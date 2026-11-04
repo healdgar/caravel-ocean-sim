@@ -102,7 +102,8 @@ export function crewNavigationObstacles(boat){
       for(const z of[-2.65,-3.65])beam('hatch.end.'+z,'hatch',[-.48,modelDeck(boat,z)+.03,z],[.48,modelDeck(boat,z)+.03,z],.075,.09,hatchExtra);
       for(let x=-.4;x<.45;x+=.10)beam('hatch.grating.long.'+x,'hatch',[x,modelDeck(boat,-2.68),-2.68],[x,modelDeck(boat,-3.62),-3.62],.027,.035,hatchExtra);
       for(let z=-2.75;z>-3.65;z-=.12)beam('hatch.grating.cross.'+z,'hatch',[-.43,modelDeck(boat,z)+.016,z],[.43,modelDeck(boat,z)+.016,z],.025,.025,hatchExtra);
-      const lidFloor=modelDeck(boat,-2.65)+.085;box('hatch.cover','hatch',[-.44,lidFloor,-3.61],[.44,lidFloor,-2.65],{reservation:'fixed',meshGroup:'hatch.cover'});
+      // The lid follows the sheer between its two rendered edges.
+      const lidAft=modelDeck(boat,-2.65)+.085,lidFore=modelDeck(boat,-3.61)+.085;box('hatch.cover','hatch',[-.44,Math.min(lidAft,lidFore),-3.61],[.44,Math.max(lidAft,lidFore),-2.65],{reservation:'fixed',meshGroup:'hatch.cover'});
       const foreFloor=modelDeck(boat,-4.8);
       for(const side of[-1,1]){const x=side*.35;box('bitt.'+side,'bitt',[x-.055,foreFloor,-4.855],[x+.055,foreFloor+.36,-4.745],{reservation:'fixed',meshGroup:'deck.fore.bitts'});}
       box('bitts.crossbeam','bitt',[-.50,foreFloor+.23,-4.85],[.50,foreFloor+.33,-4.75],{reservation:'fixed',meshGroup:'deck.fore.bitts'});

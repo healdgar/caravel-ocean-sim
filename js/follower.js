@@ -2,6 +2,8 @@ import { boatForwardSpeed } from './boat.js';
 import { SAIL_KEYS, sailingState } from './sailing.js';
 import { requestYardTransfer, yardTransferAvailable } from './lateen.js';
 import { isProceduralDesign, proceduralDesign } from './models/procedural.js';
+import { gunneryAmmoFlight } from './gunnery-state.js';
+import { bowElevationDegrees } from './gunnery-models.js';
 
 const RAD=Math.PI/180;
 const wrap=a=>Math.atan2(Math.sin(a),Math.cos(a));
@@ -313,6 +315,11 @@ export function selectBroadsideFacingTarget(boat,targetBoat){
 
 export function aimElevationForRange(boat,targetBoat,distance){
   const d=Number.isFinite(distance)?distance:selectBroadsideFacingTarget(boat,targetBoat).distance;
+  const gun=boat?.gunnery?.guns?.[0];
+  if(gun?.kind==='bow'&&Number.isFinite(d)){
+    const flight=gunneryAmmoFlight(boat.gunnery.ammo);
+    return +bowElevationDegrees(d,gun.muzzleSpeed*flight.speed,flight.drag).toFixed(2);
+  }
   if(!Number.isFinite(d)||d<=55)return 0.4;
   // Empirical ballistic elevation curve for ~420-480 m/s smoothbore ordnance with air drag
   const deg=clamp((d-45)*0.0135+Math.max(0,d-220)*0.006,0.2,9.5);
@@ -504,6 +511,12 @@ export function stepVesselCombatAI(vessel,{vessels=[],dt=0,maxRange=650}={}){
       return {action:'stand-down',reason:'no-target'};
     }
     const aim=selectBroadsideFacingTarget(boat,nearestTarget);
+    // Archers light their arrows once a target is close enough to reach with the heavier tow,
+    // and swivels, which are anti-personnel pieces, load scatter at close range.
+    if(!gunnery.ordered&&!gunnery.state.queue.length){
+      if(gunnery.weapon?.id==='bow')gunnery.setAmmo?.(aim.distance<=110?'fire-arrow':'arrow');
+      else if(gunnery.isSwivelBattery)gunnery.setAmmo?.(aim.distance<=160?'grape':'round');
+    }
     if(follower&&!follower.combatInitialized){
       follower.combatInitialized=true;
       gunnery.readyAtQuarters?.(aim.side);
@@ -518,7 +531,7 @@ export function stepVesselCombatAI(vessel,{vessels=[],dt=0,maxRange=650}={}){
       }
     }
     const maxForeRatio=gunnery.isSwivelBattery?0.98:0.78;
-    const inArc=aim.distance<=maxRange&&aim.foreRatio<=maxForeRatio;
+    const inArc=aim.distance<=Math.min(maxRange,gunnery.effectiveRange??Infinity)&&aim.foreRatio<=maxForeRatio;
     const blockedByAlly=isFriendlyInLineOfFire(boat,aim.side,enemyAllies,aim.distance);
     const delayDone=!follower||!(follower.salvoDelay>0);
     if(inArc&&!blockedByAlly&&delayDone&&!gunnery.ordered&&!gunnery.state.queue.length){

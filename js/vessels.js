@@ -53,8 +53,7 @@ export function acceptVesselProbe(boat,state,heights,time,revision,length,beam){
 export function stepVessel(boat,probe,dt,time,windSpeed,windDirection,steering=0,terrain=null){
   const dmg=boat.damage;
   const extraSink=dmg?Math.max(0,(dmg.floodingSinkage??0)-Math.max(0,boat.hydrodynamics.sinkage)):0;
-  if(boat.settledWreck||dmg?.settledWreck){
-    boat.settledWreck=true;
+  if(dmg?.settledWreck){
     boat.surgeVelocity=0;boat.surgeAcceleration=0;boat.leewayVelocity=0;boat.leewayDistance=0;
     boat.yawRate=0;boat.rollVelocity=0;boat.pitchVelocity=0;boat.heaveVelocity=0;
     boat.waterYawMoment=boat.sailYawMoment=boat.rowingYawMoment=boat.waterYawDamping=0;

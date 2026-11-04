@@ -47,7 +47,7 @@ test('genuine native-field forest mass draws opaque depth without per-frame CPU 
     await page.goto('http://127.0.0.1:'+server.address().port+'/tests/fixtures/forest-gpu.html');
     diagnostics.phase='verifying and rendering actual streamed mass';
     const result=await page.evaluate(async({forest,assetBase})=>{
-      const {FRAME_WGSL}=await import('/js/wgsl/common.js'),{TERRAIN}=await import('/js/wgsl/terrain.js');
+      const {FRAME_WGSL,NOISE_WGSL}=await import('/js/wgsl/common.js'),{TERRAIN,TERRAIN_FILTERING}=await import('/js/wgsl/terrain.js');
       const {FOREST_MASS_ASSETS,FOREST_MASS_VERTEX_WGSL,loadForestMass,createForestMassRenderer}=await import('/js/forest-mass.js');
       const device=await(await navigator.gpu.requestAdapter()).requestDevice(),B=GPUBufferUsage,T=GPUTextureUsage,errors=[],allocated=[];
       device.onuncapturederror=e=>errors.push(e.error.message);
@@ -67,7 +67,8 @@ test('genuine native-field forest mass draws opaque depth without per-frame CPU 
       const make=(data,usage,label)=>{const b=device.createBuffer({label,size:data.byteLength,usage:usage|B.COPY_DST});device.queue.writeBuffer(b,0,data);allocated.push(b);return b;};
       const fd=new Float32Array(96),frame=make(fd,B.UNIFORM,'test field opacity frame'),dummy=make(new Float32Array(4),B.UNIFORM,'test neutral lighting stub');
       const start=TERRAIN.indexOf('struct CanopyVertex'),end=TERRAIN.indexOf('@fragment fn canopyLeafFS',start);if(start<0||end<=start)throw Error('Production opaque canopy functions missing');
-      const module=await shader(FRAME_WGSL+`@group(0)@binding(0)var<uniform>F:Frame;
+      // canopyOpaqueFS calls the shared filtered noise and bump helpers since 514b716.
+      const module=await shader(FRAME_WGSL+NOISE_WGSL+TERRAIN_FILTERING+`@group(0)@binding(0)var<uniform>F:Frame;
 @group(1)@binding(0)var<uniform>neutral:vec4f;
 fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,roughness:f32)->vec4f{return vec4f(albedo+neutral.xyz,1);}
 `+TERRAIN.slice(start,end)+FOREST_MASS_VERTEX_WGSL);

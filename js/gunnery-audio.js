@@ -1,4 +1,5 @@
 import { GUNNERY_AUDIO_ASSETS } from './gunnery-audio-assets.js';
+import { isArrowAmmo } from './gunnery-state.js';
 
 // The simulation uses these durations even when sound is disabled: a muted
 // captain does not change when the ordered discharge happens.
@@ -104,6 +105,8 @@ export function createGunneryAudio({play,available=()=>true,listener=()=>({x:0,y
           seenShots.add(key);shotHistory.push(key);
           if(shotHistory.length>128)seenShots.delete(shotHistory.shift());
         }
+        // Until bows have recordings, a clipped high slap stands in for the string.
+        if(isArrowAmmo(event.ammo))return enqueue('hull-slap',position,.1,false,1.9,{duration:.12,highpassHz:900});
         const played=enqueue('cannon-report',position,.43,true);
         const ear=listener();
         if(Math.hypot(position.x-ear.x,position.y-(ear.y??0),position.z-ear.z)<80&&clock-lastMechanical>.28){
@@ -118,6 +121,7 @@ export function createGunneryAudio({play,available=()=>true,listener=()=>({x:0,y
       if(event.type==='impact'){
         if(clock-lastImpactAt<0.045&&event.kind!=='magazine-explosion')return false;
         lastImpactAt=clock;
+        if(isArrowAmmo(event.ammo))return enqueue('hull-slap',position,.08,false,1.7,{duration:.1,highpassHz:800});
         const kind=event.kind??(event.hitZone?'vessel':'water');
         if(kind==='magazine-explosion'){
           enqueue('cannon-report',position,.64,true,.58,{lowpassHz:420});

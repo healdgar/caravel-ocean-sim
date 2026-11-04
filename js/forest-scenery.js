@@ -837,23 +837,25 @@ export const forestWithNativeLod=source=>forestCullReplace(forestCullReplace(for
  let midLod=!farLod&&atlasSupported&&(!resident||(parameters.w==0.0&&near>radius&&(((p.roots.z&4u)!=0u)||projected<=atlasThreshold)));
  let nearLod=resident&&!farLod&&!midLod;
  if(!nearLod&&!farLod&&!midLod){return;}`,
- ` let stdFarLod=(resident||authoredMiddle)&&(parameters.w==2.0||(parameters.w!=1.0&&(!authoredMiddle||(p.roots.z&4u)==0u)&&near>max(radius,select(0.0,240.0,resident&&parameters.w==0.0))&&(!authoredMiddle||near>geometricError)&&farError<=threshold));
- let coastalBudgetScale=clamp(3.0/max(parameters.z,3.0),0.12,1.0);
- let coastalLodScale=coastalBudgetScale*coastalBudgetScale*mix(0.68,1.0,gazeAcuity);
+ ` // Foreground trees keep native detail inside these radii, which shrink with the adaptive
+ // polygon budget. Fixed radii would leave a weak device unable to shed any of this work.
+ let forestBudgetScale=clamp(3.0/max(parameters.z,3.0),0.12,1.0);
+ let stdFarLod=(resident||authoredMiddle)&&(parameters.w==2.0||(parameters.w!=1.0&&(!authoredMiddle||(p.roots.z&4u)==0u)&&near>max(radius,select(0.0,140.0*forestBudgetScale,resident&&parameters.w==0.0))&&(!authoredMiddle||near>geometricError)&&farError<=threshold));
+ let coastalLodScale=forestBudgetScale*forestBudgetScale*mix(0.68,1.0,gazeAcuity);
  let coastalFarDist=select(1580.0,980.0,coastalStandSteps>=2u)*coastalLodScale*select(1.0,0.90,previousLod[id.x]==0u);
  let coastalFarLod=resident&&(parameters.w==2.0||(parameters.w!=1.0&&dist>coastalFarDist));
  let farLod=select(stdFarLod,coastalFarLod,isSubtropicalCoastal);
  let mid2GeomError=bitcast<f32>(p.leaf.z)*r.rootScale.w;
  let mid2Footprint=perceptualFocal*mid2GeomError/max(midNear-mid2GeomError,.0001);
  let mid2Threshold=parameters.z*select(.88,1.0,previousLod[id.x]==3u||previousLod[id.x]==0u);
- let stdMid2Lod=!farLod&&inCanopy>0.0&&p.leaf.w==1u&&resident&&parameters.w==0.0&&midNear>max(mid2GeomError,180.0)&&mid2Footprint<=mid2Threshold;
+ let stdMid2Lod=!farLod&&p.leaf.w==1u&&resident&&parameters.w==0.0&&midNear>max(mid2GeomError,30.0*forestBudgetScale)&&mid2Footprint<=mid2Threshold;
  let coastalMid2Min=select(select(440.0,230.0,coastalStandSteps==1u),130.0,coastalStandSteps>=2u)*coastalLodScale*select(1.0,0.90,previousLod[id.x]==3u||previousLod[id.x]==0u);
  let coastalMid2Lod=!farLod&&resident&&parameters.w==0.0&&p.leaf.w==1u&&dist>coastalMid2Min;
  let mid2Lod=select(stdMid2Lod,coastalMid2Lod,isSubtropicalCoastal);
  let midGeomError=bitcast<f32>(p.wood.z)*r.rootScale.w;
  let midFootprint=perceptualFocal*midGeomError/max(midNear-midGeomError,.0001);
  let midThreshold=parameters.z*select(.88,1.0,previousLod[id.x]==2u||previousLod[id.x]==3u||previousLod[id.x]==0u);
- let stdMidLod=!farLod&&!mid2Lod&&p.wood.w==1u&&resident&&parameters.w==0.0&&(inCanopy>0.0||near>radius)&&midNear>max(midGeomError,95.0)&&midFootprint<=midThreshold;
+ let stdMidLod=!farLod&&!mid2Lod&&p.wood.w==1u&&resident&&parameters.w==0.0&&(inCanopy>0.0||near>radius)&&midNear>max(midGeomError,12.0*forestBudgetScale)&&midFootprint<=midThreshold;
  let coastalMid1Min=select(160.0,82.0,coastalStandSteps>=1u)*coastalLodScale*select(1.0,0.90,previousLod[id.x]==2u||previousLod[id.x]==3u||previousLod[id.x]==0u);
  let coastalMidLod=!farLod&&!mid2Lod&&resident&&parameters.w==0.0&&p.wood.w==1u&&dist>coastalMid1Min;
  let midLod=select(stdMidLod,coastalMidLod,isSubtropicalCoastal);

@@ -255,7 +255,7 @@ export function createEncounterDirector({ seed = 0x1550cafe } = {}) {
 
     // Trigger the live 3D humpback whale breach/blow near the player's hull
     try {
-      env.marineLife?.state?.trigger?.(boat, {
+      env.marineLife?.state?.trigger?.('whale', boat, {
         terrain: env.terrain ?? null,
         vessels: env.vessels ?? [],
       });
@@ -352,7 +352,7 @@ export function createEncounterDirector({ seed = 0x1550cafe } = {}) {
 
   function step(voyage, boat, dtRealSec, env = {}) {
     if (!voyage || !Number.isFinite(dtRealSec) || dtRealSec <= 0) return null;
-    if (state.active || voyage.interrupt) return null;
+    if (state.active || voyage.interrupt || env.battleActive) return null;
     if (Number.isFinite(env.coastKm) && env.coastKm < 12) return null;
 
     const rate = voyage.rate ?? 1;
@@ -431,8 +431,7 @@ export function createEncounterDirector({ seed = 0x1550cafe } = {}) {
       const sovRes = applyIndigenousSupportAction(
         culture.id,
         'defend-settlement',
-        getActiveIndigenousSovereigntyState(),
-        { boat, voyage }
+        { state: getActiveIndigenousSovereigntyState(), boat, voyage }
       );
       if (boat) boat.colors = 'indigenous-confederacy';
       env.onOrderCompassCourse?.(enc.compassBearingDeg);
@@ -453,8 +452,7 @@ export function createEncounterDirector({ seed = 0x1550cafe } = {}) {
       const sovRes = applyIndigenousSupportAction(
         culture.id,
         'trade',
-        getActiveIndigenousSovereigntyState(),
-        { boat, voyage }
+        { state: getActiveIndigenousSovereigntyState(), boat, voyage }
       );
       voyage.dr.lat = voyage.dr.lat * 0.25 + voyage.true.lat * 0.75;
       voyage.dr.lon = voyage.dr.lon * 0.25 + voyage.true.lon * 0.75;

@@ -306,6 +306,12 @@ test('actual gun teams retain physical routes, body clearance and reachable tool
     for(let tick=0;tick<2400;tick++){
       const before=company.crew.map(s=>Array.from(s.position)),jobs=company.crew.map(s=>s.job&&({kind:s.job.kind,stage:s.job.stage}));
       stepCompany(company,boat,.1,8);stepGunnery(boat.gunnery,.1,environment);
+      // Since fffec91 a team stays at its spent gun for the next order, until
+      // the captain stands the battery down: gunnery.standDown() clears this side.
+      if(boat.gunnerySide&&boat.gunnery.guns.filter(g=>g.visibleCrew&&g.side===side).every(g=>g.stage==='spent')){
+        assert.ok(company.crew.some(s=>s.job?.kind==='gunnery'),id+' team waits at its spent guns');
+        boat.gunnerySide=null;
+      }
       for(const [i,s]of company.crew.entries()){
         assert.ok(navDistance(before[i],s.position)<=.17502,id+' real recoil/return cannot teleport a worker');
         if(jobs[i]?.kind!=='gunnery')continue;

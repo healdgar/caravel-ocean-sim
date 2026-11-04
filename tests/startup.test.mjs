@@ -136,7 +136,17 @@ test('an explicit whale scene still waits for its requested model and reports fa
   }finally{await page.close();}
 });
 
-test('both downloadable ocean pages start offline without HTTP assets',{timeout:120000},async()=>{
+// Downloads carry everything needed to sail. Landfall scenery may still ask for
+// live DEM and imagery tiles (86875c4, 61f49a8), climate normals (1a75f64) and
+// mature forest buffers (77c6d2b), each with a procedural or lower-detail fallback.
+const OPTIONAL_ONLINE_REQUESTS=[
+  /^https:\/\/s3\.amazonaws\.com\/elevation-tiles-prod\/terrarium\/\d+\/\d+\/\d+\.png$/,
+  /^https:\/\/services\.arcgisonline\.com\/ArcGIS\/rest\/services\/World_Imagery\/MapServer\/tile\/\d+\/\d+\/\d+$/,
+  /^https:\/\/power\.larc\.nasa\.gov\/api\/temporal\/climatology\/point\?/,
+  /^https:\/\/sixcailloux\.com\/waterworld\/assets\/forest-scenery\/[a-z]+\/(mass\/)?(vertices|indices)\.bin\.[a-f0-9]{16}\.gz$/,
+];
+
+test('both downloadable ocean pages start offline without required HTTP assets and survive failed optional requests',{timeout:120000},async()=>{
   // Failure-injection pages intentionally abort startup with GPU work pending.
   // A downloaded distribution gets its own browser, retaining all timeouts.
   await browser.close();browser=null;
@@ -153,6 +163,7 @@ test('both downloadable ocean pages start offline without HTTP assets',{timeout:
     page.on('requestfailed',request=>note('requestfailed',request.url()+' '+request.failure()?.errorText));
     try{
       await page.route(/^https?:/,route=>{external.push(route.request().url());return route.abort();});
+      await page.addInitScript(()=>{const raf=requestAnimationFrame;window.startupFrames=0;window.requestAnimationFrame=callback=>raf(time=>{window.startupFrames++;callback(time);});});
       let startupError;
       try{
         await page.goto(new URL('../'+file,import.meta.url).href+'?follower=0');
@@ -164,7 +175,14 @@ test('both downloadable ocean pages start offline without HTTP assets',{timeout:
         .catch(error=>({unavailable:clip(error.message)}));
       const diagnostic=file+' offline startup: '+JSON.stringify({startupError,startup,errors,external,messages},null,2);
       assert.equal(startupError,undefined,diagnostic);assert.equal(startup.state,'ready',diagnostic);assert.deepEqual(errors,[],diagnostic);
-      assert.equal(await page.locator('#ocean-startup').isVisible(),false);assert.deepEqual(external,[]);
+      assert.equal(await page.locator('#ocean-startup').isVisible(),false);
+      // Every failed request here is an optional one, and the page keeps sailing.
+      const frames=await page.evaluate(()=>window.startupFrames);
+      await page.waitForFunction(count=>window.startupFrames>count+10,frames);
+      await page.locator('#rudder-port').click();
+      assert.equal(await page.evaluate(()=>window.oceanFleet.vessels[0].boat.rudderTarget),-5,'helm works after failed optional requests');
+      assert.deepEqual(external.filter(url=>!OPTIONAL_ONLINE_REQUESTS.some(allowed=>allowed.test(url))),[]);
+      assert.deepEqual(errors,[],diagnostic);
       assert.equal(await page.locator('#err').textContent(),'');
     }finally{await page.close();}
   }

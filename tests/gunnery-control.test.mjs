@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {createShipGunnery,createPortGunnery,createVesselDamageState,sweepShipSegment,applyShipImpactDamage,sweepBuildingSegment,applyBuildingImpactDamage,sweepScenerySegment,applySceneryImpactDamage,sweepTerrainSegment,applyTerrainImpactDamage,createGunnerySolidSweep,resolveVesselCollisions,applyShipCollisionDamage,classifyGroundingSubstrate,applyGroundingImpactDamage,stepVesselDamage,computeCrewEfficiency} from '../js/gunnery-control.js';
+import {createShipGunnery,createPortGunnery,createVesselDamageState,applyCrewCasualtiesAndMorale,sweepShipSegment,applyShipImpactDamage,sweepBuildingSegment,applyBuildingImpactDamage,sweepScenerySegment,applySceneryImpactDamage,sweepTerrainSegment,applyTerrainImpactDamage,createGunnerySolidSweep,resolveVesselCollisions,applyShipCollisionDamage,classifyGroundingSubstrate,applyGroundingImpactDamage,stepVesselDamage,computeCrewEfficiency} from '../js/gunnery-control.js';
 import {constrainIslandMotion} from '../js/terrain-model.js';
 import {GUNNERY_ORDER_SECONDS} from '../js/gunnery-audio.js';
 import {boatHydrodynamics} from '../js/boat.js';
@@ -198,7 +198,8 @@ test('cannonballs strike 16th-century port buildings and coastal land, recording
  const escort={id:'escort-1',modelId:'nina',model:{name:'Escort Caravel',rig:{sails:[]}},length:20,beam:6,heading:0,x:-28,z:0,heave:0,pitch:0,roll:0,showProw:true};
  escort.hydrodynamics=boatHydrodynamics(20,6);
  const {guns,events}=fixture({getVessels:()=>[escort],getTerrain:()=>fakeTerrain});
- guns.prepare('port');advance(guns,34);guns.fire('port');advance(guns,3.5);
+ // Her castle stands level with these swivels, so they lay down onto it.
+ guns.setElevation(-3);guns.prepare('port');advance(guns,34);guns.fire('port');advance(guns,3.5);
  const shipImpacts=events.filter(e=>e.type==='impact'&&e.kind==='ship');
  assert.equal(shipImpacts.length,2,'both port guns strike the escort hull');
  assert.ok(guns.lastDamageReport&&guns.lastDamageReport.kind==='ship');
@@ -617,18 +618,20 @@ test('ship colors, human crew casualties, battle morale, and surrender signallin
  const grapeReport=applyShipImpactDamage(grapeTarget.boat,{
   ammo:'grape',energy:140000,hitZone:'hull',surfacePosition:[80,1.2,0],localPosition:[1.2,1.2,0],designPosition:[0.8,1.1,0],velocity:[-120,0,0],mass:5.4,
  });
- const roundCas=roundReport.casualtiesKilled+roundReport.casualtiesWounded;
- const grapeCas=grapeReport.casualtiesKilled+grapeReport.casualtiesWounded;
- assert.ok(grapeCas>roundCas,`grape shot (${grapeCas}) inflicts more human casualties than round shot (${roundCas})`);
+ assert.ok(roundReport.casualtiesKilled+roundReport.casualtiesWounded<=1,'a ball that stays out of the hull hurts next to no one');
+ assert.ok(grapeReport.casualtiesKilled+grapeReport.casualtiesWounded<=1,'nor does grape that only rattles on her planks');
  assert.ok(grapeTarget.boat.damage.battleMorale<roundTarget.boat.damage.battleMorale,'grape shot inflicts greater battle morale loss');
- const affectedActors=grapeTarget.company.crew.filter(s=>s.casualtyState==='wounded'||s.casualtyState==='fallen');
- assert.ok(affectedActors.length>=1,'visible 3D deck crew actors near impact are marked wounded or fallen');
+ // A ball clear of the rail meets the body in its path, and only that body.
+ const actor=grapeTarget.company.crew.find(s=>s.visible!==false&&s.position?.[1]<2);
+ const actorWorld=[80+actor.position[0],actor.position[1]+1.55,actor.position[2]];
+ createGunnerySolidSweep({getVessels:()=>[grapeTarget.boat]})(actorWorld.map((v,i)=>i===0?v-1:v),actorWorld.map((v,i)=>i===0?v+1:v),{id:7,ammo:'grape',radius:.04,mass:1.8,velocity:[300,0,0]});
+ assert.ok(['wounded','fallen'].includes(actor.casualtyState),'the actor in its path is hit');
  assert.ok(computeCrewEfficiency(grapeTarget.boat)<1.0,'crew casualties and lowered morale reduce gunnery reload efficiency');
 
  // 3. Repeated broadsides break enemy battle morale and automatically trigger surrender (striking colors to white flag)
  let surrenderNotified=false;
  grapeTarget.boat.onSurrender=()=>{surrenderNotified=true;};
- for(let salvo=0;salvo<6&&!grapeTarget.boat.damage.surrendered;salvo++){
+ for(let salvo=0;salvo<40&&!grapeTarget.boat.damage.surrendered;salvo++){
   applyShipImpactDamage(grapeTarget.boat,{
    ammo:'grape',energy:180000,hitZone:'hull',surfacePosition:[80,1.2,0],localPosition:[1.2,1.2,0],designPosition:[0.8,1.1,0],velocity:[-140,0,0],mass:5.4,
   });
@@ -911,7 +914,7 @@ test('captured prize vessel supports ally consort, impress crew & plunder cannon
 
  const playerBoat={id:'player',modelId:'nina',name:'Niña',length:20,beam:6,heading:90,x:0,z:0,heave:0,pitch:0,roll:0,propulsion:'sail',colors:'portugal',sailFore:1,sailMain:1,sailMizzen:1,surgeVelocity:3.5};
  playerBoat.hydrodynamics=boatHydrodynamics(20,6);
- createVesselDamageState(playerBoat);
+ createShipGunnery(playerBoat);
  playerBoat.damage.hullIntegrity=0.55;
  playerBoat.damage.rigIntegrity=0.60;
  playerBoat.damage.mastIntegrity={fore:0.65,main:0.70,mizzen:0.80};
@@ -923,7 +926,7 @@ test('captured prize vessel supports ally consort, impress crew & plunder cannon
  const makePrize=(name)=>{
   const b={id:'prize-'+name,modelId:'nina',name,shipName:name,length:20,beam:6,heading:90,x:-40,z:25,heave:0,pitch:0,roll:0,propulsion:'sail',colors:'surrender',sailFore:0,sailMain:0,sailMizzen:0};
   b.hydrodynamics=boatHydrodynamics(20,6);
-  createVesselDamageState(b);
+  createShipGunnery(b);
   b.damage.surrendered=true;
   const comp=createCompany(undefined,'nina',{boat:b,faction:'enemy'});
   const fol=createFollower({trail:2.2,side:1.4},{faction:'enemy'});
@@ -954,10 +957,14 @@ test('captured prize vessel supports ally consort, impress crew & plunder cannon
  // 2. Capture prize2 and Impress Crew & Plunder Cannon/Supplies
  db.capturePrizeVessel(prize2,'boarded-and-fought');
  const foodBefore=voyage.provisions.food;
+ const ableBefore=playerBoat.damage.crewCasualties.able;
  const impressRes=db.resolvePrizeDisposition(prize2,'impress-plunder',{voyage});
  assert.equal(impressRes.ok,true);
  assert.ok(impressRes.impressedCount>=2,'impresses able hands from captured prize');
- assert.equal(playerCompany.crew.length,initialCrewCount+impressRes.impressedCount,'adds impressed crew to player roster');
+ assert.equal(playerCompany.crew.length,initialCrewCount,'the animated company stays a fixed set of real actors');
+ assert.ok(playerCompany.crew.every(s=>s.observation),'no stub actors enter the company');
+ assert.equal(playerBoat.damage.crewCasualties.able,ableBefore+impressRes.impressedCount,'pressed hands join the ship muster');
+ stepCompany(playerCompany,playerBoat,.1,8);
  assert.ok(impressRes.plunderedCannons>=1,'plunders cannon from captured prize');
  assert.ok(playerBoat.plunderedFirepowerMultiplier>1.0,'boosts player broadside firepower multiplier');
  assert.ok(voyage.provisions.food>foodBefore,'adds plundered provisions to voyage stores');
@@ -971,7 +978,7 @@ test('captured prize vessel supports ally consort, impress crew & plunder cannon
  assert.equal(scuttleRes.ok,true);
  assert.ok(playerBoat.damage.hullIntegrity>hullBefore+0.25,`repairs player hull using salvaged oak timber (${hullBefore} -> ${playerBoat.damage.hullIntegrity})`);
  assert.ok(playerBoat.damage.rigIntegrity>rigBefore+0.2,`repairs player rig using salvaged spars & canvas (${rigBefore} -> ${playerBoat.damage.rigIntegrity})`);
- assert.equal(prize3.boat.sunk,true,'scuttles prize3 after stripping repair materials');
+ assert.equal(prize3.boat.damage.sunk,true,'scuttles prize3 after stripping repair materials');
  assert.equal(prize3.boat.showProw,false,'hides scuttled prize hull');
 });
 
@@ -986,7 +993,8 @@ test('crew puppet damage, shipboard fire spread/scorch, and cannon impact audio 
  ship.crewCompany=company;
 
  // 1. Inflict hot-shot casualties and verify fallen puppets stay pitched prone after stepCompany
- applyCrewCasualtiesAndMorale(ship,{ammo:'hot',energy:260000,hitZone:'hull'},{designPt:[0,1.1,0],penetratedOuter:true});
+ applyCrewCasualtiesAndMorale(ship,{ammo:'hot',energy:260000,hitZone:'hull'},{casualties:{killed:1,wounded:0},struck:{sailor:company.crew[2],direction:[1,0,0]}});
+ applyCrewCasualtiesAndMorale(ship,{ammo:'hot',energy:260000,hitZone:'hull'},{casualties:{killed:0,wounded:1},struck:{sailor:company.crew[3],direction:[1,0,0]}});
  const fallen=company.crew.filter(s=>s.casualtyState==='fallen');
  const wounded=company.crew.filter(s=>s.casualtyState==='wounded');
  assert.ok(fallen.length>=1,'marks at least one deck puppet as fallen');
@@ -1177,4 +1185,41 @@ test('the shared canvas limit matches where damaged rigs actually settle',()=>{
  assert.equal(sailLosingCanvas(boat,0,1),false,'a sound mast never sheds canvas');
  assert.equal(sailLosingCanvas(boat,1,.5),true,'over-limit canvas on a damaged mast carries away');
  assert.equal(sailLosingCanvas(boat,1,.01),false,'under-limit canvas still needs hands to set');
+});
+
+test('a fort returns fire on the ships that fired on it, not the nearest hull',()=>{
+ const region=resolveGlobalCoastalRegion('cartagena'),pack=generateProceduralCoastalPack(region);
+ const make=(id,x,z,faction)=>{const b={id,modelId:'nina',length:20,beam:6,heading:0,x,z,heave:0,pitch:0,roll:0,propulsion:'sail',surgeVelocity:0,faction};b.hydrodynamics=boatHydrodynamics(20,6);createVesselDamageState(b);return b;};
+ const fortInstance=pack.port.instances.find(i=>createPortGunnery({instances:[i]}).batteries.length>0);
+ assert.ok(fortInstance,'the port has a gun battery');
+ const near=make('player',fortInstance.x+60,fortInstance.z,'friendly'),raider=make('raider',fortInstance.x+150,fortInstance.z,'enemy');
+ const vessels=[{boat:near,faction:'friendly'},{boat:raider,faction:'enemy'}];
+ const aimed=[];const pg=createPortGunnery({...pack.port,instances:[fortInstance]},{getVessels:()=>vessels,returnFireRange:400});
+ for(const b of pg.batteries){const fire=b.fireAtTarget;b.fireAtTarget=(target,o)=>{aimed.push(target.id);return fire(target,o);};}
+ const shot=source=>applyBuildingImpactDamage(fortInstance,{sourceBoat:source,ammo:'round',localPosition:[0,2,0],position:[fortInstance.x,3,fortInstance.z],normal:[0,0,-1],velocity:[0,0,300],mass:1,energy:45000});
+ shot(raider);
+ for(let i=0;i<30;i++)pg.update(.5);
+ assert.ok(aimed.length>0,'the fort answers the raider');
+ assert.ok(aimed.every(id=>id==='raider'),'the innocent ship lying closer is not fired on: '+[...new Set(aimed)]);
+ aimed.length=0;pg.forgetAttacker(raider);fortInstance.damageState.hits=1;
+ for(let i=0;i<30;i++)pg.update(.5);
+ assert.ok(aimed.includes('player'),'with no known attacker a battered fort still fires on the nearest ship');
+ // The earlier return fire was real, so she needs a fresh crew to still be a target.
+ near.damage=null;createVesselDamageState(near);
+ aimed.length=0;fortInstance.damageState.attackers.clear();shot(near);
+ for(let i=0;i<30;i++)pg.update(.5);
+ assert.ok(aimed.every(id=>id==='player')&&aimed.length>0,'firing on a fort yourself earns its return fire');
+});
+
+test('one heavy shot cannot reach the whole company, though a magazine blast still can do terrible harm',()=>{
+ const make=()=>{const b={id:'t',modelId:'nina',length:20,beam:6,heading:0,x:0,z:0,heave:0,pitch:0,roll:0,propulsion:'sail'};b.hydrodynamics=boatHydrodynamics(20,6);createVesselDamageState(b);return b;};
+ const hit=make(),c=hit.damage.crewCasualties,total=c.total;
+ applyCrewCasualtiesAndMorale(hit,{energy:5e6,ammo:'round'},{isSuperstructureHit:true,penetratedOuter:true});
+ const limit=Math.max(2,Math.ceil(total*.3));
+ assert.ok(c.killed+c.wounded<=limit,`${c.killed}+${c.wounded} of ${total}`);
+ assert.ok(c.killed+c.wounded>=1,'a heavy shot breaking through still costs lives');
+ assert.ok(c.able>0);
+ const blast=make(),b=blast.damage.crewCasualties;
+ applyCrewCasualtiesAndMorale(blast,{energy:5e6},{isMagazineBlast:true,powderFrac:1});
+ assert.ok(b.killed+b.wounded>limit,'a magazine going up is outside the per-shot limit');
 });

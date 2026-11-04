@@ -231,7 +231,7 @@ export function createSceneAudio({onStatus=()=>{}}={}){
           play('timber-creak',.30,p,.82,true,{duration:.9});
           return true;
         case 'prize-disposition':
-          if(ev.choice==='scuttle-repair'){
+          if(ev.disposition==='scuttle-repair'){
             play('cannon-rammer',.36,p,1.28,true,{duration:.45});
             play('timber-creak',.34,p,1.35,true,{offset:.2,duration:.85});
             play('anchor-splash',.32,p,.88,true,{duration:1.4});

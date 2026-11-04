@@ -1,6 +1,16 @@
 // Delivered cadence drives reductions. Measured work can establish restoration
 // headroom even when presentation is capped at 60 Hz; it never forces a reduction.
 // Resolution and polygon budgets are device-local; simulation stays intact.
+// A device that needs seconds per frame is the one most in need of reduction, so only
+// a pause longer than this counts as an interruption. Hidden tabs are reported separately.
+const ADAPTIVE_FRAME_LIMIT = 8;
+// Normally judge at least a dozen frames, but do not wait a minute to see that
+// frames are taking seconds: three of them over four seconds are enough.
+function adaptiveWindowComplete(seconds, count, minimumSeconds, capacity) {
+  if (count >= capacity) return true;
+  if (seconds >= minimumSeconds && count >= 12) return true;
+  return seconds >= 4 && count >= 3;
+}
 export function createAdaptiveResolution(mode = 'auto') {
   const minimum = 0.35, targetFPS = 60, samples = new Float64Array(240), workSamples = new Float64Array(240);
   let scale = mode === 'auto' || mode === 'native' || mode === 'fixed' ? 1 : Number(mode);
@@ -16,12 +26,12 @@ export function createAdaptiveResolution(mode = 'auto') {
     },
     sample(elapsed, visible = true, workMs = null) {
       if (mode !== 'auto') return false;
-      if (!visible || !Number.isFinite(elapsed) || elapsed <= 0 || elapsed > 1) { reset(); return false; }
+      if (!visible || !Number.isFinite(elapsed) || elapsed <= 0 || elapsed > ADAPTIVE_FRAME_LIMIT) { reset(); return false; }
       if (settle > 0) { settle -= elapsed; return false; }
       samples[count] = elapsed * 1000;
       workSamples[count++] = Number.isFinite(workMs) && workMs > 0 ? workMs : NaN;
       seconds += elapsed;
-      if ((seconds < 1.5 || count < 12) && count < samples.length) return false;
+      if (!adaptiveWindowComplete(seconds, count, 1.5, samples.length)) return false;
       // Ignore isolated scheduling hiccups; sustained slow frames remain visible.
       const sorted = samples.slice(0, count).sort(), trim = Math.floor(count * 0.1);
       let ms = 0;
@@ -97,12 +107,12 @@ export function createAdaptivePolygons(initialMode = 'auto', { basePixelError = 
     },
     sample(elapsed, visible = true, workMs = null) {
       if (mode !== 'auto') return false;
-      if (!visible || !Number.isFinite(elapsed) || elapsed <= 0 || elapsed > 1) { reset(); return false; }
+      if (!visible || !Number.isFinite(elapsed) || elapsed <= 0 || elapsed > ADAPTIVE_FRAME_LIMIT) { reset(); return false; }
       if (settle > 0) { settle -= elapsed; return false; }
       samples[count] = elapsed * 1000;
       workSamples[count++] = Number.isFinite(workMs) && workMs > 0 ? workMs : NaN;
       seconds += elapsed;
-      if ((seconds < 1.4 || count < 12) && count < samples.length) return false;
+      if (!adaptiveWindowComplete(seconds, count, 1.4, samples.length)) return false;
       const sorted = samples.slice(0, count).sort(), trim = Math.floor(count * 0.1);
       let ms = 0;
       for (let i = trim; i < count - trim; i++) ms += sorted[i];

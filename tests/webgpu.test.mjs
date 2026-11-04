@@ -4,6 +4,7 @@ import { once } from 'node:events';
 import { readFile } from 'node:fs/promises';
 import { after, before, test } from 'node:test';
 import { chromium } from 'playwright';
+import { createCompany } from '../js/crew.js';
 
 const port = process.env.TEST_PORT || 8082;
 const origin = `http://localhost:${port}`;
@@ -191,7 +192,7 @@ async function step(page,extraMs=0) {
 }
 
 async function slider(page, label, value) {
-  await page.locator('label').filter({ hasText: label }).locator('input').evaluate((input, value) => {
+  await page.locator('#panel label').filter({ hasText: label }).locator('input').evaluate((input, value) => {
     input.value = value; input.dispatchEvent(new Event('input'));
   }, String(value));
 }
@@ -1789,6 +1790,63 @@ test('compact helm and icon panels remain reachable across phone, tablet and des
   }finally{await page.close();}
 });
 
+test('voyage panel leaves the helm alone: a dock panel on compact screens, clear of the icons on desktop', {timeout:120000}, async()=>{
+  const page=await browser.newPage({viewport:{width:320,height:360}});
+  try{
+    await page.addInitScript(instrumentRenderer);
+    await page.goto(`${origin}/index.html?w=32&h=32`);
+    await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:90000});
+    await step(page);
+    await page.waitForFunction(()=>window.oceanStartup.state==='ready');
+    const toggle=page.getByRole('button',{name:'Voyage',exact:true}),helm=page.locator('#helm-controls');
+    const reachable=async selector=>{
+      const missed=await page.locator('#voyage-hud').evaluate((hud,selector)=>[...hud.querySelectorAll(selector)].filter(el=>!el.closest('[hidden]')).flatMap(el=>{
+        el.scrollIntoView({block:'nearest'});
+        const r=el.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
+        const clear=hit===el||el.contains(hit)||el.closest('label')?.contains(hit);
+        return clear&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight?[]:[el.outerHTML.slice(0,120)+' under '+hit?.outerHTML.slice(0,120)];
+      }),selector);
+      assert.deepEqual(missed,[]);
+    };
+    for(const [width,height] of [[320,360],[320,568],[390,844],[844,390],[640,480]]){
+      await page.setViewportSize({width,height});
+      await page.waitForFunction(()=>Math.abs(parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--view-height'))-innerHeight)<1,undefined,{polling:20,timeout:2000});
+      assert.deepEqual(await page.locator('#voyage-hud').evaluate(el=>({input:getComputedStyle(el).pointerEvents,shown:[...el.children].filter(child=>getComputedStyle(child).display!=='none').map(child=>child.className).filter(name=>name!=='voyage-toast')})),{input:'none',shown:[]},'closed, only a passing notice shows and it takes no input');
+      await toggle.scrollIntoViewIfNeeded();await toggle.click();
+      assert.equal(await toggle.getAttribute('aria-expanded'),'true');assert.equal(await helm.isVisible(),false);
+      await reachable('button,select,input');
+      assert.equal(await page.locator('#voyage-hud').evaluate(el=>el.scrollWidth<=el.clientWidth),true);
+      await page.locator('#voyage-hud').evaluate(el=>el.scrollTop=0);
+      await page.getByRole('button',{name:'Captain',exact:true}).click();
+      assert.equal(await toggle.getAttribute('aria-expanded'),'false','panels stay exclusive');
+      await toggle.scrollIntoViewIfNeeded();await toggle.click();
+      assert.equal(await page.locator('#captain-panel').isVisible(),false,'panels stay exclusive');
+      await page.getByRole('button',{name:'Hide voyage',exact:true}).click();
+      assert.equal(await helm.isVisible(),true);
+      // A lookout call needs an answer, so it opens the panel and answering closes it.
+      await page.evaluate(()=>{oceanVoyage.triggerSailEncounter();});
+      assert.equal(await toggle.getAttribute('aria-expanded'),'true');
+      await reachable('.voyage-callout button');
+      await page.locator('.voyage-callout button').last().click();
+      assert.equal(await toggle.getAttribute('aria-expanded'),'false');assert.equal(await helm.isVisible(),true);
+    }
+    await toggle.scrollIntoViewIfNeeded();await toggle.click();await page.keyboard.press('Escape');
+    assert.equal(await toggle.getAttribute('aria-expanded'),'false','Escape closes the panel like the others');
+    for(const [width,height] of [[800,600],[1160,800],[1280,800],[1440,900]]){
+      await page.setViewportSize({width,height});
+      await page.waitForFunction(()=>Math.abs(parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--view-height'))-innerHeight)<1,undefined,{polling:20,timeout:2000});
+      assert.equal(await toggle.isVisible(),false);
+      const box=await page.evaluate(()=>{
+        const rect=s=>document.querySelector(s).getBoundingClientRect(),hud=rect('#voyage-hud'),dock=rect('#camera-dock'),instruments=rect('#sailing-instruments'),helm=rect('#helm-controls');
+        const overlap=(a,b)=>a.left<b.right&&b.left<a.right&&a.top<b.bottom&&b.top<a.bottom;
+        return {dock:overlap(hud,dock),instruments:overlap(hud,instruments),helm:overlap(hud,helm),watch:rect('#voyage-hud .voyage-watch').right<=dock.left||rect('#voyage-hud .voyage-watch').top>=dock.bottom,scene:document.elementFromPoint(innerWidth/2,innerHeight/2)?.id};
+      });
+      assert.deepEqual(box,{dock:false,instruments:false,helm:false,watch:true,scene:'c'},JSON.stringify({width,height}));
+    }
+    assert.deepEqual(await page.evaluate(()=>check.errors),[]);
+  }finally{await page.close();}
+});
+
 test('tap helm commands and touch look stay independent, with real sail orders and no mouse capture', {timeout:120000},async()=>{
   const page=await browser.newPage({viewport:{width:390,height:844},hasTouch:true,isMobile:true});
   try{
@@ -1872,7 +1930,8 @@ test('resolution controls resize GPU targets and explicit dimensions stay fixed'
   }finally{await page.close();}
 });
 
-test('crew renders twelve independent sailors in two batches, obeys captain orders and hides with the ship', {timeout:120000}, async()=>{
+test('crew renders the full Niña watch as independent sailors in two batches, obeys captain orders and hides with the ship', {timeout:120000}, async()=>{
+  const watch=createCompany(undefined,'nina',{fullWatch:true}).crew,batches=['male','female'].map(sex=>watch.filter(s=>s.sex===sex).length);
   const page=await browser.newPage({viewport:{width:320,height:568}}),warnings=[];
   page.on('pageerror',error=>warnings.push(error.message));
   page.on('console',msg=>{if(msg.type()==='warning'||msg.type()==='error')warnings.push(msg.text());});
@@ -1897,24 +1956,24 @@ test('crew renders twelve independent sailors in two batches, obeys captain orde
     catch(error){throw Error(error.message+'; '+warnings.join('\n'));}
     assert.equal(await page.getByLabel('Show crew',{exact:true}).isEnabled(),true);
     const first=await step(page,100);assert.equal(first.render.crew,1);assert.equal(first.render['crew shadow'],1);
-    assert.deepEqual(await page.evaluate(()=>check.crewInstances),[6,6]);
+    assert.deepEqual(await page.evaluate(()=>check.crewInstances),batches);
     assert.equal(await page.locator('#boat-length').inputValue(), '20');
     assert.equal(await page.locator('#boat-beam').inputValue(), '6');
     assert.equal(await page.evaluate(()=>check.crewActors.filter((v,i)=>i%36===19&&v===1).length),0,'the helmsman below the quarterdeck remains visible');
-    assert.equal(await page.evaluate(()=>check.crewActors.filter((v,i)=>i%36===23&&v===1).length),12,'near-camera transparency is enabled for every sailor');
+    assert.equal(await page.evaluate(()=>check.crewActors.filter((v,i)=>i%36===23&&v===1).length),watch.length,'near-camera transparency is enabled for every sailor');
     await page.getByRole('button',{name:'Camera views',exact:true}).click();
     await page.getByRole('button',{name:'View ship',exact:true}).click();
     await page.evaluate(()=>check.crewActors=[]);await step(page,100);
-    assert.equal(await page.evaluate(()=>check.crewActors.filter((v,i)=>i%36===19&&v===1).length),0,'exterior restores all twelve sailors');
+    assert.equal(await page.evaluate(()=>check.crewActors.filter((v,i)=>i%36===19&&v===1).length),0,'exterior restores every sailor');
     assert.equal(await page.evaluate(()=>check.crewActors.filter((v,i)=>i%36===23&&v===1).length),0,'exterior disables the camera fade');
     const bones=await page.evaluate(()=>check.crewBones);
-    assert.equal(bones.length,6*65*16);assert.notDeepEqual(bones.slice(0,65*16),bones.slice(65*16,2*65*16));
+    assert.equal(bones.length,batches.at(-1)*65*16);assert.notDeepEqual(bones.slice(0,65*16),bones.slice(65*16,2*65*16));
     await step(page,100);assert.notDeepEqual(await page.evaluate(()=>check.crewBones),bones);
     assert.equal(await page.locator('#boat-panel #crew-order').count(),0);
     await page.getByRole('button',{name:'Captain',exact:true}).click();
     await page.getByRole('button',{name:'Prepare for heavy weather',exact:true}).click();
     await step(page,600);await step(page,600);assert.match(await page.locator('#crew-status').textContent(),/Prepare for heavy weather/);
-    assert.equal(await page.locator('#crew-roster li').count(),12);
+    assert.equal(await page.locator('#crew-roster li').count(),watch.length);
     await page.getByRole('button',{name:'Hide captain orders',exact:true}).click();
     await page.getByRole('button',{name:'Ship settings',exact:true}).click();
     await page.getByLabel('Show crew',{exact:true}).uncheck();
@@ -1998,7 +2057,7 @@ test('crew and vessel materials share sunlight, shadows, reflected light and dir
       device.onuncapturederror=e=>errors.push(e.error.message);
       const B=GPUBufferUsage,T=GPUTextureUsage;
       const buffer=(size,usage)=>device.createBuffer({size,usage:usage|B.COPY_DST});
-      const frame=buffer(384,B.UNIFORM),fixture=buffer(48,B.UNIFORM),sun=buffer(16,B.STORAGE),shadow=buffer(112,B.UNIFORM),hull=buffer(208,B.UNIFORM);
+      const frame=buffer(384,B.UNIFORM),fixture=buffer(48,B.UNIFORM),sun=buffer(16,B.STORAGE),shadow=buffer(112,B.UNIFORM),hull=buffer(208,B.UNIFORM),wetLookup=buffer(4,B.STORAGE);
       const hullValues=new Float32Array(52);hullValues[3]=5/3;device.queue.writeBuffer(hull,0,hullValues);
       const sampler=device.createSampler({magFilter:'linear',minFilter:'linear'});
       const compare=device.createSampler({compare:'less-equal'});
@@ -2045,7 +2104,7 @@ test('crew and vessel materials share sunlight, shadows, reflected light and dir
       const groups=[
         [[0,buf(frame)],[1,buf(hull)],[4,view(trans)],[5,sampler],[6,env.createView({dimension:'cube'})],[7,buf(sun)],[9,view(sky)],[15,buf(fixture)]],
         [[0,buf(frame)],[1,view(trans)],[2,view(sky)],[3,sampler],[4,env.createView({dimension:'cube'})],[5,buf(sun)],[6,buf(hull)],
-          [7,view(water)],[8,disp.createView({dimension:'2d-array'})],[9,sampler],[10,view(oak)],[11,sampler],[12,view(deck)],[15,buf(fixture)]],
+          [7,view(water)],[8,disp.createView({dimension:'2d-array'})],[9,sampler],[10,view(oak)],[11,sampler],[12,view(deck)],[14,buf(wetLookup)],[15,buf(fixture)]],
       ].map((entries,i)=>device.createBindGroup({layout:pipelines[i].getBindGroupLayout(0),entries:entries.map(([binding,resource])=>({binding,resource}))}));
       const shadowGroups=pipelines.map(pipe=>device.createBindGroup({layout:pipe.getBindGroupLayout(1),entries:[
         buf(shadow),view(depths[0]),compare,view(depths[1]),view(cloth),sampler,

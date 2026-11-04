@@ -6,9 +6,13 @@ import {once} from 'node:events';
 import {before,after,test} from 'node:test';
 import {chromium} from 'playwright';
 import {createDevServer} from '../server.mjs';
+import {createCompany} from '../js/crew.js';
+import {CREW_CULL_DISTANCE} from '../js/crew-lod.js';
+import {createNavalBattleGunDefinitions} from '../js/gunnery-models.js';
 
 const nineModels=['nina','pinta','santa-maria','victory','oseberg','lusoria','taino-canoe','flying-cloud','gipsy-moth-iv'];
-const nineCompanies=[12,12,12,12,32,26,30,12,1],nineCodes=[0,2,3,1,4,5,6,7,8],nineMasts=[3,3,3,3,1,1,0,3,2],nineGuns=[4,4,4,104,0,0,0,0,0];
+// Each runtime ship carries its model's full watch (6ef533d).
+const nineCompanies=nineModels.map(id=>createCompany(undefined,id,{fullWatch:true}).crew.length),nineCodes=[0,2,3,1,4,5,6,7,8],nineMasts=[3,3,3,3,1,1,0,3,2],nineGuns=nineModels.map(id=>createNavalBattleGunDefinitions(id).length);
 let nineServer,nineBrowser,nineOrigin;
 before(async()=>{
   nineServer=createDevServer();nineServer.listen(0,'127.0.0.1');await once(nineServer,'listening');nineOrigin='http://127.0.0.1:'+nineServer.address().port;
@@ -78,10 +82,15 @@ for(const path of ['/', '/docs/index.html'])test(`${path} nine distinct real mod
     // RAF is controlled by this fixture. Complete the actual first GPU frame
     // before clicking through the startup dialog, as a real user must.
     await nineStep(page);await page.waitForFunction(()=>window.oceanStartup.state==='ready');
+    // Crew beyond CREW_CULL_DISTANCE of the camera draw nothing (edb1469), so count
+    // the actual GPU batches from the lead ship, before the far-off fleet camera.
+    const nearCrew=(await nineStep(page)).draws.crew.instances;
+    const inRange=await page.evaluate(limit=>{const [lead]=oceanFleet.vessels;return oceanFleet.vessels.filter(v=>Math.hypot(v.boat.x-lead.boat.x,v.boat.z-lead.boat.z)<limit).reduce((n,v)=>n+v.crew.state.crew.length,0);},CREW_CULL_DISTANCE);
+    assert.equal(nearCrew,inRange,'actual crew GPU batches contain every real company in range');
     await page.getByRole('button',{name:'Camera views',exact:true}).click();await page.getByRole('button',{name:'View fleet',exact:true}).click();
     let frame;for(let i=0;i<8;i++)frame=await nineStep(page);const s=await nineSnapshot(page);
     assert.equal(s.startup,'ready');assert.equal(s.active,9);assert.equal(s.assets,9);assert.equal(s.config,8);assert.deepEqual(s.rows.map(v=>v.model),nineModels);assert.deepEqual(s.rows.map(v=>v.code),nineCodes);
-    assert.deepEqual(s.rows.map(v=>v.crew),nineCompanies);assert.equal(frame.draws.crew.instances,149,'actual crew GPU batches contain the nine real companies');assert.deepEqual(s.sharedCrew,{vertices:2,indices:2,joints:18,actors:18});
+    assert.deepEqual(s.rows.map(v=>v.crew),nineCompanies);assert.equal(frame.draws.crew,undefined,'the whole-fleet camera is beyond crew range');assert.deepEqual(s.sharedCrew,{vertices:2,indices:2,joints:18,actors:18});
     assert.deepEqual(s.rows.map(v=>v.masts),nineMasts);assert.deepEqual(s.rows.map(v=>v.guns),nineGuns);assert.deepEqual(s.rows.map(v=>v.anchor),nineModels.map(id=>id!=='taino-canoe'));
     assert.deepEqual(s.wake,{count:9,layers:[9,9]});for(const [kind,count]of Object.entries(s.unique))assert.equal(count,kind==='rowing'?3:9,'separate mutable '+kind+' state');
     assert.equal(new Set(s.rows.map(v=>v.source)).size,9,'each requested class has its actual distinct immutable mesh');

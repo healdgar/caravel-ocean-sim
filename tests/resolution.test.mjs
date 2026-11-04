@@ -111,3 +111,18 @@ test('adaptive polygon controller scales LOD pixel error and ocean node budgets 
   assert.ok(restored.length>0);
   assert.equal(auto.scale,1);
 });
+
+test('both budgets still fall on a device taking seconds per frame, and a long pause is not mistaken for one',()=>{
+  for(const create of[createAdaptiveResolution,createAdaptivePolygons]){
+    const slow=create('auto');
+    let changed=0;
+    for(let i=0;i<20;i++)if(slow.sample(2.5,true,2500))changed++;
+    assert.ok(changed>=2&&slow.scale<.8,`reduced to ${slow.scale} after 50 s of 2.5 s frames`);
+    const paused=create('auto');
+    for(let i=0;i<200;i++)paused.sample(i%40===39?30:1/60,true,8);
+    assert.equal(paused.scale,1,'occasional long pauses reset rather than reduce');
+    const hidden=create('auto');
+    for(let i=0;i<20;i++)hidden.sample(2.5,false,2500);
+    assert.equal(hidden.scale,1,'a hidden tab never reduces');
+  }
+});

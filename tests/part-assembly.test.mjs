@@ -1102,7 +1102,7 @@ test('sail-rip and hull-crack bakes physically deform 3D sail cloth ribbons, rig
   );
 });
 
-test('all 9 playable ship models engage in naval battles, fire broadsides, deform 3D meshes, and sink realistically', async () => {
+test('all 9 playable ship models take battle damage, deform 3D meshes and sink realistically, and all but the unarmed yacht fire', async () => {
   const { boatHydrodynamics } = await import('../js/boat.js');
   const cache = createShipAssetCache();
   const allModelIds = [
@@ -1140,14 +1140,15 @@ test('all 9 playable ship models engage in naval battles, fire broadsides, defor
     };
     ship.hydrodynamics = boatHydrodynamics(rt.length, rt.beam, 30, 0, modelId);
 
-    // 1. Every vessel model initializes naval battle gunnery and can fire a starboard broadside
+    // 1. Every armed model can fire a starboard broadside; Gipsy Moth IV carries no weapons.
     const shotsFired = [];
     const gunnery = createShipGunnery(ship, {
       onEvent: (ev) => {
         if (ev.type === 'shot') shotsFired.push(ev);
       },
     });
-    assert.ok(gunnery.state.guns.length >= 2, `${modelId} mounts port and starboard broadside guns`);
+    const unarmed = modelId === 'gipsy-moth-iv';
+    assert.ok(unarmed ? gunnery.state.guns.length === 0 : gunnery.state.guns.length >= 2, `${modelId} armament`);
     for (const g of gunnery.state.guns) {
       if (g.visibleCrew) {
         ship.gunneryAttendance ??= new Set();
@@ -1155,11 +1156,11 @@ test('all 9 playable ship models engage in naval battles, fire broadsides, defor
       }
     }
     gunnery.readyAtQuarters('starboard');
-    assert.equal(gunnery.fire('starboard'), true, `${modelId} accepts fire('starboard') order`);
+    assert.equal(gunnery.fire('starboard'), !unarmed, `${modelId} fire('starboard') order`);
     for (let step = 0; step < 30; step++) {
       gunnery.update(0.2, [0, 0, 0]);
     }
-    assert.ok(shotsFired.length >= 1, `${modelId} fires broadside projectiles (${shotsFired.length} fired)`);
+    assert.ok(unarmed ? shotsFired.length === 0 : shotsFired.length >= 1, `${modelId} broadside projectiles (${shotsFired.length} fired)`);
 
     // 2. Sweep & apply hull impact damage + 3D vertex deformation on this model
     const sweepHit = sweepShipSegment([rt.beam * 2, 0.25, 0], [-rt.beam * 2, 0.25, 0], 0.08, ship);

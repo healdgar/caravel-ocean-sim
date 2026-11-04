@@ -328,6 +328,10 @@ export function boatWaveSlope(boat, time) {
 // Long-wave Froude–Krylov approximation: F = -rho*g*volume*mean(wave slope).
 // Sailing uses apparent-wind forces; manual mode retains the calm-water thrust.
 // Both integrate through vessel inertia, resistance and incident-wave pressure.
+// Share of the long-wave Froude-Krylov pressure force passed to surge. A game
+// tuning (3dcbb60), not a derived coefficient: full coupling swung a caravel
+// about 2.8 m/s through an ordinary 0.06-slope swell.
+export const WAVE_SURGE_COUPLING = 0.35;
 export function stepBoatSurge(boat, slope, dt, windSpeed = 0, windDirection = 0) {
   boat.leewayDistance = 0;
   boat.waterYawMoment=boat.sailYawMoment=boat.rowingYawMoment=boat.waterYawDamping=0;
@@ -383,7 +387,7 @@ export function stepBoatSurge(boat, slope, dt, windSpeed = 0, windDirection = 0)
   boat.surgeVelocity=savedSurge;boat.leewayVelocity=savedLeeway;
   const target = boat.speed * KNOT_TO_MPS;
   const thrust = hydro.drag * target * Math.abs(target) * driveFactor;
-  const waveForce = -1025 * 9.81 * hydro.volume * slope * 0.35 * (1 - sinkProgress * 0.85);
+  const waveForce = -1025 * 9.81 * hydro.volume * slope * WAVE_SURGE_COUPLING * (1 - sinkProgress * 0.85);
   // Optional world-space loads (e.g. an anchor rode) pass through the same
   // inertial integrator as wind and wave pressure. Units: N, clockwise N m.
   const externalX=Number.isFinite(external?.x)?external.x:0,externalZ=Number.isFinite(external?.z)?external.z:0;

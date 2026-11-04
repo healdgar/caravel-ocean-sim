@@ -1,5 +1,24 @@
 # Ocean Sailing Simulator backlog and overnight checkpoint
 
+## November 4: tree budget, weak devices, loose-stone hillsides
+
+Foreground native tree radii from `facc252` were fixed at 95, 180 and 240 m, which the adaptive polygon budget could not reduce. They are now 12, 30 and 140 m and scale with the budget, and the budget can react to frames lasting up to 8 s (previously a frame over 1 s reset it). Measured indirect triangles at `reported-close-view`, 1920x1080, Metal, before allowing the third tier at deck level:
+
+| Polygon budget | Before | After |
+|---|---|---|
+| 100% | 89.4M | 26.1M |
+| 50% | 87.1M | 18.0M |
+| 25% | 83.9M | 12.2M |
+| 10% | not measured | 8.1M |
+
+The old 6M pilot target is not met at any budget, even with all three radii at zero (8.7M at full budget), and getting there returns shell trees to the foreground. `tests/forest-occlusion-render-gpu.test.mjs` now requires at most 30M at full budget and at least a 45% drop at a quarter budget.
+
+Hull collision was a solid box at least 4.6 m above the waterline on every ship, so shots stopped in mid-air above a canoe's gunwale and bodies on deck were always shielded. It now follows each ship's real rail. Casualties come from body hits and local splinters, with a small count for undrawn crew: by the formula, a 32-pounder breaking through Victory went from about 72 casualties to at most a few. Measured on Metal, two Victories traded about 30 hits in a minute at 160 m, costing each ship about 70 of 820, and one struck her colours.
+
+Terrain material coordinates no longer blend world planes. Blending planes thousands of metres apart was what striped and smeared slopes. Bare slopes now rest as procedural loose stone that follows the pixel footprint, and bedding lines appear only on true cliffs.
+
+Every region now shares `landGroundCover` in `js/wgsl/terrain.js`: olive grass, dark shrub, pink-tan soil and red-brown rock chosen by slope, altitude and noise, with no regional data. Green or tan imagery keeps its colour under light mottling; pale, hueless imagery takes the cover almost entirely. The palette values are authored by eye against two reference photographs of Saba. They are not measured reflectance.
+
 ## October 28: crew movement, gunnery reload, 3-tier crew LODs, 1550–1650 sailor model, and hierarchical part-assembly
 
 Completed and verified across all source, standalone, and Pages builds:

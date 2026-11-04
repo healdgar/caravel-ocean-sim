@@ -12,6 +12,7 @@ import {laterSailRigContext} from './additional-rig.js';
 import {rowingStationPose,rowingSteeringPose} from './rowing.js';
 import {crewNavigationStation,crewNavigationRoute,crewRoutineSegmentClear,crewNavigationClear,crewNavigationSegmentClear,crewNavigationObstacles} from './crew-navigation.js';
 import {crewDeckHazard,crewMotionPolicy,crewAdvanceWalk,crewTurnTowards} from './crew-motion.js';
+import {vesselSidearm} from './gunnery-models.js';
 
 export const hasExtendedCrewModel=id=>Object.hasOwn(ROWING_DESIGNS,id??'')||Object.hasOwn(LATER_SAIL_DESIGNS,id??'');
 export const CREW_CLIMB_SPEED=.65;
@@ -492,13 +493,16 @@ function crewNeededAtSail(s,needs,maneuver){
 function crewSailWorkNeeded(boat,sails,tolerance){
   return SAIL_KEYS.map((_,i)=>Math.abs(sailCanvasTarget(boat,i)-sails.set[i])>tolerance&&!sailLosingCanvas(boat,i,sails.set[i]));
 }
+// Visible hands serve authored weather-deck guns. Batteries with no authored stations,
+// archers among them, stay abstract, so paddlers keep paddling.
+const crewServesGun=gun=>gun.weatherDeck&&!gun.abstractCrew;
 function assignGunCrew(company,boat,needs=null,maneuver=false){
   const guns=boat.gunnery?.guns;
   if(!guns)return;
   const offline=g=>Boolean(g.disabledByScale||g.dismounted);
   const fit=s=>!['ines','pedro'].includes(s.id)&&s.casualtyState!=='fallen'&&!(s.knockdownTimer>0);
   const ableHands=company.crew.filter(fit).length;
-  const weather=guns.filter(g=>g.weatherDeck),baseLimit=boat.modelId==='victory'?4:2;
+  const weather=guns.filter(crewServesGun),baseLimit=boat.modelId==='victory'?4:2;
   const limit=Math.max(0,Math.min(baseLimit,Math.floor(ableHands/2)));
   // A gun station the crew physically cannot reach (blocked by wreckage, a
   // fallen shipmate, etc.) is served by unseen hands instead of stalling forever.
@@ -589,7 +593,7 @@ export function manGunStationsImmediate(company,boat){
   const guns=boat.gunnery?.guns;
   if(!guns||!company?.crew||!boat.gunnerySide)return false;
   const ableHands=company.crew.filter(s=>!['ines','pedro'].includes(s.id)&&s.casualtyState!=='fallen'&&!(s.knockdownTimer>0)).length;
-  const weather=guns.filter(g=>g.weatherDeck),baseLimit=boat.modelId==='victory'?4:2;
+  const weather=guns.filter(crewServesGun),baseLimit=boat.modelId==='victory'?4:2;
   const limit=Math.max(0,Math.min(baseLimit,Math.floor(ableHands/2)));
   const selected=new Set();
   for(const side of['port','starboard'])for(const gun of weather.filter(g=>g.side===side&&!g.disabledByScale&&!g.dismounted).slice(0,limit))selected.add(gun.id);
@@ -616,9 +620,26 @@ export function manGunStationsImmediate(company,boat){
   updateCrewGunneryAttendance(company,boat);
   return true;
 }
+// Actor-local hand targets of a boarding fight's swing, in metres.
+export function crewBoardingHands(s){
+  const phase=s.time*4.2+(s.crewIndex??0)*1.15,thrust=Math.sin(phase),slash=Math.cos(phase);
+  return {
+    right:[-0.12+0.10*slash,1.26+0.15*thrust,0.44+0.22*Math.max(0,thrust)],
+    left:[0.20,1.16+0.05*slash,0.28+0.06*Math.max(0,-thrust)],
+    point:[0.35*slash,0.55+0.25*thrust,0.75],
+  };
+}
+// The weapon each hand holds in a boarding fight, from the fist to its point.
+function crewBoardingWeapon(s,boat){
+  const arm=vesselSidearm(boat?.modelId),hands=crewBoardingHands(s),c=Math.cos(s.yaw),sn=Math.sin(s.yaw);
+  const toBoat=p=>{const x=p[0]*s.scale[0],y=p[1]*s.scale[1],z=p[2]*s.scale[2];return [s.position[0]+c*x+sn*z,s.position[1]+y,s.position[2]-sn*x+c*z];};
+  const n=Math.hypot(...hands.point);
+  return {kind:arm.kind,radius:arm.radius,a:toBoat(hands.right),b:toBoat(hands.right.map((v,i)=>v+hands.point[i]/n*arm.length))};
+}
 // Boat-local metre targets shared by actual hand IK and the visible tool mesh.
 export function crewGunneryTool(s,boat){
   const j=s.job;
+  if(j?.kind==='boarding'&&j.stage==='working'&&s.position)return crewBoardingWeapon(s,boat);
   if(j?.kind==='lookout'&&j.stage==='working'&&(s.intent==='work'||j.lookoutAtStation)&&s.position&&(s.phys?.usingSpyglass??true)){
     const scaleY=s.scale?.[1]??1;
     const eyeY=s.position[1]+(j.lookoutAtStation?1.24:1.42)*scaleY;
@@ -648,6 +669,9 @@ export function crewGunneryTool(s,boat){
   }
   if(j.gunRole==='loader'&&stage==='prime'){
     const breech=gun.breechDesign.map((v,i)=>v*scale[i]-direction[i]*gun.offset);breech[1]+=.10;
+    // Victory's loader stands beside the truck, so he primes from the breech's
+    // near shoulder; reaching its far side folds his legs through the carriage.
+    if(boat.modelId==='victory')breech[2]+=.12;
     return {kind:'prime',hands:[breech,breech.map((v,i)=>v+(i===2?.12:0))]};
   }
   if(j.gunRole==='tackle'&&['swab','load','ram','runout'].includes(stage)){

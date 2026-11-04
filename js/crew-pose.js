@@ -1,7 +1,7 @@
 import { gltfQuatMultiply } from './gltf.js';
 import { vesselVerticalScale } from './hull.js';
 import { resolveShipNode, requirePlayableShipModel } from './ship-models.js';
-import { crewRunnerMetrics, crewGunneryTool, crewMastName, hasExtendedCrewModel, crewRowingWalkContacts, crewDeckHeight } from './crew-work.js';
+import { crewRunnerMetrics, crewGunneryTool, crewBoardingHands, crewMastName, hasExtendedCrewModel, crewRowingWalkContacts, crewDeckHeight } from './crew-work.js';
 import { applyArticulatedRagdollPose } from './crew-physics.js';
 import {ADDITIONAL_DESIGNS} from './models/additional.js';
 import {proceduralDesign} from './models/procedural.js';
@@ -120,10 +120,11 @@ function poseRowingWalkingFeet(a,s,boat){
   for(const [i,side]of ['l','r'].entries()){
     const sign=side==='l'?1:-1,f=a.footContacts[side],target=targets[i];
     solveCrewLimb(a,['thigh_'+side,'calf_'+side,'foot_'+side],target,[sign*.25,.35,.85]);
-    // Undo the ankle rotation introduced by leg IK. The measured sole stays
-    // level; its authored boot/toe geometry is unchanged.
-    const foot=f.node,parent=a.parent[foot],q=poseRotation(a.world[parent]),inverse=[-q[0],-q[1],-q[2],q[3]],yaw=contacts.feet[i].yaw-s.yaw,turn=[0,Math.sin(yaw/2),0,Math.cos(yaw/2)],desired=new Float32Array(4),local=new Float32Array(4);
-    gltfQuatMultiply(desired,turn,poseRotation(f.restWorld));gltfQuatMultiply(local,inverse,desired);a.pose[foot].r.set(local);
+    // Undo the ankle rotation introduced by leg IK and the actor's forward lean
+    // at a halyard. The measured sole stays level; its authored boot/toe geometry
+    // is unchanged.
+    const foot=f.node,parent=a.parent[foot],q=poseRotation(a.world[parent]),inverse=[-q[0],-q[1],-q[2],q[3]],yaw=contacts.feet[i].yaw-s.yaw,turn=[0,Math.sin(yaw/2),0,Math.cos(yaw/2)],lean=(s.climbPitch??0)/2,level=[-Math.sin(lean),0,0,Math.cos(lean)],desired=new Float32Array(4),turned=new Float32Array(4),local=new Float32Array(4);
+    gltfQuatMultiply(turned,level,turn);gltfQuatMultiply(desired,turned,poseRotation(f.restWorld));gltfQuatMultiply(local,inverse,desired);a.pose[foot].r.set(local);
     const toe=poseNodeIndex(a,'ball_'+side);if(toe>=0)a.pose[toe].r.set(a.rest[toe].r);
     if(a.updateBranch)a.updateBranch(foot);else a.update();
     (s.grips??={})['foot_'+side]=target;
@@ -169,7 +170,10 @@ function poseGroundedGunBody(a,s,boat,requestedLean,hands=null){
     // Only add bend when the actual unchanged hand workspace requires it.
     if(reachExcess>0)lean=Math.max(lean,Math.min(.65,Math.atan2(Math.max(0,centre[2]-base[2]),Math.max(.10,centre[1]-base[1]))));
     const shoulderY=(shoulders[0][1]+shoulders[1][1])*.5;
-    drop=Math.max(0,Math.min(.36,shoulderY-centre[1]-.16));
+    // Only a long gun's low bore needs the deep crouch. Priming hands sit on top
+    // of the breech and a carronade is short: bent knees there enter the carriage.
+    const victoryGun=boat.modelId==='victory'?s.job?.gun:null;
+    drop=Math.max(0,Math.min(victoryGun?.stage==='prime'?.12:victoryGun?.kind==='carronade'?.18:.36,shoulderY-centre[1]-.16));
   }else if(requestedLean>0)drop=.12*Math.min(1,requestedLean/.45);
   const fraction=Math.max(0,Math.min(1,lean/.45));
   const lift=feet.reduce((sum,p)=>sum+p.target[1]-a.footContacts[p.side].ankle[1],0)/2;
@@ -189,7 +193,7 @@ function poseGroundedGunBody(a,s,boat,requestedLean,hands=null){
       const across=(target[0]-shoulder[0])**2+(target[1]-shoulder[1])**2;
       workspaceForward=Math.max(workspaceForward,target[2]-shoulder[2]-Math.sqrt(Math.max(0,reach*reach-across)));
     }
-    workspaceForward=Math.max(0,Math.min(.46-.04*fraction,workspaceForward));
+    workspaceForward=Math.max(0,Math.min((s.job?.gun?.stage==='prime'?.30:.46)-.04*fraction,workspaceForward));
     if(workspaceForward){const p=posePosition(a.world[pelvis]);p[2]+=workspaceForward;poseMoveBone(a,pelvis,p);}
   }
   // As in the rowing stance, lower the pelvis only as much as the genuine leg
@@ -326,10 +330,7 @@ export function poseCrewWork(a,s,boat){
   }
   if(j?.kind==='boarding'&&j.stage==='working'){
     a.blend('Brace',s.time,0.55);
-    const phase=s.time*4.2+(s.crewIndex??0)*1.15;
-    const thrust=Math.sin(phase),slash=Math.cos(phase);
-    const handR=[-0.12+0.10*slash,1.26+0.15*thrust,0.44+0.22*Math.max(0,thrust)];
-    const handL=[0.20,1.16+0.05*slash,0.28+0.06*Math.max(0,-thrust)];
+    const {right:handR,left:handL}=crewBoardingHands(s);
     solveCrewLimb(a,['upperarm_r','lowerarm_r','hand_r'],handR,[-0.6,1.0,0.2]);
     solveCrewLimb(a,['upperarm_l','lowerarm_l','hand_l'],handL,[0.6,1.0,0.2]);
     s.grips={hand_r:handR,hand_l:handL};

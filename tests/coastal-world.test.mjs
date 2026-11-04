@@ -1930,6 +1930,8 @@ test('Blender-audited architectural models feature per-vertex 3D AO gradients, s
   assert.ok(TERRAIN.includes('reflect(-v,n)'), 'landFinish computes environment reflection vector');
   assert.ok(TERRAIN.includes('let specBRDF=(D*G*fresnelSun)'), 'landFinish computes physical GGX microfacet specular BRDF');
   assert.ok(TERRAIN.includes('let archShadow=smoothstep('), 'landFinish applies architectural cavity & eave self-shadowing');
+  assert.ok(!/mix\(world\.(xz|zy),/.test(TERRAIN), 'material coordinates pick one world plane, since blending planes thousands of metres apart stripes slopes');
+  assert.ok(TERRAIN.includes('let screeWeight='), 'bare slopes rest as loose stone at every viewing range');
   assert.ok(TERRAIN.includes('let isGlazedWindow=in.kind.y>0.25'), 'landOpaque renders reflective diamond-leaded casement glass on kind 14 windows');
   assert.ok(TERRAIN.includes('let tileTan=select('), 'landOpaque aligns terracotta barrel tile flutes along roof slope tangent');
   assert.ok(TERRAIN.includes('let archLodFade='), 'landOpaque applies multi-tier distance LOD fade on architectural materials');

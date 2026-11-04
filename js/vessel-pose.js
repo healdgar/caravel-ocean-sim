@@ -28,7 +28,7 @@ export function withPosedVesselVertices(source){
     .replace(call,`RigVertex(posedPosition,posedNormal,vec3f(hull.size.x/3.6,select(${HULL_VERTICAL_SCALE},hull.right.w,hull.right.w>0.0),hull.size.y/12.0))`);
 }
 
-export async function createVesselPose({device,computePipe,sourceBuffer,mesh=null,vertexCount,hullUBO,shared=null,rigData=null,recoilMap=null,partAssembly=null}){
+export async function createVesselPose({device,computePipe,sourceBuffer,mesh=null,pristineMesh=null,vertexCount,hullUBO,shared=null,rigData=null,recoilMap=null,partAssembly=null}){
   if(!Number.isSafeInteger(vertexCount)||vertexCount<1)throw new RangeError('Vessel pose needs a positive vertex count');
   if(shared&&shared.device!==device)throw new Error('Vessel pose assets belong to another graphics device');
   if(shared&&(shared.rigData??null)!==rigData)throw new Error('Vessel pose metadata belongs to another model');
@@ -73,6 +73,11 @@ export async function createVesselPose({device,computePipe,sourceBuffer,mesh=nul
         }
       }
       return updated;
+    },
+    // Undo baked hull dents and mast breaks once a repair or a new ship makes them wrong.
+    restoreGeometry(){
+      if(destroyed||!(mesh instanceof Float32Array)||!(pristineMesh instanceof Float32Array))return false;
+      mesh.set(pristineMesh);device.queue.writeBuffer(sourceBuffer,0,mesh);return true;
     },
     encode(pass,enabled=true){
       if(!enabled||destroyed)return false;

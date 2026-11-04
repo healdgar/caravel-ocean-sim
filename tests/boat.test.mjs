@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { boatWaveAttitude, boatTargets, boatSpring, boatRotate, boatHydrodynamics, hullHydrostatics, boatForwardSpeed, boatWaveSlope, stepBoatSurge, KNOT_TO_MPS } from '../js/boat.js';
+import { boatWaveAttitude, boatTargets, boatSpring, boatRotate, boatHydrodynamics, hullHydrostatics, boatForwardSpeed, boatWaveSlope, stepBoatSurge, KNOT_TO_MPS, WAVE_SURGE_COUPLING } from '../js/boat.js';
 
 test('flat sea gives level hull and correct height', () => {
   assert.deepEqual(boatTargets(Array(9).fill(2), 10, 3), { heave: 2, pitch: 0, roll: 0 });
@@ -182,7 +182,7 @@ test('undamped wave work equals the change in kinetic energy including added mas
     const inertia = hydro.mass + hydro.addedMass, start = 0.5 * inertia * boat.surgeVelocity ** 2;
     let distance = 0;
     for (let i = 0; i < 100; i++) distance += stepBoatSurge(boat, slope, 0.1);
-    const work = -1025 * 9.81 * hydro.volume * slope * distance;
+    const work = -1025 * 9.81 * hydro.volume * slope * WAVE_SURGE_COUPLING * distance;
     const energy = 0.5 * inertia * boat.surgeVelocity ** 2 - start;
     assert.ok(Math.abs(work - energy) < 1e-6);
   }
@@ -200,7 +200,8 @@ test('travelling swell surge remains stable and consistent from 10 to 120 FPS', 
     return { velocity: boat.surgeVelocity, distance, min, max };
   };
   const reference = run(1 / 120);
-  assert.ok(reference.max - reference.min > 1, 'waves produce meaningful velocity variation');
+  // 3dcbb60 cut the wave coupling to 0.35, taking this swing from 2.82 to 0.96 m/s.
+  assert.ok(reference.max - reference.min > 2.5 * WAVE_SURGE_COUPLING, 'waves produce meaningful velocity variation');
   for (const dt of [1 / 30, 0.1]) {
     const result = run(dt);
     assert.ok(Math.abs(result.velocity - reference.velocity) < 0.06);

@@ -36,7 +36,8 @@ test('both ships walk real gun teams to either battery, complete the drill, then
     assert.equal(summary.ready,summary.total,id+' '+side+' must finish without a route deadlock');
     assert.equal(boat.gunneryAttendance.size,expected);
     assert.equal(company.crew.filter(s=>s.job?.kind==='gunnery').length,expected*2);
-    assert.ok(closest>.50,'human bodies remain separated: '+closest);
+    // 40a4ed0 cleared the full-watch deadlock by letting a gun team pass at .38 m.
+    assert.ok(closest>.38,'human bodies remain separated: '+closest);
     const pace=crewMotionPolicy(boat,{purpose:'work'}).speedMetresPerSecond;
     assert.ok(pace<=1.75,'work pace has a physical human cap');assert.ok(maxMove<=pace*.1+2e-5,'no station teleport: '+maxMove);
     assert.ok(company.crew.filter(s=>['ines','pedro'].includes(s.id)).every(s=>s.job?.kind!=='gunnery'));

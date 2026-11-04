@@ -7,14 +7,20 @@ import {withCelestialFrame,CELESTIAL_FRAME_BYTES,CELESTIAL_FRAME_FLOATS} from '.
 import { createSailingInstruments } from './instruments.js';
 import { controlIcon, createHelmControls } from './controls.js';
 import { createSceneAudio } from './audio.js';
-import { createShipGunnery, createPortGunnery, resolveVesselCollisions } from './gunnery-control.js';
-import { remountVesselGuns } from './gunnery-state.js';
+import { createShipGunnery, createPortGunnery, resolveVesselCollisions, resetVesselDamageState } from './gunnery-control.js';
+import { setVesselHullIntegrity, vesselDamageSnapshot, restoreVesselDamageSnapshot } from './vessel-damage.js';
+import { createCareerStore, applyShipwreckRecovery, nearestFoundedPort } from './career-save.js';
+import { serializeVoyage } from './voyage/passage.js';
+import { resetActiveIndigenousSovereigntyState } from './indigenous-sovereignty.js';
+import { coastalRegionStageURL } from './landfall.js';
+import { showCareerPrompt } from './career-ui.js';
 import { createGunneryControls } from './gunnery-ui.js';
 import { createGunneryEffects } from './gunnery-effects.js';
 import { createGunnerySeaProbe } from './gunnery-sea-probe.js';
 import { createGunportSafety } from './gunport-safety.js';
 import { createHullContactProbe } from './hull-contact.js';
 import { createGunRecoilMap } from './gunnery-models.js';
+import { isArrowAmmo } from './gunnery-state.js';
 import { CREW_VOICES } from './voice-assets.js';
 import { createAnchorState } from './anchor-state.js';
 import { createAnchorRenderer } from './anchor.js';
@@ -65,7 +71,7 @@ import {getShipParts} from './ship-parts.js';
 import {ARCHETYPE_SCALE_PRESETS, computeArchetypeScaleSpec} from './ship-part-taxonomy.js';
 import {vesselVerticalScale} from './hull.js';
 import { crewWorkLabel, manGunStationsImmediate } from './crew-work.js';
-import { createCrew, createFortSoldiers, preloadCrewModels, CAPTAIN_ORDERS } from './crew.js';
+import { createCrew, createFortSoldiers, preloadCrewModels, CAPTAIN_ORDERS, reviveCompany } from './crew.js';
 import { HELM_EYE_Z, HELM_EYE_HEIGHT, HULL_UNIFORM_BYTES, HULL_VERTICAL_SCALE, DEFAULT_BOAT_LENGTH, DEFAULT_BOAT_BEAM } from './hull.js';
 import { SAIL_KEYS, sailingState, pointOfSail } from './sailing.js';
 import { CARAVEL, WATER_FILTER } from './wgsl/caravel.js';
@@ -90,12 +96,14 @@ loadIndigenousSovereigntyFromStorage();
 if (qs.has('sovereignPolity')) {
   const polId = qs.get('sovereignPolity');
   const sov = getActiveIndigenousSovereigntyState();
-  applyIndigenousSupportAction(polId, 'declare-rogue', sov);
-  applyIndigenousSupportAction(polId, 'share-medicine', sov);
-  applyIndigenousSupportAction(polId, 'supply-arms', sov);
-  applyIndigenousSupportAction(polId, 'defend-raid', sov);
-  applyIndigenousSupportAction(polId, 'proclaim-sovereignty', sov);
+  for (const action of ['go-rogue', 'share-medicine', 'arm-settlement', 'defend-settlement', 'proclaim-sovereignty']) {
+    applyIndigenousSupportAction(polId, action, { state: sov });
+  }
 }
+const careerBrowserStorage=name=>{try{return window[name];}catch{return null;}};
+const careerStore=createCareerStore({storage:careerBrowserStorage('localStorage'),session:careerBrowserStorage('sessionStorage')});
+// A tab owns the save if it asked to continue, or if there is nothing yet to protect.
+if(qs.get('continue')==='1'||!careerStore.has())careerStore.claim();
 const BROADSIDE_SCENARIO=qs.get('broadside')==='1'||qs.get('scenario')==='broadside'||qs.get('situation')==='broadside';
 const BROADSIDE_SIDE=qs.get('broadsideSide')==='port'?'port':'starboard';
 const READY_SHIPS=readyFleetModels();
@@ -344,7 +352,11 @@ async function main() {
   const HDR = 'rgba16float';
 
   // Kick off all ocean, atmosphere, cloud, and landfall shader/pipeline compilations and asset fetches concurrently
-  const oakImagePromise = fetch('assets/caravel-oak-albedo.webp').then(r => r.blob()).then(b => createImageBitmap(b));
+  // The helm's wood grain reuses these bytes; a CSS url() of its own would download them again.
+  const oakImagePromise = fetch('assets/caravel-oak-albedo.webp').then(r => r.blob()).then(b => {
+    document.documentElement.style.setProperty('--nautical-wood-tex',`url("${URL.createObjectURL(b)}")`);
+    return createImageBitmap(b);
+  });
   oakImagePromise.catch(() => {});
   preloadCrewModels()?.catch(() => {});
   const rgba8MipPipePromise = computePipe(RGBA8_MIPS, 'rgba8 mips');
@@ -572,7 +584,7 @@ async function main() {
     const interactionPromise=createWaterInteraction({device,frameUBO,hullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,envView:envCubeView,transView,skyView,sunVis:sunVisBuf,shader,computePipe,surfaceWaves,wakeTargets:wakePool.layer(index)});
     const rowingWaterPromise=Object.hasOwn(ROWING_DESIGNS,spec.modelId)?createRowingWaterProbe({device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,modelId:spec.modelId,surfaceWaves}):null;
     interactionPromise.catch(()=>{});rowingWaterPromise?.catch(()=>{});
-    const pose=await createVesselPose({device,computePipe,sourceBuffer:vertexBuffer,mesh,vertexCount:mesh.length/9,hullUBO,shared:render.poseAssets,rigData:asset.rigGPUData??null,recoilMap,partAssembly:asset.partAssembly??null});
+    const pose=await createVesselPose({device,computePipe,sourceBuffer:vertexBuffer,mesh,pristineMesh:asset.vertices,vertexCount:mesh.length/9,hullUBO,shared:render.poseAssets,rigData:asset.rigGPUData??null,recoilMap,partAssembly:asset.partAssembly??null});
     if(pose)render.poseAssets=pose.assets;
     const wetnessPromise=createSurfaceWetness({device,mesh:asset.vertices,hullUBO,frameUBO,computePipe,crewCount:Object.keys(asset.model.crewStations).length+Object.keys(asset.model.supplementalCrewStations??{}).length,posed:pose});
     const shadowsPromise=wetnessPromise.then(wetness=>createVesselShadows({device,hullUBO,mesh:asset.vertices,meshIndices:asset.indices,vertexBuffer,shader,wetness,targets:sceneShadows.layer(index),posed:pose}));
@@ -1052,7 +1064,8 @@ async function main() {
     getVessels:()=>vessels,
     getTerrain:()=>terrain,
     onOrder:(id,b)=>{
-      sceneAudio.gunneryOrder(id,b);
+      // The captain's recorded orders are for gun crews.
+      if(ownerBoat.gunnery?.guns?.[0]?.kind!=='bow')sceneAudio.gunneryOrder(id,b);
       if(BROADSIDE_SCENARIO&&ownerBoat===boat&&(id==='fire-port'||id==='fire-starboard')){
         if(typeof setCaptainOpen==='function')setCaptainOpen(false);
         for(const v of vessels.slice(1)){
@@ -1069,6 +1082,8 @@ async function main() {
     },
     onEvent:event=>{
       sceneAudio.gunneryEvent(event);
+      // An arrow makes no smoke, plume or splinters.
+      if(isArrowAmmo(event.ammo)){if(event.type==='impact'){gunControls?.update?.();helm?.update?.(performance.now(),true);}return;}
       const shotKey=prefix+event.shotId;
       if(event.type==='shot')gunEffects.emitShot({...event,id:shotKey,chargeKg:event.mass*.3});
       else if(event.type==='impact'&&event.kind==='water'){
@@ -2229,6 +2244,33 @@ async function main() {
     };
     return { cam, orbit: shipOrbit, astronomy: astronomy.share(), voyage: vInfo, gameState };
   };
+  const careerSnapshot = () => ({
+    url: createShareLink(location.href, P, boat, cameraMode, buildShareCameraPayload()).toString(),
+    sovereignty: serializeIndigenousSovereignty(getActiveIndigenousSovereigntyState()),
+    vessel: {
+      modelId: boat.modelId,
+      colors: boat.colors,
+      sails: SAIL_KEYS.map(k => boat[k]),
+      set: boat.sailState?.set ? Array.from(boat.sailState.set) : null,
+      cargoTonnes: boat.cargoTonnes,
+      provisionDays: boat.provisionDays,
+      plunderedCannons: boat.plunderedCannons ?? 0,
+      plunderedFirepowerMultiplier: boat.plunderedFirepowerMultiplier ?? 1,
+      rawMaterialsTonnes: boat.rawMaterialsTonnes ?? 0,
+      damage: vesselDamageSnapshot(boat),
+    },
+  });
+  const restoreCareerVessel = saved => {
+    if (!saved) return;
+    if (saved.colors && !qs.has('colors')) setVesselColors(boat, saved.colors);
+    for (const key of ['cargoTonnes', 'provisionDays', 'plunderedCannons', 'plunderedFirepowerMultiplier', 'rawMaterialsTonnes']) {
+      if (Number.isFinite(saved[key])) boat[key] = saved[key];
+    }
+    restoreVesselDamageSnapshot(boat, saved.damage);
+    vessels[0].pose?.updateDamage?.(boat);
+    vessels[0].wetness?.updateDamage?.(boat.damage);
+  };
+  let playerWreckRaised = false;
   let lastUrlSyncMs = 0;
   const syncBrowserUrlState = (now = performance.now(), force = false) => {
     if (IS_HEADLESS_TEST && !force) return;
@@ -2288,11 +2330,17 @@ async function main() {
   const landfallUI=createLandfallUI({dock:cameraDock,active:!!terrain,stage:LAND_STAGE,weather:LAND_WEATHER,region:terrain?.region??undefined,
     discovery:terrain?.discovery??null,onUpgradeApplied:()=>{envFull=true;},
     onIndigenousAction:res=>{
-      if(res?.state?.allegiance==='rogue-liberator'){
-        setVesselColors(boat,'indigenous-confederacy');
-        if(colorsSelect)colorsSelect.value='indigenous-confederacy';
+      if(res?.colorsChangedTo){
+        setVesselColors(boat,res.colorsChangedTo);
+        if(colorsSelect)colorsSelect.value=res.colorsChangedTo;
       }
-      if(res?.message)voyageCtl?.showToast?.(res.message,8);
+      const landfallVoyage=voyageCtl?.voyage;
+      if(landfallVoyage?.provisions){
+        landfallVoyage.provisions.food=Math.min(140,(landfallVoyage.provisions.food??45)+(res?.foodGained??0));
+        landfallVoyage.provisions.water=Math.min(110,(landfallVoyage.provisions.water??40)+(res?.waterGained??0));
+        landfallVoyage.morale=Math.min(1,(landfallVoyage.morale??.85)+(res?.moraleDelta??0));
+      }
+      if(res?.summary)voyageCtl?.showToast?.(res.summary,8);
       updateCrewUI();
       syncBrowserUrlState(performance.now(),true);
     },
@@ -2326,10 +2374,30 @@ async function main() {
       const o=astronomy.state?.observer;
       return o?{latitude:o.latitude,longitude:o.longitude}:{latitude:astronomy.anchor.latitude,longitude:astronomy.anchor.longitude};
     };
+    const prepareEncounterVessel=target=>{
+      portGunnery?.forgetAttacker?.(target.boat);
+      target.gunnery?.standDown?.();
+      resetVesselDamageState(target.boat);
+      Object.assign(target.boat,{captured:false,capturedBy:null,captureMethod:null,allyConsort:false,disarmedPrize:false,scuttled:false,boardingActive:false});
+      if(target.follower){target.follower.captainOrder=null;target.follower.pendingCaptainFire=null;target.follower.formation=fleetFormation(0);}
+      reviveCompany(target.crew?.state);
+      target.pose?.restoreGeometry?.();
+      target.bakedWreck=false;target.bakingWreck=false;target.entirelySubmerged=false;
+      target.pose?.updateDamage?.(target.boat);
+      target.wetness?.updateDamage?.(target.boat.damage);
+    };
     const activateEncounterVessel=(enc,{mode='sight',keepPosition=false}={})=>{
       if(vessels.length<=1)return;
       const target=vessels[1];
-      const wasDormant=Boolean(target.dormantEncounter||!target.boat?.showProw||target.boat?.sunk||target.boat?.captured);
+      const wasDormant=Boolean(target.dormantEncounter||!target.boat?.showProw||target.boat?.damage?.sunk||target.boat?.captured);
+      // Each encounter is a new ship in this pooled hull, however the last one ended.
+      if(enc&&target.currentEncounter!==enc){
+        if(target.boat?.captured&&target.boat?.allyConsort&&!target.boat?.damage?.sunk){
+          voyageCtl?.logExternal?.(`${target.boat.shipName??'Our prize'} parted company under her prize crew, bound for a friendly port.`,'order');
+        }
+        target.currentEncounter=enc;
+        prepareEncounterVessel(target);
+      }
       target.dormantEncounter=false;
       followerEnabled=true;
       boat.followingShip=true;
@@ -2366,25 +2434,6 @@ async function main() {
           ?(enc?.battleColors??'jolly-roger')
           :(enc?.colors??'castile');
         setVesselColors(target.boat,chosenColors);
-        if(wasDormant){
-          target.boat.captured=false;
-          target.boat.allyConsort=false;
-          target.boat.disarmedPrize=false;
-          target.boat.sunk=false;
-          target.boat.settledWreck=false;
-          if(target.boat.damage){
-            target.boat.damage.hullIntegrity=1.0;
-            target.boat.damage.rigIntegrity=1.0;
-            target.boat.damage.surrendered=false;
-            target.boat.damage.surrenderReason=null;
-            target.boat.damage.sunk=false;
-            target.boat.damage.settledWreck=false;
-            target.boat.damage.battleMorale=1.0;
-            target.boat.damage.moraleShock=0;
-            target.boat.damage.moraleState='steady';
-          }
-          remountVesselGuns(target.boat);
-        }
         const curDist=Math.hypot((target.boat.x??0)-boat.x,(target.boat.z??0)-boat.z);
         const shouldPlace=!keepPosition||wasDormant||!Number.isFinite(curDist)||curDist>1200;
         const sideSign=(enc?.relBearingDeg??25)<0?-1:1;
@@ -2433,11 +2482,12 @@ async function main() {
       helm?.update?.(performance.now(),true);
     };
     voyageCtl=createVoyageController({
-      boat,P,astronomy,hudParent:document.body,
+      boat,P,astronomy,hudParent:document.body,dock:cameraDock,storage:careerStore.voyageStorage,
+      onHudOpen:()=>{setPerformanceOpen(false);setPanelOpen(false);setCaptainOpen(false);landfallUI.close();setBoatOpen(false);setCameraOpen(false);setShareOpen(false);},
       getTerrain:()=>terrain,
       getCamera:()=>cam,
       getVessels:()=>vessels.map(v=>v.boat),
-      getMarineLife:()=>{marineLife.load?.().catch(()=>{});return marineLife;},
+      getMarineLife:()=>marineLife,
       onSightVessel:enc=>activateEncounterVessel(enc,{mode:'sight'}),
       onInspectEncounter:enc=>{
         activateEncounterVessel(enc,{mode:'sight',keepPosition:true});
@@ -2482,6 +2532,19 @@ async function main() {
         if(vessels[1])dockingBoarding.boardVessel(vessels[1]);
         updateCrewUI();
         helm?.update?.(performance.now(),true);
+      },
+      isBattleActive:()=>vessels.slice(1).some(v=>!v.dormantEncounter&&v.faction==='enemy'&&v.boat?.showProw&&!v.boat.damage?.sunk&&!v.boat.damage?.surrendered&&Math.hypot((v.boat.x??0)-boat.x,(v.boat.z??0)-boat.z)<3000),
+      onAbandonShip:()=>{
+        const v=voyageCtl.voyage;if(!v)return;
+        const year=new Date(v.dateMs).getUTCFullYear();
+        const port=nearestFoundedPort(HISTORICAL_COLONIAL_PORTS,v.true.lat,v.true.lon,year);
+        if(!port)return;
+        careerStore.claim();
+        careerStore.write(applyShipwreckRecovery(careerStore.read()??{},{voyage:JSON.parse(serializeVoyage(v)),damage:boat.damage,shipName:v.shipName,port}));
+        const url=coastalRegionStageURL(new URL(location.pathname,location.href).href,port.id,'dock','clear',year);
+        url.searchParams.set('continue','1');
+        if(qs.has('ship'))url.searchParams.set('ship',qs.get('ship'));
+        location.href=url.href;
       },
       onPrizeDisposition:(disposition,targetVessel)=>{
         const res=dockingBoarding.resolvePrizeDisposition(targetVessel||vessels[1],disposition,{
@@ -2550,7 +2613,12 @@ async function main() {
       onWarp:id=>{if(!voyageCtl.active)voyageCtl.start();voyageCtl.setWarp(id);},
       getSnapshot:()=>voyageCtl.snapshot()??idleSnapshot(),
     });
-    if(qs.get('voyage')==='resume'||(qs.get('voyage')==='1'&&voyageCtl.hasSavedVoyage()&&qs.get('newVoyage')!=='1'))voyageCtl.resume()||voyageCtl.start();
+    careerStore.setSnapshotProvider(careerSnapshot);
+    const savedCareer=careerStore.read();
+    const continuing=careerStore.owned()&&Boolean(savedCareer?.voyage)&&qs.get('newVoyage')!=='1';
+    if(continuing&&voyageCtl.resume()){
+      if(savedCareer.sovereignty)setActiveIndigenousSovereigntyState(restoreIndigenousSovereignty(savedCareer.sovereignty));
+    }else if(qs.get('voyage')==='resume'||(qs.get('voyage')==='1'&&voyageCtl.hasSavedVoyage()&&qs.get('newVoyage')!=='1'))voyageCtl.resume()||voyageCtl.start();
     else if(qs.get('voyage')==='1')voyageCtl.start({difficulty:qs.get('voyageMode')==='easy'?'easy':'pilot'});
     else voyageCtl.start({passive:true,showHud:qs.get('ui')!=='0',difficulty:qs.get('voyageMode')==='easy'?'easy':'pilot'});
     // Restore URL-encoded position, ship colors, view station, voyage state, damage, and active encounter
@@ -2608,23 +2676,12 @@ async function main() {
       }
       if(urlGameState?.damage&&boat.damage){
         const ud=urlGameState.damage;
-        if(Number.isFinite(ud.hullIntegrity))boat.damage.hullIntegrity=ud.hullIntegrity;
+        if(Number.isFinite(ud.hullIntegrity))setVesselHullIntegrity(boat.damage,ud.hullIntegrity);
+        if(ud.sunk)boat.damage.sunk=true;
         if(Number.isFinite(ud.battleMorale))boat.damage.battleMorale=ud.battleMorale;
         if(ud.surrendered)strikeVesselColors(boat,'Restored surrendered state');
         if(ud.casualties&&boat.damage.crewCasualties){
           Object.assign(boat.damage.crewCasualties,ud.casualties);
-        }
-      }
-      if(!BROADSIDE_SCENARIO&&boat.propulsion==='sail'&&LAND_STAGE!=='dock'&&!boat.damage?.sunk&&!['heave-to','hove'].includes(qs.get('canvas'))){
-        const totalCanvas=(boat.sailFore??0)+(boat.sailMain??0)+(boat.sailMizzen??0);
-        if(totalCanvas>0.15&&P.windSpeed>0.5&&(!qs.has('boatSpeed')||Number(qs.get('boatSpeed'))>0)){
-          const savedR=boat.roll,savedP=boat.pitch;
-          for(let w=0;w<24;w++)stepBoatSurge(boat,0,1.0,P.windSpeed,P.windDir*D2R);
-          boat.roll=savedR;boat.pitch=savedP;boat.rollVelocity=0;boat.pitchVelocity=0;
-          boat.leewayVelocity=0;boat.leewayDistance=0;
-        }
-        if(Number.isFinite(urlGameState?.pos?.speed)&&urlGameState.pos.speed*KNOT_TO_MPS>(boat.surgeVelocity??0)){
-          boat.surgeVelocity=urlGameState.pos.speed*KNOT_TO_MPS;
         }
       }
       const allowRestoredEncounter=qs.get('follower')!=='0'&&(!qs.has('fleet')||qs.get('fleet')!=='');
@@ -2644,6 +2701,27 @@ async function main() {
       }
     }catch(restoreErr){
       console.warn('URL state restore warning:',restoreErr);
+    }
+    if(continuing)restoreCareerVessel(savedCareer.vessel);
+    if(qs.get('continue')==='1'){
+      const cleaned=new URL(location.href);cleaned.searchParams.delete('continue');
+      try{history.replaceState(null,'',cleaned);}catch{/* standalone file */}
+    }
+    // A fresh visit with a saved voyage chooses before anything can overwrite it.
+    if(!location.search&&!careerStore.owned()&&savedCareer?.voyage){
+      showCareerPrompt(document.body,{
+        save:savedCareer,
+        onContinue:()=>{
+          careerStore.claim();
+          const url=new URL(savedCareer.url??location.href,location.href);
+          url.searchParams.set('continue','1');
+          location.href=url.href;
+        },
+        onNewVoyage:()=>{
+          careerStore.clear();careerStore.claim();
+          resetActiveIndigenousSovereigntyState({persist:true});
+        },
+      });
     }
     updateCrewUI();
     window.oceanVoyage=voyageCtl;
@@ -2683,6 +2761,7 @@ async function main() {
     const instrumentsBottom=instruments.root.hidden?top+8:instruments.root.getBoundingClientRect().bottom;
     css.setProperty('--instruments-bottom',instrumentsBottom+'px');
     css.setProperty('--controls-bottom',Math.max(cameraDock.getBoundingClientRect().bottom,instrumentsBottom)+8+'px');
+    css.setProperty('--dock-width',cameraDock.getBoundingClientRect().width+'px');
   };
   const controlsObserver=new ResizeObserver(layoutControls);controlsObserver.observe(cameraDock);controlsObserver.observe(instruments.root);
   window.visualViewport?.addEventListener('resize',layoutControls);
@@ -2760,7 +2839,9 @@ async function main() {
     scaleSelect.value=matchedPreset?matchedPreset.id:'custom';
     for(const [i,groupId] of ['fore','main','mizzen'].entries()){
       const sailRow=sailInputs?.[i]?.input?.closest('label');
-      if(sailRow)sailRow.hidden=!activeSailGroups.has(groupId)||!spec.activeMastSet.has(groupId);
+      // Control groups are not masts: a yacht's "fore" headsails set from her mainmast.
+      const {sails,masts}=shipAsset.model.rig;
+      if(sailRow)sailRow.hidden=!sails.some(sail=>sail.controlGroup===groupId&&spec.activeMastSet.has(typeof sail.mast==='number'?masts[sail.mast]?.id:sail.mast));
     }
   };
   scaleSelect.onchange=()=>{
@@ -2968,6 +3049,22 @@ async function main() {
   // Old signed-azimuth links retain their direction on the full-circle controls.
   for(const key of ['windDir','swellDir','sunAzim'])if(P[key]<0||P[key]>360)P[key]=((P[key]%360)+360)%360;
   P.sunElev=Math.max(-90,Math.min(90,P.sunElev));
+  // Sailing starts under way, so bring her up to speed in the sea this scene actually
+  // has: the stage preset and URL values above, never the defaults they replaced.
+  if(!BROADSIDE_SCENARIO&&boat.propulsion==='sail'&&LAND_STAGE!=='dock'&&!boat.damage?.sunk&&!['heave-to','hove'].includes(qs.get('canvas'))){
+    const totalCanvas=(boat.sailFore??0)+(boat.sailMain??0)+(boat.sailMizzen??0);
+    if(totalCanvas>0.15&&P.windSpeed>0.5&&(!qs.has('boatSpeed')||Number(qs.get('boatSpeed'))>0)){
+      const savedR=boat.roll,savedP=boat.pitch;
+      for(let w=0;w<24;w++)stepBoatSurge(boat,0,1.0,P.windSpeed,P.windDir*D2R);
+      // Head to wind she starts stopped in irons, not already adrift astern.
+      boat.surgeVelocity=Math.max(0,boat.surgeVelocity);
+      boat.roll=savedR;boat.pitch=savedP;boat.rollVelocity=0;boat.pitchVelocity=0;
+      boat.leewayVelocity=0;boat.leewayDistance=0;
+    }
+    if(Number.isFinite(urlGameState?.pos?.speed)&&urlGameState.pos.speed*KNOT_TO_MPS>(boat.surgeVelocity??0)){
+      boat.surgeVelocity=urlGameState.pos.speed*KNOT_TO_MPS;
+    }
+  }
   const seaTitle = document.createElement('strong'); seaTitle.textContent = 'Sea settings';
   seaTitle.id='sea-title';panel.setAttribute('aria-labelledby','sea-title');
   const seaHeader=document.createElement('div');seaHeader.className='panel-header';
@@ -3437,7 +3534,12 @@ async function main() {
       device.queue.writeBuffer(v.hullUBO,0,data);
       fleetHullData.set(data.subarray(0,24),index*24);
       v.shadows.update(data,frameF.subarray(frameF[115]>.5?96:32,frameF[115]>.5?99:35),ship.showProw&&!v.entirelySubmerged&&qs.get('shadows')!=='0');
-      if((!index||followerEnabled)&&dt>0&&!dmg?.sunk){v.crew?.update(ship,dt,P.windSpeed,cam);v.wetness.updateCrew(v.crew?.state,ship);}
+      if(!index&&dmg?.sunk&&!playerWreckRaised){playerWreckRaised=true;voyageCtl?.presentShipwreck?.();}
+      // Paused frames keep the last pose, but a ship opened paused must still show its crew.
+      if((!index||followerEnabled)&&!dmg?.sunk){
+        if(dt>0||!v.crew?.posed){v.crew?.update(ship,dt,P.windSpeed,cam);v.wetness.updateCrew(v.crew?.state,ship);}
+        else v.crew.refreshDraw(ship,cam);
+      }
       if(!index||followerEnabled){
         v.pose.updateRecoil(v.gunnery.state.guns,ship);
         v.pose.updateDamage?.(ship);

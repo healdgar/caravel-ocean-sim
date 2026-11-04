@@ -5,6 +5,7 @@ import { requestYardTransfer } from './lateen.js';
 import { assignCrewWork, stepCrewWork, updateCrewGunneryAttendance, updateCrewRowingAttendance, hasExtendedCrewModel, crewSeatedPose, crewDeckHeight } from './crew-work.js';
 import { poseCrewWork } from './crew-pose.js';
 import { stepCrewPhysicsState, applyCrewRealism } from './crew-physics.js';
+import { applyCrewWounds, clearCrewWounds } from './crew-wounds.js';
 import { createGunneryTools } from './gunnery-tools.js';
 import { CREW_RENDER, CREW_SHADOW } from './wgsl/crew.js';
 import { NINA_DESIGN } from './models/nina.js';
@@ -95,6 +96,18 @@ export function isPirateVessel(boat){
   if(boat.faction==='enemy'&&!boat.captured)return true;
   return false;
 }
+// Every actor back on their feet at their post, for a new ship in a pooled hull.
+export function reviveCompany(company){
+  if(!company?.crew)return;
+  for(const s of company.crew){
+    s.casualtyState='able';s.wounded=null;s.health=1;s.strength=1;s.woundSeverity=0;s.scorchAmount=0;s.knockdownTimer=0;
+    s.job=null;s.seatedPose=null;s.climbPitch=0;s.navigationPath=null;s.navigationKey=null;s.phys=undefined;
+    clearCrewWounds(s);
+  }
+  company.gunneryActive=false;company.pending=false;company.morale=1;
+  company.gunAbstractCrew?.clear();company.gunRouteFailSince?.clear();company.revision=(company.revision??0)+1;
+}
+
 export function applyPirateCrewAttire(company,pirate=true){
   if(!company?.crew)return company;
   company.pirateAttire=Boolean(pirate);
@@ -465,23 +478,30 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
   const submergedLighting=submerged?shadows.bind(submerged.pipeline):null;
   if(submerged)for(const b of batches)b.submerged=submerged.bindGroup(b.mainResources);
   const gunTools=await createGunneryTools({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,shader,format,samples,waterOptics,shared:shared?.gunTools});
-  let enabled=true,drawEnabled=false,activeTier=0,shadowTier=1;
+  let enabled=true,drawEnabled=false,posed=false,activeTier=0,shadowTier=1;
   const drawBatch=(pass,b,shadow)=>{if(!b.people.length)return;const lod=b.lods?.[shadow?shadowTier:activeTier]??{buffer:b.index,indexCount:b.model.indices.length};pass.setBindGroup(0,shadow?b.shadow:b.main);pass.setVertexBuffer(0,b.vertex);pass.setIndexBuffer(lod.buffer,'uint32');pass.drawIndexed(lod.indexCount??lod.indices.length,b.people.length);};
   return {state,assets:{models,pipeline,shadowPipeline,gunTools:gunTools.assets,geometry:batches.map(({vertex,index,lods})=>({vertex,index,lods}))},triangles:batches.reduce((n,b)=>n+b.model.indices.length/3*b.people.length,0),lods:CREW_LOD_TIERS,
     get lodLevel(){return activeTier;},
+    get posed(){return posed;},
     get activeTriangles(){return batches.reduce((n,b)=>n+((b.lods?.[activeTier]?.triangles)??(b.model.indices.length/3))*b.people.length,0);},
     joints:65,
     order(boat,id){return issueCaptainOrder(state,boat,id);},
+    // A paused frame moves nobody, but the camera and the crew and ship toggles still apply.
+    refreshDraw(boat,camera=null){
+      const lod=selectCrewLOD(boat,camera);activeTier=lod.mainTier;shadowTier=lod.shadowTier;
+      drawEnabled=boat.crew!==false&&boat.showProw&&!lod.culled&&state.crew.some(s=>s.visible);
+    },
     update(boat,dt,wind,camera=null){
       const lod=selectCrewLOD(boat,camera);activeTier=lod.mainTier;shadowTier=lod.shadowTier;
       stepCompany(state,boat,dt,wind);enabled=boat.crew!==false;drawEnabled=enabled&&boat.showProw&&!lod.culled&&state.crew.some(s=>s.visible);
-      gunTools.update(state,boat,drawEnabled);
       if(!drawEnabled){
+        gunTools.update(state,boat,false);
         // Hidden rendering does not turn a seated body's moisture samples back
         // into standing-height probes or change its physical rowing attendance.
         if(Object.hasOwn(ROWING_DESIGNS,modelId))for(const b of batches)for(const s of b.people)if(s.seatedPose){const a=b.model.animator;a.sample('Idle',s.time);poseCrewWork(a,s,boat);}
         return;
       }
+      posed=true;
       for(const b of batches){
         const a=b.model.animator;
         for(let i=0;i<b.people.length;i++){
@@ -489,6 +509,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
           if(s.brace>.001 && !(s.job?.rung>0))a.blend('Brace',s.time,s.brace);
           poseCrewWork(a,s,boat);
           applyCrewRealism(a,s,boat,dt);
+          applyCrewWounds(a,s);
           const offset=i*CREW_ACTOR_FLOATS;
           b.poses.set(a.palette,i*65*16);b.actors.set(s.transform,offset);
           const woundAmt=s.casualtyState==='fallen'?1.0:s.casualtyState==='wounded'?Math.max(0.45,Math.min(0.95,s.woundSeverity??(1-(s.health??0.5)))):0;
@@ -510,6 +531,8 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
         }
         device.queue.writeBuffer(b.bones,0,b.poses);device.queue.writeBuffer(b.actor,0,b.actors);
       }
+      // After posing, so an arrow's bone is this frame's.
+      gunTools.update(state,boat,true);
     },
     drawSubmerged(pass,above=false){
       if(!submerged||!drawEnabled)return;

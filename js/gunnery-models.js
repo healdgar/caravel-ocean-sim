@@ -52,18 +52,53 @@ function buildFallbackRailBroadside(stations,{calibre=2,kind='swivel',type='swiv
     const x=sign*xHalf;
     result.push({id:result.length,side:sign<0?'port':'starboard',sideSign:sign,deck:'weather',
       meshGroup:`battle.gun.${sign<0?'port':'starboard'}.${i}`,muzzleDesign:[x+sign*.28,y+.02,z],breechDesign:[x-sign*.18,y,z],directionDesign:[sign,0,0],
-      station:[x-sign*.36,floor,z],floorDesign:floor,visibleCrew:false,weatherDeck:true,
+      station:[x-sign*.36,floor,z],floorDesign:floor,visibleCrew:false,abstractCrew:true,weatherDeck:true,
       calibre,type,kind,recoilLength,recoilDuration,breechMass});
   }
   return result;
 }
+// Each archer stands at the rail; nothing is mounted on the hull. War arrows are about
+// 65 g at 52 m/s, authored in the range reported for strong period bows. Archers stay
+// abstract until the crew can carry visible bows, so paddlers keep paddling.
+function buildArcherStations(stations,{y,floor,xHalf}){
+  const result=[];
+  for(const sign of[-1,1])for(const [i,z]of stations.entries()){
+    const x=sign*xHalf;
+    result.push({id:result.length,side:sign<0?'port':'starboard',sideSign:sign,deck:'weather',
+      meshGroup:`battle.archer.${sign<0?'port':'starboard'}.${i}`,muzzleDesign:[x+sign*.28,y+.02,z],breechDesign:[x-sign*.18,y,z],directionDesign:[sign,0,0],
+      station:[x-sign*.36,floor,z],floorDesign:floor,visibleCrew:false,abstractCrew:true,weatherDeck:true,
+      calibre:.25,type:'bow',kind:'bow',mass:.065,diameter:.02,muzzleSpeed:52,dispersion:.018,speedVariation:.03,
+      recoilLength:0,recoilDuration:.25,breechMass:50,gasMomentumMultiplier:1});
+  }
+  return result;
+}
+// Vessels without authored ordnance. The canoe and the two ancient and medieval hulls
+// predate naval powder, so they fight with bows. A yacht carries no weapons at all; a
+// shipyard may later fit swivels to one as a deliberate purchase.
 const NAVAL_BATTLE_FALLBACK_GUNS=deepFreeze({
   'flying-cloud':buildFallbackRailBroadside([-3.2,-1.1,1.1,3.2],{calibre:9,kind:'long-gun',type:'long-gun',y:0.86,floor:0.32,xHalf:1.48,recoilLength:0.55,recoilDuration:0.65,breechMass:820}),
-  oseberg:buildFallbackRailBroadside([-2.2,2.2],{calibre:2,kind:'swivel',type:'swivel',y:0.52,floor:0.12,xHalf:1.45}),
-  lusoria:buildFallbackRailBroadside([-2.4,2.4],{calibre:2,kind:'swivel',type:'swivel',y:0.48,floor:0.10,xHalf:1.38}),
-  'taino-canoe':buildFallbackRailBroadside([0.0],{calibre:1,kind:'swivel',type:'swivel',y:0.35,floor:0.05,xHalf:1.15,recoilLength:0.06,recoilDuration:0.40,breechMass:120}),
-  'gipsy-moth-iv':buildFallbackRailBroadside([1.4],{calibre:2,kind:'swivel',type:'swivel',y:0.62,floor:0.18,xHalf:1.42}),
+  oseberg:buildArcherStations([-3.2,0,3.2],{y:1.05,floor:0.12,xHalf:1.45}),
+  lusoria:buildArcherStations([-2.4,0,2.4],{y:1.0,floor:0.10,xHalf:1.38}),
+  'taino-canoe':buildArcherStations([-1.8,0,1.8],{y:.92,floor:0.05,xHalf:1.15}),
+  'gipsy-moth-iv':[],
 });
+// Hand weapons drawn in a boarding fight. Muskets and pistols join this when small arms arrive.
+const VESSEL_SIDEARMS=deepFreeze({
+  cutlass:{kind:'blade',length:.72,radius:.012},
+  macana:{kind:'club',length:.66,radius:.03},
+});
+export function vesselSidearm(modelId){return modelId==='taino-canoe'?VESSEL_SIDEARMS.macana:VESSEL_SIDEARMS.cutlass;}
+// Bow elevation to lay an arrow on a target at this range, close to true over the 30 to
+// 170 m that bows reach. Drag steepens the arc with distance.
+export function bowElevationDegrees(distance,speed=52,drag=1,gravity=9.80665){
+  const reach=gravity*Math.max(0,distance)*(1+.001*drag*Math.max(0,distance))/(speed*speed);
+  return Math.asin(Math.min(1,reach))*.5*180/Math.PI;
+}
+// Hulls that carry no powder, so a shot into them cannot find a magazine.
+export function vesselCarriesPowder(modelId){
+  const guns=NAVAL_BATTLE_FALLBACK_GUNS[modelId];
+  return !guns||guns.some(gun=>gun.kind!=='bow');
+}
 export function createGunDefinitions(boatOrModelId='nina'){
   const id=typeof boatOrModelId==='string'?boatOrModelId:boatOrModelId.modelId??'nina';
   if(!GUNNERY_MODEL_GUNS[id])throw new Error('No playable gun attachments for '+id);
@@ -76,10 +111,10 @@ export function createNavalBattleGunDefinitions(boatOrModelId='nina'){
   return NAVAL_BATTLE_FALLBACK_GUNS[id]??GUNNERY_MODEL_GUNS.nina;
 }
 export function gunElevationRange(gun){
-  return gun?.kind==='swivel'?{min:-6,max:14}:{min:-4,max:10};
+  return gun?.kind==='bow'?{min:-10,max:42}:gun?.kind==='swivel'?{min:-6,max:14}:{min:-4,max:10};
 }
 export function gunTraverseRange(gun){
-  return gun?.kind==='swivel'?{min:-45,max:45}:{min:-8,max:8};
+  return gun?.kind==='bow'?{min:-70,max:70}:gun?.kind==='swivel'?{min:-45,max:45}:{min:-8,max:8};
 }
 function defaultModelRuntime(boat){
   const id=boat?.model?.id??boat?.modelId??'nina';

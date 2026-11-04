@@ -32,7 +32,15 @@ Loaded muzzles also require a fresh GPU sea-clearance sample before the captain 
 
 Contact sweeps the shot's trajectory against all six cascades of the actual GPU ocean, including inverse horizontal displacement. Spatial subdivisions and bisection catch crests between integration points. Asynchronous readback retains unchecked trajectory segments. It samples the current wave field, rather than reconstructing historical FFT textures at every past trajectory time. Splashes are emitted from those measured contacts with the arriving velocity and shot mass.
 
-Ship penetration, structural damage, land impacts, water-skipping ricochets, variable powder charges, adjustable gun elevation, and AI combat decisions are subsequent systems. The following ship keeps its guns secured. This is a firing and sea-impact system, not a completed combat model.
+Penetration, structural damage, land impacts, adjustable elevation and AI combat now exist in `js/gunnery-control.js`. Water-skipping ricochets and variable powder charges are not modeled. Forts return fire only on ships that fired on them, and one non-magazine hit can disable at most 30% of a crew.
+
+## Bows
+
+The Taíno canoe, Oseberg and Lusoria have no gunpowder, so their batteries are archers at the rail. They use the same aiming, flight and order path as guns, with a 65 g arrow at 52 m/s and about 170 m of useful reach. Plain arrows have no powder, smoke, flash or recoil. They wound only the bodies they reach, stay in them and cannot breach a hull. A fire arrow flies slower, takes longer to ready and can start a fire; crews douse one, but several on one spot grow. Gipsy Moth IV carries no weapons. All figures are authored approximations.
+
+## What shots do to people
+
+Shots are swept against each visible sailor as an upright capsule. The solid hull ends at the rail, so a shot above it meets whoever stands in its path, and a shot below it stops at the hull. A ball goes straight through a body and flies on. It kills outright, and it can take a limb (55% on an arm or leg), break one (30%) or crush the chest (60% of torso hits). Those chances are authored. Splinters fly from a hit that breaks through or strikes a bulwark, reach about 3 m at most and can break limbs. A small count stands in for crew who are not drawn, in proportion to how crowded the ship is. Only a magazine blast harms by area. Swivels and archers lay on people above the rail; great guns lay on the hull.
 
 ## Smoke, flash and sound
 

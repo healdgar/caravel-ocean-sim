@@ -44,6 +44,7 @@ import {
 import { compassPointName, relativeBearingCall, formatLatitude, formatLongitude } from './compass.js';
 import { formatJulianDate, localSolarHours, greatCircleKm, windDescription } from './ocean-climate.js';
 import { createEncounterDirector, describeEncounterThroughSpyglass } from './encounters.js';
+import { controlIcon } from '../controls.js';
 import { probeHullBottomContact } from '../terrain-model.js';
 
 const VOYAGE_STORAGE_KEY = 'waterworld.voyage.v1';
@@ -82,7 +83,12 @@ export function createVoyageController(cfg) {
     demLoader = undefined,
     loadTile = undefined,
     storage = typeof localStorage !== 'undefined' ? localStorage : null,
+    dock = null,
   } = cfg;
+  // Keep in step with the compact HUD media query in index.html.
+  const HUD_COMPACT_QUERY = '(max-width:720px),(pointer:coarse),(max-height:580px)';
+  const HUD_RIVAL_PANELS = ['sea-settings-open', 'ship-settings-open', 'captain-open', 'landfall-open', 'camera-open', 'performance-open', 'share-open'];
+  let hudExpanded = false, hudAutoExpanded = false;
 
   let voyage = null;
   const helmsman = createHelmsman({ engaged: false });
@@ -156,7 +162,10 @@ export function createVoyageController(cfg) {
       <div class="voyage-row voyage-clock">
         <span class="voyage-date" aria-live="off"></span>
         <span class="voyage-watch"></span>
+      </div>
+      <div class="voyage-row voyage-orders">
         <div class="voyage-warp" role="group" aria-label="Time warp"></div>
+        <label class="voyage-canvas-label">Canvas <select class="voyage-canvas" aria-label="Canvas order"></select></label>
       </div>
       <div class="voyage-row voyage-helm">
         <button type="button" class="voyage-course-left" aria-label="Alter course one point to larboard" title="One point to larboard ( [ )">◀</button>
@@ -165,12 +174,33 @@ export function createVoyageController(cfg) {
         <button type="button" class="voyage-keep" title="Helmsman: keep her as she goes (K)">Keep her so</button>
         <button type="button" class="voyage-tack" title="Go about (T)">Tack</button>
         <label class="voyage-beat"><input type="checkbox"> Beat</label>
-        <label class="voyage-canvas-label">Canvas <select class="voyage-canvas" aria-label="Canvas order"></select></label>
       </div>
       <div class="voyage-row voyage-status"><span class="voyage-pos"></span><span class="voyage-helmsman"></span><span class="voyage-wind"></span><span class="voyage-stores"></span></div>
       <div class="voyage-callout" role="alert" hidden></div>
       <div class="voyage-toast" role="status" aria-live="polite" hidden></div>`;
     parent.append(root);
+    const hide = controlIcon(document.createElement('button'), 'close', 'Hide voyage');
+    hide.classList.add('voyage-hide');
+    hide.onclick = () => { setHudExpanded(false); toggle?.focus(); };
+    root.querySelector('.voyage-clock').append(hide);
+    // Compact screens open this panel from the dock, as they do every other panel.
+    const toggle = dock ? controlIcon(document.createElement('button'), 'voyage', 'Voyage') : null;
+    if (toggle) {
+      toggle.id = 'voyage-button';
+      toggle.hidden = true;
+      toggle.setAttribute('aria-controls', 'voyage-hud');
+      toggle.setAttribute('aria-expanded', 'false');
+      toggle.onclick = () => { setHudExpanded(!hudExpanded); if (hudExpanded) hide.focus({ preventScroll: true }); };
+      dock.append(toggle);
+    }
+    // Notices at the head of the screen stack below whatever the HUD occupies.
+    const publishBottom = () => document.documentElement.style.setProperty('--voyage-hud-bottom', `${root.hidden ? 0 : root.getBoundingClientRect().bottom}px`);
+    const hudBounds = new ResizeObserver(publishBottom);
+    hudBounds.observe(root);
+    hudBounds.observe(document.documentElement);
+    new MutationObserver(() => {
+      if (hudExpanded && HUD_RIVAL_PANELS.some((c) => document.body.classList.contains(c))) setHudExpanded(false);
+    }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
     const warpBox = root.querySelector('.voyage-warp');
     const warpButtons = new Map();
     for (const tier of WARP_TIERS) {
@@ -196,7 +226,25 @@ export function createVoyageController(cfg) {
     root.querySelector('.voyage-tack').onclick = () => tack();
     const beat = root.querySelector('.voyage-beat input');
     beat.onchange = () => { helmsman.beat = beat.checked; };
-    return { root, warpButtons, canvasSel, beat };
+    return { root, toggle, warpButtons, canvasSel, beat };
+  }
+
+  function setHudVisible(visible) {
+    if (!hud) return;
+    hud.root.hidden = !visible;
+    if (hud.toggle) hud.toggle.hidden = !visible;
+    if (!visible) setHudExpanded(false);
+  }
+
+  function setHudExpanded(open) {
+    if (!hud) return;
+    hudAutoExpanded = false;
+    if (open && !hudExpanded && matchMedia(HUD_COMPACT_QUERY).matches) cfg.onHudOpen?.();
+    hudExpanded = open;
+    hud.root.dataset.expanded = String(open);
+    hud.toggle?.setAttribute('aria-expanded', String(open));
+    document.body.classList.toggle('voyage-open', open);
+    if (open) hud.root.scrollTop = 0;
   }
 
   function showToast(text, seconds = 6) {
@@ -210,8 +258,15 @@ export function createVoyageController(cfg) {
   function showCallout(interrupt) {
     if (!hud) return;
     const box = hud.root.querySelector('.voyage-callout');
-    if (!interrupt) { box.hidden = true; box.innerHTML = ''; return; }
-    hud.root.hidden = false;
+    if (!interrupt) {
+      box.hidden = true;
+      box.innerHTML = '';
+      if (hudAutoExpanded) setHudExpanded(false);
+      return;
+    }
+    setHudVisible(true);
+    // A call that needs an answer opens the compact panel; answering closes it again.
+    if (!hudExpanded) { setHudExpanded(true); hudAutoExpanded = true; }
     box.hidden = false;
     box.innerHTML = `<p class="voyage-callout-title">${voyageEscapeHtml(interrupt.title ?? 'The lookout calls')}</p><p class="voyage-callout-text">${voyageEscapeHtml(interrupt.text)}</p><div class="voyage-callout-actions"></div>`;
     const actions = box.querySelector('.voyage-callout-actions');
@@ -294,7 +349,7 @@ export function createVoyageController(cfg) {
     const vessels = cfg.getVessels?.() ?? [];
     const targetV = vessels[1] ?? null;
     const tb = targetV?.boat ?? targetV;
-    if (!tb || tb.sunk || tb.showProw === false) {
+    if (!tb || tb.damage?.sunk || tb.showProw === false) {
       pursuit.active = false;
       return;
     }
@@ -394,24 +449,27 @@ export function createVoyageController(cfg) {
     if (!voyage || !targetVessel?.boat) return;
     const tb = targetVessel.boat;
     const shipName = tb.shipName || tb.name || 'Captured Prize';
-    const foodDays = plunder.foodDays ?? 12;
-    const waterDays = plunder.waterDays ?? 10;
-    const cannonCount = plunder.cannonCount ?? 2;
-    const ableCrew = plunder.ableCrewToImpress ?? 4;
-    const repairPct = Math.round((plunder.repairHullAmount ?? 0.35) * 100);
+    const stores = plunder.stores ?? {};
+    const storesLabel = (id) => {
+      const s = stores[id];
+      return s ? `+${s.food} d food, +${s.water} d water` : '';
+    };
+    const cannonCount = plunder.cannons ?? 0;
+    const ableCrew = plunder.impressCount ?? 0;
+    const repairPct = Math.round((plunder.scuttleHullRepair ?? 0) * 100);
     raiseInterrupt(
       voyage,
       {
         type: 'prize-disposition',
         title: `⚔️ Prize Taken · ${shipName}`,
-        text: `Victory! ${shipName} has struck her colors to our boarding party. Aboard we find +${foodDays} d food, +${waterDays} d water, ${cannonCount} serviceable cannon, ${ableCrew} able hands, and seasoned oak timber & canvas (+${repairPct}% hull & rig repair if scuttled). What are your orders for the prize?`,
+        text: `Victory! ${shipName} has struck her colors to our boarding party. Aboard we find ${cannonCount ? `${cannonCount} serviceable cannon, ` : ''}${ableCrew ? `${ableCrew} able hands, and ` : ''}seasoned oak timber & canvas (+${repairPct}% hull & rig repair if scuttled). What are your orders for the prize?${plunder.freedCaptives ? ' The captives in her hold are free, and we will carry them ashore.' : ''}`,
         targetVessel,
         plunder,
         choices: [
-          { id: 'ally', label: '🏴 Add to Fleet as Allied Consort' },
-          { id: 'gift-indigenous', label: '🛡️ Gift Prize & Cannon to Indigenous Allies' },
-          { id: 'impress-plunder', label: `⚓ Impress Crew (+${ableCrew}) & Plunder Cannon (+${cannonCount})/Stores` },
-          { id: 'scuttle-repair', label: `🔨 Plunder & Scuttle for Hull Repair (+${repairPct}%)` },
+          { id: 'ally', label: `🏴 Add to Fleet as Allied Consort (${storesLabel('ally')})` },
+          { id: 'gift-indigenous', label: `🛡️ Gift Prize${plunder.giftCannons ? ' & Cannon' : ''} to Indigenous Allies (${storesLabel('gift-indigenous')})` },
+          { id: 'impress-plunder', label: `⚓ ${ableCrew ? `Impress ${ableCrew} Hands` : 'Free Her Crew'}${cannonCount ? ` & Plunder ${cannonCount} Cannon` : ableCrew ? '' : ' & Take Her Stores'} (${storesLabel('impress-plunder')})` },
+          { id: 'scuttle-repair', label: `🔨 Strip & Scuttle for Repairs (hull +${repairPct}%, ${storesLabel('scuttle-repair')})` },
         ],
         log: `Captured prize ${shipName}. Awaiting captain's disposition orders.`,
       },
@@ -421,9 +479,38 @@ export function createVoyageController(cfg) {
     emit('change');
   }
 
+  // Our own ship is going down. Only one choice remains, so warp cannot dismiss it.
+  function presentShipwreck() {
+    if (!voyage || voyage.interrupt?.type === 'shipwreck') return;
+    const shipName = voyage.shipName ?? 'The ship';
+    raiseInterrupt(
+      voyage,
+      {
+        type: 'shipwreck',
+        title: `Abandon ship · ${shipName}`,
+        text: `${shipName} is going down beneath us. Whatever is in her hold goes with her. All hands to the boats, and make for the nearest port.`,
+        choices: [{ id: 'boats', label: 'Take to the boats' }],
+        log: `${shipName} foundered. All hands ordered to the boats.`,
+      },
+      'deck'
+    );
+    showCallout(voyage.interrupt);
+    emit('change');
+  }
+
+  function logExternal(text, kind = 'entry') {
+    if (!voyage || !text) return;
+    addLog(voyage, text, kind);
+    emit('change');
+  }
+
   function triggerSailEncounter() {
+    if (cfg.isBattleActive?.()) {
+      showToast('The lookout has no eyes for strange sails while we are engaged.');
+      return null;
+    }
     promoteActive();
-    if (hud) hud.root.hidden = false;
+    setHudVisible(true);
     return encounterDirector.spawnSailEncounter(voyage, boat, {
       marineLife: cfg.getMarineLife?.() ?? null,
       terrain: getTerrain(),
@@ -490,6 +577,8 @@ export function createVoyageController(cfg) {
       });
     } else if (it.type === 'prize-disposition') {
       cfg.onPrizeDisposition?.(choiceId, it.targetVessel, it.plunder);
+    } else if (it.type === 'shipwreck') {
+      cfg.onAbandonShip?.();
     } else if (it.type === 'arrival') {
       if (choiceId === 'chart') emit('open-chart');
     }
@@ -523,12 +612,13 @@ export function createVoyageController(cfg) {
       if (astronomy) astronomy.mode = 'astronomy';
     }
     promoteActive();
+    if (voyage.interrupt?.type === 'shipwreck') return;
     if (voyage.interrupt) {
       clearInterrupt(voyage);
       showCallout(null);
       if (encounterDirector?.state) encounterDirector.state.active = null;
     }
-    if (hud) hud.root.hidden = false;
+    setHudVisible(true);
     setWarpTier(voyage, id);
     if (tierRate > 1 && (approach.suppressLandHo || approach.landHoCalled)) {
       voyage.warpCap = 3600;
@@ -539,7 +629,7 @@ export function createVoyageController(cfg) {
   }
   function orderCompassCourse(compassDeg, { beat } = {}) {
     promoteActive();
-    if (hud) hud.root.hidden = false;
+    setHudVisible(true);
     orderCourse(helmsman, compassDeg, { beat: beat ?? helmsman.beat });
     voyage.compassCourse = helmsman.compassCourse;
     manualHelm = false;
@@ -625,6 +715,9 @@ export function createVoyageController(cfg) {
     if (!v) return null;
     voyage = v;
     orderCourse(helmsman, voyage.compassCourse);
+    helmsman.engaged = !voyage.passive;
+    manualHelm = Boolean(voyage.passive);
+    encounterDirector = encounterDirector ?? createEncounterDirector({ seed: voyage.seed ^ 0x1550cafe });
     applyCanvasOrder(boat, voyage.canvas);
     approach.landHoCalled = false;
     approach.offset = { x: 0, z: 0 };
@@ -645,7 +738,7 @@ export function createVoyageController(cfg) {
     voyage = null;
     helmsman.engaged = false;
     if (astronomy) astronomy.rate = 1;
-    if (hud) hud.root.hidden = true;
+    setHudVisible(false);
     showCallout(null);
     emit('change');
   }
@@ -687,7 +780,7 @@ export function createVoyageController(cfg) {
   }
 
   function beginScene({ showHud = true, passive = false } = {}) {
-    if (hud) hud.root.hidden = !showHud;
+    setHudVisible(showHud);
     if (hud) hud.canvasSel.value = voyage.canvas;
     weatherDriver.reset();
     if (astronomy && !passive && !respectManualSky) {
@@ -700,7 +793,7 @@ export function createVoyageController(cfg) {
   }
 
   function persist(now) {
-    if (!voyage || voyage.passive || !storage || now - lastPersist < 5000) return;
+    if (!voyage || (voyage.passive && !voyage.keepSaved) || !storage || now - lastPersist < 5000) return;
     lastPersist = now;
     try { storage.setItem(VOYAGE_STORAGE_KEY, serializeVoyage(voyage)); } catch { /* quota */ }
   }
@@ -973,6 +1066,7 @@ export function createVoyageController(cfg) {
 
     // Open-ocean encounters (whales & strange sails with lookout callouts).
     encounterDirector.step(voyage, boat, dt, {
+      battleActive: Boolean(cfg.isBattleActive?.()),
       coastKm: approach.coastKm,
       marineLife: cfg.getMarineLife?.() ?? null,
       terrain: activeTerrain,
@@ -1388,6 +1482,10 @@ export function createVoyageController(cfg) {
     r.querySelector('.voyage-wind').textContent = w ? `Wind ${compassPointName(w.windFrom)}, ${w.description}` : '';
     r.querySelector('.voyage-stores').textContent = `Water ${Math.ceil(voyage.provisions.water)} d · Food ${Math.ceil(voyage.provisions.food)} d`;
     if (hud.beat.checked !== helmsman.beat) hud.beat.checked = helmsman.beat;
+    if (hud.toggle) {
+      const alert = String(Boolean(voyage.interrupt) || voyage.rate > 1);
+      if (hud.toggle.dataset.alert !== alert) hud.toggle.dataset.alert = alert;
+    }
   }
 
   function onKey(e) {
@@ -1402,6 +1500,7 @@ export function createVoyageController(cfg) {
       setWarp(next.id);
       return true;
     }
+    if (e.code === 'Escape' && hudExpanded && matchMedia(HUD_COMPACT_QUERY).matches) { setHudExpanded(false); return true; }
     if (e.code === 'Enter' && voyage.interrupt) {
       resolveInterrupt((voyage.interrupt.choices ?? [{ id: 'ok' }])[0].id);
       return true;
@@ -1438,6 +1537,8 @@ export function createVoyageController(cfg) {
     orderCanvas,
     resolveInterrupt,
     presentPrizeDisposition,
+    presentShipwreck,
+    logExternal,
     triggerSailEncounter,
     showToast,
     onKey,

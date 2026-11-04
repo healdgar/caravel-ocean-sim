@@ -75,7 +75,10 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,r
     for(const fixture of result.immutable)assert.equal(fixture.writes,1,'source geometry uploads once: '+fixture.name);
     for(const row of result.results)for(const [name,region]of Object.entries(row.regions)){
       assert.ok(region.count>100,'nonempty interior raster witness');
-      if(name==='above'||name==='crossingAbove'){assert.ok(region.minR>=254,'above-collar native geometry remains visible: '+JSON.stringify({row,name}));assert.equal(region.minA,255);}
+      if(name==='above'||name==='crossingAbove'){
+        // 514b716 modulates middle crown pigment by (.88+.20*exposure+clump*.15) at this .72 exposure.
+        const visible=row.shader==='middle-leaf'?Math.floor(255*(.88+.20*.72-.15)):254;
+        assert.ok(region.minR>=visible,'above-collar native geometry remains visible: '+JSON.stringify({row,name}));assert.equal(region.minA,255);}
       else{assert.equal(region.maxR,0,'buried/empty geometry cannot float over downhill abyss: '+JSON.stringify({row,name}));assert.equal(region.maxA,0);}
     }
     t.diagnostic(JSON.stringify({qualification:'Production native/middle shader collar visibility; no opaque ground or terrain occlusion, unchanged immutable source geometry',...result}));

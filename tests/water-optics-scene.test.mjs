@@ -72,7 +72,7 @@ function instrumentScene(){
 }
 
 const fixture=String.raw`
-  window.opticsFixture={render(){frameIndex=40;envFull=true;frame(last);},size:()=>[W,H],
+  window.opticsFixture={render(){frameIndex=40;envFull=true;frame(last);},advance(){frameIndex=40;envFull=true;frame(last+16);},size:()=>[W,H],
     enabled(value){qs.set('waterOptics',value?'1':'0');},
     async wildlife(kind){
       // Keep the actual two-vessel roster and resources. Move both ships behind
@@ -132,7 +132,7 @@ function assertValid(frame){assert.deepEqual(frame.errors,[]);assert.ok(frame.dr
 function difference(a,b){let pixels=0,energy=0;for(let i=0;i<a.length;i+=4){const delta=Math.abs(a[i]-b[i])+Math.abs(a[i+1]-b[i+1])+Math.abs(a[i+2]-b[i+2]);if(delta>3)pixels++;energy+=delta;}return {pixels,energy};}
 
 test('the actual Niña fleet captures independent hulls and renders submerged whales and dolphins through water, including after resize',{timeout:180000},async()=>{
-  const {page,errors}=await loadScene('/?ship=nina&view=ship&follower=1&sunElev=45&clouds=0&windSpeed=2&swellHs=.2&turbidity=.2&resolution=native',{source:true});
+  const {page,errors}=await loadScene('/?ocean=1&ship=nina&view=ship&follower=1&sunElev=45&clouds=0&windSpeed=2&swellHs=.2&turbidity=.2&resolution=native',{source:true});
   try{
     const fleet=await render(page);assertValid(fleet);
     const roster=await page.evaluate(()=>{
@@ -160,6 +160,8 @@ test('the actual Niña fleet captures independent hulls and renders submerged wh
     assert.ok((await readScene(page)).count>20,'a loaded hull produces underwater source fragments');
     for(const animal of ['whale','dolphins']){
       await page.evaluate(animal=>opticsFixture.wildlife(animal),animal);
+      // Zero-step frames skip the simulation block, so one real step poses the animal.
+      await page.evaluate(()=>opticsFixture.advance());
       await render(page);await render(page);
       await page.evaluate(()=>opticsFixture.enabled(false));await render(page);const ordinary=await readScene(page);
       await page.evaluate(()=>opticsFixture.enabled(true));const frame=await render(page),through=await readScene(page);assertValid(frame);

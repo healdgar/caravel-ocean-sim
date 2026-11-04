@@ -177,7 +177,7 @@
   #landfall-chart svg { width:100%; display:block; background:#142c39; border-radius:5px; }
   #landfall-panel .landfall-credit { font-size:11px; color:var(--muted); }
   #landfall-ocean { margin-top:10px; }
-  #landfall-discovery-banner { position:fixed; top:calc(var(--controls-bottom) + 8px); left:50%; transform:translateX(-50%); width:420px; max-width:calc(100vw - 24px); box-sizing:border-box; padding:12px 14px; border:1px solid #edbd7888; border-radius:10px; background:#101d25f2; box-shadow:0 10px 32px #0007; z-index:6; }
+  #landfall-discovery-banner { position:fixed; top:calc(max(var(--controls-bottom),var(--voyage-hud-bottom,0px)) + 8px); left:50%; transform:translateX(-50%); width:420px; max-width:calc(100vw - 24px); box-sizing:border-box; padding:12px 14px; border:1px solid #edbd7888; border-radius:10px; background:#101d25f2; box-shadow:0 10px 32px #0007; z-index:6; }
   #landfall-discovery-banner .discovery-header { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:4px; }
   #landfall-discovery-banner .discovery-eyebrow,#landfall-discovery-card .discovery-eyebrow { color:var(--gold); font-size:10px; font-weight:600; letter-spacing:.11em; text-transform:uppercase; }
   #landfall-discovery-banner .discovery-title { margin:0 0 4px; font-size:14px; font-weight:600; color:var(--ink); }
@@ -189,8 +189,8 @@
   .discovery-swap-btn:hover { background:#edcf9c; }
   #landfall-discovery-card { margin:10px 0; padding:10px 12px; border:1px solid #edbd7866; border-radius:8px; background:#162834; }
   /* Chart Course voyage HUD (js/voyage/voyage-controller.js): orders, covert time warp, lookout calls. */
-  #voyage-hud { --v-font:'IM Fell English','Palatino Linotype',Palatino,'Book Antiqua',Georgia,serif; position:fixed; left:50%; transform:translateX(-50%); top:calc(var(--controls-bottom) + 8px); width:min(640px,calc(100vw - 24px)); box-sizing:border-box; display:grid; gap:6px; padding:8px 10px; border:1px solid #c9a46a88; border-radius:10px; background:linear-gradient(#1a1610f0,#120f0bf0); color:#f1e3c4; font-family:var(--v-font); box-shadow:0 10px 32px #0007; z-index:6; }
-  #voyage-hud[hidden] { display:none; }
+  #voyage-hud { --v-font:'IM Fell English','Palatino Linotype',Palatino,'Book Antiqua',Georgia,serif; position:fixed; left:50%; transform:translateX(-50%); top:calc(var(--controls-bottom) + 8px); width:min(640px,calc(100vw - 24px)); max-height:calc(var(--view-top) + var(--view-height) - var(--controls-bottom) - 16px); overflow-y:auto; overscroll-behavior:contain; box-sizing:border-box; display:grid; gap:6px; padding:8px 10px; border:1px solid #c9a46a88; border-radius:10px; background:linear-gradient(#1a1610f0,#120f0bf0); color:#f1e3c4; font-family:var(--v-font); box-shadow:0 10px 32px #0007; z-index:6; }
+  #voyage-hud[hidden],#voyage-button,#voyage-hud .voyage-hide { display:none; }
   #voyage-hud .voyage-row { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; min-width:0; }
   #voyage-hud .voyage-clock { justify-content:space-between; }
   #voyage-hud .voyage-date { font-size:15px; letter-spacing:.02em; }
@@ -203,14 +203,43 @@
   #voyage-hud .voyage-beat,#voyage-hud .voyage-canvas-label { display:flex; align-items:center; gap:4px; font:12px system-ui,sans-serif; color:#d9c39b; }
   #voyage-hud select { min-height:30px; font-size:12px; }
   #voyage-hud .voyage-status { font:12px system-ui,sans-serif; color:#cdbb98; justify-content:space-between; }
+  #career-prompt { position:fixed; inset:0; z-index:60; display:flex; align-items:center; justify-content:center; padding:16px; background:rgba(8,12,18,.62); }
+  #career-prompt .career-card { max-width:420px; padding:20px 22px; border:1px solid #e9cf9a; border-radius:10px; background:#2a2115; color:#f0e4ca; font:15px Georgia,serif; }
+  #career-prompt h2 { margin:0 0 8px; font-size:19px; font-weight:normal; }
+  #career-prompt .career-summary { margin:0 0 16px; color:#cdbb98; }
+  #career-prompt .career-actions { display:flex; flex-wrap:wrap; gap:10px; }
+  #career-prompt button { min-height:44px; padding:6px 16px; border:1px solid #c9a46a; border-radius:7px; background:#1c1a14; color:#f0e4ca; font:14px Georgia,serif; cursor:pointer; }
+  #career-prompt .career-continue { background:#c9a46a; color:#1c1a14; }
   #voyage-hud .voyage-callout { padding:9px 11px; border:1px solid #e9cf9a; border-radius:8px; background:#2a2115; }
   #voyage-hud .voyage-callout-title { margin:0 0 3px; font-size:16px; color:#f6d48d; }
   #voyage-hud .voyage-callout-text { margin:0; font-size:14px; line-height:1.35; }
   #voyage-hud .voyage-callout-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
   #voyage-hud .voyage-callout-actions button:first-child { background:#c9a46a; border-color:#e9cf9a; color:#1c1a14; font-weight:600; }
   #voyage-hud .voyage-toast { margin:0; font-size:13px; font-style:italic; color:#f1e3c4; }
-  @media (min-width:1160px) { #voyage-hud { top:calc(var(--view-top,0px) + 10px); width:min(540px,calc(100vw - 640px)); } }
-  @media (max-width:640px) { #voyage-hud { top:auto; bottom:calc(var(--keyboard-inset,0px) + 8px); padding:6px 8px; } #voyage-hud .voyage-status { display:none; } #voyage-hud .voyage-course { flex-basis:100%; order:-1; } }
+  /* Wide windows: the free run between the instruments (ends at 356px) and the icon dock, centred when it fits. */
+  @media (min-width:1160px) and (min-height:581px) and (not (pointer:coarse)) { #voyage-hud { top:calc(var(--view-top,0px) + 10px); left:max(364px,calc(50vw - 270px)); transform:none; width:min(540px,calc(100vw - var(--dock-width,392px) - 20px - max(364px,calc(50vw - 270px)))); max-height:calc(var(--view-height) - 20px); } }
+  /* Compact screens have no room beside the helm, so the HUD is a panel opened from the dock like the others.
+     Keep this query in step with HUD_COMPACT_QUERY in js/voyage/voyage-controller.js. */
+  @media (max-width:720px), (pointer:coarse), (max-height:580px) {
+    #voyage-button:not([hidden]) { display:inline-flex; }
+    #voyage-button[data-alert=true] { color:var(--gold); border-color:var(--gold); }
+    #voyage-hud { top:var(--controls-bottom); left:max(8px,env(safe-area-inset-left)); right:max(8px,env(safe-area-inset-right)); transform:none; width:auto; max-height:calc(var(--view-top) + var(--view-height) - var(--controls-bottom) - max(8px,env(safe-area-inset-bottom))); z-index:7; }
+    #voyage-hud:not([data-expanded=true]) { padding:0; border:0; background:none; box-shadow:none; overflow:visible; pointer-events:none; }
+    #voyage-hud:not([data-expanded=true]) > :not(.voyage-toast) { display:none; }
+    #voyage-hud:not([data-expanded=true]) .voyage-toast { padding:7px 11px; border:1px solid #c9a46a88; border-radius:8px; background:#1a1610f0; }
+    #voyage-hud .voyage-clock { padding-right:50px; }
+    #voyage-hud .voyage-hide { display:inline-flex; position:absolute; top:3px; right:4px; }
+    #voyage-hud .voyage-callout { order:-1; }
+    #voyage-hud .voyage-callout-title { padding-right:40px; }
+    #voyage-hud button,#voyage-hud select { min-height:44px; }
+    #voyage-hud .voyage-warp { flex-wrap:wrap; }
+    #voyage-hud .voyage-warp::after { min-width:0; }
+    #voyage-hud .voyage-course { flex-basis:100%; order:-1; }
+    #voyage-hud .voyage-course-left,#voyage-hud .voyage-course-right { min-width:44px; }
+    #voyage-hud .voyage-beat input { width:24px; height:24px; }
+    .voyage-open #helm-controls { visibility:hidden; }
+  }
+  @media (max-height:580px) and (min-width:640px) { #voyage-hud { left:auto; width:350px; } }
   /* Chart drawer (js/voyage/chart-drawer.js): a large parchment chart panel for Chart Course voyages. */
   #chart-drawer { --chart-font:'IM Fell English','Palatino Linotype',Palatino,'Book Antiqua',Georgia,serif; --chart-ink:#3a2412; --chart-vellum:#ecdcb6; --chart-vellum-deep:#dcc290; --chart-red:#8b2a1a;
     position:fixed; z-index:9; inset:calc(var(--view-top) + max(12px,env(safe-area-inset-top))) max(12px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left));
@@ -274,7 +303,7 @@
   #panel #environment-debug input[type=checkbox] { width:20px; }
   .encounter-buttons { display:flex; flex-wrap:wrap; gap:5px; }
   .encounter-buttons button { flex:1; }
-  #encounter-notice { position:fixed; top:calc(var(--controls-bottom) + 8px); left:50%; transform:translateX(-50%); max-width:calc(100vw - 30px); padding:8px 12px; border:1px solid #ffffff30; border-radius:7px; background:var(--glass); font-size:12px; color:var(--gold); z-index:4; pointer-events:none; box-sizing:border-box; }
+  #encounter-notice { position:fixed; top:calc(max(var(--controls-bottom),var(--voyage-hud-bottom,0px)) + 8px); left:50%; transform:translateX(-50%); max-width:calc(100vw - 30px); padding:8px 12px; border:1px solid #ffffff30; border-radius:7px; background:var(--glass); font-size:12px; color:var(--gold); z-index:4; pointer-events:none; box-sizing:border-box; }
   @media (max-width:720px), (pointer:coarse) {
     #sailing-instruments { top:calc(var(--view-top) + max(8px,env(safe-area-inset-top))); left:50%; transform:translateX(-50%); width:344px; }
     .instrument-heading,.instrument-speed { padding:6px 9px 4px; }
@@ -309,6 +338,7 @@
     #share-panel { right:8px; }
   }
   @media (max-width:400px) { #camera-dock { gap:0; } #pause-toggle,#performance-toggle { width:24px; min-width:24px; padding:4px; } }
+  @media (max-width:639px) and (max-height:480px) { #camera-dock { flex-wrap:nowrap; justify-content:flex-start; overflow-x:auto; scrollbar-width:none; touch-action:pan-x; } }
   @media (max-height:480px) and (min-width:640px) {
     #sailing-instruments { left:max(8px,env(safe-area-inset-left)); transform:none; width:310px; }
     #camera-dock { top:calc(var(--view-top) + max(8px,env(safe-area-inset-top))); right:max(8px,env(safe-area-inset-right)); transform:none; max-width:calc(100vw - 334px); }
