@@ -9,11 +9,16 @@ import { controlIcon, createHelmControls } from './controls.js';
 import { createSceneAudio } from './audio.js';
 import { createShipGunnery, createPortGunnery, resolveVesselCollisions, resetVesselDamageState } from './gunnery-control.js';
 import { setVesselHullIntegrity, vesselDamageSnapshot, restoreVesselDamageSnapshot } from './vessel-damage.js';
-import { createCareerStore, applyShipwreckRecovery, nearestFoundedPort } from './career-save.js';
+import { careerGreatCircleKm, createCareerStore, applyShipwreckRecovery, nearestFoundedPort } from './career-save.js';
+import {lookoutEyeHeight} from './voyage/landfall-approach.js';
 import { serializeVoyage } from './voyage/passage.js';
 import { resetActiveIndigenousSovereigntyState } from './indigenous-sovereignty.js';
 import { coastalRegionStageURL } from './landfall.js';
-import { showCareerPrompt } from './career-ui.js';
+import { showCareerPrompt, showPortPanel, showCareerEnding, careerMoney } from './career-ui.js';
+import { NEW_WORLD_ERA } from './career-era.js';
+import { createCareerPort } from './career-port.js';
+import { cargoCapacityTonnes } from './career-trade.js';
+import { formatJulianDate } from './voyage/ocean-climate.js';
 import { createGunneryControls } from './gunnery-ui.js';
 import { createGunneryEffects } from './gunnery-effects.js';
 import { createGunnerySeaProbe } from './gunnery-sea-probe.js';
@@ -903,7 +908,7 @@ async function main() {
   const LOOP = 600.0;  // s, spectrum time loop (frequencies quantised to it)
   let needSpectrum = true, envFull = true;
   // Chart Course voyage (covert time warp); created once the dock/UI exists.
-  let voyageCtl = null, chartDrawer = null, propulsionInput = null, sailInputs = [], speedRow = null, sailControls = null, note = null, helm = null;
+  let careerPort = null, voyageCtl = null, chartDrawer = null, propulsionInput = null, sailInputs = [], speedRow = null, sailControls = null, note = null, helm = null;
   let skySun = NaN, skyHaze = NaN, skyHeight = NaN;
 
   function writeSimStatic() {
@@ -1166,6 +1171,8 @@ async function main() {
       sceneAudio.event?.(ev,ev.vessel?.boat??boat);
       if(ev.type==='vessel-captured'){
         if(voyageCtl?.presentPrizeDisposition){
+          const coin=NEW_WORLD_ERA.prizeCoin[ev.captureMethod==='boarded-and-fought'?'fought':'surrendered'];
+          ev.plunder.coin=coin;ev.plunder.coinLabel=careerMoney(NEW_WORLD_ERA.currency,coin);
           voyageCtl.presentPrizeDisposition(ev.vessel,ev.plunder);
         }else if(voyageCtl?.voyage?.provisions){
           const p=ev.plunder;
@@ -1202,6 +1209,7 @@ async function main() {
   let spyglassTracking = false;
   let spyglassYawOffset = 0;
   let spyglassPitchOffset = 0;
+  let spyglassLandAim = null;
   let spyglassPrevCameraMode = null;
   let spyglassPrevStation = null;
   const boatViewYawOffset = () => (boat.enabled && boat.viewStation !== 'crows-nest') ? (boat.eyeSide ?? 1) * 15 * D2R : 0;
@@ -1259,8 +1267,12 @@ async function main() {
 
   function updateSpyglassReadout() {
     if (!spyglassActive || !spyglassReadoutEl) return;
-    const targetV = findSpyglassTargetVessel();
-    if (targetV?.boat) {
+    const targetV = spyglassLandAim ? null : findSpyglassTargetVessel();
+    if (spyglassLandAim) {
+      const dx = spyglassLandAim.x - (boat.x ?? 0), dz = spyglassLandAim.z - (boat.z ?? 0);
+      const brgDeg = Math.round(((Math.atan2(dx, -dz) * 180) / Math.PI + 360) % 360);
+      spyglassReadoutEl.textContent = `Land · Range ${(Math.hypot(dx, dz) / 1000).toFixed(1)} km · Bearing ${brgDeg}° · Drag to sweep the coast`;
+    } else if (targetV?.boat) {
       const tb = targetV.boat;
       const dx = (tb.x ?? 0) - (boat.x ?? 0), dz = (tb.z ?? 0) - (boat.z ?? 0);
       const distM = Math.round(Math.hypot(dx, dz));
@@ -1283,7 +1295,7 @@ async function main() {
     boatEyePosition(eyePosition, boat);
     cam.x = eyePosition[0]; cam.y = eyePosition[1]; cam.z = eyePosition[2];
     const tx = targetBoat.x ?? 0;
-    const ty = (targetBoat.heave ?? 0) + Math.max(3.5, 2.2 * vesselVerticalScale(targetBoat));
+    const ty = targetBoat.aimY ?? (targetBoat.heave ?? 0) + Math.max(3.5, 2.2 * vesselVerticalScale(targetBoat));
     const tz = targetBoat.z ?? 0;
     const dx = tx - cam.x, dy = ty - cam.y, dz = tz - cam.z;
     const len = Math.hypot(dx, dy, dz) || 1;
@@ -1306,7 +1318,7 @@ async function main() {
     cam.pitch = Math.max(-1.25, Math.min(0.85, basePitch + pitchOffset));
   }
 
-  function setSpyglassActive(active, targetBoat = null) {
+  function setSpyglassActive(active, targetBoat = null, { land = false } = {}) {
     const prev = spyglassActive;
     spyglassActive = Boolean(active);
     if (spyglassActive !== prev) sceneAudio.event?.({ type: 'spyglass', active: spyglassActive }, boat);
@@ -1320,7 +1332,11 @@ async function main() {
       }
       spyglassYawOffset = 0;
       spyglassPitchOffset = 0;
-      const autoTarget = targetBoat ?? findSpyglassTargetVessel()?.boat ?? null;
+      // Land just called opens the glass on that land, held steady against her roll.
+      const vesselTarget = targetBoat ?? findSpyglassTargetVessel()?.boat ?? null;
+      const sight = land || !vesselTarget ? voyageCtl?.landSightPoint?.({ eyeM: lookoutEyeHeight(boat.modelId) }) : null;
+      spyglassLandAim = sight ? { x: sight.x, z: sight.z, aimY: sight.height * 0.45 } : null;
+      const autoTarget = spyglassLandAim ?? vesselTarget;
       if (autoTarget) {
         spyglassTracking = true;
         aimCameraAtVessel(autoTarget, 0, 0);
@@ -1332,12 +1348,13 @@ async function main() {
         stepBoatView(boat, 2.5);
         boatEyePosition(eyePosition, boat);
         cam.x = eyePosition[0]; cam.y = eyePosition[1]; cam.z = eyePosition[2];
-        cam.pitch = -2.5 * D2R;
+        cam.pitch = -0.6 * D2R;
       }
       cam.fovY = SPYGLASS_FOV_Y;
       updateSpyglassReadout();
     } else {
       spyglassTracking = false;
+      spyglassLandAim = null;
       cam.fovY = BASE_FOV_Y;
       if (prev && spyglassPrevCameraMode) {
         const restoreMode = spyglassPrevCameraMode;
@@ -1582,7 +1599,7 @@ async function main() {
       cam.x=eyePosition[0]; cam.y=eyePosition[1]; cam.z=eyePosition[2];
       if(terrain)cam.y=Math.max(cam.y,terrain.height(cam.x,cam.z)+1.2);
       if (spyglassActive) {
-        const trackBoat = findSpyglassTargetVessel()?.boat ?? null;
+        const trackBoat = spyglassLandAim ?? findSpyglassTargetVessel()?.boat ?? null;
         if (trackBoat && spyglassTracking) {
           aimCameraAtVessel(trackBoat, spyglassYawOffset, spyglassPitchOffset);
         }
@@ -2489,6 +2506,7 @@ async function main() {
       getVessels:()=>vessels.map(v=>v.boat),
       getMarineLife:()=>marineLife,
       onSightVessel:enc=>activateEncounterVessel(enc,{mode:'sight'}),
+      onInspectLand:()=>setSpyglassActive(true,null,{land:true}),
       onInspectEncounter:enc=>{
         activateEncounterVessel(enc,{mode:'sight',keepPosition:true});
         setSpyglassActive(true,vessels[1]?.boat??null);
@@ -2546,12 +2564,14 @@ async function main() {
         if(qs.has('ship'))url.searchParams.set('ship',qs.get('ship'));
         location.href=url.href;
       },
-      onPrizeDisposition:(disposition,targetVessel)=>{
+      purseLabel:()=>careerStore.owned()&&careerPort?careerMoney(NEW_WORLD_ERA.currency,careerPort.purse):'',
+      onPrizeDisposition:(disposition,targetVessel,plunder)=>{
         const res=dockingBoarding.resolvePrizeDisposition(targetVessel||vessels[1],disposition,{
           voyage:voyageCtl?.voyage,
           playerVessel:vessels[0],
         });
         if(res?.ok){
+          if(disposition!=='gift-indigenous'&&plunder?.coin)careerPort?.earn(plunder.coin,{prize:true});
           voyageCtl?.showToast?.(res.summary,8);
           dockingBoarding.castOff();
           refreshCrewRosterDOM();
@@ -2718,13 +2738,123 @@ async function main() {
           location.href=url.href;
         },
         onNewVoyage:()=>{
-          careerStore.clear();careerStore.claim();
+          careerStore.clear();careerStore.claim();careerPort?.reset();
           resetActiveIndigenousSovereigntyState({persist:true});
         },
       });
     }
     updateCrewUI();
     window.oceanVoyage=voyageCtl;
+    // A port call: at a port with buildings, with no fight on, in a tab that owns the save.
+    const hullMassKg=id=>{const rt=getShipModel(id).runtime;return boatHydrodynamics(rt.length,rt.beam,getShipParts(id).loading.provisionDays,0,id).mass;};
+    careerPort=createCareerPort({
+      era:NEW_WORLD_ERA,store:careerStore,boat,
+      getVoyage:()=>voyageCtl?.voyage,
+      getCompany:()=>vessels[0].crew?.state,
+      getPort:()=>{
+        const region=terrain?.region,v=voyageCtl?.voyage;
+        if(!region||!v)return null;
+        return findHistoricalColonialPort(region.latitude,region.longitude,region.id,new Date(v.dateMs).getUTCFullYear());
+      },
+      capacityOf:id=>cargoCapacityTonnes(hullMassKg(id)),
+      hullMassOf:hullMassKg,
+      saveVoyage:()=>voyageCtl?.saveNow?.(),
+      passDays:days=>voyageCtl?.passDays?.(days),
+      onRepaired:whole=>{
+        if(whole)vessels[0].pose?.restoreGeometry?.();
+        vessels[0].pose?.updateDamage?.(boat);
+        vessels[0].wetness?.updateDamage?.(boat.damage);
+        helm?.update?.(performance.now(),true);
+      },
+      onCrewRestored:company=>{reviveCompany(company);refreshCrewRosterDOM();updateCrewUI();},
+      onPutToSea:port=>{
+        portDeparting=true;updatePortCall();
+        dockingBoarding.castOff();updateCrewUI();
+        const whenClear=()=>{
+          if(dockingBoarding.state.mooringPhase!=='clear'){setTimeout(whenClear,200);return;}
+          portDeparting=false;
+          voyageCtl.pilotOut({drop:port?.pilotDrop});
+          voyageCtl.showToast?.('The pilot has dropped off in open water. Lay your course on the chart.',8);
+          helm?.update?.(performance.now(),true);
+          updatePortCall();
+        };
+        whenClear();
+      },
+      onShipBought:(modelId,port)=>{
+        // The old hull's damage must not be saved over the new one on the way out.
+        careerStore.setSnapshotProvider(()=>({}));
+        voyageCtl.logExternal?.(`Took delivery of a new hull at ${port.name}.`,'order');
+        reloadAtPort(port,modelId);
+      },
+      onRetired:ending=>showCareerEnding(document.body,ending,{onNewLife:()=>{location.href=location.pathname;}}),
+    });
+    window.oceanCareerPort=careerPort;
+    // Saves where she now lies and comes back at that port's quay.
+    function reloadAtPort(port,modelId=null){
+      const v=voyageCtl.voyage;
+      v.keepSaved=true;
+      v.true={...v.true,lat:port.latitude,lon:port.longitude};
+      v.dr={...v.dr,lat:port.latitude,lon:port.longitude};
+      careerStore.setSnapshotProvider(()=>({}));
+      careerStore.write({voyage:JSON.parse(serializeVoyage(v))});
+      const url=coastalRegionStageURL(new URL(location.pathname,location.href).href,port.id,'dock','clear',new Date(v.dateMs).getUTCFullYear());
+      url.searchParams.set('continue','1');
+      if(modelId||qs.has('ship'))url.searchParams.set('ship',modelId??qs.get('ship'));
+      location.href=url.href;
+    }
+    const portCallButton=document.createElement('button');
+    portCallButton.id='port-call';portCallButton.type='button';portCallButton.hidden=true;
+    document.body.append(portCallButton);
+    let portPanel=null,portDeparting=false;
+    const PILOT_RANGE_KM=25;
+    const pilotablePort=()=>{
+      const v=voyageCtl?.voyage;
+      if(!v?.true)return null;
+      const port=nearestFoundedPort(HISTORICAL_COLONIAL_PORTS,v.true.lat,v.true.lon,new Date(v.dateMs).getUTCFullYear());
+      return port&&careerGreatCircleKm(v.true.lat,v.true.lon,port.latitude,port.longitude)<=PILOT_RANGE_KM?port:null;
+    };
+    const nearPortBuildings=()=>{
+      const instances=terrain?.port?.instances;
+      if(!instances?.length)return false;
+      for(const inst of instances)if(Math.hypot((inst.x??0)-boat.x,(inst.z??0)-boat.z)<=700)return true;
+      return false;
+    };
+    const mooredAtPier=()=>dockingBoarding.state.mooringPhase==='moored'&&dockingBoarding.state.mooringTargetKind==='pier';
+    const updatePortCall=()=>{
+      const able=!portPanel&&!portDeparting&&careerStore.owned()&&!voyageCtl?.isBattleActive?.()&&!boat.damage?.sunk&&!boat.damage?.surrendered;
+      const atQuay=able&&nearPortBuildings()?careerPort.here:null,offPort=able&&!atQuay?pilotablePort():null;
+      const port=atQuay??offPort;
+      portCallButton.hidden=!port;
+      if(!port)return;
+      const phase=dockingBoarding.state.mooringPhase;
+      const label=offPort?'Take a pilot in':mooredAtPier()?'Go ashore':phase==='clear'?'Moor and go ashore':'Making fast…';
+      if(portCallButton.textContent!==label){portCallButton.textContent=label;portCallButton.setAttribute('aria-label',`${label}, ${port.name}`);}
+      portCallButton.disabled=!offPort&&!mooredAtPier()&&phase!=='clear';
+    };
+    portCallButton.onclick=()=>{
+      if(portCallButton.textContent==='Take a pilot in'){
+        const port=pilotablePort();if(!port)return;
+        careerPort.hirePilot();
+        voyageCtl.logExternal?.(`A pilot brought us in to ${port.name}.`,'order');
+        reloadAtPort(port);
+        return;
+      }
+      if(!mooredAtPier()){
+        dockingBoarding.dockAtPier({terrain,portLabel:terrain?.region?.name||'Harbor Pier'});
+        updatePortCall();updateCrewUI();
+        return;
+      }
+      const port=careerPort.view()?.port;
+      if(portPanel||!port)return;
+      careerPort.recordVisit(port);
+      portPanel=showPortPanel(document.body,careerPort,{
+        getDateLabel:()=>formatJulianDate(voyageCtl.voyage.dateMs),
+        onClose:()=>{portPanel=null;updatePortCall();},
+      });
+      updatePortCall();
+    };
+    setInterval(updatePortCall,500);
+    updatePortCall();
   }
   performanceButton=document.createElement('button');performanceButton.id='performance-toggle';performanceButton.type='button';performanceButton.className='icon-button';
   performanceButton.title='Performance stats';performanceButton.setAttribute('aria-label','Performance stats');performanceButton.setAttribute('aria-controls','performance-panel');
@@ -3791,7 +3921,8 @@ async function main() {
 
     compData[0] = frameF[68]; compData[1] = P.bloom; compData[2] = frameIndex % 64; compData[3] = 0.10;
     // Neutral white balance: a fixed cool grade turned shaded oak green in daylight.
-    compData[4] = 1.05; compData[5] = 1.06; compData[6] = 0; compData[7] = 1 / bloomLevels;
+    // Colour fades as rods take over from cones.
+    compData[4] = 1.05 * (1 - 0.42 * (astronomy.mode === 'astronomy' ? astronomy.state.starVisibility : 0)); compData[5] = 1.06; compData[6] = 0; compData[7] = 1 / bloomLevels;
     device.queue.writeBuffer(compUBO, 0, compData);
     const swapTex = ctx.getCurrentTexture();
     compPass.colorAttachments[0].view = swapTex.createView();

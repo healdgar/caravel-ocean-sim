@@ -5020,6 +5020,7 @@ export function resolveVesselCollisions(vessels, dt = 1 / 60, options = {}) {
   return events;
 }
 
+const GROUNDING_GRIND_SCALE = 0.15;
 export function applyGroundingImpactDamage(boat, contact, options = {}) {
   if (!boat || !contact) return null;
   const subInfo = contact.substrateInfo ?? GROUNDING_SUBSTRATES[contact.substrate] ?? GROUNDING_SUBSTRATES.shoal;
@@ -5027,6 +5028,11 @@ export function applyGroundingImpactDamage(boat, contact, options = {}) {
   if (impactSpeed <= subInfo.safeTouchSpeed) return null;
 
   const damage = createVesselDamageState(boat);
+  // A hull working on the bottom at a crawl grinds, not strikes. This contact arrives every
+  // frame, so hard knocks count each time but slow grinding only every second and a half.
+  const groundingNow = options.nowMs ?? performance.now();
+  if (impactSpeed < 1.2 && groundingNow < (damage.groundingQuietUntilMs ?? -Infinity)) return null;
+  damage.groundingQuietUntilMs = groundingNow + 1500;
   const L = boat.length ?? 20;
   const B = boat.beam ?? 6;
   const mass = (boat.hydrodynamics?.mass ?? 60000) + Math.max(0, (damage.floodingTonnes ?? 0) * 1000);
@@ -5040,7 +5046,8 @@ export function applyGroundingImpactDamage(boat, contact, options = {}) {
   const speedNormEnergy = damage.maxHullEnergy * 0.032 * effSpeed * effSpeed * scrapeScale;
   const rawKinetic = 0.5 * mass * effSpeed * effSpeed * scrapeScale;
   const baseEnergy = Math.max(speedNormEnergy, Math.min(rawKinetic, damage.maxHullEnergy * 0.48));
-  const hullEnergy = baseEnergy * subInfo.damageMultiplier;
+  // Working on the bottom wears a hull down over many minutes. Only a real blow breaks her.
+  const hullEnergy = baseEnergy * subInfo.damageMultiplier * (impactSpeed < 1.2 ? GROUNDING_GRIND_SCALE : 1);
 
   damage.hits = (damage.hits ?? 0) + 1;
   damage.hullHits = (damage.hullHits ?? 0) + 1;

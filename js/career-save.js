@@ -10,6 +10,7 @@ const CAREER_RAD = Math.PI / 180;
 export const SHIPWRECK_PROVISION_DAYS = 14;
 export const SHIPWRECK_SURVIVAL = 0.6;
 export const SHIPWRECK_REPLACEMENT_HULL = 0.7;
+export const SHIPWRECK_PURSE_SAVED = 0.5;
 
 export function createCareerSave({ era = 'new-world' } = {}) {
   return { version: CAREER_SAVE_VERSION, era, savedAtMs: 0, voyage: null, vessel: null, sovereignty: null, url: null, career: { shipsLost: 0 } };
@@ -136,6 +137,12 @@ export function applyShipwreckRecovery(save, { voyage, damage, shipName = 'the s
         },
       },
     },
-    career: { ...save?.career, shipsLost: (save?.career?.shipsLost ?? 0) + 1 },
+    // The cargo went down with her, and only the coin in the boats came ashore.
+    career: {
+      ...save?.career,
+      shipsLost: (save?.career?.shipsLost ?? 0) + 1,
+      cargo: {},
+      ...(Number.isFinite(save?.career?.purse) ? { purse: Math.floor(save.career.purse * SHIPWRECK_PURSE_SAVED) } : {}),
+    },
   };
 }

@@ -814,6 +814,10 @@ export const forestWithNativeLod=source=>forestCullReplace(forestCullReplace(for
  'let footprint=F.screen.y/max(2.0*length(F.camUp.xyz),.0001)*geometricError*sqrt(1.0+lateral*lateral/max(near*near,.0001))/max(near-geometricError,.0001);',
  `let forwardDir=normalize(F.camFwd.xyz);
  let dist=length(relative);
+ // A spyglass brings everything closer, so every limit set in metres stretches with it.
+ // Ordinary view angles stay on the limits the budget was tuned for.
+ let forestLensZoom=0.5543/max(length(F.camUp.xyz),.0001);
+ let forestViewZoom=select(1.0,min(forestLensZoom,6.0),forestLensZoom>1.5);
  let isCoastalRoot=r.identity.z<0.0;
  let isSubtropicalCoastal=r.identity.z<-1.5;
  var coastalStandSteps=0u;
@@ -823,7 +827,7 @@ export const forestWithNativeLod=source=>forestCullReplace(forestCullReplace(for
  let cosGaze=clamp(dot(relative/max(dist,.0001),forwardDir),0.0,1.0);
  let sinGaze2=1.0-cosGaze*cosGaze;
  let gazeAcuity=1.0/(1.0+4.5*sinGaze2+6.0*sinGaze2*sinGaze2);
- let canopyMask=1.0/(1.0+max(0.0,midNear-2.0)*select(0.04,0.025,isCoastalRoot));
+ let canopyMask=1.0/(1.0+max(0.0,midNear/forestViewZoom-2.0)*select(0.04,0.025,isCoastalRoot));
  let offAxis=sqrt(1.0+lateral*lateral/max(near*near,.0001));
  let perceptualScreenY=mix(F.screen.y,min(F.screen.y,1080.0),inCanopy);
  let baseFocal=perceptualScreenY/max(2.0*length(F.camUp.xyz),.0001);
@@ -839,9 +843,10 @@ export const forestWithNativeLod=source=>forestCullReplace(forestCullReplace(for
  if(!nearLod&&!farLod&&!midLod){return;}`,
  ` // Foreground trees keep native detail inside these radii, which shrink with the adaptive
  // polygon budget. Fixed radii would leave a weak device unable to shed any of this work.
- let forestBudgetScale=clamp(3.0/max(parameters.z,3.0),0.12,1.0);
+ let forestBudgetBase=clamp(3.0/max(parameters.z,3.0),0.12,1.0);
+ let forestBudgetScale=forestBudgetBase*forestViewZoom;
  let stdFarLod=(resident||authoredMiddle)&&(parameters.w==2.0||(parameters.w!=1.0&&(!authoredMiddle||(p.roots.z&4u)==0u)&&near>max(radius,select(0.0,140.0*forestBudgetScale,resident&&parameters.w==0.0))&&(!authoredMiddle||near>geometricError)&&farError<=threshold));
- let coastalLodScale=forestBudgetScale*forestBudgetScale*mix(0.68,1.0,gazeAcuity);
+ let coastalLodScale=forestBudgetBase*forestBudgetBase*mix(0.68,1.0,gazeAcuity)*forestViewZoom;
  let coastalFarDist=select(1580.0,980.0,coastalStandSteps>=2u)*coastalLodScale*select(1.0,0.90,previousLod[id.x]==0u);
  let coastalFarLod=resident&&(parameters.w==2.0||(parameters.w!=1.0&&dist>coastalFarDist));
  let farLod=select(stdFarLod,coastalFarLod,isSubtropicalCoastal);

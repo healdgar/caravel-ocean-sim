@@ -108,3 +108,81 @@ test('losing the ship takes you to the nearest port, and a saved voyage survives
     assert.deepEqual(third.errors,[]);
   }finally{await context.close();}
 });
+
+test('a trading voyage turns cloth into money across two real ports and ends in retirement',{timeout:420000},async()=>{
+  const context=await browser.newContext({viewport:{width:1280,height:800}});
+  try{
+    const stageUrl=async(page,id)=>page.evaluate(async id=>{const {coastalRegionStageURL}=await import('/js/landfall.js');return coastalRegionStageURL(location.origin+'/',id,'dock','clear',1550).toString();},id);
+    const first=await open(context);
+    const lisbon=await stageUrl(first.page,'lisbon');
+    await first.page.goto(lisbon);await ready(first.page);
+    const call=first.page.locator('#port-call');
+    await call.waitFor({state:'visible',timeout:15000});
+    assert.match(await call.textContent(),/Moor and go ashore/);
+    assert.match(await call.getAttribute('aria-label'),/Lisbon/);
+    await call.click();
+    await first.page.waitForFunction(()=>document.getElementById('port-call').textContent.startsWith('Go ashore'),null,{timeout:30000});
+    await call.click();
+    await first.page.locator('#port-panel').waitFor({state:'visible'});
+    assert.match(await first.page.locator('#port-panel-title').textContent(),/Lisbon/);
+    assert.equal(await first.page.locator('[data-action="buy-sugar"]').count(),0,'Lisbon does not grow sugar');
+    const purseBefore=await first.page.evaluate(()=>window.oceanCareerPort.purse);
+    await first.page.locator('[data-action="buy-cloth"]').click();
+    await first.page.locator('[data-action="buy-cloth"]').click();
+    const bought=await first.page.evaluate(()=>({purse:window.oceanCareerPort.purse,cargo:window.oceanFleet.vessels[0].boat.cargoTonnes,held:window.oceanCareerPort.ledger.cargo.cloth}));
+    assert.equal(bought.held,2);
+    assert.equal(bought.cargo,2,'cargo really loads the hull');
+    assert.ok(bought.purse<purseBefore);
+    assert.match(await first.page.locator('.voyage-stores').textContent(),/pesos/);
+    // The pilot takes her out to open water, with no land left to run onto.
+    await first.page.locator('[data-action="put-to-sea"]').click();
+    await first.page.locator('#port-panel').waitFor({state:'detached'});
+    await first.page.waitForFunction(()=>window.oceanVoyage.voyage.log.some(entry=>/Dropped the pilot/.test(entry.text)),null,{timeout:30000});
+    const atSea=await first.page.evaluate(()=>({here:window.oceanCareerPort.here,moored:window.oceanDockingBoarding.state.mooringPhase,purse:window.oceanCareerPort.purse,hull:window.oceanFleet.vessels[0].boat.damage.hullIntegrity}));
+    assert.equal(atSea.here,null,'the harbor is behind her');
+    assert.equal(atSea.moored,'clear');
+    assert.equal(atSea.purse,bought.purse-12,'the pilot is paid');
+    assert.equal(atSea.hull,1);
+    // Crossing an ocean is the voyage's own subject. She fetches up off the far port.
+    await first.page.evaluate(()=>{const v=window.oceanVoyage.voyage;v.dateMs+=40*86400000;v.true={...v.true,lat:23.26,lon:-82.35};v.dr={...v.dr,lat:23.26,lon:-82.35};});
+    await first.page.waitForFunction(()=>document.getElementById('port-call').textContent==='Take a pilot in'&&!document.getElementById('port-call').hidden,null,{timeout:15000});
+    await Promise.all([first.page.waitForNavigation({timeout:60000}),call.click()]);
+    await ready(first.page);
+    const resumed=await first.page.evaluate(()=>({held:window.oceanCareerPort.ledger.cargo.cloth,cargo:window.oceanFleet.vessels[0].boat.cargoTonnes}));
+    assert.equal(resumed.held,2,'the cargo crossed in the save');
+    assert.equal(resumed.cargo,2,'and still loads the hull');
+    await call.waitFor({state:'visible',timeout:15000});
+    await call.click();
+    await first.page.waitForFunction(()=>document.getElementById('port-call').textContent.startsWith('Go ashore'),null,{timeout:30000});
+    await call.click();
+    await first.page.locator('[data-action="sellall-cloth"]').click();
+    const sold=await first.page.evaluate(()=>({purse:window.oceanCareerPort.purse,cargo:window.oceanFleet.vessels[0].boat.cargoTonnes,ports:window.oceanCareerPort.ledger.portsVisited}));
+    assert.ok(sold.purse>purseBefore,`${purseBefore} became ${sold.purse}`);
+    assert.equal(sold.cargo,0);
+    assert.deepEqual(sold.ports,['lisbon','havana']);
+    assert.ok(await first.page.locator('[data-action="pay-wages"]').isEnabled(),'forty days of wages are owed');
+    await first.page.locator('[data-action="pay-wages"]').click();
+    // Damage, repaired in a real yard, on the real hull.
+    await first.page.evaluate(()=>{const b=window.oceanFleet.vessels[0].boat;b.damage.hullIntegrity=.8;b.damage.hullDamageJoules=.2*b.damage.maxHullEnergy;window.oceanCareerPort.ledger.purse+=1000;});
+    await first.page.locator('.port-close').click();await call.click();
+    const dateBefore=await first.page.evaluate(()=>window.oceanVoyage.voyage.dateMs);
+    await first.page.locator('[data-action="repair"]').click();
+    const mended=await first.page.evaluate(()=>({hull:window.oceanFleet.vessels[0].boat.damage.hullIntegrity,date:window.oceanVoyage.voyage.dateMs}));
+    assert.equal(mended.hull,1);
+    assert.ok(mended.date>dateBefore,'the yard takes time');
+    // A life ends here, and the next one starts clean.
+    await first.page.locator('[data-action="retire"]').click();
+    assert.equal(await first.page.locator('#career-prompt').count(),0,'the first click only asks');
+    await first.page.locator('[data-action="retire"]').click();
+    await first.page.locator('#career-prompt.career-ending').waitFor({state:'visible'});
+    const ending=await first.page.locator('#career-prompt.career-ending').textContent();
+    assert.match(ending,/Retired ashore at .*(Habana|Havana)/i);
+    assert.match(ending,/Ports of call2/);
+    assert.equal(await first.page.evaluate(()=>localStorage.getItem('waterworld.career.v1')),null,'the save is cleared');
+    await first.page.locator('#career-prompt.career-ending button').click();
+    await first.page.waitForLoadState('load');await ready(first.page);
+    assert.equal(await first.page.locator('#career-prompt').count(),0,'nothing to continue');
+    assert.equal(await first.page.evaluate(()=>window.oceanCareerPort.purse),purseBefore,'a new life starts with the starting purse');
+    assert.deepEqual(first.errors,[]);
+  }finally{await context.close();}
+});

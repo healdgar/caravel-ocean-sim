@@ -112,6 +112,12 @@ export function createCrewLODs(model){
 }
 
 export const CREW_CULL_DISTANCE=420;
+const CREW_LOD_TAN_HALF_FOV=Math.tan(29*Math.PI/180);
+// How much nearer a narrow lens brings a body than the ordinary view would.
+function crewLodZoom(camera){
+  const fovY=camera?.fovY;
+  return Number.isFinite(fovY)&&fovY>0?Math.max(1,CREW_LOD_TAN_HALF_FOV/Math.tan(fovY*.5)):1;
+}
 
 export function selectCrewLOD(boat,camera=null){
   if(!camera||boat?.enabled===true||!Number.isFinite(camera.x)||!Number.isFinite(camera.z)){
@@ -120,8 +126,9 @@ export function selectCrewLOD(boat,camera=null){
   const bx=Number.isFinite(boat?.x)?boat.x:0,by=Number.isFinite(boat?.heave)?boat.heave:0,bz=Number.isFinite(boat?.z)?boat.z:0;
   const cy=Number.isFinite(camera.y)?camera.y:0;
   const distance=Math.hypot(camera.x-bx,cy-by,camera.z-bz);
-  const mainTier=distance<CREW_LOD_TIERS[0].maxDistance?0:distance<CREW_LOD_TIERS[1].maxDistance?1:2;
+  const apparent=distance/crewLodZoom(camera);
+  const mainTier=apparent<CREW_LOD_TIERS[0].maxDistance?0:apparent<CREW_LOD_TIERS[1].maxDistance?1:2;
   const shadowTier=Math.min(CREW_LOD_TIERS.length-1,mainTier+1);
-  if(distance>CREW_CULL_DISTANCE)return {mainTier,shadowTier,distance,culled:true};
+  if(apparent>CREW_CULL_DISTANCE)return {mainTier,shadowTier,distance,culled:true};
   return {mainTier,shadowTier,distance};
 }

@@ -38,7 +38,7 @@ order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-middle.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/task-yield.js','js/forest-occlusion.js');
 order.splice(order.indexOf('js/profiler.js')+1,0,'js/gpu-benchmark.js');
 order.splice(order.indexOf('js/main.js'),0,'js/wgsl-prune.js','js/gpu-program-cache.js');
-order.splice(order.indexOf('js/main.js'),0,'js/career-save.js','js/career-ui.js');
+order.splice(order.indexOf('js/main.js'),0,'js/career-save.js','js/career-ui.js','js/career-era.js','js/career-trade.js','js/career-port.js');
 order.splice(order.indexOf('js/gunnery-control.js'),0,'js/vessel-damage.js');
 order.splice(order.indexOf('js/crew.js'),0,'js/crew-wounds.js');
 order.splice(order.indexOf('js/wgsl/vessel-pose.js'),0,'js/wgsl/rig-surfaces.js');

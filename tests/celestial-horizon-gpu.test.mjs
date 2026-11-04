@@ -86,7 +86,8 @@ test('actual528B direct sunlight obeys planet/finite-disc horizon while twilight
     // A synthetic nonzero sky LUT witnesses independent scattered twilight:
     // blocking the solar disc must not multiply skyAtmo by its direct-light cap.
     assert.ok(deep.scattered.every(value=>value>.4),'twilight scattering survives direct-Sun rejection');
-    for(let k=0;k<3;k++)close(deep.scattered[k],day.scattered[k],1e-6,'direct cap never gates existing scattered LUT');
+    // The night sky's own glow adds at most about 6e-6 on top of the LUT.
+    for(let k=0;k<3;k++)close(deep.scattered[k],day.scattered[k],1e-5,'direct cap never gates existing scattered LUT');
     for(const height of [0,.01,5]){
       const cap=result.rows.filter(row=>row.name.startsWith('cap-'+height+'-'));let prior=-Infinity;
       for(const row of cap){

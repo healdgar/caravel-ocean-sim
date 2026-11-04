@@ -1,5 +1,22 @@
 # Ocean Sailing Simulator backlog and overnight checkpoint
 
+## November 4: warp, landfall, night and the spyglass
+
+A passage sailed from Lisbon wrecked on St Maarten: warp ran on until a new coast was built around her, close to rock, and she ground to pieces in about two minutes with nobody at the helm. Two coasts, Nassau and Bermuda, also showed a black screen, because climate and tree rebuilds arrived after a coast had been disposed. Warp is now governed by `warpStandoffM` and `warpCapForHazard`, see `CAREER.md`, and slow grinding on the bottom wears a hull about seven times more slowly.
+
+Other faults found and fixed on the way:
+
+- Warp eased down over about a second even when the limit collapsed, which is kilometres at 3600x. The rate now drops at once.
+- Mountains visible from 145 km held warp at 30x until the coast came into build range at 95 km, nearly ten minutes at 3 m/s. This matches the slow stretch seen near Madeira.
+- A large island could be dropped and rebuilt repeatedly while she sailed along it. Bermuda did this.
+- Heave to still makes about 3.6 kn in a fresh breeze, so a warp stop strikes all sail instead.
+
+Night was nearly black below full Moon. Moon working light now follows adapted brightness (power .345) while its disc stays physical, the sky has a blue-grey glow that thickens at the horizon, colour fades, and stars have a display gain of 8 on a 1024 cube, about 50 MB instead of 13. Physical levels for reference: full Moon 0.25 lux, quarter 0.01, starlight with airglow 0.002 ([source](https://en.wikipedia.org/wiki/Orders_of_magnitude_(illuminance))).
+
+Forest stand limits and crew detail set in metres now stretch with lens zoom, so the spyglass shows near models. Through the glass the forest draws 35.8M triangles against 26.1M in the close Wells Bay view, and 12.1M against 1.9M at long range. The close figure is above the 30M full-budget ceiling, which only counts the ordinary view.
+
+Six coasts were sailed at forced full warp (Saba, Lisbon, Bermuda, San Juan, Veracruz, Nassau): no groundings and no hull damage. Warp ended at least 780 m short of the shoal ahead, and two minutes with nobody at the helm left at least 570 m. A full trade from Lisbon to San Juan took 26 days and 3,435 miles with the hull untouched. The test script removed two attackers it could not fight.
+
 ## November 4: tree budget, weak devices, loose-stone hillsides
 
 Foreground native tree radii from `facc252` were fixed at 95, 180 and 240 m, which the adaptive polygon budget could not reduce. They are now 12, 30 and 140 m and scale with the budget, and the budget can react to frames lasting up to 8 s (previously a frame over 1 s reset it). Measured indirect triangles at `reported-close-view`, 1920x1080, Metal, before allowing the third tier at deck level:

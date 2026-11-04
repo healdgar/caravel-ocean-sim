@@ -93,3 +93,18 @@ test('celestial navigation sight helpers recover Polaris latitude with guard cor
   close(noonSight.solar.meridianLatitude,17.635,0.25,'equinox meridian solar latitude');
   close(noonSight.solar.estimatedLongitude,-63.238,2.5,'apparent solar time longitude');
 });
+
+test('adapted eyes keep moonlit and quarter-lit nights legible without touching the sky by day',()=>{
+  const at=(date)=>computeAstronomy(date,{latitude:17.6,longitude:-63.2,height:0});
+  const shown=(s)=>s.moon.irradiance*s.moon.lightGain*s.exposureScale*1.35;
+  const full=at('2026-01-03T04:12:00Z'),quarter=at('2026-01-26T00:30:00Z'),day=at('2026-01-03T16:00:00Z');
+  assert.ok(full.moon.lightGain>1&&quarter.moon.lightGain>full.moon.lightGain,'fainter Moons need more help');
+  assert.equal(day.moon.lightGain,1,'daylight is untouched');
+  const lux=full.moon.irradiance/quarter.moon.irradiance,felt=shown(full)/shown(quarter);
+  assert.ok(lux>8&&felt<4,`a ${lux.toFixed(0)}:1 difference in light reads as ${felt.toFixed(1)}:1`);
+  assert.ok(felt>1.5,'a full Moon still reads brighter than a quarter');
+  const frame=new Float32Array(132);
+  writeAstronomyFrame(frame,{mode:'astronomy',state:full,stars:true,constellations:false});
+  const discRadiance=frame[99]/frame[111];
+  assert.ok(Math.abs(discRadiance-full.moon.irradiance/full.moon.lambert)/discRadiance<1e-5,'the disc itself stays physical');
+});

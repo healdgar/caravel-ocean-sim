@@ -50,10 +50,36 @@ It exists in the world as an atrocity to fight. No market, cargo, assignment, pr
 - Archers stay abstract until crews can carry visible bows. Bows also borrow a clipped slap sound until they have recordings.
 - A lost limb collapses at its joint. There is no separate severed piece and no blood yet.
 
+## Trade
+
+A ship moored within 700 m of a port's buildings can go ashore. Each port belongs to a trading region and sells only what its region can supply, but buys anything. Buying and selling move the price against the trader, and it recovers over months. Cargo is real weight on the hull, and a hull carries about a third of her own mass. Wages run with the calendar. Repairs take days in the yard, and a port with no yard only patches. Losing a ship loses her cargo and half the purse. Retiring ends the life with a title earned from what the player owns, and the screen shows only what the game tracks.
+
+Prices, costs and hull values are authored for play. They have not been tuned over a long game.
+
+## Landfall and warp
+
+Warp stops when land comes into range, with the land in the spyglass. The player may force warp further, and warp then slows and ends on its own before she can touch anything.
+
+- The land-ho call waits until the 3D coast is in memory and land stands above the horizon from the masthead, usually 12 to 25 km off. The spyglass opens on the highest land in view and holds on it against her roll.
+- Forced warp stops short of danger by 800 m or four minutes' sailing, whichever is further. It reads the real terrain along her ground track. Where only the coarse map is known, it stops 4 km off the mapped coast.
+- A warp cut short by danger strikes all sail, so she lies safe with nobody at the helm.
+- Warp is refused with an enemy in range and drops if she takes the ground.
+
+By night the stop is the same, because the rule protects the ship and does not depend on what the lookout sees. The call changes: a dark line under the Moon, or on a moonless night signs of land and the pilot's reckoning. Either way the player may lay to until first light.
+
+The history this rests on:
+
+- Columbus, [Diario, 11 and 12 October 1492](http://historyisaweapon.org/defcon1/diarioofchristophercolombus.html): land seen at two hours after midnight about two leagues off; all sail hauled down except the mainsail, and they "jogged on and off" until daylight. Signs that day included petrels, a green bulrush, a stick worked with iron and a plank.
+- Pilots [over-reckoned distance run on purpose](https://doi.org/10.1016/0083-6656%2885%2990031-5) so as to expect land early (Enciso, 1519). Not modelled yet.
+- A deep-sea sounding meant [heaving to, and could take several hours](https://doi.org/10.1080/01402399908437760). Not modelled yet.
+- Santa María [grounded in the early hours of Christmas Day 1492](https://history.com/articles/christopher-columbus-ships) with a cabin boy at the tiller and most of the crew asleep.
+
+No source was found for how far land shows on a moonless night, or for hearing surf or smelling land on these voyages. The moonless call text is authored.
+
 ## Build order
 
-1. **Foundation (in progress):** prize choices, one owner for damage and repairs, fresh encounter ships, a real sinking outcome, one save file, current tests.
-2. **Trader loop:** market, shipyard and money, leading to a first ending screen.
+1. **Foundation (done):** prize choices, one owner for damage and repairs, fresh encounter ships, a real sinking outcome, one save file, current tests.
+2. **Trader loop (first pass):** market, shipyard and money, leading to a first ending screen.
 3. **Wider world:** reputation, assignments, rumours, encounters using all nine ship models.
 4. **Nations:** the model above, epidemics and the four tools.
 5. **Changing history:** port control and nation survival visibly change.
@@ -65,6 +91,7 @@ It exists in the world as an atrocity to fight. No market, cargo, assignment, pr
 - `resetVesselDamageState` makes a pooled hull a new ship. Call it through `prepareEncounterVessel` in `js/main.js`, which also restores geometry and revives the company.
 - `js/career-save.js` owns the one saved game (`waterworld.career.v1`): voyage, vessel, sovereignty, share URL and career record. It holds no DOM or GPU code. A tab writes only after it owns the save, through continuing, starting fresh or having nothing to protect, so a shared link cannot overwrite a voyage. The URL remains a shareable scene, not the save.
 - `js/career-ui.js` holds career DOM.
+- `js/career-era.js` holds one era's goods, currency, powers, hulls, costs and fortunes. `js/career-trade.js` is the pure money rules over a ledger kept in the save as `career`. `js/career-port.js` applies them to the live ship and saves after every change.
 - `js/crew-wounds.js` owns body hits, stuck arrows and injuries. A hit waits as a pending wound until the next pose finds the nearest bone. `applyCrewCasualtiesAndMorale` keeps the counts, and only a magazine blast still harms by area.
 - `GUNNERY_WEAPONS` in `js/gunnery-state.js` says what a battery fires: its ammunition, whether it burns powder and how far it reaches. Check it rather than testing for a model id.
 - New career systems take powers, goods, currency, tools and timelines from era data rather than from the core. Do not add new `1550`, `cannon` or crown literals to career code.

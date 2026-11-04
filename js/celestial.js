@@ -1,9 +1,11 @@
 import { propagatedStars } from './astronomy.js';
 import { OCEAN_CONSTELLATIONS } from './star-catalog.js';
 import { CELESTIAL_STARS, CELESTIAL_LINES } from './wgsl/celestial.js';
+const STAR_DISPLAY_GAIN=8;
 
 export async function createCelestialRenderer({device,shader,frameUBO,clock,sampler,format,samples}){
-  const size=512,U=GPUTextureUsage,B=GPUBufferUsage;
+  // Stars are points: the texel size sets how sharp and how bright one can look.
+  const size=1024,U=GPUTextureUsage,B=GPUBufferUsage;
   const texture=device.createTexture({label:'geographic stellar sky',size:[size,size,6],format:'rgba16float',usage:U.TEXTURE_BINDING|U.RENDER_ATTACHMENT});
   const stars=propagatedStars(clock.state.date),starData=new Float32Array(stars.length*6),starIndices=new Map(stars.map((s,i)=>[s.hip,i]));
   const edges=[];for(const path of OCEAN_CONSTELLATIONS)for(let i=1;i<path.length;i++)if(starIndices.has(path[i-1])&&starIndices.has(path[i]))edges.push(starIndices.get(path[i-1]),starIndices.get(path[i]));
@@ -24,7 +26,10 @@ export async function createCelestialRenderer({device,shader,frameUBO,clock,samp
         const s=moved[i],bv=Math.max(-.4,Math.min(2,s.colorIndex)),temperature=4600*(1/(.92*bv+1.7)+1/(.92*bv+.62));
         // Smooth blackbody-inspired RGB, normalized; no authored celestial positions.
         const color=[Math.min(1,Math.pow(6500/temperature,.45)),Math.min(1,Math.pow(temperature/6500,.12)),Math.min(1,Math.pow(temperature/6500,.8))];
-        const norm=Math.max(...color),flux=14*Math.pow(10,-.4*(s.magnitude+26.74));
+        // A screen cannot show a point's true contrast against a dark-adapted sky, so stars carry
+        // a display gain, and the few brilliant ones are compressed so they do not dazzle.
+        const shownMagnitude=s.magnitude<1?1+(s.magnitude-1)*.5:s.magnitude;
+        const norm=Math.max(...color),flux=STAR_DISPLAY_GAIN*14*Math.pow(10,-.4*(shownMagnitude+26.74));
         starData.set(s.direction,i*6);for(let k=0;k<3;k++)starData[i*6+3+k]=color[k]/norm*flux;
       }
       for(let i=0;i<edges.length;i++)lineData.set(moved[edges[i]].direction,i*3);

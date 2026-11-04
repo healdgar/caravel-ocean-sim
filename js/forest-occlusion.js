@@ -111,7 +111,9 @@ fn forestCoastalStandHidden(centre:vec3f,rootScale:vec4f,identity:vec4f,rootId:u
  if(identity.z>-1.5){return false;}
  if(standSteps>=99u){return true;}
  let camera=F.camPos.xyz;let distXZ=distance(camera.xz,centre.xz);
- let budgetScale=clamp(3.0/max(pixelError,3.0),0.15,1.0);
+ // Thinning a stand is meant to go unseen, which a spyglass would undo.
+ let lensZoom=0.5543/max(length(F.camUp.xyz),.0001);
+ let budgetScale=clamp(3.0/max(pixelError,3.0),0.15,1.0)*select(1.0,min(lensZoom,6.0),lensZoom>1.5);
  let yFactor=clamp((camera.y-36.0)/24.0,0.0,1.0);
  if(standSteps>=4u&&distXZ>mix(190.0,380.0,yFactor)*budgetScale&&((rootId&3u)!=0u||yFactor<0.5)){return true;}
  if(standSteps>=3u&&distXZ>mix(240.0,480.0,yFactor)*budgetScale&&(rootId&select(3u,1u,yFactor>0.5))!=0u){return true;}

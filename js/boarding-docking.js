@@ -578,7 +578,6 @@ export function createDockingBoardingState(boat, options = {}) {
       scuttleHullRepair: PRIZE_SCUTTLE_HULL_REPAIR,
       survivingCrew: Math.max(2, targetPower.able || 6),
       timberTonnes: 6,
-      goldEscudos: captureMethod === 'boarded-and-fought' ? 280 : 180,
     };
 
     if (!state.capturedVessels.includes(targetVessel)) {

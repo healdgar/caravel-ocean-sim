@@ -2,6 +2,9 @@ import { OceanAstronomyEngine } from './vendor/astronomy-engine.js';
 import { OCEAN_STARS } from './star-catalog.js';
 
 const ASTRO_RAD=Math.PI/180,ASTRO_AU_KM=149597870.7,ASTRO_J2000=Date.UTC(2000,0,1,12),ASTRO_YEAR_MS=365.25*86400000;
+// Night adaptation: the working light that makes a full Moon read about a twentieth of day,
+// and how steeply fainter skies fall away from it. Stevens' brightness power is near a third.
+const NIGHT_FULL_MOON_IRRADIANCE=3.4e-5,NIGHT_FULL_MOON_LEVEL=.84,NIGHT_ADAPTATION_POWER=.345,NIGHT_BASE_EXPOSURE=1.35;
 const astroClamp=(x,a,b)=>Math.max(a,Math.min(b,x));
 const astroUnit=a=>{const l=Math.hypot(...a)||1;return a.map(x=>x/l);};
 const astroCross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
@@ -32,6 +35,13 @@ export function computeAstronomy(date,observer){
   const twilight=astroClamp((-sun.altitude-4)/12,0,1),moonAbove=Math.max(0,moon.direction[1]);
   // Exposure is presentation, never a change to the Sun/Moon energy ratio.
   const exposureScale=1+(Math.pow(twilight,2)*7999)/(1+moon.irradiance*moonAbove*10000);
+  // Night vision compresses light far more than a fixed exposure can: felt brightness follows
+  // roughly the cube root of illuminance. Full Moon, quarter Moon and starlight differ by about
+  // 25:1 and 125:1 in lux, yet all stay legible to adapted eyes. Exposure stays where it is so
+  // stars and faint residuals keep their tuning; the Moon's working light carries the difference.
+  const adaptedLevel=NIGHT_FULL_MOON_LEVEL*Math.pow(Math.max(moon.irradiance,1e-9)/NIGHT_FULL_MOON_IRRADIANCE,NIGHT_ADAPTATION_POWER);
+  const adaptationGain=Math.max(1,adaptedLevel/(Math.max(moon.irradiance,1e-9)*NIGHT_BASE_EXPOSURE*exposureScale));
+  moon.lightGain=1+(adaptationGain-1)*twilight;
   return {date:t.toISOString(),observer:{...observer},sun,moon,starRotation:matrix,starVisibility:twilight,exposureScale,shadowDirection:sun.direction[1]>0?sun.direction:moon.direction,moonShadows:sun.direction[1]<=0&&moon.direction[1]>0};
 }
 export function propagatedStars(date){
@@ -63,8 +73,9 @@ export function createAstronomyClock(search=new URLSearchParams(),position={x:0,
 export function writeAstronomyFrame(frame,clock){
   if(frame.length<132)throw new RangeError('Celestial Frame requires 132 floats / 528 bytes');
   const s=clock.state,m=s.moon,active=clock.mode==='astronomy';
-  frame.set(m.direction,96);frame[99]=active?m.irradiance:0;frame.set(m.right,100);frame[103]=m.radius;
-  frame.set(m.up,104);frame[107]=m.phase;frame.set(m.sunDirection,108);frame[111]=m.lambert;
+  // The disc divides by the Lambert term, so raising both leaves its own radiance physical.
+  frame.set(m.direction,96);frame[99]=active?m.irradiance*m.lightGain:0;frame.set(m.right,100);frame[103]=m.radius;
+  frame.set(m.up,104);frame[107]=m.phase;frame.set(m.sunDirection,108);frame[111]=m.lambert*m.lightGain;
   frame[112]=active?1:0;frame[113]=active&&clock.stars?s.starVisibility:0;frame[114]=active&&clock.constellations?s.starVisibility:0;frame[115]=active&&s.moonShadows?1:0;frame.set(s.starRotation,116);
 }
 

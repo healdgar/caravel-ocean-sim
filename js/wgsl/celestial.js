@@ -42,8 +42,10 @@ fn lunarSky(dir:vec3f)->vec3f {
   if(!celestialEnabled()){return vec3f(0);}
   let h=max(dir.y,0.0);let phase=phaseRayleigh(clamp(dot(dir,F.moonDir.xyz),-1.0,1.0));
   let moon=lunarIlluminance()*vec3f(.28,.40,.65)*phase/(.12+h)*.055;
-  // Very weak airglow supplies a non-directional floor; it is not blue daylight.
-  let airglow=vec3f(.65,.85,.65)*2e-8*(1.0-smoothstep(-.2,-.06,F.sunDir.y));
+  // Starlight and airglow as adapted eyes read them: a dim blue-grey sky that land and hull
+  // stand out against. Physically about 7.6e-8, raised so a moonless night is dark, not blank.
+  // Airglow thickens toward the horizon, which is what shows land against the sky.
+  let airglow=vec3f(.56,.72,1.0)*1.7e-6*(1.0+2.2*pow(1.0-h,5.0))*(1.0-smoothstep(-.2,-.06,F.sunDir.y));
   return moon+airglow;
 }
 fn lunarDisk(dir:vec3f)->vec3f {
@@ -108,7 +110,7 @@ fn starFaceDirection(d:vec3f,face:u32)->vec3f{
 @vertex fn vs(@builtin(vertex_index) id:u32,@location(0) direction:vec3f,@location(1) flux:vec3f)->StarVertex{
  let corners=array<vec2f,6>(vec2f(-1,-1),vec2f(1,-1),vec2f(1,1),vec2f(-1,-1),vec2f(1,1),vec2f(-1,1));
  let d=(F.starRotation*vec4f(direction,0)).xyz;let q=starFaceDirection(d,u32(SF.axis.x));
- let size=SF.axis.y;let uv=corners[id];let spread=2.0;
+ let size=SF.axis.y;let uv=corners[id];let spread=1.5;
  var o:StarVertex;o.position=vec4f(vec2f(q.x,-q.y)/max(q.z,.00001)+uv*(2.0*spread/size),0,1);
  if(q.z<=0.0||d.y<=0.0||F.celestial.y<=0.0){o.position=vec4f(3,3,0,1);}
  o.uv=uv;o.flux=flux/max(q.z*q.z*q.z,.00001);o.altitude=d.y;return o;
@@ -117,7 +119,7 @@ fn starFaceDirection(d:vec3f,face:u32)->vec3f{
  let radius=dot(o.uv,o.uv);if(radius>1.0){discard;}
  // Unit-integral Gaussian PSF, physical stellar flux distributed over cube texels.
  let gaussian=exp(-4.0*radius)*1.297;let size=SF.axis.y;
- let solidAngle=4.0/(size*size);let psfArea=4.0;
+ let solidAngle=4.0/(size*size);let psfArea=2.25;
  let airmass=1.0/max(o.altitude,.04);let extinction=exp(-vec3f(.12,.16,.23)*airmass*max(.5,F.atmo.x/3.0));
  return vec4f(o.flux*gaussian/(solidAngle*psfArea)*extinction*F.celestial.y,1);
 }

@@ -189,6 +189,11 @@ test('crew LODs build progressive index tiers over the shared skinned vertex buf
   assert.deepEqual(selectCrewLOD({x:0,z:0,enabled:true},{x:200,y:10,z:200}),{mainTier:0,shadowTier:1,distance:0});
   assert.equal(selectCrewLOD({x:0,z:0,enabled:false},{x:10,y:2,z:10}).mainTier,0);
   assert.equal(selectCrewLOD({x:0,z:0,enabled:false},{x:45,y:2,z:0}).mainTier,1);
+  // A spyglass brings a far crew as near as the ordinary view would at a fifth of the range.
+  const lens=12.5*Math.PI/180;
+  assert.equal(selectCrewLOD({x:0,z:0,enabled:false},{x:45,y:2,z:0,fovY:lens}).mainTier,0);
+  assert.equal(selectCrewLOD({x:0,z:0,enabled:false},{x:600,y:2,z:0}).culled,true);
+  assert.notEqual(selectCrewLOD({x:0,z:0,enabled:false},{x:600,y:2,z:0,fovY:lens}).culled,true);
   assert.equal(selectCrewLOD({x:0,z:0,enabled:false},{x:120,y:2,z:0}).mainTier,2);
 });
 test('crew animation mixer, sea-legs balance, 30-joint finger grip, gaze tracking, inertializer, and 11-body XPBD ragdoll operate smoothly',async ()=>{

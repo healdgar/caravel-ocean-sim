@@ -1839,7 +1839,8 @@ test('voyage panel leaves the helm alone: a dock panel on compact screens, clear
       const box=await page.evaluate(()=>{
         const rect=s=>document.querySelector(s).getBoundingClientRect(),hud=rect('#voyage-hud'),dock=rect('#camera-dock'),instruments=rect('#sailing-instruments'),helm=rect('#helm-controls');
         const overlap=(a,b)=>a.left<b.right&&b.left<a.right&&a.top<b.bottom&&b.top<a.bottom;
-        return {dock:overlap(hud,dock),instruments:overlap(hud,instruments),helm:overlap(hud,helm),watch:rect('#voyage-hud .voyage-watch').right<=dock.left||rect('#voyage-hud .voyage-watch').top>=dock.bottom,scene:document.elementFromPoint(innerWidth/2,innerHeight/2)?.id};
+        // A timed notice may pop up over the scene. It is not the panel under test.
+        return {dock:overlap(hud,dock),instruments:overlap(hud,instruments),helm:overlap(hud,helm),watch:rect('#voyage-hud .voyage-watch').right<=dock.left||rect('#voyage-hud .voyage-watch').top>=dock.bottom,scene:document.elementsFromPoint(innerWidth/2,innerHeight/2).find(el=>!el.closest('#landfall-discovery-banner'))?.id};
       });
       assert.deepEqual(box,{dock:false,instruments:false,helm:false,watch:true,scene:'c'},JSON.stringify({width,height}));
     }

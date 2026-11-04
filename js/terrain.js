@@ -638,11 +638,14 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // Four exact height loads from immutable storage avoid consuming another
   // sampled-texture slot in the already texture-heavy ocean fragment stage.
   const nearElevation=buffer(nearTile?.heights??regionalElevationData??new Float32Array([-120]),GPUBufferUsage.STORAGE,'Wells Bay immutable near elevation');
+  // Upgrades, climate and streamed sections can all finish after the pack has been disposed.
+  let terrainDisposed=false;
   function writeNearDomainUniform(){
+    if(terrainDisposed)return;
     device.queue.writeBuffer(nearDomain,0,new Float32Array(nearDomainValues()));
   }
   function updateRegionalElevationGrid(){
-    if(!regionalElevationData||!regionalElevationSize)return;
+    if(terrainDisposed||!regionalElevationData||!regionalElevationSize)return;
     const regSpan=activeRegion.span*5;
     const x0=activeRegion.x-regSpan*0.5;
     const z0=activeRegion.z-regSpan*0.5;
@@ -1061,7 +1064,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   }
 
   function rebuildNeighborTreeInstances(){
-    if(!proceduralPack)return;
+    if(terrainDisposed||!proceduralPack)return;
     updateRegionalElevationGrid();
     if(forest&&forestPack){
       trees=new Float32Array(0);
@@ -1103,7 +1106,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   }
 
   async function processSectionStreamQueue(){
-    if(sectionStreamBusy||!proceduralPack||!sectionQueue.length)return;
+    if(terrainDisposed||sectionStreamBusy||!proceduralPack||!sectionQueue.length)return;
     sectionStreamBusy=true;
     const myEpoch=sectionEpoch;
     // Synthesize neighboring coastal sections in topological distance order (cardinals before diagonals/2nd ring)
@@ -1168,7 +1171,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   }
 
   function seedInitialCoastalSections(){
-    if(!proceduralPack)return;
+    if(terrainDisposed||!proceduralPack)return;
     const dirs=detectCoastalContinuationDirs(
       proceduralPack.rawHeights||heights,
       activeRegion.size,
@@ -1260,7 +1263,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   }:null;
 
   function applyUpgradedPack(upgradedPack,boat=null,isUpgraded=true){
-    if(!proceduralPack||!upgradedPack?.heights||!upgradedPack?.mesh)return false;
+    if(terrainDisposed||!proceduralPack||!upgradedPack?.heights||!upgradedPack?.mesh)return false;
     proceduralPack._cachedForestBuckets=null;
     upgradedPack._cachedForestBuckets=null;
     portsDirty=true;
@@ -1372,7 +1375,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
 
   if(proceduralPack&&search.get('publicClimate')!=='off'){
     fetchPublicClimateProfile(activeRegion.latitude,activeRegion.longitude,{region:activeRegion}).then(liveClimate=>{
-      if(!liveClimate)return;
+      if(terrainDisposed||!liveClimate)return;
       const prevKoppen=activeClimate?.koppenCode;
       activeClimate=liveClimate;
       discovery.climate=liveClimate;
@@ -1389,6 +1392,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     const forceFirstExplorer=search.get('discover')==='1';
     const autoApply1550=!forceFirstExplorer&&search.get('era')!=='2026';
     setTimeout(()=>{
+      if(terrainDisposed)return;
       runLandfallDiscoveryPipeline({ ...proceduralPack, heights: baseSnapshot.heights },{
         forceFirstExplorer,
         snapToCoast:!options?.lateSpawn,
@@ -1482,6 +1486,14 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       const sz=Math.round((lz-activeRegion.z)/activeRegion.span);
       return loadedSections.has(`${sx},${sz}`);
     },
+    // Whether height() can be trusted at a point: built, still to come, or outside this coast.
+    coverageAt(x,z){
+      const lx=x-worldOffset.x,lz=z-worldOffset.z;
+      const sx=Math.round((lx-activeRegion.x)/activeRegion.span),sz=Math.round((lz-activeRegion.z)/activeRegion.span);
+      if(sx===0&&sz===0)return 'known';
+      if(!proceduralPack||Math.abs(sx)>4||Math.abs(sz)>4)return 'none';
+      return loadedSections.has(`${sx},${sz}`)?'known':'pending';
+    },
     ensureSectionAt(x,z){
       if(!proceduralPack)return;
       const lx=x-worldOffset.x,lz=z-worldOffset.z;
@@ -1520,6 +1532,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       return {dx,dz};
     },
     dispose(){
+      // Real-terrain upgrades and streamed sections can still arrive after this.
+      terrainDisposed=true;
       sectionEpoch++;sectionQueue.length=0;queuedSections.clear();
       for(const rec of loadedSections.values())destroySectionRecord(rec);
       loadedSections.clear();
