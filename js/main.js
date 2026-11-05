@@ -1,3 +1,4 @@
+import {forestSurfaceFeatures} from './forest-surfaces.js';
 import {withSceneHullProfile} from './wgsl/hull.js';
 import {pruneWGSLFunctions} from './wgsl-prune.js';
 import {createGPUProgramCache} from './gpu-program-cache.js';
@@ -259,7 +260,7 @@ async function main() {
   if (!adapter) fail('No WebGPU adapter found.');
   const hasTS = adapter.features.has('timestamp-query');
   const device = await adapter.requestDevice({
-    requiredFeatures: hasTS ? ['timestamp-query'] : [],
+    requiredFeatures: [...(hasTS ? ['timestamp-query'] : []), ...forestSurfaceFeatures(adapter)],
   });
   validateFleetDevice(device.limits,fleetCount);
   let firstGpuError = false,oceanStartupDeviceLost=false,oceanStartupFirstFrameSubmitted=false;

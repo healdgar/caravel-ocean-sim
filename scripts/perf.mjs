@@ -7,14 +7,15 @@
 //   npm run perf -- --tris                           also count triangles per pipeline
 //   npm run perf -- --uploads                        what the CPU sends the GPU each frame, by buffer
 //   npm run perf -- --profile                        JavaScript time per function
-// PANEL=1 adds the game's own GPU pass spans. HEADED=1 shows the window.
+//   npm run perf -- --textures                       live GPU texture memory by format, forest download
+// PANEL=1 adds the game's own GPU pass spans. HEADED=1 shows the window. PERF_SHOTS=folder keeps a picture of each row.
 import {once} from 'node:events';
 import {execSync} from 'node:child_process';
 import {chromium} from 'playwright';
 import {createDevServer} from '../server.mjs';
 import {coastalRegionStageURL} from '../js/landfall.js';
 
-const args=process.argv.slice(2),wantTriangles=args.includes('--tris'),wantUploads=args.includes('--uploads'),wantProfile=args.includes('--profile');
+const args=process.argv.slice(2),wantTriangles=args.includes('--tris'),wantUploads=args.includes('--uploads'),wantProfile=args.includes('--profile'),wantTextures=args.includes('--textures');
 const rows=JSON.parse(args.find(a=>a.startsWith('['))??'[["base",{}]]');
 const SAMPLE_SECONDS=6,SETTLE_MS=5000,CPU_LIMITED_MS=14,GPU_BUSY_PERCENT=85;
 const server=createDevServer();server.listen(0,'127.0.0.1');await once(server,'listening');
@@ -52,6 +53,10 @@ function instrument(){
   const plainIndirect=pass.drawIndirect;pass.drawIndirect=function(b,o){if(window.perfCapture)draws.push({label:pipelines.get(this),buffer:b,offset:o});return plainIndirect.call(this,b,o);};
   const createBuffer=GPUDevice.prototype.createBuffer;GPUDevice.prototype.createBuffer=function(desc){return createBuffer.call(this,/indirect| draws/i.test(desc.label||'')?{...desc,usage:desc.usage|GPUBufferUsage.COPY_SRC}:desc);};
   const request=GPUAdapter.prototype.requestDevice;GPUAdapter.prototype.requestDevice=async function(...a){return window.perfDevice=await request.apply(this,a);};
+  performance.setResourceTimingBufferSize(4096);
+  const textures=(window.perfTextures=new Map());
+  const createTexture=GPUDevice.prototype.createTexture;GPUDevice.prototype.createTexture=function(desc){const texture=createTexture.call(this,desc);textures.set(texture,desc);return texture;};
+  const destroyTexture=GPUTexture.prototype.destroy;GPUTexture.prototype.destroy=function(){textures.delete(this);return destroyTexture.call(this);};
   const uploads=(window.perfUploads=new Map());
   const writeBuffer=GPUQueue.prototype.writeBuffer;GPUQueue.prototype.writeBuffer=function(buffer,offset,data,dataOffset=0,size){
     const row=uploads.get(buffer.label||'unlabelled')??{bytes:0,calls:0};uploads.set(buffer.label||'unlabelled',row);
@@ -75,6 +80,28 @@ const countTriangles=page=>page.evaluate(async()=>{
     const row=totals[d.label]??={triangles:0,draws:0};row.triangles+=triangles/2;row.draws+=.5;
   }
   return totals;
+});
+
+// Bytes the textures still alive would occupy, by format, and what the forest's surfaces cost to fetch.
+const textureMemory=page=>page.evaluate(()=>{
+  const texel={r8unorm:1,r16float:2,r32float:4,rg8unorm:2,rg16float:4,rg32float:8,rgba8unorm:4,'rgba8unorm-srgb':4,bgra8unorm:4,'bgra8unorm-srgb':4,rgba16float:8,rgba32float:16,rgb10a2unorm:4,rg11b10ufloat:4,depth32float:4,depth24plus:4,'depth24plus-stencil8':4,'depth32float-stencil8':5};
+  const bytes=d=>{
+    const [w,h,depth]=Array.isArray(d.size)?[d.size[0],d.size[1]??1,d.size[2]??1]:[d.size.width,d.size.height??1,d.size.depthOrArrayLayers??1],compressed=/^(bc7|astc-4x4)/.test(d.format);
+    let total=0;for(let level=0;level<(d.mipLevelCount??1);level++){
+      const across=Math.max(1,w>>level),down=Math.max(1,h>>level),layers=d.dimension==='3d'?Math.max(1,depth>>level):depth;
+      total+=(compressed?Math.ceil(across/4)*Math.ceil(down/4)*16:across*down*(texel[d.format]??NaN))*layers*(d.sampleCount??1);
+    }
+    return total;
+  };
+  const byFormat={},forest={};let total=0,unknown=[];
+  for(const d of perfTextures.values()){
+    const b=bytes(d);if(!Number.isFinite(b)){unknown.push(d.format);continue;}
+    total+=b;byFormat[d.format]=(byFormat[d.format]??0)+b;
+    if(/forest (immutable )?native/.test(d.label||''))forest[d.format]=(forest[d.format]??0)+b;
+  }
+  const fetched=performance.getEntriesByType('resource').filter(e=>/forest-scenery\//.test(e.name)),sum=test=>fetched.filter(e=>test.test(e.name)).reduce((s,e)=>s+e.encodedBodySize,0);
+  return{total,byFormat,forest,unknown:[...new Set(unknown)],sources:[...perfTextures.values()].filter(d=>/forest native source/.test(d.label||'')).length,
+    maps:sum(/\.png/),blocks:sum(/surfaces\/.*\.gz/),allForest:fetched.reduce((s,e)=>s+e.encodedBodySize,0)};
 });
 
 const idle=[];for(let i=0;i<4;i++){idle.push(gpuCounters().device);await new Promise(resolve=>setTimeout(resolve,250));}
@@ -125,6 +152,13 @@ for(const [label,extra,edits] of rows){
     const frames=result.fps*SAMPLE_SECONDS;
     console.log(' '.repeat(20),'JavaScript per frame, by function:');
     for(const [name,micros] of [...self].sort((a,b)=>b[1]-a[1]).slice(0,18))console.log(' '.repeat(20),`${(micros/1000/frames).toFixed(2).padStart(6)} ms  ${name}`);
+  }
+  if(process.env.PERF_SHOTS)await page.screenshot({path:`${process.env.PERF_SHOTS}/${label.replace(/\W+/g,'-')}.png`});
+  if(wantTextures){
+    const t=await textureMemory(page),mib=v=>(v/1048576).toFixed(1).padStart(7);
+    console.log(' '.repeat(20),`${mib(t.total)} MiB in live textures · forest surfaces ${mib(Object.values(t.forest).reduce((s,v)=>s+v,0))} MiB (${Object.entries(t.forest).map(([f,v])=>f+' '+mib(v)).join(', ')}) · source copies alive ${t.sources}`);
+    console.log(' '.repeat(20),'by format:',Object.entries(t.byFormat).sort((a,b)=>b[1]-a[1]).map(([f,v])=>`${f} ${(v/1048576).toFixed(1)}`).join(' · '),t.unknown.length?`· unsized: ${t.unknown}`:'');
+    console.log(' '.repeat(20),`forest fetched: maps ${mib(t.maps)} MiB · blocks ${mib(t.blocks)} MiB · everything under forest-scenery ${mib(t.allForest)} MiB`);
   }
   if(wantTriangles){
     const totals=Object.entries(await countTriangles(page)).sort((a,b)=>b[1].triangles-a[1].triangles);

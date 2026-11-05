@@ -7,6 +7,7 @@ import {loadForestImpostors,createForestImpostorResources,FOREST_IMPOSTOR_WGSL} 
 import {loadForestLight,forestLightGPUBytes,FOREST_LIGHT_WGSL} from './forest-light.js';
 import {loadForestNativeLOD} from './forest-native-lod.js';
 import {loadForestClusters,createForestClusters,FOREST_CLUSTER_ASSETS,SUBTROPICAL_FOREST_CLUSTER_ASSETS,FOREST_CLUSTER_VERTEX_WGSL,strikeForestRoot,reapplyForestStrikes} from './forest-clusters.js';
+import {FOREST_SURFACE_ASSETS,SUBTROPICAL_FOREST_SURFACE_ASSETS,chooseForestSurfaceCodec,createForestSurfaceTextures,forestMaterialOptics,loadForestSurfaceSet} from './forest-surfaces.js';
 import {loadForestVolumes,createForestVolumeResources,FOREST_VOLUME_ASSETS,SUBTROPICAL_FOREST_VOLUME_ASSETS,FOREST_VOLUME_WGSL,FOREST_VOLUME_SHELL_WGSL} from './forest-volume.js';
 
 export const FOREST_ASSETS=Object.freeze({
@@ -340,7 +341,7 @@ const CERTIFIED_FOREST_STREAM_SHAS=Object.freeze({
     '5e26e551af5855219ef1ac84ef97fafeef1a4826cd94da7ff6fcda78dfed6963',
   ]),
 });
-export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,volumeAssets=assets===SUBTROPICAL_FOREST_ASSETS?SUBTROPICAL_FOREST_VOLUME_ASSETS:FOREST_VOLUME_ASSETS,impostorAssets,loadAtlases=true,loadVolumes=true,skipNative=false,deferNative=false,skipRoots=false,onManifest,onRoots}={}){
+export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,volumeAssets=assets===SUBTROPICAL_FOREST_ASSETS?SUBTROPICAL_FOREST_VOLUME_ASSETS:FOREST_VOLUME_ASSETS,impostorAssets,loadAtlases=true,loadVolumes=true,skipNative=false,deferNative=false,skipRoots=false,deferSurfaces=false,onManifest,onRoots}={}){
   const load=async(n,signal)=>{forestLoadAbort(signal);if(typeof assets[n]!=='string')throw Error('Unregistered forest asset: '+n);const r=await fetchAsset(assets[n],signal?{signal}:undefined);if(!r.ok)throw Error('Forest scenery unavailable ('+r.status+'): '+n);return r;};
   const manifest=validateForestScenery(await(await load('manifest.json')).json());
   if(!globalThis.crypto?.subtle)throw Error('Forest receipt verification requires Web Crypto');
@@ -370,9 +371,21 @@ export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,v
   const certifiedRoots=!skipRoots&&CERTIFIED_FOREST_STREAM_SHAS['roots.bin'].has(manifest.files['roots.bin']?.sha256);
   if(!skipRoots&&!certifiedRoots)await finishForestChecks(forestRootChecks(manifest,roots));
   onRoots?.({manifest,roots,...volume});
-  let nativePromise,nativeLoaded=false;
-  const loadNative=({signal,skipGeometry=false}={})=>nativePromise??=(async()=>{
+  let nativePromise,mapsPromise,nativeLoaded=false;
+  // The maps, kept apart from geometry: a device using prebuilt blocks never needs them.
+  const loadSurfaces=({signal}={})=>mapsPromise??=(async()=>{
     const textures={},pending=new Map();
+    await Promise.all(manifest.prototypes.flatMap(p=>p.nativeMaterials.flatMap(material=>['albedo','normal','roughnessMap'].filter(kind=>material[kind]).map(async kind=>{
+      const receipt=material[kind];if(pending.has(receipt.file))return pending.get(receipt.file);
+      const request=(async()=>{
+        const raw=await(await load(receipt.file,signal)).arrayBuffer();
+        if(raw.byteLength!==receipt.bytes)throw Error('Incomplete forest surface: '+receipt.file);
+        if(await digest(raw)!==receipt.sha256)throw Error('Forest surface digest mismatch: '+receipt.file);textures[receipt.file]=raw;
+      })();pending.set(receipt.file,request);return request;
+    }))));
+    return textures;
+  })();
+  const loadNative=({signal,skipGeometry=false,skipSurfaces=false}={})=>nativePromise??=(async()=>{
     const lightPromise=(skipGeometry?Promise.resolve(null):loadForestLight({forest:manifest,fetchAsset})).then(canopyLight=>({canopyLight,canopyLightError:null})).catch(error=>({canopyLight:null,canopyLightError:error.message}));
     const geometryPromise=skipGeometry?Promise.resolve({manifest,vertices:null,indices:null,roots}):Promise.all([stream('vertices.bin',signal),stream('indices.bin',signal)]).then(async([vertices,indices])=>{
       const certifiedGeometry=CERTIFIED_FOREST_STREAM_SHAS['vertices.bin'].has(manifest.files['vertices.bin']?.sha256)&&
@@ -385,27 +398,20 @@ export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,v
       }
       return decodeForestSceneryAsync(manifest,{'vertices.bin':vertices,'indices.bin':indices,'roots.bin':rootBytes,skipRoots:true},{signal}).then(g=>({...g,roots}));
     });
-    const materialPromise=Promise.all(manifest.prototypes.flatMap(p=>p.nativeMaterials.flatMap(material=>['albedo','normal','roughnessMap'].filter(kind=>material[kind]).map(async kind=>{
-      const receipt=material[kind];if(pending.has(receipt.file))return pending.get(receipt.file);
-      const request=(async()=>{
-        const raw=await(await load(receipt.file,signal)).arrayBuffer();
-        if(raw.byteLength!==receipt.bytes)throw Error('Incomplete forest surface: '+receipt.file);
-        if(await digest(raw)!==receipt.sha256)throw Error('Forest surface digest mismatch: '+receipt.file);textures[receipt.file]=raw;
-      })();pending.set(receipt.file,request);return request;
-    }))));
-    const [geometry,,light]=await Promise.all([geometryPromise,materialPromise,lightPromise]);
+    const materialPromise=skipSurfaces?Promise.resolve({}):loadSurfaces({signal});
+    const [geometry,textures,light]=await Promise.all([geometryPromise,materialPromise,lightPromise]);
     if(lod.nativeLod&&!lod.nativeLod.indices)populateSubtropicalNativeLodIndices(manifest,lod.nativeLod,geometry.indices,geometry.vertices);
     nativeLoaded=true;return{...geometry,textures,...light,...lod};
   })();
   // Drop only our fulfilled cache reference after successful GPU installation.
   // Existing callers retain their immutable arrays; a later explicit native
   // load fetches and verifies fresh bytes. An in-flight load stays deduplicated.
-  const releaseNativeCPU=()=>{if(!nativeLoaded)return false;nativePromise=undefined;nativeLoaded=false;return true;};
+  const releaseNativeCPU=()=>{if(!nativeLoaded)return false;nativePromise=undefined;mapsPromise=undefined;nativeLoaded=false;return true;};
   // Only a complete full-sphere representation can display a forest without
   // native buffers. Upper-only legacy/missing atlases retain the eager path.
   const deferred=skipNative||deferNative||atlas.impostors?.manifest.layout.views.some(view=>view.direction[1]<0);
-  return deferred?{manifest,roots,vertices:null,indices:null,textures:null,skipNative,deferNative,...atlas,...volume,...lod,loadNative,releaseNativeCPU}:
-    {...await loadNative(),...atlas,...volume,...lod,loadNative,releaseNativeCPU};
+  return deferred?{manifest,roots,vertices:null,indices:null,textures:null,skipNative,deferNative,...atlas,...volume,...lod,loadNative,loadSurfaces,releaseNativeCPU}:
+    {...await loadNative({skipSurfaces:deferSurfaces}),...atlas,...volume,...lod,loadNative,loadSurfaces,releaseNativeCPU};
 }
 const coverageSets=new WeakMap();
 export function forestCoversPoint(manifest,x,z){
@@ -423,6 +429,9 @@ export function excludeForestRoots(trees,manifest){
 // Native pigment is sRGB; alpha is coverage, and normals are linear. Generate
 // linear, coverage-weighted mips once on the GPU. Thresholding averaged alpha
 // would delete subpixel leaves and turn an otherwise dense forest into haze.
+// Half floats here serve this compute pass, which needs a format it can write;
+// no value leaves 0..1. Devices with block compression use forest-surfaces.js.
+// Signed normals are biased so both paths hold one encoding: forestDetailSigned reads it.
 export const FOREST_SURFACE_MIPS_WGSL=/* wgsl */`
 @group(0)@binding(0)var forestMipAlbedo:texture_2d_array<f32>;
 @group(0)@binding(1)var forestMipNormal:texture_2d_array<f32>;
@@ -440,7 +449,7 @@ fn forestMipLinear(c:vec3f)->vec3f{
  var roughness=forestMipOptics[id.z].x;
  if(forestMipOptics[id.z].y>0.){roughness=textureLoad(forestMipRoughness,p,layer,0).r;}
  textureStore(forestMipColourOut,p,layer,vec4f(forestMipLinear(c.rgb)*c.a,c.a));
- textureStore(forestMipNormalOut,p,layer,vec4f(n*c.a,roughness*c.a));
+ textureStore(forestMipNormalOut,p,layer,vec4f((n*c.a*127.+vec3f(128.))/255.,roughness*c.a));
 }
 @compute @workgroup_size(8,8,1)fn forestSurfaceMips(@builtin(global_invocation_id)id:vec3u){
  let size=textureDimensions(forestMipColourOut);if(any(id.xy>=size)||id.z>=textureNumLayers(forestMipColourOut)){return;}
@@ -486,8 +495,7 @@ export async function createForestLeafSurfaces({device,shader,pack}){
       let family=families.find(f=>f.width===width&&f.height===height);
       if(!family){family={width,height,id:families.length,rows:[],levels:1+Math.floor(Math.log2(Math.max(width,height)))};families.push(family);}
       if(families.length>4)throw Error('Native forest texture dimension family limit exceeded');
-      optics.set([material.roughness,material.underside,material.transmission,material.opacityThreshold,...material.undersideReference,0,
-        family.id,family.rows.length,material.wrap==='repeat'?1:0,material.clearcoat??0],index*12);
+      forestMaterialOptics(optics,index,material,family.id,family.rows.length);
       family.rows.push({maps,material});
     }
     const [init,mip]=await pipelinesPromise;
@@ -649,10 +657,12 @@ fn forestNativeLinear(c:vec3f)->vec3f{
  return select(pow((c+vec3f(.055))/1.055,vec3f(2.4)),c/12.92,c<=vec3f(.04045));
 }
 struct ForestSurface {pigment:vec4f,detail:vec4f};
+fn forestDetailSigned(d:vec4f)->vec4f{return vec4f(d.xyz*(255./127.)-vec3f(128./127.),d.a);}
 fn forestNativePair(albedo:texture_2d_array<f32>,normal:texture_2d_array<f32>,uv:vec2f,ux:vec2f,uy:vec2f,layer:i32,repeating:bool)->ForestSurface{
  var result:ForestSurface;
  if(repeating){result.pigment=textureSampleGrad(albedo,forestNativeRepeatSampler,uv,layer,ux,uy);result.detail=textureSampleGrad(normal,forestNativeRepeatSampler,uv,layer,ux,uy);}
  else{result.pigment=textureSampleGrad(albedo,forestNativeSampler,uv,layer,ux,uy);result.detail=textureSampleGrad(normal,forestNativeSampler,uv,layer,ux,uy);}
+ result.detail=forestDetailSigned(result.detail);
  return result;
 }
 fn forestReadNative(material:ForestLeafMaterial,uv:vec2f,ux:vec2f,uy:vec2f)->ForestSurface{
@@ -714,7 +724,11 @@ fn forestNativeAlpha(material:ForestLeafMaterial,uv:vec2f,ux:vec2f,uy:vec2f)->f3
 // the leaves in front, and each sample's depth test decides which of them it shows.
 struct ForestLeafCoverage {@location(0)colour:vec4f,@builtin(sample_mask)mask:u32};
 @fragment fn forestNativeLeafDepthFS(in:ForestVertex)->ForestLeafCoverage{
- let alpha=forestNativeAlpha(forestNativeMaterials[u32(in.nativeMaterial)],in.leafUV,dpdx(in.leafUV),dpdy(in.leafUV));
+ // Nearby leaves read coverage half a level finer, which shows their shapes. It ends before the far
+ // canopy, whose look depends on the plain average. The mean coverage read is the same either way.
+ // Position's w is one over view depth; a world position here would be one more value per vertex.
+ let near=mix(.7,1.,smoothstep(30.,90.,1./in.pos.w));
+ let alpha=forestNativeAlpha(forestNativeMaterials[u32(in.nativeMaterial)],in.leafUV,dpdx(in.leafUV)*near,dpdy(in.leafUV)*near);
  // Independent native leaf footprints must not all select identical hardware
  // sample bits at small projected sizes. Stable per-primitive/root masks keep
  // expected filtered source coverage, including sub-sample fractions. This is
@@ -1054,6 +1068,23 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       impostor:{loaded:!!atlas,error:pack.impostorError??null,views:atlas?.views??0,fullSphere:atlas?.fullSphere??false,projectedPixels:impostorPixels,
         mode:impostorMode,appearanceErrorSupported:false,qualification:'Authored initial policy; native rendered comparisons required'},
       species:[...new Set(m.prototypes.map(p=>p.species))],sourceClaim:m.sourceClaim};
+    async function loadCompressedSurfaces(){
+      const materials=m.prototypes.flatMap(p=>p.nativeMaterials);
+      const codec=chooseForestSurfaceCodec(device,typeof location==='undefined'?'auto':new URLSearchParams(location.search).get('forestSurfaces')||'auto');
+      stats.surfaces={codec:null,downloadBytes:0,error:null};
+      if(!codec)return null;
+      let set;
+      try{set=await loadForestSurfaceSet({assets:isSubtropicalPack?SUBTROPICAL_FOREST_SURFACE_ASSETS:FOREST_SURFACE_ASSETS,materials,codec,signal:abort.signal});}
+      catch(error){if(abort.signal.aborted)throw error;stats.surfaces.error=error.message;return null;}
+      if(!set){stats.surfaces.error='Prebuilt surfaces do not match this pack\'s maps; rebake with scripts/prepare-forest-surfaces.py';return null;}
+      device.pushErrorScope('validation');
+      let result=null;
+      try{result=createForestSurfaceTextures({device,set,materials});}catch(error){stats.surfaces.error=error.message;}
+      const invalid=await device.popErrorScope();
+      if(invalid){result?.destroy();stats.surfaces.error=invalid.message;return null;}
+      if(result)stats.surfaces={codec,downloadBytes:set.families.reduce((sum,f)=>sum+f.albedo.downloadBytes+f.detail.downloadBytes,0),error:null};
+      return result;
+    }
     async function installNative(){
       let surfaces,surfacesPromise;const candidateBuffers=[];
       try{
@@ -1062,8 +1093,10 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
         nativeStatus.status='loading';
         const clusterSource=nativeMid&&clustersWanted?await loadForestClusters({assets:isSubtropicalPack?SUBTROPICAL_FOREST_CLUSTER_ASSETS:FOREST_CLUSTER_ASSETS,signal:abort.signal}).catch(error=>{stats.clusters={loaded:false,error:error.message};return null;}):null;
         // Clusters hold every tree's geometry. Only the subtropical far models still come from the native streams.
-        const source=pack.vertices?pack:await pack.loadNative({signal:abort.signal,skipGeometry:Boolean(clusterSource)&&Boolean(middle)});forestLoadAbort(abort.signal);
-        surfacesPromise=createForestLeafSurfaces({device,shader,pack:source});surfacesPromise.catch(()=>{});
+        // Prebuilt blocks avoid the map download and the half-float arrays. If they cannot be used, for any reason, the maps can.
+        const compressed=await loadCompressedSurfaces();forestLoadAbort(abort.signal);
+        const source=pack.vertices?pack:await pack.loadNative({signal:abort.signal,skipGeometry:Boolean(clusterSource)&&Boolean(middle),skipSurfaces:Boolean(compressed)});forestLoadAbort(abort.signal);
+        surfacesPromise=compressed?Promise.resolve(compressed):(async()=>createForestLeafSurfaces({device,shader,pack:{...source,textures:Object.keys(source.textures??{}).length?source.textures:await pack.loadSurfaces({signal:abort.signal})}}))();surfacesPromise.catch(()=>{});
         const upload=async(data,usage,label)=>{
           const bytes=new Uint8Array(data.buffer,data.byteOffset,data.byteLength),buffer=device.createBuffer({label,size:bytes.byteLength,usage:usage|B.COPY_DST});allocated.push(buffer);candidateBuffers.push(buffer);
           // Each byte is uploaded once. Keep transfer chunks bounded and
