@@ -201,6 +201,16 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## threejs-nanites cluster builder
+
+The offline tree cluster builder in `third_party/threejs-nanites/` comes from
+[threejs-nanites](https://github.com/VictorZakharov/threejs-nanites), Copyright
+(c) 2026 Victor Zakharov, MIT licence, with the local changes its README lists.
+It runs in `scripts/prepare-forest-clusters.mjs` and produces the data in
+`assets/forest-scenery/*/clusters/`. Its code is not part of the game's page, and
+neither three.js nor the rest of that library is used. The runtime in
+`js/forest-clusters.js` is original project code.
+
 ## Meshoptimizer forest transport
 
 The local forest decoder derives from meshoptimizer 1.3.0 by Arseny Kapoulkine.

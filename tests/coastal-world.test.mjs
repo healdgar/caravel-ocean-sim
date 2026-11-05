@@ -313,7 +313,7 @@ test('generateProceduralCoastalPack produces complete landfall packs and safe ve
   assert.equal(url.searchParams.get('lon'), '-75.548');
 });
 
-test('architectural port materials, 3D palm geometry, beach sand vertex weights, and Terrarium DEM upgrade', async () => {
+test('architectural port materials, foreshore palm places, beach sand vertex weights, and Terrarium DEM upgrade', async () => {
   const pack = generateProceduralCoastalPack({
     ...SPANISH_MAIN_1550_REGIONS.cartagena,
     size: 65,
@@ -322,13 +322,15 @@ test('architectural port materials, 3D palm geometry, beach sand vertex weights,
     vegetationCandidates: 6000,
   });
 
-  // Verify port geometry emits architectural materials (10=timber, 11=masonry, 12=stucco, 13=terracotta, 14=recess) + 3D palms (3=trunk, 4=fronds)
+  // Verify port geometry emits architectural materials (10=timber, 11=masonry, 12=stucco, 13=terracotta, 14=recess).
+  // The forest draws palms, so the port only records where they stand.
+  assert.ok(pack.port.palms instanceof Float32Array && pack.port.palms.length >= 8, 'port records foreshore palm places');
   const kinds = new Set();
   for (let i = 0; i < pack.portGeometry.vertices.length; i += 8) {
     kinds.add(Math.round(pack.portGeometry.vertices[i + 6]));
   }
-  for (const k of [3, 4, 10, 11, 12, 13, 14]) {
-    assert.ok(kinds.has(k), `port & palm geometry includes material kind ${k}`);
+  for (const k of [10, 11, 12, 13, 14]) {
+    assert.ok(kinds.has(k), `port geometry includes material kind ${k}`);
   }
 
   // Verify Uber-Noise is bounded, deterministic, and derivative-damped

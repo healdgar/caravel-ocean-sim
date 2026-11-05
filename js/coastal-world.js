@@ -7389,85 +7389,8 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     flushSection();
   }
 
-  // 2-tier 3D Corner-model Palms (Cocos nucifera coconut palms on foreshore + Roystonea regia royal palms & Sabal palmetto in lowland/inland canopy)
-  if (palms instanceof Float32Array && palms.length >= 8) {
-    portPlacement.palms = palms;
-    activeInstIndex = portPlacement.instances.length;
-    activePrefabId = 'palm_grove';
-    activeInstTag = 'palms';
-    instPartCounters.clear();
-    currentSectionKey = null;
-    sectionStart = indices.length;
-    beginSection('palm_canopy_grove');
-    const maxPalms = Math.min(palms.length / 8, 520);
-    const seawardRad = ((portPlacement.shoreBearing ?? 112) + 180) * COASTAL_DEG_TO_RAD;
-    const defaultSeaX = Math.sin(seawardRad);
-    const defaultSeaZ = -Math.cos(seawardRad);
-    for (let idx = 0; idx < maxPalms; idx++) {
-      const base = idx * 8;
-      const px = palms[base], py = palms[base + 1], pz = palms[base + 2];
-      const plumeR = palms[base + 3], ht = palms[base + 4], shape = palms[base + 5];
-      const psx = palms[base + 6] || 0, psz = palms[base + 7] || 0;
-      const gradLen = Math.hypot(psx, psz);
-      // Lean seaward down the local beach slope (-sx, -sz) when available; inland royal/sabal palms stand more upright
-      const seaX = gradLen > 0.008 ? -psx / gradLen : defaultSeaX;
-      const seaZ = gradLen > 0.008 ? -psz / gradLen : defaultSeaZ;
-      const azSpread = (shape - 0.5) * 1.15;
-      const leanAngle = Math.atan2(seaZ, seaX) + azSpread;
-      const leanDirX = Math.cos(leanAngle), leanDirZ = Math.sin(leanAngle);
-      const isForeshore = py < 9.5;
-      const leanMag = isForeshore ? 2.1 + ((shape * 7) % 1) * 2.2 : 0.55 + ((shape * 7) % 1) * 0.85;
-      // Tier 0 (first 160 palms): 5-segment curved trunk + 12 arching fronds; Tier 1 (palms 160..520): 3-segment trunk + 6 arching fronds
-      const isNearTier = idx < 160;
-      const segs = isNearTier ? 5 : 3;
-      let prevX = px, prevY = py - 0.35, prevZ = pz, prevR = 0.42;
-      for (let s = 1; s <= segs; s++) {
-        const t = s / segs;
-        const curY = py + t * ht;
-        // Phototropic S-curve: leans strongly seaward near base/mid-trunk, then rights toward crown
-        const curve = (1.35 * t - 0.35 * t * t) * leanMag;
-        const curX = px + leanDirX * curve;
-        const curZ = pz + leanDirZ * curve;
-        const curR = 0.38 * (1 - 0.58 * t);
-        // 4-sided trunk prism segment (kind = 3.0 bark)
-        for (let k = 0; k < 4; k++) {
-          const a0 = (k * Math.PI) / 2, a1 = ((k + 1) * Math.PI) / 2;
-          const c0 = Math.cos(a0), s0 = Math.sin(a0), c1 = Math.cos(a1), s1 = Math.sin(a1);
-          pushQuad(
-            [prevX + c0 * prevR, prevY, prevZ + s0 * prevR],
-            [prevX + c1 * prevR, prevY, prevZ + s1 * prevR],
-            [curX + c1 * curR, curY, curZ + s1 * curR],
-            [curX + c0 * curR, curY, curZ + s0 * curR],
-            3,
-            0.45 + 0.45 * t
-          );
-        }
-        prevX = curX; prevY = curY; prevZ = curZ; prevR = curR;
-      }
-      // Arching pinnate fronds radiating from the crownshaft (kind = 4.0 tropical foliage)
-      const frondCount = isNearTier ? 12 : 6;
-      const halfFronds = frondCount >> 1;
-      for (let f = 0; f < frondCount; f++) {
-        const tier = f < halfFronds ? 0 : 1;
-        const az = (f / frondCount) * Math.PI * 2 + shape * 3.1;
-        const fx = Math.cos(az), fz = Math.sin(az);
-        const tx = -fz, tz = fx;
-        const len = plumeR * (tier === 0 ? 1.12 : 0.92);
-        const midR = len * 0.55;
-        const midY = prevY + (tier === 0 ? 0.95 : 1.65);
-        const tipY = prevY - (tier === 0 ? 1.35 : 0.35);
-        const w = isNearTier ? 0.62 : 0.78;
-        const rootP = [prevX, prevY + 0.15, prevZ];
-        const midLeft = [prevX + fx * midR - tx * w, midY, prevZ + fz * midR - tz * w];
-        const midRight = [prevX + fx * midR + tx * w, midY, prevZ + fz * midR + tz * w];
-        const tipP = [prevX + fx * len, tipY, prevZ + fz * len];
-        const exposure = tier === 0 ? 0.72 : 0.92;
-        pushTri(rootP, midRight, midLeft, 4, exposure);
-        pushTri(midLeft, midRight, tipP, 4, exposure);
-      }
-    }
-    flushSection();
-  }
+  // Foreshore palms are drawn by the forest, which seeds real palms at these places. Shot still strikes them here.
+  if (palms instanceof Float32Array && palms.length >= 8) portPlacement.palms = palms;
 
   const outVertices = new Float32Array(verts);
   const outIndices = new Uint32Array(indices);

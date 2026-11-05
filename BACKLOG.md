@@ -1,5 +1,35 @@
 # Ocean Sailing Simulator backlog and overnight checkpoint
 
+## November 5: cluster forests, real palms, wind
+
+Trees are now cluster hierarchies, cut per tree on the GPU, so detail falls off continuously instead of switching between models. The builder is the three-free part of [threejs-nanites](https://github.com/VictorZakharov/threejs-nanites) (MIT, in `third_party/threejs-nanites/`). The rest of that library draws through three.js, which this game does not use, so the runtime is our own WGSL in `js/forest-clusters.js`. `scripts/prepare-forest-clusters.mjs` bakes a pack in about 70 s.
+
+Near, mid and semi-distant trees all draw this way. The crown shells for semi-distant trees are gone. The far tier and the stand-level forest mass are untouched, so the distant canopy looks as it did.
+
+Same run, Lisbon with HMS Victory, 1728×1117, fixed polygons:
+
+| | Old tiers | Clusters |
+|---|---|---|
+| Frames per second | 41 | 46 |
+| Triangles per frame | 13.7 M | 9.8 M |
+| Tiled geometry | 253 MB | 167 MB |
+| Native vertex stream fetched | 76 MB gzipped | none |
+| Cluster streams fetched | none | 79 MB gzipped |
+
+Earlier in the day, with the machine quieter, the same comparison read 55 and 59 fps. The GPU's fragment stage is still the limit. Leaves take a pixel error of .2 of the forest's budget and wood .5, because a grown leaf card shows as a shape and thin wood hides among them. Coarser leaves also trade length for width (`rounder`, our addition to the builder): grown as they were, our long thin leaves became streaks across the crown.
+
+Palms were three things, all poor: a pole under an 11,000-needle puffball in the subtropical pack, a shader stretching it, and up to 520 low-poly palms built into each port's mesh in JavaScript. `scripts/grow-palms.mjs` and `scripts/paint-palm-leaflets.py` now grow a royal palm (pale column, green crownshaft, plumed fronds) and a coconut (leaning ringed trunk, drooping fronds, coconuts), at about a quarter of the old triangles. The port's palms are gone; the forest seeds real coconuts at the same places, leaning out to sea. Gunnery still reads those positions. Palms used to bend and char under fire by editing port vertices in JavaScript; now each hit darkens the nearest tree and the third fells it, by rewriting that one tree's 48-byte record. Bending is gone. Only foreshore palms, which gunnery knows about, take marks.
+
+Wind (`forestWind`) is three motions at three speeds: the tree bends with height, branches bob by their reach from the trunk, leaves flutter. Gust fronts roll downwind across the forest at the wind's speed. It needs no new vertex data and cost nothing measurable.
+
+Still to do, largest first:
+
+- **Ceiba and mangrove models are thin columns**, stretched sideways by a shader (`isSubBroadleaf`). They need growing properly, as the palms were.
+- **Old tiers remain** as the fallback if clusters fail to load, and for `?forestClusters=0`: `forestNativeLod` mid tiers, `lod/` sidecars and the unused subtropical `lod/`, `middle/` and `volumes/` for palms. `js/forest-lod-pilot.js` and its helpers are an earlier isolated attempt at this and can probably go.
+- **Mobile** skips native trees, so with the port's palms gone a phone sees only far models on tropical shores.
+- **The far crown shells cost 1.65 M triangles.** Clusters could do the same job for less, if the look holds.
+- **Occlusion culling** of clusters against a depth pyramid, which threejs-nanites reports saving a lot on the ground. We test trees against terrain only.
+
 ## November 4: frame rate, CPU and GPU
 
 `npm run perf` (`scripts/perf.mjs`) now shows one stressful scene, Lisbon with HMS Victory, from both sides: frame times, main-thread stages, CPU cores, the GPU's own busy, fragment and vertex counters, tiled bytes, and with `--tris` triangles per pipeline. The performance panel shows the same main-thread stages. Compare rows within one run, because other work on the machine moves every number.

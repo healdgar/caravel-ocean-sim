@@ -394,8 +394,9 @@ test('shore structure foundation scarps, rotated building OBBs, and coastal palm
  assert.equal(sReport.kind,'scenery');
  assert.ok(port.sceneryBakes?.length>0,'palm impact queues 3D scenery-tree deformation bake');
  assert.ok(port.sceneryFires?.length>0,'hot shot on palm ignites coastal scenery fire');
- const palmDirty=bakeBuildingImpactDeformations(vertsCopy,port.sceneryBakes.splice(0),8);
- assert.ok(palmDirty&&palmDirty.byteLength>0,'palm impact bends and chars 3D palm vertices in portMesh');
+ const palmBake=port.sceneryBakes[0];
+ assert.equal(palmBake.kind,'scenery-tree','the forest marks the tree at this place');
+ assert.ok(Math.hypot(palmBake.x-px,palmBake.z-pz)<6,'the mark lands within reach of the palm that was hit');
 });
 
 test('ship-to-ship collision detection prevents vessels from sailing through each other, applies 6-DOF rebound impulse, and inflicts hull/bowsprit/flooding damage',()=>{

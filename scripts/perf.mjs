@@ -3,6 +3,7 @@
 // the GPU side by side. Compare rows within one run: other work on the machine moves every number.
 //   npm run perf                                     the scene as it stands
 //   npm run perf -- '[["no crew",{"crew":"0"}]]'     rows of [label, URL parameters]
+//   rows may add source edits to try: [label, parameters, [["forest-clusters.js","find","replace"]]]
 //   npm run perf -- --tris                           also count triangles per pipeline
 //   npm run perf -- --uploads                        what the CPU sends the GPU each frame, by buffer
 //   npm run perf -- --profile                        JavaScript time per function
@@ -48,7 +49,8 @@ function instrument(){
   const draw=pass.draw;pass.draw=function(n,i=1,...r){if(window.perfCapture)draws.push({label:pipelines.get(this),count:n*i});return draw.call(this,n,i,...r);};
   const indexed=pass.drawIndexed;pass.drawIndexed=function(n,i=1,...r){if(window.perfCapture)draws.push({label:pipelines.get(this),count:n*i});return indexed.call(this,n,i,...r);};
   const indirect=pass.drawIndexedIndirect;pass.drawIndexedIndirect=function(b,o){if(window.perfCapture)draws.push({label:pipelines.get(this),buffer:b,offset:o});return indirect.call(this,b,o);};
-  const createBuffer=GPUDevice.prototype.createBuffer;GPUDevice.prototype.createBuffer=function(desc){return createBuffer.call(this,/indirect/i.test(desc.label||'')?{...desc,usage:desc.usage|GPUBufferUsage.COPY_SRC}:desc);};
+  const plainIndirect=pass.drawIndirect;pass.drawIndirect=function(b,o){if(window.perfCapture)draws.push({label:pipelines.get(this),buffer:b,offset:o});return plainIndirect.call(this,b,o);};
+  const createBuffer=GPUDevice.prototype.createBuffer;GPUDevice.prototype.createBuffer=function(desc){return createBuffer.call(this,/indirect| draws/i.test(desc.label||'')?{...desc,usage:desc.usage|GPUBufferUsage.COPY_SRC}:desc);};
   const request=GPUAdapter.prototype.requestDevice;GPUAdapter.prototype.requestDevice=async function(...a){return window.perfDevice=await request.apply(this,a);};
   const uploads=(window.perfUploads=new Map());
   const writeBuffer=GPUQueue.prototype.writeBuffer;GPUQueue.prototype.writeBuffer=function(buffer,offset,data,dataOffset=0,size){
@@ -78,11 +80,13 @@ const countTriangles=page=>page.evaluate(async()=>{
 const idle=[];for(let i=0;i<4;i++){idle.push(gpuCounters().device);await new Promise(resolve=>setTimeout(resolve,250));}
 console.log(`GPU busy before loading: ${mean(idle).toFixed(0)}% (other work on this machine)`);
 console.log('scene'.padEnd(20),'frame p50/p95   fps  | JS ms mean/p95 | CPU cores main+gpu | GPU busy frag vert | limit');
-for(const [label,extra] of rows){
+for(const [label,extra,edits] of rows){
   const url=coastalRegionStageURL(base,'lisbon','dock','clear',1650);
   for(const [key,value] of Object.entries({ship:'victory',w:1728,h:1117,polygons:'fixed',...extra}))url.searchParams.set(key,String(value));
   const page=await browser.newPage({viewport:{width:1728,height:1117}}),errors=[];
   page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error'&&!/404|favicon/.test(m.text()))errors.push(m.text());});
+  const byFile=new Map();for(const [file,find,replace] of edits??[])byFile.set(file,[...(byFile.get(file)??[]),[find,replace]]);
+  for(const [file,changes] of byFile)await page.route('**/js/'+file,async route=>{const response=await route.fetch();let text=await response.text();for(const [find,replace] of changes){if(!text.includes(find))console.log('EDIT NOT FOUND',find);text=text.split(find).join(replace);}route.fulfill({response,body:text});});
   await page.addInitScript(instrument);
   await page.goto(url.toString());
   await page.waitForFunction(()=>window.oceanStartup?.state==='ready'||window.oceanStartup?.state==='failed',null,{timeout:180000,polling:200});

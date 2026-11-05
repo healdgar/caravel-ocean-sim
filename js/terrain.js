@@ -37,6 +37,9 @@ function hash32Forest(value) {
   return (v ^ (v >>> 16)) >>> 0;
 }
 
+const FORESHORE_PALMS_MAX = 520;
+// The direction the grown coconut's trunk leans, from scripts/grow-palms.mjs.
+const COCONUT_LEAN_RADIANS = Math.atan2(0.5, 1.5);
 export function retargetForestPackToProcedural(
   forestPack,
   proceduralPack,
@@ -339,6 +342,21 @@ export function retargetForestPackToProcedural(
       const basal = forestPack.manifest.prototypes[protoId].basalRadius ?? 1.2;
       const sink = Math.max(0.12, basal * scale * slope + 0.08);
       buckets[protoId].push(x, gy - sink, z, scale, yaw, tint, tint, tint, protoId, sink, -2, 0);
+    }
+  }
+  // The foreshore fringe, leaning out over the sea as coconuts do.
+  const coconutId = forestPack.manifest.prototypes.findIndex((p) => p.species === 'palm');
+  const foreshore = proceduralPack.vegetation?.palms;
+  if (coconutId >= 0 && foreshore?.length) {
+    const basal = forestPack.manifest.prototypes[coconutId].basalRadius ?? 0.3;
+    for (let i = 0; i < foreshore.length && i < FORESHORE_PALMS_MAX * 8; i += 8) {
+      const x = foreshore[i], z = foreshore[i + 2], shape = foreshore[i + 5], seaX = -foreshore[i + 6], seaZ = -foreshore[i + 7];
+      const gy = groundSample(x, z);
+      if (!Number.isFinite(gy) || gy < 1.2) continue;
+      const scale = 1 + shape * 0.55, sink = Math.max(0.12, basal * scale * Math.hypot(seaX, seaZ) + 0.08);
+      const yaw = Math.hypot(seaX, seaZ) > 0.01 ? Math.atan2(seaZ, seaX) - COCONUT_LEAN_RADIANS : shape * Math.PI * 2;
+      const tint = 0.94 + shape * 0.12;
+      buckets[coconutId].push(x, gy - sink, z, scale, yaw, tint, tint, tint, coconutId, sink, -2, 0);
     }
   }
   // Ensure at least one subterranean sentinel root if a small coral cay has 0 upland trees
@@ -1564,6 +1582,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
           }
         }
         if(hasSceneryBakes){
+          for(const bake of portObj.sceneryBakes)if(bake.kind==='scenery-tree')forest?.strike?.(bake.x,bake.z);
           bakes.push(...portObj.sceneryBakes.splice(0,portObj.sceneryBakes.length));
         }
         if(!bakes.length)return;

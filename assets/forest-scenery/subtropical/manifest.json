@@ -14,7 +14,7 @@
       -76.189,
       -58.607
     ],
-    "cellMetres": 32.0,
+    "cellMetres": 32,
     "dimensions": [
       4,
       4
@@ -40,24 +40,24 @@
   },
   "files": {
     "vertices.bin": {
-      "bytes": 16545984,
-      "sha256": "221f8306f17062d66c059aa78f47342c602c37eabb63f1b730b0ce9c92737351",
+      "bytes": 7357504,
+      "sha256": "8bf10e788e98de9448f20e77c3f39bdbcca50f239d9b4364f43071de3f8660d7",
       "gzip": {
         "file": "vertices.bin.gz",
-        "bytes": 5654670,
-        "sha256": "e630e1f7d8c7a92010da75978447ba9a65c6c0fd8d08ee99cd73a544b031ecb8"
+        "bytes": 3036645,
+        "sha256": "46629a20f70497c522f7889e313b7ed1a6840c7e469bb4afc61e653c60d2ac55"
       },
-      "vertexCount": 295464
+      "vertexCount": 131384
     },
     "indices.bin": {
-      "bytes": 2187216,
-      "sha256": "205ac56933fe58fb43ddbcbc3c32a5f2006b02462db762a1c0a74c161e664a3f",
+      "bytes": 1137096,
+      "sha256": "2535cb65f54ad7c8c7202c98f5c9969f0c745c18224b9d8c00f77a4cc634358d",
       "gzip": {
         "file": "indices.bin.gz",
-        "bytes": 620238,
-        "sha256": "137219ef997e3aec89abfca8d2c58a719dd5ecadbaf364d5814db2db7ab0e613"
+        "bytes": 302302,
+        "sha256": "1f2254775530f62e673ac0277851175d7978724dfb41af4825c85c5df2c9ae39"
       },
-      "indexCount": 546804
+      "indexCount": 284274
     },
     "roots.bin": {
       "bytes": 1344,
@@ -74,37 +74,37 @@
     {
       "id": 0,
       "species": "royal_palm",
-      "age": 24.0,
-      "heightMetres": 13.582,
-      "crownRadiusMetres": 4.636,
+      "age": 24,
+      "heightMetres": 13.6,
+      "crownRadiusMetres": 3.9,
       "low": [
-        -7.951,
-        -0.3751,
-        -7.8285
+        -4.61386251449585,
+        -0.15000000596046448,
+        -5.768512725830078
       ],
       "high": [
-        7.8534,
-        15.1891,
-        7.6559
+        5.539862632751465,
+        15.189079284667969,
+        4.871178150177002
       ],
       "centre": [
-        -0.0488,
-        7.407,
-        -0.0863
+        0.4630000591278076,
+        7.519539639353752,
+        -0.4486672878265381
       ],
-      "radius": 13.5268,
+      "radius": 10.625305993088116,
       "firstRoot": 0,
       "rootCount": 16,
       "wood": {
         "firstIndex": 0,
-        "indexCount": 32112
+        "indexCount": 6624
       },
       "leaf": {
-        "firstIndex": 32112,
-        "indexCount": 134496
+        "firstIndex": 6624,
+        "indexCount": 29952
       },
       "far": {
-        "firstIndex": 166608,
+        "firstIndex": 36576,
         "indexCount": 132
       },
       "nativeMaterials": [
@@ -128,15 +128,15 @@
             "sha256": "7ee573b82a9876fdf3645cec3f5d2596c7dc2ad1f80f29b90339db069a578cf7",
             "encoding": "linear"
           },
-          "roughness": 1.0,
+          "roughness": 1,
           "clearcoat": 0.044000000000000004,
-          "opacityThreshold": 0.0,
-          "underside": 0.0,
-          "transmission": 0.0,
+          "opacityThreshold": 0,
+          "underside": 0,
+          "transmission": 0,
           "undersideReference": [
-            1.0,
-            1.0,
-            1.0
+            1,
+            1,
+            1
           ],
           "wrap": "repeat"
         },
@@ -160,15 +160,15 @@
             "sha256": "77f1382e3e781ae9e7a42bd79d35ba715847507767fcd76985cbe83681c25fbb",
             "encoding": "linear"
           },
-          "roughness": 1.0,
-          "clearcoat": 0.0,
-          "opacityThreshold": 0.0,
-          "underside": 0.0,
-          "transmission": 0.0,
+          "roughness": 1,
+          "clearcoat": 0,
+          "opacityThreshold": 0,
+          "underside": 0,
+          "transmission": 0,
           "undersideReference": [
-            1.0,
-            1.0,
-            1.0
+            1,
+            1,
+            1
           ],
           "wrap": "clamp"
         },
@@ -176,8 +176,8 @@
           "name": "foliage_0",
           "albedo": {
             "file": "royal-palm-foliage-0-albedo.png",
-            "bytes": 4285,
-            "sha256": "2d5c0825843171114441fa4eac1e3a0510ff450c4db1b903c9d6e1d11b69f033",
+            "bytes": 12558,
+            "sha256": "4030232d573239f1e833ab2b463e48576adff2e41301682a31e706c8b3e65b79",
             "encoding": "srgb"
           },
           "normal": {
@@ -187,8 +187,8 @@
             "encoding": "linear"
           },
           "roughness": 0.712,
-          "clearcoat": 0.0,
-          "opacityThreshold": 0.0,
+          "clearcoat": 0,
+          "opacityThreshold": 0,
           "underside": 0.22,
           "transmission": 0.07735629515225133,
           "undersideReference": [
@@ -202,8 +202,8 @@
           "name": "foliage_1",
           "albedo": {
             "file": "royal-palm-foliage-1-albedo.png",
-            "bytes": 4290,
-            "sha256": "e4a180a572f2ab9636912511a8986d4b888e77bfb30ec6ff765cd8c06a43b6bc",
+            "bytes": 10512,
+            "sha256": "c45acabb33fea1dc5605c505dbd42ac3bc075f1ccdd892036d48b5b76dfcff13",
             "encoding": "srgb"
           },
           "normal": {
@@ -213,8 +213,8 @@
             "encoding": "linear"
           },
           "roughness": 0.712,
-          "clearcoat": 0.0,
-          "opacityThreshold": 0.0,
+          "clearcoat": 0,
+          "opacityThreshold": 0,
           "underside": 0.22,
           "transmission": 0.07735629515225133,
           "undersideReference": [
@@ -228,8 +228,8 @@
           "name": "foliage_2",
           "albedo": {
             "file": "royal-palm-foliage-2-albedo.png",
-            "bytes": 4298,
-            "sha256": "388b25319276d01506d0688ee4f56c9b7fb62a6cb6d5a1a7807d70154caad630",
+            "bytes": 12610,
+            "sha256": "dc10fab7cbb1602e97d969f9b156ae60bf99a0992af4fe6ed0fcd50c0d7bc3c0",
             "encoding": "srgb"
           },
           "normal": {
@@ -239,8 +239,8 @@
             "encoding": "linear"
           },
           "roughness": 0.712,
-          "clearcoat": 0.0,
-          "opacityThreshold": 0.0,
+          "clearcoat": 0,
+          "opacityThreshold": 0,
           "underside": 0.22,
           "transmission": 0.07735629515225133,
           "undersideReference": [
@@ -253,43 +253,43 @@
       ],
       "geometryErrorSupported": false,
       "unverifiedGeometryErrorMetres": 9.4313,
-      "crownRadius": 4.636,
-      "basalRadius": 0.42
+      "crownRadius": 3.9,
+      "basalRadius": 0.36
     },
     {
       "id": 1,
       "species": "palm",
-      "age": 24.0,
-      "heightMetres": 10.38,
-      "crownRadiusMetres": 4.635,
+      "age": 24,
+      "heightMetres": 10.4,
+      "crownRadiusMetres": 4.8,
       "low": [
-        -7.315,
-        -0.321,
-        -6.992
+        -5.692321300506592,
+        -0.15000000596046448,
+        -6.051856994628906
       ],
       "high": [
-        6.9384,
-        11.31,
-        7.2558
+        4.78551200309407,
+        12.407395069050542,
+        4.805424690246582
       ],
       "centre": [
-        -0.1883,
-        5.4945,
-        0.1319
+        -0.45340464870626107,
+        6.128697531545039,
+        -0.6232161521911621
       ],
-      "radius": 11.6355,
+      "radius": 9.815214304750134,
       "firstRoot": 16,
       "rootCount": 6,
       "wood": {
-        "firstIndex": 166740,
-        "indexCount": 34986
+        "firstIndex": 36708,
+        "indexCount": 11472
       },
       "leaf": {
-        "firstIndex": 201726,
-        "indexCount": 147672
+        "firstIndex": 48180,
+        "indexCount": 38688
       },
       "far": {
-        "firstIndex": 349398,
+        "firstIndex": 86868,
         "indexCount": 132
       },
       "nativeMaterials": [
@@ -313,15 +313,15 @@
             "sha256": "fa4b7953ce014aab2b0af6dca29f324b3874df51239280269d6e3b06a5f681c5",
             "encoding": "linear"
           },
-          "roughness": 1.0,
+          "roughness": 1,
           "clearcoat": 0.028000000000000004,
-          "opacityThreshold": 0.0,
-          "underside": 0.0,
-          "transmission": 0.0,
+          "opacityThreshold": 0,
+          "underside": 0,
+          "transmission": 0,
           "undersideReference": [
-            1.0,
-            1.0,
-            1.0
+            1,
+            1,
+            1
           ],
           "wrap": "repeat"
         },
@@ -345,15 +345,15 @@
             "sha256": "f15e01b22bc0a4f166bcfd0cab09a78caef472be76e9db6552d7d255daf29fb8",
             "encoding": "linear"
           },
-          "roughness": 1.0,
-          "clearcoat": 0.0,
-          "opacityThreshold": 0.0,
-          "underside": 0.0,
-          "transmission": 0.0,
+          "roughness": 1,
+          "clearcoat": 0,
+          "opacityThreshold": 0,
+          "underside": 0,
+          "transmission": 0,
           "undersideReference": [
-            1.0,
-            1.0,
-            1.0
+            1,
+            1,
+            1
           ],
           "wrap": "clamp"
         },
@@ -361,8 +361,8 @@
           "name": "foliage_0",
           "albedo": {
             "file": "palm-foliage-0-albedo.png",
-            "bytes": 4269,
-            "sha256": "84346ddbe2a2d3f0ac632493af33f85cec1ebe9fb4f3e4ef4019a08ee7cddf10",
+            "bytes": 12246,
+            "sha256": "ff738996d9046ac4fc05ed9c1f637f7d5a961d447595bb75f997bd071bece01d",
             "encoding": "srgb"
           },
           "normal": {
@@ -372,8 +372,8 @@
             "encoding": "linear"
           },
           "roughness": 0.7,
-          "clearcoat": 0.0,
-          "opacityThreshold": 0.0,
+          "clearcoat": 0,
+          "opacityThreshold": 0,
           "underside": 0.24,
           "transmission": 0.08064756610794317,
           "undersideReference": [
@@ -387,8 +387,8 @@
           "name": "foliage_1",
           "albedo": {
             "file": "palm-foliage-1-albedo.png",
-            "bytes": 4277,
-            "sha256": "939c131c003163704d19c47d47590a2373cea2fdaeb3359807b6a258cc004e4e",
+            "bytes": 11845,
+            "sha256": "1d391dc0c7bcc708c5e4dce917d3c7ea042336cfee0d8f0b414e17ab37a36ffb",
             "encoding": "srgb"
           },
           "normal": {
@@ -398,8 +398,8 @@
             "encoding": "linear"
           },
           "roughness": 0.7,
-          "clearcoat": 0.0,
-          "opacityThreshold": 0.0,
+          "clearcoat": 0,
+          "opacityThreshold": 0,
           "underside": 0.24,
           "transmission": 0.08064756610794317,
           "undersideReference": [
@@ -413,8 +413,8 @@
           "name": "foliage_2",
           "albedo": {
             "file": "palm-foliage-2-albedo.png",
-            "bytes": 4294,
-            "sha256": "2ff2fad51e6da4d077cf74277bf97d618bfa841d3d0bbb41890b2698ac054c8c",
+            "bytes": 13732,
+            "sha256": "4695cc3f1dc582a8989ddd51d2ba571de52e78fb4580b681dde11b44072e0e5d",
             "encoding": "srgb"
           },
           "normal": {
@@ -424,8 +424,8 @@
             "encoding": "linear"
           },
           "roughness": 0.7,
-          "clearcoat": 0.0,
-          "opacityThreshold": 0.0,
+          "clearcoat": 0,
+          "opacityThreshold": 0,
           "underside": 0.24,
           "transmission": 0.08064756610794317,
           "undersideReference": [
@@ -438,13 +438,13 @@
       ],
       "geometryErrorSupported": false,
       "unverifiedGeometryErrorMetres": 8.2477,
-      "crownRadius": 4.635,
-      "basalRadius": 0.38
+      "crownRadius": 4.8,
+      "basalRadius": 0.34
     },
     {
       "id": 2,
       "species": "ceiba",
-      "age": 24.0,
+      "age": 24,
       "heightMetres": 16.486,
       "crownRadiusMetres": 2.93,
       "low": [
@@ -466,15 +466,15 @@
       "firstRoot": 22,
       "rootCount": 2,
       "wood": {
-        "firstIndex": 349530,
+        "firstIndex": 87000,
         "indexCount": 12087
       },
       "leaf": {
-        "firstIndex": 361617,
+        "firstIndex": 99087,
         "indexCount": 58368
       },
       "far": {
-        "firstIndex": 419985,
+        "firstIndex": 157455,
         "indexCount": 132
       },
       "nativeMaterials": [
@@ -498,15 +498,15 @@
             "sha256": "e8e80c47229f6a82a147e2748c070ee88e82e6162d9be44ae796048dd6523d1f",
             "encoding": "linear"
           },
-          "roughness": 1.0,
+          "roughness": 1,
           "clearcoat": 0.032,
-          "opacityThreshold": 0.0,
-          "underside": 0.0,
-          "transmission": 0.0,
+          "opacityThreshold": 0,
+          "underside": 0,
+          "transmission": 0,
           "undersideReference": [
-            1.0,
-            1.0,
-            1.0
+            1,
+            1,
+            1
           ],
           "wrap": "repeat"
         },
@@ -530,15 +530,15 @@
             "sha256": "28cda5375690cb9cbb22f88a2c68d3d6143b4349b3e7e32d523f4976ab883441",
             "encoding": "linear"
           },
-          "roughness": 1.0,
-          "clearcoat": 0.0,
-          "opacityThreshold": 0.0,
-          "underside": 0.0,
-          "transmission": 0.0,
+          "roughness": 1,
+          "clearcoat": 0,
+          "opacityThreshold": 0,
+          "underside": 0,
+          "transmission": 0,
           "undersideReference": [
-            1.0,
-            1.0,
-            1.0
+            1,
+            1,
+            1
           ],
           "wrap": "clamp"
         },
@@ -557,7 +557,7 @@
             "encoding": "linear"
           },
           "roughness": 0.832,
-          "clearcoat": 0.0,
+          "clearcoat": 0,
           "opacityThreshold": 0.35,
           "underside": 0.32,
           "transmission": 0.13296535767236065,
@@ -583,7 +583,7 @@
             "encoding": "linear"
           },
           "roughness": 0.832,
-          "clearcoat": 0.0,
+          "clearcoat": 0,
           "opacityThreshold": 0.35,
           "underside": 0.32,
           "transmission": 0.13296535767236065,
@@ -609,7 +609,7 @@
             "encoding": "linear"
           },
           "roughness": 0.832,
-          "clearcoat": 0.0,
+          "clearcoat": 0,
           "opacityThreshold": 0.35,
           "underside": 0.32,
           "transmission": 0.13296535767236065,
@@ -629,7 +629,7 @@
     {
       "id": 3,
       "species": "mangrove",
-      "age": 24.0,
+      "age": 24,
       "heightMetres": 9.576,
       "crownRadiusMetres": 1.651,
       "low": [
@@ -651,15 +651,15 @@
       "firstRoot": 24,
       "rootCount": 4,
       "wood": {
-        "firstIndex": 420117,
+        "firstIndex": 157587,
         "indexCount": 10395
       },
       "leaf": {
-        "firstIndex": 430512,
+        "firstIndex": 167982,
         "indexCount": 116160
       },
       "far": {
-        "firstIndex": 546672,
+        "firstIndex": 284142,
         "indexCount": 132
       },
       "nativeMaterials": [
@@ -683,15 +683,15 @@
             "sha256": "ff822671ab5cec40a0b0bf03b495d80798e7f8afb3964474af086834bf98c1b1",
             "encoding": "linear"
           },
-          "roughness": 1.0,
+          "roughness": 1,
           "clearcoat": 0.024,
-          "opacityThreshold": 0.0,
-          "underside": 0.0,
-          "transmission": 0.0,
+          "opacityThreshold": 0,
+          "underside": 0,
+          "transmission": 0,
           "undersideReference": [
-            1.0,
-            1.0,
-            1.0
+            1,
+            1,
+            1
           ],
           "wrap": "repeat"
         },
@@ -715,15 +715,15 @@
             "sha256": "0d225e794d26ead31b9906361e17f76993516bbc950928fb3f5821db4c68ea4e",
             "encoding": "linear"
           },
-          "roughness": 1.0,
-          "clearcoat": 0.0,
-          "opacityThreshold": 0.0,
-          "underside": 0.0,
-          "transmission": 0.0,
+          "roughness": 1,
+          "clearcoat": 0,
+          "opacityThreshold": 0,
+          "underside": 0,
+          "transmission": 0,
           "undersideReference": [
-            1.0,
-            1.0,
-            1.0
+            1,
+            1,
+            1
           ],
           "wrap": "clamp"
         },
@@ -742,7 +742,7 @@
             "encoding": "linear"
           },
           "roughness": 0.6699999999999999,
-          "clearcoat": 0.0,
+          "clearcoat": 0,
           "opacityThreshold": 0.35,
           "underside": 0.35,
           "transmission": 0.06024514324007606,
@@ -768,7 +768,7 @@
             "encoding": "linear"
           },
           "roughness": 0.6699999999999999,
-          "clearcoat": 0.0,
+          "clearcoat": 0,
           "opacityThreshold": 0.35,
           "underside": 0.35,
           "transmission": 0.06024514324007606,
@@ -794,7 +794,7 @@
             "encoding": "linear"
           },
           "roughness": 0.6699999999999999,
-          "clearcoat": 0.0,
+          "clearcoat": 0,
           "opacityThreshold": 0.35,
           "underside": 0.35,
           "transmission": 0.06024514324007606,

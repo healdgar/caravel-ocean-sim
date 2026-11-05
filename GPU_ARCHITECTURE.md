@@ -18,6 +18,6 @@ Apple GPUs shade only what is visible, but only for draws that neither discard n
 - **Do not compile what is not there.** A whole ship has no damage code and the open sea has no coastal code: each is a second pipeline from the same source, chosen per draw. Large untaken branches still cost time.
 - **WGSL `select` evaluates both arguments.** Never pass it a ray march.
 - **Slow-changing answers are baked.** Land sunlight, coastal wave shelter and each ship's blurred sea shadow live in textures. A per-pixel loop over texture fetches needs a reason.
-- **Lists are made on the GPU.** Scenery culling and level of detail run in a compute pass that writes an indirect draw, and bodies with nothing to reach for pose from clips baked once. A JavaScript loop over instances needs a reason.
+- **Lists are made on the GPU.** Scenery culling, tree level of detail and cluster cuts run in compute passes that write indirect draws, and bodies with nothing to reach for pose from clips baked once. A JavaScript loop over instances needs a reason.
 - **Timestamps stall the frame they sample.** They run only while the performance panel is open, and their spans include waits, so nothing automatic may read them.
 - **Each buffer holds one thing.** Battle damage has its own uniform buffer rather than the tail of another system's storage.
