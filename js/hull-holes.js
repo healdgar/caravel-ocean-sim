@@ -3,8 +3,8 @@
 // the water right now, so a hole above the waterline floods once she lists or settles, and a
 // hole stops flooding once the water inside has risen to meet the sea outside.
 import { boatRotate } from './boat.js';
+import { HULL_HOLE_LIMIT } from './wgsl/common.js';
 
-export const HULL_HOLE_LIMIT = 24;
 const HULL_HOLE_DISCHARGE = 0.62;
 const HULL_HOLE_GRAVITY = 9.81;
 const SEA_TONNES_PER_CUBIC_METRE = 1.025;

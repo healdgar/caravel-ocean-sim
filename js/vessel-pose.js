@@ -50,7 +50,10 @@ export async function createVesselPose({device,computePipe,sourceBuffer,mesh=nul
   const recoil=recoilMap?.guns?.length?await createVesselRecoil({device,computePipe,posedBuffer:buffer,recoilMap,shared:shared?.recoilAssets??null}):null;
   const assembly=partAssembly?.parts?.length?await createPartAssemblyGPU({device,computePipe,posedBuffer:buffer,catalog:partAssembly,shared:shared?.partAssemblyAssets??null}):null;
   const assets=shared??Object.freeze({device,pipeline,rigData,modelBuffer,metadataBuffer,recoilAssets:recoil?.assets??null,partAssemblyAssets:assembly?.assets??null});let destroyed=false,initialized=!rigData;
+  // True once her vertices carry damage, which the hull shader's whole variant would not draw.
+  let baked=false;
   return {buffer,assets,vertexCount,partAssembly:assembly,
+    get scarred(){return baked||assembly?.active===true;},
     update(boat,time,wind){
       if(destroyed||!rigData)return false;
       writeRigGPUFrame(rigData,boat,time,wind,state);device.queue.writeBuffer(stateBuffer,0,state);initialized=true;return true;
@@ -68,6 +71,7 @@ export async function createVesselPose({device,computePipe,sourceBuffer,mesh=nul
         const batch=pending.splice(0,6);
         const range=bakeVesselImpactDeformations(mesh,batch,9);
         if(range){
+          baked=true;
           device.queue.writeBuffer(sourceBuffer,range.byteOffset,mesh.buffer,mesh.byteOffset+range.byteOffset,range.byteLength);
           return true;
         }
@@ -77,7 +81,7 @@ export async function createVesselPose({device,computePipe,sourceBuffer,mesh=nul
     // Undo baked hull dents and mast breaks once a repair or a new ship makes them wrong.
     restoreGeometry(){
       if(destroyed||!(mesh instanceof Float32Array)||!(pristineMesh instanceof Float32Array))return false;
-      mesh.set(pristineMesh);device.queue.writeBuffer(sourceBuffer,0,mesh);return true;
+      mesh.set(pristineMesh);device.queue.writeBuffer(sourceBuffer,0,mesh);baked=false;return true;
     },
     encode(pass,enabled=true){
       if(!enabled||destroyed)return false;

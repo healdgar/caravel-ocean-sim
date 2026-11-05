@@ -1,5 +1,42 @@
 # Ocean Sailing Simulator backlog and overnight checkpoint
 
+## November 4: frame rate, CPU and GPU
+
+`npm run perf` (`scripts/perf.mjs`) now shows one stressful scene, Lisbon with HMS Victory, from both sides: frame times, main-thread stages, CPU cores, the GPU's own busy, fragment and vertex counters, tiled bytes, and with `--tris` triangles per pipeline. The performance panel shows the same main-thread stages. Compare rows within one run, because other work on the machine moves every number.
+
+Same scene, 1728×1117, fixed polygons, Metal, with other sessions running:
+
+| | Before | After |
+|---|---|---|
+| Frames per second | 21 | 30 to 39 |
+| Main thread | 28 ms | 7 to 13 ms |
+| Triangles per frame | 24.5 M | 13.7 M |
+| Tiled geometry | 403 MB | 250 MB |
+
+With automatic budgets in a visible window it now holds 56 to 58 fps at 37% of the Retina display. The open sea went from 13 fps at the budget floor to 60 fps at about 45%.
+
+What was wrong, largest first:
+
+- `discard` for battle damage sat in the shader every ship surface uses (`edb1469`), which turned off hidden surface removal. Whole ships now have a shader with no damage code; damaged ones lay depth, then shade what is left.
+- Coastal wave code ran on every ocean pixel in mid-ocean. The open sea now has its own pipeline, and the coast reads a baked texture (`js/coastal-field.js`) instead of about 40 height lookups per vertex and pixel.
+- `landFinish` marched 64 cloud steps per land and leaf pixel through a WGSL `select`, which evaluates both sides, then discarded the answer inside the baked light.
+- The scene split across two render passes, writing multisampled attachments out and back every frame. It is one pass now, hulls first, and timber reflects last frame's image.
+- Timestamps stalled every eighth frame even with the panel closed. The automatic budgets read their spans, which include waits, so they never climbed back. They now try a little more detail and undo it if the cadence drops.
+- The ocean fetched 130 shadow texels per pixel near a ship. It is now 21.
+- The tree and ground list cache could never hit on a moving ship: its key used exact float comparison on a rotating camera. Scenery went from 6.9 ms to 0.1 ms.
+- Every sailor had a full skeleton solved every frame at full detail. Each now has a pose interval and a model by apparent distance, and hidden ones do not draw.
+- Forest leaves lay depth first and carry no `discard`. Their furthest native tier draws 5 to 6.5% of leaf quads, with larger cards, instead of 17 to 22%.
+
+Rules that follow are in `GPU_ARCHITECTURE.md`. The voyage panel layout test failed in two of four full suite runs and passes alone: something covers the centre of the screen at 800×600, and the test now names it when it happens.
+
+Still to do, largest first:
+
+- **Crew skeletons belong on the GPU.** They are still the biggest main-thread cost at 4 to 8 ms. Baking clips and evaluating the palette in a compute pass would leave JavaScript only the IK.
+- **Ground cover and the legacy tree path still cull in JavaScript** beside the forest's GPU culling. That is a duplicate system, now only cheap because it runs less often.
+- **Near-tier forest cost.** Depth-first leaves draw every leaf twice: 5.2 M of the 13.7 M triangles. Crown shells add 1.65 M.
+- **The ocean's 3.1 M triangles** run the full displacement vertex shader twice.
+- **Hull fragment work.** Sails and rope still run timber noise and plank code they then overwrite.
+
 ## November 4: holes in hulls, and men overboard
 
 Round and hot shot that beats the planking now cuts a real opening (`js/hull-holes.js`, drawn by the hull shader), up to 24 per ship, with an exit hole when enough energy is left. Each hole floods by its depth below the sea at that moment, less the water already standing inside, so a hole above the waterline only floods once she lists or settles. The carpenter's crew plug the worst leak in about 75 seconds with all hands, up to 85%. A port patch stops the water, and a full refit removes the holes. The hold shows a water surface and a falling curtain at each flowing hole (`js/hull-flood.js`).

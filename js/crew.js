@@ -17,7 +17,7 @@ import {ROWING_DESIGNS} from './models/rowing.js';
 import {proceduralDesign} from './models/procedural.js';
 import { crewDeckHazard, crewMotionPolicy, crewTurnTowards, crewAdvanceWalk } from './crew-motion.js';
 import { crewNavigationStation, crewNavigationRoute, crewRoutineSegmentClear } from './crew-navigation.js';
-import { selectCrewLOD, CREW_LOD_TIERS, createCrewLODs } from './crew-lod.js';
+import { selectCrewLOD, CREW_LOD_TIERS, createCrewLODs, crewPoseInterval, crewApparentDistance, crewSailorTier, crewDrawRuns } from './crew-lod.js';
 
 // Authored, disjoint stations keep a full company clear of stairs and masts.
 // Policies choose intent. The executor alone changes position and animation.
@@ -493,8 +493,18 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
   const submergedLighting=submerged?shadows.bind(submerged.pipeline):null;
   if(submerged)for(const b of batches)b.submerged=submerged.bindGroup(b.mainResources);
   const gunTools=await createGunneryTools({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,shader,format,samples,waterOptics,shared:shared?.gunTools});
-  let enabled=true,drawEnabled=false,posed=false,activeTier=0,shadowTier=1;
-  const drawBatch=(pass,b,shadow)=>{if(!b.people.length)return;const lod=b.lods?.[shadow?shadowTier:activeTier]??{buffer:b.index,indexCount:b.model.indices.length};pass.setBindGroup(0,shadow?b.shadow:b.main);pass.setVertexBuffer(0,b.vertex);pass.setIndexBuffer(lod.buffer,'uint32');pass.drawIndexed(lod.indexCount??lod.indices.length,b.people.length);};
+  let enabled=true,drawEnabled=false,posed=false,activeTier=0,shadowTier=1,poseFrame=0;
+  const drawBatch=(pass,b,shadow)=>{
+    const runs=shadow?b.shadowRuns:b.runs;
+    if(!b.people.length||runs?.length===0)return;
+    pass.setBindGroup(0,shadow?b.shadow:b.main);pass.setVertexBuffer(0,b.vertex);
+    let bound=null;
+    for(const run of runs??[{tier:shadow?shadowTier:activeTier,first:0,count:b.people.length}]){
+      const lod=b.lods?.[run.tier]??b.lods?.[0]??{buffer:b.index,indexCount:b.model.indices.length};
+      if(lod.buffer!==bound){pass.setIndexBuffer(lod.buffer,'uint32');bound=lod.buffer;}
+      pass.drawIndexed(lod.indexCount??lod.indices.length,run.count,0,0,run.first);
+    }
+  };
   return {state,assets:{models,pipeline,shadowPipeline,gunTools:gunTools.assets,geometry:batches.map(({vertex,index,lods})=>({vertex,index,lods}))},triangles:batches.reduce((n,b)=>n+b.model.indices.length/3*b.people.length,0),lods:CREW_LOD_TIERS,
     get lodLevel(){return activeTier;},
     get posed(){return posed;},
@@ -516,17 +526,29 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
         if(Object.hasOwn(ROWING_DESIGNS,modelId))for(const b of batches)for(const s of b.people)if(s.seatedPose){const a=b.model.animator;a.sample('Idle',s.time);poseCrewWork(a,s,boat);}
         return;
       }
-      posed=true;
+      posed=true;poseFrame++;
       for(const b of batches){
         const a=b.model.animator;
         for(let i=0;i<b.people.length;i++){
-          const s=b.people[i];a.sample('Idle',s.time,'Walk',s.walkTime,s.walk);
-          if(s.brace>.001 && !(s.job?.rung>0))a.blend('Brace',s.time,s.brace);
-          poseCrewWork(a,s,boat);
-          applyCrewRealism(a,s,boat,dt);
-          applyCrewWounds(a,s);
+          const s=b.people[i];
+          s.poseElapsed=(s.poseElapsed??0)+dt;
+          // A wound or a fall shows at once. Anyone not on show keeps their slot until they are.
+          const apparent=crewApparentDistance(s.position,boat,camera);
+          s.lodTier=crewSailorTier(apparent,s.lodTier??0);
+          const interval=s.posedOnce?crewPoseInterval(apparent):1;
+          const due=s.pendingWounds?.length||(s.knockdownTimer??0)>0||(s.visible!==false&&(poseFrame+i)%interval===0);
+          if(due){
+            s.posedOnce=true;
+            a.sample('Idle',s.time,'Walk',s.walkTime,s.walk);
+            if(s.brace>.001 && !(s.job?.rung>0))a.blend('Brace',s.time,s.brace);
+            poseCrewWork(a,s,boat);
+            applyCrewRealism(a,s,boat,s.poseElapsed);
+            applyCrewWounds(a,s);
+            b.poses.set(a.palette,i*65*16);
+            s.poseElapsed=0;
+          }
           const offset=i*CREW_ACTOR_FLOATS;
-          b.poses.set(a.palette,i*65*16);b.actors.set(s.transform,offset);
+          b.actors.set(s.transform,offset);
           const woundAmt=s.casualtyState==='fallen'?1.0:s.casualtyState==='wounded'?Math.max(0.45,Math.min(0.95,s.woundSeverity??(1-(s.health??0.5)))):0;
           const scorchAmt=Math.max(0,Math.min(0.95,s.scorchAmount??(s.casualtyState==='fallen'?0.35:s.casualtyState==='wounded'?0.18:0)));
           const bandageSeed=(s.casualtyState==='wounded'||s.casualtyState==='fallen')?(0.06+(((s.crewIndex??i)*0.37)%0.32)):0;
@@ -544,6 +566,8 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
           b.actors[offset+23]=Number(boat.enabled===true)+scorchAmt*0.42;
           b.actors[offset+31]=wetness.crewOffset+(s.crewIndex??state.crew.indexOf(s))*4;
         }
+        b.runs=crewDrawRuns(b.people,s=>s.visible===false?-1:s.lodTier);
+        b.shadowRuns=crewDrawRuns(b.people,s=>s.visible===false?-1:Math.min(CREW_LOD_TIERS.length-1,s.lodTier+1));
         device.queue.writeBuffer(b.bones,0,b.poses);device.queue.writeBuffer(b.actor,0,b.actors);
       }
       // After posing, so an arrow's bone is this frame's.
@@ -552,7 +576,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
     drawSubmerged(pass,above=false){
       if(!submerged||!drawEnabled)return;
       submerged.bind(pass,above);pass.setBindGroup(1,submergedLighting);
-      for(const b of batches){if(!b.people.length)continue;const lod=b.lods?.[activeTier]??{buffer:b.index,indexCount:b.model.indices.length};pass.setBindGroup(0,b.submerged);pass.setVertexBuffer(0,b.vertex);pass.setIndexBuffer(lod.buffer,'uint32');pass.drawIndexed(lod.indexCount??lod.indices.length,b.people.length);}
+      for(const b of batches){if(!b.people.length)continue;const lod=b.lods?.at(-1)??{buffer:b.index,indexCount:b.model.indices.length};pass.setBindGroup(0,b.submerged);pass.setVertexBuffer(0,b.vertex);pass.setIndexBuffer(lod.buffer,'uint32');pass.drawIndexed(lod.indexCount??lod.indices.length,b.people.length);}
       gunTools.drawSubmerged(pass,above);
     },
     draw(pass){if(!drawEnabled)return;pass.setPipeline(pipeline);pass.setBindGroup(1,lighting);for(const b of batches)drawBatch(pass,b,false);gunTools.draw(pass);},

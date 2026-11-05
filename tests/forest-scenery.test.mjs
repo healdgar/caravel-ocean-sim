@@ -177,17 +177,17 @@ test('native stream transport verifies both encoded and decoded receipts',async(
 });
 test('forest rendering cannot fall back to the legacy generic mask or threshold averaged coverage',async()=>{
   const source=await readFile(new URL('../js/forest-scenery.js',import.meta.url),'utf8');
-  // Biological root clipping may discard buried fragments. It must never
-  // become a generic leaf mask or a threshold on filtered native coverage.
-  const collar='if(in.world.y<in.nativeSoil){discard;}';
-  assert.equal(FOREST_VERTEX_WGSL.split(collar).length-1,3,'only wood, leaf and middle collar clips');
+  // Buried roots press flat at the soil line in the vertex stage, which keeps opaque trees
+  // free of discard. Leaves are cut by sample coverage only, never a threshold on it.
+  assert.equal(FOREST_VERTEX_WGSL.split('o.world.y=max(o.world.y,r.rootScale.y);').length-1,2,'canopy and middle roots stop at the soil');
   assert.doesNotMatch(FOREST_VERTEX_WGSL,/leafSpray|tree-foliage|canopyLeafFS/);
   assert.ok(FOREST_VERTEX_WGSL.endsWith(FOREST_VOLUME_WGSL+FOREST_VOLUME_SHELL_WGSL),'volume/shell are separate shader entry points');
   const nativeShader=FOREST_VERTEX_WGSL.slice(0,-FOREST_VOLUME_WGSL.length-FOREST_VOLUME_SHELL_WGSL.length);
-  assert.doesNotMatch(nativeShader.replaceAll(collar,''),/discard/,'native leaves may discard only biological buried roots; volume ray misses are separate');
+  assert.doesNotMatch(nativeShader,/discard/,'native trees never discard; volume ray misses are separate');
   assert.match(FOREST_VERTEX_WGSL,/@location\(7\)nativeMaterial/);
   assert.match(FOREST_VERTEX_WGSL,/forestNativeOpaqueFS/);assert.match(FOREST_VERTEX_WGSL,/forestNativeLeafFS/);
-  assert.match(FOREST_VERTEX_WGSL,/o\.colour=vec4f\(lit\.rgb,pigment\.a\)/);
+  assert.match(FOREST_VERTEX_WGSL,/return vec4f\(lit\.rgb,pigment\.a\)/);
+  assert.match(FOREST_VERTEX_WGSL,/forestNativeLeafDepthFS/,'leaves lay depth first, so hidden layers are never lit');
   assert.match(FOREST_VERTEX_WGSL,/@builtin\(sample_mask\)mask:u32/);
   assert.match(FOREST_SURFACE_MIPS_WGSL,/forestMipLinear\(c\.rgb\)\*c\.a/);
   assert.match(FOREST_SURFACE_MIPS_WGSL,/colour\*\.25/);assert.doesNotMatch(FOREST_SURFACE_MIPS_WGSL,/discard|step\(/);

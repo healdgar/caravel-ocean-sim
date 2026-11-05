@@ -224,7 +224,7 @@ ${OCEAN_HULL_MASK}
   // END HULL EARLY EXIT
 
   let sunlight = sunIlluminance() * sunVis[0];
-  let surfaceShadow = vesselShadow(in.rel+F.camPos.xyz,nrm);
+  let surfaceShadow = waterSurfaceShadow(in.rel+F.camPos.xyz);
   let sunE = sunlight * solarShadowVisibility(surfaceShadow);
   let waterSun = sunlight * solarShadowVisibility(waterVesselShadow(in.rel+F.camPos.xyz,nrm,V,cov.x+cov.y));
   let skyUp = textureSampleLevel(envCube, sampC, vec3f(0.0, 1.0, 0.0), ENV_MAXMIP).rgb;
@@ -343,7 +343,7 @@ ${OCEAN_HULL_MASK}
   col = mix(col, foamLit, foamMask * 0.95);
   col += lightningSurface(nrm,normalize(-in.rel),mix(F.waterCol.rgb,foamAlb,foamMask),.23)
     +lightningCloud(reflect(normalize(in.rel),nrm))*Fr;
-  ${coast?'col = coastalWater(col, in.xz, effHeight, foamLit);':''}
+  ${coast?'col = coastalWater(col, in.xz, cws.bed, effHeight, foamLit);':''}
 
   // ---- aerial perspective ----
   // aerial perspective: atmosphere extinction plus a marine haze floor

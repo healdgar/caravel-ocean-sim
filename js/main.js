@@ -37,7 +37,7 @@ import { createWeatherState, createImpactDetector, STORM_WEATHER, WEATHER_TYPES 
 import { createWeatherRenderer } from './weather.js';
 import { writeLateenUniform, yardTransferAvailable } from './lateen.js';
 import { createVolumetricClouds } from './clouds.js';
-import { createTerrain, createDeepWaterGroup } from './terrain.js';
+import { createTerrain } from './terrain.js';
 import { COASTAL_WATER } from './wgsl/terrain.js';
 import { ISLAND, LANDFALL_VIEWS, SPANISH_MAIN_1550_REGIONS, HISTORICAL_COLONIAL_PORTS, findHistoricalColonialPort } from './terrain-model.js';
 import { createLandfallUI, LANDFALL_WEATHER, LANDFALL_SEA, coastalSeaForRegion, landfallCameraYaw, loadIndigenousSovereigntyFromStorage, getActiveIndigenousSovereigntyState, setActiveIndigenousSovereigntyState, serializeIndigenousSovereignty, restoreIndigenousSovereignty, applyIndigenousSupportAction } from './landfall.js';
@@ -45,9 +45,9 @@ import { createVoyageController } from './voyage/voyage-controller.js';
 import { createChartDrawer } from './voyage/chart-drawer.js';
 import { islandCoordinates } from './terrain-model.js';
 import { greatCircleKm } from './voyage/ocean-climate.js';
-import { createGPUProfiler } from './profiler.js';
+import { createGPUProfiler, createFrameStages } from './profiler.js';
 import { measureIsolatedGPUStage } from './gpu-benchmark.js';
-import { createAdaptiveResolution, createAdaptivePolygons } from './resolution.js';
+import { createAdaptiveResolution, createAdaptivePolygons, POLYGON_COMFORT } from './resolution.js';
 import { bindVesselModel, copyVessel, createVesselProbeState, acceptVesselProbe, stepVessel } from './vessels.js';
 import { createFollower, steerFollower, commandFriendlyFleet, stepVesselCombatAI } from './follower.js';
 import {readyFleetModels,fleetFromSearch,fleetToSearch,fleetFormation,broadsideFormation,fleetModelCode,fleetViewBounds,createFleetWakePool,validateFleetDevice,normalizeVesselFaction,MAX_FOLLOWERS} from './fleet.js';
@@ -79,8 +79,8 @@ import { crewWorkLabel, manGunStationsImmediate } from './crew-work.js';
 import { createCrew, createFortSoldiers, preloadCrewModels, CAPTAIN_ORDERS, reviveCompany } from './crew.js';
 import { HELM_EYE_Z, HELM_EYE_HEIGHT, HULL_UNIFORM_BYTES, HULL_VERTICAL_SCALE, DEFAULT_BOAT_LENGTH, DEFAULT_BOAT_BEAM } from './hull.js';
 import { SAIL_KEYS, sailingState, pointOfSail } from './sailing.js';
-import { CARAVEL, WATER_FILTER } from './wgsl/caravel.js';
-import { createHullFlood, HULL_FLOOD_UNIFORM_BYTES } from './hull-flood.js';
+import { CARAVEL, CARAVEL_DAMAGED, WATER_FILTER } from './wgsl/caravel.js';
+import { createHullFlood, HULL_DAMAGE_UNIFORM_BYTES } from './hull-flood.js';
 import { hullHoleDepth } from './hull-holes.js';
 import { loseHandInGale } from './crew-overboard.js';
 import { boatTargets, boatSpring, boatRotate, stepBoatSteering, stepBoatView, stepDeckWalk, resetDeckWalk, boatEyePosition, boatForwardSpeed, boatWaveSlope, stepBoatSurge, boatWaveAttitude, boatHydrodynamics, setBoatViewStation, deckStationLabel, DEFAULT_PROVISION_DAYS, KNOT_TO_MPS } from './boat.js';
@@ -357,6 +357,8 @@ async function main() {
   const msView = msLUT.createView();
   const skyView = skyLUT.createView();
   const MSAA = 4;
+  const AUTO_START_PIXELS = 2.5e6;
+  const POLYGONS_YIELD_AT = 0.5;
   const HDR = 'rgba16float';
 
   // Kick off all ocean, atmosphere, cloud, and landfall shader/pipeline compilations and asset fetches concurrently
@@ -393,30 +395,31 @@ async function main() {
   ];
   for (const p of [rgba8MipPipePromise, waterFilterPipePromise, surfaceWavesPromise, waterOpticsPromise, cloudsPromise, terrainPromise, ...prewarmPromises]) p.catch(() => {});
 
-  const oceanModPromise = shader(withCachedOceanLighting(withFleetHullCount(createOpticalOcean(COASTAL_WATER, OCEAN_DEPTH, true, true), fleetCount)), 'ocean');
+  // The open sea has no coastal wave code at all. Land brings its own pipeline with it.
+  const oceanPipelines=coast=>{
+    const label='ocean';
+    const modulePromise=shader(withCachedOceanLighting(withFleetHullCount(createOpticalOcean(coast?COASTAL_WATER:'',OCEAN_DEPTH,true,true),fleetCount)),coast?'coastal ocean':'open ocean');
+    const vertex=module=>({module,entryPoint:'vs',buffers:[{arrayStride:16,stepMode:'instance',attributes:[{shaderLocation:0,offset:0,format:'float32x4'}]}]});
+    return Promise.all([
+      modulePromise.then(module=>device.createRenderPipelineAsync({
+        label,layout:'auto',vertex:vertex(module),
+        fragment:{module,entryPoint:'fs',targets:[{format:HDR}]},
+        primitive:{topology:'triangle-list',cullMode:'none'},
+        depthStencil:{format:'depth32float',depthWriteEnabled:!OCEAN_DEPTH,depthCompare:OCEAN_DEPTH?'equal':'greater'},
+        multisample:{count:MSAA},
+      })),
+      OCEAN_DEPTH?modulePromise.then(module=>device.createRenderPipelineAsync({
+        label:label+' visibility',layout:'auto',vertex:vertex(module),
+        fragment:{module,entryPoint:'depthOnly',targets:[{format:HDR,writeMask:0}]},
+        primitive:{topology:'triangle-list',cullMode:'none'},
+        depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},
+        multisample:{count:MSAA},
+      })):null,
+    ]);
+  };
+  const openOceanPromise=oceanPipelines(false),coastalOceanPromise=oceanPipelines(true);
+  coastalOceanPromise.catch(()=>{});
   const renderPipesPromise = Promise.all([
-    oceanModPromise.then(oceanMod => device.createRenderPipelineAsync({
-      label: 'ocean', layout: 'auto',
-      vertex: {
-        module: oceanMod, entryPoint: 'vs',
-        buffers: [{ arrayStride: 16, stepMode: 'instance', attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x4' }] }],
-      },
-      fragment: { module: oceanMod, entryPoint: 'fs', targets: [{ format: HDR }] },
-      primitive: { topology: 'triangle-list', cullMode: 'none' },
-      depthStencil: { format: 'depth32float', depthWriteEnabled: !OCEAN_DEPTH, depthCompare: OCEAN_DEPTH ? 'equal' : 'greater' },
-      multisample: { count: MSAA },
-    })),
-    OCEAN_DEPTH ? oceanModPromise.then(oceanMod => device.createRenderPipelineAsync({
-      label: 'ocean visibility', layout: 'auto',
-      vertex: {
-        module: oceanMod, entryPoint: 'vs',
-        buffers: [{ arrayStride: 16, stepMode: 'instance', attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x4' }] }],
-      },
-      fragment: { module: oceanMod, entryPoint: 'depthOnly', targets: [{ format: HDR, writeMask: 0 }] },
-      primitive: { topology: 'triangle-list', cullMode: 'none' },
-      depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
-      multisample: { count: MSAA },
-    })) : null,
     shader(SKY_BG, 'sky').then(skyMod => device.createRenderPipelineAsync({
       label: 'sky', layout: 'auto',
       vertex: { module: skyMod, entryPoint: 'vs' },
@@ -525,7 +528,7 @@ async function main() {
   // --------------------------------------------------------------------------------------
   // Render pipelines
   // --------------------------------------------------------------------------------------
-  const [oceanPipe,oceanDepthPipe,skyPipe,downPipe,upPipe,compPipe,mediumDownPipe,mediumCompPipe]=await renderPipesPromise;
+  const [[oceanPipe,oceanDepthPipe],[skyPipe,downPipe,upPipe,compPipe,mediumDownPipe,mediumCompPipe]]=await Promise.all([openOceanPromise,renderPipesPromise]);
 
   window.oceanStartup?.stage('ship-crew','Building the ships and loading their crew…');
   const [waterFilterPipe, surfaceWaves, waterOptics] = await Promise.all([
@@ -537,7 +540,6 @@ async function main() {
   const shipAssets=createShipAssetCache(),renderAssets=new Map();
   const sceneShadows=createSceneShadows(device,fleetCount),wakePool=createFleetWakePool(device,fleetCount);
   const fleetHullUBO=mkBuf(96*fleetCount,GU.UNIFORM|GU.COPY_DST,'scene hull masks'),fleetHullData=new Float32Array(24*fleetCount);
-  const oceanShadows=sceneShadows.bind(oceanPipe);
   const oakSampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear',
     addressModeU: 'repeat', addressModeV: 'repeat', maxAnisotropy: 8 });
   async function shipRenderAsset(modelId){
@@ -559,7 +561,20 @@ async function main() {
     const submerged=await submergedPromise;
     const indexBuffer=mkBuf(asset.indices.byteLength,GU.INDEX|GU.COPY_DST,modelId+' shared indices');
     device.queue.writeBuffer(indexBuffer,0,asset.indices);
-    const result={asset,gpuPose,pipeline,submerged,indexBuffer,poseAssets:null};
+    const result={asset,gpuPose,pipeline,submerged,indexBuffer,poseAssets:null,damaged:null,
+      // Compiled once the game is running: until then a damaged ship draws whole for a moment.
+      async compileDamaged(){
+        const damagedSource=gpuPose?withPosedVesselVertices(CARAVEL_DAMAGED):CARAVEL_DAMAGED;
+        const damagedModule=await shader(damagedSource,modelId+' damaged vessel');
+        const base={layout:'auto',vertex:{module:damagedModule,entryPoint:'vs',buffers:vertexLayouts},primitive:{topology:'triangle-list',cullMode:'none'},multisample:{count:MSAA}};
+        const [cut,shade]=await Promise.all([
+          device.createRenderPipelineAsync({...base,label:modelId+' surviving surface',fragment:{module:damagedModule,entryPoint:'surviving',targets:[{format:HDR,writeMask:0}]},
+            depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'}}),
+          device.createRenderPipelineAsync({...base,label:modelId+' damaged vessel',fragment:{module:damagedModule,entryPoint:'fs',targets:[{format:HDR}]},
+            depthStencil:{format:'depth32float',depthWriteEnabled:false,depthCompare:'equal'}}),
+        ]);
+        result.damaged={cut,shade};
+      }};
     renderAssets.set(modelId,result);return result;
   }
   const dolphinsPromise=createDolphins({waterOptics,surfaceWaves,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA});
@@ -588,7 +603,7 @@ async function main() {
     const vertexBuffer=mkBuf(mesh.byteLength,GU.VERTEX|GU.COPY_DST|(render.gpuPose?GU.STORAGE:0),spec.id+' geometry');
     device.queue.writeBuffer(vertexBuffer,0,mesh);
     const hullUBO=mkBuf(HULL_UNIFORM_BYTES,GU.UNIFORM|GU.COPY_DST,spec.id+' hull'),hullData=new Float32Array(HULL_UNIFORM_BYTES/4);
-    const holesUBO=mkBuf(HULL_FLOOD_UNIFORM_BYTES,GU.UNIFORM|GU.COPY_DST,spec.id+' hull holes');
+    const holesUBO=mkBuf(HULL_DAMAGE_UNIFORM_BYTES,GU.UNIFORM|GU.COPY_DST,spec.id+' hull damage');
     const recoilMap=createGunRecoilMap(asset);
     const interactionPromise=createWaterInteraction({device,frameUBO,hullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,envView:envCubeView,transView,skyView,sunVis:sunVisBuf,shader,computePipe,surfaceWaves,wakeTargets:wakePool.layer(index)});
     const rowingWaterPromise=Object.hasOwn(ROWING_DESIGNS,spec.modelId)?createRowingWaterProbe({device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,modelId:spec.modelId,surfaceWaves}):null;
@@ -609,6 +624,15 @@ async function main() {
     interaction.setShadows(shadows);
     vessels.push({...spec,boat:null,asset,render,hullUBO,holesUBO,hullData,mesh,vertexBuffer,pose,wetness,shadows,crew,interaction,
       rowingWater,lighting:shadows.bind(render.pipeline),submergedLighting:shadows.bind(render.submerged.pipeline),recoilMap});
+  }
+  const hullBelongsDamaged=v=>Boolean(v.render.damaged&&(v.pose?.scarred||v.boat.damage?.holes?.length||v.boat.damage?.craters?.length));
+  function damagedHullGroups(v){
+    if(v.damagedGroups)return v.damagedGroups;
+    const {cut,shade}=v.render.damaged,resources=[...v.hullResources,{buffer:v.holesUBO}];
+    // The depth entry reads only the vertex stage's resources and the damage record.
+    const forDepth=new Set([0,6,13,14,15]);
+    return v.damagedGroups={cut:bg(cut,resources.map((resource,binding)=>forDepth.has(binding)?resource:null),v.id+' surviving surface'),
+      shade:bg(shade,resources,v.id+' damaged vessel'),lighting:v.shadows.bind(shade)};
   }
   const playerVessel=vessels[0],shipAsset=playerVessel.asset,hullUBO=playerVessel.hullUBO,crew=playerVessel.crew,interaction=playerVessel.interaction,shadows=playerVessel.shadows;
   let fortSoldiers=null;
@@ -631,10 +655,14 @@ async function main() {
     fullArr(dispTex),fullArr(derivTex),fullArr(momTex),foamTex.createView(),envCubeView,sampRepeat,
     fullArr(foamW[i]),{buffer:sunVisBuf},{buffer:fleetHullUBO},{buffer:wakePool.uniform},wakePool.views[w&1],interaction.sampler,
     null,null,{buffer:surfaceWaves.uniform},surfaceWaves.views[w>>1]];
-  const bgOcean=[0,1].map(i=>wakeIndices.map(w=>device.createBindGroup({label:'ocean'+i,layout:oceanPipe.getBindGroupLayout(0),
-    entries:oceanResources(i,w).map((resource,binding)=>({binding,resource})).filter(e=>e.resource!==null&&(!OCEAN_DEPTH||e.binding!==12))})));
-  const bgOceanDepth=OCEAN_DEPTH?wakeIndices.map(w=>device.createBindGroup({label:'ocean visibility',layout:oceanDepthPipe.getBindGroupLayout(0),
-    entries:oceanResources(0,w).map((resource,binding)=>({binding,resource})).filter(e=>e.resource!==null&&[0,4,9,12,13,14,15,18,19].includes(e.binding))})):[];
+  // Automatic layouts tie bind groups to one pipeline, so each variant of the ocean keeps its own.
+  const oceanVariant=([pipe,depthPipe])=>({pipe,depthPipe,shadows:sceneShadows.bind(pipe),optics:null,
+    groups:[0,1].map(i=>wakeIndices.map(w=>device.createBindGroup({label:'ocean'+i,layout:pipe.getBindGroupLayout(0),
+      entries:oceanResources(i,w).map((resource,binding)=>({binding,resource})).filter(e=>e.resource!==null&&(!OCEAN_DEPTH||e.binding!==12))}))),
+    depthGroups:OCEAN_DEPTH?wakeIndices.map(w=>device.createBindGroup({label:'ocean visibility',layout:depthPipe.getBindGroupLayout(0),
+      entries:oceanResources(0,w).map((resource,binding)=>({binding,resource})).filter(e=>e.resource!==null&&[0,4,9,12,13,14,15,18,19].includes(e.binding))})):[]});
+  const openOcean=oceanVariant([oceanPipe,oceanDepthPipe]);
+  let coastalOcean=null;
   const bgSky=bg(skyPipe,[{buffer:frameUBO},transView,skyView,sampClamp,{buffer:sunVisBuf},celestial.view],'sky');
   window.oceanStartup?.stage('weather-wildlife','Preparing weather, scenery and wildlife…');
   const clouds = await cloudsPromise;
@@ -653,10 +681,9 @@ async function main() {
     hullContactProbePromise,
     probePipePromise,
   ]);
-  const deepWaterGroup=createDeepWaterGroup(device,oceanPipe);
-  const deepWaterDepthGroup=OCEAN_DEPTH?createDeepWaterGroup(device,oceanDepthPipe):null;
-  let coastalGroup=terrain?terrain.waterGroup(oceanPipe):deepWaterGroup;
-  let coastalDepthGroup=OCEAN_DEPTH?(terrain?terrain.waterGroup(oceanDepthPipe):deepWaterDepthGroup):null;
+  if(terrain)coastalOcean=oceanVariant(await coastalOceanPromise);
+  let coastalGroup=terrain?terrain.waterGroup(coastalOcean.pipe):null;
+  let coastalDepthGroup=OCEAN_DEPTH&&terrain?terrain.waterGroup(coastalOcean.depthPipe):null;
   async function spawnTerrainLate({region,placement,lat,lon,name,year}={}){
     const liveYear=Number.isFinite(year)
       ?year
@@ -672,9 +699,10 @@ async function main() {
       options:{lateSpawn:true},
     });
     if(!nextTerrain)return null;
+    coastalOcean??=oceanVariant(await coastalOceanPromise);
     terrain=nextTerrain;
-    coastalGroup=terrain.waterGroup(oceanPipe);
-    coastalDepthGroup=OCEAN_DEPTH?terrain.waterGroup(oceanDepthPipe):null;
+    coastalGroup=terrain.waterGroup(coastalOcean.pipe);
+    coastalDepthGroup=OCEAN_DEPTH?terrain.waterGroup(coastalOcean.depthPipe):null;
     if(typeof anchorEnvironment==='object'&&anchorEnvironment)anchorEnvironment.terrain=terrain;
     terrain.setPixelError?.(polygons.pixelError);
     envFull=true;
@@ -684,8 +712,8 @@ async function main() {
     if(oldTerrain&&oldTerrain!==terrain){oldTerrain.dispose?.();return;}
     terrain?.dispose?.();
     terrain=null;
-    coastalGroup=deepWaterGroup;
-    coastalDepthGroup=deepWaterDepthGroup;
+    coastalGroup=null;
+    coastalDepthGroup=null;
     if(typeof anchorEnvironment==='object'&&anchorEnvironment)anchorEnvironment.terrain=null;
     envFull=true;
   }
@@ -745,13 +773,18 @@ async function main() {
   const forcedWidth = Math.max(0, Number(qs.get('w')) || 0), forcedHeight = Math.max(0, Number(qs.get('h')) || 0);
   const fixedResolution = forcedWidth > 0 || forcedHeight > 0 || !!qs.get('shot');
   const requestedResolution = qs.get('resolution') || 'auto';
-  const resolution = createAdaptiveResolution(fixedResolution ? 'fixed' : ['auto','native','0.75','0.5'].includes(requestedResolution) ? requestedResolution : 'auto');
+  // Start near what a good GPU can hold rather than at a Retina display's full size, then climb.
+  const resolution = createAdaptiveResolution(fixedResolution ? 'fixed' : ['auto','native','0.75','0.5'].includes(requestedResolution) ? requestedResolution : 'auto',
+    {initial:Math.sqrt(AUTO_START_PIXELS/Math.max(1,canvas.clientWidth*canvas.clientHeight*(window.devicePixelRatio||1)**2))});
   const fixedPolygons = fixedResolution && !qs.has('polygons');
   const polygons = createAdaptivePolygons(fixedPolygons ? 'fixed' : qs.get('polygons') || 'auto');
   terrain?.setPixelError?.(polygons.pixelError);
   let nativeWidth = 0, nativeHeight = 0;
-  let colorMS, depthMS, hdrTex, bloomTex, waterCopy, hdrView, waterView;
-  let submergedColor,aboveWaterColor,submergedDepth,oceanOpticsGroup;
+  let colorMS, depthMS, hdrTex, bloomTex, waterCopy, hdrView;
+  let submergedColor,aboveWaterColor,submergedDepth;
+  const oceanOpticsGroup=ocean=>device.createBindGroup({label:'water transmission',layout:ocean.pipe.getBindGroupLayout(3),entries:[
+    {binding:0,resource:submergedColor.createView()},{binding:1,resource:linSamp},{binding:2,resource:{buffer:opticsUBO}},
+    {binding:3,resource:{buffer:vessels[0].probe.output}},{binding:4,resource:aboveWaterColor.createView()}]});
   const opticsUBO=mkBuf(16,GU.UNIFORM|GU.COPY_DST,'water extinction'),opticsData=new Float32Array(4);
   const underwaterMedium=await createUnderwater({device,shader,frameUBO,opticsUBO,transView,skyView,sampler:sampClamp,sunVis:sunVisBuf,
     derivView:fullArr(derivTex),seaSampler:samplerSim,cameraProbe:vessels[0].probe.output,surfaceWaves,sceneShadows,format:HDR,samples:MSAA,skipAir:true});
@@ -761,7 +794,7 @@ async function main() {
     depthStencilAttachment:{view:null,depthClearValue:0,depthLoadOp:'clear',depthStoreOp:'discard'}};
   const aboveWaterPass={label:'Above-water geometry',colorAttachments:[{view:null,clearValue:{r:0,g:0,b:0,a:0},loadOp:'clear',storeOp:'store'}],
     depthStencilAttachment:{view:null,depthClearValue:0,depthLoadOp:'clear',depthStoreOp:'discard'}};
-  let waterMips = 1, waterMipGroups = [];
+  let waterMips = 1, waterMipGroups = [], waterSize = [1,1];
   const mainPass = {
     colorAttachments: [{ view: null, resolveTarget: null, clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: 'clear', storeOp: 'discard' }],
     depthStencilAttachment: { view: null, depthClearValue: 0, depthLoadOp: 'clear', depthStoreOp: 'discard' },
@@ -785,29 +818,33 @@ async function main() {
     W = w; H = h;bloomFrameReady=false;
     canvas.width = W; canvas.height = H;
     for (const t of [colorMS, depthMS, hdrTex, bloomTex, waterCopy,submergedColor,aboveWaterColor,submergedDepth]) t && t.destroy();
-    submergedColor=device.createTexture({label:'submerged radiance and eye depth',size:[W,H],format:HDR,usage:TU.RENDER_ATTACHMENT|TU.TEXTURE_BINDING});
-    aboveWaterColor=device.createTexture({label:'above-water radiance and eye depth',size:[W,H],format:HDR,usage:TU.RENDER_ATTACHMENT|TU.TEXTURE_BINDING});
-    submergedDepth=device.createTexture({label:'submerged visibility',size:[W,H],format:'depth32float',usage:TU.RENDER_ATTACHMENT});
+    // Refraction blurs and bends whatever these hold, so half size is all they need.
+    const captureSize=[Math.max(1,W>>1),Math.max(1,H>>1)];
+    submergedColor=device.createTexture({label:'submerged radiance and eye depth',size:captureSize,format:HDR,usage:TU.RENDER_ATTACHMENT|TU.TEXTURE_BINDING});
+    aboveWaterColor=device.createTexture({label:'above-water radiance and eye depth',size:captureSize,format:HDR,usage:TU.RENDER_ATTACHMENT|TU.TEXTURE_BINDING});
+    submergedDepth=device.createTexture({label:'submerged visibility',size:captureSize,format:'depth32float',usage:TU.RENDER_ATTACHMENT});
     submergedPass.colorAttachments[0].view=submergedColor.createView();
     submergedPass.depthStencilAttachment.view=submergedDepth.createView();
     aboveWaterPass.colorAttachments[0].view=aboveWaterColor.createView();
     aboveWaterPass.depthStencilAttachment.view=submergedDepth.createView();
-    oceanOpticsGroup=device.createBindGroup({label:'water transmission',layout:oceanPipe.getBindGroupLayout(3),entries:[
-      {binding:0,resource:submergedColor.createView()},{binding:1,resource:linSamp},{binding:2,resource:{buffer:opticsUBO}},
-      {binding:3,resource:{buffer:vessels[0].probe.output}},{binding:4,resource:aboveWaterColor.createView()}]});
+    openOcean.optics=null;if(coastalOcean)coastalOcean.optics=null;
     colorMS = device.createTexture({ size: [W, H], format: HDR, sampleCount: MSAA, usage: TU.RENDER_ATTACHMENT });
     depthMS = device.createTexture({ size: [W, H], format: 'depth32float', sampleCount: MSAA, usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING });
     hdrTex = device.createTexture({ size: [W, H], format: HDR, usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING });
-    waterMips = Math.min(8, Math.floor(Math.log2(Math.max(W,H)))+1);
-    waterCopy = device.createTexture({ size: [W, H], format: HDR, mipLevelCount: waterMips,
-      usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING | TU.STORAGE_BINDING });
-    waterMipGroups = [];
+    // What ship timber reflects: a filtered chain from the last frame's finished image, so the
+    // whole scene can stay in one render pass. It is only ever read blurred, so half size will do.
+    waterSize = [Math.max(1,W>>1),Math.max(1,H>>1)];
+    waterMips = Math.min(8, Math.floor(Math.log2(Math.max(...waterSize)))+1);
+    waterCopy = device.createTexture({ size: waterSize, format: HDR, mipLevelCount: waterMips,
+      usage: TU.TEXTURE_BINDING | TU.STORAGE_BINDING });
+    waterMipGroups = [bg(waterFilterPipe,[hdrTex.createView(),lvl(waterCopy,0,'2d')],'water reflection source')];
     for (let m=1;m<waterMips;m++) waterMipGroups.push(bg(waterFilterPipe,
       [lvl(waterCopy,m-1,'2d'),lvl(waterCopy,m,'2d')], 'water reflection mip'));
     for(const v of vessels){
       const resources=[{buffer:frameUBO},transView,skyView,sampClamp,
         envCubeView,{buffer:sunVisBuf},{buffer:v.hullUBO},waterCopy.createView(),fullArr(dispTex),samplerSim,oakTex.createView(),oakSampler,v.interaction.deck.view,
-        {buffer:v.wetness.state},{buffer:v.wetness.lookup},{buffer:v.holesUBO}];
+        {buffer:v.wetness.state},{buffer:v.wetness.lookup}];
+      v.hullResources=resources;v.damagedGroups=null;
       v.bindGroup=bg(v.render.pipeline,resources,v.id+' vessel');v.submergedGroup=v.render.submerged.bindGroup(resources);
     }
     const bw = Math.max(1, W >> 1), bh = Math.max(1, H >> 1);
@@ -817,7 +854,6 @@ async function main() {
     mainPass.depthStencilAttachment.view = depthMS.createView();
     hdrView = hdrTex.createView();
     const mediumView=underwaterMedium.resize({width:W,height:H,hdrView,depthView:depthMS.createView(),submergedView:submergedColor.createView()});
-    waterView = waterCopy.createView({baseMipLevel:0,mipLevelCount:1});
     const bv = [];
     for (let m = 0; m < bloomLevels; m++) bv.push(bloomTex.createView({ baseMipLevel: m, mipLevelCount: 1 }));
     bloomPasses = [];
@@ -2332,7 +2368,6 @@ async function main() {
     }
     restoreVesselDamageSnapshot(boat, saved.damage);
     vessels[0].pose?.updateDamage?.(boat);
-    vessels[0].wetness?.updateDamage?.(boat.damage);
   };
   let playerWreckRaised = false;
   let lastUrlSyncMs = 0;
@@ -2448,7 +2483,6 @@ async function main() {
       target.pose?.restoreGeometry?.();
       target.bakedWreck=false;target.bakingWreck=false;target.entirelySubmerged=false;
       target.pose?.updateDamage?.(target.boat);
-      target.wetness?.updateDamage?.(target.boat.damage);
     };
     const activateEncounterVessel=(enc,{mode='sight',keepPosition=false}={})=>{
       if(vessels.length<=1)return;
@@ -2811,8 +2845,7 @@ async function main() {
       onRepaired:whole=>{
         if(whole)vessels[0].pose?.restoreGeometry?.();
         vessels[0].pose?.updateDamage?.(boat);
-        vessels[0].wetness?.updateDamage?.(boat.damage);
-        helm?.update?.(performance.now(),true);
+            helm?.update?.(performance.now(),true);
       },
       onCrewRestored:company=>{reviveCompany(company);refreshCrewRosterDOM();updateCrewUI();},
       onPutToSea:port=>{
@@ -3524,7 +3557,7 @@ async function main() {
   const fixedDt = shotName ? 1 / 60 : 0;
   let last = performance.now();
   let fpsN = 0, fpsT = 0;
-  let frameWorkMs=0;
+  let frameWorkMs=0;const frameStages=createFrameStages();window.oceanFrameStages=frameStages.snapshot;
   let shooting = false;
   document.addEventListener('visibilitychange',()=>{last=performance.now();fpsN=0;fpsT=0;resolution.reset();polygons.reset();hullContactProbe.reset();sceneAudio.visibility(document.hidden);});
 
@@ -3589,14 +3622,15 @@ async function main() {
   function frame(now) {
     if (shooting) return;  // paused while a screenshot is read back
     if(bloomMeasureRequested&&bloomFrameReady){measureBloomAlone();return;}
-    const cpuFrameStart=performance.now();
+    const cpuFrameStart=performance.now();frameStages.begin();
     requestAnimationFrame(frame);
     landfallUI.update(now);
     const elapsed = Math.max(0, (now - last) / 1000);
-    const workSample = profiler.totalMs>0?Math.max(frameWorkMs,profiler.totalMs):null;
-    const resChanged = resolution.sample(elapsed,!document.hidden,workSample);
+    // A polygon budget down to half is hard to see, so it goes along with sharpness. Further cuts
+    // wait until the image is at half size, and come back before any sharpness does.
+    const resChanged = resolution.sample(elapsed,!document.hidden,frameWorkMs,{mayRaise:polygons.mode!=='auto'||polygons.scale>=POLYGON_COMFORT,mayLower:!polygons.trying});
     if(resChanged&&elapsed<1/28)polygons.reset();
-    if(polygons.sample(elapsed,!document.hidden,workSample))terrain?.setPixelError?.(polygons.pixelError);
+    if(polygons.sample(elapsed,!document.hidden,frameWorkMs,{mayLower:!resolution.trying,mayLowerFurther:resolution.mode!=='auto'||resolution.scale<=POLYGONS_YIELD_AT}))terrain?.setPixelError?.(polygons.pixelError);
     resize();
     let camDt = Math.min(0.1, elapsed);
     last = now;
@@ -3604,8 +3638,8 @@ async function main() {
     if (fpsT > 0.5) {
       const fps = fpsN / fpsT;
       hudFps.textContent = `${fps.toFixed(0)} fps  ${(1000 / fps).toFixed(2)} ms` +
-        (hasTS ? `  |  GPU ${profiler.detailed?'window':'endpoints'} ${profiler.totalMs.toFixed(2)} ms` : '') + `  |  ${nodeCount} nodes  ${W}x${H}`;
-      profileSummary=`${fps.toFixed(1)} fps · ${(1000/fps).toFixed(1)} ms/frame\n${W} × ${H} pixels · DPR ${window.devicePixelRatio||1}\nResolution: ${resolution.mode} · ${Math.round(resolution.scale*100)}%${resolution.mode==='auto'?' · target '+resolution.targetFPS+' FPS':''}\nPolygons: ${polygons.mode} · ${Math.round(polygons.scale*100)}% · ${polygons.pixelError.toFixed(1)} px\nCPU frame work: ${frameWorkMs.toFixed(2)} ms\nOcean nodes: ${nodeCount} · Active vessels: ${1+(followerEnabled?vessels.length-1:0)}\nOcean visibility: ${OCEAN_DEPTH?'depth first':'inline'}`;
+        (profiler.detailed ? `  |  GPU window ${profiler.totalMs.toFixed(2)} ms` : '') + `  |  ${nodeCount} nodes  ${W}x${H}`;
+      profileSummary=`${fps.toFixed(1)} fps · ${(1000/fps).toFixed(1)} ms/frame\n${W} × ${H} pixels · DPR ${window.devicePixelRatio||1}\nResolution: ${resolution.mode} · ${Math.round(resolution.scale*100)}%${resolution.mode==='auto'?' · target '+resolution.targetFPS+' FPS':''}\nPolygons: ${polygons.mode} · ${Math.round(polygons.scale*100)}% · ${polygons.pixelError.toFixed(1)} px\nMain thread: ${frameStages.text()}\nCPU frame work: ${frameWorkMs.toFixed(2)} ms\nOcean nodes: ${nodeCount} · Active vessels: ${1+(followerEnabled?vessels.length-1:0)}\nOcean visibility: ${OCEAN_DEPTH?'depth first':'inline'}`;
       if(!performancePanel.hidden){performanceSummary.textContent=profileSummary;profilePanel.textContent=profiler.text();}
       updateResolutionStatus();
       updatePolygonStatus();
@@ -3663,10 +3697,12 @@ async function main() {
     astronomy.update(simPaused ? 0 : elapsed,boat);
     if(voyageCtl?.active&&!voyageCtl.voyage?.passive&&(frameIndex&7)===0)syncAstronomySliders(true);
     weather.step(dt,P,cam);
+    frameStages.mark('Sailing and voyage');
     writeFrame(simTime);
     weatherRenderer.update(weather,P,dt);
     sceneAudio.update(dt,P,boat,frameF,weather,activeFires);
     if (clouds.update(frameF,P,dt)) envFull = true;
+    frameStages.mark('Weather and sound');
     for(const v of vessels.slice(1)){v.boat.showProw=!v.dormantEncounter&&followerEnabled;v.boat.crew=boat.crew;v.boat.effects=boat.effects;}
     for(const [index,v] of vessels.entries()){
       const ship=v.boat,data=v.hullData,dmg=ship.damage;
@@ -3717,13 +3753,14 @@ async function main() {
       if(!index&&dmg?.sunk&&!playerWreckRaised){playerWreckRaised=true;voyageCtl?.presentShipwreck?.();}
       // Paused frames keep the last pose, but a ship opened paused must still show its crew.
       if((!index||followerEnabled)&&!dmg?.sunk){
+        frameStages.mark('Ship state');
         if(dt>0||!v.crew?.posed){v.crew?.update(ship,dt,P.windSpeed,cam);v.wetness.updateCrew(v.crew?.state,ship);}
         else v.crew.refreshDraw(ship,cam);
+        frameStages.mark('Crew');
       }
       if(!index||followerEnabled){
         v.pose.updateRecoil(v.gunnery.state.guns,ship);
         v.pose.updateDamage?.(ship);
-        v.wetness.updateDamage?.(ship.damage);
       }
       if(!index||followerEnabled)v.pose.update(ship,simTime,settlingBake?0:P.windSpeed);
       if(ship.showProw&&!settlingBake)v.anchorRenderer.update(v.anchor,ship);
@@ -3735,6 +3772,7 @@ async function main() {
         v.interaction.update(ship,dt,simTime,frameIndex,P.windSpeed,P.windDir*D2R,needSpectrum,weather.intensity*(weather.type===1?.1:1));
       }
     }
+    frameStages.mark('Ship state');
     if(dt>0)rowingSurfaceEvents.collect(followerEnabled?vessels:[vessels[0]],{time:simTime,dt,
       hidden:document.hidden,resetSea:needSpectrum||elapsed>.5||rowingSurfaceWrapped});
     if(terrain?.port&&terrain.port!==activePortRef){
@@ -3791,6 +3829,7 @@ async function main() {
     const cameraMediumBand=cam.y<waterH+HB+2;
     if (nodeCount) device.queue.writeBuffer(instBuf, 0, instData, 0, nodeCount * 4);
 
+    frameStages.mark('Effects');
     const enc = device.createCommandEncoder();
     if(celestial.update())envFull=true;celestial.encode(enc);
     profiler.beginFrame(frameIndex);
@@ -3835,7 +3874,7 @@ async function main() {
       skySun = frameF[33]; skyHaze = frameF[72]; skyHeight = frameF[73];
     }
     clouds.encode(cp);
-    terrain?.encode(cp,skyChanged);
+    terrain?.encode(cp,skyChanged,frameF);
     cp.setPipeline(sunVisPipe);
     cp.setBindGroup(0, bgSunVis);
     cp.setBindGroup(1, bgSunClouds);
@@ -3862,13 +3901,13 @@ async function main() {
     gunportSafety.encode(enc,boat,shipGuns.state.time);
     const drawProw=vessels.some(v=>v.boat.showProw);
     const gunTransparent=gunEffects.transparentActive;
-    // Resolve the ocean straight into the reflection pyramid. The ship pass
-    // preserves MSAA color/depth and resolves the finished scene into hdrView.
-    mainPass.colorAttachments[0].resolveTarget=drawProw?waterView:hdrView;
+    mainPass.colorAttachments[0].resolveTarget=hdrView;
     for(const [i,v] of vessels.entries())if((!v.bakedWreck||skyChanged)&&!v.dormantEncounter)v.shadows.encode(enc,profiler,v.boat.damage?.sunk?null:v.crew?.drawShadow,i?v.id+' ':'');
     const terrainCamera={x:frameF[16],y:frameF[17],z:frameF[18],screenHeight:H,pixelError:polygons.pixelError,
       tanHalfFovY:Math.hypot(frameF[24],frameF[25],frameF[26]),forward:frameF.subarray(28,31)};
+    frameStages.mark('GPU commands');
     terrain?.prepare(terrainCamera,frameF);
+    frameStages.mark('Scenery');
     submergedPass.timestampWrites=profiler.writes('Submerged geometry');
     const underwater=enc.beginRenderPass(submergedPass);
     terrain?.drawSubmerged(underwater);
@@ -3893,30 +3932,49 @@ async function main() {
       }
       dolphins.drawSubmerged(aboveWater,true);marineLife.drawSubmerged(aboveWater,true);aboveWater.end();
     }
-    mainPass.timestampWrites=profiler.writes('Ocean + sky');
-    mainPass.colorAttachments[0].storeOp = drawProw||gunTransparent ? 'store' : 'discard';
-    mainPass.depthStencilAttachment.depthStoreOp = drawProw||gunTransparent||cameraMediumBand ? 'store' : 'discard';
+    mainPass.timestampWrites=profiler.writes('Scene');
+    mainPass.colorAttachments[0].storeOp = gunTransparent ? 'store' : 'discard';
+    mainPass.depthStencilAttachment.depthStoreOp = gunTransparent||cameraMediumBand ? 'store' : 'discard';
+    // One pass for the whole scene keeps its multisampled attachments in tile memory. Whole hulls
+    // come first: they neither discard nor blend, so what they hide is never shaded, sea included.
+    if(drawProw){
+      const filterPass=enc.beginComputePass({timestampWrites:profiler.writes('Water reflection filter')});filterPass.setPipeline(waterFilterPipe);
+      for(let m=0;m<waterMips;m++){
+        filterPass.setBindGroup(0,waterMipGroups[m]);
+        filterPass.dispatchWorkgroups(Math.ceil(Math.max(1,waterSize[0]>>m)/8),Math.ceil(Math.max(1,waterSize[1]>>m)/8));
+      }
+      filterPass.end();
+    }
     const rp = enc.beginRenderPass(mainPass);
+    const hulls=!drawProw?[]:vessels.filter(v=>v.boat.showProw&&!(v.bakedWreck&&v.entirelySubmerged));
+    const drawHull=(v,pipeline,group,lighting)=>{
+      rp.setPipeline(pipeline);rp.setBindGroup(0,group);if(lighting)rp.setBindGroup(1,lighting);
+      rp.setVertexBuffer(0,v.vertexBuffer);if(v.pose)rp.setVertexBuffer(1,v.pose.buffer);rp.setIndexBuffer(v.render.indexBuffer,'uint32');rp.drawIndexed(v.asset.indices.length);
+    };
+    for(const v of hulls)if(!hullBelongsDamaged(v))drawHull(v,v.render.pipeline,v.bindGroup,v.lighting);
+    frameStages.mark('GPU commands');
     terrain?.draw(rp,terrainCamera,frameF);
+    frameStages.mark('Scenery');
     if (nodeCount) {
       rp.setVertexBuffer(0, instBuf);
       rp.setIndexBuffer(idxBuf, 'uint16');
       // Keep depth and colour in one render pass so tile attachments stay live.
       // The second draw shades only the surviving surface, with no discard.
+      const ocean=terrain?coastalOcean:openOcean;
       if (OCEAN_DEPTH) {
-        rp.setPipeline(oceanDepthPipe);
-        rp.setBindGroup(0, bgOceanDepth[wakeIndex()]);
+        rp.setPipeline(ocean.depthPipe);
+        rp.setBindGroup(0, ocean.depthGroups[wakeIndex()]);
         if (coastalDepthGroup) {
           rp.setBindGroup(1, opticsEmptyGroup);
           rp.setBindGroup(2, coastalDepthGroup);
         }
         rp.drawIndexed(GRID * GRID * 6, nodeCount);
       }
-      rp.setPipeline(oceanPipe);
-      rp.setBindGroup(0, bgOcean[foamCur][wakeIndex()]);
-      rp.setBindGroup(1, oceanShadows);
+      rp.setPipeline(ocean.pipe);
+      rp.setBindGroup(0, ocean.groups[foamCur][wakeIndex()]);
+      rp.setBindGroup(1, ocean.shadows);
       rp.setBindGroup(2,coastalGroup??opticsEmptyGroup);
-      rp.setBindGroup(3,oceanOpticsGroup);
+      rp.setBindGroup(3,ocean.optics??=oceanOpticsGroup(ocean));
       rp.drawIndexed(GRID * GRID * 6, nodeCount);
     }
     rp.setPipeline(skyPipe);
@@ -3924,41 +3982,30 @@ async function main() {
     clouds.drawSky(rp);
     rp.draw(3);
     celestial.drawLines(rp,clouds.output);
-    if (!drawProw) {fortSoldiers?.draw(rp);dolphins.draw(rp);marineLife.draw(rp);gunEffects.drawProjectiles(rp);spindrift.draw(rp);if(!gunTransparent)weatherRenderer.draw(rp);}
-    rp.end();
-
-    if (drawProw) {
-      const filterPass = enc.beginComputePass({timestampWrites:profiler.writes('Water reflection filter')}); filterPass.setPipeline(waterFilterPipe);
-      for(let m=1;m<waterMips;m++) {
-        filterPass.setBindGroup(0,waterMipGroups[m-1]);
-        filterPass.dispatchWorkgroups(Math.ceil(Math.max(1,W>>m)/8),Math.ceil(Math.max(1,H>>m)/8));
+    // Anything that cuts fragments or blends follows the opaque scene.
+    for(const v of hulls)if(hullBelongsDamaged(v)){
+      const groups=damagedHullGroups(v);
+      drawHull(v,v.render.damaged.cut,groups.cut);
+      drawHull(v,v.render.damaged.shade,groups.shade,groups.lighting);
+    }
+    if(drawProw){
+      for(const v of hulls){
+        if(!v.boat.damage?.sunk)v.crew?.draw(rp);
+        if(!v.bakedWreck)v.anchorRenderer.draw(rp);
+        if(!v.boat.damage?.sunk)v.flood?.draw(rp);
       }
-      filterPass.end();
-      const prowPass = enc.beginRenderPass({
-        timestampWrites:profiler.writes('Ship + spray'),
-        colorAttachments: [{ view: mainPass.colorAttachments[0].view, resolveTarget: hdrView,
-          loadOp: 'load', storeOp: gunTransparent?'store':'discard' }],
-        depthStencilAttachment: { view: mainPass.depthStencilAttachment.view, depthClearValue:0, depthLoadOp: 'load', depthStoreOp: gunTransparent||cameraMediumBand?'store':'discard' },
-      });
       for(let i=0;i<vessels.length;i++){
         const v=vessels[i];
         const visible=Boolean(v.boat.showProw&&!(v.bakedWreck&&v.entirelySubmerged)&&!v.boat.damage?.sunk);
         shipColorsRenderer?.updateVessel(i,visible?v.boat:null,simTime,Math.cos(P.windDir*D2R),Math.sin(P.windDir*D2R),P.windSpeed);
       }
       shipColorsRenderer?.updateMooringVertices(dockingBoarding.buildVertices());
-      for(const v of vessels){
-        if(!v.boat.showProw||(v.bakedWreck&&v.entirelySubmerged))continue;
-        prowPass.setPipeline(v.render.pipeline);prowPass.setBindGroup(0,v.bindGroup);prowPass.setBindGroup(1,v.lighting);
-        prowPass.setVertexBuffer(0,v.vertexBuffer);if(v.pose)prowPass.setVertexBuffer(1,v.pose.buffer);prowPass.setIndexBuffer(v.render.indexBuffer,'uint32');prowPass.drawIndexed(v.asset.indices.length);
-        if(!v.boat.damage?.sunk)v.crew?.draw(prowPass);
-        if(!v.bakedWreck)v.anchorRenderer.draw(prowPass);
-        if(!v.boat.damage?.sunk)v.flood?.draw(prowPass);
-      }
-      shipColorsRenderer?.draw(prowPass,vessels.length);
-      fortSoldiers?.draw(prowPass);
-      for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter&&v.boat.showProw)v.interaction.draw(prowPass);
-      dolphins.draw(prowPass);marineLife.draw(prowPass);gunEffects.drawProjectiles(prowPass);spindrift.draw(prowPass);if(!gunTransparent)weatherRenderer.draw(prowPass);prowPass.end();
+      shipColorsRenderer?.draw(rp,vessels.length);
     }
+    fortSoldiers?.draw(rp);
+    if(drawProw)for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter&&v.boat.showProw)v.interaction.draw(rp);
+    dolphins.draw(rp);marineLife.draw(rp);gunEffects.drawProjectiles(rp);spindrift.draw(rp);if(!gunTransparent)weatherRenderer.draw(rp);
+    rp.end();
 
     if(gunTransparent){
       gunEffects.resolveDepth(enc,depthMS.createView(),W,H);
@@ -4001,6 +4048,7 @@ async function main() {
     for(const v of vessels)v.rowingWater?.readback();
     if(!oceanStartupFirstFrameSubmitted){
       oceanStartupFirstFrameSubmitted=true;
+      for(const render of renderAssets.values())render.compileDamaged().catch(error=>console.warn('Damaged hull shader:',error));
       // Setup uploads submit earlier too. Only this submission contains the
       // first canvas composite, and its completion must precede revealing it.
       device.queue.onSubmittedWorkDone().then(()=>{
@@ -4043,6 +4091,7 @@ async function main() {
     if (doTs) profiler.read();
     if (readBuf) saveShot(readBuf, Math.ceil(W * 4 / 256) * 256);
     syncBrowserUrlState(now);
+    frameStages.mark('GPU commands');frameStages.end();
     frameWorkMs=performance.now()-cpuFrameStart;
   }
 

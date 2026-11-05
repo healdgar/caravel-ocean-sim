@@ -168,7 +168,7 @@ fn underwaterSceneDistance(pixel:vec2i,ray:vec3f)->f32 {
   let distance=underwaterSceneDistance(pixel,ray);
   var path=select(120.0,min(distance,120.0),distance>=0.0);
   var radiance=select(vec3f(0),original.rgb,distance>=0.0);
-  let raw=textureLoad(rawSubmerged,pixel,0);
+  let raw=textureLoad(rawSubmerged,pixel*vec2i(textureDimensions(rawSubmerged))/vec2i(textureDimensions(hdrSource)),0);
   let forwardDepth=path*dot(ray,normalize(F.camFwd.xyz));
   // Capture also contains seabed omitted by the ordinary air-side terrain
   // draw. A captured solid may precede the ordinary depth (or fill clear depth),

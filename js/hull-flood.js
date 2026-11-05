@@ -1,11 +1,14 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-// Keeps a ship's holes and hold water on the GPU, and draws the water.
+// Keeps a ship's battle damage on the GPU in one uniform buffer, and draws the water in her hold.
+// Holes and hold water change while she floods. Craters change only when she is hit.
 import { HULL_FLOOD_RENDER, HULL_FLOOD_JET_SEGMENTS } from './wgsl/hull-flood.js';
-import { HULL_HOLE_LIMIT, hullFloodLevel } from './hull-holes.js';
+import { HULL_HOLE_LIMIT, HULL_CRATER_LIMIT } from './wgsl/common.js';
+import { hullFloodLevel } from './hull-holes.js';
 import { modelDeckWidth } from './hull.js';
 import { SHIP_MODELS } from './ship-models.js';
 
-export const HULL_FLOOD_UNIFORM_BYTES = 16 * (2 + 2 * HULL_HOLE_LIMIT);
+const HULL_FLOOD_WORDS = 4 * (2 + 2 * HULL_HOLE_LIMIT);
+export const HULL_DAMAGE_UNIFORM_BYTES = 4 * HULL_FLOOD_WORDS + 16 * HULL_CRATER_LIMIT;
 const HULL_FLOOD_STATIONS = 21;
 const HULL_FLOOD_WIDTH_SHARE = 0.82;
 const HULL_FLOOD_MIN_TONNES = 0.1;
@@ -32,7 +35,25 @@ export function writeHullFloodUniform(data, boat) {
   }
   data[5] = Math.min(1, flowing * 2);
   data[6] = tonnes;
-  return { count, tonnes };
+  data[7] = Math.min(HULL_CRATER_LIMIT, damage?.craters?.length ?? 0);
+  return { count, tonnes, craters: data[7] };
+}
+
+// Position in design coordinates, then radius, depth and hits packed into one word.
+export function writeHullCraters(floats, craters = []) {
+  const words = new Uint32Array(floats.buffer, floats.byteOffset, floats.length);
+  const count = Math.min(HULL_CRATER_LIMIT, craters.length);
+  for (let i = 0; i < count; i++) {
+    const crater = craters[craters.length - count + i], at = i * 4;
+    floats[at] = Number(crater.x) || 0;
+    floats[at + 1] = Number(crater.y) || 0;
+    floats[at + 2] = Number(crater.z) || 0;
+    const radius = Math.max(0, Math.min(4095, Math.round((Number(crater.radius) || 0.08) * 4000)));
+    const depth = Math.max(0, Math.min(4095, Math.round((Number(crater.depth) || 0.2) * 1000)));
+    const hits = Math.max(1, Math.min(255, Math.round(Number(crater.hits) || 1)));
+    words[at + 3] = ((hits << 24) | (depth << 12) | radius) >>> 0;
+  }
+  return count;
 }
 
 export function hullFloodOutline(boat) {
@@ -78,14 +99,15 @@ export async function createHullFlood({ device, frameUBO, envCubeView, sampler, 
   device.queue.writeBuffer(index, 0, indexData);
 
   return {
-    // One per ship. `uniform` is the same buffer the hull shader reads its holes from.
+    // One per ship. `uniform` is the same buffer the damaged hull shader reads.
     vessel(uniform, hullUBO) {
-      const data = new Float32Array(HULL_FLOOD_UNIFORM_BYTES / 4);
+      const data = new Float32Array(HULL_FLOOD_WORDS);
+      const craterData = new Float32Array(HULL_CRATER_LIMIT * 4);
       const outline = device.createBuffer({ label: 'hull flood outline', size: HULL_FLOOD_STATIONS * 16, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
       const resources = [{ buffer: frameUBO }, { buffer: hullUBO }, { buffer: uniform }, envCubeView, sampler];
       const group = (pipeline) => device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: resources.map((resource, binding) => ({ binding, resource })) });
       const planeGroup = group(plane), jetGroup = group(jet);
-      let outlineKey = '', count = 0, tonnes = 0, wroteEmpty = false;
+      let outlineKey = '', count = 0, tonnes = 0, craters = 0, wroteEmpty = false, wroteCraters = 0, craterRevision = 0;
       return {
         update(boat) {
           const key = `${boat?.model?.id ?? boat?.modelId}/${boat.length}/${boat.beam}`;
@@ -93,10 +115,17 @@ export async function createHullFlood({ device, frameUBO, envCubeView, sampler, 
             outlineKey = key;
             device.queue.writeBuffer(outline, 0, hullFloodOutline(boat));
           }
-          ({ count, tonnes } = writeHullFloodUniform(data, boat));
+          ({ count, tonnes, craters } = writeHullFloodUniform(data, boat));
+          const revision = boat?.damage?.cratersRevision ?? 0;
+          if (revision !== craterRevision) {
+            craterRevision = revision;
+            writeHullCraters(craterData, boat.damage.craters ?? []);
+            device.queue.writeBuffer(uniform, HULL_FLOOD_WORDS * 4, craterData);
+          }
           // An undamaged ship writes nothing after its first empty frame.
-          if (count === 0 && tonnes <= 0 && wroteEmpty) return;
+          if (count === 0 && tonnes <= 0 && craters === wroteCraters && wroteEmpty) return;
           wroteEmpty = count === 0 && tonnes <= 0;
+          wroteCraters = craters;
           device.queue.writeBuffer(uniform, 0, data);
         },
         draw(pass) {

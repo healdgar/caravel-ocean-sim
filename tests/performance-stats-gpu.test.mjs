@@ -13,7 +13,7 @@ before(async()=>{
 });
 after(async()=>{await statsBrowser?.close();if(statsServer)await new Promise(resolve=>statsServer.close(resolve));});
 
-test('native GPU profiler allocates lazily, discards pending old epochs and restores endpoint-only timing',{timeout:120000},async t=>{
+test('native GPU profiler allocates lazily, discards pending old epochs and takes no timestamps while closed',{timeout:120000},async t=>{
   const page=await statsBrowser.newPage();
   try{
     await page.route('**/__stats-profiler',r=>r.fulfill({contentType:'text/html',body:'<!doctype html>'}));await page.goto(statsOrigin+'/__stats-profiler');
@@ -31,21 +31,23 @@ test('native GPU profiler allocates lazily, discards pending old epochs and rest
         for(const name of names){const timestampWrites=profiler.writes(name);descriptors.push(timestampWrites?{name,count:timestampWrites.querySet.count,start:timestampWrites.beginningOfPassWriteIndex??null,end:timestampWrites.endOfPassWriteIndex??null}:null);const pass=encoder.beginComputePass({timestampWrites});pass.end();}
         const copied=profiler.resolve(encoder);device.queue.submit([encoder.finish()]);return {copied,descriptors};
       };
+      const closedFirst=encode(0,['Waves + effects','Sky + clouds','Composite']),closedQueries=queries.length;
+      profiler.setDetailed(true);
       // Hold only delivery of a genuine GPU map. Native timestamp commands and
       // mapAsync still run; the gate makes the mode-change race deterministic.
       const nativeMap=GPUBuffer.prototype.mapAsync;let release;
       const delivery=new Promise(resolve=>release=resolve);
       GPUBuffer.prototype.mapAsync=function(...args){const native=nativeMap.apply(this,args);return this.label==='timing read'?Promise.all([native,delivery]).then(()=>{}):native;};
-      const endpoint=encode(0,['Waves + effects','Sky + clouds','Composite']),reading=profiler.read();
+      const firstOpen=encode(8,GPU_PASS_NAMES),reading=profiler.read();
       await device.queue.onSubmittedWorkDone();
-      profiler.setDetailed(true);profiler.setDetailed(false);profiler.setDetailed(true);
-      profiler.beginFrame(8);const whilePending=profiler.writes('Waves + effects'),pendingSnapshot=profiler.snapshot(),pendingQueries=queries.slice();
+      profiler.setDetailed(false);profiler.setDetailed(true);
+      profiler.beginFrame(16);const whilePending=profiler.writes('Waves + effects'),pendingSnapshot=profiler.snapshot(),pendingQueries=queries.slice();
       release();await reading;GPUBuffer.prototype.mapAsync=nativeMap;
       const discarded=profiler.snapshot();
-      const detailed=encode(16,GPU_PASS_NAMES);await profiler.read();const detailedSnapshot=profiler.snapshot(),detailQueryCounts=queries.slice();
+      const detailed=encode(24,GPU_PASS_NAMES);await profiler.read();const detailedSnapshot=profiler.snapshot(),detailQueryCounts=queries.slice();
       let releaseDetailed;const detailedDelivery=new Promise(resolve=>releaseDetailed=resolve);
       GPUBuffer.prototype.mapAsync=function(...args){const native=nativeMap.apply(this,args);return this.label==='timing read'?Promise.all([native,detailedDelivery]).then(()=>{}):native;};
-      encode(24,GPU_PASS_NAMES);const detailedReading=profiler.read();await device.queue.onSubmittedWorkDone();profiler.setDetailed(false);const cleared=profiler.snapshot();
+      encode(32,GPU_PASS_NAMES);const detailedReading=profiler.read();await device.queue.onSubmittedWorkDone();profiler.setDetailed(false);const cleared=profiler.snapshot();
       releaseDetailed();await detailedReading;GPUBuffer.prototype.mapAsync=nativeMap;const closedDiscarded=profiler.snapshot();
       const closed=encode(40,['Waves + effects','Sky + clouds','escort-8 Solid shadows','Composite']);await profiler.read();
       const endpointSnapshot=profiler.snapshot(),closedText=profiler.text();profiler.destroy();await device.queue.onSubmittedWorkDone();device.destroy();
@@ -53,17 +55,17 @@ test('native GPU profiler allocates lazily, discards pending old epochs and rest
       // permit the CPU/FPS UI; do not pretend an unsupported feature exists.
       const plain=await(await navigator.gpu.requestAdapter()).requestDevice(),unsupported=createGPUProfiler(plain,true);unsupported.beginFrame(0);
       const unsupportedResult={supported:unsupported.supported,detailed:unsupported.detailed,writes:unsupported.writes('Waves + effects')??null,enabled:unsupported.setDetailed(true),text:unsupported.text()};unsupported.destroy();plain.destroy();
-      return {errors,before,endpoint,whilePending:whilePending??null,pendingSnapshot,pendingQueries,discarded,detailed,detailedSnapshot,detailQueryCounts,cleared,closedDiscarded,closed,endpointSnapshot,closedText,unsupported:unsupportedResult,names:GPU_PASS_NAMES,buffers};
+      return {errors,before,closedFirst,closedQueries,firstOpen,whilePending:whilePending??null,pendingSnapshot,pendingQueries,discarded,detailed,detailedSnapshot,detailQueryCounts,cleared,closedDiscarded,closed,endpointSnapshot,closedText,unsupported:unsupportedResult,names:GPU_PASS_NAMES,buffers};
     });
     t.diagnostic(JSON.stringify(result));assert.deepEqual(result.errors,[]);assert.deepEqual(result.before,{queries:0,buffers:0});
-    assert.equal(result.endpoint.copied,true);assert.deepEqual(result.endpoint.descriptors.map(d=>d&&[d.count,d.start,d.end]),[[2,0,null],null,[2,null,1]]);
-    assert.equal(result.whilePending,null,'a pending read cannot start a second capture');assert.deepEqual(result.pendingQueries,[2],'opening while pending cannot allocate or reuse live detailed query memory');
-    assert.equal(result.pendingSnapshot.sampleCount,0);assert.equal(result.discarded.sampleCount,0);assert.equal(result.discarded.totalMs,0);assert.deepEqual(result.discarded.latest,{},'old endpoint readback cannot populate a newly opened detailed epoch');assert.equal(result.discarded.error,'');
-    assert.deepEqual(result.detailQueryCounts,[2,result.names.length*2]);assert.equal(result.detailed.copied,true);assert.equal(result.detailed.descriptors.filter(Boolean).length,result.names.length);
+    assert.equal(result.closedFirst.copied,false);assert.ok(result.closedFirst.descriptors.every(d=>!d),'a closed panel writes no timestamps');assert.equal(result.closedQueries,0);assert.equal(result.firstOpen.copied,true);
+    assert.equal(result.whilePending,null,'a pending read cannot start a second capture');assert.deepEqual(result.pendingQueries,[result.names.length*2],'reopening while pending cannot allocate or reuse live query memory');
+    assert.equal(result.pendingSnapshot.sampleCount,0);assert.equal(result.discarded.sampleCount,0);assert.equal(result.discarded.totalMs,0);assert.deepEqual(result.discarded.latest,{},'an old readback cannot populate a newly opened epoch');assert.equal(result.discarded.error,'');
+    assert.deepEqual(result.detailQueryCounts,[result.names.length*2]);assert.equal(result.detailed.copied,true);assert.equal(result.detailed.descriptors.filter(Boolean).length,result.names.length);
     assert.equal(result.detailedSnapshot.detailed,true);assert.equal(result.detailedSnapshot.sampleCount,1);assert.equal(result.detailedSnapshot.error,'');assert.ok(Object.values(result.detailedSnapshot.latest).every(x=>Number.isFinite(x)&&x>=0));
     for(let escort=1;escort<=8;escort++)for(const kind of ['Solid','Canvas'])assert.ok(Object.hasOwn(result.detailedSnapshot.latest,`escort-${escort} ${kind} shadows`),'all production escort timing names are accepted');
-    assert.equal(result.cleared.sampleCount,0);assert.deepEqual(result.cleared.latest,{});assert.equal(result.closedDiscarded.sampleCount,0);assert.deepEqual(result.closedDiscarded.latest,{},'an old detailed read cannot leak spans into closed-panel endpoint timing');assert.equal(result.closedDiscarded.error,'');assert.equal(result.endpointSnapshot.detailed,false);assert.equal(result.endpointSnapshot.sampleCount,1);assert.deepEqual(Object.keys(result.endpointSnapshot.latest),['Frame','Bloom']);assert.equal(result.endpointSnapshot.error,'');
-    assert.deepEqual(result.closed.descriptors.map(d=>d&&[d.count,d.start,d.end]),[[2,0,null],null,null,[2,null,1]],'closing removes detailed pass-boundary descriptors');assert.match(result.closedText,/Detailed pass timing is off/);
+    assert.equal(result.cleared.sampleCount,0);assert.deepEqual(result.cleared.latest,{});assert.equal(result.closedDiscarded.sampleCount,0);assert.deepEqual(result.closedDiscarded.latest,{},'an old read cannot leak spans into a closed panel');assert.equal(result.closedDiscarded.error,'');assert.equal(result.endpointSnapshot.detailed,false);assert.equal(result.endpointSnapshot.sampleCount,0);assert.deepEqual(result.endpointSnapshot.latest,{});
+    assert.ok(result.closed.descriptors.every(d=>!d),'closing removes every timestamp write');assert.equal(result.closed.copied,false);assert.match(result.closedText,/runs while this panel is open/);
     assert.deepEqual({supported:result.unsupported.supported,detailed:result.unsupported.detailed,writes:result.unsupported.writes,enabled:result.unsupported.enabled},{supported:false,detailed:false,writes:null,enabled:false});assert.match(result.unsupported.text,/unavailable/);
   }finally{await page.close();}
 });
@@ -110,7 +112,7 @@ for(const path of ['/', '/docs/index.html'])for(const viewport of [{width:1140,h
     await statsStep(page);await page.waitForFunction(()=>oceanStartup.state==='ready');
     const stats=page.getByRole('button',{name:'Performance stats',exact:true}),close=page.getByRole('button',{name:'Hide performance stats',exact:true});
     assert.equal(await page.locator('#performance-panel').isVisible(),false);assert.equal(await stats.getAttribute('aria-expanded'),'false');
-    for(let i=0;i<8;i++)await statsStep(page);assert.ok((await page.evaluate(()=>statsRuntime.queries)).every(n=>n===2),'closed Stats allocates endpoint queries only');
+    for(let i=0;i<8;i++)await statsStep(page);assert.deepEqual(await page.evaluate(()=>statsRuntime.queries),[],'closed Stats allocates no timing queries');
     await stats.click();assert.equal(await stats.getAttribute('aria-expanded'),'true');assert.equal(await stats.getAttribute('aria-pressed'),'true');
     for(let i=0;i<12;i++)await statsStep(page);const first=await statsLayout(page);assertStatsLayout(first);
     assert.match(first.summary,/\d+(?:\.\d+)? fps/);assert.match(first.summary,/CPU frame work: \d+(?:\.\d+)? ms/);assert.match(first.summary,/Resolution: 0\.5 · 50%/);assert.match(first.summary,/Active vessels: 3/);assert.ok(first.summary.includes(`${first.canvas.width} × ${first.canvas.height} pixels`));assert.doesNotMatch(first.gpu,/Unknown GPU timing pass|unavailable: .*Error/);
@@ -122,7 +124,7 @@ for(const path of ['/', '/docs/index.html'])for(const viewport of [{width:1140,h
     assert.ok(held,'the race fixture must actually overlap a GPU timestamp read');
     await close.click();await stats.click();await close.click();assert.equal(await page.locator('#performance-panel').isVisible(),false);assert.equal(await stats.getAttribute('aria-expanded'),'false');
     await page.evaluate(()=>{statsRuntime.holdTiming=false;for(const release of statsRuntime.heldReads.splice(0))release();});
-    const closedTimings=[];for(let i=0;i<16;i++)closedTimings.push(...(await statsStep(page)).timings);assert.ok(closedTimings.length>=2);assert.ok(closedTimings.every(d=>d.count===2),'closing restores endpoint-only scheduling after the pending read settles');
+    const closedTimings=[];for(let i=0;i<16;i++)closedTimings.push(...(await statsStep(page)).timings);assert.equal(closedTimings.length,0,'closing stops timestamps once the pending read settles');
     await stats.click();for(let i=0;i<12;i++)await statsStep(page,.025);const faster=await statsLayout(page);assert.notEqual(faster.summary,first.summary,'FPS and frame-work text update from live frames');assertStatsLayout(faster);
     await page.setViewportSize(mobile?{width:360,height:640}:{width:980,height:720});for(let i=0;i<8;i++)await statsStep(page,.05);const resized=await statsLayout(page);assertStatsLayout(resized);assert.notDeepEqual(resized.canvas,first.canvas,'actual render dimensions follow viewport resizing');assert.ok(resized.summary.includes(`${resized.canvas.width} × ${resized.canvas.height} pixels`),'Stats reports actual resized GPU output');
     await page.keyboard.press('Escape');assert.equal(await page.locator('#performance-panel').isVisible(),false);assert.equal(await stats.getAttribute('aria-expanded'),'false');assert.equal(await stats.evaluate(element=>document.activeElement===element),true,'closing restores keyboard focus');assert.deepEqual(errors,[]);

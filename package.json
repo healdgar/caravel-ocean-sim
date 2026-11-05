@@ -12,7 +12,8 @@
     "meshy": "node scripts/meshy.mjs",
     "audio": "node scripts/audio.mjs",
     "test": "node --test",
-    "test:model": "node --test tests/caravel.test.mjs tests/wetness.test.mjs"
+    "test:model": "node --test tests/caravel.test.mjs tests/wetness.test.mjs",
+    "perf": "node scripts/perf.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.25.0",

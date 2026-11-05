@@ -2,7 +2,9 @@
 // Round shot goes through a hull and leaves holes that let the sea in by how deep they lie.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { addHullHole, hullHoleDepth, hullHoleInflow, stepHullHoles, plugAllHullHoles, clearHullHoles, HULL_HOLE_LIMIT } from '../js/hull-holes.js';
+import { HULL_HOLE_LIMIT, HULL_CRATER_LIMIT } from '../js/wgsl/common.js';
+import { writeHullCraters, writeHullFloodUniform, HULL_DAMAGE_UNIFORM_BYTES } from '../js/hull-flood.js';
+import { addHullHole, hullHoleDepth, hullHoleInflow, stepHullHoles, plugAllHullHoles, clearHullHoles } from '../js/hull-holes.js';
 import { applyShipImpactDamage, stepVesselDamage, createVesselDamageState } from '../js/gunnery-control.js';
 import { repairVessel, vesselDamageSnapshot, restoreVesselDamageSnapshot } from '../js/vessel-damage.js';
 import { boatHydrodynamics } from '../js/boat.js';
@@ -85,4 +87,19 @@ test('water through a hole fills the hold, lists her that way, and a yard ends i
   assert.equal(boat.damage.holes.length, 0, 'a full refit removes it');
   plugAllHullHoles(boat.damage);
   clearHullHoles(boat.damage);
+});
+
+test('the damage uniform holds holes, flows and craters, with the newest craters kept', () => {
+  assert.equal(HULL_DAMAGE_UNIFORM_BYTES, 16 * (2 + 2 * HULL_HOLE_LIMIT + HULL_CRATER_LIMIT));
+  const floats = new Float32Array(HULL_CRATER_LIMIT * 4), words = new Uint32Array(floats.buffer);
+  const craters = Array.from({ length: HULL_CRATER_LIMIT + 5 }, (_, i) => ({ x: i, y: 1, z: 2, radius: 0.1, depth: 0.25, hits: 2 }));
+  assert.equal(writeHullCraters(floats, craters), HULL_CRATER_LIMIT);
+  assert.equal(floats[0], 5, 'the oldest fall off the front');
+  assert.equal(words[3] & 0xfff, 400, 'radius');
+  assert.equal((words[3] >> 12) & 0xfff, 250, 'depth');
+  assert.equal(words[3] >>> 24, 2, 'hits');
+  const data = new Float32Array(HULL_DAMAGE_UNIFORM_BYTES / 4);
+  const written = writeHullFloodUniform(data, { damage: { holes: [], craters: craters.slice(0, 3) } });
+  assert.equal(written.craters, 3);
+  assert.equal(data[7], 3, 'the shader finds the count in level.w');
 });

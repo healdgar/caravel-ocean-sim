@@ -486,22 +486,24 @@ export function createForestPatches(trees,span=128){
   }
   return[...patches.values()].map(p=>({...p,centre:p.low.map((v,k)=>(v+p.high[k])*.5),radius:Math.hypot(...p.high.map((v,k)=>(v-p.low[k])*.5))}));
 }
-export function visibleForestIds(patches,camera,viewProjection=null){
+// `margin` widens the frustum by that sine of an angle, so a list stays valid while the view turns that far.
+export function visibleForestIds(patches,camera,viewProjection=null,margin=0){
   const visible=[],matrix=viewProjection?.length>=16?viewProjection:null;
+  // WebGPU clip X/Y lie in [-W,+W]. Ignore the infinite reverse-Z far
+  // plane; a conservative W test also rejects completely rearward patches.
+  const planes=matrix?[[0,-1],[0,1],[1,-1],[1,1],[3,0]].map(([axis,sign])=>{
+    const x=matrix[3]+(axis===3?0:sign*matrix[axis]),y=matrix[7]+(axis===3?0:sign*matrix[4+axis]),z=matrix[11]+(axis===3?0:sign*matrix[8+axis]);
+    return{x,y,z,d:matrix[15]+(axis===3?0:sign*matrix[12+axis]),length:Math.hypot(x,y,z)};
+  }):null;
   for(const patch of patches){
-    if(matrix){
-      const p=patch.centre.map((v,k)=>v-[camera.x,camera.y,camera.z][k]);
+    if(planes){
+      const px=patch.centre[0]-camera.x,py=patch.centre[1]-camera.y,pz=patch.centre[2]-camera.z;
+      const reach=patch.radius+(margin?margin*Math.hypot(px,py,pz):0);
       let outside=false;
-      // WebGPU clip X/Y lie in [-W,+W]. Ignore the infinite reverse-Z far
-      // plane; a conservative W test also rejects completely rearward patches.
-      for(const[axis,sign]of[[0,-1],[0,1],[1,-1],[1,1],[3,0]]){
-        const a=[0,1,2].map(k=>matrix[k*4+3]+(axis===3?0:sign*matrix[k*4+axis]));
-        const d=matrix[15]+(axis===3?0:sign*matrix[12+axis]);
-        if(a.reduce((sum,v,k)=>sum+v*p[k],d)<-patch.radius*Math.hypot(...a)){outside=true;break;}
-      }
+      for(const plane of planes)if(plane.x*px+plane.y*py+plane.z*pz+plane.d<-reach*plane.length){outside=true;break;}
       if(outside)continue;
     }
-    visible.push(...patch.ids);
+    for(const id of patch.ids)visible.push(id);
   }
   return visible;
 }

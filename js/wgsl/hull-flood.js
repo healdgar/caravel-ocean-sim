@@ -1,12 +1,12 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // Water standing in a holed hull, and the sea pouring in through each hole. The hull's own
 // shader cuts the holes; these are only seen through them, through hatches, or once she is awash.
-import { FRAME_WGSL, NOISE_WGSL } from './common.js';
+import { FRAME_WGSL, NOISE_WGSL, HULL_HOLE_LIMIT } from './common.js';
 
 export const HULL_FLOOD_JET_SEGMENTS = 8;
 export const HULL_FLOOD_RENDER = FRAME_WGSL + NOISE_WGSL + /* wgsl */ `
 struct FloodHull { right:vec4f, up:vec4f, forward:vec4f, size:vec4f, origin:vec4f };
-struct HullFlood { scale:vec4f, level:vec4f, holes:array<vec4f,24>, flows:array<vec4f,24> };
+struct HullFlood { scale:vec4f, level:vec4f, holes:array<vec4f,${HULL_HOLE_LIMIT}>, flows:array<vec4f,${HULL_HOLE_LIMIT}> };
 @group(0) @binding(0) var<uniform> F:Frame;
 @group(0) @binding(1) var<uniform> hull:FloodHull;
 @group(0) @binding(2) var<uniform> flood:HullFlood;

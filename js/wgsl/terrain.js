@@ -267,34 +267,35 @@ fn landHeight(p:vec2f)->f32 {
 }
 `;
 
-// Visual shore response, nearshore wave shoaling/breaking, and breakwater shelter.
-export const COASTAL_WATER = /* wgsl */ `
-@group(2) @binding(0) var<uniform> LAND:Land;
-@group(2) @binding(1) var elevation:texture_2d<f32>;
-@group(2) @binding(2) var<uniform> nearTerrain:NearLand;
-@group(2) @binding(3) var<storage,read> nearElevation:array<f32>;
+// How the coast shapes the sea, baked per texel by coastal-field.js: shelter along the swell, the
+// fetch to the nearest land to windward, and the smoothed seabed with its slope.
+export const COASTAL_FIELD_SIZE = 1024;
+export const COASTAL_FIELD_SPAN_M = 12288;
+export const COASTAL_FIELD_TILE_TEXELS = 64;
+const COASTAL_FETCH_LIMIT_M = 1800;
+const COASTAL_FIELD_TEXEL_M = COASTAL_FIELD_SPAN_M / COASTAL_FIELD_SIZE;
+export const COASTAL_FIELD_BAKE = FRAME_WGSL + /* wgsl */ `
+@group(0) @binding(0) var<uniform> F:Frame;
+@group(0) @binding(1) var<uniform> LAND:Land;
+@group(0) @binding(2) var elevation:texture_2d<f32>;
+@group(0) @binding(3) var<uniform> nearTerrain:NearLand;
+@group(0) @binding(4) var<storage,read> nearElevation:array<f32>;
+@group(0) @binding(5) var<storage,read> tiles:array<vec4f>;
+@group(0) @binding(6) var shelterOut:texture_storage_2d<rgba16float,write>;
+@group(0) @binding(7) var slopeOut:texture_storage_2d<rgba16float,write>;
 ` + LAND_SAMPLING + /* wgsl */ `
-struct CoastalWaveState {
-  swellScale: f32,
-  chopScale: f32,
-  breakFoam: f32,
-  dispOffset: vec3f,
-  extraSlope: vec2f,
-  shoreDir: vec2f,
-  refractWeight: f32,
-};
-fn coastalWaveState(p:vec2f)->CoastalWaveState{
+@compute @workgroup_size(8,8) fn main(@builtin(global_invocation_id) id:vec3u){
+  let tile=tiles[id.z];
+  let p=tile.xy+(vec2f(id.xy)+0.5)*${COASTAL_FIELD_TEXEL_M.toFixed(1)};
+  let at=vec2i(tile.zw)+vec2i(id.xy);
   let bed=landHeight(p);
   if(bed<=-58.0){
-    return CoastalWaveState(1.0,1.0,0.0,vec3f(0.0),vec2f(0.0),vec2f(1.0,0.0),0.0);
+    textureStore(shelterOut,at,vec4f(1.0,1.0,bed,bed));
+    textureStore(slopeOut,at,vec4f(bed,0.0,0.0,0.0));
+    return;
   }
   let windProp=normalize(F.windP[0].xy+vec2f(1e-5,0.0));
   let swellProp=select(windProp,vec2f(cos(F.windP[0].w),sin(F.windP[0].w)),abs(F.windP[0].w)>0.1);
-  let swellHs=select(1.2,F.cascL[1].z,F.cascL[1].w>1.0);
-  let swellLen=clamp(select(95.0,F.cascL[1].w,F.cascL[1].w>1.0),30.0,300.0);
-  let windSpeed=F.windP[0].z;
-  let windHs=0.14*clamp(windSpeed,0.0,24.0);
-  let hsTotal=clamp(sqrt(swellHs*swellHs+windHs*windHs),0.0,4.5);
   let upSwell=-swellProp;
   let sideSwell=vec2f(-upSwell.y,upSwell.x);
   let dir0=upSwell;
@@ -304,7 +305,7 @@ fn coastalWaveState(p:vec2f)->CoastalWaveState{
   var transC=1.0;
   var transL=1.0;
   var transR=1.0;
-  var fetchDist=1800.0;
+  var fetchDist=${COASTAL_FETCH_LIMIT_M}.0;
   for(var i=0u;i<8u;i++){
     let d=steps[i];
     let bC=smoothstep(-0.35,1.15,landHeight(p+dir0*d));
@@ -315,7 +316,6 @@ fn coastalWaveState(p:vec2f)->CoastalWaveState{
     transL*=1.0-bL*0.88;
     transR*=1.0-bR*0.88;
   }
-  let rawTransmit=clamp(0.50*transC+0.25*transL+0.25*transR,0.0,1.0);
   let hE=landHeight(p+vec2f(16.0,0.0));
   let hW=landHeight(p-vec2f(16.0,0.0));
   let hN=landHeight(p+vec2f(0.0,16.0));
@@ -333,6 +333,51 @@ fn coastalWaveState(p:vec2f)->CoastalWaveState{
     gx=0.50*gx+0.50*(hE2-hW2)/88.0;
     gz=0.50*gz+0.50*(hN2-hS2)/88.0;
   }
+  textureStore(shelterOut,at,vec4f(clamp(0.50*transC+0.25*transL+0.25*transR,0.0,1.0),fetchDist/${COASTAL_FETCH_LIMIT_M}.0,bed,bedNear));
+  textureStore(slopeOut,at,vec4f(bedSmooth,gx,gz,0.0));
+}
+`;
+
+// Visual shore response, nearshore wave shoaling/breaking, and breakwater shelter.
+export const COASTAL_WATER = /* wgsl */ `
+@group(2) @binding(0) var coastalShelter:texture_2d<f32>;
+@group(2) @binding(1) var coastalSlope:texture_2d<f32>;
+@group(2) @binding(2) var coastalSampler:sampler;
+@group(2) @binding(3) var<uniform> coastalWindow:vec4f;
+struct CoastalWaveState {
+  swellScale: f32,
+  chopScale: f32,
+  breakFoam: f32,
+  dispOffset: vec3f,
+  extraSlope: vec2f,
+  shoreDir: vec2f,
+  refractWeight: f32,
+  bed: f32,
+};
+fn coastalWaveState(p:vec2f)->CoastalWaveState{
+  // Beyond the baked window lies open water. The rim fades so tiles coming into range never show.
+  let offset=abs(p-coastalWindow.xy);
+  let inside=1.0-smoothstep(coastalWindow.z-1500.0,coastalWindow.z-800.0,max(offset.x,offset.y));
+  let uv=p/${COASTAL_FIELD_SPAN_M}.0;
+  let shelter=textureSampleLevel(coastalShelter,coastalSampler,uv,0.0);
+  let bed=mix(-120.0,shelter.z,inside);
+  if(bed<=-58.0){
+    return CoastalWaveState(1.0,1.0,0.0,vec3f(0.0),vec2f(0.0),vec2f(1.0,0.0),0.0,bed);
+  }
+  let slope=textureSampleLevel(coastalSlope,coastalSampler,uv,0.0);
+  let rawTransmit=mix(1.0,shelter.x,inside);
+  let fetchDist=mix(1.0,shelter.y,inside)*${COASTAL_FETCH_LIMIT_M}.0;
+  let bedNear=mix(-120.0,shelter.w,inside);
+  let bedSmooth=mix(-120.0,slope.x,inside);
+  let gx=slope.y*inside;
+  let gz=slope.z*inside;
+  let windProp=normalize(F.windP[0].xy+vec2f(1e-5,0.0));
+  let swellProp=select(windProp,vec2f(cos(F.windP[0].w),sin(F.windP[0].w)),abs(F.windP[0].w)>0.1);
+  let swellHs=select(1.2,F.cascL[1].z,F.cascL[1].w>1.0);
+  let swellLen=clamp(select(95.0,F.cascL[1].w,F.cascL[1].w>1.0),30.0,300.0);
+  let windSpeed=F.windP[0].z;
+  let windHs=0.14*clamp(windSpeed,0.0,24.0);
+  let hsTotal=clamp(sqrt(swellHs*swellHs+windHs*windHs),0.0,4.5);
   let gLen=length(vec2f(gx,gz));
   // shoreDir points up-slope (cross-shore toward the beach); tangDir points along-shore (parallel to depth contours).
   let shoreDir=select(swellProp,vec2f(gx,gz)/max(gLen,1e-4),gLen>0.0015);
@@ -351,7 +396,7 @@ fn coastalWaveState(p:vec2f)->CoastalWaveState{
   var breakFoam=0.0;
   var dispOffset=vec3f(0.0);
   var extraSlope=vec2f(0.0);
-  let relP=p-LAND.domain.xy;
+  let relP=p;
   if(bedSmooth>-20.0 && bedSmooth<0.85 && seawardExposure>0.05 && hsTotal>0.05 && beachFactor>0.02){
     // Snell's law refraction: along-shore wavenumber k_parallel is conserved while ocean-floor drag
     // delays phase in the shallows (+shoreDir), bending wave crests parallel to the beach.
@@ -415,7 +460,7 @@ fn coastalWaveState(p:vec2f)->CoastalWaveState{
     dispOffset.y+=amp1*sin(ph1)+amp2*sin(ph2);
     extraSlope+=leeDir1*(amp1*k1*cos(ph1))+leeDir2*(amp2*k2*cos(ph2));
   }
-  return CoastalWaveState(swellScale,chopScale,breakFoam,dispOffset,extraSlope,shoreDir,refractWeight);
+  return CoastalWaveState(swellScale,chopScale,breakFoam,dispOffset,extraSlope,shoreDir,refractWeight,bed);
 }
 fn coastalRefractDisp(d:vec3f,cws:CoastalWaveState)->vec3f{
   let rw=cws.refractWeight;
@@ -437,7 +482,7 @@ fn coastalRefractSlope(p:vec2f,sl:vec2f,cws:CoastalWaveState)->vec2f{
   return refracted*shelterDamp;
 }
 fn coastalBreakerFoam(p:vec2f,height:f32,sl:vec2f,cws:CoastalWaveState)->f32{
-  let bed=landHeight(p);
+  let bed=cws.bed;
   if(bed<=-18.0 || bed>=0.75){return cws.breakFoam;}
   let h=max(0.08,-bed);
   let frontSlope=max(0.0,-dot(sl,cws.shoreDir));
@@ -445,8 +490,7 @@ fn coastalBreakerFoam(p:vec2f,height:f32,sl:vec2f,cws:CoastalWaveState)->f32{
   let depthBreak=smoothstep(0.18,0.56,dragRatio)*smoothstep(0.09,0.32,frontSlope)*smoothstep(-12.5,-0.5,bed)*(1.0-smoothstep(-0.06,0.45,bed));
   return clamp(max(cws.breakFoam,depthBreak*clamp(cws.swellScale*1.15,0.0,1.0)),0.0,1.0);
 }
-fn coastalWater(color:vec3f,p:vec2f,height:f32,foamLight:vec3f)->vec3f{
-  let bed=landHeight(p);
+fn coastalWater(color:vec3f,p:vec2f,bed:f32,height:f32,foamLight:vec3f)->vec3f{
   // Deep/open water: the shallows weight and swash rim are both exactly zero
   // here (ocean height never approaches -58 m), so the result is the input.
   if(bed<=-58.0){return color;}
@@ -562,8 +606,12 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibility:f32
   let edgeDist=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
   let inPrimaryDomain=clamp(LAND.domain.w,0.0,1.0)*smoothstep(0.0,0.36,edgeDist);
   let bakedLight=textureSampleLevel(landLight,sampC,clamp(uv,vec2f(0.0),vec2f(1.0)),0.0).rg;
-  let cloudSunVis=select(0.0,volumeSunVisibility(world*0.001,F.sunDir.xyz),F.sunDir.y>0.0);
-  let sunlight=mix(cloudSunVis,bakedLight.r,inPrimaryDomain);
+  // The light bake already holds clouds and terrain. Only ground outside it marches for itself.
+  var sunlight=bakedLight.r;
+  if(inPrimaryDomain<1.0){
+    let cloudSunVis=select(0.0,volumeSurfaceSunVisibility(world*0.001,F.sunDir.xyz),F.sunDir.y>0.0);
+    sunlight=mix(cloudSunVis,bakedLight.r,inPrimaryDomain);
+  }
   let direct=sunIlluminance()*sunlight;
   // Directional sky-hemisphere + ground/sea bounce irradiance from envCube
   let skyDir=normalize(vec3f(n.x*0.65,max(n.y,0.12),n.z*0.65));

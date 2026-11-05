@@ -1856,7 +1856,7 @@ test('Jamestown triangular fort encloses buildings with connected curtain walls,
 
   // 5. Ship WGSL shader parity for Pinta, Santa Maria, and procedural fleet
   assert.ok(CARAVEL.includes('let isProceduralFleet=hull.rig.w<.5 && abs(hull.size.y-20.0)>.2;'));
-  assert.ok(CARAVEL.includes('let paintedWood=in.material==20u || in.material==21u || in.material==23u || in.material==24u || in.material==26u;'));
+  assert.ok(CARAVEL.includes('fn vesselPainted(material:u32)->bool {return material==20u || material==21u || material==23u || material==24u || material==26u;}'));
 });
 
 test('Crow’s nest, masthead pennant, stern outlicker, yard parrels, and rear mizzen sail connect cleanly to masts and hulls across all ships', async () => {

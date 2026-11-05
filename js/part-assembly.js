@@ -1207,6 +1207,7 @@ export async function createPartAssemblyGPU({ device, computePipe, posedBuffer, 
   return {
     assets,
     state: stateController,
+    get active() { return active; },
     update(nextState = stateController) {
       if (destroyed) return false;
       active = !nextState.isDefaultIntact();

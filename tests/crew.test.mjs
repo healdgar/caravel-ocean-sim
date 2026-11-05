@@ -308,3 +308,19 @@ test('crew and soldiers working at mast halyard falls and hatches always face th
 });
 
 
+
+test('sailors far from the eye keep a pose longer and draw simpler models, in as few draws as neighbours allow',async()=>{
+  const {crewPoseInterval,crewSailorTier,crewDrawRuns,crewApparentDistance}=await import('../js/crew-lod.js');
+  assert.equal(crewPoseInterval(5),1,'anyone close is posed every frame');
+  assert.ok(crewPoseInterval(60)>crewPoseInterval(20));
+  assert.equal(crewSailorTier(5,0),0);assert.equal(crewSailorTier(20,0),1);assert.equal(crewSailorTier(80,1),2);
+  assert.equal(crewSailorTier(13,0),0,'hysteresis holds the better model just past the boundary');
+  assert.equal(crewSailorTier(13,1),1,'and does not take it back up until clearly inside');
+  const runs=crewDrawRuns([0,0,1,1,-1,1,2].map(tier=>({tier})),s=>s.tier);
+  assert.deepEqual(runs,[{tier:0,first:0,count:2},{tier:1,first:2,count:2},{tier:1,first:5,count:1},{tier:2,first:6,count:1}],'a hidden sailor splits a run and draws nothing');
+  assert.equal(crewApparentDistance([1,1,1],{x:0,z:0},null),0,'without a camera everyone counts as close');
+  const boat={x:100,z:0,heading:0,heave:0};
+  assert.ok(Math.abs(crewApparentDistance([0,0,0],boat,{x:100,y:0,z:30})-30)<1e-9);
+  assert.ok(Math.abs(crewApparentDistance([0,0,30],boat,{x:100,y:0,z:30}))<1e-9,'her local z runs aft along world z at heading zero');
+  assert.ok(crewApparentDistance([0,0,0],boat,{x:100,y:0,z:30,fovY:.1})<30/3,'a narrow lens brings them closer');
+});

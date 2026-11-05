@@ -132,3 +132,43 @@ export function selectCrewLOD(boat,camera=null){
   if(apparent>CREW_CULL_DISTANCE)return {mainTier,shadowTier,distance,culled:true};
   return {mainTier,shadowTier,distance};
 }
+
+// How many frames a sailor keeps a pose, by how far they appear from the eye. Each pose is a whole
+// skeleton solved in JavaScript. Their place on deck still moves every frame; only the limbs wait.
+const CREW_POSE_EVERY_FRAME_M=10;
+const CREW_POSE_SECOND_FRAME_M=25;
+const CREW_POSE_THIRD_FRAME_M=50;
+const CREW_POSE_LONGEST_FRAMES=4;
+export function crewPoseInterval(apparentMetres){
+  return apparentMetres<CREW_POSE_EVERY_FRAME_M?1:apparentMetres<CREW_POSE_SECOND_FRAME_M?2:apparentMetres<CREW_POSE_THIRD_FRAME_M?3:CREW_POSE_LONGEST_FRAMES;
+}
+// How far from the eye a sailor appears, allowing for a narrow lens. Without a camera, right here.
+export function crewApparentDistance(position,boat,camera,zoom=crewLodZoom(camera)){
+  if(!camera||!Number.isFinite(camera.x)||!Number.isFinite(camera.z))return 0;
+  const heading=(boat?.heading??0)*Math.PI/180,c=Math.cos(heading),sn=Math.sin(heading);
+  const x=(boat?.x??0)+position[0]*c-position[2]*sn,z=(boat?.z??0)+position[0]*sn+position[2]*c,y=(boat?.heave??0)+position[1];
+  return Math.hypot(x-camera.x,y-(camera.y??0),z-camera.z)/zoom;
+}
+
+// Each sailor's own level of detail. Hysteresis stops anyone flickering between models at a boundary.
+const CREW_SAILOR_NEAR_M=12;
+const CREW_SAILOR_MID_M=35;
+const CREW_SAILOR_HYSTERESIS=1.15;
+export function crewSailorTier(apparentMetres,previous=0){
+  const nearLimit=CREW_SAILOR_NEAR_M*(previous===0?CREW_SAILOR_HYSTERESIS:1);
+  const midLimit=CREW_SAILOR_MID_M*(previous<=1?CREW_SAILOR_HYSTERESIS:1);
+  return apparentMetres<nearLimit?0:apparentMetres<midLimit?1:2;
+}
+// One instanced draw per unbroken run of sailors at the same detail. Instance order is their
+// slot in the pose buffers, and stations keep neighbours together, so runs stay few.
+export function crewDrawRuns(people,tierOf){
+  const runs=[];let run=null;
+  for(let i=0;i<people.length;i++){
+    const tier=tierOf(people[i]);
+    if(tier<0){run=null;continue;}
+    if(run&&run.tier===tier)run.count++;
+    else{run={tier,first:i,count:1};runs.push(run);}
+  }
+  return runs;
+}
+

@@ -108,11 +108,12 @@ function assertGPUFrame(snapshot,frame,manifest){
   assert.deepEqual([reset[0].y,reset[0].z,cull[0].y,cull[0].z],[1,1,1,1]);
   const draws=snapshot.draws.filter(d=>d.frame===frame);
   const resident=draws.some(d=>d.resident);assert.ok(draws.every(d=>d.resident===resident),'residency changes only between submitted frames');
-  assert.equal(draws.length,manifest.prototypes.length*(resident?4:1),'native resources are addressed only after complete residency');
+  assert.equal(draws.length,manifest.prototypes.length*(resident?5:1),'native resources are addressed only after complete residency');
+  assert.equal(draws.filter(d=>d.pipeline==='instanced forest forestNativeLeafDepthFS').length,resident?manifest.prototypes.length:0,'each leaf bin lays depth before it is shaded');
   assert.equal(draws.filter(d=>d.pipeline==='instanced forest forestNativeOpaqueFS').length,resident?manifest.prototypes.length*2:0);
   assert.equal(draws.filter(d=>d.pipeline==='instanced forest forestNativeLeafFS').length,resident?manifest.prototypes.length:0);
   assert.equal(draws.filter(d=>d.pipeline==='instanced forest native depth impostor').length,manifest.prototypes.length);
-  assert.deepEqual(draws.map(d=>d.offset).sort((a,b)=>a-b),resident?Array.from({length:manifest.prototypes.length*4},(_,i)=>i*20):manifest.prototypes.map(p=>(p.id*4+3)*20));
+  assert.deepEqual(draws.filter(d=>d.pipeline!=='instanced forest forestNativeLeafDepthFS').map(d=>d.offset).sort((a,b)=>a-b),resident?Array.from({length:manifest.prototypes.length*4},(_,i)=>i*20):manifest.prototypes.map(p=>(p.id*4+3)*20));
   for(const draw of draws){
     assert.deepEqual([draw.command,draw.roots,draw.visible],['forest GPU indirect draws','forest immutable root transforms','forest GPU visible root IDs']);
     if(draw.pipeline==='instanced forest native depth impostor')assert.equal(draw.index,'forest immutable impostor quad indices');

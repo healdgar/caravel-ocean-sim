@@ -1,9 +1,9 @@
-// Timestamp queries are optional. Detailed mode adds compute pass boundaries;
-// normal rendering retains its single compute pass and samples only frame time.
+// Timestamp queries are optional, and on Apple GPUs they stall the frame they sample. They run
+// only while the performance panel is open and add compute pass boundaries there.
 export const GPU_PASS_NAMES = [
   'Waves + effects', 'Sky + clouds', 'Reflections', 'Solid shadows', 'Canvas shadows', 'Companion Solid shadows', 'Companion Canvas shadows',
   ...Array.from({length:8},(_,i)=>['escort-'+(i+1)+' Solid shadows','escort-'+(i+1)+' Canvas shadows']).flat(),
-  'Submerged geometry', 'Ocean + sky', 'Water reflection filter', 'Ship + spray', 'Underwater medium',
+  'Submerged geometry', 'Water reflection filter', 'Scene', 'Underwater medium',
   ...Array.from({length:8},(_,i)=>`Bloom down ${i}`),
   ...Array.from({length:7},(_,i)=>`Bloom up ${i+1}`), 'Composite',
 ];
@@ -31,27 +31,39 @@ export function decodeGPUTimestamps(values,names,used) {
   return {windowMs:Number(last-first)/1e6,passes};
 }
 
+// Where the main thread's frame goes. A clock read per stage is cheap enough to leave running.
+const FRAME_STAGE_SMOOTHING = 0.9;
+export function createFrameStages() {
+  const current=new Map(),smoothed=new Map();let last=0;
+  return {
+    begin(){last=performance.now();current.clear();},
+    // Time since the previous mark belongs to this stage. A stage may recur within a frame.
+    mark(name){const now=performance.now();current.set(name,(current.get(name)??0)+now-last);last=now;},
+    end(){for(const name of new Set([...smoothed.keys(),...current.keys()])){const ms=current.get(name)??0;smoothed.set(name,smoothed.has(name)?smoothed.get(name)*FRAME_STAGE_SMOOTHING+ms*(1-FRAME_STAGE_SMOOTHING):ms);}},
+    snapshot(){return Object.fromEntries(smoothed);},
+    text(){return [...smoothed].filter(([,ms])=>ms>=.05).sort((a,b)=>b[1]-a[1]).map(([name,ms])=>name+' '+ms.toFixed(1)).join(' · ');},
+  };
+}
+
 export function createGPUProfiler(device, requested=false) {
   const supported=device.features.has('timestamp-query'), modes=new Map();
   let detailed=!!requested&&supported,epoch=0,active=null,pendingCapture=null;
-  // Allocate detailed resources only when opened. Closing restores the original
-  // endpoint-only schedule used by automatic resolution, without pass splits.
-  function timingMode(detail){
-    if(modes.has(detail))return modes.get(detail);
-    const names=detail?GPU_PASS_NAMES:['Frame'],count=names.length*2,bytes=count*8;
+  // Allocate timing resources only when opened. Closing stops sampling altogether.
+  function timingMode(){
+    if(modes.has('detail'))return modes.get('detail');
+    const names=GPU_PASS_NAMES,count=names.length*2,bytes=count*8;
     const query=device.createQuerySet({type:'timestamp',count});
     const resolve=device.createBuffer({label:'timing resolve',size:bytes,usage:GPUBufferUsage.QUERY_RESOLVE|GPUBufferUsage.COPY_SRC});
     const staging=device.createBuffer({label:'timing read',size:bytes,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});
     const descriptors=names.map((_,i)=>({querySet:query,beginningOfPassWriteIndex:i*2,endOfPassWriteIndex:i*2+1}));
-    const mode={detail,names,count,bytes,query,resolve,staging,descriptors,used:new Uint8Array(names.length),
-      first:{querySet:query,beginningOfPassWriteIndex:0},last:{querySet:query,endOfPassWriteIndex:1}};
-    modes.set(detail,mode);return mode;
+    const mode={names,count,bytes,query,resolve,staging,descriptors,used:new Uint8Array(names.length)};
+    modes.set('detail',mode);return mode;
   }
   const latest={},smoothed={},samples=[];
   let collecting=false,pending=false,frame=0,pendingFrame=0,totalMs=0,sampleCount=0,droppedSamples=0,reading=Promise.resolve(),error='';
   function snapshot() {
     const sorted=samples.map(s=>s.totalMs).sort((a,b)=>a-b);
-    return {version:2,metric:detailed?'sampled GPU window':'compute-to-composite endpoints',supported,detailed,error,totalMs,sampleCount,droppedSamples,latest:{...latest},smoothed:{...smoothed},
+    return {version:2,metric:'sampled GPU window',supported,detailed,error,totalMs,sampleCount,droppedSamples,latest:{...latest},smoothed:{...smoothed},
       medianMs:sorted.length?sorted[Math.floor(sorted.length/2)]:null,
       p95Ms:sorted.length?sorted[Math.min(sorted.length-1,Math.ceil(sorted.length*.95)-1)]:null,
       samples:samples.map(s=>({...s,passes:{...s.passes}}))};
@@ -64,10 +76,9 @@ export function createGPUProfiler(device, requested=false) {
       for(const key of Object.keys(latest))delete latest[key];for(const key of Object.keys(smoothed))delete smoothed[key];
       return detailed;
     },
-    beginFrame(index){frame=index;collecting=supported&&!pending&&!error&&(index&7)===0;active=collecting?timingMode(detailed):null;active?.used.fill(0);},
+    beginFrame(index){frame=index;collecting=detailed&&!pending&&!error&&(index&7)===0;active=collecting?timingMode():null;active?.used.fill(0);},
     writes(name){
       if(!collecting)return undefined;
-      if(!active.detail){active.used[0]=1;return name==='Waves + effects'?active.first:name==='Composite'?active.last:undefined;}
       const i=active.names.indexOf(name);
       if(i<0)throw new Error(`Unknown GPU timing pass: ${name}`);
       active.used[i]=1;return active.descriptors[i];
@@ -92,7 +103,7 @@ export function createGPUProfiler(device, requested=false) {
         }
         const elapsed=decoded.windowMs;
         totalMs=sampleCount?totalMs*.8+elapsed*.2:elapsed;sampleCount++;
-        if(mode.detail&&pendingFrame>=120){
+        if(pendingFrame>=120){
           samples.push({frame:pendingFrame,totalMs:elapsed,passes:{...latest}});
           if(samples.length>512)samples.shift();
         }
@@ -103,14 +114,14 @@ export function createGPUProfiler(device, requested=false) {
     text(){
       if(!supported)return 'GPU pass timing unavailable: timestamp-query unsupported.';
       if(error)return `GPU pass timing unavailable: ${error}`;
-      if(!detailed)return `GPU endpoints  ${totalMs.toFixed(2)} ms\nDetailed pass timing is off.`;
-      const lines=[`GPU ${detailed?'sampled window':'endpoints'}  ${totalMs.toFixed(2)} ms`, 'Smoothed pass spans (overlap; not additive):'];
+      if(!detailed)return 'GPU pass timing runs while this panel is open.';
+      const lines=[`GPU sampled window  ${totalMs.toFixed(2)} ms`, 'Smoothed pass spans (overlap; not additive):'];
       for(const name of GPU_PASS_NAMES.filter(n=>!n.startsWith('Bloom '))){
         if((name.startsWith('escort-')||name.startsWith('Companion '))&&!(name in latest&&latest[name]>0))continue;
         if(name==='Composite'){
           lines.push(`Bloom window (waits)    ${(smoothed.Bloom||0).toFixed(2)} ms`);
         }
-        lines.push(`${(name==='Ocean + sky'?'Scenery + ocean + sky':name).padEnd(23)} ${(smoothed[name]||0).toFixed(2)} ms`);
+        lines.push(`${name.padEnd(23)} ${(smoothed[name]||0).toFixed(2)} ms`);
       }
       lines.push('GPU windows include waits; they are not FPS.', 'Bloom window is not the cost of bloom alone.', 'Sampled every 8 frames; rounded GPU timestamps.', 'Profiling adds pass boundaries; compare like-for-like.');
       if(droppedSamples)lines.push(`Discarded invalid timestamp samples: ${droppedSamples}`);

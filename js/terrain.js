@@ -2,6 +2,7 @@ import { ISLAND, decodeIsland, decodeBiome, islandGeometry, islandVegetation, te
 import { TREE_VARIANTS, TREE_VERTEX_FLOATS, TREE_PIXEL_ERROR, treeRenderGeometry, selectTreeLods, createForestPatches, visibleForestIds,
   GROUND_COVER,createGroundCoverPatches,groundCoverInstances,projectedGroundExtent,groundCoverError,groundCoverVisible,groundCoverGeometry } from './vegetation.js';
 import { TERRAIN, TERRAIN_LIGHT } from './wgsl/terrain.js';
+import { createCoastalField } from './coastal-field.js';
 import { loadCanopyScenery, excludeCanopyRoots, createCanopyRenderer, canopyInspectionURL } from './canopy-scenery.js';
 import {loadTerrainNear,terrainNearGeometry,terrainNearContains,terrainNearSample,terrainNearPatchBounds,sampleTerrainNear} from './terrain-near.js';
 import {loadForestScenery,createForestRenderer,FOREST_VERTEX_WGSL,FOREST_ASSETS,SUBTROPICAL_FOREST_ASSETS} from './forest-scenery.js';
@@ -368,25 +369,14 @@ export function retargetForestPackToProcedural(
   };
 }
 
-export function createDeepWaterGroup(device,pipe){
-  const makeBuf=(arr,usage,label)=>{
-    const b=device.createBuffer({size:Math.max(4,arr.byteLength),usage:usage|GPUBufferUsage.COPY_DST,label});
-    device.queue.writeBuffer(b,0,arr);return b;
-  };
-  const uniform=makeBuf(new Float32Array([0,0,1,0]),GPUBufferUsage.UNIFORM,'deep water land domain');
-  const nearDomain=makeBuf(new Float32Array([0,0,1,0,1,0,0,0]),GPUBufferUsage.UNIFORM,'deep water near domain');
-  const nearElevation=makeBuf(new Float32Array([-120]),GPUBufferUsage.STORAGE,'deep water near elevation');
-  const elevation=device.createTexture({label:'deep water elevation',size:[1,1],format:'r32float',usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST});
-  device.queue.writeTexture({texture:elevation},new Float32Array([-120]),{bytesPerRow:4},[1,1]);
-  return device.createBindGroup({
-    layout:pipe.getBindGroupLayout(2),
-    entries:[
-      {binding:0,resource:{buffer:uniform}},
-      {binding:1,resource:elevation.createView()},
-      {binding:2,resource:{buffer:nearDomain}},
-      {binding:3,resource:{buffer:nearElevation}},
-    ],
-  });
+// How far the view may turn or move before tree and ground lists are rebuilt.
+const SCENERY_LIST_TURN_RADIANS = 2 * Math.PI / 180;
+const SCENERY_LIST_MARGIN = Math.sin(SCENERY_LIST_TURN_RADIANS * 1.5);
+const SCENERY_LIST_MOVE_M = 3;
+// Has this clip axis of a camera-relative view projection turned from what it was?
+function sceneryViewTurned(next, before, axis) {
+  const ax=next[axis],ay=next[4+axis],az=next[8+axis],bx=before[axis],by=before[4+axis],bz=before[8+axis];
+  return ax*bx+ay*by+az*bz<Math.cos(SCENERY_LIST_TURN_RADIANS)*Math.hypot(ax,ay,az)*Math.hypot(bx,by,bz);
 }
 
 export async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeView,clouds,shader,computePipe,mipPipe,format,samples,waterOptics=null,
@@ -659,11 +649,14 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     }
     writeNearDomainUniform();
     device.queue.writeBuffer(nearElevation,0,regionalElevationData);
+    coastalField?.invalidate();
   }
+  let coastalField=null;
   updateRegionalElevationGrid();
   const uniform=buffer(new Float32Array([activeRegion.x,activeRegion.z,activeRegion.span,proceduralPack?0.22:1]),GPUBufferUsage.UNIFORM,'land domain');
   const elevation=device.createTexture({label:'island elevation',size:[activeRegion.size,activeRegion.size],format:'r32float',usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST});
   device.queue.writeTexture({texture:elevation},heights,{bytesPerRow:activeRegion.size*4},[activeRegion.size,activeRegion.size]);
+  coastalField=await createCoastalField({device,computePipe,frameUBO,land:uniform,elevationView:elevation.createView(),nearDomain,nearElevation});
   const lighting=device.createTexture({label:'island sunlight',size:[64,64],format:'rgba16float',usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.STORAGE_BINDING});
   const albedoMips=1+Math.log2(activeRegion.albedoSize);
   const albedo=device.createTexture({label:'registered island imagery seed',size:[activeRegion.albedoSize,activeRegion.albedoSize],format:'rgba8unorm',mipLevelCount:albedoMips,
@@ -753,15 +746,18 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     // Its stricter projection bound must not inherit the legacy tree batching
     // cache's one-metre/view tolerance when crossing a three-pixel threshold.
     importedCanopy?.prepare(camera,viewProjection);
-    const sameView=(!viewProjection&&!lastView)||(viewProjection&&lastView&&lastView.every((v,i)=>Math.abs(v-viewProjection[i])<.004));
-    const pixels=[camera.screenHeight,camera.tanHalfFovY,currentPixelError,...(camera.forward??[])];
-    const samePixels=lastPixels&&pixels.length===lastPixels.length&&pixels.every((v,i)=>v===lastPixels[i]);
-    if(lastCamera&&sameView&&samePixels&&Math.hypot(camera.x-lastCamera.x,camera.y-lastCamera.y,camera.z-lastCamera.z)<1)return;
+    // The ship never stops moving, so an exact comparison here would rebuild these lists every
+    // frame. They are culled with a margin and stay good until the view has really turned or moved.
+    const sameView=(!viewProjection&&!lastView)||(viewProjection&&lastView&&!sceneryViewTurned(viewProjection,lastView,0)&&!sceneryViewTurned(viewProjection,lastView,1));
+    // The field of view is measured from a rotating vector, so it only ever matches approximately.
+    const pixels=[camera.screenHeight,camera.tanHalfFovY,currentPixelError];
+    const samePixels=lastPixels&&pixels.every((v,i)=>Math.abs(v-lastPixels[i])<=Math.abs(v)*1e-3);
+    if(lastCamera&&sameView&&samePixels&&Math.hypot(camera.x-lastCamera.x,camera.y-lastCamera.y,camera.z-lastCamera.z)<SCENERY_LIST_MOVE_M)return;
     lastPixels=pixels;
     lastCamera={x:camera.x,y:camera.y,z:camera.z};lastView=viewProjection?Array.from(viewProjection).slice(0,16):null;
     lodStats.near=0;lodStats.middle=0;lodStats.far=0;lodStats.budgetOverflow=0;
     for(const batch of treeBatches){batch.data=[];batch.count=0;}
-    const candidates=visibleForestIds(forestPatches,camera,viewProjection);
+    const candidates=visibleForestIds(forestPatches,camera,viewProjection,SCENERY_LIST_MARGIN);
     for(const tree of selectTreeLods(trees,{...camera,pixelError:currentPixelError},previousLods,undefined,candidates)){
       const batch=treeBatches[tree.lod*TREE_VARIANTS+tree.variant];
       batch.data.push(...trees.subarray(tree.id*8,tree.id*8+8));batch.count++;
@@ -778,7 +774,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     }
     for(const batch of groundBatches){batch.data=[];batch.count=0;}
     const groundNow=new Set();groundStats.resident=0;groundStats.rocks=0;groundStats.grass=0;groundStats.triangles=0;
-    for(const id of visibleForestIds(groundPatches,camera,viewProjection)){
+    for(const id of visibleForestIds(groundPatches,camera,viewProjection,SCENERY_LIST_MARGIN)){
       const patch=groundPatches[id];
       const groundCullScale=isMobile&&currentPixelError>3.8?1.35:.88;
       if(projectedGroundExtent(...patch.centre,GROUND_COVER.maxExtent,camera,patch.radius)<currentPixelError*groundCullScale)continue;
@@ -1274,6 +1270,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         activeRegion=Object.freeze({...activeRegion,span:nextSpan,shoreBearing:nextBearing});
         proceduralPack.region=activeRegion;
         device.queue.writeBuffer(uniform,0,new Float32Array([activeRegion.x,activeRegion.z,activeRegion.span,0.22]));
+        coastalField?.invalidate();
       }
     }
     if(upgradedPack.views)proceduralPack.views=upgradedPack.views;
@@ -1465,7 +1462,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   }
 
   return {
-    waterGroup:pipe=>device.createBindGroup({layout:pipe.getBindGroupLayout(2),entries:[{binding:0,resource:{buffer:uniform}},{binding:1,resource:elevation.createView()},{binding:2,resource:{buffer:nearDomain}},{binding:3,resource:{buffer:nearElevation}}]}),
+    waterGroup:pipe=>coastalField.waterGroup(pipe),
     get triangles(){return (mesh.indices.length+(fineMesh?.indices.length??0))/3;},
     get trees(){return trees.length/8+(forest?.stats.roots??0);},
     get treeData(){return trees;},
@@ -1542,7 +1539,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       indices?.destroy?.();
       portMesh?.vertices?.destroy?.();portMesh?.indices?.destroy?.();
       fine?.vertices?.destroy?.();fine?.indices?.destroy?.();fine?.submerged?.destroy?.();
-      uniform?.destroy?.();nearDomain?.destroy?.();nearElevation?.destroy?.();
+      uniform?.destroy?.();nearDomain?.destroy?.();nearElevation?.destroy?.();coastalField?.destroy();
       elevation?.destroy?.();lighting?.destroy?.();albedo?.destroy?.();
       if(nearAlbedo&&nearAlbedo!==albedo)nearAlbedo?.destroy?.();
       biomeTexture?.destroy?.();leafTexture?.destroy?.();leafMean?.destroy?.();
@@ -1657,7 +1654,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       const surfDamp=bed>-4.2?Math.max(0.18,1-Math.max(0,Math.min(1,(bed+4.2)/4.1))*0.82):1;
       return Math.max(0.22,transmit*surfDamp*0.78+0.22);
     },
-    encode(pass,changed=false){
+    encode(pass,changed=false,frame=null){
+      if(frame)coastalField.encode(pass,frame);
       forestMass?.encode(pass);
       forest?.encode(pass);
       if((tick++%8)!==0&&!changed)return;

@@ -1,5 +1,7 @@
 import { VESSEL_RIG, CANVAS_OPTICS } from './vessel.js';
 
+// Sunlight under the sea is a soft volume: a few strata resolve it, and every one costs three fetches.
+const WATER_SHADOW_STRATA = 6;
 export const SHADOW_FRAME = /* wgsl */ `
 struct ShadowFrame { lightView:mat4x4f, origin:vec4f, sun:vec4f, texel:vec4f };
 `;
@@ -144,9 +146,9 @@ fn waterVesselShadow(world:vec3f,normal:vec3f,view:vec3f,variance:f32)->vec3f {
   let reach=abs(shift.xyz)*5.0+(abs(tx.xyz)+abs(ty.xyz))*(0.16+5.0*spread);
   if(any(abs(p.xy)>vec2f(1)+reach.xy) || p.z+reach.z<0.0){return vec3f(1);}
   var result=vec3f(0);
-  for(var i=0u;i<32u;i++){
+  for(var i=0u;i<${WATER_SHADOW_STRATA}u;i++){
     // Equal-probability strata of an exponential optical path (mean 1.2 m).
-    let path=-log(1.0-(f32(i)+0.5)/32.0)*1.2;
+    let path=-log(1.0-(f32(i)+0.5)/${WATER_SHADOW_STRATA}.0)*1.2;
     let angle=f32(i)*2.399963;
     let radius=(0.16+path*spread)*sqrt((f32(i%4u)+0.5)/4.0);
     let q=p+shift*path+(tx*cos(angle)+ty*sin(angle))*radius;
@@ -158,7 +160,19 @@ fn waterVesselShadow(world:vec3f,normal:vec3f,view:vec3f,variance:f32)->vec3f {
     let transmission=shadowCanvasTransmission(textureSampleLevel(canvasFilter,shadowLinear,uv,0.0));
     result+=solid*mix(transmission,vec3f(1),cloth);
   }
-  return result/32.0;
+  return result/${WATER_SHADOW_STRATA}.0;
+}
+// One filtered tap for a receiver that ripples, where a wide penumbra could never be seen.
+fn waterSurfaceShadow(world:vec3f)->vec3f {
+  if(SH.origin.w<0.5){return vec3f(1);}
+  let p=SH.lightView*vec4f(world-SH.origin.xyz+vec3f(0,0.008,0)+SH.sun.xyz*0.006,1.0);
+  let uv=p.xy*vec2f(0.5,-0.5)+0.5;
+  if(any(uv<vec2f(0)) || any(uv>vec2f(1)) || p.z<0.0){return vec3f(1);}
+  let depth=min(p.z-0.00002,0.99999);
+  let solid=textureSampleCompareLevel(solidShadow,shadowCompare,uv,depth);
+  let cloth=textureSampleCompareLevel(canvasShadow,shadowCompare,uv,depth);
+  let transmission=shadowCanvasTransmission(textureSampleLevel(canvasFilter,shadowLinear,uv,0.0));
+  return solid*mix(transmission,vec3f(1),cloth);
 }
 `;
 
@@ -172,6 +186,7 @@ export function createSceneShadowSample(count=2){
   .replaceAll('texture_depth_2d;','texture_depth_2d_array;')
   .replace(/var\s+canvasFilter:texture_2d<f32>;/,'var canvasFilter:texture_2d_array<f32>;')
   .replace(/fn vesselShadow\(world:vec3f,normal:vec3f\)->vec3f\s*\{/,'fn vesselLayerShadow(world:vec3f,normal:vec3f,layer:i32)->vec3f {\n  let SH=shadowFrames[layer];')
+  .replace(/fn waterSurfaceShadow\(world:vec3f\)->vec3f\s*\{/,'fn waterSurfaceLayerShadow(world:vec3f,layer:i32)->vec3f {\n  let SH=shadowFrames[layer];')
   .replace(/fn waterVesselShadow\(world:vec3f,normal:vec3f,view:vec3f,variance:f32\)->vec3f\s*\{/,'fn waterVesselLayerShadow(world:vec3f,normal:vec3f,view:vec3f,variance:f32,layer:i32)->vec3f {\n  let SH=shadowFrames[layer];')
   .replaceAll('textureLoad(solidShadow,at,0)','textureLoad(solidShadow,at,layer,0)')
   .replaceAll('textureLoad(canvasShadow,at,0)','textureLoad(canvasShadow,at,layer,0)')
@@ -181,6 +196,9 @@ export function createSceneShadowSample(count=2){
   .replaceAll('canvasFilter,shadowLinear,uv,0.0','canvasFilter,shadowLinear,uv,layer,0.0') + /* wgsl */ `
 fn vesselShadow(world:vec3f,normal:vec3f)->vec3f {
   return ${layers.map(i=>'vesselLayerShadow(world,normal,'+i+')').join('*')};
+}
+fn waterSurfaceShadow(world:vec3f)->vec3f {
+  return ${layers.map(i=>'waterSurfaceLayerShadow(world,'+i+')').join('*')};
 }
 fn waterVesselShadow(world:vec3f,normal:vec3f,view:vec3f,variance:f32)->vec3f {
   return ${layers.map(i=>'waterVesselLayerShadow(world,normal,view,variance,'+i+')').join('*')};

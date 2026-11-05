@@ -64,3 +64,5 @@ These sources guide the reconstruction. Exact charge tables, historical shot qua
 ## Holes and flooding
 
 A penetrating round or hot shot leaves a hole in the hull, recorded in `damage.holes` in her own frame in metres. The hole, not the hit, decides the water: see `js/hull-holes.js`. Grape, chain and arrows never hole a hull. Waterline hits that do not penetrate still use the older estimated leak in `compartments[...].breachArea`.
+
+A ship draws with the whole-hull shader until something marks her. After that she draws in two steps from a second shader: `surviving` lays depth and decides what shot and tearing have taken away, then `fs` shades only what is left. Holes, hold water and craters share one uniform buffer per ship (`js/hull-flood.js`), updated only when they change.

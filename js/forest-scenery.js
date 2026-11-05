@@ -540,10 +540,9 @@ struct ForestLeafMaterial {optics:vec4f,underside:vec4f,coordinates:vec4f};
 @group(2)@binding(12)var forestNativeNormal3:texture_2d_array<f32>;
 @group(2)@binding(13)var forestNativeRepeatSampler:sampler;
 struct ForestVertex {
- @builtin(position)pos:vec4f,@location(0)world:vec3f,@location(1)normal:vec3f,
+ @invariant @builtin(position)pos:vec4f,@location(0)world:vec3f,@location(1)normal:vec3f,
  @location(2)kind:vec2f,@location(3)leafUV:vec2f,@location(4)colour:vec3f,
  @location(5)@interpolate(flat)nativeMaterial:i32,
- @location(6)@interpolate(flat)nativeSoil:f32,
  @location(7)canopyAO:f32,
  @location(8)@interpolate(flat)coverageSeed:u32,
 };
@@ -552,7 +551,7 @@ fn forestLeafSampleMask(alpha:f32,seed:u32,pixel:vec2f)->u32{
  let samples=select(4u,forestBin.w,forestBin.w>0u);let p=vec2u(pixel);
  let random=forestCoverageHash(seed^forestCoverageHash(p.x)^forestCoverageHash(p.y*0x9e3779b9u));
  let tierId=forestBin.z>>16u;
- let coverageScale=select(1.,select(1.62,2.35,tierId==3u),tierId>=2u);
+ let coverageScale=select(1.,select(1.62,3.2,tierId==3u),tierId>=2u);
  let coverage=clamp(alpha*coverageScale,0.,1.)*f32(samples);let whole=u32(floor(coverage));
  let count=min(samples,whole+select(0u,1u,fract(coverage)>f32(random&65535u)/65536.));
  let bits=(1u<<count)-1u;let rotation=(random>>16u)%samples;
@@ -584,7 +583,7 @@ fn forestLeafSampleMask(alpha:f32,seed:u32,pixel:vec2f)->u32{
  if(kind.x>=3.5&&tierId>=2u){
   let upRef=select(vec3f(0.,1.,0.),vec3f(1.,0.,0.),abs(normal.y)>.9);
   let t1=normalize(cross(normal,upRef));let t2=cross(normal,t1);
-  let baseInflate=select(select(.03,.08,tierId==3u),select(.18,.36,tierId==3u),isSubBroadleaf);
+  let baseInflate=select(select(.03,.18,tierId==3u),select(.18,.8,tierId==3u),isSubBroadleaf);
   let inflate=baseInflate/max(r.rootScale.w,.85);let uvOff=leafUV-vec2f(.5,.5);
   posLocal+=t1*(uvOff.x*inflate)+t2*(uvOff.y*inflate);
   let domeCurve=select(0.08,0.14,tierId==3u);
@@ -597,7 +596,8 @@ fn forestLeafSampleMask(alpha:f32,seed:u32,pixel:vec2f)->u32{
   let flutter=sin(phase)*0.14+cos(phase*2.1)*0.05;
   local+=vec3f(F.windP[0].x*flutter*windAmt,0.0,F.windP[0].y*flutter*windAmt);
  }
- var o:ForestVertex;o.world=r.rootScale.xyz+local;o.nativeSoil=r.rootScale.y;
+ // Roots below the soil line press flat onto it, leaving no fragment to cut away.
+ var o:ForestVertex;o.world=r.rootScale.xyz+local;o.world.y=max(o.world.y,r.rootScale.y);
  o.normal=vec3f(c*normAdj.x-s*normAdj.z,normAdj.y,s*normAdj.x+c*normAdj.z);
  o.nativeMaterial=i32(nativeMaterial);if(o.nativeMaterial>=0){o.nativeMaterial+=i32(forestBin.y);}
  o.kind=kind;o.leafUV=leafUV;o.colour=colour*r.yawColour.yzw;o.canopyAO=forestNativeCanopyAO(vertex);o.coverageSeed=forestCoverageHash(vertex^(forestVisible[forestBin.x+instance]*0x9e3779b9u));o.pos=F.viewProj*vec4f(earthCurve(o.world-F.camPos.xyz,F.camPos.y),1);return o;
@@ -608,11 +608,10 @@ fn forestLeafSampleMask(alpha:f32,seed:u32,pixel:vec2f)->u32{
  @location(5)leafUV:vec2f,@location(6)colour:vec3f,@builtin(instance_index)instance:u32)->ForestVertex{
  let r=forestRoots[forestVisible[forestBin.x+instance]];let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
  let local=vec3f(c*position.x-s*position.z,position.y,s*position.x+c*position.z)*r.rootScale.w;
- var o:ForestVertex;o.world=r.rootScale.xyz+local;o.nativeSoil=r.rootScale.y;o.normal=vec3f(c*normal.x-s*normal.z,normal.y,s*normal.x+c*normal.z);
+ var o:ForestVertex;o.world=r.rootScale.xyz+local;o.world.y=max(o.world.y,r.rootScale.y);o.normal=vec3f(c*normal.x-s*normal.z,normal.y,s*normal.x+c*normal.z);
  o.kind=kind;o.leafUV=leafUV;o.colour=colour*r.yawColour.yzw;o.nativeMaterial=-1;o.canopyAO=1.;o.coverageSeed=0u;o.pos=F.viewProj*vec4f(earthCurve(o.world-F.camPos.xyz,F.camPos.y),1);o.pos.z*=1.-f32(forestVisible[forestBin.x+instance]&63u)*2e-7;return o;
 }
 @fragment fn forestMiddleFS(in:ForestVertex)->@location(0)vec4f{
- if(in.world.y<in.nativeSoil){discard;}
  var n=normalize(in.normal);let exposure=clamp(in.kind.y,0.,1.);
  let isCrown=in.kind.x>3.5;
  var col=in.colour;
@@ -660,9 +659,6 @@ fn forestMappedNormal(geometric:vec3f,detail:vec3f,dx:vec3f,dy:vec3f,ux:vec2f,uy
 }
 @fragment fn forestNativeOpaqueFS(in:ForestVertex,@builtin(front_facing)front:bool)->@location(0)vec4f{
  let dx=dpdx(in.world);let dy=dpdy(in.world);let ux=dpdx(in.leafUV);let uy=dpdy(in.leafUV);
- // Source roots below biological localY0 can extend beyond downhill terrain.
- // Preserve immutable meshes and clip only visibility, after derivatives.
- if(in.world.y<in.nativeSoil){discard;}
  let geometric=normalize(in.normal);let exposure=clamp(in.kind.y,0.,1.);
  // This explicitly labelled legacy far approximation is permitted only when
  // the complete specimen fits three pixels. Its dome UVs are not native UVs.
@@ -691,11 +687,27 @@ fn forestMappedNormal(geometric:vec3f,detail:vec3f,dx:vec3f,dy:vec3f,ux:vec2f,uy
  // and cloud shadows remain dynamic in landFinish; this is not a sun shadow.
  return landFinish(in.world,n,colour,max(dot(n,F.sunDir.xyz),0.)*(.35+.65*in.canopyAO),(.36+max(n.y,0.)*.25)*in.canopyAO,0.,roughness);
 }
-struct ForestNativeLeafOutput {@location(0)colour:vec4f,@builtin(sample_mask)mask:u32};
-@fragment fn forestNativeLeafFS(in:ForestVertex,@builtin(front_facing)front:bool)->ForestNativeLeafOutput{
+fn forestNativeAlpha(material:ForestLeafMaterial,uv:vec2f,ux:vec2f,uy:vec2f)->f32{
+ let family=u32(material.coordinates.x);let layer=i32(material.coordinates.y);let repeating=material.coordinates.z>0.;
+ if(family==0u){return select(textureSampleGrad(forestNativeAlbedo0,forestNativeSampler,uv,layer,ux,uy).a,textureSampleGrad(forestNativeAlbedo0,forestNativeRepeatSampler,uv,layer,ux,uy).a,repeating);}
+ if(family==1u){return select(textureSampleGrad(forestNativeAlbedo1,forestNativeSampler,uv,layer,ux,uy).a,textureSampleGrad(forestNativeAlbedo1,forestNativeRepeatSampler,uv,layer,ux,uy).a,repeating);}
+ if(family==2u){return select(textureSampleGrad(forestNativeAlbedo2,forestNativeSampler,uv,layer,ux,uy).a,textureSampleGrad(forestNativeAlbedo2,forestNativeRepeatSampler,uv,layer,ux,uy).a,repeating);}
+ return select(textureSampleGrad(forestNativeAlbedo3,forestNativeSampler,uv,layer,ux,uy).a,textureSampleGrad(forestNativeAlbedo3,forestNativeRepeatSampler,uv,layer,ux,uy).a,repeating);
+}
+// Leaf coverage lays depth first, through every layer of a crown. Shading then lights only
+// the leaves in front, and each sample's depth test decides which of them it shows.
+struct ForestLeafCoverage {@location(0)colour:vec4f,@builtin(sample_mask)mask:u32};
+@fragment fn forestNativeLeafDepthFS(in:ForestVertex)->ForestLeafCoverage{
+ let alpha=forestNativeAlpha(forestNativeMaterials[u32(in.nativeMaterial)],in.leafUV,dpdx(in.leafUV),dpdy(in.leafUV));
+ // Independent native leaf footprints must not all select identical hardware
+ // sample bits at small projected sizes. Stable per-primitive/root masks keep
+ // expected filtered source coverage, including sub-sample fractions. This is
+ // independent-footprint integration, not recovery of correlated source masks.
+ var o:ForestLeafCoverage;o.colour=vec4f(0);o.mask=forestLeafSampleMask(alpha,in.coverageSeed,in.pos.xy);return o;
+}
+@fragment fn forestNativeLeafFS(in:ForestVertex,@builtin(front_facing)front:bool)->@location(0)vec4f{
  let material=forestNativeMaterials[u32(in.nativeMaterial)];
  let dx=dpdx(in.world);let dy=dpdy(in.world);let ux=dpdx(in.leafUV);let uy=dpdy(in.leafUV);
- if(in.world.y<in.nativeSoil){discard;}
  let surface=forestReadNative(material,in.leafUV,ux,uy);let pigment=surface.pigment;
  var colour=pigment.rgb/max(pigment.a,1e-8)*in.colour;
  let uvOff=in.leafUV-vec2f(.5,.5);
@@ -710,11 +722,7 @@ struct ForestNativeLeafOutput {@location(0)colour:vec4f,@builtin(sample_mask)mas
  let ambient=(.12+exposure*.56+abs(n.y)*.09)*in.canopyAO;
  let roughness=clamp(max(0.88,surface.detail.a/max(pigment.a,1e-8)),0.86,0.96);
  let lit=landFinish(in.world,n,colour,diffuse,ambient,0.,roughness);
- // Independent native leaf footprints must not all select identical hardware
- // sample bits at small projected sizes. Stable per-primitive/root masks keep
- // expected filtered source coverage, including sub-sample fractions. This is
- // independent-footprint integration, not recovery of correlated source masks.
- var o:ForestNativeLeafOutput;o.colour=vec4f(lit.rgb,pigment.a);o.mask=forestLeafSampleMask(pigment.a,in.coverageSeed,in.pos.xy);return o;
+ return vec4f(lit.rgb,pigment.a);
 }
 `+FOREST_IMPOSTOR_WGSL+FOREST_VOLUME_WGSL+FOREST_VOLUME_SHELL_WGSL;
 export const FOREST_CULL_WGSL=FRAME_WGSL+ROOT_WGSL+/* wgsl */`
@@ -956,7 +964,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
         floats[base+14]=forestMiddleUpward(lp.woodTiers[2].maximumReportedErrorMetres);words[base+15]=1;
         const isBroadleafSub=isSubtropicalPack&&(p.species==='ceiba'||p.species==='mangrove');
         const mid1LeafIndices=Math.max(6,Math.floor((lp.leafRibbons.indexCount/6)*(isBroadleafSub?0.45:0.36))*6);
-        const mid2LeafIndices=Math.max(6,Math.floor((lp.leafRibbons.indexCount/6)*(isBroadleafSub?0.22:0.17))*6);
+        const mid2LeafIndices=Math.max(6,Math.floor((lp.leafRibbons.indexCount/6)*(isBroadleafSub?0.065:0.05))*6);
         draws.set([lp.woodTiers[1].indexCount,0,lp.woodTiers[1].firstIndex,0,0],(m.prototypes.length*4+p.id*4)*5);
         draws.set([mid1LeafIndices,0,lp.leafRibbons.firstIndex,0,0],(m.prototypes.length*4+p.id*4+1)*5);
         draws.set([lp.woodTiers[2].indexCount,0,lp.woodTiers[2].firstIndex,0,0],(m.prototypes.length*4+p.id*4+2)*5);
@@ -981,15 +989,16 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     if(terrainOcclusion){terrainVisibility=createForestTerrainOcclusion({device,...terrainOcclusion});cullSource=withForestTerrainOcclusion(cullSource);}
     if(volume)cullSource=forestWithVolumeCommands(cullSource);
     const computePromise=shader(cullSource,'forest GPU cull and compact');
-    const pipe=fragment=>device.createRenderPipelineAsync({label:'instanced forest '+fragment,layout:'auto',vertex:{module,entryPoint:'forestCanopyVS',buffers:[FOREST_VERTEX_LAYOUT]},
-      fragment:{module,entryPoint:fragment,targets:[{format}]},primitive:{topology:'triangle-list',cullMode:'none'},
-      depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples,alphaToCoverageEnabled:false}});
-    const [reset,cull,sort,opaque,leaf,middlePipeline,volumePipeline,impostor]=await Promise.all([
+    const pipe=(fragment,target={format},depthStencil={depthWriteEnabled:true,depthCompare:'greater'})=>device.createRenderPipelineAsync({label:'instanced forest '+fragment,layout:'auto',vertex:{module,entryPoint:'forestCanopyVS',buffers:[FOREST_VERTEX_LAYOUT]},
+      fragment:{module,entryPoint:fragment,targets:[target]},primitive:{topology:'triangle-list',cullMode:'none'},
+      depthStencil:{format:'depth32float',...depthStencil},multisample:{count:samples,alphaToCoverageEnabled:false}});
+    const [reset,cull,sort,opaque,leafDepth,leaf,middlePipeline,volumePipeline,impostor]=await Promise.all([
       computePromise.then(compute=>device.createComputePipelineAsync({label:'forest reset indirect counts',layout:'auto',compute:{module:compute,entryPoint:'forestReset'}})),
       computePromise.then(compute=>device.createComputePipelineAsync({label:'forest cull and LOD',layout:'auto',compute:{module:compute,entryPoint:'forestCull'}})),
       nativeMid?computePromise.then(compute=>device.createComputePipelineAsync({label:'forest sort visible roots',layout:'auto',compute:{module:compute,entryPoint:'forestSort'}})):null,
       pack.skipNative?null:pipe('forestNativeOpaqueFS'),
-      pack.skipNative?null:pipe('forestNativeLeafFS'),
+      pack.skipNative?null:pipe('forestNativeLeafDepthFS',{format,writeMask:0}),
+      pack.skipNative?null:pipe('forestNativeLeafFS',{format},{depthWriteEnabled:false,depthCompare:'equal'}),
       middle?device.createRenderPipelineAsync({label:'instanced forest generated native middle',layout:'auto',vertex:{module,entryPoint:'forestMiddleVS',buffers:[FOREST_MIDDLE_VERTEX_LAYOUT]},fragment:{module,entryPoint:'forestMiddleFS',targets:[{format}]},primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples,alphaToCoverageEnabled:false}}):null,
       volume?device.createRenderPipelineAsync({label:volumeShell?'instanced forest shaded native crown shell':'instanced forest native foliage volume',layout:'auto',vertex:{module,entryPoint:volumeShell?'forestVolumeShellVS':'forestVolumeVS',buffers:volumeShell?[FOREST_MIDDLE_VERTEX_LAYOUT]:[]},fragment:{module,entryPoint:volumeShell?'forestVolumeShellFS':'forestVolumeFS',targets:[{format}]},primitive:{topology:'triangle-list',cullMode:volumeShell?'none':'back'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples,alphaToCoverageEnabled:!volumeShell}}):null,
       atlas?device.createRenderPipelineAsync({label:'instanced forest native depth impostor',layout:'auto',vertex:{module,entryPoint:'forestImpostorVS'},
@@ -1001,7 +1010,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     const cullBuffers=[frameUBO,roots,prototypes,visible,commands,previous,parameters,residency,...(forestMass?[forestMass.state]:[]),...(forestMass?.neighbors?[forestMass.neighbors]:[])];
     const cullGroup=device.createBindGroup({layout:cull.getBindGroupLayout(0),entries:[...cullBuffers.map((buffer,binding)=>({binding,resource:{buffer}})),...(terrainVisibility?.entries??[])]});
     const bind=(p,ids)=>device.createBindGroup({layout:p.getBindGroupLayout(0),entries:resources.filter(([i])=>ids.includes(i)).map(([binding,resource])=>({binding,resource}))});
-    const opaqueGroup=opaque?bind(opaque,[0,1,2,3,4,5,6]):null,leafGroup=leaf?bind(leaf,[0,1,2,3,4,5,6]):null;
+    const opaqueGroup=opaque?bind(opaque,[0,1,2,3,4,5,6]):null,leafGroup=leaf?bind(leaf,[0,1,2,3,4,5,6]):null,leafDepthGroup=leafDepth?bind(leafDepth,[0]):null;
     const middleGroup=middlePipeline?bind(middlePipeline,[0,1,2,3,4,5,6]):null,middleCloud=middlePipeline?clouds.bindVolume(middlePipeline):null;
     const volumeGroup=volumePipeline?bind(volumePipeline,[0,1,2,3,4,5,6]):null,volumeCloud=volumePipeline?clouds.bindVolume(volumePipeline):null;
     const impostorGroup=impostor?bind(impostor,[0,1,2,3,4,5,6]):null,impostorAtlas=impostor?atlas.bind(impostor):null;
@@ -1047,14 +1056,14 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
         const materials=make(surfaces.optics,B.STORAGE,'forest immutable native material optics');candidateBuffers.push(materials);
         const canopyLight=make(forestLightGPUBytes(source.canopyLight),B.STORAGE,'forest immutable native canopy exposure');candidateBuffers.push(canopyLight);
         for(const p of m.prototypes)for(const tier of nativeMid?(middle?[0,2,3]:[0,1,2,3]):middle?[0]:[0,1]){
-          const bin=bins[p.id][tier],group=pipeline=>{
+          const bin=bins[p.id][tier],group=(pipeline,normals=true)=>{
             const entries=[...[roots,visible,bin.offset].map((buffer,binding)=>({binding,resource:{buffer}})),
               {binding:5,resource:nativeSampler},{binding:6,resource:{buffer:materials}},{binding:13,resource:nativeRepeatSampler},{binding:14,resource:{buffer:canopyLight}}];
             for(let family=0;family<4;family++){const texture=surfaces.families[family]??surfaces.families[0],first=family?5+family*2:3;
-              entries.push({binding:first,resource:texture.albedo.createView({dimension:'2d-array'})},{binding:first+1,resource:texture.normal.createView({dimension:'2d-array'})});}
+              entries.push({binding:first,resource:texture.albedo.createView({dimension:'2d-array'})});if(normals)entries.push({binding:first+1,resource:texture.normal.createView({dimension:'2d-array'})});}
             return device.createBindGroup({layout:pipeline.getBindGroupLayout(2),entries});
           };
-          bin.opaque=group(opaque);if(tier!==1)bin.leaf=group(leaf);
+          bin.opaque=group(opaque);if(tier!==1){bin.leaf=group(leaf);bin.leafDepth=group(leafDepth,false);}
         }
         forestLoadAbort(abort.signal);native={vertices,indices,surfaces};
         stats.nativeMaterialLayers=surfaces.layers;stats.nativeTextureFamilies=surfaces.families.map(f=>({width:f.width,height:f.height,layers:f.rows.length,mipLevels:f.levels}));
@@ -1068,16 +1077,16 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
         if(!destroyed&&nativeStatus.status!=='unsupported')nativeStatus.status='failed';if(!atlas&&!(middle&&volume))throw error;return false;}
     }
     const nativeReady=pack.skipNative?Promise.resolve(false):deferred?new Promise(resolve=>setTimeout(resolve,pack.deferNative?80:0)).then(installNative):Promise.resolve(await installNative());
-    const draw=(pass,pipeline,group,cloud,cutout)=>{
-      if(!native)return;pass.setPipeline(pipeline);pass.setBindGroup(0,group);pass.setBindGroup(1,cloud);pass.setVertexBuffer(0,native.vertices);pass.setIndexBuffer(native.indices,'uint32');
+    const draw=(pass,pipeline,group,cloud,cutout,binKey=cutout?'leaf':'opaque')=>{
+      if(!native)return;pass.setPipeline(pipeline);pass.setBindGroup(0,group);if(cloud)pass.setBindGroup(1,cloud);pass.setVertexBuffer(0,native.vertices);pass.setIndexBuffer(native.indices,'uint32');
       for(const p of m.prototypes){
         for(const slot of cutout?[1]:middle?[0]:[0,2]){
           if(!p[['wood','leaf','far'][slot]].indexCount)continue;
-          pass.setBindGroup(2,bins[p.id][slot===2?1:0][cutout?'leaf':'opaque']);pass.drawIndexedIndirect(commands,(p.id*4+slot)*20);
+          pass.setBindGroup(2,bins[p.id][slot===2?1:0][binKey]);pass.drawIndexedIndirect(commands,(p.id*4+slot)*20);
         }
         if(nativeMid){
-          pass.setBindGroup(2,bins[p.id][2][cutout?'leaf':'opaque']);pass.drawIndexedIndirect(commands,(m.prototypes.length*4+p.id*4+(cutout?1:0))*20);
-          pass.setBindGroup(2,bins[p.id][3][cutout?'leaf':'opaque']);pass.drawIndexedIndirect(commands,(m.prototypes.length*4+p.id*4+(cutout?3:2))*20);
+          pass.setBindGroup(2,bins[p.id][2][binKey]);pass.drawIndexedIndirect(commands,(m.prototypes.length*4+p.id*4+(cutout?1:0))*20);
+          pass.setBindGroup(2,bins[p.id][3][binKey]);pass.drawIndexedIndirect(commands,(m.prototypes.length*4+p.id*4+(cutout?3:2))*20);
         }
       }
     };
@@ -1118,6 +1127,6 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       },
       setPixelError(next){if(!destroyed&&Number.isFinite(next)&&next>0&&Math.abs(next-currentNearPixels)>1e-4){currentNearPixels=next;stats.nearPixels=next;device.queue.writeBuffer(parameters,0,new Float32Array([activeRootCount,m.prototypes.length,next,nativeStatus.resident?modeIndex:effectiveModeIndex]));}},
       encode(pass){if(!activeRootCount)return;pass.setPipeline(reset);pass.setBindGroup(0,resetGroup);pass.dispatchWorkgroups(Math.ceil(m.prototypes.length*commandSlots/64));pass.setPipeline(cull);pass.setBindGroup(0,cullGroup);pass.dispatchWorkgroups(Math.ceil(activeRootCount/64));if(sort){pass.setPipeline(sort);pass.setBindGroup(0,sortGroup);pass.dispatchWorkgroups(m.prototypes.length*visibleTiers);}},
-      drawOpaque(pass){drawMiddle(pass);draw(pass,opaque,opaqueGroup,opaqueCloud,false);if(volumeShell)drawVolumes(pass);},drawCutout(pass){draw(pass,leaf,leafGroup,leafCloud,true);if(!volumeShell)drawVolumes(pass);drawImpostors(pass);},destroy(){destroyed=true;abort.abort();nativeStatus.status='destroyed';nativeStatus.resident=false;for(const b of allocated)b.destroy();native?.surfaces.destroy();atlas?.destroy();volume?.destroy();terrainVisibility?.destroy();}};
+      drawOpaque(pass){drawMiddle(pass);draw(pass,opaque,opaqueGroup,opaqueCloud,false);if(volumeShell)drawVolumes(pass);},drawCutout(pass){draw(pass,leafDepth,leafDepthGroup,null,true,'leafDepth');draw(pass,leaf,leafGroup,leafCloud,true);if(!volumeShell)drawVolumes(pass);drawImpostors(pass);},destroy(){destroyed=true;abort.abort();nativeStatus.status='destroyed';nativeStatus.resident=false;for(const b of allocated)b.destroy();native?.surfaces.destroy();atlas?.destroy();volume?.destroy();terrainVisibility?.destroy();}};
   }catch(error){destroyed=true;abort.abort();for(const b of allocated)b.destroy();native?.surfaces.destroy();atlas?.destroy();volume?.destroy();terrainVisibility?.destroy();throw error;}
 }

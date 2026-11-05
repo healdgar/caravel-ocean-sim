@@ -21,7 +21,7 @@ test('native muzzle flash lights actual hull and crew fragments locally, follows
       const device=await adapter.requestDevice(),errors=[];device.onuncapturederror=e=>errors.push(e.error.message);
       const B=GPUBufferUsage,T=GPUTextureUsage;
       const buffer=(size,usage)=>device.createBuffer({size,usage:usage|B.COPY_DST});
-      const frame=buffer(384,B.UNIFORM),fixture=buffer(48,B.UNIFORM),sun=buffer(16,B.STORAGE),shadow=buffer(112,B.UNIFORM),wetLookup=buffer(4,B.STORAGE),hullHoles=buffer(416,B.UNIFORM);
+      const frame=buffer(384,B.UNIFORM),fixture=buffer(48,B.UNIFORM),sun=buffer(16,B.STORAGE),shadow=buffer(112,B.UNIFORM);
       const hulls=[buffer(208,B.UNIFORM),buffer(208,B.UNIFORM)],sampler=device.createSampler({minFilter:'linear',magFilter:'linear'}),compare=device.createSampler({compare:'less-equal'});
       const texture=(color,layers=1)=>{
         const t=device.createTexture({size:[1,1,layers],format:'rgba8unorm',usage:T.TEXTURE_BINDING|T.COPY_DST});
@@ -50,7 +50,7 @@ o.uv=vec2f(.2,.3);o.wet=vec2f(0);o.material=4u;return o;}`;
       const groups=hulls.map(hull=>[
         [[0,buf(frame)],[1,buf(hull)],[4,view(trans)],[5,sampler],[6,env.createView({dimension:'cube'})],[7,buf(sun)],[9,view(sky)],[16,buf(fixture)]],
         [[0,buf(frame)],[1,view(trans)],[2,view(sky)],[3,sampler],[4,env.createView({dimension:'cube'})],[5,buf(sun)],[6,buf(hull)],[7,view(water)],
-          [8,disp.createView({dimension:'2d-array'})],[9,sampler],[10,view(oak)],[11,sampler],[12,view(deck)],[14,buf(wetLookup)],[15,buf(hullHoles)],[16,buf(fixture)]],
+          [8,disp.createView({dimension:'2d-array'})],[9,sampler],[10,view(oak)],[11,sampler],[12,view(deck)],[16,buf(fixture)]],
       ].map((entries,i)=>device.createBindGroup({layout:pipes[i].getBindGroupLayout(0),entries:entries.map(([binding,resource])=>({binding,resource}))})));
       const shadowGroups=pipes.map(pipe=>device.createBindGroup({layout:pipe.getBindGroupLayout(1),entries:[buf(shadow),view(depths[0]),compare,view(depths[1]),view(cloth),sampler].map((resource,binding)=>({binding,resource}))}));
       async function render(world,normal,receiver=0){
