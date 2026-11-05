@@ -56,11 +56,14 @@ export function createSceneShadows(device,count=2,resolution=2048){
   const T=GPUTextureUsage,B=GPUBufferUsage;
   const textures=['depth32float','depth32float','rgba16float'].map((format,i)=>device.createTexture({label:'fleet shadow '+i,size:[resolution,resolution,count],format,usage:T.RENDER_ATTACHMENT|T.TEXTURE_BINDING}));
   const uniform=device.createBuffer({label:'fleet shadow frames',size:112*count,usage:B.UNIFORM|B.COPY_DST});
-  const frames=new Float32Array(28*count),compare=device.createSampler({compare:'less-equal',minFilter:'linear',magFilter:'linear'}),linear=device.createSampler({minFilter:'linear',magFilter:'linear'});
+  const frames=new Float32Array(28*count),compare=device.createSampler({compare:'less-equal',minFilter:'linear',magFilter:'linear'}),linear=device.createSampler({minFilter:'linear',magFilter:'linear',mipmapFilter:'linear'});
   return {resolution,
+    sources:{uniform:{buffer:uniform},solid:textures[0].createView({dimension:'2d-array'}),compare,canvas:textures[1].createView({dimension:'2d-array'}),filter:textures[2].createView({dimension:'2d-array'}),linear},
     layer(index){return {views:textures.map(t=>t.createView({dimension:'2d',baseArrayLayer:index,arrayLayerCount:1}))};},
     update(vessels){if(vessels.length!==count)throw new Error('Shadow roster changed without rebuilding resources');for(let i=0;i<count;i++)frames.set(vessels[i].shadows.data,i*28);device.queue.writeBuffer(uniform,0,frames);},
     bind(pipe){return device.createBindGroup({layout:pipe.getBindGroupLayout(1),entries:[{buffer:uniform},textures[0].createView({dimension:'2d-array'}),compare,textures[1].createView({dimension:'2d-array'}),textures[2].createView({dimension:'2d-array'}),linear].map((resource,binding)=>({binding,resource}))});},
+    // The sea reads only its baked shadows, which keeps it inside the fragment stage's texture limit.
+    bindSea(pipe,seaShadow){return device.createBindGroup({layout:pipe.getBindGroupLayout(1),entries:[{binding:0,resource:{buffer:uniform}},{binding:5,resource:linear},{binding:6,resource:seaShadow}]});},
     destroy(){uniform.destroy();for(const t of textures)t.destroy();},
   };
 }

@@ -51,6 +51,8 @@ export async function createCoastalField({ device, computePipe, frameUBO, land, 
     state,
     // The ground changed: everything baked from it is stale.
     invalidate() { state.generation++; },
+    // How clear this coast's shallows run, which the water's colour reads alongside the window.
+    setClarity(clarity) { windowData[3] = clarity; device.queue.writeBuffer(windowUniform, 0, windowData); },
     encode(pass, frame) {
       // Frame words: camera position 16-18, wind direction 56-57, swell direction 59.
       const swellAngle = frame[59], nextX = Math.abs(swellAngle) > 0.1 ? Math.cos(swellAngle) : frame[56], nextZ = Math.abs(swellAngle) > 0.1 ? Math.sin(swellAngle) : frame[57];

@@ -1,7 +1,9 @@
 import { VESSEL_RIG, CANVAS_OPTICS } from './vessel.js';
 
-// Sunlight under the sea is a soft volume: a few strata resolve it, and every one costs three fetches.
-const WATER_SHADOW_STRATA = 6;
+// The bake is this many times coarser than the shadow maps it reads.
+export const SEA_SHADOW_REDUCTION = 4;
+export const SEA_SHADOW_LEVELS = 7;
+const SEA_SHADOW_HEIGHT_RANGE_M = 64;
 export const SHADOW_FRAME = /* wgsl */ `
 struct ShadowFrame { lightView:mat4x4f, origin:vec4f, sun:vec4f, texel:vec4f };
 `;
@@ -33,7 +35,7 @@ struct ShadowVertex {
 
 // Separate solid and cloth depths prevent translucent sails becoming opaque
 // blockers. Only direct solar light is shadowed; sky and reflections remain.
-export const SHADOW_SAMPLE = SHADOW_FRAME + /* wgsl */ `
+const SHADOW_SAMPLE_BASE = SHADOW_FRAME + /* wgsl */ `
 @group(1) @binding(0) var<uniform> SH:ShadowFrame;
 @group(1) @binding(1) var solidShadow:texture_depth_2d;
 @group(1) @binding(2) var shadowCompare:sampler_comparison;
@@ -124,9 +126,13 @@ fn vesselShadow(world:vec3f,normal:vec3f)->vec3f {
   return result;
 }
 
+`;
 // Water colour comes from a volume, not an opaque receiving sheet. Integrate
 // sunlight entering around a refracted view ray. The optical length and diffuse
 // spread are authored approximations; this is not a full underwater ray march.
+// It costs 96 texture reads, so the sea reads a baked version instead, below.
+// This is the exact form, kept as the reference tests hold the behaviour to.
+export const SHADOW_SAMPLE = SHADOW_SAMPLE_BASE + /* wgsl */ `
 fn waterVesselShadow(world:vec3f,normal:vec3f,view:vec3f,variance:f32)->vec3f {
   if(SH.origin.w<0.5){return vec3f(1);}
   let n=normalize(mix(vec3f(0,1,0),normal,0.8));
@@ -146,9 +152,9 @@ fn waterVesselShadow(world:vec3f,normal:vec3f,view:vec3f,variance:f32)->vec3f {
   let reach=abs(shift.xyz)*5.0+(abs(tx.xyz)+abs(ty.xyz))*(0.16+5.0*spread);
   if(any(abs(p.xy)>vec2f(1)+reach.xy) || p.z+reach.z<0.0){return vec3f(1);}
   var result=vec3f(0);
-  for(var i=0u;i<${WATER_SHADOW_STRATA}u;i++){
+  for(var i=0u;i<32u;i++){
     // Equal-probability strata of an exponential optical path (mean 1.2 m).
-    let path=-log(1.0-(f32(i)+0.5)/${WATER_SHADOW_STRATA}.0)*1.2;
+    let path=-log(1.0-(f32(i)+0.5)/32.0)*1.2;
     let angle=f32(i)*2.399963;
     let radius=(0.16+path*spread)*sqrt((f32(i%4u)+0.5)/4.0);
     let q=p+shift*path+(tx*cos(angle)+ty*sin(angle))*radius;
@@ -160,19 +166,7 @@ fn waterVesselShadow(world:vec3f,normal:vec3f,view:vec3f,variance:f32)->vec3f {
     let transmission=shadowCanvasTransmission(textureSampleLevel(canvasFilter,shadowLinear,uv,0.0));
     result+=solid*mix(transmission,vec3f(1),cloth);
   }
-  return result/${WATER_SHADOW_STRATA}.0;
-}
-// One filtered tap for a receiver that ripples, where a wide penumbra could never be seen.
-fn waterSurfaceShadow(world:vec3f)->vec3f {
-  if(SH.origin.w<0.5){return vec3f(1);}
-  let p=SH.lightView*vec4f(world-SH.origin.xyz+vec3f(0,0.008,0)+SH.sun.xyz*0.006,1.0);
-  let uv=p.xy*vec2f(0.5,-0.5)+0.5;
-  if(any(uv<vec2f(0)) || any(uv>vec2f(1)) || p.z<0.0){return vec3f(1);}
-  let depth=min(p.z-0.00002,0.99999);
-  let solid=textureSampleCompareLevel(solidShadow,shadowCompare,uv,depth);
-  let cloth=textureSampleCompareLevel(canvasShadow,shadowCompare,uv,depth);
-  let transmission=shadowCanvasTransmission(textureSampleLevel(canvasFilter,shadowLinear,uv,0.0));
-  return solid*mix(transmission,vec3f(1),cloth);
+  return result/32.0;
 }
 `;
 
@@ -181,27 +175,66 @@ fn waterSurfaceShadow(world:vec3f)->vec3f {
 export function createSceneShadowSample(count=2){
   if(!Number.isSafeInteger(count)||count<1||count>9)throw new RangeError('Invalid fleet shadow count');
   const layers=Array.from({length:count},(_,i)=>i);
-  return SHADOW_SAMPLE
+  return SHADOW_SAMPLE_BASE
   .replace(/var<uniform>\s*SH:ShadowFrame;/,'var<uniform> shadowFrames:array<ShadowFrame,'+count+'>;')
   .replaceAll('texture_depth_2d;','texture_depth_2d_array;')
   .replace(/var\s+canvasFilter:texture_2d<f32>;/,'var canvasFilter:texture_2d_array<f32>;')
   .replace(/fn vesselShadow\(world:vec3f,normal:vec3f\)->vec3f\s*\{/,'fn vesselLayerShadow(world:vec3f,normal:vec3f,layer:i32)->vec3f {\n  let SH=shadowFrames[layer];')
-  .replace(/fn waterSurfaceShadow\(world:vec3f\)->vec3f\s*\{/,'fn waterSurfaceLayerShadow(world:vec3f,layer:i32)->vec3f {\n  let SH=shadowFrames[layer];')
-  .replace(/fn waterVesselShadow\(world:vec3f,normal:vec3f,view:vec3f,variance:f32\)->vec3f\s*\{/,'fn waterVesselLayerShadow(world:vec3f,normal:vec3f,view:vec3f,variance:f32,layer:i32)->vec3f {\n  let SH=shadowFrames[layer];')
   .replaceAll('textureLoad(solidShadow,at,0)','textureLoad(solidShadow,at,layer,0)')
   .replaceAll('textureLoad(canvasShadow,at,0)','textureLoad(canvasShadow,at,layer,0)')
   .replaceAll('shadowCompare,q,depth','shadowCompare,q,layer,depth')
-  .replaceAll('shadowCompare,uv,depth','shadowCompare,uv,layer,depth')
   .replaceAll('canvasFilter,shadowLinear,q,0.0','canvasFilter,shadowLinear,q,layer,0.0')
-  .replaceAll('canvasFilter,shadowLinear,uv,0.0','canvasFilter,shadowLinear,uv,layer,0.0') + /* wgsl */ `
+  + /* wgsl */ `
+// The sea reads what sea-shadows.js baked: each ship's shadow on the sea, blurred level by level.
+@group(1) @binding(6) var seaShadow:texture_2d_array<f32>;
+// Metres across one texel of the baked shadow.
+fn seaShadowTexelMetres(SH:ShadowFrame)->f32 {return SH.texel.x*${SEA_SHADOW_REDUCTION}.0;}
+fn seaShadowUV(clip:vec2f)->vec2f {return clip*vec2f(0.5,-0.5)+0.5;}
+fn seaShadowOutside(uv:vec2f)->bool {return any(uv<vec2f(0))||any(uv>vec2f(1));}
+// Sun glitter on the surface. The sun is a disc, so a shadow softens with height above the water:
+// a blurred level gives the height of whatever is overhead, and that picks the blur to read.
+fn seaSurfaceLayerShadow(world:vec3f,layer:i32)->vec3f {
+  let SH=shadowFrames[layer];
+  if(SH.origin.w<0.5){return vec3f(1);}
+  let uv=seaShadowUV((SH.lightView*vec4f(world-SH.origin.xyz,1.0)).xy);
+  if(seaShadowOutside(uv)){return vec3f(1);}
+  let around=textureSampleLevel(seaShadow,shadowLinear,uv,layer,3.0);
+  let blocked=1.0-dot(around.rgb,vec3f(0.33333));
+  if(blocked<=0.002){return vec3f(1);}
+  let height=around.a/max(blocked,0.02)*${SEA_SHADOW_HEIGHT_RANGE_M}.0;
+  return textureSampleLevel(seaShadow,shadowLinear,uv,layer,log2(max(height*0.00935/seaShadowTexelMetres(SH),1.0))).rgb;
+}
+// Sunlight inside the water, around a refracted view ray. Each sample lies further along that ray
+// and reads a blurrier level, which is the widening cone the exact integral above adds up point by point.
+fn seaBodyLayerShadow(world:vec3f,normal:vec3f,view:vec3f,variance:f32,layer:i32)->vec3f {
+  let SH=shadowFrames[layer];
+  if(SH.origin.w<0.5){return vec3f(1);}
+  let n=normalize(mix(vec3f(0,1,0),normal,0.8));
+  let eyeRay=refract(-view,n,0.75);
+  let sunRay=refract(-SH.sun.xyz,n,0.75);
+  let entry=eyeRay-sunRay*(dot(eyeRay,n)/min(dot(sunRay,n),-0.1));
+  let spread=0.22+0.7*sqrt(clamp(variance,0.0,0.25));
+  let p=(SH.lightView*vec4f(world-SH.origin.xyz,1.0)).xy;
+  let shift=(SH.lightView*vec4f(entry,0.0)).xy;
+  let texel=seaShadowTexelMetres(SH);
+  // Equal-probability depths along an exponential optical path of mean 1.2 m.
+  let paths=array<f32,4>(0.16,0.56,1.18,2.5);
+  var result=vec3f(0);
+  for(var i=0;i<4;i++){
+    let uv=seaShadowUV(p+shift*paths[i]);
+    if(seaShadowOutside(uv)){result+=vec3f(1);continue;}
+    result+=textureSampleLevel(seaShadow,shadowLinear,uv,layer,log2(max(1.5*(0.16+paths[i]*spread)/texel,1.0))).rgb;
+  }
+  return result*0.25;
+}
 fn vesselShadow(world:vec3f,normal:vec3f)->vec3f {
   return ${layers.map(i=>'vesselLayerShadow(world,normal,'+i+')').join('*')};
 }
 fn waterSurfaceShadow(world:vec3f)->vec3f {
-  return ${layers.map(i=>'waterSurfaceLayerShadow(world,'+i+')').join('*')};
+  return ${layers.map(i=>'seaSurfaceLayerShadow(world,'+i+')').join('*')};
 }
 fn waterVesselShadow(world:vec3f,normal:vec3f,view:vec3f,variance:f32)->vec3f {
-  return ${layers.map(i=>'waterVesselLayerShadow(world,normal,view,variance,'+i+')').join('*')};
+  return ${layers.map(i=>'seaBodyLayerShadow(world,normal,view,variance,'+i+')').join('*')};
 }
 `;
 }
@@ -211,3 +244,50 @@ export function withSceneShadowCount(source,count){
   if(source.split(SCENE_SHADOW_SAMPLE).length!==2)throw new Error('Ambiguous scene shadow sampler');
   return source.replace(SCENE_SHADOW_SAMPLE,createSceneShadowSample(count));
 }
+
+// One ship's shadow on the sea: colour through her canvas, and the height of whatever casts it.
+export const SEA_SHADOW_BAKE = (count)=>SHADOW_FRAME + /* wgsl */ `
+@group(0) @binding(0) var<uniform> frames:array<ShadowFrame,${count}>;
+@group(0) @binding(1) var<uniform> layerIndex:vec4u;
+@group(0) @binding(2) var solidShadow:texture_depth_2d_array;
+@group(0) @binding(3) var shadowCompare:sampler_comparison;
+@group(0) @binding(4) var canvasShadow:texture_depth_2d_array;
+@group(0) @binding(5) var canvasFilter:texture_2d_array<f32>;
+@group(0) @binding(6) var shadowLinear:sampler;
+@group(0) @binding(7) var seaOut:texture_storage_2d<rgba8unorm,write>;
+const SEA_LEVEL=-0.05;
+@compute @workgroup_size(8,8) fn main(@builtin(global_invocation_id) id:vec3u){
+  let size=textureDimensions(seaOut);
+  if(any(id.xy>=size)){return;}
+  let layer=i32(layerIndex.x);let SH=frames[layer];let L=SH.lightView;
+  let uv=(vec2f(id.xy)+0.5)/vec2f(size);
+  // Where this texel's ray to the sun crosses the sea, for its depth along that ray.
+  let clip=(uv-0.5)*vec2f(2.0,-2.0);
+  let dy=SEA_LEVEL-SH.origin.y;
+  let rhs=clip-vec2f(L[1].x,L[1].y)*dy-vec2f(L[3].x,L[3].y);
+  let det=L[0].x*L[2].y-L[2].x*L[0].y;
+  var z=0.99999;
+  if(abs(det)>0.000000001){
+    let dx=(L[2].y*rhs.x-L[2].x*rhs.y)/det;let dz=(L[0].x*rhs.y-L[0].y*rhs.x)/det;
+    z=L[0].z*dx+L[1].z*dy+L[2].z*dz+L[3].z;
+  }
+  let reference=clamp(z-0.00002,0.0,0.99999);
+  let solid=textureSampleCompareLevel(solidShadow,shadowCompare,uv,layer,reference);
+  let cloth=textureSampleCompareLevel(canvasShadow,shadowCompare,uv,layer,reference);
+  let through=textureSampleLevel(canvasFilter,shadowLinear,uv,layer,0.0);
+  let transmission=select(vec3f(1),clamp(through.rgb/max(through.a,0.000001),vec3f(0),vec3f(1)),through.a>0.000001);
+  let at=vec2i(uv*vec2f(textureDimensions(solidShadow)));
+  let nearest=min(textureLoad(solidShadow,at,layer,0),textureLoad(canvasShadow,at,layer,0));
+  let height=max(reference-nearest,0.0)*SH.sun.w;
+  textureStore(seaOut,id.xy,vec4f(solid*mix(transmission,vec3f(1),cloth),clamp(height/${SEA_SHADOW_HEIGHT_RANGE_M}.0,0.0,1.0)));
+}
+`;
+export const SEA_SHADOW_LEVEL = /* wgsl */ `
+@group(0) @binding(0) var source:texture_2d<f32>;
+@group(0) @binding(1) var blurred:texture_storage_2d<rgba8unorm,write>;
+@compute @workgroup_size(8,8) fn main(@builtin(global_invocation_id) id:vec3u){
+  if(any(id.xy>=textureDimensions(blurred))){return;}
+  let at=vec2i(id.xy)*2;
+  textureStore(blurred,id.xy,(textureLoad(source,at,0)+textureLoad(source,at+vec2i(1,0),0)+textureLoad(source,at+vec2i(0,1),0)+textureLoad(source,at+vec2i(1,1),0))*0.25);
+}
+`;

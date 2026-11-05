@@ -374,7 +374,7 @@ export function createOpticalOcean(coast='',depthFirst=true,surfaceWaves=false,c
   const transmission=WATER_TRANSMISSION.replace('mix(body,hit.source.rgb,transmission)',
     'mix(body,hit.source.rgb*waterCausticFactorFiltered(waterSourcePosition(hit.uv,hit.source.a),world.y,waterCausticPixelFootprint(waterSourcePosition(hit.uv,hit.source.a))),transmission)');
   const code=oceanSource(coast,surfaceWaves)+transmission+WATER_AIR_TRANSMISSION
-    +waterCausticFunctions({surfaceWaves})+UNDERWATER_INTERFACE
+    +waterCausticFunctions({surfaceWaves,seaShadow:true})+UNDERWATER_INTERFACE
     +(cameraProbe?'\n@group(3)@binding(3)var<storage,read>cameraSea:array<f32,16>;\n':'');
   const optical=code.replace(/let\s+Fr\s*=\s*fresnelWater\(/,'let Fr = waterFresnel(')
     .replace(/var\s+col\s*=\s*body\s*\*\s*\(1\.0\s*-\s*Fr\)/,

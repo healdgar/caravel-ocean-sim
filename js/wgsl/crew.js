@@ -60,6 +60,9 @@ fn crewSurface(v:CrewInput)->CrewSurface {
   return CrewSurface(vec3f(p.x*width,p.y+eyeShift*eye,p.z+f.z*nose),normal);
 }
 `;
+// Shading never discards, so the GPU shades only what shows. Anyone with something to cut away,
+// someone fading out of a first-person sightline or in torn clothes, lays depth with `surviving`
+// after the opaque scene, then shades what is left.
 export const CREW_RENDER = FRAME_WGSL + ATMO_CORE_WGSL + VESSEL_RIG + VESSEL_LIGHTING + CREW_SKIN + SHADOW_SAMPLE + SKY_RENDER_FUNCS + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F:Frame;
 @group(0) @binding(4) var transLUT:texture_2d<f32>;
@@ -69,7 +72,7 @@ export const CREW_RENDER = FRAME_WGSL + ATMO_CORE_WGSL + VESSEL_RIG + VESSEL_LIG
 @group(0) @binding(8) var<storage,read> moisture:array<vec2f>;
 @group(0) @binding(9) var skyLUT:texture_2d<f32>;
 struct CrewVertex {
-  @builtin(position) position:vec4f, @location(0) world:vec3f,
+  @invariant @builtin(position) position:vec4f, @location(0) world:vec3f,
   @location(1) normal:vec3f, @location(2) color:vec3f, @location(3) @interpolate(flat) helm:f32,
   @location(4) wet:vec2f, @location(5) skin:f32,
   @location(6) bodyPos:vec3f, @location(7) @interpolate(flat) damage:vec3f
@@ -99,25 +102,31 @@ struct CrewVertex {
   if(distance(v.color,vec3f(.045,.019,.009))<.001){out.color=actor.hair.rgb;}
   return out;
 }
-@fragment fn fs(v:CrewVertex,@builtin(front_facing) front:bool)->@location(0) vec4f {
+@fragment fn surviving(v:CrewVertex)->@location(0) vec4f {
   // Screen-door transparency preserves correct depth and the two instanced draws.
   // Every nearby sailor clears the first-person sightline, including moving crew.
   let opacity=select(1.0,smoothstep(1.4,4.8,distance(v.world,F.camPos.xyz)),v.helm>.5);
   let pixel=vec2u(v.position.xy)%4u;
   let bayer=array<f32,16>(0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5);
   if(opacity<(bayer[pixel.y*4u+pixel.x]+.5)/16.0){discard;}
-  let woundAmt=v.damage.x;let scorchAmt=v.damage.y;let bSeed=v.damage.z;
-  let bp=v.bodyPos;
-  let nHash=fract(sin(dot(bp*vec3f(19.3,27.1,23.7)+vec3f(bSeed*31.0),vec3f(12.9898,78.233,45.164)))*43758.5453);
-  let nLow=sin(bp.x*18.0+bSeed*41.0)*cos(bp.y*14.0-bSeed*23.0)*0.5+0.5;
+  let woundAmt=v.damage.x;let scorchAmt=v.damage.y;
   // Tattered cloth edges at cuffs and hems when heavily wounded or scorched
   if(v.skin<0.5 && (woundAmt+scorchAmt)>0.45){
+    let bp=v.bodyPos;let bSeed=v.damage.z;
     let isCuffOrHem=(bp.y>0.16 && bp.y<0.28) || (bp.y>0.68 && bp.y<0.80) || (abs(bp.x)>0.22 && bp.y>0.85 && bp.y<1.08);
     if(isCuffOrHem){
+      let nHash=fract(sin(dot(bp*vec3f(19.3,27.1,23.7)+vec3f(bSeed*31.0),vec3f(12.9898,78.233,45.164)))*43758.5453);
       let fray=sin(bp.x*95.0+bp.z*85.0+bSeed*50.0)*0.5+0.5;
       if(fray*0.65+nHash*0.35 > 1.12-(woundAmt*0.32+scorchAmt*0.25)){discard;}
     }
   }
+  return vec4f(0);
+}
+@fragment fn fs(v:CrewVertex,@builtin(front_facing) front:bool)->@location(0) vec4f {
+  let woundAmt=v.damage.x;let scorchAmt=v.damage.y;let bSeed=v.damage.z;
+  let bp=v.bodyPos;
+  let nHash=fract(sin(dot(bp*vec3f(19.3,27.1,23.7)+vec3f(bSeed*31.0),vec3f(12.9898,78.233,45.164)))*43758.5453);
+  let nLow=sin(bp.x*18.0+bSeed*41.0)*cos(bp.y*14.0-bSeed*23.0)*0.5+0.5;
   let n=normalize(v.normal)*select(-1.0,1.0,front);let sun=F.sunDir.xyz;
   let shadowSample=vesselShadow(v.world,n);
   let direct=sunIlluminance()*sunVis[0]*step(0.0,sun.y)*solarShadowVisibility(shadowSample);
@@ -174,3 +183,40 @@ export const CREW_SHADOW = VESSEL_RIG + CREW_SKIN + SHADOW_FRAME + /* wgsl */ `
   return SH.lightView*vec4f(rotateHull((crewSkin(v)*vec4f(crewSurface(v).position,1)).xyz),1);
 }
 `;
+
+// Sailors further from the eye are solved less often. Each frame the GPU carries every joint from
+// the last solved pose towards the newest one, so their limbs still move smoothly between solves.
+export const CREW_POSE_BLEND = /* wgsl */ `
+@group(0) @binding(0) var<storage,read> solved:array<mat4x4f>;
+@group(0) @binding(1) var<storage,read> blends:array<vec2f>;
+@group(0) @binding(2) var<storage,read_write> shownJoints:array<mat4x4f>;
+@compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id:vec3u){
+  if(id.x>=arrayLength(&shownJoints)){return;}
+  let sailor=id.x/65u;let joint=id.x%65u;let blend=blends[sailor];
+  let newest=u32(blend.y);
+  let older=solved[(sailor*2u+1u-newest)*65u+joint];let latest=solved[(sailor*2u+newest)*65u+joint];
+  shownJoints[id.x]=mat4x4f(mix(older[0],latest[0],blend.x),mix(older[1],latest[1],blend.x),mix(older[2],latest[2],blend.x),mix(older[3],latest[3],blend.x));
+}
+`;
+
+// A body's joints straight from its baked clips: standing and walking, blended, between frames.
+export const CREW_CLIP_POSE = /* wgsl */ `
+struct CrewClipLayout {idleFirst:u32,idleFrames:u32,walkFirst:u32,walkFrames:u32};
+@group(0) @binding(0) var<storage,read> palettes:array<mat4x4f>;
+@group(0) @binding(1) var<uniform> layout_:CrewClipLayout;
+@group(0) @binding(2) var<storage,read> bodies:array<vec4f>;
+@group(0) @binding(3) var<storage,read_write> shownJoints:array<mat4x4f>;
+fn mixJoints(a:mat4x4f,b:mat4x4f,t:f32)->mat4x4f {return mat4x4f(mix(a[0],b[0],t),mix(a[1],b[1],t),mix(a[2],b[2],t),mix(a[3],b[3],t));}
+fn clipJoint(first:u32,frames:u32,frame:f32,joint:u32)->mat4x4f {
+  let whole=u32(frame)%frames;let next=(whole+1u)%frames;
+  return mixJoints(palettes[(first+whole)*65u+joint],palettes[(first+next)*65u+joint],fract(frame));
+}
+@compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id:vec3u){
+  if(id.x>=arrayLength(&shownJoints)){return;}
+  let body=bodies[id.x/65u];
+  if(body.w<0.5){return;}
+  let joint=id.x%65u;
+  shownJoints[id.x]=mixJoints(clipJoint(layout_.idleFirst,layout_.idleFrames,body.x,joint),clipJoint(layout_.walkFirst,layout_.walkFrames,body.y,joint),body.z);
+}
+`;
+

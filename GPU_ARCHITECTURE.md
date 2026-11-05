@@ -14,9 +14,10 @@ Apple GPUs shade only what is visible, but only for draws that neither discard n
 
 - **One render pass for the scene.** Leaving a pass writes the multisampled attachments out to memory, and the next pass reads them back. What needs the scene mid-frame reads last frame's image instead, as ship timber's water reflection does.
 - **Opaque first.** Whole hulls, then terrain, then the sea and sky, then anything that cuts or blends. A hull drawn first also saves shading the sea under it.
-- **A surface that can be cut lays depth first.** A small entry decides what survives, then shading runs at `depthCompare:'equal'` with no `discard`. The ocean, forest leaves and damaged hulls all work this way.
+- **A surface that can be cut lays depth first.** A small entry decides what survives, then shading runs at `depthCompare:'equal'` with no `discard`. The ocean, forest leaves, damaged hulls and sailors who can be cut all work this way.
 - **Do not compile what is not there.** A whole ship has no damage code and the open sea has no coastal code: each is a second pipeline from the same source, chosen per draw. Large untaken branches still cost time.
 - **WGSL `select` evaluates both arguments.** Never pass it a ray march.
-- **Slow-changing answers are baked.** Land sunlight and coastal wave shelter live in textures. A per-pixel loop over texture fetches needs a reason.
+- **Slow-changing answers are baked.** Land sunlight, coastal wave shelter and each ship's blurred sea shadow live in textures. A per-pixel loop over texture fetches needs a reason.
+- **Lists are made on the GPU.** Scenery culling and level of detail run in a compute pass that writes an indirect draw, and bodies with nothing to reach for pose from clips baked once. A JavaScript loop over instances needs a reason.
 - **Timestamps stall the frame they sample.** They run only while the performance panel is open, and their spans include waits, so nothing automatic may read them.
 - **Each buffer holds one thing.** Battle damage has its own uniform buffer rather than the tail of another system's storage.

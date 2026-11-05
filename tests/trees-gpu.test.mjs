@@ -51,6 +51,11 @@ function instrumentTrees(){
     if(['island trees','island canopy and wood'].includes(labels.get(this))&&treeCheck.hideTrees)return;
     return draw.apply(this,args);
   };
+  const drawIndirect=GPURenderPassEncoder.prototype.drawIndirect;
+  GPURenderPassEncoder.prototype.drawIndirect=function(...args){
+    if(['island trees','island canopy and wood'].includes(labels.get(this))&&treeCheck.hideTrees)return;
+    return drawIndirect.apply(this,args);
+  };
 }
 
 async function ready(page,url){

@@ -324,3 +324,44 @@ test('sailors far from the eye keep a pose longer and draw simpler models, in as
   assert.ok(Math.abs(crewApparentDistance([0,0,30],boat,{x:100,y:0,z:30}))<1e-9,'her local z runs aft along world z at heading zero');
   assert.ok(crewApparentDistance([0,0,0],boat,{x:100,y:0,z:30,fovY:.1})<30/3,'a narrow lens brings them closer');
 });
+
+test('only sailors whose fragments can actually be cut pay for the shader that cuts them',async()=>{
+  const {crewNeedsCutShader}=await import('../js/crew-lod.js');
+  assert.equal(crewNeedsCutShader(3,false,0),false,'an unhurt sailor beside a third-person eye stays opaque');
+  assert.equal(crewNeedsCutShader(3,true,0),true,'first person fades whoever stands in the sightline');
+  assert.equal(crewNeedsCutShader(20,true,0),false,'the fade only reaches so far');
+  assert.equal(crewNeedsCutShader(200,false,.46),true,'torn cloth is cut at any distance');
+  assert.equal(crewNeedsCutShader(200,false,.44),false);
+});
+
+test('far sailors pose from baked clips unless their own pose still matters',async()=>{
+  const {crewClipOnly}=await import('../js/crew-lod.js');
+  assert.equal(crewClipOnly(49,{}),false);
+  assert.equal(crewClipOnly(50,{}),true);
+  assert.equal(crewClipOnly(90,{seatedPose:{}}),false);
+  assert.equal(crewClipOnly(90,{pendingWounds:[{}]}),false);
+  assert.equal(crewClipOnly(90,{pendingWounds:[]}),true);
+  assert.equal(crewClipOnly(90,{knockdownTimer:.5}),false);
+  assert.equal(crewClipOnly(90,{casualtyState:'fallen'}),false);
+});
+
+test('baked clips store every frame in order and wrap time without a jump',async()=>{
+  const {bakeCrewClips,crewClipFrame}=await import('../js/crew-clip-pose.js');
+  const joints=65*16,sampled=[];
+  const animator={
+    clips:new Map([['Idle',{duration:2}],['Walk',{duration:1}]]),
+    palette:new Float32Array(joints),
+    sample(name,seconds){sampled.push([name,seconds]);this.palette.fill((name==='Walk'?100:0)+seconds);},
+  };
+  const {palettes,clips}=bakeCrewClips(animator,10);
+  assert.deepEqual(clips.map(({name,frames,first})=>[name,frames,first]),[['Idle',20,0],['Walk',10,20]]);
+  assert.equal(palettes.length,30*joints);
+  assert.equal(sampled.length,30);
+  assert.ok(Math.abs(palettes[5*joints]-.5)<1e-6,'Idle frame 5 is half a second in');
+  assert.ok(Math.abs(palettes[(20+3)*joints+7]-100.3)<1e-3,'Walk frame 3 follows Idle');
+  assert.equal(crewClipFrame(clips[1],0),0);
+  assert.ok(Math.abs(crewClipFrame(clips[1],.25)-2.5)<1e-9);
+  assert.ok(Math.abs(crewClipFrame(clips[1],1.25)-2.5)<1e-9,'a clip repeats');
+  assert.ok(Math.abs(crewClipFrame(clips[1],-.25)-7.5)<1e-9,'time before the start wraps backwards');
+  assert.ok(crewClipFrame(clips[0],1.9999)<clips[0].frames);
+});

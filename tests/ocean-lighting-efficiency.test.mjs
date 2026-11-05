@@ -137,7 +137,8 @@ const ENV_MAXMIP:f32=${ENV_MIPS-1}.0;
         const pipeline=await device.createRenderPipelineAsync({layout:'auto',vertex:{module,entryPoint:'vs',buffers:[{arrayStride:16,stepMode:'instance',attributes:[{shaderLocation:0,offset:0,format:'float32x4'}]}]},fragment:{module,entryPoint:'fs',targets:[{format:'rgba8unorm'}]},primitive:{topology:'triangle-list',cullMode:'none'}});
         const resources=[{buffer:frame},transView,skyView,sampler,displacement.createView({dimension:'2d-array'}),derivatives.createView({dimension:'2d-array'}),moments.createView({dimension:'2d-array'}),foam.createView(),envView,repeat,worldFoam.createView({dimension:'2d-array'}),{buffer:sun},{buffer:hulls},{buffer:interaction},wake.createView(),sampler,{buffer:interaction},wake.createView()];
         const mainGroup=group(pipeline,resources);
-        const shadowGroup=device.createBindGroup({layout:pipeline.getBindGroupLayout(1),entries:[{buffer:shadowFrames},solid.createView({dimension:'2d-array'}),compare,cloth.createView({dimension:'2d-array'}),shadowTint.createView({dimension:'2d-array'}),sampler].map((resource,binding)=>({binding,resource}))});
+        const seaShadow=device.createTexture({size:[1,1,2],format:'rgba8unorm',usage:T.TEXTURE_BINDING|T.COPY_DST});for(const layer of [0,1])device.queue.writeTexture({texture:seaShadow,origin:[0,0,layer]},new Uint8Array([255,255,255,0]),{bytesPerRow:4},[1,1]);
+        const shadowGroup=device.createBindGroup({layout:pipeline.getBindGroupLayout(1),entries:[{binding:0,resource:{buffer:shadowFrames}},{binding:5,resource:sampler},{binding:6,resource:seaShadow.createView({dimension:'2d-array'})}]});
         renderPipelines.push({pipeline,mainGroup,shadowGroup});
       }
       const states=[{elevation:.04,height:.004,visibility:1,strength:1.2},{elevation:.8,height:.02,visibility:.37,strength:.9},{elevation:-.04,height:.8,visibility:0,strength:1.1},{elevation:.2,height:2.3,visibility:.91,strength:1.6}];

@@ -1,8 +1,10 @@
 import { ISLAND, decodeIsland, decodeBiome, islandGeometry, islandVegetation, terrainSample, terrainSurfaceSample, constrainIslandMotion, safeLandfallStart, SPANISH_MAIN_1550_REGIONS, HISTORICAL_COLONIAL_PORTS, resolveColonialEra, generateProceduralCoastalPack, upgradeProceduralPackWithRealDEM } from './terrain-model.js';
-import { TREE_VARIANTS, TREE_VERTEX_FLOATS, TREE_PIXEL_ERROR, treeRenderGeometry, selectTreeLods, createForestPatches, visibleForestIds,
-  GROUND_COVER,createGroundCoverPatches,groundCoverInstances,projectedGroundExtent,groundCoverError,groundCoverVisible,groundCoverGeometry } from './vegetation.js';
+import { TREE_VARIANTS, TREE_VERTEX_FLOATS, TREE_PIXEL_ERROR, treeRenderGeometry,
+  GROUND_COVER,createGroundCoverPatches,groundCoverInstances,groundCoverGeometry } from './vegetation.js';
 import { TERRAIN, TERRAIN_LIGHT } from './wgsl/terrain.js';
 import { createCoastalField } from './coastal-field.js';
+import { coastalClarity, coastalTurbidityScale } from './sea-colour.js';
+import { createSceneryCull, GROUND_COVER_CULL, TREE_CULL } from './scenery-cull.js';
 import { loadCanopyScenery, excludeCanopyRoots, createCanopyRenderer, canopyInspectionURL } from './canopy-scenery.js';
 import {loadTerrainNear,terrainNearGeometry,terrainNearContains,terrainNearSample,terrainNearPatchBounds,sampleTerrainNear} from './terrain-near.js';
 import {loadForestScenery,createForestRenderer,FOREST_VERTEX_WGSL,FOREST_ASSETS,SUBTROPICAL_FOREST_ASSETS} from './forest-scenery.js';
@@ -369,15 +371,11 @@ export function retargetForestPackToProcedural(
   };
 }
 
-// How far the view may turn or move before tree and ground lists are rebuilt.
-const SCENERY_LIST_TURN_RADIANS = 2 * Math.PI / 180;
-const SCENERY_LIST_MARGIN = Math.sin(SCENERY_LIST_TURN_RADIANS * 1.5);
-const SCENERY_LIST_MOVE_M = 3;
-// Has this clip axis of a camera-relative view projection turned from what it was?
-function sceneryViewTurned(next, before, axis) {
-  const ax=next[axis],ay=next[4+axis],az=next[8+axis],bx=before[axis],by=before[4+axis],bz=before[8+axis];
-  return ax*bx+ay*by+az*bz<Math.cos(SCENERY_LIST_TURN_RADIANS)*Math.hypot(ax,ay,az)*Math.hypot(bx,by,bz);
-}
+// Ground cover is resident within this range of the camera, and leaves it a little further out.
+const GROUND_RESIDENT_M = 1200;
+const GROUND_RESIDENT_RELEASE = 1.15;
+const GROUND_RESIDENCY_MOVE_M = 16;
+const GROUND_PATCHES_PER_FRAME = 8;
 
 export async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeView,clouds,shader,computePipe,mipPipe,format,samples,waterOptics=null,
   region:explicitRegion=null,placement=null,options={},
@@ -594,7 +592,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const originalTrees=proceduralPack?proceduralPack.vegetation.trees:islandVegetation(heights,biome);
   // Root positions change once at asset preparation, never as an animation.
   if(nearTile)for(let i=0;i<originalTrees.length;i+=8)if(terrainNearContains(nearTile,originalTrees[i],originalTrees[i+2]))originalTrees[i+1]=groundSample(originalTrees[i],originalTrees[i+2]);
-  let canopyTrees=originalTrees,trees=originalTrees,forestPatches=[];
+  let canopyTrees=originalTrees,trees=originalTrees;
   let groundPatches=createGroundCoverPatches(activeRegion,groundSample,nearTile?(x,z,span)=>terrainNearPatchBounds(nearTile,x,z,span):null);
   const nearBitmapPromise=nearTile?createImageBitmap(new Blob([nearTile.albedo],{type:'image/png'})):null;
   nearBitmapPromise?.catch(()=>{});
@@ -657,6 +655,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const elevation=device.createTexture({label:'island elevation',size:[activeRegion.size,activeRegion.size],format:'r32float',usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST});
   device.queue.writeTexture({texture:elevation},heights,{bytesPerRow:activeRegion.size*4},[activeRegion.size,activeRegion.size]);
   coastalField=await createCoastalField({device,computePipe,frameUBO,land:uniform,elevationView:elevation.createView(),nearDomain,nearElevation});
+  coastalField.setClarity(coastalClarity(activeRegion.latitude??0,activeRegion.coastalArchetype));
   const lighting=device.createTexture({label:'island sunlight',size:[64,64],format:'rgba16float',usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.STORAGE_BINDING});
   const albedoMips=1+Math.log2(activeRegion.albedoSize);
   const albedo=device.createTexture({label:'registered island imagery seed',size:[activeRegion.albedoSize,activeRegion.albedoSize],format:'rgba8unorm',mipLevelCount:albedoMips,
@@ -717,8 +716,38 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const groundMeshes=Array.from({length:GROUND_COVER.variants},(_,variant)=>{
     const geometry=groundCoverGeometry(variant);return{buffer:buffer(geometry,GPUBufferUsage.VERTEX,`ground cover ${variant}`),count:geometry.length/TREE_VERTEX_FLOATS};
   });
-  const groundBatches=groundMeshes.map((_,variant)=>({buffer:null,capacity:0,label:`ground cover instances ${variant}`,data:[],count:0}));
-  const groundStats={patches:groundPatches.length,resident:0,rocks:0,grass:0,triangles:0},previousGround=new Set();
+  const [groundCullPipeline,treeCullPipeline]=await Promise.all([computePipe(GROUND_COVER_CULL,'ground cover cull'),computePipe(TREE_CULL,'tree cull')]);
+  const groundBlock=GROUND_COVER.grassPerPatch+GROUND_COVER.rocksPerPatch;
+  const groundBlocks=Math.ceil(Math.PI*(GROUND_RESIDENT_M*GROUND_RESIDENT_RELEASE/GROUND_COVER.patchSpan+1)**2);
+  const groundCull=createSceneryCull({device,pipeline:groundCullPipeline,frameUBO,label:'ground cover',capacity:groundBlocks*groundBlock,
+    bucketCapacities:Array.from({length:GROUND_COVER.variants},(_,variant)=>groundBlocks*(variant<2?GROUND_COVER.rocksPerPatch:GROUND_COVER.grassPerPatch)),vertexCounts:[groundMeshes.map(mesh=>mesh.count)]});
+  groundCull.setPixelError(TREE_PIXEL_ERROR);
+  const groundStats={patches:groundPatches.length,resident:0};
+  const groundResident=new Map(),groundFreeBlocks=Array.from({length:groundBlocks},(_,block)=>block);
+  let groundWanted=[],groundResidencyAt=null;
+  function clearGroundResidency(){
+    for(const block of groundResident.values()){groundCull.clearSlots(block*groundBlock,groundBlock);groundFreeBlocks.push(block);}
+    groundResident.clear();groundWanted=[];groundResidencyAt=null;groundStats.resident=0;
+  }
+  // Instances are worked out once per patch and uploaded as it comes into range; the GPU does the rest.
+  function updateGroundResidency(camera){
+    const moved=!groundResidencyAt||Math.hypot(camera.x-groundResidencyAt.x,camera.z-groundResidencyAt.z)>GROUND_RESIDENCY_MOVE_M;
+    if(moved){
+      groundResidencyAt={x:camera.x,z:camera.z};
+      const distanceOf=patch=>Math.hypot(patch.centre[0]-camera.x,patch.centre[2]-camera.z);
+      for(const [patch,block] of groundResident)if(distanceOf(patch)>GROUND_RESIDENT_M*GROUND_RESIDENT_RELEASE){
+        groundCull.clearSlots(block*groundBlock,groundBlock);groundFreeBlocks.push(block);groundResident.delete(patch);
+      }
+      groundWanted=groundPatches.filter(patch=>!groundResident.has(patch)&&distanceOf(patch)<GROUND_RESIDENT_M).sort((a,b)=>distanceOf(b)-distanceOf(a));
+    }
+    for(let i=0;i<GROUND_PATCHES_PER_FRAME&&groundWanted.length&&groundFreeBlocks.length;i++){
+      const patch=groundWanted.pop(),block=groundFreeBlocks.pop(),perVariant=groundCoverInstances(patch,activeRegion,groundSample,biome);
+      const floats=new Float32Array(groundBlock*8),slotGroups=new Uint32Array(groundBlock).fill(0xffffffff);let slot=0;
+      perVariant.forEach((data,variant)=>{for(let k=0;k<data.length;k+=8){floats.set(data.subarray(k,k+8),slot*8);slotGroups[slot++]=variant;}});
+      groundCull.setInstances(block*groundBlock,floats,slotGroups);groundResident.set(patch,block);
+    }
+    groundStats.resident=groundResident.size;
+  }
   const treeMeshes=Array.from({length:3},(_,lod)=>Array.from({length:TREE_VARIANTS},(_,variant)=>{
     const data=treeRenderGeometry(variant,lod);let opaqueEnd=0;
     while(opaqueEnd<data.length&&data[opaqueEnd+6]!==2)opaqueEnd+=TREE_VERTEX_FLOATS*3;
@@ -726,81 +755,35 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     return {opaque:part(data.subarray(0,opaqueEnd),`tree wood/canopy ${variant} detail ${lod}`),
       leaves:part(data.subarray(opaqueEnd),`tree leaves ${variant} detail ${lod}`)};
   }));
-  const treeBatches=Array.from({length:3*TREE_VARIANTS},(_,id)=>({
-    buffer:null,capacity:0,label:`tree instances ${id}`,data:[],count:0,
-  }));
-  const previousLods=new Map();const lodStats={near:0,middle:0,far:0,budgetOverflow:0};
-  let lastCamera=null,lastView=null,lastPixels=null,currentPixelError=TREE_PIXEL_ERROR;
-  let lastPreparedCameraRef=null,lastPreparedViewRef=null;
+  let treeCull=null;
+  // Rebuilt whenever the stand changes. Every tree could show at any detail, so each bucket holds its variant.
+  function installTrees(next){
+    treeCull?.destroy();treeCull=null;
+    const count=next.length/8;if(!count)return;
+    const groupOf=new Uint32Array(count),perVariant=new Array(TREE_VARIANTS).fill(0);
+    for(let id=0;id<count;id++){const variant=Math.min(TREE_VARIANTS-1,Math.floor(next[id*8+5]*TREE_VARIANTS));groupOf[id]=variant;perVariant[variant]++;}
+    const counts=part=>Array.from({length:3*TREE_VARIANTS},(_,bucket)=>treeMeshes[Math.floor(bucket/TREE_VARIANTS)][bucket%TREE_VARIANTS][part].count);
+    treeCull=createSceneryCull({device,pipeline:treeCullPipeline,frameUBO,label:'trees',capacity:count,
+      bucketCapacities:Array.from({length:3*TREE_VARIANTS},(_,bucket)=>perVariant[bucket%TREE_VARIANTS]),vertexCounts:[counts('opaque'),counts('leaves')]});
+    treeCull.setInstances(0,next,groupOf);treeCull.setPixelError(currentPixelError);
+  }
+  let currentPixelError=TREE_PIXEL_ERROR;
+  let lastCamera=null,lastView=null;
   let importedCanopy=null;
   let checkCameraSectionStreaming=null;
   function updateTrees(camera,viewProjection){
-    if(camera&&camera===lastPreparedCameraRef&&viewProjection===lastPreparedViewRef&&lastCamera&&camera.x===lastCamera.x&&camera.y===lastCamera.y&&camera.z===lastCamera.z)return;
-    lastPreparedCameraRef=camera;lastPreparedViewRef=viewProjection;
-    if(Number.isFinite(camera?.pixelError)&&camera.pixelError>0){
+    if(Number.isFinite(camera?.pixelError)&&camera.pixelError>0&&camera.pixelError!==currentPixelError){
       currentPixelError=camera.pixelError;
       forestMass?.setPixelError?.(currentPixelError);
       forest?.setPixelError?.(currentPixelError);
+      groundCull.setPixelError(currentPixelError,isMobile&&currentPixelError>3.8?1.35:1);
+      treeCull?.setPixelError(currentPixelError);
     }
     checkCameraSectionStreaming?.(camera);
-    // Its stricter projection bound must not inherit the legacy tree batching
-    // cache's one-metre/view tolerance when crossing a three-pixel threshold.
     importedCanopy?.prepare(camera,viewProjection);
-    // The ship never stops moving, so an exact comparison here would rebuild these lists every
-    // frame. They are culled with a margin and stay good until the view has really turned or moved.
-    const sameView=(!viewProjection&&!lastView)||(viewProjection&&lastView&&!sceneryViewTurned(viewProjection,lastView,0)&&!sceneryViewTurned(viewProjection,lastView,1));
-    // The field of view is measured from a rotating vector, so it only ever matches approximately.
-    const pixels=[camera.screenHeight,camera.tanHalfFovY,currentPixelError];
-    const samePixels=lastPixels&&pixels.every((v,i)=>Math.abs(v-lastPixels[i])<=Math.abs(v)*1e-3);
-    if(lastCamera&&sameView&&samePixels&&Math.hypot(camera.x-lastCamera.x,camera.y-lastCamera.y,camera.z-lastCamera.z)<SCENERY_LIST_MOVE_M)return;
-    lastPixels=pixels;
-    lastCamera={x:camera.x,y:camera.y,z:camera.z};lastView=viewProjection?Array.from(viewProjection).slice(0,16):null;
-    lodStats.near=0;lodStats.middle=0;lodStats.far=0;lodStats.budgetOverflow=0;
-    for(const batch of treeBatches){batch.data=[];batch.count=0;}
-    const candidates=visibleForestIds(forestPatches,camera,viewProjection,SCENERY_LIST_MARGIN);
-    for(const tree of selectTreeLods(trees,{...camera,pixelError:currentPixelError},previousLods,undefined,candidates)){
-      const batch=treeBatches[tree.lod*TREE_VARIANTS+tree.variant];
-      batch.data.push(...trees.subarray(tree.id*8,tree.id*8+8));batch.count++;
-      lodStats[['far','middle','near'][tree.lod]]++;if(tree.qualityBudgetOverflow)lodStats.budgetOverflow++;
-    }
-    for(const batch of treeBatches)if(batch.count){
-      // Regional plant count bounds residency. Quality budgets must never
-      // overflow a fixed 96/512-instance buffer or silently lower detail.
-      if(batch.count>batch.capacity){
-        batch.buffer?.destroy();batch.capacity=Math.min(trees.length/8,Math.max(batch.count,Math.ceil(batch.capacity*1.5),32));
-        batch.buffer=device.createBuffer({size:batch.capacity*32,usage:GPUBufferUsage.VERTEX|GPUBufferUsage.COPY_DST,label:batch.label});
-      }
-      device.queue.writeBuffer(batch.buffer,0,new Float32Array(batch.data));
-    }
-    for(const batch of groundBatches){batch.data=[];batch.count=0;}
-    const groundNow=new Set();groundStats.resident=0;groundStats.rocks=0;groundStats.grass=0;groundStats.triangles=0;
-    for(const id of visibleForestIds(groundPatches,camera,viewProjection,SCENERY_LIST_MARGIN)){
-      const patch=groundPatches[id];
-      const groundCullScale=isMobile&&currentPixelError>3.8?1.35:.88;
-      if(projectedGroundExtent(...patch.centre,GROUND_COVER.maxExtent,camera,patch.radius)<currentPixelError*groundCullScale)continue;
-      const instances=groundCoverInstances(patch,activeRegion,groundSample,biome);groundStats.resident++;
-      for(let variant=0;variant<GROUND_COVER.variants;variant++){
-        if(variant>=2&&projectedGroundExtent(...patch.centre,3.3,camera,patch.radius)<currentPixelError*(isMobile?1.45:.88))continue;
-        const data=instances[variant],batch=groundBatches[variant];
-        for(let i=0;i<data.length;i+=8){
-          const key=id+':'+variant+':'+i,error=groundCoverError(data[i],data[i+1],data[i+2],data[i+3],data[i+4],camera);
-          // Hysteresis retains small visible props a little longer; an omitted
-          // prop never exceeds the three-pixel geometric extent threshold.
-          if(!groundCoverVisible(error,previousGround.has(key),currentPixelError))continue;
-          groundNow.add(key);batch.data.push(...data.subarray(i,i+8));batch.count++;
-        }
-      }
-    }
-    previousGround.clear();for(const key of groundNow)previousGround.add(key);
-    for(let variant=0;variant<groundBatches.length;variant++){
-      const batch=groundBatches[variant];if(!batch.count)continue;
-      if(batch.count>batch.capacity){
-        batch.buffer?.destroy();batch.capacity=Math.min(groundPatches.length*(GROUND_COVER.grassPerPatch+GROUND_COVER.rocksPerPatch),Math.max(batch.count,Math.ceil(batch.capacity*1.5),32));
-        batch.buffer=device.createBuffer({size:batch.capacity*32,usage:GPUBufferUsage.VERTEX|GPUBufferUsage.COPY_DST,label:batch.label});
-      }
-      device.queue.writeBuffer(batch.buffer,0,new Float32Array(batch.data));
-      groundStats[variant<2?'rocks':'grass']+=batch.count;groundStats.triangles+=batch.count*groundMeshes[variant].count/3;
-    }
+    updateGroundResidency(camera);
+    lastCamera=camera;lastView=viewProjection;
+
   }
   const bind=(pipe,entries)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:entries.map(([binding,resource])=>({binding,resource}))});
   const resources=[[0,{buffer:frameUBO}],[1,transView],[2,skyView],[3,sampler],[4,envCubeView],[5,lighting.createView()],[6,{buffer:uniform}],[7,albedo.createView()],[8,landSampler],[9,biomeTexture.createView()],[10,leafTexture.createView()],[11,{buffer:leafMean}]];
@@ -825,7 +808,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const [canopyPack,forestPack]=await Promise.all([canopyPromise,forestPromise]);
   canopyTrees=canopyPack?excludeCanopyRoots(originalTrees,canopyPack.manifest):originalTrees;
   trees=forestPack?new Float32Array(0):canopyTrees;
-  forestPatches=createForestPatches(trees);
+  installTrees(trees);
   if(canopyPack)importedCanopy=await createCanopyRenderer({device,module,resources,clouds,format,samples,pack:canopyPack,mode:canopyMode});
   const streamMaxRoots=isMobile?10000:56000;
   const activeForestPack=proceduralPack&&forestPack?retargetForestPackToProcedural(forestPack,proceduralPack,groundSample,{isMobile,maxRootCapacity:streamMaxRoots,climateProfile:activeClimate}):forestPack;
@@ -1064,7 +1047,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     updateRegionalElevationGrid();
     if(forest&&forestPack){
       trees=new Float32Array(0);
-      forestPatches=[];
+      installTrees(trees);
       const extraSections=Array.from(loadedSections.values());
       proceduralPack.region=activeRegion;
       proceduralPack.heights=heights;
@@ -1077,7 +1060,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       );
       forest.updatePack(nextForestPack,regionalElevationData??heights,getRegionalOcclusionRegion());
       lastCamera=null;
-      lastPreparedCameraRef=null;
       return;
     }
     const baseTrees=canopyTrees;
@@ -1096,9 +1078,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       }
     }
     trees=merged;
-    forestPatches=createForestPatches(trees);
+    installTrees(trees);
     lastCamera=null;
-    lastPreparedCameraRef=null;
   }
 
   async function processSectionStreamQueue(){
@@ -1280,6 +1261,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       proceduralPack.vegetation=upgradedPack.vegetation;
       canopyTrees=upgradedPack.vegetation.trees||canopyTrees;
       trees=forest?[]:canopyTrees;
+      installTrees(trees);
     }
     if(upgradedPack.rawHeights)proceduralPack.rawHeights=upgradedPack.rawHeights;
     heights.set(upgradedPack.heights);
@@ -1309,9 +1291,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
 
     groundPatches=createGroundCoverPatches(activeRegion,groundSample,null);
     groundStats.patches=groundPatches.length;
-    previousGround.clear();
+    clearGroundResidency();
     lastCamera=null;
-    lastPreparedCameraRef=null;
     tick=0;
 
     resetStreamedSections();
@@ -1463,14 +1444,14 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
 
   return {
     waterGroup:pipe=>coastalField.waterGroup(pipe),
+    get turbidityScale(){return coastalTurbidityScale(activeRegion.latitude??0,activeRegion.coastalArchetype);},
     get triangles(){return (mesh.indices.length+(fineMesh?.indices.length??0))/3;},
     get trees(){return trees.length/8+(forest?.stats.roots??0);},
     get treeData(){return trees;},
-    forestPatches:forestPatches.length,
     farTreeTriangles:treeMeshes[0].map(mesh=>mesh.opaque.count/3),
-    lodStats,groundStats,groundTriangles:groundMeshes.map(mesh=>mesh.count/3),canopyStats,forestStats,canopyInspectionURL:canopyInspectionLink,
+    groundStats,groundTriangles:groundMeshes.map(mesh=>mesh.count/3),canopyStats,forestStats,canopyInspectionURL:canopyInspectionLink,
     prepare:updateTrees,
-    setPixelError(next){if(Number.isFinite(next)&&next>0){currentPixelError=next;forestMass?.setPixelError?.(next);forest?.setPixelError?.(next);}},
+    setPixelError(next){if(Number.isFinite(next)&&next>0){currentPixelError=next;forestMass?.setPixelError?.(next);forest?.setPixelError?.(next);groundCull.setPixelError(next,isMobile&&next>3.8?1.35:1);treeCull?.setPixelError(next);}},
     nearStats:{loaded:!!nearTile,error:nearFailure,domain:nearTile?.manifest.domain??null,triangles:(fineMesh?.indices.length??0)/3},
     height:(x,z)=>heightSample(x-worldOffset.x,z-worldOffset.z),
     groundSample:(x,z)=>groundSample(x-worldOffset.x,z-worldOffset.z),
@@ -1525,7 +1506,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       }
       worldOffset.x=0;worldOffset.z=0;
       writeNearDomainUniform();
-      lastCamera=null;lastPreparedCameraRef=null;
+      lastCamera=null;
       return {dx,dz};
     },
     dispose(){
@@ -1544,9 +1525,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       if(nearAlbedo&&nearAlbedo!==albedo)nearAlbedo?.destroy?.();
       biomeTexture?.destroy?.();leafTexture?.destroy?.();leafMean?.destroy?.();
       for(const g of groundMeshes)g.buffer?.destroy?.();
-      for(const b of groundBatches)b.buffer?.destroy?.();
+      groundCull.destroy();
       for(const lod of treeMeshes)for(const v of lod){v.opaque?.buffer?.destroy?.();v.leaves?.buffer?.destroy?.();}
-      for(const b of treeBatches)b.buffer?.destroy?.();
+      treeCull?.destroy();
       importedCanopy?.destroy?.();
       forest?.destroy?.();
       forestMass?.destroy?.();
@@ -1629,7 +1610,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
               }
             }
           }
-          if(treeChanged){lastCamera=null;updated=true;}
+          if(treeChanged){installTrees(trees);updated=true;}
         }
       }
       return updated;
@@ -1656,6 +1637,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     },
     encode(pass,changed=false,frame=null){
       if(frame)coastalField.encode(pass,frame);
+      groundCull.encode(pass);
+      treeCull?.encode(pass);
       forestMass?.encode(pass);
       forest?.encode(pass);
       if((tick++%8)!==0&&!changed)return;
@@ -1682,9 +1665,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       }
       if(submergedGround){
         submergedGround.bind(pass,above);pass.setBindGroup(0,submergedGroundGroup);
-        for(let i=0;i<groundBatches.length;i++)if(groundBatches[i].count){
-          pass.setVertexBuffer(0,groundMeshes[i].buffer);pass.setVertexBuffer(1,groundBatches[i].buffer);pass.draw(groundMeshes[i].count,groundBatches[i].count);
-        }
+        for(let i=0;i<groundMeshes.length;i++)groundCull.draw(pass,i,0,groundMeshes[i].buffer);
       }
     },
     draw(pass,camera={x:0,y:6,z:0},viewProjection=null){
@@ -1702,9 +1683,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       // Opaque ground props have no cutout/depth reconstruction and no cloud
       // ray march per blade. They remain in Apple's opaque visibility path.
       pass.setPipeline(groundPipe);pass.setBindGroup(0,groundGroup);
-      for(let i=0;i<groundBatches.length;i++)if(groundBatches[i].count){
-        pass.setVertexBuffer(0,groundMeshes[i].buffer);pass.setVertexBuffer(1,groundBatches[i].buffer);pass.draw(groundMeshes[i].count,groundBatches[i].count);
-      }
+      for(let i=0;i<groundMeshes.length;i++)groundCull.draw(pass,i,0,groundMeshes[i].buffer);
       // Draw solid crowns/wood before cutout leaves for Apple hidden-surface
       // removal. The far tier has no alpha foliage or expensive bark fallback.
       for(const[pipe,groupIndex,part]of[[opaqueTreePipe,1,'opaque'],[treePipe,2,'leaves']]){
@@ -1713,8 +1692,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         if(part==='opaque'){forestMass?.drawOpaque(pass);importedCanopy?.drawOpaque(pass);forest?.drawOpaque(pass);}
         pass.setPipeline(pipe);pass.setBindGroup(0,groups[groupIndex]);pass.setBindGroup(1,cloudGroups[groupIndex]);
         for(let lod=0;lod<3;lod++)for(let variant=0;variant<TREE_VARIANTS;variant++){
-          const batch=treeBatches[lod*TREE_VARIANTS+variant],mesh=treeMeshes[lod][variant][part];if(!batch.count||!mesh.count)continue;
-          pass.setVertexBuffer(0,mesh.buffer);pass.setVertexBuffer(1,batch.buffer);pass.draw(mesh.count,batch.count);
+          treeCull?.draw(pass,lod*TREE_VARIANTS+variant,part==='opaque'?0:1,treeMeshes[lod][variant][part].buffer);
         }
       }
       importedCanopy?.drawCutout(pass);

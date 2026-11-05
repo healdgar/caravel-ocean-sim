@@ -4,6 +4,8 @@
 //   npm run perf                                     the scene as it stands
 //   npm run perf -- '[["no crew",{"crew":"0"}]]'     rows of [label, URL parameters]
 //   npm run perf -- --tris                           also count triangles per pipeline
+//   npm run perf -- --uploads                        what the CPU sends the GPU each frame, by buffer
+//   npm run perf -- --profile                        JavaScript time per function
 // PANEL=1 adds the game's own GPU pass spans. HEADED=1 shows the window.
 import {once} from 'node:events';
 import {execSync} from 'node:child_process';
@@ -11,7 +13,7 @@ import {chromium} from 'playwright';
 import {createDevServer} from '../server.mjs';
 import {coastalRegionStageURL} from '../js/landfall.js';
 
-const args=process.argv.slice(2),wantTriangles=args.includes('--tris');
+const args=process.argv.slice(2),wantTriangles=args.includes('--tris'),wantUploads=args.includes('--uploads'),wantProfile=args.includes('--profile');
 const rows=JSON.parse(args.find(a=>a.startsWith('['))??'[["base",{}]]');
 const SAMPLE_SECONDS=6,SETTLE_MS=5000,CPU_LIMITED_MS=14,GPU_BUSY_PERCENT=85;
 const server=createDevServer();server.listen(0,'127.0.0.1');await once(server,'listening');
@@ -48,6 +50,12 @@ function instrument(){
   const indirect=pass.drawIndexedIndirect;pass.drawIndexedIndirect=function(b,o){if(window.perfCapture)draws.push({label:pipelines.get(this),buffer:b,offset:o});return indirect.call(this,b,o);};
   const createBuffer=GPUDevice.prototype.createBuffer;GPUDevice.prototype.createBuffer=function(desc){return createBuffer.call(this,/indirect/i.test(desc.label||'')?{...desc,usage:desc.usage|GPUBufferUsage.COPY_SRC}:desc);};
   const request=GPUAdapter.prototype.requestDevice;GPUAdapter.prototype.requestDevice=async function(...a){return window.perfDevice=await request.apply(this,a);};
+  const uploads=(window.perfUploads=new Map());
+  const writeBuffer=GPUQueue.prototype.writeBuffer;GPUQueue.prototype.writeBuffer=function(buffer,offset,data,dataOffset=0,size){
+    const row=uploads.get(buffer.label||'unlabelled')??{bytes:0,calls:0};uploads.set(buffer.label||'unlabelled',row);
+    const unit=ArrayBuffer.isView(data)?data.BYTES_PER_ELEMENT:1;row.bytes+=(size??((data.length??data.byteLength)-dataOffset))*unit;row.calls++;
+    return size===undefined?writeBuffer.call(this,buffer,offset,data,dataOffset):writeBuffer.call(this,buffer,offset,data,dataOffset,size);
+  };
 }
 // Everything drawn over two frames, reading indirect arguments back from the GPU.
 const countTriangles=page=>page.evaluate(async()=>{
@@ -80,6 +88,9 @@ for(const [label,extra] of rows){
   await page.waitForFunction(()=>window.oceanStartup?.state==='ready'||window.oceanStartup?.state==='failed',null,{timeout:180000,polling:200});
   if(process.env.PANEL)await page.evaluate(()=>document.getElementById('performance-toggle')?.click());
   await page.waitForTimeout(SETTLE_MS);
+  const session=wantProfile?await page.context().newCDPSession(page):null;
+  if(session){await session.send('Profiler.enable');await session.send('Profiler.setSamplingInterval',{interval:500});await session.send('Profiler.start');}
+  await page.evaluate(()=>perfUploads.clear());
   const cpuBefore=cpuSeconds(),samples=[],sampling=setInterval(()=>samples.push(gpuCounters()),400);
   const result=await page.evaluate(seconds=>new Promise(resolve=>{
     perfWork.length=0;const frames=[];let last=performance.now();const start=last;
@@ -97,6 +108,19 @@ for(const [label,extra] of rows){
   if(process.env.PANEL){
     const text=await page.evaluate(()=>document.getElementById('gpu-profile')?.textContent??document.querySelector('[id*=profile]')?.textContent??'');
     console.log(' '.repeat(20),text.split('\n').filter(line=>/ ms$/.test(line)&&!/ 0\.00 ms/.test(line)).map(line=>line.replace(/\s+/g,' ').replace('GPU pass timing','')).join(' | '));
+  }
+  if(wantUploads){
+    const frames=result.fps*SAMPLE_SECONDS,uploads=await page.evaluate(()=>[...perfUploads].map(([label,row])=>[label,row.bytes,row.calls]));
+    const total=uploads.reduce((sum,[,bytes])=>sum+bytes,0)/frames/1024;
+    console.log(' '.repeat(20),`${total.toFixed(0)} KB uploaded per frame:`);
+    for(const [name,bytes,calls] of uploads.sort((a,b)=>b[1]-a[1]).slice(0,16))console.log(' '.repeat(20),`${(bytes/frames/1024).toFixed(1).padStart(8)} KB ${(calls/frames).toFixed(1).padStart(6)} writes  ${name}`);
+  }
+  if(session){
+    const {profile}=await session.send('Profiler.stop'),nodes=new Map(profile.nodes.map(n=>[n.id,n])),self=new Map();
+    profile.samples.forEach((id,i)=>{const f=nodes.get(id).callFrame;if(/^\((idle|root)\)$/.test(f.functionName))return;const key=`${f.functionName||'(anonymous)'} ${f.url.split('/').pop()}:${f.lineNumber+1}`;self.set(key,(self.get(key)??0)+(profile.timeDeltas[i]??0));});
+    const frames=result.fps*SAMPLE_SECONDS;
+    console.log(' '.repeat(20),'JavaScript per frame, by function:');
+    for(const [name,micros] of [...self].sort((a,b)=>b[1]-a[1]).slice(0,18))console.log(' '.repeat(20),`${(micros/1000/frames).toFixed(2).padStart(6)} ms  ${name}`);
   }
   if(wantTriangles){
     const totals=Object.entries(await countTriangles(page)).sort((a,b)=>b[1].triangles-a[1].triangles);

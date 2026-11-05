@@ -25,9 +25,12 @@ const order = ['js/vendor/astronomy-engine.js', 'js/star-catalog.js', 'js/astron
 order.splice(order.indexOf('js/vegetation.js')+1,0,'js/indigenous-sovereignty.js','js/cairn-primitives.js','js/coastal-world.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/canopy-scenery.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/coastal-field.js');
+order.splice(order.indexOf('js/terrain.js'),0,'js/sea-colour.js');
+order.splice(order.indexOf('js/terrain.js'),0,'js/scenery-cull.js');
 order.splice(order.indexOf('js/gltf.js'),0,'js/crew-lod.js');
 order.splice(order.indexOf('js/crew-work.js'),0,'js/crew-navigation.js','js/crew-motion.js');
 order.splice(order.indexOf('js/crew-pose.js'),0,'js/crew-physics.js');
+order.splice(order.indexOf('js/crew.js'),0,'js/crew-clip-pose.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/terrain-near.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/forest-scenery.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/vendor/forest-meshopt.js','js/forest-mass.js');
@@ -42,6 +45,7 @@ order.splice(order.indexOf('js/main.js'),0,'js/wgsl-prune.js','js/gpu-program-ca
 order.splice(order.indexOf('js/main.js'),0,'js/career-save.js','js/career-ui.js','js/career-era.js','js/career-trade.js','js/career-port.js');
 order.splice(order.indexOf('js/gunnery-control.js'),0,'js/hull-holes.js','js/vessel-damage.js');
 order.splice(order.indexOf('js/main.js'),0,'js/wgsl/hull-flood.js','js/hull-flood.js');
+order.splice(order.indexOf('js/main.js'),0,'js/sea-shadows.js');
 order.splice(order.indexOf('js/crew.js'),0,'js/crew-wounds.js');
 order.splice(order.indexOf('js/crew.js'),0,'js/crew-overboard.js');
 order.splice(order.indexOf('js/wgsl/vessel-pose.js'),0,'js/wgsl/rig-surfaces.js');

@@ -21,11 +21,12 @@ function instrumentCanopyRuntime(){
   const request=GPUAdapter.prototype.requestDevice;GPUAdapter.prototype.requestDevice=async function(...args){const device=await request.apply(this,args);r.device=device;device.addEventListener('uncapturederror',event=>r.errors.push(event.error.message));device.lost.then(info=>r.lost=info.message);return device;};
   const create=GPUDevice.prototype.createBuffer;GPUDevice.prototype.createBuffer=function(desc){const buffer=create.call(this,desc);r.buffers.push({label:desc.label||'',size:desc.size});return buffer;};
   const write=GPUQueue.prototype.writeBuffer;GPUQueue.prototype.writeBuffer=function(buffer,offset,data,...rest){
-    if(/^tree instances /.test(buffer.label)&&offset===0&&data instanceof Float32Array)r.treeWrites[buffer.label]=Array.from(data);
+    if(buffer.label==='trees instances'&&offset===0&&data instanceof Float32Array)r.treeWrites[buffer.label]=Array.from(data);
     return write.call(this,buffer,offset,data,...rest);
   };
   const labels=new WeakMap(),set=GPURenderPassEncoder.prototype.setPipeline;GPURenderPassEncoder.prototype.setPipeline=function(pipeline){labels.set(this,pipeline.label);return set.call(this,pipeline);};
   const draw=GPURenderPassEncoder.prototype.draw;GPURenderPassEncoder.prototype.draw=function(vertices,instances=1,...rest){const label=labels.get(this);r.draws[label]??={vertices:0,instances:0};r.draws[label].vertices+=vertices*instances;r.draws[label].instances+=instances;return draw.call(this,vertices,instances,...rest);};
+  const drawIndirect=GPURenderPassEncoder.prototype.drawIndirect;GPURenderPassEncoder.prototype.drawIndirect=function(...args){const label=labels.get(this);r.draws[label]??={vertices:0,instances:0};r.draws[label].instances+=1;return drawIndirect.apply(this,args);};
   const configs=new WeakMap(),configure=GPUCanvasContext.prototype.configure;GPUCanvasContext.prototype.configure=function(desc){configs.set(this,desc);return configure.call(this,desc);};
   GPUCanvasContext.prototype.getCurrentTexture=function(){const desc=configs.get(this),width=this.canvas.width,height=this.canvas.height;if(!r.target||r.target.width!==width||r.target.height!==height){r.target?.destroy();r.target=desc.device.createTexture({label:'canopy runtime composite',size:[width,height],format:desc.format,usage:desc.usage|GPUTextureUsage.COPY_SRC});}return r.target;};
   r.image=async()=>{

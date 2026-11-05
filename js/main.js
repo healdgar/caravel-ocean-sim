@@ -46,6 +46,7 @@ import { createChartDrawer } from './voyage/chart-drawer.js';
 import { islandCoordinates } from './terrain-model.js';
 import { greatCircleKm } from './voyage/ocean-climate.js';
 import { createGPUProfiler, createFrameStages } from './profiler.js';
+import { deepSeaColour } from './sea-colour.js';
 import { measureIsolatedGPUStage } from './gpu-benchmark.js';
 import { createAdaptiveResolution, createAdaptivePolygons, POLYGON_COMFORT } from './resolution.js';
 import { bindVesselModel, copyVessel, createVesselProbeState, acceptVesselProbe, stepVessel } from './vessels.js';
@@ -55,6 +56,7 @@ import {withPooledFleetWakes} from './wgsl/fleet-wakes.js';
 import {SCENE_WAKE_SAMPLE} from './wgsl/surface-coupling.js';
 import {withSceneShadowCount, SHADOW_CAST} from './wgsl/shadows.js';
 import { createVesselShadows, createSceneShadows } from './shadows.js';
+import { createSeaShadows } from './sea-shadows.js';
 import { createWaterInteraction } from './interaction.js';
 import { WATER_CONTACTS, WAKE_UPDATE, SPRAY_UPDATE, SHEET_UPDATE, WATER_EFFECTS } from './wgsl/interaction.js';
 import { SCENE_DECK_UPDATE, DECK_RENDER } from './wgsl/deck.js';
@@ -358,6 +360,7 @@ async function main() {
   const skyView = skyLUT.createView();
   const MSAA = 4;
   const AUTO_START_PIXELS = 2.5e6;
+  const SEA_LATITUDE_UNKNOWN = 30;
   const POLYGONS_YIELD_AT = 0.5;
   const HDR = 'rgba16float';
 
@@ -539,6 +542,7 @@ async function main() {
   const rowingSurfaceEvents=createRowingSurfaceEvents(surfaceWaves);
   const shipAssets=createShipAssetCache(),renderAssets=new Map();
   const sceneShadows=createSceneShadows(device,fleetCount),wakePool=createFleetWakePool(device,fleetCount);
+  const seaShadows=await createSeaShadows({device,computePipe,sceneShadows,count:fleetCount});
   const fleetHullUBO=mkBuf(96*fleetCount,GU.UNIFORM|GU.COPY_DST,'scene hull masks'),fleetHullData=new Float32Array(24*fleetCount);
   const oakSampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear',
     addressModeU: 'repeat', addressModeV: 'repeat', maxAnisotropy: 8 });
@@ -656,7 +660,7 @@ async function main() {
     fullArr(foamW[i]),{buffer:sunVisBuf},{buffer:fleetHullUBO},{buffer:wakePool.uniform},wakePool.views[w&1],interaction.sampler,
     null,null,{buffer:surfaceWaves.uniform},surfaceWaves.views[w>>1]];
   // Automatic layouts tie bind groups to one pipeline, so each variant of the ocean keeps its own.
-  const oceanVariant=([pipe,depthPipe])=>({pipe,depthPipe,shadows:sceneShadows.bind(pipe),optics:null,
+  const oceanVariant=([pipe,depthPipe])=>({pipe,depthPipe,shadows:sceneShadows.bindSea(pipe,seaShadows.view),optics:null,
     groups:[0,1].map(i=>wakeIndices.map(w=>device.createBindGroup({label:'ocean'+i,layout:pipe.getBindGroupLayout(0),
       entries:oceanResources(i,w).map((resource,binding)=>({binding,resource})).filter(e=>e.resource!==null&&(!OCEAN_DEPTH||e.binding!==12))}))),
     depthGroups:OCEAN_DEPTH?wakeIndices.map(w=>device.createBindGroup({label:'ocean visibility',layout:depthPipe.getBindGroupLayout(0),
@@ -1828,6 +1832,11 @@ async function main() {
     }
   }
 
+  // Where the ship really is: the voyage's position, else the sky's own observer.
+  function seaLatitude(){
+    const voyageLatitude=voyageCtl?.voyage?.true?.lat;
+    return Number.isFinite(voyageLatitude)?voyageLatitude:terrain?.region?.latitude??astronomy.state?.observer?.latitude??SEA_LATITUDE_UNKNOWN;
+  }
   function writeFrame(time) {
     const aspect = W / H;
     const tanY = Math.tan(cam.fovY * 0.5), tanX = tanY * aspect;
@@ -1876,9 +1885,10 @@ async function main() {
     f[72] = P.haze; f[73] = Math.max(cam.y, 10) * 0.001;
     const strike=weather.strike,dx=strike?strike.x-cam.x:0,dz=strike?strike.z-cam.z:1,range=Math.hypot(dx,dz)||1;
     f[74]=dx/range;f[75]=dz/range;
-    // deep water body scatter colour (greenish coastal water), unresolved slope variance
-    f[76] = 0.016 * P.turbidity; f[77] = 0.080 * P.turbidity; f[78] = 0.096 * P.turbidity; f[79] = 0.0024;
-    f[80] = 0.035; f[81] = 0.120; f[82] = 0.085; f[83] = 2.6;
+    // deep water body scatter colour for this latitude, unresolved slope variance
+    const seaColour=deepSeaColour(seaLatitude());
+    f[76] = seaColour[0] * P.turbidity; f[77] = seaColour[1] * P.turbidity; f[78] = seaColour[2] * P.turbidity; f[79] = 0.0024;
+    f[80] = 0.030; f[81] = 0.105; f[82] = 0.100; f[83] = 2.6;
     f[84] = 0.45; f[85] = 1.0; f[86] = Math.min(1,P.foam); f[87] = 1.0;
     f[88] = (5.802e-3 + 4.40e-3 * P.haze) * 1e-3;
     f[89] = (13.558e-3 + 4.40e-3 * P.haze) * 1e-3;
@@ -1886,7 +1896,7 @@ async function main() {
     f[91] = 1.1e-4;
     f[92]=weather.intensity;f[93]=weather.type;f[94]=weather.flash;f[95]=weather.time;
     device.queue.writeBuffer(frameUBO, 0, f);
-    opticsData[0]=P.turbidity;opticsData[1]=qs.get('waterOptics')==='0'?0:1;
+    opticsData[0]=P.turbidity*(terrain?.turbidityScale??1);opticsData[1]=qs.get('waterOptics')==='0'?0:1;
     opticsData[2]=waterH;opticsData[3]=1;
     device.queue.writeBuffer(opticsUBO,0,opticsData);
   }
@@ -3576,6 +3586,8 @@ async function main() {
     }
     surfaceWaves.encode(cp);
     for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter)v.pose?.encode(cp,v.boat.showProw);
+    for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter&&!v.boat.damage?.sunk)v.crew?.encodePose(cp);
+    fortSoldiers?.encodePose(cp);
     for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter)v.interaction.encode(cp,wakePool.next);
     wakePool.commit();
     hullContactProbe.encode(cp);
@@ -3903,6 +3915,7 @@ async function main() {
     const gunTransparent=gunEffects.transparentActive;
     mainPass.colorAttachments[0].resolveTarget=hdrView;
     for(const [i,v] of vessels.entries())if((!v.bakedWreck||skyChanged)&&!v.dormantEncounter)v.shadows.encode(enc,profiler,v.boat.damage?.sunk?null:v.crew?.drawShadow,i?v.id+' ':'');
+    seaShadows.encode(enc,i=>{const v=vessels[i];return (!v.bakedWreck||skyChanged)&&!v.dormantEncounter&&v.shadows.data[19]>0;});
     const terrainCamera={x:frameF[16],y:frameF[17],z:frameF[18],screenHeight:H,pixelError:polygons.pixelError,
       tanHalfFovY:Math.hypot(frameF[24],frameF[25],frameF[26]),forward:frameF.subarray(28,31)};
     frameStages.mark('GPU commands');
@@ -3952,6 +3965,8 @@ async function main() {
       rp.setVertexBuffer(0,v.vertexBuffer);if(v.pose)rp.setVertexBuffer(1,v.pose.buffer);rp.setIndexBuffer(v.render.indexBuffer,'uint32');rp.drawIndexed(v.asset.indices.length);
     };
     for(const v of hulls)if(!hullBelongsDamaged(v))drawHull(v,v.render.pipeline,v.bindGroup,v.lighting);
+    for(const v of hulls)if(!v.boat.damage?.sunk)v.crew?.drawOpaque(rp);
+    fortSoldiers?.draw(rp);
     frameStages.mark('GPU commands');
     terrain?.draw(rp,terrainCamera,frameF);
     frameStages.mark('Scenery');
@@ -3990,7 +4005,7 @@ async function main() {
     }
     if(drawProw){
       for(const v of hulls){
-        if(!v.boat.damage?.sunk)v.crew?.draw(rp);
+        if(!v.boat.damage?.sunk)v.crew?.drawCut(rp);
         if(!v.bakedWreck)v.anchorRenderer.draw(rp);
         if(!v.boat.damage?.sunk)v.flood?.draw(rp);
       }
@@ -4002,7 +4017,6 @@ async function main() {
       shipColorsRenderer?.updateMooringVertices(dockingBoarding.buildVertices());
       shipColorsRenderer?.draw(rp,vessels.length);
     }
-    fortSoldiers?.draw(rp);
     if(drawProw)for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter&&v.boat.showProw)v.interaction.draw(rp);
     dolphins.draw(rp);marineLife.draw(rp);gunEffects.drawProjectiles(rp);spindrift.draw(rp);if(!gunTransparent)weatherRenderer.draw(rp);
     rp.end();

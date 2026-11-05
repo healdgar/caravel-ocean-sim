@@ -114,7 +114,7 @@ export function createCrewLODs(model){
 export const CREW_CULL_DISTANCE=420;
 const CREW_LOD_TAN_HALF_FOV=Math.tan(29*Math.PI/180);
 // How much nearer a narrow lens brings a body than the ordinary view would.
-function crewLodZoom(camera){
+export function crewLensZoom(camera){
   const fovY=camera?.fovY;
   return Number.isFinite(fovY)&&fovY>0?Math.max(1,CREW_LOD_TAN_HALF_FOV/Math.tan(fovY*.5)):1;
 }
@@ -126,24 +126,26 @@ export function selectCrewLOD(boat,camera=null){
   const bx=Number.isFinite(boat?.x)?boat.x:0,by=Number.isFinite(boat?.heave)?boat.heave:0,bz=Number.isFinite(boat?.z)?boat.z:0;
   const cy=Number.isFinite(camera.y)?camera.y:0;
   const distance=Math.hypot(camera.x-bx,cy-by,camera.z-bz);
-  const apparent=distance/crewLodZoom(camera);
+  const apparent=distance/crewLensZoom(camera);
   const mainTier=apparent<CREW_LOD_TIERS[0].maxDistance?0:apparent<CREW_LOD_TIERS[1].maxDistance?1:2;
   const shadowTier=Math.min(CREW_LOD_TIERS.length-1,mainTier+1);
   if(apparent>CREW_CULL_DISTANCE)return {mainTier,shadowTier,distance,culled:true};
   return {mainTier,shadowTier,distance};
 }
 
-// How many frames a sailor keeps a pose, by how far they appear from the eye. Each pose is a whole
-// skeleton solved in JavaScript. Their place on deck still moves every frame; only the limbs wait.
+// How many frames apart a sailor's skeleton is solved, by how far they appear from the eye. The GPU
+// blends between solves, so their limbs keep moving; anyone close is solved every frame.
 const CREW_POSE_EVERY_FRAME_M=10;
-const CREW_POSE_SECOND_FRAME_M=25;
-const CREW_POSE_THIRD_FRAME_M=50;
-const CREW_POSE_LONGEST_FRAMES=4;
+const CREW_POSE_MID_M=25;
+const CREW_POSE_FAR_M=50;
+const CREW_POSE_MID_FRAMES=3;
+const CREW_POSE_FAR_FRAMES=5;
+const CREW_POSE_LONGEST_FRAMES=8;
 export function crewPoseInterval(apparentMetres){
-  return apparentMetres<CREW_POSE_EVERY_FRAME_M?1:apparentMetres<CREW_POSE_SECOND_FRAME_M?2:apparentMetres<CREW_POSE_THIRD_FRAME_M?3:CREW_POSE_LONGEST_FRAMES;
+  return apparentMetres<CREW_POSE_EVERY_FRAME_M?1:apparentMetres<CREW_POSE_MID_M?CREW_POSE_MID_FRAMES:apparentMetres<CREW_POSE_FAR_M?CREW_POSE_FAR_FRAMES:CREW_POSE_LONGEST_FRAMES;
 }
 // How far from the eye a sailor appears, allowing for a narrow lens. Without a camera, right here.
-export function crewApparentDistance(position,boat,camera,zoom=crewLodZoom(camera)){
+export function crewApparentDistance(position,boat,camera,zoom=crewLensZoom(camera)){
   if(!camera||!Number.isFinite(camera.x)||!Number.isFinite(camera.z))return 0;
   const heading=(boat?.heading??0)*Math.PI/180,c=Math.cos(heading),sn=Math.sin(heading);
   const x=(boat?.x??0)+position[0]*c-position[2]*sn,z=(boat?.z??0)+position[0]*sn+position[2]*c,y=(boat?.heave??0)+position[1];
@@ -170,5 +172,20 @@ export function crewDrawRuns(people,tierOf){
     else{run={tier,first:i,count:1};runs.push(run);}
   }
   return runs;
+}
+
+// Who needs the shader that can cut fragments. Everyone within this distance of a first-person eye
+// fades from the sightline, and enough wounds leave torn cloth. Everyone else stays opaque.
+const CREW_FADE_REACH_M=6.5;
+const CREW_TORN_DAMAGE=0.45;
+export function crewNeedsCutShader(metresFromEye,firstPerson,woundAndScorch){
+  return (firstPerson&&metresFromEye<CREW_FADE_REACH_M)||woundAndScorch>CREW_TORN_DAMAGE;
+}
+
+// Beyond this a sailor's hands and feet are a few pixels, so baked clips alone will do. Someone
+// seated, fallen or just hurt still needs their own solved pose.
+const CREW_CLIP_ONLY_M=50;
+export function crewClipOnly(apparentMetres,sailor){
+  return apparentMetres>=CREW_CLIP_ONLY_M&&!sailor.seatedPose&&!sailor.pendingWounds?.length&&!((sailor.knockdownTimer??0)>0)&&sailor.casualtyState!=='fallen';
 }
 

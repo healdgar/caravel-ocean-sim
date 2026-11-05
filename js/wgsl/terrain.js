@@ -494,9 +494,15 @@ fn coastalWater(color:vec3f,p:vec2f,bed:f32,height:f32,foamLight:vec3f)->vec3f{
   // Deep/open water: the shallows weight and swash rim are both exactly zero
   // here (ocean height never approaches -58 m), so the result is the input.
   if(bed<=-58.0){return color;}
-  let shallows=smoothstep(-7.5,0.4,bed);
-  let sunlight=(sunIlluminance()*max(F.sunDir.y,0.0)+lunarIlluminance()*max(lunarDirection().y,0.0))/PI;
-  var col=mix(color,vec3f(0.042,0.175,0.155)*(sunlight+skyAtmo(vec3f(0,1,0))),shallows*0.30);
+  // Deep blue gives way with depth. Over clear tropical sand it runs through turquoise to pale
+  // aqua, as the sand starts to show through. Elsewhere shallows only turn a dull grey-green.
+  let clarity=coastalWindow.w;
+  let light=(sunIlluminance()*max(F.sunDir.y,0.0)+lunarIlluminance()*max(lunarDirection().y,0.0))/PI+skyAtmo(vec3f(0,1,0));
+  let shelf=smoothstep(-30.0,-7.0,bed);
+  let sand=smoothstep(-8.0,-0.6,bed);
+  var col=mix(color,vec3f(0.014,0.150,0.205)*light,shelf*0.82*clarity);
+  col=mix(col,vec3f(0.085,0.300,0.285)*light,sand*0.42*clarity);
+  col=mix(col,vec3f(0.030,0.082,0.072)*light,smoothstep(-12.0,-1.0,bed)*0.45*(1.0-clarity));
   let depth=height-bed;
   let swashRim=(1.0-smoothstep(0.02,0.32,abs(depth)))*smoothstep(-0.20,0.35,height)*(0.45+0.55*gnoise(p*0.22));
   return mix(col,foamLight,swashRim*0.42);
