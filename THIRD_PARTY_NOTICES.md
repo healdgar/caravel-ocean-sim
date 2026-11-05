@@ -77,9 +77,14 @@ unused procedural canopy material; the local LiDAR/imagery importer now replaces
 the rendered Saba relief and appearance. Coastline/skirt and vegetation adaptations
 remain authored. No Google/Apple imagery, code or proprietary map data is incorporated.
 
+## Tripo crew assets
+
+`assets/crew/sailor.glb` is a character generated with Tripo (tripo3d.ai) on paid API credits, then fitted
+to the Quaternius skeleton and clips below. Tripo's terms give paid users the rights to what they generate.
+
 ## Quaternius crew assets
 
-The male and female sailors adapt Quaternius Universal Base Characters and Universal
+The classic male and female sailors adapt Quaternius Universal Base Characters and Universal
 Animation Library (animations credited to Quaternius and Gonzalo Furnier), under
 CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/.
 

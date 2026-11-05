@@ -1,7 +1,11 @@
 # Crew assets
 
-`sailor.glb`: 993,696 bytes, 15,995 triangles, 65 joints; Idle, Walk and Brace
-clips.
+`sailor.glb`: the male crew body, generated with Tripo on paid API credits and fitted to the classic
+skeleton: 15,692 triangles, 8,342 vertices, 65 joints; Idle, Walk and Brace clips. Its file carries lighter
+levels of 4,327, 1,569 and 320 triangles.
+`sailor-classic.glb`: 993,696 bytes, 15,995 triangles, 65 joints; the same clips. Its skeleton and clips are
+what the male body is fitted to, and Indigenous men are built on it, because their dress re-sculpts its
+garment pieces.
 `sailor-female.glb`: 1,212,816 bytes, 18,720 triangles, 65 joints; the same clips,
 retargeted to the distinct female base mesh with tied hair.
 Each GLB contains all geometry, vertex colours, skeleton and animation.
@@ -26,7 +30,7 @@ pinned to `5821923af517ac5fdc82505faa92a0d575fc1b1a`. No code from that reposito
 is used or executed. Exact source paths and SHA-256 checksums are in
 `scripts/prepare-crew.mjs`.
 
-Rebuild from verified source data:
+Rebuild the classic bodies from verified source data:
 
 ```sh
 node scripts/prepare-crew.mjs /tmp/waterworld-crew --download
@@ -48,9 +52,26 @@ normals are recomputed and clothing/belt thickness reduced to match. The costume
 not a documented historical reconstruction. Ground contact is approximate;
 there is no foot IK or cloth simulation.
 
+## Fitting a generated body
+
+Generate and rig a character with Tripo using `--then "rig:spec=unreal"`, then fit it and bake its levels:
+
+```sh
+python scripts/fit-crew-body.py rigged.glb assets/crew/sailor-classic.glb assets/crew/sailor.glb
+node scripts/bake-crew-levels.mjs assets/crew/sailor.glb
+```
+
+The fit keeps our skeleton and clips. It also moves elbows and knees onto our joints, and draws limbs in to
+the classic thickness, because work poses were tuned on that body. The texture is baked to vertex colours
+and split into shirt, trousers, skin and hair, each stored as a departure from that garment's typical
+colour, so every sailor can wear their own while keeping the painted folds and faces. Shoes, belts and the
+whites of the eyes keep their paint. The generated sources are kept in `.tripo/`, which git ignores.
+
+Tripo's terms give paid users the rights to what they generate, including commercial use.
+
 ## Workwear refinement
 
-The active models remain the authored Quaternius crew. The Meshy replacement
+The classic bodies remain the authored Quaternius crew. The Meshy replacement
 experiment is shelved; its generated bodies and preparation scripts stay local
 under `.meshy/`, outside standalone builds.
 

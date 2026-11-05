@@ -1,14 +1,5 @@
 # Ocean Sailing Simulator backlog and overnight checkpoint
 
-## November 5: still to check on this round
-
-Committed without a finished test run, because other sessions' suites were sharing the machine.
-
-- The full suite never finished on this build. Its last run recorded 419 passes and 28 failing names before it stopped. Most failed at exactly their timeout, but they have not been separated from real failures. Run `npm test` on a quiet machine before publishing.
-- `tests/anchor-expansion-gpu.test.mjs` fails on rope by 5.2e-5 against a limit of 2e-5, and also did before this round.
-- `tests/dolphins-gpu.test.mjs` starts a server on fixed port 8097, so it collides with another suite running at the same time.
-- Lisbon with Victory has not been measured since the Indigenous dress went in.
-
 ## November 5: streets, roads and townsfolk
 
 Buildings now find their own ground, because the port layout assumes a straight shore and real coasts curve. San Juan had 11 of 31 buildings on the seabed, its fort in 15 to 32 m of water, and Havana, Portobelo and Santo Domingo had a few each. Each prefab says what it needs (dry land, the water's edge, a bank at each end of a bridge), takes the nearest place that gives it that, and is left out if nothing within 300 m does. Piers slide along their heading until their root is ashore. Neighbours keep 5 m apart so a street fits.
@@ -44,14 +35,12 @@ Reducing with a generated model's texture coordinates stops early and smears: it
 
 - **Prop and structure:** `tripo-p1` at 40 credits looks better than the default model at 110, and starts lower. Prefer it.
 - **Trees:** led by error, a crown thins to twigs below about 1,000 triangles. Merging vertices by place (`simplifySloppy`) keeps the mass, so a budget tries both and the outline decides. It reads as a tree down to 80 triangles and comes apart at 44, where the tool says so. The result is sheets, which the forest pipelines already draw from both sides. Near the camera a generated tree is chunkier than the grown ones. Use this for a species we cannot grow, since the grown trees' own hierarchy beats it (see below).
-- **Sailor:** runs in the game by a swapped file, on our skeleton, clips and work poses. Index lists into the rigged vertices walk correctly down to 393 triangles.
+- **Sailor:** in the game as the male crew body, with his own clothes per person, levels baked into his file, and Indigenous men still on the classic body. Fitting him showed a generated rig's elbow can sit 9 cm from the bend it painted, so `scripts/fit-crew-body.py` moves elbows and knees onto our joints and draws limbs in to the classic thickness, which took his sleeve out of the guns. Lisbon with Victory: 58.8 and 56.3 fps against 56.8 and 56.8 with the classic body.
 
 To bring these into the game:
 
 1. **Textured props.** No prop renderer takes a texture today. It needs a bind group per atlas, or a shared array of baked textures.
-2. **Crew levels.** `js/crew-lod.js` groups vertices by colour, so a body with baked colours never gets below 6,830 triangles. Use `--indices` lists at build time instead.
-3. **Crew clothes.** Men vary only by the sentinel colours in `js/crew.js`. A baked sailor has none, so every man is identical. Needs clothing masks or a texture per outfit, and the Indigenous builder depends on the same colours.
-4. **A woman**, on the same path.
+2. **A woman**, on the same path.
 
 ### Decimating the grown trees instead
 

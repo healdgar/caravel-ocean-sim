@@ -86,13 +86,21 @@ function decimateCrewIndices(vertices,indices,vertexCount,animator,cellSize){
 }
 
 export function createCrewLODs(model){
-  const {vertices,indices,vertexCount,animator}=model;
+  const {vertices,indices,vertexCount,animator,levels}=model;
   const baseTriangles=indices.length/3;
   return CREW_LOD_TIERS.map(tier=>{
     if(tier.level===0){
       return Object.freeze({
         id:tier.id,level:0,maxDistance:tier.maxDistance,
         indices,indexCount:indices.length,triangles:baseTriangles,ratio:1,
+      });
+    }
+    // A body whose colours vary point by point cannot be grouped by colour. Its file carries its levels.
+    if(levels){
+      const baked=levels[tier.level-1];
+      return Object.freeze({
+        id:tier.id,level:tier.level,maxDistance:tier.maxDistance,
+        indices:baked,indexCount:baked.length,triangles:baked.length/3,ratio:baked.length/indices.length,
       });
     }
     const targetTriangles=Math.max(240,Math.round(baseTriangles*tier.targetRatio));
@@ -113,6 +121,7 @@ export function createCrewLODs(model){
 
 // A body a few dozen pixels tall needs little more than its silhouette and the colours of its clothes.
 export function createDistantCrewLOD(model,targetTriangles=320){
+  if(model.distantIndices)return model.distantIndices;
   const {vertices,vertexCount,animator}=model;
   // Regalia is too small to see at this size, and optional pieces would use up the triangles.
   const reds=new Float32Array(vertices.buffer,vertices.byteOffset,vertexCount*15),kept=[];

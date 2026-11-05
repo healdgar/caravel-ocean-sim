@@ -93,6 +93,14 @@ struct CrewVertex {
 };
 // The model's colours are placeholders for what this person wears: rgb, and whether it is skin.
 fn crewClothed(tagged:vec3f,p:vec3f,shirt:vec3f,trousers:vec3f,skin:vec3f,hair:vec3f,isIndigenous:bool,dress:u32)->vec4f {
+  // A body painted garment by garment: blue's whole part says which, and the colour is how far this
+  // point departs from that garment's typical colour, so folds and faces survive any cloth or skin.
+  let garment=u32(tagged.b*.5);
+  if(garment>0u){
+    let shade=vec3f(tagged.rg,tagged.b-2.0*f32(garment));
+    let worn=select(select(select(hair,skin,garment==3u),trousers,garment==2u),shirt,garment==1u);
+    return vec4f(worn*shade,select(0.0,1.0,garment==3u));
+  }
   let color=vec3f(tagged.r-2.0*f32(u32(tagged.r*.5)),tagged.gb);
   let isShirt=distance(color,vec3f(.55,.47,.31))<.001;
   let isLower=distance(color,vec3f(.095,.12,.15))<.001;

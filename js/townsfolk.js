@@ -96,7 +96,7 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
   // The shader they share with sailors looks up a ship for its gun flashes. There is none ashore.
   const hullData = new Float32Array(52);
   hullData.set([1, 0, 0, 1], 0); hullData.set([0, 1, 0, 0], 4); hullData.set([0, 0, -1, 0], 8); hullData.set([3.6, 12, 1, 1], 12);
-  const hull = buffer('townsfolk hull', hullData, B.UNIFORM);
+  const hull = buffer('townsfolk ship stand-in', hullData, B.UNIFORM);
   const geometryFor = new Map();
   const geometry = (model, index, indigenous) => {
     if (geometryFor.has(model)) return geometryFor.get(model);

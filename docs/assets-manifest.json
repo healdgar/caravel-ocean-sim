@@ -45,14 +45,19 @@
     "sha256": "af1b3d2448efbc0f67673f46494c890aa901a4728ac627c3d2d55e3b00fe43f3"
   },
   "assets/crew/sailor.glb": {
-    "url": "assets/crew/sailor.771be23ecc0c7f5a.glb",
-    "bytes": 995276,
-    "sha256": "771be23ecc0c7f5a8cf3262c69786bb7b4586051aaf1c41a409ae21b4efc78be"
+    "url": "assets/crew/sailor.177fbbb8a5bc7681.glb",
+    "bytes": 1051488,
+    "sha256": "177fbbb8a5bc7681e27b433918ad331be403c76f7b4f955d2b3810de2d7a3ab4"
   },
   "assets/crew/sailor-female.glb": {
     "url": "assets/crew/sailor-female.95749d1a19b0d47a.glb",
     "bytes": 1214392,
     "sha256": "95749d1a19b0d47a7498edada12d3bb6a8d2e8b7e165ed882e3730b2122fe2f4"
+  },
+  "assets/crew/sailor-classic.glb": {
+    "url": "assets/crew/sailor-classic.771be23ecc0c7f5a.glb",
+    "bytes": 995276,
+    "sha256": "771be23ecc0c7f5a8cf3262c69786bb7b4586051aaf1c41a409ae21b4efc78be"
   },
   "assets/world/saba/height.bin": {
     "url": "assets/world/saba/height.44a7a266ceebe8c9.bin",

@@ -443,19 +443,24 @@ export function stepDeckhand(s,boat,dt,wind=0,company=null) {
 }
 
 let preloadedCrewModels=null;
+// The sailor's generated body has no garment pieces to re-sculpt, so Indigenous men are still built on the
+// classic body, which travels with him.
+async function fetchCrewModels(){
+  const [male,female,classic]=await Promise.all(['assets/crew/sailor.glb','assets/crew/sailor-female.glb','assets/crew/sailor-classic.glb'].map(async path=>{
+    const response=await fetch(path);if(!response.ok)throw Error('Crew asset unavailable');return loadCrewGLB(await response.arrayBuffer());
+  }));
+  male.indigenousBase=classic;
+  return [male,female];
+}
 export function preloadCrewModels(){
   if(!preloadedCrewModels&&typeof fetch==='function'){
-    preloadedCrewModels=Promise.all(['assets/crew/sailor.glb','assets/crew/sailor-female.glb'].map(async path=>{
-      const response=await fetch(path);if(!response.ok)throw Error('Crew asset unavailable');return loadCrewGLB(await response.arrayBuffer());
-    })).catch(err=>{preloadedCrewModels=null;throw err;});
+    preloadedCrewModels=fetchCrewModels().catch(err=>{preloadedCrewModels=null;throw err;});
   }
   return preloadedCrewModels;
 }
 
 export async function createCrew({device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format='rgba16float',samples=4,shared=null,modelId='nina',waterOptics=null}) {
-  const modelsPromise=shared?.models?Promise.resolve(shared.models):(preloadedCrewModels??Promise.all(['assets/crew/sailor.glb','assets/crew/sailor-female.glb'].map(async path=>{
-    const response=await fetch(path);if(!response.ok)throw Error('Crew asset unavailable');return loadCrewGLB(await response.arrayBuffer());
-  })));
+  const modelsPromise=shared?.models?Promise.resolve(shared.models):(preloadedCrewModels??fetchCrewModels());
   modelsPromise.catch(()=>{});
   const B=GPUBufferUsage,state=createCompany(undefined,modelId,{fullWatch:true});
   const buffer=(label,data,usage)=>{const b=device.createBuffer({label,size:data.byteLength,usage:usage|B.COPY_DST});device.queue.writeBuffer(b,0,data);return b;};
@@ -1018,7 +1023,7 @@ export function createIndigenousCrewModels(models) {
   const cached = cachedIndigenousModels.get(models[0]);
   if (cached) return cached;
   const pair = [
-    buildIndigenousCrewModel(models[0], false),
+    buildIndigenousCrewModel(models[0].indigenousBase ?? models[0], false),
     buildIndigenousCrewModel(models[1], true),
   ];
   cachedIndigenousModels.set(models[0], pair);
@@ -1527,11 +1532,7 @@ export async function createFortSoldiers({
 }) {
   const modelsPromise = shared?.models
     ? Promise.resolve(shared.models)
-    : (preloadedCrewModels ?? Promise.all(['assets/crew/sailor.glb', 'assets/crew/sailor-female.glb'].map(async path => {
-        const response = await fetch(path);
-        if (!response.ok) throw Error('Crew asset unavailable');
-        return loadCrewGLB(await response.arrayBuffer());
-      })));
+    : (preloadedCrewModels ?? fetchCrewModels());
   modelsPromise.catch(() => {});
   const B = GPUBufferUsage;
   const buffer = (label, data, usage) => {

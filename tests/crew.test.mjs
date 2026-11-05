@@ -2,10 +2,10 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {readGLB,gltfAccessor,gltfSlerp,loadCrewGLB} from '../js/gltf.js';
-import {createDeckhand,stepDeckhand,createCompany,stepCompany,issueCaptainOrder,CREW_ROSTER} from '../js/crew.js';
+import {createDeckhand,stepDeckhand,createCompany,stepCompany,issueCaptainOrder,CREW_ROSTER,createIndigenousCrewModels} from '../js/crew.js';
 import {hullDeck,hullHalfWidth,vesselDeck,HULL_VERTICAL_SCALE,tillerPoint} from '../js/hull.js';
 import {poseCrewWork} from '../js/crew-pose.js';
-import {selectCrewLOD} from '../js/crew-lod.js';
+import {selectCrewLOD,createDistantCrewLOD} from '../js/crew-lod.js';
 import {advanceSails,sailingState} from '../js/sailing.js';
 import {createShareLink} from '../js/sharing.js';
 const bytes=fs.readFileSync(new URL('../assets/crew/sailor.glb',import.meta.url));
@@ -24,6 +24,24 @@ test('sailor GLB is self-contained, bounded and has the required clips',()=>{
   assert.ok(model.indices.length/3<16000);assert.deepEqual([...model.animator.clips.keys()],['Idle','Walk','Brace']);
   const rest=positions(model.animator.sample(null,0)),f=new Float32Array(model.vertices.buffer);
   for(let i=0;i<model.vertexCount;i++)for(let k=0;k<3;k++)assert.ok(Math.abs(rest[i*3+k]-f[i*15+k])<1e-5,'inverse binds preserve the authored rest geometry');
+});
+test('the generated body says what each point wears, and carries its own levels',()=>{
+  const f=new Float32Array(model.vertices.buffer,model.vertices.byteOffset,model.vertexCount*15),seen=new Set();
+  for(let i=0;i<model.vertexCount;i++){
+    assert.ok(f[i*15+6]>=0&&f[i*15+6]<2,'red stays clear of the numbers that name optional pieces');
+    seen.add(Math.floor(f[i*15+8]*.5));
+  }
+  assert.deepEqual([...seen].sort(),[0,1,2,3,4],'paint, shirt, trousers, skin, hair');
+  assert.ok(model.lods[1].triangles<=4400&&model.lods[2].triangles<=1570);
+  assert.ok(model.distantIndices.length/3<=320);
+  assert.equal(createDistantCrewLOD(model),model.distantIndices,'townsfolk take the baked level');
+});
+test('Indigenous men are built on the classic body, whose garments can be re-sculpted',()=>{
+  const classic=loadCrewGLB(fs.readFileSync(new URL('../assets/crew/sailor-classic.glb',import.meta.url))),female=loadCrewGLB(fs.readFileSync(new URL('../assets/crew/sailor-female.glb',import.meta.url)));
+  const male=loadCrewGLB(bytes);male.indigenousBase=classic;
+  const [indigenous]=createIndigenousCrewModels([male,female]);
+  assert.ok(indigenous.vertexCount>classic.vertexCount,'classic vertices, and its accessories');
+  assert.equal(indigenous.distantIndices,null,'levels baked for another body stay with it');
 });
 test('retargeted clips remain human-sized, grounded and loop without a jump',()=>{
   for(const [name,clip] of model.animator.clips){
