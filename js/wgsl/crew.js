@@ -2,6 +2,7 @@ import { FRAME_WGSL, ATMO_CORE_WGSL, ENV_MIPS } from './common.js';
 import { VESSEL_RIG, VESSEL_LIGHTING } from './vessel.js';
 import { SKY_RENDER_FUNCS } from './sky.js';
 import { SHADOW_SAMPLE, SHADOW_FRAME } from './shadows.js';
+import { DRESS_MASK_SCALE } from '../indigenous-dress.js';
 
 export const CREW_SKIN = /* wgsl */ `
 @group(0) @binding(1) var<uniform> hull:Hull;
@@ -26,11 +27,23 @@ fn crewRamp(lo:f32,hi:f32,x:f32)->vec2f {
   let t=clamp((x-lo)/(hi-lo),0.0,1.0);
   return vec2f(t*t*(3.0-2.0*t),6.0*t*(1.0-t)/(hi-lo));
 }
+// Optional pieces of a body carry their number in the red channel of their colour, and each person's
+// look says which they wear, in the fraction of hair.w. Anyone else's fraction is zero and they have no pieces.
+fn crewDressOf(hairW:f32)->u32 {return u32(fract(hairW)*${DRESS_MASK_SCALE}.0+.5);}
+fn crewPieceHidden(color:vec3f,dress:u32)->bool {
+  let piece=u32(color.r*.5);
+  return piece>0u&&((dress>>(piece-1u))&1u)==0u;
+}
+const CREW_PIECE_OUT=vec3f(0.0,1.62,0.0);
 fn crewSurface(v:CrewInput)->CrewSurface {
-  let actor=actors[v.instance];let p=v.position;let f=actor.face;
-  let headY=select(1.5998,1.5496,actor.skin.w>.5);
-  if(p.y<=headY+.015){return CrewSurface(p,v.normal);}
-  let eyeY=select(1.699,1.656,actor.skin.w>.5);
+  let actor=actors[v.instance];
+  if(crewPieceHidden(v.color,crewDressOf(actor.hair.w))){return CrewSurface(CREW_PIECE_OUT,v.normal);}
+  return crewMorph(v.position,v.normal,actor.face,actor.skin.w);
+}
+fn crewMorph(p:vec3f,normal:vec3f,f:vec4f,sex:f32)->CrewSurface {
+  let headY=select(1.5998,1.5496,sex>.5);
+  if(p.y<=headY+.015){return CrewSurface(p,normal);}
+  let eyeY=select(1.699,1.656,sex>.5);
   let head=crewRamp(headY+.015,headY+.065,p.y);
   let jaw=vec2f(1,0)-crewRamp(headY+.06,headY+.13,p.y);
   let width=1.0+head.x*((f.x-1.0)+(f.y-1.0)*jaw.x);
@@ -56,8 +69,8 @@ fn crewSurface(v:CrewInput)->CrewSurface {
   let dx=vec3f(width,eyeGradient.x,f.z*noseD.x);
   let dy=vec3f(p.x*widthY,1.0+eyeGradient.y,f.z*noseD.y);
   let dz=vec3f(0,eyeGradient.z,1.0+f.z*noseD.z);
-  let normal=normalize(cross(dy,dz)*v.normal.x+cross(dz,dx)*v.normal.y+cross(dx,dy)*v.normal.z);
-  return CrewSurface(vec3f(p.x*width,p.y+eyeShift*eye,p.z+f.z*nose),normal);
+  let morphed=normalize(cross(dy,dz)*normal.x+cross(dz,dx)*normal.y+cross(dx,dy)*normal.z);
+  return CrewSurface(vec3f(p.x*width,p.y+eyeShift*eye,p.z+f.z*nose),morphed);
 }
 `;
 // Shading never discards, so the GPU shades only what shows. Anyone with something to cut away,
@@ -75,12 +88,31 @@ struct CrewVertex {
   @invariant @builtin(position) position:vec4f, @location(0) world:vec3f,
   @location(1) normal:vec3f, @location(2) color:vec3f, @location(3) @interpolate(flat) helm:f32,
   @location(4) wet:vec2f, @location(5) skin:f32,
-  @location(6) bodyPos:vec3f, @location(7) @interpolate(flat) damage:vec3f
+  @location(6) bodyPos:vec3f, @location(7) @interpolate(flat) damage:vec3f,
+  @location(8) @interpolate(flat) paint:u32
 };
+// The model's colours are placeholders for what this person wears: rgb, and whether it is skin.
+fn crewClothed(tagged:vec3f,p:vec3f,shirt:vec3f,trousers:vec3f,skin:vec3f,hair:vec3f,isIndigenous:bool,dress:u32)->vec4f {
+  let color=vec3f(tagged.r-2.0*f32(u32(tagged.r*.5)),tagged.gb);
+  let isShirt=distance(color,vec3f(.55,.47,.31))<.001;
+  let isLower=distance(color,vec3f(.095,.12,.15))<.001;
+  let isHair=distance(color,vec3f(.045,.019,.009))<.001;
+  let isArmSkin=isIndigenous && isShirt && abs(p.x)>0.155 && p.y>0.86 && p.y<1.48;
+  let isCalfSkin=isIndigenous && isLower && p.y>0.21 && p.y<0.62;
+  let bareTorso=isShirt && (dress&${1 << 14}u)!=0u;
+  let bareLeg=isLower && (dress&${1 << 15}u)!=0u && p.y<0.87;
+  let shavedHair=isHair && u32(tagged.r*.5)==0u && ((dress&${1 << 12}u)!=0u||((dress&${1 << 13}u)!=0u&&p.z>-.02));
+  var worn=color;
+  if(isShirt){worn=select(shirt,skin,isArmSkin||bareTorso);}
+  if(isLower){worn=select(trousers,skin,isCalfSkin||bareLeg);}
+  if(distance(color,vec3f(.36,.18,.10))<.001){worn=skin;}
+  if(isHair){worn=select(hair,skin,shavedHair);}
+  return vec4f(worn,select(0.0,1.0,distance(color,vec3f(.36,.18,.10))<.001 || isArmSkin || isCalfSkin || bareTorso || bareLeg || shavedHair));
+}
 @vertex fn vs(v:CrewInput)->CrewVertex {
   let skin=crewSkin(v);let surface=crewSurface(v);let p=rotateHull((skin*vec4f(surface.position,1)).xyz)+hull.origin.xyz;
   var out:CrewVertex;out.position=F.viewProj*vec4f(p-F.camPos.xyz,1);
-  out.world=p;out.normal=normalize(rotateHull((skin*vec4f(surface.normal,0)).xyz));out.color=v.color;
+  out.world=p;out.normal=normalize(rotateHull((skin*vec4f(surface.normal,0)).xyz));
   let actor=actors[v.instance];out.helm=floor(actor.trousers.w+0.01);
   out.bodyPos=v.position;
   let woundAmt=select(clamp(actor.shirt.w/0.45,0.0,1.0),0.0,actor.shirt.w>0.5);
@@ -91,15 +123,10 @@ struct CrewVertex {
   let lower=mix(moisture[base],moisture[base+1u],smoothstep(.08,.5,y));
   let upper=mix(moisture[base+2u],moisture[base+3u],smoothstep(1.08,1.55,y));
   out.wet=mix(lower,upper,smoothstep(.5,1.08,y));
-  let isIndigenous=actor.face.w>1.5;
-  let isArmSkin=isIndigenous && distance(v.color,vec3f(.55,.47,.31))<.001 && abs(v.position.x)>0.155 && v.position.y>0.86 && v.position.y<1.48;
-  let isCalfSkin=isIndigenous && distance(v.color,vec3f(.095,.12,.15))<.001 && v.position.y>0.21 && v.position.y<0.62;
-  out.skin=select(0.0,1.0,distance(v.color,vec3f(.36,.18,.10))<.001 || isArmSkin || isCalfSkin);
+  let dress=crewDressOf(actor.hair.w);
+  let clothed=crewClothed(v.color,v.position,actor.shirt.rgb,actor.trousers.rgb,actor.skin.rgb,actor.hair.rgb,actor.face.w>1.5,dress);
+  out.color=clothed.rgb;out.skin=clothed.w;out.paint=dress>>16u;
   if(actor.shirt.w>0.5){out.position=vec4f(2,2,0,1);}
-  if(distance(v.color,vec3f(.55,.47,.31))<.001){out.color=select(actor.shirt.rgb,actor.skin.rgb,isArmSkin);}
-  if(distance(v.color,vec3f(.095,.12,.15))<.001){out.color=select(actor.trousers.rgb,actor.skin.rgb,isCalfSkin);}
-  if(distance(v.color,vec3f(.36,.18,.10))<.001){out.color=actor.skin.rgb;}
-  if(distance(v.color,vec3f(.045,.019,.009))<.001){out.color=actor.hair.rgb;}
   return out;
 }
 @fragment fn surviving(v:CrewVertex)->@location(0) vec4f {
@@ -136,6 +163,18 @@ struct CrewVertex {
   let wet=clamp(v.wet,vec2f(0),vec2f(1));
   var baseColor=v.color;
   var roughBias=0.0;
+  if(v.paint!=0u&&v.skin>.5){
+    // Genipap: dark bands over the body and limbs, the face left clear.
+    if((v.paint&1u)!=0u){
+      let band=1.0-smoothstep(.2,.3,abs(fract(bp.y*10.0+abs(bp.x)*6.0)-.5));
+      baseColor=mix(baseColor,vec3f(.014,.016,.024),band*(1.0-smoothstep(1.46,1.5,bp.y))*.88);
+    }
+    // Annatto or red earth, in a band across the eyes and cheeks.
+    if((v.paint&2u)!=0u){
+      let across=smoothstep(1.595,1.615,bp.y)*(1.0-smoothstep(1.68,1.7,bp.y));
+      baseColor=mix(baseColor,vec3f(.40,.05,.028),across*.82);
+    }
+  }
   if(woundAmt>0.15 || scorchAmt>0.10){
     // Linen bandages wrapped around brow/head or forearm/calf on wounded sailors
     let hasHeadBand=bSeed>0.16 && bp.y>1.63 && bp.y<1.71 && bp.z>-0.10;

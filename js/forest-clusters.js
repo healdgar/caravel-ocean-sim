@@ -189,12 +189,8 @@ fn forestClusterVertex(tree:u32,vertex:u32,kindValue:f32)->ForestVertex{
  let at=vertex*${FOREST_CLUSTER_VERTEX_WORDS}u;
  let w0=forestClusterVertices[at];let w1=forestClusterVertices[at+1u];let w2=forestClusterVertices[at+2u];let w3=forestClusterVertices[at+3u];let w4=forestClusterVertices[at+4u];
  let unit=vec3f(f32(w0&65535u),f32(w0>>16u),f32(w1&65535u))/65535.;
- var position=forestClusterBounds[0].xyz+unit*forestClusterBounds[0].w;
+ let position=forestClusterBounds[0].xyz+unit*forestClusterBounds[0].w;
  let r=forestRoots[tree];
- if(r.identity.z<-1.5&&forestBin.y>=10u&&position.y>2.2){
-  let flare=1.+clamp((position.y-2.2)*.18,0.,1.75);
-  position=vec3f(position.x*flare,position.y*.82+.4,position.z*flare);
- }
  let normal=forestClusterOctahedral(vec2f(f32(w2&65535u),f32(w2>>16u))/65535.*2.-1.);
  let uv=forestClusterBounds[1].xy+vec2f(f32(w3&65535u),f32(w3>>16u))/65535.*forestClusterBounds[1].zw;
  let root=vec3f(f32(w4&255u),f32((w4>>8u)&255u),f32((w4>>16u)&255u))/255.;

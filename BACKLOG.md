@@ -1,5 +1,117 @@
 # Ocean Sailing Simulator backlog and overnight checkpoint
 
+## November 5: still to check on this round
+
+Committed without a finished test run, because other sessions' suites were sharing the machine.
+
+- The full suite never finished on this build. Its last run recorded 419 passes and 28 failing names before it stopped. Most failed at exactly their timeout, but they have not been separated from real failures. Run `npm test` on a quiet machine before publishing.
+- `tests/anchor-expansion-gpu.test.mjs` fails on rope by 5.2e-5 against a limit of 2e-5, and also did before this round.
+- `tests/dolphins-gpu.test.mjs` starts a server on fixed port 8097, so it collides with another suite running at the same time.
+- Lisbon with Victory has not been measured since the Indigenous dress went in.
+
+## November 5: streets, roads and townsfolk
+
+Buildings now find their own ground, because the port layout assumes a straight shore and real coasts curve. San Juan had 11 of 31 buildings on the seabed, its fort in 15 to 32 m of water, and Havana, Portobelo and Santo Domingo had a few each. Each prefab says what it needs (dry land, the water's edge, a bank at each end of a bridge), takes the nearest place that gives it that, and is left out if nothing within 300 m does. Piers slide along their heading until their root is ashore. Neighbours keep 5 m apart so a street fits.
+
+`js/town-streets.js` lays each town's ways once, at load. Each door joins by the cheapest walk over the ground (slope costs, walls repel), so ways merge. Neighbours that end up far apart by road get a link. Trips then decide width and surface: busy stretches of a grown town are cobbled, and the rest is earth. One or two roads wander out 800 m and fade. The land shader reads the result from a small distance field, so ways need no geometry and cannot float or sink. Trees, palms and ground cover keep off them.
+
+`js/townsfolk.js` and `js/wgsl/townsfolk.js` draw the people, at most 520 in a metropolis. Each is a route, a phase and a speed, so a compute pass works out where they are from the time alone, culls them and picks one of four models. The vertex stage reads poses straight from the baked clips. JavaScript sends nothing per person. After dark about nine in ten are home, and they go in while shot is falling.
+
+Measured at Lisbon with Victory, 1728x1117, with Chrome holding the GPU about 42% busy: no measurable change in frame rate from the deck (49.7 and 47.8 fps) or in the town (38.3 and 38.7 fps), 0.12 M triangles, JavaScript unchanged at 3 ms. Laying out a town takes 50 to 370 ms at load, on the main thread.
+
+Limits:
+- People pass through each other. They keep to their right, which hides most of it.
+- Buildings mostly have no real door where a person goes in, so they walk into the wall.
+- No one casts a shadow on the ground, and neither do buildings.
+- Ways are colour only. They do not dent the ground or get steps.
+- Ways stop at the edge of what the field covers and do not join the next town.
+- Only the nearest town has people, and a destroyed building still takes visitors.
+- Laying out a streamed section with a port happens on the main thread, so can hitch.
+
+## November 5: generated assets through Tripo and our decimator
+
+Tripo generates the shape and texture, `scripts/safe-decimate.mjs --type` reduces it, and `scripts/rebake-texture.py` paints it back. Nothing generated is in the game yet. The generations are in `.tripo/`, which git ignores, with `to-crew.py`, which fits the rigged sailor to our skeleton.
+
+Reducing with a generated model's texture coordinates stops early and smears: its atlas is 40 to 99% seam corners. Dropping them and baking afresh onto the reduced mesh removed that floor and cost nothing visible.
+
+| Asset | Tripo cost | Source | Chosen by type | Before this |
+|---|---|---|---|---|
+| Dock cleat, prop | 110 credits | 3,041 | 358 | 605 |
+| Pier, low-poly model `tripo-p1`, structure | 40 | 1,268 | 616 | 951 |
+| Pier, default model, structure | 110 | 8,004 | 1,491 | about 5,084 |
+| Ceiba, foliage | 110 | 16,244 | levels 3,991 to 80 | 6,882 floor |
+| Sailor, rigged, character | 135 | 15,692 | levels 4,400 to 393 | not wired |
+
+- **Prop and structure:** `tripo-p1` at 40 credits looks better than the default model at 110, and starts lower. Prefer it.
+- **Trees:** led by error, a crown thins to twigs below about 1,000 triangles. Merging vertices by place (`simplifySloppy`) keeps the mass, so a budget tries both and the outline decides. It reads as a tree down to 80 triangles and comes apart at 44, where the tool says so. The result is sheets, which the forest pipelines already draw from both sides. Near the camera a generated tree is chunkier than the grown ones. Use this for a species we cannot grow, since the grown trees' own hierarchy beats it (see below).
+- **Sailor:** runs in the game by a swapped file, on our skeleton, clips and work poses. Index lists into the rigged vertices walk correctly down to 393 triangles.
+
+To bring these into the game:
+
+1. **Textured props.** No prop renderer takes a texture today. It needs a bind group per atlas, or a shared array of baked textures.
+2. **Crew levels.** `js/crew-lod.js` groups vertices by colour, so a body with baked colours never gets below 6,830 triangles. Use `--indices` lists at build time instead.
+3. **Crew clothes.** Men vary only by the sentinel colours in `js/crew.js`. A baked sailor has none, so every man is identical. Needs clothing masks or a texture per outfit, and the Indigenous builder depends on the same colours.
+4. **A woman**, on the same path.
+
+### Decimating the grown trees instead
+
+Tried on the grown ceiba, and not worth doing. Its cluster hierarchy already keeps perforated leaf cards at every level, and wood is a rounding error: 613 of 67,813 triangles at 75 pixels tall. Edge collapse cannot reduce separate cards, and merging them gives opaque sheets that need their own texture per tree.
+
+Image difference from the full tree at true on-screen size, in supersampled Blender renders without game lighting. Each row's bold value is the cut the game draws now at the default limit:
+
+| Tree height on screen | Cut 138,918 | Cut 67,813 | Cut 16,880 | Cut 2,489 | Cut 705 | Decimated, for comparison |
+|---|---|---|---|---|---|---|
+| 150 px | **0.5%** | 4.8% | 9.5% | 14.2% | 16.7% | 15,756: 13.8% |
+| 75 px | 0.4% | **3.0%** | 6.7% | 11.3% | 14.2% | 3,947: 11.6% |
+| 38 px | 0.3% | 1.7% | **3.7%** | 8.0% | 11.1% | 3,947: 8.7% |
+| 19 px | 0.2% | 1.0% | 2.0% | **4.5%** | 7.9% | 481: 8.3% |
+| 9 px | 0.2% | 0.5% | 0.9% | 2.2% | **4.4%** | 233: 6.2% |
+
+The decimator only draws level at about 19 pixels and below, and there it also loses the trunk. The lever is the leaf limit: `FOREST_CLUSTER_LEAF_LIMIT` at `.2` keeps cards below about two pixels, and one step coarser means a quarter of the triangles for about twice the difference. Worth trying in the game before any new tree asset.
+
+## November 5: parts worth taking from the sand3d datasets
+
+The sand3d repository itself holds no ship parts, but its Hugging Face datasets hold about 104,000 programs (CC BY 4.0, each with its source credit), found by searching `Sandflow/sand3d-*`. Bake them with sand3d at build time and credit each one in `THIRD_PARTY_NOTICES.md`. Nothing here is in the game yet.
+
+Triangles below are as built, then after dissolving flat and near-straight faces. `scripts/safe-decimate.mjs` goes much further without harm: it reduces each part only as far as a measured shape error allows, then checks surface distance and outline. The truck gun holds at 1,168 triangles with 0.81% error and no part lost. Reducing a whole model to a triangle count wrecked the same parts, so do not use that. The anchor is in the game: `js/anchor-iron.js`, 284 triangles against the old 174, baked by `scripts/bake-anchor.mjs`. Its stock is an iron bar, a later style than most of our period, and Niña's spare anchor is still the old shape. Exports have no UVs. Run a program only after checking it statically: they are other people's Python.
+
+| Part | Dataset id | Now in game | Candidate |
+|---|---|---|---|
+| Waist boat with oars | `objaverse-5ab41b26dd914a459f029cb028ac2b2e` | 1,335 | 1,836 |
+| Anchor with a stock in the plane of its arms, logo-style, so not used | `objaverse-3395efb1f3ac46e18c29df385f54c99a` | plain tubes | 31,852 then 3,962 |
+| Ship's wheel, turned spokes | `objaverse-bd2ace090dfb44629d90286aaa1c1592` | 480 to 1,120 | 13,260 then 7,856 |
+| Sabre (CC0 source) | `objaverse-e8c4a70059ec44749a7cc413331bbe25` | a plain rod | 16,342 then 1,852 |
+| Truck-carriage naval gun, 6 joints | `articraft-rec_cannon_cd4e4ccee1704217a359f191294df289` | 235 on Victory, 848 on Nina | 11,220 then 6,214 |
+| Carronade | `articraft-rec_cannon_676f94a3eca04699a3b3ef0e6201ebb9` | none | 7,640 |
+| Barrel | `objaverse-365e32dfb2df4a1f847445b9b947d3d7` | none | 29,496 then 21,414 |
+| Market stall | `objaverse-9912401c03f04d868f3818f747c69f0d` | none | 5,844 |
+| Handcart | `objaverse-e2d9daf8866847a7a909c9e8cdf2912b` | none | not built |
+| Flintlock pistol (CC0 source) | `objaverse-792ca024195d4292829d8d0b304ced30` | none | 18,692 then 3,130 |
+| Spyglass | `objaverse-5eab6c9792674c3596ddca138a010dfd` | none | 2,564 |
+
+Victory carries 104 guns and spends 235 triangles on each. At 1,042 each the guns would add about 84,000 to a 93,000-triangle ship, so a detailed model drawn only for nearby guns, chosen in a compute pass, may still be worth it. Crew gun routes and recoil are built around the current gun.
+
+Rejected on sight: the "RK17 pulley block" is a blob, "ship's rudder" is a wheel, "Birchbark Canoe" renders as four posts, and the treasure chest is blocky. Dataset names and labels are often wrong, so look at the render.
+
+## November 5: Indigenous dress by culture
+
+Every Indigenous man and woman used to wear the same headband, three eagle feathers, twin braids and collar, from New England to Brazil, which is a stereotype. `js/indigenous-dress.js` now gives each of the nine culture regions its own everyday dress, with feathers and gold as the exception, worn by people of rank (a cacique or sachem by role, one look in sixteen in a village crowd).
+
+- Taíno: bare-chested men in white cotton, long hair; a cacique adds gold, a headband and feathers.
+- Kalinago: reddened skin from annatto, bound hair.
+- Maya: plain white cotton, bound hair; the elite add jade and long quetzal plumes.
+- Tupinambá: genipap body paint, shaved forehead, lip plug; the elite add a feather crown.
+- Abenaki and Algonquian: a crest with shaved sides, or long hair; a feather or two for some, shell for rank.
+- Florida chiefdoms: tattoo-like bands and little clothing. Tierra Firme: coloured cotton and gold for chiefs. Pacific coast: bark cloth and shell.
+
+One mesh holds every optional piece, each tagged with its number in the vertex colour's red channel. A person's look says which show, so variety costs no extra draws: hidden pieces collapse in the vertex shader. Paint is a small branch in the crew fragment shader, taken only for painted skin.
+
+Limits:
+- This is an attempt from general history, not a study of any one people, and nobody from these communities has reviewed it. Each table entry stands for many nations.
+- Women keep an upper garment on every culture. Where that is a departure from history, it is a choice about the game, not a claim about the past.
+- Sailors on Indigenous canoes still use the old colour palette on the sailor model, not these looks.
+- Hair is pressed from the sailors' hair, so styles are approximate up close.
+
 ## November 5: cluster forests, real palms, wind
 
 Trees are now cluster hierarchies, cut per tree on the GPU, so detail falls off continuously instead of switching between models. The builder is the three-free part of [threejs-nanites](https://github.com/VictorZakharov/threejs-nanites) (MIT, in `third_party/threejs-nanites/`). The rest of that library draws through three.js, which this game does not use, so the runtime is our own WGSL in `js/forest-clusters.js`. `scripts/prepare-forest-clusters.mjs` bakes a pack in about 70 s.
@@ -18,15 +130,24 @@ Same run, Lisbon with HMS Victory, 1728×1117, fixed polygons:
 
 Earlier in the day, with the machine quieter, the same comparison read 55 and 59 fps. The GPU's fragment stage is still the limit. Leaves take a pixel error of .2 of the forest's budget and wood .5, because a grown leaf card shows as a shape and thin wood hides among them. Coarser leaves also trade length for width (`rounder`, our addition to the builder): grown as they were, our long thin leaves became streaks across the crown.
 
-Palms were three things, all poor: a pole under an 11,000-needle puffball in the subtropical pack, a shader stretching it, and up to 520 low-poly palms built into each port's mesh in JavaScript. `scripts/grow-palms.mjs` and `scripts/paint-palm-leaflets.py` now grow a royal palm (pale column, green crownshaft, plumed fronds) and a coconut (leaning ringed trunk, drooping fronds, coconuts), at about a quarter of the old triangles. The port's palms are gone; the forest seeds real coconuts at the same places, leaning out to sea. Gunnery still reads those positions. Palms used to bend and char under fire by editing port vertices in JavaScript; now each hit darkens the nearest tree and the third fells it, by rewriting that one tree's 48-byte record. Bending is gone. Only foreshore palms, which gunnery knows about, take marks.
+Palms were three things, all poor: a pole under an 11,000-needle puffball in the subtropical pack, thin bare trunks, and up to 520 low-poly palms built into each port's mesh in JavaScript. The ceiba and mangrove were thin columns that a shader stretched sideways. `scripts/grow-tropical-trees.mjs` and `scripts/paint-tropical-leaves.py` now grow all four, and the stretching shader is gone:
+
+- **Royal palm:** pale column, green crownshaft, plumed fronds.
+- **Coconut:** leaning ringed trunk, drooping fronds, coconuts.
+- **Ceiba:** a broad flat crown on plank buttresses, with leaflets in hands.
+- **Red mangrove:** a low dense dome on arching prop roots. It now keeps to the strand and lagoons, and stays off the uplands.
+
+Palms take about a quarter of their old triangles at full detail. Ceiba and mangrove take more, because their old crowns were far too thin, and clusters cut them back with distance. Each species' far model is refitted to its real crown, so it holds its size when the tree hands over.
+
+The port's palms are gone; the forest seeds real coconuts at the same places, leaning out to sea. Gunnery still reads those positions. Palms used to bend and char under fire by editing port vertices in JavaScript; now each hit darkens the nearest tree and the third fells it, by rewriting that one tree's 48-byte record. Bending is gone. Only foreshore palms, which gunnery knows about, take marks.
 
 Wind (`forestWind`) is three motions at three speeds: the tree bends with height, branches bob by their reach from the trunk, leaves flutter. Gust fronts roll downwind across the forest at the wind's speed. It needs no new vertex data and cost nothing measurable.
 
 Still to do, largest first:
 
-- **Ceiba and mangrove models are thin columns**, stretched sideways by a shader (`isSubBroadleaf`). They need growing properly, as the palms were.
-- **Old tiers remain** as the fallback if clusters fail to load, and for `?forestClusters=0`: `forestNativeLod` mid tiers, `lod/` sidecars and the unused subtropical `lod/`, `middle/` and `volumes/` for palms. `js/forest-lod-pilot.js` and its helpers are an earlier isolated attempt at this and can probably go.
+- **Old tiers remain** as the fallback if clusters fail to load, and for `?forestClusters=0`: `forestNativeLod` mid tiers, `lod/` sidecars, and the subtropical `lod/`, `middle/` and `volumes/`, which still describe the old models and are unused. `js/forest-lod-pilot.js` and its helpers are an earlier isolated attempt at this and can probably go.
 - **Mobile** skips native trees, so with the port's palms gone a phone sees only far models on tropical shores.
+- **Upland tropics are palms and ceiba only.** With mangroves off the hills, nothing fills the understory, and a real tropical hillside would have many more species.
 - **The far crown shells cost 1.65 M triangles.** Clusters could do the same job for less, if the look holds.
 - **Occlusion culling** of clusters against a depth pyramid, which threejs-nanites reports saving a lot on the ground. We test trees against terrain only.
 

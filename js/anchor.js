@@ -1,4 +1,5 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
+import { ANCHOR_IRON } from './anchor-iron.js';
 import {ANCHOR_GPU_RENDER} from './wgsl/anchor.js';
 import {anchorFairlead,anchorRodePoints,anchorEquipment,anchorEyeOffset} from './anchor-state.js';
 import {boatRotate} from './boat.js';
@@ -11,25 +12,8 @@ export const ANCHOR_GPU_STATE_FLOATS=(4+ANCHOR_GPU_RODE_SPANS+1)*4;
 export function createAnchorGPUTemplate(){
   const data=[];
   const add=(p,n,kind)=>data.push(...p,...n,kind,1);
-  const tri=(a,b,c,kind)=>{
-    const u=b.map((v,i)=>v-a[i]),v=c.map((v,i)=>v-a[i]),n=[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]],length=Math.hypot(...n)||1;
-    for(let i=0;i<3;i++)n[i]/=length;add(a,n,kind);add(b,n,kind);add(c,n,kind);
-  };
-  const tube=(a,b,r,kind,sides)=>{
-    const d=b.map((v,i)=>v-a[i]),length=Math.hypot(...d);for(let i=0;i<3;i++)d[i]/=length;
-    const seed=Math.abs(d[1])>.9?[1,0,0]:[0,1,0],u=[d[1]*seed[2]-d[2]*seed[1],d[2]*seed[0]-d[0]*seed[2],d[0]*seed[1]-d[1]*seed[0]],m=Math.hypot(...u);
-    for(let i=0;i<3;i++)u[i]/=m;const v=[d[1]*u[2]-d[2]*u[1],d[2]*u[0]-d[0]*u[2],d[0]*u[1]-d[1]*u[0]];
-    const point=(p,j)=>p.map((x,i)=>x+r*(u[i]*Math.cos(j*2*Math.PI/sides)+v[i]*Math.sin(j*2*Math.PI/sides)));
-    for(let j=0;j<sides;j++){const aa=point(a,j),ab=point(a,j+1),ba=point(b,j),bb=point(b,j+1);tri(aa,ab,ba,kind);tri(ba,ab,bb,kind);}
-  };
-  tube([0,-.55,0],[0,.56,0],.065,0,8);tube([0,.42,-.77],[0,.42,.77],.11,1,4);
-  for(const side of [-1,1]){
-    tube([0,-.52,0],[side*.32,-.61,0],.065,0,6);tube([side*.32,-.61,0],[side*.61,-.28,0],.065,0,6);
-    const a=[side*.46,-.43,-.18],b=[side*.46,-.43,.18],tip=[side*.67,-.16,0];
-    tri(a,b,tip,0);tri([side*.44,-.46,0],a,tip,0);tri(b,[side*.44,-.46,0],tip,0);
-  }
-  for(let i=0;i<12;i++)tube([Math.cos(i*Math.PI/6)*.12,.65+Math.sin(i*Math.PI/6)*.12,0],
-    [Math.cos((i+1)*Math.PI/6)*.12,.65+Math.sin((i+1)*Math.PI/6)*.12,0],.025,0,4);
+  // Every corner of the baked anchor, in its own frame. All iron: this anchor's stock is an iron bar.
+  for(let i=0;i<ANCHOR_IRON.length;i+=6)add([ANCHOR_IRON[i],ANCHOR_IRON[i+1],ANCHOR_IRON[i+2]],[ANCHOR_IRON[i+3],ANCHOR_IRON[i+4],ANCHOR_IRON[i+5]],0);
   const ironCount=data.length/8;
   const templateTube=(segment,sides,kind)=>{
     for(let j=0;j<sides;j++){

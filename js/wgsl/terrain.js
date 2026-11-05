@@ -1,6 +1,7 @@
 import { FRAME_WGSL, ATMO_CORE_WGSL } from './common.js';
 import { SKY_RENDER_FUNCS } from './sky.js';
 import { CLOUD_SAMPLE } from './clouds.js';
+import { STREET_FIELD_RANGE_M, STREET_FIELD_EDGE_M } from '../town-streets.js';
 
 // Procedurals need their sampling rate in material coordinates, just as image
 // textures need mip/anisotropic footprints. See pbr-book.org/4ed/Textures_and_Materials/Texture_Sampling_and_Antialiasing.
@@ -558,6 +559,8 @@ struct Land {domain:vec4f};
 struct NearLand {domain:vec4f,grid:vec4f};
 @group(0) @binding(12) var<uniform> nearTerrain:NearLand;
 @group(0) @binding(13) var nearAlbedo:texture_2d<f32>;
+@group(0) @binding(14) var townField:texture_2d<f32>;
+@group(0) @binding(15) var<uniform> townWindow:vec4f;
 ` + SKY_RENDER_FUNCS + CLOUD_SAMPLE + TERRAIN_FILTERING + TERRAIN_NEAR_MATERIAL + /* wgsl */ `
 struct LandVertex {
   @builtin(position) pos:vec4f,
@@ -989,6 +992,40 @@ fn landOpaque(in:LandVertex)->vec4f{
     let fissure=smoothstep(0.15,0.75,ridges);
     albedo=vec3f(0.095,0.068,0.038)*(0.76+fissure*0.12+barkNoise*0.18+in.kind.y*0.16);
     relief=(ridges-0.5)*0.014*(1.2-in.kind.y)*detailFade;roughness=0.91;
+  }
+  // A town's ways, from a distance field baked when it was laid out. Its red channel is how far
+  // this point lies outside a way, its green how the way is surfaced: earth, a rutted road, cobbles.
+  if(in.kind.x<2.5&&townWindow.z>0.0){
+    let townUV=(world.xz-townWindow.xy)/townWindow.z+.5;
+    if(all(townUV>vec2f(0.0))&&all(townUV<vec2f(1.0))){
+      let way=textureSampleLevel(townField,landSampler,townUV,0.0).rg;
+      if(way.r<.98){
+        let frayed=way.r*${STREET_FIELD_RANGE_M.toFixed(1)}-${STREET_FIELD_EDGE_M.toFixed(1)}+landFilteredNoise(world.xz*.6,footprint*.6)*.5*(1.0-way.g);
+        let soft=max(footprint,.14);
+        let onWay=1.0-smoothstep(-soft,soft,frayed);
+        let trodden=(1.0-smoothstep(0.0,2.4,frayed))*(1.0-onWay);
+        let wear=landFilteredNoise(world.xz*.33,footprint*.33);
+        let earth=mix(vec3f(.27,.215,.15),source,.22)*(1.0+wear*.16+landFilteredNoise(world.xz*3.1,footprint*3.1)*.08);
+        // A road's two wheel tracks run a pace either side of its middle.
+        let rutted=1.0-smoothstep(.2,.45,abs(way.g-.5));
+        let ruts=rutted*exp(-pow((frayed+.85)/.38,2.0))*(1.0-smoothstep(.06,.5,footprint));
+        var surface=earth*(1.0-ruts*.26);
+        var surfaceRelief=wear*.03-ruts*.05;
+        let paved=smoothstep(.6,.9,way.g);
+        if(paved>0.0){
+          let stoneFade=1.0-smoothstep(.015,.11,footprint);
+          var stones=vec2f(0.0,1.0);
+          if(stoneFade>0.0){stones=landStones(world.xz*4.4);}
+          let setts=vec3f(.235,.212,.187)*(1.0+wear*.12+stones.x*.22*stoneFade)*(1.0-(1.0-stones.y)*.5*stoneFade);
+          surface=mix(surface,setts,paved);
+          surfaceRelief=mix(surfaceRelief,(stones.y-.55)*.07*stoneFade,paved);
+        }
+        albedo=mix(albedo*(1.0-trodden*.2),surface,onWay);
+        relief=mix(relief,surfaceRelief,onWay);
+        roughness=mix(roughness,mix(.93,.82,paved),onWay);
+        canopyBackscatter*=1.0-onWay;
+      }
+    }
   }
   if(structDmg>0.005){
     let dmgW=clamp(structDmg,0.0,1.0);

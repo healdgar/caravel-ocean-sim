@@ -111,6 +111,25 @@ export function createCrewLODs(model){
   });
 }
 
+// A body a few dozen pixels tall needs little more than its silhouette and the colours of its clothes.
+export function createDistantCrewLOD(model,targetTriangles=320){
+  const {vertices,vertexCount,animator}=model;
+  // Regalia is too small to see at this size, and optional pieces would use up the triangles.
+  const reds=new Float32Array(vertices.buffer,vertices.byteOffset,vertexCount*15),kept=[];
+  for(let i=0;i<model.indices.length;i+=3){
+    const a=model.indices[i],b=model.indices[i+1],c=model.indices[i+2];
+    if(reds[a*15+6]<2&&reds[b*15+6]<2&&reds[c*15+6]<2)kept.push(a,b,c);
+  }
+  const indices=new Uint32Array(kept);
+  let lo=.02,hi=.4,best=null,bestDiff=Infinity;
+  for(let iter=0;iter<9;iter++){
+    const mid=(lo+hi)*.5,candidate=decimateCrewIndices(vertices,indices,vertexCount,animator,mid),tris=candidate.length/3,diff=Math.abs(tris-targetTriangles);
+    if(tris>=40&&diff<bestDiff){bestDiff=diff;best=candidate;}
+    if(tris>targetTriangles)lo=mid;else hi=mid;
+  }
+  return best??indices;
+}
+
 export const CREW_CULL_DISTANCE=420;
 const CREW_LOD_TAN_HALF_FOV=Math.tan(29*Math.PI/180);
 // How much nearer a narrow lens brings a body than the ordinary view would.

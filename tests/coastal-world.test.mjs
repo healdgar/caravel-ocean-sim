@@ -1984,7 +1984,3 @@ test('Blender-audited architectural models feature per-vertex 3D AO gradients, s
     assert.ok(smoothCastIronTris >= 250, `${fortPrefab} cannon barrels use smooth radial lathe normals (${smoothCastIronTris} smooth tris)`);
   }
 });
-
-
-
-

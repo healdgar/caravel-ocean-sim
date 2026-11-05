@@ -1,9 +1,24 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
+import {ANCHOR_IRON} from '../js/anchor-iron.js';
 import {createAnchorGPUTemplate,writeAnchorGPUState,createAnchorRenderer,ANCHOR_GPU_RODE_SPANS,ANCHOR_GPU_STATE_FLOATS} from '../js/anchor.js';
 import {ANCHOR_RENDER,ANCHOR_GPU_RENDER} from '../js/wgsl/anchor.js';
 import {anchorEquipment,anchorRodePoints,anchorFairlead,anchorEyeOffset} from '../js/anchor-state.js';
+
+test('the baked anchor stands in the frame the rode and the seabed rely on',()=>{
+  assert.equal(ANCHOR_IRON.length%18,0,'whole triangles of position and normal');
+  const triangles=ANCHOR_IRON.length/18;assert.ok(triangles<=400,`${triangles} triangles is over budget`);
+  let lowY=Infinity,highY=-Infinity,maxX=0,maxZ=0;
+  for(let i=0;i<ANCHOR_IRON.length;i+=6){
+    const x=ANCHOR_IRON[i],y=ANCHOR_IRON[i+1],z=ANCHOR_IRON[i+2];lowY=Math.min(lowY,y);highY=Math.max(highY,y);maxX=Math.max(maxX,Math.abs(x));maxZ=Math.max(maxZ,Math.abs(z));
+    assert.ok(Math.abs(Math.hypot(ANCHOR_IRON[i+3],ANCHOR_IRON[i+4],ANCHOR_IRON[i+5])-1)<.01,'unit normals');
+  }
+  assert.ok(Math.abs(lowY+.67)<.002,`crown at ${lowY}`);
+  assert.ok(highY>.65&&highY<.8,`the ring tops out at ${highY}, around the rode's eye at .65`);
+  assert.ok(maxX>.4&&maxX<.7,`arms reach ${maxX}`);assert.ok(maxZ>.4&&maxZ<.8,`stock reaches ${maxZ}`);
+  assert.equal(createAnchorGPUTemplate().ironCount,ANCHOR_IRON.length/6);
+});
 
 test('anchor topology is immutable unit iron and GPU tube/splash templates',()=>{
   const a=createAnchorGPUTemplate(),b=createAnchorGPUTemplate();

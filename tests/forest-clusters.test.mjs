@@ -124,3 +124,38 @@ test('cluster assets are written as literal paths, so the build publishes them',
     assert.ok(fs.existsSync(file),`${file} must exist`);
   }
 });
+
+function grownTree(species){
+  const dir='assets/forest-scenery/subtropical',manifest=JSON.parse(fs.readFileSync(`${dir}/manifest.json`,'utf8'));
+  const raw=zlib.gunzipSync(fs.readFileSync(`${dir}/vertices.bin.gz`)),vertices=new Float32Array(raw.buffer,raw.byteOffset,raw.length/4);
+  const rawIndices=zlib.gunzipSync(fs.readFileSync(`${dir}/indices.bin.gz`)),indices=new Uint32Array(rawIndices.buffer,rawIndices.byteOffset,rawIndices.length/4);
+  const p=manifest.prototypes.find(q=>q.species===species);
+  const positions=range=>{const out=[];for(let k=0;k<range.indexCount;k+=3){const v=indices[range.firstIndex+k]*14;out.push([vertices[v],vertices[v+1],vertices[v+2]]);}return out;};
+  return {p,wood:positions(p.wood),leaves:positions(p.leaf)};
+}
+const reachOf=([x,,z])=>Math.hypot(x,z);
+const furthest=points=>points.reduce((most,point)=>Math.max(most,reachOf(point)),0);
+
+test('a ceiba is a broad emergent on plank buttresses, with its leaves high and wide',()=>{
+  const {p,wood,leaves}=grownTree('ceiba');
+  assert.ok(p.crownRadius>=7,'its crown spreads far wider than the old column');
+  const low=leaves.filter(([,y])=>y<p.heightMetres*.5).length;
+  assert.ok(low<leaves.length*.02,`leaves belong in the crown, ${low} of ${leaves.length} hang low`);
+  assert.ok(furthest(leaves)>p.crownRadius*.8,'the crown reaches its stated radius');
+  const buttress=wood.filter(([,y])=>y<.6);
+  assert.ok(furthest(buttress)>1.5,'buttresses run out from the foot of the trunk');
+  const bole=wood.filter(([,y])=>y>6&&y<8);
+  assert.ok(furthest(bole)<.8,'and are gone a few metres up');
+});
+
+test('a mangrove is a low dome on prop roots that reach the ground',()=>{
+  const {p,wood,leaves}=grownTree('mangrove');
+  assert.ok(p.heightMetres<10,'mangroves stay low');
+  assert.ok(p.crownRadius>=3.5,'with a broad crown');
+  const feet=wood.filter(([,y])=>y<0);
+  assert.ok(feet.length>20,'prop roots reach the ground');
+  const out=feet.filter(point=>reachOf(point)>1.2);
+  assert.ok(out.length>10,'well out from the stems');
+  const low=leaves.filter(([,y])=>y<1.5).length;
+  assert.ok(low<leaves.length*.02,`the roots stand clear of the leaves: ${low} of ${leaves.length} hang low`);
+});

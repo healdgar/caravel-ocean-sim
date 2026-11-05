@@ -40,24 +40,24 @@
   },
   "files": {
     "vertices.bin": {
-      "bytes": 7357504,
-      "sha256": "8bf10e788e98de9448f20e77c3f39bdbcca50f239d9b4364f43071de3f8660d7",
+      "bytes": 19252240,
+      "sha256": "fc1c3b64fa2f9df90a98ceaa67baccc9257090a37945fc7c6392a2a51d49e1ba",
       "gzip": {
         "file": "vertices.bin.gz",
-        "bytes": 3036645,
-        "sha256": "46629a20f70497c522f7889e313b7ed1a6840c7e469bb4afc61e653c60d2ac55"
+        "bytes": 5343136,
+        "sha256": "ab7dd725d34abfa2d6931f004707bebd983383e3b677c467dece3c844e475f67"
       },
-      "vertexCount": 131384
+      "vertexCount": 343790
     },
     "indices.bin": {
-      "bytes": 1137096,
-      "sha256": "2535cb65f54ad7c8c7202c98f5c9969f0c745c18224b9d8c00f77a4cc634358d",
+      "bytes": 2965272,
+      "sha256": "404ec785fd2fc49e83403b8fd60890debb8e76d518d5436255ea7a1494ff5ef3",
       "gzip": {
         "file": "indices.bin.gz",
-        "bytes": 302302,
-        "sha256": "1f2254775530f62e673ac0277851175d7978724dfb41af4825c85c5df2c9ae39"
+        "bytes": 789155,
+        "sha256": "9a8ea62124ddb1d4f7c3a67a6c6060493a772c3cc06c3b5b7e7f6d2b078771aa"
       },
-      "indexCount": 284274
+      "indexCount": 741318
     },
     "roots.bin": {
       "bytes": 1344,
@@ -78,21 +78,21 @@
       "heightMetres": 13.6,
       "crownRadiusMetres": 3.9,
       "low": [
-        -4.61386251449585,
-        -0.15000000596046448,
-        -5.768512725830078
+        -2.779347257297923,
+        -0.22451596723606113,
+        -3.416525083438296
       ],
       "high": [
-        5.539862632751465,
-        15.189079284667969,
-        4.871178150177002
+        3.281102140083079,
+        23.196969696969695,
+        3.0938299501395505
       ],
       "centre": [
-        0.4630000591278076,
-        7.519539639353752,
-        -0.4486672878265381
+        0.25087744139257806,
+        11.486226864866817,
+        -0.16134756664937266
       ],
-      "radius": 10.625305993088116,
+      "radius": 12.526768939755014,
       "firstRoot": 0,
       "rootCount": 16,
       "wood": {
@@ -263,21 +263,21 @@
       "heightMetres": 10.4,
       "crownRadiusMetres": 4.8,
       "low": [
-        -5.692321300506592,
-        -0.15000000596046448,
-        -6.051856994628906
+        -3.5074550491998435,
+        -0.23967906832695013,
+        -3.728991204840261
       ],
       "high": [
         4.78551200309407,
-        12.407395069050542,
-        4.805424690246582
+        17.548484848484847,
+        4.076086211254677
       ],
       "centre": [
-        -0.45340464870626107,
-        6.128697531545039,
-        -0.6232161521911621
+        0.6390284769471131,
+        8.654402890078948,
+        0.17354750320720802
       ],
-      "radius": 9.815214304750134,
+      "radius": 10.560673647228107,
       "firstRoot": 16,
       "rootCount": 6,
       "wood": {
@@ -445,36 +445,36 @@
       "id": 2,
       "species": "ceiba",
       "age": 24,
-      "heightMetres": 16.486,
-      "crownRadiusMetres": 2.93,
+      "heightMetres": 18.5,
+      "crownRadiusMetres": 11,
       "low": [
-        -6.6636,
-        -0.8018,
-        -7.2488
+        -12.1124735111905,
+        -0.5060446197143166,
+        -12.827126784618448
       ],
       "high": [
-        7.0741,
-        16.7166,
-        7.0323
+        10.96838122644604,
+        29.121212121212125,
+        10.813968983932599
       ],
       "centre": [
-        0.2053,
-        7.9574,
-        -0.1083
+        -0.5720461423722298,
+        14.307583750748904,
+        -1.0065789003429249
       ],
-      "radius": 13.2257,
+      "radius": 22.188970269879878,
       "firstRoot": 22,
       "rootCount": 2,
       "wood": {
         "firstIndex": 87000,
-        "indexCount": 12087
+        "indexCount": 62784
       },
       "leaf": {
-        "firstIndex": 99087,
-        "indexCount": 58368
+        "firstIndex": 149784,
+        "indexCount": 403200
       },
       "far": {
-        "firstIndex": 157455,
+        "firstIndex": 552984,
         "indexCount": 132
       },
       "nativeMaterials": [
@@ -546,8 +546,8 @@
           "name": "foliage_0",
           "albedo": {
             "file": "ceiba-foliage-0-albedo.png",
-            "bytes": 14763,
-            "sha256": "c9709a079f03c2465d2002b1cfd3cd248ffbbe1e53073123c3a3097c6900edca",
+            "bytes": 12652,
+            "sha256": "7a32df4f858d31967c50140ece9a55f32a430abd5cd0df784e895c79ac863e2a",
             "encoding": "srgb"
           },
           "normal": {
@@ -572,8 +572,8 @@
           "name": "foliage_1",
           "albedo": {
             "file": "ceiba-foliage-1-albedo.png",
-            "bytes": 11971,
-            "sha256": "d78c7ade6be289905c2a97d61316d4ebe7f0af63c59ea2ad9516abd7323ce01a",
+            "bytes": 10008,
+            "sha256": "93ad7f3d841bb3cf68e46b4eb9e8783e2cd6bc216c0a720e7a375593e33a97ec",
             "encoding": "srgb"
           },
           "normal": {
@@ -598,8 +598,8 @@
           "name": "foliage_2",
           "albedo": {
             "file": "ceiba-foliage-2-albedo.png",
-            "bytes": 14503,
-            "sha256": "b786b41aaaeadc1a950cf45ca1358455065027b4a2daad569720472680ab340f",
+            "bytes": 12893,
+            "sha256": "de875ad975e793fdea78f5cdd426abfbaf318879c60cc82b547e791bc6922ff1",
             "encoding": "srgb"
           },
           "normal": {
@@ -623,43 +623,43 @@
       ],
       "geometryErrorSupported": false,
       "unverifiedGeometryErrorMetres": 11.7473,
-      "crownRadius": 2.93,
-      "basalRadius": 1.35
+      "crownRadius": 11,
+      "basalRadius": 1.1
     },
     {
       "id": 3,
       "species": "mangrove",
       "age": 24,
-      "heightMetres": 9.576,
-      "crownRadiusMetres": 1.651,
+      "heightMetres": 7.8,
+      "crownRadiusMetres": 4.7,
       "low": [
-        -3.8536,
-        -0.2177,
-        -3.4424
+        -4.706758753498177,
+        -0.41827290581597254,
+        -4.364841238187254
       ],
       "high": [
-        3.6751,
-        9.6804,
-        3.6604
+        5.420820408375408,
+        12.348484848484846,
+        3.7343808805012704
       ],
       "centre": [
-        -0.0893,
-        4.7313,
-        0.109
+        0.35703082743861536,
+        5.965105971334436,
+        -0.31523017884299187
       ],
-      "radius": 7.1617,
+      "radius": 9.098837318098253,
       "firstRoot": 24,
       "rootCount": 4,
       "wood": {
-        "firstIndex": 157587,
-        "indexCount": 10395
+        "firstIndex": 553116,
+        "indexCount": 51990
       },
       "leaf": {
-        "firstIndex": 167982,
-        "indexCount": 116160
+        "firstIndex": 605106,
+        "indexCount": 136080
       },
       "far": {
-        "firstIndex": 284142,
+        "firstIndex": 741186,
         "indexCount": 132
       },
       "nativeMaterials": [
@@ -731,8 +731,8 @@
           "name": "foliage_0",
           "albedo": {
             "file": "mangrove-foliage-0-albedo.png",
-            "bytes": 5892,
-            "sha256": "5ef43b9eb173e75d73b8538ed06253072b8f97bacf463b4164e10f0f0a344c17",
+            "bytes": 10412,
+            "sha256": "8a3a95c9a439bceefb469da3230b32ea850f80c14247f27ee939cf95ad58e530",
             "encoding": "srgb"
           },
           "normal": {
@@ -757,8 +757,8 @@
           "name": "foliage_1",
           "albedo": {
             "file": "mangrove-foliage-1-albedo.png",
-            "bytes": 6110,
-            "sha256": "56442b371d9849c01c77023f946342d284757663498b5a575b7961f976106e36",
+            "bytes": 10299,
+            "sha256": "6f18d947513aaef730c3601c277815cdb183d43cef83368ebfc7b609ced92e8e",
             "encoding": "srgb"
           },
           "normal": {
@@ -783,8 +783,8 @@
           "name": "foliage_2",
           "albedo": {
             "file": "mangrove-foliage-2-albedo.png",
-            "bytes": 6090,
-            "sha256": "eb70752545916e8d98b1b3d4903b0dc7a48b57d58bd0f630da005ee46f02c970",
+            "bytes": 11768,
+            "sha256": "734c72ece16bdc0ad8a6783dcd94b5636b693b838fabee71774807bcf090cd20",
             "encoding": "srgb"
           },
           "normal": {
@@ -808,8 +808,8 @@
       ],
       "geometryErrorSupported": false,
       "unverifiedGeometryErrorMetres": 6.652,
-      "crownRadius": 1.651,
-      "basalRadius": 1.15
+      "crownRadius": 4.7,
+      "basalRadius": 0.55
     }
   ],
   "volume": {

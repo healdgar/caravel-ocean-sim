@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-// Grows the two palms of the subtropical forest pack: a royal palm with its smooth pale column, green
-// crownshaft and plumed fronds, and a coconut with its leaning ringed trunk and drooping fronds.
-// Ceiba, mangrove and every far model in the pack keep their geometry.
-//   python3 scripts/paint-palm-leaflets.py assets/forest-scenery/subtropical
-//   node scripts/grow-palms.mjs
+// Grows the subtropical forest pack: a royal palm with its pale column, green crownshaft and plumed
+// fronds; a coconut with its leaning ringed trunk and drooping fronds; a ceiba, a buttressed emergent
+// with a flat spreading crown; and a red mangrove, a low dome on arching prop roots.
+//   python3 scripts/paint-tropical-leaves.py assets/forest-scenery/subtropical
+//   node scripts/grow-tropical-trees.mjs
+//   node scripts/prepare-forest-clusters.mjs subtropical
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import zlib from 'node:zlib';
@@ -50,7 +51,8 @@ function tube(mesh, rings, sides, uRepeat, vPerMetre, shade) {
     if (r) length += Math.hypot(...sub(ring.at, rings[r - 1].at));
     for (let k = 0; k <= sides; k++) {
       const angle = (k / sides) * Math.PI * 2, out = add(mul(side, Math.cos(angle)), mul(other, Math.sin(angle)));
-      mesh.vertex(add(ring.at, mul(out, ring.radius)), out, WOOD, shade, [(k / sides) * uRepeat, length * vPerMetre], ring.colour, BARK);
+      const reach = ring.radius * (ring.shape ? ring.shape(angle) : 1);
+      mesh.vertex(add(ring.at, mul(out, reach)), out, WOOD, shade, [(k / sides) * uRepeat, length * vPerMetre], ring.colour, BARK);
     }
   });
   const first = mesh.vertices.length / STRIDE - (rings.length * (sides + 1)), rowSize = sides + 1;
@@ -131,7 +133,7 @@ function growRoyalPalm() {
     const age = f / (FRONDS - 1), elevation = (78 - 88 * age) * (Math.PI / 180);
     frond({ mesh }, { mesh: leaves }, leafIndices, rng, add(crown, [0, -0.5 * age, 0]), f * GOLDEN, elevation, { frondLength: 3.7, droop: 1.15, rachisRadius: 0.055, leafletPairs: 78, leafletLength: 0.82, leafletWidth: 0.05, leafletSag: 0.5, plumes: true }, age);
   }
-  return { mesh, leaves, leafIndices, height, crownRadius: 3.9, basalRadius: 0.36 };
+  return { mesh, leaves, leafIndices, height, crownRadius: 3.9, basalRadius: 0.36, far: { crownLow: height * 0.72, crownHigh: height * 1.1, crownRadius: 3.9, trunkRadius: 0.26, trunkHeight: height * 0.86, flare: 1.12 } };
 }
 
 function growCoconut() {
@@ -152,10 +154,131 @@ function growCoconut() {
     const age = f / (FRONDS - 1), elevation = (70 - 95 * age) * (Math.PI / 180);
     frond({ mesh }, { mesh: leaves }, leafIndices, rng, add(crown, [0, -0.35 * age, 0]), f * GOLDEN, elevation, { frondLength: 4.5, droop: 1.45, rachisRadius: 0.05, leafletPairs: 62, leafletLength: 0.92, leafletWidth: 0.055, leafletSag: 0.85, plumes: false }, age);
   }
-  return { mesh, leaves, leafIndices, height, crownRadius: 4.8, basalRadius: 0.34 };
+  return { mesh, leaves, leafIndices, height, crownRadius: 4.8, basalRadius: 0.34, far: { crownLow: height * 0.62, crownHigh: height * 1.08, crownRadius: 4.2, trunkRadius: 0.2, trunkHeight: height * 0.9, flare: 1.12 } };
 }
 
-const grown = { royal_palm: growRoyalPalm(), palm: growCoconut() };
+// A limb or twig: a curving path, bent by a pull upward and a little wander, as a tapered tube.
+function limb(mesh, rng, { start, direction, length, radius, tip = 0.25, segments, sides, pull = 0, wander = 0.2, colour, shade }) {
+  const rings = [], points = [];
+  let at = start, along = unit(direction);
+  for (let s = 0; s <= segments; s++) {
+    const t = s / segments;
+    rings.push({ at, radius: radius * (1 - (1 - tip) * t), colour });
+    points.push({ at, along, t });
+    along = unit(add(add(along, [0, pull / segments, 0]), [(rng() - 0.5) * wander, (rng() - 0.5) * wander * 0.4, (rng() - 0.5) * wander]));
+    at = add(at, mul(along, length / segments));
+  }
+  tube(mesh, rings, sides, 1, 1 / Math.max(0.2, radius * 8), shade);
+  return points;
+}
+const pointOn = (points, t) => points[Math.min(points.length - 1, Math.round(t * (points.length - 1)))];
+function splay(direction, rng, spread, lift = 0) {
+  const side = unit(cross(direction, Math.abs(direction[1]) > 0.9 ? [1, 0, 0] : UP)), other = cross(direction, side);
+  const angle = rng() * Math.PI * 2, tilt = Math.tan(spread) * (0.6 + 0.4 * rng());
+  return unit(add(add(direction, add(mul(side, Math.cos(angle) * tilt), mul(other, Math.sin(angle) * tilt))), [0, lift, 0]));
+}
+// How much open sky a leaf sees: dark deep in the crown, bright on its outer shell.
+function crownLight(at, crown) {
+  const d = [(at[0] - crown.centre[0]) / crown.radius, (at[1] - crown.centre[1]) / crown.depth, (at[2] - crown.centre[2]) / crown.radius];
+  const out = Math.min(1, Math.hypot(d[0], d[1], d[2]));
+  return { shade: 0.42 + 0.46 * out * out, outward: unit([d[0], d[1] + 0.25, d[2]]) };
+}
+
+function growCeiba() {
+  const rng = random(37), height = 18.5, mesh = new Mesh(), leaves = new Mesh(), leafIndices = [];
+  const bole = height * 0.64, rings = [], FINS = 6, FIN_STEPS = 34, colour = [0.82, 0.82, 0.74];
+  for (let r = 0; r <= FIN_STEPS; r++) {
+    const t = r / FIN_STEPS, y = t * t * bole, radius = 0.34 + 0.2 * (1 - t) ** 1.5;
+    // Plank buttresses: thin fins running out from the trunk, gone a few metres up.
+    const fin = 4.2 * Math.exp(-y / 1.25);
+    rings.push({ at: [0.02 * Math.sin(y * 0.4), y - 0.25, 0.02 * Math.cos(y * 0.3)], radius, colour, shape: (angle) => 1 + fin * Math.max(0, Math.cos(FINS * angle / 2 + 0.6)) ** 10 });
+  }
+  tube(mesh, rings, 36, 3, 0.35, 0.56);
+  const crown = { centre: [0, height * 0.82, 0], radius: 11, depth: 3.6 };
+  const barkColour = [0.7, 0.7, 0.62];
+  const TIERS = 5;
+  for (let tier = 0; tier < TIERS; tier++) {
+    const y = bole * (0.8 + 0.2 * (tier / (TIERS - 1)));
+    const count = 4, offset = tier * 1.1;
+    for (let n = 0; n < count; n++) {
+      const azimuth = offset + (n / count) * Math.PI * 2 + (rng() - 0.5) * 0.5, elevation = (8 + tier * 6 + rng() * 8) * (Math.PI / 180);
+      const direction = [Math.cos(azimuth) * Math.cos(elevation), Math.sin(elevation), Math.sin(azimuth) * Math.cos(elevation)];
+      const main = limb(mesh, rng, { start: [0, y, 0], direction, length: 6.4 + rng() * 2.4 - tier * 0.5, radius: 0.2 - tier * 0.015, segments: 7, sides: 6, pull: 0.08, wander: 0.09, colour: barkColour, shade: 0.5 });
+      const SIDE = 7;
+      for (let b = 0; b < SIDE; b++) {
+        const on = pointOn(main, 0.32 + (0.68 * b) / (SIDE - 1));
+        const branch = limb(mesh, rng, { start: on.at, direction: splay(on.along, rng, 0.75, 0.08), length: 2.4 + rng() * 1.5, radius: 0.05, segments: 3, sides: 4, pull: 0.04, wander: 0.2, colour: barkColour, shade: 0.54 });
+        for (let w = 0; w < 8; w++) {
+          const near = pointOn(branch, 0.15 + 0.85 * (w / 7));
+          const twig = limb(mesh, rng, { start: near.at, direction: splay(near.along, rng, 0.8, 0.06), length: 0.9 + rng() * 0.6, radius: 0.016, segments: 2, sides: 3, wander: 0.2, colour: [0.5, 0.52, 0.34], shade: 0.6 });
+          // Hands of leaflets, as a ceiba's palmate leaves are.
+          for (let hand = 0; hand < 5; hand++) {
+            const node = add(pointOn(twig, 0.2 + 0.2 * hand).at, [0, 0.02, 0]);
+            const { shade, outward } = crownLight(node, crown);
+            const material = LEAFLET[Math.floor(rng() * LEAFLET.length)], turn = rng() * Math.PI * 2;
+            for (let f = 0; f < 6; f++) {
+              const a = turn + (f / 6) * Math.PI * 2;
+              const dir = unit([Math.cos(a), -0.12 + rng() * 0.2, Math.sin(a)]);
+              const across = unit(cross(dir, UP));
+              const tint = 0.9 + rng() * 0.15;
+              leaflet(leaves, leafIndices, node, dir, across, 0.48 + rng() * 0.12, 0.18, 0.22, [tint, tint, tint * 0.92], material, shade, outward);
+            }
+          }
+        }
+      }
+    }
+  }
+  return { mesh, leaves, leafIndices, height, crownRadius: crown.radius, basalRadius: 1.1, far: { crownLow: height * 0.66, crownHigh: height * 1.02, crownRadius: crown.radius, trunkRadius: 0.5, trunkHeight: bole, flare: 1.38 } };
+}
+
+function growMangrove() {
+  const rng = random(53), height = 7.8, mesh = new Mesh(), leaves = new Mesh(), leafIndices = [];
+  const crown = { centre: [0, 5.1, 0], radius: 4.7, depth: 2.9 };
+  const barkColour = [1, 0.86, 0.74], rootColour = [0.92, 0.74, 0.6];
+  const STEMS = 3, stems = [];
+  for (let s = 0; s < STEMS; s++) {
+    const a = (s / STEMS) * Math.PI * 2 + 0.4, lean = 0.22 + rng() * 0.18;
+    stems.push(limb(mesh, rng, { start: [Math.cos(a) * 0.12, 0.55, Math.sin(a) * 0.12], direction: [Math.cos(a) * lean, 1, Math.sin(a) * lean], length: 3.2 + rng() * 0.7, radius: 0.13, tip: 0.5, segments: 5, sides: 7, pull: -0.1, wander: 0.2, colour: barkColour, shade: 0.5 }));
+  }
+  // Prop roots arch out of the stems and down into the mud, which is what makes it a mangrove.
+  const ROOTS = 20;
+  for (let r = 0; r < ROOTS; r++) {
+    const stem = stems[r % STEMS], from = pointOn(stem, rng() * 0.42).at, a = (r / ROOTS) * Math.PI * 2 + rng() * 0.3;
+    const reach = 1.5 + rng() * 2.1, control = [from[0] + Math.cos(a) * reach * 0.55, from[1] + 0.5, from[2] + Math.sin(a) * reach * 0.55];
+    const end = [Math.cos(a) * reach, -0.35, Math.sin(a) * reach], rings = [], STEPS = 8, thick = 0.04 + rng() * 0.02;
+    for (let k = 0; k <= STEPS; k++) {
+      const t = k / STEPS, u = 1 - t;
+      rings.push({ at: [u * u * from[0] + 2 * u * t * control[0] + t * t * end[0], u * u * from[1] + 2 * u * t * control[1] + t * t * end[1], u * u * from[2] + 2 * u * t * control[2] + t * t * end[2]], radius: thick * (1 + 0.5 * t), colour: rootColour });
+    }
+    tube(mesh, rings, 4, 1, 1.2, 0.42);
+  }
+  // A dense low dome: limbs from each stem, branches, then twigs carrying thick leaves in pairs.
+  for (const stem of stems) {
+    for (let l = 0; l < 6; l++) {
+      const on = pointOn(stem, 0.5 + 0.5 * (l / 5));
+      const main = limb(mesh, rng, { start: on.at, direction: splay(on.along, rng, 0.95, 0.05), length: 2.1 + rng() * 1.1, radius: 0.055, segments: 4, sides: 5, pull: 0.05, wander: 0.32, colour: barkColour, shade: 0.5 });
+      for (let b = 0; b < 7; b++) {
+        const near = pointOn(main, 0.15 + 0.85 * (b / 6));
+        const branch = limb(mesh, rng, { start: near.at, direction: splay(near.along, rng, 0.85, 0.05), length: 1 + rng() * 0.7, radius: 0.02, segments: 2, sides: 3, wander: 0.3, colour: barkColour, shade: 0.55 });
+        for (let w = 0; w < 9; w++) {
+          const twig = limb(mesh, rng, { start: pointOn(branch, 0.1 + 0.9 * (w / 8)).at, direction: splay(near.along, rng, 0.9, 0.1), length: 0.48 + rng() * 0.3, radius: 0.008, segments: 2, sides: 3, wander: 0.2, colour: [0.42, 0.42, 0.26], shade: 0.6 });
+          const material = LEAFLET[Math.floor(rng() * LEAFLET.length)];
+          for (let pair = 0; pair < 5; pair++) {
+            const point = pointOn(twig, 0.2 + (0.8 * pair) / 4), { shade, outward } = crownLight(point.at, crown);
+            for (const hand of [-1, 1]) {
+              const dir = unit(add(mul(unit(cross(point.along, UP)), hand), mul(point.along, 0.75)));
+              const across = unit(cross(dir, UP)), tint = 0.92 + rng() * 0.12;
+              leaflet(leaves, leafIndices, point.at, dir, across, 0.38 + rng() * 0.08, 0.2, 0.12, [tint, tint, tint], material, shade, outward);
+            }
+          }
+        }
+      }
+    }
+  }
+  return { mesh, leaves, leafIndices, height, crownRadius: crown.radius, basalRadius: 0.55, far: { crownLow: 2.6, crownHigh: height, crownRadius: crown.radius, trunkRadius: 0.3, trunkHeight: 3, flare: 1.38 } };
+}
+
+const grown = { royal_palm: growRoyalPalm(), palm: growCoconut(), ceiba: growCeiba(), mangrove: growMangrove() };
 const vertices = [], indices = [];
 const appendOld = (range, remap) => {
   const first = indices.length;
@@ -166,6 +289,27 @@ const appendOld = (range, remap) => {
   }
   return { ...range, firstIndex: first };
 };
+// The far model is a small dome on a post, which the far shader widens and squashes. These undo that
+// so that it matches the grown tree's real crown, and it holds the same size when the tree hands over.
+function fitFarModel(far, fit) {
+  const used = [...new Set(Array.from({ length: far.indexCount }, (_, k) => indices[far.firstIndex + k]))];
+  const WOOD_KIND = 3.5;
+  const crown = used.filter((v) => vertices[v * STRIDE + 6] >= WOOD_KIND), post = used.filter((v) => vertices[v * STRIDE + 6] < WOOD_KIND);
+  const reach = (list) => Math.max(...list.map((v) => Math.hypot(vertices[v * STRIDE], vertices[v * STRIDE + 2])), 1e-3);
+  const heights = (list) => list.map((v) => vertices[v * STRIDE + 1]);
+  const crownReach = reach(crown), crownLow = Math.min(...heights(crown)), crownHigh = Math.max(...heights(crown));
+  for (const v of crown) {
+    const at = v * STRIDE, t = (vertices[at + 1] - crownLow) / Math.max(crownHigh - crownLow, 1e-3);
+    vertices[at] *= fit.crownRadius / (crownReach * fit.flare); vertices[at + 2] *= fit.crownRadius / (crownReach * fit.flare);
+    vertices[at + 1] = (fit.crownLow + (fit.crownHigh - fit.crownLow) * t + 0.35) / 0.66;
+  }
+  const postReach = reach(post), postHigh = Math.max(...heights(post));
+  for (const v of post) {
+    const at = v * STRIDE;
+    vertices[at] *= fit.trunkRadius / (postReach * 2.6); vertices[at + 2] *= fit.trunkRadius / (postReach * 2.6);
+    vertices[at + 1] *= fit.trunkHeight / (Math.max(postHigh, 1e-3) * 0.72);
+  }
+}
 const appendNew = (mesh, list) => {
   const base = vertices.length / STRIDE, first = indices.length;
   for (const v of mesh.vertices) vertices.push(v);
@@ -174,12 +318,10 @@ const appendNew = (mesh, list) => {
 };
 for (const p of manifest.prototypes) {
   const remap = new Map(), palm = grown[p.species];
-  if (!palm) {
-    p.wood = appendOld(p.wood, remap); p.leaf = appendOld(p.leaf, remap); p.far = appendOld(p.far, remap);
-    continue;
-  }
+  if (!palm) throw Error(`No growth recipe for ${p.species}`);
   const wood = appendNew(palm.mesh, palm.mesh.indices), leaf = appendNew(palm.leaves, palm.leafIndices);
   p.wood = { ...p.wood, ...wood }; p.leaf = { ...p.leaf, ...leaf }; p.far = appendOld(p.far, remap);
+  fitFarModel(p.far, palm.far);
   const low = [Infinity, Infinity, Infinity], high = [-Infinity, -Infinity, -Infinity];
   for (const m of [palm.mesh, palm.leaves]) for (let i = 0; i < m.vertices.length; i += STRIDE) for (let a = 0; a < 3; a++) { low[a] = Math.min(low[a], m.vertices[i + a]); high[a] = Math.max(high[a], m.vertices[i + a]); }
   for (let k = 0; k < p.far.indexCount; k++) {
@@ -196,6 +338,7 @@ for (const p of manifest.prototypes) {
     material.albedo.bytes = bytes.length; material.albedo.sha256 = createHash('sha256').update(bytes).digest('hex');
   }
 }
+const certified = { from: { vertices: manifest.files['vertices.bin'].sha256, indices: manifest.files['indices.bin'].sha256 } };
 const receipt = (name, data, count, countKey) => {
   const bytes = Buffer.from(data.buffer, data.byteOffset, data.byteLength), gz = zlib.gzipSync(bytes, { level: 9 });
   fs.writeFileSync(`${DIR}/${name}.gz`, gz);
@@ -203,5 +346,9 @@ const receipt = (name, data, count, countKey) => {
 };
 receipt('vertices.bin', Float32Array.from(vertices), vertices.length / STRIDE, 'vertexCount');
 receipt('indices.bin', Uint32Array.from(indices), indices.length, 'indexCount');
+// The loader skips its long geometry checks for streams it recognises, so it must recognise these.
+let loader = fs.readFileSync('js/forest-scenery.js', 'utf8');
+loader = loader.replace(certified.from.vertices, manifest.files['vertices.bin'].sha256).replace(certified.from.indices, manifest.files['indices.bin'].sha256);
+fs.writeFileSync('js/forest-scenery.js', loader);
 fs.writeFileSync(`${DIR}/manifest.json`, `${JSON.stringify(manifest, null, 2)}\n`);
 console.log('vertices', vertices.length / STRIDE, 'indices', indices.length, 'sha', manifest.files['vertices.bin'].sha256.slice(0, 12));

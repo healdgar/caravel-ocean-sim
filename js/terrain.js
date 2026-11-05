@@ -11,9 +11,11 @@ import {loadForestScenery,createForestRenderer,FOREST_VERTEX_WGSL,FOREST_ASSETS,
 import {loadForestMass,createForestMassRenderer,forestMiddleWoodPartition,FOREST_MASS_VERTEX_WGSL} from './forest-mass.js';
 import {loadForestMiddle,FOREST_MIDDLE_ASSETS,SUBTROPICAL_FOREST_MIDDLE_ASSETS} from './forest-middle.js';
 import {bakeBuildingImpactDeformations} from './part-assembly.js';
+import {streetEdgeAt} from './town-streets.js';
 
 import {
   portClearanceEnvelope,
+  PLANT_STREET_GAP_M,
   runLandfallDiscoveryPipeline,
   build1550HistoricalTerritoryPack,
   detectCoastalContinuationDirs,
@@ -38,7 +40,8 @@ function hash32Forest(value) {
 }
 
 const FORESHORE_PALMS_MAX = 520;
-// The direction the grown coconut's trunk leans, from scripts/grow-palms.mjs.
+const GROUND_COVER_STREET_GAP_M = 0.4;
+// The direction the grown coconut's trunk leans, from scripts/grow-tropical-trees.mjs.
 const COCONUT_LEAN_RADIANS = Math.atan2(0.5, 1.5);
 export function retargetForestPackToProcedural(
   forestPack,
@@ -183,6 +186,7 @@ export function retargetForestPackToProcedural(
           !port.hasIndigenousSettlement &&
           Math.hypot(x - port.center.x, z - port.center.z) < port.clearRadius * 0.38;
         if (clearEnv || clearRad) return -1;
+        if (streetEdgeAt(port.streets, x, z) < PLANT_STREET_GAP_M) return -1;
       }
 
       const gy = sampleSecGround(x, z);
@@ -759,7 +763,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       groundWanted=groundPatches.filter(patch=>!groundResident.has(patch)&&distanceOf(patch)<GROUND_RESIDENT_M).sort((a,b)=>distanceOf(b)-distanceOf(a));
     }
     for(let i=0;i<GROUND_PATCHES_PER_FRAME&&groundWanted.length&&groundFreeBlocks.length;i++){
-      const patch=groundWanted.pop(),block=groundFreeBlocks.pop(),perVariant=groundCoverInstances(patch,activeRegion,groundSample,biome);
+      const patch=groundWanted.pop(),block=groundFreeBlocks.pop(),perVariant=groundCoverInstances(patch,activeRegion,groundSample,biome,(x,z)=>streetEdgeAt(proceduralPack?.port?.streets,x,z)>=GROUND_COVER_STREET_GAP_M);
       const floats=new Float32Array(groundBlock*8),slotGroups=new Uint32Array(groundBlock).fill(0xffffffff);let slot=0;
       perVariant.forEach((data,variant)=>{for(let k=0;k<data.length;k+=8){floats.set(data.subarray(k,k+8),slot*8);slotGroups[slot++]=variant;}});
       groundCull.setInstances(block*groundBlock,floats,slotGroups);groundResident.set(patch,block);
@@ -844,13 +848,23 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // Auto layouts therefore correctly omit that binding instead of retaining a
   // dummy sample that would defeat the mobile opaque/feedback separation.
   const opaqueResources=resources.filter(([binding])=>binding!==10);
-  const nearResources=[...opaqueResources,[12,{buffer:nearDomain}],[13,nearAlbedo.createView()]];
+  // The town's ways as a distance field. A coast without a town binds an empty one.
+  const townField=streets=>{
+    const size=streets?.size??1;
+    const texture=device.createTexture({label:'town ways',size:[size,size],format:'rg8unorm',usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST});
+    device.queue.writeTexture({texture},streets?.field??new Uint8Array([255,0]),{bytesPerRow:size*2},[size,size]);
+    const window=buffer(new Float32Array(streets?[streets.window.x,streets.window.z,streets.window.span,0]:[0,0,0,0]),GPUBufferUsage.UNIFORM,'town ways window');
+    return {texture,window,resources:[[14,texture.createView()],[15,{buffer:window}]]};
+  };
+  let activeTownField=townField(proceduralPack?.port?.streets);
+  let nearResources=[...opaqueResources,[12,{buffer:nearDomain}],[13,nearAlbedo.createView()],...activeTownField.resources];
   const leafResources=resources.filter(([binding])=>binding!==9&&binding!==11);
   const groups=[bind(terrainPipe,nearResources),bind(opaqueTreePipe,nearResources),bind(treePipe,leafResources)];
   const groundGroup=bind(groundPipe,opaqueResources);
   const cloudGroups=[terrainPipe,opaqueTreePipe,treePipe].map(pipe=>clouds.bindVolume(pipe));
   const [submerged,submergedGround]=await submergedPipesPromise;
-  const submergedGroup=submerged?.bindGroup(nearResources.map(([binding,resource])=>({binding,resource}))),submergedClouds=submerged?clouds.bindVolume(submerged.pipeline):null;
+  let submergedGroup=submerged?.bindGroup(nearResources.map(([binding,resource])=>({binding,resource})));
+  const submergedClouds=submerged?clouds.bindVolume(submerged.pipeline):null;
   const submergedGroundGroup=submergedGround?.bindGroup(opaqueResources.map(([binding,resource])=>({binding,resource})));
   const lightGroup=bind(lightPipe,[[0,{buffer:frameUBO}],[4,elevation.createView()],[5,lighting.createView()],[6,{buffer:uniform}],[7,{buffer:nearDomain}],[8,{buffer:nearElevation}]]);
   const cloudLight=clouds.bindVolume(lightPipe,true);
@@ -938,6 +952,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     rec.uniform?.destroy?.();
     rec.albedo?.destroy?.();
     rec.biomeTexture?.destroy?.();
+    rec.townField?.texture.destroy();rec.townField?.window.destroy();
   }
 
   function buildSectionGPURecord(secPack){
@@ -971,11 +986,13 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST,
     });
     device.queue.writeTexture({texture:sBiome},secPack.biome,{bytesPerRow:sReg.biomeSize},[sReg.biomeSize,sReg.biomeSize]);
+    const sTownField=townField(secPack.port?.streets);
     const secOpaqueResources=[
       [0,{buffer:frameUBO}],[1,transView],[2,skyView],[3,sampler],[4,envCubeView],
       [5,lighting.createView()],[6,{buffer:sUniform}],[7,sAlbedo.createView()],
       [8,landSampler],[9,sBiome.createView()],[11,{buffer:leafMean}],
       [12,{buffer:nearDomain}],[13,nearAlbedo.createView()],
+      ...sTownField.resources,
     ];
     const terrainGroup=bind(terrainPipe,secOpaqueResources);
     const submergedSecGroup=submerged?.bindGroup(secOpaqueResources.map(([binding,resource])=>({binding,resource})));
@@ -1003,6 +1020,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       uniform:sUniform,
       albedo:sAlbedo,
       biomeTexture:sBiome,
+      townField:sTownField,
       terrainGroup,
       submergedGroup:submergedSecGroup,
     };
@@ -1306,6 +1324,13 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     }:null;
     oldVerts?.destroy?.();oldIdx?.destroy?.();oldSubIdx?.destroy?.();
     oldPort?.vertices?.destroy?.();oldPort?.indices?.destroy?.();
+    // The buildings moved, so their ways did too.
+    const oldTownField=activeTownField;
+    activeTownField=townField(upgradedPack.port?.streets);
+    nearResources=[...opaqueResources,[12,{buffer:nearDomain}],[13,nearAlbedo.createView()],...activeTownField.resources];
+    groups[0]=bind(terrainPipe,nearResources);groups[1]=bind(opaqueTreePipe,nearResources);
+    submergedGroup=submerged?.bindGroup(nearResources.map(([binding,resource])=>({binding,resource})));
+    oldTownField.texture.destroy();oldTownField.window.destroy();
 
     groundPatches=createGroundCoverPatches(activeRegion,groundSample,null);
     groundStats.patches=groundPatches.length;
@@ -1540,6 +1565,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       fine?.vertices?.destroy?.();fine?.indices?.destroy?.();fine?.submerged?.destroy?.();
       uniform?.destroy?.();nearDomain?.destroy?.();nearElevation?.destroy?.();coastalField?.destroy();
       elevation?.destroy?.();lighting?.destroy?.();albedo?.destroy?.();
+      activeTownField?.texture.destroy();activeTownField?.window.destroy();
       if(nearAlbedo&&nearAlbedo!==albedo)nearAlbedo?.destroy?.();
       biomeTexture?.destroy?.();leafTexture?.destroy?.();leafMean?.destroy?.();
       for(const g of groundMeshes)g.buffer?.destroy?.();

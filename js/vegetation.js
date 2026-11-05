@@ -51,13 +51,13 @@ export function createGroundCoverPatches(region,sampleHeight,extraHeightBounds=n
   }
   return patches;
 }
-export function groundCoverInstances(patch,region,sampleHeight,mask){
+export function groundCoverInstances(patch,region,sampleHeight,mask,mayGrowAt=null){
   if(patch.instances)return patch.instances;
   const rand=random(patch.seed),groups=[[],[],[],[]],span=GROUND_COVER.patchSpan;
   for(let i=0;i<GROUND_COVER.grassPerPatch+GROUND_COVER.rocksPerPatch;i++){
     const grass=i>=GROUND_COVER.rocksPerPatch,u=rand(),v=rand(),density=rand(),seed=rand(),size=rand(),tall=rand();
     const x=patch.x+u*span,z=patch.z+v*span,h=sampleHeight(x,z);
-    if(h<5||h>855)continue;
+    if(h<5||h>855||(mayGrowAt&&!mayGrowAt(x,z)))continue;
     const sx=(sampleHeight(x+.5,z)-sampleHeight(x-.5,z)),sz=(sampleHeight(x,z+.5)-sampleHeight(x,z-.5)),slope=Math.hypot(sx,sz);
     const probability=vegetationProbability(mask,region.biomeSize??512,(x-region.x)/region.span+.5,(z-region.z)/region.span+.5);
     if(grass?(probability<=0||slope>.9||density>probability*.9):(slope>1.8||density>.35+slope*.3))continue;

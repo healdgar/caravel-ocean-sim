@@ -1,3 +1,4 @@
+import { DRESS_MASK_SCALE, DRESS_PIECES, indigenousDress } from './indigenous-dress.js';
 import { loadCrewGLB, gltfTRS } from './gltf.js';
 import { hullDeck, vesselDeck, HULL_VERTICAL_SCALE, HELM_TILLER_DISTANCE, modelDeck, modelHullDeck, modelDeckWidth, vesselVerticalScale } from './hull.js';
 import { SAIL_KEYS, sailingState } from './sailing.js';
@@ -702,6 +703,13 @@ export function buildIndigenousCrewModel(baseModel, female = false) {
       bf[fOff + 8] = 0.10;
     }
 
+    // The sailors' knitted stockings have no place here.
+    if (Math.hypot(r - 0.22, g - 0.195, b - 0.165) < 0.008) {
+      bf[fOff + 6] = 0.36;
+      bf[fOff + 7] = 0.18;
+      bf[fOff + 8] = 0.10;
+    }
+
     // Bare lower calves above deerskin moccasins (y < 0.21 stays moccasin hide)
     if (isTrousers && (calfW > 0.42 || (y >= 0.215 && y <= (female ? 0.56 : 0.66)))) {
       bf[fOff + 0] = x - nx * 0.014;
@@ -712,17 +720,34 @@ export function buildIndigenousCrewModel(baseModel, female = false) {
     }
   }
 
+  // The sailors' buns and tousled hair would sit on everyone here. Press hair close to the skull,
+  // and the styles below add the length. The clamp leaves a plain cap, as a shaved head needs too.
+  const skullY = female ? 1.676 : 1.718;
+  for (let i = 0; i < baseVertCount; i++) {
+    const fOff = i * 15;
+    if (Math.hypot(bf[fOff + 6] - 0.045, bf[fOff + 7] - 0.019, bf[fOff + 8] - 0.009) >= 0.008) continue;
+    const dx = bf[fOff], dy = bf[fOff + 1] - skullY, dz = bf[fOff + 2] + 0.006, away = Math.hypot(dx, dy, dz);
+    if (away > 0.112) {
+      const pull = 0.112 / away;
+      bf[fOff] = dx * pull; bf[fOff + 1] = skullY + dy * pull; bf[fOff + 2] = dz * pull - 0.006;
+    }
+  }
+
   // Build 3D skinned indigenous regalia & hair meshes (headband, 3 crown feathers,
   // twin braided hair plaits, and carved shell/guanín pectoral collar).
   const extraVerts = [];
   const extraTris = [];
+  // Every piece is in the one mesh, and each person's look says which of them show. A vertex carries
+  // its piece's number in its red channel, above the colour itself.
+  let piece = 0;
+  const asPiece = (name, build) => { piece = DRESS_PIECES.indexOf(name) + 1; build(); piece = 0; };
   const pushVertex = (pos, norm, col, bones, weights) => {
     const idx = baseVertCount + extraVerts.length;
     const len = Math.hypot(norm[0], norm[1], norm[2]) || 1;
     extraVerts.push({
       pos: [pos[0], pos[1], pos[2]],
       norm: [norm[0] / len, norm[1] / len, norm[2] / len],
-      col: [col[0], col[1], col[2]],
+      col: [col[0] + 2 * piece, col[1], col[2]],
       bones: [bones[0] ?? 0, bones[1] ?? 0, bones[2] ?? 0, bones[3] ?? 0],
       weights: [weights[0] ?? 1, weights[1] ?? 0, weights[2] ?? 0, weights[3] ?? 0],
     });
@@ -740,7 +765,7 @@ export function buildIndigenousCrewModel(baseModel, female = false) {
   const bandSegs = 16;
 
   // 1. Woven Wampum / Dyed Quillwork Headband around brow (Head bone)
-  for (let s = 0; s < bandSegs; s++) {
+  asPiece('HEADBAND', () => { for (let s = 0; s < bandSegs; s++) {
     const a0 = (s / bandSegs) * Math.PI * 2;
     const a1 = ((s + 1) / bandSegs) * Math.PI * 2;
     const beadCol = (s % 3 === 0)
@@ -757,7 +782,7 @@ export function buildIndigenousCrewModel(baseModel, female = false) {
     const v2 = pushVertex([x1 * 0.99, browY + bandH, z1 * 0.99], n1, beadCol, [headSlot, 0, 0, 0], [1, 0, 0, 0]);
     const v3 = pushVertex([x0 * 0.99, browY + bandH, z0 * 0.99], n0, beadCol, [headSlot, 0, 0, 0], [1, 0, 0, 0]);
     pushQuad(v0, v1, v2, v3);
-  }
+  } });
 
   // 2. Crown Eagle / Hawk / Macaw Feathers rising from the back/sides of the headband (Head bone)
   const featherSpecs = female
@@ -771,7 +796,7 @@ export function buildIndigenousCrewModel(baseModel, female = false) {
         { x: -0.032, z: bandCenterZ - bandRz * 0.90, h: 0.148, w: 0.016, tiltX: -0.22, tiltZ: -0.25 },
         { x: 0.032, z: bandCenterZ - bandRz * 0.90, h: 0.148, w: 0.016, tiltX: 0.22, tiltZ: -0.25 },
       ];
-  for (const fSpec of featherSpecs) {
+  featherSpecs.forEach((fSpec, featherIndex) => asPiece(featherIndex ? 'MORE_FEATHERS' : 'ONE_FEATHER', () => {
     const baseCol = [0.88, 0.85, 0.78]; // golden eagle white basal vane
     const midCol = [0.76, 0.70, 0.58];
     const tipCol = [0.11, 0.08, 0.06]; // dark eagle tip
@@ -797,14 +822,14 @@ export function buildIndigenousCrewModel(baseModel, female = false) {
         extraTris.push(mR, mL, tV);
       }
     }
-  }
+  }));
 
   // 3. Long Braided Hair Plaits hanging down from temples over shoulders (blended Head -> neck_01 -> spine_03)
   const braidLen = female ? 0.36 : 0.31;
   const braidSegs = 6;
   const hairSentinel = [0.045, 0.019, 0.009];
   const tieCol = [0.58, 0.14, 0.08];
-  for (const sideX of [-1, 1]) {
+  asPiece('PLAITS', () => { for (const sideX of [-1, 1]) {
     const rings = [];
     for (let k = 0; k <= braidSegs; k++) {
       const t = k / braidSegs;
@@ -833,14 +858,14 @@ export function buildIndigenousCrewModel(baseModel, female = false) {
         pushQuad(rings[k][c], rings[k][c1], rings[k + 1][c1], rings[k + 1][c]);
       }
     }
-  }
+  } });
 
-  // 4. Carved Shell Wampum / Guanín Gold Pectoral Collar across upper chest (spine_03 bone)
+  // 4. Collars across the upper chest (spine_03 bone): gold, shell or jade, each its own piece.
   const chestY = female ? 1.335 : 1.375;
   const chestZ = female ? 0.112 : 0.118;
   const collarSegs = 8;
-  const collarCol = [0.76, 0.58, 0.26];
-  for (let s = 0; s < collarSegs; s++) {
+  const collar = (name, colourAt) => asPiece(name, () => { for (let s = 0; s < collarSegs; s++) {
+    const collarCol = colourAt(s);
     const t0 = (s / collarSegs) * 2 - 1;
     const t1 = ((s + 1) / collarSegs) * 2 - 1;
     const x0 = t0 * 0.072, x1 = t1 * 0.072;
@@ -852,7 +877,86 @@ export function buildIndigenousCrewModel(baseModel, female = false) {
     const v2 = pushVertex([x1, chestY - dip1, z1 - 0.004], n1, collarCol, [spine3Slot, 0, 0, 0], [1, 0, 0, 0]);
     const v3 = pushVertex([x0, chestY - dip0, z0 - 0.004], n0, collarCol, [spine3Slot, 0, 0, 0], [1, 0, 0, 0]);
     pushQuad(v0, v1, v2, v3);
-  }
+  } });
+  collar('GOLD_COLLAR', () => [0.76, 0.58, 0.26]);
+  collar('SHELL_COLLAR', (s) => (s % 2 ? [0.84, 0.80, 0.72] : [0.30, 0.16, 0.34]));
+  collar('JADE_COLLAR', (s) => (s % 2 ? [0.12, 0.36, 0.26] : [0.20, 0.46, 0.34]));
+
+  const eyeY = female ? 1.656 : 1.699;
+  const headBones = [headSlot, 0, 0, 0], headWeights = [1, 0, 0, 0];
+  // 5. Long hair, falling loose down the back (blended Head -> neck_01 -> spine_03)
+  asPiece('LOOSE_HAIR', () => {
+    const rows = 7, columns = 7, length = female ? 0.46 : 0.38, grid = [];
+    for (let k = 0; k <= rows; k++) {
+      const t = k / rows;
+      const y = browY + 0.05 - t * length;
+      const rx = 0.098 - t * 0.022, rz = 0.104 - t * 0.05, zc = -0.004 - t * 0.058;
+      const wHead = Math.max(0, 1 - t * 1.7), wSpine = Math.max(0, (t - 0.35) / 0.65), wNeck = Math.max(0, 1 - wHead - wSpine);
+      const row = [];
+      for (let c = 0; c <= columns; c++) {
+        const angle = (c / columns - 0.5) * Math.PI * 1.15;
+        row.push(pushVertex([Math.sin(angle) * rx, y, zc - Math.cos(angle) * rz], [Math.sin(angle), 0.1, -Math.cos(angle)], hairSentinel, [headSlot, neckSlot, spine3Slot, 0], [wHead, wNeck, wSpine, 0]));
+      }
+      grid.push(row);
+    }
+    for (let k = 0; k < rows; k++) for (let c = 0; c < columns; c++) pushQuad(grid[k][c], grid[k][c + 1], grid[k + 1][c + 1], grid[k + 1][c]);
+  });
+  // 6. A crest of hair and dyed deer hair along the middle of the skull, forehead to nape.
+  asPiece('ROACH', () => {
+    const steps = 9, tip = [0.34, 0.07, 0.04];
+    let previous = null;
+    for (let k = 0; k <= steps; k++) {
+      const angle = -0.55 + (k / steps) * 3.1, rise = Math.sin((k / steps) * Math.PI);
+      const inner = 0.098, outer = inner + 0.022 + rise * 0.032;
+      const cy = eyeY + 0.002, cz = -0.002, ny = Math.cos(angle), nz = Math.sin(-angle);
+      const left = pushVertex([-0.016, cy + ny * inner, cz + nz * inner], [-0.9, ny * 0.4, nz * 0.4], hairSentinel, headBones, headWeights);
+      const right = pushVertex([0.016, cy + ny * inner, cz + nz * inner], [0.9, ny * 0.4, nz * 0.4], hairSentinel, headBones, headWeights);
+      const crest = pushVertex([0, cy + ny * outer, cz + nz * outer], [0, ny, nz], tip, headBones, headWeights);
+      if (previous) { pushQuad(previous[0], left, crest, previous[2]); pushQuad(right, previous[1], previous[2], crest); }
+      previous = [left, right, crest];
+    }
+  });
+  // 7. Long quetzal plumes rising from the back of the head and arching behind.
+  asPiece('QUETZAL_PLUMES', () => {
+    for (const lean of [-0.11, 0, 0.11]) {
+      let previous = null;
+      const segments = 6, height = 0.42, width = 0.018;
+      for (let k = 0; k <= segments; k++) {
+        const t = k / segments;
+        const x = lean * t, y = browY + 0.02 + Math.sin(t * Math.PI * 0.62) * height, z = -0.075 - t * t * 0.3;
+        const colour = t > 0.72 ? [0.02, 0.2, 0.17] : [0.012, 0.13, 0.07];
+        const half = width * (1 - t * 0.55);
+        const a = pushVertex([x - half, y, z], [0, 0.25, -0.97], colour, headBones, headWeights);
+        const b = pushVertex([x + half, y, z], [0, 0.25, -0.97], colour, headBones, headWeights);
+        if (previous) pushQuad(previous[0], previous[1], b, a);
+        previous = [a, b];
+      }
+    }
+  });
+  // 8. A crown of short red and yellow feathers set upright round the head.
+  asPiece('FEATHER_CROWN', () => {
+    const count = 16;
+    for (let f = 0; f < count; f++) {
+      const angle = (f / count) * Math.PI * 2, sx = Math.sin(angle), cz = Math.cos(angle);
+      const rx = bandRx + 0.004, rz = bandRz + 0.004, y0 = browY + 0.004, h = 0.078 + (f % 2) * 0.016;
+      const tangentX = cz * 0.016, tangentZ = -sx * 0.016;
+      const px = sx * rx, pz = bandCenterZ + cz * rz;
+      const n = [sx, 0.15, cz];
+      const a = pushVertex([px - tangentX, y0, pz - tangentZ], n, [0.72, 0.50, 0.08], headBones, headWeights);
+      const b = pushVertex([px + tangentX, y0, pz + tangentZ], n, [0.72, 0.50, 0.08], headBones, headWeights);
+      const c = pushVertex([px * 1.2, y0 + h, pz * 1.2], n, [0.62, 0.07, 0.04], headBones, headWeights);
+      extraTris.push(a, b, c);
+    }
+  });
+  // 9. A stone plug set in the lower lip.
+  asPiece('LIP_PLUG', () => {
+    const y = eyeY - 0.098, z = 0.1, r = 0.007, n = [0, 0, 1], stone = [0.28, 0.42, 0.36];
+    const a = pushVertex([-r, y - r, z], n, stone, headBones, headWeights);
+    const b = pushVertex([r, y - r, z], n, stone, headBones, headWeights);
+    const c = pushVertex([r, y + r, z], n, stone, headBones, headWeights);
+    const d = pushVertex([-r, y + r, z], n, stone, headBones, headWeights);
+    pushQuad(a, b, c, d);
+  });
 
   const totalVertCount = baseVertCount + extraVerts.length;
   const vertices = new Uint8Array(totalVertCount * 60);
@@ -1094,9 +1198,7 @@ export function createFortificationSoldiersForInstance(inst, startIndex = 0) {
     const name = isIndigenousFort
       ? INDIGENOUS_NAMES[sex][Math.floor(globalIdx / 2) % INDIGENOUS_NAMES[sex].length]
       : identity.name;
-    const look = isIndigenousFort
-      ? INDIGENOUS_APPEARANCES[globalIdx % INDIGENOUS_APPEARANCES.length]
-      : CREW_APPEARANCES[identity.identityId ?? identity.id];
+    const look = isIndigenousFort ? null : CREW_APPEARANCES[identity.identityId ?? identity.id];
     const role = isIndigenousFort
       ? spec.stationKind === 'embrasure'
         ? 'Sovereign Artillerist'
@@ -1104,6 +1206,7 @@ export function createFortificationSoldiersForInstance(inst, startIndex = 0) {
           ? 'Wampum War Captain'
           : 'Rampart Guardian'
       : spec.role;
+    const dress = isIndigenousFort ? indigenousDress(inst.cultureId, sex, globalIdx, { role }) : null;
     const s = createDeckhand();
     const baseLy = spec.ly;
     const effLy = baseLy + spec.lx * (inst.slopeX ?? 0) + spec.lz * (inst.slopeZ ?? 0);
@@ -1139,16 +1242,15 @@ export function createFortificationSoldiersForInstance(inst, startIndex = 0) {
       cultureId: inst.cultureId ?? null,
       modelVariant: isIndigenousFort ? (sex === 'female' ? 'indigenous-female' : 'indigenous-male') : 'colonial',
       shirt: isIndigenousFort
-        ? INDIGENOUS_SHIRTS[globalIdx % INDIGENOUS_SHIRTS.length]
+        ? dress.shirt
         : GARRISON_SHIRTS[globalIdx % GARRISON_SHIRTS.length],
       trousers: isIndigenousFort
-        ? INDIGENOUS_TROUSERS[globalIdx % INDIGENOUS_TROUSERS.length]
+        ? dress.trousers
         : GARRISON_TROUSERS[globalIdx % GARRISON_TROUSERS.length],
-      skin: crewLinearColour(look.skin),
-      hair: crewLinearColour(look.hair),
-      face: isIndigenousFort
-        ? [look.face[0], look.face[1], look.face[2], look.face[3] + 2.0]
-        : [...look.face],
+      skin: isIndigenousFort ? dress.skin : crewLinearColour(look.skin),
+      hair: isIndigenousFort ? dress.hair : crewLinearColour(look.hair),
+      face: isIndigenousFort ? dress.face : [...look.face],
+      dress: isIndigenousFort ? dress.mask : 0,
     });
     s.scale.fill((s.sex === 'female' ? 1.04 : 1.02) * (1 + ((globalIdx % 3) - 1) * 0.02));
     s.position.set([wx, wy, wz]);
@@ -1205,7 +1307,7 @@ export function createIndigenousVillagersForInstance(inst, startIndex = 0, cultu
     const sex = (globalIdx % 2 === 0) ? 'female' : 'male';
     const namePool = INDIGENOUS_NAMES[sex];
     const name = namePool[Math.floor(globalIdx / 2) % namePool.length];
-    const look = INDIGENOUS_APPEARANCES[globalIdx % INDIGENOUS_APPEARANCES.length];
+    const dress = indigenousDress(cultureId ?? inst.indigenousCultureId ?? inst.cultureId, sex, globalIdx, { role: spec.role });
     const s = createDeckhand();
     const baseLy = spec.ly;
     const effLy = baseLy + spec.lx * (inst.slopeX ?? 0) + spec.lz * (inst.slopeZ ?? 0);
@@ -1240,11 +1342,12 @@ export function createIndigenousVillagersForInstance(inst, startIndex = 0, cultu
       crewIndex: globalIdx,
       garrison: true,
       strength: 1.0,
-      shirt: INDIGENOUS_SHIRTS[globalIdx % INDIGENOUS_SHIRTS.length],
-      trousers: INDIGENOUS_TROUSERS[globalIdx % INDIGENOUS_TROUSERS.length],
-      skin: crewLinearColour(look.skin),
-      hair: crewLinearColour(look.hair),
-      face: [look.face[0], look.face[1], look.face[2], look.face[3] + 2.0],
+      shirt: dress.shirt,
+      trousers: dress.trousers,
+      skin: dress.skin,
+      hair: dress.hair,
+      face: dress.face,
+      dress: dress.mask,
     });
     s.scale.fill((s.sex === 'female' ? 0.99 : 0.97) * (1 + ((globalIdx % 3) - 1) * 0.02));
     s.position.set([wx, wy, wz]);
@@ -1542,7 +1645,8 @@ export async function createFortSoldiers({
         b.actors[offset + 19] = Number(!s.visible);
         b.actors[offset + 23] = 1;
         b.actors[offset + 27] = Number(s.sex === 'female');
-        b.actors[offset + 31] = 0;
+        // A fort's moisture lookup is always the first entry, so the whole of this slot's fraction is free.
+        b.actors[offset + 31] = (s.dress ?? 0) / DRESS_MASK_SCALE;
       }
     }
   }

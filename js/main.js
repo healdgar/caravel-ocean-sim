@@ -79,6 +79,7 @@ import {ARCHETYPE_SCALE_PRESETS, computeArchetypeScaleSpec} from './ship-part-ta
 import {vesselVerticalScale} from './hull.js';
 import { crewWorkLabel, manGunStationsImmediate } from './crew-work.js';
 import { createCrew, createFortSoldiers, preloadCrewModels, CAPTAIN_ORDERS, reviveCompany } from './crew.js';
+import { createTownsfolk } from './townsfolk.js';
 import { HELM_EYE_Z, HELM_EYE_HEIGHT, HULL_UNIFORM_BYTES, HULL_VERTICAL_SCALE, DEFAULT_BOAT_LENGTH, DEFAULT_BOAT_BEAM } from './hull.js';
 import { SAIL_KEYS, sailingState, pointOfSail } from './sailing.js';
 import { CARAVEL, CARAVEL_DAMAGED, WATER_FILTER } from './wgsl/caravel.js';
@@ -641,6 +642,8 @@ async function main() {
   const playerVessel=vessels[0],shipAsset=playerVessel.asset,hullUBO=playerVessel.hullUBO,crew=playerVessel.crew,interaction=playerVessel.interaction,shadows=playerVessel.shadows;
   let fortSoldiers=null;
   try{if(sharedCrew)fortSoldiers=await createFortSoldiers({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,shader,format:HDR,samples:MSAA,shared:sharedCrew});}catch(error){console.warn('Fort garrison initialization:',error);}
+  let townsfolk=null;
+  try{if(sharedCrew)townsfolk=await createTownsfolk({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,shader,format:HDR,samples:MSAA,shared:sharedCrew,isMobile:/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)});}catch(error){console.warn('Townsfolk initialization:',error);}
   const spindriftPromise=createSpindrift({device,frameUBO,hullUBO,seaView:fullArr(dispTex),derivView:fullArr(derivTex),seaSampler:samplerSim,envView:envCubeView,transView,sunVis:sunVisBuf,shader,computePipe,shadows});
   const weatherRendererPromise=createWeatherRenderer({device,frameUBO,hullUBO,transView,skyView,sampler:sampClamp,shader,format:HDR,samples:MSAA});
   const hullContactProbePromise=createHullContactProbe({device,frameUBO,hullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,modelId:shipAsset.model.id});
@@ -3588,6 +3591,7 @@ async function main() {
     for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter)v.pose?.encode(cp,v.boat.showProw);
     for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter&&!v.boat.damage?.sunk)v.crew?.encodePose(cp);
     fortSoldiers?.encodePose(cp);
+    townsfolk?.encode(cp);
     for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter)v.interaction.encode(cp,wakePool.next);
     wakePool.commit();
     hullContactProbe.encode(cp);
@@ -3807,6 +3811,8 @@ async function main() {
     const windVec=[Math.cos(P.windDir*D2R)*P.windSpeed,0,Math.sin(P.windDir*D2R)*P.windSpeed];
     portGunnery?.update(dt,windVec);
     fortSoldiers?.update(terrain?.port??null,dt,P.windSpeed,cam,!portGunnery);
+    townsfolk?.follow(terrain?.ports,cam);
+    townsfolk?.setUnderFire((portGunnery?.projectiles?.length??0)>0,dt);
     terrain?.updatePortDamage?.();
     const activeVesselCount=followerEnabled?vessels.length:1;
     allProjectiles.length=0;
@@ -3967,6 +3973,7 @@ async function main() {
     for(const v of hulls)if(!hullBelongsDamaged(v))drawHull(v,v.render.pipeline,v.bindGroup,v.lighting);
     for(const v of hulls)if(!v.boat.damage?.sunk)v.crew?.drawOpaque(rp);
     fortSoldiers?.draw(rp);
+    townsfolk?.draw(rp);
     frameStages.mark('GPU commands');
     terrain?.draw(rp,terrainCamera,frameF);
     frameStages.mark('Scenery');

@@ -7,7 +7,7 @@
 //   npm run perf -- --tris                           also count triangles per pipeline
 //   npm run perf -- --uploads                        what the CPU sends the GPU each frame, by buffer
 //   npm run perf -- --profile                        JavaScript time per function
-// PANEL=1 adds the game's own GPU pass spans. HEADED=1 shows the window.
+// PANEL=1 adds the game's own GPU pass spans. HEADED=1 shows the window. PERF_REGION=san-juan changes the coast.
 import {once} from 'node:events';
 import {execSync} from 'node:child_process';
 import {chromium} from 'playwright';
@@ -81,7 +81,7 @@ const idle=[];for(let i=0;i<4;i++){idle.push(gpuCounters().device);await new Pro
 console.log(`GPU busy before loading: ${mean(idle).toFixed(0)}% (other work on this machine)`);
 console.log('scene'.padEnd(20),'frame p50/p95   fps  | JS ms mean/p95 | CPU cores main+gpu | GPU busy frag vert | limit');
 for(const [label,extra,edits] of rows){
-  const url=coastalRegionStageURL(base,'lisbon','dock','clear',1650);
+  const url=coastalRegionStageURL(base,process.env.PERF_REGION||'lisbon','dock','clear',1650);
   for(const [key,value] of Object.entries({ship:'victory',w:1728,h:1117,polygons:'fixed',...extra}))url.searchParams.set(key,String(value));
   const page=await browser.newPage({viewport:{width:1728,height:1117}}),errors=[];
   page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error'&&!/404|favicon/.test(m.text()))errors.push(m.text());});

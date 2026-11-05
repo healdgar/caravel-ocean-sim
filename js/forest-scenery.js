@@ -329,11 +329,11 @@ function populateSubtropicalNativeLodIndices(manifest,nativeLod,sourceIndices,so
 const CERTIFIED_FOREST_STREAM_SHAS=Object.freeze({
   'vertices.bin':new Set([
     '8d70fb89316d5d842ba5d224aca99878b866c70addb578848a47783af08251d0',
-    '8bf10e788e98de9448f20e77c3f39bdbcca50f239d9b4364f43071de3f8660d7',
+    'fc1c3b64fa2f9df90a98ceaa67baccc9257090a37945fc7c6392a2a51d49e1ba',
   ]),
   'indices.bin':new Set([
     '2cd8ffe90fd2e0300db51caf0decd9da6b5f50cbaa2e6dd5462d8c6f8d8ce389',
-    '2535cb65f54ad7c8c7202c98f5c9969f0c745c18224b9d8c00f77a4cc634358d',
+    '404ec785fd2fc49e83403b8fd60890debb8e76d518d5436255ea7a1494ff5ef3',
   ]),
   'roots.bin':new Set([
     '69bc2f787873f09944683f49e88c9bc09d8b068a33aee85453b626150050de9b',
@@ -603,9 +603,6 @@ fn forestPlace(r:ForestRoot,rootId:u32,posLocal:vec3f,normAdj:vec3f,kind:vec2f,l
    posLocal=vec3f(posLocal.x*flare,max(0.25,yRound*0.66-0.35),posLocal.z*flare);
    normAdj=normalize(vec3f(posLocal.x*0.35,max(0.35,normAdj.y+0.25),posLocal.z*0.35));
   }
- }else if(isSubBroadleaf&&posLocal.y>2.2){
-  let flare=1.+clamp((posLocal.y-2.2)*.18,0.,1.75);
-  posLocal=vec3f(posLocal.x*flare,posLocal.y*.82+.4,posLocal.z*flare);
  }
  if(kind.x>=3.5&&tierId>=2u){
   let upRef=select(vec3f(0.,1.,0.),vec3f(1.,0.,0.),abs(normal.y)>.9);

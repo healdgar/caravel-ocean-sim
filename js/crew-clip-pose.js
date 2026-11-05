@@ -29,7 +29,7 @@ export function crewClipFrame(clip, seconds) {
 }
 
 const bakedModels = new WeakMap();
-function bakedClips(device, model) {
+export function bakedCrewClips(device, model) {
   if (bakedModels.has(model)) return bakedModels.get(model);
   const { palettes, clips } = bakeCrewClips(model.animator);
   const paletteBuffer = device.createBuffer({ label: 'crew baked clips', size: palettes.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
@@ -49,7 +49,7 @@ export async function createCrewClipPipeline(device, shader) {
 // One batch of bodies, writing into `joints`. Set a body's clip times with `set`, or leave it off
 // for one whose joints something else writes this frame.
 export function createCrewClipBatch(device, pipeline, model, joints, capacity) {
-  const { clips, paletteBuffer, info } = bakedClips(device, model);
+  const { clips, paletteBuffer, info } = bakedCrewClips(device, model);
   const states = new Float32Array(Math.max(1, capacity) * 4);
   const stateBuffer = device.createBuffer({ label: 'crew clip times', size: states.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
   const group = device.createBindGroup({ label: 'crew clip pose', layout: pipeline.getBindGroupLayout(0), entries: [paletteBuffer, info, stateBuffer, joints].map((buffer, binding) => ({ binding, resource: { buffer } })) });

@@ -242,3 +242,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## Anchor model
+
+`js/anchor-iron.js` and `third_party/sand3d-parts/old-rusted-anchor.py` derive from "Old rusted anchor" by trivial.cat (https://sketchfab.com/3d-models/abb9321ad29243228b4ea6dabc325db9), licensed CC BY 4.0, as rewritten into a sand3d program by Sandflow in the dataset sand3d-objaverse (https://huggingface.co/datasets/Sandflow/sand3d-objaverse, id `objaverse-abb9321ad29243228b4ea6dabc325db9`), licensed CC BY 4.0. Modified: reduced to a low-polygon mesh and placed in the game's anchor frame.
