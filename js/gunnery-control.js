@@ -2,6 +2,7 @@
 import { pumpVesselDry } from './vessel-damage.js';
 import { remountVesselGuns, createGunneryState, prepareGunnery, fireGunnery, stepGunnery, gunnerySummary, resolveGunneryImpact, gunneryOffline, GUNNERY_AMMO_TYPES, isArrowAmmo, gunneryWeapon, gunneryAmmoFlight } from './gunnery-state.js';
 import { sweepCrewBodies, recordCrewWound } from './crew-wounds.js';
+import { addHullHole, stepHullHoles } from './hull-holes.js';
 import { modelDeck, modelHullDeck, vesselVerticalScale } from './hull.js';
 import { createGunDefinitions, createNavalBattleGunDefinitions, gunMuzzlePose, gunElevationRange, gunTraverseRange, vesselCarriesPowder, bowElevationDegrees } from './gunnery-models.js';
 import { GUNNERY_ORDER_SECONDS } from './gunnery-audio.js';
@@ -81,6 +82,12 @@ function getModelBulkheadZs(modelId) {
   if (modelId === 'flying-cloud') return [3.4, 1.2, -1.6, -3.8];
   if (modelId === 'gipsy-moth-iv') return [1.8, -1.4];
   return [4.2, 1.8, -3.0];
+}
+
+function hullHoleCompartment(boat, localZ, side) {
+  const halfL = Math.max(6, (boat.length ?? 20) * 0.5);
+  const section = localZ < -halfL * 0.28 ? 'fore' : localZ > halfL * 0.28 ? 'aft' : 'mid';
+  return `${section}${side >= 0 ? 'Starboard' : 'Port'}`;
 }
 
 function localToShipDesignPoint(targetBoat, localPosition) {
@@ -456,7 +463,8 @@ function strikeCrewBodyWithBall(targetBoat, hit, projectile, direction) {
   damage.hits = (damage.hits ?? 0) + 1;
   applyCrewCasualtiesAndMorale(targetBoat, { ammo: projectile.ammo, energy, hitZone: 'crew' }, {
     casualties: { killed: 1, wounded: 0 },
-    struck: { sailor: hit.sailor, direction, speed: Math.min(4.5, 2 + speed / 200) },
+    // A round shot flings what it strikes, right over the far rail on a narrow deck.
+    struck: { sailor: hit.sailor, direction, speed: Math.min(9, 3 + speed / 80) },
     cause: 'round-shot',
     hitZone: 'crew',
   });
@@ -538,7 +546,7 @@ export function applyCrewCasualtiesAndMorale(targetBoat, event = {}, context = {
     const actorScale = Math.max(1, Math.round(c.total / Math.max(1, crewActors.length)));
     let actorFallenBudget = Math.ceil(newKilled / actorScale);
     let actorWoundedBudget = Math.ceil(newWounded / actorScale);
-    const blastSpeed = context.isMagazineBlast ? 3.4 : ammo === 'grape' ? 1.8 : 2.3;
+    const blastSpeed = context.isMagazineBlast ? 9 : ammo === 'grape' ? 1.8 : 2.3;
     for (const item of candidates) {
       const s = item.sailor;
       const invD = item.dist > 1e-3 ? 1 / item.dist : 1;
@@ -1185,6 +1193,7 @@ export function applyArrowImpact(targetBoat, event) {
 export function applyShipImpactDamage(targetBoat, event) {
   if (!targetBoat || !event) return null;
   const damage = createVesselDamageState(targetBoat);
+  let estimatedLeak = null;
   const vel = event.velocity ?? [200, 0, 0];
   const speed = Math.hypot(vel[0], vel[1], vel[2]);
   const mass = event.mass ?? 5.4;
@@ -1285,6 +1294,7 @@ export function applyShipImpactDamage(targetBoat, event) {
       const holeArea = Math.PI * holeR * holeR * (ammo === 'grape' ? 0.22 : 1.0) * lowDeckScale;
       damage.waterlineBreachArea = +(damage.waterlineBreachArea + holeArea).toFixed(5);
       if (comp) comp.breachArea = +(comp.breachArea + holeArea).toFixed(5);
+      estimatedLeak = { comp, area: holeArea };
       damage.breachSideMoment = +(damage.breachSideMoment + hitSideSign * holeArea).toFixed(5);
       damage.breachTrimMoment = +(damage.breachTrimMoment + trimWeight * holeArea).toFixed(5);
       // Initial splash ingress at the instant of breach is small; the bulk of seawater pours in progressively over time.
@@ -1430,6 +1440,20 @@ export function applyShipImpactDamage(targetBoat, event) {
     penetratedOuter = penEnergy >= energyCostOuter;
     let residualEnergy = Math.max(0, penEnergy - energyCostOuter);
     if (penetratedOuter) damage.throughBreaches = (damage.throughBreaches ?? 0) + 1;
+    const bustsThrough = penetratedOuter && !enteredThroughWindow && localPos && (ammo === 'round' || ammo === 'hot');
+    // Oak tears well beyond the ball itself, and more on the way out.
+    const holeRadius = Math.max(0.07, event.radius ?? 0.08) * 2.6;
+    if (bustsThrough) {
+      // A shot recorded as striking at the waterline holes her there, wherever its contact point was taken.
+      const holeLocal = [...localPos];
+      if (event.waterline) holeLocal[1] = Math.min(holeLocal[1], -(targetBoat.heave ?? 0) - holeRadius * 0.5);
+      addHullHole(damage, { design: [surfaceX, designPt[1], designPt[2]], local: holeLocal, radius: holeRadius, side, compartment: hullHoleCompartment(targetBoat, localPos[2], side) });
+      // The real hole now governs the water, in place of the leak estimated from the hit alone.
+      if (estimatedLeak) {
+        if (estimatedLeak.comp) estimatedLeak.comp.breachArea = Math.max(0, +(estimatedLeak.comp.breachArea - estimatedLeak.area).toFixed(5));
+        damage.waterlineBreachArea = Math.max(0, +(damage.waterlineBreachArea - estimatedLeak.area).toFixed(5));
+      }
+    }
 
     const isAftCabinShock = isVictory && designPt[2] >= 3.85 && designPt[1] >= 0.72 && energy >= 45000;
     if (isGlazedWindow || isAftCabinShock) {
@@ -1761,6 +1785,17 @@ export function applyShipImpactDamage(targetBoat, event) {
       }
 
       // 3d. Striking the back wall of the hull (opposite-side inner hull wall) after crossing the interior
+      // A ball with enough left in it goes out through her far side as well.
+      if (bustsThrough && dir[0] * side < -0.2 && residualEnergy >= energyCostOuter) {
+        const farDesign = Math.abs(designPt[0]);
+        const across = (-side * farDesign - designPt[0]) / dir[0];
+        const exitDesign = [-side * farDesign, designPt[1] + dir[1] * across, designPt[2] + dir[2] * across];
+        const toLocal = (i) => (Math.abs(designPt[i]) > 1e-3 ? localPos[i] / designPt[i] : 1);
+        const exitLocal = [-localPos[0], localPos[1] + (exitDesign[1] - designPt[1]) * toLocal(1), localPos[2] + (exitDesign[2] - designPt[2]) * toLocal(2)];
+        addHullHole(damage, { design: exitDesign, local: exitLocal, radius: holeRadius * 1.15, side: -side, compartment: hullHoleCompartment(targetBoat, exitLocal[2], -side) });
+        damage.exitHoles = (damage.exitHoles ?? 0) + 1;
+      }
+
       if (Math.abs(dir[0]) > 0.20 && residualEnergy >= 75000) {
         const backSide = dir[0] < 0 ? -1 : 1;
         if (backSide !== side || Math.abs(designPt[0]) < 0.65) {
@@ -1975,7 +2010,8 @@ export function stepVesselDamage(boat, dt, terrain = null) {
   const baseFreeboard = Math.max(0.35, Math.min(2.6, hydro?.freeboard ?? 1.8));
   const reserveBuoyancyTonnes = Math.max(1.5, (wpArea * baseFreeboard * 1025) / 1000);
   const maxFloodTonnes = Math.max(reserveBuoyancyTonnes * 1.65, wpArea >= 18 ? 200 : reserveBuoyancyTonnes * 1.65);
-  if (damage.waterlineBreachArea > 0 && damage.floodingTonnes < maxFloodTonnes) {
+  const holeFlows = damage.holes?.length ? stepHullHoles(boat, damage, clampedDt) : null;
+  if ((damage.waterlineBreachArea > 0 || holeFlows?.area > 0) && damage.floodingTonnes < maxFloodTonnes) {
     const comps = damage.compartments ?? (damage.compartments = {
       forePort: { breachArea: 0, waterTonnes: 0 },
       foreStarboard: { breachArea: 0, waterTonnes: 0 },
@@ -2006,14 +2042,16 @@ export function stepVesselDamage(boat, dt, terrain = null) {
       const c = comps[k];
       const xSign = k.endsWith('Starboard') ? 1 : -1;
       const zSign = k.startsWith('fore') ? -1 : k.startsWith('aft') ? 1 : 0;
-      if (c.breachArea > 0) {
+      const holeRate = holeFlows?.byCompartment[k] ?? 0;
+      if (c.breachArea > 0 || holeRate > 0) {
         c.breachArea = Math.max(0, c.breachArea - 0.000025 * clampedDt * damage.hullIntegrity);
         totalBreachArea += c.breachArea;
-        const heelSub = Math.max(-0.20, curRoll * xSign * (boat.beam ?? 6) * 0.35);
-        const trimSub = Math.max(-0.30, -curPitch * zSign * (boat.length ?? 20) * 0.22);
+        // Positive roll lifts her starboard side, and positive pitch lifts her bow.
+        const heelSub = Math.max(-0.20, -curRoll * xSign * (boat.beam ?? 6) * 0.35);
+        const trimSub = Math.max(-0.30, curPitch * zSign * (boat.length ?? 20) * 0.22);
         const headMetres = Math.max(0.18, 0.36 + (damage.floodingSinkage ?? 0) * 0.90 + heelSub + trimSub);
         const flowVelocity = 0.78 * Math.sqrt(2 * 9.81 * headMetres) * (1.55 + 1.15 * (1 - damage.hullIntegrity));
-        const grossRate = (c.breachArea * flowVelocity * 1025) / 1000;
+        const grossRate = (c.breachArea * flowVelocity * 1025) / 1000 + holeRate;
         const netRate = Math.max(0, grossRate - pumpCapacity * 0.22);
         if (netRate > 0 && c.waterTonnes < compMaxTonnes) {
           const add = Math.min(compMaxTonnes - c.waterTonnes, netRate * clampedDt);
@@ -2023,6 +2061,7 @@ export function stepVesselDamage(boat, dt, terrain = null) {
       }
     }
     damage.waterlineBreachArea = +totalBreachArea.toFixed(5);
+    damage.holeLeakArea = +(holeFlows?.area ?? 0).toFixed(5);
 
     // Slow bulkhead seepage / limber-hole spillover between adjacent compartments so one flooded
     // end sinks deep first before water gradually equalizes along the hold.
@@ -2066,10 +2105,11 @@ export function stepVesselDamage(boat, dt, terrain = null) {
 
     if (!damage.sunk) {
       const sinkFrac = Math.min(1.6, damage.floodingSinkage / baseFreeboard);
-      const sideSign = damage.breachSideMoment >= 0 ? 1 : -1;
+      // Water on her starboard side lists her to starboard, and positive roll lifts that side.
+      const sideSign = damage.breachSideMoment >= 0 ? -1 : 1;
       const trimSign = damage.breachTrimMoment >= 0 ? 1 : -1;
       const targetRoll = Math.abs(heelImbalance) > 0.03
-        ? Math.max(-0.54, Math.min(0.54, heelImbalance * 0.44))
+        ? Math.max(-0.54, Math.min(0.54, -heelImbalance * 0.44))
         : sideSign * Math.min(0.32, sinkFrac * 0.22);
       // When one end floods heavily while the opposite end remains buoyant, the flooded end plunges
       // deep and raises the buoyant opposite end steeply out of the water (up to ~33 deg pitch).
@@ -2181,9 +2221,15 @@ export function stepVesselDamage(boat, dt, terrain = null) {
     // Free-surface flooding eliminates transverse metacentric stability (GM -> 0) and floods
     // bow/stern compartments unevenly, causing the foundering vessel to heel heavily onto its
     // beam-ends (~20-45 deg roll) and plunge by the head or stern (~15-33 deg pitch).
-    const sideSign = Math.abs(damage.breachSideMoment) > 1e-6
-      ? Math.sign(damage.breachSideMoment)
-      : (Math.sign(damage.hullSideMoment || 0) || 1);
+    // She goes over toward the side holding more water, and positive roll lifts starboard.
+    const sunkComps = damage.compartments ?? {};
+    const sunkWaterSide = (sunkComps.foreStarboard?.waterTonnes ?? 0) + (sunkComps.midStarboard?.waterTonnes ?? 0) + (sunkComps.aftStarboard?.waterTonnes ?? 0)
+      - (sunkComps.forePort?.waterTonnes ?? 0) - (sunkComps.midPort?.waterTonnes ?? 0) - (sunkComps.aftPort?.waterTonnes ?? 0);
+    const sideSign = Math.abs(sunkWaterSide) > 1
+      ? -Math.sign(sunkWaterSide)
+      : Math.abs(damage.breachSideMoment) > 1e-6
+        ? -Math.sign(damage.breachSideMoment)
+        : -(Math.sign(damage.hullSideMoment || 0) || 1);
     const rawTrim = Math.abs(damage.breachTrimMoment) > 1e-4
       ? damage.breachTrimMoment
       : (damage.hullTrimMoment || -1);

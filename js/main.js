@@ -80,6 +80,9 @@ import { createCrew, createFortSoldiers, preloadCrewModels, CAPTAIN_ORDERS, revi
 import { HELM_EYE_Z, HELM_EYE_HEIGHT, HULL_UNIFORM_BYTES, HULL_VERTICAL_SCALE, DEFAULT_BOAT_LENGTH, DEFAULT_BOAT_BEAM } from './hull.js';
 import { SAIL_KEYS, sailingState, pointOfSail } from './sailing.js';
 import { CARAVEL, WATER_FILTER } from './wgsl/caravel.js';
+import { createHullFlood, HULL_FLOOD_UNIFORM_BYTES } from './hull-flood.js';
+import { hullHoleDepth } from './hull-holes.js';
+import { loseHandInGale } from './crew-overboard.js';
 import { boatTargets, boatSpring, boatRotate, stepBoatSteering, stepBoatView, stepDeckWalk, resetDeckWalk, boatEyePosition, boatForwardSpeed, boatWaveSlope, stepBoatSurge, boatWaveAttitude, boatHydrodynamics, setBoatViewStation, deckStationLabel, DEFAULT_PROVISION_DAYS, KNOT_TO_MPS } from './boat.js';
 import { SHIP_COLORS, DEFAULT_SHIP_COLORS, getShipColorsInfo, setVesselColors, strikeVesselColors, createShipColorsRenderer } from './ship-colors.js';
 import { createDockingBoardingState, computeBoardingStrength } from './boarding-docking.js';
@@ -585,6 +588,7 @@ async function main() {
     const vertexBuffer=mkBuf(mesh.byteLength,GU.VERTEX|GU.COPY_DST|(render.gpuPose?GU.STORAGE:0),spec.id+' geometry');
     device.queue.writeBuffer(vertexBuffer,0,mesh);
     const hullUBO=mkBuf(HULL_UNIFORM_BYTES,GU.UNIFORM|GU.COPY_DST,spec.id+' hull'),hullData=new Float32Array(HULL_UNIFORM_BYTES/4);
+    const holesUBO=mkBuf(HULL_FLOOD_UNIFORM_BYTES,GU.UNIFORM|GU.COPY_DST,spec.id+' hull holes');
     const recoilMap=createGunRecoilMap(asset);
     const interactionPromise=createWaterInteraction({device,frameUBO,hullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,envView:envCubeView,transView,skyView,sunVis:sunVisBuf,shader,computePipe,surfaceWaves,wakeTargets:wakePool.layer(index)});
     const rowingWaterPromise=Object.hasOwn(ROWING_DESIGNS,spec.modelId)?createRowingWaterProbe({device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,modelId:spec.modelId,surfaceWaves}):null;
@@ -603,7 +607,7 @@ async function main() {
     try{crew=await createCrew({waterOptics,device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format:HDR,samples:MSAA,shared:sharedCrew,modelId:asset.model.id});sharedCrew??=crew.assets;}
     catch(error){if(index===0)crewError='Crew unavailable';console.warn(spec.id+' crew initialization:',error);}
     interaction.setShadows(shadows);
-    vessels.push({...spec,boat:null,asset,render,hullUBO,hullData,mesh,vertexBuffer,pose,wetness,shadows,crew,interaction,
+    vessels.push({...spec,boat:null,asset,render,hullUBO,holesUBO,hullData,mesh,vertexBuffer,pose,wetness,shadows,crew,interaction,
       rowingWater,lighting:shadows.bind(render.pipeline),submergedLighting:shadows.bind(render.submerged.pipeline),recoilMap});
   }
   const playerVessel=vessels[0],shipAsset=playerVessel.asset,hullUBO=playerVessel.hullUBO,crew=playerVessel.crew,interaction=playerVessel.interaction,shadows=playerVessel.shadows;
@@ -803,7 +807,7 @@ async function main() {
     for(const v of vessels){
       const resources=[{buffer:frameUBO},transView,skyView,sampClamp,
         envCubeView,{buffer:sunVisBuf},{buffer:v.hullUBO},waterCopy.createView(),fullArr(dispTex),samplerSim,oakTex.createView(),oakSampler,v.interaction.deck.view,
-        {buffer:v.wetness.state},{buffer:v.wetness.lookup}];
+        {buffer:v.wetness.state},{buffer:v.wetness.lookup},{buffer:v.holesUBO}];
       v.bindGroup=bg(v.render.pipeline,resources,v.id+' vessel');v.submergedGroup=v.render.submerged.bindGroup(resources);
     }
     const bw = Math.max(1, W >> 1), bh = Math.max(1, H >> 1);
@@ -1190,8 +1194,55 @@ async function main() {
     },
   });
   window.oceanDockingBoarding=dockingBoarding;
+  dockingBoarding.state.getLineEnv=()=>({terrain,portLabel:terrain?.region?.name});
   const dolphinVessels=vessels.map(v=>v.boat),dolphinPlayer=[boat];
   window.oceanFleet={vessels,config:fleetConfig,wakes:wakePool,renderAssets};
+
+  const hullFlood=await createHullFlood({device,frameUBO,envCubeView,sampler:sampClamp,shader,format:HDR,samples:MSAA});
+  for(const v of vessels)v.flood=hullFlood.vessel(v.holesUBO,v.hullUBO);
+  let seaEventSerial=0;
+  function seaEntry(position,{massKg=6,radiusMetres=.45,closingSpeed=4}={}){
+    const id='sea-entry-'+(++seaEventSerial);
+    gunEffects.emitImpact({id,position:[position[0],0,position[2]],velocity:[0,-closingSpeed,0],massKg,kind:'water'});
+    surfaceWaves.emit({source:'roundshot',id,kind:'entry',x:position[0],z:position[2],radiusMetres,closingSpeed,velocity:[0,-closingSpeed,0],massKg,age:0});
+  }
+  // What the rail and the sea do to a ship's people, told to whoever commands her.
+  const crewSeaEvents=v=>event=>{
+    const mine=v===playerVessel,name=event.sailor?.name??'A hand';
+    if(event.type==='overboard-splash')seaEntry(event.position,{massKg:6,radiusMetres:.5,closingSpeed:5});
+    if(!mine)return;
+    if(event.type==='overboard'){
+      const side=event.side>=0?'starboard':'larboard';
+      voyageCtl?.note?.(event.alive
+        ?`Man overboard! ${name} went over the ${side} side. Bring her close and slow to get a line to him.`
+        :`${name}'s body went over the ${side} side.`,10);
+    }else if(event.type==='hauled-aboard')voyageCtl?.note?.(`${name} hauled back aboard on a line, half drowned.`,7);
+    else if(event.type==='drowned')voyageCtl?.note?.(`${name} is gone. The sea has him.`,7);
+    refreshCrewRosterDOM?.();
+  };
+  // Water visibly working at any hole near the surface, and word to the master when she leaks.
+  const holeRotation=[0,0,0];
+  function updateHullHoleEffects(v,ship,dt){
+    const holes=ship.damage?.holes;
+    if(!holes?.length||!(dt>0))return;
+    v.holeSprayIn=(v.holeSprayIn??0)-dt;
+    v.leakNoticeIn=(v.leakNoticeIn??0)-dt;
+    let flowing=0;
+    for(const hole of holes)if(hole.flow>0)flowing++;
+    if(flowing&&v===playerVessel&&v.leakNoticeIn<=0&&ship.showProw){
+      v.leakNoticeIn=40;
+      voyageCtl?.note?.(`She is making water through ${flowing} shot ${flowing===1?'hole':'holes'}. The carpenter's crew are plugging them.`,7);
+    }
+    if(v.holeSprayIn>0||!flowing||!ship.showProw)return;
+    v.holeSprayIn=.5;
+    let shown=0;
+    for(const hole of holes){
+      if(!(hole.flow>0)||Math.abs(hullHoleDepth(ship,hole))>hole.radius+.5)continue;
+      boatRotate(holeRotation,hole.local[0],hole.local[1],hole.local[2],ship.heading*D2R,ship.pitch,ship.roll);
+      seaEntry([ship.x+holeRotation[0],0,ship.z+holeRotation[2]],{massKg:.4,radiusMetres:hole.radius*1.6,closingSpeed:1.2});
+      if(++shown>=2)break;
+    }
+  }
 
   const broadsideMidPan=BROADSIDE_SCENARIO&&followerEnabled?(vessels[1].boat.x-boat.x)*0.5:0;
   const shipOrbit = { yaw:boat.heading*D2R+param('orbitYaw',BROADSIDE_SCENARIO?8:57.3,-360,360)*D2R,
@@ -2057,12 +2108,8 @@ async function main() {
   const boardingStatus=document.createElement('p');boardingStatus.id='boarding-docking-status';boardingStatus.setAttribute('role','status');
   boardingStatus.style.cssText='margin:0;font-size:.9em;opacity:.92';
   dockPierBtn.onclick=()=>{
-    const activeShip=followerEnabled&&vessels[1]?.boat?.showProw&&!vessels[1].boat.damage?.sunk?vessels[1]:null;
-    if(activeShip&&Math.hypot((activeShip.boat.x??0)-boat.x,(activeShip.boat.z??0)-boat.z)<140){
-      dockingBoarding.grappleShip(activeShip,{mode:'moor'});
-    }else{
-      dockingBoarding.dockAtPier({terrain,portLabel:terrain?.region?.name||'Harbor Pier'});
-    }
+    const thrown=dockingBoarding.throwLines();
+    if(!thrown.ok)voyageCtl?.showToast?.(thrown.reason,5);
     updateCrewUI();helm?.update?.(performance.now(),true);
   };
   castOffBtn.onclick=()=>{
@@ -2147,7 +2194,7 @@ async function main() {
         castOffBtn.disabled=dbState.mooringPhase==='clear'||dbState.mooringPhase==='casting-off';
       }
       if(dockPierBtn){
-        dockPierBtn.disabled=dbState.mooringPhase==='moored'||dbState.mooringPhase==='grappled'||dbState.mooringPhase==='making-fast'||dbState.mooringPhase==='throwing-lines';
+        dockPierBtn.disabled=dbState.mooringPhase==='moored'||dbState.mooringPhase==='grappled'||dbState.mooringPhase==='making-fast'||dbState.mooringPhase==='throwing-lines'||!dockingBoarding.lineTarget();
       }
       const bTxt=`${dbState.statusText} · Boarding power: ${pStr.effectiveStrength.toFixed(1)} (${pStr.femaleHands}♀=${pStr.meanFemaleStrength.toFixed(1)}, ${pStr.maleHands}♂=${pStr.meanMaleStrength.toFixed(1)})`;
       if(boardingStatus.textContent!==bTxt)boardingStatus.textContent=bTxt;
@@ -2507,6 +2554,7 @@ async function main() {
       getMarineLife:()=>marineLife,
       onSightVessel:enc=>activateEncounterVessel(enc,{mode:'sight'}),
       onInspectLand:()=>setSpyglassActive(true,null,{land:true}),
+      onHandLostInGale:()=>{const lost=loseHandInGale(boat,crew?.state);if(lost)refreshCrewRosterDOM();return lost;},
       onInspectEncounter:enc=>{
         activateEncounterVessel(enc,{mode:'sight',keepPosition:true});
         setSpyglassActive(true,vessels[1]?.boat??null);
@@ -2807,6 +2855,7 @@ async function main() {
     document.body.append(portCallButton);
     let portPanel=null,portDeparting=false;
     const PILOT_RANGE_KM=25;
+    const ROW_ASHORE_SPEED=.8;
     const pilotablePort=()=>{
       const v=voyageCtl?.voyage;
       if(!v?.true)return null;
@@ -2827,9 +2876,11 @@ async function main() {
       portCallButton.hidden=!port;
       if(!port)return;
       const phase=dockingBoarding.state.mooringPhase;
-      const label=offPort?'Take a pilot in':mooredAtPier()?'Go ashore':phase==='clear'?'Moor and go ashore':'Making fast…';
+      // With no pier in reach it is the ship's boat, once she has stopped.
+      const stopped=Math.hypot(boat.surgeVelocity??0,boat.leewayVelocity??0)<ROW_ASHORE_SPEED;
+      const label=offPort?'Take a pilot in':mooredAtPier()?'Go ashore':phase!=='clear'?'Making fast…':dockingBoarding.lineTarget()==='pier'?'Moor and go ashore':stopped?'Row ashore':'Stop her to row ashore';
       if(portCallButton.textContent!==label){portCallButton.textContent=label;portCallButton.setAttribute('aria-label',`${label}, ${port.name}`);}
-      portCallButton.disabled=!offPort&&!mooredAtPier()&&phase!=='clear';
+      portCallButton.disabled=label==='Making fast…'||label==='Stop her to row ashore';
     };
     portCallButton.onclick=()=>{
       if(portCallButton.textContent==='Take a pilot in'){
@@ -2839,8 +2890,8 @@ async function main() {
         reloadAtPort(port);
         return;
       }
-      if(!mooredAtPier()){
-        dockingBoarding.dockAtPier({terrain,portLabel:terrain?.region?.name||'Harbor Pier'});
+      if(portCallButton.textContent==='Moor and go ashore'){
+        dockingBoarding.dockAtPier({terrain,portLabel:terrain?.region?.name});
         updatePortCall();updateCrewUI();
         return;
       }
@@ -3095,12 +3146,8 @@ async function main() {
       if(phase==='moored'||phase==='grappled'||phase==='making-fast'||phase==='throwing-lines'){
         dockingBoarding.castOff();
       }else{
-        const activeShip=followerEnabled&&vessels[1]?.boat?.showProw&&!vessels[1].boat.damage?.sunk?vessels[1]:null;
-        if(activeShip&&Math.hypot((activeShip.boat.x??0)-boat.x,(activeShip.boat.z??0)-boat.z)<140){
-          dockingBoarding.grappleShip(activeShip,{mode:'moor'});
-        }else{
-          dockingBoarding.dockAtPier({terrain,portLabel:terrain?.region?.name||'Harbor Pier'});
-        }
+        const thrown=dockingBoarding.throwLines();
+        if(!thrown.ok)voyageCtl?.showToast?.(thrown.reason,5);
       }
       updateCrewUI();
     },
@@ -3662,6 +3709,9 @@ async function main() {
       const fireZBin=primaryFire?Math.max(1,Math.min(12,Math.round((primaryFire.localPosition?.[2]??0)/Math.max(0.8,(ship.length??20)/12)+6.5))):6;
       data[51]=fireInt>0.01?(fireZBin+Math.min(0.98,Math.max(0.01,fireInt/2.5))):0;
       device.queue.writeBuffer(v.hullUBO,0,data);
+      v.flood?.update(ship);
+      updateHullHoleEffects(v,ship,dt);
+      ship.crewEvents??=crewSeaEvents(v);
       fleetHullData.set(data.subarray(0,24),index*24);
       v.shadows.update(data,frameF.subarray(frameF[115]>.5?96:32,frameF[115]>.5?99:35),ship.showProw&&!v.entirelySubmerged&&qs.get('shadows')!=='0');
       if(!index&&dmg?.sunk&&!playerWreckRaised){playerWreckRaised=true;voyageCtl?.presentShipwreck?.();}
@@ -3902,6 +3952,7 @@ async function main() {
         prowPass.setVertexBuffer(0,v.vertexBuffer);if(v.pose)prowPass.setVertexBuffer(1,v.pose.buffer);prowPass.setIndexBuffer(v.render.indexBuffer,'uint32');prowPass.drawIndexed(v.asset.indices.length);
         if(!v.boat.damage?.sunk)v.crew?.draw(prowPass);
         if(!v.bakedWreck)v.anchorRenderer.draw(prowPass);
+        if(!v.boat.damage?.sunk)v.flood?.draw(prowPass);
       }
       shipColorsRenderer?.draw(prowPass,vessels.length);
       fortSoldiers?.draw(prowPass);

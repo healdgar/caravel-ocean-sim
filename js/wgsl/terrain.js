@@ -785,10 +785,18 @@ fn landOpaque(in:LandVertex)->vec4f{
     let detailB=landOrientedDetail(world+vec3f(7.3,3.1,11.9),n,dx,dy,5.2);
     if(in.kind.x<10.5){
       // Kind 10: Weathered Spanish cedar, oak & pitch-pine timber (piers, balconies, casements, rafters)
-      let plank=landFilteredWave(world,dx,dy,vec3f(3.8,14.5,3.8),detailA*1.6);
-      let grain=landFilteredWave(world,dx,dy,vec3f(19.0,6.5,-19.0),0.0)*microLodFade;
-      let seam=max(0.0,landFilteredCourse(world.y*2.8+(world.x+world.z)*0.8,dx.y*2.8,dy.y*2.8,2.0)-0.38)*archLodFade;
-      albedo=vec3f(0.22,0.135,0.075)*shadeAlbedo*(1.0+detailA*0.18+detailB*0.09+plank*0.08+grain*0.05-seam*0.16);
+      // Boards lie level on an upright face and side by side on a flat one. Measuring them on
+      // the face itself, never along a world diagonal, keeps seams and grain from crossing into a weave.
+      let upright=abs(n.y)<.7;
+      let boardCoord=select(world.z,world.y,upright)*3.2;
+      let boardDx=select(dx.z,dx.y,upright)*3.2;
+      let boardDy=select(dy.z,dy.y,upright)*3.2;
+      let boardFade=landDetailWeight(length(vec2f(boardDx,boardDy)));
+      let plank=(fract(sin(floor(boardCoord)*91.7)*43758.5453)-.5)*boardFade;
+      let grainCoord=boardCoord*7.0+detailA*2.4;
+      let grain=landFilteredCourse(grainCoord,boardDx*7.0,boardDy*7.0,1.0)*.5*microLodFade;
+      let seam=max(0.0,landFilteredCourse(boardCoord,boardDx,boardDy,2.0)-0.38)*archLodFade;
+      albedo=vec3f(0.22,0.135,0.075)*shadeAlbedo*(1.0+detailA*0.18+detailB*0.09+plank*0.22+grain*0.05-seam*0.16);
       relief=(detailA*0.036+plank*0.026+grain*0.014-seam*0.034)*archLodFade;
       roughness=clamp(0.73-plank*0.04+seam*0.12,0.62,0.88);
       ambientVisibility=(0.42+0.34*max(n.y,0.0))*aoVis*(1.0-seam*0.22);

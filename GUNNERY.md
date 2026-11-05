@@ -60,3 +60,7 @@ Secured gunnery emits no smoke/particle work or ocean readback. A manned, loaded
 - [NASA: Flight Equations with Drag](https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/flight-equations-with-drag/): vector drag and gravity formulation.
 
 These sources guide the reconstruction. Exact charge tables, historical shot quality, sea-state firing doctrine and reload performance have not been calibrated to this ship.
+
+## Holes and flooding
+
+A penetrating round or hot shot leaves a hole in the hull, recorded in `damage.holes` in her own frame in metres. The hole, not the hit, decides the water: see `js/hull-holes.js`. Grape, chain and arrows never hole a hull. Waterline hits that do not penetrate still use the older estimated leak in `compartments[...].breachArea`.

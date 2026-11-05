@@ -3,6 +3,7 @@
 // gunnery-control.js. Hull integrity is derived from accumulated joules and
 // flooding is carried as cargo weight, so changing one without the other is
 // silently undone by the next hit or damage step.
+import { plugAllHullHoles, clearHullHoles } from './hull-holes.js';
 import { remountVesselGuns } from './gunnery-state.js';
 
 const VESSEL_COMPARTMENT_KEYS = ['forePort', 'foreStarboard', 'midPort', 'midStarboard', 'aftPort', 'aftStarboard'];
@@ -27,6 +28,7 @@ export function stopVesselLeaks(damage) {
   for (const key of VESSEL_COMPARTMENT_KEYS) {
     if (damage.compartments?.[key]) damage.compartments[key].breachArea = 0;
   }
+  plugAllHullHoles(damage);
   damage.waterlineBreachArea = 0;
   damage.breachArea = 0;
   damage.breachSideMoment = 0;
@@ -98,6 +100,7 @@ export function repairVessel(boat, { hullGain = 0, minHull = 0, minRig = 0, leak
     if (damage.partDamage) for (const key of Object.keys(damage.partDamage)) damage.partDamage[key] = 0;
     damage.throughBreaches = 0;
     damage.breaches = 0;
+    clearHullHoles(damage);
   }
   damage.revision = (damage.revision ?? 0) + 1;
   return damage;
@@ -115,6 +118,7 @@ export function vesselDamageSnapshot(boat) {
     mastIntegrity: { ...damage.mastIntegrity },
     mastState: { ...damage.mastState },
     compartments: JSON.parse(JSON.stringify(damage.compartments ?? {})),
+    holes: JSON.parse(JSON.stringify(damage.holes ?? [])),
     crewCasualties: damage.crewCasualties ? {
       total: damage.crewCasualties.total,
       able: damage.crewCasualties.able,
@@ -144,6 +148,8 @@ export function restoreVesselDamageSnapshot(boat, snapshot) {
     if (damage.mastIntegrity && Number.isFinite(snapshot.mastIntegrity?.[group])) damage.mastIntegrity[group] = snapshot.mastIntegrity[group];
     if (damage.mastState && Number.isFinite(snapshot.mastState?.[group])) damage.mastState[group] = snapshot.mastState[group];
   }
+  damage.holes = Array.isArray(snapshot.holes) ? JSON.parse(JSON.stringify(snapshot.holes)) : [];
+  damage.holesRevision = (damage.holesRevision ?? 0) + 1;
   for (const key of VESSEL_COMPARTMENT_KEYS) {
     const saved = snapshot.compartments?.[key];
     if (saved && damage.compartments?.[key]) Object.assign(damage.compartments[key], saved);

@@ -217,71 +217,48 @@ function releaseCrewRailAction(company, boat) {
 
 // Find the closest pier / harbor jetty in the terrain port instances, or
 // synthesize a stone/timber quay alongside the ship when near land/harbor.
+// How far a heaving line can be got across. Lines go only to something really there.
+export const MOORING_LINE_REACH_M = 36;
+export const MOORING_SHIP_REACH_M = 30;
+const MOORING_PIER_PREFAB = /jetty|pier|wharf|dock|quay|mole|slip/i;
+
+// The nearest point of a pier's footprint to a point in the world.
+function pierClosestPoint(inst, offset, px, pz) {
+  const cx = (inst.x ?? 0) + offset.x, cz = (inst.z ?? 0) + offset.z;
+  const yaw = inst.yaw ?? inst.rotY ?? 0, c = Math.cos(yaw), sn = Math.sin(yaw);
+  const dx = px - cx, dz = pz - cz;
+  const lx = bdClamp(dx * c - dz * sn, -(inst.width ?? 0) * 0.5, (inst.width ?? 0) * 0.5);
+  const lz = bdClamp(dx * sn + dz * c, -(inst.length ?? 0) * 0.5, (inst.length ?? 0) * 0.5);
+  return { x: cx + lx * c + lz * sn, z: cz - lx * sn + lz * c };
+}
+
+// The nearest real pier within reach of a line, or null. There is no such thing as a pier
+// that exists only because she wants one.
 export function findNearestPier(boat, env = {}) {
-  const bx = boat?.x ?? 0;
-  const bz = boat?.z ?? 0;
+  const bx = boat?.x ?? 0, bz = boat?.z ?? 0;
   const instances = env?.portInstances ?? env?.terrain?.port?.instances ?? [];
-  let bestPier = null;
-  let bestDist = Infinity;
-
-  if (Array.isArray(instances)) {
-    for (const inst of instances) {
-      if (!inst) continue;
-      const isPier = inst.assetId === 'harbor_jetty_and_crane' ||
-        /jetty|pier|wharf|dock|quay/i.test(inst.assetId ?? '');
-      if (!isPier && bestPier) continue;
-      const dx = (inst.x ?? 0) - bx;
-      const dz = (inst.z ?? 0) - bz;
-      const d = Math.hypot(dx, dz);
-      const effectiveD = isPier ? d : d + 120;
-      if (effectiveD < bestDist) {
-        bestDist = d;
-        const rot = inst.rotY ?? 0;
-        bestPier = {
-          kind: 'pier',
-          label: isPier ? 'Harbor Timber Pier & Crane' : 'Harbor Quay',
-          x: inst.x ?? 0,
-          y: Math.max(1.25, (inst.y ?? 0) + 1.35),
-          z: inst.z ?? 0,
-          heading: (rot * 180 / Math.PI) % 360,
-          distance: d,
-        };
-      }
-    }
+  const offset = env?.terrain?.getWorldOffset?.() ?? { x: 0, z: 0 };
+  let nearest = null, nearestDistance = MOORING_LINE_REACH_M;
+  for (const inst of Array.isArray(instances) ? instances : []) {
+    if (!inst || !MOORING_PIER_PREFAB.test(inst.prefabId ?? inst.assetId ?? '')) continue;
+    const point = pierClosestPoint(inst, offset, bx, bz);
+    const distance = Math.hypot(point.x - bx, point.z - bz);
+    if (distance <= nearestDistance) { nearest = { inst, point }; nearestDistance = distance; }
   }
-
-  if (bestPier && bestPier.distance <= 36) {
-    // Clamp effective bollard line-of-action to a clean lateral warping range (<= 9.5 m)
-    // so hauling never drags the vessel across shoals or far-off shore geometry.
-    const { rightX, rightZ } = boatBasis(boat);
-    const dx = bestPier.x - bx;
-    const dz = bestPier.z - bz;
-    const sideSign = (dx * rightX + dz * rightZ) >= 0 ? 1 : -1;
-    const side = sideSign >= 0 ? 'starboard' : 'port';
-    const halfBeam = Math.max(2.0, (boat?.beam ?? 4.8) * 0.5);
-    const clampedDist = bdClamp(bestPier.distance, halfBeam + 3.2, halfBeam + 7.5);
-    return {
-      ...bestPier,
-      x: bx + rightX * sideSign * clampedDist,
-      z: bz + rightZ * sideSign * clampedDist,
-      distance: clampedDist,
-      side,
-    };
-  }
-
-  // Fallback: create a berth alongside the ship's port beam at a smooth warping distance
+  if (!nearest) return null;
+  const { inst, point } = nearest;
   const { rightX, rightZ } = boatBasis(boat);
-  const halfBeam = Math.max(2.0, (boat?.beam ?? 4.8) * 0.5);
-  const pierOffset = halfBeam + 5.2;
+  const across = (point.x - bx) * rightX + (point.z - bz) * rightZ;
   return {
     kind: 'pier',
-    label: env?.portLabel || 'Harbor Landing Pier',
-    x: bx - rightX * pierOffset,
-    y: 1.35,
-    z: bz - rightZ * pierOffset,
-    heading: boat?.heading ?? 0,
-    distance: pierOffset,
-    side: 'port',
+    label: inst.label || env?.portLabel || 'the pier',
+    x: point.x,
+    y: Math.max(1.25, (inst.y ?? 0) + 1.35),
+    z: point.z,
+    heading: (((inst.yaw ?? inst.rotY ?? 0) * 180) / Math.PI) % 360,
+    distance: Math.abs(across),
+    side: across >= 0 ? 'starboard' : 'port',
+    closestPoint: (px, pz) => pierClosestPoint(inst, offset, px, pz),
   };
 }
 
@@ -307,15 +284,14 @@ function buildLineDescriptorsForPier(boat, pier, side = 'port') {
   return specs.map((sp, i) => {
     const hb = Math.max(0.55, modelDeckWidth(boat, sp.shipZ) - 0.08);
     const deckY = modelDeck(boat, sp.shipZ) + 0.34;
+    const wantX = basePierX + fwdX * sp.pierAlong, wantZ = basePierZ + fwdZ * sp.pierAlong;
+    // Each line lands on the pier itself, however she lies to it.
+    const bollard = pier?.closestPoint?.(wantX, wantZ) ?? { x: wantX, z: wantZ };
     return {
       name: sp.name,
       index: i,
       shipLocal: [sideSign * hb, deckY, sp.shipZ],
-      pierWorld: [
-        basePierX + fwdX * sp.pierAlong,
-        basePierY,
-        basePierZ + fwdZ * sp.pierAlong,
-      ],
+      pierWorld: [bollard.x, basePierY, bollard.z],
     };
   });
 }
@@ -408,6 +384,10 @@ export function createDockingBoardingState(boat, options = {}) {
   // Throw mooring lines onto a pier and make fast
   function dockAtPier(env = {}, { immediate = false } = {}) {
     const pier = findNearestPier(boat, env);
+    if (!pier) {
+      state.statusText = 'No pier within reach of a line.';
+      return { ok: false, reason: state.statusText };
+    }
     const side = pier.side ?? determineSideToward(pier.x, pier.z);
     const sideSign = side === 'port' ? -1 : 1;
     const { rightX, rightZ } = boatBasis(boat);
@@ -455,6 +435,27 @@ export function createDockingBoardingState(boat, options = {}) {
 
     emit('dock-start', { pier, side, immediate });
     return { ok: true, pier, side, phase: state.mooringPhase };
+  }
+
+  function shipWithinLineReach() {
+    let best = null, bestGap = MOORING_SHIP_REACH_M;
+    for (const v of state.getAdditionalVessels() ?? []) {
+      const tb = v?.boat;
+      if (!tb || v.dormantEncounter || tb.showProw === false || tb.damage?.sunk) continue;
+      const gap = Math.hypot((tb.x ?? 0) - (boat.x ?? 0), (tb.z ?? 0) - (boat.z ?? 0)) - ((boat.beam ?? 4.8) + (tb.beam ?? 4.8)) * 0.5;
+      if (gap <= bestGap) { best = v; bestGap = gap; }
+    }
+    return best;
+  }
+  // What a line thrown now would reach: 'vessel', 'pier', or nothing at all.
+  function lineTarget(env = state.getLineEnv?.() ?? {}) {
+    if (shipWithinLineReach()) return 'vessel';
+    return findNearestPier(boat, env) ? 'pier' : null;
+  }
+  function throwLines(env = state.getLineEnv?.() ?? {}) {
+    const vessel = shipWithinLineReach();
+    if (vessel) return grappleShip(vessel, { mode: 'moor', pullAlongside: false });
+    return dockAtPier(env);
   }
 
   // Throw grappling/mooring lines onto another ship
@@ -1323,6 +1324,8 @@ export function createDockingBoardingState(boat, options = {}) {
   return {
     state,
     dockAtPier,
+    throwLines,
+    lineTarget,
     grappleShip,
     boardVessel,
     capturePrizeVessel,

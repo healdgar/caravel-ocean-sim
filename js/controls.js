@@ -460,15 +460,16 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
       const phase=db?.mooringPhase??'clear';
       const isMoored=phase==='moored'||phase==='grappled'||phase==='making-fast'||phase==='throwing-lines';
       dockBtn.hidden=false;
-      dockBtn.disabled=false;
+      const lineTarget=battleContext?.getDockingBoarding?.()?.lineTarget?.()??null;
+      dockBtn.disabled=!isMoored&&!lineTarget;
       if(isMoored){
         dockBtn.textContent='🪢 Cast off';
         dockBtn.setAttribute('aria-pressed','true');
         dockBtn.title=`${db?.statusText??'Hauling / moored'} · Click to cast off all lines immediately`;
       }else{
-        dockBtn.textContent=nearbyShip?'🪢 Throw lines':'🪢 Dock';
+        dockBtn.textContent=lineTarget==='vessel'?'🪢 Throw lines':'🪢 Dock';
         dockBtn.setAttribute('aria-pressed','false');
-        dockBtn.title=nearbyShip?'Throw mooring & grappling lines onto adjacent vessel':'Throw bow & stern mooring lines onto pier';
+        dockBtn.title=lineTarget==='vessel'?'Throw mooring & grappling lines onto the ship alongside':lineTarget==='pier'?'Throw bow & stern mooring lines onto the pier':'Nothing within reach of a line. Bring her close to a pier or a ship';
       }
     }
     if(boardBtn||boardBattleBtn){

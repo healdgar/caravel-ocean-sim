@@ -811,7 +811,23 @@ test('pirates wear brown and black clothing, women and men have equal boarding s
   company:playerCompany,
   getAdditionalVessels:()=>[pirateVessel],
  });
- const dockRes=db.dockAtPier({portLabel:'Ribeira das Naus Pier'});
+ // A real pier 14 m off her starboard beam, running along her side.
+ const pierBeside=boat=>{const h=(boat.heading??0)*Math.PI/180;return {portLabel:'Ribeira das Naus Pier',portInstances:[{prefabId:'timber_mole_pier',label:'Ribeira das Naus Pier',x:boat.x+Math.cos(h)*14,y:1,z:boat.z+Math.sin(h)*14,yaw:-h,length:40,width:6}]};};
+ const openSea=db.dockAtPier({portLabel:'Ribeira das Naus Pier'});
+ assert.equal(openSea.ok,false,'no pier in reach means no mooring, wherever she wants one');
+ assert.equal(db.state.mooringPhase,'clear');
+ assert.equal(db.lineTarget({}),'vessel','a ship alongside can still take a line');
+ const pirateAt=pirateBoat.x;pirateBoat.x=pirateAt+500;
+ assert.equal(db.lineTarget({}),null,'but one out of reach cannot, and there is nothing else to throw to');
+ assert.equal(db.throwLines({}).ok,false,'so the lines stay aboard');
+ assert.equal(pirateBoat.x,pirateAt+500,'and she is not dragged alongside from afar');
+ assert.equal(db.state.mooringPhase,'clear');
+ pirateBoat.x=pirateAt;
+ const farAway=pierBeside(playerBoat);farAway.portInstances[0].x+=400;
+ assert.equal(db.dockAtPier(farAway).ok,false,'a pier out of reach is no pier');
+ const building=pierBeside(playerBoat);building.portInstances[0].prefabId='colonial_church';
+ assert.equal(db.dockAtPier(building).ok,false,'lines do not make fast to a church');
+ const dockRes=db.dockAtPier(pierBeside(playerBoat));
  assert.equal(dockRes.ok,true);
  assert.equal(db.state.mooringPhase,'throwing-lines');
  assert.equal(playerBoat.mooringActive,true);
@@ -821,7 +837,7 @@ test('pirates wear brown and black clothing, women and men have equal boarding s
  // Test changing your mind while hauling in and casting off:
  // advance into making-fast (hauling in), record lateral progress toward pier, then castOff()
  playerBoat.heading=255; // Lisbon departure heading
- db.dockAtPier({portLabel:'Ribeira das Naus Pier'});
+ db.dockAtPier(pierBeside(playerBoat));
  const nx=db.state.pierNormalX,nz=db.state.pierNormalZ;
  const projPier=()=>playerBoat.x*nx+playerBoat.z*nz;
  for(let i=0;i<15;i++)db.step(0.12);
@@ -842,7 +858,7 @@ test('pirates wear brown and black clothing, women and men have equal boarding s
  assert.ok(afterCastStep<atCastMoment,'ship immediately stops hauling in and glides away from pier on the very next frame after castOff()');
 
  // Full dock -> moored -> cast off cycle
- db.dockAtPier({portLabel:'Ribeira das Naus Pier'});
+ db.dockAtPier(pierBeside(playerBoat));
  for(let i=0;i<30;i++)db.step(0.15);
  assert.equal(db.state.mooringPhase,'moored','transitions through making-fast to moored');
  const castRes=db.castOff();

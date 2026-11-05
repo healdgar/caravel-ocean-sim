@@ -81,6 +81,9 @@ export const CARAVEL = FRAME_WGSL + ATMO_CORE_WGSL + DECK_PROFILE + VESSEL_RIG +
 @group(0) @binding(12) var deckWater: texture_2d<f32>;
 @group(0) @binding(13) var<storage,read> moisture:array<vec2f>;
 @group(0) @binding(14) var<storage,read> wetLookup:array<u32>;
+// Local metres and radius of every hole shot through this hull.
+struct HullHoles { scale:vec4f, level:vec4f, items:array<vec4f,24> };
+@group(0) @binding(15) var<uniform> hullHoles:HullHoles;
 ` + SKY_RENDER_FUNCS + DECK_SAMPLING + /* wgsl */ `
 struct BoatVertex {
   @builtin(position) pos: vec4f,
@@ -150,6 +153,27 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   // Plank seams follow the hull's girth and the cabin's horizontal strakes.
   // Unlike a painted line, their recessed height also breaks the light response.
   let paintedWood=in.material==20u || in.material==21u || in.material==23u || in.material==24u || in.material==26u;
+  // A ball leaves a ragged opening, torn further along the run of the planks. Timber stands
+  // raw and splintered around it, and whatever is seen through it lies in the dark of the hold.
+  var holeRim=0.0;
+  let holeCount=u32(hullHoles.scale.w);
+  let holedTimber=holeCount>0u && vesselWoodMaterial(in.material,paintedWood);
+  if(holedTimber){
+    let metres=p*hullHoles.scale.xyz;
+    for(var i=0u;i<holeCount;i++){
+      let hole=hullHoles.items[i];
+      // Measured across her side only: the planks around a hole have been stove in well inboard of it.
+      let d=metres-hole.xyz;
+      if(abs(d.x)>1.2){continue;}
+      let distance=length(d.yz*vec2f(1.0,.82));
+      if(distance>hole.w*1.8+.08){continue;}
+      let around=d.yz/max(length(d.yz),.0001);
+      let ragged=.84+.55*gnoise(around*1.7+hole.xz*9.0)+.2*gnoise(vec2f(metres.z*22.0,metres.y*48.0));
+      let edge=hole.w*ragged;
+      if(distance<edge){discard;}
+      holeRim=max(holeRim,1.0-smoothstep(edge,edge*1.3+.035,distance));
+    }
+  }
   let plankedWall=in.material==15u || (paintedWood && abs(in.normalLocal.y)<.5) || (in.material==1u && abs(in.normalLocal.y)<.35);
   let course=select(p.y/.16,in.uv.x*18.0,in.material==15u);
   let board=floor(course);
@@ -593,6 +617,10 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   }
   let v=normalize(F.camPos.xyz-in.world); let l=F.sunDir.xyz;
   let nl=clamp(dot(n,l),0.0,1.0);
+  if(holeRim>0.0){
+    albedo=mix(albedo,vec3f(.46,.33,.2)*(.55+.9*gnoise(vec2f(p.z*90.0,p.y*140.0))),holeRim);
+    rough=max(rough,.92);
+  }
   var f0=mix(vec3f(0.04),albedo,metal);
   if(isWood){f0=vec3f(vesselWoodDielectricF0());}
   if(isIron){
@@ -640,6 +668,8 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
     // bounded two-pass attenuation approximation, not a split-sum IBL integral.
     environmentTransmission=vesselIronTransmission(iron.film,max(dot(n,v),0.0),max(dot(n,v),0.0));
   }
+  // Below the deck and facing inboard is the hold, and it is dark.
+  if(holedTimber && p.y<deckFloor(p.z)+.06 && (!front || in.normalLocal.x*sign(p.x)< -.2)){directTransmission*=.04;environmentTransmission*=.1;}
   var col=(diffuse/PI+spec)*direct*nl*directTransmission;
   col+=(diffuseAmbient*ambient*ao + reflected*F.windP[1].w*vesselEnvironment(n,v,rough,f0))*environmentTransmission;
   if(!vesselWaterCapture&&isIron&&iron.film>0.0001){

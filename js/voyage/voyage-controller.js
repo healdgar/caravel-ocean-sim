@@ -53,6 +53,10 @@ import { createEncounterDirector, describeEncounterThroughSpyglass } from './enc
 import { controlIcon } from '../controls.js';
 import { probeHullBottomContact } from '../terrain-model.js';
 
+// Wind in metres a second at which a passage starts to cost hands, and the chance per game hour.
+const GALE_LOSS_WIND = 24;
+const GALE_LOSS_PER_HOUR = 0.015;
+
 const VOYAGE_STORAGE_KEY = 'waterworld.voyage.v1';
 const voyageWrap360 = (d) => ((d % 360) + 360) % 360;
 const voyageEscapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -974,6 +978,18 @@ export function createVoyageController(cfg) {
       return Boolean(coastIndex?.isLand?.(lat, lon));
     };
     const wasOnCoarseLand = isConfirmedLand(prevTrue.lat, prevTrue.lon);
+    // Too fast to watch: a gale simply costs a hand now and then.
+    if (!voyage.passive && voyage.rate > 30 && (P?.windSpeed ?? 0) >= GALE_LOSS_WIND) {
+      const hours = (dt * voyage.rate) / 3600;
+      if (Math.random() < hours * GALE_LOSS_PER_HOUR * (1 + (P.windSpeed - GALE_LOSS_WIND) / 6)) {
+        const lost = cfg.onHandLostInGale?.();
+        if (lost) {
+          const name = lost.sailor?.name ?? 'A hand';
+          addLog(voyage, `${name} was washed overboard in the gale and lost.`, 'order');
+          showToast(`${name} was washed overboard in the gale and lost.`, 8);
+        }
+      }
+    }
     const events = stepVoyage(voyage, dt, { boat, ignoreCurrent });
     handleEvents(events);
 
@@ -1724,6 +1740,12 @@ export function createVoyageController(cfg) {
       if (!voyage || !sighted || typeof terrain?.height !== 'function') return null;
       const center = initialBearing(voyage.true.lat, voyage.true.lon, sighted.lat, sighted.lon);
       return visibleLandPoint((x, z) => terrain.height(x, z), boat.x, boat.z, center, { eyeM });
+    },
+    // Something the master should hear about, and the log should remember.
+    note(text, seconds = 7, kind = 'order') {
+      if (voyage) addLog(voyage, text, kind);
+      showToast(text, seconds);
+      emit('change');
     },
     saveNow() {
       if (!voyage || !storage || (voyage.passive && !voyage.keepSaved)) return;

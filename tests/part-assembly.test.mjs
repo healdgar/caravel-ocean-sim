@@ -773,7 +773,12 @@ test('hot shot ignites shipboard fires, chain/grape shot shred sails & rigging, 
   }
   assert.ok(targetShip.damage.floodingTonnes > initialFlood + 10, 'Waterline breaches continuously admit seawater over time');
   assert.ok(targetShip.damage.floodingSinkage > 0.8, 'Continuous flooding deepens vessel sinkage');
-  assert.ok(targetShip.damage.floodingRoll > 0.05, 'Starboard waterline breaches cause the ship to list to starboard');
+  // A ball through both sides floods both, so she lists to whichever holds more water. Positive roll lifts starboard.
+  const compartments = targetShip.damage.compartments;
+  const starboardWater = compartments.foreStarboard.waterTonnes + compartments.midStarboard.waterTonnes + compartments.aftStarboard.waterTonnes;
+  const portWater = compartments.forePort.waterTonnes + compartments.midPort.waterTonnes + compartments.aftPort.waterTonnes;
+  assert.ok(Math.abs(targetShip.damage.floodingRoll) > 0.05, `She lists as she floods (roll ${targetShip.damage.floodingRoll}, starboard ${starboardWater} t, port ${portWater} t)`);
+  if (Math.abs(starboardWater - portWater) > 1) assert.equal(Math.sign(targetShip.damage.floodingRoll), -Math.sign(starboardWater - portWater), 'toward the heavier side');
   assert.equal(targetShip.damage.sunk, true, 'Uncontained heavy waterline breaches eventually founder and sink the ship');
 });
 
@@ -965,7 +970,7 @@ test('a foundering ship decelerates to a halt, heels/plunges asymmetrically, and
     });
   }
   assert.equal(ship.damage.sunk, false, 'Warship must not sink instantaneously upon impact before water pours into the hull');
-  assert.ok(ship.damage.compartments.foreStarboard.breachArea > 0.5, 'Forward starboard compartment records waterline breach area');
+  assert.ok(ship.damage.holes.some((hole) => hole.compartment === 'foreStarboard' && hole.radius > 0.2), 'The shot leaves real holes in the forward starboard side');
 
   // Step progressive compartment flooding until the forward compartment drags the bow down,
   // raises the stern up, cracks the hull under longitudinal strain, and founders the vessel

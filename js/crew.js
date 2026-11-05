@@ -6,6 +6,7 @@ import { assignCrewWork, stepCrewWork, updateCrewGunneryAttendance, updateCrewRo
 import { poseCrewWork } from './crew-pose.js';
 import { stepCrewPhysicsState, applyCrewRealism } from './crew-physics.js';
 import { applyCrewWounds, clearCrewWounds } from './crew-wounds.js';
+import { crewClearsRail, sendCrewOverboard, stepCrewOverboard, stepGaleKnockdowns, clearCrewOverboard } from './crew-overboard.js';
 import { createGunneryTools } from './gunnery-tools.js';
 import { CREW_RENDER, CREW_SHADOW } from './wgsl/crew.js';
 import { NINA_DESIGN } from './models/nina.js';
@@ -103,6 +104,7 @@ export function reviveCompany(company){
     s.casualtyState='able';s.wounded=null;s.health=1;s.strength=1;s.woundSeverity=0;s.scorchAmount=0;s.knockdownTimer=0;
     s.job=null;s.seatedPose=null;s.climbPitch=0;s.navigationPath=null;s.navigationKey=null;s.phys=undefined;
     clearCrewWounds(s);
+    clearCrewOverboard(s);
   }
   company.gunneryActive=false;company.pending=false;company.morale=1;
   company.gunAbstractCrew?.clear();company.gunRouteFailSince?.clear();company.revision=(company.revision??0)+1;
@@ -231,13 +233,26 @@ export function stepCompany(company,boat,dt,wind) {
   company.rigManeuver=sails.maneuver?.stage??null;
   company.workTime=(company.workTime??0)+dt;assignCrewWork(company,boat);
   for(const s of company.crew)s._cachedDeckY=s.job?.position?.[1]??s.navigationY??crewDeckHeight(boat,s.z,s.x);
+  stepGaleKnockdowns(boat,company,wind,dt);
   for(const s of company.crew){
-    // Apply blast knockback velocity (from cannon impacts or magazine explosions) within deck bounds
+    if(s.overboard){
+      if(!s.overboard.gone){
+        stepCrewOverboard(boat,s,dt);
+        if(s.overboard)stepCrewPhysicsState(s,boat,dt,company);
+      }
+      continue;
+    }
+    // Apply blast knockback velocity (from cannon impacts, magazine explosions or a sea) within deck bounds
     if(dt>0&&((Math.abs(s.knockbackVx??0)>1e-3)||(Math.abs(s.knockbackVz??0)>1e-3))){
       const damp=Math.exp(-dt*5.5);
       const nextX=s.x+(s.knockbackVx??0)*dt;
       const nextZ=s.z+(s.knockbackVz??0)*dt;
       const halfW=Math.max(0.18,modelDeckWidth(boat,nextZ)-0.34/Math.max(0.5,boat.beam/3.6));
+      // At the rail a body either goes over or stops against it.
+      if(Math.abs(nextX)>halfW&&s.position){
+        const side=Math.sign(nextX),outward=Math.abs(s.knockbackVx??0)*(boat.beam/3.6);
+        if(Math.sign(s.knockbackVx??0)===side&&crewClearsRail(boat,nextZ,side,outward)&&sendCrewOverboard(boat,s,{side,outward,cause:s.knockbackCause??'blast'}))continue;
+      }
       s.x=Math.max(-halfW,Math.min(halfW,nextX));
       s.z=Math.max(-4.6,Math.min(5.2,nextZ));
       s.knockbackVx=(s.knockbackVx??0)*damp;

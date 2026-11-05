@@ -1,5 +1,19 @@
 # Ocean Sailing Simulator backlog and overnight checkpoint
 
+## November 4: holes in hulls, and men overboard
+
+Round and hot shot that beats the planking now cuts a real opening (`js/hull-holes.js`, drawn by the hull shader), up to 24 per ship, with an exit hole when enough energy is left. Each hole floods by its depth below the sea at that moment, less the water already standing inside, so a hole above the waterline only floods once she lists or settles. The carpenter's crew plug the worst leak in about 75 seconds with all hands, up to 85%. A port patch stops the water, and a full refit removes the holes. The hold shows a water surface and a falling curtain at each flowing hole (`js/hull-flood.js`).
+
+Fixed along the way, because this work depends on them: bodies slid uphill on a heeled deck, a flooded side lifted instead of sank, and head at a breach was computed for the raised side.
+
+Bodies clear the rail when moving fast enough for the rail's height, helped by heel to that side (`js/crew-overboard.js`). They float where they fell as she sails on, last 150 seconds (50 wounded), and are hauled in as wounded if she stays within 28 m at under 1.6 m/s for 6 seconds. Gales knock hands to leeward at real time, and cost a hand about every three days of gale at warp.
+
+Known limits: a body floats at mean sea level, not on the local wave, because wave height is only known on the GPU. Round shot in a broadside mostly throws people inboard, so overboard is commonest from gales, magazine blasts and bodies near the far rail.
+
+Mooring lines used to reach anything. `findNearestPier` tested `assetId` while port pieces carry `prefabId`, so no pier was ever recognised, and it then invented one beside her wherever she was. Ships within 140 m were teleported alongside. Lines now reach only real piers within 36 m or ships within 30 m, measured to the pier's footprint, and land on the pier. A port with no pier in reach, such as Manila, offers rowing ashore once she has stopped. Hauling stops where the water does, so at Lisbon she lies about 10 m off the mole. Boarding still pulls a target alongside from further away, which is a separate fix.
+
+Timber was shaded with plank and seam lines running along world diagonals, which crossed into a basket weave on piers and crates. Boards now follow each face.
+
 ## November 4: warp, landfall, night and the spyglass
 
 A passage sailed from Lisbon wrecked on St Maarten: warp ran on until a new coast was built around her, close to rock, and she ground to pieces in about two minutes with nobody at the helm. Two coasts, Nassau and Bermuda, also showed a black screen, because climate and tree rebuilds arrived after a coast had been disposed. Warp is now governed by `warpStandoffM` and `warpCapForHazard`, see `CAREER.md`, and slow grinding on the bottom wears a hull about seven times more slowly.

@@ -2058,7 +2058,7 @@ test('crew and vessel materials share sunlight, shadows, reflected light and dir
       device.onuncapturederror=e=>errors.push(e.error.message);
       const B=GPUBufferUsage,T=GPUTextureUsage;
       const buffer=(size,usage)=>device.createBuffer({size,usage:usage|B.COPY_DST});
-      const frame=buffer(384,B.UNIFORM),fixture=buffer(48,B.UNIFORM),sun=buffer(16,B.STORAGE),shadow=buffer(112,B.UNIFORM),hull=buffer(208,B.UNIFORM),wetLookup=buffer(4,B.STORAGE);
+      const frame=buffer(384,B.UNIFORM),fixture=buffer(48,B.UNIFORM),sun=buffer(16,B.STORAGE),shadow=buffer(112,B.UNIFORM),hull=buffer(208,B.UNIFORM),wetLookup=buffer(4,B.STORAGE),hullHoles=buffer(416,B.UNIFORM);
       const hullValues=new Float32Array(52);hullValues[3]=5/3;device.queue.writeBuffer(hull,0,hullValues);
       const sampler=device.createSampler({magFilter:'linear',minFilter:'linear'});
       const compare=device.createSampler({compare:'less-equal'});
@@ -2081,7 +2081,7 @@ test('crew and vessel materials share sunlight, shadows, reflected light and dir
       const read=buffer(1024,B.COPY_DST|B.MAP_READ);
       const common=`
         struct LightingFixture { world:vec4f, normal:vec4f, color:vec4f };
-        @group(0) @binding(15) var<uniform> Q:LightingFixture;
+        @group(0) @binding(16) var<uniform> Q:LightingFixture;
         fn fixturePosition(i:u32)->vec4f {
           return vec4f(array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3))[i],0,1);
         }`;
@@ -2103,9 +2103,9 @@ test('crew and vessel materials share sunlight, shadows, reflected light and dir
       }));
       const buf=b=>({buffer:b}),view=t=>t.createView();
       const groups=[
-        [[0,buf(frame)],[1,buf(hull)],[4,view(trans)],[5,sampler],[6,env.createView({dimension:'cube'})],[7,buf(sun)],[9,view(sky)],[15,buf(fixture)]],
+        [[0,buf(frame)],[1,buf(hull)],[4,view(trans)],[5,sampler],[6,env.createView({dimension:'cube'})],[7,buf(sun)],[9,view(sky)],[16,buf(fixture)]],
         [[0,buf(frame)],[1,view(trans)],[2,view(sky)],[3,sampler],[4,env.createView({dimension:'cube'})],[5,buf(sun)],[6,buf(hull)],
-          [7,view(water)],[8,disp.createView({dimension:'2d-array'})],[9,sampler],[10,view(oak)],[11,sampler],[12,view(deck)],[14,buf(wetLookup)],[15,buf(fixture)]],
+          [7,view(water)],[8,disp.createView({dimension:'2d-array'})],[9,sampler],[10,view(oak)],[11,sampler],[12,view(deck)],[14,buf(wetLookup)],[15,buf(hullHoles)],[16,buf(fixture)]],
       ].map((entries,i)=>device.createBindGroup({layout:pipelines[i].getBindGroupLayout(0),entries:entries.map(([binding,resource])=>({binding,resource}))}));
       const shadowGroups=pipelines.map(pipe=>device.createBindGroup({layout:pipe.getBindGroupLayout(1),entries:[
         buf(shadow),view(depths[0]),compare,view(depths[1]),view(cloth),sampler,
