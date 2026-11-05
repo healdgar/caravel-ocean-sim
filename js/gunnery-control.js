@@ -12,6 +12,7 @@ import { createShipAssetCache } from './ship-mesh.js';
 import { PORT_PREFABS, getBuildingParts } from './coastal-world.js';
 import { GROUNDING_SUBSTRATES, classifyGroundingSubstrate, setGroundingDamageHandler } from './terrain-model.js';
 import { locatePartAtLocalPoint, isSuperstructurePartId, computeArchetypeScaleSpec } from './part-assembly.js';
+import { shipMastSpecs } from './ship-fracture.js';
 import { createFortGarrison, stepFortGarrison } from './crew.js';
 import { DEFAULT_SHIP_COLORS, strikeVesselColors } from './ship-colors.js';
 
@@ -19,51 +20,7 @@ export { GROUNDING_SUBSTRATES, classifyGroundingSubstrate };
 
 let gunneryShipAssetCache = null;
 
-function getModelMastSpecs(modelId) {
-  if (modelId === 'taino-canoe') return [];
-  if (modelId === 'oseberg' || modelId === 'lusoria') {
-    return [['main', 0.0, 4.2, 1.15]];
-  }
-  if (modelId === 'gipsy-moth-iv') {
-    return [
-      ['main', -1.15, 4.8, 1.25],
-      ['mizzen', 2.7, 3.4, 1.15],
-    ];
-  }
-  if (modelId === 'nina') {
-    return [
-      ['fore', -3.6, 4.35, 1.45],
-      ['main', -0.2, 5.1, 1.35],
-      ['mizzen', 3.4, 3.95, 1.85],
-    ];
-  }
-  if (modelId === 'pinta') {
-    return [
-      ['fore', -3.5, 4.2, 1.45],
-      ['main', 0.1, 5.2, 1.35],
-      ['mizzen', 3.8, 3.8, 1.75],
-    ];
-  }
-  if (modelId === 'santa-maria') {
-    return [
-      ['fore', -3.55, 4.6, 1.65],
-      ['main', 0.05, 5.65, 1.45],
-      ['mizzen', 3.85, 4.1, 1.95],
-    ];
-  }
-  if (modelId === 'flying-cloud') {
-    return [
-      ['fore', -3.4, 5.6, 1.45],
-      ['main', 0.15, 6.1, 1.4],
-      ['mizzen', 3.45, 5.1, 1.55],
-    ];
-  }
-  return [
-    ['fore', -3.55, 5.72, 2.05],
-    ['main', 0.05, 6.18, 1.55],
-    ['mizzen', 3.53, 5.15, 2.05],
-  ];
-}
+const getModelMastSpecs = shipMastSpecs;
 
 function computeModelRigIntegrity(damage, mastSpecs) {
   if (!mastSpecs || mastSpecs.length === 0) return 1;
@@ -736,7 +693,7 @@ export function detonateVesselMagazine(targetBoat, { magId = 'magazine.grand', d
   damage.partDamage['deck.upper.internal'] = Math.min(1, +(0.45 + 0.55 * powderFrac).toFixed(3));
   damage.partDamage['hull.planking'] = Math.min(1, +((damage.partDamage['hull.planking'] ?? 0) + 0.72 * powderFrac).toFixed(3));
 
-  // Queue the 3D mesh explosion deformation (heaves decks upward, blows port & starboard hull planking outward).
+  // Queue the explosion: it scorches what is left and throws what it reaches (js/ship-fracture.js).
   damage.pendingBakes.push({
     kind: 'magazine-explosion',
     x: 0,

@@ -15,7 +15,7 @@ import {
   createPartAssemblyState,
   createPartAssemblyGPU,
   locatePartAtLocalPoint,
-  bakeVesselImpactDeformations,
+  bakeVesselImpactMarks,
   bakeBuildingImpactDeformations,
   sampleVoronoiBlockCell,
 } from '../js/part-assembly.js';
@@ -26,6 +26,7 @@ import {
 import { SHIP_MODELS } from '../js/ship-models.js';
 import { getShipParts, SHIP_PART_CAPABILITIES } from '../js/ship-parts.js';
 import { createShipAssetCache } from '../js/ship-mesh.js';
+import { applyFractureEvents, evaluateShardFlight } from '../js/ship-fracture.js';
 import {
   PORT_PREFABS,
   getBuildingParts,
@@ -443,12 +444,14 @@ test('syncVesselDamage maps cannonball impact sites and modular part damage into
   assert.equal(plankingPose.visible, true, 'Continuous hull planking remains visible');
   assert.equal(plankingPose.explode, 0, 'Continuous hull planking does not translate as a rigid block');
 
+  // A wrecked part breaks away as a rigid shard (js/ship-fracture.js), never by shrinking to a point here.
   const stanchionPose = state.evaluatePartPose(stanchionPart.id);
-  assert.equal(stanchionPose.visible, false, 'Shattered modular bulwark part breaks away when heavily damaged');
+  assert.equal(stanchionPose.visible, true, 'Part state does not make a wrecked part vanish');
+  assert.ok(stanchionPose.wearAndDamage > 0.5, 'Its wear still reaches the surface');
   assert.ok(Math.abs(state.impactSites[3] - 0.75) < 1e-5, 'Impact site severity is recorded for localized GPU crater/scorch');
 });
 
-test('overlapping cannonball hits cumulatively erode hull collision envelope and bake deeper 3D vertex craters', () => {
+test('overlapping cannonball hits cumulatively erode hull collision envelope and deepen the crater without moving a vertex', () => {
   const victoryAsset = createShipAssetCache().get('victory');
   const mesh = new Float32Array(victoryAsset.vertices);
   const origMesh = new Float32Array(victoryAsset.vertices);
@@ -483,18 +486,21 @@ test('overlapping cannonball hits cumulatively erode hull collision envelope and
       energy: 0.5 * 14.5 * 400 * 400,
     });
 
-    const bakeRange = bakeVesselImpactDeformations(mesh, targetShip.damage.pendingBakes.splice(0), 9);
-    assert.ok(bakeRange, `Shot ${i + 1} should bake vertex deformations`);
+    const bakeRange = bakeVesselImpactMarks(mesh, targetShip.damage.pendingBakes.splice(0), 9);
+    assert.ok(bakeRange, `Shot ${i + 1} should mark the surface`);
 
     let maxInward = 0;
+    let deepest = 0;
     for (let v = bakeRange.minVertex; v <= bakeRange.maxVertex; v++) {
       const off = v * 9;
       if (origMesh[off] > 0.5) {
         const inward = origMesh[off] - mesh[off];
         if (inward > maxInward) maxInward = inward;
+        deepest = Math.max(deepest, Math.hypot(mesh[off + 3], mesh[off + 4], mesh[off + 5]) - 1);
       }
     }
-    maxInwardDisplacements.push(maxInward);
+    assert.equal(maxInward, 0, `Shot ${i + 1} leaves the hull vertices where they were`);
+    maxInwardDisplacements.push(deepest);
   }
 
   assert.equal(targetShip.damage.craters.length, 1, 'Overlapping hits merge into a cumulative crater');
@@ -505,7 +511,7 @@ test('overlapping cannonball hits cumulatively erode hull collision envelope and
   );
   assert.ok(
     maxInwardDisplacements[1] > maxInwardDisplacements[0] && maxInwardDisplacements[2] > maxInwardDisplacements[1],
-    `Baked 3D vertex crater deepens cumulatively across overlapping hits (${maxInwardDisplacements.map((d) => d.toFixed(3)).join(' -> ')})`
+    `The scorch mark deepens across overlapping hits (${maxInwardDisplacements.map((d) => d.toFixed(3)).join(' -> ')})`
   );
 });
 
@@ -549,21 +555,22 @@ test('point-blank hits penetrate outer hull, damage internal decks/beams, dismou
     'Penetrating shot damages internal gun-deck structure'
   );
 
-  const bake1 = bakeVesselImpactDeformations(mesh, targetShip.damage.pendingBakes.splice(0), 9);
-  assert.ok(bake1, 'Point-blank penetrating hit and cannon dismount bake 3D deformations');
+  const firstBakes = targetShip.damage.pendingBakes.splice(0);
+  const bake1 = bakeVesselImpactMarks(mesh, firstBakes, 9);
+  assert.ok(bake1, 'Point-blank penetrating hit marks the surface');
 
-  // Verify cannon vertices near the struck gunport (x > 0.72, |y - 0.45| < 0.35, |z| < 0.28) were knocked inward and dropped
-  let movedCannonVerts = 0;
-  for (let v = 0, n = mesh.length / 9; v < n; v++) {
-    const off = v * 9;
-    const mat = Math.floor(origMesh[off + 6]);
-    if ((mat === 3 || mat === 4 || mat === 24) && origMesh[off] > 0.72 && Math.abs(origMesh[off + 1] - 0.45) < 0.35 && Math.abs(origMesh[off + 2]) < 0.28) {
-      if (mesh[off] < origMesh[off] - 0.02 && mesh[off + 1] < origMesh[off + 1] - 0.005) {
-        movedCannonVerts++;
-      }
-    }
-  }
-  assert.ok(movedCannonVerts > 10, `Struck cannon barrel/carriage vertices should be knocked inward and dropped (${movedCannonVerts} moved)`);
+  // The struck gun comes off its carriage as one rigid piece, and stays aboard.
+  const fracture = victoryAsset.fracture;
+  const fractureDamage = {};
+  applyFractureEvents(fracture, fractureDamage, firstBakes, 1);
+  const knockedGun = fracture.guns.find((g) => fractureDamage.fracture.broken[g]);
+  assert.ok(knockedGun, 'The struck gun leaves its mounting');
+  const gunRecord = fractureDamage.fracture.records.subarray(knockedGun * 16, knockedGun * 16 + 16);
+  const gunCentre = fracture.shards[knockedGun].centroid;
+  const gunNow = evaluateShardFlight(gunRecord, 3, gunCentre, fracture.scale);
+  assert.ok(Math.abs(gunNow[0]) < Math.abs(gunCentre[0]), 'It is knocked inboard');
+  assert.ok(gunNow[1] < gunCentre[1], 'It drops off its trucks');
+  assert.equal(gunRecord[11], -1, 'It is never hidden');
 
   // 2. Repeated hits on the mainmast progressively snap topmast (stage: 'topmast') and then collapse full mainmast (stage: 'full')
   for (let i = 0; i < 6; i++) {
@@ -589,19 +596,19 @@ test('point-blank hits penetrate outer hull, damage internal decks/beams, dismou
   assert.ok(mastBakes.some((b) => b.kind === 'mast-break' && b.stage === 'topmast'), 'Queues topmast fracture stage');
   assert.ok(mastBakes.some((b) => b.kind === 'mast-break' && b.stage === 'full'), 'Queues full mast collapse stage');
 
-  bakeVesselImpactDeformations(mesh, mastBakes, 9);
-
-  // Verify upper mainmast vertices (origY > 5.0, |origZ + 0.10| < 0.4) have toppled downward and to the side
-  let toppledMastVerts = 0;
+  bakeVesselImpactMarks(mesh, mastBakes, 9);
   for (let v = 0, n = mesh.length / 9; v < n; v++) {
     const off = v * 9;
-    if (origMesh[off + 1] > 5.0 && Math.abs(origMesh[off + 2] + 0.10) < 0.45) {
-      const dy = mesh[off + 1] - origMesh[off + 1];
-      const dx = Math.abs(mesh[off] - origMesh[off]);
-      if (dy < -0.5 && dx > 0.5) toppledMastVerts++;
-    }
+    const mat = Math.floor(origMesh[off + 6]);
+    if (mat === 9 || mat === 13) continue;
+    assert.equal(mesh[off + 1], origMesh[off + 1], 'A mast break moves no vertex in the mesh');
   }
-  assert.ok(toppledMastVerts > 50, `Collapsed mainmast, yards, sails, and rigging vertices should topple downward and sideways (${toppledMastVerts} toppled)`);
+
+  // The rigid sections fall instead: sails, yards and rigging included.
+  applyFractureEvents(fracture, fractureDamage, mastBakes.filter((b) => b.kind === 'mast-break'), 2);
+  const fallen = [...fracture.masts.main.lower, ...fracture.masts.main.upper];
+  assert.ok(fallen.every((s) => fractureDamage.fracture.broken[s]), 'Every section of the mainmast has gone');
+  assert.ok(fracture.masts.fore.lower.every((s) => !fractureDamage.fracture.broken[s]), 'The foremast still stands');
 });
 
 test('shots through stern/quarter-gallery windows shatter glass, damage internal bulkheads/decks, and strike the back wall of the hull', () => {
@@ -670,22 +677,24 @@ test('shots through stern/quarter-gallery windows shatter glass, damage internal
   const bakes = targetShip.damage.pendingBakes.splice(0);
   assert.ok(bakes.some((b) => b.kind === 'window-shatter'), 'Queues window-shatter vertex bake');
   assert.ok(bakes.some((b) => b.kind === 'back-wall'), 'Queues back-wall vertex bake on opposite hull wall');
-  const baked = bakeVesselImpactDeformations(mesh, bakes, 9);
-  assert.ok(baked, 'Window shatter and back-wall bakes deform 3D mesh');
+  const baked = bakeVesselImpactMarks(mesh, bakes, 9);
+  assert.ok(baked, 'Window shatter and back-wall hits mark the surface');
 
-  // Verify stern window glass (mat === 11) vertices were shattered inward and marked with high fracture damage
+  // Stern window glass (mat === 11) is marked with high fracture damage, and stays where it was until a shard takes it.
   let shatteredGlassVerts = 0;
   for (let v = 0, n = mesh.length / 9; v < n; v++) {
     const off = v * 9;
     const mat = Math.floor(origMesh[off + 6]);
     if (mat === 11 && origMesh[off + 2] > 5.0) {
       const nLen = Math.hypot(mesh[off + 3], mesh[off + 4], mesh[off + 5]);
-      if (mesh[off + 2] < origMesh[off + 2] - 0.01 && nLen > 1.8) {
-        shatteredGlassVerts++;
-      }
+      if (nLen > 1.8) shatteredGlassVerts++;
+      assert.equal(mesh[off + 2], origMesh[off + 2], 'Glass is not pushed around by a bake');
     }
   }
-  assert.ok(shatteredGlassVerts > 4, `Stern gallery glass vertices should shatter inward (${shatteredGlassVerts} shattered)`);
+  assert.ok(shatteredGlassVerts > 4, `Stern gallery glass vertices should shatter (${shatteredGlassVerts} shattered)`);
+  const fracture = victoryAsset.fracture, fractureDamage = {};
+  applyFractureEvents(fracture, fractureDamage, bakes, 1);
+  assert.ok(fractureDamage.fracture.brokenCount >= 1, 'The gallery loses pieces');
 });
 
 test('hot shot ignites shipboard fires, chain/grape shot shred sails & rigging, and uncontained waterline breaches sink the ship', async () => {
@@ -851,19 +860,18 @@ test('powder magazine tracks ordnance inventory, depletes on firing, and causes 
   assert.ok(shipFull.damage.fires.length >= 4, 'Magazine explosion ignites a raging multi-deck conflagration');
 
   const fullBakes = shipFull.damage.pendingBakes.splice(0);
-  assert.ok(fullBakes.some((b) => b.kind === 'magazine-explosion'), 'Queues 3D magazine-explosion mesh deformation');
-  bakeVesselImpactDeformations(fullMesh, fullBakes, 9);
-
-  let heavedDeckVerts = 0;
+  assert.ok(fullBakes.some((b) => b.kind === 'magazine-explosion'), 'Queues the magazine explosion');
+  bakeVesselImpactMarks(fullMesh, fullBakes, 9);
+  const blast = {};
+  applyFractureEvents(createShipAssetCache().get('victory').fracture, blast, fullBakes, 1);
+  assert.ok(blast.fracture.brokenCount > 50, `Magazine explosion blows her apart (${blast.fracture.brokenCount} pieces)`);
+  let scorchedVerts = 0;
   for (let v = 0, n = fullMesh.length / 9; v < n; v++) {
     const off = v * 9;
-    if (Math.abs(origMesh[off + 2] + 3.3) < 1.5 && origMesh[off + 1] > -0.6 && origMesh[off + 1] < 1.6) {
-      if (fullMesh[off + 1] > origMesh[off + 1] + 0.12 || Math.abs(fullMesh[off]) > Math.abs(origMesh[off]) + 0.12) {
-        heavedDeckVerts++;
-      }
-    }
+    assert.equal(fullMesh[off + 1], origMesh[off + 1], 'The blast moves no vertex; what it takes, it takes whole');
+    if (Math.abs(origMesh[off + 2] + 3.3) < 1.5 && Math.hypot(fullMesh[off + 3], fullMesh[off + 4], fullMesh[off + 5]) > 1.3) scorchedVerts++;
   }
-  assert.ok(heavedDeckVerts > 50, `Magazine explosion bakes upward deck heave and outward hull blowout (${heavedDeckVerts} vertices displaced)`);
+  assert.ok(scorchedVerts > 50, `What is left around the magazine is scorched (${scorchedVerts})`);
 
   // 3. Strike on a nearly depleted magazine (10% powder left) -> Violent internal deflagration & fire, NOT full hull detonation
   const shipLow = makeVictory('victory-low-mag');
@@ -1022,7 +1030,7 @@ test('a foundering ship decelerates to a halt, heels/plunges asymmetrically, and
   );
 });
 
-test('sail-rip and hull-crack bakes physically deform 3D sail cloth ribbons, rigging lines, and cracked hull strakes', async () => {
+test('sail-rip and hull-crack bakes tatter sail cloth, fray rigging and scorch the break, moving no rope or timber', async () => {
   const { boatHydrodynamics } = await import('../js/boat.js');
   const victoryAsset = createShipAssetCache().get('victory');
   const baseMesh = victoryAsset.vertices;
@@ -1061,7 +1069,7 @@ test('sail-rip and hull-crack bakes physically deform 3D sail cloth ribbons, rig
     energy: 140000,
   });
   assert.ok(ripReport.sailRips >= 1, 'Rigging hit records sail rip count');
-  assert.ok(ship.damage.pendingBakes.some((b) => b.kind === 'sail-rip'), 'Rigging hit queues a 3D sail-rip mesh deformation bake');
+  assert.ok(ship.damage.pendingBakes.some((b) => b.kind === 'sail-rip'), 'Rigging hit queues a sail rip');
 
   // Also queue a hull-crack bake from extreme longitudinal bending strain
   ship.damage.pendingBakes.push({
@@ -1070,8 +1078,8 @@ test('sail-rip and hull-crack bakes physically deform 3D sail cloth ribbons, rig
     severity: 1.2,
   });
 
-  const range = bakeVesselImpactDeformations(workingMesh, ship.damage.pendingBakes, stride);
-  assert.ok(range, 'bakeVesselImpactDeformations returns dirty vertex range for sail-rip and hull-crack');
+  const range = bakeVesselImpactMarks(workingMesh, ship.damage.pendingBakes, stride);
+  assert.ok(range, 'The bake returns a dirty vertex range for sail-rip and hull-crack');
 
   let rippedSailVerts = 0;
   let frayedRiggingVerts = 0;
@@ -1087,9 +1095,11 @@ test('sail-rip and hull-crack bakes physically deform 3D sail cloth ribbons, rig
     const dmg = nLen > 1.002 ? nLen - 1.0 : 0;
     if ((mat === 9 || mat === 13) && disp > 0.10 && dmg > 0.35) {
       rippedSailVerts++;
-    } else if ((mat === 2 || mat === 12 || mat === 19) && disp > 0.05 && dmg > 0.25) {
+    } else if ((mat === 2 || mat === 12 || mat === 19) && dmg > 0.25) {
+      assert.equal(disp, 0, 'Rope frays in place');
       frayedRiggingVerts++;
-    } else if (mat === 0 && Math.abs(baseMesh[at + 2] - (-1.05)) < 0.85 && disp > 0.05 && dmg > 0.5) {
+    } else if (mat === 0 && Math.abs(baseMesh[at + 2] - (-1.05)) < 0.85 && dmg > 0.5) {
+      assert.equal(disp, 0, 'Hull timber is not sheared by a broken back');
       crackedHullVerts++;
     }
   }
@@ -1099,15 +1109,15 @@ test('sail-rip and hull-crack bakes physically deform 3D sail cloth ribbons, rig
   );
   assert.ok(
     frayedRiggingVerts > 5,
-    `Rigging lines near sail impact must slacken and fray (got ${frayedRiggingVerts})`
+    `Rigging lines near sail impact must fray (got ${frayedRiggingVerts})`
   );
   assert.ok(
     crackedHullVerts > 20,
-    `Hull planking across the fracture plane must split open under bending strain (got ${crackedHullVerts})`
+    `Hull planking across the fracture plane is scorched (got ${crackedHullVerts})`
   );
 });
 
-test('all 9 playable ship models take battle damage, deform 3D meshes and sink realistically, and all but the unarmed yacht fire', async () => {
+test('all 9 playable ship models take battle damage, mark their meshes and sink realistically, and all but the unarmed yacht fire', async () => {
   const { boatHydrodynamics } = await import('../js/boat.js');
   const cache = createShipAssetCache();
   const allModelIds = [
@@ -1167,7 +1177,7 @@ test('all 9 playable ship models take battle damage, deform 3D meshes and sink r
     }
     assert.ok(unarmed ? shotsFired.length === 0 : shotsFired.length >= 1, `${modelId} broadside projectiles (${shotsFired.length} fired)`);
 
-    // 2. Sweep & apply hull impact damage + 3D vertex deformation on this model
+    // 2. Sweep & apply hull impact damage on this model
     const sweepHit = sweepShipSegment([rt.beam * 2, 0.25, 0], [-rt.beam * 2, 0.25, 0], 0.08, ship);
     assert.ok(sweepHit && sweepHit.hitZone === 'hull', `sweepShipSegment intersects ${modelId} hull`);
 
@@ -1200,8 +1210,8 @@ test('all 9 playable ship models take battle damage, deform 3D meshes and sink r
     }
 
     const workMesh = new Float32Array(asset.vertices);
-    const dirty = bakeVesselImpactDeformations(workMesh, ship.damage.pendingBakes.splice(0), 9);
-    assert.ok(dirty && dirty.byteLength > 0, `bakeVesselImpactDeformations deforms ${modelId} 3D mesh`);
+    const dirty = bakeVesselImpactMarks(workMesh, ship.damage.pendingBakes.splice(0), 9);
+    assert.ok(dirty && dirty.byteLength > 0, `A battle marks ${modelId}'s mesh`);
   }
 });
 
@@ -1470,28 +1480,19 @@ test('all 9 ship models have complete part attribution, superstructure classific
   assert.equal(cloudState.evaluatePartPose('structure.deckhouse').visible, true, 'Damaged deckhouse superstructure must not vanish');
   assert.equal(cloudState.evaluatePartPose('hull.closure.stern').visible, true, 'Damaged stern closure must not vanish');
 
-  // Verify Santa Maria mast-break only rotates the broken mast's sails, not other masts' sails
+  // Santa Maria's foremast takes its own sail with it, and not another mast's.
   const smAsset = assetCache.get('santa-maria');
-  const smOrig = smAsset.vertices;
-  const smMesh = new Float32Array(smOrig);
-  bakeVesselImpactDeformations(
-    smMesh,
-    [{ kind: 'mast-break', modelId: 'santa-maria', mastGroup: 'fore', stage: 'full', side: 1, pivotY: 1.65, pivotZ: -3.55 }],
-    9
-  );
-  let foreMoved = 0;
-  let mainCourseMoved = 0;
-  for (let v = 0, n = smMesh.length / 9; v < n; v++) {
-    const off = v * 9;
-    const rawMat = smOrig[off + 6];
-    const mat = Math.floor(rawMat);
-    const sailId = Math.round((rawMat - mat) * 64);
-    const moved = Math.hypot(smMesh[off] - smOrig[off], smMesh[off + 1] - smOrig[off + 1], smMesh[off + 2] - smOrig[off + 2]) > 0.05;
-    if (mat === 9 && sailId === 1 && moved) foreMoved++;
-    if (mat === 9 && sailId === 2 && moved) mainCourseMoved++;
-  }
-  assert.ok(foreMoved > 20, 'Breaking Santa Maria foremast topples fore-course sail');
-  assert.equal(mainCourseMoved, 0, 'Breaking Santa Maria foremast must not detach main-course sail');
+  const smDamage = {};
+  applyFractureEvents(smAsset.fracture, smDamage, [{ kind: 'mast-break', modelId: 'santa-maria', mastGroup: 'fore', stage: 'full', side: 1 }], 1);
+  const smBroken = (id) => {
+    const part = smAsset.partAssembly.partsById[id];
+    for (let v = 0, n = smAsset.fracture.vertexShards.length; v < n; v++) {
+      if (smAsset.partAssembly.vertexPartIds[v] === part.partNumber) return smDamage.fracture.broken[smAsset.fracture.vertexShards[v]] === 1;
+    }
+    return null;
+  };
+  assert.equal(smBroken('sail.fore-course'), true, 'Breaking Santa Maria foremast topples fore-course sail');
+  assert.equal(smBroken('sail.main-course'), false, 'Breaking Santa Maria foremast must not detach main-course sail');
 
   // Verify non-Victory stern window shatter & centerline deckhouse superstructure impact
   const smShip = {
@@ -1522,23 +1523,22 @@ test('all 9 ship models have complete part attribution, superstructure classific
   assert.ok(smWinRep.superstructureIntegrity < 1, 'Superstructure integrity decreases on superstructure hit');
   assert.ok(smShip.damage.pendingBakes.some((b) => b.kind === 'window-shatter'), 'Non-Victory window hit queues window-shatter bake');
 
-  // Centerline deckhouse hit on Flying Cloud deforms vertices even when |x| < 0.22
+  // A centreline deckhouse hit on Flying Cloud marks the surface and moves nothing.
   const cloudMesh = new Float32Array(assetCache.get('flying-cloud').vertices);
   const cloudOrig = assetCache.get('flying-cloud').vertices;
-  const centerBake = bakeVesselImpactDeformations(
+  const centerBake = bakeVesselImpactMarks(
     cloudMesh,
     [{ kind: 'superstructure', modelId: 'flying-cloud', x: 0.05, y: 0.85, z: -1.35, side: 1, radius: 0.35, stepDepth: 0.25, severity: 0.9, hits: 1 }],
     9
   );
-  assert.ok(centerBake && centerBake.byteLength > 0, 'Centerline deckhouse superstructure hit deforms mesh vertices');
-  let deformedCenterVerts = 0;
+  assert.ok(centerBake && centerBake.byteLength > 0, 'Centerline deckhouse superstructure hit marks the mesh');
+  let markedCenterVerts = 0;
   for (let v = centerBake.minVertex; v <= centerBake.maxVertex; v++) {
     const off = v * 9;
-    if (Math.abs(cloudOrig[off]) < 0.22 && Math.hypot(cloudMesh[off] - cloudOrig[off], cloudMesh[off + 1] - cloudOrig[off + 1], cloudMesh[off + 2] - cloudOrig[off + 2]) > 0.01) {
-      deformedCenterVerts++;
-    }
+    assert.equal(cloudMesh[off], cloudOrig[off], 'No vertex is moved');
+    if (Math.abs(cloudOrig[off]) < 0.22 && Math.hypot(cloudMesh[off + 3], cloudMesh[off + 4], cloudMesh[off + 5]) > 1.01) markedCenterVerts++;
   }
-  assert.ok(deformedCenterVerts > 0, 'Centerline superstructure vertices (|x| < 0.22) deform on impact');
+  assert.ok(markedCenterVerts > 0, 'Centerline superstructure vertices (|x| < 0.22) are marked on impact');
 });
 
 test('Universal Boat Part Taxonomy classifies all 9 ships and applies non-rubberband archetype scaling (discrete masts, sail tiers, gunports, sealed port lids, and fixed-size human fittings)', async () => {

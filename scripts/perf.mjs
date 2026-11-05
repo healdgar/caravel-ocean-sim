@@ -4,6 +4,7 @@
 //   npm run perf                                     the scene as it stands
 //   npm run perf -- '[["no crew",{"crew":"0"}]]'     rows of [label, URL parameters]
 //   rows may add source edits to try: [label, parameters, [["forest-clusters.js","find","replace"]]]
+//   npm run perf -- '[["battle",{"battle":"1"}]]'    fires a broadside into her first, then measures
 //   npm run perf -- --tris                           also count triangles per pipeline
 //   npm run perf -- --uploads                        what the CPU sends the GPU each frame, by buffer
 //   npm run perf -- --profile                        JavaScript time per function
@@ -13,6 +14,7 @@ import {execSync} from 'node:child_process';
 import {chromium} from 'playwright';
 import {createDevServer} from '../server.mjs';
 import {coastalRegionStageURL} from '../js/landfall.js';
+import {fireBroadside} from './damage-battle.mjs';
 
 const args=process.argv.slice(2),wantTriangles=args.includes('--tris'),wantUploads=args.includes('--uploads'),wantProfile=args.includes('--profile');
 const rows=JSON.parse(args.find(a=>a.startsWith('['))??'[["base",{}]]');
@@ -82,7 +84,8 @@ console.log(`GPU busy before loading: ${mean(idle).toFixed(0)}% (other work on t
 console.log('scene'.padEnd(20),'frame p50/p95   fps  | JS ms mean/p95 | CPU cores main+gpu | GPU busy frag vert | limit');
 for(const [label,extra,edits] of rows){
   const url=coastalRegionStageURL(base,'lisbon','dock','clear',1650);
-  for(const [key,value] of Object.entries({ship:'victory',w:1728,h:1117,polygons:'fixed',...extra}))url.searchParams.set(key,String(value));
+  const {battle,...parameters}=extra;
+  for(const [key,value] of Object.entries({ship:'victory',w:1728,h:1117,polygons:'fixed',...parameters}))url.searchParams.set(key,String(value));
   const page=await browser.newPage({viewport:{width:1728,height:1117}}),errors=[];
   page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error'&&!/404|favicon/.test(m.text()))errors.push(m.text());});
   const byFile=new Map();for(const [file,find,replace] of edits??[])byFile.set(file,[...(byFile.get(file)??[]),[find,replace]]);
@@ -92,6 +95,10 @@ for(const [label,extra,edits] of rows){
   await page.waitForFunction(()=>window.oceanStartup?.state==='ready'||window.oceanStartup?.state==='failed',null,{timeout:180000,polling:200});
   if(process.env.PANEL)await page.evaluate(()=>document.getElementById('performance-toggle')?.click());
   await page.waitForTimeout(SETTLE_MS);
+  if(battle){
+    console.log(' '.repeat(20),'battle:',JSON.stringify(await page.evaluate(fireBroadside,{volleys:[{shots:70,mass:14.5,speed:430,minY:15,maxY:34},{shots:45,mass:14.5,speed:430,minY:3.5,maxY:11}]})));
+    await page.waitForTimeout(Number(process.env.BATTLE_SETTLE_MS??8000));
+  }
   const session=wantProfile?await page.context().newCDPSession(page):null;
   if(session){await session.send('Profiler.enable');await session.send('Profiler.setSamplingInterval',{interval:500});await session.send('Profiler.start');}
   await page.evaluate(()=>perfUploads.clear());

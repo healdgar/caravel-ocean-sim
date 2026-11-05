@@ -21,3 +21,4 @@ Apple GPUs shade only what is visible, but only for draws that neither discard n
 - **Lists are made on the GPU.** Scenery culling, tree level of detail and cluster cuts run in compute passes that write indirect draws, and bodies with nothing to reach for pose from clips baked once. A JavaScript loop over instances needs a reason.
 - **Timestamps stall the frame they sample.** They run only while the performance panel is open, and their spans include waits, so nothing automatic may read them.
 - **Each buffer holds one thing.** Battle damage has its own uniform buffer rather than the tail of another system's storage.
+- **Damage does not edit geometry.** A break writes one flight record. The compute pass that moves shards runs only on ships that have lost something.

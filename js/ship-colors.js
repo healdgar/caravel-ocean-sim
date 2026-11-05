@@ -4,6 +4,7 @@ import { SKY_RENDER_FUNCS } from './wgsl/sky.js';
 import { VESSEL_LIGHTING } from './wgsl/vessel.js';
 import { SCENE_SHADOW_SAMPLE } from './wgsl/shadows.js';
 import { boatRotate, crowsNestDesignStation, sternEnsignDesignStation } from './boat.js';
+import { shipMastSpecs } from './ship-fracture.js';
 import { vesselHull, modelDeck, modelDeckWidth } from './hull.js';
 import { RIG_MASTS, mastPoint } from './rigging.js';
 import { SAIL_PLAN, createLateenPoses, lateenYardPoint, lateenClothPoint } from './lateen.js';
@@ -647,6 +648,15 @@ export function buildShipColorsGeometry() {
 
 let _lateenPosesScratch = null;
 
+// Whatever hangs from a mast goes when the section it hangs from goes.
+function mastSectionLost(boat, z, y) {
+  const specs = shipMastSpecs(boat?.model?.id ?? boat?.modelId);
+  if (!specs.length) return false;
+  const spec = specs.reduce((best, s) => (Math.abs(s[1] - z) < Math.abs(best[1] - z) ? s : best), specs[0]);
+  const stage = boat?.damage?.mastState?.[spec[0]] ?? 0;
+  return stage >= 2 || (stage >= 1 && y >= spec[2]);
+}
+
 /**
  * Builds vessel-design-space rig connectors (mode 6 oak/iron spars & parrel trucks, mode 7 hemp
  * parrel trusses & stern outlicker sheets) so that:
@@ -746,7 +756,7 @@ export function buildVesselRigConnectors(boat, time = 0, windSpeed = 8) {
     addTube([mastPos[0], mastPos[1] - 0.06, mastPos[2] - 0.04], yardPos, 0.020, 0.018, 5, 7, 0.5);
     addTube([mastPos[0], mastPos[1] - 0.06, mastPos[2] + 0.04], yardPos, 0.020, 0.018, 5, 7, 0.5);
   };
-  const addSternOutlickerAndSheet = (clewPos, hullEndZ, transomY, quarterHalfBeam, outlickerTipZ) => {
+  const addSternOutlickerAndSheet = (clewPos, hullEndZ, transomY, quarterHalfBeam, outlickerTipZ, sheetParted = false) => {
     const rootZ = hullEndZ - 0.35;
     const tipZ = Math.max(outlickerTipZ, clewPos[2] + 0.16);
     const tipY = transomY + 0.02;
@@ -762,6 +772,7 @@ export function buildVesselRigConnectors(boat, time = 0, windSpeed = 8) {
     addCatenary([-quarterHalfBeam, transomY - 0.04, guyZ], [0, tipY, tipZ - 0.04], 0.03, 0.016, 4, 7, 0.4);
     addCatenary([quarterHalfBeam, transomY - 0.04, guyZ], [0, tipY, tipZ - 0.04], 0.03, 0.016, 4, 7, 0.4);
     // Live mizzen outlicker sheet (escota de mesana) from the rear sail's aft clew to the outlicker block & forward to taffrail cleat
+    if (sheetParted) return;
     const blockPos = [0, tipY + 0.03, tipZ - 0.04];
     addCatenary(clewPos, blockPos, 0.04, 0.020, 6, 7, 0.5);
     addCatenary(blockPos, [quarterHalfBeam * 0.35, transomY + 0.05, hullEndZ - 0.22], 0.02, 0.016, 4, 7, 0.5);
@@ -774,6 +785,7 @@ export function buildVesselRigConnectors(boat, time = 0, windSpeed = 8) {
       const sail = SAIL_PLAN[s];
       const yardPos = lateenYardPoint(s, sail.pivot, poses[s]);
       const mastPos = mastPoint(sail.mast, yardPos[1]);
+      if (mastSectionLost(boat, mastPos[2], mastPos[1])) continue;
       addParrelCollar(mastPos, yardPos, RIG_MASTS[sail.mast]?.r ?? 0.085);
     }
     // Rear sail (mizzen, index 2) aft clew (u = 0, v = 1) connected to stern outlicker & transom
@@ -781,7 +793,7 @@ export function buildVesselRigConnectors(boat, time = 0, windSpeed = 8) {
     const hullEndZ = 5.60;
     const transomY = modelDeck(boat ?? { modelId: 'nina' }, 5.55) + 0.14;
     const quarterHalfBeam = Math.max(0.42, modelDeckWidth(boat ?? { modelId: 'nina' }, 5.55) * 0.72);
-    addSternOutlickerAndSheet(clewPos, hullEndZ, transomY, quarterHalfBeam, stern.z + 0.12);
+    addSternOutlickerAndSheet(clewPos, hullEndZ, transomY, quarterHalfBeam, stern.z + 0.12, mastSectionLost(boat, clewPos[2] - 2, Infinity));
     return new Float32Array(values);
   }
 
@@ -798,6 +810,7 @@ export function buildVesselRigConnectors(boat, time = 0, windSpeed = 8) {
     const mastPos = rigCtx.mastPoint
       ? rigCtx.mastPoint(surface.mast, yardPos[1])
       : [0, yardPos[1], mast.z ?? 0];
+    if (mastSectionLost(boat, mastPos[2], mastPos[1])) continue;
     addParrelCollar(mastPos, yardPos, mast.radius ?? 0.08);
   }
   // Connect overhanging rear lateen sail (mizzen on Pinta & Santa María) to the stern outlicker & hull transom
@@ -808,7 +821,7 @@ export function buildVesselRigConnectors(boat, time = 0, windSpeed = 8) {
     const hullEndZ = 6.0;
     const transomY = modelDeck(boat ?? { modelId }, 5.95) + 0.14;
     const quarterHalfBeam = Math.max(0.48, modelDeckWidth(boat ?? { modelId }, 5.95) * 0.72);
-    addSternOutlickerAndSheet(clewPos, hullEndZ, transomY, quarterHalfBeam, stern.z + 0.12);
+    addSternOutlickerAndSheet(clewPos, hullEndZ, transomY, quarterHalfBeam, stern.z + 0.12, mastSectionLost(boat, rigCtx.masts?.[mizzenSurface.mast]?.z ?? 4, Infinity));
   }
 
   return new Float32Array(values);
@@ -950,8 +963,9 @@ export async function createShipColorsRenderer({
       p[26] = windSpeed;
       p[27] = boat.damage?.surrendered ? 1.0 : 0.0;
 
-      const visMask = (cn.showBasket ?? 1 ? 1 : 0)
-        | (cn.showPennant ?? 1 ? 2 : 0)
+      const basketGone = mastSectionLost(boat, cn.z, cn.y), pennantGone = mastSectionLost(boat, cn.headZ ?? cn.z, cn.headY ?? cn.y + (cn.pennantLift ?? 1.25));
+      const visMask = (!basketGone && (cn.showBasket ?? 1) ? 1 : 0)
+        | (!pennantGone && (cn.showPennant ?? 1) ? 2 : 0)
         | (stern.showEnsign ?? 1 ? 4 : 0);
       p[28] = cn.headZ ?? cn.z;
       p[29] = stern.outlickerSpan ?? 0.5;
