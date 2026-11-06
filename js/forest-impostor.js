@@ -239,7 +239,7 @@ struct ForestImpostorOutput {@location(0)colour:vec4f,@builtin(frag_depth)depth:
  let local=origin+ray*(distance/pigment.a);let world=in.rootScale.xyz+forestAtlasRotate(local,yaw)*scale;
  let projected=F.viewProj*vec4f(earthCurve(world-F.camPos.xyz,F.camPos.y),1);if(projected.w<=0.){return o;}
  let n=normalize(forestAtlasRotate(normal,yaw));let material=forestAtlasTable.prototypes[in.prototype].material;
- let colour=pigment.rgb/pigment.a*in.yawTint.yzw;let nDotL=dot(n,F.sunDir.xyz);
+ let colour=forestOwnColour(pigment)*in.yawTint.yzw;let nDotL=dot(n,F.sunDir.xyz);
  // The atlas contains mixed wood/foliage pigment without a material-ID plane.
  // Use the current native importer foliage exposure (.72), matching its
  // canopy ambient and diffuse law; bark lighting remains an approximation.

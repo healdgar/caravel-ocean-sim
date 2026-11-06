@@ -615,6 +615,10 @@ struct LandVertex {
 // The opaque call graph contains neither discard nor a leaf texture fetch.
 // Keep that property for Apple's hidden-surface removal; a runtime branch in
 // one shared cutout fragment would still make solid ground a feedback shader.
+// How much a surface's normal turns within one pixel. A mirror finish cannot show that detail, only
+// strobe on whichever facet happens to catch the sun, so that spread widens the highlight instead
+// (Kaplanyan and Tokuyoshi's geometric specular antialiasing). Set where a normal has its relief.
+var<private> landNormalSpread:f32=0.0;
 fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibility:f32,wet:f32,roughness:f32)->vec4f{
   let uv=(world.xz-LAND.domain.xy)/LAND.domain.z+0.5;
   let edgeDist=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
@@ -654,7 +658,7 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibility:f32
   let fresnel=f0+(maxF-f0)*pow(1.0-nDotV,5.0);
   let fresnelSun=f0+(maxF-f0)*pow(1.0-vDotH,5.0);
   let a=effRough*effRough;
-  let a2=max(a*a,1e-4);
+  let a2=clamp(a*a+landNormalSpread,1e-4,1.0);
   let denom=nDotH*nDotH*(a2-1.0)+1.0;
   let D=a2/(PI*denom*denom);
   let k=(effRough+1.0)*(effRough+1.0)*0.125;
@@ -723,7 +727,7 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
   var albedo=source;var relief=0.0;var roughness=0.95;
   var ambientVisibility=0.42+0.35*max(n.y,0.0);
   let crown=in.kind.x>3.5;
-  var surfaceWet=0.0;
+  var surfaceWet=0.0;var mirrorSpread=0.0;
   var canopyBackscatter=0.0;
   if(in.kind.x<2.5){
     let canopyWeight=smoothstep(0.14,0.62,vegetation)*(1.0-rocky*0.85);
@@ -930,6 +934,9 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
         relief=glassWarp*(1.0-frameMask)+frameMask*0.024;
         roughness=mix(0.10,0.48,frameMask);
         surfaceWet=0.72*(1.0-frameMask*0.85);
+        // A window a pixel or two across cannot hold its own mirror image of the sun, whichever way
+        // the camera drifts: only the near ones keep the sharp glint.
+        mirrorSpread=smoothstep(.04,.4,length(dx)+length(dy))*.03;
         ambientVisibility=0.44+0.32*portShade;
       }else{
         // Deep vaulted arch portals & shadowed embrasures with wrought-iron grille bars
@@ -1090,6 +1097,8 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
   }
   let reliefX=dpdx(relief);let reliefY=dpdy(relief);
   n=landFilteredBump(n,dx,dy,reliefX,reliefY);
+  let turnX=dpdx(n);let turnY=dpdy(n);
+  landNormalSpread=min(mirrorSpread+.5*(dot(turnX,turnX)+dot(turnY,turnY)),.18);
   let tidePulse=0.75+0.25*sin(F.camPos.w*0.7+world.x*0.02);
   let shoreWet=(1.0-smoothstep(0.35,2.2,world.y))*tidePulse*select(0.45,0.22,in.kind.x>=9.5);
   let wet=select(clamp(max(shoreWet,surfaceWet),0.0,0.96),surfaceWet-shoreWet*0.14,surfaceWet<-0.01);

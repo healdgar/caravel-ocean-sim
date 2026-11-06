@@ -207,3 +207,14 @@ fn foamCoverage(previous: f32, breaking: f32, amount: f32, decay: f32, dt: f32) 
   return clamp(equilibrium+(previous-equilibrium)*exp(-rate*dt),0.0,1.0);
 }
 `;
+
+// Only a NaN's bits can be trusted: WGSL lets a compiler assume there is none, so a comparison with
+// itself may be folded away. The whole pixel goes black, since one channel going would leave the
+// colour of the other two as a coloured dot. Infinity is the top of the half-float range, which is
+// where any overflow lands on Apple's GPUs, and so a sun too bright for the format stays white.
+export const SANE_HDR = /* wgsl */ `
+fn saneHDR(c: vec3f) -> vec3f {
+  let nan = (bitcast<vec3u>(c) & vec3u(0x7fffffffu)) > vec3u(0x7f800000u);
+  return select(clamp(c, vec3f(0.0), vec3f(65504.0)), vec3f(0.0), any(nan));
+}
+`;
