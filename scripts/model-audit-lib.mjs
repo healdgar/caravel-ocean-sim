@@ -5,6 +5,7 @@
 import { createShipAssetCache } from '../js/ship-mesh.js';
 import { SHIP_MODELS } from '../js/ship-models.js';
 import { boatHydrodynamics } from '../js/boat.js';
+import { SHARD_KINDS } from '../js/ship-fracture.js';
 
 export const SHIP_IDS = Object.freeze(['nina', 'pinta', 'santa-maria', 'victory', 'oseberg', 'lusoria', 'taino-canoe', 'flying-cloud', 'gipsy-moth-iv']);
 
@@ -215,9 +216,13 @@ export function loadShip(id, live = null) {
   const triangles = asset.indices.length / 3, leaf = leafGroups(asset.groups, triangles), partOf = new Uint8Array(triangles);
   const groupId = (t) => (leaf[t] >= 0 ? String(asset.groups[leaf[t]].id) : '(ungrouped)');
   for (let t = 0; t < triangles; t++) partOf[t] = classifyPart(groupId(t), materials[asset.indices[t * 3]]);
+  // Some standing lines are drawn in fitting material, so they count as hull above. The fracture table knows a bare
+  // tube for a rope, and a ball goes through rope: the shot's reckoning leaves them out.
+  const { vertexShards, shardKinds } = live ?? { vertexShards: built.fracture.vertexShards, shardKinds: built.fracture.shards.map((s) => s?.kind ?? 0) };
+  const isLine = (t) => partOf[t] === PART.hull && shardKinds[vertexShards[asset.indices[t * 3]]] === SHARD_KINDS.line;
   const hydro = boatHydrodynamics(runtime.length, runtime.beam, undefined, 0, id);
   const ship = {
-    id, model, asset, scale, positions, materials, partOf, leaf, groupId, hydro, posed: !!live,
+    id, model, asset, scale, positions, materials, partOf, leaf, groupId, isLine, hydro, posed: !!live,
     index: createMeshIndex(positions, asset.indices, partOf),
     boat: (extra = {}) => ({ modelId: id, model, length: runtime.length, beam: runtime.beam, x: 0, z: 0, heading: 0, pitch: 0, roll: 0, heave: -hydro.sinkage, hydrodynamics: hydro, showProw: true, ...extra }),
   };
@@ -321,7 +326,8 @@ export function measuredMasts(ship) {
 
 // Fires the fan at a ship through the game's own sweep and asks the mesh what each line should have met.
 export function auditShipCollision(ship, sweepShipSegment, createVesselDamageState, fan = {}) {
-  const { index, partOf, groupId } = ship, boat = ship.boat();
+  // Her rig stands as the game set it. At rest her hatch is shut, as the rest mesh has it.
+  const { index, partOf, groupId, isLine } = ship, boat = ship.boat(ship.posed ? fan.pose : { hatchesClosed: 1 });
   // As the fleet holds her: createShipGunnery gives every vessel a damage state before the first shot.
   if (fan.fresh !== true) createVesselDamageState(boat);
   const heave = boat.heave, radius = fan.radius ?? 0.07;
@@ -337,7 +343,7 @@ export function auditShipCollision(ship, sweepShipSegment, createVesselDamageSta
   for (const line of linesAcross(index.min, index.max, { ...fan, seaLevel })) {
     row.lines++;
     const shot = marchSweep(line, step, fan.stepMetres ?? 3.4);
-    const solid = index.first(line.from, line.d, line.length, SOLID);
+    const solid = index.first(line.from, line.d, line.length, SOLID, 0, isLine);
     const any = index.first(line.from, line.d, line.length, DRAWN);
     if (!shot && !solid) { if (any) row.softThrough++; continue; }
     row.struck++;
@@ -361,8 +367,10 @@ export function auditShipCollision(ship, sweepShipSegment, createVesselDamageSta
       row.rigHits++;
       if (!mastNames.has(shot.hit.mastGroup)) { row.phantomMast++; tally(row.phantomNames, shot.hit.mastGroup); }
       else if (masts.length) {
-        const nearest = masts.reduce((a, m) => (Math.abs(m.z - at[2]) < Math.abs(a.z - at[2]) ? m : a));
-        if (nearest.name !== shot.hit.mastGroup) row.wrongMast++;
+        // A mast is the nearest one, and a yard the one it hangs on, however far along her its tip reaches.
+        const nearest = masts.reduce((a, m) => (Math.abs(m.z - at[2]) < Math.abs(a.z - at[2]) ? m : a)), part = index.nearest(at, PART.mast | PART.spar, 2);
+        const named = part && partOf[part.triangle] === PART.spar ? groupId(part.triangle).match(/\b(fore|main|mizzen)\b/)?.[1] ?? null : nearest.name;
+        if (named && named !== shot.hit.mastGroup) row.wrongMast++;
       }
     }
     if (gap > AIR_GAP_M) {
@@ -371,7 +379,9 @@ export function auditShipCollision(ship, sweepShipSegment, createVesselDamageSta
       if (!row.worstAir || gap > row.worstAir.gap) row.worstAir = { gap: round(gap, 1), at: at.map((x) => round(x, 1)), zone: shot.hit.hitZone };
       continue;
     }
-    if (solid && Math.abs(solid.t - shot.distance) <= SHOT_TOLERANCE_M) { row.agree++; row.offset.push(Math.abs(solid.t - shot.distance)); }
+    // The ball has a radius, so it can stop on a mast its centre line would pass.
+    const standing = !solid || solid.t > shot.distance + SHOT_TOLERANCE_M ? index.nearest(at, SOLID, SHOT_TOLERANCE_M, isLine) : null;
+    if (standing || (solid && Math.abs(solid.t - shot.distance) <= SHOT_TOLERANCE_M)) { row.agree++; if (solid) row.offset.push(Math.abs(solid.t - shot.distance)); }
     else row.softStop++;
   }
   const share = (n) => round((100 * n) / Math.max(1, row.struck), 1);
@@ -535,10 +545,31 @@ export function auditMasts(ship, lib) {
   }
   // Names the mesh has that the table does not, and the other way about.
   const unlisted = measured.filter((m) => !specs.some((s) => s[0] === m.name)).map((m) => m.name), missing = specs.filter((s) => !measured.some((m) => m.name === s[0])).map((s) => s[0]);
-  const L = boat.length, B = boat.beam, radius = 0.07;
-  const rigBoxBottom = Math.max(4.6, (ship.hydro.freeboard ?? 1.8) * 2.1 + B * 0.35) - ship.hydro.sinkage;
   const railAmidships = vesselRailHeight(boat, 0) - ship.hydro.sinkage;
-  return { rows, unlisted, missing, rigTopMeshM: round(rigTop), mastTopFormulaM: round(Math.max(14, L * 0.85)), rigBoxBottomM: round(rigBoxBottom), railAmidshipsM: round(railAmidships), mastDeadBandM: round(rigBoxBottom - railAmidships) };
+  return { rows, unlisted, missing, rigTopMeshM: round(rigTop), railAmidshipsM: round(railAmidships), ...auditMastStrikes(ship, lib, railAmidships) };
+}
+
+// From her rail to her rig's top, a ball fired at whatever mast or spar stands first on the line must stop there.
+function auditMastStrikes(ship, lib, rail, stepMetres = 0.5, stationMetres = 0.1) {
+  const boat = ship.boat({ hatchesClosed: 1 }), { index, partOf } = ship, reach = (index.max[0] - index.min[0]) / 2 + 20;
+  if (!lib.sweepShipSegment) return {};
+  lib.createVesselDamageState(boat);
+  let lowest = Infinity, highest = -Infinity, gap = 0, worstGap = 0, seen = false;
+  for (let y = rail + stepMetres; y < index.max[1]; y += stepMetres) {
+    let mast = false, struck = false;
+    for (let z = index.min[2]; z < index.max[2] && !struck; z += stationMetres) {
+      const from = [reach, y, z], solid = index.first(from, [-1, 0, 0], reach * 2, SOLID, 0, ship.isLine);
+      if (!solid || partOf[solid.triangle] !== PART.mast) continue;
+      mast = true;
+      const hit = lib.sweepShipSegment([reach, y + boat.heave, z], [-reach, y + boat.heave, z], 0.07, boat, null, null);
+      struck = hit?.hitZone === 'rigging' && Math.abs(hit.fraction * reach * 2 - solid.t) <= SHOT_TOLERANCE_M;
+    }
+    if (!mast) continue;
+    seen = true;
+    if (struck) { lowest = Math.min(lowest, y); highest = Math.max(highest, y); gap = 0; }
+    else worstGap = Math.max(worstGap, gap += stepMetres);
+  }
+  return seen ? { mastStruckFromM: round(lowest), mastStruckToM: round(highest), mastDeadBandM: round(worstGap) } : {};
 }
 
 export function auditGuns(ship, lib) {
@@ -798,7 +829,7 @@ export function auditWaterline(ship, lib) {
     deckFormulaP75M: round(percentile(deckErrors, 0.75)), deckFormulaMaxM: round(deckErrors.length ? Math.max(...deckErrors) : 0),
     hullFormulaP90M: round(percentile(formula, 0.9)), hullFormulaMaxM: round(formula.length ? Math.max(...formula) : 0),
     beamRuntimeM: round(boat.beam), beamMeshM: round(sideX * 2), lengthRuntimeM: round(boat.length), lengthMeshM: round(aftZ - foreZ), foreZ: round(foreZ), aftZ: round(aftZ), foreGroup, aftGroup,
-    shotHalfLengthM: round(boat.length * 0.52), volumeTableM3: round(h.volume, 0), volumeMeshM3: round(volume, 0), volumeErrorPct: round((100 * (volume - h.volume)) / h.volume, 1),
+    volumeTableM3: round(h.volume, 0), volumeMeshM3: round(volume, 0), volumeErrorPct: round((100 * (volume - h.volume)) / h.volume, 1),
     waterplaneTableM2: round(h.waterplaneArea, 0), waterplaneMeshM2: round(waterplane, 0),
   };
 }
@@ -998,7 +1029,7 @@ export const FULL_FAN = Object.freeze({ bearings: 24, elevations: [0, -6, 10], c
 
 export function auditShip(ship, lib, { fan = FULL_FAN, crewMeshes = null, everyNth = 3, routeSeconds = 60, pose = {} } = {}) {
   const row = { id: ship.id, posed: ship.posed };
-  row.collision = auditShipCollision(ship, lib.sweepShipSegment, lib.createVesselDamageState, fan);
+  row.collision = auditShipCollision(ship, lib.sweepShipSegment, lib.createVesselDamageState, { ...fan, pose });
   row.masts = auditMasts(ship, lib);
   row.guns = auditGuns(ship.posed ? loadShip(ship.id) : ship, lib);
   row.crewStations = auditCrewStations(ship, lib);
@@ -1020,7 +1051,7 @@ export function flagsOf(results) {
   const reference = results.ships.find((r) => r.id === 'nina')?.surface;
   for (const r of results.ships) {
     const c = r.collision;
-    if (c.airRigPct > 5) add(`collision.air-rig/${r.id}`, c.airRigPct, 5, `balls stop in air in the rig box, median ${c.airGapMedianM} m from anything`);
+    if (c.airRigPct > 5) add(`collision.air-rig/${r.id}`, c.airRigPct, 5, `balls stop in air around the rig, median ${c.airGapMedianM} m from anything`);
     if (c.airHullPct > 2) add(`collision.air-hull/${r.id}`, c.airHullPct, 2, 'balls stop in air beside the hull');
     if (c.throughHullPct > 1) add(`collision.through-hull/${r.id}`, c.throughHullPct, 1, c.missedGroups);
     if (c.throughMastPct > 1) add(`collision.through-mast/${r.id}`, c.throughMastPct, 1, c.missedGroups);
@@ -1033,8 +1064,7 @@ export function flagsOf(results) {
       if (q.footAboveDeck !== null && q.footAboveDeck > 0.1) add(`mast.foot-floats/${r.id}/${q.mast}`, q.footAboveDeck, 0.1);
     }
     if (m.unlisted.length || m.missing.length) add(`mast.names/${r.id}`, m.unlisted.length + m.missing.length, 0, `unlisted ${m.unlisted} missing ${m.missing}`);
-    if (m.rows.length && m.rigTopMeshM > m.mastTopFormulaM + 1) add(`mast.top-formula-low/${r.id}`, m.rigTopMeshM - m.mastTopFormulaM, 1, `rig reaches ${m.rigTopMeshM} m, formula stops balls at ${m.mastTopFormulaM} m`);
-    if (m.rows.length && m.mastDeadBandM > 1) add(`mast.dead-band/${r.id}`, m.mastDeadBandM, 1, `no mast can be struck between rail ${m.railAmidshipsM} m and rig box ${m.rigBoxBottomM} m`);
+    if (m.mastDeadBandM > 1) add(`mast.dead-band/${r.id}`, m.mastDeadBandM, 1, `lines at a mast that pass it, up to this far running, above her rail at ${m.railAmidshipsM} m`);
     const guns = r.guns.rows;
     const worstBy = (key, list = guns) => list.reduce((a, g) => Math.max(a, Math.abs(g[key] ?? 0)), 0);
     if (worstBy('muzzleOff') > 0.2) add(`gun.muzzle-off/${r.id}`, worstBy('muzzleOff'), 0.2);
@@ -1068,8 +1098,6 @@ export function flagsOf(results) {
     if (h.hullFormulaP90M > 0.15) add(`hull.width-formula/${r.id}`, h.hullFormulaP90M, 0.15);
     if (h.railFormulaP90M > 0.3) add(`hull.rail-formula/${r.id}`, h.railFormulaP90M, 0.3, 'vesselRailHeight against the rail drawn');
     if (h.deckFormulaP75M > 0.2) add(`hull.deck-formula/${r.id}`, h.deckFormulaP75M, 0.2, 'modelDeck against the deck drawn');
-    if (Math.abs(h.foreZ) > h.shotHalfLengthM + 0.5) add(`hull.past-shot-bow/${r.id}`, Math.abs(h.foreZ) - h.shotHalfLengthM, 0.5, `${h.foreGroup} reaches ${h.foreZ} m, the shot stops at ${h.shotHalfLengthM} m`);
-    if (Math.abs(h.aftZ) > h.shotHalfLengthM + 0.5) add(`hull.past-shot-stern/${r.id}`, Math.abs(h.aftZ) - h.shotHalfLengthM, 0.5, `${h.aftGroup} reaches ${h.aftZ} m, the shot stops at ${h.shotHalfLengthM} m`);
     const b = r.crewBodies;
     if (b?.throughDeep) add(`crew.through-solid/${r.id}`, b.deepestM, 0.08, `${b.throughDeep} of ${b.crew}; worst ${b.worst[0]?.key} through ${b.worst[0]?.part}`);
     if (b?.soleSunk) add(`crew.soles-sunk/${r.id}`, b.soleSunkMaxM, 0.04, `${b.soleSunk} of ${b.crew}`);
