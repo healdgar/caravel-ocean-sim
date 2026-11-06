@@ -934,24 +934,12 @@ export function createPartAssemblyState(catalog, options = {}) {
           part.id.startsWith('structure.') ||
           part.id.startsWith('stern.') ||
           part.id.startsWith('deck.');
-        const isBreakable =
-          !isContinuousSkin &&
-          part.triangleCount > 0 &&
-          part.triangleCount <= 450 &&
-          spanZ <= 2.2 &&
-          part.layer >= 2 &&
-          part.layer <= 3 &&
-          !part.id.startsWith('gun') &&
-          !part.id.startsWith('helm') &&
-          !part.id.startsWith('boat.');
         const scaleActivity = isScaled ? evaluatePartScaleActivity(part.taxonomy, spec) : { active: true, sealPortLid: false };
         let nextAppear = 1.0;
         if (!scaleActivity.active) {
           nextAppear = 0.0;
         } else if (scaleActivity.sealPortLid) {
           nextAppear = -1.0;
-        } else if (isBreakable && dmg >= 0.65) {
-          nextAppear = 0.0;
         }
         const nextExplode = 0.0;
         const nextWear = isContinuousSkin ? Math.min(0.28, dmg * 0.35) : dmg;
@@ -1244,312 +1232,39 @@ export async function createPartAssemblyGPU({ device, computePipe, posedBuffer, 
   };
 }
 
-function inferVesselBakeModelId(mesh, vertexCount, stride) {
-  if (vertexCount > 36000) return 'victory';
-  let maxSailId = 0;
-  let hasSailId5 = false;
-  let hasSailId2 = false;
-  for (let v = 0; v < vertexCount; v += 16) {
-    const rawMat = mesh[v * stride + 6];
-    const mat = Math.floor(rawMat);
-    if (mat === 9 || mat === 10 || mat === 13 || mat === 19) {
-      const sId = Math.round((rawMat - mat) * 64);
-      if (sId > maxSailId) maxSailId = sId;
-      if (sId === 5) hasSailId5 = true;
-      if (sId === 2) hasSailId2 = true;
-    }
-  }
-  if (maxSailId > 12) return 'flying-cloud';
-  if (maxSailId === 12 && !hasSailId2 && !hasSailId5) return 'nina';
-  if (hasSailId5 && maxSailId <= 5) return 'santa-maria';
-  if (maxSailId === 4 && hasSailId2) return 'gipsy-moth-iv';
-  if (maxSailId === 1) return 'oseberg';
-  return 'victory';
+// Materials a hull scorch never marks: rope, cloth and yards.
+const SCORCH_SKIPS = new Set([2, 5, 6, 9, 10, 12, 13, 18, 19]);
+
+function scorchVertex(mesh, at, amount, add) {
+  const nx = mesh[at + 3], ny = mesh[at + 4], nz = mesh[at + 5];
+  const len = Math.hypot(nx, ny, nz) || 1;
+  const prev = len > 1.002 ? len - 1 : 0;
+  const next = Math.min(1.48, add ? prev + amount : Math.max(prev, amount));
+  const scale = (1 + next) / len;
+  mesh[at + 3] = nx * scale;
+  mesh[at + 4] = ny * scale;
+  mesh[at + 5] = nz * scale;
 }
 
-function classifyModelSailForMastBreak(modelId, sailId) {
-  if (sailId <= 0) return null;
-  if (modelId === 'nina') {
-    if (sailId === 4 || sailId === 1) return { mast: 'fore', lower: false };
-    if (sailId === 8 || sailId === 2) return { mast: 'main', lower: false };
-    if (sailId === 12 || sailId === 3) return { mast: 'mizzen', lower: false };
-    return null;
-  }
-  if (modelId === 'pinta' || modelId === 'santa-maria') {
-    if (sailId === 1 || sailId === 5) return { mast: 'fore', lower: true };
-    if (sailId === 2) return { mast: 'main', lower: true };
-    if (sailId === 4) return { mast: 'main', lower: false };
-    if (sailId === 3) return { mast: 'mizzen', lower: true };
-    return null;
-  }
-  if (modelId === 'oseberg' || modelId === 'lusoria') {
-    if (sailId === 1) return { mast: 'main', lower: false };
-    return null;
-  }
-  if (modelId === 'gipsy-moth-iv') {
-    if (sailId === 1 || sailId === 3 || sailId === 4) return { mast: 'main', lower: false };
-    if (sailId === 2) return { mast: 'mizzen', lower: false };
-    return null;
-  }
-  if (modelId === 'flying-cloud') {
-    if ((sailId >= 1 && sailId <= 5) || (sailId >= 16 && sailId <= 18)) {
-      return { mast: 'fore', lower: sailId === 1 || sailId >= 16 };
-    }
-    if ((sailId >= 6 && sailId <= 10) || (sailId >= 19 && sailId <= 21) || sailId === 24) {
-      return { mast: 'main', lower: sailId === 6 || sailId === 24 };
-    }
-    if ((sailId >= 11 && sailId <= 15) || sailId === 22 || sailId === 23 || sailId === 25) {
-      return { mast: 'mizzen', lower: sailId === 11 || sailId === 25 };
-    }
-    return null;
-  }
-  if (sailId >= 1 && sailId <= 12) {
-    const mast =
-      sailId === 1 || sailId === 2 || sailId === 3 || sailId === 9 || sailId === 10 || sailId === 11
-        ? 'fore'
-        : sailId === 4 || sailId === 5 || sailId === 6
-          ? 'main'
-          : 'mizzen';
-    const lower = sailId === 1 || sailId === 4 || sailId === 9 || sailId === 12;
-    return { mast, lower };
-  }
-  return null;
-}
-
-export function bakeVesselImpactDeformations(mesh, bakes, stride = 9) {
+// Marks what a hit does to the surface it leaves behind. Timber is never moved here: a vertex pulled
+// around on its own stretches every triangle it shares, which is what pinched hulls and sheared masts.
+// Pieces that leave do so as rigid shards (js/ship-fracture.js). Only sail cloth is displaced, because
+// the rig stage reads that offset to flap a torn edge.
+export function bakeVesselImpactMarks(mesh, bakes, stride = 9) {
   if (!(mesh instanceof Float32Array) || !Array.isArray(bakes) || !bakes.length) {
     return null;
   }
   const vertexCount = Math.floor(mesh.length / stride);
   let minV = vertexCount;
   let maxV = -1;
-  let inferredModelId = null;
+  const touched = (v) => {
+    if (v < minV) minV = v;
+    if (v > maxV) maxV = v;
+  };
 
   for (let b = 0; b < bakes.length; b++) {
     const bake = bakes[b];
-    if (!bake) continue;
-
-    if (bake.kind === 'mast-break') {
-      const modelId =
-        bake.modelId ||
-        inferredModelId ||
-        (inferredModelId = inferVesselBakeModelId(mesh, vertexCount, stride));
-      const mGroup = bake.mastGroup || 'main';
-      const stage = bake.stage || 'topmast';
-      const side = bake.side || 1;
-      const hadTopmastBreak = Boolean(bake.hadTopmastBreak);
-      const isSingleMast = modelId === 'oseberg' || modelId === 'lusoria';
-      const isKetch = modelId === 'gipsy-moth-iv';
-      const zMin = isSingleMast
-        ? -6.5
-        : isKetch
-          ? mGroup === 'mizzen'
-            ? 1.15
-            : -6.5
-          : mGroup === 'fore'
-            ? -5.15
-            : mGroup === 'mizzen'
-              ? 1.85
-              : -1.65;
-      const zMax = isSingleMast
-        ? 6.5
-        : isKetch
-          ? mGroup === 'mizzen'
-            ? 6.5
-            : 1.15
-          : mGroup === 'fore'
-            ? -1.65
-            : mGroup === 'mizzen'
-              ? 6.75
-              : 1.85;
-      const mastZ = Number.isFinite(bake.pivotZ)
-        ? bake.pivotZ
-        : isSingleMast
-          ? 0.0
-          : isKetch
-            ? mGroup === 'mizzen'
-              ? 2.7
-              : -1.15
-            : mGroup === 'fore'
-              ? -3.55
-              : mGroup === 'mizzen'
-                ? 3.53
-                : 0.05;
-      const topmastPivotY = mGroup === 'fore' ? 5.72 : mGroup === 'mizzen' ? 5.15 : 6.18;
-      const pivotY = Number.isFinite(bake.pivotY)
-        ? bake.pivotY
-        : stage === 'full'
-          ? mGroup === 'main'
-            ? 1.55
-            : 2.05
-          : topmastPivotY;
-      const baseRollAngle = -side * (stage === 'full' ? 0.56 : 0.48);
-      const basePitchAngle = stage === 'full' ? 0.18 : 0.22;
-
-      for (let v = 0; v < vertexCount; v++) {
-        const at = v * stride;
-        const px = mesh[at];
-        const py = mesh[at + 1];
-        const pz = mesh[at + 2];
-        const rawMat = mesh[at + 6];
-        const mat = Math.floor(rawMat);
-        const sailId = Math.round((rawMat - mat) * 64);
-
-        const isSailOrYardMat = mat === 9 || mat === 10 || mat === 13 || mat === 19;
-        const sailInfo = isSailOrYardMat ? classifyModelSailForMastBreak(modelId, sailId) : null;
-        const isTaggedSailOrYard = Boolean(sailInfo);
-        if (isTaggedSailOrYard) {
-          if (sailInfo.mast !== mGroup) continue;
-          if (stage === 'topmast' && (sailInfo.lower || (modelId !== 'victory' && py < pivotY - 0.25))) continue;
-        } else {
-          if (py < pivotY - 0.12) continue;
-          // Allow foremast headsails/stays extending forward toward the bowsprit to taper smoothly
-          const effZMin = (mGroup === 'fore' || isSingleMast || isKetch) && (mat === 12 || mat === 13) ? -10.6 : zMin;
-          if (pz < effZMin || pz > zMax) continue;
-        }
-
-        const isMastMat =
-          mat === 1 ||
-          mat === 2 ||
-          (mat === 3 && (modelId === 'gipsy-moth-iv' || Math.hypot(px, pz - mastZ) < 0.45)) ||
-          mat === 9 ||
-          mat === 10 ||
-          mat === 12 ||
-          mat === 13 ||
-          mat === 19 ||
-          mat === 20 ||
-          (mat === 21 && Math.hypot(px, pz - mastZ) < 0.72);
-        if (!isMastMat) continue;
-
-        const nx = mesh[at + 3];
-        const ny = mesh[at + 4];
-        const nz = mesh[at + 5];
-        const prevLen = Math.hypot(nx, ny, nz) || 1.0;
-        let ux = nx / prevLen;
-        let uy = ny / prevLen;
-        let uz = nz / prevLen;
-        const prevDmg = prevLen > 1.002 ? prevLen - 1.0 : 0.0;
-
-        if (py <= pivotY + 0.001 && !isTaggedSailOrYard) {
-          // Jagged splintered mast stump just below the fracture plane
-          const jag = Math.sin(px * 43.0 + pz * 37.0) * 0.06;
-          mesh[at + 1] = py + jag;
-          const nextDmg = Math.min(1.48, Math.max(prevDmg, 1.15));
-          const scale = 1.0 + nextDmg;
-          mesh[at + 3] = ux * scale;
-          mesh[at + 4] = uy * scale;
-          mesh[at + 5] = uz * scale;
-        } else {
-          // Compute continuous rotation weight so staysails (mat 13) and rigging stays (mat 12)
-          // spanning to the bowsprit or deck sag smoothly without stretching triangles across a step boundary.
-          let weight = 1.0;
-          if (mat === 12 || mat === 13) {
-            const wy = Math.max(0, Math.min(1, (py - pivotY) / 1.35));
-            const distZ = Math.abs(pz - mastZ);
-            const wz = Math.max(0, Math.min(1, 1 - Math.max(0, distZ - 1.25) / 2.6));
-            weight = wy * wy * (3 - 2 * wy) * (wz * wz * (3 - 2 * wz));
-            if (weight <= 0.002) continue;
-          } else if (!isTaggedSailOrYard) {
-            const wy = Math.max(0, Math.min(1, (py - pivotY) / 0.35));
-            weight = wy * wy * (3 - 2 * wy);
-          }
-          // Avoid double-rotating upper topmast vertices when a full mast break follows an earlier topmast break.
-          if (stage === 'full' && hadTopmastBreak && prevDmg > 0.18 && py > topmastPivotY - 0.5) {
-            weight *= 0.22;
-          }
-
-          const rollAngle = baseRollAngle * weight;
-          const pitchAngle = basePitchAngle * weight;
-          const crRoll = Math.cos(rollAngle);
-          const srRoll = Math.sin(rollAngle);
-          const crPitch = Math.cos(pitchAngle);
-          const srPitch = Math.sin(pitchAngle);
-
-          // Rotate upper spar/top/yard/sail/rigging around the mast fracture pivot
-          const rx0 = px;
-          const ry0 = py - pivotY;
-          const rz0 = pz - mastZ;
-          // Roll around Z then pitch around X
-          const rx1 = rx0 * crRoll - ry0 * srRoll;
-          const ry1 = rx0 * srRoll + ry0 * crRoll;
-          const rz1 = rz0;
-          const ry2 = ry1 * crPitch - rz1 * srPitch;
-          const rz2 = ry1 * srPitch + rz1 * crPitch;
-
-          mesh[at] = rx1 - side * 0.10 * weight;
-          mesh[at + 1] = pivotY + ry2 - 0.12 * weight;
-          mesh[at + 2] = mastZ + rz2;
-
-          const nrx1 = ux * crRoll - uy * srRoll;
-          const nry1 = ux * srRoll + uy * crRoll;
-          const nrz1 = uz;
-          const nry2 = nry1 * crPitch - nrz1 * srPitch;
-          const nrz2 = nry1 * srPitch + nrz1 * crPitch;
-          const nLen = Math.hypot(nrx1, nry2, nrz2) || 1.0;
-          const nearBreak = py < pivotY + 0.55 ? 0.95 : 0.25;
-          const nextDmg = Math.min(1.48, Math.max(prevDmg, nearBreak * Math.max(0.35, weight)));
-          const scale = 1.0 + nextDmg;
-          mesh[at + 3] = (nrx1 / nLen) * scale;
-          mesh[at + 4] = (nry2 / nLen) * scale;
-          mesh[at + 5] = (nrz2 / nLen) * scale;
-        }
-        if (v < minV) minV = v;
-        if (v > maxV) maxV = v;
-      }
-      continue;
-    }
-
-    if (bake.kind === 'magazine-explosion') {
-      const bx = Number(bake.x) || 0;
-      const by = Number(bake.y) || -0.35;
-      const bz = Number(bake.z) || -3.2;
-      const powFrac = Math.max(0.15, Math.min(1.0, Number(bake.powderFraction) || 0.85));
-      const blastR = Math.max(0.95, (Number(bake.radius) || 2.2) * (0.55 + 0.55 * powFrac));
-      const heaveAmp = (0.35 + 0.65 * powFrac) * (Number(bake.stepDepth) || 0.55);
-      const blastRSq = blastR * blastR;
-      const blastMaxDy = blastR / 0.62;
-      for (let v = 0; v < vertexCount; v++) {
-        const at = v * stride;
-        const py = mesh[at + 1];
-        if (py < -0.95 || Math.abs(py - by) >= blastMaxDy) continue;
-        const pz = mesh[at + 2];
-        const dz = pz - bz;
-        if (dz <= -blastR || dz >= blastR) continue;
-        const px = mesh[at];
-        const dx = px - bx;
-        if (dx <= -blastR || dx >= blastR) continue;
-        const dy = (py - by) * 0.62;
-        const distSq = dx * dx + dy * dy + dz * dz;
-        if (distSq >= blastRSq) continue;
-        const mat = Math.floor(mesh[at + 6]);
-        if (mat === 2 || mat === 5 || mat === 6 || mat === 9 || mat === 10 || mat === 12 || mat === 13 || mat === 18 || mat === 19) continue;
-        const dist = Math.sqrt(distSq);
-        const t = 1 - dist / blastR;
-        const core = t * t;
-        const jag = 0.65 + 0.55 * Math.sin(pz * 31.0 + py * 47.0) * Math.cos(px * 29.0 - pz * 19.0);
-        const outSignX = px >= 0 ? 1 : -1;
-        // Internal decks & upper deck planks heave violently upward while hull sides blow outward/splinter.
-        const isDeck = (mat === 0 || mat === 1 || mat === 23 || mat === 24) && Math.abs(px) < 1.15;
-        mesh[at] = px + outSignX * heaveAmp * (isDeck ? 0.28 : 0.52) * core * jag;
-        mesh[at + 1] = py + heaveAmp * (isDeck ? 0.92 : 0.34) * core * jag;
-        mesh[at + 2] = pz + Math.sign(dz || 0.1) * heaveAmp * 0.22 * core * jag;
-        const nx = mesh[at + 3], ny = mesh[at + 4], nz = mesh[at + 5];
-        const nLen = Math.hypot(nx, ny, nz) || 1.0;
-        const ux = nx / nLen + outSignX * 0.45 * t;
-        const uy = ny / nLen + 0.55 * t;
-        const uz = nz / nLen + (dz / blastR) * 0.35 * t;
-        const uLen = Math.hypot(ux, uy, uz) || 1.0;
-        const prevDmg = nLen > 1.002 ? nLen - 1.0 : 0.0;
-        const nextDmg = Math.min(1.48, Math.max(prevDmg, (0.65 + 0.85 * t) * Math.min(1.2, 0.55 + powFrac)));
-        const scale = 1.0 + nextDmg;
-        mesh[at + 3] = (ux / uLen) * scale;
-        mesh[at + 4] = (uy / uLen) * scale;
-        mesh[at + 5] = (uz / uLen) * scale;
-        if (v < minV) minV = v;
-        if (v > maxV) maxV = v;
-      }
-      continue;
-    }
+    if (!bake || bake.kind === 'mast-break' || bake.kind === 'cannon-dismount') continue;
 
     if (bake.kind === 'sail-rip') {
       const bx = Number(bake.x) || 0;
@@ -1580,32 +1295,32 @@ export function bakeVesselImpactDeformations(mesh, bakes, stride = 9) {
         const dz = (pz - bz) * 0.78;
         const distSq = dx * dx + dy * dy + dz * dz;
         if (distSq >= ripRadiusSq) continue;
-        const dist = Math.sqrt(distSq);
-        const t = 1 - dist / ripRadius;
+        const t = 1 - Math.sqrt(distSq) / ripRadius;
+        const addDmg = (0.42 + 0.78 * t) * ripSeverity;
+        touched(v);
+        if (isRiggingRope) {
+          scorchVertex(mesh, at, addDmg, true);
+          continue;
+        }
+        const nx = mesh[at + 3], ny = mesh[at + 4], nz = mesh[at + 5];
+        const nLen = Math.hypot(nx, ny, nz) || 1.0;
+        const prevDmg = nLen > 1.002 ? nLen - 1.0 : 0.0;
+        // Displacement must exceed 0.10 design units for rigVertex to keep it, and already-torn cloth
+        // flaps no further, so repeated rips cannot drag a sail away from its yard.
+        const fresh = Math.max(0, 1 - prevDmg / 1.48);
         const stripWave = Math.sin(px * 19.0 + pz * 13.0) * Math.cos(py * 11.0 - px * 7.0);
-        // Sail cloth displacement must exceed 0.10 design units so rigVertex preserves
-        // the 3D tattered ribbon/flap deformation on top of the billowing sail pose.
-        const flapAmp = isSailCloth
-          ? Math.max(0.115, (0.14 + 0.24 * t) * ripSeverity)
-          : (0.08 + 0.16 * t) * ripSeverity;
+        const flapAmp = Math.max(0.115, (0.14 + 0.24 * t) * ripSeverity) * fresh;
         mesh[at] = px + (dirX * 0.45 + stripWave * 0.55) * flapAmp;
         mesh[at + 1] = py - flapAmp * (0.58 + 0.42 * Math.abs(stripWave));
         mesh[at + 2] = pz + (dirZ * 0.65 + stripWave * 0.35) * flapAmp;
-        const nx = mesh[at + 3], ny = mesh[at + 4], nz = mesh[at + 5];
-        const nLen = Math.hypot(nx, ny, nz) || 1.0;
         const ux = nx / nLen + stripWave * 0.28 * t;
         const uy = ny / nLen - 0.22 * t;
         const uz = nz / nLen + dirZ * 0.24 * t;
         const uLen = Math.hypot(ux, uy, uz) || 1.0;
-        const prevDmg = nLen > 1.002 ? nLen - 1.0 : 0.0;
-        const addDmg = (0.42 + 0.78 * t) * ripSeverity;
-        const nextDmg = Math.min(1.48, prevDmg + addDmg);
-        const scale = 1.0 + nextDmg;
+        const scale = 1.0 + Math.min(1.48, prevDmg + addDmg);
         mesh[at + 3] = (ux / uLen) * scale;
         mesh[at + 4] = (uy / uLen) * scale;
         mesh[at + 5] = (uz / uLen) * scale;
-        if (v < minV) minV = v;
-        if (v > maxV) maxV = v;
       }
       continue;
     }
@@ -1613,225 +1328,46 @@ export function bakeVesselImpactDeformations(mesh, bakes, stride = 9) {
     if (bake.kind === 'hull-crack') {
       const crackZ = Number(bake.z) || 0;
       const crackSeverity = Math.max(0.5, Math.min(1.4, Number(bake.severity) || 1.0));
-      const hingeAngle = 0.16 * crackSeverity;
       for (let v = 0; v < vertexCount; v++) {
         const at = v * stride;
-        const mat = Math.floor(mesh[at + 6]);
-        const px = mesh[at];
-        const py = mesh[at + 1];
-        const pz = mesh[at + 2];
-        const dz = pz - crackZ;
-        const absDz = Math.abs(dz);
-        // Hogging/sagging structural back-break: both ends droop/hinge away from the midships
-        // fracture plane while the upper deck and topside strakes split apart in a jagged V-crack.
-        const lever = Math.min(3.5, absDz);
-        const droopY = -Math.sin(hingeAngle) * lever * 0.55;
-        const splitZ = Math.sign(dz || 1) * Math.max(0, py + 0.65) * Math.sin(hingeAngle) * 0.28;
-        const inCrackBand = absDz < 0.85;
-        const crackT = inCrackBand ? 1 - absDz / 0.85 : 0;
-        const jag = Math.sin(py * 37.0 + px * 23.0) * Math.cos(pz * 29.0);
-        const outSignX = px >= 0 ? 1 : -1;
-        mesh[at] = px + (inCrackBand ? outSignX * 0.18 * crackT * (0.6 + 0.4 * jag) * crackSeverity : 0);
-        mesh[at + 1] = py + droopY - (inCrackBand ? 0.16 * crackT * Math.abs(jag) * crackSeverity : 0);
-        mesh[at + 2] = pz + splitZ + (inCrackBand ? Math.sign(dz || 1) * 0.12 * crackT * jag : 0);
-        if (inCrackBand) {
-          const nx = mesh[at + 3], ny = mesh[at + 4], nz = mesh[at + 5];
-          const nLen = Math.hypot(nx, ny, nz) || 1.0;
-          const ux = nx / nLen + outSignX * 0.35 * crackT;
-          const uy = ny / nLen + 0.35 * crackT;
-          const uz = nz / nLen + Math.sign(dz || 1) * 0.45 * crackT;
-          const uLen = Math.hypot(ux, uy, uz) || 1.0;
-          const prevDmg = nLen > 1.002 ? nLen - 1.0 : 0.0;
-          const nextDmg = Math.min(1.48, Math.max(prevDmg, (0.55 + 0.90 * crackT) * crackSeverity));
-          const scale = 1.0 + nextDmg;
-          mesh[at + 3] = (ux / uLen) * scale;
-          mesh[at + 4] = (uy / uLen) * scale;
-          mesh[at + 5] = (uz / uLen) * scale;
-        }
-        if (v < minV) minV = v;
-        if (v > maxV) maxV = v;
+        const absDz = Math.abs(mesh[at + 2] - crackZ);
+        if (absDz >= 0.85 || SCORCH_SKIPS.has(Math.floor(mesh[at + 6]))) continue;
+        scorchVertex(mesh, at, (0.55 + 0.9 * (1 - absDz / 0.85)) * crackSeverity, false);
+        touched(v);
       }
       continue;
     }
 
+    const isExplosion = bake.kind === 'magazine-explosion';
     const bx = Number(bake.x) || 0;
-    const by = Number(bake.y) || 0;
+    const by = Number(bake.y) || (isExplosion ? -0.35 : 0);
     const bz = Number(bake.z) || 0;
-    const side = bake.side || (bx >= 0 ? 1 : -1);
-    const r = Math.max(0.24, (Number(bake.radius) || 0.12) * 1.95);
-    const stepDepth = Math.max(0.08, Number(bake.stepDepth) || 0.18);
+    const powFrac = Math.max(0.15, Math.min(1.0, Number(bake.powderFraction) || 0.85));
+    const r = isExplosion
+      ? Math.max(0.95, (Number(bake.radius) || 2.2) * (0.55 + 0.55 * powFrac))
+      : Math.max(0.24, (Number(bake.radius) || 0.12) * 1.95);
     const severity = Math.max(0.25, Number(bake.severity) || 0.6);
-    const hits = Math.max(1, Number(bake.hits) || 1);
-    const isInternalDeckBake = bake.kind === 'internal-deck';
-    const isCannonDismountBake = bake.kind === 'cannon-dismount';
-    const isWindowShatterBake = bake.kind === 'window-shatter';
-    const isBackWallBake = bake.kind === 'back-wall';
-    const isSuperstructureBake = bake.kind === 'superstructure' || Boolean(bake.superstructure);
-    const isSternBake = bz > 4.2 && (isWindowShatterBake || Math.abs(bx) < 0.75);
-
-    const rOuter = r * 1.25;
-    const rOuterSq = rOuter * rOuter;
+    const isWindowShatter = bake.kind === 'window-shatter';
     const rSq = r * r;
     for (let v = 0; v < vertexCount; v++) {
       const at = v * stride;
-      const pz = mesh[at + 2];
-      const dz = pz - bz;
-      if (dz <= -rOuter || dz >= rOuter) continue;
-      const py = mesh[at + 1];
-      const dy = py - by;
-      if (dy <= -rOuter || dy >= rOuter) continue;
-      const distYZSq = dy * dy + dz * dz;
-      if (distYZSq >= rOuterSq) continue;
-      const px = mesh[at];
+      const dz = mesh[at + 2] - bz;
+      if (dz <= -r || dz >= r) continue;
+      const dy = mesh[at + 1] - by;
+      if (dy <= -r || dy >= r) continue;
+      const dx = (mesh[at] - bx) * (isExplosion ? 1 : 0.5);
+      const distSq = dx * dx + dy * dy + dz * dz;
+      if (distSq >= rSq) continue;
       const mat = Math.floor(mesh[at + 6]);
-      if (
-        mat === 2 ||
-        mat === 5 ||
-        mat === 6 ||
-        mat === 9 ||
-        mat === 10 ||
-        mat === 12 ||
-        mat === 13 ||
-        mat === 18 ||
-        mat === 19
-      ) {
-        continue;
-      }
-      const absX = px * side;
-      const distYZ = Math.sqrt(distYZSq);
-
-      if (isCannonDismountBake) {
-        const isBarrelOrBore = (mat === 3 || mat === 4) && Math.abs(dz) < 0.055 && Math.abs(dy) < 0.12 && absX > 0.72;
-        const isOpenDeckCarriage = mat === 24 && py > 1.48 && distYZ < 0.22 && absX > 0.72;
-        if (!isBarrelOrBore && !isOpenDeckCarriage) continue;
-      } else if (isWindowShatterBake) {
-        if (mat === 3 || mat === 4 || mat === 24 || Math.abs(px - bx) >= r * 1.25) continue;
-      } else if (isInternalDeckBake) {
-        if (mat === 3 || mat === 4 || mat === 24) continue;
-        if (!isSternBake && (absX > 1.15 || absX < -0.35)) continue;
-      } else {
-        if (mat === 3 || mat === 4 || mat === 24) continue;
-        const isCenterlineSuper = isSternBake || isSuperstructureBake || (py > 0.55 && Math.abs(bx) < 0.78);
-        if (!isCenterlineSuper && absX < 0.22) continue;
-        if (isCenterlineSuper && !isSternBake && absX < -0.25) continue;
-      }
-
-      // 3D penetration ellipsoid centered at (bx, by, bz). As overlapping hits erode bx
-      // deeper into the hull, this pocket advances inward layer by layer.
-      const dxScale =
-        isWindowShatterBake || isSternBake
-          ? 0.75
-          : isSuperstructureBake
-            ? 0.55
-            : isInternalDeckBake || isCannonDismountBake || isBackWallBake
-              ? 0.35
-              : 0.38;
-      const dx = (px - bx) * dxScale;
-      const dist3DSq = dx * dx + distYZSq;
-      if (dist3DSq >= rSq) continue;
-      const dist3D = Math.sqrt(dist3DSq);
-      const t = 1 - dist3D / r;
-      if (t <= 0.001) continue;
-
-      const nx = mesh[at + 3];
-      const ny = mesh[at + 4];
-      const nz = mesh[at + 5];
-      const prevLen = Math.hypot(nx, ny, nz) || 1.0;
-      let ux = nx / prevLen;
-      let uy = ny / prevLen;
-      let uz = nz / prevLen;
-      const prevDmg = prevLen > 1.002 ? prevLen - 1.0 : 0.0;
-
-      // Direct hit on a cannon barrel (mat 3), bore (mat 4), or carriage (mat 24):
-      // violently dismounts the gun, driving it backward, dropping the muzzle, and slewing it askew.
-      if (isCannonDismountBake) {
-        const slewSign = Math.sin(bz * 37.3 + by * 19.1) >= 0 ? 1 : -1;
-        const outFrac = Math.max(0, Math.min(1.5, (absX - 1.05) / 0.55));
-        const knockBack = Math.min(0.22, stepDepth * 0.85 * Math.max(0.45, t));
-        const dropMuzzle = -0.078 * (0.35 + 0.85 * outFrac) * Math.max(0.5, t);
-        const slewZ = slewSign * 0.062 * (0.25 + 0.95 * outFrac) * Math.max(0.5, t);
-        mesh[at] = side * Math.max(0.52, absX - knockBack);
-        mesh[at + 1] = py + dropMuzzle;
-        mesh[at + 2] = pz + slewZ;
-        uy -= 0.42 * t;
-        uz += slewSign * 0.38 * t;
-        const uLen = Math.hypot(ux, uy, uz) || 1.0;
-        const nextDmg = Math.min(1.48, Math.max(prevDmg, 0.92));
-        const scale = 1.0 + nextDmg;
-        mesh[at + 3] = (ux / uLen) * scale;
-        mesh[at + 4] = (uy / uLen) * scale;
-        mesh[at + 5] = (uz / uLen) * scale;
-        if (v < minV) minV = v;
-        if (v > maxV) maxV = v;
-        continue;
-      }
-
-      // Horizontal interior deck planks or cabin/deckhouse roofs (mat === 0, 1, or 23 pointing up)
-      const isDeckSurface = (mat === 0 || mat === 1 || mat === 23) && Math.abs(uy) > 0.75;
-      const deckDamp = isDeckSurface ? (isInternalDeckBake || isSuperstructureBake ? 0.55 : 0.22) : 1.0;
-      const isTransverseSuperWall = !isSternBake && py > 0.45 && Math.abs(uz) > 0.62 && Math.abs(ux) < 0.35;
-
-      const core = t * t;
-      const plank = Math.sin(py * 52.0 + pz * 14.0) * 0.55 + Math.cos(pz * 39.0 - py * 21.0) * 0.45;
-      const jag = 0.78 + 0.38 * plank;
-      const inwardDisp = stepDepth * deckDamp * core * jag;
-      const minInwardX = isSuperstructureBake && Math.abs(bx) < 0.78 ? 0.0 : 0.15;
-      const nextAbsX =
-        isInternalDeckBake || isSternBake || isTransverseSuperWall
-          ? absX
-          : Math.max(minInwardX, absX - inwardDisp);
-      const nextX =
-        isSternBake && Math.abs(px) > 0.35
-          ? px - Math.sign(px) * inwardDisp * 0.45
-          : isTransverseSuperWall
-            ? px - Math.sign(px || side) * inwardDisp * 0.22
-            : side * nextAbsX;
-      const rim = t * (1 - t) * 4.0;
-      const splay = stepDepth * 0.09 * rim * plank * deckDamp;
-      const railBlend = Math.max(0, Math.min(1, (py - 1.38) / 0.32));
-      const topNotch = railBlend * railBlend * (3 - 2 * railBlend) * stepDepth * 0.12 * core * jag * deckDamp;
-      const deckDrop =
-        isInternalDeckBake
-          ? stepDepth * 0.38 * core * jag
-          : isDeckSurface
-            ? stepDepth * 0.32 * core * jag
-            : 0;
-      const sternPushZ =
-        isSternBake || (isWindowShatterBake && pz > 4.8)
-          ? inwardDisp * 0.78
-          : isTransverseSuperWall
-            ? Math.sign(uz || 1) * inwardDisp * 0.72
-            : 0;
-      const nextY = py + (distYZ > 1e-4 ? (dy / distYZ) * splay : 0) - topNotch - deckDrop;
-      const nextZ = pz + (distYZ > 1e-4 ? (dz / distYZ) * splay : 0) - sternPushZ;
-
-      mesh[at] = nextX;
-      mesh[at + 1] = nextY;
-      mesh[at + 2] = nextZ;
-
-      // Tilt the normal into the concave crater wall so 3D sunlight and shadows
-      // reveal the physical depth of cumulative overlapping hits.
-      if (distYZ > 1e-4) {
-        const tilt = 0.68 * t;
-        uy -= (dy / r) * tilt - plank * 0.14 * t;
-        uz -= (dz / r) * tilt;
-        const uLen = Math.hypot(ux, uy, uz) || 1.0;
-        ux /= uLen;
-        uy /= uLen;
-        uz /= uLen;
-      }
-
-      const addDmg = (isWindowShatterBake && (mat === 11 || mat === 25))
+      if (SCORCH_SKIPS.has(mat)) continue;
+      const t = 1 - Math.sqrt(distSq) / r;
+      const amount = isWindowShatter && (mat === 11 || mat === 25)
         ? 0.45 + 0.95 * t
-        : severity * (0.38 * t + 0.58 * core) * jag;
-      const nextDmg = Math.min(1.48, prevDmg + addDmg);
-      const scale = 1.0 + nextDmg;
-      mesh[at + 3] = ux * scale;
-      mesh[at + 4] = uy * scale;
-      mesh[at + 5] = uz * scale;
-
-      if (v < minV) minV = v;
-      if (v > maxV) maxV = v;
+        : isExplosion
+          ? (0.65 + 0.85 * t) * Math.min(1.2, 0.55 + powFrac)
+          : severity * (0.38 * t + 0.58 * t * t);
+      scorchVertex(mesh, at, amount, !isExplosion);
+      touched(v);
     }
   }
 

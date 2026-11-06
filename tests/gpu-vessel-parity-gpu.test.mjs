@@ -19,9 +19,11 @@ function prepareFrozenVesselGPUInputs(frozen){
   assert.deepEqual(GPU_RIG_ORACLE_CASES,frozen.controls,'frozen controls require an explicit reviewed change');
   return frozen.models.map(golden=>{
     const asset=cache.get(golden.id),data=asset.rigGPUData;
-    assert.equal(asset.vertices.length/9,golden.vertexCount,golden.id+' Node topology must match the frozen source');
-    assert.equal(createHash('sha256').update(asset.vertices).digest('hex'),golden.sourceSHA256,golden.id+' Node source must match the frozen oracle before GPU evaluation');
-    assert.ok(data&&data.vertices.length===golden.vertexCount*12,golden.id+' has a binding record for every frozen source vertex');
+    // Fracture appends shard copies after the frozen vertices and leaves those exactly as they were.
+    const frozenSource=asset.vertices.subarray(0,golden.vertexCount*9);
+    assert.ok(asset.vertices.length/9>=golden.vertexCount,golden.id+' Node topology must keep the frozen source');
+    assert.equal(createHash('sha256').update(frozenSource).digest('hex'),golden.sourceSHA256,golden.id+' Node source must match the frozen oracle before GPU evaluation');
+    assert.ok(data&&data.vertices.length===asset.vertices.length/9*12,golden.id+' has a binding record for every source vertex');
     const indices=[...new Set(golden.cases.flatMap(c=>c.samples.map(s=>s.vertex)))].sort((a,b)=>a-b),sources=new Float32Array(indices.length*9),metadata=new Float32Array(indices.length*12);
     const lookup=new Map(indices.map((original,local)=>[original,local]));
     for(const [local,original]of indices.entries()){

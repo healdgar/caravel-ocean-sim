@@ -22,3 +22,4 @@ Apple GPUs shade only what is visible, but only for draws that neither discard n
 - **What follows from the time alone keeps no state.** A town's people are a route, a phase and a speed. A compute pass works out where each one is, culls them and picks their detail, and the vertex stage reads their pose straight from the baked clips, so no joints are computed or stored per body and JavaScript touches no one after the town is laid out.
 - **Timestamps stall the frame they sample.** They run only while the performance panel is open, and their spans include waits, so nothing automatic may read them.
 - **Each buffer holds one thing.** Battle damage has its own uniform buffer rather than the tail of another system's storage.
+- **Damage does not edit geometry.** A break writes one flight record. The compute pass that moves shards runs only on ships that have lost something.

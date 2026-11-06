@@ -9,6 +9,7 @@ import {LATER_SAIL_DESIGNS} from './models/later-sail.js';
 import { requirePlayableShipModel } from './ship-models.js';
 import { deepFreeze } from './rig-definition.js';
 import { createPartAssemblyCatalog } from './part-assembly.js';
+import { prepareShipFracture } from './ship-fracture.js';
 
 // CPU geometry is immutable model data; transforms, crew poses, moisture and
 // wake state remain per vessel. Consumers may share these buffers for uploads.
@@ -28,16 +29,17 @@ export function createShipAssetCache() {
           for(const id of Object.keys(LATER_SAIL_DESIGNS))builders[id]=options=>createLaterSailShipMesh(id,options);
           if (!builders[model.id]) throw new Error(`No mesh builder for ready ship model ${model.id}`);
           const groups = [], raw = builders[model.id]({ groups });
-          const { vertices, indices } = indexCaravelMesh(raw);
+          const indexed = indexCaravelMesh(raw);
+          const { vertices, indices, groups: fracturedGroups, fracture } = prepareShipFracture({ modelId: model.id, model, vertices: indexed.vertices, indices: indexed.indices, groups });
           const partAssembly = createPartAssemblyCatalog({
             domain: 'ship',
             modelId: model.id,
             vertices,
             vertexStride: 9,
             indices,
-            groups,
+            groups: fracturedGroups,
           });
-          const shared={ model, vertices, indices, groups: deepFreeze(groups), partAssembly, gpuPose:true };
+          const shared={ model, vertices, indices, groups: deepFreeze(fracturedGroups), partAssembly, fracture, gpuPose:true };
           if(model.rig?.backend==='surfaces-v1'){
             shared.rigGPUData=createRigGPUData(shared);
           }

@@ -56,9 +56,12 @@ wgslModules.push('js/wgsl/part-assembly.js');
 // Shaders read these constants as they are built, and they import nothing, so they come first.
 order.unshift('js/town-streets.js','js/indigenous-dress.js');
 order.splice(order.indexOf('js/main.js'),0,'js/wgsl/townsfolk.js','js/townsfolk.js');
+wgslModules.push('js/wgsl/ship-fracture.js');
 order.splice(order.indexOf('js/wgsl/vessel-pose.js')+1,0,'js/wgsl/part-assembly.js');
+order.splice(order.indexOf('js/wgsl/part-assembly.js')+1,0,'js/wgsl/ship-fracture.js');
 order.splice(order.indexOf('js/boat.js'),0,'js/ship-part-taxonomy.js');
 order.splice(order.indexOf('js/ship-parts.js'),0,'js/part-assembly.js');
+order.splice(order.indexOf('js/ship-parts.js'),0,'js/ship-fracture.js');
 order.splice(order.indexOf('js/ship-mesh.js'),0,'js/rig-gpu-data.js');
 order.splice(order.indexOf('js/vessel-pose.js'),0,'js/vessel-recoil.js');
 order.splice(order.indexOf('js/gunnery-control.js'), 0, 'js/ship-colors.js', 'js/boarding-docking.js');

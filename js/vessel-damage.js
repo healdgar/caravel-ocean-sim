@@ -5,6 +5,7 @@
 // silently undone by the next hit or damage step.
 import { plugAllHullHoles, clearHullHoles } from './hull-holes.js';
 import { remountVesselGuns } from './gunnery-state.js';
+import { brokenShardList } from './ship-fracture.js';
 
 const VESSEL_COMPARTMENT_KEYS = ['forePort', 'foreStarboard', 'midPort', 'midStarboard', 'aftPort', 'aftStarboard'];
 const VESSEL_MAST_GROUPS = ['fore', 'main', 'mizzen'];
@@ -100,13 +101,14 @@ export function repairVessel(boat, { hullGain = 0, minHull = 0, minRig = 0, leak
     if (damage.partDamage) for (const key of Object.keys(damage.partDamage)) damage.partDamage[key] = 0;
     damage.throughBreaches = 0;
     damage.breaches = 0;
+    damage.fracture = null;
     clearHullHoles(damage);
   }
   damage.revision = (damage.revision ?? 0) + 1;
   return damage;
 }
 
-// JSON-safe copy of what must survive a reload. Baked mesh dents are not saved.
+// JSON-safe copy of what must survive a reload. Masts come back from mastState; shards shot away are listed.
 export function vesselDamageSnapshot(boat) {
   const damage = boat?.damage;
   if (!damage) return null;
@@ -119,6 +121,7 @@ export function vesselDamageSnapshot(boat) {
     mastState: { ...damage.mastState },
     compartments: JSON.parse(JSON.stringify(damage.compartments ?? {})),
     holes: JSON.parse(JSON.stringify(damage.holes ?? [])),
+    brokenShards: brokenShardList(damage),
     crewCasualties: damage.crewCasualties ? {
       total: damage.crewCasualties.total,
       able: damage.crewCasualties.able,
@@ -150,6 +153,7 @@ export function restoreVesselDamageSnapshot(boat, snapshot) {
   }
   damage.holes = Array.isArray(snapshot.holes) ? JSON.parse(JSON.stringify(snapshot.holes)) : [];
   damage.holesRevision = (damage.holesRevision ?? 0) + 1;
+  if (Array.isArray(snapshot.brokenShards)) damage.fractureRestore = [...snapshot.brokenShards];
   for (const key of VESSEL_COMPARTMENT_KEYS) {
     const saved = snapshot.compartments?.[key];
     if (saved && damage.compartments?.[key]) Object.assign(damage.compartments[key], saved);

@@ -66,3 +66,19 @@ These sources guide the reconstruction. Exact charge tables, historical shot qua
 A penetrating round or hot shot leaves a hole in the hull, recorded in `damage.holes` in her own frame in metres. The hole, not the hit, decides the water: see `js/hull-holes.js`. Grape, chain and arrows never hole a hull. Waterline hits that do not penetrate still use the older estimated leak in `compartments[...].breachArea`.
 
 A ship draws with the whole-hull shader until something marks her. After that she draws in two steps from a second shader: `surviving` lays depth and decides what shot and tearing have taken away, then `fs` shades only what is left. Holes, hold water and craters share one uniform buffer per ship (`js/hull-flood.js`), updated only when they change.
+
+## How a ship comes apart
+
+No hit moves a timber vertex. A vertex pulled on its own stretches every triangle it shares, which pinches hulls and shears masts. A hit does two things instead: it scorches the surface (`bakeVesselImpactMarks`, which only displaces torn sail cloth), and it wears the pieces of her it reached (`js/ship-fracture.js`). Parts say what a piece is, damage says how much it has taken, and fracture says which pieces leave.
+
+- **Shards.** Built once per model. Keel, decks and hull below the waterline stay. Bulwarks, cabins, castles, galleries and topsides break into plank-sized shards, using the Voronoi cells buildings use (`sampleVoronoiBlockCell`). Small fittings are one shard. Each gun is one shard.
+- **Compounding.** Light shots wear a shard until it goes. A penetrating shot takes the nearest at once. A wrecked fitting (part damage at 0.65) comes away rather than vanishing. A shard with no remaining path back to what stays comes down too, so nothing is left standing in space.
+- **Masts.** A mast divides at its two break heights. Rings, tops, yards, sails and rigging belong to the section they are fixed to, so they fall as one rigid body. Victory breaks at her real joints. A pole mast is cut there when the model is built, with a splintered cap on each side. A section topples from its break, goes over the side and floats flat with its yards level, then sinks. Rope goes with the mast as it starts to lean, then is gone, parted. The crow's nest, pennant and parrels go when what they stand on goes.
+- **Guns.** A dismounted gun is knocked off its trucks and stays aboard. It goes back when remounted.
+- **Magazine, broken back.** A magazine blast throws everything in its radius. A broken back takes the planking across that station. Neither bends her: she founders as she was.
+- **Graphics.** JavaScript writes one 64-byte flight record when a shard breaks. A compute pass moves each shard every frame, rigid in metres, and runs only once something has broken. While anything is in the air, a single clock value is uploaded per frame.
+- **Saves.** Masts return from `mastState`. Shards shot away are listed in the snapshot and come back already gone. A full structural repair restores them.
+
+Buildings still use `bakeBuildingImpactDeformations`: each face slumps rigidly toward a rubble floor, and nothing leaves. The two share only the cell shape. Shots do not yet pass through a gap a shard left, and a crew member can stand where a bulwark was. Fallen wreckage stays in the ship's frame while it floats, so she tows it.
+
+`node scripts/damage-review.mjs` takes pictures of this from the real game. `npm run perf -- '[["battle",{"battle":"1"}]]'` measures it.
