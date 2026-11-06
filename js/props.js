@@ -5,8 +5,8 @@
 import { PROP_MODELS, PROP_WORDS, readPropModel } from './port-props.js';
 import { PROP_DRAW_WORDS, PROPS_CULL, PROPS_RENDER } from './wgsl/props.js';
 
-const PORT_REACH_M = 3000;
-const PORT_CHECK_FRAMES = 30;
+const PROP_REACH_M = 3000;
+const PROP_CHECK_FRAMES = 30;
 const PROP_BYTES = PROP_WORDS * 4;
 const VERTEX_BYTES = 32;
 // Storage bindings start on 256 bytes, so each model's list starts on a whole number of these.
@@ -134,8 +134,8 @@ export function createProps({ device, frameUBO, transView, skyView, sampClamp, e
     get placed() { return activePort?.props ?? []; },
     get port() { return activePort; },
     follow(ports, camera) {
-      if (frameCount++ % PORT_CHECK_FRAMES || unavailable) return;
-      let best = null, bestDistance = PORT_REACH_M;
+      if (frameCount++ % PROP_CHECK_FRAMES || unavailable) return;
+      let best = null, bestDistance = PROP_REACH_M;
       for (const port of ports ?? []) {
         if (!port?.props?.length) continue;
         const d = Math.hypot(port.center.x - camera.x, port.center.z - camera.z);

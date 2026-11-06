@@ -6,7 +6,7 @@ import { SKY_RENDER_FUNCS } from './sky.js';
 import { SHADOW_SAMPLE } from './shadows.js';
 
 export const PROP_DRAW_WORDS = 5;
-const SMALLEST_PIXELS = 2.5;
+const PROP_SMALLEST_PIXELS = 2.5;
 
 const PROP_RECORD = /* wgsl */ `
 struct Prop {position:vec3f,yaw:f32,scale:f32,model:u32,first:u32,radius:f32};
@@ -36,7 +36,7 @@ fn inFrustum(relative:vec3f,radius:f32)->bool {
   let relative=prop.position-F.camPos.xyz;
   if(!inFrustum(relative,prop.radius)){return;}
   let depth=max(dot(relative,normalize(F.camFwd.xyz)),.1);
-  if(2.0*prop.radius*F.screen.y/(2.0*length(F.camUp.xyz))/depth<${SMALLEST_PIXELS.toFixed(1)}){return;}
+  if(2.0*prop.radius*F.screen.y/(2.0*length(F.camUp.xyz))/depth<${PROP_SMALLEST_PIXELS.toFixed(1)}){return;}
   let slot=atomicAdd(&draws[prop.model*${PROP_DRAW_WORDS}u+1u],1u);
   shown[prop.first+slot]=prop;
 }
