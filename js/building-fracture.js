@@ -529,23 +529,6 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
     delete shard.normalSum;
   }
 
-  // What stays and stands clear of the ground, as boxes in the building's frame: a shot through a breach
-  // can meet it. Floors and footings count.
-  const solidBoxes = [];
-  const addSolid = (min, max) => {
-    const a = toLocal(min[0], min[1], min[2]), b = toLocal(max[0], min[1], min[2]), c = toLocal(min[0], max[1], max[2]), d = toLocal(max[0], max[1], max[2]);
-    solidBoxes.push(Math.min(a[0], b[0], c[0], d[0]), min[1], Math.min(a[2], b[2], c[2], d[2]), Math.max(a[0], b[0], c[0], d[0]), max[1], Math.max(a[2], b[2], c[2], d[2]));
-  };
-  for (const face of geometry[0].faces) {
-    if (face.max[1] > Math.max(groundAt((face.min[0] + face.max[0]) * 0.5, (face.min[2] + face.max[2]) * 0.5), -0.6) + 0.1) addSolid(face.min, face.max);
-  }
-  for (const { corners, depth } of geometry[0].blocks) {
-    if (depth > 0) continue;
-    const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
-    for (const q of corners) for (let c = 0; c < 3; c++) { if (q[c] < min[c]) min[c] = q[c]; if (q[c] > max[c]) max[c] = q[c]; }
-    if (max[1] > Math.max(groundAt((min[0] + max[0]) * 0.5, (min[2] + max[2]) * 0.5), -0.6) + 0.1) addSolid(min, max);
-  }
-  const solids = new Float32Array(solidBoxes);
   yield* linkShards(shards);
   // The highest floor at or below a height: a storey can stand over the place a stone comes down.
   const floorAt = (x, z, below = Infinity) => {
@@ -575,30 +558,26 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
     instanceIndex, prefabId: instance.prefabId ?? null,
     firstIndex, indexCount: endIndex - firstIndex, blockScale,
     surface: Object.freeze({ vertices: rest, indices: finalIndices }),
-    reach: shardsReach(shards, solids),
+    reach: reachOfSurface(rest, finalIndices, toLocal),
     scale: Object.freeze([1, 1, 1]),
     toughness: fortified ? 1.4 : materialClass === 'timber' ? 0.8 : 1,
     shardCount: shards.length, vertexShards: vertexShards.slice(0, vertexCount),
     shards: Object.freeze(shards),
     strikable: Object.freeze(shards.filter(Boolean).map((s) => s.index)),
     guns: Object.freeze(shards.filter((s) => s?.kind === BUILDING_SHARD_KINDS.gun).map((s) => s.index)),
-    toLocal, toWorld, groundAt, floorAt, originX, originZ, solids,
+    toLocal, toWorld, groundAt, floorAt, originX, originZ,
   });
   return { vertices: rest, initial, indices: finalIndices, fracture };
 }
 
-function shardsReach(shards, solids) {
+function reachOfSurface(vertices, indices, toLocal) {
   const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
-  for (let s = 1; s < shards.length; s++) {
-    if (!shards[s]) continue;
+  for (let i = 0; i < indices.length; i++) {
+    const at = indices[i] * STRIDE, local = toLocal(vertices[at], vertices[at + 1], vertices[at + 2]);
     for (let c = 0; c < 3; c++) {
-      if (shards[s].localMin[c] < min[c]) min[c] = shards[s].localMin[c];
-      if (shards[s].localMax[c] > max[c]) max[c] = shards[s].localMax[c];
+      if (local[c] < min[c]) min[c] = local[c];
+      if (local[c] > max[c]) max[c] = local[c];
     }
-  }
-  for (let i = 0; i < solids.length; i += 6) for (let c = 0; c < 3; c++) {
-    if (solids[i + c] < min[c]) min[c] = solids[i + c];
-    if (solids[i + 3 + c] > max[c]) max[c] = solids[i + 3 + c];
   }
   return Object.freeze({ min, max });
 }
@@ -962,22 +941,6 @@ export function footingUnder(state, localX, y, localZ, shards = state.fracture.s
 }
 
 // Where a line enters a box, along it, or Infinity. The line runs both ways: `t` may lie behind its start.
-function lineEntersBox(a, d, minX, minY, minZ, maxX, maxY, maxZ) {
-  let low = -Infinity, high = Infinity;
-  for (let c = 0; c < 3; c++) {
-    const lo = c === 0 ? minX : c === 1 ? minY : minZ, hi = c === 0 ? maxX : c === 1 ? maxY : maxZ;
-    if (Math.abs(d[c]) < 1e-9) {
-      if (a[c] < lo || a[c] > hi) return Infinity;
-      continue;
-    }
-    const t1 = (lo - a[c]) / d[c], t2 = (hi - a[c]) / d[c];
-    low = Math.max(low, Math.min(t1, t2));
-    high = Math.min(high, Math.max(t1, t2));
-    if (low > high) return Infinity;
-  }
-  return high < 0 ? Infinity : low;
-}
-
 // The nearest triangle ahead on the line from-to, as a fraction of it. `standing` says which triangles are still there.
 function lineEntersTriangles(from, to, vertices, indices, firstIndex, endIndex, standing = null) {
   const ox = from[0], oy = from[1], oz = from[2], dx = to[0] - ox, dy = to[1] - oy, dz = to[2] - oz;
@@ -1010,19 +973,13 @@ function lineEntersTriangles(from, to, vertices, indices, firstIndex, endIndex, 
  */
 export function traceShotThroughBreach(state, from, to) {
   if (!state) return null;
-  const { fracture, broken } = state, { shards, solids, surface, vertexShards, toLocal } = fracture;
+  const { fracture, broken } = state, { shards, surface, vertexShards } = fracture;
   // A dismounted gun lies on the deck, still in the way.
   const standing = (vertex) => {
     const s = vertexShards[vertex];
     return !broken[s] || shards[s]?.kind === BUILDING_SHARD_KINDS.gun;
   };
-  let nearest = lineEntersTriangles(from, to, surface.vertices, surface.indices, 0, surface.indices.length, state.brokenCount ? standing : null);
-  const a = toLocal(from[0], from[1], from[2]), b = toLocal(to[0], to[1], to[2]), d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
-  for (let i = 0; i < solids.length; i += 6) {
-    const t = lineEntersBox(a, d, solids[i], solids[i + 1], solids[i + 2], solids[i + 3], solids[i + 4], solids[i + 5]);
-    if (t < nearest) nearest = t;
-  }
-  return { t: nearest };
+  return { t: lineEntersTriangles(from, to, surface.vertices, surface.indices, 0, surface.indices.length, state.brokenCount ? standing : null) };
 }
 
 const buildingMeshes = new WeakMap();

@@ -671,3 +671,20 @@ test('a bastion reaching beyond the box still stops a ball', () => {
   }
   assert.ok(Math.max(...hits) > instance.width / 2 + 1, `it strikes out on the bastions (${Math.max(...hits).toFixed(1)})`);
 });
+
+test('a turned building reaches as far as a square one, and a ball meets only what is drawn', () => {
+  // Every real port turns its buildings. Boxes laid square to the world used to balloon when turned.
+  for (const prefabId of ['stone_quay_seawall', 'stone_sea_bastion', 'bastion_trace_fortress']) {
+    const square = prepared(prefabId).fracture.reach, { fracture, instance } = prepared(prefabId, { yaw: 2.1, x: 300, z: -150 });
+    for (let c = 0; c < 3; c++) {
+      assert.ok(Math.abs(fracture.reach.min[c] - square.min[c]) < 0.5 && Math.abs(fracture.reach.max[c] - square.max[c]) < 0.5,
+        `${prefabId}, axis ${c}: ${fracture.reach.min[c].toFixed(1)}..${fracture.reach.max[c].toFixed(1)} turned, ${square.min[c].toFixed(1)}..${square.max[c].toFixed(1)} square`);
+    }
+    // A line along the building, just clear of everything drawn, strikes nothing.
+    createBuildingDamageState(instance);
+    buildingFractureStateOf(instance.damageState, fracture);
+    const { toWorld, reach } = fracture, y = instance.height * 0.5;
+    const from = toWorld(reach.max[0] + 0.5, y, -300), to = toWorld(reach.max[0] + 0.5, y, 300);
+    assert.equal(sweepBuildingSegment(from, to, 0.07, { center: { x: 300, z: -150 }, instances: [instance] }), null, `${prefabId}: nothing stands out there`);
+  }
+});
