@@ -59,6 +59,7 @@ order.splice(order.indexOf('js/wgsl/part-assembly.js')+1,0,'js/wgsl/ship-fractur
 order.splice(order.indexOf('js/boat.js'),0,'js/ship-part-taxonomy.js');
 order.splice(order.indexOf('js/ship-parts.js'),0,'js/part-assembly.js');
 order.splice(order.indexOf('js/ship-parts.js'),0,'js/ship-fracture.js');
+order.splice(order.indexOf('js/terrain.js'),0,'js/building-fracture.js');
 order.splice(order.indexOf('js/ship-mesh.js'),0,'js/rig-gpu-data.js');
 order.splice(order.indexOf('js/vessel-pose.js'),0,'js/vessel-recoil.js');
 order.splice(order.indexOf('js/gunnery-control.js'), 0, 'js/ship-colors.js', 'js/boarding-docking.js');

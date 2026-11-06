@@ -499,7 +499,8 @@ export function prepareShipFracture({ modelId, model = null, vertices, indices, 
 //   [hinge seconds, gravity scale, sink m/s, frozen age]
 // Frozen age is -2 for intact, -1 for on the clock, and otherwise the age it is held at.
 export const FRACTURE_RECORD_FLOATS = 16;
-const INTACT = -2, LIVE = -1, GRAVITY = 9.80665;
+export const FRACTURE_INTACT = -2, FRACTURE_GRAVITY = 9.80665;
+const INTACT = FRACTURE_INTACT, LIVE = -1, GRAVITY = FRACTURE_GRAVITY;
 
 export function createShipFractureState(fracture) {
   const records = new Float32Array(fracture.shardCount * FRACTURE_RECORD_FLOATS);
@@ -524,8 +525,9 @@ export function shipFractureStateOf(damage, fracture) {
   return damage.fracture;
 }
 
-function writeFlight(state, s, flight, now) {
-  const r = state.records, at = s * FRACTURE_RECORD_FLOATS, { pivot, velocity, spin, hinge = 0, gravity = 1, sink = 0, linger = 2, settle = null, keep = false } = flight;
+// Delay leaves the shard where it is for that long: a wall above a breach does not all let go at once.
+export function writeFlight(state, s, flight, now) {
+  const r = state.records, at = s * FRACTURE_RECORD_FLOATS, { pivot, velocity, spin, hinge = 0, gravity = 1, sink = 0, linger = 2, settle = null, keep = false, delay = 0 } = flight;
   const scaleY = state.fracture.scale[1];
   if (!state.flying.size) state.epoch = now;
   let settleAt = settle;
@@ -533,10 +535,10 @@ function writeFlight(state, s, flight, now) {
     const height = Math.max(0, pivot[1] * scaleY), g = GRAVITY * gravity;
     settleAt = hinge + (g > 0 ? (velocity[1] + Math.sqrt(velocity[1] * velocity[1] + 2 * g * height)) / g : 0);
   }
-  r.set([pivot[0], pivot[1], pivot[2], now - state.epoch, velocity[0], velocity[1], velocity[2], settleAt, spin[0], spin[1], spin[2], keep ? -1 : settleAt + linger, hinge, gravity, sink, LIVE], at);
+  r.set([pivot[0], pivot[1], pivot[2], now - state.epoch + delay, velocity[0], velocity[1], velocity[2], settleAt, spin[0], spin[1], spin[2], keep ? -1 : settleAt + linger, hinge, gravity, sink, LIVE], at);
   state.dirty.add(s);
   state.flying.add(s);
-  const ends = now + (keep ? settleAt : settleAt + linger);
+  const ends = now + delay + (keep ? settleAt : settleAt + linger);
   if (ends > state.flightEnds) state.flightEnds = ends;
   state.revision++;
 }

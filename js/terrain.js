@@ -10,7 +10,8 @@ import {loadTerrainNear,terrainNearGeometry,terrainNearContains,terrainNearSampl
 import {loadForestScenery,createForestRenderer,FOREST_VERTEX_WGSL,FOREST_ASSETS,SUBTROPICAL_FOREST_ASSETS} from './forest-scenery.js';
 import {loadForestMass,createForestMassRenderer,forestMiddleWoodPartition,FOREST_MASS_VERTEX_WGSL} from './forest-mass.js';
 import {loadForestMiddle,FOREST_MIDDLE_ASSETS,SUBTROPICAL_FOREST_MIDDLE_ASSETS} from './forest-middle.js';
-import {bakeBuildingImpactDeformations} from './part-assembly.js';
+import {bakeLandImpactDeformations} from './part-assembly.js';
+import {buildingFracturePipeline,createPortFractures} from './building-fracture.js';
 
 import {
   portClearanceEnvelope,
@@ -628,6 +629,11 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     indices:buffer(proceduralPack.portGeometry.indices,GPUBufferUsage.INDEX,'coastal port prefab indices'),
     count:proceduralPack.portGeometry.indices.length,
   }:null;
+  // Buildings under fire draw from their own buffers, made when each is first hit.
+  const portFracturesFor=(geometry,port,indexBuffer)=>port?.instances?.length&&geometry?.partAssembly&&indexBuffer
+    ?createPortFractures({device,port,geometry,portIndices:indexBuffer,groundAt:(x,z)=>heightSample(x,z)}):null;
+  let portFractures=portFracturesFor(proceduralPack?.portGeometry,proceduralPack?.port,portMesh?.indices);
+  if(portMesh&&proceduralPack?.port?.instances?.length)buildingFracturePipeline(device).catch(()=>{});
   const fine=fineMesh?{vertices:buffer(fineMesh.vertices,GPUBufferUsage.VERTEX,'Wells Bay immutable near vertices'),
     indices:buffer(fineMesh.indices,GPUBufferUsage.INDEX,'Wells Bay near indices'),
     submerged:buffer(fineMesh.submergedIndices,GPUBufferUsage.INDEX,'Wells Bay submerged near indices')}:null;
@@ -935,6 +941,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     rec.indices?.destroy?.();
     rec.portMesh?.vertices?.destroy?.();
     rec.portMesh?.indices?.destroy?.();
+    rec.portFractures?.destroy();
     rec.uniform?.destroy?.();
     rec.albedo?.destroy?.();
     rec.biomeTexture?.destroy?.();
@@ -1000,6 +1007,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       submergedCount:sSubCount,
       portMesh:sPort,
       portVertsCpu:needSecPort?secPack.portGeometry?.vertices??null:null,
+      portFractures:needSecPort?portFracturesFor(secPack.portGeometry,secPack.port,sPort?.indices):null,
       uniform:sUniform,
       albedo:sAlbedo,
       biomeTexture:sBiome,
@@ -1306,6 +1314,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     }:null;
     oldVerts?.destroy?.();oldIdx?.destroy?.();oldSubIdx?.destroy?.();
     oldPort?.vertices?.destroy?.();oldPort?.indices?.destroy?.();
+    portFractures?.destroy();
+    portFractures=portFracturesFor(upgradedPack.portGeometry,upgradedPack.port,portMesh?.indices);
 
     groundPatches=createGroundCoverPatches(activeRegion,groundSample,null);
     groundStats.patches=groundPatches.length;
@@ -1536,7 +1546,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       vertices?.destroy?.();
       if(submergedIndices&&submergedIndices!==indices)submergedIndices?.destroy?.();
       indices?.destroy?.();
-      portMesh?.vertices?.destroy?.();portMesh?.indices?.destroy?.();
+      portMesh?.vertices?.destroy?.();portMesh?.indices?.destroy?.();portFractures?.destroy();
       fine?.vertices?.destroy?.();fine?.indices?.destroy?.();fine?.submerged?.destroy?.();
       uniform?.destroy?.();nearDomain?.destroy?.();nearElevation?.destroy?.();coastalField?.destroy();
       elevation?.destroy?.();lighting?.destroy?.();albedo?.destroy?.();
@@ -1551,57 +1561,29 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       forestMass?.destroy?.();
       proceduralMiddle?.vertices?.destroy?.();proceduralMiddle?.indices?.destroy?.();proceduralMiddle?.woodIndices?.destroy?.();
     },
-    updatePortDamage(){
+    updatePortDamage(now=0){
       let updated=false;
-      const flushPort=(pMesh,pVertsCpu,portObj)=>{
-        if(!pMesh?.vertices||!pVertsCpu||!portObj)return;
-        const instances=portObj.instances;
-        const hasSceneryBakes=Array.isArray(portObj.sceneryBakes)&&portObj.sceneryBakes.length>0;
-        if((!Array.isArray(instances)||!instances.length)&&!hasSceneryBakes)return;
-        const bakes=[];
-        if(Array.isArray(instances)){
-          for(const inst of instances){
-            const pending=inst?.damageState?.pendingBakes;
-            if(Array.isArray(pending)&&pending.length){
-              const spliced=pending.splice(0,pending.length);
-              const w=Math.max(4,Number(inst.width)||16);
-              const l=Math.max(4,Number(inst.depth??inst.length)||16);
-              const isPier=inst.prefabId==='timber_mole_pier'||inst.role==='pier';
-              for(const bk of spliced){
-                if(bk&&Number.isFinite(inst.x)&&Number.isFinite(inst.z)){
-                  bk.buildingCx??=inst.x;
-                  bk.buildingCz??=inst.z;
-                  bk.buildingYaw??=inst.yaw??0;
-                  bk.buildingHalfW??=(isPier?w*1.35:w*0.5)+1.8;
-                  bk.buildingHalfL??=l*0.5+1.8;
-                  bk.buildingGroundY??=Number(inst.baseY??inst.y)||0;
-                }
-              }
-              bakes.push(...spliced);
-            }
-          }
-        }
-        if(hasSceneryBakes){
-          for(const bake of portObj.sceneryBakes)if(bake.kind==='scenery-tree')forest?.strike?.(bake.x,bake.z);
-          bakes.push(...portObj.sceneryBakes.splice(0,portObj.sceneryBakes.length));
-        }
-        if(!bakes.length)return;
-        const dirty=bakeBuildingImpactDeformations(pVertsCpu,bakes,8);
+      // Shot at a building writes flight records, nothing else. Palms still bend in the port's own mesh.
+      const flushPort=(pMesh,pVertsCpu,portObj,fractures)=>{
+        fractures?.update(now);
+        if(!Array.isArray(portObj?.sceneryBakes)||!portObj.sceneryBakes.length)return;
+        for(const bake of portObj.sceneryBakes)if(bake.kind==='scenery-tree')forest?.strike?.(bake.x,bake.z);
+        const bakes=portObj.sceneryBakes.splice(0,portObj.sceneryBakes.length);
+        if(!pMesh?.vertices||!pVertsCpu)return;
+        const dirty=bakeLandImpactDeformations(pVertsCpu,bakes,8);
         if(dirty){
           device.queue.writeBuffer(pMesh.vertices,dirty.byteOffset,pVertsCpu.buffer,pVertsCpu.byteOffset+dirty.byteOffset,dirty.byteLength);
           updated=true;
         }
       };
-      flushPort(portMesh,portVertsCpu,proceduralPack?.port);
+      flushPort(portMesh,portVertsCpu,proceduralPack?.port,portFractures);
       for(const sec of loadedSections.values()){
-        if(sec.portMesh&&sec.portVertsCpu&&sec.port&&(sec.port.instances?.length||sec.port.sceneryBakes?.length)){
-          flushPort(sec.portMesh,sec.portVertsCpu,sec.port);
-        }
+        if(sec.port)flushPort(sec.portMesh,sec.portVertsCpu,sec.port,sec.portFractures);
       }
       if(Array.isArray(this.pendingLandBakes)&&this.pendingLandBakes.length){
         const landBakes=this.pendingLandBakes.splice(0,this.pendingLandBakes.length);
         if(mesh?.vertices&&vertices){
-          const dirty=bakeBuildingImpactDeformations(mesh.vertices,landBakes,8);
+          const dirty=bakeLandImpactDeformations(mesh.vertices,landBakes,8);
           if(dirty){
             device.queue.writeBuffer(vertices,dirty.byteOffset,mesh.vertices.buffer,mesh.vertices.byteOffset+dirty.byteOffset,dirty.byteLength);
             updated=true;
@@ -1609,7 +1591,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         }
         for(const sec of loadedSections.values()){
           if(sec.vertices&&sec.meshVertsCpu){
-            const sDirty=bakeBuildingImpactDeformations(sec.meshVertsCpu,landBakes,8);
+            const sDirty=bakeLandImpactDeformations(sec.meshVertsCpu,landBakes,8);
             if(sDirty){
               device.queue.writeBuffer(sec.vertices,sDirty.byteOffset,sec.meshVertsCpu.buffer,sec.meshVertsCpu.byteOffset+sDirty.byteOffset,sDirty.byteLength);
               updated=true;
@@ -1656,6 +1638,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     },
     encode(pass,changed=false,frame=null){
       if(frame)coastalField.encode(pass,frame);
+      portFractures?.encode(pass);
+      for(const sec of loadedSections.values())sec.portFractures?.encode(pass);
       groundCull.encode(pass);
       treeCull?.encode(pass);
       forestMass?.encode(pass);
@@ -1692,12 +1676,12 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       pass.setPipeline(terrainPipe);pass.setBindGroup(0,groups[0]);pass.setBindGroup(1,cloudGroups[0]);
       pass.setVertexBuffer(0,vertices);pass.setIndexBuffer(indices,'uint32');pass.drawIndexed(mesh.indices.length);
       if(fine&&fineMesh.indices.length){pass.setVertexBuffer(0,fine.vertices);pass.setIndexBuffer(fine.indices,'uint32');pass.drawIndexed(fineMesh.indices.length);}
-      if(portMesh&&isSectionVisible(activeRegion,camera,viewProjection,4800)){pass.setVertexBuffer(0,portMesh.vertices);pass.setIndexBuffer(portMesh.indices,'uint32');pass.drawIndexed(portMesh.count);}
+      if(portMesh&&isSectionVisible(activeRegion,camera,viewProjection,4800)){pass.setVertexBuffer(0,portMesh.vertices);pass.setIndexBuffer(portMesh.indices,'uint32');pass.drawIndexed(portMesh.count);portFractures?.draw(pass);}
       for(const sec of loadedSections.values()){
         if(!isSectionVisible(sec.region,camera,viewProjection))continue;
         pass.setBindGroup(0,sec.terrainGroup);
         pass.setVertexBuffer(0,sec.vertices);pass.setIndexBuffer(sec.indices,'uint32');pass.drawIndexed(sec.indexCount);
-        if(sec.portMesh&&isSectionVisible(sec.region,camera,viewProjection,3400)){pass.setVertexBuffer(0,sec.portMesh.vertices);pass.setIndexBuffer(sec.portMesh.indices,'uint32');pass.drawIndexed(sec.portMesh.count);}
+        if(sec.portMesh&&isSectionVisible(sec.region,camera,viewProjection,3400)){pass.setVertexBuffer(0,sec.portMesh.vertices);pass.setIndexBuffer(sec.portMesh.indices,'uint32');pass.drawIndexed(sec.portMesh.count);sec.portFractures?.draw(pass);}
       }
       // Opaque ground props have no cutout/depth reconstruction and no cloud
       // ray march per blade. They remain in Apple's opaque visibility path.

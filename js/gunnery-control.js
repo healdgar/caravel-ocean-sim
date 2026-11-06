@@ -2609,23 +2609,6 @@ export function createBuildingDamageState(building) {
   return d;
 }
 
-function withBuildingBakeBounds(building, bake) {
-  if (!building || !bake) return bake;
-  const cx = Number(building.x);
-  const cz = Number(building.z);
-  if (!Number.isFinite(cx) || !Number.isFinite(cz)) return bake;
-  const w = Math.max(4, Number(building.width) || 16);
-  const l = Math.max(4, Number(building.depth ?? building.length) || 16);
-  const isPier = building.prefabId === 'timber_mole_pier' || building.role === 'pier';
-  bake.buildingCx = +cx.toFixed(3);
-  bake.buildingCz = +cz.toFixed(3);
-  bake.buildingYaw = +(Number(building.yaw) || 0).toFixed(4);
-  bake.buildingHalfW = +((isPier ? w * 1.35 : w * 0.5) + 1.8).toFixed(3);
-  bake.buildingHalfL = +(l * 0.5 + 1.8).toFixed(3);
-  bake.buildingGroundY = +(Number(building.baseY ?? building.y) || 0).toFixed(3);
-  return bake;
-}
-
 export function detonateBuildingMagazine(building, { localPos = [0, 2.2, 0], cause = 'shot' } = {}) {
   if (!building) return null;
   const d = createBuildingDamageState(building);
@@ -2684,7 +2667,7 @@ export function detonateBuildingMagazine(building, { localPos = [0, 2.2, 0], cau
   }
 
   d.collapseDropFrac = Math.min(0.72, (d.collapseDropFrac ?? 0) + 0.32 * (0.4 + 0.6 * powderFrac));
-  d.pendingBakes.push(withBuildingBakeBounds(building, {
+  d.pendingBakes.push({
     kind: 'building-explosion',
     x: +worldBlastPt[0].toFixed(3),
     y: +worldBlastPt[1].toFixed(3),
@@ -2693,7 +2676,7 @@ export function detonateBuildingMagazine(building, { localPos = [0, 2.2, 0], cau
     stepDepth: +(1.85 + 1.85 * powderFrac).toFixed(3),
     severity: +(1.25 + 0.48 * powderFrac).toFixed(3),
     powderFraction: +powderFrac.toFixed(3),
-  }));
+  });
 
   const numFires = Math.min(3, Math.max(1, Math.round(1 + 2 * powderFrac)));
   for (let i = 0; i < numFires; i++) {
@@ -2795,7 +2778,7 @@ export function applyBuildingImpactDamage(building, event) {
   });
   if (d.craters.length > 32) d.craters.shift();
 
-  d.pendingBakes.push(withBuildingBakeBounds(building, {
+  d.pendingBakes.push({
     kind: materialClass === 'timber' ? 'timber-splinter' : 'stone-crater',
     x: +worldHitPos[0].toFixed(3),
     y: +worldHitPos[1].toFixed(3),
@@ -2807,7 +2790,7 @@ export function applyBuildingImpactDamage(building, event) {
     stepDepth: +stepDepth.toFixed(3),
     severity: +siteSeverity.toFixed(3),
     materialClass,
-  }));
+  });
 
   // When a shot strikes the lower scarp/foundation wall, propagate shock & spalling up into the
   // upper scarp and parapet crenellations directly above the impact bay so the battlements crumble visibly.
@@ -2819,7 +2802,7 @@ export function applyBuildingImpactDamage(building, event) {
       localPos[2] ?? 0,
     ];
     const upperWorld = buildingLocalToWorld(building, upperLocal);
-    d.pendingBakes.push(withBuildingBakeBounds(building, {
+    d.pendingBakes.push({
       kind: materialClass === 'timber' ? 'timber-splinter' : 'stone-crater',
       x: +upperWorld[0].toFixed(3),
       y: +upperWorld[1].toFixed(3),
@@ -2831,7 +2814,7 @@ export function applyBuildingImpactDamage(building, event) {
       stepDepth: +(stepDepth * 1.1).toFixed(3),
       severity: +(siteSeverity * 0.95).toFixed(3),
       materialClass,
-    }));
+    });
   }
 
   // Check if the shot struck near a shore-battery embrasure cannon (or undermined its wall bay) and dismounted it.
@@ -2844,7 +2827,7 @@ export function applyBuildingImpactDamage(building, event) {
     d.dismountedGuns = (d.dismountedGuns ?? 0) + 1;
     dismountedNow = true;
     const gWorld = buildingLocalToWorld(building, g.localPosition ?? localPos);
-    d.pendingBakes.push(withBuildingBakeBounds(building, {
+    d.pendingBakes.push({
       kind: 'cannon-dismount',
       x: +gWorld[0].toFixed(3),
       y: +gWorld[1].toFixed(3),
@@ -2855,7 +2838,7 @@ export function applyBuildingImpactDamage(building, event) {
       radius: 1.65,
       stepDepth: 0.65,
       severity: 1.15,
-    }));
+    });
   };
   if (Array.isArray(bGuns) && bGuns.length > 0) {
     for (const g of bGuns) {
@@ -2894,7 +2877,7 @@ export function applyBuildingImpactDamage(building, event) {
   } else if (isEmbrasure && effectiveEnergy >= 85000) {
     d.dismountedGuns = (d.dismountedGuns ?? 0) + 1;
     dismountedNow = true;
-    d.pendingBakes.push(withBuildingBakeBounds(building, {
+    d.pendingBakes.push({
       kind: 'cannon-dismount',
       x: +worldHitPos[0].toFixed(3),
       y: +worldHitPos[1].toFixed(3),
@@ -2905,7 +2888,7 @@ export function applyBuildingImpactDamage(building, event) {
       radius: 1.65,
       stepDepth: 0.65,
       severity: 1.15,
-    }));
+    });
   }
 
   // Hot shot & heavy bombardment fire ignition:
@@ -3002,7 +2985,7 @@ export function applyBuildingImpactDamage(building, event) {
       (building.height ?? 7) * 0.85,
       (localPos[2] ?? 0) * 0.65,
     ]);
-    d.pendingBakes.push(withBuildingBakeBounds(building, {
+    d.pendingBakes.push({
       kind: 'building-collapse',
       x: +roofCavePt[0].toFixed(3),
       y: +roofCavePt[1].toFixed(3),
@@ -3011,7 +2994,7 @@ export function applyBuildingImpactDamage(building, event) {
       stepDepth: 1.35,
       severity: 0.95,
       powderFraction: 0.40,
-    }));
+    });
   }
   if ((d.state === 'breached' || d.state === 'ruined') && !d.breachCollapseBaked) {
     d.breachCollapseBaked = true;
@@ -3022,7 +3005,7 @@ export function applyBuildingImpactDamage(building, event) {
       (building.height ?? 8) * 0.72,
       (localPos[2] ?? 0) * 0.6,
     ]);
-    d.pendingBakes.push(withBuildingBakeBounds(building, {
+    d.pendingBakes.push({
       kind: 'building-collapse',
       x: +collapsePt[0].toFixed(3),
       y: +collapsePt[1].toFixed(3),
@@ -3031,7 +3014,7 @@ export function applyBuildingImpactDamage(building, event) {
       stepDepth: 1.65,
       severity: 1.15,
       powderFraction: 0.55,
-    }));
+    });
   }
   const activeGunsLeft = Array.isArray(bGuns) ? bGuns.filter((g) => !g.dismounted).length : 0;
   const totalGunsCount = Array.isArray(bGuns) ? bGuns.length : 0;
@@ -3053,7 +3036,7 @@ export function applyBuildingImpactDamage(building, event) {
       (building.height ?? 8) * 0.68,
       (localPos[2] ?? 0) * 0.5,
     ]);
-    d.pendingBakes.push(withBuildingBakeBounds(building, {
+    d.pendingBakes.push({
       kind: 'building-collapse',
       x: +centerCollapsePt[0].toFixed(3),
       y: +centerCollapsePt[1].toFixed(3),
@@ -3062,7 +3045,7 @@ export function applyBuildingImpactDamage(building, event) {
       stepDepth: 2.35,
       severity: 1.35,
       powderFraction: 0.85,
-    }));
+    });
   }
   // Multi-round bombardment progression: keep lowering collapseDropFrac on subsequent hits so fires and OBB top sink with the crumbling walls
   if (!emittedCollapseThisHit && d.state !== 'intact' && effectiveEnergy >= 35000) {
@@ -3156,7 +3139,7 @@ export function stepBuildingDamage(building, dt) {
     d.breachCollapseBaked = true;
     d.collapseDropFrac = Math.min(0.72, (d.collapseDropFrac ?? 0) + 0.16);
     const collapsePt = buildingLocalToWorld(building, [0, (building.height ?? 7) * 0.72, 0]);
-    d.pendingBakes.push(withBuildingBakeBounds(building, {
+    d.pendingBakes.push({
       kind: 'building-collapse',
       x: +collapsePt[0].toFixed(3),
       y: +collapsePt[1].toFixed(3),
@@ -3165,13 +3148,13 @@ export function stepBuildingDamage(building, dt) {
       stepDepth: 1.65,
       severity: 1.15,
       powderFraction: 0.55,
-    }));
+    });
   }
   if (d.state === 'ruined' && !d.ruinCollapseBaked) {
     d.ruinCollapseBaked = true;
     d.collapseDropFrac = Math.min(0.72, (d.collapseDropFrac ?? 0) + 0.22);
     const ruinPt = buildingLocalToWorld(building, [0, (building.height ?? 7) * 0.68, 0]);
-    d.pendingBakes.push(withBuildingBakeBounds(building, {
+    d.pendingBakes.push({
       kind: 'building-collapse',
       x: +ruinPt[0].toFixed(3),
       y: +ruinPt[1].toFixed(3),
@@ -3180,7 +3163,7 @@ export function stepBuildingDamage(building, dt) {
       stepDepth: 2.25,
       severity: 1.30,
       powderFraction: 0.75,
-    }));
+    });
   }
 
   const mag = building.magazine ?? d.magazine;

@@ -1,0 +1,983 @@
+// Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
+// How a building comes apart. The part catalog says what a piece is; damage says how much it has taken;
+// fracture says which pieces leave. A vertex never moves on its own here. Every piece moves as one rigid
+// body, in the same flight records ships use, and lands on the ground beneath it to stay as rubble.
+//
+// Built once per building, the first time it is struck:
+//  - shard 0 is everything that stays: what is buried or always under water, floors, gun decks.
+//  - A wall face is cut into stone blocks along the courses, where the Voronoi cells of the masonry
+//    change. Each block is a closed solid. The sides hidden inside the wall show raw stone once a
+//    neighbour has gone, and a fort has a rubble core behind its facing.
+//  - Small fittings are one shard. Guns are one shard. Everything else breaks up by cell.
+//  - Touching shards are linked, and a link knows which shard rests on which. See supportScan.
+//
+// At runtime JavaScript runs only when a building is hit. It writes one flight record per released shard,
+// and BUILDING_FRACTURE_POSE_UPDATE evaluates the flights on the GPU only while something is in the air.
+// The last pose stays in the vertex buffer, so a ruin costs what its triangles cost and nothing more.
+
+import { sampleVoronoiBlockCell } from './part-assembly.js';
+import { FRACTURE_GRAVITY, FRACTURE_RECORD_FLOATS, createShipFractureState, settleFinishedFlights, writeFlight } from './ship-fracture.js';
+import { BUILDING_FRACTURE_POSE_UPDATE } from './wgsl/ship-fracture.js';
+
+export const BUILDING_SHARD_KINDS = Object.freeze({ block: 1, whole: 2, cell: 3, gun: 4 });
+const STRIDE = 8;
+// A longer normal reads as damaged in the land shader: raw stone, raw wood.
+const RAW_SURFACE = 1.6, RAW_LENGTH_SQUARED = 2;
+const TOUCH = 0.09;
+const NOT_HELD = 255;
+
+const TIMBER_KINDS = new Set([10, 15, 17]);
+const ROOF_KINDS = new Set([13, 15]);
+const STAYING_PLATE = /(^|_)(floor|plaza|terreplein|courtyard|cobble|apron|slipway|batey|earthwork|mounds?|sleepers|adarve)(_|$)/;
+const ONE_PIECE = /garita|bollard|crane|capstan|dome|cupola|lantern|farol|spire|chimney|bell_chamber|monolith|firepit|altar|trough|beacon|canoe|rollers|hearth|mooring|espadana|turret/;
+const GUN = /cannon_embrasure/;
+
+const PART_SMALL = 3.2, ISLAND_SMALL = 2.6, ONE_PIECE_LIMIT = 9;
+// Metres behind the face, by what the wall is made of. Thin walls are limited by their own thickness.
+const FACING_DEPTH = Object.freeze({ fortified: 1.05, masonry: 0.48, stucco: 0.34, timber: 0.11, roof: 0.1, opening: 0.05 });
+const CORE_DEPTH = 1.4, RAMPART_EDGE = 2.1;
+// A building past this many blocks gets bigger blocks. A palisade fort would otherwise be thirty thousand of them.
+const SHARD_BUDGET = 3200;
+
+const blockNoise = (s, salt) => { const x = Math.sin(s * 12.9898 + salt * 78.233) * 43758.5453; return x - Math.floor(x); };
+const vectorBetween = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const crossOf = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const dotOf = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const unitOf = (a) => { const n = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / n, a[1] / n, a[2] / n]; };
+
+function surfaceOf(kind, fortified) {
+  if (ROOF_KINDS.has(kind)) return { scale: 1.7, timber: TIMBER_KINDS.has(kind), depth: FACING_DEPTH.roof, span: 4 };
+  if (TIMBER_KINDS.has(kind)) return { scale: 1, timber: true, depth: FACING_DEPTH.timber, span: 3 };
+  if (kind === 14) return { scale: 1, timber: false, depth: FACING_DEPTH.opening, span: 1 };
+  if (kind === 12) return { scale: 1.15, timber: false, depth: FACING_DEPTH.stucco, span: 1 };
+  return { scale: 1, timber: false, depth: fortified ? FACING_DEPTH.fortified : FACING_DEPTH.masonry, span: 1 };
+}
+
+// Which faces there are: the emitters' unshared quads, and any other triangles one by one.
+function facesOfInstance(indices, vertices, trianglePartIds, firstTriangle, endTriangle) {
+  const faces = [];
+  for (let t = firstTriangle; t < endTriangle;) {
+    const a = indices[t * 3], b = indices[t * 3 + 1], c = indices[t * 3 + 2], part = trianglePartIds[t];
+    if (t + 1 < endTriangle && b === a + 1 && c === a + 2 && trianglePartIds[t + 1] === part
+      && indices[t * 3 + 3] === a && indices[t * 3 + 4] === c && indices[t * 3 + 5] === a + 3) {
+      faces.push({ v: [a, b, c, a + 3], part });
+      t += 2;
+    } else {
+      faces.push({ v: [a, b, c], part });
+      t += 1;
+    }
+  }
+  for (const face of faces) {
+    const min = face.min = [Infinity, Infinity, Infinity], max = face.max = [-Infinity, -Infinity, -Infinity];
+    for (const v of face.v) for (let c = 0; c < 3; c++) {
+      const value = vertices[v * STRIDE + c];
+      if (value < min[c]) min[c] = value;
+      if (value > max[c]) max[c] = value;
+    }
+    face.kind = Math.floor(vertices[face.v[0] * STRIDE + 6]);
+  }
+  return faces;
+}
+
+// Two centimetres to the unit, within 300 metres of the building, packed into 45 bits.
+const positionKey = (vertices, v, originX, originZ) => {
+  const at = v * STRIDE;
+  return (Math.round((vertices[at] - originX) * 50) + 16384) * 1073741824 + (Math.round(vertices[at + 1] * 50) + 16384) * 32768 + (Math.round((vertices[at + 2] - originZ) * 50) + 16384);
+};
+
+// One box, spar or fitting is one connected island of faces.
+function islandsOf(faces, vertices, originX, originZ) {
+  const parent = new Map();
+  const find = (x) => {
+    let r = x;
+    while (parent.get(r) !== r) r = parent.get(r);
+    while (parent.get(x) !== r) { const next = parent.get(x); parent.set(x, r); x = next; }
+    return r;
+  };
+  const keys = faces.map((face) => face.v.map((v) => positionKey(vertices, v, originX, originZ)));
+  for (const list of keys) {
+    for (const key of list) if (!parent.has(key)) parent.set(key, key);
+    for (let k = 1; k < list.length; k++) parent.set(find(list[k]), find(list[0]));
+  }
+  const islands = new Map();
+  faces.forEach((face, i) => {
+    const root = find(keys[i][0]);
+    let island = islands.get(root);
+    if (!island) islands.set(root, island = { faces: [], min: [...face.min], max: [...face.max] });
+    island.faces.push(face);
+    for (let c = 0; c < 3; c++) {
+      if (face.min[c] < island.min[c]) island.min[c] = face.min[c];
+      if (face.max[c] > island.max[c]) island.max[c] = face.max[c];
+    }
+  });
+  return [...islands.values()];
+}
+
+const spanOf = (min, max) => Math.max(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
+
+/**
+ * Prepare one building's fracture from the port's merged mesh and part catalog. Nothing in the port's own
+ * arrays changes. Returns the building's own vertices and indices, and the fracture table.
+ *   groundAt(x, z)  what the terrain or seabed is at, in the same frame as the vertices.
+ */
+export function prepareBuildingFracture(options) {
+  const steps = prepareBuildingFractureSteps(options);
+  let step = steps.next();
+  while (!step.done) step = steps.next();
+  return step.value;
+}
+
+// The same work in pieces, so a game frame can stop between them. It yields often and cheaply.
+export function* prepareBuildingFractureSteps({ vertices, indices, catalog, instanceIndex, instance, materialClass = 'masonry', groundAt = () => 0 }) {
+  const parts = catalog.parts, ownParts = parts.filter((p) => p.instanceIndex === instanceIndex && p.indexCount > 0);
+  let firstIndex = Infinity, endIndex = 0;
+  for (const part of ownParts) {
+    if (part.firstIndex < firstIndex) firstIndex = part.firstIndex;
+    if (part.firstIndex + part.indexCount > endIndex) endIndex = part.firstIndex + part.indexCount;
+  }
+  if (!ownParts.length) return null;
+  const fortified = materialClass === 'fortified-stone';
+  const cosY = Math.cos(instance.yaw ?? 0), sinY = Math.sin(instance.yaw ?? 0), originX = instance.x ?? 0, originZ = instance.z ?? 0;
+  const toLocal = (x, y, z) => { const dx = x - originX, dz = z - originZ; return [dx * cosY - dz * sinY, y, dx * sinY + dz * cosY]; };
+  const toWorld = (x, y, z) => [originX + x * cosY + z * sinY, y, originZ - x * sinY + z * cosY];
+
+  const faces = facesOfInstance(indices, vertices, catalog.trianglePartIds, firstIndex / 3, endIndex / 3);
+  const facesByPart = new Map();
+  for (const face of faces) (facesByPart.get(face.part) ?? facesByPart.set(face.part, []).get(face.part)).push(face);
+
+  const shards = [null];
+  const geometry = [{ faces: [], blocks: [], cores: [] }];
+  const shardsByKey = new Map();
+  const newShard = (kind, part, surface) => {
+    const index = shards.length;
+    shards.push({
+      index, kind, partId: part.id, partKey: part.partKey, timber: surface.timber, span: surface.span,
+      min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity],
+      volume: 0, normalSum: [0, 0, 0], links: [], above: [], below: [], side: [], anchored: false,
+    });
+    geometry.push({ faces: [], blocks: [], cores: [] });
+    return index;
+  };
+  const keyed = (key, kind, part, surface) => {
+    let s = shardsByKey.get(key);
+    if (s === undefined) shardsByKey.set(key, s = newShard(kind, part, surface));
+    return s;
+  };
+
+  const staysBecauseLow = (min, max) => max[1] < Math.max(groundAt((min[0] + max[0]) * 0.5, (min[2] + max[2]) * 0.5), -0.6) + 0.02;
+  const faceNormal = (face) => {
+    const at = face.v[0] * STRIDE;
+    return unitOf([vertices[at + 3], vertices[at + 4], vertices[at + 5]]);
+  };
+
+  // Floors rubble can land on, by one-metre cell, in the building's frame.
+  const floors = new Map(), plates = new Map();
+  const floorKey = (x, z) => (Math.floor(x) + 32768) * 65536 + (Math.floor(z) + 32768);
+  const noteLevel = (grid, x0, x1, z0, z1, top) => {
+    for (let x = Math.floor(x0); x <= Math.floor(x1); x++) for (let z = Math.floor(z0); z <= Math.floor(z1); z++) {
+      const key = floorKey(x, z), had = grid.get(key);
+      if (had) { if (!had.includes(top)) had.push(top); } else grid.set(key, [top]);
+    }
+  };
+  const faceSpan = (face) => {
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity, top = -Infinity;
+    for (const v of face.v) {
+      const c = toLocal(vertices[v * STRIDE], vertices[v * STRIDE + 1], vertices[v * STRIDE + 2]);
+      if (c[0] < x0) x0 = c[0];
+      if (c[0] > x1) x1 = c[0];
+      if (c[2] < z0) z0 = c[2];
+      if (c[2] > z1) z1 = c[2];
+      if (c[1] > top) top = c[1];
+    }
+    return [x0, x1, z0, z1, top];
+  };
+  const recordFloor = (face) => noteLevel(floors, ...faceSpan(face));
+  // A set of faces' shape in the building's own frame: on a building set at an angle, the world's box says little.
+  const localBounds = (list) => {
+    const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
+    for (const face of list) {
+      const [x0, x1, z0, z1] = faceSpan(face);
+      if (x0 < bounds.min[0]) bounds.min[0] = x0;
+      if (x1 > bounds.max[0]) bounds.max[0] = x1;
+      if (z0 < bounds.min[2]) bounds.min[2] = z0;
+      if (z1 > bounds.max[2]) bounds.max[2] = z1;
+      if (face.min[1] < bounds.min[1]) bounds.min[1] = face.min[1];
+      if (face.max[1] > bounds.max[1]) bounds.max[1] = face.max[1];
+    }
+    return bounds;
+  };
+  const stay = (face) => geometry[0].faces.push(face);
+
+  // The flat of a fort's rampart stays, with earth under it, but not its outer edge: that stands on the facing.
+  // The part beyond the core is cut away from what stays. It falls with the wall if nothing covers it, and
+  // if another plate lies on top of it, nobody will ever see it and it is simply not drawn.
+  const rampartPlate = (face, bounds, part, surface) => {
+    const x0 = bounds.min[0] + RAMPART_EDGE, x1 = bounds.max[0] - RAMPART_EDGE, z0 = bounds.min[2] + RAMPART_EDGE, z1 = bounds.max[2] - RAMPART_EDGE;
+    const [qx0, qx1, qz0, qz1, y] = faceSpan(face);
+    if (qx0 >= x0 && qx1 <= x1 && qz0 >= z0 && qz1 <= z1) { stay(face); recordFloor(face); return; }
+    const at = face.v[0] * STRIDE;
+    const rect = (ax, bx, az, bz) => [[ax, az], [bx, az], [bx, bz], [ax, bz]].map(([x, z]) => {
+      const w = toWorld(x, y, z), out = new Float32Array(STRIDE);
+      out[0] = w[0]; out[1] = y; out[2] = w[2];
+      out[3] = vertices[at + 3]; out[4] = vertices[at + 4]; out[5] = vertices[at + 5]; out[6] = vertices[at + 6]; out[7] = vertices[at + 7];
+      return out;
+    });
+    const midX = Math.max(qx0, x0), midX1 = Math.min(qx1, x1), midZ = Math.max(qz0, z0), midZ1 = Math.min(qz1, z1);
+    if (midX < midX1 && midZ < midZ1) {
+      geometry[0].blocks.push({ corners: rect(midX, midX1, midZ, midZ1), depth: 0 });
+      noteLevel(floors, midX, midX1, midZ, midZ1, y);
+    }
+    const covered = (plates.get(floorKey((qx0 + qx1) * 0.5, (qz0 + qz1) * 0.5)) ?? []).some((h) => h > y + 0.05 && h < y + 2.5);
+    if (covered) return;
+    const strips = [[qx0, Math.min(qx1, x0), qz0, qz1], [Math.max(qx0, x1), qx1, qz0, qz1], [midX, midX1, qz0, Math.min(qz1, z0)], [midX, midX1, Math.max(qz0, z1), qz1]];
+    for (const [ax, bx, az, bz] of strips) {
+      if (bx - ax < 0.05 || bz - az < 0.05) continue;
+      // Paving along the strip, each a block with a little thickness to it.
+      const along = bx - ax >= bz - az, length = along ? bx - ax : bz - az, pieces = Math.max(1, Math.round(length / (1.45 * blockScale)));
+      for (let i = 0; i < pieces; i++) {
+        const piece = along
+          ? rect(ax + (length * i) / pieces, ax + (length * (i + 1)) / pieces, az, bz)
+          : rect(ax, bx, az + (length * i) / pieces, az + (length * (i + 1)) / pieces);
+        geometry[newShard(BUILDING_SHARD_KINDS.block, part, surface)].blocks.push({ corners: piece, depth: 0.24 });
+      }
+    }
+  };
+
+  // A face too small to cut goes with the other small faces in its cell. Those break off together.
+  const cellShard = (face, partIndex, part, surface) => {
+    const x = (face.min[0] + face.max[0]) * 0.5, y = (face.min[1] + face.max[1]) * 0.5, z = (face.min[2] + face.max[2]) * 0.5;
+    const [lx, ly, lz] = toLocal(x, y, z), k = 1 / (surface.scale * blockScale);
+    const cell = sampleVoronoiBlockCell(lx * k, ly * k, lz * k, surface.timber);
+    const number = (Math.round(cell.sx * 10) + 8192) * 268435456 + (Math.round(cell.sy * 10) + 8192) * 16384 + (Math.round(cell.sz * 10) + 8192);
+    return keyed(`cell:${partIndex}:${number}`, BUILDING_SHARD_KINDS.cell, part, surface);
+  };
+
+  // Cut one wall quad into blocks. Courses are level on an upright wall, and each course breaks where the
+  // Voronoi cell of the masonry changes, so joints do not line up from one course to the next.
+  const cutQuad = (face, part, surface, thickness) => {
+    const [a, b, c, d] = face.v, A = a * STRIDE, B = b * STRIDE, C = c * STRIDE, D = d * STRIDE;
+    const ux = vertices[B] - vertices[A], uy = vertices[B + 1] - vertices[A + 1], uz = vertices[B + 2] - vertices[A + 2];
+    const vx = vertices[D] - vertices[A], vy = vertices[D + 1] - vertices[A + 1], vz = vertices[D + 2] - vertices[A + 2];
+    const lengthU = Math.hypot(ux, uy, uz), lengthV = Math.hypot(vx, vy, vz), n = faceNormal(face);
+    const coursesOnV = Math.abs(n[1]) < 0.7 ? Math.abs(vy) >= Math.abs(uy) : lengthV <= lengthU;
+    const size = surface.scale * blockScale;
+    const courseHeight = (surface.timber ? 0.65 : 0.9) * size, blockLength = (surface.timber ? 1.8 : 1.45) * size;
+    const across = coursesOnV ? lengthU : lengthV, along = coursesOnV ? lengthV : lengthU;
+    const courses = Math.max(1, Math.round(along / courseHeight));
+    const corner = (across01, along01) => {
+      const u = coursesOnV ? across01 : along01, v = coursesOnV ? along01 : across01, out = new Float32Array(STRIDE);
+      const w00 = (1 - u) * (1 - v), w10 = u * (1 - v), w11 = u * v, w01 = (1 - u) * v;
+      for (let i = 0; i < STRIDE; i++) out[i] = w00 * vertices[A + i] + w10 * vertices[B + i] + w11 * vertices[C + i] + w01 * vertices[D + i];
+      const length = Math.hypot(out[3], out[4], out[5]) || 1;
+      out[3] /= length; out[4] /= length; out[5] /= length;
+      return out;
+    };
+    const step = Math.max(1, Math.ceil(across / (blockLength * 0.34))), minimum = Math.min(0.5 * blockLength, across), k = 1 / size;
+    const inner = Math.min(surface.depth, thickness > 0 ? thickness * 0.48 : surface.depth);
+    for (let row = 0; row < courses; row++) {
+      const v0 = row / courses, v1 = (row + 1) / courses, cuts = [0], mid = (v0 + v1) * 0.5;
+      let last = null;
+      for (let i = 0; i < step; i++) {
+        const t = (i + 0.5) / step, u = coursesOnV ? t : mid, v = coursesOnV ? mid : t;
+        // A wall is near enough flat that its corners' average is the point on it.
+        const x = vertices[A] + ux * u + vx * v, y = vertices[A + 1] + uy * u + vy * v, z = vertices[A + 2] + uz * u + vz * v;
+        const dx = x - originX, dz = z - originZ;
+        const cell = sampleVoronoiBlockCell((dx * cosY - dz * sinY) * k, y * k, (dx * sinY + dz * cosY) * k, surface.timber);
+        const id = cell.sx * 7 + cell.sy * 131 + cell.sz * 2053;
+        if (last !== null && id !== last) {
+          const at = i / step;
+          if ((at - cuts[cuts.length - 1]) * across >= minimum && (1 - at) * across >= minimum) cuts.push(at);
+        }
+        last = id;
+      }
+      cuts.push(1);
+      for (let i = 0; i + 1 < cuts.length; i++) {
+        const q00 = corner(cuts[i], v0), q10 = corner(cuts[i + 1], v0), q11 = corner(cuts[i + 1], v1), q01 = corner(cuts[i], v1);
+        // Keep the source quad's turning order, so a wall's faces wind as they did before they were cut.
+        const corners = coursesOnV ? [q00, q10, q11, q01] : [q00, q01, q11, q10];
+        const top = Math.max(q00[1], q10[1], q11[1], q01[1]), low = Math.min(q00[1], q10[1], q11[1], q01[1]);
+        const midX = (q00[0] + q11[0]) * 0.5, midZ = (q00[2] + q11[2]) * 0.5;
+        if (staysBecauseLow([midX, low, midZ], [midX, top, midZ])) {
+          geometry[0].blocks.push({ corners, depth: 0 });
+          continue;
+        }
+        const s = newShard(BUILDING_SHARD_KINDS.block, part, surface);
+        geometry[s].blocks.push({ corners, depth: inner * (0.8 + 0.4 * blockNoise(s, 9)) });
+      }
+    }
+  };
+
+  // How large to cut them: wall area over the area of a block, against the budget.
+  let blocksAtFullSize = 0;
+  for (const face of faces) {
+    if (face.v.length !== 4 || face.kind === 18) continue;
+    const at = face.v[0] * STRIDE, up = face.v[1] * STRIDE, across = face.v[3] * STRIDE, surface = surfaceOf(face.kind, fortified);
+    const area = Math.hypot(vertices[up] - vertices[at], vertices[up + 1] - vertices[at + 1], vertices[up + 2] - vertices[at + 2]) * Math.hypot(vertices[across] - vertices[at], vertices[across + 1] - vertices[at + 1], vertices[across + 2] - vertices[at + 2]);
+    if (faceNormal(face)[1] > 0.7 && area > 4 && !ROOF_KINDS.has(face.kind)) continue;
+    blocksAtFullSize += area / ((surface.timber ? 1.17 : 1.3) * surface.scale * surface.scale);
+  }
+  const blockScale = Math.max(1, Math.sqrt(blocksAtFullSize / SHARD_BUDGET));
+  yield 'faces';
+
+  if (fortified) {
+    for (const face of faces) if (face.v.length === 4 && face.kind !== 18 && !ROOF_KINDS.has(face.kind) && Math.abs(faceNormal(face)[1]) > 0.7) {
+      const span = faceSpan(face);
+      if (span[1] - span[0] > 1 && span[3] - span[2] > 1) noteLevel(plates, ...span);
+    }
+  }
+  for (const [partIndex, partFaces] of facesByPart) {
+    yield 'part';
+    const part = parts[partIndex];
+    const partBounds = localBounds(partFaces), partMin = partBounds.min, partMax = partBounds.max;
+    const middle = toWorld((partMin[0] + partMax[0]) * 0.5, 0, (partMin[2] + partMax[2]) * 0.5);
+    const lowest = Math.max(groundAt(middle[0], middle[2]), -0.6);
+    const partRooted = partMin[1] < lowest - 0.5, partKey = String(part.partKey ?? '');
+    const partSpan = spanOf(partMin, partMax), mostly = surfaceOf(partFaces[0].kind, fortified);
+    if (GUN.test(partKey)) {
+      const s = keyed(`gun:${partIndex}`, BUILDING_SHARD_KINDS.gun, part, { ...mostly, span: 1 });
+      for (const face of partFaces) geometry[s].faces.push(face);
+      continue;
+    }
+    if (!partRooted && (partSpan <= PART_SMALL || (ONE_PIECE.test(partKey) && partSpan <= ONE_PIECE_LIMIT))) {
+      const s = keyed(`whole:${partIndex}`, BUILDING_SHARD_KINDS.whole, part, mostly);
+      for (const face of partFaces) geometry[s].faces.push(face);
+      continue;
+    }
+    for (const [islandIndex, island] of islandsOf(partFaces, vertices, originX, originZ).entries()) {
+      const islandGround = Math.max(groundAt((island.min[0] + island.max[0]) * 0.5, (island.min[2] + island.max[2]) * 0.5), -0.6);
+      const bounds = localBounds(island.faces);
+      if (island.min[1] >= islandGround - 0.5 && spanOf(bounds.min, bounds.max) <= ISLAND_SMALL) {
+        const s = keyed(`island:${partIndex}:${islandIndex}`, BUILDING_SHARD_KINDS.whole, part, surfaceOf(island.faces[0].kind, fortified));
+        for (const face of island.faces) geometry[s].faces.push(face);
+        continue;
+      }
+      const spanX = bounds.max[0] - bounds.min[0], spanY = bounds.max[1] - bounds.min[1], spanZ = bounds.max[2] - bounds.min[2];
+      const platform = Math.min(spanX, spanZ) > 4;
+      // A post or a beam has no wall to cut. It breaks into lengths by cell.
+      const spar = spanX + spanY + spanZ - Math.max(spanX, spanY, spanZ) - Math.min(spanX, spanY, spanZ) < 0.9;
+      for (const face of island.faces) {
+        const surface = surfaceOf(face.kind, fortified);
+        if (staysBecauseLow(face.min, face.max)) { stay(face); continue; }
+        const n = faceNormal(face), horizontal = Math.abs(n[1]) > 0.7;
+        if (fortified && !horizontal && platform && face.v.length === 4) geometry[0].cores.push({ face });
+        const longest = Math.max(face.max[0] - face.min[0], face.max[1] - face.min[1], face.max[2] - face.min[2]);
+        // A paved floor at ground level stays, and so does the flat of a fort's rampart, which has earth under it.
+        if (horizontal && !ROOF_KINDS.has(face.kind) && !surface.timber
+          && (fortified ? platform || face.kind === 16 : (face.kind === 16 || STAYING_PLATE.test(partKey) || platform) && face.max[1] <= islandGround + 1.6)) {
+          if (fortified && platform && face.v.length === 4) rampartPlate(face, bounds, part, surface);
+          else { stay(face); recordFloor(face); }
+          continue;
+        }
+        // Any other floor comes down in big slabs that hang from each other, held by the walls around them.
+        if (horizontal && platform && !ROOF_KINDS.has(face.kind)) {
+          geometry[cellShard(face, partIndex, part, { ...surface, scale: Math.max(surface.scale, 3.2), span: 4 })].faces.push(face);
+          continue;
+        }
+        // A post driven into the ground stays in it, whatever goes from on top of it.
+        if (face.min[1] < islandGround - 0.5 && (spar || face.v.length !== 4)) { stay(face); continue; }
+        if (spar) {
+          geometry[cellShard(face, partIndex, part, surface)].faces.push(face);
+          continue;
+        }
+        const big = longest >= 0.8 * (surface.timber ? 1.8 : 1.45) * surface.scale * blockScale;
+        if (face.v.length === 4 && big && face.kind !== 18) {
+          // How thick is this wall, along its own normal? An island's span there, when it is a plain box.
+          const localNormal = [n[0] * cosY - n[2] * sinY, n[1], n[0] * sinY + n[2] * cosY];
+          const thickness = Math.abs(localNormal[0]) * spanX + Math.abs(localNormal[1]) * spanY + Math.abs(localNormal[2]) * spanZ;
+          cutQuad(face, part, surface, thickness);
+          continue;
+        }
+        if (face.min[1] < islandGround - 0.5) { stay(face); continue; }
+        const s = cellShard(face, partIndex, part, surface);
+        geometry[s].faces.push(face);
+      }
+    }
+  }
+
+  // Lay the mesh out shard by shard, so each owns a run of vertices.
+  let vertexRoom = 0, indexRoom = 0;
+  for (const { faces: ownFaces, blocks, cores } of geometry) {
+    for (const face of ownFaces) { vertexRoom += face.v.length; indexRoom += face.v.length === 4 ? 6 : 3; }
+    for (const { depth } of blocks) { vertexRoom += depth > 0 ? 24 : 4; indexRoom += depth > 0 ? 36 : 6; }
+    vertexRoom += cores.length * 4;
+    indexRoom += cores.length * 6;
+  }
+  const out = new Float32Array(vertexRoom * STRIDE), outIndices = new Uint32Array(indexRoom), vertexShards = new Uint32Array(vertexRoom);
+  let vertexCount = 0, indexCount = 0;
+  const pushVertex = (s, x, y, z, nx, ny, nz, kind, shade) => {
+    const at = vertexCount * STRIDE;
+    out[at] = x; out[at + 1] = y; out[at + 2] = z; out[at + 3] = nx; out[at + 4] = ny; out[at + 5] = nz; out[at + 6] = kind; out[at + 7] = shade;
+    vertexShards[vertexCount] = s;
+    return vertexCount++;
+  };
+  const pushQuadIndices = (v) => {
+    outIndices[indexCount] = v; outIndices[indexCount + 1] = v + 1; outIndices[indexCount + 2] = v + 2;
+    outIndices[indexCount + 3] = v; outIndices[indexCount + 4] = v + 2; outIndices[indexCount + 5] = v + 3;
+    indexCount += 6;
+  };
+  const noteBounds = (shard, x, y, z) => {
+    if (x < shard.min[0]) shard.min[0] = x;
+    if (y < shard.min[1]) shard.min[1] = y;
+    if (z < shard.min[2]) shard.min[2] = z;
+    if (x > shard.max[0]) shard.max[0] = x;
+    if (y > shard.max[1]) shard.max[1] = y;
+    if (z > shard.max[2]) shard.max[2] = z;
+  };
+  const emitQuad = (s, p, nx, ny, nz, kind, shade) => {
+    const v = pushVertex(s, p[0][0], p[0][1], p[0][2], nx, ny, nz, kind, shade);
+    pushVertex(s, p[1][0], p[1][1], p[1][2], nx, ny, nz, kind, shade);
+    pushVertex(s, p[2][0], p[2][1], p[2][2], nx, ny, nz, kind, shade);
+    pushVertex(s, p[3][0], p[3][1], p[3][2], nx, ny, nz, kind, shade);
+    pushQuadIndices(v);
+    if (s) for (let i = 0; i < 4; i++) noteBounds(shards[s], p[i][0], p[i][1], p[i][2]);
+  };
+  for (let s = 0; s < geometry.length; s++) {
+    if (s % 256 === 0) yield 'mesh';
+    const shard = shards[s], { faces: ownFaces, blocks, cores } = geometry[s];
+    const remap = new Map();
+    for (const face of ownFaces) {
+      const ids = face.v.map((v) => {
+        let mapped = remap.get(v);
+        if (mapped === undefined) {
+          const at = v * STRIDE;
+          mapped = pushVertex(s, vertices[at], vertices[at + 1], vertices[at + 2], vertices[at + 3], vertices[at + 4], vertices[at + 5], vertices[at + 6], vertices[at + 7]);
+          remap.set(v, mapped);
+          if (shard) noteBounds(shard, vertices[at], vertices[at + 1], vertices[at + 2]);
+        }
+        return mapped;
+      });
+      if (ids.length === 4) { outIndices.set([ids[0], ids[1], ids[2], ids[0], ids[2], ids[3]], indexCount); indexCount += 6; }
+      else { outIndices.set(ids, indexCount); indexCount += 3; }
+      if (shard) {
+        const at = face.v[0] * STRIDE;
+        const size = (face.max[0] - face.min[0]) + (face.max[1] - face.min[1]) + (face.max[2] - face.min[2]);
+        shard.normalSum[0] += vertices[at + 3] * size;
+        shard.normalSum[1] += vertices[at + 4] * size;
+        shard.normalSum[2] += vertices[at + 5] * size;
+      }
+    }
+    for (const { corners: front, depth } of blocks) {
+      const rawKind = front[0][6] >= 19.5 ? 11.125 : front[0][6];
+      const v = pushVertex(s, front[0][0], front[0][1], front[0][2], front[0][3], front[0][4], front[0][5], front[0][6], front[0][7]);
+      for (let i = 1; i < 4; i++) pushVertex(s, front[i][0], front[i][1], front[i][2], front[i][3], front[i][4], front[i][5], front[i][6], front[i][7]);
+      pushQuadIndices(v);
+      if (shard) for (const q of front) noteBounds(shard, q[0], q[1], q[2]);
+      if (depth <= 0) continue;
+      const back = front.map((q) => [q[0] - q[3] * depth, q[1] - q[4] * depth, q[2] - q[5] * depth]);
+      const n = unitOf([front[0][3] + front[2][3], front[0][4] + front[2][4], front[0][5] + front[2][5]]);
+      const shade = Math.min(front[0][7], front[1][7], front[2][7], front[3][7]) * 0.82;
+      emitQuad(s, [back[3], back[2], back[1], back[0]], -n[0] * RAW_SURFACE, -n[1] * RAW_SURFACE, -n[2] * RAW_SURFACE, rawKind, shade);
+      const midX = (front[0][0] + front[2][0]) * 0.5, midY = (front[0][1] + front[2][1]) * 0.5, midZ = (front[0][2] + front[2][2]) * 0.5;
+      for (let i = 0; i < 4; i++) {
+        const j = (i + 1) % 4, ax = front[i], bx = front[j];
+        let side = unitOf(crossOf([bx[0] - ax[0], bx[1] - ax[1], bx[2] - ax[2]], n));
+        if (side[0] * (ax[0] - midX) + side[1] * (ax[1] - midY) + side[2] * (ax[2] - midZ) < 0) side = [-side[0], -side[1], -side[2]];
+        emitQuad(s, [[ax[0], ax[1], ax[2]], [bx[0], bx[1], bx[2]], back[j], back[i]], side[0] * RAW_SURFACE, side[1] * RAW_SURFACE, side[2] * RAW_SURFACE, rawKind, shade);
+      }
+      if (shard) {
+        shard.volume += Math.hypot(front[1][0] - front[0][0], front[1][1] - front[0][1], front[1][2] - front[0][2]) * Math.hypot(front[3][0] - front[0][0], front[3][1] - front[0][1], front[3][2] - front[0][2]) * depth;
+        shard.normalSum[0] += n[0]; shard.normalSum[1] += n[1]; shard.normalSum[2] += n[2];
+      }
+    }
+    // A fort's facing stands in front of rubble and earth. That is what a breach shows. The surface is rough
+    // but whole: two plates that share a corner push it back by the same amount.
+    for (const { face } of cores) {
+      const p = face.v.map((v) => {
+        const at = v * STRIDE, x = vertices[at], y = vertices[at + 1], z = vertices[at + 2];
+        const depth = CORE_DEPTH + 0.75 * blockNoise(Math.round(x * 2) * 3.1 + Math.round(y * 2) * 7.7 + Math.round(z * 2) * 13.3, 7);
+        return [x - vertices[at + 3] * depth, y - vertices[at + 4] * depth, z - vertices[at + 5] * depth];
+      });
+      const n = faceNormal(face);
+      emitQuad(0, p, n[0] * RAW_SURFACE, n[1] * RAW_SURFACE, n[2] * RAW_SURFACE, 16.125, 0.46);
+    }
+  }
+  yield 'mesh';
+
+  // What each shard is, in the building's own frame.
+  for (let s = 1; s < shards.length; s++) {
+    const shard = shards[s];
+    const a = toLocal(shard.min[0], shard.min[1], shard.min[2]), b = toLocal(shard.max[0], shard.min[1], shard.min[2]);
+    const c = toLocal(shard.min[0], shard.max[1], shard.max[2]), d = toLocal(shard.max[0], shard.max[1], shard.max[2]);
+    shard.localMin = [Math.min(a[0], b[0], c[0], d[0]), shard.min[1], Math.min(a[2], b[2], c[2], d[2])];
+    shard.localMax = [Math.max(a[0], b[0], c[0], d[0]), shard.max[1], Math.max(a[2], b[2], c[2], d[2])];
+    shard.centroid = [(shard.min[0] + shard.max[0]) * 0.5, (shard.min[1] + shard.max[1]) * 0.5, (shard.min[2] + shard.max[2]) * 0.5];
+    if (!shard.volume) shard.volume = Math.max(0.02, (shard.max[0] - shard.min[0]) * (shard.max[1] - shard.min[1]) * (shard.max[2] - shard.min[2]) * 0.4);
+    shard.normal = unitOf(shard.normalSum);
+    delete shard.normalSum;
+  }
+
+  yield* linkShards(shards);
+  // The highest floor at or below a height: a storey can stand over the place a stone comes down.
+  const floorAt = (x, z, below = Infinity) => {
+    const [lx, , lz] = toLocal(x, 0, z), list = floors.get(floorKey(lx, lz));
+    let best = -Infinity;
+    if (list) for (const y of list) if (y <= below && y > best) best = y;
+    return best;
+  };
+  anchorShards(shards, groundAt, floorAt);
+  yield 'anchors';
+
+  const rest = out.slice(0, vertexCount * STRIDE);
+  // What was inside the wall is not drawn while the wall stands: its triangles begin as points, and open
+  // when the pose pass first reaches a shard that a break has exposed. So the tiler pays for none of them.
+  const initial = rest.slice();
+  for (let v = 0; v < vertexCount; v++) {
+    const s = vertexShards[v];
+    if (!s) continue;
+    const at = v * STRIDE;
+    if (rest[at + 3] * rest[at + 3] + rest[at + 4] * rest[at + 4] + rest[at + 5] * rest[at + 5] < RAW_LENGTH_SQUARED) continue;
+    const c = shards[s].centroid;
+    initial[at] = c[0]; initial[at + 1] = c[1]; initial[at + 2] = c[2];
+  }
+  const fracture = Object.freeze({
+    instanceIndex, prefabId: instance.prefabId ?? null,
+    firstIndex, indexCount: endIndex - firstIndex, blockScale,
+    scale: Object.freeze([1, 1, 1]),
+    toughness: fortified ? 1.4 : materialClass === 'timber' ? 0.8 : 1,
+    shardCount: shards.length, vertexShards: vertexShards.slice(0, vertexCount),
+    shards: Object.freeze(shards),
+    strikable: Object.freeze(shards.filter(Boolean).map((s) => s.index)),
+    guns: Object.freeze(shards.filter((s) => s?.kind === BUILDING_SHARD_KINDS.gun).map((s) => s.index)),
+    toLocal, toWorld, groundAt, floorAt,
+  });
+  return { vertices: rest, initial, indices: outIndices.slice(0, indexCount), fracture };
+}
+
+// Touching shards are linked. A link says whether one rests on the other, or only stands beside it.
+function* linkShards(shards) {
+  const cell = 2.5, grid = new Map();
+  const key = (x, y, z) => (x + 1024) * 4398046511104 + (y + 1024) * 2097152 + (z + 1024);
+  for (let s = 1; s < shards.length; s++) {
+    const shard = shards[s], lo = shard.localMin, hi = shard.localMax;
+    const x0 = Math.floor((lo[0] - TOUCH) / cell), x1 = Math.floor((hi[0] + TOUCH) / cell);
+    const y0 = Math.floor((lo[1] - TOUCH) / cell), y1 = Math.floor((hi[1] + TOUCH) / cell);
+    const z0 = Math.floor((lo[2] - TOUCH) / cell), z1 = Math.floor((hi[2] + TOUCH) / cell);
+    for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) {
+      const k = key(x, y, z), list = grid.get(k);
+      if (list) list.push(s); else grid.set(k, [s]);
+    }
+    if (s % 512 === 0) yield 'links';
+  }
+  const seen = new Set();
+  let visited = 0;
+  for (const list of grid.values()) {
+    if (++visited % 128 === 0) yield 'links';
+    for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+      const lowIndex = Math.min(list[i], list[j]), highIndex = Math.max(list[i], list[j]), pair = lowIndex * 1048576 + highIndex;
+      if (seen.has(pair)) continue;
+      seen.add(pair);
+      const a = shards[lowIndex], b = shards[highIndex];
+      const overX = Math.min(a.localMax[0], b.localMax[0]) - Math.max(a.localMin[0], b.localMin[0]);
+      const overY = Math.min(a.localMax[1], b.localMax[1]) - Math.max(a.localMin[1], b.localMin[1]);
+      const overZ = Math.min(a.localMax[2], b.localMax[2]) - Math.max(a.localMin[2], b.localMin[2]);
+      if (overX < -TOUCH || overY < -TOUCH || overZ < -TOUCH) continue;
+      a.links.push(b.index);
+      b.links.push(a.index);
+      // Sharing a footprint and clear of each other in height: one rests on the other.
+      const sharedFootprint = Math.max(overX, overZ) > 0.12 && Math.min(overX, overZ) > -TOUCH;
+      const heightA = a.localMax[1] - a.localMin[1], heightB = b.localMax[1] - b.localMin[1];
+      const stacked = sharedFootprint && overY < Math.max(TOUCH, 0.3 * Math.min(heightA, heightB));
+      if (stacked && a.centroid[1] > b.centroid[1]) { a.below.push(b.index); b.above.push(a.index); }
+      else if (stacked && b.centroid[1] > a.centroid[1]) { b.below.push(a.index); a.above.push(b.index); }
+      else if (overY > 0.2 * Math.min(heightA, heightB)) { a.side.push(b.index); b.side.push(a.index); }
+    }
+  }
+}
+
+/**
+ * What holds. Support climbs from what is anchored, up through whatever rests on what. A stone can also
+ * hang from the stone beside it, for its span and no further, and the stone on top of that one is a step
+ * better off. So a small hole stands as an arch, and a wide breach brings down a triangle of wall above it.
+ * Returns how far each shard hangs from its support, NOT_HELD if nothing holds it.
+ */
+export function supportScan(fracture, broken) {
+  const shards = fracture.shards, hang = new Uint8Array(shards.length).fill(NOT_HELD), stack = [];
+  for (let s = 1; s < shards.length; s++) if (!broken[s] && shards[s].anchored) { hang[s] = 0; stack.push(s); }
+  while (stack.length) {
+    const s = stack.pop(), reach = hang[s], shard = shards[s];
+    const onTop = reach > 0 ? reach - 1 : 0;
+    for (const t of shard.above) if (!broken[t] && onTop < hang[t]) { hang[t] = onTop; stack.push(t); }
+    const beside = reach + 1;
+    for (const t of shard.side) if (!broken[t] && beside <= shards[t].span && beside < hang[t]) { hang[t] = beside; stack.push(t); }
+  }
+  return hang;
+}
+
+function anchorShards(shards, groundAt, floorAt) {
+  for (let s = 1; s < shards.length; s++) {
+    const shard = shards[s], x = shard.centroid[0], z = shard.centroid[2];
+    const ground = Math.max(groundAt(x, z), -0.6), lowest = shard.min[1];
+    if (lowest <= ground + 0.4) { shard.anchored = true; continue; }
+    if (!shard.below.length && lowest - floorAt(x, z, lowest + 0.6) < 0.6) shard.anchored = true;
+  }
+  // An intact building stands, whatever the geometry says. Whatever nothing holds yet stands on something too
+  // fine to see, so its lowest course is fixed there, and the rest of it still depends on that course.
+  const broken = new Uint8Array(shards.length);
+  for (let pass = 0; pass < 6; pass++) {
+    const hang = supportScan({ shards }, broken), seen = new Uint8Array(shards.length);
+    let loose = false;
+    for (let s = 1; s < shards.length; s++) {
+      if (hang[s] !== NOT_HELD || seen[s]) continue;
+      loose = true;
+      const stack = [s], component = [];
+      seen[s] = 1;
+      while (stack.length) {
+        const shard = shards[stack.pop()];
+        component.push(shard);
+        for (const n of shard.links) if (!seen[n] && hang[n] === NOT_HELD) { seen[n] = 1; stack.push(n); }
+      }
+      const base = Math.min(...component.map((shard) => shard.min[1]));
+      for (const shard of component) if (shard.min[1] <= base + 0.5) shard.anchored = true;
+    }
+    if (!loose) return;
+  }
+  const hang = supportScan({ shards }, broken);
+  for (let s = 1; s < shards.length; s++) if (hang[s] === NOT_HELD) shards[s].anchored = true;
+}
+
+export function createBuildingFractureState(fracture) {
+  const state = createShipFractureState(fracture);
+  state.scorch = new Float32Array(fracture.shardCount);
+  state.scorchDirty = false;
+  state.heap = new Map();
+  return state;
+}
+
+export function buildingFractureStateOf(damage, fracture) {
+  if (!damage || !fracture) return null;
+  if (damage.fracture?.fracture !== fracture) damage.fracture = createBuildingFractureState(fracture);
+  return damage.fracture;
+}
+
+function breakBuildingShard(state, s) {
+  if (state.broken[s]) return false;
+  state.broken[s] = 1;
+  state.brokenCount++;
+  return true;
+}
+
+// Rubble lands on rubble. The heap is coarse and only ever grows, and it is read only when a block lets go.
+const HEAP_CELL = 1.5, HEAP_REPOSE = 0.55;
+const heapKey = (x, z) => (Math.floor(x / HEAP_CELL) + 32768) * 65536 + (Math.floor(z / HEAP_CELL) + 32768);
+
+function rollDownHeap(state, x, z) {
+  for (let step = 0; step < 8; step++) {
+    const here = state.heap.get(heapKey(x, z)) ?? 0;
+    let bestX = x, bestZ = z, best = here - HEAP_REPOSE;
+    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+      if (!dx && !dz) continue;
+      const nx = x + dx * HEAP_CELL, nz = z + dz * HEAP_CELL, there = state.heap.get(heapKey(nx, nz)) ?? 0;
+      if (there < best) { best = there; bestX = nx; bestZ = nz; }
+    }
+    if (bestX === x && bestZ === z) break;
+    x = bestX; z = bestZ;
+  }
+  return [x, z];
+}
+
+function restHeight(fracture, shard, axis, angle) {
+  const c = Math.cos(angle), s = Math.sin(angle), pivot = shard.centroid, lo = shard.localMin, hi = shard.localMax;
+  let lowest = 0;
+  for (let i = 0; i < 8; i++) {
+    const w = fracture.toWorld(i & 1 ? hi[0] : lo[0], i & 2 ? hi[1] : lo[1], i & 4 ? hi[2] : lo[2]);
+    const r = [w[0] - pivot[0], w[1] - pivot[1], w[2] - pivot[2]], k = dotOf(axis, r), m = crossOf(axis, r);
+    const y = r[1] * c + m[1] * s + axis[1] * k * (1 - c);
+    if (y < lowest) lowest = y;
+  }
+  return -lowest;
+}
+
+// A shard that has lost a neighbour shows the faces that were hidden against it. Any scorch above zero makes
+// the pose pass draw them, so a touch of it is enough.
+function exposeNeighbours(state, shard) {
+  for (const n of shard.links) {
+    if (state.scorch[n] > 0) continue;
+    state.scorch[n] = 1e-3;
+    state.scorchDirty = true;
+  }
+}
+
+// A piece leaves. It lands on whatever is beneath the place it comes down, lying more or less flat, and
+// it stays there. Timber over water floats a while instead, then is gone.
+function releaseShard(state, s, now, { direction = null, power = 1, up = 1, drop = false, delay = 0 } = {}) {
+  const fracture = state.fracture, shard = fracture.shards[s];
+  if (!shard || !breakBuildingShard(state, s)) return false;
+  exposeNeighbours(state, shard);
+  const a = blockNoise(s, 1), b = blockNoise(s, 2), c = blockNoise(s, 3);
+  const out = direction ?? shard.normal, pivot = shard.centroid;
+  const velocity = drop
+    ? [out[0] * (0.2 + 0.7 * a) + (b - 0.5) * 0.5, 0, out[2] * (0.2 + 0.7 * a) + (c - 0.5) * 0.5]
+    : [out[0] * (0.5 + 1.8 * a) * power + (b - 0.5) * 1.4, (0.3 + 1.6 * b) * up * power, out[2] * (0.5 + 1.8 * a) * power + (c - 0.5) * 1.4];
+  // Turn about a level axis across the way it goes. A block off a wall lands on its broad face, a quarter or
+  // three quarters of a turn over. A slab of roof or floor stays about as flat as it was. All a little off true.
+  const across = unitOf(crossOf([0, 1, 0], [out[0] || 1e-3, 0, out[2]])), tilt = (a - 0.5) * 0.32;
+  const axis = unitOf([across[0] + tilt * 0.5, tilt, across[2] - tilt * 0.5]);
+  const flat = Math.abs(shard.normal[1]) > 0.5, off = (c - 0.5) * 0.7;
+  const angle = (flat ? (b > 0.72 ? Math.PI : 0) : (b > 0.72 ? 1.5 * Math.PI : 0.5 * Math.PI)) + off;
+  const half = restHeight(fracture, shard, axis, angle);
+  const bury = Math.min(0.05, half * 0.15);
+  // It comes down about here. Then it rolls off whatever heap is already there, down to the angle of repose.
+  let settle = 0.2, landX = pivot[0], landZ = pivot[2], restY = pivot[1], water = false;
+  for (let i = 0; i < 3; i++) {
+    if (i === 2) [landX, landZ] = rollDownHeap(state, landX, landZ);
+    const ground = Math.max(fracture.groundAt(landX, landZ), fracture.floorAt(landX, landZ, pivot[1]));
+    water = shard.timber && ground < -0.2;
+    const heap = water ? 0 : state.heap.get(heapKey(landX, landZ)) ?? 0;
+    // It never lands higher than it started.
+    restY = Math.min(pivot[1], (water ? 0.02 : ground + heap) + half - bury);
+    settle = Math.max(0.16, (velocity[1] + Math.sqrt(velocity[1] * velocity[1] + 2 * FRACTURE_GRAVITY * (pivot[1] - restY))) / FRACTURE_GRAVITY);
+    if (i < 2) {
+      landX = pivot[0] + velocity[0] * settle;
+      landZ = pivot[2] + velocity[2] * settle;
+    }
+  }
+  velocity[0] = (landX - pivot[0]) / settle;
+  velocity[2] = (landZ - pivot[2]) / settle;
+  // The clock takes it from here to exactly its resting height. The record has no bounce to carry.
+  const fall = pivot[1] + velocity[1] * settle - 0.5 * FRACTURE_GRAVITY * settle * settle - restY;
+  const gravity = 1 + (2 * fall) / (FRACTURE_GRAVITY * settle * settle);
+  if (!water) {
+    const key = heapKey(landX, landZ);
+    state.heap.set(key, (state.heap.get(key) ?? 0) + (shard.volume * 1.4) / (HEAP_CELL * HEAP_CELL));
+  }
+  const rate = angle / settle;
+  writeFlight(state, s, {
+    pivot, velocity, spin: axis.map((v) => v * rate), gravity, settle, delay,
+    keep: !water, sink: water ? 0.05 : 0, linger: water ? 25 + 25 * a : 0,
+  }, now);
+  return true;
+}
+
+function releaseUnsupportedBlocks(state, now) {
+  const fracture = state.fracture, hang = supportScan(fracture, state.broken);
+  let released = 0;
+  for (const s of fracture.strikable) {
+    if (state.broken[s] || hang[s] !== NOT_HELD) continue;
+    if (releaseShard(state, s, now, { drop: true, delay: 0.04 + 0.5 * blockNoise(s, 4) })) released++;
+  }
+  return released;
+}
+
+function distanceMetres(shard, local) {
+  let sum = 0;
+  for (let c = 0; c < 3; c++) {
+    const d = local[c] < shard.localMin[c] ? shard.localMin[c] - local[c] : local[c] > shard.localMax[c] ? local[c] - shard.localMax[c] : 0;
+    // A shock travels up a wall more easily than down it.
+    sum += c === 1 ? (d * (local[1] < shard.localMin[1] ? 0.7 : 1.1)) ** 2 : d * d;
+  }
+  return Math.sqrt(sum);
+}
+
+function strikeBuilding(state, point, normal, { radius, amount, power, now, drop = false, radial = false, above = -Infinity }) {
+  const { shards, strikable, toLocal } = state.fracture, local = toLocal(point[0], point[1], point[2]);
+  let broke = 0;
+  for (const s of strikable) {
+    if (state.broken[s]) continue;
+    const shard = shards[s];
+    if (shard.max[1] < above) continue;
+    const d = distanceMetres(shard, local);
+    if (d >= radius) continue;
+    const fall = 1 - (d / radius) ** 2, burn = amount * fall;
+    state.wear[s] += burn;
+    state.scorch[s] = Math.min(0.5, state.scorch[s] + burn * 0.35);
+    state.scorchDirty = true;
+    if (state.wear[s] < 1) continue;
+    const away = radial ? unitOf(vectorBetween(shard.centroid, point)) : dotOf(shard.normal, normal) > -0.25 ? shard.normal : normal;
+    if (releaseShard(state, s, now, { direction: away, power, drop, delay: drop ? 0.03 + 0.35 * blockNoise(s, 8) : 0 })) broke++;
+  }
+  return broke;
+}
+
+// Knocked off its trucks, and left where it lands.
+function dismountBuildingGun(state, point, side, now) {
+  const { shards, guns } = state.fracture;
+  let best = -1, bestDistance = 6;
+  for (const s of guns) {
+    if (state.broken[s]) continue;
+    const c = shards[s].centroid, d = Math.hypot(c[0] - point[0], c[1] - point[1], c[2] - point[2]);
+    if (d < bestDistance) { bestDistance = d; best = s; }
+  }
+  if (best < 0 || !breakBuildingShard(state, best)) return 0;
+  const slew = blockNoise(best, 6) >= 0.5 ? 1 : -1, shard = shards[best];
+  writeFlight(state, best, { pivot: shard.centroid, velocity: [-side[0] * 1.6, -0.5, -side[2] * 1.6], spin: [0.5 * slew, 1.6 * slew, 0.7], gravity: 0, settle: 0.32, keep: true }, now);
+  return 1;
+}
+
+/**
+ * Turn damage events into releases. Events are the `damageState.pendingBakes` the gunnery code queues. Pure
+ * JavaScript with no graphics device, called only when a building is hit.
+ */
+export function applyBuildingFractureEvents(fracture, damage, events, now = 0) {
+  const state = buildingFractureStateOf(damage, fracture);
+  if (!state) return 0;
+  let released = 0;
+  for (const event of events) {
+    if (!event) continue;
+    const point = [Number(event.x) || 0, Number(event.y) || 0, Number(event.z) || 0];
+    const normal = unitOf([Number(event.nx) || 0, Number(event.ny) || 0, Number(event.nz) || 0.001]);
+    const severity = Math.max(0.25, Number(event.severity) || 0.6);
+    if (event.kind === 'cannon-dismount') {
+      released += dismountBuildingGun(state, point, normal, now);
+      continue;
+    }
+    if (event.kind === 'building-explosion') {
+      const powder = Math.max(0.25, Math.min(1, Number(event.powderFraction) || 0.85));
+      released += strikeBuilding(state, point, normal, { radius: Math.max(9.5, Math.min(18, (Number(event.radius) || 8.5) * 1.25)), amount: (1.2 + 1.6 * powder) / fracture.toughness, power: 1.4 + 2 * powder, now, radial: true });
+      continue;
+    }
+    if (event.kind === 'building-collapse') {
+      // The floors and roof give way where the wall has been pounded. It falls, it is not thrown.
+      released += strikeBuilding(state, point, normal, { radius: Math.max(4.5, Math.min(10.5, (Number(event.radius) || 5.5) * 1.05)), amount: (0.45 + 0.5 * severity) / (fracture.toughness * fracture.toughness), power: 0.5, now, drop: true, above: point[1] - 1.5 });
+      continue;
+    }
+    const penetrating = (Number(event.stepDepth) || 0) >= 0.4;
+    const radius = (penetrating ? 1.75 : 1.15) * Math.max(0.7, Math.min(1.25, severity));
+    const amount = ((penetrating ? 1.5 : 0.5) * severity) / fracture.toughness;
+    released += strikeBuilding(state, point, normal, { radius, amount, power: 0.7 + severity * 0.55, now });
+  }
+  if (released) released += releaseUnsupportedBlocks(state, now);
+  return released;
+}
+
+const fracturePipelines = new WeakMap();
+export function buildingFracturePipeline(device) {
+  let pipeline = fracturePipelines.get(device);
+  if (!pipeline) {
+    pipeline = device.createComputePipelineAsync({
+      label: 'building fracture', layout: 'auto',
+      compute: { module: device.createShaderModule({ label: 'building fracture', code: BUILDING_FRACTURE_POSE_UPDATE }), entryPoint: 'main' },
+    });
+    fracturePipelines.set(device, pipeline);
+  }
+  return pipeline;
+}
+
+// One building's own buffers, made when it is first struck. It replaces its range of the port's mesh.
+export function createBuildingFractureGPU({ device, pipeline, prepared, state }) {
+  const { fracture } = prepared, U = GPUBufferUsage;
+  const upload = (data, usage, label) => {
+    const buffer = device.createBuffer({ label, size: data.byteLength, usage: usage | U.COPY_DST });
+    device.queue.writeBuffer(buffer, 0, data);
+    return buffer;
+  };
+  const name = `${fracture.prefabId ?? 'building'} ${fracture.instanceIndex}`;
+  const vertices = upload(prepared.initial, U.VERTEX | U.STORAGE, `${name} fracture vertices`);
+  const rest = upload(prepared.vertices, U.STORAGE, `${name} rest vertices`);
+  const indices = upload(prepared.indices, U.INDEX, `${name} fracture indices`);
+  const vertexShards = upload(fracture.vertexShards, U.STORAGE, `${name} vertex shards`);
+  const records = upload(state.records, U.STORAGE, `${name} shard flights`);
+  const scorch = upload(state.scorch, U.STORAGE, `${name} shard scorch`);
+  const clockData = new Float32Array([0, FRACTURE_GRAVITY, 0, 0, 1, 1, 1, 0]);
+  const clock = upload(clockData, U.UNIFORM, `${name} fracture clock`);
+  const group = device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [vertices, rest, vertexShards, records, clock, scorch].map((buffer, binding) => ({ binding, resource: { buffer } })),
+  });
+  const workgroups = Math.ceil(fracture.vertexShards.length / 64), indexCount = prepared.indices.length;
+  let pose = false, destroyed = false;
+  return {
+    state, fracture, indexCount,
+    get posing() { return pose; },
+    // Once a frame. Nothing is written unless something changed, and only flights in the air need the clock.
+    tick(now) {
+      if (destroyed) return;
+      const flying = state.flying.size > 0;
+      if (flying) settleFinishedFlights(state, now);
+      pose = flying;
+      if (state.dirty.size) {
+        const list = [...state.dirty].sort((a, b) => a - b);
+        for (let i = 0; i < list.length;) {
+          let j = i + 1;
+          while (j < list.length && list[j] === list[j - 1] + 1) j++;
+          device.queue.writeBuffer(records, list[i] * FRACTURE_RECORD_FLOATS * 4, state.records, list[i] * FRACTURE_RECORD_FLOATS, (j - i) * FRACTURE_RECORD_FLOATS);
+          i = j;
+        }
+        state.dirty.clear();
+        pose = true;
+      }
+      if (state.scorchDirty) {
+        device.queue.writeBuffer(scorch, 0, state.scorch);
+        state.scorchDirty = false;
+        pose = true;
+      }
+      if (pose) {
+        clockData[0] = now - state.epoch;
+        device.queue.writeBuffer(clock, 0, clockData, 0, 1);
+      }
+    },
+    encode(pass) {
+      if (destroyed || !pose) return false;
+      pass.setPipeline(pipeline);
+      pass.setBindGroup(0, group);
+      pass.dispatchWorkgroups(workgroups);
+      return true;
+    },
+    draw(pass) {
+      if (destroyed) return;
+      pass.setVertexBuffer(0, vertices);
+      pass.setIndexBuffer(indices, 'uint32');
+      pass.drawIndexed(indexCount);
+    },
+    destroy() {
+      if (destroyed) return;
+      destroyed = true;
+      for (const buffer of [vertices, rest, indices, vertexShards, records, scorch, clock]) buffer.destroy();
+    },
+  };
+}
+
+/**
+ * The fractured buildings of one port. A building joins the first time it is struck. Its mesh is built once,
+ * its range of the port's index buffer is cleared once, and from then on a hit only writes flight records.
+ */
+export function createPortFractures({ device, port, geometry, portIndices, groundAt, buildMillisecondsPerFrame = 3 }) {
+  const live = new Map(), building = new Map();
+  let pipeline = null, starting = null;
+  const finish = (instance, prepared) => {
+    if (!prepared) { live.set(instance, null); return; }
+    const state = buildingFractureStateOf(instance.damageState, prepared.fracture);
+    live.set(instance, createBuildingFractureGPU({ device, pipeline, prepared, state }));
+    // From this frame the building draws from its own buffers. Once only.
+    device.queue.writeBuffer(portIndices, prepared.fracture.firstIndex * 4, new Uint32Array(prepared.fracture.indexCount));
+  };
+  // A first hit waits a few frames in the queue while its building is cut, so nothing stalls a frame.
+  const continueBuilding = () => {
+    const deadline = performance.now() + buildMillisecondsPerFrame;
+    for (const [instance, steps] of building) {
+      for (;;) {
+        const step = steps.next();
+        if (step.done) { building.delete(instance); finish(instance, step.value); break; }
+        if (performance.now() >= deadline) return;
+      }
+    }
+  };
+  return {
+    // Once a frame, before the compute pass. Costs nothing until a building has been hit.
+    update(now) {
+      const instances = port?.instances;
+      if (Array.isArray(instances)) for (let i = 0; i < instances.length; i++) {
+        const instance = instances[i], pending = instance?.damageState?.pendingBakes;
+        if (!pending?.length) continue;
+        if (!pipeline) {
+          starting ??= buildingFracturePipeline(device).then((ready) => { pipeline = ready; }, (error) => console.error('Building fracture pipeline failed', error));
+          continue;
+        }
+        if (!live.has(instance)) {
+          if (!building.has(instance)) building.set(instance, prepareBuildingFractureSteps({
+            vertices: geometry.vertices, indices: geometry.indices, catalog: geometry.partAssembly, instanceIndex: i, instance,
+            materialClass: instance.damageState.materialClass ?? 'masonry', groundAt,
+          }));
+          continue;
+        }
+        const gpu = live.get(instance), events = pending.splice(0, pending.length);
+        if (gpu) applyBuildingFractureEvents(gpu.fracture, instance.damageState, events, now);
+      }
+      if (building.size) continueBuilding();
+      for (const gpu of live.values()) gpu?.tick(now);
+    },
+    encode(pass) { for (const gpu of live.values()) gpu?.encode(pass); },
+    draw(pass) { for (const gpu of live.values()) gpu?.draw(pass); },
+    destroy() { for (const gpu of live.values()) gpu?.destroy(); live.clear(); building.clear(); },
+  };
+}
+

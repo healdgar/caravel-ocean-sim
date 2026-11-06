@@ -5,6 +5,8 @@
 //   npm run perf -- '[["no crew",{"crew":"0"}]]'     rows of [label, URL parameters]
 //   rows may add source edits to try: [label, parameters, [["forest-clusters.js","find","replace"]]]
 //   npm run perf -- '[["battle",{"battle":"1"}]]'    fires a broadside into her first, then measures
+//   rows with {"fort":...} look at Lisbon's bastion: "look" as it stands, "ruin" once shot down and settled,
+//   "siege" while shots keep landing all through the sample
 //   npm run perf -- --tris                           also count triangles per pipeline
 //   npm run perf -- --uploads                        what the CPU sends the GPU each frame, by buffer
 //   npm run perf -- --profile                        JavaScript time per function
@@ -15,6 +17,7 @@ import {chromium} from 'playwright';
 import {createDevServer} from '../server.mjs';
 import {coastalRegionStageURL} from '../js/landfall.js';
 import {fireBroadside} from './damage-battle.mjs';
+import {aimAtBuilding,fireOnBuilding} from './fort-battle.mjs';
 
 const args=process.argv.slice(2),wantTriangles=args.includes('--tris'),wantUploads=args.includes('--uploads'),wantProfile=args.includes('--profile');
 const rows=JSON.parse(args.find(a=>a.startsWith('['))??'[["base",{}]]');
@@ -84,7 +87,7 @@ console.log(`GPU busy before loading: ${mean(idle).toFixed(0)}% (other work on t
 console.log('scene'.padEnd(20),'frame p50/p95   fps  | JS ms mean/p95 | CPU cores main+gpu | GPU busy frag vert | limit');
 for(const [label,extra,edits] of rows){
   const url=coastalRegionStageURL(base,'lisbon','dock','clear',1650);
-  const {battle,...parameters}=extra;
+  const {battle,fort,...parameters}=extra;
   for(const [key,value] of Object.entries({ship:'victory',w:1728,h:1117,polygons:'fixed',...parameters}))url.searchParams.set(key,String(value));
   const page=await browser.newPage({viewport:{width:1728,height:1117}}),errors=[];
   page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error'&&!/404|favicon/.test(m.text()))errors.push(m.text());});
@@ -98,6 +101,19 @@ for(const [label,extra,edits] of rows){
   if(battle){
     console.log(' '.repeat(20),'battle:',JSON.stringify(await page.evaluate(fireBroadside,{volleys:[{shots:70,mass:14.5,speed:430,minY:15,maxY:34},{shots:45,mass:14.5,speed:430,minY:3.5,maxY:11}]})));
     await page.waitForTimeout(Number(process.env.BATTLE_SETTLE_MS??8000));
+  }
+  if(fort){
+    const prefab='stone_sea_bastion',shot={mass:14.5,speed:330,face:1};
+    await page.evaluate(aimAtBuilding,{prefab,face:1,height:6,yaw:-14,elevation:6,distance:58});
+    await page.waitForTimeout(1500);
+    if(fort==='ruin'){
+      console.log(' '.repeat(20),'fort:',JSON.stringify(await page.evaluate(fireOnBuilding,{prefab,volleys:[{...shot,shots:24,minY:1,maxY:8,centre:0,span:18}]})));
+      await page.waitForTimeout(Number(process.env.BATTLE_SETTLE_MS??8000));
+    }
+    if(fort==='siege')await page.evaluate(async({prefab,shot,fireText})=>{
+      const fire=(0,eval)('('+fireText+')');let round=0;
+      window.perfSiege=setInterval(()=>fire({prefab,everyFrames:9,volleys:[{...shot,shots:2,minY:1,maxY:8,centre:(round++%18)-9,span:3}]}),500);
+    },{prefab,shot,fireText:fireOnBuilding.toString()});
   }
   const session=wantProfile?await page.context().newCDPSession(page):null;
   if(session){await session.send('Profiler.enable');await session.send('Profiler.setSamplingInterval',{interval:500});await session.send('Profiler.start');}

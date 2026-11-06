@@ -79,6 +79,21 @@ No hit moves a timber vertex. A vertex pulled on its own stretches every triangl
 - **Graphics.** JavaScript writes one 64-byte flight record when a shard breaks. A compute pass moves each shard every frame, rigid in metres, and runs only once something has broken. While anything is in the air, a single clock value is uploaded per frame.
 - **Saves.** Masts return from `mastState`. Shards shot away are listed in the snapshot and come back already gone. A full structural repair restores them.
 
-Buildings still use `bakeBuildingImpactDeformations`: each face slumps rigidly toward a rubble floor, and nothing leaves. The two share only the cell shape. Shots do not yet pass through a gap a shard left, and a crew member can stand where a bulwark was. Fallen wreckage stays in the ship's frame while it floats, so she tows it.
+Shots do not yet pass through a gap a shard left, and a crew member can stand where a bulwark was. Fallen wreckage stays in the ship's frame while it floats, so she tows it.
 
 `node scripts/damage-review.mjs` takes pictures of this from the real game. `npm run perf -- '[["battle",{"battle":"1"}]]'` measures it.
+
+## How a building comes apart
+
+Buildings break the way ships do: no hit moves a vertex, each piece is one rigid body, and flights use the same record format (`js/building-fracture.js`). What differs is what a piece is, what holds it up, and where it comes to rest.
+
+- **Shards.** Built once per building, on its first hit, from the port's part catalog. The work is sliced so a frame stops after 3 ms, and the hit waits in the queue for those few frames. A wall face is cut into stone blocks along its courses, breaking where `sampleVoronoiBlockCell` changes cell. A building past 3,200 blocks gets bigger ones. Each block is a closed solid. What is buried or always under water stays, along with paved floors, and a post driven into the ground stays when what stood on it goes. Small fittings are one shard, a gun is one shard, and any other floor comes down in large slabs.
+- **What a breach shows.** The faces inside a wall begin as points, so an intact wall costs what it always cost. A break opens the hidden faces of the block's neighbours, in raw stone. A fort's facing stands in front of a rubble core, and only the rim of its rampart falls with the wall. The rest of the flat stays, because earth holds it.
+- **Support.** A link says whether a shard rests on another or only stands beside it. Support climbs from the ground through what rests on what. A stone can also hang from the stone beside it for its span, one stone in masonry and three or four in timber and roofs, and the stone on top of that one is a step better off. A small hole stands as an arch. A wide breach brings down a triangle of wall above it, each stone a moment after the last.
+- **Compounding.** A penetrating shot takes the nearest blocks at once, a light one only wears them, and worn blocks are scorched. A collapse takes what stands above its own height. A magazine blast throws everything in its radius outward.
+- **Rubble.** A piece lands on what is under the place it comes down: the ground, a floor below it, or the heap already there. It rolls off a heap steeper than the angle of repose and lies about flat, and it stays. Stone over deep water goes to the seabed. Timber over deep water floats a while, then is gone.
+- **Graphics.** A struck building draws from its own buffers, and its range of the port's index buffer is cleared once. A hit writes flight records and shard scorch, nothing else. The pose pass runs only while something is in the air or just changed, and the last pose stays in the vertex buffer, so a ruin costs its triangles and no compute. An intact port pays nothing.
+
+Building damage is not saved, so a ruin comes back whole on reload, as it always has. Shots do not pass through a breach: a building is still one box to the sweep. Soldiers stay on a rampart until it is ruined.
+
+`node scripts/building-damage-review.mjs` takes pictures of this from the real game. `npm run perf -- '[["fort",{"fort":"siege"}]]'` measures it.

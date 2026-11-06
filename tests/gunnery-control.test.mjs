@@ -10,7 +10,7 @@ import {createCompany,stepCompany} from '../js/crew.js';
 import {SHIP_COLORS,setVesselColors,strikeVesselColors,buildShipColorsGeometry} from '../js/ship-colors.js';
 import {advanceSails,sailingState,sailMastCap,sailCanvasTarget,sailLosingCanvas} from '../js/sailing.js';
 import {resolveGlobalCoastalRegion,synthesizeCoastalTerrain,placeCoastalPort,buildPortPrefabGeometry,generateProceduralCoastalPack} from '../js/coastal-world.js';
-import {bakeBuildingImpactDeformations} from '../js/part-assembly.js';
+import {applyBuildingFractureEvents,prepareBuildingFracture} from '../js/building-fracture.js';
 function fixture(options={}){
  const boat={modelId:'nina',length:20,beam:6,heading:0,x:0,z:0,heave:0,pitch:0,roll:0,propulsion:'sail',surgeVelocity:0};
  boat.hydrodynamics=boatHydrodynamics(20,6);const events=[],orders=[];
@@ -315,7 +315,7 @@ test('3D aerial aiming trajectory arcs predict range, respond to quoin elevation
  assert.equal(ninaGuns.aimSummary.hitKind,'ship','swiveled trajectory strikes the off-beam target vessel');
 });
 
-test('shore structure foundation scarps, rotated building OBBs, and coastal palms/trees intersect cannonfire and deform 3D meshes',()=>{
+test('shore structure foundation scarps, rotated building OBBs, and coastal palms/trees intersect cannonfire and come apart',()=>{
  const region=resolveGlobalCoastalRegion({id:'cartagena',name:'Cartagena',latitude:10.423,longitude:-75.548,size:65,biomeSize:64,albedoSize:64});
  const heights=synthesizeCoastalTerrain(region);
  const port=placeCoastalPort(region,heights);
@@ -354,7 +354,7 @@ test('shore structure foundation scarps, rotated building OBBs, and coastal palm
  const rotHit=sweepBuildingSegment([tipWx-6*sinY,5.0,tipWz-6*cosY],[tipWx+6*sinY,5.0,tipWz+6*cosY],0.08,{instances:[rotInst]});
  assert.ok(rotHit,'rotated building OBB intersects at its exact rotated world extremity');
 
- // 3. Subdivided port mesh deformation & normal-magnitude structural damage encoding
+ // 3. A hit on the port mesh takes blocks out of the wall, through flight records
  const bReport=applyBuildingImpactDamage(bastion,{
   position:[bastion.x,bastion.baseY+2.5,bastion.z-(bastion.depth??16)*0.5],
   surfacePosition:[bastion.x,bastion.baseY+2.5,bastion.z-(bastion.depth??16)*0.5],
@@ -366,14 +366,13 @@ test('shore structure foundation scarps, rotated building OBBs, and coastal palm
  });
  assert.ok(bReport&&bastion.damageState.pendingBakes.length>0);
  const vertsCopy=new Float32Array(portGeo.vertices);
- const dirty=bakeBuildingImpactDeformations(vertsCopy,bastion.damageState.pendingBakes.splice(0),8);
- assert.ok(dirty&&dirty.byteLength>0,'mid-wall cannonball hit deforms subdivided building vertices');
- let maxNormalLen=1.0;
- for(let i=0;i<vertsCopy.length;i+=8){
-  const nLen=Math.hypot(vertsCopy[i+3],vertsCopy[i+4],vertsCopy[i+5]);
-  if(nLen>maxNormalLen)maxNormalLen=nLen;
- }
- assert.ok(maxNormalLen>1.15,`expected structural damage encoded into normal length > 1.15, got ${maxNormalLen}`);
+ const fracture=prepareBuildingFracture({vertices:portGeo.vertices,indices:portGeo.indices,catalog:portGeo.partAssembly,instanceIndex:port.instances.indexOf(bastion),instance:bastion,materialClass:bastion.damageState.materialClass,groundAt:()=>bastion.baseY??0}).fracture;
+ const released=applyBuildingFractureEvents(fracture,bastion.damageState,bastion.damageState.pendingBakes.splice(0),0);
+ assert.ok(released>0,'mid-wall cannonball hit knocks blocks out of the wall');
+ assert.deepEqual(portGeo.vertices,vertsCopy,'a hit changes no vertex of the port mesh');
+ const state=bastion.damageState.fracture;
+ assert.ok(state.records.some((value,i)=>i%16===15&&value===-1),'what broke flies by a record the GPU reads');
+ assert.ok(state.scorch.some(value=>value>.05),'what it did not break is scorched');
 
  // 4. Scenery sweep against coastal 3D palms and procedural trees
  const px=port.palms[0],py=port.palms[1],pz=port.palms[2];

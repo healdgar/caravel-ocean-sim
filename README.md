@@ -1367,6 +1367,7 @@ The upstream README credits Claude Code (Opus 5.5), with headless Chrome screens
 | `js/surface-waves.js`, `js/wgsl/surface-waves.js`, `js/wgsl/surface-coupling.js` | Independent shared event waves and surface-query coupling |
 | `js/hull-contact.js`, `js/wgsl/hull-contact.js` | Canonical lower-hull probes and persistent incident-sea exposure/return events; no impact forces |
 | `js/ship-fracture.js`, `js/wgsl/ship-fracture.js` | Which pieces of a ship break away and what goes with them, rigid flight on the GPU (see `GUNNERY.md`) |
+| `js/building-fracture.js` | Which pieces of a building break away, what they held up, and where they come to rest, in the same flights (see `GUNNERY.md`) |
 | `js/spindrift.js`, `js/wgsl/spindrift.js` | Wind-driven breaking-crest mist, bounded GPU population and soft volume rendering |
 | `js/deck.js`, `js/wgsl/deck.js` | Retained deck water, drainage, wetness, wash shading, and runoff strips |
 | `js/wetness.js`, `js/wgsl/wetness.js` | Persistent material moisture, spray exposure, cached sea contact and crew probes |
