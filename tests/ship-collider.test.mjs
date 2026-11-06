@@ -122,6 +122,26 @@ test('a ball goes through canvas, tears it and flies on, and each mast takes the
   }
 });
 
+test('a heavy ball through a small ship\'s canvas tears it and does not fell the mast', () => {
+  const boat = shipOf('santa-maria'), line = rakingLine('santa-maria', boat);
+  assert.ok(line, 'she has canvas with nothing solid along the same line');
+  const before = { ...boat.damage.mastIntegrity }, projectile = { ...ball(), mass: 10.9, velocity: [0, 0, -470] };
+  assert.ok(!sweepAt(boat)(line.from, line.to, projectile), 'it flies on');
+  assert.ok(boat.damage.sailRips >= 1, 'the canvas is torn');
+  for (const [mast, was] of Object.entries(before)) {
+    const lost = was - boat.damage.mastIntegrity[mast];
+    assert.ok(lost <= 0.0651, `${mast} lost ${lost.toFixed(3)}, no more than a tear costs`);
+  }
+  assert.ok(Object.keys(before).some((mast) => boat.damage.mastIntegrity[mast] < before[mast]), 'though a tear does cost something');
+  assert.ok(!boat.damage.pendingBakes.some((bake) => /mast/.test(bake.kind) && bake.kind !== 'sail-rip'), 'and nothing comes down');
+});
+
+test('the same ball striking the mast itself still does its full harm', () => {
+  const boat = shipOf('nina');
+  applyShipImpactDamage(boat, { targetBoat: boat, hitZone: 'rigging', mastGroup: 'main', mass: 10.9, velocity: [0, 0, -470], energy: 1.2e6, ammo: 'round', localPosition: [0, 5, 0], position: [0, 5, 0], normal: [0, 0, 1] });
+  assert.ok(1 - boat.damage.mastIntegrity.main > 0.065, `it lost ${(1 - boat.damage.mastIntegrity.main).toFixed(3)}`);
+});
+
 test('the HUD hears of a tear, though the ball flies on', () => {
   const boat = shipOf('santa-maria'), line = rakingLine('santa-maria', boat), reports = [];
   const sweep = createGunnerySolidSweep({ sourceBoat: null, getVessels: () => [boat], onRigTorn: (report) => reports.push(report) });

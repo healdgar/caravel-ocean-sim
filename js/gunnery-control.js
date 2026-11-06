@@ -1072,6 +1072,9 @@ export function sweepShipRigging(from, to, radius = 0.08, targetBoat, sourceBoat
 
 // A ball that crosses a mast's canvas or rope flies on, and that mast's rig takes the hit, once a ball however many
 // lines it parts. It is the same hit as any other on the rig, but for the ball's momentum, which it keeps.
+// The most a mast loses to one ball passing through its canvas or rope, the same limit as a hit near its foot.
+const TEAR_MAST_LOSS = 0.065;
+
 function tearRigWithBall(crossing, projectile, from, to, sourceBoat) {
   const { targetBoat: boat, mastGroup: mast } = crossing, torn = (projectile.tornRigs ??= new Map());
   const masts = torn.get(boat) ?? torn.set(boat, new Set()).get(boat);
@@ -1201,7 +1204,9 @@ export function applyShipImpactDamage(targetBoat, event) {
   if (event.hitZone === 'rigging') {
     damage.rigHits++;
     damage.sailRips = (damage.sailRips ?? 0) + 1;
-    damage.rigDamageJoules += effectiveRigEnergy;
+    // A ball through canvas or rope tears it and flies on. That is no blow to the mast, however heavy the ball.
+    const rigBlow = event.passedThrough ? Math.min(effectiveRigEnergy, (TEAR_MAST_LOSS / 1.8) * damage.maxRigEnergy) : effectiveRigEnergy;
+    damage.rigDamageJoules += rigBlow;
     const validGroups = mastSpecs.map((m) => m[0]);
     const requestedGroup = event.mastGroup && Object.hasOwn(damage.mastIntegrity, event.mastGroup) ? event.mastGroup : 'main';
     const group =
@@ -1209,7 +1214,7 @@ export function applyShipImpactDamage(targetBoat, event) {
         ? requestedGroup
         : validGroups[0];
     const prevInt = Math.max(0.05, damage.mastIntegrity[group] ?? 1);
-    damage.mastIntegrity[group] = Math.max(0, damage.mastIntegrity[group] - (effectiveRigEnergy / damage.maxRigEnergy) * 1.8);
+    damage.mastIntegrity[group] = Math.max(0, damage.mastIntegrity[group] - (rigBlow / damage.maxRigEnergy) * 1.8);
     damage.rigIntegrity = computeModelRigIntegrity(damage, mastSpecs);
     const sailKey = group === 'fore' ? 'sailFore' : group === 'mizzen' ? 'sailMizzen' : 'sailMain';
     if (typeof targetBoat[sailKey] === 'number') {
@@ -1317,7 +1322,7 @@ export function applyShipImpactDamage(targetBoat, event) {
     1100000,
     (event.hitZone === 'rigging' ? damage.maxRigEnergy : damage.maxHullEnergy) * 0.18
   );
-  const deltaDamage = energy / Math.max(10000, partBudget);
+  const deltaDamage = (event.passedThrough ? Math.min(energy, (TEAR_MAST_LOSS / 1.8) * damage.maxRigEnergy) : energy) / Math.max(10000, partBudget);
   const prevPartDamage = damage.partDamage[hitPartId] ?? 0;
   const nextPartDamage = Math.min(1, +(prevPartDamage + deltaDamage).toFixed(3));
   damage.partDamage[hitPartId] = nextPartDamage;
