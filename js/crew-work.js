@@ -11,11 +11,13 @@ import {LATER_SAIL_DESIGNS,laterSailStairFlights} from './models/later-sail.js';
 import {proceduralDesign,proceduralDeck,proceduralDeckWidth,proceduralHullWidth} from './models/procedural.js';
 import {laterSailRigContext} from './additional-rig.js';
 import {rowingStationPose,rowingSteeringPose} from './rowing.js';
-import {crewNavigationStation,crewNavigationRoute,crewRoutineSegmentClear,crewNavigationClear,crewNavigationSegmentClear,crewNavigationObstacles} from './crew-navigation.js';
+import {crewNavigationStation,crewNavigationRoute,crewRoutineSegmentClear,crewNavigationClear,crewNavigationSegmentClear,crewNavigationObstacles,CREW_NAVIGATION_BODY} from './crew-navigation.js';
 import {crewDeckHazard,crewMotionPolicy,crewAdvanceWalk,crewTurnTowards} from './crew-motion.js';
 import {vesselSidearm} from './gunnery-models.js';
 import {shipMastSpecs,fracturePartsGone,LINE_MADE_FAST_BELOW_TOP} from './ship-fracture.js';
 import {crewOpenEdgeInset} from './crew-overboard.js';
+import {crewTrafficStep,crewTrafficGate,crewTrafficBackTo} from './crew-traffic.js';
+import {crewDeckField,crewDeckLineRoom,crewDeckRoom,CREW_DECK_BODY_M} from './crew-deck.js';
 
 export const hasExtendedCrewModel=id=>Object.hasOwn(ROWING_DESIGNS,id??'')||Object.hasOwn(LATER_SAIL_DESIGNS,id??'');
 export const CREW_CLIMB_SPEED=.65;
@@ -393,6 +395,47 @@ function crewWorkSegmentClear(s,boat,a,b){
   if(hasExtendedCrewModel(boat.modelId))return crewRoutineSegmentClear(s,boat,a,b);
   return crewNavigationSegmentClear(physical(a,boat),physical(b,boat),boat,crewWorkNavigationOptions(s,boat));
 }
+// How fast a walker's body comes round to the way he is going, radians a second.
+const CREW_WALK_TURN=8;
+// On the level, on a hull where nothing is stepped over, a body may leave the line of his route.
+function crewWorkOnDeck(boat,p,target){
+  if(Object.hasOwn(ROWING_DESIGNS,boat.modelId??''))return false;
+  const sy=vesselVerticalScale(boat),sx=boat.beam/3.6,sz=boat.length/12,field=crewDeckField(boat);
+  // The foot of a lead up onto a runner can be this near the floor and already over the side.
+  const margin=(CREW_NAVIGATION_BODY.radius+1e-3)/sx;
+  return Math.abs(p[1]-crewDeckHeight(boat,p[2],p[0]))*sy<=.06&&Math.abs(target[1]-crewDeckHeight(boat,target[2],target[0]))*sy<=.06
+    &&Math.abs(p[0])+margin<=modelDeckWidth(boat,p[2])&&Math.abs(target[0])+margin<=modelDeckWidth(boat,target[2])
+    &&crewDeckRoom(field,boat,p[0]*sx,p[2]*sz)>0;
+}
+// Back onto the route from wherever passing someone has left him, by a straight line to one of the next few waypoints.
+function crewWorkRejoin(s,boat,x,z){
+  const j=s.job,sx=boat.beam/3.6,sz=boat.length/12,here=[x/sx,crewDeckHeight(boat,z/sz,x/sx),z/sz],field=crewDeckField(boat),room=crewDeckRoom(field,boat,x,z);
+  // As good as there already.
+  const at=j.path[j.cursor];
+  if(at&&Math.hypot(at[0]*sx-x,at[2]*sz-z)<.05){j.clearPath=null;j.position=at.slice();s.x=at[0];s.z=at[2];return true;}
+  let furthest=j.cursor;
+  while(furthest+1<j.path.length&&furthest<j.cursor+2&&crewWorkOnDeck(boat,j.path[furthest],j.path[furthest+1]))furthest++;
+  for(let k=furthest;k>=j.cursor;k--){
+    const to=j.path[k];
+    if(!crewWorkOnDeck(boat,here,to)||!crewWorkSegmentClear(s,boat,here,to))continue;
+    const line=crewDeckLineRoom(field,boat,x,z,to[0]*sx,to[2]*sz);
+    if(line<CREW_DECK_BODY_M&&line<Math.min(room,crewDeckRoom(field,boat,to[0]*sx,to[2]*sz))-.02)continue;
+    j.cursor=k;j.clearPath=null;j.position=here;return true;
+  }
+  return false;
+}
+// A step the solver wants that the deck's clearance cannot vouch for: metres, on the floor at each end.
+function crewWorkTrafficClear(s,boat,x0,z0,x1,z1){
+  const sx=boat.beam/3.6,sz=boat.length/12;
+  return crewWorkSegmentClear(s,boat,[x0/sx,crewDeckHeight(boat,z0/sz,x0/sx),z0/sz],[x1/sx,crewDeckHeight(boat,z1/sz,x1/sx),z1/sz]);
+}
+// The route to the next waypoint need only be asked about once, until something is shot away.
+function crewWorkRouteClear(s,boat,j,p,target,next){
+  const revision=boat.damage?.fracture?.revision??0;
+  if(j.clearPath===j.path&&j.clearCursor===j.cursor&&j.clearRevision===revision)return true;
+  if(crewWorkSegmentClear(s,boat,p,target)){j.clearPath=j.path;j.clearCursor=j.cursor;j.clearRevision=revision;return true;}
+  return crewWorkSegmentClear(s,boat,p,next);
+}
 function crewWorkNavigationRoute(s,path,boat,{exactTarget=false,job=s.job}={}){
   if(hasExtendedCrewModel(boat.modelId))return path;
   if(!path?.length)return null;
@@ -400,7 +443,10 @@ function crewWorkNavigationRoute(s,path,boat,{exactTarget=false,job=s.job}={}){
   const waypoints=path.slice(),access=options?.rigAccess;
   if(access?.entry){
     const scale=[boat.beam/3.6,vesselVerticalScale(boat),boat.length/12],lead=(access.lead??[access.entry]).map(p=>p.map((v,i)=>v/scale[i]));
-    if(distance3(physical(waypoints.at(-1),boat),access.point)<1e-6)waypoints.splice(waypoints.length-1,0,...lead);
+    // A route being mended may already go by way of the lead.
+    if(distance3(physical(waypoints.at(-1),boat),access.point)<1e-6){
+      if(!waypoints.slice(0,-1).some(p=>distance3(p,lead[0])<1e-6))waypoints.splice(waypoints.length-1,0,...lead);
+    }
     else if(distance3(physical(start,boat),access.point)<1e-6){
       while(waypoints.length&&distance3(physical(waypoints[0],boat),access.point)<1e-6)waypoints.shift();
       waypoints.unshift(...lead.slice().reverse());
@@ -433,7 +479,8 @@ function crewWorkBodiesClear(s,company,boat,path){
   for(let i=1;i<path.length;i++){
     const a=physical(path[i-1],boat),b=physical(path[i],boat);a[1]+=.028;b[1]+=.028;
     const ray=b.map((v,k)=>v-a[k]),length2=ray.reduce((sum,v)=>sum+v*v,0);
-    if(others.some(o=>{const t=length2?workClamp(ray.reduce((sum,v,k)=>sum+v*(o.position[k]-a[k]),0)/length2,0,1):0;return distance3(o.position,a.map((v,k)=>v+ray[k]*t))<.54-1e-6;}))return false;
+    // Already this close to someone, as in a tight place, and going no closer to speak of, is no reason to stay.
+    if(others.some(o=>{const t=length2?workClamp(ray.reduce((sum,v,k)=>sum+v*(o.position[k]-a[k]),0)/length2,0,1):0,gap=distance3(o.position,a.map((v,k)=>v+ray[k]*t));const from=distance3(o.position,a);return gap<.54-1e-6&&(!length2||gap<from-.03||(gap<.4&&gap<from-1e-3));}))return false;
   }
   return true;
 }
@@ -442,7 +489,7 @@ function crewWorkPassingDetour(s,company,boat,p,target){
   const j=s.job,from=physical(p,boat),sy=vesselVerticalScale(boat),sx=boat.beam/3.6,sz=boat.length/12;
   // A detour is a horizontal deck walk. Never short-cut a stair or an aloft
   // transition to another floor. Retry only from the existing blocked timer.
-  if(Math.abs(p[1]-crewDeckHeight(boat,p[2],p[0]))*sy>.06)return false;
+  if(Math.abs(p[1]-crewDeckHeight(boat,p[2],p[0]))*sy>.06||!crewWorkOnDeck(boat,p,p))return false;
   const neighbours=company.crew.filter(o=>o!==s&&o.casualtyState!=='fallen'&&o.position&&Math.abs(o.position[1]-.028-from[1])<.85&&Math.hypot(o.position[0]-from[0],o.position[2]-from[2])<3.5)
     .sort((a,b)=>distance3(a.position,from)-distance3(b.position,from)).slice(0,6);
   if(!neighbours.length)return false;
@@ -486,28 +533,50 @@ function crewWorkPassingDetour(s,company,boat,p,target){
   if(!path.length)return false;
   j.path=[...path,...j.path.slice(goalIndices.get(finish)+1)];j.cursor=0;j.passing=true;j.passingDirection=Math.sign(target[2]-p[2]);j.blockedTime=0;return true;
 }
+const CREW_STANDOFF_S=3,CREW_YIELD_ROOM_M=.34,CREW_YIELD_CLEAR_M=.7,CREW_REROUTE_S=2.5;
+// Nose to nose in a gap with someone who goes first, and no way round: back to the last place there was room, and on from there.
+function crewWorkBackOff(s,company,boat){
+  const j=s.job,back=crewTrafficBackTo(s,company,boat,(j.totalBlockedTime??0)>CREW_STANDOFF_S);
+  if(!back)return false;
+  const path=crewWorkNavigationRoute(s,[[back[0]/(boat.beam/3.6),back[1]/vesselVerticalScale(boat),back[2]/(boat.length/12)],...j.path.slice(j.cursor)],boat,{exactTarget:['rig','lookout','gunnery'].includes(j.kind)});
+  if(!path)return false;
+  j.path=path;j.cursor=0;j.clearPath=null;s.trafficOffRoute=false;return true;
+}
 // A stationary off-duty sailor can occupy a legitimate work destination. Ask
 // that person to walk to a nearby clear post, retaining their body and floor;
 // neither the arriving worker nor the yielding person is moved instantly.
 function crewWorkYieldIdle(s,company,boat,p,next){
   if(hasExtendedCrewModel(boat.modelId))return false;
   const wanted=physical(next,boat);wanted[1]+=.028;
-  const mayYield=o=>!o.job||(o.job.kind==='gunnery'&&o.job.stage==='working'&&(o.job.gun.stage==='ready'||(s.job?.kind==='gunnery'&&o.job.gunRole==='tackle'&&s.job.gunRole==='loader')));
+  // Someone already standing aside, and still in the way, can stand further aside.
+  const mayYield=o=>!o.job||o.job.stage==='traffic-hold'||(o.job.kind==='gunnery'&&o.job.stage==='working'&&(o.job.gun.stage==='ready'||(s.job?.kind==='gunnery'&&o.job.gunRole==='tackle'&&s.job.gunRole==='loader')));
   const blocker=company.crew.filter(o=>o!==s&&o.casualtyState!=='fallen'&&mayYield(o)&&o.role!=='Helmsman'&&o.id!=='ines'&&o.position&&distance3(o.position,wanted)<.68).sort((a,b)=>distance3(a.position,wanted)-distance3(b.position,wanted))[0];
   if(!blocker)return false;
-  const sx=boat.beam/3.6,sz=boat.length/12,sy=vesselVerticalScale(boat),start=[blocker.x,(blocker.position[1]-.028)/sy,blocker.z],choices=[];
-  for(const radius of[.75,1.05])for(const [X,Z]of[[1,0],[-1,0],[0,1],[0,-1],[.707,.707],[-.707,.707],[.707,-.707],[-.707,-.707]]){
+  const sx=boat.beam/3.6,sz=boat.length/12,sy=vesselVerticalScale(boat),start=[blocker.x,(blocker.position[1]-.028)/sy,blocker.z],choices=[],field=crewDeckField(boat);
+  for(const radius of[.75,1.05,1.4])for(const [X,Z]of[[1,0],[-1,0],[0,1],[0,-1],[.707,.707],[-.707,.707],[.707,-.707],[-.707,-.707]]){
     const x=start[0]+X*radius/sx,z=start[2]+Z*radius/sz,target=[x,crewDeckHeight(boat,z,x),z];
     if(Math.abs(target[1]-start[1])*sy>.06||!crewRoutineSegmentClear(blocker,boat,target,target))continue;
     const physicalTarget=physical(target,boat);physicalTarget[1]+=.028;
     if(company.crew.some(o=>o!==blocker&&o.casualtyState!=='fallen'&&o.position&&distance3(o.position,physicalTarget)<.70))continue;
+    // Arms and all, on real deck, if the deck has such a place. If not, any place a route may stand, for as long as it takes.
+    const cramped=crewDeckRoom(field,boat,physicalTarget[0],physicalTarget[2])<Math.min(CREW_YIELD_ROOM_M,crewDeckRoom(field,boat,blocker.position[0],blocker.position[2]));
     const path=crewWorkNavigationRoute(blocker,[target],boat,{exactTarget:true});if(!path||!crewWorkBodiesClear(blocker,company,boat,path))continue;
-    choices.push({target,path,distance:distance3(physicalTarget,wanted)});
+    // Out of the way of the one who asked: off the line he still has to walk.
+    let clear=distance3(physicalTarget,wanted);
+    const lane=[s.position,...(s.job?.path?.slice(s.job.cursor,s.job.cursor+6).map(q=>physical(q,boat))??[])];
+    for(let k=1;k<lane.length;k++){
+      const ax=lane[k-1][0],az=lane[k-1][2],bx=lane[k][0]-ax,bz=lane[k][2]-az,t=workClamp(((physicalTarget[0]-ax)*bx+(physicalTarget[2]-az)*bz)/Math.max(bx*bx+bz*bz,1e-9),0,1);
+      clear=Math.min(clear,Math.hypot(ax+bx*t-physicalTarget[0],az+bz*t-physicalTarget[2]));
+    }
+    choices.push({target,path,distance:clear,radius,cramped});
   }
-  choices.sort((a,b)=>b.distance-a.distance);const choice=choices[0];if(!choice)return false;
+  // Far enough off that line is all it takes. He does not walk further from his post than he must.
+  choices.sort((a,b)=>a.cramped-b.cramped||Math.min(b.distance,CREW_YIELD_CLEAR_M)-Math.min(a.distance,CREW_YIELD_CLEAR_M)||a.radius-b.radius);const choice=choices[0];if(!choice)return false;
   blocker.home??=[blocker.x,blocker.z];
   if(blocker.job){
-    const job=blocker.job;job.trafficResume={stage:job.stage,path:job.path.slice(job.cursor),requester:s.id,requesterAt:Array.from(s.position)};
+    const job=blocker.job;
+    if(job.stage==='traffic-hold'&&job.trafficResume){job.trafficResume.requester=s.id;job.trafficResume.requesterAt=Array.from(s.position);}
+    else job.trafficResume={stage:job.stage,path:job.path.slice(job.cursor),requester:s.id,requesterAt:Array.from(s.position)};
     job.stage='traffic-yield';job.path=choice.path;job.cursor=0;job.elapsed=0;
   }else blocker.job={kind:'yield',stage:'approach',path:choice.path,cursor:0,elapsed:0,rung:0,revision:company.revision,priorHome:blocker.home.slice()};
   blocker.intent='work';blocker.work=0;blocker.decisionIn=0;return true;
@@ -1024,6 +1093,23 @@ function crewSailHoldReason(company,boat,needs){
   if(company.gunneryActive)return 'Hands at the guns';
   return 'Waiting for hands';
 }
+// He is at the waypoint. True if that ends his job and his step.
+function crewWorkWaypointReached(s,j,at){
+  j.position=at;s.x=at[0];s.z=at[2];j.cursor++;s.trafficOffRoute=false;
+  if(j.passing&&j.cursor>=4){j.passing=false;j.passingDirection=0;}
+  if(j.cursor<j.path.length)return false;
+  if(j.stage==='traffic-yield'){j.stage='traffic-hold';j.elapsed=0;}
+  else if(j.stage==='return'){s.job=null;s.home=[at[0],at[2]];s.wait=2;return true;}
+  if(j.kind==='yield'){
+    const shift=at[2]-j.priorHome[1];s.home=[at[0],at[2]];s.patrolX=at[0];s.route=s.route.map(z=>z+shift);s.target=s.route[1];s.navigationPath=null;s.navigationKey=null;s.job=null;s.wait=2;return true;
+  }
+  if(j.stage==='traffic-hold'){}
+  else if(j.stage==='lookout-return')j.stage='descending';
+  else if(j.stage==='lookout-approach'){j.stage='working';j.lookoutAtStation=true;}
+  else{j.stage=(j.kind==='rig'||j.kind==='lookout')?'ascending':'working';if(j.kind==='gunnery')j.arrivedAtGun=true;}
+  j.elapsed=0;
+  return false;
+}
 export function stepCrewWork(s,company,boat,dt) {
   const j=s.job;if(!j)return false;
   if(boat.sailState?.maneuver && (j.kind==='rig'||j.kind==='lookout') && ['ascending','working'].includes(j.stage))crewWorkDescend(s);
@@ -1077,51 +1163,71 @@ export function stepCrewWork(s,company,boat,dt) {
       const target=j.path[j.cursor],a=physical(p,boat),b=physical(target,boat),d=distance3(a,b);
       const horizontal=Math.hypot(b[0]-a[0],b[2]-a[2]);
       const motion=crewMotionPolicy(boat,{purpose:'work',grade:horizontal>1e-8?(b[1]-a[1])/horizontal:0,hazard:o.hazard});
-      const travel=Math.min(d,motion.speedMetresPerSecond*dt),q=d>1e-6?travel/d:1;
-      const next=p.map((x,i)=>x+(target[i]-x)*q),world=physical(next,boat);
-      // Yield locally to another body rather than walking through it.
-      const gunPass=j.kind==='gunnery'&&(j.totalBlockedTime??0)>.6;
+      // Off the line of his route only on a level deck, and never on a thwart-stepping rowed hull.
+      const onDeck=crewWorkOnDeck(boat,p,target);
+      const passing=onDeck?crewTrafficStep(s,company,boat,{x:a[0],z:a[2],toX:b[0],toZ:b[2],speed:motion.speedMetresPerSecond,dt,segmentClear:crewWorkTrafficClear,rejoin:crewWorkRejoin}):null;
+      // Nobody walks a rowed hull's one gangway both ways, as that hull's own planner sees to it.
+      const standing=!onDeck&&!Object.hasOwn(ROWING_DESIGNS,boat.modelId??'')&&crewTrafficGate(s,company,boat,a[0],a[2],dt);
+      if(!onDeck)s.trafficWalkingNow=true;
+      // Aloft the runner says which way he faces. On deck the body comes round to the way he goes, and the feet do not get ahead of it.
+      const turns=d>.01&&!passing&&!((j.rung??0)>0);
+      if(turns)s.yaw=crewTurnTowards(s.yaw??0,Math.atan2(b[0]-a[0],b[2]-a[2]),dt,CREW_WALK_TURN);
+      const facing=turns?Math.max(0,Math.cos(Math.atan2(b[0]-a[0],b[2]-a[2])-s.yaw)):1;
+      const travel=passing?Math.hypot(passing.x-a[0],passing.z-a[2]):Math.min(d,motion.speedMetresPerSecond*facing*dt),q=d>1e-6?travel/d:1;
+      const next=passing?[passing.x/(boat.beam/3.6),crewDeckHeight(boat,passing.z/(boat.length/12),passing.x/(boat.beam/3.6)),passing.z/(boat.length/12)]:p.map((x,i)=>x+(target[i]-x)*q),world=physical(next,boat);
+      // On a stair or a ladder a body stops for another. On a deck the solver has already dealt with them.
       const bodyRadius=j.kind==='gunnery'?.38:.54;
-      const occupied=!gunPass&&company.crew.some(other=>{
+      const occupied=!passing&&!onDeck&&company.crew.some(other=>{
         if(other===s||other.casualtyState==='fallen'||!other.position)return false;
-        if(j.kind==='gunnery'&&(other.job?.kind==='gunnery'||other.role==='Helmsman'||other.id==='ines'))return false;
         const d1=Math.hypot(world[0]-other.position[0],world[1]+.028-other.position[1],world[2]-other.position[2]);
         if(d1>=bodyRadius)return false;
         const d0=Math.hypot(a[0]-other.position[0],a[1]+.028-other.position[1],a[2]-other.position[2]);
-        return d1<=d0+1e-6;
+        return d1<d0-1e-7;
       });
-      const clear=crewWorkSegmentClear(s,boat,p,next);
-      if(clear&&!occupied){
+      const clear=passing?!passing.blocked||passing.hemmed:crewWorkRouteClear(s,boat,j,p,target,next);
+      if(standing){j.blockedTime=0;}
+      else if(passing){
+        const at=company.workTime??0;
+        if(passing.ask&&(j.askedAt??-1)<=at){j.askedAt=at+1;crewWorkYieldIdle(s,company,boat,p,[passing.ask.x,(passing.ask.position[1]-.028)/vesselVerticalScale(boat),passing.ask.z]);}
+        // Someone standing in the way is a matter for the route: a line round them is better than dodging them. Only then does he
+        // leave it, and a body he cannot route round he squeezes past.
+        if(passing.stander&&(j.routedAt??-1)<=at){
+          j.routedAt=at+CREW_REROUTE_S;
+          if(crewWorkPassingDetour(s,company,boat,p,target)){s.trafficOffRoute=false;j.position=p;j.clearPath=null;return crewWorkFinishStep(s,j,boat,dt,active,moving);}
+        }
+        j.passing=j.passing||(travel>1e-4&&!passing.holding);
+        if(travel>1e-5){
+          j.position=next;s.x=next[0];s.z=next[2];moving=true;j.clearPath=null;crewAdvanceWalk(s,travel,{strideMetres:motion.strideMetres});
+        }
+        // A waypoint he is abreast of needs no more going to, unless it is where he is bound. That he has to reach.
+        const goal=j.path[j.cursor],goalWorld=physical(goal,boat),left=Math.hypot(goalWorld[0]-world[0],goalWorld[2]-world[2]);
+        const after=j.path[j.cursor+1],mayPass=after&&crewWorkOnDeck(boat,goal,after);
+        // Nor does one with someone standing on it.
+        const taken=mayPass&&passing.blocked&&left<1.2&&company.crew.some(o=>o!==s&&o.casualtyState!=='fallen'&&o.position&&Math.hypot(o.position[0]-goalWorld[0],o.position[1]-.028-goalWorld[1],o.position[2]-goalWorld[2])<.45);
+        if(mayPass&&(left<.2||taken)&&crewWorkSegmentClear(s,boat,next,after))j.cursor++;
+        else if(left<.05&&travel+left<=motion.speedMetresPerSecond*dt+1e-6&&crewWorkWaypointReached(s,j,goal.slice()))return false;
+        if(passing.blocked){j.blockedTime=(j.blockedTime??0)+dt;j.totalBlockedTime=(j.totalBlockedTime??0)+dt;}else{j.blockedTime=0;j.totalBlockedTime=0;}
+      }else if(clear&&!occupied){
         const walking=crewRowingWalkState(s,boat);if(walking)walking.distance=Math.min(walking.length,walking.distance+Math.hypot(world[0]-a[0],world[2]-a[2]));
         j.position=next;s.x=next[0];s.z=next[2];moving=travel>0;crewAdvanceWalk(s,travel,{strideMetres:motion.strideMetres});
-        if(d>.01)s.yaw=Math.atan2(b[0]-a[0],b[2]-a[2]);
-        if(d-travel<=1e-8){j.cursor++;if(j.passing&&j.cursor>=4){j.passing=false;j.passingDirection=0;}if(j.cursor>=j.path.length){
-          if(j.stage==='traffic-yield'){j.stage='traffic-hold';j.elapsed=0;}
-          else if(j.stage==='return'){s.job=null;s.home=[next[0],next[2]];s.wait=2;return false;}
-          if(j.kind==='yield'){
-            const shift=next[2]-j.priorHome[1];s.home=[next[0],next[2]];s.patrolX=next[0];s.route=s.route.map(z=>z+shift);s.target=s.route[1];s.navigationPath=null;s.navigationKey=null;s.job=null;s.wait=2;return false;
-          }
-          if(j.stage==='traffic-hold'){}
-          else if(j.stage==='lookout-return')j.stage='descending';
-          else if(j.stage==='lookout-approach'){j.stage='working';j.lookoutAtStation=true;}
-          else{j.stage=(j.kind==='rig'||j.kind==='lookout')?'ascending':'working';if(j.kind==='gunnery')j.arrivedAtGun=true;}
-          j.elapsed=0;
-        }}
+        if(d-travel<=1e-8&&crewWorkWaypointReached(s,j,next))return false;
         j.blockedTime=0;
         j.totalBlockedTime=0;
       }else{
         j.blockedTime=(j.blockedTime??0)+dt;
         j.totalBlockedTime=(j.totalBlockedTime??0)+dt;
-        if(j.blockedTime>.5){
-          if(hasExtendedCrewModel(boat.modelId)){
-            const path=proceduralCrewRoute(s,j.path.at(-1),boat,company);if(path){j.path=path;j.cursor=0;}
-          }else{
-            let repaired=false;
-            if(!clear){const path=crewWorkNavigationRoute(s,j.path.slice(j.cursor),boat,{exactTarget:['rig','lookout','gunnery'].includes(j.kind)});if(path){j.path=path;j.cursor=0;repaired=true;}}
-            if(!repaired&&!crewWorkPassingDetour(s,company,boat,p,target)&&!crewWorkYieldIdle(s,company,boat,p,next)&&ADDITIONAL_DESIGNS[boat.modelId]&&j.kind!=='gunnery')crewAdditionalPassingDetour(s,company,boat,p,target);
-          }
-          j.blockedTime=0;
+      }
+      if(j.blockedTime>.5){
+        if(hasExtendedCrewModel(boat.modelId)&&!onDeck){
+          const path=proceduralCrewRoute(s,j.path.at(-1),boat,company);if(path){j.path=path;j.cursor=0;}
+        }else if(hasExtendedCrewModel(boat.modelId)){
+          const path=proceduralCrewRoute(s,j.path.at(-1),boat,company);if(path){j.path=path;j.cursor=0;s.trafficOffRoute=false;}
+        }else{
+          let repaired=false;
+          if(!clear){const path=crewWorkNavigationRoute(s,j.path.slice(j.cursor),boat,{exactTarget:['rig','lookout','gunnery'].includes(j.kind)});if(path){j.path=path;j.cursor=0;repaired=true;s.trafficOffRoute=false;}}
+          if(!repaired&&!crewWorkPassingDetour(s,company,boat,p,target)&&!crewWorkYieldIdle(s,company,boat,p,next)&&!crewWorkBackOff(s,company,boat)&&ADDITIONAL_DESIGNS[boat.modelId]&&j.kind!=='gunnery')crewAdditionalPassingDetour(s,company,boat,p,target);
         }
+        j.blockedTime=0;
       }
     }else if(j.stage==='ascending'||j.stage==='descending'){
       const {rungs,dy}=crewRunnerMetrics(boat,j.mast,j.side);
@@ -1182,6 +1288,10 @@ export function stepCrewWork(s,company,boat,dt) {
       else if(done&&j.stage==='approach')startReturn(s,boat,company);
     }
   }
+  return crewWorkFinishStep(s,j,boat,dt,active,moving);
+}
+// The rest of a sailor's step, whatever the job did: how he stands, and where that puts him.
+function crewWorkFinishStep(s,j,boat,dt,active,moving){
   const blend=1-Math.exp(-dt*8);s.walk+=(Number(moving)-s.walk)*blend;
   s.brace+=(Number(s.intent==='brace')-s.brace)*blend;
   s.work+=(Number(active&&j.stage==='working')-s.work)*blend;

@@ -267,3 +267,24 @@ fn clipJoint(first:u32,frames:u32,frame:f32,joint:u32)->mat4x4f {
 }
 `;
 
+
+// A body turned to go by someone in a tight place: the joints above the hips come round about the pelvis, each by its own
+// share of the turn, over whatever the clips and the solved poses left. The legs keep walking where he is going.
+export const CREW_SHOULDER_TURN = /* wgsl */ `
+struct CrewTurnRig {pivot:vec2f,count:u32,pad:u32};
+@group(0) @binding(0) var<storage,read> turns:array<f32>;
+@group(0) @binding(1) var<storage,read> shares:array<f32>;
+@group(0) @binding(2) var<uniform> rig:CrewTurnRig;
+@group(0) @binding(3) var<storage,read_write> shownJoints:array<mat4x4f>;
+@compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id:vec3u){
+  if(id.x>=arrayLength(&shownJoints)){return;}
+  let sailor=id.x/65u;
+  if(sailor>=rig.count){return;}
+  let angle=turns[sailor]*shares[id.x%65u];
+  if(angle==0.0){return;}
+  let c=cos(angle);let s=sin(angle);
+  // About the vertical through the pelvis, in the same sense as a body's yaw: +z comes round toward +x.
+  let turn=mat4x4f(vec4f(c,0.0,-s,0.0),vec4f(0.0,1.0,0.0,0.0),vec4f(s,0.0,c,0.0),vec4f(rig.pivot.x*(1.0-c)-rig.pivot.y*s,0.0,rig.pivot.y*(1.0-c)+rig.pivot.x*s,1.0));
+  shownJoints[id.x]=turn*shownJoints[id.x];
+}
+`;
