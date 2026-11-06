@@ -1241,6 +1241,8 @@ async function main() {
   dockingBoarding.state.getLineEnv=()=>({terrain,portLabel:terrain?.region?.name});
   const dolphinVessels=vessels.map(v=>v.boat),dolphinPlayer=[boat];
   window.oceanFleet={vessels,config:fleetConfig,wakes:wakePool,renderAssets};
+  // For the review and perf scripts, which aim at and fire on buildings.
+  Object.defineProperties(window.oceanFleet,{terrain:{get:()=>terrain},orbit:{get:()=>shipOrbit}});
 
   const hullFlood=await createHullFlood({device,frameUBO,envCubeView,sampler:sampClamp,shader,format:HDR,samples:MSAA});
   for(const v of vessels)v.flood=hullFlood.vessel(v.holesUBO,v.hullUBO);
@@ -3817,7 +3819,7 @@ async function main() {
     fortSoldiers?.update(terrain?.port??null,dt,P.windSpeed,cam,!portGunnery);
     townsfolk?.follow(terrain?.ports,cam);
     townsfolk?.setUnderFire((portGunnery?.projectiles?.length??0)>0,dt);
-    terrain?.updatePortDamage?.();
+    terrain?.updatePortDamage?.(simTime);
     const activeVesselCount=followerEnabled?vessels.length:1;
     allProjectiles.length=0;
     for(let i=0;i<activeVesselCount;i++)for(const p of vessels[i].gunnery.state.projectiles)allProjectiles.push(p);

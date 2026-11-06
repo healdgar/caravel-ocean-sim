@@ -16,7 +16,6 @@ import {
   createPartAssemblyGPU,
   locatePartAtLocalPoint,
   bakeVesselImpactMarks,
-  bakeBuildingImpactDeformations,
   sampleVoronoiBlockCell,
 } from '../js/part-assembly.js';
 import {
@@ -27,6 +26,7 @@ import { SHIP_MODELS } from '../js/ship-models.js';
 import { getShipParts, SHIP_PART_CAPABILITIES } from '../js/ship-parts.js';
 import { createShipAssetCache } from '../js/ship-mesh.js';
 import { applyFractureEvents, evaluateShardFlight } from '../js/ship-fracture.js';
+import { applyBuildingFractureEvents, prepareBuildingFracture } from '../js/building-fracture.js';
 import {
   PORT_PREFABS,
   getBuildingParts,
@@ -1215,7 +1215,7 @@ test('all 9 playable ship models take battle damage, mark their meshes and sink 
   }
 });
 
-test('cannon shot extrapolates to stone, masonry, and wooden land structures with material-specific penetration, hot-shot fires, Polvorín magazine detonation, 3D mesh craters, and shore battery return fire', async () => {
+test('cannon shot extrapolates to stone, masonry, and wooden land structures with material-specific penetration, hot-shot fires, Polvorín magazine detonation, rigid masonry shards, and shore battery return fire', async () => {
   const { boatHydrodynamics } = await import('../js/boat.js');
   const region = resolveGlobalCoastalRegion({
     id: 'cartagena',
@@ -1313,18 +1313,23 @@ test('cannon shot extrapolates to stone, masonry, and wooden land structures wit
   assert.ok(polvorinRep.magazineExplosionYieldMj > 30000, 'Polvorín explosion releases >30,000 MJ of blast energy');
   assert.ok(fortress.damageState.dismountedGuns >= 4, 'Polvorín explosion dismounts fortress embrasure cannons');
 
-  // 4. 3D vertex deformation on stone and wooden port structures
+  // 4. Hits on stone and wooden port structures take pieces off them, and never touch the port's vertices
   const portVertsCopy = new Float32Array(portGeom.vertices);
-  const allBuildingBakes = [
-    ...bastion.damageState.pendingBakes.splice(0),
-    ...pier.damageState.pendingBakes.splice(0),
-    ...fortress.damageState.pendingBakes.splice(0),
-  ];
-  assert.ok(allBuildingBakes.some((b) => b.kind === 'stone-crater'), 'Queues stone-crater 3D bake');
-  assert.ok(allBuildingBakes.some((b) => b.kind === 'timber-splinter'), 'Queues timber-splinter 3D bake');
-  assert.ok(allBuildingBakes.some((b) => b.kind === 'building-explosion'), 'Queues building-explosion 3D bake');
-  const dirtyBuildingRange = bakeBuildingImpactDeformations(portVertsCopy, allBuildingBakes, 8);
-  assert.ok(dirtyBuildingRange && dirtyBuildingRange.byteLength > 0, 'bakeBuildingImpactDeformations deforms 3D port building vertices');
+  const fractureOf = (instance) => prepareBuildingFracture({
+    vertices: portGeom.vertices, indices: portGeom.indices, catalog: portGeom.partAssembly,
+    instanceIndex: port.instances.indexOf(instance), instance,
+    materialClass: instance.damageState?.materialClass ?? 'masonry', groundAt: () => instance.baseY ?? instance.y ?? 0,
+  }).fracture;
+  const queued = [bastion, pier, fortress].map((b) => [b, b.damageState.pendingBakes.splice(0)]);
+  const allBuildingBakes = queued.flatMap(([, bakes]) => bakes);
+  assert.ok(allBuildingBakes.some((b) => b.kind === 'stone-crater'), 'Queues a stone-crater event');
+  assert.ok(allBuildingBakes.some((b) => b.kind === 'timber-splinter'), 'Queues a timber-splinter event');
+  assert.ok(allBuildingBakes.some((b) => b.kind === 'building-explosion'), 'Queues a building-explosion event');
+  for (const [building, bakes] of queued) {
+    applyBuildingFractureEvents(fractureOf(building), building.damageState, bakes, 0);
+    assert.ok(building.damageState.fracture.brokenCount > 0, `${building.prefabId} loses pieces to its hits`);
+  }
+  assert.deepEqual(portGeom.vertices, portVertsCopy, 'No hit changes a vertex of the port mesh');
 
   // 5. Shore battery gunnery & return fire against an offshore warship
   const freshBastion = {
@@ -1376,7 +1381,7 @@ test('cannon shot extrapolates to stone, masonry, and wooden land structures wit
   assert.ok((attackingShip.damage?.hits ?? 0) >= 1, 'Offshore warship receives hull/rig impact damage from shore battery');
   assert.ok((attackingShip.damage?.fires?.length ?? 0) >= 1, 'Shore battery hot shot ignites fire aboard the attacking ship');
 
-  // 6. 52-gun HMS Victory broadside against a stone bastion crumbles masonry downward without spiky horizontal shards
+  // 6. 52-gun HMS Victory broadside against a stone bastion brings down masonry that lies at its foot
   const volleyBastion = {
     ...bastion,
     id: 'victory-52-volley-bastion',
@@ -1385,8 +1390,6 @@ test('cannon shot extrapolates to stone, masonry, and wooden land structures wit
     gunnery: null,
   };
   createBuildingGunnery(volleyBastion);
-  const origPortVerts = new Float32Array(portGeom.vertices);
-  const volleyPortVerts = new Float32Array(portGeom.vertices);
   for (let i = 0; i < 52; i++) {
     const spreadX = ((i % 9) - 4) * 1.4;
     const spreadY = 2.0 + (i % 4) * 1.1;
@@ -1402,17 +1405,25 @@ test('cannon shot extrapolates to stone, masonry, and wooden land structures wit
   }
   assert.equal(volleyBastion.damageState.state, 'ruined', '52-gun HMS Victory broadside reduces stone fort to ruined state');
   assert.equal(volleyBastion.damageState.silenced, true, '52-gun broadside silences all fort guns');
-  bakeBuildingImpactDeformations(volleyPortVerts, volleyBastion.damageState.pendingBakes.splice(0), 8);
-  let maxHorizDisp = 0;
-  let maxVertDrop = 0;
-  for (let v = 0; v < volleyPortVerts.length; v += 8) {
-    const hDisp = Math.hypot(volleyPortVerts[v] - origPortVerts[v], volleyPortVerts[v + 2] - origPortVerts[v + 2]);
-    const vDrop = origPortVerts[v + 1] - volleyPortVerts[v + 1];
-    if (hDisp > maxHorizDisp) maxHorizDisp = hDisp;
-    if (vDrop > maxVertDrop) maxVertDrop = vDrop;
+  {
+    const ground = volleyBastion.baseY ?? volleyBastion.y ?? 0;
+    const fracture = prepareBuildingFracture({
+      vertices: portGeom.vertices, indices: portGeom.indices, catalog: portGeom.partAssembly,
+      instanceIndex: port.instances.indexOf(bastion), instance: volleyBastion, materialClass: 'fortified-stone', groundAt: () => ground,
+    }).fracture;
+    applyBuildingFractureEvents(fracture, volleyBastion.damageState, volleyBastion.damageState.pendingBakes.splice(0), 0);
+    const state = volleyBastion.damageState.fracture;
+    assert.ok(state.brokenCount > 40, `the broadside takes a good part of the wall (${state.brokenCount} pieces)`);
+    let farthest = 0, lowest = Infinity;
+    for (let s = 1; s < fracture.shardCount; s++) {
+      if (!state.broken[s] || fracture.shards[s].kind === 4) continue;
+      const shard = fracture.shards[s], at = evaluateShardFlight(state.records.subarray(s * 16, (s + 1) * 16), 1e6, shard.centroid, [1, 1, 1]);
+      farthest = Math.max(farthest, Math.hypot(at[0] - shard.centroid[0], at[2] - shard.centroid[2]));
+      lowest = Math.min(lowest, at[1]);
+    }
+    assert.ok(farthest < 16, `rubble lies close by, nothing thrown far from where it stood (${farthest.toFixed(1)} m)`);
+    assert.ok(lowest >= ground - 0.05, `rubble rests on the ground (${lowest.toFixed(2)} m over ${ground})`);
   }
-  assert.ok(maxHorizDisp < 1.35, `52 overlapping broadside hits keep horizontal displacement bounded (<1.35m, got ${maxHorizDisp.toFixed(2)}m) with zero spiky shards`);
-  assert.ok(maxVertDrop > 1.8, `52-gun broadside slumps upper battlements downward (>1.8m drop, got ${maxVertDrop.toFixed(2)}m) into stepped masonry rubble`);
 
   // 7. Non-fort port buildings (masonry warehouses, chapels, timber sheds) are fully destructible under cannonfire
   for (let i = 0; i < 5; i++) {
@@ -1427,7 +1438,7 @@ test('cannon shot extrapolates to stone, masonry, and wooden land structures wit
     });
   }
   assert.equal(warehouse.damageState.state, 'ruined', 'Masonry port building (Casa de Contratación / Royal Warehouse) is destructible and collapses into ruined state');
-  assert.ok(warehouse.damageState.pendingBakes.some((b) => b.kind === 'building-collapse'), 'Destroying a non-fort building queues 3D building-collapse rubble bakes');
+  assert.ok(warehouse.damageState.pendingBakes.some((b) => b.kind === 'building-collapse'), 'Destroying a non-fort building queues building-collapse events');
 });
 
 test('all 9 ship models have complete part attribution, superstructure classification, and model-accurate superstructure/mast damage', () => {
@@ -1677,7 +1688,7 @@ test('Universal Boat Part Taxonomy classifies all 9 ships and applies non-rubber
   assert.equal(osebergSpec.activeOarPairs, 8);
 });
 
-test('3D Voronoi block-cell detachment and Cairn declarative JSON primitive/voxel language compile and crumble rigidly without stretched shards', () => {
+test('3D Voronoi blocks and the Cairn declarative JSON primitive/voxel language compile, and come apart rigidly', () => {
   // 1. Cairn fraction arithmetic & coordinate resolution
   assert.equal(isFraction('5/3'), true);
   assert.equal(isFraction('12/0'), false);
@@ -1811,190 +1822,86 @@ test('3D Voronoi block-cell detachment and Cairn declarative JSON primitive/voxe
     'Cairn roof slopes use terracotta tile material kind 13 (not swapped with wallKind)'
   );
 
-  // 5. Verify 3D Voronoi block-cell detachment keeps every quad face 100% rigid (zero edge stretching/shearing) under cannonfire
+  // 5. Blocks leave as rigid wholes: no edge of a block changes length at any point of its flight
   const voronoiA = sampleVoronoiBlockCell(2.1, 3.4, -4.2, false);
   const voronoiB = sampleVoronoiBlockCell(2.15, 3.42, -4.18, false);
   assert.equal(voronoiA.sx, voronoiB.sx, 'Nearby points inside the same 3D Voronoi cell resolve to the same block seed');
 
+  const cathedralInst = { prefabId: 'catedral_basilica', x: 0, y: 0, baseY: 0, z: 0, yaw: 0 };
+  const prepareCathedral = () => prepareBuildingFracture({
+    vertices: cathedral.vertices, indices: cathedral.indices, catalog: cathedral.partAssembly, instanceIndex: 0,
+    instance: cathedralInst, materialClass: 'masonry', groundAt: () => 0,
+  });
   const origVerts = new Float32Array(cathedral.vertices);
-  const hitVerts = new Float32Array(cathedral.vertices);
+  const prepared = prepareCathedral();
   const bakes = [];
   for (let i = 0; i < 16; i++) {
-    bakes.push({
-      kind: 'stone-crater',
-      x: ((i % 4) - 1.5) * 2.2,
-      y: 3.5 + Math.floor(i / 4) * 1.4,
-      z: -14.0,
-      nx: 0,
-      ny: 0,
-      nz: -1,
-      radius: 2.2,
-      stepDepth: 0.85,
-      severity: 0.95,
-    });
+    bakes.push({ kind: 'stone-crater', x: ((i % 4) - 1.5) * 2.2, y: 3.5 + Math.floor(i / 4) * 1.4, z: -14.0, nx: 0, ny: 0, nz: -1, radius: 2.2, stepDepth: 0.85, severity: 0.95 });
   }
-  bakes.push({
-    kind: 'building-collapse',
-    x: 0,
-    y: 5.0,
-    z: -12.0,
-    radius: 11.0,
-    stepDepth: 2.4,
-    powderFraction: 0.85,
-  });
-
-  const dirty = bakeBuildingImpactDeformations(hitVerts, bakes, 8);
-  assert.ok(dirty && dirty.maxVertex > dirty.minVertex, 'Cannonfire & collapse bakes deform Cairn cathedral vertices');
-
-  let movedQuads = 0;
-  let maxAspectStretchError = 0;
-  for (let v = 0; v + 3 < hitVerts.length / 8; ) {
-    const rk = origVerts[v * 8 + 6];
-    const frac = rk - Math.floor(rk);
-    if (frac > 0.06 && frac < 0.19) {
-      // Measure all 4 edge lengths of the quad before and after impact
-      const edgeOrig = [];
-      const edgeAfter = [];
-      for (let e = 0; e < 4; e++) {
-        const a = (v + e) * 8;
-        const b = (v + ((e + 1) % 4)) * 8;
-        edgeOrig.push(Math.hypot(origVerts[b] - origVerts[a], origVerts[b + 1] - origVerts[a + 1], origVerts[b + 2] - origVerts[a + 2]));
-        edgeAfter.push(Math.hypot(hitVerts[b] - hitVerts[a], hitVerts[b + 1] - hitVerts[a + 1], hitVerts[b + 2] - hitVerts[a + 2]));
-      }
-      const moved = Math.hypot(
-        hitVerts[v * 8] - origVerts[v * 8],
-        hitVerts[v * 8 + 1] - origVerts[v * 8 + 1],
-        hitVerts[v * 8 + 2] - origVerts[v * 8 + 2]
-      );
-      if (moved > 0.05 && edgeOrig[0] > 0.05 && edgeOrig[1] > 0.05) {
-        movedQuads++;
-        const ratio0 = edgeAfter[0] / edgeOrig[0];
-        const ratio1 = edgeAfter[1] / edgeOrig[1];
-        const stretchDiff = Math.abs(ratio0 - ratio1);
-        if (stretchDiff > maxAspectStretchError) maxAspectStretchError = stretchDiff;
-      }
-      v += 4;
-    } else if (frac >= 0.19 && frac < 0.32) {
-      v += 3;
-    } else {
-      v += 1;
-    }
+  bakes.push({ kind: 'building-collapse', x: 0, y: 5.0, z: -12.0, radius: 11.0, stepDepth: 2.4, powderFraction: 0.85 });
+  const cathedralDamage = {};
+  const released = applyBuildingFractureEvents(prepared.fracture, cathedralDamage, bakes, 0);
+  assert.ok(released > 20, `Expected >20 blocks to leave, got ${released}`);
+  assert.deepEqual(cathedral.vertices, origVerts, 'The source mesh is left as it was');
+  const verticesOf = new Map();
+  for (let v = 0; v < prepared.fracture.vertexShards.length; v++) {
+    const s = prepared.fracture.vertexShards[v];
+    if (s) (verticesOf.get(s) ?? verticesOf.set(s, []).get(s)).push(v);
   }
-  assert.ok(movedQuads > 20, `Expected >20 detached Voronoi block quads, got ${movedQuads}`);
-  assert.ok(
-    maxAspectStretchError < 1e-4,
-    `Rigid 3D Voronoi block transformation preserves quad aspect ratios with zero shard stretching (max error ${maxAspectStretchError})`
-  );
-
-  // 6. Verify multi-round bombardment continues dropping and crumbling walls across Rounds 1, 2, 3, and 4
-  const multiVerts = new Float32Array(cathedral.vertices);
-  const meanZoneY = () => {
-    let sumY = 0, count = 0;
-    for (let v = 0; v < origVerts.length / 8; v++) {
-      const at = v * 8;
-      if (Math.abs(origVerts[at]) < 6.0 && origVerts[at + 1] > 2.5 && Math.abs(origVerts[at + 2] + 12.0) < 4.5) {
-        sumY += multiVerts[at + 1];
-        count++;
-      }
+  const state = cathedralDamage.fracture;
+  let checked = 0, worst = 0;
+  for (let s = 1; s < prepared.fracture.shardCount; s++) {
+    if (!state.broken[s]) continue;
+    const list = verticesOf.get(s), record = state.records.subarray(s * 16, (s + 1) * 16);
+    const a = [prepared.vertices[list[0] * 8], prepared.vertices[list[0] * 8 + 1], prepared.vertices[list[0] * 8 + 2]];
+    const b = [prepared.vertices[list.at(-1) * 8], prepared.vertices[list.at(-1) * 8 + 1], prepared.vertices[list.at(-1) * 8 + 2]];
+    const before = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+    for (const clock of [0.2, 0.6, 1.5, 40]) {
+      const pa = evaluateShardFlight(record, clock, a, [1, 1, 1]), pb = evaluateShardFlight(record, clock, b, [1, 1, 1]);
+      worst = Math.max(worst, Math.abs(Math.hypot(pa[0] - pb[0], pa[1] - pb[1], pa[2] - pb[2]) - before));
     }
-    return sumY / Math.max(1, count);
-  };
-  const y0 = meanZoneY();
-  const roundDropY = [y0];
+    checked++;
+  }
+  assert.ok(checked > 20 && worst < 1e-3, `Rigid flight keeps every block its own shape (${checked} blocks, worst ${worst})`);
+
+  // 6. Each round of a bombardment brings down more of the wall
+  const prior = prepareCathedral().fracture, rounds = {};
+  const broken = [0];
   for (let round = 1; round <= 4; round++) {
-    bakeBuildingImpactDeformations(
-      multiVerts,
-      [
-        {
-          kind: 'stone-crater',
-          x: 0,
-          y: 5.5,
-          z: -12.5,
-          nx: 0,
-          ny: 0,
-          nz: -1,
-          radius: 2.2,
-          stepDepth: 0.85,
-          severity: 0.95,
-        },
-        {
-          kind: 'building-collapse',
-          x: 0,
-          y: 5.5,
-          z: -12.5,
-          radius: 8.5,
-          stepDepth: 1.45,
-          powderFraction: 0.45,
-        },
-      ],
-      8
-    );
-    roundDropY.push(meanZoneY());
+    applyBuildingFractureEvents(prior, rounds, [
+      { kind: 'stone-crater', x: 0, y: 2 + round * 1.3, z: -14.0, nx: 0, ny: 0, nz: -1, radius: 2.2, stepDepth: 0.85, severity: 0.95 },
+      { kind: 'building-collapse', x: 0, y: 4 + round * 1.3, z: -12.5, radius: 8.5, stepDepth: 1.45, powderFraction: 0.45 },
+    ], round);
+    broken.push(rounds.fracture.brokenCount);
   }
-  for (let r = 1; r <= 4; r++) {
-    assert.ok(
-      roundDropY[r] < roundDropY[r - 1] - 0.15,
-      `Expected Round ${r} bombardment to further lower wall elevation (${roundDropY[r].toFixed(3)}m < ${roundDropY[r - 1].toFixed(3)}m)`
-    );
-  }
+  for (let r = 1; r <= 4; r++) assert.ok(broken[r] > broken[r - 1], `Round ${r} brings down more (${broken[r]} after ${broken[r - 1]})`);
 
-  // 7. Verify dock pier pilings anchored on the seabed never pop upward above their original y,
-  // and building-scoped bakes never deform adjacent buildings outside the struck building's OBB
-  const pierInst = {
-    prefabId: 'timber_mole_pier',
-    role: 'pier',
-    x: 0,
-    y: 0,
-    z: 0,
-    yaw: 0,
-    width: 7.6,
-    length: 54.0,
-    depth: 54.0,
-    height: 3.1,
-  };
+  // 7. A pier's pilings stay in the seabed, what breaks off floats away, and only the struck building is touched
+  const pierInst = { prefabId: 'timber_mole_pier', role: 'pier', x: 0, y: 0, z: 0, yaw: 0, width: 7.6, length: 54.0, depth: 54.0, height: 3.1 };
   const pierMesh = getBuildingParts('timber_mole_pier');
-  const pierOrig = new Float32Array(pierMesh.vertices);
-  const pierHit = new Float32Array(pierMesh.vertices);
+  const pierPrepared = prepareBuildingFracture({ vertices: pierMesh.vertices, indices: pierMesh.indices, catalog: pierMesh.partAssembly, instanceIndex: 0, instance: pierInst, materialClass: 'timber', groundAt: () => -7 });
   for (let hit = 0; hit < 10; hit++) {
-    applyBuildingImpactDamage(pierInst, {
-      ammo: 'round',
-      localPosition: [0, 2.2, 12.0],
-      position: [0, 2.2, 12.0],
-      surfacePosition: [0, 2.2, 12.0],
-      normal: [0, 0, 1],
-      velocity: [0, -5, -350],
-      mass: 10.8,
-      energy: 650000,
-    });
+    applyBuildingImpactDamage(pierInst, { ammo: 'round', localPosition: [0, 2.2, 12.0], position: [0, 2.2, 12.0], surfacePosition: [0, 2.2, 12.0], normal: [0, 0, 1], velocity: [0, -5, -350], mass: 10.8, energy: 650000 });
   }
   const pierBakes = pierInst.damageState.pendingBakes.splice(0);
-  assert.ok(pierBakes.length >= 4, 'Expected pier impacts to emit timber-splinter and building-collapse bakes');
-  bakeBuildingImpactDeformations(pierHit, pierBakes, 8);
-  let maxPierLift = 0;
-  for (let v = 0; v < pierOrig.length / 8; v++) {
-    const lift = pierHit[v * 8 + 1] - pierOrig[v * 8 + 1];
-    if (lift > maxPierLift) maxPierLift = lift;
+  assert.ok(pierBakes.length >= 4, 'Expected pier impacts to emit timber-splinter and building-collapse events');
+  applyBuildingFractureEvents(pierPrepared.fracture, pierInst.damageState, pierBakes, 0);
+  const pierState = pierInst.damageState.fracture;
+  assert.ok(pierState.brokenCount > 0, 'The pier loses timber');
+  let floated = 0;
+  for (let s = 1; s < pierPrepared.fracture.shardCount; s++) {
+    const shard = pierPrepared.fracture.shards[s];
+    assert.ok(!(pierState.broken[s] && shard.min[1] < -2), `Nothing rooted below the water breaks off (${shard.partKey})`);
+    if (!pierState.broken[s] || !shard.timber) continue;
+    const settledAt = evaluateShardFlight(pierState.records.subarray(s * 16, (s + 1) * 16), pierState.records[s * 16 + 7] + pierState.records[s * 16 + 3], shard.centroid, [1, 1, 1]);
+    assert.ok(settledAt[1] > -0.8, `Timber settles on the water, not the seabed (${settledAt[1].toFixed(2)} m)`);
+    assert.ok(pierState.records[s * 16 + 11] >= 0, 'Floating timber is gone in the end');
+    floated++;
   }
-  assert.ok(
-    maxPierLift < 0.08,
-    `Expected underwater pier pilings to stay anchored and never spring upward (max lift ${maxPierLift.toFixed(3)}m)`
-  );
+  assert.ok(floated > 0, 'Some timber is afloat');
+  assert.ok(pierPrepared.vertices.length > 0 && pierPrepared.fracture.indexCount === pierMesh.indices.length, 'The fracture holds exactly this building');
 
-  // Verify adjacent building vertices outside pier OBB are completely untouched by pier bakes
-  const adjVerts = new Float32Array(cathedral.vertices);
-  for (let v = 0; v < adjVerts.length / 8; v++) {
-    adjVerts[v * 8 + 2] -= 42.0; // Place cathedral shoreward at z = -42m (outside pierHalfL = 28.8m)
-  }
-  const adjBefore = new Float32Array(adjVerts);
-  bakeBuildingImpactDeformations(adjVerts, pierBakes, 8);
-  let adjMoved = 0;
-  for (let i = 0; i < adjVerts.length; i++) {
-    if (Math.abs(adjVerts[i] - adjBefore[i]) > 1e-5) adjMoved++;
-  }
-  assert.equal(adjMoved, 0, 'Building-scoped bakes must not deform any vertices of adjacent buildings outside the struck OBB');
-
-  // 8. Verify elevated land buildings (e.g. Lisboa Ribeira das Naus at y = 2.8m) keep subterranean foundations
-  // anchored in the ground and bound rubble slump to buildingGroundY, never exposing buried foundations or overlapping slipways
+  // 8. An elevated land building's rubble lies on its own ground, its footings stay put, and it never rises
   const lisbonPack = generateProceduralCoastalPack('lisbon');
   const lisbonInsts = lisbonPack.port.instances;
   const lisbonSeawalls = lisbonInsts.filter((i) => i.prefabId === 'stone_quay_seawall');
@@ -2011,53 +1918,25 @@ test('3D Voronoi block-cell detachment and Cairn declarative JSON primitive/voxe
     }
   }
 
-  const arsenalInst = {
-    prefabId: 'royal_atarazanas_arsenal',
-    x: 0,
-    y: 2.8,
-    baseY: 2.8,
-    z: 0,
-    yaw: 0,
-    width: 26,
-    length: 36,
-    depth: 36,
-    height: 8.2,
-  };
+  const arsenalInst = { prefabId: 'royal_atarazanas_arsenal', x: 0, y: 2.8, baseY: 2.8, z: 0, yaw: 0, width: 26, length: 36, depth: 36, height: 8.2 };
   const arsenalBase = getBuildingParts('royal_atarazanas_arsenal');
-  const arsenalOrig = new Float32Array(arsenalBase.vertices);
+  const arsenalVerts = new Float32Array(arsenalBase.vertices);
   // Shift mesh up to elevated land pad y = 2.8m (so foundation plinth spans y = -1.7m..3.55m and walls span 3.55m..11.0m)
-  for (let v = 0; v < arsenalOrig.length / 8; v++) {
-    arsenalOrig[v * 8 + 1] += 2.8;
-  }
-  const arsenalHit = new Float32Array(arsenalOrig);
+  for (let v = 0; v < arsenalVerts.length / 8; v++) arsenalVerts[v * 8 + 1] += 2.8;
+  const arsenal = prepareBuildingFracture({ vertices: arsenalVerts, indices: arsenalBase.indices, catalog: arsenalBase.partAssembly, instanceIndex: 0, instance: arsenalInst, materialClass: 'masonry', groundAt: () => 2.8 });
   for (let hit = 0; hit < 8; hit++) {
-    applyBuildingImpactDamage(arsenalInst, {
-      ammo: 'round',
-      localPosition: [0, 4.5, -18.0],
-      position: [0, 4.5, -18.0],
-      surfacePosition: [0, 4.5, -18.0],
-      normal: [0, 0, -1],
-      velocity: [0, -4, 340],
-      mass: 10.8,
-      energy: 650000,
-    });
+    applyBuildingImpactDamage(arsenalInst, { ammo: 'round', localPosition: [0, 4.5, -18.0], position: [0, 4.5, -18.0], surfacePosition: [0, 7.3, -18.0], normal: [0, 0, -1], velocity: [0, -4, 340], mass: 10.8, energy: 650000 });
   }
-  const arsenalBakes = arsenalInst.damageState.pendingBakes.splice(0);
-  assert.ok(arsenalBakes.every((b) => b.buildingGroundY === 2.8), 'Expected buildingGroundY = 2.8 on all bakes');
-  bakeBuildingImpactDeformations(arsenalHit, arsenalBakes, 8);
-  for (let v = 0; v < arsenalOrig.length / 8; v++) {
-    const origY = arsenalOrig[v * 8 + 1];
-    const newY = arsenalHit[v * 8 + 1];
-    if (origY >= 2.95) {
-      assert.ok(newY >= 2.8, `Above-ground wall vertex (${origY.toFixed(2)}m) must not slump below ground pad 2.8m (got ${newY.toFixed(2)}m)`);
-    }
-    assert.ok(newY <= origY + 0.05, `Elevated land building vertex must never pop upward (orig ${origY.toFixed(2)}m -> ${newY.toFixed(2)}m)`);
+  applyBuildingFractureEvents(arsenal.fracture, arsenalInst.damageState, arsenalInst.damageState.pendingBakes.splice(0), 0);
+  const arsenalState = arsenalInst.damageState.fracture;
+  assert.ok(arsenalState.brokenCount > 0, 'The arsenal loses pieces');
+  for (let s = 1; s < arsenal.fracture.shardCount; s++) {
+    const shard = arsenal.fracture.shards[s];
+    assert.ok(shard.max[1] >= 2.8, `Anything buried in the ground stays with the building (${shard.partKey} up to ${shard.max[1].toFixed(2)})`);
+    if (!arsenalState.broken[s]) continue;
+    const at = evaluateShardFlight(arsenalState.records.subarray(s * 16, (s + 1) * 16), 1e6, shard.centroid, [1, 1, 1]);
+    assert.ok(at[1] >= 2.75, `Rubble lies on the ground pad (${at[1].toFixed(2)} m)`);
+    assert.ok(at[1] <= shard.centroid[1] + 0.01, `It lands no higher than it started (${at[1].toFixed(2)} from ${shard.centroid[1].toFixed(2)})`);
   }
 });
-
-
-
-
-
-
 

@@ -23,3 +23,4 @@ Apple GPUs shade only what is visible, but only for draws that neither discard n
 - **Timestamps stall the frame they sample.** They run only while the performance panel is open, and their spans include waits, so nothing automatic may read them.
 - **Each buffer holds one thing.** Battle damage has its own uniform buffer rather than the tail of another system's storage.
 - **Damage does not edit geometry.** A break writes one flight record. The compute pass that moves shards runs only on ships that have lost something.
+- **A ruin costs no compute.** A building has no pose stage to repeat, so its pass runs only while pieces are in the air, and what it wrote stays in the vertex buffer. The faces inside a wall are points until a break opens them.
