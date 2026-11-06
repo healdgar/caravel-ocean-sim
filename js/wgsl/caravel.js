@@ -3,6 +3,7 @@ import { SKY_RENDER_FUNCS } from './sky.js';
 import { DECK_PROFILE, DECK_SAMPLING } from './deck.js';
 import { VESSEL_RIG, VESSEL_LIGHTING, CANVAS_OPTICS } from './vessel.js';
 import { SHADOW_SAMPLE } from './shadows.js';
+import { ADDITIONAL_DESIGNS } from '../models/additional.js';
 
 // Exact marker recognized by createSubmergedShader. Both hull and rudder retain
 // their authored material IDs/finishes; only the surrounding optical medium
@@ -225,11 +226,16 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
   let deckButtCoord=(p.z+fract(deckPlankId*0.413)*2.0)/2.3;
   let deckButtEdge=min(fract(deckButtCoord),1.0-fract(deckButtCoord));
   let deckButtSeam=1.0-smoothstep(.001,.004+max(fwidth(deckButtCoord),.001),deckButtEdge);
-  let deckCaulk=select(0.0,max(deckSeam,deckButtSeam*.85),isProceduralFleet && in.material==0u);
-  let isAdditionalIberian=isProceduralFleet && hull.size.y>20.5 && hull.size.y<30.0 && hull.size.x>5.0;
-  let isCastleWall=isAdditionalIberian && in.material==15u && p.y>.60 && (p.z>1.18 || p.z< -2.55);
+  // Pinta and Santa María carry their model code in rig.w, so isProceduralFleet
+  // above never matches them. It stays off for the other descriptor-driven ships.
+  let isAdditionalIberian=hull.rig.w>1.5 && hull.rig.w<3.5;
+  let deckCaulk=select(0.0,max(deckSeam,deckButtSeam*.85),(isProceduralFleet || isAdditionalIberian) && in.material==0u);
+  let castleFore=select(${ADDITIONAL_DESIGNS['santa-maria'].deckZones.find(zone=>zone.id==='forecastle').bounds[1]},${ADDITIONAL_DESIGNS.pinta.deckZones.find(zone=>zone.id==='forecastle').bounds[1]},hull.rig.w<2.5);
+  let castleAft=select(${ADDITIONAL_DESIGNS['santa-maria'].deckZones.find(zone=>zone.id==='quarter').bounds[0]},${ADDITIONAL_DESIGNS.pinta.deckZones.find(zone=>zone.id==='quarter').bounds[0]},hull.rig.w<2.5);
+  let isCastleWall=isAdditionalIberian && in.material==15u && p.y>.60 && (p.z>castleAft || p.z<castleFore);
   let castleMoulding=select(0.0,1.0-smoothstep(.14,.22,abs(fract(course*.3333)-.5)*3.0),isCastleWall);
-  let castleFuttock=select(0.0,1.0-smoothstep(.038,.062,abs(fract(p.z/.62)-.5)),isCastleWall && abs(in.normalLocal.x)>.42 && castleMoulding<.5);
+  // Only the nao carries upright battens on her castles; the caravel stays plain.
+  let castleFuttock=select(0.0,1.0-smoothstep(.038,.062,abs(fract(p.z/.62)-.5)),isCastleWall && hull.rig.w>2.5 && castleMoulding<.5);
   let castleRelief=(castleMoulding*.0024 + castleFuttock*.0018);
   let join=select(deckCaulk*.85,max(seam,buttSeam*.8),plankedWall);
   var bump=relief*.006 + grain*.00065*(1.0-smoothstep(.0005,.004,footprint)) - join*.0018 + castleRelief;
@@ -270,18 +276,17 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
   let edgeAA=max(fwidth(clothEdge),0.0005);
   if(in.material==0u) {
     albedo *= mix(0.3,1.0,smoothstep(0.001,0.004+jointAA,joint));
-    if(isProceduralFleet) {
+    if(isProceduralFleet || isAdditionalIberian) {
       albedo = mix(albedo, vec3f(0.015,0.011,0.008), deckCaulk * 0.86);
       rough = mix(rough, 0.94, deckCaulk);
     }
   }
   if(in.material == 1u || in.material == 5u || in.material == 6u) {
     albedo *= .87;
-    if(isProceduralFleet && in.material == 1u) {
+    if((isProceduralFleet || isAdditionalIberian) && in.material == 1u) {
       let isKeelOrPost = (abs(p.x) < 0.068 && p.y < -0.46) || (abs(p.x) < 0.055 && p.z > 5.25 && p.y < 1.05);
-      let isProudWale = isAdditionalIberian && abs(p.x) > 0.34 && p.y > -0.35 && p.y < 0.62 && p.z > -5.85 && p.z < 5.85 && (abs(in.normalLocal.x) > 0.48 || abs(in.normalLocal.y) > 0.78);
       let isCapRail = p.y > 0.58 && in.normalLocal.y > 0.52 && abs(p.x) > 0.32;
-      if(isKeelOrPost || isProudWale) {
+      if(isKeelOrPost) {
         albedo = timber * vec3f(.20,.18,.15);
         rough = .90;
         if(abs(p.x) < 0.055 && p.z > 5.25 && abs(fract((p.y + 0.85) / 0.42) - 0.5) < 0.085) {
@@ -396,8 +401,6 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
       if(frameWeight > 0.01) {
         albedo = mix(albedo, timber * vec3f(0.20, 0.18, 0.15), frameWeight);
         rough = mix(rough, 0.90, frameWeight);
-      } else if(p.z > 2.6 && p.y > 1.15 && p.y < 1.44 && abs(in.normalLocal.x) > 0.4) {
-        albedo = mix(albedo, vec3f(0.28, 0.055, 0.032) * (0.80 + 0.35 * relief), 0.58);
       }
     }
   }
