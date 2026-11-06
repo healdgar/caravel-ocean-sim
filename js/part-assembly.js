@@ -1954,6 +1954,7 @@ export function locatePartAtLocalPoint(catalog, localPoint, options = {}) {
     if (requireLeaf && !part.isLeaf) return;
     if (part.triangleCount <= 0) return;
     if (allowedSubAssemblies && !allowedSubAssemblies.has(part.subAssembly)) return;
+    if (options.gone?.has(part.id)) return;
     const min = part.bounds.min;
     const max = part.bounds.max;
     const dx = px < min[0] ? min[0] - px : px > max[0] ? px - max[0] : 0;

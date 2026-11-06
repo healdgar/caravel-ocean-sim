@@ -12,7 +12,7 @@ import { createShipAssetCache } from './ship-mesh.js';
 import { PORT_PREFABS, getBuildingParts } from './coastal-world.js';
 import { GROUNDING_SUBSTRATES, classifyGroundingSubstrate, setGroundingDamageHandler } from './terrain-model.js';
 import { locatePartAtLocalPoint, isSuperstructurePartId, computeArchetypeScaleSpec } from './part-assembly.js';
-import { shipMastSpecs } from './ship-fracture.js';
+import { shipMastSpecs, traceShotPastGap, fracturePartsGone } from './ship-fracture.js';
 import { createFortGarrison, stepFortGarrison } from './crew.js';
 import { DEFAULT_SHIP_COLORS, strikeVesselColors } from './ship-colors.js';
 
@@ -21,6 +21,12 @@ export { GROUNDING_SUBSTRATES, classifyGroundingSubstrate };
 let gunneryShipAssetCache = null;
 
 const getModelMastSpecs = shipMastSpecs;
+
+// A mast section is coming down. The crew read the side it falls to from here, once the queue has gone.
+function queueMastBreak(damage, event) {
+  (damage.mastFallSide ??= {})[event.mastGroup] = event.side || 1;
+  damage.pendingBakes.push(event);
+}
 
 function computeModelRigIntegrity(damage, mastSpecs) {
   if (!mastSpecs || mastSpecs.length === 0) return 1;
@@ -64,7 +70,7 @@ function localToShipDesignPoint(targetBoat, localPosition) {
   ];
 }
 
-function resolveShipHitPart(targetBoat, localPosition, hitZone) {
+function resolveShipHitPart(targetBoat, localPosition, hitZone, struckTriangle = -1) {
   if (!targetBoat || !Array.isArray(localPosition)) return null;
   const modelId = targetBoat.model?.id ?? targetBoat.modelId;
   const model = modelId ? SHIP_MODELS[modelId] : null;
@@ -76,12 +82,16 @@ function resolveShipHitPart(targetBoat, localPosition, hitZone) {
       partAssembly = gunneryShipAssetCache.get(modelId)?.partAssembly;
     }
     if (!partAssembly) return null;
+    // A shot that came through a gap already knows what stopped it.
+    const struck = struckTriangle >= 0 ? partAssembly.parts?.[partAssembly.trianglePartIds?.[struckTriangle]] : null;
+    if (struck) return struck;
     const designPt = localToShipDesignPoint(targetBoat, localPosition);
     const subAssemblies =
       hitZone === 'rigging'
         ? ['masts-and-spars', 'rigging-and-sails']
         : ['keel-and-frame', 'decks-and-interior', 'ordnance-and-helm', 'hull-and-bulwarks'];
-    return locatePartAtLocalPoint(partAssembly, designPt, { subAssemblies });
+    const fracture = targetBoat.damage?.fracture;
+    return locatePartAtLocalPoint(partAssembly, designPt, { subAssemblies, gone: fracture?.brokenCount ? fracturePartsGone(fracture) : null });
   } catch {
     return null;
   }
@@ -975,11 +985,19 @@ export function sweepShipSegment(from, to, radius = 0.08, targetBoat, sourceBoat
   const craters = targetBoat.damage?.craters;
   const previewOnly = options?.previewOnly === true;
 
-  const classifyLocal = (lx, ly, lz) => {
+  const mastState = targetBoat.damage?.mastState;
+  const mastSpecs = mastState ? getModelMastSpecs(modelId) : null;
+  // Height in metres that a mast still reaches. What fell with it no longer stops a shot.
+  const mastStandsTo = (group) => {
+    const stage = mastState?.[group] ?? 0, spec = stage ? mastSpecs.find((m) => m[0] === group) : null;
+    return spec ? spec[stage >= 2 ? 3 : 2] * sy : Infinity;
+  };
+
+  const classifyLocal = (lx, ly, lz, hullPassed = false) => {
     const castleLift = lz > L * 0.1 ? B * 0.28 : lz < -L * 0.22 ? B * 0.16 : 0;
     const rail = vesselRailHeight(targetBoat, lz);
     const freeboard = rail === null ? baseFreeboard + castleLift : rail + radius;
-    if (Math.abs(lz) <= halfL && ly >= -draft && ly <= freeboard) {
+    if (!hullPassed && Math.abs(lz) <= halfL && ly >= -draft && ly <= freeboard) {
       const taper = Math.max(0.32, 1 - 0.55 * (lz / halfL) ** 2);
       const dyDesign = ly / (sy || 1);
       const dzDesign = lz / (sz || 1);
@@ -1012,7 +1030,7 @@ export function sweepShipSegment(from, to, radius = 0.08, targetBoat, sourceBoat
         ? [['main', 0], ['fore', -L * 0.26], ['mizzen', L * 0.26]]
         : [['fore', -L * 0.26], ['main', 0], ['mizzen', L * 0.26]];
       for (const [group, zCenter] of mastStations) {
-        if (Math.abs(lx) <= mastW && Math.abs(lz - zCenter) <= mastD) {
+        if (Math.abs(lx) <= mastW && Math.abs(lz - zCenter) <= mastD && ly <= mastStandsTo(group) + radius) {
           return { hitZone: 'rigging', mastGroup: group, localNormal: [lx >= 0 ? 1 : -1, 0.15, (lz - zCenter) / mastD] };
         }
       }
@@ -1020,16 +1038,19 @@ export function sweepShipSegment(from, to, radius = 0.08, targetBoat, sourceBoat
     return null;
   };
 
+  // On a ship that has lost something, her own triangles decide whether the way in is still there.
+  const fracture = targetBoat.damage?.fracture?.brokenCount > 0 ? targetBoat.damage.fracture : null;
+
   const clippedLen = segLen * Math.max(0, tExit - tEnter);
   const stepSize = previewOnly ? 0.85 : 0.45;
   const steps = Math.min(previewOnly ? 20 : 48, Math.max(4, Math.ceil(clippedLen / stepSize)));
-  let prevT = tEnter;
+  let prevT = tEnter, hullPassed = false;
   for (let i = 0; i <= steps; i++) {
     const t = tEnter + (tExit - tEnter) * (i / steps);
     const lx = p0[0] + (p1[0] - p0[0]) * t;
     const ly = p0[1] + (p1[1] - p0[1]) * t;
     const lz = p0[2] + (p1[2] - p0[2]) * t;
-    const hit = classifyLocal(lx, ly, lz);
+    const hit = classifyLocal(lx, ly, lz, hullPassed);
     if (hit) {
       let low = prevT, high = t, bestHit = hit, bestLocal = [lx, ly, lz];
       if (i > 0) {
@@ -1039,11 +1060,29 @@ export function sweepShipSegment(from, to, radius = 0.08, targetBoat, sourceBoat
           const mx = p0[0] + (p1[0] - p0[0]) * mid;
           const my = p0[1] + (p1[1] - p0[1]) * mid;
           const mz = p0[2] + (p1[2] - p0[2]) * mid;
-          const mHit = classifyLocal(mx, my, mz);
+          const mHit = classifyLocal(mx, my, mz, hullPassed);
           if (mHit) { high = mid; bestHit = mHit; bestLocal = [mx, my, mz]; } else { low = mid; }
         }
       }
-      const hitPart = previewOnly ? null : resolveShipHitPart(targetBoat, bestLocal, bestHit.hitZone);
+      let struckTriangle = -1;
+      if (fracture && bestHit.hitZone === 'hull') {
+        const toDesign = (p) => [p[0] / (sx || 1), p[1] / (sy || 1), p[2] / (sz || 1)];
+        const behind = traceShotPastGap(fracture, toDesign(p0), toDesign(p1));
+        if (behind && !(behind.t <= 1)) {
+          // Nothing behind the gap this step: only the rig is left to meet.
+          hullPassed = true;
+          prevT = t;
+          continue;
+        }
+        if (behind) {
+          high = Math.max(0, behind.t);
+          bestLocal = [p0[0] + (p1[0] - p0[0]) * high, p0[1] + (p1[1] - p0[1]) * high, p0[2] + (p1[2] - p0[2]) * high];
+          // From inside her, what it strikes faces back along its flight.
+          bestHit = { hitZone: behind.mast ? 'rigging' : 'hull', mastGroup: behind.mast, localNormal: [p0[0] - p1[0], p0[1] - p1[1], p0[2] - p1[2]] };
+          struckTriangle = behind.triangle;
+        }
+      }
+      const hitPart = previewOnly ? null : resolveShipHitPart(targetBoat, bestLocal, bestHit.hitZone, struckTriangle);
       return {
         fraction: high,
         kind: 'ship',
@@ -1857,7 +1896,7 @@ export function applyShipImpactDamage(targetBoat, event) {
     const prevStage = damage.mastState[mGroup] ?? 0;
     if (mInt <= 0.62 && prevStage < 1) {
       damage.mastState[mGroup] = 1;
-      damage.pendingBakes.push({
+      queueMastBreak(damage, {
         kind: 'mast-break',
         modelId,
         mastGroup: mGroup,
@@ -1871,7 +1910,7 @@ export function applyShipImpactDamage(targetBoat, event) {
       damage.mastState[mGroup] = 2;
       const sailKey = mGroup === 'fore' ? 'sailFore' : mGroup === 'mizzen' ? 'sailMizzen' : 'sailMain';
       if (typeof targetBoat[sailKey] === 'number') targetBoat[sailKey] = 0;
-      damage.pendingBakes.push({
+      queueMastBreak(damage, {
         kind: 'mast-break',
         modelId,
         mastGroup: mGroup,
@@ -2299,7 +2338,7 @@ export function stepVesselDamage(boat, dt, terrain = null) {
       for (const [mGroup, mastZ] of [['fore', -3.55], ['main', 0.05], ['mizzen', 3.53]]) {
         if ((damage.mastIntegrity[mGroup] ?? 1) <= 0.24 && (damage.mastState[mGroup] ?? 0) < 2) {
           damage.mastState[mGroup] = 2;
-          damage.pendingBakes.push({
+          queueMastBreak(damage, {
             kind: 'mast-break',
             mastGroup: mGroup,
             stage: 'full',
@@ -4702,7 +4741,7 @@ function applySingleVesselCollisionDamage(targetBoat, otherBoat, contact, { isBo
       const nextStage = damage.mastIntegrity.fore <= 0.18 ? 2 : damage.mastIntegrity.fore <= 0.58 ? 1 : 0;
       if (nextStage > prevStage && damage.mastState) {
         damage.mastState.fore = nextStage;
-        damage.pendingBakes.push({
+        queueMastBreak(damage, {
           kind: 'mast-break',
           mastGroup: 'fore',
           stage: nextStage === 2 ? 'full' : 'topmast',
@@ -5172,7 +5211,7 @@ export function applyGroundingImpactDamage(boat, contact, options = {}) {
       const nextStage = damage.mastIntegrity.fore <= 0.20 ? 2 : (damage.mastIntegrity.fore <= 0.60 || impactSpeed >= 5.2) ? 1 : 0;
       if (nextStage > prevStage && damage.mastState) {
         damage.mastState.fore = nextStage;
-        damage.pendingBakes.push({
+        queueMastBreak(damage, {
           kind: 'mast-break',
           mastGroup: 'fore',
           stage: nextStage === 2 ? 'full' : 'topmast',

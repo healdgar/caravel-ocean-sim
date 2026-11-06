@@ -7,10 +7,13 @@ import { createShipAssetCache } from '../js/ship-mesh.js';
 import { SHIP_MODELS } from '../js/ship-models.js';
 import { indexCaravelMesh, createCaravelMesh } from '../js/caravel.js';
 import { bakeVesselImpactMarks } from '../js/part-assembly.js';
-import { applyShipImpactDamage, sweepShipSegment, stepVesselDamage } from '../js/gunnery-control.js';
+import { applyShipImpactDamage, createGunnerySolidSweep, createVesselDamageState, sweepShipSegment, stepVesselDamage, vesselRailHeight } from '../js/gunnery-control.js';
+import { crewClearsRail, crewRailAboveDeck } from '../js/crew-overboard.js';
+import { modelDeck } from '../js/hull.js';
+import { locatePartAtLocalPoint } from '../js/part-assembly.js';
 import { repairVessel, vesselDamageSnapshot, restoreVesselDamageSnapshot, raiseVesselRig } from '../js/vessel-damage.js';
 import { buildVesselRigConnectors } from '../js/ship-colors.js';
-import { SHARD_KINDS, FRACTURE_RECORD_FLOATS, applyFractureEvents, evaluateShardFlight, settleFinishedFlights, shipFractureStateOf, syncFractureWithDamage } from '../js/ship-fracture.js';
+import { SHARD_KINDS, FRACTURE_RECORD_FLOATS, applyFractureEvents, evaluateShardFlight, fracturePartsGone, settleFinishedFlights, shipFractureStateOf, shipMastSpecs, syncFractureWithDamage } from '../js/ship-fracture.js';
 
 const cache = createShipAssetCache();
 const ready = Object.values(SHIP_MODELS).filter((m) => m.status === 'ready' && m.geometry);
@@ -333,4 +336,138 @@ test('a stay led to another mast comes down when that mast goes', () => {
 test('the release bundle carries the fracture modules', () => {
   const build = readFileSync(new URL('../build.mjs', import.meta.url), 'utf8');
   for (const file of ['js/ship-fracture.js', 'js/wgsl/ship-fracture.js']) assert.ok(build.includes(`'${file}'`), `${file} is on the flattening list`);
+});
+
+// What gameplay does with a gap. Every shot here goes through the game's own sweep, on the real model.
+function openSide(boat, side, { minZ, maxZ, minY = 0, maxY = Infinity }) {
+  const f = boat.partAssembly && cache.get(boat.modelId).fracture, state = shipFractureStateOf(boat.damage, f);
+  const events = [];
+  for (const s of f.strikable) {
+    const shard = f.shards[s], [x, y, z] = shard.centroid;
+    if (Math.sign(x) === side && z >= minZ && z <= maxZ && y >= minY && y <= maxY) events.push({ x, y, z, side, severity: 2, stepDepth: 0.4 });
+  }
+  for (let pass = 0; pass < 3; pass++) applyFractureEvents(f, boat.damage, events, 0);
+  assert.ok(state.brokenCount > 0, `opened ${boat.modelId}'s side`);
+  return state;
+}
+const beamShot = (boat, ly, lz, radius = 0.08, down = 0) => sweepShipSegment([boat.length, ly + down, lz], [-boat.length, ly - down, lz], radius, boat, { id: 'gun', x: boat.length * 2, z: 0, heave: 0, heading: 0, pitch: 0, roll: 0 });
+const designedShip = (id) => { const boat = shipOf(id); createVesselDamageState(boat); return boat; };
+
+test('a shot through a gap flies on and strikes the far side, and one through both sides flies clear', () => {
+  for (const id of ['nina', 'victory', 'santa-maria']) {
+    const boat = designedShip(id), { fracture: f } = cache.get(id), [sx, , sz] = f.scale, stations = [];
+    // Rail height along a stretch of her side, staying below it, so every line starts on standing planking.
+    for (let z = 1.3; z <= 2.7; z += 0.13) stations.push({ lz: z * sz, ly: vesselRailHeight(boat, z * sz) - 0.4 });
+    const before = stations.map(({ ly, lz }) => beamShot(boat, ly, lz));
+    for (const hit of before) {
+      assert.equal(hit?.hitZone, 'hull', `${id} is struck on her planking while it stands`);
+      assert.ok(hit.localPosition[0] > 0, `${id} stops the shot on the side it came from`);
+    }
+    const deck = modelDeck(boat, 2);
+    const state = openSide(boat, 1, { minZ: 0.9, maxZ: 3.1, minY: deck - 0.3 });
+    const through = stations.map(({ ly, lz }) => beamShot(boat, ly, lz));
+    const carried = through.filter((hit, i) => !hit || hit.localPosition[0] < before[i].localPosition[0] - sx);
+    assert.ok(carried.length > stations.length * 0.5, `${id} lets most of them in: ${carried.length} of ${stations.length}`);
+    const gone = fracturePartsGone(state);
+    for (const hit of through) if (hit) assert.ok(!gone.has(hit.hitPartId), `${id} does not stop a shot on ${hit.hitPartId}, which has left`);
+    const farSide = carried.filter((hit) => hit && hit.localPosition[0] < -sx);
+    assert.ok(farSide.length > 0, `${id} has a far side for them to strike`);
+    for (const hit of farSide) assert.ok(hit.normal[0] > 0.5, `${id}: what it strikes from inside faces back along its flight`);
+    openSide(boat, -1, { minZ: 0.9, maxZ: 3.1, minY: deck - 0.3 });
+    const clear = stations.map(({ ly, lz }) => beamShot(boat, ly, lz)).filter((hit) => !hit).length;
+    assert.ok(clear > stations.length * 0.3, `${id} with both sides gone lets some fly clear: ${clear} of ${stations.length}`);
+  }
+});
+
+test('a plunging shot through a gap meets the deck, and one aimed at the hull below the waterline still stops', () => {
+  const boat = designedShip('nina'), [, sy, sz] = cache.get('nina').fracture.scale, z = -1.5 * sz, deck = modelDeck(boat, -1.5);
+  openSide(boat, 1, { minZ: -2.6, maxZ: -0.4 });
+  const hit = sweepShipSegment([3.2, (deck + 0.45) * sy, z], [0, (deck - 0.55) * sy, z], 0.08, boat, { id: 'gun', x: 90, z: 0, heave: 0, heading: 0, pitch: 0, roll: 0 });
+  assert.ok(hit, 'the deck does not leave');
+  assert.ok(Math.abs(hit.localPosition[1] - deck * sy) < 0.25, `it stops at deck height, not ${hit.localPosition[1].toFixed(2)} of ${(deck * sy).toFixed(2)}`);
+  const low = beamShot(boat, -0.1, z);
+  assert.ok(low?.localPosition[0] > 0, 'nothing below the waterline ever left, so the same shot lower down stops where it did');
+});
+
+test('a shot through a gap can strike a mast, and hurts that mast', () => {
+  const boat = designedShip('nina'), f = cache.get('nina').fracture, asset = cache.get('nina'), [, sy, sz] = f.scale;
+  // Where the mast really stands at this height, from its own triangles.
+  const main = shipMastSpecs('nina').findIndex((m) => m[0] === 'main') + 1, height = 0.9;
+  let sum = 0, count = 0;
+  for (let t = 0; t < f.sparMasts.length; t++) {
+    if (f.sparMasts[t] !== main) continue;
+    const at = asset.indices[t * 3] * 9;
+    if (Math.abs(asset.vertices[at + 1] - height) < 0.2) { sum += asset.vertices[at + 2]; count++; }
+  }
+  assert.ok(count > 0, 'the mast runs through this height');
+  const z = sum / count;
+  openSide(boat, 1, { minZ: z - 1, maxZ: z + 1, minY: modelDeck(boat, z) - 0.2 });
+  const hit = [0, 0.04, -0.04, 0.08, -0.08, 0.12].map((dz) => beamShot(boat, height * sy, (z + dz) * sz)).find((h) => h?.hitZone === 'rigging');
+  assert.ok(hit, 'it meets the mast standing behind the gap');
+  assert.equal(hit.mastGroup, 'main');
+  assert.ok(hit.hitPartId.startsWith('mast.main'), `on the mast itself, not ${hit.hitPartId}`);
+  const integrity = boat.damage.mastIntegrity.main;
+  applyShipImpactDamage(boat, { ...hit, velocity: [-330, 0, 0], mass: 14, energy: 0.5 * 14 * 330 * 330, ammo: 'round' });
+  assert.ok(boat.damage.mastIntegrity.main < integrity);
+});
+
+test('nothing is struck on a line that lost nothing, and pieces that have gone are not credited with a hit', () => {
+  const boat = designedShip('victory'), f = cache.get('victory').fracture, [, sy, sz] = f.scale, deck = modelDeck(boat, 3);
+  const elsewhere = beamShot(boat, (deck + 0.2) * sy, 3 * sz), sameKeys = ({ fraction, hitZone, hitPartId, localPosition }) => ({ fraction, hitZone, hitPartId, localPosition });
+  const state = openSide(boat, 1, { minZ: -3, maxZ: -1 });
+  assert.deepEqual(sameKeys(beamShot(boat, (deck + 0.2) * sy, 3 * sz)), sameKeys(elsewhere), 'the rest of her takes a shot exactly as before');
+  const gone = fracturePartsGone(state), catalog = cache.get('victory').partAssembly;
+  assert.ok(gone.size > 0, 'whole parts have left');
+  for (const id of [...gone].slice(0, 30)) {
+    const [x, y, z] = catalog.partsById[id].centroid;
+    const part = locatePartAtLocalPoint(catalog, [x, y, z], { gone });
+    assert.ok(!gone.has(part?.id), `${part?.id} has gone and cannot be struck`);
+  }
+  const events = boat.damage.pendingBakes.length, hit = beamShot(boat, (modelDeck(boat, -2) + 0.2) * sy, -2 * sz);
+  assert.ok(!gone.has(hit?.hitPartId), `the sweep does not name ${hit?.hitPartId}`);
+  assert.equal(boat.damage.pendingBakes.length, events, 'a sweep alone hurts nothing');
+});
+
+test('a fallen mast no longer stops a shot, and what still stands of it does', () => {
+  const boat = designedShip('nina'), { z, fullCut, topCut } = cache.get('nina').fracture.masts.main, [, sy, sz] = cache.get('nina').fracture.scale;
+  const aloft = (topCut + 1) * sy, lower = (topCut - 0.3) * sy;
+  assert.ok(lower > fullCut * sy);
+  assert.equal(beamShot(boat, aloft, z * sz)?.hitZone, 'rigging');
+  assert.equal(beamShot(boat, lower, z * sz)?.hitZone, 'rigging');
+  boat.damage.mastState.main = 1;
+  assert.equal(beamShot(boat, aloft, z * sz), null, 'the topmast has gone');
+  assert.equal(beamShot(boat, lower, z * sz)?.hitZone, 'rigging', 'the lower mast stands to its break');
+  boat.damage.mastState.main = 2;
+  assert.equal(beamShot(boat, lower, z * sz), null, 'and then there is nothing up there to strike');
+});
+
+test('whoever stands behind a gap is no longer shielded by planking that left', () => {
+  const boat = designedShip('nina'), [sx, sy, sz] = cache.get('nina').fracture.scale, z = -0.8, deck = modelDeck(boat, z);
+  const sailor = { position: [1.2 * sx, deck * sy, z * sz], visible: true, casualtyState: 'able', health: 1, crewIndex: 2, scale: [1, 1, 1] };
+  boat.crewCompany = { crew: [sailor] };
+  const sweep = createGunnerySolidSweep({ sourceBoat: null, getVessels: () => [boat] });
+  const projectile = () => ({ id: 1, radius: 0.08, mass: 5, velocity: [-330, 0, 0], ammo: 'round' });
+  const ly = vesselRailHeight(boat, z * sz) - 0.4, from = [boat.length, ly, z * sz], to = [-boat.length, ly, z * sz];
+  assert.ok(ly > sailor.position[1] && ly < sailor.position[1] + 1.6, 'at the height of his body');
+  sweep(from, to, projectile());
+  assert.equal(sailor.casualtyState, 'able', 'behind a standing bulwark the shot never reaches him');
+  openSide(boat, 1, { minZ: z - 0.9, maxZ: z + 0.9, minY: deck - 0.2 });
+  sweep(from, to, projectile());
+  assert.equal(sailor.casualtyState, 'fallen', 'through the gap it does');
+});
+
+test('every ship answers for her gaps and her rail, masts or none', () => {
+  for (const model of ready) {
+    const boat = designedShip(model.id), f = cache.get(model.id).fracture, state = shipFractureStateOf(boat.damage, f);
+    const s = f.strikable[Math.floor(f.strikable.length / 2)];
+    if (s) { state.broken[s] = 1; state.brokenCount = 1; state.revision++; }
+    for (const z of [-7, -3, 0, 3, 7]) {
+      for (const side of [-1, 1]) {
+        assert.ok(Number.isFinite(crewRailAboveDeck(boat, z, side)), `${model.id} has a rail height at ${z}`);
+        assert.ok(crewClearsRail(boat, z, side, 100), `${model.id}: nothing stops a body at that speed`);
+      }
+      const hit = beamShot(boat, 1, z * f.scale[2]);
+      if (hit) assert.ok(hit.localPosition.every(Number.isFinite), `${model.id} strikes somewhere real`);
+    }
+  }
 });

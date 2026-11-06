@@ -6,7 +6,8 @@ import { assignCrewWork, stepCrewWork, updateCrewGunneryAttendance, updateCrewRo
 import { poseCrewWork } from './crew-pose.js';
 import { stepCrewPhysicsState, applyCrewRealism } from './crew-physics.js';
 import { applyCrewWounds, clearCrewWounds } from './crew-wounds.js';
-import { crewClearsRail, sendCrewOverboard, stepCrewOverboard, stepGaleKnockdowns, clearCrewOverboard } from './crew-overboard.js';
+import { crewClearsRail, crewOpenEdgeInset, sendCrewOverboard, stepCrewOverboard, stepGaleKnockdowns, clearCrewOverboard } from './crew-overboard.js';
+import { crewLoseHandsAloft, stepCrewAloftFall } from './crew-aloft.js';
 import { createGunneryTools } from './gunnery-tools.js';
 import { CREW_RENDER, CREW_SHADOW, CREW_POSE_BLEND } from './wgsl/crew.js';
 import { NINA_DESIGN } from './models/nina.js';
@@ -103,7 +104,7 @@ export function reviveCompany(company){
   if(!company?.crew)return;
   for(const s of company.crew){
     s.casualtyState='able';s.wounded=null;s.health=1;s.strength=1;s.woundSeverity=0;s.scorchAmount=0;s.knockdownTimer=0;
-    s.job=null;s.seatedPose=null;s.climbPitch=0;s.navigationPath=null;s.navigationKey=null;s.phys=undefined;
+    s.job=null;s.aloftFall=null;s.seatedPose=null;s.climbPitch=0;s.navigationPath=null;s.navigationKey=null;s.phys=undefined;
     clearCrewWounds(s);
     clearCrewOverboard(s);
   }
@@ -232,7 +233,7 @@ export function stepCompany(company,boat,dt,wind) {
   } else company.pending=!!order.sails&&company.activeControls.some(i=>Math.abs(order.sails[i]-sails.set[i])>.01);
   dt=Math.max(0,Math.min(.1,Number.isFinite(dt)?dt:0));
   company.rigManeuver=sails.maneuver?.stage??null;
-  company.workTime=(company.workTime??0)+dt;assignCrewWork(company,boat);
+  company.workTime=(company.workTime??0)+dt;crewLoseHandsAloft(company,boat);assignCrewWork(company,boat);
   for(const s of company.crew)s._cachedDeckY=s.job?.position?.[1]??s.navigationY??crewDeckHeight(boat,s.z,s.x);
   stepGaleKnockdowns(boat,company,wind,dt);
   for(const s of company.crew){
@@ -241,6 +242,11 @@ export function stepCompany(company,boat,dt,wind) {
         stepCrewOverboard(boat,s,dt);
         if(s.overboard)stepCrewPhysicsState(s,boat,dt,company);
       }
+      continue;
+    }
+    if(s.aloftFall){
+      stepCrewAloftFall(boat,s,dt);
+      stepCrewPhysicsState(s,boat,dt,company);
       continue;
     }
     // Apply blast knockback velocity (from cannon impacts, magazine explosions or a sea) within deck bounds
@@ -334,6 +340,19 @@ export function createDeckhand(policy=deckhandDecision) {
     observation:{order:'patrol',hazard:false,roll:0,rollRate:0,wind:0},
     transform:new Float32Array(16),position:new Float32Array(3),rotation:new Float32Array(4),scale:new Float32Array([.95,.95,.95])};
 }
+// A hand left standing at an edge with no rail moves in from it, wherever the order had him.
+function crewStepInboard(s,boat,dt){
+  if(!boat.damage?.fracture?.brokenCount||s.role==='Helmsman'||s.seatedPose||s.visible===false)return false;
+  const side=Math.sign(s.x);if(!side)return false;
+  const inset=crewOpenEdgeInset(boat,s.z,side);if(!inset)return false;
+  const sx=boat.beam/3.6,keep=Math.max(0,modelDeckWidth(boat,s.z)-inset-.34/sx);
+  if(Math.abs(s.x)<=keep)return false;
+  const motion=crewMotionPolicy(boat,{hazard:s.observation.hazard}),step=motion.speedMetresPerSecond*dt/sx;
+  s.x=side*Math.max(keep,Math.abs(s.x)-step);
+  s.yaw=crewTurnTowards(s.yaw,-side*Math.PI/2,dt,motion.turnRadiansPerSecond);
+  crewAdvanceWalk(s,step*sx,{strideMetres:motion.strideMetres});
+  return true;
+}
 function crewFinishPatrol(s){
   s.target=s.route?(s.target===s.route[1]?s.route[0]:s.route[1]):s.target>0?-2.2:.1;s.wait=2.5;s.navigationPath=null;
 }
@@ -341,7 +360,8 @@ function crewPatrolMotion(s,boat,dt,company){
   if(s.intent!=='patrol'||s.visible===false||s.route&&s.route[0]===s.route[1])return false;
   if(s.wait>0){s.wait=Math.max(0,s.wait-dt);return false;}
   const sx=boat.beam/3.6,sz=boat.length/12,sy=vesselVerticalScale(boat),x=s.home?.[0]??s.patrolX??s.x;
-  const key=[boat.modelId??'nina',boat.length,boat.beam,s.target,x].join('/');
+  // A shot can close a route that was open, so each break asks again.
+  const key=[boat.modelId??'nina',boat.length,boat.beam,s.target,x,boat.damage?.fracture?.revision??0].join('/');
   const from=[s.x,crewDeckHeight(boat,s.z,s.x),s.z];
   if(s.navigationKey!==key){
     // Relocate an unsafe destination, never an actor already on deck. Static
@@ -414,7 +434,7 @@ export function stepDeckhand(s,boat,dt,wind=0,company=null) {
   // Preserve human proportions when resizing the hull; do not squeeze a person
   // through a walkway narrower than their shoulders.
   s.visible=boat.beam>=(s.company?3.2:2.8)&&boat.length>=(s.company?10.5:8);
-  const moving=isDown?false:crewPatrolMotion(s,boat,dt,company),lengthScale=boat.length/12;
+  const moving=isDown?false:crewStepInboard(s,boat,dt)||crewPatrolMotion(s,boat,dt,company),lengthScale=boat.length/12;
   const blend=1-Math.exp(-dt*8);s.walk+=(Number(moving)-s.walk)*blend;s.brace+=(Number(s.intent==='brace')-s.brace)*blend;
   if((boat.modelId==='victory'||ADDITIONAL_DESIGNS[boat.modelId])&&s.role!=='Helmsman'){
     const width=Math.max(0,modelDeckWidth(boat,s.z)-.34/(boat.beam/3.6));s.x=Math.max(-width,Math.min(width,s.x));

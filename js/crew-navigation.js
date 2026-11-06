@@ -6,6 +6,7 @@ import {ADDITIONAL_DESIGNS} from './models/additional.js';
 import {ROWING_DESIGNS} from './models/rowing.js';
 import {LATER_SAIL_DESIGNS} from './models/later-sail.js';
 import {RIG_MASTS,mastPoint} from './rigging.js';
+import {crewOpenEdgeInset} from './crew-overboard.js';
 
 // Metres, independent of design-frame scale. This is a standing-body clearance,
 // not a shrunken render proxy. Hands may reach outside it to work real equipment.
@@ -122,8 +123,9 @@ function crewNavigationIntersects(a,b,o,body){
   }
   return hi>0&&lo<1;
 }
-function crewNavigationOnDeck(p,boat,scale,body){
-  const z=p[2]/scale[2],x=p[0]/scale[0];return Number.isFinite(p[1])&&Math.abs(x)+body.radius/scale[0]<modelDeckWidth(boat,z);
+// Beside an open edge the deck is narrower, except to a hand already there and moving away from it.
+function crewNavigationOnDeck(p,boat,scale,body,leaving=false){
+  const z=p[2]/scale[2],x=p[0]/scale[0],inset=leaving?0:crewOpenEdgeInset(boat,z,Math.sign(x));return Number.isFinite(p[1])&&Math.abs(x)+inset+body.radius/scale[0]<modelDeckWidth(boat,z);
 }
 function crewNavigationRigAccess(p,body,boat,scale){
   // Only the actual resolved runner root is an alternate support. A short
@@ -158,9 +160,9 @@ function crewNavigationPathClear(a,b,boat,obstacles,body,scale){
   if(obstacles.some(o=>crewNavigationIntersects(a,b,o,body)))return false;
   // Preserve the original ramp's interpolated elevation. Width follows the
   // actual hull profile along the path, rather than a fixed patrol corridor.
-  const count=Math.max(1,Math.ceil(Math.hypot(b[0]-a[0],b[2]-a[2])/.12));
+  const count=Math.max(1,Math.ceil(Math.hypot(b[0]-a[0],b[2]-a[2])/.12)),leaving=Math.abs(b[0])<=Math.abs(a[0]);
   for(let i=0;i<=count;i++){
-    const p=a.map((v,k)=>v+(b[k]-v)*i/count);if(!crewNavigationOnDeck(p,boat,scale,body)&&!crewNavigationRigAccess(p,body,boat,scale))return false;
+    const p=a.map((v,k)=>v+(b[k]-v)*i/count);if(!crewNavigationOnDeck(p,boat,scale,body,leaving)&&!crewNavigationRigAccess(p,body,boat,scale))return false;
   }
   return true;
 }
@@ -183,6 +185,9 @@ export function crewNavigationStation(pointDesign,boat,options={}){
   const obstacles=crewNavigationObstacles(boat);if(!obstacles)return null;
   if(crewNavigationExtended(boat.modelId??'nina'))return pointDesign.slice();
   const scale=crewNavigationScale(boat),body=crewNavigationEnvelope(options),p=crewNavigationPhysical(pointDesign,scale),candidates=[p];
+  // A post beside an edge that has lost its rail moves inboard of it.
+  const inset=crewOpenEdgeInset(boat,pointDesign[2],Math.sign(pointDesign[0]));
+  if(inset)candidates.push([Math.sign(p[0])*Math.max(0,(modelDeckWidth(boat,pointDesign[2])-inset)*scale[0]-body.radius-.02),p[1],p[2]]);
   const near=obstacles.filter(o=>p[1]<o.max[1]&&p[1]+body.height>o.min[1]);
   for(const o of near){
     const x0=o.min[0]-body.radius-.02,x1=o.max[0]+body.radius+.02,z0=o.min[2]-body.radius-.02,z1=o.max[2]+body.radius+.02;
@@ -204,6 +209,11 @@ function crewNavigationDetour(a,b,boat,obstacles,body,scale){
   // stair with a diagonal through its riser or move a route to another floor.
   if(Math.abs(a[1]-b[1])>.15)return null;
   const margin=body.radius+.025,reach=2,low=[Math.min(a[0],b[0])-reach,Math.min(a[2],b[2])-reach],high=[Math.max(a[0],b[0])+reach,Math.max(a[2],b[2])+reach],nodes=[a,b];
+  // A walk along an open edge goes inboard of it and back out.
+  if(boat.damage?.fracture?.brokenCount)for(const p of[a,b]){
+    const inboard=Math.sign(p[0])*Math.max(0,Math.abs(p[0])-1),node=[inboard,p[1],p[2]];
+    if(crewNavigationOnDeck(node,boat,scale,body)&&!obstacles.some(q=>crewNavigationInside(node,q,body)))nodes.push(node);
+  }
   for(const o of obstacles){
     if(a[1]>=o.max[1]||a[1]+body.height<=o.min[1]||o.max[0]+margin<low[0]||o.min[0]-margin>high[0]||o.max[2]+margin<low[1]||o.min[2]-margin>high[1])continue;
     for(const x of[o.min[0]-margin,o.max[0]+margin])for(const z of[o.min[2]-margin,o.max[2]+margin]){
