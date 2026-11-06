@@ -159,6 +159,21 @@
     "bytes": 262144,
     "sha256": "a1f4077874c02161181aa49b2ec43db987897912d8619939a9f96b8c2e80a953"
   },
+  "assets/props/cleat.glb": {
+    "url": "assets/props/cleat.43180ec2b333ce1b.glb",
+    "bytes": 60008,
+    "sha256": "43180ec2b333ce1b89efe3d225786ff7e6e40af040a01f76fb67bd5ae465fa29"
+  },
+  "assets/props/jetty-weathered.glb": {
+    "url": "assets/props/jetty-weathered.6c5fe79b108effc6.glb",
+    "bytes": 134100,
+    "sha256": "6c5fe79b108effc665313562048f5e5ece1c7061cd6ddfdfc0f2bbffa2fa48ba"
+  },
+  "assets/props/jetty-planked.glb": {
+    "url": "assets/props/jetty-planked.c8015f5c74ddbd43.glb",
+    "bytes": 181268,
+    "sha256": "c8015f5c74ddbd435cae3b08157e35cbcc79aac46bdc2d30c28f9f5ad984fb28"
+  },
   "assets/ports/1550/buildings-1550-lrm.bin": {
     "url": "assets/ports/1550/buildings-1550-lrm.070f343b9c5ba729.bin",
     "bytes": 1160216,
