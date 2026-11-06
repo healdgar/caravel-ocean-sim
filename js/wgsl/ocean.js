@@ -339,11 +339,12 @@ ${OCEAN_HULL_MASK}
     if (F.post.w > 6.5 && F.post.w < 7.5) { return vec4f(skyUp, 1.0); }
     return vec4f(fwl.r, fwl.g, fresh, 1.0) * 0.2;
   }
+  ${coast?'body = coastalBody(body, cws.bed);':''}
   var col = body * (1.0 - Fr) + refl * Fr + spec+moonSpec;
   col = mix(col, foamLit, foamMask * 0.95);
   col += lightningSurface(nrm,normalize(-in.rel),mix(F.waterCol.rgb,foamAlb,foamMask),.23)
     +lightningCloud(reflect(normalize(in.rel),nrm))*Fr;
-  ${coast?'col = coastalWater(col, in.xz, cws.bed, effHeight, foamLit);':''}
+  ${coast?'col = coastalSwash(col, in.xz, cws.bed, effHeight, foamLit);':''}
 
   // ---- aerial perspective ----
   // aerial perspective: atmosphere extinction plus a marine haze floor

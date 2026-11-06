@@ -11,10 +11,9 @@ import {createNavalBattleGunDefinitions} from '../js/gunnery-models.js';
 let server,browser,origin;
 before(async()=>{
   server=createDevServer();server.listen(0,'127.0.0.1');await once(server,'listening');origin='http://127.0.0.1:'+server.address().port;
-  // macOS headless Metal dispatches wheel events without applying compositor
-  // scrolling, even on a plain HTML scroll box. Use a real native window for
-  // these interaction gates rather than forcing the application's scrollTop.
-  browser=await chromium.launch({headless:process.env.WEBGPU_BACKEND!=='metal',executablePath:process.env.CHROMIUM_PATH||undefined,args:process.env.WEBGPU_BACKEND==='metal'?['--enable-unsafe-webgpu','--use-angle=metal','--disable-gpu-watchdog']:['--enable-unsafe-webgpu','--use-angle=swiftshader','--enable-unsafe-swiftshader','--disable-gpu-watchdog']});
+  // macOS headless Metal dispatches wheel events without applying compositor scrolling, even on a plain
+  // HTML scroll box. Scrolling on the main thread applies them, with no window to take the user's focus.
+  browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||undefined,args:process.env.WEBGPU_BACKEND==='metal'?['--enable-unsafe-webgpu','--use-angle=metal','--disable-gpu-watchdog','--disable-threaded-scrolling']:['--enable-unsafe-webgpu','--use-angle=swiftshader','--enable-unsafe-swiftshader','--disable-gpu-watchdog']});
 });
 after(async()=>{await browser?.close();if(server)await new Promise(resolve=>server.close(resolve));});
 

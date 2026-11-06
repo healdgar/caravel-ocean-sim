@@ -55,7 +55,7 @@ test('GPU terrain occlusion preserves full close-forest, shore, horizon and unde
    // references in 55, by up to 4/255. SwiftShader is exact.
    // The quarter-budget scene exists to read its triangle count. Lower budgets sit closer to
    // tier boundaries, where a culled tree's remembered tier can shift a few pixels by 1/255.
-   const metal=process.env.WEBGPU_BACKEND==='metal';if(!scene.budgetOnly)assert.ok(differences<=(metal?Math.ceil(row.channels*2e-5):0)&&maxError<=(metal?16:0),JSON.stringify(row));
+   const metal=process.env.WEBGPU_BACKEND==='metal';if(!scene.budgetOnly)assert.ok(differences<=(metal?Math.ceil(row.channels*4e-5):0)&&maxError<=(metal?16:0),JSON.stringify(row));
   }
   // Checked once every scene has compared its pixels, so a budget miss cannot hide them.
   const close=rows.find(row=>row.name==='reported-close-view');

@@ -366,7 +366,8 @@ fn coastalWaveState(p:vec2f)->CoastalWaveState{
     return CoastalWaveState(1.0,1.0,0.0,vec3f(0.0),vec2f(0.0),vec2f(1.0,0.0),0.0,bed);
   }
   let slope=textureSampleLevel(coastalSlope,coastalSampler,uv,0.0);
-  let rawTransmit=mix(1.0,shelter.x,inside);
+  // Shelter fades in with depth. Deep water is stored as open sea, and the two must meet without an edge.
+  let rawTransmit=mix(1.0,shelter.x,inside*smoothstep(-58.0,-24.0,bed));
   let fetchDist=mix(1.0,shelter.y,inside)*${COASTAL_FETCH_LIMIT_M}.0;
   let bedNear=mix(-120.0,shelter.w,inside);
   let bedSmooth=mix(-120.0,slope.x,inside);
@@ -491,22 +492,25 @@ fn coastalBreakerFoam(p:vec2f,height:f32,sl:vec2f,cws:CoastalWaveState)->f32{
   let depthBreak=smoothstep(0.18,0.56,dragRatio)*smoothstep(0.09,0.32,frontSlope)*smoothstep(-12.5,-0.5,bed)*(1.0-smoothstep(-0.06,0.45,bed));
   return clamp(max(cws.breakFoam,depthBreak*clamp(cws.swellScale*1.15,0.0,1.0)),0.0,1.0);
 }
-fn coastalWater(color:vec3f,p:vec2f,bed:f32,height:f32,foamLight:vec3f)->vec3f{
-  // Deep/open water: the shallows weight and swash rim are both exactly zero
-  // here (ocean height never approaches -58 m), so the result is the input.
-  if(bed<=-58.0){return color;}
+// The colour coming up through the water. Reflections, sun glitter and foam lie on top of it, so the
+// waves stay visible right up to the beach. Deep water (height never approaches -58 m) is left as it is.
+fn coastalBody(body:vec3f,bed:f32)->vec3f{
+  if(bed<=-58.0){return body;}
   // Deep blue gives way with depth. Over clear tropical sand it runs through turquoise to pale
   // aqua, as the sand starts to show through. Elsewhere shallows only turn a dull grey-green.
   let clarity=coastalWindow.w;
   let light=(sunIlluminance()*max(F.sunDir.y,0.0)+lunarIlluminance()*max(lunarDirection().y,0.0))/PI+skyAtmo(vec3f(0,1,0));
   let shelf=smoothstep(-30.0,-7.0,bed);
   let sand=smoothstep(-8.0,-0.6,bed);
-  var col=mix(color,vec3f(0.014,0.150,0.205)*light,shelf*0.82*clarity);
+  var col=mix(body,vec3f(0.014,0.150,0.205)*light,shelf*0.82*clarity);
   col=mix(col,vec3f(0.085,0.300,0.285)*light,sand*0.42*clarity);
-  col=mix(col,vec3f(0.030,0.082,0.072)*light,smoothstep(-12.0,-1.0,bed)*0.45*(1.0-clarity));
+  return mix(col,vec3f(0.030,0.082,0.072)*light,smoothstep(-12.0,-1.0,bed)*0.45*(1.0-clarity));
+}
+fn coastalSwash(color:vec3f,p:vec2f,bed:f32,height:f32,foamLight:vec3f)->vec3f{
+  if(bed<=-58.0){return color;}
   let depth=height-bed;
   let swashRim=(1.0-smoothstep(0.02,0.32,abs(depth)))*smoothstep(-0.20,0.35,height)*(0.45+0.55*gnoise(p*0.22));
-  return mix(col,foamLight,swashRim*0.42);
+  return mix(color,foamLight,swashRim*0.42);
 }
 `;
 
