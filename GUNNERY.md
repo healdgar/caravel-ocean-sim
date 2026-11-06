@@ -79,6 +79,15 @@ No hit moves a timber vertex. A vertex pulled on its own stretches every triangl
 - **Graphics.** JavaScript writes one 64-byte flight record when a shard breaks. A compute pass moves each shard every frame, rigid in metres, and runs only once something has broken. While anything is in the air, a single clock value is uploaded per frame.
 - **Saves.** Masts return from `mastState`. Shards shot away are listed in the snapshot and come back already gone. A full structural repair restores them.
 
-Buildings still use `bakeBuildingImpactDeformations`: each face slumps rigidly toward a rubble floor, and nothing leaves. The two share only the cell shape. Shots do not yet pass through a gap a shard left, and a crew member can stand where a bulwark was. Fallen wreckage stays in the ship's frame while it floats, so she tows it.
+Buildings still use `bakeBuildingImpactDeformations`: each face slumps rigidly toward a rubble floor, and nothing leaves. The two share only the cell shape. Fallen wreckage stays in the ship's frame while it floats, so she tows it.
+
+### What a gap does
+
+- **Shots.** The hull a shot first reaches is a solid that knows nothing of the pieces. Once she has lost something, her own triangles decide: `traceShotPastGap` follows the shot's line through what stays and what is left. If the first thing on that line is a piece that has gone, the shot flies on and strikes the next thing still standing, whether that is the far side, a frame, a deck, a gun or a mast. A mast struck this way is hurt like any other. Cloth and rope do not stop it. If nothing stands on the line it flies clear. A line with no gap on it strikes exactly where it did. A hit is never credited to a part with nothing left of it.
+- **Masts.** A shot passes through where a fallen section was. The rig zones go up only as far as `mastState` leaves the mast standing.
+- **Shielding.** Bodies are reached up to where the shot stops, so planking that has gone shields nobody.
+- **The rail.** `crewRailAboveDeck` counts only what is left of her side at that station and on that side. A body with no rail to stop it goes over at walking pace (`crewClearsRail`). The deck itself never leaves, so hands stay on it, but they keep 0.45 m from an edge with less than 0.5 m of rail left. A hand caught there moves in, a post there moves inboard, and a route past it goes round. See `CREW.md`.
+
+`scripts/damage-review.mjs` prints a row of level shots asked both ways, as she is and as if nothing had left her, and how many bodies each reaches.
 
 `node scripts/damage-review.mjs` takes pictures of this from the real game. `npm run perf -- '[["battle",{"battle":"1"}]]'` measures it.

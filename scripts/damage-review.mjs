@@ -1,7 +1,8 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // Pictures of a ship under fire, from the real game. Shots go through the game's own sweep and damage
 // code against the live vessel, so the renderer shows what a battle would leave. Same seed every run.
-//   OUT=dir node scripts/damage-review.mjs before nina,victory,victory-fall,nina-fall
+//   OUT=dir node scripts/damage-review.mjs before nina,victory,victory-fall,nina-fall,nina-aloft,victory-aloft
+// Each scene also prints what a row of level shots does against the gaps, and what became of hands aloft.
 // SETTLE_MS overrides the wait after the last shot. HEADED=1 shows the window.
 import {once} from 'node:events';
 import {mkdir} from 'node:fs/promises';
@@ -30,6 +31,9 @@ const SCENES={
   // One mast shot away, pictured as it goes.
   'victory-fall':{ship:'victory',settle:300,frames:[1000,1500,1500,2500],volleys:[{shots:60,mass:14.5,speed:430,minY:24,maxY:34,mast:'main'}],views:[{name:'fall',yaw:-20,elevation:6,distance:62}]},
   'nina-fall':{ship:'nina',settle:300,frames:[600,800,1000,2000],volleys:[{shots:60,mass:1.4,speed:330,minY:6,maxY:9,mast:'mizzen'}],views:[{name:'fall',yaw:20,elevation:8,distance:34}]},
+  // Hands on the mast when it goes: rung counts from the deck, so these land in different places.
+  'nina-aloft':{ship:'nina',settle:300,frames:[300,500,800,1500,3000],aloft:[{mast:1,side:-1,rung:24},{mast:1,side:-1,rung:12},{mast:1,side:1,rung:3}],volleys:[{shots:60,mass:1.4,speed:330,minY:6,maxY:9,mast:'main'}],views:[{name:'fall',yaw:20,elevation:8,distance:34}]},
+  'victory-aloft':{ship:'victory',settle:300,frames:[500,800,1200,2500,4000],aloft:[{mast:1,side:1,rung:25},{mast:1,side:-1,rung:8},{mast:1,side:-1,rung:2}],volleys:[{shots:60,mass:14.5,speed:430,minY:24,maxY:34,mast:'main'}],views:[{name:'fall',yaw:-20,elevation:6,distance:62}]},
 };
 await mkdir(outDir,{recursive:true});
 const server=createDevServer();server.listen(0,'127.0.0.1');await once(server,'listening');
@@ -49,7 +53,7 @@ for(const name of ships){
   // The picture is of the ship, not the panels over her.
   await page.addStyleTag({content:'body *{visibility:hidden!important}canvas{visibility:visible!important}'});
   await page.screenshot({path:join(outDir,`${name}-${label}-0-intact.png`)});
-  const report=await page.evaluate(fireBroadside,{volleys:scene.volleys});
+  const report=await page.evaluate(fireBroadside,{volleys:scene.volleys,aloft:scene.aloft??[]});
   await page.evaluate(()=>[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Arcs')?.click());
   console.log(name,JSON.stringify(report));
   await page.waitForTimeout(Number(process.env.SETTLE_MS??scene.settle));
@@ -57,6 +61,7 @@ for(const name of ships){
   for(const wait of scene.frames??[]){
     await page.screenshot({path:join(outDir,`${name}-${label}-frame${frame++}.png`)});
     await page.waitForTimeout(wait);
+    if(scene.aloft)console.log(name,'hands after',wait,'ms',JSON.stringify(await page.evaluate(()=>window.damageReviewHands())));
   }
   for(const v of scene.views){
     if(v!==at){
@@ -69,6 +74,7 @@ for(const name of ships){
     }
     const file=join(outDir,`${name}-${label}-${v.name}.png`);await page.screenshot({path:file});console.log('wrote',file);
   }
+  console.log(name,'hands still at an open edge',JSON.stringify(await page.evaluate(()=>window.damageReviewEdge())));
   if(errors.length)console.log('errors:',errors.slice(0,5).join('\n'));
   await page.close();
 }

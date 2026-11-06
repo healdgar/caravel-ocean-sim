@@ -167,3 +167,13 @@ The sequence is authored and simplified, not historical reefing or a general
 multi-agent planning solution. Station ownership is by fixed role; there is no
 arbitrary task auction or general deadlock resolver. Physical iPhone performance
 of procedural IK remains unmeasured; the 30 FPS resolution target still applies.
+
+## When the mast comes down
+
+A section takes whoever is on it (`js/crew-aloft.js`). A hand on the lower ratlines stays with a lower mast that still stands, unless his ratlines were made fast above the break. Masts are read from `damage.mastState`, so it does not matter what brought one down.
+
+He comes away as it leans, thrown to the side it falls by up to 5 m/s, harder the higher he is above the break. Where that lands him decides the rest. Clear of the deck he goes overboard with `cause: 'mast-fall'`, hurt, and dead from 30 m or more. On the deck he falls in her frame and is counted when he lands: under 2.2 m knocks him down, up to 7 m wounds him and usually breaks a limb, and more kills him.
+
+Nobody is sent up a mast with no runners left, nobody keeps a lookout from a broken mast, and a hand walking to one turns back. Its canvas is then handled from the deck.
+
+An edge that has lost its rail is covered in `GUNNERY.md`, under What a gap does.

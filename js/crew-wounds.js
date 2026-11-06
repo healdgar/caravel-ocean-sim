@@ -22,6 +22,7 @@ export const CREW_BALL_SEVER_CHANCE = 0.55;
 export const CREW_BALL_BREAK_CHANCE = 0.3;
 export const CREW_BALL_CRUSH_CHANCE = 0.6;
 export const CREW_SPLINTER_BREAK_CHANCE = 0.35;
+export const CREW_FALL_BREAK_CHANCE = 0.7;
 
 const woundClamp = (x, a, b) => Math.max(a, Math.min(b, x));
 
@@ -68,7 +69,7 @@ function crewWoundBoatPoint(p, s) {
   return [s.position[0] + c * x + sn * Z, s.position[1] + Y, s.position[2] - sn * x + c * Z];
 }
 
-// Queue a hit for the next pose. `kind` is 'arrow', 'ball' or 'splinter'; `roll` is 0 to 1.
+// Queue a hit for the next pose. `kind` is 'arrow', 'ball', 'splinter' or 'fall'; `roll` is 0 to 1.
 export function recordCrewWound(s, kind, point, direction, roll = 0) {
   if (!s?.position) return;
   (s.pendingWounds ??= []).push({ kind, point: crewWoundActorPoint(point, s), direction: crewWoundActorDirection(direction ?? [0, 0, 1], s), roll });
@@ -93,6 +94,7 @@ export function crewWoundOutcome(kind, bone, roll) {
     return roll < CREW_BALL_CRUSH_CHANCE ? { kind: 'crushed', bone: 'spine_03' } : null;
   }
   if (kind === 'splinter' && joint && roll < CREW_SPLINTER_BREAK_CHANCE) return { kind: 'broken', bone: joint };
+  if (kind === 'fall' && joint && roll < CREW_FALL_BREAK_CHANCE) return { kind: 'broken', bone: joint };
   return null;
 }
 

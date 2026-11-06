@@ -37,6 +37,8 @@ const SPLICED_MASTS = new Set(['victory']);
 
 export const SHARD_KINDS = Object.freeze({ skin: 1, whole: 2, gun: 3, mast: 4, line: 5 });
 const WATERLINE_MARGIN = 0.35, ROPE_MATERIALS = new Set([2, 12, 19]);
+// A line is made fast this far below its top end, in design units, which decides the section it goes with.
+export const LINE_MADE_FAST_BELOW_TOP = 0.5;
 
 const isHullSkin = (id) => /^(hull$|hull\.(planking|outer|inner|clinker-laps|gunwales|wales|closure)|wale:)/.test(id);
 const isUpperSkin = (id) => /^(bulwark:-?\d|bulwark\.(port|starboard)|bulwark$|cabin$|cabin\.|structure\.|stern\.|transom|rail\.|bow\.structure)/.test(id);
@@ -214,10 +216,16 @@ export function prepareShipFracture({ modelId, model = null, vertices, indices, 
   const shardMeta = new Map(), skinNames = new Map();
   const assign = (t, key, meta) => { triKeys.set(t, key); if (!shardMeta.has(key)) shardMeta.set(key, meta); };
   const newGroupRanges = new Map();
+  // [triangle, mast number + 1] for every spar, so a shot can strike one and hurt the right mast.
+  const sparTriangles = [];
+  const markSpar = (list, mastId) => { const number = specs.findIndex((spec) => spec[0] === mastId) + 1; for (const t of list) sparTriangles.push(t, number); };
 
   for (const [g, triangles] of byGroup) {
     const group = allGroups[g], id = String(group.id ?? '');
-    if (isFixed(id)) continue;
+    if (isFixed(id)) {
+      if (/^mast\.trunk\./.test(id) && specs.length) markSpar(triangles, mastOfPart(id, group.nodeId ?? '', modelId, specs) ?? nearestMast(specs, store.get(outIndices[triangles[0] * 3] * 9 + 2))[0]);
+      continue;
+    }
     if (isRig(id)) {
       if (!specs.length) continue;
       const named = mastOfPart(id, group.nodeId ?? '', modelId, specs);
@@ -271,8 +279,9 @@ export function prepareShipFracture({ modelId, model = null, vertices, indices, 
             || (!wholePart && ((piece.triangles.length <= 16 && longest > 0.4) || (!isSpar && longest > 1)));
           const mid = (piece.min[1] + piece.max[1]) * 0.5;
           // A line belongs to what its top end is made fast to. Anything rigid belongs to where it sits.
-          const anchorY = isRope ? piece.max[1] - 0.5 : mid;
+          const anchorY = isRope ? piece.max[1] - LINE_MADE_FAST_BELOW_TOP : mid;
           let segment = anchorY >= topCut ? 2 : anchorY >= fullCut ? 1 : 0;
+          if (isSpar && !isRope) markSpar(piece.triangles, mast);
           if (isRope && segment === 0) segment = 1;
           if (wholePart && segment === 0) segment = 1;
           if (segment === 0) continue;
@@ -395,6 +404,8 @@ export function prepareShipFracture({ modelId, model = null, vertices, indices, 
     }
   }
   const outVertices = store.finish();
+  const sparMasts = new Uint8Array(tris);
+  for (let i = 0; i < sparTriangles.length; i += 2) sparMasts[sparTriangles[i]] = sparTriangles[i + 1];
   const vertexCount = outVertices.length / 9;
   const vertexShards = new Uint32Array(vertexCount);
   for (let v = 0; v < vertexCount; v++) vertexShards[v] = owner[v] > 0 ? owner[v] : 0;
@@ -474,6 +485,7 @@ export function prepareShipFracture({ modelId, model = null, vertices, indices, 
   for (const [id, range] of newGroupRanges) {
     outGroups.push({ id, nodeId: range.nodeId, firstVertex: baseTriangles * 3 + range.first * 3, vertexCount: (range.end - range.first) * 3 });
   }
+  const solidClusters = buildSolidClusters({ vertices: outVertices, indices: combined, vertexShards, shards, sparMasts });
   const fracture = Object.freeze({
     modelId,
     scale: Object.freeze(scale),
@@ -483,6 +495,10 @@ export function prepareShipFracture({ modelId, model = null, vertices, indices, 
     designFrame: frame ?? null,
     shardCount,
     vertexShards,
+    vertices: outVertices,
+    indices: combined,
+    sparMasts,
+    solidClusters,
     shards: Object.freeze(shards),
     masts: Object.freeze(masts),
     strikable: Object.freeze(shards.filter((s) => s && free(s)).map((s) => s.index)),
@@ -515,6 +531,8 @@ export function createShipFractureState(fracture) {
     flightEnds: -Infinity,
     epoch: 0,
     revision: 0,
+    partsGone: null,
+    sideTops: null,
   };
 }
 
@@ -791,6 +809,165 @@ export function brokenShardList(damage) {
   const list = [];
   for (const s of state.fracture.strikable) if (state.broken[s]) list.push(s);
   return list;
+}
+
+// ---------------------------------------------------------------------------------------------------
+// What the rest of the game asks of the pieces. Design units throughout, and none of it runs until
+// something has broken.
+
+// Everything solid in her, in clusters of nearby triangles, so a line through her tests few of them. Cloth
+// and rope do not stop a ball, so of what hangs on a mast only the spars count. Built with the model, so the
+// first shot through a gap costs no more than the rest.
+const SOLID_CLUSTER_SIZE = 0.6, SOLID_CLUSTER_CELLS = 256, SOLID_CLUSTER_SHARD_STRIDE = SOLID_CLUSTER_CELLS ** 3;
+function buildSolidClusters({ vertices, indices, vertexShards, shards, sparMasts }) {
+  const byKey = new Map(), cell = (value) => Math.floor(value / SOLID_CLUSTER_SIZE) + SOLID_CLUSTER_CELLS / 2;
+  for (let t = 0, n = indices.length / 3; t < n; t++) {
+    const s = vertexShards[indices[t * 3]], shard = shards[s];
+    const hanging = shard?.kind === SHARD_KINDS.mast || shard?.kind === SHARD_KINDS.line;
+    if (hanging && !sparMasts[t]) continue;
+    const at = indices[t * 3] * 9;
+    // A plank, fitting or gun is its own cluster. What never leaves is cut up by position.
+    const cluster3D = shard && !hanging ? 0 : 1 + cell(vertices[at]) + cell(vertices[at + 1]) * SOLID_CLUSTER_CELLS + cell(vertices[at + 2]) * SOLID_CLUSTER_CELLS * SOLID_CLUSTER_CELLS;
+    const key = s * SOLID_CLUSTER_SHARD_STRIDE + cluster3D;
+    let cluster = byKey.get(key);
+    if (!cluster) byKey.set(key, cluster = { shard: s, triangles: [], min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] });
+    cluster.triangles.push(t);
+    for (let k = 0; k < 3; k++) {
+      const v = indices[t * 3 + k] * 9;
+      for (let c = 0; c < 3; c++) {
+        const value = vertices[v + c];
+        if (value < cluster.min[c]) cluster.min[c] = value;
+        if (value > cluster.max[c]) cluster.max[c] = value;
+      }
+    }
+  }
+  const clusters = [...byKey.values()];
+  for (const cluster of clusters) cluster.triangles = Uint32Array.from(cluster.triangles);
+  return Object.freeze(clusters);
+}
+
+// Fraction along a to b where that line meets a triangle of her, or Infinity. Either face counts.
+function lineMeetsTriangle(vertices, indices, t, a, d) {
+  const i0 = indices[t * 3] * 9, i1 = indices[t * 3 + 1] * 9, i2 = indices[t * 3 + 2] * 9;
+  const ex = vertices[i1] - vertices[i0], ey = vertices[i1 + 1] - vertices[i0 + 1], ez = vertices[i1 + 2] - vertices[i0 + 2];
+  const fx = vertices[i2] - vertices[i0], fy = vertices[i2 + 1] - vertices[i0 + 1], fz = vertices[i2 + 2] - vertices[i0 + 2];
+  const px = d[1] * fz - d[2] * fy, py = d[2] * fx - d[0] * fz, pz = d[0] * fy - d[1] * fx;
+  const det = ex * px + ey * py + ez * pz;
+  if (Math.abs(det) < 1e-12) return Infinity;
+  const ox = a[0] - vertices[i0], oy = a[1] - vertices[i0 + 1], oz = a[2] - vertices[i0 + 2];
+  const u = (ox * px + oy * py + oz * pz) / det;
+  if (u < 0 || u > 1) return Infinity;
+  const qx = oy * ez - oz * ey, qy = oz * ex - ox * ez, qz = ox * ey - oy * ex;
+  const v = (d[0] * qx + d[1] * qy + d[2] * qz) / det;
+  if (v < 0 || u + v > 1) return Infinity;
+  return (fx * qx + fy * qy + fz * qz) / det;
+}
+
+// Does the line reach this cluster's box before `limit`?
+function lineNearCluster(cluster, a, d, limit) {
+  let lo = -Infinity, hi = Infinity;
+  for (let c = 0; c < 3; c++) {
+    if (Math.abs(d[c]) < 1e-9) {
+      if (a[c] < cluster.min[c] || a[c] > cluster.max[c]) return false;
+      continue;
+    }
+    const t1 = (cluster.min[c] - a[c]) / d[c], t2 = (cluster.max[c] - a[c]) / d[c];
+    lo = Math.max(lo, Math.min(t1, t2));
+    hi = Math.min(hi, Math.max(t1, t2));
+    if (lo > hi) return false;
+  }
+  return lo < limit;
+}
+
+/**
+ * What a shot meets on the line a to b, given what has left. The solid hull it first reached knows nothing
+ * of the pieces, so her own triangles decide. Null means the first thing on the line is still there, and the
+ * shot strikes where it reached her. Otherwise the way in has gone, and `t` is the next thing standing,
+ * Infinity if it passes clean through. `t` runs along a to b and may lie beyond either end.
+ */
+export function traceShotPastGap(state, a, b) {
+  const { fracture, broken } = state, { vertices, indices, shards, sparMasts, solidClusters } = fracture;
+  const d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+  // Most lines have no gap on them, and asking the pieces that left first settles those at once.
+  let opening = Infinity;
+  for (const cluster of solidClusters) {
+    const s = cluster.shard;
+    // A fallen spar left nothing to pass through, and a dismounted gun lies on deck out of the way.
+    if (!broken[s] || (shards[s].kind !== SHARD_KINDS.skin && shards[s].kind !== SHARD_KINDS.whole) || !lineNearCluster(cluster, a, d, opening)) continue;
+    for (const t of cluster.triangles) {
+      const met = lineMeetsTriangle(vertices, indices, t, a, d);
+      if (met < opening) opening = met;
+    }
+  }
+  if (opening === Infinity) return null;
+  let standing = Infinity, struck = -1;
+  for (const cluster of solidClusters) {
+    if (broken[cluster.shard] || !lineNearCluster(cluster, a, d, standing)) continue;
+    for (const t of cluster.triangles) {
+      const met = lineMeetsTriangle(vertices, indices, t, a, d);
+      if (met < standing) {
+        standing = met;
+        struck = t;
+      }
+    }
+  }
+  if (standing < opening) return null;
+  return { t: standing, triangle: struck, mast: struck >= 0 && sparMasts[struck] ? shipMastSpecs(fracture.modelId)[sparMasts[struck] - 1][0] : null };
+}
+
+// Parts with nothing left of them, so a hit is never credited to one.
+export function fracturePartsGone(state) {
+  if (state.partsGone?.revision === state.revision) return state.partsGone.ids;
+  const { shards, strikable } = state.fracture, gone = new Set(), standing = new Set();
+  for (const s of strikable) (state.broken[s] ? gone : standing).add(shards[s].partId);
+  for (const id of standing) gone.delete(id);
+  state.partsGone = { revision: state.revision, ids: gone };
+  return gone;
+}
+
+const SIDE_STATIONS = 112, SIDE_DESIGN_SPAN = 14, SIDE_PIECE_MARGIN = 0.05;
+const sidePieceTables = new WeakMap();
+// The pieces that make up her side, by station. Built once per model.
+function sidePiecesByStation(fracture) {
+  let table = sidePieceTables.get(fracture);
+  if (table) return table;
+  table = Array.from({ length: SIDE_STATIONS }, () => []);
+  for (const s of fracture.strikable) {
+    const shard = fracture.shards[s];
+    if (shard.kind !== SHARD_KINDS.skin && !/^(bulwark|rail)/.test(shard.partId)) continue;
+    const first = Math.max(0, Math.floor((shard.min[2] / SIDE_DESIGN_SPAN + 0.5) * SIDE_STATIONS));
+    const last = Math.min(SIDE_STATIONS - 1, Math.floor((shard.max[2] / SIDE_DESIGN_SPAN + 0.5) * SIDE_STATIONS));
+    for (let i = first; i <= last; i++) table[i].push(shard);
+  }
+  sidePieceTables.set(fracture, table);
+  return table;
+}
+
+/**
+ * Height of what is left of her side above the deck at a station, or null where nothing has gone from it.
+ * `deckAt(z)` gives the deck height there. Cached until the next break, since the crew ask constantly.
+ */
+export function fractureSideTop(state, side, z, deckAt) {
+  if (!state?.brokenCount) return null;
+  if (state.sideTops?.revision !== state.revision) {
+    const stations = sidePiecesByStation(state.fracture), tops = [new Float32Array(SIDE_STATIONS), new Float32Array(SIDE_STATIONS)];
+    for (let i = 0; i < SIDE_STATIONS; i++) {
+      const deck = deckAt(((i + 0.5) / SIDE_STATIONS - 0.5) * SIDE_DESIGN_SPAN);
+      for (let which = 0; which < 2; which++) {
+        let gone = false, top = deck;
+        for (const shard of stations[i]) {
+          if (shard.max[1] <= deck || (which ? shard.max[0] < SIDE_PIECE_MARGIN : shard.min[0] > -SIDE_PIECE_MARGIN)) continue;
+          if (state.broken[shard.index]) gone = true;
+          else if (shard.max[1] > top) top = shard.max[1];
+        }
+        tops[which][i] = gone ? top : NaN;
+      }
+    }
+    state.sideTops = { revision: state.revision, tops };
+  }
+  const i = Math.max(0, Math.min(SIDE_STATIONS - 1, Math.floor((z / SIDE_DESIGN_SPAN + 0.5) * SIDE_STATIONS)));
+  const top = state.sideTops.tops[side > 0 ? 1 : 0][i];
+  return Number.isNaN(top) ? null : top;
 }
 
 // The same rigid motion the GPU applies, for tests and tools. Not used by the renderer.

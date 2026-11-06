@@ -5,6 +5,7 @@
 import { boatRotate } from './boat.js';
 import { modelDeck, modelHullDeck, modelDeckWidth, vesselVerticalScale } from './hull.js';
 import { gltfTRS } from './gltf.js';
+import { fractureSideTop } from './ship-fracture.js';
 
 const OVERBOARD_GRAVITY = 9.81;
 const OVERBOARD_DEFAULT_RAIL_M = 1;
@@ -23,6 +24,9 @@ export const OVERBOARD_RESCUE_RANGE_M = 28;
 export const OVERBOARD_RESCUE_SPEED_MPS = 1.6;
 export const OVERBOARD_RESCUE_SECONDS = 6;
 const OVERBOARD_LOST_RANGE_M = 450;
+// Nothing left above the deck to this height is no rail at all, and a hand keeps this far from such an edge.
+const OPEN_EDGE_RAIL_M = 0.5;
+const OPEN_EDGE_KEEP_M = 0.45;
 // A body is out of sight of the deck this long after it stops moving.
 const OVERBOARD_BODY_FLOATS_SECONDS = 90;
 // Gale knockdowns, per exposed hand per second at unit severity.
@@ -39,11 +43,20 @@ function overboardBasis(boat) {
 const overboardDot = (a, x, y, z) => a[0] * x + a[1] * y + a[2] * z;
 
 // Height of the rail above the deck at a station, in metres. An open hull's gunwale is
-// its shell; a decked ship's is her bulwark.
-export function crewRailAboveDeck(boat, zDesign) {
+// its shell; a decked ship's is her bulwark. Given a side, only what is left of it there counts.
+export function crewRailAboveDeck(boat, zDesign, side = 0) {
   const vertical = vesselVerticalScale(boat);
   const deck = modelDeck(boat, zDesign) * vertical, shell = modelHullDeck(boat, zDesign) * vertical;
-  return shell > deck + 0.2 ? shell - deck : OVERBOARD_DEFAULT_RAIL_M;
+  const rail = shell > deck + 0.2 ? shell - deck : OVERBOARD_DEFAULT_RAIL_M;
+  if (!side || !boat.damage?.fracture?.brokenCount) return rail;
+  const left = fractureSideTop(boat.damage.fracture, side, zDesign, (z) => modelDeck(boat, z));
+  return left === null ? rail : Math.max(0, Math.min(rail, left * vertical - deck));
+}
+
+// How much of the deck's width, in design units, a hand gives up beside an open edge. Zero where she has her rail.
+export function crewOpenEdgeInset(boat, zDesign, side) {
+  if (!boat.damage?.fracture?.brokenCount || !side) return 0;
+  return crewRailAboveDeck(boat, zDesign, side) < OPEN_EDGE_RAIL_M ? OPEN_EDGE_KEEP_M / ((boat.beam ?? 3.6) / 3.6) : 0;
 }
 
 // Does a body moving outward this fast go over rather than strike the rail and drop? Heel
@@ -51,9 +64,10 @@ export function crewRailAboveDeck(boat, zDesign) {
 export function crewClearsRail(boat, zDesign, side, outwardMetresPerSecond) {
   if (!(outwardMetresPerSecond > 0)) return false;
   const lean = -Math.sin(boat.roll ?? 0) * side * (boat.beam ?? 3.6) * 0.5;
-  // Even a low rail stops a stumble on a level deck. Heel down to it takes that away.
-  const floor = Math.max(0.03, OVERBOARD_MIN_CLIMB_M - Math.max(0, lean));
-  const climb = Math.max(floor, crewRailAboveDeck(boat, zDesign) - OVERBOARD_BODY_CENTRE_M - lean);
+  // Even a low rail stops a stumble on a level deck. Heel down to it takes that away, and so does a shot.
+  const rail = crewRailAboveDeck(boat, zDesign, side);
+  const floor = Math.max(0.03, Math.min(OVERBOARD_MIN_CLIMB_M, rail) - Math.max(0, lean));
+  const climb = Math.max(floor, rail - OVERBOARD_BODY_CENTRE_M - lean);
   return outwardMetresPerSecond >= Math.sqrt(2 * OVERBOARD_GRAVITY * climb);
 }
 
@@ -67,10 +81,10 @@ function overboardCountLost(boat, s) {
   c.able = Math.max(0, (c.total ?? 0) - c.killed - (c.wounded ?? 0));
 }
 
-export function sendCrewOverboard(boat, s, { side = Math.sign(s.x || 1) || 1, outward = 2.5, cause = 'blast' } = {}) {
+export function sendCrewOverboard(boat, s, { side = Math.sign(s.x || 1) || 1, outward = 2.5, cause = 'blast', dead = false, hurt = false } = {}) {
   if (!boat || !s?.position || s.overboard) return null;
-  const alive = s.casualtyState !== 'fallen';
-  const wounded = s.casualtyState === 'wounded';
+  const alive = !dead && s.casualtyState !== 'fallen';
+  const wounded = hurt || s.casualtyState === 'wounded';
   overboardCountLost(boat, s);
   const { ax, ay, az } = overboardBasis(boat);
   const [lx, ly, lz] = s.position;

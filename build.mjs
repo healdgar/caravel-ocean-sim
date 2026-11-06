@@ -52,6 +52,7 @@ order.splice(order.indexOf('js/main.js'),0,'js/wgsl/hull-flood.js','js/hull-floo
 order.splice(order.indexOf('js/main.js'),0,'js/sea-shadows.js');
 order.splice(order.indexOf('js/crew.js'),0,'js/crew-wounds.js');
 order.splice(order.indexOf('js/crew.js'),0,'js/crew-overboard.js');
+order.splice(order.indexOf('js/crew.js'),0,'js/crew-aloft.js');
 order.splice(order.indexOf('js/wgsl/vessel-pose.js'),0,'js/wgsl/rig-surfaces.js');
 order.splice(order.indexOf('js/wgsl/vessel-pose.js'),0,'js/wgsl/vessel-recoil.js');
 wgslModules.push('js/wgsl/part-assembly.js');
