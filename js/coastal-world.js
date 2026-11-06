@@ -5,6 +5,7 @@
 // of shore for curated 1550s Caribbean ports or any global (lat, lon) landfall.
 
 import { layTownStreets, streetEdgeAt } from './town-streets.js';
+import { layPortProps } from './port-props.js';
 import {
   terrainSample,
   terrainSurfaceSample,
@@ -8726,6 +8727,7 @@ function finalizeProceduralCoastalPack(
     });
     syncPortInstancesToTerrain(port, heights, region, { gradePads: !port?.hasOrthoFootprints });
     port.streets = layTownStreets(port, (x, z) => terrainSurfaceSample(heights, x, z, region));
+    port.props = layPortProps(port, (x, z) => terrainSurfaceSample(heights, x, z, region));
   }
   const shoreDist = computeCoastalShoreDistances(heights, region.size, region.span, 0.25);
   const beaches = synthesizeCoastalBeaches(region, heights, satelliteData, shoreDist, {

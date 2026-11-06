@@ -39,9 +39,10 @@ Reducing with a generated model's texture coordinates stops early and smears: it
 - **Sailor:** in the game as the male crew body, with his own clothes per person, levels baked into his file, and Indigenous men still on the classic body. Fitting him showed a generated rig's elbow can sit 9 cm from the bend it painted, so `scripts/fit-crew-body.py` moves elbows and knees onto our joints and draws limbs in to the classic thickness, which took his sleeve out of the guns. Lisbon with Victory: 58.8 and 56.3 fps against 56.8 and 56.8 with the classic body.
 - **Woman:** in the game the same way, with Indigenous women still on the classic female body. All sailors of a sex share one hair shape and face, varied by the existing colours, proportions and height. A few more generated bodies would give the next step in variety.
 
-To bring these into the game:
+Props are in the game: `js/props.js` culls them on the GPU and draws one textured indirect draw per model, loading nothing until a port is near. Cleats line pier and quay edges, and two kinds of jetty stand on the beach at colonial ports. They're scenery: nothing moors to a jetty, shots pass through it, and it casts no shadow. Its pilings aren't drawn in the underwater pass, so they stop at the surface.
 
-1. **Textured props.** No prop renderer takes a texture today. It needs a bind group per atlas, or a shared array of baked textures.
+Still to bring into the game:
+
 
 ### Decimating the grown trees instead
 
