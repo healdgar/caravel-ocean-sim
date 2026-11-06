@@ -83,6 +83,7 @@ const runtimeAssetTypes = new Map([
   ['assets/crew/sailor.glb','model/gltf-binary'],
   ['assets/crew/sailor-female.glb','model/gltf-binary'],
   ['assets/crew/sailor-classic.glb','model/gltf-binary'],
+  ['assets/crew/sailor-female-classic.glb','model/gltf-binary'],
   ['assets/tree-foliage.png','image/png'],
   ['assets/world/saba/albedo.png','image/png'],
   ['assets/world/saba/canopy.png','image/png'],
@@ -240,7 +241,7 @@ fs.writeFileSync(path.join(root,'docs','assets-manifest.json'),JSON.stringify(Ob
 // Only sailing essentials preload. Marine encounters load their whale asset
 // on demand, keeping optional downloads off the first-frame critical path.
 const startupPreloads=['assets/caravel-oak-albedo.webp','assets/crew/sailor.glb',
-  'assets/crew/sailor-female.glb','assets/crew/sailor-classic.glb']
+  'assets/crew/sailor-female.glb','assets/crew/sailor-classic.glb','assets/crew/sailor-female-classic.glb']
   .map(file=>`<link rel="preload" as="fetch" href="${pagesAssets.get(file).url}" crossorigin="anonymous">`).join('');
 write('docs/index.html', minifyPage(pagesJs).replace('</head>','<meta name="robots" content="noindex, nofollow, noarchive">'+startupPreloads+'</head>')
   .replace('<script type="module">', pagesBootstrap + '<script type="module">'));

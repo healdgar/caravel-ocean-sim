@@ -31,16 +31,17 @@ Reducing with a generated model's texture coordinates stops early and smears: it
 | Pier, low-poly model `tripo-p1`, structure | 40 | 1,268 | 616 | 951 |
 | Pier, default model, structure | 110 | 8,004 | 1,491 | about 5,084 |
 | Ceiba, foliage | 110 | 16,244 | levels 3,991 to 80 | 6,882 floor |
-| Sailor, rigged, character | 135 | 15,692 | levels 4,400 to 393 | not wired |
+| Sailor, rigged, character | 135 | 15,692 | levels 4,327 to 320 | not wired |
+| Woman, rigged, character | 135, and 135 for a first try that read as a man | 15,353 | levels 4,386 to 320 | not wired |
 
 - **Prop and structure:** `tripo-p1` at 40 credits looks better than the default model at 110, and starts lower. Prefer it.
 - **Trees:** led by error, a crown thins to twigs below about 1,000 triangles. Merging vertices by place (`simplifySloppy`) keeps the mass, so a budget tries both and the outline decides. It reads as a tree down to 80 triangles and comes apart at 44, where the tool says so. The result is sheets, which the forest pipelines already draw from both sides. Near the camera a generated tree is chunkier than the grown ones. Use this for a species we cannot grow, since the grown trees' own hierarchy beats it (see below).
 - **Sailor:** in the game as the male crew body, with his own clothes per person, levels baked into his file, and Indigenous men still on the classic body. Fitting him showed a generated rig's elbow can sit 9 cm from the bend it painted, so `scripts/fit-crew-body.py` moves elbows and knees onto our joints and draws limbs in to the classic thickness, which took his sleeve out of the guns. Lisbon with Victory: 58.8 and 56.3 fps against 56.8 and 56.8 with the classic body.
+- **Woman:** in the game the same way, with Indigenous women still on the classic female body. All sailors of a sex share one hair shape and face, varied by the existing colours, proportions and height. A few more generated bodies would give the next step in variety.
 
 To bring these into the game:
 
 1. **Textured props.** No prop renderer takes a texture today. It needs a bind group per atlas, or a shared array of baked textures.
-2. **A woman**, on the same path.
 
 ### Decimating the grown trees instead
 

@@ -443,13 +443,13 @@ export function stepDeckhand(s,boat,dt,wind=0,company=null) {
 }
 
 let preloadedCrewModels=null;
-// The sailor's generated body has no garment pieces to re-sculpt, so Indigenous men are still built on the
-// classic body, which travels with him.
+// The generated bodies have no garment pieces to re-sculpt, so Indigenous people are still built on the
+// classic bodies, which travel with them.
 async function fetchCrewModels(){
-  const [male,female,classic]=await Promise.all(['assets/crew/sailor.glb','assets/crew/sailor-female.glb','assets/crew/sailor-classic.glb'].map(async path=>{
+  const [male,female,classicMale,classicFemale]=await Promise.all(['assets/crew/sailor.glb','assets/crew/sailor-female.glb','assets/crew/sailor-classic.glb','assets/crew/sailor-female-classic.glb'].map(async path=>{
     const response=await fetch(path);if(!response.ok)throw Error('Crew asset unavailable');return loadCrewGLB(await response.arrayBuffer());
   }));
-  male.indigenousBase=classic;
+  male.indigenousBase=classicMale;female.indigenousBase=classicFemale;
   return [male,female];
 }
 export function preloadCrewModels(){
@@ -1024,7 +1024,7 @@ export function createIndigenousCrewModels(models) {
   if (cached) return cached;
   const pair = [
     buildIndigenousCrewModel(models[0].indigenousBase ?? models[0], false),
-    buildIndigenousCrewModel(models[1], true),
+    buildIndigenousCrewModel(models[1].indigenousBase ?? models[1], true),
   ];
   cachedIndigenousModels.set(models[0], pair);
   return pair;

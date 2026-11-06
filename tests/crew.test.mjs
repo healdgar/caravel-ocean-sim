@@ -25,21 +25,25 @@ test('sailor GLB is self-contained, bounded and has the required clips',()=>{
   const rest=positions(model.animator.sample(null,0)),f=new Float32Array(model.vertices.buffer);
   for(let i=0;i<model.vertexCount;i++)for(let k=0;k<3;k++)assert.ok(Math.abs(rest[i*3+k]-f[i*15+k])<1e-5,'inverse binds preserve the authored rest geometry');
 });
-test('the generated body says what each point wears, and carries its own levels',()=>{
-  const f=new Float32Array(model.vertices.buffer,model.vertices.byteOffset,model.vertexCount*15),seen=new Set();
-  for(let i=0;i<model.vertexCount;i++){
-    assert.ok(f[i*15+6]>=0&&f[i*15+6]<2,'red stays clear of the numbers that name optional pieces');
-    seen.add(Math.floor(f[i*15+8]*.5));
+test('the generated bodies say what each point wears, and carry their own levels',()=>{
+  for(const body of [model,loadCrewGLB(fs.readFileSync(new URL('../assets/crew/sailor-female.glb',import.meta.url)))]){
+    const f=new Float32Array(body.vertices.buffer,body.vertices.byteOffset,body.vertexCount*15),seen=new Set();
+    for(let i=0;i<body.vertexCount;i++){
+      assert.ok(f[i*15+6]>=0&&f[i*15+6]<2,'red stays clear of the numbers that name optional pieces');
+      seen.add(Math.floor(f[i*15+8]*.5));
+    }
+    assert.deepEqual([...seen].sort(),[0,1,2,3,4],'paint, shirt, trousers, skin, hair');
+    assert.ok(body.lods[1].triangles<=4400&&body.lods[2].triangles<=1570);
+    assert.ok(body.distantIndices.length/3<=320);
+    assert.equal(createDistantCrewLOD(body),body.distantIndices,'townsfolk take the baked level');
   }
-  assert.deepEqual([...seen].sort(),[0,1,2,3,4],'paint, shirt, trousers, skin, hair');
-  assert.ok(model.lods[1].triangles<=4400&&model.lods[2].triangles<=1570);
-  assert.ok(model.distantIndices.length/3<=320);
-  assert.equal(createDistantCrewLOD(model),model.distantIndices,'townsfolk take the baked level');
 });
 test('Indigenous men are built on the classic body, whose garments can be re-sculpted',()=>{
   const classic=loadCrewGLB(fs.readFileSync(new URL('../assets/crew/sailor-classic.glb',import.meta.url))),female=loadCrewGLB(fs.readFileSync(new URL('../assets/crew/sailor-female.glb',import.meta.url)));
-  const male=loadCrewGLB(bytes);male.indigenousBase=classic;
-  const [indigenous]=createIndigenousCrewModels([male,female]);
+  const classicFemale=loadCrewGLB(fs.readFileSync(new URL('../assets/crew/sailor-female-classic.glb',import.meta.url)));
+  const male=loadCrewGLB(bytes);male.indigenousBase=classic;female.indigenousBase=classicFemale;
+  const [indigenous,indigenousFemale]=createIndigenousCrewModels([male,female]);
+  assert.ok(indigenousFemale.vertexCount>classicFemale.vertexCount);assert.equal(indigenousFemale.distantIndices,null);
   assert.ok(indigenous.vertexCount>classic.vertexCount,'classic vertices, and its accessories');
   assert.equal(indigenous.distantIndices,null,'levels baked for another body stay with it');
 });

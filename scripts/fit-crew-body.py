@@ -126,7 +126,8 @@ def yaw_between(a, b):
 R0 = yaw_between(s_pos('upperarm_l') - s_pos('upperarm_r'), d_pos('upperarm_l') - d_pos('upperarm_r'))
 # Same stature: top of mesh to the floor, against our own sailor's measured height.
 src_height = float(P[:, 1].max() - P[:, 1].min())
-dst_body = next(n for n in dst['nodes'] if n.get('name') == 'SuperHero_Male')['mesh']
+body_node = next(i for i, n in enumerate(dst['nodes']) if n.get('name', '').lower().startswith('superhero_'))
+dst_body = dst['nodes'][body_node]['mesh']
 old = accessor(dst, dst_bin, dst['meshes'][dst_body]['primitives'][0]['attributes']['POSITION'])
 our_height = float(old[:, 1].max() - old[:, 1].min()); S = our_height / src_height
 print('turned', np.round(R0 @ np.array([1, 0, 0]), 2), 'our height', round(our_height, 3), 'scale', round(S, 3))
@@ -301,7 +302,9 @@ colors = np.where(srgb <= .04045, srgb / 12.92, ((srgb + .055) / 1.055) ** 2.4).
 # how far it departs from its garment's typical colour, with the garment's number in blue's whole part, and
 # the shader multiplies that by what this person wears. See crewClothed in js/wgsl/crew.js.
 SHIRT, TROUSERS, SKIN, HAIR = 1, 2, 3, 4
-HEAD_Y, WAIST_Y, CUFF_Y = 1.52, 1.10, .35
+HEAD_Y, COLLAR_Y, WAIST_Y, CUFF_Y, SHOULDER_Y = d_pos('neck_01')[1], d_pos('neck_01')[1] + .08, d_pos('spine_01')[1] + .03, .35, d_pos('spine_03')[1]
+# Hair below the neck is a ponytail: nothing on a shirt is nearly black up there.
+TAIL = .02
 GRIME = .035
 # Dark warm breeches share skin's hue, and only its brightness tells them apart. Same for shirt folds.
 BARE, CHEST = .12, .08
@@ -314,10 +317,11 @@ regions = np.zeros(len(colors), dtype=np.int64)
 head = y >= HEAD_Y; torso = (y >= WAIST_Y) & ~head; thighs = (y >= CUFF_Y) & (y < WAIST_Y); shins = y < CUFF_Y
 regions[head] = SKIN
 regions[head & (lum <= GRIME)] = HAIR
-regions[head & pale & (y < 1.6)] = SHIRT
-regions[head & pale & (y >= 1.6)] = 0  # the whites of the eyes keep their paint
+regions[head & pale & (y < COLLAR_Y)] = SHIRT
+regions[head & pale & (y >= COLLAR_Y)] = 0  # the whites of the eyes keep their paint
 regions[torso] = SHIRT
 regions[torso & skin_hue & (lum > CHEST)] = SKIN
+regions[torso & (lum < TAIL) & (y > SHOULDER_Y)] = HAIR
 regions[thighs] = TROUSERS
 regions[thighs & skin_hue & (lum > BARE)] = SKIN
 regions[thighs & pale & (lum > .1)] = SHIRT
@@ -378,7 +382,7 @@ prim = {'attributes': {
     'JOINTS_0': add(out_j.astype(np.uint16), 34962, 'VEC4', 5123),
     'WEIGHTS_0': add(out_w.astype(np.float32), 34962, 'VEC4', 5126)},
   'indices': add(I.astype(np.uint32), 34963, 'SCALAR', 5125), 'material': 0}
-keep = next(i for i, n in enumerate(dst['nodes']) if n.get('name') == 'SuperHero_Male')
+keep = body_node
 for i, n in enumerate(dst['nodes']):
     if 'mesh' in n and i != keep: n.pop('mesh'); n.pop('skin', None)
 dst['nodes'][keep]['mesh'] = 0

@@ -1278,7 +1278,7 @@ test('Native American settlements, regional structures, demographic collapse tim
 
   // 5. Native American male & female 3D character models and shore village garrison
   const maleBase = loadCrewGLB(fs.readFileSync('assets/crew/sailor-classic.glb').buffer);
-  const femaleBase = loadCrewGLB(fs.readFileSync('assets/crew/sailor-female.glb').buffer);
+  const femaleBase = loadCrewGLB(fs.readFileSync('assets/crew/sailor-female-classic.glb').buffer);
   const [indigMale, indigFemale] = createIndigenousCrewModels([maleBase, femaleBase]);
 
   assert.equal(indigMale.sex, 'male');
