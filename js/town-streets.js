@@ -3,6 +3,8 @@
 // cheapest walk over the ground, so ways merge as real ones do, and how many trips cross a stretch
 // decides whether it is a street, a lane or a path. A road then leaves for the country.
 // The result is immutable: a distance field the land shader reads, and routes a compute pass walks.
+import { WALL_SOLID_HALF_WIDTH_M, enclosurePlan, pointOnEnclosureWall, pointWithinEnclosure } from './fort-plan.js';
+
 const CELL_M = 2;
 const SITE_MARGIN_M = 26;
 const MOST_TOWN_RADIUS_M = 560;
@@ -351,8 +353,12 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
     const j0 = Math.max(0, Math.floor((inst.z - reach - minZ) / CELL_M)), j1 = Math.min(grid.nz - 1, Math.ceil((inst.z + reach - minZ) / CELL_M));
     const deck = deckOf(inst);
     if (deck) decks.push({ inst, ...deck });
+    const walled = enclosurePlan(inst);
     for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
       const c = j * grid.nx + i;
+      // Nobody walks through a palisade: the way into a fort is by its gate.
+      if (walled && pointOnEnclosureWall(inst, walled, grid.x(c), grid.z(c))) grid.cost[c] = Infinity;
+      else if (walled && Number.isFinite(grid.cost[c]) && pointOnEnclosureWall(inst, walled, grid.x(c), grid.z(c), WALL_SOLID_HALF_WIDTH_M + CELL_M)) grid.cost[c] += NEAR_WALL_COST;
       if (deck) {
         const { lx, lz } = worldToLocal(inst, grid.x(c), grid.z(c));
         if (Math.abs(lx) <= deck.halfWidth + CELL_M * 0.2 && Math.abs(lz) <= inst.length * 0.5) grid.cost[c] = 1;
@@ -527,11 +533,14 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
       roadGrid.cost[c] = grade > ROAD_MOST_GRADE ? Infinity : 1 + ROAD_WANDER * (1 + wander * 0.5) + 30 * grade * grade;
     }
     for (const inst of all) {
-      const r = Math.hypot(inst.width, inst.length) * 0.5 + 2;
+      const walled = enclosurePlan(inst);
+      const r = Math.hypot(inst.width, inst.length) * 0.5 + 2 + ROAD_CELL_M;
       const i0 = Math.floor((inst.x - r - roadGrid.minX) / ROAD_CELL_M), i1 = Math.ceil((inst.x + r - roadGrid.minX) / ROAD_CELL_M);
       const j0 = Math.floor((inst.z - r - roadGrid.minZ) / ROAD_CELL_M), j1 = Math.ceil((inst.z + r - roadGrid.minZ) / ROAD_CELL_M);
       for (let j = Math.max(0, j0); j <= Math.min(roadGrid.nz - 1, j1); j++) for (let i = Math.max(0, i0); i <= Math.min(roadGrid.nx - 1, i1); i++) {
         const c = j * roadGrid.nx + i;
+        // A road is too coarse to find a gate, so it keeps out of a fort altogether.
+        if (walled && pointWithinEnclosure(inst, walled, roadGrid.x(c), roadGrid.z(c), ROAD_CELL_M)) roadGrid.cost[c] = Infinity;
         if (NOT_WALKED_ON.has(inst.prefabId)) continue;
         const { lx, lz } = worldToLocal(inst, roadGrid.x(c), roadGrid.z(c));
         if (Math.abs(lx) <= inst.width * 0.5 + 2 && Math.abs(lz) <= inst.length * 0.5 + 2) roadGrid.cost[c] = Infinity;

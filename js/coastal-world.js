@@ -6,6 +6,16 @@
 
 import { layTownStreets, streetEdgeAt } from './town-streets.js';
 import {
+  bastionBayIsEmbrasure,
+  enclosureGroundPoints,
+  enclosureSiteIsClear,
+  footprintFitsEnclosures,
+  fortLocalToWorld,
+  palisadeRingPlan,
+  ringPostIsGate,
+  triangularFortPlan,
+} from './fort-plan.js';
+import {
   terrainSample,
   terrainSurfaceSample,
   safeLandfallStart,
@@ -1714,9 +1724,9 @@ const PREFAB_SITE_NEEDS = Object.freeze({
   timber_mole_pier: 'pier',
   stone_arch_bridge: 'bridge',
   stone_quay_seawall: 'quay',
-  // A ring walls round the settlement rather than standing on one spot of it.
-  english_triangular_palisade_fort: 'free',
-  indigenous_palisade_ring: 'free',
+  // A ring walls round the settlement, so it is its wall line that needs the ground and the room.
+  english_triangular_palisade_fort: 'enclosure',
+  indigenous_palisade_ring: 'enclosure',
 });
 const FOOTPRINT_SAMPLES = Object.freeze([-1, -0.5, 0, 0.5, 1]);
 // Nothing grows on a way, and a tree stands a little off it.
@@ -1742,7 +1752,9 @@ export function syncPortInstancesToTerrain(portOrInstances, heights, region, { g
   const step = span / Math.max(1, n - 1);
 
   if (gradePads) {
-    for (const inst of instances) {
+    // A palisade fort keeps the level it was sited at. Its yard goes last, so its houses' pads cannot lift it.
+    const levelledLast = (inst) => inst.prefabId === 'english_triangular_palisade_fort';
+    for (const inst of [...instances.filter((i) => !levelledLast(i)), ...instances.filter(levelledLast)]) {
       if (
         OVER_WATER_PREFAB_IDS.has(inst.prefabId) ||
         inst.prefabId === 'indigenous_canoe_landing' ||
@@ -1774,11 +1786,13 @@ export function syncPortInstancesToTerrain(portOrInstances, heights, region, { g
         inst.prefabId === 'english_triangular_palisade_fort';
       const padSlopeX = isFort ? 0 : Math.max(-0.08, Math.min(0.08, rawSlopeX));
       const padSlopeZ = isFort ? 0 : Math.max(-0.08, Math.min(0.08, rawSlopeZ));
-      const padY = inst.indigenous && !isFort
-        ? Math.max(0.95, centerGroundY)
-        : isFort
-          ? Math.max(inst.y ?? 2.8, centerGroundY)
-          : Math.max(1.6, centerGroundY);
+      const padY = levelledLast(inst)
+        ? inst.y ?? 2.8
+        : inst.indigenous && !isFort
+          ? Math.max(0.95, centerGroundY)
+          : isFort
+            ? Math.max(inst.y ?? 2.8, centerGroundY)
+            : Math.max(1.6, centerGroundY);
 
       const coreX = hw + step * 1.05;
       const coreZ = hl + step * 1.05;
@@ -3989,7 +4003,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       footprintRise(x, z, yaw, width, length) <= PREFAB_MOST_RISE_M;
   };
   // A pier keeps its heading and slides along it until its root is on the shore and its head in water.
-  const pierSite = (wanted, yaw, length) => {
+  const pierSite = (wanted, yaw, width, length) => {
     const axisX = Math.sin(yaw), axisZ = Math.cos(yaw), half = length * 0.5;
     const endAt = (slide, end) => terrainSurfaceSample(heights, wanted.x + axisX * (slide + end * half), wanted.z + axisZ * (slide + end * half), region);
     for (let distance = 0; distance <= PIER_MOST_SLIDE_M; distance += 3) {
@@ -3997,7 +4011,8 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
         const a = endAt(slide, 1), b = endAt(slide, -1);
         const root = Math.max(a, b), head = Math.min(a, b);
         if (root >= PIER_ROOT_LOWEST_M && root <= PIER_ROOT_HIGHEST_M && head <= PIER_HEAD_HIGHEST_M) {
-          return { x: wanted.x + axisX * slide, z: wanted.z + axisZ * slide };
+          const x = wanted.x + axisX * slide, z = wanted.z + axisZ * slide;
+          if (footprintFitsEnclosures(instances, x, z, yaw, width, length)) return { x, z };
         }
       }
     }
@@ -4011,14 +4026,28 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       terrainSurfaceSample(heights, x, z, region) <= 0.2;
   };
   const prefabSiteNeed = (prefabId) => PREFAB_SITE_NEEDS[prefabId] ?? 'land';
-  function findPrefabSite(prefabId, wanted, yaw, width, length) {
+  const enclosureSuits = (candidate) => {
+    let low = Infinity, high = -Infinity;
+    for (const { x, z } of enclosureGroundPoints(candidate)) {
+      const h = terrainSurfaceSample(heights, x, z, region);
+      if (h < low) low = h;
+      if (h > high) high = h;
+    }
+    return low >= PREFAB_DRY_GROUND_M && high - low <= PREFAB_MOST_RISE_M;
+  };
+  function findPrefabSite(prefabId, wanted, yaw, width, length, homeFort = null) {
     const need = prefabSiteNeed(prefabId);
-    if (need === 'free') return wanted;
-    if (need === 'pier') return pierSite(wanted, yaw, length);
+    if (need === 'pier') return pierSite(wanted, yaw, width, length);
+    const asEnclosure = (x, z) => ({ prefabId, x, z, yaw, width, length });
     const suits = need === 'bridge'
       ? (x, z) => bridgeSuits(x, z, yaw, length)
-      : (x, z) => siteSuits(need, x, z, yaw, width, length);
-    const open = (x, z) => need === 'quay' || !obbOverlapsExisting(x, z, yaw, width, length, prefabId);
+      : need === 'enclosure'
+        ? (x, z) => enclosureSuits(asEnclosure(x, z))
+        : (x, z) => siteSuits(need, x, z, yaw, width, length);
+    const open = need === 'enclosure'
+      ? (x, z) => enclosureSiteIsClear(asEnclosure(x, z), instances)
+      : (x, z) => (need === 'quay' || !obbOverlapsExisting(x, z, yaw, width, length, prefabId)) &&
+          footprintFitsEnclosures(instances, x, z, yaw, width, length, homeFort);
     if (suits(wanted.x, wanted.z) && open(wanted.x, wanted.z)) return { x: wanted.x, z: wanted.z };
     // Rings out from the wanted spot, starting on the landward side so ties go inland.
     const landward = (region.shoreBearing ?? 112) * COASTAL_DEG_TO_RAD;
@@ -4038,13 +4067,17 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     const prefab = PORT_PREFABS[prefabId] ?? cairnSpec;
     const instLength = overrides?.length ?? prefab?.length ?? 24;
     const instWidth = overrides?.width ?? prefab?.width ?? 18;
-    const yaw = bearingRad + yawOffsetDeg * COASTAL_DEG_TO_RAD;
-    const wanted = worldFromCoastalFrame(region, bestShoreAlong + alongOffset, bestShoreInland + inlandOffset);
+    // A house inside a fort is set out in the fort's own frame, so its plan holds however the coast runs.
+    const homeFort = overrides?.homeFort ?? null;
+    const yaw = homeFort ? homeFort.yaw + overrides.fortSlot[2] : bearingRad + yawOffsetDeg * COASTAL_DEG_TO_RAD;
+    const wanted = homeFort
+      ? fortLocalToWorld(homeFort, overrides.fortSlot[0], overrides.fortSlot[1])
+      : worldFromCoastalFrame(region, bestShoreAlong + alongOffset, bestShoreInland + inlandOffset);
     // Hand-set works, such as Lisbon's dredged basin and its quays, keep the place they were given.
     const site = overrides?.exactY !== undefined
       ? wanted
-      : findPrefabSite(prefabId, wanted, yaw, instWidth, instLength);
-    if (!site) return;
+      : findPrefabSite(prefabId, wanted, yaw, instWidth, instLength, homeFort);
+    if (!site) return null;
     const pos = site;
     const groundY = terrainSurfaceSample(heights, pos.x, pos.z, region);
     const y = overrides?.exactY !== undefined
@@ -4073,6 +4106,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       cultureId: overrides?.cultureId ?? region.indigenousSettlement?.cultureId ?? null,
       cairnSpec,
     });
+    return instances[instances.length - 1];
   };
 
   // 1. Timber mole piers & stone quays derived from harbor boat/pier outlines (or fallback shoreline pier)
@@ -4499,27 +4533,51 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       ? '1608 Timber-Framed Church & Virginia Company Storehouse'
       : 'Half-Timbered Meetinghouse & Company Magazine';
 
+    // Piers and forts go down before the town does, so that the town builds round them.
+    const grownToSecondPier = colonyGrowth.stage === 'fortified-port' || colonyGrowth.stage === 'citadel-metropolis' || colonyGrowth.expansionTier >= 3;
+    if (grownToSecondPier) {
+      const secondPierTip = worldFromCoastalFrame(region, bestShoreAlong + 42, bestShoreInland - 30);
+      if (terrainSample(heights, secondPierTip.x, secondPierTip.z, region) <= -0.4) {
+        addPrefab('timber_mole_pier', 42, -22, 0, 2.2, {
+          label: isJamestown ? 'Tobacco Fleet Hogshead Wharf' : 'Merchant Brigantine Wharf',
+        });
+      }
+    }
     // Enclosing Triangular Palisade Fort (James Fort, 118m x 90m) surrounding the core settlement buildings
-    addPrefab('english_triangular_palisade_fort', 0, 48, 0, 2.8, {
+    const fort = addPrefab('english_triangular_palisade_fort', 0, 48, 0, 2.8, {
       label: fortLabel,
       armed: true,
       hasMagazine: true,
     });
+    if (colonyGrowth.expansionTier >= 5) {
+      addPrefab('english_triangular_palisade_fort', 94, 18, -16, 3.2, {
+        label: isJamestown ? 'Turf & Timber River Battery' : 'Harbor Crossfire Timber Battery',
+        armed: true,
+        hasMagazine: true,
+      });
+    }
     // Core church, company storehouse & flanked rows of half-timbered / mud-and-stud cottages INSIDE the triangular palisade fort
+    const fortPlan = fort ? triangularFortPlan(fort.width, fort.length) : null;
+    const inFort = (slot) => (fort ? { homeFort: fort, fortSlot: slot } : null);
     addPrefab('english_half_timber_hall', 0, 44, 0, 2.8, {
       label: hallLabel,
+      ...inFort(fortPlan?.hallSlot),
     });
     addPrefab('english_timber_cottage', -22, 32, 0, 2.7, {
       label: isJamestown ? 'Mud-and-Stud & Clapboard Settlers’ West Row' : 'Clapboard & Thatch Settler Cottage',
+      ...inFort(fortPlan?.cottageSlots[3]),
     });
     addPrefab('english_timber_cottage', 22, 32, 0, 2.7, {
       label: isJamestown ? 'Mud-and-Stud & Clapboard Settlers’ East Row' : 'Half-Timbered Planter’s House',
+      ...inFort(fortPlan?.cottageSlots[2]),
     });
     addPrefab('english_timber_cottage', -14, 62, 0, 2.9, {
       label: isJamestown ? 'Governor’s Half-Timbered Tenement (Inside Fort)' : 'Company Guard & Quartermaster House',
+      ...inFort(fortPlan?.cottageSlots[0]),
     });
     addPrefab('english_timber_cottage', 14, 62, 0, 2.9, {
       label: 'Artificers’ & Smiths’ Timber Forge Cottage (Inside Fort)',
+      ...inFort(fortPlan?.cottageSlots[1]),
     });
     // Waterfront shallop careening shed, slipway & river watch beacon outside the fort curtains
     addPrefab('careening_shed', -68, 14, 10, 2.0, {
@@ -4562,13 +4620,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
         label: 'Country Road Planter’s Homestead',
       });
     }
-    if (colonyGrowth.stage === 'fortified-port' || colonyGrowth.stage === 'citadel-metropolis' || colonyGrowth.expansionTier >= 3) {
-      const secondPierTip = worldFromCoastalFrame(region, bestShoreAlong + 42, bestShoreInland - 30);
-      if (terrainSample(heights, secondPierTip.x, secondPierTip.z, region) <= -0.4) {
-        addPrefab('timber_mole_pier', 42, -22, 0, 2.2, {
-          label: isJamestown ? 'Tobacco Fleet Hogshead Wharf' : 'Merchant Brigantine Wharf',
-        });
-      }
+    if (grownToSecondPier) {
       addPrefab('english_half_timber_hall', -22, 96, 0, 3.5, {
         label: isJamestown ? 'Statehouse & General Court Building' : 'Provincial Statehouse & Court',
       });
@@ -4588,13 +4640,6 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       });
       addPrefab('english_timber_cottage', 36, 122, 0, 3.8, {
         label: 'Upper Street Merchant Tenement',
-      });
-    }
-    if (colonyGrowth.expansionTier >= 5) {
-      addPrefab('english_triangular_palisade_fort', 94, 18, -16, 3.2, {
-        label: isJamestown ? 'Turf & Timber River Battery' : 'Harbor Crossfire Timber Battery',
-        armed: true,
-        hasMagazine: true,
       });
     }
   } else if (allowColonialPort) {
@@ -6767,8 +6812,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     } else if (inst.prefabId === 'indigenous_palisade_ring') {
       // Woodland / Tupinambá Circular Split-Log Palisade Stockade, Council Firepit & Three Sisters Maize-Bean-Squash Mounds:
       // Solid continuous split-log & woven-sapling stockade curtain wall connecting all perimeter posts (no floating grey floor wedge!).
-      const rRingX = hw * 0.90;
-      const rRingZ = hl * 0.90;
+      const { radiusX: rRingX, radiusZ: rRingZ } = palisadeRingPlan(inst.width, inst.length);
       const yPlinth = yGround + 0.03;
       const emitStockadeChord = (x0, z0, x1, z1, y0, y1, halfThick, kind, shade) => {
         const dx = x1 - x0;
@@ -6795,16 +6839,15 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       beginSection('palisade_stockade_posts');
       const nPosts = 28;
       const postH = Math.max(3.6, inst.height);
-      const isGateAngle = (a) => Math.abs(Math.sin(a) + 1) < 0.07 && Math.abs(Math.cos(a)) < 0.32;
       for (let p = 0; p < nPosts; p++) {
         const angle = (p / nPosts) * Math.PI * 2;
-        if (isGateAngle(angle)) continue;
+        if (ringPostIsGate(angle)) continue;
         const px = Math.cos(angle) * rRingX;
         const pz = Math.sin(angle) * rRingZ;
         const hVar = ((p * 7) % 5) * 0.14;
         emitCylinder(toWorld, px, pz, yGround - 0.35, yPlinth + postH + hVar, 0.32, 0.15, 6, 10, 0.74 + (p % 3) * 0.04, true);
         const nextAngle = (((p + 1) % nPosts) / nPosts) * Math.PI * 2;
-        if (!isGateAngle(nextAngle)) {
+        if (!ringPostIsGate(nextAngle)) {
           const nx = Math.cos(nextAngle) * rRingX;
           const nz = Math.sin(nextAngle) * rRingZ;
           // Continuous split-log & woven-sapling curtain wall between post p and post p+1
@@ -7042,10 +7085,10 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       const yWallTop = yPlinth + Math.max(4.4, inst.height * 0.68);
       const yBulwarkDeck = yWallTop - 1.05;
       // 3 triangular apex coordinates: SW river bulwark (-hw*0.86, -hl*0.72), SE river bulwark (+hw*0.86, -hl*0.72), N landward bulwark (0, +hl*0.86)
-      const bSW = [-hw * 0.86, -hl * 0.72];
-      const bSE = [hw * 0.86, -hl * 0.72];
-      const bN = [0, hl * 0.86];
-      const rBulwark = Math.min(6.4, Math.min(hw, hl) * 0.24);
+      const fortPlan = triangularFortPlan(inst.width, inst.length);
+      const [bSW, bSE, bN] = fortPlan.bastions;
+      const rBulwark = fortPlan.bastionRadius;
+      const [riverCurtain, westCurtain, eastCurtain] = fortPlan.curtains;
       const emitAngledWall = (x0, z0, x1, z1, y0, y1, halfThick, kind, shade) => {
         const dx = x1 - x0;
         const dz = z1 - z0;
@@ -7069,13 +7112,11 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
 
       beginSection('fort_earthwork_plinth');
       // Perimeter earthen embankment berm along the 3 curtains (leaves the central parade/village ground open)
-      emitAngledWall(bSW[0], bSW[1], bSE[0], bSE[1], yGround - 0.45, yPlinth, 1.35, 10, 0.72);
-      emitAngledWall(bSW[0], bSW[1], bN[0], bN[1], yGround - 0.45, yPlinth, 1.35, 10, 0.72);
-      emitAngledWall(bSE[0], bSE[1], bN[0], bN[1], yGround - 0.45, yPlinth, 1.35, 10, 0.72);
+      for (const [[x0, z0], [x1, z1]] of fortPlan.curtains) emitAngledWall(x0, z0, x1, z1, yGround - 0.45, yPlinth, 1.35, 10, 0.72);
 
       // 3 Circular Corner Bulwark Bastions (earthen drum + timber revetment + solid log parapet + gun deck)
       beginSection('corner_bulwark_bastions');
-      for (const [bx, bz] of [bSW, bSE, bN]) {
+      for (const [bastion, [bx, bz]] of fortPlan.bastions.entries()) {
         emitCylinder(toWorld, bx, bz, yGround - 1.2, yBulwarkDeck, rBulwark + 0.35, rBulwark + 0.15, 12, 16, 0.78, true);
         emitCylinder(toWorld, bx, bz, yBulwarkDeck - 0.25, yBulwarkDeck + 0.08, rBulwark + 0.12, rBulwark + 0.12, 12, 10, 0.82, true);
         const nLogs = 24;
@@ -7088,8 +7129,8 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
           const nz = bz + Math.sin(aNext) * rBulwark;
           // Continuous lower breastwork wall around the bulwark drum
           emitAngledWall(lx, lz, nx, nz, yBulwarkDeck, yBulwarkDeck + 0.72, 0.18, 10, 0.76);
-          // Leave cannon embrasure openings on every 6th bay
-          if (p % 6 === 0) continue;
+          // Leave cannon embrasure openings on every 6th bay, except where a curtain joins
+          if (bastionBayIsEmbrasure(fortPlan, bastion, p, nLogs)) continue;
           emitAngledWall(lx, lz, nx, nz, yBulwarkDeck + 0.70, yWallTop + 0.28, 0.16, 10, 0.78);
           emitCylinder(toWorld, lx, lz, yGround - 0.8, yWallTop + 0.45 + (p % 3) * 0.14, 0.28, 0.14, 6, 10, 0.72 + (p % 2) * 0.05, true);
         }
@@ -7122,14 +7163,14 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
           const bx1 = sx1 + perpX * 0.72, bz1 = sz1 + perpZ * 0.72;
           emitAngledWall(bx0, bz0, bx1, bz1, yGround - 0.25, yPlinth + 1.05, 0.52, 10, 0.74);
         };
-        const gateHalfU = Math.min(0.08, 2.2 / dist);
+        const gateHalfU = Math.min(0.08, fortPlan.gateHalfWidth / dist);
         if (leaveCenterGate) {
           emitCurtainSpan(0, 0.5 - gateHalfU);
           emitCurtainSpan(0.5 + gateHalfU, 1);
         } else {
           emitCurtainSpan(0, 1);
         }
-        // Closely spaced pointed vertical palisade logs along the entire curtain from bulwark to bulwark
+        // Closely spaced pointed vertical palisade logs along the curtain, from the edge of one bulwark to the next
         const steps = Math.max(12, Math.round(dist / 0.64));
         for (let s = 0; s <= steps; s++) {
           const u = s / steps;
@@ -7140,9 +7181,9 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
           emitCylinder(toWorld, px, pz, yGround - 0.65, yWallTop + 0.18 + hJit, 0.26, 0.13, 6, 10, 0.73 + (s % 3) * 0.04, true);
         }
       };
-      emitPalisadeLine(bSW[0], bSW[1], bSE[0], bSE[1], true);
-      emitPalisadeLine(bSW[0], bSW[1], bN[0], bN[1], false);
-      emitPalisadeLine(bSE[0], bSE[1], bN[0], bN[1], false);
+      emitPalisadeLine(riverCurtain[0][0], riverCurtain[0][1], riverCurtain[1][0], riverCurtain[1][1], true);
+      emitPalisadeLine(westCurtain[0][0], westCurtain[0][1], westCurtain[1][0], westCurtain[1][1], false);
+      emitPalisadeLine(eastCurtain[0][0], eastCurtain[0][1], eastCurtain[1][0], eastCurtain[1][1], false);
 
       // Riverward Timber Gatehouse & Watch-Bell Frame at (0, bSW[1])
       beginSection('river_gatehouse_and_watchtower');
