@@ -121,9 +121,9 @@ export function prepareGunnery(state,side){
 
 // Fire only the ready snapshot. Loading guns never inherit this order. Cadence
 // is authored, representing independent gun captains firing a rolling broadside.
-export function fireGunnery(state,side,{interval=.14,ammo=null}={}){
+export function fireGunnery(state,side,{interval=.14,ammo=null,only=null}={}){
   side=gunnerySide(side);if(!side)return 0;
-  const ready=state.guns.filter(g=>!gunneryOffline(g)&&g.side===side&&g.stage==='ready'&&!g.queued);
+  const ready=state.guns.filter(g=>!gunneryOffline(g)&&g.side===side&&g.stage==='ready'&&!g.queued&&(!only||only.includes(g)));
   interval=gunneryClamp(gunneryFinite(interval,.14),.04,.6);
   const shotAmmo=GUNNERY_AMMO_TYPES.includes(ammo)?ammo:(state.ammo??'round');
   ready.forEach((gun,i)=>{gun.queued=true;gun.lastBlocked=null;state.queue.push({gun,time:state.time+i*interval,ammo:shotAmmo});});

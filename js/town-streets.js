@@ -6,6 +6,8 @@
 import { WALL_SOLID_HALF_WIDTH_M, enclosurePlan, pointOnEnclosureWall, pointWithinEnclosure } from './fort-plan.js';
 
 const CELL_M = 2;
+// A deck that butts onto another, as a pier's head mole does, can be walked from one to the other.
+const DECK_RUNS_ON_M = 1;
 const SITE_MARGIN_M = 26;
 const MOST_TOWN_RADIUS_M = 560;
 const WALL_CLEARANCE_M = 1;
@@ -209,6 +211,14 @@ function chooseDoor(inst, grid, towards) {
     const cell = nearestFreeCell(grid, head.x, head.z);
     return cell < 0 ? null : { inst, cell, outside: head, inside: head };
   }
+  if (inst.trace?.gate) {
+    // A fort is entered by its gate, from wherever its footprint ends in that direction.
+    const { x, z, nx, nz } = inst.trace.gate;
+    let out = 0;
+    while (Math.abs(x + nx * out) <= hw + WALL_CLEARANCE_M && Math.abs(z + nz * out) <= hl + WALL_CLEARANCE_M && out < 120) out += CELL_M * 0.5;
+    const outside = localToWorld(inst, x + nx * out, z + nz * out), cell = nearestFreeCell(grid, outside.x, outside.z);
+    if (cell >= 0 && Math.hypot(grid.x(cell) - outside.x, grid.z(cell) - outside.z) <= CELL_M * 2.5) return { inst, cell, outside, inside: localToWorld(inst, x - nx * 1.6, z - nz * 1.6) };
+  }
   const sides = [[-1, 0], [1, 0], [0, -1], [0, 1]].map(([sx, sz]) => {
     const middle = localToWorld(inst, sx * hw, sz * hl);
     return { sx, sz, facing: (middle.x - inst.x) * (towards.x - inst.x) + (middle.z - inst.z) * (towards.z - inst.z) };
@@ -361,7 +371,7 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
       else if (walled && Number.isFinite(grid.cost[c]) && pointOnEnclosureWall(inst, walled, grid.x(c), grid.z(c), WALL_SOLID_HALF_WIDTH_M + CELL_M)) grid.cost[c] += NEAR_WALL_COST;
       if (deck) {
         const { lx, lz } = worldToLocal(inst, grid.x(c), grid.z(c));
-        if (Math.abs(lx) <= deck.halfWidth + CELL_M * 0.2 && Math.abs(lz) <= inst.length * 0.5) grid.cost[c] = 1;
+        if (Math.abs(lx) <= deck.halfWidth + CELL_M * 0.2 && Math.abs(lz) <= inst.length * 0.5 + DECK_RUNS_ON_M) grid.cost[c] = 1;
       } else if (!NOT_WALKED_ON.has(inst.prefabId)) {
         if (solid(inst, c, WALL_CLEARANCE_M)) grid.cost[c] = Infinity;
         else if (Number.isFinite(grid.cost[c]) && solid(inst, c, WALL_CLEARANCE_M + CELL_M)) grid.cost[c] += NEAR_WALL_COST;
@@ -372,7 +382,7 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
     let y = groundAt(x, z);
     for (const { inst, y: top, halfWidth } of decks) {
       const { lx, lz } = worldToLocal(inst, x, z);
-      if (Math.abs(lz) <= inst.length * 0.5 && Math.abs(lx) <= halfWidth + 0.5 && top > y) y = top;
+      if (Math.abs(lz) <= inst.length * 0.5 + DECK_RUNS_ON_M && Math.abs(lx) <= halfWidth + 1.2 && top > y) y = top;
     }
     return y;
   };
@@ -425,7 +435,9 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
   }
   for (const door of doors) if (onWay[door.cell]) joined.add(door);
   const reachable = doors.filter((door) => joined.has(door));
-  const stranded = doors.length - reachable.length;
+  // A fort or a lookout may stand off by itself on a point of land. Anything else with no way to it is a fault.
+  const strandedDoors = doors.filter((door) => !joined.has(door) && !door.inst.trace && door.inst.prefabId !== 'torreon_atalaya_farol').map((door) => door.inst.prefabId);
+  const stranded = strandedDoors.length;
 
   // A tree of ways sends people the long way round. Where two neighbours are far apart by road, link them.
   const wayCost = (c) => (onWay[c] ? 1 : Infinity);
@@ -646,7 +658,7 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
     walkers: floats,
     people,
     stats: {
-      doors: doors.length, stranded, links, trips: trips.length, roads: roads.length, people,
+      doors: doors.length, stranded, strandedDoors, links, trips: trips.length, roads: roads.length, people,
       wayMetres: Math.round(fieldWays.reduce((sum, way) => sum + polylineLength(way.points), 0)),
       fieldBytes: field.byteLength, milliseconds: typeof performance === 'object' ? performance.now() - started : 0,
     },

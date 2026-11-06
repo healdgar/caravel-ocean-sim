@@ -35,11 +35,16 @@ test('no building stands in the sea on a coast that curves away from the layout'
   syncPortInstancesToTerrain(port,heights,region,{gradePads:true});
   assert.ok(port.instances.length>=6,`only ${port.instances.length} placed`);
   for(const inst of port.instances){
-    if(AT_THE_WATER.has(inst.prefabId))continue;
+    // A fort drawn to its ground may have its feet in the water, so what matters is the line of its walls.
+    if(AT_THE_WATER.has(inst.prefabId)||inst.trace)continue;
     assert.equal(wetShare(inst,heights,region),0,`${inst.prefabId} at ${inst.x.toFixed(0)},${inst.z.toFixed(0)} is in the water`);
   }
-  for(const inst of port.instances.filter(i=>i.prefabId==='stone_sea_bastion'||i.prefabId==='torreon_atalaya_farol')){
+  for(const inst of port.instances.filter(i=>i.prefabId==='torreon_atalaya_farol'||(i.prefabId==='stone_sea_bastion'&&!i.trace))){
     assert.ok(wetShare(inst,heights,region)<.5,`${inst.prefabId} should have most of its floor on land`);
+  }
+  for(const inst of port.instances.filter(i=>i.trace)){
+    const c=Math.cos(inst.yaw),s=Math.sin(inst.yaw),walls=inst.trace.outline,dry=walls.filter(([lx,lz])=>terrainSurfaceSample(heights,inst.x+lx*c+lz*s,inst.z-lx*s+lz*c,region)>=-.5);
+    assert.ok(dry.length>=walls.length*.34,`${inst.prefabId} has ${dry.length} of ${walls.length} walls on the land`);
   }
 });
 
