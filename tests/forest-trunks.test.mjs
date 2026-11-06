@@ -189,6 +189,14 @@ test('marks survive streaming and a save, and a tree shot down stays down', () =
   assert.equal(later[12 + 11], FOREST_LONG_FALLEN, 'down since before this sitting, with no fall to replay');
   assert.ok(later[11] > 0, 'the wounded one stands, wounded');
   assert.equal(later[24 + 11], 0, 'and a tree nobody hit is untouched');
+  // The same coast laid out elsewhere on a later visit, as near as a float gets: its trees are known all the same, and
+  // the next ball adds to what the tree already took.
+  const origin = { x: 1000, z: -2000 }, moved = forestStrikesFromSave(forestStrikesToSave(strikes, { x: 0, z: 0 }), origin), wounded = new Float32Array(root(1040.007, 1, -1979.993, 1.2, 0));
+  reapplyForestStrikes(wounded, 1, moved);
+  assert.ok(wounded[11] > 0, 'wounded still, where it stands now');
+  strikeForestTree(wounded, 0, shape, { energy: 1e5, bearing: 2, height: 1, now: 7 }, moved);
+  assert.equal([...moved.values()].find((r) => Math.abs(r.x - 1040) < 1).hits, 2);
+  assert.equal(moved.size, 2);
   assert.equal(later[12 + 9], roots[9], 'where it broke and which way it fell come back');
   assert.ok(Math.abs(later[12 + 5] - 0.6) < 1e-6, 'and its char');
   // Streaming again must not char it twice: each array of roots is fresh.

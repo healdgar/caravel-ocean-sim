@@ -115,7 +115,7 @@ The GPU does the rest, and JavaScript writes 48 bytes of root only when a ball l
 - **Wounded:** the reserved float (`identity.w`) above 0 holds height, bearing and how bad. `forestPlace` gouges the trunk there and shows raw wood, on the side the ball came from. Only the latest wound shows.
 - **Felled:** `identity.w` below 0 is minus the time the fall began, and `identity.y` holds the break's height, bearing and resting angle. Above the break the tree turns about the break, level across the bearing, and comes to rest with its tip on the ground. The stump stays and still stops a ball. The far wood and leaf shell lie down with it. A box of leaves or an atlas card cannot, so a felled tree draws neither. The cull doubles its bound and stops culling its clusters by where they were baked.
 
-A hit does not cost a standing tree anything but one compare per vertex.
+A tree nobody has hit pays one compare per vertex for this, and one per cluster.
 
 Records go in the port damage store under `forest:<coast>`, so a career save holds every tree and a share link as many as fit. Nothing regrows a tree, so a felled one stays down and a wounded one stays wounded. A record matches a root by position, to the centimetre. On a coast whose trees are replanted (the real terrain arriving late, or a different era) a record matches nothing and does nothing, though it stays in the save.
 

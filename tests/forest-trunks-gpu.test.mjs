@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-// In the running game, headless: the free camera's cannon strikes a forest trunk and a foreshore palm, the root the GPU
+// In the running game, with no window: the free camera's cannon strikes a forest trunk and a foreshore palm, the root the GPU
 // reads is what changes, and a tree shot down is still down when the game comes back from a saved link.
 import assert from 'node:assert/strict';
 import { once } from 'node:events';

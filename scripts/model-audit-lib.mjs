@@ -1155,7 +1155,7 @@ export function flagsOf(results) {
   }
   for (const j of results.jetties ?? []) if (Math.abs(j.deckAboveSeaM - j.wantAboveSeaM) > 0.2) add(`prop.jetty-deck/${j.id}`, j.deckAboveSeaM, j.wantAboveSeaM);
   for (const t of results.trees ?? []) {
-    if (t.mode === 'forest' && t.woodStoppedPct < 50) add(`tree.no-collision/${t.species}`, t.trunkStoppedPct, 50, 'lines through the trunk that any shot stops');
+    if (t.mode === 'forest' && t.trunkStoppedPct < 50) add(`tree.no-collision/${t.species}`, t.trunkStoppedPct, 50, 'lines through the trunk that any shot stops');
     if (t.mode === 'foreshore' && t.airPct > 10) add(`tree.palm-air/${t.species}`, t.airPct, 10, `a ball stops ${t.airGapMedianM} m from anything`);
   }
   return flags.sort((a, b) => a.key.localeCompare(b.key));

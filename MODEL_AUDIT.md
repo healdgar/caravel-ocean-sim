@@ -89,21 +89,21 @@ No model was changed. No plain typo turned up, so `js/` is untouched.
 
 
 <!-- audit tables start -->
-Measured 2026-11-06. Rig as the GPU posed it, read back on Metal. 135 measurements past their limits.
+Measured 2026-11-06. Rig as the GPU posed it, read back on Metal. 119 measurements past their limits.
 
 ### Posed geometry read back from the GPU
 
 | Ship | vertices | hull-class parts that moved | mast | spar | cloth | rope | gun | length off | beam off | sinkage off |
 |---|---|---|---|---|---|---|---|---|---|---|
-| nina | 91998 | hatch.cover 2.27 | 0 | 0.77 | 4.79 | 4.8 | 0.09 | 0 | 0 | 0 |
-| pinta | 43041 | hatch.main 2.92 | 0 | 0.68 | 3.59 | 6.6 | 0.09 | 0 | 0 | 0 |
-| santa-maria | 48686 | hatch.main 3.68 | 0 | 0.63 | 2.46 | 4.58 | 0.09 | 0 | 0 | 0 |
-| victory | 144783 | hatch.main 4.68 | 0 | 1.77 | 1.67 | 1.76 | 1.1 | 0 | 0 | 0 |
-| oseberg | 71016 | none | 0 | 0.6 | 0.62 | 0.62 | – | 0 | 0 | 0 |
-| lusoria | 30703 | none | 0 | 0.42 | 0.41 | 0.41 | – | 0 | 0 | 0 |
+| nina | 91998 | hatch.cover 2.27 | 0 | 0.77 | 4.85 | 4.86 | 0.09 | 0 | 0 | 0 |
+| pinta | 43041 | hatch.main 2.92 | 0 | 0.68 | 3.6 | 6.61 | 0.09 | 0 | 0 | 0 |
+| santa-maria | 48686 | hatch.main 3.68 | 0 | 0.64 | 2.46 | 4.58 | 0.09 | 0 | 0 | 0 |
+| victory | 144783 | hatch.main 4.68 | 0 | 1.78 | 1.68 | 1.77 | 1.1 | 0 | 0 | 0 |
+| oseberg | 71016 | none | 0 | 0.66 | 0.67 | 0.67 | – | 0 | 0 | 0 |
+| lusoria | 30703 | none | 0 | 0.46 | 0.44 | 0.44 | – | 0 | 0 | 0 |
 | taino-canoe | 26453 | none | – | – | – | – | – | 0 | 0 | 0 |
-| flying-cloud | 76071 | hatch.main 4.7 | 0 | 1.89 | 2.2 | 1.89 | – | 0 | 0 | 0 |
-| gipsy-moth-iv | 21568 | hatch.main 0.85 | 0 | 0.3 | 0.3 | 0.34 | – | 0 | 0 | 0 |
+| flying-cloud | 76071 | hatch.main 4.7 | 0 | 2.25 | 2.52 | 2.25 | – | 0 | 0 | 0 |
+| gipsy-moth-iv | 21568 | hatch.main 0.85 | 0 | 0.41 | 0.41 | 0.41 | – | 0 | 0 | 0 |
 
 ### 1a. Balls against ship meshes
 
@@ -111,41 +111,43 @@ Share of lines that either the shot or the mesh says struck. *Agree* is within 0
 
 | Ship | lines | agree % | soft % | air: rig box % | air: hull % | median gap m | max gap m | through hull % | through mast/spar % | phantom mast % | wrong mast % | parts missed most |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| nina | 47546 | 10.2 | 11.3 | 73.7 | 2.2 | 3.27 | 6.72 | 1.5 | 1 | 0 | 0 | yard.fore 296, cabin 234, bulwark:-# 148, bulwark:# 115, bow.structure 107 |
-| pinta | 51040 | 8.1 | 12.8 | 75.3 | 2.8 | 3.17 | 7.23 | 0.4 | 0.7 | 0 | 0 | mast.main.cut 153, hatch.main 84, bow.bowsprit 72, mast.fore.cut 62, mast.mizzen.cut 34 |
-| santa-maria | 61825 | 6.5 | 6.5 | 80.7 | 1.9 | 3.99 | 9.39 | 3.6 | 0.8 | 0 | 0.6 | hull.planking 1515, hull.closure.stern 148, mast.main.cut 127, yard.spritsail 122, bow.bowsprit 116 |
-| victory | 42956 | 6 | 8.3 | 71.2 | 1.4 | 6.1 | 11.75 | 10.6 | 2.3 | 0 | 0 | hull.planking 1745, stern.galleries 419, bow.bowsprit 312, rig.standing.fore 304, rig.standing.main 303 |
-| oseberg | 34376 | 3.8 | 31.4 | 57 | 7.1 | 2.3 | 5.79 | 0.6 | 0 | 0 | 0 | hull.carved-stems 212, yard.main-square 3 |
-| lusoria | 24060 | 11 | 30.2 | 58.1 | 0 | 2.21 | 4.76 | 0 | 0.6 | 0 | 0 | mast.main.cut 152, mast.main 2 |
+| nina | 47357 | 10.3 | 11.4 | 73.5 | 2.3 | 3.25 | 6.73 | 1.5 | 1 | 0 | 0 | yard.fore 312, cabin 243, bulwark:-# 148, bulwark:# 108, bow.structure 103 |
+| pinta | 51024 | 8.1 | 12.8 | 75.3 | 2.8 | 3.17 | 7.23 | 0.4 | 0.7 | 0 | 0 | mast.main.cut 153, hatch.main 84, bow.bowsprit 72, mast.fore.cut 62, mast.mizzen.cut 34 |
+| santa-maria | 61826 | 6.5 | 6.5 | 80.7 | 1.9 | 3.99 | 9.39 | 3.6 | 0.8 | 0 | 0.6 | hull.planking 1517, hull.closure.stern 147, mast.main.cut 127, yard.spritsail 121, bow.bowsprit 116 |
+| victory | 42952 | 6 | 8.3 | 71.3 | 1.4 | 6.09 | 11.75 | 10.6 | 2.3 | 0 | 0 | hull.planking 1747, stern.galleries 419, bow.bowsprit 312, rig.standing.fore 304, rig.standing.main 299 |
+| oseberg | 34376 | 3.8 | 31.4 | 57.1 | 7.1 | 2.3 | 5.82 | 0.6 | 0 | 0 | 0 | hull.carved-stems 212, yard.main-square 3 |
+| lusoria | 24060 | 11 | 30.2 | 58.2 | 0 | 2.22 | 4.76 | 0 | 0.6 | 0 | 0 | mast.main.cut 152, mast.main 2 |
 | taino-canoe | 10112 | 47.8 | 52.2 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
-| flying-cloud | 63491 | 2.6 | 5.2 | 85 | 5.5 | 6.83 | 12 | 1 | 0.8 | 0 | 0.4 | hull.planking 214, mast.fore.cut 144, mast.main.cut 116, bow.bowsprit 110, structure.deckhouse 108 |
-| gipsy-moth-iv | 44494 | 4.5 | 20.8 | 73.1 | 0.3 | 2.63 | 5.46 | 0.2 | 1.1 | 0 | 0 | mast.main.cut 246, mast.mizzen.cut 164, spar.mizzen-boom 66, rail.port 35, rail.starboard 34 |
+| flying-cloud | 63639 | 2.6 | 5.2 | 85 | 5.5 | 6.83 | 12 | 1 | 0.8 | 0 | 0.5 | hull.planking 218, mast.fore.cut 146, mast.main.cut 113, bow.bowsprit 110, structure.deckhouse 108 |
+| gipsy-moth-iv | 44492 | 4.5 | 20.8 | 73 | 0.3 | 2.63 | 5.46 | 0.3 | 1.1 | 0 | 0 | mast.main.cut 246, mast.mizzen.cut 164, spar.mizzen-boom 64, rail.port 35, rail.starboard 34 |
 
 ### 1b. Balls against trees
 
-| Tree | mode | wood lines stopped % | agree % | soft % | air % | through % | gap m | top m | reach m |
-|---|---|---|---|---|---|---|---|---|---|
-| subtropical/royal_palm | forest | 0 | 0 | 0 | 0 | 100 | – | 20.97 | 3.53 |
-| subtropical/palm | forest | 0 | 0 | 0 | 0 | 100 | – | 18.65 | 5.26 |
-| subtropical/palm-0.2 | foreshore | 74.3 | 1.8 | 46.9 | 45.9 | 5.5 | 1.33 | 15.57 | 5.32 |
-| subtropical/palm-0.5 | foreshore | 71.8 | 1.9 | 43.7 | 47.8 | 6.6 | 1.47 | 17.62 | 6.11 |
-| subtropical/palm-0.8 | foreshore | 79.8 | 1.5 | 48.8 | 45.3 | 4.4 | 1.47 | 19.67 | 6.9 |
-| subtropical/ceiba | forest | 0 | 0 | 0 | 0 | 100 | – | 26.21 | 14.11 |
-| subtropical/mangrove | forest | 0 | 0 | 0 | 0 | 100 | – | 14.11 | 5.96 |
-| saba/oak | forest | 0 | 0 | 0 | 0 | 100 | – | 24.5 | 28.21 |
-| saba/maple | forest | 0 | 0 | 0 | 0 | 100 | – | 22.72 | 22.39 |
-| saba/birch | forest | 0 | 0 | 0 | 0 | 100 | – | 12.86 | 15.49 |
-| saba/elm | forest | 0 | 0 | 0 | 0 | 100 | – | 23.19 | 28.07 |
-| saba/chestnut | forest | 0 | 0 | 0 | 0 | 100 | – | 28.31 | 23.11 |
+*Trunk lines* are fired close together at the trunk alone. The rest cross the tree's whole silhouette: *wood lines* cross wood as thick as a ball, or a slender tree's own trunk; *all wood* counts twigs too, which a ball goes through. *Agree* is within 0.5 m of that wood. *Soft* stopped within a metre of something drawn, usually a line that misses the wood by less than the ball's own width. *Air* stopped further off than that. *Through* passed thick wood unstopped.
+
+| Tree | mode | trunk lines | trunk lines stopped % | trunk agree % | wood lines stopped % | all wood stopped % | agree % | soft % | air % | through % | gap m | top m | reach m |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| subtropical/royal_palm | forest | 7399 | 100 | 100 | 100 | 74.6 | 62.2 | 37.8 | 0 | 0 | – | 20.97 | 3.53 |
+| subtropical/palm | forest | 2813 | 100 | 98.5 | 100 | 53.3 | 58.9 | 41.1 | 0 | 0 | – | 18.65 | 5.26 |
+| subtropical/palm-0.2 | foreshore | 3328 | 100 | 98.6 | 100 | 51 | 51.8 | 48.2 | 0 | 0 | – | 15.31 | 5.32 |
+| subtropical/palm-0.5 | foreshore | 3429 | 100 | 98.5 | 100 | 51.5 | 54.7 | 45.3 | 0 | 0 | – | 17.31 | 6.11 |
+| subtropical/palm-0.8 | foreshore | 3499 | 100 | 98.3 | 100 | 53.8 | 56.1 | 43.9 | 0 | 0 | – | 19.3 | 6.9 |
+| subtropical/ceiba | forest | 4975 | 90.1 | 78.4 | 89.9 | 49.6 | 46.9 | 46.4 | 0 | 6.7 | – | 26.21 | 14.11 |
+| subtropical/mangrove | forest | 1996 | 92.8 | 75.2 | 91.7 | 38.1 | 22.9 | 74.1 | 0 | 3.1 | – | 14.11 | 5.96 |
+| saba/oak | forest | 1317 | 99.5 | 96.7 | 98 | 32 | 52.7 | 46.2 | 0 | 1.1 | – | 24.5 | 28.21 |
+| saba/maple | forest | 1311 | 99.9 | 98.9 | 75 | 4.8 | 4.8 | 93.5 | 0 | 1.6 | – | 22.72 | 22.39 |
+| saba/birch | forest | 1722 | 100 | 100 | 0 | 0 | 0 | 0 | 0 | 0 | – | 12.86 | 15.49 |
+| saba/elm | forest | 1501 | 99.1 | 94.9 | 99.2 | 33.2 | 57.5 | 42.1 | 0 | 0.5 | – | 23.19 | 28.07 |
+| saba/chestnut | forest | 1859 | 99.9 | 95.3 | 97.9 | 42.7 | 55.8 | 43 | 0 | 1.2 | – | 28.31 | 23.11 |
 
 ### 1c. A live port and forest, read from the running game
 
 | Region | ports | buildings | known by mesh | traced by mesh | trees drawn | trees a ball can strike | palms a ball can strike |
 |---|---|---|---|---|---|---|---|
-| lisbon | 1 | 26 | 26 | 26 | 36000 | 0 | 0 |
-| havana | 1 | 23 | 23 | 23 | 31020 | 0 | 520 |
-| san-juan | 1 | 23 | 23 | 23 | 56000 | 0 | 520 |
-| jamestown | 1 | 18 | 18 | 18 | 36000 | 0 | 0 |
+| lisbon | 1 | 26 | 26 | 26 | 14000 | 14000 | 0 |
+| havana | 1 | 23 | 23 | 23 | 31020 | 31020 | 520 |
+| san-juan | 1 | 23 | 23 | 23 | 56000 | 56000 | 520 |
+| jamestown | 1 | 18 | 18 | 18 | 14000 | 14000 | 0 |
 
 ### 1d. Balls against port buildings
 
@@ -153,40 +155,40 @@ Share of lines that either the shot or the mesh says struck. *Agree* is within 0
 
 | Prefab | nominal w×h×l | drawn top m | mesh half m | reach square m | reach turned m | mesh | pieces square | pieces turned | max air m |
 |---|---|---|---|---|---|---|---|---|---|
-| timber_mole_pier | 7.5×2.8×68 | 10.3 | 34 | 34 | 36.7 | 332 / 0 / 0 / 0 | 472 / 0 / 0 / 0 | 332 / 0 / 0 / 15 | 0.1 |
-| stone_sea_bastion | 28×11.5×34 | 19.5 | 18.9 | 18.9 | 27.5 | 1248 / 0 / 0 / 0 | 1644 / 0 / 0 / 0 | 810 / 131 / 0 / 371 | 12.2 |
-| casa_de_contratacion | 16×8.5×26 | 12 | 14.1 | 14.1 | 23 | 1332 / 0 / 0 / 0 | 1728 / 0 / 0 / 0 | 1328 / 0 / 0 / 6 | 0.8 |
-| royal_warehouse | 14×7.2×30 | 10.3 | 15.8 | 15.8 | 23.4 | 1332 / 0 / 0 / 0 | 1712 / 0 / 0 / 0 | 1328 / 2 / 0 / 8 | 1.1 |
-| careening_shed | 11×5.6×22 | 8.2 | 11.8 | 11.8 | 18 | 768 / 0 / 0 / 0 | 1072 / 0 / 0 / 0 | 773 / 0 / 0 / 3 | 0.3 |
-| mission_chapel | 13×12×28 | 23.6 | 18.7 | 18.7 | 20.4 | 1254 / 0 / 0 / 0 | 1461 / 0 / 0 / 5 | 1223 / 2 / 0 / 32 | 1.2 |
-| colonial_town_block | 18×6.4×24 | 8.6 | 12.7 | 12.7 | 21.1 | 1205 / 0 / 0 / 0 | 1582 / 0 / 0 / 0 | 1183 / 13 / 0 / 18 | 4 |
-| stone_quay_seawall | 84×1.9×12 | 3.2 | 42.8 | 42.4 | 43.7 | 419 / 0 / 0 / 0 | 629 / 0 / 5 / 4 | 241 / 720 / 0 / 38 | 30 |
-| single_nave_solar | 9.5×7.2×22 | 9.4 | 11.7 | 11.7 | 17 | 1162 / 0 / 0 / 0 | 1482 / 0 / 0 / 0 | 1156 / 0 / 0 / 8 | 0.9 |
-| l_wing_u_wing_solar | 17×7.4×24 | 9.6 | 12.7 | 12.7 | 20.6 | 1239 / 0 / 0 / 0 | 1623 / 0 / 0 / 0 | 1227 / 11 / 0 / 11 | 3.9 |
-| modular_patio_cloister | 26×8.2×30 | 12.4 | 15.7 | 15.7 | 27.9 | 1214 / 0 / 0 / 0 | 1609 / 0 / 0 / 0 | 1184 / 24 / 0 / 16 | 2.5 |
-| royal_atarazanas_arsenal | 26×8.2×36 | 10.4 | 18.8 | 18.8 | 22.7 | 1304 / 0 / 0 / 0 | 1764 / 0 / 0 / 16 | 1290 / 2 / 0 / 14 | 1.5 |
-| open_lonja_loggia | 13.5×7.4×26 | 10.4 | 13.9 | 13.9 | 21.3 | 1120 / 0 / 0 / 0 | 1516 / 0 / 0 / 0 | 1089 / 204 / 0 / 21 | 12.6 |
-| walled_mule_corral | 30×5.8×34 | 7.2 | 17.7 | 17.7 | 31.8 | 1053 / 0 / 0 / 0 | 1472 / 0 / 0 / 0 | 1037 / 309 / 0 / 8 | 19.8 |
-| bastion_trace_fortress | 38×9.8×42 | 15.4 | 33 | 32.7 | 36.4 | 1208 / 0 / 0 / 0 | 1468 / 0 / 0 / 0 | 703 / 120 / 0 / 442 | 15.2 |
-| torreon_atalaya_farol | 13×15.5×13 | 21.8 | 7.4 | 6.9 | 8.3 | 792 / 0 / 0 / 0 | 1064 / 0 / 0 / 0 | 800 / 0 / 0 / 0 | 0.7 |
-| curtain_wall_and_gate | 6.2×6.6×34 | 10.3 | 17.7 | 17.4 | 18.7 | 1009 / 0 / 0 / 0 | 1296 / 0 / 0 / 0 | 985 / 4 / 0 / 22 | 1.4 |
-| stone_arch_bridge | 7.2×4.6×32 | 4.6 | 16.2 | 16.2 | 18.1 | 800 / 0 / 0 / 0 | 848 / 0 / 0 / 116 | 755 / 0 / 0 / 49 | 0.5 |
-| thatched_bohio_palafito | 8.5×4.8×14 | 7.9 | 11.8 | 11.8 | 13 | 836 / 0 / 0 / 0 | 974 / 0 / 0 / 6 | 836 / 0 / 0 / 4 | 0.1 |
-| astillero_and_moored_hull | 8.2×5.2×23 | 5.1 | 11.8 | 11.8 | 14.9 | 631 / 0 / 0 / 0 | 862 / 0 / 1 / 20 | 628 / 0 / 0 / 3 | 0.1 |
-| abenaki_birchbark_wigwam | 6.4×3.6×6.8 | 4.4 | 5.3 | 5.3 | 6.8 | 520 / 0 / 0 / 0 | 575 / 0 / 0 / 0 | 519 / 0 / 0 / 1 | 0 |
-| algonquian_longhouse | 7.2×5.2×22 | 5.4 | 11.7 | 11.7 | 13.7 | 1354 / 0 / 0 / 0 | 1641 / 0 / 0 / 0 | 1355 / 0 / 0 / 1 | 0.1 |
-| indigenous_palisade_ring | 26×4.4×28 | 5 | 12.9 | 12.9 | 14 | 1378 / 0 / 0 / 0 | 1347 / 0 / 0 / 27 | 1353 / 0 / 0 / 35 | 0.1 |
-| taino_cacique_caney | 11.2×6.4×16.5 | 7.2 | 9.5 | 9.5 | 16.3 | 931 / 0 / 0 / 0 | 1184 / 0 / 0 / 10 | 928 / 0 / 0 / 14 | 0.2 |
-| taino_circular_bohio | 8.6×5.4×8.6 | 6.3 | 4.5 | 4.5 | 5.7 | 808 / 0 / 0 / 0 | 812 / 0 / 0 / 0 | 808 / 0 / 0 / 0 | 0.1 |
-| taino_batey_court | 15×2.2×24 | 1.9 | 12 | 12 | 12.8 | 506 / 0 / 0 / 0 | 636 / 0 / 0 / 8 | 515 / 0 / 0 / 41 | 0.5 |
-| kalinago_carbet_hall | 9.8×6.2×21 | 6.4 | 14.2 | 14.2 | 17 | 974 / 0 / 0 / 0 | 1112 / 0 / 0 / 0 | 972 / 0 / 0 / 2 | 0.1 |
-| tupinamba_oca_longhouse | 9.6×6.6×28 | 6.9 | 14.4 | 14.4 | 15.9 | 1216 / 0 / 0 / 0 | 1580 / 0 / 0 / 0 | 1216 / 0 / 0 / 0 | 0.1 |
-| palafito_estuary_village | 14×5.4×18 | 6.3 | 12.6 | 12.6 | 15.1 | 637 / 0 / 0 / 0 | 710 / 0 / 0 / 0 | 651 / 0 / 0 / 8 | 0.2 |
-| maya_limestone_shrine_and_na | 11.5×7.4×18.5 | 7 | 9.2 | 9.2 | 12.6 | 797 / 0 / 0 / 0 | 1000 / 0 / 0 / 0 | 797 / 17 / 0 / 5 | 2.3 |
-| indigenous_canoe_landing | 8.5×2.2×16 | 1.4 | 11.4 | 11.4 | 11.4 | 172 / 0 / 0 / 0 | 181 / 0 / 0 / 11 | 186 / 0 / 0 / 4 | 0.1 |
-| english_triangular_palisade_fort | 118×6.8×90 | 8.4 | 57.5 | 57.5 | 59.8 | 1064 / 0 / 0 / 0 | 1007 / 0 / 0 / 41 | 1057 / 2 / 0 / 64 | 2.8 |
-| english_half_timber_hall | 10.5×7.4×22 | 10.4 | 13.6 | 13.6 | 16.1 | 1071 / 0 / 0 / 0 | 1292 / 0 / 0 / 0 | 1065 / 6 / 0 / 12 | 1 |
-| english_timber_cottage | 8.2×5.8×15.5 | 7.7 | 8.9 | 8.9 | 11.8 | 1086 / 0 / 0 / 0 | 1356 / 0 / 0 / 0 | 1088 / 0 / 0 / 9 | 0.8 |
+| timber_mole_pier | 7.5×2.8×68 | 10.3 | 34 | 34 | 34.1 | 332 / 0 / 0 / 0 | 472 / 0 / 0 / 0 | 332 / 0 / 0 / 0 | 0 |
+| stone_sea_bastion | 28×11.5×34 | 19.5 | 18.9 | 18.9 | 21.2 | 1248 / 0 / 0 / 0 | 1640 / 0 / 0 / 0 | 1072 / 149 / 0 / 41 | 2.9 |
+| casa_de_contratacion | 16×8.5×26 | 12 | 14.1 | 14.1 | 14.2 | 1332 / 0 / 0 / 0 | 1728 / 0 / 0 / 0 | 1332 / 0 / 0 / 0 | 0.1 |
+| royal_warehouse | 14×7.2×30 | 10.3 | 15.8 | 15.8 | 16 | 1332 / 0 / 0 / 0 | 1712 / 0 / 0 / 0 | 1332 / 0 / 0 / 2 | 0.3 |
+| careening_shed | 11×5.6×22 | 8.2 | 11.8 | 11.8 | 11.9 | 768 / 0 / 0 / 0 | 1072 / 0 / 0 / 0 | 773 / 0 / 0 / 3 | 0.3 |
+| mission_chapel | 13×12×28 | 23.6 | 18.7 | 18.7 | 18.7 | 1254 / 0 / 0 / 0 | 1461 / 0 / 0 / 5 | 1227 / 0 / 0 / 27 | 0.4 |
+| colonial_town_block | 18×6.4×24 | 8.6 | 12.7 | 12.7 | 13 | 1205 / 0 / 0 / 0 | 1582 / 0 / 0 / 0 | 1197 / 0 / 0 / 8 | 0.2 |
+| stone_quay_seawall | 84×1.9×12 | 3.2 | 42.8 | 42.8 | 45.7 | 419 / 0 / 0 / 0 | 634 / 0 / 4 / 0 | 405 / 7 / 2 / 12 | 3.1 |
+| single_nave_solar | 9.5×7.2×22 | 9.4 | 11.7 | 11.7 | 12 | 1162 / 0 / 0 / 0 | 1482 / 0 / 0 / 0 | 1162 / 0 / 0 / 0 | 0.2 |
+| l_wing_u_wing_solar | 17×7.4×24 | 9.6 | 12.7 | 12.7 | 13 | 1239 / 0 / 0 / 0 | 1623 / 0 / 0 / 0 | 1239 / 0 / 0 / 0 | 0.2 |
+| modular_patio_cloister | 26×8.2×30 | 12.4 | 15.7 | 15.7 | 16 | 1214 / 0 / 0 / 0 | 1609 / 0 / 0 / 0 | 1214 / 0 / 0 / 0 | 0 |
+| royal_atarazanas_arsenal | 26×8.2×36 | 10.4 | 18.8 | 18.8 | 19 | 1304 / 0 / 0 / 0 | 1764 / 0 / 0 / 16 | 1300 / 0 / 0 / 4 | 0.4 |
+| open_lonja_loggia | 13.5×7.4×26 | 10.4 | 13.9 | 13.9 | 14.1 | 1120 / 0 / 0 / 0 | 1516 / 0 / 0 / 0 | 1119 / 0 / 0 / 1 | 0.2 |
+| walled_mule_corral | 30×5.8×34 | 7.2 | 17.7 | 17.7 | 17.9 | 1053 / 0 / 0 / 0 | 1472 / 0 / 0 / 0 | 1053 / 0 / 0 / 0 | 0.2 |
+| bastion_trace_fortress | 38×9.8×42 | 15.4 | 33 | 33 | 36.1 | 1208 / 0 / 0 / 0 | 1462 / 0 / 0 / 16 | 951 / 253 / 0 / 35 | 2.8 |
+| torreon_atalaya_farol | 13×15.5×13 | 21.8 | 7.4 | 7.4 | 7.4 | 792 / 0 / 0 / 0 | 1064 / 0 / 0 / 0 | 792 / 0 / 0 / 0 | 0 |
+| curtain_wall_and_gate | 6.2×6.6×34 | 10.3 | 17.7 | 17.7 | 17.7 | 1009 / 0 / 0 / 0 | 1296 / 0 / 0 / 0 | 999 / 0 / 0 / 10 | 0.3 |
+| stone_arch_bridge | 7.2×4.6×32 | 4.6 | 16.2 | 16.2 | 16.6 | 800 / 0 / 0 / 0 | 848 / 0 / 0 / 116 | 755 / 0 / 0 / 47 | 0.5 |
+| thatched_bohio_palafito | 8.5×4.8×14 | 7.9 | 11.8 | 11.8 | 11.8 | 836 / 0 / 0 / 0 | 974 / 0 / 0 / 0 | 836 / 0 / 0 / 0 | 0 |
+| astillero_and_moored_hull | 8.2×5.2×23 | 5.1 | 11.8 | 11.8 | 11.8 | 631 / 0 / 0 / 0 | 862 / 0 / 1 / 20 | 628 / 0 / 0 / 3 | 0.1 |
+| abenaki_birchbark_wigwam | 6.4×3.6×6.8 | 4.4 | 5.3 | 5.3 | 5.3 | 520 / 0 / 0 / 0 | 575 / 0 / 0 / 0 | 519 / 0 / 0 / 1 | 0 |
+| algonquian_longhouse | 7.2×5.2×22 | 5.4 | 11.7 | 11.7 | 11.7 | 1354 / 0 / 0 / 0 | 1641 / 0 / 0 / 0 | 1355 / 0 / 0 / 1 | 0.1 |
+| indigenous_palisade_ring | 26×4.4×28 | 5 | 12.9 | 12.9 | 12.9 | 1378 / 0 / 0 / 0 | 1347 / 0 / 0 / 27 | 1353 / 0 / 0 / 35 | 0.1 |
+| taino_cacique_caney | 11.2×6.4×16.5 | 7.2 | 9.5 | 9.5 | 9.6 | 931 / 0 / 0 / 0 | 1194 / 0 / 0 / 0 | 926 / 0 / 0 / 5 | 0.2 |
+| taino_circular_bohio | 8.6×5.4×8.6 | 6.3 | 4.5 | 4.5 | 4.5 | 808 / 0 / 0 / 0 | 812 / 0 / 0 / 0 | 808 / 0 / 0 / 0 | 0 |
+| taino_batey_court | 15×2.2×24 | 1.9 | 12 | 12 | 12.4 | 506 / 0 / 0 / 0 | 640 / 0 / 0 / 0 | 528 / 0 / 0 / 14 | 0.4 |
+| kalinago_carbet_hall | 9.8×6.2×21 | 6.4 | 14.2 | 14.2 | 14.2 | 974 / 0 / 0 / 0 | 1112 / 0 / 0 / 0 | 974 / 0 / 0 / 0 | 0 |
+| tupinamba_oca_longhouse | 9.6×6.6×28 | 6.9 | 14.4 | 14.4 | 14.4 | 1216 / 0 / 0 / 0 | 1580 / 0 / 0 / 0 | 1216 / 0 / 0 / 0 | 0.1 |
+| palafito_estuary_village | 14×5.4×18 | 6.3 | 12.6 | 12.6 | 12.7 | 637 / 0 / 0 / 0 | 710 / 0 / 0 / 0 | 631 / 0 / 0 / 6 | 0.2 |
+| maya_limestone_shrine_and_na | 11.5×7.4×18.5 | 7 | 9.2 | 9.2 | 9.6 | 797 / 0 / 0 / 0 | 1000 / 0 / 0 / 0 | 800 / 0 / 0 / 2 | 0.3 |
+| indigenous_canoe_landing | 8.5×2.2×16 | 1.4 | 11.4 | 11.4 | 11.4 | 172 / 0 / 0 / 0 | 180 / 0 / 0 / 0 | 172 / 0 / 0 / 0 | 0 |
+| english_triangular_palisade_fort | 118×6.8×90 | 8.4 | 57.5 | 57.5 | 57.5 | 1064 / 0 / 0 / 0 | 970 / 0 / 0 / 24 | 1041 / 0 / 0 / 25 | 0.1 |
+| english_half_timber_hall | 10.5×7.4×22 | 10.4 | 13.6 | 13.6 | 13.6 | 1071 / 0 / 0 / 0 | 1292 / 0 / 0 / 0 | 1071 / 0 / 0 / 0 | 0 |
+| english_timber_cottage | 8.2×5.8×15.5 | 7.7 | 8.9 | 8.9 | 9.2 | 1086 / 0 / 0 / 0 | 1356 / 0 / 0 / 0 | 1090 / 0 / 0 / 3 | 0.2 |
 
 ### 2a. Masts
 
@@ -248,12 +250,12 @@ Share of lines that either the shot or the mesh says struck. *Agree* is within 0
 | nina | 36 | 0 |  | 56 | 0 | 0 | – | – |
 | pinta | 45 | 0 |  | 202 | 0 | 0 | – | – |
 | santa-maria | 58 | 0 |  | 196 | 0 | 0 | – | – |
-| victory | 67 | 3 | helm.tiller 0.8m, helm.rudder 0.8m, rig.mizzen.fall 0.52m | 260 | 27 | 0.56 | 0 | 0 |
+| victory | 67 | 3 | helm.tiller 0.8m, helm.rudder 0.8m, rig.mizzen.fall 0.52m | 259 | 27 | 0.56 | 0 | 0 |
 | oseberg | 232 | 0 |  | 6 | 0 | 0 | – | – |
 | lusoria | 190 | 0 |  | 6 | 2 | 0.37 | – | – |
 | taino-canoe | 149 | 0 |  | 0 | 0 | 0 | – | – |
-| flying-cloud | 219 | 0 |  | 473 | 0 | 0 | – | – |
-| gipsy-moth-iv | 38 | 0 |  | 16 | 0 | 0 | – | – |
+| flying-cloud | 219 | 0 |  | 478 | 0 | 0 | – | – |
+| gipsy-moth-iv | 38 | 0 |  | 17 | 0 | 0 | – | – |
 
 ### 3. Waterline and hull
 
@@ -314,36 +316,32 @@ Share of lines that either the shot or the mesh says struck. *Agree* is within 0
 | oseberg | 3.6 / 1.116 | 0.181 / 0.376 | 2.791 / 1.113 | – | – | – | – | – | – | – | – | 4.705 / 1.812 | – | – | – | 0.287 | 0.201 | 0.307 |
 | lusoria | 6.429 / 1.333 | 0.308 / 0.402 | 5.54 / 1.333 | – | – | – | – | – | – | – | – | 4.787 / 1.842 | – | – | – | 0.24 | 0.113 | 0.18 |
 | taino-canoe | 10 / 1.714 | 0.323 / 0.52 | 6.69 / 1.713 | – | – | – | – | – | – | – | – | 3.995 / 2 | – | – | – | 0.187 | 0.072 | 0.172 |
-| flying-cloud | 3 / 0.7 | – | 0.875 / 0.347 | – | – | 0.244 / 0.104 | – | 0.875 / 0.344 | – | 1.433 / 0.248 | – | – | 0.875 / 0.35 | 16.712 / 4.984 | 1.44 / 0.35 | 0.914 | 0.503 | – |
+| flying-cloud | 3 / 0.7 | – | 0.875 / 0.347 | – | – | 0.244 / 0.104 | – | 0.875 / 0.344 | – | 1.43 / 0.249 | – | – | 0.875 / 0.35 | 16.712 / 4.984 | 1.44 / 0.35 | 0.914 | 0.503 | – |
 | gipsy-moth-iv | 3 / 0.7 | – | 3.707 / 1.483 | – | – | – | – | 0.252 / 0.445 | – | – | – | – | – | – | – | 0.216 | 0.129 | – |
 
 ### Every measurement past its limit
 
 | Check | measured | limit | note |
 |---|---|---|---|
-| building.pieces-air-turned/bastion_trace_fortress | 9.49 | 2 | reach grows from 32.7 m to 36.4 m when turned; stops up to 15.2 m from it |
-| building.pieces-air-turned/maya_limestone_shrine_and_na | 2.08 | 2 | reach grows from 9.2 m to 12.6 m when turned; stops up to 2.3 m from it |
-| building.pieces-air-turned/open_lonja_loggia | 15.53 | 2 | reach grows from 13.9 m to 21.3 m when turned; stops up to 12.6 m from it |
-| building.pieces-air-turned/stone_quay_seawall | 72.07 | 2 | reach grows from 42.4 m to 43.7 m when turned; stops up to 30 m from it |
-| building.pieces-air-turned/stone_sea_bastion | 9.98 | 2 | reach grows from 18.9 m to 27.5 m when turned; stops up to 12.2 m from it |
-| building.pieces-air-turned/walled_mule_corral | 22.82 | 2 | reach grows from 17.7 m to 31.8 m when turned; stops up to 19.8 m from it |
+| building.pieces-air-turned/bastion_trace_fortress | 20.42 | 2 | reach grows from 33 m to 36.1 m when turned; stops up to 2.8 m from it |
+| building.pieces-air-turned/stone_sea_bastion | 11.81 | 2 | reach grows from 18.9 m to 21.2 m when turned; stops up to 2.9 m from it |
 | collision.air-hull/flying-cloud | 5.5 | 2 | balls stop in air beside the hull |
-| collision.air-hull/nina | 2.2 | 2 | balls stop in air beside the hull |
+| collision.air-hull/nina | 2.3 | 2 | balls stop in air beside the hull |
 | collision.air-hull/oseberg | 7.1 | 2 | balls stop in air beside the hull |
 | collision.air-hull/pinta | 2.8 | 2 | balls stop in air beside the hull |
 | collision.air-rig/flying-cloud | 85 | 5 | balls stop in air in the rig box, median 6.83 m from anything |
-| collision.air-rig/gipsy-moth-iv | 73.1 | 5 | balls stop in air in the rig box, median 2.63 m from anything |
-| collision.air-rig/lusoria | 58.1 | 5 | balls stop in air in the rig box, median 2.21 m from anything |
-| collision.air-rig/nina | 73.7 | 5 | balls stop in air in the rig box, median 3.27 m from anything |
-| collision.air-rig/oseberg | 57 | 5 | balls stop in air in the rig box, median 2.3 m from anything |
+| collision.air-rig/gipsy-moth-iv | 73 | 5 | balls stop in air in the rig box, median 2.63 m from anything |
+| collision.air-rig/lusoria | 58.2 | 5 | balls stop in air in the rig box, median 2.22 m from anything |
+| collision.air-rig/nina | 73.5 | 5 | balls stop in air in the rig box, median 3.25 m from anything |
+| collision.air-rig/oseberg | 57.1 | 5 | balls stop in air in the rig box, median 2.3 m from anything |
 | collision.air-rig/pinta | 75.3 | 5 | balls stop in air in the rig box, median 3.17 m from anything |
 | collision.air-rig/santa-maria | 80.7 | 5 | balls stop in air in the rig box, median 3.99 m from anything |
-| collision.air-rig/victory | 71.2 | 5 | balls stop in air in the rig box, median 6.1 m from anything |
-| collision.through-hull/nina | 1.5 | 1 | yard.fore 296, cabin 234, bulwark:-# 148, bulwark:# 115, bow.structure 107 |
-| collision.through-hull/santa-maria | 3.6 | 1 | hull.planking 1515, hull.closure.stern 148, mast.main.cut 127, yard.spritsail 122, bow.bowsprit 116 |
-| collision.through-hull/victory | 10.6 | 1 | hull.planking 1745, stern.galleries 419, bow.bowsprit 312, rig.standing.fore 304, rig.standing.main 303 |
-| collision.through-mast/gipsy-moth-iv | 1.1 | 1 | mast.main.cut 246, mast.mizzen.cut 164, spar.mizzen-boom 66, rail.port 35, rail.starboard 34 |
-| collision.through-mast/victory | 2.3 | 1 | hull.planking 1745, stern.galleries 419, bow.bowsprit 312, rig.standing.fore 304, rig.standing.main 303 |
+| collision.air-rig/victory | 71.3 | 5 | balls stop in air in the rig box, median 6.09 m from anything |
+| collision.through-hull/nina | 1.5 | 1 | yard.fore 312, cabin 243, bulwark:-# 148, bulwark:# 108, bow.structure 103 |
+| collision.through-hull/santa-maria | 3.6 | 1 | hull.planking 1517, hull.closure.stern 147, mast.main.cut 127, yard.spritsail 121, bow.bowsprit 116 |
+| collision.through-hull/victory | 10.6 | 1 | hull.planking 1747, stern.galleries 419, bow.bowsprit 312, rig.standing.fore 304, rig.standing.main 299 |
+| collision.through-mast/gipsy-moth-iv | 1.1 | 1 | mast.main.cut 246, mast.mizzen.cut 164, spar.mizzen-boom 64, rail.port 35, rail.starboard 34 |
+| collision.through-mast/victory | 2.3 | 1 | hull.planking 1747, stern.galleries 419, bow.bowsprit 312, rig.standing.fore 304, rig.standing.main 299 |
 | crew.route-buried/victory | 1.2 | 0.5 | victory_w3 180, victory_q8 180, victory_q11 180, leonor 143, victory_q10 64, duarte 14; up to 0.21 m |
 | crew.route-floats/flying-cloud | 2.6 | 0.5 | maria 103, afonso 92; up to 9 m |
 | crew.route-floats/taino-canoe | 6.7 | 0.5 | rower.port.08 180, rower.starboard.08 180; up to 0.3 m |
@@ -401,7 +399,7 @@ Share of lines that either the shot or the mesh says struck. *Agree* is within 0
 | node.loose/victory | 3 | 0 | helm.tiller 0.8m, helm.rudder 0.8m, rig.mizzen.fall 0.52m |
 | prop.jetty-root-buried/boston | 0.43 | 0 | the shore end stands in rising ground |
 | rope.loose/lusoria | 2 | 0 | of 6 lines; worst 0.37 m; rig.standing 2 |
-| rope.loose/victory | 27 | 0 | of 260 lines; worst 0.56 m; rig.standing.main 12, rig.standing.mizzen 8, rig.standing.fore 6, rig.running 1 |
+| rope.loose/victory | 27 | 0 | of 259 lines; worst 0.56 m; rig.standing.main 12, rig.standing.mizzen 8, rig.standing.fore 6, rig.running 1 |
 | surface.grain-across/flying-cloud/deck | 3.13 | 1.67 | 3/m against Niña's 0.96/m |
 | surface.grain-across/flying-cloud/wood-17 | 14.82 | 1.67 | 16.712/m against Niña's 1.128/m |
 | surface.grain-across/gipsy-moth-iv/deck | 3.13 | 1.67 | 3/m against Niña's 0.96/m |
@@ -416,7 +414,7 @@ Share of lines that either the shot or the mesh says struck. *Agree* is within 0
 | surface.grain-across/taino-canoe/oak | 6.97 | 1.67 | 6.69/m against Niña's 0.96/m |
 | surface.grain-across/taino-canoe/wale/post | 4.16 | 1.67 | 3.995/m against Niña's 0.96/m |
 | surface.grain-along/flying-cloud/deck | 2.12 | 1.67 | 0.7/m against Niña's 0.33/m |
-| surface.grain-along/flying-cloud/spar | 0.55 | 1.67 | 0.248/m against Niña's 0.45/m |
+| surface.grain-along/flying-cloud/spar | 0.55 | 1.67 | 0.249/m against Niña's 0.45/m |
 | surface.grain-along/flying-cloud/wood-17 | 12.78 | 1.67 | 4.984/m against Niña's 0.39/m |
 | surface.grain-along/gipsy-moth-iv/deck | 2.12 | 1.67 | 0.7/m against Niña's 0.33/m |
 | surface.grain-along/gipsy-moth-iv/oak | 4.49 | 1.67 | 1.483/m against Niña's 0.33/m |
@@ -431,18 +429,6 @@ Share of lines that either the shot or the mesh says struck. *Agree* is within 0
 | surface.grain-along/taino-canoe/wale/post | 5.57 | 1.67 | 2/m against Niña's 0.359/m |
 | surface.wall-course/flying-cloud | 0.91 | 0.45 | wall courses 0.914 m wide against Niña's 0.267 m |
 | surface.wall-course/victory | 0.76 | 0.45 | wall courses 0.756 m wide against Niña's 0.267 m |
-| tree.no-collision/birch | 0 | 50 | lines through the trunk that any shot stops |
-| tree.no-collision/ceiba | 0 | 50 | lines through the trunk that any shot stops |
-| tree.no-collision/chestnut | 0 | 50 | lines through the trunk that any shot stops |
-| tree.no-collision/elm | 0 | 50 | lines through the trunk that any shot stops |
-| tree.no-collision/mangrove | 0 | 50 | lines through the trunk that any shot stops |
-| tree.no-collision/maple | 0 | 50 | lines through the trunk that any shot stops |
-| tree.no-collision/oak | 0 | 50 | lines through the trunk that any shot stops |
-| tree.no-collision/palm | 0 | 50 | lines through the trunk that any shot stops |
-| tree.no-collision/royal_palm | 0 | 50 | lines through the trunk that any shot stops |
-| tree.palm-air/palm-0.2 | 45.9 | 10 | a ball stops 1.33 m from anything |
-| tree.palm-air/palm-0.5 | 47.8 | 10 | a ball stops 1.47 m from anything |
-| tree.palm-air/palm-0.8 | 45.3 | 10 | a ball stops 1.47 m from anything |
 | walk.inside-structure/flying-cloud | 438 | 0 | of 3467 cells: under a roof with no floor |
 | walk.inside-structure/gipsy-moth-iv | 55 | 0 | of 161 cells: under a roof with no floor |
 | walk.inside-structure/victory | 3 | 0 | of 2048 cells: under a roof with no floor |

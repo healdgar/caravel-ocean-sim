@@ -318,10 +318,6 @@ const STRIKE_BLAST_DAMAGE = 1 / 3;
 const STRIKE_CHAR = 0.6;
 export const FOREST_FALL_SECONDS = 3.6;
 
-export function forestFallCode(value) {
-  const code = value | 0;
-  return { height: (code & 2047) / FOREST_FALL_HEIGHT_STEPS, bearing: ((code >>> 11) & (FOREST_FALL_BEARINGS - 1)) / FOREST_FALL_BEARINGS * Math.PI * 2, restDegrees: FOREST_FALL_REST_MIN_DEG + (code >>> 18) };
-}
 const encodeTreeFall = (height, bearing, restDegrees) => {
   const turn = ((bearing / (Math.PI * 2)) % 1 + 1) % 1;
   return (Math.max(0, Math.min(2047, Math.round(height * FOREST_FALL_HEIGHT_STEPS))))
@@ -355,7 +351,6 @@ function writeStruckRoot(root, at, record, { falling = false, now = 0 } = {}) {
   }
 }
 
-const treeStrikeRecord = (strikes, x, z) => strikes.get(forestStrikeKey(x, z));
 function ensureStrikeRecord(strikes, x, z) {
   const key = forestStrikeKey(x, z);
   let record = strikes.get(key);
@@ -412,27 +407,47 @@ export function strikeForestRoot(roots, count, x, z, strikes, { now = 0, shapeOf
   return best;
 }
 
-// Puts what is remembered back on a freshly streamed set of roots. A tree that fell before stays down.
+// Puts what is remembered back on a freshly streamed set of roots. A tree that fell before stays down. Saved positions can
+// come back a fraction off, the same coast being laid out elsewhere on a later visit, so a tree is known within 2 cm.
+const STRIKE_MATCH_M = 0.02;
+const strikeCell = (x, z) => Math.floor(x) * 1e6 + Math.floor(z);
 export function reapplyForestStrikes(roots, count, strikes) {
   if (!strikes.size) return;
+  const cells = new Map();
+  for (const record of strikes.values()) {
+    for (const dx of [-STRIKE_MATCH_M, STRIKE_MATCH_M]) for (const dz of [-STRIKE_MATCH_M, STRIKE_MATCH_M]) {
+      const key = strikeCell(record.x + dx, record.z + dz);
+      let list = cells.get(key);
+      if (!list) cells.set(key, list = []);
+      if (!list.includes(record)) list.push(record);
+    }
+  }
   for (let i = 0; i < count; i++) {
-    const at = i * TRUNK_ROOT_FLOATS, record = treeStrikeRecord(strikes, roots[at], roots[at + 2]);
+    const at = i * TRUNK_ROOT_FLOATS, x = roots[at], z = roots[at + 2], list = cells.get(strikeCell(x, z));
+    if (!list) continue;
+    const record = list.find((r) => Math.abs(r.x - x) <= STRIKE_MATCH_M && Math.abs(r.z - z) <= STRIKE_MATCH_M);
     if (!record) continue;
+    // From here on this root's own position names it, so the next ball finds what it has already suffered.
+    strikes.delete(forestStrikeKey(record.x, record.z));
+    record.x = x;
+    record.z = z;
+    strikes.set(forestStrikeKey(x, z), record);
     for (let k = 0; k < record.chars; k++) for (let c = 0; c < 3; c++) roots[at + TRUNK_ROOT_TINT + c] *= STRIKE_CHAR;
     writeStruckRoot(roots, at, record);
   }
 }
 
-// The saved form: one line per tree, short enough to keep every tree a long war brings down.
-export function forestStrikesToSave(strikes) {
+// The saved form: one line per tree, short enough to keep every tree a long war brings down. Positions are in centimetres
+// from the coast's own centre.
+export function forestStrikesToSave(strikes, origin = { x: 0, z: 0 }) {
   const out = [];
-  for (const r of strikes.values()) out.push([Math.round(r.x * 100), Math.round(r.z * 100), r.hits, +r.damage.toFixed(3), +r.height.toFixed(2), +r.bearing.toFixed(2), Math.round(r.rest), r.chars, r.wounded ? 1 : 0]);
+  for (const r of strikes.values()) out.push([Math.round((r.x - origin.x) * 100), Math.round((r.z - origin.z) * 100), r.hits, +r.damage.toFixed(3), +r.height.toFixed(2), +r.bearing.toFixed(2), Math.round(r.rest), r.chars, r.wounded ? 1 : 0]);
   return out;
 }
-export function forestStrikesFromSave(saved, strikes = new Map()) {
+export function forestStrikesFromSave(saved, origin = { x: 0, z: 0 }, strikes = new Map()) {
   for (const line of Array.isArray(saved) ? saved : []) {
     if (!Array.isArray(line) || !line.every(Number.isFinite)) continue;
-    const [xCm, zCm, hits, damage, height, bearing, rest, chars, wounded] = line, x = xCm / 100, z = zCm / 100;
+    const [xCm, zCm, hits, damage, height, bearing, rest, chars, wounded] = line, x = origin.x + xCm / 100, z = origin.z + zCm / 100;
     strikes.set(forestStrikeKey(x, z), { x, z, hits, damage, height, bearing, rest, chars, wounded: wounded === 1 });
   }
   return strikes;

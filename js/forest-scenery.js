@@ -986,7 +986,7 @@ var<workgroup> forestSortCount:u32;
 
 export async function createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack,groundSample,forestMass=null,forestMiddle=forestMass?.middle??null,mode='auto',nearPixels=3,
   impostorPixels=typeof location==='undefined'?32:Number(new URLSearchParams(location.search).get('forestImpostorPixels')||32),
-  impostorMode=typeof location==='undefined'?'auto':new URLSearchParams(location.search).get('forestImpostor')||'auto',terrainOcclusion=null,savedStrikes=null,onStrikesChanged=null}){
+  impostorMode=typeof location==='undefined'?'auto':new URLSearchParams(location.search).get('forestImpostor')||'auto',terrainOcclusion=null,savedStrikes=null,strikeOrigin={x:0,z:0},onStrikesChanged=null}){
   if(!['auto','near','far'].includes(mode)||!(nearPixels>0&&nearPixels<=3))throw Error('Invalid forest LOD policy');
   if(!['auto','off','force'].includes(impostorMode)||!Number.isInteger(impostorPixels)||impostorPixels<3||impostorPixels>256)throw Error('Invalid authored forest impostor policy');
   if(samples<2)throw Error('Native forest coverage requires MSAA');
@@ -1013,7 +1013,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     const nativeSampler=device.createSampler({...samplerOptions,addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge'});
     const nativeRepeatSampler=device.createSampler({...samplerOptions,addressModeU:'repeat',addressModeV:'repeat'});
     const rooted=pack.roots.slice();let excludedRoots=0;
-    let liveRoots=rooted;const strikes=forestStrikesFromSave(savedStrikes),falling=[];
+    let liveRoots=rooted;const strikes=forestStrikesFromSave(savedStrikes,strikeOrigin),falling=[];
     if(forestMass){
       if(forestMass.rootChunks.length!==m.rootCount)throw Error('Native forest mass owner table differs from original root count');
       for(let i=0;i<rooted.length;i+=12){const owner=forestMass.rootChunks[i/12];rooted[i+10]=owner===0xffffffff?-1:owner;}
@@ -1233,7 +1233,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       for(let i=0;i<activeRootCount;i++)if(liveRoots[i*12]===hit.x&&liveRoots[i*12+2]===hit.z)return i;
       return -1;
     };
-    const saveStrikes=()=>{onStrikesChanged?.(forestStrikesToSave(strikes));};
+    const saveStrikes=()=>{onStrikesChanged?.(forestStrikesToSave(strikes,strikeOrigin));};
     return {stats,nativeReady,prepare(){},trunksReady,
       get trunks(){return trunkGrid;},
       updatePack(nextPack,nextHeights=null,nextRegion=null){
