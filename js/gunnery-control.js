@@ -4042,6 +4042,8 @@ export function createGunnerySolidSweep({ sourceBoat, sourceBuilding = null, get
       if (!arrow && projectile) {
         const land = getTerrain?.(), shores = land?.ports ?? (land?.port ? [land.port] : null);
         for (const port of shores ?? []) {
+          // The people in its streets see it go by. What it does to them is worked out on the GPU.
+          port?.townsfolkWatch?.(from, to, best, projectile);
           const soldiers = port?.garrison?.soldiers;
           if (!soldiers?.length) continue;
           const reach = 400 + Math.hypot(to[0] - from[0], to[2] - from[2]), mx = (from[0] + to[0]) * 0.5, mz = (from[2] + to[2]) * 0.5;

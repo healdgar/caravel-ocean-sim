@@ -6,7 +6,7 @@ Buildings now find their own ground, because the port layout assumes a straight 
 
 `js/town-streets.js` lays each town's ways once, at load. Each door joins by the cheapest walk over the ground (slope costs, walls repel), so ways merge. Neighbours that end up far apart by road get a link. Trips then decide width and surface: busy stretches of a grown town are cobbled, and the rest is earth. One or two roads wander out 800 m and fade. The land shader reads the result from a small distance field, so ways need no geometry and cannot float or sink. Trees, palms and ground cover keep off them.
 
-`js/townsfolk.js` and `js/wgsl/townsfolk.js` draw the people, at most 520 in a metropolis. Each is a route, a phase and a speed, so a compute pass works out where they are from the time alone, culls them and picks one of four models. The vertex stage reads poses straight from the baked clips. JavaScript sends nothing per person. After dark about nine in ten are home, and they go in while shot is falling.
+`js/townsfolk.js` and `js/wgsl/townsfolk.js` draw the people, at most 520 in a metropolis. Each is a route, a phase and a speed, so a compute pass works out where they are from the time alone, culls them and picks one of four models. The vertex stage reads poses straight from the baked clips. JavaScript sends nothing per person. After dark about nine in ten are home. Under fire see "People under fire" below.
 
 Measured at Lisbon with Victory, 1728x1117, with Chrome holding the GPU about 42% busy: no measurable change in frame rate from the deck (49.7 and 47.8 fps) or in the town (38.3 and 38.7 fps), 0.12 M triangles, JavaScript unchanged at 3 ms. Laying out a town takes 50 to 370 ms at load, on the main thread.
 
@@ -18,6 +18,14 @@ Limits:
 - Ways stop at the edge of what the field covers and do not join the next town.
 - Only the nearest town has people, and a destroyed building still takes visitors.
 - Laying out a streamed section with a port happens on the main thread, so can hitch.
+
+People under fire: JavaScript (`js/town-shots.js`) sends the walkers' compute pass a short list of each ball's path over the frame, where balls landed and where masonry is coming down, only while there is any. The pass tests everyone against it. A ball's path brings down whoever it touches; a landing or falling masonry may bring down those very near, on a roll; anyone within reach is frightened, more surely the closer they are. Beyond the reach (about 34 m for a 24-pounder, 10 m for a ball going past) nobody reacts, so the old emptying of the whole town while anything flew is gone. Those close run along their own way, which already keeps clear of walls and water, or crouch; those further off stop and look. Each person has a 48-byte record in a GPU buffer, written only when something changes. Motion remains a function of the time: running is a start, a direction and a speed. Falls are baked once from the soldiers' ragdoll, with the run and the cower, into the town's clips (`js/town-clips.js`).
+
+Limits:
+- Fallen people are not saved. They stay as long as their port stays in memory, and a reload has everyone back on their feet among the saved ruins. They are not cleared when the town rebuilds, or moved if a crater opens under them.
+- Those indoors when a building falls come out again unharmed. Nobody is hit indoors.
+- Bodies may overlap each other and a nearby wall.
+- The frame clock restarts every 600 s, and everyone walking jumps along their way when it does. This was so before.
 
 ## November 5: generated assets through Tripo and our decimator
 

@@ -1,11 +1,15 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // The people of whichever town is nearest, drawn entirely from what the GPU works out each frame.
-// JavaScript uploads their routes once when a town comes into reach, and touches no one after that.
+// JavaScript uploads their routes once when a town comes into reach, and touches no one after that. Under fire it
+// sends a short list of where shot went, only while there is any, and never learns who that struck. What has
+// befallen people lives on the GPU as long as their town stays loaded. It is not saved: after a reload the ruins
+// are still there, and the people are all back on their feet.
 import { createIndigenousCrewModels } from './crew.js';
 import { DRESS_MASK_SCALE, indigenousDress } from './indigenous-dress.js';
-import { bakedCrewClips } from './crew-clip-pose.js';
 import { createDistantCrewLOD } from './crew-lod.js';
-import { TOWNSFOLK_BODY_WORDS, TOWNSFOLK_LOOKS, TOWNSFOLK_RENDER, TOWNSFOLK_TIERS, TOWNSFOLK_WALK } from './wgsl/townsfolk.js';
+import { bakeTownClips } from './town-clips.js';
+import { TOWN_SHOTS_WORDS, createTownShots } from './town-shots.js';
+import { TOWN_FATE_WORDS, TOWN_SHOT_LIMIT, TOWN_SHOT_WORDS, TOWNSFOLK_BODY_WORDS, TOWNSFOLK_LOOKS, TOWNSFOLK_RENDER, TOWNSFOLK_TIERS, TOWNSFOLK_WALK } from './wgsl/townsfolk.js';
 import { WALKER_WORDS } from './town-streets.js';
 
 const MODELS = 2;
@@ -15,7 +19,7 @@ const STORAGE_ALIGNMENT_BODIES = 8;
 const PORT_REACH_M = 3200;
 const PORT_CHECK_FRAMES = 45;
 const MOBILE_SHARE = 0.4;
-const CALM_RATE_PER_SECOND = 0.12;
+const CROWD_UNIFORM_WORDS = 28;
 // One look in this many is someone of rank, or someone dressed for an occasion.
 const ELITE_LOOK_EVERY = 16;
 
@@ -108,16 +112,20 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     }));
     const distant = createDistantCrewLOD(model);
     const tiers = [...lods.slice(0, TOWNSFOLK_TIERS - 1), { indexCount: distant.length, buffer: buffer('townsfolk distant indices', distant, B.INDEX) }];
-    const entry = { vertex, lods: tiers, clips: bakedCrewClips(device, model) };
+    const { palettes, layout: clips } = bakeTownClips(model.animator);
+    const entry = { vertex, lods: tiers, clips, palette: buffer('townsfolk clips', palettes, B.STORAGE) };
     geometryFor.set(model, entry);
     return entry;
   };
   let indigenousModels = null;
 
-  let activePort = null, crowd = null, frameCount = 0, calm = 1, calmSent = 1;
+  let activePort = null, crowd = null, frameCount = 0;
+  // Each town's people as they were left, for as long as its port is in memory, so turning away and back raises no one.
+  const fatesOfTown = new WeakMap();
   function dispose() {
     if (!crowd) return;
-    for (const b of [crowd.walkers, crowd.route, crowd.bodies, crowd.draws, crowd.uniform, crowd.looks]) b.destroy();
+    for (const b of [crowd.walkers, crowd.route, crowd.bodies, crowd.draws, crowd.uniform, crowd.looks, crowd.shots]) b.destroy();
+    delete crowd.port.townsfolkWatch;
     crowd = null;
   }
   function buildCrowd(port) {
@@ -142,16 +150,21 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     const looks = buffer('townsfolk looks', townLooks(random, indigenous, port.indigenousSettlement?.cultureId), B.STORAGE);
     const bodies = device.createBuffer({ label: 'townsfolk bodies', size: buckets * bucketSpan * BODY_BYTES, usage: B.STORAGE });
     const draws = buffer('townsfolk draws', drawArguments, B.STORAGE | B.INDIRECT);
-    const uniformData = new ArrayBuffer(48), words = new Uint32Array(uniformData), floats = new Float32Array(uniformData);
-    for (let m = 0; m < MODELS; m++) {
-      const { clips } = geometries[m].clips;
-      words.set([clips[0].first, clips[0].frames, clips[1].first, clips[1].frames], m * 4);
+    const crowdWords = new Uint32Array(CROWD_UNIFORM_WORDS);
+    for (let m = 0; m < MODELS; m++) crowdWords.set(geometries[m].clips, m * geometries[m].clips.length);
+    crowdWords[24] = bucketSpan; crowdWords[25] = TOWNSFOLK_LOOKS;
+    const uniform = buffer('townsfolk crowd', crowdWords, B.UNIFORM);
+    const shots = device.createBuffer({ label: 'townsfolk shots', size: TOWN_SHOTS_WORDS * 4, usage: B.UNIFORM | B.COPY_DST });
+    let fates = fatesOfTown.get(port);
+    if (!fates) {
+      fates = device.createBuffer({ label: 'townsfolk fates', size: people * TOWN_FATE_WORDS * 4, usage: B.STORAGE });
+      fatesOfTown.set(port, fates);
     }
-    words[8] = bucketSpan; words[9] = TOWNSFOLK_LOOKS; floats[10] = calm;
-    const uniform = buffer('townsfolk crowd', new Uint8Array(uniformData), B.UNIFORM);
+    const shotLog = createTownShots(streets), shotBytes = new ArrayBuffer(TOWN_SHOTS_WORDS * 4);
+    port.townsfolkWatch = shotLog.note;
     const walkGroup = device.createBindGroup({
       label: 'townsfolk walk', layout: walkPipeline.getBindGroupLayout(0),
-      entries: [frameUBO, walkers, route, bodies, draws, uniform].map((b, binding) => ({ binding, resource: { buffer: b } })),
+      entries: [frameUBO, walkers, route, bodies, draws, uniform, shots, fates].map((b, binding) => ({ binding, resource: { buffer: b } })),
     });
     const groups = [];
     for (let m = 0; m < MODELS; m++) for (let t = 0; t < TOWNSFOLK_TIERS; t++) {
@@ -160,11 +173,11 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
         entries: [
           [0, { buffer: frameUBO }], [1, { buffer: hull }], [4, transView], [5, sampClamp], [6, envCubeView], [7, { buffer: sunVisBuf }], [9, skyView],
           [10, { buffer: bodies, offset: (m * TOWNSFOLK_TIERS + t) * bucketSpan * BODY_BYTES, size: bucketSpan * BODY_BYTES }],
-          [11, { buffer: geometries[m].clips.paletteBuffer }], [12, { buffer: looks }],
+          [11, { buffer: geometries[m].palette }], [12, { buffer: looks }],
         ].map(([binding, resource]) => ({ binding, resource })),
       }));
     }
-    crowd = { people, walkers, route, looks, bodies, draws, uniform, drawArguments, walkGroup, groups, geometries };
+    crowd = { port, people, walkers, route, looks, bodies, draws, uniform, shots, fates, shotLog, shotWords: new Uint32Array(shotBytes), shotFloats: new Float32Array(shotBytes), shotsSent: 0, drawArguments, walkGroup, groups, geometries };
   }
 
   return {
@@ -180,14 +193,15 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
       }
       if (best !== activePort) { activePort = best; buildCrowd(best); }
     },
-    // With shot falling on the town people go in, a few at a time, and come out again after.
-    setUnderFire(underFire, dt) {
-      calm = Math.max(0, Math.min(1, calm + (underFire ? -1 : 1) * CALM_RATE_PER_SECOND * dt));
-      if (crowd && calm !== calmSent) { device.queue.writeBuffer(crowd.uniform, 40, new Float32Array([calm])); calmSent = calm; }
-    },
     encode(pass) {
       if (!crowd) return;
       device.queue.writeBuffer(crowd.draws, 0, crowd.drawArguments);
+      // Nothing while nothing flies, and once more after the last of it to say so.
+      const shotCount = crowd.shotLog.collect(crowd.shotWords, crowd.shotFloats);
+      if (shotCount || crowd.shotsSent) {
+        device.queue.writeBuffer(crowd.shots, 0, crowd.shotWords, 0, TOWN_SHOTS_WORDS - TOWN_SHOT_WORDS * (TOWN_SHOT_LIMIT - shotCount));
+        crowd.shotsSent = shotCount;
+      }
       pass.setPipeline(walkPipeline);
       pass.setBindGroup(0, crowd.walkGroup);
       pass.dispatchWorkgroups(Math.ceil(crowd.people / 64));
@@ -208,6 +222,6 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
         }
       }
     },
-    destroy() { dispose(); hull.destroy(); },
+    destroy() { crowd?.fates.destroy(); dispose(); hull.destroy(); },
   };
 }
