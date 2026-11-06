@@ -40,3 +40,8 @@ test('a gun on the far side of its own fort holds too',()=>{
   assert.ok(held>=1,'the west wall gun holds');
   assert.deepEqual(struck,[]);
 });
+
+test('a fort never strikes itself, even firing across its own works',()=>{
+  const {struck}=volley([FORT],{...SHIP,x:400,z:40});
+  assert.deepEqual(struck,[]);
+});

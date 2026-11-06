@@ -13,7 +13,7 @@ import { PORT_PREFABS, getBuildingParts } from './coastal-world.js';
 import { GROUNDING_SUBSTRATES, classifyGroundingSubstrate, setGroundingDamageHandler } from './terrain-model.js';
 import { locatePartAtLocalPoint, isSuperstructurePartId, computeArchetypeScaleSpec } from './part-assembly.js';
 import { shipMastSpecs, traceShotPastGap, fracturePartsGone } from './ship-fracture.js';
-import { traceShotThroughBreach } from './building-fracture.js';
+import { buildingReach, traceShotAtBuilding } from './building-fracture.js';
 import { createFortGarrison, stepFortGarrison } from './crew.js';
 import { DEFAULT_SHIP_COLORS, strikeVesselColors } from './ship-colors.js';
 
@@ -2429,10 +2429,12 @@ export function sweepBuildingSegment(from, to, radius = 0.08, port, options = nu
   if (Math.hypot(midX - portAnchorX, midZ - portAnchorZ) > 1800 + segHalf) return null;
   const segMinY = Math.min(from[1], to[1]);
   const segMaxY = Math.max(from[1], to[1]);
-  const previewOnly = options?.previewOnly === true;
+  const previewOnly = options?.previewOnly === true, exact = !previewOnly || options?.exact === true;
   let best = null;
   for (const inst of instances) {
+    if (inst === options?.ignore) continue;
     const baseY = inst.baseY ?? inst.y ?? 0;
+    const reach = buildingReach(inst);
     const foundDepth = Math.max(0, inst.foundationDepth ?? 4.5);
     const roofExtra = Math.max(
       inst.roofHeight ?? inst.roofPitch ?? 2.0,
@@ -2441,10 +2443,13 @@ export function sweepBuildingSegment(from, to, radius = 0.08, port, options = nu
     const instHeight = inst.height ?? 10;
     const collapseDropFrac = Math.max(0, Math.min(0.65, inst.damageState?.collapseDropFrac ?? 0));
     const effTopY = Math.max(3.2, (instHeight + roofExtra) * (1 - collapseDropFrac * 0.72));
-    if (segMaxY < baseY - foundDepth - radius || segMinY > baseY + effTopY + radius) continue;
+    const lowY = reach ? reach.min[1] : baseY - foundDepth, highY = reach ? reach.max[1] : baseY + effTopY;
+    if (segMaxY < lowY - radius || segMinY > highY + radius) continue;
     const depthZ = inst.depth ?? inst.length ?? 20;
     const widthX = inst.width ?? 12;
-    const halfDiag = Math.hypot(widthX, depthZ) * 0.5 + radius;
+    const halfDiag = (reach
+      ? Math.hypot(Math.max(-reach.min[0], reach.max[0]), Math.max(-reach.min[2], reach.max[2]))
+      : Math.hypot(widthX, depthZ) * 0.5) + radius;
     const bdx = midX - inst.x, bdz = midZ - inst.z;
     const maxReach = halfDiag + segHalf;
     if (bdx * bdx + bdz * bdz > maxReach * maxReach) continue;
@@ -2457,8 +2462,12 @@ export function sweepBuildingSegment(from, to, radius = 0.08, port, options = nu
     const p0 = [dx0 * cosY - dz0 * sinY, dy0, dx0 * sinY + dz0 * cosY];
     const p1 = [dx1 * cosY - dz1 * sinY, dy1, dx1 * sinY + dz1 * cosY];
     const d = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
-    const minB = [-widthX * 0.5 - radius, -foundDepth - radius, -depthZ * 0.5 - radius];
-    const maxB = [widthX * 0.5 + radius, effTopY + radius, depthZ * 0.5 + radius];
+    const minB = reach
+      ? [reach.min[0] - radius, reach.min[1] - baseY - radius, reach.min[2] - radius]
+      : [-widthX * 0.5 - radius, -foundDepth - radius, -depthZ * 0.5 - radius];
+    const maxB = reach
+      ? [reach.max[0] + radius, reach.max[1] - baseY + radius, reach.max[2] + radius]
+      : [widthX * 0.5 + radius, effTopY + radius, depthZ * 0.5 + radius];
     let tMin = 0, tMax = 1, hitAxis = 0, hitSign = 1;
     let valid = true;
     for (let a = 0; a < 3; a++) {
@@ -2473,18 +2482,18 @@ export function sweepBuildingSegment(from, to, radius = 0.08, port, options = nu
       }
     }
     if (!valid || tMin < 0 || tMin > 1) continue;
-    // The box knows nothing of what has left. Where the line goes in through a gap, it strikes the next thing
-    // standing, and it may meet nothing in this step, or anywhere in this building.
-    const behind = traceShotThroughBreach(inst.damageState?.fracture, from, to);
-    if (behind) {
-      if (!(behind.t <= 1)) continue;
-      tMin = Math.max(0, behind.t);
+    // The box only says the ball is near. It strikes the first thing really standing on its line, and it may
+    // meet nothing in this step, or anywhere in this building: a fort's box is mostly air at the corners.
+    const met = exact ? traceShotAtBuilding(inst, from, to) : null;
+    if (met) {
+      if (!(met.t <= 1)) continue;
+      tMin = Math.max(0, met.t);
     }
     if (!best || tMin < best.fraction) {
       const ln = [0, 0, 0]; ln[hitAxis] = hitSign;
-      // From inside it, what it strikes faces back along its flight.
+      // What it strikes faces back along its flight.
       const dLength = Math.hypot(d[0], d[1], d[2]) || 1;
-      const normal = behind
+      const normal = met
         ? [(from[0] - to[0]) / dLength, (from[1] - to[1]) / dLength, (from[2] - to[2]) / dLength]
         : [ln[0] * cosY + ln[2] * sinY, ln[1], -ln[0] * sinY + ln[2] * cosY];
       const localPosition = [p0[0] + d[0] * tMin, p0[1] + d[1] * tMin, p0[2] + d[2] * tMin];
@@ -3357,12 +3366,14 @@ export function buildingGunMuzzlePose(gun, building) {
   };
 }
 
+const GUN_PARAPET_M = 6;
+
 export function createBuildingGunnery(building, { onEvent = () => {}, getVessels = () => [], getTerrain = () => null, sweep = null, town = null } = {}) {
   const defs = createBuildingGunDefinitions(building);
   const state = createGunneryState(defs);
   building.gunnery = state;
   for (const i of createBuildingDamageState(building).restoredGuns ?? []) if (state.guns[i]) state.guns[i].dismounted = true;
-  const solidSweep = sweep ?? createGunnerySolidSweep({ sourceBoat: null, getVessels, getTerrain });
+  const solidSweep = sweep ?? createGunnerySolidSweep({ sourceBoat: null, sourceBuilding: building, getVessels, getTerrain });
   const damageLog = [];
   let lastDamageReport = null;
 
@@ -3370,7 +3381,13 @@ export function createBuildingGunnery(building, { onEvent = () => {}, getVessels
   // No gunner lays a piece through his own town: a gun whose line to its mark crosses one of the port's
   // buildings, or the fort it stands on, holds its fire.
   const ownGround = town ?? { instances: [building], center: { x: building.x ?? 0, z: building.z ?? 0 } };
-  const lineFouled = (gun, pose) => !!gun.aimPoint && !!sweepBuildingSegment(pose.position, gun.aimPoint, 0.08, ownGround, { previewOnly: true });
+  const lineFouled = (gun, pose) => {
+    if (!gun.aimPoint) return false;
+    // It fires over its own parapet, so what stands right before the muzzle does not count.
+    const to = gun.aimPoint, from = pose.position, share = Math.min(1, GUN_PARAPET_M / (Math.hypot(to[0] - from[0], to[1] - from[1], to[2] - from[2]) || 1));
+    const clear = [from[0] + (to[0] - from[0]) * share, from[1] + (to[1] - from[1]) * share, from[2] + (to[2] - from[2]) * share];
+    return !!sweepBuildingSegment(clear, to, 0.08, ownGround, { previewOnly: true, exact: true });
+  };
   const readyAtQuarters = (side = null) => {
     for (const g of state.guns) {
       if (!side || g.side === side) {
@@ -3974,11 +3991,11 @@ export function applyTerrainImpactDamage(terrain, event) {
   };
 }
 
-export function createGunnerySolidSweep({ sourceBoat, getVessels = () => [], getTerrain = () => null } = {}) {
+export function createGunnerySolidSweep({ sourceBoat, sourceBuilding = null, getVessels = () => [], getTerrain = () => null } = {}) {
   return function sweep(from, to, projectile) {
     const radius = projectile?.sweepRadius ?? projectile?.radius ?? 0.08;
     const previewOnly = projectile?.previewOnly === true;
-    const opts = previewOnly ? { previewOnly: true } : null;
+    const opts = previewOnly || sourceBuilding ? { previewOnly, ignore: sourceBuilding } : null;
     let best = null;
     const vessels = getVessels() ?? [];
     for (const entry of vessels) {

@@ -111,6 +111,10 @@ Buildings break the way ships do: no hit moves a vertex, each piece is one rigid
 
 `node scripts/building-damage-review.mjs` takes pictures of this from the real game. `npm run perf -- '[["fort",{"fort":"siege"}]]'` measures it.
 
+## What a ball strikes on a building
+
+To the sweep a building is only a box saying the ball is near. The ball strikes the first thing really standing on its line: the mesh until the building is first hit and cut, then its pieces, skipping what has gone, and the earth behind a fort's facing. The box comes from what the building really reaches, so a star fort's bastions stop balls, and the air in the corners of a triangular fort does not. A ball into earth breaks nothing itself, but its shock carries to the rim of the hole, up to six metres, so a breach goes on widening. The earth stays. A fort's own balls never strike it, and a gun fires over the first six metres of its own works.
+
 ## The free camera's cannon
 
 For trying out destruction: in the free camera, hold F to fire a 24-pounder where the sight points, at most once a second (`js/free-cannon.js`). Its balls strike ships, buildings, trees and ground as any other, and what they do is saved like any other damage. They raise no muzzle smoke, since it would hide the target, and no fort answers them by firing on a ship. Nor does a fort fire on arrival at a port saved battered: only fresh hits start a fight.

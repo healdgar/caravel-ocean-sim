@@ -239,7 +239,8 @@ test('a shot goes through a breach to whatever still stands behind it', () => {
   assert.ok(front, 'there is wall to shoot');
   const { from, to } = shotAt(fracture, front);
   assert.equal(traceShotThroughBreach(null, from, to), null, 'a building with no fracture is only its box');
-  assert.equal(traceShotThroughBreach(state, from, to), null, 'nothing has left: it strikes where it reached the box');
+  const first = traceShotThroughBreach(state, from, to);
+  assert.ok(first.t > 0 && first.t < 0.5 + 0.05 , `nothing has left: it strikes the wall itself (${first.t.toFixed(3)})`);
   // Shot out of the wall: the line now goes in through the gap.
   state.broken[front.index] = 1;
   state.brokenCount = 1;
@@ -568,4 +569,85 @@ test('a broad floor comes down in slabs, not as one sheet', () => {
   const walk = fracture.shards.filter((s) => s?.partKey === 'terreplein_adarve_walk');
   assert.ok(walk.length > 2, `${walk.length} pieces of wall walk`);
   for (const shard of walk) assert.ok(Math.max(shard.localMax[0] - shard.localMin[0], shard.localMax[2] - shard.localMin[2]) < 14, `one is ${shard.localMax[2] - shard.localMin[2]} m long`);
+});
+
+// The firing line runs from a bearing through a point on the building, far enough out on both sides.
+function hammer(prefabId, bearingDegrees, aimOf, shots = 12) {
+  const { fracture, instance } = prepared(prefabId), port = { instances: [instance] };
+  createBuildingDamageState(instance);
+  buildingFractureStateOf(instance.damageState, fracture);
+  const a = (bearingDegrees * Math.PI) / 180, d = [Math.sin(a), 0, -Math.cos(a)], aim = aimOf(instance);
+  const from = [aim[0] - d[0] * 200, aim[1], aim[2] - d[2] * 200], to = [aim[0] + d[0] * 200, aim[1], aim[2] + d[2] * 200];
+  let broke = 0, hits = 0;
+  for (let n = 0; n < shots; n++) {
+    const hit = sweepBuildingSegment(from, to, 0.07, port);
+    if (!hit) continue;
+    hits++;
+    applyBuildingImpactDamage(instance, { ...hit, mass: 10.9, ammo: 'round', velocity: [d[0] * 420, 0, d[2] * 420], energy: 961000 });
+    broke += applyBuildingFractureEvents(fracture, instance.damageState, instance.damageState.pendingBakes.splice(0), n);
+  }
+  return { broke, hits };
+}
+
+test('no angle on a fort\'s corner is a hard point: every bearing keeps breaking it', () => {
+  for (const prefabId of ['bastion_trace_fortress', 'stone_sea_bastion']) {
+    const corner = (instance) => [instance.width * 0.42, instance.height * 0.5, instance.length * 0.42];
+    for (const bearing of [0, 30, 45, 90, 120, 135, 180, 225, 270, 315]) {
+      const { broke, hits } = hammer(prefabId, bearing, corner);
+      assert.equal(hits, 12, `${prefabId} from ${bearing}`);
+      assert.ok(broke >= 90, `${prefabId} from ${bearing}: 12 shots broke only ${broke} pieces`);
+    }
+  }
+});
+
+test('a breach in a fort goes on widening after the ball reaches the earth behind the facing, and replays the same', () => {
+  const { fracture, instance } = prepared('stone_sea_bastion'), port = { instances: [instance] };
+  createBuildingDamageState(instance);
+  const state = buildingFractureStateOf(instance.damageState, fracture);
+  const aim = [instance.width * 0.42, instance.height * 0.5, instance.length * 0.42], from = [aim[0], aim[1], aim[2] + 200], to = [aim[0], aim[1], aim[2] - 200];
+  const counts = [];
+  for (let n = 0; n < 12; n++) {
+    const hit = sweepBuildingSegment(from, to, 0.07, port);
+    assert.ok(hit, 'earth stops it');
+    applyBuildingImpactDamage(instance, { ...hit, mass: 10.9, ammo: 'round', velocity: [0, 0, -420], energy: 961000 });
+    applyBuildingFractureEvents(fracture, instance.damageState, instance.damageState.pendingBakes.splice(0), n);
+    counts.push(state.brokenCount);
+  }
+  assert.ok(counts[3] > counts[1] && counts[7] > counts[3], `still widening: ${counts.join(' ')}`);
+  assert.ok(counts[11] > 120, `a wide breach: ${counts[11]}`);
+  const damage = {};
+  replayBuildingFracture(fracture, damage, instance.damageState.fractureLog, 100);
+  assert.deepEqual([...damage.fracture.broken], [...state.broken]);
+});
+
+test('a ball meets a triangular fort\'s walls, not the air in the corners of its box', () => {
+  const { fracture, instance } = prepared('english_triangular_palisade_fort'), port = { instances: [instance] };
+  createBuildingDamageState(instance);
+  buildingFractureStateOf(instance.damageState, fracture);
+  // Across the corner of the box, where there is no wall.
+  const x = instance.width * 0.42, z = instance.length * 0.42;
+  assert.equal(sweepBuildingSegment([x, 3, z + 40], [x, 3, z - 4], 0.07, port), null);
+  // And when it does strike, it strikes something: there is a piece where it lands.
+  const hit = sweepBuildingSegment([0, 3, 200], [0, 3, -200], 0.07, port);
+  assert.ok(hit, 'the fort has walls');
+  const l = hit.localPosition;
+  const gap = Math.min(...fracture.strikable.map((s) => {
+    const { localMin: lo, localMax: hi } = fracture.shards[s];
+    return Math.hypot(Math.max(lo[0] - l[0], 0, l[0] - hi[0]), Math.max(lo[1] - l[1], 0, l[1] - hi[1]), Math.max(lo[2] - l[2], 0, l[2] - hi[2]));
+  }));
+  assert.ok(gap < 0.5, `${gap.toFixed(2)} m from anything`);
+});
+
+test('a bastion reaching beyond the box still stops a ball', () => {
+  const { fracture, instance } = prepared('bastion_trace_fortress'), port = { instances: [instance] };
+  createBuildingDamageState(instance);
+  buildingFractureStateOf(instance.damageState, fracture);
+  const { reach } = fracture;
+  assert.ok(reach.max[0] > instance.width / 2 + 2, 'the star reaches well past its nominal box');
+  const hits = [];
+  for (let z = reach.min[2]; z <= reach.max[2]; z += 1) {
+    const hit = sweepBuildingSegment([200, 5, z], [-200, 5, z], 0.07, port);
+    if (hit) hits.push(hit.localPosition[0]);
+  }
+  assert.ok(Math.max(...hits) > instance.width / 2 + 1, `it strikes out on the bastions (${Math.max(...hits).toFixed(1)})`);
 });

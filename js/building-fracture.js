@@ -562,9 +562,12 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
     const c = shards[s].centroid;
     initial[at] = c[0]; initial[at + 1] = c[1]; initial[at + 2] = c[2];
   }
+  const finalIndices = outIndices.slice(0, indexCount);
   const fracture = Object.freeze({
     instanceIndex, prefabId: instance.prefabId ?? null,
     firstIndex, indexCount: endIndex - firstIndex, blockScale,
+    surface: Object.freeze({ vertices: rest, indices: finalIndices }),
+    reach: shardsReach(shards, solids),
     scale: Object.freeze([1, 1, 1]),
     toughness: fortified ? 1.4 : materialClass === 'timber' ? 0.8 : 1,
     shardCount: shards.length, vertexShards: vertexShards.slice(0, vertexCount),
@@ -573,7 +576,23 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
     guns: Object.freeze(shards.filter((s) => s?.kind === BUILDING_SHARD_KINDS.gun).map((s) => s.index)),
     toLocal, toWorld, groundAt, floorAt, originX, originZ, solids,
   });
-  return { vertices: rest, initial, indices: outIndices.slice(0, indexCount), fracture };
+  return { vertices: rest, initial, indices: finalIndices, fracture };
+}
+
+function shardsReach(shards, solids) {
+  const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+  for (let s = 1; s < shards.length; s++) {
+    if (!shards[s]) continue;
+    for (let c = 0; c < 3; c++) {
+      if (shards[s].localMin[c] < min[c]) min[c] = shards[s].localMin[c];
+      if (shards[s].localMax[c] > max[c]) max[c] = shards[s].localMax[c];
+    }
+  }
+  for (let i = 0; i < solids.length; i += 6) for (let c = 0; c < 3; c++) {
+    if (solids[i + c] < min[c]) min[c] = solids[i + c];
+    if (solids[i + 3 + c] > max[c]) max[c] = solids[i + 3 + c];
+  }
+  return Object.freeze({ min, max });
 }
 
 // Touching shards are linked. A link says whether one rests on the other, or only stands beside it.
@@ -704,7 +723,7 @@ function breakBuildingShard(state, s) {
 }
 
 // Rubble lands on rubble. The heap is coarse and only ever grows, and it is read only when a block lets go.
-const HEAP_CELL = 1.5, HEAP_REPOSE = 0.55;
+const HEAP_CELL = 1.5, HEAP_REPOSE = 0.55, SHOCK_REACH_M = 6, STRUCK_M = 0.3;
 const heapKey = (x, z) => (Math.floor(x / HEAP_CELL) + 32768) * 65536 + (Math.floor(z / HEAP_CELL) + 32768);
 
 function rollDownHeap(state, x, z) {
@@ -815,6 +834,20 @@ function distanceMetres(shard, local) {
   return Math.sqrt(sum);
 }
 
+// A ball that has struck bare earth, not a piece: how far off the nearest thing still standing lies, if near
+// enough to feel the shock. The earth stays, but the facing round the hole goes on falling.
+function rimOfBreach(state, point) {
+  const { shards, strikable, toLocal } = state.fracture, local = toLocal(point[0], point[1], point[2]);
+  let nearest = Infinity;
+  for (const s of strikable) {
+    if (state.broken[s]) continue;
+    const d = distanceMetres(shards[s], local);
+    if (d < STRUCK_M) return 0;
+    if (d < nearest) nearest = d;
+  }
+  return nearest < SHOCK_REACH_M ? nearest : 0;
+}
+
 function strikeBuilding(state, point, normal, { radius, amount, power, now, drop = false, radial = false, above = -Infinity }) {
   const { shards, strikable, toLocal } = state.fracture, local = toLocal(point[0], point[1], point[2]);
   let broke = 0;
@@ -881,7 +914,8 @@ export function applyBuildingFractureEvents(fracture, damage, events, now = 0) {
       const penetrating = event.stepDepth >= 0.4;
       const radius = (penetrating ? 1.75 : 1.15) * Math.max(0.7, Math.min(1.25, severity));
       const amount = ((penetrating ? 1.5 : 0.5) * severity) / fracture.toughness;
-      released = strikeBuilding(state, point, normal, { radius, amount, power: 0.7 + severity * 0.55, now });
+      // Into bare earth, the shock reaches what stands round the hole, so a breach goes on widening.
+      released = strikeBuilding(state, point, normal, { radius: radius + rimOfBreach(state, point), amount, power: 0.7 + severity * 0.55, now });
     }
     // Support is settled after each hit, so it makes no difference how they were batched.
     if (released) released += releaseUnsupportedBlocks(state, now);
@@ -933,40 +967,97 @@ function lineEntersBox(a, d, minX, minY, minZ, maxX, maxY, maxZ) {
     high = Math.min(high, Math.max(t1, t2));
     if (low > high) return Infinity;
   }
-  return low;
+  return high < 0 ? Infinity : low;
+}
+
+// The nearest triangle ahead on the line from-to, as a fraction of it. `standing` says which triangles are still there.
+function lineEntersTriangles(from, to, vertices, indices, firstIndex, endIndex, standing = null) {
+  const ox = from[0], oy = from[1], oz = from[2], dx = to[0] - ox, dy = to[1] - oy, dz = to[2] - oz;
+  let nearest = Infinity;
+  for (let i = firstIndex; i < endIndex; i += 3) {
+    if (standing && !standing(indices[i])) continue;
+    const a = indices[i] * STRIDE, b = indices[i + 1] * STRIDE, c = indices[i + 2] * STRIDE;
+    const ax = vertices[a], ay = vertices[a + 1], az = vertices[a + 2];
+    const e1x = vertices[b] - ax, e1y = vertices[b + 1] - ay, e1z = vertices[b + 2] - az;
+    const e2x = vertices[c] - ax, e2y = vertices[c + 1] - ay, e2z = vertices[c + 2] - az;
+    const px = dy * e2z - dz * e2y, py = dz * e2x - dx * e2z, pz = dx * e2y - dy * e2x;
+    const det = e1x * px + e1y * py + e1z * pz;
+    if (det > -1e-12 && det < 1e-12) continue;
+    const f = 1 / det, sx = ox - ax, sy = oy - ay, sz = oz - az;
+    const u = f * (sx * px + sy * py + sz * pz);
+    if (u < 0 || u > 1) continue;
+    const qx = sy * e1z - sz * e1y, qy = sz * e1x - sx * e1z, qz = sx * e1y - sy * e1x;
+    const v = f * (dx * qx + dy * qy + dz * qz);
+    if (v < 0 || u + v > 1) continue;
+    const t = f * (e2x * qx + e2y * qy + e2z * qz);
+    if (t >= 0 && t < nearest) nearest = t;
+  }
+  return nearest;
 }
 
 /**
- * What a shot meets on the line from `from` to `to`, in world metres, given what has left. A building is one
- * box to the sweep, so its pieces decide here. Null means the first thing on the line is still standing, and
- * the shot strikes where it reached the box. Otherwise the way in has gone, and `t` is the next thing standing,
- * Infinity if it passes clean through. `t` runs along from-to and may lie beyond either end.
+ * What a shot meets on the line from `from` to `to`, in world metres, given what has left. A building is one box
+ * to the sweep, and the pieces decide here. `t` is the next thing standing, as a fraction along from-to, and
+ * Infinity if it passes clean through. Null means there are no pieces to ask.
  */
 export function traceShotThroughBreach(state, from, to) {
-  if (!state?.brokenCount) return null;
-  const { fracture, broken } = state, { shards, solids, toLocal } = fracture;
+  if (!state) return null;
+  const { fracture, broken } = state, { shards, solids, surface, vertexShards, toLocal } = fracture;
+  // A dismounted gun lies on the deck, still in the way.
+  const standing = (vertex) => {
+    const s = vertexShards[vertex];
+    return !broken[s] || shards[s]?.kind === BUILDING_SHARD_KINDS.gun;
+  };
+  let nearest = lineEntersTriangles(from, to, surface.vertices, surface.indices, 0, surface.indices.length, state.brokenCount ? standing : null);
   const a = toLocal(from[0], from[1], from[2]), b = toLocal(to[0], to[1], to[2]), d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
-  // Most lines have no gap on them, and asking what has left first settles those at once.
-  let opening = Infinity;
-  for (let s = 1; s < shards.length; s++) {
-    // A dismounted gun lies on the deck, still in the way.
-    if (!broken[s] || shards[s].kind === BUILDING_SHARD_KINDS.gun) continue;
-    const { localMin: lo, localMax: hi } = shards[s], t = lineEntersBox(a, d, lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]);
-    if (t < opening) opening = t;
-  }
-  if (opening === Infinity) return null;
-  let standing = Infinity;
-  for (let s = 1; s < shards.length; s++) {
-    if (broken[s] && shards[s].kind !== BUILDING_SHARD_KINDS.gun) continue;
-    const { localMin: lo, localMax: hi } = shards[s], t = lineEntersBox(a, d, lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]);
-    if (t < standing) standing = t;
-  }
   for (let i = 0; i < solids.length; i += 6) {
     const t = lineEntersBox(a, d, solids[i], solids[i + 1], solids[i + 2], solids[i + 3], solids[i + 4], solids[i + 5]);
-    if (t < standing) standing = t;
+    if (t < nearest) nearest = t;
   }
-  if (standing < opening) return null;
-  return { t: standing };
+  return { t: nearest };
+}
+
+const buildingMeshes = new WeakMap();
+
+// Until a building has been cut into pieces, a shot meets the mesh it was drawn from.
+function noteBuildingMeshes(port, geometry) {
+  const instances = port?.instances, parts = geometry?.partAssembly?.parts;
+  if (!Array.isArray(instances) || !parts || !geometry.vertices || !geometry.indices) return;
+  const ranges = new Map();
+  for (const part of parts) {
+    if (!(part.indexCount > 0)) continue;
+    const range = ranges.get(part.instanceIndex);
+    if (!range) ranges.set(part.instanceIndex, [part.firstIndex, part.firstIndex + part.indexCount]);
+    else { range[0] = Math.min(range[0], part.firstIndex); range[1] = Math.max(range[1], part.firstIndex + part.indexCount); }
+  }
+  for (const [index, [firstIndex, endIndex]] of ranges) {
+    const instance = instances[index];
+    if (!instance) continue;
+    const cosY = Math.cos(instance.yaw ?? 0), sinY = Math.sin(instance.yaw ?? 0), originX = instance.x ?? 0, originZ = instance.z ?? 0;
+    const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+    for (let i = firstIndex; i < endIndex; i++) {
+      const at = geometry.indices[i] * STRIDE, dx = geometry.vertices[at] - originX, dz = geometry.vertices[at + 2] - originZ;
+      const lx = dx * cosY - dz * sinY, ly = geometry.vertices[at + 1], lz = dx * sinY + dz * cosY;
+      if (lx < min[0]) min[0] = lx; if (lx > max[0]) max[0] = lx;
+      if (ly < min[1]) min[1] = ly; if (ly > max[1]) max[1] = ly;
+      if (lz < min[2]) min[2] = lz; if (lz > max[2]) max[2] = lz;
+    }
+    buildingMeshes.set(instance, { vertices: geometry.vertices, indices: geometry.indices, firstIndex, endIndex, min, max });
+  }
+}
+
+// How far a building really reaches, in its own frame with heights as they stand: its nominal box does not say.
+export function buildingReach(instance) {
+  const pieces = instance?.damageState?.fracture?.fracture?.reach;
+  return pieces ?? buildingMeshes.get(instance) ?? null;
+}
+
+// What a shot meets on its way through a building. Null if it is known only by its box.
+export function traceShotAtBuilding(instance, from, to) {
+  const state = instance?.damageState?.fracture;
+  if (state) return traceShotThroughBreach(state, from, to);
+  const mesh = buildingMeshes.get(instance);
+  return mesh ? { t: lineEntersTriangles(from, to, mesh.vertices, mesh.indices, mesh.firstIndex, mesh.endIndex) } : null;
 }
 
 // A building's damage is the hits it took. Replaying them gives every shard back exactly, so a save holds the
@@ -1121,6 +1212,7 @@ export function createBuildingFractureGPU({ device, pipeline, prepared, state })
 export function createPortFractures({ device, port, geometry, portIndices, groundAt, damageStore = null, buildMillisecondsPerFrame = 3 }) {
   const live = new Map(), building = new Map();
   let pipeline = null, starting = null, frame = 0, lastNow = 0;
+  noteBuildingMeshes(port, geometry);
   const finish = (instance, prepared) => {
     if (!prepared) { live.set(instance, null); return; }
     const damage = instance.damageState;
