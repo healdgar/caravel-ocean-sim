@@ -22,6 +22,9 @@ import {
   createDemProbe,
   scanForLand,
   coastlineToward,
+  warpStandoffM,
+  warpCapForHazard,
+  visibleLandPoint,
   approachStage,
   approachWarpCap,
   regionLocalOrigin,
@@ -367,14 +370,14 @@ test('high-warp ship heading into a continent stops offshore in navigable water 
 
   const boat = {
     x: 0,
-    z: -5200,
+    z: -2500,
     heading: 0, // Heading due North straight into the continent!
     surgeVelocity: 4.5,
     leewayVelocity: 0,
     modelId: 'nina',
     hydrodynamics: { draft: 2.0 },
   };
-  const cam = { x: 0, z: -5180, y: 6 };
+  const cam = { x: 0, z: -2480, y: 6 };
   const P = { windSpeed: 7, windDir: 180, swellHs: 1, swellDir: 0, swellLength: 80, clouds: 0.3, rain: 0, thunder: 0, haze: 1, cloudBase: 1.2, cloudDepth: 1.8, cloudDensity: 1, cloudAnvil: 0.05 };
 
   const ctrl = createVoyageController({
@@ -388,7 +391,7 @@ test('high-warp ship heading into a continent stops offshore in navigable water 
   ctrl.start({ lat: 38.70, lon: -9.14, compassCourse: 0 });
   ctrl.setWarp('crossing');
 
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 400; i++) {
     ctrl.update(0.05, i * 50);
   }
 
@@ -396,6 +399,13 @@ test('high-warp ship heading into a continent stops offshore in navigable water 
   assert.equal(worldOffset.z, 0, 'worldOffset.z is committed so trees never detach from ground');
   assert.ok(mockTerrain.height(boat.x, boat.z) <= -2.2, `ship stopped in navigable water before the shore (bed=${mockTerrain.height(boat.x, boat.z).toFixed(2)}m, z=${boat.z.toFixed(1)})`);
   assert.equal(ctrl.voyage.tier, 'deck', 'dropped warp to 1× real time upon reaching shoal water ahead');
+  assert.equal(ctrl.voyage.canvas, 'furl', 'warp leaves her with sail struck, safe even with nobody at the helm');
+  const shoreM = Math.abs(-6000 - boat.z);
+  assert.ok(shoreM >= warpStandoffM(4.5) - 150, `warp stopped with room to turn (${shoreM.toFixed(0)} m off the shore)`);
+  ctrl.setWarp('crossing');
+  ctrl.update(0.05, 400 * 50);
+  ctrl.update(0.05, 401 * 50);
+  assert.equal(ctrl.voyage.rate, 1, 'warp cannot be forced any closer');
 });
 
 test('sighting and hailing a vessel invokes onSightVessel and onHailVessel with historical ship colors', () => {
@@ -818,3 +828,48 @@ test('warped approach from 80 km out preloads 3D terrain, slides it from >40 km 
 
 
 
+
+test('time warp is refused and dropped while an enemy is in range', () => {
+  const boat = { x: 0, z: 0, heading: 225, surgeVelocity: 2, leewayVelocity: 0 };
+  const P = { windSpeed: 7, windDir: 180, swellHs: 1, swellDir: 0, swellLength: 80, clouds: 0.3, rain: 0, thunder: 0, haze: 1 };
+  let engaged = false;
+  const ctrl = createVoyageController({
+    boat,
+    P,
+    getTerrain: () => null,
+    getCamera: () => ({ x: 0, z: 0, y: 6 }),
+    loadLandRings: () => Promise.resolve([]),
+    loadTile: () => Promise.resolve(null),
+    isBattleActive: () => engaged,
+  });
+  ctrl.start({ lat: 30, lon: -40, compassCourse: 0 });
+  ctrl.setWarp('crossing');
+  assert.ok(ctrl.voyage.rate > 1, 'warps freely in open water');
+  engaged = true;
+  ctrl.update(0.05, 50);
+  assert.equal(ctrl.voyage.rate, 1, 'an enemy coming into range drops her to deck watch');
+  ctrl.setWarp('crossing');
+  assert.equal(ctrl.voyage.rate, 1, 'warp stays refused while she is in range');
+  engaged = false;
+  ctrl.setWarp('crossing');
+  assert.ok(ctrl.voyage.rate > 1, 'warp returns once she is clear');
+});
+
+test('warp slows toward danger and stops short of it, whatever is asked', () => {
+  assert.equal(warpCapForHazard(Infinity, 3), 3600, 'open water is unlimited');
+  assert.equal(warpCapForHazard(warpStandoffM(3), 3), 1, 'at the standoff warp is over');
+  assert.equal(warpCapForHazard(warpStandoffM(3) + 30, 3), 1, 'and it ends before the last few seconds of the gap');
+  assert.ok(warpCapForHazard(5000, 3) > warpCapForHazard(2000, 3), 'further off runs faster');
+  assert.ok(warpStandoffM(0) >= 800, 'always room to turn');
+  assert.ok(warpStandoffM(6) > warpStandoffM(3), 'a fast ship needs further to stop');
+});
+
+test('the glass only finds land that stands above the horizon', () => {
+  // A hill 12 km north of the ship, and a low cay 30 km north that the curve of the sea hides.
+  const hill = (x, z) => (Math.hypot(x, z + 12000) < 1500 ? 300 : -100);
+  const found = visibleLandPoint(hill, 0, 0, 0, { eyeM: 20 });
+  assert.ok(found && Math.abs(found.distanceM - 12000) < 1600, 'finds the hill');
+  const cay = (x, z) => (Math.hypot(x, z + 30000) < 1500 ? 4 : -100);
+  assert.equal(visibleLandPoint(cay, 0, 0, 0, { eyeM: 20 }), null, 'a low cay beyond the horizon is not land in sight');
+  assert.equal(visibleLandPoint(hill, 0, 0, 180, { eyeM: 20, searchDeg: 30 }), null, 'land astern is outside the search');
+});

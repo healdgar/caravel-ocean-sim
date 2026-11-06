@@ -65,8 +65,10 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,r
         {binding:5,visibility:S.FRAGMENT,sampler:{}},{binding:6,visibility:S.FRAGMENT,buffer:{type:'read-only-storage'}},{binding:13,visibility:S.FRAGMENT,sampler:{}},{binding:14,visibility:S.VERTEX,buffer:{type:'read-only-storage'}}];
       for(const binding of [3,4,7,8,9,10,11,12])entries.push({binding,visibility:S.FRAGMENT,texture:{viewDimension:'2d-array'}});
       const layout2=device.createBindGroupLayout({entries}),layout=device.createPipelineLayout({bindGroupLayouts:[layout0,layout1,layout2]});
-      const pipeline=await device.createRenderPipelineAsync({layout,vertex:{module,entryPoint:'forestCanopyVS',buffers:[FOREST_VERTEX_LAYOUT]},fragment:{module,entryPoint:'forestNativeLeafFS',targets:[{format:'rgba16float'}]},
-        primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:4,alphaToCoverageEnabled:false}});
+      const leafPipeline=(entryPoint,target,depthStencil)=>device.createRenderPipelineAsync({layout,vertex:{module,entryPoint:'forestCanopyVS',buffers:[FOREST_VERTEX_LAYOUT]},fragment:{module,entryPoint,targets:[target]},
+        primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',...depthStencil},multisample:{count:4,alphaToCoverageEnabled:false}});
+      const depthPipeline=await leafPipeline('forestNativeLeafDepthFS',{format:'rgba16float',writeMask:0},{depthWriteEnabled:true,depthCompare:'greater'});
+      const pipeline=await leafPipeline('forestNativeLeafFS',{format:'rgba16float'},{depthWriteEnabled:false,depthCompare:'equal'});
       const group0=device.createBindGroup({layout:layout0,entries:[{binding:0,resource:{buffer:frame}}]}),group1=device.createBindGroup({layout:layout1,entries:[]});
       const sampler=device.createSampler({magFilter:'linear',minFilter:'linear',mipmapFilter:'linear',maxAnisotropy:4}),repeat=device.createSampler({addressModeU:'repeat',addressModeV:'repeat',magFilter:'linear',minFilter:'linear',mipmapFilter:'linear',maxAnisotropy:4});
       const canopyLight=make(forestLightGPUBytes(),B.STORAGE);
@@ -84,7 +86,7 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,r
       async function render(layers,scale){
         const output=scale===1?low:high;frameData.set([W*scale,H*scale,1/(W*scale),1/(H*scale)],36);device.queue.writeBuffer(frame,0,frameData);
         const encoder=device.createCommandEncoder(),pass=encoder.beginRenderPass({colorAttachments:[{view:output.msaa.createView(),resolveTarget:output.resolve.createView(),loadOp:'clear',storeOp:'discard',clearValue:[0,0,0,0]}],depthStencilAttachment:{view:output.depth.createView(),depthLoadOp:'clear',depthStoreOp:'discard',depthClearValue:0}});
-        pass.setPipeline(pipeline);pass.setBindGroup(0,group0);pass.setBindGroup(1,group1);pass.setBindGroup(2,group2);pass.setVertexBuffer(0,vertices);pass.setIndexBuffer(indices,'uint32');for(const layer of layers)pass.drawIndexed(6,1,layer*6);pass.end();
+        pass.setBindGroup(0,group0);pass.setBindGroup(1,group1);pass.setBindGroup(2,group2);pass.setVertexBuffer(0,vertices);pass.setIndexBuffer(indices,'uint32');for(const step of [depthPipeline,pipeline]){pass.setPipeline(step);for(const layer of layers)pass.drawIndexed(6,1,layer*6);}pass.end();
         if(scale===SCALE){const p=encoder.beginRenderPass({colorAttachments:[{view:low.resolve.createView(),loadOp:'clear',storeOp:'store',clearValue:[0,0,0,0]}]});p.setPipeline(average);p.setBindGroup(0,averageGroup);p.draw(3);p.end();}
         encoder.copyTextureToBuffer({texture:low.resolve},{buffer:read,bytesPerRow:W*8},[W,H]);device.queue.submit([encoder.finish()]);await read.mapAsync(GPUMapMode.READ);
         const bytes=new DataView(read.getMappedRange());let coverage=0,alpha=0,min=1,max=0;

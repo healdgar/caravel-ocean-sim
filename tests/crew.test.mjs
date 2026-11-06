@@ -2,10 +2,10 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {readGLB,gltfAccessor,gltfSlerp,loadCrewGLB} from '../js/gltf.js';
-import {createDeckhand,stepDeckhand,createCompany,stepCompany,issueCaptainOrder,CREW_ROSTER} from '../js/crew.js';
+import {createDeckhand,stepDeckhand,createCompany,stepCompany,issueCaptainOrder,CREW_ROSTER,createIndigenousCrewModels} from '../js/crew.js';
 import {hullDeck,hullHalfWidth,vesselDeck,HULL_VERTICAL_SCALE,tillerPoint} from '../js/hull.js';
 import {poseCrewWork} from '../js/crew-pose.js';
-import {selectCrewLOD} from '../js/crew-lod.js';
+import {selectCrewLOD,createDistantCrewLOD} from '../js/crew-lod.js';
 import {advanceSails,sailingState} from '../js/sailing.js';
 import {createShareLink} from '../js/sharing.js';
 const bytes=fs.readFileSync(new URL('../assets/crew/sailor.glb',import.meta.url));
@@ -24,6 +24,28 @@ test('sailor GLB is self-contained, bounded and has the required clips',()=>{
   assert.ok(model.indices.length/3<16000);assert.deepEqual([...model.animator.clips.keys()],['Idle','Walk','Brace']);
   const rest=positions(model.animator.sample(null,0)),f=new Float32Array(model.vertices.buffer);
   for(let i=0;i<model.vertexCount;i++)for(let k=0;k<3;k++)assert.ok(Math.abs(rest[i*3+k]-f[i*15+k])<1e-5,'inverse binds preserve the authored rest geometry');
+});
+test('the generated bodies say what each point wears, and carry their own levels',()=>{
+  for(const body of [model,loadCrewGLB(fs.readFileSync(new URL('../assets/crew/sailor-female.glb',import.meta.url)))]){
+    const f=new Float32Array(body.vertices.buffer,body.vertices.byteOffset,body.vertexCount*15),seen=new Set();
+    for(let i=0;i<body.vertexCount;i++){
+      assert.ok(f[i*15+6]>=0&&f[i*15+6]<2,'red stays clear of the numbers that name optional pieces');
+      seen.add(Math.floor(f[i*15+8]*.5));
+    }
+    assert.deepEqual([...seen].sort(),[0,1,2,3,4],'paint, shirt, trousers, skin, hair');
+    assert.ok(body.lods[1].triangles<=4400&&body.lods[2].triangles<=1570);
+    assert.ok(body.distantIndices.length/3<=320);
+    assert.equal(createDistantCrewLOD(body),body.distantIndices,'townsfolk take the baked level');
+  }
+});
+test('Indigenous men are built on the classic body, whose garments can be re-sculpted',()=>{
+  const classic=loadCrewGLB(fs.readFileSync(new URL('../assets/crew/sailor-classic.glb',import.meta.url))),female=loadCrewGLB(fs.readFileSync(new URL('../assets/crew/sailor-female.glb',import.meta.url)));
+  const classicFemale=loadCrewGLB(fs.readFileSync(new URL('../assets/crew/sailor-female-classic.glb',import.meta.url)));
+  const male=loadCrewGLB(bytes);male.indigenousBase=classic;female.indigenousBase=classicFemale;
+  const [indigenous,indigenousFemale]=createIndigenousCrewModels([male,female]);
+  assert.ok(indigenousFemale.vertexCount>classicFemale.vertexCount);assert.equal(indigenousFemale.distantIndices,null);
+  assert.ok(indigenous.vertexCount>classic.vertexCount,'classic vertices, and its accessories');
+  assert.equal(indigenous.distantIndices,null,'levels baked for another body stay with it');
 });
 test('retargeted clips remain human-sized, grounded and loop without a jump',()=>{
   for(const [name,clip] of model.animator.clips){
@@ -189,6 +211,11 @@ test('crew LODs build progressive index tiers over the shared skinned vertex buf
   assert.deepEqual(selectCrewLOD({x:0,z:0,enabled:true},{x:200,y:10,z:200}),{mainTier:0,shadowTier:1,distance:0});
   assert.equal(selectCrewLOD({x:0,z:0,enabled:false},{x:10,y:2,z:10}).mainTier,0);
   assert.equal(selectCrewLOD({x:0,z:0,enabled:false},{x:45,y:2,z:0}).mainTier,1);
+  // A spyglass brings a far crew as near as the ordinary view would at a fifth of the range.
+  const lens=12.5*Math.PI/180;
+  assert.equal(selectCrewLOD({x:0,z:0,enabled:false},{x:45,y:2,z:0,fovY:lens}).mainTier,0);
+  assert.equal(selectCrewLOD({x:0,z:0,enabled:false},{x:600,y:2,z:0}).culled,true);
+  assert.notEqual(selectCrewLOD({x:0,z:0,enabled:false},{x:600,y:2,z:0,fovY:lens}).culled,true);
   assert.equal(selectCrewLOD({x:0,z:0,enabled:false},{x:120,y:2,z:0}).mainTier,2);
 });
 test('crew animation mixer, sea-legs balance, 30-joint finger grip, gaze tracking, inertializer, and 11-body XPBD ragdoll operate smoothly',async ()=>{
@@ -303,3 +330,60 @@ test('crew and soldiers working at mast halyard falls and hatches always face th
 });
 
 
+
+test('sailors far from the eye keep a pose longer and draw simpler models, in as few draws as neighbours allow',async()=>{
+  const {crewPoseInterval,crewSailorTier,crewDrawRuns,crewApparentDistance}=await import('../js/crew-lod.js');
+  assert.equal(crewPoseInterval(5),1,'anyone close is posed every frame');
+  assert.ok(crewPoseInterval(60)>crewPoseInterval(20));
+  assert.equal(crewSailorTier(5,0),0);assert.equal(crewSailorTier(20,0),1);assert.equal(crewSailorTier(80,1),2);
+  assert.equal(crewSailorTier(13,0),0,'hysteresis holds the better model just past the boundary');
+  assert.equal(crewSailorTier(13,1),1,'and does not take it back up until clearly inside');
+  const runs=crewDrawRuns([0,0,1,1,-1,1,2].map(tier=>({tier})),s=>s.tier);
+  assert.deepEqual(runs,[{tier:0,first:0,count:2},{tier:1,first:2,count:2},{tier:1,first:5,count:1},{tier:2,first:6,count:1}],'a hidden sailor splits a run and draws nothing');
+  assert.equal(crewApparentDistance([1,1,1],{x:0,z:0},null),0,'without a camera everyone counts as close');
+  const boat={x:100,z:0,heading:0,heave:0};
+  assert.ok(Math.abs(crewApparentDistance([0,0,0],boat,{x:100,y:0,z:30})-30)<1e-9);
+  assert.ok(Math.abs(crewApparentDistance([0,0,30],boat,{x:100,y:0,z:30}))<1e-9,'her local z runs aft along world z at heading zero');
+  assert.ok(crewApparentDistance([0,0,0],boat,{x:100,y:0,z:30,fovY:.1})<30/3,'a narrow lens brings them closer');
+});
+
+test('only sailors whose fragments can actually be cut pay for the shader that cuts them',async()=>{
+  const {crewNeedsCutShader}=await import('../js/crew-lod.js');
+  assert.equal(crewNeedsCutShader(3,false,0),false,'an unhurt sailor beside a third-person eye stays opaque');
+  assert.equal(crewNeedsCutShader(3,true,0),true,'first person fades whoever stands in the sightline');
+  assert.equal(crewNeedsCutShader(20,true,0),false,'the fade only reaches so far');
+  assert.equal(crewNeedsCutShader(200,false,.46),true,'torn cloth is cut at any distance');
+  assert.equal(crewNeedsCutShader(200,false,.44),false);
+});
+
+test('far sailors pose from baked clips unless their own pose still matters',async()=>{
+  const {crewClipOnly}=await import('../js/crew-lod.js');
+  assert.equal(crewClipOnly(49,{}),false);
+  assert.equal(crewClipOnly(50,{}),true);
+  assert.equal(crewClipOnly(90,{seatedPose:{}}),false);
+  assert.equal(crewClipOnly(90,{pendingWounds:[{}]}),false);
+  assert.equal(crewClipOnly(90,{pendingWounds:[]}),true);
+  assert.equal(crewClipOnly(90,{knockdownTimer:.5}),false);
+  assert.equal(crewClipOnly(90,{casualtyState:'fallen'}),false);
+});
+
+test('baked clips store every frame in order and wrap time without a jump',async()=>{
+  const {bakeCrewClips,crewClipFrame}=await import('../js/crew-clip-pose.js');
+  const joints=65*16,sampled=[];
+  const animator={
+    clips:new Map([['Idle',{duration:2}],['Walk',{duration:1}]]),
+    palette:new Float32Array(joints),
+    sample(name,seconds){sampled.push([name,seconds]);this.palette.fill((name==='Walk'?100:0)+seconds);},
+  };
+  const {palettes,clips}=bakeCrewClips(animator,10);
+  assert.deepEqual(clips.map(({name,frames,first})=>[name,frames,first]),[['Idle',20,0],['Walk',10,20]]);
+  assert.equal(palettes.length,30*joints);
+  assert.equal(sampled.length,30);
+  assert.ok(Math.abs(palettes[5*joints]-.5)<1e-6,'Idle frame 5 is half a second in');
+  assert.ok(Math.abs(palettes[(20+3)*joints+7]-100.3)<1e-3,'Walk frame 3 follows Idle');
+  assert.equal(crewClipFrame(clips[1],0),0);
+  assert.ok(Math.abs(crewClipFrame(clips[1],.25)-2.5)<1e-9);
+  assert.ok(Math.abs(crewClipFrame(clips[1],1.25)-2.5)<1e-9,'a clip repeats');
+  assert.ok(Math.abs(crewClipFrame(clips[1],-.25)-7.5)<1e-9,'time before the start wraps backwards');
+  assert.ok(crewClipFrame(clips[0],1.9999)<clips[0].frames);
+});

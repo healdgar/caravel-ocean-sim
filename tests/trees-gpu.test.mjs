@@ -51,6 +51,11 @@ function instrumentTrees(){
     if(['island trees','island canopy and wood'].includes(labels.get(this))&&treeCheck.hideTrees)return;
     return draw.apply(this,args);
   };
+  const drawIndirect=GPURenderPassEncoder.prototype.drawIndirect;
+  GPURenderPassEncoder.prototype.drawIndirect=function(...args){
+    if(['island trees','island canopy and wood'].includes(labels.get(this))&&treeCheck.hideTrees)return;
+    return drawIndirect.apply(this,args);
+  };
 }
 
 async function ready(page,url){
@@ -103,7 +108,7 @@ async function coverage(page,baseline=false){
 
 test('the production tree renderer retains detailed perforated foliage and opaque distant crown masses',{timeout:240000},async t=>{
   const terrain=await readFile(new URL('../js/terrain.js',import.meta.url),'utf8'),main=await readFile(new URL('../js/main.js',import.meta.url),'utf8');
-  const treeMarker='const trees=forestPack?new Float32Array(0):canopyTrees;',geometryMarker='treeRenderGeometry(variant,lod)',groundMarker='pass.drawIndexed(mesh.indices.length);',cameraMarker='  const param = (key, fallback, min, max) => {';
+  const treeMarker='trees=forestPack?new Float32Array(0):canopyTrees;',geometryMarker='treeRenderGeometry(variant,lod)',groundMarker='pass.drawIndexed(mesh.indices.length);',cameraMarker='  const param = (key, fallback, min, max) => {';
   for(const marker of [treeMarker,geometryMarker,groundMarker])assert.ok(terrain.includes(marker),'tree fixture marker '+marker);
   assert.ok(main.includes(cameraMarker));
   // Inspect the actual post-filter array with imported scenery explicitly off;
@@ -118,9 +123,10 @@ test('the production tree renderer retains detailed perforated foliage and opaqu
     }
     return new Float32Array(sparse);
   })()`;
-  const fixture=terrain.replace(treeMarker,'const trees=(forestPack?new Float32Array(0):canopyTrees).slice(0,8);window.treeCheck.instance=Array.from(trees);window.treeCheck.originalSeed=Array.from(originalTrees.subarray(0,8));window.treeCheck.importedScenery=!!canopyPack;')
+  const fixture=terrain.replace(treeMarker,'trees=(forestPack?new Float32Array(0):canopyTrees).slice(0,8);window.treeCheck.instance=Array.from(trees);window.treeCheck.originalSeed=Array.from(originalTrees.subarray(0,8));window.treeCheck.importedScenery=!!canopyPack;')
     .replace(geometryMarker,geometryFixture)
-    .replace(groundMarker,'');
+    // d58efe3 added a second, submerged ground draw before the terrain's own.
+    .replaceAll(groundMarker,'');
   const results=[];
   for(const lod of [0,1,2,'sparse']){
     const page=await browser.newPage({viewport:{width:384,height:384}}),errors=errorsFor(page);let textureLoaded=false;
@@ -151,7 +157,9 @@ test('the production tree renderer retains detailed perforated foliage and opaqu
   }
   const near=results[2];
   for(const [lod,pixels] of results.entries()){
-    assert.ok(pixels.leaves>near.leaves*.6&&pixels.leaves<near.leaves*1.6,`LOD ${lod} changes foliage coverage excessively: ${JSON.stringify(results)}`);
+    // 514b716 made the opaque LOD 0 crown read greener without changing its 9737
+    // silhouette pixels, so the upper bound counts tree pixels rather than green hue.
+    assert.ok(pixels.leaves>near.leaves*.6&&pixels.leaves+pixels.wood<(near.leaves+near.wood)*1.3,`LOD ${lod} changes foliage coverage excessively: ${JSON.stringify(results)}`);
     assert.ok(Math.abs(pixels.width/near.width-1)<.18&&Math.abs(pixels.height/near.height-1)<.18,`LOD ${lod} changes the visible tree extent: ${JSON.stringify(results)}`);
   }
   t.diagnostic('Production canopy pixels by LOD: '+JSON.stringify(results));

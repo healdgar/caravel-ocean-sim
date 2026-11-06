@@ -1,6 +1,10 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-import { createGunneryState, prepareGunnery, fireGunnery, stepGunnery, gunnerySummary, resolveGunneryImpact, GUNNERY_AMMO_TYPES } from './gunnery-state.js';
-import { createGunDefinitions, createNavalBattleGunDefinitions, gunMuzzlePose, gunElevationRange, gunTraverseRange } from './gunnery-models.js';
+import { pumpVesselDry } from './vessel-damage.js';
+import { remountVesselGuns, createGunneryState, prepareGunnery, fireGunnery, stepGunnery, gunnerySummary, resolveGunneryImpact, gunneryOffline, GUNNERY_AMMO_TYPES, isArrowAmmo, gunneryWeapon, gunneryAmmoFlight } from './gunnery-state.js';
+import { sweepCrewBodies, recordCrewWound } from './crew-wounds.js';
+import { addHullHole, stepHullHoles } from './hull-holes.js';
+import { modelDeck, modelHullDeck, vesselVerticalScale } from './hull.js';
+import { createGunDefinitions, createNavalBattleGunDefinitions, gunMuzzlePose, gunElevationRange, gunTraverseRange, vesselCarriesPowder, bowElevationDegrees } from './gunnery-models.js';
 import { GUNNERY_ORDER_SECONDS } from './gunnery-audio.js';
 import { boatRotate, boatHydrodynamics, boatForwardSpeed } from './boat.js';
 import { SHIP_MODELS } from './ship-models.js';
@@ -8,6 +12,8 @@ import { createShipAssetCache } from './ship-mesh.js';
 import { PORT_PREFABS, getBuildingParts } from './coastal-world.js';
 import { GROUNDING_SUBSTRATES, classifyGroundingSubstrate, setGroundingDamageHandler } from './terrain-model.js';
 import { locatePartAtLocalPoint, isSuperstructurePartId, computeArchetypeScaleSpec } from './part-assembly.js';
+import { shipMastSpecs, traceShotPastGap, fracturePartsGone } from './ship-fracture.js';
+import { traceShotThroughBreach } from './building-fracture.js';
 import { createFortGarrison, stepFortGarrison } from './crew.js';
 import { DEFAULT_SHIP_COLORS, strikeVesselColors } from './ship-colors.js';
 
@@ -15,50 +21,12 @@ export { GROUNDING_SUBSTRATES, classifyGroundingSubstrate };
 
 let gunneryShipAssetCache = null;
 
-function getModelMastSpecs(modelId) {
-  if (modelId === 'taino-canoe') return [];
-  if (modelId === 'oseberg' || modelId === 'lusoria') {
-    return [['main', 0.0, 4.2, 1.15]];
-  }
-  if (modelId === 'gipsy-moth-iv') {
-    return [
-      ['main', -1.15, 4.8, 1.25],
-      ['mizzen', 2.7, 3.4, 1.15],
-    ];
-  }
-  if (modelId === 'nina') {
-    return [
-      ['fore', -3.6, 4.35, 1.45],
-      ['main', -0.2, 5.1, 1.35],
-      ['mizzen', 3.4, 3.95, 1.85],
-    ];
-  }
-  if (modelId === 'pinta') {
-    return [
-      ['fore', -3.5, 4.2, 1.45],
-      ['main', 0.1, 5.2, 1.35],
-      ['mizzen', 3.8, 3.8, 1.75],
-    ];
-  }
-  if (modelId === 'santa-maria') {
-    return [
-      ['fore', -3.55, 4.6, 1.65],
-      ['main', 0.05, 5.65, 1.45],
-      ['mizzen', 3.85, 4.1, 1.95],
-    ];
-  }
-  if (modelId === 'flying-cloud') {
-    return [
-      ['fore', -3.4, 5.6, 1.45],
-      ['main', 0.15, 6.1, 1.4],
-      ['mizzen', 3.45, 5.1, 1.55],
-    ];
-  }
-  return [
-    ['fore', -3.55, 5.72, 2.05],
-    ['main', 0.05, 6.18, 1.55],
-    ['mizzen', 3.53, 5.15, 2.05],
-  ];
+const getModelMastSpecs = shipMastSpecs;
+
+// A mast section is coming down. The crew read the side it falls to from here, once the queue has gone.
+function queueMastBreak(damage, event) {
+  (damage.mastFallSide ??= {})[event.mastGroup] = event.side || 1;
+  damage.pendingBakes.push(event);
 }
 
 function computeModelRigIntegrity(damage, mastSpecs) {
@@ -80,6 +48,12 @@ function getModelBulkheadZs(modelId) {
   return [4.2, 1.8, -3.0];
 }
 
+function hullHoleCompartment(boat, localZ, side) {
+  const halfL = Math.max(6, (boat.length ?? 20) * 0.5);
+  const section = localZ < -halfL * 0.28 ? 'fore' : localZ > halfL * 0.28 ? 'aft' : 'mid';
+  return `${section}${side >= 0 ? 'Starboard' : 'Port'}`;
+}
+
 function localToShipDesignPoint(targetBoat, localPosition) {
   if (!targetBoat || !Array.isArray(localPosition)) return null;
   const modelId = targetBoat.model?.id ?? targetBoat.modelId;
@@ -97,7 +71,7 @@ function localToShipDesignPoint(targetBoat, localPosition) {
   ];
 }
 
-function resolveShipHitPart(targetBoat, localPosition, hitZone) {
+function resolveShipHitPart(targetBoat, localPosition, hitZone, struckTriangle = -1) {
   if (!targetBoat || !Array.isArray(localPosition)) return null;
   const modelId = targetBoat.model?.id ?? targetBoat.modelId;
   const model = modelId ? SHIP_MODELS[modelId] : null;
@@ -109,12 +83,16 @@ function resolveShipHitPart(targetBoat, localPosition, hitZone) {
       partAssembly = gunneryShipAssetCache.get(modelId)?.partAssembly;
     }
     if (!partAssembly) return null;
+    // A shot that came through a gap already knows what stopped it.
+    const struck = struckTriangle >= 0 ? partAssembly.parts?.[partAssembly.trianglePartIds?.[struckTriangle]] : null;
+    if (struck) return struck;
     const designPt = localToShipDesignPoint(targetBoat, localPosition);
     const subAssemblies =
       hitZone === 'rigging'
         ? ['masts-and-spars', 'rigging-and-sails']
         : ['keel-and-frame', 'decks-and-interior', 'ordnance-and-helm', 'hull-and-bulwarks'];
-    return locatePartAtLocalPoint(partAssembly, designPt, { subAssemblies });
+    const fracture = targetBoat.damage?.fracture;
+    return locatePartAtLocalPoint(partAssembly, designPt, { subAssemblies, gone: fracture?.brokenCount ? fracturePartsGone(fracture) : null });
   } catch {
     return null;
   }
@@ -172,14 +150,15 @@ export function createVesselMagazineState(boat) {
   // of corned black powder (~14,280 kg) stowed in the Grand and Aft Magazines below the orlop deck,
   // plus shot-locker allowances of round, furnace-heated hot, chain, and quilted grape shot.
   const barrelMassKg = 40.8;
-  const barrelsTotal = isFirstRate ? 350 : Math.max(8, gunCount * 3);
+  const carriesPowder = vesselCarriesPowder(modelId);
+  const barrelsTotal = !carriesPowder ? 0 : isFirstRate ? 350 : Math.max(8, gunCount * 3);
   const initialPowderKg = +(barrelsTotal * barrelMassKg).toFixed(1);
-  const initialRounds = {
+  const initialRounds = carriesPowder ? {
     round: isFirstRate ? 6200 : gunCount * 50,
     hot: isFirstRate ? 240 : gunCount * 6,
     chain: isFirstRate ? 620 : gunCount * 10,
     grape: isFirstRate ? 840 : gunCount * 12,
-  };
+  } : { round: 0, hot: 0, chain: 0, grape: 0 };
   boat.magazine = {
     initialPowderKg,
     powderKg: initialPowderKg,
@@ -203,7 +182,7 @@ export function createVesselMagazineState(boat) {
 
 export function consumeMagazineOrdnance(boat, event = {}) {
   const mag = createVesselMagazineState(boat);
-  if (!mag || mag.exploded) return mag;
+  if (!mag || mag.exploded || isArrowAmmo(event.ammo)) return mag;
   const shotMass = Number.isFinite(event.mass) ? event.mass : 5.4;
   // Service charge of black powder is ~1/3 the weight of the cast-iron round shot.
   const chargeKg = Number.isFinite(event.chargeKg)
@@ -250,7 +229,7 @@ function defaultVesselCrewComplement(boat) {
   if (modelId === 'santa-maria') return 42;
   if (modelId === 'pinta') return 26;
   if (modelId === 'nina') return 22;
-  if (modelId === 'taino-canoe') return 12;
+  if (modelId === 'taino-canoe') return 30;
   return Math.max(18, Math.round((boat?.length ?? 20) * 1.2));
 }
 
@@ -382,6 +361,93 @@ export function createVesselDamageState(boat) {
   return boat.damage;
 }
 
+// A new ship in the same pooled hull: nothing of the previous one carries over.
+export function resetVesselDamageState(boat) {
+  pumpVesselDry(boat);
+  boat.damage = null;
+  boat.magazine = null;
+  boat.groundingRoll = 0;
+  boat.groundingPitch = 0;
+  const damage = createVesselDamageState(boat);
+  remountVesselGuns(boat);
+  return damage;
+}
+
+// A body struck directly goes down where the shot carried it.
+function fellCrewBody({ sailor: s, direction, speed = 3 }, killed, wounded, ammo = null) {
+  if (!killed && !wounded) return;
+  if (ammo !== 'arrow') s.scorchAmount = Math.min(1, (s.scorchAmount ?? 0) + (ammo === 'hot' ? (killed ? 0.72 : 0.55) : ammo === 'fire-arrow' ? 0.3 : killed ? 0.35 : 0.22));
+  const n = Math.hypot(direction?.[0] ?? 0, direction?.[2] ?? 0) || 1;
+  const dirX = (direction?.[0] ?? 0) / n, dirZ = (direction?.[2] ?? 1) / n;
+  s.knockbackVx = dirX * speed;
+  s.knockbackVz = dirZ * speed;
+  s.fallDir = (s.crewIndex ?? 0) % 2 === 0 ? 1 : -1;
+  if (killed) {
+    s.casualtyState = 'fallen';
+    s.health = 0;
+    s.woundSeverity = 1;
+    s.collapseYaw = Math.atan2(dirX, dirZ);
+  } else {
+    s.casualtyState = 'wounded';
+    s.health = Math.max(0.25, (s.health ?? 1) - 0.45);
+    s.woundSeverity = Math.min(1, Math.max(0.45, 1 - s.health));
+  }
+}
+
+// Oak splinters fly from where a shot breaks through or strikes a bulwark, and only
+// hurt those close by.
+function woundCrewBySplinters(targetBoat, damage, localPos, energy, ammo) {
+  const counts = { killed: 0, wounded: 0 };
+  const crew = targetBoat.crewCompany?.crew;
+  if (!Array.isArray(crew) || !localPos) return counts;
+  const reach = Math.min(3.2, 1.2 + Math.sqrt(energy / 500000) * 1.4);
+  for (const s of crew) {
+    if (!s.position || s.visible === false || s.casualtyState === 'fallen') continue;
+    const dx = s.position[0] - localPos[0], dy = s.position[1] + 0.9 - localPos[1], dz = s.position[2] - localPos[2];
+    const distance = Math.hypot(dx, dy, dz);
+    if (distance > reach) continue;
+    const roll = ((damage.hits ?? 1) * 0.6180339887 + (s.crewIndex ?? 0) * 0.7548776662) % 1;
+    const chance = 0.5 * (1 - distance / reach);
+    if (roll >= chance) continue;
+    const killed = roll < chance * 0.25;
+    fellCrewBody({ sailor: s, direction: [dx, dy, dz], speed: 2.3 * (1 - distance / reach) + 0.4 }, killed, !killed, ammo);
+    if (killed) counts.killed++; else counts.wounded++;
+    recordCrewWound(s, 'splinter', [s.position[0] - dx * 0.4, s.position[1] + 0.9 - dy * 0.4, s.position[2] - dz * 0.4], [dx, dy, dz], (roll * 7.3890560989) % 1);
+  }
+  return counts;
+}
+
+// A ball goes straight through whoever it meets and flies on. It kills outright.
+function strikeSoldierWithBall(hit, projectile) {
+  const struck = (projectile.struckBodies ??= new Set());
+  if (struck.has(hit.sailor)) return;
+  struck.add(hit.sailor);
+  const speed = Math.hypot(...(projectile.velocity ?? [0, 0, 0]));
+  if (0.5 * (projectile.mass ?? 1) * speed * speed < 200) return;
+  hit.sailor.casualtyState = 'fallen';
+  hit.sailor._poseReady = false;
+}
+
+function strikeCrewBodyWithBall(targetBoat, hit, projectile, direction) {
+  const struck = (projectile.struckBodies ??= new Set());
+  if (struck.has(hit.sailor)) return;
+  struck.add(hit.sailor);
+  const speed = Math.hypot(...(projectile.velocity ?? [0, 0, 0]));
+  const energy = 0.5 * (projectile.mass ?? 1) * speed * speed;
+  if (energy < 200) return;
+  const roll = (((projectile.id ?? 1) * 0.7548776662 + (hit.sailor.crewIndex ?? 0) * 0.5698402909) % 1 + 1) % 1;
+  recordCrewWound(hit.sailor, 'ball', hit.point, direction, roll);
+  const damage = createVesselDamageState(targetBoat);
+  damage.hits = (damage.hits ?? 0) + 1;
+  applyCrewCasualtiesAndMorale(targetBoat, { ammo: projectile.ammo, energy, hitZone: 'crew' }, {
+    casualties: { killed: 1, wounded: 0 },
+    // A round shot flings what it strikes, right over the far rail on a narrow deck.
+    struck: { sailor: hit.sailor, direction, speed: Math.min(9, 3 + speed / 80) },
+    cause: 'round-shot',
+    hitZone: 'crew',
+  });
+}
+
 export function applyCrewCasualtiesAndMorale(targetBoat, event = {}, context = {}) {
   if (!targetBoat) return null;
   const damage = createVesselDamageState(targetBoat);
@@ -389,38 +455,43 @@ export function applyCrewCasualtiesAndMorale(targetBoat, event = {}, context = {
   const ammo = event.ammo ?? context.ammo ?? 'round';
   const energy = Number.isFinite(event.energy) ? Math.max(5000, event.energy) : 120000;
   const hitZone = event.hitZone ?? context.hitZone ?? 'hull';
-  const cause = context.cause ?? (ammo === 'grape' ? 'grape-hail' : ammo === 'hot' ? 'hot-shot-burns' : hitZone === 'rigging' ? 'falling-spars' : 'oak-splinters');
-
-  // Anti-personnel lethality by ammunition & impact zone:
-  // - Quilted grape shot sweeps weather decks and open gunports with iron balls (3.2x anti-personnel).
-  // - Solid round shot penetrating oak planking / bulwarks throws lethal oak splinters across gun crews.
-  // - Chain shot brings down blocks, yards, and rigging on deck hands.
-  // - Hot shot causes severe burns and smoke panic.
-  const ammoPersonnelMult =
-    ammo === 'grape' ? 3.2 :
-    ammo === 'round' ? (context.penetratedOuter || context.enteredThroughWindow ? 1.55 : 0.85) :
-    ammo === 'hot' ? 1.35 :
-    ammo === 'chain' ? (hitZone === 'rigging' ? 1.15 : 0.75) : 1.0;
-
-  const zoneMult =
-    context.isMagazineBlast ? 6.5 :
-    context.enteredThroughWindow || context.isSuperstructureHit ? 1.45 :
-    hitZone === 'rigging' ? (ammo === 'grape' ? 1.85 : 0.55) : 1.0;
-
-  const crewScale = Math.max(0.65, Math.min(4.2, Math.sqrt(c.total / 28)));
-  const rawSeverity = (energy / 110000) * ammoPersonnelMult * zoneMult * crewScale;
+  const cause = context.cause ?? (isArrowAmmo(ammo) ? 'arrow-wound' : ammo === 'grape' ? 'grape-hail' : ammo === 'hot' ? 'hot-shot-burns' : hitZone === 'rigging' ? 'falling-spars' : 'oak-splinters');
 
   let newKilled = 0;
   let newWounded = 0;
-  if (context.isMagazineBlast) {
+  if (context.casualties) {
+    newKilled = Math.min(c.able, context.casualties.killed ?? 0);
+    newWounded = Math.min(c.able - newKilled, context.casualties.wounded ?? 0);
+  } else if (context.isMagazineBlast) {
     const frac = Math.min(0.65, 0.22 + 0.35 * (context.powderFrac ?? 0.5));
     newKilled = Math.min(c.able, Math.max(2, Math.round(c.total * frac * 0.55)));
     newWounded = Math.min(Math.max(0, c.able - newKilled), Math.max(2, Math.round(c.total * frac * 0.45)));
-  } else if (rawSeverity >= 0.18 && c.able > 0) {
+  } else if (c.able > 0) {
+    // A shot hurts the bodies it meets, which the sweep and splinters below handle. This
+    // count stands in only for hands the game does not draw, in proportion to how many
+    // share the deck, and mostly when a shot breaks through to where they stand.
+    const crew = Array.isArray(targetBoat.crewCompany?.crew) ? targetBoat.crewCompany.crew : [];
+    const drawn = crew.filter((s) => s.visible !== false && s.casualtyState !== 'fallen').length;
+    const crowding = Math.min(1.5, Math.max(0, c.able - drawn) / Math.max(1, (targetBoat.length ?? 20) * (targetBoat.beam ?? 6) * 0.35));
+    const penetrating = context.penetratedOuter || context.enteredThroughWindow;
+    // A bulwark is thin: a shot striking it showers those at the rail even if it stays out.
+    const rail = context.localPos ? vesselRailHeight(targetBoat, context.localPos[2]) : null;
+    const topside = rail !== null && context.localPos[1] >= rail - VESSEL_BULWARK_METRES - 0.2;
+    const reach = (penetrating ? 1 : topside ? 0.4 : 0.1) * Math.min(2, Math.sqrt(energy / 500000));
+    const ammoReach = ammo === 'grape' || ammo === 'hot' ? 1.25 : hitZone === 'rigging' ? 0.2 : 1;
     const deterministic = ((damage.hits ?? 1) * 0.6180339) % 1;
-    newKilled = Math.min(c.able, Math.max(ammo === 'grape' ? 1 : 0, Math.floor(rawSeverity * 0.42 + deterministic * 0.55)));
-    const remAble = Math.max(0, c.able - newKilled);
-    newWounded = Math.min(remAble, Math.max(rawSeverity >= 0.32 ? 1 : 0, Math.floor(rawSeverity * 0.88 + (1 - deterministic) * 0.65)));
+    const count = Math.floor(reach * ammoReach * crowding + deterministic);
+    newKilled = Math.min(c.able, Math.floor(count / 3 + deterministic));
+    newWounded = Math.min(c.able - newKilled, Math.max(0, count - newKilled));
+    if (penetrating || topside) {
+      const splintered = woundCrewBySplinters(targetBoat, damage, context.localPos, energy, ammo);
+      newKilled = Math.min(c.able, newKilled + splintered.killed);
+      newWounded = Math.min(c.able - newKilled, newWounded + splintered.wounded);
+    }
+    // One shot strikes one part of the ship: however heavy, it cannot reach the whole company.
+    const perHitLimit = Math.max(2, Math.ceil(c.total * 0.3));
+    newKilled = Math.min(newKilled, perHitLimit);
+    newWounded = Math.min(newWounded, perHitLimit - newKilled);
   }
 
   c.killed += newKilled;
@@ -432,7 +503,9 @@ export function applyCrewCasualtiesAndMorale(targetBoat, event = {}, context = {
 
   // Propagate casualties to visible 3D deck crew actors if present on the vessel.
   const crewActors = targetBoat.crewCompany?.crew;
-  if (Array.isArray(crewActors) && (newKilled > 0 || newWounded > 0 || context.isMagazineBlast)) {
+  if (context.struck) {
+    fellCrewBody(context.struck, newKilled > 0, newWounded > 0, ammo);
+  } else if (Array.isArray(crewActors) && context.isMagazineBlast) {
     const designPt = context.designPt ?? [0, 0, 0];
     const candidates = crewActors
       .filter(s => s.casualtyState !== 'fallen')
@@ -451,7 +524,7 @@ export function applyCrewCasualtiesAndMorale(targetBoat, event = {}, context = {
     const actorScale = Math.max(1, Math.round(c.total / Math.max(1, crewActors.length)));
     let actorFallenBudget = Math.ceil(newKilled / actorScale);
     let actorWoundedBudget = Math.ceil(newWounded / actorScale);
-    const blastSpeed = context.isMagazineBlast ? 3.4 : ammo === 'grape' ? 1.8 : 2.3;
+    const blastSpeed = context.isMagazineBlast ? 9 : ammo === 'grape' ? 1.8 : 2.3;
     for (const item of candidates) {
       const s = item.sailor;
       const invD = item.dist > 1e-3 ? 1 / item.dist : 1;
@@ -495,7 +568,7 @@ export function applyCrewCasualtiesAndMorale(targetBoat, event = {}, context = {
   const shockAdd = Math.min(
     0.45,
     ((newKilled * 1.6 + newWounded * 0.85) / Math.max(8, c.total)) * 1.35 +
-      (ammo === 'grape' ? 0.055 : ammo === 'hot' ? 0.045 : 0.018) +
+      (ammo === 'arrow' ? 0.002 : ammo === 'fire-arrow' ? 0.006 : ammo === 'grape' ? 0.055 : ammo === 'hot' ? 0.045 : 0.018) +
       (context.isMagazineBlast ? 0.38 : 0),
   );
   damage.moraleShock = +Math.min(0.65, (damage.moraleShock ?? 0) + shockAdd).toFixed(4);
@@ -641,7 +714,7 @@ export function detonateVesselMagazine(targetBoat, { magId = 'magazine.grand', d
   damage.partDamage['deck.upper.internal'] = Math.min(1, +(0.45 + 0.55 * powderFrac).toFixed(3));
   damage.partDamage['hull.planking'] = Math.min(1, +((damage.partDamage['hull.planking'] ?? 0) + 0.72 * powderFrac).toFixed(3));
 
-  // Queue the 3D mesh explosion deformation (heaves decks upward, blows port & starboard hull planking outward).
+  // Queue the explosion: it scorches what is left and throws what it reaches (js/ship-fracture.js).
   damage.pendingBakes.push({
     kind: 'magazine-explosion',
     x: 0,
@@ -826,6 +899,39 @@ function vesselLocalToWorldNormal(boat, localNormal) {
   return [out[0] / len, out[1] / len, out[2] / len];
 }
 
+// Top of the solid hull along her length, in metres above the waterline: the gunwale of an
+// open hull, or the deck plus its bulwark. Anything above it is open air and whoever
+// stands there. Sampled once per hull shape, since a shot asks many times per step.
+const VESSEL_RAIL_PROFILES = new Map();
+const VESSEL_RAIL_STATIONS = 33;
+const VESSEL_BULWARK_METRES = 1;
+function vesselRailProfile(boat) {
+  const modelId = boat?.model?.id ?? boat?.modelId;
+  const f = (modelId ? SHIP_MODELS[modelId] : null)?.designFrame;
+  if (!f?.length) return null;
+  const key = `${modelId}/${boat.length}/${boat.beam}`;
+  if (VESSEL_RAIL_PROFILES.has(key)) return VESSEL_RAIL_PROFILES.get(key);
+  let profile = null;
+  try {
+    const vertical = vesselVerticalScale(boat);
+    const heights = Array.from({ length: VESSEL_RAIL_STATIONS }, (_, i) => {
+      const z = (i / (VESSEL_RAIL_STATIONS - 1) - 0.5) * f.length * 1.04;
+      const deck = modelDeck(boat, z) * vertical, shell = modelHullDeck(boat, z) * vertical;
+      return shell > deck + 0.2 ? shell : deck + VESSEL_BULWARK_METRES;
+    });
+    profile = { heights, designLength: f.length };
+  } catch { /* an unfinished hull keeps the generic volume */ }
+  VESSEL_RAIL_PROFILES.set(key, profile);
+  return profile;
+}
+export function vesselRailHeight(boat, localZ = 0) {
+  const profile = vesselRailProfile(boat);
+  if (!profile) return null;
+  const u = Math.max(0, Math.min(1, localZ / (boat.length ?? profile.designLength) / 1.04 + 0.5)) * (VESSEL_RAIL_STATIONS - 1);
+  const i = Math.min(VESSEL_RAIL_STATIONS - 2, Math.floor(u));
+  return profile.heights[i] + (profile.heights[i + 1] - profile.heights[i]) * (u - i);
+}
+
 export function sweepShipSegment(from, to, radius = 0.08, targetBoat, sourceBoat = null, options = null) {
   if (!targetBoat || targetBoat === sourceBoat || targetBoat.showProw === false) return null;
   const L = targetBoat.length ?? 20, B = targetBoat.beam ?? 6;
@@ -890,10 +996,19 @@ export function sweepShipSegment(from, to, radius = 0.08, targetBoat, sourceBoat
   const craters = targetBoat.damage?.craters;
   const previewOnly = options?.previewOnly === true;
 
-  const classifyLocal = (lx, ly, lz) => {
+  const mastState = targetBoat.damage?.mastState;
+  const mastSpecs = mastState ? getModelMastSpecs(modelId) : null;
+  // Height in metres that a mast still reaches. What fell with it no longer stops a shot.
+  const mastStandsTo = (group) => {
+    const stage = mastState?.[group] ?? 0, spec = stage ? mastSpecs.find((m) => m[0] === group) : null;
+    return spec ? spec[stage >= 2 ? 3 : 2] * sy : Infinity;
+  };
+
+  const classifyLocal = (lx, ly, lz, hullPassed = false) => {
     const castleLift = lz > L * 0.1 ? B * 0.28 : lz < -L * 0.22 ? B * 0.16 : 0;
-    const freeboard = baseFreeboard + castleLift;
-    if (Math.abs(lz) <= halfL && ly >= -draft && ly <= freeboard) {
+    const rail = vesselRailHeight(targetBoat, lz);
+    const freeboard = rail === null ? baseFreeboard + castleLift : rail + radius;
+    if (!hullPassed && Math.abs(lz) <= halfL && ly >= -draft && ly <= freeboard) {
       const taper = Math.max(0.32, 1 - 0.55 * (lz / halfL) ** 2);
       const dyDesign = ly / (sy || 1);
       const dzDesign = lz / (sz || 1);
@@ -922,28 +1037,37 @@ export function sweepShipSegment(from, to, radius = 0.08, targetBoat, sourceBoat
     if (ly > baseFreeboard - radius && ly <= mastTop && (targetBoat.model?.rig?.sails?.length ?? (model?.rig?.sails?.length ?? 1)) > 0) {
       const mastW = B * 0.85 + radius, mastD = L * 0.14 + radius;
       const sailCount = targetBoat.model?.rig?.sails?.length ?? model?.rig?.sails?.length ?? 3;
-      const mastStations = sailCount === 1
-        ? [['main', 0], ['fore', -L * 0.26], ['mizzen', L * 0.26]]
-        : [['fore', -L * 0.26], ['main', 0], ['mizzen', L * 0.26]];
-      for (const [group, zCenter] of mastStations) {
-        if (Math.abs(lx) <= mastW && Math.abs(lz - zCenter) <= mastD) {
-          return { hitZone: 'rigging', mastGroup: group, localNormal: [lx >= 0 ? 1 : -1, 0.15, (lz - zCenter) / mastD] };
-        }
+      // A shot hits the mast it is nearest, where that mast really stands.
+      const mastStations = mastSpecs?.length
+        ? mastSpecs.map((spec) => [spec[0], spec[1] * sz])
+        : sailCount === 1
+          ? [['main', 0], ['fore', -L * 0.26], ['mizzen', L * 0.26]]
+          : [['fore', -L * 0.26], ['main', 0], ['mizzen', L * 0.26]];
+      let group = null, zCenter = 0, nearest = Infinity;
+      for (const [name, station] of mastStations) {
+        const away = Math.abs(lz - station);
+        if (away < nearest) { nearest = away; group = name; zCenter = station; }
+      }
+      if (Math.abs(lx) <= mastW && nearest <= mastD && ly <= mastStandsTo(group) + radius) {
+        return { hitZone: 'rigging', mastGroup: group, localNormal: [lx >= 0 ? 1 : -1, 0.15, (lz - zCenter) / mastD] };
       }
     }
     return null;
   };
 
+  // On a ship that has lost something, her own triangles decide whether the way in is still there.
+  const fracture = targetBoat.damage?.fracture?.brokenCount > 0 ? targetBoat.damage.fracture : null;
+
   const clippedLen = segLen * Math.max(0, tExit - tEnter);
   const stepSize = previewOnly ? 0.85 : 0.45;
   const steps = Math.min(previewOnly ? 20 : 48, Math.max(4, Math.ceil(clippedLen / stepSize)));
-  let prevT = tEnter;
+  let prevT = tEnter, hullPassed = false;
   for (let i = 0; i <= steps; i++) {
     const t = tEnter + (tExit - tEnter) * (i / steps);
     const lx = p0[0] + (p1[0] - p0[0]) * t;
     const ly = p0[1] + (p1[1] - p0[1]) * t;
     const lz = p0[2] + (p1[2] - p0[2]) * t;
-    const hit = classifyLocal(lx, ly, lz);
+    const hit = classifyLocal(lx, ly, lz, hullPassed);
     if (hit) {
       let low = prevT, high = t, bestHit = hit, bestLocal = [lx, ly, lz];
       if (i > 0) {
@@ -953,11 +1077,29 @@ export function sweepShipSegment(from, to, radius = 0.08, targetBoat, sourceBoat
           const mx = p0[0] + (p1[0] - p0[0]) * mid;
           const my = p0[1] + (p1[1] - p0[1]) * mid;
           const mz = p0[2] + (p1[2] - p0[2]) * mid;
-          const mHit = classifyLocal(mx, my, mz);
+          const mHit = classifyLocal(mx, my, mz, hullPassed);
           if (mHit) { high = mid; bestHit = mHit; bestLocal = [mx, my, mz]; } else { low = mid; }
         }
       }
-      const hitPart = previewOnly ? null : resolveShipHitPart(targetBoat, bestLocal, bestHit.hitZone);
+      let struckTriangle = -1;
+      if (fracture && bestHit.hitZone === 'hull') {
+        const toDesign = (p) => [p[0] / (sx || 1), p[1] / (sy || 1), p[2] / (sz || 1)];
+        const behind = traceShotPastGap(fracture, toDesign(p0), toDesign(p1));
+        if (behind && !(behind.t <= 1)) {
+          // Nothing behind the gap this step: only the rig is left to meet.
+          hullPassed = true;
+          prevT = t;
+          continue;
+        }
+        if (behind) {
+          high = Math.max(0, behind.t);
+          bestLocal = [p0[0] + (p1[0] - p0[0]) * high, p0[1] + (p1[1] - p0[1]) * high, p0[2] + (p1[2] - p0[2]) * high];
+          // From inside her, what it strikes faces back along its flight.
+          bestHit = { hitZone: behind.mast ? 'rigging' : 'hull', mastGroup: behind.mast, localNormal: [p0[0] - p1[0], p0[1] - p1[1], p0[2] - p1[2]] };
+          struckTriangle = behind.triangle;
+        }
+      }
+      const hitPart = previewOnly ? null : resolveShipHitPart(targetBoat, bestLocal, bestHit.hitZone, struckTriangle);
       return {
         fraction: high,
         kind: 'ship',
@@ -979,9 +1121,92 @@ export function sweepShipSegment(from, to, radius = 0.08, targetBoat, sourceBoat
   return null;
 }
 
+// A new fire joins any burning within 3.5 m, so repeated hits on one spot outrun the crew.
+function addVesselFire(damage, localPos, event, addIntensity) {
+  damage.fireCount = (damage.fireCount ?? 0) + 1;
+  let mergedFire = false;
+  for (const f of damage.fires) {
+    const dist = Math.hypot(
+      (f.localPosition[0] ?? 0) - (localPos?.[0] ?? 0),
+      (f.localPosition[1] ?? 0) - (localPos?.[1] ?? 0),
+      (f.localPosition[2] ?? 0) - (localPos?.[2] ?? 0),
+    );
+    if (dist < 3.5) {
+      f.intensity = Math.min(1.6, f.intensity + addIntensity * 0.65);
+      mergedFire = true;
+      break;
+    }
+  }
+  if (!mergedFire && damage.fires.length < 12) {
+    damage.fires.push({
+      localPosition: [...(localPos ?? [0, 1.5, 0])],
+      hitZone: event.hitZone ?? 'hull',
+      mastGroup: event.mastGroup ?? null,
+      intensity: addIntensity,
+      age: 0,
+      seed: ((damage.hits * 0.61803398875) % 1) || 0.37,
+    });
+  }
+  damage.fireIntensity = +damage.fires.reduce((s, f) => s + f.intensity, 0).toFixed(3);
+}
+
+// An arrow cannot breach a hull. It wounds only a body it reaches, and a lit one can
+// catch tarred rope or canvas. Crews douse a lone small fire, but several landing
+// together grow past what they can put out.
+export const ARROW_FIRE_INTENSITY = 0.22;
+export function applyArrowImpact(targetBoat, event) {
+  const damage = createVesselDamageState(targetBoat);
+  damage.hits = (damage.hits ?? 0) + 1;
+  const c = damage.crewCasualties;
+  const hitZone = event.hitZone ?? 'hull';
+  const roll = (damage.hits * 0.6180339887 + (event.shotId ?? 0) * 0.7548776662) % 1;
+  // Only a body the arrow reached is hurt, and the arrow stays in it.
+  const killed = event.sailor ? (roll < 0.2 ? 1 : 0) : 0;
+  const wounded = event.sailor && !killed ? 1 : 0;
+  if (event.sailor) recordCrewWound(event.sailor, 'arrow', event.localPosition, vesselWorldToLocalVector(targetBoat, event.velocity ?? [0, 0, 1]));
+  const casualties = applyCrewCasualtiesAndMorale(targetBoat, event, {
+    casualties: { killed, wounded },
+    hitZone,
+    struck: event.sailor ? { sailor: event.sailor, direction: vesselWorldToLocalVector(targetBoat, event.velocity ?? [0, 0, 1]), speed: 0.5 } : null,
+  });
+  const localPos = event.localPosition ?? vesselWorldToLocal(targetBoat, event.surfacePosition ?? event.position ?? [targetBoat.x ?? 0, 1, targetBoat.z ?? 0]);
+  const catchChance = event.ammo !== 'fire-arrow' || event.waterline ? 0 : hitZone === 'rigging' ? 0.55 : 0.28;
+  const fireRoll = (roll * 7.3890560989) % 1;
+  if (fireRoll < catchChance) addVesselFire(damage, localPos, event, ARROW_FIRE_INTENSITY);
+  damage.revision = (damage.revision ?? 0) + 1;
+  const report = {
+    kind: 'ship',
+    ammo: event.ammo,
+    targetId: targetBoat.id ?? targetBoat.modelId ?? 'ship',
+    targetName: targetBoat.model?.name ?? targetBoat.modelId ?? 'Vessel',
+    hitZone,
+    mastGroup: event.mastGroup ?? null,
+    hitPartId: event.hitPartId ?? null,
+    hullIntegrity: +(damage.hullIntegrity ?? 1).toFixed(3),
+    rigIntegrity: +(damage.rigIntegrity ?? 1).toFixed(3),
+    breaches: damage.breaches ?? 0,
+    fires: damage.fires?.length ?? 0,
+    fireIntensity: +(damage.fireIntensity ?? 0).toFixed(2),
+    sunk: Boolean(damage.sunk),
+    casualtiesKilled: casualties?.killed ?? 0,
+    casualtiesWounded: casualties?.wounded ?? 0,
+    crewAble: c?.able ?? 0,
+    crewWounded: c?.wounded ?? 0,
+    crewKilled: c?.killed ?? 0,
+    crewTotal: c?.total ?? 0,
+    battleMorale: +(damage.battleMorale ?? 1).toFixed(3),
+    moraleState: damage.moraleState ?? 'steady',
+    surrendered: Boolean(damage.surrendered),
+    colors: targetBoat.colors ?? DEFAULT_SHIP_COLORS,
+  };
+  damage.lastHit = report;
+  return report;
+}
+
 export function applyShipImpactDamage(targetBoat, event) {
   if (!targetBoat || !event) return null;
   const damage = createVesselDamageState(targetBoat);
+  let estimatedLeak = null;
   const vel = event.velocity ?? [200, 0, 0];
   const speed = Math.hypot(vel[0], vel[1], vel[2]);
   const mass = event.mass ?? 5.4;
@@ -1082,6 +1307,7 @@ export function applyShipImpactDamage(targetBoat, event) {
       const holeArea = Math.PI * holeR * holeR * (ammo === 'grape' ? 0.22 : 1.0) * lowDeckScale;
       damage.waterlineBreachArea = +(damage.waterlineBreachArea + holeArea).toFixed(5);
       if (comp) comp.breachArea = +(comp.breachArea + holeArea).toFixed(5);
+      estimatedLeak = { comp, area: holeArea };
       damage.breachSideMoment = +(damage.breachSideMoment + hitSideSign * holeArea).toFixed(5);
       damage.breachTrimMoment = +(damage.breachTrimMoment + trimWeight * holeArea).toFixed(5);
       // Initial splash ingress at the instant of breach is small; the bulk of seawater pours in progressively over time.
@@ -1119,34 +1345,10 @@ export function applyShipImpactDamage(targetBoat, event) {
     (damage.hits % 3 === 0) &&
     damage.fires.length < 3;
   if (ammo === 'hot' || canCombatIgnite) {
-    damage.fireCount = (damage.fireCount ?? 0) + 1;
     const addIntensity = ammo === 'hot'
       ? Math.min(1.2, 0.48 + energy / 550000)
       : Math.min(0.92, 0.56 + energy / 680000);
-    let mergedFire = false;
-    for (const f of damage.fires) {
-      const dist = Math.hypot(
-        (f.localPosition[0] ?? 0) - (localPos?.[0] ?? 0),
-        (f.localPosition[1] ?? 0) - (localPos?.[1] ?? 0),
-        (f.localPosition[2] ?? 0) - (localPos?.[2] ?? 0),
-      );
-      if (dist < 3.5) {
-        f.intensity = Math.min(1.6, f.intensity + addIntensity * 0.65);
-        mergedFire = true;
-        break;
-      }
-    }
-    if (!mergedFire && damage.fires.length < 12) {
-      damage.fires.push({
-        localPosition: [...(localPos ?? [0, 1.5, 0])],
-        hitZone: event.hitZone ?? 'hull',
-        mastGroup: event.mastGroup ?? null,
-        intensity: addIntensity,
-        age: 0,
-        seed: ((damage.hits * 0.61803398875) % 1) || 0.37,
-      });
-    }
-    damage.fireIntensity = +damage.fires.reduce((s, f) => s + f.intensity, 0).toFixed(3);
+    addVesselFire(damage, localPos, event, addIntensity);
   }
 
   const partBudget = Math.min(
@@ -1251,6 +1453,20 @@ export function applyShipImpactDamage(targetBoat, event) {
     penetratedOuter = penEnergy >= energyCostOuter;
     let residualEnergy = Math.max(0, penEnergy - energyCostOuter);
     if (penetratedOuter) damage.throughBreaches = (damage.throughBreaches ?? 0) + 1;
+    const bustsThrough = penetratedOuter && !enteredThroughWindow && localPos && (ammo === 'round' || ammo === 'hot');
+    // Oak tears well beyond the ball itself, and more on the way out.
+    const holeRadius = Math.max(0.07, event.radius ?? 0.08) * 2.6;
+    if (bustsThrough) {
+      // A shot recorded as striking at the waterline holes her there, wherever its contact point was taken.
+      const holeLocal = [...localPos];
+      if (event.waterline) holeLocal[1] = Math.min(holeLocal[1], -(targetBoat.heave ?? 0) - holeRadius * 0.5);
+      addHullHole(damage, { design: [surfaceX, designPt[1], designPt[2]], local: holeLocal, radius: holeRadius, side, compartment: hullHoleCompartment(targetBoat, localPos[2], side) });
+      // The real hole now governs the water, in place of the leak estimated from the hit alone.
+      if (estimatedLeak) {
+        if (estimatedLeak.comp) estimatedLeak.comp.breachArea = Math.max(0, +(estimatedLeak.comp.breachArea - estimatedLeak.area).toFixed(5));
+        damage.waterlineBreachArea = Math.max(0, +(damage.waterlineBreachArea - estimatedLeak.area).toFixed(5));
+      }
+    }
 
     const isAftCabinShock = isVictory && designPt[2] >= 3.85 && designPt[1] >= 0.72 && energy >= 45000;
     if (isGlazedWindow || isAftCabinShock) {
@@ -1368,7 +1584,8 @@ export function applyShipImpactDamage(targetBoat, event) {
 
     // Stage 2: Direct cannon hits & interior gun-deck penetration.
     // Check if the shot struck an entry-side cannon or, after penetrating, an opposite-side cannon.
-    const targetGuns = targetBoat.gunnery?.state?.guns;
+    // boat.gunnery is the gun state itself on live vessels.
+    const targetGuns = targetBoat.gunnery?.guns ?? targetBoat.gunnery?.state?.guns;
     if (Array.isArray(targetGuns) && targetGuns.length > 0) {
       for (const g of targetGuns) {
         if (g.dismounted) continue;
@@ -1581,6 +1798,17 @@ export function applyShipImpactDamage(targetBoat, event) {
       }
 
       // 3d. Striking the back wall of the hull (opposite-side inner hull wall) after crossing the interior
+      // A ball with enough left in it goes out through her far side as well.
+      if (bustsThrough && dir[0] * side < -0.2 && residualEnergy >= energyCostOuter) {
+        const farDesign = Math.abs(designPt[0]);
+        const across = (-side * farDesign - designPt[0]) / dir[0];
+        const exitDesign = [-side * farDesign, designPt[1] + dir[1] * across, designPt[2] + dir[2] * across];
+        const toLocal = (i) => (Math.abs(designPt[i]) > 1e-3 ? localPos[i] / designPt[i] : 1);
+        const exitLocal = [-localPos[0], localPos[1] + (exitDesign[1] - designPt[1]) * toLocal(1), localPos[2] + (exitDesign[2] - designPt[2]) * toLocal(2)];
+        addHullHole(damage, { design: exitDesign, local: exitLocal, radius: holeRadius * 1.15, side: -side, compartment: hullHoleCompartment(targetBoat, exitLocal[2], -side) });
+        damage.exitHoles = (damage.exitHoles ?? 0) + 1;
+      }
+
       if (Math.abs(dir[0]) > 0.20 && residualEnergy >= 75000) {
         const backSide = dir[0] < 0 ? -1 : 1;
         if (backSide !== side || Math.abs(designPt[0]) < 0.65) {
@@ -1685,7 +1913,7 @@ export function applyShipImpactDamage(targetBoat, event) {
     const prevStage = damage.mastState[mGroup] ?? 0;
     if (mInt <= 0.62 && prevStage < 1) {
       damage.mastState[mGroup] = 1;
-      damage.pendingBakes.push({
+      queueMastBreak(damage, {
         kind: 'mast-break',
         modelId,
         mastGroup: mGroup,
@@ -1699,7 +1927,7 @@ export function applyShipImpactDamage(targetBoat, event) {
       damage.mastState[mGroup] = 2;
       const sailKey = mGroup === 'fore' ? 'sailFore' : mGroup === 'mizzen' ? 'sailMizzen' : 'sailMain';
       if (typeof targetBoat[sailKey] === 'number') targetBoat[sailKey] = 0;
-      damage.pendingBakes.push({
+      queueMastBreak(damage, {
         kind: 'mast-break',
         modelId,
         mastGroup: mGroup,
@@ -1718,6 +1946,7 @@ export function applyShipImpactDamage(targetBoat, event) {
     { ammo, energy, hitZone: event.hitZone ?? 'hull' },
     {
       designPt,
+      localPos,
       penetratedOuter,
       enteredThroughWindow,
       hitBackWall,
@@ -1794,7 +2023,8 @@ export function stepVesselDamage(boat, dt, terrain = null) {
   const baseFreeboard = Math.max(0.35, Math.min(2.6, hydro?.freeboard ?? 1.8));
   const reserveBuoyancyTonnes = Math.max(1.5, (wpArea * baseFreeboard * 1025) / 1000);
   const maxFloodTonnes = Math.max(reserveBuoyancyTonnes * 1.65, wpArea >= 18 ? 200 : reserveBuoyancyTonnes * 1.65);
-  if (damage.waterlineBreachArea > 0 && damage.floodingTonnes < maxFloodTonnes) {
+  const holeFlows = damage.holes?.length ? stepHullHoles(boat, damage, clampedDt) : null;
+  if ((damage.waterlineBreachArea > 0 || holeFlows?.area > 0) && damage.floodingTonnes < maxFloodTonnes) {
     const comps = damage.compartments ?? (damage.compartments = {
       forePort: { breachArea: 0, waterTonnes: 0 },
       foreStarboard: { breachArea: 0, waterTonnes: 0 },
@@ -1825,14 +2055,16 @@ export function stepVesselDamage(boat, dt, terrain = null) {
       const c = comps[k];
       const xSign = k.endsWith('Starboard') ? 1 : -1;
       const zSign = k.startsWith('fore') ? -1 : k.startsWith('aft') ? 1 : 0;
-      if (c.breachArea > 0) {
+      const holeRate = holeFlows?.byCompartment[k] ?? 0;
+      if (c.breachArea > 0 || holeRate > 0) {
         c.breachArea = Math.max(0, c.breachArea - 0.000025 * clampedDt * damage.hullIntegrity);
         totalBreachArea += c.breachArea;
-        const heelSub = Math.max(-0.20, curRoll * xSign * (boat.beam ?? 6) * 0.35);
-        const trimSub = Math.max(-0.30, -curPitch * zSign * (boat.length ?? 20) * 0.22);
+        // Positive roll lifts her starboard side, and positive pitch lifts her bow.
+        const heelSub = Math.max(-0.20, -curRoll * xSign * (boat.beam ?? 6) * 0.35);
+        const trimSub = Math.max(-0.30, curPitch * zSign * (boat.length ?? 20) * 0.22);
         const headMetres = Math.max(0.18, 0.36 + (damage.floodingSinkage ?? 0) * 0.90 + heelSub + trimSub);
         const flowVelocity = 0.78 * Math.sqrt(2 * 9.81 * headMetres) * (1.55 + 1.15 * (1 - damage.hullIntegrity));
-        const grossRate = (c.breachArea * flowVelocity * 1025) / 1000;
+        const grossRate = (c.breachArea * flowVelocity * 1025) / 1000 + holeRate;
         const netRate = Math.max(0, grossRate - pumpCapacity * 0.22);
         if (netRate > 0 && c.waterTonnes < compMaxTonnes) {
           const add = Math.min(compMaxTonnes - c.waterTonnes, netRate * clampedDt);
@@ -1842,6 +2074,7 @@ export function stepVesselDamage(boat, dt, terrain = null) {
       }
     }
     damage.waterlineBreachArea = +totalBreachArea.toFixed(5);
+    damage.holeLeakArea = +(holeFlows?.area ?? 0).toFixed(5);
 
     // Slow bulkhead seepage / limber-hole spillover between adjacent compartments so one flooded
     // end sinks deep first before water gradually equalizes along the hold.
@@ -1885,10 +2118,11 @@ export function stepVesselDamage(boat, dt, terrain = null) {
 
     if (!damage.sunk) {
       const sinkFrac = Math.min(1.6, damage.floodingSinkage / baseFreeboard);
-      const sideSign = damage.breachSideMoment >= 0 ? 1 : -1;
+      // Water on her starboard side lists her to starboard, and positive roll lifts that side.
+      const sideSign = damage.breachSideMoment >= 0 ? -1 : 1;
       const trimSign = damage.breachTrimMoment >= 0 ? 1 : -1;
       const targetRoll = Math.abs(heelImbalance) > 0.03
-        ? Math.max(-0.54, Math.min(0.54, heelImbalance * 0.44))
+        ? Math.max(-0.54, Math.min(0.54, -heelImbalance * 0.44))
         : sideSign * Math.min(0.32, sinkFrac * 0.22);
       // When one end floods heavily while the opposite end remains buoyant, the flooded end plunges
       // deep and raises the buoyant opposite end steeply out of the water (up to ~33 deg pitch).
@@ -2000,9 +2234,15 @@ export function stepVesselDamage(boat, dt, terrain = null) {
     // Free-surface flooding eliminates transverse metacentric stability (GM -> 0) and floods
     // bow/stern compartments unevenly, causing the foundering vessel to heel heavily onto its
     // beam-ends (~20-45 deg roll) and plunge by the head or stern (~15-33 deg pitch).
-    const sideSign = Math.abs(damage.breachSideMoment) > 1e-6
-      ? Math.sign(damage.breachSideMoment)
-      : (Math.sign(damage.hullSideMoment || 0) || 1);
+    // She goes over toward the side holding more water, and positive roll lifts starboard.
+    const sunkComps = damage.compartments ?? {};
+    const sunkWaterSide = (sunkComps.foreStarboard?.waterTonnes ?? 0) + (sunkComps.midStarboard?.waterTonnes ?? 0) + (sunkComps.aftStarboard?.waterTonnes ?? 0)
+      - (sunkComps.forePort?.waterTonnes ?? 0) - (sunkComps.midPort?.waterTonnes ?? 0) - (sunkComps.aftPort?.waterTonnes ?? 0);
+    const sideSign = Math.abs(sunkWaterSide) > 1
+      ? -Math.sign(sunkWaterSide)
+      : Math.abs(damage.breachSideMoment) > 1e-6
+        ? -Math.sign(damage.breachSideMoment)
+        : -(Math.sign(damage.hullSideMoment || 0) || 1);
     const rawTrim = Math.abs(damage.breachTrimMoment) > 1e-4
       ? damage.breachTrimMoment
       : (damage.hullTrimMoment || -1);
@@ -2028,7 +2268,6 @@ export function stepVesselDamage(boat, dt, terrain = null) {
           if (typeof boat[k] === 'number') boat[k] = 0;
         }
         damage.settledWreck = true;
-        boat.settledWreck = true;
       }
     }
   }
@@ -2116,7 +2355,7 @@ export function stepVesselDamage(boat, dt, terrain = null) {
       for (const [mGroup, mastZ] of [['fore', -3.55], ['main', 0.05], ['mizzen', 3.53]]) {
         if ((damage.mastIntegrity[mGroup] ?? 1) <= 0.24 && (damage.mastState[mGroup] ?? 0) < 2) {
           damage.mastState[mGroup] = 2;
-          damage.pendingBakes.push({
+          queueMastBreak(damage, {
             kind: 'mast-break',
             mastGroup: mGroup,
             stage: 'full',
@@ -2234,9 +2473,20 @@ export function sweepBuildingSegment(from, to, radius = 0.08, port, options = nu
       }
     }
     if (!valid || tMin < 0 || tMin > 1) continue;
+    // The box knows nothing of what has left. Where the line goes in through a gap, it strikes the next thing
+    // standing, and it may meet nothing in this step, or anywhere in this building.
+    const behind = traceShotThroughBreach(inst.damageState?.fracture, from, to);
+    if (behind) {
+      if (!(behind.t <= 1)) continue;
+      tMin = Math.max(0, behind.t);
+    }
     if (!best || tMin < best.fraction) {
       const ln = [0, 0, 0]; ln[hitAxis] = hitSign;
-      const normal = [ln[0] * cosY + ln[2] * sinY, ln[1], -ln[0] * sinY + ln[2] * cosY];
+      // From inside it, what it strikes faces back along its flight.
+      const dLength = Math.hypot(d[0], d[1], d[2]) || 1;
+      const normal = behind
+        ? [(from[0] - to[0]) / dLength, (from[1] - to[1]) / dLength, (from[2] - to[2]) / dLength]
+        : [ln[0] * cosY + ln[2] * sinY, ln[1], -ln[0] * sinY + ln[2] * cosY];
       const localPosition = [p0[0] + d[0] * tMin, p0[1] + d[1] * tMin, p0[2] + d[2] * tMin];
       const hitPart = previewOnly ? null : resolveBuildingHitPart(inst, localPosition);
       best = {
@@ -2426,23 +2676,6 @@ export function createBuildingDamageState(building) {
   return d;
 }
 
-function withBuildingBakeBounds(building, bake) {
-  if (!building || !bake) return bake;
-  const cx = Number(building.x);
-  const cz = Number(building.z);
-  if (!Number.isFinite(cx) || !Number.isFinite(cz)) return bake;
-  const w = Math.max(4, Number(building.width) || 16);
-  const l = Math.max(4, Number(building.depth ?? building.length) || 16);
-  const isPier = building.prefabId === 'timber_mole_pier' || building.role === 'pier';
-  bake.buildingCx = +cx.toFixed(3);
-  bake.buildingCz = +cz.toFixed(3);
-  bake.buildingYaw = +(Number(building.yaw) || 0).toFixed(4);
-  bake.buildingHalfW = +((isPier ? w * 1.35 : w * 0.5) + 1.8).toFixed(3);
-  bake.buildingHalfL = +(l * 0.5 + 1.8).toFixed(3);
-  bake.buildingGroundY = +(Number(building.baseY ?? building.y) || 0).toFixed(3);
-  return bake;
-}
-
 export function detonateBuildingMagazine(building, { localPos = [0, 2.2, 0], cause = 'shot' } = {}) {
   if (!building) return null;
   const d = createBuildingDamageState(building);
@@ -2501,7 +2734,7 @@ export function detonateBuildingMagazine(building, { localPos = [0, 2.2, 0], cau
   }
 
   d.collapseDropFrac = Math.min(0.72, (d.collapseDropFrac ?? 0) + 0.32 * (0.4 + 0.6 * powderFrac));
-  d.pendingBakes.push(withBuildingBakeBounds(building, {
+  d.pendingBakes.push({
     kind: 'building-explosion',
     x: +worldBlastPt[0].toFixed(3),
     y: +worldBlastPt[1].toFixed(3),
@@ -2510,7 +2743,7 @@ export function detonateBuildingMagazine(building, { localPos = [0, 2.2, 0], cau
     stepDepth: +(1.85 + 1.85 * powderFrac).toFixed(3),
     severity: +(1.25 + 0.48 * powderFrac).toFixed(3),
     powderFraction: +powderFrac.toFixed(3),
-  }));
+  });
 
   const numFires = Math.min(3, Math.max(1, Math.round(1 + 2 * powderFrac)));
   for (let i = 0; i < numFires; i++) {
@@ -2548,6 +2781,7 @@ export function detonateBuildingMagazine(building, { localPos = [0, 2.2, 0], cau
 export function applyBuildingImpactDamage(building, event) {
   if (!building || !event) return null;
   const d = createBuildingDamageState(building);
+  if (event.sourceBoat) (d.attackers ??= new Set()).add(event.sourceBoat);
   const mag = d.magazine;
   const materialClass = d.materialClass;
   const vel = event.velocity ?? [200, 0, 0];
@@ -2611,7 +2845,7 @@ export function applyBuildingImpactDamage(building, event) {
   });
   if (d.craters.length > 32) d.craters.shift();
 
-  d.pendingBakes.push(withBuildingBakeBounds(building, {
+  d.pendingBakes.push({
     kind: materialClass === 'timber' ? 'timber-splinter' : 'stone-crater',
     x: +worldHitPos[0].toFixed(3),
     y: +worldHitPos[1].toFixed(3),
@@ -2623,7 +2857,7 @@ export function applyBuildingImpactDamage(building, event) {
     stepDepth: +stepDepth.toFixed(3),
     severity: +siteSeverity.toFixed(3),
     materialClass,
-  }));
+  });
 
   // When a shot strikes the lower scarp/foundation wall, propagate shock & spalling up into the
   // upper scarp and parapet crenellations directly above the impact bay so the battlements crumble visibly.
@@ -2635,7 +2869,7 @@ export function applyBuildingImpactDamage(building, event) {
       localPos[2] ?? 0,
     ];
     const upperWorld = buildingLocalToWorld(building, upperLocal);
-    d.pendingBakes.push(withBuildingBakeBounds(building, {
+    d.pendingBakes.push({
       kind: materialClass === 'timber' ? 'timber-splinter' : 'stone-crater',
       x: +upperWorld[0].toFixed(3),
       y: +upperWorld[1].toFixed(3),
@@ -2647,7 +2881,7 @@ export function applyBuildingImpactDamage(building, event) {
       stepDepth: +(stepDepth * 1.1).toFixed(3),
       severity: +(siteSeverity * 0.95).toFixed(3),
       materialClass,
-    }));
+    });
   }
 
   // Check if the shot struck near a shore-battery embrasure cannon (or undermined its wall bay) and dismounted it.
@@ -2660,7 +2894,7 @@ export function applyBuildingImpactDamage(building, event) {
     d.dismountedGuns = (d.dismountedGuns ?? 0) + 1;
     dismountedNow = true;
     const gWorld = buildingLocalToWorld(building, g.localPosition ?? localPos);
-    d.pendingBakes.push(withBuildingBakeBounds(building, {
+    d.pendingBakes.push({
       kind: 'cannon-dismount',
       x: +gWorld[0].toFixed(3),
       y: +gWorld[1].toFixed(3),
@@ -2671,7 +2905,7 @@ export function applyBuildingImpactDamage(building, event) {
       radius: 1.65,
       stepDepth: 0.65,
       severity: 1.15,
-    }));
+    });
   };
   if (Array.isArray(bGuns) && bGuns.length > 0) {
     for (const g of bGuns) {
@@ -2710,7 +2944,7 @@ export function applyBuildingImpactDamage(building, event) {
   } else if (isEmbrasure && effectiveEnergy >= 85000) {
     d.dismountedGuns = (d.dismountedGuns ?? 0) + 1;
     dismountedNow = true;
-    d.pendingBakes.push(withBuildingBakeBounds(building, {
+    d.pendingBakes.push({
       kind: 'cannon-dismount',
       x: +worldHitPos[0].toFixed(3),
       y: +worldHitPos[1].toFixed(3),
@@ -2721,7 +2955,7 @@ export function applyBuildingImpactDamage(building, event) {
       radius: 1.65,
       stepDepth: 0.65,
       severity: 1.15,
-    }));
+    });
   }
 
   // Hot shot & heavy bombardment fire ignition:
@@ -2818,7 +3052,7 @@ export function applyBuildingImpactDamage(building, event) {
       (building.height ?? 7) * 0.85,
       (localPos[2] ?? 0) * 0.65,
     ]);
-    d.pendingBakes.push(withBuildingBakeBounds(building, {
+    d.pendingBakes.push({
       kind: 'building-collapse',
       x: +roofCavePt[0].toFixed(3),
       y: +roofCavePt[1].toFixed(3),
@@ -2827,7 +3061,7 @@ export function applyBuildingImpactDamage(building, event) {
       stepDepth: 1.35,
       severity: 0.95,
       powderFraction: 0.40,
-    }));
+    });
   }
   if ((d.state === 'breached' || d.state === 'ruined') && !d.breachCollapseBaked) {
     d.breachCollapseBaked = true;
@@ -2838,7 +3072,7 @@ export function applyBuildingImpactDamage(building, event) {
       (building.height ?? 8) * 0.72,
       (localPos[2] ?? 0) * 0.6,
     ]);
-    d.pendingBakes.push(withBuildingBakeBounds(building, {
+    d.pendingBakes.push({
       kind: 'building-collapse',
       x: +collapsePt[0].toFixed(3),
       y: +collapsePt[1].toFixed(3),
@@ -2847,7 +3081,7 @@ export function applyBuildingImpactDamage(building, event) {
       stepDepth: 1.65,
       severity: 1.15,
       powderFraction: 0.55,
-    }));
+    });
   }
   const activeGunsLeft = Array.isArray(bGuns) ? bGuns.filter((g) => !g.dismounted).length : 0;
   const totalGunsCount = Array.isArray(bGuns) ? bGuns.length : 0;
@@ -2869,7 +3103,7 @@ export function applyBuildingImpactDamage(building, event) {
       (building.height ?? 8) * 0.68,
       (localPos[2] ?? 0) * 0.5,
     ]);
-    d.pendingBakes.push(withBuildingBakeBounds(building, {
+    d.pendingBakes.push({
       kind: 'building-collapse',
       x: +centerCollapsePt[0].toFixed(3),
       y: +centerCollapsePt[1].toFixed(3),
@@ -2878,7 +3112,7 @@ export function applyBuildingImpactDamage(building, event) {
       stepDepth: 2.35,
       severity: 1.35,
       powderFraction: 0.85,
-    }));
+    });
   }
   // Multi-round bombardment progression: keep lowering collapseDropFrac on subsequent hits so fires and OBB top sink with the crumbling walls
   if (!emittedCollapseThisHit && d.state !== 'intact' && effectiveEnergy >= 35000) {
@@ -2972,7 +3206,7 @@ export function stepBuildingDamage(building, dt) {
     d.breachCollapseBaked = true;
     d.collapseDropFrac = Math.min(0.72, (d.collapseDropFrac ?? 0) + 0.16);
     const collapsePt = buildingLocalToWorld(building, [0, (building.height ?? 7) * 0.72, 0]);
-    d.pendingBakes.push(withBuildingBakeBounds(building, {
+    d.pendingBakes.push({
       kind: 'building-collapse',
       x: +collapsePt[0].toFixed(3),
       y: +collapsePt[1].toFixed(3),
@@ -2981,13 +3215,13 @@ export function stepBuildingDamage(building, dt) {
       stepDepth: 1.65,
       severity: 1.15,
       powderFraction: 0.55,
-    }));
+    });
   }
   if (d.state === 'ruined' && !d.ruinCollapseBaked) {
     d.ruinCollapseBaked = true;
     d.collapseDropFrac = Math.min(0.72, (d.collapseDropFrac ?? 0) + 0.22);
     const ruinPt = buildingLocalToWorld(building, [0, (building.height ?? 7) * 0.68, 0]);
-    d.pendingBakes.push(withBuildingBakeBounds(building, {
+    d.pendingBakes.push({
       kind: 'building-collapse',
       x: +ruinPt[0].toFixed(3),
       y: +ruinPt[1].toFixed(3),
@@ -2996,7 +3230,7 @@ export function stepBuildingDamage(building, dt) {
       stepDepth: 2.25,
       severity: 1.30,
       powderFraction: 0.75,
-    }));
+    });
   }
 
   const mag = building.magazine ?? d.magazine;
@@ -3127,7 +3361,7 @@ export function createBuildingGunnery(building, { onEvent = () => {}, getVessels
   const defs = createBuildingGunDefinitions(building);
   const state = createGunneryState(defs);
   building.gunnery = state;
-  createBuildingDamageState(building);
+  for (const i of createBuildingDamageState(building).restoredGuns ?? []) if (state.guns[i]) state.guns[i].dismounted = true;
   const solidSweep = sweep ?? createGunnerySolidSweep({ sourceBoat: null, getVessels, getTerrain });
   const damageLog = [];
   let lastDamageReport = null;
@@ -3299,6 +3533,10 @@ export function createPortGunnery(port, { onEvent = () => {}, getVessels = () =>
       }
       return cachedWorldFires;
     },
+    // The same pooled hull coming back as a different ship owes this port nothing.
+    forgetAttacker(boat) {
+      for (const inst of instances) inst.damageState?.attackers?.delete(boat);
+    },
     fireAtTarget(targetBoat, opts = {}) {
       let totalQueued = 0;
       for (const b of batteries) {
@@ -3316,6 +3554,9 @@ export function createPortGunnery(port, { onEvent = () => {}, getVessels = () =>
       }
       if (autoReturnFire && batteries.length > 0 && dt > 0) {
         const portAttacked = instances.some((inst) => (inst.damageState?.hits ?? 0) > 0);
+        // A fort answers the ships that fired on it, not whichever hull lies closest.
+        const attackers = new Set();
+        for (const inst of instances) for (const b of inst.damageState?.attackers ?? []) attackers.add(b);
         const hasFriendlyIndigenousBattery = batteries.some((b) => b.building?.indigenous || b.building?.friendlyToPlayer);
         cooldown -= dt;
         if (cooldown <= 0 && (portAttacked || hasFriendlyIndigenousBattery)) {
@@ -3327,6 +3568,7 @@ export function createPortGunnery(port, { onEvent = () => {}, getVessels = () =>
             const boat = entry?.boat ?? entry;
             if (!boat || boat.damage?.sunk || boat.damage?.surrendered) continue;
             const isHostileEnemy = entry?.faction === 'enemy' || boat?.faction === 'enemy';
+            if (attackers.size > 0 && !attackers.has(boat) && !hasFriendlyIndigenousBattery) continue;
             // Allied Indigenous coastal batteries actively defend the harbor against hostile European vessels
             // without firing on the allied player (vIdx === 0) unless the port was directly bombarded when no enemy is present.
             if (hasFriendlyIndigenousBattery && !portAttacked && !isHostileEnemy) continue;
@@ -3753,12 +3995,50 @@ export function createGunnerySolidSweep({ sourceBoat, getVessels = () => [], get
       const tHit = sweepTerrainSegment(from, to, radius, terrain, opts);
       if (tHit && (!best || tHit.fraction < best.fraction)) best = tHit;
     }
+    // Aiming previews never harm anyone. An arrow stops in the first body it meets; a ball
+    // passes through every body before whatever it strikes first.
+    if (!previewOnly) {
+      const arrow = isArrowAmmo(projectile?.ammo);
+      for (const entry of vessels) {
+        const targetBoat = entry?.boat ?? entry;
+        const crew = targetBoat?.crewCompany?.crew;
+        if (!crew?.length || targetBoat === sourceBoat || targetBoat.showProw === false) continue;
+        const span = Math.max(targetBoat.length ?? 20, targetBoat.beam ?? 6) * 0.6 + 4 + Math.hypot(to[0] - from[0], to[2] - from[2]);
+        if (Math.hypot((from[0] + to[0]) * 0.5 - (targetBoat.x ?? 0), (from[2] + to[2]) * 0.5 - (targetBoat.z ?? 0)) > span) continue;
+        const localFrom = vesselWorldToLocal(targetBoat, from), localTo = vesselWorldToLocal(targetBoat, to);
+        const hits = sweepCrewBodies(localFrom, localTo, radius, crew, best?.fraction ?? 1);
+        if (!hits.length) continue;
+        if (arrow) {
+          best = { fraction: hits[0].fraction, kind: 'ship', hitZone: 'crew', targetBoat, sailor: hits[0].sailor, localPosition: hits[0].point, normal: [0, 1, 0] };
+        } else {
+          const direction = localTo.map((v, i) => v - localFrom[i]);
+          for (const hit of hits) strikeCrewBodyWithBall(targetBoat, hit, projectile, direction);
+        }
+      }
+      // Men ashore: a ball goes through them too, on the way to whatever stops it.
+      if (!arrow && projectile) {
+        const land = getTerrain?.(), shores = land?.ports ?? (land?.port ? [land.port] : null);
+        for (const port of shores ?? []) {
+          const soldiers = port?.garrison?.soldiers;
+          if (!soldiers?.length) continue;
+          const reach = 400 + Math.hypot(to[0] - from[0], to[2] - from[2]), mx = (from[0] + to[0]) * 0.5, mz = (from[2] + to[2]) * 0.5;
+          if (Math.hypot(mx - (port.center?.x ?? mx), mz - (port.center?.z ?? mz)) > reach) continue;
+          for (const hit of sweepCrewBodies(from, to, radius, soldiers, best?.fraction ?? 1)) strikeSoldierWithBall(hit, projectile);
+        }
+      }
+    }
     return best;
   };
 }
 
 export function resolveSolidGunneryImpact(event, { getTerrain = () => null } = {}) {
   if (!event || event.type !== 'impact') return null;
+  if (isArrowAmmo(event.ammo)) {
+    if (event.kind === 'ship' && event.targetBoat) return applyArrowImpact(event.targetBoat, event);
+    // Stone shrugs off arrows, but a garrison still answers whoever loosed them.
+    if (event.kind === 'building' && event.building && event.sourceBoat) (createBuildingDamageState(event.building).attackers ??= new Set()).add(event.sourceBoat);
+    return null;
+  }
   if (event.kind === 'ship' && event.targetBoat) {
     return applyShipImpactDamage(event.targetBoat, event);
   }
@@ -3788,7 +4068,8 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
   let cachedAimArcs=null,cachedAimTime=-1,cachedAimSide=null,cachedAimAmmo=null,cachedAimElev=NaN,cachedAimTrav=NaN,cachedAimQuoin=NaN,cachedAimX=NaN,cachedAimZ=NaN,cachedAimHeading=NaN,cachedAimRoll=NaN;
   const attended=gun=>!gun.visibleCrew||boat.aiGunneryAttended===true||boat.gunneryAttendance?.has(gun.id)===true;
   const sideValid=side=>side==='port'||side==='starboard';
-  const hasPowder=()=>!boat.magazine||(!boat.magazine.exploded&&boat.magazine.powderKg>0);
+  const weapon=gunneryWeapon(state.guns[0]);
+  const hasPowder=()=>!weapon.usesPowder||!boat.magazine||(!boat.magazine.exploded&&boat.magazine.powderKg>0);
   function traceBallisticPreview(gun,windVec,{elevationDeg=0,traverseDeg=0,rollRad=0,alpha=0.72,isLiveRoll=false}={}){
     const savedRoll=boat.roll,savedElev=gun.elevation,savedTrav=gun.traverse;
     boat.roll=rollRad;
@@ -3799,8 +4080,7 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
     gun.elevation=savedElev;
     gun.traverse=savedTrav;
     const ammo=state.ammo??'round';
-    const speedMul=ammo==='hot'?.88:ammo==='chain'?.82:ammo==='grape'?.85:1;
-    const dragMul=ammo==='chain'?1.62:ammo==='grape'?1.18:1;
+    const {speed:speedMul,drag:dragMul}=gunneryAmmoFlight(ammo);
     const radius=ammo==='grape'?(gun.diameter/2)*.55:gun.diameter/2;
     const sweepRadius=ammo==='chain'?gun.diameter*1.85:radius;
     const dragFactor=.5*state.airDensity*(gun.dragCoefficient*dragMul)*Math.PI*radius*radius/gun.mass;
@@ -3921,7 +4201,7 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
     if(!sideValid(side)||boat.gunnerySide!==side||pending||state.queue.length||!hasPowder())return false;
     let count=0;
     for(const g of state.guns){
-      if(g.disabledByScale||g.side!==side)continue;
+      if(gunneryOffline(g)||g.side!==side)continue;
       count++;
       if(g.stage!=='ready'||!attended(g)||muzzleBlock(g,gunMuzzlePose(g,boat)))return false;
     }
@@ -3931,7 +4211,7 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
     syncScaledGuns();
     if(!sideValid(side)||boat.gunnerySide!==side||pending||state.queue.length||!hasPowder())return false;
     for(const g of state.guns){
-      if(!g.disabledByScale&&g.side===side&&g.stage==='ready'&&!g.queued&&attended(g)&&!muzzleBlock(g,gunMuzzlePose(g,boat)))return true;
+      if(!gunneryOffline(g)&&g.side===side&&g.stage==='ready'&&!g.queued&&attended(g)&&!muzzleBlock(g,gunMuzzlePose(g,boat)))return true;
     }
     return false;
   };
@@ -3949,7 +4229,7 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
       side,
       allowPartial,
       stage:'laying',
-      at:state.time+GUNNERY_ORDER_SECONDS[order],
+      at:state.time+(weapon.usesPowder?GUNNERY_ORDER_SECONDS[order]:.35),
       targetElevation,
       effectiveQuoin:targetElevation,
       minRollDeg:initRollDeg,
@@ -3965,7 +4245,9 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
   return {
     state,
     damageLog,
-    get magazine(){return boat.magazine;},
+    weapon,
+    get effectiveRange(){return weapon.effectiveRange;},
+    get magazine(){return weapon.usesPowder?boat.magazine:null;},
     get lastDamageReport(){return lastDamageReport;},
     get fireAtWill(){return fireAtWillMode;},
     setFireAtWill(enabled,side=null){
@@ -3992,7 +4274,7 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
       if(!sideValid(side))return false;
       pending=null;state.queue.length=0;
       boat.gunnerySide=side;prepared=true;lastReady=true;
-      for(const g of state.guns)if(!g.disabledByScale&&g.side===side){
+      for(const g of state.guns)if(!gunneryOffline(g)&&g.side===side){
         g.stage='ready';g.loading=false;g.progress=1;g.offset=0;g.queued=false;
       }
       return true;
@@ -4052,10 +4334,13 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
             }
             pending.stage='steady';
           }
-          if(pending.stage==='steady'){
+          // Every gun in the order was lost after it was given: nothing can ever
+          // answer "give fire", and a held order would block all further orders.
+          if(pending.stage==='steady'&&gunnerySummary(state,pending.side).ready===0&&!state.queue.length)pending=null;
+          if(pending?.stage==='steady'){
             let readyCount=0,clearCount=0,allReadyClear=true;
             for(const g of state.guns){
-              if(g.side!==pending.side||g.stage!=='ready')continue;
+              if(g.side!==pending.side||g.stage!=='ready'||gunneryOffline(g))continue;
               if(!g.queued)readyCount++;
               if(attended(g)&&!muzzleBlock(g,gunMuzzlePose(g,boat)))clearCount++;
               else allReadyClear=false;
@@ -4074,7 +4359,7 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
             const portsClear=(pending.allowPartial||waitTime>=3.5)?clearCount>0:(readyCount>0&&allReadyClear);
             pending.prevError=ePred;
             if(isFlatCalm||(portsClear&&(((crossedZero||withinWindow)&&goodRollDirection)||waitTime>=5.2))){
-              onEvent({
+              if(weapon.usesPowder)onEvent({
                 type:'give-fire',
                 side:pending.side,
                 targetElevation:pending.targetElevation,
@@ -4096,21 +4381,23 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
       }
       for(const gun of state.guns)previousStages[gun.index]=gun.stage;
       const crewEfficiency=computeCrewEfficiency(boat);
-      const events=stepGunnery(state,dt,{deferSeaCollision,waterHeight,
+      const events=stepGunnery(state,dt,{boat,deferSeaCollision,waterHeight,
         windVelocity:wind,muzzle:gun=>gunMuzzlePose(gun,boat),
         sweep:solidSweep,
-        crewRate:()=>crewEfficiency,
+        // Lighting each fire arrow from a pot of coals slows the archers.
+        crewRate:()=>crewEfficiency*(state.ammo==='fire-arrow'?.66:1),
         gunAttended:gun=>!boat.damage?.surrendered&&attended(gun),canFire:(gun,pose)=>!boat.damage?.surrendered&&attended(gun)&&!muzzleBlock(gun,pose),
         onEvent:event=>{
-          if(event.type==='shot'){consumeMagazineOrdnance(boat,event);recoil(event);flash={gunId:event.gunId,side:event.gun.sideSign,time:event.time,mass:event.mass};}
+          if(event.type==='shot'&&weapon.usesPowder){consumeMagazineOrdnance(boat,event);recoil(event);flash={gunId:event.gunId,side:event.gun.sideSign,time:event.time,mass:event.mass};}
           if(event.type==='impact'&&event.kind!=='water'){
+            event.sourceBoat=boat;
             const report=resolveSolidGunneryImpact(event,{getTerrain});
             if(report){event.damageReport=report;lastDamageReport=report;if(damageLog.length>=32)damageLog.shift();damageLog.push(report);}
           }
           if(event.type!=='ready')onEvent(event);
         },
       });
-      for(const gun of state.guns)if(previousStages[gun.index]!==gun.stage&&(gun.stage==='ram'||gun.stage==='runout')){
+      if(weapon.usesPowder)for(const gun of state.guns)if(previousStages[gun.index]!==gun.stage&&(gun.stage==='ram'||gun.stage==='runout')){
         onEvent({type:gun.stage==='ram'?'load':'run-out',gun,position:gunMuzzlePose(gun,boat).position});
       }
       if((fireAtWillMode||autoReload)&&prepared&&sideValid(boat.gunnerySide)&&hasPowder()&&!boat.damage?.sunk&&!boat.damage?.surrendered&&!pending){
@@ -4119,10 +4406,10 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
       const s=gunnerySummary(state,boat.gunnerySide);
       let allAttended=true;
       if(prepared&&s.total>0&&s.ready===s.total){
-        for(const g of state.guns)if(g.side===boat.gunnerySide&&!attended(g)){allAttended=false;break;}
+        for(const g of state.guns)if(g.side===boat.gunnerySide&&!gunneryOffline(g)&&!attended(g)){allAttended=false;break;}
       }else allAttended=false;
       const ready=prepared&&s.total>0&&s.ready===s.total&&allAttended;
-      if(ready&&!lastReady)onEvent({type:'ready',position:[boat.x,boat.heave+3,boat.z]});
+      if(ready&&!lastReady&&weapon.usesPowder)onEvent({type:'ready',position:[boat.x,boat.heave+3,boat.z]});
       lastReady=ready;return events;
     },
     impact(contact){return resolveGunneryImpact(state,contact.shotId??contact.id,contact);},
@@ -4132,13 +4419,29 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
     blockedReason(side){
       if(side!==boat.gunnerySide)return null;
       if(boat.damage?.surrendered)return 'Colors struck (surrendered)';
-      if(boat.magazine?.exploded)return 'Magazine exploded';
-      if(boat.magazine&&boat.magazine.powderKg<=0)return 'Powder exhausted';
+      if(!hasPowder())return boat.magazine?.exploded?'Magazine exploded':'Powder exhausted';
       for(const gun of state.guns){
-        if(gun.side!==side)continue;
+        if(gun.side!==side||gunneryOffline(gun))continue;
         if(!attended(gun))return 'Manning guns';
         const reason=muzzleBlock(gun,gunMuzzlePose(gun,boat));if(reason)return reason;
       }return null;
+    },
+    // Why a battery is not progressing through the loading drill (or cannot be
+    // loaded at all). Surfaced in the UI so stalls are never silent.
+    stallReason(side){
+      if(!sideValid(side))return null;
+      if(boat.damage?.sunk)return 'Foundering';
+      if(boat.damage?.surrendered)return 'Colors struck (surrendered)';
+      if(!hasPowder())return boat.magazine?.exploded?'Magazine exploded':'Powder exhausted';
+      const s=gunnerySummary(state,side);
+      if(s.total===0&&s.dismounted>0)return weapon.usesPowder?`All ${s.dismounted} guns dismounted`:`All ${s.dismounted} archers down`;
+      // Loaded guns the captain has stood down cannot fire until prepared again.
+      if(boat.gunnerySide!==side)return s.ready>0?'Stood down':null;
+      let unmanned=0;
+      for(const g of state.guns)if(g.side===side&&!gunneryOffline(g)&&(g.loading||g.stage==='ready')&&!attended(g))unmanned++;
+      if(unmanned)return boat.gunneryCrewNote??`${unmanned} gun${unmanned>1?'s':''} awaiting crew`;
+      if(s.spent>0&&s.loading===0&&!autoReload&&!fireAtWillMode)return 'Order reload';
+      return null;
     },
     get selectedSide(){return boat.gunnerySide??null;},
     get ordered(){return pending?.side??null;},
@@ -4152,7 +4455,7 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
     },
     get ammo(){return state.ammo??'round';},
     setAmmo(type){
-      const next=GUNNERY_AMMO_TYPES.includes(type)?type:'round';
+      const next=weapon.ammo.includes(type)?type:weapon.defaultAmmo;
       state.ammo=next;boat.gunneryAmmo=next;return next;
     },
     get elevation(){return boat.gunneryElevation??0;},
@@ -4166,7 +4469,8 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
     },
     get traverse(){return boat.gunneryTraverse??0;},
     get traverseRange(){return gunTraverseRange(state.guns[0]);},
-    get isSwivelBattery(){return state.guns[0]?.kind==='swivel';},
+    // Whether the battery trains freely along the rail rather than through a gunport.
+    get isSwivelBattery(){return state.guns[0]?.kind==='swivel'||state.guns[0]?.kind==='bow';},
     setTraverse(degrees){
       const range=gunTraverseRange(state.guns[0]);
       const next=Number.isFinite(Number(degrees))?Math.max(range.min,Math.min(range.max,Number(degrees))):0;
@@ -4184,7 +4488,9 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
       for(const entry of vessels){
         const tb=entry?.boat??entry;
         if(!tb||tb===boat||tb.damage?.sunk||tb.showProw===false)continue;
-        const loc=vesselWorldToLocal(boat,[tb.x??0,(tb.heave??0)+2.2,tb.z??0]);
+        // Great guns lay on the hull. Swivels and archers lay on whoever stands above the rail.
+        const rail=vesselRailHeight(tb,0)??3.5;
+        const loc=vesselWorldToLocal(boat,[tb.x??0,(tb.heave??0)+(this.isSwivelBattery?rail+.5:rail*.62),tb.z??0]);
         if(loc[0]*sideSign<=0.5)continue;
         const d=Math.hypot(loc[0],loc[2]);
         if(d<bestDist){bestDist=d;bestLocal=loc;}
@@ -4225,8 +4531,14 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
       const gunSpeed=state.guns[0]?.muzzleSpeed??380;
       const grav=state.gravity??9.81;
       const dragComp=1+0.0022*bestDist;
-      const ballisticDeg=Math.max(0,(0.5*grav*bestDist/(gunSpeed*gunSpeed))*180/Math.PI*1.12*dragComp);
-      const heightDeg=Math.atan2(bestLocal[1]-1.6,bestDist)*180/Math.PI;
+      const flight=gunneryAmmoFlight(state.ammo);
+      const ballisticDeg=weapon.usesPowder
+        ?Math.max(0,(0.5*grav*bestDist/(gunSpeed*gunSpeed))*180/Math.PI*1.12*dragComp)
+        :bowElevationDegrees(bestDist,gunSpeed*flight.speed,flight.drag);
+      // Laid from the battery's real height, since a castle gun fires down onto a waist.
+      const sideGun=state.guns.find(g=>g.side===side&&!gunneryOffline(g))??state.guns[0];
+      const muzzleY=sideGun?gunMuzzlePose(sideGun,boat).localPosition[1]:1.6;
+      const heightDeg=Math.atan2(bestLocal[1]-muzzleY,bestDist)*180/Math.PI;
       const clampedElev=+(Math.max(eRange.min,Math.min(eRange.max,ballisticDeg+heightDeg))).toFixed(1);
       this.setTraverse(clampedTrav);
       this.setElevation(clampedElev);
@@ -4451,7 +4763,7 @@ function applySingleVesselCollisionDamage(targetBoat, otherBoat, contact, { isBo
       const nextStage = damage.mastIntegrity.fore <= 0.18 ? 2 : damage.mastIntegrity.fore <= 0.58 ? 1 : 0;
       if (nextStage > prevStage && damage.mastState) {
         damage.mastState.fore = nextStage;
-        damage.pendingBakes.push({
+        queueMastBreak(damage, {
           kind: 'mast-break',
           mastGroup: 'fore',
           stage: nextStage === 2 ? 'full' : 'topmast',
@@ -4772,6 +5084,7 @@ export function resolveVesselCollisions(vessels, dt = 1 / 60, options = {}) {
   return events;
 }
 
+const GROUNDING_GRIND_SCALE = 0.15;
 export function applyGroundingImpactDamage(boat, contact, options = {}) {
   if (!boat || !contact) return null;
   const subInfo = contact.substrateInfo ?? GROUNDING_SUBSTRATES[contact.substrate] ?? GROUNDING_SUBSTRATES.shoal;
@@ -4779,6 +5092,11 @@ export function applyGroundingImpactDamage(boat, contact, options = {}) {
   if (impactSpeed <= subInfo.safeTouchSpeed) return null;
 
   const damage = createVesselDamageState(boat);
+  // A hull working on the bottom at a crawl grinds, not strikes. This contact arrives every
+  // frame, so hard knocks count each time but slow grinding only every second and a half.
+  const groundingNow = options.nowMs ?? performance.now();
+  if (impactSpeed < 1.2 && groundingNow < (damage.groundingQuietUntilMs ?? -Infinity)) return null;
+  damage.groundingQuietUntilMs = groundingNow + 1500;
   const L = boat.length ?? 20;
   const B = boat.beam ?? 6;
   const mass = (boat.hydrodynamics?.mass ?? 60000) + Math.max(0, (damage.floodingTonnes ?? 0) * 1000);
@@ -4792,7 +5110,8 @@ export function applyGroundingImpactDamage(boat, contact, options = {}) {
   const speedNormEnergy = damage.maxHullEnergy * 0.032 * effSpeed * effSpeed * scrapeScale;
   const rawKinetic = 0.5 * mass * effSpeed * effSpeed * scrapeScale;
   const baseEnergy = Math.max(speedNormEnergy, Math.min(rawKinetic, damage.maxHullEnergy * 0.48));
-  const hullEnergy = baseEnergy * subInfo.damageMultiplier;
+  // Working on the bottom wears a hull down over many minutes. Only a real blow breaks her.
+  const hullEnergy = baseEnergy * subInfo.damageMultiplier * (impactSpeed < 1.2 ? GROUNDING_GRIND_SCALE : 1);
 
   damage.hits = (damage.hits ?? 0) + 1;
   damage.hullHits = (damage.hullHits ?? 0) + 1;
@@ -4914,7 +5233,7 @@ export function applyGroundingImpactDamage(boat, contact, options = {}) {
       const nextStage = damage.mastIntegrity.fore <= 0.20 ? 2 : (damage.mastIntegrity.fore <= 0.60 || impactSpeed >= 5.2) ? 1 : 0;
       if (nextStage > prevStage && damage.mastState) {
         damage.mastState.fore = nextStage;
-        damage.pendingBakes.push({
+        queueMastBreak(damage, {
           kind: 'mast-break',
           mastGroup: 'fore',
           stage: nextStage === 2 ? 'full' : 'topmast',

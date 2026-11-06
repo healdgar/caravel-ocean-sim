@@ -16,17 +16,23 @@ import { FOREST_LIGHT_ASSETS } from './js/forest-light.js';
 import { FOREST_NATIVE_LOD_ASSETS } from './js/forest-native-lod.js';
 import { FOREST_VOLUME_ASSETS, SUBTROPICAL_FOREST_VOLUME_ASSETS } from './js/forest-volume.js';
 import { FOREST_MIDDLE_ASSETS, SUBTROPICAL_FOREST_MIDDLE_ASSETS } from './js/forest-middle.js';
+import { FOREST_CLUSTER_ASSETS, SUBTROPICAL_FOREST_CLUSTER_ASSETS } from './js/forest-clusters.js';
 import { FOREST_MASS_ASSETS } from './js/forest-mass.js';
+import { FOREST_SURFACE_ASSETS, SUBTROPICAL_FOREST_SURFACE_ASSETS } from './js/forest-surfaces.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const wgslModules = ['js/wgsl/common.js', 'js/wgsl/celestial.js', 'js/wgsl/hull.js', 'js/wgsl/lateen.js', 'js/wgsl/victory.js', 'js/wgsl/vessel.js', 'js/wgsl/vessel-pose.js', 'js/wgsl/shadows.js', 'js/wgsl/interaction.js', 'js/wgsl/surface-waves.js', 'js/wgsl/surface-coupling.js', 'js/wgsl/fleet-wakes.js', 'js/wgsl/cloud-model.js', 'js/wgsl/clouds.js', 'js/wgsl/sky.js', 'js/wgsl/deck.js', 'js/wgsl/spindrift.js', 'js/wgsl/wetness.js', 'js/wgsl/sim.js', 'js/wgsl/water-optics.js', 'js/wgsl/underwater.js', 'js/wgsl/ocean.js', 'js/wgsl/ocean-lighting.js', 'js/wgsl/post.js', 'js/wgsl/caravel.js', 'js/wgsl/crew.js', 'js/wgsl/terrain.js', 'js/wgsl/weather.js', 'js/wgsl/anchor.js', 'js/wgsl/dolphins.js', 'js/wgsl/marine-life.js', 'js/wgsl/gunnery.js', 'js/wgsl/gunnery-probe.js', 'js/wgsl/hull-contact.js', 'js/wgsl/rowing-water.js'];
-const order = ['js/vendor/astronomy-engine.js', 'js/star-catalog.js', 'js/astronomy.js', 'js/rig-definition.js', 'js/hull-loft.js', 'js/models/additional.js', 'js/models/rowing.js', 'js/models/later-sail.js', 'js/models/procedural.js', 'js/models/nina.js', 'js/models/victory.js', 'js/hull.js', 'js/rig-plan.js', 'js/rigging.js', 'js/lateen.js', 'js/additional-rig.js', 'js/rig-surface.js', 'js/rowing.js', 'js/procedural-models.js', 'js/ship-models.js', 'js/victory-motion.js', 'js/sail-aerodynamics.js', 'js/sailing.js', 'js/dolphin-state.js', 'js/marine-life-state.js', 'js/hull-lateral.js', 'js/boat.js', 'js/gunnery-state.js', 'js/gunnery-models.js', ...wgslModules, 'js/celestial.js', 'js/fleet.js', 'js/surface-waves.js', 'js/surface-bindings.js', 'js/rowing-water.js', 'js/rowing-surface-events.js', 'js/gunnery-effects.js', 'js/gunnery-sea-probe.js', 'js/gunport-safety.js', 'js/hull-contact.js', 'js/vessels.js', 'js/follower.js', 'js/anchor-state.js', 'js/ship-parts.js', 'js/water-optics.js', 'js/underwater.js', 'js/anchor.js', 'js/dolphin-mesh.js', 'js/dolphins.js', 'js/dolphin-ui.js', 'js/gltf.js', 'js/marine-asset.js', 'js/marine-rig.js', 'js/marine-life.js', 'js/marine-loader.js', 'js/marine-ui.js', 'js/caravel.js', 'js/mesh-writer.js', 'js/victory.js', 'js/additional-ships.js', 'js/rowing-ships.js', 'js/later-sail-ships.js', 'js/ship-mesh.js', 'js/crew-work.js', 'js/gunnery-tools.js', 'js/crew-pose.js', 'js/crew.js', 'js/wetness.js', 'js/sharing.js', 'js/camera.js', 'js/vessel-pose.js', 'js/shadows.js', 'js/deck.js', 'js/interaction.js', 'js/spindrift.js', 'js/clouds.js', 'js/terrain-model.js', 'js/vegetation.js', 'js/terrain.js', 'js/landfall.js', 'js/profiler.js', 'js/resolution.js', 'js/instruments.js', 'js/controls.js', 'js/weather-state.js', 'js/audio-assets.js', 'js/voice-assets.js', 'js/voice-lines.js', 'js/gunnery-audio-assets.js', 'js/gunnery-audio.js', 'js/gunnery-control.js', 'js/gunnery-ui.js', 'js/audio.js', 'js/weather.js', 'js/main.js'];
+const order = ['js/vendor/astronomy-engine.js', 'js/star-catalog.js', 'js/astronomy.js', 'js/rig-definition.js', 'js/hull-loft.js', 'js/models/additional.js', 'js/models/rowing.js', 'js/models/later-sail.js', 'js/models/procedural.js', 'js/models/nina.js', 'js/models/victory.js', 'js/hull.js', 'js/rig-plan.js', 'js/rigging.js', 'js/lateen.js', 'js/additional-rig.js', 'js/rig-surface.js', 'js/rowing.js', 'js/procedural-models.js', 'js/ship-models.js', 'js/victory-motion.js', 'js/sail-aerodynamics.js', 'js/sailing.js', 'js/dolphin-state.js', 'js/marine-life-state.js', 'js/hull-lateral.js', 'js/boat.js', 'js/gunnery-state.js', 'js/gunnery-models.js', ...wgslModules, 'js/celestial.js', 'js/fleet.js', 'js/surface-waves.js', 'js/surface-bindings.js', 'js/rowing-water.js', 'js/rowing-surface-events.js', 'js/gunnery-effects.js', 'js/gunnery-sea-probe.js', 'js/gunport-safety.js', 'js/hull-contact.js', 'js/vessels.js', 'js/follower.js', 'js/anchor-state.js', 'js/ship-parts.js', 'js/water-optics.js', 'js/underwater.js', 'js/anchor-iron.js', 'js/anchor.js', 'js/dolphin-mesh.js', 'js/dolphins.js', 'js/dolphin-ui.js', 'js/gltf.js', 'js/marine-asset.js', 'js/marine-rig.js', 'js/marine-life.js', 'js/marine-loader.js', 'js/marine-ui.js', 'js/caravel.js', 'js/mesh-writer.js', 'js/victory.js', 'js/additional-ships.js', 'js/rowing-ships.js', 'js/later-sail-ships.js', 'js/ship-mesh.js', 'js/crew-work.js', 'js/gunnery-tools.js', 'js/crew-pose.js', 'js/crew.js', 'js/wetness.js', 'js/sharing.js', 'js/camera.js', 'js/vessel-pose.js', 'js/shadows.js', 'js/deck.js', 'js/interaction.js', 'js/spindrift.js', 'js/clouds.js', 'js/terrain-model.js', 'js/vegetation.js', 'js/terrain.js', 'js/landfall.js', 'js/profiler.js', 'js/resolution.js', 'js/instruments.js', 'js/controls.js', 'js/weather-state.js', 'js/audio-assets.js', 'js/voice-assets.js', 'js/voice-lines.js', 'js/gunnery-audio-assets.js', 'js/gunnery-audio.js', 'js/gunnery-control.js', 'js/gunnery-ui.js', 'js/audio.js', 'js/weather.js', 'js/main.js'];
 // Baked stand loading is deferred to landfall; preserve existing module order.
 order.splice(order.indexOf('js/vegetation.js')+1,0,'js/indigenous-sovereignty.js','js/cairn-primitives.js','js/coastal-world.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/canopy-scenery.js');
+order.splice(order.indexOf('js/terrain.js'),0,'js/coastal-field.js');
+order.splice(order.indexOf('js/terrain.js'),0,'js/sea-colour.js');
+order.splice(order.indexOf('js/terrain.js'),0,'js/scenery-cull.js');
 order.splice(order.indexOf('js/gltf.js'),0,'js/crew-lod.js');
 order.splice(order.indexOf('js/crew-work.js'),0,'js/crew-navigation.js','js/crew-motion.js');
 order.splice(order.indexOf('js/crew-pose.js'),0,'js/crew-physics.js');
+order.splice(order.indexOf('js/crew.js'),0,'js/crew-clip-pose.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/terrain-near.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/forest-scenery.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/vendor/forest-meshopt.js','js/forest-mass.js');
@@ -35,15 +41,33 @@ order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-light.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-native-lod.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-volume.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-middle.js');
+order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-clusters.js');
+order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-surfaces.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/task-yield.js','js/forest-occlusion.js');
 order.splice(order.indexOf('js/profiler.js')+1,0,'js/gpu-benchmark.js');
 order.splice(order.indexOf('js/main.js'),0,'js/wgsl-prune.js','js/gpu-program-cache.js');
+order.splice(order.indexOf('js/main.js'),0,'js/career-save.js','js/career-ui.js','js/career-era.js','js/career-trade.js','js/career-port.js');
+order.splice(order.indexOf('js/gunnery-control.js'),0,'js/hull-holes.js','js/vessel-damage.js');
+order.splice(order.indexOf('js/main.js'),0,'js/wgsl/hull-flood.js','js/hull-flood.js');
+order.splice(order.indexOf('js/main.js'),0,'js/sea-shadows.js');
+order.splice(order.indexOf('js/crew.js'),0,'js/crew-wounds.js');
+order.splice(order.indexOf('js/crew.js'),0,'js/crew-overboard.js');
+order.splice(order.indexOf('js/crew.js'),0,'js/crew-aloft.js');
 order.splice(order.indexOf('js/wgsl/vessel-pose.js'),0,'js/wgsl/rig-surfaces.js');
 order.splice(order.indexOf('js/wgsl/vessel-pose.js'),0,'js/wgsl/vessel-recoil.js');
 wgslModules.push('js/wgsl/part-assembly.js');
+// Shaders read these constants as they are built, and they import nothing, so they come first.
+order.unshift('js/town-streets.js','js/indigenous-dress.js');
+order.splice(order.indexOf('js/main.js'),0,'js/wgsl/townsfolk.js','js/townsfolk.js','js/wgsl/props.js','js/props.js');
+order.splice(order.indexOf('js/coastal-world.js'),0,'js/port-props.js');
+wgslModules.push('js/wgsl/ship-fracture.js');
 order.splice(order.indexOf('js/wgsl/vessel-pose.js')+1,0,'js/wgsl/part-assembly.js');
+order.splice(order.indexOf('js/wgsl/part-assembly.js')+1,0,'js/wgsl/ship-fracture.js');
 order.splice(order.indexOf('js/boat.js'),0,'js/ship-part-taxonomy.js');
 order.splice(order.indexOf('js/ship-parts.js'),0,'js/part-assembly.js');
+order.splice(order.indexOf('js/ship-parts.js'),0,'js/ship-fracture.js');
+order.splice(order.indexOf('js/terrain.js'),0,'js/building-fracture.js');
+order.splice(order.indexOf('js/main.js'),0,'js/port-damage.js');
 order.splice(order.indexOf('js/ship-mesh.js'),0,'js/rig-gpu-data.js');
 order.splice(order.indexOf('js/vessel-pose.js'),0,'js/vessel-recoil.js');
 order.splice(order.indexOf('js/gunnery-control.js'), 0, 'js/ship-colors.js', 'js/boarding-docking.js');
@@ -67,6 +91,11 @@ const runtimeAssetTypes = new Map([
   ['assets/wildlife/whale.glb','model/gltf-binary'],
   ['assets/crew/sailor.glb','model/gltf-binary'],
   ['assets/crew/sailor-female.glb','model/gltf-binary'],
+  ['assets/crew/sailor-classic.glb','model/gltf-binary'],
+  ['assets/crew/sailor-female-classic.glb','model/gltf-binary'],
+  ['assets/props/cleat.glb','model/gltf-binary'],
+  ['assets/props/jetty-weathered.glb','model/gltf-binary'],
+  ['assets/props/jetty-planked.glb','model/gltf-binary'],
   ['assets/tree-foliage.png','image/png'],
   ['assets/world/saba/albedo.png','image/png'],
   ['assets/world/saba/canopy.png','image/png'],
@@ -89,7 +118,7 @@ if(fs.existsSync(path.join(root,'assets/world/saba/wells-bay/manifest.json'))){
     runtimeAssetTypes.set('assets/world/saba/wells-bay/'+name,mime);
 }
 if(fs.existsSync(path.join(root,'assets/forest-scenery/saba/manifest.json'))){
-  for(const file of [...Object.values(FOREST_ASSETS),...Object.values(FOREST_IMPOSTOR_ASSETS),...Object.values(FOREST_LIGHT_ASSETS),...Object.values(FOREST_NATIVE_LOD_ASSETS),...Object.values(FOREST_VOLUME_ASSETS),...Object.values(FOREST_MIDDLE_ASSETS)]){
+  for(const file of [...Object.values(FOREST_SURFACE_ASSETS),...Object.values(FOREST_CLUSTER_ASSETS),...Object.values(FOREST_ASSETS),...Object.values(FOREST_IMPOSTOR_ASSETS),...Object.values(FOREST_LIGHT_ASSETS),...Object.values(FOREST_NATIVE_LOD_ASSETS),...Object.values(FOREST_VOLUME_ASSETS),...Object.values(FOREST_MIDDLE_ASSETS)]){
     if(fs.existsSync(path.join(root,file)))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':file.endsWith('.png')?'image/png':'application/octet-stream');
   }
 }
@@ -98,7 +127,7 @@ if(fs.existsSync(path.join(root,'assets/forest-scenery/saba/mass/manifest.json')
     runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':'application/octet-stream');
 }
 if(fs.existsSync(path.join(root,'assets/forest-scenery/subtropical/manifest.json'))){
-  for(const file of [...Object.values(SUBTROPICAL_FOREST_ASSETS),...Object.values(SUBTROPICAL_FOREST_VOLUME_ASSETS),...Object.values(SUBTROPICAL_FOREST_MIDDLE_ASSETS)]){
+  for(const file of [...Object.values(SUBTROPICAL_FOREST_SURFACE_ASSETS),...Object.values(SUBTROPICAL_FOREST_CLUSTER_ASSETS),...Object.values(SUBTROPICAL_FOREST_ASSETS),...Object.values(SUBTROPICAL_FOREST_VOLUME_ASSETS),...Object.values(SUBTROPICAL_FOREST_MIDDLE_ASSETS)]){
     if(fs.existsSync(path.join(root,file)))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':file.endsWith('.png')?'image/png':'application/octet-stream');
   }
 }
@@ -106,7 +135,9 @@ const runtimeAssetBytes = new Map(), pagesAssets = new Map();
 // Keep core sailing and the native forest atlases embedded in downloads. The
 // lossless mature close-up buffers alone exceed 100 MB after base64 encoding;
 // load those optional buffers from the same versioned public asset instead.
-const externalDownloadGeometry=new Set(['assets/forest-scenery/saba/vertices.bin.gz','assets/forest-scenery/saba/indices.bin.gz','assets/forest-scenery/saba/mass/vertices.bin.gz','assets/forest-scenery/saba/mass/indices.bin.gz','assets/forest-scenery/subtropical/vertices.bin.gz','assets/forest-scenery/subtropical/indices.bin.gz']);
+const externalDownloadGeometry=new Set(['assets/forest-scenery/saba/clusters/vertices.bin.gz','assets/forest-scenery/saba/clusters/indices.bin.gz','assets/forest-scenery/saba/vertices.bin.gz','assets/forest-scenery/saba/indices.bin.gz','assets/forest-scenery/saba/mass/vertices.bin.gz','assets/forest-scenery/saba/mass/indices.bin.gz','assets/forest-scenery/subtropical/vertices.bin.gz','assets/forest-scenery/subtropical/indices.bin.gz']);
+// Both block-compressed sets are a saving for online play. Offline, the embedded maps serve instead.
+for(const file of [...Object.values(FOREST_SURFACE_ASSETS),...Object.values(SUBTROPICAL_FOREST_SURFACE_ASSETS)])if(file.endsWith('.gz'))externalDownloadGeometry.add(file);
 function runtimeAssetURL(file,mime,inlineAssets){
   if(!runtimeAssetBytes.has(file))runtimeAssetBytes.set(file,fs.readFileSync(path.join(root,file)));
   const bytes=runtimeAssetBytes.get(file);
@@ -139,6 +170,12 @@ const write = (name, html) => {
   fs.writeFileSync(path.join(root, name), html);
   console.log(`wrote ${name}`, (html.length / 1024).toFixed(0) + ' KB');
 };
+
+// A module left off the list passes every test that imports it, then stops the published page at start.
+for (const f of order) for (const [, target] of fs.readFileSync(path.join(root, f), 'utf8').matchAll(/^\s*(?:import|export)\s[^;'"]*?from\s+['"](\.[^'"]+)['"]/gm)) {
+  const wanted = path.posix.join(path.posix.dirname(f), target);
+  if (!order.includes(wanted)) throw Error(`${f} imports ${wanted}, which build.mjs does not bundle`);
+}
 
 // ---- readable bundle --------------------------------------------------------------------
 let code = '';
@@ -218,7 +255,7 @@ fs.writeFileSync(path.join(root,'docs','assets-manifest.json'),JSON.stringify(Ob
 // Only sailing essentials preload. Marine encounters load their whale asset
 // on demand, keeping optional downloads off the first-frame critical path.
 const startupPreloads=['assets/caravel-oak-albedo.webp','assets/crew/sailor.glb',
-  'assets/crew/sailor-female.glb']
+  'assets/crew/sailor-female.glb','assets/crew/sailor-classic.glb','assets/crew/sailor-female-classic.glb']
   .map(file=>`<link rel="preload" as="fetch" href="${pagesAssets.get(file).url}" crossorigin="anonymous">`).join('');
 write('docs/index.html', minifyPage(pagesJs).replace('</head>','<meta name="robots" content="noindex, nofollow, noarchive">'+startupPreloads+'</head>')
   .replace('<script type="module">', pagesBootstrap + '<script type="module">'));

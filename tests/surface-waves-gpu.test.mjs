@@ -102,7 +102,8 @@ test('a real whale encounter feeds persistent waves into the production ocean re
     assert.ok(main.includes(marker));
     const cameraMarker='  function updateCamera(dt) {',frameMarker='    device.queue.writeBuffer(frameUBO, 0, f);';
     for(const m of[cameraMarker,frameMarker])assert.ok(main.includes(m),'fixture marker '+m);
-    await page.route('**/js/main.js',route=>route.fulfill({contentType:'text/javascript',body:main.replace('createMarineLife({','createMarineLife({random:()=>.4,')
+    const marineMarker='createDeferredMarineLife({';assert.ok(main.includes(marineMarker));
+    await page.route('**/js/main.js',route=>route.fulfill({contentType:'text/javascript',body:main.replace(marineMarker,marineMarker+'random:()=>.4,')
       .replace(cameraMarker,cameraMarker+'\n    if(waveScene.freezeCamera)return;')
       .replace(frameMarker,'    if(waveScene.freezeCamera)f[70]=waveScene.frozenFrame??(waveScene.frozenFrame=f[70]);\n'+frameMarker)
       .replace(marker,'  Object.assign(window.waveScene,{surfaceWaves,marineLife,device});\n'+marker)}));
@@ -122,10 +123,11 @@ test('a real whale encounter feeds persistent waves into the production ocean re
       await frame(0);const withWaves=await read();
       // Same simulation instant, camera and scene. Only shared surface sampling
       // is disabled, so different pixels establish actual production coupling.
-      const update=surfaceWaves.update;surfaceWaves.update=function(...args){update.apply(this,args);device.queue.writeBuffer(surfaceWaves.uniform,60,new Float32Array([0]));};
+      // A zero-step frame skips the simulation block, so nothing rewrites this flag.
+      device.queue.writeBuffer(surfaceWaves.uniform,60,new Float32Array([0]));
       await frame(0);const withoutWaves=await read();let changed=0,maxDifference=0,controlChanged=0;
       for(let i=0;i<withWaves.length;i+=4){let difference=0,noise=0;for(let c=0;c<3;c++){difference+=Math.abs(withWaves[i+c]-withoutWaves[i+c]);noise+=Math.abs(withWaves[i+c]-control[i+c]);}if(difference>6)changed++;if(noise>6)controlChanged++;maxDifference=Math.max(maxDifference,difference);}
-      surfaceWaves.update=update;surfaceWaves.reset();await frame(0);const resetActive=surfaceWaves.stats.active;
+      surfaceWaves.reset();await frame(0);const resetActive=surfaceWaves.stats.active;
       return{errors:waveScene.errors,accepted,age,retained,changed,controlChanged,maxDifference,resetActive};
     });
     t.diagnostic(JSON.stringify(result));assert.deepEqual(errors,[]);assert.deepEqual(result.errors,[]);

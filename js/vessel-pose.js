@@ -3,7 +3,8 @@ import {HULL_VERTICAL_SCALE} from './hull.js';
 import {VESSEL_POSE_UPDATE,VESSEL_SURFACE_POSE_UPDATE} from './wgsl/vessel-pose.js';
 import {createRigGPUFrame,writeRigGPUFrame} from './rig-gpu-data.js';
 import {createVesselRecoil} from './vessel-recoil.js';
-import {createPartAssemblyGPU,bakeVesselImpactDeformations} from './part-assembly.js';
+import {createPartAssemblyGPU,bakeVesselImpactMarks} from './part-assembly.js';
+import {createShipFractureGPU} from './ship-fracture.js';
 
 const vesselPosePipelineCache=new WeakMap();
 async function vesselPosePipeline(device,computePipe,generic){
@@ -28,7 +29,7 @@ export function withPosedVesselVertices(source){
     .replace(call,`RigVertex(posedPosition,posedNormal,vec3f(hull.size.x/3.6,select(${HULL_VERTICAL_SCALE},hull.right.w,hull.right.w>0.0),hull.size.y/12.0))`);
 }
 
-export async function createVesselPose({device,computePipe,sourceBuffer,mesh=null,vertexCount,hullUBO,shared=null,rigData=null,recoilMap=null,partAssembly=null}){
+export async function createVesselPose({device,computePipe,sourceBuffer,mesh=null,pristineMesh=null,vertexCount,hullUBO,shared=null,rigData=null,recoilMap=null,partAssembly=null,fracture=null}){
   if(!Number.isSafeInteger(vertexCount)||vertexCount<1)throw new RangeError('Vessel pose needs a positive vertex count');
   if(shared&&shared.device!==device)throw new Error('Vessel pose assets belong to another graphics device');
   if(shared&&(shared.rigData??null)!==rigData)throw new Error('Vessel pose metadata belongs to another model');
@@ -49,9 +50,14 @@ export async function createVesselPose({device,computePipe,sourceBuffer,mesh=nul
   const group=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource:{buffer:resource}})).filter(entry=>!rigData||entry.binding!==0)});
   const recoil=recoilMap?.guns?.length?await createVesselRecoil({device,computePipe,posedBuffer:buffer,recoilMap,shared:shared?.recoilAssets??null}):null;
   const assembly=partAssembly?.parts?.length?await createPartAssemblyGPU({device,computePipe,posedBuffer:buffer,catalog:partAssembly,shared:shared?.partAssemblyAssets??null}):null;
-  const assets=shared??Object.freeze({device,pipeline,rigData,modelBuffer,metadataBuffer,recoilAssets:recoil?.assets??null,partAssemblyAssets:assembly?.assets??null});let destroyed=false,initialized=!rigData;
+  const shards=fracture?.shardCount>1?await createShipFractureGPU({device,computePipe,posedBuffer:buffer,fracture,shared:shared?.fractureAssets??null}):null;
+  const assets=shared??Object.freeze({device,pipeline,rigData,modelBuffer,metadataBuffer,recoilAssets:recoil?.assets??null,partAssemblyAssets:assembly?.assets??null,fractureAssets:shards?.assets??null});let destroyed=false,initialized=!rigData;
+  // True once her vertices carry damage, which the hull shader's whole variant would not draw.
+  let baked=false,clock=0;
   return {buffer,assets,vertexCount,partAssembly:assembly,
+    get scarred(){return baked||assembly?.active===true||shards?.active===true;},
     update(boat,time,wind){
+      clock=time;shards?.tick(boat?.damage,time);
       if(destroyed||!rigData)return false;
       writeRigGPUFrame(rigData,boat,time,wind,state);device.queue.writeBuffer(stateBuffer,0,state);initialized=true;return true;
     },
@@ -66,19 +72,27 @@ export async function createVesselPose({device,computePipe,sourceBuffer,mesh=nul
       const pending=boat?.damage?.pendingBakes;
       if(mesh instanceof Float32Array&&Array.isArray(pending)&&pending.length>0){
         const batch=pending.splice(0,6);
-        const range=bakeVesselImpactDeformations(mesh,batch,9);
+        shards?.apply(boat.damage,batch,clock);
+        const range=bakeVesselImpactMarks(mesh,batch,9);
         if(range){
+          baked=true;
           device.queue.writeBuffer(sourceBuffer,range.byteOffset,mesh.buffer,mesh.byteOffset+range.byteOffset,range.byteLength);
-          return true;
+          updated=true;
         }
       }
+      if(shards?.sync(boat?.damage,boat))updated=true;
       return updated;
+    },
+    // Undo scorch marks and broken shards once a repair or a new ship makes them wrong.
+    restoreGeometry(){
+      if(destroyed||!(mesh instanceof Float32Array)||!(pristineMesh instanceof Float32Array))return false;
+      mesh.set(pristineMesh);device.queue.writeBuffer(sourceBuffer,0,mesh);baked=false;shards?.reset();return true;
     },
     encode(pass,enabled=true){
       if(!enabled||destroyed)return false;
       if(!initialized)throw Error('GPU rig state must be updated before dispatch');
-      pass.setPipeline(pipeline);pass.setBindGroup(0,group);pass.dispatchWorkgroups(Math.ceil(vertexCount/64));recoil?.encode(pass);assembly?.encode(pass);return true;
+      pass.setPipeline(pipeline);pass.setBindGroup(0,group);pass.dispatchWorkgroups(Math.ceil(vertexCount/64));recoil?.encode(pass);assembly?.encode(pass);shards?.encode(pass);return true;
     },
-    destroy(){if(!destroyed){destroyed=true;recoil?.destroy();assembly?.destroy();buffer.destroy();stateBuffer?.destroy();}},
+    destroy(){if(!destroyed){destroyed=true;recoil?.destroy();assembly?.destroy();shards?.destroy();buffer.destroy();stateBuffer?.destroy();}},
   };
 }

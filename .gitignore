@@ -1,4 +1,7 @@
 node_modules/
+# Single-file bundles are built locally and released through npm run deploy.
+ocean.html
+ocean.min.html
 # local screenshot captures written by server.mjs (/__shot) and test shots
 shots/
 # local tooling
@@ -7,6 +10,8 @@ shots/
 .wrangler/
 # Meshy credentials references, task records and generated source assets stay local.
 .meshy/
+# Tripo generations and the script that fits a rigged body to our skeleton, kept until they ship.
+.tripo/
 # Local sound-generation takes and request records.
 .audio/
 # Local authoring credentials; never commit or deploy these files.

@@ -137,6 +137,29 @@ versioned absolute Pages URLs**: base64 embedding would exceed GitHub's 100 MB
 file limit. Core simulation and forest atlases work offline; full native close
 geometry requires network access. Downloads are not entirely self-contained.
 
+### Compressed surfaces
+
+Bark and leaf arrays ship prebuilt as BC7 for desktops and ASTC 4×4 for phones, one
+set per pack in `surfaces/`, baked by `scripts/prepare-forest-surfaces.py`. A device
+with `texture-compression-bc` or `texture-compression-astc` fetches its one set and
+copies the blocks straight in, with no map download and no compute pass.
+`?forestSurfaces=png`, `bc7` or `astc` forces a path. Any other outcome uses the maps
+and the half-float arrays: no feature, a failed fetch, or a set whose recorded map
+hashes no longer match the pack. **After editing a pack's maps, rebake its set**;
+until then that pack quietly costs its full memory again and
+`tests/forest-surfaces.test.mjs` fails.
+
+Pigment stores linear colour times coverage in sRGB encoding, so the sampler returns
+what the half-float path holds. Detail stores signed normals biased into an unsigned
+format, decoded by `forestDetailSigned`, with zero exact; both paths use that encoding.
+
+The game reads these arrays at level 2 or coarser from 10 m out, and removing levels 0
+and 1 changes nothing measurable from 1 m to 90 m. So more base texels would not sharpen
+anything. Sharpness comes from the levels actually read: the bake restores contrast each
+level loses to averaging, holding its mean coverage to the plain average, and leaves
+keep plain averages from level 5 down so the far canopy does not change. Within 30 m,
+leaf coverage also reads half a level finer, fading out by 90 m.
+
 ## Rebuild and validation
 
 Run from Waterworld; adjust output directories to fresh paths. The converter

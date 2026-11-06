@@ -141,6 +141,14 @@ fn volumeSunVisibility(ro:vec3f,rd:vec3f)->f32 {
   }
   return exp(-optical);
 }
+// For lighting a surface, which never sees the sun's disc directly: far coarser than the above.
+fn volumeSurfaceSunVisibility(ro:vec3f,rd:vec3f)->f32 {
+  if(CF.screen.w<0.5){return 1.0;}
+  let hit=cloudInterval(ro,rd);if(hit.y<=hit.x){return 1.0;}
+  let step=(hit.y-hit.x)/6.0;var optical=0.0;
+  for(var i=0u;i<6u;i++){optical+=cloudDensityAt(ro+rd*(hit.x+(f32(i)+0.5)*step),0.0).r*step*CF.shape.z;}
+  return exp(-optical);
+}
 struct CloudRay { color:vec4f, distance:f32 };
 fn marchCloudsTo(ro:vec3f,rd:vec3f,budget:u32,jitter:f32,sunColor:vec3f,skyColor:vec3f,maxDistance:f32)->CloudRay {
   var out:CloudRay;out.color=vec4f(0);out.distance=0.0;

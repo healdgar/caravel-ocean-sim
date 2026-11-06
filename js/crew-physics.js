@@ -332,9 +332,10 @@ export function stepArticulatedRagdoll(s, boat, dt) {
   const pitch = boat?.pitch ?? 0;
   const rollRate = boat?.rollVelocity ?? 0;
   const pitchRate = boat?.pitchVelocity ?? 0;
-  const gx = Math.sin(roll) * 9.81 - crewPhysClamp(rollRate * 0.8, -2.5, 2.5);
+  // Positive roll lifts starboard (+x) and positive pitch lifts the bow (-z), so bodies slide the other way.
+  const gx = -Math.sin(roll) * 9.81 - crewPhysClamp(rollRate * 0.8, -2.5, 2.5);
   const gy = -Math.cos(roll) * Math.cos(pitch) * 9.81;
-  const gz = -Math.sin(pitch) * 9.81 - crewPhysClamp(pitchRate * 0.8, -2.5, 2.5);
+  const gz = Math.sin(pitch) * 9.81 - crewPhysClamp(pitchRate * 0.8, -2.5, 2.5);
 
   const sx = (boat?.beam ?? 3.6) / 3.6;
   const sz = (boat?.length ?? 12) / 12;
@@ -417,7 +418,8 @@ export function stepArticulatedRagdoll(s, boat, dt) {
       const r = CREW_PHYS_RAGDOLL_RADII[i];
       let floorY = baseFloorY;
 
-      if (boat) {
+      // Over the side there is no deck or rail to meet, only the sea at baseFloorY.
+      if (boat && !s.overboard) {
         const xDesign = rag.pos[idx] / sx;
         const zDesign = rag.pos[idx + 2] / sz;
         const sampledDeckY = crewDeckHeight(boat, zDesign, xDesign) * sy;

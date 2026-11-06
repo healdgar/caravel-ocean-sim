@@ -1,4 +1,4 @@
-import { SAIL_KEYS, sailingState } from './sailing.js';
+import { SAIL_KEYS, sailingState, sailCanvasTarget } from './sailing.js';
 import {getShipModel} from './ship-models.js';
 import {ROWING_DESIGNS} from './models/rowing.js';
 import {deckStationLabel} from './boat.js';
@@ -8,6 +8,7 @@ const CONTROL_ICONS = {
   captain:'<path d="M4 9c0-6 16-6 16 0l-2 5H6Z"/><path d="M6 14v3c3 3 9 3 12 0v-3M9 10h6"/>',
   map:'<path d="m3 5 6-2 6 2 6-2v16l-6 2-6-2-6 2ZM9 3v16M15 5v16"/>',
   chart:'<path d="M12 3.5V6M12 6 6.5 20.5M12 6l5.5 14.5M8.6 15h6.8"/><circle cx="12" cy="6" r="1.5"/>',
+  voyage:'<path d="M6.5 3h11M6.5 21h11M8 3v3.5c0 2.5 8 3 8 5.5s-8 3-8 5.5V21M16 3v3.5c0 2.5-8 3-8 5.5s8 3 8 5.5V21"/>',
   weather:'<path d="M7 16a4 4 0 1 1 1-8 5 5 0 0 1 9 1 3.5 3.5 0 1 1 1 7ZM8 19l-1 2M13 19l-1 2M18 19l-1 2"/>',
   ship:'<path d="M12 2v14M10 4 4 13h6M14 6l5 7h-5M3 17h18l-3 4H6Z"/>',
   share:'<path d="M12 16V3m-4 4 4-4 4 4M6 11H4v10h16V11h-2"/>',
@@ -42,9 +43,9 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
   const rowing=Object.hasOwn(ROWING_DESIGNS,model.id);
   const gunnery=battleContext?.gunnery??boat.gunnery??null;
   const hasGuns=Boolean(gunnery&&gunnery.state?.guns?.length>0);
+  const bowBattery=gunnery?.weapon?.id==='bow';
   const root=document.createElement('section');root.id='helm-controls';root.setAttribute('aria-label','Helm controls');
   root.dataset.battle='false';
-  root.style.setProperty('--nautical-wood-tex','url("assets/caravel-oak-albedo.webp")');
   root.innerHTML=`<div class="helm-rudder"><div class="helm-label"><label for="boat-rudder"><span class="helm-kicker" id="helm-rudder-kicker">HELM</span>Rudder</label><span class="helm-meta"><output id="rudder-angle" aria-live="off">Centred</output></span></div>
     <div class="rudder-controls"><button id="rudder-port"></button><input type="range" id="boat-rudder" min="-35" max="35" step="0.5" value="${boat.rudderTarget}" aria-label="Rudder"><button id="rudder-centre"></button><button id="rudder-starboard"></button></div></div>
     <div class="helm-sails"><div class="helm-label"><span><span class="helm-kicker" id="helm-sails-kicker">RIG</span>Sails</span><span class="helm-meta" id="helm-sails-meta"><output id="helm-canvas" aria-live="off">Full canvas</output></span></div>
@@ -205,19 +206,19 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
     const actions=document.createElement('div');actions.className='helm-battery-actions';
     const notifyGunnery=()=>{battleContext?.onGunneryChange?.();update(performance.now(),true);};
     const prepBtn=document.createElement('button');prepBtn.type='button';prepBtn.id=`helm-prepare-${side}`;
-    prepBtn.textContent='Prep';
-    prepBtn.title=`Prepare ${side} battery`;
+    prepBtn.textContent=bowBattery?'Nock':'Prep';
+    prepBtn.title=bowBattery?`Nock arrows on ${side}`:`Prepare ${side} battery`;
     prepBtn.onclick=()=>{gunnery.prepare(side);notifyGunnery();};
 
     const fireBtn=document.createElement('button');fireBtn.type='button';fireBtn.id=`helm-fire-${side}`;
-    fireBtn.className='helm-fire-btn';fireBtn.textContent='Fire';
-    fireBtn.title=`Fire ${side} broadside`;
-    fireBtn.setAttribute('aria-label',`Fire ${side}`);
+    fireBtn.className='helm-fire-btn';fireBtn.textContent=bowBattery?'Loose':'Fire';
+    fireBtn.title=bowBattery?`Loose arrows to ${side}`:`Fire ${side} broadside`;
+    fireBtn.setAttribute('aria-label',`${bowBattery?'Loose':'Fire'} ${side}`);
     fireBtn.onclick=()=>{if(!gunnery.fire(side))gunnery.fireLoaded?.(side);notifyGunnery();};
 
     const fireLoadedBtn=document.createElement('button');fireLoadedBtn.type='button';fireLoadedBtn.id=`helm-fire-loaded-${side}`;
-    fireLoadedBtn.className='helm-fire-loaded-btn';fireLoadedBtn.textContent='Loaded';
-    fireLoadedBtn.title='Fire all currently loaded guns on this side immediately';
+    fireLoadedBtn.className='helm-fire-loaded-btn';fireLoadedBtn.textContent=bowBattery?'Ready':'Loaded';
+    fireLoadedBtn.title=bowBattery?'Loose every nocked arrow on this side immediately':'Fire all currently loaded guns on this side immediately';
     fireLoadedBtn.onclick=()=>{gunnery.fireLoaded?.(side);notifyGunnery();};
 
     actions.append(prepBtn,fireBtn,fireLoadedBtn);
@@ -268,7 +269,7 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
     const toggles=document.createElement('div');toggles.className='helm-battle-toggles';
     trainTargetBtn=document.createElement('button');trainTargetBtn.type='button';trainTargetBtn.id='helm-train-target';
     trainTargetBtn.className='helm-chip-btn helm-chip-gold';
-    trainTargetBtn.textContent=gunnery.isSwivelBattery?'Swivel':'Aim';
+    trainTargetBtn.textContent=gunnery.isSwivelBattery&&!bowBattery?'Swivel':'Aim';
     trainTargetBtn.title='Automatically lay horizontal traverse and ballistic elevation onto the nearest target';
     trainTargetBtn.onclick=()=>{
       const side=gunnery.selectedSide||battleContext?.broadsideSide||'starboard';
@@ -303,7 +304,7 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
     fireAtWillBtn=document.createElement('button');fireAtWillBtn.type='button';fireAtWillBtn.id='helm-fire-at-will';
     fireAtWillBtn.className='helm-chip-btn';
     fireAtWillBtn.textContent='Auto';
-    fireAtWillBtn.title='Fire at will: automatically reload and fire guns as soon as each battery bears';
+    fireAtWillBtn.title=bowBattery?'Loose at will: keep nocking and loosing as arrows are ready':'Fire at will: automatically reload and fire guns as soon as each battery bears';
     fireAtWillBtn.onclick=()=>{
       if(!gunnery.fireAtWill&&!gunnery.selectedSide)gunnery.prepare(battleContext?.broadsideSide??'starboard');
       gunnery.setFireAtWill?.(!gunnery.fireAtWill);
@@ -325,8 +326,11 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
 
     const ordnanceBar=document.createElement('div');ordnanceBar.className='helm-ordnance-bar';
     const ammoGroup=document.createElement('div');ammoGroup.className='helm-ammo-pills';
-    ammoGroup.setAttribute('role','group');ammoGroup.setAttribute('aria-label','Battle shot type');
-    for(const [val,label,tip] of [
+    ammoGroup.setAttribute('role','group');ammoGroup.setAttribute('aria-label',bowBattery?'Arrows':'Battle shot type');
+    for(const [val,label,tip] of bowBattery?[
+      ['arrow','Arrows','Arrows · wound exposed crew'],
+      ['fire-arrow','Fire','Fire arrows · slower to loose, can catch sails and rigging'],
+    ]:[
       ['round','Round','Round shot · solid iron for hull penetration'],
       ['chain','Chain','Chain shot · whirling shot that rips sails & rigging'],
       ['grape','Grape','Grape shot · anti-personnel & canvas cluster'],
@@ -334,7 +338,7 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
     ]){
       const btn=document.createElement('button');btn.type='button';btn.dataset.helmAmmo=val;
       btn.textContent=label;btn.title=tip;
-      btn.setAttribute('aria-pressed',String((gunnery.ammo??'round')===val));
+      btn.setAttribute('aria-pressed',String(gunnery.ammo===val));
       btn.onclick=()=>{gunnery.setAmmo?.(val);notifyGunnery();};
       ammoGroup.append(btn);ammoButtons.push(btn);
     }
@@ -357,7 +361,7 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
 
     const tRange=gunnery.traverseRange??(gunnery.isSwivelBattery?{min:-45,max:45}:{min:-8,max:8});
     const travLabel=document.createElement('label');travLabel.className='helm-aim-control';
-    const travSpan=document.createElement('span');travSpan.textContent=gunnery.isSwivelBattery?'Swivel':'Train';
+    const travSpan=document.createElement('span');travSpan.textContent=bowBattery?'Rail':gunnery.isSwivelBattery?'Swivel':'Train';
     traverseInput=document.createElement('input');
     Object.assign(traverseInput,{type:'range',min:tRange.min,max:tRange.max,step:gunnery.isSwivelBattery?1:.5,value:gunnery.traverse??0,id:'helm-traverse'});
     traverseInput.setAttribute('aria-label',gunnery.isSwivelBattery?'Battle swivel traverse':'Battle gunport train');
@@ -398,8 +402,26 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
     slider.setAttribute('aria-valuetext',angle.textContent);
     const rig=sailingState(boat).rig,deployed=active.length?active.reduce((sum,i)=>sum+rig[i].deployed,0)/active.length:0;
     const targetSail=boat[SAIL_KEYS[active[0]]]??0,uniform=active.every(i=>Math.abs(boat[SAIL_KEYS[i]]-targetSail)<.001);
-    const working=active.some(i=>Math.abs(boat[SAIL_KEYS[i]]-rig[i].deployed)>.015);
-    canvas.textContent=boat.propulsion!=='sail'?'Set-speed mode':working?`Setting · ${Math.round(deployed*100)}%`:uniform&&targetSail===1?'Full canvas':uniform&&targetSail===0?'Furled':inBattleState&&deployed>=0.45&&deployed<=0.6?`Battle · ${Math.round(deployed*100)}%`:`${Math.round(deployed*100)}% canvas`;
+    // Compare against the canvas the rig can actually carry: a damaged or sprung
+    // mast caps the setting, so "Setting…" must not spin forever in that case.
+    const working=active.some(i=>Math.abs(sailCanvasTarget(boat,i)-rig[i].deployed)>.015);
+    const canvasText=boat.propulsion!=='sail'?'Set-speed mode':working?`Setting · ${Math.round(deployed*100)}%`:uniform&&targetSail===1?'Full canvas':uniform&&targetSail===0?'Furled':inBattleState&&deployed>=0.45&&deployed<=0.6?`Battle · ${Math.round(deployed*100)}%`:`${Math.round(deployed*100)}% canvas`;
+    // Explain why canvas is not answering an order (crew busy/bracing, damaged masts).
+    const holdNotes=[];
+    if(boat.propulsion==='sail'){
+      const dmg=boat.damage,names=['Fore','Main','Mizzen'];
+      for(const i of active){
+        const g=['fore','main','mizzen'][i],state=dmg?.mastState?.[g]??0,integ=dmg?.mastIntegrity?.[g]??1,most=Math.round(sailCanvasTarget(boat,i,1)*100);
+        if(dmg?.sunk)break;
+        if(state>=2||most===0)holdNotes.push(`${names[i]}mast shot away`);
+        else if(state===1)holdNotes.push(`${names[i]}mast sprung · max ${most}%`);
+        else if(integ<.98)holdNotes.push(`${names[i]}mast damaged · max ${most}%`);
+      }
+      if(working&&boat.sailHoldReason)holdNotes.unshift(boat.sailHoldReason);
+    }
+    const canvasLine=holdNotes.length?`${canvasText} · ${holdNotes[0]}`:canvasText,holdText=holdNotes.join(' · ');
+    if(canvas.textContent!==canvasLine)canvas.textContent=canvasLine;
+    if(canvas.title!==holdText)canvas.title=holdText;
     for(const b of buttons)b.setAttribute('aria-pressed',String(boat.propulsion==='sail'&&uniform&&Math.abs(Number(b.dataset.sail)-targetSail)<.001));
     if(rowingOutput){const effort=boat.rowingEffort??0;rowingOutput.textContent=effort===0?'Rest':Math.round(effort*100)+'% effort';for(const b of rowButtons)b.setAttribute('aria-pressed',String(boat.propulsion==='sail'&&Math.abs(Number(b.dataset.rowing)-effort)<.001));}
 
@@ -438,15 +460,16 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
       const phase=db?.mooringPhase??'clear';
       const isMoored=phase==='moored'||phase==='grappled'||phase==='making-fast'||phase==='throwing-lines';
       dockBtn.hidden=false;
-      dockBtn.disabled=false;
+      const lineTarget=battleContext?.getDockingBoarding?.()?.lineTarget?.()??null;
+      dockBtn.disabled=!isMoored&&!lineTarget;
       if(isMoored){
         dockBtn.textContent='🪢 Cast off';
         dockBtn.setAttribute('aria-pressed','true');
         dockBtn.title=`${db?.statusText??'Hauling / moored'} · Click to cast off all lines immediately`;
       }else{
-        dockBtn.textContent=nearbyShip?'🪢 Throw lines':'🪢 Dock';
+        dockBtn.textContent=lineTarget==='vessel'?'🪢 Throw lines':'🪢 Dock';
         dockBtn.setAttribute('aria-pressed','false');
-        dockBtn.title=nearbyShip?'Throw mooring & grappling lines onto adjacent vessel':'Throw bow & stern mooring lines onto pier';
+        dockBtn.title=lineTarget==='vessel'?'Throw mooring & grappling lines onto the ship alongside':lineTarget==='pier'?'Throw bow & stern mooring lines onto the pier':'Nothing within reach of a line. Bring her close to a pier or a ship';
       }
     }
     if(boardBtn||boardBattleBtn){
@@ -508,14 +531,19 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
         const s=gunnery.summary(b.side),ordered=gunnery.ordered===b.side;
         const rs=ordered?gunnery.rollStatus?.(b.side):null;
         const held=s.ready===s.total?gunnery.blockedReason(b.side):null;
+        const stall=gunnery.stallReason?.(b.side)??null;
+        const lostTxt=s.dismounted?` · ${s.dismounted} dismounted`:'';
         const statusTxt=ordered
           ?(rs?.stage==='firing'?`Give fire!`:rs?.stage==='steady'?`Steady (${formatHelmElevation(rs.worldElevation)})`:`Laying (${formatHelmElevation(rs?.targetElevation??0)})`)
           :s.queued?`${s.queued} firing`
-          :s.loading?`${s.ready}/${s.total} · ${s.loading} load`
-          :s.ready?`${s.ready}/${s.total} ready${held?' · held':''}`
-          :s.spent?`${s.spent} spent`
-          :`${s.total} secured`;
+          :(s.total===0&&stall)?stall
+          :s.loading?`${s.ready}/${s.total} · ${s.loading} load${stall?` · ${stall}`:''}${lostTxt}`
+          :s.ready?`${s.ready}/${s.total} ready${held?' · held':stall?` · ${stall}`:''}${lostTxt}`
+          :s.spent?`${s.spent} spent${stall?` · ${stall}`:''}${lostTxt}`
+          :`${s.total} secured${lostTxt}`;
         if(b.status.textContent!==statusTxt)b.status.textContent=statusTxt;
+        const statusTitle=[held,stall,s.dismounted?`${s.dismounted} gun${s.dismounted>1?'s':''} dismounted by enemy fire`:null].filter(Boolean).join(' · ');
+        if(b.status.title!==statusTitle)b.status.title=statusTitle;
         const total=Math.max(1,s.total);
         const readyPct=Math.round((s.ready/total)*100);
         const loadPct=Math.round((s.loading/total)*100);
@@ -525,10 +553,10 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
         const canPart=gunnery.canFireLoaded?.(b.side)??canFull;
         b.fireBtn.disabled=!(canFull||canPart);
         b.fireLoadedBtn.disabled=!canPart;
-        const partialLabel=s.ready>0&&s.ready<s.total?`Loaded (${s.ready})`:'Loaded';
+        const loadedWord=bowBattery?'Ready':'Loaded',partialLabel=s.ready>0&&s.ready<s.total?`${loadedWord} (${s.ready})`:loadedWord;
         if(b.fireLoadedBtn.textContent!==partialLabel)b.fireLoadedBtn.textContent=partialLabel;
         b.prepBtn.disabled=!!gunnery.ordered||!!s.queued||(s.ready+s.loading===s.total&&s.spent===0&&gunnery.selectedSide===b.side);
-        const prepLabel=s.spent>0&&s.loading===0?'Reload':'Prep';
+        const prepLabel=bowBattery?'Nock':s.spent>0&&s.loading===0?'Reload':'Prep';
         if(b.prepBtn.textContent!==prepLabel)b.prepBtn.textContent=prepLabel;
         b.card.dataset.active=String(gunnery.selectedSide===b.side||ordered);
         b.card.dataset.ready=String(canPart);
@@ -584,7 +612,10 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
       }else if(tgt){
         telemTxt=`${tgt.name} · ${Math.round(tgt.dist)}m · ${Math.round(tgt.hull*100)}%`;
       }
-      if(gunnery.lastDamageReport?.targetName&&gunnery.lastDamageReport?.energyKj){
+      if(gunnery.lastDamageReport?.targetName&&bowBattery){
+        const r=gunnery.lastDamageReport,hurt=(r.casualtiesKilled||0)+(r.casualtiesWounded||0);
+        telemTxt+=r.surrendered?` · 🏳️ ${r.targetName} SURRENDERED!`:` · Arrow struck${hurt?` (-${hurt} crew)`:''}${r.fires?` · ${r.fires} afire`:''}`;
+      }else if(gunnery.lastDamageReport?.targetName&&gunnery.lastDamageReport?.energyKj){
         const r=gunnery.lastDamageReport;
         if(r.kind==='building'){
           const gunTxt=r.totalGuns>0?` · ${r.activeGuns}/${r.totalGuns} guns`:'';

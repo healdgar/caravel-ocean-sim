@@ -449,6 +449,7 @@ export function applyIndigenousSupportAction(
     colorsChangedTo,
     foodGained,
     waterGained,
+    moraleDelta,
     summary,
   };
 }

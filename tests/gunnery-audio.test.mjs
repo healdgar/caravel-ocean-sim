@@ -27,6 +27,18 @@ test('gun reports arrive after acoustic propagation, not with the muzzle flash',
   assert.deepEqual(played[0][2],position);
 });
 
+test('a fort is heard though the ship fired shots of the same number',()=>{
+  const {played,sound}=audioFixture(),ship={id:0},bastion={id:0},redoubt={id:0};
+  assert.equal(sound.event({type:'shot',shotId:1,gun:ship,position:{x:5,y:2,z:0}}),true);
+  assert.equal(sound.event({type:'shot',shotId:1,gun:ship,position:{x:5,y:2,z:0}}),false,'the same discharge is still heard once');
+  assert.equal(sound.event({type:'shot',shotId:1,gun:bastion,position:{x:400,y:12,z:0}}),true,'every battery counts its own shots from one');
+  assert.equal(sound.event({type:'shot',shotId:1,gun:redoubt,position:{x:0,y:12,z:900}}),true);
+  sound.update(4);
+  const reports=played.filter(p=>p[0]==='cannon-report');
+  assert.equal(reports.length,3);
+  for(const report of reports)assert.ok(report[5].reach>100,'a gun carries further than a voice');
+});
+
 test('broadside reports are bounded acoustic groups while independent reload discharges remain audible',()=>{
   const {played,sound}=audioFixture();
   for(let i=0;i<52;i++)sound.event({type:'shot',shotId:i,position:{x:10,y:2,z:i*.6}});

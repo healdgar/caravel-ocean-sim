@@ -1,4 +1,5 @@
 import { GUNNERY_AUDIO_ASSETS } from './gunnery-audio-assets.js';
+import { isArrowAmmo } from './gunnery-state.js';
 
 // The simulation uses these durations even when sound is disabled: a muted
 // captain does not change when the ordered discharge happens.
@@ -28,12 +29,20 @@ export function gunnerySoundDelay(source,ear,temperatureC=15){
   return Math.hypot(source.x-ear.x,(source.y??0)-(ear.y??0),source.z-ear.z)/gunnerySoundSpeed(temperatureC);
 }
 
+// A gun carries for miles, so a report falls off far more slowly than a voice or a block on deck.
+const REPORT_REACH_M=150;
 // Playback is supplied by the scene's one Web Audio context. Report arrivals
 // within 100 ms share an acoustic voice, while every physical gun still fires.
 // This gives a rolling broadside without creating fifty full-length sources.
 export function createGunneryAudio({play,available=()=>true,listener=()=>({x:0,y:0,z:0}),temperature=()=>15}={}){
   let clock=0,voiceUntil=0,pendingOrder=null,pendingGiveFire=null,pendingReady=null,lastOrder='',lastOrderAt=-100,lastMechanical=-100,lastReadyAt=-100;
-  const arrivals=[],seenShots=new Set(),shotHistory=[];
+  const arrivals=[],seenShots=new Set(),shotHistory=[],gunTokens=new WeakMap();
+  let gunCount=0;
+  const gunToken=gun=>{
+    if(!gun||typeof gun!=='object')return '';
+    if(!gunTokens.has(gun))gunTokens.set(gun,++gunCount);
+    return gunTokens.get(gun)+':';
+  };
   const maxArrivals=32;
   function positionOf(event){
     const point=event?.position??event?.worldPosition??event;
@@ -97,14 +106,17 @@ export function createGunneryAudio({play,available=()=>true,listener=()=>({x:0,y
       }
       if(event.type==='shot'){
         pendingReady=null;
-        // IDs identify discharges, not permanent guns, so reloads remain audible.
-        const key=event.shotId??(event.id!==undefined?event.id:null);
+        // IDs identify discharges, not permanent guns, so reloads remain audible. Every ship and fort battery
+        // counts its own shots from one, so a number means nothing without the gun that fired it.
+        const shot=event.shotId??event.id??null,key=shot===null?null:gunToken(event.gun)+shot;
         if(key!==null){
           if(seenShots.has(key))return false;
           seenShots.add(key);shotHistory.push(key);
           if(shotHistory.length>128)seenShots.delete(shotHistory.shift());
         }
-        const played=enqueue('cannon-report',position,.43,true);
+        // Until bows have recordings, a clipped high slap stands in for the string.
+        if(isArrowAmmo(event.ammo))return enqueue('hull-slap',position,.1,false,1.9,{duration:.12,highpassHz:900});
+        const played=enqueue('cannon-report',position,.43,true,1,{reach:REPORT_REACH_M});
         const ear=listener();
         if(Math.hypot(position.x-ear.x,position.y-(ear.y??0),position.z-ear.z)<80&&clock-lastMechanical>.28){
           enqueue('cannon-recoil',position,.19);lastMechanical=clock;
@@ -118,6 +130,7 @@ export function createGunneryAudio({play,available=()=>true,listener=()=>({x:0,y
       if(event.type==='impact'){
         if(clock-lastImpactAt<0.045&&event.kind!=='magazine-explosion')return false;
         lastImpactAt=clock;
+        if(isArrowAmmo(event.ammo))return enqueue('hull-slap',position,.08,false,1.7,{duration:.1,highpassHz:800});
         const kind=event.kind??(event.hitZone?'vessel':'water');
         if(kind==='magazine-explosion'){
           enqueue('cannon-report',position,.64,true,.58,{lowpassHz:420});

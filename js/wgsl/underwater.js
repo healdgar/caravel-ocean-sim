@@ -10,7 +10,7 @@ import {surfaceWaveSource} from './surface-coupling.js';
 // slopes. This local, filtered focusing approximation is not a photon solver:
 // folded/multiple light paths are bounded rather than accumulated. No noise or
 // preanimated caustic texture is used. See GPU Gems, chapter 2 (Guardado/Crespo).
-export function waterCausticFunctions({derivatives='derivTex',sampler='sampR',surfaceWaves=false,shadows=true}={}){
+export function waterCausticFunctions({derivatives='derivTex',sampler='sampR',surfaceWaves=false,shadows=true,seaShadow=false}={}){
   return CELESTIAL_CAUSTIC_STUB+/* wgsl */ `
 fn causticSlope(p:vec2f,footprint:f32)->vec2f {
   var slope=vec2f(0);
@@ -69,7 +69,7 @@ fn waterCausticFactorFiltered(receiver:vec3f,surfaceY:f32,pixelFootprint:f32)->v
   let blur=.55+min(pixelFootprint/max(beam,.001),2.0)*.35;
   let density=sqrt((1.0+blur*blur)/(jacobian*jacobian+blur*blur));
   let focus=mix(1.0,density,smoothstep(-.35,.15,jacobian));
-  let shadow=${shadows?'vesselShadow(vec3f(entry.x,surfaceY,entry.y),vec3f(0,1,0))':'vec3f(1)'};
+  let shadow=${seaShadow?'waterSurfaceShadow(vec3f(entry.x,surfaceY,entry.y))':shadows?'vesselShadow(vec3f(entry.x,surfaceY,entry.y),vec3f(0,1,0))':'vec3f(1)'};
   return mix(vec3f(1),vec3f(focus),strength*shadow);
 }
 fn waterCausticFactor(receiver:vec3f,surfaceY:f32)->vec3f {
@@ -168,7 +168,7 @@ fn underwaterSceneDistance(pixel:vec2i,ray:vec3f)->f32 {
   let distance=underwaterSceneDistance(pixel,ray);
   var path=select(120.0,min(distance,120.0),distance>=0.0);
   var radiance=select(vec3f(0),original.rgb,distance>=0.0);
-  let raw=textureLoad(rawSubmerged,pixel,0);
+  let raw=textureLoad(rawSubmerged,pixel*vec2i(textureDimensions(rawSubmerged))/vec2i(textureDimensions(hdrSource)),0);
   let forwardDepth=path*dot(ray,normalize(F.camFwd.xyz));
   // Capture also contains seabed omitted by the ordinary air-side terrain
   // draw. A captured solid may precede the ordinary depth (or fill clear depth),

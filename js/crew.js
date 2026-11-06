@@ -1,3 +1,4 @@
+import { DRESS_MASK_SCALE, DRESS_PIECES, indigenousDress } from './indigenous-dress.js';
 import { loadCrewGLB, gltfTRS } from './gltf.js';
 import { hullDeck, vesselDeck, HULL_VERTICAL_SCALE, HELM_TILLER_DISTANCE, modelDeck, modelHullDeck, modelDeckWidth, vesselVerticalScale } from './hull.js';
 import { SAIL_KEYS, sailingState } from './sailing.js';
@@ -5,8 +6,11 @@ import { requestYardTransfer } from './lateen.js';
 import { assignCrewWork, stepCrewWork, updateCrewGunneryAttendance, updateCrewRowingAttendance, hasExtendedCrewModel, crewSeatedPose, crewDeckHeight } from './crew-work.js';
 import { poseCrewWork } from './crew-pose.js';
 import { stepCrewPhysicsState, applyCrewRealism } from './crew-physics.js';
+import { applyCrewWounds, clearCrewWounds } from './crew-wounds.js';
+import { crewClearsRail, crewOpenEdgeInset, sendCrewOverboard, stepCrewOverboard, stepGaleKnockdowns, clearCrewOverboard } from './crew-overboard.js';
+import { crewLoseHandsAloft, stepCrewAloftFall } from './crew-aloft.js';
 import { createGunneryTools } from './gunnery-tools.js';
-import { CREW_RENDER, CREW_SHADOW } from './wgsl/crew.js';
+import { CREW_RENDER, CREW_SHADOW, CREW_POSE_BLEND } from './wgsl/crew.js';
 import { NINA_DESIGN } from './models/nina.js';
 import { VICTORY_DESIGN } from './models/victory.js';
 import { requirePlayableShipModel, resolveShipNode } from './ship-models.js';
@@ -15,7 +19,8 @@ import {ROWING_DESIGNS} from './models/rowing.js';
 import {proceduralDesign} from './models/procedural.js';
 import { crewDeckHazard, crewMotionPolicy, crewTurnTowards, crewAdvanceWalk } from './crew-motion.js';
 import { crewNavigationStation, crewNavigationRoute, crewRoutineSegmentClear } from './crew-navigation.js';
-import { selectCrewLOD, CREW_LOD_TIERS, createCrewLODs } from './crew-lod.js';
+import { selectCrewLOD, CREW_LOD_TIERS, createCrewLODs, crewPoseInterval, crewApparentDistance, crewLensZoom, crewSailorTier, crewDrawRuns, crewNeedsCutShader, crewClipOnly } from './crew-lod.js';
+import { createCrewClipPipeline, createCrewClipBatch } from './crew-clip-pose.js';
 
 // Authored, disjoint stations keep a full company clear of stairs and masts.
 // Policies choose intent. The executor alone changes position and animation.
@@ -95,6 +100,19 @@ export function isPirateVessel(boat){
   if(boat.faction==='enemy'&&!boat.captured)return true;
   return false;
 }
+// Every actor back on their feet at their post, for a new ship in a pooled hull.
+export function reviveCompany(company){
+  if(!company?.crew)return;
+  for(const s of company.crew){
+    s.casualtyState='able';s.wounded=null;s.health=1;s.strength=1;s.woundSeverity=0;s.scorchAmount=0;s.knockdownTimer=0;
+    s.job=null;s.aloftFall=null;s.seatedPose=null;s.climbPitch=0;s.navigationPath=null;s.navigationKey=null;s.phys=undefined;
+    clearCrewWounds(s);
+    clearCrewOverboard(s);
+  }
+  company.gunneryActive=false;company.pending=false;company.morale=1;
+  company.gunAbstractCrew?.clear();company.gunRouteFailSince?.clear();company.revision=(company.revision??0)+1;
+}
+
 export function applyPirateCrewAttire(company,pirate=true){
   if(!company?.crew)return company;
   company.pirateAttire=Boolean(pirate);
@@ -216,15 +234,33 @@ export function stepCompany(company,boat,dt,wind) {
   } else company.pending=!!order.sails&&company.activeControls.some(i=>Math.abs(order.sails[i]-sails.set[i])>.01);
   dt=Math.max(0,Math.min(.1,Number.isFinite(dt)?dt:0));
   company.rigManeuver=sails.maneuver?.stage??null;
-  company.workTime=(company.workTime??0)+dt;assignCrewWork(company,boat);
+  company.workTime=(company.workTime??0)+dt;crewLoseHandsAloft(company,boat);assignCrewWork(company,boat);
   for(const s of company.crew)s._cachedDeckY=s.job?.position?.[1]??s.navigationY??crewDeckHeight(boat,s.z,s.x);
+  stepGaleKnockdowns(boat,company,wind,dt);
   for(const s of company.crew){
-    // Apply blast knockback velocity (from cannon impacts or magazine explosions) within deck bounds
+    if(s.overboard){
+      if(!s.overboard.gone){
+        stepCrewOverboard(boat,s,dt);
+        if(s.overboard)stepCrewPhysicsState(s,boat,dt,company);
+      }
+      continue;
+    }
+    if(s.aloftFall){
+      stepCrewAloftFall(boat,s,dt);
+      stepCrewPhysicsState(s,boat,dt,company);
+      continue;
+    }
+    // Apply blast knockback velocity (from cannon impacts, magazine explosions or a sea) within deck bounds
     if(dt>0&&((Math.abs(s.knockbackVx??0)>1e-3)||(Math.abs(s.knockbackVz??0)>1e-3))){
       const damp=Math.exp(-dt*5.5);
       const nextX=s.x+(s.knockbackVx??0)*dt;
       const nextZ=s.z+(s.knockbackVz??0)*dt;
       const halfW=Math.max(0.18,modelDeckWidth(boat,nextZ)-0.34/Math.max(0.5,boat.beam/3.6));
+      // At the rail a body either goes over or stops against it.
+      if(Math.abs(nextX)>halfW&&s.position){
+        const side=Math.sign(nextX),outward=Math.abs(s.knockbackVx??0)*(boat.beam/3.6);
+        if(Math.sign(s.knockbackVx??0)===side&&crewClearsRail(boat,nextZ,side,outward)&&sendCrewOverboard(boat,s,{side,outward,cause:s.knockbackCause??'blast'}))continue;
+      }
       s.x=Math.max(-halfW,Math.min(halfW,nextX));
       s.z=Math.max(-4.6,Math.min(5.2,nextZ));
       s.knockbackVx=(s.knockbackVx??0)*damp;
@@ -305,6 +341,19 @@ export function createDeckhand(policy=deckhandDecision) {
     observation:{order:'patrol',hazard:false,roll:0,rollRate:0,wind:0},
     transform:new Float32Array(16),position:new Float32Array(3),rotation:new Float32Array(4),scale:new Float32Array([.95,.95,.95])};
 }
+// A hand left standing at an edge with no rail moves in from it, wherever the order had him.
+function crewStepInboard(s,boat,dt){
+  if(!boat.damage?.fracture?.brokenCount||s.role==='Helmsman'||s.roles?.includes('helmsman')||s.seatedPose||s.visible===false)return false;
+  const side=Math.sign(s.x);if(!side)return false;
+  const inset=crewOpenEdgeInset(boat,s.z,side);if(!inset)return false;
+  const sx=boat.beam/3.6,keep=Math.max(0,modelDeckWidth(boat,s.z)-inset-.34/sx);
+  if(Math.abs(s.x)<=keep)return false;
+  const motion=crewMotionPolicy(boat,{hazard:s.observation.hazard}),step=motion.speedMetresPerSecond*dt/sx;
+  s.x=side*Math.max(keep,Math.abs(s.x)-step);
+  s.yaw=crewTurnTowards(s.yaw,-side*Math.PI/2,dt,motion.turnRadiansPerSecond);
+  crewAdvanceWalk(s,step*sx,{strideMetres:motion.strideMetres});
+  return true;
+}
 function crewFinishPatrol(s){
   s.target=s.route?(s.target===s.route[1]?s.route[0]:s.route[1]):s.target>0?-2.2:.1;s.wait=2.5;s.navigationPath=null;
 }
@@ -312,7 +361,8 @@ function crewPatrolMotion(s,boat,dt,company){
   if(s.intent!=='patrol'||s.visible===false||s.route&&s.route[0]===s.route[1])return false;
   if(s.wait>0){s.wait=Math.max(0,s.wait-dt);return false;}
   const sx=boat.beam/3.6,sz=boat.length/12,sy=vesselVerticalScale(boat),x=s.home?.[0]??s.patrolX??s.x;
-  const key=[boat.modelId??'nina',boat.length,boat.beam,s.target,x].join('/');
+  // A shot can close a route that was open, so each break asks again.
+  const key=[boat.modelId??'nina',boat.length,boat.beam,s.target,x,boat.damage?.fracture?.revision??0].join('/');
   const from=[s.x,crewDeckHeight(boat,s.z,s.x),s.z];
   if(s.navigationKey!==key){
     // Relocate an unsafe destination, never an actor already on deck. Static
@@ -359,7 +409,7 @@ function stepProceduralDeckhand(s,boat,dt,wind,company){
     s.position.set([s.x*boat.beam/3.6,crewDeckHeight(boat,s.z,s.x)*vesselVerticalScale(boat)+.028,s.z*boat.length/12]);
     const seat=seated.seat,feet=seated.feet;s.moisturePoints=[feet[0].map((v,i)=>(v+feet[1][i])*.5),seat.map((v,i)=>v+(i===1?.10:0)),seat.map((v,i)=>v+(i===1?.50:0)),seat.map((v,i)=>v+(i===1?.95:0))];
   }else{
-    const moving=isDown?false:crewPatrolMotion(s,boat,dt,company);
+    const moving=isDown?false:crewStepInboard(s,boat,dt)||crewPatrolMotion(s,boat,dt,company);
     s.walk+=(Number(moving)-s.walk)*(1-Math.exp(-dt*8));s.moisturePoints=null;
     const proneLift=isDown?0.11*Math.abs(Math.sin(s.climbPitch??0)):0;
     s.position.set([s.x*boat.beam/3.6,(s.navigationY??crewDeckHeight(boat,s.z,s.x))*vesselVerticalScale(boat)+.028+proneLift,s.z*boat.length/12]);
@@ -385,7 +435,7 @@ export function stepDeckhand(s,boat,dt,wind=0,company=null) {
   // Preserve human proportions when resizing the hull; do not squeeze a person
   // through a walkway narrower than their shoulders.
   s.visible=boat.beam>=(s.company?3.2:2.8)&&boat.length>=(s.company?10.5:8);
-  const moving=isDown?false:crewPatrolMotion(s,boat,dt,company),lengthScale=boat.length/12;
+  const moving=isDown?false:crewStepInboard(s,boat,dt)||crewPatrolMotion(s,boat,dt,company),lengthScale=boat.length/12;
   const blend=1-Math.exp(-dt*8);s.walk+=(Number(moving)-s.walk)*blend;s.brace+=(Number(s.intent==='brace')-s.brace)*blend;
   if((boat.modelId==='victory'||ADDITIONAL_DESIGNS[boat.modelId])&&s.role!=='Helmsman'){
     const width=Math.max(0,modelDeckWidth(boat,s.z)-.34/(boat.beam/3.6));s.x=Math.max(-width,Math.min(width,s.x));
@@ -413,19 +463,24 @@ export function stepDeckhand(s,boat,dt,wind=0,company=null) {
 }
 
 let preloadedCrewModels=null;
+// The generated bodies have no garment pieces to re-sculpt, so Indigenous people are still built on the
+// classic bodies, which travel with them.
+async function fetchCrewModels(){
+  const [male,female,classicMale,classicFemale]=await Promise.all(['assets/crew/sailor.glb','assets/crew/sailor-female.glb','assets/crew/sailor-classic.glb','assets/crew/sailor-female-classic.glb'].map(async path=>{
+    const response=await fetch(path);if(!response.ok)throw Error('Crew asset unavailable');return loadCrewGLB(await response.arrayBuffer());
+  }));
+  male.indigenousBase=classicMale;female.indigenousBase=classicFemale;
+  return [male,female];
+}
 export function preloadCrewModels(){
   if(!preloadedCrewModels&&typeof fetch==='function'){
-    preloadedCrewModels=Promise.all(['assets/crew/sailor.glb','assets/crew/sailor-female.glb'].map(async path=>{
-      const response=await fetch(path);if(!response.ok)throw Error('Crew asset unavailable');return loadCrewGLB(await response.arrayBuffer());
-    })).catch(err=>{preloadedCrewModels=null;throw err;});
+    preloadedCrewModels=fetchCrewModels().catch(err=>{preloadedCrewModels=null;throw err;});
   }
   return preloadedCrewModels;
 }
 
 export async function createCrew({device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format='rgba16float',samples=4,shared=null,modelId='nina',waterOptics=null}) {
-  const modelsPromise=shared?.models?Promise.resolve(shared.models):(preloadedCrewModels??Promise.all(['assets/crew/sailor.glb','assets/crew/sailor-female.glb'].map(async path=>{
-    const response=await fetch(path);if(!response.ok)throw Error('Crew asset unavailable');return loadCrewGLB(await response.arrayBuffer());
-  })));
+  const modelsPromise=shared?.models?Promise.resolve(shared.models):(preloadedCrewModels??fetchCrewModels());
   modelsPromise.catch(()=>{});
   const B=GPUBufferUsage,state=createCompany(undefined,modelId,{fullWatch:true});
   const buffer=(label,data,usage)=>{const b=device.createBuffer({label,size:data.byteLength,usage:usage|B.COPY_DST});device.queue.writeBuffer(b,0,data);return b;};
@@ -439,12 +494,18 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
     shared?Promise.resolve([null,null]):Promise.all([shader(CREW_RENDER,'crew'),shader(CREW_SHADOW,'crew shadow')]),
   ]);
   if(models.some(m=>m.animator.joints.length!==65))throw Error('Crew expects the prepared 65-joint rigs');
-  const [pipeline,shadowPipeline]=await Promise.all([shared?.pipeline??device.createRenderPipelineAsync({label:'crew',layout:'auto',vertex:{module,entryPoint:'vs',buffers:layout},
-    fragment:{module,entryPoint:'fs',targets:[{format}]},primitive:{topology:'triangle-list',cullMode:'none'},
-    depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples}}),
+  const crewPipeline=(label,entryPoint,target,depthStencil)=>device.createRenderPipelineAsync({label,layout:'auto',vertex:{module,entryPoint:'vs',buffers:layout},
+    fragment:{module,entryPoint,targets:[target]},primitive:{topology:'triangle-list',cullMode:'none'},
+    depthStencil:{format:'depth32float',...depthStencil},multisample:{count:samples}});
+  const layingDepth={depthWriteEnabled:true,depthCompare:'greater'};
+  const [pipeline,cutDepthPipeline,cutPipeline,shadowPipeline]=await Promise.all([shared?.pipeline??crewPipeline('crew','fs',{format},layingDepth),
+    shared?.cutDepthPipeline??crewPipeline('crew surviving','surviving',{format,writeMask:0},layingDepth),
+    shared?.cutPipeline??crewPipeline('crew cut','fs',{format},{depthWriteEnabled:false,depthCompare:'equal'}),
     shared?.shadowPipeline??device.createRenderPipelineAsync({label:'crew shadow',layout:'auto',vertex:{module:shadowModule,entryPoint:'vs',buffers:layout},primitive:{topology:'triangle-list',cullMode:'none'},
     depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less',depthBias:2,depthBiasSlopeScale:1.5}})]);
   const group=(pipe,resources)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource}))});
+  const poseBlendPipeline=shared?.poseBlendPipeline??await shader(CREW_POSE_BLEND,'crew pose blend').then(blendModule=>device.createComputePipelineAsync({label:'crew pose blend',layout:'auto',compute:{module:blendModule,entryPoint:'main'}}));
+  const clipPipeline=shared?.clipPipeline??await createCrewClipPipeline(device,shader);
   const batches=models.map((model,i)=>{
     const people=state.crew.filter(s=>s.sex===(i?'female':'male'));
     for(const s of people)s.walkClipDuration=model.animator.clips.get('Walk').duration;
@@ -454,45 +515,94 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
     const vertex=shared?.geometry[i].vertex??buffer('crew vertices',model.vertices,B.VERTEX),index=shared?.geometry[i].index??buffer('crew indices',model.indices,B.INDEX);
     const lods=shared?.geometry[i].lods??(model.lods??[{id:'near',level:0,indices:model.indices,indexCount:model.indices.length,triangles:model.indices.length/3}]).map((tier,t)=>({...tier,buffer:t===0?index:buffer('crew indices '+tier.id,tier.indices,B.INDEX)}));
     const bones=buffer('crew joints',poses,B.STORAGE),actor=buffer('crew transforms',actors,B.STORAGE);
+    // Two solved poses per sailor, and how far along the way from one to the other each is.
+    const blends=new Float32Array(Math.max(1,people.length)*2);
+    const solved=device.createBuffer({label:'crew solved poses',size:poses.byteLength*2,usage:B.STORAGE|B.COPY_DST}),blend=buffer('crew pose blends',blends,B.STORAGE);
+    const poseBlendGroup=device.createBindGroup({label:'crew pose blend',layout:poseBlendPipeline.getBindGroupLayout(0),entries:[solved,blend,bones].map((resource,binding)=>({binding,resource:{buffer:resource}}))});
+    const clip=createCrewClipBatch(device,clipPipeline,model,bones,people.length);
     const common=[{buffer:hullUBO},{buffer:bones},{buffer:actor}];
     const mainResources=[{buffer:frameUBO},...common,transView,sampClamp,envCubeView,{buffer:sunVisBuf},{buffer:wetness.state},skyView];
-    const main=group(pipeline,mainResources);
+    const main=group(pipeline,mainResources),mainCut=group(cutPipeline,mainResources);
+    // The depth entry reads only what the vertex stage does, and the frame.
+    const cutDepth=device.createBindGroup({layout:cutDepthPipeline.getBindGroupLayout(0),entries:[0,1,2,3,8].map(binding=>({binding,resource:mainResources[binding]}))});
     const shadow=group(shadowPipeline,[{buffer:shadows.uniform},...common]);
-    return {model,people,poses,actors,vertex,index,lods,bones,actor,main,shadow,mainResources};
+    return {model,people,poses,actors,vertex,index,lods,bones,actor,main,mainCut,cutDepth,shadow,mainResources,solved,blend,blends,poseBlendGroup,clip};
   });
-  const lighting=shadows.bind(pipeline);
+  const lighting=shadows.bind(pipeline),cutLighting=shadows.bind(cutPipeline);
   const submerged=waterOptics?await waterOptics.capture({source:CREW_RENDER,pipeline,vertex:{buffers:layout},groups:2}):null;
   const submergedLighting=submerged?shadows.bind(submerged.pipeline):null;
   if(submerged)for(const b of batches)b.submerged=submerged.bindGroup(b.mainResources);
   const gunTools=await createGunneryTools({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,shader,format,samples,waterOptics,shared:shared?.gunTools});
-  let enabled=true,drawEnabled=false,activeTier=0,shadowTier=1;
-  const drawBatch=(pass,b,shadow)=>{if(!b.people.length)return;const lod=b.lods?.[shadow?shadowTier:activeTier]??{buffer:b.index,indexCount:b.model.indices.length};pass.setBindGroup(0,shadow?b.shadow:b.main);pass.setVertexBuffer(0,b.vertex);pass.setIndexBuffer(lod.buffer,'uint32');pass.drawIndexed(lod.indexCount??lod.indices.length,b.people.length);};
-  return {state,assets:{models,pipeline,shadowPipeline,gunTools:gunTools.assets,geometry:batches.map(({vertex,index,lods})=>({vertex,index,lods}))},triangles:batches.reduce((n,b)=>n+b.model.indices.length/3*b.people.length,0),lods:CREW_LOD_TIERS,
+  let enabled=true,drawEnabled=false,posed=false,activeTier=0,shadowTier=1,poseFrame=0;
+  const drawBatch=(pass,b,shadow,cutGroup=null)=>{
+    const runs=shadow?b.shadowRuns:cutGroup?b.cutRuns:b.runs;
+    if(!b.people.length||runs?.length===0||(cutGroup&&!runs))return;
+    pass.setBindGroup(0,shadow?b.shadow:cutGroup??b.main);pass.setVertexBuffer(0,b.vertex);
+    let bound=null;
+    for(const run of runs??[{tier:shadow?shadowTier:activeTier,first:0,count:b.people.length}]){
+      const lod=b.lods?.[run.tier]??b.lods?.[0]??{buffer:b.index,indexCount:b.model.indices.length};
+      if(lod.buffer!==bound){pass.setIndexBuffer(lod.buffer,'uint32');bound=lod.buffer;}
+      pass.drawIndexed(lod.indexCount??lod.indices.length,run.count,0,0,run.first);
+    }
+  };
+  return {state,assets:{models,pipeline,cutDepthPipeline,cutPipeline,shadowPipeline,poseBlendPipeline,clipPipeline,gunTools:gunTools.assets,geometry:batches.map(({vertex,index,lods})=>({vertex,index,lods}))},triangles:batches.reduce((n,b)=>n+b.model.indices.length/3*b.people.length,0),lods:CREW_LOD_TIERS,
     get lodLevel(){return activeTier;},
+    get posed(){return posed;},
     get activeTriangles(){return batches.reduce((n,b)=>n+((b.lods?.[activeTier]?.triangles)??(b.model.indices.length/3))*b.people.length,0);},
     joints:65,
     order(boat,id){return issueCaptainOrder(state,boat,id);},
+    // A paused frame moves nobody, but the camera and the crew and ship toggles still apply.
+    refreshDraw(boat,camera=null){
+      const lod=selectCrewLOD(boat,camera);activeTier=lod.mainTier;shadowTier=lod.shadowTier;
+      drawEnabled=boat.crew!==false&&boat.showProw&&!lod.culled&&state.crew.some(s=>s.visible);
+    },
     update(boat,dt,wind,camera=null){
       const lod=selectCrewLOD(boat,camera);activeTier=lod.mainTier;shadowTier=lod.shadowTier;
       stepCompany(state,boat,dt,wind);enabled=boat.crew!==false;drawEnabled=enabled&&boat.showProw&&!lod.culled&&state.crew.some(s=>s.visible);
-      gunTools.update(state,boat,drawEnabled);
       if(!drawEnabled){
+        gunTools.update(state,boat,false);
         // Hidden rendering does not turn a seated body's moisture samples back
         // into standing-height probes or change its physical rowing attendance.
         if(Object.hasOwn(ROWING_DESIGNS,modelId))for(const b of batches)for(const s of b.people)if(s.seatedPose){const a=b.model.animator;a.sample('Idle',s.time);poseCrewWork(a,s,boat);}
         return;
       }
+      posed=true;poseFrame++;
       for(const b of batches){
         const a=b.model.animator;
+        b.clip.begin(b.people.length);
         for(let i=0;i<b.people.length;i++){
-          const s=b.people[i];a.sample('Idle',s.time,'Walk',s.walkTime,s.walk);
-          if(s.brace>.001 && !(s.job?.rung>0))a.blend('Brace',s.time,s.brace);
-          poseCrewWork(a,s,boat);
-          applyCrewRealism(a,s,boat,dt);
+          const s=b.people[i];
+          s.poseElapsed=(s.poseElapsed??0)+dt;
+          // A wound or a fall shows at once. Anyone not on show keeps their slot until they are.
+          const apparent=crewApparentDistance(s.position,boat,camera);
+          s.lodTier=crewSailorTier(apparent,s.lodTier??0);
+          const clipOnly=crewClipOnly(apparent,s);
+          // Coming back within reach of their own pose, they take it at once.
+          const snap=!s.posedOnce||s.pendingWounds?.length||(s.knockdownTimer??0)>0||(s.clipOnly&&!clipOnly);
+          s.clipOnly=clipOnly;
+          if(clipOnly){s.posedOnce=true;b.clip.set(i,s.time,s.walkTime,s.walk);}else b.clip.off(i);
+          const interval=snap?1:crewPoseInterval(apparent);
+          s.poseAge=(s.poseAge??i)+1;
+          const due=!clipOnly&&(snap||(s.visible!==false&&s.poseAge>=interval));
+          if(due){
+            s.posedOnce=true;s.poseAge=0;
+            a.sample('Idle',s.time,'Walk',s.walkTime,s.walk);
+            if(s.brace>.001 && !(s.job?.rung>0))a.blend('Brace',s.time,s.brace);
+            poseCrewWork(a,s,boat);
+            applyCrewRealism(a,s,boat,s.poseElapsed);
+            applyCrewWounds(a,s);
+            // The older of the two solved poses is the one to replace.
+            s.poseSlot=1-(s.poseSlot??0);
+            device.queue.writeBuffer(b.solved,(i*2+s.poseSlot)*65*64,a.palette);
+            if(snap)device.queue.writeBuffer(b.solved,(i*2+1-s.poseSlot)*65*64,a.palette);
+            s.poseElapsed=0;
+          }
+          b.blends[i*2]=Math.min(1,(s.poseAge+1)/interval);b.blends[i*2+1]=s.poseSlot??0;
           const offset=i*CREW_ACTOR_FLOATS;
-          b.poses.set(a.palette,i*65*16);b.actors.set(s.transform,offset);
+          b.actors.set(s.transform,offset);
           const woundAmt=s.casualtyState==='fallen'?1.0:s.casualtyState==='wounded'?Math.max(0.45,Math.min(0.95,s.woundSeverity??(1-(s.health??0.5)))):0;
           const scorchAmt=Math.max(0,Math.min(0.95,s.scorchAmount??(s.casualtyState==='fallen'?0.35:s.casualtyState==='wounded'?0.18:0)));
+          s.cutShader=crewNeedsCutShader(crewApparentDistance(s.position,boat,camera,1),boat.enabled===true,woundAmt+scorchAmt);
           const bandageSeed=(s.casualtyState==='wounded'||s.casualtyState==='fallen')?(0.06+(((s.crewIndex??i)*0.37)%0.32)):0;
           const shirt=s.casualtyState==='fallen'
             ?[s.shirt[0]*0.55+0.20,s.shirt[1]*0.32,s.shirt[2]*0.32]
@@ -508,19 +618,37 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
           b.actors[offset+23]=Number(boat.enabled===true)+scorchAmt*0.42;
           b.actors[offset+31]=wetness.crewOffset+(s.crewIndex??state.crew.indexOf(s))*4;
         }
-        device.queue.writeBuffer(b.bones,0,b.poses);device.queue.writeBuffer(b.actor,0,b.actors);
+        b.runs=crewDrawRuns(b.people,s=>s.visible===false||s.cutShader?-1:s.lodTier);
+        b.cutRuns=crewDrawRuns(b.people,s=>s.visible!==false&&s.cutShader?s.lodTier:-1);
+        b.shadowRuns=crewDrawRuns(b.people,s=>s.visible===false?-1:Math.min(CREW_LOD_TIERS.length-1,s.lodTier+1));
+        device.queue.writeBuffer(b.blend,0,b.blends);device.queue.writeBuffer(b.actor,0,b.actors);b.clip.upload();
       }
+      // After posing, so an arrow's bone is this frame's.
+      gunTools.update(state,boat,true);
+    },
+    // Before anything draws them: every joint of every sailor, on the way to their newest pose.
+    encodePose(pass){
+      if(!drawEnabled)return;
+      pass.setPipeline(poseBlendPipeline);
+      for(const b of batches)if(b.people.length){pass.setBindGroup(0,b.poseBlendGroup);pass.dispatchWorkgroups(Math.ceil(b.people.length*65/64));}
+      for(const b of batches)if(b.people.length)b.clip.encode(pass);
     },
     drawSubmerged(pass,above=false){
       if(!submerged||!drawEnabled)return;
       submerged.bind(pass,above);pass.setBindGroup(1,submergedLighting);
-      for(const b of batches){if(!b.people.length)continue;const lod=b.lods?.[activeTier]??{buffer:b.index,indexCount:b.model.indices.length};pass.setBindGroup(0,b.submerged);pass.setVertexBuffer(0,b.vertex);pass.setIndexBuffer(lod.buffer,'uint32');pass.drawIndexed(lod.indexCount??lod.indices.length,b.people.length);}
+      for(const b of batches){if(!b.people.length)continue;const lod=b.lods?.at(-1)??{buffer:b.index,indexCount:b.model.indices.length};pass.setBindGroup(0,b.submerged);pass.setVertexBuffer(0,b.vertex);pass.setIndexBuffer(lod.buffer,'uint32');pass.drawIndexed(lod.indexCount??lod.indices.length,b.people.length);}
       gunTools.drawSubmerged(pass,above);
     },
-    draw(pass){if(!drawEnabled)return;pass.setPipeline(pipeline);pass.setBindGroup(1,lighting);for(const b of batches)drawBatch(pass,b,false);gunTools.draw(pass);},
+    // Opaque sailors belong with the opaque scene. Anyone being cut follows it.
+    drawOpaque(pass){if(!drawEnabled)return;pass.setPipeline(pipeline);pass.setBindGroup(1,lighting);for(const b of batches)drawBatch(pass,b,false);gunTools.draw(pass);},
+    drawCut(pass){
+      if(!drawEnabled||!batches.some(b=>b.cutRuns?.length))return;
+      pass.setPipeline(cutDepthPipeline);for(const b of batches)drawBatch(pass,b,false,b.cutDepth);
+      pass.setPipeline(cutPipeline);pass.setBindGroup(1,cutLighting);for(const b of batches)drawBatch(pass,b,false,b.mainCut);
+    },
     drawShadow(pass){if(!drawEnabled)return;pass.setPipeline(shadowPipeline);for(const b of batches)drawBatch(pass,b,true);gunTools.drawShadow(pass);},
     status(){return state.crew.length&&!state.crew.some(s=>s.visible)?hasExtendedCrewModel(modelId)?'Crew hidden':'Crew needs a larger deck':companyStatus(state);},
-    destroy(){gunTools.destroy();for(const b of batches)for(const resource of [...(shared?[]:[b.vertex,b.index,...(b.lods?.slice(1).map(l=>l.buffer)??[])]),b.bones,b.actor])resource.destroy();},
+    destroy(){gunTools.destroy();for(const b of batches)for(const resource of [...(shared?[]:[b.vertex,b.index,...(b.lods?.slice(1).map(l=>l.buffer)??[])]),b.bones,b.actor,b.solved,b.blend])resource.destroy();for(const b of batches)b.clip.destroy();},
   };
 }
 
@@ -600,6 +728,13 @@ export function buildIndigenousCrewModel(baseModel, female = false) {
       bf[fOff + 8] = 0.10;
     }
 
+    // The sailors' knitted stockings have no place here.
+    if (Math.hypot(r - 0.22, g - 0.195, b - 0.165) < 0.008) {
+      bf[fOff + 6] = 0.36;
+      bf[fOff + 7] = 0.18;
+      bf[fOff + 8] = 0.10;
+    }
+
     // Bare lower calves above deerskin moccasins (y < 0.21 stays moccasin hide)
     if (isTrousers && (calfW > 0.42 || (y >= 0.215 && y <= (female ? 0.56 : 0.66)))) {
       bf[fOff + 0] = x - nx * 0.014;
@@ -610,17 +745,34 @@ export function buildIndigenousCrewModel(baseModel, female = false) {
     }
   }
 
+  // The sailors' buns and tousled hair would sit on everyone here. Press hair close to the skull,
+  // and the styles below add the length. The clamp leaves a plain cap, as a shaved head needs too.
+  const skullY = female ? 1.676 : 1.718;
+  for (let i = 0; i < baseVertCount; i++) {
+    const fOff = i * 15;
+    if (Math.hypot(bf[fOff + 6] - 0.045, bf[fOff + 7] - 0.019, bf[fOff + 8] - 0.009) >= 0.008) continue;
+    const dx = bf[fOff], dy = bf[fOff + 1] - skullY, dz = bf[fOff + 2] + 0.006, away = Math.hypot(dx, dy, dz);
+    if (away > 0.112) {
+      const pull = 0.112 / away;
+      bf[fOff] = dx * pull; bf[fOff + 1] = skullY + dy * pull; bf[fOff + 2] = dz * pull - 0.006;
+    }
+  }
+
   // Build 3D skinned indigenous regalia & hair meshes (headband, 3 crown feathers,
   // twin braided hair plaits, and carved shell/guanín pectoral collar).
   const extraVerts = [];
   const extraTris = [];
+  // Every piece is in the one mesh, and each person's look says which of them show. A vertex carries
+  // its piece's number in its red channel, above the colour itself.
+  let piece = 0;
+  const asPiece = (name, build) => { piece = DRESS_PIECES.indexOf(name) + 1; build(); piece = 0; };
   const pushVertex = (pos, norm, col, bones, weights) => {
     const idx = baseVertCount + extraVerts.length;
     const len = Math.hypot(norm[0], norm[1], norm[2]) || 1;
     extraVerts.push({
       pos: [pos[0], pos[1], pos[2]],
       norm: [norm[0] / len, norm[1] / len, norm[2] / len],
-      col: [col[0], col[1], col[2]],
+      col: [col[0] + 2 * piece, col[1], col[2]],
       bones: [bones[0] ?? 0, bones[1] ?? 0, bones[2] ?? 0, bones[3] ?? 0],
       weights: [weights[0] ?? 1, weights[1] ?? 0, weights[2] ?? 0, weights[3] ?? 0],
     });
@@ -638,7 +790,7 @@ export function buildIndigenousCrewModel(baseModel, female = false) {
   const bandSegs = 16;
 
   // 1. Woven Wampum / Dyed Quillwork Headband around brow (Head bone)
-  for (let s = 0; s < bandSegs; s++) {
+  asPiece('HEADBAND', () => { for (let s = 0; s < bandSegs; s++) {
     const a0 = (s / bandSegs) * Math.PI * 2;
     const a1 = ((s + 1) / bandSegs) * Math.PI * 2;
     const beadCol = (s % 3 === 0)
@@ -655,7 +807,7 @@ export function buildIndigenousCrewModel(baseModel, female = false) {
     const v2 = pushVertex([x1 * 0.99, browY + bandH, z1 * 0.99], n1, beadCol, [headSlot, 0, 0, 0], [1, 0, 0, 0]);
     const v3 = pushVertex([x0 * 0.99, browY + bandH, z0 * 0.99], n0, beadCol, [headSlot, 0, 0, 0], [1, 0, 0, 0]);
     pushQuad(v0, v1, v2, v3);
-  }
+  } });
 
   // 2. Crown Eagle / Hawk / Macaw Feathers rising from the back/sides of the headband (Head bone)
   const featherSpecs = female
@@ -669,7 +821,7 @@ export function buildIndigenousCrewModel(baseModel, female = false) {
         { x: -0.032, z: bandCenterZ - bandRz * 0.90, h: 0.148, w: 0.016, tiltX: -0.22, tiltZ: -0.25 },
         { x: 0.032, z: bandCenterZ - bandRz * 0.90, h: 0.148, w: 0.016, tiltX: 0.22, tiltZ: -0.25 },
       ];
-  for (const fSpec of featherSpecs) {
+  featherSpecs.forEach((fSpec, featherIndex) => asPiece(featherIndex ? 'MORE_FEATHERS' : 'ONE_FEATHER', () => {
     const baseCol = [0.88, 0.85, 0.78]; // golden eagle white basal vane
     const midCol = [0.76, 0.70, 0.58];
     const tipCol = [0.11, 0.08, 0.06]; // dark eagle tip
@@ -695,14 +847,14 @@ export function buildIndigenousCrewModel(baseModel, female = false) {
         extraTris.push(mR, mL, tV);
       }
     }
-  }
+  }));
 
   // 3. Long Braided Hair Plaits hanging down from temples over shoulders (blended Head -> neck_01 -> spine_03)
   const braidLen = female ? 0.36 : 0.31;
   const braidSegs = 6;
   const hairSentinel = [0.045, 0.019, 0.009];
   const tieCol = [0.58, 0.14, 0.08];
-  for (const sideX of [-1, 1]) {
+  asPiece('PLAITS', () => { for (const sideX of [-1, 1]) {
     const rings = [];
     for (let k = 0; k <= braidSegs; k++) {
       const t = k / braidSegs;
@@ -731,14 +883,14 @@ export function buildIndigenousCrewModel(baseModel, female = false) {
         pushQuad(rings[k][c], rings[k][c1], rings[k + 1][c1], rings[k + 1][c]);
       }
     }
-  }
+  } });
 
-  // 4. Carved Shell Wampum / Guanín Gold Pectoral Collar across upper chest (spine_03 bone)
+  // 4. Collars across the upper chest (spine_03 bone): gold, shell or jade, each its own piece.
   const chestY = female ? 1.335 : 1.375;
   const chestZ = female ? 0.112 : 0.118;
   const collarSegs = 8;
-  const collarCol = [0.76, 0.58, 0.26];
-  for (let s = 0; s < collarSegs; s++) {
+  const collar = (name, colourAt) => asPiece(name, () => { for (let s = 0; s < collarSegs; s++) {
+    const collarCol = colourAt(s);
     const t0 = (s / collarSegs) * 2 - 1;
     const t1 = ((s + 1) / collarSegs) * 2 - 1;
     const x0 = t0 * 0.072, x1 = t1 * 0.072;
@@ -750,7 +902,86 @@ export function buildIndigenousCrewModel(baseModel, female = false) {
     const v2 = pushVertex([x1, chestY - dip1, z1 - 0.004], n1, collarCol, [spine3Slot, 0, 0, 0], [1, 0, 0, 0]);
     const v3 = pushVertex([x0, chestY - dip0, z0 - 0.004], n0, collarCol, [spine3Slot, 0, 0, 0], [1, 0, 0, 0]);
     pushQuad(v0, v1, v2, v3);
-  }
+  } });
+  collar('GOLD_COLLAR', () => [0.76, 0.58, 0.26]);
+  collar('SHELL_COLLAR', (s) => (s % 2 ? [0.84, 0.80, 0.72] : [0.30, 0.16, 0.34]));
+  collar('JADE_COLLAR', (s) => (s % 2 ? [0.12, 0.36, 0.26] : [0.20, 0.46, 0.34]));
+
+  const eyeY = female ? 1.656 : 1.699;
+  const headBones = [headSlot, 0, 0, 0], headWeights = [1, 0, 0, 0];
+  // 5. Long hair, falling loose down the back (blended Head -> neck_01 -> spine_03)
+  asPiece('LOOSE_HAIR', () => {
+    const rows = 7, columns = 7, length = female ? 0.46 : 0.38, grid = [];
+    for (let k = 0; k <= rows; k++) {
+      const t = k / rows;
+      const y = browY + 0.05 - t * length;
+      const rx = 0.098 - t * 0.022, rz = 0.104 - t * 0.05, zc = -0.004 - t * 0.058;
+      const wHead = Math.max(0, 1 - t * 1.7), wSpine = Math.max(0, (t - 0.35) / 0.65), wNeck = Math.max(0, 1 - wHead - wSpine);
+      const row = [];
+      for (let c = 0; c <= columns; c++) {
+        const angle = (c / columns - 0.5) * Math.PI * 1.15;
+        row.push(pushVertex([Math.sin(angle) * rx, y, zc - Math.cos(angle) * rz], [Math.sin(angle), 0.1, -Math.cos(angle)], hairSentinel, [headSlot, neckSlot, spine3Slot, 0], [wHead, wNeck, wSpine, 0]));
+      }
+      grid.push(row);
+    }
+    for (let k = 0; k < rows; k++) for (let c = 0; c < columns; c++) pushQuad(grid[k][c], grid[k][c + 1], grid[k + 1][c + 1], grid[k + 1][c]);
+  });
+  // 6. A crest of hair and dyed deer hair along the middle of the skull, forehead to nape.
+  asPiece('ROACH', () => {
+    const steps = 9, tip = [0.34, 0.07, 0.04];
+    let previous = null;
+    for (let k = 0; k <= steps; k++) {
+      const angle = -0.55 + (k / steps) * 3.1, rise = Math.sin((k / steps) * Math.PI);
+      const inner = 0.098, outer = inner + 0.022 + rise * 0.032;
+      const cy = eyeY + 0.002, cz = -0.002, ny = Math.cos(angle), nz = Math.sin(-angle);
+      const left = pushVertex([-0.016, cy + ny * inner, cz + nz * inner], [-0.9, ny * 0.4, nz * 0.4], hairSentinel, headBones, headWeights);
+      const right = pushVertex([0.016, cy + ny * inner, cz + nz * inner], [0.9, ny * 0.4, nz * 0.4], hairSentinel, headBones, headWeights);
+      const crest = pushVertex([0, cy + ny * outer, cz + nz * outer], [0, ny, nz], tip, headBones, headWeights);
+      if (previous) { pushQuad(previous[0], left, crest, previous[2]); pushQuad(right, previous[1], previous[2], crest); }
+      previous = [left, right, crest];
+    }
+  });
+  // 7. Long quetzal plumes rising from the back of the head and arching behind.
+  asPiece('QUETZAL_PLUMES', () => {
+    for (const lean of [-0.11, 0, 0.11]) {
+      let previous = null;
+      const segments = 6, height = 0.42, width = 0.018;
+      for (let k = 0; k <= segments; k++) {
+        const t = k / segments;
+        const x = lean * t, y = browY + 0.02 + Math.sin(t * Math.PI * 0.62) * height, z = -0.075 - t * t * 0.3;
+        const colour = t > 0.72 ? [0.02, 0.2, 0.17] : [0.012, 0.13, 0.07];
+        const half = width * (1 - t * 0.55);
+        const a = pushVertex([x - half, y, z], [0, 0.25, -0.97], colour, headBones, headWeights);
+        const b = pushVertex([x + half, y, z], [0, 0.25, -0.97], colour, headBones, headWeights);
+        if (previous) pushQuad(previous[0], previous[1], b, a);
+        previous = [a, b];
+      }
+    }
+  });
+  // 8. A crown of short red and yellow feathers set upright round the head.
+  asPiece('FEATHER_CROWN', () => {
+    const count = 16;
+    for (let f = 0; f < count; f++) {
+      const angle = (f / count) * Math.PI * 2, sx = Math.sin(angle), cz = Math.cos(angle);
+      const rx = bandRx + 0.004, rz = bandRz + 0.004, y0 = browY + 0.004, h = 0.078 + (f % 2) * 0.016;
+      const tangentX = cz * 0.016, tangentZ = -sx * 0.016;
+      const px = sx * rx, pz = bandCenterZ + cz * rz;
+      const n = [sx, 0.15, cz];
+      const a = pushVertex([px - tangentX, y0, pz - tangentZ], n, [0.72, 0.50, 0.08], headBones, headWeights);
+      const b = pushVertex([px + tangentX, y0, pz + tangentZ], n, [0.72, 0.50, 0.08], headBones, headWeights);
+      const c = pushVertex([px * 1.2, y0 + h, pz * 1.2], n, [0.62, 0.07, 0.04], headBones, headWeights);
+      extraTris.push(a, b, c);
+    }
+  });
+  // 9. A stone plug set in the lower lip.
+  asPiece('LIP_PLUG', () => {
+    const y = eyeY - 0.098, z = 0.1, r = 0.007, n = [0, 0, 1], stone = [0.28, 0.42, 0.36];
+    const a = pushVertex([-r, y - r, z], n, stone, headBones, headWeights);
+    const b = pushVertex([r, y - r, z], n, stone, headBones, headWeights);
+    const c = pushVertex([r, y + r, z], n, stone, headBones, headWeights);
+    const d = pushVertex([-r, y + r, z], n, stone, headBones, headWeights);
+    pushQuad(a, b, c, d);
+  });
 
   const totalVertCount = baseVertCount + extraVerts.length;
   const vertices = new Uint8Array(totalVertCount * 60);
@@ -812,8 +1043,8 @@ export function createIndigenousCrewModels(models) {
   const cached = cachedIndigenousModels.get(models[0]);
   if (cached) return cached;
   const pair = [
-    buildIndigenousCrewModel(models[0], false),
-    buildIndigenousCrewModel(models[1], true),
+    buildIndigenousCrewModel(models[0].indigenousBase ?? models[0], false),
+    buildIndigenousCrewModel(models[1].indigenousBase ?? models[1], true),
   ];
   cachedIndigenousModels.set(models[0], pair);
   return pair;
@@ -992,9 +1223,7 @@ export function createFortificationSoldiersForInstance(inst, startIndex = 0) {
     const name = isIndigenousFort
       ? INDIGENOUS_NAMES[sex][Math.floor(globalIdx / 2) % INDIGENOUS_NAMES[sex].length]
       : identity.name;
-    const look = isIndigenousFort
-      ? INDIGENOUS_APPEARANCES[globalIdx % INDIGENOUS_APPEARANCES.length]
-      : CREW_APPEARANCES[identity.identityId ?? identity.id];
+    const look = isIndigenousFort ? null : CREW_APPEARANCES[identity.identityId ?? identity.id];
     const role = isIndigenousFort
       ? spec.stationKind === 'embrasure'
         ? 'Sovereign Artillerist'
@@ -1002,6 +1231,7 @@ export function createFortificationSoldiersForInstance(inst, startIndex = 0) {
           ? 'Wampum War Captain'
           : 'Rampart Guardian'
       : spec.role;
+    const dress = isIndigenousFort ? indigenousDress(inst.cultureId, sex, globalIdx, { role }) : null;
     const s = createDeckhand();
     const baseLy = spec.ly;
     const effLy = baseLy + spec.lx * (inst.slopeX ?? 0) + spec.lz * (inst.slopeZ ?? 0);
@@ -1037,16 +1267,15 @@ export function createFortificationSoldiersForInstance(inst, startIndex = 0) {
       cultureId: inst.cultureId ?? null,
       modelVariant: isIndigenousFort ? (sex === 'female' ? 'indigenous-female' : 'indigenous-male') : 'colonial',
       shirt: isIndigenousFort
-        ? INDIGENOUS_SHIRTS[globalIdx % INDIGENOUS_SHIRTS.length]
+        ? dress.shirt
         : GARRISON_SHIRTS[globalIdx % GARRISON_SHIRTS.length],
       trousers: isIndigenousFort
-        ? INDIGENOUS_TROUSERS[globalIdx % INDIGENOUS_TROUSERS.length]
+        ? dress.trousers
         : GARRISON_TROUSERS[globalIdx % GARRISON_TROUSERS.length],
-      skin: crewLinearColour(look.skin),
-      hair: crewLinearColour(look.hair),
-      face: isIndigenousFort
-        ? [look.face[0], look.face[1], look.face[2], look.face[3] + 2.0]
-        : [...look.face],
+      skin: isIndigenousFort ? dress.skin : crewLinearColour(look.skin),
+      hair: isIndigenousFort ? dress.hair : crewLinearColour(look.hair),
+      face: isIndigenousFort ? dress.face : [...look.face],
+      dress: isIndigenousFort ? dress.mask : 0,
     });
     s.scale.fill((s.sex === 'female' ? 1.04 : 1.02) * (1 + ((globalIdx % 3) - 1) * 0.02));
     s.position.set([wx, wy, wz]);
@@ -1103,7 +1332,7 @@ export function createIndigenousVillagersForInstance(inst, startIndex = 0, cultu
     const sex = (globalIdx % 2 === 0) ? 'female' : 'male';
     const namePool = INDIGENOUS_NAMES[sex];
     const name = namePool[Math.floor(globalIdx / 2) % namePool.length];
-    const look = INDIGENOUS_APPEARANCES[globalIdx % INDIGENOUS_APPEARANCES.length];
+    const dress = indigenousDress(cultureId ?? inst.indigenousCultureId ?? inst.cultureId, sex, globalIdx, { role: spec.role });
     const s = createDeckhand();
     const baseLy = spec.ly;
     const effLy = baseLy + spec.lx * (inst.slopeX ?? 0) + spec.lz * (inst.slopeZ ?? 0);
@@ -1138,11 +1367,12 @@ export function createIndigenousVillagersForInstance(inst, startIndex = 0, cultu
       crewIndex: globalIdx,
       garrison: true,
       strength: 1.0,
-      shirt: INDIGENOUS_SHIRTS[globalIdx % INDIGENOUS_SHIRTS.length],
-      trousers: INDIGENOUS_TROUSERS[globalIdx % INDIGENOUS_TROUSERS.length],
-      skin: crewLinearColour(look.skin),
-      hair: crewLinearColour(look.hair),
-      face: [look.face[0], look.face[1], look.face[2], look.face[3] + 2.0],
+      shirt: dress.shirt,
+      trousers: dress.trousers,
+      skin: dress.skin,
+      hair: dress.hair,
+      face: dress.face,
+      dress: dress.mask,
     });
     s.scale.fill((s.sex === 'female' ? 0.99 : 0.97) * (1 + ((globalIdx % 3) - 1) * 0.02));
     s.position.set([wx, wy, wz]);
@@ -1322,11 +1552,7 @@ export async function createFortSoldiers({
 }) {
   const modelsPromise = shared?.models
     ? Promise.resolve(shared.models)
-    : (preloadedCrewModels ?? Promise.all(['assets/crew/sailor.glb', 'assets/crew/sailor-female.glb'].map(async path => {
-        const response = await fetch(path);
-        if (!response.ok) throw Error('Crew asset unavailable');
-        return loadCrewGLB(await response.arrayBuffer());
-      })));
+    : (preloadedCrewModels ?? fetchCrewModels());
   modelsPromise.catch(() => {});
   const B = GPUBufferUsage;
   const buffer = (label, data, usage) => {
@@ -1379,6 +1605,7 @@ export async function createFortSoldiers({
   });
   const indigenousModels = createIndigenousCrewModels(models);
   const allModels = [models[0], models[1], indigenousModels[0], indigenousModels[1]];
+  const clipPipeline = shared?.clipPipeline ?? await createCrewClipPipeline(device, shader);
   const batches = allModels.map((model, i) => {
     const isIndigenousBatch = i >= 2;
     const sharedGeo = !isIndigenousBatch ? shared?.geometry?.[i] : shared?.indigenousGeometry?.[i - 2];
@@ -1391,11 +1618,12 @@ export async function createFortSoldiers({
       buffer: t === 0 ? index : buffer('fort crew indices ' + tier.id, tier.indices, B.INDEX),
     }));
     const bones = buffer('fort crew joints', poses, B.STORAGE);
+    const clip = createCrewClipBatch(device, clipPipeline, model, bones, MAX_FORT_SOLDIERS_PER_BATCH);
     const actor = buffer('fort crew transforms', actors, B.STORAGE);
     const common = [{ buffer: fortHullUBO }, { buffer: bones }, { buffer: actor }];
     const mainResources = [{ buffer: frameUBO }, ...common, transView, sampClamp, envCubeView, { buffer: sunVisBuf }, { buffer: dryMoistureBuf }, skyView];
     const main = group(pipeline, mainResources);
-    return { model, isIndigenousBatch, ownsGeometry: !sharedGeo, people: [], poses, actors, vertex, index, lods, bones, actor, main };
+    return { model, isIndigenousBatch, ownsGeometry: !sharedGeo, people: [], poses, actors, vertex, index, lods, bones, actor, main, clip };
   });
   const lighting = shadows.bind(pipeline);
 
@@ -1438,7 +1666,8 @@ export async function createFortSoldiers({
         b.actors[offset + 19] = Number(!s.visible);
         b.actors[offset + 23] = 1;
         b.actors[offset + 27] = Number(s.sex === 'female');
-        b.actors[offset + 31] = 0;
+        // A fort's moisture lookup is always the first entry, so the whole of this slot's fraction is free.
+        b.actors[offset + 31] = (s.dress ?? 0) / DRESS_MASK_SCALE;
       }
     }
   }
@@ -1489,23 +1718,33 @@ export async function createFortSoldiers({
       for (const b of batches) {
         if (!b.people.length) continue;
         const a = b.model.animator;
+        b.clip.begin(b.people.length);
         for (let i = 0; i < b.people.length; i++) {
           const s = b.people[i];
           const offset = i * CREW_ACTOR_FLOATS;
           b.actors.set(s.transform, offset);
           b.actors[offset + 19] = Number(!s.visible);
+          // Only someone close enough to see their hands needs a skeleton solved for them.
+          const away = camera ? Math.hypot(s.position[0] - camera.x, (s.position[1] ?? 0) - (camera.y ?? 0), s.position[2] - camera.z) / crewLensZoom(camera) : 0;
+          if (crewClipOnly(away, s)) {
+            b.clip.set(i, s.time, s.walkTime, s.walk);
+            continue;
+          }
+          b.clip.off(i);
           if (shouldSamplePoses) {
             a.sample('Idle', s.time, 'Walk', s.walkTime, s.walk);
             if (s.brace > 0.001) a.blend('Brace', s.time, s.brace);
             applyCrewRealism(a, s, null, dt);
-            b.poses.set(a.palette, i * 65 * 16);
+            device.queue.writeBuffer(b.bones, i * 65 * 64, a.palette);
           }
         }
-        if (shouldSamplePoses) {
-          device.queue.writeBuffer(b.bones, 0, b.poses, 0, b.people.length * 65 * 16);
-        }
+        b.clip.upload();
         device.queue.writeBuffer(b.actor, 0, b.actors, 0, b.people.length * CREW_ACTOR_FLOATS);
       }
+    },
+    encodePose(pass) {
+      if (!drawEnabled) return;
+      for (const b of batches) if (b.people.length) b.clip.encode(pass);
     },
     draw(pass) {
       if (!drawEnabled) return;
@@ -1529,7 +1768,7 @@ export async function createFortSoldiers({
             resource?.destroy?.();
           }
         }
-        b.bones.destroy();
+        b.bones.destroy();b.clip.destroy();
         b.actor.destroy();
       }
     },

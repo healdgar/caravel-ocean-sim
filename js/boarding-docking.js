@@ -14,12 +14,31 @@
 // ============================================================================
 
 import { modelDeck, modelDeckWidth, vesselHull } from './hull.js';
+import { clearCrewWounds } from './crew-wounds.js';
+import { repairVessel, refloatVessel, stopVesselLeaks, setVesselHullIntegrity } from './vessel-damage.js';
 import { applyPirateCrewAttire } from './crew.js';
 import { resolveIndigenousCultureRegion } from './coastal-world.js';
 import {
   applyIndigenousSupportAction,
   getActiveIndigenousSovereigntyState,
 } from './indigenous-sovereignty.js';
+
+// What each prize choice gives, shown to the captain before choosing.
+export const PRIZE_STORES = Object.freeze({
+  ally: Object.freeze({ food: 10, water: 8 }),
+  'gift-indigenous': Object.freeze({ food: 12, water: 12 }),
+  'impress-plunder': Object.freeze({ food: 24, water: 18 }),
+  'scuttle-repair': Object.freeze({ food: 18, water: 14 }),
+});
+export const PRIZE_PLUNDERED_CANNONS = 4;
+// A prize yields cannon only if she mounts them and our own ship can fight with them.
+const prizeMountedCannons = (boat) => (boat?.gunnery?.guns ?? []).filter((gun) => gun.kind !== 'bow').length;
+export function prizeCannonCount(prizeBoat, ownBoat) {
+  if (!prizeMountedCannons(ownBoat)) return 0;
+  return Math.min(PRIZE_PLUNDERED_CANNONS, prizeMountedCannons(prizeBoat));
+}
+export const PRIZE_SCUTTLE_HULL_REPAIR = 0.55;
+const prizeImpressCount = able => Math.max(3, Math.min(8, able > 0 ? Math.ceil(able * 0.5) : 4));
 
 export const FEMALE_BOARDING_STRENGTH = 1.0;
 export const MALE_BOARDING_STRENGTH = 1.0;
@@ -198,71 +217,48 @@ function releaseCrewRailAction(company, boat) {
 
 // Find the closest pier / harbor jetty in the terrain port instances, or
 // synthesize a stone/timber quay alongside the ship when near land/harbor.
+// How far a heaving line can be got across. Lines go only to something really there.
+export const MOORING_LINE_REACH_M = 36;
+export const MOORING_SHIP_REACH_M = 30;
+const MOORING_PIER_PREFAB = /jetty|pier|wharf|dock|quay|mole|slip/i;
+
+// The nearest point of a pier's footprint to a point in the world.
+function pierClosestPoint(inst, offset, px, pz) {
+  const cx = (inst.x ?? 0) + offset.x, cz = (inst.z ?? 0) + offset.z;
+  const yaw = inst.yaw ?? inst.rotY ?? 0, c = Math.cos(yaw), sn = Math.sin(yaw);
+  const dx = px - cx, dz = pz - cz;
+  const lx = bdClamp(dx * c - dz * sn, -(inst.width ?? 0) * 0.5, (inst.width ?? 0) * 0.5);
+  const lz = bdClamp(dx * sn + dz * c, -(inst.length ?? 0) * 0.5, (inst.length ?? 0) * 0.5);
+  return { x: cx + lx * c + lz * sn, z: cz - lx * sn + lz * c };
+}
+
+// The nearest real pier within reach of a line, or null. There is no such thing as a pier
+// that exists only because she wants one.
 export function findNearestPier(boat, env = {}) {
-  const bx = boat?.x ?? 0;
-  const bz = boat?.z ?? 0;
+  const bx = boat?.x ?? 0, bz = boat?.z ?? 0;
   const instances = env?.portInstances ?? env?.terrain?.port?.instances ?? [];
-  let bestPier = null;
-  let bestDist = Infinity;
-
-  if (Array.isArray(instances)) {
-    for (const inst of instances) {
-      if (!inst) continue;
-      const isPier = inst.assetId === 'harbor_jetty_and_crane' ||
-        /jetty|pier|wharf|dock|quay/i.test(inst.assetId ?? '');
-      if (!isPier && bestPier) continue;
-      const dx = (inst.x ?? 0) - bx;
-      const dz = (inst.z ?? 0) - bz;
-      const d = Math.hypot(dx, dz);
-      const effectiveD = isPier ? d : d + 120;
-      if (effectiveD < bestDist) {
-        bestDist = d;
-        const rot = inst.rotY ?? 0;
-        bestPier = {
-          kind: 'pier',
-          label: isPier ? 'Harbor Timber Pier & Crane' : 'Harbor Quay',
-          x: inst.x ?? 0,
-          y: Math.max(1.25, (inst.y ?? 0) + 1.35),
-          z: inst.z ?? 0,
-          heading: (rot * 180 / Math.PI) % 360,
-          distance: d,
-        };
-      }
-    }
+  const offset = env?.terrain?.getWorldOffset?.() ?? { x: 0, z: 0 };
+  let nearest = null, nearestDistance = MOORING_LINE_REACH_M;
+  for (const inst of Array.isArray(instances) ? instances : []) {
+    if (!inst || !MOORING_PIER_PREFAB.test(inst.prefabId ?? inst.assetId ?? '')) continue;
+    const point = pierClosestPoint(inst, offset, bx, bz);
+    const distance = Math.hypot(point.x - bx, point.z - bz);
+    if (distance <= nearestDistance) { nearest = { inst, point }; nearestDistance = distance; }
   }
-
-  if (bestPier && bestPier.distance <= 36) {
-    // Clamp effective bollard line-of-action to a clean lateral warping range (<= 9.5 m)
-    // so hauling never drags the vessel across shoals or far-off shore geometry.
-    const { rightX, rightZ } = boatBasis(boat);
-    const dx = bestPier.x - bx;
-    const dz = bestPier.z - bz;
-    const sideSign = (dx * rightX + dz * rightZ) >= 0 ? 1 : -1;
-    const side = sideSign >= 0 ? 'starboard' : 'port';
-    const halfBeam = Math.max(2.0, (boat?.beam ?? 4.8) * 0.5);
-    const clampedDist = bdClamp(bestPier.distance, halfBeam + 3.2, halfBeam + 7.5);
-    return {
-      ...bestPier,
-      x: bx + rightX * sideSign * clampedDist,
-      z: bz + rightZ * sideSign * clampedDist,
-      distance: clampedDist,
-      side,
-    };
-  }
-
-  // Fallback: create a berth alongside the ship's port beam at a smooth warping distance
+  if (!nearest) return null;
+  const { inst, point } = nearest;
   const { rightX, rightZ } = boatBasis(boat);
-  const halfBeam = Math.max(2.0, (boat?.beam ?? 4.8) * 0.5);
-  const pierOffset = halfBeam + 5.2;
+  const across = (point.x - bx) * rightX + (point.z - bz) * rightZ;
   return {
     kind: 'pier',
-    label: env?.portLabel || 'Harbor Landing Pier',
-    x: bx - rightX * pierOffset,
-    y: 1.35,
-    z: bz - rightZ * pierOffset,
-    heading: boat?.heading ?? 0,
-    distance: pierOffset,
-    side: 'port',
+    label: inst.label || env?.portLabel || 'the pier',
+    x: point.x,
+    y: Math.max(1.25, (inst.y ?? 0) + 1.35),
+    z: point.z,
+    heading: (((inst.yaw ?? inst.rotY ?? 0) * 180) / Math.PI) % 360,
+    distance: Math.abs(across),
+    side: across >= 0 ? 'starboard' : 'port',
+    closestPoint: (px, pz) => pierClosestPoint(inst, offset, px, pz),
   };
 }
 
@@ -288,15 +284,14 @@ function buildLineDescriptorsForPier(boat, pier, side = 'port') {
   return specs.map((sp, i) => {
     const hb = Math.max(0.55, modelDeckWidth(boat, sp.shipZ) - 0.08);
     const deckY = modelDeck(boat, sp.shipZ) + 0.34;
+    const wantX = basePierX + fwdX * sp.pierAlong, wantZ = basePierZ + fwdZ * sp.pierAlong;
+    // Each line lands on the pier itself, however she lies to it.
+    const bollard = pier?.closestPoint?.(wantX, wantZ) ?? { x: wantX, z: wantZ };
     return {
       name: sp.name,
       index: i,
       shipLocal: [sideSign * hb, deckY, sp.shipZ],
-      pierWorld: [
-        basePierX + fwdX * sp.pierAlong,
-        basePierY,
-        basePierZ + fwdZ * sp.pierAlong,
-      ],
+      pierWorld: [bollard.x, basePierY, bollard.z],
     };
   });
 }
@@ -389,6 +384,10 @@ export function createDockingBoardingState(boat, options = {}) {
   // Throw mooring lines onto a pier and make fast
   function dockAtPier(env = {}, { immediate = false } = {}) {
     const pier = findNearestPier(boat, env);
+    if (!pier) {
+      state.statusText = 'No pier within reach of a line.';
+      return { ok: false, reason: state.statusText };
+    }
     const side = pier.side ?? determineSideToward(pier.x, pier.z);
     const sideSign = side === 'port' ? -1 : 1;
     const { rightX, rightZ } = boatBasis(boat);
@@ -436,6 +435,27 @@ export function createDockingBoardingState(boat, options = {}) {
 
     emit('dock-start', { pier, side, immediate });
     return { ok: true, pier, side, phase: state.mooringPhase };
+  }
+
+  function shipWithinLineReach() {
+    let best = null, bestGap = MOORING_SHIP_REACH_M;
+    for (const v of state.getAdditionalVessels() ?? []) {
+      const tb = v?.boat;
+      if (!tb || v.dormantEncounter || tb.showProw === false || tb.damage?.sunk) continue;
+      const gap = Math.hypot((tb.x ?? 0) - (boat.x ?? 0), (tb.z ?? 0) - (boat.z ?? 0)) - ((boat.beam ?? 4.8) + (tb.beam ?? 4.8)) * 0.5;
+      if (gap <= bestGap) { best = v; bestGap = gap; }
+    }
+    return best;
+  }
+  // What a line thrown now would reach: 'vessel', 'pier', or nothing at all.
+  function lineTarget(env = state.getLineEnv?.() ?? {}) {
+    if (shipWithinLineReach()) return 'vessel';
+    return findNearestPier(boat, env) ? 'pier' : null;
+  }
+  function throwLines(env = state.getLineEnv?.() ?? {}) {
+    const vessel = shipWithinLineReach();
+    if (vessel) return grappleShip(vessel, { mode: 'moor', pullAlongside: false });
+    return dockAtPier(env);
   }
 
   // Throw grappling/mooring lines onto another ship
@@ -513,8 +533,7 @@ export function createDockingBoardingState(boat, options = {}) {
       tb.damage.surrenderReason = null;
       tb.damage.battleMorale = Math.max(0.78, tb.damage.battleMorale ?? 0.78);
       tb.damage.moraleState = 'steady';
-      tb.damage.floodingRate = 0;
-      tb.damage.floodingLevel = Math.min(0.15, tb.damage.floodingLevel ?? 0);
+      stopVesselLeaks(tb.damage);
       if (tb.damage.crewCasualties) {
         tb.damage.crewCasualties.surrendered = false;
         tb.damage.crewCasualties.battleMorale = tb.damage.battleMorale;
@@ -550,12 +569,16 @@ export function createDockingBoardingState(boat, options = {}) {
     const plunder = {
       vesselName: shipLabel,
       captureMethod,
-      waterDays: 12,
-      foodDays: 16,
-      cannons: 4,
+      stores: PRIZE_STORES,
+      cannons: prizeCannonCount(targetVessel.boat ?? targetVessel, boat),
+      giftCannons: Math.min(6, prizeMountedCannons(targetVessel.boat ?? targetVessel)),
+      // Nobody here can be enslaved: Indigenous crews go free, and so do a slaver's captives.
+      impressCount: targetVessel.currentEncounter?.archetype?.indigenousAlly ? 0 : prizeImpressCount(targetPower.able || 0),
+      indigenousCrew: Boolean(targetVessel.currentEncounter?.archetype?.indigenousAlly),
+      freedCaptives: Boolean(targetVessel.currentEncounter?.archetype?.colonialRaider),
+      scuttleHullRepair: PRIZE_SCUTTLE_HULL_REPAIR,
       survivingCrew: Math.max(2, targetPower.able || 6),
       timberTonnes: 6,
-      goldEscudos: captureMethod === 'boarded-and-fought' ? 280 : 180,
     };
 
     if (!state.capturedVessels.includes(targetVessel)) {
@@ -573,7 +596,7 @@ export function createDockingBoardingState(boat, options = {}) {
       ? `Boarded surrendered ${shipLabel} and took her as a prize! Hoisted ${playerColors} colors.`
       : `Boarding party victorious! Captured ${shipLabel} hand-to-hand and hoisted ${playerColors} colors!`;
     state.combatLog.unshift(state.statusText);
-    emit('vessel-captured', { targetVessel, captureMethod, plunder });
+    emit('vessel-captured', { vessel: targetVessel, captureMethod, plunder });
     return state.lastOutcome;
   }
 
@@ -603,14 +626,8 @@ export function createDockingBoardingState(boat, options = {}) {
       vessel.isPirate = false;
       if (tb.damage) {
         tb.damage.surrendered = false;
-        tb.damage.sunk = false;
-        tb.damage.settledWreck = false;
-        tb.damage.restingOnBottom = false;
-        tb.damage.hullIntegrity = Math.max(0.68, tb.damage.hullIntegrity ?? 0.68);
-        tb.damage.rigIntegrity = Math.max(0.75, tb.damage.rigIntegrity ?? 0.75);
-        tb.damage.floodingRate = 0;
-        tb.damage.floodingLevel = 0;
-        tb.damage.floodingSinkage = 0;
+        refloatVessel(tb);
+        repairVessel(tb, { minHull: 0.68, minRig: 0.75, leaks: true, flooding: true });
         tb.damage.battleMorale = 0.88;
         tb.damage.moraleState = 'steady';
         if (tb.damage.crewCasualties) {
@@ -630,8 +647,8 @@ export function createDockingBoardingState(boat, options = {}) {
       tb.sailMain = 1;
       tb.sailMizzen = 1;
       if (voyage?.provisions) {
-        voyage.provisions.water = Math.min(90, (voyage.provisions.water ?? 30) + 8);
-        voyage.provisions.food = Math.min(120, (voyage.provisions.food ?? 40) + 10);
+        voyage.provisions.water = Math.min(90, (voyage.provisions.water ?? 30) + PRIZE_STORES.ally.water);
+        voyage.provisions.food = Math.min(120, (voyage.provisions.food ?? 40) + PRIZE_STORES.ally.food);
       }
       if (state.mooringPhase !== 'clear') castOff();
       const summary = `🏴 Prize crew placed aboard ${shipLabel}! She hoists ${playerColors} colors and joins our fleet as an allied consort (+8d water, +10d food).`;
@@ -651,8 +668,7 @@ export function createDockingBoardingState(boat, options = {}) {
       const sovRes = applyIndigenousSupportAction(
         culture.id,
         'gift-prize',
-        getActiveIndigenousSovereigntyState(),
-        { boat, voyage, cannonCount: 6 }
+        { state: getActiveIndigenousSovereigntyState(), boat, voyage, cannonCount: Math.min(6, prizeMountedCannons(tb)) }
       );
       boat.colors = 'indigenous-confederacy';
       tb.colors = 'indigenous-confederacy';
@@ -661,11 +677,8 @@ export function createDockingBoardingState(boat, options = {}) {
       vessel.faction = 'friendly';
       if (tb.damage) {
         tb.damage.surrendered = false;
-        tb.damage.sunk = false;
-        tb.damage.hullIntegrity = Math.max(0.75, tb.damage.hullIntegrity ?? 0.75);
-        tb.damage.rigIntegrity = Math.max(0.80, tb.damage.rigIntegrity ?? 0.80);
-        tb.damage.floodingRate = 0;
-        tb.damage.floodingLevel = 0;
+        refloatVessel(tb);
+        repairVessel(tb, { minHull: 0.75, minRig: 0.8, leaks: true, flooding: true });
         tb.damage.battleMorale = 0.94;
       }
       if (vessel.follower) {
@@ -679,7 +692,7 @@ export function createDockingBoardingState(boat, options = {}) {
       tb.sailMain = 1;
       tb.sailMizzen = 1;
       if (state.mooringPhase !== 'clear') castOff();
-      const summary = `🛡️ ${sovRes.message}`;
+      const summary = `🛡️ ${sovRes.summary}`;
       state.statusText = summary;
       state.combatLog.unshift(summary);
       const res = {
@@ -697,40 +710,20 @@ export function createDockingBoardingState(boat, options = {}) {
       const targetComp = getVesselCompany(vessel);
       const targetSailors = targetComp?.crew ?? targetComp?.sailors ?? [];
       const targetAble = targetSailors.filter(s => s.casualtyState !== 'fallen' && s.wounded !== 'incapacitated').length;
-      const pressedCount = Math.max(3, Math.min(8, targetAble > 0 ? Math.ceil(targetAble * 0.5) : 4));
+      const pressedCount = vessel.currentEncounter?.archetype?.indigenousAlly ? 0 : prizeImpressCount(targetAble);
 
-      // Heal wounded/fallen in player's crew and add pressed hands to player's roster (women and men equally strong = 1.0)
+      // Pressed hands first fill the places of our wounded and fallen. The visible company is a
+      // fixed set of animated actors, so extra hands join the ship's muster, not the deck.
       const playerSailors = state.company?.crew ?? state.company?.sailors ?? [];
       let healed = 0;
       for (const s of playerSailors) {
-        if (healed < pressedCount && (s.wounded || s.casualtyState !== 'able' || (s.health ?? 1) < 1)) {
+        if (healed < pressedCount && (s.wounded || s.casualtyState === 'wounded' || s.casualtyState === 'fallen' || (s.health ?? 1) < 1)) {
           s.health = 1.0;
           s.wounded = null;
           s.casualtyState = 'able';
           s.strength = 1.0;
+          clearCrewWounds(s); // a pressed hand takes this place
           healed++;
-        }
-      }
-      let addedToRoster = 0;
-      if (Array.isArray(state.company?.crew)) {
-        const candidates = targetSailors.filter(s => s.casualtyState !== 'fallen');
-        for (let i = 0; i < pressedCount; i++) {
-          const src = candidates[i];
-          const sex = src?.sex ?? (i % 2 === 0 ? 'female' : 'male');
-          state.company.crew.push({
-            id: `impressed-${Date.now()}-${i}`,
-            name: src?.name ?? (sex === 'female' ? `Catalina (${shipLabel})` : `Rodrigo (${shipLabel})`),
-            role: src?.role ?? 'Able seaman (impressed)',
-            sex,
-            strength: 1.0,
-            health: 1.0,
-            casualtyState: 'able',
-            wounded: null,
-            x: 0,
-            y: 0,
-            z: 0,
-          });
-          addedToRoster++;
         }
       }
       const dmg = boat.damage;
@@ -750,15 +743,15 @@ export function createDockingBoardingState(boat, options = {}) {
       }
 
       // Plunder her cannon, powder, shot, and provisions
-      const plunderedGuns = 4;
+      const plunderedGuns = prizeCannonCount(tb, boat);
       boat.plunderedCannons = (boat.plunderedCannons ?? 0) + plunderedGuns;
-      boat.plunderedFirepowerMultiplier = Math.min(2.0, +((boat.plunderedFirepowerMultiplier ?? 1.0) + 0.25).toFixed(2));
+      if (plunderedGuns > 0) boat.plunderedFirepowerMultiplier = Math.min(2.0, +((boat.plunderedFirepowerMultiplier ?? 1.0) + 0.25).toFixed(2));
       boat.provisionDays = Math.min(120, (boat.provisionDays ?? 60) + 18);
       if (voyage) {
         voyage.morale = Math.min(1.0, (voyage.morale ?? 0.85) + 0.12);
         if (voyage.provisions) {
-          voyage.provisions.water = Math.min(90, (voyage.provisions.water ?? 30) + 18);
-          voyage.provisions.food = Math.min(120, (voyage.provisions.food ?? 40) + 24);
+          voyage.provisions.water = Math.min(90, (voyage.provisions.water ?? 30) + PRIZE_STORES['impress-plunder'].water);
+          voyage.provisions.food = Math.min(120, (voyage.provisions.food ?? 40) + PRIZE_STORES['impress-plunder'].food);
         }
       }
 
@@ -777,14 +770,14 @@ export function createDockingBoardingState(boat, options = {}) {
       vessel.gunnery?.standDown?.();
       if (state.mooringPhase !== 'clear') castOff();
 
-      const summary = `⚓ Impressed ${pressedCount} able hands into our crew and plundered ${plunderedGuns} cannon (+25% broadside weight, +18d water, +24d food) from ${shipLabel}!`;
+      const summary = `⚓ ${pressedCount ? `Impressed ${pressedCount} able hands into our crew and` : 'Set her crew free and'} took ${plunderedGuns ? `${plunderedGuns} cannon (+25% broadside weight, +18d water, +24d food)` : 'her stores (+18d water, +24d food)'} from ${shipLabel}!`;
       state.statusText = summary;
       state.combatLog.unshift(summary);
       const res = {
         ok: true,
         disposition: 'impress-plunder',
         vessel,
-        impressedCount: addedToRoster || pressedCount,
+        impressedCount: pressedCount,
         pressedCrew: pressedCount,
         plunderedCannons: plunderedGuns,
         waterDays: 18,
@@ -800,36 +793,17 @@ export function createDockingBoardingState(boat, options = {}) {
       const prevHull = boat.damage?.hullIntegrity ?? 1.0;
       const prevRig = boat.damage?.rigIntegrity ?? 1.0;
       if (boat.damage) {
-        boat.damage.hullIntegrity = Math.min(1.0, +((boat.damage.hullIntegrity ?? 0.6) + 0.55).toFixed(3));
-        boat.damage.rigIntegrity = 1.0;
-        boat.damage.floodingRate = 0;
-        boat.damage.floodingLevel = 0;
-        boat.damage.floodingSinkage = 0;
-        boat.damage.floodingRoll = 0;
-        boat.damage.floodingPitch = 0;
+        repairVessel(boat, { hullGain: PRIZE_SCUTTLE_HULL_REPAIR, minRig: 1, leaks: true, flooding: true, guns: true, fires: true, structure: true });
         boat.damage.battleMorale = Math.min(1.0, (boat.damage.battleMorale ?? 0.85) + 0.15);
-        if (boat.damage.mastIntegrity) {
-          boat.damage.mastIntegrity.fore = 1;
-          boat.damage.mastIntegrity.main = 1;
-          boat.damage.mastIntegrity.mizzen = 1;
-        }
-        if (boat.damage.mastState) {
-          boat.damage.mastState.fore = 0;
-          boat.damage.mastState.main = 0;
-          boat.damage.mastState.mizzen = 0;
-        }
-        if (Array.isArray(boat.damage.craters)) boat.damage.craters.length = 0;
-        if (boat.damage.partDamage) {
-          for (const k of Object.keys(boat.damage.partDamage)) boat.damage.partDamage[k] = 0;
-        }
       }
+      playerVessel?.pose?.restoreGeometry?.();
       boat.rawMaterialsTonnes = (boat.rawMaterialsTonnes ?? 0) + 6;
-      boat.provisionDays = Math.min(120, (boat.provisionDays ?? 60) + 14);
+      boat.provisionDays = Math.min(120, (boat.provisionDays ?? 60) + PRIZE_STORES['scuttle-repair'].water);
       if (voyage) {
         voyage.hull = boat.damage?.hullIntegrity ?? 1.0;
         if (voyage.provisions) {
-          voyage.provisions.water = Math.min(90, (voyage.provisions.water ?? 30) + 14);
-          voyage.provisions.food = Math.min(120, (voyage.provisions.food ?? 40) + 18);
+          voyage.provisions.water = Math.min(90, (voyage.provisions.water ?? 30) + PRIZE_STORES['scuttle-repair'].water);
+          voyage.provisions.food = Math.min(120, (voyage.provisions.food ?? 40) + PRIZE_STORES['scuttle-repair'].food);
         }
       }
       if (playerVessel) {
@@ -841,16 +815,13 @@ export function createDockingBoardingState(boat, options = {}) {
       if (state.mooringPhase !== 'clear') castOff();
       tb.allyConsort = false;
       tb.scuttled = true;
-      tb.sunk = true;
       tb.showProw = false;
       tb.sailFore = 0;
       tb.sailMain = 0;
       tb.sailMizzen = 0;
       if (tb.damage) {
         tb.damage.sunk = true;
-        tb.damage.hullIntegrity = 0;
-        tb.damage.floodingRate = 0.38;
-        tb.damage.floodingLevel = 1.0;
+        setVesselHullIntegrity(tb.damage, 0);
         tb.damage.sinkingDepth = Math.max(2.2, tb.damage.sinkingDepth ?? 2.2);
         tb.damage.floodingSinkage = Math.max(1.8, tb.damage.floodingSinkage ?? 1.8);
         tb.damage.floodingPitch = 0.14;
@@ -1133,7 +1104,7 @@ export function createDockingBoardingState(boat, options = {}) {
     let best = null;
     let bestD = maxDist;
     for (const v of vessels) {
-      if (!v?.boat || v.boat.sunk) continue;
+      if (!v?.boat || v.boat.damage?.sunk) continue;
       const d = Math.hypot((v.boat.x ?? 0) - (boat.x ?? 0), (v.boat.z ?? 0) - (boat.z ?? 0));
       if (d < bestD) {
         bestD = d;
@@ -1353,6 +1324,8 @@ export function createDockingBoardingState(boat, options = {}) {
   return {
     state,
     dockAtPier,
+    throwLines,
+    lineTarget,
     grappleShip,
     boardVessel,
     capturePrizeVessel,

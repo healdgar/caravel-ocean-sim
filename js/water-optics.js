@@ -45,7 +45,8 @@ export function createSubmergedShader(source,entry='fs',world='v.world',surfaceW
   const originalSignature=source.slice(marker.index,bodyStart).replace(new RegExp(`\\b${entry}\\s*\\(`),'submergedFS(');
   const materialSignature=`fn waterCaptureMaterial(${plain})->vec4f `;
   source=source.slice(0,marker.index)+materialSignature+source.slice(bodyStart);
-  return source+/* wgsl */ `
+  // Material derivatives past the early exit above are never read at a surface edge that matters.
+  return 'diagnostic(off,derivative_uniformity);\n'+source+/* wgsl */ `
 @group(3) @binding(0) var captureSea:texture_2d_array<f32>;
 @group(3) @binding(1) var captureSeaSampler:sampler;
 @group(3) @binding(4) var<uniform> captureMode:vec4f;
@@ -62,12 +63,13 @@ fn captureHeight(p:vec2f)->f32{
   return captureDisplacement(q).y${surfaceWaves?'+surfaceWaveAt(p).x':''};
 }
 ${originalSignature}{
-  let material=waterCaptureMaterial(${argumentsList});
+  // Most of a ship is on the wrong side of the surface here. Leave before lighting any of it.
   let captureWorld=${world};
   let surfaceY=captureHeight(captureWorld.xz);
-  if(select(captureWorld.y>surfaceY+0.015,(captureWorld.y<surfaceY-0.015),captureMode.x>.5)){discard;}
+  if(select(captureWorld.y>surfaceY+0.015,(captureWorld.y<surfaceY-0.015),captureMode.x>.5)){discard;return vec4f(0);}
   let eyeDepth=dot(captureWorld-F.camPos.xyz,F.camFwd.xyz);
-  if(eyeDepth<=0.0){discard;}
+  if(eyeDepth<=0.0){discard;return vec4f(0);}
+  let material=waterCaptureMaterial(${argumentsList});
   return vec4f(material.rgb,eyeDepth);
 }
 `;

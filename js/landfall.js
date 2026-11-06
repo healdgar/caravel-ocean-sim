@@ -639,9 +639,9 @@ export function createLandfallUI({dock,active,stage,weather,region=ISLAND,discov
     for(const btn of sovContainer.querySelectorAll('[data-sov-action]')){
       btn.onclick=()=>{
         const action=btn.getAttribute('data-sov-action');
-        const res=applyIndigenousSupportAction(indigenousCulture.id,action,sovState);
+        const res=applyIndigenousSupportAction(indigenousCulture.id,action,{state:sovState});
         saveIndigenousSovereigntyToStorage(sovState);
-        lastSovMessage=res.message;
+        lastSovMessage=res.summary;
         renderIndigenousSovereigntyCard();
         onIndigenousAction?.(res);
       };

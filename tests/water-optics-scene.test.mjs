@@ -72,7 +72,7 @@ function instrumentScene(){
 }
 
 const fixture=String.raw`
-  window.opticsFixture={render(){frameIndex=40;envFull=true;frame(last);},size:()=>[W,H],
+  window.opticsFixture={render(){frameIndex=40;envFull=true;frame(last);},advance(){frameIndex=40;envFull=true;frame(last+16);},size:()=>[W,H],
     enabled(value){qs.set('waterOptics',value?'1':'0');},
     async wildlife(kind){
       // Keep the actual two-vessel roster and resources. Move both ships behind
@@ -132,7 +132,7 @@ function assertValid(frame){assert.deepEqual(frame.errors,[]);assert.ok(frame.dr
 function difference(a,b){let pixels=0,energy=0;for(let i=0;i<a.length;i+=4){const delta=Math.abs(a[i]-b[i])+Math.abs(a[i+1]-b[i+1])+Math.abs(a[i+2]-b[i+2]);if(delta>3)pixels++;energy+=delta;}return {pixels,energy};}
 
 test('the actual Niña fleet captures independent hulls and renders submerged whales and dolphins through water, including after resize',{timeout:180000},async()=>{
-  const {page,errors}=await loadScene('/?ship=nina&view=ship&follower=1&sunElev=45&clouds=0&windSpeed=2&swellHs=.2&turbidity=.2&resolution=native',{source:true});
+  const {page,errors}=await loadScene('/?ocean=1&ship=nina&view=ship&follower=1&sunElev=45&clouds=0&windSpeed=2&swellHs=.2&turbidity=.2&resolution=native',{source:true});
   try{
     const fleet=await render(page);assertValid(fleet);
     const roster=await page.evaluate(()=>{
@@ -157,18 +157,20 @@ test('the actual Niña fleet captures independent hulls and renders submerged wh
         assert.equal(draw.count,vessel.indices);assert.equal(draw.instances,1);assert.ok(draw.material&&draw.lighting&&draw.indices,'each draw binds its own material and shadow groups with the shared model indices');
       }
     }
-    assert.ok((await readScene(page)).count>20,'a loaded hull produces underwater source fragments');
+    assert.ok((await readScene(page)).count>5,'a loaded hull produces underwater source fragments');
     for(const animal of ['whale','dolphins']){
       await page.evaluate(animal=>opticsFixture.wildlife(animal),animal);
+      // Zero-step frames skip the simulation block, so one real step poses the animal.
+      await page.evaluate(()=>opticsFixture.advance());
       await render(page);await render(page);
       await page.evaluate(()=>opticsFixture.enabled(false));await render(page);const ordinary=await readScene(page);
       await page.evaluate(()=>opticsFixture.enabled(true));const frame=await render(page),through=await readScene(page);assertValid(frame);
       const family=animal==='whale'?'marine':'dolphins';assert.ok(frame.draws.some(draw=>draw.pass==='Submerged geometry'&&draw.family===family),`${animal} submits its real animated mesh to capture`);
-      assert.ok(through.count>(animal==='whale'?200:30),`${animal} creates measurable submerged pixels: ${through.count}`);
+      assert.ok(through.count>(animal==='whale'?50:8),`${animal} creates measurable submerged pixels in the half-size capture: ${through.count}`);
       assert.ok(through.minDepth>0&&through.maxDepth<80,`${animal} alpha remains camera depth in metres`);
-      const delta=difference(ordinary.color,through.color);assert.ok(delta.pixels>(animal==='whale'?100:20),`${animal} must affect final water pixels, not just an unused capture: ${JSON.stringify(delta)}`);
+      const delta=difference(ordinary.color,through.color);assert.ok(delta.pixels>(animal==='whale'?25:5),`${animal} must affect final water pixels, not just an unused capture: ${JSON.stringify(delta)}`);
     }
-    await page.setViewportSize({width:288,height:216});const resized=await render(page);assertValid(resized);assert.deepEqual(resized.size,[288,216]);assert.ok((await readScene(page)).count>30,'resizing retains underwater wildlife');
+    await page.setViewportSize({width:288,height:216});const resized=await render(page);assertValid(resized);assert.deepEqual(resized.size,[144,108],'the capture follows the new canvas at half size');assert.ok((await readScene(page)).count>8,'resizing retains underwater wildlife');
     assert.deepEqual(errors,[]);assert.deepEqual(await page.evaluate(()=>opticsScene.errors),[]);
   }finally{await page.close();}
 });
@@ -180,7 +182,7 @@ test('the standalone coastal Niña scene composites captured seabed with inline 
     assert.ok(frame.draws.some(draw=>draw.pass==='Submerged geometry'&&draw.family==='terrain'),'real coastal seabed is captured');
     assert.ok(frame.draws.some(draw=>draw.label==='island'),'the ordinary land path remains active');
     assert.equal(frame.draws.filter(draw=>draw.pass==='Submerged geometry'&&draw.family==='hull').length,2);
-    const capture=await readScene(page);assert.ok(capture.count>100,'coastal source contains actual submerged geometry');
+    const capture=await readScene(page);assert.ok(capture.count>25,'coastal source contains actual submerged geometry');
     assert.deepEqual(errors,[]);assert.deepEqual(await page.evaluate(()=>opticsScene.errors),[]);
   }finally{await page.close();}
 });

@@ -18,5 +18,5 @@ for(const model of Object.values(SHIP_MODELS).filter(m=>m.status==='ready'&&m.ge
   models.push({id:model.id,vertexCount:asset.vertices.length/9,sourceSHA256:createHash('sha256').update(asset.vertices).digest('hex'),cases});
 }
 await mkdir(new URL('../tests/data/',import.meta.url),{recursive:true});
-await writeFile(fixture,JSON.stringify({version:1,sourceCommit:'379881a62e4b9a90bac030f88dab5bbf871aef8c',description:'Frozen pre-GPU-port CPU geometry; five complete control/rowing states. Tests never regenerate.',controls:GPU_RIG_ORACLE_CASES,models})+'\n',{flag:'wx'});
+await writeFile(fixture,JSON.stringify({version:1,sourceCommit:'2a6a4bd404aaf80429a379205de3f41fb6bdb749',description:'Frozen CPU rig reference for the fleet geometry after edb1469, 6f4db09 and fffec91 (first frozen pre-GPU-port at 379881a); five complete control/rowing states. Tests never regenerate.',controls:GPU_RIG_ORACLE_CASES,models})+'\n',{flag:'wx'});
 console.log('Wrote '+fixture.pathname+' for '+models.length+' complete CPU reference models');

@@ -59,8 +59,20 @@ export function writeGunneryToolInstances(company,boat,target){
     vertices+=sides*12;if(vertices>4096)throw Error('Gunnery tools exceed bounded geometry');
     buckets[sides===5?0:sides===6?1:2].push(...a,radius,...b,kind);
   };
+  const spare=()=>vertices+60<=4096&&buckets.reduce((n,b)=>n+b.length,0)+8<=target.length;
   for(const sailor of company.crew){
+    // Arrows that struck this body, fletched at the tail. They yield to a working crew's tools.
+    for(const arrow of sailor.stuckArrowPoses??[]){
+      if(spare())tube(arrow.tip,arrow.tail,.011,1,5);
+      const d=arrow.tail.map((v,i)=>v-arrow.tip[i]),n=Math.hypot(...d);
+      if(n>1e-5&&spare())tube(arrow.tail.map((v,i)=>v-d[i]/n*.1),arrow.tail,.02,2,5);
+    }
     const tool=crewGunneryTool(sailor,boat);if(!tool?.a||!tool.b)continue;
+    if(tool.kind==='blade'||tool.kind==='club'){
+      // A crowded rail loses a few weapons rather than overflow the tool budget.
+      if(spare())tube(tool.a,tool.b,tool.radius,tool.kind==='blade'?0:1,5);
+      continue;
+    }
     if(tool.kind==='tackle'){tube(tool.a,tool.b,.019,2,5);continue;}
     if(tool.kind==='chamber'){tube(tool.a,tool.b,.055,0,8);continue;}
     if(tool.kind==='spyglass'){
@@ -97,6 +109,10 @@ export function buildGunneryToolVertices(company,boat,vertices){
   };
   for(const sailor of company.crew){
     const tool=crewGunneryTool(sailor,boat);if(!tool?.a||!tool.b)continue;
+    if(tool.kind==='blade'||tool.kind==='club'){
+      if(cursor+60*8<=vertices.length)tube(tool.a,tool.b,tool.radius,tool.kind==='blade'?0:1,5);
+      continue;
+    }
     if(tool.kind==='tackle'){tube(tool.a,tool.b,.019,2,5);continue;}
     if(tool.kind==='chamber'){tube(tool.a,tool.b,.055,0,8);continue;}
     if(tool.kind==='spyglass'){

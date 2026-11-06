@@ -9,7 +9,7 @@ function rowingModelProfile({length,draft,freeboard,sheer,breadths,upper,bottom,
   const sy=length/12,D=draft/sy,deck=freeboard/sy;
   return prepareHullLoft({stations:rowingModelStations,levels:[-D,-D*.70,-D*.25,0,deck*.45,deck],
     sections:[flat?bottom:bottom.map(()=>0),bottom,breadths.map(w=>w*.94),breadths,breadths.map((w,i)=>w*.4+upper[i]*.6),upper],
-    deck,sheerFore:sheer/sy,sheerAft:sheer/sy,...(railRise?{railRise:railRise/sy,railRisePower}:{}),bowRake:rake??(flat?.15:.35),sternRake:rake??(flat?.15:.35)});
+    deck,sheerFore:sheer/sy,sheerAft:sheer/sy,...(railRise?{railRise:railRise/sy,railRisePower,stemTop:deck,sternTop:deck}:{}),bowRake:rake??(flat?.15:.35),sternRake:rake??(flat?.15:.35)});
 }
 function rowingModelSail(frame,{height,mastHeight,head,foot,area,z=0}){
   const sx=frame.beam/3.6,sy=frame.length/12,drop=area/((head+foot)*.5),top=height/sy,Y=(height-drop)/sy,Z=z/sy-.06;

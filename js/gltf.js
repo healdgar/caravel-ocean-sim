@@ -186,7 +186,7 @@ export function createSkinAnimator(asset) {
 }
 
 export function loadCrewGLB(bytes) {
-  const asset=readGLB(bytes),g=asset.json,animator=createSkinAnimator(asset),chunks=[],indices=[];let count=0;
+  const asset=readGLB(bytes),g=asset.json,animator=createSkinAnimator(asset),chunks=[],indices=[];let count=0,levels=null;
   if(g.textures?.length)throw Error('Crew materials must be baked to vertex colours');
   for(const node of g.nodes)if(node.mesh!==undefined){
     if(node.skin!==0)throw Error('Crew meshes must share one skin');
@@ -204,12 +204,16 @@ export function loadCrewGLB(bytes) {
       }
       const idx=gltfAccessor(asset,p.indices);if(idx.length%3)throw Error('Invalid triangle count');
       for(const n of idx){if(!Number.isInteger(n)||n<0||n>=num)throw Error('Crew index out of range');indices.push(n+count);}
+      if(p.extras?.crewLevels){
+        levels=p.extras.crewLevels.map(a=>Uint32Array.from(gltfAccessor(asset,a),n=>n+count));
+        for(const level of levels)for(const n of level)if(n>=count+num)throw Error('Crew level out of range');
+      }
       chunks.push(new Uint8Array(data));count+=num;
     }
   }
   if(count===0||count>100000)throw Error('Crew mesh exceeds budget');
   const vertices=new Uint8Array(count*60);let offset=0;for(const c of chunks){vertices.set(c,offset);offset+=c.length;}
   const indexArray=new Uint32Array(indices);
-  const lods=createCrewLODs({vertices,indices:indexArray,vertexCount:count,animator});
-  return {asset,animator,vertices,indices:indexArray,lods,vertexCount:count};
+  const lods=createCrewLODs({vertices,indices:indexArray,vertexCount:count,animator,levels});
+  return {asset,animator,vertices,indices:indexArray,lods,vertexCount:count,distantIndices:levels?.[2]??null};
 }

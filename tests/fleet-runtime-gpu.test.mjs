@@ -8,6 +8,10 @@ import {before,after,test} from 'node:test';
 import {chromium} from 'playwright';
 import {createDevServer} from '../server.mjs';
 import {computeAstronomy} from '../js/astronomy.js';
+import {createCompany} from '../js/crew.js';
+
+// Each runtime ship carries its model's full watch (6ef533d).
+const fullWatch=model=>createCompany(undefined,model,{fullWatch:true}).crew.length;
 
 let fleetRuntimeServer,fleetRuntimeBrowser,fleetRuntimeOrigin;
 before(async()=>{
@@ -90,7 +94,7 @@ function assertFleetSnapshot(snapshot,expected){
   assert.equal(snapshot.shadows.length,3);assert.ok(snapshot.shadows.every(s=>s.layers===expected&&s.width===2048&&s.height===2048));
   assert.deepEqual(snapshot.frameBuffers.map(b=>b.size),[528],'actual production celestial Frame allocation');
   for(const [index,row]of snapshot.rows.entries()){
-    assert.ok(row.vertices>1000&&row.indices>3000,row.model+' actual geometry');assert.equal(row.crew,12,row.model+' actual crew');assert.ok(row.crewFinite&&row.probeFinite,row.model+' finite live state');assert.ok(row.probeTime>=0,row.model+' receives its own actual sea readback');
+    assert.ok(row.vertices>1000&&row.indices>3000,row.model+' actual geometry');assert.equal(row.crew,fullWatch(row.model),row.model+' actual crew');assert.ok(row.crewFinite&&row.probeFinite,row.model+' finite live state');assert.ok(row.probeTime>=0,row.model+' receives its own actual sea readback');
     assert.ok(row.sampleMatches,row.model+' GPU vertex upload matches current instance geometry');assert.equal(row.shadowViews.length,3);assert.ok(row.shadowViews.every(view=>view.layer===index&&view.count===1&&view.total===expected),'shadow draws select this ship’s actual array layers');
     assert.equal(row.cpuPose,false,row.model+' has no runtime CPU mesh animator');assert.equal(row.gpuPose,true,row.model+' owns an actual GPU pose');assert.equal(row.dynamic,-1,row.model+' CPU sail vertices remain immutable');assert.equal(row.uploads,1,row.model+' source geometry is uploaded only at initialization');
   }
@@ -135,7 +139,7 @@ for(const path of ['/', '/docs/index.html'])test(`${path} four different ships s
 for(const path of ['/', '/docs/index.html'])test(`${path} maximum nine real GPU vessels retain shared immutable model assets and isolated moisture`,{timeout:300000},async()=>{
   const {page,errors}=await fleetRuntimeOpen(path,{fleet:'pinta,santa-maria,victory,nina,pinta,santa-maria,victory,nina',w:'128',h:'96'});
   try{
-    await fleetRuntimeStep(page);await fleetRuntimeStep(page);const snapshot=await fleetRuntimeSnapshot(page);assertFleetSnapshot(snapshot,9);assert.equal(snapshot.models.length,4);assert.ok(snapshot.sameModels.length>=5);assert.ok(snapshot.rows.every(v=>v.crew===12));
+    await fleetRuntimeStep(page);await fleetRuntimeStep(page);const snapshot=await fleetRuntimeSnapshot(page);assertFleetSnapshot(snapshot,9);assert.equal(snapshot.models.length,4);assert.ok(snapshot.sameModels.length>=5);assert.deepEqual(snapshot.rows.map(v=>v.crew),snapshot.rows.map(v=>fullWatch(v.model)));
     const isolation=await page.evaluate(async()=>{const f=oceanFleet,r=fleetRuntime;await r.device.queue.onSubmittedWorkDone();const prior=await Promise.all(f.vessels.map(v=>r.read(v.wetness.state,0,8)));r.device.queue.writeBuffer(f.vessels[0].wetness.state,0,new Float32Array([.25,.5]));const after=await Promise.all(f.vessels.map(v=>r.read(v.wetness.state,0,8)));return {prior,after};});
     assert.deepEqual(isolation.after[0],[.25,.5]);for(let i=1;i<9;i++)assert.deepEqual(isolation.after[i],isolation.prior[i],'one ship’s moisture write cannot change ship '+i);
     const next=await fleetRuntimeStep(page);for(const model of snapshot.models)assert.ok(next.render[model+' vessel']>0,'maximum fleet actually renders '+model);assert.deepEqual(next.errors,[]);assert.deepEqual(errors,[]);

@@ -934,24 +934,12 @@ export function createPartAssemblyState(catalog, options = {}) {
           part.id.startsWith('structure.') ||
           part.id.startsWith('stern.') ||
           part.id.startsWith('deck.');
-        const isBreakable =
-          !isContinuousSkin &&
-          part.triangleCount > 0 &&
-          part.triangleCount <= 450 &&
-          spanZ <= 2.2 &&
-          part.layer >= 2 &&
-          part.layer <= 3 &&
-          !part.id.startsWith('gun') &&
-          !part.id.startsWith('helm') &&
-          !part.id.startsWith('boat.');
         const scaleActivity = isScaled ? evaluatePartScaleActivity(part.taxonomy, spec) : { active: true, sealPortLid: false };
         let nextAppear = 1.0;
         if (!scaleActivity.active) {
           nextAppear = 0.0;
         } else if (scaleActivity.sealPortLid) {
           nextAppear = -1.0;
-        } else if (isBreakable && dmg >= 0.65) {
-          nextAppear = 0.0;
         }
         const nextExplode = 0.0;
         const nextWear = isContinuousSkin ? Math.min(0.28, dmg * 0.35) : dmg;
@@ -1207,6 +1195,7 @@ export async function createPartAssemblyGPU({ device, computePipe, posedBuffer, 
   return {
     assets,
     state: stateController,
+    get active() { return active; },
     update(nextState = stateController) {
       if (destroyed) return false;
       active = !nextState.isDefaultIntact();
@@ -1243,312 +1232,39 @@ export async function createPartAssemblyGPU({ device, computePipe, posedBuffer, 
   };
 }
 
-function inferVesselBakeModelId(mesh, vertexCount, stride) {
-  if (vertexCount > 36000) return 'victory';
-  let maxSailId = 0;
-  let hasSailId5 = false;
-  let hasSailId2 = false;
-  for (let v = 0; v < vertexCount; v += 16) {
-    const rawMat = mesh[v * stride + 6];
-    const mat = Math.floor(rawMat);
-    if (mat === 9 || mat === 10 || mat === 13 || mat === 19) {
-      const sId = Math.round((rawMat - mat) * 64);
-      if (sId > maxSailId) maxSailId = sId;
-      if (sId === 5) hasSailId5 = true;
-      if (sId === 2) hasSailId2 = true;
-    }
-  }
-  if (maxSailId > 12) return 'flying-cloud';
-  if (maxSailId === 12 && !hasSailId2 && !hasSailId5) return 'nina';
-  if (hasSailId5 && maxSailId <= 5) return 'santa-maria';
-  if (maxSailId === 4 && hasSailId2) return 'gipsy-moth-iv';
-  if (maxSailId === 1) return 'oseberg';
-  return 'victory';
+// Materials a hull scorch never marks: rope, cloth and yards.
+const SCORCH_SKIPS = new Set([2, 5, 6, 9, 10, 12, 13, 18, 19]);
+
+function scorchVertex(mesh, at, amount, add) {
+  const nx = mesh[at + 3], ny = mesh[at + 4], nz = mesh[at + 5];
+  const len = Math.hypot(nx, ny, nz) || 1;
+  const prev = len > 1.002 ? len - 1 : 0;
+  const next = Math.min(1.48, add ? prev + amount : Math.max(prev, amount));
+  const scale = (1 + next) / len;
+  mesh[at + 3] = nx * scale;
+  mesh[at + 4] = ny * scale;
+  mesh[at + 5] = nz * scale;
 }
 
-function classifyModelSailForMastBreak(modelId, sailId) {
-  if (sailId <= 0) return null;
-  if (modelId === 'nina') {
-    if (sailId === 4 || sailId === 1) return { mast: 'fore', lower: false };
-    if (sailId === 8 || sailId === 2) return { mast: 'main', lower: false };
-    if (sailId === 12 || sailId === 3) return { mast: 'mizzen', lower: false };
-    return null;
-  }
-  if (modelId === 'pinta' || modelId === 'santa-maria') {
-    if (sailId === 1 || sailId === 5) return { mast: 'fore', lower: true };
-    if (sailId === 2) return { mast: 'main', lower: true };
-    if (sailId === 4) return { mast: 'main', lower: false };
-    if (sailId === 3) return { mast: 'mizzen', lower: true };
-    return null;
-  }
-  if (modelId === 'oseberg' || modelId === 'lusoria') {
-    if (sailId === 1) return { mast: 'main', lower: false };
-    return null;
-  }
-  if (modelId === 'gipsy-moth-iv') {
-    if (sailId === 1 || sailId === 3 || sailId === 4) return { mast: 'main', lower: false };
-    if (sailId === 2) return { mast: 'mizzen', lower: false };
-    return null;
-  }
-  if (modelId === 'flying-cloud') {
-    if ((sailId >= 1 && sailId <= 5) || (sailId >= 16 && sailId <= 18)) {
-      return { mast: 'fore', lower: sailId === 1 || sailId >= 16 };
-    }
-    if ((sailId >= 6 && sailId <= 10) || (sailId >= 19 && sailId <= 21) || sailId === 24) {
-      return { mast: 'main', lower: sailId === 6 || sailId === 24 };
-    }
-    if ((sailId >= 11 && sailId <= 15) || sailId === 22 || sailId === 23 || sailId === 25) {
-      return { mast: 'mizzen', lower: sailId === 11 || sailId === 25 };
-    }
-    return null;
-  }
-  if (sailId >= 1 && sailId <= 12) {
-    const mast =
-      sailId === 1 || sailId === 2 || sailId === 3 || sailId === 9 || sailId === 10 || sailId === 11
-        ? 'fore'
-        : sailId === 4 || sailId === 5 || sailId === 6
-          ? 'main'
-          : 'mizzen';
-    const lower = sailId === 1 || sailId === 4 || sailId === 9 || sailId === 12;
-    return { mast, lower };
-  }
-  return null;
-}
-
-export function bakeVesselImpactDeformations(mesh, bakes, stride = 9) {
+// Marks what a hit does to the surface it leaves behind. Timber is never moved here: a vertex pulled
+// around on its own stretches every triangle it shares, which is what pinched hulls and sheared masts.
+// Pieces that leave do so as rigid shards (js/ship-fracture.js). Only sail cloth is displaced, because
+// the rig stage reads that offset to flap a torn edge.
+export function bakeVesselImpactMarks(mesh, bakes, stride = 9) {
   if (!(mesh instanceof Float32Array) || !Array.isArray(bakes) || !bakes.length) {
     return null;
   }
   const vertexCount = Math.floor(mesh.length / stride);
   let minV = vertexCount;
   let maxV = -1;
-  let inferredModelId = null;
+  const touched = (v) => {
+    if (v < minV) minV = v;
+    if (v > maxV) maxV = v;
+  };
 
   for (let b = 0; b < bakes.length; b++) {
     const bake = bakes[b];
-    if (!bake) continue;
-
-    if (bake.kind === 'mast-break') {
-      const modelId =
-        bake.modelId ||
-        inferredModelId ||
-        (inferredModelId = inferVesselBakeModelId(mesh, vertexCount, stride));
-      const mGroup = bake.mastGroup || 'main';
-      const stage = bake.stage || 'topmast';
-      const side = bake.side || 1;
-      const hadTopmastBreak = Boolean(bake.hadTopmastBreak);
-      const isSingleMast = modelId === 'oseberg' || modelId === 'lusoria';
-      const isKetch = modelId === 'gipsy-moth-iv';
-      const zMin = isSingleMast
-        ? -6.5
-        : isKetch
-          ? mGroup === 'mizzen'
-            ? 1.15
-            : -6.5
-          : mGroup === 'fore'
-            ? -5.15
-            : mGroup === 'mizzen'
-              ? 1.85
-              : -1.65;
-      const zMax = isSingleMast
-        ? 6.5
-        : isKetch
-          ? mGroup === 'mizzen'
-            ? 6.5
-            : 1.15
-          : mGroup === 'fore'
-            ? -1.65
-            : mGroup === 'mizzen'
-              ? 6.75
-              : 1.85;
-      const mastZ = Number.isFinite(bake.pivotZ)
-        ? bake.pivotZ
-        : isSingleMast
-          ? 0.0
-          : isKetch
-            ? mGroup === 'mizzen'
-              ? 2.7
-              : -1.15
-            : mGroup === 'fore'
-              ? -3.55
-              : mGroup === 'mizzen'
-                ? 3.53
-                : 0.05;
-      const topmastPivotY = mGroup === 'fore' ? 5.72 : mGroup === 'mizzen' ? 5.15 : 6.18;
-      const pivotY = Number.isFinite(bake.pivotY)
-        ? bake.pivotY
-        : stage === 'full'
-          ? mGroup === 'main'
-            ? 1.55
-            : 2.05
-          : topmastPivotY;
-      const baseRollAngle = -side * (stage === 'full' ? 0.56 : 0.48);
-      const basePitchAngle = stage === 'full' ? 0.18 : 0.22;
-
-      for (let v = 0; v < vertexCount; v++) {
-        const at = v * stride;
-        const px = mesh[at];
-        const py = mesh[at + 1];
-        const pz = mesh[at + 2];
-        const rawMat = mesh[at + 6];
-        const mat = Math.floor(rawMat);
-        const sailId = Math.round((rawMat - mat) * 64);
-
-        const isSailOrYardMat = mat === 9 || mat === 10 || mat === 13 || mat === 19;
-        const sailInfo = isSailOrYardMat ? classifyModelSailForMastBreak(modelId, sailId) : null;
-        const isTaggedSailOrYard = Boolean(sailInfo);
-        if (isTaggedSailOrYard) {
-          if (sailInfo.mast !== mGroup) continue;
-          if (stage === 'topmast' && (sailInfo.lower || (modelId !== 'victory' && py < pivotY - 0.25))) continue;
-        } else {
-          if (py < pivotY - 0.12) continue;
-          // Allow foremast headsails/stays extending forward toward the bowsprit to taper smoothly
-          const effZMin = (mGroup === 'fore' || isSingleMast || isKetch) && (mat === 12 || mat === 13) ? -10.6 : zMin;
-          if (pz < effZMin || pz > zMax) continue;
-        }
-
-        const isMastMat =
-          mat === 1 ||
-          mat === 2 ||
-          (mat === 3 && (modelId === 'gipsy-moth-iv' || Math.hypot(px, pz - mastZ) < 0.45)) ||
-          mat === 9 ||
-          mat === 10 ||
-          mat === 12 ||
-          mat === 13 ||
-          mat === 19 ||
-          mat === 20 ||
-          (mat === 21 && Math.hypot(px, pz - mastZ) < 0.72);
-        if (!isMastMat) continue;
-
-        const nx = mesh[at + 3];
-        const ny = mesh[at + 4];
-        const nz = mesh[at + 5];
-        const prevLen = Math.hypot(nx, ny, nz) || 1.0;
-        let ux = nx / prevLen;
-        let uy = ny / prevLen;
-        let uz = nz / prevLen;
-        const prevDmg = prevLen > 1.002 ? prevLen - 1.0 : 0.0;
-
-        if (py <= pivotY + 0.001 && !isTaggedSailOrYard) {
-          // Jagged splintered mast stump just below the fracture plane
-          const jag = Math.sin(px * 43.0 + pz * 37.0) * 0.06;
-          mesh[at + 1] = py + jag;
-          const nextDmg = Math.min(1.48, Math.max(prevDmg, 1.15));
-          const scale = 1.0 + nextDmg;
-          mesh[at + 3] = ux * scale;
-          mesh[at + 4] = uy * scale;
-          mesh[at + 5] = uz * scale;
-        } else {
-          // Compute continuous rotation weight so staysails (mat 13) and rigging stays (mat 12)
-          // spanning to the bowsprit or deck sag smoothly without stretching triangles across a step boundary.
-          let weight = 1.0;
-          if (mat === 12 || mat === 13) {
-            const wy = Math.max(0, Math.min(1, (py - pivotY) / 1.35));
-            const distZ = Math.abs(pz - mastZ);
-            const wz = Math.max(0, Math.min(1, 1 - Math.max(0, distZ - 1.25) / 2.6));
-            weight = wy * wy * (3 - 2 * wy) * (wz * wz * (3 - 2 * wz));
-            if (weight <= 0.002) continue;
-          } else if (!isTaggedSailOrYard) {
-            const wy = Math.max(0, Math.min(1, (py - pivotY) / 0.35));
-            weight = wy * wy * (3 - 2 * wy);
-          }
-          // Avoid double-rotating upper topmast vertices when a full mast break follows an earlier topmast break.
-          if (stage === 'full' && hadTopmastBreak && prevDmg > 0.18 && py > topmastPivotY - 0.5) {
-            weight *= 0.22;
-          }
-
-          const rollAngle = baseRollAngle * weight;
-          const pitchAngle = basePitchAngle * weight;
-          const crRoll = Math.cos(rollAngle);
-          const srRoll = Math.sin(rollAngle);
-          const crPitch = Math.cos(pitchAngle);
-          const srPitch = Math.sin(pitchAngle);
-
-          // Rotate upper spar/top/yard/sail/rigging around the mast fracture pivot
-          const rx0 = px;
-          const ry0 = py - pivotY;
-          const rz0 = pz - mastZ;
-          // Roll around Z then pitch around X
-          const rx1 = rx0 * crRoll - ry0 * srRoll;
-          const ry1 = rx0 * srRoll + ry0 * crRoll;
-          const rz1 = rz0;
-          const ry2 = ry1 * crPitch - rz1 * srPitch;
-          const rz2 = ry1 * srPitch + rz1 * crPitch;
-
-          mesh[at] = rx1 - side * 0.10 * weight;
-          mesh[at + 1] = pivotY + ry2 - 0.12 * weight;
-          mesh[at + 2] = mastZ + rz2;
-
-          const nrx1 = ux * crRoll - uy * srRoll;
-          const nry1 = ux * srRoll + uy * crRoll;
-          const nrz1 = uz;
-          const nry2 = nry1 * crPitch - nrz1 * srPitch;
-          const nrz2 = nry1 * srPitch + nrz1 * crPitch;
-          const nLen = Math.hypot(nrx1, nry2, nrz2) || 1.0;
-          const nearBreak = py < pivotY + 0.55 ? 0.95 : 0.25;
-          const nextDmg = Math.min(1.48, Math.max(prevDmg, nearBreak * Math.max(0.35, weight)));
-          const scale = 1.0 + nextDmg;
-          mesh[at + 3] = (nrx1 / nLen) * scale;
-          mesh[at + 4] = (nry2 / nLen) * scale;
-          mesh[at + 5] = (nrz2 / nLen) * scale;
-        }
-        if (v < minV) minV = v;
-        if (v > maxV) maxV = v;
-      }
-      continue;
-    }
-
-    if (bake.kind === 'magazine-explosion') {
-      const bx = Number(bake.x) || 0;
-      const by = Number(bake.y) || -0.35;
-      const bz = Number(bake.z) || -3.2;
-      const powFrac = Math.max(0.15, Math.min(1.0, Number(bake.powderFraction) || 0.85));
-      const blastR = Math.max(0.95, (Number(bake.radius) || 2.2) * (0.55 + 0.55 * powFrac));
-      const heaveAmp = (0.35 + 0.65 * powFrac) * (Number(bake.stepDepth) || 0.55);
-      const blastRSq = blastR * blastR;
-      const blastMaxDy = blastR / 0.62;
-      for (let v = 0; v < vertexCount; v++) {
-        const at = v * stride;
-        const py = mesh[at + 1];
-        if (py < -0.95 || Math.abs(py - by) >= blastMaxDy) continue;
-        const pz = mesh[at + 2];
-        const dz = pz - bz;
-        if (dz <= -blastR || dz >= blastR) continue;
-        const px = mesh[at];
-        const dx = px - bx;
-        if (dx <= -blastR || dx >= blastR) continue;
-        const dy = (py - by) * 0.62;
-        const distSq = dx * dx + dy * dy + dz * dz;
-        if (distSq >= blastRSq) continue;
-        const mat = Math.floor(mesh[at + 6]);
-        if (mat === 2 || mat === 5 || mat === 6 || mat === 9 || mat === 10 || mat === 12 || mat === 13 || mat === 18 || mat === 19) continue;
-        const dist = Math.sqrt(distSq);
-        const t = 1 - dist / blastR;
-        const core = t * t;
-        const jag = 0.65 + 0.55 * Math.sin(pz * 31.0 + py * 47.0) * Math.cos(px * 29.0 - pz * 19.0);
-        const outSignX = px >= 0 ? 1 : -1;
-        // Internal decks & upper deck planks heave violently upward while hull sides blow outward/splinter.
-        const isDeck = (mat === 0 || mat === 1 || mat === 23 || mat === 24) && Math.abs(px) < 1.15;
-        mesh[at] = px + outSignX * heaveAmp * (isDeck ? 0.28 : 0.52) * core * jag;
-        mesh[at + 1] = py + heaveAmp * (isDeck ? 0.92 : 0.34) * core * jag;
-        mesh[at + 2] = pz + Math.sign(dz || 0.1) * heaveAmp * 0.22 * core * jag;
-        const nx = mesh[at + 3], ny = mesh[at + 4], nz = mesh[at + 5];
-        const nLen = Math.hypot(nx, ny, nz) || 1.0;
-        const ux = nx / nLen + outSignX * 0.45 * t;
-        const uy = ny / nLen + 0.55 * t;
-        const uz = nz / nLen + (dz / blastR) * 0.35 * t;
-        const uLen = Math.hypot(ux, uy, uz) || 1.0;
-        const prevDmg = nLen > 1.002 ? nLen - 1.0 : 0.0;
-        const nextDmg = Math.min(1.48, Math.max(prevDmg, (0.65 + 0.85 * t) * Math.min(1.2, 0.55 + powFrac)));
-        const scale = 1.0 + nextDmg;
-        mesh[at + 3] = (ux / uLen) * scale;
-        mesh[at + 4] = (uy / uLen) * scale;
-        mesh[at + 5] = (uz / uLen) * scale;
-        if (v < minV) minV = v;
-        if (v > maxV) maxV = v;
-      }
-      continue;
-    }
+    if (!bake || bake.kind === 'mast-break' || bake.kind === 'cannon-dismount') continue;
 
     if (bake.kind === 'sail-rip') {
       const bx = Number(bake.x) || 0;
@@ -1579,32 +1295,32 @@ export function bakeVesselImpactDeformations(mesh, bakes, stride = 9) {
         const dz = (pz - bz) * 0.78;
         const distSq = dx * dx + dy * dy + dz * dz;
         if (distSq >= ripRadiusSq) continue;
-        const dist = Math.sqrt(distSq);
-        const t = 1 - dist / ripRadius;
+        const t = 1 - Math.sqrt(distSq) / ripRadius;
+        const addDmg = (0.42 + 0.78 * t) * ripSeverity;
+        touched(v);
+        if (isRiggingRope) {
+          scorchVertex(mesh, at, addDmg, true);
+          continue;
+        }
+        const nx = mesh[at + 3], ny = mesh[at + 4], nz = mesh[at + 5];
+        const nLen = Math.hypot(nx, ny, nz) || 1.0;
+        const prevDmg = nLen > 1.002 ? nLen - 1.0 : 0.0;
+        // Displacement must exceed 0.10 design units for rigVertex to keep it, and already-torn cloth
+        // flaps no further, so repeated rips cannot drag a sail away from its yard.
+        const fresh = Math.max(0, 1 - prevDmg / 1.48);
         const stripWave = Math.sin(px * 19.0 + pz * 13.0) * Math.cos(py * 11.0 - px * 7.0);
-        // Sail cloth displacement must exceed 0.10 design units so rigVertex preserves
-        // the 3D tattered ribbon/flap deformation on top of the billowing sail pose.
-        const flapAmp = isSailCloth
-          ? Math.max(0.115, (0.14 + 0.24 * t) * ripSeverity)
-          : (0.08 + 0.16 * t) * ripSeverity;
+        const flapAmp = Math.max(0.115, (0.14 + 0.24 * t) * ripSeverity) * fresh;
         mesh[at] = px + (dirX * 0.45 + stripWave * 0.55) * flapAmp;
         mesh[at + 1] = py - flapAmp * (0.58 + 0.42 * Math.abs(stripWave));
         mesh[at + 2] = pz + (dirZ * 0.65 + stripWave * 0.35) * flapAmp;
-        const nx = mesh[at + 3], ny = mesh[at + 4], nz = mesh[at + 5];
-        const nLen = Math.hypot(nx, ny, nz) || 1.0;
         const ux = nx / nLen + stripWave * 0.28 * t;
         const uy = ny / nLen - 0.22 * t;
         const uz = nz / nLen + dirZ * 0.24 * t;
         const uLen = Math.hypot(ux, uy, uz) || 1.0;
-        const prevDmg = nLen > 1.002 ? nLen - 1.0 : 0.0;
-        const addDmg = (0.42 + 0.78 * t) * ripSeverity;
-        const nextDmg = Math.min(1.48, prevDmg + addDmg);
-        const scale = 1.0 + nextDmg;
+        const scale = 1.0 + Math.min(1.48, prevDmg + addDmg);
         mesh[at + 3] = (ux / uLen) * scale;
         mesh[at + 4] = (uy / uLen) * scale;
         mesh[at + 5] = (uz / uLen) * scale;
-        if (v < minV) minV = v;
-        if (v > maxV) maxV = v;
       }
       continue;
     }
@@ -1612,225 +1328,46 @@ export function bakeVesselImpactDeformations(mesh, bakes, stride = 9) {
     if (bake.kind === 'hull-crack') {
       const crackZ = Number(bake.z) || 0;
       const crackSeverity = Math.max(0.5, Math.min(1.4, Number(bake.severity) || 1.0));
-      const hingeAngle = 0.16 * crackSeverity;
       for (let v = 0; v < vertexCount; v++) {
         const at = v * stride;
-        const mat = Math.floor(mesh[at + 6]);
-        const px = mesh[at];
-        const py = mesh[at + 1];
-        const pz = mesh[at + 2];
-        const dz = pz - crackZ;
-        const absDz = Math.abs(dz);
-        // Hogging/sagging structural back-break: both ends droop/hinge away from the midships
-        // fracture plane while the upper deck and topside strakes split apart in a jagged V-crack.
-        const lever = Math.min(3.5, absDz);
-        const droopY = -Math.sin(hingeAngle) * lever * 0.55;
-        const splitZ = Math.sign(dz || 1) * Math.max(0, py + 0.65) * Math.sin(hingeAngle) * 0.28;
-        const inCrackBand = absDz < 0.85;
-        const crackT = inCrackBand ? 1 - absDz / 0.85 : 0;
-        const jag = Math.sin(py * 37.0 + px * 23.0) * Math.cos(pz * 29.0);
-        const outSignX = px >= 0 ? 1 : -1;
-        mesh[at] = px + (inCrackBand ? outSignX * 0.18 * crackT * (0.6 + 0.4 * jag) * crackSeverity : 0);
-        mesh[at + 1] = py + droopY - (inCrackBand ? 0.16 * crackT * Math.abs(jag) * crackSeverity : 0);
-        mesh[at + 2] = pz + splitZ + (inCrackBand ? Math.sign(dz || 1) * 0.12 * crackT * jag : 0);
-        if (inCrackBand) {
-          const nx = mesh[at + 3], ny = mesh[at + 4], nz = mesh[at + 5];
-          const nLen = Math.hypot(nx, ny, nz) || 1.0;
-          const ux = nx / nLen + outSignX * 0.35 * crackT;
-          const uy = ny / nLen + 0.35 * crackT;
-          const uz = nz / nLen + Math.sign(dz || 1) * 0.45 * crackT;
-          const uLen = Math.hypot(ux, uy, uz) || 1.0;
-          const prevDmg = nLen > 1.002 ? nLen - 1.0 : 0.0;
-          const nextDmg = Math.min(1.48, Math.max(prevDmg, (0.55 + 0.90 * crackT) * crackSeverity));
-          const scale = 1.0 + nextDmg;
-          mesh[at + 3] = (ux / uLen) * scale;
-          mesh[at + 4] = (uy / uLen) * scale;
-          mesh[at + 5] = (uz / uLen) * scale;
-        }
-        if (v < minV) minV = v;
-        if (v > maxV) maxV = v;
+        const absDz = Math.abs(mesh[at + 2] - crackZ);
+        if (absDz >= 0.85 || SCORCH_SKIPS.has(Math.floor(mesh[at + 6]))) continue;
+        scorchVertex(mesh, at, (0.55 + 0.9 * (1 - absDz / 0.85)) * crackSeverity, false);
+        touched(v);
       }
       continue;
     }
 
+    const isExplosion = bake.kind === 'magazine-explosion';
     const bx = Number(bake.x) || 0;
-    const by = Number(bake.y) || 0;
+    const by = Number(bake.y) || (isExplosion ? -0.35 : 0);
     const bz = Number(bake.z) || 0;
-    const side = bake.side || (bx >= 0 ? 1 : -1);
-    const r = Math.max(0.24, (Number(bake.radius) || 0.12) * 1.95);
-    const stepDepth = Math.max(0.08, Number(bake.stepDepth) || 0.18);
+    const powFrac = Math.max(0.15, Math.min(1.0, Number(bake.powderFraction) || 0.85));
+    const r = isExplosion
+      ? Math.max(0.95, (Number(bake.radius) || 2.2) * (0.55 + 0.55 * powFrac))
+      : Math.max(0.24, (Number(bake.radius) || 0.12) * 1.95);
     const severity = Math.max(0.25, Number(bake.severity) || 0.6);
-    const hits = Math.max(1, Number(bake.hits) || 1);
-    const isInternalDeckBake = bake.kind === 'internal-deck';
-    const isCannonDismountBake = bake.kind === 'cannon-dismount';
-    const isWindowShatterBake = bake.kind === 'window-shatter';
-    const isBackWallBake = bake.kind === 'back-wall';
-    const isSuperstructureBake = bake.kind === 'superstructure' || Boolean(bake.superstructure);
-    const isSternBake = bz > 4.2 && (isWindowShatterBake || Math.abs(bx) < 0.75);
-
-    const rOuter = r * 1.25;
-    const rOuterSq = rOuter * rOuter;
+    const isWindowShatter = bake.kind === 'window-shatter';
     const rSq = r * r;
     for (let v = 0; v < vertexCount; v++) {
       const at = v * stride;
-      const pz = mesh[at + 2];
-      const dz = pz - bz;
-      if (dz <= -rOuter || dz >= rOuter) continue;
-      const py = mesh[at + 1];
-      const dy = py - by;
-      if (dy <= -rOuter || dy >= rOuter) continue;
-      const distYZSq = dy * dy + dz * dz;
-      if (distYZSq >= rOuterSq) continue;
-      const px = mesh[at];
+      const dz = mesh[at + 2] - bz;
+      if (dz <= -r || dz >= r) continue;
+      const dy = mesh[at + 1] - by;
+      if (dy <= -r || dy >= r) continue;
+      const dx = (mesh[at] - bx) * (isExplosion ? 1 : 0.5);
+      const distSq = dx * dx + dy * dy + dz * dz;
+      if (distSq >= rSq) continue;
       const mat = Math.floor(mesh[at + 6]);
-      if (
-        mat === 2 ||
-        mat === 5 ||
-        mat === 6 ||
-        mat === 9 ||
-        mat === 10 ||
-        mat === 12 ||
-        mat === 13 ||
-        mat === 18 ||
-        mat === 19
-      ) {
-        continue;
-      }
-      const absX = px * side;
-      const distYZ = Math.sqrt(distYZSq);
-
-      if (isCannonDismountBake) {
-        const isBarrelOrBore = (mat === 3 || mat === 4) && Math.abs(dz) < 0.055 && Math.abs(dy) < 0.12 && absX > 0.72;
-        const isOpenDeckCarriage = mat === 24 && py > 1.48 && distYZ < 0.22 && absX > 0.72;
-        if (!isBarrelOrBore && !isOpenDeckCarriage) continue;
-      } else if (isWindowShatterBake) {
-        if (mat === 3 || mat === 4 || mat === 24 || Math.abs(px - bx) >= r * 1.25) continue;
-      } else if (isInternalDeckBake) {
-        if (mat === 3 || mat === 4 || mat === 24) continue;
-        if (!isSternBake && (absX > 1.15 || absX < -0.35)) continue;
-      } else {
-        if (mat === 3 || mat === 4 || mat === 24) continue;
-        const isCenterlineSuper = isSternBake || isSuperstructureBake || (py > 0.55 && Math.abs(bx) < 0.78);
-        if (!isCenterlineSuper && absX < 0.22) continue;
-        if (isCenterlineSuper && !isSternBake && absX < -0.25) continue;
-      }
-
-      // 3D penetration ellipsoid centered at (bx, by, bz). As overlapping hits erode bx
-      // deeper into the hull, this pocket advances inward layer by layer.
-      const dxScale =
-        isWindowShatterBake || isSternBake
-          ? 0.75
-          : isSuperstructureBake
-            ? 0.55
-            : isInternalDeckBake || isCannonDismountBake || isBackWallBake
-              ? 0.35
-              : 0.38;
-      const dx = (px - bx) * dxScale;
-      const dist3DSq = dx * dx + distYZSq;
-      if (dist3DSq >= rSq) continue;
-      const dist3D = Math.sqrt(dist3DSq);
-      const t = 1 - dist3D / r;
-      if (t <= 0.001) continue;
-
-      const nx = mesh[at + 3];
-      const ny = mesh[at + 4];
-      const nz = mesh[at + 5];
-      const prevLen = Math.hypot(nx, ny, nz) || 1.0;
-      let ux = nx / prevLen;
-      let uy = ny / prevLen;
-      let uz = nz / prevLen;
-      const prevDmg = prevLen > 1.002 ? prevLen - 1.0 : 0.0;
-
-      // Direct hit on a cannon barrel (mat 3), bore (mat 4), or carriage (mat 24):
-      // violently dismounts the gun, driving it backward, dropping the muzzle, and slewing it askew.
-      if (isCannonDismountBake) {
-        const slewSign = Math.sin(bz * 37.3 + by * 19.1) >= 0 ? 1 : -1;
-        const outFrac = Math.max(0, Math.min(1.5, (absX - 1.05) / 0.55));
-        const knockBack = Math.min(0.22, stepDepth * 0.85 * Math.max(0.45, t));
-        const dropMuzzle = -0.078 * (0.35 + 0.85 * outFrac) * Math.max(0.5, t);
-        const slewZ = slewSign * 0.062 * (0.25 + 0.95 * outFrac) * Math.max(0.5, t);
-        mesh[at] = side * Math.max(0.52, absX - knockBack);
-        mesh[at + 1] = py + dropMuzzle;
-        mesh[at + 2] = pz + slewZ;
-        uy -= 0.42 * t;
-        uz += slewSign * 0.38 * t;
-        const uLen = Math.hypot(ux, uy, uz) || 1.0;
-        const nextDmg = Math.min(1.48, Math.max(prevDmg, 0.92));
-        const scale = 1.0 + nextDmg;
-        mesh[at + 3] = (ux / uLen) * scale;
-        mesh[at + 4] = (uy / uLen) * scale;
-        mesh[at + 5] = (uz / uLen) * scale;
-        if (v < minV) minV = v;
-        if (v > maxV) maxV = v;
-        continue;
-      }
-
-      // Horizontal interior deck planks or cabin/deckhouse roofs (mat === 0, 1, or 23 pointing up)
-      const isDeckSurface = (mat === 0 || mat === 1 || mat === 23) && Math.abs(uy) > 0.75;
-      const deckDamp = isDeckSurface ? (isInternalDeckBake || isSuperstructureBake ? 0.55 : 0.22) : 1.0;
-      const isTransverseSuperWall = !isSternBake && py > 0.45 && Math.abs(uz) > 0.62 && Math.abs(ux) < 0.35;
-
-      const core = t * t;
-      const plank = Math.sin(py * 52.0 + pz * 14.0) * 0.55 + Math.cos(pz * 39.0 - py * 21.0) * 0.45;
-      const jag = 0.78 + 0.38 * plank;
-      const inwardDisp = stepDepth * deckDamp * core * jag;
-      const minInwardX = isSuperstructureBake && Math.abs(bx) < 0.78 ? 0.0 : 0.15;
-      const nextAbsX =
-        isInternalDeckBake || isSternBake || isTransverseSuperWall
-          ? absX
-          : Math.max(minInwardX, absX - inwardDisp);
-      const nextX =
-        isSternBake && Math.abs(px) > 0.35
-          ? px - Math.sign(px) * inwardDisp * 0.45
-          : isTransverseSuperWall
-            ? px - Math.sign(px || side) * inwardDisp * 0.22
-            : side * nextAbsX;
-      const rim = t * (1 - t) * 4.0;
-      const splay = stepDepth * 0.09 * rim * plank * deckDamp;
-      const railBlend = Math.max(0, Math.min(1, (py - 1.38) / 0.32));
-      const topNotch = railBlend * railBlend * (3 - 2 * railBlend) * stepDepth * 0.12 * core * jag * deckDamp;
-      const deckDrop =
-        isInternalDeckBake
-          ? stepDepth * 0.38 * core * jag
-          : isDeckSurface
-            ? stepDepth * 0.32 * core * jag
-            : 0;
-      const sternPushZ =
-        isSternBake || (isWindowShatterBake && pz > 4.8)
-          ? inwardDisp * 0.78
-          : isTransverseSuperWall
-            ? Math.sign(uz || 1) * inwardDisp * 0.72
-            : 0;
-      const nextY = py + (distYZ > 1e-4 ? (dy / distYZ) * splay : 0) - topNotch - deckDrop;
-      const nextZ = pz + (distYZ > 1e-4 ? (dz / distYZ) * splay : 0) - sternPushZ;
-
-      mesh[at] = nextX;
-      mesh[at + 1] = nextY;
-      mesh[at + 2] = nextZ;
-
-      // Tilt the normal into the concave crater wall so 3D sunlight and shadows
-      // reveal the physical depth of cumulative overlapping hits.
-      if (distYZ > 1e-4) {
-        const tilt = 0.68 * t;
-        uy -= (dy / r) * tilt - plank * 0.14 * t;
-        uz -= (dz / r) * tilt;
-        const uLen = Math.hypot(ux, uy, uz) || 1.0;
-        ux /= uLen;
-        uy /= uLen;
-        uz /= uLen;
-      }
-
-      const addDmg = (isWindowShatterBake && (mat === 11 || mat === 25))
+      if (SCORCH_SKIPS.has(mat)) continue;
+      const t = 1 - Math.sqrt(distSq) / r;
+      const amount = isWindowShatter && (mat === 11 || mat === 25)
         ? 0.45 + 0.95 * t
-        : severity * (0.38 * t + 0.58 * core) * jag;
-      const nextDmg = Math.min(1.48, prevDmg + addDmg);
-      const scale = 1.0 + nextDmg;
-      mesh[at + 3] = ux * scale;
-      mesh[at + 4] = uy * scale;
-      mesh[at + 5] = uz * scale;
-
-      if (v < minV) minV = v;
-      if (v > maxV) maxV = v;
+        : isExplosion
+          ? (0.65 + 0.85 * t) * Math.min(1.2, 0.55 + powFrac)
+          : severity * (0.38 * t + 0.58 * t * t);
+      scorchVertex(mesh, at, amount, !isExplosion);
+      touched(v);
     }
   }
 
@@ -1906,72 +1443,15 @@ export function sampleVoronoiBlockCell(fx, fy, fz, isTimber = false) {
   };
 }
 
-function detectRigidFaceSpan(mesh, v, vertexCount, stride) {
-  const rawKind0 = mesh[v * stride + 6] ?? 7;
-  if (rawKind0 < 9.5 || rawKind0 >= 18.5) return 1;
-  const frac0 = rawKind0 - Math.floor(rawKind0);
-  if (frac0 > 0.06 && frac0 < 0.19 && v + 3 < vertexCount) {
-    for (let k = 1; k <= 3; k++) {
-      const rk = mesh[(v + k) * stride + 6] ?? 7;
-      const fk = rk - Math.floor(rk);
-      if (fk <= 0.06 || fk >= 0.19) return 1;
-    }
-    return 4;
-  }
-  if (frac0 >= 0.19 && frac0 < 0.32 && v + 2 < vertexCount) {
-    for (let k = 1; k <= 2; k++) {
-      const rk = mesh[(v + k) * stride + 6] ?? 7;
-      const fk = rk - Math.floor(rk);
-      if (fk < 0.19 || fk >= 0.32) return 1;
-    }
-    return 3;
-  }
-  return 1;
-}
-
-function rotateVec3Rigid(vx, vy, vz, ax, ay, az) {
-  // Exact 3D orthogonal rotation R_y(ay) * R_x(ax) * R_z(az) in SO(3) (preserves edge lengths 100%)
-  const cz = Math.cos(az), sz = Math.sin(az);
-  const x1 = vx * cz - vy * sz;
-  const y1 = vx * sz + vy * cz;
-  const z1 = vz;
-  const cx = Math.cos(ax), sx = Math.sin(ax);
-  const x2 = x1;
-  const y2 = y1 * cx - z1 * sx;
-  const z2 = y1 * sx + z1 * cx;
-  const cy = Math.cos(ay), sy = Math.sin(ay);
-  return [
-    x2 * cy + z2 * sy,
-    y2,
-    -x2 * sy + z2 * cy,
-  ];
-}
-
-function isInsideBuildingBakeBounds(fx, fz, bake) {
-  if (!Number.isFinite(bake?.buildingCx) || !Number.isFinite(bake?.buildingCz)) return true;
-  const hw = Number(bake.buildingHalfW) || 0;
-  const hl = Number(bake.buildingHalfL) || 0;
-  if (hw <= 0 || hl <= 0) return true;
-  const yaw = Number(bake.buildingYaw) || 0;
-  const cosY = Math.cos(yaw);
-  const sinY = Math.sin(yaw);
-  const dx = fx - bake.buildingCx;
-  const dz = fz - bake.buildingCz;
-  const lx = dx * cosY - dz * sinY;
-  const lz = dx * sinY + dz * cosY;
-  return Math.abs(lx) <= hw && Math.abs(lz) <= hl;
-}
-
-export function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
+// Shot on the land itself: a crater in the ground, a palm in the port mesh bent over. Buildings do not come
+// through here. They break into rigid pieces (js/building-fracture.js), and no hit moves one of their vertices.
+export function bakeLandImpactDeformations(mesh, bakes, stride = 8) {
   if (!(mesh instanceof Float32Array) || !Array.isArray(bakes) || !bakes.length) {
     return null;
   }
   const vertexCount = Math.floor(mesh.length / stride);
   let minV = vertexCount;
   let maxV = -1;
-  const localRotX = new Float32Array(4);
-  const localRotY = new Float32Array(4);
-  const localRotZ = new Float32Array(4);
 
   for (let b = 0; b < bakes.length; b++) {
     const bake = bakes[b];
@@ -1979,166 +1459,6 @@ export function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
     const bx = Number(bake.x) || 0;
     const by = Number(bake.y) || 0;
     const bz = Number(bake.z) || 0;
-    const groundY = Number.isFinite(bake.buildingGroundY) ? Math.max(0, Number(bake.buildingGroundY)) : 0;
-
-    if (bake.kind === 'building-explosion' || bake.kind === 'building-collapse') {
-      const isExplosion = bake.kind === 'building-explosion';
-      const blastR = isExplosion
-        ? Math.max(9.5, Math.min(18.0, (Number(bake.radius) || 8.5) * 1.25))
-        : Math.max(4.5, Math.min(10.5, (Number(bake.radius) || 5.5) * 1.05));
-      const stepDepth = Math.max(1.5, Number(bake.stepDepth) || 2.2);
-      const powFrac = Math.max(0.25, Math.min(1.0, Number(bake.powderFraction) || 0.85));
-      let faceSpan = 1;
-      for (let v = 0; v < vertexCount; v += faceSpan) {
-        faceSpan = detectRigidFaceSpan(mesh, v, vertexCount, stride);
-        let fx = 0, fy = 0, fz = 0, prevDmgSum = 0, origMinY = Infinity;
-        for (let k = 0; k < faceSpan; k++) {
-          const at = (v + k) * stride;
-          const vy = mesh[at + 1];
-          fx += mesh[at];
-          fy += vy;
-          fz += mesh[at + 2];
-          if (vy < origMinY) origMinY = vy;
-          const cLen = Math.hypot(mesh[at + 3], mesh[at + 4], mesh[at + 5]) || 1;
-          prevDmgSum += Math.max(0, cLen - 1.0);
-        }
-        fx /= faceSpan;
-        fy /= faceSpan;
-        fz /= faceSpan;
-        const prevDmg = prevDmgSum / faceSpan;
-
-        if (!isInsideBuildingBakeBounds(fx, fz, bake)) continue;
-
-        const dx = fx - bx;
-        const dy = fy - by;
-        const dz = fz - bz;
-        const dist = Math.hypot(dx, dy * 0.55, dz);
-        if (dist >= blastR) continue;
-
-        const rawKind = mesh[v * stride + 6] ?? 7;
-        const kind = Math.floor(rawKind);
-        const isTimber = kind === 10 || kind === 15 || kind === 17;
-        const isAperture = kind === 14;
-        const voronoi = sampleVoronoiBlockCell(fx, fy, fz, isTimber);
-        const { blockStep, blockMod } = voronoi;
-        const t = 1 - dist / blastR;
-        const core = t * t;
-        const nextDmg = Math.min(1.45, prevDmg + (0.48 + 0.38 * powFrac) * (0.35 + 0.65 * t));
-
-        // Seabed-anchored pilings and subterranean foundation walls (origMinY < groundY - 0.15) stay rooted in the seabed/ground
-        // and never pop upward or detach out of their sockets.
-        const isSubmergedAnchored = origMinY < groundY - 0.15 || origMinY < -0.25;
-        const horizRemain = Math.max(0, 1.0 - prevDmg / 0.45) * Math.exp(-prevDmg * 2.8);
-        const hDist = Math.hypot(dx, dz) || 1;
-        const effMod = isAperture ? Math.max(blockMod, 0.85) : blockMod;
-        const outPush = isSubmergedAnchored
-          ? 0
-          : Math.min(0.32, stepDepth * (isExplosion ? 0.18 : 0.12) * core * effMod) * horizRemain;
-
-        // Gravity slump: Voronoi blocks detach and drop monotonically toward the building's ground rubble floor across multiple rounds
-        const rubbleBaseY = groundY + 0.28 + blockStep * 0.45;
-        const aboveRubble = Math.max(0, fy - rubbleBaseY);
-        const slumpFrac = isSubmergedAnchored
-          ? 0
-          : Math.min(0.58, (isExplosion ? 0.48 : 0.34) * (0.35 + 0.65 * t) * effMod);
-        let newFy = fy - aboveRubble * slumpFrac;
-        const newFx = fx + (dx / hDist) * outPush;
-        const newFz = fz + (dz / hDist) * outPush;
-
-        // Rigid 3D Voronoi block detachment: uniform block contraction proportional to slump prevents vertical face overlap
-        let faceRadius = 0;
-        for (let k = 0; k < faceSpan; k++) {
-          const at = (v + k) * stride;
-          const rad = Math.hypot(mesh[at] - fx, mesh[at + 1] - fy, mesh[at + 2] - fz);
-          if (rad > faceRadius) faceRadius = rad;
-        }
-        const gapShrink =
-          !isSubmergedAnchored && !isAperture && faceSpan > 1 && faceRadius > 0.15
-            ? Math.min(0.035, faceRadius * 0.04) * horizRemain
-            : 0;
-        const gapScale = faceRadius > 0.15 ? (faceRadius - gapShrink) / faceRadius : 1.0;
-        const groundRoom = Math.max(0, origMinY - (groundY + 0.18));
-        const groundTumbleScale = Math.min(1.0, groundRoom / 0.5);
-        const maxCornerTumble = (isExplosion ? 0.09 : 0.065) * core * horizRemain * groundTumbleScale;
-        const tumbleMag =
-          !isSubmergedAnchored && !isAperture && faceSpan > 1
-            ? Math.min(0.12, maxCornerTumble / Math.max(0.65, faceRadius))
-            : 0;
-        const fNx0 = mesh[v * stride + 3], fNy0 = mesh[v * stride + 4], fNz0 = mesh[v * stride + 5];
-        const fNLen = Math.hypot(fNx0, fNy0, fNz0) || 1;
-        const fNx = fNx0 / fNLen, fNy = fNy0 / fNLen, fNz = fNz0 / fNLen;
-        const rawAx = voronoi.tumbleX * tumbleMag;
-        const rawAy = voronoi.tumbleY * tumbleMag * 0.75;
-        const rawAz = voronoi.tumbleZ * tumbleMag;
-        const inPlaneDot = rawAx * fNx + rawAy * fNy + rawAz * fNz;
-        const outScale = Math.abs(fNy) < 0.45 ? 0.18 : 1.0;
-        const dAx = fNx * inPlaneDot + (rawAx - fNx * inPlaneDot) * outScale;
-        const dAy = fNy * inPlaneDot + (rawAy - fNy * inPlaneDot) * outScale;
-        const dAz = fNz * inPlaneDot + (rawAz - fNz * inPlaneDot) * outScale;
-
-        let minLocalY = 0;
-        let maxLocalY = 0;
-        let origMaxY = -Infinity;
-        for (let k = 0; k < faceSpan; k++) {
-          const at = (v + k) * stride;
-          if (mesh[at + 1] > origMaxY) origMaxY = mesh[at + 1];
-          const rx = (mesh[at] - fx) * gapScale;
-          const ry = (mesh[at + 1] - fy) * gapScale;
-          const rz = (mesh[at + 2] - fz) * gapScale;
-          const [tx, ty, tz] = tumbleMag > 1e-4 ? rotateVec3Rigid(rx, ry, rz, dAx, dAy, dAz) : [rx, ry, rz];
-          localRotX[k] = tx;
-          localRotY[k] = ty;
-          localRotZ[k] = tz;
-          if (ty < minLocalY) minLocalY = ty;
-          if (ty > maxLocalY) maxLocalY = ty;
-        }
-        if (!isSubmergedAnchored) {
-          const floorY = Math.min(origMinY, groundY + 0.18);
-          if (newFy + minLocalY < floorY) {
-            newFy = floorY - minLocalY;
-          }
-          let maxDeltaY = 0;
-          for (let k = 0; k < faceSpan; k++) {
-            const dyVert = newFy + localRotY[k] - mesh[(v + k) * stride + 1];
-            if (dyVert > maxDeltaY) maxDeltaY = dyVert;
-          }
-          if (maxDeltaY > 0) {
-            newFy -= maxDeltaY;
-          }
-        } else {
-          newFy = fy;
-        }
-
-        const scale = 1.0 + nextDmg;
-        for (let k = 0; k < faceSpan; k++) {
-          const idx = v + k;
-          const at = idx * stride;
-          mesh[at] = newFx + localRotX[k];
-          mesh[at + 1] = newFy + localRotY[k];
-          mesh[at + 2] = newFz + localRotZ[k];
-
-          const nx = mesh[at + 3], ny = mesh[at + 4], nz = mesh[at + 5];
-          const curLen = Math.hypot(nx, ny, nz) || 1;
-          const [rnx, rny, rnz] =
-            tumbleMag > 1e-4
-              ? rotateVec3Rigid(nx / curLen, ny / curLen, nz / curLen, dAx, dAy, dAz)
-              : [nx / curLen, ny / curLen, nz / curLen];
-          const ux = rnx + (dx / blastR) * 0.22 * t;
-          const uy = rny + 0.42 * t;
-          const uz = rnz + (dz / blastR) * 0.22 * t;
-          const uLen = Math.hypot(ux, uy, uz) || 1;
-          mesh[at + 3] = (ux / uLen) * scale;
-          mesh[at + 4] = (uy / uLen) * scale;
-          mesh[at + 5] = (uz / uLen) * scale;
-          if (stride >= 8 && rawKind < 19.5) {
-            mesh[at + 7] = Math.max(0.42, mesh[at + 7] * (1 - 0.10 * core * horizRemain));
-          }
-          if (idx < minV) minV = idx;
-          if (idx > maxV) maxV = idx;
-        }
-      }
-      continue;
-    }
 
     if (bake.kind === 'scenery-tree') {
       const treeR = Math.max(5.5, (Number(bake.radius) || 2.8) * 2.2);
@@ -2214,183 +1534,6 @@ export function bakeBuildingImpactDeformations(mesh, bakes, stride = 8) {
       }
       continue;
     }
-
-    const r = Math.max(3.6, Math.min(5.6, (Number(bake.radius) || 1.3) * 3.2));
-    const stepDepth = Math.max(0.85, (Number(bake.stepDepth) || 0.45) * 3.1);
-    const severity = Math.max(0.55, Number(bake.severity) || 0.90);
-    const wnx = Number(bake.nx) || 0;
-    const wny = Number(bake.ny) || 0;
-    const wnz = Number(bake.nz) || 1;
-    const wnLen = Math.hypot(wnx, wny, wnz) || 1;
-    const inX = -wnx / wnLen;
-    const inY = -wny / wnLen;
-    const inZ = -wnz / wnLen;
-    const isTimber = bake.kind === 'timber-splinter' || bake.materialClass === 'timber';
-    const isCannonDismount = bake.kind === 'cannon-dismount';
-
-    let faceSpan = 1;
-    for (let v = 0; v < vertexCount; v += faceSpan) {
-      faceSpan = detectRigidFaceSpan(mesh, v, vertexCount, stride);
-      let fx = 0, fy = 0, fz = 0, prevDmgSum = 0, origMinY = Infinity;
-      for (let k = 0; k < faceSpan; k++) {
-        const at = (v + k) * stride;
-        const vy = mesh[at + 1];
-        fx += mesh[at];
-        fy += vy;
-        fz += mesh[at + 2];
-        if (vy < origMinY) origMinY = vy;
-        const cLen = Math.hypot(mesh[at + 3], mesh[at + 4], mesh[at + 5]) || 1;
-        prevDmgSum += Math.max(0, cLen - 1.0);
-      }
-      fx /= faceSpan;
-      fy /= faceSpan;
-      fz /= faceSpan;
-      const prevDmg = prevDmgSum / faceSpan;
-
-      if (!isInsideBuildingBakeBounds(fx, fz, bake)) continue;
-
-      const dx = fx - bx;
-      const dy = fy - by;
-      const dz = fz - bz;
-      // Weight vertical distance slightly softer when above the impact point so upper parapet merlons
-      // and crenellations collapse when the scarp wall beneath them is pounded by cannonfire.
-      const effDy = dy > 0 ? dy * 0.55 : dy * 0.9;
-      const dist = Math.hypot(dx, effDy, dz);
-      if (dist >= r) continue;
-      const rawKind = mesh[v * stride + 6] ?? 7;
-      const kind = Math.floor(rawKind);
-      const isAperture = kind === 14;
-      if (isCannonDismount && kind !== 10 && kind !== 14 && kind !== 18 && dist > r * 0.68) continue;
-
-      const t = 1 - dist / r;
-      const core = t * 0.45 + t * t * 0.55;
-      const nextDmg = Math.min(1.45, prevDmg + Math.min(0.85, 0.58 * core * severity));
-      const voronoi = sampleVoronoiBlockCell(fx, fy, fz, isTimber);
-      const { blockStep, blockMod } = voronoi;
-
-      // Seabed-anchored pilings and subterranean foundation walls (origMinY < groundY - 0.15) stay rooted in the seabed/ground
-      // and never pop upward or detach out of their sockets.
-      const isSubmergedAnchored = origMinY < groundY - 0.15 || origMinY < -0.25;
-      // Smoothly cap horizontal displacement via prevDmg so multi-round broadsides progress vertically without pushing walls through back faces
-      const horizRemain = Math.max(0, 1.0 - prevDmg / 0.45) * Math.exp(-prevDmg * 2.8);
-
-      let newFx = fx;
-      let newFy = fy;
-      let newFz = fz;
-      if (!isSubmergedAnchored) {
-        if (isCannonDismount && (kind === 10 || kind === 14 || kind === 18)) {
-          const slew = Math.sin(bx * 19.0 + bz * 23.0) >= 0 ? 1 : -1;
-          const hDisp = stepDepth * 0.52 * t * horizRemain;
-          newFx = fx + (inX * hDisp + inZ * slew * 0.20 * t * horizRemain);
-          newFy = Math.max(Math.min(origMinY, groundY + 0.2), fy - Math.min(0.65, 0.52 * t * (0.5 + 0.5 * horizRemain)));
-          newFz = fz + (inZ * hDisp - inX * slew * 0.20 * t * horizRemain);
-        } else {
-          const hScale = isAperture ? 0.25 : 1.0;
-          const hDisp = Math.min(0.22, stepDepth * 0.16 * core * blockMod) * horizRemain * hScale;
-          const rubbleFloorY = groundY + 0.25 + blockStep * 0.45;
-          const aboveRubble = Math.max(0, fy - rubbleFloorY);
-          const dropWeight = isAperture ? 0.12 : dy > -0.6 ? 0.38 : 0.16;
-          const rawDrop = Math.min(aboveRubble * 0.42, stepDepth * dropWeight * core * blockMod);
-          newFy = Math.min(fy, Math.max(Math.min(origMinY, groundY + 0.15), fy - rawDrop + inY * hDisp * 0.30));
-
-          newFx = fx + inX * hDisp;
-          newFz = fz + inZ * hDisp;
-        }
-      }
-
-      // Rigid 3D Voronoi block detachment: uniform block contraction proportional to slump prevents vertical face overlap
-      let faceRadius = 0;
-      for (let k = 0; k < faceSpan; k++) {
-        const at = (v + k) * stride;
-        const rad = Math.hypot(mesh[at] - fx, mesh[at + 1] - fy, mesh[at + 2] - fz);
-        if (rad > faceRadius) faceRadius = rad;
-      }
-      const gapShrink =
-        !isSubmergedAnchored && !isAperture && faceSpan > 1 && faceRadius > 0.15
-          ? Math.min(0.032, faceRadius * 0.035) * horizRemain
-          : 0;
-      const gapScale = faceRadius > 0.15 ? (faceRadius - gapShrink) / faceRadius : 1.0;
-      const groundRoom = Math.max(0, origMinY - (groundY + 0.15));
-      const groundTumbleScale = Math.min(1.0, groundRoom / 0.5);
-      const maxCornerTumble = 0.075 * core * severity * horizRemain * groundTumbleScale;
-      const tumbleMag =
-        !isSubmergedAnchored && !isAperture && faceSpan > 1
-          ? Math.min(0.11, maxCornerTumble / Math.max(0.65, faceRadius))
-          : 0;
-      const fNx0 = mesh[v * stride + 3], fNy0 = mesh[v * stride + 4], fNz0 = mesh[v * stride + 5];
-      const fNLen = Math.hypot(fNx0, fNy0, fNz0) || 1;
-      const fNx = fNx0 / fNLen, fNy = fNy0 / fNLen, fNz = fNz0 / fNLen;
-      const rawAx = voronoi.tumbleX * tumbleMag;
-      const rawAy = voronoi.tumbleY * tumbleMag * 0.75;
-      const rawAz = voronoi.tumbleZ * tumbleMag;
-      const inPlaneDot = rawAx * fNx + rawAy * fNy + rawAz * fNz;
-      const outScale = Math.abs(fNy) < 0.45 ? 0.18 : 1.0;
-      const dAx = fNx * inPlaneDot + (rawAx - fNx * inPlaneDot) * outScale;
-      const dAy = fNy * inPlaneDot + (rawAy - fNy * inPlaneDot) * outScale;
-      const dAz = fNz * inPlaneDot + (rawAz - fNz * inPlaneDot) * outScale;
-
-      let minLocalY = 0;
-      let maxLocalY = 0;
-      let origMaxY = -Infinity;
-      for (let k = 0; k < faceSpan; k++) {
-        const at = (v + k) * stride;
-        if (mesh[at + 1] > origMaxY) origMaxY = mesh[at + 1];
-        const rx = (mesh[at] - fx) * gapScale;
-        const ry = (mesh[at + 1] - fy) * gapScale;
-        const rz = (mesh[at + 2] - fz) * gapScale;
-        const [tx, ty, tz] = tumbleMag > 1e-4 ? rotateVec3Rigid(rx, ry, rz, dAx, dAy, dAz) : [rx, ry, rz];
-        localRotX[k] = tx;
-        localRotY[k] = ty;
-        localRotZ[k] = tz;
-        if (ty < minLocalY) minLocalY = ty;
-        if (ty > maxLocalY) maxLocalY = ty;
-      }
-      if (!isSubmergedAnchored) {
-        const floorY = Math.min(origMinY, groundY + 0.15);
-        if (newFy + minLocalY < floorY) {
-          newFy = floorY - minLocalY;
-        }
-        let maxDeltaY = 0;
-        for (let k = 0; k < faceSpan; k++) {
-          const dyVert = newFy + localRotY[k] - mesh[(v + k) * stride + 1];
-          if (dyVert > maxDeltaY) maxDeltaY = dyVert;
-        }
-        if (maxDeltaY > 0) {
-          newFy -= maxDeltaY;
-        }
-      } else {
-        newFy = fy;
-      }
-
-      const scale = 1.0 + nextDmg;
-      const tilt = 0.30 * t;
-      for (let k = 0; k < faceSpan; k++) {
-        const idx = v + k;
-        const at = idx * stride;
-        mesh[at] = newFx + localRotX[k];
-        mesh[at + 1] = newFy + localRotY[k];
-        mesh[at + 2] = newFz + localRotZ[k];
-
-        const nx = mesh[at + 3], ny = mesh[at + 4], nz = mesh[at + 5];
-        const curLen = Math.hypot(nx, ny, nz) || 1;
-        const [rnx, rny, rnz] =
-          tumbleMag > 1e-4
-            ? rotateVec3Rigid(nx / curLen, ny / curLen, nz / curLen, dAx, dAy, dAz)
-            : [nx / curLen, ny / curLen, nz / curLen];
-        const ux = rnx - (dx / r) * tilt * 0.55;
-        const uy = rny + 0.35 * core;
-        const uz = rnz - (dz / r) * tilt * 0.55;
-        const uLen = Math.hypot(ux, uy, uz) || 1;
-        mesh[at + 3] = (ux / uLen) * scale;
-        mesh[at + 4] = (uy / uLen) * scale;
-        mesh[at + 5] = (uz / uLen) * scale;
-        if (stride >= 8 && rawKind < 19.5) {
-          mesh[at + 7] = Math.max(0.42, mesh[at + 7] * (1 - 0.08 * core * severity * horizRemain));
-        }
-        if (idx < minV) minV = idx;
-        if (idx > maxV) maxV = idx;
-      }
-    }
   }
 
   if (maxV < minV) return null;
@@ -2417,6 +1560,7 @@ export function locatePartAtLocalPoint(catalog, localPoint, options = {}) {
     if (requireLeaf && !part.isLeaf) return;
     if (part.triangleCount <= 0) return;
     if (allowedSubAssemblies && !allowedSubAssemblies.has(part.subAssembly)) return;
+    if (options.gone?.has(part.id)) return;
     const min = part.bounds.min;
     const max = part.bounds.max;
     const dx = px < min[0] ? min[0] - px : px > max[0] ? px - max[0] : 0;

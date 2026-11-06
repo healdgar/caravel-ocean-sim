@@ -129,11 +129,11 @@ test('perceptual gaze and canopy masking reserve full woody resolution for the c
       const B=GPUBufferUsage,make=(data,usage)=>{const b=device.createBuffer({size:data.byteLength,usage:usage|B.COPY_DST});device.queue.writeBuffer(b,0,data);return b;};
       const frameData=new Float32Array(96);frameData[0]=1/.6;frameData[5]=1/.45;frameData[11]=-1;frameData[14]=.1;
       frameData.set([0,100,0],16);frameData.set([.6,0,0],20);frameData.set([0,.45,0],24);frameData.set([0,0,-1],28);frameData.set([1920,1080,1/1920,1/1080],36);
-      // Root 0: closest directly in front (z=-16) -> wood0 (nearLod) at 100% budget, wood1 at 25% mobile budget
-      // Root 1: deeper on-axis (z=-25) -> wood1 (midLod)
-      // Root 2: peripheral at closer depth (x=12, z=-22) -> wood2 (mid2Lod) due to gazeAcuity
-      // Root 3: deeper in canopy (z=-110) -> farLod (middle/volumeShell)
-      const frame=make(frameData,B.UNIFORM),roots=make(new Float32Array([[0,100,-16],[0,100,-25],[12,100,-22],[0,100,-110]].flatMap(p=>[...p,1,0,1,1,1,0,0,0,0])),B.STORAGE);
+      // At full budget a native tree within 12 m keeps wood0, and wood1 is allowed only
+      // past 12 m, wood2 past 30 m and the far shell past 140 m. These radii shrink with
+      // the polygon budget. Error budgets then decide within those distance bands.
+      const rootRecords=(points,identity=0)=>new Float32Array(points.flatMap(p=>[...p,1,0,1,1,1,0,0,identity,0]));
+      const frame=make(frameData,B.UNIFORM),roots=make(rootRecords([[0,100,-16],[0,100,-25],[20,100,-100],[0,100,-300]]),B.STORAGE);
       const meta=new ArrayBuffer(80),f=new Float32Array(meta),u=new Uint32Array(meta);
       f.set([0,0,0,2]);u.set([0,4,8,32],4);u.set([0,3,0,0,3,3,0,0,6,3,0,0],8);
       f[10]=0.08;u[11]=1;f[14]=0.16;u[15]=1;f[18]=0.8;u[19]=0;
@@ -160,37 +160,55 @@ test('perceptual gaze and canopy masking reserve full woody resolution for the c
         return {nearCount:c(0),nearLeafCount:c(1),farCount:c(2),mid1Count:c(4),mid1LeafCount:c(5),mid2Count:c(6),mid2LeafCount:c(7),
           nearIds:vis(0,c(0)),farIds:vis(1,c(2)),mid1Ids:vis(2,c(4)),mid2Ids:vis(3,c(6))};
       }
-      const highBudget=await run(3),mobileBudget=await run(6);
-      // Verify sea-level coastal camera (y=6.0m) with coastal roots (identity.z = -1.0)
-      // steps smoothly through all 4 progressive tiers: nearLod -> mid1Lod -> mid2Lod -> farLod
+      const highBudget=await run(3);
+      const place=(points,identity)=>device.queue.writeBuffer(roots,0,rootRecords(points,identity));
+      // With wood cheap enough for either budget, the protected radius alone decides:
+      // all four hold wood0 at full budget, and the farthest gives way at half.
+      f[10]=0.02;device.queue.writeBuffer(prototypes,0,new Uint8Array(meta));
+      place([[0,100,-4],[0,100,-6],[4,100,-5],[0,100,-9]]);
+      const foregroundHigh=await run(3),foregroundMobile=await run(6);
+      // Past each distance gate, a coarser budget accepts a coarser wood or leaf tier.
+      f[10]=0.35;f[14]=0.7;device.queue.writeBuffer(prototypes,0,new Uint8Array(meta));
+      place([[0,100,-16],[0,100,-40],[0,100,-60],[0,100,-300]]);
+      const distantHigh=await run(3),distantMobile=await run(6);
+      f[10]=0.08;f[14]=0.16;device.queue.writeBuffer(prototypes,0,new Uint8Array(meta));
+      // From a deck at sea level (y=6 m), coastal roots step through the same tiers.
       frameData.set([0,6,0],16);device.queue.writeBuffer(frame,0,frameData);
       f[18]=0.3822;device.queue.writeBuffer(prototypes,0,new Uint8Array(meta));
-      const coastalRootsData=new Float32Array([
-        [0,6,-14],   // Root 0: immediate shoreline tree (14m) -> nearLod (wood0 + 100% leafRibbons)
-        [0,6,-40],   // Root 1: near-mid coastal tree (40m) -> mid1Lod (wood1 + 42% inflated leafRibbons)
-        [18,6,-95],  // Root 2: mid-range coastal tree (97m) -> mid2Lod (wood2 + 16% inflated leafRibbons)
-        [0,6,-195],  // Root 3: distant coastal tree (195m) -> farLod (botanical volumeShell)
-      ].flatMap(p=>[...p,1,0,1,1,1,0,0,-1,0]));
-      device.queue.writeBuffer(roots,0,coastalRootsData);
+      place([[0,6,-14],[0,6,-120],[18,6,-190],[0,6,-300]],-1);
       const coastalSeaLevel=await run(3);
+      place([[0,6,-14],[0,6,-200],[0,6,-500],[0,6,-1700]],-2);
+      const subtropicalSeaLevel=await run(3);
       await device.queue.onSubmittedWorkDone();device.destroy();
-      return {errors,highBudget,mobileBudget,coastalSeaLevel};
+      return {errors,highBudget,foregroundHigh,foregroundMobile,distantHigh,distantMobile,coastalSeaLevel,subtropicalSeaLevel};
     });
     assert.deepEqual(result.errors,[]);
-    assert.deepEqual(result.highBudget.nearIds,[0],'only the closest tree directly in front of the viewer uses full wood0 resolution');
+    assert.deepEqual(result.highBudget.nearIds,[0],'the closest tree directly in front of the viewer uses full wood0 resolution');
     assert.equal(result.highBudget.nearLeafCount,1);
-    assert.deepEqual(result.highBudget.mid1Ids,[1],'next on-axis tree steps down to wood1');
-    assert.deepEqual(result.highBudget.mid2Ids,[2],'off-axis peripheral tree at close distance steps down to wood2');
-    assert.deepEqual(result.highBudget.farIds,[3],'deeper canopy tree steps down to middle/far shell');
-    assert.equal(result.mobileBudget.nearCount,0,'mobile polygon budget (6px threshold) steps even the closest tree down from wood0');
-    assert.deepEqual(result.mobileBudget.mid1Ids,[0],'mobile polygon budget shifts the closest tree from wood0 to wood1');
-    assert.deepEqual(result.mobileBudget.mid2Ids,[1,2],'mobile polygon budget shifts the second tree from wood1 to wood2');
-    assert.deepEqual(result.coastalSeaLevel.nearIds,[0],'immediate shoreline tree (14m) uses nearLod (wood0 + 100% leafRibbons)');
-    assert.deepEqual(result.coastalSeaLevel.mid1Ids,[1],'near-mid coastal tree (40m) uses mid1Lod (wood1 + 42% leafRibbons)');
-    assert.deepEqual(result.coastalSeaLevel.mid2Ids,[2],'mid-range coastal tree (87m) uses mid2Lod (wood2 + 16% leafRibbons)');
-    assert.deepEqual(result.coastalSeaLevel.farIds,[3],'distant coastal tree (195m) uses farLod (botanical volumeShell)');
+    assert.deepEqual(result.highBudget.mid1Ids,[1],'a tree past 12 m steps down to wood1');
+    assert.deepEqual(result.highBudget.mid2Ids,[2],'an off-axis tree past 30 m steps down to wood2');
+    assert.deepEqual(result.highBudget.farIds,[3],'a tree past 140 m steps down to the far shell');
+    assert.deepEqual(result.foregroundHigh.nearIds,[0,1,2,3],'every tree within 12 m keeps wood0 at full budget, even off-axis');
+    assert.equal(result.foregroundHigh.nearLeafCount,4);assert.equal(result.foregroundHigh.mid1Count+result.foregroundHigh.mid2Count+result.foregroundHigh.farCount,0);
+    assert.deepEqual(result.foregroundMobile.nearIds,[0,1,2],'half the pixel budget keeps wood0 only within a smaller radius');
+    assert.deepEqual(result.foregroundMobile.mid1Ids,[3],'a tree outside the shrunken radius sheds wood0');
+    assert.deepEqual(result.distantHigh.nearIds,[0,1],'at a 3 px budget a 40 m tree with coarse wood1 error holds wood0');
+    assert.deepEqual(result.distantHigh.mid1Ids,[2],'at a 3 px budget a 60 m tree with coarse wood2 error holds wood1');
+    assert.deepEqual(result.distantMobile.nearIds,[0],'the 6 px budget leaves the foreground tree on wood0');
+    assert.deepEqual(result.distantMobile.mid1Ids,[1],'the 6 px budget shifts the 40 m tree from wood0 to wood1');
+    assert.deepEqual(result.distantMobile.mid2Ids,[2],'the 6 px budget shifts the 60 m tree from wood1 to wood2');
+    assert.deepEqual(result.coastalSeaLevel.nearIds,[0],'immediate shoreline tree (14 m) uses nearLod (wood0 + 100% leafRibbons)');
+    assert.deepEqual(result.coastalSeaLevel.mid2Ids,[1],'a coastal tree past 30 m uses wood2 from a deck at sea level');
+    assert.equal(result.coastalSeaLevel.mid1Count,0);
+    assert.deepEqual(result.coastalSeaLevel.farIds,[2,3],'coastal trees past 140 m use farLod');
     assert.equal(result.coastalSeaLevel.nearLeafCount,1);
-    assert.equal(result.coastalSeaLevel.mid1LeafCount,1);
     assert.equal(result.coastalSeaLevel.mid2LeafCount,1);
+    assert.deepEqual(result.subtropicalSeaLevel.nearIds,[0],'immediate subtropical shoreline tree stays on nearLod');
+    assert.deepEqual(result.subtropicalSeaLevel.mid1Ids,[1],'a 200 m subtropical tree uses mid1Lod');
+    assert.deepEqual(result.subtropicalSeaLevel.mid2Ids,[2],'a 500 m subtropical tree uses mid2Lod');
+    assert.deepEqual(result.subtropicalSeaLevel.farIds,[3],'a 1700 m subtropical tree uses farLod');
+    assert.equal(result.subtropicalSeaLevel.nearLeafCount,1);
+    assert.equal(result.subtropicalSeaLevel.mid1LeafCount,1);
+    assert.equal(result.subtropicalSeaLevel.mid2LeafCount,1);
   }finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}
 });

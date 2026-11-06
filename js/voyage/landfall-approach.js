@@ -348,6 +348,60 @@ export function destinationPoint(lat, lon, bearingDeg, distKm) {
   return { lat: p2 / APPROACH_RAD, lon: approachWrapLon(l2 / APPROACH_RAD) };
 }
 
+// Where a harbor pilot leaves a ship: the nearest point with open sea all around it, trying
+// seaward first. The coast map is too coarse to trust close in. A port far up a river names
+// its own point, since no straight line from it reaches the sea the way a ship would go.
+const PILOT_DROP_KM = Object.freeze([30, 40, 60, 90, 130]);
+const PILOT_DROP_OFFSETS = Object.freeze([0, 30, -30, 60, -60, 90, -90, 120, -120, 150, -150, 180]);
+export function pilotDropPoint(lat, lon, shoreBearing, coastIndex, { marginKm = 18, drop = null } = {}) {
+  const seaward = Number.isFinite(shoreBearing) ? (shoreBearing + 180) % 360 : 0;
+  const clear = (p) => !coastIndex?.isLand?.(p.lat, p.lon) && !coastIndex?.nearestCoast?.(p.lat, p.lon, marginKm);
+  if (drop && clear({ lat: drop.latitude, lon: drop.longitude })) {
+    return { lat: drop.latitude, lon: drop.longitude, bearing: initialBearing(lat, lon, drop.latitude, drop.longitude), distanceKm: greatCircleKm(lat, lon, drop.latitude, drop.longitude) };
+  }
+  for (const distanceKm of PILOT_DROP_KM) {
+    for (const offset of PILOT_DROP_OFFSETS) {
+      const bearing = ((seaward + offset) % 360 + 360) % 360, p = destinationPoint(lat, lon, bearing, distanceKm);
+      if (clear(p)) return { lat: p.lat, lon: p.lon, bearing, distanceKm };
+    }
+  }
+  return null;
+}
+
+// How far short of danger warp must stop: room to turn, and minutes of real sailing to do it in.
+const WARP_STANDOFF_MIN_M = 800;
+const WARP_STANDOFF_SECONDS = 240;
+const WARP_BRAKE_SECONDS = 2;
+const WARP_LAST_SECONDS = 20;
+// The zoom-6 map can be kilometres out, so where it is all there is, warp stops further off.
+export const WARP_MAP_COAST_STOP_KM = 4;
+export function warpStandoffM(groundSpeed = 3) {
+  return Math.max(WARP_STANDOFF_MIN_M, Math.max(0.5, groundSpeed) * WARP_STANDOFF_SECONDS);
+}
+// Fastest warp that can still stop at the standoff. Each scan closes only a small part of the gap.
+export function warpCapForHazard(hazardM, groundSpeed = 3) {
+  if (!Number.isFinite(hazardM)) return 3600;
+  const speed = Math.max(0.8, groundSpeed), gapM = hazardM - warpStandoffM(groundSpeed);
+  if (gapM <= speed * WARP_LAST_SECONDS) return 1;
+  return approachClamp(gapM / (speed * WARP_BRAKE_SECONDS), 1, 3600);
+}
+
+// Land in a 3D coast that stands above the horizon from the masthead, around a bearing. Returns
+// the point standing highest in the view, or null when nothing shows from here.
+export function visibleLandPoint(heightAt, x, z, centerBearing, { eyeM = 20, searchDeg = 30, stepDeg = 1, reachM = 34000, minShowingM = 3 } = {}) {
+  let best = null, bestAngle = -Infinity;
+  for (let off = -searchDeg; off <= searchDeg; off += stepDeg) {
+    const rad = ((centerBearing + off) * Math.PI) / 180, sx = Math.sin(rad), sz = -Math.cos(rad);
+    for (let d = 600; d <= reachM; d += d < 6000 ? 200 : 400) {
+      const px = x + sx * d, pz = z + sz * d, h = heightAt(px, pz);
+      if (h <= 1 || h - hiddenHeightM(d, eyeM) < minShowingM) continue;
+      const angle = (h - eyeM) / d;
+      if (angle > bestAngle) { bestAngle = angle; best = { x: px, z: pz, height: h, distanceM: d }; }
+    }
+  }
+  return best;
+}
+
 // ---------------------------------------------------------------------------------------------
 // Approach staging & warp governor
 // ---------------------------------------------------------------------------------------------

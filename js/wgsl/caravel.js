@@ -1,8 +1,9 @@
-import { FRAME_WGSL, ATMO_CORE_WGSL, ENV_MIPS } from './common.js';
+import { FRAME_WGSL, ATMO_CORE_WGSL, ENV_MIPS, HULL_HOLE_LIMIT, HULL_CRATER_LIMIT } from './common.js';
 import { SKY_RENDER_FUNCS } from './sky.js';
 import { DECK_PROFILE, DECK_SAMPLING } from './deck.js';
 import { VESSEL_RIG, VESSEL_LIGHTING, CANVAS_OPTICS } from './vessel.js';
 import { SHADOW_SAMPLE } from './shadows.js';
+import { ADDITIONAL_DESIGNS } from '../models/additional.js';
 
 // Exact marker recognized by createSubmergedShader. Both hull and rudder retain
 // their authored material IDs/finishes; only the surrounding optical medium
@@ -65,7 +66,10 @@ fn vesselIronTransmission(film:f32,nv:f32,nl:f32)->f32 {
   return mix(1.0,(1.0-fv)*(1.0-fl),film);
 }
 `;
-export const CARAVEL = FRAME_WGSL + ATMO_CORE_WGSL + DECK_PROFILE + VESSEL_RIG + VESSEL_LIGHTING + CANVAS_OPTICS + SHADOW_SAMPLE + VESSEL_MATERIAL_MEDIUM + IRON_SURFACE + /* wgsl */ `
+// Two shaders from one source. A whole ship has no damage code at all: no discard, so the GPU
+// shades only what the eye can see of her. A damaged ship lays depth with `surviving`, which
+// decides what shot and tearing have taken away, then `fs` shades just the surface that is left.
+function vesselSource(damaged) { return FRAME_WGSL + ATMO_CORE_WGSL + DECK_PROFILE + VESSEL_RIG + VESSEL_LIGHTING + CANVAS_OPTICS + SHADOW_SAMPLE + VESSEL_MATERIAL_MEDIUM + IRON_SURFACE + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var transLUT: texture_2d<f32>;
 @group(0) @binding(2) var skyLUT: texture_2d<f32>;
@@ -81,9 +85,13 @@ export const CARAVEL = FRAME_WGSL + ATMO_CORE_WGSL + DECK_PROFILE + VESSEL_RIG +
 @group(0) @binding(12) var deckWater: texture_2d<f32>;
 @group(0) @binding(13) var<storage,read> moisture:array<vec2f>;
 @group(0) @binding(14) var<storage,read> wetLookup:array<u32>;
-` + SKY_RENDER_FUNCS + DECK_SAMPLING + /* wgsl */ `
+${damaged?`// Holes in local metres with their radius, then craters in design coordinates. See hull-flood.js.
+struct HullCrater { at:vec3f, packed:u32 };
+struct HullDamage { scale:vec4f, level:vec4f, holes:array<vec4f,${HULL_HOLE_LIMIT}>, flows:array<vec4f,${HULL_HOLE_LIMIT}>, craters:array<HullCrater,${HULL_CRATER_LIMIT}> };
+@group(0) @binding(15) var<uniform> hullDamage:HullDamage;
+`:''}` + SKY_RENDER_FUNCS + DECK_SAMPLING + /* wgsl */ `
 struct BoatVertex {
-  @builtin(position) pos: vec4f,
+  ${damaged?'@invariant ':''}@builtin(position) pos: vec4f,
   @location(0) world: vec3f,
   @location(1) normal: vec3f,
   @location(2) local: vec3f,
@@ -91,13 +99,12 @@ struct BoatVertex {
   @location(4) normalLocal: vec3f,
   @location(5) uv: vec2f,
   @location(6) wet:vec2f,
-  @location(7) damage: f32,
+  ${damaged?'@location(7) damage: f32,':''}
 };
 @vertex fn vs(@location(0) position: vec3f, @location(1) normal: vec3f, @location(2) material: f32, @location(3) uv: vec2f,@builtin(vertex_index) index:u32) -> BoatVertex {
   let inputNormLen=length(normal);
   let unitInputNormal=select(normal,normal/max(inputNormLen,0.0001),inputNormLen>1.002);
   let rig=rigVertex(position,normal,material,uv);
-  let rigNormLen=max(inputNormLen,length(rig.normal));
   let rawRigLen=length(rig.normal);
   let unitRigNormal=select(rig.normal,rig.normal/max(rawRigLen,0.0001),rawRigLen>1.002);
   let relative = rotateHull(rig.position * rig.scale) + hull.origin.xyz - F.camPos.xyz;
@@ -107,7 +114,7 @@ struct BoatVertex {
   o.normal = normalize(rotateHull(unitRigNormal / rig.scale));
   o.local = position;
   o.material = u32(material); o.normalLocal = unitInputNormal; o.uv=uv;o.wet=moisture[wetLookup[index]];
-  o.damage = select(0.0, clamp(rigNormLen - 1.0, 0.0, 1.5), rigNormLen > 1.002);
+  ${damaged?'let rigNormLen=max(inputNormLen,rawRigLen);o.damage=select(0.0,clamp(rigNormLen-1.0,0.0,1.5),rigNormLen>1.002);':''}
   return o;
 }
 fn oceanHeight(p: vec2f) -> f32 {
@@ -128,7 +135,7 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   let edge = min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
   let confidence = smoothstep(0.015,0.14,edge) * smoothstep(0.0,0.5,clip.w)
       * smoothstep(0.025,0.16,-direction.y) * smoothstep(0.0,0.3,t);
-  let lod = 1.5 + roughness * 5.0;
+  let lod = 0.5 + roughness * 5.0;
   let ocean = textureSampleLevel(waterScene, sampC, clamp(uv,vec2f(0.001),vec2f(0.999)), lod).rgb;
   // A rough timber reflection integrates light over a broad lobe. Individual
   // HDR sun glitter pixels must not behave as point emitters on the wood.
@@ -136,7 +143,56 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   let filteredOcean=min(ocean,limit);
   return mix(env,filteredOcean,confidence*0.55);
 }
-@fragment fn fs(in: BoatVertex, @builtin(front_facing) front: bool) -> @location(0) vec4f {
+fn vesselPainted(material:u32)->bool {return material==20u || material==21u || material==23u || material==24u || material==26u;}
+fn vesselClothEdge(uv:vec2f,material:u32)->f32 {
+  let squareEdge=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
+  let triangleEdge=min(min(uv.x,uv.y),(1.0-uv.x-uv.y)*0.70710678);
+  return select(squareEdge,triangleEdge,material==13u);
+}
+${damaged?`// A ball leaves a ragged opening, torn further along the run of the planks. How far into its
+// splintered margin this point lies, or below zero inside the hole itself.
+fn hullHoleRim(p:vec3f)->f32 {
+  var rim=0.0;
+  let metres=p*hullDamage.scale.xyz;
+  for(var i=0u;i<u32(hullDamage.scale.w);i++){
+    let hole=hullDamage.holes[i];
+    // Measured across her side only: the planks around a hole have been stove in well inboard of it.
+    let d=metres-hole.xyz;
+    if(abs(d.x)>1.2){continue;}
+    let distance=length(d.yz*vec2f(1.0,.82));
+    if(distance>hole.w*1.8+.08){continue;}
+    let around=d.yz/max(length(d.yz),.0001);
+    let ragged=.84+.55*gnoise(around*1.7+hole.xz*9.0)+.2*gnoise(vec2f(metres.z*22.0,metres.y*48.0));
+    let edge=hole.w*ragged;
+    if(distance<edge){return -1.0;}
+    rim=max(rim,1.0-smoothstep(edge,edge*1.3+.035,distance));
+  }
+  return rim;
+}
+fn ropeFray(p:vec3f)->f32 {return gnoise(vec2f((p.x+p.z)*32.0,p.y*48.0));}
+fn ropeParted(p:vec3f,damage:f32)->bool {return damage>0.58 && ropeFray(p)>1.18-damage*0.65;}
+// Anisotropic linen tear field: canvas rips preferentially along vertical warp strips
+// and seams, with ragged shot holes and frayed cross-weft threads around the tear rim.
+struct CanvasTear {value:f32,threshold:f32,fray:f32};
+fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
+  let warpTear=gnoise(vec2f(uv.x*42.0+floor(uv.x*10.0)*3.7,uv.y*8.5));
+  let shotTear=gnoise(vec2f(uv.x*16.0+p.x*2.1,uv.y*16.0+p.y*1.9));
+  let threadFray=gnoise(vec2f(uv.x*170.0,uv.y*55.0));
+  let seamWeakness=(1.0-smoothstep(0.0,0.14,abs(fract(uv.x*10.0)-0.5)))*0.18;
+  let keepRim=(1.0-smoothstep(0.0,0.035,vesselClothEdge(uv,material)))*0.35;
+  return CanvasTear(warpTear*0.48+shotTear*0.34+threadFray*0.18+seamWeakness-keepRim,clamp(0.96-damage*0.56,0.24,0.92),threadFray);
+}
+// Depth for a damaged ship. Whatever fails here is gone, so it is never shaded.
+@fragment fn surviving(in:BoatVertex)->@location(0) vec4f {
+  if(vesselWoodMaterial(in.material,vesselPainted(in.material)) && hullHoleRim(in.local)<0.0){discard;}
+  if((in.material==2u || in.material==12u || in.material==19u) && ropeParted(in.local,in.damage)){discard;}
+  if((in.material==9u || in.material==13u) && in.damage>0.04){
+    let tear=canvasTear(in.uv,in.local,in.material,in.damage);
+    if(tear.value>tear.threshold){discard;}
+  }
+  return vec4f(0);
+}
+`:''}@fragment fn fs(in: BoatVertex, @builtin(front_facing) front: bool) -> @location(0) vec4f {
   let p = in.local;
   var wet=clamp(in.wet,vec2f(0),vec2f(1));
   if(in.material==0u && abs(p.y-deckFloor(p.z))<0.08){wet.x=max(wet.x,sampleDeck(deckUV(p)).z);}
@@ -149,8 +205,11 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   let footprint = max(length(dpdx(grainUV)),length(dpdy(grainUV)));
   // Plank seams follow the hull's girth and the cabin's horizontal strakes.
   // Unlike a painted line, their recessed height also breaks the light response.
-  let paintedWood=in.material==20u || in.material==21u || in.material==23u || in.material==24u || in.material==26u;
-  let plankedWall=in.material==15u || (paintedWood && abs(in.normalLocal.y)<.5) || (in.material==1u && abs(in.normalLocal.y)<.35);
+  let paintedWood=vesselPainted(in.material);
+  ${damaged?`// Timber stands raw and splintered around a hole, and whatever is seen through it lies in the dark of the hold.
+  let holedTimber=u32(hullDamage.scale.w)>0u && vesselWoodMaterial(in.material,paintedWood);
+  let holeRim=select(0.0,max(hullHoleRim(p),0.0),holedTimber);
+`:''}  let plankedWall=in.material==15u || (paintedWood && abs(in.normalLocal.y)<.5) || (in.material==1u && abs(in.normalLocal.y)<.35);
   let course=select(p.y/.16,in.uv.x*18.0,in.material==15u);
   let board=floor(course);
   let edge=min(fract(course),1.0-fract(course));
@@ -167,16 +226,20 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   let deckButtCoord=(p.z+fract(deckPlankId*0.413)*2.0)/2.3;
   let deckButtEdge=min(fract(deckButtCoord),1.0-fract(deckButtCoord));
   let deckButtSeam=1.0-smoothstep(.001,.004+max(fwidth(deckButtCoord),.001),deckButtEdge);
-  let deckCaulk=select(0.0,max(deckSeam,deckButtSeam*.85),isProceduralFleet && in.material==0u);
-  let isAdditionalIberian=isProceduralFleet && hull.size.y>20.5 && hull.size.y<30.0 && hull.size.x>5.0;
-  let isCastleWall=isAdditionalIberian && in.material==15u && p.y>.60 && (p.z>1.18 || p.z< -2.55);
+  // Pinta and Santa María carry their model code in rig.w, so isProceduralFleet
+  // above never matches them. It stays off for the other descriptor-driven ships.
+  let isAdditionalIberian=hull.rig.w>1.5 && hull.rig.w<3.5;
+  let deckCaulk=select(0.0,max(deckSeam,deckButtSeam*.85),(isProceduralFleet || isAdditionalIberian) && in.material==0u);
+  let castleFore=select(${ADDITIONAL_DESIGNS['santa-maria'].deckZones.find(zone=>zone.id==='forecastle').bounds[1]},${ADDITIONAL_DESIGNS.pinta.deckZones.find(zone=>zone.id==='forecastle').bounds[1]},hull.rig.w<2.5);
+  let castleAft=select(${ADDITIONAL_DESIGNS['santa-maria'].deckZones.find(zone=>zone.id==='quarter').bounds[0]},${ADDITIONAL_DESIGNS.pinta.deckZones.find(zone=>zone.id==='quarter').bounds[0]},hull.rig.w<2.5);
+  let isCastleWall=isAdditionalIberian && in.material==15u && p.y>.60 && (p.z>castleAft || p.z<castleFore);
   let castleMoulding=select(0.0,1.0-smoothstep(.14,.22,abs(fract(course*.3333)-.5)*3.0),isCastleWall);
-  let castleFuttock=select(0.0,1.0-smoothstep(.038,.062,abs(fract(p.z/.62)-.5)),isCastleWall && abs(in.normalLocal.x)>.42 && castleMoulding<.5);
+  // Only the nao carries upright battens on her castles; the caravel stays plain.
+  let castleFuttock=select(0.0,1.0-smoothstep(.038,.062,abs(fract(p.z/.62)-.5)),isCastleWall && hull.rig.w>2.5 && castleMoulding<.5);
   let castleRelief=(castleMoulding*.0024 + castleFuttock*.0018);
   let join=select(deckCaulk*.85,max(seam,buttSeam*.8),plankedWall);
-  var dmgBump=0.0;
-  if(in.damage>0.05){dmgBump=smoothstep(0.05,0.45,clamp(in.damage,0.0,1.5))*gnoise(vec2f(p.z*28.0,p.y*165.0))*.016*(1.0-smoothstep(.002,.015,footprint));}
-  let bump=relief*.006 + grain*.00065*(1.0-smoothstep(.0005,.004,footprint)) - join*.0018 + castleRelief + dmgBump;
+  var bump=relief*.006 + grain*.00065*(1.0-smoothstep(.0005,.004,footprint)) - join*.0018 + castleRelief;
+  ${damaged?'if(in.damage>0.05){bump+=smoothstep(0.05,0.45,clamp(in.damage,0.0,1.5))*gnoise(vec2f(p.z*28.0,p.y*165.0))*.016*(1.0-smoothstep(.002,.015,footprint));}':''}
   let dx = dpdx(in.world); let dy = dpdy(in.world);
   // Shadow depth rasterizes flat triangles, while cloth lighting uses smooth
   // analytic normals. Receiver-plane filtering must follow the actual triangle
@@ -209,24 +272,21 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   let clothSeam=abs(fract(in.uv.x*10.0)-0.5);
   let clothAA=max(fwidth(clothSeam),0.001);
   let weaveAA=max(fwidth(in.uv.x+in.uv.y),0.001);
-  let squareEdge=min(min(in.uv.x,1.0-in.uv.x),min(in.uv.y,1.0-in.uv.y));
-  let triangleEdge=min(min(in.uv.x,in.uv.y),(1.0-in.uv.x-in.uv.y)*0.70710678);
-  let clothEdge=select(squareEdge,triangleEdge,in.material==13u);
+  let clothEdge=vesselClothEdge(in.uv,in.material);
   let edgeAA=max(fwidth(clothEdge),0.0005);
   if(in.material==0u) {
     albedo *= mix(0.3,1.0,smoothstep(0.001,0.004+jointAA,joint));
-    if(isProceduralFleet) {
+    if(isProceduralFleet || isAdditionalIberian) {
       albedo = mix(albedo, vec3f(0.015,0.011,0.008), deckCaulk * 0.86);
       rough = mix(rough, 0.94, deckCaulk);
     }
   }
   if(in.material == 1u || in.material == 5u || in.material == 6u) {
     albedo *= .87;
-    if(isProceduralFleet && in.material == 1u) {
+    if((isProceduralFleet || isAdditionalIberian) && in.material == 1u) {
       let isKeelOrPost = (abs(p.x) < 0.068 && p.y < -0.46) || (abs(p.x) < 0.055 && p.z > 5.25 && p.y < 1.05);
-      let isProudWale = isAdditionalIberian && abs(p.x) > 0.34 && p.y > -0.35 && p.y < 0.62 && p.z > -5.85 && p.z < 5.85 && (abs(in.normalLocal.x) > 0.48 || abs(in.normalLocal.y) > 0.78);
       let isCapRail = p.y > 0.58 && in.normalLocal.y > 0.52 && abs(p.x) > 0.32;
-      if(isKeelOrPost || isProudWale) {
+      if(isKeelOrPost) {
         albedo = timber * vec3f(.20,.18,.15);
         rough = .90;
         if(abs(p.x) < 0.055 && p.z > 5.25 && abs(fract((p.y + 0.85) / 0.42) - 0.5) < 0.085) {
@@ -273,14 +333,10 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   if(in.material == 2u || in.material == 12u || in.material==19u) {
     let twist = sin((p.x+p.y+p.z)*100.0) * (1.0-smoothstep(0.02,0.12,ropeAA));
     albedo = vec3f(0.28,0.20,0.11) * (0.8+0.2*twist); rough=0.87;
-    if (in.damage > 0.25) {
-      let ropeFray = gnoise(vec2f((p.x + p.z) * 32.0, p.y * 48.0));
-      if (in.damage > 0.58 && ropeFray > 1.18 - in.damage * 0.65) {
-        discard;
-      }
-      albedo *= mix(1.0, 0.45 + 0.35 * ropeFray, clamp(in.damage, 0.0, 1.0));
-      rough = 0.96;
-    }
+    ${damaged?`if(in.damage>0.25){
+      albedo*=mix(1.0,0.45+0.35*ropeFray(p),clamp(in.damage,0.0,1.0));
+      rough=0.96;
+    }`:''}
   }
   if(in.material == 4u) { albedo=vec3f(0.012,0.009,0.006); rough=0.92; }
   if(isIron){albedo=iron.albedo;rough=iron.rough;metal=iron.bare;}
@@ -293,30 +349,19 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
     // light. Broad folds and filtered weave avoid a uniformly luminous sheet.
     albedo=vec3f(0.58,0.55,0.48)*aged*(1.0-0.12*seam-0.08*hem)*(1.0+0.025*weave);
     n=normalize(in.normal)*select(-1.0,1.0,front); rough=0.95;
-    if (in.damage > 0.04) {
-      // Anisotropic linen tear field: canvas rips preferentially along vertical warp strips
-      // and seams, with ragged shot holes and frayed cross-weft threads around the tear rim.
-      let warpTear = gnoise(vec2f(in.uv.x * 42.0 + floor(in.uv.x * 10.0) * 3.7, in.uv.y * 8.5));
-      let shotTear = gnoise(vec2f(in.uv.x * 16.0 + p.x * 2.1, in.uv.y * 16.0 + p.y * 1.9));
-      let threadFray = gnoise(vec2f(in.uv.x * 170.0, in.uv.y * 55.0));
-      let seamWeakness = (1.0 - smoothstep(0.0, 0.14, clothSeam)) * 0.18;
-      let keepRim = (1.0 - smoothstep(0.0, 0.035, clothEdge)) * 0.35;
-      let tearVal = warpTear * 0.48 + shotTear * 0.34 + threadFray * 0.18 + seamWeakness - keepRim;
-      let tearThresh = clamp(0.96 - in.damage * 0.56, 0.24, 0.92);
-      if (tearVal > tearThresh) {
-        discard;
+    ${damaged?`if(in.damage>0.04){
+      let tear=canvasTear(in.uv,p,in.material,in.damage);
+      let rimBand=smoothstep(tear.threshold-0.16,tear.threshold,tear.value);
+      if(rimBand>0.01){
+        let frayWave=sin(in.uv.x*520.0+tear.fray*12.0)*0.5+0.5;
+        let scorchMix=clamp(in.damage*0.55,0.15,0.72);
+        let frayedColor=mix(vec3f(0.66,0.62,0.53),vec3f(0.14,0.11,0.08),scorchMix*(1.0-frayWave*0.45));
+        albedo=mix(albedo,frayedColor,rimBand*0.88);
+        let ripTang=normalize(cross(n,vec3f(0.0,1.0,0.0))+vec3f(0.001,0.0,0.0));
+        n=normalize(n+ripTang*(tear.fray-0.5)*rimBand*0.65);
+        rough=0.99;
       }
-      let rimBand = smoothstep(tearThresh - 0.16, tearThresh, tearVal);
-      if (rimBand > 0.01) {
-        let frayWave = sin(in.uv.x * 520.0 + threadFray * 12.0) * 0.5 + 0.5;
-        let scorchMix = clamp(in.damage * 0.55, 0.15, 0.72);
-        let frayedColor = mix(vec3f(0.66, 0.62, 0.53), vec3f(0.14, 0.11, 0.08), scorchMix * (1.0 - frayWave * 0.45));
-        albedo = mix(albedo, frayedColor, rimBand * 0.88);
-        let ripTang = normalize(cross(n, vec3f(0.0, 1.0, 0.0)) + vec3f(0.001, 0.0, 0.0));
-        n = normalize(n + ripTang * (threadFray - 0.5) * rimBand * 0.65);
-        rough = 0.99;
-      }
-    }
+    }`:''}
   }
   var windowPaneMask = 1.0;
   var windowHoleMask = 0.0;
@@ -356,8 +401,6 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
       if(frameWeight > 0.01) {
         albedo = mix(albedo, timber * vec3f(0.20, 0.18, 0.15), frameWeight);
         rough = mix(rough, 0.90, frameWeight);
-      } else if(p.z > 2.6 && p.y > 1.15 && p.y < 1.44 && abs(in.normalLocal.x) > 0.4) {
-        albedo = mix(albedo, vec3f(0.28, 0.055, 0.032) * (0.80 + 0.35 * relief), 0.58);
       }
     }
   }
@@ -374,9 +417,8 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
     albedo*=timberMoisture.x;rough=timberMoisture.y;
   }
   var craterLightMul = 1.0;
-  let wLen = arrayLength(&wetLookup);
-  let tailWord = select(0u, wetLookup[wLen - 1u], wLen > 512u);
-  let craterCount = select(0u, min(127u, tailWord & 0xFFu), (tailWord & 0xFFFFFF00u) == 0xC8A7E000u);
+  ${damaged?`
+  let craterCount = u32(hullDamage.level.w);
   let isSternSurface = p.z > 4.2 && (isWood || paintedWood || in.material == 11u || in.material == 25u);
   let isSuperstructureWall = p.y > 0.45 && (isWood || paintedWood || in.material == 11u) && abs(in.normalLocal.y) < 0.68;
   let canCrater = ((isWood || paintedWood || in.material == 22u) && abs(p.x) > 0.22 && abs(in.normalLocal.x) > 0.16) || isSternSurface || isSuperstructureWall;
@@ -401,12 +443,12 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
     var bestDepth = 0.18;
 
     for (var ci = 0u; ci < craterCount; ci++) {
-      let cBase = (wLen - 512u) + ci * 4u;
-      let cx = bitcast<f32>(wetLookup[cBase]);
-      let cy = bitcast<f32>(wetLookup[cBase + 1u]);
+      let crater = hullDamage.craters[ci];
+      let cx = crater.at.x;
+      let cy = crater.at.y;
       let dy = p.y - cy;
       if (abs(dy) > 0.32) { continue; }
-      let cz = bitcast<f32>(wetLookup[cBase + 2u]);
+      let cz = crater.at.z;
       let isSternCrater = cz > 4.2 && p.z > 4.2;
       let isTransverseWall = abs(in.normalLocal.z) > 0.45 && abs(p.z - cz) < 0.34;
       let isCenterSuperstructure = p.y > 0.45 && abs(cx) < 0.75 && abs(p.x - cx) < 0.45;
@@ -422,7 +464,7 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
         noiseReady = true;
       }
 
-      let w3 = wetLookup[cBase + 3u];
+      let w3 = crater.packed;
       let cr = max(0.052, f32(w3 & 0xFFFu) / 4000.0);
       let cDepth = f32((w3 >> 12u) & 0xFFFu) / 1000.0;
       let cHits = f32(max(1u, (w3 >> 24u) & 0xFFu));
@@ -591,8 +633,13 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
       n = normalize(n + rotateHull(shardTilt));
     }
   }
+  `:''}
   let v=normalize(F.camPos.xyz-in.world); let l=F.sunDir.xyz;
   let nl=clamp(dot(n,l),0.0,1.0);
+  ${damaged?`if(holeRim>0.0){
+    albedo=mix(albedo,vec3f(.46,.33,.2)*(.55+.9*gnoise(vec2f(p.z*90.0,p.y*140.0))),holeRim);
+    rough=max(rough,.92);
+  }`:''}
   var f0=mix(vec3f(0.04),albedo,metal);
   if(isWood){f0=vec3f(vesselWoodDielectricF0());}
   if(isIron){
@@ -640,6 +687,8 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
     // bounded two-pass attenuation approximation, not a split-sum IBL integral.
     environmentTransmission=vesselIronTransmission(iron.film,max(dot(n,v),0.0),max(dot(n,v),0.0));
   }
+  // Below the deck and facing inboard is the hold, and it is dark.
+  ${damaged?'if(holedTimber && p.y<deckFloor(p.z)+.06 && (!front || in.normalLocal.x*sign(p.x)< -.2)){directTransmission*=.04;environmentTransmission*=.1;}':''}
   var col=(diffuse/PI+spec)*direct*nl*directTransmission;
   col+=(diffuseAmbient*ambient*ao + reflected*F.windP[1].w*vesselEnvironment(n,v,rough,f0))*environmentTransmission;
   if(!vesselWaterCapture&&isIron&&iron.film>0.0001){
@@ -712,7 +761,9 @@ fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
   col=surfaceAir(col,in.world);
   return vec4f(col,1.0);
 }
-`;
+`; }
+export const CARAVEL = vesselSource(false);
+export const CARAVEL_DAMAGED = vesselSource(true);
 
 // HDR mip chain suppresses raw single-pixel sun glints in rough timber reflections.
 export const WATER_FILTER = /* wgsl */ `

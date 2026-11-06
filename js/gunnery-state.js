@@ -20,7 +20,29 @@
 
 export const GUNNERY_STAGE_DURATIONS=Object.freeze({swab:6,load:8,ram:7,runout:8,prime:4});
 export const GUNNERY_SWIVEL_STAGE_DURATIONS=Object.freeze({swab:2,load:4,ram:2,runout:2,prime:2});
-export const GUNNERY_AMMO_TYPES=Object.freeze(['round','hot','chain','grape']);
+// An archer nocks, draws and looses in about three seconds. Bows share the gun drill's
+// stages so one reload path serves every weapon; the cannon-only stages pass at once.
+export const GUNNERY_BOW_STAGE_DURATIONS=Object.freeze({swab:.01,load:1.6,ram:.01,runout:.01,prime:1.4});
+export const GUNNERY_CANNON_AMMO=Object.freeze(['round','hot','chain','grape']);
+export const GUNNERY_BOW_AMMO=Object.freeze(['arrow','fire-arrow']);
+export const GUNNERY_AMMO_TYPES=Object.freeze([...GUNNERY_CANNON_AMMO,...GUNNERY_BOW_AMMO]);
+export const isArrowAmmo=ammo=>ammo==='arrow'||ammo==='fire-arrow';
+// What a battery fires decides its ammunition, whether it burns powder and how far
+// it reaches. Muskets and pistols become further rows here.
+const GUNNERY_WEAPONS=Object.freeze({
+  cannon:Object.freeze({id:'cannon',ammo:GUNNERY_CANNON_AMMO,defaultAmmo:'round',usesPowder:true,effectiveRange:Infinity}),
+  bow:Object.freeze({id:'bow',ammo:GUNNERY_BOW_AMMO,defaultAmmo:'arrow',usesPowder:false,effectiveRange:170}),
+});
+export function gunneryWeapon(gun){return gun?.kind==='bow'?GUNNERY_WEAPONS.bow:GUNNERY_WEAPONS.cannon;}
+// Flight multipliers shared by the live shot and the aiming preview. Pitch-soaked
+// tow makes a fire arrow slower and draggier than a plain one.
+export function gunneryAmmoFlight(ammo){
+  if(ammo==='hot')return {speed:.88,drag:1,dispersion:0};
+  if(ammo==='chain')return {speed:.82,drag:1.62,dispersion:.012};
+  if(ammo==='grape')return {speed:.85,drag:1.18,dispersion:.032};
+  if(ammo==='fire-arrow')return {speed:.9,drag:1.35,dispersion:0};
+  return {speed:1,drag:1,dispersion:0};
+}
 export const GUNNERY_LIMITS=Object.freeze({guns:128,projectiles:128,events:512,fixedStep:1/120,maxAdvance:.5,maxFlight:30,maxRange:8000});
 const GUNNERY_DRILL=Object.freeze(['swab','load','ram','runout','prime']);
 const gunneryClamp=(x,a,b)=>Math.max(a,Math.min(b,x));
@@ -34,6 +56,19 @@ function gunneryRandom(state){
   return state.seed/4294967296;
 }
 function gunnerySide(side){return side==='port'||side===-1?'port':side==='starboard'||side===1?'starboard':null;}
+// A gun is offline when the vessel scale omits it or battle damage has dismounted
+// it (carriage smashed / breeching parted). Offline guns never load, queue or fire.
+export function gunneryOffline(gun){return Boolean(gun?.disabledByScale||gun?.dismounted);}
+// Shipwrights or a fresh vessel put every dismounted gun back on its carriage, run in and unloaded.
+export function remountVesselGuns(boat){
+  let count=0;
+  for(const gun of boat?.gunnery?.guns??[]){
+    if(!gun.dismounted)continue;
+    gun.dismounted=false;gun.loading=false;gun.queued=false;gun.stage='secured';gun.elapsed=0;gun.progress=0;gun.offset=gun.recoilLength;gun.recoil=0;count++;
+  }
+  if(boat?.damage){boat.damage.dismountedGuns=0;boat.damage.dismountedPorts?.clear?.();}
+  return count;
+}
 
 // gunDefs retain their metadata (including id, deck and attachment). A caller
 // supplies muzzle positions/directions after vessel scale and rigid rotation.
@@ -50,7 +85,7 @@ export function createGunneryState(gunDefs=[],options={}){
     const diameter=gunneryClamp(gunneryFinite(def.diameter,Math.cbrt(6*mass/(Math.PI*7200))),.015,.25);
     const carronade=def.kind==='carronade',swivel=def.kind==='swivel'||def.type==='swivel';
     const muzzleSpeed=gunneryClamp(gunneryFinite(def.muzzleSpeed,carronade?300:calibre>=32?487.68:calibre>=24?470:calibre>=12?450:350),1,650);
-    const defaultDurations=swivel?GUNNERY_SWIVEL_STAGE_DURATIONS:GUNNERY_STAGE_DURATIONS;
+    const defaultDurations=def.kind==='bow'?GUNNERY_BOW_STAGE_DURATIONS:swivel?GUNNERY_SWIVEL_STAGE_DURATIONS:GUNNERY_STAGE_DURATIONS;
     const durations={};for(const stage of GUNNERY_DRILL)durations[stage]=gunneryClamp(gunneryFinite(def.durations?.[stage],defaultDurations[stage]),.01,120);
     return {...def,id,index,side,calibre,mass,diameter,muzzleSpeed,durations,
       dragCoefficient:gunneryClamp(gunneryFinite(def.dragCoefficient,.47),0,2),
@@ -64,7 +99,7 @@ export function createGunneryState(gunDefs=[],options={}){
       loading:false,queued:false,roundsFired:0,lastShot:-Infinity,lastBlocked:null};
   });
   return {guns,projectiles:[],queue:[],events:[],pendingEvents:[],time:0,accumulator:0,seed:(options.seed??0x14921805)>>>0||1,
-    ammo:GUNNERY_AMMO_TYPES.includes(options.ammo)?options.ammo:'round',
+    ammo:GUNNERY_AMMO_TYPES.includes(options.ammo)?options.ammo:gunneryWeapon(gunDefs[0]).defaultAmmo,
     sequence:0,shotSequence:0,droppedTime:0,droppedEvents:0,
     maxProjectiles:gunneryClamp(Math.floor(gunneryFinite(options.maxProjectiles,GUNNERY_LIMITS.projectiles)),1,512),
     maxEvents:gunneryClamp(Math.floor(gunneryFinite(options.maxEvents,GUNNERY_LIMITS.events)),1,2048),
@@ -77,7 +112,7 @@ export function prepareGunnery(state,side){
   side=gunnerySide(side);if(!side)return 0;
   let count=0;
   for(const gun of state.guns){
-    if(gun.disabledByScale||gun.side!==side||gun.loading||gun.stage==='ready'||gun.queued)continue;
+    if(gunneryOffline(gun)||gun.side!==side||gun.loading||gun.stage==='ready'||gun.queued)continue;
     gun.loading=true;gun.lastBlocked=null;count++;
     if(gun.stage!=='recoil'){gun.stage='swab';gun.elapsed=0;gun.progress=0;gun.offset=gun.recoilLength;gun.recoil=0;}
   }
@@ -88,7 +123,7 @@ export function prepareGunnery(state,side){
 // is authored, representing independent gun captains firing a rolling broadside.
 export function fireGunnery(state,side,{interval=.14,ammo=null}={}){
   side=gunnerySide(side);if(!side)return 0;
-  const ready=state.guns.filter(g=>!g.disabledByScale&&g.side===side&&g.stage==='ready'&&!g.queued);
+  const ready=state.guns.filter(g=>!gunneryOffline(g)&&g.side===side&&g.stage==='ready'&&!g.queued);
   interval=gunneryClamp(gunneryFinite(interval,.14),.04,.6);
   const shotAmmo=GUNNERY_AMMO_TYPES.includes(ammo)?ammo:(state.ammo??'round');
   ready.forEach((gun,i)=>{gun.queued=true;gun.lastBlocked=null;state.queue.push({gun,time:state.time+i*interval,ammo:shotAmmo});});
@@ -97,16 +132,17 @@ export function fireGunnery(state,side,{interval=.14,ammo=null}={}){
 
 export function gunnerySummary(state,side){
   const wanted=gunnerySide(side);
-  let total=0,ready=0,queued=0,loading=0,spent=0;
+  let total=0,ready=0,queued=0,loading=0,spent=0,dismounted=0;
   for(const g of state.guns){
     if(g.disabledByScale||(wanted&&g.side!==wanted))continue;
+    if(g.dismounted){dismounted++;continue;}
     total++;
     if(g.stage==='ready'&&!g.queued)ready++;
     if(g.queued)queued++;
     if(g.loading)loading++;
     if(g.stage==='spent'||g.stage==='recoil')spent++;
   }
-  return {total,ready,queued,loading,spent};
+  return {total,ready,queued,loading,spent,dismounted};
 }
 
 function gunneryEmit(state,environment,event){
@@ -115,7 +151,12 @@ function gunneryEmit(state,environment,event){
   environment.onEvent?.(event);
 }
 function gunneryAdvanceGun(state,gun,dt,time,environment){
-  if(gun.disabledByScale)return;
+  if(gunneryOffline(gun)){
+    gun.loading=false;gun.queued=false;
+    if(gun.dismounted)gun.stage='dismounted';
+    else if(gun.stage==='ready'||GUNNERY_DRILL.includes(gun.stage))gun.stage='secured';
+    return;
+  }
   if(gun.stage==='recoil'){
     const previous=gun.elapsed;gun.elapsed=Math.min(gun.recoilDuration,gun.elapsed+dt);gun.progress=gun.elapsed/gun.recoilDuration;
     // Fast initial movement followed by arrest by the breeching. No repeated
@@ -157,7 +198,7 @@ function gunneryWaterHeight(environment,x,z,time){
 function gunneryFireQueued(state,environment,end){
   while(state.queue.length&&state.queue[0].time<=end+1e-10){
     const queued=state.queue.shift(),gun=queued.gun;gun.queued=false;
-    if(gun.disabledByScale||gun.stage!=='ready')continue;
+    if(gunneryOffline(gun)||gun.stage!=='ready')continue;
     let blocked=state.projectiles.length>=state.maxProjectiles?'capacity':null;
     const muzzle=environment.muzzle?.(gun,queued.time);
     const position=gunneryVector(muzzle?.position,[NaN,NaN,NaN]);
@@ -167,14 +208,13 @@ function gunneryFireQueued(state,environment,end){
     else if(environment.canFire?.(gun,muzzle)===false)blocked='obstructed';
     if(blocked){gun.lastBlocked=blocked;gunneryEmit(state,environment,{type:'blocked',gunId:gun.id,gun,time:queued.time,reason:blocked});continue;}
     const ammo=GUNNERY_AMMO_TYPES.includes(queued.ammo)?queued.ammo:(state.ammo??'round');
-    const disp=ammo==='grape'?Math.max(gun.dispersion,.032):ammo==='chain'?Math.max(gun.dispersion,.012):gun.dispersion;
-    const speedMul=ammo==='hot'?.88:ammo==='chain'?.82:ammo==='grape'?.85:1;
-    const dragMul=ammo==='chain'?1.62:ammo==='grape'?1.18:1;
+    const flight=gunneryAmmoFlight(ammo);
+    const disp=Math.max(gun.dispersion,flight.dispersion),speedMul=flight.speed,dragMul=flight.drag;
     const aimed=gunnerySpread(state,direction,disp);
     const speed=gun.muzzleSpeed*speedMul*(1+(gunneryRandom(state)*2-1)*gun.speedVariation),inherited=gunneryVector(muzzle.velocity);
     const velocity=aimed.map((x,i)=>x*speed+inherited[i]),shotId=++state.shotSequence;
     const subCount=ammo==='grape'&&state.queue.length<=8&&state.projectiles.length+3<=state.maxProjectiles?3:1;
-    const firepowerMul=Math.max(.25,Number(environment.boat?.plunderedFirepowerMultiplier)||1);
+    const firepowerMul=isArrowAmmo(ammo)?1:Math.max(.25,Number(environment.boat?.plunderedFirepowerMultiplier)||1);
     const subMass=(gun.mass*firepowerMul)/subCount;
     const subRadius=ammo==='grape'?(gun.diameter/2)*.55:gun.diameter/2;
     const sweepRadius=ammo==='chain'?gun.diameter*1.85:subRadius;

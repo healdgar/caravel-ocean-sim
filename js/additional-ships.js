@@ -3,9 +3,14 @@
 // loft; only the nine-float construction primitives are shared with other ships.
 import {createMeshWriter} from './mesh-writer.js';
 import {additionalDesign,additionalHullWidth,additionalDeck,additionalStairFlights} from './models/additional.js';
-import {hullLoftPoint,hullLoftBottom,hullLoftSheer} from './hull-loft.js';
+import {hullLoftPoint,hullLoftBottom,hullLoftSheer,hullLoftStem} from './hull-loft.js';
 import {additionalRigContext,additionalGunAttachments} from './additional-rig.js';
 import {surfaceRestPoint,rigSurfacePose,surfaceClothPoint,surfaceYardPoint,surfaceRopePoint,withRigPoseContext} from './rig-surface.js';
+import {ANCHOR_IRON} from './anchor-iron.js';
+
+// Oak repeats and plank width in metres, taken from the Niña's hull and cabin
+// walls, so timber on the larger ships has the same grain at the same size.
+const DECK_BOARD=.145,OAK_ACROSS_PER_METRE=.96,OAK_ALONG_PER_METRE=.33,OAK_SPAR_PER_METRE=.45,OAK_HULL_ALONG_PER_METRE=.36,PLANK_METRES=.26;
 
 const additionalMeshAdd=(a,b)=>a.map((v,i)=>v+b[i]);
 const additionalMeshSub=(a,b)=>a.map((v,i)=>v-b[i]);
@@ -30,9 +35,12 @@ function additionalMeshFrame(axis,preferred){
 
 export function createAdditionalShipMesh(modelId,{groups,parts}={}){
   const design=additionalDesign(modelId),profile=design.profile,context=additionalRigContext(modelId);
-  const {out,add,sub,mul,unit,tag,group,tri,quad,box,tube,rope,ring}=createMeshWriter({groups,parts});
+  const sx=design.runtime.beam/design.frame.beam,sy=design.frame.verticalScale,sz=design.runtime.length/design.frame.length;
+  const {out,add,sub,mul,unit,tag,group,tri,quad,box,tube,rope,ring}=createMeshWriter({groups,parts,
+    grain:{across:OAK_ACROSS_PER_METRE*sy,along:OAK_ALONG_PER_METRE*sz,spar:OAK_SPAR_PER_METRE*sz}});
   const begin=profile.stations[0],end=profile.stations.at(-1),zones=design.deckZones,flights=additionalStairFlights(modelId);
-  const zSet=new Set([...profile.stations,...Array.from({length:61},(_,i)=>begin+(end-begin)*i/60)]);
+  // The entry turns quickly, so the first stations sit closer together.
+  const zSet=new Set([...profile.stations,...Array.from({length:61},(_,i)=>begin+(end-begin)*i/60),...Array.from({length:11},(_,i)=>begin+.1*i+.05)]);
   const hatchLeft=design.hatch.centre[0]-design.hatch.size[0]/2,hatchRight=design.hatch.centre[0]+design.hatch.size[0]/2;
   const hatchFore=design.hatch.centre[2]-design.hatch.size[2]/2,hatchAft=design.hatch.centre[2]+design.hatch.size[2]/2;
   zSet.add(hatchFore);zSet.add(hatchAft);
@@ -42,23 +50,41 @@ export function createAdditionalShipMesh(modelId,{groups,parts}={}){
     zSet.add(z);
     zSet.add(z<0?z*begin/(begin+(profile.bowRake??0)):z*end/(end-(profile.sternRake??0)));
   }
-  const zs=[...zSet].sort((a,b)=>a-b),waleHeights=[-.10,.32];
-  const levels=[...new Set([...profile.levels,...zones.flatMap(d=>[d.height,d.height+design.barrier]),...waleHeights.flatMap(h=>[h-.035,h+.035]),
+  const zs=[...zSet].sort((a,b)=>a-b);
+  const levels=[...new Set([...profile.levels,...zones.flatMap(d=>[d.height,d.height+design.barrier]),...design.wales.flatMap(w=>[w.y-w.half,w.y+w.half]),
     ...Array.from({length:17},(_,i)=>profile.levels[0]+(profile.deck-profile.levels[0])*i/16)])].sort((a,b)=>a-b);
   const point=(station,base,side)=>hullLoftPoint(profile,station,base,side);
+  // A point at a real length along the hull, for parts that must line up with
+  // deck edges. The skin grid follows the raked sections instead.
+  const onSide=(z,base,side)=>{const y=base+hullLoftSheer(profile,z);return [side*additionalHullWidth(modelId,z,y),y,z];};
   const top=z=>additionalDeck(modelId,z)-hullLoftSheer(profile,z)+design.barrier;
   const normal=(p,side)=>{
     const e=.0001,dy=(additionalHullWidth(modelId,p[2],p[1]+e)-additionalHullWidth(modelId,p[2],p[1]-e))/(2*e),dz=(additionalHullWidth(modelId,p[2]+e,p[1])-additionalHullWidth(modelId,p[2]-e,p[1]))/(2*e);
     return unit([side,-dy,-dz]);
   };
+  // Material 15 reads uv.x*18 as a plank course. Courses count along the girth of
+  // each section and every strake runs the full length, so strakes narrow into
+  // the stem and sweep up to it the way the Niña's do, not as parallel bands.
+  const girths=new Map(zs.map(station=>{
+    const rows=new Map([[levels[0],0]]);let run=0;
+    for(let j=0;j<levels.length-1;j++){
+      const p=point(station,levels[j],1),q=point(station,levels[j+1],1);
+      run+=Math.hypot((q[0]-p[0])*sx,(q[1]-p[1])*sy,(q[2]-p[2])*sz);rows.set(levels[j+1],run);
+    }
+    return [station,rows];
+  }));
+  const railLevel=profile.deck+design.barrier,courses=Math.round(girths.get(0).get(railLevel)/PLANK_METRES);
+  const course=(station,base)=>{
+    const rows=girths.get(station),here=rows.get(base),rail=rows.get(railLevel);
+    return here<=rail?courses*here/rail:courses+(here-rail)/PLANK_METRES;
+  };
+  const hullUV=(station,base,p)=>[course(station,base)/18,p[2]*sz*OAK_HULL_ALONG_PER_METRE];
   const hullStart=out.length;
   for(const side of [-1,1])for(let j=0;j<levels.length-1;j++)for(let i=0;i<zs.length-1;i++){
     const a=levels[j],b=levels[j+1],z=zs[i],Z=zs[i+1];
     if(a<profile.levels[0]-1e-8||(a+b)/2>top((z+Z)*.5)+1e-8)continue;
     const p=[point(z,a,side),point(Z,a,side),point(Z,b,side),point(z,b,side)];
-    // Material 15 interprets uv.x*18 as a plank course. About .12 design
-    // units gives broad hull planks instead of centimetre-scale veneer stripes.
-    quad(...p,15,p.map(q=>normal(q,side)),[[a/(.12*18),z*.6],[a/(.12*18),Z*.6],[b/(.12*18),Z*.6],[b/(.12*18),z*.6]]);
+    quad(...p,15,p.map(q=>normal(q,side)),[hullUV(z,a,p[0]),hullUV(Z,a,p[1]),hullUV(Z,b,p[2]),hullUV(z,b,p[3])]);
   }
   group('hull.planking','hull',hullStart);
   for(const [name,z] of [['bow',begin],['stern',end]]){
@@ -66,7 +92,7 @@ export function createAdditionalShipMesh(modelId,{groups,parts}={}){
     for(let i=0;i<levels.length-1;i++){
       const a=levels[i],b=levels[i+1];if(a<profile.levels[0]-1e-8||(a+b)/2>top(z)+1e-8)continue;
       const p=[point(z,a,-1),point(z,a,1),point(z,b,1),point(z,b,-1)];
-      quad(...p,15,null,p.map((q,i)=>[(i<2?a:b)/(.12*18),q[0]*.6]));
+      quad(...p,15,null,p.map((q,i)=>[course(z,i<2?a:b)/18,q[0]*sx*OAK_HULL_ALONG_PER_METRE]));
     }
     group('hull.closure.'+name,'hull',start);
   }
@@ -81,21 +107,39 @@ export function createAdditionalShipMesh(modelId,{groups,parts}={}){
   }
   for(const z of [keelZs[0],keelZs.at(-1)])quad(kp(z,-1,false),kp(z,-1,true),kp(z,1,true),kp(z,1,false),1);
   group('hull.keel','hull',keelStart);
-  // Proud wales share their return edges with the triangulated skin grid.
+  // The stem post is one tarred timber from the keel to the rail. It covers the
+  // joint of the two sides and gives the raked profile its hard edge.
+  const stemStart=out.length,stemHalf=.052,stemOut=.05,stemIn=.08,stemTopBase=profile.stemTop+.012;
+  const stemLevels=[profile.levels[0]-k.depth,...levels.filter(y=>y>=profile.levels[0]&&y<stemTopBase),stemTopBase];
+  const stemUV=(across,y)=>[across*OAK_ACROSS_PER_METRE*sx,y*OAK_ALONG_PER_METRE*sy];
+  const stemCorner=(p,x,dz)=>[x*stemHalf,p[1],p[2]+dz];
+  for(let j=0;j<stemLevels.length-1;j++){
+    const a=hullLoftStem(profile,stemLevels[j]),b=hullLoftStem(profile,stemLevels[j+1]);
+    quad(stemCorner(a,-1,-stemOut),stemCorner(a,1,-stemOut),stemCorner(b,1,-stemOut),stemCorner(b,-1,-stemOut),16,null,[stemUV(-stemHalf,a[1]),stemUV(stemHalf,a[1]),stemUV(stemHalf,b[1]),stemUV(-stemHalf,b[1])]);
+    for(const side of [-1,1])quad(stemCorner(a,side,-stemOut),stemCorner(a,side,stemIn),stemCorner(b,side,stemIn),stemCorner(b,side,-stemOut),16,null,[stemUV(a[2]-stemOut,a[1]),stemUV(a[2]+stemIn,a[1]),stemUV(b[2]+stemIn,b[1]),stemUV(b[2]-stemOut,b[1])]);
+  }
+  for(const end of [hullLoftStem(profile,stemLevels[0]),hullLoftStem(profile,stemTopBase)])quad(stemCorner(end,-1,-stemOut),stemCorner(end,1,-stemOut),stemCorner(end,1,stemIn),stemCorner(end,-1,stemIn),16);
+  group('hull.stem','hull',stemStart);
+  // Proud tarred wales share their return edges with the triangulated skin grid.
   for(const side of [-1,1]){
     const start=out.length;
-    for(const h of waleHeights)for(let i=0;i<zs.length-1;i++){
-      const skin=[point(zs[i],h-.035,side),point(zs[i+1],h-.035,side),point(zs[i+1],h+.035,side),point(zs[i],h+.035,side)];
+    const waleUV=p=>[p[1]*sy*OAK_ACROSS_PER_METRE,p[2]*sz*OAK_HULL_ALONG_PER_METRE];
+    for(const {y:h,half}of design.wales)for(let i=0;i<zs.length-1;i++){
+      const skin=[point(zs[i],h-half,side),point(zs[i+1],h-half,side),point(zs[i+1],h+half,side),point(zs[i],h+half,side)];
       const outer=skin.map(p=>[p[0]+side*.026,p[1],p[2]]);
-      quad(...outer,1,outer.map(p=>normal(p,side)));quad(skin[0],skin[1],outer[1],outer[0],1);quad(outer[3],outer[2],skin[2],skin[3],1);
-      if(i===0)quad(skin[0],outer[0],outer[3],skin[3],1);
-      if(i===zs.length-2)quad(outer[1],skin[1],skin[2],outer[2],1);
+      quad(...outer,16,outer.map(p=>normal(p,side)),outer.map(waleUV));quad(skin[0],skin[1],outer[1],outer[0],16);quad(outer[3],outer[2],skin[2],skin[3],16);
+      if(i===0)quad(skin[0],outer[0],outer[3],skin[3],16);
+      if(i===zs.length-2)quad(outer[1],skin[1],skin[2],outer[2],16);
     }
     group('hull.wales.'+(side<0?'port':'starboard'),'hull',start);
   }
   function deck(zone){
-    const start=out.length,cuts=zs.filter(z=>z>=zone.bounds[0]&&z<=zone.bounds[1]);
-    const xs=[...new Set([...Array.from({length:37},(_,i)=>-1.8+i*.1),hatchLeft,hatchRight,...flights.flatMap(f=>[f.x-f.width*.5,f.x+f.width*.5])])].sort((a,b)=>a-b);
+    // Cross-cuts land on the skin's own vertices at this deck's height, plus the
+    // fixed edges of the zone, hatch and stairs, so the deck welds to the hull.
+    const start=out.length,structural=[...zone.bounds,hatchFore,hatchAft,...flights.flatMap(f=>[f.z0,f.z1])];
+    const cuts=[...new Set([...zs.map(s=>point(s,zone.height,0)[2]),...structural])].filter(z=>z>=zone.bounds[0]&&z<=zone.bounds[1]).sort((a,b)=>a-b);
+    // One column per board, with the seams where the shader draws them.
+    const xs=[...new Set([...Array.from({length:26},(_,i)=>-1.8+i*DECK_BOARD),hatchLeft,hatchRight,...flights.flatMap(f=>[f.x-f.width*.5,f.x+f.width*.5])])].sort((a,b)=>a-b);
     for(let i=0;i<cuts.length-1;i++){
       const z=cuts[i],Z=cuts[i+1],y=zone.height+hullLoftSheer(profile,z),Y=zone.height+hullLoftSheer(profile,Z),w=additionalHullWidth(modelId,z,y),W=additionalHullWidth(modelId,Z,Y);
       const width=p=>w+(W-w)*(p[2]-z)/(Z-z);
@@ -113,9 +157,9 @@ export function createAdditionalShipMesh(modelId,{groups,parts}={}){
           const y=zone.height+hullLoftSheer(profile,p[2]),w=additionalHullWidth(modelId,p[2],y);
           return [Math.max(-w,Math.min(w,p[0])),y,p[2]];
         });
-        const offset=Math.sin(Math.round(x/.1)*13.4)*.4;
+        const offset=Math.sin(Math.floor(((x+X)*.5+1.8)/DECK_BOARD)*17.1)*.43;
         const deckNormal=p=>unit([0,1,-(hullLoftSheer(profile,p[2]+.0001)-hullLoftSheer(profile,p[2]-.0001))/.0002]);
-        for(let j=1;j<polygon.length-1;j++){const p=[polygon[0],polygon[j],polygon[j+1]];tri(...p,0,p.map(deckNormal),p.map(q=>[q[0]*5+offset,q[2]*2]));}
+        for(let j=1;j<polygon.length-1;j++){const p=[polygon[0],polygon[j],polygon[j+1]];tri(...p,0,p.map(deckNormal),p.map(q=>[q[0]*sx*OAK_ACROSS_PER_METRE+offset,q[2]*sz*OAK_ALONG_PER_METRE]));}
       }
     }
     group('deck.'+zone.id+'.planks','deck.'+zone.id,start);
@@ -160,13 +204,18 @@ export function createAdditionalShipMesh(modelId,{groups,parts}={}){
   for(const side of [-1,1]){
     const start=out.length;
     for(let i=0;i<zs.length-1;i++){
-      const z=zs[i],Z=zs[i+1],base=additionalDeck(modelId,(z+Z)*.5)-hullLoftSheer(profile,(z+Z)*.5),a=point(z,base,side),b=point(Z,base,side),c=point(Z,base+design.barrier,side),d=point(z,base+design.barrier,side);
+      const z=zs[i],Z=zs[i+1],base=additionalDeck(modelId,(z+Z)*.5)-hullLoftSheer(profile,(z+Z)*.5),a=onSide(z,base,side),b=onSide(Z,base,side),c=onSide(Z,base+design.barrier,side),d=onSide(z,base+design.barrier,side);
       const inset=p=>[p[0]-side*Math.min(.045,Math.abs(p[0])),p[1],p[2]],A=inset(a),B=inset(b),C=inset(c),D=inset(d);
-      quad(A,D,C,B,1);quad(d,c,C,D,1);tube(d,c,.025,1,.025,5,undefined,true);
+      quad(A,D,C,B,1);quad(d,c,C,D,1);
+      // A broad cap rail, as on the Niña: it overhangs the planking and laps inboard.
+      const cap=(p,offset,y)=>[side*Math.max(0,Math.abs(p[0])+offset),p[1]+y,p[2]];
+      quad(cap(d,.024,.05),cap(c,.024,.05),cap(c,-.09,.05),cap(d,-.09,.05),17,[[0,1,0],[0,1,0],[0,1,0],[0,1,0]]);
+      quad(cap(d,.024,-.03),cap(c,.024,-.03),cap(c,.024,.05),cap(d,.024,.05),17);
+      quad(cap(d,-.09,-.03),cap(c,-.09,-.03),cap(c,-.09,.05),cap(d,-.09,.05),17);
       const previous=i?additionalDeck(modelId,(zs[i-1]+z)*.5)-hullLoftSheer(profile,(zs[i-1]+z)*.5):NaN;
       const next=i<zs.length-2?additionalDeck(modelId,(Z+zs[i+2])*.5)-hullLoftSheer(profile,(Z+zs[i+2])*.5):NaN;
-      if(i===0||Math.abs(previous-base)>1e-8)quad(a,d,D,A,1);
-      if(i===zs.length-2||Math.abs(next-base)>1e-8)quad(b,B,C,c,1);
+      if(i===0||Math.abs(previous-base)>1e-8){quad(a,d,D,A,1);quad(cap(d,.024,-.03),cap(d,-.09,-.03),cap(d,-.09,.05),cap(d,.024,.05),17);}
+      if(i===zs.length-2||Math.abs(next-base)>1e-8){quad(b,B,C,c,1);quad(cap(c,.024,-.03),cap(c,-.09,-.03),cap(c,-.09,.05),cap(c,.024,.05),17);}
       if(i%4===0)tube(inset(a),inset(d),.016,1,.016,5,undefined,true);
     }
     const sternBase=additionalDeck(modelId,end)-hullLoftSheer(profile,end),sternSheer=hullLoftSheer(profile,end),notch=design.steering.handle[1]>sternBase+sternSheer-.05&&design.steering.handle[1]<sternBase+sternSheer+design.barrier+.05,innerX=side*(notch?.09:0);
@@ -195,7 +244,10 @@ export function createAdditionalShipMesh(modelId,{groups,parts}={}){
   for(let i=3;i<zs.length-3;i+=5)for(const side of [-1,1]){
     const station=zs[i],base=additionalDeck(modelId,station)-hullLoftSheer(profile,station),samples=[profile.levels[0]+.025,...profile.levels.filter(y=>y>profile.levels[0]+.025&&y<base),base];
     for(let j=0;j<samples.length-1;j++){
-      const a=point(station,samples[j],side),b=point(station,samples[j+1],side);a[0]-=side*.025;b[0]-=side*.025;tube(a,b,.022,1,.022,5,undefined,true);
+      const a=point(station,samples[j],side),b=point(station,samples[j+1],side);
+      // A rib would break through the planking where the section is this narrow.
+      if(Math.min(Math.abs(a[0]),Math.abs(b[0]))<.075)continue;
+      a[0]-=side*.025;b[0]-=side*.025;tube(a,b,.022,1,.022,5,undefined,true);
     }
   }
   group('hull.frames','hull',frameStart);
@@ -218,12 +270,35 @@ export function createAdditionalShipMesh(modelId,{groups,parts}={}){
   tube(add(handle,[-.10,0,0]),add(handle,[.10,0,0]),.021,7,.021,6);
   group('helm.tiller','helm.tiller',tillerStart,{type:'tiller'});
   for(const side of [-1,1]){
-    const start=out.length,cat=context.anchorCathead(side);tube(cat.root,cat.tip,.045,1,.038,8);
-    // The shared anchor renderer owns the stowed/dropping iron and cable.
+    const start=out.length,cat=context.anchorCathead(side);
+    tube(cat.root,cat.tip,.058,17,.05,8);
+    // A knee carries the timber down onto the planking below the rail.
+    const kneeZ=(cat.root[2]+cat.tip[2])*.5,kneeBase=cat.root[1]-.26-hullLoftSheer(profile,kneeZ);
+    tube(onSide(kneeZ,kneeBase,side),add(cat.root,mul(sub(cat.tip,cat.root),.62)),.034,17,.04,6);
+    // The working anchor to port belongs to the shared anchor renderer. The spare
+    // to starboard is built in, as on the Niña, so that timber does not stand empty.
+    if(side>0){
+      const scale=design.equipment.anchorScale,eye=[cat.fairlead[0],cat.fairlead[1]-.65*scale/sy,cat.fairlead[2]];
+      const corner=(i,k)=>add(eye,[ANCHOR_IRON[i+k*6]*scale/sx,ANCHOR_IRON[i+k*6+1]*scale/sy,ANCHOR_IRON[i+k*6+2]*scale/sz]);
+      const facing=(i,k)=>unit([ANCHOR_IRON[i+k*6+3]*sx,ANCHOR_IRON[i+k*6+4]*sy,ANCHOR_IRON[i+k*6+5]*sz]);
+      for(let i=0;i<ANCHOR_IRON.length;i+=18)tri(corner(i,0),corner(i,1),corner(i,2),3,[facing(i,0),facing(i,1),facing(i,2)]);
+      tube(cat.fairlead,eye,.012,2,.012,5,undefined,true);
+    }
     group('anchor.'+(side<0?'port':'starboard'),'anchor.'+(side<0?'port':'starboard')+'.root',start);
   }
-  const bowStart=out.length;tube(design.bowsprit.a,design.bowsprit.b,design.bowsprit.radius,1,design.bowsprit.radius*.58,12);
-  tube([0,additionalDeck(modelId,-5.45),-5.45],design.bowsprit.a,.055,1,.045,8);
+  // The bowsprit heel stands on bitts on the forecastle deck, and the spar is
+  // lashed down over the stem head with a gammoning, as on the Niña.
+  const bowStart=out.length,sprit=design.bowsprit,spritAxis=sub(sprit.b,sprit.a),spritAt=t=>add(sprit.a,mul(spritAxis,t));
+  tube(sprit.a,sprit.b,sprit.radius,1,sprit.radius*.5,16);
+  const bittZ=sprit.a[2]+.02,bittDeck=additionalDeck(modelId,bittZ);
+  for(const x of [-.13,.13])tube([x,bittDeck,bittZ],[x,sprit.a[1]+.05,bittZ],.042,17,.036,8);
+  tube([-.20,sprit.a[1]-.075,bittZ],[.20,sprit.a[1]-.075,bittZ],.04,17,.04,8);
+  const gammon=additionalMeshFrame(spritAxis),gammonT=(begin-sprit.a[2])/spritAxis[2];
+  for(let turn=0;turn<7;turn++){
+    const t=gammonT+(turn-2)*.012,centre=spritAt(t),r=sprit.radius*(1-.5*t)+.006;
+    const around=q=>add(centre,add(mul(gammon.across,r*Math.cos(q*Math.PI/7)),mul(gammon.up,r*Math.sin(q*Math.PI/7))));
+    for(let j=0;j<14;j++)tube(around(j),around(j+1),.012,2,.012,4,undefined,true);
+  }
   group('bow.bowsprit','hull',bowStart);
   const coamingStart=out.length,hatchFloor=additionalDeck(modelId,design.hatch.centre[2]),coamingTop=design.hatch.centre[1]+.015;
   for(const x of [hatchLeft,hatchRight]){
@@ -253,8 +328,8 @@ export function createAdditionalShipMesh(modelId,{groups,parts}={}){
     group('gun.'+gun.id,'hull',start);
   }
   for(const [index,m] of context.masts.entries()){
-    const start=out.length;tube(m.foot,m.head,m.radius,1,.018,14);
-    for(let y=m.foot[1]+.20;y<m.head[1]*.65;y+=.42)ring(context.mastPoint(index,y),m.radius*(1-(y-m.foot[1])/(m.head[1]-m.foot[1]))+.004,.008,2,'y',10);
+    const start=out.length;tube(m.foot,m.head,m.radius,1,m.radius*.4,16);
+    for(let y=m.foot[1]+.45;y<m.head[1]*.65;y+=1.1)ring(context.mastPoint(index,y),m.radius*(1-(y-m.foot[1])/(m.head[1]-m.foot[1]))+.004,.008,2,'y',10);
     group('mast.'+m.id,'mast.'+m.id,start);
   }
   if(design.lookout){
@@ -281,7 +356,7 @@ export function createAdditionalShipMesh(modelId,{groups,parts}={}){
     }else for(let i=0;i<n;i++)for(let j=0;j<n;j++)emit([[i/n,j/n],[(i+1)/n,j/n],[(i+1)/n,(j+1)/n],[i/n,(j+1)/n]]);
     group('sail.'+s.name,'sail.'+s.name,start,{type:'surface-cloth',surface:s.id});
     const yardStart=out.length,a=s.corners[0],b=s.corners[1],axis=unit(sub(b,a)),A=add(a,mul(axis,-.12)),B=add(b,mul(axis,.12)),middle=mul(add(a,b),.5);
-    tube(A,middle,.023,tag(10,s.id),.046,10);tube(middle,B,.046,tag(10,s.id),.023,10);
+    tube(A,middle,.03,tag(10,s.id),.058,12);tube(middle,B,.058,tag(10,s.id),.03,12);
     group('yard.'+s.name,'yard.'+s.name,yardStart,{type:'surface-yard',surface:s.id});
   }
   const standingStart=out.length;

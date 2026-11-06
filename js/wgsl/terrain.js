@@ -1,6 +1,7 @@
 import { FRAME_WGSL, ATMO_CORE_WGSL } from './common.js';
 import { SKY_RENDER_FUNCS } from './sky.js';
 import { CLOUD_SAMPLE } from './clouds.js';
+import { STREET_FIELD_RANGE_M, STREET_FIELD_EDGE_M } from '../town-streets.js';
 
 // Procedurals need their sampling rate in material coordinates, just as image
 // textures need mip/anisotropic footprints. See pbr-book.org/4ed/Textures_and_Materials/Texture_Sampling_and_Antialiasing.
@@ -9,6 +10,9 @@ export const TERRAIN_FILTERING = /* wgsl */ `
 fn landMaterialFootprint(dx:vec2f,dy:vec2f)->f32{
   // Frobenius norm bounds the longest axis of the pixel's material footprint,
   // including oblique/sheared projections; max(length(dx),length(dy)) can miss it.
+  return sqrt(dot(dx,dx)+dot(dy,dy));
+}
+fn landMaterialFootprint3(dx:vec3f,dy:vec3f)->f32{
   return sqrt(dot(dx,dx)+dot(dy,dy));
 }
 fn landDetailWeight(cellWidth:f32)->f32{
@@ -29,6 +33,66 @@ fn landFilteredFissure(p:vec2f,cellWidth:f32,inner:f32,outer:f32)->f32{
   let weight=landDetailWeight(cellWidth/max(outer-inner,0.001));
   if(weight<=0.0){return 0.0;}
   return (1.0-smoothstep(inner,outer,abs(gnoise(p))))*weight;
+}
+// Loose stones of uneven size: each jittered cell has its own tone (x) and a dark gap to
+// its nearest neighbour (y). One hash per cell supplies jitter, tone and size, and the
+// four closest cells are enough to search for this bounded jitter.
+fn landStones(p:vec2f)->vec2f{
+  let base=vec2i(floor(p-.5));
+  var nearest=9.0;var second=9.0;var tone=0.0;
+  for(var j=0;j<2;j++){for(var i=0;i<2;i++){
+    let cell=base+vec2i(i,j);
+    let h=pcgHash(u32(cell.x)*1664525u+pcgHash(u32(cell.y)+1013904223u));
+    let offset=vec2f(cell)+.5+(vec2f(f32(h&255u),f32((h>>8u)&255u))/255.0-.5)*.8-p;
+    let r=sqrt(dot(offset,offset))*(.72+f32(h>>24u)/255.0*.56);
+    if(r<nearest){second=nearest;nearest=r;tone=f32((h>>16u)&255u)/127.5-1.0;}else if(r<second){second=r;}
+  }}
+  return vec2f(tone,clamp((second-nearest)*2.6,0.0,1.0));
+}
+// Three stone sizes, turned against each other so no lattice shows. The two finer sizes
+// track the pixel footprint: grit up close, talus far away. Anchored to the world so
+// nothing swims; the crossfade hides each change of size.
+fn landScreeOctaves(p:vec2f,cell:f32,blend:f32)->vec2f{
+  let q=vec2f(p.x*.8-p.y*.6,p.x*.6+p.y*.8)/cell;
+  let fine=mix(landStones(q),landStones(vec2f(p.x*.6+p.y*.8,p.y*.6-p.x*.8)/(cell*2.0)+vec2f(37.1,11.3)),blend);
+  let large=landStones(vec2f(p.x*.28-p.y*.96,p.x*.96+p.y*.28)/(cell*5.0)+vec2f(5.3,71.9));
+  return vec2f(fine.x*.62+large.x*.38,min(fine.y,large.y+.25));
+}
+// Tone, gap and stone size in metres. Sharp projection weights mean most pixels pay for
+// one plane, and every plane is world-true, so a steep face cannot stretch the pattern.
+fn landScree(p:vec3f,n:vec3f,width:f32)->vec3f{
+  let scale=max(0.0,log2(max(width,.0001)*3.0/.06));
+  let level=floor(scale);let blend=scale-level;
+  let cell=.06*pow(2.0,level);
+  let w0=pow(abs(n),vec3f(8.0));let w=w0/max(dot(w0,vec3f(1.0)),.0001);
+  var sum=vec2f(0.0);
+  if(w.x>.04){sum+=w.x*landScreeOctaves(p.zy,cell,blend);}
+  if(w.y>.04){sum+=w.y*landScreeOctaves(p.xz,cell,blend);}
+  if(w.z>.04){sum+=w.z*landScreeOctaves(p.xy,cell,blend);}
+  return vec3f(sum,cell*(1.0+blend));
+}
+// Ground cover for any region, from the patterns of real volcanic and temperate hills:
+// olive grass and dark shrub on the gentler ground, pink-tan soil where it thins, and
+// red-brown rock on steep faces. The region's own imagery decides how much shows: green
+// or tan ground keeps its colour under light mottling, while pale, hueless ground, which
+// says nothing about what is there, takes the cover almost entirely. Returns the colour,
+// with grass cover in the alpha for the stone layer.
+fn landGroundCover(source:vec3f,slope:f32,cliff:f32,patchA:f32,patchB:f32,grain:f32,fine:f32,altitude:f32,exposed:f32,detailedImage:bool)->vec4f{
+  let top=max(source.r,max(source.g,source.b));
+  let saturation=(top-min(source.r,min(source.g,source.b)))/max(top,.02);
+  let greenness=(source.g-max(source.r,source.b))/max(top,.02);
+  let hueless=1.0-smoothstep(.1,.3,saturation);
+  let saltLimit=smoothstep(1.5,6.0,altitude);
+  let grass=smoothstep(-.12,.3,.56+greenness*2.0+patchA*.4+patchB*.62+grain*.5+fine*.22-slope*.95)*(1.0-cliff)*saltLimit;
+  let shrub=smoothstep(.26,.5,patchA*.7+patchB*.35+fine*.3+greenness*.3-slope*.2)*grass*.8;
+  let leaf=mix(vec3f(.045,.07,.019),vec3f(.1,.14,.035),smoothstep(-.4,.4,patchB+patchA*.4+grain*.4+fine*.25));
+  let soil=mix(vec3f(.13,.078,.058),vec3f(.19,.13,.07),smoothstep(-.3,.3,patchB-patchA*.4+fine*.2));
+  let rockHue=mix(vec3f(.045,.022,.019),vec3f(.085,.07,.057),smoothstep(-.3,.35,patchA+grain*.5+fine*.3));
+  let outcrop=max(cliff,smoothstep(.26,.46,slope+patchA*.2+grain*.12+fine*.1));
+  let cover=mix(mix(soil,rockHue,outcrop),mix(leaf,vec3f(.014,.028,.01),shrub),grass);
+  // Keep the imagery's ridges and gullies as light and dark within the cover.
+  let shape=clamp(pow(dot(source,vec3f(.3,.59,.11))/.14,.3),.72,1.18);
+  return vec4f(mix(source,cover*shape,mix(select(.38,.2,detailedImage),.96,hueless)*exposed),grass);
 }
 fn landFilteredBump(n:vec3f,dx:vec3f,dy:vec3f,hx:f32,hy:f32)->vec3f{
   let sx=cross(dy,n);let sy=cross(n,dx);let det=dot(dx,sx);
@@ -204,34 +268,35 @@ fn landHeight(p:vec2f)->f32 {
 }
 `;
 
-// Visual shore response, nearshore wave shoaling/breaking, and breakwater shelter.
-export const COASTAL_WATER = /* wgsl */ `
-@group(2) @binding(0) var<uniform> LAND:Land;
-@group(2) @binding(1) var elevation:texture_2d<f32>;
-@group(2) @binding(2) var<uniform> nearTerrain:NearLand;
-@group(2) @binding(3) var<storage,read> nearElevation:array<f32>;
+// How the coast shapes the sea, baked per texel by coastal-field.js: shelter along the swell, the
+// fetch to the nearest land to windward, and the smoothed seabed with its slope.
+export const COASTAL_FIELD_SIZE = 1024;
+export const COASTAL_FIELD_SPAN_M = 12288;
+export const COASTAL_FIELD_TILE_TEXELS = 64;
+const COASTAL_FETCH_LIMIT_M = 1800;
+const COASTAL_FIELD_TEXEL_M = COASTAL_FIELD_SPAN_M / COASTAL_FIELD_SIZE;
+export const COASTAL_FIELD_BAKE = FRAME_WGSL + /* wgsl */ `
+@group(0) @binding(0) var<uniform> F:Frame;
+@group(0) @binding(1) var<uniform> LAND:Land;
+@group(0) @binding(2) var elevation:texture_2d<f32>;
+@group(0) @binding(3) var<uniform> nearTerrain:NearLand;
+@group(0) @binding(4) var<storage,read> nearElevation:array<f32>;
+@group(0) @binding(5) var<storage,read> tiles:array<vec4f>;
+@group(0) @binding(6) var shelterOut:texture_storage_2d<rgba16float,write>;
+@group(0) @binding(7) var slopeOut:texture_storage_2d<rgba16float,write>;
 ` + LAND_SAMPLING + /* wgsl */ `
-struct CoastalWaveState {
-  swellScale: f32,
-  chopScale: f32,
-  breakFoam: f32,
-  dispOffset: vec3f,
-  extraSlope: vec2f,
-  shoreDir: vec2f,
-  refractWeight: f32,
-};
-fn coastalWaveState(p:vec2f)->CoastalWaveState{
+@compute @workgroup_size(8,8) fn main(@builtin(global_invocation_id) id:vec3u){
+  let tile=tiles[id.z];
+  let p=tile.xy+(vec2f(id.xy)+0.5)*${COASTAL_FIELD_TEXEL_M.toFixed(1)};
+  let at=vec2i(tile.zw)+vec2i(id.xy);
   let bed=landHeight(p);
   if(bed<=-58.0){
-    return CoastalWaveState(1.0,1.0,0.0,vec3f(0.0),vec2f(0.0),vec2f(1.0,0.0),0.0);
+    textureStore(shelterOut,at,vec4f(1.0,1.0,bed,bed));
+    textureStore(slopeOut,at,vec4f(bed,0.0,0.0,0.0));
+    return;
   }
   let windProp=normalize(F.windP[0].xy+vec2f(1e-5,0.0));
   let swellProp=select(windProp,vec2f(cos(F.windP[0].w),sin(F.windP[0].w)),abs(F.windP[0].w)>0.1);
-  let swellHs=select(1.2,F.cascL[1].z,F.cascL[1].w>1.0);
-  let swellLen=clamp(select(95.0,F.cascL[1].w,F.cascL[1].w>1.0),30.0,300.0);
-  let windSpeed=F.windP[0].z;
-  let windHs=0.14*clamp(windSpeed,0.0,24.0);
-  let hsTotal=clamp(sqrt(swellHs*swellHs+windHs*windHs),0.0,4.5);
   let upSwell=-swellProp;
   let sideSwell=vec2f(-upSwell.y,upSwell.x);
   let dir0=upSwell;
@@ -241,7 +306,7 @@ fn coastalWaveState(p:vec2f)->CoastalWaveState{
   var transC=1.0;
   var transL=1.0;
   var transR=1.0;
-  var fetchDist=1800.0;
+  var fetchDist=${COASTAL_FETCH_LIMIT_M}.0;
   for(var i=0u;i<8u;i++){
     let d=steps[i];
     let bC=smoothstep(-0.35,1.15,landHeight(p+dir0*d));
@@ -252,7 +317,6 @@ fn coastalWaveState(p:vec2f)->CoastalWaveState{
     transL*=1.0-bL*0.88;
     transR*=1.0-bR*0.88;
   }
-  let rawTransmit=clamp(0.50*transC+0.25*transL+0.25*transR,0.0,1.0);
   let hE=landHeight(p+vec2f(16.0,0.0));
   let hW=landHeight(p-vec2f(16.0,0.0));
   let hN=landHeight(p+vec2f(0.0,16.0));
@@ -270,6 +334,52 @@ fn coastalWaveState(p:vec2f)->CoastalWaveState{
     gx=0.50*gx+0.50*(hE2-hW2)/88.0;
     gz=0.50*gz+0.50*(hN2-hS2)/88.0;
   }
+  textureStore(shelterOut,at,vec4f(clamp(0.50*transC+0.25*transL+0.25*transR,0.0,1.0),fetchDist/${COASTAL_FETCH_LIMIT_M}.0,bed,bedNear));
+  textureStore(slopeOut,at,vec4f(bedSmooth,gx,gz,0.0));
+}
+`;
+
+// Visual shore response, nearshore wave shoaling/breaking, and breakwater shelter.
+export const COASTAL_WATER = /* wgsl */ `
+@group(2) @binding(0) var coastalShelter:texture_2d<f32>;
+@group(2) @binding(1) var coastalSlope:texture_2d<f32>;
+@group(2) @binding(2) var coastalSampler:sampler;
+@group(2) @binding(3) var<uniform> coastalWindow:vec4f;
+struct CoastalWaveState {
+  swellScale: f32,
+  chopScale: f32,
+  breakFoam: f32,
+  dispOffset: vec3f,
+  extraSlope: vec2f,
+  shoreDir: vec2f,
+  refractWeight: f32,
+  bed: f32,
+};
+fn coastalWaveState(p:vec2f)->CoastalWaveState{
+  // Beyond the baked window lies open water. The rim fades so tiles coming into range never show.
+  let offset=abs(p-coastalWindow.xy);
+  let inside=1.0-smoothstep(coastalWindow.z-1500.0,coastalWindow.z-800.0,max(offset.x,offset.y));
+  let uv=p/${COASTAL_FIELD_SPAN_M}.0;
+  let shelter=textureSampleLevel(coastalShelter,coastalSampler,uv,0.0);
+  let bed=mix(-120.0,shelter.z,inside);
+  if(bed<=-58.0){
+    return CoastalWaveState(1.0,1.0,0.0,vec3f(0.0),vec2f(0.0),vec2f(1.0,0.0),0.0,bed);
+  }
+  let slope=textureSampleLevel(coastalSlope,coastalSampler,uv,0.0);
+  // Shelter fades in with depth. Deep water is stored as open sea, and the two must meet without an edge.
+  let rawTransmit=mix(1.0,shelter.x,inside*smoothstep(-58.0,-24.0,bed));
+  let fetchDist=mix(1.0,shelter.y,inside)*${COASTAL_FETCH_LIMIT_M}.0;
+  let bedNear=mix(-120.0,shelter.w,inside);
+  let bedSmooth=mix(-120.0,slope.x,inside);
+  let gx=slope.y*inside;
+  let gz=slope.z*inside;
+  let windProp=normalize(F.windP[0].xy+vec2f(1e-5,0.0));
+  let swellProp=select(windProp,vec2f(cos(F.windP[0].w),sin(F.windP[0].w)),abs(F.windP[0].w)>0.1);
+  let swellHs=select(1.2,F.cascL[1].z,F.cascL[1].w>1.0);
+  let swellLen=clamp(select(95.0,F.cascL[1].w,F.cascL[1].w>1.0),30.0,300.0);
+  let windSpeed=F.windP[0].z;
+  let windHs=0.14*clamp(windSpeed,0.0,24.0);
+  let hsTotal=clamp(sqrt(swellHs*swellHs+windHs*windHs),0.0,4.5);
   let gLen=length(vec2f(gx,gz));
   // shoreDir points up-slope (cross-shore toward the beach); tangDir points along-shore (parallel to depth contours).
   let shoreDir=select(swellProp,vec2f(gx,gz)/max(gLen,1e-4),gLen>0.0015);
@@ -288,7 +398,7 @@ fn coastalWaveState(p:vec2f)->CoastalWaveState{
   var breakFoam=0.0;
   var dispOffset=vec3f(0.0);
   var extraSlope=vec2f(0.0);
-  let relP=p-LAND.domain.xy;
+  let relP=p;
   if(bedSmooth>-20.0 && bedSmooth<0.85 && seawardExposure>0.05 && hsTotal>0.05 && beachFactor>0.02){
     // Snell's law refraction: along-shore wavenumber k_parallel is conserved while ocean-floor drag
     // delays phase in the shallows (+shoreDir), bending wave crests parallel to the beach.
@@ -352,7 +462,7 @@ fn coastalWaveState(p:vec2f)->CoastalWaveState{
     dispOffset.y+=amp1*sin(ph1)+amp2*sin(ph2);
     extraSlope+=leeDir1*(amp1*k1*cos(ph1))+leeDir2*(amp2*k2*cos(ph2));
   }
-  return CoastalWaveState(swellScale,chopScale,breakFoam,dispOffset,extraSlope,shoreDir,refractWeight);
+  return CoastalWaveState(swellScale,chopScale,breakFoam,dispOffset,extraSlope,shoreDir,refractWeight,bed);
 }
 fn coastalRefractDisp(d:vec3f,cws:CoastalWaveState)->vec3f{
   let rw=cws.refractWeight;
@@ -374,7 +484,7 @@ fn coastalRefractSlope(p:vec2f,sl:vec2f,cws:CoastalWaveState)->vec2f{
   return refracted*shelterDamp;
 }
 fn coastalBreakerFoam(p:vec2f,height:f32,sl:vec2f,cws:CoastalWaveState)->f32{
-  let bed=landHeight(p);
+  let bed=cws.bed;
   if(bed<=-18.0 || bed>=0.75){return cws.breakFoam;}
   let h=max(0.08,-bed);
   let frontSlope=max(0.0,-dot(sl,cws.shoreDir));
@@ -382,17 +492,25 @@ fn coastalBreakerFoam(p:vec2f,height:f32,sl:vec2f,cws:CoastalWaveState)->f32{
   let depthBreak=smoothstep(0.18,0.56,dragRatio)*smoothstep(0.09,0.32,frontSlope)*smoothstep(-12.5,-0.5,bed)*(1.0-smoothstep(-0.06,0.45,bed));
   return clamp(max(cws.breakFoam,depthBreak*clamp(cws.swellScale*1.15,0.0,1.0)),0.0,1.0);
 }
-fn coastalWater(color:vec3f,p:vec2f,height:f32,foamLight:vec3f)->vec3f{
-  let bed=landHeight(p);
-  // Deep/open water: the shallows weight and swash rim are both exactly zero
-  // here (ocean height never approaches -58 m), so the result is the input.
+// The colour coming up through the water. Reflections, sun glitter and foam lie on top of it, so the
+// waves stay visible right up to the beach. Deep water (height never approaches -58 m) is left as it is.
+fn coastalBody(body:vec3f,bed:f32)->vec3f{
+  if(bed<=-58.0){return body;}
+  // Deep blue gives way with depth. Over clear tropical sand it runs through turquoise to pale
+  // aqua, as the sand starts to show through. Elsewhere shallows only turn a dull grey-green.
+  let clarity=coastalWindow.w;
+  let light=(sunIlluminance()*max(F.sunDir.y,0.0)+lunarIlluminance()*max(lunarDirection().y,0.0))/PI+skyAtmo(vec3f(0,1,0));
+  let shelf=smoothstep(-30.0,-7.0,bed);
+  let sand=smoothstep(-8.0,-0.6,bed);
+  var col=mix(body,vec3f(0.014,0.150,0.205)*light,shelf*0.82*clarity);
+  col=mix(col,vec3f(0.085,0.300,0.285)*light,sand*0.42*clarity);
+  return mix(col,vec3f(0.030,0.082,0.072)*light,smoothstep(-12.0,-1.0,bed)*0.45*(1.0-clarity));
+}
+fn coastalSwash(color:vec3f,p:vec2f,bed:f32,height:f32,foamLight:vec3f)->vec3f{
   if(bed<=-58.0){return color;}
-  let shallows=smoothstep(-7.5,0.4,bed);
-  let sunlight=(sunIlluminance()*max(F.sunDir.y,0.0)+lunarIlluminance()*max(lunarDirection().y,0.0))/PI;
-  var col=mix(color,vec3f(0.042,0.175,0.155)*(sunlight+skyAtmo(vec3f(0,1,0))),shallows*0.30);
   let depth=height-bed;
   let swashRim=(1.0-smoothstep(0.02,0.32,abs(depth)))*smoothstep(-0.20,0.35,height)*(0.45+0.55*gnoise(p*0.22));
-  return mix(col,foamLight,swashRim*0.42);
+  return mix(color,foamLight,swashRim*0.42);
 }
 `;
 
@@ -445,6 +563,8 @@ struct Land {domain:vec4f};
 struct NearLand {domain:vec4f,grid:vec4f};
 @group(0) @binding(12) var<uniform> nearTerrain:NearLand;
 @group(0) @binding(13) var nearAlbedo:texture_2d<f32>;
+@group(0) @binding(14) var townField:texture_2d<f32>;
+@group(0) @binding(15) var<uniform> townWindow:vec4f;
 ` + SKY_RENDER_FUNCS + CLOUD_SAMPLE + TERRAIN_FILTERING + TERRAIN_NEAR_MATERIAL + /* wgsl */ `
 struct LandVertex {
   @builtin(position) pos:vec4f,
@@ -499,8 +619,12 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibility:f32
   let edgeDist=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
   let inPrimaryDomain=clamp(LAND.domain.w,0.0,1.0)*smoothstep(0.0,0.36,edgeDist);
   let bakedLight=textureSampleLevel(landLight,sampC,clamp(uv,vec2f(0.0),vec2f(1.0)),0.0).rg;
-  let cloudSunVis=select(0.0,volumeSunVisibility(world*0.001,F.sunDir.xyz),F.sunDir.y>0.0);
-  let sunlight=mix(cloudSunVis,bakedLight.r,inPrimaryDomain);
+  // The light bake already holds clouds and terrain. Only ground outside it marches for itself.
+  var sunlight=bakedLight.r;
+  if(inPrimaryDomain<1.0){
+    let cloudSunVis=select(0.0,volumeSurfaceSunVisibility(world*0.001,F.sunDir.xyz),F.sunDir.y>0.0);
+    sunlight=mix(cloudSunVis,bakedLight.r,inPrimaryDomain);
+  }
   let direct=sunIlluminance()*sunlight;
   // Directional sky-hemisphere + ground/sea bounce irradiance from envCube
   let skyDir=normalize(vec3f(n.x*0.65,max(n.y,0.12),n.z*0.65));
@@ -567,7 +691,11 @@ fn landOpaque(in:LandVertex)->vec4f{
   let dx=dpdx(world);let dy=dpdy(world);let nx=dpdx(n);let ny=dpdy(n);
   // Registered aerial RGB remains the regional colour seed. The neutral detail
   // below adds material scale, never a replacement green/brown island palette.
-  var source=pow(textureSampleGrad(landAlbedo,landSampler,uv,dx.xz/LAND.domain.z,dy.xz/LAND.domain.z).rgb,vec3f(2.2));
+  // Overhead imagery holds nothing about a steep face. Blur it there by the surface's own
+  // footprint and a few texels, so it gives colour without smearing downhill.
+  let imageSteep=smoothstep(.12,.42,1.0-max(n.y,0.0));
+  let imageBlur=max(max(length(dx),length(dy)),imageSteep*4.0*LAND.domain.z/f32(textureDimensions(landAlbedo).x))/LAND.domain.z;
+  var source=pow(textureSampleGrad(landAlbedo,landSampler,uv,mix(dx.xz/LAND.domain.z,vec2f(imageBlur,0.0),imageSteep),mix(dy.xz/LAND.domain.z,vec2f(0.0,imageBlur),imageSteep)).rgb,vec3f(2.2));
   let nearGround=in.kind.x>.5&&in.kind.x<1.5&&nearTerrain.domain.w>.5;
   if(nearGround){
     source=landNearColour(source,world,n,dx,dy,nx,ny,1.0-in.kind.y);
@@ -578,11 +706,14 @@ fn landOpaque(in:LandVertex)->vec4f{
   var grain=0.0;
   if(in.kind.x<2.5){grain=landFilteredNoise(world.xz*0.019,landMaterialFootprint(dx.xz,dy.xz)*0.019);}
   let rocky=smoothstep(0.22,0.56,1.0-n.y+grain*0.07);
-  let vertical=mix(world.zy,world.xy,smoothstep(0.35,0.65,abs(n.z)/(abs(n.x)+abs(n.z)+0.001)));
-  let materialUV=mix(world.xz,vertical,rocky);
-  // Different cliff projections and their blend can stretch coordinates much
-  // faster than world position. Filter that actual mapping, before branching.
-  let materialWidth=landMaterialFootprint(dpdx(materialUV),dpdy(materialUV));
+  // Pick one world-true plane; never blend them. Their coordinates lie thousands of metres
+  // apart, so a slight blend slides the pattern across the slope and stripes it. Detail
+  // fades to nothing at each switch, leaving no seam for the bump to catch.
+  let verticalBias=abs(n.z)-abs(n.x);
+  let vertical=select(world.zy,world.xy,verticalBias>0.0);
+  let materialUV=select(world.xz,vertical,rocky>.5);
+  let materialSeam=smoothstep(0.0,.1,abs(rocky-.5))*select(1.0,smoothstep(0.0,.08,abs(verticalBias)),rocky>.5);
+  let materialWidth=landMaterialFootprint3(dx,dy);
   let bldgUV=clamp(vec2f(in.kind.x-20.0,in.kind.y),vec2f(0.001),vec2f(0.999));
   let bldgDx=dpdx(bldgUV);let bldgDy=dpdy(bldgUV);
   var albedo=source;var relief=0.0;var roughness=0.95;
@@ -595,6 +726,20 @@ fn landOpaque(in:LandVertex)->vec4f{
     let crownW1=footprint*0.105;let crownW2=footprint*0.046;
     let crownN1=landFilteredNoise(world.xz*0.105+vec2f(grain*0.75,-grain*0.55),crownW1);
     let crownN2=landFilteredNoise(world.xz*0.046+vec2f(-grain*0.45,grain*0.65),crownW2);
+    // Bare slopes below about 60 degrees rest as loose stone; only steeper faces show bedding.
+    let cliff=smoothstep(.40,.62,1.0-n.y+grain*.05);
+    let screeWeight=smoothstep(.10,.30,1.0-n.y+grain*.07)*(1.0-canopyWeight)*(1.0-cliff*.55);
+    var scree=vec3f(0.0,1.0,0.0);
+    if(screeWeight>.01){scree=landScree(world,n,footprint);}
+    let coastSand=select(0.0,clamp((in.kind.y-0.02)/0.98,0.0,1.0),in.kind.x<0.5&&in.kind.y>0.015);
+    let groundCover=landGroundCover(source,1.0-n.y,cliff,crownN1,crownN2,grain,scree.x,world.y,(1.0-canopyWeight)*(1.0-coastSand),nearGround);
+    source=groundCover.rgb;
+    // Single stones dissolve with distance into tone, so far slopes never read as masonry.
+    let screeNear=1.0-smoothstep(.04,.45,footprint);
+    let screeMottle=crownN1*.2+crownN2*.3;
+    // Grass hides most stones, leaving the mottling and only the palest as scattered rocks.
+    let screeTone=screeWeight*(screeMottle*.5+(scree.x*mix(.1,.26,screeNear)-(1.0-scree.y)*mix(.03,.3,screeNear))*(1.0-groundCover.a*.65));
+    let screeRelief=screeWeight*(scree.y-.5)*scree.z*mix(.06,.3,screeNear);
     if(nearGround){
       let rockMass=landOrientedDetail(world,n,dx,dy,.24);
       let fracture=landOrientedDetail(world+vec3f(19.1,7.3,4.7),n,dx,dy,1.35);
@@ -604,8 +749,8 @@ fn landOpaque(in:LandVertex)->vec4f{
       let crownBillow=(abs(crownN1)*0.68+crownN2*0.32)*canopyWeight;
       let crownGap=clamp(0.38-abs(crownN1),0.0,0.38)*landDetailWeight(crownW1)*canopyWeight;
       let basalWetRock=rocky*(1.0-smoothstep(0.2,2.1,world.y));
-      albedo=source*(1.0+rockMass*.22+fracture*.13+gravel*.08+rocky*(strata*.065-joint*.16)+crownBillow*0.18-crownGap*0.38)*(1.0-basalWetRock*0.32);
-      relief=mix(gravel*.018+fracture*.025+crownBillow*0.38-crownGap*0.28,rockMass*.28+fracture*.11+gravel*.014+strata*.022-joint*.09,rocky);
+      albedo=source*(1.0+screeTone+rockMass*.22+fracture*.13+gravel*.08+rocky*(strata*cliff*.065-joint*.16)+crownBillow*0.18-crownGap*0.38)*(1.0-basalWetRock*0.32);
+      relief=screeRelief+mix(gravel*.018+fracture*.025+crownBillow*0.38-crownGap*0.28,rockMass*.28+fracture*.11+gravel*.014+strata*cliff*.022-joint*.09,rocky);
       ambientVisibility*=(1.0-crownGap*0.34)*(1.0-rocky*joint*0.18);
       surfaceWet=basalWetRock*0.75;
       roughness=clamp(.91+gravel*.08-rocky*.08-canopyWeight*0.04,.70,.98);
@@ -619,14 +764,14 @@ fn landOpaque(in:LandVertex)->vec4f{
     let rockKeep=1.0-beachSand*0.94;
     let effCanopy=canopyWeight*(1.0-beachSand);
     let blockWidth=materialWidth*.19;let blockWeight=landDetailWeight(blockWidth);
-    var blockNoise=0.0;if(blockWeight>0.0){blockNoise=gnoise(materialUV*.19);}
+    var blockNoise=0.0;if(blockWeight>0.0){blockNoise=gnoise(materialUV*.19)*materialSeam;}
     let blocks=blockNoise*blockWeight*rockKeep;
-    let stoneRaw=landFilteredNoise(materialUV*.82,materialWidth*.82);
+    let stoneRaw=landFilteredNoise(materialUV*.82,materialWidth*.82)*materialSeam;
     let stone=stoneRaw*rockKeep;
-    let pores=landFilteredNoise(materialUV*5.4,materialWidth*5.4);
-    let fissure=landFilteredFissure(materialUV*1.7+vec2f(13.1,7.7),materialWidth*1.7,.025,.11)*rockKeep;
+    let pores=landFilteredNoise(materialUV*5.4,materialWidth*5.4)*materialSeam;
+    let fissure=landFilteredFissure(materialUV*1.7+vec2f(13.1,7.7),materialWidth*1.7,.025,.11)*rockKeep*materialSeam;
     // Reuse the raw block noise, not its faded value, without another noise call.
-    let coarseFissure=(1.0-smoothstep(.025,.09,abs(blockNoise)))*landDetailWeight(blockWidth/.065)*rockKeep;
+    let coarseFissure=(1.0-smoothstep(.025,.09,abs(blockNoise)))*landDetailWeight(blockWidth/.065)*rockKeep*materialSeam;
     var baseSource=source;
     var swashGloss=0.0;
     var waterFilm=0.0;
@@ -656,13 +801,14 @@ fn landOpaque(in:LandVertex)->vec4f{
       baseSource=mix(baseSource,shoalSand,shoalZone*0.75);
       swashGloss=max(capillaryZone*0.58,waterFilm*0.96);
     }
-    let strataDetailW=landDetailWeight(footprint*0.45)*rocky*rockKeep;
+    let strataDetailW=landDetailWeight(footprint*0.45)*cliff*rockKeep;
     cliffStrata=(sin(world.y*1.95+blockNoise*2.4)*0.65+sin(world.y*4.8-stoneRaw*1.7)*0.35)*strataDetailW;
     ledgeStep=(smoothstep(-0.22,0.32,cliffStrata)-0.5)*strataDetailW;
     cragFacet=(abs(stoneRaw)-0.32)*landDetailWeight(materialWidth*0.82)*rocky*rockKeep;
     let rockTone=mix(vec3f(1.0),mix(vec3f(0.94,0.96,1.04),vec3f(1.06,1.01,0.92),clamp(0.5+0.5*cliffStrata,0.0,1.0)),rocky*rockKeep*0.55);
     // Dual-scale beach sand ripples: braided cross-shore swash ripples (smoothed under active water film) + fine wind ripples on dry berm
-    let rippleW=landDetailWeight(materialWidth*0.45)*beachSand;
+    // Wind and swash ripple only a gentle beach; sand cannot hold them on a hillside.
+    let rippleW=landDetailWeight(materialWidth*0.45)*beachSand*(1.0-smoothstep(.05,.14,1.0-n.y));
     let waveRipple=sin(world.x*1.95+world.z*1.42+stoneRaw*2.8)*cos(world.x*0.58-world.z*0.76+stoneRaw*1.5)*(1.0-waterFilm*0.65);
     let windRipple=sin(world.x*3.3-world.z*2.1+pores*1.6)*(1.0-swashGloss);
     let sandRipple=(waveRipple*0.024+windRipple*0.014)*rippleW;
@@ -670,10 +816,10 @@ fn landOpaque(in:LandVertex)->vec4f{
     let crownBillow=(abs(crownN1)*0.68+crownN2*0.32)*effCanopy;
     let crownGap=clamp(0.40-abs(crownN1),0.0,0.40)*landDetailWeight(crownW1)*effCanopy;
     let canopyTone=mix(vec3f(1.0),vec3f(1.0+crownN2*0.09,1.0+crownBillow*0.14,1.0-crownN2*0.06),effCanopy);
-    albedo=baseSource*rockTone*canopyTone*(1.0+blocks*.15+stone*0.11+cliffStrata*0.075+ledgeStep*0.06+cragFacet*0.05+pores*(0.055-beachSand*0.025)+sandRipple+crownBillow*0.20-crownGap*0.42-(fissure*.085+coarseFissure*.095)*rocky)*(1.0-basalWetRock*0.34);
+    albedo=baseSource*rockTone*canopyTone*(1.0+screeTone*rockKeep+blocks*.15+stone*0.11+cliffStrata*0.075+ledgeStep*0.06+cragFacet*0.05+pores*(0.055-beachSand*0.025)+sandRipple+crownBillow*0.20-crownGap*0.42-(fissure*.085+coarseFissure*.095)*rocky)*(1.0-basalWetRock*0.34);
     let soil=stone*(0.025+vegetation*0.012)+pores*(0.006+vegetation*0.006)+sandRipple*0.42+crownBillow*0.42-crownGap*0.32;
     let rockRelief=stone*0.15+blocks*.24+cliffStrata*0.048+ledgeStep*0.042+cragFacet*0.035-fissure*0.075-coarseFissure*.11;
-    relief=mix(soil,rockRelief,rocky*rockKeep);
+    relief=screeRelief*rockKeep+mix(soil,rockRelief,rocky*rockKeep);
     ambientVisibility*=(1.0-crownGap*0.38)*(1.0-(fissure*0.22+coarseFissure*0.25)*rocky);
     surfaceWet=max(swashGloss,basalWetRock*0.75);
     let baseRough=mix(0.89+vegetation*0.03-effCanopy*0.05+pores*0.055-rocky*0.09,0.76+pores*0.03,beachSand);
@@ -700,10 +846,18 @@ fn landOpaque(in:LandVertex)->vec4f{
     let detailB=landOrientedDetail(world+vec3f(7.3,3.1,11.9),n,dx,dy,5.2);
     if(in.kind.x<10.5){
       // Kind 10: Weathered Spanish cedar, oak & pitch-pine timber (piers, balconies, casements, rafters)
-      let plank=landFilteredWave(world,dx,dy,vec3f(3.8,14.5,3.8),detailA*1.6);
-      let grain=landFilteredWave(world,dx,dy,vec3f(19.0,6.5,-19.0),0.0)*microLodFade;
-      let seam=max(0.0,landFilteredCourse(world.y*2.8+(world.x+world.z)*0.8,dx.y*2.8,dy.y*2.8,2.0)-0.38)*archLodFade;
-      albedo=vec3f(0.22,0.135,0.075)*shadeAlbedo*(1.0+detailA*0.18+detailB*0.09+plank*0.08+grain*0.05-seam*0.16);
+      // Boards lie level on an upright face and side by side on a flat one. Measuring them on
+      // the face itself, never along a world diagonal, keeps seams and grain from crossing into a weave.
+      let upright=abs(n.y)<.7;
+      let boardCoord=select(world.z,world.y,upright)*3.2;
+      let boardDx=select(dx.z,dx.y,upright)*3.2;
+      let boardDy=select(dy.z,dy.y,upright)*3.2;
+      let boardFade=landDetailWeight(length(vec2f(boardDx,boardDy)));
+      let plank=(fract(sin(floor(boardCoord)*91.7)*43758.5453)-.5)*boardFade;
+      let grainCoord=boardCoord*7.0+detailA*2.4;
+      let grain=landFilteredCourse(grainCoord,boardDx*7.0,boardDy*7.0,1.0)*.5*microLodFade;
+      let seam=max(0.0,landFilteredCourse(boardCoord,boardDx,boardDy,2.0)-0.38)*archLodFade;
+      albedo=vec3f(0.22,0.135,0.075)*shadeAlbedo*(1.0+detailA*0.18+detailB*0.09+plank*0.22+grain*0.05-seam*0.16);
       relief=(detailA*0.036+plank*0.026+grain*0.014-seam*0.034)*archLodFade;
       roughness=clamp(0.73-plank*0.04+seam*0.12,0.62,0.88);
       ambientVisibility=(0.42+0.34*max(n.y,0.0))*aoVis*(1.0-seam*0.22);
@@ -842,6 +996,40 @@ fn landOpaque(in:LandVertex)->vec4f{
     let fissure=smoothstep(0.15,0.75,ridges);
     albedo=vec3f(0.095,0.068,0.038)*(0.76+fissure*0.12+barkNoise*0.18+in.kind.y*0.16);
     relief=(ridges-0.5)*0.014*(1.2-in.kind.y)*detailFade;roughness=0.91;
+  }
+  // A town's ways, from a distance field baked when it was laid out. Its red channel is how far
+  // this point lies outside a way, its green how the way is surfaced: earth, a rutted road, cobbles.
+  if(in.kind.x<2.5&&townWindow.z>0.0){
+    let townUV=(world.xz-townWindow.xy)/townWindow.z+.5;
+    if(all(townUV>vec2f(0.0))&&all(townUV<vec2f(1.0))){
+      let way=textureSampleLevel(townField,landSampler,townUV,0.0).rg;
+      if(way.r<.98){
+        let frayed=way.r*${STREET_FIELD_RANGE_M.toFixed(1)}-${STREET_FIELD_EDGE_M.toFixed(1)}+landFilteredNoise(world.xz*.6,footprint*.6)*.5*(1.0-way.g);
+        let soft=max(footprint,.14);
+        let onWay=1.0-smoothstep(-soft,soft,frayed);
+        let trodden=(1.0-smoothstep(0.0,2.4,frayed))*(1.0-onWay);
+        let wear=landFilteredNoise(world.xz*.33,footprint*.33);
+        let earth=mix(vec3f(.27,.215,.15),source,.22)*(1.0+wear*.16+landFilteredNoise(world.xz*3.1,footprint*3.1)*.08);
+        // A road's two wheel tracks run a pace either side of its middle.
+        let rutted=1.0-smoothstep(.2,.45,abs(way.g-.5));
+        let ruts=rutted*exp(-pow((frayed+.85)/.38,2.0))*(1.0-smoothstep(.06,.5,footprint));
+        var surface=earth*(1.0-ruts*.26);
+        var surfaceRelief=wear*.03-ruts*.05;
+        let paved=smoothstep(.6,.9,way.g);
+        if(paved>0.0){
+          let stoneFade=1.0-smoothstep(.015,.11,footprint);
+          var stones=vec2f(0.0,1.0);
+          if(stoneFade>0.0){stones=landStones(world.xz*4.4);}
+          let setts=vec3f(.235,.212,.187)*(1.0+wear*.12+stones.x*.22*stoneFade)*(1.0-(1.0-stones.y)*.5*stoneFade);
+          surface=mix(surface,setts,paved);
+          surfaceRelief=mix(surfaceRelief,(stones.y-.55)*.07*stoneFade,paved);
+        }
+        albedo=mix(albedo*(1.0-trodden*.2),surface,onWay);
+        relief=mix(relief,surfaceRelief,onWay);
+        roughness=mix(roughness,mix(.93,.82,paved),onWay);
+        canopyBackscatter*=1.0-onWay;
+      }
+    }
   }
   if(structDmg>0.005){
     let dmgW=clamp(structDmg,0.0,1.0);

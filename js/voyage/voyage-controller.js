@@ -36,15 +36,26 @@ import {
   scanForLand,
   coastlineToward,
   approachStage,
+  destinationPoint,
   approachWarpCap,
   regionLocalOrigin,
   visibilityRangeKm,
   lookoutEyeHeight,
+  pilotDropPoint,
+  warpStandoffM,
+  warpCapForHazard,
+  WARP_MAP_COAST_STOP_KM,
+  visibleLandPoint,
 } from './landfall-approach.js';
 import { compassPointName, relativeBearingCall, formatLatitude, formatLongitude } from './compass.js';
-import { formatJulianDate, localSolarHours, greatCircleKm, windDescription } from './ocean-climate.js';
+import { formatJulianDate, localSolarHours, greatCircleKm, initialBearing, windDescription } from './ocean-climate.js';
 import { createEncounterDirector, describeEncounterThroughSpyglass } from './encounters.js';
+import { controlIcon } from '../controls.js';
 import { probeHullBottomContact } from '../terrain-model.js';
+
+// Wind in metres a second at which a passage starts to cost hands, and the chance per game hour.
+const GALE_LOSS_WIND = 24;
+const GALE_LOSS_PER_HOUR = 0.015;
 
 const VOYAGE_STORAGE_KEY = 'waterworld.voyage.v1';
 const voyageWrap360 = (d) => ((d % 360) + 360) % 360;
@@ -82,7 +93,12 @@ export function createVoyageController(cfg) {
     demLoader = undefined,
     loadTile = undefined,
     storage = typeof localStorage !== 'undefined' ? localStorage : null,
+    dock = null,
   } = cfg;
+  // Keep in step with the compact HUD media query in index.html.
+  const HUD_COMPACT_QUERY = '(max-width:720px),(pointer:coarse),(max-height:580px)';
+  const HUD_RIVAL_PANELS = ['sea-settings-open', 'ship-settings-open', 'captain-open', 'landfall-open', 'camera-open', 'performance-open', 'share-open'];
+  let hudExpanded = false, hudAutoExpanded = false;
 
   let voyage = null;
   const helmsman = createHelmsman({ engaged: false });
@@ -156,7 +172,10 @@ export function createVoyageController(cfg) {
       <div class="voyage-row voyage-clock">
         <span class="voyage-date" aria-live="off"></span>
         <span class="voyage-watch"></span>
+      </div>
+      <div class="voyage-row voyage-orders">
         <div class="voyage-warp" role="group" aria-label="Time warp"></div>
+        <label class="voyage-canvas-label">Canvas <select class="voyage-canvas" aria-label="Canvas order"></select></label>
       </div>
       <div class="voyage-row voyage-helm">
         <button type="button" class="voyage-course-left" aria-label="Alter course one point to larboard" title="One point to larboard ( [ )">◀</button>
@@ -165,12 +184,33 @@ export function createVoyageController(cfg) {
         <button type="button" class="voyage-keep" title="Helmsman: keep her as she goes (K)">Keep her so</button>
         <button type="button" class="voyage-tack" title="Go about (T)">Tack</button>
         <label class="voyage-beat"><input type="checkbox"> Beat</label>
-        <label class="voyage-canvas-label">Canvas <select class="voyage-canvas" aria-label="Canvas order"></select></label>
       </div>
       <div class="voyage-row voyage-status"><span class="voyage-pos"></span><span class="voyage-helmsman"></span><span class="voyage-wind"></span><span class="voyage-stores"></span></div>
       <div class="voyage-callout" role="alert" hidden></div>
       <div class="voyage-toast" role="status" aria-live="polite" hidden></div>`;
     parent.append(root);
+    const hide = controlIcon(document.createElement('button'), 'close', 'Hide voyage');
+    hide.classList.add('voyage-hide');
+    hide.onclick = () => { setHudExpanded(false); toggle?.focus(); };
+    root.querySelector('.voyage-clock').append(hide);
+    // Compact screens open this panel from the dock, as they do every other panel.
+    const toggle = dock ? controlIcon(document.createElement('button'), 'voyage', 'Voyage') : null;
+    if (toggle) {
+      toggle.id = 'voyage-button';
+      toggle.hidden = true;
+      toggle.setAttribute('aria-controls', 'voyage-hud');
+      toggle.setAttribute('aria-expanded', 'false');
+      toggle.onclick = () => { setHudExpanded(!hudExpanded); if (hudExpanded) hide.focus({ preventScroll: true }); };
+      dock.append(toggle);
+    }
+    // Notices at the head of the screen stack below whatever the HUD occupies.
+    const publishBottom = () => document.documentElement.style.setProperty('--voyage-hud-bottom', `${root.hidden ? 0 : root.getBoundingClientRect().bottom}px`);
+    const hudBounds = new ResizeObserver(publishBottom);
+    hudBounds.observe(root);
+    hudBounds.observe(document.documentElement);
+    new MutationObserver(() => {
+      if (hudExpanded && HUD_RIVAL_PANELS.some((c) => document.body.classList.contains(c))) setHudExpanded(false);
+    }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
     const warpBox = root.querySelector('.voyage-warp');
     const warpButtons = new Map();
     for (const tier of WARP_TIERS) {
@@ -196,7 +236,25 @@ export function createVoyageController(cfg) {
     root.querySelector('.voyage-tack').onclick = () => tack();
     const beat = root.querySelector('.voyage-beat input');
     beat.onchange = () => { helmsman.beat = beat.checked; };
-    return { root, warpButtons, canvasSel, beat };
+    return { root, toggle, warpButtons, canvasSel, beat };
+  }
+
+  function setHudVisible(visible) {
+    if (!hud) return;
+    hud.root.hidden = !visible;
+    if (hud.toggle) hud.toggle.hidden = !visible;
+    if (!visible) setHudExpanded(false);
+  }
+
+  function setHudExpanded(open) {
+    if (!hud) return;
+    hudAutoExpanded = false;
+    if (open && !hudExpanded && matchMedia(HUD_COMPACT_QUERY).matches) cfg.onHudOpen?.();
+    hudExpanded = open;
+    hud.root.dataset.expanded = String(open);
+    hud.toggle?.setAttribute('aria-expanded', String(open));
+    document.body.classList.toggle('voyage-open', open);
+    if (open) hud.root.scrollTop = 0;
   }
 
   function showToast(text, seconds = 6) {
@@ -210,8 +268,15 @@ export function createVoyageController(cfg) {
   function showCallout(interrupt) {
     if (!hud) return;
     const box = hud.root.querySelector('.voyage-callout');
-    if (!interrupt) { box.hidden = true; box.innerHTML = ''; return; }
-    hud.root.hidden = false;
+    if (!interrupt) {
+      box.hidden = true;
+      box.innerHTML = '';
+      if (hudAutoExpanded) setHudExpanded(false);
+      return;
+    }
+    setHudVisible(true);
+    // A call that needs an answer opens the compact panel; answering closes it again.
+    if (!hudExpanded) { setHudExpanded(true); hudAutoExpanded = true; }
     box.hidden = false;
     box.innerHTML = `<p class="voyage-callout-title">${voyageEscapeHtml(interrupt.title ?? 'The lookout calls')}</p><p class="voyage-callout-text">${voyageEscapeHtml(interrupt.text)}</p><div class="voyage-callout-actions"></div>`;
     const actions = box.querySelector('.voyage-callout-actions');
@@ -294,7 +359,7 @@ export function createVoyageController(cfg) {
     const vessels = cfg.getVessels?.() ?? [];
     const targetV = vessels[1] ?? null;
     const tb = targetV?.boat ?? targetV;
-    if (!tb || tb.sunk || tb.showProw === false) {
+    if (!tb || tb.damage?.sunk || tb.showProw === false) {
       pursuit.active = false;
       return;
     }
@@ -394,24 +459,27 @@ export function createVoyageController(cfg) {
     if (!voyage || !targetVessel?.boat) return;
     const tb = targetVessel.boat;
     const shipName = tb.shipName || tb.name || 'Captured Prize';
-    const foodDays = plunder.foodDays ?? 12;
-    const waterDays = plunder.waterDays ?? 10;
-    const cannonCount = plunder.cannonCount ?? 2;
-    const ableCrew = plunder.ableCrewToImpress ?? 4;
-    const repairPct = Math.round((plunder.repairHullAmount ?? 0.35) * 100);
+    const stores = plunder.stores ?? {};
+    const storesLabel = (id) => {
+      const s = stores[id];
+      return s ? `+${s.food} d food, +${s.water} d water` : '';
+    };
+    const cannonCount = plunder.cannons ?? 0;
+    const ableCrew = plunder.impressCount ?? 0;
+    const repairPct = Math.round((plunder.scuttleHullRepair ?? 0) * 100);
     raiseInterrupt(
       voyage,
       {
         type: 'prize-disposition',
         title: `⚔️ Prize Taken · ${shipName}`,
-        text: `Victory! ${shipName} has struck her colors to our boarding party. Aboard we find +${foodDays} d food, +${waterDays} d water, ${cannonCount} serviceable cannon, ${ableCrew} able hands, and seasoned oak timber & canvas (+${repairPct}% hull & rig repair if scuttled). What are your orders for the prize?`,
+        text: `Victory! ${shipName} has struck her colors to our boarding party. Aboard we find ${cannonCount ? `${cannonCount} serviceable cannon, ` : ''}${ableCrew ? `${ableCrew} able hands, and ` : ''}seasoned oak timber & canvas (+${repairPct}% hull & rig repair if scuttled). ${plunder.freedCaptives ? 'The captives in her hold are free, and we will carry them ashore. ' : ''}${plunder.coinLabel ? `Her strongbox holds ${plunder.coinLabel}, ours unless she is gifted. ` : ''}What are your orders for the prize?`,
         targetVessel,
         plunder,
         choices: [
-          { id: 'ally', label: '🏴 Add to Fleet as Allied Consort' },
-          { id: 'gift-indigenous', label: '🛡️ Gift Prize & Cannon to Indigenous Allies' },
-          { id: 'impress-plunder', label: `⚓ Impress Crew (+${ableCrew}) & Plunder Cannon (+${cannonCount})/Stores` },
-          { id: 'scuttle-repair', label: `🔨 Plunder & Scuttle for Hull Repair (+${repairPct}%)` },
+          { id: 'ally', label: `🏴 Add to Fleet as Allied Consort (${storesLabel('ally')})` },
+          { id: 'gift-indigenous', label: `🛡️ Gift Prize${plunder.giftCannons ? ' & Cannon' : ''} to Indigenous Allies (${storesLabel('gift-indigenous')})` },
+          { id: 'impress-plunder', label: `⚓ ${ableCrew ? `Impress ${ableCrew} Hands` : 'Free Her Crew'}${cannonCount ? ` & Plunder ${cannonCount} Cannon` : ableCrew ? '' : ' & Take Her Stores'} (${storesLabel('impress-plunder')})` },
+          { id: 'scuttle-repair', label: `🔨 Strip & Scuttle for Repairs (hull +${repairPct}%, ${storesLabel('scuttle-repair')})` },
         ],
         log: `Captured prize ${shipName}. Awaiting captain's disposition orders.`,
       },
@@ -421,9 +489,38 @@ export function createVoyageController(cfg) {
     emit('change');
   }
 
+  // Our own ship is going down. Only one choice remains, so warp cannot dismiss it.
+  function presentShipwreck() {
+    if (!voyage || voyage.interrupt?.type === 'shipwreck') return;
+    const shipName = voyage.shipName ?? 'The ship';
+    raiseInterrupt(
+      voyage,
+      {
+        type: 'shipwreck',
+        title: `Abandon ship · ${shipName}`,
+        text: `${shipName} is going down beneath us. Whatever is in her hold goes with her. All hands to the boats, and make for the nearest port.`,
+        choices: [{ id: 'boats', label: 'Take to the boats' }],
+        log: `${shipName} foundered. All hands ordered to the boats.`,
+      },
+      'deck'
+    );
+    showCallout(voyage.interrupt);
+    emit('change');
+  }
+
+  function logExternal(text, kind = 'entry') {
+    if (!voyage || !text) return;
+    addLog(voyage, text, kind);
+    emit('change');
+  }
+
   function triggerSailEncounter() {
+    if (cfg.isBattleActive?.()) {
+      showToast('The lookout has no eyes for strange sails while we are engaged.');
+      return null;
+    }
     promoteActive();
-    if (hud) hud.root.hidden = false;
+    setHudVisible(true);
     return encounterDirector.spawnSailEncounter(voyage, boat, {
       marineLife: cfg.getMarineLife?.() ?? null,
       terrain: getTerrain(),
@@ -432,6 +529,26 @@ export function createVoyageController(cfg) {
       onToast: showToast,
       onInterrupt: showCallout,
     });
+  }
+
+  // Night as the lookout has it: null by day and twilight, else whether the Moon lights the land.
+  function nightSight() {
+    const sky = astronomy?.mode === 'astronomy' ? astronomy.state : null;
+    if (!sky || sky.sun.altitude > -6) return null;
+    return { moonlit: sky.moon.altitude > 5 && sky.moon.phase >= 0.25 };
+  }
+  const landHoChoices = (night) => [
+    ...(night ? [{ id: 'lay-to', label: 'Lay to until first light' }] : []),
+    { id: 'stand-in', label: 'Stand in toward the land' },
+    { id: 'spyglass', label: '🔭 Spyglass' },
+    { id: 'hold', label: 'Hold our course' },
+    { id: 'chart', label: 'Open the chart' },
+  ];
+  // What a careful master did off a strange coast: stay put under little sail and wait for day.
+  function layToUntilFirstLight() {
+    if (voyage.canvas !== 'furl') orderCanvas('hove');
+    alignDateToDaylightIfNight(voyage, 7.2);
+    addLog(voyage, 'Lay to until first light.', 'order');
   }
 
   function resolveInterrupt(choiceId) {
@@ -456,6 +573,22 @@ export function createVoyageController(cfg) {
       showCallout(it);
       emit('change');
       return;
+    }
+    if (it.type === 'land-ho' && choiceId === 'spyglass') {
+      // The decision stays open behind the glass.
+      cfg.onInspectLand?.();
+      return;
+    }
+    if (choiceId === 'lay-to') {
+      layToUntilFirstLight();
+      if (it.type === 'land-ho') {
+        it.title = 'First light';
+        it.text = `Hove to through the night. At first light the land lies ${relativeBearingCall((it.bearing ?? boat.heading) - boat.heading)}.`;
+        it.choices = landHoChoices(false);
+        showCallout(it);
+        emit('change');
+        return;
+      }
     }
     clearInterrupt(voyage);
     showCallout(null);
@@ -490,6 +623,8 @@ export function createVoyageController(cfg) {
       });
     } else if (it.type === 'prize-disposition') {
       cfg.onPrizeDisposition?.(choiceId, it.targetVessel, it.plunder);
+    } else if (it.type === 'shipwreck') {
+      cfg.onAbandonShip?.();
     } else if (it.type === 'arrival') {
       if (choiceId === 'chart') emit('open-chart');
     }
@@ -513,7 +648,42 @@ export function createVoyageController(cfg) {
       beginScene({ showHud: true });
     }
   }
-  function setWarp(id) {
+  let lastStepRate = 1;
+  // Warp ends here. A hull that was racing has all sail struck as it does, so she lies safe
+  // even if nobody takes the helm straight away. A warp that never began changes nothing else.
+  function stopWarpForDanger(text) {
+    if (voyage.rate <= 1.05 && voyage.tier === 'deck') return;
+    const wasRacing = voyage.rate > 1.5 || lastStepRate > 1.5;
+    setWarpTier(voyage, 'deck');
+    voyage.rate = 1;
+    voyage.targetRate = 1;
+    voyage.warpCap = 1;
+    if (wasRacing && voyage.canvas !== 'furl') orderCanvas('furl');
+    addLog(voyage, text, 'order');
+    showToast(wasRacing ? `${text} Warp is off and all sail struck. Make sail and take the helm to work her clear.` : `${text} No warp here: take the helm.`, 9);
+    if (wasRacing && nightSight() && !voyage.interrupt) {
+      raiseInterrupt(voyage, {
+        type: 'lay-to',
+        title: 'Danger close, in the dark',
+        text: `${text} All sail is struck. There is little to be seen from the deck tonight.`,
+        choices: [{ id: 'lay-to', label: 'Lay to until first light' }, { id: 'stay', label: 'Stay on deck' }],
+      }, 'deck');
+      showCallout(voyage.interrupt);
+    }
+    updateHud();
+  }
+  // A fight is fought in real time. Closing on a distant enemy may run at watch speed, no faster.
+  const warpLimitInAction = () => {
+    if (!cfg.isBattleActive?.()) return Infinity;
+    return pursuit.active && !pursuit.battleRangeReached ? warpTier('watch').rate : 1;
+  };
+  function setWarp(requested) {
+    const limit = warpLimitInAction();
+    if (warpTier(requested).rate > limit && limit <= 1) {
+      showToast('Not with an enemy in range. Fight her or run clear.', 5);
+      return;
+    }
+    const id = warpTier(requested).rate > limit ? 'watch' : requested;
     const tierRate = warpTier(id).rate;
     if (tierRate > 1) {
       respectManualSky = false;
@@ -523,23 +693,23 @@ export function createVoyageController(cfg) {
       if (astronomy) astronomy.mode = 'astronomy';
     }
     promoteActive();
+    if (voyage.interrupt?.type === 'shipwreck') return;
     if (voyage.interrupt) {
       clearInterrupt(voyage);
       showCallout(null);
       if (encounterDirector?.state) encounterDirector.state.active = null;
     }
-    if (hud) hud.root.hidden = false;
+    setHudVisible(true);
     setWarpTier(voyage, id);
-    if (tierRate > 1 && (approach.suppressLandHo || approach.landHoCalled)) {
-      voyage.warpCap = 3600;
-    }
+    // Forcing warp past a sighting is allowed; the next scan decides how fast she may go.
+    if (tierRate > 1) scanTimer = 0;
     voyage.rate = Math.min(tierRate, voyage.warpCap ?? 3600);
     updateHud();
     emit('change');
   }
   function orderCompassCourse(compassDeg, { beat } = {}) {
     promoteActive();
-    if (hud) hud.root.hidden = false;
+    setHudVisible(true);
     orderCourse(helmsman, compassDeg, { beat: beat ?? helmsman.beat });
     voyage.compassCourse = helmsman.compassCourse;
     manualHelm = false;
@@ -625,8 +795,12 @@ export function createVoyageController(cfg) {
     if (!v) return null;
     voyage = v;
     orderCourse(helmsman, voyage.compassCourse);
+    helmsman.engaged = !voyage.passive;
+    manualHelm = Boolean(voyage.passive);
+    encounterDirector = encounterDirector ?? createEncounterDirector({ seed: voyage.seed ^ 0x1550cafe });
     applyCanvasOrder(boat, voyage.canvas);
     approach.landHoCalled = false;
+    approach.landSighted = null;
     approach.offset = { x: 0, z: 0 };
     attachExistingTerrain();
     beginScene();
@@ -645,7 +819,7 @@ export function createVoyageController(cfg) {
     voyage = null;
     helmsman.engaged = false;
     if (astronomy) astronomy.rate = 1;
-    if (hud) hud.root.hidden = true;
+    setHudVisible(false);
     showCallout(null);
     emit('change');
   }
@@ -659,6 +833,7 @@ export function createVoyageController(cfg) {
       : null;
     approach.suppressLandHo = Boolean(t);
     approach.landHoCalled = false;
+    approach.landSighted = null;
     approach.forceCoastLatLon = null;
     approach.offset = t?.worldOffset ? { x: t.worldOffset.x, z: t.worldOffset.z } : { x: 0, z: 0 };
     approach.committed = true;
@@ -687,7 +862,7 @@ export function createVoyageController(cfg) {
   }
 
   function beginScene({ showHud = true, passive = false } = {}) {
-    if (hud) hud.root.hidden = !showHud;
+    setHudVisible(showHud);
     if (hud) hud.canvasSel.value = voyage.canvas;
     weatherDriver.reset();
     if (astronomy && !passive && !respectManualSky) {
@@ -700,7 +875,7 @@ export function createVoyageController(cfg) {
   }
 
   function persist(now) {
-    if (!voyage || voyage.passive || !storage || now - lastPersist < 5000) return;
+    if (!voyage || (voyage.passive && !voyage.keepSaved) || !storage || now - lastPersist < 5000) return;
     lastPersist = now;
     try { storage.setItem(VOYAGE_STORAGE_KEY, serializeVoyage(voyage)); } catch { /* quota */ }
   }
@@ -751,6 +926,18 @@ export function createVoyageController(cfg) {
 
   function update(dt, now = typeof performance !== 'undefined' ? performance.now() : 0) {
     if (!voyage || !(dt > 0)) return { spectrum: false, env: false };
+    // Time must not race past a ship that has taken the ground.
+    if (voyage.rate > 1.05 && (boat.aground || boat.coastBlocked || boat.shoalScraping)) {
+      setWarp('deck');
+      showToast('She has taken the ground. Time slowed to deck watch: take the helm and work her off.', 8);
+    }
+    const actionLimit = warpLimitInAction();
+    if (voyage.rate > actionLimit * 1.05 || warpTier(voyage.tier).rate > actionLimit) {
+      setWarpTier(voyage, actionLimit <= 1 ? 'deck' : 'watch');
+      voyage.rate = Math.min(voyage.rate, actionLimit);
+      voyage.targetRate = voyage.rate;
+      updateHud();
+    }
     const terrain = getTerrain();
     const span = terrain?.region?.span ?? 8192;
     const baseReg0 = terrain?.baseRegion ?? terrain?.region;
@@ -784,12 +971,25 @@ export function createVoyageController(cfg) {
     const prevDistLogged = voyage.distanceLoggedNm;
     const prevDateMs = voyage.dateMs;
     const prevRate = voyage.rate;
+    lastStepRate = prevRate;
     const isConfirmedLand = (lat, lon) => {
       const elev = probe.elevation?.(lat, lon);
       if (elev !== undefined && elev > -900) return elev > 0.5;
       return Boolean(coastIndex?.isLand?.(lat, lon));
     };
     const wasOnCoarseLand = isConfirmedLand(prevTrue.lat, prevTrue.lon);
+    // Too fast to watch: a gale simply costs a hand now and then.
+    if (!voyage.passive && voyage.rate > 30 && (P?.windSpeed ?? 0) >= GALE_LOSS_WIND) {
+      const hours = (dt * voyage.rate) / 3600;
+      if (Math.random() < hours * GALE_LOSS_PER_HOUR * (1 + (P.windSpeed - GALE_LOSS_WIND) / 6)) {
+        const lost = cfg.onHandLostInGale?.();
+        if (lost) {
+          const name = lost.sailor?.name ?? 'A hand';
+          addLog(voyage, `${name} was washed overboard in the gale and lost.`, 'order');
+          showToast(`${name} was washed overboard in the gale and lost.`, 8);
+        }
+      }
+    }
     const events = stepVoyage(voyage, dt, { boat, ignoreCurrent });
     handleEvents(events);
 
@@ -821,17 +1021,10 @@ export function createVoyageController(cfg) {
       extraX *= safeFrac;
       extraZ *= safeFrac;
       extraDist *= safeFrac;
-      if (prevRate >= 60 && !respectManualSky && (P?.sunElev ?? 32) > -2) {
-        alignDateToDaylightIfNight(voyage, 8.2);
-      }
       approach.suppressLandHo = false;
       approach.forceCoastLatLon = { lat: coastLat, lon: coastLon };
-      voyage.tier = 'deck';
-      voyage.rate = 1;
-      voyage.targetRate = 1;
-      voyage.warpCap = 1;
+      stopWarpForDanger('Land close ahead.');
       scanTimer = 0;
-      showToast('Land ahead — dropping to real time off the coast.', 6);
     }
 
     // While a coastal pack is resident, slide/commit the 3D terrain onto the hull so land, trees, and harbour works
@@ -844,12 +1037,18 @@ export function createVoyageController(cfg) {
         const minSafeBed = -Math.max(3.2, draft * 1.35);
         const startBed = activeTerrain.height(boat.x, boat.z);
         const bowLead = Math.max(24, (boat.length ?? 22) * 1.1);
-        const standoffM = Math.max(42, (boat.length ?? 22) * 1.9);
+        const warping = prevRate > 1.05;
+        const contactStandoffM = Math.max(42, (boat.length ?? 22) * 1.9);
+        const hullSpeed = Math.hypot(boat.surgeVelocity ?? 0, boat.leewayVelocity ?? 0);
+        const warpStopM = warpStandoffM(hullSpeed);
         const portsList = activeTerrain.ports ?? (activeTerrain.port ? [activeTerrain.port] : null);
         const steps = Math.max(1, Math.min(2000, Math.ceil(extraDist / 6)));
+        const shoalAt = (h) => h > minSafeBed && (startBed <= minSafeBed || h > startBed + 0.05);
+        let struckInStep = false;
         const traceRay = (rx, rz) => {
           const rDist = Math.hypot(rx, rz) || 1;
           const dX = rx / rDist, dZ = rz / rDist;
+          const standoffM = warping ? warpStopM : contactStandoffM;
           for (let k = 1; k <= steps; k++) {
             const frac = k / steps;
             const wx = boat.x + rx * frac, wz = boat.z + rz * frac;
@@ -873,9 +1072,18 @@ export function createVoyageController(cfg) {
               }
               hitStructure = Boolean(probeContact.hitStructure);
             }
-            if (hitStructure || (h > minSafeBed && (startBed <= minSafeBed || h > startBed + 0.05))) {
+            if (hitStructure || shoalAt(h)) {
+              struckInStep = true;
               const clearDist = Math.max(0, ((k - 1) / steps) * rDist - standoffM);
               return clearDist / rDist;
+            }
+          }
+          // Warp must also leave her room beyond the step to stop and turn.
+          if (warping) {
+            for (let d = rDist + 24; d <= rDist + standoffM; d += 24) {
+              const wx = boat.x + dX * d, wz = boat.z + dZ * d;
+              activeTerrain.ensureSectionAt?.(wx, wz);
+              if (shoalAt(activeTerrain.height(wx, wz))) return Math.max(0, d - 24 - standoffM) / rDist;
             }
           }
           return 1;
@@ -889,19 +1097,10 @@ export function createVoyageController(cfg) {
           voyage.distanceTrueNm = prevDistTrue + (voyage.distanceTrueNm - prevDistTrue) * safeFrac;
           voyage.distanceLoggedNm = prevDistLogged + (voyage.distanceLoggedNm - prevDistLogged) * safeFrac;
           voyage.dateMs = Math.round(prevDateMs + (voyage.dateMs - prevDateMs) * safeFrac);
-          if (safeFrac < 0.08) {
+          if (struckInStep && safeFrac < 0.08) {
             boat.surgeVelocity = Math.min(boat.surgeVelocity ?? 0, 0.6);
           }
-          if (prevRate > 1.05 || voyage.rate > 1.05) {
-            if (prevRate >= 60 && !respectManualSky && (P?.sunElev ?? 32) > -2) {
-              alignDateToDaylightIfNight(voyage, 8.2);
-            }
-            voyage.tier = 'deck';
-            voyage.rate = 1;
-            voyage.targetRate = 1;
-            voyage.warpCap = 1;
-            showToast('Shoal water ahead — dropping to real time before running aground.', 6);
-          }
+          if (prevRate > 1.05 || voyage.rate > 1.05) stopWarpForDanger('Shoal water ahead.');
         }
       }
       let sx = -stepExtraX * safeFrac, sz = -stepExtraZ * safeFrac;
@@ -944,15 +1143,7 @@ export function createVoyageController(cfg) {
               cam.x += boat.x - postCommitX;
               cam.z += boat.z - postCommitZ;
             }
-            if (prevRate > 1.05 || voyage.rate > 1.05) {
-              if (prevRate >= 60 && !respectManualSky && (P?.sunElev ?? 32) > -2) {
-                alignDateToDaylightIfNight(voyage, 8.2);
-              }
-              voyage.tier = 'deck';
-              voyage.rate = 1;
-              voyage.targetRate = 1;
-              voyage.warpCap = 1;
-            }
+            if (prevRate > 1.05 || voyage.rate > 1.05) stopWarpForDanger('Shoal water ahead.');
           }
         }
       }
@@ -973,6 +1164,7 @@ export function createVoyageController(cfg) {
 
     // Open-ocean encounters (whales & strange sails with lookout callouts).
     encounterDirector.step(voyage, boat, dt, {
+      battleActive: Boolean(cfg.isBattleActive?.()),
       coastKm: approach.coastKm,
       marineLife: cfg.getMarineLife?.() ?? null,
       terrain: activeTerrain,
@@ -1043,6 +1235,24 @@ export function createVoyageController(cfg) {
     if (events.length) emit('change');
   }
 
+  // Always false, so it can sit in the sighting test: builds the coast along a bearing.
+  function requestCoastToward(terrain, bearing) {
+    const rad = (bearing * Math.PI) / 180, sx = Math.sin(rad), sz = -Math.cos(rad), span = terrain.region?.span ?? 8192;
+    for (let d = span * 0.5; d <= 34000; d += span * 0.5) terrain.ensureSectionAt?.(boat.x + sx * d, boat.z + sz * d);
+    return false;
+  }
+
+  function coastLiesAlongside(terrain, radiusM) {
+    if (typeof terrain?.height !== 'function') return false;
+    for (let a = 0; a < 16; a++) {
+      const rad = (a * Math.PI) / 8, sx = Math.sin(rad), sz = -Math.cos(rad);
+      for (const d of [radiusM * 0.25, radiusM * 0.5, radiusM * 0.75, radiusM]) {
+        if (terrain.height(boat.x + sx * d, boat.z + sz * d) > 0.5) return true;
+      }
+    }
+    return false;
+  }
+
   async function runApproach(terrain) {
     const lat = voyage.true.lat, lon = voyage.true.lon;
     const eyeM = lookoutEyeHeight(boat.modelId);
@@ -1110,6 +1320,18 @@ export function createVoyageController(cfg) {
       : terrainDistM / 1000;
     const forceCoast = approach.forceCoastLatLon;
     const fwdTargetForMismatch = forceCoast ?? fwdLand;
+    // Does the 3D coast in memory actually hold the land the map shows ahead? The map's cell
+    // is 2.4 km across, so a shallow anywhere near that point counts.
+    const mapLandAhead = scan.forwardNearest ?? (!scan.complete ? indexForward : null);
+    let landAheadIn3D = false;
+    if (terrain && typeof terrain.height === 'function' && mapLandAhead) {
+      const at = regionLocalOrigin({ shipLat: lat, shipLon: lon, shipX: boat.x, shipZ: boat.z, regionLat: mapLandAhead.lat, regionLon: mapLandAhead.lon });
+      terrain.ensureSectionAt?.(at.x, at.z);
+      // Built coast outranks the coarse map. Only built coast can ground her, and the map's cell
+      // can sit kilometres from the shore, so a built section with no land at that point still counts.
+      landAheadIn3D = (terrain.coverageAt?.(at.x, at.z) ?? 'known') === 'known'
+        && (Boolean(terrain.coverageAt) || [[0, 0], [1500, 0], [-1500, 0], [0, 1500], [0, -1500]].some(([ox, oz]) => terrain.height(at.x + ox, at.z + oz) > -8));
+    }
     const forwardCoastMismatch = Boolean(
       !isDepartureTerrain &&
       terrain &&
@@ -1120,9 +1342,14 @@ export function createVoyageController(cfg) {
       (forceCoast || fwdCoastKm < 65) &&
       greatCircleKm(fwdTargetForMismatch.lat, fwdTargetForMismatch.lon, terrain.region.latitude, terrain.region.longitude) > 16
     );
+    // Never drop a coast she is still beside, nor swap for one that would land her in the same
+    // place: a large island's far shore can lie further from its centre than the test above allows.
+    const mismatchWorthAct = forwardCoastMismatch && (
+      !approach.spawnedAt || greatCircleKm(lat, lon, approach.spawnedAt.lat, approach.spawnedAt.lon) > 15
+    ) && !coastLiesAlongside(terrain, 8000);
     const shouldDispose = isDepartureTerrain
       ? (geoDistKm >= 11.5 || terrainDistM >= (terrain?.region?.span ?? 8192) * 1.42)
-      : (terrainDistM > 150000 || forwardCoastMismatch);
+      : (terrainDistM > 150000 || mismatchWorthAct);
     if (terrain && terrain.region && cfg.disposeTerrain && shouldDispose) {
       cfg.disposeTerrain(terrain);
       approach.spawnedTerrain = null;
@@ -1154,48 +1381,40 @@ export function createVoyageController(cfg) {
     });
 
     // Direct local heightfield probe along the ship's course when terrain is resident.
-    let localWarpCap = 3600;
+    let localWarpCap = 3600, unbuiltWarpCap = 3600;
     if (terrain && typeof terrain.height === 'function' && terrainDistM < (terrain.region?.span ?? 8192) * 2.5) {
       const draft = boat.hydrodynamics?.draft ?? 2.0;
       const minBed = -Math.max(2.2, draft * 1.15);
       const startBed = terrain.height(boat.x, boat.z);
       const portsList = terrain.ports ?? (terrain.port ? [terrain.port] : null);
-      for (const d of [35, 80, 160, 300, 600, 1200, 2200, 3500]) {
-        let allBlocked = true;
-        let centerBlocked = false;
-        for (const off of [0, 10, -10, 20, -20]) {
-          const rad = ((courseDeg + off) * Math.PI) / 180;
-          const px = boat.x + Math.sin(rad) * d, pz = boat.z - Math.cos(rad) * d;
-          let h = terrain.height(px, pz);
-          let hitStructure = false;
-          if (off === 0 && d <= 600 && terrain.region) {
-            const probeContact = probeHullBottomContact(
-              null,
-              boat,
-              px,
-              pz,
-              terrain.region,
-              (qx, qz) => terrain.height(qx, qz),
-              { ports: portsList }
-            );
-            if (Number.isFinite(probeContact.worstBed)) {
-              h = Math.max(h, probeContact.worstBed);
-            }
-            hitStructure = Boolean(probeContact.hitStructure);
-          }
-          const blocked = hitStructure || (h > minBed && (startBed <= minBed || h > startBed + 0.1));
-          if (off === 0 && blocked) centerBlocked = true;
-          if (!blocked) {
-            allBlocked = false;
-          }
-        }
-        if (allBlocked || (centerBlocked && d <= 300)) {
-          localWarpCap = d <= 200 ? 1 : Math.max(1, Math.min(240, (d - 160) / (Math.max(1, ground) * 5)));
+      const rad = (courseDeg * Math.PI) / 180, sinC = Math.sin(rad), cosC = Math.cos(rad);
+      const reach = warpStandoffM(ground) + 3500;
+      let hazardM = Infinity, unbuiltM = Infinity;
+      // A corridor as wide as she needs, out past the distance warp must stop at.
+      for (let d = 40; d <= reach && !Number.isFinite(hazardM); d += d < 1000 ? 40 : d < 3000 ? 80 : 160) {
+        const px = boat.x + sinC * d, pz = boat.z - cosC * d;
+        // Water not built yet reads as deep. Ask for it, and do not outrun it.
+        if (terrain.coverageAt?.(px, pz) === 'pending') {
+          terrain.ensureSectionAt?.(px, pz);
+          unbuiltM = d;
           break;
         }
+        for (const side of [0, 60, -60]) {
+          let h = terrain.height(px + cosC * side, pz + sinC * side);
+          let hitStructure = false;
+          if (side === 0 && d <= 600 && terrain.region) {
+            const probeContact = probeHullBottomContact(null, boat, px, pz, terrain.region, (qx, qz) => terrain.height(qx, qz), { ports: portsList });
+            if (Number.isFinite(probeContact.worstBed)) h = Math.max(h, probeContact.worstBed);
+            hitStructure = Boolean(probeContact.hitStructure);
+          }
+          if (hitStructure || (h > minBed && (startBed <= minBed || h > startBed + 0.1))) { hazardM = d; break; }
+        }
       }
+      localWarpCap = warpCapForHazard(hazardM, ground);
+      unbuiltWarpCap = warpCapForHazard(unbuiltM + warpStandoffM(ground), ground);
     }
 
+    let mapCoastStop = false;
     if (isDepartureTerrain && terrainDistM < (terrain.region?.span ?? 8192) * 1.65) {
       // While departing inside a high-res 3D coastal pack (e.g. Tagus Gorge), trust the 3D heightfield probe
       // rather than the 2.4 km/px zoom-6 DEM which blurs river mouths.
@@ -1206,8 +1425,9 @@ export function createVoyageController(cfg) {
       const bowDiff = fwdTarget
         ? Math.abs((((fwdTarget.bearing - courseDeg + 540) % 360) - 180))
         : 180;
-      if (bowDiff <= (approach.suppressLandHo ? 22 : 45) && fwdCoastKm < 35) {
-        voyage.warpCap = Math.max(1, Math.min(3600, ((fwdCoastKm - 1.8) * 1000) / (Math.max(0.8, ground) * 5)));
+      if (bowDiff <= (approach.suppressLandHo ? 22 : 45) && fwdCoastKm < 35 && !landAheadIn3D) {
+        voyage.warpCap = Math.max(1, Math.min(3600, ((fwdCoastKm - WARP_MAP_COAST_STOP_KM) * 1000) / (Math.max(0.8, ground) * 5)));
+        mapCoastStop = fwdCoastKm <= WARP_MAP_COAST_STOP_KM;
       } else {
         voyage.warpCap = 3600;
       }
@@ -1229,7 +1449,15 @@ export function createVoyageController(cfg) {
     if (approach.spawning && fwdCoastKm < 60) {
       voyage.warpCap = Math.min(voyage.warpCap, fwdCoastKm < 35 ? 1 : 30);
     }
-    voyage.warpCap = Math.min(voyage.warpCap, localWarpCap);
+    voyage.warpCap = Math.min(voyage.warpCap, localWarpCap, unbuiltWarpCap);
+    // Warp reached its stopping distance: end it, rather than leave it ready to run on.
+    if (localWarpCap <= 1 && warpTier(voyage.tier).rate > 1) {
+      stopWarpForDanger('Shoal water ahead.');
+    } else if (mapCoastStop && warpTier(voyage.tier).rate > 1) {
+      stopWarpForDanger('Land close ahead.');
+    }
+    // The clock eases down over a second, which at full warp would be kilometres.
+    if (voyage.rate > voyage.warpCap) voyage.rate = voyage.warpCap;
 
     // Stream the coastal terrain before the land tops the horizon (never while departure suppression is active).
     const wantSpawn = Boolean(
@@ -1255,6 +1483,7 @@ export function createVoyageController(cfg) {
           const t = await spawnTerrain({ region, placement: { x: placement.x, z: placement.z }, lat: rLat, lon: rLon, name: region.name });
           if (t && voyage) {
             approach.spawnedTerrain = t;
+            approach.spawnedAt = { lat: voyage.true.lat, lon: voyage.true.lon };
             const actualLat = Number.isFinite(t.region?.latitude) ? t.region.latitude : rLat;
             const actualLon = Number.isFinite(t.region?.longitude) ? t.region.longitude : rLon;
             const now = regionLocalOrigin({ shipLat: voyage.true.lat, shipLon: voyage.true.lon, shipX: boat.x, shipZ: boat.z, regionLat: actualLat, regionLon: actualLon });
@@ -1312,34 +1541,56 @@ export function createVoyageController(cfg) {
     const hasVisual3DLand = !spawnTerrain || Boolean(
       terrain &&
       terrain !== approach.departureTerrain &&
-      (terrainDistM <= 18000 || fwdCoastKm <= 16 || sighted?.distanceKm <= 18)
+      (terrainDistM <= 18000 || fwdCoastKm <= 16 || sighted?.distanceKm <= 18) &&
+      // The call means something to look at: land the glass can actually find.
+      (!sighted || approach.landHoCalled || typeof terrain.height !== 'function' || requestCoastToward(terrain, sighted.bearing) || visibleLandPoint(
+        (x, z) => terrain.height(x, z), boat.x, boat.z, sighted.bearing, { eyeM, stepDeg: 5 }
+      ))
     );
+    // A new coast in memory, well away from the last sighting, is a new landfall with its own call.
+    if (approach.landHoCalled && sighted && terrain && approach.landHoTerrain && terrain !== approach.landHoTerrain && approach.landSighted
+      && greatCircleKm(sighted.lat, sighted.lon, approach.landSighted.lat, approach.landSighted.lon) > 40) {
+      approach.landHoCalled = false;
+    }
     if (sighted && !approach.landHoCalled && !approach.suppressLandHo) {
       if (hasVisual3DLand) {
         approach.landHoCalled = true;
+        approach.landSighted = { lat: sighted.lat, lon: sighted.lon };
+        approach.landHoTerrain = terrain;
         const rel = sighted.bearing - boat.heading;
         const call = relativeBearingCall(rel);
         addMark(voyage, { kind: 'land', lat: sighted.lat, lon: sighted.lon, label: 'Land sighted' });
         const leaguesOff = Math.max(1, Math.round(Math.min(sighted.distanceKm, Number.isFinite(fwdCoastKm) ? fwdCoastKm : sighted.distanceKm) / 1.852 / NM_PER_LEAGUE));
+        const night = nightSight();
+        const bearingWords = `${compassPointName(sighted.bearing - voyage.variation)} by the compass`;
+        const warning = 'Masters lay to rather than close a strange coast by night.';
         raiseInterrupt(voyage, {
           type: 'land-ho',
-          title: '¡Tierra! Land ho!',
-          text: `The lookout sings out: "Land! Land ${call}!" High ground bearing ${compassPointName(sighted.bearing - voyage.variation)} by the compass, perhaps ${leaguesOff} leagues off.`,
+          title: !night ? '¡Tierra! Land ho!' : night.moonlit ? '¡Tierra! Land by moonlight' : 'Land near, in the dark',
+          text: !night
+            ? `The lookout sings out: "Land! Land ${call}!" High ground bearing ${bearingWords}, perhaps ${leaguesOff} leagues off.`
+            : night.moonlit
+              ? `The lookout sings out: "Land! Land ${call}!" A dark line against the moonlit sky, bearing ${bearingWords}, perhaps ${leaguesOff} leagues off. ${warning}`
+              : `The lookout can make out nothing ahead, but land birds crossed at dusk and the wind smells of earth. The pilot reckons land ${call}, perhaps ${leaguesOff} leagues off. ${warning}`,
           bearing: sighted.bearing,
-          choices: [{ id: 'stand-in', label: 'Stand in toward the land' }, { id: 'hold', label: 'Hold our course' }, { id: 'chart', label: 'Open the chart' }],
-          log: `Land sighted ${call}, bearing ${compassPointName(sighted.bearing - voyage.variation)} by the compass.`,
+          choices: landHoChoices(Boolean(night)),
+          log: `Land sighted ${call}, bearing ${bearingWords}.`,
         }, 'deck');
         showCallout(voyage.interrupt);
         emit('land-ho', sighted);
       } else {
         const distToVisualM = Math.max(0, Math.min(terrainDistM, fwdCoastKm * 1000) - 14000);
+        // Mountains show from far beyond where the coast is built, so run on until it is in range.
+        const toSpawnM = (fwdCoastKm - 95) * 1000;
         const closeCap = terrain
           ? Math.max(60, Math.min(1800, distToVisualM / (Math.max(1, ground) * 1.5)))
-          : 30;
+          : Math.max(30, Math.min(3600, toSpawnM / (Math.max(1, ground) * 6)));
         voyage.warpCap = Math.min(voyage.warpCap, closeCap);
       }
     } else if (!sighted && fwdCoastKm > approach.sightKm + 30) {
       approach.landHoCalled = false;
+    approach.landSighted = null;
+      approach.landSighted = null;
     }
 
     // Arrival: inside a newly streamed coastal pack, at real time, after a real passage (and not overwriting a fresh Land Ho callout).
@@ -1386,8 +1637,13 @@ export function createVoyageController(cfg) {
     r.querySelector('.voyage-helmsman').textContent = manualHelm ? 'Helm: by hand' : `Helmsman: ${helmsman.status}`;
     const w = voyage.weather;
     r.querySelector('.voyage-wind').textContent = w ? `Wind ${compassPointName(w.windFrom)}, ${w.description}` : '';
-    r.querySelector('.voyage-stores').textContent = `Water ${Math.ceil(voyage.provisions.water)} d · Food ${Math.ceil(voyage.provisions.food)} d`;
+    const purse = cfg.purseLabel?.();
+    r.querySelector('.voyage-stores').textContent = `Water ${Math.ceil(voyage.provisions.water)} d · Food ${Math.ceil(voyage.provisions.food)} d${purse ? ` · ${purse}` : ''}`;
     if (hud.beat.checked !== helmsman.beat) hud.beat.checked = helmsman.beat;
+    if (hud.toggle) {
+      const alert = String(Boolean(voyage.interrupt) || voyage.rate > 1);
+      if (hud.toggle.dataset.alert !== alert) hud.toggle.dataset.alert = alert;
+    }
   }
 
   function onKey(e) {
@@ -1402,6 +1658,7 @@ export function createVoyageController(cfg) {
       setWarp(next.id);
       return true;
     }
+    if (e.code === 'Escape' && hudExpanded && matchMedia(HUD_COMPACT_QUERY).matches) { setHudExpanded(false); return true; }
     if (e.code === 'Enter' && voyage.interrupt) {
       resolveInterrupt((voyage.interrupt.choices ?? [{ id: 'ok' }])[0].id);
       return true;
@@ -1438,6 +1695,64 @@ export function createVoyageController(cfg) {
     orderCanvas,
     resolveInterrupt,
     presentPrizeDisposition,
+    presentShipwreck,
+    isBattleActive: () => Boolean(cfg.isBattleActive?.()),
+    // Time spent ashore runs on the voyage's clock.
+    passDays(days) {
+      if (!voyage || !(days > 0)) return;
+      voyage.dateMs += Math.round(days * 86400000);
+      emit('change');
+    },
+    // A pilot takes her out past the bar and drops off in open water.
+    pilotOut({ drop = null } = {}) {
+      const terrain = getTerrain();
+      if (!voyage || !terrain) return null;
+      const { lat, lon } = voyage.true, shore = terrain.region?.shoreBearing;
+      const seaward = Number.isFinite(shore) ? (shore + 180) % 360 : 0;
+      const out = pilotDropPoint(lat, lon, shore, coastIndex, { drop }) ?? { ...destinationPoint(lat, lon, seaward, 30), bearing: seaward, distanceKm: 30 };
+      const { bearing, distanceKm: clearKm } = out;
+      voyage.true = { ...voyage.true, lat: out.lat, lon: out.lon };
+      voyage.dr = { ...voyage.dr, lat: out.lat, lon: out.lon };
+      voyage.dateMs += Math.round((clearKm / 8) * 3600000);
+      cfg.disposeTerrain?.(terrain);
+      approach.spawnedTerrain = null;
+      approach.departureTerrain = null;
+      approach.offset = { x: 0, z: 0 };
+      approach.suppressLandHo = true;
+      approach.landHoCalled = false;
+      approach.landSighted = null;
+      boat.heading = bearing;
+      boat.aground = false;
+      boat.coastBlocked = false;
+      boat.shoalScraping = false;
+      helmsman.compassCourse = (bearing - (voyage.variation ?? 0) + 360) % 360;
+      helmsman.engaged = true;
+      manualHelm = false;
+      if (voyage.passive) promoteActive();
+      addLog(voyage, `Dropped the pilot in open water, ${Math.round(clearKm / 5.556)} leagues off the port.`, 'order');
+      emit('change');
+      return { bearing, lat: out.lat, lon: out.lon };
+    },
+    // What the glass should hold on: the land standing highest above the horizon near the
+    // sighting. Null until land has been called or when it is not in memory yet.
+    landSightPoint({ eyeM = 20 } = {}) {
+      const sighted = approach.landSighted, terrain = getTerrain();
+      if (!voyage || !sighted || typeof terrain?.height !== 'function') return null;
+      const center = initialBearing(voyage.true.lat, voyage.true.lon, sighted.lat, sighted.lon);
+      return visibleLandPoint((x, z) => terrain.height(x, z), boat.x, boat.z, center, { eyeM });
+    },
+    // Something the master should hear about, and the log should remember.
+    note(text, seconds = 7, kind = 'order') {
+      if (voyage) addLog(voyage, text, kind);
+      showToast(text, seconds);
+      emit('change');
+    },
+    saveNow() {
+      if (!voyage || !storage || (voyage.passive && !voyage.keepSaved)) return;
+      lastPersist = performance.now();
+      try { storage.setItem(VOYAGE_STORAGE_KEY, serializeVoyage(voyage)); } catch { /* quota */ }
+    },
+    logExternal,
     triggerSailEncounter,
     showToast,
     onKey,

@@ -313,7 +313,7 @@ test('generateProceduralCoastalPack produces complete landfall packs and safe ve
   assert.equal(url.searchParams.get('lon'), '-75.548');
 });
 
-test('architectural port materials, 3D palm geometry, beach sand vertex weights, and Terrarium DEM upgrade', async () => {
+test('architectural port materials, foreshore palm places, beach sand vertex weights, and Terrarium DEM upgrade', async () => {
   const pack = generateProceduralCoastalPack({
     ...SPANISH_MAIN_1550_REGIONS.cartagena,
     size: 65,
@@ -322,13 +322,15 @@ test('architectural port materials, 3D palm geometry, beach sand vertex weights,
     vegetationCandidates: 6000,
   });
 
-  // Verify port geometry emits architectural materials (10=timber, 11=masonry, 12=stucco, 13=terracotta, 14=recess) + 3D palms (3=trunk, 4=fronds)
+  // Verify port geometry emits architectural materials (10=timber, 11=masonry, 12=stucco, 13=terracotta, 14=recess).
+  // The forest draws palms, so the port only records where they stand.
+  assert.ok(pack.port.palms instanceof Float32Array && pack.port.palms.length >= 8, 'port records foreshore palm places');
   const kinds = new Set();
   for (let i = 0; i < pack.portGeometry.vertices.length; i += 8) {
     kinds.add(Math.round(pack.portGeometry.vertices[i + 6]));
   }
-  for (const k of [3, 4, 10, 11, 12, 13, 14]) {
-    assert.ok(kinds.has(k), `port & palm geometry includes material kind ${k}`);
+  for (const k of [10, 11, 12, 13, 14]) {
+    assert.ok(kinds.has(k), `port geometry includes material kind ${k}`);
   }
 
   // Verify Uber-Noise is bounded, deterministic, and derivative-damped
@@ -1275,8 +1277,8 @@ test('Native American settlements, regional structures, demographic collapse tim
   assert.ok(maracaibo1505.prefabs.includes('palafito_estuary_village'));
 
   // 5. Native American male & female 3D character models and shore village garrison
-  const maleBase = loadCrewGLB(fs.readFileSync('assets/crew/sailor.glb').buffer);
-  const femaleBase = loadCrewGLB(fs.readFileSync('assets/crew/sailor-female.glb').buffer);
+  const maleBase = loadCrewGLB(fs.readFileSync('assets/crew/sailor-classic.glb').buffer);
+  const femaleBase = loadCrewGLB(fs.readFileSync('assets/crew/sailor-female-classic.glb').buffer);
   const [indigMale, indigFemale] = createIndigenousCrewModels([maleBase, femaleBase]);
 
   assert.equal(indigMale.sex, 'male');
@@ -1856,7 +1858,7 @@ test('Jamestown triangular fort encloses buildings with connected curtain walls,
 
   // 5. Ship WGSL shader parity for Pinta, Santa Maria, and procedural fleet
   assert.ok(CARAVEL.includes('let isProceduralFleet=hull.rig.w<.5 && abs(hull.size.y-20.0)>.2;'));
-  assert.ok(CARAVEL.includes('let paintedWood=in.material==20u || in.material==21u || in.material==23u || in.material==24u || in.material==26u;'));
+  assert.ok(CARAVEL.includes('fn vesselPainted(material:u32)->bool {return material==20u || material==21u || material==23u || material==24u || material==26u;}'));
 });
 
 test('Crow’s nest, masthead pennant, stern outlicker, yard parrels, and rear mizzen sail connect cleanly to masts and hulls across all ships', async () => {
@@ -1930,6 +1932,8 @@ test('Blender-audited architectural models feature per-vertex 3D AO gradients, s
   assert.ok(TERRAIN.includes('reflect(-v,n)'), 'landFinish computes environment reflection vector');
   assert.ok(TERRAIN.includes('let specBRDF=(D*G*fresnelSun)'), 'landFinish computes physical GGX microfacet specular BRDF');
   assert.ok(TERRAIN.includes('let archShadow=smoothstep('), 'landFinish applies architectural cavity & eave self-shadowing');
+  assert.ok(!/mix\(world\.(xz|zy),/.test(TERRAIN), 'material coordinates pick one world plane, since blending planes thousands of metres apart stripes slopes');
+  assert.ok(TERRAIN.includes('let screeWeight='), 'bare slopes rest as loose stone at every viewing range');
   assert.ok(TERRAIN.includes('let isGlazedWindow=in.kind.y>0.25'), 'landOpaque renders reflective diamond-leaded casement glass on kind 14 windows');
   assert.ok(TERRAIN.includes('let tileTan=select('), 'landOpaque aligns terracotta barrel tile flutes along roof slope tangent');
   assert.ok(TERRAIN.includes('let archLodFade='), 'landOpaque applies multi-tier distance LOD fade on architectural materials');
@@ -1980,7 +1984,3 @@ test('Blender-audited architectural models feature per-vertex 3D AO gradients, s
     assert.ok(smoothCastIronTris >= 250, `${fortPrefab} cannon barrels use smooth radial lathe normals (${smoothCastIronTris} smooth tris)`);
   }
 });
-
-
-
-

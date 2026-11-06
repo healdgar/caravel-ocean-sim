@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {GUNNERY_LIMITS,GUNNERY_STAGE_DURATIONS,createGunneryState,prepareGunnery,fireGunnery,stepGunnery,gunnerySummary,resolveGunneryImpact} from '../js/gunnery-state.js';
+import {GUNNERY_LIMITS,GUNNERY_STAGE_DURATIONS,createGunneryState,prepareGunnery,fireGunnery,stepGunnery,gunnerySummary,resolveGunneryImpact,gunneryOffline,remountVesselGuns} from '../js/gunnery-state.js';
 
 const fastDrill={swab:.05,load:.05,ram:.05,runout:.05,prime:.05};
 const gunDef=(id=0,side='starboard',extra={})=>({id,side,calibre:32,dispersion:0,speedVariation:0,durations:fastDrill,...extra});
@@ -193,4 +193,36 @@ test('deferred contact history and pending impact storage stay bounded, and inva
   resolveGunneryImpact(state,p.id,{position:[1,0,0]});const events=stepGunnery(state,0,env);
   assert.equal(events.filter(e=>e.type==='impact').length,1,'paused frame still drains completed GPU result');
   assert.equal(stepGunnery(state,0,env).length,0);
+});
+
+test('a dismounted gun leaves the drill, the broadside and the count until shipwrights remount it',()=>{
+  const state=loaded([gunDef(0),gunDef(1),gunDef(2)]);
+  assert.equal(gunnerySummary(state,'starboard').ready,3);
+  const [lost,recoiling]=state.guns;
+  lost.dismounted=true;assert.equal(gunneryOffline(lost),true);
+  assert.deepEqual(gunnerySummary(state,'starboard'),{total:2,ready:2,queued:0,loading:0,spent:0,dismounted:1});
+  assert.equal(fireGunnery(state,'starboard',{interval:.04}),2,'only mounted guns answer the order');
+  // Struck while its charge was queued: the shot is cancelled, not fired from wreckage.
+  recoiling.dismounted=true;
+  const shots=advance(state,.2).filter(e=>e.type==='shot');
+  assert.deepEqual(shots.map(e=>e.gunId),[2]);
+  assert.equal(lost.stage,'dismounted');assert.equal(recoiling.stage,'dismounted');assert.equal(recoiling.queued,false);
+  assert.equal(prepareGunnery(state,'starboard'),1,'the survivor reloads alone');
+  advance(state,2);
+  assert.equal(lost.loading,false);assert.equal(lost.stage,'dismounted');
+  const boat={gunnery:state,damage:{dismountedGuns:2,dismountedPorts:new Set(['a'])}};
+  assert.equal(remountVesselGuns(boat),2);
+  assert.equal(boat.damage.dismountedGuns,0);assert.equal(boat.damage.dismountedPorts.size,0);
+  assert.deepEqual(gunnerySummary(state,'starboard'),{total:3,ready:1,queued:0,loading:0,spent:0,dismounted:0});
+  assert.equal(lost.stage,'secured');
+  assert.equal(prepareGunnery(state,'starboard'),2,'remounted guns return to the drill');
+  advance(state,2);assert.equal(gunnerySummary(state,'starboard').ready,3);
+});
+
+test('a gun omitted by vessel scale is secured rather than reported as battle damage',()=>{
+  const state=loaded([gunDef(0),gunDef(1)]);state.guns[0].disabledByScale=true;
+  advance(state,.1);
+  assert.equal(state.guns[0].stage,'secured');
+  assert.deepEqual(gunnerySummary(state,'starboard'),{total:1,ready:1,queued:0,loading:0,spent:0,dismounted:0});
+  assert.equal(remountVesselGuns({gunnery:state}),0);
 });

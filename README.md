@@ -68,7 +68,8 @@ Loaded guns require current sea clearance; awash gunports hold fire.
 
 Niña uses her four small swivel guns; Victory uses her 104-gun arrangement.
 The visible watch demonstrates selected deck-gun teams; interior teams are
-abstracted. Damage, penetration, ricochet and AI combat are not yet modeled.
+abstracted. Ships take hull, rig, flooding and crew damage, and enemy ships fight back.
+Plans for careers, ports and Indigenous nations are in [CAREER.md](CAREER.md).
 [Implementation, historical sources and assumptions](GUNNERY.md).
 [Audio review and provenance](GUNNERY_AUDIO.md).
 
@@ -78,7 +79,7 @@ abstracted. Damage, penetration, ricochet and AI combat are not yet modeled.
 
 You need a recent Chrome with WebGPU and a reasonably capable GPU. On a laptop, force Chrome onto the dedicated GPU in the Windows graphics settings, or it will fall back to the integrated one.
 
-Open `ocean.html` directly in the browser. `ocean.min.html` is the same page minified. Both embed sailing assets and the forest view atlases. The optional full-detail mature tree buffers load from versioned public assets; they require a connection.
+Play at [sixcailloux.com/waterworld](https://sixcailloux.com/waterworld/), or download the single-file [`ocean.html`](https://sixcailloux.com/waterworld/download/ocean.html) or minified [`ocean.min.html`](https://sixcailloux.com/waterworld/download/ocean.min.html) and open it directly in the browser. Git does not track these two files; `npm run build` makes them locally and `npm run deploy` publishes them. Both embed sailing assets and the forest view atlases. The optional full-detail mature tree buffers load from versioned public assets; they require a connection.
 
 Normal sailing preloads only wood and two crew models (about 2.8 MB before HTTP
 compression); forest assets load only in Landfall scenes. The island's complete
@@ -442,7 +443,7 @@ five additional hulls, rig/rowing poses, companies, controls and equipment:
 | Flying Cloud, 1851 | 68.58 m deck length × 12.50 m beam | Three-mast full rig; wheel and rudder | 12 / 42 |
 | Gipsy Moth IV, 1966 | 16.18 m LOA × 3.20 m beam | Two-mast Bermudan ketch; tiller and rudder | 1 / 1 |
 
-All five are unarmed. The canoe has no anchor, sails or placeholder masts; its
+None mounts ordnance by design. In battle the canoe, Oseberg and Lusoria fight with [bows](GUNNERY.md#bows), Flying Cloud has a fallback battery of light guns, and Gipsy Moth IV carries no weapons. The canoe has no anchor, sails or placeholder masts; its
 inapplicable controls are absent. The others have model-owned anchor fittings.
 Gipsy Moth's recorded engine is disabled. Its headsails/main/mizzen controls serve
 two physical masts; Oseberg and Lusoria expose only their one main-sail group.
@@ -1365,6 +1366,9 @@ The upstream README credits Claude Code (Opus 5.5), with headless Chrome screens
 | `js/interaction.js` | GPU hull contacts, wake grid, spray resources, and effect passes |
 | `js/surface-waves.js`, `js/wgsl/surface-waves.js`, `js/wgsl/surface-coupling.js` | Independent shared event waves and surface-query coupling |
 | `js/hull-contact.js`, `js/wgsl/hull-contact.js` | Canonical lower-hull probes and persistent incident-sea exposure/return events; no impact forces |
+| `js/ship-fracture.js`, `js/wgsl/ship-fracture.js` | Which pieces of a ship break away and what goes with them, rigid flight on the GPU (see `GUNNERY.md`) |
+| `js/building-fracture.js` | Which pieces of a building break away, what they held up, and where they come to rest, in the same flights (see `GUNNERY.md`) |
+| `js/port-damage.js` | What ports have suffered, kept in the save and a share link, and when a town has rebuilt it (see `GUNNERY.md`) |
 | `js/spindrift.js`, `js/wgsl/spindrift.js` | Wind-driven breaking-crest mist, bounded GPU population and soft volume rendering |
 | `js/deck.js`, `js/wgsl/deck.js` | Retained deck water, drainage, wetness, wash shading, and runoff strips |
 | `js/wetness.js`, `js/wgsl/wetness.js` | Persistent material moisture, spray exposure, cached sea contact and crew probes |
@@ -1807,7 +1811,7 @@ downloads embed sailing assets and forest atlases; full-detail mature forest
 buffers are optional versioned network assets.
 Older hashed assets are retained for cached HTML; the build copies only its
 explicit runtime asset list. The site defaults to Boat camera and preserves
-explicit camera links. GitHub Pages serves the `main` branch's `/docs` folder. To update the
-demo, rebuild, commit the generated HTML, asset manifest and referenced files
-alongside the source, and push to `main`.
+explicit camera links. GitHub Pages serves the `main` branch's `/docs` folder, committed alongside the
+source. The game's main release is `npm run deploy`, which publishes the same site
+and the single-file downloads to sixcailloux.com/waterworld.
 The `.nojekyll` file preserves the generated static page without a Jekyll build.

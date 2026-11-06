@@ -51,13 +51,13 @@ export function createGroundCoverPatches(region,sampleHeight,extraHeightBounds=n
   }
   return patches;
 }
-export function groundCoverInstances(patch,region,sampleHeight,mask){
+export function groundCoverInstances(patch,region,sampleHeight,mask,mayGrowAt=null){
   if(patch.instances)return patch.instances;
   const rand=random(patch.seed),groups=[[],[],[],[]],span=GROUND_COVER.patchSpan;
   for(let i=0;i<GROUND_COVER.grassPerPatch+GROUND_COVER.rocksPerPatch;i++){
     const grass=i>=GROUND_COVER.rocksPerPatch,u=rand(),v=rand(),density=rand(),seed=rand(),size=rand(),tall=rand();
     const x=patch.x+u*span,z=patch.z+v*span,h=sampleHeight(x,z);
-    if(h<5||h>855)continue;
+    if(h<5||h>855||(mayGrowAt&&!mayGrowAt(x,z)))continue;
     const sx=(sampleHeight(x+.5,z)-sampleHeight(x-.5,z)),sz=(sampleHeight(x,z+.5)-sampleHeight(x,z-.5)),slope=Math.hypot(sx,sz);
     const probability=vegetationProbability(mask,region.biomeSize??512,(x-region.x)/region.span+.5,(z-region.z)/region.span+.5);
     if(grass?(probability<=0||slope>.9||density>probability*.9):(slope>1.8||density>.35+slope*.3))continue;
@@ -486,22 +486,24 @@ export function createForestPatches(trees,span=128){
   }
   return[...patches.values()].map(p=>({...p,centre:p.low.map((v,k)=>(v+p.high[k])*.5),radius:Math.hypot(...p.high.map((v,k)=>(v-p.low[k])*.5))}));
 }
-export function visibleForestIds(patches,camera,viewProjection=null){
+// `margin` widens the frustum by that sine of an angle, so a list stays valid while the view turns that far.
+export function visibleForestIds(patches,camera,viewProjection=null,margin=0){
   const visible=[],matrix=viewProjection?.length>=16?viewProjection:null;
+  // WebGPU clip X/Y lie in [-W,+W]. Ignore the infinite reverse-Z far
+  // plane; a conservative W test also rejects completely rearward patches.
+  const planes=matrix?[[0,-1],[0,1],[1,-1],[1,1],[3,0]].map(([axis,sign])=>{
+    const x=matrix[3]+(axis===3?0:sign*matrix[axis]),y=matrix[7]+(axis===3?0:sign*matrix[4+axis]),z=matrix[11]+(axis===3?0:sign*matrix[8+axis]);
+    return{x,y,z,d:matrix[15]+(axis===3?0:sign*matrix[12+axis]),length:Math.hypot(x,y,z)};
+  }):null;
   for(const patch of patches){
-    if(matrix){
-      const p=patch.centre.map((v,k)=>v-[camera.x,camera.y,camera.z][k]);
+    if(planes){
+      const px=patch.centre[0]-camera.x,py=patch.centre[1]-camera.y,pz=patch.centre[2]-camera.z;
+      const reach=patch.radius+(margin?margin*Math.hypot(px,py,pz):0);
       let outside=false;
-      // WebGPU clip X/Y lie in [-W,+W]. Ignore the infinite reverse-Z far
-      // plane; a conservative W test also rejects completely rearward patches.
-      for(const[axis,sign]of[[0,-1],[0,1],[1,-1],[1,1],[3,0]]){
-        const a=[0,1,2].map(k=>matrix[k*4+3]+(axis===3?0:sign*matrix[k*4+axis]));
-        const d=matrix[15]+(axis===3?0:sign*matrix[12+axis]);
-        if(a.reduce((sum,v,k)=>sum+v*p[k],d)<-patch.radius*Math.hypot(...a)){outside=true;break;}
-      }
+      for(const plane of planes)if(plane.x*px+plane.y*py+plane.z*pz+plane.d<-reach*plane.length){outside=true;break;}
       if(outside)continue;
     }
-    visible.push(...patch.ids);
+    for(const id of patch.ids)visible.push(id);
   }
   return visible;
 }

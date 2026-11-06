@@ -2,7 +2,8 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {createCompany,stepCompany} from '../js/crew.js';
-import {crewGunneryTool,crewGunStation} from '../js/crew-work.js';
+import {advanceSails,sailingState,sailCanvasTarget} from '../js/sailing.js';
+import {crewGunneryTool,crewGunStation,manGunStationsImmediate} from '../js/crew-work.js';
 import {poseCrewWork} from '../js/crew-pose.js';
 import {buildGunneryToolVertices} from '../js/gunnery-tools.js';
 import {createGunDefinitions,gunMuzzlePose} from '../js/gunnery-models.js';
@@ -35,7 +36,8 @@ test('both ships walk real gun teams to either battery, complete the drill, then
     assert.equal(summary.ready,summary.total,id+' '+side+' must finish without a route deadlock');
     assert.equal(boat.gunneryAttendance.size,expected);
     assert.equal(company.crew.filter(s=>s.job?.kind==='gunnery').length,expected*2);
-    assert.ok(closest>.50,'human bodies remain separated: '+closest);
+    // 40a4ed0 cleared the full-watch deadlock by letting a gun team pass at .38 m.
+    assert.ok(closest>.38,'human bodies remain separated: '+closest);
     const pace=crewMotionPolicy(boat,{purpose:'work'}).speedMetresPerSecond;
     assert.ok(pace<=1.75,'work pace has a physical human cap');assert.ok(maxMove<=pace*.1+2e-5,'no station teleport: '+maxMove);
     assert.ok(company.crew.filter(s=>['ines','pedro'].includes(s.id)).every(s=>s.job?.kind!=='gunnery'));
@@ -93,4 +95,109 @@ test('an aloft lookout descends before joining the gun drill and crew rendering 
   assert.ok(lookout.job.rung<rung&&gunneryCrewDistance(before,lookout.position)<.08,'aloft hand descends continuously');
   for(let i=0;i<2400;i++){stepCompany(company,boat,.1,8);stepGunnery(boat.gunnery,.1,{muzzle:g=>gunMuzzlePose(g,boat),gunAttended:g=>!g.visibleCrew||boat.gunneryAttendance.has(g.id)});}
   assert.equal(gunnerySummary(boat.gunnery,'port').ready,52);
+});
+
+const gunHands=company=>company.crew.filter(s=>s.job?.kind==='gunnery'&&!['return','waiting-return'].includes(s.job.stage));
+// A manned battery on a working rig: canvas answers the crew as it does in the game.
+function mannedBattery(id='nina',expected=2){
+  const fixture=drillFixture(id),{boat}=fixture,step=fixture.step;
+  boat.heading=0;boat.surgeVelocity=0;boat.leewayVelocity=0;
+  fixture.step=inspect=>{advanceSails(boat,.1,8,90);return step(inspect);};
+  for(let i=0;i<2400&&gunnerySummary(boat.gunnery,'port').loading;i++)fixture.step();
+  assert.equal(boat.gunneryAttendance.size,expected,'the battery is manned before the test changes anything');
+  return fixture;
+}
+
+test('sail hands leave the guns only for canvas that needs them, then return and the battery recovers',()=>{
+  const {boat,company,step}=mannedBattery();
+  const atSheet=()=>company.crew.filter(s=>s.job?.kind==='haul'&&s.job.mast===0);
+  assert.equal(atSheet().length,0);assert.equal(boat.sailHoldReason??null,null);
+  boat.sailFore=.5;let moved=false,noted=false;
+  for(let i=0;i<1200&&Math.abs(sailingState(boat).set[0]-sailCanvasTarget(boat,0))>.008;i++){
+    step();
+    moved||=atSheet().some(s=>s.job.stage==='working');
+    noted||=Boolean(boat.sailHoldReason);
+  }
+  assert.ok(moved,'the fore hand reaches the sheet with the guns still manned');
+  assert.ok(noted,'the wait for canvas is explained while the hand is on the way');
+  assert.ok(Math.abs(sailingState(boat).set[0]-sailCanvasTarget(boat,0))<.01,'canvas answered the order during gunnery');
+  for(let i=0;i<600&&boat.gunneryAttendance.size<2;i++)step();
+  assert.equal(boat.gunneryAttendance.size,2,'guns are fully manned once more');
+  assert.equal(gunHands(company).length,4);
+  for(let i=0;i<20;i++)step();
+  assert.equal(boat.sailHoldReason,null,'nothing is held once the canvas settles');
+});
+
+test('hands short at the guns because of canvas work are reported as such',()=>{
+  const {boat,company,step}=mannedBattery();
+  const sailIds=new Set(['beatriz','catarina','duarte','joao','isabel']);
+  // Eight able hands still warrant two gun teams, but only three are free of the rig.
+  for(const s of company.crew.filter(s=>!['ines','pedro'].includes(s.id)&&!sailIds.has(s.id)).slice(3))s.casualtyState='fallen';
+  boat.sailFore=.2;boat.sailMain=.2;boat.sailMizzen=.2;
+  let note=null;
+  for(let i=0;i<600&&!note;i++){step();note=boat.gunneryCrewNote;}
+  assert.ok(company.crew.some(s=>s.job?.kind==='haul'),'canvas work is under way');
+  assert.equal(note,'Hands at the sheets · guns wait for crew');
+  for(let i=0;i<1200&&Math.abs(sailingState(boat).set[0]-sailCanvasTarget(boat,0))>.008;i++)step();
+  for(let i=0;i<600&&boat.gunneryCrewNote;i++)step();
+  assert.equal(boat.gunneryCrewNote,null,'the note clears once sail hands are free again');
+});
+
+test('canvas carried away by a hit aloft pulls nobody off a loaded gun',()=>{
+  const {boat,company,step}=mannedBattery();
+  for(let i=0;i<20;i++)step();
+  const crewed=new Set(gunHands(company).map(s=>s.id));
+  boat.damage={mastIntegrity:{fore:.6,main:1,mizzen:1},mastState:{fore:0,main:0,mizzen:0}};
+  for(let i=0;i<40;i++){
+    step();
+    assert.deepEqual(new Set(gunHands(company).map(s=>s.id)),crewed,'gun teams stay on station');
+    assert.equal(boat.gunneryAttendance.size,2);
+  }
+  assert.ok(Math.abs(sailingState(boat).set[0]-sailCanvasTarget(boat,0))<.01,'the canvas came down by itself');
+});
+
+test('a dismounted gun releases its team, which takes the next mounted gun',()=>{
+  const {boat,company,step}=mannedBattery('victory',4);
+  const portWeather=boat.gunnery.guns.filter(g=>g.weatherDeck&&g.side==='port');
+  const lost=portWeather[0],spare=portWeather[4];
+  assert.ok(spare,'the quarterdeck has a spare weather gun');assert.equal(spare.visibleCrew,false);
+  lost.dismounted=true;step();
+  assert.equal(lost.visibleCrew,false);assert.equal(spare.visibleCrew,true,'the fourth team slot moves to a mounted gun');
+  prepareGunnery(boat.gunnery,'port');
+  for(let i=0;i<1600&&!boat.gunneryAttendance.has(spare.id);i++)step();
+  assert.ok(boat.gunneryAttendance.has(spare.id),'the spare gun is physically manned');
+  assert.ok(!gunHands(company).some(s=>s.job.gun===lost),'nobody stays at the wreck');
+  assert.equal(gunnerySummary(boat.gunnery,'port').dismounted,1);
+});
+
+test('a gun no hand can reach goes to unseen crew rather than staying silent',()=>{
+  // z=-3 ends inside a fixture, so no route exists. z=60 ends off the deck, so the
+  // route exists but its hand never arrives.
+  for(const[z,seconds]of[[-3,8],[60,60]]){
+    const {boat,company,step}=drillFixture('nina');
+    const gun=boat.gunnery.guns.find(g=>g.weatherDeck&&g.side==='port');
+    gun.centre=null;gun.muzzleDesign=[gun.muzzleDesign[0],gun.muzzleDesign[1],z];
+    for(let i=0;i<seconds*10&&gun.visibleCrew;i++)step();
+    assert.equal(gun.visibleCrew,false,'z='+z+' hands the gun over within '+seconds+' s');
+    assert.ok(company.gunAbstractCrew.has(gun.id));
+    step();
+    assert.ok(!gunHands(company).some(s=>s.job.gun===gun),'nobody is left standing at the unreachable gun');
+    for(let i=0;i<1600&&gun.stage!=='ready';i++)step();
+    assert.equal(gun.stage,'ready','the gun still completes its drill');
+    boat.gunnerySide='starboard';step();
+    assert.equal(company.gunAbstractCrew.size,0,'changing battery retries the route');
+  }
+});
+
+test('crew cannot be pulled from the sheets by immediate manning, and their guns wait visibly',()=>{
+  const {boat,company,step}=drillFixture('nina');
+  boat.heading=0;boat.surgeVelocity=0;boat.leewayVelocity=0;
+  boat.sailFore=.2;
+  for(let i=0;i<3;i++)step();
+  const fore=company.crew.find(s=>s.id==='duarte');
+  assert.equal(fore.job?.kind,'haul');
+  assert.equal(manGunStationsImmediate(company,boat),true);
+  assert.equal(fore.job.kind,'haul','the fore hand stays on the sheet');
+  assert.equal(boat.gunneryAttendance.size,2,'other hands fill both guns at once');
+  assert.ok(company.crew.filter(s=>s.job?.kind==='gunnery').every(s=>s.id!=='duarte'&&s.id!=='beatriz'));
 });

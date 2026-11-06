@@ -14,7 +14,7 @@ export const ANCHOR_LIMITS = Object.freeze({maxDepth:35,maxRode:200,scope:5,maxD
 export const VICTORY_ANCHOR_LIMITS=Object.freeze({...ANCHOR_LIMITS,anchorMass:4000,renderScale:3.1,
   rodeRadius:.08,maxRode:260,payRate:2.4,weighRate:.4,maxStiffness:90000});
 export const ADDITIONAL_ANCHOR_LIMITS=Object.freeze(Object.fromEntries(Object.entries(ADDITIONAL_DESIGNS).map(([id,d])=>[id,Object.freeze({...ANCHOR_LIMITS,
-  anchorMass:d.family==='nao'?450:320,renderScale:d.family==='nao'?1.25:1.1})])));
+  anchorMass:d.family==='nao'?450:320,renderScale:d.equipment.anchorScale})])));
 // Authored equipment for gameplay; these are not recovered anchor inventories.
 const laterAnchorProfiles={
   oseberg:{anchorMass:30,renderScale:.5,rodeRadius:.016,maxDepth:18,maxRode:110,maxStiffness:5000},

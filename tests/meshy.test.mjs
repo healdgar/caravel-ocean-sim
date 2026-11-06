@@ -12,7 +12,7 @@ const complete=id=>({id,type:'text-to-3d-preview',status:'SUCCEEDED',progress:10
   model_urls:{glb:'https://assets.meshy.ai/test/model.glb?Expires=123'},consumed_credits:20});
 
 test('native remesh and rig requests stay distinct, resume safely and retain animation outputs',async t=>{
-  const dir=await temp(t),glb=await fs.readFile(path.join(ROOT,'assets/crew/sailor.glb'));
+  const dir=await temp(t),glb=await fs.readFile(path.join(ROOT,'assets/crew/sailor-classic.glb'));
   assert.deepEqual(remeshRequest('source'),{input_task_id:'source',topology:'quad',target_polycount:20000,target_formats:['glb']});
   assert.deepEqual(rigRequest('remeshed',1.75),{input_task_id:'remeshed',height_meters:1.75});
   assert.throws(()=>remeshRequest('source',{polygons:300001}),/Polygons/);
@@ -133,7 +133,7 @@ test('bounded wait resumes existing tasks and exposes terminal failure without a
 });
 
 test('downloads retain GLB/maps and hashes, omit signed URLs and auth, and resume without redownloading',async t=>{
-  const dir=await temp(t),glb=await fs.readFile(path.join(ROOT,'assets/crew/sailor.glb'));let downloads=0;
+  const dir=await temp(t),glb=await fs.readFile(path.join(ROOT,'assets/crew/sailor-classic.glb'));let downloads=0;
   const task={...complete('task'),thumbnail_url:'https://assets.meshy.ai/test/thumb.png?secret=abc',
     texture_urls:[{base_color:'https://assets.meshy.ai/test/color.png?secret=abc'}]};
   const client=new MeshyClient({key:'msy_test',dir,fetchImpl:async(url,options)=>{
@@ -176,7 +176,7 @@ test('offline inspector recognizes existing rigs and rejects raw unrigged source
 });
 
 test('textured prepared assets report rig compatibility separately from renderer compatibility',async t=>{
-  const dir=await temp(t),asset=readGLB(await fs.readFile(path.join(ROOT,'assets/crew/sailor.glb')));
+  const dir=await temp(t),asset=readGLB(await fs.readFile(path.join(ROOT,'assets/crew/sailor-classic.glb')));
   // A texture declaration changes loader support, not the preserved rig/animation.
   asset.json.textures=[{}];
   const raw=Buffer.from(JSON.stringify(asset.json)),json=Buffer.alloc((raw.length+3)&~3,32);raw.copy(json);

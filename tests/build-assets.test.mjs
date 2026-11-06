@@ -9,7 +9,9 @@ test('Pages uses versioned, byte-identical runtime assets and excludes inline me
   const html=await readFile(new URL('docs/index.html',root),'utf8');
   const manifest=JSON.parse(await readFile(new URL('docs/assets-manifest.json',root),'utf8'));
   assert.ok(Object.keys(manifest).length>40,'all runtime sound/model/terrain assets are represented');
-  assert.ok(Buffer.byteLength(html)<2*1024*1024,'optional media must not return to the initial HTML');
+  // Code and shaders alone reached about 2.5 MiB. This trips well before the
+  // smallest crew or wildlife model (over 1.3 MiB as base64) could fit inline.
+  assert.ok(Buffer.byteLength(html)<3*1024*1024,'optional media must not return to the initial HTML');
   assert.ok(!/data:(audio\/mpeg|model\/gltf-binary|image\/png|image\/webp);base64,/.test(html));
   for(const [source,record]of Object.entries(manifest)){
     assert.match(source,/^assets\/[a-z0-9/.-]+$/);
@@ -21,7 +23,7 @@ test('Pages uses versioned, byte-identical runtime assets and excludes inline me
     assert.equal(record.sha256,createHash('sha256').update(original).digest('hex'));
     assert.ok(record.url.includes(record.sha256.slice(0,16)),'cache version follows actual bytes');
   }
-  for(const source of ['assets/crew/sailor.glb','assets/crew/sailor-female.glb','assets/caravel-oak-albedo.webp'])
+  for(const source of ['assets/crew/sailor.glb','assets/crew/sailor-female.glb','assets/crew/sailor-classic.glb','assets/crew/sailor-female-classic.glb','assets/caravel-oak-albedo.webp'])
     assert.ok(html.includes(`as="fetch" href="${manifest[source].url}" crossorigin="anonymous"`),'startup model discovery: '+source);
   assert.ok(!html.includes(`as="fetch" href="${manifest['assets/wildlife/whale.glb'].url}"`),'inactive wildlife must not preload');
 });
@@ -34,7 +36,7 @@ test('downloads embed sailing and native forest atlases; optional mature buffers
       assert.ok(html.includes('data:'+mime+';base64,'),file+' includes '+mime);
     assert.ok(!/href="assets\/[^"\s]+\.[a-f0-9]{16}\./.test(html),'web-only preloads do not leak into offline downloads');
     for(const source of Object.keys(manifest)){
-      if(/^assets\/forest-scenery\/(saba|subtropical)\/(mass\/)?(vertices|indices)\.bin\.gz$/.test(source)){
+      if(/^assets\/forest-scenery\/((saba|subtropical)\/(mass\/)?|saba\/clusters\/)(vertices|indices)\.bin\.gz$|\/surfaces\/.*\.gz$/.test(source)){
         assert.ok(html.includes('https://sixcailloux.com/waterworld/'+manifest[source].url),file+' uses exact optional close-up geometry');continue;
       }
       const bytes=await readFile(new URL(source,root));

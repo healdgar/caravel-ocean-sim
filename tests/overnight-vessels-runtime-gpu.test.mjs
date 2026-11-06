@@ -6,14 +6,14 @@ import {once} from 'node:events';
 import {before,after,test} from 'node:test';
 import {chromium} from 'playwright';
 import {createDevServer} from '../server.mjs';
+import {createNavalBattleGunDefinitions} from '../js/gunnery-models.js';
 
 let server,browser,origin;
 before(async()=>{
   server=createDevServer();server.listen(0,'127.0.0.1');await once(server,'listening');origin='http://127.0.0.1:'+server.address().port;
-  // macOS headless Metal dispatches wheel events without applying compositor
-  // scrolling, even on a plain HTML scroll box. Use a real native window for
-  // these interaction gates rather than forcing the application's scrollTop.
-  browser=await chromium.launch({headless:process.env.WEBGPU_BACKEND!=='metal',executablePath:process.env.CHROMIUM_PATH||undefined,args:process.env.WEBGPU_BACKEND==='metal'?['--enable-unsafe-webgpu','--use-angle=metal','--disable-gpu-watchdog']:['--enable-unsafe-webgpu','--use-angle=swiftshader','--enable-unsafe-swiftshader','--disable-gpu-watchdog']});
+  // macOS headless Metal dispatches wheel events without applying compositor scrolling, even on a plain
+  // HTML scroll box. Scrolling on the main thread applies them, with no window to take the user's focus.
+  browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||undefined,args:process.env.WEBGPU_BACKEND==='metal'?['--enable-unsafe-webgpu','--use-angle=metal','--disable-gpu-watchdog','--disable-threaded-scrolling']:['--enable-unsafe-webgpu','--use-angle=swiftshader','--enable-unsafe-swiftshader','--disable-gpu-watchdog']});
 });
 after(async()=>{await browser?.close();if(server)await new Promise(resolve=>server.close(resolve));});
 
@@ -129,7 +129,8 @@ test('canoe exposes only actual paddle controls; rowboats use main canvas and ya
         assert.equal(await page.getByRole('group',{name:'Sail amount',exact:true}).isVisible(),false);
         assert.equal(await page.locator('#helm-controls [data-rowing="1"]').isVisible(),true);
         await page.getByRole('button',{name:'Captain',exact:true}).click();
-        assert.equal(await page.locator('.gunnery-controls').isVisible(),false);assert.equal(await page.locator('#drop-anchor').isVisible(),false);assert.equal(await page.locator('#weigh-anchor').isVisible(),false);
+        // Every vessel can fight since edb1469, the canoe with its one swivel.
+        assert.equal(await page.locator('.gunnery-controls').isVisible(),createNavalBattleGunDefinitions(id).length>0);assert.equal(await page.locator('#drop-anchor').isVisible(),false);assert.equal(await page.locator('#weigh-anchor').isVisible(),false);
         for(const order of ['full','reduced','furl','transfer'])assert.equal(await page.locator('[data-order="'+order+'"]').isVisible(),false,'no nonexistent sail job '+order);
       }
       if(id==='gipsy-moth-iv'){const s=await snapshot(page);assert.deepEqual(s.rows[0].masts.map(m=>m.id),['main','mizzen']);assert.deepEqual(s.rows[0].controls,['main','mizzen','fore']);}

@@ -1,34 +1,39 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
+import {isArrowAmmo} from './gunnery-state.js';
 export function createGunneryControls(parent,gunnery){
   const section=document.createElement('section');section.className='gunnery-controls';
-  const title=document.createElement('h3');title.textContent='Gunnery';section.append(title);
-  const note=document.createElement('p');note.textContent='Prepare a side. Wait for the gun crews, then order a single broadside.';section.append(note);
+  const bows=gunnery.weapon?.id==='bow';
+  const title=document.createElement('h3');title.textContent=bows?'Archers':'Gunnery';section.append(title);
+  const note=document.createElement('p');note.textContent=bows?'Nock on one side, then order a flight of arrows. They reach about 170 m.':'Prepare a side. Wait for the gun crews, then order a single broadside.';section.append(note);
   const rows=[];
   for(const side of ['port','starboard']){
     const row=document.createElement('div');row.className='gunnery-battery';
-    const label=document.createElement('strong');label.textContent=side==='port'?'Port battery':'Starboard battery';
+    const label=document.createElement('strong');label.textContent=`${side==='port'?'Port':'Starboard'} ${bows?'archers':'battery'}`;
     const status=document.createElement('span');status.setAttribute('role','status');status.id='guns-'+side+'-status';
     const actions=document.createElement('div');actions.className='gunnery-actions';
-    const prepare=document.createElement('button');prepare.textContent='Prepare '+side;prepare.id='guns-prepare-'+side;
+    const prepare=document.createElement('button');prepare.textContent=(bows?'Nock ':'Prepare ')+side;prepare.id='guns-prepare-'+side;
     prepare.onclick=()=>{gunnery.prepare(side);update();};
-    const fire=document.createElement('button');fire.textContent='Fire '+side;fire.id='guns-fire-'+side;fire.className='gun-fire';
+    const fire=document.createElement('button');fire.textContent=(bows?'Loose ':'Fire ')+side;fire.id='guns-fire-'+side;fire.className='gun-fire';
     fire.onclick=()=>{if(!gunnery.fire(side))gunnery.fireLoaded?.(side);update();};
-    const fireLoaded=document.createElement('button');fireLoaded.textContent='Fire loaded';fireLoaded.id='guns-fire-loaded-'+side;fireLoaded.className='gun-fire-loaded';
-    fireLoaded.title='Fire all currently loaded guns on this side without waiting for the remaining guns to finish loading';
+    const fireLoaded=document.createElement('button');fireLoaded.textContent=bows?'Loose ready':'Fire loaded';fireLoaded.id='guns-fire-loaded-'+side;fireLoaded.className='gun-fire-loaded';
+    fireLoaded.title=bows?'Loose every nocked arrow on this side without waiting for the rest':'Fire all currently loaded guns on this side without waiting for the remaining guns to finish loading';
     fireLoaded.onclick=()=>{gunnery.fireLoaded?.(side);update();};
     actions.append(prepare,fire,fireLoaded);row.append(label,status,actions);section.append(row);rows.push({side,status,prepare,fire,fireLoaded});
   }
-  const fireAtWill=document.createElement('button');fireAtWill.id='guns-fire-at-will';fireAtWill.textContent='Fire at will: Off';
+  const fireAtWill=document.createElement('button');fireAtWill.id='guns-fire-at-will';fireAtWill.textContent=`${bows?'Loose':'Fire'} at will: Off`;
   fireAtWill.setAttribute('aria-pressed','false');
-  fireAtWill.title='Automatically reload and fire guns as soon as each battery bears and finishes loading';
+  fireAtWill.title=bows?'Keep nocking and loosing as soon as arrows are ready':'Automatically reload and fire guns as soon as each battery bears and finishes loading';
   fireAtWill.onclick=()=>{gunnery.setFireAtWill?.(!gunnery.fireAtWill);update();};
   section.append(fireAtWill);
-  const cease=document.createElement('button');cease.textContent='Cease fire';cease.onclick=()=>{gunnery.cease();update();};section.append(cease);
-  const standDown=document.createElement('button');standDown.textContent='Stand down gun crews';standDown.onclick=()=>{gunnery.standDown();update();};section.append(standDown);
+  const cease=document.createElement('button');cease.textContent=bows?'Hold arrows':'Cease fire';cease.onclick=()=>{gunnery.cease();update();};section.append(cease);
+  const standDown=document.createElement('button');standDown.textContent=bows?'Stand down archers':'Stand down gun crews';standDown.onclick=()=>{gunnery.standDown();update();};section.append(standDown);
   const ammoRow=document.createElement('label');ammoRow.className='gunnery-ammo';
-  const ammoName=document.createElement('span');ammoName.textContent='Shot type';
-  const ammoSelect=document.createElement('select');ammoSelect.id='guns-ammo';ammoSelect.setAttribute('aria-label','Shot type');
-  for(const [val,txt] of [
+  const ammoName=document.createElement('span');ammoName.textContent=bows?'Arrows':'Shot type';
+  const ammoSelect=document.createElement('select');ammoSelect.id='guns-ammo';ammoSelect.setAttribute('aria-label',bows?'Arrows':'Shot type');
+  for(const [val,txt] of bows?[
+    ['arrow','Arrows (wound exposed crew)'],
+    ['fire-arrow','Fire arrows (slower · can catch sails and rigging)'],
+  ]:[
     ['round','Round shot (solid iron · hull penetration)'],
     ['hot','Hot shot (glowing red-hot · starts fires)'],
     ['chain','Chain shot (whirling · rips sails & rigging)'],
@@ -36,15 +41,15 @@ export function createGunneryControls(parent,gunnery){
   ]){
     const opt=document.createElement('option');opt.value=val;opt.textContent=txt;ammoSelect.append(opt);
   }
-  ammoSelect.value=gunnery.ammo??'round';
+  ammoSelect.value=gunnery.ammo??(bows?'arrow':'round');
   ammoSelect.onchange=()=>{gunnery.setAmmo?.(ammoSelect.value);update();};
   ammoRow.append(ammoName,ammoSelect);section.append(ammoRow);
   const range=gunnery.elevationRange??{min:-4,max:10};
   const elevationRow=document.createElement('label');elevationRow.className='gunnery-elevation';
-  const elevationName=document.createElement('span');elevationName.textContent='Quoin elevation';
+  const elevationName=document.createElement('span');elevationName.textContent=bows?'Elevation':'Quoin elevation';
   const elevationInput=document.createElement('input');
   Object.assign(elevationInput,{type:'range',min:range.min,max:range.max,step:.5,value:gunnery.elevation??0,id:'guns-elevation'});
-  elevationInput.setAttribute('aria-label','Quoin elevation');
+  elevationInput.setAttribute('aria-label',bows?'Elevation':'Quoin elevation');
   const elevationOutput=document.createElement('output');elevationOutput.id='guns-elevation-value';
   const formatElevation=v=>`${v>0?'+':''}${Number(v).toFixed(1)}°`;
   elevationOutput.textContent=formatElevation(gunnery.elevation??0);
@@ -53,10 +58,11 @@ export function createGunneryControls(parent,gunnery){
   const tRange=gunnery.traverseRange??(gunnery.isSwivelBattery?{min:-45,max:45}:{min:-8,max:8});
   const traverseRow=document.createElement('label');traverseRow.className='gunnery-traverse';
   const traverseName=document.createElement('span');
-  traverseName.textContent=gunnery.isSwivelBattery?'Swivel traverse':'Gunport train';
+  const traverseLabel=bows?'Aim along the rail':gunnery.isSwivelBattery?'Swivel traverse':'Gunport train';
+  traverseName.textContent=traverseLabel;
   const traverseInput=document.createElement('input');
   Object.assign(traverseInput,{type:'range',min:tRange.min,max:tRange.max,step:gunnery.isSwivelBattery?1:.5,value:gunnery.traverse??0,id:'guns-traverse'});
-  traverseInput.setAttribute('aria-label',gunnery.isSwivelBattery?'Swivel traverse':'Gunport train');
+  traverseInput.setAttribute('aria-label',traverseLabel);
   const traverseOutput=document.createElement('output');traverseOutput.id='guns-traverse-value';
   const formatTraverse=v=>{
     const n=Number(v);
@@ -67,7 +73,7 @@ export function createGunneryControls(parent,gunnery){
   traverseInput.oninput=()=>{const v=gunnery.setTraverse?.(Number(traverseInput.value))??Number(traverseInput.value);traverseOutput.textContent=formatTraverse(v);update();};
   traverseRow.append(traverseName,traverseInput,traverseOutput);section.append(traverseRow);
   const trainTargetBtn=document.createElement('button');trainTargetBtn.id='guns-train-target';
-  trainTargetBtn.textContent=gunnery.isSwivelBattery?'Swivel onto target':'Train onto target';
+  trainTargetBtn.textContent=bows?'Aim at target':gunnery.isSwivelBattery?'Swivel onto target':'Train onto target';
   trainTargetBtn.title='Automatically swivel/train and elevate the battery toward the nearest target on the active side';
   trainTargetBtn.onclick=()=>{
     const res=gunnery.trainOnTarget?.(gunnery.selectedSide);
@@ -109,6 +115,10 @@ export function createGunneryControls(parent,gunnery){
       if(r.surrendered)extras.push('🏳️ STRUCK COLORS (SURRENDERED)');
       if(r.sunk)extras.push('Foundering');
       const extraText=extras.length?` · ${extras.join(', ')}`:'';
+      if(isArrowAmmo(r.ammo)){
+        const hurt=r.casualtiesKilled||r.casualtiesWounded?` · ${r.casualtiesKilled||0} killed, ${r.casualtiesWounded||0} wounded (${r.crewAble}/${r.crewTotal} able)`:'';
+        return `${r.ammo==='fire-arrow'?'Fire arrow':'Arrow'} struck ${r.hitZone==='crew'?`a hand aboard ${r.targetName}`:`${r.targetName} ${r.hitZone==='rigging'?'rigging':'hull'}`}${hurt}${r.fires?` · ${r.fires} fire${r.fires>1?'s':''} burning`:''}${r.surrendered?' · 🏳️ STRUCK COLORS (SURRENDERED)':''}`;
+      }
       const zone=r.hitZone==='rigging'?`${r.mastGroup||'main'} rigging${partLabel} (${Math.round(r.rigIntegrity*100)}% rig)`:`hull${partLabel} (${Math.round(r.hullIntegrity*100)}% hull${r.breaches?`, ${r.breaches} breach${r.breaches>1?'es':''}`:''})`;
       return `Struck ${r.targetName} ${zone} · ${r.energyKj} kJ${extraText}`;
     }
@@ -149,24 +159,26 @@ export function createGunneryControls(parent,gunnery){
       const s=gunnery.summary(r.side),ordered=gunnery.ordered===r.side;
       const rs=ordered?gunnery.rollStatus?.(r.side):null;
       const fmtDeg=v=>`${v>0?'+':''}${Number(v).toFixed(1)}°`;
-      const orderText=rs?.stage==='firing'?`As she bears · give fire! (${fmtDeg(rs.worldElevation)})`
+      const orderText=rs?.stage==='firing'?(bows?`Loose! (${fmtDeg(rs.worldElevation)})`:`As she bears · give fire! (${fmtDeg(rs.worldElevation)})`)
         :rs?.stage==='steady'?`Steady on the roll · ${fmtDeg(rs.worldElevation)} → ${fmtDeg(rs.targetElevation)}`
-        :rs?`Laying quoins (${fmtDeg(rs.targetElevation)}) · ready & steady`
-        :'Captain’s order · stand clear';
+        :rs?(bows?`Drawing (${fmtDeg(rs.targetElevation)})`:`Laying quoins (${fmtDeg(rs.targetElevation)}) · ready & steady`)
+        :bows?'Draw!':'Captain’s order · stand clear';
       const held=s.ready===s.total?gunnery.blockedReason(r.side):null;
-      const text=ordered?orderText:s.queued?`${s.queued} guns firing`:s.loading?`${s.ready}/${s.total} ready · ${s.loading} loading`:s.ready?`${s.ready}/${s.total} ready${held?' · '+held:''}`:s.spent?`${s.spent} discharged · prepare to reload`:`${s.total} guns secured`;
+      const stall=gunnery.stallReason?.(r.side)??null;
+      const lost=s.dismounted?` · ${s.dismounted} ${bows?'down':'dismounted'}`:'';
+      const text=ordered?orderText:s.queued?`${s.queued} ${bows?'arrows loosing':'guns firing'}`:(s.total===0&&stall)?stall:s.loading?`${s.ready}/${s.total} ready · ${s.loading} loading${stall?' · '+stall:''}${lost}`:s.ready?`${s.ready}/${s.total} ready${held?' · '+held:stall?' · '+stall:''}${lost}`:s.spent?`${s.spent} ${bows?'loosed':'discharged'} · ${stall??(bows?'nock again':'prepare to reload')}${lost}`:`${s.total} ${bows?'archers at ease':'guns secured'}${lost}`;
       if(r.status.textContent!==text)r.status.textContent=text;
       const canFull=gunnery.canFire(r.side);
       const canPartial=gunnery.canFireLoaded?.(r.side)??canFull;
       r.fire.disabled=!(canFull||canPartial);
       r.fireLoaded.disabled=!canPartial;
-      const loadedLabel=s.ready>0&&s.ready<s.total?`Fire loaded (${s.ready})`:'Fire loaded';
+      const loadedName=bows?'Loose ready':'Fire loaded',loadedLabel=s.ready>0&&s.ready<s.total?`${loadedName} (${s.ready})`:loadedName;
       if(r.fireLoaded.textContent!==loadedLabel)r.fireLoaded.textContent=loadedLabel;
       r.prepare.disabled=!!gunnery.ordered||!!s.queued||(s.ready+s.loading===s.total&&s.spent===0&&gunnery.selectedSide===r.side);
     }
     const faw=Boolean(gunnery.fireAtWill);
     fireAtWill.setAttribute('aria-pressed',String(faw));
-    const fawText=faw?`Fire at will: On (${gunnery.selectedSide||'port'})`:'Fire at will: Off';
+    const fawName=bows?'Loose at will':'Fire at will',fawText=faw?`${fawName}: On (${gunnery.selectedSide||'port'})`:`${fawName}: Off`;
     if(fireAtWill.textContent!==fawText)fireAtWill.textContent=fawText;
     const showArcs=gunnery.showTrajectory??true;
     aimArcsBtn.setAttribute('aria-pressed',String(showArcs));
@@ -181,7 +193,7 @@ export function createGunneryControls(parent,gunnery){
           ?'Shore / fort impact'
           :'Sea splash';
       const travTxt=Math.abs(aim.targetTraverse??0)>=0.5?` · ${formatTraverse(aim.targetTraverse)}`:'';
-      const aimText=`Ballistic aim (${aim.side}${travTxt}): ~${aim.rangeMeters} m · ${aim.flightSeconds}s flight · ${zoneLabel}`;
+      const aimText=`${bows?'Arrow arc':'Ballistic aim'} (${aim.side}${travTxt}): ~${aim.rangeMeters} m · ${aim.flightSeconds}s flight · ${zoneLabel}`;
       if(aimStatus.textContent!==aimText)aimStatus.textContent=aimText;
     }else{
       aimStatus.hidden=true;

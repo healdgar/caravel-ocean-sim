@@ -68,11 +68,16 @@ test('semantic groups name real triangle ranges, structure points and rig compon
 test('indexed model assets share one cached mesh with preserved group index ranges', () => {
   const cache = createShipAssetCache(), asset = cache.get();
   assert.equal(cache.get('nina'), asset); assert.equal(asset.model, requirePlayableShipModel('nina'));
-  assert.equal(sha(asset.vertices), NINA_MESH_BASELINE.indexed);
-  assert.equal(sha(asset.indices), NINA_MESH_BASELINE.indices);
   assert.ok(Object.isFrozen(asset) && Object.isFrozen(asset.groups) && Object.isFrozen(asset.groups[0]));
   const raw = createCaravelMesh();
+  // Her indexed model is frozen. Fracture only appends to it: shard copies and the cuts in her masts.
+  const indexed = indexCaravelMesh(raw);
+  assert.equal(sha(indexed.vertices), NINA_MESH_BASELINE.indexed);
+  assert.equal(sha(indexed.indices), NINA_MESH_BASELINE.indices);
+  assert.equal(sha(asset.vertices.subarray(0, indexed.vertices.length)), NINA_MESH_BASELINE.indexed, 'every original vertex keeps its bytes');
   for (const group of asset.groups) {
+    // Cut masts have new corners, and their cut pieces follow the original stream.
+    if (group.id.startsWith('mast.')) continue;
     // Indexing retains the original triangle stream, so a group's raw vertex
     // range is the exact drawIndexed range after deduplication.
     for (const i of [group.firstVertex, group.firstVertex + group.vertexCount - 1]) {

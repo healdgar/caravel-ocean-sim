@@ -1,8 +1,9 @@
 // Offline reference frozen from 379881a:js/anchor.js. Never imported by runtime.
-// Only the export name and relative import paths differ from that source.
+// Beyond the export name and relative import paths, its iron is now the baked anchor.
 import { ANCHOR_RENDER } from '../../js/wgsl/anchor.js';
 import { anchorFairlead, anchorRodePoints, anchorEquipment, anchorEyeOffset } from '../../js/anchor-state.js';
 import { boatRotate } from '../../js/boat.js';
+import { ANCHOR_IRON } from '../../js/anchor-iron.js';
 
 // One anchor, a 48-span hemp rode, and one short-lived impact splash. No new
 // textures, compute fields, readbacks, per-particle objects, or shadow maps.
@@ -66,16 +67,12 @@ export async function createAnchorCPUReference({device,frameUBO,transView,skyVie
         else{p[0]=c*x-s*z;p[1]=y;p[2]=s*x+c*z;}
         return p.map((n,i)=>n+[origin.x,origin.y,origin.z][i]);
       };
-      // Stocked wrought-iron anchor: shank, timber stock, curved arms and flukes.
-      tube(point(0,-.55,0),point(0,.56,0),.065,0,8);
-      tube(point(0,.42,-.77),point(0,.42,.77),.11,1,4);
-      for(const side of [-1,1]){
-        tube(point(0,-.52,0),point(side*.32,-.61,0),.065,0,6);
-        tube(point(side*.32,-.61,0),point(side*.61,-.28,0),.065,0,6);
-        const a=point(side*.46,-.43,-.18),b=point(side*.46,-.43,.18),tip=point(side*.67,-.16,0);
-        triangle(a,b,tip,0);triangle(point(side*.44,-.46,0),a,tip,0);triangle(b,point(side*.44,-.46,0),tip,0);
+      // The baked anchor, placed the way the GPU places it. Normals here are the bake's, turned to match.
+      for(let i=0;i<ANCHOR_IRON.length;i+=6){
+        const n=[0,0,0],nx=ANCHOR_IRON[i+3],ny=ANCHOR_IRON[i+4],nz=ANCHOR_IRON[i+5];
+        if(state.phase==='stowed')boatRotate(n,nx,ny,nz,angle,boat.pitch??0,boat.roll??0);else{n[0]=c*nx-s*nz;n[1]=ny;n[2]=s*nx+c*nz;}
+        add(point(ANCHOR_IRON[i],ANCHOR_IRON[i+1],ANCHOR_IRON[i+2]),n,0);
       }
-      for(let i=0;i<12;i++)tube(point(Math.cos(i*Math.PI/6)*.12,.65+Math.sin(i*Math.PI/6)*.12,0),point(Math.cos((i+1)*Math.PI/6)*.12,.65+Math.sin((i+1)*Math.PI/6)*.12,0),.025,0,4);
       shapeScale=1;
       const rope=anchorRodePoints(state,boat);
       for(let i=0;i<rope.length-1;i++)tube(Object.values(rope[i]),Object.values(rope[i+1]),equipment.rodeRadius,2,5);

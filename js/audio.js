@@ -29,7 +29,7 @@ export function createSceneAudio({onStatus=()=>{}}={}){
     const dx=position.x-listener.x,dz=position.z-listener.z,d=Math.hypot(dx,dz);
     pan.pan.value=weatherClamp((dx*listener.rx+dz*listener.rz)/Math.max(d,1),-1,1)*.85;
     const range=Math.hypot(dx,(position.y??position.heave??0)-listener.y,dz);
-    level.gain.value=weatherClamp(gain,0,1)*(spatial?1/(1+Math.max(0,range-8)/24):1);
+    level.gain.value=weatherClamp(gain,0,1)*(spatial?1/(1+Math.max(0,range-8)/(options.reach??24)):1);
     const filters=[];let tail=source;
     for(const[type,hz]of[['highpass',options.highpassHz],['lowpass',options.lowpassHz]])if(Number.isFinite(hz)){
       const filter=context.createBiquadFilter();filter.type=type;filter.frequency.value=hz;filter.Q.value=.6;tail.connect(filter);tail=filter;filters.push(filter);
@@ -231,7 +231,7 @@ export function createSceneAudio({onStatus=()=>{}}={}){
           play('timber-creak',.30,p,.82,true,{duration:.9});
           return true;
         case 'prize-disposition':
-          if(ev.choice==='scuttle-repair'){
+          if(ev.disposition==='scuttle-repair'){
             play('cannon-rammer',.36,p,1.28,true,{duration:.45});
             play('timber-creak',.34,p,1.35,true,{offset:.2,duration:.85});
             play('anchor-splash',.32,p,.88,true,{duration:1.4});

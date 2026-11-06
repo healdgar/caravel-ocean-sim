@@ -77,9 +77,15 @@ unused procedural canopy material; the local LiDAR/imagery importer now replaces
 the rendered Saba relief and appearance. Coastline/skirt and vegetation adaptations
 remain authored. No Google/Apple imagery, code or proprietary map data is incorporated.
 
+## Tripo crew assets
+
+`assets/crew/sailor.glb` and `assets/crew/sailor-female.glb` are characters generated with Tripo (tripo3d.ai)
+on paid API credits, then fitted to the Quaternius skeletons and clips below. Tripo's terms give paid users the rights to what they generate.
+The models in `assets/props/` were generated the same way.
+
 ## Quaternius crew assets
 
-The male and female sailors adapt Quaternius Universal Base Characters and Universal
+The classic male and female sailors adapt Quaternius Universal Base Characters and Universal
 Animation Library (animations credited to Quaternius and Gonzalo Furnier), under
 CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/.
 
@@ -201,6 +207,16 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## threejs-nanites cluster builder
+
+The offline tree cluster builder in `third_party/threejs-nanites/` comes from
+[threejs-nanites](https://github.com/VictorZakharov/threejs-nanites), Copyright
+(c) 2026 Victor Zakharov, MIT licence, with the local changes its README lists.
+It runs in `scripts/prepare-forest-clusters.mjs` and produces the data in
+`assets/forest-scenery/*/clusters/`. Its code is not part of the game's page, and
+neither three.js nor the rest of that library is used. The runtime in
+`js/forest-clusters.js` is original project code.
+
 ## Meshoptimizer forest transport
 
 The local forest decoder derives from meshoptimizer 1.3.0 by Arseny Kapoulkine.
@@ -232,3 +248,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## Anchor model
+
+`js/anchor-iron.js` and `third_party/sand3d-parts/old-rusted-anchor.py` derive from "Old rusted anchor" by trivial.cat (https://sketchfab.com/3d-models/abb9321ad29243228b4ea6dabc325db9), licensed CC BY 4.0, as rewritten into a sand3d program by Sandflow in the dataset sand3d-objaverse (https://huggingface.co/datasets/Sandflow/sand3d-objaverse, id `objaverse-abb9321ad29243228b4ea6dabc325db9`), licensed CC BY 4.0. Modified: reduced to a low-polygon mesh and placed in the game's anchor frame.

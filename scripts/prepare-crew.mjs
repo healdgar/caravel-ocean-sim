@@ -310,7 +310,7 @@ g.buffers=[{byteLength}];const bin=Buffer.concat(buffers);
 let json=Buffer.from(JSON.stringify(g));json=Buffer.concat([json,Buffer.alloc((4-json.length%4)%4,32)]);
 const header=Buffer.alloc(20);header.writeUInt32LE(0x46546c67,0);header.writeUInt32LE(2,4);header.writeUInt32LE(28+json.length+bin.length,8);header.writeUInt32LE(json.length,12);header.writeUInt32LE(0x4e4f534a,16);
 const bh=Buffer.alloc(8);bh.writeUInt32LE(bin.length,0);bh.writeUInt32LE(0x004e4942,4);
-const out=new URL('../assets/crew/'+(female?'sailor-female.glb':'sailor.glb'),import.meta.url);await fs.mkdir(new URL('../assets/crew/',import.meta.url),{recursive:true});
+const out=new URL('../assets/crew/'+(female?'sailor-female-classic.glb':'sailor-classic.glb'),import.meta.url);await fs.mkdir(new URL('../assets/crew/',import.meta.url),{recursive:true});
 const output=Buffer.concat([header,json,bh,bin]);await fs.writeFile(out,output);
 console.log(female?'Female sailor GLB:':'Male sailor GLB:',output.length,'bytes;',g.animations.map(a=>a.name).join(', '));
 }

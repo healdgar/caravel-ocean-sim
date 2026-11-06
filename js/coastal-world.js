@@ -4,6 +4,8 @@
 // vegetation, and modular 16th-century port prefabs within several kilometres
 // of shore for curated 1550s Caribbean ports or any global (lat, lon) landfall.
 
+import { layTownStreets, streetEdgeAt } from './town-streets.js';
+import { layPortProps } from './port-props.js';
 import {
   terrainSample,
   terrainSurfaceSample,
@@ -511,7 +513,7 @@ export const HISTORICAL_COLONIAL_PORTS = Object.freeze([
   Object.freeze({ id: 'portobelo', name: 'San Felipe de Portobelo', latitude: 9.555, longitude: -79.654, shoreBearing: 75, coastalArchetype: 'sheltered-bay', foundedYear: 1597, fortProgramYear: 1597, crown: 'spain', baseTier: 3 }),
   // Early 17th-century foundations (1600–1639)
   Object.freeze({ id: 'jamestown', name: 'Jamestown · Virginia', latitude: 37.208, longitude: -76.778, shoreBearing: 30, coastalArchetype: 'river-mouth', foundedYear: 1607, fortProgramYear: 1665, crown: 'england', baseTier: 2 }),
-  Object.freeze({ id: 'quebec', name: 'Québec · Stadacona', latitude: 46.813, longitude: -71.202, shoreBearing: 320, coastalArchetype: 'river-mouth', foundedYear: 1608, fortProgramYear: 1660, crown: 'france', baseTier: 2 }),
+  Object.freeze({ id: 'quebec', name: 'Québec · Stadacona', latitude: 46.813, longitude: -71.202, shoreBearing: 320, pilotDrop: Object.freeze({ latitude: 48, longitude: -62.5 }), coastalArchetype: 'river-mouth', foundedYear: 1608, fortProgramYear: 1660, crown: 'france', baseTier: 2 }),
   Object.freeze({ id: 'bermuda', name: "St. George's · Bermuda", latitude: 32.381, longitude: -64.678, shoreBearing: 310, coastalArchetype: 'harbor-channel', foundedYear: 1612, fortProgramYear: 1620, crown: 'england', baseTier: 2 }),
   Object.freeze({ id: 'batavia', name: 'Batavia · Sunda Kelapa', latitude: -6.127, longitude: 106.812, shoreBearing: 185, coastalArchetype: 'estuary-bay', foundedYear: 1619, fortProgramYear: 1627, crown: 'netherlands', baseTier: 3 }),
   Object.freeze({ id: 'plymouth-colony', name: 'Plymouth Colony · New England', latitude: 41.958, longitude: -70.662, shoreBearing: 255, coastalArchetype: 'sheltered-bay', foundedYear: 1620, crown: 'england', baseTier: 2 }),
@@ -1699,6 +1701,40 @@ const OVER_WATER_PREFAB_IDS = new Set([
   'stone_arch_bridge',
 ]);
 
+// What each prefab must stand on. Anything not named stands wholly on dry land.
+const PREFAB_SITE_NEEDS = Object.freeze({
+  // Works at the water's edge, with their feet in the shallows.
+  careening_shed: 'shore',
+  astillero_and_moored_hull: 'shore',
+  thatched_bohio_palafito: 'shore',
+  indigenous_canoe_landing: 'beach',
+  palafito_estuary_village: 'shore',
+  // Sea defences may overhang the water, but their middle and most of their floor are on land.
+  stone_sea_bastion: 'waterline',
+  torreon_atalaya_farol: 'waterline',
+  timber_mole_pier: 'pier',
+  stone_arch_bridge: 'bridge',
+  stone_quay_seawall: 'quay',
+  // A ring walls round the settlement rather than standing on one spot of it.
+  english_triangular_palisade_fort: 'free',
+  indigenous_palisade_ring: 'free',
+});
+const FOOTPRINT_SAMPLES = Object.freeze([-1, -0.5, 0, 0.5, 1]);
+// Nothing grows on a way, and a tree stands a little off it.
+export const PLANT_STREET_GAP_M = 3;
+// Room for a street between neighbours.
+const BUILDING_STREET_GAP_M = 5;
+const PREFAB_DRY_GROUND_M = 0.6;
+const PREFAB_MOST_RISE_M = 11;
+const SHORE_WORKS_LOWEST_M = -0.7;
+const SHORE_WORKS_HIGHEST_M = 3.2;
+const PREFAB_SITE_STEP_M = 6;
+const PREFAB_SITE_REACH_M = 300;
+const PIER_ROOT_LOWEST_M = 0.1;
+const PIER_ROOT_HIGHEST_M = 4;
+const PIER_HEAD_HIGHEST_M = -1;
+const PIER_MOST_SLIDE_M = 240;
+
 export function syncPortInstancesToTerrain(portOrInstances, heights, region, { gradePads = false } = {}) {
   const instances = Array.isArray(portOrInstances) ? portOrInstances : portOrInstances?.instances;
   if (!Array.isArray(instances) || !heights || !region) return instances;
@@ -2041,16 +2077,11 @@ export function classifyKoppenClimateFromNormals({
       climateZone === 'arid'
         ? 0.50
         : Math.max(0.14, Math.min(0.42, 0.24 + 0.14 * drySeasonIntensity - 0.08 * moistureNorm));
-    const mangroveUplandShare =
-      climateZone === 'arid'
-        ? 0.16
-        : Math.max(0.10, Math.min(0.22, 0.11 + 0.05 * humidityNorm + 0.03 * moistureNorm));
-
+    // Mangroves stand on prop roots in tidal mud, so they keep to the strand and lagoons.
     uplandForestWeights = normalizeSpeciesWeights({
       royal_palm: royalPalmShare,
       palm: coconutPalmShare,
       ceiba: ceibaShare,
-      mangrove: mangroveUplandShare,
     });
     coastalStrandWeights = normalizeSpeciesWeights({
       palm: 0.52 + 0.08 * drySeasonIntensity,
@@ -3883,7 +3914,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
   const obbOverlapsExisting = (cx, cz, cyaw, cw, cl, prefabId) => {
     if (ENCLOSING_RING_PREFABS.has(prefabId) || prefabId === 'timber_mole_pier') return false;
     const cA = Math.cos(cyaw), sA = Math.sin(cyaw);
-    const hwA = cw * 0.5 + 1.0, hlA = cl * 0.5 + 1.0;
+    const hwA = cw * 0.5 + BUILDING_STREET_GAP_M * 0.5, hlA = cl * 0.5 + BUILDING_STREET_GAP_M * 0.5;
     const cornersA = [
       [cx - hwA * cA - hlA * sA, cz + hwA * sA - hlA * cA],
       [cx + hwA * cA - hlA * sA, cz - hwA * sA - hlA * cA],
@@ -3894,7 +3925,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       if (ENCLOSING_RING_PREFABS.has(other.prefabId)) continue;
       if (other.prefabId === 'timber_mole_pier' && prefabId === 'stone_quay_seawall') continue;
       const cB = Math.cos(other.yaw), sB = Math.sin(other.yaw);
-      const hwB = other.width * 0.5 + 1.0, hlB = other.length * 0.5 + 1.0;
+      const hwB = other.width * 0.5 + BUILDING_STREET_GAP_M * 0.5, hlB = other.length * 0.5 + BUILDING_STREET_GAP_M * 0.5;
       if (Math.hypot(cx - other.x, cz - other.z) > Math.hypot(hwA, hlA) + Math.hypot(hwB, hlB)) continue;
       const cornersB = [
         [other.x - hwB * cB - hlB * sB, other.z + hwB * sB - hlB * cB],
@@ -3917,48 +3948,106 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     }
     return false;
   };
+  // The layout below is written against a straight shore, and real coasts curve. So each prefab says
+  // what it must stand on, and takes the nearest place that gives it that. One with no such place
+  // nearby is left out rather than built on the seabed.
+  const groundUnder = (x, z, yaw, width, length, a, b) => {
+    const lx = a * width * 0.5, lz = b * length * 0.5;
+    return terrainSurfaceSample(heights, x + lx * Math.cos(yaw) + lz * Math.sin(yaw), z - lx * Math.sin(yaw) + lz * Math.cos(yaw), region);
+  };
+  const footprintShare = (x, z, yaw, width, length, level) => {
+    let above = 0;
+    for (const a of FOOTPRINT_SAMPLES) for (const b of FOOTPRINT_SAMPLES) if (groundUnder(x, z, yaw, width, length, a, b) >= level) above++;
+    return above / (FOOTPRINT_SAMPLES.length * FOOTPRINT_SAMPLES.length);
+  };
+  const footprintRise = (x, z, yaw, width, length) => {
+    let low = Infinity, high = -Infinity;
+    for (const a of FOOTPRINT_SAMPLES) for (const b of FOOTPRINT_SAMPLES) {
+      const h = groundUnder(x, z, yaw, width, length, a, b);
+      if (h < low) low = h;
+      if (h > high) high = h;
+    }
+    return high - low;
+  };
+  const siteSuits = (need, x, z, yaw, width, length) => {
+    if (need === 'quay') {
+      const h = terrainSurfaceSample(heights, x, z, region);
+      return h >= SHORE_WORKS_LOWEST_M - 1 && h <= SHORE_WORKS_HIGHEST_M;
+    }
+    if (need === 'beach') {
+      const h = terrainSurfaceSample(heights, x, z, region);
+      return h >= 0.25 && h <= SHORE_WORKS_HIGHEST_M && footprintShare(x, z, yaw, width, length, -0.1) >= 0.8;
+    }
+    if (need === 'shore') {
+      const h = terrainSurfaceSample(heights, x, z, region);
+      return h >= SHORE_WORKS_LOWEST_M && h <= SHORE_WORKS_HIGHEST_M && footprintShare(x, z, yaw, width, length, SHORE_WORKS_LOWEST_M - 0.6) >= 0.75;
+    }
+    if (need === 'waterline') {
+      return terrainSurfaceSample(heights, x, z, region) >= PREFAB_DRY_GROUND_M && footprintShare(x, z, yaw, width, length, PREFAB_DRY_GROUND_M) >= 0.55;
+    }
+    return terrainSurfaceSample(heights, x, z, region) >= PREFAB_DRY_GROUND_M &&
+      footprintShare(x, z, yaw, width, length, PREFAB_DRY_GROUND_M) === 1 &&
+      footprintRise(x, z, yaw, width, length) <= PREFAB_MOST_RISE_M;
+  };
+  // A pier keeps its heading and slides along it until its root is on the shore and its head in water.
+  const pierSite = (wanted, yaw, length) => {
+    const axisX = Math.sin(yaw), axisZ = Math.cos(yaw), half = length * 0.5;
+    const endAt = (slide, end) => terrainSurfaceSample(heights, wanted.x + axisX * (slide + end * half), wanted.z + axisZ * (slide + end * half), region);
+    for (let distance = 0; distance <= PIER_MOST_SLIDE_M; distance += 3) {
+      for (const slide of distance ? [distance, -distance] : [0]) {
+        const a = endAt(slide, 1), b = endAt(slide, -1);
+        const root = Math.max(a, b), head = Math.min(a, b);
+        if (root >= PIER_ROOT_LOWEST_M && root <= PIER_ROOT_HIGHEST_M && head <= PIER_HEAD_HIGHEST_M) {
+          return { x: wanted.x + axisX * slide, z: wanted.z + axisZ * slide };
+        }
+      }
+    }
+    return null;
+  };
+  // A bridge needs a bank at each end and water, or at least a low place, between them.
+  const bridgeSuits = (x, z, yaw, length) => {
+    const axisX = Math.sin(yaw) * length * 0.5, axisZ = Math.cos(yaw) * length * 0.5;
+    return terrainSurfaceSample(heights, x + axisX, z + axisZ, region) >= PREFAB_DRY_GROUND_M &&
+      terrainSurfaceSample(heights, x - axisX, z - axisZ, region) >= PREFAB_DRY_GROUND_M &&
+      terrainSurfaceSample(heights, x, z, region) <= 0.2;
+  };
+  const prefabSiteNeed = (prefabId) => PREFAB_SITE_NEEDS[prefabId] ?? 'land';
+  function findPrefabSite(prefabId, wanted, yaw, width, length) {
+    const need = prefabSiteNeed(prefabId);
+    if (need === 'free') return wanted;
+    if (need === 'pier') return pierSite(wanted, yaw, length);
+    const suits = need === 'bridge'
+      ? (x, z) => bridgeSuits(x, z, yaw, length)
+      : (x, z) => siteSuits(need, x, z, yaw, width, length);
+    const open = (x, z) => need === 'quay' || !obbOverlapsExisting(x, z, yaw, width, length, prefabId);
+    if (suits(wanted.x, wanted.z) && open(wanted.x, wanted.z)) return { x: wanted.x, z: wanted.z };
+    // Rings out from the wanted spot, starting on the landward side so ties go inland.
+    const landward = (region.shoreBearing ?? 112) * COASTAL_DEG_TO_RAD;
+    for (let radius = PREFAB_SITE_STEP_M; radius <= PREFAB_SITE_REACH_M; radius += PREFAB_SITE_STEP_M) {
+      const spots = Math.max(8, Math.round((2 * Math.PI * radius) / PREFAB_SITE_STEP_M));
+      for (let spot = 0; spot < spots; spot++) {
+        const turn = Math.ceil(spot / 2) * (spot % 2 ? 1 : -1) * ((2 * Math.PI) / spots);
+        const x = wanted.x + Math.sin(landward + turn) * radius;
+        const z = wanted.z - Math.cos(landward + turn) * radius;
+        if (suits(x, z) && open(x, z)) return { x, z };
+      }
+    }
+    return null;
+  }
   const addPrefab = (prefabId, alongOffset, inlandOffset, yawOffsetDeg = 0, minElevation = null, overrides = null) => {
     const cairnSpec = overrides?.cairnSpec ?? CAIRN_ARCHITECTURAL_TEMPLATES[prefabId] ?? null;
     const prefab = PORT_PREFABS[prefabId] ?? cairnSpec;
     const instLength = overrides?.length ?? prefab?.length ?? 24;
     const instWidth = overrides?.width ?? prefab?.width ?? 18;
     const yaw = bearingRad + yawOffsetDeg * COASTAL_DEG_TO_RAD;
-    let adjAlong = alongOffset;
-    let adjInland = inlandOffset;
-    let pos = worldFromCoastalFrame(region, bestShoreAlong + adjAlong, bestShoreInland + adjInland);
-    let groundY = terrainSurfaceSample(heights, pos.x, pos.z, region);
-    if (!OVER_WATER_PREFAB_IDS.has(prefabId) && overrides?.exactY === undefined) {
-      const minGroundTarget = prefabId === 'indigenous_canoe_landing' ? 0.18 : 0.55;
-      for (let stepIn = 0; stepIn < 12 && groundY < minGroundTarget; stepIn++) {
-        adjInland += 4;
-        pos = worldFromCoastalFrame(region, bestShoreAlong + adjAlong, bestShoreInland + adjInland);
-        groundY = terrainSurfaceSample(heights, pos.x, pos.z, region);
-      }
-    }
-    if (prefabId !== 'stone_quay_seawall' && obbOverlapsExisting(pos.x, pos.z, yaw, instWidth, instLength, prefabId)) {
-      const alongDir = adjAlong < 0 ? -1 : 1;
-      for (let nudge = 1; nudge <= 14; nudge++) {
-        const candInland = adjInland + nudge * 5;
-        const candPos1 = worldFromCoastalFrame(region, bestShoreAlong + adjAlong, bestShoreInland + candInland);
-        if (!obbOverlapsExisting(candPos1.x, candPos1.z, yaw, instWidth, instLength, prefabId)) {
-          adjInland = candInland;
-          pos = candPos1;
-          groundY = terrainSurfaceSample(heights, pos.x, pos.z, region);
-          break;
-        }
-        const candAlong = adjAlong + alongDir * nudge * 7;
-        const candPos2 = worldFromCoastalFrame(region, bestShoreAlong + candAlong, bestShoreInland + adjInland);
-        if (
-          terrainSurfaceSample(heights, candPos2.x, candPos2.z, region) >= 0.45 &&
-          !obbOverlapsExisting(candPos2.x, candPos2.z, yaw, instWidth, instLength, prefabId)
-        ) {
-          adjAlong = candAlong;
-          pos = candPos2;
-          groundY = terrainSurfaceSample(heights, pos.x, pos.z, region);
-          break;
-        }
-      }
-    }
+    const wanted = worldFromCoastalFrame(region, bestShoreAlong + alongOffset, bestShoreInland + inlandOffset);
+    // Hand-set works, such as Lisbon's dredged basin and its quays, keep the place they were given.
+    const site = overrides?.exactY !== undefined
+      ? wanted
+      : findPrefabSite(prefabId, wanted, yaw, instWidth, instLength);
+    if (!site) return;
+    const pos = site;
+    const groundY = terrainSurfaceSample(heights, pos.x, pos.z, region);
     const y = overrides?.exactY !== undefined
       ? overrides.exactY
       : prefabId === 'stone_quay_seawall'
@@ -7389,85 +7478,8 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     flushSection();
   }
 
-  // 2-tier 3D Corner-model Palms (Cocos nucifera coconut palms on foreshore + Roystonea regia royal palms & Sabal palmetto in lowland/inland canopy)
-  if (palms instanceof Float32Array && palms.length >= 8) {
-    portPlacement.palms = palms;
-    activeInstIndex = portPlacement.instances.length;
-    activePrefabId = 'palm_grove';
-    activeInstTag = 'palms';
-    instPartCounters.clear();
-    currentSectionKey = null;
-    sectionStart = indices.length;
-    beginSection('palm_canopy_grove');
-    const maxPalms = Math.min(palms.length / 8, 520);
-    const seawardRad = ((portPlacement.shoreBearing ?? 112) + 180) * COASTAL_DEG_TO_RAD;
-    const defaultSeaX = Math.sin(seawardRad);
-    const defaultSeaZ = -Math.cos(seawardRad);
-    for (let idx = 0; idx < maxPalms; idx++) {
-      const base = idx * 8;
-      const px = palms[base], py = palms[base + 1], pz = palms[base + 2];
-      const plumeR = palms[base + 3], ht = palms[base + 4], shape = palms[base + 5];
-      const psx = palms[base + 6] || 0, psz = palms[base + 7] || 0;
-      const gradLen = Math.hypot(psx, psz);
-      // Lean seaward down the local beach slope (-sx, -sz) when available; inland royal/sabal palms stand more upright
-      const seaX = gradLen > 0.008 ? -psx / gradLen : defaultSeaX;
-      const seaZ = gradLen > 0.008 ? -psz / gradLen : defaultSeaZ;
-      const azSpread = (shape - 0.5) * 1.15;
-      const leanAngle = Math.atan2(seaZ, seaX) + azSpread;
-      const leanDirX = Math.cos(leanAngle), leanDirZ = Math.sin(leanAngle);
-      const isForeshore = py < 9.5;
-      const leanMag = isForeshore ? 2.1 + ((shape * 7) % 1) * 2.2 : 0.55 + ((shape * 7) % 1) * 0.85;
-      // Tier 0 (first 160 palms): 5-segment curved trunk + 12 arching fronds; Tier 1 (palms 160..520): 3-segment trunk + 6 arching fronds
-      const isNearTier = idx < 160;
-      const segs = isNearTier ? 5 : 3;
-      let prevX = px, prevY = py - 0.35, prevZ = pz, prevR = 0.42;
-      for (let s = 1; s <= segs; s++) {
-        const t = s / segs;
-        const curY = py + t * ht;
-        // Phototropic S-curve: leans strongly seaward near base/mid-trunk, then rights toward crown
-        const curve = (1.35 * t - 0.35 * t * t) * leanMag;
-        const curX = px + leanDirX * curve;
-        const curZ = pz + leanDirZ * curve;
-        const curR = 0.38 * (1 - 0.58 * t);
-        // 4-sided trunk prism segment (kind = 3.0 bark)
-        for (let k = 0; k < 4; k++) {
-          const a0 = (k * Math.PI) / 2, a1 = ((k + 1) * Math.PI) / 2;
-          const c0 = Math.cos(a0), s0 = Math.sin(a0), c1 = Math.cos(a1), s1 = Math.sin(a1);
-          pushQuad(
-            [prevX + c0 * prevR, prevY, prevZ + s0 * prevR],
-            [prevX + c1 * prevR, prevY, prevZ + s1 * prevR],
-            [curX + c1 * curR, curY, curZ + s1 * curR],
-            [curX + c0 * curR, curY, curZ + s0 * curR],
-            3,
-            0.45 + 0.45 * t
-          );
-        }
-        prevX = curX; prevY = curY; prevZ = curZ; prevR = curR;
-      }
-      // Arching pinnate fronds radiating from the crownshaft (kind = 4.0 tropical foliage)
-      const frondCount = isNearTier ? 12 : 6;
-      const halfFronds = frondCount >> 1;
-      for (let f = 0; f < frondCount; f++) {
-        const tier = f < halfFronds ? 0 : 1;
-        const az = (f / frondCount) * Math.PI * 2 + shape * 3.1;
-        const fx = Math.cos(az), fz = Math.sin(az);
-        const tx = -fz, tz = fx;
-        const len = plumeR * (tier === 0 ? 1.12 : 0.92);
-        const midR = len * 0.55;
-        const midY = prevY + (tier === 0 ? 0.95 : 1.65);
-        const tipY = prevY - (tier === 0 ? 1.35 : 0.35);
-        const w = isNearTier ? 0.62 : 0.78;
-        const rootP = [prevX, prevY + 0.15, prevZ];
-        const midLeft = [prevX + fx * midR - tx * w, midY, prevZ + fz * midR - tz * w];
-        const midRight = [prevX + fx * midR + tx * w, midY, prevZ + fz * midR + tz * w];
-        const tipP = [prevX + fx * len, tipY, prevZ + fz * len];
-        const exposure = tier === 0 ? 0.72 : 0.92;
-        pushTri(rootP, midRight, midLeft, 4, exposure);
-        pushTri(midLeft, midRight, tipP, 4, exposure);
-      }
-    }
-    flushSection();
-  }
+  // Foreshore palms are drawn by the forest, which seeds real palms at these places. Shot still strikes them here.
+  if (palms instanceof Float32Array && palms.length >= 8) portPlacement.palms = palms;
 
   const outVertices = new Float32Array(verts);
   const outIndices = new Uint32Array(indices);
@@ -7971,7 +7983,8 @@ export function seedCoastalVegetation(
         (!portPlacement.hasOrthophotoFootprints &&
           !portPlacement.hasIndigenousSettlement &&
           distPort < portPlacement.clearRadius * 0.68) ||
-        !portClearanceEnvelope(portPlacement, x, z, hullMargin)
+        !portClearanceEnvelope(portPlacement, x, z, hullMargin) ||
+        streetEdgeAt(portPlacement.streets, x, z) < PLANT_STREET_GAP_M
       ) {
         continue;
       }
@@ -8713,6 +8726,8 @@ function finalizeProceduralCoastalPack(
       taperOuterBorders: Boolean(pack.taperOuterBorders),
     });
     syncPortInstancesToTerrain(port, heights, region, { gradePads: !port?.hasOrthoFootprints });
+    port.streets = layTownStreets(port, (x, z) => terrainSurfaceSample(heights, x, z, region));
+    port.props = layPortProps(port, (x, z) => terrainSurfaceSample(heights, x, z, region));
   }
   const shoreDist = computeCoastalShoreDistances(heights, region.size, region.span, 0.25);
   const beaches = synthesizeCoastalBeaches(region, heights, satelliteData, shoreDist, {

@@ -2,6 +2,7 @@
 // Offline fixtures. The root validator executes these; authoring does not.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {existsSync} from 'node:fs';
 import {mkdtemp,mkdir,readFile,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -13,6 +14,10 @@ const STRIDE=52,SPECIES=['oak','maple','birch','elm','chestnut'];
 const TOOLS=process.env.FOREST_MESHOPT_PACKAGE??'/tmp/waterworld-meshopt-tools/node_modules/meshoptimizer';
 const ENCODER_SHA='22c128be3e22b187e2d2661882fc62f51e995f409c0fe14c9f6358cfbaff1611';
 const tools=()=>loadMiddleTools(TOOLS);
+// The offline authoring tool is deliberately outside package.json. A requested
+// FOREST_MESHOPT_PACKAGE that is missing still fails; only the unset default skips.
+const TOOLS_SKIP=process.env.FOREST_MESHOPT_PACKAGE||existsSync(join(TOOLS,'package.json'))?false:
+ 'pinned meshoptimizer 1.3.0 absent at '+TOOLS+'; install with `npm install --prefix /tmp/waterworld-meshopt-tools --no-save --ignore-scripts meshoptimizer@1.3.0` or set FOREST_MESHOPT_PACKAGE';
 const floats=values=>{const out=Buffer.alloc(values.length*4);values.forEach((x,i)=>out.writeFloatLE(x,i*4));return out;};
 const uints=values=>{const out=Buffer.alloc(values.length*4);values.forEach((x,i)=>out.writeUInt32LE(x,i*4));return out;};
 const receipt=(text)=>middleReceipt(Buffer.from(text));
@@ -65,7 +70,7 @@ async function saveFixture(folder,f,{gzip=false,meshopt=false}={}){
 
 function outputRows(raw){const set=new Set();for(let at=0;at<raw.length;at+=STRIDE)set.add(raw.subarray(at,at+STRIDE).toString('hex'));return set;}
 
-test('real pinned simplifier retains exact native records, partitions parts and reports bounded error',async()=>{
+test('real pinned simplifier retains exact native records, partitions parts and reports bounded error',{skip:TOOLS_SKIP},async()=>{
  const temp=await mkdtemp(join(tmpdir(),'forest-middle-fixture-'));
  try{
   const f=fixture(),source=join(temp,'source'),output=join(temp,'reduced');await saveFixture(source,f,{gzip:true});
@@ -105,7 +110,7 @@ test('real pinned simplifier retains exact native records, partitions parts and 
  }finally{await rm(temp,{recursive:true,force:true});}
 });
 
-test('field leaf profile omits only resampled shading attributes and retains exact shape records',async()=>{
+test('field leaf profile omits only resampled shading attributes and retains exact shape records',{skip:TOOLS_SKIP},async()=>{
  const temp=await mkdtemp(join(tmpdir(),'forest-middle-field-'));
  try{
   const f=fixture(),source=join(temp,'source'),output=join(temp,'reduced');await saveFixture(source,f);
@@ -140,7 +145,7 @@ test('field profile passes zero weights without weakening the geometric cap or c
   {targetTriangles:1,errorMetres:.35,shadingProfile:'field'}),/exceeds requested metres/);
 });
 
-test('raw and meshopt+gzip inputs decode to identical original middle bytes',async()=>{
+test('raw and meshopt+gzip inputs decode to identical original middle bytes',{skip:TOOLS_SKIP},async()=>{
  const temp=await mkdtemp(join(tmpdir(),'forest-middle-codec-'));
  try{
   const f=fixture(),tool=await tools();
@@ -172,7 +177,7 @@ test('tool error and mutation never override the source records or metre cap',()
  assert.deepEqual(f.vertices,original,'rejected tools changed source buffer');
 });
 
-test('corrupt encoded or decoded source receipts fail before publishing output',async()=>{
+test('corrupt encoded or decoded source receipts fail before publishing output',{skip:TOOLS_SKIP},async()=>{
  const temp=await mkdtemp(join(tmpdir(),'forest-middle-receipts-'));
  try{
   const f=fixture(),tool=await tools(),folder=join(temp,'source'),m=await saveFixture(folder,f,{gzip:true});

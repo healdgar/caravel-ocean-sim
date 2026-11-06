@@ -97,6 +97,23 @@ export function apparentWind(out, heading, speed, sideways, windSpeed, windDirec
   return out;
 }
 
+// Canvas a mast can carry: integrity, reduced to 42% when sprung and nil once shot away.
+export function sailMastCap(boat, i) {
+  const group = ['fore', 'main', 'mizzen'][i];
+  const integrity = boat.damage?.sunk ? 0 : sailClamp(boat.damage?.mastIntegrity?.[group] ?? 1, 0, 1);
+  const state = boat.damage?.mastState?.[group] ?? 0;
+  return integrity * (state >= 2 ? 0 : state === 1 ? 0.42 : 1);
+}
+// Setting the canvas settles at for a requested order; a damaged spar also spreads it poorly.
+export function sailCanvasTarget(boat, i, requested = boat[SAIL_KEYS[i]] ?? 1) {
+  const cap = sailMastCap(boat, i);
+  return Math.min(sailClamp(requested, 0, 1), cap) * (0.25 + 0.75 * cap);
+}
+// Canvas above a damaged mast's limit carries away at once, without any hand on a line.
+export function sailLosingCanvas(boat, i, set) {
+  return (Boolean(boat.damage?.sunk) || sailMastCap(boat, i) < 1 - 1e-4) && set > sailCanvasTarget(boat, i) + 1e-4;
+}
+
 export function advanceSails(boat, dt, windSpeed, windDirection) {
   const s = sailingState(boat);
   apparentWind(s, boat.heading, boat.surgeVelocity ?? 0, boat.leewayVelocity ?? 0, windSpeed, windDirection);
@@ -107,19 +124,12 @@ export function advanceSails(boat, dt, windSpeed, windDirection) {
     const squares=s.geometry.design.surfaces.filter(p=>p.kind==='square'),limit=squares.length?Math.max(...squares.map(p=>p.braceLimit??Math.PI/3)):0;
     s.squareTarget=sailClamp(s.squareTarget,-limit,limit);
   }
-  const mastGroups = ['fore', 'main', 'mizzen'];
   for (let i = 0; i < 3; i++) {
-    const mGroup = mastGroups[i];
-    const mastInt = boat.damage?.sunk ? 0 : sailClamp(boat.damage?.mastIntegrity?.[mGroup] ?? 1, 0, 1);
-    const mState = boat.damage?.mastState?.[mGroup] ?? 0;
-    const stateCap = mState >= 2 ? 0 : mState === 1 ? 0.42 : 1;
-    const mastCap = mastInt * stateCap;
+    const mastCap = sailMastCap(boat, i);
     const key = SAIL_KEYS[i];
     if (mastCap < 1 && typeof boat[key] === 'number' && boat[key] > mastCap) boat[key] = mastCap;
-    const requested = sailClamp(boat[key] ?? 1, 0, 1);
-    const targetSet = Math.min(requested, mastCap) * (0.25 + 0.75 * mastCap);
-    const losingCanvas = (boat.damage?.sunk || mastCap < 1 - 1e-4) && s.set[i] > targetSet + 1e-4;
-    const rate = losingCanvas ? (boat.damage?.sunk ? 0.85 : 1.8) : 0.18 * (boat.crewSailRate?.[i] ?? 1);
+    const targetSet = sailCanvasTarget(boat, i);
+    const rate = sailLosingCanvas(boat, i, s.set[i]) ? (boat.damage?.sunk ? 0.85 : 1.8) : 0.18 * (boat.crewSailRate?.[i] ?? 1);
     s.set[i] += sailClamp(targetSet - s.set[i], -dt * rate, dt * rate);
   }
   // Yards and lateen take time to brace/tack; forces use this actual trim.

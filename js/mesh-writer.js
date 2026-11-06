@@ -2,7 +2,12 @@
 // Shared nine-float construction primitives. The Victory projection preset
 // preserves its original normals, UVs, winding and triangle ordering exactly.
 // Geometry and semantic attachments remain owned by each ship builder.
-export function createMeshWriter({groups,parts}={}){
+//
+// grain is optional and sets oak repeats per design unit: {across,along,spar}.
+// Flat faces then run their grain along the timber, and spars along their axis.
+// The texture repeats far too often without it, which fades the wood to a flat
+// pale average at any distance. Ships that do not pass it keep their exact bytes.
+export function createMeshWriter({groups,parts,grain=null}={}){
   const out=[];
   const add=(a,b)=>a.map((x,i)=>x+b[i]),sub=(a,b)=>a.map((x,i)=>x-b[i]),mul=(a,s)=>a.map(x=>x*s);
   const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
@@ -18,7 +23,9 @@ export function createMeshWriter({groups,parts}={}){
     const n=unit(axis);
     if(ns&&n.reduce((s,x,i)=>s+x*ns[0][i],0)<0){[b,c]=[c,b];ns=[ns[0],ns[2],ns[1]];if(uv)uv=[uv[0],uv[2],uv[1]];}
     for(const [i,p]of [a,b,c].entries()){
-      const t=uv?.[i]??(Math.abs(n[1])>.65?[p[0]*5,p[2]*2]:[p[1]*5,p[2]*2]);
+      const t=uv?.[i]??(grain
+        ?Math.abs(n[1])>.65?[p[0]*grain.across,p[2]*grain.along]:Math.abs(n[0])>Math.abs(n[2])?[p[1]*grain.across,p[2]*grain.along]:[p[1]*grain.across,p[0]*grain.along]
+        :Math.abs(n[1])>.65?[p[0]*5,p[2]*2]:[p[1]*5,p[2]*2]);
       out.push(...p,...(ns?.[i]??n),m,...t);
     }
   }
@@ -36,8 +43,11 @@ export function createMeshWriter({groups,parts}={}){
     const axis=unit(sub(b,a)),u=unit(cross(axis,Math.abs(axis[1])<.9?[0,1,0]:[1,0,0])),v=cross(axis,u);
     const n=i=>add(mul(u,Math.cos(i*2*Math.PI/sides)),mul(v,Math.sin(i*2*Math.PI/sides)));
     const pa=(i,end)=>add(end?b:a,mul(n(i),end?r2:r));
+    const length=Math.hypot(...sub(b,a));
     for(let i=0;i<sides;i++){
-      const j=i+1,na=n(i),nb=n(j),uv=uvEnds?[uvEnds[0],uvEnds[1],uvEnds[1],uvEnds[0]]:undefined;
+      const j=i+1,na=n(i),nb=n(j);
+      const uv=uvEnds?[uvEnds[0],uvEnds[1],uvEnds[1],uvEnds[0]]
+        :grain?[[i/sides*.7,0],[i/sides*.7,length*grain.spar],[j/sides*.7,length*grain.spar],[j/sides*.7,0]]:undefined;
       quad(pa(i,0),pa(i,1),pa(j,1),pa(j,0),m,[na,na,nb,nb],uv);
       if(!open)tri(a,pa(j,0),pa(i,0),m,null,uvEnds?[uvEnds[0],uvEnds[0],uvEnds[0]]:undefined);
       if(!open)tri(b,pa(i,1),pa(j,1),m,null,uvEnds?[uvEnds[1],uvEnds[1],uvEnds[1]]:undefined);

@@ -31,8 +31,10 @@ export function additionalRigContext(id){
   };
   const anchorCathead=side=>{
     if(side!==-1&&side!==1)throw Error('Anchor side must be port or starboard');
-    const z=-4.8,y=additionalDeck(id,z),x=side*additionalDeckWidth(id,z);
-    return {root:[x-side*.06,y+.16,z+.12],tip:[x+side*.34,y+.26,z-.20],fairlead:[x+side*.33,y+.25,z-.19]};
+    // The timber lies across the rail and reaches out and forward, so the anchor
+    // hangs clear of the bow. It does not come out of the planking below the rail.
+    const z=-4.8,rail=additionalDeck(id,z)+d.barrier,x=side*additionalDeckWidth(id,z);
+    return {root:[x-side*.14,rail-.015,z+.12],tip:[x+side*.32,rail+.11,z-.18],fairlead:[x+side*.31,rail+.10,z-.17]};
   };
   const masts=d.masts.map((m,index)=>({...m,index,foot:mastPoint(index,additionalDeck(id,m.z)),head:mastPoint(index,m.height)}));
   for(const [index,m]of d.masts.entries()){
@@ -42,7 +44,9 @@ export function additionalRigContext(id){
       supports.push({a,b:top,r:.010,mast:index,side,kind:'shroud'});
     }
     const stayZ=index===0?-7.8:d.masts[index-1].z-.45;
-    supports.push({a:[0,index===0?1.5:additionalDeck(id,stayZ)+.07,stayZ],b:mastPoint(index,m.height*.95),r:.012,mast:index,side:0,kind:'stay'});
+    // The fore stay comes down to the bowsprit itself.
+    const sprit=d.bowsprit,stayY=index===0?sprit.a[1]+(sprit.b[1]-sprit.a[1])*(stayZ-sprit.a[2])/(sprit.b[2]-sprit.a[2]):additionalDeck(id,stayZ)+.07;
+    supports.push({a:[0,stayY,stayZ],b:mastPoint(index,m.height*.95),r:.012,mast:index,side:0,kind:'stay'});
   }
   // Ratlines join actual adjacent shrouds at a human rung pitch after scaling.
   const rungStep=.32/d.frame.verticalScale;

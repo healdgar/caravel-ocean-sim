@@ -224,7 +224,7 @@ ${OCEAN_HULL_MASK}
   // END HULL EARLY EXIT
 
   let sunlight = sunIlluminance() * sunVis[0];
-  let surfaceShadow = vesselShadow(in.rel+F.camPos.xyz,nrm);
+  let surfaceShadow = waterSurfaceShadow(in.rel+F.camPos.xyz);
   let sunE = sunlight * solarShadowVisibility(surfaceShadow);
   let waterSun = sunlight * solarShadowVisibility(waterVesselShadow(in.rel+F.camPos.xyz,nrm,V,cov.x+cov.y));
   let skyUp = textureSampleLevel(envCube, sampC, vec3f(0.0, 1.0, 0.0), ENV_MAXMIP).rgb;
@@ -339,11 +339,12 @@ ${OCEAN_HULL_MASK}
     if (F.post.w > 6.5 && F.post.w < 7.5) { return vec4f(skyUp, 1.0); }
     return vec4f(fwl.r, fwl.g, fresh, 1.0) * 0.2;
   }
+  ${coast?'body = coastalBody(body, cws.bed);':''}
   var col = body * (1.0 - Fr) + refl * Fr + spec+moonSpec;
   col = mix(col, foamLit, foamMask * 0.95);
   col += lightningSurface(nrm,normalize(-in.rel),mix(F.waterCol.rgb,foamAlb,foamMask),.23)
     +lightningCloud(reflect(normalize(in.rel),nrm))*Fr;
-  ${coast?'col = coastalWater(col, in.xz, effHeight, foamLit);':''}
+  ${coast?'col = coastalSwash(col, in.xz, cws.bed, effHeight, foamLit);':''}
 
   // ---- aerial perspective ----
   // aerial perspective: atmosphere extinction plus a marine haze floor
@@ -374,7 +375,7 @@ export function createOpticalOcean(coast='',depthFirst=true,surfaceWaves=false,c
   const transmission=WATER_TRANSMISSION.replace('mix(body,hit.source.rgb,transmission)',
     'mix(body,hit.source.rgb*waterCausticFactorFiltered(waterSourcePosition(hit.uv,hit.source.a),world.y,waterCausticPixelFootprint(waterSourcePosition(hit.uv,hit.source.a))),transmission)');
   const code=oceanSource(coast,surfaceWaves)+transmission+WATER_AIR_TRANSMISSION
-    +waterCausticFunctions({surfaceWaves})+UNDERWATER_INTERFACE
+    +waterCausticFunctions({surfaceWaves,seaShadow:true})+UNDERWATER_INTERFACE
     +(cameraProbe?'\n@group(3)@binding(3)var<storage,read>cameraSea:array<f32,16>;\n':'');
   const optical=code.replace(/let\s+Fr\s*=\s*fresnelWater\(/,'let Fr = waterFresnel(')
     .replace(/var\s+col\s*=\s*body\s*\*\s*\(1\.0\s*-\s*Fr\)/,

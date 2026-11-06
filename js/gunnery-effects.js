@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 import {GUNNERY_RENDER,GUNNERY_DEPTH_RESOLVE,GUNNERY_CROWN_SEGMENTS,GUNNERY_CROWN_ROWS,GUNNERY_DROP_COUNT,GUNNERY_RING_SEGMENTS,GUNNERY_RING_COUNT} from './wgsl/gunnery.js';
 import {coupleSurfaceHeight} from './wgsl/surface-coupling.js';
+import {isArrowAmmo} from './gunnery-state.js';
 import {surfaceWaveGroups} from './surface-bindings.js';
 
 export const GUNNERY_FX_LIMITS=Object.freeze({shots:128,smoke:512,impacts:96,projectiles:128,arcSegments:256,smokeSeconds:18,impactSeconds:8,flashSeconds:.085});
@@ -284,6 +285,14 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
       for(const p of selected){if(volumeCount>=maxVolumes)break;writeVolume(volumeCount++,p.centre,p.direction,p.radii,p.type,p.extinction,p.age,p.seed,p.subtype??0);}
       for(const p of state.projectiles){
         if(ballCount>=GUNNERY_FX_LIMITS.projectiles)break;
+        if(isArrowAmmo(p.ammo)&&p.velocity){
+          if(ballCount+3>GUNNERY_FX_LIMITS.projectiles)break;
+          const speed=Math.hypot(...p.velocity)||1,lit=p.ammo==='fire-arrow';
+          for(const[back,radius]of[[0,lit?-.075:.022],[.32,.016],[.64,.016]]){
+            balls.set([p.position[0]-p.velocity[0]/speed*back,p.position[1]-p.velocity[1]/speed*back,p.position[2]-p.velocity[2]/speed*back,radius],ballCount++*4);
+          }
+          continue;
+        }
         const signedRadius=p.ammo==='hot'?-p.radius:p.radius;
         if(p.ammo==='chain'&&ballCount+1<GUNNERY_FX_LIMITS.projectiles){
           const spin=(p.age??0)*24.0+(p.id??0)*1.7;
