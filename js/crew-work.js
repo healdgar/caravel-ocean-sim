@@ -4,6 +4,7 @@ import { SAIL_KEYS, sailingState, sailCanvasTarget, sailLosingCanvas } from './s
 import { gltfTRS } from './gltf.js';
 import { resolveShipNode,requirePlayableShipModel } from './ship-models.js';
 import { VICTORY_DESIGN, victorySheer,victoryStairFlights,victoryChainwale } from './models/victory.js';
+import { NINA_DESIGN } from './models/nina.js';
 import {ADDITIONAL_DESIGNS,additionalStairFlights} from './models/additional.js';
 import {ROWING_DESIGNS,rowingRigContext,rowingBenchDescriptors} from './models/rowing.js';
 import {LATER_SAIL_DESIGNS,laterSailStairFlights} from './models/later-sail.js';
@@ -27,23 +28,75 @@ export function crewDeckHeight(boat,z,x=0){return hasExtendedCrewModel(boat.mode
 // These targets are the actual shaft/seat evaluator used by the water forces
 // and visible propulsors. Crew never advances the shared rowing phase.
 export function crewSeatedPose(s,boat){
-  if(!Object.hasOwn(ROWING_DESIGNS,boat.modelId??''))return null;
+  // A single-hander steers from her cockpit bench, where the tiller comes to hand.
+  const sitting=Object.hasOwn(ROWING_DESIGNS,boat.modelId??'')||(boat.modelId==='gipsy-moth-iv'&&s.roles?.includes('helmsman'));
+  if(!sitting)return null;
   if(s.stationId)return rowingStationPose(boat,s.stationId);
   const d=proceduralDesign(boat.modelId),station=d.crewStations[s.stationKey??s.id];if(!station)return null;
-  const scale=[boat.beam/d.frame.beam,d.frame.verticalScale,boat.length/d.frame.length],seat=[station.x,station.y,station.z].map((v,i)=>v*scale[i]);
-  const stance=station.yaw??Math.PI,z=seat[2]+Math.cos(stance)*.46,Z=z/scale[2],floor=proceduralDeck(d.id,Z,station.x)*scale[1];
-  const edge=Math.max(.12,proceduralHullWidth(d.id,Z,proceduralDeck(d.id,Z,station.x))*scale[0]-d.shellThicknessMetres),x=Math.max(-edge+.12,Math.min(edge-.12,seat[0]));
-  const feet=[[x-.10,floor,z],[x+.10,floor,z]],hands=s.role==='Helmsman'?rowingSteeringPose(boat).hands:
-    [-1,1].map(side=>[seat[0]+side*.14,seat[1]+.18,seat[2]+Math.cos(stance)*.22]);
+  const scale=[boat.beam/d.frame.beam,d.frame.verticalScale,boat.length/d.frame.length],seat=(station.seat??[station.x,station.y,station.z]).map((v,i)=>v*scale[i]);
+  const facing=station.yaw??Math.PI,z=seat[2]+Math.cos(facing)*.42,Z=z/scale[2],floor=proceduralDeck(d.id,Z,station.x)*scale[1];
+  const edge=Math.max(.12,proceduralHullWidth(d.id,Z,proceduralDeck(d.id,Z,station.x))*scale[0]-(d.shellThicknessMetres??0)),side=Math.sign(seat[0])||1;
+  // Boots either side of the stores, not in them: between what the deck carries there and the hull's own side.
+  const stores=(d.equipment.cargo??[]).filter(c=>Math.abs(Z-c.z)<c.extent[2]+.16/scale[2]).reduce((half,c)=>Math.max(half,c.extent[0]*scale[0]),0),inner=stores?stores+.09:0,outer=edge-.07;
+  const stance=Math.min(.10,Math.max(.03,(outer-inner)*.5)),x=stores?side*Math.max(inner+stance,Math.min(outer-stance,Math.abs(seat[0]))):Math.max(-edge+.12,Math.min(edge-.12,seat[0]));
+  // In a cockpit the feet go forward and inboard off the bench, into the well.
+  const helmsman=s.role==='Helmsman'||s.roles?.includes('helmsman'),across=[Math.cos(facing),-Math.sin(facing)],out=seat[0]+Math.sin(facing)*.42;
+  const feet=d.cockpit?[1,-1].map(k=>[out+across[0]*k*.09,floor,z+across[1]*k*.09]):[[x-stance,floor,z],[x+stance,floor,z]];
+  // At rest his hands lie on his thighs, which ride a thigh's depth over the bench.
+  const hands=d.cockpit?crewHelmHands(boat):helmsman?rowingSteeringPose(boat).hands:[-1,1].map(side=>[seat[0]+side*.14,seat[1]+.34,seat[2]+Math.cos(facing)*.30]);
   // A side-mounted steering oar is not directly in front of the bench. Turn
-  // toward its real grips without moving the seat or the planted foot targets.
-  const yaw=s.role==='Helmsman'?Math.atan2((hands[0][0]+hands[1][0])*.5-seat[0],(hands[0][2]+hands[1][2])*.5-seat[2]):stance;
+  // part way toward its real grips, still looking ahead, without moving the seat
+  // or the planted foot targets. The arms reach the rest of the way.
+  let yaw=facing;
+  if(helmsman){const off=Math.atan2((hands[0][0]+hands[1][0])*.5-seat[0],(hands[0][2]+hands[1][2])*.5-seat[2])-facing,turn=Math.atan2(Math.sin(off),Math.cos(off));yaw=facing+workClamp(turn,-.45,.45);}
   return {seat,feet,hands,body:{position:seat,yaw,lean:0},stationId:s.stationKey??s.id,drive:false,effort:0};
 }
 export function updateCrewRowingAttendance(company,boat){
   if(!Object.hasOwn(ROWING_DESIGNS,boat.modelId??''))return;
   const attendance=boat.rowingAttendance??=new Set();attendance.clear();
   for(const s of company.crew)if(s.stationId&&!s.job&&!s.observation.hazard)attendance.add(s.stationId);
+}
+
+// A helmsman stands beside his tiller's end to port of it and faces forward, turned
+// a little in toward it, with both hands on it. back and out are metres from the
+// handle's end, along the tiller and across it. A hand's point is the wrist, up
+// off the bar and back toward him, so the fingers close over it. Bars differ:
+// Niña's is a square timber, the Pinta's and Santa María's end in a crossbar. The
+// Gipsy Moth's helmsman sits to it instead, so she has hands but no stance.
+const HELM_TILLER=Object.freeze({
+  nina:{back:.30,out:.30,turn:.40,hands:[[.07,.11,.13],[.25,.11,.13]]},
+  pinta:{back:.24,out:.28,turn:.40,hands:[[.08,.15,.09],[.09,.04,.09]]},
+  'santa-maria':{back:.24,out:.28,turn:.40,hands:[[.08,.15,.09],[.09,.04,.09]]},
+  'gipsy-moth-iv':{hands:[[.04,.05,.08],[.18,.05,.08]]},
+});
+// A wheel's rim is a circle in the design frame, and stays one as the wheel turns, so a hand on it stays on it:
+// angles up from the side he stands, and how far aft of the wheel's plane the wrist rides, in design units.
+const HELM_WHEEL=Object.freeze({'flying-cloud':{side:-1,high:.8,low:.05,aft:.02}});
+// Metres. The handle's end, and the unit way along the tiller to its pivot, in plan.
+function crewTillerFrame(boat){
+  const id=boat.modelId??'nina',sx=boat.beam/3.6,sz=boat.length/12,grip=resolveShipNode(boat,'helm.grip');
+  const pivot=id==='nina'?NINA_DESIGN.tiller.pivot:(ADDITIONAL_DESIGNS[id]??LATER_SAIL_DESIGNS[id]).steering.pivot;
+  const x=pivot[0]*sx-grip[0],z=pivot[2]*sz-grip[2],n=Math.hypot(x,z)||1;
+  return {grip,along:[x/n,z/n],out:[-z/n,x/n]};
+}
+// Where the helmsman of a tiller stands, in metres, and which way he faces. Null if she has no tiller.
+export function crewHelmStand(boat){
+  const stance=HELM_TILLER[boat.modelId??'nina'];if(!stance?.back)return null;
+  const {grip,along,out}=crewTillerFrame(boat),yaw=Math.atan2(along[0],along[1])+Math.PI-stance.turn;
+  return {x:grip[0]+along[0]*stance.back+out[0]*stance.out,z:grip[2]+along[1]*stance.back+out[1]*stance.out,yaw};
+}
+// The helmsman's left and right wrists, in hull metres.
+export function crewHelmHands(boat){
+  const wheel=HELM_WHEEL[boat.modelId];
+  if(wheel){
+    const d=proceduralDesign(boat.modelId).steering.wheel,sx=boat.beam/3.6,sy=vesselVerticalScale(boat),sz=boat.length/12;
+    const grips=[wheel.high,wheel.low].map(a=>[(d.centre[0]+wheel.side*Math.cos(a)*d.radius)*sx,(d.centre[1]+Math.sin(a)*d.radius)*sy,(d.centre[2]+wheel.aft)*sz]);
+    return wheel.side<0?grips.reverse():grips;
+  }
+  const stance=HELM_TILLER[boat.modelId??'nina'];
+  if(!stance)return ['l','r'].map((_,i)=>resolveShipNode(boat,'helm.grip',{along:i?.09:-.09}));
+  const {grip,along,out}=crewTillerFrame(boat);
+  return stance.hands.map(([a,o,up])=>[grip[0]+along[0]*a+out[0]*o,grip[1]+up,grip[2]+along[1]*a+out[1]*o]);
 }
 
 const CLIMBERS={beatriz:[0,-1],catarina:[1,1]};
@@ -303,7 +356,7 @@ function routeTo(s,target,boat){
   if(ADDITIONAL_DESIGNS[boat.modelId])return additionalCrewRoute(s,target,boat);
   if(boat.modelId==='victory')return victoryCrewRoute(s,target,boat);
   // Named corridors stay clear of the hatch, mast heels and aft companionway.
-  if(s.id==='maria')return [deckPoint(s.x,target[2],boat),target];
+  if(s.id==='maria')return [deckPoint(.78,s.z,boat),deckPoint(.78,target[2],boat),target];
   if(s.id==='rui')return [deckPoint(.55,s.z,boat),deckPoint(.55,-2.25,boat),target];
   if(s.id==='beatriz')return [deckPoint(s.x,-2.65,boat),deckPoint(target[0],-2.65,boat),target];
   if(s.id==='catarina')return [deckPoint(s.x,2.55,boat),deckPoint(target[0],2.55,boat),target];
@@ -783,6 +836,8 @@ export function proceduralCrewRoute(s,target,boat,company=null){
     return best;
   };
   const a=nearest(start),b=nearest(target);if(!a||!b)return null;
+  // A start off her decks has no path, however near a node the search above can find.
+  if(distance3(a.world,physical(start,boat))>2)return null;
   const heap=[],push=item=>{heap.push(item);let i=heap.length-1;while(i){const p=(i-1)>>1;if(heap[p].cost<=item.cost)break;heap[i]=heap[p];i=p;}heap[i]=item;};
   const pop=()=>{const first=heap[0],last=heap.pop();if(heap.length){let i=0;while(i*2+1<heap.length){let c=i*2+1;if(c+1<heap.length&&heap[c+1].cost<heap[c].cost)c++;if(heap[c].cost>=last.cost)break;heap[i]=heap[c];i=c;}heap[i]=last;}return first;};
   const costs=new Map([[a.key,0]]),parents=new Map(),closed=new Set();push({node:a,cost:distance3(a.world,b.world)});let found=false;
@@ -1171,7 +1226,7 @@ function startReturn(s,boat,company=null){
   const path=ADDITIONAL_DESIGNS[boat.modelId]?additionalCrewRoute(s,home,boat,{gunCorridor:j.kind==='gunnery'})
     :boat.modelId==='victory'?victoryCrewRoute(s,home,boat,{gunCorridor:j.kind==='gunnery'})
     :j.kind==='gunnery'?crewNinaGunDeckRoute(s,home,boat)
-    :s.id==='maria'?[deckPoint(s.x,-3.2,boat),deckPoint(home[0],-3.2,boat),home]
+    :s.id==='maria'?[deckPoint(s.x,-3.2,boat),deckPoint(.78,-3.2,boat),deckPoint(.78,home[2],boat),home]
     :s.id==='duarte'?[deckPoint(home[0],s.z,boat),home]
     :j.path?.length>1?[...j.path.slice(0,-1).reverse(),home]:routeTo(s,home,boat);
   j.path=crewWorkNavigationRoute(s,path,boat);if(!j.path){j.path=[];j.stage='waiting-return';}

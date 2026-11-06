@@ -208,8 +208,8 @@ function laterSailCloudCrossjackFoot(design,surfaces){
 }
 function laterSailCloudCrew(){
   const ids=['ines','tomas','beatriz','duarte','joao','catarina','leonor','rui','maria','afonso','isabel','pedro'];
-  const positions=[[-.62,4.6],[.62,4.6],[-1,-3.15],[1,-3.15],[-1.10,-.5],[1.10,-.5],[-1.1,1],[1.1,1],[-.45,-5.1],[.45,-5.1],[-.8,3.15],[0,5.05]];
-  return Object.fromEntries(ids.map((id,i)=>{const [x,z]=positions[i];return[id,{x,z,route:i===11?[z,z]:[z,z+.16],yaw:i===11?Math.PI:undefined}];}));
+  const positions=[[-.62,4.6],[.62,4.6],[-1,-3.15],[1,-3.15],[-1.10,-.5],[1.10,-.5],[-1.1,1],[1.1,1],[-.25,-4.9],[.25,-4.9],[-.8,3.15],[-.144,4.905]];
+  return Object.fromEntries(ids.map((id,i)=>{const [x,z]=positions[i];return[id,{x,z,route:i===11?[z,z]:i===8||i===9?[z,z+.08]:[z,z+.16],yaw:i===11||i===8||i===9?Math.PI:undefined}];}));
 }
 
 const laterSailCloud={
@@ -271,8 +271,8 @@ const laterSailCloud={
     cloud_w16:{x:1.38,z:1.45,route:[1.38,1.52],role:'Main brace hand'},
     cloud_w17:{x:-1.32,z:1.90,route:[1.83,1.97],role:'Aft waist hand'},
     cloud_w18:{x:1.32,z:1.90,route:[1.83,1.97],role:'Aft waist hand'},
-    cloud_p1:{x:-1.18,z:2.65,route:[2.58,2.72],role:'Poop deckhand'},
-    cloud_p2:{x:1.18,z:2.65,route:[2.58,2.72],role:'Poop deckhand'},
+    cloud_p1:{x:-1.1,z:2.65,route:[2.58,2.72],role:'Poop deckhand'},
+    cloud_p2:{x:1.1,z:2.65,route:[2.58,2.72],role:'Poop deckhand'},
     cloud_p3:{x:.80,z:3.15,route:[3.08,3.22],role:'Mizzen hand'},
     cloud_p4:{x:-1.05,z:3.65,route:[3.58,3.72],role:'Mizzen sheet hand'},
     cloud_p5:{x:1.05,z:3.65,route:[3.58,3.72],role:'Mizzen brace hand'},
@@ -379,7 +379,7 @@ const laterSailMoth={
     {id:'mizzen',controlGroup:'mizzen',z:2.7,height:9.8/laterSailMothScale,radius:.075/laterSailMothX,rake:.12}],
   surfaces:[],bowsprit:null,
   hatch:{centre:[0,1.42/laterSailMothScale,1.10],size:[.62/laterSailMothX,.055/laterSailMothScale,.60/laterSailMothScale]},
-  crewStations:{ines:{x:0,z:3.85,route:[3.85,3.85],yaw:0,roles:['captain','helmsman','sail-handler']}},
+  crewStations:{ines:{x:-.14,z:3.60,route:[3.60,3.60],yaw:2.27,seat:[-.52,.65/laterSailMothScale,3.60],roles:['captain','helmsman','sail-handler']}},
   loading:{crew:1,personKg:80,waterKgPerDay:5,foodKgPerDay:1.5,casksKg:40,sparesKg:150,designIncludesManifest:true,gmBeamFraction:.14,
     ballastKg:8490*laterSailPound,permanentMassKg:null,referenceDisplacementKg:23320*laterSailPound,
     referenceCondition:'builder original design-DWL, not verified 1966 departure or 1967 Sydney condition',

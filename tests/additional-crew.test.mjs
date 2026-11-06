@@ -7,6 +7,7 @@ import {createCompany,stepCompany,issueCaptainOrder,companyStatus} from '../js/c
 import {additionalCrewRoute,crewRunnerMetrics,stepCrewWork} from '../js/crew-work.js';
 import {sailingState,advanceSails} from '../js/sailing.js';
 import {resolveShipNode,requirePlayableShipModel} from '../js/ship-models.js';
+import {crewHelmStand} from '../js/crew-work.js';
 
 const close=(a,b,t=1e-6)=>assert.ok(Math.abs(a-b)<t,`${a} != ${b}`);
 const distance=(a,b)=>Math.hypot(...a.map((v,i)=>v-b[i]));
@@ -27,8 +28,12 @@ test('additional companies retain identities and own twelve safe station positio
       for(const s of c.crew.filter(s=>!['duarte','joao','isabel','beatriz','catarina','rui'].includes(s.id)))assert.ok(distance(point,Array.from(s.position))>.54,`${id} ${mast.id} haul stance must clear standby ${s.id}`);
     }
     for(const rudder of [-35,-10,0,10,35]){
-      b.rudder=rudder;stepCompany(c,b,0,6);const s=c.crew.find(p=>p.role==='Helmsman'),grip=resolveShipNode(b,'helm.grip');
-      close(s.position[0],grip[0]);close(s.position[2]+.4,grip[2]);
+      b.rudder=rudder;stepCompany(c,b,0,6);const s=c.crew.find(p=>p.role==='Helmsman'),grip=resolveShipNode(b,'helm.grip'),stand=crewHelmStand(b);
+      // Beside the handle's end, to port of the tiller, near enough to hold it and facing along it toward the bow.
+      close(s.position[0],stand.x);close(s.position[2],stand.z);
+      assert.ok(Math.hypot(s.position[0]-grip[0],s.position[2]-grip[2])<.5,'stands at the tiller');
+      assert.ok(s.position[0]<grip[0],'to port of it, clear of the bar');
+      if(Math.abs(rudder)<=10)assert.ok(Math.cos(s.yaw)<-.8,'facing forward');
       close(s.position[1],additionalDeck(id,s.z)*d.frame.verticalScale+.028);
       assert.ok(grip[1]-s.position[1]>.5&&grip[1]-s.position[1]<1.4,'real tiller grip is at reachable torso height');
     }

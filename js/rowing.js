@@ -119,13 +119,21 @@ export function rowingStationPose(boat,stationId,{phase,time=0,sampleWater}={}){
     shaftA=rowingAdd(centre,rowingMul(along,grip.loom));shaftB=rowingAdd(centre,rowingMul(along,-spec.bladeLength*.5));
     const low=rowingAdd(centre,rowingMul(along,grip.low)),high=rowingAdd(centre,rowingMul(along,grip.high));hands=station.side<0?[low,high]:[high,low];
   }
-  const footZ=seat[2]+(station.kind==='oar'?.58:-.46),floorDesign=rowingDeck(d.id,footZ/scale[2]),floor=floorDesign*scale[1];
+  const footZ=seat[2]+(station.kind==='oar'?.58:-.38),floorDesign=rowingDeck(d.id,footZ/scale[2]),floor=floorDesign*scale[1];
   const footEdge=Math.max(.02,rowingHullWidth(d.id,footZ/scale[2],floorDesign)*scale[0]-d.shellThicknessMetres);
-  const footInset=spec.footInset??.12,footX=rowingClamp(seat[0],-Math.max(0,footEdge-footInset),Math.max(0,footEdge-footInset));
   // Arrays are anatomical left/right. Oar actors face +Z (left is +X), while
   // forward-facing paddlers use yaw pi (left is -X), on either side of the hull.
   const footSide=station.kind==='oar'?1:-1;
-  const feet=[[rowingClamp(footX+footSide*.10,-footEdge,footEdge),floor,footZ],[rowingClamp(footX-footSide*.10,-footEdge,footEdge),floor,footZ]];
+  let footX,stance=.10;
+  if(station.kind==='oar'){const footInset=spec.footInset??.12;footX=rowingClamp(seat[0],-Math.max(0,footEdge-footInset),Math.max(0,footEdge-footInset));}
+  else{
+    // A narrow canoe's boots fit between her side and the neighbour's: both ankles
+    // a boot clear of each, at the toes, where she has narrowed further.
+    const toeZ=footZ-.2,toeEdge=rowingHullWidth(d.id,toeZ/scale[2],rowingDeck(d.id,toeZ/scale[2]))*scale[0]-d.shellThicknessMetres;
+    const inner=.06,outer=Math.max(inner,Math.min(footEdge,toeEdge)-.06);stance=rowingClamp((outer-inner)*.5,.03,.10);
+    footX=station.side*rowingClamp(Math.abs(seat[0]),inner+stance,Math.max(inner+stance,outer-stance));
+  }
+  const feet=[[rowingClamp(footX+footSide*stance,-footEdge,footEdge),floor,footZ],[rowingClamp(footX-footSide*stance,-footEdge,footEdge),floor,footZ]];
   return rowingPoseFinish(boat,d,{stationId:station.id,station:station.index,side:station.side,drive:stroke.drive,effort:stroke.effort,
     seat,feet,hands,body:{position:seat,yaw:station.kind==='oar'?0:Math.PI,lean:-spec.torsoLeanRadians*stroke.sweep},
     shaftA,shaftB,bladeCentre:centre,bladeAlong:along,bladeAcross:across,bladeNormal:normal,bladeVelocity:velocity,

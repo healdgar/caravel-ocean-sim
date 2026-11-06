@@ -47,10 +47,12 @@ test('rower hands, pelvis and planted boots follow shared stroke targets without
         assert.ok(ordered(targets.feet)>0,id+' '+s.id+' left and right feet must not cross');
         assert.ok(ordered(targets.hands)>0,id+' '+s.id+' shaft grips must preserve anatomical left/right at this facing');
         assert.ok(a.palette.every(Number.isFinite),id+' finite seated skin');
-        assert.ok(crewProposedDistance(at('pelvis'),targets.seat)<.025,id+' pelvis rests at its own bench');
+        const rests=targets.seat.slice();rests[1]+=a.seatContact.pelvisAboveSeat*s.scale[1];
+        assert.ok(crewProposedDistance(at('pelvis'),rests)<.025,id+' pelvis rests on its own bench, on the thigh under it');
         for(const [i,side]of ['l','r'].entries()){
           readings.push({id,sailor:s.id,phase,side,gap:crewProposedDistance(at('hand_'+side),targets.hands[i]),hand:at('hand_'+side),target:targets.hands[i],seat:targets.seat,pelvis:at('pelvis'),root:Array.from(s.position),scale:Array.from(s.scale),lean:targets.body.lean});
-          assert.ok(crewProposedDistance(at('foot_'+side),targets.feet[i])<.08,id+' actual boot reaches the authored floor');
+          const sole=targets.feet[i].slice();sole[1]+=a.footContacts[side].ankleAboveSole*s.scale[1];
+          assert.ok(crewProposedDistance(at('foot_'+side),sole)<.08,id+' actual boot reaches the authored floor');
         }
         assert.ok(at('Head')[1]<targets.seat[1]+1.2,'seated workers are not standing templates');
         assert.equal(s.moisturePoints.length,4);assert.ok(s.moisturePoints.every(p=>p.every(Number.isFinite)));

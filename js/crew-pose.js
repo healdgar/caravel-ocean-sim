@@ -1,7 +1,7 @@
 import { gltfQuatMultiply } from './gltf.js';
-import { vesselVerticalScale } from './hull.js';
+import { vesselVerticalScale, hullDeck, HULL_VERTICAL_SCALE } from './hull.js';
 import { resolveShipNode, requirePlayableShipModel } from './ship-models.js';
-import { crewRunnerMetrics, crewGunneryTool, crewBoardingHands, crewMastName, hasExtendedCrewModel, crewRowingWalkContacts, crewDeckHeight } from './crew-work.js';
+import { crewRunnerMetrics, crewGunneryTool, crewBoardingHands, crewMastName, hasExtendedCrewModel, crewRowingWalkContacts, crewDeckHeight, crewHelmHands } from './crew-work.js';
 import { applyArticulatedRagdollPose } from './crew-physics.js';
 import {ADDITIONAL_DESIGNS} from './models/additional.js';
 import {proceduralDesign} from './models/procedural.js';
@@ -71,19 +71,56 @@ function poseNeutralSeatedBody(a){
   }
   if(branch>=0&&a.updateBranch)a.updateBranch(branch);else a.update();
 }
-// Seat is an authoritative pelvis anchor, never the standing actor root. This
-// permits real knees/boots on the floor while both hands follow one blade pose.
+// Leg IK leaves a boot tipped with its shin. Turn it back to how it stands in the
+// asset, then to the normal of what it stands on, in the actor's own frame.
+function poseBootFlat(a,side,normal){
+  const f=a.footContacts[side],parent=a.parent[f.node],q=poseRotation(a.world[parent]),inverse=[-q[0],-q[1],-q[2],q[3]],desired=new Float32Array(4),local=new Float32Array(4);
+  const delta=[...poseCross([0,1,0],normal),1+normal[1]],size=Math.hypot(...delta);gltfQuatMultiply(desired,delta.map(v=>v/size),poseRotation(f.restWorld));
+  gltfQuatMultiply(local,inverse,desired);a.pose[f.node].r.set(local);
+  const toe=poseNodeIndex(a,'ball_'+side);if(toe>=0)a.pose[toe].r.set(a.rest[toe].r);
+  if(a.updateBranch)a.updateBranch(f.node);else a.update();
+}
+// Seat and feet are the surfaces a seated body rests on, never the standing actor
+// root. The pelvis rides above the bench by the thigh under it and each ankle above
+// the floor by the boot, both measured from this body's own skin, so all three rowed
+// ships agree with one pose while both hands follow one blade.
 export function poseSeatedCrew(a,s,targets=s.seatedPose){
   if(!targets)return false;
   const pelvis=poseNodeIndex(a,'pelvis');if(pelvis<0)throw Error('Seated crew requires a pelvis joint');
   poseNeutralSeatedBody(a);
   const lean=targets.body?.lean??0;
   turnBone(a,pelvis,[0,1,0],[0,Math.cos(lean),Math.sin(lean)]);
-  poseMoveBone(a,pelvis,actorLocal(targets.seat,s));
-  const grips={};
+  const hips=actorLocal(targets.seat,s);hips[1]+=a.seatContact?.pelvisAboveSeat??0;
+  poseMoveBone(a,pelvis,hips);
+  // The low grip at the bottom of a paddle stroke is out of an arm's reach from a
+  // sitting shoulder. Bow from the hips over it, as a paddler does, rather than
+  // leave the hand short of the shaft or lengthen a bone.
+  let excess=0,toward=null;
   for(const [i,side]of ['l','r'].entries()){
-    const sign=side==='l'?1:-1,foot=actorLocal(targets.feet[i],s),hand=actorLocal(targets.hands[i],s);
-    solveCrewLimb(a,['thigh_'+side,'calf_'+side,'foot_'+side],foot,[sign*.22,.18,.8]);
+    const shoulder=posePosition(a.world[poseNodeIndex(a,'upperarm_'+side)]),elbow=posePosition(a.world[poseNodeIndex(a,'lowerarm_'+side)]),wrist=posePosition(a.world[poseNodeIndex(a,'hand_'+side)]),ray=poseSub(actorLocal(targets.hands[i],s),shoulder);
+    const over=Math.hypot(...ray)-Math.hypot(...poseSub(elbow,shoulder))-Math.hypot(...poseSub(wrist,elbow))+.02;
+    if(over>excess){excess=over;toward=ray;}
+  }
+  if(toward){
+    const angle=Math.min(.6,excess/.32),along=Math.hypot(toward[0],toward[2])||1,sway=[toward[0]/along,toward[2]/along];
+    for(const [name,weight]of [['spine_01',.55],['spine_02',.45]]){
+      const node=poseNodeIndex(a,name);if(node>=0){const bend=angle*weight;turnBone(a,node,[0,1,0],[sway[0]*Math.sin(bend),Math.cos(bend),sway[1]*Math.sin(bend)]);}
+    }
+  }
+  const grips={},contact=a.seatContact;
+  for(const [i,side]of ['l','r'].entries()){
+    // The knee stays over the line from hip to foot, a little out, not splayed through a narrow hull's side.
+    const sign=side==='l'?1:-1,f=a.footContacts?.[side],foot=actorLocal(targets.feet[i],s),hand=actorLocal(targets.hands[i],s),leg=['thigh_'+side,'calf_'+side,'foot_'+side],pole=[(posePosition(a.world[poseNodeIndex(a,leg[0])])[0]+foot[0])*.5+sign*.04,.18,.8];
+    if(f)foot[1]+=f.ankleAboveSole;
+    solveCrewLimb(a,leg,foot,pole);
+    if(f&&contact){
+      // A foot out ahead of its knee leans the shin back, and the heel skinned to
+      // that shin down: rest on the heel with the toes eased up, as a braced foot does.
+      const knee=posePosition(a.world[poseNodeIndex(a,leg[1])]),ankle=posePosition(a.world[f.node]),lean=Math.max(0,Math.atan2(ankle[2]-knee[2],knee[1]-ankle[1]));
+      const raise=contact.heelBelow*Math.cos(lean)+contact.heelBehind*Math.sin(lean)-f.ankleAboveSole;
+      if(raise>.002){foot[1]+=raise;solveCrewLimb(a,leg,foot,pole);}
+      poseBootFlat(a,side,[0,Math.cos(lean*.5),-Math.sin(lean*.5)]);
+    }
     solveCrewLimb(a,['upperarm_'+side,'lowerarm_'+side,'hand_'+side],hand,[sign*.6,.6,.15]);
     grips['foot_'+side]=foot;grips['hand_'+side]=hand;
   }
@@ -133,11 +170,11 @@ function poseRowingWalkingFeet(a,s,boat){
   const point=name=>poseHullPoint(posePosition(a.world[poseNodeIndex(a,name)]),s),left=point('foot_l'),right=point('foot_r');
   s.moisturePoints=[left.map((v,i)=>(v+right[i])*.5),point('pelvis'),point('spine_02'),point('Head')];return true;
 }
-function poseGroundedGunBody(a,s,boat,requestedLean,hands=null){
+function poseGroundedGunBody(a,s,boat,requestedLean,hands=null,{floorAt=null,stoop=false}={}){
   poseNeutralSeatedBody(a);
   const pelvis=poseNodeIndex(a,'pelvis');if(pelvis<0)throw Error('Gunnery stance requires a pelvis');
   const sx=boat.beam/3.6,sz=boat.length/12,sy=vesselVerticalScale(boat),c=Math.cos(s.yaw),sn=Math.sin(s.yaw);
-  const floor=(x,z)=>crewDeckHeight(boat,z/sz,x/sx)*sy,feet=[];
+  const floor=floorAt??((x,z)=>crewDeckHeight(boat,z/sz,x/sx)*sy),feet=[];
   let platformMin=-Infinity,platformMax=Infinity;
   if(boat.modelId==='victory'){
     // The quarterdeck ends at a real, tall poop-deck rise. Place each complete
@@ -159,7 +196,17 @@ function poseGroundedGunBody(a,s,boat,requestedLean,hands=null){
     feet.push({side,sole,ankle,normal:n,target:actorLocal(ankle,s)});
   }
   const base=posePosition(a.world[pelvis]);let lean=requestedLean,drop=0,reachExcess=0;
-  if(hands&&requestedLean>0){
+  if(hands&&stoop){
+    // A helmsman's bar is often lower than his hands hang. Bend the knees and hips
+    // only as far as both hands need to meet it.
+    const lift=feet.reduce((sum,p)=>sum+p.target[1]-a.footContacts[p.side].ankle[1],0)/2;
+    for(const [i,side]of ['l','r'].entries()){
+      const target=actorLocal(hands[i],s),shoulder=posePosition(a.world[poseNodeIndex(a,'upperarm_'+side)]),elbow=posePosition(a.world[poseNodeIndex(a,'lowerarm_'+side)]),hand=posePosition(a.world[poseNodeIndex(a,'hand_'+side)]);
+      shoulder[1]+=lift;
+      reachExcess=Math.max(reachExcess,Math.hypot(...poseSub(target,shoulder))-Math.hypot(...poseSub(elbow,poseSub(shoulder,[0,lift,0])))-Math.hypot(...poseSub(hand,elbow))+.02);
+    }
+    drop=Math.min(.24,reachExcess*.7);lean=Math.min(.42,reachExcess*.9);
+  }else if(hands&&requestedLean>0){
     const targets=hands.map(p=>actorLocal(p,s)),centre=targets[0].map((v,i)=>(v+targets[1][i])*.5),shoulders=[];
     for(const [i,side]of ['l','r'].entries()){
       const shoulder=posePosition(a.world[poseNodeIndex(a,'upperarm_'+side)]),elbow=posePosition(a.world[poseNodeIndex(a,'lowerarm_'+side)]),hand=posePosition(a.world[poseNodeIndex(a,'hand_'+side)]);
@@ -210,12 +257,7 @@ function poseGroundedGunBody(a,s,boat,requestedLean,hands=null){
     solveCrewLimb(a,['thigh_'+side,'calf_'+side,'foot_'+side],p.target,[sign*.25,.35,.85]);
     // Match the measured boot's rest orientation to the actual deck tangent;
     // leg IK must not leave a tipped ankle or rotate the sole through the deck.
-    const n=poseUnit([c*p.normal[0]-sn*p.normal[2],p.normal[1],sn*p.normal[0]+c*p.normal[2]]);
-    const delta=[...poseCross([0,1,0],n),1+n[1]],size=Math.hypot(...delta),alignment=delta.map(v=>v/size);
-    const parent=a.parent[f.node],q=poseRotation(a.world[parent]),inverse=[-q[0],-q[1],-q[2],q[3]],desired=new Float32Array(4),local=new Float32Array(4);
-    gltfQuatMultiply(desired,alignment,poseRotation(f.restWorld));gltfQuatMultiply(local,inverse,desired);a.pose[f.node].r.set(local);
-    const toe=poseNodeIndex(a,'ball_'+side);if(toe>=0)a.pose[toe].r.set(a.rest[toe].r);
-    if(a.updateBranch)a.updateBranch(f.node);else a.update();
+    poseBootFlat(a,side,poseUnit([c*p.normal[0]-sn*p.normal[2],p.normal[1],sn*p.normal[0]+c*p.normal[2]]));
     (s.grips??={})['foot_'+side]=p.target;
   }
   s.gunContacts={feet,lean,requestedLean,reachExcessBefore:reachExcess,workspaceForward};
@@ -368,11 +410,13 @@ export function poseCrewWork(a,s,boat){
       (s.grips??={})[`hand_${side}`]=hand;
     }
   }else if(s.role==='Helmsman'||s.roles?.includes('helmsman')){
-    a.blend('Brace',s.time,boat.modelId==='victory'?0:.4);
-    for(const [side,sign] of [['l',1],['r',-1]]){
-      const p=resolveShipNode(boat,'helm.grip',{along:sign*(boat.modelId==='victory'?-.09:.09)});if(boat.modelId!=='victory')p[0]+=sign*.035;
-      const target=actorLocal(p,s);
-      solveCrewLimb(a,[`upperarm_${side}`,`lowerarm_${side}`,`hand_${side}`],target,[sign*.6,1,.3]);
+    // Both boots planted on his own deck, under the quarterdeck on the Niña.
+    // Nor does a heel behind him climb onto the raised deck beyond his own.
+    const hands=crewHelmHands(boat),sz=boat.length/12,below=(boat.modelId??'nina')==='nina'?(x,z)=>hullDeck(z/sz)*HULL_VERTICAL_SCALE:(x,z)=>crewDeckHeight(boat,Math.min(z,s.position[2])/sz,x/(boat.beam/3.6))*vesselVerticalScale(boat);
+    poseGroundedGunBody(a,s,boat,0,hands,{floorAt:below,stoop:true});
+    for(const [i,[side,sign]] of [['l',1],['r',-1]].entries()){
+      const target=actorLocal(hands[i],s);
+      solveCrewLimb(a,[`upperarm_${side}`,`lowerarm_${side}`,`hand_${side}`],target,[sign*.6,.6,-.1]);
       (s.grips??={})[`hand_${side}`]=target;
     }
   }else if((s.firePanic??0)>0.15){

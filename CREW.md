@@ -51,9 +51,10 @@ to gender. Individual skills and two six-person duty watches remain future work.
 This is a lean gameplay complement for our default 20 m × 6 m vessel,
 not a documented historical minimum or a validated manning requirement.
 Adult body heights remain 1.71–1.80 m. Stations and deck elevations follow the
-enlarged hull, walking speed stays in metres per second, and the helmsman's station
-follows the tiller grip from 0.32 m forward, facing aft. A slight crouch lets both
-hands reach the waist-height arm. The player camera remains above on the quarterdeck.
+enlarged hull, walking speed stays in metres per second, and the helmsman follows
+the tiller's end from just aft of it and to port of the bar, facing forward and turned
+a little in toward it. A slight stoop lets both hands reach the waist-height arm.
+The player camera remains above on the quarterdeck.
 
 The [Museum of Angra do Heroísmo](https://museu-angra.cultura.azores.gov.pt/en/others/historical-pieces/caravela/)
 describes 20–30 m caravels, with smaller examples carrying 25–30 people. The

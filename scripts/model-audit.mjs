@@ -15,10 +15,11 @@ const flag = (name) => process.argv.includes('--' + name);
 const option = (name) => process.argv.find((a) => a.startsWith(`--${name}=`))?.split('=')[1];
 
 export async function loadAuditModules() {
-  const names = ['forest-trunks', 'gunnery-control', 'building-fracture', 'coastal-world', 'ship-fracture', 'hull', 'gunnery-models', 'crew', 'crew-pose', 'crew-work', 'crew-navigation', 'ship-models', 'models/victory', 'terrain-model', 'port-props', 'gltf'];
+  const names = ['forest-trunks', 'gunnery-control', 'building-fracture', 'coastal-world', 'ship-fracture', 'hull', 'gunnery-models', 'crew', 'crew-pose', 'crew-physics', 'crew-work', 'crew-navigation', 'ship-models', 'models/victory', 'terrain-model', 'port-props', 'gltf'];
   return Object.assign({}, ...(await Promise.all(names.map((n) => import(new URL(`../js/${n}.js`, import.meta.url).href)))));
 }
-export const loadCrewMeshes = (lib) => Object.fromEntries(['male', 'female'].map((sex) => [sex, lib.loadCrewGLB(readFileSync(new URL('assets/crew/' + (sex === 'female' ? 'sailor-female.glb' : 'sailor.glb'), root)))]));
+// As js/crew.js chooses them: Indigenous people are built on the classic bodies.
+export const loadCrewMeshes = (lib) => Object.fromEntries(Object.entries({ male: 'sailor', female: 'sailor-female', 'classic-male': 'sailor-classic', 'classic-female': 'sailor-female-classic' }).map(([key, file]) => [key, lib.loadCrewGLB(readFileSync(new URL(`assets/crew/${file}.glb`, root)))]));
 
 const browserArgs = () => (process.env.WEBGPU_BACKEND === 'metal' ? ['--enable-unsafe-webgpu', '--use-angle=metal', '--disable-gpu-watchdog'] : ['--enable-unsafe-webgpu', '--use-angle=swiftshader', '--use-webgpu-adapter=swiftshader']);
 

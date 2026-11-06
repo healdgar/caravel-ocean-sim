@@ -188,7 +188,7 @@ test('20 m hull grounds adult crew on real decks, keeps the helm reachable and l
   }
   const helm=company.crew.find(s=>s.role==='Helmsman');
   const grip=tillerPoint({length:20,beam:6});
-  assert.ok(Math.abs(helm.position[2]-grip[2]+.32)<1e-6);
+  assert.ok(Math.hypot(helm.position[0]-grip[0],helm.position[2]-grip[2])<.5,'stands at the tiller');
   assert.ok(grip[1]-helm.position[1]>.9 && grip[1]-helm.position[1]<1.1);
   assert.ok(helm.position[1]+1.8<vesselDeck(helm.z)*scale[1],'standing head clears the quarterdeck');
   // Detect actual upper tread faces, rather than trusting the requested step count.

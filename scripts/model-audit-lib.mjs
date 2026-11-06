@@ -579,6 +579,18 @@ export function floorUnder(ship, x, y, z, mask = PART.hull | PART.gun) {
   const hit = ship.index.first([x, y, z], down, 40, mask);
   return hit ? { y: y - hit.t, triangle: hit.triangle } : null;
 }
+// What a boot stands on. A boot is 10 cm across, and a deck is planks with 9 mm seams between them: one line down
+// through a seam, or along the edge between two triangles, found the deck below and called a sailor afloat. Of a
+// boot's width either way, the surface nearest his feet.
+const BOOT_REACH = 0.05;
+export function floorBeneath(ship, x, y, z, feet, mask = PART.hull | PART.gun) {
+  let best = null;
+  for (const [dx, dz] of [[0, 0], [BOOT_REACH, 0], [-BOOT_REACH, 0], [0, BOOT_REACH], [0, -BOOT_REACH]]) {
+    const floor = floorUnder(ship, x + dx, y, z + dz, mask);
+    if (floor && (!best || Math.abs(feet - floor.y) < Math.abs(feet - best.y))) best = floor;
+  }
+  return best;
+}
 
 export function auditMasts(ship, lib) {
   const { shipMastSpecs, modelDeck, vesselRailHeight } = lib, boat = ship.boat(), sy = ship.scale[1], sz = ship.scale[2];
@@ -641,7 +653,7 @@ export function auditGuns(ship, lib) {
     const breechOff = hasMesh ? ship.index.nearest(breech, 0xff, 30, notOwn)?.distance ?? 30 : null;
     const dir = unit(gunModelDirection(gun, s, 0, 0));
     const blocked = ship.index.first(muzzle, dir, 6, SOLID, 0.02, own);
-    const floor = floorUnder(ship, station[0], station[1] + 1.2, station[2], PART.hull);
+    const floor = floorBeneath(ship, station[0], station[1] + 1.2, station[2], station[1], PART.hull);
     const hullNear = ship.index.nearest(muzzle, PART.hull, 30)?.distance ?? 30;
     rows.push({
       id: gun.id, group: gun.meshGroup, abstract: !hasMesh, kind: gun.kind, side: gun.side, visibleCrew: !!gun.visibleCrew,
@@ -657,14 +669,17 @@ export function auditGuns(ship, lib) {
 // Is a standing body at this point on something, inside the ship, and clear of what is around it?
 export function standingAt(ship, x, y, z) {
   // From the knee down, so that a tiller or a wheel overhead is not taken for the floor.
-  const floor = floorUnder(ship, x, y + 0.5, z);
+  const floor = floorBeneath(ship, x, y + 0.5, z, y);
   const clearance = (height) => ship.index.nearest([x, y + height, z], PART.hull | PART.mast | PART.gun, 2);
   const chest = clearance(1.1), knee = clearance(0.45), up = ship.index.first([x, y + 0.2, z], upward, 3, PART.hull | PART.gun | PART.mast | PART.spar);
-  const portSide = ship.index.first([x, y + 0.35, z], [-1, 0, 0], 40, PART.hull), starboardSide = ship.index.first([x, y + 0.35, z], [1, 0, 0], 40, PART.hull);
+  // A side at any height of his legs and a boot either way along the ship: at knee height alone, the line runs out
+  // through a gunport, or along the edge between two triangles of the hull.
+  const side = (direction) => [0.15, 0.35, 0.7].some((height) => [0, BOOT_REACH, -BOOT_REACH].some((dz) => ship.index.first([x, y + height, z + dz], [direction, 0, 0], 40, PART.hull)));
+  const portSide = side(-1), starboardSide = side(1);
   return {
     floorGap: floor ? y - floor.y : null, floorPart: floor ? ship.groupId(floor.triangle) : null,
     chest: chest?.distance ?? 2, chestPart: chest ? ship.groupId(chest.triangle) : null, knee: knee?.distance ?? 2, kneePart: knee ? ship.groupId(knee.triangle) : null,
-    headroom: up ? up.t + 0.2 : Infinity, enclosed: !!portSide && !!starboardSide, roofed: !!(ship.index.first([x, y + 2.4, z], down, 1.9, PART.hull | PART.gun)),
+    headroom: up ? up.t + 0.2 : Infinity, enclosed: portSide && starboardSide, roofed: !!(ship.index.first([x, y + 2.4, z], down, 1.9, PART.hull | PART.gun)),
   };
 }
 
@@ -890,19 +905,27 @@ export function auditWaterline(ship, lib) {
 
 // --- Check 4: crew and props --------------------------------------------------------------------------------------
 
+const SOLE_LOOK = 0.28;
 // Each sailor's skinned surface. An edge of his body that crosses a solid surface is a real intersection, not
 // merely an arm reaching round something. Depth is how far past that surface the part reaches from his own middle.
-export function auditCrewBodies(ship, lib, crewMeshes, { everyNth = 3 } = {}) {
-  const { createCompany, stepCompany, poseCrewWork } = lib;
+export function auditCrewBodies(ship, lib, crewMeshes, { everyNth = 3, rowingPhase = 0.22, settle = 40 } = {}) {
+  const { createCompany, stepCompany } = lib;
   const boat = ship.boat({ rudder: 0, rollVelocity: 0, sailFore: 1, sailMain: 1, sailMizzen: 1, crew: false, hatchesClosed: 0 });
-  if (ship.model.geometry === 'rowing-procedural-v1') boat.rowingState = { phase: 0.22, rate: 0.45, effortPort: 0.6, effortStarboard: 0.6, cadence: 0.45 };
+  if (ship.model.geometry === 'rowing-procedural-v1') boat.rowingState = { phase: rowingPhase, rate: 0.45, effortPort: 0.6, effortStarboard: 0.6, cadence: 0.45 };
   const company = createCompany(undefined, ship.id, { fullWatch: true });
-  for (let i = 0; i < 40; i++) stepCompany(company, boat, 0.05, 2);
-  const rows = [], kinds = {}, MASK = PART.hull | PART.mast | PART.gun;
+  for (let i = 0; i < settle; i++) stepCompany(company, boat, 0.05, 2);
+  return crewBodiesOf(ship, lib, crewMeshes, company, boat, { everyNth });
+}
+// A company as it stands now, on this boat.
+export function crewBodiesOf(ship, lib, crewMeshes, company, boat, { everyNth = 3 } = {}) {
+  const { poseCrewWork, applyCrewRealism } = lib, rows = [], kinds = {}, MASK = PART.hull | PART.mast | PART.gun;
   for (const s of company.crew) {
-    const mesh = crewMeshes[s.sex], a = mesh.animator;
-    a.sample('Idle', s.time);
+    const mesh = (s.indigenous && crewMeshes[`classic-${s.sex}`]) || crewMeshes[s.sex], a = mesh.animator;
+    // In the order the game draws him, js/crew.js: a hand on a tiller closes its fingers only in applyCrewRealism.
+    a.sample('Idle', s.time, 'Walk', s.walkTime, s.walk);
+    if (s.brace > 0.001 && !(s.job?.rung > 0)) a.blend('Brace', s.time, s.brace);
     poseCrewWork(a, s, boat);
+    applyCrewRealism(a, s, boat, 1 / 60);
     const f = new Float32Array(mesh.vertices.buffer, mesh.vertices.byteOffset, mesh.vertices.byteLength / 4), u = new Uint16Array(mesh.vertices.buffer, mesh.vertices.byteOffset, mesh.vertices.byteLength / 2);
     const count = mesh.vertices.byteLength / 60, world = new Float64Array(count * 3), centre = [0, 0, 0];
     let lowest = Infinity;
@@ -935,23 +958,24 @@ export function auditCrewBodies(ship, lib, crewMeshes, { everyNth = 3 } = {}) {
       const hit = ship.index.first(centre, [d[0] / length, d[1] / length, d[2] / length], length, MASK);
       if (hit && crossedNames.has(ship.groupId(hit.triangle)) && length - hit.t > deepest) { deepest = length - hit.t; part = ship.groupId(hit.triangle); }
     }
-    // The soles against what is under them.
+    // The soles against what is under them, looking from below the lowest thwart's underside: a toe under the next
+    // bench has the bench over it, not through it.
     let soleDepth = 0, soles = 0;
     for (let i = 0; i < count; i++) {
       if (world[i * 3 + 1] > lowest + 0.03) continue;
-      const hit = ship.index.first([world[i * 3], lowest + 0.4, world[i * 3 + 2]], down, 1.2, PART.hull);
-      if (hit) { soleDepth += 0.4 - hit.t; soles++; }
+      const hit = ship.index.first([world[i * 3], lowest + SOLE_LOOK, world[i * 3 + 2]], down, 1.2, PART.hull);
+      if (hit) { soleDepth += SOLE_LOOK - hit.t; soles++; }
     }
     const worstPart = Object.entries(crossed).sort((x, y) => y[1] - x[1])[0]?.[0] ?? null;
     if (edges >= 6) tally(kinds, worstPart.replace(/\d+/g, '#'));
-    rows.push({ key: s.stationKey, role: s.role, at: centre.map((v) => round(v, 1)), edges, deepest, part: part ?? worstPart, soleBelow: soles ? soleDepth / soles : null });
+    rows.push({ key: s.stationKey, role: s.role, job: s.job?.kind ?? null, stage: s.job?.stage ?? null, at: centre.map((v) => round(v, 1)), edges, deepest, part: part ?? worstPart, soleBelow: soles ? soleDepth / soles : null });
   }
   const bad = rows.filter((r) => r.edges >= 6 && r.deepest > 0.08).sort((a, b) => b.deepest - a.deepest);
   const sunk = rows.filter((r) => r.soleBelow !== null && r.soleBelow > 0.04);
   return {
     crew: rows.length, intersecting: rows.filter((r) => r.edges >= 6).length, throughDeep: bad.length, deepestM: round(bad[0]?.deepest ?? 0),
     soleSunk: sunk.length, soleSunkMaxM: round(Math.max(0, ...sunk.map((r) => r.soleBelow))),
-    parts: topOf(kinds, 5), worst: bad.slice(0, 6).map((r) => ({ key: r.key, role: r.role, at: r.at, deepest: round(r.deepest), part: r.part, edges: r.edges })),
+    rows, parts: topOf(kinds, 5), worst: bad.slice(0, 6).map((r) => ({ key: r.key, role: r.role, at: r.at, deepest: round(r.deepest), part: r.part, edges: r.edges })),
   };
 }
 
@@ -972,7 +996,7 @@ export function auditCrewRoutes(ship, lib, { seconds = 60, dt = 0.1 } = {}) {
       let deck = null;
       try { deck = lib.crewDeckHeight(boat, p[2] / ship.scale[2], p[0] / ship.scale[0]) * ship.scale[1]; } catch { deck = null; }
       if (deck !== null && p[1] > deck + 0.6) continue;
-      const floor = floorUnder(ship, p[0], p[1] + 0.25, p[2]);
+      const floor = floorBeneath(ship, p[0], p[1] + 0.25, p[2], p[1]);
       samples++;
       const gap = floor ? p[1] - floor.y : 9;
       if (gap > 0.2) { floating++; worstFloat = Math.max(worstFloat, gap); tally(who, s.stationKey); tally(cells, `${Math.round(p[0])},${Math.round(p[1])},${Math.round(p[2])}`); }
