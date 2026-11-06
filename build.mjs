@@ -18,6 +18,7 @@ import { FOREST_VOLUME_ASSETS, SUBTROPICAL_FOREST_VOLUME_ASSETS } from './js/for
 import { FOREST_MIDDLE_ASSETS, SUBTROPICAL_FOREST_MIDDLE_ASSETS } from './js/forest-middle.js';
 import { FOREST_CLUSTER_ASSETS, SUBTROPICAL_FOREST_CLUSTER_ASSETS } from './js/forest-clusters.js';
 import { FOREST_MASS_ASSETS } from './js/forest-mass.js';
+import { FOREST_SURFACE_ASSETS, SUBTROPICAL_FOREST_SURFACE_ASSETS } from './js/forest-surfaces.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const wgslModules = ['js/wgsl/common.js', 'js/wgsl/celestial.js', 'js/wgsl/hull.js', 'js/wgsl/lateen.js', 'js/wgsl/victory.js', 'js/wgsl/vessel.js', 'js/wgsl/vessel-pose.js', 'js/wgsl/shadows.js', 'js/wgsl/interaction.js', 'js/wgsl/surface-waves.js', 'js/wgsl/surface-coupling.js', 'js/wgsl/fleet-wakes.js', 'js/wgsl/cloud-model.js', 'js/wgsl/clouds.js', 'js/wgsl/sky.js', 'js/wgsl/deck.js', 'js/wgsl/spindrift.js', 'js/wgsl/wetness.js', 'js/wgsl/sim.js', 'js/wgsl/water-optics.js', 'js/wgsl/underwater.js', 'js/wgsl/ocean.js', 'js/wgsl/ocean-lighting.js', 'js/wgsl/post.js', 'js/wgsl/caravel.js', 'js/wgsl/crew.js', 'js/wgsl/terrain.js', 'js/wgsl/weather.js', 'js/wgsl/anchor.js', 'js/wgsl/dolphins.js', 'js/wgsl/marine-life.js', 'js/wgsl/gunnery.js', 'js/wgsl/gunnery-probe.js', 'js/wgsl/hull-contact.js', 'js/wgsl/rowing-water.js'];
@@ -41,6 +42,7 @@ order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-native-lod.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-volume.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-middle.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-clusters.js');
+order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-surfaces.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/task-yield.js','js/forest-occlusion.js');
 order.splice(order.indexOf('js/profiler.js')+1,0,'js/gpu-benchmark.js');
 order.splice(order.indexOf('js/main.js'),0,'js/wgsl-prune.js','js/gpu-program-cache.js');
@@ -109,7 +111,7 @@ if(fs.existsSync(path.join(root,'assets/world/saba/wells-bay/manifest.json'))){
     runtimeAssetTypes.set('assets/world/saba/wells-bay/'+name,mime);
 }
 if(fs.existsSync(path.join(root,'assets/forest-scenery/saba/manifest.json'))){
-  for(const file of [...Object.values(FOREST_CLUSTER_ASSETS),...Object.values(FOREST_ASSETS),...Object.values(FOREST_IMPOSTOR_ASSETS),...Object.values(FOREST_LIGHT_ASSETS),...Object.values(FOREST_NATIVE_LOD_ASSETS),...Object.values(FOREST_VOLUME_ASSETS),...Object.values(FOREST_MIDDLE_ASSETS)]){
+  for(const file of [...Object.values(FOREST_SURFACE_ASSETS),...Object.values(FOREST_CLUSTER_ASSETS),...Object.values(FOREST_ASSETS),...Object.values(FOREST_IMPOSTOR_ASSETS),...Object.values(FOREST_LIGHT_ASSETS),...Object.values(FOREST_NATIVE_LOD_ASSETS),...Object.values(FOREST_VOLUME_ASSETS),...Object.values(FOREST_MIDDLE_ASSETS)]){
     if(fs.existsSync(path.join(root,file)))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':file.endsWith('.png')?'image/png':'application/octet-stream');
   }
 }
@@ -118,7 +120,7 @@ if(fs.existsSync(path.join(root,'assets/forest-scenery/saba/mass/manifest.json')
     runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':'application/octet-stream');
 }
 if(fs.existsSync(path.join(root,'assets/forest-scenery/subtropical/manifest.json'))){
-  for(const file of [...Object.values(SUBTROPICAL_FOREST_CLUSTER_ASSETS),...Object.values(SUBTROPICAL_FOREST_ASSETS),...Object.values(SUBTROPICAL_FOREST_VOLUME_ASSETS),...Object.values(SUBTROPICAL_FOREST_MIDDLE_ASSETS)]){
+  for(const file of [...Object.values(SUBTROPICAL_FOREST_SURFACE_ASSETS),...Object.values(SUBTROPICAL_FOREST_CLUSTER_ASSETS),...Object.values(SUBTROPICAL_FOREST_ASSETS),...Object.values(SUBTROPICAL_FOREST_VOLUME_ASSETS),...Object.values(SUBTROPICAL_FOREST_MIDDLE_ASSETS)]){
     if(fs.existsSync(path.join(root,file)))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':file.endsWith('.png')?'image/png':'application/octet-stream');
   }
 }
@@ -127,6 +129,8 @@ const runtimeAssetBytes = new Map(), pagesAssets = new Map();
 // lossless mature close-up buffers alone exceed 100 MB after base64 encoding;
 // load those optional buffers from the same versioned public asset instead.
 const externalDownloadGeometry=new Set(['assets/forest-scenery/saba/clusters/vertices.bin.gz','assets/forest-scenery/saba/clusters/indices.bin.gz','assets/forest-scenery/saba/vertices.bin.gz','assets/forest-scenery/saba/indices.bin.gz','assets/forest-scenery/saba/mass/vertices.bin.gz','assets/forest-scenery/saba/mass/indices.bin.gz','assets/forest-scenery/subtropical/vertices.bin.gz','assets/forest-scenery/subtropical/indices.bin.gz']);
+// Both block-compressed sets are a saving for online play. Offline, the embedded maps serve instead.
+for(const file of [...Object.values(FOREST_SURFACE_ASSETS),...Object.values(SUBTROPICAL_FOREST_SURFACE_ASSETS)])if(file.endsWith('.gz'))externalDownloadGeometry.add(file);
 function runtimeAssetURL(file,mime,inlineAssets){
   if(!runtimeAssetBytes.has(file))runtimeAssetBytes.set(file,fs.readFileSync(path.join(root,file)));
   const bytes=runtimeAssetBytes.get(file);

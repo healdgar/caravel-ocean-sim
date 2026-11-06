@@ -7,6 +7,7 @@ import { coastalClarity, coastalTurbidityScale } from './sea-colour.js';
 import { createSceneryCull, GROUND_COVER_CULL, TREE_CULL } from './scenery-cull.js';
 import { loadCanopyScenery, excludeCanopyRoots, createCanopyRenderer, canopyInspectionURL } from './canopy-scenery.js';
 import {loadTerrainNear,terrainNearGeometry,terrainNearContains,terrainNearSample,terrainNearPatchBounds,sampleTerrainNear} from './terrain-near.js';
+import {chooseForestSurfaceCodec} from './forest-surfaces.js';
 import {loadForestScenery,createForestRenderer,FOREST_VERTEX_WGSL,FOREST_ASSETS,SUBTROPICAL_FOREST_ASSETS} from './forest-scenery.js';
 import {loadForestMass,createForestMassRenderer,forestMiddleWoodPartition,FOREST_MASS_VERTEX_WGSL} from './forest-mass.js';
 import {loadForestMiddle,FOREST_MIDDLE_ASSETS,SUBTROPICAL_FOREST_MIDDLE_ASSETS} from './forest-middle.js';
@@ -482,6 +483,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     skipNative:skipNativeForest&&!useSubtropicalForest,
     deferNative:!skipNativeForest&&useProcedural&&!useSubtropicalForest,
     skipRoots:useProcedural,
+    deferSurfaces:Boolean(chooseForestSurfaceCodec(device,search.get('forestSurfaces')||'auto')),
     onManifest:resolveForestManifest,
     onRoots:resolveForestRoots,
   }).catch(error=>{forestFailure=error.message;resolveForestManifest(null);resolveForestRoots(null);return null;});

@@ -9,6 +9,86 @@
     "bytes": 8564253,
     "sha256": "0f68da0056057761395521f90ff931537ab272dbde05ba2cafddab89f25f468f"
   },
+  "assets/forest-scenery/saba/surfaces/family-0-albedo.bc7.bin.gz": {
+    "url": "assets/forest-scenery/saba/surfaces/family-0-albedo.bc7.bin.8761cbffd602c548.gz",
+    "bytes": 1407033,
+    "sha256": "8761cbffd602c5480e50cc1f2f8f1961f0c8a62e7243a2530b01ae398a82e213"
+  },
+  "assets/forest-scenery/saba/surfaces/family-0-detail.bc7.bin.gz": {
+    "url": "assets/forest-scenery/saba/surfaces/family-0-detail.bc7.bin.226a9b266854237d.gz",
+    "bytes": 2244425,
+    "sha256": "226a9b266854237d3f2b77fc215544dbc6b54207cb6822b3ef1377ffef5e0941"
+  },
+  "assets/forest-scenery/saba/surfaces/family-1-albedo.bc7.bin.gz": {
+    "url": "assets/forest-scenery/saba/surfaces/family-1-albedo.bc7.bin.d4ce4e868dbd5938.gz",
+    "bytes": 342267,
+    "sha256": "d4ce4e868dbd5938329fe53a90bbc58746d52f8dffa465daea1c626aeb31b371"
+  },
+  "assets/forest-scenery/saba/surfaces/family-1-detail.bc7.bin.gz": {
+    "url": "assets/forest-scenery/saba/surfaces/family-1-detail.bc7.bin.96513032dc89b4f4.gz",
+    "bytes": 478212,
+    "sha256": "96513032dc89b4f4e78edcaecdbf767f96214c8338dfcdc63d359010aac9eab3"
+  },
+  "assets/forest-scenery/saba/surfaces/family-0-albedo.astc.bin.gz": {
+    "url": "assets/forest-scenery/saba/surfaces/family-0-albedo.astc.bin.5d22d138d88e9f49.gz",
+    "bytes": 2731078,
+    "sha256": "5d22d138d88e9f492a0754e263cb744167d7c335102d040854591d8cb62cc093"
+  },
+  "assets/forest-scenery/saba/surfaces/family-0-detail.astc.bin.gz": {
+    "url": "assets/forest-scenery/saba/surfaces/family-0-detail.astc.bin.4b69699e9706669c.gz",
+    "bytes": 3094028,
+    "sha256": "4b69699e9706669c76dce0ef3caad264f8965cf69b3ce7d79d1477f13b76adb8"
+  },
+  "assets/forest-scenery/saba/surfaces/family-1-albedo.astc.bin.gz": {
+    "url": "assets/forest-scenery/saba/surfaces/family-1-albedo.astc.bin.3b62ecf956abe05b.gz",
+    "bytes": 540697,
+    "sha256": "3b62ecf956abe05b529813d285cfba8146d1e8c932ff39ca8286b2f060ecc39f"
+  },
+  "assets/forest-scenery/saba/surfaces/family-1-detail.astc.bin.gz": {
+    "url": "assets/forest-scenery/saba/surfaces/family-1-detail.astc.bin.cf736e80872c2837.gz",
+    "bytes": 614117,
+    "sha256": "cf736e80872c28377947dfc6bc4b2168b3e8fa3cb063b61bd99481fa456621c8"
+  },
+  "assets/forest-scenery/subtropical/surfaces/family-0-albedo.bc7.bin.gz": {
+    "url": "assets/forest-scenery/subtropical/surfaces/family-0-albedo.bc7.bin.0bc4a625ece7bfd5.gz",
+    "bytes": 1014125,
+    "sha256": "0bc4a625ece7bfd5f84066db4e4ca65242821c8f82101b19addd153bf0d91a99"
+  },
+  "assets/forest-scenery/subtropical/surfaces/family-0-detail.bc7.bin.gz": {
+    "url": "assets/forest-scenery/subtropical/surfaces/family-0-detail.bc7.bin.ed90f582d72d3d63.gz",
+    "bytes": 1477757,
+    "sha256": "ed90f582d72d3d635f465f41a9f7c034f6fc0967282e10d93a212714cee7605f"
+  },
+  "assets/forest-scenery/subtropical/surfaces/family-1-albedo.bc7.bin.gz": {
+    "url": "assets/forest-scenery/subtropical/surfaces/family-1-albedo.bc7.bin.3da635f9c02a4a91.gz",
+    "bytes": 296567,
+    "sha256": "3da635f9c02a4a913826e3ecd8ed84ba1a83c4ac719244dc3446ed83c530152e"
+  },
+  "assets/forest-scenery/subtropical/surfaces/family-1-detail.bc7.bin.gz": {
+    "url": "assets/forest-scenery/subtropical/surfaces/family-1-detail.bc7.bin.05bde450a539034c.gz",
+    "bytes": 312311,
+    "sha256": "05bde450a539034cbd29324da874c2809aa05cbe3fd7c6224b0493ca96470dc6"
+  },
+  "assets/forest-scenery/subtropical/surfaces/family-0-albedo.astc.bin.gz": {
+    "url": "assets/forest-scenery/subtropical/surfaces/family-0-albedo.astc.bin.9eea4a8e6d60a298.gz",
+    "bytes": 2092720,
+    "sha256": "9eea4a8e6d60a298d973c0dc2e7889acda468cb53998bfd6bd76d1e311ee57e1"
+  },
+  "assets/forest-scenery/subtropical/surfaces/family-0-detail.astc.bin.gz": {
+    "url": "assets/forest-scenery/subtropical/surfaces/family-0-detail.astc.bin.48a882a114e3f921.gz",
+    "bytes": 2270345,
+    "sha256": "48a882a114e3f92193a5bba44c117f638e495a05a8451fd6828675f3b12dac36"
+  },
+  "assets/forest-scenery/subtropical/surfaces/family-1-albedo.astc.bin.gz": {
+    "url": "assets/forest-scenery/subtropical/surfaces/family-1-albedo.astc.bin.f93bbd8bea2c3b0f.gz",
+    "bytes": 615134,
+    "sha256": "f93bbd8bea2c3b0fef2ab479adc995d9a4883b2863add8608f5a2a372b5d02da"
+  },
+  "assets/forest-scenery/subtropical/surfaces/family-1-detail.astc.bin.gz": {
+    "url": "assets/forest-scenery/subtropical/surfaces/family-1-detail.astc.bin.39700cc3440db013.gz",
+    "bytes": 394012,
+    "sha256": "39700cc3440db01345bdc62506aa65f92b829d527458f34a701ac7fb584a4377"
+  },
   "assets/forest-scenery/saba/vertices.bin.gz": {
     "url": "assets/forest-scenery/saba/vertices.bin.e45e1be7b39d818e.gz",
     "bytes": 78658880,
@@ -368,6 +448,16 @@
     "url": "assets/forest-scenery/subtropical/clusters/clusters.bin.e00909febf2d356a.gz",
     "bytes": 112111,
     "sha256": "e00909febf2d356a38ad3bc0c077dce51bfe60c1421f6e2c7fbe44be43ff1289"
+  },
+  "assets/forest-scenery/saba/surfaces/manifest.json": {
+    "url": "assets/forest-scenery/saba/surfaces/manifest.ad2701101db333d4.json",
+    "bytes": 15574,
+    "sha256": "ad2701101db333d40c6d2b9258af942cf2c3eca01f872a32d1d7b196fc5dfa46"
+  },
+  "assets/forest-scenery/subtropical/surfaces/manifest.json": {
+    "url": "assets/forest-scenery/subtropical/surfaces/manifest.607436af1f6516b8.json",
+    "bytes": 13485,
+    "sha256": "607436af1f6516b857b603f872eff32204b7d8a2bce6fec040f14d808397f0bd"
   },
   "assets/forest-scenery/saba/manifest.json": {
     "url": "assets/forest-scenery/saba/manifest.7d98919998ed8c52.json",

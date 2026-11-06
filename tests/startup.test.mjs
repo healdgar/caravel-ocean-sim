@@ -144,7 +144,7 @@ const OPTIONAL_ONLINE_REQUESTS=[
   /^https:\/\/services\.arcgisonline\.com\/ArcGIS\/rest\/services\/World_Imagery\/MapServer\/tile\/\d+\/\d+\/\d+$/,
   /^https:\/\/power\.larc\.nasa\.gov\/api\/temporal\/climatology\/point\?/,
   /^https:\/\/sixcailloux\.com\/waterworld\/assets\/forest-scenery\/[a-z]+\/(mass\/|clusters\/)?(vertices|indices)\.bin\.[a-f0-9]{16}\.gz$/,
-];
+  /^https:\/\/sixcailloux\.com\/waterworld\/assets\/forest-scenery\/(saba|subtropical)\/surfaces\/[a-z0-9.-]+\.[a-f0-9]{16}\.gz$/];
 
 test('both downloadable ocean pages start offline without required HTTP assets and survive failed optional requests',{timeout:120000},async()=>{
   // Failure-injection pages intentionally abort startup with GPU work pending.
