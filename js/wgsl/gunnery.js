@@ -544,7 +544,10 @@ struct GunneryArcVertex{
   else if(kind>=2.5&&kind<3.5){tint=vec3f(1.0,.42,.18);}
   else if(kind>=3.5){tint=vec3f(.55,.78,1.0);}
   let sunScale=.85+.25*sunVis[0];
-  let glow=tint*(2.4*sunScale+.6*max(0.0,F.sunDir.y));
+  // They are a guide, not a lamp. Night exposure runs thousands of times higher than day's, so undo it, and keep
+  // well under what would dazzle eyes used to the dark, whichever way the night was reached.
+  let night=1.0-smoothstep(-.06,.16,F.sunDir.y);
+  let glow=tint*(2.4*sunScale+.6*max(0.0,F.sunDir.y))*min(1.0,1.35/max(F.post.x,1e-3))*mix(1.0,.1,night);
   if(isRing){
     let r=length(v.uv);
     if(r>1.0){discard;}
