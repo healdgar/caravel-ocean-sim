@@ -1073,6 +1073,12 @@ export function sweepShipRigging(from, to, radius = 0.08, targetBoat, sourceBoat
 
 // A ball that crosses a mast's canvas or rope flies on, and that mast's rig takes the hit, once a ball however many
 // lines it parts. It is the same hit as any other on the rig, but for the ball's momentum, which it keeps.
+// A tear's reach is in metres, whatever the size of the ship. The sail's mesh is in design units.
+function sailRipRadius(boat, model, ammo) {
+  const metres = ammo === 'grape' ? 3.2 : ammo === 'chain' ? 2.9 : 2.1, frame = model?.designFrame;
+  return metres / Math.max(0.1, frame?.length ? (boat.length ?? frame.length) / frame.length : 1);
+}
+
 // The most a mast loses to one ball passing through its canvas or rope, the same limit as a hit near its foot.
 const TEAR_MAST_LOSS = 0.065;
 
@@ -1228,7 +1234,7 @@ export function applyShipImpactDamage(targetBoat, event) {
     const ripX = event.ripDesign?.[0] ?? (designPt ? Math.max(-1.85, Math.min(1.85, designPt[0])) : 0);
     const ripY = event.ripDesign?.[1] ?? (designPt ? Math.max(2.4, Math.min(8.4, designPt[1])) : 4.8);
     const ripZ = event.ripDesign?.[2] ?? (designPt ? Math.max(-5.6, Math.min(5.6, designPt[2])) : mastDefaultZ);
-    const ripRadius = ammo === 'grape' ? 1.95 : ammo === 'chain' ? 1.75 : 1.25;
+    const ripRadius = sailRipRadius(targetBoat, model, ammo);
     const ripSeverity = ammo === 'chain' ? 1.40 : ammo === 'grape' ? 1.25 : 0.92;
     damage.pendingBakes.push({
       kind: 'sail-rip',
@@ -1757,7 +1763,7 @@ export function applyShipImpactDamage(targetBoat, event) {
               z: +Math.max(-5.2, Math.min(5.2, mastDefaultZ + (designPt[2] - mastDefaultZ) * 0.35)).toFixed(3),
               mastGroup: nearGroup,
               ammo,
-              radius: ammo === 'chain' ? 1.55 : 1.15,
+              radius: sailRipRadius(targetBoat, model, ammo),
               severity: ammo === 'chain' ? 1.25 : 0.85,
               hits: damage.sailRips,
             });

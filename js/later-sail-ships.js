@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // Independent clipper/yacht construction. Published dimensions are retained in
 // the design ledger; loft offsets, structures and working rope leads are authored.
-import {createMeshWriter} from './mesh-writer.js';
+import {createMeshWriter,OAK_ACROSS_PER_METRE,OAK_ALONG_PER_METRE,shipOakGrain} from './mesh-writer.js';
 import {hullLoftPoint,hullLoftBottom,hullLoftSheer} from './hull-loft.js';
 import {laterSailDesign,laterSailHullWidth,laterSailDeck,laterSailDeckWidth,laterSailKeelHalfWidth,laterSailStairFlights} from './models/later-sail.js';
 import {laterSailRigContext,laterSailSteeringPose} from './additional-rig.js';
@@ -26,7 +26,8 @@ function laterMeshInside(rect,x,z){return x>rect.x0+1e-10&&x<rect.x1-1e-10&&z>re
 
 export function createLaterSailShipMesh(id,{groups,parts}={}){
   const d=laterSailDesign(id),p=d.profile,context=laterSailRigContext(id),cloud=id==='flying-cloud',flights=laterSailStairFlights(id);
-  const {out,tri,quad,box,tube,rope,ring,group,tag}=createMeshWriter({groups,parts}),sx=d.runtime.beam/d.frame.beam,sy=d.frame.verticalScale,sz=d.runtime.length/d.frame.length;
+  const sx=d.runtime.beam/d.frame.beam,sy=d.frame.verticalScale,sz=d.runtime.length/d.frame.length;
+  const {out,tri,quad,box,tube,rope,ring,group,tag}=createMeshWriter({groups,parts,grain:shipOakGrain(sy,sz,sx)});
   const begin=p.stations[0],end=p.stations.at(-1),h=d.hatch,c=d.cockpit;
   const hatch={x0:h.centre[0]-h.size[0]/2,x1:h.centre[0]+h.size[0]/2,z0:h.centre[2]-h.size[2]/2,z1:h.centre[2]+h.size[2]/2};
   const structures=d.structures.map(s=>({...s,x0:s.centre[0]-s.size[0]/2,x1:s.centre[0]+s.size[0]/2,z0:s.centre[2]-s.size[2]/2,z1:s.centre[2]+s.size[2]/2}));
@@ -113,7 +114,7 @@ export function createLaterSailShipMesh(id,{groups,parts}={}){
       let polygon=[[x,0,z],[x,0,Z],[X,0,Z],[X,0,z]];
       polygon=laterMeshClip(laterMeshClip(polygon,q=>q[0]+width(q[2])),q=>width(q[2])-q[0]);
       polygon=polygon.map(q=>[Math.max(-width(q[2]),Math.min(width(q[2]),q[0])),zone.height+hullLoftSheer(p,q[2]),q[2]]);
-      for(let n=1;n<polygon.length-1;n++){const q=[polygon[0],polygon[n],polygon[n+1]];tri(...q,0,q.map(v=>deckNormal(v[2])),q.map(v=>[v[0]*sx*3,v[2]*sz*.7]));}
+      for(let n=1;n<polygon.length-1;n++){const q=[polygon[0],polygon[n],polygon[n+1]];tri(...q,0,q.map(v=>deckNormal(v[2])),q.map(v=>[v[0]*sx*OAK_ACROSS_PER_METRE,v[2]*sz*OAK_ALONG_PER_METRE]));}
     }
     group('deck.'+zone.id+'.planks','deck.'+zone.id,start);
   }

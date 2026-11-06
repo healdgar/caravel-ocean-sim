@@ -47,8 +47,8 @@ The audit changes no model. No plain typo turned up.
 
 | # | Defect | Measured | Where |
 |---|---|---|---|
-| 16 | **Oak grain 2–10 times too dense on five ships**, the fault the Pinta and Santa María had. The default UV repeats per design unit, so a smaller ship packs more into a metre. It only looks right on Victory by luck of size. `additional-ships.js:39` passes a grain; these do not. | Repeats per metre across / along, Niña 0.96 / 0.33. Canoe deck 10 / 1.7, Lusoria 6.4 / 1.3, Oseberg 3.6 / 1.1, Gipsy Moth oak 3.7 / 1.5, Flying Cloud deck 3 / 0.7 and material 17 16.7 / 5. Pinta, Santa María, Victory match. | `js/rowing-ships.js:22`, `js/later-sail-ships.js:29`, `js/mesh-writer.js:28` |
-| 17 | **Wall planks grow with the ship.** The shader sets their width in design units. | Flying Cloud 0.91 m, Victory 0.76 m, Niña 0.27 m. | `js/wgsl/caravel.js:213` |
+| 16 | **Fixed: oak grain was 2–10 times too dense on five ships**, the fault the Pinta and Santa María had. All ships now take it from `shipOakGrain` in `js/mesh-writer.js`, in metres; Flying Cloud's oak and a few tubes still read off, listed in the known file. Was: The default UV repeats per design unit, so a smaller ship packs more into a metre. It only looks right on Victory by luck of size. `additional-ships.js:39` passes a grain; these do not. | Repeats per metre across / along, Niña 0.96 / 0.33. Canoe deck 10 / 1.7, Lusoria 6.4 / 1.3, Oseberg 3.6 / 1.1, Gipsy Moth oak 3.7 / 1.5, Flying Cloud deck 3 / 0.7 and material 17 16.7 / 5. Pinta, Santa María, Victory match. | `js/rowing-ships.js:22`, `js/later-sail-ships.js:29`, `js/mesh-writer.js:28` |
+| 17 | **Fixed: wall planks grew with the ship.** The shader now sets their width in metres, the Niña's on every ship. Was: their width was in design units. | Flying Cloud 0.91 m, Victory 0.76 m, Niña 0.27 m. | `js/wgsl/caravel.js:213` |
 
 ### Numbers wrong, little to see
 

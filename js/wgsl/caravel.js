@@ -210,7 +210,8 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
   let holedTimber=u32(hullDamage.scale.w)>0u && vesselWoodMaterial(in.material,paintedWood);
   let holeRim=select(0.0,max(hullHoleRim(p),0.0),holedTimber);
 `:''}  let plankedWall=in.material==15u || (paintedWood && abs(in.normalLocal.y)<.5) || (in.material==1u && abs(in.normalLocal.y)<.35);
-  let course=select(p.y/.16,in.uv.x*18.0,in.material==15u);
+  // Wall strakes are the Niña's width in metres on every ship, not in the ship's design units.
+  let course=select(p.y*hull.right.w/(.16*20.0/12.0),in.uv.x*18.0,in.material==15u);
   let board=floor(course);
   let edge=min(fract(course),1.0-fract(course));
   let seam=1.0-smoothstep(.008,.035+max(fwidth(course),.001),edge);

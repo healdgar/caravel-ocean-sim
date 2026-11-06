@@ -1,16 +1,15 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // Independent mixed-rig reconstructions. Every hull join follows this model's
 // loft; only the nine-float construction primitives are shared with other ships.
-import {createMeshWriter} from './mesh-writer.js';
+import {createMeshWriter,OAK_ACROSS_PER_METRE,OAK_ALONG_PER_METRE,shipOakGrain} from './mesh-writer.js';
 import {additionalDesign,additionalHullWidth,additionalDeck,additionalStairFlights} from './models/additional.js';
 import {hullLoftPoint,hullLoftBottom,hullLoftSheer,hullLoftStem} from './hull-loft.js';
 import {additionalRigContext,additionalGunAttachments} from './additional-rig.js';
 import {surfaceRestPoint,rigSurfacePose,surfaceClothPoint,surfaceYardPoint,surfaceRopePoint,withRigPoseContext} from './rig-surface.js';
 import {ANCHOR_IRON} from './anchor-iron.js';
 
-// Oak repeats and plank width in metres, taken from the Niña's hull and cabin
-// walls, so timber on the larger ships has the same grain at the same size.
-const DECK_BOARD=.145,OAK_ACROSS_PER_METRE=.96,OAK_ALONG_PER_METRE=.33,OAK_SPAR_PER_METRE=.45,OAK_HULL_ALONG_PER_METRE=.36,PLANK_METRES=.26;
+// The hull's own oak repeats and plank width in metres, taken from the Niña's hull.
+const DECK_BOARD=.145,OAK_HULL_ALONG_PER_METRE=.36,PLANK_METRES=.26;
 
 const additionalMeshAdd=(a,b)=>a.map((v,i)=>v+b[i]);
 const additionalMeshSub=(a,b)=>a.map((v,i)=>v-b[i]);
@@ -36,8 +35,7 @@ function additionalMeshFrame(axis,preferred){
 export function createAdditionalShipMesh(modelId,{groups,parts}={}){
   const design=additionalDesign(modelId),profile=design.profile,context=additionalRigContext(modelId);
   const sx=design.runtime.beam/design.frame.beam,sy=design.frame.verticalScale,sz=design.runtime.length/design.frame.length;
-  const {out,add,sub,mul,unit,tag,group,tri,quad,box,tube,rope,ring}=createMeshWriter({groups,parts,
-    grain:{across:OAK_ACROSS_PER_METRE*sy,along:OAK_ALONG_PER_METRE*sz,spar:OAK_SPAR_PER_METRE*sz}});
+  const {out,add,sub,mul,unit,tag,group,tri,quad,box,tube,rope,ring}=createMeshWriter({groups,parts,grain:shipOakGrain(sy,sz,sx)});
   const begin=profile.stations[0],end=profile.stations.at(-1),zones=design.deckZones,flights=additionalStairFlights(modelId);
   // The entry turns quickly, so the first stations sit closer together.
   const zSet=new Set([...profile.stations,...Array.from({length:61},(_,i)=>begin+(end-begin)*i/60),...Array.from({length:11},(_,i)=>begin+.1*i+.05)]);

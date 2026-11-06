@@ -142,6 +142,19 @@ test('the same ball striking the mast itself still does its full harm', () => {
   assert.ok(1 - boat.damage.mastIntegrity.main > 0.065, `it lost ${(1 - boat.damage.mastIntegrity.main).toFixed(3)}`);
 });
 
+test('a tear is the same size in metres on every ship', () => {
+  const metres = {};
+  for (const id of ['santa-maria', 'victory', 'flying-cloud']) {
+    const boat = shipOf(id), line = rakingLine(id, boat);
+    assert.ok(line, `${id} has canvas to tear`);
+    sweepAt(boat)(line.from, line.to, ball());
+    const rip = boat.damage.pendingBakes.find((bake) => bake.kind === 'sail-rip');
+    assert.ok(rip, `${id} is torn`);
+    metres[id] = rip.radius * (boat.length / boat.model.designFrame.length);
+  }
+  for (const value of Object.values(metres)) assert.ok(Math.abs(value - metres.victory) < 1e-6 && value < 3, `${JSON.stringify(metres)} m`);
+});
+
 test('the HUD hears of a tear, though the ball flies on', () => {
   const boat = shipOf('santa-maria'), line = rakingLine('santa-maria', boat), reports = [];
   const sweep = createGunnerySolidSweep({ sourceBoat: null, getVessels: () => [boat], onRigTorn: (report) => reports.push(report) });

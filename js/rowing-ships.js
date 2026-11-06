@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-import {createMeshWriter} from './mesh-writer.js';
+import {createMeshWriter,shipOakGrain} from './mesh-writer.js';
 import {rowingDesign,rowingDeck,rowingHullWidth,rowingHullDeck,rowingRigContext,rowingBenchDescriptors} from './models/rowing.js';
 import {hullLoftPoint,hullLoftBottom,hullLoftSheer} from './hull-loft.js';
 import {rowingStationPose,rowingSteeringPose} from './rowing.js';
@@ -19,9 +19,9 @@ function rowingMeshRestBoat(d){return {modelId:d.id,...d.runtime,rowingState:{ph
 
 export function createRowingShipMesh(modelId,{groups,parts}={}){
   const d=rowingDesign(modelId),p=d.profile,context=proceduralRigContext(modelId),rest=rowingMeshRestBoat(d),sx=d.runtime.beam/d.frame.beam,sy=d.frame.verticalScale,sz=d.runtime.length/d.frame.length;
-  const {out,quad,tri,box,tube,rope,group,tag,unit}=createMeshWriter({groups,parts});
+  const {out,quad,tri,box,tube,rope,group,tag,unit}=createMeshWriter({groups,parts,grain:shipOakGrain(sy,sz,sx)});
   const physicalGeometry=build=>{
-    const writer=createMeshWriter();build(writer);
+    const writer=createMeshWriter({grain:shipOakGrain()});build(writer);
     for(let i=0;i<writer.out.length;i+=9){
       const normal=unit([writer.out[i+3]*sx,writer.out[i+4]*sy,writer.out[i+5]*sz]);
       out.push(writer.out[i]/sx,writer.out[i+1]/sy,writer.out[i+2]/sz,...normal,writer.out[i+6],writer.out[i+7],writer.out[i+8]);

@@ -7,6 +7,11 @@
 // Flat faces then run their grain along the timber, and spars along their axis.
 // The texture repeats far too often without it, which fades the wood to a flat
 // pale average at any distance. Ships that do not pass it keep their exact bytes.
+// Oak repeats in metres, taken from the Niña's hull and cabin walls, so timber on every ship has the same grain at the
+// same size. Scale by metres per design unit: a ship's mesh is written in design units.
+export const OAK_ACROSS_PER_METRE=.96,OAK_ALONG_PER_METRE=.33,OAK_SPAR_PER_METRE=.45;
+export function shipOakGrain(sy=1,sz=1,sx=sy){return {across:OAK_ACROSS_PER_METRE*sy,along:OAK_ALONG_PER_METRE*sz,spar:OAK_SPAR_PER_METRE*sz,beamAcross:OAK_ACROSS_PER_METRE*sx,beamAlong:OAK_ALONG_PER_METRE*sx};}
+
 export function createMeshWriter({groups,parts,grain=null}={}){
   const out=[];
   const add=(a,b)=>a.map((x,i)=>x+b[i]),sub=(a,b)=>a.map((x,i)=>x-b[i]),mul=(a,s)=>a.map(x=>x*s);
@@ -24,7 +29,7 @@ export function createMeshWriter({groups,parts,grain=null}={}){
     if(ns&&n.reduce((s,x,i)=>s+x*ns[0][i],0)<0){[b,c]=[c,b];ns=[ns[0],ns[2],ns[1]];if(uv)uv=[uv[0],uv[2],uv[1]];}
     for(const [i,p]of [a,b,c].entries()){
       const t=uv?.[i]??(grain
-        ?Math.abs(n[1])>.65?[p[0]*grain.across,p[2]*grain.along]:Math.abs(n[0])>Math.abs(n[2])?[p[1]*grain.across,p[2]*grain.along]:[p[1]*grain.across,p[0]*grain.along]
+        ?Math.abs(n[1])>.65?[p[0]*grain.beamAcross,p[2]*grain.along]:Math.abs(n[0])>Math.abs(n[2])?[p[1]*grain.across,p[2]*grain.along]:[p[1]*grain.across,p[0]*grain.beamAlong]
         :Math.abs(n[1])>.65?[p[0]*5,p[2]*2]:[p[1]*5,p[2]*2]);
       out.push(...p,...(ns?.[i]??n),m,...t);
     }
