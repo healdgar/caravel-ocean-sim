@@ -113,7 +113,7 @@ Buildings break the way ships do: no hit moves a vertex, each piece is one rigid
 
 ## What a ball strikes on a building
 
-To the sweep a building is only a box saying the ball is near. The ball strikes the first thing really standing on its line: the mesh until the building is first hit and cut, then its pieces, skipping what has gone, and the earth behind a fort's facing. The box comes from what the building really reaches, so a star fort's bastions stop balls, and the air in the corners of a triangular fort does not. A ball into earth breaks nothing itself, but its shock carries to the rim of the hole, up to six metres, so a breach goes on widening. The earth stays. A fort's own balls never strike it, and a gun fires over the first six metres of its own works.
+To the sweep a building is only a box saying the ball is near. The ball strikes the first thing really standing on its line: the mesh until the building is first hit and cut, then its pieces, skipping what has gone, and the earth behind a fort's facing. The box comes from what the building really reaches, so a star fort's bastions stop balls, and the air in the corners of a triangular fort does not. Behind a fort's facing is earth, cut into clods two deep and about twice as hard to shift as stone, and behind that is the inside of the fort, so sustained fire opens a breach right through and the next ball flies in. A ball that strikes something that cannot break, such as a footing, still shakes what stands within six metres. A fort's own balls never strike it, and a gun fires over the first six metres of its own works.
 
 ## The free camera's cannon
 

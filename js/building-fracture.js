@@ -36,6 +36,8 @@ const PART_SMALL = 3.2, ISLAND_SMALL = 2.6, ONE_PIECE_LIMIT = 9;
 // Metres behind the face, by what the wall is made of. Thin walls are limited by their own thickness.
 const FACING_DEPTH = Object.freeze({ fortified: 1.05, masonry: 0.48, stucco: 0.34, timber: 0.11, roof: 0.1, opening: 0.05 });
 const CORE_DEPTH = 1.4, RAMPART_EDGE = 2.1;
+// The earth behind a fort's facing, in great clods, two deep, harder to shift than stone.
+const EARTH_CELL_M = 3, EARTH_THICK_M = 1.6, EARTH_LAYERS = 2, EARTH_HARDNESS = 2.2;
 // A building past this many blocks gets bigger blocks. A palisade fort would otherwise be thirty thousand of them.
 const SHARD_BUDGET = 3200;
 
@@ -365,7 +367,7 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
         const surface = surfaceOf(face.kind, fortified);
         if (staysBecauseLow(face.min, face.max)) { stay(face); continue; }
         const n = faceNormal(face), horizontal = Math.abs(n[1]) > 0.7;
-        if (fortified && !horizontal && platform && face.v.length === 4) geometry[0].cores.push({ face });
+        if (fortified && !horizontal && platform && face.v.length === 4) geometry[0].cores.push({ face, part });
         const longest = Math.max(face.max[0] - face.min[0], face.max[1] - face.min[1], face.max[2] - face.min[2]);
         // A paved floor at ground level stays, and so does the flat of a fort's rampart, which has earth under it.
         if (horizontal && !ROOF_KINDS.has(face.kind) && !surface.timber
@@ -404,12 +406,34 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
   }
 
   // Lay the mesh out shard by shard, so each owns a run of vertices.
+  // A fort's facing stands in front of rubble and earth, and that is what a breach shows first. The surface is
+  // rough but whole: clods that share a corner push it back by the same amount. Behind the last of it is the fort.
+  for (const { face, part } of geometry[0].cores) {
+    const n = faceNormal(face), corner = face.v.map((v) => [vertices[v * STRIDE], vertices[v * STRIDE + 1], vertices[v * STRIDE + 2]]);
+    const cellsAcross = Math.max(1, Math.round(Math.hypot(corner[1][0] - corner[0][0], corner[1][1] - corner[0][1], corner[1][2] - corner[0][2]) / (EARTH_CELL_M * blockScale)));
+    const cellsUp = Math.max(1, Math.round(Math.hypot(corner[3][0] - corner[0][0], corner[3][1] - corner[0][1], corner[3][2] - corner[0][2]) / (EARTH_CELL_M * blockScale)));
+    const earthAt = (i, j, layer) => {
+      const u = i / cellsAcross, w = j / cellsUp, q = new Float32Array(STRIDE);
+      for (let c = 0; c < 3; c++) q[c] = (1 - w) * ((1 - u) * corner[0][c] + u * corner[1][c]) + w * ((1 - u) * corner[3][c] + u * corner[2][c]);
+      const depth = CORE_DEPTH + 0.75 * blockNoise(Math.round(q[0] * 2) * 3.1 + Math.round(q[1] * 2) * 7.7 + Math.round(q[2] * 2) * 13.3, 7) + layer * EARTH_THICK_M;
+      for (let c = 0; c < 3; c++) { q[c] -= n[c] * depth; q[3 + c] = n[c] * RAW_SURFACE; }
+      q[6] = 16.125; q[7] = 0.46;
+      return q;
+    };
+    for (let layer = 0; layer < EARTH_LAYERS; layer++) for (let j = 0; j < cellsUp; j++) for (let i = 0; i < cellsAcross; i++) {
+      const corners = [earthAt(i, j, layer), earthAt(i + 1, j, layer), earthAt(i + 1, j + 1, layer), earthAt(i, j + 1, layer)];
+      const top = Math.max(corners[0][1], corners[1][1], corners[2][1], corners[3][1]);
+      if (top < Math.max(groundAt(corners[0][0], corners[0][2]), -0.6) + 0.02) continue;
+      const clod = newShard(BUILDING_SHARD_KINDS.block, part, { timber: false, span: 1 });
+      shards[clod].earth = true;
+      geometry[clod].blocks.push({ corners, depth: EARTH_THICK_M / RAW_SURFACE });
+    }
+  }
+  geometry[0].cores.length = 0;
   let vertexRoom = 0, indexRoom = 0;
   for (const { faces: ownFaces, blocks, cores } of geometry) {
     for (const face of ownFaces) { vertexRoom += face.v.length; indexRoom += face.v.length === 4 ? 6 : 3; }
     for (const { depth } of blocks) { vertexRoom += depth > 0 ? 24 : 4; indexRoom += depth > 0 ? 36 : 6; }
-    vertexRoom += cores.length * 4;
-    indexRoom += cores.length * 6;
   }
   const out = new Float32Array(vertexRoom * STRIDE), outIndices = new Uint32Array(indexRoom), vertexShards = new Uint32Array(vertexRoom);
   let vertexCount = 0, indexCount = 0;
@@ -489,17 +513,6 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
         shard.normalSum[0] += n[0]; shard.normalSum[1] += n[1]; shard.normalSum[2] += n[2];
       }
     }
-    // A fort's facing stands in front of rubble and earth. That is what a breach shows. The surface is rough
-    // but whole: two plates that share a corner push it back by the same amount.
-    for (const { face } of cores) {
-      const p = face.v.map((v) => {
-        const at = v * STRIDE, x = vertices[at], y = vertices[at + 1], z = vertices[at + 2];
-        const depth = CORE_DEPTH + 0.75 * blockNoise(Math.round(x * 2) * 3.1 + Math.round(y * 2) * 7.7 + Math.round(z * 2) * 13.3, 7);
-        return [x - vertices[at + 3] * depth, y - vertices[at + 4] * depth, z - vertices[at + 5] * depth];
-      });
-      const n = faceNormal(face);
-      emitQuad(0, p, n[0] * RAW_SURFACE, n[1] * RAW_SURFACE, n[2] * RAW_SURFACE, 16.125, 0.46);
-    }
   }
   yield 'mesh';
 
@@ -517,7 +530,7 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
   }
 
   // What stays and stands clear of the ground, as boxes in the building's frame: a shot through a breach
-  // can meet it. Floors and footings count, and so does a fort's earth, which is why a ball stops in a rampart.
+  // can meet it. Floors and footings count.
   const solidBoxes = [];
   const addSolid = (min, max) => {
     const a = toLocal(min[0], min[1], min[2]), b = toLocal(max[0], min[1], min[2]), c = toLocal(min[0], max[1], max[2]), d = toLocal(max[0], max[1], max[2]);
@@ -531,12 +544,6 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
     const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
     for (const q of corners) for (let c = 0; c < 3; c++) { if (q[c] < min[c]) min[c] = q[c]; if (q[c] > max[c]) max[c] = q[c]; }
     if (max[1] > Math.max(groundAt((min[0] + max[0]) * 0.5, (min[2] + max[2]) * 0.5), -0.6) + 0.1) addSolid(min, max);
-  }
-  for (const { face } of geometry[0].cores) {
-    // The earth begins behind the facing, where the core's surface is.
-    const min = [...face.min], max = [...face.max], at = face.v[0] * STRIDE;
-    for (let c = 0; c < 3; c++) { const inward = vertices[at + 3 + c] * CORE_DEPTH; min[c] -= inward; max[c] -= inward; }
-    addSolid(min, max);
   }
   const solids = new Float32Array(solidBoxes);
   yield* linkShards(shards);
@@ -556,7 +563,8 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
   const initial = rest.slice();
   for (let v = 0; v < vertexCount; v++) {
     const s = vertexShards[v];
-    if (!s) continue;
+    // The earth touches no stone to tell it the facing in front has gone, so it is always there.
+    if (!s || shards[s].earth) continue;
     const at = v * STRIDE;
     if (rest[at + 3] * rest[at + 3] + rest[at + 4] * rest[at + 4] + rest[at + 5] * rest[at + 5] < RAW_LENGTH_SQUARED) continue;
     const c = shards[s].centroid;
@@ -834,8 +842,8 @@ function distanceMetres(shard, local) {
   return Math.sqrt(sum);
 }
 
-// A ball that has struck bare earth, not a piece: how far off the nearest thing still standing lies, if near
-// enough to feel the shock. The earth stays, but the facing round the hole goes on falling.
+// A ball that has struck what cannot break, not a piece: how far off the nearest thing still standing lies, if
+// near enough to feel the shock, so what stands round the hole goes on falling.
 function rimOfBreach(state, point) {
   const { shards, strikable, toLocal } = state.fracture, local = toLocal(point[0], point[1], point[2]);
   let nearest = Infinity;
@@ -858,7 +866,7 @@ function strikeBuilding(state, point, normal, { radius, amount, power, now, drop
     const d = distanceMetres(shard, local);
     if (d >= radius) continue;
     state.touched = true;
-    const fall = 1 - (d / radius) ** 2, burn = amount * fall;
+    const fall = 1 - (d / radius) ** 2, burn = (amount * fall) / (shard.earth ? EARTH_HARDNESS : 1);
     state.wear[s] += burn;
     state.scorch[s] = Math.min(0.5, state.scorch[s] + burn * 0.35);
     state.scorchDirty = true;
