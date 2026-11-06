@@ -13,7 +13,7 @@ import {rowingStationPose,rowingSteeringPose} from './rowing.js';
 import {crewNavigationStation,crewNavigationRoute,crewRoutineSegmentClear,crewNavigationClear,crewNavigationSegmentClear,crewNavigationObstacles} from './crew-navigation.js';
 import {crewDeckHazard,crewMotionPolicy,crewAdvanceWalk,crewTurnTowards} from './crew-motion.js';
 import {vesselSidearm} from './gunnery-models.js';
-import {shipMastSpecs,LINE_MADE_FAST_BELOW_TOP} from './ship-fracture.js';
+import {shipMastSpecs,fracturePartsGone,LINE_MADE_FAST_BELOW_TOP} from './ship-fracture.js';
 import {crewOpenEdgeInset} from './crew-overboard.js';
 
 export const hasExtendedCrewModel=id=>Object.hasOwn(ROWING_DESIGNS,id??'')||Object.hasOwn(LATER_SAIL_DESIGNS,id??'');
@@ -123,10 +123,26 @@ export function crewMastTop(boat,mast){
   const spec=shipMastSpecs(boat.modelId??'nina').find(m=>m[0]===name);
   return spec?spec[stage>=2?3:2]:Infinity;
 }
-// A runner is made fast at its head. If that went with the mast, there is nothing left to climb.
+// A runner's foot within this of the deck's edge, in design units, stands on her rail and not on her deck.
+const CREW_RUNNER_FOOT_AT_RAIL=.1;
+// What the foot of a runner stands on: Victory's on her chainwales, and other ships' on the rail where it reaches
+// the side. Niña's stands inboard on the deck, which never leaves.
+export function crewRunnerFootGone(boat,mast,side){
+  const state=boat.damage?.fracture;if(!state?.brokenCount)return false;
+  if(boat.modelId==='victory')return fracturePartsGone(state).has(`chainwale.${crewMastName(boat,mast)}.${side}`);
+  const root=climbRoot(mast,side,0,boat);
+  return Math.abs(root[0])+CREW_RUNNER_FOOT_AT_RAIL>=modelDeckWidth(boat,root[2])&&crewOpenEdgeInset(boat,root[2],side)>0;
+}
+// A runner is made fast at its head and its foot. With either gone there is nothing left to climb.
 export function crewRunnerGone(boat,mast,side){
+  if(crewRunnerFootGone(boat,mast,side))return true;
   const top=crewMastTop(boat,mast);
   return top!==Infinity&&climbRoot(mast,side,crewRunnerMetrics(boat,mast,side).rungs,boat)[1]-LINE_MADE_FAST_BELOW_TOP>=top;
+}
+// The side a hand can climb, given the one he would choose. Zero if neither side has a runner left.
+export function crewClimbSide(boat,mast,side){
+  if(!crewRunnerGone(boat,mast,side))return side;
+  return crewRunnerGone(boat,mast,-side)?0:-side;
 }
 function haulStation(mast,boat){
   return resolveShipNode(boat,`station.haul.${['fore','main','mizzen'][mast]}`,{space:'design'});
@@ -321,7 +337,7 @@ function crewWorkNavigationOptions(s,boat){
   return {...s.navigationBody,rigAccess:access};
 }
 function crewWorkSegmentClear(s,boat,a,b){
-  if(hasExtendedCrewModel(boat.modelId))return true;
+  if(hasExtendedCrewModel(boat.modelId))return crewRoutineSegmentClear(s,boat,a,b);
   return crewNavigationSegmentClear(physical(a,boat),physical(b,boat),boat,crewWorkNavigationOptions(s,boat));
 }
 function crewWorkNavigationRoute(s,path,boat,{exactTarget=false,job=s.job}={}){
@@ -707,6 +723,12 @@ export function proceduralCrewRoute(s,target,boat,company=null){
   const d=proceduralDesign(boat.modelId),sx=boat.beam/d.frame.beam,sy=d.frame.verticalScale,sz=boat.length/d.frame.length,flights=crewExtendedFlights(d.id);
   const rowingBody=Object.hasOwn(ROWING_DESIGNS,d.id),bodies=company?.crew.filter(other=>other!==s&&other.casualtyState!=='fallen'&&other.position)??[];
   const pitch=.32,margin=d.cockpit?.22:.27,lo=d.profile.stations[0]*sz+.28,hi=d.profile.stations.at(-1)*sz-.28,columns=Math.ceil(boat.beam/pitch);
+  // A station beside an open edge moves inboard of it, and nothing below walks along one.
+  const targetInset=crewOpenEdgeInset(boat,target[2],Math.sign(target[0]));
+  if(targetInset){
+    const keep=Math.max(0,proceduralDeckWidth(d.id,target[2])-targetInset-(margin+.02)/sx);
+    if(Math.abs(target[0])>keep){const x=Math.sign(target[0])*keep;target=[x,proceduralDeck(d.id,target[2],x),target[2]];}
+  }
   // Narrow yacht side decks may lie between regular grid columns. Include the
   // actual centre of each authored cabin/walkway gap, without shrinking people.
   const xColumns=[...Array.from({length:columns+1},(_,i)=>-boat.beam/2+i*boat.beam/columns),...flights.map(f=>f.x*sx)];
@@ -736,7 +758,7 @@ export function proceduralCrewRoute(s,target,boat,company=null){
   const make=(i,j)=>{
     if(i<0||i>nx||j<0||j>nz)return null;const key=j*width+i;if(points.has(key))return points.get(key);
     const x=xColumns[i]/sx,z=zRows[j]/sz,y=floor(x,z),p=[x,y,z],world=physical(p,boat);
-    let clear=Math.abs(x)+margin/sx<proceduralDeckWidth(d.id,z);
+    let clear=Math.abs(x)+margin/sx+crewOpenEdgeInset(boat,z,Math.sign(x))<proceduralDeckWidth(d.id,z);
     const c=d.cockpit;
     if(clear&&c){
       const entry=flights.some(f=>f.zoneId==='cockpit'&&Math.abs(x-f.x)<=f.width/2-margin/sx&&z>=f.z0-margin/sz&&z<=f.z1+margin/sz);
@@ -826,10 +848,11 @@ function assignProceduralCrewWork(company,boat){
     if(Math.abs(targetSet-sails.set[control.index])<=1e-6)continue;
     const station=context.controlStations?.[control.name];if(!station)continue;
     const mast=station.mast??control.surfaces[0].mast,runner='mast.'+crewMastName(boat,mast)+'.runner';
-    const climbing=!solo&&control.surfaces.some(s=>s.kind==='square')&&(model.nodes[runner]?.motion?.rungs??0)>0&&!crewRunnerGone(boat,mast,1);
+    const climbSide=(model.nodes[runner]?.motion?.rungs??0)>0?crewClimbSide(boat,mast,1):0;
+    const climbing=!solo&&control.surfaces.some(s=>s.kind==='square')&&climbSide!==0;
     for(const kind of climbing?['haul','rig']:['haul']){
       if(company.crew.some(s=>s.job?.control===control.index&&s.job.kind===kind))continue;
-      const side=1,target=kind==='haul'?station.position:climbRoot(mast,side,0,boat);
+      const side=climbSide||1,target=kind==='haul'?station.position:climbRoot(mast,side,0,boat);
       for(const s of free(target))if(crewProceduralTask(company,boat,s,{kind,control:control.index,mast,side,controlGroup:control.name},target))break;
     }
     const ready=company.crew.filter(s=>s.job?.control===control.index&&s.job.stage==='working'&&s.intent==='work'&&!s.observation.hazard);
@@ -861,23 +884,24 @@ export function assignCrewWork(company,boat) {
         j.stage='ascending';j.elapsed=0;continue;
       }
       if((j.rung??0)<=0&&(['return','waiting-return'].includes(j.stage)||j.kind==='yield')){
-        const wantsClimb=CLIMBERS[s.id]&&needs[CLIMBERS[s.id][0]]&&!sails.maneuver&&!crewRunnerGone(boat,CLIMBERS[s.id][0],CLIMBERS[s.id][1]);
+        const wantsClimb=CLIMBERS[s.id]&&needs[CLIMBERS[s.id][0]]&&!sails.maneuver&&crewClimberSide(s,boat,sails,CLIMBERS[s.id][0])!==0;
         const wantsHaul=HANDS[s.id]!==undefined&&(needs[HANDS[s.id]]||sails.maneuver);
         const wantsHatch=s.id==='rui'&&company.order==='weather'&&(boat.hatchesClosed??0)<.999;
         if(wantsClimb||wantsHaul||wantsHatch){s.job=null;}else continue;
       }else continue;
     }
     let job;
-    if(CLIMBERS[s.id] && needs[CLIMBERS[s.id][0]] && !sails.maneuver && !crewRunnerGone(boat,CLIMBERS[s.id][0],CLIMBERS[s.id][1])){
-      const [mast]=CLIMBERS[s.id],side=boat.modelId==='victory'||ADDITIONAL_DESIGNS[boat.modelId]?Math.sign(s.x)||-1:-Math.sign(sails.rig[mast].side);job={kind:'rig',mast,side};
+    if(CLIMBERS[s.id] && needs[CLIMBERS[s.id][0]] && !sails.maneuver && crewClimberSide(s,boat,sails,CLIMBERS[s.id][0])!==0){
+      const [mast]=CLIMBERS[s.id];job={kind:'rig',mast,side:crewClimberSide(s,boat,sails,mast)};
     }else if(HANDS[s.id]!==undefined && (needs[HANDS[s.id]] || sails.maneuver)){
       job={kind:'haul',mast:HANDS[s.id]};
     }else if(company.gunneryActive){
       job=null;
     }else if(s.id==='rui' && company.order==='weather' && (boat.hatchesClosed??0)<.999){
       job={kind:'hatch'};
-    }else if(s.id==='maria' && !sails.maneuver && company.order==='watch' && company.workTime>(s.nextWatch??12) && crewMastTop(boat,ADDITIONAL_DESIGNS[boat.modelId]?.lookout?.mast??0)===Infinity){
-      job={kind:'lookout',mast:ADDITIONAL_DESIGNS[boat.modelId]?.lookout?.mast??0,side:boat.modelId==='victory'||ADDITIONAL_DESIGNS[boat.modelId]?Math.sign(s.x)||-1:-Math.sign(sails.rig[0].side)};
+    }else if(s.id==='maria' && !sails.maneuver && company.order==='watch' && company.workTime>(s.nextWatch??12) && crewMastTop(boat,ADDITIONAL_DESIGNS[boat.modelId]?.lookout?.mast??0)===Infinity && crewClimberSide(s,boat,sails,ADDITIONAL_DESIGNS[boat.modelId]?.lookout?.mast??0)!==0){
+      const mast=ADDITIONAL_DESIGNS[boat.modelId]?.lookout?.mast??0;
+      job={kind:'lookout',mast,side:crewClimberSide(s,boat,sails,mast)};
     }
     if(!job)continue;
     job.stage='approach';job.elapsed=0;job.rung=0;job.revision=company.revision;
@@ -923,7 +947,7 @@ export function assignCrewWork(company,boat) {
     const targetSet=sailCanvasTarget(boat,mast);
     const raising=targetSet>sails.set[mast]+1e-4;
     // A mast that has lost its runners has its canvas handled from the deck.
-    const climberAssigned=company.crew.some(s=>CLIMBERS[s.id]?.[0]===mast&&s.casualtyState!=='fallen'&&!crewRunnerGone(boat,mast,CLIMBERS[s.id][1]));
+    const climberAssigned=company.crew.some(s=>CLIMBERS[s.id]?.[0]===mast&&s.casualtyState!=='fallen'&&crewClimberSide(s,boat,sails,mast)!==0);
     boat.crewRigRate[mast]=Number(!aloft && hauling);
     boat.crewSailRate[mast]=(mast===2||raising||!climberAssigned)
       ?Number(hauling)
@@ -1128,11 +1152,17 @@ export function stepCrewWork(s,company,boat,dt) {
 // someone still on deck or on what is left. A lookout has no top to go to; others come back from the foot.
 function crewMastJobLost(s,boat,company){
   const j=s.job;
-  if((j.kind!=='rig'&&j.kind!=='lookout')||crewMastTop(boat,j.mast)===Infinity)return false;
-  if(j.kind==='lookout'&&['ascending','working','lookout-approach'].includes(j.stage)&&(j.rung??0)>0){crewWorkDescend(s);return true;}
-  if((j.rung??0)>0||['return','waiting-return'].includes(j.stage)||(j.kind==='rig'&&!crewRunnerGone(boat,j.mast,j.side)))return false;
+  if(j.kind!=='rig'&&j.kind!=='lookout')return false;
+  const mastBroken=crewMastTop(boat,j.mast)!==Infinity,runnerGone=crewRunnerGone(boat,j.mast,j.side);
+  if(!mastBroken&&!runnerGone)return false;
+  if(j.kind==='lookout'&&mastBroken&&['ascending','working','lookout-approach'].includes(j.stage)&&(j.rung??0)>0){crewWorkDescend(s);return true;}
+  if((j.rung??0)>0||['return','waiting-return'].includes(j.stage)||(j.kind==='rig'&&!runnerGone))return false;
   startReturn(s,boat,company);
   return true;
+}
+// The side a climber would take on this mast and can, or zero.
+function crewClimberSide(s,boat,sails,mast){
+  return crewClimbSide(boat,mast,boat.modelId==='victory'||ADDITIONAL_DESIGNS[boat.modelId]?Math.sign(s.x)||-1:-Math.sign(sails.rig[mast].side));
 }
 function startReturn(s,boat,company=null){
   const j=s.job;delete j.trafficResume;j.stage='return';j.elapsed=0;j.cursor=0;

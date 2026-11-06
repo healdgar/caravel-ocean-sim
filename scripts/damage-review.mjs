@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // Pictures of a ship under fire, from the real game. Shots go through the game's own sweep and damage
 // code against the live vessel, so the renderer shows what a battle would leave. Same seed every run.
-//   OUT=dir node scripts/damage-review.mjs before nina,victory,victory-fall,nina-fall,nina-aloft,victory-aloft
+//   OUT=dir node scripts/damage-review.mjs before nina,victory,victory-fall,nina-fall,nina-aloft,victory-aloft,victory-chains,cloud,cloud-fall
 // Each scene also prints what a row of level shots does against the gaps, and what became of hands aloft.
 // SETTLE_MS overrides the wait after the last shot. HEADED=1 shows the window.
 import {once} from 'node:events';
@@ -38,6 +38,10 @@ const SCENES={
   'nina-fall':{ship:'nina',settle:300,frames:[600,800,1000,2000],volleys:[{shots:60,mass:1.4,speed:330,minY:6,maxY:9,mast:'mizzen'}],views:[{name:'fall',yaw:20,elevation:8,distance:34}]},
   // Hands on the mast when it goes: rung counts from the deck, so these land in different places.
   'nina-aloft':{ship:'nina',settle:300,frames:[300,500,800,1500,3000],aloft:[{mast:1,side:-1,rung:24},{mast:1,side:-1,rung:12},{mast:1,side:1,rung:3}],volleys:[{shots:60,mass:1.4,speed:330,minY:6,maxY:9,mast:'main'}],views:[{name:'fall',yaw:20,elevation:8,distance:34}]},
+  // A broadside along her topsides, to open her rail. The report says who is left standing beside the gaps.
+  cloud:{ship:'flying-cloud',settle:6000,volleys:[{shots:70,mass:2,speed:330,minY:3.2,maxY:5}],views:[{name:'beam',yaw:0,elevation:14,distance:60}]},
+  // Shots at the main chainwale on the side they come from, with hands on the shrouds either side.
+  'victory-chains':{ship:'victory',settle:300,frames:[500,1000,2000,3000],aloft:[{mast:1,side:-1,rung:6},{mast:1,side:-1,rung:22},{mast:1,side:1,rung:10}],volleys:[{shots:40,mass:14.5,speed:430,minY:5.6,maxY:7.6,minZ:3.5,maxZ:9}],views:[{name:'chains',yaw:-20,elevation:6,distance:50}]},
   'victory-aloft':{ship:'victory',settle:300,frames:[500,800,1200,2500,4000],aloft:[{mast:1,side:1,rung:25},{mast:1,side:-1,rung:8},{mast:1,side:-1,rung:2}],volleys:[{shots:60,mass:14.5,speed:430,minY:24,maxY:34,mast:'main'}],views:[{name:'fall',yaw:-20,elevation:6,distance:62}]},
 };
 await mkdir(outDir,{recursive:true});
@@ -80,7 +84,7 @@ for(const name of ships){
     }
     const file=join(outDir,`${name}-${label}-${v.name}.png`);await page.screenshot({path:file});console.log('wrote',file);
   }
-  console.log(name,'hands still at an open edge',JSON.stringify(await page.evaluate(()=>window.damageReviewEdge())));
+  console.log(name,'hands still at an open edge',JSON.stringify(await page.evaluate(()=>window.damageReviewEdge())),JSON.stringify(await page.evaluate(()=>window.damageReviewDeck())));
   if(errors.length)console.log('errors:',errors.slice(0,5).join('\n'));
   await page.close();
 }

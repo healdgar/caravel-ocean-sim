@@ -176,4 +176,6 @@ He comes away as it leans, thrown to the side it falls by up to 5 m/s, harder th
 
 Nobody is sent up a mast with no runners left, nobody keeps a lookout from a broken mast, and a hand walking to one turns back. Its canvas is then handled from the deck.
 
+A runner also needs its foot. Victory's stand on her chainwales, and on other ships a foot at the side stands on the rail (`crewRunnerFootGone`). When that goes, whoever is on those shrouds or that chainwale comes off, outward. Climbers use the other side if it still has its runners, and a lookout coming down from the top does the same. Niña's feet stand inboard on the deck, so this never takes hers.
+
 An edge that has lost its rail is covered in `GUNNERY.md`, under What a gap does.

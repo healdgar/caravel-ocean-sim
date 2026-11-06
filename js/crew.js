@@ -343,7 +343,7 @@ export function createDeckhand(policy=deckhandDecision) {
 }
 // A hand left standing at an edge with no rail moves in from it, wherever the order had him.
 function crewStepInboard(s,boat,dt){
-  if(!boat.damage?.fracture?.brokenCount||s.role==='Helmsman'||s.seatedPose||s.visible===false)return false;
+  if(!boat.damage?.fracture?.brokenCount||s.role==='Helmsman'||s.roles?.includes('helmsman')||s.seatedPose||s.visible===false)return false;
   const side=Math.sign(s.x);if(!side)return false;
   const inset=crewOpenEdgeInset(boat,s.z,side);if(!inset)return false;
   const sx=boat.beam/3.6,keep=Math.max(0,modelDeckWidth(boat,s.z)-inset-.34/sx);
@@ -409,7 +409,7 @@ function stepProceduralDeckhand(s,boat,dt,wind,company){
     s.position.set([s.x*boat.beam/3.6,crewDeckHeight(boat,s.z,s.x)*vesselVerticalScale(boat)+.028,s.z*boat.length/12]);
     const seat=seated.seat,feet=seated.feet;s.moisturePoints=[feet[0].map((v,i)=>(v+feet[1][i])*.5),seat.map((v,i)=>v+(i===1?.10:0)),seat.map((v,i)=>v+(i===1?.50:0)),seat.map((v,i)=>v+(i===1?.95:0))];
   }else{
-    const moving=isDown?false:crewPatrolMotion(s,boat,dt,company);
+    const moving=isDown?false:crewStepInboard(s,boat,dt)||crewPatrolMotion(s,boat,dt,company);
     s.walk+=(Number(moving)-s.walk)*(1-Math.exp(-dt*8));s.moisturePoints=null;
     const proneLift=isDown?0.11*Math.abs(Math.sin(s.climbPitch??0)):0;
     s.position.set([s.x*boat.beam/3.6,(s.navigationY??crewDeckHeight(boat,s.z,s.x))*vesselVerticalScale(boat)+.028+proneLift,s.z*boat.length/12]);

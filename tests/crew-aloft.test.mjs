@@ -5,15 +5,16 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createCompany, stepCompany, reviveCompany } from '../js/crew.js';
 import { crewClearsRail, crewRailAboveDeck, crewOpenEdgeInset } from '../js/crew-overboard.js';
-import { crewNavigationClear, crewNavigationRoute, crewNavigationSegmentClear, crewNavigationStation } from '../js/crew-navigation.js';
-import { crewMastTop, crewRunnerGone, crewDeckHeight } from '../js/crew-work.js';
+import { crewNavigationClear, crewNavigationRoute, crewNavigationSegmentClear, crewNavigationStation, crewRoutineSegmentClear } from '../js/crew-navigation.js';
+import { crewClimbSide, crewMastTop, crewRunnerFootGone, crewRunnerGone, crewDeckHeight, proceduralCrewRoute } from '../js/crew-work.js';
 import { ALOFT_FALL_FATAL_M, ALOFT_FALL_HURT_M } from '../js/crew-aloft.js';
 import { applyShipImpactDamage, createVesselDamageState } from '../js/gunnery-control.js';
 import { repairVessel } from '../js/vessel-damage.js';
 import { createShipAssetCache } from '../js/ship-mesh.js';
-import { applyFractureEvents, shipFractureStateOf } from '../js/ship-fracture.js';
+import { applyFractureEvents, fracturePartsGone, shipFractureStateOf } from '../js/ship-fracture.js';
 import { boatHydrodynamics } from '../js/boat.js';
-import { getShipModel } from '../js/ship-models.js';
+import { getShipModel, resolveShipNode } from '../js/ship-models.js';
+import { victoryChainwale } from '../js/models/victory.js';
 import { modelDeck, modelDeckWidth, vesselVerticalScale } from '../js/hull.js';
 
 const cache = createShipAssetCache();
@@ -88,6 +89,7 @@ test('nobody walks along an open edge, but a hand caught there can leave and a r
   openRail(boat, 1, z - 1.2, z + 1.2);
   assert.ok(crewOpenEdgeInset(boat, z, 1) > 0, 'the deck is narrower beside the gap');
   const inboard = [(edge - 0.8) * sx, floor, z * sz];
+  assert.equal(crewNavigationSegmentClear(along[0], along[1], boat), false, 'no walking along it');
   assert.equal(crewNavigationSegmentClear(inboard, [edge * sx, floor, z * sz], boat), false, 'no walking out to it');
   assert.equal(crewNavigationSegmentClear([edge * sx, floor, z * sz], inboard, boat), true, 'a hand already there can come away');
   const route = crewNavigationRoute([[1.0, modelDeck(boat, z - 1), z - 1], [1.0, modelDeck(boat, z + 1), z + 1]], boat);
@@ -262,4 +264,162 @@ test('a mast repaired and shot away again takes its hands again, and a revived c
   assert.ok(!s.job, 'it counts as a new fall');
   reviveCompany(company);
   assert.ok(!s.aloftFall && !s.overboard && s.casualtyState === 'able');
+});
+
+// Ships whose crews route over a grid of their own, and do not plan around obstacles.
+const EXTENDED = ['flying-cloud', 'gipsy-moth-iv', 'oseberg', 'lusoria', 'taino-canoe'];
+const keepsOffEdge = (boat, p, margin) => Math.abs(p[0]) + crewOpenEdgeInset(boat, p[2], Math.sign(p[0])) + margin / (boat.beam / 3.6) <= modelDeckWidth(boat, p[2]) + 1e-6;
+
+test('damage narrows the walkway on every ship with crew', () => {
+  for (const id of EXTENDED) {
+    const boat = ship(id), sx = boat.beam / 3.6, sy = vesselVerticalScale(boat), sz = boat.length / 12, z = 0;
+    const width = modelDeckWidth(boat, z), edge = width - 0.3 / sx - 0.03, floor = modelDeck(boat, z, edge) * sy;
+    const along = [[edge, modelDeck(boat, z - 0.3, edge), z - 0.3], [edge, modelDeck(boat, z + 0.3, edge), z + 0.3]];
+    assert.equal(crewRoutineSegmentClear(null, boat, along[0], along[1]), true, `${id}: she walks her rail while it stands`);
+    openRail(boat, 1, z - 1.5, z + 1.5);
+    assert.ok(crewOpenEdgeInset(boat, z, 1) > 0, `${id}: the deck is narrower beside the gap`);
+    assert.equal(crewRoutineSegmentClear(null, boat, along[0], along[1]), false, `${id}: no walking along it`);
+    assert.equal(crewRoutineSegmentClear(null, boat, [edge, floor / sy, z], [edge - 0.6, floor / sy, z]), true, `${id}: a hand already there can come away`);
+    const moved = crewNavigationStation([edge, floor / sy, z], boat);
+    assert.ok(moved[0] < edge - 0.05, `${id}: a post there moves inboard`);
+    const route = crewNavigationRoute([[edge, modelDeck(boat, z - 1.3, edge), z - 1.3], [edge, modelDeck(boat, z + 1.3, edge), z + 1.3]], boat);
+    for (let k = 1; k < route.length; k++) assert.equal(crewRoutineSegmentClear(null, boat, route[k - 1], route[k]), true, `${id}: its way past the gap is all walkable, leg ${k}`);
+  }
+});
+
+test('the grid routes of extended crews go round an open edge, and their stations move in from it', () => {
+  for (const id of ['flying-cloud', 'gipsy-moth-iv']) {
+    const company = createCompany(undefined, id), s = company.crew[0], intact = ship(id);
+    stepCompany(company, intact, 0.05, 6);
+    s.job = null;
+    // A station at her rail that a hand can reach while the rail stands.
+    const station = (boat) => [-3, -2, -1, 0, 1, 2, 3].map((z) => { const x = modelDeckWidth(boat, z) - 0.15; return [x, modelDeck(boat, z, x), z]; }).find((p) => proceduralCrewRoute(s, p, boat));
+    const target = station(intact);
+    assert.ok(target, `${id}: a hand can reach her rail while it stands`);
+    const boat = ship(id);
+    openRail(boat, 1, target[2] - 1.5, target[2] + 1.5);
+    assert.ok(crewOpenEdgeInset(boat, target[2], 1) > 0, `${id}: the rail has gone there`);
+    const route = proceduralCrewRoute(s, target, boat);
+    assert.ok(route, `${id}: there is still a way`);
+    const end = route.at(-1);
+    assert.ok(end[0] < target[0] - 0.05, `${id}: the station moved in, to ${end[0].toFixed(2)} from ${target[0].toFixed(2)}`);
+    for (const p of route.slice(1)) assert.ok(keepsOffEdge(boat, p, 0.2), `${id}: ${p.map((v) => v.toFixed(2))} keeps off the edge`);
+  }
+});
+
+test('a hand left at an open edge moves in on extended crews too, and a rower stays at his oar', () => {
+  const boat = ship('flying-cloud'), company = createCompany(undefined, 'flying-cloud'), s = company.crew.find((c) => !c.roles?.includes('helmsman') && !c.stationId);
+  stepCompany(company, boat, 0.05, 6);
+  s.job = null; s.z = 0; s.x = modelDeckWidth(boat, 0) - 0.05; s.home = [s.x, s.z]; s.intent = 'standby';
+  const before = s.x;
+  openRail(boat, 1, -1.5, 1.5);
+  for (let i = 0; i < 60; i++) stepCompany(company, boat, 0.05, 6);
+  assert.ok(s.x < before - 0.15, `he is inboard of the edge, at ${s.x.toFixed(2)} of ${before.toFixed(2)}`);
+
+  const oared = ship('oseberg'), crew = createCompany(undefined, 'oseberg');
+  for (let i = 0; i < 4; i++) stepCompany(crew, oared, 0.05, 6);
+  const rower = crew.crew.find((c) => c.seatedPose && c.x > 0.8), seat = rower.x;
+  openRail(oared, 1, -6, 6);
+  for (let i = 0; i < 40; i++) stepCompany(crew, oared, 0.05, 6);
+  assert.equal(rower.x, seat, 'a seat is not a walkway');
+});
+
+test('a low rail that has lost nothing is still her rail, once something else has gone', () => {
+  const boat = ship('oseberg');
+  assert.ok(crewRailAboveDeck(boat, 0) < 0.5, 'she is built low');
+  openRail(boat, 1, -4, -2);
+  assert.ok(boat.damage.fracture.brokenCount > 0);
+  assert.equal(crewOpenEdgeInset(boat, 3, 1), 0, 'far from the gap');
+  assert.equal(crewOpenEdgeInset(boat, 0, -1), 0, 'and on her other side');
+});
+
+function shootPart(boat, partId) {
+  const { fracture: f } = cache.get(boat.modelId), shard = f.shards.find((s) => s?.partId === partId);
+  assert.ok(shard, `${boat.modelId} has a piece ${partId}`);
+  const [x, y, z] = shard.centroid;
+  applyFractureEvents(f, boat.damage, [{ x, y, z, side: Math.sign(x), severity: 2, stepDepth: 0.4 }], 0);
+  assert.ok(fracturePartsGone(boat.damage.fracture).has(partId), `${partId} has left`);
+}
+
+test('a hand cannot climb from a chainwale that has gone, on that side, and the other side still serves', () => {
+  const boat = ship('victory'), scale = [boat.beam / 3.6, vesselVerticalScale(boat), boat.length / 12];
+  assert.equal(crewRunnerFootGone(boat, 1, 1), false);
+  // Where the crew code has a hand stand to board the shrouds, on the chainwale at the foot of the runner.
+  const foot = resolveShipNode(boat, 'mast.main.runner', { space: 'design', side: 1, step: 0 }), channel = victoryChainwale(1, 1, foot[2]);
+  const root = [(channel.outer - 0.325 / scale[0]) * scale[0], channel.y * scale[1], foot[2] * scale[2]];
+  const access = { point: foot.map((v, i) => v * scale[i]), entry: root, radius: 1.25, mast: 1, side: 1 };
+  assert.equal(crewNavigationClear(root, boat, { rigAccess: access }), true, 'she stands on it while it is there');
+  shootPart(boat, 'chainwale.main.1');
+  assert.equal(crewRunnerFootGone(boat, 1, 1), true);
+  assert.equal(crewRunnerFootGone(boat, 1, -1), false, 'its twin on her other side stands');
+  assert.equal(crewRunnerFootGone(boat, 0, 1), false, 'and so does the next mast along');
+  assert.equal(crewRunnerGone(boat, 1, 1), true);
+  assert.equal(crewNavigationClear(root, boat, { rigAccess: access }), false, 'nothing holds her up there now');
+  assert.equal(crewClimbSide(boat, 1, 1), -1, 'a climber goes up the other side');
+  shootPart(boat, 'chainwale.main.-1');
+  assert.equal(crewClimbSide(boat, 1, 1), 0, 'and with both gone nobody climbs that mast');
+});
+
+test('whoever is on the shrouds when their chainwale goes comes off, and the other side keep their hold', () => {
+  const boat = ship('victory'), company = createCompany(undefined, 'victory');
+  stepCompany(company, boat, 0.05, 6);
+  const low = handAloft(company, boat, 1, 1, 6);
+  const other = company.crew.find((c) => c.id === 'rui');
+  other.job = { kind: 'rig', mast: 1, side: -1, stage: 'ascending', elapsed: 0, rung: 6, cursor: 0, path: [], control: 1, revision: company.revision };
+  other.intent = 'work'; other.decisionIn = 5;
+  stepCompany(company, boat, 0.05, 6);
+  assert.ok(low.job.rung > 0 && low.position[1] > modelDeck(boat, 0) * vesselVerticalScale(boat) + 1, 'he is on the shrouds');
+  shootPart(boat, 'chainwale.main.1');
+  stepCompany(company, boat, 0.05, 6);
+  assert.equal(low.job, null, 'nothing holds them now');
+  assert.ok(low.overboard || low.aloftFall, 'he comes off');
+  assert.ok(other.job, 'the other side stands');
+  for (let i = 0; i < 100; i++) stepCompany(company, boat, 0.05, 6);
+  assert.ok(low.position[1] < modelDeck(boat, 0) * vesselVerticalScale(boat) + 0.5, `he is down, at ${low.position[1].toFixed(1)} m`);
+});
+
+test('a hand walking to shrouds that have lost their foot turns back, and canvas is worked without him', () => {
+  const boat = ship('victory'), company = createCompany(undefined, 'victory');
+  stepCompany(company, boat, 0.05, 6);
+  const s = company.crew.find((c) => c.id === 'leonor');
+  s.job = { kind: 'rig', mast: 1, side: 1, stage: 'approach', elapsed: 0, rung: 0, cursor: 0, path: [[s.x, modelDeck(boat, s.z), s.z]], control: 1, revision: company.revision };
+  s.intent = 'work'; s.decisionIn = 5;
+  shootPart(boat, 'chainwale.main.1');
+  shootPart(boat, 'chainwale.main.-1');
+  stepCompany(company, boat, 0.05, 6);
+  assert.ok(!s.job || ['return', 'waiting-return'].includes(s.job.stage), `he goes back, not on to ${s.job?.stage}`);
+  assert.ok(!s.overboard && !s.aloftFall, 'he was still on deck');
+  boat.sailMain = 0.2;
+  for (let i = 0; i < 300; i++) stepCompany(company, boat, 0.05, 6);
+  assert.ok(!company.crew.some((c) => c.job?.kind === 'rig' && c.job.mast === 1 && c.job.rung > 0), 'nobody goes up her main');
+});
+
+test('a lookout coming down from the top takes the side that still has shrouds', () => {
+  const boat = ship('santa-maria'), company = createCompany(undefined, 'santa-maria'), lookout = company.crew.find((c) => c.role === 'Lookout');
+  for (let i = 0; i < 900 && !lookout.job?.lookoutAtStation; i++) stepCompany(company, boat, 0.1, 6);
+  assert.ok(lookout.job?.lookoutAtStation, 'she reached the top the normal way');
+  const { mast, side } = lookout.job, root = resolveShipNode(boat, `mast.${['fore', 'main', 'mizzen'][mast]}.runner`, { space: 'design', side, step: 0 });
+  openRail(boat, side, root[2] - 0.5, root[2] + 0.5);
+  assert.equal(crewRunnerFootGone(boat, mast, side), true, 'her side has lost its foot');
+  stepCompany(company, boat, 0.05, 6);
+  assert.ok(lookout.job?.lookoutAtStation, 'up there she is not on the shrouds, so she stays');
+  lookout.job.elapsed = 100;
+  for (let i = 0; i < 60 && lookout.job?.stage !== 'descending'; i++) stepCompany(company, boat, 0.05, 6);
+  stepCompany(company, boat, 0.05, 6);
+  assert.ok(!lookout.overboard && !lookout.aloftFall, 'she does not fall');
+  assert.equal(lookout.job?.side, -side, 'she comes down the other side');
+});
+
+test('a foot at the rail goes with the rail, and Nina, whose feet stand on deck, is not affected', () => {
+  for (const [id, mast] of [['pinta', 0], ['santa-maria', 1], ['flying-cloud', 1]]) {
+    const boat = ship(id), name = getShipModel(id).rig.masts[mast].id;
+    const root = resolveShipNode(boat, `mast.${name}.runner`, { space: 'design', side: 1, step: 0 });
+    assert.equal(crewRunnerFootGone(boat, mast, 1), false, `${id}: while it stands`);
+    openRail(boat, 1, root[2] - 0.8, root[2] + 0.8);
+    assert.equal(crewRunnerFootGone(boat, mast, 1), true, `${id}: its ${name} shrouds have lost their foot`);
+    assert.equal(crewRunnerFootGone(boat, mast, -1), false, `${id}: its other side has not`);
+  }
+  const nina = ship(), root = resolveShipNode(nina, 'mast.main.runner', { space: 'design', side: 1, step: 0 });
+  openRail(nina, 1, root[2] - 0.8, root[2] + 0.8);
+  assert.equal(crewRunnerFootGone(nina, 1, 1), false, 'Nina climbs from her deck, which never leaves');
 });

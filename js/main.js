@@ -1263,8 +1263,9 @@ async function main() {
         ?`Man overboard! ${name} went over the ${side} side. Bring her close and slow to get a line to him.`
         :`${name}'s body went over the ${side} side.`,10);
     }else if(event.type==='fell-from-aloft'){
-      if(event.killed)voyageCtl?.note?.(`${name} came down with the mast and is dead on the deck.`,7);
-      else if(event.hurt)voyageCtl?.note?.(`${name} came down with the mast, badly hurt.`,7);
+      const how=event.cause==='mast-fall'?'came down with the mast':'fell when the shrouds went slack';
+      if(event.killed)voyageCtl?.note?.(`${name} ${how} and is dead on the deck.`,7);
+      else if(event.hurt)voyageCtl?.note?.(`${name} ${how}, badly hurt.`,7);
     }else if(event.type==='hauled-aboard')voyageCtl?.note?.(`${name} hauled back aboard on a line, half drowned.`,7);
     else if(event.type==='drowned')voyageCtl?.note?.(`${name} is gone. The sea has him.`,7);
     refreshCrewRosterDOM?.();
