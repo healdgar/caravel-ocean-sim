@@ -3357,7 +3357,7 @@ export function buildingGunMuzzlePose(gun, building) {
   };
 }
 
-export function createBuildingGunnery(building, { onEvent = () => {}, getVessels = () => [], getTerrain = () => null, sweep = null } = {}) {
+export function createBuildingGunnery(building, { onEvent = () => {}, getVessels = () => [], getTerrain = () => null, sweep = null, town = null } = {}) {
   const defs = createBuildingGunDefinitions(building);
   const state = createGunneryState(defs);
   building.gunnery = state;
@@ -3367,6 +3367,10 @@ export function createBuildingGunnery(building, { onEvent = () => {}, getVessels
   let lastDamageReport = null;
 
   const hasPowder = () => !building.magazine || (!building.magazine.exploded && building.magazine.powderKg > 0);
+  // No gunner lays a piece through his own town: a gun whose line to its mark crosses one of the port's
+  // buildings, or the fort it stands on, holds its fire.
+  const ownGround = town ?? { instances: [building], center: { x: building.x ?? 0, z: building.z ?? 0 } };
+  const lineFouled = (gun, pose) => !!gun.aimPoint && !!sweepBuildingSegment(pose.position, gun.aimPoint, 0.08, ownGround, { previewOnly: true });
   const readyAtQuarters = (side = null) => {
     for (const g of state.guns) {
       if (!side || g.side === side) {
@@ -3431,6 +3435,7 @@ export function createBuildingGunnery(building, { onEvent = () => {}, getVessels
       for (const g of state.guns) {
         if (g.side === side && !g.dismounted) {
           g.aimDirectionLocal = [...localDir];
+          g.aimPoint = [targetBoat.x ?? 0, targetY, targetBoat.z ?? 0];
           g.elevation = aimElevDeg;
           g.stage = 'ready';
           g.loading = false;
@@ -3465,7 +3470,7 @@ export function createBuildingGunnery(building, { onEvent = () => {}, getVessels
         muzzle: (gun) => buildingGunMuzzlePose(gun, building),
         sweep: solidSweep,
         gunAttended: (gun) => !gun.dismounted,
-        canFire: (gun) => !gun.dismounted && hasPowder(),
+        canFire: (gun, pose) => !gun.dismounted && hasPowder() && !lineFouled(gun, pose),
         onEvent: (event) => {
           if (event.type === 'shot' && building.magazine && !building.magazine.exploded) {
             const chargeKg = +(Math.max(0.5, (event.mass ?? 10.9) / 3)).toFixed(2);
@@ -3500,7 +3505,7 @@ export function createPortGunnery(port, { onEvent = () => {}, getVessels = () =>
     createBuildingDamageState(inst);
     const defs = createBuildingGunDefinitions(inst);
     if (defs.length > 0) {
-      batteries.push(createBuildingGunnery(inst, { onEvent, getVessels, getTerrain }));
+      batteries.push(createBuildingGunnery(inst, { onEvent, getVessels, getTerrain, town: port }));
     }
   }
   const garrison = port ? (port.garrison ?? createFortGarrison(port)) : null;
