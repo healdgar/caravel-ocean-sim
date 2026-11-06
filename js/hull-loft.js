@@ -35,6 +35,14 @@ export function prepareHullLoft({stations,levels,sections,...rest}){
   return {...rest,sheerDatum,stations:[...stations],levels:[...levels],sections:sections.map(row=>[...row]),tangents:sections.map(row=>loftTangents(stations,row))};
 }
 
+// How far the stem stands aft of the first station at a given height. Hulls that
+// set stemTop rake the whole stem, from the keel up to that height. Others rake
+// only below the datum waterline and stand plumb above it.
+function loftForeEnd(profile,base){
+  const top=profile.stemTop??0,depth=loftClamp((top-base)/(top-profile.levels[0]),0,1);
+  return profile.stations[0]+(profile.bowRake??0)*depth*depth;
+}
+
 export function hullLoftSheer(profile,z){
   const t=loftClamp((z-profile.stations[0])/(profile.stations.at(-1)-profile.stations[0]),0,1);
   return (profile.sheerFore??0)*(1-t)**4+(profile.sheerAft??0)*t**4-(profile.sheerDatum??0);
@@ -45,7 +53,7 @@ export function hullLoftWidth(profile,z,y){
   const base=y-hullLoftSheer(profile,z),ys=profile.levels;
   if(base<ys[0]-1e-8||base>ys.at(-1)+1e-8)return 0;
   const depth=loftClamp(-base/-ys[0],0,1),first=profile.stations[0],last=profile.stations.at(-1);
-  const fore=first+(profile.bowRake??0)*depth*depth,aft=last-(profile.sternRake??0)*depth*depth;
+  const fore=loftForeEnd(profile,base),aft=last-(profile.sternRake??0)*depth*depth;
   if(z<fore-1e-8||z>aft+1e-8)return 0;
   const station=z<0?z*first/fore:z*last/aft;
   let j=0;while(j<ys.length-2&&base>ys[j+1])j++;
@@ -56,9 +64,13 @@ export function hullLoftWidth(profile,z,y){
   const right=j<ys.length-2?loftTangent(span,ys[j+2]-ys[j+1],d,(after-b)/(ys[j+2]-ys[j+1])):loftEndTangent(span,ys[j]-ys[j-1],d,(a-before)/(ys[j]-ys[j-1]));
   return Math.max(0,loftCubic(a,b,left,right,span,loftClamp((base-ys[j])/span,0,1)));
 }
+export function hullLoftStem(profile,baseY){
+  const z=loftForeEnd(profile,baseY);
+  return [0,baseY+hullLoftSheer(profile,z),z];
+}
 export function hullLoftPoint(profile,station,baseY,side){
   const depth=loftClamp(-baseY/-profile.levels[0],0,1),first=profile.stations[0],last=profile.stations.at(-1);
-  const fore=first+(profile.bowRake??0)*depth*depth,aft=last-(profile.sternRake??0)*depth*depth;
+  const fore=loftForeEnd(profile,baseY),aft=last-(profile.sternRake??0)*depth*depth;
   const z=station*(station<0?fore/first:aft/last),y=baseY+hullLoftSheer(profile,z);
   return [side*hullLoftWidth(profile,z,y),y,z];
 }
@@ -87,7 +99,8 @@ fn ${prefix}Row(j:u32,z:f32)->f32 {
 fn ${prefix}Width(z:f32,y:f32)->f32 {
   let base=y-${prefix}Sheer(z);if(base<${profile.levels[0]}-.00000001||base>${profile.levels.at(-1)}+.00000001){return 0.0;}
   let depth=clamp(-base/${-profile.levels[0]},0.0,1.0);
-  let fore=${profile.stations[0]}+${profile.bowRake??0}*depth*depth;let aft=${profile.stations.at(-1)}-${profile.sternRake??0}*depth*depth;
+  let stemDepth=${profile.stemTop===undefined?'depth':`clamp((${profile.stemTop}-base)/${profile.stemTop-profile.levels[0]},0.0,1.0)`};
+  let fore=${profile.stations[0]}+${profile.bowRake??0}*stemDepth*stemDepth;let aft=${profile.stations.at(-1)}-${profile.sternRake??0}*depth*depth;
   if(z<fore-.00000001||z>aft+.00000001){return 0.0;}
   let station=select(z*${profile.stations.at(-1)}/aft,z*${profile.stations[0]}/fore,z<0.0);
   var j=0u;while(j<${ny-2}u&&base>${prefix}Y[j+1u]){j++;}
