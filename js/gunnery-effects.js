@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
-import {GUNNERY_RENDER,GUNNERY_DEPTH_RESOLVE,GUNNERY_CROWN_SEGMENTS,GUNNERY_CROWN_ROWS,GUNNERY_DROP_COUNT,GUNNERY_RING_SEGMENTS,GUNNERY_RING_COUNT} from './wgsl/gunnery.js';
+import {GUNNERY_RENDER,GUNNERY_DEPTH_RESOLVE,GUNNERY_CROWN_SEGMENTS,GUNNERY_CROWN_ROWS,GUNNERY_DROP_COUNT,GUNNERY_RING_SEGMENTS,GUNNERY_RING_COUNT,GUNNERY_EARTH_COUNT,GUNNERY_DUST_COUNT} from './wgsl/gunnery.js';
+import {landCraterSize} from './land-craters.js';
 import {coupleSurfaceHeight} from './wgsl/surface-coupling.js';
 import {isArrowAmmo} from './gunnery-state.js';
 import {surfaceWaveGroups} from './surface-bindings.js';
@@ -29,8 +30,10 @@ export function createGunneryEffectState(){
     if(speed<.1)return false;
     if(impacts.length===GUNNERY_FX_LIMITS.impacts)impacts.shift();
     const kindCode=event.kind==='ship'?1:(event.kind==='terrain'||event.kind==='scenery')?2:event.kind==='building'?3:0;
+    // A ball on the ground throws as much as the pit it digs: the land model reckons that, from the strike's energy.
+    const pit=event.kind==='terrain'?landCraterSize(.5*gunneryFxFinite(event.massKg,12)*speed*speed).radius:0;
     impacts.push({id:event.id??++serial,position:gunneryFxVector(event.position),velocity,age:0,seed:(++serial*.61803398875)%1,
-      scale:gunneryFxClamp(Math.cbrt(gunneryFxFinite(event.massKg,12)/12),.4,1.6),wind:[0,0,0],kindCode});return true;
+      scale:gunneryFxClamp(Math.cbrt(gunneryFxFinite(event.massKg,12)/12),.4,1.6),wind:[0,0,0],kindCode,pit,sand:gunneryFxClamp(gunneryFxFinite(event.damageReport?.sand,0),0,1)});return true;
   }
   function setProjectiles(values=[]){
     projectiles.length=0;
@@ -117,7 +120,7 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
   const source=surfaceWaves?coupleSurfaceHeight(GUNNERY_RENDER,'gunnerySeaDisplacement(q).y','p',{group:1,uniformBinding:0,textureBinding:1,samplerName:'gunnerySeaSampler'}):GUNNERY_RENDER;
   const module=await shader(source,'black powder cannon effects');
   const transparent={color:{srcFactor:'one',dstFactor:'one-minus-src-alpha'},alpha:{srcFactor:'one',dstFactor:'one-minus-src-alpha'}};
-  const types=[['gunneryBall',false],['gunneryVolume',true],['gunneryCrown',true],['gunneryDrop',true],['gunneryRing',true],['gunneryArc',true]];
+  const types=[['gunneryBall',false],['gunneryVolume',true],['gunneryCrown',true],['gunneryDrop',true],['gunneryRing',true],['gunneryArc',true],['gunneryEarth',true],['gunneryDust',true]];
   const pipelines=await Promise.all(types.map(([entry,blend],i)=>device.createRenderPipelineAsync({label:entry,layout:'auto',
     vertex:{module,entryPoint:entry+'VS'},fragment:{module,entryPoint:entry+'FS',targets:[{format,...(blend?{blend:transparent}:{})}]},
     primitive:{topology:'triangle-list',cullMode:i===1?'front':'none'},
@@ -125,7 +128,7 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
   const resources=[{buffer:frameUBO},transView,skyView,sampler,envView,{buffer:sunVis},seaView,seaSampler,{buffer:volumeBuffer},{buffer:ballBuffer},{buffer:contactBuffer},null,{buffer:arcBuffer}];
   // Auto layouts reflect each entry point. Keep this table explicit so resource
   // changes are checked by native pipeline creation and integration tests.
-  const bindings=[[0,1,2,3,4,5,9],[0,1,2,3,5,8,11],[0,1,2,3,4,5,10],[0,1,2,3,4,5,10],[0,1,2,3,4,5,6,7,10],[0,1,2,3,5,12]];
+  const bindings=[[0,1,2,3,4,5,9],[0,1,2,3,5,8,11],[0,1,2,3,4,5,10],[0,1,2,3,4,5,10],[0,1,2,3,4,5,6,7,10],[0,1,2,3,5,12],[0,1,2,3,5,10],[0,1,2,3,5,10]];
   const ringWaves=surfaceWaveGroups(device,pipelines[4],surfaceWaves);
   let volumeCount=0,impactCount=0,ballCount=0,arcSegmentCount=0,depthTexture=null,depthWidth=0,depthHeight=0,depthSource=null,depthGroup=null;
   let volumeGroup=null,depthReady=false;
@@ -186,6 +189,8 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
       for(const e of state.impacts){
         if(!(e.kindCode>0)||e.age>=5.5)continue;
         const sc=Math.max(0.6,e.scale??1.0),age=e.age;
+        // Iron striking earth makes no flash and no powder smoke. Its earth and dust are drawn from the contact below.
+        if(e.pit>0)continue;
         if(age<0.12){
           const ft=age/0.12;
           const rFlash=(0.45+0.95*Math.sin(ft*Math.PI))*sc;
@@ -303,7 +308,7 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
           balls.set([...p.position,signedRadius],ballCount++*4);
         }
       }
-      for(const e of state.impacts){contacts.set([...e.position,e.age,...e.velocity,e.scale,e.seed,...e.wind,e.kindCode??0,0,0,0],impactCount++*16);}
+      for(const e of state.impacts){contacts.set([...e.position,e.age,...e.velocity,e.scale,e.seed,...e.wind,e.kindCode??0,e.pit??0,e.sand??0,0],impactCount++*16);}
       for(const seg of state.aimArcs){
         if(arcSegmentCount>=GUNNERY_FX_LIMITS.arcSegments)break;
         arcs.set([...seg.p0,...seg.p1,...seg.style],arcSegmentCount++*12);
@@ -334,6 +339,8 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
       if(impactCount){
         pass.setPipeline(pipelines[2]);pass.setBindGroup(0,groups[2]);pass.draw(GUNNERY_CROWN_SEGMENTS*GUNNERY_CROWN_ROWS*6,impactCount);
         pass.setPipeline(pipelines[3]);pass.setBindGroup(0,groups[3]);pass.draw(6,impactCount*GUNNERY_DROP_COUNT);
+        pass.setPipeline(pipelines[7]);pass.setBindGroup(0,groups[7]);pass.draw(6,impactCount*GUNNERY_DUST_COUNT);
+        pass.setPipeline(pipelines[6]);pass.setBindGroup(0,groups[6]);pass.draw(6,impactCount*GUNNERY_EARTH_COUNT);
         pass.setPipeline(pipelines[4]);pass.setBindGroup(0,groups[4]);if(ringWaves)pass.setBindGroup(1,ringWaves[surfaceWaves.current]);pass.draw(GUNNERY_RING_SEGMENTS*GUNNERY_RING_COUNT*6,impactCount);
       }
       if(volumeCount&&depthReady){pass.setPipeline(pipelines[1]);pass.setBindGroup(0,volumeGroup);pass.draw(36,volumeCount);}

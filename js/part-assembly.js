@@ -1443,8 +1443,8 @@ export function sampleVoronoiBlockCell(fx, fy, fz, isTimber = false) {
   };
 }
 
-// Shot on the land itself: a crater in the ground, a palm in the port mesh bent over. Buildings do not come
-// through here. They break into rigid pieces (js/building-fracture.js), and no hit moves one of their vertices.
+// A palm in the port mesh bent over by shot. The ground does not come through here (js/land-craters.js), and
+// nor do buildings: they break into rigid pieces (js/building-fracture.js), and no hit moves one of their vertices.
 export function bakeLandImpactDeformations(mesh, bakes, stride = 8) {
   if (!(mesh instanceof Float32Array) || !Array.isArray(bakes) || !bakes.length) {
     return null;
@@ -1495,40 +1495,6 @@ export function bakeLandImpactDeformations(mesh, bakes, stride = 8) {
         if (stride >= 8) {
           mesh[at + 7] = Math.max(0.22, mesh[at + 7] * (1 - 0.42 * t * severity));
         }
-        if (v < minV) minV = v;
-        if (v > maxV) maxV = v;
-      }
-      continue;
-    }
-
-    if (bake.kind === 'terrain-crater') {
-      const craterR = Math.max(18.0, (Number(bake.radius) || 1.6) * 11.5);
-      const stepDepth = Math.max(0.24, Number(bake.stepDepth) || 0.45);
-      const severity = Math.max(0.45, Number(bake.severity) || 0.85);
-      for (let v = 0; v < vertexCount; v++) {
-        const at = v * stride;
-        const px = mesh[at];
-        const py = mesh[at + 1];
-        const pz = mesh[at + 2];
-        if (py <= 0.05) continue;
-        const hDist = Math.hypot(px - bx, pz - bz);
-        if (hDist >= craterR) continue;
-        const t = 1 - hDist / craterR;
-        const core = t * t;
-        const jag = 0.72 + 0.35 * Math.sin(px * 7.0 + pz * 11.0);
-        mesh[at + 1] = Math.max(0.08, py - stepDepth * core * jag);
-        const nx = mesh[at + 3], ny = mesh[at + 4], nz = mesh[at + 5];
-        const curLen = Math.hypot(nx, ny, nz) || 1;
-        const prevDmg = Math.max(0, curLen - 1.0);
-        const nextDmg = Math.min(1.45, prevDmg + 0.72 * core * severity);
-        const scale = 1.0 + nextDmg;
-        const ux = nx / curLen - ((px - bx) / craterR) * 0.25 * t;
-        const uy = ny / curLen;
-        const uz = nz / curLen - ((pz - bz) / craterR) * 0.25 * t;
-        const uLen = Math.hypot(ux, uy, uz) || 1;
-        mesh[at + 3] = (ux / uLen) * scale;
-        mesh[at + 4] = (uy / uLen) * scale;
-        mesh[at + 5] = (uz / uLen) * scale;
         if (v < minV) minV = v;
         if (v > maxV) maxV = v;
       }
