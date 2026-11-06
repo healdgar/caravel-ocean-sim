@@ -103,6 +103,10 @@ Buildings break the way ships do: no hit moves a vertex, each piece is one rigid
 - **Rubble.** A piece lands on what is under the place it comes down: the ground, a floor below it, or the heap already there. It rolls off a heap steeper than the angle of repose and lies about flat, and it stays. Stone over deep water goes to the seabed. Timber over deep water floats a while, then is gone.
 - **Graphics.** A struck building draws from its own buffers, and its range of the port's index buffer is cleared once. A hit writes flight records and shard scorch, nothing else. The pose pass runs only while something is in the air or just changed, and the last pose stays in the vertex buffer, so a ruin costs its triangles and no compute. An intact port pays nothing.
 
-Building damage is not saved, so a ruin comes back whole on reload, as it always has. Shots do not pass through a breach: a building is still one box to the sweep. Soldiers stay on a rampart until it is ruined.
+- **Shots.** A building is one box to the sweep, so its pieces decide what a shot meets. Where a line goes in through a gap, the shot flies on to the next thing standing, inside the building or beyond it, and strikes whatever that is. A fort's earth stops it, so a ball does not pass through a rampart. A ball goes through men ashore on its way, as it does sailors.
+- **Saves.** A building's record is its standing plus its hits, sixteen characters each, and replaying the hits puts every piece back exactly where it fell, with nothing seen to fall. The career save holds every port. A share link holds the port in view, the worst damage first, as much as fits in nine thousand characters. A port with no record costs one lookup. Fires go out, and fallen soldiers rise, across a reload.
+- **Rebuilding.** A town rebuilds what was shot down. A week's clearing up, then up to 30 days for timber, 60 for masonry and 90 for a fort, in proportion to the damage, counted in game days from the last shot. Being hit again restarts the count. The building comes back whole, all at once, and its saved damage is gone.
+
+Soldiers stay on a rampart until it is ruined, even where the stretch under them has fallen.
 
 `node scripts/building-damage-review.mjs` takes pictures of this from the real game. `npm run perf -- '[["fort",{"fort":"siege"}]]'` measures it.

@@ -10,6 +10,7 @@ import { controlIcon, createHelmControls } from './controls.js';
 import { createSceneAudio } from './audio.js';
 import { createShipGunnery, createPortGunnery, resolveVesselCollisions, resetVesselDamageState } from './gunnery-control.js';
 import { setVesselHullIntegrity, vesselDamageSnapshot, restoreVesselDamageSnapshot } from './vessel-damage.js';
+import { createPortDamageStore } from './port-damage.js';
 import { careerGreatCircleKm, createCareerStore, applyShipwreckRecovery, nearestFoundedPort } from './career-save.js';
 import {lookoutEyeHeight} from './voyage/landfall-approach.js';
 import { serializeVoyage } from './voyage/passage.js';
@@ -120,6 +121,9 @@ const BROADSIDE_SCENARIO=qs.get('broadside')==='1'||qs.get('scenario')==='broads
 const BROADSIDE_SIDE=qs.get('broadsideSide')==='port'?'port':'starboard';
 const READY_SHIPS=readyFleetModels();
 const urlGameState = qs.has('state') ? decodeGameStateParam(qs.get('state')) : null;
+// What ports have suffered: the career's own record when continuing it, otherwise what a shared link carries.
+const continuedCareer = careerStore.owned() && qs.get('newVoyage') !== '1' ? careerStore.read() : null;
+const portDamage = createPortDamageStore(continuedCareer?.portDamage ?? urlGameState?.portDamage, { dateMs: continuedCareer?.voyage?.dateMs ?? urlGameState?.voyage?.dateMs ?? null });
 if (urlGameState) {
   if (urlGameState.sovereignty) {
     setActiveIndigenousSovereigntyState(restoreIndigenousSovereignty(urlGameState.sovereignty));
@@ -379,7 +383,7 @@ async function main() {
   const surfaceWavesPromise = createSurfaceWaves({ device, computePipe });
   const waterOpticsPromise = surfaceWavesPromise.then(sw => createWaterOptics({ device, shader, seaView: fullArr(dispTex), seaSampler: samplerSim, format: HDR, surfaceWaves: sw }));
   const cloudsPromise = createVolumetricClouds({ device, frameUBO, transView, skyView, sampler: sampClamp, computePipe });
-  const terrainPromise = LAND_STAGE ? createTerrain({ waterOptics: waterOpticsPromise, device, frameUBO, transView, skyView, sampler: sampClamp, envCubeView, clouds: cloudsPromise, shader, computePipe, mipPipe: rgba8MipPipePromise, format: HDR, samples: MSAA }) : Promise.resolve(null);
+  const terrainPromise = LAND_STAGE ? createTerrain({ waterOptics: waterOpticsPromise, device, frameUBO, transView, skyView, sampler: sampClamp, envCubeView, clouds: cloudsPromise, shader, computePipe, mipPipe: rgba8MipPipePromise, format: HDR, samples: MSAA, portDamage }) : Promise.resolve(null);
   const prewarmPromises = [
     computePipe(SCENE_DECK_UPDATE, 'deck wash'),
     shader(DECK_RENDER, 'deck water'),
@@ -700,11 +704,13 @@ async function main() {
         :Number.isFinite(voyageCtl?.voyage?.dateMs)
           ?new Date(voyageCtl.voyage.dateMs).getUTCFullYear()
           :(terrain?.region?.year??1550);
+    portDamage.snapshot(terrain?.ports);
     const nextTerrain=await createTerrain({
       waterOptics,device,frameUBO,transView,skyView,sampler:sampClamp,envCubeView,clouds,shader,computePipe,mipPipe:rgba8MipPipe,format:HDR,samples:MSAA,
       region:{...(typeof region==='object'?region:{}),id:region?.id,name:name??region?.name,latitude:lat??region?.latitude,longitude:lon??region?.longitude,year:liveYear},
       placement,
       options:{lateSpawn:true},
+      portDamage,
     });
     if(!nextTerrain)return null;
     coastalOcean??=oceanVariant(await coastalOceanPromise);
@@ -1242,7 +1248,7 @@ async function main() {
   const dolphinVessels=vessels.map(v=>v.boat),dolphinPlayer=[boat];
   window.oceanFleet={vessels,config:fleetConfig,wakes:wakePool,renderAssets};
   // For the review and perf scripts, which aim at and fire on buildings.
-  Object.defineProperties(window.oceanFleet,{terrain:{get:()=>terrain},orbit:{get:()=>shipOrbit}});
+  Object.defineProperties(window.oceanFleet,{terrain:{get:()=>terrain},orbit:{get:()=>shipOrbit},portDamage:{value:portDamage}});
 
   const hullFlood=await createHullFlood({device,frameUBO,envCubeView,sampler:sampClamp,shader,format:HDR,samples:MSAA});
   for(const v of vessels)v.flood=hullFlood.vessel(v.holesUBO,v.hullUBO);
@@ -2361,6 +2367,8 @@ async function main() {
       } : undefined,
       sovereignty: serializeIndigenousSovereignty(getActiveIndigenousSovereigntyState()),
     };
+    const damagedPort = portDamage.forLink(terrain?.port);
+    if (damagedPort) gameState.portDamage = damagedPort;
     return { cam, orbit: shipOrbit, astronomy: astronomy.share(), voyage: vInfo, gameState };
   };
   const careerSnapshot = () => ({
@@ -2378,6 +2386,7 @@ async function main() {
       rawMaterialsTonnes: boat.rawMaterialsTonnes ?? 0,
       damage: vesselDamageSnapshot(boat),
     },
+    portDamage: portDamage.snapshot(terrain?.ports),
   });
   const restoreCareerVessel = saved => {
     if (!saved) return;
@@ -2839,13 +2848,14 @@ async function main() {
           location.href=url.href;
         },
         onNewVoyage:()=>{
-          careerStore.clear();careerStore.claim();careerPort?.reset();
+          careerStore.clear();careerStore.claim();careerPort?.reset();portDamage.clear();
           resetActiveIndigenousSovereigntyState({persist:true});
         },
       });
     }
     updateCrewUI();
     window.oceanVoyage=voyageCtl;
+    portDamage.setClock(()=>voyageCtl?.voyage?.dateMs??Date.parse(astronomy.state?.date));
     // A port call: at a port with buildings, with no fight on, in a tab that owns the save.
     const hullMassKg=id=>{const rt=getShipModel(id).runtime;return boatHydrodynamics(rt.length,rt.beam,getShipParts(id).loading.provisionDays,0,id).mass;};
     careerPort=createCareerPort({
