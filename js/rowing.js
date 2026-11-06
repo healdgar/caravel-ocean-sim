@@ -121,7 +121,7 @@ export function rowingStationPose(boat,stationId,{phase,time=0,sampleWater}={}){
   }
   const footZ=seat[2]+(station.kind==='oar'?.58:-.46),floorDesign=rowingDeck(d.id,footZ/scale[2]),floor=floorDesign*scale[1];
   const footEdge=Math.max(.02,rowingHullWidth(d.id,footZ/scale[2],floorDesign)*scale[0]-d.shellThicknessMetres);
-  const footX=rowingClamp(seat[0],-Math.max(0,footEdge-.12),Math.max(0,footEdge-.12));
+  const footInset=spec.footInset??.12,footX=rowingClamp(seat[0],-Math.max(0,footEdge-footInset),Math.max(0,footEdge-footInset));
   // Arrays are anatomical left/right. Oar actors face +Z (left is +X), while
   // forward-facing paddlers use yaw pi (left is -X), on either side of the hull.
   const footSide=station.kind==='oar'?1:-1;

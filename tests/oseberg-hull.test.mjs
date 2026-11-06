@@ -8,6 +8,11 @@ import {boatHydrodynamics} from '../js/boat.js';
 import {createRowingShipMesh} from '../js/rowing-ships.js';
 import {rowingSteeringPose} from '../js/rowing.js';
 import {hullLoftBottom,hullLoftPoint,hullLoftWGSL} from '../js/hull-loft.js';
+import {readFileSync} from 'node:fs';
+import {createCompany,stepCompany} from '../js/crew.js';
+import {poseCrewWork} from '../js/crew-pose.js';
+import {loadCrewGLB} from '../js/gltf.js';
+import {requirePlayableShipModel} from '../js/ship-models.js';
 
 const d=ROWING_DESIGNS.oseberg,sy=d.frame.verticalScale,sx=d.runtime.beam/d.frame.beam;
 const metres=y=>y*sy;
@@ -53,12 +58,35 @@ test('her sides flare out from the waterline to the rail and the stem is raked',
 test('the steering oar hangs clear of her hull from its pivot',()=>{
   const boat={modelId:'oseberg',...d.runtime,rudder:0,rowingState:{phase:0,rate:0,effortPort:0,effortStarboard:0}};
   const pose=rowingSteeringPose(boat),pivot=d.steering.pivot.map((v,i)=>v*[sx,sy,d.runtime.length/12][i]);
-  for(const t of [0,.25,.5,.75,1]){
+  for(let t=0;t<=1;t+=.05){
     const p=pivot.map((v,i)=>v+(pose.shaftB[i]-v)*t),design=[p[0]/sx,p[1]/sy,p[2]/(d.runtime.length/12)];
     assert.ok(design[0]>=rowingHullWidth('oseberg',design[2],design[1]),`shaft leaves the hull at t=${t}`);
   }
   assert.ok(Math.abs(pose.bladeAlong[0]*(pose.shaftB[1]-pivot[1])-pose.bladeAlong[1]*(pose.shaftB[0]-pivot[0]))<1e-9,'blade lies in line with the shaft');
   assert.ok(pose.bladeCorners.every(c=>c[1]<0),'blade is fully under water at rest');
+});
+
+test('her flared ends leave room: no seated crew member pokes through the hull',()=>{
+  const meshes=Object.fromEntries(['male','female'].map(sex=>[sex,loadCrewGLB(readFileSync(new URL('../assets/crew/'+(sex==='female'?'sailor-female.glb':'sailor.glb'),import.meta.url)))]));
+  const model=requirePlayableShipModel('oseberg'),boat={modelId:'oseberg',model,...model.runtime,heading:0,heave:0,pitch:0,roll:0,rollVelocity:0,rudder:0,sailFore:1,sailMain:1,sailMizzen:1,crew:false,showProw:true,hatchesClosed:0};
+  const company=createCompany(undefined,'oseberg'),sz=boat.length/12,through=[];
+  boat.rowingState={phase:0,rate:.45,effortPort:.6,effortStarboard:.6,cadence:.45};
+  for(const [phase,rudder] of [[0,0],[.22,0],[.44,0],[.75,0],[.3,25],[.3,-25]]){
+    boat.rowingState.phase=phase;boat.rudder=rudder;stepCompany(company,boat,0,2);
+    for(const s of company.crew){
+      const mesh=meshes[s.sex],a=mesh.animator;a.sample('Idle',s.time);poseCrewWork(a,s,boat);
+      const f=new Float32Array(mesh.vertices.buffer,mesh.vertices.byteOffset,mesh.vertices.byteLength/4),u=new Uint16Array(mesh.vertices.buffer,mesh.vertices.byteOffset,mesh.vertices.byteLength/2);
+      for(let i=0;i<mesh.vertices.byteLength/60;i++){
+        const local=[0,0,0];
+        for(let k=0;k<4;k++){const at=u[i*30+18+k]*16,w=f[i*15+11+k];for(let c=0;c<3;c++)local[c]+=w*(a.palette[at+c]*f[i*15]+a.palette[at+4+c]*f[i*15+1]+a.palette[at+8+c]*f[i*15+2]+a.palette[at+12+c]);}
+        const p=[0,1,2].map(c=>s.transform[c]*local[0]+s.transform[c+4]*local[1]+s.transform[c+8]*local[2]+s.transform[c+12]);
+        const y=p[1]/sy,z=p[2]/sz;if(Math.abs(z)>6||y>rowingHullDeck('oseberg',z))continue;
+        const out=Math.abs(p[0])-rowingHullWidth('oseberg',z,y)*sx;
+        if(out>.005)through.push({sailor:s.id,phase,rudder,out});
+      }
+    }
+  }
+  assert.deepEqual(through.slice(0,8),[],through.length+' crew vertices stand outside her hull');
 });
 
 test('her siblings keep their hulls: no rail sweep leaks into their geometry or shaders',()=>{

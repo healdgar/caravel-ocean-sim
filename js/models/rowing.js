@@ -18,7 +18,7 @@ function rowingModelSail(frame,{height,mastHeight,head,foot,area,z=0}){
     provenance:'Authored reconstruction sail dimensions; exact archaeological sail area is not established.'}]};
 }
 function rowingModelBuild({id,modelCode,name,length,beam,draft,freeboard,sheer,railRise,railRisePower,rake,breadths,upper,bottom,flat=false,keelDepth=0,keelWidth=0,keelEnd=5.65,
-  floorBelowRail=.48,seatBelowRail=.13,stayEnd=5.2,steerLayout={inboard:.25,rise:.28,forward:.40,bladeY:-.28},people,rowingPairs,stationFirst,stationLast,propulsor,sail,construction,interpretation,references}){
+  floorBelowRail=.48,seatBelowRail=.13,stayEnd=5.2,steerLayout={inboard:.25,rise:.28,forward:.40,bladeOut:.26,bladeY:-.28},helmStation=.39,footInset,people,rowingPairs,stationFirst,stationLast,propulsor,sail,construction,interpretation,references}){
   const frame={length:12,beam:3.6,verticalScale:length/12},runtime={length,beam},sy=frame.verticalScale,sx=beam/3.6;
   const profile=rowingModelProfile({length,draft:draft-keelDepth,freeboard,sheer,breadths,upper,bottom,flat,railRise,railRisePower,rake});
   const design={id,modelCode,name,revision:1,status:'planned',family:construction,frame,runtime,profile,stayEnd,
@@ -33,7 +33,7 @@ function rowingModelBuild({id,modelCode,name,length,beam,draft,freeboard,sheer,r
       bladeLength:propulsor==='paddle'?.55:.62,bladeWidth:propulsor==='paddle'?.18:.15,bladeThickness:.018,
       ...(propulsor==='paddle'?{paddleGrip:{low:.80,high:1.15,loom:1.30,inboardMin:.60,inboardMax:.90,seatRimReference:.65}}:{}),
       outboard:propulsor==='paddle'?0:id==='oseberg'?2.80:2.45,inboard:.80,shaftRadius:propulsor==='paddle'?.022:.028,
-      maxHandForce:300,maxPower:210,dragCoefficient:1.6,normalDragProvenance:'Authored effective plate drag and human force/power limits; not measured replica trials.'},
+      ...(footInset?{footInset}:{}),maxHandForce:300,maxPower:210,dragCoefficient:1.6,normalDragProvenance:'Authored effective plate drag and human force/power limits; not measured replica trials.'},
     ...(sail?rowingModelSail(runtime,sail):{masts:[],surfaces:[]}),stations:[],crewStations:{},equipment:{guns:[],bailer:true,anchor:propulsor!=='paddle',cargo:[{z:3.8,extent:[.32,.16,.5]}]},
   };
   for(let row=0;row<rowingPairs;row++)for(const side of [-1,1]){
@@ -50,12 +50,12 @@ function rowingModelBuild({id,modelCode,name,length,beam,draft,freeboard,sheer,r
   // Full complement and active rowing count are distinct, including the canoe.
   const remaining=people-design.stations.length;
   for(let i=0;i<remaining;i++){
-    const steering=i===remaining-1,z=(id==='taino-canoe'?3.50+Math.floor(i/2)*.70:steering?length*.39:-length*.40)/sy,x=(i%2?1:-1)*(id==='taino-canoe'?.30:steering?.45:0)/sx;
+    const steering=i===remaining-1,z=(id==='taino-canoe'?3.50+Math.floor(i/2)*.70:steering?length*helmStation:-length*.40)/sy,x=(i%2?1:-1)*(id==='taino-canoe'?.30:steering?.45:0)/sx;
     design.crewStations[steering?'helm':'passenger.'+(i+1)]={x,y:design.seatHeight+hullLoftSheer(profile,z),z,role:steering?'Helmsman':'Passenger',yaw:Math.PI};
   }
   const helm=design.crewStations.helm,steerZ=helm.z,steerY=hullLoftDeck(profile,steerZ),steerX=propulsor==='paddle'?Math.min(1.65,hullLoftWidth(profile,steerZ,steerY)-.08):hullLoftWidth(profile,steerZ,steerY)+.035;
   design.steering={kind:design.capabilities.steering,pivot:[steerX,steerY,steerZ],handle:[steerX-steerLayout.inboard/sx,steerY+steerLayout.rise/sy,steerZ-steerLayout.forward/sy],
-    blade:[steerX+.26/sx,steerLayout.bladeY/sy,steerZ+.85/sy],hangsFromPivot:!!steerLayout.hangsFromPivot,bladeLength:.75,bladeWidth:.20,dragCoefficient:1.5,
+    blade:[steerX+steerLayout.bladeOut/sx,steerLayout.bladeY/sy,steerZ+.85/sy],hangsFromPivot:!!steerLayout.hangsFromPivot,bladeLength:.75,bladeWidth:.20,dragCoefficient:1.5,
     provenance:'Authored starboard steering-oar/paddle layout; not a recovered fitting arrangement.'};
   design.helm={x:helm.x,z:helm.z,eyeAboveDeck:1.4};
   return design;
@@ -65,7 +65,7 @@ export const ROWING_DESIGNS=deepFreeze({
   // while the rail stands a metre clear amidships and sweeps up to the stems.
   oseberg:rowingModelBuild({id:'oseberg',modelCode:4,name:'Oseberg-based vessel · c. 850',length:21.5,beam:5,draft:.90,freeboard:.95,sheer:.60,railRise:1.2,railRisePower:20,rake:1.2,
     breadths:[0,.05,.27,.68,1.06,1.40,1.50,1.40,1.06,.68,.27,.05,0],upper:[0,.14,.50,1.03,1.45,1.75,1.8,1.75,1.45,1.03,.50,.14,0],
-    bottom:[0,.012,.075,.23,.38,.52,.57,.52,.38,.23,.075,.012,0],keelDepth:.12,keelWidth:.12,keelEnd:4.8,floorBelowRail:.80,seatBelowRail:.45,stayEnd:5.8,steerLayout:{inboard:.25,rise:.02,forward:.40,bladeY:-.42,hangsFromPivot:true},people:32,rowingPairs:15,stationFirst:-6.4,stationLast:6.4,propulsor:'oar',
+    bottom:[0,.012,.075,.23,.38,.52,.57,.52,.38,.23,.075,.012,0],keelDepth:.12,keelWidth:.12,keelEnd:4.8,floorBelowRail:.80,seatBelowRail:.45,stayEnd:5.8,steerLayout:{inboard:.50,rise:.02,forward:.25,bladeOut:-.25,bladeY:-.42,hangsFromPivot:true},helmStation:.358,footInset:.24,people:32,rowingPairs:15,stationFirst:-6.4,stationLast:6.4,propulsor:'oar',
     sail:{height:9.5,mastHeight:10.6,head:9,foot:9.5,area:69.375,z:0},construction:'clinker-oak',
     interpretation:'AD 820 Oseberg proportions in a c. 850 scenario, guided by the revised Saga Oseberg reconstruction; authored offsets, .90 m service draft, .95 m amidships freeboard and rig dimensions.',
     references:[{subject:'archaeological-vessel',source:'https://www.vikingtidsmuseet.no/vikingtiden/vikingskip/osebergskipet.html',
