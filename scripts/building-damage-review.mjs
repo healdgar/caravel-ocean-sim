@@ -17,9 +17,9 @@ const WIDTH=1400,HEIGHT=900;
 const SCENES={
   bastion:{prefab:'stone_sea_bastion',face:1,height:6,views:[{name:'front',yaw:-14,elevation:6,distance:58},{name:'close',yaw:16,elevation:12,distance:30}],
     volleys:[{shots:6,mass:14.5,speed:330,minY:2,maxY:7,centre:-6,span:5,face:1},{shots:18,mass:14.5,speed:330,minY:1,maxY:8,centre:5,span:9,face:1}]},
-  // Lighter shot, low on the landward wall, close in: a breach and what it brings down, with no magazine.
-  breach:{prefab:'stone_sea_bastion',face:-1,height:5,views:[{name:'front',yaw:24,elevation:9,distance:44},{name:'close',yaw:8,elevation:12,distance:30}],
-    volleys:[{shots:2,mass:5.4,speed:380,minY:2,maxY:3,centre:-2,span:2,face:-1,range:12},{shots:1,mass:5.4,speed:380,minY:2,maxY:3,centre:3,span:1,face:-1,range:12}]},
+  // Lighter shot, low on the wall, close in: a breach and what it brings down, with no magazine.
+  breach:{prefab:'stone_sea_bastion',face:1,height:5,views:[{name:'front',yaw:-20,elevation:9,distance:44},{name:'close',yaw:-8,elevation:12,distance:30}],
+    volleys:[{shots:2,mass:5.4,speed:380,minY:2,maxY:3,centre:-2,span:2,face:1,range:12},{shots:1,mass:5.4,speed:380,minY:2,maxY:3,centre:3,span:1,face:1,range:12}]},
   fortress:{prefab:'bastion_trace_fortress',face:1,height:6,views:[{name:'front',yaw:15,elevation:8,distance:66},{name:'close',yaw:-18,elevation:14,distance:36}],
     volleys:[{shots:6,mass:14.5,speed:330,minY:1,maxY:6,centre:-5,span:5,face:1},{shots:18,mass:14.5,speed:330,minY:1,maxY:8,centre:3,span:10,face:1}]},
   warehouse:{prefab:'royal_warehouse',face:-1,height:4,views:[{name:'front',yaw:20,elevation:8,distance:42},{name:'close',yaw:-15,elevation:12,distance:26}],
@@ -64,7 +64,26 @@ for(const name of names){
     await look(v);await page.waitForTimeout(1500);
     const file=join(outDir,`${name}-${label}-2-${v.name}.png`);await page.screenshot({path:file});console.log('wrote',file);
   }
+  // The same scene from a share link: it should come back just as it was, with nothing falling.
+  const link=await page.evaluate(async()=>{
+    const {encodeGameStateParam}=await import('/js/sharing.js');
+    return encodeGameStateParam({v:1,portDamage:oceanFleet.portDamage?.forLink(oceanFleet.terrain.port)});
+  });
+  if(link&&link.length<16384){
+    url.searchParams.set('state',link);
+    await page.close();
+    const again=await browser.newPage({viewport:{width:WIDTH,height:HEIGHT}});
+    await again.goto(url.toString());
+    await again.waitForFunction(()=>window.oceanStartup?.state==='ready'||window.oceanStartup?.state==='failed',null,{timeout:600000,polling:500});
+    await again.addStyleTag({content:'body *{visibility:hidden!important}canvas{visibility:visible!important}'});
+    for(const v of scene.views){
+      await again.evaluate(aimAtBuilding,{prefab:scene.prefab,face:scene.face,height:scene.height,...v});await again.waitForTimeout(2000);
+      await again.screenshot({path:join(outDir,`${name}-${label}-3-reloaded-${v.name}.png`)});
+    }
+    await again.close();
+    console.log(name,'reloaded from a link of',link.length,'characters');
+  }
   if(errors.length)console.log('errors:',errors.slice(0,5).join('\n'));
-  await page.close();
+  if(!page.isClosed())await page.close();
 }
 await browser.close();server.closeAllConnections?.();server.close();process.exit(0);

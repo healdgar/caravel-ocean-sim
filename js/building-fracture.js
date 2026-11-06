@@ -24,7 +24,7 @@ const STRIDE = 8;
 // A longer normal reads as damaged in the land shader: raw stone, raw wood.
 const RAW_SURFACE = 1.6, RAW_LENGTH_SQUARED = 2;
 const TOUCH = 0.09;
-const NOT_HELD = 255;
+const NOT_HELD = 255, TIE_REACH = 1.5;
 
 const TIMBER_KINDS = new Set([10, 15, 17]);
 const ROOF_KINDS = new Set([13, 15]);
@@ -137,6 +137,8 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
   }
   if (!ownParts.length) return null;
   const fortified = materialClass === 'fortified-stone';
+  // A rampart has earth under it, up to its own height. A keep standing on it does not.
+  const rampartTop = (instance.baseY ?? instance.y ?? 0) + (instance.height ?? Infinity) + 0.2;
   const cosY = Math.cos(instance.yaw ?? 0), sinY = Math.sin(instance.yaw ?? 0), originX = instance.x ?? 0, originZ = instance.z ?? 0;
   const toLocal = (x, y, z) => { const dx = x - originX, dz = z - originZ; return [dx * cosY - dz * sinY, y, dx * sinY + dz * cosY]; };
   const toWorld = (x, y, z) => [originX + x * cosY + z * sinY, y, originZ - x * sinY + z * cosY];
@@ -363,7 +365,7 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
         const longest = Math.max(face.max[0] - face.min[0], face.max[1] - face.min[1], face.max[2] - face.min[2]);
         // A paved floor at ground level stays, and so does the flat of a fort's rampart, which has earth under it.
         if (horizontal && !ROOF_KINDS.has(face.kind) && !surface.timber
-          && (fortified ? platform || face.kind === 16 : (face.kind === 16 || STAYING_PLATE.test(partKey) || platform) && face.max[1] <= islandGround + 1.6)) {
+          && (fortified ? (platform || face.kind === 16) && face.max[1] <= rampartTop : (face.kind === 16 || STAYING_PLATE.test(partKey) || platform) && face.max[1] <= islandGround + 1.6)) {
           if (fortified && platform && face.v.length === 4) rampartPlate(face, bounds, part, surface);
           else { stay(face); recordFloor(face); }
           continue;
@@ -506,6 +508,29 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
     delete shard.normalSum;
   }
 
+  // What stays and stands clear of the ground, as boxes in the building's frame: a shot through a breach
+  // can meet it. Floors and footings count, and so does a fort's earth, which is why a ball stops in a rampart.
+  const solidBoxes = [];
+  const addSolid = (min, max) => {
+    const a = toLocal(min[0], min[1], min[2]), b = toLocal(max[0], min[1], min[2]), c = toLocal(min[0], max[1], max[2]), d = toLocal(max[0], max[1], max[2]);
+    solidBoxes.push(Math.min(a[0], b[0], c[0], d[0]), min[1], Math.min(a[2], b[2], c[2], d[2]), Math.max(a[0], b[0], c[0], d[0]), max[1], Math.max(a[2], b[2], c[2], d[2]));
+  };
+  for (const face of geometry[0].faces) {
+    if (face.max[1] > Math.max(groundAt((face.min[0] + face.max[0]) * 0.5, (face.min[2] + face.max[2]) * 0.5), -0.6) + 0.1) addSolid(face.min, face.max);
+  }
+  for (const { corners, depth } of geometry[0].blocks) {
+    if (depth > 0) continue;
+    const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+    for (const q of corners) for (let c = 0; c < 3; c++) { if (q[c] < min[c]) min[c] = q[c]; if (q[c] > max[c]) max[c] = q[c]; }
+    if (max[1] > Math.max(groundAt((min[0] + max[0]) * 0.5, (min[2] + max[2]) * 0.5), -0.6) + 0.1) addSolid(min, max);
+  }
+  for (const { face } of geometry[0].cores) {
+    // The earth begins behind the facing, where the core's surface is.
+    const min = [...face.min], max = [...face.max], at = face.v[0] * STRIDE;
+    for (let c = 0; c < 3; c++) { const inward = vertices[at + 3 + c] * CORE_DEPTH; min[c] -= inward; max[c] -= inward; }
+    addSolid(min, max);
+  }
+  const solids = new Float32Array(solidBoxes);
   yield* linkShards(shards);
   // The highest floor at or below a height: a storey can stand over the place a stone comes down.
   const floorAt = (x, z, below = Infinity) => {
@@ -538,7 +563,7 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
     shards: Object.freeze(shards),
     strikable: Object.freeze(shards.filter(Boolean).map((s) => s.index)),
     guns: Object.freeze(shards.filter((s) => s?.kind === BUILDING_SHARD_KINDS.gun).map((s) => s.index)),
-    toLocal, toWorld, groundAt, floorAt,
+    toLocal, toWorld, groundAt, floorAt, originX, originZ, solids,
   });
   return { vertices: rest, initial, indices: outIndices.slice(0, indexCount), fracture };
 }
@@ -610,8 +635,8 @@ function anchorShards(shards, groundAt, floorAt) {
     if (lowest <= ground + 0.4) { shard.anchored = true; continue; }
     if (!shard.below.length && lowest - floorAt(x, z, lowest + 0.6) < 0.6) shard.anchored = true;
   }
-  // An intact building stands, whatever the geometry says. Whatever nothing holds yet stands on something too
-  // fine to see, so its lowest course is fixed there, and the rest of it still depends on that course.
+  // An intact building stands, whatever the geometry says. A roof's eaves overhang the walls they sit on, so what
+  // nothing holds yet is first tied to what stands just under it. Only with nothing there is it fixed where it is.
   const broken = new Uint8Array(shards.length);
   for (let pass = 0; pass < 6; pass++) {
     const hang = supportScan({ shards }, broken), seen = new Uint8Array(shards.length);
@@ -627,7 +652,21 @@ function anchorShards(shards, groundAt, floorAt) {
         for (const n of shard.links) if (!seen[n] && hang[n] === NOT_HELD) { seen[n] = 1; stack.push(n); }
       }
       const base = Math.min(...component.map((shard) => shard.min[1]));
-      for (const shard of component) if (shard.min[1] <= base + 0.5) shard.anchored = true;
+      const lowest = component.filter((shard) => shard.min[1] <= base + 0.5);
+      let tied = false;
+      for (const shard of lowest) {
+        const lo = shard.localMin, hi = shard.localMax;
+        for (let c = 1; c < shards.length; c++) {
+          const t = shards[c];
+          if (hang[c] === NOT_HELD || t.localMax[1] > lo[1] + 0.3 || t.localMax[1] < lo[1] - TIE_REACH) continue;
+          if (t.localMax[0] < lo[0] - TIE_REACH || t.localMin[0] > hi[0] + TIE_REACH || t.localMax[2] < lo[2] - TIE_REACH || t.localMin[2] > hi[2] + TIE_REACH) continue;
+          if (shard.links.includes(c)) { if (!shard.below.includes(c)) { shard.below.push(c); t.above.push(shard.index); } tied = true; continue; }
+          shard.links.push(c); t.links.push(shard.index);
+          shard.below.push(c); t.above.push(shard.index);
+          tied = true;
+        }
+      }
+      if (!tied) for (const shard of lowest) shard.anchored = true;
     }
     if (!loose) return;
   }
@@ -777,6 +816,7 @@ function strikeBuilding(state, point, normal, { radius, amount, power, now, drop
     if (shard.max[1] < above) continue;
     const d = distanceMetres(shard, local);
     if (d >= radius) continue;
+    state.touched = true;
     const fall = 1 - (d / radius) ** 2, burn = amount * fall;
     state.wear[s] += burn;
     state.scorch[s] = Math.min(0.5, state.scorch[s] + burn * 0.35);
@@ -810,33 +850,146 @@ function dismountBuildingGun(state, point, side, now) {
 export function applyBuildingFractureEvents(fracture, damage, events, now = 0) {
   const state = buildingFractureStateOf(damage, fracture);
   if (!state) return 0;
-  let released = 0;
-  for (const event of events) {
-    if (!event) continue;
-    const point = [Number(event.x) || 0, Number(event.y) || 0, Number(event.z) || 0];
-    const normal = unitOf([Number(event.nx) || 0, Number(event.ny) || 0, Number(event.nz) || 0.001]);
-    const severity = Math.max(0.25, Number(event.severity) || 0.6);
+  let total = 0;
+  for (const raw of events) {
+    if (!raw) continue;
+    // Rounded as the save rounds it, so a replay lands every piece exactly here.
+    const text = encodeBuildingEvent(raw, fracture.originX, fracture.originZ), event = decodeBuildingEvent(text, 0, fracture.originX, fracture.originZ);
+    const point = [event.x, event.y, event.z];
+    const normal = unitOf([event.nx, event.ny, event.nz || 0.001]);
+    const severity = Math.max(0.25, event.severity || 0.6);
+    let released = 0;
+    state.touched = false;
     if (event.kind === 'cannon-dismount') {
-      released += dismountBuildingGun(state, point, normal, now);
-      continue;
-    }
-    if (event.kind === 'building-explosion') {
-      const powder = Math.max(0.25, Math.min(1, Number(event.powderFraction) || 0.85));
-      released += strikeBuilding(state, point, normal, { radius: Math.max(9.5, Math.min(18, (Number(event.radius) || 8.5) * 1.25)), amount: (1.2 + 1.6 * powder) / fracture.toughness, power: 1.4 + 2 * powder, now, radial: true });
-      continue;
-    }
-    if (event.kind === 'building-collapse') {
+      released = dismountBuildingGun(state, point, normal, now);
+      if (released) state.touched = true;
+    } else if (event.kind === 'building-explosion') {
+      const powder = Math.max(0.25, Math.min(1, event.powderFraction || 0.85));
+      released = strikeBuilding(state, point, normal, { radius: Math.max(9.5, Math.min(18, (event.radius || 8.5) * 1.25)), amount: (1.2 + 1.6 * powder) / fracture.toughness, power: 1.4 + 2 * powder, now, radial: true });
+    } else if (event.kind === 'building-collapse') {
       // The floors and roof give way where the wall has been pounded. It falls, it is not thrown.
-      released += strikeBuilding(state, point, normal, { radius: Math.max(4.5, Math.min(10.5, (Number(event.radius) || 5.5) * 1.05)), amount: (0.45 + 0.5 * severity) / (fracture.toughness * fracture.toughness), power: 0.5, now, drop: true, above: point[1] - 1.5 });
+      released = strikeBuilding(state, point, normal, { radius: Math.max(4.5, Math.min(10.5, (event.radius || 5.5) * 1.05)), amount: (0.45 + 0.5 * severity) / (fracture.toughness * fracture.toughness), power: 0.5, now, drop: true, above: point[1] - 1.5 });
+    } else {
+      const penetrating = event.stepDepth >= 0.4;
+      const radius = (penetrating ? 1.75 : 1.15) * Math.max(0.7, Math.min(1.25, severity));
+      const amount = ((penetrating ? 1.5 : 0.5) * severity) / fracture.toughness;
+      released = strikeBuilding(state, point, normal, { radius, amount, power: 0.7 + severity * 0.55, now });
+    }
+    // Support is settled after each hit, so it makes no difference how they were batched.
+    if (released) released += releaseUnsupportedBlocks(state, now);
+    total += released;
+    // A hit on what has already gone changes nothing, and is not worth keeping.
+    if (state.touched) damage.fractureLog = (damage.fractureLog ?? '') + text;
+  }
+  return total;
+}
+
+// Where a line enters a box, along it, or Infinity. The line runs both ways: `t` may lie behind its start.
+function lineEntersBox(a, d, minX, minY, minZ, maxX, maxY, maxZ) {
+  let low = -Infinity, high = Infinity;
+  for (let c = 0; c < 3; c++) {
+    const lo = c === 0 ? minX : c === 1 ? minY : minZ, hi = c === 0 ? maxX : c === 1 ? maxY : maxZ;
+    if (Math.abs(d[c]) < 1e-9) {
+      if (a[c] < lo || a[c] > hi) return Infinity;
       continue;
     }
-    const penetrating = (Number(event.stepDepth) || 0) >= 0.4;
-    const radius = (penetrating ? 1.75 : 1.15) * Math.max(0.7, Math.min(1.25, severity));
-    const amount = ((penetrating ? 1.5 : 0.5) * severity) / fracture.toughness;
-    released += strikeBuilding(state, point, normal, { radius, amount, power: 0.7 + severity * 0.55, now });
+    const t1 = (lo - a[c]) / d[c], t2 = (hi - a[c]) / d[c];
+    low = Math.max(low, Math.min(t1, t2));
+    high = Math.min(high, Math.max(t1, t2));
+    if (low > high) return Infinity;
   }
-  if (released) released += releaseUnsupportedBlocks(state, now);
-  return released;
+  return low;
+}
+
+/**
+ * What a shot meets on the line from `from` to `to`, in world metres, given what has left. A building is one
+ * box to the sweep, so its pieces decide here. Null means the first thing on the line is still standing, and
+ * the shot strikes where it reached the box. Otherwise the way in has gone, and `t` is the next thing standing,
+ * Infinity if it passes clean through. `t` runs along from-to and may lie beyond either end.
+ */
+export function traceShotThroughBreach(state, from, to) {
+  if (!state?.brokenCount) return null;
+  const { fracture, broken } = state, { shards, solids, toLocal } = fracture;
+  const a = toLocal(from[0], from[1], from[2]), b = toLocal(to[0], to[1], to[2]), d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+  // Most lines have no gap on them, and asking what has left first settles those at once.
+  let opening = Infinity;
+  for (let s = 1; s < shards.length; s++) {
+    // A dismounted gun lies on the deck, still in the way.
+    if (!broken[s] || shards[s].kind === BUILDING_SHARD_KINDS.gun) continue;
+    const { localMin: lo, localMax: hi } = shards[s], t = lineEntersBox(a, d, lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]);
+    if (t < opening) opening = t;
+  }
+  if (opening === Infinity) return null;
+  let standing = Infinity;
+  for (let s = 1; s < shards.length; s++) {
+    if (broken[s] && shards[s].kind !== BUILDING_SHARD_KINDS.gun) continue;
+    const { localMin: lo, localMax: hi } = shards[s], t = lineEntersBox(a, d, lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]);
+    if (t < standing) standing = t;
+  }
+  for (let i = 0; i < solids.length; i += 6) {
+    const t = lineEntersBox(a, d, solids[i], solids[i + 1], solids[i + 2], solids[i + 3], solids[i + 4], solids[i + 5]);
+    if (t < standing) standing = t;
+  }
+  if (standing < opening) return null;
+  return { t: standing };
+}
+
+// A building's damage is the hits it took. Replaying them gives every shard back exactly, so a save holds the
+// hits and nothing else: sixteen characters each, close enough that the live hit is rounded the same way.
+const LOG_DIGITS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+const LOG_KINDS = ['stone-crater', 'timber-splinter', 'cannon-dismount', 'building-explosion', 'building-collapse'];
+const LOG_EVENT_LENGTH = 16;
+const logDigits = (value, count) => {
+  let out = '';
+  for (let i = count - 1; i >= 0; i--) out += LOG_DIGITS[Math.floor(value / 64 ** i) % 64];
+  return out;
+};
+const logValue = (text, at, count) => {
+  let value = 0;
+  for (let i = 0; i < count; i++) value = value * 64 + LOG_DIGITS.indexOf(text[at + i]);
+  return value;
+};
+const logClamp = (value, top) => Math.max(0, Math.min(top, Math.round(Number(value) || 0)));
+
+export function encodeBuildingEvent(event, originX, originZ) {
+  const kind = Math.max(0, LOG_KINDS.indexOf(event.kind));
+  return logDigits(kind, 1)
+    + logDigits(logClamp(((Number(event.x) || 0) - originX) * 50 + 131072, 262143), 3)
+    + logDigits(logClamp(((Number(event.y) || 0) + 50) * 10, 4095), 2)
+    + logDigits(logClamp(((Number(event.z) || 0) - originZ) * 50 + 131072, 262143), 3)
+    + logDigits(logClamp(((Number(event.nx) || 0) + 1) * 31.5, 63), 1)
+    + logDigits(logClamp(((Number(event.ny) || 0) + 1) * 31.5, 63), 1)
+    + logDigits(logClamp(((Number(event.nz) || 0) + 1) * 31.5, 63), 1)
+    + logDigits(logClamp((Number(event.severity) || 0) * 20, 63), 1)
+    + logDigits(logClamp((Number(event.stepDepth) || 0) * 50, 63), 1)
+    + logDigits(logClamp((Number(event.radius) || 0) * 2, 63), 1)
+    + logDigits(logClamp((Number(event.powderFraction) || 0) * 63, 63), 1);
+}
+
+export function decodeBuildingEvent(text, at, originX, originZ) {
+  return {
+    kind: LOG_KINDS[logValue(text, at, 1)] ?? LOG_KINDS[0],
+    x: (logValue(text, at + 1, 3) - 131072) / 50 + originX,
+    y: logValue(text, at + 4, 2) / 10 - 50,
+    z: (logValue(text, at + 6, 3) - 131072) / 50 + originZ,
+    nx: logValue(text, at + 9, 1) / 31.5 - 1,
+    ny: logValue(text, at + 10, 1) / 31.5 - 1,
+    nz: logValue(text, at + 11, 1) / 31.5 - 1,
+    severity: logValue(text, at + 12, 1) / 20,
+    stepDepth: logValue(text, at + 13, 1) / 50,
+    radius: logValue(text, at + 14, 1) / 2,
+    powderFraction: logValue(text, at + 15, 1) / 63,
+  };
+}
+
+// Every hit a saved building took, one after another. Nothing is seen to fall: each piece is simply where it lay.
+export function replayBuildingFracture(fracture, damage, log, now = 0) {
+  const state = buildingFractureStateOf(damage, fracture), events = [];
+  for (let at = 0; at + LOG_EVENT_LENGTH <= log.length; at += LOG_EVENT_LENGTH) events.push(decodeBuildingEvent(log, at, fracture.originX, fracture.originZ));
+  damage.fractureLog = '';
+  applyBuildingFractureEvents(fracture, damage, events, now);
+  settleFinishedFlights(state, Infinity);
+  return state.brokenCount;
 }
 
 const fracturePipelines = new WeakMap();
@@ -930,16 +1083,25 @@ export function createBuildingFractureGPU({ device, pipeline, prepared, state })
  * The fractured buildings of one port. A building joins the first time it is struck. Its mesh is built once,
  * its range of the port's index buffer is cleared once, and from then on a hit only writes flight records.
  */
-export function createPortFractures({ device, port, geometry, portIndices, groundAt, buildMillisecondsPerFrame = 3 }) {
+export function createPortFractures({ device, port, geometry, portIndices, groundAt, damageStore = null, buildMillisecondsPerFrame = 3 }) {
   const live = new Map(), building = new Map();
-  let pipeline = null, starting = null;
+  let pipeline = null, starting = null, frame = 0, lastNow = 0;
   const finish = (instance, prepared) => {
     if (!prepared) { live.set(instance, null); return; }
-    const state = buildingFractureStateOf(instance.damageState, prepared.fracture);
+    const damage = instance.damageState;
+    const state = buildingFractureStateOf(damage, prepared.fracture);
+    if (damage.replayLog) {
+      replayBuildingFracture(prepared.fracture, damage, damage.replayLog, lastNow);
+      damage.replayLog = null;
+    }
     live.set(instance, createBuildingFractureGPU({ device, pipeline, prepared, state }));
     // From this frame the building draws from its own buffers. Once only.
     device.queue.writeBuffer(portIndices, prepared.fracture.firstIndex * 4, new Uint32Array(prepared.fracture.indexCount));
   };
+  const stepsFor = (instance, instanceIndex) => prepareBuildingFractureSteps({
+    vertices: geometry.vertices, indices: geometry.indices, catalog: geometry.partAssembly, instanceIndex, instance,
+    materialClass: instance.damageState.materialClass ?? 'masonry', groundAt,
+  });
   // A first hit waits a few frames in the queue while its building is cut, so nothing stalls a frame.
   const continueBuilding = () => {
     const deadline = performance.now() + buildMillisecondsPerFrame;
@@ -951,33 +1113,65 @@ export function createPortFractures({ device, port, geometry, portIndices, groun
       }
     }
   };
+  // A rebuilt building draws from the port's mesh again, as it did before it was struck.
+  const rebuild = (instance) => {
+    const gpu = live.get(instance);
+    if (gpu) {
+      device.queue.writeBuffer(portIndices, gpu.fracture.firstIndex * 4, geometry.indices, gpu.fracture.firstIndex, gpu.fracture.indexCount);
+      gpu.destroy();
+    }
+    live.delete(instance);
+    building.delete(instance);
+    damageStore?.rebuilt(port, instance);
+  };
   return {
+    // Before a port is first seen: anything saved as ruined is a ruin already, with no fall to watch.
+    async restoreNow() {
+      const instances = port?.instances ?? [];
+      if (!instances.some((instance) => instance?.damageState?.replayLog)) return 0;
+      pipeline ??= await buildingFracturePipeline(device);
+      let restored = 0;
+      for (let i = 0; i < instances.length; i++) {
+        if (!instances[i]?.damageState?.replayLog || live.has(instances[i])) continue;
+        const steps = stepsFor(instances[i], i);
+        let step = steps.next();
+        while (!step.done) step = steps.next();
+        finish(instances[i], step.value);
+        restored++;
+      }
+      return restored;
+    },
+    rebuild,
     // Once a frame, before the compute pass. Costs nothing until a building has been hit.
     update(now) {
+      lastNow = now;
       const instances = port?.instances;
       if (Array.isArray(instances)) for (let i = 0; i < instances.length; i++) {
-        const instance = instances[i], pending = instance?.damageState?.pendingBakes;
-        if (!pending?.length) continue;
+        const instance = instances[i], damage = instance?.damageState, pending = damage?.pendingBakes;
+        if (!pending?.length && !damage?.replayLog) continue;
         if (!pipeline) {
           starting ??= buildingFracturePipeline(device).then((ready) => { pipeline = ready; }, (error) => console.error('Building fracture pipeline failed', error));
           continue;
         }
         if (!live.has(instance)) {
-          if (!building.has(instance)) building.set(instance, prepareBuildingFractureSteps({
-            vertices: geometry.vertices, indices: geometry.indices, catalog: geometry.partAssembly, instanceIndex: i, instance,
-            materialClass: instance.damageState.materialClass ?? 'masonry', groundAt,
-          }));
+          if (!building.has(instance)) building.set(instance, stepsFor(instance, i));
           continue;
         }
-        const gpu = live.get(instance), events = pending.splice(0, pending.length);
-        if (gpu) applyBuildingFractureEvents(gpu.fracture, instance.damageState, events, now);
+        const gpu = live.get(instance);
+        if (!pending?.length) continue;
+        const events = pending.splice(0, pending.length);
+        if (gpu) applyBuildingFractureEvents(gpu.fracture, damage, events, now);
+        damageStore?.noteHit(damage);
       }
       if (building.size) continueBuilding();
       for (const gpu of live.values()) gpu?.tick(now);
+      // Now and then, whether a town has finished rebuilding what was shot down.
+      if (damageStore && Array.isArray(instances) && ++frame % 240 === 0) {
+        for (const instance of instances) if (instance?.damageState?.hits && damageStore.rebuildDue(instance)) rebuild(instance);
+      }
     },
     encode(pass) { for (const gpu of live.values()) gpu?.encode(pass); },
     draw(pass) { for (const gpu of live.values()) gpu?.draw(pass); },
     destroy() { for (const gpu of live.values()) gpu?.destroy(); live.clear(); building.clear(); },
   };
 }
-

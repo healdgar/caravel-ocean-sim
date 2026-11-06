@@ -13,6 +13,7 @@ import { PORT_PREFABS, getBuildingParts } from './coastal-world.js';
 import { GROUNDING_SUBSTRATES, classifyGroundingSubstrate, setGroundingDamageHandler } from './terrain-model.js';
 import { locatePartAtLocalPoint, isSuperstructurePartId, computeArchetypeScaleSpec } from './part-assembly.js';
 import { shipMastSpecs, traceShotPastGap, fracturePartsGone } from './ship-fracture.js';
+import { traceShotThroughBreach } from './building-fracture.js';
 import { createFortGarrison, stepFortGarrison } from './crew.js';
 import { DEFAULT_SHIP_COLORS, strikeVesselColors } from './ship-colors.js';
 
@@ -417,6 +418,16 @@ function woundCrewBySplinters(targetBoat, damage, localPos, energy, ammo) {
 }
 
 // A ball goes straight through whoever it meets and flies on. It kills outright.
+function strikeSoldierWithBall(hit, projectile) {
+  const struck = (projectile.struckBodies ??= new Set());
+  if (struck.has(hit.sailor)) return;
+  struck.add(hit.sailor);
+  const speed = Math.hypot(...(projectile.velocity ?? [0, 0, 0]));
+  if (0.5 * (projectile.mass ?? 1) * speed * speed < 200) return;
+  hit.sailor.casualtyState = 'fallen';
+  hit.sailor._poseReady = false;
+}
+
 function strikeCrewBodyWithBall(targetBoat, hit, projectile, direction) {
   const struck = (projectile.struckBodies ??= new Set());
   if (struck.has(hit.sailor)) return;
@@ -2462,9 +2473,20 @@ export function sweepBuildingSegment(from, to, radius = 0.08, port, options = nu
       }
     }
     if (!valid || tMin < 0 || tMin > 1) continue;
+    // The box knows nothing of what has left. Where the line goes in through a gap, it strikes the next thing
+    // standing, and it may meet nothing in this step, or anywhere in this building.
+    const behind = traceShotThroughBreach(inst.damageState?.fracture, from, to);
+    if (behind) {
+      if (!(behind.t <= 1)) continue;
+      tMin = Math.max(0, behind.t);
+    }
     if (!best || tMin < best.fraction) {
       const ln = [0, 0, 0]; ln[hitAxis] = hitSign;
-      const normal = [ln[0] * cosY + ln[2] * sinY, ln[1], -ln[0] * sinY + ln[2] * cosY];
+      // From inside it, what it strikes faces back along its flight.
+      const dLength = Math.hypot(d[0], d[1], d[2]) || 1;
+      const normal = behind
+        ? [(from[0] - to[0]) / dLength, (from[1] - to[1]) / dLength, (from[2] - to[2]) / dLength]
+        : [ln[0] * cosY + ln[2] * sinY, ln[1], -ln[0] * sinY + ln[2] * cosY];
       const localPosition = [p0[0] + d[0] * tMin, p0[1] + d[1] * tMin, p0[2] + d[2] * tMin];
       const hitPart = previewOnly ? null : resolveBuildingHitPart(inst, localPosition);
       best = {
@@ -3339,7 +3361,7 @@ export function createBuildingGunnery(building, { onEvent = () => {}, getVessels
   const defs = createBuildingGunDefinitions(building);
   const state = createGunneryState(defs);
   building.gunnery = state;
-  createBuildingDamageState(building);
+  for (const i of createBuildingDamageState(building).restoredGuns ?? []) if (state.guns[i]) state.guns[i].dismounted = true;
   const solidSweep = sweep ?? createGunnerySolidSweep({ sourceBoat: null, getVessels, getTerrain });
   const damageLog = [];
   let lastDamageReport = null;
@@ -3991,6 +4013,17 @@ export function createGunnerySolidSweep({ sourceBoat, getVessels = () => [], get
         } else {
           const direction = localTo.map((v, i) => v - localFrom[i]);
           for (const hit of hits) strikeCrewBodyWithBall(targetBoat, hit, projectile, direction);
+        }
+      }
+      // Men ashore: a ball goes through them too, on the way to whatever stops it.
+      if (!arrow && projectile) {
+        const land = getTerrain?.(), shores = land?.ports ?? (land?.port ? [land.port] : null);
+        for (const port of shores ?? []) {
+          const soldiers = port?.garrison?.soldiers;
+          if (!soldiers?.length) continue;
+          const reach = 400 + Math.hypot(to[0] - from[0], to[2] - from[2]), mx = (from[0] + to[0]) * 0.5, mz = (from[2] + to[2]) * 0.5;
+          if (Math.hypot(mx - (port.center?.x ?? mx), mz - (port.center?.z ?? mz)) > reach) continue;
+          for (const hit of sweepCrewBodies(from, to, radius, soldiers, best?.fraction ?? 1)) strikeSoldierWithBall(hit, projectile);
         }
       }
     }

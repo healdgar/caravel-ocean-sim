@@ -117,3 +117,124 @@ test('a live port pays nothing until hit, poses while pieces fall, then stops, a
     assert.deepEqual(await page.evaluate(()=>gpuErrors),[]);
   }finally{await page.close();}
 });
+
+test('a share link brings a ruin back settled, and a town rebuilds it',{timeout:560000},async()=>{
+  const scene=`${origin}/?region=lisbon&view=ship&ship=nina&follower=0&clouds=0&w=320&h=240&year=1650&boatSpeed=0`;
+  const ready=async page=>{
+    await page.addInitScript(instrument);
+    return page;
+  };
+  const start=async(page,url)=>{
+    await page.goto(url);
+    await page.waitForFunction(()=>window.oceanStartup?.state==='ready'||window.oceanStartup?.state==='failed',undefined,{timeout:400000,polling:500});
+    assert.equal(await page.evaluate(()=>oceanStartup.state),'ready');
+  };
+  const first=await ready(await browser.newPage({viewport:{width:320,height:240}}));
+  let saved;
+  try{
+    await start(first,scene);
+    saved=await first.evaluate(async()=>{
+      const {applyBuildingImpactDamage}=await import('/js/gunnery-control.js');
+      const {encodeGameStateParam}=await import('/js/sharing.js');
+      const port=oceanFleet.terrain.port,building=port.instances.find(i=>i.prefabId==='stone_sea_bastion');
+      const half=(building.depth??building.length)*.5,cos=Math.cos(building.yaw),sin=Math.sin(building.yaw),base=building.baseY??building.y;
+      for(let i=0;i<4;i++){
+        const x=(i-1.5)*1.5,z=half,y=2+i%3;
+        const at=[building.x+x*cos+z*sin,base+y,building.z-x*sin+z*cos];
+        applyBuildingImpactDamage(building,{localPosition:[x,y,z],position:at,surfacePosition:at,normal:[sin,0,cos],velocity:[-sin*300,0,-cos*300],mass:5.4,energy:240000,ammo:'round'});
+      }
+      window.fractureTarget=building;
+      const frames=async n=>{for(let i=0;i<n;i++)await new Promise(requestAnimationFrame);};
+      while(!(fractureTarget.damageState.fracture?.brokenCount>0))await frames(5);
+      while(fractureTarget.damageState.fracture.flying.size)await frames(5);
+      const state=building.damageState.fracture,poses=[];
+      const {evaluateShardFlight}=await import('/js/ship-fracture.js');
+      for(let s=1;s<state.broken.length;s++)if(state.broken[s])poses.push([s,...evaluateShardFlight(state.records.subarray(s*16,s*16+16),1e6,state.fracture.shards[s].centroid,[1,1,1])]);
+      return {link:encodeGameStateParam({v:1,portDamage:oceanFleet.portDamage.forLink(port)}),broken:state.brokenCount,integrity:building.damageState.integrity,hits:building.damageState.hits,poses};
+    });
+    assert.ok(saved.broken>0,'the bastion lost blocks');
+    assert.ok(saved.link.length<16384,'the link is one a browser and decodeGameStateParam will take');
+  }finally{await first.close();}
+  const second=await ready(await browser.newPage({viewport:{width:320,height:240}}));
+  try{
+    await start(second,`${scene}&state=${saved.link}`);
+    const back=await second.evaluate(async()=>{
+      const {evaluateShardFlight}=await import('/js/ship-fracture.js');
+      const building=oceanFleet.terrain.port.instances.find(i=>i.prefabId==='stone_sea_bastion'),d=building.damageState,state=d.fracture;
+      const poses=[];
+      for(let s=1;s<state.broken.length;s++)if(state.broken[s])poses.push([s,...evaluateShardFlight(state.records.subarray(s*16,s*16+16),1e6,state.fracture.shards[s].centroid,[1,1,1])]);
+      window.fractureTarget=building;
+      return {broken:state.brokenCount,flying:state.flying.size,integrity:d.integrity,hits:d.hits,replay:d.replayLog??null,poses,others:oceanFleet.terrain.port.instances.filter(i=>i.damageState?.fracture&&i!==building).length};
+    });
+    assert.equal(back.broken,saved.broken,'the same pieces are gone');
+    assert.equal(back.flying,0,'and nothing falls');
+    assert.equal(back.hits,saved.hits);
+    assert.ok(Math.abs(back.integrity-saved.integrity)<1e-3);
+    assert.equal(back.replay,null);
+    for(const [i,row] of back.poses.entries()){
+      assert.equal(row[0],saved.poses[i][0]);
+      for(let c=1;c<4;c++)assert.ok(Math.abs(row[c]-saved.poses[i][c])<1e-2,`piece ${row[0]} lies where it lay: ${row} ${saved.poses[i]}`);
+    }
+    const frames=n=>second.evaluate(async n=>{for(let i=0;i<n;i++)await new Promise(requestAnimationFrame);},n);
+    await frames(10);
+    assert.equal(await second.evaluate(()=>{const n=fractureDispatches;fractureDispatches=0;return n;})>0,true,'the pose pass opened it once');
+    await frames(5);
+    assert.equal(await second.evaluate(()=>fractureDispatches),0,'and has stopped');
+    // A long time passes with no shot fired.
+    const rebuilt=await second.evaluate(async()=>{
+      const building=fractureTarget;
+      building.damageState.lastHitDateMs=Date.UTC(1650,0,1);
+      oceanFleet.portDamage.setClock(()=>Date.UTC(1652,0,1));
+      for(let i=0;i<300&&building.damageState.hits;i++)await new Promise(requestAnimationFrame);
+      return {hits:building.damageState.hits,state:building.damageState.state,fracture:building.damageState.fracture??null,saved:oceanFleet.portDamage.forLink(oceanFleet.terrain.port)??null};
+    });
+    assert.equal(rebuilt.hits,0,'the town has rebuilt it');
+    assert.equal(rebuilt.state,'intact');
+    assert.equal(rebuilt.fracture,null);
+    assert.equal(rebuilt.saved,null,'nothing is saved of it');
+    await frames(3);
+    assert.deepEqual(await second.evaluate(()=>gpuErrors),[]);
+  }finally{await second.close();}
+});
+
+test('the career save keeps a ruin, and continuing brings it back settled',{timeout:560000},async()=>{
+  const scene=`${origin}/?region=lisbon&view=ship&ship=nina&follower=0&clouds=0&w=320&h=240&year=1650&boatSpeed=0&voyage=1&voyageMode=easy`;
+  const page=await browser.newPage({viewport:{width:320,height:240}});
+  try{
+    await page.addInitScript(instrument);
+    const start=async url=>{
+      await page.goto(url);
+      await page.waitForFunction(()=>window.oceanStartup?.state==='ready'||window.oceanStartup?.state==='failed',undefined,{timeout:400000,polling:500});
+      assert.equal(await page.evaluate(()=>oceanStartup.state),'ready');
+    };
+    await start(scene);
+    const before=await page.evaluate(async()=>{
+      const {applyBuildingImpactDamage}=await import('/js/gunnery-control.js');
+      const building=oceanFleet.terrain.port.instances.find(i=>i.prefabId==='stone_sea_bastion');
+      const half=(building.depth??building.length)*.5,cos=Math.cos(building.yaw),sin=Math.sin(building.yaw),base=building.baseY??building.y;
+      for(let i=0;i<4;i++){
+        const x=(i-1.5)*1.5,z=half,y=2+i%3;
+        const at=[building.x+x*cos+z*sin,base+y,building.z-x*sin+z*cos];
+        applyBuildingImpactDamage(building,{localPosition:[x,y,z],position:at,surfacePosition:at,normal:[sin,0,cos],velocity:[-sin*300,0,-cos*300],mass:5.4,energy:240000,ammo:'round'});
+      }
+      const frames=async n=>{for(let i=0;i<n;i++)await new Promise(requestAnimationFrame);};
+      while(!(building.damageState.fracture?.brokenCount>0))await frames(5);
+      while(building.damageState.fracture.flying.size)await frames(5);
+      oceanVoyage.saveNow();
+      const save=JSON.parse(localStorage.getItem('waterworld.career.v1'));
+      return {broken:building.damageState.fracture.brokenCount,lastHit:building.damageState.lastHitDateMs,voyageDate:oceanVoyage.voyage?.dateMs??null,ports:Object.keys(save.portDamage??{}),buildings:Object.values(save.portDamage??{}).flatMap(p=>Object.keys(p)).length,key:building.id};
+    });
+    assert.ok(before.broken>0,'the bastion lost blocks');
+    assert.ok(before.ports.length>=1&&before.buildings>=1,`the career save holds its damage (${JSON.stringify(before)})`);
+    assert.ok(Number.isFinite(before.lastHit),'dated in the game\'s calendar, for the town to rebuild from');
+    await start(`${scene}&continue=1`);
+    const back=await page.evaluate(()=>{
+      const building=oceanFleet.terrain.port.instances.find(i=>i.prefabId==='stone_sea_bastion'),state=building.damageState?.fracture;
+      return {broken:state?.brokenCount??0,flying:state?.flying.size??-1,hits:building.damageState?.hits??0};
+    });
+    assert.equal(back.broken,before.broken,'continuing brings the same pieces down');
+    assert.equal(back.flying,0,'and nothing falls');
+    assert.ok(back.hits>0);
+    assert.deepEqual(await page.evaluate(()=>gpuErrors),[]);
+  }finally{await page.close();}
+});

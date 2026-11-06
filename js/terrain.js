@@ -403,7 +403,7 @@ const GROUND_PATCHES_PER_FRAME = 8;
 
 export async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeView,clouds,shader,computePipe,mipPipe,format,samples,waterOptics=null,
   region:explicitRegion=null,placement=null,options={},
-  canopyMode=typeof location==='undefined'?'auto':new URLSearchParams(location.search).get('canopy')||'auto'}){
+  canopyMode=typeof location==='undefined'?'auto':new URLSearchParams(location.search).get('canopy')||'auto',portDamage=null}){
   if(!['auto','near','far','off'].includes(canopyMode))throw Error('Unknown canopy scenery mode');
   // createTerrain is itself deferred until landfall; optional stand downloads
   // never run on the open-ocean startup path. Failure retains all old roots.
@@ -637,7 +637,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   }:null;
   // Buildings under fire draw from their own buffers, made when each is first hit.
   const portFracturesFor=(geometry,port,indexBuffer)=>port?.instances?.length&&geometry?.partAssembly&&indexBuffer
-    ?createPortFractures({device,port,geometry,portIndices:indexBuffer,groundAt:(x,z)=>heightSample(x,z)}):null;
+    ?(portDamage?.restore(port),createPortFractures({device,port,geometry,portIndices:indexBuffer,groundAt:(x,z)=>heightSample(x,z),damageStore:portDamage})):null;
   let portFractures=portFracturesFor(proceduralPack?.portGeometry,proceduralPack?.port,portMesh?.indices);
   if(portMesh&&proceduralPack?.port?.instances?.length)buildingFracturePipeline(device).catch(()=>{});
   const fine=fineMesh?{vertices:buffer(fineMesh.vertices,GPUBufferUsage.VERTEX,'Wells Bay immutable near vertices'),
@@ -957,6 +957,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     rec.indices?.destroy?.();
     rec.portMesh?.vertices?.destroy?.();
     rec.portMesh?.indices?.destroy?.();
+    portDamage?.capture(rec.port);
     rec.portFractures?.destroy();
     rec.uniform?.destroy?.();
     rec.albedo?.destroy?.();
@@ -1341,8 +1342,10 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     groups[0]=bind(terrainPipe,nearResources);groups[1]=bind(opaqueTreePipe,nearResources);
     submergedGroup=submerged?.bindGroup(nearResources.map(([binding,resource])=>({binding,resource})));
     oldTownField.texture.destroy();oldTownField.window.destroy();
+    portDamage?.capture(proceduralPack?.port);
     portFractures?.destroy();
     portFractures=portFracturesFor(upgradedPack.portGeometry,upgradedPack.port,portMesh?.indices);
+    portFractures?.restoreNow().catch((error)=>console.error('Port damage restore failed',error));
 
     groundPatches=createGroundCoverPatches(activeRegion,groundSample,null);
     groundStats.patches=groundPatches.length;
@@ -1497,6 +1500,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     return true;
   }
 
+  // Anything saved as ruined is a ruin before the port is first seen.
+  await portFractures?.restoreNow();
   return {
     waterGroup:pipe=>coastalField.waterGroup(pipe),
     get turbidityScale(){return coastalTurbidityScale(activeRegion.latitude??0,activeRegion.coastalArchetype);},
@@ -1573,6 +1578,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       vertices?.destroy?.();
       if(submergedIndices&&submergedIndices!==indices)submergedIndices?.destroy?.();
       indices?.destroy?.();
+      portDamage?.capture(proceduralPack?.port);
+      for(const sec of loadedSections.values())portDamage?.capture(sec.port);
       portMesh?.vertices?.destroy?.();portMesh?.indices?.destroy?.();portFractures?.destroy();
       fine?.vertices?.destroy?.();fine?.indices?.destroy?.();fine?.submerged?.destroy?.();
       uniform?.destroy?.();nearDomain?.destroy?.();nearElevation?.destroy?.();coastalField?.destroy();
