@@ -1268,7 +1268,7 @@ export function bakeVesselImpactMarks(mesh, bakes, stride = 9) {
 
     if (bake.kind === 'sail-rip') {
       const bx = Number(bake.x) || 0;
-      const by = Math.max(2.2, Number(bake.y) || 4.8);
+      const by = Number(bake.y) || 4.8;
       const bz = Number(bake.z) || 0;
       const ripRadius = Math.max(0.85, Number(bake.radius) || 1.45);
       const ripSeverity = Math.max(0.45, Math.min(1.6, Number(bake.severity) || 0.95));

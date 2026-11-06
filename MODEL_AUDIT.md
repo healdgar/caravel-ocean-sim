@@ -10,9 +10,9 @@ That rewrites the measured tables below and takes about 90 seconds. It runs head
 
 `tests/model-audit.test.mjs` holds the game to `tests/data/model-audit-known.json`: nothing new may pass its limit, and no known fault may get worse. After a fix, run `node scripts/model-audit.mjs --write-known`. `tests/model-audit-gpu.test.mjs` holds the Node mesh to what the GPU draws.
 
-To show the audit passes what is right: a sweep that follows the mesh scores 100% agreement with no air or through lines, and a mast table 1 m out is caught. Both are tests.
+To show the audit passes what is right: a sweep that follows the mesh scores 100% agreement with no air or through lines, and a mast table 1 m out is caught. Both are tests. `tests/ship-collider.test.mjs` holds the shot to it on every ship, and `tests/model-audit-gpu.test.mjs` holds the yards and hatch lids the shot moves to where the GPU draws them.
 
-No model was changed. No plain typo turned up, so `js/` is untouched.
+The audit changes no model. No plain typo turned up.
 
 ## Defects, most visible in play first
 
@@ -22,10 +22,12 @@ No model was changed. No plain typo turned up, so `js/` is untouched.
 
 | # | Defect | Measured | Where |
 |---|---|---|---|
-| 1 | **Balls burst in empty air around the rig.** The rig is a box ±0.85 beam wide and ±0.14 length long about each mast. | 57–85% of lines stop more than 1 m from anything drawn, typically 2.2–6.8 m, up to 12 m. Only 2.6–11% meet the first solid within 0.5 m. All eight rigged ships. | `js/gunnery-control.js:1038` |
+| 1 | **Fixed: balls burst in empty air around the rig.** The rig box is gone. A ball meets what is drawn, from `js/ship-collider.js`, and goes through canvas and rope, tearing them. | Was 57–85% of lines stopping more than 1 m from anything drawn, typically 2.2–6.8 m, up to 12 m. Now none, on all nine. | `sweepShipSegment` |
 | 2 | **Once a building has been hit, balls stop in mid-air, up to 30 m off.** `addSolid` boxes a world-aligned box after turning it, so turned buildings balloon. Every real port turns its buildings. This brings back the fault `traceShotAtBuilding` was written to end, from the first hit on. | Quay wall: reach 8 m becomes 43 m, 72% of lines stop in air. Corral 23%, loggia 16%, sea bastion 10%, star fort 9%. Fort lines stopping early besides: 28–35%. Square, none; the quay's reach is tight again at 90°. | `js/building-fracture.js:522` |
-| 4 | **Balls pass through Victory's bow and stern**, and the Santa María's and Niña's upper works. The shot's hull ends at 0.52 length and narrows by formula; the planks do not. | Through hull: Victory 10.6%, Santa María 3.6%, Niña 1.5%. Victory's bow reaches 34.2 m and her galleries 29.6 m; the shot stops at 29.5 m. Niña's bow is 3.6 m past it. | `js/gunnery-control.js:967`, `:1012` |
-| 5 | **Lower masts cannot be hit, nor Victory's upper rig.** Nothing is struck between the rail and the bottom of the rig box. The box's top is a formula. | Dead band: Victory 10.6 m, Flying Cloud 6.6 m, others 2.4–4.1 m. Victory's rig reaches 62.4 m, the formula stops at 48.2 m; Niña 21.1 / 17, Pinta 25.1 / 22. Oseberg's box stands 7.7 m over her masthead, Lusoria's 6.3 m. | `js/gunnery-control.js:969`, `:945` |
+| 3 | **Fixed: no forest tree could be struck.** A ball meets the wood each tree draws, through a grid over the roots the GPU draws, as chains of round sections measured from the mesh. It goes through air, leaves and twigs thinner than itself. Was: 0 of 14,000–56,000 trees strikable, 0% of lines through a trunk stopped. | All the trees drawn are strikable. Lines through a trunk stopped 90–100%, on all nine species, 7 of them at 99% or better. None stop in air. Ceiba's buttresses (90%) and mangrove's prop roots (93%) are the misses. | `js/forest-trunks.js`, `js/forest-trunk-shapes.js` |
+| 4 | **Fixed: balls pass through Victory's bow and stern**, and the Santa María's and Niña's upper works. The shot's hull was a formula ending at 0.52 length. Now it is her planks. | Through hull was Victory 10.6%, Santa María 3.6%, Niña 1.5%. Now Victory 0.2%, the rest 0. Victory's is her guns, which the GPU runs in up to 1.1 m and the shot holds at rest. | `sweepShipSegment` |
+| 5 | **Fixed: lower masts cannot be hit, nor Victory's upper rig.** Masts and yards are solid on their own triangles, and a fallen one is not. | Dead band was Victory 10.6 m, Flying Cloud 6.6 m, others 2.4–4.1 m, with tops a formula out by up to 14 m. Now none, from one 0.5 m step over the rail to the masthead, on all eight rigged ships. | `sweepShipSegment` |
+| 6 | **Fixed: balls stopped in air around foreshore palms.** A foreshore palm is a root of the forest, and a ball meets its leaning trunk. Was: 45–48% of lines stopped in air, about 1.4 m from anything, at a trunk 1.35 m in radius against 0.34 m drawn. | No line stops in air, and 98% of lines through the trunk stop within 0.5 m of it. | `js/forest-trunks.js` |
 
 ### Seen on deck at normal camera range
 
@@ -54,20 +56,19 @@ No model was changed. No plain typo turned up, so `js/` is untouched.
 |---|---|---|---|
 | 18 | **Flying Cloud's eight guns are not drawn**, so a ball appears from nowhere. Their numbers were written by hand. | Muzzle up to 1.6 m from the hull. Station 3.4 m off her deck. | `js/gunnery-models.js:79` |
 | 19 | **Archers' stations off the floor.** Abstract, so only their arrows show it. | Oseberg 0.41 m, canoe 0.25 m. | `js/gunnery-models.js:80` |
-| 20 | **A bulwark invented for shots.** Where the shell stops at the deck, the shot adds 1 m of wall. A ball stops in air over the rail. | Rail against mesh, P90: Victory 1.05 m, Gipsy Moth 1.03 m, Flying Cloud 0.66 m. | `js/gunnery-control.js:907`, `:920` |
+| 20 | **A bulwark invented for shots.** Fixed for the ball, which meets the shell as drawn. `vesselRailHeight` still adds 1 m of wall for what splinters reach and for a warship's aim at a rail. | Rail against mesh, P90: Victory 1.05 m, Gipsy Moth 1.03 m, Flying Cloud 0.66 m. | `js/gunnery-control.js:908`, `:921` |
 | 21 | **Niña's mizzen breaks under the quarterdeck.** | Full break at 3.08 m, deck at 3.83 m. | `js/ship-fracture.js:27` |
 | 22 | **Two Victory guns fire into the main chains**, and one quarterdeck gun's station is over a gap. | Muzzle 0.08 m from `rig.standing.main` (upper battery, gun 38 each side). Station 2.97 m off the floor (`gun.quarter.port.1`). | `js/gunnery-models.js:25` |
 | 23 | **The walk grid runs through solid things.** The rowed and later-sail ships skip the obstacle check, and Victory's obstacles leave these out. No hand was seen walking these cells in 90 s, beyond those named above. | Flying Cloud 438 of 3,467 cells inside her deckhouse. Victory 81 through bulkheads, stairs and wheel, 75 over gaps. Gipsy Moth 55 in her cabin. | `js/crew-navigation.js:214`, `:228`, `:284` |
 | 24 | **Low rails**, under 0.8 m. Oseberg now passes at 0.93 m. These two may be right for the hull, so I flag rather than call them faults. | Canoe 0.41 m, Lusoria 0.57 m. Gipsy Moth 0.82 m passes at her lowest. | `js/models/rowing.js` |
 | 25 | **Rig ends loose.** | Victory: 27 line ends up to 0.56 m from anything, `helm.tiller` and `helm.rudder` nodes 0.80 m, `rig.mizzen.fall` 0.52 m. Lusoria: 2 ends, 0.37 m. | `js/ship-models.js:87-88`, `js/victory.js` |
 | 26 | **One jetty's shore end stands in rising ground.** Only at Boston. | 0.43 m. | `js/port-props.js` |
-| 27 | **A dead code path in the shot.** Without a damage state, hits go to fixed stations, including masts a ship lacks (Oseberg 81% to a "fore" or "mizzen"). `createShipGunnery` gives every fleet vessel a damage state first, so play never reaches it. | Never reached in the fleet. | `js/gunnery-control.js:1041` |
+| 27 | **Fixed: a dead code path in the shot.** Without a damage state, hits went to fixed stations, including masts a ship lacks. The stations are gone with the box. A hit credits the mast its triangle belongs to. | None left. | `sweepShipSegment` |
 
 ## What holds
 
 - **Buildings as meshes.** All 34 prefabs: every line agrees with the mesh, before any hit.
 - **Ports.** Every building is known by its own mesh: four live, ten offline. Other ports: a streamed section's port has `instances: []` (`js/coastal-world.js:10810`), so only the active port ever has buildings, and live `terrain.ports` held one.
-- **Forest trees and foreshore palms.** Faults 3 and 6 in the first version of this list, now fixed. See table 1b: no ball stops in air, and lines through a trunk stop on it. `js/forest-trunks.js`.
 - **Hydrostatics.** Displaced volume within 1.4% of the mesh on all nine. Hull-width formula within 0.07 m at P90. Draft exact, but for Niña's separate keel, 0.12 m.
 - **Mast stations.** Within 0.34 m of the mesh on all ships, after the earlier fix. Santa María's foremast is the largest, from its rake.
 - **Gun muzzles and breeches** of drawn guns. Within 0.14 m of the barrel, at rest.
@@ -79,9 +80,10 @@ No model was changed. No plain typo turned up, so `js/` is untouched.
 ## What this does not cover
 
 - Ships are level at their design waterline, on a calm sea, with sails as the game first sets them. Hits below the sea are not counted.
+- At rest (`--no-gpu`, `--write-known`, and so `tests/model-audit.test.mjs`) the Niña's, Pinta's and Santa María's lateen yards stand in the rest mesh, where the game never draws them, so `collision.through-mast/nina` and `/pinta` are known there. On Metal those read 0.
 - Crew are measured at the watch, standing or rowing. Gun drills, aloft work and falls are not.
 - Crew claims rest on rays against the read-back geometry. Headless whole-ship screenshots agree with the mesh, but I did not get close-up pixel shots of each sailor.
-- A hit's credited part, ship fracture after damage, and the terrain sweep are not checked. Nor are the legacy trees used only if the forest fails to load.
+- A hit's credited part and ship fracture after damage are checked by `tests/ship-collider.test.mjs` and `tests/ship-fracture.test.mjs`, not here. Nor are the terrain sweep and the legacy trees used only if the forest fails to load.
 - Trees are measured standing, in calm air. Wood is hard where a tube is as thick as a ball, or is a slender tree's own stem. That is the audit's own measure, from rays across each tube, not the table's. Wind, felled trees and fallen trunks are not measured.
 - A manifest's `heightMetres` differs from its mesh (palm 10.4 against 17.5 m). Nothing I found reads it for collision, so it is not ranked.
 
@@ -89,37 +91,37 @@ No model was changed. No plain typo turned up, so `js/` is untouched.
 
 
 <!-- audit tables start -->
-Measured 2026-11-06. Rig as the GPU posed it, read back on Metal. 119 measurements past their limits.
+Measured 2026-11-06. Rig as the GPU posed it, read back on Metal. 89 measurements past their limits.
 
 ### Posed geometry read back from the GPU
 
 | Ship | vertices | hull-class parts that moved | mast | spar | cloth | rope | gun | length off | beam off | sinkage off |
 |---|---|---|---|---|---|---|---|---|---|---|
 | nina | 91998 | hatch.cover 2.27 | 0 | 0.77 | 4.85 | 4.86 | 0.09 | 0 | 0 | 0 |
-| pinta | 43041 | hatch.main 2.92 | 0 | 0.68 | 3.6 | 6.61 | 0.09 | 0 | 0 | 0 |
-| santa-maria | 48686 | hatch.main 3.68 | 0 | 0.64 | 2.46 | 4.58 | 0.09 | 0 | 0 | 0 |
-| victory | 144783 | hatch.main 4.68 | 0 | 1.78 | 1.68 | 1.77 | 1.1 | 0 | 0 | 0 |
+| pinta | 43041 | hatch.main 2.92 | 0 | 0.74 | 3.64 | 6.65 | 0.09 | 0 | 0 | 0 |
+| santa-maria | 48686 | hatch.main 3.68 | 0 | 0.63 | 2.46 | 4.58 | 0.09 | 0 | 0 | 0 |
+| victory | 144783 | hatch.main 4.68 | 0 | 1.77 | 1.67 | 1.76 | 1.1 | 0 | 0 | 0 |
 | oseberg | 71016 | none | 0 | 0.66 | 0.67 | 0.67 | – | 0 | 0 | 0 |
-| lusoria | 30703 | none | 0 | 0.46 | 0.44 | 0.44 | – | 0 | 0 | 0 |
+| lusoria | 30703 | none | 0 | 0.5 | 0.48 | 0.48 | – | 0 | 0 | 0 |
 | taino-canoe | 26453 | none | – | – | – | – | – | 0 | 0 | 0 |
-| flying-cloud | 76071 | hatch.main 4.7 | 0 | 2.25 | 2.52 | 2.25 | – | 0 | 0 | 0 |
-| gipsy-moth-iv | 21568 | hatch.main 0.85 | 0 | 0.41 | 0.41 | 0.41 | – | 0 | 0 | 0 |
+| flying-cloud | 76071 | hatch.main 4.7 | 0 | 2.45 | 2.69 | 2.45 | – | 0 | 0 | 0 |
+| gipsy-moth-iv | 21568 | hatch.main 0.85 | 0 | 0.44 | 0.44 | 0.44 | – | 0 | 0 | 0 |
 
 ### 1a. Balls against ship meshes
 
-Share of lines that either the shot or the mesh says struck. *Agree* is within 0.5 m of the first solid surface. *Soft* stopped on or near cloth or rope only. *Air* stopped more than 1 m from anything drawn. *Through* passed a solid surface unstopped.
+Share of lines that either the shot or the mesh says struck. *Agree* is within 0.5 m of the first solid surface. *Soft* stopped with nothing solid within 0.5 m, on or near cloth or rope only. *Air* stopped more than 1 m from anything drawn. *Through* passed a solid surface unstopped.
 
-| Ship | lines | agree % | soft % | air: rig box % | air: hull % | median gap m | max gap m | through hull % | through mast/spar % | phantom mast % | wrong mast % | parts missed most |
+| Ship | lines | agree % | soft % | air: rig % | air: hull % | median gap m | max gap m | through hull % | through mast/spar % | phantom mast % | wrong mast % | parts missed most |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| nina | 47357 | 10.3 | 11.4 | 73.5 | 2.3 | 3.25 | 6.73 | 1.5 | 1 | 0 | 0 | yard.fore 312, cabin 243, bulwark:-# 148, bulwark:# 108, bow.structure 103 |
-| pinta | 51024 | 8.1 | 12.8 | 75.3 | 2.8 | 3.17 | 7.23 | 0.4 | 0.7 | 0 | 0 | mast.main.cut 153, hatch.main 84, bow.bowsprit 72, mast.fore.cut 62, mast.mizzen.cut 34 |
-| santa-maria | 61826 | 6.5 | 6.5 | 80.7 | 1.9 | 3.99 | 9.39 | 3.6 | 0.8 | 0 | 0.6 | hull.planking 1517, hull.closure.stern 147, mast.main.cut 127, yard.spritsail 121, bow.bowsprit 116 |
-| victory | 42952 | 6 | 8.3 | 71.3 | 1.4 | 6.09 | 11.75 | 10.6 | 2.3 | 0 | 0 | hull.planking 1747, stern.galleries 419, bow.bowsprit 312, rig.standing.fore 304, rig.standing.main 299 |
-| oseberg | 34376 | 3.8 | 31.4 | 57.1 | 7.1 | 2.3 | 5.82 | 0.6 | 0 | 0 | 0 | hull.carved-stems 212, yard.main-square 3 |
-| lusoria | 24060 | 11 | 30.2 | 58.2 | 0 | 2.22 | 4.76 | 0 | 0.6 | 0 | 0 | mast.main.cut 152, mast.main 2 |
-| taino-canoe | 10112 | 47.8 | 52.2 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
-| flying-cloud | 63639 | 2.6 | 5.2 | 85 | 5.5 | 6.83 | 12 | 1 | 0.8 | 0 | 0.5 | hull.planking 218, mast.fore.cut 146, mast.main.cut 113, bow.bowsprit 110, structure.deckhouse 108 |
-| gipsy-moth-iv | 44492 | 4.5 | 20.8 | 73 | 0.3 | 2.63 | 5.46 | 0.3 | 1.1 | 0 | 0 | mast.main.cut 246, mast.mizzen.cut 164, spar.mizzen-boom 64, rail.port 35, rail.starboard 34 |
+| nina | 13031 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
+| pinta | 11381 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
+| santa-maria | 13697 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
+| victory | 13903 | 98.7 | 1.1 | 0 | 0 | – | 0 | 0.2 | 0 | 0 | 0 | gunnery.recoil.# 8, gun.forecastle.port.# 7, gun.forecastle.starboard.# 7, gun.quarter.starboard.# 3, gun.quarter.port.# 3 |
+| oseberg | 8226 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
+| lusoria | 6164 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
+| taino-canoe | 9084 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
+| flying-cloud | 11116 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
+| gipsy-moth-iv | 8958 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
 
 ### 1b. Balls against trees
 
@@ -144,8 +146,8 @@ Share of lines that either the shot or the mesh says struck. *Agree* is within 0
 
 | Region | ports | buildings | known by mesh | traced by mesh | trees drawn | trees a ball can strike | palms a ball can strike |
 |---|---|---|---|---|---|---|---|
-| lisbon | 1 | 26 | 26 | 26 | 14000 | 14000 | 0 |
-| havana | 1 | 23 | 23 | 23 | 31020 | 31020 | 520 |
+| lisbon | 1 | 26 | 26 | 26 | 36000 | 36000 | 0 |
+| havana | 1 | 23 | 23 | 23 | 56000 | 56000 | 520 |
 | san-juan | 1 | 23 | 23 | 23 | 56000 | 56000 | 520 |
 | jamestown | 1 | 18 | 18 | 18 | 14000 | 14000 | 0 |
 
@@ -192,28 +194,28 @@ Share of lines that either the shot or the mesh says struck. *Agree* is within 0
 
 ### 2a. Masts
 
-| Ship | mast | table z | mesh z | off | deck y | foot y | top y | top break | full break | break above deck | rig top | shot formula top | rail | rig box from | dead band |
+| Ship | mast | table z | mesh z | off | deck y | foot y | top y | top break | full break | break above deck | rig top | rail | struck from | struck to | dead band |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| nina | fore | -3.23 | -3.23 | 0.01 | 1.19 | 0.67 | 15.21 | 8.5 | 2.42 | 1.23 | 21.06 | 17 | 2.08 | 4.51 | 2.43 |
-| nina | main | 3.57 | 3.57 | 0.01 | 1.23 | 0.7 | 12.24 | 7.25 | 2.25 | 1.02 | 21.06 | 17 | 2.08 | 4.51 | 2.43 |
-| nina | mizzen | 8.1 | 8.13 | 0.03 | 3.83 | 1.46 | 9.4 | 6.58 | 3.08 | -0.75 | 21.06 | 17 | 2.08 | 4.51 | 2.43 |
-| pinta | fore | -6.87 | -6.9 | 0.03 | 1.66 | 1.66 | 20.51 | 9.07 | 3.13 | 1.48 | 25.05 | 22.02 | 2.47 | 5.54 | 3.06 |
-| pinta | main | 0.22 | 0.01 | 0.2 | 1.47 | 1.47 | 25.05 | 11.23 | 2.91 | 1.44 | 25.05 | 22.02 | 2.47 | 5.54 | 3.06 |
-| pinta | mizzen | 8.2 | 8 | 0.2 | 2.79 | 2.78 | 19.43 | 8.2 | 3.78 | 0.99 | 25.05 | 22.02 | 2.47 | 5.54 | 3.06 |
-| santa-maria | fore | -8.37 | -8.71 | 0.34 | 1.7 | 1.72 | 18.99 | 10.85 | 3.89 | 2.19 | 25 | 24.05 | 2.54 | 6.02 | 3.48 |
-| santa-maria | main | 0.12 | -0.1 | 0.22 | 1.54 | 1.54 | 25 | 13.32 | 3.42 | 1.88 | 25 | 24.05 | 2.54 | 6.02 | 3.48 |
-| santa-maria | mizzen | 10.64 | 10.63 | 0 | 3.42 | 3.42 | 18.51 | 9.67 | 4.6 | 1.18 | 25 | 24.05 | 2.54 | 6.02 | 3.48 |
-| victory | fore | -16.77 | -16.76 | 0.01 | 5.71 | -1.99 | 57.4 | 27.02 | 7.51 | 1.8 | 62.36 | 48.19 | 6.53 | 17.16 | 10.63 |
-| victory | main | 0.24 | 0.26 | 0.02 | 5.53 | -1.99 | 62.36 | 29.2 | 7.32 | 1.8 | 62.36 | 48.19 | 6.53 | 17.16 | 10.63 |
-| victory | mizzen | 16.68 | 16.62 | 0.06 | 8.03 | -1.99 | 49.37 | 24.33 | 9.83 | 1.8 | 62.36 | 48.19 | 6.53 | 17.16 | 10.63 |
-| oseberg | main | 0 | 0.02 | 0.02 | 0.15 | 0.15 | 10.6 | 7.53 | 2.06 | 1.91 | 10.6 | 18.27 | 0.95 | 4.6 | 3.65 |
-| lusoria | main | 0 | -0.18 | 0.18 | 0.07 | 0.07 | 9 | 6.3 | 1.72 | 1.65 | 9 | 15.3 | 0.55 | 4.6 | 4.05 |
-| taino-canoe | – | – | – | – | – | – | – | – | – | – | -Infinity | 14 | 0.42 | 4.6 | 4.18 |
-| flying-cloud | fore | -18.92 | -18.83 | 0.09 | 3.21 | 3.15 | 48.31 | 32 | 8.29 | 5.08 | 52.02 | 58.29 | 3.97 | 10.61 | 6.64 |
-| flying-cloud | main | -0.63 | -0.54 | 0.09 | 2.98 | 2.9 | 52.02 | 34.86 | 8 | 5.03 | 52.02 | 58.29 | 3.97 | 10.61 | 6.64 |
-| flying-cloud | mizzen | 19.72 | 19.72 | 0.01 | 4.65 | 4.59 | 42.59 | 29.15 | 8.86 | 4.21 | 52.02 | 58.29 | 3.97 | 10.61 | 6.64 |
-| gipsy-moth-iv | main | -1.55 | -1.54 | 0.01 | 0.83 | 0.83 | 14.4 | 6.47 | 1.69 | 0.86 | 14.4 | 14 | 1.82 | 4.6 | 2.78 |
-| gipsy-moth-iv | mizzen | 3.64 | 3.66 | 0.02 | 0.3 | 0.3 | 9.8 | 4.59 | 1.55 | 1.25 | 14.4 | 14 | 1.82 | 4.6 | 2.78 |
+| nina | fore | -3.23 | -3.23 | 0.01 | 1.19 | 0.67 | 15.21 | 8.5 | 2.42 | 1.23 | 21.06 | 2.08 | 2.58 | 15.08 | 0 |
+| nina | main | 3.57 | 3.57 | 0.01 | 1.23 | 0.7 | 12.24 | 7.25 | 2.25 | 1.02 | 21.06 | 2.08 | 2.58 | 15.08 | 0 |
+| nina | mizzen | 8.1 | 8.13 | 0.03 | 3.83 | 1.46 | 9.4 | 6.58 | 3.08 | -0.75 | 21.06 | 2.08 | 2.58 | 15.08 | 0 |
+| pinta | fore | -6.87 | -6.9 | 0.03 | 1.66 | 1.66 | 20.51 | 9.07 | 3.13 | 1.48 | 25.05 | 2.47 | 2.97 | 24.97 | 0 |
+| pinta | main | 0.22 | 0.01 | 0.2 | 1.47 | 1.47 | 25.05 | 11.23 | 2.91 | 1.44 | 25.05 | 2.47 | 2.97 | 24.97 | 0 |
+| pinta | mizzen | 8.2 | 8 | 0.2 | 2.79 | 2.78 | 19.43 | 8.2 | 3.78 | 0.99 | 25.05 | 2.47 | 2.97 | 24.97 | 0 |
+| santa-maria | fore | -8.37 | -8.71 | 0.34 | 1.7 | 1.72 | 18.99 | 10.85 | 3.89 | 2.19 | 25 | 2.54 | 3.04 | 24.54 | 0 |
+| santa-maria | main | 0.12 | -0.1 | 0.22 | 1.54 | 1.54 | 25 | 13.32 | 3.42 | 1.88 | 25 | 2.54 | 3.04 | 24.54 | 0 |
+| santa-maria | mizzen | 10.64 | 10.63 | 0 | 3.42 | 3.42 | 18.51 | 9.67 | 4.6 | 1.18 | 25 | 2.54 | 3.04 | 24.54 | 0 |
+| victory | fore | -16.77 | -16.76 | 0.01 | 5.71 | -1.99 | 57.4 | 27.02 | 7.51 | 1.8 | 62.36 | 6.53 | 8.03 | 62.03 | 0 |
+| victory | main | 0.24 | 0.26 | 0.02 | 5.53 | -1.99 | 62.36 | 29.2 | 7.32 | 1.8 | 62.36 | 6.53 | 8.03 | 62.03 | 0 |
+| victory | mizzen | 16.68 | 16.62 | 0.06 | 8.03 | -1.99 | 49.37 | 24.33 | 9.83 | 1.8 | 62.36 | 6.53 | 8.03 | 62.03 | 0 |
+| oseberg | main | 0 | 0.02 | 0.02 | 0.15 | 0.15 | 10.6 | 7.53 | 2.06 | 1.91 | 10.6 | 0.95 | 1.45 | 10.45 | 0 |
+| lusoria | main | 0 | -0.18 | 0.18 | 0.07 | 0.07 | 9 | 6.3 | 1.72 | 1.65 | 9 | 0.55 | 1.05 | 8.55 | 0 |
+| taino-canoe | – | – | – | – | – | – | – | – | – | – | -Infinity | 0.42 | – | – | – |
+| flying-cloud | fore | -18.92 | -18.83 | 0.09 | 3.21 | 3.15 | 48.31 | 32 | 8.29 | 5.08 | 52.02 | 3.97 | 4.97 | 51.97 | 0 |
+| flying-cloud | main | -0.63 | -0.54 | 0.09 | 2.98 | 2.9 | 52.02 | 34.86 | 8 | 5.03 | 52.02 | 3.97 | 4.97 | 51.97 | 0 |
+| flying-cloud | mizzen | 19.72 | 19.72 | 0.01 | 4.65 | 4.59 | 42.59 | 29.15 | 8.86 | 4.21 | 52.02 | 3.97 | 4.97 | 51.97 | 0 |
+| gipsy-moth-iv | main | -1.55 | -1.54 | 0.01 | 0.83 | 0.83 | 14.4 | 6.47 | 1.69 | 0.86 | 14.4 | 1.82 | 2.32 | 14.32 | 0 |
+| gipsy-moth-iv | mizzen | 3.64 | 3.66 | 0.02 | 0.3 | 0.3 | 9.8 | 4.59 | 1.55 | 1.25 | 14.4 | 1.82 | 2.32 | 14.32 | 0 |
 
 ### 2b. Guns
 
@@ -250,26 +252,26 @@ Share of lines that either the shot or the mesh says struck. *Agree* is within 0
 | nina | 36 | 0 |  | 56 | 0 | 0 | – | – |
 | pinta | 45 | 0 |  | 202 | 0 | 0 | – | – |
 | santa-maria | 58 | 0 |  | 196 | 0 | 0 | – | – |
-| victory | 67 | 3 | helm.tiller 0.8m, helm.rudder 0.8m, rig.mizzen.fall 0.52m | 259 | 27 | 0.56 | 0 | 0 |
+| victory | 67 | 3 | helm.tiller 0.8m, helm.rudder 0.8m, rig.mizzen.fall 0.52m | 260 | 27 | 0.56 | 0 | 0 |
 | oseberg | 232 | 0 |  | 6 | 0 | 0 | – | – |
 | lusoria | 190 | 0 |  | 6 | 2 | 0.37 | – | – |
 | taino-canoe | 149 | 0 |  | 0 | 0 | 0 | – | – |
-| flying-cloud | 219 | 0 |  | 478 | 0 | 0 | – | – |
-| gipsy-moth-iv | 38 | 0 |  | 17 | 0 | 0 | – | – |
+| flying-cloud | 219 | 0 |  | 480 | 0 | 0 | – | – |
+| gipsy-moth-iv | 38 | 0 |  | 19 | 0 | 0 | – | – |
 
 ### 3. Waterline and hull
 
-| Ship | draft table | draft mesh | freeboard table | rail mid min | at z | rail amidships | rail formula P90 | deck formula P75 | hull width P90 | beam run | beam mesh | length run | length mesh | shot half length | volume table | volume mesh | error % |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| nina | 2.09 | 2.21 | 1.08 | 2.23 | -1.89 | 2.23 | 0.19 | 0.04 | 0.04 | 6 | 6.38 | 20 | 23.61 | 10.4 | 113 | 114 | 1.4 |
-| pinta | 2.29 | 2.29 | 1.47 | 2.42 | -1.58 | 2.42 | 0.08 | 0 | 0.05 | 7.01 | 7.11 | 25.91 | 26.1 | 13.47 | 154 | 154 | 0 |
-| santa-maria | 1.95 | 1.95 | 1.54 | 2.53 | -2.42 | 2.53 | 0.23 | 0 | 0.05 | 7.96 | 8.07 | 28.3 | 28.51 | 14.72 | 178 | 178 | -0.1 |
-| victory | 8.8 | 8.8 | 5.53 | 7.56 | -6.22 | 7.56 | 1.05 | 0 | 0.07 | 15.85 | 16.32 | 56.69 | 63.8 | 29.48 | 4782 | 4762 | -0.4 |
-| oseberg | 0.9 | 0.9 | 0.95 | 0.93 | -1.31 | 0.93 | 0.02 | 0.08 | 0 | 5 | 5.05 | 21.5 | 22.38 | 11.18 | 20 | 20 | 0 |
-| lusoria | 0.38 | 0.38 | 0.55 | 0.57 | -4.17 | 0.57 | 0.02 | 0 | 0 | 2.8 | 2.83 | 18 | 18.03 | 9.36 | 10 | 10 | 0.3 |
-| taino-canoe | 0.42 | 0.42 | 0.42 | 0.41 | -2.56 | 0.41 | 0.03 | 0 | 0 | 1.8 | 1.82 | 14 | 14.02 | 7.28 | 4 | 4 | -0.2 |
-| flying-cloud | 5.46 | 5.46 | 2.97 | 4.53 | -2.51 | 4.53 | 0.66 | 0 | 0.01 | 12.5 | 12.58 | 68.58 | 68.69 | 35.66 | 1677 | 1676 | -0.1 |
-| gipsy-moth-iv | 2.36 | 2.36 | 0.82 | 0.82 | -4.14 | 1.42 | 1.03 | 0.59 | 0 | 3.2 | 3.23 | 16.18 | 16.21 | 8.42 | 10 | 10 | -0.1 |
+| Ship | draft table | draft mesh | freeboard table | rail mid min | at z | rail amidships | rail formula P90 | deck formula P75 | hull width P90 | beam run | beam mesh | length run | length mesh | volume table | volume mesh | error % |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| nina | 2.09 | 2.21 | 1.08 | 2.23 | -1.89 | 2.23 | 0.19 | 0.04 | 0.04 | 6 | 6.38 | 20 | 23.61 | 113 | 114 | 1.4 |
+| pinta | 2.29 | 2.29 | 1.47 | 2.42 | -1.58 | 2.42 | 0.08 | 0 | 0.05 | 7.01 | 7.11 | 25.91 | 26.1 | 154 | 154 | 0 |
+| santa-maria | 1.95 | 1.95 | 1.54 | 2.53 | -2.42 | 2.53 | 0.23 | 0 | 0.05 | 7.96 | 8.07 | 28.3 | 28.51 | 178 | 178 | -0.1 |
+| victory | 8.8 | 8.8 | 5.53 | 7.56 | -6.22 | 7.56 | 1.05 | 0 | 0.07 | 15.85 | 16.32 | 56.69 | 63.8 | 4782 | 4762 | -0.4 |
+| oseberg | 0.9 | 0.9 | 0.95 | 0.93 | -1.31 | 0.93 | 0.02 | 0.08 | 0 | 5 | 5.05 | 21.5 | 22.38 | 20 | 20 | 0 |
+| lusoria | 0.38 | 0.38 | 0.55 | 0.57 | -4.17 | 0.57 | 0.02 | 0 | 0 | 2.8 | 2.83 | 18 | 18.03 | 10 | 10 | 0.3 |
+| taino-canoe | 0.42 | 0.42 | 0.42 | 0.41 | -2.56 | 0.41 | 0.03 | 0 | 0 | 1.8 | 1.82 | 14 | 14.02 | 4 | 4 | -0.2 |
+| flying-cloud | 5.46 | 5.46 | 2.97 | 4.53 | -2.51 | 4.53 | 0.66 | 0 | 0.01 | 12.5 | 12.58 | 68.58 | 68.69 | 1677 | 1676 | -0.1 |
+| gipsy-moth-iv | 2.36 | 2.36 | 0.82 | 0.82 | -4.14 | 1.42 | 1.03 | 0.59 | 0 | 3.2 | 3.23 | 16.18 | 16.21 | 10 | 10 | -0.1 |
 
 ### 4a. Crew bodies
 
@@ -316,7 +318,7 @@ Share of lines that either the shot or the mesh says struck. *Agree* is within 0
 | oseberg | 3.6 / 1.116 | 0.181 / 0.376 | 2.791 / 1.113 | – | – | – | – | – | – | – | – | 4.705 / 1.812 | – | – | – | 0.287 | 0.201 | 0.307 |
 | lusoria | 6.429 / 1.333 | 0.308 / 0.402 | 5.54 / 1.333 | – | – | – | – | – | – | – | – | 4.787 / 1.842 | – | – | – | 0.24 | 0.113 | 0.18 |
 | taino-canoe | 10 / 1.714 | 0.323 / 0.52 | 6.69 / 1.713 | – | – | – | – | – | – | – | – | 3.995 / 2 | – | – | – | 0.187 | 0.072 | 0.172 |
-| flying-cloud | 3 / 0.7 | – | 0.875 / 0.347 | – | – | 0.244 / 0.104 | – | 0.875 / 0.344 | – | 1.43 / 0.249 | – | – | 0.875 / 0.35 | 16.712 / 4.984 | 1.44 / 0.35 | 0.914 | 0.503 | – |
+| flying-cloud | 3 / 0.7 | – | 0.875 / 0.347 | – | – | 0.244 / 0.104 | – | 0.875 / 0.344 | – | 1.428 / 0.249 | – | – | 0.875 / 0.35 | 16.712 / 4.984 | 1.44 / 0.35 | 0.914 | 0.503 | – |
 | gipsy-moth-iv | 3 / 0.7 | – | 3.707 / 1.483 | – | – | – | – | 0.252 / 0.445 | – | – | – | – | – | – | – | 0.216 | 0.129 | – |
 
 ### Every measurement past its limit
@@ -325,23 +327,6 @@ Share of lines that either the shot or the mesh says struck. *Agree* is within 0
 |---|---|---|---|
 | building.pieces-air-turned/bastion_trace_fortress | 20.42 | 2 | reach grows from 33 m to 36.1 m when turned; stops up to 2.8 m from it |
 | building.pieces-air-turned/stone_sea_bastion | 11.81 | 2 | reach grows from 18.9 m to 21.2 m when turned; stops up to 2.9 m from it |
-| collision.air-hull/flying-cloud | 5.5 | 2 | balls stop in air beside the hull |
-| collision.air-hull/nina | 2.3 | 2 | balls stop in air beside the hull |
-| collision.air-hull/oseberg | 7.1 | 2 | balls stop in air beside the hull |
-| collision.air-hull/pinta | 2.8 | 2 | balls stop in air beside the hull |
-| collision.air-rig/flying-cloud | 85 | 5 | balls stop in air in the rig box, median 6.83 m from anything |
-| collision.air-rig/gipsy-moth-iv | 73 | 5 | balls stop in air in the rig box, median 2.63 m from anything |
-| collision.air-rig/lusoria | 58.2 | 5 | balls stop in air in the rig box, median 2.22 m from anything |
-| collision.air-rig/nina | 73.5 | 5 | balls stop in air in the rig box, median 3.25 m from anything |
-| collision.air-rig/oseberg | 57.1 | 5 | balls stop in air in the rig box, median 2.3 m from anything |
-| collision.air-rig/pinta | 75.3 | 5 | balls stop in air in the rig box, median 3.17 m from anything |
-| collision.air-rig/santa-maria | 80.7 | 5 | balls stop in air in the rig box, median 3.99 m from anything |
-| collision.air-rig/victory | 71.3 | 5 | balls stop in air in the rig box, median 6.09 m from anything |
-| collision.through-hull/nina | 1.5 | 1 | yard.fore 312, cabin 243, bulwark:-# 148, bulwark:# 108, bow.structure 103 |
-| collision.through-hull/santa-maria | 3.6 | 1 | hull.planking 1517, hull.closure.stern 147, mast.main.cut 127, yard.spritsail 121, bow.bowsprit 116 |
-| collision.through-hull/victory | 10.6 | 1 | hull.planking 1747, stern.galleries 419, bow.bowsprit 312, rig.standing.fore 304, rig.standing.main 299 |
-| collision.through-mast/gipsy-moth-iv | 1.1 | 1 | mast.main.cut 246, mast.mizzen.cut 164, spar.mizzen-boom 64, rail.port 35, rail.starboard 34 |
-| collision.through-mast/victory | 2.3 | 1 | hull.planking 1747, stern.galleries 419, bow.bowsprit 312, rig.standing.fore 304, rig.standing.main 299 |
 | crew.route-buried/victory | 1.2 | 0.5 | victory_w3 180, victory_q8 180, victory_q11 180, leonor 143, victory_q10 64, duarte 14; up to 0.21 m |
 | crew.route-floats/flying-cloud | 2.6 | 0.5 | maria 103, afonso 92; up to 9 m |
 | crew.route-floats/taino-canoe | 6.7 | 0.5 | rower.port.08 180, rower.starboard.08 180; up to 0.3 m |
@@ -379,27 +364,14 @@ Share of lines that either the shot or the mesh says struck. *Agree* is within 0
 | hull.deck-formula/gipsy-moth-iv | 0.59 | 0.2 | modelDeck against the deck drawn |
 | hull.low-rail/lusoria | 0.57 | 0.8 | at z -4.17 m |
 | hull.low-rail/taino-canoe | 0.41 | 0.8 | at z -2.56 m |
-| hull.past-shot-bow/nina | 3.62 | 0.5 | bow.structure reaches -14.02 m, the shot stops at 10.4 m |
-| hull.past-shot-bow/victory | 4.7 | 0.5 | bow.knee reaches -34.18 m, the shot stops at 29.48 m |
 | hull.rail-formula/flying-cloud | 0.66 | 0.3 | vesselRailHeight against the rail drawn |
 | hull.rail-formula/gipsy-moth-iv | 1.03 | 0.3 | vesselRailHeight against the rail drawn |
 | hull.rail-formula/victory | 1.05 | 0.3 | vesselRailHeight against the rail drawn |
 | mast.break-below-deck/nina/mizzen | -0.75 | 0.2 | full break 3.08 m, deck 3.83 m |
-| mast.dead-band/flying-cloud | 6.64 | 1 | no mast can be struck between rail 3.97 m and rig box 10.61 m |
-| mast.dead-band/gipsy-moth-iv | 2.78 | 1 | no mast can be struck between rail 1.82 m and rig box 4.6 m |
-| mast.dead-band/lusoria | 4.05 | 1 | no mast can be struck between rail 0.55 m and rig box 4.6 m |
-| mast.dead-band/nina | 2.43 | 1 | no mast can be struck between rail 2.08 m and rig box 4.51 m |
-| mast.dead-band/oseberg | 3.65 | 1 | no mast can be struck between rail 0.95 m and rig box 4.6 m |
-| mast.dead-band/pinta | 3.06 | 1 | no mast can be struck between rail 2.47 m and rig box 5.54 m |
-| mast.dead-band/santa-maria | 3.48 | 1 | no mast can be struck between rail 2.54 m and rig box 6.02 m |
-| mast.dead-band/victory | 10.63 | 1 | no mast can be struck between rail 6.53 m and rig box 17.16 m |
-| mast.top-formula-low/nina | 4.06 | 1 | rig reaches 21.06 m, formula stops balls at 17 m |
-| mast.top-formula-low/pinta | 3.03 | 1 | rig reaches 25.05 m, formula stops balls at 22.02 m |
-| mast.top-formula-low/victory | 14.17 | 1 | rig reaches 62.36 m, formula stops balls at 48.19 m |
 | node.loose/victory | 3 | 0 | helm.tiller 0.8m, helm.rudder 0.8m, rig.mizzen.fall 0.52m |
 | prop.jetty-root-buried/boston | 0.43 | 0 | the shore end stands in rising ground |
 | rope.loose/lusoria | 2 | 0 | of 6 lines; worst 0.37 m; rig.standing 2 |
-| rope.loose/victory | 27 | 0 | of 259 lines; worst 0.56 m; rig.standing.main 12, rig.standing.mizzen 8, rig.standing.fore 6, rig.running 1 |
+| rope.loose/victory | 27 | 0 | of 260 lines; worst 0.56 m; rig.standing.main 12, rig.standing.mizzen 8, rig.standing.fore 6, rig.running 1 |
 | surface.grain-across/flying-cloud/deck | 3.13 | 1.67 | 3/m against Niña's 0.96/m |
 | surface.grain-across/flying-cloud/wood-17 | 14.82 | 1.67 | 16.712/m against Niña's 1.128/m |
 | surface.grain-across/gipsy-moth-iv/deck | 3.13 | 1.67 | 3/m against Niña's 0.96/m |
