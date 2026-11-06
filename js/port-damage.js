@@ -20,6 +20,12 @@ const LINK_GROUND_NUMBERS = 6 * 60;
 const DAMAGE_FLAGS = ['damageCollapseBaked', 'breachCollapseBaked', 'ruinCollapseBaked', 'magazineHit', 'magazineExploded', 'silenced'];
 
 const FOREST_RECORD_PREFIX = 'forest:';
+// A fort's plan, so that a save made when it had another shape does not put stones back on walls that are not there.
+const planKeyOf = (building) => {
+  if (building.trace) return `t${building.trace.outline.length}:${Math.round(building.width)}x${Math.round(building.length)}`;
+  if (building.gateSide !== undefined || building.enclosureShape) return `e${building.enclosureShape ?? 'triangle'}${building.gateSide ?? 0}`;
+  return null;
+};
 const portKeyOf = (port) => String(port?.regionId ?? port?.id ?? port?.name ?? 'port');
 const buildingKeyOf = (building, index) => String(building.id ?? `${building.prefabId ?? 'building'}_${index}`);
 
@@ -40,6 +46,8 @@ function buildingDamageRecord(building) {
     c: +(d.collapseDropFrac ?? 0).toFixed(3), f: DAMAGE_FLAGS.reduce((bits, name, i) => (d[name] ? bits | (1 << i) : bits), 0),
     a: d.lastHitDateMs ?? null, l: log,
   };
+  const planKey = planKeyOf(building);
+  if (planKey) record.k = planKey;
   const guns = building.gunnery?.guns;
   if (Array.isArray(guns)) {
     const down = [];
@@ -115,7 +123,9 @@ export function createPortDamageStore(saved = null, { dateMs = null } = {}) {
       let restored = 0;
       instances.forEach((building, index) => {
         const name = buildingKeyOf(building, index), record = records[name];
+        // A building that has moved or changed its plan since the save stands whole. Its old record just waits.
         if (!record || record.p !== (building.prefabId ?? null) || Math.abs(record.x - (building.x ?? 0)) > 1 || Math.abs(record.z - (building.z ?? 0)) > 1) return;
+        if ((record.k ?? null) !== planKeyOf(building)) return;
         // Rebuilt while we were away.
         if (overdue(record.a, { integrity: record.i, materialClass: classifyBuildingMaterial(building) })) {
           delete records[name];

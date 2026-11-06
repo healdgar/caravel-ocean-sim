@@ -58,7 +58,7 @@ order.splice(order.indexOf('js/wgsl/vessel-pose.js'),0,'js/wgsl/rig-surfaces.js'
 order.splice(order.indexOf('js/wgsl/vessel-pose.js'),0,'js/wgsl/vessel-recoil.js');
 wgslModules.push('js/wgsl/part-assembly.js');
 // Shaders read these constants as they are built, so they come first, after the fort plan the streets import.
-order.unshift('js/fort-plan.js','js/town-streets.js','js/indigenous-dress.js');
+order.unshift('js/fort-plan.js','js/fort-records.js','js/harbour-geography.js','js/harbour-defences.js','js/town-streets.js','js/indigenous-dress.js');
 order.splice(order.indexOf('js/main.js'),0,'js/wgsl/townsfolk.js','js/town-clips.js','js/town-shots.js','js/townsfolk.js','js/wgsl/props.js','js/props.js','js/free-cannon.js');
 order.splice(order.indexOf('js/coastal-world.js'),0,'js/port-props.js');
 wgslModules.push('js/wgsl/ship-fracture.js');

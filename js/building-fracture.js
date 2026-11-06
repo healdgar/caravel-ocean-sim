@@ -15,6 +15,7 @@
 // and BUILDING_FRACTURE_POSE_UPDATE evaluates the flights on the GPU only while something is in the air.
 // The last pose stays in the vertex buffer, so a ruin costs what its triangles cost and nothing more.
 
+import { depthInOutline } from './fort-plan.js';
 import { sampleVoronoiBlockCell } from './part-assembly.js';
 import { FRACTURE_GRAVITY, FRACTURE_RECORD_FLOATS, createShipFractureState, settleFinishedFlights, writeFlight } from './ship-fracture.js';
 import { BUILDING_FRACTURE_POSE_UPDATE } from './wgsl/ship-fracture.js';
@@ -31,6 +32,8 @@ const ROOF_KINDS = new Set([13, 15]);
 const STAYING_PLATE = /(^|_)(floor|plaza|terreplein|courtyard|cobble|apron|slipway|batey|earthwork|mounds?|sleepers|adarve)(_|$)/;
 const ONE_PIECE = /garita|bollard|crane|capstan|dome|cupola|lantern|farol|spire|chimney|bell_chamber|monolith|firepit|altar|trough|beacon|canoe|rollers|hearth|mooring|espadana|turret/;
 const GUN = /cannon_embrasure/;
+// The outer edge of a traced fort's rampart walk, and its cordon: these go with the wall under them.
+const WALK_EDGE = /rampart_walk_edge|scarp_cordon_cornice/;
 
 const PART_SMALL = 3.2, ISLAND_SMALL = 2.6, ONE_PIECE_LIMIT = 9;
 // Metres behind the face, by what the wall is made of. Thin walls are limited by their own thickness.
@@ -195,7 +198,28 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
     }
     return [x0, x1, z0, z1, top];
   };
-  const recordFloor = (face) => noteLevel(floors, ...faceSpan(face));
+  const localCorners = (face) => face.v.map((v) => toLocal(vertices[v * STRIDE], 0, vertices[v * STRIDE + 2]));
+  // Whether a quad's corners stand on its own box, so that its box is its shape.
+  const squareOnto = (corners, frame) => {
+    const a = corners.map(([x, , z]) => (frame ? [x * frame.cos - z * frame.sin, x * frame.sin + z * frame.cos] : [x, z]));
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (const [x, z] of a) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (z < z0) z0 = z; if (z > z1) z1 = z; }
+    return a.every(([x, z]) => (Math.abs(x - x0) < 0.02 || Math.abs(x - x1) < 0.02) && (Math.abs(z - z0) < 0.02 || Math.abs(z - z1) < 0.02));
+  };
+  const recordFloor = (face) => {
+    const corners = localCorners(face), span = faceSpan(face);
+    if (corners.length === 4 && squareOnto(corners)) { noteLevel(floors, ...span); return; }
+    // A floor at an angle to the building: only the cells it really covers, or stones would lie on air beside it.
+    const [x0, x1, z0, z1, top] = span;
+    for (let x = Math.floor(x0); x <= Math.floor(x1); x++) for (let z = Math.floor(z0); z <= Math.floor(z1); z++) {
+      let inside = false;
+      for (let i = 0, j = corners.length - 1; i < corners.length; j = i++) {
+        const [ax, , az] = corners[i], [bx, , bz] = corners[j];
+        if ((az > z + 0.5) !== (bz > z + 0.5) && x + 0.5 < ((bx - ax) * (z + 0.5 - az)) / (bz - az) + ax) inside = !inside;
+      }
+      if (inside) noteLevel(floors, x, x, z, z, top);
+    }
+  };
   // A set of faces' shape in the building's own frame: on a building set at an angle, the world's box says little.
   const localBounds = (list) => {
     const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
@@ -205,6 +229,35 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
       if (x1 > bounds.max[0]) bounds.max[0] = x1;
       if (z0 < bounds.min[2]) bounds.min[2] = z0;
       if (z1 > bounds.max[2]) bounds.max[2] = z1;
+      if (face.min[1] < bounds.min[1]) bounds.min[1] = face.min[1];
+      if (face.max[1] > bounds.max[1]) bounds.max[1] = face.max[1];
+    }
+    return bounds;
+  };
+  // The frame of a box set at an angle in the building, from the longest level edge of its broadest top. Null if square.
+  const islandFrame = (list) => {
+    let longest = 0, ux = 1, uz = 0;
+    for (const face of list) {
+      if (face.v.length !== 4 || Math.abs(faceNormal(face)[1]) < 0.7) continue;
+      const c = localCorners(face);
+      for (let i = 0; i < 4; i++) {
+        const dx = c[(i + 1) % 4][0] - c[i][0], dz = c[(i + 1) % 4][2] - c[i][2], length = Math.hypot(dx, dz);
+        if (length > longest) { longest = length; ux = dx / length; uz = dz / length; }
+      }
+    }
+    if (!longest || Math.abs(ux * uz) < 0.01) return null;
+    return { cos: ux, sin: -uz };
+  };
+  const boundsAlong = (list, frame) => {
+    const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
+    for (const face of list) for (const [x, , z] of localCorners(face)) {
+      const fx = x * frame.cos - z * frame.sin, fz = x * frame.sin + z * frame.cos;
+      if (fx < bounds.min[0]) bounds.min[0] = fx;
+      if (fx > bounds.max[0]) bounds.max[0] = fx;
+      if (fz < bounds.min[2]) bounds.min[2] = fz;
+      if (fz > bounds.max[2]) bounds.max[2] = fz;
+    }
+    for (const face of list) {
       if (face.min[1] < bounds.min[1]) bounds.min[1] = face.min[1];
       if (face.max[1] > bounds.max[1]) bounds.max[1] = face.max[1];
     }
@@ -220,6 +273,8 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
   // The part beyond the core is cut away from what stays. It falls with the wall if nothing covers it, and
   // if another plate lies on top of it, nobody will ever see it and it is simply not drawn.
   const rampartPlate = (face, bounds, part, surface) => {
+    // Not square to the building: a fort drawn to its ground. Its walk's outer edge is cut separately, so what is here stays.
+    if (!squareOnto(localCorners(face))) { stay(face); recordFloor(face); return; }
     const x0 = bounds.min[0] + RAMPART_EDGE, x1 = bounds.max[0] - RAMPART_EDGE, z0 = bounds.min[2] + RAMPART_EDGE, z1 = bounds.max[2] - RAMPART_EDGE;
     const [qx0, qx1, qz0, qz1, y] = faceSpan(face);
     if (qx0 >= x0 && qx1 <= x1 && qz0 >= z0 && qz1 <= z1) { stay(face); recordFloor(face); return; }
@@ -353,7 +408,8 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
     }
     for (const [islandIndex, island] of islandsOf(partFaces, vertices, originX, originZ).entries()) {
       const islandGround = Math.max(groundAt((island.min[0] + island.max[0]) * 0.5, (island.min[2] + island.max[2]) * 0.5), -0.6);
-      const bounds = localBounds(island.faces);
+      // A box set at an angle in the building is measured along its own sides.
+      const frame = islandFrame(island.faces), bounds = frame ? boundsAlong(island.faces, frame) : localBounds(island.faces);
       if (island.min[1] >= islandGround - 0.5 && spanOf(bounds.min, bounds.max) <= ISLAND_SMALL) {
         const s = keyed(`island:${partIndex}:${islandIndex}`, BUILDING_SHARD_KINDS.whole, part, surfaceOf(island.faces[0].kind, fortified));
         for (const face of island.faces) geometry[s].faces.push(face);
@@ -367,6 +423,10 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
         const surface = surfaceOf(face.kind, fortified);
         if (staysBecauseLow(face.min, face.max)) { stay(face); continue; }
         const n = faceNormal(face), horizontal = Math.abs(n[1]) > 0.7;
+        if (horizontal && instance.trace && WALK_EDGE.test(partKey) && face.v.length === 4) {
+          cutQuad(face, part, { ...surface, scale: Math.max(surface.scale, 1.6) }, 0.5);
+          continue;
+        }
         if (fortified && !horizontal && platform && face.v.length === 4) geometry[0].cores.push({ face, part });
         const longest = Math.max(face.max[0] - face.min[0], face.max[1] - face.min[1], face.max[2] - face.min[2]);
         // A paved floor at ground level stays, and so does the flat of a fort's rampart, which has earth under it.
@@ -393,7 +453,8 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
         const big = longest >= 0.8 * (surface.timber ? 1.8 : 1.45) * surface.scale * blockScale;
         if (face.v.length === 4 && big && face.kind !== 18) {
           // How thick is this wall, along its own normal? An island's span there, when it is a plain box.
-          const localNormal = [n[0] * cosY - n[2] * sinY, n[1], n[0] * sinY + n[2] * cosY];
+          const buildingNormal = [n[0] * cosY - n[2] * sinY, n[1], n[0] * sinY + n[2] * cosY];
+          const localNormal = frame ? [buildingNormal[0] * frame.cos - buildingNormal[2] * frame.sin, buildingNormal[1], buildingNormal[0] * frame.sin + buildingNormal[2] * frame.cos] : buildingNormal;
           const thickness = Math.abs(localNormal[0]) * spanX + Math.abs(localNormal[1]) * spanY + Math.abs(localNormal[2]) * spanZ;
           cutQuad(face, part, surface, thickness);
           continue;
@@ -422,6 +483,8 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
     };
     for (let layer = 0; layer < EARTH_LAYERS; layer++) for (let j = 0; j < cellsUp; j++) for (let i = 0; i < cellsAcross; i++) {
       const corners = [earthAt(i, j, layer), earthAt(i + 1, j, layer), earthAt(i + 1, j + 1, layer), earthAt(i, j + 1, layer)];
+      // In a fort drawn to its ground a wall may stand close across a bastion from another: earth stays inside the line.
+      if (instance.trace && corners.some((q) => { const [lx, , lz] = toLocal(q[0], q[1], q[2]); return depthInOutline(instance.trace.outline, lx, lz) < EARTH_THICK_M * 0.6; })) continue;
       const top = Math.max(corners[0][1], corners[1][1], corners[2][1], corners[3][1]);
       if (top < Math.max(groundAt(corners[0][0], corners[0][2]), -0.6) + 0.02) continue;
       const clod = newShard(BUILDING_SHARD_KINDS.block, part, { timber: false, span: 1 });
@@ -985,7 +1048,7 @@ export function traceShotThroughBreach(state, from, to) {
 const buildingMeshes = new WeakMap();
 
 // Until a building has been cut into pieces, a shot meets the mesh it was drawn from.
-function noteBuildingMeshes(port, geometry) {
+export function noteBuildingMeshes(port, geometry) {
   const instances = port?.instances, parts = geometry?.partAssembly?.parts;
   if (!Array.isArray(instances) || !parts || !geometry.vertices || !geometry.indices) return;
   const ranges = new Map();

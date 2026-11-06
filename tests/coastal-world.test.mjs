@@ -216,9 +216,11 @@ test('16th-century port prefabs place grounded waterfront piers, sea bastions an
   assert.ok(port.berth.depth >= 4.5, 'mooring berth clears deep-draft vessels');
 
   const prefabIds = new Set(port.instances.map((i) => i.prefabId));
-  for (const required of ['timber_mole_pier', 'stone_sea_bastion', 'casa_de_contratacion', 'royal_warehouse', 'mission_chapel']) {
+  for (const required of ['timber_mole_pier', 'casa_de_contratacion', 'royal_warehouse', 'mission_chapel']) {
     assert.ok(prefabIds.has(required), `port includes ${required}`);
   }
+  // Which forts is Santo Domingo's record to say. It has at least one.
+  assert.ok(prefabIds.has('stone_sea_bastion') || prefabIds.has('bastion_trace_fortress'), 'port includes a fort');
 
   // Pier center blocks hull clearance, while open berth clears hull envelope
   const pier = port.instances.find((i) => i.prefabId === 'timber_mole_pier');

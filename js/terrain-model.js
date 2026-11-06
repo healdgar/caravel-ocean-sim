@@ -178,7 +178,7 @@ export function classifyGroundingSubstrate(arg0, arg1, arg2 = {}, arg3 = null, a
       const instances = port?.instances;
       if (!Array.isArray(instances) || !instances.length) continue;
       if (port.center && (port.clearRadius ?? 0) > 0) {
-        const pRad = port.clearRadius + 140;
+        const pRad = Math.max(port.clearRadius, port.reach ?? 0) + 140;
         if (Math.abs(x - (port.center.x ?? 0)) > pRad || Math.abs(z - (port.center.z ?? 0)) > pRad) continue;
       }
       for (const inst of instances) {
@@ -317,7 +317,7 @@ export function probeHullBottomContact(heights, boat, x, z, region = ISLAND, sam
       const port = rawPorts[p];
       if (!Array.isArray(port?.instances) || !port.instances.length) continue;
       if (port.center && (port.clearRadius ?? 0) > 0) {
-        const pRad = port.clearRadius + L + 140;
+        const pRad = Math.max(port.clearRadius, port.reach ?? 0) + L + 140;
         if (Math.abs(x - (port.center.x ?? 0)) > pRad || Math.abs(z - (port.center.z ?? 0)) > pRad) continue;
       }
       if (!nearPorts) nearPorts = [];

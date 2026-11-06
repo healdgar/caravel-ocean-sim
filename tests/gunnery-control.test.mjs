@@ -357,12 +357,15 @@ test('shore structure foundation scarps, rotated building OBBs, and coastal palm
  assert.ok(rotHit,'rotated building OBB intersects at its exact rotated world extremity');
 
  // 3. A hit on the port mesh takes blocks out of the wall, through flight records
+ // On a wall of its trace, where a gun looks out, square on.
+ const face=bastion.trace.guns[0],wallCos=Math.cos(bastion.yaw),wallSin=Math.sin(bastion.yaw);
+ const wallAt=[bastion.x+face.x*wallCos+face.z*wallSin,bastion.baseY+2.5,bastion.z-face.x*wallSin+face.z*wallCos],wallOut=[face.nx*wallCos+face.nz*wallSin,0,-face.nx*wallSin+face.nz*wallCos];
  const bReport=applyBuildingImpactDamage(bastion,{
-  position:[bastion.x,bastion.baseY+2.5,bastion.z-(bastion.depth??16)*0.5],
-  surfacePosition:[bastion.x,bastion.baseY+2.5,bastion.z-(bastion.depth??16)*0.5],
-  localPosition:[0,2.5,-(bastion.depth??16)*0.5],
-  normal:[0,0,-1],
-  velocity:[0,0,280],
+  position:wallAt,
+  surfacePosition:wallAt,
+  localPosition:[face.x,2.5,face.z],
+  normal:wallOut,
+  velocity:[-wallOut[0]*280,0,-wallOut[2]*280],
   mass:10.9,
   ammo:'round',
  });

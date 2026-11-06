@@ -15,6 +15,8 @@ import { locatePartAtLocalPoint, isSuperstructurePartId, computeArchetypeScaleSp
 import { shipMastSpecs, fracturePartsGone } from './ship-fracture.js';
 import { shipColliderCrossings, shipColliderNormal, shipColliderTrace } from './ship-collider.js';
 import { buildingReach, traceShotAtBuilding } from './building-fracture.js';
+import { TRACE_GUN_ARC_COS, enclosurePlan } from './fort-plan.js';
+import { HARBOUR_GUN_RANGE_M } from './harbour-geography.js';
 import { FOREST_LONG_FALLEN, buildForestTrunkGrid, foreshorePalmPlacement, forestTrunkShape, sweepForestTrunks } from './forest-trunks.js';
 import { landCraterSize } from './land-craters.js';
 import { createFortGarrison, stepFortGarrison } from './crew.js';
@@ -2394,7 +2396,7 @@ export function sweepBuildingSegment(from, to, radius = 0.08, port, options = nu
   const segHalf = Math.hypot(to[0] - from[0], to[1] - from[1], to[2] - from[2]) * 0.5;
   const portAnchorX = port.center?.x ?? port.berth?.x ?? instances[0].x ?? 0;
   const portAnchorZ = port.center?.z ?? port.berth?.z ?? instances[0].z ?? 0;
-  if (Math.hypot(midX - portAnchorX, midZ - portAnchorZ) > 1800 + segHalf) return null;
+  if (Math.hypot(midX - portAnchorX, midZ - portAnchorZ) > Math.max(1800, port.reach ?? 0) + segHalf) return null;
   const segMinY = Math.min(from[1], to[1]);
   const segMaxY = Math.max(from[1], to[1]);
   const previewOnly = options?.previewOnly === true, exact = !previewOnly || options?.exact === true;
@@ -3269,7 +3271,15 @@ export function createBuildingGunDefinitions(building) {
     });
   };
 
-  if (prefabId === 'bastion_trace_fortress') {
+  if (building.trace) {
+    // A fort drawn to its ground has its guns where its trace puts them, each with its own arc.
+    const drop = building.trace.lowDrop ?? 0, lowZ = building.trace.lowZ;
+    for (const gun of building.trace.guns) {
+      const y = yTop + 0.25 - (lowZ !== null && gun.z < lowZ ? drop : 0);
+      addEmbrasureGun(gun.nz <= 0 ? 'port' : 'starboard', gun.nz <= 0 ? -1 : 1, gun.x + gun.nx * 0.15, y, gun.z + gun.nz * 0.15, [gun.nx, 0, gun.nz], prefabId === 'stone_sea_bastion' ? 24 : 32);
+      guns[guns.length - 1].arcCos = TRACE_GUN_ARC_COS;
+    }
+  } else if (prefabId === 'bastion_trace_fortress') {
     for (let i = -1.5; i <= 1.5; i += 1.0) {
       const gx = i * (hw * 0.34);
       addEmbrasureGun('port', -1, gx, yTop + 0.25, -hl - 0.15, [0, 0, -1], 32);
@@ -3291,15 +3301,25 @@ export function createBuildingGunDefinitions(building) {
     }
   } else if (prefabId === 'english_triangular_palisade_fort') {
     const yBulwark = 0.35 + Math.max(4.4, (building.height ?? 6.8) * 0.68) - 0.35;
-    addEmbrasureGun('port', -1, -hw * 0.84, yBulwark, -hl * 0.68 - 2.0, [0, 0, -1], 12);
-    addEmbrasureGun('port', -1, 0, yBulwark, -hl * 0.68 - 1.2, [0, 0, -1], 12);
-    addEmbrasureGun('port', -1, hw * 0.84, yBulwark, -hl * 0.68 - 2.0, [0, 0, -1], 12);
-    addEmbrasureGun('starboard', 1, 0, yBulwark, hl * 0.82 + 2.0, [0, 0, 1], 12);
+    for (const gun of enclosurePlan(building).guns) {
+      addEmbrasureGun(gun.nz <= 0 ? 'port' : 'starboard', gun.nz <= 0 ? -1 : 1, gun.x + gun.nx * 1.6, yBulwark, gun.z + gun.nz * 1.6, [gun.nx, 0, gun.nz], 12);
+      guns[guns.length - 1].arcCos = TRACE_GUN_ARC_COS;
+    }
   } else if (building.armed && (prefabId === 'stone_quay_seawall' || prefabId === 'timber_mole_pier')) {
     addEmbrasureGun('port', -1, -hw * 0.35, yTop + 0.35, -hl, [0, 0, -1], 12);
     addEmbrasureGun('starboard', 1, hw * 0.35, yTop + 0.35, hl, [0, 0, 1], 12);
   }
   return guns;
+}
+
+// Whether a gun can be laid on a mark on the water. A gun with an arc looks out over its own wall; one without
+// serves whichever side of its fort the mark is on.
+export function buildingGunBears(gun, building, x, z) {
+  const cos = Math.cos(building?.yaw ?? 0), sin = Math.sin(building?.yaw ?? 0), dx = x - (building?.x ?? 0), dz = z - (building?.z ?? 0);
+  const lx = dx * cos - dz * sin, lz = dx * sin + dz * cos;
+  if (gun.arcCos === undefined) return gun.side === (lz <= 0 ? 'port' : 'starboard');
+  const mx = lx - (gun.localPosition?.[0] ?? 0), mz = lz - (gun.localPosition?.[2] ?? 0), length = Math.hypot(mx, mz) || 1, way = gun.directionDesign;
+  return (mx * way[0] + mz * way[2]) / length >= gun.arcCos;
 }
 
 export function buildingGunMuzzlePose(gun, building) {
@@ -3406,7 +3426,8 @@ export function createBuildingGunnery(building, { onEvent = () => {}, getVessels
       const localTx = tx * cosY - tz * sinY;
       const localTz = tx * sinY + tz * cosY;
       const localDir = [localTx / distH, 0, localTz / distH];
-      const side = localTz <= 0 ? 'port' : 'starboard';
+      const bearing = state.guns.filter((g) => buildingGunBears(g, building, targetBoat.x ?? 0, targetBoat.z ?? 0));
+      if (!bearing.length) return 0;
 
       // Ballistic elevation solution for shore battery firing down/out at an offshore vessel.
       const muzzleY = (building.baseY ?? building.y ?? 0) + (building.height ?? 6) + 0.25;
@@ -3417,8 +3438,8 @@ export function createBuildingGunnery(building, { onEvent = () => {}, getVessels
       const directAngleDeg = (Math.atan2(dy, distH) * 180) / Math.PI;
       const aimElevDeg = Math.max(-8, Math.min(16, directAngleDeg + gravDropDeg * 1.08));
 
-      for (const g of state.guns) {
-        if (g.side === side && !g.dismounted) {
+      for (const g of bearing) {
+        if (!g.dismounted) {
           g.aimDirectionLocal = [...localDir];
           g.aimPoint = [targetBoat.x ?? 0, targetY, targetBoat.z ?? 0];
           g.elevation = aimElevDeg;
@@ -3429,7 +3450,9 @@ export function createBuildingGunnery(building, { onEvent = () => {}, getVessels
           g.queued = false;
         }
       }
-      return fireGunnery(state, side, { interval: 0.10, ammo: state.ammo });
+      let queued = 0;
+      for (const side of ['port', 'starboard']) queued += fireGunnery(state, side, { interval: 0.10, ammo: state.ammo, only: bearing });
+      return queued;
     },
     update(dt, wind = [0, 0, 0], { skipBuildingDamage = false } = {}) {
       if (!skipBuildingDamage) stepBuildingDamage(building, dt);
@@ -3483,7 +3506,7 @@ export function createBuildingGunnery(building, { onEvent = () => {}, getVessels
   };
 }
 
-export function createPortGunnery(port, { onEvent = () => {}, getVessels = () => [], getTerrain = () => null, autoReturnFire = true, returnFireRange = 420 } = {}) {
+export function createPortGunnery(port, { onEvent = () => {}, getVessels = () => [], getTerrain = () => null, autoReturnFire = true, returnFireRange = HARBOUR_GUN_RANGE_M } = {}) {
   const batteries = [];
   const instances = port?.instances ?? [];
   for (const inst of instances) {
@@ -3573,7 +3596,10 @@ export function createPortGunnery(port, { onEvent = () => {}, getVessels = () =>
             }
           }
           if (nearestBoat && nearestDist <= returnFireRange) {
-            for (const b of batteries) b.fireAtTarget(nearestBoat);
+            // Only those in range: a fort at the mouth has no shot at a ship off the town.
+            for (const b of batteries) {
+              if (Math.hypot((nearestBoat.x ?? 0) - (b.building.x ?? 0), (nearestBoat.z ?? 0) - (b.building.z ?? 0)) <= returnFireRange) b.fireAtTarget(nearestBoat);
+            }
             cooldown = 9.5;
           } else {
             cooldown = 2.0;
@@ -3980,7 +4006,7 @@ export function createGunnerySolidSweep({ sourceBoat, sourceBuilding = null, get
           port?.townsfolkWatch?.(from, to, best, projectile);
           const soldiers = port?.garrison?.soldiers;
           if (!soldiers?.length) continue;
-          const reach = 400 + Math.hypot(to[0] - from[0], to[2] - from[2]), mx = (from[0] + to[0]) * 0.5, mz = (from[2] + to[2]) * 0.5;
+          const reach = Math.max(400, (port.reach ?? 0) + 60) + Math.hypot(to[0] - from[0], to[2] - from[2]), mx = (from[0] + to[0]) * 0.5, mz = (from[2] + to[2]) * 0.5;
           if (Math.hypot(mx - (port.center?.x ?? mx), mz - (port.center?.z ?? mz)) > reach) continue;
           for (const hit of sweepCrewBodies(from, to, radius, soldiers, best?.fraction ?? 1)) strikeSoldierWithBall(hit, projectile);
         }

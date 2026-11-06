@@ -1,4 +1,5 @@
 import { footingUnder, restingHeightUnder } from './building-fracture.js';
+import { enclosurePlan, insetOutline, traceWalls } from './fort-plan.js';
 import { DRESS_MASK_SCALE, DRESS_PIECES, indigenousDress } from './indigenous-dress.js';
 import { loadCrewGLB, gltfTRS } from './gltf.js';
 import { hullDeck, vesselDeck, HULL_VERTICAL_SCALE, modelDeck, modelHullDeck, modelDeckWidth, vesselVerticalScale } from './hull.js';
@@ -1079,7 +1080,37 @@ export function createFortificationSoldiersForInstance(inst, startIndex = 0) {
   const wallT = 1.75;
   const specs = [];
 
-  if (inst.prefabId === 'stone_sea_bastion') {
+  if (inst.trace) {
+    // Gunners behind the guns the trace has, sentries on the points of its bastions and a captain in the yard.
+    const yDeck = yTop - 0.85, trace = inst.trace, lowAt = (z) => (trace.lowZ !== null && trace.lowZ !== undefined && z < trace.lowZ ? trace.lowDrop : 0);
+    const inward = insetOutline(trace.outline, 2.6);
+    // Nobody shares a post, at a sharp corner or where a beat crosses a gun.
+    const free = (lx, lz) => specs.every((spec) => Math.hypot(spec.lx - lx, spec.lz - lz) > 1.6);
+    trace.guns.forEach((gun, gunIndex) => {
+      let lx = gun.x - gun.nx * 2.5, lz = gun.z - gun.nz * 2.5;
+      if (!free(lx, lz)) { lx = gun.x - gun.nx * 1.3; lz = gun.z - gun.nz * 1.3; }
+      if (free(lx, lz)) specs.push({ lx, ly: yTop - 0.16 - lowAt(gun.z), lz, routeZ: [lz, lz], localYaw: Math.atan2(gun.nx, gun.nz), role: 'Artillero', stationKind: 'embrasure', gunIndex });
+    });
+    trace.salients.slice(0, 5).forEach((at) => {
+      const [lx, lz] = inward[at];
+      if (free(lx, lz)) specs.push({ lx, ly: yDeck - lowAt(lz), lz, routeZ: [lz - 1.2, lz + 1.2], localYaw: Math.atan2(lx, lz), role: 'Vigía de Garita', stationKind: 'bastion' });
+    });
+    // Sentries walk the longest walls with no guns on them. A beat runs along z, so one on a wall set across it is short.
+    const gunWalls = new Set(trace.guns.map((gun) => gun.wall));
+    const beats = traceWalls(trace).filter((wall) => wall.index !== trace.gate.wall && wall.length >= 8).sort((a, b) => Number(gunWalls.has(a.index)) - Number(gunWalls.has(b.index)) || b.length - a.length).slice(0, 8);
+    beats.forEach((wall, beat) => {
+      const lx = (wall.ax + wall.bx) * 0.5 - wall.nx * 3.2, lz = (wall.az + wall.bz) * 0.5 - wall.nz * 3.2;
+      const run = Math.abs(wall.uz) > 0.85 ? Math.min(6, wall.length * 0.3) : 1.2;
+      if (free(lx, lz)) specs.push({ lx, ly: yTop - 0.16 - lowAt(lz), lz, routeZ: [lz - run, lz + run], localYaw: beat % 2 ? Math.PI : 0, role: beat % 2 ? 'Alabardero' : 'Centinela de Muralla', stationKind: 'rampart' });
+    });
+    const gate = trace.gate;
+    for (const hand of [-1, 1]) {
+      const gateX = gate.x - gate.nx * 3.2 + gate.ux * 2.6 * hand, gateZ = gate.z - gate.nz * 3.2 + gate.uz * 2.6 * hand;
+      if (free(gateX, gateZ)) specs.push({ lx: gateX, ly: yDeck - lowAt(gate.z), lz: gateZ, routeZ: [gateZ, gateZ], localYaw: Math.atan2(gate.nx, gate.nz), role: 'Guardia de Puerta', stationKind: 'rampart' });
+    }
+    const yard = trace.buildings.find((building) => building.kind === 'magazine');
+    if (yard && free(yard.x, yard.z - yard.radius - 2.4)) specs.push({ lx: yard.x, ly: yDeck - lowAt(yard.z), lz: yard.z - yard.radius - 2.4, routeZ: [yard.z - yard.radius - 3.4, yard.z - yard.radius - 1.4], localYaw: 0, role: 'Capitán de Presidio', stationKind: 'citadel' });
+  } else if (inst.prefabId === 'stone_sea_bastion') {
     const yDeck = yTop - 0.85;
     const yBanquette = yTop - 0.16;
     const zSea = -hl + wallT + 0.55;
@@ -1185,17 +1216,20 @@ export function createFortificationSoldiersForInstance(inst, startIndex = 0) {
     const yWallTop = yPlinth + 4.4;
     const yBulwarkDeck = yWallTop - 0.95;
     const yBanquette = yWallTop - 1.10;
-    const bSW = [-hw * 0.86, -hl * 0.72];
-    const bSE = [hw * 0.86, -hl * 0.72];
-    const bN = [0, hl * 0.86];
-    specs.push({ lx: bSW[0], ly: yBulwarkDeck, lz: bSW[1] - 0.8, routeZ: [bSW[1] - 1.4, bSW[1] + 0.8], localYaw: Math.PI, role: 'Master Gunner', stationKind: 'embrasure', gunIndex: 0 });
-    specs.push({ lx: 0, ly: yBulwarkDeck, lz: bSW[1] - 0.6, routeZ: [bSW[1] - 1.0, bSW[1] + 0.8], localYaw: Math.PI, role: 'Culverin Gunner', stationKind: 'embrasure', gunIndex: 1 });
-    specs.push({ lx: bSE[0], ly: yBulwarkDeck, lz: bSE[1] - 0.8, routeZ: [bSE[1] - 1.4, bSE[1] + 0.8], localYaw: Math.PI, role: 'Bulwark Gunner', stationKind: 'embrasure', gunIndex: 2 });
-    specs.push({ lx: bN[0], ly: yBulwarkDeck, lz: bN[1] + 0.6, routeZ: [bN[1] - 1.0, bN[1] + 1.2], localYaw: 0, role: 'North Bulwark Sentry', stationKind: 'embrasure', gunIndex: 3 });
+    const plan = enclosurePlan(inst), [bSW, bSE] = plan.bastions, bN = plan.bastions[2];
+    const [one, two, three, four] = plan.guns;
+    specs.push({ lx: one.x, ly: yBulwarkDeck, lz: bSW[1] - 0.8, routeZ: [bSW[1] - 1.4, bSW[1] + 0.8], localYaw: Math.PI, role: 'Master Gunner', stationKind: 'embrasure', gunIndex: 0 });
+    specs.push({ lx: two.x, ly: yBulwarkDeck, lz: bSW[1] - 0.6, routeZ: [bSW[1] - 1.0, bSW[1] + 0.8], localYaw: Math.PI, role: 'Culverin Gunner', stationKind: 'embrasure', gunIndex: 1 });
+    specs.push({ lx: three.x, ly: yBulwarkDeck, lz: bSE[1] - 0.8, routeZ: [bSE[1] - 1.4, bSE[1] + 0.8], localYaw: Math.PI, role: 'Bulwark Gunner', stationKind: 'embrasure', gunIndex: 2 });
+    specs.push({ lx: four.x, ly: yBulwarkDeck, lz: bN[1] + 0.6, routeZ: [bN[1] - 1.0, bN[1] + 1.2], localYaw: 0, role: 'North Bulwark Sentry', stationKind: 'embrasure', gunIndex: 3 });
     specs.push({ lx: -hw * 0.38, ly: yBanquette, lz: bSW[1] + 1.2, routeZ: [bSW[1] + 0.6, bSW[1] + 2.4], localYaw: Math.PI, role: 'Captain of the Guard', stationKind: 'rampart' });
     specs.push({ lx: hw * 0.38, ly: yBanquette, lz: bSE[1] + 1.2, routeZ: [bSE[1] + 0.6, bSE[1] + 2.4], localYaw: Math.PI, role: 'Pikeman / Musketeer', stationKind: 'rampart' });
-    specs.push({ lx: -3.2, ly: yPlinth, lz: bSW[1] - 1.8, routeZ: [bSW[1] - 3.2, bSW[1] - 0.8], localYaw: Math.PI, role: 'River Gate Halberdier', stationKind: 'parade' });
-    specs.push({ lx: 3.2, ly: yPlinth, lz: bSE[1] - 1.8, routeZ: [bSE[1] - 3.2, bSE[1] - 0.8], localYaw: Math.PI, role: 'River Gate Musketeer', stationKind: 'parade' });
+    // Two at the gate, either side of it, just outside.
+    const gate = plan.gate;
+    for (const [hand, role] of [[-1, 'Gate Halberdier'], [1, 'Gate Musketeer']]) {
+      const lz = gate.z + gate.nz * 2.2 + gate.uz * hand * 3.2;
+      specs.push({ lx: gate.x + gate.nx * 2.2 + gate.ux * hand * 3.2, ly: yPlinth, lz, routeZ: [lz - 1.2, lz + 1.2], localYaw: Math.atan2(gate.nx, gate.nz), role, stationKind: 'parade' });
+    }
   } else if (inst.prefabId === 'curtain_wall_and_gate') {
     const wallHW = Math.min(3.4, hw);
     const yWalk = yTop - 0.18;

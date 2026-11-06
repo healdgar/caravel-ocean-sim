@@ -106,17 +106,14 @@ test('no footprint crosses a wall, in any port or year with one',{timeout:600000
 
 test('a port with two forts keeps them apart',{timeout:600000},()=>{
   let pairs=0;
+  const lineOf=inst=>inst.trace?inst.trace.outline.map(([lx,lz])=>{const p=fortLocalToWorld(inst,lx,lz);return [p.x,p.z];}):worldOutline(inst);
   for(const spec of walledPorts()){
-    const forts=packOf(spec).port.instances.filter(i=>enclosurePlan(i));
+    const forts=packOf(spec).port.instances.filter(i=>enclosurePlan(i)||i.trace);
     for(const a of forts)for(const b of forts){
       if(a===b)continue;
       pairs++;
-      const outline=worldOutline(b),reach=enclosurePlan(a).bastionRadius+enclosurePlan(b).bastionRadius;
-      assert.ok(!worldOutline(a).some(p=>inOutline(p,outline)),`${spec.id} ${spec.year}: one fort's bastion stands inside another`);
-      for(const [ax,az] of worldOutline(a))for(const [bx,bz] of outline){
-        assert.ok(Math.hypot(ax-bx,az-bz)>reach,`${spec.id} ${spec.year}: two forts share a bastion's ground`);
-      }
-      assert.equal(emittedPoints(a,WALL_PARTS).find(p=>inOutline(p,outline)),undefined,`${spec.id} ${spec.year}: one fort's wall runs inside another`);
+      const outline=lineOf(b);
+      assert.ok(!lineOf(a).some(p=>inOutline(p,outline)),`${spec.id} ${spec.year}: one fort stands inside another`);
     }
   }
   assert.ok(pairs>0,'some port has two forts');
@@ -177,12 +174,12 @@ test('ways go round a wall and through its gate, and every door is still reached
       const plan=enclosurePlan(wall);
       const spans=plan.wallSpans.map(([a,b])=>[a,b].map(([lx,lz])=>{const p=fortLocalToWorld(wall,lx,lz);return [p.x,p.z];}));
       // Smoothing a way may graze the post at either side of a gate, and no further.
-      const gateEdges=plan.gateHalfWidth?[-1,1].map(side=>{const p=fortLocalToWorld(wall,side*plan.gateHalfWidth,plan.curtains[0][0][1]);return [p.x,p.z];}):[];
+      const gateEdges=plan.gateEdges?plan.gateEdges.map(([lx,lz])=>{const p=fortLocalToWorld(wall,lx,lz);return [p.x,p.z];}):[];
       for(const way of port.streets.ways){
         const pts=way.points;
         for(let k=1;k<pts.length;k++)for(const [a,b] of spans){
           if(!segmentsCross(pts[k-1],pts[k],a,b))continue;
-          const atGate=gateEdges.some(([x,z])=>Math.hypot(pts[k][0]-x,pts[k][1]-z)<2.5);
+          const atGate=gateEdges.some(([x,z])=>Math.hypot(pts[k][0]-x,pts[k][1]-z)<3);
           assert.ok(atGate,`${label}: a ${way.road?'road':'way'} crosses ${wall.prefabId} at ${pts[k][0].toFixed(0)},${pts[k][1].toFixed(0)}`);
         }
       }

@@ -1260,7 +1260,7 @@ async function main() {
   const dolphinVessels=vessels.map(v=>v.boat),dolphinPlayer=[boat];
   window.oceanFleet={vessels,config:fleetConfig,wakes:wakePool,renderAssets};
   // For the review and perf scripts, which aim at and fire on buildings.
-  Object.defineProperties(window.oceanFleet,{terrain:{get:()=>terrain},orbit:{get:()=>shipOrbit},portDamage:{value:portDamage}});
+  Object.defineProperties(window.oceanFleet,{terrain:{get:()=>terrain},orbit:{get:()=>shipOrbit},freeCam:{value:cam},portDamage:{value:portDamage}});
 
   const hullFlood=await createHullFlood({device,frameUBO,envCubeView,sampler:sampClamp,shader,format:HDR,samples:MSAA});
   for(const v of vessels)v.flood=hullFlood.vessel(v.holesUBO,v.hullUBO);
