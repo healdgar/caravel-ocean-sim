@@ -284,7 +284,7 @@ export function readHarbourGeography(heights, region, { town = null, seaward = n
 
 // Where along the way out the water is narrow. A place counts if it opens wider on both sides of it.
 function readNarrows(out) {
-  const { route, grid } = out;
+  const { route } = out;
   const width = route.map((p) => p.clear * 2);
   const seen = [];
   for (let s = 1; s < route.length - 1; s++) {

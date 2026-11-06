@@ -2,7 +2,7 @@
 // Which forts a harbour has in a given year, where each stands, which way it looks and what shape the ground gives it.
 // The record says what stood and where, when there is a record and the coast is the real one. Otherwise the geography
 // says where the same job is. Worked out once when a port is laid out. See FORTS.md.
-import { HARBOUR_GUN_RANGE_M, bestGroundNear, commandFrom, waterRound } from './harbour-geography.js';
+import { bestGroundNear, commandFrom, waterRound } from './harbour-geography.js';
 import { drawFortTrace } from './fort-plan.js';
 import { fortRecordsFor } from './fort-records.js';
 
@@ -98,7 +98,7 @@ export function shoreNormal(harbour, x, z) {
 }
 
 // Which job a fort does on this coast and the ground for it, when the record cannot say exactly.
-function groundForRole(harbour, role, side, taken, region) {
+function groundForRole(harbour, role, side, taken) {
   const { mouth, narrows, anchorage, townWater, opening, route, town } = harbour;
   const way = rankWays(side);
   const options = { taken, apart: FORT_APART_M };
@@ -174,7 +174,7 @@ function siteRecordedFort(harbour, record, region, coastIsReal, taken) {
       if (spot) return { ...spot, source: 'moved' };
     }
   }
-  const spot = groundForRole(harbour, record.role, record.side, taken, region);
+  const spot = groundForRole(harbour, record.role, record.side, taken);
   return spot ? { ...spot, source: coastIsReal ? 'moved' : 'role' } : null;
 }
 
@@ -309,4 +309,3 @@ export function planHarbourDefences({ harbour, region, portId, year, coastIsReal
   return { forts: out, enclosure };
 }
 
-export { HARBOUR_GUN_RANGE_M };

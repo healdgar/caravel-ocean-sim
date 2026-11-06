@@ -69,20 +69,20 @@ lists every fort; pass `--coasts` a folder from `scripts/harbour-coasts.mjs` for
 | Across 53 ports in 1550, 1600, 1650 and 1689 | Real coasts, before | after | Made-up coasts, before | after |
 |---|---|---|---|---|
 | Port years | 164 | 164 | 166 | 166 |
-| Forts | 469 | 326 | 474 | 331 |
-| Port years with none | 10 | 6 | 10 | 3 |
-| Median distance to the mouth, where there is one (m) | 1539 | 617 | - | - |
-| Median distance to the way in (m) | 484 | 544 | 485 | 565 |
-| Median sea face off the water it guards | 97° | 7° | 97° | 7° |
-| Sea faces more than 45° off | 365 | 38 | 352 | 19 |
-| Gates opening on the water, away from the town | 89 | 0 | 79 | 0 |
-| Median share of its guns with clear water before them | 40% | 86% | 40% | 100% |
-| Median share of its fire reaching the approach | 35% | 44% | 37% | 68% |
-| Forts with no fire on the approach at all | 11 | 43 | 2 | 0 |
-| Median share of the approach a port holds | 51% | 54% | 48% | 52% |
-| Forts reaching into a neighbour | 82 | 0 | 52 | 0 |
-| Worst reach into a neighbour (m) | 5.92 | 0 | 5.85 | 0 |
-| Port years with two piers overlapping | 11 | 0 | 13 | 0 |
+| Forts | 470 | 325 | 474 | 331 |
+| Port years with none | 10 | 7 | 10 | 3 |
+| Median distance to the mouth, where there is one (m) | 1289 | 824 | - | - |
+| Median distance to the way in (m) | 464 | 481 | 485 | 565 |
+| Median sea face off the water it guards | 99° | 9° | 97° | 7° |
+| Sea faces more than 45° off | 360 | 42 | 352 | 19 |
+| Gates opening on the water, away from the town | 64 | 2 | 79 | 0 |
+| Median share of its guns with clear water before them | 40% | 90% | 40% | 100% |
+| Median share of its fire reaching the approach | 34% | 46% | 37% | 68% |
+| Forts with no fire on the approach at all | 11 | 32 | 2 | 0 |
+| Median share of the approach a port holds | 51% | 55% | 48% | 52% |
+| Forts reaching into a neighbour | 79 | 0 | 52 | 0 |
+| Worst reach into a neighbour (m) | 5.5 | 0 | 5.85 | 0 |
+| Port years with two piers overlapping | 14 | 0 | 13 | 0 |
 
 
 ## Records and sources

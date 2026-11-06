@@ -23,7 +23,6 @@ server.listen(0, '127.0.0.1');
 await once(server, 'listening');
 const base = `http://127.0.0.1:${server.address().port}/`;
 const browser = await chromium.launch({ args: ['--enable-unsafe-webgpu', '--use-angle=metal', '--disable-gpu-watchdog'] });
-const FORTS = /bastion_trace_fortress|stone_sea_bastion|english_triangular_palisade_fort|torreon_atalaya_farol/;
 const aim = (eye, at) => [Math.atan2(at[0] - eye[0], -(at[1] - eye[2])) * 180 / Math.PI, Math.atan2((at[2] ?? 0) - eye[1], Math.hypot(at[0] - eye[0], at[1] - eye[2])) * 180 / Math.PI];
 for (const { id, year } of specs) {
   const page = await browser.newPage({ viewport: { width: WIDTH, height: HEIGHT } }), errors = [];

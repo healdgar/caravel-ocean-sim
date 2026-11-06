@@ -3702,7 +3702,6 @@ function extractAndCarveHarborQuaysAndPiers(region, heights, orthoFootprints) {
 export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, satelliteData = null, shoreDist = null, coastIsReal = false } = {}) {
   const region = resolveGlobalCoastalRegion(regionSpec);
   const recordedPortId = region.colonyGrowth?.portId ?? region.id;
-  if (coastIsReal) carveRecordedChannel(heights, region, fortRecordsFor(recordedPortId, region.year ?? 1550).channel);
   const allowColonialPort = region.hasColonialPort !== false;
   const isLisbonRoyalDock = region.id === 'lisbon' || region.portType === 'royal-arsenal-dock';
   const orthoFootprints =
@@ -3839,6 +3838,8 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     }
   }
 
+  // A channel the elevation data has lost is opened now, so that the town keeps the shore it has always had.
+  if (coastIsReal) carveRecordedChannel(heights, region, fortRecordsFor(recordedPortId, 1800).channel);
   // The coast as it is, before the port's own works change it, for reading what the harbour needs.
   const pristineHeights = allowColonialPort ? new Float32Array(heights) : null;
   // NMS-style Feature Stamp Terraforming: grade the harbor pier berth and level foundation pads
@@ -4208,7 +4209,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
   };
   let defencesSited = false;
   // A fort that holds the settlement stands back from the water and looks at it. It is sited first of all.
-  const placeEnclosingFort = (label, recordOf, year) => {
+  const placeEnclosingFort = (label, recordOf) => {
     const shape = recordOf?.encloses === 'triangle' || (!recordOf && colonyGrowth.crown === 'england') ? 'triangle' : 'square';
     const width = shape === 'triangle' ? PORT_PREFABS.english_triangular_palisade_fort.width : 96;
     const length = shape === 'triangle' ? PORT_PREFABS.english_triangular_palisade_fort.length : 86;
@@ -4670,7 +4671,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     // The fort that holds the settlement (James Fort, 118m x 90m; four-sided where the record says so), then the
     // harbour's other works, from the record or the rule.
     const heldBy = fortRecordsFor(recordedPortId, colonyGrowth.year).forts.find((record) => record.encloses) ?? fortRecordsFor(recordedPortId, 1800).forts.find((record) => record.encloses) ?? null;
-    const fort = placeEnclosingFort(fortLabel, heldBy, colonyGrowth.year);
+    const fort = placeEnclosingFort(fortLabel, heldBy);
     siteDefences(true);
     // Core church, company storehouse & flanked rows of half-timbered / mud-and-stud cottages INSIDE the palisade
     const fortPlan = fort ? enclosurePlan(fort) : null;
@@ -9856,7 +9857,8 @@ export function build1550HistoricalTerritoryPack(basePack, options = {}) {
     ...basePack,
     region,
     satelliteData: sat1550,
-    coastIsReal: basePack.coastIsReal ?? /terrarium|1550/.test(basePack.elevationSource ?? ''),
+    // Heights that came from the territory cache are only ever real elevation.
+    coastIsReal: Boolean(options.precomputedHeights1550) || (basePack.coastIsReal ?? /terrarium|1550/.test(basePack.elevationSource ?? '')),
   };
   finalizeProceduralCoastalPack(
     upgradedPack,
