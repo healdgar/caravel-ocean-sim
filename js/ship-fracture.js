@@ -477,11 +477,23 @@ export function prepareShipFracture({ modelId, model = null, vertices, indices, 
     if (!anchored) for (const s of component) s.anchored = true;
   }
 
+  // Where a spar stands at a height, from its own vertices. A raked mast moves along her as it rises.
+  const sparStation = (number, height, fallback) => {
+    let sum = 0, count = 0;
+    for (let t = 0; t < tris; t++) {
+      if (sparMasts[t] !== number) continue;
+      for (let k = 0; k < 3; k++) {
+        const at = combined[t * 3 + k] * 9;
+        if (Math.abs(outVertices[at]) < 0.3 && Math.abs(outVertices[at + 1] - height) < 0.3) { sum += outVertices[at + 2]; count++; }
+      }
+    }
+    return count ? sum / count : fallback;
+  };
   const masts = {};
-  for (const [mast, z, topCut, fullCut] of specs) {
+  for (const [index, [mast, z, topCut, fullCut]] of specs.entries()) {
     const of = (segment) => shards.filter((s) => s && s.mast === mast && s.segment === segment).map((s) => s.index);
     const led = (segment) => shards.filter((s) => s?.ledTo?.mast === mast && s.ledTo.segment === segment).map((s) => s.index);
-    masts[mast] = { z, topCut, fullCut, upper: [...of(2), ...led(2)], lower: [...of(1), ...led(1)] };
+    masts[mast] = { z, topCut, fullCut, topZ: sparStation(index + 1, topCut, z), fullZ: sparStation(index + 1, fullCut, z), upper: [...of(2), ...led(2)], lower: [...of(1), ...led(1)] };
   }
   const outGroups = [...groups];
   for (const [id, range] of newGroupRanges) {
@@ -644,7 +656,7 @@ function fellMast(state, mastId, stage, side, now, { snap = false } = {}) {
   const fall = Math.sqrt((2 * drop) / GRAVITY);
   const rate = ((2 * Math.PI) / 3) / (0.5 * hinge + fall);
   const clear = fracture.beamMetres * 0.5 + length * 0.06;
-  const pivot = [0, cut, mast.z + (side > 0 ? 0.01 : -0.01)];
+  const pivot = [0, cut, (stage === 'topmast' ? mast.topZ : mast.fullZ) + (side > 0 ? 0.01 : -0.01)];
   // It lands flat. A plain sideways topple would leave the yards standing up out of the sea, so one turn
   // about a skew axis carries the mast down to the water and rolls its yards level on the way.
   const roll = shardNoise(fresh[0], 5) >= 0.5 ? 1 : -1, third = 1 / Math.sqrt(3);

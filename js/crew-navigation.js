@@ -7,6 +7,7 @@ import {ROWING_DESIGNS} from './models/rowing.js';
 import {LATER_SAIL_DESIGNS} from './models/later-sail.js';
 import {RIG_MASTS,mastPoint} from './rigging.js';
 import {crewOpenEdgeInset} from './crew-overboard.js';
+import {fracturePartsGone} from './ship-fracture.js';
 
 // Metres, independent of design-frame scale. This is a standing-body clearance,
 // not a shrunken render proxy. Hands may reach outside it to work real equipment.
@@ -123,6 +124,8 @@ function crewNavigationIntersects(a,b,o,body){
   }
   return hi>0&&lo<1;
 }
+// Moving inboard, or not moving. Walking along an open edge is neither.
+const crewNavigationLeavesEdge=(a,b)=>Math.abs(b[0])<Math.abs(a[0])||(a[0]===b[0]&&a[2]===b[2]);
 // Beside an open edge the deck is narrower, except to a hand already there and moving away from it.
 function crewNavigationOnDeck(p,boat,scale,body,leaving=false){
   const z=p[2]/scale[2],x=p[0]/scale[0],inset=leaving?0:crewOpenEdgeInset(boat,z,Math.sign(x));return Number.isFinite(p[1])&&Math.abs(x)+inset+body.radius/scale[0]<modelDeckWidth(boat,z);
@@ -134,6 +137,9 @@ function crewNavigationRigAccess(p,body,boat,scale){
   const access=body.rigAccess;if(!access||!Array.isArray(access.point)||!(access.radius>0&&access.radius<=1.25))return false;
   if(boat.modelId==='victory'){
     if(!Number.isInteger(access.mast)||![-1,1].includes(access.side))return false;
+    // A chainwale that has been shot away holds nobody.
+    const fracture=boat.damage?.fracture;
+    if(fracture?.brokenCount&&fracturePartsGone(fracture).has(`chainwale.${VICTORY_MASTS[access.mast].id}.${access.side}`))return false;
     const z=p[2]/scale[2],channel=victoryChainwale(access.mast,access.side,z);
     const front=victoryChainwale(access.mast,access.side,z-body.radius/scale[2]),aft=victoryChainwale(access.mast,access.side,z+body.radius/scale[2]);
     if(Math.abs(front.floorLevel-aft.floorLevel)>1e-8)return false;
@@ -160,16 +166,52 @@ function crewNavigationPathClear(a,b,boat,obstacles,body,scale){
   if(obstacles.some(o=>crewNavigationIntersects(a,b,o,body)))return false;
   // Preserve the original ramp's interpolated elevation. Width follows the
   // actual hull profile along the path, rather than a fixed patrol corridor.
-  const count=Math.max(1,Math.ceil(Math.hypot(b[0]-a[0],b[2]-a[2])/.12)),leaving=Math.abs(b[0])<=Math.abs(a[0]);
+  const count=Math.max(1,Math.ceil(Math.hypot(b[0]-a[0],b[2]-a[2])/.12)),leaving=crewNavigationLeavesEdge(a,b);
   for(let i=0;i<=count;i++){
     const p=a.map((v,k)=>v+(b[k]-v)*i/count);if(!crewNavigationOnDeck(p,boat,scale,body,leaving)&&!crewNavigationRigAccess(p,body,boat,scale))return false;
   }
   return true;
 }
+// Ships with extended crews route over their own grid and skip the checks above, but an open edge narrows their
+// decks all the same. Both of these are metres.
+function crewNavigationEdgeClear(a,b,boat,scale,body){
+  if(!boat.damage?.fracture?.brokenCount||crewNavigationLeavesEdge(a,b))return true;
+  const count=Math.max(1,Math.ceil(Math.hypot(b[0]-a[0],b[2]-a[2])/.12));
+  for(let i=0;i<=count;i++){
+    const x=(a[0]+(b[0]-a[0])*i/count)/scale[0],z=(a[2]+(b[2]-a[2])*i/count)/scale[2],inset=crewOpenEdgeInset(boat,z,Math.sign(x));
+    if(inset&&Math.abs(x)+inset+body.radius/scale[0]>=modelDeckWidth(boat,z))return false;
+  }
+  return true;
+}
+// The furthest out a hand may stand at a station, in design units. Infinity where she has her rail.
+function crewNavigationDeckLimit(z,side,boat,scale,body){
+  const inset=crewOpenEdgeInset(boat,z,side);
+  return inset?Math.max(0,modelDeckWidth(boat,z)-inset-(body.radius+.02)/scale[0]):Infinity;
+}
+function crewNavigationOffEdge(p,boat,scale,body){
+  const side=Math.sign(p[0]),limit=crewNavigationDeckLimit(p[2],side,boat,scale,body);
+  if(Math.abs(p[0])<=limit)return p.slice();
+  const x=side*limit;return [x,modelDeck(boat,p[2],x),p[2]];
+}
+// Past an open edge, inboard of it and back out, for ships that do not plan around obstacles.
+function crewNavigationEdgeDetour(path,boat,scale,body){
+  const out=[path[0].slice()];
+  for(let k=1;k<path.length;k++){
+    const a=out.at(-1),b=crewNavigationOffEdge(path[k],boat,scale,body);
+    if(!crewNavigationEdgeClear(crewNavigationPhysical(a,scale),crewNavigationPhysical(b,scale),boat,scale,body)){
+      const side=Math.sign(b[0])||Math.sign(a[0])||1,count=Math.max(1,Math.ceil(Math.abs(b[2]-a[2])*scale[2]/.12));
+      let lane=Math.max(Math.abs(a[0]),Math.abs(b[0]));
+      for(let i=0;i<=count;i++)lane=Math.min(lane,crewNavigationDeckLimit(a[2]+(b[2]-a[2])*i/count,side,boat,scale,body));
+      for(const z of[a[2],b[2]]){const x=side*lane;out.push([x,modelDeck(boat,z,x),z]);}
+    }
+    out.push(b);
+  }
+  return out;
+}
 export function crewRoutineSegmentClear(s,boat,fromDesign,toDesign){
   const obstacles=crewNavigationObstacles(boat);if(!obstacles)return false;
-  if(crewNavigationExtended(boat.modelId??'nina'))return true;
   const scale=crewNavigationScale(boat),body=crewNavigationEnvelope(s?.navigationBody),a=crewNavigationPhysical(fromDesign,scale),b=crewNavigationPhysical(toDesign,scale);
+  if(crewNavigationExtended(boat.modelId??'nina'))return crewNavigationEdgeClear(a,b,boat,scale,body);
   return crewNavigationPathClear(a,b,boat,obstacles,body,scale);
 }
 export function crewNavigationSegmentClear(aMetres,bMetres,boat,options={}){
@@ -183,7 +225,7 @@ export function crewNavigationClear(pointMetres,boat,options={}){return crewNavi
 // a route to the result; this helper never changes an actor or vessel.
 export function crewNavigationStation(pointDesign,boat,options={}){
   const obstacles=crewNavigationObstacles(boat);if(!obstacles)return null;
-  if(crewNavigationExtended(boat.modelId??'nina'))return pointDesign.slice();
+  if(crewNavigationExtended(boat.modelId??'nina'))return crewNavigationOffEdge(pointDesign,boat,crewNavigationScale(boat),crewNavigationEnvelope(options));
   const scale=crewNavigationScale(boat),body=crewNavigationEnvelope(options),p=crewNavigationPhysical(pointDesign,scale),candidates=[p];
   // A post beside an edge that has lost its rail moves inboard of it.
   const inset=crewOpenEdgeInset(boat,pointDesign[2],Math.sign(pointDesign[0]));
@@ -239,7 +281,7 @@ function crewNavigationDetour(a,b,boat,obstacles,body,scale){
 }
 export function crewNavigationRoute(pathDesign,boat,options={}){
   const obstacles=crewNavigationObstacles(boat);if(!obstacles||!pathDesign?.length)return null;
-  if(crewNavigationExtended(boat.modelId??'nina'))return pathDesign.map(p=>p.slice());
+  if(crewNavigationExtended(boat.modelId??'nina'))return boat.damage?.fracture?.brokenCount?crewNavigationEdgeDetour(pathDesign,boat,crewNavigationScale(boat),crewNavigationEnvelope(options)):pathDesign.map(p=>p.slice());
   const scale=crewNavigationScale(boat),body=crewNavigationEnvelope(options),points=pathDesign.map(p=>crewNavigationPhysical(p,scale));
   if(points.some(p=>!p.every(Number.isFinite))||!crewNavigationPathClear(points[0],points[0],boat,obstacles,body,scale))return null;
   const result=[points[0]];

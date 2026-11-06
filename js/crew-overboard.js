@@ -53,10 +53,14 @@ export function crewRailAboveDeck(boat, zDesign, side = 0) {
   return left === null ? rail : Math.max(0, Math.min(rail, left * vertical - deck));
 }
 
-// How much of the deck's width, in design units, a hand gives up beside an open edge. Zero where she has her rail.
+// How much of the deck's width, in design units, a hand gives up beside an open edge. Zero where she has her
+// rail, however low she was built. A boat's gunwale is open only once it has lost half its height.
 export function crewOpenEdgeInset(boat, zDesign, side) {
-  if (!boat.damage?.fracture?.brokenCount || !side) return 0;
-  return crewRailAboveDeck(boat, zDesign, side) < OPEN_EDGE_RAIL_M ? OPEN_EDGE_KEEP_M / ((boat.beam ?? 3.6) / 3.6) : 0;
+  const state = boat.damage?.fracture;
+  if (!state?.brokenCount || !side) return 0;
+  if (fractureSideTop(state, side, zDesign, (z) => modelDeck(boat, z)) === null) return 0;
+  const left = crewRailAboveDeck(boat, zDesign, side), built = crewRailAboveDeck(boat, zDesign);
+  return left < Math.min(OPEN_EDGE_RAIL_M, built * 0.5) ? OPEN_EDGE_KEEP_M / ((boat.beam ?? 3.6) / 3.6) : 0;
 }
 
 // Does a body moving outward this fast go over rather than strike the rail and drop? Heel
