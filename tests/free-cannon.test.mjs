@@ -1,7 +1,10 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {FREE_CANNON_INTERVAL_S,createFreeCannon} from '../js/free-cannon.js';
-import {createPortGunnery} from '../js/gunnery-control.js';
+import {createBuildingGunDefinitions,createPortGunnery} from '../js/gunnery-control.js';
+import {createGunneryState} from '../js/gunnery-state.js';
+import {createNavalBattleGunDefinitions} from '../js/gunnery-models.js';
+import {boatHydrodynamics} from '../js/boat.js';
 import {createPortDamageStore} from '../js/port-damage.js';
 
 const HOUSE={id:'house',prefabId:'casa_de_contratacion',x:0,z:-100,y:0,baseY:0,yaw:0,width:30,depth:20,height:12,damageState:null};
@@ -20,6 +23,22 @@ test('it fires once a second at most, however long the key is held',()=>{
   const {shots}=hold(4.5);
   assert.equal(shots.length,5);
   for(let i=1;i<shots.length;i++)assert.ok(shots[i].time-shots[i-1].time>=.99,`gap ${shots[i].time-shots[i-1].time}`);
+});
+
+test('it is a 24-pounder like any other: same ball, same muzzle velocity, same flight',()=>{
+  const free=createFreeCannon().state.guns[0];
+  const boat={id:'v',modelId:'victory',length:56,beam:15,x:0,z:0,heave:0,heading:0,roll:0,pitch:0,sailFore:1,sailMain:1,sailMizzen:1,cargoTonnes:0};
+  boat.hydrodynamics=boatHydrodynamics(56,15,30,0,'victory');
+  const real=[
+    ...createGunneryState(createNavalBattleGunDefinitions(boat)).guns.filter(g=>g.calibre===24),
+    ...createGunneryState(createBuildingGunDefinitions({prefabId:'stone_sea_bastion',width:28,length:34,height:11.5})).guns.filter(g=>g.calibre===24),
+  ];
+  assert.ok(real.length>10,`${real.length} real 24-pounders to compare`);
+  for(const gun of real)for(const key of ['mass','diameter','muzzleSpeed','speedVariation','dispersion','dragCoefficient'])
+    assert.equal(free[key],gun[key],`${key} on ${gun.id}`);
+  assert.equal(free.muzzleSpeed,470);
+  const {shots}=hold(1.5);
+  for(const shot of shots)assert.ok(Math.abs(shot.muzzleSpeed-470)<=470*free.speedVariation+1e-9,`${shot.muzzleSpeed} m/s`);
 });
 
 test('it stays silent unless told to fire',()=>{

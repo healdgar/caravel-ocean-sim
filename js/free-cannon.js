@@ -1,12 +1,13 @@
 import {createGunneryState,fireGunnery,stepGunnery} from './gunnery-state.js';
 import {createGunnerySolidSweep,resolveSolidGunneryImpact} from './gunnery-control.js';
 
-// The free camera's cannon, for trying out destruction: one 24-pounder, laid where the camera looks.
+// The free camera's cannon, for trying out destruction: one 24-pounder, laid where the camera looks. Its ball flies
+// as any other 24-pounder's does, so only a calibre is given here and gunnery-state.js fixes the rest.
 export const FREE_CANNON_INTERVAL_S=1;
 const MUZZLE_AHEAD_M=4,MUZZLE_BELOW_M=.8;
 
 export function createFreeCannon({onEvent=()=>{},getVessels=()=>[],getTerrain=()=>null}={}){
-  const state=createGunneryState([{id:'free-cannon',side:'port',calibre:24,recoilLength:0,dispersion:.001}]);
+  const state=createGunneryState([{id:'free-cannon',side:'port',calibre:24}]);
   const gun=state.guns[0],sweep=createGunnerySolidSweep({sourceBoat:null,getVessels,getTerrain});
   let wait=0,position=[0,0,0],direction=[0,0,-1];
   const muzzle=()=>({position,direction,velocity:[0,0,0]});
