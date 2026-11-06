@@ -3558,7 +3558,8 @@ export function createPortGunnery(port, { onEvent = () => {}, getVessels = () =>
         if (evs?.length) allEvents.push(...evs);
       }
       if (autoReturnFire && batteries.length > 0 && dt > 0) {
-        const portAttacked = instances.some((inst) => (inst.damageState?.hits ?? 0) > 0);
+        // Old wounds, and what the free camera's cannon did, give a garrison no ship to blame.
+        const portAttacked = instances.some((inst) => (inst.damageState?.hits ?? 0) > (inst.damageState?.forgivenHits ?? 0));
         // A fort answers the ships that fired on it, not whichever hull lies closest.
         const attackers = new Set();
         for (const inst of instances) for (const b of inst.damageState?.attackers ?? []) attackers.add(b);

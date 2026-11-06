@@ -92,6 +92,7 @@ import { loseHandInGale } from './crew-overboard.js';
 import { boatTargets, boatSpring, boatRotate, stepBoatSteering, stepBoatView, stepDeckWalk, resetDeckWalk, boatEyePosition, boatForwardSpeed, boatWaveSlope, stepBoatSurge, boatWaveAttitude, boatHydrodynamics, setBoatViewStation, deckStationLabel, DEFAULT_PROVISION_DAYS, KNOT_TO_MPS } from './boat.js';
 import { SHIP_COLORS, DEFAULT_SHIP_COLORS, getShipColorsInfo, setVesselColors, strikeVesselColors, createShipColorsRenderer } from './ship-colors.js';
 import { createDockingBoardingState, computeBoardingStrength } from './boarding-docking.js';
+import { createFreeCannon } from './free-cannon.js';
 import { cameraModeFromLink, propulsionFromLink, createShareLink, encodeGameStateParam, decodeGameStateParam, ROUGH_SEAS } from './sharing.js';
 import { ORBIT_LIMIT, orbitElevation, orbitDistance, panOrbit, placeOrbitCamera } from './camera.js';
 // WebGPU ocean — custom renderer.
@@ -1192,21 +1193,29 @@ async function main() {
   }
   vessels[0].gunnery=shipGuns;
   for(const v of vessels.slice(1))v.gunnery=createShipGunnery(v.boat,makeGunneryOptions(v.boat,v.id+'-'));
+  const showShoreShot=(prefix,event)=>{
+    sceneAudio.gunneryEvent(event);
+    const shotKey=prefix+event.shotId;
+    if(event.type==='shot')gunEffects.emitShot({...event,id:shotKey,chargeKg:event.mass*.3});
+    else if(event.type==='impact'&&event.kind==='water'){
+      gunEffects.emitImpact({...event,id:shotKey,position:event.surfacePosition,massKg:event.mass});
+    }else if(event.type==='impact'){
+      gunEffects.emitImpact({...event,id:shotKey,position:event.surfacePosition,massKg:event.mass,kind:event.kind});
+    }
+  };
   let activePortRef=terrain?.port??null;
   let portGunnery=activePortRef?createPortGunnery(activePortRef,{
     getVessels:()=>followerEnabled?vessels:[vessels[0]],
     getTerrain:()=>terrain,
-    onEvent:event=>{
-      sceneAudio.gunneryEvent(event);
-      const shotKey='port-'+event.shotId;
-      if(event.type==='shot')gunEffects.emitShot({...event,id:shotKey,chargeKg:event.mass*.3});
-      else if(event.type==='impact'&&event.kind==='water'){
-        gunEffects.emitImpact({...event,id:shotKey,position:event.surfacePosition,massKg:event.mass});
-      }else if(event.type==='impact'){
-        gunEffects.emitImpact({...event,id:shotKey,position:event.surfacePosition,massKg:event.mass,kind:event.kind});
-      }
-    },
+    onEvent:event=>showShoreShot('port-',event),
   }):null;
+  const freeCannon=createFreeCannon({
+    getVessels:()=>followerEnabled?vessels:[vessels[0]],
+    getTerrain:()=>terrain,
+    // No muzzle smoke or flash: at the camera they would hide what is being shot at.
+    onEvent:event=>{if(event.type==='shot')sceneAudio.gunneryEvent(event);else showShoreShot('free-',event);},
+  });
+  window.oceanFreeCannon=freeCannon;
   if(qs.get('ammo'))for(const v of vessels)v.gunnery.setAmmo?.(qs.get('ammo'));
   if(BROADSIDE_SCENARIO&&qs.get('gunsReady')!=='0'){
     shipGuns.readyAtQuarters(BROADSIDE_SIDE);
@@ -1523,7 +1532,7 @@ async function main() {
     if (e.code === 'KeyZ' && !e.repeat) {
       setSpyglassActive(!spyglassActive);
     }
-    if (e.code === 'KeyF' && !e.repeat && shipGuns.state.guns.length > 0) {
+    if (e.code === 'KeyF' && !e.repeat && cameraMode !== 'free' && shipGuns.state.guns.length > 0) {
       const side = shipGuns.selectedSide || BROADSIDE_SIDE;
       if (e.shiftKey) {
         shipGuns.readyAtQuarters(side);
@@ -3020,16 +3029,17 @@ async function main() {
   }
   const lookHint=document.createElement('div');lookHint.id='look-hint';
   const updateHelp = (flashHint=false) => {
-    const gunHint = BROADSIDE_SCENARIO ? ' · F: fire broadside · G: enemy return fire' : '';
+    const gunHint = BROADSIDE_SCENARIO && cameraMode !== 'free' ? ' · F: fire broadside · G: enemy return fire' : '';
+    document.body.classList.toggle('free-cannon',cameraMode==='free');
     document.querySelector('#hud .help').textContent = (boat.enabled
       ? 'Drag / ↑↓←→: turn view · W/S/Q/E: walk deck · A/D: rudder · X: centre · B: change camera · H: sea settings'
       : cameraMode === 'ship' ? 'Drag / ↑↓←→: orbit ship | Shift-drag: pan | wheel: zoom | B: board ship | H: sea settings'
-      : 'WASD: fly | Space/E: up | Q/C: down | wheel: speed | B: board ship | H: sea settings') + gunHint;
+      : 'WASD: fly | Space/E: up | Q/C: down | wheel: speed | F: cannon | B: board ship | H: sea settings') + gunHint;
     lookHint.textContent = boat.enabled
       ? 'Drag mouse or ↑↓←→ keys to turn view · W S Q E walk deck'
       : cameraMode === 'ship'
       ? 'Drag mouse or ↑↓←→ keys to orbit · Scroll zoom · Shift-drag pan'
-      : 'Drag mouse or ↑↓←→ keys to look · WASD fly · E/Q up/down';
+      : 'Drag mouse or ↑↓←→ keys to look · WASD fly · E/Q up/down · Hold F to fire the cannon';
     if(flashHint&&lookHint.isConnected){
       document.body.classList.remove('has-looked');
       lookHint.style.animation='none';
@@ -3817,29 +3827,23 @@ async function main() {
       portGunnery=createPortGunnery(activePortRef,{
         getVessels:()=>followerEnabled?vessels:[vessels[0]],
         getTerrain:()=>terrain,
-        onEvent:event=>{
-          sceneAudio.gunneryEvent(event);
-          const shotKey='port-'+event.shotId;
-          if(event.type==='shot')gunEffects.emitShot({...event,id:shotKey,chargeKg:event.mass*.3});
-          else if(event.type==='impact'&&event.kind==='water'){
-            gunEffects.emitImpact({...event,id:shotKey,position:event.surfacePosition,massKg:event.mass});
-          }else if(event.type==='impact'){
-            gunEffects.emitImpact({...event,id:shotKey,position:event.surfacePosition,massKg:event.mass,kind:event.kind});
-          }
-        },
+        onEvent:event=>showShoreShot('port-',event),
       });
     }
     const windVec=[Math.cos(P.windDir*D2R)*P.windSpeed,0,Math.sin(P.windDir*D2R)*P.windSpeed];
     portGunnery?.update(dt,windVec);
+    freeCannon.update(dt,{firing:cameraMode==='free'&&keys.KeyF===true,eye:[cam.x,cam.y,cam.z],
+      forward:[Math.cos(cam.pitch)*Math.sin(cam.yaw),Math.sin(cam.pitch),-Math.cos(cam.pitch)*Math.cos(cam.yaw)],wind:windVec});
     fortSoldiers?.update(terrain?.port??null,dt,P.windSpeed,cam,!portGunnery);
     townsfolk?.follow(terrain?.ports,cam);
     props?.follow(terrain?.ports,cam);
-    townsfolk?.setUnderFire((portGunnery?.projectiles?.length??0)>0,dt);
+    townsfolk?.setUnderFire((portGunnery?.projectiles?.length??0)+freeCannon.state.projectiles.length>0,dt);
     terrain?.updatePortDamage?.(simTime);
     const activeVesselCount=followerEnabled?vessels.length:1;
     allProjectiles.length=0;
     for(let i=0;i<activeVesselCount;i++)for(const p of vessels[i].gunnery.state.projectiles)allProjectiles.push(p);
     if(portGunnery){const portProj=portGunnery.projectiles;for(let i=0;i<portProj.length;i++)allProjectiles.push(portProj[i]);}
+    for(const p of freeCannon.state.projectiles)allProjectiles.push(p);
     gunEffects.setProjectiles(allProjectiles);
     if(boat.showProw&&boat.effects!==false){
       const aimFallback=(helm.inBattle||!captainPanel.hidden)?(shipGuns.selectedSide??BROADSIDE_SIDE??'port'):null;

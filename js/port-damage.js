@@ -53,6 +53,7 @@ function applyBuildingDamageRecord(building, record) {
   d.integrity = record.i ?? 1;
   d.damageJoules = record.j ?? 0;
   d.hits = record.h ?? 0;
+  d.forgivenHits = d.hits;
   d.breaches = record.b ?? 0;
   d.throughBreaches = record.t ?? 0;
   d.dismountedGuns = record.g ?? 0;

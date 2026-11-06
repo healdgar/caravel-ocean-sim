@@ -110,3 +110,7 @@ Buildings break the way ships do: no hit moves a vertex, each piece is one rigid
 - **Soldiers.** A man comes down with the stretch he stands on, to the ground, a floor or the rubble under him, and stays down. One walking a rampart keeps to what is left of his beat. On a fort's deck he only steps down when the parapet goes, because the rampart still holds him. A saved ruin has its men already down, and a rebuilt one has them back at their posts. This is worked out only when a building has lost something, never by the frame.
 
 `node scripts/building-damage-review.mjs` takes pictures of this from the real game. `npm run perf -- '[["fort",{"fort":"siege"}]]'` measures it.
+
+## The free camera's cannon
+
+For trying out destruction: in the free camera, hold F to fire a 24-pounder where the sight points, at most once a second (`js/free-cannon.js`). Its balls strike ships, buildings, trees and ground as any other, and what they do is saved like any other damage. They raise no muzzle smoke, since it would hide the target, and no fort answers them by firing on a ship. Nor does a fort fire on arrival at a port saved battered: only fresh hits start a fight.

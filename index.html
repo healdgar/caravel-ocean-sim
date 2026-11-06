@@ -114,6 +114,7 @@
   .battle-ui-open #look-hint { bottom:140px; }
   #look-hint { position:fixed; bottom:110px; left:50%; transform:translateX(-50%); padding:3px 10px; border-radius:99px; background:#0d1a23bf; border:1px solid #ffffff26; color:#f2f6f8; text-shadow:0 1px 3px #000; font-size:11px; white-space:nowrap; pointer-events:none; animation:hint-away 1s 8s forwards; }
   .has-looked #look-hint { display:none; }
+  .free-cannon::after { content:''; position:fixed; left:50%; top:50%; width:15px; height:15px; transform:translate(-50%,-50%); pointer-events:none; background:linear-gradient(#ffffffb0,#ffffffb0) center/100% 1px no-repeat,linear-gradient(#ffffffb0,#ffffffb0) center/1px 100% no-repeat; }
   @keyframes hint-away { to { opacity:0; } }
   #panel,#boat-panel,#captain-panel,#landfall-panel,#camera-panel,#performance-panel { position:fixed; right:max(12px,env(safe-area-inset-right)); top:var(--controls-bottom); width:350px; max-height:calc(var(--view-top) + var(--view-height) - var(--controls-bottom) - 118px); display:flex; flex-direction:column; overflow:hidden; box-sizing:border-box; border:1px solid #ffffff30; border-radius:10px; background:#101d25f5; z-index:7; box-shadow:0 12px 40px #0005; }
   #panel.hidden { display:none; }
