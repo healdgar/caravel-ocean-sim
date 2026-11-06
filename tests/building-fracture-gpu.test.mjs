@@ -238,3 +238,41 @@ test('the career save keeps a ruin, and continuing brings it back settled',{time
     assert.deepEqual(await page.evaluate(()=>gpuErrors),[]);
   }finally{await page.close();}
 });
+
+test('in the running game a soldier comes down with his wall, and the others keep their posts',{timeout:560000},async()=>{
+  const page=await browser.newPage({viewport:{width:320,height:240}});
+  try{
+    await page.addInitScript(instrument);
+    await page.goto(`${origin}/?region=lisbon&view=ship&ship=nina&follower=0&clouds=0&w=320&h=240&year=1650&boatSpeed=0`);
+    await page.waitForFunction(()=>window.oceanStartup?.state==='ready'||window.oceanStartup?.state==='failed',undefined,{timeout:400000,polling:500});
+    assert.equal(await page.evaluate(()=>oceanStartup.state),'ready');
+    const result=await page.evaluate(async()=>{
+      const {applyBuildingImpactDamage}=await import('/js/gunnery-control.js');
+      const port=oceanFleet.terrain.port,frames=async n=>{for(let i=0;i<n;i++)await new Promise(requestAnimationFrame);};
+      const building=port.instances.find(i=>i.prefabId==='curtain_wall_and_gate');
+      if(!building||!port.garrison)return {missing:!building?'wall':'garrison'};
+      const soldiers=building.garrisonSoldiers??[];
+      const doomed=soldiers[0],before=doomed?.baseLy;
+      if(!doomed)return {missing:'soldier'};
+      const cos=Math.cos(building.yaw),sin=Math.sin(building.yaw),base=building.baseY??building.y;
+      // Square onto both faces of the wall, under him.
+      for(const side of [1,-1])for(let i=-2;i<=2;i++){
+        const x=side*building.width*.5,z=doomed.lz+i*1.2,y=2+Math.abs(i)%3;
+        const at=[building.x+x*cos+z*sin,base+y,building.z-x*sin+z*cos];
+        applyBuildingImpactDamage(building,{localPosition:[x,y,z],position:at,surfacePosition:at,normal:[side*cos,0,-side*sin],velocity:[-side*cos*320,0,side*sin*320],mass:14.5,energy:740000,ammo:'round'});
+      }
+      while(!(building.damageState.fracture?.brokenCount>0))await frames(5);
+      await frames(3);
+      const started=doomed.garrisonFall?1:0;
+      for(let i=0;i<400&&doomed.garrisonFall;i++)await frames(1);
+      await frames(30);
+      return {broken:building.damageState.fracture.brokenCount,before,after:doomed.baseLy,state:doomed.casualtyState,started,visible:doomed.visible,standing:soldiers.filter(s=>s.casualtyState!=='fallen').length,total:soldiers.length,ground:oceanFleet.terrain.height(doomed.position[0],doomed.position[2]),y:doomed.position[1],role:doomed.role};
+    });
+    assert.deepEqual(result.missing,undefined,'Lisbon has a garrisoned curtain wall');
+    assert.ok(result.broken>0);
+    assert.equal(result.state,'fallen',`he came down (${JSON.stringify(result)})`);
+    assert.ok(result.after<result.before-1,`to the foot of the wall (${result.before} to ${result.after})`);
+    assert.ok(Math.abs(result.y-result.ground)<4,`he is on the ground, not in the air (${result.y} over ${result.ground})`);
+    assert.deepEqual(await page.evaluate(()=>gpuErrors),[]);
+  }finally{await page.close();}
+});

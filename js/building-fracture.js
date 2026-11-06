@@ -208,7 +208,11 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
     }
     return bounds;
   };
-  const stay = (face) => geometry[0].faces.push(face);
+  const stay = (face) => {
+    // The underside of a box was never seen. Once the walls have gone it is the ground they stood on.
+    if (faceNormal(face)[1] < -0.7) face.groundUp = true;
+    geometry[0].faces.push(face);
+  };
 
   // The flat of a fort's rampart stays, with earth under it, but not its outer edge: that stands on the facing.
   // The part beyond the core is cut away from what stays. It falls with the wall if nothing covers it, and
@@ -372,7 +376,10 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
         }
         // Any other floor comes down in big slabs that hang from each other, held by the walls around them.
         if (horizontal && platform && !ROOF_KINDS.has(face.kind)) {
-          geometry[cellShard(face, partIndex, part, { ...surface, scale: Math.max(surface.scale, 3.2), span: 4 })].faces.push(face);
+          const slab = { ...surface, scale: Math.max(surface.scale, 3.2), span: 4 };
+          // One broad quad has no cells to fall into, so it is cut like a wall, or it would come down whole.
+          if (face.v.length === 4 && longest > 1.45 * slab.scale * blockScale) cutQuad(face, part, slab, spanY);
+          else geometry[cellShard(face, partIndex, part, slab)].faces.push(face);
           continue;
         }
         // A post driven into the ground stays in it, whatever goes from on top of it.
@@ -442,7 +449,8 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
         let mapped = remap.get(v);
         if (mapped === undefined) {
           const at = v * STRIDE;
-          mapped = pushVertex(s, vertices[at], vertices[at + 1], vertices[at + 2], vertices[at + 3], vertices[at + 4], vertices[at + 5], vertices[at + 6], vertices[at + 7]);
+          const up = face.groundUp ? -1 : 1;
+          mapped = pushVertex(s, vertices[at], vertices[at + 1], vertices[at + 2], vertices[at + 3] * up, vertices[at + 4] * up, vertices[at + 5] * up, vertices[at + 6], face.groundUp ? Math.max(vertices[at + 7], 0.72) : vertices[at + 7]);
           remap.set(v, mapped);
           if (shard) noteBounds(shard, vertices[at], vertices[at + 1], vertices[at + 2]);
         }
@@ -882,6 +890,33 @@ export function applyBuildingFractureEvents(fracture, damage, events, now = 0) {
     if (state.touched) damage.fractureLog = (damage.fractureLog ?? '') + text;
   }
   return total;
+}
+
+// What rubble or a falling man comes to rest on at a place, from a given height: the ground, a floor under him,
+// and whatever heap is there already. Read when something lets go, never by the frame.
+export function restingHeightUnder(state, x, z, below = Infinity) {
+  const { fracture } = state;
+  return Math.max(fracture.groundAt(x, z), fracture.floorAt(x, z, below)) + (state.heap.get(heapKey(x, z)) ?? 0);
+}
+
+const FOOT_MARGIN = 0.2, FOOT_REACH = 1.1;
+// What a man at a point of this building has under his feet, in its own frame. `shards` narrows the search.
+// `stood` says the building ever had anything there, and `stands` that it still does. `floor` is what stays
+// within a step below him, if that is all that is left.
+export function footingUnder(state, localX, y, localZ, shards = state.fracture.shards) {
+  const { fracture, broken } = state;
+  let stood = false, stands = false;
+  for (const shard of shards) {
+    if (!shard) continue;
+    const lo = shard.localMin, hi = shard.localMax;
+    if (lo[1] > y + FOOT_MARGIN || hi[1] < y - FOOT_REACH) continue;
+    if (localX < lo[0] - FOOT_MARGIN || localX > hi[0] + FOOT_MARGIN || localZ < lo[2] - FOOT_MARGIN || localZ > hi[2] + FOOT_MARGIN) continue;
+    stood = true;
+    if (!broken[shard.index]) { stands = true; break; }
+  }
+  const world = fracture.toWorld(localX, y, localZ), level = fracture.floorAt(world[0], world[2], y + FOOT_MARGIN);
+  const floor = y - level <= FOOT_REACH ? level : null;
+  return { stood: stood || floor !== null, stands: stands || floor !== null, floor: stands ? null : floor };
 }
 
 // Where a line enters a box, along it, or Infinity. The line runs both ways: `t` may lie behind its start.
