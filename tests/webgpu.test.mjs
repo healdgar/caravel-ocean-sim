@@ -236,25 +236,30 @@ test('indexed ship matches the original pixels, including profiled rendering', {
   // Recreate the previous unindexed/copy schedule only inside this comparison.
   // Hold the ocean flat to isolate indexing/resolve from Metal's FFT rounding;
   // travelling-wave and rough-sea fixtures independently cover the wave fields.
-  let rawMesh=replaceOnce(source,"import { createShipAssetCache } from './ship-mesh.js';","import { createShipAssetCache } from './ship-mesh.js';\nimport { createCaravelMesh } from './caravel.js';");
-  rawMesh=replaceOnce(rawMesh,'const asset=shipAssets.get(modelId),gpuPose=',
-    "const asset=((asset)=>{if(modelId!=='nina')throw new Error('Raw mesh fixture requires Niña');const vertices=createCaravelMesh();return {...asset,vertices,indices:Uint32Array.from({length:vertices.length/9},(_,i)=>i)};})(shipAssets.get(modelId)),gpuPose=");
+  // `legacy` draws her own triangles unindexed, which isolates indexing. `uncut` draws the model as authored,
+  // before fracture splits her mast tubes at their break heights.
+  const unindexed=(vertices)=>replaceOnce(source,'const asset=shipAssets.get(modelId),gpuPose=',
+    `const asset=((asset)=>{if(modelId!=='nina')throw new Error('Raw mesh fixture requires Niña');const vertices=${vertices};return {...asset,vertices,indices:Uint32Array.from({length:vertices.length/9},(_,i)=>i)};})(shipAssets.get(modelId)),gpuPose=`);
+  let rawMesh=unindexed('new Float32Array(asset.indices.length*9);for(let i=0;i<asset.indices.length;i++)vertices.set(asset.vertices.subarray(asset.indices[i]*9,asset.indices[i]*9+9),i*9)');
+  let authored=replaceOnce(unindexed('createCaravelMesh()'),"import { createShipAssetCache } from './ship-mesh.js';","import { createShipAssetCache } from './ship-mesh.js';\nimport { createCaravelMesh } from './caravel.js';");
   // The factory's asset feeds each instance's geometry, wetness and shadows.
   // Both visible and submerged draws use those same raw instance vertices.
-  for(const pass of ['rp','underwater'])rawMesh=replaceOnce(rawMesh,
-    `${pass}.setIndexBuffer(v.render.indexBuffer,'uint32');${pass}.drawIndexed(v.asset.indices.length);`,`${pass}.draw(v.mesh.length/9);`);
+  for(const pass of ['rp','underwater']){
+    const indexedDraw=`${pass}.setIndexBuffer(v.render.indexBuffer,'uint32');${pass}.drawIndexed(v.asset.indices.length);`,plainDraw=`${pass}.draw(v.mesh.length/9);`;
+    rawMesh=replaceOnce(rawMesh,indexedDraw,plainDraw);authored=replaceOnce(authored,indexedDraw,plainDraw);
+  }
   const legacy=rawMesh;
   assert.ok(legacy.includes('rp.draw(v.mesh.length/9);'),'legacy fixture must use the unindexed ship instance draw');
-  assert.ok(legacy.includes('const vertices=createCaravelMesh();'),'legacy fixture must replace the factory asset geometry with raw vertices');
+  assert.ok(legacy.includes('vertices.set(asset.vertices.subarray('),'legacy fixture must replace the factory asset geometry with raw vertices');
   const captures=[];
-  for(const mode of ['legacy','optimized','profiled']){
+  for(const mode of ['legacy','authored','optimized','profiled']){
     const page=await browser.newPage({viewport:{width:96,height:72}});
     try{
       const initErrors=[];
       page.on('pageerror',e=>initErrors.push(e.message));
       page.on('console',msg=>{if(msg.text().includes('init failed'))initErrors.push(msg.text());});
       await page.addInitScript(instrumentRenderer);
-      await page.route('**/js/main.js',route=>route.fulfill({contentType:'text/javascript',body:mode==='legacy'?legacy:source}));
+      await page.route('**/js/main.js',route=>route.fulfill({contentType:'text/javascript',body:mode==='legacy'?legacy:mode==='authored'?authored:source}));
       await page.goto(`${origin}/?ship=nina&view=ship&sunElev=35&sunAzim=30&clouds=0&windSpeed=0&swellHs=0&choppy=0&shot=compare.png&frames=100000${mode==='profiled'?'&profile=1':''}`);
       try{await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:30000});}
       catch(e){throw new Error(`${mode} initialization: ${initErrors.join('\n')||e.message}`);}
@@ -272,11 +277,14 @@ test('indexed ship matches the original pixels, including profiled rendering', {
       captures.push(pixels);
     }finally{await page.close();}
   }
-  // Fracture splits the hull into pieces and reorders it, so a few edge pixels resolve differently.
-  let indexingDifferences=0,indexingWorst=0;
-  captures[0].forEach((v,i)=>{const d=Math.abs(v-captures[1][i]);if(d){indexingDifferences++;indexingWorst=Math.max(indexingWorst,d);}});
-  assert.ok(indexingDifferences<=captures[0].length*.001&&indexingWorst<=16,`indexing must preserve pixels: ${indexingDifferences} differ, by up to ${indexingWorst}`);
-  assert.deepEqual(captures[2],captures[1],'profiling must preserve pixels');
+  const [plain,uncut,optimized,profiled]=captures;
+  assert.deepEqual(optimized,plain,'indexing must preserve pixels');
+  assert.deepEqual(profiled,optimized,'profiling must preserve pixels');
+  // Splitting a mast tube leaves its surface where it was, but moves a few samples on its thin silhouette by
+  // rounding. A seam or a showing cap would change far more of this 96 x 72 image.
+  const changed=new Set();
+  for(let i=0;i<uncut.length;i++)if(uncut[i]!==optimized[i])changed.add(i>>2);
+  assert.ok(changed.size<=16,`cutting her masts must not show on an intact ship (${changed.size} pixels changed)`);
 });
 
 test('early hull exclusion preserves water edges and the complete ship image', {timeout:180000}, async()=>{

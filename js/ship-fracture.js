@@ -109,8 +109,9 @@ function connectedIslands(triangleList, indices, store) {
   return [...islands.values()];
 }
 
-// Split a spar's triangles at one height. Records grow only at the end, so earlier vertices keep their
-// bytes. Each side gets its own jagged rim and a splintered cap of fresh wood, hidden until it breaks.
+// Split a spar's triangles near one height. Records grow only at the end, so earlier vertices keep their
+// bytes. A cut vertex stays on its original edge, and both sides share it, so an intact spar has the same
+// surface and no seam. The rim wanders up and down its edges, which reads as splinters once the two part.
 function cutIsland(island, height, indices, store, newIndices) {
   const base = indices.length / 3;
   const indexOf = (t, k) => (t < base ? indices[t * 3 + k] : newIndices[(t - base) * 3 + k]);
@@ -118,18 +119,18 @@ function cutIsland(island, height, indices, store, newIndices) {
     const target = t < base ? indices : newIndices, at = (t < base ? t : t - base) * 3;
     target[at] = a; target[at + 1] = b; target[at + 2] = c;
   };
-  const below = [], above = [], rim = { below: [], above: [] }, radius = Math.max(island.max[0] - island.min[0], island.max[2] - island.min[2]) * 0.5;
+  const below = [], above = [], rim = [];
+  // Across the spar, not along its rake.
+  const radius = Math.min(island.max[0] - island.min[0], island.max[2] - island.min[2]) * 0.5;
   const at = (v, c) => store.get(v * 9 + c);
   const edgeCut = new Map();
-  const cutVertex = (a, b, side) => {
-    const key = (a < b ? a * 1e7 + b : b * 1e7 + a) * 2 + (side === 'above' ? 1 : 0);
+  const cutVertex = (a, b) => {
+    const key = a < b ? a * 1e7 + b : b * 1e7 + a;
     if (edgeCut.has(key)) return edgeCut.get(key);
-    const t = (height - at(a, 1)) / (at(b, 1) - at(a, 1)), record = [];
+    const span = at(b, 1) - at(a, 1), level = (height - at(a, 1)) / span;
+    const wander = Math.sin((at(a, 0) + (at(b, 0) - at(a, 0)) * level) * 91.7 + (at(a, 2) + (at(b, 2) - at(a, 2)) * level) * 53.3) * radius * 0.42;
+    const t = Math.max(0.02, Math.min(0.98, (height + wander - at(a, 1)) / span)), record = [];
     for (let c = 0; c < 9; c++) record.push(c === 6 ? at(a, 6) : at(a, c) + (at(b, c) - at(a, c)) * t);
-    const n = Math.hypot(record[3], record[4], record[5]) || 1;
-    for (let c = 3; c < 6; c++) record[c] /= n;
-    const jag = Math.sin(record[0] * 91.7 + record[2] * 53.3) * radius * 0.42 + (side === 'above' ? radius * 0.2 : -radius * 0.2);
-    record[1] += jag;
     const v = store.length / 9;
     store.push(...record);
     edgeCut.set(key, v);
@@ -143,32 +144,31 @@ function cutIsland(island, height, indices, store, newIndices) {
     if (count === 3) { above.push(t); continue; }
     const lone = up.findIndex((u) => u === (count === 1));
     const L = tri[lone], P = tri[(lone + 1) % 3], Q = tri[(lone + 2) % 3];
-    const loneSide = at(L, 1) > height ? 'above' : 'below', otherSide = loneSide === 'above' ? 'below' : 'above';
-    const M1 = cutVertex(L, P, loneSide), N1 = cutVertex(L, Q, loneSide);
-    const M2 = cutVertex(L, P, otherSide), N2 = cutVertex(L, Q, otherSide);
+    const loneAbove = at(L, 1) > height;
+    const M = cutVertex(L, P), N = cutVertex(L, Q);
     // The original triangle's slot keeps its place in its group; the two extra triangles go at the end.
-    setTriangle(t, L, M1, N1);
-    (loneSide === 'above' ? above : below).push(t);
+    setTriangle(t, L, M, N);
+    (loneAbove ? above : below).push(t);
     const start = newIndices.length / 3;
-    newIndices.push(M2, P, Q, M2, Q, N2);
-    (otherSide === 'above' ? above : below).push(base + start, base + start + 1);
-    rim[loneSide].push([M1, N1]);
-    rim[otherSide].push([M2, N2]);
+    newIndices.push(M, P, Q, M, Q, N);
+    (loneAbove ? below : above).push(base + start, base + start + 1);
+    rim.push([M, N]);
   }
-  // Fan each rim into a cap. It takes material 17, the fresh-wood timber, wherever the spar was painted.
-  for (const side of ['below', 'above']) {
-    const edges = rim[side];
-    if (!edges.length) continue;
+  // A cap of fresh wood closes each side, material 17 wherever the spar was painted. It sits just inside
+  // the rim and points into the other side, so nothing shows until the spar parts.
+  if (rim.length) {
     let cx = 0, cz = 0, cy = 0, n = 0;
-    for (const [a, b] of edges) for (const v of [a, b]) { cx += at(v, 0); cy += at(v, 1); cz += at(v, 2); n++; }
+    for (const edge of rim) for (const v of edge) { cx += at(v, 0); cy += at(v, 1); cz += at(v, 2); n++; }
     cx /= n; cy /= n; cz /= n;
-    const ny = side === 'above' ? -1 : 1, copy = (x, y, z, u, v) => { const i = store.length / 9; store.push(x, y, z, 0, ny, 0, 17, u, v); return i; };
-    const centre = copy(cx, cy + ny * radius * 0.5, cz, cx, cz);
-    for (const [a, b] of edges) {
-      const ca = copy(at(a, 0), at(a, 1), at(a, 2), at(a, 7), at(a, 8)), cb = copy(at(b, 0), at(b, 1), at(b, 2), at(b, 7), at(b, 8));
-      const start = newIndices.length / 3;
-      newIndices.push(centre, ca, cb);
-      (side === 'above' ? above : below).push(base + start);
+    for (const [side, ny] of [[below, 1], [above, -1]]) {
+      const copy = (x, y, z, u, v) => { const i = store.length / 9; store.push(x, y, z, 0, ny, 0, 17, u, v); return i; };
+      const inset = (v) => copy(cx + (at(v, 0) - cx) * 0.98, at(v, 1), cz + (at(v, 2) - cz) * 0.98, at(v, 7), at(v, 8));
+      const centre = copy(cx, cy + ny * radius * 0.5, cz, cx, cz);
+      for (const [a, b] of rim) {
+        const ca = inset(a), cb = inset(b), start = newIndices.length / 3;
+        newIndices.push(centre, ca, cb);
+        side.push(base + start);
+      }
     }
   }
   return { below, above };
@@ -283,6 +283,8 @@ export function prepareShipFracture({ modelId, model = null, vertices, indices, 
           let segment = anchorY >= topCut ? 2 : anchorY >= fullCut ? 1 : 0;
           if (isSpar && !isRope) markSpar(piece.triangles, mast);
           if (isRope && segment === 0) segment = 1;
+          // An upper sail's running rig hangs from that sail, wherever its line lies at rest.
+          if (isRope && /\.t[2-9](\.|$)/.test(id)) segment = 2;
           if (wholePart && segment === 0) segment = 1;
           if (segment === 0) continue;
           // A stay led to another mast goes when either mast goes: it has nothing to end on.

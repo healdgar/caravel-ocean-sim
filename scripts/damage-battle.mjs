@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // A broadside against the player's ship, through the game's own sweep and damage code. It runs in the
-// page. Same seed every time, so runs compare. Her shot holes stop leaking afterwards, so what she
-// shows is the damage and not her foundering.
-export async function fireBroadside({volleys,aloft=[]}){
+// page. Same seed every time, so runs compare. Unless a scene says `leaking`, her shot holes stop leaking
+// afterwards, so what she shows is the damage and not her foundering.
+export async function fireBroadside({volleys,aloft=[],leaking=false}){
   const {applyShipImpactDamage,sweepShipSegment,vesselRailHeight}=await import('/js/gunnery-control.js');
   const {boatRotate}=await import('/js/boat.js');
   const {repairVessel}=await import('/js/vessel-damage.js');
@@ -76,7 +76,7 @@ export async function fireBroadside({volleys,aloft=[]}){
     const side=Math.sign(s.x),inset=crewOpenEdgeInset(boat,s.z,side);
     return inset>0&&Math.abs(s.x)>modelDeckWidth(boat,s.z)-inset-.34/(boat.beam/3.6)+.01;
   }).map(s=>s.id);
-  window.damageReviewAfloat=setInterval(()=>repairVessel(boat,{leaks:true,flooding:true}),100);repairVessel(boat,{leaks:true,flooding:true});
+  if(!leaking){window.damageReviewAfloat=setInterval(()=>repairVessel(boat,{leaks:true,flooding:true}),100);repairVessel(boat,{leaks:true,flooding:true});}
   for(let i=0;i<4;i++)await new Promise(requestAnimationFrame);
   const d=boat.damage;
   return {hits,zones,hull:d.hullIntegrity,rig:d.rigIntegrity,masts:d.mastIntegrity,mastState:d.mastState,sunk:d.sunk,cracked:d.hullCracked,craters:d.craters.length,holes:d.holes?.length??0,broken:d.fracture?.brokenCount??null,gaps:probeGaps(),hands:window.damageReviewHands(),handsAtOpenEdge:window.damageReviewEdge()};

@@ -81,6 +81,48 @@ test('a pole mast is really cut: no triangle of any section reaches across a bre
   }
 });
 
+test('an intact pole mast has no seam: both sides of a cut share the same rim', () => {
+  for (const id of ['nina', 'pinta', 'santa-maria', 'flying-cloud', 'gipsy-moth-iv', 'oseberg', 'lusoria']) {
+    const asset = cache.get(id), f = asset.fracture, v = asset.vertices, cat = asset.partAssembly;
+    for (const [mastId, mast] of Object.entries(f.masts)) {
+      const key = (i) => [v[i * 9], v[i * 9 + 1], v[i * 9 + 2]].map((x) => x.toFixed(5)).join();
+      const spar = new Set([`mast.${mastId}`, `mast.${mastId}.cut`]);
+      const sides = new Map();
+      for (let t = 0; t < asset.indices.length; t += 3) {
+        if (!spar.has(cat.parts[cat.trianglePartIds[t / 3]].id)) continue;
+        for (let k = 0; k < 3; k++) {
+          const i = asset.indices[t + k];
+          if (Math.floor(v[i * 9 + 6]) === 17) continue;
+          const s = f.vertexShards[i];
+          (sides.get(s) ?? sides.set(s, new Set()).get(s)).add(key(i));
+        }
+      }
+      // A section that was cut from the spar meets the next one at a shared ring of points.
+      const sparShards = [...sides.keys()];
+      let shared = 0;
+      for (let a = 0; a < sparShards.length; a++) for (let b = a + 1; b < sparShards.length; b++) {
+        for (const p of sides.get(sparShards[a])) if (sides.get(sparShards[b]).has(p)) shared++;
+      }
+      assert.ok(shared >= 8, `${id} ${mastId} sections meet on a shared rim (${shared} shared points)`);
+    }
+  }
+});
+
+test('the running rig of an upper sail goes with the topmast, not the lower mast', () => {
+  let checked = 0;
+  for (const model of ready) {
+    const asset = cache.get(model.id), f = asset.fracture, cat = asset.partAssembly;
+    for (let v = 0; v < f.vertexShards.length; v++) {
+      if (!/^rig\.running\.[a-z]+\.t[2-9]/.test(cat.parts[cat.vertexPartIds[v]].id)) continue;
+      const shard = f.shards[f.vertexShards[v]];
+      if (!shard) continue;
+      checked++;
+      assert.equal(shard.segment, 2, `${model.id} ${cat.parts[cat.vertexPartIds[v]].id}`);
+    }
+  }
+  assert.ok(checked > 100, `some ship has upper running rig (${checked})`);
+});
+
 test('a battle never moves timber: a bake changes only the damage mark, and only cloth is displaced', () => {
   for (const [modelId, ball] of [['nina', { mass: 5.4, speed: 420 }], ['victory', { mass: 14.5, speed: 430 }]]) {
     const asset = cache.get(modelId), mesh = new Float32Array(asset.vertices), boat = shipOf(modelId);
