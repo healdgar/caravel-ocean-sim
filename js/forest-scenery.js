@@ -6,7 +6,8 @@ import {createTaskYieldBudget,yieldCooperativeTask} from './task-yield.js';
 import {loadForestImpostors,createForestImpostorResources,FOREST_IMPOSTOR_WGSL} from './forest-impostor.js';
 import {loadForestLight,forestLightGPUBytes,FOREST_LIGHT_WGSL} from './forest-light.js';
 import {loadForestNativeLOD} from './forest-native-lod.js';
-import {loadForestClusters,createForestClusters,FOREST_CLUSTER_ASSETS,SUBTROPICAL_FOREST_CLUSTER_ASSETS,FOREST_CLUSTER_VERTEX_WGSL,strikeForestRoot,reapplyForestStrikes} from './forest-clusters.js';
+import {loadForestClusters,createForestClusters,FOREST_CLUSTER_ASSETS,SUBTROPICAL_FOREST_CLUSTER_ASSETS,FOREST_CLUSTER_VERTEX_WGSL} from './forest-clusters.js';
+import {FOREST_FALL_BEARINGS,FOREST_FALL_HEIGHT_STEPS,FOREST_FALL_REST_MIN_DEG,FOREST_FALL_SECONDS,FOREST_LONG_FALLEN,FOREST_WOUND_BEARINGS,buildForestTrunkGridAsync,forestStrikesFromSave,forestStrikesToSave,forestTrunkShape,reapplyForestStrikes,strikeForestRoot,strikeForestTree} from './forest-trunks.js';
 import {FOREST_SURFACE_ASSETS,SUBTROPICAL_FOREST_SURFACE_ASSETS,chooseForestSurfaceCodec,createForestSurfaceTextures,forestMaterialOptics,loadForestSurfaceSet} from './forest-surfaces.js';
 import {loadForestVolumes,createForestVolumeResources,FOREST_VOLUME_ASSETS,SUBTROPICAL_FOREST_VOLUME_ASSETS,FOREST_VOLUME_WGSL,FOREST_VOLUME_SHELL_WGSL} from './forest-volume.js';
 
@@ -582,15 +583,65 @@ fn forestWind(r:ForestRoot,local:vec3f,model:vec3f,isLeaf:bool)->vec3f{
  var flutter=0.;if(isLeaf){flutter=strength*.03*sin(t*9.+dot(model,vec3f(7.1,5.3,6.7)));}
  return vec3f(downwind.x*(bend+bob+flutter),(bob+flutter)*.6,downwind.y*(bend+bob+flutter));
 }
+// What shot has done to this tree, from its root (js/forest-trunks.js). JavaScript writes it only when a ball lands.
+fn forestFallTurn(r:ForestRoot,code:u32)->vec2f{
+ let rest=(${FOREST_FALL_REST_MIN_DEG}.+f32(code>>18u))*.01745329;var angle=rest;
+ let age=F.camPos.w+r.identity.w;
+ if(r.identity.w>-1e8&&age>=0.){let e=min(age/${FOREST_FALL_SECONDS},1.);angle=rest*e*e;}
+ return vec2f(sin(angle),cos(angle));
+}
+// Turns about the level line across the fall, so that up goes towards the bearing.
+fn forestFallRotate(v:vec3f,bearing:vec2f,turn:vec2f)->vec3f{
+ let along=v.x*bearing.x+v.z*bearing.y;let reach=along*turn.y+v.y*turn.x;
+ return vec3f(v.x-bearing.x*along+bearing.x*reach,v.y*turn.y-along*turn.x,v.z-bearing.y*along+bearing.y*reach);
+}
+fn forestFallBearing(code:u32)->vec2f{let a=f32((code>>11u)&${FOREST_FALL_BEARINGS-1}u)/${FOREST_FALL_BEARINGS}.*6.2831853;return vec2f(cos(a),sin(a));}
+fn forestFallen(r:ForestRoot,model:vec3f,local:vec3f)->vec3f{
+ let code=u32(r.identity.y);let height=f32(code&2047u)/${FOREST_FALL_HEIGHT_STEPS}.;
+ if(model.y<=height){return local;}
+ let hinge=vec3f(0.,height*r.rootScale.w,0.);
+ return hinge+forestFallRotate(local-hinge,forestFallBearing(code),forestFallTurn(r,code));
+}
+struct ForestStruck {local:vec3f,normal:vec3f,colour:vec3f,fallen:bool};
+fn forestStruckPlace(r:ForestRoot,model:vec3f,local:vec3f,normal:vec3f,colour:vec3f,isWood:bool)->ForestStruck{
+ var o:ForestStruck;o.local=local;o.normal=normal;o.colour=colour;o.fallen=false;
+ let paleWood=colour*vec3f(2.7,2.2,1.5)+vec3f(.07,.055,.03);
+ if(r.identity.w<0.){
+  // Snapped at the height it was struck: the stump stays, and what is above comes down.
+  let code=u32(r.identity.y);let height=f32(code&2047u)/${FOREST_FALL_HEIGHT_STEPS}.;
+  if(isWood){o.colour=mix(colour,paleWood,1.-smoothstep(0.,.7,abs(model.y-height)));}
+  if(model.y>height){
+   let bearing=forestFallBearing(code);let turn=forestFallTurn(r,code);let hinge=vec3f(0.,height*r.rootScale.w,0.);
+   o.local=hinge+forestFallRotate(local-hinge,bearing,turn);o.normal=forestFallRotate(normal,bearing,turn);o.fallen=true;
+  }
+  return o;
+ }
+ if(isWood){
+  // A gouge on the side the ball came from, its raw wood showing.
+  let code=u32(r.identity.w);let height=f32(code&2047u)/${FOREST_FALL_HEIGHT_STEPS}.;let severity=f32(code>>17u)/127.;
+  let along=abs(model.y-height)/(.6+.6*severity);
+  if(along<1.){
+   let a=f32((code>>11u)&${FOREST_WOUND_BEARINGS-1}u)/${FOREST_WOUND_BEARINGS}.*6.2831853;
+   // The trunk alone: a limb that happens to leave it at this height is whole.
+   let facing=smoothstep(-.6,.5,-dot(normal.xz,vec2f(cos(a),sin(a))));let mark=(1.-along*along)*facing*(1.-smoothstep(.9,1.25,length(model.xz)));
+   o.local=local-normal*mark*(.03+.09*severity)*r.rootScale.w;o.colour=mix(colour,paleWood,mark);
+  }
+ }
+ return o;
+}
 fn forestPlace(r:ForestRoot,rootId:u32,posLocal:vec3f,normAdj:vec3f,kind:vec2f,leafUV:vec2f,colour:vec3f,nativeMaterial:f32,vertex:u32,canopyAO:f32)->ForestVertex{
  let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
  var local=vec3f(c*posLocal.x-s*posLocal.z,posLocal.y,s*posLocal.x+c*posLocal.z)*r.rootScale.w;
  local+=forestWind(r,local,posLocal,kind.x>=3.5);
- // Roots below the soil line press flat onto it, leaving no fragment to cut away.
- var o:ForestVertex;o.world=r.rootScale.xyz+local;o.world.y=max(o.world.y,r.rootScale.y);
+ var o:ForestVertex;
  o.normal=vec3f(c*normAdj.x-s*normAdj.z,normAdj.y,s*normAdj.x+c*normAdj.z);
+ var tint=colour*r.yawColour.yzw;var fallen=false;
+ if(r.identity.w!=0.){let struck=forestStruckPlace(r,posLocal,local,o.normal,tint,kind.x<3.5);local=struck.local;o.normal=struck.normal;tint=struck.colour;fallen=struck.fallen;}
+ o.world=r.rootScale.xyz+local;
+ // Roots below the soil line press flat onto it, leaving no fragment to cut away.
+ if(!fallen){o.world.y=max(o.world.y,r.rootScale.y);}
  o.nativeMaterial=i32(nativeMaterial);if(o.nativeMaterial>=0){o.nativeMaterial+=i32(forestBin.y);}
- o.kind=kind;o.leafUV=leafUV;o.colour=colour*r.yawColour.yzw;o.canopyAO=canopyAO;o.coverageSeed=forestCoverageHash(vertex^(rootId*0x9e3779b9u));o.pos=F.viewProj*vec4f(earthCurve(o.world-F.camPos.xyz,F.camPos.y),1);return o;
+ o.kind=kind;o.leafUV=leafUV;o.colour=tint;o.canopyAO=canopyAO;o.coverageSeed=forestCoverageHash(vertex^(rootId*0x9e3779b9u));o.pos=F.viewProj*vec4f(earthCurve(o.world-F.camPos.xyz,F.camPos.y),1);return o;
 }
 @vertex fn forestCanopyVS(@location(0)position:vec3f,@location(1)normal:vec3f,@location(2)kind:vec2f,
  @location(5)leafUV:vec2f,@location(6)colour:vec3f,@location(7)nativeMaterial:f32,@builtin(instance_index)instance:u32,@builtin(vertex_index)vertex:u32)->ForestVertex{
@@ -629,7 +680,7 @@ fn forestPlace(r:ForestRoot,rootId:u32,posLocal:vec3f,normAdj:vec3f,kind:vec2f,l
  @location(5)leafUV:vec2f,@location(6)colour:vec3f,@builtin(instance_index)instance:u32)->ForestVertex{
  let r=forestRoots[forestVisible[forestBin.x+instance]];let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
  let local=vec3f(c*position.x-s*position.z,position.y,s*position.x+c*position.z)*r.rootScale.w;
- var o:ForestVertex;o.world=r.rootScale.xyz+local;o.world.y=max(o.world.y,r.rootScale.y);o.normal=vec3f(c*normal.x-s*normal.z,normal.y,s*normal.x+c*normal.z);
+ var o:ForestVertex;o.world=r.rootScale.xyz+local;o.world.y=max(o.world.y,r.rootScale.y);if(r.identity.w<0.){o.world=r.rootScale.xyz+forestFallen(r,position,local);}o.normal=vec3f(c*normal.x-s*normal.z,normal.y,s*normal.x+c*normal.z);
  o.kind=kind;o.leafUV=leafUV;o.colour=colour*r.yawColour.yzw;o.nativeMaterial=-1;o.canopyAO=1.;o.coverageSeed=0u;o.pos=F.viewProj*vec4f(earthCurve(o.world-F.camPos.xyz,F.camPos.y),1);o.pos.z*=1.-f32(forestVisible[forestBin.x+instance]&63u)*2e-7;return o;
 }
 @fragment fn forestMiddleFS(in:ForestVertex)->@location(0)vec4f{
@@ -769,7 +820,7 @@ struct ForestPrototype {bound:vec4f,roots:vec4u,wood:vec4u,leaf:vec4u,far:vec4u}
  if(id.x>=u32(parameters.x)){return;}
  let r=roots[id.x];if(r.rootScale.w<=0.0){return;}let pi=u32(r.identity.x);let p=prototypes[pi];let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
  let b=p.bound.xyz*r.rootScale.w;
- let world=r.rootScale.xyz+vec3f(c*b.x-s*b.z,b.y,s*b.x+c*b.z);let relative=world-F.camPos.xyz;let radius=p.bound.w*r.rootScale.w;
+ let world=r.rootScale.xyz+vec3f(c*b.x-s*b.z,b.y,s*b.x+c*b.z);let relative=world-F.camPos.xyz;let radius=p.bound.w*r.rootScale.w*select(1.,2.,r.identity.w<0.);
  let clip=F.viewProj*vec4f(relative,1);
  let rowW=vec3f(F.viewProj[0].w,F.viewProj[1].w,F.viewProj[2].w);
  for(var a=0u;a<2u;a++){
@@ -935,7 +986,7 @@ var<workgroup> forestSortCount:u32;
 
 export async function createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack,groundSample,forestMass=null,forestMiddle=forestMass?.middle??null,mode='auto',nearPixels=3,
   impostorPixels=typeof location==='undefined'?32:Number(new URLSearchParams(location.search).get('forestImpostorPixels')||32),
-  impostorMode=typeof location==='undefined'?'auto':new URLSearchParams(location.search).get('forestImpostor')||'auto',terrainOcclusion=null}){
+  impostorMode=typeof location==='undefined'?'auto':new URLSearchParams(location.search).get('forestImpostor')||'auto',terrainOcclusion=null,savedStrikes=null,strikeOrigin={x:0,z:0},onStrikesChanged=null}){
   if(!['auto','near','far'].includes(mode)||!(nearPixels>0&&nearPixels<=3))throw Error('Invalid forest LOD policy');
   if(!['auto','off','force'].includes(impostorMode)||!Number.isInteger(impostorPixels)||impostorPixels<3||impostorPixels>256)throw Error('Invalid authored forest impostor policy');
   if(samples<2)throw Error('Native forest coverage requires MSAA');
@@ -962,7 +1013,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     const nativeSampler=device.createSampler({...samplerOptions,addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge'});
     const nativeRepeatSampler=device.createSampler({...samplerOptions,addressModeU:'repeat',addressModeV:'repeat'});
     const rooted=pack.roots.slice();let excludedRoots=0;
-    let liveRoots=rooted;const strikes=[];
+    let liveRoots=rooted;const strikes=forestStrikesFromSave(savedStrikes,strikeOrigin),falling=[];
     if(forestMass){
       if(forestMass.rootChunks.length!==m.rootCount)throw Error('Native forest mass owner table differs from original root count');
       for(let i=0;i<rooted.length;i+=12){const owner=forestMass.rootChunks[i/12];rooted[i+10]=owner===0xffffffff?-1:owner;}
@@ -980,6 +1031,8 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       rooted[i+9]=Math.min(maxSink,Math.max(rooted[i+9],basal*rooted[i+3]*slope+.08));rooted[i+1]=y-rooted[i+9];
     }
     let activeRootCount=m.rootCount;
+    // Trees shot down in an earlier sitting are down before the coast is first seen.
+    reapplyForestStrikes(rooted,activeRootCount,strikes);
     const maxRootCapacity=Math.max(m.rootCount,pack.maxRootCapacity||m.rootCount);
     const roots=device.createBuffer({size:Math.max(4,maxRootCapacity*12*4),usage:B.STORAGE|B.COPY_DST,label:'forest immutable root transforms'});
     allocated.push(roots);if(rooted.byteLength)device.queue.writeBuffer(roots,0,rooted);
@@ -1166,7 +1219,23 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       if(!impostor)return;pass.setPipeline(impostor);pass.setBindGroup(0,impostorGroup);pass.setBindGroup(1,impostorCloud);pass.setBindGroup(3,impostorAtlas);pass.setIndexBuffer(atlas.indices,'uint32');
       for(const p of m.prototypes){pass.setBindGroup(2,bins[p.id][2].impostor);pass.drawIndexedIndirect(commands,(p.id*4+3)*20);}
     };
-    return {stats,nativeReady,prepare(){},
+    // A ball finds its trees through this. A new one builds off the frame; the old one serves until it is ready.
+    const speciesOf=m.prototypes.map(p=>p.species);let trunkGrid=null,trunkBuild=0;
+    const rebuildTrunks=()=>{
+      const build=++trunkBuild,forRoots=liveRoots,forCount=activeRootCount;
+      return buildForestTrunkGridAsync(forRoots,forCount,speciesOf,{isCancelled:()=>destroyed||build!==trunkBuild}).then(grid=>{if(grid&&build===trunkBuild)trunkGrid=grid;}).catch(error=>{console.error('Forest trunk grid failed',error);});
+    };
+    const trunksReady=rebuildTrunks();
+    const writeRoot=index=>device.queue.writeBuffer(roots,index*48,liveRoots.subarray(index*12,index*12+12));
+    const noteFall=(index,now)=>{falling.push({x:liveRoots[index*12],z:liveRoots[index*12+2],now});};
+    const liveIndex=(hit)=>{
+      if(hit.roots===liveRoots)return hit.rootIndex;
+      for(let i=0;i<activeRootCount;i++)if(liveRoots[i*12]===hit.x&&liveRoots[i*12+2]===hit.z)return i;
+      return -1;
+    };
+    const saveStrikes=()=>{onStrikesChanged?.(forestStrikesToSave(strikes,strikeOrigin));};
+    return {stats,nativeReady,prepare(){},trunksReady,
+      get trunks(){return trunkGrid;},
       updatePack(nextPack,nextHeights=null,nextRegion=null){
         if(destroyed||!nextPack?.roots||!nextPack?.manifest)return;
         const nextCount=Math.min(maxRootCapacity,nextPack.manifest.rootCount);
@@ -1190,10 +1259,34 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
         device.queue.writeBuffer(prototypes,0,new Uint8Array(meta));
         device.queue.writeBuffer(parameters,0,new Float32Array([activeRootCount,m.prototypes.length,currentNearPixels,nativeStatus.resident?modeIndex:effectiveModeIndex]));
         if(nextHeights)terrainVisibility?.update?.(nextHeights,nextRegion);
+        rebuildTrunks();
       },
-      strike(x,z){
-        if(destroyed)return;const index=strikeForestRoot(liveRoots,activeRootCount,x,z,strikes);
-        if(index>=0)device.queue.writeBuffer(roots,index*48,liveRoots.subarray(index*12,index*12+12));
+      // A blast close by, with no ball in the tree: the nearest takes it.
+      strike(x,z,now=0,groundAt=null){
+        if(destroyed)return;
+        const index=strikeForestRoot(liveRoots,activeRootCount,x,z,strikes,{now,groundAt,shapeOf:id=>forestTrunkShape(speciesOf[id])});
+        if(index<0)return;
+        writeRoot(index);saveStrikes();
+        if(liveRoots[index*12+11]<0)noteFall(index,now);
+      },
+      // A ball in this tree. Only this root's 48 bytes go to the GPU, and only now.
+      strikeTree(hit,impact,now=0,groundAt=null){
+        if(destroyed)return null;
+        const index=liveIndex(hit);if(index<0)return null;
+        const result=strikeForestTree(liveRoots,index,forestTrunkShape(hit.species),{...impact,height:hit.height,onTrunk:hit.onTrunk,now,groundAt},strikes);
+        if(!result)return null;
+        writeRoot(index);saveStrikes();
+        if(result.felled)noteFall(index,now);
+        return result;
+      },
+      // Once a tree is down it stays down, whatever the clock does: it wraps every ten minutes.
+      settleFalls(now){
+        for(let f=falling.length-1;f>=0;f--){
+          const fall=falling[f],age=now-fall.now;
+          if(age>=0&&age<FOREST_FALL_SECONDS+.1)continue;
+          falling.splice(f,1);
+          for(let i=0;i<activeRootCount;i++)if(liveRoots[i*12]===fall.x&&liveRoots[i*12+2]===fall.z){liveRoots[i*12+11]=FOREST_LONG_FALLEN;writeRoot(i);break;}
+        }
       },
       setPixelError(next){if(!destroyed&&Number.isFinite(next)&&next>0&&Math.abs(next-currentNearPixels)>1e-4){currentNearPixels=next;stats.nearPixels=next;device.queue.writeBuffer(parameters,0,new Float32Array([activeRootCount,m.prototypes.length,next,nativeStatus.resident?modeIndex:effectiveModeIndex]));}},
       encode(pass){if(!activeRootCount)return;pass.setPipeline(reset);pass.setBindGroup(0,resetGroup);pass.dispatchWorkgroups(Math.ceil(m.prototypes.length*commandSlots/64));pass.setPipeline(cull);pass.setBindGroup(0,cullGroup);pass.dispatchWorkgroups(Math.ceil(activeRootCount/64));if(sort){pass.setPipeline(sort);pass.setBindGroup(0,sortGroup);pass.dispatchWorkgroups(m.prototypes.length*visibleTiers);}clusters?.encode(pass);},

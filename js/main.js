@@ -2380,7 +2380,7 @@ async function main() {
       } : undefined,
       sovereignty: serializeIndigenousSovereignty(getActiveIndigenousSovereigntyState()),
     };
-    const damagedPort = portDamage.forLink(terrain?.port);
+    const damagedPort = portDamage.forLink(terrain?.port, terrain?.forestStrikeKey ?? null);
     if (damagedPort) gameState.portDamage = damagedPort;
     return { cam, orbit: shipOrbit, astronomy: astronomy.share(), voyage: vInfo, gameState };
   };

@@ -119,6 +119,10 @@ To the sweep a building is only a box saying the ball is near. The ball strikes 
 
 Canvas and rope do not stop a ball. It tears them and flies on, and each mast it crosses loses at most 6.5% of its integrity however heavy the ball, so six or so tears bring a topmast down. A ball that strikes a mast or yard itself does its full harm, and one 24-pounder can then fell a small ship's mast.
 
+## What a ball strikes in a forest
+
+A live forest's trees and foreshore palms are its own roots. A ball meets the wood they draw, through a grid over those roots, and goes through air, leaves and twigs. What it does to them, down to a tree falling, is on the GPU and in the save. See [What a ball meets](FOREST_INSTANCES.md#what-a-ball-meets).
+
 ## The free camera's cannon
 
 For trying out destruction: in the free camera, hold F to fire a 24-pounder where the sight points, at most once a second (`js/free-cannon.js`). Its balls strike ships, buildings, trees and ground as any other, and what they do is saved like any other damage. They raise no muzzle smoke, since it would hide the target, and no fort answers them by firing on a ship. Nor does a fort fire on arrival at a port saved battered: only fresh hits start a fight.

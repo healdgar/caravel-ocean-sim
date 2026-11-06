@@ -15,7 +15,7 @@ const flag = (name) => process.argv.includes('--' + name);
 const option = (name) => process.argv.find((a) => a.startsWith(`--${name}=`))?.split('=')[1];
 
 export async function loadAuditModules() {
-  const names = ['gunnery-control', 'building-fracture', 'coastal-world', 'ship-fracture', 'hull', 'gunnery-models', 'crew', 'crew-pose', 'crew-work', 'crew-navigation', 'ship-models', 'models/victory', 'terrain-model', 'port-props', 'gltf'];
+  const names = ['forest-trunks', 'gunnery-control', 'building-fracture', 'coastal-world', 'ship-fracture', 'hull', 'gunnery-models', 'crew', 'crew-pose', 'crew-work', 'crew-navigation', 'ship-models', 'models/victory', 'terrain-model', 'port-props', 'gltf'];
   return Object.assign({}, ...(await Promise.all(names.map((n) => import(new URL(`../js/${n}.js`, import.meta.url).href)))));
 }
 export const loadCrewMeshes = (lib) => Object.fromEntries(['male', 'female'].map((sex) => [sex, lib.loadCrewGLB(readFileSync(new URL('assets/crew/' + (sex === 'female' ? 'sailor-female.glb' : 'sailor.glb'), root)))]));
@@ -78,11 +78,11 @@ export async function readLiveGame(shipIds, regions = []) {
           const { buildingReach, traceShotAtBuilding } = await import('/js/building-fracture.js');
           const t = oceanFleet.terrain, ports = t.ports ?? [];
           return {
-            region, roots: t.trees, treeData: (t.treeData?.length ?? 0) / 8, ports: ports.length,
+            region, roots: t.trees, treeData: (t.treeData?.length ?? 0) / 8 + (t.forestTrunks?.trees ?? 0), ports: ports.length,
             instances: ports.reduce((n, p) => n + (p.instances?.length ?? 0), 0),
             meshed: ports.reduce((n, p) => n + (p.instances?.filter((i) => buildingReach(i)).length ?? 0), 0),
             traced: ports.reduce((n, p) => n + (p.instances?.filter((i) => traceShotAtBuilding(i, [0, 0, 0], [1, 0, 0])).length ?? 0), 0),
-            palmsShootable: ports.reduce((n, p) => n + Math.min((p.palms?.length ?? 0) / 8, 520), 0),
+            palmsShootable: ports.reduce((n, p) => n + Math.min((p.palms?.length ?? 0) / 8, 520), 0), // Struck among the forest's trees when it draws them.
           };
         }, region));
       } finally { await page.close(); }
@@ -123,15 +123,16 @@ export function auditForestTrees(lib, fan = {}) {
     const vb = gunzipSync(readFileSync(new URL('vertices.bin.gz', dir))), ib = gunzipSync(readFileSync(new URL('indices.bin.gz', dir)));
     const vertices = new Float32Array(vb.buffer, vb.byteOffset, vb.byteLength / 4), indices = new Uint32Array(ib.buffer, ib.byteOffset, ib.byteLength / 4);
     for (const [i, p] of manifest.prototypes.entries()) {
+      const standing = (scale, yaw, x, y, z) => lib.buildForestTrunkGrid(new Float32Array([x, y, z, scale, yaw, 1, 1, 1, 0, 0, -2, 0]), 1, [p.species]);
       const drawn = A.forestPrototypeIndex(manifest, vertices, indices, i, { scale: 1.1, origin: [0, 5, 0] });
-      // A live forest leaves terrain.treeData empty: this is what such a tree offers a ball.
-      rows.push({ mode: 'forest', set, species: p.species, heightClaimM: p.heightMetres, ...A.auditTreeCollision(drawn, { ports: [], treeData: new Float32Array(0) }, lib.sweepScenerySegment, fan) });
+      // What a live forest offers a ball: its own roots.
+      rows.push({ mode: 'forest', set, species: p.species, heightClaimM: p.heightMetres, ...A.auditTreeCollision(drawn, { ports: [], treeData: new Float32Array(0), forestTrunks: standing(1.1, 0, 0, 5, 0) }, lib.sweepScenerySegment, fan) });
       if (p.species === 'palm') {
-        // The foreshore fringe: drawn from this prototype by terrain.js, struck through port.palms.
+        // The foreshore fringe: planted by terrain.js where the port records its palms, and drawn and struck as the forest's own.
         for (const shape of [0.2, 0.5, 0.8]) {
-          const seaX = 1, seaZ = 0, scale = 1 + shape * 0.55, yaw = Math.atan2(seaZ, seaX) - Math.atan2(0.5, 1.5);
-          const palm = A.forestPrototypeIndex(manifest, vertices, indices, i, { scale, yaw, origin: [0, 1.8, 0] });
-          rows.push({ mode: 'foreshore', set, species: `palm-${shape}`, heightClaimM: 22, ...A.auditTreeCollision(palm, { ports: [{ center: { x: 0, z: 0 }, palms: new Float32Array([0, 2, 0, 3.5, 22, shape, -seaX, -seaZ]) }] }, lib.sweepScenerySegment, fan) });
+          const seaX = 1, seaZ = 0, { scale, sink, yaw } = lib.foreshorePalmPlacement(shape, seaX, seaZ, p.basalRadius), y = 2 - sink;
+          const palm = A.forestPrototypeIndex(manifest, vertices, indices, i, { scale, yaw, origin: [0, y, 0] });
+          rows.push({ mode: 'foreshore', set, species: `palm-${shape}`, heightClaimM: 22, ...A.auditTreeCollision(palm, { ports: [{ center: { x: 0, z: 0 }, palms: new Float32Array([0, 2, 0, 3.5, 22, shape, -seaX, -seaZ]) }], forestTrunks: standing(scale, yaw, 0, y, 0) }, lib.sweepScenerySegment, fan) });
         }
       }
     }
@@ -166,7 +167,8 @@ export function renderTables(results) {
   out.push('Share of lines that either the shot or the mesh says struck. *Agree* is within 0.5 m of the first solid surface. *Soft* stopped with nothing solid within 0.5 m, on or near cloth or rope only. *Air* stopped more than 1 m from anything drawn. *Through* passed a solid surface unstopped.\n');
   out.push(table(['Ship', 'lines', 'agree %', 'soft %', 'air: rig %', 'air: hull %', 'median gap m', 'max gap m', 'through hull %', 'through mast/spar %', 'phantom mast %', 'wrong mast %', 'parts missed most'], ships.map((r) => { const c = r.collision; return [r.id, c.struck, c.agreePct, c.softStopPct, c.airRigPct, c.airHullPct, c.airGapMedianM, c.airGapMaxM, c.throughHullPct, c.throughMastPct, c.phantomMastPct, c.wrongMastPct, c.missedGroups]; })));
   out.push('\n### 1b. Balls against trees\n');
-  out.push(table(['Tree', 'mode', 'wood lines stopped %', 'agree %', 'soft %', 'air %', 'through %', 'gap m', 'top m', 'reach m'], results.trees.map((t) => [`${t.set}/${t.species}`, t.mode, t.woodStoppedPct, t.agreePct, t.softStopPct, t.airPct, t.throughPct, t.airGapMedianM, t.topM, t.reachM])));
+  out.push('*Trunk lines* are fired close together at the trunk alone. The rest cross the tree\'s whole silhouette: *wood lines* cross wood as thick as a ball, or a slender tree\'s own trunk; *all wood* counts twigs too, which a ball goes through. *Agree* is within 0.5 m of that wood. *Soft* stopped within a metre of something drawn, usually a line that misses the wood by less than the ball\'s own width. *Air* stopped further off than that. *Through* passed thick wood unstopped.\n');
+  out.push(table(['Tree', 'mode', 'trunk lines', 'trunk lines stopped %', 'trunk agree %', 'wood lines stopped %', 'all wood stopped %', 'agree %', 'soft %', 'air %', 'through %', 'gap m', 'top m', 'reach m'], results.trees.map((t) => [`${t.set}/${t.species}`, t.mode, t.trunkLines, t.trunkStoppedPct, t.trunkAgreePct, t.woodStoppedPct, t.allWoodStoppedPct, t.agreePct, t.softStopPct, t.airPct, t.throughPct, t.airGapMedianM, t.topM, t.reachM])));
   if (results.world?.length) {
     out.push('\n### 1c. A live port and forest, read from the running game\n');
     out.push(table(['Region', 'ports', 'buildings', 'known by mesh', 'traced by mesh', 'trees drawn', 'trees a ball can strike', 'palms a ball can strike'], results.world.map((w) => [w.region, w.ports, w.instances, w.meshed, w.traced, w.roots, w.treeData, w.palmsShootable])));

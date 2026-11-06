@@ -42,7 +42,7 @@ no substitute wound map is manufactured.
 position, normal, kind, shade, UV, linear RGB factor and native material index.
 The index identifies the actual GLB material slot; leaf pigments come from maps.
 A root uses **12 Float32 values / 48 bytes**: collar position, uniform scale,
-yaw, linear RGB tint, prototype ID, collar sink and two reserved values.
+yaw, linear RGB tint, prototype ID, collar sink, the mass chunk that owns it, and what shot has done to it.
 
 Deterministic planting requires elevation 18–840 m, slope ≤1.1, vegetation-mask
 byte ≥96, valid coastal crown rims and crown-relative spacing. Native planting
@@ -97,6 +97,29 @@ coarse far fallback from its extracted foliage, with a function hash. Colour
 integrates the source albedo. This explicitly approximate fallback uses material
 sentinel −1 and recorded coarse RGB; it requires whole support within 3 rendered
 pixels. It is distinct from the detailed native model and depth atlas.
+
+## What a ball meets
+
+`js/forest-trunks.js` keeps a grid over the roots the renderer holds, 16 m to a cell, and rebuilds it in small steps off the frame whenever the forest streams. A ball's line asks only the cells near it. Each tree's wood is its species' chains of round sections in `js/forest-trunk-shapes.js`, turned and scaled as the vertex shader turns and scales it. A ball stops on trunks however thin, and on other wood at least 6 cm in radius, about a 24-pounder's own. It goes through thinner wood and through leaves.
+
+`scripts/prepare-forest-trunks.mjs` measures that table from the packs' wood: each tube's rings come from the mesh's own connections, and a ring counts if its surface faces out from its middle, all round, at one distance. A flat strip of bark or a mat of roots does not. Rerun it after changing a pack. `tests/forest-trunks.test.mjs` holds the table to the meshes, and `scripts/model-audit.mjs` measures the sweep against them with its own, separate rays.
+
+Roots under the soil line are pressed flat by the shader and left out. Wind is left out too, so a gale's top may stand a metre from where the ball finds it.
+
+## What shot does
+
+A ball spends its energy against the trunk's cross-section, so one snaps a palm at close range and two or more bring down a hardwood. A hit on a limb counts for a quarter. Hot shot chars the whole tree and starts a fire. A blast close by, with no ball in the tree, chars the nearest, and three fell it.
+
+The GPU does the rest, and JavaScript writes 48 bytes of root only when a ball lands, and again once a fall has ended:
+
+- **Wounded:** the reserved float (`identity.w`) above 0 holds height, bearing and how bad. `forestPlace` gouges the trunk there and shows raw wood, on the side the ball came from. Only the latest wound shows.
+- **Felled:** `identity.w` below 0 is minus the time the fall began, and `identity.y` holds the break's height, bearing and resting angle. Above the break the tree turns about the break, level across the bearing, and comes to rest with its tip on the ground. The stump stays and still stops a ball. The far wood and leaf shell lie down with it. A box of leaves or an atlas card cannot, so a felled tree draws neither. The cull doubles its bound and stops culling its clusters by where they were baked.
+
+A tree nobody has hit pays one compare per vertex for this, and one per cluster.
+
+Records go in the port damage store under `forest:<coast>`, so a career save holds every tree and a share link as many as fit. Nothing regrows a tree, so a felled one stays down and a wounded one stays wounded. A record matches a root by position, to the centimetre. On a coast whose trees are replanted (the real terrain arriving late, or a different era) a record matches nothing and does nothing, though it stays in the save.
+
+Not done: a falling tree does not hit anything, the fallen trunk stops no ball, and on Saba the far mass, baked from standing trees, keeps showing it.
 
 ## Loading, compression and offline scope
 

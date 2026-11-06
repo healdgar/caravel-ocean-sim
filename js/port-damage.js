@@ -4,6 +4,7 @@
 // A town rebuilds what was shot down: a building comes back whole once it has gone long enough unshot.
 // The career save holds every port. A share link holds the one in view, as much as fits.
 // The ground has its record here too: nobody rebuilds a crater, so it stays until the save does.
+// So do trees shot down, a list per coast. Nothing regrows them.
 import { encodeBuildingEvent } from './building-fracture.js';
 import { reviveGarrisonSoldiers } from './crew.js';
 import { classifyBuildingMaterial, createBuildingDamageState } from './gunnery-control.js';
@@ -18,6 +19,7 @@ const GROUND_KEY = '@ground';
 const LINK_GROUND_NUMBERS = 6 * 60;
 const DAMAGE_FLAGS = ['damageCollapseBaked', 'breachCollapseBaked', 'ruinCollapseBaked', 'magazineHit', 'magazineExploded', 'silenced'];
 
+const FOREST_RECORD_PREFIX = 'forest:';
 const portKeyOf = (port) => String(port?.regionId ?? port?.id ?? port?.name ?? 'port');
 const buildingKeyOf = (building, index) => String(building.id ?? `${building.prefabId ?? 'building'}_${index}`);
 
@@ -129,6 +131,12 @@ export function createPortDamageStore(saved = null, { dateMs = null } = {}) {
     openGround(coast) { groundInView = coast; return ports[GROUND_KEY]?.[coast] ?? null; },
     setGround(coast, craters) { if (craters?.length) (ports[GROUND_KEY] ??= {})[coast] = craters; },
     noteHit(damage) { damage.lastHitDateMs = today(); },
+    // What js/forest-trunks.js saved of this coast's trees, or null.
+    forestStrikes(coast) { return ports[FOREST_RECORD_PREFIX + coast]?.trees ?? null; },
+    setForestStrikes(coast, trees) {
+      if (trees?.length) ports[FOREST_RECORD_PREFIX + coast] = { trees };
+      else delete ports[FOREST_RECORD_PREFIX + coast];
+    },
     rebuildDue(building) {
       const d = building?.damageState;
       if (!d) return false;
@@ -154,12 +162,12 @@ export function createPortDamageStore(saved = null, { dateMs = null } = {}) {
       return Object.keys(ports).length ? ports : undefined;
     },
     // The port in view, for a share link, which is short of room: the most damaged buildings it can fit.
-    forLink(port) {
+    forLink(port, coast = null) {
       const link = {};
+      let room = LINK_LIMIT;
       if (port) {
         capture(port);
         const fitted = {};
-        let room = LINK_LIMIT;
         for (const [name, record] of Object.entries(ports[portKeyOf(port)] ?? {}).sort((a, b) => a[1].i - b[1].i)) {
           const size = JSON.stringify(record).length + name.length;
           if (size > room) continue;
@@ -167,6 +175,18 @@ export function createPortDamageStore(saved = null, { dateMs = null } = {}) {
           room -= size;
         }
         if (Object.keys(fitted).length) link[portKeyOf(port)] = fitted;
+      }
+      // Then as many of this coast's fallen and wounded trees as still fit, the worst first.
+      const trees = coast === null ? null : ports[FOREST_RECORD_PREFIX + coast]?.trees;
+      if (trees?.length) {
+        const kept = [];
+        for (const tree of [...trees].sort((a, b) => b[3] - a[3])) {
+          const size = JSON.stringify(tree).length + 1;
+          if (size > room) break;
+          kept.push(tree);
+          room -= size;
+        }
+        if (kept.length) link[FOREST_RECORD_PREFIX + coast] = { trees: kept };
       }
       // And its largest craters.
       const craters = ports[GROUND_KEY]?.[groundInView];

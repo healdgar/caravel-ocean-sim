@@ -60,40 +60,6 @@ export async function loadForestClusters({ assets = FOREST_CLUSTER_ASSETS, fetch
   return { manifest, vertices, indices, clusters };
 }
 
-const ROOT_FLOATS = 12;
-const STRIKE_REACH_M = 6;
-const STRIKE_CHAR = 0.6;
-const STRIKE_FELLS_AT = 3;
-function markRoot(roots, at, hits) {
-  for (let k = 5; k <= 7; k++) roots[at + k] *= STRIKE_CHAR;
-  if (hits >= STRIKE_FELLS_AT) roots[at + 3] = 0;
-}
-// A shot's mark on the nearest tree: each hit chars it, and the third fells it. `strikes` remembers
-// them across coast streaming. Returns the tree's root index, or -1 if none stood in reach.
-export function strikeForestRoot(roots, count, x, z, strikes) {
-  let best = -1, bestDistance = STRIKE_REACH_M;
-  for (let i = 0; i < count; i++) {
-    const at = i * ROOT_FLOATS;
-    if (roots[at + 3] <= 0) continue;
-    const distance = Math.hypot(roots[at] - x, roots[at + 2] - z);
-    if (distance < bestDistance) { best = i; bestDistance = distance; }
-  }
-  if (best < 0) return -1;
-  const at = best * ROOT_FLOATS, mark = strikes.find((m) => m.x === roots[at] && m.z === roots[at + 2]);
-  const hits = (mark?.hits ?? 0) + 1;
-  if (mark) mark.hits = hits; else strikes.push({ x: roots[at], z: roots[at + 2], hits });
-  markRoot(roots, at, hits);
-  return best;
-}
-// Puts remembered marks back on a freshly streamed set of roots.
-export function reapplyForestStrikes(roots, count, strikes) {
-  if (!strikes.length) return;
-  for (let i = 0; i < count; i++) {
-    const at = i * ROOT_FLOATS, mark = strikes.find((m) => m.x === roots[at] && m.z === roots[at + 2]);
-    if (mark) for (let hit = 1; hit <= mark.hits; hit++) markRoot(roots, at, hit);
-  }
-}
-
 // The cut one tree draws, as the GPU picks it: a cluster is drawn when its own error is within the
 // limit and its parent's is not. Used by tests; the game does this in FOREST_CLUSTER_SELECT.
 export function forestClusterIsDrawn({ error, parentError, lodDistance, parentDistance }, pixelsPerMetre, limit) {
@@ -161,7 +127,8 @@ fn forestClusterTree(index:u32)->u32{
   let at=origin+vec3f(c*k.cull.x-s*k.cull.z,k.cull.y,s*k.cull.x+c*k.cull.z)*scale;
   // Wind carries leaves past the shapes they were baked from.
   let reach=k.cull.w*scale+.2+F.windP[0].z*.07;
-  if(dot(planeL,at)<-reach*lengthL||dot(planeR,at)<-reach*lengthR||dot(planeB,at)<-reach*lengthB||dot(planeT,at)<-reach*lengthT||dot(rowW,at)<-reach*length(rowW)){continue;}
+  // A felled tree no longer stands where its clusters were baked.
+  if(r.identity.w>=0.&&(dot(planeL,at)<-reach*lengthL||dot(planeR,at)<-reach*lengthR||dot(planeB,at)<-reach*lengthB||dot(planeT,at)<-reach*lengthT||dot(rowW,at)<-reach*length(rowW))){continue;}
   let draw=select(bucket.drawWood,bucket.drawLeaf,isLeaf);
   let slot=atomicAdd(&draws[draw*5u+1u],1u);
   if(slot<bucket.capacity.x){list[select(bucket.listWood,bucket.listLeaf,isLeaf)+slot]=vec2u(tree,index);}

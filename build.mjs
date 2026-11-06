@@ -44,6 +44,7 @@ order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-middle.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-clusters.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-surfaces.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/task-yield.js','js/forest-occlusion.js');
+order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-trunk-shapes.js','js/forest-trunks.js');
 order.splice(order.indexOf('js/profiler.js')+1,0,'js/gpu-benchmark.js');
 order.splice(order.indexOf('js/main.js'),0,'js/wgsl-prune.js','js/gpu-program-cache.js');
 order.splice(order.indexOf('js/main.js'),0,'js/career-save.js','js/career-ui.js','js/career-era.js','js/career-trade.js','js/career-port.js');

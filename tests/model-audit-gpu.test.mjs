@@ -45,6 +45,7 @@ test('hull and masts stand on the GPU where the audit measures them, and a live 
   assert.ok(port.instances > 0, 'a port with buildings');
   assert.equal(port.meshed, port.instances, 'every building is known by its mesh');
   assert.equal(port.traced, port.instances, 'every building traces its mesh');
-  // MODEL_AUDIT.md: a forest has no collision. This says when that changes.
+  // The forest's own roots are what a ball meets. Streaming may have added more since its grid was last built.
+  assert.ok(port.treeData > 0, 'a ball can strike the forest');
   t.diagnostic(`trees drawn ${port.roots}, trees a ball can strike ${port.treeData}`);
 });

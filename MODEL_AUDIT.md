@@ -24,10 +24,10 @@ The audit changes no model. No plain typo turned up.
 |---|---|---|---|
 | 1 | **Fixed: balls burst in empty air around the rig.** The rig box is gone. A ball meets what is drawn, from `js/ship-collider.js`, and goes through canvas and rope, tearing them. | Was 57–85% of lines stopping more than 1 m from anything drawn, typically 2.2–6.8 m, up to 12 m. Now none, on all nine. | `sweepShipSegment` |
 | 2 | **Once a building has been hit, balls stop in mid-air, up to 30 m off.** `addSolid` boxes a world-aligned box after turning it, so turned buildings balloon. Every real port turns its buildings. This brings back the fault `traceShotAtBuilding` was written to end, from the first hit on. | Quay wall: reach 8 m becomes 43 m, 72% of lines stop in air. Corral 23%, loggia 16%, sea bastion 10%, star fort 9%. Fort lines stopping early besides: 28–35%. Square, none; the quay's reach is tight again at 90°. | `js/building-fracture.js:522` |
-| 3 | **No forest tree can be struck.** A live forest leaves `treeData` empty, and the sweep reads only that. | 14,000–56,000 trees drawn, 0 strikable. Lines through a trunk stopped: 0%, all nine species. | `js/terrain.js:840`, `js/gunnery-control.js:3745` |
+| 3 | **Fixed: no forest tree could be struck.** A ball meets the wood each tree draws, through a grid over the roots the GPU draws, as chains of round sections measured from the mesh. It goes through air, leaves and twigs thinner than itself. Was: 0 of 14,000–56,000 trees strikable, 0% of lines through a trunk stopped. | All the trees drawn are strikable. Lines through a trunk stopped 90–100%, on all nine species, 7 of them at 99% or better. None stop in air. Ceiba's buttresses (90%) and mangrove's prop roots (93%) are the misses. | `js/forest-trunks.js`, `js/forest-trunk-shapes.js` |
 | 4 | **Fixed: balls pass through Victory's bow and stern**, and the Santa María's and Niña's upper works. The shot's hull was a formula ending at 0.52 length. Now it is her planks. | Through hull was Victory 10.6%, Santa María 3.6%, Niña 1.5%. Now Victory 0.2%, the rest 0. Victory's is her guns, which the GPU runs in up to 1.1 m and the shot holds at rest. | `sweepShipSegment` |
 | 5 | **Fixed: lower masts cannot be hit, nor Victory's upper rig.** Masts and yards are solid on their own triangles, and a fallen one is not. | Dead band was Victory 10.6 m, Flying Cloud 6.6 m, others 2.4–4.1 m, with tops a formula out by up to 14 m. Now none, from one 0.5 m step over the rail to the masthead, on all eight rigged ships. | `sweepShipSegment` |
-| 6 | **Balls stop in air around foreshore palms.** Vertical cylinders stand for a leaning palm, with a trunk 1.35 m in radius against 0.34 m drawn. | 45–48% of lines stop in air, about 1.4 m from anything. | `js/gunnery-control.js:3684` |
+| 6 | **Fixed: balls stopped in air around foreshore palms.** A foreshore palm is a root of the forest, and a ball meets its leaning trunk. Was: 45–48% of lines stopped in air, about 1.4 m from anything, at a trunk 1.35 m in radius against 0.34 m drawn. | No line stops in air, and 98% of lines through the trunk stop within 0.5 m of it. | `js/forest-trunks.js` |
 
 ### Seen on deck at normal camera range
 
@@ -84,27 +84,28 @@ The audit changes no model. No plain typo turned up.
 - Crew are measured at the watch, standing or rowing. Gun drills, aloft work and falls are not.
 - Crew claims rest on rays against the read-back geometry. Headless whole-ship screenshots agree with the mesh, but I did not get close-up pixel shots of each sailor.
 - A hit's credited part and ship fracture after damage are checked by `tests/ship-collider.test.mjs` and `tests/ship-fracture.test.mjs`, not here. Nor are the terrain sweep and the legacy trees used only if the forest fails to load.
+- Trees are measured standing, in calm air. Wood is hard where a tube is as thick as a ball, or is a slender tree's own stem. That is the audit's own measure, from rays across each tube, not the table's. Wind, felled trees and fallen trunks are not measured.
 - A manifest's `heightMetres` differs from its mesh (palm 10.4 against 17.5 m). Nothing I found reads it for collision, so it is not ranked.
 
 ## Measured
 
 
 <!-- audit tables start -->
-Measured 2026-11-06. Rig as the GPU posed it, read back on Metal. 101 measurements past their limits.
+Measured 2026-11-06. Rig as the GPU posed it, read back on Metal. 89 measurements past their limits.
 
 ### Posed geometry read back from the GPU
 
 | Ship | vertices | hull-class parts that moved | mast | spar | cloth | rope | gun | length off | beam off | sinkage off |
 |---|---|---|---|---|---|---|---|---|---|---|
-| nina | 91998 | hatch.cover 2.27 | 0 | 0.77 | 4.78 | 4.79 | 0.09 | 0 | 0 | 0 |
-| pinta | 43041 | hatch.main 2.92 | 0 | 0.68 | 3.59 | 6.6 | 0.09 | 0 | 0 | 0 |
-| santa-maria | 48686 | hatch.main 3.68 | 0 | 0.64 | 2.46 | 4.58 | 0.09 | 0 | 0 | 0 |
-| victory | 144783 | hatch.main 4.68 | 0 | 1.91 | 1.8 | 1.9 | 1.1 | 0 | 0 | 0 |
-| oseberg | 71016 | none | 0 | 0.6 | 0.62 | 0.62 | – | 0 | 0 | 0 |
-| lusoria | 30703 | none | 0 | 0.46 | 0.44 | 0.45 | – | 0 | 0 | 0 |
+| nina | 91998 | hatch.cover 2.27 | 0 | 0.77 | 4.85 | 4.86 | 0.09 | 0 | 0 | 0 |
+| pinta | 43041 | hatch.main 2.92 | 0 | 0.74 | 3.64 | 6.65 | 0.09 | 0 | 0 | 0 |
+| santa-maria | 48686 | hatch.main 3.68 | 0 | 0.63 | 2.46 | 4.58 | 0.09 | 0 | 0 | 0 |
+| victory | 144783 | hatch.main 4.68 | 0 | 1.77 | 1.67 | 1.76 | 1.1 | 0 | 0 | 0 |
+| oseberg | 71016 | none | 0 | 0.66 | 0.67 | 0.67 | – | 0 | 0 | 0 |
+| lusoria | 30703 | none | 0 | 0.5 | 0.48 | 0.48 | – | 0 | 0 | 0 |
 | taino-canoe | 26453 | none | – | – | – | – | – | 0 | 0 | 0 |
-| flying-cloud | 76071 | hatch.main 4.7 | 0 | 4.33 | 4.32 | 4.33 | – | 0 | 0 | 0 |
-| gipsy-moth-iv | 21568 | hatch.main 0.85 | 0 | 0.37 | 0.37 | 0.37 | – | 0 | 0 | 0 |
+| flying-cloud | 76071 | hatch.main 4.7 | 0 | 2.45 | 2.69 | 2.45 | – | 0 | 0 | 0 |
+| gipsy-moth-iv | 21568 | hatch.main 0.85 | 0 | 0.44 | 0.44 | 0.44 | – | 0 | 0 | 0 |
 
 ### 1a. Balls against ship meshes
 
@@ -112,41 +113,43 @@ Share of lines that either the shot or the mesh says struck. *Agree* is within 0
 
 | Ship | lines | agree % | soft % | air: rig % | air: hull % | median gap m | max gap m | through hull % | through mast/spar % | phantom mast % | wrong mast % | parts missed most |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| nina | 13064 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
-| pinta | 11362 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
+| nina | 13031 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
+| pinta | 11381 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
 | santa-maria | 13697 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
-| victory | 13937 | 98.7 | 1.1 | 0 | 0 | – | 0 | 0.2 | 0 | 0 | 0 | gunnery.recoil.# 8, gun.forecastle.port.# 6, gun.forecastle.starboard.# 6, gun.quarter.starboard.# 3, gun.quarter.port.# 3 |
-| oseberg | 8219 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
-| lusoria | 6162 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
+| victory | 13903 | 98.7 | 1.1 | 0 | 0 | – | 0 | 0.2 | 0 | 0 | 0 | gunnery.recoil.# 8, gun.forecastle.port.# 7, gun.forecastle.starboard.# 7, gun.quarter.starboard.# 3, gun.quarter.port.# 3 |
+| oseberg | 8226 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
+| lusoria | 6164 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
 | taino-canoe | 9084 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
-| flying-cloud | 11228 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
-| gipsy-moth-iv | 8959 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
+| flying-cloud | 11116 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
+| gipsy-moth-iv | 8958 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
 
 ### 1b. Balls against trees
 
-| Tree | mode | wood lines stopped % | agree % | soft % | air % | through % | gap m | top m | reach m |
-|---|---|---|---|---|---|---|---|---|---|
-| subtropical/royal_palm | forest | 0 | 0 | 0 | 0 | 100 | – | 20.97 | 3.53 |
-| subtropical/palm | forest | 0 | 0 | 0 | 0 | 100 | – | 18.65 | 5.26 |
-| subtropical/palm-0.2 | foreshore | 74.3 | 1.8 | 46.9 | 45.9 | 5.5 | 1.33 | 15.57 | 5.32 |
-| subtropical/palm-0.5 | foreshore | 71.8 | 1.9 | 43.7 | 47.8 | 6.6 | 1.47 | 17.62 | 6.11 |
-| subtropical/palm-0.8 | foreshore | 79.8 | 1.5 | 48.8 | 45.3 | 4.4 | 1.47 | 19.67 | 6.9 |
-| subtropical/ceiba | forest | 0 | 0 | 0 | 0 | 100 | – | 26.21 | 14.11 |
-| subtropical/mangrove | forest | 0 | 0 | 0 | 0 | 100 | – | 14.11 | 5.96 |
-| saba/oak | forest | 0 | 0 | 0 | 0 | 100 | – | 24.5 | 28.21 |
-| saba/maple | forest | 0 | 0 | 0 | 0 | 100 | – | 22.72 | 22.39 |
-| saba/birch | forest | 0 | 0 | 0 | 0 | 100 | – | 12.86 | 15.49 |
-| saba/elm | forest | 0 | 0 | 0 | 0 | 100 | – | 23.19 | 28.07 |
-| saba/chestnut | forest | 0 | 0 | 0 | 0 | 100 | – | 28.31 | 23.11 |
+*Trunk lines* are fired close together at the trunk alone. The rest cross the tree's whole silhouette: *wood lines* cross wood as thick as a ball, or a slender tree's own trunk; *all wood* counts twigs too, which a ball goes through. *Agree* is within 0.5 m of that wood. *Soft* stopped within a metre of something drawn, usually a line that misses the wood by less than the ball's own width. *Air* stopped further off than that. *Through* passed thick wood unstopped.
+
+| Tree | mode | trunk lines | trunk lines stopped % | trunk agree % | wood lines stopped % | all wood stopped % | agree % | soft % | air % | through % | gap m | top m | reach m |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| subtropical/royal_palm | forest | 7399 | 100 | 100 | 100 | 74.6 | 62.2 | 37.8 | 0 | 0 | – | 20.97 | 3.53 |
+| subtropical/palm | forest | 2813 | 100 | 98.5 | 100 | 53.3 | 58.9 | 41.1 | 0 | 0 | – | 18.65 | 5.26 |
+| subtropical/palm-0.2 | foreshore | 3328 | 100 | 98.6 | 100 | 51 | 51.8 | 48.2 | 0 | 0 | – | 15.31 | 5.32 |
+| subtropical/palm-0.5 | foreshore | 3429 | 100 | 98.5 | 100 | 51.5 | 54.7 | 45.3 | 0 | 0 | – | 17.31 | 6.11 |
+| subtropical/palm-0.8 | foreshore | 3499 | 100 | 98.3 | 100 | 53.8 | 56.1 | 43.9 | 0 | 0 | – | 19.3 | 6.9 |
+| subtropical/ceiba | forest | 4975 | 90.1 | 78.4 | 89.9 | 49.6 | 46.9 | 46.4 | 0 | 6.7 | – | 26.21 | 14.11 |
+| subtropical/mangrove | forest | 1996 | 92.8 | 75.2 | 91.7 | 38.1 | 22.9 | 74.1 | 0 | 3.1 | – | 14.11 | 5.96 |
+| saba/oak | forest | 1317 | 99.5 | 96.7 | 98 | 32 | 52.7 | 46.2 | 0 | 1.1 | – | 24.5 | 28.21 |
+| saba/maple | forest | 1311 | 99.9 | 98.9 | 75 | 4.8 | 4.8 | 93.5 | 0 | 1.6 | – | 22.72 | 22.39 |
+| saba/birch | forest | 1722 | 100 | 100 | 0 | 0 | 0 | 0 | 0 | 0 | – | 12.86 | 15.49 |
+| saba/elm | forest | 1501 | 99.1 | 94.9 | 99.2 | 33.2 | 57.5 | 42.1 | 0 | 0.5 | – | 23.19 | 28.07 |
+| saba/chestnut | forest | 1859 | 99.9 | 95.3 | 97.9 | 42.7 | 55.8 | 43 | 0 | 1.2 | – | 28.31 | 23.11 |
 
 ### 1c. A live port and forest, read from the running game
 
 | Region | ports | buildings | known by mesh | traced by mesh | trees drawn | trees a ball can strike | palms a ball can strike |
 |---|---|---|---|---|---|---|---|
-| lisbon | 1 | 26 | 26 | 26 | 36000 | 0 | 0 |
-| havana | 1 | 23 | 23 | 23 | 31020 | 0 | 520 |
-| san-juan | 1 | 23 | 23 | 23 | 36520 | 0 | 520 |
-| jamestown | 1 | 18 | 18 | 18 | 14000 | 0 | 0 |
+| lisbon | 1 | 26 | 26 | 26 | 36000 | 36000 | 0 |
+| havana | 1 | 23 | 23 | 23 | 56000 | 56000 | 520 |
+| san-juan | 1 | 23 | 23 | 23 | 56000 | 56000 | 520 |
+| jamestown | 1 | 18 | 18 | 18 | 14000 | 14000 | 0 |
 
 ### 1d. Balls against port buildings
 
@@ -249,12 +252,12 @@ Share of lines that either the shot or the mesh says struck. *Agree* is within 0
 | nina | 36 | 0 |  | 56 | 0 | 0 | – | – |
 | pinta | 45 | 0 |  | 202 | 0 | 0 | – | – |
 | santa-maria | 58 | 0 |  | 196 | 0 | 0 | – | – |
-| victory | 67 | 3 | helm.tiller 0.8m, helm.rudder 0.8m, rig.mizzen.fall 0.52m | 262 | 27 | 0.56 | 0 | 0 |
+| victory | 67 | 3 | helm.tiller 0.8m, helm.rudder 0.8m, rig.mizzen.fall 0.52m | 260 | 27 | 0.56 | 0 | 0 |
 | oseberg | 232 | 0 |  | 6 | 0 | 0 | – | – |
 | lusoria | 190 | 0 |  | 6 | 2 | 0.37 | – | – |
 | taino-canoe | 149 | 0 |  | 0 | 0 | 0 | – | – |
-| flying-cloud | 219 | 0 |  | 497 | 0 | 0 | – | – |
-| gipsy-moth-iv | 38 | 0 |  | 17 | 0 | 0 | – | – |
+| flying-cloud | 219 | 0 |  | 480 | 0 | 0 | – | – |
+| gipsy-moth-iv | 38 | 0 |  | 19 | 0 | 0 | – | – |
 
 ### 3. Waterline and hull
 
@@ -315,7 +318,7 @@ Share of lines that either the shot or the mesh says struck. *Agree* is within 0
 | oseberg | 3.6 / 1.116 | 0.181 / 0.376 | 2.791 / 1.113 | – | – | – | – | – | – | – | – | 4.705 / 1.812 | – | – | – | 0.287 | 0.201 | 0.307 |
 | lusoria | 6.429 / 1.333 | 0.308 / 0.402 | 5.54 / 1.333 | – | – | – | – | – | – | – | – | 4.787 / 1.842 | – | – | – | 0.24 | 0.113 | 0.18 |
 | taino-canoe | 10 / 1.714 | 0.323 / 0.52 | 6.69 / 1.713 | – | – | – | – | – | – | – | – | 3.995 / 2 | – | – | – | 0.187 | 0.072 | 0.172 |
-| flying-cloud | 3 / 0.7 | – | 0.875 / 0.347 | – | – | 0.244 / 0.104 | – | 0.875 / 0.344 | – | 1.404 / 0.252 | – | – | 0.875 / 0.35 | 16.712 / 4.984 | 1.44 / 0.35 | 0.914 | 0.503 | – |
+| flying-cloud | 3 / 0.7 | – | 0.875 / 0.347 | – | – | 0.244 / 0.104 | – | 0.875 / 0.344 | – | 1.428 / 0.249 | – | – | 0.875 / 0.35 | 16.712 / 4.984 | 1.44 / 0.35 | 0.914 | 0.503 | – |
 | gipsy-moth-iv | 3 / 0.7 | – | 3.707 / 1.483 | – | – | – | – | 0.252 / 0.445 | – | – | – | – | – | – | – | 0.216 | 0.129 | – |
 
 ### Every measurement past its limit
@@ -368,7 +371,7 @@ Share of lines that either the shot or the mesh says struck. *Agree* is within 0
 | node.loose/victory | 3 | 0 | helm.tiller 0.8m, helm.rudder 0.8m, rig.mizzen.fall 0.52m |
 | prop.jetty-root-buried/boston | 0.43 | 0 | the shore end stands in rising ground |
 | rope.loose/lusoria | 2 | 0 | of 6 lines; worst 0.37 m; rig.standing 2 |
-| rope.loose/victory | 27 | 0 | of 262 lines; worst 0.56 m; rig.standing.main 12, rig.standing.mizzen 8, rig.standing.fore 6, rig.running 1 |
+| rope.loose/victory | 27 | 0 | of 260 lines; worst 0.56 m; rig.standing.main 12, rig.standing.mizzen 8, rig.standing.fore 6, rig.running 1 |
 | surface.grain-across/flying-cloud/deck | 3.13 | 1.67 | 3/m against Niña's 0.96/m |
 | surface.grain-across/flying-cloud/wood-17 | 14.82 | 1.67 | 16.712/m against Niña's 1.128/m |
 | surface.grain-across/gipsy-moth-iv/deck | 3.13 | 1.67 | 3/m against Niña's 0.96/m |
@@ -383,7 +386,7 @@ Share of lines that either the shot or the mesh says struck. *Agree* is within 0
 | surface.grain-across/taino-canoe/oak | 6.97 | 1.67 | 6.69/m against Niña's 0.96/m |
 | surface.grain-across/taino-canoe/wale/post | 4.16 | 1.67 | 3.995/m against Niña's 0.96/m |
 | surface.grain-along/flying-cloud/deck | 2.12 | 1.67 | 0.7/m against Niña's 0.33/m |
-| surface.grain-along/flying-cloud/spar | 0.56 | 1.67 | 0.252/m against Niña's 0.45/m |
+| surface.grain-along/flying-cloud/spar | 0.55 | 1.67 | 0.249/m against Niña's 0.45/m |
 | surface.grain-along/flying-cloud/wood-17 | 12.78 | 1.67 | 4.984/m against Niña's 0.39/m |
 | surface.grain-along/gipsy-moth-iv/deck | 2.12 | 1.67 | 0.7/m against Niña's 0.33/m |
 | surface.grain-along/gipsy-moth-iv/oak | 4.49 | 1.67 | 1.483/m against Niña's 0.33/m |
@@ -398,18 +401,6 @@ Share of lines that either the shot or the mesh says struck. *Agree* is within 0
 | surface.grain-along/taino-canoe/wale/post | 5.57 | 1.67 | 2/m against Niña's 0.359/m |
 | surface.wall-course/flying-cloud | 0.91 | 0.45 | wall courses 0.914 m wide against Niña's 0.267 m |
 | surface.wall-course/victory | 0.76 | 0.45 | wall courses 0.756 m wide against Niña's 0.267 m |
-| tree.no-collision/birch | 0 | 50 | lines through the trunk that any shot stops |
-| tree.no-collision/ceiba | 0 | 50 | lines through the trunk that any shot stops |
-| tree.no-collision/chestnut | 0 | 50 | lines through the trunk that any shot stops |
-| tree.no-collision/elm | 0 | 50 | lines through the trunk that any shot stops |
-| tree.no-collision/mangrove | 0 | 50 | lines through the trunk that any shot stops |
-| tree.no-collision/maple | 0 | 50 | lines through the trunk that any shot stops |
-| tree.no-collision/oak | 0 | 50 | lines through the trunk that any shot stops |
-| tree.no-collision/palm | 0 | 50 | lines through the trunk that any shot stops |
-| tree.no-collision/royal_palm | 0 | 50 | lines through the trunk that any shot stops |
-| tree.palm-air/palm-0.2 | 45.9 | 10 | a ball stops 1.33 m from anything |
-| tree.palm-air/palm-0.5 | 47.8 | 10 | a ball stops 1.47 m from anything |
-| tree.palm-air/palm-0.8 | 45.3 | 10 | a ball stops 1.47 m from anything |
 | walk.inside-structure/flying-cloud | 438 | 0 | of 3467 cells: under a roof with no floor |
 | walk.inside-structure/gipsy-moth-iv | 55 | 0 | of 161 cells: under a roof with no floor |
 | walk.inside-structure/victory | 3 | 0 | of 2048 cells: under a roof with no floor |
