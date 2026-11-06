@@ -14,6 +14,7 @@ import {noteBuildingMeshes,prepareBuildingFracture,applyBuildingFractureEvents} 
 import {createPortDamageStore} from '../js/port-damage.js';
 import {worldOfPosition} from '../js/harbour-defences.js';
 import {applyBuildingImpactDamage} from '../js/gunnery-control.js';
+import {terrainSurfaceSample} from '../js/terrain-model.js';
 
 const FORT_PREFABS=new Set(['bastion_trace_fortress','stone_sea_bastion','english_triangular_palisade_fort']);
 const fixtures=new URL('./data/harbours/',import.meta.url);
@@ -109,14 +110,26 @@ test('a fort looks at the water it guards, and its gate looks away from it or to
       assert.ok(plan,`${fort.label} has a gate`);
       const c=Math.cos(fort.yaw),s=Math.sin(fort.yaw),gx=plan.nx*c+plan.nz*s,gz=-plan.nx*s+plan.nz*c;
       const toTown=[port.center.x-fort.x,port.center.z-fort.z],townLength=Math.hypot(...toTown)||1;
-      seen.push({label:`${id}: ${fort.label}`,facing:(lx*dx+lz*dz)/length,away:-(gx*dx+gz*dz)/length,towards:(gx*toTown[0]+gz*toTown[1])/townLength});
+      seen.push({label:`${id}: ${fort.label}`,riverGate:fort.gateSide===0,facing:(lx*dx+lz*dz)/length,away:-(gx*dx+gz*dz)/length,towards:(gx*toTown[0]+gz*toTown[1])/townLength});
     }
   }
   assert.ok(seen.length>=18,`${seen.length} forts`);
   // Nearly every sea face has water before it. A fort squares up to the channel, which is not always the nearest shore.
   const facing=seen.filter(f=>f.facing>0);
   assert.ok(facing.length>=seen.length*.8,`only ${facing.length} of ${seen.length} look towards water: ${seen.filter(f=>f.facing<=0).map(f=>f.label).join('; ')}`);
-  for(const fort of seen)assert.ok(fort.away>-.6||fort.towards>.2,`${fort.label}: its gate opens on the water (${fort.away.toFixed(2)}, ${fort.towards.toFixed(2)})`);
+  for(const fort of seen)assert.ok(fort.riverGate||fort.away>-.6||fort.towards>.2,`${fort.label}: its gate opens on the water (${fort.away.toFixed(2)}, ${fort.towards.toFixed(2)})`);
+});
+
+test("James Fort's main gate opens to the river, as Strachey says it did, and the way to it stays dry",()=>{
+  const {port,heights,region}=portOn('jamestown',1650);
+  const fort=fortsOf(port).find(f=>f.gateSide===0);
+  assert.ok(fort,'the fort that holds the settlement has its gate in the river curtain');
+  assert.match(fort.label,/James Fort/);
+  const plan=enclosurePlan(fort),water=nearestWater(fort,heights,region),c=Math.cos(fort.yaw),s=Math.sin(fort.yaw);
+  const gx=plan.gate.nx*c+plan.gate.nz*s,gz=-plan.gate.nx*s+plan.gate.nz*c,dx=water.x-fort.x,dz=water.z-fort.z;
+  assert.ok((gx*dx+gz*dz)/(Math.hypot(dx,dz)||1)>.5,'it looks at the water');
+  const out=fortLocalToWorld(fort,plan.gate.x+plan.gate.nx*6,plan.gate.z+plan.gate.nz*6);
+  assert.ok(terrainSurfaceSample(heights,out.x,out.z,region)>0,'and there is bank to stand on outside it');
 });
 
 test('Jamestown, New Amsterdam and Boston: gate and river guns no longer point arbitrary ways',()=>{

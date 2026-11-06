@@ -4,7 +4,7 @@
 // landmark, so it only says which stretch of shore to look along. Ports not named here go by the geography alone.
 // Fields: name, from, until, lat, lon, role (mouth, narrows, headland, river, waterfront, island, citadel), side
 // (compass side of the water), shape (star, headland, battery, drum, islet, fitted), earth (earth and timber, not
-// stone), bastions, sizeM, rough, encloses (holds the settlement, as James Fort did), landmark, terraces.
+// stone), bastions, sizeM, rough, encloses (holds the settlement, as James Fort did), gate ("river" where the main gate opened to the water, as Strachey says James Fort's did), landmark, terraces.
 export const FORT_RECORDS = Object.freeze({
   "havana": Object.freeze({
     seaward: 340,
@@ -223,7 +223,7 @@ export const FORT_RECORDS = Object.freeze({
   "jamestown": Object.freeze({
     seaward: 150,
     forts: Object.freeze([
-      Object.freeze({ name: "James Fort", from: 1607, lat: 37.2092, lon: -76.7787, role: "river", side: "north", shape: "star", earth: true, rough: true, encloses: "triangle" }),
+      Object.freeze({ name: "James Fort", from: 1607, lat: 37.2092, lon: -76.7787, role: "river", side: "north", shape: "star", earth: true, rough: true, encloses: "triangle", gate: "river" }),
       Object.freeze({ name: "Jamestown Turf Fort (1665-67 earthwork)", from: 1665, until: 1680, lat: 37.2088, lon: -76.7749, role: "river", side: "north", shape: "star", earth: true, rough: true }),
     ]),
   }),

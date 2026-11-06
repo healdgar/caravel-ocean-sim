@@ -4234,9 +4234,10 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     look = lookFrom(site.x, site.z);
     yaw = Math.atan2(-look.x, -look.z);
     const stillFits = findPrefabSite('english_triangular_palisade_fort', site, yaw, width, length, null, candidate) ?? site;
-    // The gate is in the flank that looks towards dry ground and the rest of the town.
+    // The gate is in the flank that looks towards dry ground and the rest of the town, unless the record says otherwise.
     let gateSide;
-    if (shape === 'triangle') {
+    if (shape === 'triangle' && recordOf?.gate === 'river') gateSide = 0;
+    else if (shape === 'triangle') {
       const score = (side) => {
         const plan = triangularFortPlan(width, length, side), g = plan.gate;
         const c = Math.cos(yaw), s = Math.sin(yaw), wx = stillFits.x + (g.x + g.nx * 22) * c + (g.z + g.nz * 22) * s, wz = stillFits.z - (g.x + g.nx * 22) * s + (g.z + g.nz * 22) * c;
