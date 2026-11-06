@@ -1,6 +1,6 @@
-import {test,before} from 'node:test';
+import {test,before,after} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,readFileSync,writeFileSync,existsSync} from 'node:fs';
+import {mkdtempSync,readFileSync,rmSync,writeFileSync,existsSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {spawnSync} from 'node:child_process';
@@ -8,6 +8,10 @@ import {MeshoptSimplifier} from 'meshoptimizer';
 import {ASSET_TYPES,bakeSize,bestStep,createDecimator,dropHidden,readGLB,sourceIndices,writeGLB} from '../scripts/safe-decimate.mjs';
 
 before(()=>MeshoptSimplifier.ready);
+
+const workDirs=[];
+const workDir=()=>{const dir=mkdtempSync(join(tmpdir(),'decimate-'));workDirs.push(dir);return dir;};
+after(()=>{for(const dir of workDirs)rmSync(dir,{recursive:true,force:true});});
 
 // ---- models to reduce -------------------------------------------------------------------------
 function cylinder(radius,height,{x=0,y=0,z=0,sides=96,rings=24}={}){
@@ -140,7 +144,7 @@ test('its own output reads back as a closed, renderable model',()=>{
 });
 
 test('the command line writes only what passes, and says why not',()=>{
-  const dir=mkdtempSync(join(tmpdir(),'decimate-')),input=join(dir,'in.glb'),out=join(dir,'out.glb'),report=join(dir,'r.json');
+  const dir=workDir(),input=join(dir,'in.glb'),out=join(dir,'out.glb'),report=join(dir,'r.json');
   writeFileSync(input,model());
   const script=new URL('../scripts/safe-decimate.mjs',import.meta.url).pathname;
   const good=spawnSync(process.execPath,[script,input,'--out',out,'--report',report],{encoding:'utf8'});
@@ -253,7 +257,7 @@ test('a baked texture follows the triangle count, within what a card can hold',(
 });
 
 test('the command line writes one file per level, and index lists for a body',()=>{
-  const dir=mkdtempSync(join(tmpdir(),'decimate-')),input=join(dir,'tree.glb'),output=join(dir,'out.glb');
+  const dir=workDir(),input=join(dir,'tree.glb'),output=join(dir,'out.glb');
   writeFileSync(input,glb([tree()]));
   const run=spawnSync(process.execPath,['scripts/safe-decimate.mjs',input,'--type','foliage','--levels','800,120','--out',output],{encoding:'utf8'});
   assert.equal(run.status,0,run.stderr);
@@ -272,7 +276,7 @@ test('the command line writes one file per level, and index lists for a body',()
 });
 
 test('a textured type says how to bake when it has no Python, and fails aloud when the Python cannot',()=>{
-  const dir=mkdtempSync(join(tmpdir(),'decimate-')),input=join(dir,'in.glb'),output=join(dir,'out.glb');
+  const dir=workDir(),input=join(dir,'in.glb'),output=join(dir,'out.glb');
   writeFileSync(input,model({uvs:true,image:true}));
   const hint=spawnSync(process.execPath,['scripts/safe-decimate.mjs',input,'--type','prop','--out',output],{encoding:'utf8'});
   assert.equal(hint.status,0,hint.stderr);assert.match(hint.stdout,/no texture yet\. Bake it with/);
@@ -282,7 +286,7 @@ test('a textured type says how to bake when it has no Python, and fails aloud wh
 
 // Needs Blender's Python: BPY_PYTHON=venv/bin/python npm test
 test('a bake gives the reduced model its own unwrap and texture',{skip:process.env.BPY_PYTHON?false:'set BPY_PYTHON to a Python with bpy'},()=>{
-  const dir=mkdtempSync(join(tmpdir(),'decimate-')),input=join(dir,'in.glb'),output=join(dir,'out.glb');
+  const dir=workDir(),input=join(dir,'in.glb'),output=join(dir,'out.glb');
   writeFileSync(input,readFileSync(process.env.BAKE_SOURCE));
   const run=spawnSync(process.execPath,['scripts/safe-decimate.mjs',input,'--type','prop','--out',output,'--python',process.env.BPY_PYTHON],{encoding:'utf8'});
   assert.equal(run.status,0,run.stderr);
