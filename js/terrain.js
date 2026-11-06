@@ -15,6 +15,7 @@ import {loadForestMiddle,FOREST_MIDDLE_ASSETS,SUBTROPICAL_FOREST_MIDDLE_ASSETS} 
 import {bakeLandImpactDeformations} from './part-assembly.js';
 import {buildingFracturePipeline,createPortFractures} from './building-fracture.js';
 import {streetEdgeAt} from './town-streets.js';
+import {createLandCraterLedger,createLandCraters,landCraterSize} from './land-craters.js';
 
 import {
   portClearanceEnvelope,
@@ -560,6 +561,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     }
   }
   let activeRegion=proceduralPack?proceduralPack.region:ISLAND;
+  const craterCoast=activeRegion.id??'saba',craterLedger=createLandCraterLedger(portDamage?.openGround(craterCoast),activeRegion);
+  let craters=null,craterLand=null,craterClouds=null;
   let heights,biome,nearTile=null,nearFailure=null,albedoImage=null;
   if(proceduralPack){
     heights=proceduralPack.heights;biome=proceduralPack.biome;
@@ -769,12 +772,23 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       groundWanted=groundPatches.filter(patch=>!groundResident.has(patch)&&distanceOf(patch)<GROUND_RESIDENT_M).sort((a,b)=>distanceOf(b)-distanceOf(a));
     }
     for(let i=0;i<GROUND_PATCHES_PER_FRAME&&groundWanted.length&&groundFreeBlocks.length;i++){
-      const patch=groundWanted.pop(),block=groundFreeBlocks.pop(),perVariant=groundCoverInstances(patch,activeRegion,groundSample,biome,(x,z)=>streetEdgeAt(proceduralPack?.port?.streets,x,z)>=GROUND_COVER_STREET_GAP_M);
+      const patch=groundWanted.pop(),block=groundFreeBlocks.pop(),perVariant=groundCoverInstances(patch,activeRegion,groundSample,biome,(x,z)=>streetEdgeAt(proceduralPack?.port?.streets,x,z)>=GROUND_COVER_STREET_GAP_M&&!craterLedger.covers(x,z));
       const floats=new Float32Array(groundBlock*8),slotGroups=new Uint32Array(groundBlock).fill(0xffffffff);let slot=0;
       perVariant.forEach((data,variant)=>{for(let k=0;k<data.length;k+=8){floats.set(data.subarray(k,k+8),slot*8);slotGroups[slot++]=variant;}});
       groundCull.setInstances(block*groundBlock,floats,slotGroups);groundResident.set(patch,block);
     }
     groundStats.resident=groundResident.size;
+  }
+  // What grew or lay where a pit has opened is worked out again without it, from the patch's same seed.
+  function clearGroundCoverAt(x,z,radius){
+    for(const patch of groundPatches){
+      if(x+radius<patch.x||x-radius>patch.x+GROUND_COVER.patchSpan||z+radius<patch.z||z-radius>patch.z+GROUND_COVER.patchSpan)continue;
+      patch.instances=null;
+      const block=groundResident.get(patch);
+      if(block===undefined)continue;
+      groundCull.clearSlots(block*groundBlock,groundBlock);groundFreeBlocks.push(block);groundResident.delete(patch);
+      groundWanted.push(patch);
+    }
   }
   const treeMeshes=Array.from({length:3},(_,lod)=>Array.from({length:TREE_VARIANTS},(_,variant)=>{
     const data=treeRenderGeometry(variant,lod);let opaqueEnd=0;
@@ -810,6 +824,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     checkCameraSectionStreaming?.(camera);
     importedCanopy?.prepare(camera,viewProjection);
     updateGroundResidency(camera);
+    craters?.follow({x:camera.x-worldOffset.x,z:camera.z-worldOffset.z});
     lastCamera=camera;lastView=viewProjection;
 
   }
@@ -1032,6 +1047,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       albedo:sAlbedo,
       biomeTexture:sBiome,
       townField:sTownField,
+      opaqueResources:secOpaqueResources,
       terrainGroup,
       submergedGroup:submergedSecGroup,
     };
@@ -1082,6 +1098,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     oldVerts?.destroy?.();
     oldIdx?.destroy?.();
     oldSubIdx?.destroy?.();
+    craters?.invalidate(sReg);
     adjRec.biome=synthesizeCoastalBiome(sReg,adjRec.heights,adjRec.beaches,adjRec.port,null);
     device.queue.writeTexture({texture:adjRec.biomeTexture},adjRec.biome,{bytesPerRow:sReg.biomeSize},[sReg.biomeSize,sReg.biomeSize]);
     const rebuiltAlbedo=synthesizeCoastalAlbedo(sReg,adjRec.heights,adjRec.beaches,adjRec.port,adjRec.biome,null);
@@ -1163,6 +1180,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
           const rec=buildSectionGPURecord(secPack);
           loadedSections.set(key,rec);
           portsDirty=true;
+          craters?.invalidate(rec.region);
           for(const [dx,dz,adjEdge] of [[-1,0,'east'],[1,0,'west'],[0,-1,'south'],[0,1,'north']]){
             const adj=loadedSections.get(`${secX+dx},${secZ+dz}`);
             if(adj&&!adj.connectedEdges?.[adjEdge])restitchNeighborSection(adj);
@@ -1224,6 +1242,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         submergedIndices=mesh.submergedIndices?buffer(mesh.submergedIndices,GPUBufferUsage.INDEX,'submerged island indices border-synced'):indices;
         submergedCount=mesh.submergedIndices?.length??mesh.indices.length;
         oldVerts?.destroy?.();oldIdx?.destroy?.();oldSubIdx?.destroy?.();
+        craters?.invalidate(activeRegion);
       }
     }
     if(sectionQueue.length){
@@ -1339,7 +1358,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     const oldTownField=activeTownField;
     activeTownField=townField(upgradedPack.port?.streets);
     nearResources=[...opaqueResources,[12,{buffer:nearDomain}],[13,nearAlbedo.createView()],...activeTownField.resources];
-    groups[0]=bind(terrainPipe,nearResources);groups[1]=bind(opaqueTreePipe,nearResources);
+    groups[0]=bind(terrainPipe,nearResources);groups[1]=bind(opaqueTreePipe,nearResources);craterLand=null;
     submergedGroup=submerged?.bindGroup(nearResources.map(([binding,resource])=>({binding,resource})));
     oldTownField.texture.destroy();oldTownField.window.destroy();
     portDamage?.capture(proceduralPack?.port);
@@ -1354,6 +1373,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     tick=0;
 
     resetStreamedSections();
+    craters?.invalidate();
     if(boat&&Number.isFinite(boat.x)&&Number.isFinite(boat.z)){
       const draft=boat.hydrodynamics?.draft??2.1;
       if(heightSample(boat.x,boat.z)>-draft*1.15){
@@ -1502,6 +1522,20 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
 
   // Anything saved as ruined is a ruin before the port is first seen.
   await portFractures?.restoreNow();
+  craters=createLandCraters({device,module,shader,computePipe,format,samples,ledger:craterLedger,maxLayers:isMobile?96:384,
+    surfaces(){
+      const list=[{vertices,indices,count:mesh.indices.length,region:null}];
+      if(fine)list.push({vertices:fine.vertices,indices:fine.indices,count:fineMesh.indices.length,region:null});
+      for(const sec of loadedSections.values())list.push({vertices:sec.vertices,indices:sec.indices,count:sec.indexCount,region:sec.region});
+      return list;
+    },
+    sectionAt(x,z){
+      const sx=Math.round((x-activeRegion.x)/activeRegion.span),sz=Math.round((z-activeRegion.z)/activeRegion.span);
+      if(sx===0&&sz===0)return 'main';
+      return loadedSections.has(`${sx},${sz}`)?`${sx},${sz}`:null;
+    },
+    groundAt:(x,z)=>groundSample(x,z),
+  });
   return {
     waterGroup:pipe=>coastalField.waterGroup(pipe),
     get turbidityScale(){return coastalTurbidityScale(activeRegion.latitude??0,activeRegion.coastalArchetype);},
@@ -1583,6 +1617,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       indices?.destroy?.();
       portDamage?.capture(proceduralPack?.port);
       for(const sec of loadedSections.values())portDamage?.capture(sec.port);
+      craters?.dispose();
       portMesh?.vertices?.destroy?.();portMesh?.indices?.destroy?.();portFractures?.destroy();
       fine?.vertices?.destroy?.();fine?.indices?.destroy?.();fine?.submerged?.destroy?.();
       uniform?.destroy?.();nearDomain?.destroy?.();nearElevation?.destroy?.();coastalField?.destroy();
@@ -1622,6 +1657,21 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       for(const sec of loadedSections.values()){
         if(sec.port)flushPort(sec.portMesh,sec.portVertsCpu,sec.port,sec.portFractures);
       }
+      // Standing trees where a shot has landed go down with it.
+      const felled=(strikes)=>{
+        if(!trees?.length)return;
+        let treeChanged=false;
+        for(const strike of strikes){
+          for(let i=0;i<trees.length;i+=8){
+            const dx=trees[i]-strike.x,dz=trees[i+2]-strike.z;
+            if(dx*dx+dz*dz<=strike.rSq&&trees[i+3]>0.05){
+              trees[i+3]*=0.12;
+              treeChanged=true;
+            }
+          }
+        }
+        if(treeChanged){installTrees(trees);updated=true;}
+      };
       if(Array.isArray(this.pendingLandBakes)&&this.pendingLandBakes.length){
         const landBakes=this.pendingLandBakes.splice(0,this.pendingLandBakes.length);
         if(mesh?.vertices&&vertices){
@@ -1640,25 +1690,39 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
             }
           }
         }
-        if(trees?.length){
-          let treeChanged=false;
-          for(let bIdx=0;bIdx<landBakes.length;bIdx++){
-            const b=landBakes[bIdx];
-            const rSq=Math.max(36,((b.radius??2)*2.6)**2);
-            for(let i=0;i<trees.length;i+=8){
-              const dx=trees[i]-b.x,dz=trees[i+2]-b.z;
-              if(dx*dx+dz*dz<=rSq&&trees[i+3]>0.05){
-                trees[i+3]*=0.12;
-                treeChanged=true;
-              }
-            }
-          }
-          if(treeChanged){installTrees(trees);updated=true;}
+        felled(landBakes.map(b=>({x:b.x,z:b.z,rSq:Math.max(36,((b.radius??2)*2.6)**2)})));
+      }
+      // A crater goes in the ledger, and on the GPU, the moment its ball lands.
+      if(Array.isArray(this.pendingCraters)&&this.pendingCraters.length){
+        const hits=this.pendingCraters.splice(0,this.pendingCraters.length),strikes=[];
+        for(const hit of hits){
+          const local={...hit,x:hit.x-worldOffset.x,z:hit.z-worldOffset.z},record=craters.strike(local),radius=landCraterSize(record.energyJ).radius;
+          clearGroundCoverAt(record.x,record.z,radius*1.35);
+          strikes.push({x:record.x,z:record.z,rSq:(radius*1.6)**2});
         }
+        felled(strikes);
+        portDamage?.setGround(craterCoast,craterLedger.snapshot());
+        updated=true;
       }
       return updated;
     },
     get streamedSectionCount(){return loadedSections.size;},
+    get craters(){return craters;},
+    // How much of the ground at a point is loose sand, from none to all: what the beach survey says, or the low,
+    // gentle strand with no green in this coast's imagery, which the land shader leaves bare (landGroundCover).
+    sandAt(x,z){
+      const lx=x-worldOffset.x,lz=z-worldOffset.z,sec=findNeighborSection(lx,lz),region=sec?.region??activeRegion,beaches=sec?sec.beaches:proceduralPack?.beaches;
+      const m=region.biomeSize,u=(lx-region.x)/region.span+.5,v=(lz-region.z)/region.span+.5;
+      if(!(u>=0&&v>=0&&u<1&&v<1))return 0;
+      const at=Math.floor(v*m)*m+Math.floor(u*m);
+      const surveyed=beaches?.drySandMask&&beaches?.swashMask?Math.max(beaches.drySandMask[at],beaches.swashMask[at])/255:0;
+      const image=!sec&&proceduralPack?.albedo,size=region.albedoSize;
+      if(!image||!size)return surveyed;
+      const texel=(Math.floor(v*size)*size+Math.floor(u*size))*4,green=(image[texel+1]-Math.max(image[texel],image[texel+2]))/Math.max(image[texel],image[texel+1],image[texel+2],1);
+      const step=(from,to,value)=>Math.max(0,Math.min(1,(value-from)/(to-from)));
+      const slope=Math.hypot(heightSample(lx+2,lz)-heightSample(lx-2,lz),heightSample(lx,lz+2)-heightSample(lx,lz-2))/4;
+      return Math.max(surveyed,(1-step(.12,.3,green))*(1-step(1.5,3.5,heightSample(lx,lz)))*(1-step(.12,.3,slope)));
+    },
     discovery,applyUpgradedPack,
     safeStart(view,boat){return safeLandfallStart(heights,view,boat,this.region,this.height);},
     constrain(boat,x,z,extraOptions=null){return constrainIslandMotion(heights,boat,x,z,this.height,this.region,{ports:this.ports,beaches:proceduralPack?.beaches??null,onGrounding:this.onGrounding,...(extraOptions||{})});},
@@ -1724,6 +1788,16 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         pass.setBindGroup(0,sec.terrainGroup);
         pass.setVertexBuffer(0,sec.vertices);pass.setIndexBuffer(sec.indices,'uint32');pass.drawIndexed(sec.indexCount);
         if(sec.portMesh&&isSectionVisible(sec.region,camera,viewProjection,3400)){pass.setVertexBuffer(0,sec.portMesh.vertices);pass.setIndexBuffer(sec.portMesh.indices,'uint32');pass.drawIndexed(sec.portMesh.count);sec.portFractures?.draw(pass);}
+      }
+      // Dug-up ground draws over the land it replaces, with that land's own textures.
+      if(craters?.pipeline&&craters.stats.tiles){
+        craterLand??=bind(craters.pipeline,nearResources);craterClouds??=clouds.bindVolume(craters.pipeline);
+        craters.draw(pass,'main',craterLand,craterClouds);
+        for(const sec of loadedSections.values()){
+          if(!isSectionVisible(sec.region,camera,viewProjection))continue;
+          sec.craterGroup??=bind(craters.pipeline,sec.opaqueResources);
+          craters.draw(pass,`${sec.secX},${sec.secZ}`,sec.craterGroup,craterClouds);
+        }
       }
       // Opaque ground props have no cutout/depth reconstruction and no cloud
       // ray march per blade. They remain in Apple's opaque visibility path.

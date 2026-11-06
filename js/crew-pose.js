@@ -13,7 +13,7 @@ const poseUnit=a=>{const n=Math.hypot(...a);return a.map(v=>v/Math.max(n,1e-9));
 const poseCross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
 const posePosition=m=>Array.from(m.subarray(12,15));
 const poseNodeIndex=(a,name)=>a.nodeIndex?a.nodeIndex(name):a.names.indexOf(name);
-function poseRotation(m){
+export function poseRotation(m){
   const scale=Math.hypot(m[0],m[1],m[2]),r=[m[0],m[4],m[8],m[1],m[5],m[9],m[2],m[6],m[10]].map(v=>v/scale);
   const trace=r[0]+r[4]+r[8];let q;
   if(trace>0){const s=Math.sqrt(trace+1)*2;q=[(r[7]-r[5])/s,(r[2]-r[6])/s,(r[3]-r[1])/s,s/4];}
@@ -21,7 +21,7 @@ function poseRotation(m){
     const s=Math.sqrt(1+r[i*3+i]-r[j*3+j]-r[k*3+k])*2;q=[0,0,0,0];q[i]=s/4;q[j]=(r[i*3+j]+r[j*3+i])/s;q[k]=(r[i*3+k]+r[k*3+i])/s;q[3]=(r[k*3+j]-r[j*3+k])/s;}
   return q;
 }
-function turnBone(a,node,from,to){
+export function turnBone(a,node,from,to){
   const u=poseUnit(from),v=poseUnit(to),dot=poseDot(u,v);
   let delta=dot<-.9999?[...poseUnit(poseCross(u,Math.abs(u[0])<.8?[1,0,0]:[0,1,0])),0]:[...poseCross(u,v),1+dot];
   const n=Math.hypot(...delta);delta=delta.map(x=>x/Math.max(n,1e-9));
@@ -47,7 +47,7 @@ function actorLocal(p,s){
   const x=c*dx-sn*dz,z=sn*dx+c*dz,pitch=s.climbPitch??0,cp=Math.cos(pitch),sp=Math.sin(pitch);
   return [x/s.scale[0],(cp*dy+sp*z)/s.scale[1],(-sp*dy+cp*z)/s.scale[2]];
 }
-function poseMoveBone(a,node,target){
+export function poseMoveBone(a,node,target){
   const at=posePosition(a.world[node]),delta=poseSub(target,at),parent=a.parent[node];
   if(parent<0)a.pose[node].t.set(a.pose[node].t.map((v,i)=>v+delta[i]));
   else{

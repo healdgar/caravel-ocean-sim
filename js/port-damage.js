@@ -3,7 +3,8 @@
 // standing, and the hits it took (js/building-fracture.js replays them to put every stone back where it fell).
 // A town rebuilds what was shot down: a building comes back whole once it has gone long enough unshot.
 // The career save holds every port. A share link holds the one in view, as much as fits.
-// Trees shot down on a coast are kept here too, a list per coast. Nothing regrows them, so they stay down.
+// The ground has its record here too: nobody rebuilds a crater, so it stays until the save does.
+// So do trees shot down, a list per coast. Nothing regrows them.
 import { encodeBuildingEvent } from './building-fracture.js';
 import { reviveGarrisonSoldiers } from './crew.js';
 import { classifyBuildingMaterial, createBuildingDamageState } from './gunnery-control.js';
@@ -13,6 +14,9 @@ const PORT_DAY_MS = 86400000;
 const REBUILD_DAYS = Object.freeze({ timber: 30, masonry: 60, 'fortified-stone': 90 });
 const REBUILD_MINIMUM_DAYS = 7;
 const LINK_LIMIT = 9000;
+// Craters by coast, under a key no port can have. Six numbers each, largest first (js/land-craters.js).
+const GROUND_KEY = '@ground';
+const LINK_GROUND_NUMBERS = 6 * 60;
 const DAMAGE_FLAGS = ['damageCollapseBaked', 'breachCollapseBaked', 'ruinCollapseBaked', 'magazineHit', 'magazineExploded', 'silenced'];
 
 const FOREST_RECORD_PREFIX = 'forest:';
@@ -84,6 +88,7 @@ function applyBuildingDamageRecord(building, record) {
 export function createPortDamageStore(saved = null, { dateMs = null } = {}) {
   let ports = saved && typeof saved === 'object' && !Array.isArray(saved) ? { ...saved } : {};
   let clock = () => dateMs;
+  let groundInView = null;
   const today = () => { const value = clock(); return Number.isFinite(value) ? value : null; };
   const overdue = (lastHit, damageLike) => {
     const date = today();
@@ -122,6 +127,9 @@ export function createPortDamageStore(saved = null, { dateMs = null } = {}) {
       if (!Object.keys(records).length) delete ports[key];
       return restored;
     },
+    // The craters a coast has when it comes into being. Nothing fills them in: no one in the game mends a field.
+    openGround(coast) { groundInView = coast; return ports[GROUND_KEY]?.[coast] ?? null; },
+    setGround(coast, craters) { if (craters?.length) (ports[GROUND_KEY] ??= {})[coast] = craters; },
     noteHit(damage) { damage.lastHitDateMs = today(); },
     // What js/forest-trunks.js saved of this coast's trees, or null.
     forestStrikes(coast) { return ports[FOREST_RECORD_PREFIX + coast]?.trees ?? null; },
@@ -155,17 +163,19 @@ export function createPortDamageStore(saved = null, { dateMs = null } = {}) {
     },
     // The port in view, for a share link, which is short of room: the most damaged buildings it can fit.
     forLink(port, coast = null) {
-      if (port) capture(port);
-      const records = port ? ports[portKeyOf(port)] : null, out = {};
-      const fitted = {};
+      const link = {};
       let room = LINK_LIMIT;
-      for (const [name, record] of Object.entries(records ?? {}).sort((a, b) => a[1].i - b[1].i)) {
-        const size = JSON.stringify(record).length + name.length;
-        if (size > room) continue;
-        fitted[name] = record;
-        room -= size;
+      if (port) {
+        capture(port);
+        const fitted = {};
+        for (const [name, record] of Object.entries(ports[portKeyOf(port)] ?? {}).sort((a, b) => a[1].i - b[1].i)) {
+          const size = JSON.stringify(record).length + name.length;
+          if (size > room) continue;
+          fitted[name] = record;
+          room -= size;
+        }
+        if (Object.keys(fitted).length) link[portKeyOf(port)] = fitted;
       }
-      if (Object.keys(fitted).length) out[portKeyOf(port)] = fitted;
       // Then as many of this coast's fallen and wounded trees as still fit, the worst first.
       const trees = coast === null ? null : ports[FOREST_RECORD_PREFIX + coast]?.trees;
       if (trees?.length) {
@@ -176,9 +186,12 @@ export function createPortDamageStore(saved = null, { dateMs = null } = {}) {
           kept.push(tree);
           room -= size;
         }
-        if (kept.length) out[FOREST_RECORD_PREFIX + coast] = { trees: kept };
+        if (kept.length) link[FOREST_RECORD_PREFIX + coast] = { trees: kept };
       }
-      return Object.keys(out).length ? out : undefined;
+      // And its largest craters.
+      const craters = ports[GROUND_KEY]?.[groundInView];
+      if (craters?.length) link[GROUND_KEY] = { [groundInView]: craters.slice(0, LINK_GROUND_NUMBERS) };
+      return Object.keys(link).length ? link : undefined;
     },
   };
 }

@@ -9,6 +9,8 @@ export const ENV_MIPS = 9;
 // Battle damage a hull's uniform buffer holds. See hull-flood.js.
 export const HULL_HOLE_LIMIT = 24;
 export const HULL_CRATER_LIMIT = 127;
+// The frame's clock, Frame.camPos.w, starts again after this many seconds: the spectrum's time loop.
+export const SIM_CLOCK_LOOP_S = 600;
 
 // Per-frame uniform block shared by every render / sky shader.
 // Layout must match the Float32Array offsets in main.js (FR_* constants).

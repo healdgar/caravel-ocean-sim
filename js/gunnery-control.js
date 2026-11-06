@@ -15,6 +15,7 @@ import { locatePartAtLocalPoint, isSuperstructurePartId, computeArchetypeScaleSp
 import { shipMastSpecs, traceShotPastGap, fracturePartsGone } from './ship-fracture.js';
 import { buildingReach, traceShotAtBuilding } from './building-fracture.js';
 import { FOREST_LONG_FALLEN, buildForestTrunkGrid, foreshorePalmPlacement, forestTrunkShape, sweepForestTrunks } from './forest-trunks.js';
+import { landCraterSize } from './land-craters.js';
 import { createFortGarrison, stepFortGarrison } from './crew.js';
 import { DEFAULT_SHIP_COLORS, strikeVesselColors } from './ship-colors.js';
 
@@ -3881,7 +3882,7 @@ export function applyTerrainImpactDamage(terrain, event) {
   const energy = event.energy ?? (0.5 * mass * speed * speed);
   const pos = event.surfacePosition ?? event.position ?? [0, 0, 0];
   const normal = event.normal ?? [0, 1, 0];
-  const craterRadius = +(0.35 * Math.cbrt(mass / 5.4) * Math.max(0.7, Math.cbrt(energy / 120000))).toFixed(2);
+  const craterRadius = +landCraterSize(energy).radius.toFixed(2);
   const record = {
     position: [...pos],
     normal,
@@ -3893,19 +3894,9 @@ export function applyTerrainImpactDamage(terrain, event) {
   if (terrain.landImpacts.length >= 64) terrain.landImpacts.shift();
   terrain.landImpacts.push(record);
 
-  terrain.pendingLandBakes ??= [];
-  terrain.pendingLandBakes.push({
-    kind: 'terrain-crater',
-    x: +pos[0].toFixed(3),
-    y: +pos[1].toFixed(3),
-    z: +pos[2].toFixed(3),
-    nx: +(normal[0] ?? 0).toFixed(3),
-    ny: +(normal[1] ?? 1).toFixed(3),
-    nz: +(normal[2] ?? 0).toFixed(3),
-    radius: +(Math.max(2.5, craterRadius * 3.5)).toFixed(3),
-    stepDepth: +(Math.min(0.85, Math.max(0.25, craterRadius * 0.65))).toFixed(3),
-    severity: +(Math.min(1.35, Math.max(0.45, craterRadius * 0.95))).toFixed(3),
-  });
+  const sand = terrain.sandAt?.(pos[0], pos[2]) ?? 0;
+  terrain.pendingCraters ??= [];
+  terrain.pendingCraters.push({ x: pos[0], z: pos[2], energyJ: energy, velocity: vel, normal, sand });
 
   // Also blast/char any coastal palm trees standing right next to the terrain crater
   const ports = terrain.ports ?? (terrain.port ? [terrain.port] : null);
@@ -3957,6 +3948,7 @@ export function applyTerrainImpactDamage(terrain, event) {
     craterRadius,
     elevation: record.elevation,
     energyKj: record.energyKj,
+    sand,
   };
 }
 
@@ -4011,6 +4003,8 @@ export function createGunnerySolidSweep({ sourceBoat, sourceBuilding = null, get
       if (!arrow && projectile) {
         const land = getTerrain?.(), shores = land?.ports ?? (land?.port ? [land.port] : null);
         for (const port of shores ?? []) {
+          // The people in its streets see it go by. What it does to them is worked out on the GPU.
+          port?.townsfolkWatch?.(from, to, best, projectile);
           const soldiers = port?.garrison?.soldiers;
           if (!soldiers?.length) continue;
           const reach = 400 + Math.hypot(to[0] - from[0], to[2] - from[2]), mx = (from[0] + to[0]) * 0.5, mz = (from[2] + to[2]) * 0.5;

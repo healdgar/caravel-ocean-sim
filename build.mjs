@@ -59,7 +59,7 @@ order.splice(order.indexOf('js/wgsl/vessel-pose.js'),0,'js/wgsl/vessel-recoil.js
 wgslModules.push('js/wgsl/part-assembly.js');
 // Shaders read these constants as they are built, so they come first, after the fort plan the streets import.
 order.unshift('js/fort-plan.js','js/town-streets.js','js/indigenous-dress.js');
-order.splice(order.indexOf('js/main.js'),0,'js/wgsl/townsfolk.js','js/townsfolk.js','js/wgsl/props.js','js/props.js','js/free-cannon.js');
+order.splice(order.indexOf('js/main.js'),0,'js/wgsl/townsfolk.js','js/town-clips.js','js/town-shots.js','js/townsfolk.js','js/wgsl/props.js','js/props.js','js/free-cannon.js');
 order.splice(order.indexOf('js/coastal-world.js'),0,'js/port-props.js');
 wgslModules.push('js/wgsl/ship-fracture.js');
 order.splice(order.indexOf('js/wgsl/vessel-pose.js')+1,0,'js/wgsl/part-assembly.js');
@@ -68,6 +68,9 @@ order.splice(order.indexOf('js/boat.js'),0,'js/ship-part-taxonomy.js');
 order.splice(order.indexOf('js/ship-parts.js'),0,'js/part-assembly.js');
 order.splice(order.indexOf('js/ship-parts.js'),0,'js/ship-fracture.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/building-fracture.js');
+order.splice(order.indexOf('js/terrain.js'),0,'js/land-craters.js');
+order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/wgsl/land-craters.js');
+wgslModules.push('js/wgsl/land-craters.js');
 order.splice(order.indexOf('js/main.js'),0,'js/port-damage.js');
 order.splice(order.indexOf('js/ship-mesh.js'),0,'js/rig-gpu-data.js');
 order.splice(order.indexOf('js/vessel-pose.js'),0,'js/vessel-recoil.js');

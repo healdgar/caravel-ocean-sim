@@ -99,7 +99,7 @@ import { ORBIT_LIMIT, orbitElevation, orbitDistance, panOrbit, placeOrbitCamera 
 // FFT ocean (6 cascades) + CDLOD surface mesh + physically based sky + HDR post.
 // All per-frame data lives in preallocated typed arrays / descriptors (no per-frame garbage
 // apart from the unavoidable swap-chain view and command buffer objects).
-import { N, CASCADES, SKY_W, SKY_H, ENV_SIZE, ENV_MIPS } from './wgsl/common.js';
+import { N, CASCADES, SKY_W, SKY_H, ENV_SIZE, ENV_MIPS, SIM_CLOCK_LOOP_S } from './wgsl/common.js';
 import { SIM_INIT, FFT_ROWS, FFT_COLS, SIM_MIPS, FOAM_TEX, RGBA8_MIPS, SCENE_FOAM_UPDATE, ARRAY16_MIPS, FOAM_RES } from './wgsl/sim.js';
 import { TRANS_LUT, MS_LUT, SKYVIEW_LUT, ENV_CUBE, CUBE_MIPS, SUN_VIS } from './wgsl/sky.js';
 import { SKY_BG, SCENE_HEIGHT_PROBE, createOpticalOcean,withFleetHullCount } from './wgsl/ocean.js';
@@ -963,7 +963,7 @@ async function main() {
   const frameF = new Float32Array(CELESTIAL_FRAME_FLOATS);
   const atmoF = new Float32Array(4);
   const proj = new Float32Array(16), view = new Float32Array(16), viewProj = new Float32Array(16);
-  const LOOP = 600.0;  // s, spectrum time loop (frequencies quantised to it)
+  const LOOP = SIM_CLOCK_LOOP_S;  // s, spectrum time loop (frequencies quantised to it)
   let needSpectrum = true, envFull = true;
   // Chart Course voyage (covert time warp); created once the dock/UI exists.
   let careerPort = null, voyageCtl = null, chartDrawer = null, propulsionInput = null, sailInputs = [], speedRow = null, sailControls = null, note = null, helm = null;
@@ -3837,7 +3837,6 @@ async function main() {
     fortSoldiers?.update(terrain?.port??null,dt,P.windSpeed,cam,!portGunnery);
     townsfolk?.follow(terrain?.ports,cam);
     props?.follow(terrain?.ports,cam);
-    townsfolk?.setUnderFire((portGunnery?.projectiles?.length??0)+freeCannon.state.projectiles.length>0,dt);
     terrain?.updatePortDamage?.(simTime);
     const activeVesselCount=followerEnabled?vessels.length:1;
     allProjectiles.length=0;
