@@ -121,7 +121,7 @@ export function rowingStationPose(boat,stationId,{phase,time=0,sampleWater}={}){
   }
   const footZ=seat[2]+(station.kind==='oar'?.58:-.46),floorDesign=rowingDeck(d.id,footZ/scale[2]),floor=floorDesign*scale[1];
   const footEdge=Math.max(.02,rowingHullWidth(d.id,footZ/scale[2],floorDesign)*scale[0]-d.shellThicknessMetres);
-  const footX=rowingClamp(seat[0],-Math.max(0,footEdge-.12),Math.max(0,footEdge-.12));
+  const footInset=spec.footInset??.12,footX=rowingClamp(seat[0],-Math.max(0,footEdge-footInset),Math.max(0,footEdge-footInset));
   // Arrays are anatomical left/right. Oar actors face +Z (left is +X), while
   // forward-facing paddlers use yaw pi (left is -X), on either side of the hull.
   const footSide=station.kind==='oar'?1:-1;
@@ -137,10 +137,12 @@ export function rowingSteeringPose(boat,{time=0,sampleWater}={}){
   const angle=rowingClamp((boat.rudder??0)*Math.PI/180,-.65,.65),c=Math.cos(angle),s=Math.sin(angle);
   const turn=p=>{const q=rowingSub(p,pivot);return [pivot[0]+c*q[0]+s*q[2],p[1],pivot[2]-s*q[0]+c*q[2]];};
   const vector=p=>[c*p[0]+s*p[2],p[1],-s*p[0]+c*p[2]],handle=turn(spec.handle.map((v,i)=>v*scale[i])),centre=turn(spec.blade.map((v,i)=>v*scale[i]));
-  const along=vector(rowingUnit([0,-1,.2])),normal=vector([1,0,0]),across=rowingUnit(rowingCross(normal,along));
+  // A hanging oar's blade lies in line with its shaft below the pivot, and the grip is on the tiller bar.
+  const hanging=spec.hangsFromPivot,along=hanging?rowingUnit(rowingSub(centre,pivot)):vector(rowingUnit([0,-1,.2])),side=vector([1,0,0]);
+  const across=rowingUnit(rowingCross(side,along)),normal=hanging?rowingUnit(rowingCross(along,across)):side;
   return rowingPoseFinish(boat,d,{stationId:'helm',side:1,drive:false,effort:0,shaftA:handle,shaftB:rowingAdd(centre,rowingMul(along,spec.bladeLength*.45)),
     bladeCentre:centre,bladeAlong:along,bladeAcross:across,bladeNormal:normal,bladeVelocity:[0,0,0],bladeLength:spec.bladeLength,bladeWidth:spec.bladeWidth,
-    hands:[handle,rowingAdd(handle,rowingMul(rowingUnit(rowingSub(centre,handle)),.14))]}, {time,sampleWater});
+    hands:[handle,rowingAdd(handle,rowingMul(rowingUnit(rowingSub(hanging?pivot:centre,handle)),.14))]}, {time,sampleWater});
 }
 
 // Water samples are world-space {height,velocity:[vx,vy,vz]} (or height alone).

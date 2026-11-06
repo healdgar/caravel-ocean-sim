@@ -325,7 +325,7 @@ test('a hand left at an open edge moves in on extended crews too, and a rower st
 });
 
 test('a low rail that has lost nothing is still her rail, once something else has gone', () => {
-  const boat = ship('oseberg');
+  const boat = ship('lusoria');
   assert.ok(crewRailAboveDeck(boat, 0) < 0.5, 'she is built low');
   openRail(boat, 1, -4, -2);
   assert.ok(boat.damage.fracture.brokenCount > 0);

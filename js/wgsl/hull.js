@@ -6,6 +6,7 @@ const victoryHullNX=VICTORY_DESIGN.hull.stations.length,victoryHullNY=VICTORY_DE
 const proceduralDeckWGSL=d=>Number.isFinite(d.floorHeight)?`var y=${d.floorHeight};`:
   `var y=${d.profile.deck};`+(d.deckZones??[]).map(zone=>`if(z>=${zone.bounds[0]}&&z<=${zone.bounds[1]}){y=max(y,${zone.height});}`).join('')+
   (d.cockpit?`if(z>${d.cockpit.bounds[0]}&&z<${d.cockpit.bounds[1]}&&abs(x)<${d.cockpit.halfWidth}){y=${d.cockpit.floorHeight};}`:'');
+const railRiseWGSL=d=>d.profile.railRise?`+additionalHull${d.modelCode}Rise(z)`:'';
 const proceduralKeelWGSL=d=>{
   const k=d.keel;if(!k)return 'return 0.0;';
   if(k.kind!=='profiled-ballast-fin')return `let bottom=${d.profile.levels[0]}+additionalHull${d.modelCode}Sheer(z);if(z>=${k.bounds[0]}&&z<=${k.bounds[1]}&&y>=bottom-${k.depth}&&y<=bottom){return ${k.width*.5};}return 0.0;`;
@@ -85,7 +86,7 @@ fn hullExcludesOcean(local:vec3f)->bool {
 fn shipY(value:f32)->f32 {return select(HULL_Y_SCALE,value,value>0.0);}
 fn victorySheer(z:f32)->f32 {return .085*pow(abs(z)/6.0,2.0)+.075*pow(max(0.0,-z/6.0),4.0);}
 fn modelHullDeck(z:f32,model:f32)->f32 {
- if(model>=1.5){switch u32(round(model)){${additionalHullCases(d=>`return ${d.profile.deck}+additionalHull${d.modelCode}Sheer(z);`)}default:{return -1000000.0;}}}
+ if(model>=1.5){switch u32(round(model)){${additionalHullCases(d=>`return ${d.profile.deck}+additionalHull${d.modelCode}Sheer(z)${railRiseWGSL(d)};`)}default:{return -1000000.0;}}}
  if(model>.5){return ${VICTORY_DESIGN.decks.main}+victorySheer(z);}return hullDeck(z);
 }
 fn modelHullDraft(model:f32)->f32 {
@@ -125,7 +126,7 @@ fn modelKeelHalfWidth(z:f32,y:f32,model:f32)->f32 {
 // Open quarterdeck rails have an authored low sill; this is a visual boundary,
 // not a collision model of each gap between rail posts.
 fn modelDeckBarrierAt(z:f32,x:f32,model:f32)->f32 {
-  if(model>=1.5){switch u32(round(model)){${additionalHullCases(d=>Number.isFinite(d.floorHeight)?`return ${d.profile.deck-d.floorHeight};`:
+  if(model>=1.5){switch u32(round(model)){${additionalHullCases(d=>Number.isFinite(d.floorHeight)?`return ${d.profile.deck-d.floorHeight}${railRiseWGSL(d)};`:
     (d.cockpit?`if(z>${d.cockpit.bounds[0]}&&z<${d.cockpit.bounds[1]}&&abs(x)<${d.cockpit.halfWidth}){return ${d.cockpit.coamingHeight-d.cockpit.floorHeight};}`:'')+`return ${d.barrier??0};`)}default:{return 0.0;}}}
   if(model>.5){
     if(z>${VICTORY_DESIGN.decks.forecastle.end}&&z<${VICTORY_DESIGN.decks.quarter.start}){return ${1.605-VICTORY_DESIGN.decks.main};}
