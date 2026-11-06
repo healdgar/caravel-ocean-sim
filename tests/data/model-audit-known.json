@@ -1,6 +1,7 @@
 {
- "building.pieces-air-turned/stone_quay_seawall": 46.25,
- "building.pieces-air-turned/stone_sea_bastion": 8.02,
+ "building.pieces-air-turned/bastion_trace_fortress": 7.32,
+ "building.pieces-air-turned/stone_quay_seawall": 7.5,
+ "building.pieces-air-turned/stone_sea_bastion": 7.29,
  "collision.air-hull/flying-cloud": 5.3,
  "collision.air-hull/oseberg": 8.2,
  "collision.air-hull/pinta": 2.3,
