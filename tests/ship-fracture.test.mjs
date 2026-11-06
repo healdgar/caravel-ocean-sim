@@ -528,3 +528,39 @@ test('every ship answers for her gaps and her rail, masts or none', () => {
     }
   }
 });
+
+test('a section falls from where it stood, at each break, raked mast or not', () => {
+  for (const id of ['nina', 'santa-maria', 'flying-cloud', 'victory']) {
+    for (const stage of ['topmast', 'full']) {
+      const boat = designedShip(id), f = cache.get(id).fracture, mast = f.masts.main, cut = stage === 'topmast' ? mast.topCut : mast.fullCut;
+      const number = shipMastSpecs(id).findIndex((m) => m[0] === 'main') + 1, asset = cache.get(id);
+      // Where her spar really is at this break, read from its triangles and not from the table.
+      let sum = 0, count = 0;
+      for (let t = 0; t < f.sparMasts.length; t++) {
+        if (f.sparMasts[t] !== number) continue;
+        for (let k = 0; k < 3; k++) {
+          const at = asset.indices[t * 3 + k] * 9;
+          if (Math.abs(asset.vertices[at]) < 0.3 && Math.abs(asset.vertices[at + 1] - cut) < 0.3) { sum += asset.vertices[at + 2]; count++; }
+        }
+      }
+      assert.ok(count > 0, `${id} has a spar at its ${stage} break`);
+      const foot = [0, cut, sum / count];
+      applyFractureEvents(f, boat.damage, [{ kind: 'mast-break', mastGroup: 'main', stage, side: 1 }], 0);
+      const record = recordOf(boat.damage.fracture, stage === 'topmast' ? mast.upper[0] : mast.lower[0]);
+      // Through the whole of its lean the foot stays at the break: it turns about it.
+      const moved = evaluateShardFlight(record, record[3] + record[12], foot, f.scale);
+      const metres = Math.hypot(...moved.map((v, c) => (v - foot[c]) * f.scale[c]));
+      assert.ok(metres < 0.2, `${id} ${stage}: its foot wandered ${metres.toFixed(2)} m while it leaned`);
+    }
+  }
+});
+
+test('a shot at a mast hurts that mast, wherever along her it stands', () => {
+  for (const id of ['nina', 'santa-maria', 'victory']) {
+    const boat = designedShip(id), [, sy, sz] = cache.get(id).fracture.scale;
+    for (const [mastId, z, topCut] of shipMastSpecs(id)) {
+      const hit = beamShot(boat, (topCut - 0.3) * sy, z * sz);
+      assert.equal(hit?.mastGroup, mastId, `${id}: a shot at her ${mastId} at ${(z * sz).toFixed(1)} m`);
+    }
+  }
+});

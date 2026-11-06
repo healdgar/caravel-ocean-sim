@@ -33,6 +33,8 @@ const SCENES={
   // Shots at her hull with the leaks left open, pictured as she takes on water.
   'nina-flood':{ship:'nina',settle:500,leaking:true,frames:[3000,4000,5000,6000],volleys:[{shots:16,mass:1.4,speed:330,minY:.8,maxY:4}],views:[{name:'flood',yaw:20,elevation:8,distance:34}]},
   'victory-flood':{ship:'victory',settle:500,leaking:true,frames:[8000,10000,12000,14000],volleys:[{shots:50,mass:14.5,speed:430,minY:1,maxY:8}],views:[{name:'flood',yaw:20,elevation:6,distance:70}]},
+  // A raked mast, so the break stands well along her from the mast's foot. Only the topmast goes.
+  'cloud-fall':{ship:'flying-cloud',settle:300,frames:[800,1200,1500,2500],volleys:[{shots:60,mass:14.5,speed:430,minY:30,maxY:40,mast:'main',untilStage:1}],views:[{name:'fall',yaw:-20,elevation:6,distance:80}]},
   'nina-fall':{ship:'nina',settle:300,frames:[600,800,1000,2000],volleys:[{shots:60,mass:1.4,speed:330,minY:6,maxY:9,mast:'mizzen'}],views:[{name:'fall',yaw:20,elevation:8,distance:34}]},
   // Hands on the mast when it goes: rung counts from the deck, so these land in different places.
   'nina-aloft':{ship:'nina',settle:300,frames:[300,500,800,1500,3000],aloft:[{mast:1,side:-1,rung:24},{mast:1,side:-1,rung:12},{mast:1,side:1,rung:3}],volleys:[{shots:60,mass:1.4,speed:330,minY:6,maxY:9,mast:'main'}],views:[{name:'fall',yaw:20,elevation:8,distance:34}]},

@@ -26,9 +26,9 @@ export async function fireBroadside({volleys,aloft=[],leaking=false}){
   const events=[],priorEvents=boat.crewEvents;
   boat.crewEvents=e=>{events.push(e.type+':'+(e.sailor?.id??''));priorEvents?.(e);};
   window.damageReviewHands=()=>sent.map((s,i)=>({id:s.id,startedAt:heights[i],y:+s.position[1].toFixed(1),state:s.casualtyState,job:s.job?.kind??null,falling:Boolean(s.aloftFall),overboard:s.overboard?{cause:s.overboard.cause,inWater:s.overboard.inWater,alive:s.overboard.alive}:null,wounds:s.crewInjuries?.map(w=>w.kind+':'+w.bone)??[]})).concat({events});
-  for(const {shots,mass,speed,minY,maxY,mast}of volleys){
+  for(const {shots,mass,speed,minY,maxY,mast,untilStage}of volleys){
     for(let i=0;i<shots;i++){
-      if(boat.damage?.sunk||(mast&&(boat.damage?.mastState?.[mast]??0)>=2))break;
+      if(boat.damage?.sunk||(mast&&(boat.damage?.mastState?.[mast]??0)>=(untilStage??2)))break;
       const y=minY+rnd()*(maxY-minY),h=boat.heave??0,v=[-across[0]*speed,-2,-across[2]*speed];
       if(mast){
         // Shots at one mast only, so the others stand for comparison.
