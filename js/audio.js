@@ -29,7 +29,7 @@ export function createSceneAudio({onStatus=()=>{}}={}){
     const dx=position.x-listener.x,dz=position.z-listener.z,d=Math.hypot(dx,dz);
     pan.pan.value=weatherClamp((dx*listener.rx+dz*listener.rz)/Math.max(d,1),-1,1)*.85;
     const range=Math.hypot(dx,(position.y??position.heave??0)-listener.y,dz);
-    level.gain.value=weatherClamp(gain,0,1)*(spatial?1/(1+Math.max(0,range-8)/24):1);
+    level.gain.value=weatherClamp(gain,0,1)*(spatial?1/(1+Math.max(0,range-8)/(options.reach??24)):1);
     const filters=[];let tail=source;
     for(const[type,hz]of[['highpass',options.highpassHz],['lowpass',options.lowpassHz]])if(Number.isFinite(hz)){
       const filter=context.createBiquadFilter();filter.type=type;filter.frequency.value=hz;filter.Q.value=.6;tail.connect(filter);tail=filter;filters.push(filter);
