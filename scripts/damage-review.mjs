@@ -29,6 +29,9 @@ const SCENES={
   ]},
   // One mast shot away, pictured as it goes.
   'victory-fall':{ship:'victory',settle:300,frames:[1000,1500,1500,2500],volleys:[{shots:60,mass:14.5,speed:430,minY:24,maxY:34,mast:'main'}],views:[{name:'fall',yaw:-20,elevation:6,distance:62}]},
+  // Shots at her hull with the leaks left open, pictured as she takes on water.
+  'nina-flood':{ship:'nina',settle:500,leaking:true,frames:[3000,4000,5000,6000],volleys:[{shots:16,mass:1.4,speed:330,minY:.8,maxY:4}],views:[{name:'flood',yaw:20,elevation:8,distance:34}]},
+  'victory-flood':{ship:'victory',settle:500,leaking:true,frames:[8000,10000,12000,14000],volleys:[{shots:50,mass:14.5,speed:430,minY:1,maxY:8}],views:[{name:'flood',yaw:20,elevation:6,distance:70}]},
   'nina-fall':{ship:'nina',settle:300,frames:[600,800,1000,2000],volleys:[{shots:60,mass:1.4,speed:330,minY:6,maxY:9,mast:'mizzen'}],views:[{name:'fall',yaw:20,elevation:8,distance:34}]},
 };
 await mkdir(outDir,{recursive:true});
@@ -49,13 +52,14 @@ for(const name of ships){
   // The picture is of the ship, not the panels over her.
   await page.addStyleTag({content:'body *{visibility:hidden!important}canvas{visibility:visible!important}'});
   await page.screenshot({path:join(outDir,`${name}-${label}-0-intact.png`)});
-  const report=await page.evaluate(fireBroadside,{volleys:scene.volleys});
+  const report=await page.evaluate(fireBroadside,{volleys:scene.volleys,leaking:scene.leaking});
   await page.evaluate(()=>[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Arcs')?.click());
   console.log(name,JSON.stringify(report));
   await page.waitForTimeout(Number(process.env.SETTLE_MS??scene.settle));
   let at=first,frame=0;
   for(const wait of scene.frames??[]){
     await page.screenshot({path:join(outDir,`${name}-${label}-frame${frame++}.png`)});
+    console.log(name,'water:',JSON.stringify(await page.evaluate(()=>{const b=oceanFleet.vessels[0].boat,d=b.damage;return {tonnes:+d.floodingTonnes.toFixed(1),sinkageM:+d.floodingSinkage.toFixed(2),rollDeg:+(d.floodingRoll*57.3).toFixed(1),pitchDeg:+(d.floodingPitch*57.3).toFixed(1),holes:d.holes?.length??0,sunk:d.sunk};})));
     await page.waitForTimeout(wait);
   }
   for(const v of scene.views){
