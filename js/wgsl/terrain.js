@@ -2,6 +2,7 @@ import { FRAME_WGSL, ATMO_CORE_WGSL } from './common.js';
 import { SKY_RENDER_FUNCS } from './sky.js';
 import { CLOUD_SAMPLE } from './clouds.js';
 import { STREET_FIELD_RANGE_M, STREET_FIELD_EDGE_M } from '../town-streets.js';
+import { LAND_CRATER_RENDER } from './land-craters.js';
 
 // Procedurals need their sampling rate in material coordinates, just as image
 // textures need mip/anisotropic footprints. See pbr-book.org/4ed/Textures_and_Materials/Texture_Sampling_and_Antialiasing.
@@ -682,7 +683,10 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibility:f32
   }
   return vec4f(col,1.0);
 }
-fn landOpaque(in:LandVertex)->vec4f{
+// What a crater does to ground it lies on. Plain ground has no cover to mix, so it never reads the rest.
+struct LandPit{normal:vec3f,cover:f32,soil:vec3f,relief:f32,sun:f32,sky:f32,pool:f32,damp:f32,sand:f32};
+fn landOpaque(in:LandVertex)->vec4f{return landSurface(in,LandPit(vec3f(0.0),-1.0,vec3f(0.0),0.0,1.0,1.0,0.0,1.0,0.0));}
+fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
   let world=in.world;
   let rawNLen=length(in.normal);
   let structDmg=clamp(rawNLen-1.0,0.0,1.5);
@@ -1073,6 +1077,17 @@ fn landOpaque(in:LandVertex)->vec4f{
       roughness=max(roughness,0.93);
     }
   }
+  if(pit.cover>=0.0){
+    // Under turf it is dark earth. Where the ground is bare it is more of itself, damp from below.
+    let bare=max(pit.sand,1.0-smoothstep(-.12,-.04,(albedo.g-max(albedo.r,albedo.b))/max(max(albedo.r,max(albedo.g,albedo.b)),.02)));
+    albedo=mix(albedo,mix(mix(pit.soil,albedo*pit.damp,bare),vec3f(.022,.036,.04),pit.pool),pit.cover);
+    relief=mix(relief,pit.relief*(1.0-.6*bare),pit.cover);
+    roughness=mix(roughness,mix(.97,.05,pit.pool),pit.cover);
+    canopyBackscatter*=1.0-pit.cover;
+    surfaceWet=mix(surfaceWet,pit.pool*.96,pit.cover);
+    ambientVisibility*=pit.sky;
+    n=pit.normal;
+  }
   let reliefX=dpdx(relief);let reliefY=dpdy(relief);
   n=landFilteredBump(n,dx,dy,reliefX,reliefY);
   let tidePulse=0.75+0.25*sin(F.camPos.w*0.7+world.x*0.02);
@@ -1080,7 +1095,7 @@ fn landOpaque(in:LandVertex)->vec4f{
   let wet=select(clamp(max(shoreWet,surfaceWet),0.0,0.96),surfaceWet-shoreWet*0.14,surfaceWet<-0.01);
   roughness=mix(roughness,min(roughness,0.24),shoreWet*0.65);
   let nDotL=dot(n,F.sunDir.xyz);
-  let diffuse=max(nDotL,0.0)+max(-nDotL,0.0)*canopyBackscatter;
+  let diffuse=(max(nDotL,0.0)+max(-nDotL,0.0)*canopyBackscatter)*pit.sun;
   return landFinish(world,n,albedo,diffuse,ambientVisibility,wet,roughness);
 }
 @fragment fn fs(in:LandVertex,@builtin(front_facing) front:bool)->@location(0) vec4f{return landOpaque(in);}
@@ -1130,6 +1145,7 @@ fn landOpaque(in:LandVertex)->vec4f{
   let color=landFinish(world,n,albedo,diffuse,ambientVisibility,0.0,0.92);
   return vec4f(color.rgb,leaf.a);
 }
+`+LAND_CRATER_RENDER+/* wgsl */ `
 // Imported canopy streams already contain absolute Y-up world positions and
 // source linear material factors. Do not run treeVS's root/scale/yaw/sway again.
 struct CanopyVertex {

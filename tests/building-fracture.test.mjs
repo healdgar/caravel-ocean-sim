@@ -200,11 +200,10 @@ test('a magazine blast throws everything near it outward', () => {
   assert.ok(outward > count * 0.8, `${outward} of ${count} go outward`);
 });
 
-test('shot on the land still marks the land, and never a building', () => {
+test('shot on the land moves neither the land mesh nor a building', () => {
   const stride = 8, vertices = new Float32Array([5, 3, 5, 0, 1, 0, 1.5, 0.8, 5, 3, 900, 0, 1, 0, 11.125, 0.8]);
-  const dirty = bakeLandImpactDeformations(vertices, [{ kind: 'terrain-crater', x: 5, y: 3, z: 5, radius: 4, stepDepth: 0.5, severity: 1 }], stride);
-  assert.ok(dirty && vertices[1] < 3, 'a crater dents the ground');
-  assert.equal(vertices[stride + 1], 3, 'outside its radius nothing moves');
+  assert.equal(bakeLandImpactDeformations(vertices, [{ kind: 'terrain-crater', x: 5, y: 3, z: 5, radius: 4, stepDepth: 0.5, severity: 1 }], stride), null, 'a crater is not cut in the 16 m mesh: see land-craters');
+  assert.equal(vertices[1], 3);
   const walls = new Float32Array([5, 3, 5, 0, 1, 0, 11.125, 0.8]);
   assert.equal(bakeLandImpactDeformations(walls, [{ kind: 'stone-crater', x: 5, y: 3, z: 5, radius: 4, stepDepth: 0.5, severity: 1 }], stride), null, 'a shot on stone is not this code');
   assert.equal(walls[1], 3);
