@@ -14,6 +14,7 @@ import { GROUNDING_SUBSTRATES, classifyGroundingSubstrate, setGroundingDamageHan
 import { locatePartAtLocalPoint, isSuperstructurePartId, computeArchetypeScaleSpec } from './part-assembly.js';
 import { shipMastSpecs, traceShotPastGap, fracturePartsGone } from './ship-fracture.js';
 import { buildingReach, traceShotAtBuilding } from './building-fracture.js';
+import { FOREST_LONG_FALLEN, buildForestTrunkGrid, foreshorePalmPlacement, forestTrunkShape, sweepForestTrunks } from './forest-trunks.js';
 import { createFortGarrison, stepFortGarrison } from './crew.js';
 import { DEFAULT_SHIP_COLORS, strikeVesselColors } from './ship-colors.js';
 
@@ -3652,6 +3653,19 @@ function intersectVerticalCylinder(from, to, cx, cz, yMin, yMax, cylRadius) {
   return tEnter;
 }
 
+const FORESHORE_PALMS_SHOOTABLE = 520, PALM_FELLED_AT = 3;
+function foreshorePalmGrid(port) {
+  if (port.palmGrid?.palms === port.palms) return port.palmGrid.grid;
+  const palms = port.palms, count = Math.min(palms.length / 8, FORESHORE_PALMS_SHOOTABLE), roots = new Float32Array(count * 12), basal = forestTrunkShape('palm')?.collarRadius ?? 0.3;
+  for (let i = 0; i < count; i++) {
+    const at = i * 8, shape = palms[at + 5], { scale, sink, yaw } = foreshorePalmPlacement(shape, -palms[at + 6], -palms[at + 7], basal);
+    roots.set([palms[at], palms[at + 1] - sink, palms[at + 2], scale, yaw, 1, 1, 1, 0, sink, -2, (port.damagedPalms?.[i] ?? 0) >= PALM_FELLED_AT ? FOREST_LONG_FALLEN : 0], i * 12);
+  }
+  const grid = buildForestTrunkGrid(roots, count, ['palm']);
+  port.palmGrid = { palms, grid };
+  return grid;
+}
+
 export function sweepScenerySegment(from, to, radius = 0.08, terrain, options = null) {
   if (!terrain) return null;
   const midX = (from[0] + to[0]) * 0.5;
@@ -3661,83 +3675,19 @@ export function sweepScenerySegment(from, to, radius = 0.08, terrain, options = 
   const segMaxY = Math.max(from[1], to[1]);
   let best = null;
 
-  const ports = terrain.ports ?? (terrain.port ? [terrain.port] : null);
-  if (ports) {
-    for (const port of ports) {
+  // A live forest draws every tree and foreshore palm, so its roots are what a ball meets.
+  const forest = terrain.forestTrunks;
+  if (forest) {
+    best = sweepForestTrunks(forest, from, to, radius);
+  } else {
+    // No forest drawn: the port's record of where its palms stand is all there is to hit.
+    const ports = terrain.ports ?? (terrain.port ? [terrain.port] : null);
+    for (const port of ports ?? []) {
       const palms = port?.palms;
-      if (!palms) continue;
-      if (palms instanceof Float32Array && palms.length >= 8) {
-        const portAnchorX = port.center?.x ?? port.berth?.x ?? palms[0] ?? 0;
-        const portAnchorZ = port.center?.z ?? port.berth?.z ?? palms[2] ?? 0;
-        if (Math.hypot(midX - portAnchorX, midZ - portAnchorZ) > 1800 + segHalf) continue;
-        const maxPalms = Math.min(palms.length / 8, 520);
-        for (let idx = 0; idx < maxPalms; idx++) {
-          if ((port.damagedPalms?.[idx] ?? 0) >= 3) continue;
-          const base = idx * 8;
-          const px = palms[base], py = palms[base + 1], pz = palms[base + 2];
-          const plumeR = Math.max(2.2, palms[base + 3] || 3.2);
-          const ht = Math.max(5.5, palms[base + 4] || 9.0);
-          if (segMaxY < py - 0.5 - radius || segMinY > py + ht + 2.5 + radius) continue;
-          const pdx = midX - px, pdz = midZ - pz;
-          const maxR = plumeR + 2.5 + radius + segHalf;
-          if (pdx * pdx + pdz * pdz > maxR * maxR) continue;
-          const tTrunk = intersectVerticalCylinder(from, to, px, pz, py - 0.4, py + ht * 0.85, 1.35 + radius);
-          const tCrown = intersectVerticalCylinder(from, to, px, pz, py + ht * 0.65, py + ht + 2.2, plumeR + radius);
-          let tHit = -1;
-          if (tTrunk >= 0 && tCrown >= 0) tHit = Math.min(tTrunk, tCrown);
-          else if (tTrunk >= 0) tHit = tTrunk;
-          else if (tCrown >= 0) tHit = tCrown;
-          if (tHit >= 0 && (!best || tHit < best.fraction)) {
-            const hx = from[0] + (to[0] - from[0]) * tHit;
-            const hz = from[2] + (to[2] - from[2]) * tHit;
-            const nx = hx - px, nz = hz - pz;
-            const nLen = Math.hypot(nx, 0.35, nz) || 1;
-            best = {
-              fraction: tHit,
-              kind: 'scenery',
-              sceneryType: 'palm',
-              port,
-              palmIndex: idx,
-              sceneryPos: [px, py, pz],
-              normal: [nx / nLen, 0.35 / nLen, nz / nLen],
-            };
-          }
-        }
-      } else if (Array.isArray(palms) && palms.length) {
-        const portAnchorX = port.center?.x ?? port.berth?.x ?? palms[0].x ?? 0;
-        const portAnchorZ = port.center?.z ?? port.berth?.z ?? palms[0].z ?? 0;
-        if (Math.hypot(midX - portAnchorX, midZ - portAnchorZ) > 1800 + segHalf) continue;
-        for (let i = 0; i < palms.length; i++) {
-          const palm = palms[i];
-          if (!palm || (palm.damaged ?? 0) >= 3) continue;
-          const s = palm.scale ?? 1;
-          const py = palm.y ?? 0;
-          if (segMaxY < py - 0.5 - radius || segMinY > py + 10.5 * s + radius) continue;
-          const pdx = midX - palm.x, pdz = midZ - palm.z;
-          const maxR = 3.5 * s + radius + segHalf;
-          if (pdx * pdx + pdz * pdz > maxR * maxR) continue;
-          const tTrunk = intersectVerticalCylinder(from, to, palm.x, palm.z, py - 0.4, py + 7.4 * s, 1.15 * s + radius);
-          const tCrown = intersectVerticalCylinder(from, to, palm.x, palm.z, py + 5.6 * s, py + 10.2 * s, 3.1 * s + radius);
-          let tHit = -1;
-          if (tTrunk >= 0 && tCrown >= 0) tHit = Math.min(tTrunk, tCrown);
-          else if (tTrunk >= 0) tHit = tTrunk;
-          else if (tCrown >= 0) tHit = tCrown;
-          if (tHit >= 0 && (!best || tHit < best.fraction)) {
-            const hx = from[0] + (to[0] - from[0]) * tHit;
-            const hz = from[2] + (to[2] - from[2]) * tHit;
-            const nx = hx - palm.x, nz = hz - palm.z;
-            const nLen = Math.hypot(nx, 0.35, nz) || 1;
-            best = {
-              fraction: tHit,
-              kind: 'scenery',
-              sceneryType: 'palm',
-              port,
-              palmIndex: i,
-              sceneryPos: [palm.x, py, palm.z],
-              normal: [nx / nLen, 0.35 / nLen, nz / nLen],
-            };
-          }
-        }
+      if (!(palms instanceof Float32Array) || palms.length < 8) continue;
+      const hit = sweepForestTrunks(foreshorePalmGrid(port), from, to, radius);
+      if (hit && (!best || hit.fraction < best.fraction)) {
+        best = { fraction: hit.fraction, kind: 'scenery', sceneryType: 'palm', port, palmIndex: hit.treeIndex, sceneryPos: hit.sceneryPos, normal: hit.normal };
       }
     }
   }
@@ -3783,6 +3733,23 @@ export function applySceneryImpactDamage(terrain, event) {
   const pos = event.surfacePosition ?? event.position ?? event.sceneryPos ?? [0, 0, 0];
   const normal = event.normal ?? [0, 1, 0];
   const craterRadius = +(0.55 * Math.cbrt(mass / 5.4) * Math.max(0.8, Math.cbrt(energy / 100000))).toFixed(2);
+  // A tree of the forest: the ball's mark goes in its root, on the GPU and in the save, as the next frame begins.
+  const forestTree = event.forestTree ?? null;
+  if (forestTree) {
+    const hot = event.ammo === 'hot';
+    terrain.pendingForestStrikes ??= [];
+    terrain.pendingForestStrikes.push({ tree: forestTree, impact: { energy, bearing: Math.atan2(vel[2], vel[0]), hot } });
+    const firePort = hot ? terrain.port ?? terrain.ports?.[0] ?? null : null;
+    if (firePort) {
+      firePort.sceneryFires ??= [];
+      if (firePort.sceneryFires.length >= 12) firePort.sceneryFires.shift();
+      firePort.sceneryFires.push({ position: [pos[0], pos[1] + 1.2, pos[2]], intensity: 0.95, age: 0, seed: ((terrain.sceneryImpacts.length * 0.618 + 0.31) % 1) || 0.47 });
+    }
+    const record = { position: [...pos], normal: [...normal], sceneryType: event.sceneryType ?? 'tree', energyKj: +(energy / 1000).toFixed(1), craterRadius, time: event.time ?? 0 };
+    if (terrain.sceneryImpacts.length >= 64) terrain.sceneryImpacts.shift();
+    terrain.sceneryImpacts.push(record);
+    return { kind: 'scenery', sceneryType: record.sceneryType, hitCount: terrain.sceneryImpacts.length, craterRadius, energyKj: record.energyKj };
+  }
   const bake = {
     kind: 'scenery-tree',
     x: +pos[0].toFixed(3),
@@ -3801,6 +3768,8 @@ export function applySceneryImpactDamage(terrain, event) {
     if (Number.isInteger(event.palmIndex)) {
       event.port.damagedPalms ??= {};
       event.port.damagedPalms[event.palmIndex] = (event.port.damagedPalms[event.palmIndex] ?? 0) + 1;
+      // Downed, for what a later ball can meet.
+      if (event.port.damagedPalms[event.palmIndex] >= PALM_FELLED_AT) event.port.palmGrid = null;
       if (Array.isArray(event.port.palms) && typeof event.port.palms[event.palmIndex] === 'object' && event.port.palms[event.palmIndex]) {
         event.port.palms[event.palmIndex].damaged = (event.port.palms[event.palmIndex].damaged ?? 0) + 1;
       }

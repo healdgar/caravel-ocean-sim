@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import fs from 'node:fs';
 import zlib from 'node:zlib';
-import {FOREST_CLUSTER_ASSETS,SUBTROPICAL_FOREST_CLUSTER_ASSETS,FOREST_CLUSTER_VERTEX_WORDS,FOREST_CLUSTER_WORDS,FOREST_LEAF_VERTICES,forestClusterIsDrawn,packForestClusterVertex,reapplyForestStrikes,strikeForestRoot} from '../js/forest-clusters.js';
+import {FOREST_CLUSTER_ASSETS,SUBTROPICAL_FOREST_CLUSTER_ASSETS,FOREST_CLUSTER_VERTEX_WORDS,FOREST_CLUSTER_WORDS,FOREST_LEAF_VERTICES,forestClusterIsDrawn,packForestClusterVertex} from '../js/forest-clusters.js';
+import {reapplyForestStrikes,strikeForestRoot} from '../js/forest-trunks.js';
 
 const MAX_TRIANGLES=128,STORAGE_BINDING_LIMIT=134217728;
 function loadPack(pack){
@@ -97,19 +98,19 @@ test('palms are palms: a clear trunk, a crown of leaflets high up, no mat of sur
 
 test('shot chars the nearest tree, fells it on the third hit, and the mark survives streaming',()=>{
   const root=(x,z)=>[x,2,z,1.2,0,1,1,1,0,0,-2,0];
-  const roots=new Float32Array([...root(0,0),...root(40,0)]),strikes=[];
+  const roots=new Float32Array([...root(0,0),...root(40,0)]),strikes=new Map();
   assert.equal(strikeForestRoot(roots,2,1,1,strikes),0);
   assert.ok(Math.abs(roots[5]-.6)<1e-6,'one hit chars it');
   assert.equal(roots[3],Math.fround(1.2),'one hit leaves it standing');
   assert.equal(strikeForestRoot(roots,2,20,0,strikes),-1,'nothing stands within reach');
   strikeForestRoot(roots,2,0,0,strikes);strikeForestRoot(roots,2,0,0,strikes);
-  assert.equal(roots[3],0,'the third hit fells it');
+  assert.ok(roots[11]<0,'the third hit fells it');
   assert.equal(roots[15],Math.fround(1.2),'its neighbour is untouched');
   assert.equal(strikeForestRoot(roots,1,0,0,strikes),-1,'a felled tree takes no more hits');
   const streamed=new Float32Array([...root(40,0),...root(0,0)]);
   reapplyForestStrikes(streamed,2,strikes);
-  assert.equal(streamed[15],0,'still felled after the coast streams again');
-  assert.equal(streamed[3],Math.fround(1.2));
+  assert.ok(streamed[12+11]<0,'still felled after the coast streams again');
+  assert.equal(streamed[11],0);
 });
 
 test('cluster assets are written as literal paths, so the build publishes them',()=>{

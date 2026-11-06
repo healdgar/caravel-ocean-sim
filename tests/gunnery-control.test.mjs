@@ -383,7 +383,8 @@ test('shore structure foundation scarps, rotated building OBBs, and coastal palm
   height:()=>1.8,
   treeData:new Float32Array([50,2.0,50,1.2,0,1,0,0]),
  };
- const palmHit=sweepScenerySegment([px-8,py+3.5,pz],[px+8,py+3.5,pz],0.08,terrainMock);
+ // At the foot, where the trunk stands: higher up it leans away, as it is drawn to.
+ const palmHit=sweepScenerySegment([px-8,py+.3,pz],[px+8,py+.3,pz],0.08,terrainMock);
  assert.ok(palmHit&&palmHit.kind==='scenery'&&palmHit.sceneryType==='palm','cannonball intersects coastal 3D palm trunk/crown');
  const sReport=applySceneryImpactDamage(terrainMock,{
   ...palmHit,

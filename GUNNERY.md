@@ -115,6 +115,10 @@ Buildings break the way ships do: no hit moves a vertex, each piece is one rigid
 
 To the sweep a building is only a box saying the ball is near. The ball strikes the first thing really standing on its line: the mesh until the building is first hit and cut, then its pieces, skipping what has gone, and the earth behind a fort's facing. The box comes from what the building really reaches, so a star fort's bastions stop balls, and the air in the corners of a triangular fort does not. Behind a fort's facing is earth, cut into clods two deep and about twice as hard to shift as stone, and behind that is the inside of the fort, so sustained fire opens a breach right through and the next ball flies in. A ball that strikes something that cannot break, such as a footing, still shakes what stands within six metres. A fort's own balls never strike it, and a gun fires over the first six metres of its own works.
 
+## What a ball strikes in a forest
+
+A live forest's trees and foreshore palms are its own roots. A ball meets the wood they draw, through a grid over those roots, and goes through air, leaves and twigs. What it does to them, down to a tree falling, is on the GPU and in the save. See [What a ball meets](FOREST_INSTANCES.md#what-a-ball-meets).
+
 ## The free camera's cannon
 
 For trying out destruction: in the free camera, hold F to fire a 24-pounder where the sight points, at most once a second (`js/free-cannon.js`). Its balls strike ships, buildings, trees and ground as any other, and what they do is saved like any other damage. They raise no muzzle smoke, since it would hide the target, and no fort answers them by firing on a ship. Nor does a fort fire on arrival at a port saved battered: only fresh hits start a fight.

@@ -465,46 +465,100 @@ export function auditPortMeshes(pack, lib) {
 
 // --- Trees and palms --------------------------------------------------------------------------------------------
 
-// One forest prototype drawn as the forest vertex shader draws it. Wood stops a ball; a frond is a soft thing.
+// A ball goes through wood thinner than itself, as it does through a frond. This is that thickness, in a tree at scale one.
+export const WOOD_STOPS_BALL_M = 0.06;
+// One forest prototype drawn as the forest vertex shader draws it. Wood a ball cannot go through is hard; a twig or a frond
+// is a soft thing. How thick each triangle's wood is comes from the mesh: the distance across its tube to the far wall.
 export function forestPrototypeIndex(manifest, vertices, indices, prototypeId, { scale = 1, yaw = 0, origin = [0, 0, 0] } = {}) {
   const p = manifest.prototypes[prototypeId], stride = 14, c = Math.cos(yaw), s = Math.sin(yaw);
-  const ranges = [[p.wood, PART.hull], [p.leaf, PART.cloth]], triangles = (p.wood.indexCount + p.leaf.indexCount) / 3;
+  const ranges = [[p.wood, PART.rope], [p.leaf, PART.cloth]], triangles = (p.wood.indexCount + p.leaf.indexCount) / 3;
   const positions = new Float64Array(triangles * 9), order = new Uint32Array(triangles * 3), partOf = new Uint8Array(triangles);
   let t = 0;
   for (const [range, part] of ranges) for (let i = range.firstIndex; i < range.firstIndex + range.indexCount; i += 3) {
     for (let k = 0; k < 3; k++) {
       const at = indices[i + k] * stride, x = vertices[at], y = vertices[at + 1], z = vertices[at + 2];
       positions[t * 9 + k * 3] = origin[0] + (c * x - s * z) * scale;
-      positions[t * 9 + k * 3 + 1] = origin[1] + y * scale;
+      // Roots below the soil line press flat onto it.
+      positions[t * 9 + k * 3 + 1] = Math.max(origin[1], origin[1] + y * scale);
       positions[t * 9 + k * 3 + 2] = origin[2] + (s * x + c * z) * scale;
       order[t * 3 + k] = t * 3 + k;
     }
     partOf[t++] = part;
   }
-  return { index: createMeshIndex(positions, order, partOf), species: p.species, spec: p };
+  const woodTriangles = p.wood.indexCount / 3, wood = createMeshIndex(positions, order.subarray(0, woodTriangles * 3)), across = new Float32Array(woodTriangles);
+  let collar = 0;
+  for (let w = 0; w < woodTriangles; w++) {
+    let cx = 0, cy = 0, cz = 0, nx = 0, ny = 0, nz = 0;
+    for (let k = 0; k < 3; k++) {
+      const at = indices[p.wood.firstIndex + w * 3 + k] * stride;
+      cx += positions[w * 9 + k * 3] / 3; cy += positions[w * 9 + k * 3 + 1] / 3; cz += positions[w * 9 + k * 3 + 2] / 3;
+      nx += c * vertices[at + 3] - s * vertices[at + 5]; ny += vertices[at + 4]; nz += s * vertices[at + 3] + c * vertices[at + 5];
+    }
+    const n = Math.hypot(nx, ny, nz) || 1, hit = wood.first([cx, cy, cz], [-nx / n, -ny / n, -nz / n], 8 * scale, 0xff, 1e-3, (other) => other === w);
+    // A tube's far wall faces away from here. Behind a flat strip of bark there is only whatever comes next.
+    let farWall = false;
+    if (hit) {
+      let fx = 0, fy = 0, fz = 0;
+      for (let k = 0; k < 3; k++) {
+        const at = indices[p.wood.firstIndex + hit.triangle * 3 + k] * stride;
+        fx += c * vertices[at + 3] - s * vertices[at + 5]; fy += vertices[at + 4]; fz += s * vertices[at + 3] + c * vertices[at + 5];
+      }
+      farWall = -(fx * nx + fy * ny + fz * nz) / (n * (Math.hypot(fx, fy, fz) || 1)) >= 0.25;
+    }
+    across[w] = farWall ? hit.t / 2 / scale : 0;
+    if (Math.hypot(cx - origin[0], cz - origin[2]) < 2 * scale && cy < origin[1] + 0.5 * scale && across[w] > collar) collar = across[w];
+  }
+  // A slender tree is still a tree: its own stem counts as trunk, however thin. Its other wood is as thin as any twig.
+  const isStem = (w) => across[w] >= collar * 0.4 && Math.hypot(positions[w * 9] - origin[0], positions[w * 9 + 2] - origin[2]) <= 0.45 * scale;
+  const trunkMin = [Infinity, Infinity, Infinity], trunkMax = [-Infinity, -Infinity, -Infinity];
+  for (let w = 0; w < woodTriangles; w++) {
+    if (across[w] < WOOD_STOPS_BALL_M && !isStem(w)) continue;
+    partOf[w] = PART.hull;
+    for (let k = 0; k < 3; k++) {
+      const x = positions[w * 9 + k * 3], y = positions[w * 9 + k * 3 + 1], z = positions[w * 9 + k * 3 + 2];
+      if (Math.hypot(x - origin[0], z - origin[2]) > 2.5 * scale) continue;
+      trunkMin[0] = Math.min(trunkMin[0], x); trunkMin[1] = Math.min(trunkMin[1], y); trunkMin[2] = Math.min(trunkMin[2], z);
+      trunkMax[0] = Math.max(trunkMax[0], x); trunkMax[1] = Math.max(trunkMax[1], y); trunkMax[2] = Math.max(trunkMax[2], z);
+    }
+  }
+  return { index: createMeshIndex(positions, order, partOf), species: p.species, spec: p, trunk: { min: trunkMin, max: trunkMax } };
 }
 
 // Lines through one standing tree, through the game's own scenery sweep.
-export function auditTreeCollision({ index }, terrain, sweepScenerySegment, fan = {}) {
-  const row = { struck: 0, agree: 0, air: 0, through: 0, late: 0, softStop: 0, softThrough: 0, airGaps: [], woodLines: 0, woodStopped: 0 };
+export function auditTreeCollision({ index, trunk }, terrain, sweepScenerySegment, fan = {}) {
+  const row = { struck: 0, agree: 0, air: 0, through: 0, late: 0, softStop: 0, softThrough: 0, airGaps: [], woodLines: 0, woodStopped: 0, allWoodLines: 0, allWoodStopped: 0 };
   const step = (a, b) => sweepScenerySegment(a, b, 0.07, terrain, null);
   for (const line of linesAcross(index.min, index.max, { seaLevel: null, bearings: 12, elevations: [0, -6], columns: 28, rows: 40, margin: 1, ...fan })) {
     const shot = marchSweep(line, step);
     const wood = index.first(line.from, line.d, line.length, PART.hull);
+    const anyWood = index.first(line.from, line.d, line.length, PART.hull | PART.rope);
     const any = index.first(line.from, line.d, line.length);
     if (wood) row.woodLines++;
+    if (anyWood) row.allWoodLines++;
     if (!shot && !any) continue;
     if (!shot && !wood) { row.softThrough++; continue; }
     row.struck++;
     if (!shot) { row.through++; continue; }
     if (wood) row.woodStopped++;
+    if (anyWood) row.allWoodStopped++;
     if (wood && wood.t < shot.distance - SHOT_TOLERANCE_M) { row.late++; continue; }
     const gap = index.nearest(pointOn(line.from, line.d, shot.distance), 0xff, 30)?.distance ?? 30;
     if (gap > AIR_GAP_M) { row.air++; row.airGaps.push(gap); continue; }
     if (wood && Math.abs(wood.t - shot.distance) <= SHOT_TOLERANCE_M) row.agree++; else row.softStop++;
   }
+  // Then lines fired only at the trunk, close together: most of a tree's silhouette is air and twigs.
+  let trunkLines = 0, trunkStopped = 0, trunkAgree = 0;
+  if (Number.isFinite(trunk?.min[0])) for (const line of linesAcross(trunk.min, trunk.max, { seaLevel: null, bearings: 12, elevations: [0, -6], columns: 24, rows: 32, margin: 0.1, ...fan })) {
+    const wood = index.first(line.from, line.d, line.length, PART.hull);
+    if (!wood) continue;
+    trunkLines++;
+    const shot = marchSweep(line, step);
+    if (!shot) continue;
+    trunkStopped++;
+    if (Math.abs(wood.t - shot.distance) <= SHOT_TOLERANCE_M) trunkAgree++;
+  }
   const share = (n) => round((100 * n) / Math.max(1, row.struck), 1);
-  return { struck: row.struck, agreePct: share(row.agree), softStopPct: share(row.softStop), airPct: share(row.air), throughPct: share(row.through + row.late), airGapMedianM: round(percentile(row.airGaps, 0.5)), woodLines: row.woodLines, woodStoppedPct: round((100 * row.woodStopped) / Math.max(1, row.woodLines), 1), topM: round(index.max[1]), reachM: round(Math.max(-index.min[0], index.max[0], -index.min[2], index.max[2])) };
+  return { trunkLines, trunkStoppedPct: round((100 * trunkStopped) / Math.max(1, trunkLines), 1), trunkAgreePct: round((100 * trunkAgree) / Math.max(1, trunkLines), 1), struck: row.struck, agreePct: share(row.agree), softStopPct: share(row.softStop), airPct: share(row.air), throughPct: share(row.through + row.late), airGapMedianM: round(percentile(row.airGaps, 0.5)), woodLines: row.woodLines, woodStoppedPct: round((100 * row.woodStopped) / Math.max(1, row.woodLines), 1), allWoodStoppedPct: round((100 * row.allWoodStopped) / Math.max(1, row.allWoodLines), 1), topM: round(index.max[1]), reachM: round(Math.max(-index.min[0], index.max[0], -index.min[2], index.max[2])) };
 }
 
 // --- Check 2: stations against the model --------------------------------------------------------------------------
@@ -1101,7 +1155,7 @@ export function flagsOf(results) {
   }
   for (const j of results.jetties ?? []) if (Math.abs(j.deckAboveSeaM - j.wantAboveSeaM) > 0.2) add(`prop.jetty-deck/${j.id}`, j.deckAboveSeaM, j.wantAboveSeaM);
   for (const t of results.trees ?? []) {
-    if (t.mode === 'forest' && t.woodStoppedPct < 50) add(`tree.no-collision/${t.species}`, t.woodStoppedPct, 50, 'lines through the trunk that any shot stops');
+    if (t.mode === 'forest' && t.woodStoppedPct < 50) add(`tree.no-collision/${t.species}`, t.trunkStoppedPct, 50, 'lines through the trunk that any shot stops');
     if (t.mode === 'foreshore' && t.airPct > 10) add(`tree.palm-air/${t.species}`, t.airPct, 10, `a ball stops ${t.airGapMedianM} m from anything`);
   }
   return flags.sort((a, b) => a.key.localeCompare(b.key));

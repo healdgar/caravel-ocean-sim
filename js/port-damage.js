@@ -3,6 +3,7 @@
 // standing, and the hits it took (js/building-fracture.js replays them to put every stone back where it fell).
 // A town rebuilds what was shot down: a building comes back whole once it has gone long enough unshot.
 // The career save holds every port. A share link holds the one in view, as much as fits.
+// Trees shot down on a coast are kept here too, a list per coast. Nothing regrows them, so they stay down.
 import { encodeBuildingEvent } from './building-fracture.js';
 import { reviveGarrisonSoldiers } from './crew.js';
 import { classifyBuildingMaterial, createBuildingDamageState } from './gunnery-control.js';
@@ -14,6 +15,7 @@ const REBUILD_MINIMUM_DAYS = 7;
 const LINK_LIMIT = 9000;
 const DAMAGE_FLAGS = ['damageCollapseBaked', 'breachCollapseBaked', 'ruinCollapseBaked', 'magazineHit', 'magazineExploded', 'silenced'];
 
+const FOREST_RECORD_PREFIX = 'forest:';
 const portKeyOf = (port) => String(port?.regionId ?? port?.id ?? port?.name ?? 'port');
 const buildingKeyOf = (building, index) => String(building.id ?? `${building.prefabId ?? 'building'}_${index}`);
 
@@ -121,6 +123,12 @@ export function createPortDamageStore(saved = null, { dateMs = null } = {}) {
       return restored;
     },
     noteHit(damage) { damage.lastHitDateMs = today(); },
+    // What js/forest-trunks.js saved of this coast's trees, or null.
+    forestStrikes(coast) { return ports[FOREST_RECORD_PREFIX + coast]?.trees ?? null; },
+    setForestStrikes(coast, trees) {
+      if (trees?.length) ports[FOREST_RECORD_PREFIX + coast] = { trees };
+      else delete ports[FOREST_RECORD_PREFIX + coast];
+    },
     rebuildDue(building) {
       const d = building?.damageState;
       if (!d) return false;
@@ -146,20 +154,31 @@ export function createPortDamageStore(saved = null, { dateMs = null } = {}) {
       return Object.keys(ports).length ? ports : undefined;
     },
     // The port in view, for a share link, which is short of room: the most damaged buildings it can fit.
-    forLink(port) {
-      if (!port) return undefined;
-      capture(port);
-      const records = ports[portKeyOf(port)];
-      if (!records) return undefined;
+    forLink(port, coast = null) {
+      if (port) capture(port);
+      const records = port ? ports[portKeyOf(port)] : null, out = {};
       const fitted = {};
       let room = LINK_LIMIT;
-      for (const [name, record] of Object.entries(records).sort((a, b) => a[1].i - b[1].i)) {
+      for (const [name, record] of Object.entries(records ?? {}).sort((a, b) => a[1].i - b[1].i)) {
         const size = JSON.stringify(record).length + name.length;
         if (size > room) continue;
         fitted[name] = record;
         room -= size;
       }
-      return Object.keys(fitted).length ? { [portKeyOf(port)]: fitted } : undefined;
+      if (Object.keys(fitted).length) out[portKeyOf(port)] = fitted;
+      // Then as many of this coast's fallen and wounded trees as still fit, the worst first.
+      const trees = coast === null ? null : ports[FOREST_RECORD_PREFIX + coast]?.trees;
+      if (trees?.length) {
+        const kept = [];
+        for (const tree of [...trees].sort((a, b) => b[3] - a[3])) {
+          const size = JSON.stringify(tree).length + 1;
+          if (size > room) break;
+          kept.push(tree);
+          room -= size;
+        }
+        if (kept.length) out[FOREST_RECORD_PREFIX + coast] = { trees: kept };
+      }
+      return Object.keys(out).length ? out : undefined;
     },
   };
 }

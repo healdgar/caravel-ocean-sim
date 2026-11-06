@@ -155,6 +155,8 @@ fn forestAtlasFrame(cell:vec2i,grid:i32,fullSphere:bool)->u32{
 }
 @vertex fn forestImpostorVS(@builtin(vertex_index)vertex:u32,@builtin(instance_index)instance:u32)->ForestImpostorVertex{
  let rootID=forestVisible[forestBin.x+instance];let root=forestRoots[rootID];let prototype=u32(root.identity.x);let source=forestAtlasTable.prototypes[prototype];
+ // A picture of a standing tree cannot lie down: a felled one draws nothing at this range.
+ if(root.identity.w<0.){var gone:ForestImpostorVertex;return gone;}
  let centre=root.rootScale.xyz+forestAtlasRotate(source.centreExtent.xyz,root.yawColour.x)*root.rootScale.w;
  let direction=normalize(forestAtlasRotate(F.camPos.xyz-centre,-root.yawColour.x));
  let grid=i32(forestAtlasTable.config.x);let fullSphere=forestAtlasTable.config.w>.5;

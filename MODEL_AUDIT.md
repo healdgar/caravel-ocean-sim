@@ -24,10 +24,8 @@ No model was changed. No plain typo turned up, so `js/` is untouched.
 |---|---|---|---|
 | 1 | **Balls burst in empty air around the rig.** The rig is a box ±0.85 beam wide and ±0.14 length long about each mast. | 57–85% of lines stop more than 1 m from anything drawn, typically 2.2–6.8 m, up to 12 m. Only 2.6–11% meet the first solid within 0.5 m. All eight rigged ships. | `js/gunnery-control.js:1038` |
 | 2 | **Once a building has been hit, balls stop in mid-air, up to 30 m off.** `addSolid` boxes a world-aligned box after turning it, so turned buildings balloon. Every real port turns its buildings. This brings back the fault `traceShotAtBuilding` was written to end, from the first hit on. | Quay wall: reach 8 m becomes 43 m, 72% of lines stop in air. Corral 23%, loggia 16%, sea bastion 10%, star fort 9%. Fort lines stopping early besides: 28–35%. Square, none; the quay's reach is tight again at 90°. | `js/building-fracture.js:522` |
-| 3 | **No forest tree can be struck.** A live forest leaves `treeData` empty, and the sweep reads only that. | 14,000–56,000 trees drawn, 0 strikable. Lines through a trunk stopped: 0%, all nine species. | `js/terrain.js:840`, `js/gunnery-control.js:3745` |
 | 4 | **Balls pass through Victory's bow and stern**, and the Santa María's and Niña's upper works. The shot's hull ends at 0.52 length and narrows by formula; the planks do not. | Through hull: Victory 10.6%, Santa María 3.6%, Niña 1.5%. Victory's bow reaches 34.2 m and her galleries 29.6 m; the shot stops at 29.5 m. Niña's bow is 3.6 m past it. | `js/gunnery-control.js:967`, `:1012` |
 | 5 | **Lower masts cannot be hit, nor Victory's upper rig.** Nothing is struck between the rail and the bottom of the rig box. The box's top is a formula. | Dead band: Victory 10.6 m, Flying Cloud 6.6 m, others 2.4–4.1 m. Victory's rig reaches 62.4 m, the formula stops at 48.2 m; Niña 21.1 / 17, Pinta 25.1 / 22. Oseberg's box stands 7.7 m over her masthead, Lusoria's 6.3 m. | `js/gunnery-control.js:969`, `:945` |
-| 6 | **Balls stop in air around foreshore palms.** Vertical cylinders stand for a leaning palm, with a trunk 1.35 m in radius against 0.34 m drawn. | 45–48% of lines stop in air, about 1.4 m from anything. | `js/gunnery-control.js:3684` |
 
 ### Seen on deck at normal camera range
 
@@ -69,6 +67,7 @@ No model was changed. No plain typo turned up, so `js/` is untouched.
 
 - **Buildings as meshes.** All 34 prefabs: every line agrees with the mesh, before any hit.
 - **Ports.** Every building is known by its own mesh: four live, ten offline. Other ports: a streamed section's port has `instances: []` (`js/coastal-world.js:10810`), so only the active port ever has buildings, and live `terrain.ports` held one.
+- **Forest trees and foreshore palms.** Faults 3 and 6 in the first version of this list, now fixed. See table 1b: no ball stops in air, and lines through a trunk stop on it. `js/forest-trunks.js`.
 - **Hydrostatics.** Displaced volume within 1.4% of the mesh on all nine. Hull-width formula within 0.07 m at P90. Draft exact, but for Niña's separate keel, 0.12 m.
 - **Mast stations.** Within 0.34 m of the mesh on all ships, after the earlier fix. Santa María's foremast is the largest, from its rake.
 - **Gun muzzles and breeches** of drawn guns. Within 0.14 m of the barrel, at rest.
@@ -83,6 +82,7 @@ No model was changed. No plain typo turned up, so `js/` is untouched.
 - Crew are measured at the watch, standing or rowing. Gun drills, aloft work and falls are not.
 - Crew claims rest on rays against the read-back geometry. Headless whole-ship screenshots agree with the mesh, but I did not get close-up pixel shots of each sailor.
 - A hit's credited part, ship fracture after damage, and the terrain sweep are not checked. Nor are the legacy trees used only if the forest fails to load.
+- Trees are measured standing, in calm air. Wood is hard where a tube is as thick as a ball, or is a slender tree's own stem. That is the audit's own measure, from rays across each tube, not the table's. Wind, felled trees and fallen trunks are not measured.
 - A manifest's `heightMetres` differs from its mesh (palm 10.4 against 17.5 m). Nothing I found reads it for collision, so it is not ranked.
 
 ## Measured

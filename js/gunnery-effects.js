@@ -28,7 +28,8 @@ export function createGunneryEffectState(){
     const velocity=gunneryFxVector(event.velocity),speed=Math.hypot(...velocity);
     if(speed<.1)return false;
     if(impacts.length===GUNNERY_FX_LIMITS.impacts)impacts.shift();
-    const kindCode=event.kind==='ship'?1:(event.kind==='terrain'||event.kind==='scenery')?2:event.kind==='building'?3:0;
+    // A tree throws splinters as a hull does.
+    const kindCode=event.kind==='ship'||event.kind==='scenery'?1:event.kind==='terrain'?2:event.kind==='building'?3:0;
     impacts.push({id:event.id??++serial,position:gunneryFxVector(event.position),velocity,age:0,seed:(++serial*.61803398875)%1,
       scale:gunneryFxClamp(Math.cbrt(gunneryFxFinite(event.massKg,12)/12),.4,1.6),wind:[0,0,0],kindCode});return true;
   }

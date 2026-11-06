@@ -148,6 +148,8 @@ fn forestVolumeRotate(p:vec3f,yaw:f32)->vec3f{let c=cos(yaw);let s=sin(yaw);retu
  let corner=triangles[vertex];let upper=vec3<bool>((corner&1u)!=0u,(corner&2u)!=0u,(corner&4u)!=0u);
  let local=select(forestVolumeMeta.lowStep.xyz,forestVolumeMeta.highFloor.xyz,upper);
  let root=forestRoots[forestVisible[forestBin.x+instance]];let world=root.rootScale.xyz+forestVolumeRotate(local,root.yawColour.x)*root.rootScale.w;
+ // A box of leaves cannot lie down: a felled tree draws its wood alone at this range.
+ if(root.identity.w<0.){var gone:ForestVolumeVertex;return gone;}
  var o:ForestVolumeVertex;o.local=local;o.rootScale=root.rootScale;o.yawTint=root.yawColour;o.pos=F.viewProj*vec4f(world-F.camPos.xyz,1);return o;
 }
 fn forestVolumeUVW(p:vec3f)->vec3f{return (p-forestVolumeMeta.originCell.xyz+vec3f(.5*forestVolumeMeta.originCell.w))/(forestVolumeMeta.dimensionsExtinction.xyz*forestVolumeMeta.originCell.w);}
@@ -199,7 +201,8 @@ struct ForestVolumeShellVertex {
 };
 @vertex fn forestVolumeShellVS(@location(0)position:vec3f,@location(1)normal:vec3f,@location(6)colour:vec3f,
  @builtin(instance_index)instance:u32)->ForestVolumeShellVertex{
- let root=forestRoots[forestVisible[forestBin.x+instance]];let world=root.rootScale.xyz+forestVolumeRotate(position,root.yawColour.x)*root.rootScale.w;
+ let root=forestRoots[forestVisible[forestBin.x+instance]];let turned=forestVolumeRotate(position,root.yawColour.x)*root.rootScale.w;
+ var world=root.rootScale.xyz+turned;if(root.identity.w<0.){world=root.rootScale.xyz+forestFallen(root,position,turned);}
  var o:ForestVolumeShellVertex;o.world=world;o.local=position;o.normal=normal;o.colour=colour;o.rootScale=root.rootScale;o.yawTint=root.yawColour;
  o.pos=F.viewProj*vec4f(world-F.camPos.xyz,1);o.pos.z*=1.-f32(forestVisible[forestBin.x+instance]&63u)*2e-7;return o;
 }

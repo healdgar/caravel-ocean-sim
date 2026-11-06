@@ -9,6 +9,7 @@ import { loadCanopyScenery, excludeCanopyRoots, createCanopyRenderer, canopyInsp
 import {loadTerrainNear,terrainNearGeometry,terrainNearContains,terrainNearSample,terrainNearPatchBounds,sampleTerrainNear} from './terrain-near.js';
 import {chooseForestSurfaceCodec} from './forest-surfaces.js';
 import {loadForestScenery,createForestRenderer,FOREST_VERTEX_WGSL,FOREST_ASSETS,SUBTROPICAL_FOREST_ASSETS} from './forest-scenery.js';
+import {foreshorePalmPlacement} from './forest-trunks.js';
 import {loadForestMass,createForestMassRenderer,forestMiddleWoodPartition,FOREST_MASS_VERTEX_WGSL} from './forest-mass.js';
 import {loadForestMiddle,FOREST_MIDDLE_ASSETS,SUBTROPICAL_FOREST_MIDDLE_ASSETS} from './forest-middle.js';
 import {bakeLandImpactDeformations} from './part-assembly.js';
@@ -43,8 +44,6 @@ function hash32Forest(value) {
 
 const FORESHORE_PALMS_MAX = 520;
 const GROUND_COVER_STREET_GAP_M = 0.4;
-// The direction the grown coconut's trunk leans, from scripts/grow-tropical-trees.mjs.
-const COCONUT_LEAN_RADIANS = Math.atan2(0.5, 1.5);
 export function retargetForestPackToProcedural(
   forestPack,
   proceduralPack,
@@ -359,8 +358,7 @@ export function retargetForestPackToProcedural(
       const x = foreshore[i], z = foreshore[i + 2], shape = foreshore[i + 5], seaX = -foreshore[i + 6], seaZ = -foreshore[i + 7];
       const gy = groundSample(x, z);
       if (!Number.isFinite(gy) || gy < 1.2) continue;
-      const scale = 1 + shape * 0.55, sink = Math.max(0.12, basal * scale * Math.hypot(seaX, seaZ) + 0.08);
-      const yaw = Math.hypot(seaX, seaZ) > 0.01 ? Math.atan2(seaZ, seaX) - COCONUT_LEAN_RADIANS : shape * Math.PI * 2;
+      const { scale, sink, yaw } = foreshorePalmPlacement(shape, seaX, seaZ, basal);
       const tint = 0.94 + shape * 0.12;
       buckets[coconutId].push(x, gy - sink, z, scale, yaw, tint, tint, tint, coconutId, sink, -2, 0);
     }
@@ -843,7 +841,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const streamMaxRoots=isMobile?10000:56000;
   const activeForestPack=proceduralPack&&forestPack?retargetForestPackToProcedural(forestPack,proceduralPack,groundSample,{isMobile,maxRootCapacity:streamMaxRoots,climateProfile:activeClimate}):forestPack;
   const activeForestMiddle=forestAtlasDebug?null:(proceduralMiddle??forestMass?.middle??null);
-  const forest=activeForestPack?await createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack:activeForestPack,groundSample:proceduralPack?null:groundSample,forestMass,forestMiddle:activeForestMiddle,mode:canopyMode,terrainOcclusion:typeof location!=='undefined'&&new URLSearchParams(location.search).get('forestOcclusion')==='off'?null:{heights:regionalElevationData??heights,region:getRegionalOcclusionRegion(),near:nearTile??(regionalElevationSize?{heights,manifest:{domain:{x:activeRegion.x,z:activeRegion.z,span:activeRegion.span,size:activeRegion.size}}}:null)}}):null;
+  // What has been shot down on this coast comes back with it, and is kept with the port damage.
+  const forestStrikeKey=activeRegion.id??`${activeRegion.latitude},${activeRegion.longitude}`;
+  const forest=activeForestPack?await createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack:activeForestPack,groundSample:proceduralPack?null:groundSample,forestMass,forestMiddle:activeForestMiddle,mode:canopyMode,savedStrikes:portDamage?.forestStrikes?.(forestStrikeKey)??null,onStrikesChanged:trees=>portDamage?.setForestStrikes?.(forestStrikeKey,trees),terrainOcclusion:typeof location!=='undefined'&&new URLSearchParams(location.search).get('forestOcclusion')==='off'?null:{heights:regionalElevationData??heights,region:getRegionalOcclusionRegion(),near:nearTile??(regionalElevationSize?{heights,manifest:{domain:{x:activeRegion.x,z:activeRegion.z,span:activeRegion.span,size:activeRegion.size}}}:null)}}):null;
   const forestStats=forest?.stats??{loaded:false,mode:canopyMode,error:forestFailure};
   forestStats.mass=forestMass?.stats??{loaded:false,error:forestMassFailure,appearanceErrorSupported:false};
   if(forestStats.mass.middle)forestStats.mass.middle.error=forestMiddleFailure;
@@ -1508,6 +1508,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     get triangles(){return (mesh.indices.length+(fineMesh?.indices.length??0))/3;},
     get trees(){return trees.length/8+(forest?.stats.roots??0);},
     get treeData(){return trees;},
+    // The forest's own roots, as a ball meets them. Null with no forest, and for a moment while one loads.
+    get forestTrunks(){return forest?.trunks??null;},
+    get forestStrikeKey(){return forest?forestStrikeKey:null;},
     farTreeTriangles:treeMeshes[0].map(mesh=>mesh.opaque.count/3),
     groundStats,groundTriangles:groundMeshes.map(mesh=>mesh.count/3),canopyStats,forestStats,canopyInspectionURL:canopyInspectionLink,
     prepare:updateTrees,
@@ -1602,7 +1605,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       const flushPort=(pMesh,pVertsCpu,portObj,fractures)=>{
         fractures?.update(now);
         if(!Array.isArray(portObj?.sceneryBakes)||!portObj.sceneryBakes.length)return;
-        for(const bake of portObj.sceneryBakes)if(bake.kind==='scenery-tree')forest?.strike?.(bake.x,bake.z);
+        for(const bake of portObj.sceneryBakes)if(bake.kind==='scenery-tree')forest?.strike?.(bake.x,bake.z,now,groundSample);
         const bakes=portObj.sceneryBakes.splice(0,portObj.sceneryBakes.length);
         if(!pMesh?.vertices||!pVertsCpu)return;
         const dirty=bakeLandImpactDeformations(pVertsCpu,bakes,8);
@@ -1611,6 +1614,10 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
           updated=true;
         }
       };
+      if(this.pendingForestStrikes?.length){
+        for(const struck of this.pendingForestStrikes.splice(0,this.pendingForestStrikes.length))forest?.strikeTree?.(struck.tree,struck.impact,now,groundSample);
+      }
+      forest?.settleFalls?.(now);
       flushPort(portMesh,portVertsCpu,proceduralPack?.port,portFractures);
       for(const sec of loadedSections.values()){
         if(sec.port)flushPort(sec.portMesh,sec.portVertsCpu,sec.port,sec.portFractures);
