@@ -8,6 +8,7 @@ import {poseCrewWork} from '../js/crew-pose.js';
 import {selectCrewLOD,createDistantCrewLOD} from '../js/crew-lod.js';
 import {advanceSails,sailingState} from '../js/sailing.js';
 import {createShareLink} from '../js/sharing.js';
+import {crewHelmStand,crewHelmHands} from '../js/crew-work.js';
 const bytes=fs.readFileSync(new URL('../assets/crew/sailor.glb',import.meta.url));
 const model=loadCrewGLB(bytes);
 const boat={length:12,beam:3.6,roll:0,rollVelocity:0};
@@ -187,16 +188,24 @@ test('helmsman follows the direct tiller below the quarterdeck at full port and 
   const c=createCompany(),b={length:20,beam:6},a=model.animator;
   for(const rudder of [-35,-10,0,10,35]){
     b.rudder=rudder;stepCompany(c,b,0,0);
-    const s=c.crew.find(s=>s.role==='Helmsman'),p=tillerPoint(b);
-    assert.ok(Math.abs(s.position[0]-p[0])<1e-6);
-    assert.ok(Math.abs(s.position[2]+.32-p[2])<1e-6);
+    const s=c.crew.find(s=>s.role==='Helmsman'),p=tillerPoint(b),stand=crewHelmStand(b);
+    // Beside the handle's end, to port of the bar, and facing forward along it.
+    assert.ok(Math.abs(s.position[0]-stand.x)<1e-6);
+    assert.ok(Math.abs(s.position[2]-stand.z)<1e-6);
+    assert.ok(Math.hypot(s.position[0]-p[0],s.position[2]-p[2])<.5,'stands at the tiller');
+    assert.ok(s.position[0]<p[0],'clear of the bar, to port');
+    if(Math.abs(rudder)<=10)assert.ok(Math.cos(s.yaw)<-.8,'facing forward, not back at the rudder');
     assert.ok(s.position[1]+1.8<vesselDeck(s.z)*HULL_VERTICAL_SCALE);
     a.sample('Idle',s.time);poseCrewWork(a,s,b);
-    for(const [side,sign] of [['l',1],['r',-1]]){
+    const hands=crewHelmHands(b),pivot=[...tillerPoint(b,1.73*20/12)];
+    for(const [i,side] of ['l','r'].entries()){
       const hand=a.world[a.names.indexOf('hand_'+side)].subarray(12,15);
-      const world=Array.from(hand).map((v,i)=>v*s.scale[i]+s.position[i]);
-      const target=tillerPoint(b,sign*.09);target[0]+=sign*.035;
-      assert.ok(Math.hypot(...world.map((v,i)=>v-target[i]))<.05,'hands reach the actual tiller');
+      const world=[0,1,2].map(c=>s.transform[c]*hand[0]+s.transform[c+4]*hand[1]+s.transform[c+8]*hand[2]+s.transform[c+12]);
+      assert.ok(Math.hypot(...world.map((v,k)=>v-hands[i][k]))<.05,'hands reach their grips');
+      // And those grips are on the bar itself: the wrist rides just over it.
+      const axis=[pivot[0]-p[0],pivot[2]-p[2]],t=Math.max(0,((world[0]-p[0])*axis[0]+(world[2]-p[2])*axis[1])/(axis[0]**2+axis[1]**2));
+      assert.ok(Math.hypot(world[0]-p[0]-axis[0]*t,world[2]-p[2]-axis[1]*t)<.14,'over the tiller in plan');
+      assert.ok(Math.abs(world[1]-p[1]-.13)<.06,'just above it');
     }
   }
 });

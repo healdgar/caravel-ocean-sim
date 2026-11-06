@@ -33,15 +33,15 @@ The audit changes no model. No plain typo turned up.
 
 | # | Defect | Measured | Where |
 |---|---|---|---|
-| 7 | **Victory's helmsman stands in the wheel.** | Through it by 1.09 m. | `js/models/victory.js:89` |
-| 8 | **Victory's hands stand in the poop stairs.** | q9 0.99 m, q12 0.58 m, q10 0.33 m. | `js/models/victory.js:130-133` |
-| 9 | **Victory's hands stand on air.** q8 and q11 stand over a quarterdeck gap, Duarte over the forecastle's, 3 m above the deck below. Leonor walks over one. w3 stands on the main hatch, which the game holds open. | 3.0 m; w3 0.64 m. 5.6% of 90 s of crew positions. | `js/models/victory.js:129`, `:132`, `:81`, `:84`, `:100` |
-| 10 | **Niña's aft waist hand stands under the stair**, the tread through the body about a metre above the feet. This is the default ship. | Through tread 4 by 0.73 m. | `js/models/nina.js:39` |
-| 11 | **Flying Cloud's two bow hands stand outside her hull**, over the sea. | At x 1.56 m; hull half-width there is 1.39 m. No floor at all. | `js/models/later-sail.js:211` |
-| 12 | **Gipsy Moth's only hand stands in the tiller.** | Through it by 0.87 m. | `js/models/later-sail.js:382` |
-| 13 | **Oseberg's helmsman stands in the deck stores.** | 0.41 m. | `js/models/rowing.js:53` |
-| 14 | **Rowers' legs pass through benches and boots through floorboards, on all three rowed ships.** | All 88. Legs 0.13–0.15 m; soles 0.11 m, up to 0.34 m on the Oseberg. Taíno bow paddlers through the hull inner 0.27 m. Taíno row 8 hangs 0.3 m over a floorboard gap. | `js/models/rowing.js:26`, `:45` |
-| 15 | **Helmsmen's hands through tillers.** | Santa María 0.22 m, Niña 0.17 m, Pinta 0.12 m. Niña's two fore hands meet the foremast, 0.27 m. | stations in `js/models/nina.js`, `additional.js` |
+| 7 | **Fixed: Victory's helmsman stood in the wheel.** He stands aft of the after wheel, to starboard of its spindle and post, facing forward, hands on the rim. | Was through it by 1.09 m. Now clear. | `js/models/victory.js`, `helm.grip` in `js/ship-models.js` |
+| 8 | **Fixed: Victory's hands stood in the poop stairs.** q10 and q11 stand forward of the stair foot. q12 stands at the rail between two guns, and q9, the mizzen sheet hand, in the next bay forward: the bay by the mizzen fall is where the hauler stands. Isabel keeps to the same bay to port: her round went round a gun and through the stair. | Was q9 0.99 m, q12 0.58 m, q10 0.33 m. Now clear. | `js/models/victory.js` |
+| 9 | **The audit was wrong: no Victory hand stood on air.** q8, q11, Duarte, Leonor and w3 each stood on a 9 mm seam between planks, and one line down a seam found the deck below. There is no hatch under w3. A floor is now read across a boot's width. Duarte, Beatriz and Leonor still moved inboard, from a gun's carriage and a brace. | Was 3.0 m and 0.64 m, 5.6% of 90 s of crew positions. Now none. Every plank has these seams: 75 walk cells read over nothing for the same reason. | `floorBeneath` in `scripts/model-audit-lib.mjs` |
+| 10 | **Fixed: Niña's aft waist hand stood under the stair.** He stands inboard, forward of its foot, clear of the main shrouds and of the corridor Rui walks to the hatch. | Was through tread 4 by 0.73 m. Now clear. | `js/models/nina.js` |
+| 11 | **Fixed: Flying Cloud's two bow hands stood outside her hull.** They stand on the forecastle behind the anchors, facing forward. | Was x 1.56 m at a half-width of 1.39 m. Now x 0.87 m on deck. | `js/models/later-sail.js` |
+| 12 | **Fixed: Gipsy Moth's only hand stood in the tiller.** She sits on the port bench with her feet in the well and both hands on the tiller, and walks from the well to work. | Was through it by 0.87 m. Now clear. | `js/models/later-sail.js`, `crewSeatedPose` |
+| 13 | **Fixed: the Oseberg's helmsman stood in the deck stores.** He sits further out on his thwart with his boots beside them, and turns part way to the steering oar. | Was 0.41 m. Now clear. | `js/models/rowing.js`, `crewSeatedPose` |
+| 14 | **Fixed: rowers' legs through benches and boots through floorboards, on all three rowed ships.** One pose: the pelvis rides above the bench by the back of the thigh and each ankle above the floor by the boot, both measured from the body's own skin. A paddler bows over a low grip he cannot otherwise reach. The canoe's narrow first row and stern bench sit further in, boots a boot's width from her side. No bench, oar or paddle moved, so they still meet the water. | Was all 88: legs 0.13–0.15 m, soles 0.11 m. Now none, through the whole stroke. The 0.34 m was the audit's: a toe under the next thwart. So was row 8's floorboard gap: a line along the edge between two triangles. | `poseSeatedCrew`, `rowingStationPose` |
+| 15 | **Fixed: helmsmen's hands through tillers.** On the Santa María, Niña and Pinta he stands beside the handle to port of the bar, facing forward and turned a little in toward it, hands on it, boots planted. He faced aft before. Niña's fore hands move inboard of the shroud leads, which are what they met: `mast.fore` holds those fittings as well as the mast. | Was Santa María 0.22 m, Niña 0.17 m, Pinta 0.12 m; fore hands 0.27 m. Now clear. | `crewHelmStand`, `crewHelmHands` |
 
 ### Seen on close inspection
 
@@ -54,12 +54,12 @@ The audit changes no model. No plain typo turned up.
 
 | # | Defect | Measured | Where |
 |---|---|---|---|
-| 18 | **Flying Cloud's eight guns are not drawn**, so a ball appears from nowhere. Their numbers were written by hand. | Muzzle up to 1.6 m from the hull. Station 3.4 m off her deck. | `js/gunnery-models.js:79` |
-| 19 | **Archers' stations off the floor.** Abstract, so only their arrows show it. | Oseberg 0.41 m, canoe 0.25 m. | `js/gunnery-models.js:80` |
+| 18 | **Flying Cloud's eight guns are not drawn**, so a ball appears from nowhere. Their numbers were written by hand. | Muzzle up to 1.6 m from the hull. Station 3.3 m off her deck. | `js/gunnery-models.js:79` |
+| 19 | **Archers' stations off the floor.** Abstract, so only their arrows show it. | Oseberg 0.22 m, canoe 0.25 m. | `js/gunnery-models.js:80` |
 | 20 | **A bulwark invented for shots.** Fixed for the ball, which meets the shell as drawn. `vesselRailHeight` still adds 1 m of wall for what splinters reach and for a warship's aim at a rail. | Rail against mesh, P90: Victory 1.05 m, Gipsy Moth 1.03 m, Flying Cloud 0.66 m. | `js/gunnery-control.js:908`, `:921` |
 | 21 | **Niña's mizzen breaks under the quarterdeck.** | Full break at 3.08 m, deck at 3.83 m. | `js/ship-fracture.js:27` |
-| 22 | **Two Victory guns fire into the main chains**, and one quarterdeck gun's station is over a gap. | Muzzle 0.08 m from `rig.standing.main` (upper battery, gun 38 each side). Station 2.97 m off the floor (`gun.quarter.port.1`). | `js/gunnery-models.js:25` |
-| 23 | **The walk grid runs through solid things.** The rowed and later-sail ships skip the obstacle check, and Victory's obstacles leave these out. No hand was seen walking these cells in 90 s, beyond those named above. | Flying Cloud 438 of 3,467 cells inside her deckhouse. Victory 81 through bulkheads, stairs and wheel, 75 over gaps. Gipsy Moth 55 in her cabin. | `js/crew-navigation.js:214`, `:228`, `:284` |
+| 22 | **Two Victory guns fire into the main chains.** The quarterdeck gun's station read over a gap was a plank seam, as in 9. | Muzzle 0.08 m from `rig.standing.main` (upper battery, gun 38 each side). | `js/gunnery-models.js:25` |
+| 23 | **The walk grid runs through solid things.** The rowed and later-sail ships skip the obstacle check, and Victory's obstacles leave these out. No hand was seen walking these cells in 90 s. | Flying Cloud 414 of 3,467 cells inside her deckhouse. Victory 83 through bulkheads, stairs and wheel. Gipsy Moth 54 in her cabin. | `js/crew-navigation.js:214`, `:228`, `:284` |
 | 24 | **Low rails**, under 0.8 m. Oseberg now passes at 0.93 m. These two may be right for the hull, so I flag rather than call them faults. | Canoe 0.41 m, Lusoria 0.57 m. Gipsy Moth 0.82 m passes at her lowest. | `js/models/rowing.js` |
 | 25 | **Rig ends loose.** | Victory: 27 line ends up to 0.56 m from anything, `helm.tiller` and `helm.rudder` nodes 0.80 m, `rig.mizzen.fall` 0.52 m. Lusoria: 2 ends, 0.37 m. | `js/ship-models.js:87-88`, `js/victory.js` |
 | 26 | **One jetty's shore end stands in rising ground.** Only at Boston. | 0.43 m. | `js/port-props.js` |
@@ -81,8 +81,9 @@ The audit changes no model. No plain typo turned up.
 
 - Ships are level at their design waterline, on a calm sea, with sails as the game first sets them. Hits below the sea are not counted.
 - At rest (`--no-gpu`, `--write-known`, and so `tests/model-audit.test.mjs`) the Niña's, Pinta's and Santa María's lateen yards stand in the rest mesh, where the game never draws them, so `collision.through-mast/nina` and `/pinta` are known there. On Metal those read 0.
-- Crew are measured at the watch, standing or rowing. Gun drills, aloft work and falls are not.
-- Crew claims rest on rays against the read-back geometry. Headless whole-ship screenshots agree with the mesh, but I did not get close-up pixel shots of each sailor.
+- Crew are measured at the watch, standing or rowing, posed as the game draws them with hands closed. `tests/crew-stations.test.mjs` adds a long watch, the whole stroke, either rudder and manned guns. Hands walking on a job, aloft work and falls are not held to it, nor are bodies against rope and cloth, which move with the wind.
+- At hard rudder a helmsman follows the tiller: across the Santa María's poop stair foot past about 13°, and the Gipsy Moth's tiller can reach her on the bench past about 16°.
+- Flying Cloud's spanker boom passes 1.55 m over the deck at her wheel, so her helmsman's head meets it on one tack in a narrow range of brace.
 - A hit's credited part and ship fracture after damage are checked by `tests/ship-collider.test.mjs` and `tests/ship-fracture.test.mjs`, not here. Nor are the terrain sweep and the legacy trees used only if the forest fails to load.
 - Trees are measured standing, in calm air. Wood is hard where a tube is as thick as a ball, or is a slender tree's own stem. That is the audit's own measure, from rays across each tube, not the table's. Wind, felled trees and fallen trunks are not measured.
 - A manifest's `heightMetres` differs from its mesh (palm 10.4 against 17.5 m). Nothing I found reads it for collision, so it is not ranked.
@@ -91,21 +92,21 @@ The audit changes no model. No plain typo turned up.
 
 
 <!-- audit tables start -->
-Measured 2026-11-06. Rig as the GPU posed it, read back on Metal. 89 measurements past their limits.
+Measured 2026-11-06. Rig as the GPU posed it, read back on Metal. 58 measurements past their limits.
 
 ### Posed geometry read back from the GPU
 
 | Ship | vertices | hull-class parts that moved | mast | spar | cloth | rope | gun | length off | beam off | sinkage off |
 |---|---|---|---|---|---|---|---|---|---|---|
 | nina | 91998 | hatch.cover 2.27 | 0 | 0.77 | 4.85 | 4.86 | 0.09 | 0 | 0 | 0 |
-| pinta | 43041 | hatch.main 2.92 | 0 | 0.74 | 3.64 | 6.65 | 0.09 | 0 | 0 | 0 |
-| santa-maria | 48686 | hatch.main 3.68 | 0 | 0.63 | 2.46 | 4.58 | 0.09 | 0 | 0 | 0 |
-| victory | 144783 | hatch.main 4.68 | 0 | 1.77 | 1.67 | 1.76 | 1.1 | 0 | 0 | 0 |
-| oseberg | 71016 | none | 0 | 0.66 | 0.67 | 0.67 | – | 0 | 0 | 0 |
+| pinta | 43041 | hatch.main 2.92 | 0 | 0.75 | 3.65 | 6.65 | 0.09 | 0 | 0 | 0 |
+| santa-maria | 48686 | hatch.main 3.68 | 0 | 0.69 | 2.49 | 4.61 | 0.09 | 0 | 0 | 0 |
+| victory | 144783 | hatch.main 4.68 | 0 | 1.89 | 1.79 | 1.88 | 1.1 | 0 | 0 | 0 |
+| oseberg | 71016 | none | 0 | 0.6 | 0.61 | 0.61 | – | 0 | 0 | 0 |
 | lusoria | 30703 | none | 0 | 0.5 | 0.48 | 0.48 | – | 0 | 0 | 0 |
 | taino-canoe | 26453 | none | – | – | – | – | – | 0 | 0 | 0 |
-| flying-cloud | 76071 | hatch.main 4.7 | 0 | 2.45 | 2.69 | 2.45 | – | 0 | 0 | 0 |
-| gipsy-moth-iv | 21568 | hatch.main 0.85 | 0 | 0.44 | 0.44 | 0.44 | – | 0 | 0 | 0 |
+| flying-cloud | 76071 | hatch.main 4.7 | 0 | 2.28 | 2.54 | 2.28 | – | 0 | 0 | 0 |
+| gipsy-moth-iv | 21568 | hatch.main 0.85 | 0 | 0.4 | 0.4 | 0.41 | – | 0 | 0 | 0 |
 
 ### 1a. Balls against ship meshes
 
@@ -113,15 +114,15 @@ Share of lines that either the shot or the mesh says struck. *Agree* is within 0
 
 | Ship | lines | agree % | soft % | air: rig % | air: hull % | median gap m | max gap m | through hull % | through mast/spar % | phantom mast % | wrong mast % | parts missed most |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| nina | 13031 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
-| pinta | 11381 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
-| santa-maria | 13697 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
-| victory | 13903 | 98.7 | 1.1 | 0 | 0 | – | 0 | 0.2 | 0 | 0 | 0 | gunnery.recoil.# 8, gun.forecastle.port.# 7, gun.forecastle.starboard.# 7, gun.quarter.starboard.# 3, gun.quarter.port.# 3 |
-| oseberg | 8226 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
+| nina | 13017 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
+| pinta | 11385 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
+| santa-maria | 13702 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
+| victory | 13939 | 98.7 | 1.1 | 0 | 0 | – | 0 | 0.2 | 0 | 0 | 0 | gunnery.recoil.# 8, gun.forecastle.port.# 6, gun.forecastle.starboard.# 6, gun.quarter.starboard.# 3, gun.quarter.port.# 3 |
+| oseberg | 8220 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
 | lusoria | 6164 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
 | taino-canoe | 9084 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
-| flying-cloud | 11116 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
-| gipsy-moth-iv | 8958 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
+| flying-cloud | 11086 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
+| gipsy-moth-iv | 8959 | 100 | 0 | 0 | 0 | – | 0 | 0 | 0 | 0 | 0 |  |
 
 ### 1b. Balls against trees
 
@@ -149,7 +150,7 @@ Share of lines that either the shot or the mesh says struck. *Agree* is within 0
 | lisbon | 1 | 26 | 26 | 26 | 36000 | 36000 | 0 |
 | havana | 1 | 23 | 23 | 23 | 56000 | 56000 | 520 |
 | san-juan | 1 | 23 | 23 | 23 | 56000 | 56000 | 520 |
-| jamestown | 1 | 18 | 18 | 18 | 14000 | 14000 | 0 |
+| jamestown | 1 | 18 | 18 | 18 | 36000 | 36000 | 0 |
 
 ### 1d. Balls against port buildings
 
@@ -221,29 +222,29 @@ Share of lines that either the shot or the mesh says struck. *Agree* is within 0
 
 | Ship | guns | undrawn | muzzle off barrel m | breech off barrel m | lowest muzzle above sea | furthest from hull | into own ship | station off floor |
 |---|---|---|---|---|---|---|---|---|
-| nina | 4 | 0 | 0.05 | 0 | 4.81 | 0.75 | 0 | 0.03 |
+| nina | 4 | 0 | 0.05 | 0 | 4.81 | 0.75 | 0 | 0 |
 | pinta | 4 | 0 | 0.04 | 0 | 3.64 | 0.53 | 0 | 0.01 |
 | santa-maria | 4 | 0 | 0.04 | 0 | 4.22 | 0.61 | 0 | 0.01 |
-| victory | 104 | 0 | 0.14 | 0 | 1.8 | 1.06 | 2 | 2.97 |
-| oseberg | 6 | 6 | 0 | 0 | 1.92 | 0.94 | 0 | 0.41 |
+| victory | 104 | 0 | 0.14 | 0 | 1.8 | 1.06 | 2 | 0 |
+| oseberg | 6 | 6 | 0 | 0 | 1.92 | 0.94 | 0 | 0.22 |
 | lusoria | 6 | 6 | 0 | 0 | 1.53 | 0.96 | 0 | 0.08 |
 | taino-canoe | 6 | 6 | 0 | 0 | 1.1 | 0.68 | 0 | 0.25 |
-| flying-cloud | 8 | 8 | 0 | 0 | 5.03 | 1.6 | 0 | 3.4 |
+| flying-cloud | 8 | 8 | 0 | 0 | 5.03 | 1.6 | 0 | 3.34 |
 | gipsy-moth-iv | 0 | 0 | 0 | 0 | – | 0 | 0 | 0 |
 
 ### 2c. Crew stations, routes and walkways
 
 | Ship | crew | floating | under something | pressed | no hull beside | route floating % | worst m | who | walk cells | over nothing | worst m | inside a structure | through solid | through what |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| nina | 24 | 0 | 0 | 1 | 0 | 0.1 | 0.54 | maria 3 | 397 | 0 | 0 | 0 | 12 | stair:tread:# 6, bow.structure 5, tackle.fore 2, anchor:cathead:-# 1 |
-| pinta | 30 | 0 | 0 | 0 | 0 | 0.1 | 9 | maria 3 | 690 | 0 | 0 | 0 | 16 | deck.stairs.forecastle.stairs.port 10, deck.stairs.forecastle.stairs.starboard 10, deck.stairs.quarter.stairs.port 6, deck.stairs.quarter.stairs.starboard 6 |
-| santa-maria | 40 | 0 | 0 | 0 | 0 | 0 | 9 | maria 2 | 943 | 5 | 0.16 | 0 | 24 | deck.stairs.poop.stairs.port 10, deck.stairs.poop.stairs.starboard 8, deck.stairs.quarter.stairs.port 7, deck.stairs.quarter.stairs.starboard 7 |
-| victory | 64 | 4 | 0 | 3 | 8 | 5.6 | 3 | victory_w3 180, victory_q8 180, victory_q11 180, leonor 143, victory_q10 64, duarte 14 | 2048 | 75 | 18.5 | 3 | 81 | deck.bulkhead.#.# 40, stairs.quarter.port 10, stairs.quarter.starboard 8, helm.wheel 8 |
-| oseberg | 32 | 0 | 0 | 0 | 0 | 0 | 0 |  | 277 | 0 | 0 | 0 | 1 | rowing.benches 64, deck.stores 10, mast.main.cut 1 |
-| lusoria | 26 | 0 | 0 | 0 | 0 | 0 | 0 |  | 158 | 0 | 0 | 0 | 0 | rowing.benches 35, deck.stores 4 |
-| taino-canoe | 30 | 0 | 0 | 0 | 2 | 6.7 | 0.3 | rower.port.08 180, rower.starboard.08 180 | 56 | 0 | 0 | 0 | 0 | rowing.benches 8, deck.stores 1 |
-| flying-cloud | 42 | 2 | 0 | 0 | 2 | 2.6 | 9 | maria 103, afonso 92 | 3467 | 0 | 0 | 438 | 63 | structure.deckhouse 18, deck.bulkhead.forecastle 11, deck.stairs.poop.port 11, deck.stairs.poop.starboard 10 |
-| gipsy-moth-iv | 1 | 0 | 0 | 0 | 0 | 0 | 0 |  | 161 | 1 | 1.38 | 55 | 12 | deck.cockpit 15, structure.cabin 6, deck.stairs.cockpit-entry 6 |
+| nina | 24 | 0 | 0 | 0 | 0 | 0 | 0.34 | maria 2 | 397 | 0 | 0 | 0 | 12 | stair:tread:# 6, bow.structure 5, anchor:cathead:-# 1, tackle.fore 1 |
+| pinta | 30 | 0 | 0 | 0 | 0 | 0 | 9 | maria 1 | 690 | 0 | 0 | 0 | 16 | deck.stairs.forecastle.stairs.port 8, deck.stairs.forecastle.stairs.starboard 8, deck.stairs.quarter.stairs.port 6, deck.stairs.quarter.stairs.starboard 6 |
+| santa-maria | 40 | 0 | 0 | 0 | 0 | 0 | 9 | maria 3 | 943 | 2 | 0.16 | 0 | 24 | deck.stairs.poop.stairs.port 8, deck.stairs.poop.stairs.starboard 8, deck.stairs.quarter.stairs.port 7, deck.stairs.quarter.stairs.starboard 7 |
+| victory | 64 | 0 | 0 | 0 | 0 | 0 | 0 | maria 2 | 2048 | 0 | 0 | 0 | 83 | deck.bulkhead.#.# 40, stairs.quarter.port 8, stairs.quarter.starboard 8, helm.wheel 8 |
+| oseberg | 32 | 0 | 0 | 0 | 0 | 0 | 0 |  | 277 | 0 | 0 | 0 | 1 | rowing.benches 34, deck.stores 8, mast.main.cut 1 |
+| lusoria | 26 | 0 | 0 | 0 | 0 | 0 | 0 |  | 158 | 0 | 0 | 0 | 0 | rowing.benches 12, deck.stores 4 |
+| taino-canoe | 30 | 0 | 0 | 0 | 0 | 0 | 0 |  | 56 | 0 | 0 | 0 | 0 | rowing.benches 8, deck.stores 1 |
+| flying-cloud | 42 | 0 | 0 | 0 | 0 | 0 | 0 |  | 3467 | 0 | 0 | 414 | 87 | structure.deckhouse 41, deck.bulkhead.forecastle 11, deck.stairs.poop.port 11, deck.stairs.poop.starboard 9 |
+| gipsy-moth-iv | 1 | 0 | 0 | 0 | 0 | 0 | 0 |  | 161 | 2 | 1.38 | 54 | 13 | deck.cockpit 11, structure.cabin 7, deck.stairs.cockpit-entry 5, hull.planking 1 |
 
 ### 2d. Rig and fittings
 
@@ -256,8 +257,8 @@ Share of lines that either the shot or the mesh says struck. *Agree* is within 0
 | oseberg | 232 | 0 |  | 6 | 0 | 0 | – | – |
 | lusoria | 190 | 0 |  | 6 | 2 | 0.37 | – | – |
 | taino-canoe | 149 | 0 |  | 0 | 0 | 0 | – | – |
-| flying-cloud | 219 | 0 |  | 480 | 0 | 0 | – | – |
-| gipsy-moth-iv | 38 | 0 |  | 19 | 0 | 0 | – | – |
+| flying-cloud | 219 | 0 |  | 472 | 0 | 0 | – | – |
+| gipsy-moth-iv | 38 | 0 |  | 17 | 0 | 0 | – | – |
 
 ### 3. Waterline and hull
 
@@ -277,15 +278,15 @@ Share of lines that either the shot or the mesh says struck. *Agree* is within 0
 
 | Ship | crew | body meets a solid | through more than 8 cm | deepest m | soles sunk | by m | parts | worst |
 |---|---|---|---|---|---|---|---|---|
-| nina | 24 | 7 | 4 | 0.73 | 1 | 0.06 | deck.main.planks 3, mast.fore 2, helm.tiller 1, stair:tread:# 1 | nina_w7 (Aft waist hand) through stair:tread:4 |
-| pinta | 30 | 7 | 1 | 0.12 | 1 | 0.06 | deck.forecastle.planks 4, deck.main.planks 1, helm.tiller 1, deck.quarter.planks 1 | pedro (Helmsman) through helm.tiller |
-| santa-maria | 40 | 6 | 2 | 0.22 | 1 | 0.06 | deck.forecastle.planks 2, deck.poop.planks 2, deck.stairs.forecastle.stairs.starboard 1, helm.tiller 1 | pedro (Helmsman) through helm.tiller |
-| victory | 64 | 8 | 7 | 1.09 | 2 | 0.17 | gun.quarter.port.# 2, stairs.poop.port 2, gun.quarter.starboard.# 1, helm.wheel 1, deck.forecastle.planks 1 | pedro (Helmsman) through helm.wheel |
-| oseberg | 32 | 32 | 32 | 0.41 | 32 | 0.34 | deck.floorboards 17, rowing.benches 15 | helm (Helmsman) through deck.stores |
-| lusoria | 26 | 26 | 26 | 0.14 | 26 | 0.11 | deck.floorboards 13, rowing.benches 13 | rower.port.02 (Rower) through rowing.benches |
-| taino-canoe | 30 | 30 | 30 | 0.27 | 30 | 0.11 | deck.floorboards 20, rowing.benches 6, hull.inner 4 | rower.starboard.01 (Paddler) through hull.inner |
-| flying-cloud | 42 | 3 | 3 | 0.48 | 1 | 0.07 | hull.planking 2, deck.poop.planks 1 | maria (Lookout) through hull.planking |
-| gipsy-moth-iv | 1 | 1 | 1 | 0.87 | 0 | 0 | deck.cockpit 1 | ines (Captain) through helm.tiller |
+| nina | 24 | 2 | 0 | 0 | 0 | 0 | deck.main.planks 1, helm.tiller 1 |  |
+| pinta | 30 | 1 | 0 | 0 | 0 | 0 | helm.tiller 1 |  |
+| santa-maria | 40 | 1 | 0 | 0 | 0 | 0 | helm.tiller 1 |  |
+| victory | 64 | 1 | 0 | 0 | 0 | 0 | deck.quarter.planks 1 |  |
+| oseberg | 32 | 14 | 0 | 0 | 0 | 0 | deck.floorboards 14 |  |
+| lusoria | 26 | 14 | 0 | 0 | 0 | 0 | deck.floorboards 14 |  |
+| taino-canoe | 30 | 21 | 0 | 0 | 0 | 0 | deck.floorboards 11, rowing.benches 9, deck.stores 1 |  |
+| flying-cloud | 42 | 1 | 0 | 0 | 0 | 0 | helm.wheel 1 |  |
+| gipsy-moth-iv | 1 | 1 | 0 | 0 | 0 | 0 | helm.tiller 1 |  |
 
 ### 4b. Port props
 
@@ -318,7 +319,7 @@ Share of lines that either the shot or the mesh says struck. *Agree* is within 0
 | oseberg | 3.6 / 1.116 | 0.181 / 0.376 | 2.791 / 1.113 | – | – | – | – | – | – | – | – | 4.705 / 1.812 | – | – | – | 0.287 | 0.201 | 0.307 |
 | lusoria | 6.429 / 1.333 | 0.308 / 0.402 | 5.54 / 1.333 | – | – | – | – | – | – | – | – | 4.787 / 1.842 | – | – | – | 0.24 | 0.113 | 0.18 |
 | taino-canoe | 10 / 1.714 | 0.323 / 0.52 | 6.69 / 1.713 | – | – | – | – | – | – | – | – | 3.995 / 2 | – | – | – | 0.187 | 0.072 | 0.172 |
-| flying-cloud | 3 / 0.7 | – | 0.875 / 0.347 | – | – | 0.244 / 0.104 | – | 0.875 / 0.344 | – | 1.428 / 0.249 | – | – | 0.875 / 0.35 | 16.712 / 4.984 | 1.44 / 0.35 | 0.914 | 0.503 | – |
+| flying-cloud | 3 / 0.7 | – | 0.875 / 0.347 | – | – | 0.244 / 0.104 | – | 0.875 / 0.344 | – | 1.43 / 0.249 | – | – | 0.875 / 0.35 | 16.712 / 4.984 | 1.44 / 0.35 | 0.914 | 0.503 | – |
 | gipsy-moth-iv | 3 / 0.7 | – | 3.707 / 1.483 | – | – | – | – | 0.252 / 0.445 | – | – | – | – | – | – | – | 0.216 | 0.129 | – |
 
 ### Every measurement past its limit
@@ -327,39 +328,10 @@ Share of lines that either the shot or the mesh says struck. *Agree* is within 0
 |---|---|---|---|
 | building.pieces-air-turned/bastion_trace_fortress | 20.42 | 2 | reach grows from 33 m to 36.1 m when turned; stops up to 2.8 m from it |
 | building.pieces-air-turned/stone_sea_bastion | 11.81 | 2 | reach grows from 18.9 m to 21.2 m when turned; stops up to 2.9 m from it |
-| crew.route-buried/victory | 1.2 | 0.5 | victory_w3 180, victory_q8 180, victory_q11 180, leonor 143, victory_q10 64, duarte 14; up to 0.21 m |
-| crew.route-floats/flying-cloud | 2.6 | 0.5 | maria 103, afonso 92; up to 9 m |
-| crew.route-floats/taino-canoe | 6.7 | 0.5 | rower.port.08 180, rower.starboard.08 180; up to 0.3 m |
-| crew.route-floats/victory | 5.6 | 0.5 | victory_w3 180, victory_q8 180, victory_q11 180, leonor 143, victory_q10 64, duarte 14; up to 3 m |
-| crew.soles-sunk/flying-cloud | 0.07 | 0.04 | 1 of 42 |
-| crew.soles-sunk/lusoria | 0.11 | 0.04 | 26 of 26 |
-| crew.soles-sunk/nina | 0.06 | 0.04 | 1 of 24 |
-| crew.soles-sunk/oseberg | 0.34 | 0.04 | 32 of 32 |
-| crew.soles-sunk/pinta | 0.06 | 0.04 | 1 of 30 |
-| crew.soles-sunk/santa-maria | 0.06 | 0.04 | 1 of 40 |
-| crew.soles-sunk/taino-canoe | 0.11 | 0.04 | 30 of 30 |
-| crew.soles-sunk/victory | 0.17 | 0.04 | 2 of 64 |
-| crew.station-floats/flying-cloud | 2 | 0 | up to 9 m |
-| crew.station-floats/victory | 4 | 0 | up to 3 m |
-| crew.station-outside/flying-cloud | 2 | 0 | no hull to one side at knee height |
-| crew.station-outside/taino-canoe | 2 | 0 | no hull to one side at knee height |
-| crew.station-outside/victory | 8 | 0 | no hull to one side at knee height |
-| crew.station-pressed/nina | 1 | 0 | chest 0.05 m from a solid |
-| crew.station-pressed/victory | 3 | 0 | chest 0.06 m from a solid |
-| crew.through-solid/flying-cloud | 0.48 | 0.08 | 3 of 42; worst maria through hull.planking |
-| crew.through-solid/gipsy-moth-iv | 0.87 | 0.08 | 1 of 1; worst ines through helm.tiller |
-| crew.through-solid/lusoria | 0.14 | 0.08 | 26 of 26; worst rower.port.02 through rowing.benches |
-| crew.through-solid/nina | 0.73 | 0.08 | 4 of 24; worst nina_w7 through stair:tread:4 |
-| crew.through-solid/oseberg | 0.41 | 0.08 | 32 of 32; worst helm through deck.stores |
-| crew.through-solid/pinta | 0.12 | 0.08 | 1 of 30; worst pedro through helm.tiller |
-| crew.through-solid/santa-maria | 0.22 | 0.08 | 2 of 40; worst pedro through helm.tiller |
-| crew.through-solid/taino-canoe | 0.27 | 0.08 | 30 of 30; worst rower.starboard.01 through hull.inner |
-| crew.through-solid/victory | 1.09 | 0.08 | 7 of 64; worst pedro through helm.wheel |
 | gun.blocked/victory | 2 | 0 | gun.upper.port.38 into rig.standing.main at 0.08 m |
-| gun.station-off-floor/flying-cloud | 3.4 | 0.15 | battle.gun.port.3 |
-| gun.station-off-floor/oseberg | 0.41 | 0.15 | battle.archer.port.0 |
+| gun.station-off-floor/flying-cloud | 3.34 | 0.15 | battle.gun.port.3 |
+| gun.station-off-floor/oseberg | 0.22 | 0.15 | battle.archer.port.0 |
 | gun.station-off-floor/taino-canoe | 0.25 | 0.15 | battle.archer.port.0 |
-| gun.station-off-floor/victory | 2.97 | 0.15 | gun.quarter.port.1 |
 | gun.undrawn/flying-cloud | 8 | 0 | fires from a place with no gun drawn |
 | hull.deck-formula/gipsy-moth-iv | 0.59 | 0.2 | modelDeck against the deck drawn |
 | hull.low-rail/lusoria | 0.57 | 0.8 | at z -4.17 m |
@@ -401,17 +373,15 @@ Share of lines that either the shot or the mesh says struck. *Agree* is within 0
 | surface.grain-along/taino-canoe/wale/post | 5.57 | 1.67 | 2/m against Niña's 0.359/m |
 | surface.wall-course/flying-cloud | 0.91 | 0.45 | wall courses 0.914 m wide against Niña's 0.267 m |
 | surface.wall-course/victory | 0.76 | 0.45 | wall courses 0.756 m wide against Niña's 0.267 m |
-| walk.inside-structure/flying-cloud | 438 | 0 | of 3467 cells: under a roof with no floor |
-| walk.inside-structure/gipsy-moth-iv | 55 | 0 | of 161 cells: under a roof with no floor |
-| walk.inside-structure/victory | 3 | 0 | of 2048 cells: under a roof with no floor |
-| walk.over-nothing/gipsy-moth-iv | 1 | 0 | of 161 cells; up to 1.38 m |
-| walk.over-nothing/santa-maria | 5 | 0 | of 943 cells; up to 0.16 m |
-| walk.over-nothing/victory | 75 | 0 | of 2048 cells; up to 18.5 m |
-| walk.through-solid/flying-cloud | 63 | 0 | of 3467 cells; structure.deckhouse 18, deck.bulkhead.forecastle 11, deck.stairs.poop.port 11, deck.stairs.poop.starboard 10 |
-| walk.through-solid/gipsy-moth-iv | 12 | 0 | of 161 cells; deck.cockpit 15, structure.cabin 6, deck.stairs.cockpit-entry 6 |
-| walk.through-solid/nina | 12 | 0 | of 397 cells; stair:tread:# 6, bow.structure 5, tackle.fore 2, anchor:cathead:-# 1 |
-| walk.through-solid/oseberg | 1 | 0 | of 277 cells; rowing.benches 64, deck.stores 10, mast.main.cut 1 |
-| walk.through-solid/pinta | 16 | 0 | of 690 cells; deck.stairs.forecastle.stairs.port 10, deck.stairs.forecastle.stairs.starboard 10, deck.stairs.quarter.stairs.port 6, deck.stairs.quarter.stairs.starboard 6 |
-| walk.through-solid/santa-maria | 24 | 0 | of 943 cells; deck.stairs.poop.stairs.port 10, deck.stairs.poop.stairs.starboard 8, deck.stairs.quarter.stairs.port 7, deck.stairs.quarter.stairs.starboard 7 |
-| walk.through-solid/victory | 81 | 0 | of 2048 cells; deck.bulkhead.#.# 40, stairs.quarter.port 10, stairs.quarter.starboard 8, helm.wheel 8 |
+| walk.inside-structure/flying-cloud | 414 | 0 | of 3467 cells: under a roof with no floor |
+| walk.inside-structure/gipsy-moth-iv | 54 | 0 | of 161 cells: under a roof with no floor |
+| walk.over-nothing/gipsy-moth-iv | 2 | 0 | of 161 cells; up to 1.38 m |
+| walk.over-nothing/santa-maria | 2 | 0 | of 943 cells; up to 0.16 m |
+| walk.through-solid/flying-cloud | 87 | 0 | of 3467 cells; structure.deckhouse 41, deck.bulkhead.forecastle 11, deck.stairs.poop.port 11, deck.stairs.poop.starboard 9 |
+| walk.through-solid/gipsy-moth-iv | 13 | 0 | of 161 cells; deck.cockpit 11, structure.cabin 7, deck.stairs.cockpit-entry 5, hull.planking 1 |
+| walk.through-solid/nina | 12 | 0 | of 397 cells; stair:tread:# 6, bow.structure 5, anchor:cathead:-# 1, tackle.fore 1 |
+| walk.through-solid/oseberg | 1 | 0 | of 277 cells; rowing.benches 34, deck.stores 8, mast.main.cut 1 |
+| walk.through-solid/pinta | 16 | 0 | of 690 cells; deck.stairs.forecastle.stairs.port 8, deck.stairs.forecastle.stairs.starboard 8, deck.stairs.quarter.stairs.port 6, deck.stairs.quarter.stairs.starboard 6 |
+| walk.through-solid/santa-maria | 24 | 0 | of 943 cells; deck.stairs.poop.stairs.port 8, deck.stairs.poop.stairs.starboard 8, deck.stairs.quarter.stairs.port 7, deck.stairs.quarter.stairs.starboard 7 |
+| walk.through-solid/victory | 83 | 0 | of 2048 cells; deck.bulkhead.#.# 40, stairs.quarter.port 8, stairs.quarter.starboard 8, helm.wheel 8 |
 <!-- audit tables end -->

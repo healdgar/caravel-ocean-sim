@@ -818,8 +818,8 @@ export function poseCrewFingers(a, s, leftGrip = null, rightGrip = null) {
       leftGrip = 0.35;
       rightGrip = 0.94;
     } else if (s.role === 'Helmsman' || s.roles?.includes('helmsman')) {
-      leftGrip = 0.80;
-      rightGrip = 0.80;
+      leftGrip = 1.05;
+      rightGrip = 1.05;
     } else if ((s.firePanic ?? 0) > 0.18) {
       const tremor = 0.08 * Math.sin((s.time ?? 0) * 11 + (s.crewIndex ?? 0));
       leftGrip = -0.28 + tremor;

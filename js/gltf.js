@@ -181,6 +181,27 @@ export function createSkinAnimator(asset) {
         min:Object.freeze(min.map((v,i)=>v-ankle[i])),max:Object.freeze(max.map((v,i)=>v-ankle[i])),
         restWorld:Object.freeze(Array.from(animator.world[node])),vertices:Object.freeze(points.map(p=>p.index))});
     }
+    // What a seated body rests on, measured from its own skin: the back of the thigh, which turns to face down as
+    // the thigh comes up to level, and the heel of the boot, which is skinned to the shin and swings with it.
+    const pelvisNode=animator.nodeIndex('pelvis'),hipNode=animator.nodeIndex('thigh_l'),ankleNode=animator.nodeIndex('foot_l');
+    if(pelvisNode>=0&&hipNode>=0&&ankleNode>=0){
+      const slotsOf=pattern=>new Set(animator.joints.map((n,i)=>pattern.test(animator.names[n])?i:-1).filter(i=>i>=0)),thighs=slotsOf(/^thigh_[lr]$/),shin=slotsOf(/^calf_l$/);
+      const hip=animator.world[hipNode],pelvis=animator.world[pelvisNode],ankle=animator.world[ankleNode];let behind=0,heelBelow=0,heelBehind=0;
+      for(const meshNode of g.nodes)if(meshNode.mesh!==undefined&&meshNode.skin===0)for(const p of g.meshes[meshNode.mesh]?.primitives??[]){
+        const a=p.attributes;if(a?.POSITION===undefined||a?.JOINTS_0===undefined||a?.WEIGHTS_0===undefined)continue;
+        const pos=gltfAccessor(asset,a.POSITION),joint=gltfAccessor(asset,a.JOINTS_0),weight=gltfAccessor(asset,a.WEIGHTS_0),num=pos.length/3;
+        for(let i=0;i<num;i++){
+          let sum=0,onThigh=0,onShin=0;for(let k=0;k<4;k++)sum+=weight[i*4+k];if(sum<1e-6)continue;
+          for(let k=0;k<4;k++){if(thighs.has(joint[i*4+k]))onThigh+=weight[i*4+k]/sum;if(shin.has(joint[i*4+k]))onShin+=weight[i*4+k]/sum;}
+          if(onThigh<.5&&onShin<.5)continue;
+          let y=0,z=0;for(let k=0;k<4;k++){const at=joint[i*4+k]*16,w=weight[i*4+k]/sum;y+=w*(animator.palette[at+1]*pos[i*3]+animator.palette[at+5]*pos[i*3+1]+animator.palette[at+9]*pos[i*3+2]+animator.palette[at+13]);z+=w*(animator.palette[at+2]*pos[i*3]+animator.palette[at+6]*pos[i*3+1]+animator.palette[at+10]*pos[i*3+2]+animator.palette[at+14]);}
+          if(onThigh>=.5)behind=Math.max(behind,hip[14]-z);
+          else if(y<ankle[13]&&(ankle[13]-y)+(ankle[14]-z)>heelBelow+heelBehind){heelBelow=ankle[13]-y;heelBehind=ankle[14]-z;}
+        }
+      }
+      // A centimetre of give, for the thigh that a lean or a raised knee turns further under.
+      animator.seatContact=Object.freeze({pelvisAboveSeat:behind-(hip[13]-pelvis[13])+.01,heelBelow,heelBehind});
+    }
   }
   return animator;
 }

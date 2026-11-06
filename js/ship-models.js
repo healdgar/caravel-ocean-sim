@@ -232,7 +232,8 @@ export function resolveShipNode(boat,nodeId,{space='vessel',time=0,wind=0,side=-
   }
   if(model.id==='victory'&&nodeId==='helm.grip'){
     const centre=VICTORY_DESIGN.wheel.centre,r=VICTORY_DESIGN.wheel.radius,a=(boat.rudder??0)*.07;
-    const theta=(along<0?Math.PI-.6:.6)+Math.sin(a)*.12,p=[centre[0]+Math.cos(theta)*r,centre[1]+Math.sin(theta)*r,centre[2]+.055];
+    // Wrists just aft of the after wheel's rim on its starboard side, one high and one low, in front of where he stands.
+    const theta=(along<0?.26:-.28)+Math.sin(a)*.12,p=[centre[0]+Math.cos(theta)*r,centre[1]+Math.sin(theta)*r,centre[2]+.055+.03];
     const k=space==='design'?[1,1,1]:[boat.beam/3.6,model.designFrame.verticalScale,boat.length/12];
     for(let i=0;i<3;i++)out[i]=p[i]*k[i];return out;
   }

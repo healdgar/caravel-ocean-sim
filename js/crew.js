@@ -1,10 +1,10 @@
 import { footingUnder, restingHeightUnder } from './building-fracture.js';
 import { DRESS_MASK_SCALE, DRESS_PIECES, indigenousDress } from './indigenous-dress.js';
 import { loadCrewGLB, gltfTRS } from './gltf.js';
-import { hullDeck, vesselDeck, HULL_VERTICAL_SCALE, HELM_TILLER_DISTANCE, modelDeck, modelHullDeck, modelDeckWidth, vesselVerticalScale } from './hull.js';
+import { hullDeck, vesselDeck, HULL_VERTICAL_SCALE, modelDeck, modelHullDeck, modelDeckWidth, vesselVerticalScale } from './hull.js';
 import { SAIL_KEYS, sailingState } from './sailing.js';
 import { requestYardTransfer } from './lateen.js';
-import { assignCrewWork, stepCrewWork, updateCrewGunneryAttendance, updateCrewRowingAttendance, hasExtendedCrewModel, crewSeatedPose, crewDeckHeight } from './crew-work.js';
+import { assignCrewWork, stepCrewWork, updateCrewGunneryAttendance, updateCrewRowingAttendance, hasExtendedCrewModel, crewSeatedPose, crewDeckHeight, crewHelmStand } from './crew-work.js';
 import { poseCrewWork } from './crew-pose.js';
 import { stepCrewPhysicsState, applyCrewRealism } from './crew-physics.js';
 import { applyCrewWounds, clearCrewWounds } from './crew-wounds.js';
@@ -14,7 +14,7 @@ import { createGunneryTools } from './gunnery-tools.js';
 import { CREW_RENDER, CREW_SHADOW, CREW_POSE_BLEND } from './wgsl/crew.js';
 import { NINA_DESIGN } from './models/nina.js';
 import { VICTORY_DESIGN } from './models/victory.js';
-import { requirePlayableShipModel, resolveShipNode } from './ship-models.js';
+import { requirePlayableShipModel } from './ship-models.js';
 import {ADDITIONAL_DESIGNS,additionalStairFlights} from './models/additional.js';
 import {ROWING_DESIGNS} from './models/rowing.js';
 import {proceduralDesign} from './models/procedural.js';
@@ -414,7 +414,7 @@ function stepProceduralDeckhand(s,boat,dt,wind,company){
     s.walk+=(Number(moving)-s.walk)*(1-Math.exp(-dt*8));s.moisturePoints=null;
     const proneLift=isDown?0.11*Math.abs(Math.sin(s.climbPitch??0)):0;
     s.position.set([s.x*boat.beam/3.6,(s.navigationY??crewDeckHeight(boat,s.z,s.x))*vesselVerticalScale(boat)+.028+proneLift,s.z*boat.length/12]);
-    if(!isDown&&s.roles?.includes('helmsman')){const grip=resolveShipNode(boat,'helm.grip');s.yaw=Math.atan2(grip[0]-s.position[0],grip[2]-s.position[2]);}
+    if(!isDown&&s.roles?.includes('helmsman'))s.yaw=proceduralDesign(boat.modelId).crewStations[s.stationKey??s.id]?.yaw??s.yaw;
   }
   const sy=Math.sin(s.yaw/2),cy=Math.cos(s.yaw/2),sx=Math.sin((s.climbPitch??0)/2),cx=Math.cos((s.climbPitch??0)/2);
   s.rotation.set([cy*sx,sy*cx,-sy*sx,cy*cx]);gltfTRS(s.transform,s.position,s.rotation,s.scale);return s;
@@ -444,19 +444,19 @@ export function stepDeckhand(s,boat,dt,wind=0,company=null) {
   const proneLift=isDown?0.11*Math.abs(Math.sin(s.climbPitch??0)):0;
   if(!isDown&&s.role==='Helmsman'&&boat.modelId==='victory'){
     const station=boat.model?.crewStations?.[s.id]??requirePlayableShipModel('victory').crewStations[s.id];
-    s.x=station.x;s.z=station.z;s.yaw=station.yaw??Math.PI;s.climbPitch=.28;
+    s.x=station.x;s.z=station.z;s.yaw=station.yaw??Math.PI;s.climbPitch=0;
     s.position.set([s.x*boat.beam/3.6,modelDeck(boat,s.z)*vesselVerticalScale(boat)+.028,s.z*lengthScale]);
   }else if(!isDown&&s.role==='Helmsman'&&ADDITIONAL_DESIGNS[boat.modelId]){
-    const design=ADDITIONAL_DESIGNS[boat.modelId],grip=resolveShipNode(boat,'helm.grip'),spacing=.40;
-    // Stand inboard of the real handle. The boat's own weather deck sets feet;
+    const design=ADDITIONAL_DESIGNS[boat.modelId],stand=crewHelmStand(boat);
+    // Stand beside the real handle. The boat's own weather deck sets feet;
     // neither the Niña's 2.3-high quarterdeck nor its tiller distance is reused.
-    s.x=grip[0]/(boat.beam/3.6);s.z=(grip[2]-spacing)/lengthScale;s.yaw=0;s.climbPitch=.08;
+    s.x=stand.x/(boat.beam/3.6);s.z=stand.z/lengthScale;s.yaw=stand.yaw;s.climbPitch=0;
     const station=design.crewStations[s.id];
     if(Math.abs(modelDeck(boat,s.z)-modelDeck(boat,station.z))>.15){s.x=station.x;s.z=station.z;s.yaw=station.yaw??0;}
     s.position.set([s.x*boat.beam/3.6,modelDeck(boat,s.z)*vesselVerticalScale(boat)+.028,s.z*lengthScale]);
   }else if(!isDown&&s.role==='Helmsman'){
-    const grip=resolveShipNode(boat,'helm.grip');s.x=grip[0]/(boat.beam/3.6);s.z=(grip[2]-HELM_TILLER_DISTANCE)/lengthScale;s.yaw=0;
-    s.position.set([grip[0],hullDeck(s.z)*HULL_VERTICAL_SCALE+.028,grip[2]-HELM_TILLER_DISTANCE]);
+    const stand=crewHelmStand(boat);s.x=stand.x/(boat.beam/3.6);s.z=stand.z/lengthScale;s.yaw=stand.yaw;
+    s.position.set([stand.x,hullDeck(s.z)*HULL_VERTICAL_SCALE+.028,stand.z]);
   }else s.position.set([s.x*boat.beam/3.6,(s.navigationY??(s.company?modelDeck(boat,s.z):modelHullDeck(boat,s.z)))*vesselVerticalScale(boat)+.028+proneLift,s.z*lengthScale]);
   const sy=Math.sin(s.yaw/2),cy=Math.cos(s.yaw/2),sx=Math.sin((s.climbPitch??0)/2),cx=Math.cos((s.climbPitch??0)/2);
   s.rotation.set([cy*sx,sy*cx,-sy*sx,cy*cx]);gltfTRS(s.transform,s.position,s.rotation,s.scale);
