@@ -297,3 +297,22 @@ test('sail, rigging, and mast damage immediately diverges vessel speeds in broad
   assert.ok(player.surgeVelocity<enemy.surgeVelocity*0.65,`crippled ship slows down (${player.surgeVelocity.toFixed(2)} m/s) while undamaged ship maintains headway (${enemy.surgeVelocity.toFixed(2)} m/s)`);
   assert.ok(enemy.z<player.z-12,`undamaged ship pulls ahead of crippled opponent (enemy z=${enemy.z.toFixed(1)}, player z=${player.z.toFixed(1)})`);
 });
+
+test('a hull goes on riding the waves when the game is drawn slowly',()=>{
+  const WAVES=[[.9,6.5,.3],[.45,4.2,2.1]],sea=t=>WAVES.reduce((s,[a,T,p])=>s+a*Math.sin(p-2*Math.PI/T*t),0);
+  const lag=(fps,id)=>{
+    const boat=copyVessel({...source,modelId:id},{distance:0,side:0,modelId:id}),probe=createVesselProbeState(),dt=1/fps;
+    let pending=null,worst=0;
+    for(let t=0;t<60;t+=dt){
+      if(!pending)pending={time:t,revision:boat.revision,due:t+2*dt-1e-9,heights:new Float32Array(16).fill(sea(t),0,9)};
+      else if(t>=pending.due){acceptVesselProbe(boat,probe,pending.heights,pending.time,pending.revision,boat.length,boat.beam);pending=null;}
+      stepVessel(boat,probe,dt,t,0,0);
+      if(t>15)worst=Math.max(worst,Math.abs(boat.heave+boat.hydrodynamics.sinkage-sea(t+dt)));
+    }
+    return worst;
+  };
+  for(const id of ['nina','oseberg','victory']){
+    const fast=lag(60,id),slow=lag(10,id);
+    assert.ok(slow<fast+.6,`${id}: ${fast.toFixed(2)} m at 60 fps, ${slow.toFixed(2)} m at 10`);
+  }
+});

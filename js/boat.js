@@ -315,12 +315,16 @@ export function boatForwardSpeed(boat) {
   return boat.surgeVelocity ?? (boat.propulsion === 'sail' ? 0 : boat.speed * KNOT_TO_MPS);
 }
 
+// How old a sea reading may be and still be steered by. A reading takes about three frames to come back, so this
+// is reached near five frames a second: a hull must go on riding the waves however slowly the game is drawn.
+export const WAVE_READING_LIFE_S = 0.6;
+
 // World-space, incident-wave slopes arrive in the existing asynchronous probe.
 // Never hold an old force indefinitely after a stalled readback or a scene edit.
 export function boatWaveSlope(boat, time) {
   const age = time - boat.waveSampleTime;
   if (boat.waveRevision !== boat.revision || !(age >= 0)) return 0;
-  const freshness = Math.exp(-Math.max(0, age - 0.25) / 0.25);
+  const freshness = Math.exp(-Math.max(0, age - WAVE_READING_LIFE_S) / 0.15);
   const heading = boat.heading * Math.PI / 180;
   return (boat.waveSlopeX * Math.sin(heading) - boat.waveSlopeZ * Math.cos(heading)) * freshness;
 }

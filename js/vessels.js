@@ -1,4 +1,4 @@
-import { boatHydrodynamics, boatTargets, boatWaveAttitude, boatWaveSlope, stepBoatSurge, stepBoatSteering, boatSpring } from './boat.js';
+import { WAVE_READING_LIFE_S, boatHydrodynamics, boatTargets, boatWaveAttitude, boatWaveSlope, stepBoatSurge, stepBoatSteering, boatSpring } from './boat.js';
 import { requirePlayableShipModel } from './ship-models.js';
 import {getShipParts} from './ship-parts.js';
 
@@ -37,7 +37,7 @@ export function createVesselProbeState(){return {time:-1,revision:-1,rate:{heave
 export function acceptVesselProbe(boat,state,heights,time,revision,length,beam){
   if(revision!==boat.revision)return false;
   const next={...boatTargets(heights.subarray(0,9),length,beam),...boatWaveAttitude(heights[10],heights[11],boat.heading)};
-  const elapsed=time-state.time,placed=state.time<0,valid=state.revision===revision&&elapsed>0&&elapsed<.25;
+  const elapsed=time-state.time,placed=state.time<0,valid=state.revision===revision&&elapsed>0&&elapsed<WAVE_READING_LIFE_S;
   for(const key of AXES){
     const limit=key==='heave'?8:1.2;
     const rate=valid?Math.max(-limit,Math.min(limit,(next[key]-boat.target[key])/elapsed)):0;
@@ -64,9 +64,9 @@ export function stepVessel(boat,probe,dt,time,windSpeed,windDirection,steering=0
   }
   const previousX=boat.x,previousZ=boat.z,age=Math.max(0,time-probe.time);
   const predicted=boat.waveAttitude??={heave:0,pitch:0,roll:0};
-  const fresh=age<.25&&probe.revision===boat.revision;
+  const fresh=age<WAVE_READING_LIFE_S&&probe.revision===boat.revision;
   const waveDecay=dmg?.sunk?Math.exp(-(dmg.sinkingDepth??0)/5):1;
-  for(const key of AXES)predicted[key]=(boat.target[key]+(fresh?probe.rate[key]:0)*Math.min(age,.25))*waveDecay;
+  for(const key of AXES)predicted[key]=(boat.target[key]+(fresh?probe.rate[key]:0)*age)*waveDecay;
   if(dmg){
     predicted.roll+=(dmg.floodingRoll??0);
     predicted.pitch+=(dmg.floodingPitch??0);
