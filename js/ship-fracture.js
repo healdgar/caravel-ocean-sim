@@ -24,10 +24,10 @@ export function shipMastSpecs(modelId) {
   if (modelId === 'taino-canoe') return [];
   if (modelId === 'oseberg' || modelId === 'lusoria') return [['main', 0.0, 4.2, 1.15]];
   if (modelId === 'gipsy-moth-iv') return [['main', -1.15, 4.8, 1.25], ['mizzen', 2.7, 3.4, 1.15]];
-  if (modelId === 'nina') return [['fore', -3.6, 4.35, 1.45], ['main', -0.2, 5.1, 1.35], ['mizzen', 3.4, 3.95, 1.85]];
-  if (modelId === 'pinta') return [['fore', -3.5, 4.2, 1.45], ['main', 0.1, 5.2, 1.35], ['mizzen', 3.8, 3.8, 1.75]];
-  if (modelId === 'santa-maria') return [['fore', -3.55, 4.6, 1.65], ['main', 0.05, 5.65, 1.45], ['mizzen', 3.85, 4.1, 1.95]];
-  if (modelId === 'flying-cloud') return [['fore', -3.4, 5.6, 1.45], ['main', 0.15, 6.1, 1.4], ['mizzen', 3.45, 5.1, 1.55]];
+  if (modelId === 'nina') return [['fore', -1.94, 5.1, 1.45], ['main', 2.14, 4.35, 1.35], ['mizzen', 4.86, 3.95, 1.85]];
+  if (modelId === 'pinta') return [['fore', -3.18, 4.2, 1.45], ['main', 0.1, 5.2, 1.35], ['mizzen', 3.8, 3.8, 1.75]];
+  if (modelId === 'santa-maria') return [['fore', -3.55, 4.6, 1.65], ['main', 0.05, 5.65, 1.45], ['mizzen', 4.51, 4.1, 1.95]];
+  if (modelId === 'flying-cloud') return [['fore', -3.31, 5.6, 1.45], ['main', -0.11, 6.1, 1.4], ['mizzen', 3.45, 5.1, 1.55]];
   // Victory's breaks are her real joints: the stump's top, and the doubling at each lower masthead.
   return [['fore', -3.55, 5.72, 1.59], ['main', 0.05, 6.18, 1.55], ['mizzen', 3.53, 5.15, 2.08]];
 }

@@ -389,6 +389,21 @@ test('a plunging shot through a gap meets the deck, and one aimed at the hull be
   assert.ok(low?.localPosition[0] > 0, 'nothing below the waterline ever left, so the same shot lower down stops where it did');
 });
 
+test('every mast is listed where its ship really steps it', () => {
+  for (const id of Object.keys(SHIP_MODELS)) {
+    const asset = cache.get(id), f = asset.fracture;
+    shipMastSpecs(id).forEach((spec, k) => {
+      const points = [];
+      for (let t = 0; t < f.sparMasts.length; t++) if (f.sparMasts[t] === k + 1) for (let c = 0; c < 3; c++) { const at = asset.indices[t * 3 + c] * 9; points.push([asset.vertices[at + 1], asset.vertices[at + 2]]); }
+      const low = points.reduce((least, p) => Math.min(least, p[0]), Infinity), high = points.reduce((most, p) => Math.max(most, p[0]), -Infinity);
+      // Low down there is only the trunk: the yards are up where they would pull the mean about.
+      const trunk = points.filter((p) => p[0] < low + (high - low) * 0.4), station = trunk.reduce((sum, p) => sum + p[1], 0) / trunk.length;
+      assert.ok(Math.abs(station - spec[1]) < 0.15, `${id} ${spec[0]}: listed at ${spec[1]}, stands at ${station.toFixed(2)}`);
+      assert.ok(spec[2] < high && spec[3] > low, `${id} ${spec[0]}: breaks at ${spec[3]} and ${spec[2]} within ${low.toFixed(2)} to ${high.toFixed(2)}`);
+    });
+  }
+});
+
 test('a shot through a gap can strike a mast, and hurts that mast', () => {
   const boat = designedShip('nina'), f = cache.get('nina').fracture, asset = cache.get('nina'), [, sy, sz] = f.scale;
   // Where the mast really stands at this height, from its own triangles.

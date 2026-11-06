@@ -1026,13 +1026,19 @@ export function sweepShipSegment(from, to, radius = 0.08, targetBoat, sourceBoat
     if (ly > baseFreeboard - radius && ly <= mastTop && (targetBoat.model?.rig?.sails?.length ?? (model?.rig?.sails?.length ?? 1)) > 0) {
       const mastW = B * 0.85 + radius, mastD = L * 0.14 + radius;
       const sailCount = targetBoat.model?.rig?.sails?.length ?? model?.rig?.sails?.length ?? 3;
-      const mastStations = sailCount === 1
-        ? [['main', 0], ['fore', -L * 0.26], ['mizzen', L * 0.26]]
-        : [['fore', -L * 0.26], ['main', 0], ['mizzen', L * 0.26]];
-      for (const [group, zCenter] of mastStations) {
-        if (Math.abs(lx) <= mastW && Math.abs(lz - zCenter) <= mastD && ly <= mastStandsTo(group) + radius) {
-          return { hitZone: 'rigging', mastGroup: group, localNormal: [lx >= 0 ? 1 : -1, 0.15, (lz - zCenter) / mastD] };
-        }
+      // A shot hits the mast it is nearest, where that mast really stands.
+      const mastStations = mastSpecs?.length
+        ? mastSpecs.map((spec) => [spec[0], spec[1] * sz])
+        : sailCount === 1
+          ? [['main', 0], ['fore', -L * 0.26], ['mizzen', L * 0.26]]
+          : [['fore', -L * 0.26], ['main', 0], ['mizzen', L * 0.26]];
+      let group = null, zCenter = 0, nearest = Infinity;
+      for (const [name, station] of mastStations) {
+        const away = Math.abs(lz - station);
+        if (away < nearest) { nearest = away; group = name; zCenter = station; }
+      }
+      if (Math.abs(lx) <= mastW && nearest <= mastD && ly <= mastStandsTo(group) + radius) {
+        return { hitZone: 'rigging', mastGroup: group, localNormal: [lx >= 0 ? 1 : -1, 0.15, (lz - zCenter) / mastD] };
       }
     }
     return null;

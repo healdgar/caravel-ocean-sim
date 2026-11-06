@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
+import {shipMastSpecs} from '../js/ship-fracture.js';
 import {createShipGunnery,createPortGunnery,createVesselDamageState,applyCrewCasualtiesAndMorale,sweepShipSegment,applyShipImpactDamage,sweepBuildingSegment,applyBuildingImpactDamage,sweepScenerySegment,applySceneryImpactDamage,sweepTerrainSegment,applyTerrainImpactDamage,createGunnerySolidSweep,resolveVesselCollisions,applyShipCollisionDamage,classifyGroundingSubstrate,applyGroundingImpactDamage,stepVesselDamage,computeCrewEfficiency} from '../js/gunnery-control.js';
 import {constrainIslandMotion} from '../js/terrain-model.js';
 import {GUNNERY_ORDER_SECONDS} from '../js/gunnery-audio.js';
@@ -144,7 +145,8 @@ test('cannonballs strike other ships in hull and rigging zones, imparting 6-DOF 
  assert.ok(Math.abs(target.rollVelocity)>0,'off-centre hull strike imparts roll impulse');
 
  // 2. Upper rigging/mast hit reduces mast integrity and caps deployed canvas
- const rigHit=sweepShipSegment([-10,9.5,0],[-50,9.5,0],0.08,target,source);
+ const mainStation=shipMastSpecs('nina').find(mast=>mast[0]==='main')[1]*20/12;
+ const rigHit=sweepShipSegment([-10,9.5,mainStation],[-50,9.5,mainStation],0.08,target,source);
  assert.ok(rigHit,'swept segment intersects mainmast rigging envelope');
  assert.equal(rigHit.hitZone,'rigging');
  assert.equal(rigHit.mastGroup,'main');
