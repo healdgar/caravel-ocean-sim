@@ -59,7 +59,7 @@ function buildFallbackRailBroadside(stations,{calibre=2,kind='swivel',type='swiv
 }
 const NAVAL_BATTLE_FALLBACK_GUNS=deepFreeze({
   'flying-cloud':buildFallbackRailBroadside([-3.2,-1.1,1.1,3.2],{calibre:9,kind:'long-gun',type:'long-gun',y:0.86,floor:0.32,xHalf:1.48,recoilLength:0.55,recoilDuration:0.65,breechMass:820}),
-  oseberg:buildFallbackRailBroadside([-2.2,2.2],{calibre:2,kind:'swivel',type:'swivel',y:0.52,floor:0.12,xHalf:1.45}),
+  oseberg:buildFallbackRailBroadside([-2.2,2.2],{calibre:2,kind:'swivel',type:'swivel',y:0.60,floor:0.12,xHalf:1.45}),
   lusoria:buildFallbackRailBroadside([-2.4,2.4],{calibre:2,kind:'swivel',type:'swivel',y:0.48,floor:0.10,xHalf:1.38}),
   'taino-canoe':buildFallbackRailBroadside([0.0],{calibre:1,kind:'swivel',type:'swivel',y:0.35,floor:0.05,xHalf:1.15,recoilLength:0.06,recoilDuration:0.40,breechMass:120}),
   'gipsy-moth-iv':buildFallbackRailBroadside([1.4],{calibre:2,kind:'swivel',type:'swivel',y:0.62,floor:0.18,xHalf:1.42}),

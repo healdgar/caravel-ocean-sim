@@ -35,16 +35,32 @@ export function prepareHullLoft({stations,levels,sections,...rest}){
   return {...rest,sheerDatum,stations:[...stations],levels:[...levels],sections:sections.map(row=>[...row]),tangents:sections.map(row=>loftTangents(stations,row))};
 }
 
+// Optional sweep of the rail alone. The keel, floor and seats keep the gentle
+// sheer while the topsides stretch upward from the waterline toward the stems.
+export function hullLoftRailRise(profile,z){
+  const rise=profile.railRise??0;if(!rise)return 0;
+  const n=profile.railRisePower,t=loftClamp((z-profile.stations[0])/(profile.stations.at(-1)-profile.stations[0]),0,1);
+  return rise*((1-t)**n+t**n-2*.5**n);
+}
+// A height on a given station back to its section level, then that level's rake depth.
+function loftSectionLevel(profile,z,y){
+  const base=y-hullLoftSheer(profile,z);
+  return profile.railRise&&base>0?base*profile.deck/(profile.deck+hullLoftRailRise(profile,z)):base;
+}
+function loftRakeDepth(profile,base){
+  const ys=profile.levels;
+  return profile.railRise?loftClamp((profile.deck-base)/(profile.deck-ys[0]),0,1):loftClamp(-base/-ys[0],0,1);
+}
 export function hullLoftSheer(profile,z){
   const t=loftClamp((z-profile.stations[0])/(profile.stations.at(-1)-profile.stations[0]),0,1);
   return (profile.sheerFore??0)*(1-t)**4+(profile.sheerAft??0)*t**4-(profile.sheerDatum??0);
 }
-export function hullLoftDeck(profile,z){return profile.deck+hullLoftSheer(profile,z);}
+export function hullLoftDeck(profile,z){return profile.deck+hullLoftSheer(profile,z)+hullLoftRailRise(profile,z);}
 export function hullLoftBottom(profile,z){return profile.levels[0]+hullLoftSheer(profile,z);}
 export function hullLoftWidth(profile,z,y){
-  const base=y-hullLoftSheer(profile,z),ys=profile.levels;
+  const base=loftSectionLevel(profile,z,y),ys=profile.levels;
   if(base<ys[0]-1e-8||base>ys.at(-1)+1e-8)return 0;
-  const depth=loftClamp(-base/-ys[0],0,1),first=profile.stations[0],last=profile.stations.at(-1);
+  const depth=loftRakeDepth(profile,base),first=profile.stations[0],last=profile.stations.at(-1);
   const fore=first+(profile.bowRake??0)*depth*depth,aft=last-(profile.sternRake??0)*depth*depth;
   if(z<fore-1e-8||z>aft+1e-8)return 0;
   const station=z<0?z*first/fore:z*last/aft;
@@ -57,9 +73,9 @@ export function hullLoftWidth(profile,z,y){
   return Math.max(0,loftCubic(a,b,left,right,span,loftClamp((base-ys[j])/span,0,1)));
 }
 export function hullLoftPoint(profile,station,baseY,side){
-  const depth=loftClamp(-baseY/-profile.levels[0],0,1),first=profile.stations[0],last=profile.stations.at(-1);
+  const depth=loftRakeDepth(profile,baseY),first=profile.stations[0],last=profile.stations.at(-1);
   const fore=first+(profile.bowRake??0)*depth*depth,aft=last-(profile.sternRake??0)*depth*depth;
-  const z=station*(station<0?fore/first:aft/last),y=baseY+hullLoftSheer(profile,z);
+  const z=station*(station<0?fore/first:aft/last),y=baseY+hullLoftSheer(profile,z)+(baseY>0?hullLoftRailRise(profile,z)*baseY/profile.deck:0);
   return [side*hullLoftWidth(profile,z,y),y,z];
 }
 
@@ -79,14 +95,18 @@ fn ${prefix}Sheer(z:f32)->f32 {
   let t=clamp((z-(${profile.stations[0]}))/${profile.stations.at(-1)-profile.stations[0]},0.0,1.0);
   return ${profile.sheerFore??0}*pow(1.0-t,4.0)+${profile.sheerAft??0}*pow(t,4.0)-${profile.sheerDatum??0};
 }
-fn ${prefix}Row(j:u32,z:f32)->f32 {
+${profile.railRise?`fn ${prefix}Rise(z:f32)->f32 {
+  let t=clamp((z-(${profile.stations[0]}))/${profile.stations.at(-1)-profile.stations[0]},0.0,1.0);
+  return ${profile.railRise}*(pow(1.0-t,${profile.railRisePower.toFixed(1)})+pow(t,${profile.railRisePower.toFixed(1)})-${2*.5**profile.railRisePower});
+}
+`:''}fn ${prefix}Row(j:u32,z:f32)->f32 {
   var i=0u;while(i<${nx-2}u&&z>${prefix}X[i+1u]){i++;}
   let h=${prefix}X[i+1u]-${prefix}X[i];let t=clamp((z-${prefix}X[i])/h,0.0,1.0);let k=j*${nx}u+i;
   return victoryCubic(${prefix}W[k],${prefix}W[k+1u],${prefix}M[k],${prefix}M[k+1u],h,t);
 }
 fn ${prefix}Width(z:f32,y:f32)->f32 {
-  let base=y-${prefix}Sheer(z);if(base<${profile.levels[0]}-.00000001||base>${profile.levels.at(-1)}+.00000001){return 0.0;}
-  let depth=clamp(-base/${-profile.levels[0]},0.0,1.0);
+  ${profile.railRise?`var base=y-${prefix}Sheer(z);if(base>0.0){base=base*${profile.deck}/(${profile.deck}+${prefix}Rise(z));}`:`let base=y-${prefix}Sheer(z);`}if(base<${profile.levels[0]}-.00000001||base>${profile.levels.at(-1)}+.00000001){return 0.0;}
+  let depth=${profile.railRise?`clamp((${profile.deck}-base)/${profile.deck-profile.levels[0]},0.0,1.0)`:`clamp(-base/${-profile.levels[0]},0.0,1.0)`};
   let fore=${profile.stations[0]}+${profile.bowRake??0}*depth*depth;let aft=${profile.stations.at(-1)}-${profile.sternRake??0}*depth*depth;
   if(z<fore-.00000001||z>aft+.00000001){return 0.0;}
   let station=select(z*${profile.stations.at(-1)}/aft,z*${profile.stations[0]}/fore,z<0.0);

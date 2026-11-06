@@ -28,7 +28,9 @@ export function createRowingShipMesh(modelId,{groups,parts}={}){
     }
   };
   const ports=d.stations.filter(s=>s.oarlock==='hull-port'),portRY=.055/sy,portRZ=.055/sz,portY=p.deck-.12/sy;
-  const zs=[...new Set([...p.stations,...Array.from({length:65},(_,i)=>-6+12*i/64),...d.stations.map(s=>s.z),...ports.flatMap(s=>[s.z-portRZ,s.z+portRZ])])].sort((a,b)=>a-b);
+  // A rail that sweeps up needs closer stations near the ends to stay fair.
+  const endStations=p.railRise?Array.from({length:8},(_,i)=>4.59375+.1875*i).flatMap(z=>[-z,z]):[];
+  const zs=[...new Set([...p.stations,...Array.from({length:65},(_,i)=>-6+12*i/64),...endStations,...d.stations.map(s=>s.z),...ports.flatMap(s=>[s.z-portRZ,s.z+portRZ])])].sort((a,b)=>a-b);
   const levels=[...new Set([...Array.from({length:25},(_,i)=>p.levels[0]+(p.deck-p.levels[0])*i/24),...(ports.length?[portY-portRY,portY+portRY]:[])])].sort((a,b)=>a-b);
   const fractions=levels.map(y=>(y-p.levels[0])/(p.deck-p.levels[0]));
   const outer=(z,y,side)=>hullLoftPoint(p,z,y,side),inner=(z,t,side)=>{
@@ -119,11 +121,44 @@ export function createRowingShipMesh(modelId,{groups,parts}={}){
   group('hull.gunwales','hull',railStart);
   if(d.id==='oseberg'){
     const start=out.length;
+    const smooth=t=>{t=Math.max(0,Math.min(1,t));return t*t*(3-2*t);},mix=(a,b,t)=>a+(b-a)*t;
+    // Sweep an oval section along a path in the y-z plane. Path widths are metres.
+    const sweep=path=>{
+      const sides=8,ring=i=>{
+        const a=path[Math.max(0,i-1)],b=path[Math.min(path.length-1,i+1)],T=unit([0,b.y-a.y,b.z-a.z]),{y,z,across,chord}=path[i],wx=across/sx,wc=chord/sy;
+        return Array.from({length:sides},(_,k)=>{
+          const u=Math.cos(k*2*Math.PI/sides),v=Math.sin(k*2*Math.PI/sides);
+          return {p:[wx*u,y-T[2]*wc*v,z+T[1]*wc*v],n:unit([u/wx,-T[2]*v/wc,T[1]*v/wc])};
+        });
+      };
+      for(let i=0;i<path.length-1;i++){
+        const A=ring(i),B=ring(i+1);
+        for(let k=0;k<sides;k++){const K=(k+1)%sides;quad(A[k].p,B[k].p,B[K].p,A[K].p,1,[A[k].n,B[k].n,B[K].n,A[K].n]);}
+      }
+      for(const [i,c]of [[0,path[0]],[path.length-1,path.at(-1)]].map(e=>[e[0],[0,e[1].y,e[1].z]])){
+        const R=ring(i);for(let k=0;k<sides;k++)tri(c,R[k].p,R[(k+1)%sides].p,1);
+      }
+    };
     for(const sign of [-1,1]){
-      const z=sign*6,y=rowingHullDeck(modelId,z),points=[];
-      for(let i=0;i<=18;i++){const t=i/18;points.push([0,y+t*.90,z+sign*(.15*Math.sin(t*Math.PI)-.12*t*t)]);}
-      for(let i=0;i<12;i++){const a=i*Math.PI/16;points.push([0,y+.90+.13*Math.sin(a),z-sign*.12-sign*.13*(1-Math.cos(a))]);}
-      for(let i=0;i<points.length-1;i++)tube(points[i],points[i+1],.035,1,.031,8,undefined,true);
+      const path=[],keel=d.keel.depth*.5,keelChord=keel*sy,keelAcross=d.keel.width*sx*.5;
+      // Below the rail the timber follows the hull's own stem line, growing out of the keel.
+      for(let i=0;i<=16;i++){
+        const t=i/16,q=hullLoftPoint(p,sign*6,p.levels[0]+(p.deck-p.levels[0])*t,1),blend=smooth(t/.35);
+        path.push({y:q[1]-keel*(1-blend),z:q[2],across:mix(keelAcross,.07,t),chord:mix(keelChord,.09,t)});
+      }
+      // Above the rail it carries on as one broad post and ends in an inward coil.
+      const y0=rowingHullDeck(modelId,sign*6),z0=sign*6,curve=[[0,0],[.02,.36],[.30,.78],[.15,1.12]];
+      for(let i=1;i<=20;i++){
+        const t=i/20,m=1-t,w=[m*m*m,3*m*m*t,3*m*t*t,t*t*t],reach=w.reduce((sum,k,j)=>sum+k*curve[j][0],0),up=w.reduce((sum,k,j)=>sum+k*curve[j][1],0);
+        path.push({y:y0+up,z:z0+sign*reach,across:mix(.07,.05,t),chord:t<.25?mix(.09,.135,smooth(t/.25)):mix(.135,.075,(t-.25)/.75)});
+      }
+      let heading=Math.atan2(curve[3][1]-curve[2][1],curve[3][0]-curve[2][0]),reach=curve[3][0],up=curve[3][1];
+      for(let i=1;i<=32;i++){
+        const t=i/32,radius=mix(.16,.035,t),step=.21;
+        heading+=step;reach+=Math.cos(heading)*radius*step;up+=Math.sin(heading)*radius*step;
+        path.push({y:y0+up,z:z0+sign*reach,across:mix(.05,.026,t),chord:mix(.075,.022,t)});
+      }
+      sweep(path);
     }
     group('hull.carved-stems','hull',start);
   }
@@ -144,14 +179,21 @@ export function createRowingShipMesh(modelId,{groups,parts}={}){
   }
   const steeringStart=out.length,steering=rowingSteeringPose(rest);
   physicalGeometry(({tube,quad})=>{
-    tube(steering.shaftA,steering.shaftB,.026,17,.018,8);
+    if(d.steering.hangsFromPivot){
+      // A tiller bar inboard, then the shaft hanging clear of the hull from the pivot.
+      const pivot=d.steering.pivot.map((v,i)=>v*[sx,sy,sz][i]);
+      tube(steering.shaftA,pivot,.022,17,.026,8);tube(pivot,steering.shaftB,.026,17,.018,8);
+    }else tube(steering.shaftA,steering.shaftB,.026,17,.018,8);
     const n=steering.bladeNormal,offset=rowingMeshMul(n,d.propulsion.bladeThickness*.5),front=steering.bladeCorners.map(q=>rowingMeshAdd(q,offset)),back=steering.bladeCorners.map(q=>rowingMeshSub(q,offset));
     quad(...front,17,front.map(()=>n));quad(...back.slice().reverse(),17,back.map(()=>rowingMeshMul(n,-1)));
     for(let j=0;j<4;j++)quad(front[j],front[(j+1)%4],back[(j+1)%4],back[j],17);
   });
   group('helm.steering-oar','helm.rudder',steeringStart,{type:'steering-oar'});
   const cargoStart=out.length;
-  for(const c of d.equipment.cargo){const y=rowingDeck(modelId,c.z),[w,h,L]=c.extent;box([-w,y,c.z-L],[w,y+h,c.z+L],1);}
+  for(const c of d.equipment.cargo){
+    const y=rowingDeck(modelId,c.z),[w,h,L]=c.extent,base=p.railRise?Math.min(y,rowingDeck(modelId,c.z-L),rowingDeck(modelId,c.z+L)):y;
+    box([-w,base,c.z-L],[w,y+h,c.z+L],1);
+  }
   const bailerY=rowingDeck(modelId,2.8);box([.22,bailerY,2.7],[.35,bailerY+.09,2.9],1);
   group('deck.stores','deck.main',cargoStart);
   if(d.equipment.anchor)for(const side of [-1,1]){
