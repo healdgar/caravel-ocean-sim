@@ -10,6 +10,7 @@ import { requirePlayableShipModel } from './ship-models.js';
 import { deepFreeze } from './rig-definition.js';
 import { createPartAssemblyCatalog } from './part-assembly.js';
 import { prepareShipFracture } from './ship-fracture.js';
+import { createShipCollider } from './ship-collider.js';
 
 // CPU geometry is immutable model data; transforms, crew poses, moisture and
 // wake state remain per vessel. Consumers may share these buffers for uploads.
@@ -39,7 +40,8 @@ export function createShipAssetCache() {
             indices,
             groups: fracturedGroups,
           });
-          const shared={ model, vertices, indices, groups: deepFreeze(fracturedGroups), partAssembly, fracture, gpuPose:true };
+          const collider = createShipCollider({ model, vertices, indices, groups: fracturedGroups, fracture });
+          const shared={ model, vertices, indices, groups: deepFreeze(fracturedGroups), partAssembly, fracture, collider, gpuPose:true };
           if(model.rig?.backend==='surfaces-v1'){
             shared.rigGPUData=createRigGPUData(shared);
           }

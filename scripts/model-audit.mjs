@@ -62,7 +62,8 @@ export async function readLiveGame(shipIds, regions = []) {
           return {
             posed: encode(posed), vertices: encode(view(asset.vertices)), indices: encode(view(asset.indices)),
             groups: asset.groups.map((g) => ({ id: g.id, firstVertex: g.firstVertex, vertexCount: g.vertexCount })),
-            length: b.length, beam: b.beam, sinkage: b.hydrodynamics?.sinkage, sailState: b.sailState, rudder: b.rudder,
+            vertexShards: encode(view(asset.fracture.vertexShards)), shardKinds: asset.fracture.shards.map((s) => s?.kind ?? 0),
+            length: b.length, beam: b.beam, sinkage: b.hydrodynamics?.sinkage, sailState: b.sailState, rudder: b.rudder, hatchesClosed: b.hatchesClosed,
           };
         });
       } finally { await page.close(); }
@@ -95,6 +96,7 @@ export async function readLiveGame(shipIds, regions = []) {
     live.posed = decode(live.posed, Float32Array);
     live.vertices = decode(live.vertices, Float32Array);
     live.indices = decode(live.indices, Uint32Array);
+    live.vertexShards = decode(live.vertexShards, Uint32Array);
   }
   return { ships, world };
 }
@@ -161,8 +163,8 @@ export function renderTables(results) {
     out.push('');
   }
   out.push('### 1a. Balls against ship meshes\n');
-  out.push('Share of lines that either the shot or the mesh says struck. *Agree* is within 0.5 m of the first solid surface. *Soft* stopped on or near cloth or rope only. *Air* stopped more than 1 m from anything drawn. *Through* passed a solid surface unstopped.\n');
-  out.push(table(['Ship', 'lines', 'agree %', 'soft %', 'air: rig box %', 'air: hull %', 'median gap m', 'max gap m', 'through hull %', 'through mast/spar %', 'phantom mast %', 'wrong mast %', 'parts missed most'], ships.map((r) => { const c = r.collision; return [r.id, c.struck, c.agreePct, c.softStopPct, c.airRigPct, c.airHullPct, c.airGapMedianM, c.airGapMaxM, c.throughHullPct, c.throughMastPct, c.phantomMastPct, c.wrongMastPct, c.missedGroups]; })));
+  out.push('Share of lines that either the shot or the mesh says struck. *Agree* is within 0.5 m of the first solid surface. *Soft* stopped with nothing solid within 0.5 m, on or near cloth or rope only. *Air* stopped more than 1 m from anything drawn. *Through* passed a solid surface unstopped.\n');
+  out.push(table(['Ship', 'lines', 'agree %', 'soft %', 'air: rig %', 'air: hull %', 'median gap m', 'max gap m', 'through hull %', 'through mast/spar %', 'phantom mast %', 'wrong mast %', 'parts missed most'], ships.map((r) => { const c = r.collision; return [r.id, c.struck, c.agreePct, c.softStopPct, c.airRigPct, c.airHullPct, c.airGapMedianM, c.airGapMaxM, c.throughHullPct, c.throughMastPct, c.phantomMastPct, c.wrongMastPct, c.missedGroups]; })));
   out.push('\n### 1b. Balls against trees\n');
   out.push(table(['Tree', 'mode', 'wood lines stopped %', 'agree %', 'soft %', 'air %', 'through %', 'gap m', 'top m', 'reach m'], results.trees.map((t) => [`${t.set}/${t.species}`, t.mode, t.woodStoppedPct, t.agreePct, t.softStopPct, t.airPct, t.throughPct, t.airGapMedianM, t.topM, t.reachM])));
   if (results.world?.length) {
@@ -174,7 +176,7 @@ export function renderTables(results) {
   const cell = (b) => `${b.agree} / ${b.air} / ${b.through + b.late} / ${b.early}`;
   out.push(table(['Prefab', 'nominal w×h×l', 'drawn top m', 'mesh half m', 'reach square m', 'reach turned m', 'mesh', 'pieces square', 'pieces turned', 'max air m'], results.buildings.map((b) => [b.id, b.nominal, b.drawnTopM, b.meshHalfM, b.reachSquareM, b.reachTurnedM, cell(b.mesh), cell(b.piecesSquare), cell(b.piecesTurned), A.round(b.piecesTurned.maxAir, 1)])));
   out.push('\n### 2a. Masts\n');
-  out.push(table(['Ship', 'mast', 'table z', 'mesh z', 'off', 'deck y', 'foot y', 'top y', 'top break', 'full break', 'break above deck', 'rig top', 'shot formula top', 'rail', 'rig box from', 'dead band'], ships.flatMap((r) => (r.masts.rows.length ? r.masts.rows : [{}]).map((q) => [r.id, q.mast, q.tableZ, q.meshZ, q.offZ, q.deck, q.foot, q.top, q.topBreak, q.fullBreak, q.fullBreakAboveDeck, r.masts.rigTopMeshM, r.masts.mastTopFormulaM, r.masts.railAmidshipsM, r.masts.rigBoxBottomM, r.masts.mastDeadBandM]))));
+  out.push(table(['Ship', 'mast', 'table z', 'mesh z', 'off', 'deck y', 'foot y', 'top y', 'top break', 'full break', 'break above deck', 'rig top', 'rail', 'struck from', 'struck to', 'dead band'], ships.flatMap((r) => (r.masts.rows.length ? r.masts.rows : [{}]).map((q) => [r.id, q.mast, q.tableZ, q.meshZ, q.offZ, q.deck, q.foot, q.top, q.topBreak, q.fullBreak, q.fullBreakAboveDeck, r.masts.rigTopMeshM, r.masts.railAmidshipsM, r.masts.mastStruckFromM, r.masts.mastStruckToM, r.masts.mastDeadBandM]))));
   out.push('\n### 2b. Guns\n');
   out.push(table(['Ship', 'guns', 'undrawn', 'muzzle off barrel m', 'breech off barrel m', 'lowest muzzle above sea', 'furthest from hull', 'into own ship', 'station off floor'], ships.map((r) => { const g = r.guns.rows, w = (k, l = g) => l.reduce((a, q) => Math.max(a, Math.abs(q[k] ?? 0)), 0); return [r.id, g.length, g.filter((q) => q.abstract).length, w('muzzleOff'), w('breechOff'), g.length ? Math.min(...g.map((q) => q.muzzleAboveSea)) : null, w('hullNear'), g.filter((q) => q.blockedAt !== null).length, w('stationGap', g.filter((q) => q.visibleCrew || q.abstract))]; })));
   out.push('\n### 2c. Crew stations, routes and walkways\n');
@@ -182,7 +184,7 @@ export function renderTables(results) {
   out.push('\n### 2d. Rig and fittings\n');
   out.push(table(['Ship', 'attachment nodes', 'more than 0.25 m from anything', 'worst', 'lines', 'loose ends', 'worst m', 'chainwale samples missed', 'chainwale height off'], ships.map((r) => [r.id, r.nodes.nodes, r.nodes.loose, r.nodes.worst, r.ropes.ropes, r.ropes.looseEnds, r.ropes.worstM, r.chainwales?.missing, r.chainwales?.worstYM])));
   out.push('\n### 3. Waterline and hull\n');
-  out.push(table(['Ship', 'draft table', 'draft mesh', 'freeboard table', 'rail mid min', 'at z', 'rail amidships', 'rail formula P90', 'deck formula P75', 'hull width P90', 'beam run', 'beam mesh', 'length run', 'length mesh', 'shot half length', 'volume table', 'volume mesh', 'error %'], ships.map((r) => { const h = r.waterline; return [r.id, h.draftTableM, h.draftMeshM, h.freeboardTableM, h.railMidMinM, h.railMidAtZ, h.railAmidshipsM, h.railFormulaP90M, h.deckFormulaP75M, h.hullFormulaP90M, h.beamRuntimeM, h.beamMeshM, h.lengthRuntimeM, h.lengthMeshM, h.shotHalfLengthM, h.volumeTableM3, h.volumeMeshM3, h.volumeErrorPct]; })));
+  out.push(table(['Ship', 'draft table', 'draft mesh', 'freeboard table', 'rail mid min', 'at z', 'rail amidships', 'rail formula P90', 'deck formula P75', 'hull width P90', 'beam run', 'beam mesh', 'length run', 'length mesh', 'volume table', 'volume mesh', 'error %'], ships.map((r) => { const h = r.waterline; return [r.id, h.draftTableM, h.draftMeshM, h.freeboardTableM, h.railMidMinM, h.railMidAtZ, h.railAmidshipsM, h.railFormulaP90M, h.deckFormulaP75M, h.hullFormulaP90M, h.beamRuntimeM, h.beamMeshM, h.lengthRuntimeM, h.lengthMeshM, h.volumeTableM3, h.volumeMeshM3, h.volumeErrorPct]; })));
   out.push('\n### 4a. Crew bodies\n');
   out.push(table(['Ship', 'crew', 'body meets a solid', 'through more than 8 cm', 'deepest m', 'soles sunk', 'by m', 'parts', 'worst'], ships.map((r) => { const b = r.crewBodies; return b ? [r.id, b.crew, b.intersecting, b.throughDeep, b.deepestM, b.soleSunk, b.soleSunkMaxM, b.parts, b.worst[0] ? `${b.worst[0].key} (${b.worst[0].role}) through ${b.worst[0].part}` : ''] : [r.id]; })));
   out.push('\n### 4b. Port props\n');
@@ -207,7 +209,7 @@ export async function runAudit({ fast = false, live = null, log = () => {} } = {
     log(id);
     const ship = A.loadShip(id, live ? live.ships[id] : null);
     if (live) comparison.push(compareLiveToRest(ship, live.ships[id]));
-    const pose = live ? { sailState: live.ships[id].sailState, rudder: live.ships[id].rudder } : {};
+    const pose = live ? { sailState: live.ships[id].sailState, rudder: live.ships[id].rudder, hatchesClosed: live.ships[id].hatchesClosed } : {};
     ships.push(A.auditShip(ship, lib, { fan: fast ? A.FAST_FAN : A.FULL_FAN, crewMeshes, everyNth: fast ? 6 : 2, routeSeconds: fast ? 30 : 90, pose }));
   }
   log('buildings');

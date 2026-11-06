@@ -12,7 +12,8 @@ import { createShipAssetCache } from './ship-mesh.js';
 import { PORT_PREFABS, getBuildingParts } from './coastal-world.js';
 import { GROUNDING_SUBSTRATES, classifyGroundingSubstrate, setGroundingDamageHandler } from './terrain-model.js';
 import { locatePartAtLocalPoint, isSuperstructurePartId, computeArchetypeScaleSpec } from './part-assembly.js';
-import { shipMastSpecs, traceShotPastGap, fracturePartsGone } from './ship-fracture.js';
+import { shipMastSpecs, fracturePartsGone } from './ship-fracture.js';
+import { shipColliderCrossings, shipColliderNormal, shipColliderTrace } from './ship-collider.js';
 import { buildingReach, traceShotAtBuilding } from './building-fracture.js';
 import { landCraterSize } from './land-craters.js';
 import { createFortGarrison, stepFortGarrison } from './crew.js';
@@ -933,193 +934,152 @@ export function vesselRailHeight(boat, localZ = 0) {
   return profile.heights[i] + (profile.heights[i + 1] - profile.heights[i]) * (u - i);
 }
 
-export function sweepShipSegment(from, to, radius = 0.08, targetBoat, sourceBoat = null, options = null) {
-  if (!targetBoat || targetBoat === sourceBoat || targetBoat.showProw === false) return null;
-  const L = targetBoat.length ?? 20, B = targetBoat.beam ?? 6;
-  const boundR = Math.max(L, B) * 1.1 + 12;
-  const midX = (from[0] + to[0]) * 0.5 - (targetBoat.x ?? 0);
-  const midZ = (from[2] + to[2]) * 0.5 - (targetBoat.z ?? 0);
-  const segLen = Math.hypot(to[0] - from[0], to[1] - from[1], to[2] - from[2]);
-  if (Math.hypot(midX, midZ) > boundR + segLen * 0.5) return null;
-
-  const draft = (targetBoat.hydrodynamics?.draft ?? 2.2) + radius;
-  const mastTop = Math.max(14, L * 0.85) + radius;
-  const heave = targetBoat.heave ?? 0;
-  if (Math.max(from[1], to[1]) < heave - draft - 4 || Math.min(from[1], to[1]) > heave + mastTop + 4) {
-    return null;
+// Built with each model's mesh. A boat with no model of her own is the Niña, as everywhere else, and a model with
+// nothing drawn has nothing to strike.
+const SHIP_COLLIDERS = new Map();
+function shipColliderOf(boat) {
+  const modelId = boat.model?.id ?? boat.modelId ?? 'nina';
+  let collider = SHIP_COLLIDERS.get(modelId);
+  if (collider === undefined) {
+    if (!gunneryShipAssetCache) gunneryShipAssetCache = createShipAssetCache();
+    try { collider = gunneryShipAssetCache.get(modelId).collider; } catch { collider = null; }
+    SHIP_COLLIDERS.set(modelId, collider);
   }
+  return collider;
+}
 
-  // Compute vessel basis once for both endpoints instead of 6 boatRotate calls.
-  const { ax, ay, az } = vesselBasisAxes(targetBoat);
-  const bx = targetBoat.x ?? 0, bz = targetBoat.z ?? 0;
+// A segment in her own frame and in her design units, or null if it cannot come near what `bounds` holds. Nearly every
+// segment of a flight, and of a preview, ends in the first two tests.
+function shipSegmentInFrame(from, to, radius, boat, collider, bounds) {
+  const frame = collider.frame, { runtime } = collider.model, { min, max } = bounds;
+  const sx = (boat.beam ?? runtime.beam) / frame.beam, sy = frame.verticalScale ?? 1, sz = (boat.length ?? runtime.length) / frame.length;
+  const across = Math.hypot(Math.max(-min[0], max[0]) * sx, Math.max(-min[2], max[2]) * sz) + radius;
+  const bx = boat.x ?? 0, bz = boat.z ?? 0, heave = boat.heave ?? 0;
+  const midX = (from[0] + to[0]) * 0.5 - bx, midZ = (from[2] + to[2]) * 0.5 - bz;
+  const segLen = Math.hypot(to[0] - from[0], to[1] - from[1], to[2] - from[2]);
+  if (Math.hypot(midX, midZ) > across + segLen * 0.5) return null;
+  const sphere = Math.hypot(across, Math.max(-min[1], max[1]) * sy);
+  if (Math.max(from[1], to[1]) < heave - sphere || Math.min(from[1], to[1]) > heave + sphere) return null;
+
+  const { ax, ay, az } = vesselBasisAxes(boat);
   const dx0 = from[0] - bx, dy0 = from[1] - heave, dz0 = from[2] - bz;
   const dx1 = to[0] - bx, dy1 = to[1] - heave, dz1 = to[2] - bz;
-  const p0 = [
-    dx0 * ax[0] + dy0 * ax[1] + dz0 * ax[2],
-    dx0 * ay[0] + dy0 * ay[1] + dz0 * ay[2],
-    dx0 * az[0] + dy0 * az[1] + dz0 * az[2],
-  ];
-  const p1 = [
-    dx1 * ax[0] + dy1 * ax[1] + dz1 * ax[2],
-    dx1 * ay[0] + dy1 * ay[1] + dz1 * ay[2],
-    dx1 * az[0] + dy1 * az[1] + dz1 * az[2],
-  ];
-
-  const halfL = L * 0.52 + radius;
-  const halfB = B * 0.52 + radius;
-  const baseFreeboard = Math.max(4.6, (targetBoat.hydrodynamics?.freeboard ?? 1.8) * 2.1 + B * 0.35) + radius;
-  const maxWidth = Math.max(halfB, B * 0.85 + radius);
-
-  // Fast 3D local AABB slab test to reject misses and restrict marching to [tEnter, tExit].
+  const p0 = [dx0 * ax[0] + dy0 * ax[1] + dz0 * ax[2], dx0 * ay[0] + dy0 * ay[1] + dz0 * ay[2], dx0 * az[0] + dy0 * az[1] + dz0 * az[2]];
+  const p1 = [dx1 * ax[0] + dy1 * ax[1] + dz1 * ax[2], dx1 * ay[0] + dy1 * ay[1] + dz1 * ay[2], dx1 * az[0] + dy1 * az[1] + dz1 * az[2]];
+  const ox = p0[0] / sx, oy = p0[1] / sy, oz = p0[2] / sz, dx = p1[0] / sx - ox, dy = p1[1] / sy - oy, dz = p1[2] / sz - oz;
+  // Design units stretch a little differently along each axis: the ball is near enough round in them.
+  const r = radius / Math.cbrt(sx * sy * sz);
   let tEnter = 0, tExit = 1;
-  const minB = [-maxWidth, -draft, -halfL];
-  const maxB = [maxWidth, mastTop, halfL];
-  for (let a = 0; a < 3; a++) {
-    const d = p1[a] - p0[a];
+  for (let c = 0; c < 3; c++) {
+    const o = c === 0 ? ox : c === 1 ? oy : oz, d = c === 0 ? dx : c === 1 ? dy : dz, lo = min[c] - r, hi = max[c] + r;
     if (Math.abs(d) < 1e-9) {
-      if (p0[a] < minB[a] || p0[a] > maxB[a]) return null;
-    } else {
-      let t1 = (minB[a] - p0[a]) / d;
-      let t2 = (maxB[a] - p0[a]) / d;
-      if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
-      if (t1 > tEnter) tEnter = t1;
-      if (t2 < tExit) tExit = t2;
-      if (tEnter > tExit) return null;
+      if (o < lo || o > hi) return null;
+      continue;
     }
+    const t1 = (lo - o) / d, t2 = (hi - o) / d;
+    tEnter = Math.max(tEnter, Math.min(t1, t2));
+    tExit = Math.min(tExit, Math.max(t1, t2));
+    if (tEnter > tExit) return null;
   }
+  return { p0, p1, ox, oy, oz, dx, dy, dz, r, sx, sy, sz };
+}
 
-  const modelId = targetBoat.model?.id ?? targetBoat.modelId;
-  const model = modelId ? SHIP_MODELS[modelId] : null;
-  const f = model?.designFrame;
-  const sx = f?.beam ? B / f.beam : B / 3.6;
-  const sy = f?.verticalScale ?? 1;
-  const sz = f?.length ? L / f.length : L / 12;
-  const craters = targetBoat.damage?.craters;
-  const previewOnly = options?.previewOnly === true;
-
-  const mastState = targetBoat.damage?.mastState;
-  const mastSpecs = mastState ? getModelMastSpecs(modelId) : null;
-  // Height in metres that a mast still reaches. What fell with it no longer stops a shot.
-  const mastStandsTo = (group) => {
-    const stage = mastState?.[group] ?? 0, spec = stage ? mastSpecs.find((m) => m[0] === group) : null;
-    return spec ? spec[stage >= 2 ? 3 : 2] * sy : Infinity;
-  };
-
-  const classifyLocal = (lx, ly, lz, hullPassed = false) => {
-    const castleLift = lz > L * 0.1 ? B * 0.28 : lz < -L * 0.22 ? B * 0.16 : 0;
-    const rail = vesselRailHeight(targetBoat, lz);
-    const freeboard = rail === null ? baseFreeboard + castleLift : rail + radius;
-    if (!hullPassed && Math.abs(lz) <= halfL && ly >= -draft && ly <= freeboard) {
-      const taper = Math.max(0.32, 1 - 0.55 * (lz / halfL) ** 2);
-      const dyDesign = ly / (sy || 1);
-      const dzDesign = lz / (sz || 1);
-      const tumblehome = dyDesign > 0.3 ? Math.max(0.76, 1 - 0.11 * Math.max(0, dyDesign - 0.3)) : 1.0;
-      const outerMaxX = halfB * taper * tumblehome;
-      let erodedDesign = 0;
-      if (!previewOnly && Array.isArray(craters) && craters.length > 0) {
-        const side = lx >= 0 ? 1 : -1;
-        for (let c = 0; c < craters.length; c++) {
-          const cr = craters[c];
-          if (cr.side !== side) continue;
-          const distYZ = Math.hypot(dyDesign - cr.y, dzDesign - cr.z);
-          const envRadius = Math.max(0.18, cr.radius * 1.85);
-          if (distYZ < envRadius) {
-            const falloff = 1 - distYZ / envRadius;
-            erodedDesign += cr.depth * falloff * falloff;
-          }
-        }
-      }
-      const maxX = Math.max(halfB * 0.08, outerMaxX - erodedDesign * (sx || 1));
-      if (Math.abs(lx) <= maxX) {
-        const nx = lx / Math.max(0.2, maxX), ny = (ly - (freeboard - draft) * 0.5) / Math.max(0.5, (freeboard + draft) * 0.5), nz = lz / halfL;
-        return { hitZone: 'hull', mastGroup: null, localNormal: [nx, ny * 0.35, nz * 0.4] };
-      }
-    }
-    if (ly > baseFreeboard - radius && ly <= mastTop && (targetBoat.model?.rig?.sails?.length ?? (model?.rig?.sails?.length ?? 1)) > 0) {
-      const mastW = B * 0.85 + radius, mastD = L * 0.14 + radius;
-      const sailCount = targetBoat.model?.rig?.sails?.length ?? model?.rig?.sails?.length ?? 3;
-      // A shot hits the mast it is nearest, where that mast really stands.
-      const mastStations = mastSpecs?.length
-        ? mastSpecs.map((spec) => [spec[0], spec[1] * sz])
-        : sailCount === 1
-          ? [['main', 0], ['fore', -L * 0.26], ['mizzen', L * 0.26]]
-          : [['fore', -L * 0.26], ['main', 0], ['mizzen', L * 0.26]];
-      let group = null, zCenter = 0, nearest = Infinity;
-      for (const [name, station] of mastStations) {
-        const away = Math.abs(lz - station);
-        if (away < nearest) { nearest = away; group = name; zCenter = station; }
-      }
-      if (Math.abs(lx) <= mastW && nearest <= mastD && ly <= mastStandsTo(group) + radius) {
-        return { hitZone: 'rigging', mastGroup: group, localNormal: [lx >= 0 ? 1 : -1, 0.15, (lz - zCenter) / mastD] };
-      }
-    }
-    return null;
-  };
-
-  // On a ship that has lost something, her own triangles decide whether the way in is still there.
-  const fracture = targetBoat.damage?.fracture?.brokenCount > 0 ? targetBoat.damage.fracture : null;
-
-  const clippedLen = segLen * Math.max(0, tExit - tEnter);
-  const stepSize = previewOnly ? 0.85 : 0.45;
-  const steps = Math.min(previewOnly ? 20 : 48, Math.max(4, Math.ceil(clippedLen / stepSize)));
-  let prevT = tEnter, hullPassed = false;
-  for (let i = 0; i <= steps; i++) {
-    const t = tEnter + (tExit - tEnter) * (i / steps);
-    const lx = p0[0] + (p1[0] - p0[0]) * t;
-    const ly = p0[1] + (p1[1] - p0[1]) * t;
-    const lz = p0[2] + (p1[2] - p0[2]) * t;
-    const hit = classifyLocal(lx, ly, lz, hullPassed);
-    if (hit) {
-      let low = prevT, high = t, bestHit = hit, bestLocal = [lx, ly, lz];
-      if (i > 0) {
-        const bisectIters = previewOnly ? 5 : 10;
-        for (let b = 0; b < bisectIters; b++) {
-          const mid = (low + high) * 0.5;
-          const mx = p0[0] + (p1[0] - p0[0]) * mid;
-          const my = p0[1] + (p1[1] - p0[1]) * mid;
-          const mz = p0[2] + (p1[2] - p0[2]) * mid;
-          const mHit = classifyLocal(mx, my, mz, hullPassed);
-          if (mHit) { high = mid; bestHit = mHit; bestLocal = [mx, my, mz]; } else { low = mid; }
-        }
-      }
-      let struckTriangle = -1;
-      if (fracture && bestHit.hitZone === 'hull') {
-        const toDesign = (p) => [p[0] / (sx || 1), p[1] / (sy || 1), p[2] / (sz || 1)];
-        const behind = traceShotPastGap(fracture, toDesign(p0), toDesign(p1));
-        if (behind && !(behind.t <= 1)) {
-          // Nothing behind the gap this step: only the rig is left to meet.
-          hullPassed = true;
-          prevT = t;
-          continue;
-        }
-        if (behind) {
-          high = Math.max(0, behind.t);
-          bestLocal = [p0[0] + (p1[0] - p0[0]) * high, p0[1] + (p1[1] - p0[1]) * high, p0[2] + (p1[2] - p0[2]) * high];
-          // From inside her, what it strikes faces back along its flight.
-          bestHit = { hitZone: behind.mast ? 'rigging' : 'hull', mastGroup: behind.mast, localNormal: [p0[0] - p1[0], p0[1] - p1[1], p0[2] - p1[2]] };
-          struckTriangle = behind.triangle;
-        }
-      }
-      const hitPart = previewOnly ? null : resolveShipHitPart(targetBoat, bestLocal, bestHit.hitZone, struckTriangle);
-      return {
-        fraction: high,
-        kind: 'ship',
-        targetBoat,
-        targetId: targetBoat.id ?? targetBoat.modelId ?? 'ship',
-        targetName: targetBoat.model?.name ?? targetBoat.modelId ?? 'Vessel',
-        hitZone: bestHit.hitZone,
-        mastGroup: bestHit.mastGroup,
-        hitPartId: hitPart?.id ?? null,
-        hitSubAssembly: hitPart?.subAssembly ?? null,
-        hitLayer: hitPart?.layer ?? null,
-        waterline: bestHit.hitZone === 'hull' && bestLocal[1] <= 0.75,
-        localPosition: bestLocal,
-        normal: vesselLocalToWorldNormal(targetBoat, bestHit.localNormal),
-      };
-    }
-    prevT = t;
+// A shot into an old wound carries on into it: what its craters have eaten of her side no longer stops a ball, and it
+// goes no further than the centre of her. Returns how far along the segment it now stops.
+function shipFractionPastCraters(craters, segment, t) {
+  const { ox, oy, oz, dx, dy, dz } = segment, x = ox + dx * t, y = oy + dy * t, z = oz + dz * t, side = x >= 0 ? 1 : -1;
+  if (dx * side >= 0) return t;
+  let eaten = 0;
+  for (let c = 0; c < craters.length; c++) {
+    const crater = craters[c];
+    if (crater.side !== side) continue;
+    const away = Math.hypot(y - crater.y, z - crater.z), reach = Math.max(0.18, crater.radius * 1.85);
+    if (away < reach) eaten += crater.depth * (1 - away / reach) ** 2;
   }
-  return null;
+  if (eaten <= 0) return t;
+  const across = Math.min(Math.abs(x), eaten) / Math.abs(dx), along = eaten / Math.hypot(dx, dy, dz);
+  return Math.min(1, t + Math.min(across, along));
+}
+
+export function sweepShipSegment(from, to, radius = 0.08, targetBoat, sourceBoat = null, options = null) {
+  if (!targetBoat || targetBoat === sourceBoat || targetBoat.showProw === false) return null;
+  const collider = shipColliderOf(targetBoat);
+  if (!collider) return null;
+  const segment = shipSegmentInFrame(from, to, radius, targetBoat, collider, collider.bounds);
+  if (!segment) return null;
+  const { p0, p1, sx, sy, sz } = segment, damage = targetBoat.damage;
+  const hit = shipColliderTrace(collider, targetBoat, damage, segment.ox, segment.oy, segment.oz, segment.dx, segment.dy, segment.dz, segment.r);
+  if (!hit) return null;
+  const previewOnly = options?.previewOnly === true, mast = collider.mastOf[hit.triangle];
+  const hitZone = mast ? 'rigging' : 'hull', struck = hit.triangle;
+  const [nx, ny, nz] = shipColliderNormal(collider, hit);
+  let t = Math.min(1, hit.t);
+  if (!previewOnly && !mast && damage?.craters?.length) t = shipFractionPastCraters(damage.craters, segment, t);
+  const localPosition = [p0[0] + (p1[0] - p0[0]) * t, p0[1] + (p1[1] - p0[1]) * t, p0[2] + (p1[2] - p0[2]) * t];
+  // A normal stretches inversely to the frame, and faces back along the flight whichever side was struck.
+  const faces = Math.sign((p1[0] - p0[0]) * nx / sx + (p1[1] - p0[1]) * ny / sy + (p1[2] - p0[2]) * nz / sz) || 1;
+  const hitPart = previewOnly ? null : resolveShipHitPart(targetBoat, localPosition, hitZone, struck);
+  return {
+    fraction: t,
+    kind: 'ship',
+    targetBoat,
+    targetId: targetBoat.id ?? targetBoat.modelId ?? 'ship',
+    targetName: targetBoat.model?.name ?? targetBoat.modelId ?? 'Vessel',
+    hitZone,
+    mastGroup: mast ? collider.masts[mast - 1] : null,
+    hitPartId: hitPart?.id ?? null,
+    hitSubAssembly: hitPart?.subAssembly ?? null,
+    hitLayer: hitPart?.layer ?? null,
+    waterline: hitZone === 'hull' && localPosition[1] <= 0.75,
+    localPosition,
+    normal: vesselLocalToWorldNormal(targetBoat, [-faces * nx / sx, -faces * ny / sy, -faces * nz / sz]),
+  };
+}
+
+// What a ball tears on its way through her, nearest first, up to `limit` along the segment. Canvas and rope do not stop
+// it, so sweepShipSegment never answers for them. Costs nothing away from her.
+const SHIP_NO_CROSSINGS = Object.freeze([]);
+export function sweepShipRigging(from, to, radius = 0.08, targetBoat, sourceBoat = null, limit = 1, previewOnly = false) {
+  if (!targetBoat || targetBoat === sourceBoat || targetBoat.showProw === false) return SHIP_NO_CROSSINGS;
+  const collider = shipColliderOf(targetBoat);
+  if (!collider) return SHIP_NO_CROSSINGS;
+  const segment = shipSegmentInFrame(from, to, radius, targetBoat, collider, collider.softBounds);
+  if (!segment) return SHIP_NO_CROSSINGS;
+  const { p0, p1 } = segment;
+  const crossings = shipColliderCrossings(collider, targetBoat, targetBoat.damage, segment.ox, segment.oy, segment.oz, segment.dx, segment.dy, segment.dz, segment.r, limit);
+  return crossings.map(({ t, mast, triangle, rest, kind }) => {
+    const localPosition = [p0[0] + (p1[0] - p0[0]) * t, p0[1] + (p1[1] - p0[1]) * t, p0[2] + (p1[2] - p0[2]) * t];
+    const hitPart = previewOnly ? null : resolveShipHitPart(targetBoat, localPosition, 'rigging', triangle);
+    return {
+      fraction: t,
+      kind: 'ship',
+      targetBoat,
+      targetId: targetBoat.id ?? targetBoat.modelId ?? 'ship',
+      targetName: targetBoat.model?.name ?? targetBoat.modelId ?? 'Vessel',
+      hitZone: 'rigging',
+      riggingKind: kind,
+      mastGroup: mast,
+      hitPartId: hitPart?.id ?? null,
+      hitSubAssembly: hitPart?.subAssembly ?? null,
+      hitLayer: hitPart?.layer ?? null,
+      waterline: false,
+      localPosition,
+      ripDesign: rest,
+      normal: vesselLocalToWorldNormal(targetBoat, [p0[0] - p1[0], p0[1] - p1[1], p0[2] - p1[2]]),
+    };
+  });
+}
+
+// A ball that crosses a mast's canvas or rope flies on, and that mast's rig takes the hit, once a ball however many
+// lines it parts. It is the same hit as any other on the rig, but for the ball's momentum, which it keeps.
+function tearRigWithBall(crossing, projectile, from, to, sourceBoat) {
+  const { targetBoat: boat, mastGroup: mast } = crossing, torn = (projectile.tornRigs ??= new Map());
+  const masts = torn.get(boat) ?? torn.set(boat, new Set()).get(boat);
+  if (masts.has(mast)) return null;
+  masts.add(mast);
+  const velocity = projectile.velocity ?? [to[0] - from[0], to[1] - from[1], to[2] - from[2]], speed = Math.hypot(...velocity), mass = projectile.mass ?? 1;
+  const at = [0, 1, 2].map((c) => from[c] + (to[c] - from[c]) * crossing.fraction);
+  return applyShipImpactDamage(boat, { ...crossing, sourceBoat, position: at, surfacePosition: at, velocity, mass, radius: projectile.radius, ammo: projectile.ammo, energy: 0.5 * mass * speed * speed, passedThrough: true });
 }
 
 // A new fire joins any burning within 3.5 m, so repeated hits on one spot outrun the crew.
@@ -1213,7 +1173,7 @@ export function applyShipImpactDamage(targetBoat, event) {
   const mass = event.mass ?? 5.4;
   const energy = event.energy ?? (0.5 * mass * speed * speed);
   const pos = event.surfacePosition ?? event.position ?? [targetBoat.x ?? 0, targetBoat.heave ?? 0, targetBoat.z ?? 0];
-  const scale = event.hitZone === 'rigging' ? 0.35 : 1.0;
+  const scale = event.passedThrough ? 0 : event.hitZone === 'rigging' ? 0.35 : 1.0;
   applyRigidHullImpulse(targetBoat, pos, [vel[0] * mass * scale, vel[1] * mass * scale, vel[2] * mass * scale]);
 
   const localPos = event.localPosition ?? vesselWorldToLocal(targetBoat, pos);
@@ -1258,9 +1218,10 @@ export function applyShipImpactDamage(targetBoat, event) {
     }
     const specEntry = mastSpecs.find((m) => m[0] === group);
     const mastDefaultZ = specEntry ? specEntry[1] : group === 'fore' ? -3.55 : group === 'mizzen' ? 3.53 : 0.05;
-    const ripX = designPt ? Math.max(-1.85, Math.min(1.85, designPt[0])) : 0;
-    const ripY = designPt ? Math.max(2.4, Math.min(8.4, designPt[1])) : 4.8;
-    const ripZ = designPt ? Math.max(-5.6, Math.min(5.6, designPt[2])) : mastDefaultZ;
+    // A ball through canvas knows where on the sail it went. Anything else tears what hangs near where it struck.
+    const ripX = event.ripDesign?.[0] ?? (designPt ? Math.max(-1.85, Math.min(1.85, designPt[0])) : 0);
+    const ripY = event.ripDesign?.[1] ?? (designPt ? Math.max(2.4, Math.min(8.4, designPt[1])) : 4.8);
+    const ripZ = event.ripDesign?.[2] ?? (designPt ? Math.max(-5.6, Math.min(5.6, designPt[2])) : mastDefaultZ);
     const ripRadius = ammo === 'grape' ? 1.95 : ammo === 'chain' ? 1.75 : 1.25;
     const ripSeverity = ammo === 'chain' ? 1.40 : ammo === 'grape' ? 1.25 : 0.92;
     damage.pendingBakes.push({
@@ -3374,7 +3335,7 @@ export function createBuildingGunnery(building, { onEvent = () => {}, getVessels
   const state = createGunneryState(defs);
   building.gunnery = state;
   for (const i of createBuildingDamageState(building).restoredGuns ?? []) if (state.guns[i]) state.guns[i].dismounted = true;
-  const solidSweep = sweep ?? createGunnerySolidSweep({ sourceBoat: null, sourceBuilding: building, getVessels, getTerrain });
+  const solidSweep = sweep ?? createGunnerySolidSweep({ sourceBoat: null, sourceBuilding: building, getVessels, getTerrain, onRigTorn: (report) => { lastDamageReport = report; if (damageLog.length >= 32) damageLog.shift(); damageLog.push(report); } });
   const damageLog = [];
   let lastDamageReport = null;
 
@@ -3983,7 +3944,7 @@ export function applyTerrainImpactDamage(terrain, event) {
   };
 }
 
-export function createGunnerySolidSweep({ sourceBoat, sourceBuilding = null, getVessels = () => [], getTerrain = () => null } = {}) {
+export function createGunnerySolidSweep({ sourceBoat, sourceBuilding = null, getVessels = () => [], getTerrain = () => null, onRigTorn = null } = {}) {
   return function sweep(from, to, projectile) {
     const radius = projectile?.sweepRadius ?? projectile?.radius ?? 0.08;
     const previewOnly = projectile?.previewOnly === true;
@@ -4010,10 +3971,17 @@ export function createGunnerySolidSweep({ sourceBoat, sourceBuilding = null, get
       const tHit = sweepTerrainSegment(from, to, radius, terrain, opts);
       if (tHit && (!best || tHit.fraction < best.fraction)) best = tHit;
     }
+    const arrow = isArrowAmmo(projectile?.ammo);
+    // A ball tears canvas and rope and flies on. An arrow sticks in them, and an aiming preview names the first it
+    // would tear, since that is what the shot does to her.
+    if (projectile) for (const entry of vessels) {
+      const crossings = sweepShipRigging(from, to, radius, entry?.boat ?? entry, sourceBoat, best?.fraction ?? 1, previewOnly);
+      if (crossings.length && (arrow || previewOnly)) best = crossings[0];
+      else for (const crossing of crossings) { const report = tearRigWithBall(crossing, projectile, from, to, sourceBoat); if (report) onRigTorn?.(report); }
+    }
     // Aiming previews never harm anyone. An arrow stops in the first body it meets; a ball
     // passes through every body before whatever it strikes first.
     if (!previewOnly) {
-      const arrow = isArrowAmmo(projectile?.ammo);
       for (const entry of vessels) {
         const targetBoat = entry?.boat ?? entry;
         const crew = targetBoat?.crewCompany?.crew;
@@ -4079,7 +4047,7 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
   const state=createGunneryState(createNavalBattleGunDefinitions(boat));boat.gunnery=state;
   createVesselDamageState(boat);
   const previousStages=new Array(state.guns.length);
-  const solidSweep=sweep??createGunnerySolidSweep({sourceBoat:boat,getVessels,getTerrain});
+  const solidSweep=sweep??createGunnerySolidSweep({sourceBoat:boat,getVessels,getTerrain,onRigTorn:report=>{lastDamageReport=report;if(damageLog.length>=32)damageLog.shift();damageLog.push(report);}});
   const damageLog=[];
   let pending=null,prepared=false,lastReady=false,flash=null,lastDamageReport=null,fireAtWillMode=false,showTrajectoryMode=true,lastAimSummary=null;
   let cachedAimArcs=null,cachedAimTime=-1,cachedAimSide=null,cachedAimAmmo=null,cachedAimElev=NaN,cachedAimTrav=NaN,cachedAimQuoin=NaN,cachedAimX=NaN,cachedAimZ=NaN,cachedAimHeading=NaN,cachedAimRoll=NaN;
