@@ -2,11 +2,12 @@
 // Hits must take blocks off a building, not pull its vertices around. They land on the ground, and what they held up comes down.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { applyBuildingFractureEvents, BUILDING_SHARD_KINDS, buildingFractureStateOf, prepareBuildingFracture, prepareBuildingFractureSteps, replayBuildingFracture, supportScan, traceShotThroughBreach } from '../js/building-fracture.js';
+import { applyBuildingFractureEvents, BUILDING_SHARD_KINDS, buildingFractureStateOf, footingUnder, prepareBuildingFracture, prepareBuildingFractureSteps, replayBuildingFracture, supportScan, traceShotThroughBreach } from '../js/building-fracture.js';
 import { getBuildingParts, PORT_PREFABS } from '../js/coastal-world.js';
 import { evaluateShardFlight, FRACTURE_RECORD_FLOATS, settleFinishedFlights } from '../js/ship-fracture.js';
 import { applyBuildingImpactDamage, classifyBuildingMaterial, createBuildingDamageState, createGunnerySolidSweep, sweepBuildingSegment } from '../js/gunnery-control.js';
 import { createPortDamageStore } from '../js/port-damage.js';
+import { createFortGarrison, stepFortGarrison } from '../js/crew.js';
 import { bakeLandImpactDeformations, sampleVoronoiBlockCell } from '../js/part-assembly.js';
 
 const recordOf = (state, s) => state.records.subarray(s * FRACTURE_RECORD_FLOATS, (s + 1) * FRACTURE_RECORD_FLOATS);
@@ -436,4 +437,135 @@ test('a roof comes down when the walls under it have gone', () => {
     const stillUp = roof.filter((s) => hang[s.index] !== 255);
     assert.ok(stillUp.length < roof.length * 0.1, `${prefabId}: ${stillUp.length} of ${roof.length} roof pieces hang on with every wall gone`);
   }
+});
+
+function garrisoned(prefabId, ground = 0) {
+  const built = prepared(prefabId, { ground }), { fracture, instance } = built;
+  instance.id = 'held';
+  const port = { regionId: 'test', instances: [instance], center: { x: 0, z: 0 } };
+  const garrison = createFortGarrison(port);
+  createBuildingDamageState(instance);
+  const state = buildingFractureStateOf(instance.damageState, fracture);
+  return { ...built, port, garrison, state, soldiers: garrison.soldiers };
+}
+// Knock out whatever is under a point, as if a shot had taken it.
+function breakUnder(state, x, y, z, reach = 0.2) {
+  let broken = 0;
+  for (const shard of state.fracture.shards) {
+    if (!shard || state.broken[shard.index]) continue;
+    const lo = shard.localMin, hi = shard.localMax;
+    if (lo[1] > y + 0.2 || hi[1] < y - 1.1 || x < lo[0] - reach || x > hi[0] + reach || z < lo[2] - reach || z > hi[2] + reach) continue;
+    state.broken[shard.index] = 1;
+    state.brokenCount++;
+    broken++;
+  }
+  return broken;
+}
+const onlyOnPieces = (state, soldiers) => soldiers.filter((s) => {
+  const footing = footingUnder(state, s.lx, s.ly, s.lz);
+  return footing.stood && footing.stands && footing.floor === null;
+});
+
+test('a man comes down with the stretch he stands on, and the rest stay at their posts', () => {
+  const { state, garrison, soldiers } = garrisoned('curtain_wall_and_gate');
+  assert.ok(soldiers.length >= 2, `${soldiers.length} men on the wall`);
+  stepFortGarrison(garrison, 0.016);
+  assert.ok(soldiers.every((s) => s.casualtyState !== 'fallen'), 'with nothing broken, nobody falls');
+  const standing = onlyOnPieces(state, soldiers);
+  assert.ok(standing.length >= 2, `${standing.length} men stand on pieces that can go`);
+  const doomed = standing[0], from = doomed.baseLy, others = soldiers.filter((s) => s !== doomed && Math.hypot(s.lx - doomed.lx, s.lz - doomed.lz) > 3);
+  assert.ok(others.length, 'there is someone away from him');
+  assert.ok(breakUnder(state, doomed.lx, doomed.ly, doomed.lz) > 0);
+  state.flying.add(1);
+  stepFortGarrison(garrison, 0.016);
+  assert.equal(doomed.casualtyState, 'fallen', 'he goes down');
+  assert.ok(doomed.garrisonFall, 'and falls, it is not a jump cut');
+  assert.ok(doomed.baseLy > 0.5, 'he has only just started');
+  for (let i = 0; i < 200 && doomed.garrisonFall; i++) stepFortGarrison(garrison, 0.05);
+  assert.equal(doomed.garrisonFall, null);
+  assert.ok(doomed.baseLy < from - 1 && doomed.baseLy >= 0 && doomed.baseLy < 1.5, `he lies at the foot of the wall (${doomed.baseLy.toFixed(2)} from ${from.toFixed(2)})`);
+  for (const s of others) assert.notEqual(s.casualtyState, 'fallen', 'the others stay at their posts');
+});
+
+test('a man walking a rampart keeps to what is left of his beat', () => {
+  const { state, garrison, soldiers } = garrisoned('curtain_wall_and_gate');
+  const walker = onlyOnPieces(state, soldiers).find((s) => s.routeZ && Math.abs(s.routeZ[1] - s.routeZ[0]) > 4);
+  assert.ok(walker, 'someone walks the wall');
+  const [a, b] = walker.routeZ, far = Math.abs(a - walker.lz) > Math.abs(b - walker.lz) ? a : b;
+  const gapAt = walker.lz + (far - walker.lz) * 0.7;
+  assert.ok(breakUnder(state, walker.lx, walker.ly, gapAt) > 0);
+  stepFortGarrison(garrison, 0.016);
+  assert.notEqual(walker.casualtyState, 'fallen', 'the gap is not under him');
+  const [lo, hi] = [Math.min(...walker.routeZ), Math.max(...walker.routeZ)];
+  assert.ok(gapAt < lo || gapAt > hi, `his beat now stops short of the gap at ${gapAt.toFixed(1)} (${lo.toFixed(1)} to ${hi.toFixed(1)})`);
+  assert.ok(walker.lz >= lo - 1e-6 && walker.lz <= hi + 1e-6, 'and he is still on it');
+  assert.ok(walker.targetZ >= lo - 1e-6 && walker.targetZ <= hi + 1e-6, 'walking only where he can');
+  for (let i = 0; i < 400; i++) stepFortGarrison(garrison, 0.05);
+  assert.ok(walker.lz >= lo - 1e-6 && walker.lz <= hi + 1e-6, `he never walks off the edge (${walker.lz.toFixed(2)})`);
+});
+
+test('men on a fort\'s deck step down to it, but do not fall, when the parapet goes', () => {
+  const { state, garrison, soldiers } = garrisoned('stone_sea_bastion');
+  const onDeck = soldiers.filter((s) => { const f = footingUnder(state, s.lx, s.ly, s.lz); return f.stands && f.floor !== null; });
+  for (const s of soldiers) breakUnder(state, s.lx, s.ly, s.lz);
+  const levels = new Map(soldiers.map((s) => [s, s.baseLy]));
+  state.flying.add(1);
+  stepFortGarrison(garrison, 0.016);
+  for (const s of onDeck) assert.notEqual(s.casualtyState, 'fallen', `${s.role} has the rampart under him`);
+  for (const s of soldiers) if (s.casualtyState !== 'fallen') assert.ok(s.baseLy <= levels.get(s) + 1e-6, 'nobody rises');
+  const down = soldiers.filter((s) => s.casualtyState === 'fallen');
+  assert.ok(down.every((s) => footingUnder(state, s.lx, levels.get(s), s.lz).floor === null), 'only those with no floor left fall');
+});
+
+test('a saved ruin has its men already down, and a rebuilt one has them back at their posts', () => {
+  const live = garrisoned('curtain_wall_and_gate'), half = live.instance.width / 2;
+  const doomed = onlyOnPieces(live.state, live.soldiers)[0];
+  const events = [];
+  for (let i = -2; i <= 2; i++) for (const height of [1.5, 3, 4.5]) events.push({ kind: 'stone-crater', x: half, y: height, z: doomed.lz + i * 1.2, nx: 1, ny: 0, nz: 0, stepDepth: 0.44, severity: 1.2 }, { kind: 'stone-crater', x: -half, y: height, z: doomed.lz + i * 1.2, nx: -1, ny: 0, nz: 0, stepDepth: 0.44, severity: 1.2 });
+  applyBuildingFractureEvents(live.state.fracture, live.instance.damageState, events, 0);
+  assert.ok(live.state.brokenCount > 10);
+  stepFortGarrison(live.garrison, 0.016);
+  for (let i = 0; i < 200; i++) stepFortGarrison(live.garrison, 0.05);
+  const fell = live.soldiers.filter((s) => s.casualtyState === 'fallen').map((s) => s.crewIndex);
+  assert.ok(fell.length > 0, 'somebody came down');
+  const levels = live.soldiers.map((s) => s.baseLy);
+
+  const back = garrisoned('curtain_wall_and_gate');
+  replayBuildingFracture(back.state.fracture, back.instance.damageState, live.instance.damageState.fractureLog, 900);
+  const state = back.instance.damageState.fracture;
+  assert.equal(state.flying.size, 0);
+  stepFortGarrison(back.garrison, 0.016);
+  assert.deepEqual(back.soldiers.filter((s) => s.casualtyState === 'fallen').map((s) => s.crewIndex), fell, 'the same men are down');
+  assert.ok(back.soldiers.every((s) => !s.garrisonFall), 'none of them is seen to fall');
+  back.soldiers.forEach((s, i) => assert.ok(Math.abs(s.baseLy - levels[i]) < 1e-3, `${s.role} lies where he lay: ${s.baseLy} ${levels[i]}`));
+
+  const homes = garrisoned('curtain_wall_and_gate').soldiers.map((s) => [s.baseLy, [...s.routeZ]]);
+  createPortDamageStore().rebuilt(back.port, back.instance);
+  stepFortGarrison(back.garrison, 0.016);
+  back.soldiers.forEach((s, i) => {
+    assert.notEqual(s.casualtyState, 'fallen', 'back on his feet');
+    assert.equal(s.baseLy, homes[i][0], 'at his post');
+    assert.deepEqual(s.routeZ, homes[i][1], 'on his old beat');
+  });
+});
+
+test('what stays of a building faces up, so it reads as ground once the walls have gone', () => {
+  const { fracture, vertices } = prepared('curtain_wall_and_gate');
+  let flat = 0, facingDown = 0;
+  for (let v = 0; v < fracture.vertexShards.length; v++) {
+    if (fracture.vertexShards[v]) continue;
+    const at = v * 8, ny = vertices[at + 4], length = Math.hypot(vertices[at + 3], ny, vertices[at + 5]);
+    if (Math.abs(ny) / length < 0.7) continue;
+    flat++;
+    if (ny < 0) facingDown++;
+  }
+  assert.ok(flat > 0, 'there are flats that stay');
+  assert.equal(facingDown, 0, 'none is lit as if it faced the ground');
+});
+
+test('a broad floor comes down in slabs, not as one sheet', () => {
+  const { fracture } = prepared('curtain_wall_and_gate');
+  const walk = fracture.shards.filter((s) => s?.partKey === 'terreplein_adarve_walk');
+  assert.ok(walk.length > 2, `${walk.length} pieces of wall walk`);
+  for (const shard of walk) assert.ok(Math.max(shard.localMax[0] - shard.localMin[0], shard.localMax[2] - shard.localMin[2]) < 14, `one is ${shard.localMax[2] - shard.localMin[2]} m long`);
 });

@@ -4,6 +4,7 @@
 // A town rebuilds what was shot down: a building comes back whole once it has gone long enough unshot.
 // The career save holds every port. A share link holds the one in view, as much as fits.
 import { encodeBuildingEvent } from './building-fracture.js';
+import { reviveGarrisonSoldiers } from './crew.js';
 import { classifyBuildingMaterial, createBuildingDamageState } from './gunnery-control.js';
 
 const PORT_DAY_MS = 86400000;
@@ -136,7 +137,7 @@ export function createPortDamageStore(saved = null, { dateMs = null } = {}) {
       building.magazine = null;
       createBuildingDamageState(building);
       for (const gun of building.gunnery?.guns ?? []) gun.dismounted = false;
-      for (const soldier of building.garrisonSoldiers ?? []) soldier.casualtyState = null;
+      reviveGarrisonSoldiers(building);
     },
     // Everything, for the career save. Undefined when nothing has been hit, so a save carries no empty record.
     snapshot(activePorts = []) {

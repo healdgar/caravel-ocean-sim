@@ -1,3 +1,4 @@
+import { footingUnder, restingHeightUnder } from './building-fracture.js';
 import { DRESS_MASK_SCALE, DRESS_PIECES, indigenousDress } from './indigenous-dress.js';
 import { loadCrewGLB, gltfTRS } from './gltf.js';
 import { hullDeck, vesselDeck, HULL_VERTICAL_SCALE, HELM_TILLER_DISTANCE, modelDeck, modelHullDeck, modelDeckWidth, vesselVerticalScale } from './hull.js';
@@ -1411,18 +1412,105 @@ export function createFortGarrison(port) {
   return garrison;
 }
 
+// Whoever had the stretch under him shot away comes down with it, to whatever is beneath. One walking a rampart
+// keeps to what is left of his beat. Runs only when a building has lost something since the last look.
+function settleGarrisonOnWhatIsLeft(garrison) {
+  for (const unit of garrison.byBuilding.values()) {
+    const inst = unit[0]?.building, damage = inst?.damageState, state = damage?.fracture;
+    if (!state || state.brokenCount === (damage.garrisonSawBroken ?? 0)) continue;
+    damage.garrisonSawBroken = state.brokenCount;
+    // Nothing in the air means this is a saved ruin coming back: he is already where he fell.
+    const settled = state.flying.size === 0;
+    let low = Infinity, high = -Infinity;
+    for (const s of unit) { if (s.ly < low) low = s.ly; if (s.ly > high) high = s.ly; }
+    const near = state.fracture.shards.filter((shard) => shard && shard.localMin[1] <= high + 0.2 && shard.localMax[1] >= low - 1.1);
+    for (const s of unit) {
+      if (s.casualtyState === 'fallen') continue;
+      const footing = footingUnder(state, s.lx, s.ly, s.lz, near);
+      if (footing.stood && !footing.stands) {
+        garrisonSoldierFalls(state, s, inst, settled);
+        continue;
+      }
+      if (footing.floor !== null && footing.floor < s.ly - 0.05) {
+        // What he stood on has gone, and the floor is a step below.
+        s.homeBaseLy ??= s.baseLy;
+        s.baseLy -= s.ly - footing.floor;
+        s._poseReady = false;
+      }
+      if (!s.routeZ || Math.abs(s.routeZ[1] - s.routeZ[0]) <= 0.05) continue;
+      s.homeRouteZ ??= [...s.routeZ];
+      const [from, to] = s.homeRouteZ, length = Math.abs(to - from), steps = Math.max(1, Math.ceil(length / 0.5));
+      let lo = s.lz, hi = s.lz;
+      const dir = Math.sign(to - from) || 1;
+      // Out each way from where he stands, as far as there is anything to stand on.
+      for (let i = 1; i <= steps; i++) {
+        const z = s.lz + (dir * length * i) / steps;
+        if ((z - from) * dir > length + 1e-6) break;
+        const there = footingUnder(state, s.lx, s.ly, z, near);
+        if (there.stood && !there.stands) break;
+        hi = z;
+      }
+      for (let i = 1; i <= steps; i++) {
+        const z = s.lz - (dir * length * i) / steps;
+        if ((z - from) * dir < -1e-6) break;
+        const there = footingUnder(state, s.lx, s.ly, z, near);
+        if (there.stood && !there.stands) break;
+        lo = z;
+      }
+      s.routeZ = dir > 0 ? [lo, hi] : [hi, lo];
+      s.targetZ = Math.abs(s.targetZ - hi) < Math.abs(s.targetZ - lo) ? hi : lo;
+    }
+  }
+}
+
+function garrisonSoldierFalls(state, s, inst, settled) {
+  const cosY = Math.cos(inst.yaw ?? 0), sinY = Math.sin(inst.yaw ?? 0);
+  const wx = (inst.x ?? 0) + s.lx * cosY + s.lz * sinY, wz = (inst.z ?? 0) - s.lx * sinY + s.lz * cosY;
+  const slope = s.lx * (inst.slopeX ?? 0) + s.lz * (inst.slopeZ ?? 0);
+  const to = restingHeightUnder(state, wx, wz, s.ly) - slope;
+  s.homeBaseLy ??= s.baseLy;
+  s.casualtyState = 'fallen';
+  s.walk = 0;
+  s._poseReady = false;
+  if (settled) s.baseLy = to;
+  else s.garrisonFall = { to, speed: 0 };
+}
+
+// A rebuilt building has its men back on its walls, as they were posted.
+export function reviveGarrisonSoldiers(building) {
+  for (const s of building?.garrisonSoldiers ?? []) {
+    if (s.homeBaseLy !== undefined) s.baseLy = s.homeBaseLy;
+    if (s.homeRouteZ) s.routeZ = s.homeRouteZ;
+    s.homeBaseLy = undefined;
+    s.homeRouteZ = undefined;
+    s.garrisonFall = null;
+    s.casualtyState = 'able';
+    s.knockdownTimer = 0;
+    s.phys = undefined;
+    s._poseReady = false;
+  }
+}
+
 export function stepFortGarrison(garrison, dt = 0, wind = 0) {
   if (!garrison?.soldiers?.length) return garrison;
   dt = Math.max(0, Math.min(0.1, Number.isFinite(dt) ? dt : 0));
   garrison.time = (garrison.time ?? 0) + dt;
+  settleGarrisonOnWhatIsLeft(garrison);
   const ox = garrison.origin[0], oy = garrison.origin[1], oz = garrison.origin[2];
   const blend = 1 - Math.exp(-dt * 8);
   for (const s of garrison.soldiers) {
     s.time += dt;
     const inst = s.building;
     const dmg = inst?.damageState;
-    const ruined = dmg?.state === 'ruined';
+    const ruined = dmg?.state === 'ruined' && s.casualtyState !== 'fallen';
     s.visible = !ruined;
+    if (s.garrisonFall) {
+      const fall = s.garrisonFall;
+      fall.speed += 9.80665 * dt;
+      s.baseLy = Math.max(fall.to, s.baseLy - fall.speed * dt);
+      if (s.baseLy <= fall.to) s.garrisonFall = null;
+      s._poseReady = false;
+    }
     if (ruined) {
       s.walk = 0;
       s.brace = 0;
