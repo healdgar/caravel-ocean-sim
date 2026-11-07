@@ -623,7 +623,7 @@ export function createVictoryMesh({groups,parts}={}){
   }
   const runningStart=out.length;
   for(const [index,line]of VICTORY_RUNNING_LINES.entries()){
-    const segments=2;
+    const segments=4;
     for(let i=0;i<segments;i++){
       const a=line.a.map((x,k)=>x+(line.b[k]-x)*i/segments),b=line.a.map((x,k)=>x+(line.b[k]-x)*(i+1)/segments);
       tube(a,b,.0055,12,.0055,4,[[100+index,i/segments],[100+index,(i+1)/segments]],true);

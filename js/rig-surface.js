@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // Descriptor-driven CPU poses for new mixed rigs. Existing Niña/Victory
 // evaluators remain unchanged. All points are in the model's design frame.
+import {evaluateRopeWaveDisplacement} from './rope-wave.js';
 const surfaceKinds=new Set(['square','lateen','headsail','gaff','bermudan']);
 const surfaceClamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x));
 const surfaceSmooth=(a,b,x)=>{const t=surfaceClamp((x-a)/(b-a));return t*t*(3-2*t);};
@@ -330,13 +331,25 @@ export function surfaceRopePoint(line,t,context={}){
   const sag=line.sag??(line.kind==='sheet'?.04:0),lazySag=line.lazySag??.25;
   if(!Number.isFinite(sag)||sag<0||!Number.isFinite(lazySag)||lazySag<0)throw Error('Invalid rope sag');
   const working=surfaceMix(a,b,t);working[1]-=Math.sin(Math.PI*t)*sag;
-  if(lazy===0)return working;
-  let loose;
-  if(line.lazyLead!==undefined){
-    const lead=surfaceAttachmentPoint(line.lazyLead,context),split=line.leadSplit??.72;
-    if(!(split>0&&split<1))throw Error('Invalid lazy sheet lead split');
-    const q=t<split?t/split:(t-split)/(1-split);loose=t<split?surfaceMix(a,lead,q):surfaceMix(lead,b,q);
-    loose[1]-=Math.sin(Math.PI*q)*lazySag;
-  }else{loose=surfaceMix(a,b,t);loose[1]-=Math.sin(Math.PI*t)*(sag+lazySag);}
-  return surfaceMix(working,loose,lazy);
+  let basePoint;
+  if(lazy===0){
+    basePoint=working;
+  }else{
+    let loose;
+    if(line.lazyLead!==undefined){
+      const lead=surfaceAttachmentPoint(line.lazyLead,context),split=line.leadSplit??.72;
+      if(!(split>0&&split<1))throw Error('Invalid lazy sheet lead split');
+      const q=t<split?t/split:(t-split)/(1-split);loose=t<split?surfaceMix(a,lead,q):surfaceMix(lead,b,q);
+      loose[1]-=Math.sin(Math.PI*q)*lazySag;
+    }else{loose=surfaceMix(a,b,t);loose[1]-=Math.sin(Math.PI*t)*(sag+lazySag);}
+    basePoint=surfaceMix(working,loose,lazy);
+  }
+  const chainActive=surfaceClamp(context.ropeChain?.active??0,0,1);
+  if(chainActive>0){
+    const lineIndex=Number.isFinite(context.lineIndex)?context.lineIndex:Array.isArray(context.lines)?Math.max(0,context.lines.indexOf(line)):0;
+    const compliance=(0.042+0.045*lazy)*chainActive;
+    const wave=evaluateRopeWaveDisplacement(a,b,t,lineIndex,compliance,context.ropeChain.swayX??0,context.ropeChain.swayZ??0,context.time??0,context.wind??0);
+    return [basePoint[0]+wave[0],basePoint[1]+wave[1],basePoint[2]+wave[2]];
+  }
+  return basePoint;
 }

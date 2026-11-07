@@ -1,6 +1,7 @@
 import { deckHalfWidth, vesselDeck, HULL_VERTICAL_SCALE, QUARTERDECK_START } from './hull.js';
 import { LATEEN_RIG_PLATE, rigPlatePoint } from './rig-plan.js';
 import { NINA_DESIGN } from './models/nina.js';
+import { evaluateRopeWaveDisplacement } from './rope-wave.js';
 
 // Keep the converted rig's supports with its future model. Active mast positions
 // and heights come from the same orthographic plate as the lateen canvas.
@@ -69,16 +70,26 @@ export function standingRiggingLines(){
   return lines;
 }
 
-export function standingRopePoint(line,t,pose){
+export function standingRopePoint(line,t,pose,ropeChain=null,time=0,wind=7,index=0){
   const point=line.a.map((v,i)=>v+(line.b[i]-v)*t);
-  if(line.kind==='forestay')return point;
-  const lee=(pose?.side??-1)*line.side>0?1:0;
-  const ease=line.kind==='fall'?1:Math.max(lee,Math.min(1,(pose?.dip??0)/.12));
-  // Eased pendants are gathered alongside the mast. Their fixed deck ends
-  // remain visible; paid-out length curves down to the same belaying points.
-  const low=1-t,foot=Math.pow(low,32),m=RIG_MASTS[line.mast];
-  const y=point[1]-.12*Math.sin(Math.PI*t),axis=mastPoint(line.mast,y);
-  const x=line.b[0]+line.side*.08*low+(line.a[0]-line.b[0]-line.side*.08)*foot;
-  const z=axis[2]+(line.a[2]-mastPoint(line.mast,line.a[1])[2])*foot;
-  return [point[0]+(x-point[0])*ease,point[1]+(y-point[1])*ease,point[2]+(z-point[2])*ease];
+  let res;
+  if(line.kind==='forestay'){
+    res=point;
+  }else{
+    const lee=(pose?.side??-1)*line.side>0?1:0;
+    const ease=line.kind==='fall'?1:Math.max(lee,Math.min(1,(pose?.dip??0)/.12));
+    // Eased pendants are gathered alongside the mast. Their fixed deck ends
+    // remain visible; paid-out length curves down to the same belaying points.
+    const low=1-t,foot=Math.pow(low,32),m=RIG_MASTS[line.mast];
+    const y=point[1]-.12*Math.sin(Math.PI*t),axis=mastPoint(line.mast,y);
+    const x=line.b[0]+line.side*.08*low+(line.a[0]-line.b[0]-line.side*.08)*foot;
+    const z=axis[2]+(line.a[2]-mastPoint(line.mast,line.a[1])[2])*foot;
+    res=[point[0]+(x-point[0])*ease,point[1]+(y-point[1])*ease,point[2]+(z-point[2])*ease];
+  }
+  if(ropeChain?.active>0){
+    const isSlack=line.kind==='fall'||((pose?.side??-1)*line.side>0&&['shroud','runner','stay'].includes(line.kind));
+    const wave=evaluateRopeWaveDisplacement(line.a,line.b,t,index,isSlack?.048:.014,ropeChain.swayX??0,ropeChain.swayZ??0,time,wind);
+    return [res[0]+wave[0],res[1]+wave[1],res[2]+wave[2]];
+  }
+  return res;
 }

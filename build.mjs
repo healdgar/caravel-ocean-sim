@@ -79,6 +79,7 @@ order.splice(order.indexOf('js/ship-mesh.js'),0,'js/rig-gpu-data.js');
 order.splice(order.indexOf('js/ship-mesh.js'),0,'js/ship-collider.js');
 order.splice(order.indexOf('js/vessel-pose.js'),0,'js/vessel-recoil.js');
 order.splice(order.indexOf('js/gunnery-audio.js'), 0, 'js/world-audio-assets.js');
+order.splice(order.indexOf('js/rigging.js'), 0, 'js/rope-wave.js');
 order.splice(order.indexOf('js/gunnery-control.js'), 0, 'js/ship-colors.js', 'js/boarding-docking.js');
 order.splice(
   order.indexOf('js/main.js'),

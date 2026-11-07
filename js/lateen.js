@@ -1,6 +1,7 @@
 import { vesselDeck } from './hull.js';
 import { mastPoint, RIG_MASTS, standingRiggingLines, standingRopePoint } from './rigging.js';
 import { LATEEN_RIG_PLATE, rigPlatePoint } from './rig-plan.js';
+import { evaluateRopeWaveDisplacement } from './rope-wave.js';
 
 export const SAIL_PLAN=LATEEN_RIG_PLATE.sails.map((s,mast)=>{
   const corners=s.corners.map(rigPlatePoint),[a,b]=corners,m=RIG_MASTS[mast];
@@ -167,12 +168,13 @@ export function runningRiggingLines(){
   return lines;
 }
 
-export function lateenRopePoint(line,t,poses,time=0,wind=7){
+export function lateenRopePoint(line,t,poses,time=0,wind=7,ropeChain=null,index=0){
   const p=poses[line.mast];let a=line.a,b=line.b;
   if(line.kind==='sheet')a=lateenClothPoint(line.mast,0,1,p,time,wind,true,poses);
   if(line.kind==='tack')a=lateenYardPoint(line.mast,SAIL_PLAN[line.mast].corners[1],p);
   if(line.kind==='halyard')b=lateenYardPoint(line.mast,line.b,p);
   let point=a.map((x,i)=>mix(x,b[i],t));
+  let compliance=.034;
   if(line.kind==='sheet'){
     const lazy=1-rigSmooth(-.25,.25,line.side*p.side);
     const lead=[-b[0],b[1]-.05,b[2]-.12],q=t<.72?t/.72:(t-.72)/.28;
@@ -183,7 +185,12 @@ export function lateenRopePoint(line,t,poses,time=0,wind=7){
     // The mizzen's leads are forward of its clew: carry their slack abaft the
     // vertical bundle during transfer. The other sheets already lead aft.
     if(line.mast===2)point[2]+=p.dip*.45*Math.sin(Math.PI*t);
-  }else if(line.kind==='tack')point[1]-=Math.sin(Math.PI*t)*(.06+p.dip*.2);
+    compliance=mix(.046,.088,lazy);
+  }else if(line.kind==='tack'){point[1]-=Math.sin(Math.PI*t)*(.06+p.dip*.2);compliance=.050;}
+  if(ropeChain?.active>0){
+    const wave=evaluateRopeWaveDisplacement(a,b,t,index,compliance,ropeChain.swayX??0,ropeChain.swayZ??0,time,wind);
+    return [point[0]+wave[0],point[1]+wave[1],point[2]+wave[2]];
+  }
   return point;
 }
 

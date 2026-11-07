@@ -1,6 +1,7 @@
 // Shared authored square/fore-and-aft cloth model. Geometry drives forces,
 // visible sails, their ropes, shadows and wetness; no requested-speed propulsion.
-import {VICTORY_SAILS,VICTORY_STANDING_LINES,victorySailPoint} from './models/victory.js';
+import {VICTORY_SAILS,VICTORY_STANDING_LINES,VICTORY_RUNNING_LINES,victorySailPoint} from './models/victory.js';
+import {evaluateRopeWaveDisplacement} from './rope-wave.js';
 
 const victoryMotionClamp=(x,a,b)=>Math.max(a,Math.min(b,x));
 export function victoryPose(sail,state){
@@ -47,4 +48,17 @@ export function victoryRotateVector(sail,p,yaw){
   const axis=sail.corners[0].map((v,i)=>v-sail.corners[1][i]),length=Math.hypot(...axis);for(let i=0;i<3;i++)axis[i]/=length;
   const dot=axis.reduce((n,v,i)=>n+v*p[i],0),cross=[axis[1]*p[2]-axis[2]*p[1],axis[2]*p[0]-axis[0]*p[2],axis[0]*p[1]-axis[1]*p[0]];
   return p.map((v,i)=>v*c+cross[i]*s+axis[i]*dot*(1-c));
+}
+export function victoryRopePoint(index,t,state,time=0,wind=0,ropeChain=null){
+  const line=VICTORY_RUNNING_LINES[index],sail=VICTORY_SAILS[line.sail-1],pose=victoryPose(sail,state);
+  const a=line.kind==='sheet'?victoryClothPoint(line.sail,...line.uv,pose,time,wind):victoryYardPoint(line.sail,line.a,pose);
+  const b=line.bSail?victoryYardPoint(line.bSail,line.b,victoryPose(VICTORY_SAILS[line.bSail-1],state)):line.b;
+  const p=a.map((x,k)=>x+(b[k]-x)*t);
+  if(ropeChain?.active>0){
+    const fill=state.rig?.[sail.mast]?.fill??0;
+    const compliance=line.kind==='sheet'?.062*(1.35-.45*fill):.036;
+    const wave=evaluateRopeWaveDisplacement(a,b,t,index,compliance,ropeChain.swayX??0,ropeChain.swayZ??0,time,wind);
+    return [p[0]+wave[0],p[1]+wave[1],p[2]+wave[2]];
+  }
+  return p;
 }

@@ -1,7 +1,9 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 // Descriptor-driven rigs share the canonical GPU pose output. These helpers
 // mirror rig-surface.js; immutable model/vertex data is uploaded only once.
+import {ROPE_WAVE_WGSL} from '../rope-wave.js';
 export const GPU_RIG_SURFACES=/* wgsl */ `
+${ROPE_WAVE_WGSL}
 struct Hull { right:vec4f, up:vec4f, forward:vec4f, size:vec4f, origin:vec4f, rig:vec4f,
   sailSet:vec4f, sailTrim:vec4f, sailWind:vec4f, lateen:array<vec4f,3>, lateenPressure:vec4f };
 @group(0)@binding(0)var<uniform>hull:Hull;
@@ -240,6 +242,9 @@ fn surfaceGpuAttachment(position:vec4f,binding:vec4f)->vec3f {
 fn surfaceGpuSineDifference(a:f32,b:f32)->f32 {
   return 2.0*cos(3.141592653589793*(a+b)*.5)*sin(3.141592653589793*(a-b)*.5);
 }
+fn surfaceGpuHarmonicDifference(n:f32,a:f32,b:f32)->f32 {
+  return 2.0*cos(3.141592653589793*n*(a+b)*.5)*sin(3.141592653589793*n*(a-b)*.5);
+}
 fn surfaceGpuRopeNear(index:u32,coordinate:f32,anchorCoordinate:f32)->SurfaceGpuRelative {
   let at=u32(surfaceGpuModel[1].x)+index*10u;let edge=surfaceGpuModel[at+8u];let edgeEnd=surfaceGpuModel[at+9u];let t=clamp(coordinate,0.0,1.0);let anchor=clamp(anchorCoordinate,0.0,1.0);
   if(edgeEnd.y!=0.0){let end=vec2f(edge.w,edgeEnd.x);return surfaceGpuClothNear(u32(edge.x),mix(edge.yz,end,t),mix(edge.yz,end,anchor));}
@@ -252,21 +257,34 @@ fn surfaceGpuRopeNear(index:u32,coordinate:f32,anchorCoordinate:f32)->SurfaceGpu
   }
   var workingOrigin=mix(a,b,anchor);workingOrigin.y-=sin(3.141592653589793*anchor)*info.x;
   var workingDifference=(b-a)*(t-anchor);workingDifference.y-=surfaceGpuSineDifference(t,anchor)*info.x;
-  if(lazy==0.0){return SurfaceGpuRelative(workingOrigin,workingDifference);}
-  var looseOrigin:vec3f;var looseDifference:vec3f;
-  if(leads.w!=0.0){
-    let lead=surfaceGpuAttachment(surfaceGpuModel[at+4u],surfaceGpuModel[at+5u]);let split=leads.z;var q=(t-split)/(1.0-split);var anchorQ=(anchor-split)/(1.0-split);
-    if(t<split){q=t/split;}if(anchor<split){anchorQ=anchor/split;looseOrigin=mix(a,lead,anchorQ);}else{looseOrigin=mix(lead,b,anchorQ);}
-    if(t<split&&anchor<split){looseDifference=(lead-a)*(q-anchorQ);}
-    else if(t>=split&&anchor>=split){looseDifference=(b-lead)*(q-anchorQ);}
-    else if(t<split){looseDifference=(lead-a)*(q-1.0)-(b-lead)*anchorQ;}
-    else{looseDifference=(b-lead)*q+(lead-a)*(1.0-anchorQ);}
-    looseOrigin.y-=sin(3.141592653589793*anchorQ)*info.y;looseDifference.y-=surfaceGpuSineDifference(q,anchorQ)*info.y;
+  var rel:SurfaceGpuRelative;
+  if(lazy==0.0){
+    rel=SurfaceGpuRelative(workingOrigin,workingDifference);
   }else{
-    looseOrigin=mix(a,b,anchor);looseOrigin.y-=sin(3.141592653589793*anchor)*(info.x+info.y);
-    looseDifference=(b-a)*(t-anchor);looseDifference.y-=surfaceGpuSineDifference(t,anchor)*(info.x+info.y);
+    var looseOrigin:vec3f;var looseDifference:vec3f;
+    if(leads.w!=0.0){
+      let lead=surfaceGpuAttachment(surfaceGpuModel[at+4u],surfaceGpuModel[at+5u]);let split=leads.z;var q=(t-split)/(1.0-split);var anchorQ=(anchor-split)/(1.0-split);
+      if(t<split){q=t/split;}if(anchor<split){anchorQ=anchor/split;looseOrigin=mix(a,lead,anchorQ);}else{looseOrigin=mix(lead,b,anchorQ);}
+      if(t<split&&anchor<split){looseDifference=(lead-a)*(q-anchorQ);}
+      else if(t>=split&&anchor>=split){looseDifference=(b-lead)*(q-anchorQ);}
+      else if(t<split){looseDifference=(lead-a)*(q-1.0)-(b-lead)*anchorQ;}
+      else{looseDifference=(b-lead)*q+(lead-a)*(1.0-anchorQ);}
+      looseOrigin.y-=sin(3.141592653589793*anchorQ)*info.y;looseDifference.y-=surfaceGpuSineDifference(q,anchorQ)*info.y;
+    }else{
+      looseOrigin=mix(a,b,anchor);looseOrigin.y-=sin(3.141592653589793*anchor)*(info.x+info.y);
+      looseDifference=(b-a)*(t-anchor);looseDifference.y-=surfaceGpuSineDifference(t,anchor)*(info.x+info.y);
+    }
+    rel=SurfaceGpuRelative(mix(workingOrigin,looseOrigin,lazy),mix(workingDifference,looseDifference,lazy));
   }
-  return SurfaceGpuRelative(mix(workingOrigin,looseOrigin,lazy),mix(workingDifference,looseDifference,lazy));
+  let chainEnabled=clamp(surfaceGpuLive[1].w,0.0,1.0);
+  if(chainEnabled>0.0){
+    let compliance=(0.042+0.045*lazy)*chainEnabled;
+    let modes=computeRopeWaveModes(a,b,f32(index),compliance,surfaceGpuLive[2].z,surfaceGpuLive[2].w,surfaceGpuLive[0].x,surfaceGpuLive[0].y);
+    let pi=3.141592653589793;
+    rel.origin+=modes.mode1*sin(pi*anchor)+modes.mode2*sin(2.0*pi*anchor)+modes.mode3*sin(3.0*pi*anchor);
+    rel.offset+=modes.mode1*surfaceGpuHarmonicDifference(1.0,t,anchor)+modes.mode2*surfaceGpuHarmonicDifference(2.0,t,anchor)+modes.mode3*surfaceGpuHarmonicDifference(3.0,t,anchor);
+  }
+  return rel;
 }
 fn surfaceGpuRope(index:u32,coordinate:f32)->vec3f {
   let point=surfaceGpuRopeNear(index,coordinate,coordinate);return point.origin+point.offset;

@@ -91,11 +91,15 @@ fn supportedCanvas(p:vec3f,id:u32,v:f32)->vec3f {
 fn rigRopePoint(index:u32,t:f32)->vec3f {
   let line=rigLines[index];let kind=u32(line.control.x);let mast=u32(line.control.y);let id=mast+1u;
   let side=line.control.z;let pose=hull.lateen[mast];var a=line.a.xyz;var b=line.b.xyz;
-  if(kind<3u){return standingPoint(line,t,pose);}
+  if(kind<3u){
+    let standCompliance=select(0.014,0.048,kind==1u || (pose.y*side>0.0 && kind==0u));
+    return standingPoint(line,t,pose)+hullRopeWaveAt(a,b,t,f32(index),standCompliance);
+  }
   if(kind==3u){a=sailPoint(sailRestPoint(id,vec2f(0,1)),vec2f(0,1),id,13u,false);}
   if(kind==4u){b=yardPoint(id,line.b.xyz);}
   if(kind==5u){a=yardPoint(id,lateenCorners(id)[1]);}
   var point=mix(a,b,t);
+  var compliance=0.034;
   if(kind==3u){
     let lazy=1.0-smoothstep(-.25,.25,side*pose.y);
     let lead=vec3f(-b.x,b.y-.05,b.z-.12);let q=select((t-.72)/.28,t/.72,t<.72);
@@ -103,9 +107,10 @@ fn rigRopePoint(index:u32,t:f32)->vec3f {
     slack.y-=sin(3.14159265*q)*select(.02,.25,t<.72);
     point.y-=sin(3.14159265*t)*(.04+pose.z*.35);point=mix(point,slack,lazy);
     if(mast==2u){point.z+=pose.z*.45*sin(3.14159265*t);}
+    compliance=mix(0.046,0.088,lazy);
   }
-  if(kind==5u){point.y-=sin(3.14159265*t)*(.06+pose.z*.2);}
-  return point;
+  if(kind==5u){point.y-=sin(3.14159265*t)*(.06+pose.z*.2);compliance=0.050;}
+  return point+hullRopeWaveAt(a,b,t,f32(index),compliance);
 }
 fn ropeFrame(v:vec3f,oldAxis:vec3f,newAxis:vec3f)->vec3f {
   let axis=cross(oldAxis,newAxis);return v+cross(axis,v)+cross(axis,cross(axis,v))/max(.00001,1.0+dot(oldAxis,newAxis));

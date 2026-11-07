@@ -61,6 +61,8 @@ fn victoryRopePoint(index:u32,t:f32)->vec3f {
  if(line.motion.y>.5){a=victorySailCloth(sail,line.motion.zw);}
  var b=line.b.xyz;let otherSail=victoryLineTargets[index];
  if(otherSail>0u){b=victoryYardPoint(otherSail,b);}
- return mix(a,b,t);
+ let m=u32(sail.shape.x);let fill=hull.lateen[m].w;
+ let compliance=select(0.036,0.062*(1.35-0.45*fill),line.motion.y>.5);
+ return mix(a,b,t)+hullRopeWaveAt(a,b,t,f32(index),compliance);
 }
 `;

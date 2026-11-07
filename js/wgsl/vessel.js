@@ -1,4 +1,5 @@
 import { TILLER_PIVOT, HULL_VERTICAL_SCALE, hullDeck } from '../hull.js';
+import { ROPE_WAVE_WGSL } from '../rope-wave.js';
 import { LATEEN_MOTION } from './lateen.js';
 import {VICTORY_MOTION} from './victory.js';
 import {VICTORY_DESIGN,VICTORY_SAILS,victoryHatchPivot} from '../models/victory.js';
@@ -18,8 +19,7 @@ const gunFlashVictory=array<vec3f,104>(${createGunDefinitions('victory').map(g=>
 ${additionalGunFlashWGSL}
 fn gunFlashSurface(world:vec3f,n:vec3f,eye:vec3f,albedo:vec3f,rough:f32)->vec3f {
   var result=vec3f(0);
-  let flashExposure=min(1.0,1.35/max(F.post.x,1e-3));
-  let energy=abs(hull.up.w)*flashExposure;
+  let energy=abs(hull.up.w);
   if(energy>=.0001){
     let index=u32(max(0.0,hull.forward.w));
     var local=gunFlashNina[min(index,3u)];
@@ -44,9 +44,14 @@ fn gunFlashSurface(world:vec3f,n:vec3f,eye:vec3f,albedo:vec3f,rough:f32)->vec3f 
     let fDelta=fireLight-world;let fd=max(0.6,length(fDelta));let fl=fDelta/fd;
     let fHalf=normalize(fl+eye);let fSpec=pow(max(dot(n,fHalf),0.0),mix(64.0,6.0,rough));
     let ndl=max(dot(n,fl),0.0)*0.92+0.08;
-    result+=vec3f(1.0,0.36,0.07)*(fireInt*flicker*(3.2*flashExposure)/(2.2+fd*fd*0.95))*(albedo*0.31831*ndl+fSpec*0.015);
+    result+=vec3f(1.0,0.36,0.07)*(fireInt*flicker*3.2/(2.2+fd*fd*0.95))*(albedo*0.31831*ndl+fSpec*0.015);
   }
   return result;
+}
+${ROPE_WAVE_WGSL}
+fn hullRopeWaveAt(a:vec3f,b:vec3f,t:f32,index:f32,compliance:f32)->vec3f {
+  let chain=unpackHullRopeChain(hull.size.z,hull.right.y,hull.forward.y);
+  return evaluateRopeWaveAt(a,b,t,index,compliance,chain,hull.origin.w,max(hull.rig.y,hull.sailWind.z));
 }
 ${LATEEN_MOTION}
 ${VICTORY_MOTION}
@@ -82,10 +87,12 @@ fn rigVertex(position:vec3f,normal:vec3f,material:f32,uv:vec2f)->RigVertex {
     }else if(base==12u && uv.x>=100.0){
       let index=u32(round(uv.x-100.0));let line=victoryLines[index];let t=uv.y;
       let oldAxis=normalize(line.b.xyz-line.a.xyz);
-      let a0=victoryRopePoint(index,0.0);let b1=victoryRopePoint(index,1.0);
-      let newAxis=normalize(b1-a0);
+      var rPts=array<vec3f,3>(vec3f(0),vec3f(0),vec3f(0));
+      let rTs=array<f32,3>(t,min(1.0,t+.001),max(0.0,t-.001));
+      for(var s=0u;s<3u;s++){rPts[s]=victoryRopePoint(index,rTs[s]);}
+      let newAxis=normalize(rPts[1]-rPts[2]);
       let lineDelta=position-mix(line.a.xyz,line.b.xyz,t);
-      let bracedRope=mix(a0,b1,t)+ropeFrame(lineDelta,oldAxis,newAxis);
+      let bracedRope=rPts[0]+ropeFrame(lineDelta,oldAxis,newAxis);
       let ropeMix=select(0.0,clamp(length(lineDelta)*1.5,0.0,1.0),hasBakedDamage);
       local=mix(bracedRope,position,ropeMix);
       localN=ropeFrame(normal,oldAxis,newAxis);

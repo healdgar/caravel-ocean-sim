@@ -6,6 +6,7 @@ import {ADDITIONAL_DESIGNS,additionalDesign} from './models/additional.js';
 import {LATER_SAIL_DESIGNS,laterSailDesign} from './models/later-sail.js';
 import {ROWING_DESIGNS,rowingDesign} from './models/rowing.js';
 import {rigSurfacePose,surfaceControlIndex,surfaceRopePoint,withRigPoseContext} from './rig-surface.js';
+import {resolveVesselRopeChain} from './rope-wave.js';
 import {rowingStationPose,rowingSteeringPose} from './rowing.js';
 
 // Binding 3 is a vec4 array. All offsets stored in it are vec4 offsets.
@@ -191,7 +192,8 @@ export function writeRigGPUFrame(data,boat,time,wind,target){
   if(!scale.every(v=>Number.isFinite(v)&&v>0))throw Error('Invalid GPU rig dimensions');
   const rudder=(boat.rudder??0)*Math.PI/180,closed=Math.max(0,Math.min(1,boat.hatchesClosed??0));
   if(!Number.isFinite(rudder)||!Number.isFinite(closed))throw Error('Invalid GPU rig controls');
-  target.set([time,wind,rudder,(1-closed)*Math.PI/2,...scale,0,surfaces.length,data.bladeCount,0,0]);
+  const chain=resolveVesselRopeChain(boat);
+  target.set([time,wind,rudder,(1-closed)*Math.PI/2,...scale,chain.active,surfaces.length,data.bladeCount,chain.swayX,chain.swayZ]);
   for(let i=0;i<surfaces.length;i++){
     const pose=rigSurfacePose(surfaces[i],boat.sailState??{});
     target.set([pose.yaw,pose.deployed,pose.fill,pose.side,pose.opening,pose.dip,pose.pressure,0],data.surfaceStateOffset+i*8);

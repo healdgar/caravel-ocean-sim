@@ -8,6 +8,7 @@ import {hullLoftSheer,hullLoftPoint} from './hull-loft.js';
 import { advanceSails, sailForces } from './sailing.js';
 import {createHullLateralDescriptor,evaluateHullLateral} from './hull-lateral.js';
 import {computeArchetypeScaleSpec} from './ship-part-taxonomy.js';
+import {stepVesselRopeChain} from './rope-wave.js';
 
 export const KNOT_TO_MPS = 0.514444;
 export const DEFAULT_PROVISION_DAYS = 60;
@@ -444,6 +445,7 @@ export function stepBoatSurge(boat, slope, dt, windSpeed = 0, windDirection = 0)
   boat.surgeAcceleration = (velocity - initial) / dt;
   boat.leewayVelocity = sideways; boat.leewayDistance = sidewaysDistance;
   sailForces(boat, windSpeed, windDirection, velocity, sideways);
+  stepVesselRopeChain(boat, dt, boat.waveSampleTime || 0, windSpeed);
   return distance;
 }
 

@@ -6,6 +6,7 @@ import {additionalDesign,additionalHullWidth,additionalDeck,additionalStairFligh
 import {hullLoftPoint,hullLoftBottom,hullLoftSheer,hullLoftStem} from './hull-loft.js';
 import {additionalRigContext,additionalGunAttachments} from './additional-rig.js';
 import {surfaceRestPoint,rigSurfacePose,surfaceClothPoint,surfaceYardPoint,surfaceRopePoint,withRigPoseContext} from './rig-surface.js';
+import {resolveVesselRopeChain} from './rope-wave.js';
 import {ANCHOR_IRON} from './anchor-iron.js';
 
 // The hull's own oak repeats and plank width in metres, taken from the Niña's hull.
@@ -396,7 +397,7 @@ export function createAdditionalAssetPose(asset,options={}){
       const key=lineIndex+'/'+t;let sample=ropes.get(key);
       if(!sample){
         const point=surfaceRopePoint(line,t,restContext),a=surfaceRopePoint(line,Math.max(0,t-.001),restContext),b=surfaceRopePoint(line,Math.min(1,t+.001),restContext),frame=additionalMeshFrame(additionalMeshSub(b,a));
-        sample={line,t,point,across:frame.across,frame};ropes.set(key,sample);
+        sample={line,lineIndex,t,point,across:frame.across,frame};ropes.set(key,sample);
       }
       const offset=additionalMeshSub(p,sample.point),frame=sample.frame;
       entries.push({kind,at:i,sample,c:additionalMeshDot(offset,frame.across),s:additionalMeshDot(offset,frame.up),
@@ -409,6 +410,7 @@ export function createAdditionalAssetPose(asset,options={}){
   return (boat,time,wind,target)=>{
     if(!(target instanceof Float32Array)||target.length!==source.length)throw Error('Additional posed vertex buffer has wrong shape');
     runtime.state=boat.sailState??{};runtime.time=time;runtime.wind=wind;
+    runtime.ropeChain=resolveVesselRopeChain(boat);
     for(const s of context.surfaces){
       const pose=rigSurfacePose(s,runtime.state);poses.set(s.id,pose);
       const origin=surfaceYardPoint(s,[0,0,0],pose),axes=[[1,0,0],[0,1,0],[0,0,1]].map(axis=>additionalMeshSub(surfaceYardPoint(s,axis,pose),origin));
@@ -422,7 +424,8 @@ export function createAdditionalAssetPose(asset,options={}){
       const n=additionalMeshUnit(additionalMeshCross(du,dv));for(const at of sample.indices)write(target,at,p,n);
     }
     for(const sample of ropeSamples){
-      const {line,t}=sample,a=surfaceRopePoint(line,Math.max(0,t-.001),runtime),b=surfaceRopePoint(line,Math.min(1,t+.001),runtime);
+      const {line,lineIndex,t}=sample;runtime.lineIndex=lineIndex;
+      const a=surfaceRopePoint(line,Math.max(0,t-.001),runtime),b=surfaceRopePoint(line,Math.min(1,t+.001),runtime);
       sample.point=surfaceRopePoint(line,t,runtime);sample.frame=additionalMeshFrame(additionalMeshSub(b,a),sample.across);
     }
     const angle=(boat.rudder??0)*Math.PI/180,c=Math.cos(angle),s=Math.sin(angle),opening=(1-Math.max(0,Math.min(1,boat.hatchesClosed??0)))*Math.PI/2,hc=Math.cos(opening),hs=Math.sin(opening);

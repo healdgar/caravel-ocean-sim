@@ -13,6 +13,7 @@ import { ROWING_DESIGNS } from './models/rowing.js';
 import { LATER_SAIL_DESIGNS } from './models/later-sail.js';
 import { proceduralRigContext } from './additional-rig.js';
 import { rigSurfacePose, surfaceYardPoint, surfaceClothPoint } from './rig-surface.js';
+import { evaluateRopeWaveDisplacement, resolveVesselRopeChain } from './rope-wave.js';
 export { sternEnsignDesignStation };
 
 function getAdditionalRigDesign(modelId) {
@@ -705,15 +706,21 @@ export function buildVesselRigConnectors(boat, time = 0, windSpeed = 8) {
       put(b1, n1, uFlag, 1, mode);
     }
   };
+  const chain = resolveVesselRopeChain(boat);
+  const swayX = chain.active > 0 ? chain.swayX : -Math.sin(boat?.roll ?? 0);
+  const swayZ = chain.active > 0 ? chain.swayZ : Math.sin(boat?.pitch ?? 0);
+  let catenaryIndex = 0;
   const addCatenary = (a, b, sag, radius, segs, mode = 7, uFlag = 0.45) => {
+    const lineIdx = catenaryIndex++;
     let prev = a;
     for (let i = 1; i <= segs; i++) {
       const t = i / segs;
       const dip = 4 * t * (1 - t) * sag;
+      const wave = evaluateRopeWaveDisplacement(a, b, t, lineIdx, sag * 1.35, swayX, swayZ, time, windSpeed);
       const cur = [
-        a[0] + (b[0] - a[0]) * t,
-        a[1] + (b[1] - a[1]) * t - dip,
-        a[2] + (b[2] - a[2]) * t,
+        a[0] + (b[0] - a[0]) * t + wave[0],
+        a[1] + (b[1] - a[1]) * t - dip + wave[1],
+        a[2] + (b[2] - a[2]) * t + wave[2],
       ];
       addTube(prev, cur, radius, radius, 5, mode, uFlag);
       prev = cur;
