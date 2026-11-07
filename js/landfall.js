@@ -48,7 +48,7 @@ export function landfallStageURL(href,stage,weather='clear'){
   const view=LANDFALL_VIEWS[stage]||(stage==='dock'||stage==='harbor'?LANDFALL_VIEWS.coast:null);
   if(!view)throw new RangeError('Unknown landfall stage');
   const url=new URL(href);
-  for(const key of ['ocean','cam','boatX','boatZ','boatHeading','boatRudder','boatLength','boatBeam','boatEye','shipScale','state','swellDir','swellHs','swellLength','swellSpread','windSpeed'])url.searchParams.delete(key);
+  for(const key of ['ocean','cam','boatX','boatZ','boatHeading','boatRudder','boatLength','boatBeam','boatEye','shipScale','state','swellDir','swellHs','swellLength','swellSpread','windSpeed','latitude','longitude','drLat','drLon'])url.searchParams.delete(key);
   url.searchParams.set('landfall',stage);url.searchParams.set('view','boat');url.searchParams.set('boat','1');
   url.searchParams.set('boatHeading',String(view.heading??0));url.searchParams.set('boatSpeed',stage==='dock'?'1.5':'4');url.searchParams.set('weather',weather);
   for(const [key,value]of Object.entries(LANDFALL_SEA[stage]||LANDFALL_SEA.coast))url.searchParams.set(key,String(value));
@@ -507,8 +507,9 @@ export function createLandfallUI({dock,active,stage,weather,region=ISLAND,discov
       }
     }
     if(val==='saba'){
-      const url=stripScenarioOverrides(landfallStageURL(location.href,stage||'coast',weather));
-      url.searchParams.delete('region');url.searchParams.delete('lat');url.searchParams.delete('lon');
+      const sabaStage=stage==='dock'?'coast':(stage||'coast');
+      const url=stripScenarioOverrides(landfallStageURL(location.href,sabaStage,weather));
+      for(const k of ['region','lat','lon','latitude','longitude','drLat','drLon'])url.searchParams.delete(k);
       location.assign(url.href);
     }else if(allPresetIds.has(val)){
       const portMeta=HISTORICAL_COLONIAL_PORTS.find(p=>p.id===val);
@@ -551,7 +552,7 @@ export function createLandfallUI({dock,active,stage,weather,region=ISLAND,discov
     b.onclick=()=>{
       if(isSaba){
         const url=landfallStageURL(location.href,id,weather);
-        url.searchParams.delete('region');url.searchParams.delete('lat');url.searchParams.delete('lon');
+        for(const k of ['region','lat','lon','latitude','longitude','drLat','drLon'])url.searchParams.delete(k);
         location.assign(url.href);
       }else if(allPresetIds.has(region.id)){
         location.assign(coastalRegionStageURL(location.href,region.id,id,weather,getSelectedYear()).href);

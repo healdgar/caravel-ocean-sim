@@ -82,6 +82,23 @@ function boatWorldPoint(boat, lx, ly, lz) {
   ];
 }
 
+// Convert a 3D world point into `boat`'s crew design coordinates [dx, dy, dz]
+// (where +dx is starboard, +dy is up, and +dz is aft).
+function worldToCrewDesign(boat, wx, wy, wz) {
+  const hull = vesselHull(boat);
+  const f = hull.frame;
+  const sx = (boat.beam ?? f.beam) / f.beam;
+  const sy = f.verticalScale ?? 1;
+  const sz = (boat.length ?? f.length) / f.length;
+  const { rightX, rightZ, fwdX, fwdZ } = boatBasis(boat);
+  const rx = wx - (boat.x ?? 0);
+  const ry = wy - (boat.heave ?? 0);
+  const rz = wz - (boat.z ?? 0);
+  const localRight = rx * rightX + rz * rightZ;
+  const localAft = -(rx * fwdX + rz * fwdZ);
+  return [localRight / sx, ry / sy, localAft / sz];
+}
+
 // Compute crew boarding combat power from individual crew strength & battle morale.
 // Women and men have identical per-sailor physical strength (1.0).
 export function computeBoardingStrength(vesselOrBoat, companyArg = null) {
@@ -161,12 +178,13 @@ function getVesselCompany(v) {
   return v?.crew?.state ?? v?.company ?? v?.boat?.company ?? null;
 }
 
-function assignCrewToRailAction(company, boat, kind, side = 'starboard') {
+function assignCrewToRailAction(company, boat, kind, side = 'starboard', { isAttacker = true } = {}) {
   const sailors = company?.crew ?? company?.sailors;
   if (!sailors || !boat) return;
   const sideSign = side === 'port' ? -1 : 1;
   const zSlots = [-2.2, -1.1, 0.0, 1.1, 2.2, -1.65, 0.55, 1.65];
   let idx = 0;
+  let partySlot = 0;
   for (const s of sailors) {
     if (s.id === 'ines' || s.role === 'helmsman' || s.role === 'Helmsman') continue;
     if (s.casualtyState === 'fallen' || s.wounded === 'incapacitated') continue;
@@ -175,6 +193,8 @@ function assignCrewToRailAction(company, boat, kind, side = 'starboard') {
     const hb = Math.max(0.55, modelDeckWidth(boat, z) - 0.24);
     const x = sideSign * hb;
     const y = modelDeck(boat, z);
+    const boardingParty = kind === 'boarding' && isAttacker && (idx % 3 !== 2);
+    const plankIndex = (idx % 2 === 0) ? 1 : 2;
     s.x = x;
     s.z = z;
     s.intent = 'work';
@@ -183,6 +203,17 @@ function assignCrewToRailAction(company, boat, kind, side = 'starboard') {
       stage: 'working',
       side,
       sideSign,
+      railX: x,
+      railY: y,
+      railZ: z,
+      boardingParty,
+      isAttacker,
+      plankIndex,
+      partySlot: boardingParty ? (partySlot++) : idx,
+      crossProgress: 0,
+      crossingGangplank: false,
+      engagedMelee: false,
+      combatYaw: sideSign * Math.PI * 0.5,
       position: [x, y, z],
       targetX: x,
       targetZ: z,
@@ -464,19 +495,24 @@ export function createDockingBoardingState(boat, options = {}) {
       return { ok: false, reason: 'No vessel in range to throw lines' };
     }
     const tb = targetVessel.boat;
+    const dx0 = (tb.x ?? 0) - (boat.x ?? 0);
+    const dz0 = (tb.z ?? 0) - (boat.z ?? 0);
+    const dist0 = Math.hypot(dx0, dz0);
+    const maxGrappleDist = MOORING_SHIP_REACH_M + ((boat.beam ?? 4.8) + (tb.beam ?? 4.8)) * 0.5;
+    if (dist0 > maxGrappleDist) {
+      return {
+        ok: false,
+        tooFar: true,
+        distance: dist0,
+        reason: `${tb.shipName || tb.name || 'Target vessel'} is ${Math.round(dist0)} m away — steer within ${Math.round(MOORING_SHIP_REACH_M)} m alongside to throw grappling hooks!`,
+      };
+    }
     if (pullAlongside) {
-      // If the vessel is far off, bring her within initial line-throwing distance (~desiredGap + 4.5 m)
-      // so the subsequent making-fast phase smoothly hauls the hulls beam-to-beam without snapping.
+      // Only align heading/velocity when already within real grappling reach; never tractor-beam from afar.
       const { rightX, rightZ } = boatBasis(boat);
-      const dx = (tb.x ?? 0) - (boat.x ?? 0);
-      const dz = (tb.z ?? 0) - (boat.z ?? 0);
-      const dist = Math.hypot(dx, dz);
-      const sideSign = (dx * rightX + dz * rightZ) >= 0 ? 1 : -1;
+      const sideSign = (dx0 * rightX + dz0 * rightZ) >= 0 ? 1 : -1;
       const desiredGap = Math.max(6.2, ((boat.beam ?? 4.8) + (tb.beam ?? 4.8)) * 0.68);
-      if (dist > desiredGap + 6.0) {
-        const stagingDist = desiredGap + 4.2;
-        tb.x = (boat.x ?? 0) + rightX * sideSign * stagingDist;
-        tb.z = (boat.z ?? 0) + rightZ * sideSign * stagingDist;
+      if (dist0 > desiredGap + 6.0 && dist0 <= maxGrappleDist) {
         tb.heading = boat.heading ?? 0;
         tb.surgeVelocity = (boat.surgeVelocity ?? 0) * 0.35;
         tb.leewayVelocity = 0;
@@ -507,11 +543,11 @@ export function createDockingBoardingState(boat, options = {}) {
     state.lines = buildLineDescriptorsForShip(boat, tb, side);
 
     boat.mooringActive = true;
-    assignCrewToRailAction(state.company, boat, 'mooring', side);
+    assignCrewToRailAction(state.company, boat, 'mooring', side, { isAttacker: true });
     const targetComp = getVesselCompany(targetVessel);
     if (targetComp) {
       const oppSide = side === 'port' ? 'starboard' : 'port';
-      assignCrewToRailAction(targetComp, tb, mode === 'board-fight' ? 'boarding' : 'mooring', oppSide);
+      assignCrewToRailAction(targetComp, tb, mode === 'board-fight' ? 'boarding' : 'mooring', oppSide, { isAttacker: false });
     }
 
     state.statusText = `Throwing grappling lines across to ${tb.shipName || tb.name || 'vessel'} (${side} beam)…`;
@@ -865,10 +901,22 @@ export function createDockingBoardingState(boat, options = {}) {
     const tb = vessel.boat;
     const isSurrendered = Boolean(tb.damage?.surrendered || tb.colors === 'surrender');
 
-    grappleShip(vessel, {
+    const grappleRes = grappleShip(vessel, {
       mode: isSurrendered ? 'board-surrendered' : 'board-fight',
-      pullAlongside: true,
+      pullAlongside: !immediateResolve,
     });
+    if (!grappleRes.ok) {
+      state.targetVessel = vessel;
+      state.boardingPhase = 'approaching';
+      state.boardingMode = isSurrendered ? 'surrendered' : 'fight';
+      const side = determineSideToward(tb.x ?? 0, tb.z ?? 0);
+      state.mooringSide = side;
+      boat.boardingActive = true;
+      assignCrewToRailAction(state.company, boat, 'boarding', side, { isAttacker: true });
+      state.statusText = grappleRes.reason || `Stand by grappling irons! Close within ${MOORING_SHIP_REACH_M} m alongside ${tb.shipName || tb.name || 'target vessel'} to throw grappling hooks!`;
+      state.combatLog.unshift(state.statusText);
+      return { ok: false, approaching: true, phase: 'approaching', reason: state.statusText, vessel };
+    }
 
     state.boardingMode = isSurrendered ? 'surrendered' : 'fight';
     state.boardingTimer = 0;
@@ -893,11 +941,11 @@ export function createDockingBoardingState(boat, options = {}) {
     state.boardingPhase = 'grappling';
     boat.boardingActive = true;
     tb.boardingActive = true;
-    assignCrewToRailAction(state.company, boat, 'boarding', state.mooringSide);
+    assignCrewToRailAction(state.company, boat, 'boarding', state.mooringSide, { isAttacker: true });
     const targetComp = getVesselCompany(vessel);
     if (targetComp) {
       const oppSide = state.mooringSide === 'port' ? 'starboard' : 'port';
-      assignCrewToRailAction(targetComp, tb, 'boarding', oppSide);
+      assignCrewToRailAction(targetComp, tb, 'boarding', oppSide, { isAttacker: false });
     }
 
     const atk = computeBoardingStrength({ boat, company: state.company });
@@ -1242,9 +1290,108 @@ export function createDockingBoardingState(boat, options = {}) {
     }
   }
 
+  function stepBoardingPartyMovement(dt) {
+    if (
+      state.mooringTargetKind !== 'vessel' ||
+      !state.targetVessel?.boat ||
+      !state.lines?.length
+    ) {
+      return;
+    }
+    const tb = state.targetVessel.boat;
+    const gp = bdClamp(state.gangplankProgress ?? 0, 0, 1);
+    if (gp < 0.65) return;
+
+    const sailors = state.company?.crew ?? state.company?.sailors ?? [];
+    for (const s of sailors) {
+      const j = s.job;
+      if (!j || j.kind !== 'boarding' || s.casualtyState === 'fallen' || s.wounded === 'incapacitated') continue;
+      if (!j.boardingParty) {
+        j.crossingGangplank = false;
+        j.engagedMelee = state.boardingPhase === 'boarding-melee';
+        continue;
+      }
+      const line = state.lines[j.plankIndex ?? 1] ?? state.lines[1];
+      if (!line || !line.targetLocal) continue;
+
+      const slotDelay = (j.partySlot ?? 0) * 0.28;
+      const elapsed = Math.max(0, (state.boardingTimer ?? 0) - slotDelay);
+      const targetCross = state.boardingPhase === 'boarding-melee' || state.boardingPhase === 'capturing-surrendered'
+        ? Math.min(1.32, elapsed * 0.62)
+        : 0;
+      const prevCross = j.crossProgress ?? 0;
+      const nextCross = prevCross + (targetCross - prevCross) * Math.min(1, dt * 3.8);
+      j.crossProgress = nextCross;
+      j.crossingGangplank = Math.abs(targetCross - nextCross) > 0.04 && nextCross > 0.02 && nextCross < 1.24;
+      j.engagedMelee = nextCross >= 0.92;
+
+      const startW = boatWorldPoint(boat, line.shipLocal[0], line.shipLocal[1] + 0.06, line.shipLocal[2]);
+      const endW = boatWorldPoint(tb, line.targetLocal[0], line.targetLocal[1] + 0.06, line.targetLocal[2]);
+      const plankBridge = Math.min(1.0, nextCross);
+      let wx = startW[0] + (endW[0] - startW[0]) * plankBridge;
+      let wy = startW[1] + (endW[1] - startW[1]) * plankBridge;
+      let wz = startW[2] + (endW[2] - startW[2]) * plankBridge;
+
+      if (nextCross > 1.0) {
+        // Step off the gangplank onto the enemy ship's waist deck and duel hand-to-hand
+        const intoDeck = (nextCross - 1.0) / 0.32;
+        const slot = j.partySlot ?? 0;
+        const spreadZ = ((slot % 3) - 1) * 0.72 + (j.plankIndex === 1 ? 1.05 : -1.05);
+        const lunge = 0.24 * Math.sin((state.boardingTimer ?? 0) * 3.6 + slot * 1.3);
+        const enemySideSign = Math.sign(line.targetLocal[0]) || -1;
+        const enemyDeckX = line.targetLocal[0] - enemySideSign * (0.58 * intoDeck + lunge);
+        const enemyDeckY = modelDeck(tb, spreadZ);
+        const enemyPtW = boatWorldPoint(tb, enemyDeckX, enemyDeckY, spreadZ);
+        wx = endW[0] + (enemyPtW[0] - endW[0]) * Math.min(1, intoDeck);
+        wy = endW[1] + (enemyPtW[1] - endW[1]) * Math.min(1, intoDeck);
+        wz = endW[2] + (enemyPtW[2] - endW[2]) * Math.min(1, intoDeck);
+      }
+
+      const designPt = worldToCrewDesign(boat, wx, wy, wz);
+      j.position = designPt;
+      s.x = designPt[0];
+      s.z = designPt[2];
+      const sideSign = j.sideSign ?? (j.side === 'port' ? -1 : 1);
+      const yawSwing = j.engagedMelee ? 0.28 * Math.sin((state.boardingTimer ?? 0) * 2.9 + (j.partySlot ?? 0)) : 0;
+      j.combatYaw = sideSign * Math.PI * 0.5 + yawSwing;
+    }
+
+    // Position enemy defenders on their deck facing our boarding party at the gangplanks
+    const targetComp = getVesselCompany(state.targetVessel);
+    const enemySailors = targetComp?.crew ?? targetComp?.sailors ?? [];
+    let defIdx = 0;
+    for (const es of enemySailors) {
+      const ej = es.job;
+      if (!ej || ej.kind !== 'boarding' || es.casualtyState === 'fallen' || es.wounded === 'incapacitated') continue;
+      const sideSign = ej.sideSign ?? (ej.side === 'port' ? -1 : 1);
+      const baseZ = ((defIdx % 4) - 1.5) * 0.95;
+      const hb = Math.max(0.55, modelDeckWidth(tb, baseZ) - 0.58);
+      const parryShift = 0.22 * Math.sin((state.boardingTimer ?? 0) * 3.6 + defIdx * 1.3 + Math.PI);
+      const ex = sideSign * Math.max(0.18, hb - 0.35 + parryShift);
+      const ey = modelDeck(tb, baseZ);
+      ej.position = [ex, ey, baseZ];
+      es.x = ex;
+      es.z = baseZ;
+      ej.engagedMelee = true;
+      ej.combatYaw = sideSign * Math.PI * 0.5 + 0.22 * Math.cos((state.boardingTimer ?? 0) * 2.7 + defIdx);
+      defIdx++;
+    }
+  }
+
   function step(dt) {
     if (!(dt > 0)) return;
     state.phaseTimer += dt;
+
+    if (state.boardingPhase === 'approaching' && state.targetVessel?.boat) {
+      const tb = state.targetVessel.boat;
+      const dist = Math.hypot((tb.x ?? 0) - (boat.x ?? 0), (tb.z ?? 0) - (boat.z ?? 0));
+      const maxGrappleDist = MOORING_SHIP_REACH_M + ((boat.beam ?? 4.8) + (tb.beam ?? 4.8)) * 0.5;
+      if (dist <= maxGrappleDist) {
+        boardVessel(state.targetVessel);
+      } else {
+        state.statusText = `Closing to board ${tb.shipName || tb.name || 'target vessel'} — ${Math.round(dist)} m away (close within ${Math.round(MOORING_SHIP_REACH_M)} m alongside to throw grappling hooks)…`;
+      }
+    }
 
     if (state.mooringPhase === 'throwing-lines') {
       state.lineProgress = bdClamp(state.lineProgress + dt * 0.65, 0, 1);
@@ -1308,10 +1455,14 @@ export function createDockingBoardingState(boat, options = {}) {
     if (state.boardingPhase === 'boarding-melee') {
       state.boardingTimer += dt;
       state.combatRoundTimer += dt;
+      stepBoardingPartyMovement(dt);
       if (state.combatRoundTimer >= 1.35) {
         state.combatRoundTimer = 0;
         stepBoardingCombatRound();
       }
+    } else if (state.boardingPhase === 'capturing-surrendered' && state.gangplankProgress > 0.65) {
+      state.boardingTimer += dt;
+      stepBoardingPartyMovement(dt);
     }
 
     applyMooringPhysics(dt);

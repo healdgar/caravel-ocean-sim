@@ -55,15 +55,24 @@ export function createDolphinEncounter(random=Math.random,options={}){
           const pose=dolphinPoseAt(0,a,i);a.contactPose=pose;a.contactBounds=dolphinSurfaceContact(pose.depth,pose.pitch,a.scale);a.entryPending=a.contactBounds.max>0;
         }
         event={id:serial,text:`Dolphins off the ${candidate<0?'port':'starboard'} bow · ${count} in the pod`};
+        podHeading=heading;
         previousX=boat.x;previousZ=boat.z;return true;
       }
     }
     event={id:serial,text:'Dolphins need clear water at least six metres deep.'};return false;
   }
+  let podHeading=0;
+  function shift(dx,dz){
+    if(!Number.isFinite(dx)||!Number.isFinite(dz))return;
+    if(Number.isFinite(previousX))previousX+=dx;
+    if(Number.isFinite(previousZ))previousZ+=dz;
+    for(let i=0;i<count;i++){animals[i].x+=dx;animals[i].z+=dz;}
+    for(const s of splashes){if(s.strength>0){s.x+=dx;s.z+=dz;}}
+  }
   return {
     get onSurfaceEvent(){return dolphinSurfaceSink;},set onSurfaceEvent(value){dolphinSurfaceSink=typeof value==='function'?value:null;},
     animals,splashes,enabled:true,get active(){return count>0;},get count(){return count;},get time(){return time;},get age(){return age;},get event(){return event;},get nextAt(){return next;},
-    trigger:start,clear,
+    trigger:start,clear,shift,
     step(dt,boat,settings={},terrain=null,vessels=[boat]){
       dt=dolphinClamp(Number.isFinite(dt)?dt:0,0,.1);time+=dt;event=null;
       for(const s of splashes)s.age+=dt;
@@ -75,7 +84,9 @@ export function createDolphinEncounter(random=Math.random,options={}){
       }
       const previousAge=age;age+=dt;
       if(age>DOLPHIN_ENCOUNTER_SECONDS){clear();return;}
-      const heading=(boat.heading??0)*Math.PI/180,boatSpeed=Math.abs(boat.surgeVelocity??0);
+      const rawHeading=(boat.heading??0)*Math.PI/180,boatSpeed=Math.abs(boat.surgeVelocity??0);
+      podHeading+=dolphinClamp(dolphinAngle(rawHeading-podHeading),-.18*dt,.18*dt);
+      const heading=podHeading;
       const depart=dolphinClamp((age-75)/30,0,1);
       for(let i=0;i<count;i++){
         const a=animals[i],oldX=a.x,oldZ=a.z,oldHeading=a.heading,fore=boat.length*.64+8+i%3*5+depart*80,beam=a.side*(boat.beam*.5+6+Math.floor(i/3)*3+depart*25);

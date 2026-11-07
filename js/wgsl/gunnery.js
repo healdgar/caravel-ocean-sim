@@ -337,7 +337,8 @@ struct GunneryWaterVertex{@builtin(position)position:vec4f,@location(0)world:vec
   let drift=heading*min(12.0,length(c.motion.xz)*.025)*age;
   let horizontal=side*cos(angle)*radius+heading*sin(angle)*radius*1.18+drift*row;
   let rise=max(0.0,lift*age-4.905*age*age)*row*lobe;
-  let world=c.root.xyz+vec3f(horizontal.x,.025+rise,horizontal.y);
+  let baseY=select(gunnerySeaHeight(c.root.xz+horizontal),c.root.y,c.extra.x>.5);
+  let world=vec3f(c.root.x+horizontal.x,baseY+.025+rise,c.root.z+horizontal.y);
   return GunneryWaterVertex(F.viewProj*vec4f(world-F.camPos.xyz,1),world,vec2f(angle,row),id);
 }
 @fragment fn gunneryCrownFS(v:GunneryWaterVertex)->@location(0)vec4f{

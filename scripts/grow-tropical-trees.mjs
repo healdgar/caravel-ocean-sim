@@ -184,98 +184,176 @@ function crownLight(at, crown) {
   return { shade: 0.42 + 0.46 * out * out, outward: unit([d[0], d[1] + 0.25, d[2]]) };
 }
 
-function growCeiba() {
-  const rng = random(37), height = 18.5, mesh = new Mesh(), leaves = new Mesh(), leafIndices = [];
-  const bole = height * 0.64, rings = [], FINS = 6, FIN_STEPS = 34, colour = [0.82, 0.82, 0.74];
-  for (let r = 0; r <= FIN_STEPS; r++) {
-    const t = r / FIN_STEPS, y = t * t * bole, radius = 0.34 + 0.2 * (1 - t) ** 1.5;
-    // Plank buttresses: thin fins running out from the trunk, gone a few metres up.
-    const fin = 4.2 * Math.exp(-y / 1.25);
-    rings.push({ at: [0.02 * Math.sin(y * 0.4), y - 0.25, 0.02 * Math.cos(y * 0.3)], radius, colour, shape: (angle) => 1 + fin * Math.max(0, Math.cos(FINS * angle / 2 + 0.6)) ** 10 });
+const sabaManifest = JSON.parse(fs.readFileSync('assets/forest-scenery/saba/manifest.json', 'utf8'));
+const sabaVertices = asFloats(zlib.gunzipSync(fs.readFileSync('assets/forest-scenery/saba/vertices.bin.gz')));
+const sabaIndices = asWords(zlib.gunzipSync(fs.readFileSync('assets/forest-scenery/saba/indices.bin.gz')));
+
+// Extracts a baked forestmodeler broadleaf tree from the Saba pack, retaining its primary trunk & limb
+// tube components intact (so trunk ring topology is 100% preserved) and subsampling its 12-index leaflets.
+function bakeFromSaba(protoIndex, maxWoodComponents, leafStep, leafInflate, woodTint = [1, 1, 1], leafTint = [1, 1, 1]) {
+  const p = sabaManifest.prototypes[protoIndex];
+  const mesh = new Mesh(), leaves = new Mesh(), leafIndices = [], farMesh = new Mesh();
+  const woodIndices = sabaIndices.subarray(p.wood.firstIndex, p.wood.firstIndex + p.wood.indexCount);
+
+  // Weld wood positions to identify connected tube components and keep the thickest/largest trunk & limb tubes intact
+  const posKeyToId = new Map();
+  const triWeld = new Uint32Array(woodIndices.length);
+  let weldCount = 0;
+  for (let i = 0; i < woodIndices.length; i++) {
+    const at = woodIndices[i] * STRIDE;
+    const key = `${Math.round(sabaVertices[at] * 1000)},${Math.round(sabaVertices[at + 1] * 1000)},${Math.round(sabaVertices[at + 2] * 1000)}`;
+    let wid = posKeyToId.get(key);
+    if (wid === undefined) {
+      wid = weldCount++;
+      posKeyToId.set(key, wid);
+    }
+    triWeld[i] = wid;
   }
-  tube(mesh, rings, 36, 3, 0.35, 0.56);
-  const crown = { centre: [0, height * 0.82, 0], radius: 11, depth: 3.6 };
-  const barkColour = [0.7, 0.7, 0.62];
-  const TIERS = 5;
-  for (let tier = 0; tier < TIERS; tier++) {
-    const y = bole * (0.8 + 0.2 * (tier / (TIERS - 1)));
-    const count = 4, offset = tier * 1.1;
-    for (let n = 0; n < count; n++) {
-      const azimuth = offset + (n / count) * Math.PI * 2 + (rng() - 0.5) * 0.5, elevation = (8 + tier * 6 + rng() * 8) * (Math.PI / 180);
-      const direction = [Math.cos(azimuth) * Math.cos(elevation), Math.sin(elevation), Math.sin(azimuth) * Math.cos(elevation)];
-      const main = limb(mesh, rng, { start: [0, y, 0], direction, length: 6.4 + rng() * 2.4 - tier * 0.5, radius: 0.2 - tier * 0.015, segments: 7, sides: 6, pull: 0.08, wander: 0.09, colour: barkColour, shade: 0.5 });
-      const SIDE = 7;
-      for (let b = 0; b < SIDE; b++) {
-        const on = pointOn(main, 0.32 + (0.68 * b) / (SIDE - 1));
-        const branch = limb(mesh, rng, { start: on.at, direction: splay(on.along, rng, 0.75, 0.08), length: 2.4 + rng() * 1.5, radius: 0.05, segments: 3, sides: 4, pull: 0.04, wander: 0.2, colour: barkColour, shade: 0.54 });
-        for (let w = 0; w < 8; w++) {
-          const near = pointOn(branch, 0.15 + 0.85 * (w / 7));
-          const twig = limb(mesh, rng, { start: near.at, direction: splay(near.along, rng, 0.8, 0.06), length: 0.9 + rng() * 0.6, radius: 0.016, segments: 2, sides: 3, wander: 0.2, colour: [0.5, 0.52, 0.34], shade: 0.6 });
-          // Hands of leaflets, as a ceiba's palmate leaves are.
-          for (let hand = 0; hand < 5; hand++) {
-            const node = add(pointOn(twig, 0.2 + 0.2 * hand).at, [0, 0.02, 0]);
-            const { shade, outward } = crownLight(node, crown);
-            const material = LEAFLET[Math.floor(rng() * LEAFLET.length)], turn = rng() * Math.PI * 2;
-            for (let f = 0; f < 6; f++) {
-              const a = turn + (f / 6) * Math.PI * 2;
-              const dir = unit([Math.cos(a), -0.12 + rng() * 0.2, Math.sin(a)]);
-              const across = unit(cross(dir, UP));
-              const tint = 0.9 + rng() * 0.15;
-              leaflet(leaves, leafIndices, node, dir, across, 0.48 + rng() * 0.12, 0.18, 0.22, [tint, tint, tint * 0.92], material, shade, outward);
-            }
-          }
+  const adj = Array.from({ length: weldCount }, () => []);
+  for (let t = 0; t < triWeld.length; t += 3) {
+    const a = triWeld[t], b = triWeld[t + 1], c = triWeld[t + 2];
+    adj[a].push(b, c);
+    adj[b].push(a, c);
+    adj[c].push(a, b);
+  }
+  const compOf = new Int32Array(weldCount).fill(-1);
+  const comps = [];
+  for (let v = 0; v < weldCount; v++) {
+    if (compOf[v] >= 0) continue;
+    const cid = comps.length;
+    const list = [v];
+    compOf[v] = cid;
+    for (let head = 0; head < list.length; head++) {
+      const cur = list[head];
+      const nb = adj[cur];
+      for (let k = 0; k < nb.length; k++) {
+        const nxt = nb[k];
+        if (compOf[nxt] < 0) {
+          compOf[nxt] = cid;
+          list.push(nxt);
         }
       }
     }
+    comps.push(list);
   }
-  return { mesh, leaves, leafIndices, height, crownRadius: crown.radius, basalRadius: 1.1, far: { crownLow: height * 0.66, crownHigh: height * 1.02, crownRadius: crown.radius, trunkRadius: 0.5, trunkHeight: bole, flare: 1.38 } };
+  const keepComps = new Set(
+    comps
+      .map((c, idx) => ({ idx, len: c.length }))
+      .sort((a, b) => b.len - a.len)
+      .slice(0, maxWoodComponents)
+      .map((c) => c.idx)
+  );
+
+  const woodRemap = new Map();
+  let maxWoodY = 0;
+  for (let t = 0; t < woodIndices.length; t += 3) {
+    if (!keepComps.has(compOf[triWeld[t]])) continue;
+    for (let k = 0; k < 3; k++) {
+      const oldV = woodIndices[t + k];
+      let newV = woodRemap.get(oldV);
+      if (newV === undefined) {
+        const at = oldV * STRIDE;
+        const pos = [sabaVertices[at], sabaVertices[at + 1], sabaVertices[at + 2]];
+        if (pos[1] > maxWoodY) maxWoodY = pos[1];
+        const nrm = [sabaVertices[at + 3], sabaVertices[at + 4], sabaVertices[at + 5]];
+        const shade = sabaVertices[at + 7];
+        const uv = [sabaVertices[at + 8], sabaVertices[at + 9]];
+        const col = [
+          Math.min(1.2, sabaVertices[at + 10] * woodTint[0]),
+          Math.min(1.2, sabaVertices[at + 11] * woodTint[1]),
+          Math.min(1.2, sabaVertices[at + 12] * woodTint[2]),
+        ];
+        const mat = sabaVertices[at + 13] === 1 ? 1 : BARK;
+        newV = mesh.vertex(pos, nrm, WOOD, shade, uv, col, mat);
+        woodRemap.set(oldV, newV);
+      }
+      mesh.indices.push(newV);
+    }
+  }
+
+  let maxLeafY = 0, maxCrownR = 1.0;
+  const leafRange = sabaIndices.subarray(p.leaf.firstIndex, p.leaf.firstIndex + p.leaf.indexCount);
+  const totalLeaflets = (leafRange.length / 12) | 0;
+  for (let l = 0; l < totalLeaflets; l += leafStep) {
+    const base = l * 12;
+    const origVerts = [
+      leafRange[base + 0],
+      leafRange[base + 1],
+      leafRange[base + 2],
+      leafRange[base + 5],
+      leafRange[base + 8],
+      leafRange[base + 11],
+    ];
+    let cx = 0, cy = 0, cz = 0;
+    for (const vIdx of origVerts) {
+      const at = vIdx * STRIDE;
+      cx += sabaVertices[at] / 6;
+      cy += sabaVertices[at + 1] / 6;
+      cz += sabaVertices[at + 2] / 6;
+    }
+    const newVerts = origVerts.map((vIdx) => {
+      const at = vIdx * STRIDE;
+      const pos = [
+        cx + (sabaVertices[at] - cx) * leafInflate,
+        cy + (sabaVertices[at + 1] - cy) * leafInflate,
+        cz + (sabaVertices[at + 2] - cz) * leafInflate,
+      ];
+      if (pos[1] > maxLeafY) maxLeafY = pos[1];
+      const cr = Math.hypot(pos[0], pos[2]);
+      if (cr > maxCrownR) maxCrownR = cr;
+      const nrm = [sabaVertices[at + 3], sabaVertices[at + 4], sabaVertices[at + 5]];
+      const shade = sabaVertices[at + 7];
+      const uv = [sabaVertices[at + 8], sabaVertices[at + 9]];
+      const col = [
+        Math.min(1.2, sabaVertices[at + 10] * leafTint[0]),
+        Math.min(1.2, sabaVertices[at + 11] * leafTint[1]),
+        Math.min(1.2, sabaVertices[at + 12] * leafTint[2]),
+      ];
+      const mat = LEAFLET[(Math.round(sabaVertices[at + 13]) - 2 + 3) % LEAFLET.length] ?? 2;
+      return leaves.vertex(pos, nrm, LEAF, shade, uv, col, mat);
+    });
+    const [a, b, c, d, e, f] = newVerts;
+    leafIndices.push(a, b, c, a, c, d, d, c, e, d, e, f);
+  }
+
+  const farRange = sabaIndices.subarray(p.far.firstIndex, p.far.firstIndex + p.far.indexCount);
+  const farRemap = new Map();
+  for (let k = 0; k < farRange.length; k++) {
+    const oldV = farRange[k];
+    let newV = farRemap.get(oldV);
+    if (newV === undefined) {
+      const at = oldV * STRIDE;
+      newV = farMesh.vertex(
+        [sabaVertices[at], sabaVertices[at + 1], sabaVertices[at + 2]],
+        [sabaVertices[at + 3], sabaVertices[at + 4], sabaVertices[at + 5]],
+        sabaVertices[at + 6],
+        sabaVertices[at + 7],
+        [sabaVertices[at + 8], sabaVertices[at + 9]],
+        [sabaVertices[at + 10], sabaVertices[at + 11], sabaVertices[at + 12]],
+        sabaVertices[at + 13]
+      );
+      farRemap.set(oldV, newV);
+    }
+    farMesh.indices.push(newV);
+  }
+
+  return {
+    mesh,
+    leaves,
+    leafIndices,
+    farMesh,
+    height: Math.max(maxWoodY, maxLeafY),
+    crownRadius: maxCrownR,
+    basalRadius: 0.44,
+  };
+}
+
+function growCeiba() {
+  return bakeFromSaba(0, 12, 18, 1.55, [0.95, 0.94, 0.88], [0.98, 1.02, 0.94]);
 }
 
 function growMangrove() {
-  const rng = random(53), height = 7.8, mesh = new Mesh(), leaves = new Mesh(), leafIndices = [];
-  const crown = { centre: [0, 5.1, 0], radius: 4.7, depth: 2.9 };
-  const barkColour = [1, 0.86, 0.74], rootColour = [0.92, 0.74, 0.6];
-  const STEMS = 3, stems = [];
-  for (let s = 0; s < STEMS; s++) {
-    const a = (s / STEMS) * Math.PI * 2 + 0.4, lean = 0.22 + rng() * 0.18;
-    stems.push(limb(mesh, rng, { start: [Math.cos(a) * 0.12, 0.55, Math.sin(a) * 0.12], direction: [Math.cos(a) * lean, 1, Math.sin(a) * lean], length: 3.2 + rng() * 0.7, radius: 0.13, tip: 0.5, segments: 5, sides: 7, pull: -0.1, wander: 0.2, colour: barkColour, shade: 0.5 }));
-  }
-  // Prop roots arch out of the stems and down into the mud, which is what makes it a mangrove.
-  const ROOTS = 20;
-  for (let r = 0; r < ROOTS; r++) {
-    const stem = stems[r % STEMS], from = pointOn(stem, rng() * 0.42).at, a = (r / ROOTS) * Math.PI * 2 + rng() * 0.3;
-    const reach = 1.5 + rng() * 2.1, control = [from[0] + Math.cos(a) * reach * 0.55, from[1] + 0.5, from[2] + Math.sin(a) * reach * 0.55];
-    const end = [Math.cos(a) * reach, -0.35, Math.sin(a) * reach], rings = [], STEPS = 8, thick = 0.04 + rng() * 0.02;
-    for (let k = 0; k <= STEPS; k++) {
-      const t = k / STEPS, u = 1 - t;
-      rings.push({ at: [u * u * from[0] + 2 * u * t * control[0] + t * t * end[0], u * u * from[1] + 2 * u * t * control[1] + t * t * end[1], u * u * from[2] + 2 * u * t * control[2] + t * t * end[2]], radius: thick * (1 + 0.5 * t), colour: rootColour });
-    }
-    tube(mesh, rings, 4, 1, 1.2, 0.42);
-  }
-  // A dense low dome: limbs from each stem, branches, then twigs carrying thick leaves in pairs.
-  for (const stem of stems) {
-    for (let l = 0; l < 6; l++) {
-      const on = pointOn(stem, 0.5 + 0.5 * (l / 5));
-      const main = limb(mesh, rng, { start: on.at, direction: splay(on.along, rng, 0.95, 0.05), length: 2.1 + rng() * 1.1, radius: 0.055, segments: 4, sides: 5, pull: 0.05, wander: 0.32, colour: barkColour, shade: 0.5 });
-      for (let b = 0; b < 7; b++) {
-        const near = pointOn(main, 0.15 + 0.85 * (b / 6));
-        const branch = limb(mesh, rng, { start: near.at, direction: splay(near.along, rng, 0.85, 0.05), length: 1 + rng() * 0.7, radius: 0.02, segments: 2, sides: 3, wander: 0.3, colour: barkColour, shade: 0.55 });
-        for (let w = 0; w < 9; w++) {
-          const twig = limb(mesh, rng, { start: pointOn(branch, 0.1 + 0.9 * (w / 8)).at, direction: splay(near.along, rng, 0.9, 0.1), length: 0.48 + rng() * 0.3, radius: 0.008, segments: 2, sides: 3, wander: 0.2, colour: [0.42, 0.42, 0.26], shade: 0.6 });
-          const material = LEAFLET[Math.floor(rng() * LEAFLET.length)];
-          for (let pair = 0; pair < 5; pair++) {
-            const point = pointOn(twig, 0.2 + (0.8 * pair) / 4), { shade, outward } = crownLight(point.at, crown);
-            for (const hand of [-1, 1]) {
-              const dir = unit(add(mul(unit(cross(point.along, UP)), hand), mul(point.along, 0.75)));
-              const across = unit(cross(dir, UP)), tint = 0.92 + rng() * 0.12;
-              leaflet(leaves, leafIndices, point.at, dir, across, 0.38 + rng() * 0.08, 0.2, 0.12, [tint, tint, tint], material, shade, outward);
-            }
-          }
-        }
-      }
-    }
-  }
-  return { mesh, leaves, leafIndices, height, crownRadius: crown.radius, basalRadius: 0.55, far: { crownLow: 2.6, crownHigh: height, crownRadius: crown.radius, trunkRadius: 0.3, trunkHeight: 3, flare: 1.38 } };
+  return bakeFromSaba(2, 16, 5, 1.35, [0.96, 0.88, 0.80], [0.96, 1.0, 0.92]);
 }
 
 const grown = { royal_palm: growRoyalPalm(), palm: growCoconut(), ceiba: growCeiba(), mangrove: growMangrove() };
@@ -320,8 +398,13 @@ for (const p of manifest.prototypes) {
   const remap = new Map(), palm = grown[p.species];
   if (!palm) throw Error(`No growth recipe for ${p.species}`);
   const wood = appendNew(palm.mesh, palm.mesh.indices), leaf = appendNew(palm.leaves, palm.leafIndices);
-  p.wood = { ...p.wood, ...wood }; p.leaf = { ...p.leaf, ...leaf }; p.far = appendOld(p.far, remap);
-  fitFarModel(p.far, palm.far);
+  p.wood = { ...p.wood, ...wood }; p.leaf = { ...p.leaf, ...leaf };
+  if (palm.farMesh) {
+    p.far = { ...p.far, ...appendNew(palm.farMesh, palm.farMesh.indices) };
+  } else {
+    p.far = appendOld(p.far, remap);
+    fitFarModel(p.far, palm.far);
+  }
   const low = [Infinity, Infinity, Infinity], high = [-Infinity, -Infinity, -Infinity];
   for (const m of [palm.mesh, palm.leaves]) for (let i = 0; i < m.vertices.length; i += STRIDE) for (let a = 0; a < 3; a++) { low[a] = Math.min(low[a], m.vertices[i + a]); high[a] = Math.max(high[a], m.vertices[i + a]); }
   for (let k = 0; k < p.far.indexCount; k++) {

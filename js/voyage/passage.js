@@ -373,6 +373,11 @@ export function serializeVoyage(voyage) {
 export function restoreVoyage(json) {
   const v = typeof json === 'string' ? JSON.parse(json) : json;
   if (!v || v.version !== 1 || !v.true || !v.dr) return null;
+  if (Number.isFinite(v.dateMs) && new Date(v.dateMs).getUTCFullYear() > 1800) {
+    const elapsedDays = Math.max(0, (v.dayAtSea ?? 1) - 1);
+    v.departureDateMs = DEFAULT_DEPARTURE.dateMs;
+    v.dateMs = DEFAULT_DEPARTURE.dateMs + elapsedDays * 86400000;
+  }
   v.weather = null;
   v.weatherSampleMs = -Infinity;
   v.interrupt = null;

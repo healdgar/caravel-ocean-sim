@@ -209,7 +209,7 @@ function crewWorkDescend(s){
   else j.stage='descending';
 }
 function crewWorkFacingYaw(s,j,boat){
-  if(j.kind==='boarding'||j.kind==='mooring')return (j.sideSign??(j.side==='port'?-1:1))*Math.PI/2;
+  if(j.kind==='boarding'||j.kind==='mooring')return j.combatYaw??((j.sideSign??(j.side==='port'?-1:1))*Math.PI/2);
   const sx=boat.beam/3.6,sz=boat.length/12;
   if(j.kind==='haul'){
     if(hasExtendedCrewModel(boat.modelId)){
@@ -778,14 +778,35 @@ export function manGunStationsImmediate(company,boat){
   updateCrewGunneryAttendance(company,boat);
   return true;
 }
-// Actor-local hand targets of a boarding fight's swing, in metres.
+// Actor-local hand targets of a boarding fight's cutlass lunge, slash, and parry cycle, in metres.
 export function crewBoardingHands(s){
-  const phase=s.time*4.2+(s.crewIndex??0)*1.15,thrust=Math.sin(phase),slash=Math.cos(phase);
-  return {
-    right:[-0.12+0.10*slash,1.26+0.15*thrust,0.44+0.22*Math.max(0,thrust)],
-    left:[0.20,1.16+0.05*slash,0.28+0.06*Math.max(0,-thrust)],
-    point:[0.35*slash,0.55+0.25*thrust,0.75],
-  };
+  const phase=s.time*4.8+(s.crewIndex??0)*1.37;
+  const cycle=phase%(Math.PI*2);
+  // 3-beat fencing cadence: (0..2.1) forward lunge thrust, (2.1..4.2) diagonal high-to-low slash, (4.2..6.28) high guard parry & riposte
+  let right,left,point,lunge=0,torsoTwist=0;
+  if(cycle<2.1){
+    const u=Math.sin((cycle/2.1)*Math.PI);
+    lunge=0.14*u;
+    torsoTwist=0.28*u;
+    right=[-0.10+0.06*u,1.22+0.08*u,0.38+0.34*u];
+    left=[0.22+0.05*u,1.14-0.04*u,0.22-0.08*u];
+    point=[0.08*(1-u),0.18+0.12*u,0.92];
+  }else if(cycle<4.2){
+    const t=(cycle-2.1)/2.1,arc=Math.cos(t*Math.PI),drop=Math.sin(t*Math.PI);
+    lunge=0.06*drop;
+    torsoTwist=-0.32*arc;
+    right=[-0.22*arc,1.34-0.28*t,0.36+0.24*drop];
+    left=[0.20,1.18+0.06*drop,0.28];
+    point=[-0.52*arc,0.48-0.55*t,0.74];
+  }else{
+    const t=(cycle-4.2)/(Math.PI*2-4.2),parry=Math.sin(t*Math.PI);
+    lunge=-0.06*parry;
+    torsoTwist=-0.18*parry;
+    right=[-0.04+0.18*parry,1.38+0.10*parry,0.34+0.08*parry];
+    left=[0.18,1.24+0.08*parry,0.32];
+    point=[0.48*parry+0.15,0.62+0.18*parry,0.58];
+  }
+  return {right,left,point,lunge,torsoTwist};
 }
 // The weapon each hand holds in a boarding fight, from the fist to its point.
 function crewBoardingWeapon(s,boat){
@@ -1252,7 +1273,11 @@ export function stepCrewWork(s,company,boat,dt) {
       }
       if(j.stage==='descending'&&j.rung<=0)startReturn(s,boat,company);
     }else if(j.stage==='working'&&(j.kind==='boarding'||j.kind==='mooring')){
-      s.yaw=(j.sideSign??(j.side==='port'?-1:1))*Math.PI/2;
+      s.yaw=j.combatYaw??((j.sideSign??(j.side==='port'?-1:1))*Math.PI/2);
+      if(j.crossingGangplank){
+        moving=true;
+        crewAdvanceWalk(s,dt*1.55,{strideMetres:0.56});
+      }
       const done=j.kind==='boarding'?!boat.boardingActive:!boat.mooringActive;
       if(done)startReturn(s,boat,company);
     }else if(j.stage==='working'&&j.kind==='gunnery'){

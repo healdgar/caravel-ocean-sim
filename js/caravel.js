@@ -466,7 +466,9 @@ export function createCaravelMesh({parts,groups}={}) {
   for(const [mast,{z,height,r}] of RIG_MASTS.entries()){
     const mastStart=out.length;
     tube(mastPoint(mast,deck(z)),mastPoint(mast,height),r,10,r*0.35,24);
-    for(let y=1.5;y<height;y+=1.4)torus(mastPoint(mast,y),r*(1-.65*(y-deck(z))/(height-deck(z)))+.003,.012,3,sub(mastPoint(mast,y+1),mastPoint(mast,y)),24,6);
+    for(let y=1.5;y<height*.84;y+=1.5)torus(mastPoint(mast,y),r*(1-.65*(y-deck(z))/(height-deck(z)))+.003,.012,3,sub(mastPoint(mast,y+1),mastPoint(mast,y)),24,6);
+    const houndY=height*(mast===0?.885:.92),rAtHound=r*(1-.65*(houndY-deck(z))/(height-deck(z)));
+    torus(mastPoint(mast,houndY),rAtHound+.018,.034,3,sub(mastPoint(mast,height),mastPoint(mast,deck(z))),18,6);
     for(const side of [-1,1]){
       const {feet}=shroudGeometry(mast,side);
       for(const foot of [...feet,feet[0].map((v,i)=>(v+feet[1][i])*.5)]){

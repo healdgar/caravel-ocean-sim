@@ -15,7 +15,7 @@ export function mastPoint(mast,y){
   return [0,y,m.z+m.rake*(y-base)/(m.height-base)];
 }
 export function shroudGeometry(mast,side) {
-  const {z,height}=RIG_MASTS[mast],head=mastPoint(mast,height*.92);head[0]=side*.11;
+  const {z,height}=RIG_MASTS[mast],houndFrac=mast===0?.885:.92,head=mastPoint(mast,height*houndFrac);head[0]=side*.068;
   const span=z<QUARTERDECK_START?Math.min(.65,QUARTERDECK_START-z-.12):.65;
   const feet=[-span,span].map(dz=>[side*(deckHalfWidth(z+dz)-.40),vesselDeck(z+dz)+.10,z+dz]);
   const rungs=Math.ceil((head[1]-Math.min(...feet.map(p=>p[1])))*HULL_VERTICAL_SCALE/.35);
@@ -34,7 +34,7 @@ export const SAIL_TACKLES = NINA_DESIGN.tackles;
 export function tacklePoint(mast,height){
   const t=SAIL_TACKLES[mast],m=RIG_MASTS[mast],side=Math.sign(t.x);
   const bottom=[t.x+side*.25,vesselDeck(t.z)+.25,t.z];
-  const top=mastPoint(mast,m.height*.90);top[0]=side*.10;
+  const top=mastPoint(mast,m.height*(mast===0?.875:.90));top[0]=side*.065;
   const f=Math.max(0,Math.min(1,(height-bottom[1])/(top[1]-bottom[1])));
   return bottom.map((v,i)=>v+(top[i]-v)*f);
 }
@@ -59,11 +59,11 @@ export function standingRiggingLines(){
   }
   // Keep the fore stay to the bowsprit. The other masts use paired running
   // stays led to the waterways; fixed inter-mast stays blocked yard transfer.
-  add('forestay',0,0,[0,1.9,-8.1],mastPoint(0,RIG_MASTS[0].height*.96),.036,.0288,12);
+  add('forestay',0,0,[0,1.9,-8.1],mastPoint(0,RIG_MASTS[0].height*.895),.036,.0288,12);
   for(const side of [-1,1])for(const [mast,m] of RIG_MASTS.entries()){
     for(const direction of [-1,1]){
       const z=Math.max(-5.8,Math.min(5.35,m.z+direction*1.3));
-      const head=mastPoint(mast,m.height*.94);head[0]=side*.12;
+      const head=mastPoint(mast,m.height*(mast===0?.89:.94));head[0]=side*.068;
       add('stay',mast,side,[side*(deckHalfWidth(z)-.04),vesselDeck(z)+.03,z],head,.024);
     }
   }

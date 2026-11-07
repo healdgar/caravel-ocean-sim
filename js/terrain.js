@@ -94,11 +94,12 @@ export function retargetForestPackToProcedural(
     );
   const densityMul = Math.max(0.65, Math.min(1.38, activeClimate.canopyDensityMultiplier ?? 1.0));
   const effectiveMaxCapacity =
-    maxRootCapacity ?? (extraSections.length > 0 ? (isMobile ? 24000 : 56000) : (isMobile ? 16000 : 36000));
-  const baseMaxRoots = Math.min(
-    effectiveMaxCapacity,
-    Math.round((isMobile ? 6000 : 24000) * densityMul)
-  );
+    maxRootCapacity ?? (extraSections.length > 0 ? (isMobile ? 24000 : 72000) : (isMobile ? 16000 : 44000));
+  const reservedExtra =
+    extraSections.length > 0
+      ? Math.min(Math.round(effectiveMaxCapacity * 0.35), extraSections.length * (isMobile ? 2400 : 8500))
+      : 0;
+  const baseMaxRoots = Math.max(64, effectiveMaxCapacity - reservedExtra);
 
   // Build cumulative probability tables per habitat zone (coastal strand, lagoon/mangrove, upland forest)
   // and cohort (veteran emergent vs canopy/drip-line nurse matrix) matched against the loaded forestPack's species.
@@ -204,9 +205,9 @@ export function retargetForestPackToProcedural(
     }
 
     const secBuckets = Array.from({ length: protoCount }, () => []);
-    const veteranSpacingFactor = hasCohorts ? (isMobile ? 0.52 : 0.42) : (isMobile ? 0.62 : 0.52);
-    const canopySpacingFactor = hasCohorts ? (isMobile ? 0.27 : 0.19) : (isMobile ? 0.34 : 0.24);
-    const vetCanopySpacingFactor = hasCohorts ? (isMobile ? 0.24 : 0.17) : (isMobile ? 0.30 : 0.21);
+    const veteranSpacingFactor = hasCohorts ? (isMobile ? 0.46 : 0.36) : (isMobile ? 0.56 : 0.46);
+    const canopySpacingFactor = hasCohorts ? (isMobile ? 0.23 : 0.16) : (isMobile ? 0.30 : 0.21);
+    const vetCanopySpacingFactor = hasCohorts ? (isMobile ? 0.21 : 0.15) : (isMobile ? 0.27 : 0.19);
     const cellSize = 20;
     const hashW = Math.ceil(span / cellSize) + 1;
     const head = new Int32Array(hashW * hashW).fill(-1);
@@ -318,38 +319,39 @@ export function retargetForestPackToProcedural(
         let sMin;
         let sSpan;
         if (pr.species === 'blueberry') {
-          sMin = 1.35 + inlandBlend * 0.35;
-          sSpan = 0.48;
+          sMin = 1.45 + inlandBlend * 0.40;
+          sSpan = 0.52;
         } else if (isVeteran || pr.cohort === 'veteran') {
-          sMin = 1.28 + inlandBlend * 0.44;
-          sSpan = 0.38 + inlandBlend * 0.22;
+          sMin = (hasCohorts ? 1.95 : 1.42) + inlandBlend * (hasCohorts ? 0.55 : 0.44);
+          sSpan = (hasCohorts ? 0.45 : 0.38) + inlandBlend * 0.24;
           if (pr.species === 'ceiba') {
-            sMin = 1.30 + inlandBlend * 0.48;
-            sSpan = 0.38 + inlandBlend * 0.24;
+            sMin = 1.98 + inlandBlend * 0.56;
+            sSpan = 0.45 + inlandBlend * 0.28;
           } else if (pr.species === 'royal_palm' || pr.species === 'palm') {
-            sMin = 1.08 + inlandBlend * 0.26;
-            sSpan = 0.28;
+            sMin = 1.16 + inlandBlend * 0.28;
+            sSpan = 0.30;
           } else if (pr.species === 'mangrove') {
-            sMin = 0.96 + inlandBlend * 0.18;
-            sSpan = 0.24;
+            sMin = 1.05 + inlandBlend * 0.22;
+            sSpan = 0.26;
           }
         } else {
-          sMin = 1.12 + inlandBlend * 0.36;
-          sSpan = 0.38 + inlandBlend * 0.20;
+          sMin = (hasCohorts ? 1.55 : 1.18) + inlandBlend * (hasCohorts ? 0.45 : 0.36);
+          sSpan = (hasCohorts ? 0.42 : 0.38) + inlandBlend * 0.22;
           if (pr.species === 'ceiba') {
-            sMin = 1.08 + inlandBlend * 0.38;
-            sSpan = 0.36 + inlandBlend * 0.22;
+            sMin = 1.62 + inlandBlend * 0.48;
+            sSpan = 0.42 + inlandBlend * 0.24;
           } else if (pr.species === 'royal_palm' || pr.species === 'palm') {
-            sMin = 0.92 + inlandBlend * 0.22;
+            sMin = 0.98 + inlandBlend * 0.24;
             sSpan = 0.32;
           } else if (pr.species === 'mangrove') {
-            sMin = 0.84 + inlandBlend * 0.16;
-            sSpan = 0.26;
+            sMin = 0.92 + inlandBlend * 0.20;
+            sSpan = 0.28;
           }
         }
         const sc = sMin + uScale * sSpan;
         const baseCrownR = pr.crownRadius ?? pr.crownRadiusMetres ?? 8.5;
-        return { scale: sc, crownR: baseCrownR * sc, proto: pr };
+        const spacingScale = hasCohorts ? (isVeteran || pr.cohort === 'veteran' ? 1.32 : 1.15) : Math.min(sc, 1.35);
+        return { scale: sc, crownR: baseCrownR * spacingScale, proto: pr };
       };
 
       let { scale, crownR, proto } = computeScaleAndRadius(protoId);
@@ -727,7 +729,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const forestPromise=canopyMode==='off'?Promise.resolve(null):loadForestScenery({
     assets:useSubtropicalForest?SUBTROPICAL_FOREST_ASSETS:usePortugalForest?PORTUGAL_FOREST_ASSETS:FOREST_ASSETS,
     skipNative:skipNativeForest&&!useSubtropicalForest&&!usePortugalForest,
-    deferNative:!skipNativeForest&&useProcedural&&!useSubtropicalForest,
+    deferNative:!skipNativeForest&&useProcedural&&!useSubtropicalForest&&!usePortugalForest,
     skipRoots:useProcedural,
     deferSurfaces:Boolean(chooseForestSurfaceCodec(device,search.get('forestSurfaces')||'auto')),
     onManifest:resolveForestManifest,
@@ -1848,7 +1850,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       writeNearDomainUniform();
     },
     getWorldOffset(){return {...worldOffset};},
-    commitWorldOffset({boat=null,camera=null,vessels=null}={}){
+    commitWorldOffset({boat=null,camera=null,vessels=null,marineLife=null,dolphins=null}={}){
       const dx=worldOffset.x,dz=worldOffset.z;
       if(Math.abs(dx)<0.05&&Math.abs(dz)<0.05)return {dx:0,dz:0};
       if(boat){boat.x-=dx;boat.z-=dz;}
@@ -1859,6 +1861,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
           if(vb&&vb!==boat&&Number.isFinite(vb.x)&&Number.isFinite(vb.z)){vb.x-=dx;vb.z-=dz;}
         }
       }
+      (marineLife?.state??marineLife)?.shift?.(-dx,-dz);
+      (dolphins?.state??dolphins)?.shift?.(-dx,-dz);
       worldOffset.x=0;worldOffset.z=0;
       writeNearDomainUniform();
       lastCamera=null;
@@ -1956,6 +1960,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         for(const hit of hits){
           const local={...hit,x:hit.x-worldOffset.x,z:hit.z-worldOffset.z},record=craters.strike(local),radius=landCraterSize(record.energyJ).radius;
           clearGroundCoverAt(record.x,record.z,radius*1.35);
+          forest?.strike?.(record.x,record.z,now,groundSample);
           strikes.push({x:record.x,z:record.z,rSq:(radius*1.6)**2});
         }
         felled(strikes);

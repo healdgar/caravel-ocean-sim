@@ -368,7 +368,7 @@ export function strikeForestTree(roots, index, shape, { energy, bearing, height,
   const at = index * TRUNK_ROOT_FLOATS;
   if (!treeStands(roots, at)) return null;
   const record = ensureStrikeRecord(strikes, roots[at], roots[at + 2]), scale = roots[at + TRUNK_ROOT_SCALE];
-  const radius = (shape?.trunkRadius || 0.2) * scale, resisted = TRUNK_BREAK_JOULES_PER_M2 * Math.PI * radius * radius;
+  const radius = Math.min(0.42, (shape?.trunkRadius || 0.2) * scale), resisted = TRUNK_BREAK_JOULES_PER_M2 * Math.PI * radius * radius;
   record.hits++;
   record.damage = Math.min(1, record.damage + (energy / resisted) * (onTrunk ? 1 : STRIKE_LIMB_SHARE));
   // Only a ball on the trunk says where the trunk goes.

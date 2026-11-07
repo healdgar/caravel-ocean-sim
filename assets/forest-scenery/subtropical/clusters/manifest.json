@@ -3,35 +3,35 @@
  "version": 1,
  "vertexWords": 5,
  "clusterWords": 16,
- "vertexCount": 646838,
- "indexCount": 259518,
- "clusterCount": 3948,
+ "vertexCount": 185059,
+ "indexCount": 208455,
+ "clusterCount": 1424,
  "files": {
   "vertices.bin": {
-   "bytes": 12936760,
-   "sha256": "f2ea1f29724b6dd8b6eb2ada233f3d3bd891411ddc09c093ef31f6ae89b8cb6d",
+   "bytes": 3701180,
+   "sha256": "4ed74ebcc8efa1e90ba10539c27a2722f0741259032b1d727a30fc1664749010",
    "gzip": {
     "file": "vertices.bin.gz",
-    "bytes": 6109465,
-    "sha256": "e528e914f1abca931ef79fc4ba9ac67332572680f7a3522a21d1563aa37ebcee"
+    "bytes": 1952421,
+    "sha256": "83334d030b3f7adf61b93a66446361ba1fd39f9fb14ad388e91e82a1a571b77f"
    }
   },
   "indices.bin": {
-   "bytes": 1038072,
-   "sha256": "3204c4f92bb3700fe11029243e7099430d42ece5ff420d3d8daca03c18fbd1f4",
+   "bytes": 833820,
+   "sha256": "286e801772be2cb974c34dcebbb82ce19da7ce1ab44b9a865ca6332618f75bf9",
    "gzip": {
     "file": "indices.bin.gz",
-    "bytes": 315469,
-    "sha256": "4aae9c9e9ebd3939decff9314d5e024f78fa14e09bcb8e6a439cf24f3bd07c2f"
+    "bytes": 244058,
+    "sha256": "e96c1d8cb18f8dee177033be1a2502b0a70bbee6cd2d5178e8d937298eb8e040"
    }
   },
   "clusters.bin": {
-   "bytes": 252672,
-   "sha256": "ad335461b33db2e336b7a127e15043c53791d7bdad862a187656095c244027c9",
+   "bytes": 91136,
+   "sha256": "194787317607e883fec0d2f55b295f92a7db385f9d4358ae1cc4222bb7abf3fa",
    "gzip": {
     "file": "clusters.bin.gz",
-    "bytes": 112111,
-    "sha256": "e00909febf2d356a38ad3bc0c077dce51bfe60c1421f6e2c7fbe44be43ff1289"
+    "bytes": 38569,
+    "sha256": "ae65563999d0b44588970d2f17df428f3e718d69b43c913ba57f91922e101e4b"
    }
   }
  },
@@ -75,7 +75,7 @@
      1.236,
      1.367
     ],
-    "ms": 77,
+    "ms": 78,
     "tinyClusters": 2
    }
   },
@@ -118,7 +118,7 @@
      1.236,
      1.288
     ],
-    "ms": 105,
+    "ms": 104,
     "tinyClusters": 1
    }
   },
@@ -126,92 +126,87 @@
    "id": 2,
    "species": "ceiba",
    "firstCluster": 460,
-   "clusterCount": 2464,
+   "clusterCount": 615,
    "firstVertex": 72331,
    "low": [
-    -12.59068489074707,
-    -0.2667914032936096,
-    -13.075390815734863
+    -23.698659896850586,
+    -0.9950469732284546,
+    -25.594480514526367
    ],
-   "posScale": 24.1186580657959,
+   "posScale": 49.34115982055664,
    "uvLow": [
     0,
     0
    ],
    "uvScale": [
-    3,
-    9.737738609313965
+    2,
+    5.855999946594238
    ],
    "stats": {
-    "barkTris": 20928,
-    "leafTris": 134400,
-    "barkClusters": 363,
-    "leafClusters": 2101,
+    "barkTris": 22271,
+    "leafTris": 16884,
+    "barkClusters": 351,
+    "leafClusters": 264,
     "barkLevels": 8,
-    "leafLevels": 11,
+    "leafLevels": 8,
     "barkRoots": 1,
     "leafRoots": 1,
     "leafGrowth": [
      null,
-     1.286,
-     1.364,
-     1.341,
-     1.336,
-     1.345,
-     1.36,
-     1.307,
+     1.348,
+     1.379,
+     1.37,
+     1.419,
+     1.328,
      1.314,
-     1.367,
-     1.341,
-     1.23
+     1.393,
+     1.393
     ],
-    "ms": 968,
-    "tinyClusters": 1
+    "ms": 376,
+    "tinyClusters": 0
    }
   },
   {
    "id": 3,
    "species": "mangrove",
-   "firstCluster": 2924,
-   "clusterCount": 1024,
-   "firstVertex": 494054,
+   "firstCluster": 1075,
+   "clusterCount": 349,
+   "firstVertex": 135194,
    "low": [
-    -5.659260272979736,
-    -0.4182729125022888,
-    -4.4126505851745605
+    -13.841879844665527,
+    -0.2625058889389038,
+    -14.053790092468262
    ],
-   "posScale": 11.519002914428711,
+   "posScale": 28.132539749145508,
    "uvLow": [
     0,
     0
    ],
    "uvScale": [
     1,
-    8.4912109375
+    3.4010000228881836
    ],
    "stats": {
-    "barkTris": 17330,
-    "leafTris": 45360,
-    "barkClusters": 312,
-    "leafClusters": 712,
-    "barkLevels": 8,
-    "leafLevels": 9,
+    "barkTris": 6862,
+    "leafTris": 15264,
+    "barkClusters": 109,
+    "leafClusters": 240,
+    "barkLevels": 6,
+    "leafLevels": 7,
     "barkRoots": 1,
     "leafRoots": 1,
     "leafGrowth": [
      null,
-     1.101,
-     1.33,
+     1.35,
+     1.336,
+     1.337,
      1.341,
-     1.333,
-     1.318,
-     1.331,
-     1.328,
-     1.236,
-     1.262
+     1.38,
+     1.341,
+     1.367
     ],
-    "ms": 373,
-    "tinyClusters": 7
+    "ms": 250,
+    "tinyClusters": 0
    }
   }
  ]

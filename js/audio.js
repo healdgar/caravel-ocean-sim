@@ -564,8 +564,13 @@ export function createSceneAudio({onStatus=()=>{}}={}){
         }
         case 'lookout-sighting':
         case 'lookout-call':{
-          const clip=ev.kind==='land'?'lookout-land-ho':(ev.kind==='whale'||ev.kind==='dolphin'||ev.kind==='humpback'||ev.kind==='sperm-whale'||ev.kind==='orca')?'lookout-whale-ho':'lookout-sail-ho';
-          play(clip,ev.gain??0.32,{x:p.x,y:(p.y??0)+11,z:p.z},ev.rate??1,true,{reach:ev.reach??90});
+          if(time-lastLookoutCallAt<45)return false;
+          lastLookoutCallAt=time;
+          const isLand=ev.kind==='land';
+          const isMarine=ev.kind==='whale'||ev.kind==='dolphin'||ev.kind==='humpback'||ev.kind==='sperm-whale'||ev.kind==='orca';
+          const clip=isLand?'lookout-land-ho':isMarine?'lookout-whale-ho':'lookout-sail-ho';
+          // Play only the crisp Spanish masthead hail ("¡Vela!" / "¡Tierra!" / "¡Ballena!") without the long bilingual studio readout
+          play(clip,ev.gain??0.26,{x:p.x,y:(p.y??0)+11,z:p.z},ev.rate??0.98,true,{duration:0.95,release:0.22,reach:ev.reach??75});
           return true;
         }
         case 'town-panic':
@@ -822,17 +827,8 @@ export function createSceneAudio({onStatus=()=>{}}={}){
         }
       }
 
-      // Lookout sighting calls ("Sail ho!", "Land ho!", "Whale off the bow!")
-      const sighting=boat?.lookoutSighting;
-      if(sighting?.kind){
-        if(sighting.kind!==lastLookoutKind&&time-lastLookoutCallAt>=10){
-          lastLookoutKind=sighting.kind;
-          lastLookoutCallAt=time;
-          this.event({type:'lookout-call',kind:sighting.kind,position:boat},boat);
-        }
-      }else{
-        lastLookoutKind=null;
-      }
+      // Lookout sighting calls are triggered explicitly on genuine horizon sightings, not polled per-frame from boat.lookoutSighting
+      void lastLookoutKind;
 
       // Spatial shipboard fire crackle & roar when any vessel is burning nearby
       const fires=Array.isArray(activeFires)&&activeFires.length?activeFires:(boat?.damage?.worldFires??[]);

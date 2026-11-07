@@ -161,7 +161,7 @@ export function runningRiggingLines(){
     for(const side of [-1,1])lines.push({kind:'sheet',mast,side,a:corners[2],b:[side*1.0,vesselDeck(z)+.18,z],r:.016,r2:.016,sides:8,id,weights:[1,0]});
     const axis=sub(corners[1],corners[0]),length=Math.hypot(...axis);
     const sling=pivot.map((v,i)=>v+axis[i]/length*[.4,.45,.75][mast]);
-    lines.push({kind:'halyard',mast,side:0,a:mastPoint(mast,RIG_MASTS[mast].height*.97),b:sling,r:.022,r2:.022,sides:8,id,weights:[0,1]});
+    lines.push({kind:'halyard',mast,side:0,a:mastPoint(mast,RIG_MASTS[mast].height*(mast===0?.895:.97)),b:sling,r:.022,r2:.022,sides:8,id,weights:[0,1]});
     const tackZ=Math.max(-6.1,corners[1][2]-.25);
     lines.push({kind:'tack',mast,side:0,a:corners[1],b:[0,vesselDeck(tackZ)+.12,tackZ],r:.018,r2:.018,sides:8,id,weights:[1,0]});
   }

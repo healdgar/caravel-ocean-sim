@@ -3689,22 +3689,10 @@ export function createPortGunnery(port, { onEvent = () => {}, getVessels = () =>
           }
           if (nearestBoat && nearestDist <= returnFireRange) {
             // Only those in range: a fort at the mouth has no shot at a ship off the town.
-            let firedAny = 0, voiceBattery = null;
             for (const b of batteries) {
               if (Math.hypot((nearestBoat.x ?? 0) - (b.building.x ?? 0), (nearestBoat.z ?? 0) - (b.building.z ?? 0)) <= returnFireRange) {
-                const q = b.fireAtTarget(nearestBoat);
-                if (q > 0) {
-                  firedAny += q;
-                  if (!voiceBattery) voiceBattery = b.building;
-                }
+                b.fireAtTarget(nearestBoat);
               }
-            }
-            if (firedAny > 0 && voiceBattery) {
-              onEvent({
-                type: 'enemy-voice',
-                action: 'fire',
-                position: [voiceBattery.x ?? 0, (voiceBattery.baseY ?? voiceBattery.y ?? 0) + (voiceBattery.height ?? 6), voiceBattery.z ?? 0],
-              });
             }
             cooldown = 9.5;
           } else {
@@ -3836,8 +3824,9 @@ export function applySceneryImpactDamage(terrain, event) {
   const forestTree = event.forestTree ?? null;
   if (forestTree) {
     const hot = event.ammo === 'hot';
+    const treeEnergy = Math.max(energy * 3.5, 2_500_000);
     terrain.pendingForestStrikes ??= [];
-    terrain.pendingForestStrikes.push({ tree: forestTree, impact: { energy, bearing: Math.atan2(vel[2], vel[0]), hot } });
+    terrain.pendingForestStrikes.push({ tree: { ...forestTree, onTrunk: true }, impact: { energy: treeEnergy, bearing: Math.atan2(vel[2], vel[0]), hot } });
     const firePort = hot ? terrain.port ?? terrain.ports?.[0] ?? null : null;
     if (firePort) {
       firePort.sceneryFires ??= [];

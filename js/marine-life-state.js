@@ -81,8 +81,9 @@ export function createMarineLifeState(random=Math.random,options={}){
     }
     if(!location){event={id:++serial,type,text:type==='whale'?'Whales need clear water at least sixteen metres deep.':'Sharks need clear water at least six metres deep.'};return false;}
     count=1;age=0;const a=animals[0];
-    Object.assign(a,{...location,type,kind:type,behavior,heading,scale:type==='whale'?.94+rand()*.10:.95+rand()*.15,
-      phase:rand()*Math.PI*2,speed:type==='whale'?3.0:2.1,contactTick:0,nextTrail:.65,nextBlow:type==='whale'?3:Infinity});
+    const crossAngle=type==='whale'?(location.side<0?1:-1)*(.42+rand()*.55):0;
+    Object.assign(a,{...location,type,kind:type,behavior,heading:heading+crossAngle,scale:type==='whale'?.94+rand()*.10:.95+rand()*.15,
+      phase:rand()*Math.PI*2,speed:type==='whale'?1.45:2.1,contactTick:0,nextTrail:.65,nextBlow:type==='whale'?3:Infinity});
     Object.assign(a,marinePoseAt(0,a));a.contactPose=marinePoseAt(0,a);a.contactBounds=marineSurfaceBounds(type,a.depth,a.pitch,a.scale,a.roll);a.entryPending=a.contactBounds.max>0;
     previousX=boat.x;previousZ=boat.z;event={id:++serial,type,text:`${type==='whale'?'Whale':'Shark'} off the ${location.side<0?'port':'starboard'} bow`};return true;
   }
@@ -100,7 +101,20 @@ export function createMarineLifeState(random=Math.random,options={}){
     marineSurfaceSink?.({source:options.source??'marine',id:e.id,x:e.x,z:e.z,kind:e.kind,age:e.age,
       radiusMetres:radius*a.scale,closingSpeed,velocity:[vx,e.kind==='entry'?-closingSpeed:e.kind==='emerge'?closingSpeed:0,vz]});
   }
-  return {animals,effects,enabled:true,get onSurfaceEvent(){return marineSurfaceSink;},set onSurfaceEvent(value){marineSurfaceSink=typeof value==='function'?value:null;},get active(){return count>0;},get count(){return count;},get age(){return age;},get time(){return time;},get event(){return event;},get nextAt(){return next;},trigger,clear,
+  function shift(dx,dz){
+    if(!Number.isFinite(dx)||!Number.isFinite(dz))return;
+    if(Number.isFinite(previousX))previousX+=dx;
+    if(Number.isFinite(previousZ))previousZ+=dz;
+    for(let i=0;i<count;i++){animals[i].x+=dx;animals[i].z+=dz;}
+    for(const e of effects){
+      if(e.strength>0){
+        e.x+=dx;e.z+=dz;
+        if(Number.isFinite(e.anchorX))e.anchorX+=dx;
+        if(Number.isFinite(e.anchorZ))e.anchorZ+=dz;
+      }
+    }
+  }
+  return {animals,effects,enabled:true,get onSurfaceEvent(){return marineSurfaceSink;},set onSurfaceEvent(value){marineSurfaceSink=typeof value==='function'?value:null;},get active(){return count>0;},get count(){return count;},get age(){return age;},get time(){return time;},get event(){return event;},get nextAt(){return next;},trigger,clear,shift,
     step(dt,boat,settings={},terrain=null,vessels=[boat]){
       dt=marineClamp(Number.isFinite(dt)?dt:0,0,.1);time+=dt;event=null;for(const e of effects)e.age+=dt;
       if(Number.isFinite(previousX)&&Math.hypot(boat.x-previousX,boat.z-previousZ)>250){clear();previousX=boat.x;previousZ=boat.z;return;}

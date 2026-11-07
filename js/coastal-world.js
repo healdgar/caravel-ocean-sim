@@ -2075,7 +2075,7 @@ export function classifyKoppenClimateFromNormals({
   // subtropical, and warm arid coasts equatorward of 33.2° latitude (so Virginia, New England, Europe,
   // and Cape Town use temperate broadleaf oak/maple/birch/elm/chestnut forests with zero palm trees).
   const isTropicalOrSubtropical =
-    Math.abs(latitude) < 33.2 &&
+    Math.abs(latitude) < 28.5 &&
     (climateZone === 'tropical' ||
       climateZone === 'subtropical' ||
       (climateZone === 'arid' && meanAnnualTempC >= 18.0));
@@ -4215,7 +4215,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
   let defencesSited = false;
   // A fort that holds the settlement stands back from the water and looks at it. It is sited first of all.
   const placeEnclosingFort = (label, recordOf) => {
-    const shape = recordOf?.encloses === 'triangle' || (!recordOf && colonyGrowth.crown === 'england') ? 'triangle' : 'square';
+    const shape = recordOf?.encloses === 'triangle' || region.id === 'jamestown' ? 'triangle' : 'square';
     const width = shape === 'triangle' ? PORT_PREFABS.english_triangular_palisade_fort.width : 96;
     const length = shape === 'triangle' ? PORT_PREFABS.english_triangular_palisade_fort.length : 86;
     const told = recordOf && coastIsReal ? worldOfPosition(region, recordOf.lat, recordOf.lon) : null;
@@ -5311,9 +5311,14 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       0.014 * Math.cos(p[1] * 1.15 - p[0] * 0.41) +
       0.022 * (n[0] * 0.6 + n[1] * 0.5 - n[2] * 0.4);
     if (kFloor === 14) {
-      // Window panes & recessed portals: vertical soffit-to-sill depth gradient
-      const revealGrad = 0.84 + 0.22 * Math.sin(p[1] * 1.35 + p[0] * 0.45 + p[2] * 0.45);
-      return Math.max(0.18, Math.min(1.0, baseShade * revealGrad * soffitAO));
+      // Window panes (baseShade > 0.25) vs recessed dark portals (baseShade <= 0.25):
+      // never cross the 0.25 shader threshold (isGlazedWindow = in.kind.y > 0.25) across vertices of a quad!
+      const revealGrad = 0.90 + 0.14 * Math.sin(p[1] * 1.35 + p[0] * 0.45 + p[2] * 0.45);
+      const shaded = baseShade * revealGrad * soffitAO;
+      if (baseShade <= 0.25) {
+        return Math.max(0.12, Math.min(0.22, shaded));
+      }
+      return Math.max(0.30, Math.min(1.0, shaded));
     }
     const combined =
       baseShade *
@@ -5920,24 +5925,47 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
   };
 
   // Helper to emit a 3D radial stone voussoir arch & shadowed barrel vault along the Z axis (for X-facing facades)
-  const emitStoneArchZ = (toWorld, xFace, depthSign, yFloor, ySpring, radius, zCenter, archSegs = 6) =>
+  const emitStoneArchZ = (toWorld, xFace, depthSign, yFloor, ySpring, radius, zCenter, archSegs = 6, isGlazed = false) =>
     withPartGroup('stone_arch', () => {
       const xVaultOut = xFace + depthSign * 0.14;
       const xOut = xFace + depthSign * 0.24;
       const xIn = xFace - depthSign * 0.55;
-      // Dark barrel-vaulted interior opening (kind 14), stepped 7cm proud of outer wall and 9cm recessed inside stone arch ring
+      const vaultShade = isGlazed ? 0.42 : 0.20;
+      const rVault = radius + 0.08;
+      // Arch-shaped interior opening (kind 14): rectangular jamb span up to ySpring + radial tympanum fan matching the voussoir ring
       withPartGroup('arch_vault', () => {
-        emitBox(
-          toWorld,
-          Math.min(xVaultOut, xIn),
-          Math.max(xVaultOut, xIn),
-          yFloor,
-          ySpring + radius * 0.86,
-          zCenter - radius * 0.92,
-          zCenter + radius * 0.92,
-          14,
-          0.28
-        );
+        if (ySpring > yFloor) {
+          emitBox(
+            toWorld,
+            Math.min(xVaultOut, xIn),
+            Math.max(xVaultOut, xIn),
+            yFloor,
+            ySpring + 0.02,
+            zCenter - rVault,
+            zCenter + rVault,
+            14,
+            vaultShade
+          );
+        }
+        const cOut = toWorld(xVaultOut, ySpring, zCenter);
+        const cIn = toWorld(xIn, ySpring, zCenter);
+        for (let s = 0; s < archSegs; s++) {
+          const a0 = (s / archSegs) * Math.PI;
+          const a1 = ((s + 1) / archSegs) * Math.PI;
+          const z0v = zCenter - Math.cos(a0) * rVault, y0v = ySpring + Math.sin(a0) * rVault;
+          const z1v = zCenter - Math.cos(a1) * rVault, y1v = ySpring + Math.sin(a1) * rVault;
+          const v0Out = toWorld(xVaultOut, y0v, z0v);
+          const v1Out = toWorld(xVaultOut, y1v, z1v);
+          const v0In = toWorld(xIn, y0v, z0v);
+          const v1In = toWorld(xIn, y1v, z1v);
+          if (depthSign < 0) {
+            pushTri(cOut, v1Out, v0Out, 14, vaultShade);
+            pushTri(cIn, v0In, v1In, 14, vaultShade);
+          } else {
+            pushTri(cOut, v0Out, v1Out, 14, vaultShade);
+            pushTri(cIn, v1In, v0In, 14, vaultShade);
+          }
+        }
       });
       // Stone jamb piers flanking the arch
       const jambW = 0.34;
@@ -6014,23 +6042,28 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       });
     });
 
-  // Helper to emit an overhanging gabled or hipped roof (kind 13 terracotta or kind 15 palm thatch) with timber rafter tails (kind 10) & ridge cap
+  // Helper to emit an overhanging gabled or hipped roof (kind 13 terracotta, kind 11 dark kawara tile in Nagasaki, or kind 15 palm thatch)
+  const isJapanesePort = portPlacement?.regionId === 'nagasaki';
   const emitRoof = (toWorld, x0, x1, yEave, yPeak, z0, z1, overhang = 0.65, hipRatio = 0.25, wallKind = 12, roofKind = 13) =>
     withPartGroup('roof_assembly', () => {
+      const effRoofKind = isJapanesePort && roofKind === 13 ? 11 : roofKind;
+      const roofShadeA = isJapanesePort && roofKind === 13 ? 0.42 : 0.94;
+      const roofShadeB = isJapanesePort && roofKind === 13 ? 0.38 : 0.88;
+      const timberShade = isJapanesePort ? 0.46 : 0.72;
       const rx0 = x0 - overhang, rx1 = x1 + overhang;
       const rz0 = z0 - overhang, rz1 = z1 + overhang;
       const fasciaH = 0.24;
       // Timber fascia / eaves skirt (raised 4.5cm above wall top to prevent coplanar eave z-fighting)
       withPartGroup('roof_eaves_fascia', () => {
-        emitBox(toWorld, rx0, rx1, yEave - fasciaH, yEave + 0.045, rz0, rz1, 10, 0.72, true);
+        emitBox(toWorld, rx0, rx1, yEave - fasciaH, yEave + 0.045, rz0, rz1, 10, timberShade, true);
       });
-      // Projecting Spanish timber rafter tails (canecillos) under the eaves, iterated every 1.6m
+      // Projecting Spanish/Japanese timber rafter tails (canecillos / taruki) under the eaves, iterated every 1.6m
       const rafterCount = Math.max(4, Math.round((z1 - z0) / 1.6));
       withPartGroup('roof_rafters', () => {
         for (let r = 0; r <= rafterCount; r++) {
           const rz = z0 + (r / rafterCount) * (z1 - z0);
-          emitBox(toWorld, rx0 - 0.12, x0 + 0.1, yEave - fasciaH - 0.14, yEave - 0.04, rz - 0.08, rz + 0.08, 10, 0.66, true);
-          emitBox(toWorld, x1 - 0.1, rx1 + 0.12, yEave - fasciaH - 0.14, yEave - 0.04, rz - 0.08, rz + 0.08, 10, 0.66, true);
+          emitBox(toWorld, rx0 - 0.12, x0 + 0.1, yEave - fasciaH - 0.14, yEave - 0.04, rz - 0.08, rz + 0.08, 10, timberShade * 0.92, true);
+          emitBox(toWorld, x1 - 0.1, rx1 + 0.12, yEave - fasciaH - 0.14, yEave - 0.04, rz - 0.08, rz + 0.08, 10, timberShade * 0.92, true);
         }
       });
       const midX = (x0 + x1) * 0.5;
@@ -6049,14 +6082,14 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       withPartGroup('roof_slopes', () => {
         if (hipRatio > 0.02) {
           // Hipped roof: 2 subdivided side trapezoids + 2 end hip triangles
-          pushSubdividedQuad(e01, e00, r0, r1, nRoofZ, nRoofSlope, roofKind, 0.94);
-          pushSubdividedQuad(e10, e11, r1, r0, nRoofZ, nRoofSlope, roofKind, 0.88);
-          pushTri(e00, e10, r0, roofKind, 0.90);
-          pushTri(e11, e01, r1, roofKind, 0.91);
+          pushSubdividedQuad(e01, e00, r0, r1, nRoofZ, nRoofSlope, effRoofKind, roofShadeA);
+          pushSubdividedQuad(e10, e11, r1, r0, nRoofZ, nRoofSlope, effRoofKind, roofShadeB);
+          pushTri(e00, e10, r0, effRoofKind, (roofShadeA + roofShadeB) * 0.5);
+          pushTri(e11, e01, r1, effRoofKind, (roofShadeA + roofShadeB) * 0.5);
         } else {
           // Gable roof + masonry gable end triangles (inset 4cm from z0/z1 to prevent coplanar overlap with lower walls)
-          pushSubdividedQuad(e01, e00, r0, r1, nRoofZ, nRoofSlope, roofKind, 0.94);
-          pushSubdividedQuad(e10, e11, r1, r0, nRoofZ, nRoofSlope, roofKind, 0.88);
+          pushSubdividedQuad(e01, e00, r0, r1, nRoofZ, nRoofSlope, effRoofKind, roofShadeA);
+          pushSubdividedQuad(e10, e11, r1, r0, nRoofZ, nRoofSlope, effRoofKind, roofShadeB);
           const gz0 = z0 + 0.04, gz1 = z1 - 0.04;
           const g00 = toWorld(x0, yEave, gz0), g10 = toWorld(x1, yEave, gz0), gr0 = toWorld(midX, yPeak - 0.08, gz0);
           const g01 = toWorld(x0, yEave, gz1), g11 = toWorld(x1, yEave, gz1), gr1 = toWorld(midX, yPeak - 0.08, gz1);
@@ -6064,19 +6097,19 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
           pushTri(g11, g01, gr1, wallKind, 0.84);
         }
       });
-      // Raised ridge tile / thatch ridge pole cap (caballete)
+      // Raised ridge tile / thatch ridge pole cap (caballete / onigawara)
       if (zHip1 > zHip0 + 0.4) {
         withPartGroup('roof_ridge_cap', () => {
-          const capKind = roofKind === 15 ? 10 : roofKind;
-          emitBox(toWorld, midX - 0.22, midX + 0.22, yPeak - 0.08, yPeak + 0.18, zHip0, zHip1, capKind, 0.96, false, 0.06);
+          const capKind = effRoofKind === 15 ? 10 : effRoofKind;
+          emitBox(toWorld, midX - 0.22, midX + 0.22, yPeak - 0.08, yPeak + 0.18, zHip0, zHip1, capKind, roofShadeA, false, 0.06);
         });
       }
     });
 
   // Right-handed +90° rotation in local XZ (det = +1) so X-aligned wings/arches/balconies reuse Z helpers with outward normals intact
   const rot90 = (toWorld) => (lx, ly, lz) => toWorld(lz, ly, -lx);
-  const emitStoneArchX = (toWorld, zFace, depthSign, yFloor, ySpring, radius, xCenter, archSegs = 6) =>
-    emitStoneArchZ(rot90(toWorld), -zFace, -depthSign, yFloor, ySpring, radius, xCenter, archSegs);
+  const emitStoneArchX = (toWorld, zFace, depthSign, yFloor, ySpring, radius, xCenter, archSegs = 6, isGlazed = false) =>
+    emitStoneArchZ(rot90(toWorld), -zFace, -depthSign, yFloor, ySpring, radius, xCenter, archSegs, isGlazed);
   const emitBalustradeX = (toWorld, zWall, outSign, yFloor, x0, x1) =>
     emitBalustradeZ(rot90(toWorld), -zWall, -outSign, yFloor, x0, x1);
   const emitRoofX = (toWorld, x0, x1, yEave, yPeak, z0, z1, overhang = 0.65, hipRatio = 0.25, wallKind = 12, roofKind = 13) =>
@@ -6089,7 +6122,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
   const snapBays = (span, nominalBay, minBays = 2) => Math.max(minBays, Math.round(span / nominalBay));
 
   // Helper to emit a single iterated ~3.8m Spanish colonial window & upper balcony-door bay along a Z-running wall
-  const emitFacadeBayZ = (toWorld, xWall, outSign, yPlinth, yMid, yTop, bz, hasUpper = true) =>
+  const emitFacadeBayZ = (toWorld, xWall, outSign, yPlinth, yMid, yTop, bz, hasUpper = true, hasGround = true) =>
     withPartGroup('facade_bay', () => {
       const xPaneMin = Math.min(xWall + outSign * 0.03, xWall + outSign * 0.09);
       const xPaneMax = Math.max(xWall + outSign * 0.03, xWall + outSign * 0.09);
@@ -6100,15 +6133,17 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       const yWin0 = yPlinth + 0.78;
       const yWin1 = Math.min(yMid - 0.32, yPlinth + 2.45);
       // Ground-floor glazed window opening (kind 14) + 4-piece wooden casement surround (kind 10, non-coplanar) + projecting stone sill (kind 11)
-      withPartGroup('facade_window_reja', () => {
-        emitBox(toWorld, xPaneMin, xPaneMax, yWin0, yWin1, bz - 0.54, bz + 0.54, 14, 0.42);
-        // Left & right timber casement jambs + top head lintel + bottom rail
-        emitBox(toWorld, xCasementMin, xCasementMax, yWin0 - 0.08, yWin1 + 0.10, bz - 0.66, bz - 0.54, 10, 0.74, true);
-        emitBox(toWorld, xCasementMin, xCasementMax, yWin0 - 0.08, yWin1 + 0.10, bz + 0.54, bz + 0.66, 10, 0.74, true);
-        emitBox(toWorld, xCasementMin, xCasementMax, yWin1, yWin1 + 0.12, bz - 0.54, bz + 0.54, 10, 0.76, true);
-        emitBox(toWorld, xCasementMin, xCasementMax, yWin0 - 0.10, yWin0, bz - 0.54, bz + 0.54, 10, 0.70, true);
-        emitBox(toWorld, xSillMin, xSillMax, yPlinth + 0.52, yPlinth + 0.66, bz - 0.74, bz + 0.74, 11, 0.86, true);
-      });
+      if (hasGround) {
+        withPartGroup('facade_window_reja', () => {
+          emitBox(toWorld, xPaneMin, xPaneMax, yWin0, yWin1, bz - 0.54, bz + 0.54, 14, 0.42);
+          // Left & right timber casement jambs + top head lintel + bottom rail
+          emitBox(toWorld, xCasementMin, xCasementMax, yWin0 - 0.08, yWin1 + 0.10, bz - 0.66, bz - 0.54, 10, 0.74, true);
+          emitBox(toWorld, xCasementMin, xCasementMax, yWin0 - 0.08, yWin1 + 0.10, bz + 0.54, bz + 0.66, 10, 0.74, true);
+          emitBox(toWorld, xCasementMin, xCasementMax, yWin1, yWin1 + 0.12, bz - 0.54, bz + 0.54, 10, 0.76, true);
+          emitBox(toWorld, xCasementMin, xCasementMax, yWin0 - 0.10, yWin0, bz - 0.54, bz + 0.54, 10, 0.70, true);
+          emitBox(toWorld, xSillMin, xSillMax, yPlinth + 0.52, yPlinth + 0.66, bz - 0.74, bz + 0.74, 11, 0.86, true);
+        });
+      }
       if (hasUpper && yTop - yMid >= 2.2) {
         // Upper-story glazed balcony window/door (kind 14) + molded stone lintel pediment (kind 11)
         withPartGroup('facade_upper_window', () => {
@@ -6117,8 +6152,8 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         });
       }
     });
-  const emitFacadeBayX = (toWorld, zWall, outSign, yPlinth, yMid, yTop, bx, hasUpper = true) =>
-    emitFacadeBayZ(rot90(toWorld), -zWall, -outSign, yPlinth, yMid, yTop, bx, hasUpper);
+  const emitFacadeBayX = (toWorld, zWall, outSign, yPlinth, yMid, yTop, bx, hasUpper = true, hasGround = true) =>
+    emitFacadeBayZ(rot90(toWorld), -zWall, -outSign, yPlinth, yMid, yTop, bx, hasUpper, hasGround);
 
   // Helper to emit alternating tooth-stone ashlar corner quoins (esquinales de sillería) at the 4 corners of a wing
   const emitCornerQuoins = (toWorld, x0, x1, y0, y1, z0, z1, courses = 5) =>
@@ -6422,8 +6457,8 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
           emitCylinder(toWorld, gx, gz, yCordon - 1.4, yCordon + 0.35, 0.35, 1.48, 8, 11, 0.78, false);
           emitCylinder(toWorld, gx, gz, yCordon + 0.35, yCordon + 0.65, 1.58, 1.58, 8, 11, 0.92, true);
           emitCylinder(toWorld, gx, gz, yCordon + 0.65, merlonY + 1.65, 1.38, 1.38, 8, 11, 0.90, true);
-          emitBox(toWorld, gx - 1.44, gx + 1.44, yCordon + 1.35, merlonY + 1.05, gz - 0.22, gz + 0.22, 14, 0.30);
-          emitBox(toWorld, gx - 0.22, gx + 0.22, yCordon + 1.35, merlonY + 1.05, gz - 1.44, gz + 1.44, 14, 0.30);
+          emitBox(toWorld, gx - 1.44, gx + 1.44, yCordon + 1.35, merlonY + 1.05, gz - 0.22, gz + 0.22, 14, 0.20);
+          emitBox(toWorld, gx - 0.22, gx + 0.22, yCordon + 1.35, merlonY + 1.05, gz - 1.44, gz + 1.44, 14, 0.20);
           emitCylinder(toWorld, gx, gz, merlonY + 1.65, merlonY + 1.88, 1.52, 1.52, 8, 11, 0.94, true);
           emitCylinder(toWorld, gx, gz, merlonY + 1.88, merlonY + 2.75, 1.42, 0.72, 8, 11, 0.95, false);
           emitCylinder(toWorld, gx, gz, merlonY + 2.75, merlonY + 3.25, 0.72, 0.14, 8, 11, 0.97, true);
@@ -6479,8 +6514,8 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         const bz = -hl + 0.8 + (b + 0.5) * baySpan;
         emitStoneArchZ(toWorld, -hw, -1, yPlinth, yPlinth + 2.05, archR, bz, 6);
         emitStoneArchZ(toWorld, hw, 1, yPlinth, yPlinth + 2.05, archR, bz, 6);
-        emitFacadeBayZ(toWorld, -hw, -1, yPlinth, yMid, yTop, bz, true);
-        emitFacadeBayZ(toWorld, hw, 1, yPlinth, yMid, yTop, bz, true);
+        emitFacadeBayZ(toWorld, -hw, -1, yPlinth, yMid, yTop, bz, true, false);
+        emitFacadeBayZ(toWorld, hw, 1, yPlinth, yMid, yTop, bz, true, false);
       }
       // Iterate end-wall window bays along X
       const baysX = snapBays(inst.width - 1.6, 4.0, 2);
@@ -6499,7 +6534,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       const naveHW = Math.min(hw, 7.2);
       const yPlinth = yGround + 0.78;
       beginSection('foundation_plinth');
-      emitBox(toWorld, -hw - 0.75, hw + 0.75, yBase, yPlinth, -hl - 0.75, hl + 0.75, 11, 0.82);
+      emitBox(toWorld, -naveHW - 0.42, Math.max(naveHW + 0.42, naveHW + 2.8 + 0.28), yBase, yPlinth, -hl - 1.35, hl + 0.85, 11, 0.82);
       beginSection('nave_walls');
       emitBox(toWorld, -naveHW, naveHW, yPlinth, yTop, -hl, hl, 12, 0.91);
       beginSection('apse_walls');
@@ -6515,8 +6550,8 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         emitBox(toWorld, naveHW, naveHW + 0.82, yPlinth, yTop - 0.4, bz - 0.45, bz + 0.45, 11, 0.84, false, 0.18);
         if (b < nButtressBays) {
           const wz = bz + buttressSpan * 0.5;
-          emitStoneArchZ(toWorld, -naveHW, -1, yPlinth + 2.6, yTop - 2.2, 0.62, wz, 5);
-          emitStoneArchZ(toWorld, naveHW, 1, yPlinth + 2.6, yTop - 2.2, 0.62, wz, 5);
+          emitStoneArchZ(toWorld, -naveHW, -1, yPlinth + 2.6, yTop - 2.2, 0.62, wz, 5, true);
+          emitStoneArchZ(toWorld, naveHW, 1, yPlinth + 2.6, yTop - 2.2, 0.62, wz, 5, true);
         }
       }
       // West facade Plateresque carved stone portal frame, arched doorway, flanking pilasters & rose choir window
@@ -6525,9 +6560,9 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       emitCylinder(toWorld, -2.35, -hl - 0.48, yPlinth, yPlinth + 5.8, 0.28, 0.24, 6, 11, 0.91, true);
       emitCylinder(toWorld, 2.35, -hl - 0.48, yPlinth, yPlinth + 5.8, 0.28, 0.24, 6, 11, 0.91, true);
       emitBox(toWorld, -3.1, 3.1, yPlinth + 5.8, yPlinth + 6.4, -hl - 0.65, -hl, 11, 0.92, true);
-      emitBox(toWorld, -1.45, 1.45, yPlinth, yPlinth + 4.8, -hl - 0.56, -hl + 0.1, 14, 0.28);
+      emitBox(toWorld, -1.45, 1.45, yPlinth, yPlinth + 4.8, -hl - 0.56, -hl + 0.1, 14, 0.20);
       emitCylinder(toWorld, 0, -hl - 0.22, yPlinth + 7.2, yPlinth + 9.2, 1.15, 1.15, 8, 11, 0.88, true);
-      emitBox(toWorld, -0.82, 0.82, yPlinth + 7.45, yPlinth + 8.95, -hl - 0.36, -hl + 0.08, 14, 0.32);
+      emitBox(toWorld, -0.82, 0.82, yPlinth + 7.45, yPlinth + 8.95, -hl - 0.36, -hl + 0.08, 14, 0.42);
       const yPeak = yTop + roofRise(naveHW * 2, 0.48);
       beginSection('espadana_gable_wall');
       emitBox(toWorld, -naveHW * 0.72, naveHW * 0.72, yTop, yPeak - 0.6, -hl - 0.35, -hl + 0.35, 12, 0.92);
@@ -6544,7 +6579,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       emitStoneArchZ(toWorld, tx1 - 0.35, 1, yT1 + 0.45, yT2 - 1.35, 0.78, tmz, 5);
       emitStoneArchZ(toWorld, tx0 + 0.35, -1, yT1 + 0.45, yT2 - 1.35, 0.78, tmz, 5);
       beginSection('campanario_bell_chamber');
-      emitBox(toWorld, tmx - 0.72, tmx + 0.72, yT1 + 0.55, yT2 - 0.65, tz0 + 0.26, tz1 - 0.26, 14, 0.30);
+      emitBox(toWorld, tmx - 0.72, tmx + 0.72, yT1 + 0.55, yT2 - 0.65, tz0 + 0.26, tz1 - 0.26, 14, 0.20);
       emitCylinder(toWorld, tmx, tmz, yT1 + 1.45, yT1 + 2.45, 0.58, 0.24, 8, 10, 0.76, true);
       emitBox(toWorld, tx0 + 0.12, tx1 - 0.12, yT2 - 0.32, yT2, tz0 + 0.12, tz1 - 0.12, 11, 0.91, true);
       beginSection('campanario_cupola_spire');
@@ -6598,8 +6633,8 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         emitStoneArchX(toWorld, -hl, -1, yPlinth, yPlinth + 2.8, archR, nMidX, 6);
         emitStoneArchX(toWorld, hl, 1, yPlinth, yPlinth + 2.8, archR, nMidX, 6);
         beginSection('facade_oculus_and_gutters');
-        emitCylinder(toWorld, nMidX, -hl - 0.15, yTop - 1.4, yTop - 0.3, 0.58, 0.58, 6, 14, 0.32, true);
-        emitCylinder(toWorld, nMidX, hl + 0.15, yTop - 1.4, yTop - 0.3, 0.58, 0.58, 6, 14, 0.32, true);
+        emitCylinder(toWorld, nMidX, -hl - 0.15, yTop - 1.4, yTop - 0.3, 0.58, 0.58, 6, 14, 0.42, true);
+        emitCylinder(toWorld, nMidX, hl + 0.15, yTop - 1.4, yTop - 0.3, 0.58, 0.58, 6, 14, 0.42, true);
         if (g > 0) {
           // Shared valley gutter beam between adjacent parallel roofs
           emitBox(toWorld, nx0 - 0.24, nx0 + 0.24, yTop - 0.15, yTop + 0.18, -hl - 0.35, hl + 0.35, 11, 0.84, true);
@@ -6655,19 +6690,30 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       }
       emitRoof(toWorld, -hw, hw, yTop, yTop + roofRise(Math.min(14, inst.width)), -hl, hl, 0.85, 0.24, 11);
     } else if (inst.prefabId === 'walled_mule_corral') {
-      // Primitive #6: Corral del Rey / Caballerizas Reales (Walled Pack-Mule Compound & Stable Yard — Portobelo / Seville)
+      // Primitive #6: Corral del Rey / Caballerizas Reales (Roofed Courtyard Stable & Pack-Train Compound)
       const yPlinth = yGround + 0.58;
       beginSection('foundation_plinth');
-      emitBox(toWorld, -hw - 0.6, hw + 0.6, yBase, yPlinth - 0.15, -hl - 0.6, hl + 0.6, 11, 0.80);
+      emitBox(toWorld, -hw - 0.32, hw + 0.32, yBase, yPlinth - 0.15, -hl - 0.32, hl + 0.32, 11, 0.80);
       // Cobbled courtyard yard floor (kind 16)
       beginSection('courtyard_cobble_floor');
       emitBox(toWorld, -hw, hw, yPlinth - 0.15, yPlinth, -hl, hl, 16, 0.84, true);
-      // Single constant-depth (5.8m) tiled stable wing along the +X side of the compound
-      const stableD = Math.min(WING_DEPTH, inst.width * 0.35);
+      // Paired tiled stable & storehouse wings along +X and -X with roofed north/south cross-galleries
+      const stableD = Math.min(WING_DEPTH, inst.width * 0.32);
+      const gateD = Math.min(4.6, inst.width * 0.26);
+      const crossD = Math.min(4.2, inst.length * 0.24);
       const sx0 = hw - stableD, sx1 = hw;
+      const gx0 = -hw, gx1 = -hw + gateD;
+      const yWingEave = yTop - 0.35;
       beginSection('stable_wing_walls');
       emitBox(toWorld, sx0, sx1, yPlinth, yTop, -hl, hl, 12, 0.88);
       emitRoof(toWorld, sx0, sx1, yTop, yTop + roofRise(stableD), -hl, hl, 0.65, 0.20, 12);
+      beginSection('corral_perimeter_walls');
+      emitBox(toWorld, gx0, gx1, yPlinth, yWingEave, -hl, hl, 12, 0.86);
+      emitRoof(toWorld, gx0, gx1, yWingEave, yWingEave + roofRise(gateD), -hl, hl, 0.58, 0.20, 12);
+      emitBox(toWorld, gx1, sx0, yPlinth, yWingEave, -hl, -hl + crossD, 12, 0.85);
+      emitRoofX(toWorld, -hw, hw, yWingEave, yWingEave + roofRise(crossD), -hl, -hl + crossD, 0.58, 0.20, 12);
+      emitBox(toWorld, gx1, sx0, yPlinth, yWingEave, hl - crossD, hl, 12, 0.85);
+      emitRoofX(toWorld, -hw, hw, yWingEave, yWingEave + roofRise(crossD), hl - crossD, hl, 0.58, 0.20, 12);
       // Iterated timber stable stalls & stone watering troughs facing the courtyard
       const nStalls = snapBays(inst.length - 2.0, 3.8, 4);
       const stallSpan = (inst.length - 2.0) / nStalls;
@@ -6679,24 +6725,10 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
           emitBox(toWorld, sx0 - 2.2, sx0 - 0.8, yPlinth, yPlinth + 0.85, sz - 1.1, sz + 1.1, 11, 0.82);
         }
       }
-      // Perimeter 3.2m masonry corral wall with terracotta tile coping & iterated 4.2m stone pilaster bays on the remaining 3 sides
-      const yWall = yPlinth + 3.2;
-      const wallT = 0.95;
-      beginSection('corral_perimeter_walls');
-      emitBox(toWorld, -hw, -hw + wallT, yPlinth, yWall, -hl, hl, 12, 0.85);
-      emitBox(toWorld, -hw - 0.14, -hw + wallT + 0.14, yWall, yWall + 0.32, -hl - 0.1, hl + 0.1, 13, 0.92, true);
-      emitBox(toWorld, -hw, sx0, yPlinth, yWall, -hl, -hl + wallT, 12, 0.85);
-      emitBox(toWorld, -hw - 0.1, sx0 + 0.1, yWall, yWall + 0.32, -hl - 0.14, -hl + wallT + 0.14, 13, 0.92, true);
-      emitBox(toWorld, -hw, sx0, yPlinth, yWall, hl - wallT, hl, 12, 0.85);
-      emitBox(toWorld, -hw - 0.1, sx0 + 0.1, yWall, yWall + 0.32, hl - wallT - 0.14, hl + 0.14, 13, 0.92, true);
-      for (let b = 0; b <= nStalls; b++) {
-        const bz = -hl + 1.0 + b * stallSpan;
-        emitBox(toWorld, -hw - 0.32, -hw, yPlinth, yWall, bz - 0.32, bz + 0.32, 11, 0.84);
-      }
-      // Arched stone carriage gatehouse on the -X street wall
+      // Arched stone carriage gateway cut cleanly through the -X street wing
       beginSection('carriage_gatehouse');
-      emitBox(toWorld, -hw - 0.38, -hw + wallT + 0.25, yPlinth, yWall + 1.4, -2.4, 2.4, 11, 0.88);
-      emitStoneArchZ(toWorld, -hw - 0.25, -1, yPlinth, yPlinth + 2.2, 1.35, 0, 6);
+      emitStoneArchZ(toWorld, -hw, -1, yPlinth, yPlinth + 2.2, 1.35, 0, 6);
+      emitStoneArchZ(toWorld, gx1, 1, yPlinth, yPlinth + 2.2, 1.35, 0, 6);
     } else if (inst.prefabId === 'torreon_atalaya_farol') {
       // Primitive #8: Torre del Homenaje / Torreón Redondo (Torre del Oro) / Atalaya de Madera & Farol Beacon
       const rBase = Math.min(hw, hl);
@@ -6873,8 +6905,8 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         if (p < nPostsZ) {
           beginSection('facade_window_openings');
           const wz = pz + postSpanZ * 0.5;
-          emitBox(toWorld, -hutHW - 0.08, -hutHW + 0.12, yDeck + 0.65, yEave - 0.55, wz - 0.48, wz + 0.48, 14, 0.32);
-          emitBox(toWorld, hutHW - 0.12, hutHW + 0.08, yDeck + 0.65, yEave - 0.55, wz - 0.48, wz + 0.48, 14, 0.32);
+          emitBox(toWorld, -hutHW - 0.08, -hutHW + 0.12, yDeck + 0.65, yEave - 0.55, wz - 0.48, wz + 0.48, 14, 0.20);
+          emitBox(toWorld, hutHW - 0.12, hutHW + 0.08, yDeck + 0.65, yEave - 0.55, wz - 0.48, wz + 0.48, 14, 0.20);
         }
       }
       // Steep 38° multi-tiered palm-thatch hipped roof (kind 15)
@@ -7000,7 +7032,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
           emitStoneArchZ(toWorld, -whHW, -1, yPlinth, yPlinth + 2.25, archR, pz, 6);
           emitStoneArchZ(toWorld, whHW, 1, yPlinth, yPlinth + 2.25, archR, pz, 6);
           beginSection('facade_clerestory_windows');
-          emitBox(toWorld, -whHW - 0.08, whHW + 0.08, yPlinth + 4.45, yTop - 0.85, pz - 0.62, pz + 0.62, 14, 0.36);
+          emitBox(toWorld, -whHW - 0.08, whHW + 0.08, yPlinth + 4.45, yTop - 0.85, pz - 0.62, pz + 0.62, 14, 0.42);
         }
       }
       emitRoof(toWorld, -whHW, whHW, yTop, yTop + roofRise(whHW * 2), -hl, hl, 0.78, 0.15, 12);
@@ -7043,13 +7075,13 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         emitCylinder(toWorld, 0, 0, ry - 0.06, ry + 0.06, rBase * sRing + 0.06, rBase * sRing + 0.06, 10, 10, 0.76, false);
       }
       // Apex smoke-hole collar (kind 14) & projecting smoke-flap poles (kind 10)
-      emitCylinder(toWorld, 0, 0, yPlinth + domeH - 0.08, yPlinth + domeH + 0.14, rBase * 0.18, rBase * 0.16, 8, 14, 0.32, true);
+      emitCylinder(toWorld, 0, 0, yPlinth + domeH - 0.08, yPlinth + domeH + 0.14, rBase * 0.18, rBase * 0.16, 8, 14, 0.20, true);
       emitCylinder(toWorld, -0.22, -0.15, yPlinth + domeH - 0.4, yPlinth + domeH + 0.75, 0.05, 0.04, 5, 10, 0.78, true);
       emitCylinder(toWorld, 0.22, 0.15, yPlinth + domeH - 0.4, yPlinth + domeH + 0.75, 0.05, 0.04, 5, 10, 0.78, true);
       // Low arched bark-hooded entrance tunnel on -Z with deerskin door flap (kind 13/14)
       beginSection('wigwam_doorway_hood');
       emitBox(toWorld, -0.78, 0.78, yGround - 0.35, yPlinth + 1.55, -rBase - 0.55, -rBase + 0.25, 17, 0.90, true);
-      emitBox(toWorld, -0.56, 0.56, yPlinth, yPlinth + 1.38, -rBase - 0.58, -rBase - 0.35, 14, 0.28);
+      emitBox(toWorld, -0.56, 0.56, yPlinth, yPlinth + 1.38, -rBase - 0.58, -rBase - 0.35, 14, 0.20);
       // Forecourt stone hearth ring (kind 11) + glowing ember bed (kind 13) + timber fish-smoking rack (kind 10)
       beginSection('hearth_and_drying_rack');
       const hz = -rBase - 1.65;
@@ -7535,7 +7567,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         if (b < nBays) {
           const cz = bz + baySpan * 0.5;
           // Shuttered casement windows in each bay
-          emitBox(toWorld, -hHW - 0.08, hHW + 0.08, yPlinth + 1.15, yEave - 0.65, cz - 0.46, cz + 0.46, 14, 0.28);
+          emitBox(toWorld, -hHW - 0.08, hHW + 0.08, yPlinth + 1.15, yEave - 0.65, cz - 0.46, cz + 0.46, 14, 0.42);
           emitBox(toWorld, -hHW - 0.12, hHW + 0.12, yPlinth + 1.05, yPlinth + 1.18, cz - 0.56, cz + 0.56, 10, 0.72, true);
         }
       }
@@ -7550,7 +7582,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       beginSection('porch_and_tudor_brick_chimney');
       emitBox(toWorld, -1.65, 1.65, yGround - 1.2, yEave - 0.4, -hl - 2.1, -hl, 12, 0.86, true);
       emitBox(toWorld, -1.72, 1.72, yPlinth, yEave - 0.4, -hl - 2.16, -hl - 1.92, 10, 0.68, true);
-      emitBox(toWorld, -0.85, 0.85, yPlinth, yPlinth + 2.15, -hl - 2.22, -hl - 1.85, 14, 0.26);
+      emitBox(toWorld, -0.85, 0.85, yPlinth, yPlinth + 2.15, -hl - 2.22, -hl - 1.85, 14, 0.20);
       emitRoof(toWorld, -1.85, 1.85, yEave - 0.4, yEave + 1.35, -hl - 2.25, -hl + 0.1, 0.35, 0, 12, 10);
       // Stepped Virginia red-brick chimney stack at +hl
       emitBox(toWorld, -1.35, 1.35, yGround - 1.4, yEave + 0.6, hl - 0.2, hl + 1.35, 13, 0.86, true, 0.18);
@@ -7589,11 +7621,11 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
           const cz = bz + baySpan * 0.5;
           if (b === 1) {
             // Plank batten doorway with timber hood on -X side
-            emitBox(toWorld, -cHW - 0.08, -cHW + 0.14, yPlinth, yPlinth + 2.05, cz - 0.62, cz + 0.62, 14, 0.28);
+            emitBox(toWorld, -cHW - 0.08, -cHW + 0.14, yPlinth, yPlinth + 2.05, cz - 0.62, cz + 0.62, 14, 0.20);
             emitBox(toWorld, -cHW - 0.48, -cHW + 0.05, yPlinth + 2.02, yPlinth + 2.24, cz - 0.82, cz + 0.82, 10, 0.72, true);
-            emitBox(toWorld, cHW - 0.12, cHW + 0.08, yPlinth + 0.95, yEave - 0.55, cz - 0.42, cz + 0.42, 14, 0.28);
+            emitBox(toWorld, cHW - 0.12, cHW + 0.08, yPlinth + 0.95, yEave - 0.55, cz - 0.42, cz + 0.42, 14, 0.42);
           } else {
-            emitBox(toWorld, -cHW - 0.08, cHW + 0.08, yPlinth + 0.95, yEave - 0.55, cz - 0.42, cz + 0.42, 14, 0.28);
+            emitBox(toWorld, -cHW - 0.08, cHW + 0.08, yPlinth + 0.95, yEave - 0.55, cz - 0.42, cz + 0.42, 14, 0.42);
             emitBox(toWorld, -cHW - 0.12, cHW + 0.12, yPlinth + 0.86, yPlinth + 0.98, cz - 0.50, cz + 0.50, 10, 0.72, true);
           }
         }
@@ -7617,7 +7649,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       const yPlinth = yGround + 0.68;
       const yMid = yPlinth + (yTop - yPlinth) * 0.50;
       beginSection('foundation_plinth');
-      emitBox(toWorld, -hw - 0.65, hw + 0.65, yBase, yPlinth, -hl - 0.65, hl + 0.65, 11, 0.80);
+      emitBox(toWorld, -hw - 0.32, hw + 0.32, yBase, yPlinth, -hl - 0.32, hl + 0.32, 11, 0.80);
 
       const isSingleNave =
         inst.prefabId === 'single_nave_solar' ||
@@ -7642,11 +7674,11 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
           const bz = -hl + 0.6 + (b + 0.5) * baySpanZ;
           if (b === doorBay) {
             emitStoneArchZ(toWorld, -sHW, -1, yPlinth, yPlinth + 2.05, Math.min(1.08, baySpanZ * 0.32), bz, 5);
-            emitFacadeBayZ(toWorld, -sHW, -1, yPlinth, yMid, yTop, bz, true);
+            emitFacadeBayZ(toWorld, -sHW, -1, yPlinth, yMid, yTop, bz, true, false);
           } else {
-            emitFacadeBayZ(toWorld, -sHW, -1, yPlinth, yMid, yTop, bz, true);
+            emitFacadeBayZ(toWorld, -sHW, -1, yPlinth, yMid, yTop, bz, true, true);
           }
-          emitFacadeBayZ(toWorld, sHW, 1, yPlinth, yMid, yTop, bz, true);
+          emitFacadeBayZ(toWorld, sHW, 1, yPlinth, yMid, yTop, bz, true, true);
         }
         const nBaysX = snapBays(spanW - 1.0, 3.6, 2);
         const baySpanX = (spanW - 1.0) / nBaysX;
@@ -7721,12 +7753,13 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         const midBayZ = Math.floor(nExtZ * 0.5);
         for (let b = 0; b < nExtZ; b++) {
           const bz = -hl + 0.7 + (b + 0.5) * extSpanZ;
-          if (b === midBayZ) {
+          const isDoorBay = b === midBayZ;
+          if (isDoorBay) {
             emitStoneArchZ(toWorld, -hw, -1, yPlinth, yPlinth + 2.15, 1.18, bz, 6);
             emitStoneArchZ(toWorld, hw, 1, yPlinth, yPlinth + 2.15, 1.18, bz, 6);
           }
-          emitFacadeBayZ(toWorld, -hw, -1, yPlinth, yMid, yTop, bz, true);
-          emitFacadeBayZ(toWorld, hw, 1, yPlinth, yMid, yTop, bz, true);
+          emitFacadeBayZ(toWorld, -hw, -1, yPlinth, yMid, yTop, bz, true, !isDoorBay);
+          emitFacadeBayZ(toWorld, hw, 1, yPlinth, yMid, yTop, bz, true, !isDoorBay);
         }
         const nExtX = snapBays(inst.width - 1.4, 3.8, 3);
         const extSpanX = (inst.width - 1.4) / nExtX;
@@ -7745,13 +7778,13 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         const crossPeak = crossEave + roofRise(wingD);
         const ix0 = -hw + wingD;
         const iz0 = -hl + wingD;
-        const hasUWing = inst.length >= 23.0;
-        const iz1 = hasUWing ? hl - wingD : hl - 1.05;
+        const iz1 = hl - wingD;
+        const eastD = Math.min(4.2, Math.max(3.2, (hw - ix0) * 0.38));
 
         // Cobbled side patio floor (kind 16) + stone wellhead (brocal de pozo)
         beginSection('courtyard_floor_and_wellhead');
-        emitBox(toWorld, ix0 + 0.04, hw - 1.08, yPlinth - 0.12, yPlinth + 0.04, iz0 + 0.04, iz1 - 0.04, 16, 0.83, true);
-        emitCylinder(toWorld, (ix0 + hw) * 0.5, (iz0 + iz1) * 0.5, yPlinth + 0.04, yPlinth + 1.05, 0.88, 0.92, 8, 11, 0.86, true);
+        emitBox(toWorld, ix0 + 0.04, hw - eastD + 0.04, yPlinth - 0.12, yPlinth + 0.04, iz0 + 0.04, iz1 - 0.04, 16, 0.83, true);
+        emitCylinder(toWorld, (ix0 + hw - eastD) * 0.5, (iz0 + iz1) * 0.5, yPlinth + 0.04, yPlinth + 1.05, 0.88, 0.92, 8, 11, 0.86, true);
 
         // Main street wing [-hw, ix0] running full length [-hl, hl]
         beginSection('main_street_wing_walls');
@@ -7764,22 +7797,15 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         emitBox(toWorld, ix0 - 0.6, hw, yPlinth, crossEave, -hl, iz0, 12, 0.87);
         emitRoofX(toWorld, ix0 - 0.6, hw, crossEave, crossPeak, -hl, iz0, 0.60, 0.22, 12);
 
-        if (hasUWing) {
-          // South cross-wing [ix0 - 0.6, hw] × [iz1, hl] completing the U-plan
-          beginSection('south_cross_wing_walls');
-          emitBox(toWorld, ix0 - 0.6, hw, yPlinth, crossEave, iz1, hl, 12, 0.87);
-          emitRoofX(toWorld, ix0 - 0.6, hw, crossEave, crossPeak, iz1, hl, 0.60, 0.22, 12);
-        } else {
-          // South limewashed tapia corral wall closing the L-plan
-          beginSection('south_corral_wall');
-          emitBox(toWorld, ix0, hw, yPlinth, yPlinth + 3.35, hl - 1.05, hl, 12, 0.84);
-          emitBox(toWorld, ix0, hw + 0.15, yPlinth + 3.35, yPlinth + 3.68, hl - 1.2, hl + 0.15, 13, 0.92, true);
-        }
+        // South cross-wing [ix0 - 0.6, hw] × [iz1, hl] completing the U-plan
+        beginSection('south_cross_wing_walls');
+        emitBox(toWorld, ix0 - 0.6, hw, yPlinth, crossEave, iz1, hl, 12, 0.87);
+        emitRoofX(toWorld, ix0 - 0.6, hw, crossEave, crossPeak, iz1, hl, 0.60, 0.22, 12);
 
-        // East courtyard enclosure wall with terracotta tile coping & arched carriage portal (zaguán)
+        // Roofed east carriage gallery & zaguán portal closing the courtyard
         beginSection('east_courtyard_wall');
-        emitBox(toWorld, hw - 1.05, hw, yPlinth, yPlinth + 3.35, iz0, iz1, 12, 0.84);
-        emitBox(toWorld, hw - 1.2, hw + 0.15, yPlinth + 3.35, yPlinth + 3.68, iz0, iz1, 13, 0.92, true);
+        emitBox(toWorld, hw - eastD, hw, yPlinth, crossEave - 0.45, iz0, iz1, 12, 0.86);
+        emitRoof(toWorld, hw - eastD, hw, crossEave - 0.45, crossEave - 0.45 + roofRise(eastD), iz0 - 0.4, iz1 + 0.4, 0.55, 0.18, 12);
         emitStoneArchZ(toWorld, hw, 1, yPlinth, yPlinth + 2.0, 1.08, (iz0 + iz1) * 0.5, 5);
 
         // Iterate 3.8m street facade bays on -hw and interior patio colonnade arches on ix0
@@ -7788,10 +7814,11 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         const midBay = Math.floor(nBaysZ * 0.5);
         for (let b = 0; b < nBaysZ; b++) {
           const bz = -hl + 0.6 + (b + 0.5) * baySpanZ;
-          if (b === midBay) {
+          const isDoorBay = b === midBay;
+          if (isDoorBay) {
             emitStoneArchZ(toWorld, -hw, -1, yPlinth, yPlinth + 2.15, 1.12, bz, 5);
           }
-          emitFacadeBayZ(toWorld, -hw, -1, yPlinth, yMid, yTop + 0.85, bz, true);
+          emitFacadeBayZ(toWorld, -hw, -1, yPlinth, yMid, yTop + 0.85, bz, true, !isDoorBay);
           if (bz > iz0 + 0.8 && bz < iz1 - 0.8) {
             emitStoneArchZ(toWorld, ix0, 1, yPlinth, yPlinth + 1.95, Math.min(1.08, baySpanZ * 0.32), bz, 5);
           }

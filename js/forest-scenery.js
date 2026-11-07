@@ -410,12 +410,12 @@ function populateSubtropicalNativeLodIndices(manifest,nativeLod,sourceIndices,so
 const CERTIFIED_FOREST_STREAM_SHAS=Object.freeze({
   'vertices.bin':new Set([
     '8d70fb89316d5d842ba5d224aca99878b866c70addb578848a47783af08251d0',
-    'fc1c3b64fa2f9df90a98ceaa67baccc9257090a37945fc7c6392a2a51d49e1ba',
+    'e9df13166329797db6ddf89839778aa126c82fedc3070a47630e69ee85f6d007',
     '96296b66eb43b8d1a81e72e55d75443bb950b324b99da4804d9da94f4895e5b9',
   ]),
   'indices.bin':new Set([
     '2cd8ffe90fd2e0300db51caf0decd9da6b5f50cbaa2e6dd5462d8c6f8d8ce389',
-    '404ec785fd2fc49e83403b8fd60890debb8e76d518d5436255ea7a1494ff5ef3',
+    'eb385ff490bdbc2b44d370facaf73de6516ef1b4084bb725ad9312580f059e9f',
     '69f75971b59f9881249e095b040abba74f89c6408fee70f01a782b55fa49caea',
   ]),
   'roots.bin':new Set([

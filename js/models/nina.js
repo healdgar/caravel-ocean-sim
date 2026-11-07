@@ -14,8 +14,8 @@ export const NINA_DESIGN = deepFreeze({
   anchor:{z:-4.8,rootInset:.15,tipOutset:.27,rootRise:.58,tipRise:.78,fairleadRise:.76},
   tackles:[{mast:0,x:1.05,z:-1.4},{mast:1,x:-1.1,z:-.45},{mast:2,x:-.4,z:4.55}],
   crewStations:{
-    ines:{x:-.92,z:4.15,route:[4.15,4.15],yaw:Math.PI},
-    tomas:{x:.8,z:3.3,route:[3.3,3.3],yaw:Math.PI},
+    ines:{x:.8,z:3.3,route:[3.3,3.3],yaw:Math.PI},
+    tomas:{x:-.92,z:4.15,route:[4.15,4.15],yaw:Math.PI},
     beatriz:{x:-1.05,z:-2.1,route:[-2.1,-1.3]},
     duarte:{x:.95,z:-1.4,route:[-1.4,-1.4]},
     joao:{x:-1.0,z:-.45,route:[-.45,.25]},

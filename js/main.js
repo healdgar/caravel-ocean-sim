@@ -118,6 +118,14 @@ if (qs.has('sovereignPolity')) {
 }
 const careerBrowserStorage=name=>{try{return window[name];}catch{return null;}};
 const careerStore=createCareerStore({storage:careerBrowserStorage('localStorage'),session:careerBrowserStorage('sessionStorage')});
+if(qs.get('reset')==='1'||qs.get('newVoyage')==='1'){
+  try{
+    careerStore.clear?.();
+    careerBrowserStorage('localStorage')?.removeItem?.('waterworld.voyage.v1');
+    careerBrowserStorage('localStorage')?.removeItem?.('waterworld.career.v1');
+    resetActiveIndigenousSovereigntyState({persist:true});
+  }catch{/* ignore */}
+}
 // A tab owns the save if it asked to continue, or if there is nothing yet to protect.
 if(qs.get('continue')==='1'||!careerStore.has())careerStore.claim();
 const BROADSIDE_SCENARIO=qs.get('broadside')==='1'||qs.get('scenario')==='broadside'||qs.get('situation')==='broadside';
@@ -1153,7 +1161,7 @@ async function main() {
     },
     onEvent:event=>{
       if(ownerBoat.faction==='enemy'&&(event.type==='give-fire'||event.type==='ready')){
-        if(event.type==='give-fire')sceneAudio.gunneryEvent({type:'enemy-voice',action:'fire',position:event.position??[ownerBoat.x??0,(ownerBoat.heave??0)+2,ownerBoat.z??0]});
+        // Enemy ships do not spam vocal fire orders on every single gun discharge
       }else{
         sceneAudio.gunneryEvent(event);
       }
@@ -2646,6 +2654,22 @@ async function main() {
       getCamera:()=>cam,
       getVessels:()=>vessels.map(v=>v.boat),
       getMarineLife:()=>marineLife,
+      getDolphins:()=>dolphins,
+      hasMetIndigenous:()=>{
+        const sov=getActiveIndigenousSovereigntyState();
+        return Boolean(sov&&(sov.allegiance==='rogue-liberator'||(sov.treatiesSigned??0)>0||(sov.totalTrades??0)>0||(sov.totalColonizersRepelled??0)>0||Object.values(sov.regions??{}).some(r=>(r.strengthScore??0)>0||(r.tradeCount??0)>0)));
+      },
+      onResetVoyage:()=>{
+        try{
+          careerStore.clear?.();
+          careerBrowserStorage('localStorage')?.removeItem?.('waterworld.voyage.v1');
+          careerBrowserStorage('localStorage')?.removeItem?.('waterworld.career.v1');
+          resetActiveIndigenousSovereigntyState({persist:true});
+        }catch{/* ignore */}
+        const url=new URL(location.pathname,location.href);
+        url.searchParams.set('newVoyage','1');
+        location.href=url.href;
+      },
       onSightVessel:enc=>activateEncounterVessel(enc,{mode:'sight'}),
       onInspectLand:()=>setSpyglassActive(true,null,{land:true}),
       onHandLostInGale:()=>{const lost=loseHandInGale(boat,crew?.state);if(lost)refreshCrewRosterDOM();return lost;},
@@ -2808,6 +2832,8 @@ async function main() {
             v.dr.lat=qs.has('drLat')&&Number.isFinite(Number(qs.get('drLat')))?Number(qs.get('drLat')):qLat;
             v.dr.lon=qs.has('drLon')&&Number.isFinite(Number(qs.get('drLon')))?Number(qs.get('drLon')):qLon;
           }
+        }else if(qs.has('landfall')&&terrain?.region&&Number.isFinite(terrain.region.latitude)&&Number.isFinite(terrain.region.longitude)){
+          voyageCtl.syncToTerrainBoat();
         }
         if(urlGameState?.voyage){
           const uv=urlGameState.voyage;

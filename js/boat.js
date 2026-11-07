@@ -582,7 +582,7 @@ export function crowsNestDesignStation(boat = {}) {
     const mastSurfaces = (additional.surfaces ?? []).filter(
       (s) => s.mast === tallestIdx && s.kind === 'square'
     );
-    let y = headY * 0.86;
+    let y = modelId === 'pinta' ? headY * 0.90 : headY * 0.86;
     if (modelId === 'flying-cloud') {
       y = 8.48;
     } else if (mastSurfaces.length >= 2) {
@@ -623,7 +623,7 @@ export function crowsNestDesignStation(boat = {}) {
   const sy = vesselVerticalScale(boat);
   const lengthScale = Math.max(0.85, Math.min(1.45, (boat.length || 20) / 20));
   const mastIdx = !scaleSpec.isDefaultScale && !scaleSpec.activeMasts.includes('fore') ? 1 : 0;
-  const y = mastIdx === 1 ? 6.8 : 7.75;
+  const y = mastIdx === 1 ? 6.8 : 8.48;
   const [, , z] = mastPoint(mastIdx, y);
   const [, headY, headZ] = mastPoint(mastIdx, RIG_MASTS[mastIdx].height);
   const eyeY = y + 0.88;

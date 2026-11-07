@@ -147,8 +147,8 @@ export function createVoyageController(cfg) {
     mode: null, // 'fight' | 'board' | 'hail'
     encounter: null,
     battleRangeM: 235,
-    boardRangeM: 46,
-    hailRangeM: 88,
+    boardRangeM: 24,
+    hailRangeM: 72,
     battleRangeReached: false,
     actionTriggered: false,
   };
@@ -184,6 +184,7 @@ export function createVoyageController(cfg) {
         <button type="button" class="voyage-keep" title="Helmsman: keep her as she goes (K)">Keep her so</button>
         <button type="button" class="voyage-tack" title="Go about (T)">Tack</button>
         <label class="voyage-beat"><input type="checkbox"> Beat</label>
+        <button type="button" class="voyage-reset" title="Reset saved career and start a new 1550 voyage">Reset voyage</button>
       </div>
       <div class="voyage-row voyage-status"><span class="voyage-pos"></span><span class="voyage-helmsman"></span><span class="voyage-wind"></span><span class="voyage-stores"></span></div>
       <div class="voyage-callout" role="alert" hidden></div>
@@ -236,7 +237,19 @@ export function createVoyageController(cfg) {
     root.querySelector('.voyage-tack').onclick = () => tack();
     const beat = root.querySelector('.voyage-beat input');
     beat.onchange = () => { helmsman.beat = beat.checked; };
-    return { root, toggle, warpButtons, canvasSel, beat };
+    const resetBtn = root.querySelector('.voyage-reset');
+    if (resetBtn) {
+      resetBtn.onclick = () => {
+        if (cfg.onResetVoyage) {
+          cfg.onResetVoyage();
+        } else {
+          try { storage?.removeItem?.(VOYAGE_STORAGE_KEY); } catch { /* ignore */ }
+          start({ dateMs: DEFAULT_DEPARTURE.dateMs, passive: Boolean(voyage?.passive) });
+          showToast('Voyage reset to 1550.');
+        }
+      };
+    }
+    return { root, toggle, warpButtons, canvasSel, beat, resetBtn };
   }
 
   function setHudVisible(visible) {
@@ -416,35 +429,40 @@ export function createVoyageController(cfg) {
       return;
     }
 
-    // Inside battle range at 1× real time:
+    // Inside battle range at 1× real time: in live 3D gameplay (where main.js steps boat.x/boat.z),
+    // never tractor-beam or drag the target; let the two hulls maneuver naturally into grappling reach.
+    // In headless tests where boat.x/boat.z are static mock coordinates, integrate relative closing motion.
+    const hullSteppedExternally =
+      pursuit.prevBoatX !== undefined &&
+      Math.hypot((boat.x ?? 0) - pursuit.prevBoatX, (boat.z ?? 0) - pursuit.prevBoatZ) > 1e-5;
+    pursuit.prevBoatX = boat.x ?? 0;
+    pursuit.prevBoatZ = boat.z ?? 0;
+
     if (pursuit.mode === 'fight') {
-      // Close smoothly into prime broadside range (~135 m), then hand off to live broadside combat
-      if (dist > 140) {
-        const stepIn = Math.min(dist - 135, 9.5 * dt);
-        tb.x -= dirX * stepIn;
-        tb.z -= dirZ * stepIn;
-      } else {
+      if (dist <= 165) {
         pursuit.actionTriggered = true;
         pursuit.active = false;
       }
     } else if (pursuit.mode === 'board') {
-      // Continue steering alongside at 1× real time until within grappling range (~46 m)
-      if (dist > pursuit.boardRangeM) {
-        const stepIn = Math.min(dist - (pursuit.boardRangeM - 4), 14.0 * dt);
-        tb.x -= dirX * stepIn;
-        tb.z -= dirZ * stepIn;
+      if (tb && Number.isFinite(tb.surgeVelocity) && tb.surgeVelocity > 2.2) {
+        tb.surgeVelocity = Math.max(1.8, tb.surgeVelocity - 0.6 * dt);
+      }
+      if (!hullSteppedExternally && dist > pursuit.boardRangeM) {
+        const closeStep = Math.min(dist - (pursuit.boardRangeM - 2), 14.5 * dt);
+        tb.x -= dirX * closeStep;
+        tb.z -= dirZ * closeStep;
         dist = Math.hypot((tb.x ?? 0) - (boat.x ?? 0), (tb.z ?? 0) - (boat.z ?? 0));
       }
-      if (dist <= pursuit.boardRangeM && !pursuit.actionTriggered) {
+      if (dist <= Math.max(pursuit.boardRangeM, !hullSteppedExternally ? 46 : pursuit.boardRangeM) && !pursuit.actionTriggered) {
         pursuit.actionTriggered = true;
         pursuit.active = false;
         cfg.onBoardVessel?.(pursuit.encounter, targetV);
       }
     } else if (pursuit.mode === 'hail') {
-      if (dist > pursuit.hailRangeM) {
-        const stepIn = Math.min(dist - (pursuit.hailRangeM - 4), 12.0 * dt);
-        tb.x -= dirX * stepIn;
-        tb.z -= dirZ * stepIn;
+      if (!hullSteppedExternally && dist > pursuit.hailRangeM) {
+        const closeStep = Math.min(dist - (pursuit.hailRangeM - 2), 12.0 * dt);
+        tb.x -= dirX * closeStep;
+        tb.z -= dirZ * closeStep;
         dist = Math.hypot((tb.x ?? 0) - (boat.x ?? 0), (tb.z ?? 0) - (boat.z ?? 0));
       }
       if (dist <= pursuit.hailRangeM && !pursuit.actionTriggered) {
@@ -467,20 +485,24 @@ export function createVoyageController(cfg) {
     const cannonCount = plunder.cannons ?? 0;
     const ableCrew = plunder.impressCount ?? 0;
     const repairPct = Math.round((plunder.scuttleHullRepair ?? 0) * 100);
+    const showIndigenousGift = Boolean(plunder.hasMetIndigenous || cfg.hasMetIndigenous?.());
+    const choices = [
+      { id: 'ally', label: `🏴 Add to Fleet as Allied Consort (${storesLabel('ally')})` },
+      ...(showIndigenousGift
+        ? [{ id: 'gift-indigenous', label: `🛡️ Gift Prize${plunder.giftCannons ? ' & Cannon' : ''} to Indigenous Allies (${storesLabel('gift-indigenous')})` }]
+        : []),
+      { id: 'impress-plunder', label: `⚓ ${ableCrew ? `Impress ${ableCrew} Hands` : 'Free Her Crew'}${cannonCount ? ` & Plunder ${cannonCount} Cannon` : ableCrew ? '' : ' & Take Her Stores'} (${storesLabel('impress-plunder')})` },
+      { id: 'scuttle-repair', label: `🔨 Strip & Scuttle for Repairs (hull +${repairPct}%, ${storesLabel('scuttle-repair')})` },
+    ];
     raiseInterrupt(
       voyage,
       {
         type: 'prize-disposition',
         title: `⚔️ Prize Taken · ${shipName}`,
-        text: `Victory! ${shipName} has struck her colors to our boarding party. Aboard we find ${cannonCount ? `${cannonCount} serviceable cannon, ` : ''}${ableCrew ? `${ableCrew} able hands, and ` : ''}seasoned oak timber & canvas (+${repairPct}% hull & rig repair if scuttled). ${plunder.freedCaptives ? 'The captives in her hold are free, and we will carry them ashore. ' : ''}${plunder.coinLabel ? `Her strongbox holds ${plunder.coinLabel}, ours unless she is gifted. ` : ''}What are your orders for the prize?`,
+        text: `Victory! ${shipName} has struck her colors to our boarding party. Aboard we find ${cannonCount ? `${cannonCount} serviceable cannon, ` : ''}${ableCrew ? `${ableCrew} able hands, and ` : ''}seasoned oak timber & canvas (+${repairPct}% hull & rig repair if scuttled). ${plunder.freedCaptives ? 'The captives in her hold are free, and we will carry them ashore. ' : ''}${plunder.coinLabel ? `Her strongbox holds ${plunder.coinLabel}${showIndigenousGift ? ', ours unless she is gifted' : ''}. ` : ''}What are your orders for the prize?`,
         targetVessel,
         plunder,
-        choices: [
-          { id: 'ally', label: `🏴 Add to Fleet as Allied Consort (${storesLabel('ally')})` },
-          { id: 'gift-indigenous', label: `🛡️ Gift Prize${plunder.giftCannons ? ' & Cannon' : ''} to Indigenous Allies (${storesLabel('gift-indigenous')})` },
-          { id: 'impress-plunder', label: `⚓ ${ableCrew ? `Impress ${ableCrew} Hands` : 'Free Her Crew'}${cannonCount ? ` & Plunder ${cannonCount} Cannon` : ableCrew ? '' : ' & Take Her Stores'} (${storesLabel('impress-plunder')})` },
-          { id: 'scuttle-repair', label: `🔨 Strip & Scuttle for Repairs (hull +${repairPct}%, ${storesLabel('scuttle-repair')})` },
-        ],
+        choices,
         log: `Captured prize ${shipName}. Awaiting captain's disposition orders.`,
       },
       'deck'
@@ -882,25 +904,34 @@ export function createVoyageController(cfg) {
 
   function syncAstronomy() {
     if (!astronomy || !voyage) return;
+    if (Number.isFinite(voyage.dateMs) && new Date(voyage.dateMs).getUTCFullYear() > 1800) {
+      const elapsedDays = Math.max(0, (voyage.dayAtSea ?? 1) - 1);
+      voyage.departureDateMs = DEFAULT_DEPARTURE.dateMs;
+      voyage.dateMs = DEFAULT_DEPARTURE.dateMs + elapsedDays * 86400000;
+    }
     if (astronomy.revision !== undefined && astronomy.revision !== lastAstroRevision) {
       if (astronomy.mode === 'manual') {
         respectManualSky = true;
       } else {
         respectManualSky = false;
         const userTimeMs = astronomy.epochMs + (astronomy.elapsedSeconds || 0) * 1000;
-        if (Number.isFinite(userTimeMs)) voyage.dateMs = userTimeMs;
+        if (Number.isFinite(userTimeMs) && new Date(userTimeMs).getUTCFullYear() <= 1850) {
+          voyage.dateMs = userTimeMs;
+        }
       }
       lastAstroRevision = astronomy.revision;
     }
     // Always keep the geographic observer anchor synced to the ship's live lat/lon.
     astronomy.anchor = { latitude: voyage.true.lat, longitude: voyage.true.lon, x: boat.x, z: boat.z };
-    if (!voyage.passive && !respectManualSky) {
-      // Sun, moon and stars follow the warped voyage clock and the ship's true position.
-      astronomy.mode = 'astronomy';
-      astronomy.rate = 0;
+    if (!respectManualSky) {
       astronomy.epochMs = voyage.dateMs;
       astronomy.elapsedSeconds = 0;
-      astronomy.update?.(0, boat);
+      if (!voyage.passive) {
+        // Sun, moon and stars follow the warped voyage clock and the ship's true position.
+        astronomy.mode = 'astronomy';
+        astronomy.rate = 0;
+        astronomy.update?.(0, boat);
+      }
     }
   }
 
@@ -1132,6 +1163,8 @@ export function createVoyageController(cfg) {
           boat,
           camera: cam,
           vessels: cfg.getVessels?.() ?? null,
+          marineLife: cfg.getMarineLife?.() ?? null,
+          dolphins: cfg.getDolphins?.() ?? null,
         });
         approach.offset = { x: 0, z: 0 };
         approach.committed = true;
@@ -1496,6 +1529,8 @@ export function createVoyageController(cfg) {
                 boat,
                 camera: cfg.getCamera?.() ?? null,
                 vessels: cfg.getVessels?.() ?? null,
+                marineLife: cfg.getMarineLife?.() ?? null,
+                dolphins: cfg.getDolphins?.() ?? null,
               });
               approach.offset = { x: 0, z: 0 };
               approach.committed = true;

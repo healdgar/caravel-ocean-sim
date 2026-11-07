@@ -21,7 +21,7 @@ function additionalSquare(id,name,mast,y,z,headWidth,footWidth,footY,belly=.22){
 const additionalAftEntryV=[.90,.90,.90,.90,.90,.90,.90],additionalAftFlare=[.94,.94,.94,.94,.94,.94,.94];
 const additionalCrewIDs=['ines','tomas','beatriz','duarte','joao','catarina','leonor','rui','maria','afonso','isabel','pedro'];
 function additionalStationsForCrew(){
-  const positions=[[-.60,4.4],[.60,4.4],[-1,-3.5],[1,-3.5],[-.95,-.8],[.95,-.8],[-.9,1.2],[.9,1.2],[-.45,-4.9],[.45,-4.9],[-.72,3.2],[0,4.8]];
+  const positions=[[.60,4.4],[-.60,4.4],[-1,-3.5],[1,-3.5],[-.95,-.8],[.95,-.8],[-.9,1.2],[.9,1.2],[-.45,-4.9],[.45,-4.9],[-.72,3.2],[0,4.8]];
   return Object.fromEntries(additionalCrewIDs.map((id,i)=>{const [x,z]=positions[i];return [id,{x,z,route:i===11?[z,z]:[z,z+(i<2?.2:.45)],yaw:i===11?Math.PI:undefined}];}));
 }
 const pintaScale=25.908/12,santaScale=28.3/12;

@@ -75,8 +75,8 @@ export const VICTORY_DESIGN=deepFreeze({
     {id:'quarter',count:12,centre:1.83,calibre:12,start:1.98,end:4.12},
     {id:'forecastle',count:4,centre:1.83,calibre:12,start:-4.8,end:-4.18}],
   crewStations:{
-    ines:{x:-.68,z:4.85,route:[4.6,5.0],yaw:Math.PI},
-    tomas:{x:.68,z:4.85,route:[4.6,5.0],yaw:Math.PI},
+    ines:{x:.68,z:4.85,route:[4.6,5.0],yaw:Math.PI},
+    tomas:{x:-.68,z:4.85,route:[4.6,5.0],yaw:Math.PI},
     beatriz:{x:-.92,z:-3.95,route:[-4.5,-4.0]},
     duarte:{x:.92,z:-3.95,route:[-4.5,-4.0]},
     joao:{x:-1.12,z:-.85,route:[-.85,-.25]},

@@ -50,8 +50,8 @@ export function propagatedStars(date){
 }
 export function createAstronomyClock(search=new URLSearchParams(),position={x:0,z:0}){
   const number=(key,fallback,min,max)=>search.has(key)&&Number.isFinite(+search.get(key))?astroClamp(+search.get(key),min,max):fallback;
-  const requested=search.get('astroDate'),epoch=Date.parse(requested||'2026-10-21T00:00:00Z');
-  const clock={mode:search.get('skyMode')==='astronomy'?'astronomy':'manual',epochMs:Number.isFinite(epoch)?epoch:Date.UTC(2026,9,21),elapsedSeconds:0,rate:number('astroRate',1,0,3600),stars:search.get('stars')!=='0',constellations:search.get('constellations')==='1',anchor:{latitude:number('latitude',17.635,-90,90),longitude:number('longitude',-63.238,-180,180),x:position.x||0,z:position.z||0},state:null,revision:0};
+  const requested=search.get('astroDate'),epoch=Date.parse(requested||'1550-04-01T00:00:00Z');
+  const clock={mode:search.get('skyMode')==='astronomy'?'astronomy':'manual',epochMs:Number.isFinite(epoch)?epoch:Date.UTC(1550,3,1),elapsedSeconds:0,rate:number('astroRate',1,0,3600),stars:search.get('stars')!=='0',constellations:search.get('constellations')==='1',anchor:{latitude:number('latitude',17.635,-90,90),longitude:number('longitude',-63.238,-180,180),x:position.x||0,z:position.z||0},state:null,revision:0};
   let sampled=-Infinity,anchorKey='';
   clock.set=(values={},boat=position)=>{
     if(values.mode!==undefined)clock.mode=values.mode==='astronomy'?'astronomy':'manual';

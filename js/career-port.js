@@ -11,7 +11,11 @@ const WAGES_MORALE_GAIN = 0.1;
 
 export function createCareerPort({ era, store, boat, getVoyage, getCompany, getPort, capacityOf, hullMassOf, saveVoyage = () => {}, passDays = () => {}, onPutToSea = () => {}, onRepaired = () => {}, onCrewRestored = () => {}, onShipBought = () => {}, onRetired = () => {} }) {
   let ledger = null;
-  const dateMs = () => getVoyage()?.dateMs ?? Date.now();
+  const DEFAULT_ERA_DATE_MS = Date.parse('1550-03-24T12:00:00Z');
+  const dateMs = () => {
+    const raw = getVoyage()?.dateMs;
+    return Number.isFinite(raw) && new Date(raw).getUTCFullYear() <= 1800 ? raw : DEFAULT_ERA_DATE_MS;
+  };
   const load = () => (ledger ??= ensureCareerLedger(store.read()?.career ?? {}, era, dateMs()));
   const save = () => {
     const voyage = getVoyage();

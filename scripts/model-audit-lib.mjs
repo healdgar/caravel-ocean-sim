@@ -489,7 +489,7 @@ export function forestPrototypeIndex(manifest, vertices, indices, prototypeId, {
       const at = indices[i + k] * stride;
       let x = vertices[at], y = vertices[at + 1], z = vertices[at + 2];
       const r2 = x * x + z * z;
-      if (part === PART.rope && p.species !== 'ceiba' && p.species !== 'mangrove' && ((y < 0.025 && r2 > 0.7) || (y < -0.01 && r2 > 0.22))) {
+      if (part === PART.rope && ((y < 0.025 && r2 > 0.7) || (y < -0.01 && r2 > 0.22))) {
         x = 0; y = 0; z = 0;
       }
       positions[t * 9 + k * 3] = origin[0] + (c * x - s * z) * scale;

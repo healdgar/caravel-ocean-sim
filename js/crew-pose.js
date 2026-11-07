@@ -371,8 +371,20 @@ export function poseCrewWork(a,s,boat){
     return;
   }
   if(j?.kind==='boarding'&&j.stage==='working'){
-    a.blend('Brace',s.time,0.55);
-    const {right:handR,left:handL}=crewBoardingHands(s);
+    a.blend('Brace',s.time,j.crossingGangplank?0.22:0.58);
+    const {right:handR,left:handL,lunge=0,torsoTwist=0}=crewBoardingHands(s);
+    const pelvis=poseNodeIndex(a,'pelvis');
+    if(pelvis>=0&&!j.crossingGangplank){
+      const p=posePosition(a.world[pelvis]);
+      poseMoveBone(a,pelvis,[p[0],p[1]-0.05-Math.abs(lunge)*0.18,p[2]+lunge]);
+    }
+    for(const [name,weight] of [['spine_01',0.45],['spine_02',0.55]]){
+      const node=poseNodeIndex(a,name);
+      if(node>=0){
+        const angle=torsoTwist*weight;
+        turnBone(a,node,[0,0,1],[Math.sin(angle),0.12*Math.max(0,lunge),Math.cos(angle)]);
+      }
+    }
     solveCrewLimb(a,['upperarm_r','lowerarm_r','hand_r'],handR,[-0.6,1.0,0.2]);
     solveCrewLimb(a,['upperarm_l','lowerarm_l','hand_l'],handL,[0.6,1.0,0.2]);
     s.grips={hand_r:handR,hand_l:handL};
