@@ -84,11 +84,14 @@ export const CREW_RENDER = FRAME_WGSL + ATMO_CORE_WGSL + VESSEL_RIG + VESSEL_LIG
 @group(0) @binding(7) var<storage,read> sunVis:array<f32,4>;
 @group(0) @binding(8) var<storage,read> moisture:array<vec2f>;
 @group(0) @binding(9) var skyLUT:texture_2d<f32>;
+// Centroid, because a sliver of limb can cover a sample and miss the pixel's centre. Read at the
+// centre, its values are extrapolated far past any its corners hold, and skin at -7 divides by zero
+// in the wrap below: one sample of a distant figure then blazes at the top of the half-float range.
 struct CrewVertex {
-  @invariant @builtin(position) position:vec4f, @location(0) world:vec3f,
-  @location(1) normal:vec3f, @location(2) color:vec3f, @location(3) @interpolate(flat) helm:f32,
-  @location(4) wet:vec2f, @location(5) skin:f32,
-  @location(6) bodyPos:vec3f, @location(7) @interpolate(flat) damage:vec3f,
+  @invariant @builtin(position) position:vec4f, @location(0) @interpolate(perspective,centroid) world:vec3f,
+  @location(1) @interpolate(perspective,centroid) normal:vec3f, @location(2) @interpolate(perspective,centroid) color:vec3f, @location(3) @interpolate(flat) helm:f32,
+  @location(4) @interpolate(perspective,centroid) wet:vec2f, @location(5) @interpolate(perspective,centroid) skin:f32,
+  @location(6) @interpolate(perspective,centroid) bodyPos:vec3f, @location(7) @interpolate(flat) damage:vec3f,
   @location(8) @interpolate(flat) paint:u32
 };
 // The model's colours are placeholders for what this person wears: rgb, and whether it is skin.
@@ -212,7 +215,7 @@ fn crewClothed(tagged:vec3f,p:vec3f,shirt:vec3f,trousers:vec3f,skin:vec3f,hair:v
   // highlight; absorbed water darkens linen, surface water strengthens glints.
   // Roughness values are authored material choices, not measured cloth/skin data.
   let rough=clamp(mix(mix(.92,.62,v.skin),mix(.55,.38,v.skin),wet.y)+roughBias,0.08,0.99);
-  let wrap=.14*v.skin;
+  let wrap=.14*saturate(v.skin);
   let diffuse=max(0.0,(dot(n,sun)+wrap)/(1.0+wrap))/(1.0+wrap);
   let f0=vec3f(.04);
   let spec=vesselSpecular(n,view,sun,rough,f0);

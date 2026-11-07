@@ -1,4 +1,4 @@
-import {FRAME_WGSL} from './common.js';
+import {FRAME_WGSL,SANE_HDR} from './common.js';
 // Bloom (dual-filter chain) and final composite with AgX tonemapping.
 const FS_TRI = /* wgsl */ `
 struct VO { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
@@ -11,8 +11,13 @@ struct VO { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
 }
 `;
 
-export const BLOOM_DOWN = FS_TRI + /* wgsl */ `
+export const BLOOM_DOWN = FS_TRI + SANE_HDR + /* wgsl */ `
 struct P { texel: vec4f };   // xy = 1/src size, z = first pass (karis + threshold)
+// One pixel falls in two taps at most, so the rest of the 13 say how bright this place really is. The
+// sun or a muzzle flash fills them and passes untouched. A single pixel far above them may be a glint
+// or a mistake, and is shown as such, but it does not get to light a wide circle around itself.
+const BLOOM_LONE_RATIO = 8.0;
+const BLOOM_LONE_FLOOR = 1.0;
 @group(0) @binding(0) var src: texture_2d<f32>;
 @group(0) @binding(1) var samp: sampler;
 @group(0) @binding(2) var<uniform> U: P;
@@ -37,12 +42,23 @@ fn karis(c: vec3f) -> f32 { return 1.0 / (1.0 + luma(c) * 0.25); }
   let m = tap(uv + t * vec2f(1.0, 1.0));
   var o: vec3f;
   if (U.texel.z > 0.5) {
+    var taps = array<vec3f, 13>(a, b, c, d, e, f, g, h, i, j, k, l, m);
+    var lumas: array<f32, 13>;
+    var top = 0.0; var second = 0.0; var total = 0.0;
+    for (var n = 0u; n < 13u; n++) {
+      taps[n] = saneHDR(taps[n]);
+      let y = luma(taps[n]);
+      lumas[n] = y; total += y;
+      if (y > top) { second = top; top = y; } else if (y > second) { second = y; }
+    }
+    let most = max(BLOOM_LONE_FLOOR, (total - top - second) / 11.0 * BLOOM_LONE_RATIO);
+    for (var n = 0u; n < 13u; n++) { taps[n] *= min(1.0, most / max(lumas[n], 1e-6)); }
     // Karis average on the first downsample to tame fireflies from sun glints
-    let g0 = (a + b + d + e) * 0.25;
-    let g1 = (b + c + e + f) * 0.25;
-    let g2 = (d + e + g + h) * 0.25;
-    let g3 = (e + f + h + i) * 0.25;
-    let g4 = (j + k + l + m) * 0.25;
+    let g0 = (taps[0] + taps[1] + taps[3] + taps[4]) * 0.25;
+    let g1 = (taps[1] + taps[2] + taps[4] + taps[5]) * 0.25;
+    let g2 = (taps[3] + taps[4] + taps[6] + taps[7]) * 0.25;
+    let g3 = (taps[4] + taps[5] + taps[7] + taps[8]) * 0.25;
+    let g4 = (taps[9] + taps[10] + taps[11] + taps[12]) * 0.25;
     let w0 = karis(g0) * 0.125; let w1 = karis(g1) * 0.125; let w2 = karis(g2) * 0.125;
     let w3 = karis(g3) * 0.125; let w4 = karis(g4) * 0.5;
     o = (g0 * w0 + g1 * w1 + g2 * w2 + g3 * w3 + g4 * w4) / (w0 + w1 + w2 + w3 + w4);
@@ -87,7 +103,7 @@ fn tap(uv: vec2f) -> vec3f { return textureSampleLevel(src, samp, uv, 0.0).rgb; 
 }
 `;
 
-export const COMPOSITE = FS_TRI + /* wgsl */ `
+export const COMPOSITE = FS_TRI + SANE_HDR + /* wgsl */ `
 struct P { p: vec4f, q: vec4f };  // p: exposure, bloom, frame, vignette; q: saturation, contrast, warmth, 1/bloom levels
 @group(0) @binding(0) var hdr: texture_2d<f32>;
 @group(0) @binding(1) var bloom: texture_2d<f32>;
@@ -127,6 +143,7 @@ fn ign(p: vec2f) -> f32 { return fract(52.9829189 * fract(dot(p, vec2f(0.0671105
   let dims = vec2f(textureDimensions(hdr));
   let pc = vec2i(in.pos.xy);
   var c = textureLoad(hdr, pc, 0).rgb;
+  c = saneHDR(c);
   if (U.p.y > 0.0) {
     let b = textureSampleLevel(bloom, samp, in.uv, 0.0).rgb * U.q.w;
     c = mix(c, b, U.p.y);

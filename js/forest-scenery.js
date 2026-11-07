@@ -705,6 +705,13 @@ fn forestNativeLinear(c:vec3f)->vec3f{
  return select(pow((c+vec3f(.055))/1.055,vec3f(2.4)),c/12.92,c<=vec3f(.04045));
 }
 struct ForestSurface {pigment:vec4f,detail:vec4f};
+// A leaf's own colour from what the textures keep, which is that colour times coverage. Where coverage
+// nears nothing the two are noise over noise: BC7 and ASTC blocks, and rounding to eight bits, leave a
+// little colour over a coverage of zero, and dividing by zero then gives one sample a value at the top
+// of the half-float range. Below the floor the colour fades to black instead of growing, and a surface
+// has no colour above one anyway. Only the stochastic edge of a leaf is ever this thin.
+const FOREST_THINNEST_COVERAGE=1./32.;
+fn forestOwnColour(pigment:vec4f)->vec3f{return min(pigment.rgb/max(pigment.a,FOREST_THINNEST_COVERAGE),vec3f(1));}
 fn forestDetailSigned(d:vec4f)->vec4f{return vec4f(d.xyz*(255./127.)-vec3f(128./127.),d.a);}
 fn forestNativePair(albedo:texture_2d_array<f32>,normal:texture_2d_array<f32>,uv:vec2f,ux:vec2f,uy:vec2f,layer:i32,repeating:bool)->ForestSurface{
  var result:ForestSurface;
@@ -754,9 +761,9 @@ fn forestMappedNormal(geometric:vec3f,detail:vec3f,dx:vec3f,dy:vec3f,ux:vec2f,uy
    return landFinish(in.world,farNorm,farCol,diffuse,ambient,0.,select(.95,.86,isCrown));
  }
  let material=forestNativeMaterials[u32(in.nativeMaterial)];let surface=forestReadNative(material,in.leafUV,ux,uy);
- let colour=surface.pigment.rgb/max(surface.pigment.a,1e-8)*in.colour;
+ let colour=forestOwnColour(surface.pigment)*in.colour;
  let n=forestMappedNormal(geometric,surface.detail.xyz,dx,dy,ux,uy)*select(-1.,1.,front);
- let roughness=clamp(surface.detail.a/max(surface.pigment.a,1e-8),0.,1.);
+ let roughness=clamp(surface.detail.a/max(surface.pigment.a,FOREST_THINNEST_COVERAGE),0.,1.);
  // Static escape through this specimen's original leaf-area field. Terrain
  // and cloud shadows remain dynamic in landFinish; this is not a sun shadow.
  return landFinish(in.world,n,colour,max(dot(n,F.sunDir.xyz),0.)*(.35+.65*in.canopyAO),(.36+max(n.y,0.)*.25)*in.canopyAO,0.,roughness);
@@ -787,7 +794,7 @@ struct ForestLeafCoverage {@location(0)colour:vec4f,@builtin(sample_mask)mask:u3
  let material=forestNativeMaterials[u32(in.nativeMaterial)];
  let dx=dpdx(in.world);let dy=dpdy(in.world);let ux=dpdx(in.leafUV);let uy=dpdy(in.leafUV);
  let surface=forestReadNative(material,in.leafUV,ux,uy);let pigment=surface.pigment;
- var colour=pigment.rgb/max(pigment.a,1e-8)*in.colour;
+ var colour=forestOwnColour(pigment)*in.colour;
  let uvOff=in.leafUV-vec2f(.5,.5);
  let frondCurve=vec3f(uvOff.x*0.06,uvOff.y*0.05,0.0);
  let mappedN=forestMappedNormal(normalize(in.normal),surface.detail.xyz,dx,dy,ux,uy)*select(-1.,1.,front);
@@ -798,7 +805,7 @@ struct ForestLeafCoverage {@location(0)colour:vec4f,@builtin(sample_mask)mask:u3
  colour=colour*mix(vec3f(1.0),vec3f(1.10,1.14,0.80),backlit*exposure);
  let diffuse=(max(nDotL,0.)+backlit)*(.22+.78*exposure*exposure)*(.35+.65*in.canopyAO);
  let ambient=(.12+exposure*.56+abs(n.y)*.09)*in.canopyAO;
- let roughness=clamp(max(0.88,surface.detail.a/max(pigment.a,1e-8)),0.86,0.96);
+ let roughness=clamp(max(0.88,surface.detail.a/max(pigment.a,FOREST_THINNEST_COVERAGE)),0.86,0.96);
  let lit=landFinish(in.world,n,colour,diffuse,ambient,0.,roughness);
  return vec4f(lit.rgb,pigment.a);
 }

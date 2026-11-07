@@ -1,4 +1,4 @@
-import { FRAME_WGSL, ATMO_CORE_WGSL, ENV_MIPS, HULL_HOLE_LIMIT, HULL_CRATER_LIMIT } from './common.js';
+import { FRAME_WGSL, ATMO_CORE_WGSL, ENV_MIPS, HULL_HOLE_LIMIT, HULL_CRATER_LIMIT, SANE_HDR } from './common.js';
 import { SKY_RENDER_FUNCS } from './sky.js';
 import { DECK_PROFILE, DECK_SAMPLING } from './deck.js';
 import { VESSEL_RIG, VESSEL_LIGHTING, CANVAS_OPTICS } from './vessel.js';
@@ -767,7 +767,7 @@ export const CARAVEL = vesselSource(false);
 export const CARAVEL_DAMAGED = vesselSource(true);
 
 // HDR mip chain suppresses raw single-pixel sun glints in rough timber reflections.
-export const WATER_FILTER = /* wgsl */ `
+export const WATER_FILTER = SANE_HDR + /* wgsl */ `
 @group(0) @binding(0) var src: texture_2d<f32>;
 @group(0) @binding(1) var dst: texture_storage_2d<rgba16float,write>;
 @compute @workgroup_size(8,8)
@@ -780,7 +780,8 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   let c=textureLoad(src,min(base+vec2i(0,1),extent),0).rgb;
   let d=textureLoad(src,min(base+vec2i(1,1),extent),0).rgb;
   let weights=1.0/(vec4f(dot(a,vec3f(0.2126,0.7152,0.0722)),dot(b,vec3f(0.2126,0.7152,0.0722)),dot(c,vec3f(0.2126,0.7152,0.0722)),dot(d,vec3f(0.2126,0.7152,0.0722)))*0.03+1.0);
-  let color=(a*weights.x+b*weights.y+c*weights.z+d*weights.w)/dot(weights,vec4f(1.0));
+  // Infinity weighs nothing here, and nothing times infinity is NaN: one bad pixel must not reach a hull.
+  let color=saneHDR((a*weights.x+b*weights.y+c*weights.z+d*weights.w)/dot(weights,vec4f(1.0)));
   textureStore(dst,vec2i(id.xy),vec4f(color,1.0));
 }
 `;
