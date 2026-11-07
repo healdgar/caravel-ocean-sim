@@ -78,6 +78,7 @@ export function createTownShots(streets) {
       }
       if (!hit) return;
       streets.underFireCount = (streets.underFireCount ?? 0) + 1;
+      streets.underFireFrames = WATCH_FRAMES;
       streets.lastShotPoint = [...end];
       const root = Math.sqrt(joules / 1e6);
       burst(end[0], end[1], end[2], within(LANDING_BLAST_M, root * LANDING_BLAST_M.perRootMegajoule), within(LANDING_REACH_M, root * LANDING_REACH_M.perRootMegajoule));
@@ -91,6 +92,7 @@ export function createTownShots(streets) {
     // Writes the list as a uniform block and empties it, returning how many it holds. Landings first: when a great
     // many balls fly at once, a few of them are the ones not looked for.
     collect(words, floats) {
+      if (streets.underFireFrames > 0) streets.underFireFrames--;
       if (watched.size) lookAtBuildings();
       let count = 0;
       const put = ({ start, end, strike, blast, reach, seed }) => {

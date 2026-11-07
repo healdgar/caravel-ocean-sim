@@ -150,14 +150,14 @@ export function createHullAudioState(){
         return {id:'hull-slap',gain:.018+.038*Math.sqrt(strength),rate:.96,
           position:{x:event.x,y:event.y??0,z:event.z},time:event.time??time,
           peakStrength,peakClosing,
-          options:{duration:.48,attack:.014,release:.20,lowpassHz:1950,highpassHz:110},kind:'modest'};
+          options:{duration:.44,attack:.014,release:.18,lowpassHz:1950,highpassHz:110},kind:'modest'};
       }
       if(event.strength<.18||time<quietUntil||(event.kind&&event.kind!=='light')||latched)return null;
       const strength=weatherClamp(event.strength/3.5);
       latched=true;receding=0;quietUntil=time+1.4+strength*.8;
       modestLatched=true;modestReceding=0;modestQuietUntil=Math.max(modestQuietUntil,quietUntil);
       return {id:'hull-slap',gain:.027+.055*Math.sqrt(strength),rate:.93,position:event,
-        options:{duration:.66,attack:.018,release:.24,lowpassHz:1800,highpassHz:90},kind:'light'};
+        options:{duration:.46,attack:.018,release:.20,lowpassHz:1800,highpassHz:90},kind:'light'};
     },
     reset(){
       lastContact=-Infinity;revision=null;contact=null;wash=0;quietUntil=time+1;latched=false;receding=0;lastReturn=null;

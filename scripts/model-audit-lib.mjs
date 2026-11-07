@@ -486,7 +486,12 @@ export function forestPrototypeIndex(manifest, vertices, indices, prototypeId, {
   let t = 0;
   for (const [range, part] of ranges) for (let i = range.firstIndex; i < range.firstIndex + range.indexCount; i += 3) {
     for (let k = 0; k < 3; k++) {
-      const at = indices[i + k] * stride, x = vertices[at], y = vertices[at + 1], z = vertices[at + 2];
+      const at = indices[i + k] * stride;
+      let x = vertices[at], y = vertices[at + 1], z = vertices[at + 2];
+      const r2 = x * x + z * z;
+      if (part === PART.rope && p.species !== 'ceiba' && p.species !== 'mangrove' && ((y < 0.025 && r2 > 0.7) || (y < -0.01 && r2 > 0.22))) {
+        x = 0; y = 0; z = 0;
+      }
       positions[t * 9 + k * 3] = origin[0] + (c * x - s * z) * scale;
       // Roots below the soil line press flat onto it.
       positions[t * 9 + k * 3 + 1] = Math.max(origin[1], origin[1] + y * scale);

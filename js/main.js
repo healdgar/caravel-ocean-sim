@@ -1174,7 +1174,6 @@ async function main() {
             gunEffects.emitImpact({...event,id:`${shotKey}-mag-${k}`,position:[event.surfacePosition[0]+(k-2)*3.5,event.surfacePosition[1]+k*1.8,event.surfacePosition[2]+((k%2)?2.8:-2.8)],massKg:95,kind:'building'});
           }
         }
-        sceneAudio.impact({x:event.surfacePosition[0],z:event.surfacePosition[2],strength:rep?.magazineExploded?1:Math.min(1,Math.cbrt(event.mass/12))});
         gunControls?.update?.();helm?.update?.(performance.now(),true);
       }
     },
@@ -1286,7 +1285,7 @@ async function main() {
     const mine=v===playerVessel,name=event.sailor?.name??'A hand';
     if(event.type==='overboard-splash')seaEntry(event.position,{massKg:6,radiusMetres:.5,closingSpeed:5});
     if(event.type==='overboard'||event.type==='falling-from-aloft'||event.type==='fell-from-aloft'||event.type==='casualty-scream'||event.type==='mast-snap'){
-      sceneAudio.event?.(event,v.boat);
+      sceneAudio.event?.({...event,propagate:event.type==='casualty-scream'||event.type==='mast-snap'},v.boat);
     }
     if(!mine)return;
     if(event.type==='overboard'){

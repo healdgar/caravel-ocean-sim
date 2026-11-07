@@ -7,7 +7,7 @@ export const WORLD_AUDIO_ASSETS = {
     "gain": 0.28,
     "category": "scream",
     "sex": "male",
-    "seconds": 2.4
+    "seconds": 0.92
   },
   "scream-female": {
     "url": "assets/audio/world/scream-female.mp3",
@@ -16,7 +16,7 @@ export const WORLD_AUDIO_ASSETS = {
     "gain": 0.28,
     "category": "scream",
     "sex": "female",
-    "seconds": 2.4
+    "seconds": 0.78
   },
   "scream-overboard": {
     "url": "assets/audio/world/scream-overboard.mp3",
@@ -25,16 +25,16 @@ export const WORLD_AUDIO_ASSETS = {
     "gain": 0.28,
     "category": "scream",
     "sex": "male",
-    "seconds": 2.5
+    "seconds": 1.38
   },
   "crowd-panic": {
     "url": "assets/audio/world/crowd-panic.mp3",
-    "loop": false,
-    "lazyLoop": false,
-    "gain": 0.26,
+    "loop": true,
+    "lazyLoop": true,
+    "gain": 0.22,
     "category": "scream",
     "sex": null,
-    "seconds": 3.2
+    "seconds": 6
   },
   "timber-crumble": {
     "url": "assets/audio/world/timber-crumble.mp3",
@@ -79,7 +79,7 @@ export const WORLD_AUDIO_ASSETS = {
     "gain": 0.24,
     "category": "surf",
     "sex": null,
-    "seconds": 7.8
+    "seconds": 4.9
   },
   "shore-birds": {
     "url": "assets/audio/world/shore-birds.mp3",
@@ -88,7 +88,7 @@ export const WORLD_AUDIO_ASSETS = {
     "gain": 0.18,
     "category": "nature",
     "sex": null,
-    "seconds": 3.6
+    "seconds": 2.25
   },
   "town-ambience": {
     "url": "assets/audio/world/town-ambience.mp3",
@@ -97,7 +97,7 @@ export const WORLD_AUDIO_ASSETS = {
     "gain": 0.22,
     "category": "town",
     "sex": null,
-    "seconds": 7.8
+    "seconds": 6.2
   },
   "footstep-deck": {
     "url": "assets/audio/world/footstep-deck.mp3",
@@ -124,7 +124,7 @@ export const WORLD_AUDIO_ASSETS = {
     "gain": 0.26,
     "category": "weapon",
     "sex": null,
-    "seconds": 0.9
+    "seconds": 0.35
   },
   "oar-stroke": {
     "url": "assets/audio/world/oar-stroke.mp3",
@@ -151,7 +151,7 @@ export const WORLD_AUDIO_ASSETS = {
     "gain": 0.3,
     "category": "enemy-voice",
     "sex": "male",
-    "seconds": 3.2
+    "seconds": 4
   },
   "enemy-boarding-cry": {
     "url": "assets/audio/world/enemy-boarding-cry.mp3",
@@ -160,7 +160,7 @@ export const WORLD_AUDIO_ASSETS = {
     "gain": 0.3,
     "category": "enemy-voice",
     "sex": "male",
-    "seconds": 3.2
+    "seconds": 4
   },
   "enemy-surrender-cry": {
     "url": "assets/audio/world/enemy-surrender-cry.mp3",
@@ -178,7 +178,7 @@ export const WORLD_AUDIO_ASSETS = {
     "gain": 0.28,
     "category": "indigenous-voice",
     "sex": "male",
-    "seconds": 3.2
+    "seconds": 3.68
   },
   "indigenous-kalinago": {
     "url": "assets/audio/world/indigenous-kalinago.mp3",
@@ -187,7 +187,7 @@ export const WORLD_AUDIO_ASSETS = {
     "gain": 0.28,
     "category": "indigenous-voice",
     "sex": "male",
-    "seconds": 3.2
+    "seconds": 4.5
   },
   "indigenous-algonquian": {
     "url": "assets/audio/world/indigenous-algonquian.mp3",
@@ -196,7 +196,7 @@ export const WORLD_AUDIO_ASSETS = {
     "gain": 0.28,
     "category": "indigenous-voice",
     "sex": "male",
-    "seconds": 3.2
+    "seconds": 3.36
   },
   "indigenous-tupinamba": {
     "url": "assets/audio/world/indigenous-tupinamba.mp3",
@@ -205,7 +205,7 @@ export const WORLD_AUDIO_ASSETS = {
     "gain": 0.28,
     "category": "indigenous-voice",
     "sex": "male",
-    "seconds": 3.2
+    "seconds": 3.92
   },
   "indigenous-maya": {
     "url": "assets/audio/world/indigenous-maya.mp3",
@@ -214,7 +214,7 @@ export const WORLD_AUDIO_ASSETS = {
     "gain": 0.28,
     "category": "indigenous-voice",
     "sex": "female",
-    "seconds": 3.2
+    "seconds": 3.92
   },
   "lookout-sail-ho": {
     "url": "assets/audio/world/lookout-sail-ho.mp3",
@@ -223,7 +223,7 @@ export const WORLD_AUDIO_ASSETS = {
     "gain": 0.28,
     "category": "lookout",
     "sex": "male",
-    "seconds": 3.2
+    "seconds": 3.84
   },
   "lookout-land-ho": {
     "url": "assets/audio/world/lookout-land-ho.mp3",
@@ -232,7 +232,7 @@ export const WORLD_AUDIO_ASSETS = {
     "gain": 0.28,
     "category": "lookout",
     "sex": "male",
-    "seconds": 3.2
+    "seconds": 3.68
   },
   "lookout-whale-ho": {
     "url": "assets/audio/world/lookout-whale-ho.mp3",
@@ -241,6 +241,6 @@ export const WORLD_AUDIO_ASSETS = {
     "gain": 0.28,
     "category": "lookout",
     "sex": "male",
-    "seconds": 3.2
+    "seconds": 3.84
   }
 };

@@ -275,7 +275,7 @@ export function retargetForestPackToProcedural(
       totalPlaced++;
 
       const basal = proto.basalRadius ?? 1.2;
-      const sink = Math.min(0.65, Math.max(0.12, basal * scale * slope * 0.45 + 0.08));
+      const sink = Math.min(0.85, Math.max(0.16, basal * scale * slope * 0.65 + 0.12));
       const yaw = (hash32Forest(key + 3) / 4294967296) * Math.PI * 2;
       const tint = 0.92 + (hash32Forest(key + 4) / 4294967296) * 0.16;
       const climateTint = activeClimate.foliageTint ?? (isTrop ? [0.78, 1.12, 0.68] : [1.0, 1.0, 1.0]);

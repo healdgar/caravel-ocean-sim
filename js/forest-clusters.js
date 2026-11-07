@@ -223,7 +223,8 @@ export async function createForestClusters({ device, shader, module, frame, sour
     const words = new ArrayBuffer(80), bucket = make(words, B.UNIFORM, 'forest cluster bucket');
     const boundsData = new Float32Array([...info.low, info.posScale, ...info.uvLow, ...info.uvScale]);
     const bounds = make(boundsData, B.UNIFORM, 'forest cluster bounds');
-    const uniform = (listBase) => make(new Uint32Array([listBase, firstMaterials[id], p.nativeMaterials.length, samples]), B.UNIFORM, 'forest cluster bin');
+    const subRoot = (p.species === 'ceiba' || p.species === 'mangrove') ? 256 : 0;
+    const uniform = (listBase) => make(new Uint32Array([listBase, firstMaterials[id], subRoot | p.nativeMaterials.length, samples]), B.UNIFORM, 'forest cluster bin');
     const wood = uniform(id * 2 * CLUSTERS_PER_DRAW), leaf = uniform((id * 2 + 1) * CLUSTERS_PER_DRAW);
     const clusterGroup = (pipeline, hasIndices) => device.createBindGroup({
       layout: pipeline.getBindGroupLayout(3),

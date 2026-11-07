@@ -143,7 +143,7 @@ export function createGunneryAudio({play,available=()=>true,listener=()=>({x:0,y
           seenShots.add(key);shotHistory.push(key);
           if(shotHistory.length>128)seenShots.delete(shotHistory.shift());
         }
-        if(isArrowAmmo(event.ammo))return enqueue('bow-release',position,.26,false,1,{duration:.88,highpassHz:120,reach:45});
+        if(isArrowAmmo(event.ammo))return enqueue('bow-release',position,.26,false,1,{duration:.34,highpassHz:120,reach:45});
         const played=enqueue('cannon-report',position,.43,true,1,{reach:REPORT_REACH_M});
         const ear=listener();
         if(Math.hypot(position.x-ear.x,position.y-(ear.y??0),position.z-ear.z)<80&&clock-lastMechanical>.28){
@@ -160,7 +160,7 @@ export function createGunneryAudio({play,available=()=>true,listener=()=>({x:0,y
         lastImpactAt=clock;
         const rep=event.damageReport??event;
         const casualties=event.casualties??rep.casualties??0;
-        if((casualties>0||event.scream)&&clock-lastScreamAt>=0.12){
+        if((casualties>0||event.scream)&&clock-lastScreamAt>=0.35){
           lastScreamAt=clock;
           enqueue((event.sex??rep.sex)==='female'?'scream-female':'scream-male',position,.28,false,1,{reach:85});
         }
@@ -174,13 +174,13 @@ export function createGunneryAudio({play,available=()=>true,listener=()=>({x:0,y
         }
         if(kind==='water'){
           const isGrape=event.ammo==='grape';
-          return enqueue(isGrape?'hull-slap':'anchor-splash',position,isGrape?.22:.34,false,isGrape?1.35:.96,{duration:isGrape?.55:1.35,highpassHz:140});
+          return enqueue(isGrape?'hull-slap':'anchor-splash',position,isGrape?.22:.34,false,isGrape?1.35:.96,{duration:isGrape?.44:.88,release:.22,highpassHz:140});
         }
         if(kind==='rigging'||event.hitZone==='rigging'){
           if(event.mastSnap||rep.mastSnap||event.mastSpring||rep.mastSpring){
             enqueue('mast-snap',position,.42,false,(event.mastSnap||rep.mastSnap)?.95:1.12,{reach:135});
           }
-          enqueue('hull-slap',position,.28,false,1.45,{duration:.42,highpassHz:420});
+          enqueue('hull-slap',position,.28,false,1.45,{duration:.42,release:.14,highpassHz:420});
           return enqueue('timber-creak',position,.26,false,1.35,{offset:.35,duration:.65,highpassHz:300});
         }
         if(kind==='scenery'){
@@ -205,7 +205,7 @@ export function createGunneryAudio({play,available=()=>true,listener=()=>({x:0,y
         }
         // Hull / superstructure timber impact & oak splinters
         enqueue('cannon-recoil',position,.35,false,1.18,{duration:.48,lowpassHz:920});
-        enqueue('hull-slap',position,.30,false,.84,{duration:.52});
+        enqueue('hull-slap',position,.30,false,.84,{duration:.44,release:.16});
         enqueue('timber-crumble',position,.32,false,.96,{reach:95});
         return enqueue('timber-creak',position,.38,false,1.42,{offset:.10,duration:.65,highpassHz:240});
       }

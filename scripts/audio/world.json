@@ -12,7 +12,7 @@
       "text": "Aaaagh! Dios mío, I'm hit! Ugh!",
       "voiceSettings": { "stability": 0.28, "similarity_boost": 0.78, "style": 0.85, "use_speaker_boost": true },
       "filter": "highpass=f=110,lowpass=f=6800,acompressor=threshold=-16dB:ratio=2.8:attack=5:release=90,alimiter=limit=0.89",
-      "maxDuration": 2.4,
+      "maxDuration": 0.92,
       "fadeOut": 0.18,
       "gain": 0.28
     },
@@ -26,8 +26,8 @@
       "text": "Aaaah! Ay, Dios! Help me!",
       "voiceSettings": { "stability": 0.28, "similarity_boost": 0.78, "style": 0.85, "use_speaker_boost": true },
       "filter": "highpass=f=150,lowpass=f=7400,acompressor=threshold=-16dB:ratio=2.8:attack=5:release=90,alimiter=limit=0.89",
-      "maxDuration": 2.4,
-      "fadeOut": 0.18,
+      "maxDuration": 0.78,
+      "fadeOut": 0.16,
       "gain": 0.28
     },
     {
@@ -40,7 +40,7 @@
       "text": "Whoa—aaaahhh! Man overboard!",
       "voiceSettings": { "stability": 0.25, "similarity_boost": 0.75, "style": 0.88, "use_speaker_boost": true },
       "filter": "highpass=f=120,lowpass=f=6400,acompressor=threshold=-16dB:ratio=2.6:attack=5:release=90,alimiter=limit=0.88",
-      "maxDuration": 2.5,
+      "maxDuration": 1.38,
       "fadeOut": 0.22,
       "gain": 0.28
     },
@@ -48,13 +48,15 @@
       "id": "crowd-panic",
       "kind": "sfx",
       "category": "scream",
-      "seconds": 3.5,
+      "seconds": 8.0,
+      "loop": true,
       "promptInfluence": 0.45,
-      "prompt": "Outdoor historical coastal town crowd of men and women gasping, shouting, and crying out in sudden panic and alarm from distant cannon bombardment, no modern sirens or cars.",
-      "filter": "highpass=f=130,lowpass=f=5800,acompressor=threshold=-18dB:ratio=2.5:attack=10:release=120,alimiter=limit=0.86",
-      "maxDuration": 3.2,
-      "fadeOut": 0.35,
-      "gain": 0.26
+      "prompt": "Steady continuous outdoor 16th century stone harbour street crowd commotion, many distant townsfolk voices murmuring urgently, hurried leather boots running on cobblestones, steady ambient crowd bustle, no cheering or screaming.",
+      "filter": "highpass=f=120,lowpass=f=4800,acompressor=threshold=-20dB:ratio=2.8:attack=12:release=160,alimiter=limit=0.82",
+      "startSeconds": 0.4,
+      "maxDuration": 7.2,
+      "loopCrossfade": 1.2,
+      "gain": 0.22
     },
     {
       "id": "timber-crumble",
@@ -113,8 +115,9 @@
       "promptInfluence": 0.45,
       "prompt": "Seamless natural coastal ocean waves rolling in, breaking with gentle white foam surf, and lapping against a sandy and pebble shoreline, no wind roar or birds.",
       "filter": "highpass=f=50,lowpass=f=5400,acompressor=threshold=-20dB:ratio=2.0:attack=25:release=200,alimiter=limit=0.84",
-      "maxDuration": 7.8,
-      "fadeOut": 0.25,
+      "startSeconds": 1.75,
+      "maxDuration": 6.0,
+      "loopCrossfade": 1.1,
       "gain": 0.24
     },
     {
@@ -123,8 +126,9 @@
       "sourceTake": "tern-calls-01.mp3",
       "category": "nature",
       "filter": "highpass=f=450,lowpass=f=8200,acompressor=threshold=-18dB:ratio=2.2:attack=8:release=110,alimiter=limit=0.84",
-      "maxDuration": 3.6,
-      "fadeOut": 0.28,
+      "startSeconds": 1.85,
+      "maxDuration": 2.25,
+      "fadeOut": 0.35,
       "gain": 0.18
     },
     {
@@ -136,8 +140,9 @@
       "promptInfluence": 0.45,
       "prompt": "Outdoor 16th century coastal harbour port town ambience, lively distant crowd murmur, marketplace chatter, wooden crates, and dockyard carpenter hammering, no motors or modern sounds.",
       "filter": "highpass=f=85,lowpass=f=5200,acompressor=threshold=-20dB:ratio=2.2:attack=20:release=180,alimiter=limit=0.84",
-      "maxDuration": 7.8,
-      "fadeOut": 0.25,
+      "startSeconds": 0.35,
+      "maxDuration": 7.3,
+      "loopCrossfade": 1.1,
       "gain": 0.22
     },
     {
@@ -172,8 +177,8 @@
       "promptInfluence": 0.5,
       "prompt": "Traditional wooden longbow taut bowstring twang release and fast feathered arrow whoosh through the air, dry outdoor Foley.",
       "filter": "highpass=f=120,lowpass=f=7600,acompressor=threshold=-15dB:ratio=2.6:attack=2:release=70,alimiter=limit=0.88",
-      "maxDuration": 0.9,
-      "fadeOut": 0.12,
+      "maxDuration": 0.35,
+      "fadeOut": 0.08,
       "gain": 0.26
     },
     {
@@ -210,7 +215,7 @@
       "text": "¡Batería! ¡Apunten a ese navío... fuego!",
       "voiceSettings": { "stability": 0.35, "similarity_boost": 0.78, "style": 0.80, "use_speaker_boost": true },
       "filter": "highpass=f=130,lowpass=f=5600,acompressor=threshold=-16dB:ratio=2.8:attack=6:release=90,alimiter=limit=0.88",
-      "maxDuration": 3.2,
+      "maxDuration": 4.5,
       "fadeOut": 0.18,
       "gain": 0.30
     },
@@ -224,7 +229,7 @@
       "text": "¡Al abordaje! ¡A ellos, soldados, sin cuartel!",
       "voiceSettings": { "stability": 0.32, "similarity_boost": 0.78, "style": 0.85, "use_speaker_boost": true },
       "filter": "highpass=f=130,lowpass=f=5600,acompressor=threshold=-16dB:ratio=2.8:attack=6:release=90,alimiter=limit=0.88",
-      "maxDuration": 3.2,
+      "maxDuration": 4.5,
       "fadeOut": 0.18,
       "gain": 0.30
     },
@@ -238,7 +243,7 @@
       "text": "¡Arriad la bandera! ¡Nos rendimos, cuartel!",
       "voiceSettings": { "stability": 0.38, "similarity_boost": 0.78, "style": 0.75, "use_speaker_boost": true },
       "filter": "highpass=f=130,lowpass=f=5600,acompressor=threshold=-16dB:ratio=2.8:attack=6:release=90,alimiter=limit=0.88",
-      "maxDuration": 3.2,
+      "maxDuration": 4.5,
       "fadeOut": 0.18,
       "gain": 0.28
     },
@@ -252,7 +257,7 @@
       "text": "¡Mabrika, guaribo! Guakia Baba, taino.",
       "voiceSettings": { "stability": 0.45, "similarity_boost": 0.78, "style": 0.65, "use_speaker_boost": true },
       "filter": "highpass=f=120,lowpass=f=6000,acompressor=threshold=-16dB:ratio=2.6:attack=6:release=90,alimiter=limit=0.88",
-      "maxDuration": 3.2,
+      "maxDuration": 4.5,
       "fadeOut": 0.18,
       "gain": 0.28
     },
@@ -266,7 +271,7 @@
       "text": "¡Mabrika! Karifuna waitukubuli, banaré!",
       "voiceSettings": { "stability": 0.42, "similarity_boost": 0.78, "style": 0.70, "use_speaker_boost": true },
       "filter": "highpass=f=120,lowpass=f=6000,acompressor=threshold=-16dB:ratio=2.6:attack=6:release=90,alimiter=limit=0.88",
-      "maxDuration": 3.2,
+      "maxDuration": 4.5,
       "fadeOut": 0.18,
       "gain": 0.28
     },
@@ -280,7 +285,7 @@
       "text": "Wingapo, netop! Aquene, kwgw!",
       "voiceSettings": { "stability": 0.45, "similarity_boost": 0.78, "style": 0.65, "use_speaker_boost": true },
       "filter": "highpass=f=120,lowpass=f=6000,acompressor=threshold=-16dB:ratio=2.6:attack=6:release=90,alimiter=limit=0.88",
-      "maxDuration": 3.2,
+      "maxDuration": 4.5,
       "fadeOut": 0.18,
       "gain": 0.28
     },
@@ -294,7 +299,7 @@
       "text": "Pa'i, kori! Iané retama, tupinambá!",
       "voiceSettings": { "stability": 0.44, "similarity_boost": 0.78, "style": 0.68, "use_speaker_boost": true },
       "filter": "highpass=f=120,lowpass=f=6000,acompressor=threshold=-16dB:ratio=2.6:attack=6:release=90,alimiter=limit=0.88",
-      "maxDuration": 3.2,
+      "maxDuration": 4.5,
       "fadeOut": 0.18,
       "gain": 0.28
     },
@@ -308,7 +313,7 @@
       "text": "Bix a beel! Ki'imak in óol, ko'ox!",
       "voiceSettings": { "stability": 0.45, "similarity_boost": 0.78, "style": 0.65, "use_speaker_boost": true },
       "filter": "highpass=f=120,lowpass=f=6000,acompressor=threshold=-16dB:ratio=2.6:attack=6:release=90,alimiter=limit=0.88",
-      "maxDuration": 3.2,
+      "maxDuration": 4.5,
       "fadeOut": 0.18,
       "gain": 0.28
     },
@@ -322,7 +327,7 @@
       "text": "¡Vela! Sail ho! Strange sail on the horizon!",
       "voiceSettings": { "stability": 0.35, "similarity_boost": 0.80, "style": 0.82, "use_speaker_boost": true },
       "filter": "highpass=f=140,lowpass=f=5800,acompressor=threshold=-16dB:ratio=2.6:attack=5:release=90,alimiter=limit=0.88",
-      "maxDuration": 3.2,
+      "maxDuration": 4.5,
       "fadeOut": 0.18,
       "gain": 0.28
     },
@@ -336,7 +341,7 @@
       "text": "¡Tierra! Land ho! Land on the bow!",
       "voiceSettings": { "stability": 0.35, "similarity_boost": 0.80, "style": 0.82, "use_speaker_boost": true },
       "filter": "highpass=f=140,lowpass=f=5800,acompressor=threshold=-16dB:ratio=2.6:attack=5:release=90,alimiter=limit=0.88",
-      "maxDuration": 3.2,
+      "maxDuration": 4.5,
       "fadeOut": 0.18,
       "gain": 0.28
     },
@@ -350,7 +355,7 @@
       "text": "¡Ballena! There she blows! Whale off the bow!",
       "voiceSettings": { "stability": 0.35, "similarity_boost": 0.80, "style": 0.82, "use_speaker_boost": true },
       "filter": "highpass=f=140,lowpass=f=5800,acompressor=threshold=-16dB:ratio=2.6:attack=5:release=90,alimiter=limit=0.88",
-      "maxDuration": 3.2,
+      "maxDuration": 4.5,
       "fadeOut": 0.18,
       "gain": 0.28
     }

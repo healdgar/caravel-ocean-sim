@@ -213,11 +213,12 @@ export const FORT_RECORDS = Object.freeze({
     seaward: 250,
     anchorage: Object.freeze([38.7,-9.14]),
     forts: Object.freeze([
+      Object.freeze({ name: "Baluarte da Ribeira (Forte do Terreiro do Paço)", from: 1511, lat: 38.7058, lon: -9.1412, role: "waterfront", side: "north", shape: "battery", sizeM: [44,32] }),
       Object.freeze({ name: "Torre de São Vicente de Belém", from: 1514, lat: 38.69167, lon: -9.21611, role: "river", side: "north", shape: "battery", sizeM: [40,40], landmark: "torre_de_belem_manuelina" }),
       Object.freeze({ name: "Forte de São Julião da Barra", from: 1553, lat: 38.6795, lon: -9.325, role: "mouth", side: "north", shape: "star", bastions: 5, rough: true }),
       Object.freeze({ name: "Forte de São Lourenço do Bugio (Torre da Cabeça Seca)", from: 1590, lat: 38.66028, lon: -9.29861, role: "island", shape: "drum", sizeM: [62,62] }),
       Object.freeze({ name: "Torre Velha de São Sebastião da Caparica", from: 1481, lat: 38.67618, lon: -9.20969, role: "narrows", side: "south", shape: "battery" }),
-      Object.freeze({ name: "Castelo de São Jorge", from: 1492, lat: 38.71389, lon: -9.13361, role: "citadel", shape: "fitted" }),
+      Object.freeze({ name: "Castelo de São Jorge", from: 1492, lat: 38.7082, lon: -9.1342, role: "citadel", shape: "fitted" }),
     ]),
   }),
   "jamestown": Object.freeze({

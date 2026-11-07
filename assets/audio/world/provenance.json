@@ -8,10 +8,10 @@
     "voiceId": "N2lVS1w4EtoT3dr4eOWO",
     "text": "Aaaagh! Dios mío, I'm hit! Ugh!",
     "prompt": null,
-    "seconds": 2.4,
+    "seconds": 0.92,
     "sourceSha256": "61ce0b7545a012bd13f44209604bdbc9760569d261efc60b3e3497f97a222167",
-    "sha256": "8830e8944cc71d08ffd88d0179531c1652fb666dd592afeb382c17fa4807b43d",
-    "bytes": 19408
+    "sha256": "42cbb0dd3121143dd2c038119d65ceb637c7921e8bd5999bacde95e8bd16a638",
+    "bytes": 7277
   },
   {
     "id": "scream-female",
@@ -22,10 +22,10 @@
     "voiceId": "pFZP5JQG7iQjIQuC4Bku",
     "text": "Aaaah! Ay, Dios! Help me!",
     "prompt": null,
-    "seconds": 2.4,
+    "seconds": 0.78,
     "sourceSha256": "a283f4bb5115075fc5d89a8c4f6e08fcda4b11eeae9be1d27fce394b1b129467",
-    "sha256": "aee060f8971cac8c5dd6fd9c447680ed9efc13955717d738ca4fdfa37553c163",
-    "bytes": 21792
+    "sha256": "0da1d4c439e0aa0fc0b2c5b474437cb3a5ba48522d27bc9e79d7f8e57a9f2205",
+    "bytes": 7782
   },
   {
     "id": "scream-overboard",
@@ -36,10 +36,10 @@
     "voiceId": "SOYHLrjzK2X1ezoPC6cr",
     "text": "Whoa—aaaahhh! Man overboard!",
     "prompt": null,
-    "seconds": 2.5,
+    "seconds": 1.38,
     "sourceSha256": "9f8a020b5801cb3b8e6dddb6e70e385c36081884a1cf7676df5859099c775d51",
-    "sha256": "8c0b964804c73396df74b7f233e3de434111330b0ae459c5e6b2e145dd0df625",
-    "bytes": 20838
+    "sha256": "914635a3db4cd1b63a4cb2073d844bf5c29880402cac3f1c4a49f818412e73c5",
+    "bytes": 11259
   },
   {
     "id": "crowd-panic",
@@ -49,11 +49,11 @@
     "model": "eleven_text_to_sound_v2",
     "voiceId": null,
     "text": null,
-    "prompt": "Outdoor historical coastal town crowd of men and women gasping, shouting, and crying out in sudden panic and alarm from distant cannon bombardment, no modern sirens or cars.",
-    "seconds": 3.2,
-    "sourceSha256": "c998353fe967f56bb3fecaf035f16c45b0808500472a29fb84d85c873b8562e8",
-    "sha256": "931b1ad25a860af62d7f04988710079a713355345952b0c30892b1c542ea4890",
-    "bytes": 27189
+    "prompt": "Steady continuous outdoor 16th century stone harbour street crowd commotion, many distant townsfolk voices murmuring urgently, hurried leather boots running on cobblestones, steady ambient crowd bustle, no cheering or screaming.",
+    "seconds": 6,
+    "sourceSha256": "4e91092731f49af10cecd7af16b066f5a5c85bb78cedb39fdaa558c84b5c6d43",
+    "sha256": "2a4a3055f3f01dd8cae9ddbe89ba8921db621dbea5dd23291fe232fd79512212",
+    "bytes": 43628
   },
   {
     "id": "timber-crumble",
@@ -120,10 +120,10 @@
     "voiceId": null,
     "text": null,
     "prompt": "Seamless natural coastal ocean waves rolling in, breaking with gentle white foam surf, and lapping against a sandy and pebble shoreline, no wind roar or birds.",
-    "seconds": 7.8,
+    "seconds": 4.9,
     "sourceSha256": "bb1bdebdc89529b109662e70a24c0ad25d96a89d14570a696e01b88774948371",
-    "sha256": "0a3f96405cef5341f60ee52655e96feb94db27a66b0090c6a0e115cd68567c61",
-    "bytes": 64865
+    "sha256": "f7e4928306f4babc78b368021799a21fbe2ac4ac2f7ab370089847cc48096a95",
+    "bytes": 39997
   },
   {
     "id": "shore-birds",
@@ -134,10 +134,10 @@
     "voiceId": null,
     "text": null,
     "prompt": null,
-    "seconds": 3.6,
+    "seconds": 2.25,
     "sourceSha256": "34e2effc9b2b19badecc7bd5868a6f4bd44676332b85940d568869b4586d9424",
-    "sha256": "1c9a6356c276c5f229959e1cae5ac11acf7fa423c3d64cc411c6a9414c0d2465",
-    "bytes": 31330
+    "sha256": "1c473bfa106577d5caf8dbd35ad34c1199dc7e443ec25fd14814554fc2cf9132",
+    "bytes": 18904
   },
   {
     "id": "town-ambience",
@@ -148,10 +148,10 @@
     "voiceId": null,
     "text": null,
     "prompt": "Outdoor 16th century coastal harbour port town ambience, lively distant crowd murmur, marketplace chatter, wooden crates, and dockyard carpenter hammering, no motors or modern sounds.",
-    "seconds": 7.8,
+    "seconds": 6.2,
     "sourceSha256": "0819b8514febc49f39ec34f3560d835ba166c827a514b271115a7db79a1b3d4c",
-    "sha256": "83d3e37e3c2a22a754b88d2927e6979173aa0dcfd36f29eb7289710947a4cd2c",
-    "bytes": 51293
+    "sha256": "cbc788334b31f08405d3e1e0f81a149a71755830c5fe6e8e2c48a2b6765e8d50",
+    "bytes": 45600
   },
   {
     "id": "footstep-deck",
@@ -190,10 +190,10 @@
     "voiceId": null,
     "text": null,
     "prompt": "Traditional wooden longbow taut bowstring twang release and fast feathered arrow whoosh through the air, dry outdoor Foley.",
-    "seconds": 0.9,
+    "seconds": 0.35,
     "sourceSha256": "91eb7778315ef79f5317c58937dbcba6d85a284606a7883d40d80f5bc043a999",
-    "sha256": "c058a1cba216441c9c1286265f4d31fbc9703748cc4ce7e074b4cabde4dfaccc",
-    "bytes": 5300
+    "sha256": "d93ec84eefed87bfbdb019e8c5b47d8d74b4747027c3dcc21ac4a495b0f9f726",
+    "bytes": 2986
   },
   {
     "id": "oar-stroke",
@@ -232,10 +232,10 @@
     "voiceId": "nPczCjzI2devNBz1zQrb",
     "text": "¡Batería! ¡Apunten a ese navío... fuego!",
     "prompt": null,
-    "seconds": 3.2,
+    "seconds": 4,
     "sourceSha256": "f225d5da264e9f9f0f5caf8087dd7e701c0a50d95158547f1b2f52d0afc2f89b",
-    "sha256": "6b565256fc4432d365c794af5ef227bc0ffc311d43be30b5bb5ce38998197029",
-    "bytes": 26966
+    "sha256": "21b8bec46309657fc6d106c4d8e2655617eed48e4f5350b04feb890899203a5d",
+    "bytes": 34101
   },
   {
     "id": "enemy-boarding-cry",
@@ -246,10 +246,10 @@
     "voiceId": "SOYHLrjzK2X1ezoPC6cr",
     "text": "¡Al abordaje! ¡A ellos, soldados, sin cuartel!",
     "prompt": null,
-    "seconds": 3.2,
+    "seconds": 4,
     "sourceSha256": "209ceb2337320ca6927fa416a1d3a924e264b0f90966dffde81d8e61ce307ae6",
-    "sha256": "eb6418d665a4b3d7b1c0ce221b1ce07f5f0d8cdf69b0c2c555ca3c00251e5c8e",
-    "bytes": 23360
+    "sha256": "f98233aa76cffe0401e2d7e4c9c5c04adc974fd13edcc702267c6148a8c0ad7e",
+    "bytes": 28928
   },
   {
     "id": "enemy-surrender-cry",
@@ -274,10 +274,10 @@
     "voiceId": "onwK4e9ZLuTAKqWW03F9",
     "text": "¡Mabrika, guaribo! Guakia Baba, taino.",
     "prompt": null,
-    "seconds": 3.2,
+    "seconds": 3.68,
     "sourceSha256": "1d7ab302bc6ff573d22f15607dcb3e7c62323416fe86f5a61aca5dfc5907094c",
-    "sha256": "5d9a76f1a2fb7a418b3915611aeb8b2dababdae25d6f0dfe903aa89f710281a8",
-    "bytes": 22846
+    "sha256": "5791f2d549bcbdbbd7a4ec07638cc2c28ee23352ac6c442a6e525269328c9e95",
+    "bytes": 26882
   },
   {
     "id": "indigenous-kalinago",
@@ -288,10 +288,10 @@
     "voiceId": "nPczCjzI2devNBz1zQrb",
     "text": "¡Mabrika! Karifuna waitukubuli, banaré!",
     "prompt": null,
-    "seconds": 3.2,
+    "seconds": 4.5,
     "sourceSha256": "fb19007bf4044a6aee2fa3ebb3e67a6278b8bbdc485618bf6b4425d361756433",
-    "sha256": "9b2ba41579f04818f6a39a02993dccfe0e3714750dc549ef18496a5f55d2b8cb",
-    "bytes": 28509
+    "sha256": "0f160c46b99f318e3729b8910f38601786d689150f93183c16862aff3adcd1bb",
+    "bytes": 40126
   },
   {
     "id": "indigenous-algonquian",
@@ -302,10 +302,10 @@
     "voiceId": "JBFqnCBsd6RMkjVDRZzb",
     "text": "Wingapo, netop! Aquene, kwgw!",
     "prompt": null,
-    "seconds": 3.2,
+    "seconds": 3.36,
     "sourceSha256": "4e6cba4178b06afbc25895b0c731d5916b8151db5f5f3ed80be56467a184ccc1",
-    "sha256": "71e140df35b4b8880f31726b76c850d8feed2fc23b926e13a443174178d6e9c6",
-    "bytes": 22525
+    "sha256": "789ecbf926a6004ecf3526f4d434a42c827afd505063977ae9f750b5b0ebee4b",
+    "bytes": 23748
   },
   {
     "id": "indigenous-tupinamba",
@@ -316,10 +316,10 @@
     "voiceId": "N2lVS1w4EtoT3dr4eOWO",
     "text": "Pa'i, kori! Iané retama, tupinambá!",
     "prompt": null,
-    "seconds": 3.2,
+    "seconds": 3.92,
     "sourceSha256": "b1384e5f31fec420f0a5a65fd4592b6fefbf38fe5021e9bea8920e93e7e62e8c",
-    "sha256": "3107cce6a98dfb6b35818e5206068b2439b9e4a00c97daae5a9610b044923a91",
-    "bytes": 26730
+    "sha256": "4eb1558bb220ee9bd1865a03d7edc9aa5f34fbe8ecde1523278a5de9b9c5395a",
+    "bytes": 32535
   },
   {
     "id": "indigenous-maya",
@@ -330,10 +330,10 @@
     "voiceId": "Xb7hH8MSUJpSbSDYk0k2",
     "text": "Bix a beel! Ki'imak in óol, ko'ox!",
     "prompt": null,
-    "seconds": 3.2,
+    "seconds": 3.92,
     "sourceSha256": "a13c2e49178b19a77eea08c31143be01fde9874c4c82e777f68f9fcb314f1cf3",
-    "sha256": "d5cce562c2b5e7ae40daf5ea32b3a3bf6272bf69b0f63903bfeaed92a0e48166",
-    "bytes": 23277
+    "sha256": "ed4bfb6ca16581242d30197446d631d603eadf6204fb67d253705feb45bebd4e",
+    "bytes": 28298
   },
   {
     "id": "lookout-sail-ho",
@@ -344,10 +344,10 @@
     "voiceId": "IKne3meq5aSn9XLyUdCD",
     "text": "¡Vela! Sail ho! Strange sail on the horizon!",
     "prompt": null,
-    "seconds": 3.2,
+    "seconds": 3.84,
     "sourceSha256": "83aed376633735432a9551be4458fa6f9b66a44aad75faf9e39eab778c6c6076",
-    "sha256": "c2daa66a1c045cf1303a0eff2f1f80920699b1f36fb4393efe284b055ad9d269",
-    "bytes": 23467
+    "sha256": "03f60aae361f3b3d79e5370bb40789614b3b905925d379d8bba790462bc0076b",
+    "bytes": 28334
   },
   {
     "id": "lookout-land-ho",
@@ -358,10 +358,10 @@
     "voiceId": "IKne3meq5aSn9XLyUdCD",
     "text": "¡Tierra! Land ho! Land on the bow!",
     "prompt": null,
-    "seconds": 3.2,
+    "seconds": 3.68,
     "sourceSha256": "d7dcb62c7945da9e25141f896d706c4fe2fcec34ad3c46dc53734218f427c3f2",
-    "sha256": "50a03f67316dd98b7f23efe08475f5690f71d9a4c5c46f65b89bab69fae644f9",
-    "bytes": 25132
+    "sha256": "c04e3448156144e9442bec635471c961af4f7c31e6ef6a871a879cdc855d5796",
+    "bytes": 28775
   },
   {
     "id": "lookout-whale-ho",
@@ -372,9 +372,9 @@
     "voiceId": "IKne3meq5aSn9XLyUdCD",
     "text": "¡Ballena! There she blows! Whale off the bow!",
     "prompt": null,
-    "seconds": 3.2,
+    "seconds": 3.84,
     "sourceSha256": "75aef44df275f35657b9f2deb082ba720bce06196cc9bc29f0f1218eed5b87b8",
-    "sha256": "081979dfe0ee591df8dd4b1e52de3073c48df3bafa6baf385fd93bed3136c75c",
-    "bytes": 24168
+    "sha256": "71b1f14d8f6c2de294d83e61a681d0dff0b2cac677d2809fd75754fcb7b722b2",
+    "bytes": 29244
   }
 ]

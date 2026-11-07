@@ -1647,17 +1647,20 @@ export function stepFortGarrison(garrison, dt = 0, wind = 0) {
           const impulse = (1 - d / blastR) * 3.2;
           s.knockbackVx = (dirX * cosB + dirZ * sinB) * impulse;
           s.knockbackVz = (-dirX * sinB + dirZ * cosB) * impulse;
+          const wasAble = s.casualtyState !== 'fallen';
           if (d < 1.8 && (imp.strength ?? 0.5) > 0.65) {
             s.casualtyState = 'fallen';
+            if (wasAble) {
+              (garrison.audioEvents ??= []).push({
+                type: 'casualty-scream',
+                sex: s.sex ?? 'male',
+                cause: 'blast',
+                position: [s.position?.[0] ?? inst?.x ?? 0, s.position?.[1] ?? 2, s.position?.[2] ?? inst?.z ?? 0],
+              });
+            }
           } else {
             s.knockdownTimer = Math.max(s.knockdownTimer ?? 0, 1.4 + (1 - d / blastR) * 1.4);
           }
-          (garrison.audioEvents ??= []).push({
-            type: 'casualty-scream',
-            sex: s.sex ?? 'male',
-            cause: 'blast',
-            position: [s.position?.[0] ?? inst?.x ?? 0, s.position?.[1] ?? 2, s.position?.[2] ?? inst?.z ?? 0],
-          });
           s._poseReady = false;
         }
       }

@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { generateSound, resolveAudioKey } from './audio.mjs';
+import { editAudio, generateSound, resolveAudioKey, reviewWave } from './audio.mjs';
 import { paidRequest, speechRequest } from './voices.mjs';
 
 const WORKTREE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -113,39 +113,96 @@ export async function promoteWorldAudio({
         { encoding: 'utf8' }
       ).trim()
     );
-    const maxDur = recipe.maxDuration ?? rawDuration;
-    const targetDur = Math.min(rawDuration, maxDur);
-    const fadeOut = Math.min(recipe.fadeOut ?? 0.15, Math.max(0.04, targetDur * 0.25));
-    const fadeStart = Math.max(0, targetDur - fadeOut);
-    const afChain = [
-      recipe.filter,
-      `afade=t=in:st=0:d=0.015`,
-      `afade=t=out:st=${fadeStart.toFixed(3)}:d=${fadeOut.toFixed(3)}`,
-    ]
-      .filter(Boolean)
-      .join(',');
-    execFileSync('ffmpeg', [
-      '-v',
-      'error',
-      '-y',
-      '-i',
-      input,
-      '-t',
-      targetDur.toFixed(3),
-      '-map_metadata',
-      '-1',
-      '-af',
-      afChain,
-      '-ac',
-      '1',
-      '-ar',
-      '44100',
-      '-c:a',
-      'libmp3lame',
-      '-q:a',
-      '5',
-      output,
-    ]);
+    const startSec = recipe.startSeconds ?? 0;
+    const availDur = Math.max(0.1, rawDuration - startSec);
+    const maxDur = recipe.maxDuration ?? availDur;
+    const targetDur = Math.min(availDur, maxDur);
+    if (recipe.loop) {
+      const pcm = execFileSync(
+        'ffmpeg',
+        [
+          '-v',
+          'error',
+          '-i',
+          input,
+          ...(recipe.filter ? ['-af', recipe.filter] : []),
+          '-f',
+          'f32le',
+          '-ac',
+          '2',
+          '-ar',
+          '44100',
+          'pipe:1',
+        ],
+        { maxBuffer: 32 * 1024 * 1024 }
+      );
+      const endSec = Math.min(rawDuration, startSec + targetDur);
+      const crossfade = Math.min(recipe.loopCrossfade ?? 0.9, Math.max(0.15, (endSec - startSec) * 0.25));
+      const prepared = reviewWave(
+        editAudio(pcm, {
+          startSeconds: startSec,
+          endSeconds: endSec,
+          loopCrossfadeSeconds: crossfade,
+        })
+      );
+      execFileSync(
+        'ffmpeg',
+        [
+          '-v',
+          'error',
+          '-y',
+          '-f',
+          'wav',
+          '-i',
+          'pipe:0',
+          '-map_metadata',
+          '-1',
+          '-ac',
+          '1',
+          '-ar',
+          '44100',
+          '-c:a',
+          'libmp3lame',
+          '-q:a',
+          '5',
+          output,
+        ],
+        { input: prepared.wav }
+      );
+    } else {
+      const fadeOut = Math.min(recipe.fadeOut ?? 0.15, Math.max(0.04, targetDur * 0.25));
+      const fadeStart = Math.max(0, targetDur - fadeOut);
+      const afChain = [
+        recipe.filter,
+        `afade=t=in:st=0:d=0.015`,
+        `afade=t=out:st=${fadeStart.toFixed(3)}:d=${fadeOut.toFixed(3)}`,
+      ]
+        .filter(Boolean)
+        .join(',');
+      execFileSync('ffmpeg', [
+        '-v',
+        'error',
+        '-y',
+        ...(startSec > 0 ? ['-ss', startSec.toFixed(3)] : []),
+        '-i',
+        input,
+        '-t',
+        targetDur.toFixed(3),
+        '-map_metadata',
+        '-1',
+        '-af',
+        afChain,
+        '-ac',
+        '1',
+        '-ar',
+        '44100',
+        '-c:a',
+        'libmp3lame',
+        '-q:a',
+        '5',
+        output,
+      ]);
+    }
     const seconds = Number(
       execFileSync(
         'ffprobe',

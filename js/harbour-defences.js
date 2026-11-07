@@ -12,7 +12,7 @@ const CHART_MARGIN_M = 180;
 const OFF_CHART_ANY_M = 6500;
 const OFF_CHART_APPROACH_M = 20000;
 const APPROACH_ROLES = new Set(['mouth', 'narrows', 'river']);
-const FORTS_MOST = 5;
+const FORTS_MOST = 6;
 const FORT_APART_M = 150;
 const SIDE_WAYS = Object.freeze({ north: [0, -1], south: [0, 1], east: [1, 0], west: [-1, 0], northeast: [0.7, -0.7], northwest: [-0.7, -0.7], southeast: [0.7, 0.7], southwest: [-0.7, 0.7] });
 const HEIGHT_OF_SHAPE = Object.freeze({ battery: 4.4, drum: 7.4, star: 8.4, headland: 9.8, islet: 6.6, fitted: 8.6 });
@@ -150,8 +150,8 @@ function siteRecordedFort(harbour, record, region, coastIsReal, taken) {
     const citadel = record.role === 'citadel';
     if (inChart) {
       const spot = bestGroundNear(harbour, at, {
-        ...options, reach: record.rough ? 480 : 300, furthestFromWater: citadel ? 1500 : record.rough ? 170 : 300, highest: citadel ? 180 : 110,
-        commandWeight: citadel ? 0 : record.rough ? 0.8 : 0.35, nearWeight: record.rough ? 0.8 : 1.5, pointWeight: 0.15, mostRise: 16,
+        ...options, reach: record.rough ? 480 : 300, furthestFromWater: citadel ? 480 : record.rough ? 170 : 300, highest: citadel ? 42 : 110,
+        commandWeight: citadel ? 0.45 : record.rough ? 0.8 : 0.35, nearWeight: record.rough ? 0.8 : 1.5, pointWeight: 0.15, mostRise: 16,
       });
       if (spot) return { ...spot, source: 'record' };
     } else {

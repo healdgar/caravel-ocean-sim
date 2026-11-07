@@ -631,12 +631,15 @@ fn forestStruckPlace(r:ForestRoot,model:vec3f,local:vec3f,normal:vec3f,colour:ve
 }
 fn forestPlace(r:ForestRoot,rootId:u32,posLocal:vec3f,normAdj:vec3f,kind:vec2f,leafUV:vec2f,colour:vec3f,nativeMaterial:f32,vertex:u32,canopyAO:f32)->ForestVertex{
  let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
- var local=vec3f(c*posLocal.x-s*posLocal.z,posLocal.y,s*posLocal.x+c*posLocal.z)*r.rootScale.w;
- local+=forestWind(r,local,posLocal,kind.x>=3.5);
+ let r2=dot(posLocal.xz,posLocal.xz);
+ let buried=kind.x<3.5&&(forestBin.z&256u)==0u&&((posLocal.y<.025&&r2>.7)||(posLocal.y<-.01&&r2>.22));
+ let posAdj=select(posLocal,vec3f(0.),buried);
+ var local=vec3f(c*posAdj.x-s*posAdj.z,posAdj.y,s*posAdj.x+c*posAdj.z)*r.rootScale.w;
+ local+=forestWind(r,local,posAdj,kind.x>=3.5);
  var o:ForestVertex;
  o.normal=vec3f(c*normAdj.x-s*normAdj.z,normAdj.y,s*normAdj.x+c*normAdj.z);
  var tint=colour*r.yawColour.yzw;var fallen=false;
- if(r.identity.w!=0.){let struck=forestStruckPlace(r,posLocal,local,o.normal,tint,kind.x<3.5);local=struck.local;o.normal=struck.normal;tint=struck.colour;fallen=struck.fallen;}
+ if(r.identity.w!=0.){let struck=forestStruckPlace(r,posAdj,local,o.normal,tint,kind.x<3.5);local=struck.local;o.normal=struck.normal;tint=struck.colour;fallen=struck.fallen;}
  o.world=r.rootScale.xyz+local;
  // Roots below the soil line press flat onto it, leaving no fragment to cut away.
  if(!fallen){o.world.y=max(o.world.y,r.rootScale.y);}
@@ -679,8 +682,9 @@ fn forestPlace(r:ForestRoot,rootId:u32,posLocal:vec3f,normAdj:vec3f,kind:vec2f,l
 @vertex fn forestMiddleVS(@location(0)position:vec3f,@location(1)normal:vec3f,@location(2)kind:vec2f,
  @location(5)leafUV:vec2f,@location(6)colour:vec3f,@builtin(instance_index)instance:u32)->ForestVertex{
  let r=forestRoots[forestVisible[forestBin.x+instance]];let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
- let local=vec3f(c*position.x-s*position.z,position.y,s*position.x+c*position.z)*r.rootScale.w;
- var o:ForestVertex;o.world=r.rootScale.xyz+local;o.world.y=max(o.world.y,r.rootScale.y);if(r.identity.w<0.){o.world=r.rootScale.xyz+forestFallen(r,position,local);}o.normal=vec3f(c*normal.x-s*normal.z,normal.y,s*normal.x+c*normal.z);
+ let r2=dot(position.xz,position.xz);let posAdj=select(position,vec3f(0.),kind.x<3.5&&(forestBin.z&256u)==0u&&((position.y<.025&&r2>.7)||(position.y<-.01&&r2>.22)));
+ let local=vec3f(c*posAdj.x-s*posAdj.z,posAdj.y,s*posAdj.x+c*posAdj.z)*r.rootScale.w;
+ var o:ForestVertex;o.world=r.rootScale.xyz+local;o.world.y=max(o.world.y,r.rootScale.y);if(r.identity.w<0.){o.world=r.rootScale.xyz+forestFallen(r,posAdj,local);}o.normal=vec3f(c*normal.x-s*normal.z,normal.y,s*normal.x+c*normal.z);
  o.kind=kind;o.leafUV=leafUV;o.colour=colour*r.yawColour.yzw;o.nativeMaterial=-1;o.canopyAO=1.;o.coverageSeed=0u;o.pos=F.viewProj*vec4f(earthCurve(o.world-F.camPos.xyz,F.camPos.y),1);o.pos.z*=1.-f32(forestVisible[forestBin.x+instance]&63u)*2e-7;return o;
 }
 @fragment fn forestMiddleFS(in:ForestVertex)->@location(0)vec4f{
@@ -1108,8 +1112,9 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     let materialBase=0;
     const bins=m.prototypes.map(p=>{
       const firstMaterial=materialBase;materialBase+=p.nativeMaterials.length;
+      const subRoot=(p.species==='ceiba'||p.species==='mangrove')?256:0;
       return [0,1,2,...(nativeMid?[3]:[])].map(tier=>{
-        const offset=make(new Uint32Array([p.firstRoot*visibleTiers+tier*p.rootCount,firstMaterial,(tier<<16)|p.nativeMaterials.length,samples]),B.UNIFORM,'forest bin offset');
+        const offset=make(new Uint32Array([p.firstRoot*visibleTiers+tier*p.rootCount,firstMaterial,(tier<<16)|subRoot|p.nativeMaterials.length,samples]),B.UNIFORM,'forest bin offset');
         return{offset,opaque:null,leaf:null,middle:tier===1&&middlePipeline?device.createBindGroup({layout:middlePipeline.getBindGroupLayout(2),entries:[roots,visible,offset].map((buffer,binding)=>({binding,resource:{buffer}}))}):null,
           volume:tier===1&&volumePipeline?device.createBindGroup({layout:volumePipeline.getBindGroupLayout(2),entries:[roots,visible,offset].map((buffer,binding)=>({binding,resource:{buffer}}))}):null,
           impostor:tier===2&&impostor?device.createBindGroup({layout:impostor.getBindGroupLayout(2),entries:[roots,visible,offset].map((buffer,binding)=>({binding,resource:{buffer}}))}):null};

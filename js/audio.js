@@ -104,8 +104,8 @@ export function computeTownAmbienceState(arg1,arg2,arg3={}){
   const livingPeople=typeof rawPeople==='number'?rawPeople:Array.isArray(rawPeople)?rawPeople.filter(p=>p&&p.alive!==false&&!p.dead).length:0;
   const dayFactor=sunElev>2?1:sunElev>-6?0.58:0.28;
   const popFactor=weatherClamp(livingBuildings*0.035+Math.min(18,livingPeople)*0.025+0.22,0.15,1);
-  const attackedBuildings=instances.some(inst=>(inst?.damageState?.hits??0)>0||(inst?.damage?.hits??0)>0);
-  const portUnderFire=Boolean(underFire||(nearest.underFireUntil&&time<nearest.underFireUntil)||(nearest.streets?.underFireCount>0)||(nearest.streets?.fleeTimer>0)||(nearest.townsfolk?.fleeTimer>0)||attackedBuildings);
+  const streetsUnderFire=nearest.streets?.underFireFrames!==undefined?nearest.streets.underFireFrames>0:(nearest.streets?.underFireCount>0);
+  const portUnderFire=Boolean(underFire||(nearest.underFireUntil&&time<nearest.underFireUntil)||streetsUnderFire||(nearest.streets?.fleeTimer>0)||(nearest.townsfolk?.fleeTimer>0));
   const atten=1/(1+Math.max(0,bestDist-14)/68);
   const gain=weatherClamp(0.25*popFactor*dayFactor*atten,0,0.28);
   const dx=bestX-listener.x,dz=bestZ-listener.z,horiz=Math.hypot(dx,dz)||1;
@@ -363,7 +363,7 @@ export function createSceneAudio({onStatus=()=>{}}={}){
     tail.connect(level).connect(pan).connect(master);pool.add(source);
     const offset=weatherClamp(options.offset??0,0,Math.max(0,source.buffer.duration-.01));
     const duration=Math.min(source.buffer.duration-offset,Number.isFinite(options.duration)?Math.max(.02,options.duration):source.buffer.duration),seconds=duration/rate;
-    if(options.attack||options.release){
+    if((options.attack||options.release)&&typeof level.gain.setValueAtTime==='function'&&typeof level.gain.linearRampToValueAtTime==='function'){
       const at=context.currentTime,target=level.gain.value,attack=Math.min(seconds*.3,options.attack??0),release=Math.min(seconds*.8,options.release??0);
       level.gain.setValueAtTime(0,at);level.gain.linearRampToValueAtTime(target,at+attack);
       level.gain.setValueAtTime(target,at+Math.max(attack,seconds-release));level.gain.linearRampToValueAtTime(0,at+seconds);
@@ -499,7 +499,7 @@ export function createSceneAudio({onStatus=()=>{}}={}){
       anchorPosition={x:event.x??boat?.x??0,y:event.y??boat?.heave??0,z:event.z??boat?.z??0};
       if(event.type==='reel-start')anchorReeling=true;
       else if(event.type==='reel-stop'||event.type==='secured')anchorReeling=false;
-      else if(event.type==='splash')play('anchor-splash',.6,anchorPosition,1,true);
+      else if(event.type==='splash')play('anchor-splash',.6,anchorPosition,1,true,{duration:.88,release:.22});
       else if(event.type==='drop')play('anchor-release',.4,anchorPosition,1,true);
     },
     hullContact(contact){if(enabled&&!hidden&&ready)timberAudio.contact(contact);return hullAudio.contact(contact);},
@@ -524,7 +524,7 @@ export function createSceneAudio({onStatus=()=>{}}={}){
         case 'fell-from-aloft':
         case 'casualty-scream':{
           if(ev.propagate)return gunsAudio.event({...ev,type:'casualty-scream',position:p});
-          if(time-lastScreamAt<0.10)return false;
+          if(time-lastScreamAt<0.35)return false;
           lastScreamAt=time;
           const sex=ev.sex??ev.sailor?.sex??'male';
           const isOverboard=Boolean(ev.overboard||ev.type==='overboard'||ev.type==='falling-from-aloft'||ev.cause==='overboard'||ev.cause==='aloft');
@@ -598,11 +598,11 @@ export function createSceneAudio({onStatus=()=>{}}={}){
           return true;
         case 'dock-complete':
           play('cannon-rammer',.34,p,.78,true,{duration:.48});
-          play('hull-slap',.25,p,.72,true,{duration:.52,lowpassHz:540});
+          play('hull-slap',.25,p,.72,true,{duration:.44,release:.16,lowpassHz:540});
           return true;
         case 'cast-off-start':
           play('anchor-release',.28,p,1.22,true,{duration:.65});
-          play('hull-slap',.26,p,1.15,true,{duration:.62});
+          play('hull-slap',.26,p,1.15,true,{duration:.44,release:.16});
           return true;
         case 'boarding-round':{
           playSynth('sword',p,.34);
@@ -631,7 +631,7 @@ export function createSceneAudio({onStatus=()=>{}}={}){
           if(ev.disposition==='scuttle-repair'){
             play('cannon-rammer',.36,p,1.28,true,{duration:.45});
             play('timber-creak',.34,p,1.35,true,{offset:.2,duration:.85});
-            play('anchor-splash',.32,p,.88,true,{duration:1.4});
+            play('anchor-splash',.32,p,.88,true,{duration:.88,release:.22});
           }else{
             play('cannon-run-out',.28,p,1.08,true,{duration:.75});
           }
@@ -698,13 +698,21 @@ export function createSceneAudio({onStatus=()=>{}}={}){
         levels['town-ambience']=townState.underFire?townState.gain*0.35:townState.gain;
         const townLoop=loops.get('town-ambience');
         if(townLoop?.pan)townLoop.pan.pan.value=townState.pan;
-        if(townState.underFire&&time>=nextTownPanic&&townState.position){
-          play('crowd-panic',Math.min(0.32,townState.gain*1.35),townState.position,0.96+Math.random()*0.08,true,{reach:140});
-          playSynth('bell',townState.position,0.24);
-          nextTownPanic=time+3.4+Math.random()*2.5;
+        if(townState.underFire){
+          startLoop('crowd-panic',ALL_SOUNDS['crowd-panic']);
+          levels['crowd-panic']=Math.min(0.26,townState.gain*1.15);
+          const panicLoop=loops.get('crowd-panic');
+          if(panicLoop?.pan)panicLoop.pan.pan.value=townState.pan;
+          if(time>=nextTownPanic&&townState.position){
+            playSynth('bell',townState.position,0.20);
+            nextTownPanic=time+8.5+Math.random()*5.5;
+          }
+        }else{
+          levels['crowd-panic']=0;
         }
       }else{
         levels['town-ambience']=0;
+        levels['crowd-panic']=0;
       }
 
       // Native American languages at sovereign Indigenous settlements or Taíno canoes
