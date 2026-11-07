@@ -9,7 +9,7 @@ import {loadForestNativeLOD} from './forest-native-lod.js';
 import {loadForestClusters,createForestClusters,FOREST_CLUSTER_ASSETS,SUBTROPICAL_FOREST_CLUSTER_ASSETS,FOREST_CLUSTER_VERTEX_WGSL} from './forest-clusters.js';
 import {FOREST_FALL_BEARINGS,FOREST_FALL_HEIGHT_STEPS,FOREST_FALL_REST_MIN_DEG,FOREST_FALL_SECONDS,FOREST_LONG_FALLEN,FOREST_WOUND_BEARINGS,buildForestTrunkGridAsync,forestStrikesFromSave,forestStrikesToSave,forestTrunkShape,reapplyForestStrikes,strikeForestRoot,strikeForestTree} from './forest-trunks.js';
 import {FOREST_SURFACE_ASSETS,SUBTROPICAL_FOREST_SURFACE_ASSETS,chooseForestSurfaceCodec,createForestSurfaceTextures,forestMaterialOptics,loadForestSurfaceSet} from './forest-surfaces.js';
-import {loadForestVolumes,createForestVolumeResources,FOREST_VOLUME_ASSETS,SUBTROPICAL_FOREST_VOLUME_ASSETS,FOREST_VOLUME_WGSL,FOREST_VOLUME_SHELL_WGSL} from './forest-volume.js';
+import {loadForestVolumes,createForestVolumeResources,FOREST_VOLUME_ASSETS,SUBTROPICAL_FOREST_VOLUME_ASSETS,PORTUGAL_FOREST_VOLUME_ASSETS,FOREST_VOLUME_WGSL,FOREST_VOLUME_SHELL_WGSL} from './forest-volume.js';
 
 export const FOREST_ASSETS=Object.freeze({
   'manifest.json':'assets/forest-scenery/saba/manifest.json',
@@ -131,7 +131,85 @@ export const SUBTROPICAL_FOREST_ASSETS=Object.freeze({
   'mangrove-foliage-2-albedo.png':'assets/forest-scenery/subtropical/mangrove-foliage-2-albedo.png',
   'mangrove-foliage-2-normal.png':'assets/forest-scenery/subtropical/mangrove-foliage-2-normal.png',
 });
-export const FOREST_SPECIES=Object.freeze(['oak','maple','birch','elm','chestnut','palm','royal_palm','ceiba','mangrove']);
+export const PORTUGAL_FOREST_ASSETS=Object.freeze({
+  'manifest.json':'assets/forest-scenery/portugal/manifest.json',
+  'vertices.bin':'assets/forest-scenery/portugal/vertices.bin.gz',
+  'indices.bin':'assets/forest-scenery/portugal/indices.bin.gz',
+  'roots.bin':'assets/forest-scenery/portugal/roots.bin.gz',
+  'oak-veteran-bark-albedo.png':'assets/forest-scenery/portugal/oak-veteran-bark-albedo.png',
+  'oak-veteran-bark-normal.png':'assets/forest-scenery/portugal/oak-veteran-bark-normal.png',
+  'oak-veteran-bark-roughness.png':'assets/forest-scenery/portugal/oak-veteran-bark-roughness.png',
+  'oak-veteran-wounds-albedo.png':'assets/forest-scenery/portugal/oak-veteran-wounds-albedo.png',
+  'oak-veteran-wounds-normal.png':'assets/forest-scenery/portugal/oak-veteran-wounds-normal.png',
+  'oak-veteran-wounds-roughness.png':'assets/forest-scenery/portugal/oak-veteran-wounds-roughness.png',
+  'oak-veteran-foliage-0-albedo.png':'assets/forest-scenery/portugal/oak-veteran-foliage-0-albedo.png',
+  'oak-veteran-foliage-0-normal.png':'assets/forest-scenery/portugal/oak-veteran-foliage-0-normal.png',
+  'oak-veteran-foliage-1-albedo.png':'assets/forest-scenery/portugal/oak-veteran-foliage-1-albedo.png',
+  'oak-veteran-foliage-1-normal.png':'assets/forest-scenery/portugal/oak-veteran-foliage-1-normal.png',
+  'oak-veteran-foliage-2-albedo.png':'assets/forest-scenery/portugal/oak-veteran-foliage-2-albedo.png',
+  'oak-veteran-foliage-2-normal.png':'assets/forest-scenery/portugal/oak-veteran-foliage-2-normal.png',
+  'chestnut-veteran-bark-albedo.png':'assets/forest-scenery/portugal/chestnut-veteran-bark-albedo.png',
+  'chestnut-veteran-bark-normal.png':'assets/forest-scenery/portugal/chestnut-veteran-bark-normal.png',
+  'chestnut-veteran-bark-roughness.png':'assets/forest-scenery/portugal/chestnut-veteran-bark-roughness.png',
+  'chestnut-veteran-wounds-albedo.png':'assets/forest-scenery/portugal/chestnut-veteran-wounds-albedo.png',
+  'chestnut-veteran-wounds-normal.png':'assets/forest-scenery/portugal/chestnut-veteran-wounds-normal.png',
+  'chestnut-veteran-wounds-roughness.png':'assets/forest-scenery/portugal/chestnut-veteran-wounds-roughness.png',
+  'chestnut-veteran-foliage-0-albedo.png':'assets/forest-scenery/portugal/chestnut-veteran-foliage-0-albedo.png',
+  'chestnut-veteran-foliage-0-normal.png':'assets/forest-scenery/portugal/chestnut-veteran-foliage-0-normal.png',
+  'chestnut-veteran-foliage-1-albedo.png':'assets/forest-scenery/portugal/chestnut-veteran-foliage-1-albedo.png',
+  'chestnut-veteran-foliage-1-normal.png':'assets/forest-scenery/portugal/chestnut-veteran-foliage-1-normal.png',
+  'chestnut-veteran-foliage-2-albedo.png':'assets/forest-scenery/portugal/chestnut-veteran-foliage-2-albedo.png',
+  'chestnut-veteran-foliage-2-normal.png':'assets/forest-scenery/portugal/chestnut-veteran-foliage-2-normal.png',
+  'maple-veteran-bark-albedo.png':'assets/forest-scenery/portugal/maple-veteran-bark-albedo.png',
+  'maple-veteran-bark-normal.png':'assets/forest-scenery/portugal/maple-veteran-bark-normal.png',
+  'maple-veteran-bark-roughness.png':'assets/forest-scenery/portugal/maple-veteran-bark-roughness.png',
+  'maple-veteran-wounds-albedo.png':'assets/forest-scenery/portugal/maple-veteran-wounds-albedo.png',
+  'maple-veteran-wounds-normal.png':'assets/forest-scenery/portugal/maple-veteran-wounds-normal.png',
+  'maple-veteran-wounds-roughness.png':'assets/forest-scenery/portugal/maple-veteran-wounds-roughness.png',
+  'maple-veteran-foliage-0-albedo.png':'assets/forest-scenery/portugal/maple-veteran-foliage-0-albedo.png',
+  'maple-veteran-foliage-0-normal.png':'assets/forest-scenery/portugal/maple-veteran-foliage-0-normal.png',
+  'maple-veteran-foliage-1-albedo.png':'assets/forest-scenery/portugal/maple-veteran-foliage-1-albedo.png',
+  'maple-veteran-foliage-1-normal.png':'assets/forest-scenery/portugal/maple-veteran-foliage-1-normal.png',
+  'maple-veteran-foliage-2-albedo.png':'assets/forest-scenery/portugal/maple-veteran-foliage-2-albedo.png',
+  'maple-veteran-foliage-2-normal.png':'assets/forest-scenery/portugal/maple-veteran-foliage-2-normal.png',
+  'elm-veteran-bark-albedo.png':'assets/forest-scenery/portugal/elm-veteran-bark-albedo.png',
+  'elm-veteran-bark-normal.png':'assets/forest-scenery/portugal/elm-veteran-bark-normal.png',
+  'elm-veteran-bark-roughness.png':'assets/forest-scenery/portugal/elm-veteran-bark-roughness.png',
+  'elm-veteran-wounds-albedo.png':'assets/forest-scenery/portugal/elm-veteran-wounds-albedo.png',
+  'elm-veteran-wounds-normal.png':'assets/forest-scenery/portugal/elm-veteran-wounds-normal.png',
+  'elm-veteran-wounds-roughness.png':'assets/forest-scenery/portugal/elm-veteran-wounds-roughness.png',
+  'elm-veteran-foliage-0-albedo.png':'assets/forest-scenery/portugal/elm-veteran-foliage-0-albedo.png',
+  'elm-veteran-foliage-0-normal.png':'assets/forest-scenery/portugal/elm-veteran-foliage-0-normal.png',
+  'elm-veteran-foliage-1-albedo.png':'assets/forest-scenery/portugal/elm-veteran-foliage-1-albedo.png',
+  'elm-veteran-foliage-1-normal.png':'assets/forest-scenery/portugal/elm-veteran-foliage-1-normal.png',
+  'elm-veteran-foliage-2-albedo.png':'assets/forest-scenery/portugal/elm-veteran-foliage-2-albedo.png',
+  'elm-veteran-foliage-2-normal.png':'assets/forest-scenery/portugal/elm-veteran-foliage-2-normal.png',
+  'birch-veteran-bark-albedo.png':'assets/forest-scenery/portugal/birch-veteran-bark-albedo.png',
+  'birch-veteran-bark-normal.png':'assets/forest-scenery/portugal/birch-veteran-bark-normal.png',
+  'birch-veteran-bark-roughness.png':'assets/forest-scenery/portugal/birch-veteran-bark-roughness.png',
+  'birch-veteran-wounds-albedo.png':'assets/forest-scenery/portugal/birch-veteran-wounds-albedo.png',
+  'birch-veteran-wounds-normal.png':'assets/forest-scenery/portugal/birch-veteran-wounds-normal.png',
+  'birch-veteran-wounds-roughness.png':'assets/forest-scenery/portugal/birch-veteran-wounds-roughness.png',
+  'birch-veteran-foliage-0-albedo.png':'assets/forest-scenery/portugal/birch-veteran-foliage-0-albedo.png',
+  'birch-veteran-foliage-0-normal.png':'assets/forest-scenery/portugal/birch-veteran-foliage-0-normal.png',
+  'birch-veteran-foliage-1-albedo.png':'assets/forest-scenery/portugal/birch-veteran-foliage-1-albedo.png',
+  'birch-veteran-foliage-1-normal.png':'assets/forest-scenery/portugal/birch-veteran-foliage-1-normal.png',
+  'birch-veteran-foliage-2-albedo.png':'assets/forest-scenery/portugal/birch-veteran-foliage-2-albedo.png',
+  'birch-veteran-foliage-2-normal.png':'assets/forest-scenery/portugal/birch-veteran-foliage-2-normal.png',
+  'blueberry-veteran-bark-albedo.png':'assets/forest-scenery/portugal/blueberry-veteran-bark-albedo.png',
+  'blueberry-veteran-bark-normal.png':'assets/forest-scenery/portugal/blueberry-veteran-bark-normal.png',
+  'blueberry-veteran-bark-roughness.png':'assets/forest-scenery/portugal/blueberry-veteran-bark-roughness.png',
+  'blueberry-veteran-wounds-albedo.png':'assets/forest-scenery/portugal/blueberry-veteran-wounds-albedo.png',
+  'blueberry-veteran-wounds-normal.png':'assets/forest-scenery/portugal/blueberry-veteran-wounds-normal.png',
+  'blueberry-veteran-wounds-roughness.png':'assets/forest-scenery/portugal/blueberry-veteran-wounds-roughness.png',
+  'blueberry-veteran-foliage-0-albedo.png':'assets/forest-scenery/portugal/blueberry-veteran-foliage-0-albedo.png',
+  'blueberry-veteran-foliage-0-normal.png':'assets/forest-scenery/portugal/blueberry-veteran-foliage-0-normal.png',
+  'blueberry-veteran-foliage-1-albedo.png':'assets/forest-scenery/portugal/blueberry-veteran-foliage-1-albedo.png',
+  'blueberry-veteran-foliage-1-normal.png':'assets/forest-scenery/portugal/blueberry-veteran-foliage-1-normal.png',
+  'blueberry-veteran-foliage-2-albedo.png':'assets/forest-scenery/portugal/blueberry-veteran-foliage-2-albedo.png',
+  'blueberry-veteran-foliage-2-normal.png':'assets/forest-scenery/portugal/blueberry-veteran-foliage-2-normal.png',
+});
+export const FOREST_SPECIES=Object.freeze(['oak','maple','birch','elm','chestnut','palm','royal_palm','ceiba','mangrove','blueberry']);
 export const FOREST_ROOT_FLOATS=12;
 export const FOREST_VERTEX_LAYOUT=Object.freeze({arrayStride:56,attributes:[
   {shaderLocation:0,offset:0,format:'float32x3'},
@@ -274,19 +352,20 @@ async function finishForestChecks(iterator,{yieldTask,signal}={}){
 }
 export async function decodeForestSceneryAsync(manifest,streams,options){return finishForestChecks(forestGeometryChecks(manifest,streams),options);}
 function createSubtropicalNativeLod(manifest){
-  if(!Array.isArray(manifest?.prototypes)||!manifest.prototypes.some(p=>p.species==='royal_palm'||p.species==='ceiba'||p.species==='mangrove'))return null;
+  if(!Array.isArray(manifest?.prototypes)||!manifest.prototypes.some(p=>p.cohort||p.species==='royal_palm'||p.species==='ceiba'||p.species==='mangrove'))return null;
   let cursor=0;
   const prototypes=manifest.prototypes.map((p,id)=>{
     const origWoodTris=Math.floor(p.wood.indexCount/3);
     const isPalm=p.species==='royal_palm'||p.species==='palm';
-    const woodFracs=isPalm?[0.22,0.14,0.08]:[0.46,0.28,0.16],woodErrs=[0,0.08,0.22];
+    const isCohort=Boolean(p.cohort);
+    const woodFracs=isPalm?[0.22,0.14,0.08]:isCohort?[0.75,0.48,0.28]:[0.46,0.28,0.16],woodErrs=[0,0.08,0.22];
     const woodTiers=woodFracs.map((frac,tier)=>{
       const tris=Math.max(4,Math.floor(origWoodTris*frac)),indexCount=tris*3,firstIndex=cursor;
       cursor+=indexCount;
       return{tier,firstIndex,indexCount,triangles:tris,originalTriangles:origWoodTris,maximumReportedErrorMetres:woodErrs[tier]};
     });
     const origLeafQuads=Math.floor(p.leaf.indexCount/6);
-    const keepQuads=Math.max(8,Math.floor(origLeafQuads*(isPalm?0.50:0.44))),leafIndexCount=keepQuads*6,leafFirstIndex=cursor;
+    const keepQuads=Math.max(8,Math.floor(origLeafQuads*(isCohort?0.64:isPalm?0.50:0.44))),leafIndexCount=keepQuads*6,leafFirstIndex=cursor;
     cursor+=leafIndexCount;
     const leafRibbons={firstIndex:leafFirstIndex,indexCount:leafIndexCount,leafCount:keepQuads,originalFirstIndex:p.leaf.firstIndex,originalIndexCount:p.leaf.indexCount,maximumPositionErrorUpperMetres:0.04};
     const farFirstIndex=cursor,farIndexCount=p.far.indexCount;
@@ -332,17 +411,20 @@ const CERTIFIED_FOREST_STREAM_SHAS=Object.freeze({
   'vertices.bin':new Set([
     '8d70fb89316d5d842ba5d224aca99878b866c70addb578848a47783af08251d0',
     'fc1c3b64fa2f9df90a98ceaa67baccc9257090a37945fc7c6392a2a51d49e1ba',
+    '96296b66eb43b8d1a81e72e55d75443bb950b324b99da4804d9da94f4895e5b9',
   ]),
   'indices.bin':new Set([
     '2cd8ffe90fd2e0300db51caf0decd9da6b5f50cbaa2e6dd5462d8c6f8d8ce389',
     '404ec785fd2fc49e83403b8fd60890debb8e76d518d5436255ea7a1494ff5ef3',
+    '69f75971b59f9881249e095b040abba74f89c6408fee70f01a782b55fa49caea',
   ]),
   'roots.bin':new Set([
     '69bc2f787873f09944683f49e88c9bc09d8b068a33aee85453b626150050de9b',
     '5e26e551af5855219ef1ac84ef97fafeef1a4826cd94da7ff6fcda78dfed6963',
+    '7171a1d02ea10ae83e33bb21cf87538c62034cf692a9a363adf852d549eedfb2',
   ]),
 });
-export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,volumeAssets=assets===SUBTROPICAL_FOREST_ASSETS?SUBTROPICAL_FOREST_VOLUME_ASSETS:FOREST_VOLUME_ASSETS,impostorAssets,loadAtlases=true,loadVolumes=true,skipNative=false,deferNative=false,skipRoots=false,deferSurfaces=false,onManifest,onRoots}={}){
+export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,volumeAssets=assets===SUBTROPICAL_FOREST_ASSETS?SUBTROPICAL_FOREST_VOLUME_ASSETS:assets===PORTUGAL_FOREST_ASSETS?PORTUGAL_FOREST_VOLUME_ASSETS:FOREST_VOLUME_ASSETS,impostorAssets,loadAtlases=true,loadVolumes=true,skipNative=false,deferNative=false,skipRoots=false,deferSurfaces=false,onManifest,onRoots}={}){
   const load=async(n,signal)=>{forestLoadAbort(signal);if(typeof assets[n]!=='string')throw Error('Unregistered forest asset: '+n);const r=await fetchAsset(assets[n],signal?{signal}:undefined);if(!r.ok)throw Error('Forest scenery unavailable ('+r.status+'): '+n);return r;};
   const manifest=validateForestScenery(await(await load('manifest.json')).json());
   if(!globalThis.crypto?.subtle)throw Error('Forest receipt verification requires Web Crypto');
@@ -481,11 +563,17 @@ export async function createForestLeafSurfaces({device,shader,pack}){
       device.createComputePipelineAsync({label:'forest filter native coverage',layout:'auto',compute:{module:code,entryPoint:'forestSurfaceMips'}}),
     ]));
     pipelinesPromise.catch(()=>{});
+    const bitmapCache=new Map();
     const decodedMaps=await Promise.all(materials.map(async material=>{
       const entries=await Promise.all(['albedo','normal','roughnessMap'].filter(key=>material[key]).map(async kind=>{
-        const raw=pack.textures[material[kind].file];
-        const image=await createImageBitmap(new Blob([raw],{type:'image/png'}),{premultiplyAlpha:'none',colorSpaceConversion:'none'});
-        images.push(image);return[kind,image];
+        const file=material[kind].file;
+        let bmpPromise=bitmapCache.get(file);
+        if(!bmpPromise){
+          const raw=pack.textures[file];
+          bmpPromise=createImageBitmap(new Blob([raw],{type:'image/png'}),{premultiplyAlpha:'none',colorSpaceConversion:'none'}).then(img=>{images.push(img);return img;});
+          bitmapCache.set(file,bmpPromise);
+        }
+        return[kind,await bmpPromise];
       }));
       return Object.fromEntries(entries);
     }));
@@ -496,8 +584,10 @@ export async function createForestLeafSurfaces({device,shader,pack}){
       let family=families.find(f=>f.width===width&&f.height===height);
       if(!family){family={width,height,id:families.length,rows:[],levels:1+Math.floor(Math.log2(Math.max(width,height)))};families.push(family);}
       if(families.length>4)throw Error('Native forest texture dimension family limit exceeded');
-      forestMaterialOptics(optics,index,material,family.id,family.rows.length);
-      family.rows.push({maps,material});
+      const rowKey=`${material.albedo.file}:${material.normal.file}:${material.roughnessMap?.file??''}:${material.roughness}`;
+      let rowIdx=family.rows.findIndex(r=>r.rowKey===rowKey);
+      if(rowIdx<0){rowIdx=family.rows.length;family.rows.push({maps,material,rowKey});}
+      forestMaterialOptics(optics,index,material,family.id,rowIdx);
     }
     const [init,mip]=await pipelinesPromise;
     const encoder=device.createCommandEncoder({label:'forest immutable surface preparation'}),pass=encoder.beginComputePass();
@@ -650,7 +740,7 @@ fn forestPlace(r:ForestRoot,rootId:u32,posLocal:vec3f,normAdj:vec3f,kind:vec2f,l
  @location(5)leafUV:vec2f,@location(6)colour:vec3f,@location(7)nativeMaterial:f32,@builtin(instance_index)instance:u32,@builtin(vertex_index)vertex:u32)->ForestVertex{
  let r=forestRoots[forestVisible[forestBin.x+instance]];let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
  let tierId=forestBin.z>>16u;
- let isSubBroadleaf=(forestBin.z&256u)!=0u;
+ let isSubBroadleaf=(forestBin.z&768u)!=0u;
  var posLocal=position;var normAdj=normal;
  if(nativeMaterial<0.){
   if(kind.x<3.5){
@@ -1015,13 +1105,14 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     const volumeOff=typeof location!=='undefined'&&new URLSearchParams(location.search).get('forestVolume')==='off';
     const volumeForce=typeof location!=='undefined'&&new URLSearchParams(location.search).get('forestVolume')==='force';
     const isSubtropicalPack=m.prototypes.some(p=>p.species==='royal_palm'||p.species==='ceiba'||p.species==='mangrove');
+    const isCohortPack=m.prototypes.some(p=>Boolean(p.cohort));
     if(pack.volumes&&(!isSubtropicalPack||volumeForce)&&middle?.woodIndices&&mode==='auto'&&impostorMode!=='force'&&!volumeOff){
       volume=createForestVolumeResources({device,pack:pack.volumes});
       volumeShell=middle.reduced&&new URLSearchParams(typeof location==='undefined'?'':location.search).get('forestVolume')!=='ray';shellIndices=middle.indices;
       middle={...middle,indices:middle.woodIndices,prototypes:middle.woodPrototypes.map((p,id)=>({...p,lodErrorMetres:isSubtropicalPack?0.045:(volumeShell?volume.prototypes[id].samplingFootprintMetres+p.simplification.reportedErrorMetres:volume.samplingFootprints[id])}))};
     }
     if(pack.impostors&&impostorMode!=='off'&&!volume)atlas=await createForestImpostorResources({device,shader,pack:pack.impostors,forest:m});
-    const nativeMid=Boolean(nativeLod&&(middle||isSubtropicalPack)&&!atlas),commandSlots=nativeMid?8:4,visibleTiers=nativeMid?4:3;
+    const nativeMid=Boolean(nativeLod&&(middle||isSubtropicalPack||isCohortPack)&&!atlas),commandSlots=nativeMid?8:4,visibleTiers=nativeMid?4:3;
     const samplerOptions={minFilter:'linear',magFilter:'linear',mipmapFilter:'linear',maxAnisotropy:4};
     const nativeSampler=device.createSampler({...samplerOptions,addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge'});
     const nativeRepeatSampler=device.createSampler({...samplerOptions,addressModeU:'repeat',addressModeV:'repeat'});
@@ -1057,9 +1148,9 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       if(nativeMid){
         floats[base+10]=forestMiddleUpward(lp.woodTiers[1].maximumReportedErrorMetres);words[base+11]=1;
         floats[base+14]=forestMiddleUpward(lp.woodTiers[2].maximumReportedErrorMetres);words[base+15]=1;
-        const isBroadleafSub=isSubtropicalPack&&(p.species==='ceiba'||p.species==='mangrove');
-        const mid1LeafIndices=Math.max(6,Math.floor((lp.leafRibbons.indexCount/6)*(isBroadleafSub?0.45:0.36))*6);
-        const mid2LeafIndices=Math.max(6,Math.floor((lp.leafRibbons.indexCount/6)*(isBroadleafSub?0.065:0.05))*6);
+        const isBroadleafDense=Boolean(p.cohort)||(isSubtropicalPack&&(p.species==='ceiba'||p.species==='mangrove'));
+        const mid1LeafIndices=Math.max(6,Math.floor((lp.leafRibbons.indexCount/6)*(isBroadleafDense?0.56:0.36))*6);
+        const mid2LeafIndices=Math.max(6,Math.floor((lp.leafRibbons.indexCount/6)*(isBroadleafDense?0.22:0.05))*6);
         draws.set([lp.woodTiers[1].indexCount,0,lp.woodTiers[1].firstIndex,0,0],(m.prototypes.length*4+p.id*4)*5);
         draws.set([mid1LeafIndices,0,lp.leafRibbons.firstIndex,0,0],(m.prototypes.length*4+p.id*4+1)*5);
         draws.set([lp.woodTiers[2].indexCount,0,lp.woodTiers[2].firstIndex,0,0],(m.prototypes.length*4+p.id*4+2)*5);
@@ -1115,8 +1206,9 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     const bins=m.prototypes.map(p=>{
       const firstMaterial=materialBase;materialBase+=p.nativeMaterials.length;
       const subRoot=(p.species==='ceiba'||p.species==='mangrove')?256:0;
+      const closedCrown=p.cohort?512:0;
       return [0,1,2,...(nativeMid?[3]:[])].map(tier=>{
-        const offset=make(new Uint32Array([p.firstRoot*visibleTiers+tier*p.rootCount,firstMaterial,(tier<<16)|subRoot|p.nativeMaterials.length,samples]),B.UNIFORM,'forest bin offset');
+        const offset=make(new Uint32Array([p.firstRoot*visibleTiers+tier*p.rootCount,firstMaterial,(tier<<16)|closedCrown|subRoot|p.nativeMaterials.length,samples]),B.UNIFORM,'forest bin offset');
         return{offset,opaque:null,leaf:null,middle:tier===1&&middlePipeline?device.createBindGroup({layout:middlePipeline.getBindGroupLayout(2),entries:[roots,visible,offset].map((buffer,binding)=>({binding,resource:{buffer}}))}):null,
           volume:tier===1&&volumePipeline?device.createBindGroup({layout:volumePipeline.getBindGroupLayout(2),entries:[roots,visible,offset].map((buffer,binding)=>({binding,resource:{buffer}}))}):null,
           impostor:tier===2&&impostor?device.createBindGroup({layout:impostor.getBindGroupLayout(2),entries:[roots,visible,offset].map((buffer,binding)=>({binding,resource:{buffer}}))}):null};
@@ -1136,7 +1228,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       const materials=m.prototypes.flatMap(p=>p.nativeMaterials);
       const codec=chooseForestSurfaceCodec(device,typeof location==='undefined'?'auto':new URLSearchParams(location.search).get('forestSurfaces')||'auto');
       stats.surfaces={codec:null,downloadBytes:0,error:null};
-      if(!codec)return null;
+      if(!codec||isCohortPack)return null;
       let set;
       try{set=await loadForestSurfaceSet({assets:isSubtropicalPack?SUBTROPICAL_FOREST_SURFACE_ASSETS:FOREST_SURFACE_ASSETS,materials,codec,signal:abort.signal});}
       catch(error){if(abort.signal.aborted)throw error;stats.surfaces.error=error.message;return null;}
@@ -1155,7 +1247,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
         forestLoadAbort(abort.signal);
         for(const name of ['vertices.bin','indices.bin'])if(m.files[name].bytes>device.limits.maxBufferSize){nativeStatus.status='unsupported';throw Error('Native forest '+name+' exceeds device maxBufferSize ('+device.limits.maxBufferSize+')');}
         nativeStatus.status='loading';
-        const clusterSource=nativeMid&&clustersWanted?await loadForestClusters({assets:isSubtropicalPack?SUBTROPICAL_FOREST_CLUSTER_ASSETS:FOREST_CLUSTER_ASSETS,signal:abort.signal}).catch(error=>{stats.clusters={loaded:false,error:error.message};return null;}):null;
+        const clusterSource=nativeMid&&clustersWanted&&!isCohortPack?await loadForestClusters({assets:isSubtropicalPack?SUBTROPICAL_FOREST_CLUSTER_ASSETS:FOREST_CLUSTER_ASSETS,signal:abort.signal}).catch(error=>{stats.clusters={loaded:false,error:error.message};return null;}):null;
         // Clusters hold every tree's geometry. Only the subtropical far models still come from the native streams.
         // Prebuilt blocks avoid the map download and the half-float arrays. If they cannot be used, for any reason, the maps can.
         const compressed=await loadCompressedSurfaces();forestLoadAbort(abort.signal);
@@ -1222,7 +1314,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       }
     };
     const drawMiddle=pass=>{
-      if(!middlePipeline||(!forestMass&&nativeMid&&volumeShell))return;pass.setPipeline(middlePipeline);pass.setBindGroup(0,middleGroup);pass.setBindGroup(1,middleCloud);pass.setVertexBuffer(0,middle.vertices);pass.setIndexBuffer(middle.indices,'uint32');
+      if(!middlePipeline)return;pass.setPipeline(middlePipeline);pass.setBindGroup(0,middleGroup);pass.setBindGroup(1,middleCloud);pass.setVertexBuffer(0,middle.vertices);pass.setIndexBuffer(middle.indices,'uint32');
       for(const p of m.prototypes){pass.setBindGroup(2,bins[p.id][1].middle);pass.drawIndexedIndirect(commands,(p.id*4+2)*20);}
     };
     const drawVolumes=pass=>{
@@ -1265,9 +1357,10 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
           if(m.prototypes[p.id]){m.prototypes[p.id].firstRoot=p.firstRoot;m.prototypes[p.id].rootCount=p.rootCount;}
           words[base+4]=p.firstRoot;words[base+5]=p.rootCount;
           const subRoot=(p.species==='ceiba'||p.species==='mangrove')?256:0;
+          const closedCrown=p.cohort?512:0;
           for(const [tierIdx,tier]of [0,1,2,...(nativeMid?[3]:[])].entries()){
             const bin=bins[p.id]?.[tierIdx];
-            if(bin?.offset)device.queue.writeBuffer(bin.offset,0,new Uint32Array([p.firstRoot*visibleTiers+tier*p.rootCount,firstMaterial,(tier<<16)|subRoot|p.nativeMaterials.length,samples]));
+            if(bin?.offset)device.queue.writeBuffer(bin.offset,0,new Uint32Array([p.firstRoot*visibleTiers+tier*p.rootCount,firstMaterial,(tier<<16)|closedCrown|subRoot|p.nativeMaterials.length,samples]));
           }
         }
         clusters?.placeTrees();

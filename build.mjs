@@ -10,12 +10,12 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { FOREST_ASSETS, SUBTROPICAL_FOREST_ASSETS } from './js/forest-scenery.js';
+import { FOREST_ASSETS, SUBTROPICAL_FOREST_ASSETS, PORTUGAL_FOREST_ASSETS } from './js/forest-scenery.js';
 import { FOREST_IMPOSTOR_ASSETS } from './js/forest-impostor.js';
 import { FOREST_LIGHT_ASSETS } from './js/forest-light.js';
 import { FOREST_NATIVE_LOD_ASSETS } from './js/forest-native-lod.js';
-import { FOREST_VOLUME_ASSETS, SUBTROPICAL_FOREST_VOLUME_ASSETS } from './js/forest-volume.js';
-import { FOREST_MIDDLE_ASSETS, SUBTROPICAL_FOREST_MIDDLE_ASSETS } from './js/forest-middle.js';
+import { FOREST_VOLUME_ASSETS, SUBTROPICAL_FOREST_VOLUME_ASSETS, PORTUGAL_FOREST_VOLUME_ASSETS } from './js/forest-volume.js';
+import { FOREST_MIDDLE_ASSETS, SUBTROPICAL_FOREST_MIDDLE_ASSETS, PORTUGAL_FOREST_MIDDLE_ASSETS } from './js/forest-middle.js';
 import { FOREST_CLUSTER_ASSETS, SUBTROPICAL_FOREST_CLUSTER_ASSETS } from './js/forest-clusters.js';
 import { FOREST_MASS_ASSETS } from './js/forest-mass.js';
 import { FOREST_SURFACE_ASSETS, SUBTROPICAL_FOREST_SURFACE_ASSETS } from './js/forest-surfaces.js';
@@ -142,11 +142,16 @@ if(fs.existsSync(path.join(root,'assets/forest-scenery/subtropical/manifest.json
     if(fs.existsSync(path.join(root,file)))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':file.endsWith('.png')?'image/png':'application/octet-stream');
   }
 }
+if(fs.existsSync(path.join(root,'assets/forest-scenery/portugal/manifest.json'))){
+  for(const file of [...Object.values(PORTUGAL_FOREST_ASSETS),...Object.values(PORTUGAL_FOREST_VOLUME_ASSETS),...Object.values(PORTUGAL_FOREST_MIDDLE_ASSETS)]){
+    if(fs.existsSync(path.join(root,file)))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':file.endsWith('.png')?'image/png':'application/octet-stream');
+  }
+}
 const runtimeAssetBytes = new Map(), pagesAssets = new Map();
 // Keep core sailing and the native forest atlases embedded in downloads. The
 // lossless mature close-up buffers alone exceed 100 MB after base64 encoding;
 // load those optional buffers from the same versioned public asset instead.
-const externalDownloadGeometry=new Set(['assets/forest-scenery/saba/clusters/vertices.bin.gz','assets/forest-scenery/saba/clusters/indices.bin.gz','assets/forest-scenery/saba/vertices.bin.gz','assets/forest-scenery/saba/indices.bin.gz','assets/forest-scenery/saba/mass/vertices.bin.gz','assets/forest-scenery/saba/mass/indices.bin.gz','assets/forest-scenery/subtropical/vertices.bin.gz','assets/forest-scenery/subtropical/indices.bin.gz']);
+const externalDownloadGeometry=new Set(['assets/forest-scenery/saba/clusters/vertices.bin.gz','assets/forest-scenery/saba/clusters/indices.bin.gz','assets/forest-scenery/saba/vertices.bin.gz','assets/forest-scenery/saba/indices.bin.gz','assets/forest-scenery/saba/mass/vertices.bin.gz','assets/forest-scenery/saba/mass/indices.bin.gz','assets/forest-scenery/subtropical/vertices.bin.gz','assets/forest-scenery/subtropical/indices.bin.gz','assets/forest-scenery/portugal/vertices.bin.gz','assets/forest-scenery/portugal/indices.bin.gz']);
 // Both block-compressed sets are a saving for online play. Offline, the embedded maps serve instead.
 for(const file of [...Object.values(FOREST_SURFACE_ASSETS),...Object.values(SUBTROPICAL_FOREST_SURFACE_ASSETS)])if(file.endsWith('.gz'))externalDownloadGeometry.add(file);
 function runtimeAssetURL(file,mime,inlineAssets){

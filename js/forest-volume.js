@@ -25,6 +25,33 @@ export const SUBTROPICAL_FOREST_VOLUME_ASSETS=Object.freeze({
  'prototype-3-mangrove/field.rgba16f.bin.gz':'assets/forest-scenery/subtropical/volumes/prototype-3-mangrove/field.rgba16f.bin.gz',
  'prototype-3-mangrove/exposure.r8.bin.gz':'assets/forest-scenery/subtropical/volumes/prototype-3-mangrove/exposure.r8.bin.gz',
 });
+export const PORTUGAL_FOREST_VOLUME_ASSETS=Object.freeze({
+ 'manifest.json':'assets/forest-scenery/portugal/volumes/manifest.json',
+ 'prototype-0-oak-veteran/field.rgba16f.bin.gz':'assets/forest-scenery/portugal/volumes/prototype-0-oak-veteran/field.rgba16f.bin.gz',
+ 'prototype-0-oak-veteran/exposure.r8.bin.gz':'assets/forest-scenery/portugal/volumes/prototype-0-oak-veteran/exposure.r8.bin.gz',
+ 'prototype-1-chestnut-veteran/field.rgba16f.bin.gz':'assets/forest-scenery/portugal/volumes/prototype-1-chestnut-veteran/field.rgba16f.bin.gz',
+ 'prototype-1-chestnut-veteran/exposure.r8.bin.gz':'assets/forest-scenery/portugal/volumes/prototype-1-chestnut-veteran/exposure.r8.bin.gz',
+ 'prototype-2-maple-veteran/field.rgba16f.bin.gz':'assets/forest-scenery/portugal/volumes/prototype-2-maple-veteran/field.rgba16f.bin.gz',
+ 'prototype-2-maple-veteran/exposure.r8.bin.gz':'assets/forest-scenery/portugal/volumes/prototype-2-maple-veteran/exposure.r8.bin.gz',
+ 'prototype-3-elm-veteran/field.rgba16f.bin.gz':'assets/forest-scenery/portugal/volumes/prototype-3-elm-veteran/field.rgba16f.bin.gz',
+ 'prototype-3-elm-veteran/exposure.r8.bin.gz':'assets/forest-scenery/portugal/volumes/prototype-3-elm-veteran/exposure.r8.bin.gz',
+ 'prototype-4-birch-veteran/field.rgba16f.bin.gz':'assets/forest-scenery/portugal/volumes/prototype-4-birch-veteran/field.rgba16f.bin.gz',
+ 'prototype-4-birch-veteran/exposure.r8.bin.gz':'assets/forest-scenery/portugal/volumes/prototype-4-birch-veteran/exposure.r8.bin.gz',
+ 'prototype-5-blueberry-veteran/field.rgba16f.bin.gz':'assets/forest-scenery/portugal/volumes/prototype-5-blueberry-veteran/field.rgba16f.bin.gz',
+ 'prototype-5-blueberry-veteran/exposure.r8.bin.gz':'assets/forest-scenery/portugal/volumes/prototype-5-blueberry-veteran/exposure.r8.bin.gz',
+ 'prototype-6-oak-canopy/field.rgba16f.bin.gz':'assets/forest-scenery/portugal/volumes/prototype-6-oak-canopy/field.rgba16f.bin.gz',
+ 'prototype-6-oak-canopy/exposure.r8.bin.gz':'assets/forest-scenery/portugal/volumes/prototype-6-oak-canopy/exposure.r8.bin.gz',
+ 'prototype-7-chestnut-canopy/field.rgba16f.bin.gz':'assets/forest-scenery/portugal/volumes/prototype-7-chestnut-canopy/field.rgba16f.bin.gz',
+ 'prototype-7-chestnut-canopy/exposure.r8.bin.gz':'assets/forest-scenery/portugal/volumes/prototype-7-chestnut-canopy/exposure.r8.bin.gz',
+ 'prototype-8-maple-canopy/field.rgba16f.bin.gz':'assets/forest-scenery/portugal/volumes/prototype-8-maple-canopy/field.rgba16f.bin.gz',
+ 'prototype-8-maple-canopy/exposure.r8.bin.gz':'assets/forest-scenery/portugal/volumes/prototype-8-maple-canopy/exposure.r8.bin.gz',
+ 'prototype-9-elm-canopy/field.rgba16f.bin.gz':'assets/forest-scenery/portugal/volumes/prototype-9-elm-canopy/field.rgba16f.bin.gz',
+ 'prototype-9-elm-canopy/exposure.r8.bin.gz':'assets/forest-scenery/portugal/volumes/prototype-9-elm-canopy/exposure.r8.bin.gz',
+ 'prototype-10-birch-canopy/field.rgba16f.bin.gz':'assets/forest-scenery/portugal/volumes/prototype-10-birch-canopy/field.rgba16f.bin.gz',
+ 'prototype-10-birch-canopy/exposure.r8.bin.gz':'assets/forest-scenery/portugal/volumes/prototype-10-birch-canopy/exposure.r8.bin.gz',
+ 'prototype-11-blueberry-canopy/field.rgba16f.bin.gz':'assets/forest-scenery/portugal/volumes/prototype-11-blueberry-canopy/field.rgba16f.bin.gz',
+ 'prototype-11-blueberry-canopy/exposure.r8.bin.gz':'assets/forest-scenery/portugal/volumes/prototype-11-blueberry-canopy/exposure.r8.bin.gz',
+});
 const forestVolumeMaxBytes=256*1024*1024;
 const forestVolumeUint=n=>Number.isSafeInteger(n)&&n>=0;
 const forestVolumeVector=(v,n)=>Array.isArray(v)&&v.length===n&&v.every(Number.isFinite);
@@ -42,7 +69,7 @@ function forestVolumeManifest(m,forest=null){
     p.dimensionsXYZ.some(n=>!forestVolumeUint(n)||n<2||n>256)||!Number.isFinite(p.cellMetres)||p.cellMetres<=0||p.cellMetres>4||
     !forestVolumeVector(p.low,3)||!forestVolumeVector(p.high,3)||!Number.isFinite(p.samplingFootprintMetres)||p.samplingFootprintMetres<Math.sqrt(3)*p.cellMetres-1e-6||
     (forest&&(p.id!==forest.prototypes[id].id||p.species!==forest.prototypes[id].species)))throw Error('Invalid native forest volume specimen');
-   const voxels=p.dimensionsXYZ.reduce((a,b)=>a*b,1),slug=p.species.replaceAll('_','-'),stem=`prototype-${id}-${slug}/`;
+   const voxels=p.dimensionsXYZ.reduce((a,b)=>a*b,1),slug=(p.cohort?`${p.species}-${p.cohort}`:p.species).replaceAll('_','-'),stem=`prototype-${id}-${slug}/`;
    for(const [key,suffix,stride]of [['field','field.rgba16f.bin',8],['exposure','exposure.r8.bin',1]]){
     const rawEntry=p[key]??p.files?.[suffix];
     if(!forestVolumeReceipt(rawEntry)||rawEntry.bytes!==voxels*stride||!forestVolumeReceipt(rawEntry.gzip)||rawEntry.gzip.file!==stem+suffix+'.gz')throw Error('Invalid native forest volume stream: '+key);

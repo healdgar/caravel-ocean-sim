@@ -11,6 +11,11 @@ export const SUBTROPICAL_FOREST_MIDDLE_ASSETS=Object.freeze({
  'middle-vertices.bin.gz':'assets/forest-scenery/subtropical/middle/middle-vertices.bin.gz',
  'middle-indices.bin.gz':'assets/forest-scenery/subtropical/middle/middle-indices.bin.gz',
 });
+export const PORTUGAL_FOREST_MIDDLE_ASSETS=Object.freeze({
+ 'manifest.json':'assets/forest-scenery/portugal/middle/manifest.json',
+ 'middle-vertices.bin.gz':'assets/forest-scenery/portugal/middle/middle-vertices.bin.gz',
+ 'middle-indices.bin.gz':'assets/forest-scenery/portugal/middle/middle-indices.bin.gz',
+});
 const forestMiddleUint=n=>Number.isSafeInteger(n)&&n>=0;
 const forestMiddleReceipt=r=>forestMiddleUint(r?.bytes)&&r.bytes>0&&r.bytes<=256*1024*1024&&/^[a-f0-9]{64}$/.test(r.sha256??'');
 const forestMiddleSame=(a,b)=>forestMiddleReceipt(a)&&forestMiddleReceipt(b)&&a.bytes===b.bytes&&a.sha256===b.sha256;

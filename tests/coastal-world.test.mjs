@@ -58,10 +58,12 @@ import {
   FOREST_SPECIES,
   FOREST_ROOT_FLOATS,
   SUBTROPICAL_FOREST_ASSETS,
+  PORTUGAL_FOREST_ASSETS,
   loadForestScenery,
 } from '../js/forest-scenery.js';
 import {
   SUBTROPICAL_FOREST_MIDDLE_ASSETS,
+  PORTUGAL_FOREST_MIDDLE_ASSETS,
   loadForestMiddle,
 } from '../js/forest-middle.js';
 import {
@@ -1985,4 +1987,78 @@ test('Blender-audited architectural models feature per-vertex 3D AO gradients, s
     assert.ok(castIronTris >= 400, `${fortPrefab} emits lathe-turned cast-iron cannon barrels, trunnions & truck wheels (${castIronTris} tris)`);
     assert.ok(smoothCastIronTris >= 250, `${fortPrefab} cannon barrels use smooth radial lathe normals (${smoothCastIronTris} smooth tris)`);
   }
+});
+
+test('Portugal 5-tier multi-cohort forest pack loads 12 veteran+canopy prototypes and populates dense harbor-hill woodlands at Lisboa', async () => {
+  const fetchLocalAsset = async (url) => {
+    const buf = fs.readFileSync(url);
+    const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+    return {
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => ab,
+      json: async () => JSON.parse(buf.toString('utf8')),
+      blob: async () => new Blob([ab]),
+    };
+  };
+  const portugalPack = await loadForestScenery({
+    assets: PORTUGAL_FOREST_ASSETS,
+    fetchAsset: fetchLocalAsset,
+    decodeImage: async () => ({ width: 512, height: 512, close() {} }),
+  });
+  assert.equal(portugalPack.manifest.prototypes.length, 12);
+  assert.deepEqual(
+    portugalPack.manifest.prototypes.map((p) => `${p.species}:${p.cohort}`),
+    [
+      'oak:veteran',
+      'chestnut:veteran',
+      'maple:veteran',
+      'elm:veteran',
+      'birch:veteran',
+      'blueberry:veteran',
+      'oak:canopy',
+      'chestnut:canopy',
+      'maple:canopy',
+      'elm:canopy',
+      'birch:canopy',
+      'blueberry:canopy',
+    ]
+  );
+  assert.equal(portugalPack.volumes?.prototypes?.length, 12, 'Portugal pack includes 12 3D optical volume fields');
+  assert.equal(portugalPack.nativeLod?.prototypes?.length, 12, 'Portugal pack builds 12 runtime multi-tier wood & leaf-ribbon LODs');
+  const portugalMiddle = await loadForestMiddle({
+    forest: portugalPack.manifest,
+    assets: PORTUGAL_FOREST_MIDDLE_ASSETS,
+    fetchAsset: fetchLocalAsset,
+  });
+  assert.equal(portugalMiddle.prototypes.length, 12, 'Portugal middle LOD pack includes 12 3D structural branch hulls');
+
+  const { retargetForestPackToProcedural } = await import('../js/terrain.js');
+  const lisbonPack = generateProceduralCoastalPack('lisbon');
+  const groundFn = (x, z) => terrainSample(lisbonPack.heights, x, z, lisbonPack.region);
+  const retargeted = retargetForestPackToProcedural(portugalPack, lisbonPack, groundFn);
+
+  assert.ok(retargeted.manifest.rootCount >= 22000, `Expected Lisboa to place >=22,000 trees across the 5-tier Portugal woodland pack, got ${retargeted.manifest.rootCount}`);
+  const veteranRoots = retargeted.manifest.prototypes
+    .filter((p) => p.cohort === 'veteran' && p.species !== 'blueberry')
+    .reduce((acc, p) => acc + p.rootCount, 0);
+  const canopyRoots = retargeted.manifest.prototypes
+    .filter((p) => p.cohort === 'canopy' || p.species === 'blueberry')
+    .reduce((acc, p) => acc + p.rootCount, 0);
+  assert.ok(veteranRoots >= 2800, `Expected >=2,800 emergent veteran trees on Lisboa hills, got ${veteranRoots}`);
+  assert.ok(canopyRoots >= 15000, `Expected >=15,000 interlocking canopy & understory trees on Lisboa hills, got ${canopyRoots}`);
+
+  const portCx = lisbonPack.port.center.x;
+  const portCz = lisbonPack.port.center.z;
+  let near500 = 0;
+  let near1000 = 0;
+  for (let i = 0; i < retargeted.manifest.rootCount; i++) {
+    const x = retargeted.roots[i * 12];
+    const z = retargeted.roots[i * 12 + 2];
+    const d = Math.hypot(x - portCx, z - portCz);
+    if (d <= 500) near500++;
+    if (d <= 1000) near1000++;
+  }
+  assert.ok(near500 >= 2000, `Expected dense harbor-hill woodland within 500m of Lisboa port (>=2,000 trees, got ${near500})`);
+  assert.ok(near1000 >= 10000, `Expected dense harbor-hill woodland within 1,000m of Lisboa port (>=10,000 trees, got ${near1000})`);
 });

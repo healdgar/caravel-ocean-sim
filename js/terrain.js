@@ -8,10 +8,10 @@ import { createSceneryCull, GROUND_COVER_CULL, TREE_CULL } from './scenery-cull.
 import { loadCanopyScenery, excludeCanopyRoots, createCanopyRenderer, canopyInspectionURL } from './canopy-scenery.js';
 import {loadTerrainNear,terrainNearGeometry,terrainNearContains,terrainNearSample,terrainNearPatchBounds,sampleTerrainNear} from './terrain-near.js';
 import {chooseForestSurfaceCodec} from './forest-surfaces.js';
-import {loadForestScenery,createForestRenderer,FOREST_VERTEX_WGSL,FOREST_ASSETS,SUBTROPICAL_FOREST_ASSETS} from './forest-scenery.js';
+import {loadForestScenery,createForestRenderer,FOREST_VERTEX_WGSL,FOREST_ASSETS,SUBTROPICAL_FOREST_ASSETS,PORTUGAL_FOREST_ASSETS} from './forest-scenery.js';
 import {foreshorePalmPlacement} from './forest-trunks.js';
 import {loadForestMass,createForestMassRenderer,forestMiddleWoodPartition,FOREST_MASS_VERTEX_WGSL} from './forest-mass.js';
-import {loadForestMiddle,FOREST_MIDDLE_ASSETS,SUBTROPICAL_FOREST_MIDDLE_ASSETS} from './forest-middle.js';
+import {loadForestMiddle,FOREST_MIDDLE_ASSETS,SUBTROPICAL_FOREST_MIDDLE_ASSETS,PORTUGAL_FOREST_MIDDLE_ASSETS} from './forest-middle.js';
 import {bakeLandImpactDeformations} from './part-assembly.js';
 import {buildingFracturePipeline,createPortFractures} from './building-fracture.js';
 import {streetEdgeAt} from './town-streets.js';
@@ -56,6 +56,9 @@ const SPECIES_SHADE_TOLERANCE = Object.freeze({
   elm: 0.62,
   maple: 0.82,
   birch: 0.20,
+  blueberry: 0.92,
+  fir: 0.78,
+  larch: 0.18,
 });
 const SPECIES_VETERAN_AFFINITY = Object.freeze({
   ceiba: 1.45,
@@ -67,6 +70,9 @@ const SPECIES_VETERAN_AFFINITY = Object.freeze({
   elm: 1.00,
   maple: 0.88,
   birch: 0.58,
+  blueberry: 0.35,
+  fir: 1.15,
+  larch: 0.90,
 });
 
 export function retargetForestPackToProcedural(
@@ -76,6 +82,7 @@ export function retargetForestPackToProcedural(
   { isMobile = false, extraSections = [], maxRootCapacity = null, climateProfile = null } = {}
 ) {
   const protoCount = forestPack.manifest.prototypes.length;
+  const hasCohorts = forestPack.manifest.prototypes.some((p) => Boolean(p.cohort));
   const buckets = Array.from({ length: protoCount }, () => []);
   const activeClimate =
     climateProfile ??
@@ -87,16 +94,23 @@ export function retargetForestPackToProcedural(
     );
   const densityMul = Math.max(0.65, Math.min(1.38, activeClimate.canopyDensityMultiplier ?? 1.0));
   const effectiveMaxCapacity =
-    maxRootCapacity ?? (extraSections.length > 0 ? (isMobile ? 24000 : 56000) : (isMobile ? 16000 : 28000));
+    maxRootCapacity ?? (extraSections.length > 0 ? (isMobile ? 24000 : 56000) : (isMobile ? 16000 : 36000));
   const baseMaxRoots = Math.min(
     effectiveMaxCapacity,
-    Math.round((isMobile ? 4500 : 16000) * densityMul)
+    Math.round((isMobile ? 6000 : 24000) * densityMul)
   );
 
   // Build cumulative probability tables per habitat zone (coastal strand, lagoon/mangrove, upland forest)
   // and cohort (veteran emergent vs canopy/drip-line nurse matrix) matched against the loaded forestPack's species.
-  const buildSpeciesCdf = (weightMap, affinityFn = null) => {
+  const buildSpeciesCdf = (weightMap, affinityFn = null, targetCohort = null) => {
     const weights = forestPack.manifest.prototypes.map((p) => {
+      if (hasCohorts && targetCohort) {
+        if (targetCohort === 'veteran') {
+          if (p.cohort !== 'veteran' || p.species === 'blueberry') return 0;
+        } else if (targetCohort === 'canopy') {
+          if (p.cohort !== 'canopy' && !(p.species === 'blueberry' && p.cohort === 'veteran')) return 0;
+        }
+      }
       const w = weightMap?.[p.species];
       const baseW = Number.isFinite(w) && w > 0 ? w : 0;
       return affinityFn ? baseW * affinityFn(p.species) : baseW;
@@ -115,16 +129,16 @@ export function retargetForestPackToProcedural(
     return cdf;
   };
   const vetMod = (sp) => SPECIES_VETERAN_AFFINITY[sp] ?? 1.0;
-  const shadeMod = (sp) => 0.72 + 0.56 * (SPECIES_SHADE_TOLERANCE[sp] ?? 0.45);
-  const uplandCdf = buildSpeciesCdf(activeClimate.uplandForestWeights);
-  const strandCdf = buildSpeciesCdf(activeClimate.coastalStrandWeights);
-  const lagoonCdf = buildSpeciesCdf(activeClimate.lagoonMangroveWeights);
-  const uplandVetCdf = buildSpeciesCdf(activeClimate.uplandForestWeights, vetMod);
-  const strandVetCdf = buildSpeciesCdf(activeClimate.coastalStrandWeights, vetMod);
-  const lagoonVetCdf = buildSpeciesCdf(activeClimate.lagoonMangroveWeights, vetMod);
-  const uplandShadeCdf = buildSpeciesCdf(activeClimate.uplandForestWeights, shadeMod);
-  const strandShadeCdf = buildSpeciesCdf(activeClimate.coastalStrandWeights, shadeMod);
-  const lagoonShadeCdf = buildSpeciesCdf(activeClimate.lagoonMangroveWeights, shadeMod);
+  const shadeMod = (sp) => (sp === 'blueberry' ? 1.85 : 0.72 + 0.56 * (SPECIES_SHADE_TOLERANCE[sp] ?? 0.45));
+  const uplandCdf = buildSpeciesCdf(activeClimate.uplandForestWeights, null, 'canopy');
+  const strandCdf = buildSpeciesCdf(activeClimate.coastalStrandWeights, null, 'canopy');
+  const lagoonCdf = buildSpeciesCdf(activeClimate.lagoonMangroveWeights, null, 'canopy');
+  const uplandVetCdf = buildSpeciesCdf(activeClimate.uplandForestWeights, vetMod, 'veteran');
+  const strandVetCdf = buildSpeciesCdf(activeClimate.coastalStrandWeights, vetMod, 'veteran');
+  const lagoonVetCdf = buildSpeciesCdf(activeClimate.lagoonMangroveWeights, vetMod, 'veteran');
+  const uplandShadeCdf = buildSpeciesCdf(activeClimate.uplandForestWeights, shadeMod, 'canopy');
+  const strandShadeCdf = buildSpeciesCdf(activeClimate.coastalStrandWeights, shadeMod, 'canopy');
+  const lagoonShadeCdf = buildSpeciesCdf(activeClimate.lagoonMangroveWeights, shadeMod, 'canopy');
   const hasMangrove = forestPack.manifest.prototypes.some((p) => p.species === 'mangrove');
   const rootIdentityZ = -2;
 
@@ -162,20 +176,37 @@ export function retargetForestPackToProcedural(
     const seed = (region.vegetationSeed ?? 47231) >>> 0;
     if (!(biome instanceof Uint8Array) || biome.length !== maskSize * maskSize) return;
 
-    // Pre-index vegetated land cells so candidate draws target forested land directly instead of ocean water
+    const portCx = port ? port.center.x : proceduralPack.region.x;
+    const portCz = port ? port.center.z : proceduralPack.region.z;
+
+    // Pre-index vegetated land cells and stratify into harbor-framing concentric bands
+    // so that large 8192m coastal tiles concentrate dense forest stands on the visible
+    // harbor hills (0–1,950 m) instead of losing 89% of the tree budget 2–5.5 km inland.
     const validLandCells = [];
+    const nearLandCells = [];
+    const midLandCells = [];
+    const farLandCells = [];
     const drySand = beaches?.drySandMask;
     const swash = beaches?.swashMask;
+    const cellSpanM = span / maskSize;
     for (let idx = 0; idx < maskSize * maskSize; idx++) {
       if (biome[idx] < 42) continue;
       if ((drySand && drySand[idx] > 110) || (swash && swash[idx] > 64)) continue;
       validLandCells.push(idx);
+      const bi = idx % maskSize;
+      const bj = (idx / maskSize) | 0;
+      const cx = x0 + (bi + 0.5) * cellSpanM;
+      const cz = z0 + (bj + 0.5) * cellSpanM;
+      const dPort = Math.hypot(cx - portCx, cz - portCz);
+      if (dPort <= 950) nearLandCells.push(idx);
+      else if (dPort <= 1950) midLandCells.push(idx);
+      else farLandCells.push(idx);
     }
 
     const secBuckets = Array.from({ length: protoCount }, () => []);
-    const veteranSpacingFactor = isMobile ? 0.62 : 0.52;
-    const canopySpacingFactor = isMobile ? 0.34 : 0.24;
-    const vetCanopySpacingFactor = isMobile ? 0.30 : 0.21;
+    const veteranSpacingFactor = hasCohorts ? (isMobile ? 0.52 : 0.42) : (isMobile ? 0.62 : 0.52);
+    const canopySpacingFactor = hasCohorts ? (isMobile ? 0.27 : 0.19) : (isMobile ? 0.34 : 0.24);
+    const vetCanopySpacingFactor = hasCohorts ? (isMobile ? 0.24 : 0.17) : (isMobile ? 0.30 : 0.21);
     const cellSize = 20;
     const hashW = Math.ceil(span / cellSize) + 1;
     const head = new Int32Array(hashW * hashW).fill(-1);
@@ -193,8 +224,6 @@ export function retargetForestPackToProcedural(
       activeClimate.climate === 'subtropical' ||
       region.climate === 'tropical' ||
       region.climate === 'subtropical';
-    const portCx = port ? port.center.x : proceduralPack.region.x;
-    const portCz = port ? port.center.z : proceduralPack.region.z;
     const borderMargin = 0.05;
     const secHeights = secPack.heights;
     const sampleSecGround = (wx, wz) => {
@@ -288,9 +317,12 @@ export function retargetForestPackToProcedural(
         const pr = forestPack.manifest.prototypes[pid];
         let sMin;
         let sSpan;
-        if (isVeteran) {
-          sMin = 1.24 + inlandBlend * 0.44;
-          sSpan = 0.36 + inlandBlend * 0.22;
+        if (pr.species === 'blueberry') {
+          sMin = 1.35 + inlandBlend * 0.35;
+          sSpan = 0.48;
+        } else if (isVeteran || pr.cohort === 'veteran') {
+          sMin = 1.28 + inlandBlend * 0.44;
+          sSpan = 0.38 + inlandBlend * 0.22;
           if (pr.species === 'ceiba') {
             sMin = 1.30 + inlandBlend * 0.48;
             sSpan = 0.38 + inlandBlend * 0.24;
@@ -302,7 +334,7 @@ export function retargetForestPackToProcedural(
             sSpan = 0.24;
           }
         } else {
-          sMin = 1.04 + inlandBlend * 0.36;
+          sMin = 1.12 + inlandBlend * 0.36;
           sSpan = 0.38 + inlandBlend * 0.20;
           if (pr.species === 'ceiba') {
             sMin = 1.08 + inlandBlend * 0.38;
@@ -316,7 +348,8 @@ export function retargetForestPackToProcedural(
           }
         }
         const sc = sMin + uScale * sSpan;
-        return { scale: sc, crownR: (pr.crownRadius ?? 8.5) * sc, proto: pr };
+        const baseCrownR = pr.crownRadius ?? pr.crownRadiusMetres ?? 8.5;
+        return { scale: sc, crownR: baseCrownR * sc, proto: pr };
       };
 
       let { scale, crownR, proto } = computeScaleAndRadius(protoId);
@@ -439,7 +472,16 @@ export function retargetForestPackToProcedural(
 
     const drawCandidateXZ = (h1, h2) => {
       if (validLandCells.length > 0) {
-        const cellIdx = validLandCells[h1 % validLandCells.length];
+        const bandSel = (h2 >>> 24) & 255;
+        const pool =
+          bandSel < 123 && nearLandCells.length > 0
+            ? nearLandCells
+            : bandSel < 212 && midLandCells.length > 0
+              ? midLandCells
+              : farLandCells.length > 0
+                ? farLandCells
+                : validLandCells;
+        const cellIdx = pool[h1 % pool.length];
         const bi = cellIdx % maskSize;
         const bj = (cellIdx / maskSize) | 0;
         const jitterU = ((h1 >>> 16) & 65535) / 65536;
@@ -451,13 +493,13 @@ export function retargetForestPackToProcedural(
       return [x0 + (h1 / 4294967296) * span, z0 + (h2 / 4294967296) * span];
     };
 
-    // Stage 1: Veteran emergent cohort (~22% of stand) + drip-line nurse & gap satellites
-    const veteranBudget = Math.max(16, Math.round(effectiveSecMaxRoots * 0.22));
+    // Stage 1: Veteran emergent cohort (~24% of stand) + drip-line nurse & gap satellites
+    const veteranBudget = Math.max(16, Math.round(effectiveSecMaxRoots * 0.24));
     const maxVetCandidates = veteranBudget * 6;
     const baseSeed = (seed ^ 0x9e3779b9) >>> 0;
     for (
       let step = 0;
-      step < maxVetCandidates && totalPlaced < effectiveSecMaxRoots && consecutiveCollisions < 3200;
+      step < maxVetCandidates && totalPlaced < effectiveSecMaxRoots && consecutiveCollisions < 3600;
       step++
     ) {
       const h1 = hash32Forest(baseSeed + Math.imul(step, 0x9e3779b1));
@@ -468,19 +510,19 @@ export function retargetForestPackToProcedural(
 
       const vetR = rr[vetIdx];
       const baseAngle = (hash32Forest(h2 + 17) / 4294967296) * Math.PI * 2;
-      // Drip-line nurse ring (0.58..1.25 * vetR) + gap-edge canopy ring (1.35..2.05 * vetR)
-      for (let c = 0; c < 12 && totalPlaced < effectiveSecMaxRoots; c++) {
+      // Drip-line nurse ring (0.52..1.18 * vetR) + gap-edge canopy ring (1.25..1.95 * vetR)
+      for (let c = 0; c < 5 && totalPlaced < effectiveSecMaxRoots; c++) {
         const cKey = hash32Forest(h2 ^ Math.imul(c + 1, 0x27d4eb2d));
         const angle = baseAngle + c * 2.39996323 + ((cKey & 1023) / 1024 - 0.5) * 0.42;
-        const isDrip = c < 6;
-        const ringMin = isDrip ? 0.58 : 1.35;
-        const ringSpan = isDrip ? 0.67 : 0.70;
+        const isDrip = c < 3;
+        const ringMin = isDrip ? 0.52 : 1.25;
+        const ringSpan = isDrip ? 0.66 : 0.70;
         const dist = vetR * (ringMin + (((cKey >>> 10) & 1023) / 1024) * ringSpan);
         const nx = sx + Math.cos(angle) * dist;
         const nz = sz + Math.sin(angle) * dist;
         tryPlaceTree(nx, nz, cKey, true, false, isDrip);
       }
-      if (totalPlaced >= Math.round(effectiveSecMaxRoots * 0.58)) break;
+      if (totalPlaced >= Math.round(effectiveSecMaxRoots * 0.68)) break;
     }
 
     // Stage 2: Dense canopy & understory matrix cohort filling remaining stand capacity
@@ -489,7 +531,7 @@ export function retargetForestPackToProcedural(
     const canopySeed = (seed ^ 0x7f4a7c15) >>> 0;
     for (
       let step = 0;
-      step < maxCanopyCandidates && totalPlaced < effectiveSecMaxRoots && consecutiveCollisions < 5400;
+      step < maxCanopyCandidates && totalPlaced < effectiveSecMaxRoots && consecutiveCollisions < 6400;
       step++
     ) {
       const h1 = hash32Forest(canopySeed + Math.imul(step, 0x9e3779b1));
@@ -500,14 +542,14 @@ export function retargetForestPackToProcedural(
 
       const baseR = rr[rootIdx];
       const baseAngle = (hash32Forest(h2 + 19) / 4294967296) * Math.PI * 2;
-      for (let c = 0; c < 8 && totalPlaced < effectiveSecMaxRoots; c++) {
+      for (let c = 0; c < 10 && totalPlaced < effectiveSecMaxRoots; c++) {
         const cKey = hash32Forest(h2 ^ Math.imul(c + 1, 0x27d4eb2d));
         const angle = baseAngle + c * 2.39996323 + ((cKey & 1023) / 1024 - 0.5) * 0.48;
-        const ringMul = c < 4 ? 0.62 : 1.18;
+        const ringMul = c < 5 ? 0.58 : 1.12;
         const dist = baseR * ringMul * (0.85 + (((cKey >>> 10) & 1023) / 1024) * 0.36);
         const nx = sx + Math.cos(angle) * dist;
         const nz = sz + Math.sin(angle) * dist;
-        tryPlaceTree(nx, nz, cKey, true, false, c < 4);
+        tryPlaceTree(nx, nz, cKey, true, false, c < 5);
       }
     }
     secPack._cachedForestBuckets = { key: cacheKey, buckets: secBuckets };
@@ -645,6 +687,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const useSubtropicalForest=forestMixParam
     ?(forestMixParam==='subtropical'||forestMixParam==='tropical')
     :(useProcedural&&activeClimate.forestPackKind==='subtropical');
+  const usePortugalForest=forestMixParam
+    ?(forestMixParam==='portugal'||forestMixParam==='temperate')
+    :(useProcedural&&!useSubtropicalForest);
   const isMobile=typeof navigator!=='undefined'&&(/iPhone|iPad|iPod|Android/i.test(navigator.userAgent||'')||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1));
   const skipNativeForest=isMobile;
   const load=async path=>{const response=await fetch(path);if(!response.ok)throw new Error(`Saba terrain unavailable (${response.status})`);return response;};
@@ -680,8 +725,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const forestManifestPromise=new Promise(r=>{resolveForestManifest=r;});
   const forestRootsPromise=new Promise(r=>{resolveForestRoots=r;});
   const forestPromise=canopyMode==='off'?Promise.resolve(null):loadForestScenery({
-    assets:useSubtropicalForest?SUBTROPICAL_FOREST_ASSETS:FOREST_ASSETS,
-    skipNative:skipNativeForest&&!useSubtropicalForest,
+    assets:useSubtropicalForest?SUBTROPICAL_FOREST_ASSETS:usePortugalForest?PORTUGAL_FOREST_ASSETS:FOREST_ASSETS,
+    skipNative:skipNativeForest&&!useSubtropicalForest&&!usePortugalForest,
     deferNative:!skipNativeForest&&useProcedural&&!useSubtropicalForest,
     skipRoots:useProcedural,
     deferSurfaces:Boolean(chooseForestSurfaceCodec(device,search.get('forestSurfaces')||'auto')),
@@ -699,16 +744,16 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // This is a new optional asset, never an alias of the rejected crown pack.
   // Missing/unqualified transport retains the existing native/atlas forest.
   const forestMassPromise=forestManifestPromise.then(forestManifest=>{
-    if(!forestManifest||forestMassMode==='off'||useSubtropicalForest){resolveMassManifest(null);return null;}
+    if(!forestManifest||forestMassMode==='off'||useSubtropicalForest||usePortugalForest){resolveMassManifest(null);return null;}
     return loadForestMass({forest:forestManifest,rootsPromise:massOnly?null:forestRootsPromise,manifestOnly:massOnly,onManifest:resolveMassManifest}).catch(error=>{forestMassFailure=error.message;resolveMassManifest(null);return null;});
   });
   const forestMiddlePromise=Promise.all([forestManifestPromise,massManifestPromise]).then(async([forestManifest,massManifest])=>{
-    if(!forestManifest||(!massManifest&&!(useSubtropicalForest&&forceSubtropicalVolume))||(useSubtropicalForest&&!forceSubtropicalVolume)||forestAtlasDebug)return null;
+    if(!forestManifest||(!massManifest&&!usePortugalForest&&!(useSubtropicalForest&&forceSubtropicalVolume))||(useSubtropicalForest&&!forceSubtropicalVolume)||forestAtlasDebug)return null;
     try{
       const middle=await loadForestMiddle({
         forest:forestManifest,
         mass:massManifest,
-        assets:useSubtropicalForest?SUBTROPICAL_FOREST_MIDDLE_ASSETS:FOREST_MIDDLE_ASSETS,
+        assets:useSubtropicalForest?SUBTROPICAL_FOREST_MIDDLE_ASSETS:usePortugalForest?PORTUGAL_FOREST_MIDDLE_ASSETS:FOREST_MIDDLE_ASSETS,
       });
       if(middle?.manifest.recipe.leafShading==='field'){
         const forest=await forestRootsPromise;
