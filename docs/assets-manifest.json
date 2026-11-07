@@ -134,6 +134,11 @@
     "bytes": 1011220,
     "sha256": "63615c55233de33a9446433b59d148040e4d5efc46b3af7fc5506e8887ce3ab1"
   },
+  "assets/crew/captain.glb": {
+    "url": "assets/crew/captain.2744724b19b2c40c.glb",
+    "bytes": 996700,
+    "sha256": "2744724b19b2c40c8bd4cf9c93c546fa83d8f3951997fff816f4ab29effd5afe"
+  },
   "assets/crew/sailor-classic.glb": {
     "url": "assets/crew/sailor-classic.771be23ecc0c7f5a.glb",
     "bytes": 995276,

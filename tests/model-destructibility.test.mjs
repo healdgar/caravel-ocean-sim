@@ -52,6 +52,7 @@ const KNOWN_CREW_GLBS = new Set([
   'assets/crew/sailor-female.glb',
   'assets/crew/sailor-classic.glb',
   'assets/crew/sailor-female-classic.glb',
+  'assets/crew/captain.glb',
 ]);
 
 const KNOWN_WILDLIFE_GLBS = new Set([
@@ -81,6 +82,14 @@ test('every .glb asset on disk and in build.mjs is registered in a destructible 
       assert.ok(
         KNOWN_CREW_GLBS.has(glb),
         `Crew asset ${glb} must be registered in the crew wound/casualty pipeline`,
+      );
+      continue;
+    }
+    if (glb.startsWith('assets/ports/1550/')) {
+      const prefabId = path.basename(glb, '.glb');
+      assert.ok(
+        prefabId in PORT_PREFABS,
+        `Port building GLB ${glb} must correspond to a destructible prefab in PORT_PREFABS (js/coastal-world.js)`,
       );
       continue;
     }
