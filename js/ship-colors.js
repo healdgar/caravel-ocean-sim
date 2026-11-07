@@ -8,6 +8,8 @@ import { shipMastSpecs } from './ship-fracture.js';
 import { vesselHull, modelDeck, modelDeckWidth } from './hull.js';
 import { RIG_MASTS, mastPoint } from './rigging.js';
 import { SAIL_PLAN, createLateenPoses, lateenYardPoint, lateenClothPoint } from './lateen.js';
+import { VICTORY_MASTS, VICTORY_SAILS, victoryMastPoint } from './models/victory.js';
+import { victoryPose, victoryYardPoint } from './victory-motion.js';
 import { ADDITIONAL_DESIGNS } from './models/additional.js';
 import { ROWING_DESIGNS } from './models/rowing.js';
 import { LATER_SAIL_DESIGNS } from './models/later-sail.js';
@@ -223,7 +225,7 @@ struct ColorsVertexOut {
     let world = P.origin.xyz + P.right.xyz * localPos.x + P.up.xyz * localPos.y + P.aft.xyz * localPos.z;
     let nWorld = normalize(P.right.xyz * norm.x + P.up.xyz * norm.y + P.aft.xyz * norm.z);
     var out: ColorsVertexOut;
-    out.position = F.viewProj * vec4f(earthCurve(world - F.camPos.xyz, F.camPos.y), 1.0);
+    out.position = F.viewProj * vec4f(world - F.camPos.xyz, 1.0);
     out.world = world;
     out.normal = nWorld;
     out.uvMode = vec4f(u, v, mode, P.ensignBase.w);
@@ -295,9 +297,10 @@ struct ColorsVertexOut {
       - vec3f(0.0, sag * sy, 0.0);
 
     let dWave = cos(phase) * 0.85 * u;
-    let nWorld = normalize(sideDir * select(1.0, -1.0, norm.x < 0.0) - streamDir * dWave * 0.32 + vec3f(0.0, 0.12, 0.0));
+    let faceSign = select(1.0, -1.0, norm.x < 0.0);
+    let nWorld = normalize(sideDir * faceSign - streamDir * dWave * faceSign * 0.32 + vec3f(0.0, 0.12, 0.0));
     var out: ColorsVertexOut;
-    out.position = F.viewProj * vec4f(earthCurve(world - F.camPos.xyz, F.camPos.y), 1.0);
+    out.position = F.viewProj * vec4f(world - F.camPos.xyz, 1.0);
     out.world = world;
     out.normal = nWorld;
     out.uvMode = vec4f(u, v, mode, P.ensignBase.w);
@@ -307,21 +310,22 @@ struct ColorsVertexOut {
   let world = P.origin.xyz + P.right.xyz * localPos.x + P.up.xyz * localPos.y + P.aft.xyz * localPos.z;
   let nWorld = normalize(P.right.xyz * localNorm.x + P.up.xyz * localNorm.y + P.aft.xyz * localNorm.z);
   var out: ColorsVertexOut;
-  out.position = F.viewProj * vec4f(earthCurve(world - F.camPos.xyz, F.camPos.y), 1.0);
+  out.position = F.viewProj * vec4f(world - F.camPos.xyz, 1.0);
   out.world = world;
   out.normal = nWorld;
   out.uvMode = vec4f(u, v, mode, P.ensignBase.w);
   return out;
 }
 
-fn evalEnsignColor(u: f32, v: f32, code: i32, isPennant: bool) -> vec3f {
+fn evalEnsignColor(u: f32, v: f32, code: i32, isPennant: bool, weaveFade: f32) -> vec3f {
   let cx = u - 0.46;
   let cy = v - 0.50;
-  let weave = 0.96 + 0.04 * sin(u * 140.0) * sin(v * 95.0);
+  let weave = 1.0 + 0.04 * weaveFade * sin(u * 140.0) * sin(v * 95.0);
 
   // Border hem shading
   let border = min(min(u, 1.0 - u), min(v, 1.0 - v));
   let hem = smoothstep(0.0, 0.025, border);
+  let hemShade = 0.90 + 0.10 * hem;
 
   if (code == 8) {
     // White Flag of Surrender / Truce
@@ -349,7 +353,7 @@ fn evalEnsignColor(u: f32, v: f32, code: i32, isPennant: bool) -> vec3f {
     if (r < 0.145 + ray) {
       col = vec3f(0.86, 0.64, 0.16);
     }
-    return col * weave * (0.90 + 0.10 * hem);
+    return col * weave * hemShade;
   }
   if (code == 7) {
     // Blood Flag (Sans Quartier — solid crimson)
@@ -361,7 +365,7 @@ fn evalEnsignColor(u: f32, v: f32, code: i32, isPennant: bool) -> vec3f {
     if (isPennant) {
       let stripe = step(0.38, abs(v - 0.5));
       col = mix(col, vec3f(0.84, 0.82, 0.76), stripe * 0.7);
-      return col * weave;
+      return col * weave * hemShade;
     }
     // Skull cranium + jaw
     let sx = (u - 0.46) * 1.45;
@@ -385,7 +389,7 @@ fn evalEnsignColor(u: f32, v: f32, code: i32, isPennant: bool) -> vec3f {
     if (skull || bones) {
       col = vec3f(0.88, 0.86, 0.80);
     }
-    return col * weave;
+    return col * weave * hemShade;
   }
   if (code == 2) {
     // Castile / Spain — White field with crimson ragged Cross of Burgundy (saltire)
@@ -399,7 +403,7 @@ fn evalEnsignColor(u: f32, v: f32, code: i32, isPennant: bool) -> vec3f {
     if (arm1 < 0.055 + notch1 || arm2 < 0.055 + notch2) {
       col = vec3f(0.66, 0.07, 0.08);
     }
-    return col * weave;
+    return col * weave * hemShade;
   }
   if (code == 3) {
     // Kingdom of France — Royal blue field, white cross, gold fleurs-de-lis
@@ -414,7 +418,7 @@ fn evalEnsignColor(u: f32, v: f32, code: i32, isPennant: bool) -> vec3f {
         col = vec3f(0.82, 0.65, 0.14);
       }
     }
-    return col * weave;
+    return col * weave * hemShade;
   }
   if (code == 4) {
     // Vizcaya / Basque — Crimson field with white saltire & green cross
@@ -427,7 +431,7 @@ fn evalEnsignColor(u: f32, v: f32, code: i32, isPennant: bool) -> vec3f {
     if (abs(u - 0.48) < 0.055 || abs(v - 0.50) < 0.085) {
       col = vec3f(0.89, 0.87, 0.82);
     }
-    return col * weave;
+    return col * weave * hemShade;
   }
   if (code == 5) {
     // England — White field with red St. George's Cross
@@ -435,7 +439,7 @@ fn evalEnsignColor(u: f32, v: f32, code: i32, isPennant: bool) -> vec3f {
     if (abs(u - 0.46) < 0.065 || abs(v - 0.50) < 0.10) {
       col = vec3f(0.68, 0.07, 0.08);
     }
-    return col * weave;
+    return col * weave * hemShade;
   }
 
   // Default (code == 1): Kingdom of Portugal — White field, crimson Order of Christ cross,
@@ -467,7 +471,7 @@ fn evalEnsignColor(u: f32, v: f32, code: i32, isPennant: bool) -> vec3f {
       }
     }
   }
-  return col * weave;
+  return col * weave * hemShade;
 }
 
 @fragment fn fs(v: ColorsVertexOut) -> @location(0) vec4f {
@@ -475,6 +479,7 @@ fn evalEnsignColor(u: f32, v: f32, code: i32, isPennant: bool) -> vec3f {
   let eye = normalize(F.camPos.xyz - v.world);
   let mode = v.uvMode.z;
   let code = i32(round(v.uvMode.w));
+  let weaveFade = 1.0 - smoothstep(0.35, 1.2, max(fwidth(v.uvMode.x * 140.0), fwidth(v.uvMode.y * 95.0)));
 
   var color = vec3f(0.11, 0.075, 0.042);
   var rough = 0.78;
@@ -489,12 +494,12 @@ fn evalEnsignColor(u: f32, v: f32, code: i32, isPennant: bool) -> vec3f {
     f0 = select(vec3f(0.035), vec3f(0.12), isIronBand);
   } else if (mode < 3.5) {
     // Woven bunting cloth (stern ensign or masthead pennant)
-    color = evalEnsignColor(clamp(v.uvMode.x, 0.0, 1.0), clamp(v.uvMode.y, 0.0, 1.0), code, mode > 2.5);
+    color = evalEnsignColor(clamp(v.uvMode.x, 0.0, 1.0), clamp(v.uvMode.y, 0.0, 1.0), code, mode > 2.5, weaveFade);
     rough = 0.86;
   } else if (mode < 4.5 || mode > 6.5) {
     // mode 4 (world-space) or mode 7 (vessel-space): Braided hemp line / parrel truss / outlicker sheet
     let isHook = v.uvMode.x > 0.94;
-    let twist = 0.88 + 0.12 * sin(v.uvMode.x * 120.0 + v.uvMode.y * 18.0);
+    let twist = 0.86 + 0.14 * sin(v.uvMode.y * 42.0 + v.uvMode.x * 18.0);
     color = select(vec3f(0.44, 0.34, 0.19) * twist, vec3f(0.055, 0.058, 0.062), isHook);
     rough = select(0.84, 0.42, isHook);
     f0 = select(vec3f(0.035), vec3f(0.14), isHook);
@@ -510,10 +515,14 @@ fn evalEnsignColor(u: f32, v: f32, code: i32, isPennant: bool) -> vec3f {
   let sun = sunIlluminance() * sunVis[0] * step(0.0, F.sunDir.y) * solarShadowVisibility(shadowSample);
   let sky = textureSampleLevel(envCube, sampC, vec3f(0, 1, 0), 7).rgb;
   let sea = textureSampleLevel(envCube, sampC, vec3f(0, -1, 0), 7).rgb;
+  let reflDir = reflect(-eye, n);
+  let envRefl = textureSampleLevel(envCube, sampC, reflDir, rough * 6.0).rgb;
+  let fresnel = f0 + (vec3f(1.0) - f0) * pow(1.0 - max(dot(n, eye), 0.0), 5.0);
   let nDotL = max(dot(n, F.sunDir.xyz), 0.0);
   // Cloth translucency when backlit by the sun
   let backlit = select(0.0, max(dot(-n, F.sunDir.xyz), 0.0) * 0.38, mode > 1.5 && mode < 3.5);
   var radiance = color * vesselAmbient(n, sky, sea)
+    + envRefl * fresnel * (1.0 - rough * 0.75)
     + sun * (color / PI * (nDotL + backlit) + vesselSpecular(n, eye, F.sunDir.xyz, rough, f0) * nDotL);
   radiance += lunarSurface(n, eye, color, rough, f0, sunVis[1] * lunarShadowVisibility(shadowSample))
     + lightningSurface(n, eye, color, rough);
@@ -668,7 +677,7 @@ function mastSectionLost(boat, z, y) {
  */
 export function buildVesselRigConnectors(boat, time = 0, windSpeed = 8) {
   const modelId = boat?.modelId ?? 'nina';
-  if (modelId === 'taino-canoe' || modelId === 'victory' || modelId === 'gipsy-moth-iv') {
+  if (modelId === 'taino-canoe') {
     return new Float32Array(0);
   }
   if (!_lateenPosesScratch) _lateenPosesScratch = createLateenPoses([1, 1, 1], -1);
@@ -727,7 +736,7 @@ export function buildVesselRigConnectors(boat, time = 0, windSpeed = 8) {
     }
   };
   const addParrelCollar = (mastPos, yardPos, mastRadius = 0.085) => {
-    const ringSegs = 8;
+    const ringSegs = 6;
     const rRing = mastRadius + 0.025;
     for (let i = 0; i < ringSegs; i++) {
       const a0 = (i / ringSegs) * Math.PI * 2;
@@ -759,7 +768,7 @@ export function buildVesselRigConnectors(boat, time = 0, windSpeed = 8) {
       1
     );
     // Upper and lower hemp truss yoke legs & halyard tie (racamento & ostaga) bridging mast to yard
-    addTube([mastPos[0], mastPos[1] + 0.14, mastPos[2]], yardPos, 0.022, 0.020, 5, 7, 0.5);
+    addTube([mastPos[0], mastPos[1] + 0.16, mastPos[2]], yardPos, 0.022, 0.020, 5, 7, 0.5);
     addTube([mastPos[0], mastPos[1] - 0.06, mastPos[2] - 0.04], yardPos, 0.020, 0.018, 5, 7, 0.5);
     addTube([mastPos[0], mastPos[1] - 0.06, mastPos[2] + 0.04], yardPos, 0.020, 0.018, 5, 7, 0.5);
   };
@@ -785,9 +794,55 @@ export function buildVesselRigConnectors(boat, time = 0, windSpeed = 8) {
     addCatenary(blockPos, [quarterHalfBeam * 0.35, transomY + 0.05, hullEndZ - 0.22], 0.02, 0.016, 4, 7, 0.5);
   };
 
+  const rigState = boat?.sailState ?? boat;
+
+  if (modelId === 'victory') {
+    const vState = {
+      squareYaw: rigState?.squareYaw ?? 0,
+      lateenYaw: rigState?.lateenYaw ?? 0,
+      windSide: rigState?.windSide ?? 0,
+      windForward: rigState?.windForward ?? 0,
+      set: rigState?.set ?? [1, 1, 1],
+      rig: rigState?.rig?.length >= 3 ? rigState.rig : [{ fill: 0.7 }, { fill: 0.7 }, { fill: 0.7 }],
+    };
+    for (const sail of VICTORY_SAILS) {
+      const vPose = victoryPose(sail, vState);
+      if (sail.kind === 'square') {
+        const yardPos = victoryYardPoint(sail.id, sail.pivot, vPose);
+        const mastPos = victoryMastPoint(sail.mast, yardPos[1]);
+        if (mastSectionLost(boat, mastPos[2], mastPos[1])) continue;
+        addParrelCollar(mastPos, yardPos, VICTORY_MASTS[sail.mast]?.r0 ?? 0.10);
+      } else if (sail.kind === 'spanker') {
+        const gaffThroat = victoryYardPoint(sail.id, sail.corners[0], vPose);
+        const gaffPeak = victoryYardPoint(sail.id, sail.corners[1], vPose);
+        const gaffMastPos = victoryMastPoint(sail.mast, gaffThroat[1]);
+        if (!mastSectionLost(boat, gaffMastPos[2], gaffMastPos[1])) {
+          addParrelCollar(gaffMastPos, gaffThroat, 0.085);
+          const peakHalyardHead = victoryMastPoint(sail.mast, gaffThroat[1] + 0.82);
+          addCatenary(peakHalyardHead, gaffPeak, 0.018, 0.015, 3, 7, 0.48);
+        }
+        const boomJaws = victoryYardPoint(sail.id, sail.corners[3], vPose);
+        const boomEnd = victoryYardPoint(sail.id, sail.corners[2], vPose);
+        const boomMastPos = victoryMastPoint(sail.mast, boomJaws[1]);
+        if (!mastSectionLost(boat, boomMastPos[2], boomMastPos[1])) {
+          addParrelCollar(boomMastPos, boomJaws, 0.095);
+          const toppingHead = victoryMastPoint(sail.mast, gaffThroat[1] + 0.35);
+          addCatenary(toppingHead, boomEnd, 0.022, 0.015, 3, 7, 0.48);
+        }
+      }
+    }
+    // Fixed mizzen crossjack yard at y = 4.87
+    const cjMastPos = victoryMastPoint(2, 4.87);
+    const cjYardPos = [0, 4.87, cjMastPos[2] - 0.15];
+    if (!mastSectionLost(boat, cjMastPos[2], cjMastPos[1])) {
+      addParrelCollar(cjMastPos, cjYardPos, VICTORY_MASTS[2]?.r0 ?? 0.09);
+    }
+    return new Float32Array(values);
+  }
+
   const design = getAdditionalRigDesign(modelId);
   if (modelId === 'nina' || !design) {
-    const poses = boat?.rig?.length === 3 ? boat.rig : _lateenPosesScratch;
+    const poses = rigState?.rig?.length === 3 ? rigState.rig : (boat?.rig?.length === 3 ? boat.rig : _lateenPosesScratch);
     for (let s = 0; s < SAIL_PLAN.length; s++) {
       const sail = SAIL_PLAN[s];
       const yardPos = lateenYardPoint(s, sail.pivot, poses[s]);
@@ -809,21 +864,91 @@ export function buildVesselRigConnectors(boat, time = 0, windSpeed = 8) {
     return new Float32Array(values);
   }
   for (const surface of rigCtx.surfaces) {
-    if (surface.kind === 'headsail' || surface.name === 'spritsail') continue;
+    if (surface.kind === 'headsail') continue;
     const mast = rigCtx.masts?.[surface.mast];
+    const pose = rigSurfacePose(surface, rigState);
+
+    if (surface.name === 'spritsail') {
+      // Connect Santa María's spritsail yard to the bowsprit with a sling collar & spritsail lifts
+      if (mastSectionLost(boat, mast?.z ?? -3.7, Infinity)) continue;
+      const spar = surface.spars?.[0];
+      const headA = spar ? spar.a : surface.corners?.[0];
+      const headB = spar ? spar.b : surface.corners?.[1];
+      const restMid = headA && headB
+        ? [0.5 * (headA[0] + headB[0]), 0.5 * (headA[1] + headB[1]), 0.5 * (headA[2] + headB[2])]
+        : surface.pivot;
+      const yardPos = surfaceYardPoint(surface, restMid, pose);
+      const bs = design.bowsprit;
+      const tBs = bs ? Math.max(0, Math.min(1, (yardPos[2] - bs.a[2]) / ((bs.b[2] - bs.a[2]) || -1))) : 0.65;
+      const bowspritPos = bs
+        ? [bs.a[0] + (bs.b[0] - bs.a[0]) * tBs, bs.a[1] + (bs.b[1] - bs.a[1]) * tBs, bs.a[2] + (bs.b[2] - bs.a[2]) * tBs]
+        : [0, yardPos[1] + 0.12, yardPos[2]];
+      addParrelCollar(bowspritPos, yardPos, bs?.r0 ?? 0.065);
+      if (headA && headB && bs) {
+        const portTip = surfaceYardPoint(surface, [headA[0] * 0.88, headA[1], headA[2]], pose);
+        const stbdTip = surfaceYardPoint(surface, [headB[0] * 0.88, headB[1], headB[2]], pose);
+        addCatenary(bs.b, portTip, 0.015, 0.013, 3, 7, 0.45);
+        addCatenary(bs.b, stbdTip, 0.015, 0.013, 3, 7, 0.45);
+      }
+      continue;
+    }
+
     if (!mast) continue;
-    const pose = rigSurfacePose(surface, boat);
-    const yardPos = surfaceYardPoint(surface, surface.pivot, pose);
+
+    if (surface.kind === 'gaff' || surface.kind === 'bermudan') {
+      for (const spar of surface.spars ?? []) {
+        const throatPos = surfaceYardPoint(surface, spar.a, pose);
+        const tipPos = surfaceYardPoint(surface, spar.b, pose);
+        const mastPos = rigCtx.mastPoint
+          ? rigCtx.mastPoint(surface.mast, throatPos[1])
+          : [0, throatPos[1], mast.z ?? 0];
+        if (mastSectionLost(boat, mastPos[2], mastPos[1])) continue;
+        addParrelCollar(mastPos, throatPos, mast.radius ?? 0.075);
+        const topLiftY = Math.min(mast.topY ?? (throatPos[1] + 1.2), throatPos[1] + 1.15);
+        const liftHead = rigCtx.mastPoint
+          ? rigCtx.mastPoint(surface.mast, topLiftY)
+          : [0, topLiftY, mast.z ?? 0];
+        addCatenary(liftHead, tipPos, 0.02, 0.014, 3, 7, 0.48);
+      }
+      if (surface.kind === 'bermudan' && surface.corners?.[0]) {
+        const headCorner = surface.corners[0];
+        const headMastPos = rigCtx.mastPoint
+          ? rigCtx.mastPoint(surface.mast, headCorner[1])
+          : [0, headCorner[1], mast.z ?? 0];
+        if (!mastSectionLost(boat, headMastPos[2], headMastPos[1])) {
+          addTube(headMastPos, headCorner, 0.018, 0.016, 5, 7, 0.5);
+        }
+      }
+      continue;
+    }
+
+    const spar = surface.spars?.[0];
+    const headA = spar ? spar.a : surface.corners?.[0];
+    const headB = spar ? spar.b : surface.corners?.[1];
+    const restCenter = spar
+      ? [0.5 * (spar.a[0] + spar.b[0]), 0.5 * (spar.a[1] + spar.b[1]), 0.5 * (spar.a[2] + spar.b[2])]
+      : surface.pivot;
+    const yardPos = surfaceYardPoint(surface, restCenter, pose);
     const mastPos = rigCtx.mastPoint
       ? rigCtx.mastPoint(surface.mast, yardPos[1])
       : [0, yardPos[1], mast.z ?? 0];
     if (mastSectionLost(boat, mastPos[2], mastPos[1])) continue;
     addParrelCollar(mastPos, yardPos, mast.radius ?? 0.08);
+    if (surface.kind === 'square' && headA && headB) {
+      const liftY = Math.min(mast.topY ?? (yardPos[1] + 0.52), yardPos[1] + 0.52);
+      const liftHead = rigCtx.mastPoint
+        ? rigCtx.mastPoint(surface.mast, liftY)
+        : [0, liftY, mast.z ?? 0];
+      const portTip = surfaceYardPoint(surface, [headA[0] * 0.86, headA[1], headA[2]], pose);
+      const stbdTip = surfaceYardPoint(surface, [headB[0] * 0.86, headB[1], headB[2]], pose);
+      addCatenary(liftHead, portTip, 0.015, 0.013, 3, 7, 0.45);
+      addCatenary(liftHead, stbdTip, 0.015, 0.013, 3, 7, 0.45);
+    }
   }
   // Connect overhanging rear lateen sail (mizzen on Pinta & Santa María) to the stern outlicker & hull transom
   const mizzenSurface = rigCtx.surfaces.find((s) => s.kind === 'lateen' && (s.corners?.[2]?.[2] ?? 0) >= 5.5);
   if (mizzenSurface) {
-    const pose = rigSurfacePose(mizzenSurface, boat);
+    const pose = rigSurfacePose(mizzenSurface, rigState);
     const clewPos = surfaceClothPoint(mizzenSurface, 0, 1, pose, rigCtx, time, windSpeed);
     const hullEndZ = 6.0;
     const transomY = modelDeck(boat ?? { modelId }, 5.95) + 0.14;
@@ -866,7 +991,7 @@ export async function createShipColorsRenderer({
   });
   let mooringVertexCount = 0;
 
-  const maxRigConnectorVerts = 4096;
+  const maxRigConnectorVerts = 12288;
 
   const layout = [{
     arrayStride: 40,

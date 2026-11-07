@@ -92,7 +92,8 @@ export function crewHelmHands(boat){
   const wheel=HELM_WHEEL[boat.modelId];
   if(wheel){
     const d=proceduralDesign(boat.modelId).steering.wheel,sx=boat.beam/3.6,sy=vesselVerticalScale(boat),sz=boat.length/12;
-    const grips=[wheel.high,wheel.low].map(a=>[(d.centre[0]+wheel.side*Math.cos(a)*d.radius)*sx,(d.centre[1]+Math.sin(a)*d.radius)*sy,(d.centre[2]+wheel.aft)*sz]);
+    const turn=Math.sin((boat.rudder??0)*.07)*.18;
+    const grips=[wheel.high+turn,wheel.low+turn].map(a=>[(d.centre[0]+wheel.side*Math.cos(a)*d.radius)*sx,(d.centre[1]+Math.sin(a)*d.radius)*sy,(d.centre[2]+wheel.aft)*sz]);
     return wheel.side<0?grips.reverse():grips;
   }
   const stance=HELM_TILLER[boat.modelId??'nina'];

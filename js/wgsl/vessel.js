@@ -210,9 +210,13 @@ fn canvasThickness(uv:vec2f,material:u32)->f32 {
   let triangleEdge=min(min(uv.x,uv.y),(1.0-uv.x-uv.y)*0.70710678);
   let edge=select(squareEdge,triangleEdge,material==13u);
   let hem=1.0-smoothstep(0.006,0.014+max(fwidth(edge),0.0005),edge);
+  let reefDist=min(abs(uv.y-0.26),abs(uv.y-0.52));
+  let reefBand=select(0.0,1.0-smoothstep(0.007,0.014+max(fwidth(uv.y),0.0005),reefDist),material==9u);
+  let cornerDist=min(min(length(uv),length(uv-vec2f(1.0,0.0))),min(length(uv-vec2f(0.0,1.0)),length(uv-vec2f(1.0,1.0))));
+  let cornerPatch=1.0-smoothstep(0.055,0.085,cornerDist);
   let fold=pow(0.5+0.5*cos(uv.x*62.83185+sin(uv.y*9.0)*0.35),8.0);
   let weave=sin(uv.x*1400.0)*sin(uv.y*1800.0)*(1.0-smoothstep(0.0004,0.003,max(fwidth(uv.x+uv.y),0.001)));
-  return 1.0+0.95*seam+0.85*hem+0.18*fold+0.035*weave;
+  return 1.0+0.95*seam+0.85*hem+0.65*reefBand+0.55*cornerPatch+0.18*fold+0.035*weave;
 }
 fn canvasTransmission(thickness:f32,incidence:f32)->vec3f {
   return exp(-vec3f(0.90,1.15,1.60)*thickness/max(incidence,0.12));

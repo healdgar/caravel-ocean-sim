@@ -45,14 +45,23 @@ fn inFrustum(relative:vec3f,radius:f32)->bool {
 const PROP_FRAGMENT = /* wgsl */ `
 struct PropVertex {@builtin(position) position:vec4f,@location(0) world:vec3f,@location(1) normal:vec3f,@location(2) uv:vec2f};
 @fragment fn propFS(v:PropVertex,@builtin(front_facing) front:bool)->@location(0) vec4f {
-  let n=normalize(v.normal)*select(-1.0,1.0,front);let sun=F.sunDir.xyz;
+  var n=normalize(v.normal)*select(-1.0,1.0,front);let sun=F.sunDir.xyz;
+  let albedo=textureSample(pigment,pigmentSampler,v.uv).rgb;
+  let luma=dot(albedo,vec3f(0.2126,0.7152,0.0722));
+  let dx=dpdx(v.world);let dy=dpdy(v.world);
+  let sx=cross(dy,n);let sy=cross(n,dx);
+  let det=dot(dx,sx);
+  let uvFootprint=max(length(dpdx(v.uv)),length(dpdy(v.uv)));
+  let bumpFilter=1.0-smoothstep(0.015,0.08,uvFootprint);
+  let propBump=luma*0.0045*bumpFilter;
+  let propGrad=(dpdx(propBump)*sx+dpdy(propBump)*sy)/max(abs(det),0.000001)*sign(det);
+  n=normalize(n-clamp(propGrad,vec3f(-0.26),vec3f(0.26)));
   let shadowSample=vesselShadow(v.world,n);
   let direct=sunIlluminance()*sunVis[0]*step(0.0,sun.y)*solarShadowVisibility(shadowSample);
   let sky=textureSampleLevel(envCube,sampC,vec3f(0,1,0),${ENV_MIPS - 1}.0).rgb;
   let sea=textureSampleLevel(envCube,sampC,normalize(vec3f(n.x,-.65,n.z)),${ENV_MIPS - 1}.0).rgb;
-  let albedo=textureSample(pigment,pigmentSampler,v.uv).rgb;
   let view=normalize(F.camPos.xyz-v.world);
-  let rough=.9;let f0=vec3f(.04);
+  let rough=clamp(0.90-luma*0.18,0.56,0.92);let f0=vec3f(.04);
   let spec=vesselSpecular(n,view,sun,rough,f0);
   let reflected=textureSampleLevel(envCube,sampC,reflect(-view,n),rough*${ENV_MIPS - 1}.0).rgb;
   let col=lunarSurface(n,view,albedo,rough,f0,sunVis[1]*lunarShadowVisibility(shadowSample))+lightningSurface(n,view,albedo,rough)+gunFlashSurface(v.world,n,view,albedo,rough)
@@ -78,7 +87,7 @@ struct PropInput {@location(0) position:vec3f,@location(1) normal:vec3f,@locatio
   let prop=shown[v.instance];let c=cos(prop.yaw);let s=sin(prop.yaw);let p=v.position*prop.scale;
   var out:PropVertex;
   out.world=vec3f(p.x*c+p.z*s,p.y,p.z*c-p.x*s)+prop.position;
-  out.position=F.viewProj*vec4f(out.world-F.camPos.xyz,1);
+  out.position=F.viewProj*vec4f(earthCurve(out.world-F.camPos.xyz,F.camPos.y),1);
   out.normal=vec3f(v.normal.x*c+v.normal.z*s,v.normal.y,v.normal.z*c-v.normal.x*s);
   out.uv=v.uv;
   return out;
@@ -153,7 +162,7 @@ fn propFractureRotate(v:vec3f,axis:vec3f,c:f32,s:f32)->vec3f {
   let c=cos(FP.yaw);let s=sin(FP.yaw);
   var out:PropVertex;
   out.world=vec3f(localPos.x*c+localPos.z*s,localPos.y,localPos.z*c-localPos.x*s)+FP.position;
-  out.position=F.viewProj*vec4f(out.world-F.camPos.xyz,1);
+  out.position=F.viewProj*vec4f(earthCurve(out.world-F.camPos.xyz,F.camPos.y),1);
   out.normal=vec3f(localNorm.x*c+localNorm.z*s,localNorm.y,localNorm.z*c-localNorm.x*s);
   out.uv=v.uv;
   return out;

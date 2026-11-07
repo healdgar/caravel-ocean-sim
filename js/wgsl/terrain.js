@@ -622,6 +622,7 @@ struct LandVertex {
 // strobe on whichever facet happens to catch the sun, so that spread widens the highlight instead
 // (Kaplanyan and Tokuyoshi's geometric specular antialiasing). Set where a normal has its relief.
 var<private> landNormalSpread:f32=0.0;
+var<private> landWindowEmission:vec3f=vec3f(0.0);
 fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibility:f32,wet:f32,roughness:f32)->vec4f{
   let uv=(world.xz-LAND.domain.xy)/LAND.domain.z+0.5;
   let edgeDist=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
@@ -655,7 +656,7 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibility:f32
   let nDotH=max(dot(n,h),0.0);
   let vDotH=max(dot(v,h),0.0);
   let effRough=clamp(mix(roughness,min(roughness,0.12),effWet*0.80),0.06,0.98);
-  let smoothFilm=select(clamp((0.40-roughness)/0.32,0.0,1.0)*effWet,1.0,isMetal);
+  let smoothFilm=select(clamp((0.46-effRough)/0.34,0.0,1.0)*effWet,1.0,isMetal);
   let f0=select(mix(0.038,0.058,effWet),clamp(-wet,0.18,0.56),isMetal);
   let maxF=select(mix(f0,0.75,smoothFilm),max(1.0-effRough*0.55,f0),isMetal);
   let fresnel=f0+(maxF-f0)*pow(1.0-nDotV,5.0);
@@ -676,7 +677,7 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibility:f32
   let specMask=select(clamp((0.72-effRough)/0.42,0.0,1.0)*(0.08+0.92*effWet),0.65,isMetal);
   col+=direct*min(specBRDF,1.5)*specMask*(0.25+0.75*archShadow)+skyRefl;
   col+=lunarSurface(n,v,albedo*(1.0-effWet*.32),effRough,vec3f(f0),vec3f(mix(1.0,bakedLight.g,inPrimaryDomain)));
-  col+=lightningSurface(n,v,albedo,effRough);
+  col+=lightningSurface(n,v,albedo,effRough)+landWindowEmission;
   col=surfaceAir(col,world);
   // Clip cloud integration at high mountain surfaces: clouds behind mountain peaks
   // stay hidden and low clouds in front veil upper slopes, while low coastal plains
@@ -899,22 +900,32 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       relief=(detailA*0.036+plank*0.026+grain*0.014-seam*0.034)*archLodFade;
       roughness=clamp(0.73-plank*0.04+seam*0.12,0.62,0.88);
       ambientVisibility=(0.42+0.34*max(n.y,0.0))*aoVis*(1.0-seam*0.22);
+      // Intertidal marine algae & barnacle biofouling on submerged/splash-zone dock pilings
+      let pilingTide=(1.0-smoothstep(0.15,1.45,world.y))*clamp(0.55+0.45*detailA,0.0,1.0);
+      albedo=mix(albedo,vec3f(0.055,0.082,0.042),pilingTide*0.62);
+      roughness=mix(roughness,0.92,pilingTide*0.5);
     }else if(in.kind.x<11.5){
       // Kind 11: Coursed Pedra Lioz & coral-limestone ashlar masonry (bastion walls, quoins, arches, buttresses)
       let vertWall=1.0-smoothstep(0.35,0.85,abs(n.y));
       let courseY=world.y*1.65;
       let bedJoint=max(0.0,landFilteredCourse(courseY,dx.y*1.65,dy.y*1.65,2.0)-0.22)*vertWall;
-      let blockCoord=(world.x+world.z)*0.68+floor(courseY)*0.5;
-      let headJoint=max(0.0,landFilteredCourse(blockCoord,(dx.x+dx.z)*0.68,(dy.x+dy.z)*0.68,1.8)-0.28)*vertWall*microLodFade;
+      let wallHorizLen=length(n.xz);
+      let wallTan=select(vec3f(0.7071,0.0,0.7071),vec3f(-n.z,0.0,n.x)/max(wallHorizLen,1e-3),wallHorizLen>0.08);
+      let blockCoord=dot(world,wallTan)*0.82+floor(courseY)*0.5;
+      let blockDx=dot(dx,wallTan)*0.82;
+      let blockDy=dot(dy,wallTan)*0.82;
+      let headJoint=max(0.0,landFilteredCourse(blockCoord,blockDx,blockDy,1.8)-0.28)*vertWall*microLodFade;
       let jointWave=clamp(0.68*bedJoint+0.36*headJoint,0.0,1.0);
       let blockId=floor(courseY)*19.0+floor(blockCoord);
       let blockHash=(fract(sin(blockId*127.1)*43758.5453)-0.5)*archLodFade;
       let damp=smoothstep(0.2,3.8,world.y);
       let blockTint=vec3f(1.0+blockHash*0.065,1.0+blockHash*0.048,1.0+blockHash*0.025);
       let stoneBase=mix(vec3f(0.38,0.35,0.29),vec3f(0.53,0.49,0.41),damp)*blockTint+vec3f(detailA*0.035);
-      albedo=stoneBase*shadeAlbedo*(0.98-0.14*jointWave+detailA*0.11+detailB*0.055);
+      let tidalMoss=(1.0-smoothstep(0.25,1.65,world.y))*vertWall*clamp(0.5+0.5*detailA+0.35*jointWave,0.0,1.0);
+      let fouledStone=mix(stoneBase,vec3f(0.09,0.13,0.065),tidalMoss*0.58);
+      albedo=fouledStone*shadeAlbedo*(0.98-0.14*jointWave+detailA*0.11+detailB*0.055);
       relief=(detailA*0.044+detailB*0.018-jointWave*0.056)*archLodFade;
-      roughness=clamp(0.75-blockHash*0.06+jointWave*0.14+(1.0-damp)*0.05,0.62,0.92);
+      roughness=clamp(0.75-blockHash*0.06+jointWave*0.14+(1.0-damp)*0.05+tidalMoss*0.12,0.62,0.92);
       ambientVisibility=(0.46+0.34*max(n.y,0.0))*aoVis*(1.0-jointWave*0.26);
     }else if(in.kind.x<12.5){
       // Kind 12: Warm Iberian & colonial limewashed stucco (cream/ochre plaster with trowel relief & cornice weathering)
@@ -941,12 +952,11 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       ambientVisibility=(0.48+0.36*max(n.y,0.0))*aoVis*(1.0-courseStep*0.20);
     }else if(in.kind.x<14.5){
       // Kind 14: 16th-century leaded-glass casements (vidrieras emplomadas with sky reflections) & deep arched portals
-      let hFlat=1.0-clamp(abs(n.x)+abs(n.z),0.0,1.0);
-      let hWx=abs(n.z)+0.7071*hFlat;
-      let hWz=abs(n.x)+0.7071*hFlat;
-      let hCoord=world.x*hWx+world.z*hWz;
-      let hDx=dx.x*hWx+dx.z*hWz;
-      let hDy=dy.x*hWx+dy.z*hWz;
+      let winHorizLen=length(n.xz);
+      let winTan=select(vec3f(0.7071,0.0,0.7071),vec3f(-n.z,0.0,n.x)/max(winHorizLen,1e-3),winHorizLen>0.08);
+      let hCoord=dot(world,winTan);
+      let hDx=dot(dx,winTan);
+      let hDy=dot(dy,winTan);
       let rejaX=max(0.0,landFilteredCourse(hCoord*3.4,hDx*3.4,hDy*3.4,2.0)-0.34);
       let rejaY=max(0.0,landFilteredCourse(world.y*2.2,dx.y*2.2,dy.y*2.2,1.8)-0.34);
       let rejaWave=clamp(0.62*rejaX+0.48*rejaY,0.0,1.0)*archLodFade;
@@ -968,6 +978,18 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
         // the camera drifts: only the near ones keep the sharp glint.
         mirrorSpread=smoothstep(.04,.4,length(dx)+length(dy))*.03;
         ambientVisibility=0.44+0.32*portShade;
+        // Warm dusk & nighttime interior candle/hearth glow in occupied port town casements
+        let candleSched=(1.0-smoothstep(-0.04,0.14,F.sunDir.y))*(1.0-clamp(structDmg*2.2,0.0,1.0));
+        if(candleSched>0.001){
+          let winId=floor(hCoord*0.35)*31.7+floor(world.y*0.32)*73.1;
+          let winSeed=fract(sin(winId)*43758.5453);
+          if(winSeed>0.32){
+            let flicker=0.86+0.09*sin(F.camPos.w*5.4+winSeed*19.0)+0.05*cos(F.camPos.w*13.1-winSeed*29.0);
+            let paneGlow=(0.55+0.45*smoothstep(-0.4,0.4,sin(world.y*2.2)))*(1.0-frameMask*0.88);
+            let candleExp=1.0/max(F.post.x,1.0);
+            landWindowEmission=vec3f(0.34,0.145,0.032)*(candleSched*flicker*paneGlow*candleExp*(0.65+0.35*winSeed));
+          }
+        }
       }else{
         // Deep vaulted arch portals & shadowed embrasures with wrought-iron grille bars
         albedo=vec3f(0.048,0.040,0.033)*(1.0-0.22*rejaWave)*portShade*(1.0+detailB*0.08);
@@ -996,8 +1018,10 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       ambientVisibility=(0.48+0.36*max(n.y,0.0))*aoVis;
     }else if(in.kind.x<17.5){
       // Kind 17: Paper-birch & elm/cedar bark sheathing (Abenaki wigwams, Algonquian longhouses & birchbark canoes)
+      let barkHorizLen=length(n.xz);
+      let barkTan=select(vec3f(0.7071,0.0,0.7071),vec3f(-n.z,0.0,n.x)/max(barkHorizLen,1e-3),barkHorizLen>0.08);
       let seamY=landFilteredCourse(world.y*1.35,dx.y*1.35,dy.y*1.35,2.0);
-      let seamX=landFilteredCourse((world.x+world.z)*0.85,(dx.x+dx.z)*0.85,(dy.x+dy.z)*0.85,2.0);
+      let seamX=landFilteredCourse(dot(world,barkTan)*1.15,dot(dx,barkTan)*1.15,dot(dy,barkTan)*1.15,2.0);
       let seamWave=(0.65*seamY+0.35*seamX)*archLodFade;
       let lenticel=landFilteredWave(world,dx,dy,vec3f(6.5,26.0,-6.5),detailA*2.4)*microLodFade;
       let sheetVar=(detailA*0.55+detailB*0.45)*0.048;

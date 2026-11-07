@@ -274,7 +274,8 @@ fn townPose(frame:u32,v:CrewInput)->mat4x4f {
   out.normal=normalize(vec3f(turned.x*c+turned.z*s,turned.y,turned.z*c-turned.x*s));
   let clothed=crewClothed(v.color,v.position,look.shirt.rgb,look.trousers.rgb,look.skin.rgb,look.hair.rgb,look.face.w>1.5,dress);
   out.color=clothed.rgb;out.skin=clothed.w;out.paint=dress>>16u;
-  out.helm=0.0;out.wet=vec2f(0.0);out.bodyPos=v.position;out.damage=vec3f(0.0);
+  let rainWet=clamp(F.windP[1].x,0.0,1.0);
+  out.helm=0.0;out.wet=vec2f(rainWet*0.65,rainWet*0.75);out.bodyPos=v.position;out.damage=vec3f(0.0);
   return out;
 }
 `;

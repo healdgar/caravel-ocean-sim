@@ -206,10 +206,14 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
   // Plank seams follow the hull's girth and the cabin's horizontal strakes.
   // Unlike a painted line, their recessed height also breaks the light response.
   let paintedWood=vesselPainted(in.material);
+  let isProceduralFleet=hull.rig.w<.5 && abs(hull.size.y-20.0)>.2;
+  let isCopper=in.material==22u || (in.material==20u && isProceduralFleet && p.y < -0.05);
+  let isGilt=in.material==25u || (in.material==20u && isProceduralFleet && abs(p.y - 0.53) < 0.018 && abs(in.normalLocal.x) > 0.35);
+  let isMastSpar=(in.material==1u && abs(p.x)<0.24 && p.y>0.65) || in.material==10u;
   ${damaged?`// Timber stands raw and splintered around a hole, and whatever is seen through it lies in the dark of the hold.
   let holedTimber=u32(hullDamage.scale.w)>0u && vesselWoodMaterial(in.material,paintedWood);
   let holeRim=select(0.0,max(hullHoleRim(p),0.0),holedTimber);
-`:''}  let plankedWall=in.material==15u || (paintedWood && abs(in.normalLocal.y)<.5) || (in.material==1u && abs(in.normalLocal.y)<.35);
+`:''}  let plankedWall=in.material==15u || (paintedWood && !isCopper && !isGilt && abs(in.normalLocal.y)<.5) || (in.material==1u && !isMastSpar && abs(in.normalLocal.y)<.35);
   // Wall strakes are the Niña's width in metres on every ship, not in the ship's design units.
   let course=select(p.y*hull.right.w/(.16*20.0/12.0),in.uv.x*18.0,in.material==15u);
   let board=floor(course);
@@ -219,7 +223,6 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
   let buttCoord=(along+fract(sin(board*73.17)*4321.1)*2.6)/2.6;
   let butt=min(fract(buttCoord),1.0-fract(buttCoord));
   let buttSeam=1.0-smoothstep(.0008,.003+max(fwidth(buttCoord),.0003),butt);
-  let isProceduralFleet=hull.rig.w<.5 && abs(hull.size.y-20.0)>.2;
   let deckCourse=(p.x+1.8)/.145;
   let deckPlankId=floor(deckCourse);
   let deckEdge=min(fract(deckCourse),1.0-fract(deckCourse));
@@ -250,7 +253,7 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
   let sx = cross(dy,n); let sy = cross(n,dx);
   let det = dot(dx,sx);
   let gradient = (dpdx(bump)*sx + dpdy(bump)*sy) / max(abs(det), 0.000001) * sign(det);
-  let isWood=vesselWoodMaterial(in.material,paintedWood);
+  let isWood=vesselWoodMaterial(in.material,paintedWood) && !isCopper && !isGilt;
   n = normalize(n - clamp(gradient,vec3f(-.38),vec3f(.38))*select(0.0,1.0,isWood));
   let isIron=in.material==3u || in.material==8u;
   let materialPoint=p*vec3f(hull.size.x/3.6,hull.right.w,hull.size.y/12.0);
@@ -261,6 +264,33 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
   // same surface-gradient frame as timber but a separate, filtered cast relief.
   let ironGradient=(dpdx(iron.relief)*sx+dpdy(iron.relief)*sy)/max(abs(det),0.000001)*sign(det);
   if(isIron){n=normalize(n-clamp(ironGradient,vec3f(-.18),vec3f(.18)));}
+  // Precompute staggered copper plate coordinates & surface-gradient relief outside control flow
+  let cuRow=floor(materialPoint.y*3.2);
+  let cuCol=floor(materialPoint.z*0.95+fract(cuRow*0.5)*0.5);
+  let cuUV=vec2f(fract(materialPoint.z*0.95+fract(cuRow*0.5)*0.5),fract(materialPoint.y*3.2));
+  let cuHash=fract(sin(cuRow*127.1+cuCol*311.7)*43758.5453);
+  let cuEdge=min(min(cuUV.x,1.0-cuUV.x),min(cuUV.y,1.0-cuUV.y));
+  let cuSeam=1.0-smoothstep(0.015,0.055,cuEdge);
+  let cuNailCoord=vec2f(fract(cuUV.x*8.0)-0.5,fract(cuUV.y*4.0)-0.5);
+  let cuNailRing=cuEdge<0.14 && cuEdge>0.025;
+  let cuNail=select(0.0,1.0-smoothstep(0.12,0.28,length(cuNailCoord)),cuNailRing)*(1.0-smoothstep(0.01,0.05,materialFootprint));
+  let cuRelief=(cuUV.y*0.0012 - cuSeam*0.0018 + cuNail*0.0009)*(1.0-smoothstep(0.02,0.09,materialFootprint));
+  let cuGradient=(dpdx(cuRelief)*sx+dpdy(cuRelief)*sy)/max(abs(det),0.000001)*sign(det);
+  // Precompute sail canvas panel pillowing, seam puckering & reef-band surface-gradient relief outside control flow
+  let clothSeam=abs(fract(in.uv.x*10.0)-0.5);
+  let clothAA=max(fwidth(clothSeam),0.001);
+  let weaveAA=max(fwidth(in.uv.x+in.uv.y),0.001);
+  let clothEdge=vesselClothEdge(in.uv,in.material);
+  let edgeAA=max(fwidth(clothEdge),0.0005);
+  let reefDist=min(abs(in.uv.y-0.26),abs(in.uv.y-0.52));
+  let reefBand=select(0.0,1.0-smoothstep(0.007,0.014+max(fwidth(in.uv.y),0.0005),reefDist),in.material==9u);
+  let reefGrommet=select(0.0,1.0-smoothstep(0.003,0.007,length(vec2f((fract(in.uv.x*20.0)-0.5)*0.05,reefDist))),in.material==9u && reefDist<0.012);
+  let cornerDist=min(min(length(in.uv),length(in.uv-vec2f(1.0,0.0))),min(length(in.uv-vec2f(0.0,1.0)),length(in.uv-vec2f(1.0,1.0))));
+  let cornerPatch=1.0-smoothstep(0.055,0.085,cornerDist);
+  let panelPillow=sin(fract(in.uv.x*10.0)*3.14159265);
+  let seamPucker=sin(in.uv.y*95.0+floor(in.uv.x*10.0)*2.3)*(1.0-smoothstep(0.0,0.08,clothSeam));
+  let canvasRelief=(panelPillow*0.0032 + seamPucker*0.0011 + reefBand*0.0018 + cornerPatch*0.0012)*(1.0-smoothstep(0.004,0.025,weaveAA));
+  let canvasGradient=(dpdx(canvasRelief)*sx+dpdy(canvasRelief)*sy)/max(abs(det),0.000001)*sign(det);
   var albedo = timber * vec3f(1.02,.98,.88);
   var rough = clamp(.86 + (.2-relief)*.20 + (grain-.5)*.08,.78,.95); var metal = 0.0;
   let canvasDepth=canvasThickness(in.uv,in.material)*canvasWetDepth(wet.x);
@@ -270,11 +300,6 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
   // Fine end-grain joints, splits, and oxidised grain.
   let joint = abs(fract((p.z + fract(plank*0.413)*2.0)/2.3)-0.5);
   let jointAA = max(fwidth(joint),0.001);
-  let clothSeam=abs(fract(in.uv.x*10.0)-0.5);
-  let clothAA=max(fwidth(clothSeam),0.001);
-  let weaveAA=max(fwidth(in.uv.x+in.uv.y),0.001);
-  let clothEdge=vesselClothEdge(in.uv,in.material);
-  let edgeAA=max(fwidth(clothEdge),0.0005);
   if(in.material==0u) {
     albedo *= mix(0.3,1.0,smoothstep(0.001,0.004+jointAA,joint));
     if(isProceduralFleet || isAdditionalIberian) {
@@ -282,9 +307,22 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
       rough = mix(rough, 0.94, deckCaulk);
     }
   }
-  if(in.material == 1u || in.material == 5u || in.material == 6u) {
-    albedo *= .87;
-    if((isProceduralFleet || isAdditionalIberian) && in.material == 1u) {
+  if(in.material == 1u || in.material == 5u || in.material == 6u || in.material == 10u) {
+    if(in.material != 10u) { albedo *= .87; }
+    if(isMastSpar) {
+      // Turned cylindrical spar: longitudinal pine/spruce grain, radial weather-checking, and iron mast hoops (wooldings)
+      let sparAngle = atan2(in.normalLocal.x, in.normalLocal.z);
+      let sparGrain = 0.92 + 0.08 * sin(sparAngle * 24.0 + gnoise(vec2f(p.y * 6.0, p.z * 6.0)) * 4.0);
+      let checkCrack = smoothstep(0.86, 0.95, sin(sparAngle * 11.0 + p.y * 2.5));
+      albedo = timber * vec3f(1.08, 0.92, 0.68) * sparGrain * (1.0 - checkCrack * 0.28);
+      rough = clamp(0.74 + (1.0 - sparGrain) * 0.14 + checkCrack * 0.12, 0.68, 0.90);
+      let isMastHoop = in.material == 1u && p.y > 0.85 && p.y < 6.4 && abs(fract(p.y * 1.35) - 0.5) < 0.036;
+      if(isMastHoop) {
+        albedo = vec3f(0.032, 0.031, 0.029);
+        rough = 0.58;
+        metal = 0.45;
+      }
+    } else if((isProceduralFleet || isAdditionalIberian) && in.material == 1u) {
       let isKeelOrPost = (abs(p.x) < 0.068 && p.y < -0.46) || (abs(p.x) < 0.055 && p.z > 5.25 && p.y < 1.05);
       let isCapRail = p.y > 0.58 && in.normalLocal.y > 0.52 && abs(p.x) > 0.32;
       if(isKeelOrPost) {
@@ -303,19 +341,27 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
   }
   if(in.material==20u){
     albedo=vec3f(.009,.008,.006);rough=.88;
-    if(isProceduralFleet) {
-      if(p.y < -0.05) {
-        let cuPlate = 1.0 - smoothstep(0.02, 0.06, min(fract(p.z * 3.8), fract(p.y * 14.0)));
-        albedo = vec3f(.29,.115,.055) * (1.0 - cuPlate * 0.22);
-        rough = .53; metal = .65;
-      } else if(abs(p.y - 0.53) < 0.018 && abs(in.normalLocal.x) > 0.35) {
-        albedo = vec3f(.48,.28,.055);
-        rough = .45; metal = .60;
-      }
+    if(isGilt) {
+      albedo = vec3f(.48,.28,.055);
+      rough = .42; metal = .68;
     }
   }
   if(in.material==21u){albedo=vec3f(.48,.265,.075);rough=.85;}
-  if(in.material==22u){albedo=vec3f(.29,.115,.055);rough=.53;metal=.65;}
+  if(isCopper){
+    // Staggered 18th/19th-century Muntz-metal / copper hull sheathing plates with overlapped seams,
+    // embossed tack rows, rolled-metal tone variation, and sea-salt verdigris patina near the waterline.
+    let plateTone = 0.90 + 0.18 * cuHash;
+    let rolledStreak = 0.96 + 0.04 * sin(materialPoint.z * 48.0 + cuRow * 5.1);
+    let cuBase = vec3f(0.33, 0.135, 0.065) * plateTone * rolledStreak * (1.0 - cuSeam * 0.28 + cuNail * 0.14);
+    let waterlineBand = smoothstep(-0.75, -0.02, p.y) * (1.0 - smoothstep(-0.02, 0.12, p.y));
+    let verdigrisNoise = clamp(gnoise(vec2f(materialPoint.z * 3.5 + cuRow * 1.7, materialPoint.y * 8.0)) * 0.85 + cuSeam * 0.45, 0.0, 1.0);
+    let verdigrisMask = clamp(waterlineBand * verdigrisNoise * 0.52 + cuSeam * 0.16, 0.0, 0.65);
+    let verdigrisColor = vec3f(0.11, 0.29, 0.22);
+    albedo = mix(cuBase, verdigrisColor, verdigrisMask);
+    rough = mix(0.46 + (1.0 - plateTone) * 0.12, 0.82, verdigrisMask);
+    metal = mix(0.72, 0.08, verdigrisMask);
+    n = normalize(n - clamp(cuGradient, vec3f(-0.22), vec3f(0.22)));
+  }
   if(in.material==23u){
     albedo=vec3f(.68,.65,.55);rough=.86;
     if(isProceduralFleet && hull.size.y < 20.0 && abs(in.normalLocal.x) > 0.25) {
@@ -327,13 +373,35 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
     }
   }
   if(in.material==24u){albedo=vec3f(.26,.028,.018);rough=.83;}
-  if(in.material==25u){albedo=vec3f(.48,.28,.055);rough=.45;metal=.6;}
+  if(in.material==25u){albedo=vec3f(.48,.28,.055);rough=.42;metal=.68;}
   if(in.material==26u){albedo=vec3f(.015,.035,.09);rough=.88;}
   if(paintedWood && metal < 0.1){albedo*=mix(.88,1.04,relief)*(1.0-join*.46);}
   let ropeAA=fwidth(p.x+p.y+p.z);
   if(in.material == 2u || in.material == 12u || in.material==19u) {
-    let twist = sin((p.x+p.y+p.z)*100.0) * (1.0-smoothstep(0.02,0.12,ropeAA));
-    albedo = vec3f(0.28,0.20,0.11) * (0.8+0.2*twist); rough=0.87;
+    // 3D Helical 3-strand laid hemp rope: right-hand hawser lay spiraling around the rope cross-section
+    // plus counter-twisted spun-yarn micro-fibres, with distinct Stockholm-tarred standing rigging (2u)
+    // vs. golden laid hemp running rigging (12u) and marline-hitched sail bolt-ropes (19u).
+    let ropeFilter = 1.0 - smoothstep(0.02, 0.12, ropeAA);
+    let ropeAz = atan2(in.normalLocal.x, in.normalLocal.z);
+    let ropeAxial = select(in.uv.y * 16.0, (p.x + p.y + p.z) * 4.2, in.uv.y == 0.0 && in.uv.x < 10.0);
+    let layPhase = ropeAxial * 42.0 + ropeAz * 3.0;
+    let strandCrown = sin(layPhase);
+    let strandGroove = smoothstep(-0.92, -0.35, strandCrown);
+    let yarnTwist = sin(ropeAxial * 210.0 - ropeAz * 9.0) * (1.0 - smoothstep(0.008, 0.045, ropeAA));
+    let marlineHitch = select(0.0, smoothstep(0.84, 0.96, sin(ropeAxial * 18.0)), in.material == 19u);
+    let baseHemp = select(
+      select(vec3f(0.34, 0.25, 0.135), vec3f(0.072, 0.050, 0.032), in.material == 2u),
+      vec3f(0.25, 0.175, 0.092),
+      in.material == 19u
+    );
+    let ropeShade = mix(1.0, (0.62 + 0.38 * strandGroove) * (1.0 + 0.09 * yarnTwist), ropeFilter);
+    albedo = mix(baseHemp * ropeShade, vec3f(0.065, 0.045, 0.028), marlineHitch * 0.72 * ropeFilter);
+    rough = select(0.86, 0.76, in.material == 2u) - 0.04 * strandCrown * ropeFilter;
+    // Perturb rope normal along helical strand tangent for true 3D cylindrical hawser relief
+    let ropeTang = normalize(cross(n, vec3f(0.35, 0.86, 0.35)) + vec3f(0.001, 0.0, 0.0));
+    let ropeBitang = cross(n, ropeTang);
+    let dStrand = cos(layPhase) * ropeFilter;
+    n = normalize(n + (ropeTang * dStrand * 0.28 + ropeBitang * dStrand * 0.18));
     ${damaged?`if(in.damage>0.25){
       albedo*=mix(1.0,0.45+0.35*ropeFray(p),clamp(in.damage,0.0,1.0));
       rough=0.96;
@@ -344,12 +412,16 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
   if(in.material == 9u || in.material == 13u) {
     let weave=sin(in.uv.x*1400.0)*sin(in.uv.y*1800.0)*(1.0-smoothstep(0.0004,0.003,weaveAA));
     let aged=0.94+0.045*gnoise(in.uv*vec2f(21.0,16.0));
+    let panelTone=0.985+0.03*fract(sin(floor(in.uv.x*10.0)*91.7)*43758.5);
     let seam=1.0-smoothstep(0.004,0.013+clothAA,clothSeam);
     let hem=1.0-smoothstep(0.006,0.014+edgeAA,clothEdge);
-    // Optical depth: overlapped stitching and doubled edge cloth block more
-    // light. Broad folds and filtered weave avoid a uniformly luminous sheet.
-    albedo=vec3f(0.58,0.55,0.48)*aged*(1.0-0.12*seam-0.08*hem)*(1.0+0.025*weave);
-    n=normalize(in.normal)*select(-1.0,1.0,front); rough=0.95;
+    // Optical depth: overlapped stitching, reef bands, corner tabling patches and doubled edge cloth
+    // block more light, while surface-gradient normal relief gives each cloth panel 3D pillowing.
+    let stitchShade=1.0 - 0.13*seam - 0.09*hem - 0.08*reefBand - 0.06*cornerPatch - 0.22*reefGrommet;
+    albedo=vec3f(0.58,0.55,0.48)*aged*panelTone*stitchShade*(1.0+0.025*weave);
+    let baseClothN=normalize(in.normal)*select(-1.0,1.0,front);
+    n=normalize(baseClothN - clamp(canvasGradient,vec3f(-0.24),vec3f(0.24)));
+    rough=0.93;
     ${damaged?`if(in.damage>0.04){
       let tear=canvasTear(in.uv,p,in.material,in.damage);
       let rimBand=smoothstep(tear.threshold-0.16,tear.threshold,tear.value);
@@ -369,7 +441,8 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
   var windowShardRim = 0.0;
   if(in.material == 11u) {
     // Georgian stern/quarter-gallery sash muntin grid (individual crown-glass panes)
-    let sashU = select(p.z * 34.0, p.x * 36.0, abs(in.normalLocal.z) > 0.45);
+    let isTransomWin = abs(in.normalLocal.z) > 0.45;
+    let sashU = select(p.z * 34.0, p.x * 36.0, isTransomWin);
     let sashV = p.y * 28.0;
     let paneCoord = vec2f(sashU, sashV);
     let paneId = floor(paneCoord);
@@ -381,11 +454,10 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
     let paneHash = fract(sin(dot(paneId, vec2f(127.1, 311.7))) * 43758.5453);
     let paneHash2 = fract(sin(dot(paneId, vec2f(269.5, 183.3))) * 43758.5453);
     // Hand-blown 18th-century crown glass has a slight bullseye meniscus curvature per pane
-    let crownRipple = vec3f(
-      (paneUV.x * 0.11 + (paneHash - 0.5) * 0.06) * windowPaneMask,
-      (paneUV.y * 0.11 + (paneHash2 - 0.5) * 0.06) * windowPaneMask,
-      0.0
-    );
+    // aligned to the window's horizontal tangent (X on stern transom, Z on quarter galleries).
+    let rippleH = (paneUV.x * 0.11 + (paneHash - 0.5) * 0.06) * windowPaneMask;
+    let rippleV = (paneUV.y * 0.11 + (paneHash2 - 0.5) * 0.06) * windowPaneMask;
+    let crownRipple = select(vec3f(0.0, rippleV, rippleH), vec3f(rippleH, rippleV, 0.0), isTransomWin);
     n = normalize(n + rotateHull(crownRipple));
     let muntinColor = vec3f(0.42, 0.24, 0.055);
     let glassBase = vec3f(0.014, 0.028, 0.032);
@@ -407,11 +479,15 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
   }
   if(in.material == 16u) { albedo=timber*vec3f(.20,.18,.15); }
   if(in.material == 17u) { albedo=timber*vec3f(1.10,1.0,.80); }
+  // Dynamic waterline wave-lap capillary meniscus on exterior hull planking and sheathing
+  let waterSurfY = select(0.0, oceanHeight(in.world.xz), !vesselWaterCapture && in.world.y < 2.2);
+  let waveMeniscus = select(0.0, smoothstep(0.28, 0.0, abs(in.world.y - waterSurfY)) * step(waterSurfY - 0.06, in.world.y), !vesselWaterCapture && in.world.y < 2.2 && abs(p.x) > 0.18);
+  wet = max(wet, vec2f(waveMeniscus * 0.65, waveMeniscus * 0.82));
   if(in.material==2u || in.material==12u || in.material==19u){
     albedo*=mix(1.0,.58,wet.x);rough=mix(rough,.65,wet.x);
   }else if(in.material==9u || in.material==13u){
-    albedo*=mix(1.0,.72,wet.x);rough=mix(.95,.84,wet.x);
-  }else if(in.material!=3u && in.material!=4u && in.material!=8u && in.material!=11u){
+    albedo*=mix(1.0,.72,wet.x);rough=mix(.93,.82,wet.x);
+  }else if(in.material!=3u && in.material!=4u && in.material!=8u && in.material!=11u && !isCopper && !isGilt){
     // Absorbed moisture darkens coarse timber without varnishing it. Only the
     // transient surface film glints; grain valleys retain more water than ridges.
     let timberMoisture=vesselWoodOptics(rough,wet.x,wet.y,relief,grain);
@@ -642,7 +718,8 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
     rough=max(rough,.92);
   }`:''}
   var f0=mix(vec3f(0.04),albedo,metal);
-  if(isWood){f0=vec3f(vesselWoodDielectricF0());}
+  if(isWood && metal<0.1){f0=vec3f(vesselWoodDielectricF0());}
+  if(in.material==11u){f0=max(f0,vec3f(0.045));}
   if(isIron){
     f0=iron.f0;
     // The oxide's dielectric boundary changes medium too. Bare-metal F0 stays
@@ -692,6 +769,25 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
   ${damaged?'if(holedTimber && p.y<deckFloor(p.z)+.06 && (!front || in.normalLocal.x*sign(p.x)< -.2)){directTransmission*=.04;environmentTransmission*=.1;}':''}
   var col=(diffuse/PI+spec)*direct*nl*directTransmission;
   col+=(diffuseAmbient*ambient*ao + reflected*F.windP[1].w*vesselEnvironment(n,v,rough,f0))*environmentTransmission;
+  // Grazing-angle flax & hemp fibre rim sheen on sails and ropes
+  if(in.material==2u || in.material==12u || in.material==19u || in.material==9u || in.material==13u){
+    let grazing=1.0-clamp(dot(n,v),0.0,1.0);
+    let g2=grazing*grazing;
+    let fiberSheen=g2*g2*(1.0-wet.x*0.65)*select(0.055,0.038,in.material==9u || in.material==13u);
+    col+=(direct*nl + ambient*0.35)*albedo*fiberSheen*directTransmission;
+  }
+  // Upward-reflected solar water-caustic shimmer on lower hull planks & overhanging stern counters
+  if(!vesselWaterCapture && l.y>0.02 && in.world.y>waterSurfY-0.05 && in.world.y<waterSurfY+3.2 && n.y<0.35 && abs(p.x)>0.18){
+    let hAbove=max(0.0,in.world.y-waterSurfY);
+    let cFade=(1.0-smoothstep(0.0,3.2,hAbove))*clamp(0.42-n.y,0.0,1.0)*step(0.0,dot(vec3f(l.x,0.0,l.z),vec3f(n.x,0.0,n.z))+0.35);
+    if(cFade>0.005){
+      let ct=hull.origin.w*1.65;
+      let cw1=sin(in.world.x*3.4+in.world.z*2.7+ct)+cos(in.world.z*4.1-in.world.x*2.3-ct*1.2);
+      let cw2=sin(in.world.x*6.2-in.world.z*5.1+ct*1.7)*cos(in.world.z*5.8+in.world.x*4.9-ct*1.4);
+      let causticNet=smoothstep(0.45,1.65,cw1*0.6+cw2*0.85);
+      col+=sunIlluminance()*sunVis[0]*l.y*diffuse*(causticNet*cFade*0.095*directTransmission);
+    }
+  }
   if(!vesselWaterCapture&&isIron&&iron.film>0.0001){
     let filmF0=vec3f(vesselIronWaterF0);
     col+=iron.film*vesselSpecular(n,v,l,iron.filmRough,filmF0)*direct*nl;

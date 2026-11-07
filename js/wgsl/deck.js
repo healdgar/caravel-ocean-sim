@@ -276,6 +276,8 @@ fn corner(v:u32)->vec2f {
   let foamLight=vec3f(0.88,0.90,0.91)*(ambient*1.1+sun*(0.12+0.28*abs(dot(n,F.sunDir.xyz))+scatter*0.35));
   let moonFoam=lunarIlluminance()*sunVis[1]*lunarShadowVisibility(shadowSample)*(.12+.28*abs(dot(n,lunarDirection()))+.35*pow(max(dot(-v,lunarDirection()),0.0),12.0));
   let color=mix(reflection,foamLight+vec3f(.88,.90,.91)*moonFoam,froth);
+  let glint=sun*vesselSpecular(n,v,F.sunDir.xyz,0.22,vec3f(0.02))*nl
+    +lunarSurface(n,v,vec3f(0.0),0.22,vec3f(0.02),sunVis[1]*lunarShadowVisibility(shadowSample));
   var alpha=smoothstep(0.001,0.015,w.x)*clamp(f+froth*0.7+w.x*0.28,0.0,0.9);
   if(curtain){
     let fall=in.curtain.x;
@@ -286,11 +288,10 @@ fn corner(v:u32)->vec2f {
     // bubbles obscure it; fixed opacity made dark blue plastic strips.
     alpha=coverage*(f*(1.0-aeration)+aeration);
     if(alpha<0.003){discard;}
-    let glint=sun*vesselSpecular(n,v,F.sunDir.xyz,0.24,vec3f(0.02))*nl;
     let radiance=coverage*((reflection*f+glint)*(1.0-aeration)+foamLight*aeration+lightningSurface(n,v,vec3f(.1),.24));
     return vec4f(surfaceAir(radiance/alpha,in.world)*alpha,alpha);
   }
   if(alpha<0.003){discard;}
-  return vec4f(surfaceAir(color+lightningSurface(n,v,vec3f(.1),.24),in.world)*alpha,alpha);
+  return vec4f(surfaceAir(color+glint*(1.0-froth)+lightningSurface(n,v,vec3f(.1),.24),in.world)*alpha,alpha);
 }
 `;

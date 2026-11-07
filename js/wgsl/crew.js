@@ -170,7 +170,20 @@ fn crewShade(v:CrewVertex,front:bool,baseIn:vec3f)->vec4f {
   let bp=v.bodyPos;
   let nHash=fract(sin(dot(bp*vec3f(19.3,27.1,23.7)+vec3f(bSeed*31.0),vec3f(12.9898,78.233,45.164)))*43758.5453);
   let nLow=sin(bp.x*18.0+bSeed*41.0)*cos(bp.y*14.0-bSeed*23.0)*0.5+0.5;
-  let n=normalize(v.normal)*select(-1.0,1.0,front);let sun=F.sunDir.xyz;
+  var n=normalize(v.normal)*select(-1.0,1.0,front);let sun=F.sunDir.xyz;
+  // Surface-gradient normal relief for woven wool/linen garments, sleeves, and textured captain regalia
+  let dx=dpdx(v.world);let dy=dpdy(v.world);
+  let sx=cross(dy,n);let sy=cross(n,dx);
+  let det=dot(dx,sx);
+  let bpFootprint=max(length(dpdx(bp)),length(dpdy(bp)));
+  let clothFilter=(1.0-smoothstep(0.012,0.065,bpFootprint))*(1.0-clamp(v.skin,0.0,1.0));
+  let foldWave=sin(bp.y*34.0+sin(bp.x*22.0+bp.z*19.0)*1.6)*0.0018;
+  let weaveWave=sin((bp.x+bp.z)*220.0)*sin(bp.y*240.0)*0.00045*(1.0-smoothstep(0.003,0.016,bpFootprint));
+  let texLuma=dot(baseIn,vec3f(0.2126,0.7152,0.0722));
+  let texRelief=select(0.0,(texLuma-0.35)*0.0032,v.color.b<-1.0);
+  let clothBump=(foldWave+weaveWave+texRelief)*clothFilter;
+  let clothGrad=(dpdx(clothBump)*sx+dpdy(clothBump)*sy)/max(abs(det),0.000001)*sign(det);
+  n=normalize(n-clamp(clothGrad,vec3f(-0.22),vec3f(0.22)));
   let shadowSample=vesselShadow(v.world,n);
   let direct=sunIlluminance()*sunVis[0]*step(0.0,sun.y)*solarShadowVisibility(shadowSample);
   let sky=textureSampleLevel(envCube,sampC,vec3f(0,1,0),${ENV_MIPS-1}.0).rgb;
@@ -225,7 +238,9 @@ fn crewShade(v:CrewVertex,front:bool,baseIn:vec3f)->vec4f {
   let f0=vec3f(.04);
   let spec=vesselSpecular(n,view,sun,rough,f0);
   let reflected=textureSampleLevel(envCube,sampC,reflect(-view,n),rough*${ENV_MIPS-1}.0).rgb;
-  let col=lunarSurface(n,view,albedo,rough,f0,sunVis[1]*lunarShadowVisibility(shadowSample))+lightningSurface(n,view,albedo,rough)+gunFlashSurface(v.world,n,view,albedo,rough)+albedo*(direct*diffuse/PI+ambient)+direct*spec*max(dot(n,sun),0.0)
+  let grazing=1.0-clamp(dot(n,view),0.0,1.0);
+  let clothSheen=grazing*grazing*grazing*grazing*(1.0-clamp(v.skin,0.0,1.0))*(1.0-wet.x*0.7)*0.045;
+  let col=lunarSurface(n,view,albedo,rough,f0,sunVis[1]*lunarShadowVisibility(shadowSample))+lightningSurface(n,view,albedo,rough)+gunFlashSurface(v.world,n,view,albedo,rough)+albedo*(direct*(diffuse/PI+clothSheen)+ambient*(1.0+clothSheen*0.5))+direct*spec*max(dot(n,sun),0.0)
     +reflected*F.windP[1].w*vesselEnvironment(n,view,rough,f0);
   // Match timber, canvas and land: the same directional sky and marine haze
   // must veil every surface along this view ray, including shadowed sailors.
