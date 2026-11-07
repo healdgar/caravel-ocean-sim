@@ -256,12 +256,17 @@ test('fireLoaded fires the 48 ready guns while weather-deck guns finish loading,
  assert.equal(guns.canFireLoaded('port'),true,'canFireLoaded is true when 48 of 52 guns are ready');
  if(partial.ready<partial.total){
   assert.equal(guns.fireLoaded('port'),true,'fireLoaded fires the ready guns without waiting for all 52');
+  // The salvo is every gun ready when the word is given, two seconds after the order: a gun finishing in between joins it.
+  let readyAtWord=partial.ready;
   for(let i=0;i<120;i++){
+   const ready=guns.summary('port').ready;
    stepCompany(company,boat,0.1,6);
    guns.update(0.1,[0,0,0]);
+   if(!events.some(e=>e.type==='shot'))readyAtWord=ready;
   }
   const shotsFired=events.filter(e=>e.type==='shot').length;
-  assert.equal(shotsFired,partial.ready,'all 48 ready guns discharged');
+  assert.ok(readyAtWord>=48);
+  assert.equal(shotsFired,readyAtWord,'every ready gun discharged, and none still loading');
  }
  assert.equal(guns.setFireAtWill(true,'port'),true);
  assert.equal(guns.fireAtWill,true);

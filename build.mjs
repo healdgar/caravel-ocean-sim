@@ -30,7 +30,7 @@ order.splice(order.indexOf('js/terrain.js'),0,'js/coastal-field.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/sea-colour.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/scenery-cull.js');
 order.splice(order.indexOf('js/gltf.js'),0,'js/crew-lod.js');
-order.splice(order.indexOf('js/crew-work.js'),0,'js/crew-navigation.js','js/crew-motion.js');
+order.splice(order.indexOf('js/crew-work.js'),0,'js/crew-navigation.js','js/crew-motion.js','js/models/crew-deck-masks.js','js/crew-deck.js','js/crew-traffic.js');
 order.splice(order.indexOf('js/crew-pose.js'),0,'js/crew-physics.js');
 order.splice(order.indexOf('js/crew.js'),0,'js/crew-clip-pose.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/terrain-near.js');

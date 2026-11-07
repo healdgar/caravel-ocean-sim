@@ -5,7 +5,7 @@ create executable sail-handling and hatch jobs. Fore/main work assembles an alof
 hand and a deck hand; only their attendance allows actual canvas to change.
 A lookout climbs a foremast runner during watch. Job phases are approach,
 ascending, working, descending and return. Routes are authored; role allocation
-reserves distinct runners, and moving sailors yield to nearby bodies.
+reserves distinct runners, and moving sailors get past each other as described under Getting past each other.
 
 `js/rigging.js` supplies the mesh, runner path and grip positions. Two-bone IK
 places alternating hands and simplified boot locks against the actual ropes.
@@ -168,6 +168,67 @@ The sequence is authored and simplified, not historical reefing or a general
 multi-agent planning solution. Station ownership is by fixed role; there is no
 arbitrary task auction or general deadlock resolver. Physical iPhone performance
 of procedural IK remains unmeasured; the 30 FPS resolution target still applies.
+
+## Getting past each other
+
+Routes still say where to go. `js/crew-traffic.js` says who goes where on the deck in the meantime.
+
+- **Bodies on the move** avoid each other by velocity obstacles (ORCA, van den Berg et al.), written here in about a hundred lines. Each takes a share of the avoiding by right of way, and each keeps to starboard of his own direction of travel, moving over before the meeting. If his right hand has no room he holds his line and the other takes all of it.
+- **Someone standing still** is a matter for the route. The walker goes round on a line planned for it (`crewWorkPassingDetour`), and a round turns back. Someone idle with no way past them is asked to step aside (`crewWorkYieldIdle`), off the line the asker still has to walk.
+- **A gap one body wide** takes one direction at a time. A lane is sampled along the route, and any stretch too tight for two, or on a stair, is such a gap. Whoever gives way waits at the last wide spot before it, a step to starboard of the lane. Victory's gangway past her guns is this: one body wide at each gun's recoil, with a bay between each pair of guns to stand in.
+- **Right of way** is a strict order, so nobody waits on someone waiting on them: in the gap first, then gun crews and sail handlers at an order, then a load (`s.carrying`, or a loader going to his gun), then anyone strolling. Ties go by crew index.
+- **Nose to nose** with someone who goes first, he steps out of their way, or back along his own trail if there is nowhere to step. After three seconds of it, either of them will.
+- **A tight place** turns the shoulders. Centre to centre, two bodies try to keep 0.56 m, then 0.50 m, then 0.40 m turned. After four seconds hemmed in they may go to 0.32 m. The legs keep walking where he is going and the shoulders come round to face whoever he is squeezing past, in a compute pass over the skinning palette (`CREW_SHOULDER_TURN`). JavaScript sends one number a body, and nothing while everyone is square.
+- **Feet.** The body comes round to the way it is going at a limited rate, and the walk slows while it does. Nobody turns on a shuffle.
+
+A man lying on the deck is gone round if there is room and stepped over if not, and he keeps no one from taking his place at a gun.
+
+Rowed hulls keep their own planner, because a walker there steps over thwarts on the line of the route. The helmsman, seated rowers and anyone working at a fixed station are walked around, and move only where a yield rule already had them move. Bodies aloft and overboard are ignored.
+
+### The deck
+
+`js/crew-deck.js` answers how far a point is from anything a body would strike. It starts from `js/models/crew-deck-masks.js`, baked by `node scripts/bake-crew-deck.mjs` from the mesh each ship draws: real floor at the height the crew walk on, nothing solid from the knee to the head, no step in the deck. To that it adds the reserved recoil of her guns, and an edge that has lost its rail narrows it as it is asked (`crewDeckRoom`). A step off the route is allowed only where this says so, and within half a metre of anything only if the route's own exact check agrees as well, so a body can always be routed on from wherever passing left him. Routes themselves still come from their graphs: MODEL_AUDIT item 23 stands for them, and only the sidesteps are held to the mesh.
+
+A round goes only where the mesh leaves 0.44 m, so a hand at a tight post now stays at it. Before, most of them stood blocked anyway.
+
+If a mesh changes, `tests/crew-deck.test.mjs` says so, and the masks want baking again.
+
+### Why this and not a library
+
+The numbers below say the old code hardly ever overlapped except where a gun crew was let walk through: what it mostly did was stand. So the work was less about avoiding bodies than about keeping them moving.
+
+- **RVO2/ORCA** is the standard. `palmerabollo/rvo2-js` still calls itself an alpha for research only, and its core is small, so it is written here, with half-planes taken from the clearance field in place of obstacle polygons.
+- **ORCA alone gridlocks in counterflow.** The gaps are why the lanes and right of way exist. Cooperative-ORCA* (arXiv 2606.22757) reaches for the same thing, each agent's whole trajectory rather than the next moment, for planned multi-agent paths. Reciprocally-Rotating Velocity Obstacles (Giese, Latypov and Amato, ICRA 2014) rotate polygonal agents to break deadlock. Here the turn is a pose on a capsule that passes closer, not a change to the solver.
+- **Recast/Detour's crowd** has a maintained WASM port (`recast-navigation-js`). Tilt is no argument against it, since crew live in ship space, and damage only narrows the deck. But it brings a dependency, a path corridor of its own in place of the routes with their exact stair heights, and neither right of way nor passing side.
+
+### What it did
+
+Each row is one scene from `node scripts/crew-traffic.mjs`, with the full watch aboard, before and after. Deep means one body more than 0.1 m into another, reading a torso as an ellipse 0.48 m across and 0.38 m deep. Blocked counts time spent wanting to walk and not moving. A work trip is measured against path length over pace, so turning now counts against it where it used not to, as the clear-deck orders show. Feet follow the boot that is down through the walk clip and the body's transform: the mean is mostly the clip's own slip, and the worst of it was yaw snapping round.
+
+| Ship | Scene | Deep overlaps a minute | Closest (m) | Blocked, all walkers | Blocked, at work | Longest stop (s) | Work trip against an empty deck | Feet: mean / p99 slide (m/s) | Yaw pops a minute |
+|---|---|---|---|---|---|---|---|---|---|
+| Niña | watch | 0 → 0 | 0.54 → 0.397 | 78% → 3% | 16% → 9% | 173.6 → 0.6 | ×1.09 → ×1.73 | 0.82 / 2.6 → 0.72 / 2.6 | 11.7 → 0.7 |
+| Niña | sail | 0 → 0 | 0.541 → 0.494 | 33% → 8% | 17% → 9% | 11.8 → 0.9 | ×1.3 → ×1.47 | 0.70 / 7.2 → 0.69 / 3.2 | 54.1 → 5.2 |
+| Niña | guns | 0 → 0 | 0.542 → 0.666 | 10% → 5% | 6% → 5% | 0.8 → 0.1 | ×1.05 → ×1.3 | 0.83 / 10.5 → 0.76 / 3.7 | 41.9 → 5.4 |
+| Victory | watch | 0 → 0 | 0.541 → 0.462 | 50% → 9% | 8% → 1% | 172.9 → 2.5 | ×1.2 → ×1.14 | 0.74 / 2.4 → 0.77 / 2.5 | 24.3 → 0.7 |
+| Victory | sail | 0 → 0 | 0.542 → 0.433 | 33% → 9% | 9% → 4% | 41.6 → 2.5 | ×1.18 → ×1.15 | 0.67 / 4.9 → 0.61 / 2.7 | 110 → 1.3 |
+| Victory | guns | 0.67 → 0 | 0.02 → 0.419 | 7% → 5% | 7% → 5% | 0.6 → 0.1 | ×1.16 → ×1.09 | 0.60 / 8.1 → 0.61 / 3.0 | 14.7 → 3.3 |
+| Santa María | watch | 0 → 0 | 0.546 → 0.55 | 2% → 1% | 4% → 3% | 1.6 → 0.7 | ×1.1 → ×1.2 | 0.71 / 2.3 → 0.68 / 2.4 | 11 → 0.7 |
+| Santa María | sail | 0 → 0 | 0.542 → 0.55 | 3% → 2% | 4% → 3% | 1.4 → 0.6 | ×1.1 → ×1.2 | 0.64 / 6.0 → 0.61 / 2.8 | 85.5 → 3.9 |
+| Santa María | guns | 1.55 → 0 | 0.001 → 0.496 | 5% → 1% | 6% → 2% | 2.6 → 0.3 | ×1.12 → ×1.17 | 0.57 / 5.4 → 0.52 / 2.7 | 52.8 → 2.3 |
+| Oseberg | watch | 0 → 0 | 0.914 → 0.914 | 0% → 0% | 0% → 0% | 0 → 0 | ×0 → ×0 | 0.00 / 0.0 → 0.00 / 0.0 | 0 → 0 |
+| Oseberg | sail | 0 → 0 | 0.582 → 0.582 | 2% → 2% | 2% → 2% | 0.1 → 0.1 | ×1.12 → ×1.15 | 0.31 / 2.7 → 0.35 / 2.6 | 19.7 → 0 |
+
+| Ship | Order on a crowded deck | Same order, clear deck | All at work by (crowded / clear) |
+|---|---|---|---|
+| Niña | 41 → 45.8 s | 39.8 → 41.4 s | 6.5 / 5.8 → 8.8 / 7.2 s |
+| Victory | 94.8 → 95.5 s | 92.1 → 94.2 s | 24.9 / 23.2 → 21.1 / 20.2 s |
+| Santa María | 58.9 → 61.1 s | 56.2 → 59.4 s | 27.8 / 26.7 → 29 / 28.2 s |
+| Oseberg | 15.2 → 15.5 s | 15.2 → 15.5 s | 6.1 / 6.1 → 6.4 / 6.4 s |
+
+The busy deck is where the time goes now, not the standing: a hand walks round whoever is in the way where others used to stop dead for him, so a work trip through a crowded Niña is longer than it was (her lookout's walk home, ×1.73), while bystanders on her deck went from 78% blocked to 3%. Clear-deck orders are 1 to 6% slower because a body now turns where it used to snap. Her crowded sail order is the worst of it, 12% longer than before.
+
+Victory's simulation, the fastest of three runs of a minute each in node: watch 0.81 → 0.73 ms a step, sail 0.45 → 0.52, gun drill 0.33 → 0.65. The next stretch of route is now checked once and not every frame, which is why a watch got cheaper. The shoulder pass takes under 0.01 ms a batch on the GPU, and only while someone is turned.
 
 ## When the mast comes down
 

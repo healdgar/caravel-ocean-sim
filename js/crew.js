@@ -21,8 +21,10 @@ import {ROWING_DESIGNS} from './models/rowing.js';
 import {proceduralDesign} from './models/procedural.js';
 import { crewDeckHazard, crewMotionPolicy, crewTurnTowards, crewAdvanceWalk } from './crew-motion.js';
 import { crewNavigationStation, crewNavigationRoute, crewRoutineSegmentClear } from './crew-navigation.js';
+import { crewTrafficStep, crewTrafficAfterStep } from './crew-traffic.js';
+import { crewDeckField, crewDeckRoom } from './crew-deck.js';
 import { selectCrewLOD, CREW_LOD_TIERS, createCrewLODs, crewPoseInterval, crewApparentDistance, crewLensZoom, crewSailorTier, crewDrawRuns, crewNeedsCutShader, crewClipOnly } from './crew-lod.js';
-import { createCrewClipPipeline, createCrewClipBatch } from './crew-clip-pose.js';
+import { createCrewClipPipeline, createCrewClipBatch, createCrewTurnPipeline, createCrewTurnBatch } from './crew-clip-pose.js';
 
 // Authored, disjoint stations keep a full company clear of stairs and masts.
 // Policies choose intent. The executor alone changes position and animation.
@@ -310,6 +312,7 @@ export function stepCompany(company,boat,dt,wind) {
     if(!stepCrewWork(s,company,boat,sailorDt)){s.observation.job=null;stepDeckhand(s,boat,hadJob?0:sailorDt,wind,company);}
     stepCrewPhysicsState(s,boat,sailorDt,company);
   }
+  crewTrafficAfterStep(company,boat,dt);
   updateCrewGunneryAttendance(company,boat);
   updateCrewRowingAttendance(company,boat);
   // Hazard/policy changes above can alter attendance during this step. Resolve
@@ -356,6 +359,18 @@ function crewStepInboard(s,boat,dt){
   crewAdvanceWalk(s,step*sx,{strideMetres:motion.strideMetres});
   return true;
 }
+// How long a sailor on his rounds will stand stopped, in seconds.
+const CREW_PATROL_PATIENCE=2.5,CREW_ROUND_ROOM_M=.44,CREW_PATROL_TURN_BACK_M=1.3;
+function crewPatrolTrafficClear(s,boat,x0,z0,x1,z1){
+  const sx=boat.beam/3.6,sz=boat.length/12;
+  return crewRoutineSegmentClear(s,boat,[x0/sx,crewDeckHeight(boat,z0/sz,x0/sx),z0/sz],[x1/sx,crewDeckHeight(boat,z1/sz,x1/sx),z1/sz]);
+}
+// Back onto his round from wherever passing someone has left him. Failing that, the round is over.
+function crewPatrolRejoin(s,boat,x,z){
+  const sx=boat.beam/3.6,sz=boat.length/12,here=[x/sx,crewDeckHeight(boat,z/sz,x/sx),z/sz],to=s.navigationPath?.[s.navigationCursor];
+  if(to&&crewRoutineSegmentClear(s,boat,here,to))return true;
+  crewFinishPatrol(s);return true;
+}
 function crewFinishPatrol(s){
   s.target=s.route?(s.target===s.route[1]?s.route[0]:s.route[1]):s.target>0?-2.2:.1;s.wait=2.5;s.navigationPath=null;
 }
@@ -373,11 +388,28 @@ function crewPatrolMotion(s,boat,dt,company){
     s.navigationPath=to?crewNavigationRoute([from,to],boat):null;s.navigationKey=key;s.navigationCursor=0;
   }
   const path=s.navigationPath;if(!path?.length)return false;
+  // A hand at a tight post stays at it: a round goes only where the mesh leaves room for a body, arms and all.
+  const field=company?crewDeckField(boat):null;
+  if(field&&crewDeckRoom(field,boat,from[0]*sx,from[2]*sz)<CREW_ROUND_ROOM_M){s.navigationPath=null;return false;}
   while(s.navigationCursor<path.length&&Math.hypot((path[s.navigationCursor][0]-from[0])*sx,(path[s.navigationCursor][1]-from[1])*sy,(path[s.navigationCursor][2]-from[2])*sz)<1e-7)s.navigationCursor++;
   const target=path[s.navigationCursor];
   if(!target){crewFinishPatrol(s);return false;}
   const dx=(target[0]-from[0])*sx,dy=(target[1]-from[1])*sy,dz=(target[2]-from[2])*sz,horizontal=Math.hypot(dx,dz),distance=Math.hypot(horizontal,dy);
   const motion=crewMotionPolicy(boat,{grade:horizontal>1e-8?dy/horizontal:0,hazard:s.observation.hazard});
+  const passing=company?crewTrafficStep(s,company,boat,{x:from[0]*sx,z:from[2]*sz,toX:target[0]*sx,toZ:target[2]*sz,speed:motion.speedMetresPerSecond,dt,segmentClear:crewPatrolTrafficClear,rejoin:crewPatrolRejoin}):null;
+  if(passing){
+    const walked=Math.hypot(passing.x-from[0]*sx,passing.z-from[2]*sz);
+    // A round is nothing to wait for, or to go out of the way for: he turns back from someone standing in it.
+    if(passing.stander&&Math.hypot(passing.stander.position[0]-from[0]*sx,passing.stander.position[2]-from[2]*sz)<CREW_PATROL_TURN_BACK_M){s.patrolStopped=0;s.trafficOffRoute=false;crewFinishPatrol(s);return false;}
+    s.patrolStopped=walked<1e-4?(s.patrolStopped??0)+dt:0;
+    if(s.patrolStopped>CREW_PATROL_PATIENCE){s.patrolStopped=0;crewFinishPatrol(s);return false;}
+    if(walked<1e-5)return false;
+    const X=passing.x/sx,Z=passing.z/sz,Y=crewDeckHeight(boat,Z,X);
+    s.x=X;s.z=Z;s.navigationY=Y;s._cachedDeckY=Y;s.patrolClearPath=null;crewAdvanceWalk(s,walked,{strideMetres:motion.strideMetres});
+    const goal=path[s.navigationCursor];
+    if(goal&&Math.hypot((goal[0]-X)*sx,(goal[2]-Z)*sz)<.2&&++s.navigationCursor>=path.length)crewFinishPatrol(s);
+    return true;
+  }
   const desired=horizontal>1e-8?Math.atan2(dx,dz):s.yaw;s.yaw=crewTurnTowards(s.yaw,desired,dt,motion.turnRadiansPerSecond);
   const angle=Math.atan2(Math.sin(desired-s.yaw),Math.cos(desired-s.yaw));
   const travel=Math.min(distance,motion.speedMetresPerSecond*Math.max(0,Math.cos(angle))*dt),q=distance>1e-8?travel/distance:0;
@@ -385,14 +417,19 @@ function crewPatrolMotion(s,boat,dt,company){
   // Routine rounds remain on one weather deck. Its curved sheer is not the
   // endpoint chord; actual stair/ramp travel belongs to the job executor.
   next[1]=crewDeckHeight(boat,next[2],next[0]);
-  if(!travel||!crewRoutineSegmentClear(s,boat,from,next))return false;
-  if(company?.crew.some(other=>{
-    if(other===s)return false;
-    const y=(other.job?.position?.[1]??other.navigationY??other._cachedDeckY??crewDeckHeight(boat,other.z,other.x))*sy;
-    if(Math.abs(next[1]*sy-y)>=1.7)return false;
-    const gap=Math.hypot((next[0]-other.x)*sx,(next[2]-other.z)*sz),before=Math.hypot((from[0]-other.x)*sx,(from[2]-other.z)*sz);
-    return gap<.60&&gap<before-1e-8;
-  }))return false;
+  if(!travel)return false;
+  // A round does not go where the mesh has no room for a body, whatever was asked of it. He turns back, or stands if he has nowhere.
+  if(field&&crewDeckRoom(field,boat,next[0]*sx,next[2]*sz)<CREW_ROUND_ROOM_M){
+    s.patrolStopped=0;crewFinishPatrol(s);
+    return false;
+  }
+  // The way to the next point of his round need only be asked about once, until something is shot away.
+  const revision=boat.damage?.fracture?.revision??0;
+  if(s.patrolClearPath!==path||s.patrolClearCursor!==s.navigationCursor||s.patrolClearRevision!==revision){
+    if(crewRoutineSegmentClear(s,boat,from,target)){s.patrolClearPath=path;s.patrolClearCursor=s.navigationCursor;s.patrolClearRevision=revision;}
+    else if(!crewRoutineSegmentClear(s,boat,from,next))return false;
+  }
+  s.patrolStopped=0;
   const acceptedDistance=Math.hypot((next[0]-from[0])*sx,(next[1]-from[1])*sy,(next[2]-from[2])*sz);
   s.x=next[0];s.z=next[2];s.navigationY=next[1];s._cachedDeckY=next[1];crewAdvanceWalk(s,acceptedDistance,{strideMetres:motion.strideMetres});
   if(distance<=travel+1e-7&&++s.navigationCursor>=path.length)crewFinishPatrol(s);
@@ -485,6 +522,8 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
   const modelsPromise=shared?.models?Promise.resolve(shared.models):(preloadedCrewModels??fetchCrewModels());
   modelsPromise.catch(()=>{});
   const B=GPUBufferUsage,state=createCompany(undefined,modelId,{fullWatch:true});
+  // Built now, at loading, rather than the first time anyone has to step aside.
+  crewDeckField({modelId,...requirePlayableShipModel(modelId).runtime});
   const buffer=(label,data,usage)=>{const b=device.createBuffer({label,size:data.byteLength,usage:usage|B.COPY_DST});device.queue.writeBuffer(b,0,data);return b;};
   const layout=[{arrayStride:60,attributes:[
     {shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},
@@ -508,6 +547,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
   const group=(pipe,resources)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource}))});
   const poseBlendPipeline=shared?.poseBlendPipeline??await shader(CREW_POSE_BLEND,'crew pose blend').then(blendModule=>device.createComputePipelineAsync({label:'crew pose blend',layout:'auto',compute:{module:blendModule,entryPoint:'main'}}));
   const clipPipeline=shared?.clipPipeline??await createCrewClipPipeline(device,shader);
+  const turnPipeline=shared?.turnPipeline??await createCrewTurnPipeline(device,shader);
   const batches=models.map((model,i)=>{
     const people=state.crew.filter(s=>s.sex===(i?'female':'male'));
     for(const s of people)s.walkClipDuration=model.animator.clips.get('Walk').duration;
@@ -522,13 +562,14 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
     const solved=device.createBuffer({label:'crew solved poses',size:poses.byteLength*2,usage:B.STORAGE|B.COPY_DST}),blend=buffer('crew pose blends',blends,B.STORAGE);
     const poseBlendGroup=device.createBindGroup({label:'crew pose blend',layout:poseBlendPipeline.getBindGroupLayout(0),entries:[solved,blend,bones].map((resource,binding)=>({binding,resource:{buffer:resource}}))});
     const clip=createCrewClipBatch(device,clipPipeline,model,bones,people.length);
+    const turn=createCrewTurnBatch(device,turnPipeline,model,bones,people.length);
     const common=[{buffer:hullUBO},{buffer:bones},{buffer:actor}];
     const mainResources=[{buffer:frameUBO},...common,transView,sampClamp,envCubeView,{buffer:sunVisBuf},{buffer:wetness.state},skyView];
     const main=group(pipeline,mainResources),mainCut=group(cutPipeline,mainResources);
     // The depth entry reads only what the vertex stage does, and the frame.
     const cutDepth=device.createBindGroup({layout:cutDepthPipeline.getBindGroupLayout(0),entries:[0,1,2,3,8].map(binding=>({binding,resource:mainResources[binding]}))});
     const shadow=group(shadowPipeline,[{buffer:shadows.uniform},...common]);
-    return {model,people,poses,actors,vertex,index,lods,bones,actor,main,mainCut,cutDepth,shadow,mainResources,solved,blend,blends,poseBlendGroup,clip};
+    return {model,people,poses,actors,vertex,index,lods,bones,actor,main,mainCut,cutDepth,shadow,mainResources,solved,blend,blends,poseBlendGroup,clip,turn};
   });
   const lighting=shadows.bind(pipeline),cutLighting=shadows.bind(cutPipeline);
   const submerged=waterOptics?await waterOptics.capture({source:CREW_RENDER,pipeline,vertex:{buffers:layout},groups:2}):null;
@@ -547,7 +588,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
       pass.drawIndexed(lod.indexCount??lod.indices.length,run.count,0,0,run.first);
     }
   };
-  return {state,assets:{models,pipeline,cutDepthPipeline,cutPipeline,shadowPipeline,poseBlendPipeline,clipPipeline,gunTools:gunTools.assets,geometry:batches.map(({vertex,index,lods})=>({vertex,index,lods}))},triangles:batches.reduce((n,b)=>n+b.model.indices.length/3*b.people.length,0),lods:CREW_LOD_TIERS,
+  return {state,assets:{models,pipeline,cutDepthPipeline,cutPipeline,shadowPipeline,poseBlendPipeline,clipPipeline,turnPipeline,gunTools:gunTools.assets,geometry:batches.map(({vertex,index,lods})=>({vertex,index,lods}))},triangles:batches.reduce((n,b)=>n+b.model.indices.length/3*b.people.length,0),lods:CREW_LOD_TIERS,
     get lodLevel(){return activeTier;},
     get posed(){return posed;},
     get activeTriangles(){return batches.reduce((n,b)=>n+((b.lods?.[activeTier]?.triangles)??(b.model.indices.length/3))*b.people.length,0);},
@@ -623,7 +664,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
         b.runs=crewDrawRuns(b.people,s=>s.visible===false||s.cutShader?-1:s.lodTier);
         b.cutRuns=crewDrawRuns(b.people,s=>s.visible!==false&&s.cutShader?s.lodTier:-1);
         b.shadowRuns=crewDrawRuns(b.people,s=>s.visible===false?-1:Math.min(CREW_LOD_TIERS.length-1,s.lodTier+1));
-        device.queue.writeBuffer(b.blend,0,b.blends);device.queue.writeBuffer(b.actor,0,b.actors);b.clip.upload();
+        device.queue.writeBuffer(b.blend,0,b.blends);device.queue.writeBuffer(b.actor,0,b.actors);b.clip.upload();b.turn.update(b.people);
       }
       // After posing, so an arrow's bone is this frame's.
       gunTools.update(state,boat,true);
@@ -634,6 +675,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
       pass.setPipeline(poseBlendPipeline);
       for(const b of batches)if(b.people.length){pass.setBindGroup(0,b.poseBlendGroup);pass.dispatchWorkgroups(Math.ceil(b.people.length*65/64));}
       for(const b of batches)if(b.people.length)b.clip.encode(pass);
+      for(const b of batches)if(b.people.length)b.turn.encode(pass);
     },
     drawSubmerged(pass,above=false){
       if(!submerged||!drawEnabled)return;
@@ -650,7 +692,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
     },
     drawShadow(pass){if(!drawEnabled)return;pass.setPipeline(shadowPipeline);for(const b of batches)drawBatch(pass,b,true);gunTools.drawShadow(pass);},
     status(){return state.crew.length&&!state.crew.some(s=>s.visible)?hasExtendedCrewModel(modelId)?'Crew hidden':'Crew needs a larger deck':companyStatus(state);},
-    destroy(){gunTools.destroy();for(const b of batches)for(const resource of [...(shared?[]:[b.vertex,b.index,...(b.lods?.slice(1).map(l=>l.buffer)??[])]),b.bones,b.actor,b.solved,b.blend])resource.destroy();for(const b of batches)b.clip.destroy();},
+    destroy(){gunTools.destroy();for(const b of batches)for(const resource of [...(shared?[]:[b.vertex,b.index,...(b.lods?.slice(1).map(l=>l.buffer)??[])]),b.bones,b.actor,b.solved,b.blend])resource.destroy();for(const b of batches){b.clip.destroy();b.turn.destroy();}},
   };
 }
 
