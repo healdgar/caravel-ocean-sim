@@ -583,16 +583,20 @@ function markBroken(state, s) {
 // A cheap repeatable number for this shard, so a replayed battle looks the same.
 const shardNoise = (s, salt) => { const x = Math.sin(s * 12.9898 + salt * 78.233) * 43758.5453; return x - Math.floor(x); };
 
-// A shard shot away flies from where it was, spinning.
+// A shard shot away flies from where it was, spinning. Light splinters and window frames fly fast; heavy oak hull strakes heave outward with realistic mass.
 function blowOff(state, s, now, { side = 0, power = 1, up = 1, drop = false } = {}) {
   const shard = state.fracture.shards[s];
   if (!shard || !markBroken(state, s)) return false;
   const a = shardNoise(s, 1), b = shardNoise(s, 2), c = shardNoise(s, 3);
   const outward = side || (shard.centroid[0] >= 0 ? 1 : -1);
+  const [sx, sy, sz] = state.fracture.scale;
+  const boxVol = Math.max(0.01, (shard.max[0] - shard.min[0]) * sx * (shard.max[1] - shard.min[1]) * sy * (shard.max[2] - shard.min[2]) * sz * 0.25);
+  const massScale = power >= 1.8 ? 1.0 : Math.min(1.25, Math.max(0.42, 0.52 / Math.cbrt(boxVol)));
+  const effPower = power * massScale;
   const velocity = drop
     ? [outward * (0.3 + a), 0.2 * b, (c - 0.5)]
-    : [outward * (2 + 5 * a) * power, (1 + 4 * b) * up * power, (c - 0.5) * 5 * power];
-  const rate = drop ? 1 + 2 * b : (2 + 6 * c) * Math.min(1.6, power);
+    : [outward * (1.8 + 4.2 * a) * effPower, (0.8 + 3.2 * b) * up * effPower, (c - 0.5) * 4.0 * effPower];
+  const rate = drop ? 1 + 2 * b : (2 + 5 * c) * Math.min(1.5, effPower);
   const axis = [a - 0.5, b - 0.5, c - 0.5], n = Math.hypot(...axis) || 1;
   writeFlight(state, s, { pivot: shard.centroid, velocity, spin: axis.map((v) => (v / n) * rate), linger: 3 }, now);
   return true;
@@ -697,9 +701,9 @@ function dismountGun(state, event, now) {
 }
 
 const STRIKE_RULES = Object.freeze({
-  'internal-deck': { amount: 0.25, radius: 0.8 },
-  'back-wall': { amount: 0.5, radius: 1.1 },
-  'window-shatter': { amount: 1.2, radius: 1.3 },
+  'internal-deck': { amount: 0.22, radius: 0.65 },
+  'back-wall': { amount: 0.45, radius: 0.9 },
+  'window-shatter': { amount: 1.2, radius: 1.2 },
 });
 
 /**
@@ -738,9 +742,9 @@ export function applyFractureEvents(fracture, damage, events, now = 0) {
     const rule = STRIKE_RULES[event.kind];
     const severity = Math.max(0.25, Number(event.severity) || 0.6);
     const penetrating = (Number(event.stepDepth) || 0) >= 0.22;
-    const amount = (rule?.amount ?? (penetrating ? 1.15 : 0.42) * severity) / fracture.toughness;
-    const radius = (rule?.radius ?? (penetrating ? 1.2 : 0.9)) * reach;
-    released += strike(state, point, { radius, amount, side: event.side ?? (point[0] >= 0 ? 1 : -1), power: 0.7 + severity * 0.6, now });
+    const amount = (rule?.amount ?? (penetrating ? 1.12 : 0.40) * severity) / fracture.toughness;
+    const radius = (rule?.radius ?? (penetrating ? 0.98 : 0.76)) * reach;
+    released += strike(state, point, { radius, amount, side: event.side ?? (point[0] >= 0 ? 1 : -1), power: 0.65 + severity * 0.5, now });
   }
   released += destroyWreckedParts(state, damage, now);
   if (released) released += releaseUnsupported(state, now);

@@ -588,6 +588,8 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
     shard.localMax = [Math.max(a[0], b[0], c[0], d[0]), shard.max[1], Math.max(a[2], b[2], c[2], d[2])];
     shard.centroid = [(shard.min[0] + shard.max[0]) * 0.5, (shard.min[1] + shard.max[1]) * 0.5, (shard.min[2] + shard.max[2]) * 0.5];
     if (!shard.volume) shard.volume = Math.max(0.02, (shard.max[0] - shard.min[0]) * (shard.max[1] - shard.min[1]) * (shard.max[2] - shard.min[2]) * 0.4);
+    const densityKgM3 = shard.timber ? 680 : shard.earth ? 1600 : fortified ? 2450 : 2100;
+    shard.massKg = Math.max(12, shard.volume * densityKgM3);
     shard.normal = unitOf(shard.normalSum);
     delete shard.normalSum;
   }
@@ -821,25 +823,32 @@ function releaseShard(state, s, now, { direction = null, power = 1, proximity = 
   exposeNeighbours(state, shard);
   const a = blockNoise(s, 1), b = blockNoise(s, 2), c = blockNoise(s, 3);
   const out = direction ?? shard.normal, pivot = shard.centroid;
-  const effVol = Math.max(0.03, (shard.volume ?? 0.25) * (shard.timber ? 0.45 : 1));
-  const massScale = Math.min(2.6, Math.max(0.75, 0.85 / Math.cbrt(effVol)));
-  const proxScale = 0.45 + 0.85 * Math.max(0, Math.min(1, proximity));
-  const impulse = power * massScale * proxScale;
+  const massKg = shard.massKg ?? Math.max(12, (shard.volume ?? 0.25) * (shard.timber ? 680 : shard.earth ? 1600 : 2100));
+  // Momentum-conserving piece response: light timber splinters (~25-80 kg) fly fast, medium masonry stones (~250-600 kg)
+  // heave outward on low arcs, and multi-tonne cut-stone blocks (~1,200-3,000 kg) are shoved out of their course and crash down.
+  const massScale = shard.earth
+    ? 0.18
+    : shard.timber
+      ? Math.min(1.25, Math.max(0.55, Math.pow(75 / massKg, 0.38)))
+      : Math.min(0.68, Math.max(0.22, Math.pow(78 / massKg, 0.44)));
+  const proxScale = 0.42 + 0.58 * Math.max(0, Math.min(1, proximity));
+  const impulse = Math.min(1.28, power * massScale * proxScale);
   const velocity = drop
-    ? [out[0] * (0.2 + 0.7 * a) + (b - 0.5) * 0.5, 0, out[2] * (0.2 + 0.7 * a) + (c - 0.5) * 0.5]
+    ? [out[0] * (0.18 + 0.52 * a) + (b - 0.5) * 0.35, 0, out[2] * (0.18 + 0.52 * a) + (c - 0.5) * 0.35]
     : [
-        out[0] * (3.8 + 5.6 * a) * impulse + (b - 0.5) * 2.2,
-        (2.4 + 4.2 * b) * up * impulse,
-        out[2] * (3.8 + 5.6 * a) * impulse + (c - 0.5) * 2.2,
+        out[0] * (2.2 + 3.0 * a) * impulse + (b - 0.5) * 0.85 * massScale,
+        (0.75 + 1.45 * b) * up * impulse,
+        out[2] * (2.2 + 3.0 * a) * impulse + (c - 0.5) * 0.85 * massScale,
       ];
   // Turn about a level axis across the way it goes. A block off a wall lands on its broad face, a quarter or
-  // three quarters of a turn over. A slab of roof or floor stays about as flat as it was. All a little off true.
+  // three quarters of a turn over. Light high-impulse splinters flip end-over-end in flight.
   const across = unitOf(crossOf([0, 1, 0], [out[0] || 1e-3, 0, out[2]])), tilt = (a - 0.5) * 0.32;
   const axis = unitOf([across[0] + tilt * 0.5, tilt, across[2] - tilt * 0.5]);
   const flat = Math.abs(shard.normal[1]) > 0.5, off = (c - 0.5) * 0.7;
-  const turns = drop
-    ? (flat ? (b > 0.72 ? Math.PI : 0) : (b > 0.72 ? 1.5 * Math.PI : 0.5 * Math.PI))
-    : (flat ? (1 + Math.floor(b * 3)) * Math.PI : (1.5 + Math.floor(b * 3)) * Math.PI);
+  const lively = !drop && impulse > 0.58;
+  const turns = lively
+    ? (flat ? (1 + Math.floor(b * 2)) * Math.PI : (1.5 + Math.floor(b * 2)) * Math.PI)
+    : (flat ? (b > 0.72 ? Math.PI : 0) : (b > 0.72 ? 1.5 * Math.PI : 0.5 * Math.PI));
   const angle = turns + off;
   const half = restHeight(fracture, shard, axis, angle);
   const bury = Math.min(0.05, half * 0.15);
@@ -854,9 +863,15 @@ function releaseShard(state, s, now, { direction = null, power = 1, proximity = 
     restY = Math.min(pivot[1], (water ? 0.02 : ground + heap) + half - bury);
     settle = Math.max(0.16, (velocity[1] + Math.sqrt(velocity[1] * velocity[1] + 2 * FRACTURE_GRAVITY * (pivot[1] - restY))) / FRACTURE_GRAVITY);
     if (i < 2) {
-      landX = pivot[0] + velocity[0] * settle;
-      landZ = pivot[2] + velocity[2] * settle;
+      const horizTime = settle <= 0.85 ? settle : 0.85 + (settle - 0.85) * 0.30;
+      landX = pivot[0] + velocity[0] * horizTime;
+      landZ = pivot[2] + velocity[2] * horizTime;
     }
+  }
+  const horizTravel = Math.hypot(landX - pivot[0], landZ - pivot[2]);
+  const maxHorizSpeed = drop ? 1.25 : 5.6;
+  if (horizTravel > maxHorizSpeed * settle) {
+    settle = horizTravel / maxHorizSpeed;
   }
   velocity[0] = (landX - pivot[0]) / settle;
   velocity[2] = (landZ - pivot[2]) / settle;
@@ -973,10 +988,10 @@ export function applyBuildingFractureEvents(fracture, damage, events, now = 0) {
       released = strikeBuilding(state, point, normal, { radius: Math.max(4.5, Math.min(10.5, (event.radius || 5.5) * 1.05)), amount: (0.45 + 0.5 * severity) / (fracture.toughness * fracture.toughness), power: 0.5, now, drop: true, above: point[1] - 1.5 });
     } else {
       const penetrating = event.stepDepth >= 0.4;
-      const radius = (penetrating ? 1.75 : 1.15) * Math.max(0.7, Math.min(1.25, severity));
-      const amount = ((penetrating ? 1.5 : 0.5) * severity) / fracture.toughness;
+      const radius = (penetrating ? 1.55 : 1.05) * Math.max(0.7, Math.min(1.2, severity));
+      const amount = ((penetrating ? 1.38 : 0.48) * severity) / fracture.toughness;
       // Into bare earth, the shock reaches what stands round the hole, so a breach goes on widening.
-      released = strikeBuilding(state, point, normal, { radius: radius + rimOfBreach(state, point), amount, power: 0.7 + severity * 0.55, now });
+      released = strikeBuilding(state, point, normal, { radius: radius + rimOfBreach(state, point), amount, power: 0.62 + severity * 0.45, now });
     }
     // Support is settled after each hit, so it makes no difference how they were batched.
     if (released) released += releaseUnsupportedBlocks(state, now);

@@ -2834,9 +2834,19 @@ export function applyBuildingImpactDamage(building, event) {
       ? (ammo === 'hot' ? 1.25 : ammo === 'chain' ? 0.85 : ammo === 'grape' ? 0.55 : 1.0)
       : (ammo === 'hot' ? 0.92 : ammo === 'chain' ? 0.18 : ammo === 'grape' ? 0.12 : 1.0);
   const effectiveEnergy = energy * ammoStructuralMul;
+  // A single solid iron ball punches a localized hole along its path and cannot transfer its entire
+  // point-blank muzzle energy (~1.2 MJ) into global structural collapse of the whole building at once.
+  const maxSingleShotStructural = materialClass === 'fortified-stone'
+    ? d.maxEnergy * 0.20
+    : materialClass === 'timber'
+      ? d.maxEnergy * 0.30
+      : d.maxEnergy * 0.28;
+  const absorbedStructuralEnergy = effectiveEnergy <= 245000
+    ? effectiveEnergy
+    : Math.min(maxSingleShotStructural, 245000 + (effectiveEnergy - 245000) * 0.08);
 
   d.hits++;
-  d.damageJoules += effectiveEnergy;
+  d.damageJoules += absorbedStructuralEnergy;
   d.integrity = Math.max(0, 1 - d.damageJoules / d.maxEnergy);
   d.state = d.integrity > 0.75 ? 'intact' : d.integrity > 0.4 ? 'damaged' : d.integrity > 0.1 ? 'breached' : 'ruined';
 
@@ -2893,10 +2903,10 @@ export function applyBuildingImpactDamage(building, event) {
     materialClass,
   });
 
-  // When a shot strikes the lower scarp/foundation wall, propagate shock & spalling up into the
+  // When repeated shots batter the lower scarp/foundation wall, propagate shock & spalling up into the
   // upper scarp and parapet crenellations directly above the impact bay so the battlements crumble visibly.
   const bHeight = building.height ?? 8.0;
-  if ((localPos[1] ?? 0) < bHeight * 0.55 && effectiveEnergy >= 45000) {
+  if (d.hits >= 2 && (localPos[1] ?? 0) < bHeight * 0.55 && effectiveEnergy >= 45000) {
     const upperLocal = [
       localPos[0] ?? 0,
       Math.min(bHeight + 0.4, Math.max((localPos[1] ?? 0) + 4.5, bHeight * 0.78)),
@@ -2911,9 +2921,9 @@ export function applyBuildingImpactDamage(building, event) {
       nx: +worldNormal[0].toFixed(3),
       ny: +worldNormal[1].toFixed(3),
       nz: +worldNormal[2].toFixed(3),
-      radius: +(craterRadius * 1.15).toFixed(3),
-      stepDepth: +(stepDepth * 1.1).toFixed(3),
-      severity: +(siteSeverity * 0.95).toFixed(3),
+      radius: +(craterRadius * 1.05).toFixed(3),
+      stepDepth: +(stepDepth * 1.05).toFixed(3),
+      severity: +(siteSeverity * 0.90).toFixed(3),
       materialClass,
     });
   }
@@ -3073,11 +3083,25 @@ export function applyBuildingImpactDamage(building, event) {
     }
   }
 
-  // Progressive structural collapse bakes when a fort or building becomes damaged, breached, or ruined,
-  // plus incremental multi-round collapse bakes so subsequent broadsides keep crumbling the remaining structure.
+  // Progressive structural collapse bakes when a fort or building becomes damaged, breached, or ruined
+  // over sustained fire (never all cascading on a single non-explosive shot).
   const minSpan = Math.min(building.width ?? 16, building.depth ?? building.length ?? 16);
   let emittedCollapseThisHit = false;
-  if (d.state !== 'intact' && materialClass !== 'fortified-stone' && !d.damageCollapseBaked) {
+  const activeGunsLeft = Array.isArray(bGuns) ? bGuns.filter((g) => !g.dismounted).length : 0;
+  const totalGunsCount = Array.isArray(bGuns) ? bGuns.length : 0;
+  const isRuinedOrSilenced = d.state === 'ruined' || (totalGunsCount > 0 && activeGunsLeft === 0 && d.integrity <= 0.45);
+  if (isRuinedOrSilenced) {
+    d.silenced = true;
+    if (Array.isArray(bGuns)) {
+      for (const g of bGuns) {
+        g.dismounted = true;
+        g.loading = false;
+        g.queued = false;
+      }
+      d.dismountedGuns = bGuns.length;
+    }
+  }
+  if (d.hits >= 2 && d.state !== 'intact' && materialClass !== 'fortified-stone' && !d.damageCollapseBaked) {
     d.damageCollapseBaked = true;
     emittedCollapseThisHit = true;
     d.collapseDropFrac = Math.min(0.72, (d.collapseDropFrac ?? 0) + 0.12);
@@ -3096,8 +3120,7 @@ export function applyBuildingImpactDamage(building, event) {
       severity: 0.95,
       powderFraction: 0.40,
     });
-  }
-  if ((d.state === 'breached' || d.state === 'ruined') && !d.breachCollapseBaked) {
+  } else if (d.hits >= 2 && (d.state === 'breached' || d.state === 'ruined') && !d.breachCollapseBaked) {
     d.breachCollapseBaked = true;
     emittedCollapseThisHit = true;
     d.collapseDropFrac = Math.min(0.72, (d.collapseDropFrac ?? 0) + 0.16);
@@ -3116,22 +3139,10 @@ export function applyBuildingImpactDamage(building, event) {
       severity: 1.15,
       powderFraction: 0.55,
     });
-  }
-  const activeGunsLeft = Array.isArray(bGuns) ? bGuns.filter((g) => !g.dismounted).length : 0;
-  const totalGunsCount = Array.isArray(bGuns) ? bGuns.length : 0;
-  if ((d.state === 'ruined' || (totalGunsCount > 0 && activeGunsLeft === 0 && d.integrity <= 0.45)) && !d.ruinCollapseBaked) {
+  } else if (d.hits >= 3 && isRuinedOrSilenced && !d.ruinCollapseBaked) {
     d.ruinCollapseBaked = true;
     emittedCollapseThisHit = true;
     d.collapseDropFrac = Math.min(0.72, (d.collapseDropFrac ?? 0) + 0.22);
-    d.silenced = true;
-    if (Array.isArray(bGuns)) {
-      for (const g of bGuns) {
-        g.dismounted = true;
-        g.loading = false;
-        g.queued = false;
-      }
-      d.dismountedGuns = bGuns.length;
-    }
     const centerCollapsePt = buildingLocalToWorld(building, [
       (localPos[0] ?? 0) * 0.5,
       (building.height ?? 8) * 0.68,

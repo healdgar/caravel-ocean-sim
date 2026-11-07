@@ -732,11 +732,35 @@ test('a direct cannonball hit hurls blocks outward on high ballistic arcs while 
     }
   }
 
-  assert.ok(maxDirectHorizSpeed >= 6.0, `direct-hit shards fly outward fast (${maxDirectHorizSpeed.toFixed(2)} m/s)`);
-  assert.ok(maxDirectVertSpeed >= 3.5, `direct-hit shards loft into an upward arc (${maxDirectVertSpeed.toFixed(2)} m/s)`);
-  assert.ok(maxDirectReach >= 5.0, `direct-hit shards travel several metres before settling (${maxDirectReach.toFixed(2)} m)`);
-  assert.ok(maxDirectTurn >= 1.5 * Math.PI, `direct-hit shards spin multiple half-turns in flight (${(maxDirectTurn / Math.PI).toFixed(2)}π rad)`);
+  assert.ok(maxDirectHorizSpeed >= 3.2 && maxDirectHorizSpeed <= 6.0, `direct-hit masonry shards fly outward with realistic momentum (${maxDirectHorizSpeed.toFixed(2)} m/s)`);
+  assert.ok(maxDirectVertSpeed >= 1.1 && maxDirectVertSpeed <= 3.0, `direct-hit masonry shards loft on a realistic arc (${maxDirectVertSpeed.toFixed(2)} m/s)`);
+  assert.ok(maxDirectReach >= 2.6 && maxDirectReach < 12.0, `direct-hit shards travel several metres before settling (${maxDirectReach.toFixed(2)} m)`);
+  assert.ok(maxDirectTurn >= 1.2 * Math.PI, `direct-hit shards spin in flight (${(maxDirectTurn / Math.PI).toFixed(2)}π rad)`);
   assert.ok(dropCount > 0, 'undermined upper courses collapse after the breach');
   assert.ok(maxDirectHorizSpeed > maxDropHorizSpeed * 2.2, `direct hit hurls debris much faster than gravity collapse (${maxDirectHorizSpeed.toFixed(2)} vs ${maxDropHorizSpeed.toFixed(2)} m/s)`);
   assert.ok(maxDirectVertSpeed > maxDropVertSpeed * 2.5, `direct hit lofts debris much higher than gravity collapse (${maxDirectVertSpeed.toFixed(2)} vs ${maxDropVertSpeed.toFixed(2)} m/s)`);
+
+  // Verify light timber splinters launch faster than heavy fortified stone blocks, and a single 24-pdr hit does not ruin a building at once.
+  const pier = prepared('timber_mole_pier', { ground: -6 }), pierDamage = {};
+  applyBuildingFractureEvents(pier.fracture, pierDamage, [shot(0, 2, 10, { kind: 'timber-splinter', stepDepth: 0.52, severity: 1.25 })], 0);
+  let maxTimberSpeed = 0;
+  for (let s = 1; s < pier.fracture.shardCount; s++) {
+    if (!pierDamage.fracture.broken[s]) continue;
+    const rec = recordOf(pierDamage.fracture, s);
+    maxTimberSpeed = Math.max(maxTimberSpeed, Math.hypot(rec[4], rec[6]));
+  }
+  const bastion = prepared('stone_sea_bastion'), bastionDamage = {};
+  applyBuildingFractureEvents(bastion.fracture, bastionDamage, [shot(0, 5, -bastion.parts.dimensions.length / 2, { stepDepth: 0.52, severity: 1.25 })], 0);
+  let maxBastionStoneSpeed = 0;
+  for (let s = 1; s < bastion.fracture.shardCount; s++) {
+    if (!bastionDamage.fracture.broken[s]) continue;
+    const rec = recordOf(bastionDamage.fracture, s);
+    maxBastionStoneSpeed = Math.max(maxBastionStoneSpeed, Math.hypot(rec[4], rec[6]));
+  }
+  assert.ok(maxTimberSpeed > maxBastionStoneSpeed * 1.15, `light timber splinters launch faster than multi-tonne bastion stone (${maxTimberSpeed.toFixed(2)} vs ${maxBastionStoneSpeed.toFixed(2)} m/s)`);
+
+  const singleHitHouse = { id: 'house', prefabId: 'casa_de_contratacion', x: 0, z: 0, y: 0, baseY: 0, yaw: 0, width: 30, depth: 20, height: 12, damageState: null };
+  applyBuildingImpactDamage(singleHitHouse, { ammo: 'round', localPosition: [0, 3, -10], position: [0, 3, -10], surfacePosition: [0, 3, -10], normal: [0, 0, -1], velocity: [0, 0, 470], mass: 10.89, energy: 1202800 });
+  assert.equal(singleHitHouse.damageState.pendingBakes.length, 1, 'a single 24-pdr shot emits only the localized impact crater bake');
+  assert.notEqual(singleHitHouse.damageState.state, 'ruined', 'a single 24-pdr shot does not ruin an entire building');
 });
