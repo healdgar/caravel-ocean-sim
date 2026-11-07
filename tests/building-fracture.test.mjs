@@ -687,3 +687,56 @@ test('a turned building reaches as far as a square one, and a ball meets only wh
     assert.equal(sweepBuildingSegment(from, to, 0.07, { center: { x: 300, z: -150 }, instances: [instance] }), null, `${prefabId}: nothing stands out there`);
   }
 });
+
+test('a direct cannonball hit hurls blocks outward on high ballistic arcs while undermined courses drop into the breach', () => {
+  const { fracture, parts } = prepared('curtain_wall_and_gate');
+  const directDamage = {};
+  const w = parts.dimensions.width / 2;
+  // Strike one face directly with a heavy shot, then trigger a wide breach so upper courses collapse by gravity.
+  applyBuildingFractureEvents(fracture, directDamage, [shot(w, 2.5, 0, { nx: 1, ny: 0, nz: 0, stepDepth: 0.52, severity: 1.35 })], 0);
+  const directState = directDamage.fracture;
+  const directShards = [];
+  for (let s = 1; s < fracture.shardCount; s++) {
+    if (directState.broken[s]) directShards.push(s);
+  }
+  assert.ok(directShards.length >= 2, `direct hit releases shards (${directShards.length})`);
+
+  // Now widen the lower course until upper blocks collapse under gravity (t > 0.05 staggered drop).
+  const sweepHits = [];
+  for (let z = -6; z <= 6; z += 1.5) {
+    sweepHits.push(shot(w, 2.2, z, { nx: 1, ny: 0, nz: 0, stepDepth: 0.52, severity: 1.35 }));
+  }
+  applyBuildingFractureEvents(fracture, directDamage, sweepHits, 10);
+
+  let maxDirectHorizSpeed = 0, maxDirectVertSpeed = 0, maxDirectReach = 0, maxDirectTurn = 0;
+  let maxDropHorizSpeed = 0, maxDropVertSpeed = 0, dropCount = 0;
+
+  for (let s = 1; s < fracture.shardCount; s++) {
+    if (!directState.broken[s]) continue;
+    const rec = recordOf(directState, s);
+    const t0 = rec[3];
+    const vx = rec[4], vy = rec[5], vz = rec[6], settle = rec[7], omega = Math.hypot(rec[8], rec[9], rec[10]);
+    const horizSpeed = Math.hypot(vx, vz);
+    const horizReach = horizSpeed * settle;
+    const totalTurn = omega * settle;
+    if (t0 === 0) {
+      maxDirectHorizSpeed = Math.max(maxDirectHorizSpeed, horizSpeed);
+      maxDirectVertSpeed = Math.max(maxDirectVertSpeed, vy);
+      maxDirectReach = Math.max(maxDirectReach, horizReach);
+      maxDirectTurn = Math.max(maxDirectTurn, totalTurn);
+    } else if (t0 > 10.005) {
+      // Staggered gravity-collapse shard (released at t + 0.08 * hang[s])
+      dropCount++;
+      maxDropHorizSpeed = Math.max(maxDropHorizSpeed, horizSpeed);
+      maxDropVertSpeed = Math.max(maxDropVertSpeed, vy);
+    }
+  }
+
+  assert.ok(maxDirectHorizSpeed >= 6.0, `direct-hit shards fly outward fast (${maxDirectHorizSpeed.toFixed(2)} m/s)`);
+  assert.ok(maxDirectVertSpeed >= 3.5, `direct-hit shards loft into an upward arc (${maxDirectVertSpeed.toFixed(2)} m/s)`);
+  assert.ok(maxDirectReach >= 5.0, `direct-hit shards travel several metres before settling (${maxDirectReach.toFixed(2)} m)`);
+  assert.ok(maxDirectTurn >= 1.5 * Math.PI, `direct-hit shards spin multiple half-turns in flight (${(maxDirectTurn / Math.PI).toFixed(2)}π rad)`);
+  assert.ok(dropCount > 0, 'undermined upper courses collapse after the breach');
+  assert.ok(maxDirectHorizSpeed > maxDropHorizSpeed * 2.2, `direct hit hurls debris much faster than gravity collapse (${maxDirectHorizSpeed.toFixed(2)} vs ${maxDropHorizSpeed.toFixed(2)} m/s)`);
+  assert.ok(maxDirectVertSpeed > maxDropVertSpeed * 2.5, `direct hit lofts debris much higher than gravity collapse (${maxDirectVertSpeed.toFixed(2)} vs ${maxDropVertSpeed.toFixed(2)} m/s)`);
+});

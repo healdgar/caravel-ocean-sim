@@ -15,6 +15,7 @@ import { locatePartAtLocalPoint, isSuperstructurePartId, computeArchetypeScaleSp
 import { shipMastSpecs, fracturePartsGone } from './ship-fracture.js';
 import { shipColliderCrossings, shipColliderNormal, shipColliderTrace } from './ship-collider.js';
 import { buildingReach, traceShotAtBuilding } from './building-fracture.js';
+import { sweepJettySegment, applyJettyImpactDamage } from './port-props.js';
 import { TRACE_GUN_ARC_COS, enclosurePlan } from './fort-plan.js';
 import { HARBOUR_GUN_RANGE_M } from './harbour-geography.js';
 import { FOREST_LONG_FALLEN, buildForestTrunkGrid, foreshorePalmPlacement, forestTrunkShape, sweepForestTrunks } from './forest-trunks.js';
@@ -2441,7 +2442,7 @@ export function stepVesselDamage(boat, dt, terrain = null) {
 
 export function sweepBuildingSegment(from, to, radius = 0.08, port, options = null) {
   const instances = port?.instances;
-  if (!Array.isArray(instances) || !instances.length) return null;
+  if (!Array.isArray(instances) || !instances.length) return sweepJettySegment(from, to, radius, port, options);
   const midX = (from[0] + to[0]) * 0.5;
   const midZ = (from[2] + to[2]) * 0.5;
   const segHalf = Math.hypot(to[0] - from[0], to[1] - from[1], to[2] - from[2]) * 0.5;
@@ -2451,7 +2452,7 @@ export function sweepBuildingSegment(from, to, radius = 0.08, port, options = nu
   const segMinY = Math.min(from[1], to[1]);
   const segMaxY = Math.max(from[1], to[1]);
   const previewOnly = options?.previewOnly === true, exact = !previewOnly || options?.exact === true;
-  let best = null;
+  let best = sweepJettySegment(from, to, radius, port, options);
   for (const inst of instances) {
     if (inst === options?.ignore) continue;
     const baseY = inst.baseY ?? inst.y ?? 0;
@@ -2810,6 +2811,9 @@ export function detonateBuildingMagazine(building, { localPos = [0, 2.2, 0], cau
 
 export function applyBuildingImpactDamage(building, event) {
   if (!building || !event) return null;
+  if (event.kind === 'jetty' || (typeof building.model === 'number' && !building.prefabId)) {
+    return applyJettyImpactDamage(event.jetty ?? building, event);
+  }
   const d = createBuildingDamageState(building);
   if (event.sourceBoat) (d.attackers ??= new Set()).add(event.sourceBoat);
   const mag = d.magazine;
@@ -4105,6 +4109,10 @@ export function resolveSolidGunneryImpact(event, { getTerrain = () => null } = {
   if (event.kind === 'ship' && event.targetBoat) {
     return applyShipImpactDamage(event.targetBoat, event);
   }
+  if (event.kind === 'jetty' && (event.jetty || event.building)) {
+    const terrain = getTerrain();
+    return applyJettyImpactDamage(event.jetty ?? event.building, event, { port: event.port, terrain });
+  }
   if (event.kind === 'building' && event.building) {
     return applyBuildingImpactDamage(event.building, event);
   }
@@ -4209,7 +4217,7 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
       ?4
       :hitInfo.kind==='ship'
         ?(hitInfo.hitZone==='rigging'?2:1)
-        :(hitInfo.kind==='terrain'||hitInfo.kind==='building')
+        :(hitInfo.kind==='terrain'||hitInfo.kind==='building'||hitInfo.kind==='jetty')
           ?3
           :0;
     const segments=[];
