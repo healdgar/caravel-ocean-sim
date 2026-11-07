@@ -5549,24 +5549,38 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       } else {
         span(from, to);
       }
-      const onWall = gunsOn.get(wall.index) ?? [];
-      // Merlons stand between the guns. A wall with no guns has an unbroken cap.
-      const bays = Math.max(1, Math.round(wall.length / 2.4));
-      for (let b = 0; b < bays; b++) {
-        const a0 = (wall.length * b) / bays, a1 = (wall.length * (b + 1)) / bays, mid = (a0 + a1) * 0.5;
-        if (onWall.some((gun) => Math.abs(gun.along - mid) < 1.3)) continue;
-        if (isGate && Math.abs(mid - gateAt) < trace.gate.halfWidth + 1.4) continue;
-        beginSection('parapet_merlons');
-        emitBox(frame, a0 + 0.12, a1 - 0.12, top, top + (merlonY - parapetTop), 0, TRACE_PARAPET_M, wallKind, 0.88, false, 0.06);
+      const onWall = (gunsOn.get(wall.index) ?? []).slice().sort((a, b) => a.along - b.along);
+      // Carve open embrasures around every gun and the gate so merlons never overlap a cannon barrel.
+      const gaps = onWall.map((gun) => [gun.along - 0.72, gun.along + 0.72]);
+      if (isGate) gaps.push([gateAt - trace.gate.halfWidth - 0.85, gateAt + trace.gate.halfWidth + 0.85]);
+      gaps.sort((a, b) => a[0] - b[0]);
+      const merlonSpans = [];
+      let cursor = 0;
+      for (const [g0, g1] of gaps) {
+        if (g0 > cursor + 1.05) merlonSpans.push([cursor, Math.min(wall.length, g0)]);
+        cursor = Math.max(cursor, g1);
+      }
+      if (wall.length > cursor + 1.05) merlonSpans.push([cursor, wall.length]);
+      beginSection('parapet_merlons');
+      for (const [s0, s1] of merlonSpans) {
+        const segLen = s1 - s0;
+        const bays = Math.max(1, Math.round(segLen / 2.4));
+        for (let b = 0; b < bays; b++) {
+          const a0 = s0 + (segLen * b) / bays;
+          const a1 = s0 + (segLen * (b + 1)) / bays;
+          if (a1 - a0 < 0.45) continue;
+          emitBox(frame, a0 + 0.1, a1 - 0.1, top, top + (merlonY - parapetTop), 0, TRACE_PARAPET_M, wallKind, 0.88, false, 0.06);
+        }
+      }
+      // Firing step (banquette) behind the parapet and beveled stone embrasure sills.
+      beginSection('parapet_wall');
+      if (to - from > 3 || onWall.length > 0) {
+        emitBox(frame, Math.max(0, from), Math.min(wall.length, to), floor, floor + 0.7, TRACE_PARAPET_M, TRACE_PARAPET_M + 1.35, wallKind, 0.82);
       }
       for (const gun of onWall) {
-        beginSection('cannon_embrasure');
-        emitBox(frame, gun.along - 0.62, gun.along + 0.62, top - 0.08, top + 0.12, 0.06, TRACE_PARAPET_M - 0.06, wallKind, 0.84, true);
-        emitFortCannon(frame, gun.along, floor + 0.06, TRACE_PARAPET_M + 0.18, 0, -1, 1.0);
+        emitBox(frame, gun.along - 0.62, gun.along + 0.62, top - 0.08, top + 0.08, 0.06, TRACE_PARAPET_M - 0.06, wallKind, 0.84, true);
+        emitFortCannon(frame, gun.along, floor + 0.7, TRACE_PARAPET_M + 0.42, 0, -1, 1.0);
       }
-      // The firing step behind it.
-      beginSection('parapet_wall');
-      if (to - from > 3) emitBox(frame, Math.max(0, from), Math.min(wall.length, to), floor, floor + 0.7, TRACE_PARAPET_M, TRACE_PARAPET_M + 1.2, wallKind, 0.82);
     }
     // Sentry boxes on the points of the bastions.
     for (const at of trace.salients) {
@@ -5810,87 +5824,94 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
   // horizontal cylindrical trunnions, iron capsquare straps, cascabel button, reinforce rings,
   // flared muzzle tulip swell, and recessed hollow bore.
   const emitFortCannon = (toWorld, cx, yFloor, cz, dirX = 0, dirZ = -1, scale = 1.0) => {
-    const dLen = Math.hypot(dirX, dirZ) || 1;
-    const fx = dirX / dLen, fz = dirZ / dLen;
-    const rx = -fz, rz = fx;
-    const cToWorld = (lx, ly, lz) =>
-      toWorld(cx + (rx * lx + fx * lz) * scale, yFloor + ly * scale, cz + (rz * lx + fz * lz) * scale);
+    const emit = () => {
+      const dLen = Math.hypot(dirX, dirZ) || 1;
+      const fx = dirX / dLen, fz = dirZ / dLen;
+      const rx = -fz, rz = fx;
+      const cToWorld = (lx, ly, lz) =>
+        toWorld(cx + (rx * lx + fx * lz) * scale, yFloor + ly * scale, cz + (rz * lx + fz * lz) * scale);
 
-    // 1. Stepped oak garrison carriage (Cureña de Plaza): twin stepped cheeks, transom bed, quoin wedge & axletrees
-    for (const side of [-1, 1]) {
-      const xIn = side * 0.20, xOut = side * 0.34;
-      const xMin = Math.min(xIn, xOut), xMax = Math.max(xIn, xOut);
-      // Lower cheek bed & trail step
-      emitBox(cToWorld, xMin, xMax, 0.16, 0.44, -0.74, 0.48, 10, 0.72, true);
-      // Middle carriage step
-      emitBox(cToWorld, xMin, xMax, 0.44, 0.60, -0.38, 0.46, 10, 0.75);
-      // Front trunnion cheek breast
-      emitBox(cToWorld, xMin, xMax, 0.60, 0.74, -0.06, 0.44, 10, 0.78);
-      // Dark cast-iron capsquare strap clamping the trunnion
-      emitBox(cToWorld, xMin - 0.01, xMax + 0.01, 0.72, 0.80, 0.03, 0.25, 18, 0.80, true);
-    }
-    // Carriage transom bed, elevating quoin wedge, and front/rear wooden axletree bolsters
-    emitBox(cToWorld, -0.20, 0.20, 0.22, 0.48, -0.56, 0.38, 10, 0.68, true);
-    emitBox(cToWorld, -0.44, 0.44, 0.12, 0.24, 0.24, 0.42, 10, 0.64, true);
-    emitBox(cToWorld, -0.44, 0.44, 0.10, 0.22, -0.60, -0.44, 10, 0.64, true);
-
-    // 2. Four cylindrical iron-shod truck wheels (8 facets each) on front & rear axles
-    for (const [az, rTruck] of [[0.33, 0.18], [-0.52, 0.155]]) {
+      // 1. Stepped oak garrison carriage (Cureña de Plaza): twin stepped cheeks, transom bed, quoin wedge & axletrees
       for (const side of [-1, 1]) {
-        const wx0 = side * 0.34, wx1 = side * 0.47;
-        emitLatheTube(
-          cToWorld,
-          [wx0, rTruck, az],
-          [wx1, rTruck, az],
-          [[0, rTruck * scale, 0.92], [1, rTruck * scale, 0.92]],
-          8,
-          18,
-          0.76,
-          true,
-          0
-        );
+        const xIn = side * 0.20, xOut = side * 0.34;
+        const xMin = Math.min(xIn, xOut), xMax = Math.max(xIn, xOut);
+        // Lower cheek bed & trail step (kept behind lz <= +0.36 so carriage stands cleanly behind parapet wall)
+        emitBox(cToWorld, xMin, xMax, 0.16, 0.44, -0.74, 0.36, 10, 0.72, true);
+        // Middle carriage step
+        emitBox(cToWorld, xMin, xMax, 0.44, 0.60, -0.38, 0.35, 10, 0.75);
+        // Front trunnion cheek breast
+        emitBox(cToWorld, xMin, xMax, 0.60, 0.74, -0.06, 0.34, 10, 0.78);
+        // Dark cast-iron capsquare strap clamping the trunnion
+        emitBox(cToWorld, xMin - 0.01, xMax + 0.01, 0.72, 0.80, 0.02, 0.24, 18, 0.80, true);
       }
+      // Carriage transom bed, elevating quoin wedge, and front/rear wooden axletree bolsters
+      emitBox(cToWorld, -0.20, 0.20, 0.22, 0.48, -0.56, 0.32, 10, 0.68, true);
+      emitBox(cToWorld, -0.44, 0.44, 0.12, 0.24, 0.10, 0.26, 10, 0.64, true);
+      emitBox(cToWorld, -0.44, 0.44, 0.10, 0.22, -0.60, -0.44, 10, 0.64, true);
+
+      // 2. Four cylindrical iron-shod truck wheels (8 facets each) on front & rear axles (flush at ly = 0)
+      for (const [az, rTruck] of [[0.18, 0.18], [-0.52, 0.155]]) {
+        for (const side of [-1, 1]) {
+          const wx0 = side * 0.34, wx1 = side * 0.47;
+          emitLatheTube(
+            cToWorld,
+            [wx0, rTruck, az],
+            [wx1, rTruck, az],
+            [[0, rTruck * scale, 0.92], [1, rTruck * scale, 0.92]],
+            8,
+            18,
+            0.76,
+            true,
+            0
+          );
+        }
+      }
+
+      // 3. Horizontal cylindrical cast-iron trunnions (muñones) resting across the carriage cheeks
+      emitLatheTube(
+        cToWorld,
+        [-0.40, 0.72, 0.13],
+        [0.40, 0.72, 0.13],
+        [[0, 0.072 * scale, 0.88], [1, 0.072 * scale, 0.88]],
+        8,
+        18,
+        0.80,
+        true,
+        0
+      );
+
+      // 4. 10-Faceted Multi-Station Lathe-Turned Cast-Iron Cannon Barrel projecting through the embrasure throat
+      const cannonProfile = [
+        [0.00, 0.055 * scale, 0.84], // Cascabel pommel button tip
+        [0.04, 0.115 * scale, 0.92], // Cascabel button equator
+        [0.08, 0.074 * scale, 0.78], // Cascabel neck fillet
+        [0.12, 0.260 * scale, 0.96], // Breech base ring (astragal)
+        [0.39, 0.240 * scale, 0.94], // First reinforce (heavy powder chamber)
+        [0.42, 0.258 * scale, 0.98], // Trunnion reinforce ring
+        [0.46, 0.218 * scale, 0.92], // Second reinforce start
+        [0.68, 0.192 * scale, 0.92], // Second reinforce to chase step
+        [0.88, 0.156 * scale, 0.90], // Chase taper neck
+        [0.91, 0.182 * scale, 0.96], // Muzzle astragal ring
+        [0.97, 0.220 * scale, 0.98], // Flared muzzle tulip swell
+        [1.00, 0.198 * scale, 0.94], // Muzzle face rim
+      ];
+      emitLatheTube(
+        cToWorld,
+        [0, 0.68, -0.80],
+        [0, 0.79, 1.92],
+        cannonProfile,
+        10,
+        18,
+        0.84,
+        true,
+        0.58
+      );
+    };
+    if (partGroupDepth === 0) {
+      withPartGroup('fort_cannon', emit);
+    } else {
+      emit();
     }
-
-    // 3. Horizontal cylindrical cast-iron trunnions (muñones) resting across the carriage cheeks
-    emitLatheTube(
-      cToWorld,
-      [-0.40, 0.72, 0.14],
-      [0.40, 0.72, 0.14],
-      [[0, 0.072 * scale, 0.88], [1, 0.072 * scale, 0.88]],
-      8,
-      18,
-      0.80,
-      true,
-      0
-    );
-
-    // 4. 10-Faceted Multi-Station Lathe-Turned Cast-Iron Cannon Barrel (cascabel -> breech ring -> 1st/2nd reinforce -> chase -> flared muzzle tulip -> hollow bore)
-    const cannonProfile = [
-      [0.00, 0.055 * scale, 0.84], // Cascabel pommel button tip
-      [0.04, 0.115 * scale, 0.92], // Cascabel button equator
-      [0.08, 0.074 * scale, 0.78], // Cascabel neck fillet
-      [0.12, 0.260 * scale, 0.96], // Breech base ring (astragal)
-      [0.39, 0.240 * scale, 0.94], // First reinforce (heavy powder chamber)
-      [0.42, 0.258 * scale, 0.98], // Trunnion reinforce ring
-      [0.46, 0.218 * scale, 0.92], // Second reinforce start
-      [0.68, 0.192 * scale, 0.92], // Second reinforce to chase step
-      [0.88, 0.156 * scale, 0.90], // Chase taper neck
-      [0.91, 0.182 * scale, 0.96], // Muzzle astragal ring
-      [0.97, 0.220 * scale, 0.98], // Flared muzzle tulip swell
-      [1.00, 0.198 * scale, 0.94], // Muzzle face rim
-    ];
-    emitLatheTube(
-      cToWorld,
-      [0, 0.68, -0.82],
-      [0, 0.79, 1.44],
-      cannonProfile,
-      10,
-      18,
-      0.84,
-      true,
-      0.58
-    );
   };
 
   // Helper to emit a 3D radial stone voussoir arch & shadowed barrel vault along the Z axis (for X-facing facades)
@@ -6339,47 +6360,52 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       const merlonY = yTop + 0.92;
       const nBaysX = snapBays(inst.width - 3.2, 4.6, 3);
       const baySpanX = (inst.width - 3.2) / nBaysX;
+      const merlonHalfX = Math.max(0.6, Math.min(1.35, baySpanX * 0.5 - 0.72));
       for (const sideZ of [-1, 1]) {
         const zOut = sideZ < 0 ? -hl : hl - wallT;
         const zIn = sideZ < 0 ? -hl + wallT : hl;
         beginSection('parapet_wall');
         emitBox(toWorld, -hw, hw, yTop - 0.85, yTop, zOut, zIn, 11, 0.86);
-        // Interior firing banquette step along the rampart walk so gunners and sentries stand above the parapet
+        // Interior firing banquette step along the rampart walk so cannons and gunners stand above the parapet
         const bZ0 = sideZ < 0 ? zIn : zOut - 1.35;
         const bZ1 = sideZ < 0 ? zIn + 1.35 : zOut;
-        emitBox(toWorld, -hw + wallT, hw - wallT, yTop - 0.85, yTop - 0.14, bZ0, bZ1, 11, 0.82);
+        emitBox(toWorld, -hw + wallT, hw - wallT, yTop - 0.85, yTop - 0.15, bZ0, bZ1, 11, 0.82);
         for (let m = 0; m <= nBaysX; m++) {
           const mx = -hw + 1.6 + m * baySpanX;
           beginSection('parapet_merlons');
-          emitBox(toWorld, mx - 1.35, mx + 1.35, yTop, merlonY, zOut, zIn, 11, 0.90, false, 0.12);
+          emitBox(toWorld, mx - merlonHalfX, mx + merlonHalfX, yTop, merlonY, zOut, zIn, 11, 0.90, false, 0.12);
           if (m < nBaysX) {
-            beginSection('cannon_embrasure');
             const ex = mx + baySpanX * 0.5;
-            const cZ = sideZ < 0 ? zIn + 0.18 : zOut - 0.18;
+            const cZ = sideZ < 0 ? zIn + 0.42 : zOut - 0.42;
+            beginSection('parapet_wall');
             // Beveled stone embrasure sill apron between parapet merlons
-            emitBox(toWorld, ex - 0.62, ex + 0.62, yTop - 0.08, yTop + 0.12, zOut + 0.06, zIn - 0.06, 11, 0.84, true);
+            emitBox(toWorld, ex - 0.62, ex + 0.62, yTop - 0.08, yTop + 0.08, zOut + 0.06, zIn - 0.06, 11, 0.84, true);
             // Lathe-turned cast-iron 24-pounder fortress cannon on stepped oak garrison carriage
-            emitFortCannon(toWorld, ex, yTop - 0.52, cZ, 0, sideZ, 1.0);
+            emitFortCannon(toWorld, ex, yTop - 0.15, cZ, 0, sideZ, 1.0);
           }
         }
       }
       const nBaysZ = snapBays(inst.length - 3.2, 4.8, 3);
       const baySpanZ = (inst.length - 3.2) / nBaysZ;
+      const merlonHalfZ = Math.max(0.6, Math.min(1.45, baySpanZ * 0.5 - 0.72));
       for (const sideX of [-1, 1]) {
         const xOut = sideX < 0 ? -hw : hw - wallT;
         const xIn = sideX < 0 ? -hw + wallT : hw;
         beginSection('parapet_wall');
         emitBox(toWorld, xOut, xIn, yTop - 0.85, yTop, -hl + wallT, hl - wallT, 11, 0.84);
+        const bX0 = sideX < 0 ? xIn : xOut - 1.35;
+        const bX1 = sideX < 0 ? xIn + 1.35 : xOut;
+        emitBox(toWorld, bX0, bX1, yTop - 0.85, yTop - 0.15, -hl + wallT + 1.35, hl - wallT - 1.35, 11, 0.82);
         for (let m = 0; m <= nBaysZ; m++) {
           const mz = -hl + 1.6 + m * baySpanZ;
           beginSection('parapet_merlons');
-          emitBox(toWorld, xOut, xIn, yTop, merlonY, mz - 1.45, mz + 1.45, 11, 0.88, false, 0.12);
+          emitBox(toWorld, xOut, xIn, yTop, merlonY, mz - merlonHalfZ, mz + merlonHalfZ, 11, 0.88, false, 0.12);
           if (m < nBaysZ) {
-            beginSection('cannon_embrasure');
             const ez = mz + baySpanZ * 0.5;
-            const cX = sideX < 0 ? xIn + 0.18 : xOut - 0.18;
-            emitBox(toWorld, xOut + 0.06, xIn - 0.06, yTop - 0.08, yTop + 0.12, ez - 0.62, ez + 0.62, 11, 0.84, true);
-            emitFortCannon(toWorld, cX, yTop - 0.52, ez, sideX, 0, 0.94);
+            const cX = sideX < 0 ? xIn + 0.42 : xOut - 0.42;
+            beginSection('parapet_wall');
+            emitBox(toWorld, xOut + 0.06, xIn - 0.06, yTop - 0.08, yTop + 0.08, ez - 0.62, ez + 0.62, 11, 0.84, true);
+            emitFortCannon(toWorld, cX, yTop - 0.15, ez, sideX, 0, 0.94);
           }
         }
       }
@@ -7389,10 +7415,11 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
           const lz = bz + Math.sin(a) * rBulwark;
           const nx = bx + Math.cos(aNext) * rBulwark;
           const nz = bz + Math.sin(aNext) * rBulwark;
-          // Continuous lower breastwork wall around the bulwark drum
-          emitAngledWall(lx, lz, nx, nz, yBulwarkDeck, yBulwarkDeck + 0.72, 0.18, 10, 0.76);
+          const isEmbrasure = bastionBayIsEmbrasure(fortPlan, bastion, p, nLogs);
+          // Continuous lower breastwork wall around the bulwark drum (lowered at embrasure sills so barrels clear cleanly)
+          emitAngledWall(lx, lz, nx, nz, yBulwarkDeck, yBulwarkDeck + (isEmbrasure ? 0.52 : 0.72), 0.18, 10, 0.76);
           // Leave cannon embrasure openings on every 6th bay, except where a curtain joins
-          if (bastionBayIsEmbrasure(fortPlan, bastion, p, nLogs)) continue;
+          if (isEmbrasure) continue;
           emitAngledWall(lx, lz, nx, nz, yBulwarkDeck + 0.70, yWallTop + 0.28, 0.16, 10, 0.78);
           emitCylinder(toWorld, lx, lz, yGround - 0.8, yWallTop + 0.45 + (p % 3) * 0.14, 0.28, 0.14, 6, 10, 0.72 + (p % 2) * 0.05, true);
         }
@@ -7453,9 +7480,8 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       emitBox(gateFrame, -1.25, 1.25, yPlinth, yWallTop - 0.9, -1.3, 1.3, 14, 0.26);
       emitRoof(gateFrame, -2.7, 2.7, yWallTop + 1.8, yWallTop + 3.4, -1.5, 1.5, 0.45, 0.35, 10, 10);
 
-      // Mounted Demi-Culverin / Saker Ordnance Guns on Timber Carriages, where the plan has them
-      beginSection('bulwark_ordnance_guns');
-      for (const gun of fortPlan.guns) emitFortCannon(toWorld, gun.x, yBulwarkDeck, gun.z, gun.nx, gun.nz, 0.94);
+      // Mounted Demi-Culverin / Saker Ordnance Guns on Timber Carriages, sitting flush on the raised bulwark timber decks
+      for (const gun of fortPlan.guns) emitFortCannon(toWorld, gun.x, yBulwarkDeck + 0.08, gun.z, gun.nx, gun.nz, 0.94);
 
       // Gate-Flank Mud-and-Stud Guardhouse / Corps de Garde & Powder Magazine just inside the river gatehouse
       beginSection('interior_guardhouse_and_magazine');

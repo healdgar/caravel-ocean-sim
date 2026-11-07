@@ -13,6 +13,14 @@ const CURTAIN_INTO_PARAPET_M = 0.1;
 const EMBRASURE_WALL_MARGIN = (3 * Math.PI) / 180;
 // One bay in six of a bastion's parapet is left open for a gun.
 const EMBRASURE_EVERY_BAYS = 6;
+const BASTION_BAYS = 24;
+
+function bastionGunOnBay([bx, bz], bastionRadius, bay) {
+  const angle = ((bay + 0.5) / BASTION_BAYS) * Math.PI * 2;
+  const nx = Math.cos(angle), nz = Math.sin(angle);
+  const rCarriage = Math.max(0.8, bastionRadius - 0.95);
+  return { x: bx + nx * rCarriage, z: bz + nz * rCarriage, nx, nz };
+}
 // The sample spacing when checking the ground under a wall.
 const WALL_GROUND_STEP_M = 8;
 const FORT_GATE_HALF_WIDTH_M = 2.2;
@@ -84,12 +92,12 @@ export function triangularFortPlan(width, length, gateSide = 0) {
     cottageSlots: gateSide
       ? [[m * 14.5, -3, turned], [m * -15, -21, facing], [m * 27.8, -20.5, turned], [0, -20, turned]]
       : [[14.5, -3, 0], [-14.5, -3, Math.PI], [27.8, -20.5, 0], [-27.8, -20.5, Math.PI]],
-    // Mounted at the river bulwarks and the middle of the river curtain, and one looking inland from the far bulwark.
+    // Mounted on the raised circular corner bulwark decks behind their open embrasure bays.
     guns: [
-      { x: sw[0], z: sw[1] - bastionRadius * 0.38, nx: 0, nz: -1 },
-      { x: sw[0] * -0.18, z: sw[1] - 0.25, nx: 0, nz: -1 },
-      { x: se[0], z: se[1] - bastionRadius * 0.38, nx: 0, nz: -1 },
-      { x: 0, z: north[1] + 0.25, nx: 0, nz: 1 },
+      bastionGunOnBay(sw, bastionRadius, 18),
+      bastionGunOnBay(sw, bastionRadius, 12),
+      bastionGunOnBay(se, bastionRadius, 18),
+      bastionGunOnBay(north, bastionRadius, 6),
     ],
   };
 }
@@ -115,10 +123,10 @@ export function squareFortPlan(width, length) {
     hallSlot: [0, -6, 0],
     cottageSlots: [[22, -14, 0], [-22, -14, Math.PI], [22, 12, 0], [-22, 12, Math.PI]],
     guns: [
-      { x: corners[0][0], z: corners[0][1] - bastionRadius * 0.38, nx: 0, nz: -1 },
-      { x: 0, z: corners[0][1] - 0.25, nx: 0, nz: -1 },
-      { x: corners[1][0], z: corners[1][1] - bastionRadius * 0.38, nx: 0, nz: -1 },
-      { x: corners[2][0] * 0.5, z: gateZ + 0.25, nx: 0, nz: 1 },
+      bastionGunOnBay(corners[0], bastionRadius, 18),
+      bastionGunOnBay(corners[0], bastionRadius, 12),
+      bastionGunOnBay(corners[1], bastionRadius, 18),
+      bastionGunOnBay(corners[2], bastionRadius, 6),
     ],
   };
 }
@@ -652,8 +660,16 @@ export function drawFortTrace({ shape = 'star', sizeM = null, bastions = 4, land
   // Guns go on the walls that look over clear water, best first, spread evenly. A gate's wall has none.
   const most = guns ?? (shape === 'battery' ? 7 : shape === 'drum' ? 6 : shape === 'islet' ? 6 : shape === 'star' ? 10 : 12);
   const spacing = shape === 'battery' ? 7 : 6.5;
+  const carriageDepth = TRACE_PARAPET_M + 0.42;
+  const gunSlotFits = (wall, along) => {
+    const x = wall.ax + wall.ux * along, z = wall.az + wall.uz * along;
+    const cx = x - wall.nx * carriageDepth, cz = z - wall.nz * carriageDepth;
+    if (depthInOutline(outline, cx, cz) < TRACE_PARAPET_M + 0.35) return false;
+    if (lowZ !== null && Math.abs(cz - lowZ) < 1.45) return false;
+    return true;
+  };
   // A flank looks along its own curtain at the next bastion: its guns are for the ditch, and they stay out of this.
-  const ranked = walls.filter((wall) => wall.length >= 4 && wall.index !== gateWall && wall.kind !== 'flank').map((wall) => {
+  const ranked = walls.filter((wall) => wall.length >= 4 && wall.index !== gateWall && wall.kind !== 'flank' && gunSlotFits(wall, wall.length * 0.5)).map((wall) => {
     const mx = (wall.ax + wall.bx) / 2, mz = (wall.az + wall.bz) / 2;
     return { wall, open: openAt(mx + shiftX, mz + shiftZ, wall.nx, wall.nz), room: Math.max(1, Math.floor(wall.length / spacing)), count: 0 };
   }).sort((a, b) => b.open - b.wall.nz * 0.3 - (a.open - a.wall.nz * 0.3));
@@ -669,10 +685,15 @@ export function drawFortTrace({ shape = 'star', sizeM = null, bastions = 4, land
     }
   }
   for (const { wall, count } of ranked) {
+    const margin = count > 1 ? Math.min(wall.length * 0.22, 2.2) : 0;
+    const usable = wall.length - margin * 2;
     for (let s = 0; s < count; s++) {
-      const along = (wall.length * (s + 0.5)) / count, x = wall.ax + wall.ux * along, z = wall.az + wall.uz * along;
+      const along = margin + (usable * (s + 0.5)) / count;
+      if (!gunSlotFits(wall, along)) continue;
+      const x = wall.ax + wall.ux * along, z = wall.az + wall.uz * along;
+      const cx = x - wall.nx * carriageDepth, cz = z - wall.nz * carriageDepth;
       // Round a sharp corner two guns would share a platform.
-      if (trace.guns.some((gun) => Math.hypot(gun.x - x, gun.z - z) < GUN_APART_M)) continue;
+      if (trace.guns.some((gun) => Math.hypot(gun.x - x, gun.z - z) < GUN_APART_M || Math.hypot(gun.x - gun.nx * carriageDepth - cx, gun.z - gun.nz * carriageDepth - cz) < 2.2)) continue;
       trace.guns.push({ x, z, nx: wall.nx, nz: wall.nz, wall: wall.index, along });
     }
   }

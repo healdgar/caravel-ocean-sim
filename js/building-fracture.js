@@ -31,7 +31,7 @@ const TIMBER_KINDS = new Set([10, 15, 17]);
 const ROOF_KINDS = new Set([13, 15]);
 const STAYING_PLATE = /(^|_)(floor|plaza|terreplein|courtyard|cobble|apron|slipway|batey|earthwork|mounds?|sleepers|adarve)(_|$)/;
 const ONE_PIECE = /garita|bollard|crane|capstan|dome|cupola|lantern|farol|spire|chimney|bell_chamber|monolith|firepit|altar|trough|beacon|canoe|rollers|hearth|mooring|espadana|turret/;
-const GUN = /cannon_embrasure/;
+const GUN = /fort_cannon|cannon_embrasure|bastion_ordnance_battery|bulwark_ordnance_guns/;
 // The outer edge of a traced fort's rampart walk, and its cordon: these go with the wall under them.
 const WALK_EDGE = /rampart_walk_edge|scarp_cordon_cornice/;
 
@@ -160,6 +160,7 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
     shards.push({
       index, kind, partId: part.id, partKey: part.partKey, timber: surface.timber, span: surface.span,
       min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity],
+      localMin: [Infinity, Infinity, Infinity], localMax: [-Infinity, -Infinity, -Infinity],
       volume: 0, normalSum: [0, 0, 0], links: [], above: [], below: [], side: [], anchored: false,
     });
     geometry.push({ faces: [], blocks: [], cores: [] });
@@ -470,7 +471,7 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
     const partRooted = partMin[1] < lowest - 0.5, partKey = String(part.partKey ?? '');
     const partSpan = spanOf(partMin, partMax), mostly = surfaceOf(partFaces[0].kind, fortified);
     if (GUN.test(partKey)) {
-      const s = keyed(`gun:${partIndex}`, BUILDING_SHARD_KINDS.gun, part, { ...mostly, span: 1 });
+      const s = keyed(`gun:${partIndex}`, BUILDING_SHARD_KINDS.gun, part, { ...mostly, timber: false, span: 1 });
       for (const face of partFaces) geometry[s].faces.push(face);
       continue;
     }
@@ -592,6 +593,14 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
     if (x > shard.max[0]) shard.max[0] = x;
     if (y > shard.max[1]) shard.max[1] = y;
     if (z > shard.max[2]) shard.max[2] = z;
+    const lx = (x - originX) * cosY - (z - originZ) * sinY;
+    const lz = (x - originX) * sinY + (z - originZ) * cosY;
+    if (lx < shard.localMin[0]) shard.localMin[0] = lx;
+    if (y < shard.localMin[1]) shard.localMin[1] = y;
+    if (lz < shard.localMin[2]) shard.localMin[2] = lz;
+    if (lx > shard.localMax[0]) shard.localMax[0] = lx;
+    if (y > shard.localMax[1]) shard.localMax[1] = y;
+    if (lz > shard.localMax[2]) shard.localMax[2] = lz;
   };
   const emitQuad = (s, p, nx, ny, nz, kind, shade) => {
     const v = pushVertex(s, p[0][0], p[0][1], p[0][2], nx, ny, nz, kind, shade);
@@ -661,12 +670,8 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
   // What each shard is, in the building's own frame.
   for (let s = 1; s < shards.length; s++) {
     const shard = shards[s];
-    const a = toLocal(shard.min[0], shard.min[1], shard.min[2]), b = toLocal(shard.max[0], shard.min[1], shard.min[2]);
-    const c = toLocal(shard.min[0], shard.max[1], shard.max[2]), d = toLocal(shard.max[0], shard.max[1], shard.max[2]);
-    shard.localMin = [Math.min(a[0], b[0], c[0], d[0]), shard.min[1], Math.min(a[2], b[2], c[2], d[2])];
-    shard.localMax = [Math.max(a[0], b[0], c[0], d[0]), shard.max[1], Math.max(a[2], b[2], c[2], d[2])];
     shard.centroid = [(shard.min[0] + shard.max[0]) * 0.5, (shard.min[1] + shard.max[1]) * 0.5, (shard.min[2] + shard.max[2]) * 0.5];
-    if (!shard.volume) shard.volume = Math.max(0.02, (shard.max[0] - shard.min[0]) * (shard.max[1] - shard.min[1]) * (shard.max[2] - shard.min[2]) * 0.4);
+    if (!shard.volume) shard.volume = Math.max(0.02, (shard.localMax[0] - shard.localMin[0]) * (shard.localMax[1] - shard.localMin[1]) * (shard.localMax[2] - shard.localMin[2]) * 0.4);
     const densityKgM3 = shard.timber ? 680 : shard.earth ? 1600 : fortified ? 2450 : 2100;
     shard.massKg = Math.max(12, shard.volume * densityKgM3);
     shard.normal = unitOf(shard.normalSum);
@@ -779,6 +784,7 @@ export function supportScan(fracture, broken) {
   for (let s = 1; s < shards.length; s++) if (!broken[s] && shards[s].anchored) { hang[s] = 0; stack.push(s); }
   while (stack.length) {
     const s = stack.pop(), reach = hang[s], shard = shards[s];
+    if (shard.kind === BUILDING_SHARD_KINDS.gun) continue;
     const onTop = reach > 0 ? reach - 1 : 0;
     for (const t of shard.above) if (!broken[t] && onTop < hang[t]) { hang[t] = onTop; stack.push(t); }
     const beside = reach + 1;

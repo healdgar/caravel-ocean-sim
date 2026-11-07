@@ -1170,26 +1170,27 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         to: [7.4, 6.4, 2.0],
         material: 'cobble',
       },
-      // Voxel-crenellated bastion parapet merlons (sitting flush at y = 6.35)
+      // Voxel-crenellated bastion parapet merlons (sitting flush at y = 6.4)
       {
         primitive: 'blocks',
         partGroup: 'bastion_parapet_merlons',
         gridSize: 1.0,
-        origin: [0, 6.35, 0],
+        origin: [0, 6.4, 0],
         material: 'limestone',
         runs: [
-          { x: [-6, 6], y: 0, z: -9, step: 2 },
+          { x: [-6, -2], y: 0, z: -9, step: 2 },
+          { x: [2, 6], y: 0, z: -9, step: 2 },
           { x: [-4, 4], y: 0, z: -12, step: 2 },
           { x: -7, y: 0, z: [-7, 1], step: 2 },
           { x: 7, y: 0, z: [-7, 1], step: 2 },
         ],
       },
       // Lathe-turned cast-iron Manueline fortress culverins on stepped oak garrison carriages guarding the Tagus channel
-      { primitive: 'cannon', partGroup: 'bastion_ordnance_battery', position: [-3.0, 5.8, -8.5], direction: [0, -1], cannonScale: 0.92 },
-      { primitive: 'cannon', partGroup: 'bastion_ordnance_battery', position: [0.0, 5.8, -8.5], direction: [0, -1], cannonScale: 0.95 },
-      { primitive: 'cannon', partGroup: 'bastion_ordnance_battery', position: [3.0, 5.8, -8.5], direction: [0, -1], cannonScale: 0.92 },
-      { primitive: 'cannon', partGroup: 'bastion_ordnance_battery', position: [-6.1, 6.35, -4.0], direction: [-1, 0], cannonScale: 0.90 },
-      { primitive: 'cannon', partGroup: 'bastion_ordnance_battery', position: [6.1, 6.35, -4.0], direction: [1, 0], cannonScale: 0.90 },
+      { primitive: 'cannon', partGroup: 'fort_cannon', position: [-3.0, 6.4, -7.9], direction: [0, -1], cannonScale: 0.92 },
+      { primitive: 'cannon', partGroup: 'fort_cannon', position: [0.0, 6.4, -7.9], direction: [0, -1], cannonScale: 0.95 },
+      { primitive: 'cannon', partGroup: 'fort_cannon', position: [3.0, 6.4, -7.9], direction: [0, -1], cannonScale: 0.92 },
+      { primitive: 'cannon', partGroup: 'fort_cannon', position: [-5.9, 6.4, -4.0], direction: [-1, 0], cannonScale: 0.90 },
+      { primitive: 'cannon', partGroup: 'fort_cannon', position: [5.9, 6.4, -4.0], direction: [1, 0], cannonScale: 0.90 },
       // Six iconic cylindrical Manueline bartizan sentry turrets (Garitas) on the bastion corners
       { shape: 'manueline_garita', partGroup: 'bastion_garitas', position: [-7.5, 5.4, -9.4] },
       { shape: 'manueline_garita', partGroup: 'bastion_garitas', position: [7.5, 5.4, -9.4] },

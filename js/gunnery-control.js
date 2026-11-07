@@ -3347,34 +3347,54 @@ export function createBuildingGunDefinitions(building) {
     // A fort drawn to its ground has its guns where its trace puts them, each with its own arc.
     const drop = building.trace.lowDrop ?? 0, lowZ = building.trace.lowZ;
     for (const gun of building.trace.guns) {
-      const y = yTop + 0.25 - (lowZ !== null && gun.z < lowZ ? drop : 0);
-      addEmbrasureGun(gun.nz <= 0 ? 'port' : 'starboard', gun.nz <= 0 ? -1 : 1, gun.x + gun.nx * 0.15, y, gun.z + gun.nz * 0.15, [gun.nx, 0, gun.nz], prefabId === 'stone_sea_bastion' ? 24 : 32);
+      const y = yTop + 0.58 - (lowZ !== null && gun.z < lowZ ? drop : 0);
+      addEmbrasureGun(gun.nz <= 0 ? 'port' : 'starboard', gun.nz <= 0 ? -1 : 1, gun.x - gun.nx * 0.8, y, gun.z - gun.nz * 0.8, [gun.nx, 0, gun.nz], prefabId === 'stone_sea_bastion' ? 24 : 32);
       guns[guns.length - 1].arcCos = TRACE_GUN_ARC_COS;
     }
   } else if (prefabId === 'bastion_trace_fortress') {
+    const nBaysX = Math.max(3, Math.round(((building.width ?? 38) - 3.2) / 4.6));
+    const baySpanX = ((building.width ?? 38) - 3.2) / nBaysX;
+    const snapEx = (targetX) => {
+      let best = -hw + 1.6 + 0.5 * baySpanX;
+      for (let m = 0; m < nBaysX; m++) {
+        const ex = -hw + 1.6 + (m + 0.5) * baySpanX;
+        if (Math.abs(ex - targetX) < Math.abs(best - targetX)) best = ex;
+      }
+      return best;
+    };
     for (let i = -1.5; i <= 1.5; i += 1.0) {
-      const gx = i * (hw * 0.34);
-      addEmbrasureGun('port', -1, gx, yTop + 0.25, -hl - 0.15, [0, 0, -1], 32);
+      const gx = snapEx(i * (hw * 0.34));
+      addEmbrasureGun('port', -1, gx, yTop + 0.58, -hl + 0.8, [0, 0, -1], 32);
     }
     for (let i = -1.5; i <= 1.5; i += 1.0) {
-      const gx = i * (hw * 0.34);
-      addEmbrasureGun('starboard', 1, gx, yTop + 0.25, hl + 0.15, [0, 0, 1], 32);
+      const gx = snapEx(i * (hw * 0.34));
+      addEmbrasureGun('starboard', 1, gx, yTop + 0.58, hl - 0.8, [0, 0, 1], 32);
     }
-    addEmbrasureGun('port', -1, -hw - 0.15, yTop + 0.25, 0, [-1, 0, 0], 24);
-    addEmbrasureGun('starboard', 1, hw + 0.15, yTop + 0.25, 0, [1, 0, 0], 24);
+    addEmbrasureGun('port', -1, -hw + 0.8, yTop + 0.58, 0, [-1, 0, 0], 24);
+    addEmbrasureGun('starboard', 1, hw - 0.8, yTop + 0.58, 0, [1, 0, 0], 24);
   } else if (prefabId === 'stone_sea_bastion') {
+    const nBaysX = Math.max(3, Math.round(((building.width ?? 24) - 3.2) / 4.6));
+    const baySpanX = ((building.width ?? 24) - 3.2) / nBaysX;
+    const snapEx = (targetX) => {
+      let best = -hw + 1.6 + 0.5 * baySpanX;
+      for (let m = 0; m < nBaysX; m++) {
+        const ex = -hw + 1.6 + (m + 0.5) * baySpanX;
+        if (Math.abs(ex - targetX) < Math.abs(best - targetX)) best = ex;
+      }
+      return best;
+    };
     for (let i = -1; i <= 1; i++) {
-      const gx = i * (hw * 0.48);
-      addEmbrasureGun('port', -1, gx, yTop + 0.25, -hl - 0.15, [0, 0, -1], 24);
+      const gx = snapEx(i * (hw * 0.48));
+      addEmbrasureGun('port', -1, gx, yTop + 0.58, -hl + 0.8, [0, 0, -1], 24);
     }
     for (let i = -0.5; i <= 0.5; i += 1.0) {
-      const gx = i * (hw * 0.50);
-      addEmbrasureGun('starboard', 1, gx, yTop + 0.25, hl + 0.15, [0, 0, 1], 24);
+      const gx = snapEx(i * (hw * 0.50));
+      addEmbrasureGun('starboard', 1, gx, yTop + 0.58, hl - 0.8, [0, 0, 1], 24);
     }
   } else if (prefabId === 'english_triangular_palisade_fort') {
-    const yBulwark = 0.35 + Math.max(4.4, (building.height ?? 6.8) * 0.68) - 0.35;
+    const yBulwark = 0.35 + Math.max(4.4, (building.height ?? 6.8) * 0.68) - 0.25;
     for (const gun of enclosurePlan(building).guns) {
-      addEmbrasureGun(gun.nz <= 0 ? 'port' : 'starboard', gun.nz <= 0 ? -1 : 1, gun.x + gun.nx * 1.6, yBulwark, gun.z + gun.nz * 1.6, [gun.nx, 0, gun.nz], 12);
+      addEmbrasureGun(gun.nz <= 0 ? 'port' : 'starboard', gun.nz <= 0 ? -1 : 1, gun.x + gun.nx * 0.55, yBulwark, gun.z + gun.nz * 0.55, [gun.nx, 0, gun.nz], 12);
       guns[guns.length - 1].arcCos = TRACE_GUN_ARC_COS;
     }
   } else if (building.armed && (prefabId === 'stone_quay_seawall' || prefabId === 'timber_mole_pier')) {

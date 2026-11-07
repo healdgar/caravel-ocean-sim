@@ -343,3 +343,46 @@ test('the record has what the game needs: every fort a place, a job and a date',
   assert.ok(Object.keys(FORT_RECORDS).length>=40);
   assert.ok(getBuildingParts('bastion_trace_fortress').vertexCount>1000,'the catalog fort still builds with no trace');
 });
+
+test('fort cannons sit flush on their banquettes and bulwarks, clear of stone merlons and parapets',()=>{
+  for(const [prefabId,minFloor] of [['stone_sea_bastion',11.3],['bastion_trace_fortress',9.6],['english_triangular_palisade_fort',3.8]]){
+    const parts=getBuildingParts(prefabId);
+    const cannonGroups=parts.groups.filter(g=>g.partKey==='fort_cannon');
+    assert.ok(cannonGroups.length>=4,`${prefabId} has individual fort_cannon parts (${cannonGroups.length})`);
+    const instance={prefabId,x:0,z:0,y:0,baseY:0,yaw:0,...parts.dimensions};
+    const {fracture}=prepareBuildingFracture({vertices:parts.vertices,indices:parts.indices,catalog:parts.partAssembly,instanceIndex:0,instance,materialClass:classifyBuildingMaterial(prefabId),groundAt:()=>0});
+    assert.equal(fracture.guns.length,cannonGroups.length,`${prefabId} maps every fort_cannon to its own gun shard`);
+    for(const s of fracture.guns){
+      const gun=fracture.shards[s];
+      assert.ok(gun.min[1]>=minFloor&&gun.min[1]<=minFloor+0.15,`${prefabId} gun ${s} sits flush on its platform (${gun.min[1].toFixed(2)})`);
+      assert.equal(gun.anchored,false,`${prefabId} gun ${s} rests on its platform shards rather than floating anchored`);
+      assert.ok(gun.below.length>=1,`${prefabId} gun ${s} is supported from below`);
+    }
+  }
+  for(const [id,year] of [['lisbon',1650],['havana',1650],['san-juan',1650]]){
+    const {port}=portOn(id,year),geometry=buildPortPrefabGeometry(port);
+    for(const fort of fortsOf(port).filter(f=>f.trace)){
+      const instanceIndex=port.instances.indexOf(fort);
+      const {fracture,vertices}=prepareBuildingFracture({vertices:geometry.vertices,indices:geometry.indices,catalog:geometry.partAssembly,instanceIndex,instance:fort,materialClass:'fortified-stone',groundAt:()=>fort.y});
+      assert.equal(fracture.guns.length,fort.trace.guns.length,`${id} ${fort.label}: every traced gun is an individual gun shard`);
+      const walls=traceWalls(fort.trace);
+      const merlonVerts=[];
+      for(let v=0;v<fracture.vertexShards.length;v++){
+        const s=fracture.vertexShards[v];
+        if(s&&fracture.shards[s].partKey==='parapet_merlons'){
+          merlonVerts.push(fracture.toLocal(vertices[v*8],vertices[v*8+1],vertices[v*8+2]));
+        }
+      }
+      for(const gun of fort.trace.guns){
+        const wall=walls[gun.wall];
+        for(const [mx,my,mz] of merlonVerts){
+          const along=(mx-wall.ax)*wall.ux+(mz-wall.az)*wall.uz;
+          const depth=-(mx-wall.ax)*wall.nx-(mz-wall.az)*wall.nz;
+          if(depth>=-0.05&&depth<=1.8){
+            assert.ok(Math.abs(along-gun.along)>0.65,`${id} ${fort.label}: merlon vertex at along=${along.toFixed(2)} clears gun embrasure at ${gun.along.toFixed(2)}`);
+          }
+        }
+      }
+    }
+  }
+});

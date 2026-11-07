@@ -1284,12 +1284,27 @@ export function createFortificationSoldiersForInstance(inst, startIndex = 0) {
     const yWallTop = yPlinth + 4.4;
     const yBulwarkDeck = yWallTop - 0.95;
     const yBanquette = yWallTop - 1.10;
-    const plan = enclosurePlan(inst), [bSW, bSE] = plan.bastions, bN = plan.bastions[2];
+    const plan = enclosurePlan(inst), [bSW, bSE] = plan.bastions;
     const [one, two, three, four] = plan.guns;
-    specs.push({ lx: one.x, ly: yBulwarkDeck, lz: bSW[1] - 0.8, routeZ: [bSW[1] - 1.4, bSW[1] + 0.8], localYaw: Math.PI, role: 'Master Gunner', stationKind: 'embrasure', gunIndex: 0 });
-    specs.push({ lx: two.x, ly: yBulwarkDeck, lz: bSW[1] - 0.6, routeZ: [bSW[1] - 1.0, bSW[1] + 0.8], localYaw: Math.PI, role: 'Culverin Gunner', stationKind: 'embrasure', gunIndex: 1 });
-    specs.push({ lx: three.x, ly: yBulwarkDeck, lz: bSE[1] - 0.8, routeZ: [bSE[1] - 1.4, bSE[1] + 0.8], localYaw: Math.PI, role: 'Bulwark Gunner', stationKind: 'embrasure', gunIndex: 2 });
-    specs.push({ lx: four.x, ly: yBulwarkDeck, lz: bN[1] + 0.6, routeZ: [bN[1] - 1.0, bN[1] + 1.2], localYaw: 0, role: 'North Bulwark Sentry', stationKind: 'embrasure', gunIndex: 3 });
+    for (const [gunIndex, [gun, role]] of [
+      [one, 'Master Gunner'],
+      [two, 'Culverin Gunner'],
+      [three, 'Bulwark Gunner'],
+      [four, 'North Bulwark Sentry'],
+    ].entries()) {
+      const gx = gun.x - gun.nx * 1.15;
+      const gz = gun.z - gun.nz * 1.15;
+      specs.push({
+        lx: gx,
+        ly: yBulwarkDeck,
+        lz: gz,
+        routeZ: [gz - 0.7, gz + 0.7],
+        localYaw: Math.atan2(gun.nx, gun.nz),
+        role,
+        stationKind: 'embrasure',
+        gunIndex,
+      });
+    }
     specs.push({ lx: -hw * 0.38, ly: yBanquette, lz: bSW[1] + 1.2, routeZ: [bSW[1] + 0.6, bSW[1] + 2.4], localYaw: Math.PI, role: 'Captain of the Guard', stationKind: 'rampart' });
     specs.push({ lx: hw * 0.38, ly: yBanquette, lz: bSE[1] + 1.2, routeZ: [bSE[1] + 0.6, bSE[1] + 2.4], localYaw: Math.PI, role: 'Pikeman / Musketeer', stationKind: 'rampart' });
     // Two at the gate, either side of it, just outside.
