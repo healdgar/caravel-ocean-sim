@@ -5,6 +5,10 @@ skeleton: 15,692 triangles, 8,342 vertices, 65 joints; Idle, Walk and Brace clip
 levels of 4,327, 1,569 and 320 triangles.
 `sailor-female.glb`: the female crew body, made the same way on the classic female skeleton: 15,353
 triangles, 7,742 vertices, 65 joints; the same clips and levels of 4,386, 1,552 and 320 triangles.
+`captain.glb`: the ship and presidio captain body, generated with Tripo on paid API credits, fitted to the
+classic skeleton (`--textured`) with its embedded 2048×2048 JPEG texture preserved, and decimated with
+`scripts/safe-decimate.mjs` (`ignoreUvs: false`): 3,600 base triangles (from 5,316 raw), 3,567 vertices,
+65 joints; Idle, Walk and Brace clips, and lighter baked levels of 1,500, 742 and 317 triangles.
 `sailor-classic.glb`: 993,696 bytes, 15,995 triangles, 65 joints; the same clips. Its skeleton and clips are
 what the male body is fitted to, and Indigenous men are built on it, because their dress re-sculpts its
 garment pieces.

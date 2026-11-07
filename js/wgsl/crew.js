@@ -84,6 +84,8 @@ export const CREW_RENDER = FRAME_WGSL + ATMO_CORE_WGSL + VESSEL_RIG + VESSEL_LIG
 @group(0) @binding(7) var<storage,read> sunVis:array<f32,4>;
 @group(0) @binding(8) var<storage,read> moisture:array<vec2f>;
 @group(0) @binding(9) var skyLUT:texture_2d<f32>;
+@group(0) @binding(13) var captainTex:texture_2d<f32>;
+@group(0) @binding(14) var captainSampler:sampler;
 // Centroid, because a sliver of limb can cover a sample and miss the pixel's centre. Read at the
 // centre, its values are extrapolated far past any its corners hold, and skin at -7 divides by zero
 // in the wrap below: one sample of a distant figure then blazes at the top of the half-float range.
@@ -96,6 +98,9 @@ struct CrewVertex {
 };
 // The model's colours are placeholders for what this person wears: rgb, and whether it is skin.
 fn crewClothed(tagged:vec3f,p:vec3f,shirt:vec3f,trousers:vec3f,skin:vec3f,hair:vec3f,isIndigenous:bool,dress:u32)->vec4f {
+  if(tagged.b<-1.0){
+    return vec4f(tagged,select(0.0,1.0,tagged.b<-10.5));
+  }
   // A body painted garment by garment: blue's whole part says which, and the colour is how far this
   // point departs from that garment's typical colour, so folds and faces survive any cloth or skin.
   let garment=u32(tagged.b*.5);
@@ -160,7 +165,7 @@ fn crewClothed(tagged:vec3f,p:vec3f,shirt:vec3f,trousers:vec3f,skin:vec3f,hair:v
   }
   return vec4f(0);
 }
-@fragment fn fs(v:CrewVertex,@builtin(front_facing) front:bool)->@location(0) vec4f {
+fn crewShade(v:CrewVertex,front:bool,baseIn:vec3f)->vec4f {
   let woundAmt=v.damage.x;let scorchAmt=v.damage.y;let bSeed=v.damage.z;
   let bp=v.bodyPos;
   let nHash=fract(sin(dot(bp*vec3f(19.3,27.1,23.7)+vec3f(bSeed*31.0),vec3f(12.9898,78.233,45.164)))*43758.5453);
@@ -172,7 +177,7 @@ fn crewClothed(tagged:vec3f,p:vec3f,shirt:vec3f,trousers:vec3f,skin:vec3f,hair:v
   let sea=textureSampleLevel(envCube,sampC,normalize(vec3f(n.x,-.65,n.z)),${ENV_MIPS-1}.0).rgb;
   let ambient=vesselAmbient(n,sky,sea);
   let wet=clamp(v.wet,vec2f(0),vec2f(1));
-  var baseColor=v.color;
+  var baseColor=baseIn;
   var roughBias=0.0;
   if(v.paint!=0u&&v.skin>.5){
     // Genipap: dark bands over the body and limbs, the face left clear.
@@ -225,6 +230,13 @@ fn crewClothed(tagged:vec3f,p:vec3f,shirt:vec3f,trousers:vec3f,skin:vec3f,hair:v
   // Match timber, canvas and land: the same directional sky and marine haze
   // must veil every surface along this view ray, including shadowed sailors.
   return vec4f(surfaceAir(col,v.world),1);
+}
+@fragment fn fs(v:CrewVertex,@builtin(front_facing) front:bool)->@location(0) vec4f {
+  return crewShade(v,front,v.color);
+}
+@fragment fn crewFS(v:CrewVertex,@builtin(front_facing) front:bool)->@location(0) vec4f {
+  let tex=textureSampleBias(captainTex,captainSampler,v.color.rg,-0.35).rgb;
+  return crewShade(v,front,select(v.color,tex,v.color.b<-1.0));
 }
 `;
 export const CREW_SHADOW = VESSEL_RIG + CREW_SKIN + SHADOW_FRAME + /* wgsl */ `

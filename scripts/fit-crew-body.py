@@ -60,7 +60,9 @@ def rotation_between(a, b):
     k = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
     return np.eye(3) + k + k @ k / (1 + c)
 
-source_path, target_path, out_path = sys.argv[1:4]
+args = [a for a in sys.argv[1:] if not a.startswith('--')]
+textured = '--textured' in sys.argv
+source_path, target_path, out_path = args[:3]
 src, src_bin = read(source_path); dst, dst_bin = read(target_path)
 print('source nodes with mesh:', sum('mesh' in n for n in src['nodes']), 'skins', len(src.get('skins', [])))
 skin = src['skins'][0]; src_names = [src['nodes'][j].get('name', f'j{j}') for j in skin['joints']]
@@ -110,7 +112,8 @@ for ni, n in enumerate(src['nodes']):
         texture = material.get('pbrMetallicRoughness', {}).get('baseColorTexture')
         if texture and image is None:
             view = src['bufferViews'][src['images'][src['textures'][texture['index']]['source']]['bufferView']]
-            image = Image.open(io.BytesIO(src_bin[view.get('byteOffset', 0):view.get('byteOffset', 0) + view['byteLength']])).convert('RGB')
+            raw_image = src_bin[view.get('byteOffset', 0):view.get('byteOffset', 0) + view['byteLength']]
+            image = Image.open(io.BytesIO(raw_image)).convert('RGB')
 P = np.concatenate(positions); N = np.concatenate(normals); UV = np.concatenate(uvs); J = np.concatenate(joints); W = np.concatenate(weights); I = np.concatenate(indices)
 W = W / np.maximum(W.sum(axis=1, keepdims=True), 1e-9)
 print('vertices', len(P), 'triangles', len(I) // 3, 'bounds', P.min(0).round(3), P.max(0).round(3), 'image', image.size if image else None)
@@ -329,15 +332,19 @@ regions[shins & skin_hue & (lum > BARE)] = SKIN
 regions[shins & ~skin_hue & (y > .15)] = TROUSERS
 print('regions', {name: int((regions == k).sum()) for name, k in (('paint', 0), ('shirt', SHIRT), ('trousers', TROUSERS), ('skin', SKIN), ('hair', HAIR))})
 shaded = colors.copy()
-for k in (SHIRT, TROUSERS, SKIN, HAIR):
-    at = regions == k
-    typical = np.median(colors[at], axis=0)
-    print(' typical', k, typical.round(3))
-    shaded[at] = np.clip(colors[at] / np.maximum(typical, 1e-3), .05, 1.99)
-    shaded[at, 2] += 2 * k
-
-# A texture seam splits corners that the body has no reason to split, and each costs a skinned vertex.
-keys = np.concatenate([np.round(out_p / 2e-4), np.round(out_n / .05), np.round(out_w / .02), out_j, regions[:, None]], axis=1).astype(np.int64)
+if textured:
+    uv_mod = (UV % 1.0).astype(np.float32)
+    shaded = np.column_stack([uv_mod[:, 0], uv_mod[:, 1], np.where(regions == SKIN, -11.0, -10.0).astype(np.float32)])
+    keys = np.concatenate([np.round(out_p / 2e-4), np.round(out_n / .05), np.round(out_w / .02), out_j, np.round(uv_mod / 1e-4), (regions == SKIN)[:, None]], axis=1).astype(np.int64)
+else:
+    for k in (SHIRT, TROUSERS, SKIN, HAIR):
+        at = regions == k
+        typical = np.median(colors[at], axis=0)
+        print(' typical', k, typical.round(3))
+        shaded[at] = np.clip(colors[at] / np.maximum(typical, 1e-3), .05, 1.99)
+        shaded[at, 2] += 2 * k
+    # A texture seam splits corners that the body has no reason to split, and each costs a skinned vertex.
+    keys = np.concatenate([np.round(out_p / 2e-4), np.round(out_n / .05), np.round(out_w / .02), out_j, regions[:, None]], axis=1).astype(np.int64)
 _, first, inverse = np.unique(keys, axis=0, return_index=True, return_inverse=True)
 inverse = inverse.ravel()
 order = np.argsort(first); rank = np.zeros(len(first), dtype=np.int64); rank[order] = np.arange(len(first))
@@ -346,7 +353,7 @@ tinted = np.zeros((len(first), 3), dtype=np.float64); hits = np.zeros(len(first)
 np.add.at(tinted, remap, shaded); np.add.at(hits, remap, 1)
 tinted = (tinted / hits[:, None]).astype(np.float32)
 kept = first[order]
-out_p, out_n, out_j, out_w = out_p[kept], out_n[kept], out_j[kept], out_w[kept]
+out_p, out_n, out_j, out_w, out_uv = out_p[kept], out_n[kept], out_j[kept], out_w[kept], (UV % 1.0)[kept].astype(np.float32)
 faces = remap[I].reshape(-1, 3)
 faces = faces[(faces[:, 0] != faces[:, 1]) & (faces[:, 1] != faces[:, 2]) & (faces[:, 0] != faces[:, 2])]
 I = faces.ravel()
@@ -379,6 +386,7 @@ prim = {'attributes': {
     'POSITION': add(op, 34962, 'VEC3', 5126, {'min': op.min(0).tolist(), 'max': op.max(0).tolist()}),
     'NORMAL': add((out_n / np.maximum(np.linalg.norm(out_n, axis=1, keepdims=True), 1e-9)).astype(np.float32), 34962, 'VEC3', 5126),
     'COLOR_0': add(tinted, 34962, 'VEC3', 5126),
+    **({'TEXCOORD_0': add(out_uv, 34962, 'VEC2', 5126)} if textured else {}),
     'JOINTS_0': add(out_j.astype(np.uint16), 34962, 'VEC4', 5123),
     'WEIGHTS_0': add(out_w.astype(np.float32), 34962, 'VEC4', 5126)},
   'indices': add(I.astype(np.uint32), 34963, 'SCALAR', 5125), 'material': 0}
@@ -387,6 +395,14 @@ for i, n in enumerate(dst['nodes']):
     if 'mesh' in n and i != keep: n.pop('mesh'); n.pop('skin', None)
 dst['nodes'][keep]['mesh'] = 0
 material = dst['materials'][0]; material.setdefault('pbrMetallicRoughness', {})['baseColorFactor'] = [1, 1, 1, 1]
+if textured and image is not None:
+    buf = io.BytesIO()
+    image.save(buf, format='JPEG', quality=90, optimize=True)
+    img_bytes = buf.getvalue() if len(buf.getvalue()) < len(raw_image) else raw_image
+    img_view = add_bytes(img_bytes)
+    dst['images'] = [{'bufferView': img_view, 'mimeType': 'image/jpeg'}]
+    dst['textures'] = [{'source': 0}]
+    material['pbrMetallicRoughness']['baseColorTexture'] = {'index': 0}
 dst.update(meshes=[{'name': 'sailor', 'primitives': [prim]}], materials=[material], accessors=accessors, bufferViews=views)
 new_bin = b''.join(chunks); new_bin += b'\0' * ((4 - len(new_bin) % 4) % 4); dst['buffers'] = [{'byteLength': len(new_bin)}]
 js = json.dumps(dst).encode(); js += b' ' * ((4 - len(js) % 4) % 4)

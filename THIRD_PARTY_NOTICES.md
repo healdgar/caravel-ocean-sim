@@ -79,7 +79,7 @@ remain authored. No Google/Apple imagery, code or proprietary map data is incorp
 
 ## Tripo crew assets
 
-`assets/crew/sailor.glb` and `assets/crew/sailor-female.glb` are characters generated with Tripo (tripo3d.ai)
+`assets/crew/sailor.glb`, `assets/crew/sailor-female.glb` and `assets/crew/captain.glb` are characters generated with Tripo (tripo3d.ai)
 on paid API credits, then fitted to the Quaternius skeletons and clips below. Tripo's terms give paid users the rights to what they generate.
 The models in `assets/props/` were generated the same way.
 

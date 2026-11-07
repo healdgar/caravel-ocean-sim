@@ -207,8 +207,13 @@ export function createSkinAnimator(asset) {
 }
 
 export function loadCrewGLB(bytes) {
-  const asset=readGLB(bytes),g=asset.json,animator=createSkinAnimator(asset),chunks=[],indices=[];let count=0,levels=null;
-  if(g.textures?.length)throw Error('Crew materials must be baked to vertex colours');
+  const asset=readGLB(bytes),g=asset.json,animator=createSkinAnimator(asset),chunks=[],indices=[];let count=0,levels=null,image=null,mime=null;
+  if(g.textures?.length){
+    if(g.textures.length!==1||g.images?.length!==1)throw Error('Crew materials expect at most one embedded texture');
+    const img=g.images[0],view=g.bufferViews?.[img?.bufferView],start=view?.byteOffset??0,len=view?.byteLength??0;
+    if(!view||view.buffer!==0||start<0||len<1||start+len>asset.bin.length)throw Error('Invalid crew texture buffer');
+    image=asset.bin.subarray(start,start+len);mime=img.mimeType||'image/jpeg';
+  }
   for(const node of g.nodes)if(node.mesh!==undefined){
     if(node.skin!==0)throw Error('Crew meshes must share one skin');
     for(const p of g.meshes[node.mesh].primitives){
@@ -236,5 +241,5 @@ export function loadCrewGLB(bytes) {
   const vertices=new Uint8Array(count*60);let offset=0;for(const c of chunks){vertices.set(c,offset);offset+=c.length;}
   const indexArray=new Uint32Array(indices);
   const lods=createCrewLODs({vertices,indices:indexArray,vertexCount:count,animator,levels});
-  return {asset,animator,vertices,indices:indexArray,lods,vertexCount:count,distantIndices:levels?.[2]??null};
+  return {asset,animator,vertices,indices:indexArray,lods,vertexCount:count,distantIndices:levels?.[2]??null,image,mime};
 }

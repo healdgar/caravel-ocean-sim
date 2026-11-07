@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {readGLB,gltfAccessor,gltfSlerp,loadCrewGLB} from '../js/gltf.js';
-import {createDeckhand,stepDeckhand,createCompany,stepCompany,issueCaptainOrder,CREW_ROSTER,createIndigenousCrewModels} from '../js/crew.js';
+import {createDeckhand,stepDeckhand,createCompany,stepCompany,issueCaptainOrder,CREW_ROSTER,createIndigenousCrewModels,isCaptainActor} from '../js/crew.js';
 import {hullDeck,hullHalfWidth,vesselDeck,HULL_VERTICAL_SCALE,tillerPoint} from '../js/hull.js';
 import {poseCrewWork} from '../js/crew-pose.js';
 import {selectCrewLOD,createDistantCrewLOD} from '../js/crew-lod.js';
@@ -396,4 +396,31 @@ test('baked clips store every frame in order and wrap time without a jump',async
   assert.ok(Math.abs(crewClipFrame(clips[1],1.25)-2.5)<1e-9,'a clip repeats');
   assert.ok(Math.abs(crewClipFrame(clips[1],-.25)-7.5)<1e-9,'time before the start wraps backwards');
   assert.ok(crewClipFrame(clips[0],1.9999)<clips[0].frames);
+});
+
+test('captain GLB carries its embedded high-resolution texture, UV sentinels, 65-joint rig and decimated LODs',()=>{
+  const captainBytes=fs.readFileSync(new URL('../assets/crew/captain.glb',import.meta.url));
+  assert.ok(captainBytes.length<1_100_000);
+  const captain=loadCrewGLB(captainBytes);
+  assert.equal(captain.animator.joints.length,65);
+  assert.deepEqual([...captain.animator.clips.keys()],['Idle','Walk','Brace']);
+  assert.ok(captain.image instanceof Uint8Array && captain.image.byteLength>100_000,'embedded texture bytes present');
+  assert.equal(captain.mime,'image/jpeg');
+  assert.equal(captain.image[0],0xff);assert.equal(captain.image[1],0xd8,'valid JPEG header');
+  assert.equal(captain.lods[0].triangles,3600,'base mesh decimated to 3,600 triangles');
+  assert.equal(captain.lods[1].triangles,1500,'mid LOD decimated to 1,500 triangles');
+  assert.ok(captain.lods[2].triangles<=750&&captain.lods[2].triangles>=200);
+  assert.ok(captain.distantIndices.length/3<=320);
+  const f=new Float32Array(captain.vertices.buffer,captain.vertices.byteOffset,captain.vertexCount*15);
+  let skinVerts=0,clothVerts=0;
+  for(let i=0;i<captain.vertexCount;i++){
+    const u=f[i*15+6],v=f[i*15+7],b=f[i*15+8];
+    assert.ok(u>=0&&u<=1&&v>=0&&v<=1,'UV stored in color.rg');
+    assert.ok(b<-1.0,'negative blue sentinel routes fragment shader to captain texture');
+    if(b<-10.5)skinVerts++;else clothVerts++;
+  }
+  assert.ok(skinVerts>100&&clothVerts>1000,'both skin and garment vertices tagged on textured captain');
+  const company=createCompany();
+  assert.equal(company.crew.filter(isCaptainActor).length,1,'exactly one captain in company');
+  assert.equal(company.crew.find(isCaptainActor).role,'Captain');
 });
