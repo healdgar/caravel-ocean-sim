@@ -1140,7 +1140,10 @@ async function main() {
       // The captain's recorded orders are for gun crews.
       if(ownerBoat.gunnery?.guns?.[0]?.kind!=='bow'){
         if(ownerBoat.faction==='enemy'){
-          sceneAudio.event?.({type:'enemy-voice',action:'fire',order:id,position:[ownerBoat.x??0,(ownerBoat.heave??0)+2,ownerBoat.z??0]},ownerBoat);
+          if((id==='fire-port'||id==='fire-starboard')&&Math.hypot((ownerBoat.x??0)-cam.x,(ownerBoat.z??0)-cam.z)<95&&simTime-(ownerBoat._lastEnemyVoiceAt??-120)>=75){
+            ownerBoat._lastEnemyVoiceAt=simTime;
+            sceneAudio.event?.({type:'enemy-voice',action:'fire',order:id,position:[ownerBoat.x??0,(ownerBoat.heave??0)+2,ownerBoat.z??0]},ownerBoat);
+          }
         }else{
           sceneAudio.gunneryOrder(id,b);
         }
@@ -3771,7 +3774,7 @@ async function main() {
       const activeWhale=marineLife.state?.active&&marineLife.state.count>0?marineLife.state.animals[0]:null;
       const targetVessel=findSpyglassTargetVessel();
       const activeDolphin=dolphins.state?.active&&dolphins.state.pods?.[0]?.animals?.[0]?dolphins.state.pods[0].animals[0]:null;
-      boat.lookoutSighting=activeWhale
+      boat.lookoutSighting=simTime<8?null:activeWhale
         ?{kind:activeWhale.type||'whale',x:activeWhale.x,y:activeWhale.depth??0,z:activeWhale.z}
         :targetVessel?.boat
           ?{kind:targetVessel.faction==='enemy'?'enemy-ship':'ship',x:targetVessel.boat.x,y:(targetVessel.boat.heave??0)+3,z:targetVessel.boat.z}

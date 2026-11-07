@@ -23,12 +23,15 @@ const PEOPLE=96,LENGTH=200,STEP=1.25,WALK_SPEED=1.25,INDOORS=10,HALF_WIDTH=1.5;
 
 // Runs in the page. `town(options)` builds a crowd, and `run(town,seconds,shots)` is one frame at that time.
 async function setUp(){
-  const {TOWNSFOLK_WALK,TOWN_FATE_WORDS,TOWN_SHOT_WORDS:SW,TOWN_SHOT_LIMIT:SL}=await import('/js/wgsl/townsfolk.js');
+  const {TOWNSFOLK_WALK,TOWNSFOLK_RENDER,TOWN_FATE_WORDS,TOWN_SHOT_WORDS:SW,TOWN_SHOT_LIMIT:SL}=await import('/js/wgsl/townsfolk.js');
   const device=await(await navigator.gpu.requestAdapter()).requestDevice(),B=GPUBufferUsage,errors=[];
   device.onuncapturederror=e=>errors.push(e.error.message);
   const module=device.createShaderModule({code:TOWNSFOLK_WALK});
   const bad=(await module.getCompilationInfo()).messages.filter(m=>m.type==='error');
   if(bad.length)throw Error(bad.map(m=>m.message).join('\n'));
+  const renderMod=device.createShaderModule({code:TOWNSFOLK_RENDER});
+  const badRender=(await renderMod.getCompilationInfo()).messages.filter(m=>m.type==='error');
+  if(badRender.length)throw Error(badRender.map(m=>m.message).join('\n'));
   const pipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'main'}});
   const made=(data,usage)=>{const b=device.createBuffer({size:data.byteLength,usage:usage|B.COPY_DST|B.COPY_SRC});device.queue.writeBuffer(b,0,data);return b;};
   const LOOKS=48;
@@ -146,10 +149,18 @@ test('a ball that passes through someone brings them down where they were, and t
   assert.deepEqual(modes.slice(2),modes.slice(2).map(()=>TOWN_DOWN),'down, and never up again');
   const stamps=frames.slice(2).map(f=>f.fates[hit]);
   assert.ok(stamps.every(f=>f.since===stamps[0].since&&f.along===stamps[0].along),'nothing is written once they lie still');
-  const bodyOf=f=>f.bodies.filter(b=>b.who===hit&&Math.hypot(b.x-people.onStreet.x,b.z-people.onStreet.z)<.1);
-  for(const frame of frames.slice(1)){
+  const findHit=f=>f.bodies.filter(b=>b.who===hit);
+  const flying=findHit(frames[1]);
+  assert.equal(flying.length,1,'body is in flight while falling');
+  assert.ok(flying[0].z>people.onStreet.z+0.5,`thrown forward along the shot path from ${people.onStreet.z} to ${flying[0].z}`);
+  assert.ok(Math.floor(flying[0].blend)>0,`damage/injury bits encoded in blend (${flying[0].blend})`);
+  const landed=findHit(frames[2])[0];
+  assert.ok(landed.z>people.onStreet.z+1.0,`thrown well past where they stood (${landed.z} > ${people.onStreet.z})`);
+  const bodyOf=f=>f.bodies.filter(b=>b.who===hit&&Math.hypot(b.x-landed.x,b.z-landed.z)<.05);
+  for(const frame of frames.slice(2)){
     const lying=bodyOf(frame);
-    assert.equal(lying.length,1,'in the very place they were struck');
+    assert.equal(lying.length,1,'in the very place they landed after being thrown');
+    assert.ok(Math.floor(lying[0].blend)>0,'retains wound/scorch/limb-severance damage while down');
   }
   // The last frame of a fall, whichever way they went, still after the clock has gone round.
   const last=bodyOf(frames.at(-1))[0];

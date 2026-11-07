@@ -722,7 +722,7 @@ fn forestStruckPlace(r:ForestRoot,model:vec3f,local:vec3f,normal:vec3f,colour:ve
 fn forestPlace(r:ForestRoot,rootId:u32,posLocal:vec3f,normAdj:vec3f,kind:vec2f,leafUV:vec2f,colour:vec3f,nativeMaterial:f32,vertex:u32,canopyAO:f32)->ForestVertex{
  let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
  let r2=dot(posLocal.xz,posLocal.xz);
- let buried=kind.x<3.5&&(forestBin.z&256u)==0u&&((posLocal.y<.025&&r2>.7)||(posLocal.y<-.01&&r2>.22));
+ let buried=kind.x<3.5&&(forestBin.z&256u)==0u&&((posLocal.y<.08&&r2>9.)||(posLocal.y<.013&&r2>.7)||(posLocal.y<.025&&r2>.7&&r2<4.)||(posLocal.y<-.01&&r2>.22));
  let posAdj=select(posLocal,vec3f(0.),buried);
  var local=vec3f(c*posAdj.x-s*posAdj.z,posAdj.y,s*posAdj.x+c*posAdj.z)*r.rootScale.w;
  local+=forestWind(r,local,posAdj,kind.x>=3.5);
@@ -772,7 +772,7 @@ fn forestPlace(r:ForestRoot,rootId:u32,posLocal:vec3f,normAdj:vec3f,kind:vec2f,l
 @vertex fn forestMiddleVS(@location(0)position:vec3f,@location(1)normal:vec3f,@location(2)kind:vec2f,
  @location(5)leafUV:vec2f,@location(6)colour:vec3f,@builtin(instance_index)instance:u32)->ForestVertex{
  let r=forestRoots[forestVisible[forestBin.x+instance]];let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
- let r2=dot(position.xz,position.xz);let posAdj=select(position,vec3f(0.),kind.x<3.5&&(forestBin.z&256u)==0u&&((position.y<.025&&r2>.7)||(position.y<-.01&&r2>.22)));
+ let r2=dot(position.xz,position.xz);let posAdj=select(position,vec3f(0.),kind.x<3.5&&(forestBin.z&256u)==0u&&((position.y<.08&&r2>9.)||(position.y<.013&&r2>.7)||(position.y<.025&&r2>.7&&r2<4.)||(position.y<-.01&&r2>.22)));
  let local=vec3f(c*posAdj.x-s*posAdj.z,posAdj.y,s*posAdj.x+c*posAdj.z)*r.rootScale.w;
  var o:ForestVertex;o.world=r.rootScale.xyz+local;o.world.y=max(o.world.y,r.rootScale.y);if(r.identity.w<0.){o.world=r.rootScale.xyz+forestFallen(r,posAdj,local);}o.normal=vec3f(c*normal.x-s*normal.z,normal.y,s*normal.x+c*normal.z);
  o.kind=kind;o.leafUV=leafUV;o.colour=colour*r.yawColour.yzw;o.nativeMaterial=-1;o.canopyAO=1.;o.coverageSeed=0u;o.pos=F.viewProj*vec4f(earthCurve(o.world-F.camPos.xyz,F.camPos.y),1);o.pos.z*=1.-f32(forestVisible[forestBin.x+instance]&63u)*2e-7;return o;

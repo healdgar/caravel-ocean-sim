@@ -49,7 +49,7 @@ fn waterSourceSample(uv:vec2f)->vec4f {
   if(nearest.a<=0.0){return vec4f(0);}
   let filtered=textureSampleLevel(underwaterSource,opticsSampler,uv,0.0);
   let continuous=abs(filtered.a-nearest.a)<max(.02,nearest.a*.005);
-  return vec4f(select(nearest.rgb,filtered.rgb,continuous),nearest.a);
+  return vec4f(select(nearest.rgb,filtered.rgb,continuous),select(nearest.a,filtered.a,continuous));
 }
 fn waterProject(world:vec3f)->vec2f {
   let clip=F.viewProj*vec4f(world-F.camPos.xyz,1);
@@ -62,21 +62,40 @@ fn waterSourcePosition(uv:vec2f,depth:f32)->vec3f {
 fn waterSourceValid(uv:vec2f,source:vec4f,surface:vec3f,surfaceDepth:f32)->bool {
   // Reverse-Z foreground surfaces must not be pulled into water. Forward-depth
   // alpha is used here so the check stays independent of projection near plane.
-  if(any(uv<=vec2f(0))||any(uv>=vec2f(1))||source.a<=surfaceDepth+.025){return false;}
-  return waterSourcePosition(uv,source.a).y<surface.y+.025;
+  let f16Tol=select(0.0,source.a*0.002,source.a>12.0);
+  if(any(uv<=vec2f(0))||any(uv>=vec2f(1))||source.a<=0.001){return false;}
+  let pos=waterSourcePosition(uv,source.a);
+  if(F.camPos.y>surface.y+.05){
+    return pos.y<surface.y+.025+f16Tol*0.4;
+  }
+  if(source.a<=surfaceDepth+.025-f16Tol){return false;}
+  return pos.y<surface.y+.025+f16Tol*0.4;
+}
+fn waterRayPath(world:vec3f,ray:vec3f,alongForward:f32,surfaceDepth:f32,uv:vec2f,source:vec4f)->f32 {
+  if(F.camPos.y>world.y+.05&&ray.y<-0.15){
+    let pos=waterSourcePosition(uv,source.a);
+    return clamp(max(0.0,world.y-pos.y)/(-ray.y),0.0,500.0);
+  }
+  return clamp((source.a-surfaceDepth)/alongForward,0.0,500.0);
 }
 struct WaterSourceHit {source:vec4f,uv:vec2f,path:f32,valid:f32};
 fn waterTraceSource(world:vec3f,ray:vec3f,alongForward:f32,surfaceDepth:f32,start:vec2f)->WaterSourceHit {
   var hit:WaterSourceHit;hit.valid=0.0;hit.path=0.0;hit.uv=start;
   hit.source=waterSourceSample(hit.uv);
   if(!waterSourceValid(hit.uv,hit.source,world,surfaceDepth)){return hit;}
+  var initial=hit;
+  initial.path=waterRayPath(world,ray,alongForward,surfaceDepth,initial.uv,initial.source);
+  initial.valid=1.0;
   for(var refine=0u;refine<2u;refine++){
-    hit.path=clamp((hit.source.a-surfaceDepth)/alongForward,0.0,500.0);
+    hit.path=waterRayPath(world,ray,alongForward,surfaceDepth,hit.uv,hit.source);
     hit.uv=waterProject(world+ray*hit.path);
     hit.source=waterSourceSample(hit.uv);
-    if(!waterSourceValid(hit.uv,hit.source,world,surfaceDepth)){return hit;}
+    if(!waterSourceValid(hit.uv,hit.source,world,surfaceDepth)){
+      if(initial.path<0.85){return initial;}
+      return hit;
+    }
   }
-  hit.path=clamp((hit.source.a-surfaceDepth)/alongForward,0.0,500.0);hit.valid=1.0;return hit;
+  hit.path=waterRayPath(world,ray,alongForward,surfaceDepth,hit.uv,hit.source);hit.valid=1.0;return hit;
 }
 fn waterTransmission(world:vec3f,normal:vec3f,body:vec3f)->vec3f {
   // This path observes the interface from air. Underwater scene variants use

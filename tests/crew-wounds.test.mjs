@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { sweepCrewBodies, recordCrewWound, applyCrewWounds, clearCrewWounds, crewWoundOutcome, CREW_ARROWS_PER_BODY, CREW_BALL_SEVER_CHANCE, CREW_BALL_BREAK_CHANCE } from '../js/crew-wounds.js';
 import { applyArrowImpact, applyCrewCasualtiesAndMorale, createGunnerySolidSweep, createVesselDamageState, sweepShipSegment, vesselRailHeight } from '../js/gunnery-control.js';
 import { bindVesselModel } from '../js/vessels.js';
-import { reviveCompany } from '../js/crew.js';
+import { reviveCompany, createFortGarrison, stepFortGarrison, reviveGarrisonSoldiers } from '../js/crew.js';
 
 const sailor = (i, position, extra = {}) => ({ id: 's' + i, crewIndex: i, visible: true, casualtyState: 'able', health: 1, yaw: 0, scale: [1, 1, 1], position: Float32Array.from(position), ...extra });
 const makeBoat = (modelId, crew, extra = {}) => {
@@ -149,4 +149,47 @@ test('a new ship in a pooled hull starts whole', () => {
   assert.equal(s.stuckArrows, null);
   assert.equal(s.stuckArrowPoses, null);
   assert.equal(s.pendingWounds, null);
+});
+
+test('people on land take cannonball and crater blast damage, with bodies thrown and limbs wounded', () => {
+  const fort = { id: 'fort_1', prefabId: 'torreon_atalaya_farol', x: 0, y: 0, z: 0, width: 16, length: 16, height: 6, yaw: 0, damageState: { state: 'intact', craters: [], fires: [] } };
+  const port = { center: { x: 0, z: 0 }, reach: 200, instances: [fort] };
+  const garrison = createFortGarrison(port);
+  assert.ok(garrison.soldiers.length >= 2, 'fort spawns land garrison soldiers');
+  const first = garrison.soldiers.reduce((a, b) => a.position[2] < b.position[2] ? a : b);
+  const startX = first.position[0], startY = first.position[1], startZ = first.position[2];
+
+  // 1. Direct cannonball strike throws the soldier's body and records a limb/body wound.
+  const sweep = createGunnerySolidSweep({ getTerrain: () => ({ port }) });
+  const ball = { id: 1, ammo: 'round', radius: 0.08, mass: 8, velocity: [0, 0, 260] };
+  sweep([startX, startY + 1.1, startZ - 5], [startX, startY + 1.1, startZ + 0.5], ball);
+  assert.equal(first.casualtyState, 'fallen');
+  assert.equal(first.woundSeverity, 1.0);
+  assert.ok(first.scorchAmount > 0);
+  assert.equal(first.pendingWounds?.length, 1);
+  assert.ok(first.knockbackVz > 3.0 && first.knockbackVy > 1.5, 'ball imparts forward and upward throw velocity');
+
+  stepFortGarrison(garrison, 0.08, 0);
+  assert.ok(first.position[2] > startZ + 0.2, 'thrown forward along the shot path');
+  assert.ok(first.baseLy > first.homeBaseLy, 'launched upward on a ballistic arc');
+  const a = skeleton();
+  applyCrewWounds(a, first);
+  assert.equal(first.pendingWounds, null, 'wound is baked onto the skeleton');
+
+  // 2. Building crater blast throws and wounds nearby land soldiers/villagers.
+  const second = garrison.soldiers[1];
+  const secStartLx = second.lx, secStartLz = second.lz;
+  fort.damageState.craters.push({ localPosition: [secStartLx - 1.0, second.ly, secStartLz - 1.0], radius: 2.2, severity: 0.9, isExplosion: true });
+  stepFortGarrison(garrison, 0.08, 0);
+  assert.equal(second.casualtyState, 'fallen');
+  assert.equal(second.woundSeverity, 1.0);
+  assert.ok(second.scorchAmount > 0.4);
+  assert.ok(Math.hypot(second.lx - secStartLx, second.lz - secStartLz) > 0.15, 'blast throws the soldier away from the crater');
+  assert.equal(second.pendingWounds?.length, 1);
+
+  reviveGarrisonSoldiers(fort);
+  assert.equal(first.casualtyState, 'able');
+  assert.equal(first.woundSeverity, 0);
+  assert.equal(first.crewInjuries, null);
+  assert.equal(first.lx, first.homeLxz?.[0] ?? first.lx);
 });

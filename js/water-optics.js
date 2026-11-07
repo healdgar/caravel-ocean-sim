@@ -45,28 +45,38 @@ export function createSubmergedShader(source,entry='fs',world='v.world',surfaceW
   const originalSignature=source.slice(marker.index,bodyStart).replace(new RegExp(`\\b${entry}\\s*\\(`),'submergedFS(');
   const materialSignature=`fn waterCaptureMaterial(${plain})->vec4f `;
   source=source.slice(0,marker.index)+materialSignature+source.slice(bodyStart);
+  const isTerrain=/marchCloudsTo\s*\(/.test(source);
+  const shoreMargin=isTerrain?0.45:0.015;
   // Material derivatives past the early exit above are never read at a surface edge that matters.
   return 'diagnostic(off,derivative_uniformity);\n'+source+/* wgsl */ `
 @group(3) @binding(0) var captureSea:texture_2d_array<f32>;
 @group(3) @binding(1) var captureSeaSampler:sampler;
 @group(3) @binding(4) var<uniform> captureMode:vec4f;
-fn captureDisplacement(p:vec2f)->vec3f{
+fn captureDisplacement(p:vec2f,footprint:f32)->vec3f{
   var d=vec3f(0);
+  let seaSize=f32(textureDimensions(captureSea).x);
   for(var c=0u;c<${CASCADES}u;c++){
-    d+=textureSampleLevel(captureSea,captureSeaSampler,p*F.cascInvL[c>>2u][c&3u],i32(c),0.0).xyz;
+    let invL=F.cascInvL[c>>2u][c&3u];
+    let texel=max(1.0/(max(invL,1e-4)*max(seaSize,1.0)),1e-4);
+    let lod=select(0.0,clamp(log2(max(footprint/texel,1.0))+0.75,0.0,8.0),seaSize>1.5);
+    let w=select(1.0,clamp(1.0-smoothstep(1.5,4.0,footprint*invL),0.0,1.0),seaSize>1.5);
+    d+=textureSampleLevel(captureSea,captureSeaSampler,p*invL,i32(c),lod).xyz*w;
   }
   return d;
 }
-fn captureHeight(p:vec2f)->f32{
+fn captureHeight(p:vec2f,footprint:f32)->f32{
   var q=p;
-  for(var i=0;i<3;i++){q=p-captureDisplacement(q).xz;}
-  return captureDisplacement(q).y${surfaceWaves?'+surfaceWaveAt(p).x':''};
+  for(var i=0;i<3;i++){q=p-captureDisplacement(q,footprint).xz;}
+  return captureDisplacement(q,footprint).y${surfaceWaves?'+surfaceWaveAt(p).x':''};
 }
 ${originalSignature}{
   // Most of a ship is on the wrong side of the surface here. Leave before lighting any of it.
   let captureWorld=${world};
-  let surfaceY=captureHeight(captureWorld.xz);
-  if(select(captureWorld.y>surfaceY+0.015,(captureWorld.y<surfaceY-0.015),captureMode.x>.5)){discard;return vec4f(0);}
+  let eyeDist=length(captureWorld-F.camPos.xyz);
+  let pxSpan=max(length(F.camRight.xyz)/max(F.screen.x,1.0),length(F.camUp.xyz)/max(F.screen.y,1.0));
+  let footprint=2.0*eyeDist*pxSpan*4.0;
+  let surfaceY=captureHeight(captureWorld.xz,footprint);
+  if(select(captureWorld.y>surfaceY+${shoreMargin},(captureWorld.y<surfaceY-0.015),captureMode.x>.5)){discard;return vec4f(0);}
   let eyeDepth=dot(captureWorld-F.camPos.xyz,F.camFwd.xyz);
   if(eyeDepth<=0.0){discard;return vec4f(0);}
   let material=waterCaptureMaterial(${argumentsList});

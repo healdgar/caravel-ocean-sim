@@ -8,7 +8,7 @@ import { requestYardTransfer } from './lateen.js';
 import { assignCrewWork, stepCrewWork, updateCrewGunneryAttendance, updateCrewRowingAttendance, hasExtendedCrewModel, crewSeatedPose, crewDeckHeight, crewHelmStand } from './crew-work.js';
 import { poseCrewWork } from './crew-pose.js';
 import { stepCrewPhysicsState, applyCrewRealism } from './crew-physics.js';
-import { applyCrewWounds, clearCrewWounds } from './crew-wounds.js';
+import { applyCrewWounds, clearCrewWounds, recordCrewWound } from './crew-wounds.js';
 import { crewClearsRail, crewOpenEdgeInset, sendCrewOverboard, stepCrewOverboard, stepGaleKnockdowns, clearCrewOverboard } from './crew-overboard.js';
 import { crewLoseHandsAloft, stepCrewAloftFall } from './crew-aloft.js';
 import { createGunneryTools } from './gunnery-tools.js';
@@ -1587,6 +1587,9 @@ export function garrisonSoldierFalls(state, s, inst = {}, settled = false, garri
   const to = (state?.fracture ? restingHeightUnder(state, wx, wz, s.ly) : 0) - slope;
   s.homeBaseLy ??= s.baseLy;
   s.casualtyState = 'fallen';
+  s.woundSeverity = Math.max(s.woundSeverity ?? 0, 0.72);
+  const roll = (((s.crewIndex ?? 0) * 0.6180339887 + 0.23) % 1 + 1) % 1;
+  recordCrewWound(s, 'fall', [wx, (s.ly ?? 2) + 0.45, wz], [0, -1, 0], roll);
   s.walk = 0;
   s._poseReady = false;
   if (settled) s.baseLy = to;
@@ -1607,13 +1610,23 @@ export function garrisonSoldierFalls(state, s, inst = {}, settled = false, garri
 export function reviveGarrisonSoldiers(building) {
   for (const s of building?.garrisonSoldiers ?? []) {
     if (s.homeBaseLy !== undefined) s.baseLy = s.homeBaseLy;
+    if (s.homeLxz) { s.lx = s.homeLxz[0]; s.lz = s.homeLxz[1]; }
     if (s.homeRouteZ) s.routeZ = s.homeRouteZ;
     s.homeBaseLy = undefined;
+    s.homeLxz = undefined;
     s.homeRouteZ = undefined;
     s.garrisonFall = null;
     s.casualtyState = 'able';
+    s.health = 1;
+    s.woundSeverity = 0;
+    s.scorchAmount = 0;
+    s.knockbackVx = 0;
+    s.knockbackVz = 0;
+    s.knockbackVy = 0;
     s.knockdownTimer = 0;
     s.phys = undefined;
+    s.ragdoll = null;
+    clearCrewWounds(s);
     s._poseReady = false;
   }
 }
@@ -1631,40 +1644,54 @@ export function stepFortGarrison(garrison, dt = 0, wind = 0) {
     const dmg = inst?.damageState;
     const ruined = dmg?.state === 'ruined' && s.casualtyState !== 'fallen';
     s.visible = !ruined;
-    if (s.garrisonFall) {
-      const fall = s.garrisonFall;
-      fall.speed += 9.80665 * dt;
-      s.baseLy = Math.max(fall.to, s.baseLy - fall.speed * dt);
-      if (s.baseLy <= fall.to) s.garrisonFall = null;
-      s._poseReady = false;
-    }
     if (ruined) {
       s.walk = 0;
       s.brace = 0;
       s.work = 0;
       continue;
     }
-    const impacts = dmg?.impacts;
+    const impacts = dmg?.impacts?.length ? dmg.impacts : dmg?.craters;
     const seenImpacts = s._seenImpacts ?? 0;
     if (impacts && impacts.length > seenImpacts) {
       for (let k = seenImpacts; k < impacts.length; k++) {
         const imp = impacts[k];
-        const lp = imp.localPos;
+        const lp = imp.localPos ?? imp.localPosition;
         if (!lp) continue;
         const dx = s.lx - lp[0];
         const dz = s.lz - lp[2];
         const d = Math.hypot(dx, dz);
-        const blastR = Math.max(5.5, (imp.radius ?? 2.0) * 2.6);
+        const blastR = Math.max(6.0, (imp.radius ?? 2.0) * 3.2);
         if (d < blastR) {
-          const dirX = d > 1e-3 ? dx / d : 1;
-          const dirZ = d > 1e-3 ? dz / d : 0;
+          const prox = Math.max(0.15, 1 - d / blastR);
+          const strength = imp.strength ?? imp.severity ?? 0.75;
+          const dirX = d > 1e-3 ? dx / d : (((s.crewIndex ?? 0) % 2 === 0) ? 1 : -1);
+          const dirZ = d > 1e-3 ? dz / d : 0.5;
           const cosB = Math.cos(inst?.yaw ?? 0), sinB = Math.sin(inst?.yaw ?? 0);
-          const impulse = (1 - d / blastR) * 3.2;
-          s.knockbackVx = (dirX * cosB + dirZ * sinB) * impulse;
-          s.knockbackVz = (-dirX * sinB + dirZ * cosB) * impulse;
+          const wDirX = dirX * cosB + dirZ * sinB;
+          const wDirZ = -dirX * sinB + dirZ * cosB;
+          const impulse = prox * (imp.isExplosion ? 8.5 : 4.8);
+          s.homeLxz ??= [s.lx, s.lz];
+          s.homeBaseLy ??= s.baseLy;
+          s.knockbackVx = (s.knockbackVx ?? 0) + dirX * impulse;
+          s.knockbackVz = (s.knockbackVz ?? 0) + dirZ * impulse;
+          s.knockbackVy = Math.max(s.knockbackVy ?? 0, prox * (imp.isExplosion ? 4.4 : 2.6));
+          s.collapseYaw = Math.atan2(wDirX, wDirZ);
+          s.fallDir = ((s.crewIndex ?? 0) % 2 === 0) ? 1 : -1;
+          s.scorchAmount = Math.min(1, (s.scorchAmount ?? 0) + prox * (imp.isExplosion ? 0.85 : 0.45));
+          const roll = (((k + 1) * 0.6180339887 + (s.crewIndex ?? 0) * 0.7548776662) % 1 + 1) % 1;
+          const hitY = (s.position?.[1] ?? s.ly ?? 0) + 0.35 + ((roll * 1.732) % 1) * 1.1;
+          const sideSign = (((k + (s.crewIndex ?? 0)) % 2) === 0 ? 1 : -1) * 0.22;
+          const worldHitOnBody = [
+            (s.position?.[0] ?? inst?.x ?? 0) - wDirX * 0.18 + wDirZ * sideSign,
+            hitY,
+            (s.position?.[2] ?? inst?.z ?? 0) - wDirZ * 0.18 - wDirX * sideSign,
+          ];
+          recordCrewWound(s, imp.isExplosion || d < 2.2 ? 'ball' : 'splinter', worldHitOnBody, [wDirX, 0.25, wDirZ], roll);
           const wasAble = s.casualtyState !== 'fallen';
-          if (d < 1.8 && (imp.strength ?? 0.5) > 0.65) {
+          if (d < (imp.isExplosion ? 5.5 : 2.6) && strength > 0.45) {
             s.casualtyState = 'fallen';
+            s.health = 0;
+            s.woundSeverity = 1.0;
             if (wasAble) {
               (garrison.audioEvents ??= []).push({
                 type: 'casualty-scream',
@@ -1674,18 +1701,65 @@ export function stepFortGarrison(garrison, dt = 0, wind = 0) {
               });
             }
           } else {
-            s.knockdownTimer = Math.max(s.knockdownTimer ?? 0, 1.4 + (1 - d / blastR) * 1.4);
+            if (s.casualtyState !== 'fallen') {
+              s.casualtyState = 'wounded';
+              s.health = Math.max(0.25, (s.health ?? 1) - 0.45 * prox);
+              s.woundSeverity = Math.min(1, Math.max(s.woundSeverity ?? 0, 0.45 + 0.45 * prox));
+            }
+            s.knockdownTimer = Math.max(s.knockdownTimer ?? 0, 1.4 + prox * 1.4);
           }
           s._poseReady = false;
         }
       }
       s._seenImpacts = impacts.length;
     }
+    if (dt > 0 && (Math.abs(s.knockbackVx ?? 0) > 1e-3 || Math.abs(s.knockbackVz ?? 0) > 1e-3 || (s.knockbackVy ?? 0) > 1e-3)) {
+      s.homeLxz ??= [s.lx, s.lz];
+      s.homeBaseLy ??= s.baseLy;
+      s.lx += (s.knockbackVx ?? 0) * dt;
+      s.lz += (s.knockbackVz ?? 0) * dt;
+      const damp = Math.exp(-dt * 3.8);
+      s.knockbackVx = (s.knockbackVx ?? 0) * damp;
+      s.knockbackVz = (s.knockbackVz ?? 0) * damp;
+      if ((s.knockbackVy ?? 0) > 1e-3) {
+        const state = dmg?.fracture;
+        const cosY0 = Math.cos(inst?.yaw ?? 0), sinY0 = Math.sin(inst?.yaw ?? 0);
+        const wx0 = (inst?.x ?? 0) + s.lx * cosY0 + s.lz * sinY0;
+        const wz0 = (inst?.z ?? 0) - s.lx * sinY0 + s.lz * cosY0;
+        const hw = (inst?.width ?? 10) * 0.5 + 1.1, hl = (inst?.length ?? inst?.depth ?? 12) * 0.5 + 1.1;
+        const offEdge = Math.abs(s.lx) > hw || Math.abs(s.lz) > hl;
+        const slope = s.lx * (inst?.slopeX ?? 0) + s.lz * (inst?.slopeZ ?? 0);
+        const floorTo = offEdge
+          ? Math.max(0, inst?.y ?? 0) - slope
+          : (state?.fracture ? restingHeightUnder(state, wx0, wz0, s.ly + 0.5) - slope : (s.baseLy ?? 0));
+        s.garrisonFall = { to: Math.min(s.baseLy ?? 0, floorTo), speed: -s.knockbackVy };
+        s.knockbackVy = 0;
+      } else {
+        const hw = (inst?.width ?? 10) * 0.5 + 1.1, hl = (inst?.length ?? inst?.depth ?? 12) * 0.5 + 1.1;
+        if ((Math.abs(s.lx) > hw || Math.abs(s.lz) > hl) && (s.baseLy ?? 0) > (inst?.y ?? 0) + 0.35) {
+          const slope = s.lx * (inst?.slopeX ?? 0) + (s.lz ?? 0) * (inst?.slopeZ ?? 0);
+          const groundTo = Math.max(0, inst?.y ?? 0) - slope;
+          if (s.garrisonFall) s.garrisonFall.to = Math.min(s.garrisonFall.to, groundTo);
+          else s.garrisonFall = { to: groundTo, speed: 0 };
+        }
+      }
+      s._poseReady = false;
+    }
+    if (s.garrisonFall) {
+      const fall = s.garrisonFall;
+      fall.speed += 9.80665 * dt;
+      s.baseLy = Math.max(fall.to, s.baseLy - fall.speed * dt);
+      if (s.baseLy <= fall.to && fall.speed >= 0) s.garrisonFall = null;
+      s._poseReady = false;
+    }
     if ((s.knockdownTimer ?? 0) > 0) {
       s.knockdownTimer = Math.max(0, s.knockdownTimer - dt);
       s._poseReady = false;
     }
     const isDown = s.casualtyState === 'fallen' || (s.knockdownTimer ?? 0) > 0;
+    if (isDown && (s.ragdoll?.age ?? 0) < 2.2) {
+      s._poseReady = false;
+    }
     const underFire = (dmg?.fires?.length ?? 0) > 0 || (dmg?.state === 'burning');
     let moving = false;
     let working = false;
@@ -1954,8 +2028,25 @@ export async function createFortSoldiers({
         for (let i = 0; i < b.people.length; i++) {
           const s = b.people[i];
           const offset = i * CREW_ACTOR_FLOATS;
+          const woundAmt = s.casualtyState === 'fallen'
+            ? 1.0
+            : s.casualtyState === 'wounded'
+              ? Math.max(0.45, Math.min(0.95, s.woundSeverity ?? (1 - (s.health ?? 0.5))))
+              : 0;
+          const scorchAmt = Math.max(0, Math.min(0.95, s.scorchAmount ?? (s.casualtyState === 'fallen' ? 0.35 : s.casualtyState === 'wounded' ? 0.18 : 0)));
+          const bandageSeed = (s.casualtyState === 'wounded' || s.casualtyState === 'fallen')
+            ? (0.06 + (((s.crewIndex ?? i) * 0.37) % 0.32))
+            : 0;
+          const shirt = s.casualtyState === 'fallen'
+            ? [s.shirt[0] * 0.55 + 0.20, s.shirt[1] * 0.32, s.shirt[2] * 0.32]
+            : s.casualtyState === 'wounded'
+              ? [s.shirt[0] * 0.78 + 0.12, s.shirt[1] * 0.62, s.shirt[2] * 0.62]
+              : s.shirt;
           b.actors.set(s.transform, offset);
-          b.actors[offset + 19] = Number(!s.visible);
+          b.actors.set(shirt, offset + 16);
+          b.actors[offset + 19] = !s.visible ? 1.0 : (woundAmt * 0.45);
+          b.actors[offset + 23] = 1 + scorchAmt * 0.42;
+          b.actors[offset + 27] = Number(!b.isCaptainBatch && s.sex === 'female') + bandageSeed;
           // Only someone close enough to see their hands needs a skeleton solved for them.
           const away = camera ? Math.hypot(s.position[0] - camera.x, (s.position[1] ?? 0) - (camera.y ?? 0), s.position[2] - camera.z) / crewLensZoom(camera) : 0;
           if (crewClipOnly(away, s)) {
@@ -1963,10 +2054,11 @@ export async function createFortSoldiers({
             continue;
           }
           b.clip.off(i);
-          if (shouldSamplePoses) {
+          if (shouldSamplePoses || s.pendingWounds?.length || !s._poseReady) {
             a.sample('Idle', s.time, 'Walk', s.walkTime, s.walk);
             if (s.brace > 0.001) a.blend('Brace', s.time, s.brace);
             applyCrewRealism(a, s, null, dt);
+            applyCrewWounds(a, s);
             device.queue.writeBuffer(b.bones, i * 65 * 64, a.palette);
           }
         }

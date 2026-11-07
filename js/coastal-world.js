@@ -6329,10 +6329,10 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       // Seaward pier-head Manueline stepped octagonal Pedra Lioz Padrão plinth, iron fire-basket cresset beacon & Tripo treadwheel harbor crane
       beginSection('pier_beacon_and_crane');
       const bz = -hl + 2.1;
-      emitCylinder(toWorld, 0, bz, yTop, yTop + 0.58, 1.55, 1.42, 8, 11, 0.88, true);
-      emitCylinder(toWorld, 0, bz, yTop + 0.58, yTop + 0.74, 1.48, 1.32, 8, 11, 0.92, true);
-      emitCylinder(toWorld, 0, bz, yTop + 0.74, yTop + 1.85, 1.12, 0.96, 8, 11, 0.86, true);
-      emitCylinder(toWorld, 0, bz, yTop + 1.85, yTop + 2.08, 1.08, 0.92, 8, 11, 0.92, true);
+      emitCylinder(toWorld, 0, bz, yTop, yTop + 0.58, 1.55, 1.42, 8, 11, 0.88, false);
+      emitCylinder(toWorld, 0, bz, yTop + 0.58, yTop + 0.74, 1.48, 1.32, 8, 11, 0.92, false);
+      emitCylinder(toWorld, 0, bz, yTop + 0.74, yTop + 1.85, 1.12, 0.96, 8, 11, 0.86, false);
+      emitCylinder(toWorld, 0, bz, yTop + 1.85, yTop + 2.08, 1.08, 0.92, 8, 11, 0.92, false);
       emitCylinder(toWorld, 0, bz, yTop + 2.08, yTop + 5.75, 0.34, 0.25, 12, 11, 0.88, true);
       emitCylinder(toWorld, 0, bz, yTop + 5.75, yTop + 6.18, 0.26, 0.52, 12, 11, 0.92, true);
       // Open wrought-iron fire-basket cresset cage with glowing pitch-pine embers

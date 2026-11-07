@@ -886,18 +886,17 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
     if(in.kind.x<10.5){
       // Kind 10: Weathered Spanish cedar, oak & pitch-pine timber (piers, balconies, casements, rafters)
       let upright=abs(n.y)<.7;
-      let boardCoord=select(world.z,world.y,upright)*2.6;
-      let boardDx=select(dx.z,dx.y,upright)*2.6;
-      let boardDy=select(dy.z,dy.y,upright)*2.6;
-      let boardFade=landDetailWeight(length(vec2f(boardDx,boardDy)));
-      let plank=(fract(sin(floor(boardCoord)*91.7)*43758.5453)-.5)*boardFade;
-      let grainCoord=boardCoord*5.5+detailA*1.6;
-      let grain=landFilteredCourse(grainCoord,boardDx*5.5,boardDy*5.5,1.0)*.5*microLodFade;
-      let seam=max(0.0,landFilteredCourse(boardCoord,boardDx,boardDy,2.0)-0.42)*archLodFade;
-      albedo=vec3f(0.21,0.132,0.074)*shadeAlbedo*(1.0+detailA*0.14+detailB*0.07+plank*0.13+grain*0.04-seam*0.12);
-      relief=(detailA*0.008+grain*0.0018-seam*0.006)*archLodFade;
-      roughness=clamp(0.76-plank*0.03+seam*0.10,0.66,0.88);
-      ambientVisibility=(0.44+0.34*max(n.y,0.0))*aoVis*(1.0-seam*0.18);
+      let boardCoord=select(world.z+world.x*0.35,world.y,upright)*2.4;
+      let boardDx=select(dx.z+dx.x*0.35,dx.y,upright)*2.4;
+      let boardDy=select(dy.z+dy.x*0.35,dy.y,upright)*2.4;
+      let plank=landFilteredCourse(boardCoord*0.5,boardDx*0.5,boardDy*0.5,1.0)*0.5*archLodFade;
+      let grainCoord=boardCoord*4.5+detailA*1.2;
+      let grain=landFilteredCourse(grainCoord,boardDx*4.5,boardDy*4.5,1.0)*.5*microLodFade;
+      let seam=max(0.0,landFilteredCourse(boardCoord,boardDx,boardDy,1.8)-0.45)*archLodFade;
+      albedo=vec3f(0.21,0.132,0.074)*shadeAlbedo*(1.0+detailA*0.12+detailB*0.06+plank*0.10+grain*0.03-seam*0.10);
+      relief=(detailA*0.006+grain*0.0015-seam*0.005)*archLodFade;
+      roughness=clamp(0.76-plank*0.03+seam*0.08,0.66,0.88);
+      ambientVisibility=(0.44+0.34*max(n.y,0.0))*aoVis*(1.0-seam*0.16);
       // Intertidal marine algae & barnacle biofouling on submerged/splash-zone dock pilings
       let pilingTide=(1.0-smoothstep(0.15,1.45,world.y))*clamp(0.55+0.45*detailA,0.0,1.0);
       albedo=mix(albedo,vec3f(0.055,0.082,0.042),pilingTide*0.62);
@@ -905,31 +904,29 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
     }else if(in.kind.x<11.5){
       // Kind 11: Coursed Pedra Lioz & coral-limestone ashlar masonry (bastion walls, quoins, arches, buttresses)
       let vertWall=1.0-smoothstep(0.35,0.85,abs(n.y));
-      let courseY=world.y*1.65;
-      let bedJoint=max(0.0,landFilteredCourse(courseY,dx.y*1.65,dy.y*1.65,2.0)-0.22)*vertWall;
-      let wallHorizLen=length(n.xz);
-      let wallTan=select(vec3f(0.7071,0.0,0.7071),vec3f(-n.z,0.0,n.x)/max(wallHorizLen,1e-3),wallHorizLen>0.08);
-      let blockCoord=dot(world,wallTan)*0.82+floor(courseY)*0.5;
-      let blockDx=dot(dx,wallTan)*0.82;
-      let blockDy=dot(dy,wallTan)*0.82;
-      let headJoint=max(0.0,landFilteredCourse(blockCoord,blockDx,blockDy,1.8)-0.28)*vertWall*microLodFade;
-      let jointWave=clamp(0.68*bedJoint+0.36*headJoint,0.0,1.0);
-      let blockId=floor(courseY)*19.0+floor(blockCoord);
-      let blockHash=(fract(sin(blockId*127.1)*43758.5453)-0.5)*archLodFade;
+      let courseY=world.y*1.55;
+      let bedJoint=max(0.0,landFilteredCourse(courseY,dx.y*1.55,dy.y*1.55,1.8)-0.32)*vertWall*archLodFade;
+      let courseBand=landFilteredCourse(courseY*0.5,dx.y*0.775,dy.y*0.775,1.0);
+      let blockCoord=(world.x-world.z)*0.68+courseBand*0.45;
+      let blockDx=(dx.x-dx.z)*0.68;
+      let blockDy=(dy.x-dy.z)*0.68;
+      let headJoint=max(0.0,landFilteredCourse(blockCoord,blockDx,blockDy,1.8)-0.36)*vertWall*microLodFade;
+      let jointWave=clamp(0.62*bedJoint+0.32*headJoint,0.0,1.0);
+      let blockVar=(detailA*0.55+detailB*0.45+courseBand*0.25)*archLodFade;
       let damp=smoothstep(0.2,3.8,world.y);
-      let blockTint=vec3f(1.0+blockHash*0.065,1.0+blockHash*0.048,1.0+blockHash*0.025);
-      let stoneBase=mix(vec3f(0.35,0.32,0.26),vec3f(0.49,0.45,0.37),damp)*blockTint+vec3f(detailA*0.032);
+      let blockTint=vec3f(1.0+blockVar*0.045,1.0+blockVar*0.035,1.0+blockVar*0.018);
+      let stoneBase=mix(vec3f(0.36,0.33,0.27),vec3f(0.50,0.46,0.38),damp)*blockTint+vec3f(detailA*0.025);
       let tidalMoss=(1.0-smoothstep(0.25,1.65,world.y))*vertWall*clamp(0.5+0.5*detailA+0.35*jointWave,0.0,1.0);
       let fouledStone=mix(stoneBase,vec3f(0.09,0.13,0.065),tidalMoss*0.58);
-      albedo=fouledStone*shadeAlbedo*(0.98-0.14*jointWave+detailA*0.10+detailB*0.05);
-      relief=(detailA*0.012+detailB*0.006-jointWave*0.015)*archLodFade;
-      roughness=clamp(0.76-blockHash*0.05+jointWave*0.14+(1.0-damp)*0.05+tidalMoss*0.12,0.64,0.92);
-      ambientVisibility=(0.46+0.34*max(n.y,0.0))*aoVis*(1.0-jointWave*0.24);
+      albedo=fouledStone*shadeAlbedo*(0.98-0.11*jointWave+detailA*0.08+detailB*0.04);
+      relief=(detailA*0.008+detailB*0.004-jointWave*0.010)*archLodFade;
+      roughness=clamp(0.76-blockVar*0.04+jointWave*0.12+(1.0-damp)*0.05+tidalMoss*0.12,0.64,0.92);
+      ambientVisibility=(0.46+0.34*max(n.y,0.0))*aoVis*(1.0-jointWave*0.20);
     }else if(in.kind.x<12.5){
       // Kind 12: Warm Iberian & colonial limewashed stucco (cream/ochre plaster with trowel relief & cornice weathering)
       let damp=smoothstep(0.5,4.2,world.y);
       let trowel=landFilteredWave(world,dx,dy,vec3f(2.2,0.7,2.0),detailA*1.8)*0.018;
-      let washStreak=sin(world.x*2.8+world.z*2.6+detailA*1.6)*0.014*microLodFade;
+      let washStreak=landFilteredWave(world,dx,dy,vec3f(2.8,0.0,2.6),detailA*1.6)*0.014*microLodFade;
       let bedCourse=max(0.0,landFilteredCourse(world.y*1.4,dx.y*1.4,dy.y*1.4,2.0)-0.32)*(1.0-smoothstep(0.35,0.85,abs(n.y)))*archLodFade;
       let warmStucco=mix(vec3f(0.39,0.33,0.25),vec3f(0.58,0.51,0.41),damp)+vec3f(trowel+washStreak-bedCourse*0.042);
       albedo=warmStucco*shadeAlbedo*(1.0+detailA*0.075+detailB*0.042);
@@ -938,9 +935,7 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       ambientVisibility=(0.48+0.36*max(n.y,0.0))*aoVis*(1.0-bedCourse*0.10);
     }else if(in.kind.x<13.5){
       // Kind 13: Fired terracotta barrel roof tiles (tejas curvas / telha de canudo aligned down roof slope)
-      let slopeLen=length(n.xz);
-      let tileTan=select(vec3f(0.7071,0.0,0.7071),vec3f(-n.z,0.0,n.x)/max(slopeLen,1e-3),slopeLen>0.08);
-      let flute=landFilteredWave(world,dx,dy,tileTan*14.5,detailA*0.45)*microLodFade;
+      let flute=landFilteredWave(world,dx,dy,vec3f(9.5,0.0,-9.5),detailA*0.45)*microLodFade;
       let courseWave=landFilteredCourse(world.y*2.4,dx.y*2.4,dy.y*2.4,1.8);
       let courseStep=max(0.0,courseWave-0.26)*archLodFade;
       let kilnVar=(detailA*0.62+detailB*0.38)*0.048;
@@ -951,20 +946,18 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       ambientVisibility=(0.48+0.36*max(n.y,0.0))*aoVis*(1.0-courseStep*0.16);
     }else if(in.kind.x<14.5){
       // Kind 14: 16th-century leaded-glass casements (vidrieras emplomadas with sky reflections) & deep arched portals
-      let winHorizLen=length(n.xz);
-      let winTan=select(vec3f(0.7071,0.0,0.7071),vec3f(-n.z,0.0,n.x)/max(winHorizLen,1e-3),winHorizLen>0.08);
-      let hCoord=dot(world,winTan);
-      let hDx=dot(dx,winTan);
-      let hDy=dot(dy,winTan);
+      let hCoord=(world.x-world.z)*0.7071;
+      let hDx=(dx.x-dx.z)*0.7071;
+      let hDy=(dy.x-dy.z)*0.7071;
       let rejaX=max(0.0,landFilteredCourse(hCoord*3.4,hDx*3.4,hDy*3.4,2.0)-0.34);
       let rejaY=max(0.0,landFilteredCourse(world.y*2.2,dx.y*2.2,dy.y*2.2,1.8)-0.34);
       let rejaWave=clamp(0.62*rejaX+0.48*rejaY,0.0,1.0)*archLodFade;
       let isGlazedWindow=in.kind.y>0.25;
       if(isGlazedWindow){
         // Diamond leaded glass quarrels (emplomado) with crown-glass wave & sky/cloud reflections
-        let d1=abs(fract((hCoord+world.y)*2.8)-0.5);
-        let d2=abs(fract((hCoord-world.y)*2.8)-0.5);
-        let leadCame=(1.0-smoothstep(0.035,0.085,min(d1,d2)))*microLodFade;
+        let d1=landFilteredCourse((hCoord+world.y)*2.8,(hDx+dx.y)*2.8,(hDy+dy.y)*2.8,1.8);
+        let d2=landFilteredCourse((hCoord-world.y)*2.8,(hDx-dx.y)*2.8,(hDy-dy.y)*2.8,1.8);
+        let leadCame=clamp(max(d1-0.36,d2-0.36)*2.2,0.0,1.0)*microLodFade;
         let frameMask=clamp(max(rejaWave,leadCame*0.85),0.0,1.0);
         let glassWarp=sin(hCoord*5.5+detailA*2.2)*cos(world.y*5.5-detailB*2.2)*0.004*archLodFade;
         let roomDepth=vec3f(0.038,0.052,0.066)*(0.75+0.25*sin(hCoord*1.8+world.y*1.2))*(0.65+0.35*portShade);
@@ -1013,10 +1006,8 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       ambientVisibility=(0.48+0.36*max(n.y,0.0))*aoVis;
     }else if(in.kind.x<17.5){
       // Kind 17: Paper-birch & elm/cedar bark sheathing (Abenaki wigwams, Algonquian longhouses & birchbark canoes)
-      let barkHorizLen=length(n.xz);
-      let barkTan=select(vec3f(0.7071,0.0,0.7071),vec3f(-n.z,0.0,n.x)/max(barkHorizLen,1e-3),barkHorizLen>0.08);
       let seamY=landFilteredCourse(world.y*1.35,dx.y*1.35,dy.y*1.35,2.0);
-      let seamX=landFilteredCourse(dot(world,barkTan)*1.15,dot(dx,barkTan)*1.15,dot(dy,barkTan)*1.15,2.0);
+      let seamX=landFilteredCourse((world.x-world.z)*0.82,(dx.x-dx.z)*0.82,(dy.x-dy.z)*0.82,2.0);
       let seamWave=(0.65*seamY+0.35*seamX)*archLodFade;
       let lenticel=landFilteredWave(world,dx,dy,vec3f(6.5,16.0,-6.5),detailA*1.8)*microLodFade;
       let sheetVar=(detailA*0.55+detailB*0.45)*0.048;

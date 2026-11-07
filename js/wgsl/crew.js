@@ -194,11 +194,11 @@ fn crewShade(v:CrewVertex,front:bool,baseIn:vec3f)->vec4f {
     }
   }
   if(woundAmt>0.15 || scorchAmt>0.10){
-    // Linen bandages wrapped around brow/head or forearm/calf on wounded sailors
+    // Linen bandages wrapped around brow/head or forearm/calf on wounded survivors
     let hasHeadBand=bSeed>0.16 && bp.y>1.63 && bp.y<1.71 && bp.z>-0.10;
     let hasArmBand=bSeed>0.05 && abs(bp.x)>0.16 && bp.y>0.92 && bp.y<1.12 && sign(bp.x)==select(-1.0,1.0,bSeed>0.22);
     let hasLegBand=bSeed>0.11 && bp.y>0.24 && bp.y<0.42 && sign(bp.x)==select(1.0,-1.0,bSeed>0.20);
-    if(woundAmt>0.25 && (hasHeadBand || hasArmBand || hasLegBand)){
+    if(woundAmt>0.25 && woundAmt<0.85 && (hasHeadBand || hasArmBand || hasLegBand)){
       let wrapStripe=sin((bp.y*85.0+bp.x*32.0)*6.283)*0.04;
       var linen=vec3f(0.84,0.80,0.72)+vec3f(wrapStripe);
       let seep=smoothstep(0.58,0.82,nLow+0.25*woundAmt);
@@ -206,9 +206,10 @@ fn crewShade(v:CrewVertex,front:bool,baseIn:vec3f)->vec4f {
       baseColor=linen;
       roughBias=0.22;
     }else if(woundAmt>0.15){
-      let stainZone=smoothstep(0.52,0.78,nLow+0.22*woundAmt)*smoothstep(0.35,1.45,bp.y);
-      let bloodCol=select(vec3f(0.24,0.025,0.018),vec3f(0.32,0.04,0.03),v.skin>0.5);
-      baseColor=mix(baseColor,bloodCol,stainZone*woundAmt*0.72);
+      let stainZone=smoothstep(0.42,0.74,nLow+0.30*woundAmt)*smoothstep(0.18,1.62,bp.y);
+      let bloodCol=select(vec3f(0.24,0.022,0.016),vec3f(0.34,0.035,0.025),v.skin>0.5);
+      baseColor=mix(baseColor,bloodCol,clamp(stainZone*woundAmt*0.84,0.0,0.88));
+      roughBias=min(roughBias,-stainZone*woundAmt*0.14);
     }
     if(scorchAmt>0.08){
       let sootMask=smoothstep(0.38,0.76,nLow*0.7+nHash*0.3)*scorchAmt;

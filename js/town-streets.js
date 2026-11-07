@@ -205,8 +205,9 @@ function resample(points, step) {
 function chooseDoor(inst, grid, towards) {
   const hw = inst.width * 0.5, hl = inst.length * 0.5;
   if (inst.prefabId === 'timber_mole_pier') {
-    // People go to the head of a pier, the end over the deepest water.
-    const a = localToWorld(inst, 0, hl - 1.5), b = localToWorld(inst, 0, -hl + 1.5);
+    // People walk out along the pier deck, stopping clear of the pierhead capstan and Padrão beacon plinth.
+    const reach = Math.max(2.0, hl - 8.2);
+    const a = localToWorld(inst, 0, reach), b = localToWorld(inst, 0, -reach);
     const head = grid.groundAt(a.x, a.z) < grid.groundAt(b.x, b.z) ? a : b;
     const cell = nearestFreeCell(grid, head.x, head.z);
     return cell < 0 ? null : { inst, cell, outside: head, inside: head };
@@ -622,7 +623,8 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
       const [x, z] = line[k];
       const c = grid.at(x, z);
       const halfWidth = c >= 0 && onWay[c] ? Math.min(widthOf(c) * 0.5, roomOf(c)) : narrowest * 0.5;
-      routeSamples.push(x, climbed[k], z, Math.max(0, halfWidth - 0.45));
+      const onPier = (a.inst.prefabId === 'timber_mole_pier' || b.inst.prefabId === 'timber_mole_pier') && climbed[k] > 1.8;
+      routeSamples.push(x, climbed[k], z, Math.max(0, halfWidth - (onPier ? 1.15 : 0.45)));
     }
     return { first, count: line.length, length: (line.length - 1) * ROUTE_STEP_M };
   });
@@ -632,21 +634,29 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
   const words = new Uint32Array(walkers), floats = new Float32Array(walkers);
   for (let w = 0; w < people; w++) {
     const route = routes[walkerTrip[w]];
+    const trip = trips[walkerTrip[w]];
     const at = w * WALKER_WORDS;
     const speed = WALKING_SPEEDS[0] + (WALKING_SPEEDS[1] - WALKING_SPEEDS[0]) * random();
     const pauses = random() < PAUSE_SHARE;
-    words[at] = route.first;
-    words[at + 1] = route.count;
+    let first = route.first, count = route.count;
+    if (count > 8 && OPEN_AIR.has(trip.b.inst.prefabId)) {
+      count = Math.max(4, count - (w % Math.min(8, Math.floor(count * 0.35))));
+    } else if (count > 8 && OPEN_AIR.has(trip.a.inst.prefabId)) {
+      const trim = w % Math.min(8, Math.floor(count * 0.35));
+      first += trim;
+      count -= trim;
+    }
+    words[at] = first;
+    words[at + 1] = count;
     floats[at + 2] = random();
     floats[at + 3] = speed;
     floats[at + 4] = 0.25 + 0.75 * random(); // Each keeps to one side of their way of going.
     floats[at + 5] = pauses ? 0.2 + 0.6 * random() : 0;
     floats[at + 6] = pauses ? PAUSE_SECONDS * (0.5 + random()) : 0;
     floats[at + 7] = INDOOR_SECONDS[0] + (INDOOR_SECONDS[1] - INDOOR_SECONDS[0]) * random();
-    floats[at + 8] = route.length;
+    floats[at + 8] = (count - 1) * ROUTE_STEP_M;
     floats[at + 9] = random(); // How readily they stay out after dark.
     words[at + 10] = Math.floor(random() * 0xffff);
-    const trip = trips[walkerTrip[w]];
     words[at + 11] = (w & 1) | (OPEN_AIR.has(trip.a.inst.prefabId) ? 2 : 0) | (OPEN_AIR.has(trip.b.inst.prefabId) ? 4 : 0);
   }
 

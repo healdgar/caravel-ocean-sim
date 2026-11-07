@@ -123,13 +123,13 @@ export function createGunneryAudio({play,available=()=>true,listener=()=>({x:0,y
         return enqueue('timber-crumble',position,.30,false,.88,{offset:.14,reach:110});
       }
       if(event.type==='enemy-voice'){
-        const minCooldown=event.action==='fire'?75:18;
+        const minCooldown=event.action==='fire'?2.2:1.8;
         if(clock-lastEnemyVoiceAt<minCooldown)return false;
         const ear=listener();
-        if(Math.hypot(position.x-ear.x,position.y-(ear.y??0),position.z-ear.z)>75)return false;
+        if(Math.hypot(position.x-ear.x,position.y-(ear.y??0),position.z-ear.z)>450)return false;
         lastEnemyVoiceAt=clock;
         const clip=event.action==='boarding'?'enemy-boarding-cry':event.action==='surrender'?'enemy-surrender-cry':'enemy-fire-order';
-        return enqueue(clip,position,event.gain??.26,false,event.rate??1,{reach:event.reach??75});
+        return enqueue(clip,position,event.gain??.26,false,event.rate??1,{reach:event.reach??95});
       }
       if(event.type==='town-panic'){
         if(clock-lastPanicAt<1.2)return false;

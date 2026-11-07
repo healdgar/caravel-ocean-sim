@@ -108,11 +108,20 @@ export function computeTownAmbienceState(arg1,arg2,arg3={}){
   for(const port of ports){
     const px=port?.x??port?.harbourX??port?.center?.x??port?.center?.[0],pz=port?.z??port?.harbourZ??port?.center?.z??port?.center?.[1];
     if(!Number.isFinite(px)||!Number.isFinite(pz))continue;
-    const d=Math.hypot(px-listener.x,pz-listener.z);
-    if(d<bestDist){bestDist=d;nearest=port;bestX=px;bestZ=pz;}
+    let d=Math.hypot(px-listener.x,pz-listener.z);
+    let hx=px,hz=pz;
+    const samples=port?.streets?.samples;
+    if(samples&&samples.length>=4){
+      for(let k=0;k<samples.length;k+=24){
+        const sx=samples[k],sz=samples[k+2];
+        const sd=Math.hypot(sx-listener.x,sz-listener.z);
+        if(sd<d){d=sd;hx=sx;hz=sz;}
+      }
+    }
+    if(d<bestDist){bestDist=d;nearest=port;bestX=hx;bestZ=hz;}
   }
   if(!nearest||bestDist>320){
-    return {active:false,nearTown:false,distance:Infinity,gain:0,crowdGain:0,pan:0,underFire:false,hasIndigenous:false,cultureId:null,position:null,livingBuildings:0,livingPeople:0,dayFactor:1};
+    return {active:false,nearTown:false,distance:Infinity,gain:0,crowdGain:0,busyWalkGain:0,pan:0,underFire:false,hasIndigenous:false,cultureId:null,position:null,livingBuildings:0,livingPeople:0,dayFactor:1};
   }
   const instances=Array.isArray(nearest.instances)?nearest.instances:[];
   const livingBuildings=instances.length?instances.filter(inst=>!inst?.damage?.collapsed&&inst?.damageState?.state!=='ruined').length:12;
@@ -124,6 +133,8 @@ export function computeTownAmbienceState(arg1,arg2,arg3={}){
   const portUnderFire=Boolean(underFire||(nearest.underFireUntil&&time<nearest.underFireUntil)||streetsUnderFire||(nearest.streets?.fleeTimer>0)||(nearest.townsfolk?.fleeTimer>0));
   const atten=1/(1+Math.max(0,bestDist-14)/68);
   const gain=weatherClamp(0.25*popFactor*dayFactor*atten,0,0.28);
+  const walkAtten=bestDist<110?1/(1+Math.max(0,bestDist-8)/28):0;
+  const busyWalkGain=livingPeople>0&&sunElev>-4?weatherClamp(0.095*popFactor*dayFactor*walkAtten,0,0.11):0;
   const dx=bestX-listener.x,dz=bestZ-listener.z,horiz=Math.hypot(dx,dz)||1;
   const rx=Number.isFinite(listener.rx)?listener.rx:Number.isFinite(listener.rightX)?listener.rightX:1;
   const rz=Number.isFinite(listener.rz)?listener.rz:Number.isFinite(listener.rightZ)?listener.rightZ:0;
@@ -138,6 +149,7 @@ export function computeTownAmbienceState(arg1,arg2,arg3={}){
     distance:bestDist,
     gain,
     crowdGain:gain,
+    busyWalkGain,
     pan,
     underFire:portUnderFire,
     hasIndigenous,
@@ -235,25 +247,26 @@ export function collectFootstepEvents(arg1,arg2={}){
   if(time!==null&&typeof walkerTracker.get==='function'){
     try{
       const lastStepTime=walkerTracker.get('__lastStepTime')??-10;
-      if(time-lastStepTime<0.085)return [];
+      if(time-lastStepTime<0.24)return [];
     }catch{/* WeakMap does not accept string keys */}
   }
   const events=[];
   const D2R=Math.PI/180;
+  const STRIDE_RAD=Math.PI;
   if(boat&&Number.isFinite(boat.deckWalkX)&&Number.isFinite(boat.deckWalkZ)){
     try{
       const prev=walkerTracker.get(boat);
       if(prev&&Number.isFinite(prev.x)){
         const moved=Math.hypot(boat.deckWalkX-prev.x,boat.deckWalkZ-prev.z);
-        if(moved>=0.65){
+        if(moved>=0.78){
           const h=(boat.heading??0)*D2R,sinH=Math.sin(h),cosH=Math.cos(h);
           const wx=(boat.x??0)+boat.deckWalkZ*sinH+boat.deckWalkX*cosH;
           const wz=(boat.z??0)+boat.deckWalkZ*cosH-boat.deckWalkX*sinH;
-          events.push({kind:'deck',surface:'deck',id:'footstep-deck',position:{x:wx,y:(boat.heave??0)+1.5,z:wz},gain:0.18,rate:0.96+(moved%0.12)});
-          walkerTracker.set(boat,{x:boat.deckWalkX,z:boat.deckWalkZ});
+          events.push({kind:'deck',surface:'deck',id:'footstep-deck',position:{x:wx,y:(boat.heave??0)+1.5,z:wz},gain:0.065,rate:0.92+((prev.step=(prev.step??0)+1)&1)*0.07});
+          walkerTracker.set(boat,{x:boat.deckWalkX,z:boat.deckWalkZ,step:prev.step});
         }
       }else{
-        walkerTracker.set(boat,{x:boat.deckWalkX,z:boat.deckWalkZ});
+        walkerTracker.set(boat,{x:boat.deckWalkX,z:boat.deckWalkZ,step:0});
       }
     }catch{/* ignore */}
   }
@@ -261,8 +274,8 @@ export function collectFootstepEvents(arg1,arg2={}){
   if(boat&&Array.isArray(roster)){
     const h=(boat.heading??0)*D2R,sinH=Math.sin(h),cosH=Math.cos(h);
     for(const s of roster){
-      if(!s||s.visible===false||s.dead||s.casualtyState==='fallen'||s.incapacitated||s.overboard||(s.walk??0)<=0.12||!Number.isFinite(s.walkTime))continue;
-      const stepIdx=Math.floor(s.walkTime/0.52);
+      if(!s||s.visible===false||s.dead||s.casualtyState==='fallen'||s.incapacitated||s.overboard||(s.walk??0)<=0.18||!Number.isFinite(s.walkTime))continue;
+      const stepIdx=Math.floor(s.walkTime/STRIDE_RAD);
       const prevIdx=walkerTracker.get(s);
       walkerTracker.set(s,stepIdx);
       if(prevIdx===undefined||stepIdx<=prevIdx)continue;
@@ -271,8 +284,9 @@ export function collectFootstepEvents(arg1,arg2={}){
       const wy=(boat.heave??0)+sy;
       const wz=(boat.z??0)+sz*cosH-sx*sinH;
       const d=Math.hypot(wx-listener.x,wy-(listener.y??0),wz-listener.z);
-      if(d<=22){
-        events.push({kind:'deck',surface:'deck',id:'footstep-deck',position:{x:wx,y:wy,z:wz},gain:0.16,rate:0.94+((stepIdx&3)*0.04)});
+      if(d<=16){
+        const prox=1/(1+d/5.5);
+        events.push({kind:'deck',surface:'deck',id:'footstep-deck',position:{x:wx,y:wy,z:wz},gain:0.055*prox,rate:0.91+((stepIdx&1)*0.07)+((stepIdx&3)*0.015)});
         if(events.length>=2)break;
       }
     }
@@ -282,15 +296,16 @@ export function collectFootstepEvents(arg1,arg2={}){
     for(const g of garrisons){
       const soldiers=g?.soldiers??[];
       for(const s of soldiers){
-        if(!s||s.visible===false||s.dead||s.casualtyState==='fallen'||s.falling||(s.walk??0)<=0.12||!Number.isFinite(s.walkTime))continue;
-        const stepIdx=Math.floor(s.walkTime/0.54);
+        if(!s||s.visible===false||s.dead||s.casualtyState==='fallen'||s.falling||(s.walk??0)<=0.18||!Number.isFinite(s.walkTime))continue;
+        const stepIdx=Math.floor(s.walkTime/STRIDE_RAD);
         const prevIdx=walkerTracker.get(s);
         walkerTracker.set(s,stepIdx);
         if(prevIdx===undefined||stepIdx<=prevIdx)continue;
         const sx=s.x??s.position?.[0]??0,sy=s.y??s.position?.[1]??2,sz=s.z??s.position?.[2]??0;
         const d=Math.hypot(sx-listener.x,sy-(listener.y??0),sz-listener.z);
-        if(d<=26){
-          events.push({kind:'ground',surface:'ground',id:'footstep-ground',position:{x:sx,y:sy,z:sz},gain:0.15,rate:0.94+((stepIdx&3)*0.04)});
+        if(d<=18){
+          const prox=1/(1+d/6.0);
+          events.push({kind:'ground',surface:'ground',id:'footstep-ground',position:{x:sx,y:sy,z:sz},gain:0.052*prox,rate:0.91+((stepIdx&1)*0.07)+((stepIdx&3)*0.015)});
           if(events.length>=2)break;
         }
       }
@@ -305,30 +320,16 @@ export function collectFootstepEvents(arg1,arg2={}){
         for(const p of people){
           if(!p||p.visible===false||p.alive===false||p.dead)continue;
           const wt=Number.isFinite(p.walkTime)?p.walkTime:Number.isFinite(p.phase)?p.phase:null;
-          if(wt===null||((p.speed??p.walk??1)<=0.08))continue;
-          const stepIdx=Math.floor(wt/0.55);
+          if(wt===null||((p.speed??p.walk??1)<=0.12))continue;
+          const stepIdx=Math.floor(wt/STRIDE_RAD);
           const prevIdx=walkerTracker.get(p);
           walkerTracker.set(p,stepIdx);
           if(prevIdx===undefined||stepIdx<=prevIdx)continue;
           const d=Math.hypot((p.x??0)-listener.x,(p.y??1.5)-(listener.y??0),(p.z??0)-listener.z);
-          if(d<=26){
-            events.push({kind:'ground',surface:'ground',id:'footstep-ground',position:{x:p.x??0,y:p.y??1.5,z:p.z??0},gain:0.14,rate:0.96+((stepIdx&3)*0.03)});
+          if(d<=18){
+            const prox=1/(1+d/6.0);
+            events.push({kind:'ground',surface:'ground',id:'footstep-ground',position:{x:p.x??0,y:p.y??1.5,z:p.z??0},gain:0.050*prox,rate:0.92+((stepIdx&1)*0.07)+((stepIdx&3)*0.015)});
             if(events.length>=2)break;
-          }
-        }
-      }else if(typeof people==='number'&&people>0&&port?.streets?.samples?.length>=4){
-        const samples=port.streets.samples;
-        const stepIdx=Math.floor((time??0)/0.58);
-        const prevIdx=walkerTracker.get(port);
-        walkerTracker.set(port,stepIdx);
-        if(prevIdx!==undefined&&stepIdx>prevIdx){
-          for(let k=0;k<samples.length;k+=16){
-            const sx=samples[k],sy=samples[k+1],sz=samples[k+2];
-            const d=Math.hypot(sx-listener.x,sy-(listener.y??0),sz-listener.z);
-            if(d<=22){
-              events.push({kind:'ground',surface:'ground',id:'footstep-ground',position:{x:sx,y:sy,z:sz},gain:0.14,rate:0.95+((stepIdx&3)*0.03)});
-              break;
-            }
           }
         }
       }
@@ -580,7 +581,9 @@ export function createSceneAudio({onStatus=()=>{}}={}){
         }
         case 'lookout-sighting':
         case 'lookout-call':{
-          if(time-lastLookoutCallAt<45)return false;
+          if(ev.kind===lastLookoutKind&&time-lastLookoutCallAt<14)return false;
+          if(ev.kind!==lastLookoutKind&&time-lastLookoutCallAt<14&&ev.fromUpdate)return false;
+          lastLookoutKind=ev.kind??'ship';
           lastLookoutCallAt=time;
           const isLand=ev.kind==='land';
           const isMarine=ev.kind==='whale'||ev.kind==='dolphin'||ev.kind==='humpback'||ev.kind==='sperm-whale'||ev.kind==='orca';
@@ -600,10 +603,10 @@ export function createSceneAudio({onStatus=()=>{}}={}){
           play('sail-luff',ev.gain??0.24,p,ev.rate??(0.95+Math.random()*0.1),true,{reach:ev.reach??42});
           return true;
         case 'footstep-deck':
-          play('footstep-deck',ev.gain??0.18,p,ev.rate??(0.94+Math.random()*0.12),true,{reach:ev.reach??22});
+          play('footstep-deck',ev.gain??0.06,p,ev.rate??(0.92+Math.random()*0.10),true,{duration:0.22,attack:0.015,release:0.12,lowpassHz:1650,reach:ev.reach??14});
           return true;
         case 'footstep-ground':
-          play('footstep-ground',ev.gain??0.16,p,ev.rate??(0.94+Math.random()*0.12),true,{reach:ev.reach??26});
+          play('footstep-ground',ev.gain??0.055,p,ev.rate??(0.92+Math.random()*0.10),true,{duration:0.22,attack:0.015,release:0.12,lowpassHz:1850,reach:ev.reach??16});
           return true;
         case 'dock-start':
           play('wind-strong',.28,p,1.65,true,{offset:.2,duration:.42,highpassHz:520});
@@ -710,7 +713,7 @@ export function createSceneAudio({onStatus=()=>{}}={}){
         levels['shore-surf']=0;
       }
 
-      // Busy towns ambience & bombardment panic
+      // Busy towns ambience (multi-person walking + unintelligible background crowd chatter) & bombardment panic
       const townSource=worldState?.ports??terrain;
       const sunElev=worldState?.sunElev??settings.sunElev??25;
       const townState=computeTownAmbienceState(listener,townSource,{sunElev,time,underFire:Boolean(worldState?.underFire)});
@@ -723,10 +726,21 @@ export function createSceneAudio({onStatus=()=>{}}={}){
           startLoop('crowd-panic',ALL_SOUNDS['crowd-panic']);
           levels['crowd-panic']=Math.min(0.26,townState.gain*1.15);
           const panicLoop=loops.get('crowd-panic');
-          if(panicLoop?.pan)panicLoop.pan.pan.value=townState.pan;
+          if(panicLoop){
+            panicLoop.source.playbackRate.value=1.0;
+            if(panicLoop.pan)panicLoop.pan.pan.value=townState.pan;
+          }
           if(time>=nextTownPanic&&townState.position){
             playSynth('bell',townState.position,0.20);
             nextTownPanic=time+8.5+Math.random()*5.5;
+          }
+        }else if(townState.busyWalkGain>0.006){
+          startLoop('crowd-panic',ALL_SOUNDS['crowd-panic']);
+          levels['crowd-panic']=townState.busyWalkGain;
+          const panicLoop=loops.get('crowd-panic');
+          if(panicLoop){
+            panicLoop.source.playbackRate.value=0.88;
+            if(panicLoop.pan)panicLoop.pan.pan.value=townState.pan;
           }
         }else{
           levels['crowd-panic']=0;
@@ -793,7 +807,7 @@ export function createSceneAudio({onStatus=()=>{}}={}){
         time,
       });
       for(const step of footstepEvents){
-        play(step.id,step.gain,step.position,step.rate,true,{reach:step.kind==='deck'?20:25});
+        play(step.id,step.gain,step.position,step.rate,true,{duration:0.22,attack:0.015,release:0.12,lowpassHz:step.kind==='deck'?1650:1850,reach:step.kind==='deck'?14:16});
       }
 
       // Drain queued fort garrison / rampart fall casualty screams
@@ -843,8 +857,11 @@ export function createSceneAudio({onStatus=()=>{}}={}){
         }
       }
 
-      // Lookout sighting calls are triggered explicitly on genuine horizon sightings, not polled per-frame from boat.lookoutSighting
-      void lastLookoutKind;
+      // Lookout sighting calls when a new horizon contact is sighted
+      const sight=boat?.lookoutSighting;
+      if(sight?.kind&&sight.kind!=='dolphin'&&sight.kind!==lastLookoutKind){
+        this.event({type:'lookout-sighting',...sight,fromUpdate:true,position:{x:sight.x??boat.x,y:sight.y??((boat.heave??0)+12),z:sight.z??boat.z}},boat);
+      }
 
       // Spatial shipboard fire crackle & roar when any vessel is burning nearby
       const fires=Array.isArray(activeFires)&&activeFires.length?activeFires:(boat?.damage?.worldFires??[]);

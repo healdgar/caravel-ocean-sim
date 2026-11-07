@@ -214,6 +214,6 @@ export function crewNeedsCutShader(metresFromEye,firstPerson,woundAndScorch){
 // seated, fallen or just hurt still needs their own solved pose.
 const CREW_CLIP_ONLY_M=50;
 export function crewClipOnly(apparentMetres,sailor){
-  return apparentMetres>=CREW_CLIP_ONLY_M&&!sailor.seatedPose&&!sailor.pendingWounds?.length&&!((sailor.knockdownTimer??0)>0)&&sailor.casualtyState!=='fallen';
+  return apparentMetres>=CREW_CLIP_ONLY_M&&!sailor.seatedPose&&!sailor.pendingWounds?.length&&!sailor.wounds?.length&&!((sailor.knockdownTimer??0)>0)&&sailor.casualtyState!=='fallen';
 }
 

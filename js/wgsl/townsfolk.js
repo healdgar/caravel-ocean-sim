@@ -53,7 +53,7 @@ struct TownCrowd {clips:array<vec4u,6>,bucketSpan:u32,looks:u32,padding:vec2u};
 struct TownShot {start:vec3f,strike:f32,end:vec3f,blast:f32,reach:f32,seed:f32,padding:vec2f};
 struct TownShots {count:u32,list:array<TownShot,${TOWN_SHOT_LIMIT}>};
 struct TownFate {mode:u32,since:f32,until:f32,runFor:f32,along:f32,going:f32,lane:f32,heading:f32,clock:f32,speed:f32,look:f32,how:u32};
-struct TownSpot {position:vec3f,forward:vec2f};
+struct TownSpot {position:vec3f,forward:vec2f,centerXZ:vec2f,halfWidth:f32};
 @group(0) @binding(0) var<uniform> F:Frame;
 @group(0) @binding(1) var<storage,read> walkers:array<Walker>;
 @group(0) @binding(2) var<storage,read> route:array<vec4f>;
@@ -88,7 +88,7 @@ fn wayAt(w:Walker,metres:f32,lane:f32)->TownSpot {
   let ahead=route[w.first+min(i+3u,w.count-1u)].xz-route[w.first+u32(max(i32(i)-2,0))].xz;
   let forward=normalize(ahead+vec2f(1e-4,0.0));
   let aside=vec2f(forward.y,-forward.x)*lane*w.side*here.w;
-  return TownSpot(vec3f(here.x+aside.x,here.y,here.z+aside.y),forward);
+  return TownSpot(vec3f(here.x+aside.x,here.y,here.z+aside.y),forward,here.xz,here.w);
 }
 // What to add to the clock so that their day, which follows from the time, goes on from this point of it.
 fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
@@ -103,7 +103,7 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
   let w=walkers[id.x];
   var fate=fates[id.x];
   let time=F.camPos.w;
-  let age=secondsSince(fate.since,time);
+  var age=secondsSince(fate.since,time);
   // The fear passes and they take up their day from where they are. They run only along their own way, which was
   // laid clear of walls and water, so they cannot go through a building or into the sea.
   if(fate.mode==AFRAID&&age>=fate.until){
@@ -144,7 +144,7 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
     hidden=ran>0.0&&(metres<=0.0||metres>=w.length)&&((w.flags>>select(2u,1u,going<0.0))&1u)==0u;
   }
   let spot=wayAt(w,metres,lane);
-  let position=spot.position;
+  var position=spot.position;
   let facing=spot.forward*going;
   var heading=atan2(facing.x,facing.y);
   if(fate.mode>=FALLING){heading=fate.heading;}
@@ -155,7 +155,8 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
   }
   // What the guns did since the last frame. Nearly always nothing, and then this costs one comparison.
   if(shots.count>0u&&fate.mode<FALLING){
-    var fear=0.0;var danger=vec2f(0.0);var fearReach=1.0;var fearSeed=0.0;var struck=false;var fallsTo=vec2f(0.0,1.0);
+    var fear=0.0;var danger=vec2f(0.0);var fearReach=1.0;var fearSeed=0.0;var fearBlast=0.0;var fearAway=1e6;
+    var struck=false;var directHit=false;var hitSeed=1.0;var hitProx=1.0;var fallsTo=vec2f(0.0,1.0);
     for(var k=0u;k<shots.count;k++){
       let shot=shots.list[k];
       let line=shot.end-shot.start;
@@ -166,17 +167,44 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
       let y=shot.start.y+line.y*t;
       let away=length(vec3f(nearest.x,max(max(position.y-y,y-position.y-${BODY_HEIGHT_M.toFixed(3)}),0.0),nearest.y));
       if(!hidden){
-        if(away<shot.strike){struck=true;fallsTo=line.xz;}
-        else if(away<shot.blast&&townRoll(id.x,shot.seed)<${TOWN_BLAST_CHANCE.toFixed(2)}*(1.0-away/shot.blast)){struck=true;fallsTo=-nearest;}
+        if(away<shot.strike){
+          struck=true;directHit=true;hitSeed=shot.seed;hitProx=1.0;fallsTo=line.xz;
+        }else if(away<shot.blast&&townRoll(id.x,shot.seed)<${TOWN_BLAST_CHANCE.toFixed(2)}*(1.0-away/shot.blast)){
+          struck=true;hitSeed=shot.seed;hitProx=clamp(1.0-away/max(shot.blast,0.1),0.25,1.0);fallsTo=-nearest;
+        }
       }
       let closeness=1.0-away/shot.reach;
-      if(closeness>fear){fear=closeness;danger=position.xz+nearest;fearReach=shot.reach;fearSeed=shot.seed;}
+      if(closeness>fear){fear=closeness;danger=position.xz+nearest;fearReach=shot.reach;fearSeed=shot.seed;fearBlast=shot.blast;fearAway=away;}
     }
     if(struck){
-      // Half go down on their face and half on their back, either way in the direction it took them.
-      fate.how=select(1u,0u,townRoll(id.x,7.0)<.5);
-      let toward=fallsTo*select(-1.0,1.0,fate.how==0u)+vec2f(1e-4,0.0);
+      // Half go down on their face and half on their back, and the shot or blast flings them along its path.
+      let onBack=select(1u,0u,townRoll(id.x,7.0)<.5);
+      let throwDir0=normalize(fallsTo+vec2f(1e-4,0.0));
+      let perpDir=vec2f(-throwDir0.y,throwDir0.x)*(townRoll(id.x,hitSeed+5.0)-0.5)*select(0.28,0.42,directHit);
+      let throwDir=normalize(throwDir0+perpDir);
+      let throwSpeed=select((3.4+townRoll(id.x,hitSeed+6.0)*4.2)*hitProx,4.6+townRoll(id.x,hitSeed+6.0)*3.8,directHit);
+      let throwVy=select((1.9+townRoll(id.x,hitSeed+8.0)*2.1)*hitProx,2.4+townRoll(id.x,hitSeed+8.0)*1.9,directHit);
+      let rInj=townRoll(id.x,hitSeed+9.0);
+      var injuryKind=0u;
+      if(directHit){
+        if(rInj<0.72){injuryKind=1u+(u32(rInj*100.0)%5u);}
+        else if(rInj<0.92){injuryKind=6u+(u32(rInj*100.0)&1u);}
+      }else{
+        if(rInj<0.38){injuryKind=1u+(u32(rInj*100.0)%4u);}
+        else if(rInj<0.68){injuryKind=6u+(u32(rInj*100.0)&1u);}
+      }
+      let wound4=min(15u,u32((11.0+townRoll(id.x,hitSeed+10.0)*4.9)*max(0.75,hitProx)));
+      let scorch4=min(15u,u32((7.0+townRoll(id.x,hitSeed+11.0)*8.9)*max(0.60,hitProx)));
+      let seed3=u32(townRoll(id.x,hitSeed+12.0)*7.99)&7u;
+      let dmgCode=injuryKind|(wound4<<3u)|(scorch4<<7u)|(seed3<<11u);
+      let toward=fallsTo*select(-1.0,1.0,onBack==0u)+vec2f(1e-4,0.0);
+      fate.how=onBack|(dmgCode<<1u);
+      fate.until=throwDir.x*throwSpeed;
+      fate.runFor=throwDir.y*throwSpeed;
+      fate.speed=throwVy;
+      fate.look=f32(dmgCode);
       fate.mode=FALLING;fate.since=time;fate.along=metres;fate.going=going;fate.lane=lane;fate.heading=atan2(toward.x,toward.y);
+      heading=fate.heading;age=0.0;
       fates[id.x]=fate;
     }else if(fear>0.0&&townRoll(id.x,fearSeed+1.0)<min(1.0,fear*${TOWN_REACT_GAIN.toFixed(2)})){
       let settle=${TOWN_SETTLE_S[0].toFixed(1)}+fear*${TOWN_SETTLE_S[1].toFixed(1)}+townRoll(id.x,fearSeed+2.0)*${TOWN_SETTLE_S[2].toFixed(1)};
@@ -192,8 +220,18 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
         let onlyLooks=fear<${TOWN_ONLY_LOOKS.toFixed(2)};
         let cowers=!onlyLooks&&(cornered||townRoll(id.x,fearSeed+3.0)<${TOWN_COWER_SHARE.toFixed(2)});
         let toDanger=danger-position.xz+vec2f(1e-4,0.0);
+        var survDmg=0u;
+        if(fearBlast>0.0&&fearAway<fearBlast*1.45&&!onlyLooks){
+          let wProx=clamp(1.0-fearAway/(fearBlast*1.45),0.20,1.0);
+          let sInj=select(0u,6u+(id.x&1u),wProx>0.55&&townRoll(id.x,fearSeed+9.0)<0.35);
+          let sWound=min(12u,max(4u,u32((6.0+townRoll(id.x,fearSeed+10.0)*6.5)*wProx)));
+          let sScorch=min(13u,max(3u,u32((5.0+townRoll(id.x,fearSeed+11.0)*8.0)*wProx)));
+          let sSeed=u32(townRoll(id.x,fearSeed+12.0)*7.99)&7u;
+          survDmg=sInj|(sWound<<3u)|(sScorch<<7u)|(sSeed<<11u);
+        }
         fate.how=select(0u,1u,cowers);
-        fate.mode=AFRAID;fate.since=time;fate.along=metres;fate.lane=lane;fate.heading=heading;fate.look=atan2(toDanger.x,toDanger.y);
+        fate.mode=AFRAID;fate.since=time;fate.along=metres;fate.lane=lane;fate.heading=heading;
+        fate.look=select(atan2(toDanger.x,toDanger.y),f32(survDmg),!onlyLooks);
         fate.speed=${TOWN_RUN_SPEEDS[0].toFixed(2)}+townRoll(id.x,fearSeed+4.0)*${(TOWN_RUN_SPEEDS[1] - TOWN_RUN_SPEEDS[0]).toFixed(2)};
         if(cowers||onlyLooks){
           fate.going=going;fate.runFor=0.0;fate.until=select(settle,settle*.3,onlyLooks);
@@ -205,6 +243,36 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
         }
       }
       fates[id.x]=fate;
+    }
+  }
+  if(fate.mode>=FALLING){
+    let fallSpan=${(TOWN_FALL_FRAMES / TOWN_FALL_RATE).toFixed(3)};
+    let throwAge=select(min(age,fallSpan),fallSpan,fate.mode==DOWN);
+    let vHoriz=vec2f(fate.until,fate.runFor);
+    let vy0=max(0.0,fate.speed);
+    let g=9.81;
+    let tAirFlat=clamp(2.0*vy0/g,0.28,0.96);
+    let rightVec=vec2f(spot.forward.y,-spot.forward.x);
+    let endXZ=spot.position.xz+vHoriz*(tAirFlat+0.16);
+    let endLat=abs(dot(endXZ-spot.centerXZ,rightVec));
+    let overPier=spot.position.y>0.35 && spot.position.y<3.8 && endLat>(spot.halfWidth+0.95);
+    if(overPier){
+      let tSplash=clamp((vy0+sqrt(max(0.0,vy0*vy0+2.0*g*max(0.0,spot.position.y+0.10))))/g,0.32,1.20);
+      let flyT=min(throwAge,tSplash);
+      let waterT=max(0.0,throwAge-tSplash);
+      let waterMax=max(1e-4,1.0-exp(-(fallSpan-tSplash)*4.5));
+      let driftT=select(0.0,clamp((1.0-exp(-waterT*4.5))/waterMax,0.0,1.0)*0.10,waterT>0.0);
+      let arcY=spot.position.y+vy0*flyT-0.5*g*flyT*flyT;
+      let bobY=-0.10+0.04*sin(time*2.2+f32(id.x)*0.73);
+      position=vec3f(spot.position.x+vHoriz.x*(flyT+driftT),select(arcY,bobY,throwAge>=tSplash),spot.position.z+vHoriz.y*(flyT+driftT));
+    }else{
+      let flyT=min(throwAge,tAirFlat);
+      let groundT=max(0.0,throwAge-tAirFlat);
+      let slideMax=max(1e-4,1.0-exp(-(fallSpan-tAirFlat)*5.0));
+      let slideT=select(0.0,clamp((1.0-exp(-groundT*5.0))/slideMax,0.0,1.0)*0.16,groundT>0.0);
+      let arcY=max(0.0,vy0*flyT-0.5*g*flyT*flyT);
+      let bounceY=select(0.0,sin(groundT/0.24*3.14159)*min(0.18,vy0*0.045),groundT>0.0 && groundT<0.24);
+      position=vec3f(spot.position.x+vHoriz.x*(flyT+slideT),spot.position.y+select(arcY,bounceY,throwAge>=tAirFlat),spot.position.z+vHoriz.y*(flyT+slideT));
     }
   }
   if(hidden){return;}
@@ -245,7 +313,10 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
   let after=select(min(whole+1u,frames-1u),(whole+1u)%frames,looped);
   let bucket=model*${TOWNSFOLK_TIERS}u+tier;
   let slot=atomicAdd(&draws[bucket*5u+1u],1u);
-  bodies[bucket*crowd.bucketSpan+slot]=TownBody(position,heading,first+whole,first+after,select(fract(frame),0.0,tier>=3u),model*crowd.looks+w.look%crowd.looks);
+  let dmgCode=select(select(0u,u32(max(0.0,fate.look)),fate.mode==AFRAID&&(fate.runFor>0.0||fate.how==1u)),fate.how>>1u,fate.mode>=FALLING);
+  let rawBlend=select(fract(frame),0.0,tier>=3u||fate.mode==DOWN);
+  let packedBlend=select(rawBlend,f32(dmgCode)+clamp(rawBlend,0.0,0.96875),dmgCode>0u);
+  bodies[bucket*crowd.bucketSpan+slot]=TownBody(position,heading,first+whole,first+after,packedBlend,model*crowd.looks+w.look%crowd.looks);
 }
 `;
 
@@ -254,17 +325,66 @@ struct TownLook {shirt:vec4f,trousers:vec4f,skin:vec4f,hair:vec4f,face:vec4f};
 @group(0) @binding(10) var<storage,read> bodies:array<TownBody>;
 @group(0) @binding(11) var<storage,read> poses:array<mat4x4f>;
 @group(0) @binding(12) var<storage,read> looks:array<TownLook>;
-fn townPose(frame:u32,v:CrewInput)->mat4x4f {
+fn townPoseBones(frame:u32,bones:vec4u,weights:vec4f)->mat4x4f {
   let at=frame*65u;
-  return poses[at+v.bones.x]*v.weights.x+poses[at+v.bones.y]*v.weights.y+poses[at+v.bones.z]*v.weights.z+poses[at+v.bones.w]*v.weights.w;
+  return poses[at+bones.x]*weights.x+poses[at+bones.y]*weights.y+poses[at+bones.z]*weights.z+poses[at+bones.w]*weights.w;
 }
 @vertex fn townsfolkVS(v:CrewInput)->CrewVertex {
   let body=bodies[v.instance];let look=looks[body.look];
-  var pose=townPose(body.frameA,v);
-  if(body.blend>0.0){pose=pose*(1.0-body.blend)+townPose(body.frameB,v)*body.blend;}
+  let dmgBits=u32(max(0.0,body.blend));
+  let blend=fract(body.blend);
+  let injury=dmgBits&7u;
+  var woundAmt=f32((dmgBits>>3u)&15u)/15.0;
+  let scorchAmt=f32((dmgBits>>7u)&15u)/15.0;
+  let bSeed=select(0.0,0.06+f32((dmgBits>>11u)&7u)/7.0*0.32,dmgBits>0u);
   let dress=crewDressOf(look.hair.w);
+  let isFemale=look.skin.w>0.5;
   var surface=CrewSurface(CREW_PIECE_OUT,v.normal);
   if(!crewPieceHidden(v.color,dress)){surface=crewMorph(v.position,v.normal,look.face,look.skin.w);}
+  var bones=v.bones;
+  if(injury>=1u && injury<=5u){
+    var loSlot=9u;var hiSlot=30u;var stumpSlot=8u;
+    var stumpPos=select(vec3f(0.308,1.192,-0.060),vec3f(0.243,1.163,-0.071),isFemale);
+    if(injury==2u){
+      loSlot=33u;hiSlot=54u;stumpSlot=32u;
+      stumpPos=select(vec3f(-0.239,1.212,-0.254),vec3f(-0.186,1.180,-0.224),isFemale);
+    }else if(injury==3u){
+      loSlot=56u;hiSlot=59u;stumpSlot=55u;
+      stumpPos=select(vec3f(0.175,0.537,0.109),vec3f(0.167,0.533,0.104),isFemale);
+    }else if(injury==4u){
+      loSlot=61u;hiSlot=64u;stumpSlot=60u;
+      stumpPos=select(vec3f(-0.189,0.517,-0.178),vec3f(-0.185,0.505,-0.170),isFemale);
+    }else if(injury==5u){
+      loSlot=5u;hiSlot=6u;stumpSlot=4u;
+      stumpPos=select(vec3f(-0.007,1.380,-0.031),vec3f(-0.006,1.350,-0.035),isFemale);
+    }
+    var sevWeight=0.0;
+    if(bones.x>=loSlot && bones.x<=hiSlot){sevWeight+=v.weights.x;bones.x=stumpSlot;}
+    if(bones.y>=loSlot && bones.y<=hiSlot){sevWeight+=v.weights.y;bones.y=stumpSlot;}
+    if(bones.z>=loSlot && bones.z<=hiSlot){sevWeight+=v.weights.z;bones.z=stumpSlot;}
+    if(bones.w>=loSlot && bones.w<=hiSlot){sevWeight+=v.weights.w;bones.w=stumpSlot;}
+    if(sevWeight>0.0){
+      surface.position=mix(surface.position,stumpPos,clamp(sevWeight,0.0,1.0));
+      woundAmt=max(woundAmt,0.88+0.12*clamp(sevWeight,0.0,1.0));
+    }
+  }else if(injury==6u || injury==7u){
+    let isLeft=injury==6u;
+    let armLo=select(33u,9u,isLeft);let armHi=select(54u,30u,isLeft);
+    var brkW=0.0;
+    if(bones.x>=armLo && bones.x<=armHi){brkW+=v.weights.x;}
+    if(bones.y>=armLo && bones.y<=armHi){brkW+=v.weights.y;}
+    if(bones.z>=armLo && bones.z<=armHi){brkW+=v.weights.z;}
+    if(bones.w>=armLo && bones.w<=armHi){brkW+=v.weights.w;}
+    if(brkW>0.0){
+      let pivot=select(vec3f(-0.21,1.20,-0.18),vec3f(0.27,1.18,-0.06),isLeft);
+      let rel=surface.position-pivot;
+      let ang=select(-0.68,0.68,isLeft)*clamp(brkW,0.0,1.0);
+      let ca=cos(ang);let sa=sin(ang);
+      surface.position=pivot+vec3f(rel.x*ca-rel.y*sa,rel.x*sa+rel.y*ca,rel.z);
+    }
+  }
+  var pose=townPoseBones(body.frameA,bones,v.weights);
+  if(blend>0.0){pose=pose*(1.0-blend)+townPoseBones(body.frameB,bones,v.weights)*blend;}
   let c=cos(body.heading);let s=sin(body.heading);
   let local=(pose*vec4f(surface.position,1)).xyz;
   let turned=(pose*vec4f(surface.normal,0)).xyz;
@@ -272,10 +392,13 @@ fn townPose(frame:u32,v:CrewInput)->mat4x4f {
   out.world=vec3f(local.x*c+local.z*s,local.y,local.z*c-local.x*s)+body.position;
   out.position=F.viewProj*vec4f(out.world-F.camPos.xyz,1);
   out.normal=normalize(vec3f(turned.x*c+turned.z*s,turned.y,turned.z*c-turned.x*s));
-  let clothed=crewClothed(v.color,v.position,look.shirt.rgb,look.trousers.rgb,look.skin.rgb,look.hair.rgb,look.face.w>1.5,dress);
+  let shirtCol=mix(look.shirt.rgb,look.shirt.rgb*vec3f(0.55,0.32,0.32)+vec3f(0.20,0.0,0.0),smoothstep(0.15,0.85,woundAmt));
+  let clothed=crewClothed(v.color,v.position,shirtCol,look.trousers.rgb,look.skin.rgb,look.hair.rgb,look.face.w>1.5,dress);
   out.color=clothed.rgb;out.skin=clothed.w;out.paint=dress>>16u;
   let rainWet=clamp(F.windP[1].x,0.0,1.0);
-  out.helm=0.0;out.wet=vec2f(rainWet*0.65,rainWet*0.75);out.bodyPos=v.position;out.damage=vec3f(0.0);
+  let seaWet=select(0.0,0.92,body.position.y<-0.02);
+  out.helm=0.0;out.wet=max(vec2f(rainWet*0.65,rainWet*0.75),vec2f(seaWet,seaWet));
+  out.bodyPos=v.position;out.damage=vec3f(woundAmt,scorchAmt,bSeed);
   return out;
 }
 `;

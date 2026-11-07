@@ -424,21 +424,46 @@ function woundCrewBySplinters(targetBoat, damage, localPos, energy, ammo) {
   return counts;
 }
 
-// A ball goes straight through whoever it meets and flies on. It kills outright.
-function strikeSoldierWithBall(hit, projectile, port = null) {
+// A ball goes straight through whoever it meets and flies on. It kills outright,
+// flinging the body along the shot path and severing or crushing what it strikes.
+function strikeSoldierWithBall(hit, projectile, port = null, direction = null) {
   const struck = (projectile.struckBodies ??= new Set());
   if (struck.has(hit.sailor)) return;
   struck.add(hit.sailor);
-  const speed = Math.hypot(...(projectile.velocity ?? [0, 0, 0]));
+  const vel = projectile.velocity ?? direction ?? [0, 0, 0];
+  const speed = Math.hypot(vel[0] ?? 0, vel[1] ?? 0, vel[2] ?? 0);
   if (0.5 * (projectile.mass ?? 1) * speed * speed < 200) return;
-  hit.sailor.casualtyState = 'fallen';
-  hit.sailor._poseReady = false;
+  const s = hit.sailor;
+  const roll = (((projectile.id ?? 1) * 0.7548776662 + (s.crewIndex ?? 0) * 0.5698402909) % 1 + 1) % 1;
+  const dir = direction ?? vel;
+  recordCrewWound(s, isArrowAmmo(projectile.ammo) ? 'arrow' : 'ball', hit.point, dir, roll);
+  const inst = s.building;
+  const cosB = Math.cos(inst?.yaw ?? 0), sinB = Math.sin(inst?.yaw ?? 0);
+  const n = Math.hypot(dir[0] ?? 0, dir[2] ?? 0) || 1;
+  const worldDirX = (dir[0] ?? 0) / n, worldDirZ = (dir[2] ?? 1) / n;
+  const localDirX = worldDirX * cosB - worldDirZ * sinB;
+  const localDirZ = worldDirX * sinB + worldDirZ * cosB;
+  const throwSpeed = Math.min(9.5, 3.5 + speed / 75);
+  s.homeLxz ??= [s.lx ?? 0, s.lz ?? 0];
+  s.homeBaseLy ??= s.baseLy ?? s.ly ?? 0;
+  s.knockbackVx = localDirX * throwSpeed;
+  s.knockbackVz = localDirZ * throwSpeed;
+  s.knockbackVy = Math.min(4.2, 1.6 + speed / 110);
+  s.fallDir = (s.crewIndex ?? 0) % 2 === 0 ? 1 : -1;
+  s.collapseYaw = Math.atan2(worldDirX, worldDirZ);
+  s.casualtyState = 'fallen';
+  s.health = 0;
+  s.woundSeverity = 1.0;
+  if (!isArrowAmmo(projectile.ammo)) {
+    s.scorchAmount = Math.min(1, (s.scorchAmount ?? 0) + (projectile.ammo === 'hot' ? 0.75 : 0.42));
+  }
+  s._poseReady = false;
   if (port?.garrison) {
     (port.garrison.audioEvents ??= []).push({
       type: 'casualty-scream',
-      sex: hit.sailor.sex ?? 'male',
-      cause: 'ball',
-      position: hit.point ?? [hit.sailor.x ?? 0, hit.sailor.y ?? 2, hit.sailor.z ?? 0],
+      sex: s.sex ?? 'male',
+      cause: isArrowAmmo(projectile.ammo) ? 'arrow-wound' : 'ball',
+      position: hit.point ?? [s.x ?? 0, s.y ?? 2, s.z ?? 0],
     });
   }
 }
@@ -2766,13 +2791,23 @@ export function detonateBuildingMagazine(building, { localPos = [0, 2.2, 0], cau
     d.silenced = true;
   }
 
+  const blastRadius = +(Math.max(8.5, Math.min(building.width ?? 24, building.depth ?? building.length ?? 24) * (0.55 + 0.35 * powderFrac))).toFixed(3);
+  d.craters.push({
+    position: [...worldBlastPt],
+    localPosition: [...localPos],
+    normal: [0, 1, 0],
+    radius: blastRadius,
+    depth: +(1.85 + 1.85 * powderFrac).toFixed(3),
+    severity: +(1.25 + 0.48 * powderFrac).toFixed(3),
+    isExplosion: true,
+  });
   d.collapseDropFrac = Math.min(0.72, (d.collapseDropFrac ?? 0) + 0.32 * (0.4 + 0.6 * powderFrac));
   d.pendingBakes.push({
     kind: 'building-explosion',
     x: +worldBlastPt[0].toFixed(3),
     y: +worldBlastPt[1].toFixed(3),
     z: +worldBlastPt[2].toFixed(3),
-    radius: +(Math.max(8.5, Math.min(building.width ?? 24, building.depth ?? building.length ?? 24) * (0.55 + 0.35 * powderFrac))).toFixed(3),
+    radius: blastRadius,
     stepDepth: +(1.85 + 1.85 * powderFrac).toFixed(3),
     severity: +(1.25 + 0.48 * powderFrac).toFixed(3),
     powderFraction: +powderFrac.toFixed(3),
@@ -4105,6 +4140,7 @@ export function createGunnerySolidSweep({ sourceBoat, sourceBuilding = null, get
       // Men ashore: a ball goes through them too, on the way to whatever stops it.
       if (!arrow && projectile) {
         const land = getTerrain?.(), shores = land?.ports ?? (land?.port ? [land.port] : null);
+        const segDir = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
         for (const port of shores ?? []) {
           // The people in its streets see it go by. What it does to them is worked out on the GPU.
           port?.townsfolkWatch?.(from, to, best, projectile);
@@ -4112,7 +4148,7 @@ export function createGunnerySolidSweep({ sourceBoat, sourceBuilding = null, get
           if (!soldiers?.length) continue;
           const reach = Math.max(400, (port.reach ?? 0) + 60) + Math.hypot(to[0] - from[0], to[2] - from[2]), mx = (from[0] + to[0]) * 0.5, mz = (from[2] + to[2]) * 0.5;
           if (Math.hypot(mx - (port.center?.x ?? mx), mz - (port.center?.z ?? mz)) > reach) continue;
-          for (const hit of sweepCrewBodies(from, to, radius, soldiers, best?.fraction ?? 1)) strikeSoldierWithBall(hit, projectile, port);
+          for (const hit of sweepCrewBodies(from, to, radius, soldiers, best?.fraction ?? 1)) strikeSoldierWithBall(hit, projectile, port, segDir);
         }
       }
     }

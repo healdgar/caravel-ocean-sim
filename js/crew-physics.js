@@ -480,7 +480,8 @@ export function stepArticulatedRagdoll(s, boat, dt) {
         }
         const maxLX = instHW + 1.8 - r;
         const maxLZ = instHL + 2.4 - r;
-        if (Math.abs(lx) > maxLX || Math.abs(lz) > maxLZ) {
+        const rootOnRoof = Math.abs(s.lx ?? 0) <= instHW + 1.2 && Math.abs(s.lz ?? 0) <= instHL + 1.2;
+        if (rootOnRoof && (Math.abs(lx) > maxLX || Math.abs(lz) > maxLZ)) {
           lx = crewPhysClamp(lx, -maxLX, maxLX);
           lz = crewPhysClamp(lz, -maxLZ, maxLZ);
           rag.pos[idx] = (inst.x ?? 0) + lx * instCosY + lz * instSinY;
