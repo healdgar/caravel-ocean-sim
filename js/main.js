@@ -1106,6 +1106,7 @@ async function main() {
     v.boat.onSurrender=(surrenderedBoat,dmg,reason)=>{
       const shipTitle=surrenderedBoat.shipName||v.asset?.model?.name||v.id||'Enemy vessel';
       const msg=`🏳️ ${shipTitle} has struck her colors and hoisted the white flag of surrender! (${reason})`;
+      sceneAudio.event?.({type:'enemy-voice',action:'surrender',position:[surrenderedBoat.x??0,(surrenderedBoat.heave??0)+2,surrenderedBoat.z??0]},surrenderedBoat);
       voyageCtl?.logExternal?.(msg,'combat');
       gunControls?.update?.();
       helm?.update?.(performance.now(),true);
@@ -1128,7 +1129,13 @@ async function main() {
     getTerrain:()=>terrain,
     onOrder:(id,b)=>{
       // The captain's recorded orders are for gun crews.
-      if(ownerBoat.gunnery?.guns?.[0]?.kind!=='bow')sceneAudio.gunneryOrder(id,b);
+      if(ownerBoat.gunnery?.guns?.[0]?.kind!=='bow'){
+        if(ownerBoat.faction==='enemy'){
+          sceneAudio.event?.({type:'enemy-voice',action:'fire',order:id,position:[ownerBoat.x??0,(ownerBoat.heave??0)+2,ownerBoat.z??0]},ownerBoat);
+        }else{
+          sceneAudio.gunneryOrder(id,b);
+        }
+      }
       if(BROADSIDE_SCENARIO&&ownerBoat===boat&&(id==='fire-port'||id==='fire-starboard')){
         if(typeof setCaptainOpen==='function')setCaptainOpen(false);
         for(const v of vessels.slice(1)){
@@ -1144,7 +1151,11 @@ async function main() {
       }
     },
     onEvent:event=>{
-      sceneAudio.gunneryEvent(event);
+      if(ownerBoat.faction==='enemy'&&(event.type==='give-fire'||event.type==='ready')){
+        if(event.type==='give-fire')sceneAudio.gunneryEvent({type:'enemy-voice',action:'fire',position:event.position??[ownerBoat.x??0,(ownerBoat.heave??0)+2,ownerBoat.z??0]});
+      }else{
+        sceneAudio.gunneryEvent(event);
+      }
       // An arrow makes no smoke, plume or splinters.
       if(isArrowAmmo(event.ammo)){if(event.type==='impact'){gunControls?.update?.();helm?.update?.(performance.now(),true);}return;}
       const shotKey=prefix+event.shotId;
@@ -1274,6 +1285,9 @@ async function main() {
   const crewSeaEvents=v=>event=>{
     const mine=v===playerVessel,name=event.sailor?.name??'A hand';
     if(event.type==='overboard-splash')seaEntry(event.position,{massKg:6,radiusMetres:.5,closingSpeed:5});
+    if(event.type==='overboard'||event.type==='falling-from-aloft'||event.type==='fell-from-aloft'||event.type==='casualty-scream'||event.type==='mast-snap'){
+      sceneAudio.event?.(event,v.boat);
+    }
     if(!mine)return;
     if(event.type==='overboard'){
       const side=event.side>=0?'starboard':'larboard';
@@ -2470,6 +2484,11 @@ async function main() {
   const landfallUI=createLandfallUI({dock:cameraDock,active:!!terrain,stage:LAND_STAGE,weather:LAND_WEATHER,region:terrain?.region??undefined,
     discovery:terrain?.discovery??null,onUpgradeApplied:()=>{envFull=true;},
     onIndigenousAction:res=>{
+      sceneAudio.event?.({
+        type:'indigenous-voice',
+        cultureId:res?.polityId??terrain?.port?.indigenousSettlement?.polityId??terrain?.region?.id,
+        position:[terrain?.port?.x??boat.x,2,terrain?.port?.z??boat.z],
+      },boat);
       if(res?.colorsChangedTo){
         setVesselColors(boat,res.colorsChangedTo);
         if(colorsSelect)colorsSelect.value=res.colorsChangedTo;
@@ -2740,7 +2759,10 @@ async function main() {
       spawnTerrain:typeof spawnTerrainLate==='function'?spawnTerrainLate:null,
       disposeTerrain:typeof disposeTerrainLate==='function'?disposeTerrainLate:null,
     });
-    voyageCtl.subscribe(type=>{if(type==='open-chart')chartDrawer?.open();});
+    voyageCtl.subscribe(type=>{
+      if(type==='open-chart')chartDrawer?.open();
+      else if(type==='land-ho')sceneAudio.event?.({type:'lookout-sighting',kind:'land'},boat);
+    });
     const idleSnapshot=()=>{
       const g=geoOfBoat();
       return {drPos:{lat:g.latitude,lon:g.longitude},drTrack:[],revealTrue:false,courseTrue:boat.heading,warpTiers:[],warp:1,
@@ -3712,6 +3734,7 @@ async function main() {
     if(needSpectrum)for(const v of vessels){v.boat.revision++;v.probe.state.time=-1;}
     if(needSpectrum)surfaceWaves.reset();
     const rowingSurfaceTime=simTime+dt,rowingSurfaceWrapped=rowingSurfaceTime>LOOP;
+    let flushedRowingEvents=null;
     if(dt>0||needSpectrum||frameIndex===0){
       boat.externalForce=anchor.step(dt,boat,anchorEnvironment);
       for(const event of anchor.events)sceneAudio.anchor(event,boat);
@@ -3729,7 +3752,7 @@ async function main() {
           :activeDolphin
             ?{kind:'dolphin',x:activeDolphin.x,y:activeDolphin.y??0,z:activeDolphin.z}
             :null;
-      rowingSurfaceEvents.flush({time:rowingSurfaceWrapped?rowingSurfaceTime-LOOP:rowingSurfaceTime,dt,
+      flushedRowingEvents=rowingSurfaceEvents.flush({time:rowingSurfaceWrapped?rowingSurfaceTime-LOOP:rowingSurfaceTime,dt,
         hidden:document.hidden,resetSea:needSpectrum||elapsed>.5||rowingSurfaceWrapped});
       surfaceWaves.update(boat,dt);
     }
@@ -3747,7 +3770,15 @@ async function main() {
     frameStages.mark('Sailing and voyage');
     writeFrame(simTime);
     weatherRenderer.update(weather,P,dt);
-    sceneAudio.update(dt,P,boat,frameF,weather,activeFires);
+    sceneAudio.update(dt,P,boat,frameF,weather,activeFires,{
+      terrain,
+      vessels:followerEnabled?vessels:[vessels[0]],
+      crew:vessels[0]?.crew?.state?.crew??null,
+      fortSoldiers,
+      ports:terrain?.ports??(terrain?.port?[terrain.port]:null),
+      sunElev:P.sunElev,
+      rowingEvents:flushedRowingEvents,
+    });
     if (clouds.update(frameF,P,dt)) envFull = true;
     frameStages.mark('Weather and sound');
     for(const v of vessels.slice(1)){v.boat.showProw=!v.dormantEncounter&&followerEnabled;v.boat.crew=boat.crew;v.boat.effects=boat.effects;}

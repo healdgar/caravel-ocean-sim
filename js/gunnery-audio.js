@@ -1,4 +1,5 @@
 import { GUNNERY_AUDIO_ASSETS } from './gunnery-audio-assets.js';
+import { WORLD_AUDIO_ASSETS } from './world-audio-assets.js';
 import { isArrowAmmo } from './gunnery-state.js';
 
 // The simulation uses these durations even when sound is disabled: a muted
@@ -62,7 +63,7 @@ export function createGunneryAudio({play,available=()=>true,listener=()=>({x:0,y
     }
     return playSpeech('captain-guns-'+request.id,request.position);
   }
-  let lastImpactAt=-100;
+  let lastImpactAt=-100,lastScreamAt=-100,lastEnemyVoiceAt=-100,lastPanicAt=-100;
   function enqueue(id,position,gain,report=false,rate=1,options=undefined){
     const ear=listener(),distance=Math.hypot(position.x-ear.x,position.y-(ear.y??0),position.z-ear.z);
     if(!Number.isFinite(distance)||distance>18000)return false;
@@ -104,6 +105,34 @@ export function createGunneryAudio({play,available=()=>true,listener=()=>({x:0,y
         if(clock<voiceUntil){pendingGiveFire={position};return true;}
         return playSpeech('captain-guns-give-fire',position);
       }
+      if(event.type==='casualty-scream'){
+        if(clock-lastScreamAt<0.12)return false;
+        lastScreamAt=clock;
+        const isOverboard=Boolean(event.overboard||event.cause==='overboard'||event.cause==='aloft');
+        const clip=event.crowd?'crowd-panic':isOverboard?(event.sex==='female'?'scream-female':'scream-overboard'):(event.sex==='female'?'scream-female':'scream-male');
+        return enqueue(clip,position,event.gain??(WORLD_AUDIO_ASSETS[clip]?.gain??.28),false,event.rate??1,{reach:event.reach??85});
+      }
+      if(event.type==='timber-crumble'||event.type==='tree-fall'){
+        return enqueue('timber-crumble',position,event.gain??.36,false,event.type==='tree-fall'?.82:(event.rate??1),{reach:event.reach??110});
+      }
+      if(event.type==='stone-crumble'||event.type==='masonry-collapse'){
+        return enqueue('stone-crumble',position,event.gain??.38,false,event.collapsed?.84:(event.rate??1),{reach:event.reach??120});
+      }
+      if(event.type==='mast-snap'){
+        enqueue('mast-snap',position,event.gain??.42,false,event.rate??.96,{reach:event.reach??135});
+        return enqueue('timber-crumble',position,.30,false,.88,{offset:.14,reach:110});
+      }
+      if(event.type==='enemy-voice'){
+        if(clock-lastEnemyVoiceAt<1.1)return false;
+        lastEnemyVoiceAt=clock;
+        const clip=event.action==='boarding'?'enemy-boarding-cry':event.action==='surrender'?'enemy-surrender-cry':'enemy-fire-order';
+        return enqueue(clip,position,event.gain??.34,false,event.rate??1,{reach:event.reach??125});
+      }
+      if(event.type==='town-panic'){
+        if(clock-lastPanicAt<1.2)return false;
+        lastPanicAt=clock;
+        return enqueue('crowd-panic',position,event.gain??.30,false,event.rate??1,{reach:event.reach??135});
+      }
       if(event.type==='shot'){
         pendingReady=null;
         // IDs identify discharges, not permanent guns, so reloads remain audible. Every ship and fort battery
@@ -114,8 +143,7 @@ export function createGunneryAudio({play,available=()=>true,listener=()=>({x:0,y
           seenShots.add(key);shotHistory.push(key);
           if(shotHistory.length>128)seenShots.delete(shotHistory.shift());
         }
-        // Until bows have recordings, a clipped high slap stands in for the string.
-        if(isArrowAmmo(event.ammo))return enqueue('hull-slap',position,.1,false,1.9,{duration:.12,highpassHz:900});
+        if(isArrowAmmo(event.ammo))return enqueue('bow-release',position,.26,false,1,{duration:.88,highpassHz:120,reach:45});
         const played=enqueue('cannon-report',position,.43,true,1,{reach:REPORT_REACH_M});
         const ear=listener();
         if(Math.hypot(position.x-ear.x,position.y-(ear.y??0),position.z-ear.z)<80&&clock-lastMechanical>.28){
@@ -130,28 +158,55 @@ export function createGunneryAudio({play,available=()=>true,listener=()=>({x:0,y
       if(event.type==='impact'){
         if(clock-lastImpactAt<0.045&&event.kind!=='magazine-explosion')return false;
         lastImpactAt=clock;
-        if(isArrowAmmo(event.ammo))return enqueue('hull-slap',position,.08,false,1.7,{duration:.1,highpassHz:800});
+        const rep=event.damageReport??event;
+        const casualties=event.casualties??rep.casualties??0;
+        if((casualties>0||event.scream)&&clock-lastScreamAt>=0.12){
+          lastScreamAt=clock;
+          enqueue((event.sex??rep.sex)==='female'?'scream-female':'scream-male',position,.28,false,1,{reach:85});
+        }
+        if(isArrowAmmo(event.ammo))return enqueue('footstep-deck',position,.22,false,1.35,{duration:.28,highpassHz:240,reach:35});
         const kind=event.kind??(event.hitZone?'vessel':'water');
         if(kind==='magazine-explosion'){
           enqueue('cannon-report',position,.64,true,.58,{lowpassHz:420});
           enqueue('thunder-near',position,.55,true,.78,{duration:3.5,lowpassHz:360});
+          enqueue('timber-crumble',position,.46,false,.82,{reach:140});
           return enqueue('timber-creak',position,.48,false,1.55,{offset:.12,duration:.85,highpassHz:220});
         }
         if(kind==='water'){
           const isGrape=event.ammo==='grape';
           return enqueue(isGrape?'hull-slap':'anchor-splash',position,isGrape?.22:.34,false,isGrape?1.35:.96,{duration:isGrape?.55:1.35,highpassHz:140});
         }
-        if(event.hitZone==='rigging'){
+        if(kind==='rigging'||event.hitZone==='rigging'){
+          if(event.mastSnap||rep.mastSnap||event.mastSpring||rep.mastSpring){
+            enqueue('mast-snap',position,.42,false,(event.mastSnap||rep.mastSnap)?.95:1.12,{reach:135});
+          }
           enqueue('hull-slap',position,.28,false,1.45,{duration:.42,highpassHz:420});
           return enqueue('timber-creak',position,.26,false,1.35,{offset:.35,duration:.65,highpassHz:300});
         }
-        if(kind==='building'||kind==='terrain'){
+        if(kind==='scenery'){
+          const felled=Boolean(event.felled||rep.felled);
+          enqueue('cannon-recoil',position,.24,false,1.08,{duration:.42,lowpassHz:820});
+          return enqueue('timber-crumble',position,felled?.38:.28,false,felled?.84:1.06,{reach:105});
+        }
+        if(kind==='building'){
+          const isTimber=Boolean(event.materialClass==='timber'||event.timberClass||rep.timberClass);
+          const collapsed=Boolean(event.collapsed||rep.collapsed);
           enqueue('cannon-recoil',position,.28,false,.85,{duration:.52,lowpassHz:680});
-          return enqueue('cannon-rammer',position,.22,false,.78,{duration:.38});
+          enqueue('cannon-rammer',position,.22,false,.78,{duration:.38});
+          if(isTimber){
+            return enqueue('timber-crumble',position,collapsed?.38:.30,false,collapsed?.85:1.02,{reach:115});
+          }
+          return enqueue('stone-crumble',position,collapsed?.40:.32,false,collapsed?.84:1,{reach:120});
+        }
+        if(kind==='terrain'){
+          enqueue('cannon-recoil',position,.28,false,.85,{duration:.52,lowpassHz:680});
+          enqueue('cannon-rammer',position,.22,false,.78,{duration:.38});
+          return enqueue('stone-crumble',position,.26,false,.74,{lowpassHz:920,reach:100});
         }
         // Hull / superstructure timber impact & oak splinters
         enqueue('cannon-recoil',position,.35,false,1.18,{duration:.48,lowpassHz:920});
         enqueue('hull-slap',position,.30,false,.84,{duration:.52});
+        enqueue('timber-crumble',position,.32,false,.96,{reach:95});
         return enqueue('timber-creak',position,.38,false,1.42,{offset:.10,duration:.65,highpassHz:240});
       }
       const id=event.type==='load'||event.type==='ram'?'cannon-rammer':event.type==='run-out'?'cannon-run-out':null;
@@ -180,7 +235,7 @@ export function createGunneryAudio({play,available=()=>true,listener=()=>({x:0,y
         }
       }
     },
-    clear(){arrivals.length=0;pendingOrder=null;pendingGiveFire=null;pendingReady=null;voiceUntil=clock;lastOrder='';lastOrderAt=-100;lastReadyAt=-100;lastImpactAt=-100;seenShots.clear();shotHistory.length=0;},
+    clear(){arrivals.length=0;pendingOrder=null;pendingGiveFire=null;pendingReady=null;voiceUntil=clock;lastOrder='';lastOrderAt=-100;lastReadyAt=-100;lastImpactAt=-100;lastScreamAt=-100;lastEnemyVoiceAt=-100;lastPanicAt=-100;seenShots.clear();shotHistory.length=0;},
     get pending(){return arrivals.length;},
     get busy(){return clock<voiceUntil;},
   };

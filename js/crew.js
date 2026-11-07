@@ -1504,7 +1504,7 @@ function settleGarrisonOnWhatIsLeft(garrison) {
       if (s.casualtyState === 'fallen') continue;
       const footing = footingUnder(state, s.lx, s.ly, s.lz, near);
       if (footing.stood && !footing.stands) {
-        garrisonSoldierFalls(state, s, inst, settled);
+        garrisonSoldierFalls(state, s, inst, settled, garrison);
         continue;
       }
       if (footing.floor !== null && footing.floor < s.ly - 0.05) {
@@ -1539,17 +1539,27 @@ function settleGarrisonOnWhatIsLeft(garrison) {
   }
 }
 
-function garrisonSoldierFalls(state, s, inst, settled) {
+export function garrisonSoldierFalls(state, s, inst = {}, settled = false, garrison = state) {
   const cosY = Math.cos(inst.yaw ?? 0), sinY = Math.sin(inst.yaw ?? 0);
-  const wx = (inst.x ?? 0) + s.lx * cosY + s.lz * sinY, wz = (inst.z ?? 0) - s.lx * sinY + s.lz * cosY;
-  const slope = s.lx * (inst.slopeX ?? 0) + s.lz * (inst.slopeZ ?? 0);
-  const to = restingHeightUnder(state, wx, wz, s.ly) - slope;
+  const wx = (inst.x ?? 0) + (s.lx ?? 0) * cosY + (s.lz ?? 0) * sinY, wz = (inst.z ?? 0) - (s.lx ?? 0) * sinY + (s.lz ?? 0) * cosY;
+  const slope = (s.lx ?? 0) * (inst.slopeX ?? 0) + (s.lz ?? 0) * (inst.slopeZ ?? 0);
+  const to = (state?.fracture ? restingHeightUnder(state, wx, wz, s.ly) : 0) - slope;
   s.homeBaseLy ??= s.baseLy;
   s.casualtyState = 'fallen';
   s.walk = 0;
   s._poseReady = false;
   if (settled) s.baseLy = to;
-  else s.garrisonFall = { to, speed: 0 };
+  else {
+    s.garrisonFall = { to, speed: 0 };
+    if (garrison && typeof garrison === 'object') {
+      (garrison.audioEvents ??= []).push({
+        type: 'casualty-scream',
+        sex: s.sex ?? 'male',
+        cause: 'aloft',
+        position: [wx, s.ly ?? 4, wz],
+      });
+    }
+  }
 }
 
 // A rebuilt building has its men back on its walls, as they were posted.
@@ -1616,6 +1626,12 @@ export function stepFortGarrison(garrison, dt = 0, wind = 0) {
           } else {
             s.knockdownTimer = Math.max(s.knockdownTimer ?? 0, 1.4 + (1 - d / blastR) * 1.4);
           }
+          (garrison.audioEvents ??= []).push({
+            type: 'casualty-scream',
+            sex: s.sex ?? 'male',
+            cause: 'blast',
+            position: [s.position?.[0] ?? inst?.x ?? 0, s.position?.[1] ?? 2, s.position?.[2] ?? inst?.z ?? 0],
+          });
           s._poseReady = false;
         }
       }
@@ -1687,6 +1703,9 @@ export function stepFortGarrison(garrison, dt = 0, wind = 0) {
     const wx = (inst?.x ?? 0) + s.lx * cosY + s.lz * sinY;
     const wy = s.ly + 0.028;
     const wz = (inst?.z ?? 0) - s.lx * sinY + s.lz * cosY;
+    s.x = wx;
+    s.y = wy;
+    s.z = wz;
     s.position.set([wx, wy, wz]);
     const half = s.yaw * 0.5;
     s.rotation.set([0, Math.sin(half), 0, Math.cos(half)]);
