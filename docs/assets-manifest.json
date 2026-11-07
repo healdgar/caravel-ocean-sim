@@ -365,49 +365,49 @@
     "sha256": "52435e192b8ed0d7066ef1b327d5d513910792c684d8b5431e73f0daa8085c09"
   },
   "assets/forest-scenery/subtropical/volumes/manifest.json": {
-    "url": "assets/forest-scenery/subtropical/volumes/manifest.8ab376eb0bc477ae.json",
-    "bytes": 5081,
-    "sha256": "8ab376eb0bc477ae7e17cf0a04b5386c47004b04ad3e11119eb8691dfcca4fba"
+    "url": "assets/forest-scenery/subtropical/volumes/manifest.17e911113e369277.json",
+    "bytes": 5041,
+    "sha256": "17e911113e3692774be4885cff5f5458d698b1457c85ad8ef5626da3dca7b33c"
   },
   "assets/forest-scenery/subtropical/volumes/prototype-0-royal-palm/field.rgba16f.bin.gz": {
-    "url": "assets/forest-scenery/subtropical/volumes/prototype-0-royal-palm/field.rgba16f.bin.0dee6b5823f46963.gz",
-    "bytes": 209458,
-    "sha256": "0dee6b5823f469633fbe1a8c2a11986333791c20b87ffcb102d5f6ec693006a1"
+    "url": "assets/forest-scenery/subtropical/volumes/prototype-0-royal-palm/field.rgba16f.bin.a2d6149f3f097a97.gz",
+    "bytes": 79811,
+    "sha256": "a2d6149f3f097a974ee01e6f6008c68076194b72a21426cd6b48f63116915810"
   },
   "assets/forest-scenery/subtropical/volumes/prototype-0-royal-palm/exposure.r8.bin.gz": {
-    "url": "assets/forest-scenery/subtropical/volumes/prototype-0-royal-palm/exposure.r8.bin.7a237d9ff4b75ec9.gz",
-    "bytes": 21648,
-    "sha256": "7a237d9ff4b75ec9c33cb4599f4aa4751aa88329b1ca7ccbba811944ea616f8b"
+    "url": "assets/forest-scenery/subtropical/volumes/prototype-0-royal-palm/exposure.r8.bin.15a4584fbc1e143f.gz",
+    "bytes": 10946,
+    "sha256": "15a4584fbc1e143f31183cc05d034bae0012653f03fdb85155e549421b44699a"
   },
   "assets/forest-scenery/subtropical/volumes/prototype-1-palm/field.rgba16f.bin.gz": {
-    "url": "assets/forest-scenery/subtropical/volumes/prototype-1-palm/field.rgba16f.bin.e36e33f2a7ccfa4f.gz",
-    "bytes": 164420,
-    "sha256": "e36e33f2a7ccfa4f08fcc5c61406981ad1c932cd1c6c3a712872fe4300d8537a"
+    "url": "assets/forest-scenery/subtropical/volumes/prototype-1-palm/field.rgba16f.bin.06b0196480f2efc7.gz",
+    "bytes": 127289,
+    "sha256": "06b0196480f2efc744f4b57648e46f65a34e33b6010ce4c53e3095209b2d1048"
   },
   "assets/forest-scenery/subtropical/volumes/prototype-1-palm/exposure.r8.bin.gz": {
-    "url": "assets/forest-scenery/subtropical/volumes/prototype-1-palm/exposure.r8.bin.3f56662ce72ada87.gz",
-    "bytes": 16899,
-    "sha256": "3f56662ce72ada873aaa31f065741b80335775d2e275bd3b29a0f0d2f201fb00"
+    "url": "assets/forest-scenery/subtropical/volumes/prototype-1-palm/exposure.r8.bin.cb713baf55e8c3be.gz",
+    "bytes": 17802,
+    "sha256": "cb713baf55e8c3bed6895d14427692f417bc58e5bbce435550b08943b0b7cad7"
   },
   "assets/forest-scenery/subtropical/volumes/prototype-2-ceiba/field.rgba16f.bin.gz": {
-    "url": "assets/forest-scenery/subtropical/volumes/prototype-2-ceiba/field.rgba16f.bin.4030706f7f5e45f3.gz",
-    "bytes": 107709,
-    "sha256": "4030706f7f5e45f31058ef109a9a30b3f371149f2662e50057eb9f9cf010ae51"
+    "url": "assets/forest-scenery/subtropical/volumes/prototype-2-ceiba/field.rgba16f.bin.8f89524da6325609.gz",
+    "bytes": 414851,
+    "sha256": "8f89524da63256099080f4559d1c802aba3cbc4080fb9c88b345a33cfc6ec9ca"
   },
   "assets/forest-scenery/subtropical/volumes/prototype-2-ceiba/exposure.r8.bin.gz": {
-    "url": "assets/forest-scenery/subtropical/volumes/prototype-2-ceiba/exposure.r8.bin.3295777e56984396.gz",
-    "bytes": 15592,
-    "sha256": "3295777e569843969e8a3c4331dfbaee2a4f53841df8537e6743d0fe18ae25ad"
+    "url": "assets/forest-scenery/subtropical/volumes/prototype-2-ceiba/exposure.r8.bin.0463db9ec916ebbf.gz",
+    "bytes": 64053,
+    "sha256": "0463db9ec916ebbfa0332f3680ca0438a193ef9f1d404c0f8d49a651b50c810a"
   },
   "assets/forest-scenery/subtropical/volumes/prototype-3-mangrove/field.rgba16f.bin.gz": {
-    "url": "assets/forest-scenery/subtropical/volumes/prototype-3-mangrove/field.rgba16f.bin.3cca8e665385da66.gz",
-    "bytes": 63025,
-    "sha256": "3cca8e665385da66ca7352a9002e22bec4b92621ef2210253c487e65e7b2f377"
+    "url": "assets/forest-scenery/subtropical/volumes/prototype-3-mangrove/field.rgba16f.bin.2e223d89653d9a97.gz",
+    "bytes": 139267,
+    "sha256": "2e223d89653d9a976ada7c11fb93bfbc6462be519f426dbff75c0f8c52b0e510"
   },
   "assets/forest-scenery/subtropical/volumes/prototype-3-mangrove/exposure.r8.bin.gz": {
-    "url": "assets/forest-scenery/subtropical/volumes/prototype-3-mangrove/exposure.r8.bin.d9d768027b7580d3.gz",
-    "bytes": 8416,
-    "sha256": "d9d768027b7580d32ad6a3402a97032af9fd6edb129e862b735b532b7c9d8950"
+    "url": "assets/forest-scenery/subtropical/volumes/prototype-3-mangrove/exposure.r8.bin.4ee67319dd59b399.gz",
+    "bytes": 18412,
+    "sha256": "4ee67319dd59b399e1f1003082f74c4db0b80809a9404ab1ff0e257fbb4ccf34"
   },
   "assets/forest-scenery/saba/middle/manifest.json": {
     "url": "assets/forest-scenery/saba/middle/manifest.149dfe5ec83d9b27.json",
@@ -425,19 +425,19 @@
     "sha256": "968f43c4a5a03c70f213f1a635ed8166652e5315b971f8e0492158acdb140cb5"
   },
   "assets/forest-scenery/subtropical/middle/manifest.json": {
-    "url": "assets/forest-scenery/subtropical/middle/manifest.53b5a64fd2789f51.json",
-    "bytes": 2571,
-    "sha256": "53b5a64fd2789f5163091b8f2f5c87beb91d60144f2d2ab97224dec0093d3c14"
+    "url": "assets/forest-scenery/subtropical/middle/manifest.7411d24d6516ac5f.json",
+    "bytes": 2563,
+    "sha256": "7411d24d6516ac5f6496a00139a226c554cb599aa4e0a683a5880c7b5df06b7c"
   },
   "assets/forest-scenery/subtropical/middle/middle-vertices.bin.gz": {
-    "url": "assets/forest-scenery/subtropical/middle/middle-vertices.bin.011a8a824f209129.gz",
-    "bytes": 508231,
-    "sha256": "011a8a824f209129c4c1dd24a6a2a466e9c57fcbce90eb3b3731c08d124f33e0"
+    "url": "assets/forest-scenery/subtropical/middle/middle-vertices.bin.724dde0f0b781883.gz",
+    "bytes": 225023,
+    "sha256": "724dde0f0b781883db5905ac6e3de237dc0b3b06996c2433d9dd900fc86de2be"
   },
   "assets/forest-scenery/subtropical/middle/middle-indices.bin.gz": {
-    "url": "assets/forest-scenery/subtropical/middle/middle-indices.bin.504877cd3838c801.gz",
-    "bytes": 108170,
-    "sha256": "504877cd3838c8019632525eb585afe628d79a30e9922b7f6a23fea3c7feb201"
+    "url": "assets/forest-scenery/subtropical/middle/middle-indices.bin.9d499a041bae41ca.gz",
+    "bytes": 46134,
+    "sha256": "9d499a041bae41ca34df5ec0649c8f2717cde813721ef390c42f9c116d72e93e"
   },
   "assets/forest-scenery/saba/clusters/manifest.json": {
     "url": "assets/forest-scenery/saba/clusters/manifest.bc785493021bef3f.json",
@@ -775,9 +775,9 @@
     "sha256": "77c546db14203e80a9b3ac8e60a3e5b36940db4bdce11721cfa22c06e4923f40"
   },
   "assets/forest-scenery/subtropical/manifest.json": {
-    "url": "assets/forest-scenery/subtropical/manifest.ab243437eb321372.json",
+    "url": "assets/forest-scenery/subtropical/manifest.1323733af378b6e8.json",
     "bytes": 23730,
-    "sha256": "ab243437eb321372c2e79083b577f5521b861a1ae59d5010d98f15d913dd589a"
+    "sha256": "1323733af378b6e826a45b4cde5b24b8dced4fa3742055e7cb30ac1df806e3c2"
   },
   "assets/forest-scenery/subtropical/roots.bin.gz": {
     "url": "assets/forest-scenery/subtropical/roots.bin.65de3ebff697b179.gz",

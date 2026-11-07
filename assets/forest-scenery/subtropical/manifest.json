@@ -814,12 +814,12 @@
   ],
   "volume": {
     "file": "volumes/manifest.json",
-    "bytes": 5081,
-    "sha256": "8ab376eb0bc477ae7e17cf0a04b5386c47004b04ad3e11119eb8691dfcca4fba"
+    "bytes": 5041,
+    "sha256": "17e911113e3692774be4885cff5f5458d698b1457c85ad8ef5626da3dca7b33c"
   },
   "middle": {
     "file": "middle/manifest.json",
-    "bytes": 2571,
-    "sha256": "53b5a64fd2789f5163091b8f2f5c87beb91d60144f2d2ab97224dec0093d3c14"
+    "bytes": 2563,
+    "sha256": "7411d24d6516ac5f6496a00139a226c554cb599aa4e0a683a5880c7b5df06b7c"
   }
 }

@@ -150,7 +150,7 @@ fn forestVolumeRotate(p:vec3f,yaw:f32)->vec3f{let c=cos(yaw);let s=sin(yaw);retu
  let root=forestRoots[forestVisible[forestBin.x+instance]];let world=root.rootScale.xyz+forestVolumeRotate(local,root.yawColour.x)*root.rootScale.w;
  // A box of leaves cannot lie down: a felled tree draws its wood alone at this range.
  if(root.identity.w<0.){var gone:ForestVolumeVertex;return gone;}
- var o:ForestVolumeVertex;o.local=local;o.rootScale=root.rootScale;o.yawTint=root.yawColour;o.pos=F.viewProj*vec4f(world-F.camPos.xyz,1);return o;
+ var o:ForestVolumeVertex;o.local=local;o.rootScale=root.rootScale;o.yawTint=root.yawColour;o.pos=F.viewProj*vec4f(earthCurve(world-F.camPos.xyz,F.camPos.y),1);return o;
 }
 fn forestVolumeUVW(p:vec3f)->vec3f{return (p-forestVolumeMeta.originCell.xyz+vec3f(.5*forestVolumeMeta.originCell.w))/(forestVolumeMeta.dimensionsExtinction.xyz*forestVolumeMeta.originCell.w);}
 fn forestVolumeDensity(p:vec3f)->f32{return max(0.,textureSampleLevel(forestVolumeField,forestVolumeSampler,forestVolumeUVW(p),0).a);}
@@ -182,7 +182,7 @@ struct ForestVolumeFragment {@location(0)colour:vec4f,@builtin(frag_depth)depth:
  var localNormal=-ray;if(dot(gradient,gradient)>1e-16){localNormal=-normalize(gradient);}
  let n=forestVolumeRotate(localNormal,in.yawTint.x);let exposure=clamp(escape/weightSum,0.,1.);
  let localHit=origin+ray*(hit/weightSum);let world=in.rootScale.xyz+forestVolumeRotate(localHit,in.yawTint.x)*in.rootScale.w;
- let clip=F.viewProj*vec4f(world-F.camPos.xyz,1);if(clip.w<=0.||clip.z<0.||clip.z>clip.w){discard;}
+ let clip=F.viewProj*vec4f(earthCurve(world-F.camPos.xyz,F.camPos.y),1);if(clip.w<=0.||clip.z<0.||clip.z>clip.w){discard;}
  let diffuse=(max(dot(n,F.sunDir.xyz),0.)+max(-dot(n,F.sunDir.xyz),0.)*.48)*(.22+.78*exposure*exposure);
  let lit=landFinish(world,n,colour/weightSum*in.yawTint.yzw,diffuse,.12+exposure*.55+abs(n.y)*.08,0.,.95);
  var o:ForestVolumeFragment;o.colour=vec4f(lit.rgb,clamp(1.-transmittance,0.,1.));o.depth=clip.z/clip.w;return o;
@@ -204,7 +204,7 @@ struct ForestVolumeShellVertex {
  let root=forestRoots[forestVisible[forestBin.x+instance]];let turned=forestVolumeRotate(position,root.yawColour.x)*root.rootScale.w;
  var world=root.rootScale.xyz+turned;if(root.identity.w<0.){world=root.rootScale.xyz+forestFallen(root,position,turned);}
  var o:ForestVolumeShellVertex;o.world=world;o.local=position;o.normal=normal;o.colour=colour;o.rootScale=root.rootScale;o.yawTint=root.yawColour;
- o.pos=F.viewProj*vec4f(world-F.camPos.xyz,1);o.pos.z*=1.-f32(forestVisible[forestBin.x+instance]&63u)*2e-7;return o;
+ o.pos=F.viewProj*vec4f(earthCurve(world-F.camPos.xyz,F.camPos.y),1);o.pos.z*=1.-f32(forestVisible[forestBin.x+instance]&63u)*2e-7;return o;
 }
 @fragment fn forestVolumeShellFS(in:ForestVolumeShellVertex)->@location(0)vec4f{
  if(in.local.y<forestVolumeMeta.highFloor.w){discard;}

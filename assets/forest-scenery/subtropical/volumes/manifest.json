@@ -12,44 +12,44 @@
       "id": 0,
       "species": "royal_palm",
       "originXYZ": [
-        -6.6,
-        7.5,
-        -7.8
+        -4.8,
+        7.199999999999999,
+        -5.1
       ],
       "cellMetres": 0.3,
       "dimensionsXYZ": [
-        48,
-        33,
-        50
+        34,
+        32,
+        35
       ],
       "low": [
-        -6.75,
-        7.35,
-        -7.95
+        -4.95,
+        7.049999999999999,
+        -5.25
       ],
       "high": [
-        7.65,
-        17.25,
-        7.05
+        5.249999999999999,
+        16.65,
+        5.25
       ],
       "samplingFootprintMetres": 0.5196152422706631,
       "files": {
         "field.rgba16f.bin": {
-          "bytes": 633600,
-          "sha256": "194362d09679203e2a636d5164e339a716462bc484732bdc0b7b19b7568e812d",
+          "bytes": 304640,
+          "sha256": "c0b032a5c0b3fc7763d70123176f80050040d0860ab1ca77231a629ed067cf15",
           "gzip": {
             "file": "prototype-0-royal-palm/field.rgba16f.bin.gz",
-            "bytes": 209458,
-            "sha256": "0dee6b5823f469633fbe1a8c2a11986333791c20b87ffcb102d5f6ec693006a1"
+            "bytes": 79811,
+            "sha256": "a2d6149f3f097a974ee01e6f6008c68076194b72a21426cd6b48f63116915810"
           }
         },
         "exposure.r8.bin": {
-          "bytes": 79200,
-          "sha256": "2369c6fc397596f8d5fc34ec94c1a8bf5f38f1a5ffc6c5f426ca94b1204c09c8",
+          "bytes": 38080,
+          "sha256": "e02fb2f87276485c158d5c74dfb1935bfa4258427d18757835bef8488482144c",
           "gzip": {
             "file": "prototype-0-royal-palm/exposure.r8.bin.gz",
-            "bytes": 21648,
-            "sha256": "7a237d9ff4b75ec9c33cb4599f4aa4751aa88329b1ca7ccbba811944ea616f8b"
+            "bytes": 10946,
+            "sha256": "15a4584fbc1e143f31183cc05d034bae0012653f03fdb85155e549421b44699a"
           }
         }
       }
@@ -58,44 +58,44 @@
       "id": 1,
       "species": "palm",
       "originXYZ": [
-        -7.8,
-        5.1,
-        -8.1
+        -4.2,
+        3.9,
+        -5.1
       ],
       "cellMetres": 0.3,
       "dimensionsXYZ": [
-        49,
-        28,
-        51
+        37,
+        36,
+        38
       ],
       "low": [
-        -7.95,
-        4.949999999999999,
-        -8.25
+        -4.3500000000000005,
+        3.75,
+        -5.25
       ],
       "high": [
         6.749999999999999,
-        13.35,
-        7.049999999999999
+        14.55,
+        6.15
       ],
       "samplingFootprintMetres": 0.5196152422706631,
       "files": {
         "field.rgba16f.bin": {
-          "bytes": 559776,
-          "sha256": "6aee0434d8c7579ddfd8eb0a0103af229359941edf6dea6c8d8244924e0f0399",
+          "bytes": 404928,
+          "sha256": "9870fd2d6bfece436cff5a841786c4a6fbac7c9999b75f176996eb56194494b4",
           "gzip": {
             "file": "prototype-1-palm/field.rgba16f.bin.gz",
-            "bytes": 164420,
-            "sha256": "e36e33f2a7ccfa4f08fcc5c61406981ad1c932cd1c6c3a712872fe4300d8537a"
+            "bytes": 127289,
+            "sha256": "06b0196480f2efc744f4b57648e46f65a34e33b6010ce4c53e3095209b2d1048"
           }
         },
         "exposure.r8.bin": {
-          "bytes": 69972,
-          "sha256": "2cdd3f0e3fd48cc2553bff53c4b873b7facf9f6efe5da3eb18ef783c1bf70da6",
+          "bytes": 50616,
+          "sha256": "f2fbc4855fc16bec1a8593afaafc1c4ceb777fc49b8eed64b62804f5693a8245",
           "gzip": {
             "file": "prototype-1-palm/exposure.r8.bin.gz",
-            "bytes": 16899,
-            "sha256": "3f56662ce72ada873aaa31f065741b80335775d2e275bd3b29a0f0d2f201fb00"
+            "bytes": 17802,
+            "sha256": "cb713baf55e8c3bed6895d14427692f417bc58e5bbce435550b08943b0b7cad7"
           }
         }
       }
@@ -104,44 +104,44 @@
       "id": 2,
       "species": "ceiba",
       "originXYZ": [
-        -4.5,
-        -0.8999999999999999,
-        -4.2
+        -14.8,
+        5.2,
+        -15.600000000000001
       ],
-      "cellMetres": 0.3,
+      "cellMetres": 0.4,
       "dimensionsXYZ": [
-        32,
-        66,
-        32
+        72,
+        43,
+        74
       ],
       "low": [
-        -4.65,
-        -1.0499999999999998,
-        -4.3500000000000005
+        -15.0,
+        5.0,
+        -15.8
       ],
       "high": [
-        4.949999999999999,
-        18.75,
-        5.249999999999999
+        13.8,
+        22.2,
+        13.8
       ],
-      "samplingFootprintMetres": 0.5196152422706631,
+      "samplingFootprintMetres": 0.6928203230275509,
       "files": {
         "field.rgba16f.bin": {
-          "bytes": 540672,
-          "sha256": "56585ca81e33e220e789901614a0fe0f484bef0283a2d7db4799223b463bcdcb",
+          "bytes": 1832832,
+          "sha256": "d0cc71de1147b7a9f42218bb219b6c9e3123e338f30b16afdf6d27928b299f11",
           "gzip": {
             "file": "prototype-2-ceiba/field.rgba16f.bin.gz",
-            "bytes": 107709,
-            "sha256": "4030706f7f5e45f31058ef109a9a30b3f371149f2662e50057eb9f9cf010ae51"
+            "bytes": 414851,
+            "sha256": "8f89524da63256099080f4559d1c802aba3cbc4080fb9c88b345a33cfc6ec9ca"
           }
         },
         "exposure.r8.bin": {
-          "bytes": 67584,
-          "sha256": "b0c5a87fc2d5e37c558f5c34177240072e85cd6db9818c452f04dc85e5480453",
+          "bytes": 229104,
+          "sha256": "57c50ab930dfccabb1e18397f9a6f55cb23b7fc2b001e55f22bbd6d445c78d66",
           "gzip": {
             "file": "prototype-2-ceiba/exposure.r8.bin.gz",
-            "bytes": 15592,
-            "sha256": "3295777e569843969e8a3c4331dfbaee2a4f53841df8537e6743d0fe18ae25ad"
+            "bytes": 64053,
+            "sha256": "0463db9ec916ebbfa0332f3680ca0438a193ef9f1d404c0f8d49a651b50c810a"
           }
         }
       }
@@ -150,44 +150,44 @@
       "id": 3,
       "species": "mangrove",
       "originXYZ": [
-        -4.2,
-        -2.1,
-        -4.2
+        -6.6,
+        0.6,
+        -6.3
       ],
       "cellMetres": 0.3,
       "dimensionsXYZ": [
-        27,
-        47,
-        28
+        48,
+        33,
+        41
       ],
       "low": [
-        -4.3500000000000005,
-        -2.25,
-        -4.3500000000000005
+        -6.75,
+        0.44999999999999996,
+        -6.45
       ],
       "high": [
-        3.749999999999999,
-        11.85,
-        4.05
+        7.65,
+        10.35,
+        5.8500000000000005
       ],
       "samplingFootprintMetres": 0.5196152422706631,
       "files": {
         "field.rgba16f.bin": {
-          "bytes": 284256,
-          "sha256": "078743905911c4e76ee4e31974fc83ac5b3226099e859f057c692fe31b082f23",
+          "bytes": 519552,
+          "sha256": "064447eb45fd874a2bd9360679b8953ae2bb302378615307a06b924cf3eb392e",
           "gzip": {
             "file": "prototype-3-mangrove/field.rgba16f.bin.gz",
-            "bytes": 63025,
-            "sha256": "3cca8e665385da66ca7352a9002e22bec4b92621ef2210253c487e65e7b2f377"
+            "bytes": 139267,
+            "sha256": "2e223d89653d9a976ada7c11fb93bfbc6462be519f426dbff75c0f8c52b0e510"
           }
         },
         "exposure.r8.bin": {
-          "bytes": 35532,
-          "sha256": "26a1cd0ab8455f8e408e0e431248f0eb22b5358b7e5db9ec7bcc99ce9126ec4d",
+          "bytes": 64944,
+          "sha256": "b7bba00fb603880a3c3eb2505fd3b0104098e55c0d037c2c00e3d1e71119bb8c",
           "gzip": {
             "file": "prototype-3-mangrove/exposure.r8.bin.gz",
-            "bytes": 8416,
-            "sha256": "d9d768027b7580d32ad6a3402a97032af9fd6edb129e862b735b532b7c9d8950"
+            "bytes": 18412,
+            "sha256": "4ee67319dd59b399e1f1003082f74c4db0b80809a9404ab1ff0e257fbb4ccf34"
           }
         }
       }

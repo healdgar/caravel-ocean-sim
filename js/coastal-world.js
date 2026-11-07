@@ -2133,8 +2133,8 @@ export function classifyKoppenClimateFromNormals({
 
     canopyDensityMultiplier =
       climateZone === 'arid'
-        ? 0.52
-        : Math.max(0.75, Math.min(1.22, 0.78 + 0.28 * moistureNorm + 0.08 * humidityNorm));
+        ? 0.65
+        : Math.max(0.92, Math.min(1.38, 0.95 + 0.30 * moistureNorm + 0.10 * humidityNorm));
     foliageTint =
       koppenCode === 'Af'
         ? [0.76, 1.14, 0.66]
@@ -2145,25 +2145,25 @@ export function classifyKoppenClimateFromNormals({
     // Temperate / Mediterranean / Boreal broadleaf & mixed stand modulation
     const oakShare =
       climateZone === 'mediterranean'
-        ? 0.46
+        ? 0.44
         : climateZone === 'boreal'
           ? 0.12
-          : Math.max(0.20, Math.min(0.42, 0.26 + 0.12 * warmthNorm));
+          : Math.max(0.22, Math.min(0.42, 0.28 + 0.10 * warmthNorm));
     const mapleShare =
       climateZone === 'mediterranean'
-        ? 0.10
+        ? 0.12
         : Math.max(0.18, Math.min(0.34, 0.28 - 0.04 * drySeasonIntensity));
     const birchShare =
       climateZone === 'boreal'
         ? 0.46
         : climateZone === 'mediterranean'
-          ? 0.04
-          : Math.max(0.10, Math.min(0.32, 0.22 - 0.12 * warmthNorm));
-    const elmShare = Math.max(0.08, Math.min(0.22, 0.14 + 0.04 * moistureNorm));
+          ? 0.06
+          : Math.max(0.10, Math.min(0.30, 0.20 - 0.10 * warmthNorm));
+    const elmShare = Math.max(0.10, Math.min(0.22, 0.14 + 0.04 * moistureNorm));
     const chestnutShare =
       climateZone === 'mediterranean'
         ? 0.26
-        : Math.max(0.06, Math.min(0.20, 0.12 + 0.06 * warmthNorm));
+        : Math.max(0.08, Math.min(0.22, 0.12 + 0.06 * warmthNorm));
 
     uplandForestWeights = normalizeSpeciesWeights({
       oak: oakShare,
@@ -2176,8 +2176,8 @@ export function classifyKoppenClimateFromNormals({
       oak: oakShare * 1.15,
       birch: birchShare * 1.1,
       elm: elmShare * 1.2,
-      maple: mapleShare * 0.8,
-      chestnut: chestnutShare * 0.8,
+      maple: mapleShare * 0.85,
+      chestnut: chestnutShare * 0.85,
     });
     lagoonMangroveWeights = normalizeSpeciesWeights({
       elm: 0.34,
@@ -2188,8 +2188,8 @@ export function classifyKoppenClimateFromNormals({
     });
     canopyDensityMultiplier =
       climateZone === 'mediterranean'
-        ? 0.78
-        : Math.max(0.72, Math.min(1.15, 0.82 + 0.22 * moistureNorm));
+        ? 0.88
+        : Math.max(0.88, Math.min(1.28, 0.96 + 0.24 * moistureNorm));
     foliageTint =
       climateZone === 'mediterranean'
         ? [0.94, 0.98, 0.78]

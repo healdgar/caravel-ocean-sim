@@ -650,7 +650,7 @@ fn forestPlace(r:ForestRoot,rootId:u32,posLocal:vec3f,normAdj:vec3f,kind:vec2f,l
  @location(5)leafUV:vec2f,@location(6)colour:vec3f,@location(7)nativeMaterial:f32,@builtin(instance_index)instance:u32,@builtin(vertex_index)vertex:u32)->ForestVertex{
  let r=forestRoots[forestVisible[forestBin.x+instance]];let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
  let tierId=forestBin.z>>16u;
- let isSubBroadleaf=r.identity.z<-1.5&&forestBin.y>=10u;
+ let isSubBroadleaf=(forestBin.z&256u)!=0u;
  var posLocal=position;var normAdj=normal;
  if(nativeMaterial<0.){
   if(kind.x<3.5){
@@ -786,8 +786,10 @@ struct ForestLeafCoverage {@location(0)colour:vec4f,@builtin(sample_mask)mask:u3
  // Nearby leaves read coverage half a level finer, which shows their shapes. It ends before the far
  // canopy, whose look depends on the plain average. The mean coverage read is the same either way.
  // Position's w is one over view depth; a world position here would be one more value per vertex.
- let near=mix(.7,1.,smoothstep(30.,90.,1./in.pos.w));
- let alpha=forestNativeAlpha(forestNativeMaterials[u32(in.nativeMaterial)],in.leafUV,dpdx(in.leafUV)*near,dpdy(in.leafUV)*near);
+ let viewDist=1./max(in.pos.w,1e-6);
+ let near=mix(.7,1.,smoothstep(30.,90.,viewDist));
+ let rawAlpha=forestNativeAlpha(forestNativeMaterials[u32(in.nativeMaterial)],in.leafUV,dpdx(in.leafUV)*near,dpdy(in.leafUV)*near);
+ let alpha=clamp(rawAlpha*mix(1.,2.25,smoothstep(45.,220.,viewDist)),0.,1.);
  // Independent native leaf footprints must not all select identical hardware
  // sample bits at small projected sizes. Stable per-primitive/root masks keep
  // expected filtered source coverage, including sub-sample fractions. This is
@@ -1262,9 +1264,10 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
           const base=p.id*20,firstMaterial=matBase;matBase+=p.nativeMaterials.length;
           if(m.prototypes[p.id]){m.prototypes[p.id].firstRoot=p.firstRoot;m.prototypes[p.id].rootCount=p.rootCount;}
           words[base+4]=p.firstRoot;words[base+5]=p.rootCount;
+          const subRoot=(p.species==='ceiba'||p.species==='mangrove')?256:0;
           for(const [tierIdx,tier]of [0,1,2,...(nativeMid?[3]:[])].entries()){
             const bin=bins[p.id]?.[tierIdx];
-            if(bin?.offset)device.queue.writeBuffer(bin.offset,0,new Uint32Array([p.firstRoot*visibleTiers+tier*p.rootCount,firstMaterial,(tier<<16)|p.nativeMaterials.length,samples]));
+            if(bin?.offset)device.queue.writeBuffer(bin.offset,0,new Uint32Array([p.firstRoot*visibleTiers+tier*p.rootCount,firstMaterial,(tier<<16)|subRoot|p.nativeMaterials.length,samples]));
           }
         }
         clusters?.placeTrees();

@@ -46,6 +46,29 @@ function hash32Forest(value) {
 
 const FORESHORE_PALMS_MAX = 520;
 const GROUND_COVER_STREET_GAP_M = 0.4;
+const SPECIES_SHADE_TOLERANCE = Object.freeze({
+  ceiba: 0.25,
+  royal_palm: 0.42,
+  palm: 0.22,
+  mangrove: 0.38,
+  oak: 0.45,
+  chestnut: 0.55,
+  elm: 0.62,
+  maple: 0.82,
+  birch: 0.20,
+});
+const SPECIES_VETERAN_AFFINITY = Object.freeze({
+  ceiba: 1.45,
+  royal_palm: 1.20,
+  palm: 0.72,
+  mangrove: 0.75,
+  oak: 1.45,
+  chestnut: 1.30,
+  elm: 1.00,
+  maple: 0.88,
+  birch: 0.58,
+});
+
 export function retargetForestPackToProcedural(
   forestPack,
   proceduralPack,
@@ -54,10 +77,6 @@ export function retargetForestPackToProcedural(
 ) {
   const protoCount = forestPack.manifest.prototypes.length;
   const buckets = Array.from({ length: protoCount }, () => []);
-  const baseMaxRoots = isMobile ? 3200 : 14000;
-  const effectiveMaxCapacity =
-    maxRootCapacity ?? (extraSections.length > 0 ? (isMobile ? 24000 : 56000) : (isMobile ? 16000 : 28000));
-
   const activeClimate =
     climateProfile ??
     proceduralPack.climateProfile ??
@@ -66,13 +85,21 @@ export function retargetForestPackToProcedural(
       proceduralPack.region?.longitude ?? -63.23,
       proceduralPack.region
     );
+  const densityMul = Math.max(0.65, Math.min(1.38, activeClimate.canopyDensityMultiplier ?? 1.0));
+  const effectiveMaxCapacity =
+    maxRootCapacity ?? (extraSections.length > 0 ? (isMobile ? 24000 : 56000) : (isMobile ? 16000 : 28000));
+  const baseMaxRoots = Math.min(
+    effectiveMaxCapacity,
+    Math.round((isMobile ? 4500 : 16000) * densityMul)
+  );
 
   // Build cumulative probability tables per habitat zone (coastal strand, lagoon/mangrove, upland forest)
-  // matched against the loaded forestPack's actual prototype species.
-  const buildSpeciesCdf = (weightMap) => {
+  // and cohort (veteran emergent vs canopy/drip-line nurse matrix) matched against the loaded forestPack's species.
+  const buildSpeciesCdf = (weightMap, affinityFn = null) => {
     const weights = forestPack.manifest.prototypes.map((p) => {
       const w = weightMap?.[p.species];
-      return Number.isFinite(w) && w > 0 ? w : 0;
+      const baseW = Number.isFinite(w) && w > 0 ? w : 0;
+      return affinityFn ? baseW * affinityFn(p.species) : baseW;
     });
     let total = weights.reduce((a, b) => a + b, 0);
     if (total <= 1e-6) {
@@ -87,10 +114,19 @@ export function retargetForestPackToProcedural(
     }
     return cdf;
   };
+  const vetMod = (sp) => SPECIES_VETERAN_AFFINITY[sp] ?? 1.0;
+  const shadeMod = (sp) => 0.72 + 0.56 * (SPECIES_SHADE_TOLERANCE[sp] ?? 0.45);
   const uplandCdf = buildSpeciesCdf(activeClimate.uplandForestWeights);
   const strandCdf = buildSpeciesCdf(activeClimate.coastalStrandWeights);
   const lagoonCdf = buildSpeciesCdf(activeClimate.lagoonMangroveWeights);
+  const uplandVetCdf = buildSpeciesCdf(activeClimate.uplandForestWeights, vetMod);
+  const strandVetCdf = buildSpeciesCdf(activeClimate.coastalStrandWeights, vetMod);
+  const lagoonVetCdf = buildSpeciesCdf(activeClimate.lagoonMangroveWeights, vetMod);
+  const uplandShadeCdf = buildSpeciesCdf(activeClimate.uplandForestWeights, shadeMod);
+  const strandShadeCdf = buildSpeciesCdf(activeClimate.coastalStrandWeights, shadeMod);
+  const lagoonShadeCdf = buildSpeciesCdf(activeClimate.lagoonMangroveWeights, shadeMod);
   const hasMangrove = forestPack.manifest.prototypes.some((p) => p.species === 'mangrove');
+  const rootIdentityZ = -2;
 
   const pickProtoFromCdf = (cdf, u01) => {
     for (let i = 0; i < protoCount - 1; i++) {
@@ -99,16 +135,20 @@ export function retargetForestPackToProcedural(
     return protoCount - 1;
   };
 
+  const appendFloats = (dst, src) => {
+    for (let k = 0; k < src.length; k++) dst.push(src[k]);
+  };
+
   const seedSectionCanopy = (secPack, secMaxRoots) => {
     const region = secPack.region;
     const span = region.span ?? 8192;
-    const areaScale = span < 4096 ? Math.max(0.38, Math.min(1, Math.pow(span / 4096, 1.25))) : 1;
+    const areaScale = span < 4096 ? Math.max(0.45, Math.min(1, Math.pow(span / 4096, 1.15))) : 1;
     const effectiveSecMaxRoots = Math.max(64, Math.round(secMaxRoots * areaScale));
     const cacheKey = `${activeClimate.koppenCode ?? activeClimate.climate}:${protoCount}:${effectiveSecMaxRoots}:${span}:${secPack.heights ? secPack.heights[0] : 0}`;
     if (secPack._cachedForestBuckets?.key === cacheKey) {
       const cached = secPack._cachedForestBuckets.buckets;
       for (let i = 0; i < protoCount; i++) {
-        if (cached[i].length) buckets[i].push(...cached[i]);
+        if (cached[i].length) appendFloats(buckets[i], cached[i]);
       }
       return;
     }
@@ -122,15 +162,29 @@ export function retargetForestPackToProcedural(
     const seed = (region.vegetationSeed ?? 47231) >>> 0;
     if (!(biome instanceof Uint8Array) || biome.length !== maskSize * maskSize) return;
 
+    // Pre-index vegetated land cells so candidate draws target forested land directly instead of ocean water
+    const validLandCells = [];
+    const drySand = beaches?.drySandMask;
+    const swash = beaches?.swashMask;
+    for (let idx = 0; idx < maskSize * maskSize; idx++) {
+      if (biome[idx] < 42) continue;
+      if ((drySand && drySand[idx] > 110) || (swash && swash[idx] > 64)) continue;
+      validLandCells.push(idx);
+    }
+
     const secBuckets = Array.from({ length: protoCount }, () => []);
-    const crownSpacingFactor = isMobile ? 0.44 : 0.35;
-    const cellSize = 24;
+    const veteranSpacingFactor = isMobile ? 0.62 : 0.52;
+    const canopySpacingFactor = isMobile ? 0.34 : 0.24;
+    const vetCanopySpacingFactor = isMobile ? 0.30 : 0.21;
+    const cellSize = 20;
     const hashW = Math.ceil(span / cellSize) + 1;
     const head = new Int32Array(hashW * hashW).fill(-1);
     const next = new Int32Array(effectiveSecMaxRoots);
     const rx = new Float32Array(effectiveSecMaxRoots);
     const rz = new Float32Array(effectiveSecMaxRoots);
     const rr = new Float32Array(effectiveSecMaxRoots);
+    const rProto = new Uint8Array(effectiveSecMaxRoots);
+    const rVet = new Uint8Array(effectiveSecMaxRoots);
     let totalPlaced = 0;
     let consecutiveCollisions = 0;
 
@@ -162,11 +216,11 @@ export function retargetForestPackToProcedural(
       const bi = Math.min(maskSize - 1, Math.floor(uc * maskSize));
       const bj = Math.min(maskSize - 1, Math.floor(vc * maskSize));
       const idx = bj * maskSize + bi;
-      if (beaches?.drySandMask?.[idx] > 110 || beaches?.swashMask?.[idx] > 64) return 0;
+      if ((drySand && drySand[idx] > 110) || (swash && swash[idx] > 64)) return 0;
       return biome[idx];
     };
 
-    const tryPlaceTree = (x, z, key, isSatellite = false) => {
+    const tryPlaceTree = (x, z, key, isSatellite = false, isVeteran = false, isDripLine = false) => {
       if (totalPlaced >= effectiveSecMaxRoots) return -1;
       if (
         x <= x0 + borderMargin ||
@@ -179,7 +233,7 @@ export function retargetForestPackToProcedural(
 
       const probByte = sampleBiomeByte(x, z);
       if (probByte < 42) return -1;
-      if (probByte < 115 && (hash32Forest(key + 5) & 255) > probByte + 96) return -1;
+      if (probByte < 108 && (hash32Forest(key + 5) & 255) > probByte + 112) return -1;
 
       if (port && port.clearRadius > 0) {
         const envPad = port.hasOrthophotoFootprints ? 8 : port.hasIndigenousSettlement ? 8.5 : 10;
@@ -200,36 +254,75 @@ export function retargetForestPackToProcedural(
       const slope = Math.hypot(sx, sz);
       if (!Number.isFinite(slope) || slope > 1.08) return -1;
 
-      const uSpecies = (hash32Forest(key + 1) & 0xffff) / 65536;
-      const zoneCdf =
-        hasMangrove && gy <= 2.35 && slope < 0.22
-          ? lagoonCdf
-          : gy <= 4.8
-          ? strandCdf
-          : uplandCdf;
-      const protoId = pickProtoFromCdf(zoneCdf, uSpecies);
-      const proto = forestPack.manifest.prototypes[protoId];
+      const isLagoonZone = hasMangrove && gy <= 2.35 && slope < 0.22;
+      const isStrandZone = !isLagoonZone && gy <= 4.8;
+      const zoneCdf = isLagoonZone
+        ? isVeteran
+          ? lagoonVetCdf
+          : isDripLine
+            ? lagoonShadeCdf
+            : lagoonCdf
+        : isStrandZone
+          ? isVeteran
+            ? strandVetCdf
+            : isDripLine
+              ? strandShadeCdf
+              : strandCdf
+          : isVeteran
+            ? uplandVetCdf
+            : isDripLine
+              ? uplandShadeCdf
+              : uplandCdf;
 
-      const distPort = Math.hypot(x - portCx, z - portCz);
-      const inlandBlend = Math.max(0, Math.min(1, (distPort - 120) / 520));
-      let scaleMin = 1.12 + inlandBlend * 0.46;
-      let scaleSpan = 0.44 + inlandBlend * 0.26;
-      if (proto.species === 'ceiba') {
-        scaleMin = 1.18 + inlandBlend * 0.48;
-        scaleSpan = 0.42 + inlandBlend * 0.28;
-      } else if (proto.species === 'royal_palm' || proto.species === 'palm') {
-        scaleMin = 0.98 + inlandBlend * 0.26;
-        scaleSpan = 0.36;
-      } else if (proto.species === 'mangrove') {
-        scaleMin = 0.88 + inlandBlend * 0.18;
-        scaleSpan = 0.30;
-      }
-      const scale = scaleMin + (hash32Forest(key + 2) / 4294967296) * scaleSpan;
-      const crownR = (proto.crownRadius ?? 8.5) * scale;
+      const uSpecies = (hash32Forest(key + 1) & 0xffff) / 65536;
+      let protoId = pickProtoFromCdf(zoneCdf, uSpecies);
 
       const gx = Math.max(0, Math.min(hashW - 1, Math.floor((x - x0) / cellSize)));
       const gz = Math.max(0, Math.min(hashW - 1, Math.floor((z - z0) / cellSize)));
+
+      // Check spatial hash for spacing collisions and nearest-neighbor species mixing (forestmodeler tiered_forest)
+      const distPort = Math.hypot(x - portCx, z - portCz);
+      const inlandBlend = Math.max(0, Math.min(1, (distPort - 100) / 480));
+      const uScale = hash32Forest(key + 2) / 4294967296;
+      const computeScaleAndRadius = (pid) => {
+        const pr = forestPack.manifest.prototypes[pid];
+        let sMin;
+        let sSpan;
+        if (isVeteran) {
+          sMin = 1.24 + inlandBlend * 0.44;
+          sSpan = 0.36 + inlandBlend * 0.22;
+          if (pr.species === 'ceiba') {
+            sMin = 1.30 + inlandBlend * 0.48;
+            sSpan = 0.38 + inlandBlend * 0.24;
+          } else if (pr.species === 'royal_palm' || pr.species === 'palm') {
+            sMin = 1.08 + inlandBlend * 0.26;
+            sSpan = 0.28;
+          } else if (pr.species === 'mangrove') {
+            sMin = 0.96 + inlandBlend * 0.18;
+            sSpan = 0.24;
+          }
+        } else {
+          sMin = 1.04 + inlandBlend * 0.36;
+          sSpan = 0.38 + inlandBlend * 0.20;
+          if (pr.species === 'ceiba') {
+            sMin = 1.08 + inlandBlend * 0.38;
+            sSpan = 0.36 + inlandBlend * 0.22;
+          } else if (pr.species === 'royal_palm' || pr.species === 'palm') {
+            sMin = 0.92 + inlandBlend * 0.22;
+            sSpan = 0.32;
+          } else if (pr.species === 'mangrove') {
+            sMin = 0.84 + inlandBlend * 0.16;
+            sSpan = 0.26;
+          }
+        }
+        const sc = sMin + uScale * sSpan;
+        return { scale: sc, crownR: (pr.crownRadius ?? 8.5) * sc, proto: pr };
+      };
+
+      let { scale, crownR, proto } = computeScaleAndRadius(protoId);
       let collision = false;
+      let nearestDistSq = Infinity;
+      let nearestProto = -1;
       for (let dz = -1; dz <= 1 && !collision; dz++) {
         const nz = gz + dz;
         if (nz < 0 || nz >= hashW) continue;
@@ -239,10 +332,22 @@ export function retargetForestPackToProcedural(
           for (let idx = head[nz * hashW + nx]; idx !== -1; idx = next[idx]) {
             const ddx = x - rx[idx];
             const ddz = z - rz[idx];
-            const minD = crownSpacingFactor * (crownR + rr[idx]);
-            if (ddx * ddx + ddz * ddz < minD * minD) {
+            const dSq = ddx * ddx + ddz * ddz;
+            const otherIsVet = rVet[idx] === 1;
+            const spacingFactor =
+              isVeteran && otherIsVet
+                ? veteranSpacingFactor
+                : isVeteran || otherIsVet
+                  ? vetCanopySpacingFactor
+                  : canopySpacingFactor;
+            const minD = spacingFactor * (crownR + rr[idx]);
+            if (dSq < minD * minD) {
               collision = true;
               break;
+            }
+            if (dSq < nearestDistSq) {
+              nearestDistSq = dSq;
+              nearestProto = rProto[idx];
             }
           }
           if (collision) break;
@@ -253,8 +358,52 @@ export function retargetForestPackToProcedural(
         return -1;
       }
 
+      // Interspecies nearest-neighbor mixing: penalize conspecific adjacency so stands interleave species naturally
+      if (
+        !isVeteran &&
+        protoCount > 1 &&
+        nearestProto === protoId &&
+        nearestDistSq < (crownR * 2.4) * (crownR * 2.4) &&
+        (hash32Forest(key + 6) & 255) < 158
+      ) {
+        const altProtoId = pickProtoFromCdf(zoneCdf, (uSpecies + 0.381966011) % 1.0);
+        if (altProtoId !== protoId) {
+          const alt = computeScaleAndRadius(altProtoId);
+          // Re-verify if alt crown is wider
+          let altOk = true;
+          if (alt.crownR > crownR) {
+            for (let dz = -1; dz <= 1 && altOk; dz++) {
+              const nz = gz + dz;
+              if (nz < 0 || nz >= hashW) continue;
+              for (let dx = -1; dx <= 1; dx++) {
+                const nx = gx + dx;
+                if (nx < 0 || nx >= hashW) continue;
+                for (let idx = head[nz * hashW + nx]; idx !== -1; idx = next[idx]) {
+                  const ddx = x - rx[idx];
+                  const ddz = z - rz[idx];
+                  const otherIsVet = rVet[idx] === 1;
+                  const spacingFactor = otherIsVet ? vetCanopySpacingFactor : canopySpacingFactor;
+                  const minD = spacingFactor * (alt.crownR + rr[idx]);
+                  if (ddx * ddx + ddz * ddz < minD * minD) {
+                    altOk = false;
+                    break;
+                  }
+                }
+                if (!altOk) break;
+              }
+            }
+          }
+          if (altOk) {
+            protoId = altProtoId;
+            scale = alt.scale;
+            crownR = alt.crownR;
+            proto = alt.proto;
+          }
+        }
+      }
+
       const rimMinGy = proto.species === 'mangrove' ? 0.08 : 0.45;
-      const rimCheckR = Math.min(5.0, crownR * 0.22);
+      const rimCheckR = Math.min(4.5, crownR * 0.20);
       if (
         sampleSecGround(x + rimCheckR, z) < rimMinGy ||
         sampleSecGround(x - rimCheckR, z) < rimMinGy ||
@@ -270,6 +419,8 @@ export function retargetForestPackToProcedural(
       rx[placedIdx] = x;
       rz[placedIdx] = z;
       rr[placedIdx] = crownR;
+      rProto[placedIdx] = protoId;
+      rVet[placedIdx] = isVeteran ? 1 : 0;
       next[placedIdx] = head[cell];
       head[cell] = placedIdx;
       totalPlaced++;
@@ -282,43 +433,92 @@ export function retargetForestPackToProcedural(
       const rTint = tint * climateTint[0];
       const gTint = tint * climateTint[1];
       const bTint = tint * climateTint[2];
-      secBuckets[protoId].push(x, gy - sink, z, scale, yaw, rTint, gTint, bTint, protoId, sink, -2, 0);
+      secBuckets[protoId].push(x, gy - sink, z, scale, yaw, rTint, gTint, bTint, protoId, sink, rootIdentityZ, 0);
       return placedIdx;
     };
 
-    const maxCandidates = effectiveSecMaxRoots * 6;
+    const drawCandidateXZ = (h1, h2) => {
+      if (validLandCells.length > 0) {
+        const cellIdx = validLandCells[h1 % validLandCells.length];
+        const bi = cellIdx % maskSize;
+        const bj = (cellIdx / maskSize) | 0;
+        const jitterU = ((h1 >>> 16) & 65535) / 65536;
+        const jitterV = (h2 & 65535) / 65536;
+        const u = (bi + jitterU) / maskSize;
+        const v = (bj + jitterV) / maskSize;
+        return [x0 + u * span, z0 + v * span];
+      }
+      return [x0 + (h1 / 4294967296) * span, z0 + (h2 / 4294967296) * span];
+    };
+
+    // Stage 1: Veteran emergent cohort (~22% of stand) + drip-line nurse & gap satellites
+    const veteranBudget = Math.max(16, Math.round(effectiveSecMaxRoots * 0.22));
+    const maxVetCandidates = veteranBudget * 6;
     const baseSeed = (seed ^ 0x9e3779b9) >>> 0;
-    for (let step = 0; step < maxCandidates && totalPlaced < effectiveSecMaxRoots && consecutiveCollisions < 3600; step++) {
+    for (
+      let step = 0;
+      step < maxVetCandidates && totalPlaced < effectiveSecMaxRoots && consecutiveCollisions < 3200;
+      step++
+    ) {
       const h1 = hash32Forest(baseSeed + Math.imul(step, 0x9e3779b1));
       const h2 = hash32Forest(h1 ^ Math.imul(step, 0x85ebca6b) ^ 0xc2b2ae35);
-      const u = h1 / 4294967296;
-      const v = h2 / 4294967296;
-      const sx = x0 + u * span;
-      const sz = z0 + v * span;
-      const rootIdx = tryPlaceTree(sx, sz, h2, false);
+      const [sx, sz] = drawCandidateXZ(h1, h2);
+      const vetIdx = tryPlaceTree(sx, sz, h2, false, true, false);
+      if (vetIdx < 0) continue;
+
+      const vetR = rr[vetIdx];
+      const baseAngle = (hash32Forest(h2 + 17) / 4294967296) * Math.PI * 2;
+      // Drip-line nurse ring (0.58..1.25 * vetR) + gap-edge canopy ring (1.35..2.05 * vetR)
+      for (let c = 0; c < 12 && totalPlaced < effectiveSecMaxRoots; c++) {
+        const cKey = hash32Forest(h2 ^ Math.imul(c + 1, 0x27d4eb2d));
+        const angle = baseAngle + c * 2.39996323 + ((cKey & 1023) / 1024 - 0.5) * 0.42;
+        const isDrip = c < 6;
+        const ringMin = isDrip ? 0.58 : 1.35;
+        const ringSpan = isDrip ? 0.67 : 0.70;
+        const dist = vetR * (ringMin + (((cKey >>> 10) & 1023) / 1024) * ringSpan);
+        const nx = sx + Math.cos(angle) * dist;
+        const nz = sz + Math.sin(angle) * dist;
+        tryPlaceTree(nx, nz, cKey, true, false, isDrip);
+      }
+      if (totalPlaced >= Math.round(effectiveSecMaxRoots * 0.58)) break;
+    }
+
+    // Stage 2: Dense canopy & understory matrix cohort filling remaining stand capacity
+    consecutiveCollisions = 0;
+    const maxCanopyCandidates = effectiveSecMaxRoots * 5;
+    const canopySeed = (seed ^ 0x7f4a7c15) >>> 0;
+    for (
+      let step = 0;
+      step < maxCanopyCandidates && totalPlaced < effectiveSecMaxRoots && consecutiveCollisions < 5400;
+      step++
+    ) {
+      const h1 = hash32Forest(canopySeed + Math.imul(step, 0x9e3779b1));
+      const h2 = hash32Forest(h1 ^ Math.imul(step, 0x85ebca6b) ^ 0x165667b1);
+      const [sx, sz] = drawCandidateXZ(h1, h2);
+      const rootIdx = tryPlaceTree(sx, sz, h2, false, false, false);
       if (rootIdx < 0) continue;
 
       const baseR = rr[rootIdx];
-      const baseAngle = (hash32Forest(h2 + 17) / 4294967296) * Math.PI * 2;
+      const baseAngle = (hash32Forest(h2 + 19) / 4294967296) * Math.PI * 2;
       for (let c = 0; c < 8 && totalPlaced < effectiveSecMaxRoots; c++) {
         const cKey = hash32Forest(h2 ^ Math.imul(c + 1, 0x27d4eb2d));
-        const angle = baseAngle + c * 2.39996323 + ((cKey & 1023) / 1024 - 0.5) * 0.45;
-        const ringMul = c < 4 ? 0.85 : 1.48;
-        const dist = baseR * ringMul * (0.90 + ((cKey >>> 10) & 1023) / 1024 * 0.32);
+        const angle = baseAngle + c * 2.39996323 + ((cKey & 1023) / 1024 - 0.5) * 0.48;
+        const ringMul = c < 4 ? 0.62 : 1.18;
+        const dist = baseR * ringMul * (0.85 + (((cKey >>> 10) & 1023) / 1024) * 0.36);
         const nx = sx + Math.cos(angle) * dist;
         const nz = sz + Math.sin(angle) * dist;
-        tryPlaceTree(nx, nz, cKey, true);
+        tryPlaceTree(nx, nz, cKey, true, false, c < 4);
       }
     }
     secPack._cachedForestBuckets = { key: cacheKey, buckets: secBuckets };
     for (let i = 0; i < protoCount; i++) {
-      if (secBuckets[i].length) buckets[i].push(...secBuckets[i]);
+      if (secBuckets[i].length) appendFloats(buckets[i], secBuckets[i]);
     }
   };
 
   seedSectionCanopy(proceduralPack, baseMaxRoots);
   if (Array.isArray(extraSections) && extraSections.length > 0) {
-    const perSecBudget = isMobile ? 1200 : 5500;
+    const perSecBudget = isMobile ? 1800 : 6500;
     for (const sec of extraSections) {
       const currentTotal = buckets.reduce((acc, b) => acc + b.length / 12, 0);
       const remaining = effectiveMaxCapacity - currentTotal;
@@ -855,7 +1055,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   trees=forestPack?new Float32Array(0):canopyTrees;
   installTrees(trees);
   if(canopyPack)importedCanopy=await createCanopyRenderer({device,module,resources,clouds,format,samples,pack:canopyPack,mode:canopyMode});
-  const streamMaxRoots=isMobile?10000:56000;
+  const streamMaxRoots=isMobile?16000:56000;
   const activeForestPack=proceduralPack&&forestPack?retargetForestPackToProcedural(forestPack,proceduralPack,groundSample,{isMobile,maxRootCapacity:streamMaxRoots,climateProfile:activeClimate}):forestPack;
   const activeForestMiddle=forestAtlasDebug?null:(proceduralMiddle??forestMass?.middle??null);
   // What has been shot down on this coast comes back with it, and is kept with the port damage.
@@ -1288,9 +1488,20 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     }
   };
 
+  const whenStartupSettled=(fn,delayMs=60)=>{
+    const check=()=>{
+      if(terrainDisposed)return;
+      if(typeof window!=='undefined'&&window.oceanStartup?.state==='loading'){
+        setTimeout(check,80);
+        return;
+      }
+      setTimeout(()=>{if(!terrainDisposed)fn();},delayMs);
+    };
+    setTimeout(check,delayMs);
+  };
   const willAutoUpgrade1550=Boolean(proceduralPack&&!preloaded1550&&search.get('discover')!=='1'&&search.get('era')!=='2026');
   if(proceduralPack&&!willAutoUpgrade1550){
-    setTimeout(()=>seedInitialCoastalSections(),45);
+    whenStartupSettled(()=>seedInitialCoastalSections(),60);
   }
 
   let baseSnapshot=proceduralPack&&!preloaded1550?{
@@ -1449,7 +1660,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   if(proceduralPack&&!preloaded1550){
     const forceFirstExplorer=search.get('discover')==='1';
     const autoApply1550=!forceFirstExplorer&&search.get('era')!=='2026';
-    setTimeout(()=>{
+    whenStartupSettled(()=>{
       if(terrainDisposed)return;
       runLandfallDiscoveryPipeline({ ...proceduralPack, heights: baseSnapshot.heights },{
         forceFirstExplorer,

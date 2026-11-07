@@ -1,0 +1,105 @@
+{
+  "format": "waterworld.forest-middle",
+  "version": 2,
+  "units": "metres",
+  "upAxis": "Y",
+  "vertexStride": 52,
+  "source": {
+    "forestManifest": {
+      "file": "../manifest.json",
+      "rootsSha256": "5e26e551af5855219ef1ac84ef97fafeef1a4826cd94da7ff6fcda78dfed6963"
+    }
+  },
+  "files": {
+    "middle-vertices.bin": {
+      "bytes": 447408,
+      "sha256": "b44124c863436aefd5d5147afe8d68f8836a8aa1c28b7fd98940e5d1ebec5ff1",
+      "gzip": {
+        "file": "middle-vertices.bin.gz",
+        "bytes": 225023,
+        "sha256": "724dde0f0b781883db5905ac6e3de237dc0b3b06996c2433d9dd900fc86de2be"
+      },
+      "vertexCount": 8604
+    },
+    "middle-indices.bin": {
+      "bytes": 163200,
+      "sha256": "b9525d8364daaa1b1857d906ade69bcc4dcd9ce4868624ce3a4b6a2a79672f77",
+      "gzip": {
+        "file": "middle-indices.bin.gz",
+        "bytes": 46134,
+        "sha256": "9d499a041bae41ca34df5ec0649c8f2717cde813721ef390c42f9c116d72e93e"
+      },
+      "indexCount": 40800
+    }
+  },
+  "prototypes": [
+    {
+      "id": 0,
+      "species": "royal_palm",
+      "wood": {
+        "firstIndex": 0,
+        "indexCount": 3141,
+        "triangles": 1047,
+        "sourceTriangles": 2208
+      },
+      "shell": {
+        "firstIndex": 3141,
+        "indexCount": 864,
+        "triangles": 288,
+        "sourceProxyAreaSquareMetres": 50.09
+      },
+      "geometryErrorMetres": 2.7476
+    },
+    {
+      "id": 1,
+      "species": "palm",
+      "wood": {
+        "firstIndex": 4005,
+        "indexCount": 4737,
+        "triangles": 1579,
+        "sourceTriangles": 3824
+      },
+      "shell": {
+        "firstIndex": 8742,
+        "indexCount": 2490,
+        "triangles": 830,
+        "sourceProxyAreaSquareMetres": 88.2
+      },
+      "geometryErrorMetres": 4.5122
+    },
+    {
+      "id": 2,
+      "species": "ceiba",
+      "wood": {
+        "firstIndex": 11232,
+        "indexCount": 15264,
+        "triangles": 5088,
+        "sourceTriangles": 20928
+      },
+      "shell": {
+        "firstIndex": 26496,
+        "indexCount": 6138,
+        "triangles": 2046,
+        "sourceProxyAreaSquareMetres": 1821.23
+      },
+      "geometryErrorMetres": 9.1457
+    },
+    {
+      "id": 3,
+      "species": "mangrove",
+      "wood": {
+        "firstIndex": 32634,
+        "indexCount": 6030,
+        "triangles": 2010,
+        "sourceTriangles": 17330
+      },
+      "shell": {
+        "firstIndex": 38664,
+        "indexCount": 2136,
+        "triangles": 712,
+        "sourceProxyAreaSquareMetres": 613.89
+      },
+      "geometryErrorMetres": 4.0059
+    }
+  ]
+}

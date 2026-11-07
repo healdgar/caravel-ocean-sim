@@ -156,10 +156,23 @@ fn forestClusterVertex(tree:u32,vertex:u32,kindValue:f32)->ForestVertex{
  let at=vertex*${FOREST_CLUSTER_VERTEX_WORDS}u;
  let w0=forestClusterVertices[at];let w1=forestClusterVertices[at+1u];let w2=forestClusterVertices[at+2u];let w3=forestClusterVertices[at+3u];let w4=forestClusterVertices[at+4u];
  let unit=vec3f(f32(w0&65535u),f32(w0>>16u),f32(w1&65535u))/65535.;
- let position=forestClusterBounds[0].xyz+unit*forestClusterBounds[0].w;
+ var position=forestClusterBounds[0].xyz+unit*forestClusterBounds[0].w;
  let r=forestRoots[tree];
- let normal=forestClusterOctahedral(vec2f(f32(w2&65535u),f32(w2>>16u))/65535.*2.-1.);
+ var normal=forestClusterOctahedral(vec2f(f32(w2&65535u),f32(w2>>16u))/65535.*2.-1.);
  let uv=forestClusterBounds[1].xy+vec2f(f32(w3&65535u),f32(w3>>16u))/65535.*forestClusterBounds[1].zw;
+ if(kindValue>=3.5){
+  let dist=length(r.rootScale.xyz-F.camPos.xyz);
+  let midBlend=smoothstep(55.,320.,dist);
+  if(midBlend>0.){
+   let upRef=select(vec3f(0.,1.,0.),vec3f(1.,0.,0.),abs(normal.y)>.9);
+   let t1=normalize(cross(normal,upRef));let t2=cross(normal,t1);
+   let isSubBroadleaf=(forestBin.z&256u)!=0u;
+   let baseInflate=select(.18,.48,isSubBroadleaf)*midBlend/max(r.rootScale.w,.85);
+   let uvOff=clamp(uv-vec2f(.5,.5),vec2f(-.65),vec2f(.65));
+   position+=t1*(uvOff.x*baseInflate)+t2*(uvOff.y*baseInflate);
+   normal=normalize(normal+(t1*uvOff.x+t2*uvOff.y)*(.10*midBlend));
+  }
+ }
  let root=vec3f(f32(w4&255u),f32((w4>>8u)&255u),f32((w4>>16u)&255u))/255.;
  return forestPlace(r,tree,position,normal,vec2f(kindValue,f32(w1>>24u)/255.),uv,root*root,f32((w1>>16u)&255u),vertex,f32(w4>>24u)/255.);
 }

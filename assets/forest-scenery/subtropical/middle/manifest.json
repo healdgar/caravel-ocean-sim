@@ -12,24 +12,24 @@
   },
   "files": {
     "middle-vertices.bin": {
-      "bytes": 779844,
-      "sha256": "deba404cba295f1381fd5b964784406da13b26adb7636458d302beb961c6d324",
+      "bytes": 447408,
+      "sha256": "b44124c863436aefd5d5147afe8d68f8836a8aa1c28b7fd98940e5d1ebec5ff1",
       "gzip": {
         "file": "middle-vertices.bin.gz",
-        "bytes": 508231,
-        "sha256": "011a8a824f209129c4c1dd24a6a2a466e9c57fcbce90eb3b3731c08d124f33e0"
+        "bytes": 225023,
+        "sha256": "724dde0f0b781883db5905ac6e3de237dc0b3b06996c2433d9dd900fc86de2be"
       },
-      "vertexCount": 14997
+      "vertexCount": 8604
     },
     "middle-indices.bin": {
-      "bytes": 346668,
-      "sha256": "762ecfe6e079fbace08cd36c3f592fcec458400d151d2032b2a476f49327fc87",
+      "bytes": 163200,
+      "sha256": "b9525d8364daaa1b1857d906ade69bcc4dcd9ce4868624ce3a4b6a2a79672f77",
       "gzip": {
         "file": "middle-indices.bin.gz",
-        "bytes": 108170,
-        "sha256": "504877cd3838c8019632525eb585afe628d79a30e9922b7f6a23fea3c7feb201"
+        "bytes": 46134,
+        "sha256": "9d499a041bae41ca34df5ec0649c8f2717cde813721ef390c42f9c116d72e93e"
       },
-      "indexCount": 86667
+      "indexCount": 40800
     }
   },
   "prototypes": [
@@ -38,68 +38,68 @@
       "species": "royal_palm",
       "wood": {
         "firstIndex": 0,
-        "indexCount": 1644,
-        "triangles": 548,
-        "sourceTriangles": 10704
+        "indexCount": 3141,
+        "triangles": 1047,
+        "sourceTriangles": 2208
       },
       "shell": {
-        "firstIndex": 1644,
-        "indexCount": 25656,
-        "triangles": 8552,
-        "sourceProxyAreaSquareMetres": 627.03
+        "firstIndex": 3141,
+        "indexCount": 864,
+        "triangles": 288,
+        "sourceProxyAreaSquareMetres": 50.09
       },
-      "geometryErrorMetres": 10.4179
+      "geometryErrorMetres": 2.7476
     },
     {
       "id": 1,
       "species": "palm",
       "wood": {
-        "firstIndex": 27300,
-        "indexCount": 1737,
-        "triangles": 579,
-        "sourceTriangles": 11662
+        "firstIndex": 4005,
+        "indexCount": 4737,
+        "triangles": 1579,
+        "sourceTriangles": 3824
       },
       "shell": {
-        "firstIndex": 29037,
-        "indexCount": 22704,
-        "triangles": 7568,
-        "sourceProxyAreaSquareMetres": 673.6
+        "firstIndex": 8742,
+        "indexCount": 2490,
+        "triangles": 830,
+        "sourceProxyAreaSquareMetres": 88.2
       },
-      "geometryErrorMetres": 7.3917
+      "geometryErrorMetres": 4.5122
     },
     {
       "id": 2,
       "species": "ceiba",
       "wood": {
-        "firstIndex": 51741,
-        "indexCount": 1668,
-        "triangles": 556,
-        "sourceTriangles": 4029
+        "firstIndex": 11232,
+        "indexCount": 15264,
+        "triangles": 5088,
+        "sourceTriangles": 20928
       },
       "shell": {
-        "firstIndex": 53409,
-        "indexCount": 20460,
-        "triangles": 6820,
-        "sourceProxyAreaSquareMetres": 83.75
+        "firstIndex": 26496,
+        "indexCount": 6138,
+        "triangles": 2046,
+        "sourceProxyAreaSquareMetres": 1821.23
       },
-      "geometryErrorMetres": 10.9811
+      "geometryErrorMetres": 9.1457
     },
     {
       "id": 3,
       "species": "mangrove",
       "wood": {
-        "firstIndex": 73869,
-        "indexCount": 1026,
-        "triangles": 342,
-        "sourceTriangles": 3465
+        "firstIndex": 32634,
+        "indexCount": 6030,
+        "triangles": 2010,
+        "sourceTriangles": 17330
       },
       "shell": {
-        "firstIndex": 74895,
-        "indexCount": 11772,
-        "triangles": 3924,
-        "sourceProxyAreaSquareMetres": 38.82
+        "firstIndex": 38664,
+        "indexCount": 2136,
+        "triangles": 712,
+        "sourceProxyAreaSquareMetres": 613.89
       },
-      "geometryErrorMetres": 7.3498
+      "geometryErrorMetres": 4.0059
     }
   ]
 }
