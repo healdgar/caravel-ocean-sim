@@ -32,7 +32,7 @@ export function createGunneryEffectState(){
     // A tree or timber jetty throws splinters as a hull does.
     const kindCode=event.kind==='ship'||event.kind==='scenery'||event.kind==='jetty'?1:event.kind==='terrain'?2:event.kind==='building'?3:0;
     // A ball on the ground throws as much as the pit it digs: the land model reckons that, from the strike's energy.
-    const pit=event.kind==='terrain'?landCraterSize(.5*gunneryFxFinite(event.massKg,12)*speed*speed).radius:0;
+    const pit=(event.kind==='terrain'||(event.kind==='building'&&Boolean(event.floorHit)))?landCraterSize(.5*gunneryFxFinite(event.massKg,12)*speed*speed).radius:0;
     impacts.push({id:event.id??++serial,position:gunneryFxVector(event.position),velocity,age:0,seed:(++serial*.61803398875)%1,
       scale:gunneryFxClamp(Math.cbrt(gunneryFxFinite(event.massKg,12)/12),.4,1.6),wind:[0,0,0],kindCode,pit,sand:gunneryFxClamp(gunneryFxFinite(event.damageReport?.sand,0),0,1)});return true;
   }

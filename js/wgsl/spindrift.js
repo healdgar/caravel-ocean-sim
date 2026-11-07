@@ -257,7 +257,7 @@ struct CrestVertex {
   let moonPhase=phaseMie(dot(-view,lunarDirection()),.5);
   let shadowSample=vesselShadow(center,vec3f(0,1,0));
   let moon=lunarIlluminance()*sunVisibility.y*moonPhase*lunarShadowVisibility(shadowSample);
-  o.light=sky*.85+sunlight*F.sunDir.w*sunVisibility.x*phase*step(0.0,F.sunDir.y)*solarShadowVisibility(shadowSample)+moon+vec3f(.65,.78,1.0)*F.reserved.z*1.5;
+  o.light=sky*.85+sunlight*F.sunDir.w*sunVisibility.x*phase*step(0.0,F.sunDir.y)*solarShadowVisibility(shadowSample)+moon+vec3f(.65,.78,1.0)*F.reserved.z*1.5*min(1.0,1.35/max(F.post.x,1e-3));
   let fade=smoothstep(0.0,.08,age)*(1.0-smoothstep(.35,1.0,age/p.launch.w));
   o.shape=vec3f((.65+.70*p.shape.x)*fade*smoothstep(1.0,4.0,distanceToEye)
     *(1.0-smoothstep(55.0,80.0,distanceToEye)),p.shape.y+parcel*7.1,age);

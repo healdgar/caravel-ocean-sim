@@ -18,7 +18,8 @@ const gunFlashVictory=array<vec3f,104>(${createGunDefinitions('victory').map(g=>
 ${additionalGunFlashWGSL}
 fn gunFlashSurface(world:vec3f,n:vec3f,eye:vec3f,albedo:vec3f,rough:f32)->vec3f {
   var result=vec3f(0);
-  let energy=abs(hull.up.w);
+  let flashExposure=min(1.0,1.35/max(F.post.x,1e-3));
+  let energy=abs(hull.up.w)*flashExposure;
   if(energy>=.0001){
     let index=u32(max(0.0,hull.forward.w));
     var local=gunFlashNina[min(index,3u)];
@@ -42,8 +43,8 @@ fn gunFlashSurface(world:vec3f,n:vec3f,eye:vec3f,albedo:vec3f,rough:f32)->vec3f 
     let fireLight=hull.origin.xyz+rotateHull(fireLocal);
     let fDelta=fireLight-world;let fd=max(0.6,length(fDelta));let fl=fDelta/fd;
     let fHalf=normalize(fl+eye);let fSpec=pow(max(dot(n,fHalf),0.0),mix(64.0,6.0,rough));
-    let ndl=max(dot(n,fl),0.0)*0.75+0.25;
-    result+=vec3f(1.0,0.36,0.07)*(fireInt*flicker*38.0/(1.5+fd*fd*0.38))*(albedo*0.31831*ndl+fSpec*0.05);
+    let ndl=max(dot(n,fl),0.0)*0.92+0.08;
+    result+=vec3f(1.0,0.36,0.07)*(fireInt*flicker*(3.2*flashExposure)/(2.2+fd*fd*0.95))*(albedo*0.31831*ndl+fSpec*0.015);
   }
   return result;
 }

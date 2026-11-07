@@ -76,7 +76,7 @@ fn boltPoint(t:f32,branch:u32)->vec3f {
   let p=mix(a,b,corner.y*.5+.5)+side*corner.x*width;
   var out:WeatherVertex;out.position=F.viewProj*vec4f(p-F.camPos.xyz,1);out.uv=corner;
   let branchFade=select(1.0,smoothstep(.15,.35,t0)*(1.0-smoothstep(.55,.7,t0)),branch>0u);
-  out.color=vec4f(vec3f(.7,.82,1.0)*18.0,F.reserved.z*branchFade);return out;
+  out.color=vec4f(vec3f(.7,.82,1.0)*6.5*min(1.0,1.35/max(F.post.x,1e-3)),F.reserved.z*branchFade);return out;
 }
 @fragment fn boltFS(v:WeatherVertex)->@location(0) vec4f {
   let core=exp(-abs(v.uv.x)*8.0);let glow=exp(-abs(v.uv.x)*2.0)*.12;

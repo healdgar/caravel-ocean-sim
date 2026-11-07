@@ -2520,6 +2520,7 @@ export function sweepBuildingSegment(from, to, radius = 0.08, port, options = nu
         : [ln[0] * cosY + ln[2] * sinY, ln[1], -ln[0] * sinY + ln[2] * cosY];
       const localPosition = [p0[0] + d[0] * tMin, p0[1] + d[1] * tMin, p0[2] + d[2] * tMin];
       const hitPart = previewOnly ? null : resolveBuildingHitPart(inst, localPosition);
+      const floorHit = met ? Boolean(met.normal && met.normal[1] > 0.7 && met.kind === 16) : (hitAxis === 1 && hitSign > 0);
       best = {
         fraction: tMin,
         kind: 'building',
@@ -2532,6 +2533,7 @@ export function sweepBuildingSegment(from, to, radius = 0.08, port, options = nu
         hitLayer: hitPart?.layer ?? null,
         localPosition,
         normal,
+        floorHit,
       };
     }
   }

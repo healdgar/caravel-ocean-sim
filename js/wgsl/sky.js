@@ -203,7 +203,7 @@ fn sunIlluminance() -> vec3f {
 // Broad light from the discharging cloud. Evaluate at draw time so a brief
 // flash cannot remain baked into the amortized reflection cube or cloud history.
 fn lightningDirection()->vec3f {return normalize(vec3f(F.atmo.z,0.8,F.atmo.w));}
-fn lightningLight()->vec3f {return vec3f(0.65,0.78,1.0)*F.reserved.z*5.0;}
+fn lightningLight()->vec3f {return vec3f(0.65,0.78,1.0)*F.reserved.z*5.0*min(1.0,1.35/max(F.post.x,1e-3));}
 fn lightningSurface(n:vec3f,v:vec3f,albedo:vec3f,rough:f32)->vec3f {
   if(F.reserved.z<.0001){return vec3f(0);}
   let l=lightningDirection();let nl=max(dot(n,l),0.0);

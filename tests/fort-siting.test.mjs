@@ -273,11 +273,26 @@ test('a fort drawn to its ground still comes apart in blocks and earth, and its 
   assert.ok(kinds.filter(s=>s.kind===1).length>200,`${kinds.length} shards`);
   assert.ok(kinds.some(s=>s.earth),'earth behind the facing');
   assert.ok(kinds.some(s=>s.kind===4),'guns as pieces');
+  assert.ok(kinds.some(s=>s.floorSlab),'paving slabs on the terreplein floor');
   const wall=fort.trace.guns[0],c=Math.cos(fort.yaw),s=Math.sin(fort.yaw),outX=wall.nx*c+wall.nz*s,outZ=-wall.nx*s+wall.nz*c,at=fortLocalToWorld(fort,wall.x,wall.z);
   const report=applyBuildingImpactDamage(fort,{position:[at.x,(fort.baseY??fort.y)+2.5,at.z],surfacePosition:[at.x,(fort.baseY??fort.y)+2.5,at.z],localPosition:[wall.x,2.5,wall.z],normal:[outX,0,outZ],velocity:[-outX*300,0,-outZ*300],mass:14.5,ammo:'round',energy:900000});
   assert.ok(report);
   const released=applyBuildingFractureEvents(fracture,fort.damageState,fort.damageState.pendingBakes.splice(0),0);
   assert.ok(released>0,'a ball takes stones out of the wall');
+
+  // Castelo de São Jorge uphill from Lisboa: cannonfire striking its interior terreplein floor blasts out paving slabs.
+  const lisbon=portOn('lisbon',1550).port,castelo=named(lisbon,'Jorge'),lisbonGeom=buildPortPrefabGeometry(lisbon);
+  noteBuildingMeshes(lisbon,lisbonGeom);
+  const casteloFracture=prepareBuildingFracture({vertices:lisbonGeom.vertices,indices:lisbonGeom.indices,catalog:lisbonGeom.partAssembly,instanceIndex:lisbon.instances.indexOf(castelo),instance:castelo,materialClass:'fortified-stone',groundAt:()=>castelo.y}).fracture;
+  const deckY=(castelo.baseY??castelo.y)+castelo.height-0.85;
+  const floorHit=sweepBuildingSegment([castelo.x,deckY+12,castelo.z+8],[castelo.x,deckY-6,castelo.z-4],0.08,lisbon);
+  assert.ok(floorHit&&floorHit.building===castelo,'a plunging shot strikes Castelo de São Jorge');
+  assert.equal(floorHit.floorHit,true,'and is recognized as a fort floor strike');
+  const hitWorld=fortLocalToWorld(castelo,floorHit.localPosition[0],floorHit.localPosition[2]);
+  applyBuildingImpactDamage(castelo,{...floorHit,position:[hitWorld.x,deckY,hitWorld.z],surfacePosition:[hitWorld.x,deckY,hitWorld.z],velocity:[0,-260,-180],mass:10.9,ammo:'round',energy:545000});
+  const floorReleased=applyBuildingFractureEvents(casteloFracture,castelo.damageState,castelo.damageState.pendingBakes.splice(0),0);
+  assert.ok(floorReleased>=1,`cannonball blasts ${floorReleased} paving slabs out of Castelo de São Jorge's floor`);
+  assert.ok(casteloFracture.floorAt(hitWorld.x,hitWorld.z,deckY+0.5)>=deckY-0.05,'the underlying rampart floor still holds men and rubble');
 });
 
 test('an old save whose fort has moved does not crash: the fort stands whole and the record just waits',()=>{

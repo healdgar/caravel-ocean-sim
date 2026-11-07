@@ -201,6 +201,7 @@ struct GunneryVolumeVertex{@builtin(position)position:vec4f,@location(0)world:ve
   let age=volume.optical.y;
   let sootFactor=exp(-age*1.45);
   let emberFactor=exp(-age*5.5);
+  let selfExposure=min(1.0,1.35/max(F.post.x,1e-3));
   for(var sample=0u;sample<steps;sample++){
     let distance=enter+(f32(sample)+.15+.7*jitter)*stepSize;
     let local=origin+direction*distance;
@@ -223,17 +224,17 @@ struct GunneryVolumeVertex{@builtin(position)position:vec4f,@location(0)world:ve
         let flameShape=tongueMask*vertEnv;
         if(flameShape<0.01){continue;}
         let temp=clamp(flameShape*(1.05-0.48*h)+0.24*fTurb,0.0,1.0);
-        let colBase=mix(vec3f(0.85,0.04,0.005),vec3f(4.2,0.48,0.03),smoothstep(0.12,0.62,temp));
-        let colCore=mix(colBase,vec3f(8.5,1.45,0.12),smoothstep(0.62,0.95,temp));
+        let colBase=mix(vec3f(0.42,0.03,0.004),vec3f(1.35,0.22,0.016),smoothstep(0.12,0.62,temp));
+        let colCore=mix(colBase,vec3f(2.35,0.52,0.045),smoothstep(0.62,0.95,temp));
         // Add rising glowing embers near the top of the upper flame tongue
         let sparkNoise=gunneryNoise3(advectPos*4.2+vec3f(0.0,0.0,-age*6.0));
-        let sparks=select(0.0,smoothstep(0.84,0.96,sparkNoise)*h*4.8,subtype>1.1);
-        emission=(colCore*flameShape+vec3f(6.5,0.85,0.06)*sparks)*volume.optical.x;
+        let sparks=select(0.0,smoothstep(0.84,0.96,sparkNoise)*h*1.5,subtype>1.1);
+        emission=(colCore*flameShape+vec3f(1.8,0.32,0.025)*sparks)*clamp(volume.optical.x,0.35,1.0)*selfExposure;
         extinction=density*flameShape*5.2;
       }else{
         let flame=max(0.0,1.0-dot(local,local));
         let coreNoise=.65+.35*df.y;
-        emission=mix(vec3f(6.5,0.65,.04),vec3f(16.0,4.8,0.65),flame*flame*coreNoise)*volume.optical.x;
+        emission=mix(vec3f(2.2,0.32,.025),vec3f(5.2,1.45,0.22),flame*flame*coreNoise)*volume.optical.x*selfExposure;
         extinction=density*4.2;
       }
     }else{
@@ -272,7 +273,7 @@ struct GunneryVolumeVertex{@builtin(position)position:vec4f,@location(0)world:ve
         (1.0-smoothstep(0.0,0.68,heightGrad))*max(0.0,1.0-length(local.xy)*0.95)*(0.65+0.35*df.y)*max(0.15,2.55-subtype),
         isFireSmoke
       );
-      let internalEmber=vec3f(6.5,1.1,.08)*(emberFactor*throatCore*throatCore*density)+vec3f(2.4,0.28,0.02)*(fireUnderGlow*density);
+      let internalEmber=(vec3f(2.4,0.42,.03)*(emberFactor*throatCore*throatCore*density)+vec3f(0.55,0.08,0.006)*(fireUnderGlow*density))*selfExposure;
       emission=cloudAlbedo*(ambient+sunlight*directTransfer)+internalEmber;
     }
     let opacity=1.0-exp(-extinction*stepSize);
@@ -296,7 +297,7 @@ struct GunneryBallVertex{@builtin(position)position:vec4f,@location(0)world:vec3
   let n=normalize(v.normal);let eye=normalize(F.camPos.xyz-v.world);
   if(v.hot>0.5){
     let core=clamp(dot(n,eye),0.0,1.0);
-    let hotGlow=mix(vec3f(11.0,1.8,0.18),vec3f(32.0,14.5,2.8),core*core);
+    let hotGlow=mix(vec3f(1.6,0.25,0.025),vec3f(3.8,0.95,0.12),core*core)*min(1.0,1.35/max(F.post.x,1e-3));
     return vec4f(surfaceAir(hotGlow,v.world),1);
   }
   let sky=textureSampleLevel(envCube,sampC,vec3f(0,1,0),8.0).rgb;let sea=textureSampleLevel(envCube,sampC,vec3f(0,-.4,1),8.0).rgb;
