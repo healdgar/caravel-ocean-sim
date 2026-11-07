@@ -764,3 +764,60 @@ test('a direct cannonball hit hurls blocks outward on high ballistic arcs while 
   assert.equal(singleHitHouse.damageState.pendingBakes.length, 1, 'a single 24-pdr shot emits only the localized impact crater bake');
   assert.notEqual(singleHitHouse.damageState.state, 'ruined', 'a single 24-pdr shot does not ruin an entire building');
 });
+
+test('a plunging cannon shot breaks clean through a fort\'s roof and rampart deck without leaving an unbreakable crust', () => {
+  for (const prefabId of ['bastion_trace_fortress', 'stone_sea_bastion']) {
+    const { fracture, instance } = prepared(prefabId);
+    assert.equal(
+      fracture.shards.filter((s) => s?.floorSlab && (s.partKey === 'foundation_scarp_walls' || s.partKey === 'scarp_cordon_cornice')).length,
+      0,
+      `${prefabId}: no buried secondary floorSlab layer under terreplein_gun_deck`,
+    );
+
+    // 1. Plunging shot through the barracks/keep roof breaks tiles + fascia + ceiling so the next ball passes through.
+    const port = { instances: [instance] };
+    createBuildingDamageState(instance);
+    const state = buildingFractureStateOf(instance.damageState, fracture);
+    const roofShards = fracture.shards.filter((s) => s?.roof);
+    assert.ok(roofShards.length > 0, `${prefabId} has roof shards`);
+    const roofTarget = roofShards[Math.floor(roofShards.length / 2)];
+    const rcx = (roofTarget.min[0] + roofTarget.max[0]) * 0.5;
+    const rcy = (roofTarget.min[1] + roofTarget.max[1]) * 0.5;
+    const rcz = (roofTarget.min[2] + roofTarget.max[2]) * 0.5;
+    const roofFrom = [rcx, rcy + 12, rcz + 12];
+    const roofTo = [rcx, rcy - 1.5, rcz - 1.5];
+    const roofHit1 = sweepBuildingSegment(roofFrom, roofTo, 0.08, port);
+    assert.ok(roofHit1, `${prefabId}: first plunging shot strikes the roof`);
+    applyBuildingImpactDamage(instance, { ...roofHit1, mass: 10.9, ammo: 'round', velocity: [0, -180, -180], energy: 961000 });
+    const roofReleased = applyBuildingFractureEvents(fracture, instance.damageState, instance.damageState.pendingBakes.splice(0), 0);
+    assert.ok(roofReleased >= 6, `${prefabId}: roof shot releases tiles and underlying ceiling (${roofReleased})`);
+    assert.equal(sweepBuildingSegment(roofFrom, roofTo, 0.08, port), null, `${prefabId}: second shot passes clean through the roof breach`);
+
+    // 2. Plunging shot through the rampart gun deck breaks the floor slabs all the way to the ground.
+    const { fracture: deckFracture, instance: deckInstance } = prepared(prefabId);
+    const deckPort = { instances: [deckInstance] };
+    createBuildingDamageState(deckInstance);
+    const deckState = buildingFractureStateOf(deckInstance.damageState, deckFracture);
+    const deckShards = deckFracture.shards.filter((s) => s?.floorSlab && s.partKey === 'terreplein_gun_deck');
+    assert.ok(deckShards.length > 0, `${prefabId} has terreplein_gun_deck floor slabs`);
+    const deckTarget = deckShards.find((s) => Math.abs((s.min[0] + s.max[0]) * 0.5) < 4 && (s.min[2] + s.max[2]) * 0.5 < -8 && (s.min[2] + s.max[2]) * 0.5 > -15) || deckShards[0];
+    const dcx = (deckTarget.min[0] + deckTarget.max[0]) * 0.5;
+    const dcy = deckTarget.max[1];
+    const dcz = (deckTarget.min[2] + deckTarget.max[2]) * 0.5;
+    const deckFrom = [dcx, dcy + 12, dcz + 3];
+    const deckTo = [dcx, dcy - 3, dcz - 0.75];
+    const deckHit1 = sweepBuildingSegment(deckFrom, deckTo, 0.08, deckPort);
+    assert.ok(deckHit1, `${prefabId}: first plunging shot strikes the rampart deck`);
+    applyBuildingImpactDamage(deckInstance, { ...deckHit1, mass: 10.9, ammo: 'round', velocity: [0, -220, -55], energy: 961000 });
+    const deckReleased = applyBuildingFractureEvents(deckFracture, deckInstance.damageState, deckInstance.damageState.pendingBakes.splice(0), 0);
+    assert.ok(deckReleased >= 2, `${prefabId}: deck shot releases floor slabs (${deckReleased})`);
+    assert.equal(sweepBuildingSegment(deckFrom, deckTo, 0.08, deckPort), null, `${prefabId}: second shot passes clean through the deck breach`);
+
+    for (let s = 1; s < deckFracture.shardCount; s++) {
+      if (!deckState.broken[s] || !deckFracture.shards[s].floorSlab) continue;
+      const shard = deckFracture.shards[s];
+      const at = evaluateShardFlight(recordOf(deckState, s), NOWHERE, shard.centroid, [1, 1, 1]);
+      assert.ok(at[1] < dcy - 3, `${prefabId}: broken deck slab falls down from deck (${dcy.toFixed(2)}) to ground (${at[1].toFixed(2)})`);
+    }
+  }
+});

@@ -30,6 +30,8 @@ const NOT_HELD = 255, TIE_REACH = 1.5;
 const TIMBER_KINDS = new Set([10, 15, 17]);
 const ROOF_KINDS = new Set([13, 15]);
 const STAYING_PLATE = /(^|_)(floor|plaza|terreplein|courtyard|cobble|apron|slipway|batey|earthwork|mounds?|sleepers|adarve)(_|$)/;
+const RAMPART_BODY = /scarp|bastion|retaining_wall|terreplein|adarve|earthwork|mounds?/;
+const SCARP_WALL = /scarp_walls|bastion_scarp|retaining_wall/;
 const ONE_PIECE = /garita|bollard|crane|capstan|dome|cupola|lantern|farol|spire|chimney|bell_chamber|monolith|firepit|altar|trough|beacon|canoe|rollers|hearth|mooring|espadana|turret/;
 const GUN = /fort_cannon|cannon_embrasure|bastion_ordnance_battery|bulwark_ordnance_guns/;
 // The outer edge of a traced fort's rampart walk, and its cordon: these go with the wall under them.
@@ -51,11 +53,11 @@ const dotOf = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const unitOf = (a) => { const n = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / n, a[1] / n, a[2] / n]; };
 
 function surfaceOf(kind, fortified) {
-  if (ROOF_KINDS.has(kind)) return { scale: 1.7, timber: TIMBER_KINDS.has(kind), depth: FACING_DEPTH.roof, span: 4 };
-  if (TIMBER_KINDS.has(kind)) return { scale: 1, timber: true, depth: FACING_DEPTH.timber, span: 3 };
-  if (kind === 14) return { scale: 1, timber: false, depth: FACING_DEPTH.opening, span: 1 };
-  if (kind === 12) return { scale: 1.15, timber: false, depth: FACING_DEPTH.stucco, span: 1 };
-  return { scale: 1, timber: false, depth: fortified ? FACING_DEPTH.fortified : FACING_DEPTH.masonry, span: 1 };
+  if (ROOF_KINDS.has(kind)) return { scale: 1.7, timber: TIMBER_KINDS.has(kind), roof: true, depth: FACING_DEPTH.roof, span: 4 };
+  if (TIMBER_KINDS.has(kind)) return { scale: 1, timber: true, roof: false, depth: FACING_DEPTH.timber, span: 3 };
+  if (kind === 14) return { scale: 1, timber: false, roof: false, depth: FACING_DEPTH.opening, span: 1 };
+  if (kind === 12) return { scale: 1.15, timber: false, roof: false, depth: FACING_DEPTH.stucco, span: 1 };
+  return { scale: 1, timber: false, roof: false, depth: fortified ? FACING_DEPTH.fortified : FACING_DEPTH.masonry, span: 1 };
 }
 
 // Which faces there are: the emitters' unshared quads, and any other triangles one by one.
@@ -157,8 +159,12 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
   const shardsByKey = new Map();
   const newShard = (kind, part, surface) => {
     const index = shards.length;
+    const partKey = String(part.partKey ?? '');
     shards.push({
-      index, kind, partId: part.id, partKey: part.partKey, timber: surface.timber, span: surface.span,
+      index, kind, partId: part.id, partKey: part.partKey, timber: surface.timber,
+      roof: Boolean(surface.roof) || /^roof_/.test(partKey),
+      ceiling: Boolean(surface.ceiling) || /roof_eaves_fascia/.test(partKey),
+      span: surface.span,
       min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity],
       localMin: [Infinity, Infinity, Infinity], localMax: [-Infinity, -Infinity, -Infinity],
       volume: 0, normalSum: [0, 0, 0], links: [], above: [], below: [], side: [], anchored: false,
@@ -264,13 +270,12 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
     }
     return bounds;
   };
-  const stay = (face, subFloor = false) => {
+  const stay = (face) => {
     // The underside of a box was never seen. Once the walls have gone it is the ground they stood on.
     if (faceNormal(face)[1] < -0.7) face.groundUp = true;
-    if (subFloor) face.subFloor = true;
     geometry[0].faces.push(face);
   };
-  const FLOOR_SLAB_DEPTH = 0.22;
+  const FLOOR_SLAB_DEPTH = 0.42;
   const lerpVertex = (a, b, t = 0.5) => {
     const out = new Float32Array(STRIDE);
     for (let i = 0; i < STRIDE; i++) out[i] = a[i] + (b[i] - a[i]) * t;
@@ -310,7 +315,6 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
     emitFloorSlab([c, ca, cen, bc], part, surface);
   };
   const rampartPolygon = (face, part, surface) => {
-    stay(face, true);
     recordFloor(face);
     const corners = face.v.map((v) => vertices.slice(v * STRIDE, (v + 1) * STRIDE));
     if (corners.length === 3) {
@@ -321,21 +325,24 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
     }
   };
 
-  // The flat of a fort's rampart stays, with earth under it, but not its outer edge: that stands on the facing.
-  // The part beyond the core is cut away from what stays. It falls with the wall if nothing covers it, and
-  // if another plate lies on top of it, nobody will ever see it and it is simply not drawn.
-  const rampartPlate = (face, bounds, part, surface) => {
+  // The flat of a fort's rampart is paved in heavy stone slabs, and its outer edge stands on the facing.
+  // What is covered by another plate directly above it is inside the solid rampart and is not drawn.
+  const rampartPlate = (face, bounds, part, surface, groundY = 0) => {
     const upFacing = faceNormal(face)[1] > 0.7;
-    // Not square to the building: a fort drawn to its ground. Its walk's outer edge is cut separately, so what is here stays.
+    // Not square to the building: a fort drawn to its ground. Its walk's outer edge is cut separately.
     if (!squareOnto(localCorners(face))) {
       if (upFacing) rampartPolygon(face, part, surface);
-      else { stay(face); recordFloor(face); }
+      else if (face.max[1] <= groundY + 1.6) { stay(face); recordFloor(face); }
       return;
     }
     const x0 = bounds.min[0] + RAMPART_EDGE, x1 = bounds.max[0] - RAMPART_EDGE, z0 = bounds.min[2] + RAMPART_EDGE, z1 = bounds.max[2] - RAMPART_EDGE;
     const [qx0, qx1, qz0, qz1, y] = faceSpan(face);
+    if (!upFacing) {
+      if (y <= groundY + 1.6) { stay(face); recordFloor(face); }
+      return;
+    }
     const covered = (plates.get(floorKey((qx0 + qx1) * 0.5, (qz0 + qz1) * 0.5)) ?? []).some((h) => h > y + 0.05 && h < y + 2.5);
-    if (qx0 >= x0 && qx1 <= x1 && qz0 >= z0 && qz1 <= z1 && (covered || !upFacing)) { stay(face); recordFloor(face); return; }
+    if (covered) return;
     const at = face.v[0] * STRIDE;
     const rect = (ax, bx, az, bz, drop = 0) => [[ax, az], [bx, az], [bx, bz], [ax, bz]].map(([x, z]) => {
       const w = toWorld(x, y - drop, z), out = new Float32Array(STRIDE);
@@ -348,24 +355,19 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
       return out;
     });
     const midX = Math.max(qx0, x0), midX1 = Math.min(qx1, x1), midZ = Math.max(qz0, z0), midZ1 = Math.min(qz1, z1);
-    const paveInterior = !covered && upFacing;
     if (midX < midX1 && midZ < midZ1) {
-      geometry[0].blocks.push({ corners: rect(midX, midX1, midZ, midZ1, paveInterior ? FLOOR_SLAB_DEPTH : 0), depth: 0 });
       noteLevel(floors, midX, midX1, midZ, midZ1, y);
-      if (paveInterior) {
-        const slabStep = 2.8 * blockScale;
-        const nx = Math.max(1, Math.round((midX1 - midX) / slabStep));
-        const nz = Math.max(1, Math.round((midZ1 - midZ) / slabStep));
-        for (let ix = 0; ix < nx; ix++) {
-          const ax = midX + ((midX1 - midX) * ix) / nx, bx = midX + ((midX1 - midX) * (ix + 1)) / nx;
-          for (let iz = 0; iz < nz; iz++) {
-            const az = midZ + ((midZ1 - midZ) * iz) / nz, bz = midZ + ((midZ1 - midZ) * (iz + 1)) / nz;
-            emitFloorSlab(rect(ax, bx, az, bz), part, surface);
-          }
+      const slabStep = 2.8 * blockScale;
+      const nx = Math.max(1, Math.round((midX1 - midX) / slabStep));
+      const nz = Math.max(1, Math.round((midZ1 - midZ) / slabStep));
+      for (let ix = 0; ix < nx; ix++) {
+        const ax = midX + ((midX1 - midX) * ix) / nx, bx = midX + ((midX1 - midX) * (ix + 1)) / nx;
+        for (let iz = 0; iz < nz; iz++) {
+          const az = midZ + ((midZ1 - midZ) * iz) / nz, bz = midZ + ((midZ1 - midZ) * (iz + 1)) / nz;
+          emitFloorSlab(rect(ax, bx, az, bz), part, surface);
         }
       }
     }
-    if (covered) return;
     const strips = [[qx0, Math.min(qx1, x0), qz0, qz1], [Math.max(qx0, x1), qx1, qz0, qz1], [midX, midX1, qz0, Math.min(qz1, z0)], [midX, midX1, Math.max(qz0, z1), qz1]];
     for (const [ax, bx, az, bz] of strips) {
       if (bx - ax < 0.05 || bz - az < 0.05) continue;
@@ -457,9 +459,14 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
   yield 'faces';
 
   if (fortified) {
-    for (const face of faces) if (face.v.length === 4 && face.kind !== 18 && !ROOF_KINDS.has(face.kind) && Math.abs(faceNormal(face)[1]) > 0.7) {
-      const span = faceSpan(face);
-      if (span[1] - span[0] > 1 && span[3] - span[2] > 1) noteLevel(plates, ...span);
+    for (const [partIndex, partFaces] of facesByPart) {
+      const partKey = String(parts[partIndex]?.partKey ?? '');
+      const partBounds = localBounds(partFaces);
+      if (partBounds.max[0] - partBounds.min[0] <= 4 || partBounds.max[2] - partBounds.min[2] <= 4) continue;
+      for (const face of partFaces) if (face.v.length === 4 && face.kind !== 18 && !ROOF_KINDS.has(face.kind) && faceNormal(face)[1] > 0.7 && face.max[1] <= rampartTop) {
+        if (!RAMPART_BODY.test(partKey) && face.kind !== 16) continue;
+        noteLevel(plates, ...faceSpan(face));
+      }
     }
   }
   for (const [partIndex, partFaces] of facesByPart) {
@@ -501,19 +508,19 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
           cutQuad(face, part, { ...surface, scale: Math.max(surface.scale, 1.6) }, 0.5);
           continue;
         }
-        if (fortified && !horizontal && platform && face.v.length === 4) geometry[0].cores.push({ face, part });
+        if (fortified && !horizontal && platform && face.v.length === 4 && SCARP_WALL.test(partKey)) geometry[0].cores.push({ face, part });
         const longest = Math.max(face.max[0] - face.min[0], face.max[1] - face.min[1], face.max[2] - face.min[2]);
-        // A paved floor at ground level stays, and so does the flat of a fort's rampart, which has earth under it.
+        // A paved floor at ground level stays, and the flat of a fort's rampart is cut into heavy slabs.
         if (horizontal && !ROOF_KINDS.has(face.kind) && !surface.timber
-          && (fortified ? (platform || face.kind === 16) && face.max[1] <= rampartTop : (face.kind === 16 || STAYING_PLATE.test(partKey) || platform) && face.max[1] <= islandGround + 1.6)) {
-          if (fortified && platform && face.v.length === 4) rampartPlate(face, bounds, part, surface);
+          && (fortified ? (RAMPART_BODY.test(partKey) || face.kind === 16) && face.max[1] <= rampartTop : (face.kind === 16 || STAYING_PLATE.test(partKey) || platform) && face.max[1] <= islandGround + 1.6)) {
+          if (fortified && platform && face.v.length === 4) rampartPlate(face, bounds, part, surface, islandGround);
           else if (fortified && n[1] > 0.7) rampartPolygon(face, part, surface);
-          else { stay(face); recordFloor(face); }
+          else if (face.max[1] <= islandGround + 1.6) { stay(face); recordFloor(face); }
           continue;
         }
         // Any other floor comes down in big slabs that hang from each other, held by the walls around them.
         if (horizontal && platform && !ROOF_KINDS.has(face.kind)) {
-          const slab = { ...surface, scale: Math.max(surface.scale, 3.2), span: 4 };
+          const slab = { ...surface, ceiling: true, scale: Math.max(surface.scale, 3.2), span: 4 };
           // One broad quad has no cells to fall into, so it is cut like a wall, or it would come down whole.
           if (face.v.length === 4 && longest > 1.45 * slab.scale * blockScale) cutQuad(face, part, slab, spanY);
           else geometry[cellShard(face, partIndex, part, slab)].faces.push(face);
@@ -613,20 +620,14 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
   for (let s = 0; s < geometry.length; s++) {
     if (s % 256 === 0) yield 'mesh';
     const shard = shards[s], { faces: ownFaces, blocks, cores } = geometry[s];
-    const remap = new Map(), subRemap = new Map();
+    const remap = new Map();
     for (const face of ownFaces) {
-      const sub = Boolean(face.subFloor), table = sub ? subRemap : remap;
       const ids = face.v.map((v) => {
-        let mapped = table.get(v);
+        let mapped = remap.get(v);
         if (mapped === undefined) {
-          const at = v * STRIDE;
-          if (sub) {
-            mapped = pushVertex(s, vertices[at], vertices[at + 1] - FLOOR_SLAB_DEPTH, vertices[at + 2], 0, RAW_SURFACE, 0, 16.125, 0.46);
-          } else {
-            const up = face.groundUp ? -1 : 1;
-            mapped = pushVertex(s, vertices[at], vertices[at + 1], vertices[at + 2], vertices[at + 3] * up, vertices[at + 4] * up, vertices[at + 5] * up, vertices[at + 6], face.groundUp ? Math.max(vertices[at + 7], 0.72) : vertices[at + 7]);
-          }
-          table.set(v, mapped);
+          const at = v * STRIDE, up = face.groundUp ? -1 : 1;
+          mapped = pushVertex(s, vertices[at], vertices[at + 1], vertices[at + 2], vertices[at + 3] * up, vertices[at + 4] * up, vertices[at + 5] * up, vertices[at + 6], face.groundUp ? Math.max(vertices[at + 7], 0.72) : vertices[at + 7]);
+          remap.set(v, mapped);
           if (shard) noteBounds(shard, vertices[at], vertices[at + 1], vertices[at + 2]);
         }
         return mapped;
@@ -755,13 +756,13 @@ function* linkShards(shards) {
       if (seen.has(pair)) continue;
       seen.add(pair);
       const a = shards[lowIndex], b = shards[highIndex];
-      if (Boolean(a.floorSlab) !== Boolean(b.floorSlab)) continue;
       const overX = Math.min(a.localMax[0], b.localMax[0]) - Math.max(a.localMin[0], b.localMin[0]);
       const overY = Math.min(a.localMax[1], b.localMax[1]) - Math.max(a.localMin[1], b.localMin[1]);
       const overZ = Math.min(a.localMax[2], b.localMax[2]) - Math.max(a.localMin[2], b.localMin[2]);
       if (overX < -TOUCH || overY < -TOUCH || overZ < -TOUCH) continue;
       a.links.push(b.index);
       b.links.push(a.index);
+      if (a.floorSlab || b.floorSlab) continue;
       // Sharing a footprint and clear of each other in height: one rests on the other.
       const sharedFootprint = Math.max(overX, overZ) > 0.12 && Math.min(overX, overZ) > -TOUCH;
       const heightA = a.localMax[1] - a.localMin[1], heightB = b.localMax[1] - b.localMin[1];
@@ -944,7 +945,7 @@ function releaseShard(state, s, now, { direction = null, power = 1, proximity = 
   let settle = 0.2, landX = pivot[0], landZ = pivot[2], restY = pivot[1], water = false;
   for (let i = 0; i < 3; i++) {
     if (i === 2) [landX, landZ] = rollDownHeap(state, landX, landZ);
-    const ground = Math.max(fracture.groundAt(landX, landZ), fracture.floorAt(landX, landZ, shard.floorSlab ? shard.max[1] + 0.05 : pivot[1]));
+    const ground = Math.max(fracture.groundAt(landX, landZ), fracture.floorAt(landX, landZ, shard.floorSlab ? shard.min[1] - 0.15 : pivot[1]));
     water = shard.timber && ground < -0.2;
     const heap = water ? 0 : state.heap.get(heapKey(landX, landZ)) ?? 0;
     // It never lands higher than it started.
@@ -992,8 +993,13 @@ function distanceMetres(shard, local) {
   let sum = 0;
   for (let c = 0; c < 3; c++) {
     const d = local[c] < shard.localMin[c] ? shard.localMin[c] - local[c] : local[c] > shard.localMax[c] ? local[c] - shard.localMax[c] : 0;
-    // A shock travels up a wall more easily than down it.
-    sum += c === 1 ? (d * (local[1] < shard.localMin[1] ? 0.7 : 1.1)) ** 2 : d * d;
+    // A shock travels up a wall more easily than down it, except through a roof or deck into what lies right under it.
+    const yScale = local[1] < shard.localMin[1]
+      ? 0.7
+      : (shard.roof || shard.ceiling || shard.floorSlab || shard.earth)
+        ? 0.42
+        : 1.1;
+    sum += c === 1 ? (d * yScale) ** 2 : d * d;
   }
   return Math.sqrt(sum);
 }
@@ -1014,16 +1020,24 @@ function rimOfBreach(state, point) {
 
 function strikeBuilding(state, point, normal, { radius, amount, power, now, drop = false, radial = false, above = -Infinity }) {
   const { shards, strikable, toLocal } = state.fracture, local = toLocal(point[0], point[1], point[2]);
+  const topHit = normal[1] > 0.35;
   let broke = 0;
   for (const s of strikable) {
     if (state.broken[s]) continue;
     const shard = shards[s];
     if (shard.max[1] < above) continue;
-    const reach = shard.floorSlab && !drop ? radius * 1.35 : radius;
+    const overHead = shard.floorSlab || shard.roof || shard.ceiling || (topHit && shard.earth);
+    const reach = overHead && !drop ? radius * 1.45 : radius;
     const d = distanceMetres(shard, local);
     if (d >= reach) continue;
     state.touched = true;
-    const fall = 1 - (d / reach) ** 2, burn = (amount * fall * (shard.floorSlab && !drop ? 1.45 : 1)) / (shard.earth ? EARTH_HARDNESS : 1);
+    const matMul = !drop && overHead
+      ? Math.max(1.45, state.fracture.toughness * 1.45)
+      : !drop && shard.timber
+        ? state.fracture.toughness
+        : 1;
+    const hardness = shard.earth && !topHit ? EARTH_HARDNESS : 1;
+    const fall = 1 - (d / reach) ** 2, burn = (amount * fall * matMul) / hardness;
     state.wear[s] += burn;
     state.scorch[s] = Math.min(0.5, state.scorch[s] + burn * 0.35);
     state.scorchDirty = true;
