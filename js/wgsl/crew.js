@@ -105,7 +105,9 @@ fn crewClothed(tagged:vec3f,p:vec3f,shirt:vec3f,trousers:vec3f,skin:vec3f,hair:v
   // point departs from that garment's typical colour, so folds and faces survive any cloth or skin.
   let garment=u32(tagged.b*.5);
   if(garment>0u){
-    let shade=vec3f(tagged.rg,tagged.b-2.0*f32(garment));
+    let rawShade=vec3f(tagged.rg,tagged.b-2.0*f32(garment));
+    let shadeLuma=clamp(dot(rawShade,vec3f(0.299,0.587,0.114)),0.64,1.16);
+    let shade=mix(vec3f(shadeLuma),clamp(rawShade,vec3f(0.62),vec3f(1.18)),select(0.20,0.45,garment==3u));
     let worn=select(select(select(hair,skin,garment==3u),trousers,garment==2u),shirt,garment==1u);
     return vec4f(worn*shade,select(0.0,1.0,garment==3u));
   }
@@ -170,20 +172,7 @@ fn crewShade(v:CrewVertex,front:bool,baseIn:vec3f)->vec4f {
   let bp=v.bodyPos;
   let nHash=fract(sin(dot(bp*vec3f(19.3,27.1,23.7)+vec3f(bSeed*31.0),vec3f(12.9898,78.233,45.164)))*43758.5453);
   let nLow=sin(bp.x*18.0+bSeed*41.0)*cos(bp.y*14.0-bSeed*23.0)*0.5+0.5;
-  var n=normalize(v.normal)*select(-1.0,1.0,front);let sun=F.sunDir.xyz;
-  // Surface-gradient normal relief for woven wool/linen garments, sleeves, and textured captain regalia
-  let dx=dpdx(v.world);let dy=dpdy(v.world);
-  let sx=cross(dy,n);let sy=cross(n,dx);
-  let det=dot(dx,sx);
-  let bpFootprint=max(length(dpdx(bp)),length(dpdy(bp)));
-  let clothFilter=(1.0-smoothstep(0.012,0.065,bpFootprint))*(1.0-clamp(v.skin,0.0,1.0));
-  let foldWave=sin(bp.y*34.0+sin(bp.x*22.0+bp.z*19.0)*1.6)*0.0018;
-  let weaveWave=sin((bp.x+bp.z)*220.0)*sin(bp.y*240.0)*0.00045*(1.0-smoothstep(0.003,0.016,bpFootprint));
-  let texLuma=dot(baseIn,vec3f(0.2126,0.7152,0.0722));
-  let texRelief=select(0.0,(texLuma-0.35)*0.0032,v.color.b<-1.0);
-  let clothBump=(foldWave+weaveWave+texRelief)*clothFilter;
-  let clothGrad=(dpdx(clothBump)*sx+dpdy(clothBump)*sy)/max(abs(det),0.000001)*sign(det);
-  n=normalize(n-clamp(clothGrad,vec3f(-0.22),vec3f(0.22)));
+  let n=normalize(v.normal)*select(-1.0,1.0,front);let sun=F.sunDir.xyz;
   let shadowSample=vesselShadow(v.world,n);
   let direct=sunIlluminance()*sunVis[0]*step(0.0,sun.y)*solarShadowVisibility(shadowSample);
   let sky=textureSampleLevel(envCube,sampC,vec3f(0,1,0),${ENV_MIPS-1}.0).rgb;

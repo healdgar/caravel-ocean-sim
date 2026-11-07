@@ -511,6 +511,62 @@ export function emitCairnScene(sceneSpec, helpers) {
           emitBox(primToWorld, x1 - th, x1, y0, y1, z0 + th, z1 - th, kind, shade * 0.94);
         } else {
           emitBox(primToWorld, x0, x1, y0, y1, z0, z1, kind, shade, Boolean(prim.includeBottom), topInset);
+          const spanX = x1 - x0, spanY = y1 - y0, spanZ = z1 - z0;
+          const shouldArticulate =
+            prim.plain !== true &&
+            topInset <= 0.05 &&
+            y0 >= 0.4 &&
+            spanY >= 3.0 &&
+            spanX >= 3.2 &&
+            spanZ >= 2.6 &&
+            (kind === 12 || prim.articulateFacade === true);
+          if (shouldArticulate) {
+            // Corner ashlar pilasters / quoins & stone eave cornice
+            const pilW = 0.28, pilOut = 0.05;
+            emitBox(primToWorld, x0 - pilOut, x0 + pilW, y0, y1, z0 - pilOut, z0 + pilW, 11, 0.88);
+            emitBox(primToWorld, x1 - pilW, x1 + pilOut, y0, y1, z0 - pilOut, z0 + pilW, 11, 0.88);
+            emitBox(primToWorld, x0 - pilOut, x0 + pilW, y0, y1, z1 - pilW, z1 + pilOut, 11, 0.88);
+            emitBox(primToWorld, x1 - pilW, x1 + pilOut, y0, y1, z1 - pilW, z1 + pilOut, 11, 0.88);
+            emitBox(primToWorld, x0 - 0.08, x1 + 0.08, y1 - 0.24, y1 + 0.02, z0 - 0.08, z1 + 0.08, 11, 0.92, true);
+            if (spanY >= 6.8) {
+              const yBelt = y0 + spanY * 0.52;
+              emitBox(primToWorld, x0 - 0.06, x1 + 0.06, yBelt - 0.12, yBelt + 0.12, z0 - 0.06, z1 + 0.06, 11, 0.90, true);
+            }
+            // Framed leaded-glass casement windows with Pedra Lioz stone surrounds
+            const winRows = [];
+            if (spanY >= 6.8) {
+              winRows.push([y1 - 2.85, y1 - 0.85, true]);
+              if (y0 < 2.2) winRows.push([y0 + 1.35, y0 + 3.25, false]);
+            } else if (spanY >= 3.2) {
+              winRows.push([y0 + Math.max(0.75, spanY * 0.24), y1 - Math.max(0.65, spanY * 0.20), y0 >= 5.0]);
+            }
+            const winW = 0.52;
+            for (const [wy0, wy1, isUpper] of winRows) {
+              if (wy1 - wy0 < 0.85) continue;
+              if (spanX >= 5.6) {
+                const nWx = Math.max(2, Math.min(7, Math.floor((spanX - 2.2) / 3.8)));
+                const stepX = (spanX - 2.4) / nWx;
+                for (let i = 0; i < nWx; i++) {
+                  const wx = x0 + 1.2 + (i + 0.5) * stepX;
+                  if (!isUpper && Math.abs(wx) < 3.6) continue;
+                  emitBox(primToWorld, wx - winW, wx + winW, wy0, wy1, z0 - 0.04, z1 + 0.04, 14, 0.44);
+                  emitBox(primToWorld, wx - winW - 0.14, wx + winW + 0.14, wy1, wy1 + 0.20, z0 - 0.09, z1 + 0.09, 11, 0.90, true);
+                  emitBox(primToWorld, wx - winW - 0.12, wx + winW + 0.12, wy0 - 0.14, wy0, z0 - 0.09, z1 + 0.09, 11, 0.88, true);
+                }
+              }
+              if (spanZ >= 5.6) {
+                const nWz = Math.max(2, Math.min(7, Math.floor((spanZ - 2.2) / 3.8)));
+                const stepZ = (spanZ - 2.4) / nWz;
+                for (let i = 0; i < nWz; i++) {
+                  const wz = z0 + 1.2 + (i + 0.5) * stepZ;
+                  if (!isUpper && Math.abs(wz) < 3.2) continue;
+                  emitBox(primToWorld, x0 - 0.04, x1 + 0.04, wy0, wy1, wz - winW, wz + winW, 14, 0.44);
+                  emitBox(primToWorld, x0 - 0.09, x1 + 0.09, wy1, wy1 + 0.20, wz - winW - 0.14, wz + winW + 0.14, 11, 0.90, true);
+                  emitBox(primToWorld, x0 - 0.09, x1 + 0.09, wy0 - 0.14, wy0, wz - winW - 0.12, wz + winW + 0.12, 11, 0.88, true);
+                }
+              }
+            }
+          }
         }
         return;
       }
@@ -704,12 +760,29 @@ export function emitCairnScene(sceneSpec, helpers) {
         const h = Math.max(0.8, resolveNumeric(prim.height, r * 0.95));
         const rings = Math.max(4, Math.min(8, Math.round(resolveNumeric(prim.rings, 5))));
         const segs = Math.max(8, Math.min(18, Math.round(resolveNumeric(prim.segments, 12))));
-        // Octagonal / cylindrical drum plinth if drumHeight > 0
+        // Octagonal / cylindrical drum plinth with base & top cornices and arched drum windows
         const drumH = resolveNumeric(prim.drumHeight, 0);
         let yStart = base[1];
         if (drumH > 0.1) {
-          emitCylinder(primToWorld, base[0], base[2], yStart, yStart + drumH, r * 1.02, r, segs, 11, 0.88, true);
+          emitCylinder(primToWorld, base[0], base[2], yStart, yStart + 0.24, r * 1.07, r * 1.05, segs, 11, 0.90, true);
+          emitCylinder(primToWorld, base[0], base[2], yStart, yStart + drumH, r * 1.02, r, segs, 11, 0.86, true);
+          emitCylinder(primToWorld, base[0], base[2], yStart + drumH - 0.22, yStart + drumH + 0.04, r * 1.05, r * 1.06, segs, 11, 0.92, true);
+          if (drumH >= 1.2 && r >= 1.6) {
+            const wy0 = yStart + 0.34;
+            const wy1 = yStart + drumH - 0.32;
+            const winHalfW = Math.min(0.42, (r * Math.PI) / (segs * 2.6));
+            for (let s = 0; s < segs; s++) {
+              const aMid = ((s + 0.5) / segs) * Math.PI * 2;
+              const deg = (aMid * 180) / Math.PI;
+              const facetWorld = composeToWorld(primToWorld, [base[0], 0, base[2]], [0, deg, 0], [1, 1, 1]);
+              const rFace = r * Math.cos(Math.PI / segs);
+              emitBox(facetWorld, -winHalfW, winHalfW, wy0, wy1, rFace - 0.06, rFace + 0.05, 14, 0.44);
+              emitBox(facetWorld, -winHalfW - 0.10, winHalfW + 0.10, wy1, wy1 + 0.14, rFace - 0.06, rFace + 0.09, 11, 0.92, true);
+            }
+          }
           yStart += drumH;
+        } else if (r >= 1.6) {
+          emitCylinder(primToWorld, base[0], base[2], yStart - 0.12, yStart + 0.12, r * 1.05, r * 1.04, segs, 11, 0.90, true);
         }
         for (let ring = 0; ring < rings; ring++) {
           const t0 = (ring / rings) * (Math.PI * 0.5);
@@ -719,12 +792,31 @@ export function emitCairnScene(sceneSpec, helpers) {
           const y0 = yStart + Math.sin(t0) * h;
           const y1 = yStart + Math.sin(t1) * h;
           emitCylinder(primToWorld, base[0], base[2], y0, y1, r0, r1, segs, kind, shade * (0.94 + 0.06 * (ring / rings)), ring === rings - 1);
+          // Raised Pedra Lioz stone meridian ribs along each dome gore
+          if (r >= 1.5 && typeof pushQuad === 'function') {
+            const ribOut = Math.min(0.11, r * 0.028);
+            const ribW = Math.min(0.10, r * 0.026);
+            for (let s = 0; s < segs; s++) {
+              const a = (s / segs) * Math.PI * 2;
+              const ca = Math.cos(a), sa = Math.sin(a);
+              const tx = -sa * ribW, tz = ca * ribW;
+              const rr0 = r0 + ribOut, rr1 = r1 + ribOut * 0.65;
+              const p0L = primToWorld(base[0] + ca * rr0 - tx, y0, base[2] + sa * rr0 - tz);
+              const p0R = primToWorld(base[0] + ca * rr0 + tx, y0, base[2] + sa * rr0 + tz);
+              const p1R = primToWorld(base[0] + ca * rr1 + tx * 0.7, y1, base[2] + sa * rr1 + tz * 0.7);
+              const p1L = primToWorld(base[0] + ca * rr1 - tx * 0.7, y1, base[2] + sa * rr1 - tz * 0.7);
+              pushQuad(p0L, p0R, p1R, p1L, 11, 0.90);
+            }
+          }
         }
         if (prim.lantern) {
-          const lR = r * 0.24;
-          const lH = h * 0.38;
-          emitCylinder(primToWorld, base[0], base[2], yStart + h - 0.1, yStart + h + lH, lR, lR * 0.92, Math.max(8, Math.min(12, segs)), 11, 0.92, true);
-          emitCylinder(primToWorld, base[0], base[2], yStart + h + lH, yStart + h + lH * 1.55, lR * 1.05, 0.06, Math.max(8, Math.min(12, segs)), 13, 0.94, true);
+          const lR = r * 0.25;
+          const lH = h * 0.40;
+          const lSegs = Math.max(8, Math.min(12, segs));
+          emitCylinder(primToWorld, base[0], base[2], yStart + h - 0.1, yStart + h + lH, lR, lR * 0.92, lSegs, 11, 0.90, true);
+          emitCylinder(primToWorld, base[0], base[2], yStart + h + lH - 0.08, yStart + h + lH + 0.08, lR * 1.06, lR * 1.06, lSegs, 11, 0.92, true);
+          emitCylinder(primToWorld, base[0], base[2], yStart + h + lH, yStart + h + lH * 1.55, lR * 1.04, 0.08, lSegs, 13, 0.90, true);
+          emitCylinder(primToWorld, base[0], base[2], yStart + h + lH * 1.55, yStart + h + lH * 1.88, 0.06, 0.03, 6, 18, 0.68, true);
         }
         return;
       }
@@ -1384,7 +1476,7 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
             segments: 8,
             rings: 4,
             lantern: true,
-            material: 'limestone',
+            material: 'terracotta',
           },
         ],
       },
@@ -1429,6 +1521,16 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         from: [8.5, 0.75, -12.8],
         to: [18.2, 13.4, 4.2],
         material: 'limestone',
+        articulateFacade: true,
+      },
+      {
+        primitive: 'roof',
+        partGroup: 'transept_and_chancel',
+        from: [8.5, 13.4, -12.8],
+        to: [18.2, 15.6, 4.2],
+        height: 2.2,
+        hipRatio: 0.24,
+        material: 'terracotta',
       },
       // Ornate Portal Sul (South Portal by João de Castilho) with carved archivolts & gable tabernacle
       {
@@ -1479,13 +1581,13 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
       {
         primitive: 'dome',
         partGroup: 'crossing_lantern_dome',
-        base: [13.2, 13.4, -4.2],
+        base: [13.2, 14.8, -4.2],
         drumHeight: 2.2,
         radius: 3.8,
         height: 3.4,
         segments: 8,
         lantern: true,
-        material: 'limestone',
+        material: 'terracotta',
       },
       // Adjoining Two-Story Manueline Royal Cloister (Claustro Real) on the north side
       {
@@ -1679,6 +1781,7 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         from: [-9.8, 0.8, -9.4],
         to: [9.8, 7.8, 10.5],
         material: 'limestone',
+        articulateFacade: true,
       },
       {
         primitive: 'box',
@@ -1693,6 +1796,7 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         from: [-5.2, 7.8, -9.4],
         to: [5.2, 12.2, 10.5],
         material: 'limestone',
+        articulateFacade: true,
       },
       // Projecting Romanesque transept & Gothic ambulatory apse
       {
@@ -1701,6 +1805,7 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         from: [-11.8, 0.8, 1.5],
         to: [-9.8, 10.8, 7.8],
         material: 'limestone',
+        articulateFacade: true,
       },
       {
         primitive: 'box',
@@ -1708,6 +1813,7 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         from: [9.8, 0.8, 1.5],
         to: [11.8, 10.8, 7.8],
         material: 'limestone',
+        articulateFacade: true,
       },
       {
         primitive: 'box',
@@ -1724,6 +1830,25 @@ export const CAIRN_ARCHITECTURAL_TEMPLATES = {
         radius: 5.2,
         segments: 8,
         material: 'limestone',
+      },
+      {
+        primitive: 'cylinder',
+        partGroup: 'gothic_ambulatory_apse',
+        base: [0, 10.1, 11.8],
+        height: 0.35,
+        radius: 5.45,
+        segments: 8,
+        material: 'ashlar',
+      },
+      {
+        primitive: 'cone',
+        partGroup: 'gothic_ambulatory_apse',
+        base: [0, 10.45, 11.8],
+        height: 2.35,
+        radiusBottom: 5.5,
+        radiusTop: 0.25,
+        segments: 8,
+        material: 'terracotta',
       },
       // Deep stepped Romanesque West Portal & Rose Window frontispiece between the twin towers
       {

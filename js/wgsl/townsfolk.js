@@ -38,9 +38,9 @@ const BODY_HEIGHT_M = 1.75;
 const BODY_BOUND_M = 1.3;
 const LYING_BOUND_M = 2.4;
 // How tall someone appears on screen, in pixels, at each change of detail.
-const NEAR_PIXELS = 300;
-const MID_PIXELS = 120;
-const FAR_PIXELS = 36;
+const NEAR_PIXELS = 110;
+const MID_PIXELS = 48;
+const FAR_PIXELS = 20;
 const SMALLEST_PIXELS = 2.5;
 
 const TOWN_BODY = /* wgsl */ `
@@ -245,7 +245,7 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
   let after=select(min(whole+1u,frames-1u),(whole+1u)%frames,looped);
   let bucket=model*${TOWNSFOLK_TIERS}u+tier;
   let slot=atomicAdd(&draws[bucket*5u+1u],1u);
-  bodies[bucket*crowd.bucketSpan+slot]=TownBody(position,heading,first+whole,first+after,select(fract(frame),0.0,tier>=2u),model*crowd.looks+w.look%crowd.looks);
+  bodies[bucket*crowd.bucketSpan+slot]=TownBody(position,heading,first+whole,first+after,select(fract(frame),0.0,tier>=3u),model*crowd.looks+w.look%crowd.looks);
 }
 `;
 

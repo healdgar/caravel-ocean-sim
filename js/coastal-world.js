@@ -6,6 +6,7 @@
 
 import { layTownStreets, streetEdgeAt } from './town-streets.js';
 import { layPortProps } from './port-props.js';
+import { emitTripoHarborCrane, emitTripoDockCleat } from './tripo-pier-assets.js';
 import {
   bastionBayIsEmbrasure,
   enclosureGroundPoints,
@@ -6284,8 +6285,15 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         emitBox(toWorld, -hw + 0.6, hw - 0.6, deckBottom - 1.65, deckBottom - 1.32, z - 0.14, z + 0.14, 10, 0.56, true);
         if (b % 2 === 0) {
           beginSection('mooring_bollards');
-          emitCylinder(toWorld, -hw + 0.78, z, yTop + 0.28, yTop + 1.02, 0.24, 0.28, 8, 18, 0.78, true);
-          emitCylinder(toWorld, hw - 0.78, z, yTop + 0.28, yTop + 1.02, 0.24, 0.28, 8, 18, 0.78, true);
+          if (b % 4 === 0) {
+            emitTripoDockCleat(pushTri, toWorld, -hw + 0.78, yTop + 0.26, z, 0.72, Math.PI * 0.5);
+            emitTripoDockCleat(pushTri, toWorld, hw - 0.78, yTop + 0.26, z, 0.72, -Math.PI * 0.5);
+          } else {
+            emitCylinder(toWorld, -hw + 0.78, z, yTop + 0.26, yTop + 0.94, 0.20, 0.22, 8, 10, 0.68, true);
+            emitCylinder(toWorld, -hw + 0.78, z, yTop + 0.94, yTop + 1.04, 0.24, 0.21, 8, 18, 0.64, true);
+            emitCylinder(toWorld, hw - 0.78, z, yTop + 0.26, yTop + 0.94, 0.20, 0.22, 8, 10, 0.68, true);
+            emitCylinder(toWorld, hw - 0.78, z, yTop + 0.94, yTop + 1.04, 0.24, 0.21, 8, 18, 0.64, true);
+          }
         }
       }
       // Boatman's timber landing stage & water stairs descending into the water on the sheltered flank
@@ -6297,36 +6305,61 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       }
       emitCylinder(toWorld, -hw - 1.30, stairZ, yBase, yTop + 0.85, 0.18, 0.16, 6, 10, 0.64, true);
       emitCylinder(toWorld, -hw - 1.30, stairZ + 4.92, yBase, yTop + 0.85, 0.18, 0.16, 6, 10, 0.64, true);
-      // Dockside cargo staging: stacked wine/water casks, bound spice chests, warping capstan & boarding brow
+      // Dockside cargo staging: iron-bound spice chests, hooped wine/water casks, warping capstan & boarding brow
       beginSection('pier_cargo_and_capstan');
       const cargoZ = -hl * 0.52;
-      emitBox(toWorld, -hw + 1.15, -hw + 2.95, yTop, yTop + 1.05, cargoZ - 1.6, cargoZ + 1.2, 10, 0.76, true);
-      emitBox(toWorld, -hw + 1.35, -hw + 2.75, yTop + 1.05, yTop + 1.85, cargoZ - 1.1, cargoZ + 0.7, 10, 0.82, true);
-      emitCylinder(toWorld, hw - 1.75, cargoZ + 2.2, yTop, yTop + 1.15, 0.52, 0.48, 8, 10, 0.72, true);
-      emitCylinder(toWorld, hw - 1.75, cargoZ + 3.35, yTop, yTop + 1.15, 0.52, 0.48, 8, 10, 0.70, true);
-      emitCylinder(toWorld, hw - 2.65, cargoZ + 2.75, yTop, yTop + 1.15, 0.52, 0.48, 8, 10, 0.74, true);
+      emitBox(toWorld, -hw + 1.15, -hw + 2.75, yTop, yTop + 0.96, cargoZ - 1.4, cargoZ + 1.0, 10, 0.74, true);
+      emitBox(toWorld, -hw + 1.12, -hw + 2.78, yTop + 0.88, yTop + 0.98, cargoZ - 1.43, cargoZ + 1.03, 18, 0.64, true);
+      emitBox(toWorld, -hw + 1.35, -hw + 2.55, yTop + 0.98, yTop + 1.72, cargoZ - 0.95, cargoZ + 0.55, 10, 0.80, true);
+      for (const [cx, cz] of [[hw - 1.75, cargoZ + 2.2], [hw - 1.75, cargoZ + 3.35], [hw - 2.65, cargoZ + 2.75]]) {
+        emitCylinder(toWorld, cx, cz, yTop, yTop + 0.58, 0.44, 0.52, 10, 10, 0.72, true);
+        emitCylinder(toWorld, cx, cz, yTop + 0.58, yTop + 1.14, 0.52, 0.44, 10, 10, 0.74, true);
+        emitCylinder(toWorld, cx, cz, yTop + 0.22, yTop + 0.28, 0.49, 0.50, 10, 18, 0.62, false);
+        emitCylinder(toWorld, cx, cz, yTop + 0.86, yTop + 0.92, 0.50, 0.49, 10, 18, 0.62, false);
+      }
       // Timber warping capstan & capstan bars near the pierhead
       const capZ = -hl + 6.4;
-      emitCylinder(toWorld, -hw * 0.38, capZ, yTop, yTop + 1.18, 0.46, 0.36, 8, 10, 0.75, true);
-      emitBox(toWorld, -hw * 0.38 - 1.45, -hw * 0.38 + 1.45, yTop + 0.92, yTop + 1.06, capZ - 0.10, capZ + 0.10, 10, 0.82, true);
-      emitBox(toWorld, -hw * 0.38 - 0.10, -hw * 0.38 + 0.10, yTop + 0.92, yTop + 1.06, capZ - 1.45, capZ + 1.45, 10, 0.82, true);
+      emitCylinder(toWorld, -hw * 0.38, capZ, yTop, yTop + 0.24, 0.54, 0.48, 10, 18, 0.64, true);
+      emitCylinder(toWorld, -hw * 0.38, capZ, yTop + 0.24, yTop + 1.06, 0.38, 0.30, 10, 10, 0.74, true);
+      emitCylinder(toWorld, -hw * 0.38, capZ, yTop + 1.02, yTop + 1.22, 0.48, 0.46, 10, 10, 0.80, true);
+      emitBox(toWorld, -hw * 0.38 - 1.45, -hw * 0.38 + 1.45, yTop + 1.06, yTop + 1.16, capZ - 0.08, capZ + 0.08, 10, 0.82, true);
+      emitBox(toWorld, -hw * 0.38 - 0.08, -hw * 0.38 + 0.08, yTop + 1.06, yTop + 1.16, capZ - 1.45, capZ + 1.45, 10, 0.82, true);
       // Brow gangway plank staged at the embarkation berth edge
-      emitBox(toWorld, hw - 1.6, hw + 1.45, yTop + 0.05, yTop + 0.26, -hl + 8.2, -hl + 9.6, 10, 0.84, true);
-      // Seaward pier-head Manueline stepped limestone Padrão plinth, iron fire-basket cresset beacon & twin-wheel Guindaste harbor crane
+      emitBox(toWorld, hw - 1.6, hw + 1.45, yTop + 0.05, yTop + 0.24, -hl + 8.2, -hl + 9.6, 10, 0.82, true);
+      // Seaward pier-head Manueline stepped octagonal Pedra Lioz Padrão plinth, iron fire-basket cresset beacon & Tripo treadwheel harbor crane
       beginSection('pier_beacon_and_crane');
-      emitBox(toWorld, -1.65, 1.65, yTop, yTop + 0.85, -hl + 0.4, -hl + 3.6, 11, 0.90);
-      emitBox(toWorld, -1.2, 1.2, yTop + 0.85, yTop + 2.1, -hl + 0.8, -hl + 3.2, 11, 0.88);
-      emitCylinder(toWorld, 0, -hl + 2.0, yTop + 2.1, yTop + 6.4, 0.28, 0.22, 8, 11, 0.86, true);
-      emitBox(toWorld, -0.65, 0.65, yTop + 5.6, yTop + 5.9, -hl + 1.35, -hl + 2.65, 11, 0.90, true);
-      emitCylinder(toWorld, 0, -hl + 2.0, yTop + 6.4, yTop + 7.45, 0.58, 0.78, 8, 18, 0.80, true);
-      // Twin-wheel timber harbor crane (Guindaste da Ribeira) with treadwheel housing, slewing jib boom & slung barrel
+      const bz = -hl + 2.1;
+      emitCylinder(toWorld, 0, bz, yTop, yTop + 0.58, 1.55, 1.42, 8, 11, 0.88, true);
+      emitCylinder(toWorld, 0, bz, yTop + 0.58, yTop + 0.74, 1.48, 1.32, 8, 11, 0.92, true);
+      emitCylinder(toWorld, 0, bz, yTop + 0.74, yTop + 1.85, 1.12, 0.96, 8, 11, 0.86, true);
+      emitCylinder(toWorld, 0, bz, yTop + 1.85, yTop + 2.08, 1.08, 0.92, 8, 11, 0.92, true);
+      emitCylinder(toWorld, 0, bz, yTop + 2.08, yTop + 5.75, 0.34, 0.25, 12, 11, 0.88, true);
+      emitCylinder(toWorld, 0, bz, yTop + 5.75, yTop + 6.18, 0.26, 0.52, 12, 11, 0.92, true);
+      // Open wrought-iron fire-basket cresset cage with glowing pitch-pine embers
+      emitCylinder(toWorld, 0, bz, yTop + 6.18, yTop + 6.32, 0.44, 0.48, 10, 18, 0.66, true);
+      emitCylinder(toWorld, 0, bz, yTop + 6.32, yTop + 6.96, 0.38, 0.48, 10, 13, 0.92, true);
+      emitCylinder(toWorld, 0, bz, yTop + 6.66, yTop + 6.72, 0.56, 0.58, 10, 18, 0.66, false);
+      emitCylinder(toWorld, 0, bz, yTop + 7.06, yTop + 7.16, 0.64, 0.66, 10, 18, 0.68, false);
+      for (let cRib = 0; cRib < 8; cRib++) {
+        const ca = (cRib / 8) * Math.PI * 2;
+        const rcx = Math.cos(ca), rcz = Math.sin(ca);
+        emitLatheTube(
+          toWorld,
+          [rcx * 0.44, yTop + 6.20, bz + rcz * 0.44],
+          [rcx * 0.65, yTop + 7.15, bz + rcz * 0.65],
+          [[0, 0.035, 1], [1, 0.035, 1]],
+          5,
+          18,
+          0.68,
+          true
+        );
+      }
+      // Tripo-generated 16th-century treadwheel harbor crane (Guindaste da Ribeira) with slung cargo cask
       const craneZ = -hl * 0.32;
-      emitBox(toWorld, hw - 2.6, hw - 0.4, yTop, yTop + 2.8, craneZ - 1.4, craneZ + 1.4, 10, 0.74, true);
-      emitCylinder(toWorld, hw - 1.35, craneZ, yTop, yTop + 6.2, 0.38, 0.30, 8, 10, 0.78, true);
-      emitBox(toWorld, hw - 1.55, hw + 3.2, yTop + 4.9, yTop + 5.45, craneZ - 0.24, craneZ + 0.24, 10, 0.76, true);
-      emitBox(toWorld, hw - 1.15, hw + 2.2, yTop + 3.4, yTop + 4.9, craneZ - 0.16, craneZ + 0.16, 10, 0.70, true);
-      emitCylinder(toWorld, hw + 2.75, craneZ, yTop + 2.2, yTop + 5.0, 0.08, 0.08, 6, 18, 0.76, true);
-      emitCylinder(toWorld, hw + 2.75, craneZ, yTop + 1.35, yTop + 2.25, 0.46, 0.42, 8, 10, 0.76, true);
+      emitTripoHarborCrane(pushTri, toWorld, hw - 1.35, yTop, craneZ, 5.8, 0);
+      emitCylinder(toWorld, hw + 1.30, craneZ - 0.12, yTop + 1.95, yTop + 5.55, 0.045, 0.045, 6, 18, 0.68, true);
+      emitCylinder(toWorld, hw + 1.30, craneZ - 0.12, yTop + 1.15, yTop + 1.95, 0.42, 0.38, 10, 10, 0.76, true);
+      emitCylinder(toWorld, hw + 1.30, craneZ - 0.12, yTop + 1.35, yTop + 1.42, 0.43, 0.43, 10, 18, 0.62, false);
     } else if (inst.prefabId === 'stone_quay_seawall') {
       // Continuous Colonial Stone Seawall & Wharf (Malecón y Muelle de Piedra)
       const yCoping = yTop - 0.35;
@@ -6353,7 +6386,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       const bStep = Math.max(6, 14 * qs);
       for (let bx = -hw + 4 * qs; bx <= hw - 4 * qs; bx += bStep) {
         if (Math.abs(bx) < 5 * qs || (Math.abs(bx) > 14 * qs && Math.abs(bx) < 23 * qs)) continue;
-        emitCylinder(toWorld, bx, -hl + 0.6, yTop + 0.65, yTop + 1.38, 0.34, 0.38, 8, 18, 0.78, true);
+        emitTripoDockCleat(pushTri, toWorld, bx, yTop + 0.65, -hl + 0.55, 0.76, 0);
       }
     } else if ((inst.prefabId === 'stone_sea_bastion' || inst.prefabId === 'bastion_trace_fortress') && inst.trace) {
       emitTracedFort(inst, toWorld, yBase, yTop);
@@ -6996,20 +7029,51 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       for (let s = 1; s < nSec; s++) {
         const p = secProfile(s);
         beginSection('caravel_rib_frames');
-        // Curved port & starboard futtock ribs & deck beam
-        emitBox(toWorld, -p.bWale - 0.04, -p.bGunwale + 0.24, p.yB, p.yG + 0.18, p.z - 0.13, p.z + 0.13, 10, 0.78, true);
-        emitBox(toWorld, p.bGunwale - 0.24, p.bWale + 0.04, p.yB, p.yG + 0.18, p.z - 0.13, p.z + 0.13, 10, 0.78, true);
-        emitBox(toWorld, -p.bGunwale + 0.12, p.bGunwale - 0.12, p.yW - 0.18, p.yW + 0.08, p.z - 0.12, p.z + 0.12, 10, 0.74, true);
+        for (const side of [-1, 1]) {
+          const pk = [side * p.bKeel, p.yK + 0.14, p.z];
+          const pb = [side * p.bBilge * 0.96, p.yB, p.z];
+          const pw = [side * p.bWale * 0.96, p.yW, p.z];
+          const pg = [side * p.bGunwale * 0.96, p.yG + 0.24, p.z];
+          emitLatheTube(toWorld, pk, pb, [[0, 0.13, 1], [1, 0.12, 1]], 6, 10, 0.76, true);
+          emitLatheTube(toWorld, pb, pw, [[0, 0.12, 1], [1, 0.11, 1]], 6, 10, 0.78, false);
+          emitLatheTube(toWorld, pw, pg, [[0, 0.11, 1], [1, 0.09, 1]], 6, 10, 0.80, false);
+        }
+        // Deck cross-beam (vau) & central hanging knee
+        emitBox(toWorld, -p.bWale * 0.94, p.bWale * 0.94, p.yW - 0.14, p.yW + 0.06, p.z - 0.10, p.z + 0.10, 10, 0.74, true);
         if (s % 2 === 1) {
-          // Angled bilge shore props (escoras) wedged from slipway sleepers against the hull wales
-          emitBox(toWorld, -p.bWale - 0.75, -p.bWale + 0.05, ySlip + 0.12, p.yW - 0.10, p.z - 0.11, p.z + 0.11, 10, 0.70, true, 0.18);
-          emitBox(toWorld, p.bWale - 0.05, p.bWale + 0.75, ySlip + 0.12, p.yW - 0.10, p.z - 0.11, p.z + 0.11, 10, 0.70, true, 0.18);
+          // Angled cylindrical bilge shore poles (escoras) wedged from slipway sleepers against the hull wales
+          emitLatheTube(
+            toWorld,
+            [-p.bWale - 0.95, ySlip + 0.08, p.z],
+            [-p.bWale * 0.98, p.yW - 0.08, p.z],
+            [[0, 0.10, 1], [1, 0.09, 1]],
+            6,
+            10,
+            0.68,
+            true
+          );
+          emitLatheTube(
+            toWorld,
+            [p.bWale + 0.95, ySlip + 0.08, p.z],
+            [p.bWale * 0.98, p.yW - 0.08, p.z],
+            [[0, 0.10, 1], [1, 0.09, 1]],
+            6,
+            10,
+            0.68,
+            true
+          );
         }
       }
-      // Continuous upper gunwale rail & pitch cauldron + stacked seasoning oak planks beside the slipway
+      // A-frame timber sheerlegs hoist, pitch cauldron on masonry hearth & stacked seasoning oak planks beside the slipway
       beginSection('sheerlegs_crane_and_pitch_cauldron');
-      emitCylinder(toWorld, -hw + 1.05, hl * 0.52, ySlip, ySlip + 1.15, 0.68, 0.78, 8, 18, 0.76, true);
-      emitBox(toWorld, hw - 1.55, hw - 0.35, ySlip, ySlip + 0.75, -hl * 0.45, hl * 0.35, 10, 0.76, true);
+      const shZ = hl * 0.72;
+      emitLatheTube(toWorld, [-2.1, ySlip, shZ + 0.6], [0, ySlip + 6.2, shZ - 0.4], [[0, 0.15, 1], [1, 0.11, 1]], 6, 10, 0.74, true);
+      emitLatheTube(toWorld, [2.1, ySlip, shZ + 0.6], [0, ySlip + 6.2, shZ - 0.4], [[0, 0.15, 1], [1, 0.11, 1]], 6, 10, 0.74, true);
+      emitLatheTube(toWorld, [0, ySlip, shZ + 2.4], [0, ySlip + 6.2, shZ - 0.4], [[0, 0.13, 1], [1, 0.10, 1]], 6, 10, 0.70, true);
+      emitCylinder(toWorld, -hw + 1.05, hl * 0.52, ySlip, ySlip + 0.42, 0.76, 0.74, 8, 11, 0.80, true);
+      emitCylinder(toWorld, -hw + 1.05, hl * 0.52, ySlip + 0.42, ySlip + 1.12, 0.62, 0.72, 10, 18, 0.66, true);
+      emitBox(toWorld, hw - 1.55, hw - 0.45, ySlip, ySlip + 0.36, -hl * 0.42, hl * 0.32, 10, 0.74, true);
+      emitBox(toWorld, hw - 1.45, hw - 0.55, ySlip + 0.38, ySlip + 0.72, -hl * 0.36, hl * 0.26, 10, 0.78, true);
     } else if (inst.prefabId === 'royal_warehouse') {
       // Royal Warehouse (Almacén Real): Bay-iterated buttressed masonry hall with radial stone voussoir cargo portals
       const yPlinth = yGround + 0.68;
