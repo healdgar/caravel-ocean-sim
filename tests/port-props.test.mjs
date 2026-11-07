@@ -3,7 +3,23 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {generateProceduralCoastalPack} from '../js/coastal-world.js';
 import {terrainSurfaceSample} from '../js/terrain-model.js';
-import {PROP_MODELS,layPortProps,readPropModel} from '../js/port-props.js';
+import {
+  PROP_MODELS,
+  applyJettyImpactDamage,
+  ensureJettyFracture,
+  evaluateJettyShardPose,
+  jettyLocalToWorld,
+  layPortProps,
+  preparePortJetties,
+  readPropModel,
+  stepJettyFracture,
+  sweepJettySegment,
+} from '../js/port-props.js';
+import {
+  createGunnerySolidSweep,
+  resolveSolidGunneryImpact,
+  sweepBuildingSegment,
+} from '../js/gunnery-control.js';
 
 const GRID={size:513,biomeSize:128,albedoSize:256};
 
@@ -79,4 +95,115 @@ test('the same port lays the same props, and a real port gets them',()=>{
   const ground=(x,z)=>terrainSurfaceSample(pack.heights,x,z,pack.region);
   assert.deepEqual(pack.port.props,layPortProps(pack.port,ground));
   assert.ok(pack.port.props.some(p=>p.model===0),'Lisbon has cleats on its piers');
+});
+
+test('a cannonball strikes a rustic jetty\'s drawn timbers, breaks off flying shards that fall under gravity, and lets follow-up shots pass through the gap',()=>{
+  const models=PROP_MODELS.map(spec=>readPropModel(readFileSync(new URL('../'+spec.file,import.meta.url)),spec));
+  for(const modelIndex of [1,2]){
+    const model=models[modelIndex];
+    const jetty={model:modelIndex,x:0,y:null,z:0,yaw:0.35,owner:-1};
+    const port={center:{x:0,z:0},instances:[],props:[jetty],groundAt:()=>-1.8};
+    preparePortJetties(port,models,port.groundAt);
+
+    // Pick a deck shard near mid-length and aim a horizontal shot directly through one of its triangles.
+    const state=ensureJettyFracture(jetty,model,port.groundAt);
+    const targetShard=state.shards.find(s=>s.tier===2&&s.bay>=2&&s.bay<=5)??state.shards[0];
+    const i0=model.indices[targetShard.indexStart]*8;
+    const i1=model.indices[targetShard.indexStart+1]*8;
+    const i2=model.indices[targetShard.indexStart+2]*8;
+    const triCenter=[
+      (model.vertices[i0]+model.vertices[i1]+model.vertices[i2])/3,
+      (model.vertices[i0+1]+model.vertices[i1+1]+model.vertices[i2+1])/3,
+      (model.vertices[i0+2]+model.vertices[i1+2]+model.vertices[i2+2])/3,
+    ];
+    const from=jettyLocalToWorld(jetty,triCenter[0]-12,triCenter[1],triCenter[2],model);
+    const to=jettyLocalToWorld(jetty,triCenter[0]+12,triCenter[1],triCenter[2],model);
+
+    // A shot high above the jetty misses (passes through air, not an oversized box).
+    const airFrom=jettyLocalToWorld(jetty,triCenter[0]-12,model.height+2.5,triCenter[2],model);
+    const airTo=jettyLocalToWorld(jetty,triCenter[0]+12,model.height+2.5,triCenter[2],model);
+    assert.equal(sweepJettySegment(airFrom,airTo,0.08,port),null,`${PROP_MODELS[modelIndex].id}: air above deck is clear`);
+
+    // The shot aimed at the drawn timber hits via both sweepJettySegment and createGunnerySolidSweep.
+    const sweep=createGunnerySolidSweep({getVessels:()=>[],getTerrain:()=>({port})});
+    const hit=sweep(from,to,{radius:0.08,ammo:'round'});
+    assert.ok(hit,`${PROP_MODELS[modelIndex].id}: cannonball hits drawn jetty mesh`);
+    assert.equal(hit.kind,'jetty');
+    assert.equal(hit.materialClass,'timber');
+    assert.equal(hit.jetty,jetty);
+    assert.deepEqual(sweepBuildingSegment(from,to,0.08,port)?.jetty,jetty);
+
+    const vel=[
+      (to[0]-from[0])*15,
+      (to[1]-from[1])*15,
+      (to[2]-from[2])*15,
+    ];
+    const report=resolveSolidGunneryImpact({
+      ...hit,
+      type:'impact',
+      ammo:'round',
+      mass:10.9,
+      velocity:vel,
+      position:jettyLocalToWorld(jetty,...hit.localPosition,model),
+    },{getTerrain:()=>({port})});
+
+    assert.ok(report,`${PROP_MODELS[modelIndex].id}: impact resolves`);
+    assert.equal(report.kind,'jetty');
+    assert.ok(report.releasedShards.length>=1,`${PROP_MODELS[modelIndex].id}: releases broken timber shards`);
+    assert.ok(state.aliveCount<state.shards.length);
+
+    // Released shards fly outward and upward initially, then fall under gravity below their starting height.
+    const brokenId=report.releasedShards[0];
+    const pose0=evaluateJettyShardPose(jetty,brokenId,0);
+    assert.equal(pose0.inFlight,true);
+    stepJettyFracture(jetty,0.12);
+    const poseMid=evaluateJettyShardPose(jetty,brokenId);
+    const horizDisp=Math.hypot(
+      poseMid.localPosition[0]-pose0.localPosition[0],
+      poseMid.localPosition[2]-pose0.localPosition[2],
+    );
+    assert.ok(horizDisp>0.25,`${PROP_MODELS[modelIndex].id}: broken timber flies outward (${horizDisp.toFixed(2)} m)`);
+    assert.ok(poseMid.angle>0.2,`${PROP_MODELS[modelIndex].id}: broken timber spins in flight`);
+
+    for(let step=0;step<40;step++)stepJettyFracture(jetty,0.1);
+    const poseLate=evaluateJettyShardPose(jetty,brokenId);
+    assert.ok(poseLate.localPosition[1]<pose0.localPosition[1]-0.4,`${PROP_MODELS[modelIndex].id}: broken timber falls under gravity`);
+
+    // A follow-up shot along the exact same line now passes through the broken gap (or hits a deeper shard behind it, and once cleared, passes right through).
+    for(let shotIdx=0;shotIdx<4;shotIdx++){
+      const nextHit=sweep(from,to,{radius:0.08,ammo:'round'});
+      if(!nextHit)break;
+      resolveSolidGunneryImpact({...nextHit,type:'impact',ammo:'round',mass:10.9,velocity:vel},{getTerrain:()=>({port})});
+    }
+    assert.equal(sweep(from,to,{radius:0.08,ammo:'round'}),null,`${PROP_MODELS[modelIndex].id}: follow-up shot passes cleanly through the breached gap`);
+  }
+});
+
+test('shooting away the supporting pilings under a rustic jetty collapses the unsupported deck section above',()=>{
+  const models=PROP_MODELS.map(spec=>readPropModel(readFileSync(new URL('../'+spec.file,import.meta.url)),spec));
+  for(const modelIndex of [1,2]){
+    const model=models[modelIndex];
+    const jetty={model:modelIndex,x:0,y:null,z:0,yaw:0,owner:-1};
+    const port={center:{x:0,z:0},instances:[],props:[jetty],groundAt:()=>-2.0};
+    preparePortJetties(port,models,port.groundAt);
+    const state=ensureJettyFracture(jetty,model,port.groundAt);
+
+    // Strike the lower anchored pilings across the seaward bays with low horizontal shots below deck level.
+    const anchored=state.shards.filter(s=>s.anchored);
+    assert.ok(anchored.length>=4,`${PROP_MODELS[modelIndex].id} has anchored pilings`);
+    let totalCollapsed=0;
+    for(const piling of anchored){
+      if(!state.alive[piling.id])continue;
+      const report=applyJettyImpactDamage(jetty,{
+        shardId:piling.id,
+        localPosition:[piling.center[0],Math.min(piling.center[1],model.fracture.deckY*0.4),piling.center[2]],
+        velocity:[320,0,0],
+        mass:14.5,
+        energy:740000,
+        ammo:'round',
+      },{port});
+      totalCollapsed+=report?.collapsedShards.length??0;
+    }
+    assert.ok(totalCollapsed>0,`${PROP_MODELS[modelIndex].id}: shooting out pilings collapses ${totalCollapsed} supported upper shards`);
+  }
 });

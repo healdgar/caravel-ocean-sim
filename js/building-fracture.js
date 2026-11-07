@@ -815,21 +815,32 @@ function exposeNeighbours(state, shard) {
 
 // A piece leaves. It lands on whatever is beneath the place it comes down, lying more or less flat, and
 // it stays there. Timber over water floats a while instead, then is gone.
-function releaseShard(state, s, now, { direction = null, power = 1, up = 1, drop = false, delay = 0 } = {}) {
+function releaseShard(state, s, now, { direction = null, power = 1, proximity = 0.7, up = 1, drop = false, delay = 0 } = {}) {
   const fracture = state.fracture, shard = fracture.shards[s];
   if (!shard || !breakBuildingShard(state, s)) return false;
   exposeNeighbours(state, shard);
   const a = blockNoise(s, 1), b = blockNoise(s, 2), c = blockNoise(s, 3);
   const out = direction ?? shard.normal, pivot = shard.centroid;
+  const effVol = Math.max(0.03, (shard.volume ?? 0.25) * (shard.timber ? 0.45 : 1));
+  const massScale = Math.min(2.6, Math.max(0.75, 0.85 / Math.cbrt(effVol)));
+  const proxScale = 0.45 + 0.85 * Math.max(0, Math.min(1, proximity));
+  const impulse = power * massScale * proxScale;
   const velocity = drop
     ? [out[0] * (0.2 + 0.7 * a) + (b - 0.5) * 0.5, 0, out[2] * (0.2 + 0.7 * a) + (c - 0.5) * 0.5]
-    : [out[0] * (0.5 + 1.8 * a) * power + (b - 0.5) * 1.4, (0.3 + 1.6 * b) * up * power, out[2] * (0.5 + 1.8 * a) * power + (c - 0.5) * 1.4];
+    : [
+        out[0] * (3.8 + 5.6 * a) * impulse + (b - 0.5) * 2.2,
+        (2.4 + 4.2 * b) * up * impulse,
+        out[2] * (3.8 + 5.6 * a) * impulse + (c - 0.5) * 2.2,
+      ];
   // Turn about a level axis across the way it goes. A block off a wall lands on its broad face, a quarter or
   // three quarters of a turn over. A slab of roof or floor stays about as flat as it was. All a little off true.
   const across = unitOf(crossOf([0, 1, 0], [out[0] || 1e-3, 0, out[2]])), tilt = (a - 0.5) * 0.32;
   const axis = unitOf([across[0] + tilt * 0.5, tilt, across[2] - tilt * 0.5]);
   const flat = Math.abs(shard.normal[1]) > 0.5, off = (c - 0.5) * 0.7;
-  const angle = (flat ? (b > 0.72 ? Math.PI : 0) : (b > 0.72 ? 1.5 * Math.PI : 0.5 * Math.PI)) + off;
+  const turns = drop
+    ? (flat ? (b > 0.72 ? Math.PI : 0) : (b > 0.72 ? 1.5 * Math.PI : 0.5 * Math.PI))
+    : (flat ? (1 + Math.floor(b * 3)) * Math.PI : (1.5 + Math.floor(b * 3)) * Math.PI);
+  const angle = turns + off;
   const half = restHeight(fracture, shard, axis, angle);
   const bury = Math.min(0.05, half * 0.15);
   // It comes down about here. Then it rolls off whatever heap is already there, down to the angle of repose.
@@ -914,7 +925,7 @@ function strikeBuilding(state, point, normal, { radius, amount, power, now, drop
     state.scorchDirty = true;
     if (state.wear[s] < 1) continue;
     const away = radial ? unitOf(vectorBetween(shard.centroid, point)) : dotOf(shard.normal, normal) > -0.25 ? shard.normal : normal;
-    if (releaseShard(state, s, now, { direction: away, power, drop, delay: drop ? 0.03 + 0.35 * blockNoise(s, 8) : 0 })) broke++;
+    if (releaseShard(state, s, now, { direction: away, power, proximity: fall, drop, delay: drop ? 0.03 + 0.35 * blockNoise(s, 8) : 0 })) broke++;
   }
   return broke;
 }

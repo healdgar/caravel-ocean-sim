@@ -14,9 +14,10 @@ before(async()=>{
 after(async()=>{await browser?.close();server?.closeAllConnections?.();server?.close();});
 
 const instrument=()=>{
-  const pass=GPURenderPassEncoder.prototype,pipelines=new WeakMap();window.propDraws=[];window.propCapture=false;window.propErrors=[];
+  const pass=GPURenderPassEncoder.prototype,pipelines=new WeakMap();window.propDraws=[];window.fracturedDraws=[];window.propCapture=false;window.propErrors=[];
   const setPipeline=pass.setPipeline;pass.setPipeline=function(p){pipelines.set(this,p.label||'');return setPipeline.call(this,p);};
   const indirect=pass.drawIndexedIndirect;pass.drawIndexedIndirect=function(b,o){if(window.propCapture&&pipelines.get(this)==='props')propDraws.push({buffer:b,offset:o});return indirect.call(this,b,o);};
+  const indexed=pass.drawIndexed;pass.drawIndexed=function(...a){if(window.propCapture&&pipelines.get(this)==='props fractured')fracturedDraws.push(a[0]);return indexed.apply(this,a);};
   const createBuffer=GPUDevice.prototype.createBuffer;
   GPUDevice.prototype.createBuffer=function(d){return createBuffer.call(this,/prop draws/.test(d.label||'')?{...d,usage:d.usage|GPUBufferUsage.COPY_SRC}:d);};
   const request=GPUAdapter.prototype.requestDevice;GPUAdapter.prototype.requestDevice=async function(...a){const device=await request.apply(this,a);device.addEventListener('uncapturederror',e=>propErrors.push(e.error.message));return window.propDevice=device;};
@@ -24,14 +25,14 @@ const instrument=()=>{
   GPUQueue.prototype.writeBuffer=function(b,...rest){if(window.propCapture&&/^prop/.test(b.label||''))propUploads.push(b.label);return write.call(this,b,...rest);};
 };
 const shown=page=>page.evaluate(async()=>{
-  propDraws.length=0;propUploads.length=0;propCapture=true;
+  propDraws.length=0;fracturedDraws.length=0;propUploads.length=0;propCapture=true;
   await new Promise(requestAnimationFrame);await new Promise(requestAnimationFrame);propCapture=false;
-  if(!propDraws.length)return {drawn:[],draws:0,uploads:[...propUploads]};
+  if(!propDraws.length)return {drawn:[],draws:0,fractured:fracturedDraws.length,uploads:[...propUploads]};
   const buffer=propDraws[0].buffer,read=propDevice.createBuffer({size:buffer.size,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),encoder=propDevice.createCommandEncoder();
   encoder.copyBufferToBuffer(buffer,0,read,0,buffer.size);propDevice.queue.submit([encoder.finish()]);await read.mapAsync(GPUMapMode.READ);
   const words=new Uint32Array(read.getMappedRange().slice(0));read.unmap();read.destroy();
   const drawn=[];for(let m=0;m*20<buffer.size;m++)drawn.push(words[m*5+1]);
-  return {drawn,draws:propDraws.length,uploads:[...propUploads]};
+  return {drawn,draws:propDraws.length,fractured:fracturedDraws.length,uploads:[...propUploads]};
 });
 async function open(cam){
   const url=coastalRegionStageURL(base,'lisbon','dock','clear',1650);
@@ -78,4 +79,44 @@ test('a ruined pier takes its cleats with it',{timeout:300000},async t=>{
   await page.waitForTimeout(1200);
   const after=await shown(page);
   assert.equal(after.drawn[0],0,`cleats before ${before.drawn[0]}, after ${after.drawn[0]}`);
+});
+
+test('a cannonball striking a beach jetty retires its intact instance and renders its fractured timber shards on the GPU',{timeout:300000},async t=>{
+  const {page,errors}=await open('5,70,-5760,0,-14');
+  t.after(()=>page.close());
+  const before=await shown(page);
+  assert.equal(before.fractured,0,'no fractured prop draws before cannonfire');
+
+  const strike=await page.evaluate(async()=>{
+    const {applyJettyImpactDamage,jettyLocalToWorld}=await import('/js/port-props.js');
+    const {port,placed,models}=oceanProps;
+    const jetty=placed.find(p=>p.model>0)??placed[0];
+    const model=models[jetty.model];
+    const shard=jetty.fracture.shards.find(s=>s.tier===2)??jetty.fracture.shards[0];
+    const worldHit=jettyLocalToWorld(jetty,shard.center[0],shard.center[1],shard.center[2],model);
+    const report=applyJettyImpactDamage(jetty,{
+      shardId:shard.id,
+      localPosition:[...shard.center],
+      position:worldHit,
+      surfacePosition:worldHit,
+      velocity:[320,-10,0],
+      mass:10.9,
+      energy:550000,
+      ammo:'round',
+    },{port});
+    return {
+      modelIndex:jetty.model,
+      released:report?.releasedShards.length??0,
+      collapsed:report?.collapsedShards.length??0,
+      aliveCount:jetty.fracture.aliveCount,
+    };
+  });
+
+  assert.ok(strike.released>0,`cannonball released ${strike.released} shards`);
+  await page.waitForTimeout(150);
+  const after=await shown(page);
+  assert.ok(after.fractured>0,`fractured prop pipeline drew ${after.fractured} times over two frames`);
+  assert.equal(await page.evaluate(()=>oceanProps.fracturedCount),1);
+  assert.deepEqual(await page.evaluate(()=>propErrors),[]);
+  assert.deepEqual(errors,[]);
 });
