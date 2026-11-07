@@ -402,7 +402,7 @@ function fellCrewBody({ sailor: s, direction, speed = 3 }, killed, wounded, ammo
 // Oak splinters fly from where a shot breaks through or strikes a bulwark, and only
 // hurt those close by.
 function woundCrewBySplinters(targetBoat, damage, localPos, energy, ammo) {
-  const counts = { killed: 0, wounded: 0 };
+  const counts = { killed: 0, wounded: 0, sex: null };
   const crew = targetBoat.crewCompany?.crew;
   if (!Array.isArray(crew) || !localPos) return counts;
   const reach = Math.min(3.2, 1.2 + Math.sqrt(energy / 500000) * 1.4);
@@ -417,13 +417,14 @@ function woundCrewBySplinters(targetBoat, damage, localPos, energy, ammo) {
     const killed = roll < chance * 0.25;
     fellCrewBody({ sailor: s, direction: [dx, dy, dz], speed: 2.3 * (1 - distance / reach) + 0.4 }, killed, !killed, ammo);
     if (killed) counts.killed++; else counts.wounded++;
+    if (!counts.sex && s.sex) counts.sex = s.sex;
     recordCrewWound(s, 'splinter', [s.position[0] - dx * 0.4, s.position[1] + 0.9 - dy * 0.4, s.position[2] - dz * 0.4], [dx, dy, dz], (roll * 7.3890560989) % 1);
   }
   return counts;
 }
 
 // A ball goes straight through whoever it meets and flies on. It kills outright.
-function strikeSoldierWithBall(hit, projectile) {
+function strikeSoldierWithBall(hit, projectile, port = null) {
   const struck = (projectile.struckBodies ??= new Set());
   if (struck.has(hit.sailor)) return;
   struck.add(hit.sailor);
@@ -431,6 +432,14 @@ function strikeSoldierWithBall(hit, projectile) {
   if (0.5 * (projectile.mass ?? 1) * speed * speed < 200) return;
   hit.sailor.casualtyState = 'fallen';
   hit.sailor._poseReady = false;
+  if (port?.garrison) {
+    (port.garrison.audioEvents ??= []).push({
+      type: 'casualty-scream',
+      sex: hit.sailor.sex ?? 'male',
+      cause: 'ball',
+      position: hit.point ?? [hit.sailor.x ?? 0, hit.sailor.y ?? 2, hit.sailor.z ?? 0],
+    });
+  }
 }
 
 function strikeCrewBodyWithBall(targetBoat, hit, projectile, direction) {
@@ -464,6 +473,7 @@ export function applyCrewCasualtiesAndMorale(targetBoat, event = {}, context = {
 
   let newKilled = 0;
   let newWounded = 0;
+  let casualtySex = context.struck?.sailor?.sex ?? null;
   if (context.casualties) {
     newKilled = Math.min(c.able, context.casualties.killed ?? 0);
     newWounded = Math.min(c.able - newKilled, context.casualties.wounded ?? 0);
@@ -492,11 +502,17 @@ export function applyCrewCasualtiesAndMorale(targetBoat, event = {}, context = {
       const splintered = woundCrewBySplinters(targetBoat, damage, context.localPos, energy, ammo);
       newKilled = Math.min(c.able, newKilled + splintered.killed);
       newWounded = Math.min(c.able - newKilled, newWounded + splintered.wounded);
+      if (!casualtySex && splintered.sex) casualtySex = splintered.sex;
     }
     // One shot strikes one part of the ship: however heavy, it cannot reach the whole company.
     const perHitLimit = Math.max(2, Math.ceil(c.total * 0.3));
     newKilled = Math.min(newKilled, perHitLimit);
     newWounded = Math.min(newWounded, perHitLimit - newKilled);
+  }
+  if (!casualtySex && (newKilled > 0 || newWounded > 0)) {
+    const crew = Array.isArray(targetBoat.crewCompany?.crew) ? targetBoat.crewCompany.crew : [];
+    const femalePresent = crew.some((s) => s.sex === 'female');
+    casualtySex = femalePresent && ((damage.hits ?? 1) % 2 === 0) ? 'female' : 'male';
   }
 
   c.killed += newKilled;
@@ -590,6 +606,7 @@ export function applyCrewCasualtiesAndMorale(targetBoat, event = {}, context = {
   c.lastCasualties = {
     killed: newKilled,
     wounded: newWounded,
+    sex: casualtySex ?? 'male',
     cause,
     ammo,
     ableRemaining: c.able,
@@ -597,6 +614,16 @@ export function applyCrewCasualtiesAndMorale(targetBoat, event = {}, context = {
     battleMorale: damage.battleMorale,
     moraleState: damage.moraleState,
   };
+  if ((newKilled > 0 || newWounded > 0) && typeof targetBoat.crewEvents === 'function') {
+    targetBoat.crewEvents({
+      type: 'casualty-scream',
+      sex: casualtySex ?? 'male',
+      killed: newKilled,
+      wounded: newWounded,
+      cause,
+      position: [targetBoat.x ?? 0, (targetBoat.heave ?? 0) + 2, targetBoat.z ?? 0],
+    });
+  }
 
   // Automatic surrender when battle morale breaks or the crew is decimated under heavy damage (AI/non-player vessels, or if autoSurrender !== false).
   if (
@@ -1142,6 +1169,8 @@ export function applyArrowImpact(targetBoat, event) {
     hitZone,
     struck: event.sailor ? { sailor: event.sailor, direction: vesselWorldToLocalVector(targetBoat, event.velocity ?? [0, 0, 1]), speed: 0.5 } : null,
   });
+  event.casualties = (casualties?.killed ?? 0) + (casualties?.wounded ?? 0);
+  event.sex = event.sailor?.sex ?? casualties?.sex ?? 'male';
   const localPos = event.localPosition ?? vesselWorldToLocal(targetBoat, event.surfacePosition ?? event.position ?? [targetBoat.x ?? 0, 1, targetBoat.z ?? 0]);
   const catchChance = event.ammo !== 'fire-arrow' || event.waterline ? 0 : hitZone === 'rigging' ? 0.55 : 0.28;
   const fireRoll = (roll * 7.3890560989) % 1;
@@ -1884,11 +1913,13 @@ export function applyShipImpactDamage(targetBoat, event) {
   // Stage 4: Progressive mast structural collapse (topmast shot away -> full mast dismasted by the board).
   const hitSide = designPt ? (designPt[0] >= 0 ? 1 : -1) : 1;
   damage.mastState ??= { fore: 0, main: 0, mizzen: 0 };
+  let mastSpring = false, mastSnap = false;
   for (const [mGroup, mastZ, topPivotY, fullPivotY] of mastSpecs) {
     const mInt = damage.mastIntegrity[mGroup] ?? 1;
     const prevStage = damage.mastState[mGroup] ?? 0;
     if (mInt <= 0.62 && prevStage < 1) {
       damage.mastState[mGroup] = 1;
+      mastSpring = true;
       queueMastBreak(damage, {
         kind: 'mast-break',
         modelId,
@@ -1901,6 +1932,7 @@ export function applyShipImpactDamage(targetBoat, event) {
     }
     if (mInt <= 0.24 && prevStage < 2) {
       damage.mastState[mGroup] = 2;
+      mastSnap = true;
       const sailKey = mGroup === 'fore' ? 'sailFore' : mGroup === 'mizzen' ? 'sailMizzen' : 'sailMain';
       if (typeof targetBoat[sailKey] === 'number') targetBoat[sailKey] = 0;
       queueMastBreak(damage, {
@@ -1930,6 +1962,19 @@ export function applyShipImpactDamage(targetBoat, event) {
     },
   );
   const c = damage.crewCasualties;
+  event.casualties = (casualties?.killed ?? 0) + (casualties?.wounded ?? 0);
+  event.sex = casualties?.sex ?? 'male';
+  event.mastSnap = mastSnap;
+  event.mastSpring = mastSpring;
+  event.timberCrumble = event.hitZone !== 'rigging';
+  if ((mastSnap || mastSpring) && typeof targetBoat.crewEvents === 'function') {
+    targetBoat.crewEvents({
+      type: 'mast-snap',
+      mastGroup: event.mastGroup ?? 'main',
+      stage: mastSnap ? 'full' : 'topmast',
+      position: pos,
+    });
+  }
 
   const mag = targetBoat.magazine ?? damage.magazine;
   const report = {
@@ -3118,6 +3163,9 @@ export function applyBuildingImpactDamage(building, event) {
   }
 
   d.revision = (d.revision ?? 0) + 1;
+  event.materialClass = materialClass;
+  event.collapsed = Boolean(emittedCollapseThisHit || d.state === 'ruined');
+  event.breached = Boolean(penetratedOuter);
   const bName = building.label ?? building.prefabId;
   const report = {
     kind: 'building',
@@ -3126,6 +3174,7 @@ export function applyBuildingImpactDamage(building, event) {
     targetName: bName,
     prefabId: building.prefabId,
     materialClass,
+    collapsed: Boolean(emittedCollapseThisHit || d.state === 'ruined'),
     ammo,
     hitPartId,
     hitSubAssembly,
@@ -3603,8 +3652,22 @@ export function createPortGunnery(port, { onEvent = () => {}, getVessels = () =>
           }
           if (nearestBoat && nearestDist <= returnFireRange) {
             // Only those in range: a fort at the mouth has no shot at a ship off the town.
+            let firedAny = 0, voiceBattery = null;
             for (const b of batteries) {
-              if (Math.hypot((nearestBoat.x ?? 0) - (b.building.x ?? 0), (nearestBoat.z ?? 0) - (b.building.z ?? 0)) <= returnFireRange) b.fireAtTarget(nearestBoat);
+              if (Math.hypot((nearestBoat.x ?? 0) - (b.building.x ?? 0), (nearestBoat.z ?? 0) - (b.building.z ?? 0)) <= returnFireRange) {
+                const q = b.fireAtTarget(nearestBoat);
+                if (q > 0) {
+                  firedAny += q;
+                  if (!voiceBattery) voiceBattery = b.building;
+                }
+              }
+            }
+            if (firedAny > 0 && voiceBattery) {
+              onEvent({
+                type: 'enemy-voice',
+                action: 'fire',
+                position: [voiceBattery.x ?? 0, (voiceBattery.baseY ?? voiceBattery.y ?? 0) + (voiceBattery.height ?? 6), voiceBattery.z ?? 0],
+              });
             }
             cooldown = 9.5;
           } else {
@@ -3747,7 +3810,9 @@ export function applySceneryImpactDamage(terrain, event) {
     const record = { position: [...pos], normal: [...normal], sceneryType: event.sceneryType ?? 'tree', energyKj: +(energy / 1000).toFixed(1), craterRadius, time: event.time ?? 0 };
     if (terrain.sceneryImpacts.length >= 64) terrain.sceneryImpacts.shift();
     terrain.sceneryImpacts.push(record);
-    return { kind: 'scenery', sceneryType: record.sceneryType, hitCount: terrain.sceneryImpacts.length, craterRadius, energyKj: record.energyKj };
+    event.materialClass = 'timber';
+    event.felled = true;
+    return { kind: 'scenery', sceneryType: record.sceneryType, hitCount: terrain.sceneryImpacts.length, craterRadius, energyKj: record.energyKj, felled: true };
   }
   const bake = {
     kind: 'scenery-tree',
@@ -3761,6 +3826,7 @@ export function applySceneryImpactDamage(terrain, event) {
     stepDepth: +(Math.min(1.6, Math.max(0.55, craterRadius * 0.95))).toFixed(3),
     severity: +(Math.min(1.4, Math.max(0.65, craterRadius * 1.1))).toFixed(3),
   };
+  let palmFelled = false;
   if (event.port) {
     event.port.sceneryBakes ??= [];
     event.port.sceneryBakes.push(bake);
@@ -3768,7 +3834,10 @@ export function applySceneryImpactDamage(terrain, event) {
       event.port.damagedPalms ??= {};
       event.port.damagedPalms[event.palmIndex] = (event.port.damagedPalms[event.palmIndex] ?? 0) + 1;
       // Downed, for what a later ball can meet.
-      if (event.port.damagedPalms[event.palmIndex] >= PALM_FELLED_AT) event.port.palmGrid = null;
+      if (event.port.damagedPalms[event.palmIndex] >= PALM_FELLED_AT) {
+        event.port.palmGrid = null;
+        palmFelled = true;
+      }
       if (Array.isArray(event.port.palms) && typeof event.port.palms[event.palmIndex] === 'object' && event.port.palms[event.palmIndex]) {
         event.port.palms[event.palmIndex].damaged = (event.port.palms[event.palmIndex].damaged ?? 0) + 1;
       }
@@ -3796,12 +3865,15 @@ export function applySceneryImpactDamage(terrain, event) {
   };
   if (terrain.sceneryImpacts.length >= 64) terrain.sceneryImpacts.shift();
   terrain.sceneryImpacts.push(record);
+  event.materialClass = 'timber';
+  event.felled = palmFelled;
   return {
     kind: 'scenery',
     sceneryType: record.sceneryType,
     hitCount: terrain.sceneryImpacts.length,
     craterRadius,
     energyKj: record.energyKj,
+    felled: palmFelled,
   };
 }
 
@@ -4014,7 +4086,7 @@ export function createGunnerySolidSweep({ sourceBoat, sourceBuilding = null, get
           if (!soldiers?.length) continue;
           const reach = Math.max(400, (port.reach ?? 0) + 60) + Math.hypot(to[0] - from[0], to[2] - from[2]), mx = (from[0] + to[0]) * 0.5, mz = (from[2] + to[2]) * 0.5;
           if (Math.hypot(mx - (port.center?.x ?? mx), mz - (port.center?.z ?? mz)) > reach) continue;
-          for (const hit of sweepCrewBodies(from, to, radius, soldiers, best?.fraction ?? 1)) strikeSoldierWithBall(hit, projectile);
+          for (const hit of sweepCrewBodies(from, to, radius, soldiers, best?.fraction ?? 1)) strikeSoldierWithBall(hit, projectile, port);
         }
       }
     }

@@ -1329,6 +1329,141 @@
     "bytes": 17842,
     "sha256": "80d34d7d222a5ab206874dbe821bc78e36d8c1f5b14408d69dcf220cb6e986b0"
   },
+  "assets/audio/world/scream-male.mp3": {
+    "url": "assets/audio/world/scream-male.8830e8944cc71d08.mp3",
+    "bytes": 19408,
+    "sha256": "8830e8944cc71d08ffd88d0179531c1652fb666dd592afeb382c17fa4807b43d"
+  },
+  "assets/audio/world/scream-female.mp3": {
+    "url": "assets/audio/world/scream-female.aee060f8971cac8c.mp3",
+    "bytes": 21792,
+    "sha256": "aee060f8971cac8c5dd6fd9c447680ed9efc13955717d738ca4fdfa37553c163"
+  },
+  "assets/audio/world/scream-overboard.mp3": {
+    "url": "assets/audio/world/scream-overboard.8c0b964804c73396.mp3",
+    "bytes": 20838,
+    "sha256": "8c0b964804c73396df74b7f233e3de434111330b0ae459c5e6b2e145dd0df625"
+  },
+  "assets/audio/world/crowd-panic.mp3": {
+    "url": "assets/audio/world/crowd-panic.931b1ad25a860af6.mp3",
+    "bytes": 27189,
+    "sha256": "931b1ad25a860af62d7f04988710079a713355345952b0c30892b1c542ea4890"
+  },
+  "assets/audio/world/timber-crumble.mp3": {
+    "url": "assets/audio/world/timber-crumble.6977e463a053a221.mp3",
+    "bytes": 17297,
+    "sha256": "6977e463a053a2215aae8651582882bfe6bbd708c60b9a97c8b70fa8f99fbcbe"
+  },
+  "assets/audio/world/stone-crumble.mp3": {
+    "url": "assets/audio/world/stone-crumble.a8d196d4db9cf807.mp3",
+    "bytes": 25474,
+    "sha256": "a8d196d4db9cf807273a5b0b69a2304108cba8164f51c4880f4cbc189d6e7f4b"
+  },
+  "assets/audio/world/mast-snap.mp3": {
+    "url": "assets/audio/world/mast-snap.3fea60d977266d3d.mp3",
+    "bytes": 28008,
+    "sha256": "3fea60d977266d3de440e000d9a37de51ae8aa1e438b3d3972d4c1e960197738"
+  },
+  "assets/audio/world/water-bubble.mp3": {
+    "url": "assets/audio/world/water-bubble.fb2019d95051a3d6.mp3",
+    "bytes": 18299,
+    "sha256": "fb2019d95051a3d6914b0afd868f2c444f5543f2f47b8922e9b6e0d073733470"
+  },
+  "assets/audio/world/shore-surf.mp3": {
+    "url": "assets/audio/world/shore-surf.0a3f96405cef5341.mp3",
+    "bytes": 64865,
+    "sha256": "0a3f96405cef5341f60ee52655e96feb94db27a66b0090c6a0e115cd68567c61"
+  },
+  "assets/audio/world/shore-birds.mp3": {
+    "url": "assets/audio/world/shore-birds.1c9a6356c276c5f2.mp3",
+    "bytes": 31330,
+    "sha256": "1c9a6356c276c5f229959e1cae5ac11acf7fa423c3d64cc411c6a9414c0d2465"
+  },
+  "assets/audio/world/town-ambience.mp3": {
+    "url": "assets/audio/world/town-ambience.83d3e37e3c2a22a7.mp3",
+    "bytes": 51293,
+    "sha256": "83d3e37e3c2a22a754b88d2927e6979173aa0dcfd36f29eb7289710947a4cd2c"
+  },
+  "assets/audio/world/footstep-deck.mp3": {
+    "url": "assets/audio/world/footstep-deck.e304e81848d3960a.mp3",
+    "bytes": 5436,
+    "sha256": "e304e81848d3960a30675678252c240febb65c16181849c3b9862d3bb63d355d"
+  },
+  "assets/audio/world/footstep-ground.mp3": {
+    "url": "assets/audio/world/footstep-ground.340304571259f877.mp3",
+    "bytes": 5042,
+    "sha256": "340304571259f877d9d7a9a5b0933f01c028470a7df6553400217ce91deea2ef"
+  },
+  "assets/audio/world/bow-release.mp3": {
+    "url": "assets/audio/world/bow-release.c058a1cba216441c.mp3",
+    "bytes": 5300,
+    "sha256": "c058a1cba216441c9c1286265f4d31fbc9703748cc4ce7e074b4cabde4dfaccc"
+  },
+  "assets/audio/world/oar-stroke.mp3": {
+    "url": "assets/audio/world/oar-stroke.e168ea9c61bffadb.mp3",
+    "bytes": 13455,
+    "sha256": "e168ea9c61bffadb0ef5fa386efed016310c3e3be2afbf6019e68eabef26f5c5"
+  },
+  "assets/audio/world/sail-luff.mp3": {
+    "url": "assets/audio/world/sail-luff.e96c9ab4bbbe1cce.mp3",
+    "bytes": 19174,
+    "sha256": "e96c9ab4bbbe1cce2b38ef194c35eea836e569a9720d89b2cca5809e3908822a"
+  },
+  "assets/audio/world/enemy-fire-order.mp3": {
+    "url": "assets/audio/world/enemy-fire-order.6b565256fc4432d3.mp3",
+    "bytes": 26966,
+    "sha256": "6b565256fc4432d365c794af5ef227bc0ffc311d43be30b5bb5ce38998197029"
+  },
+  "assets/audio/world/enemy-boarding-cry.mp3": {
+    "url": "assets/audio/world/enemy-boarding-cry.eb6418d665a4b3d7.mp3",
+    "bytes": 23360,
+    "sha256": "eb6418d665a4b3d7b1c0ce221b1ce07f5f0d8cdf69b0c2c555ca3c00251e5c8e"
+  },
+  "assets/audio/world/enemy-surrender-cry.mp3": {
+    "url": "assets/audio/world/enemy-surrender-cry.e8618fe5ed28671f.mp3",
+    "bytes": 24252,
+    "sha256": "e8618fe5ed28671fd169e346ed0bb35f042b02632b74e382e670ee6fd72b1d4a"
+  },
+  "assets/audio/world/indigenous-taino.mp3": {
+    "url": "assets/audio/world/indigenous-taino.5d9a76f1a2fb7a41.mp3",
+    "bytes": 22846,
+    "sha256": "5d9a76f1a2fb7a418b3915611aeb8b2dababdae25d6f0dfe903aa89f710281a8"
+  },
+  "assets/audio/world/indigenous-kalinago.mp3": {
+    "url": "assets/audio/world/indigenous-kalinago.9b2ba41579f04818.mp3",
+    "bytes": 28509,
+    "sha256": "9b2ba41579f04818f6a39a02993dccfe0e3714750dc549ef18496a5f55d2b8cb"
+  },
+  "assets/audio/world/indigenous-algonquian.mp3": {
+    "url": "assets/audio/world/indigenous-algonquian.71e140df35b4b888.mp3",
+    "bytes": 22525,
+    "sha256": "71e140df35b4b8880f31726b76c850d8feed2fc23b926e13a443174178d6e9c6"
+  },
+  "assets/audio/world/indigenous-tupinamba.mp3": {
+    "url": "assets/audio/world/indigenous-tupinamba.3107cce6a98dfb6b.mp3",
+    "bytes": 26730,
+    "sha256": "3107cce6a98dfb6b35818e5206068b2439b9e4a00c97daae5a9610b044923a91"
+  },
+  "assets/audio/world/indigenous-maya.mp3": {
+    "url": "assets/audio/world/indigenous-maya.d5cce562c2b5e7ae.mp3",
+    "bytes": 23277,
+    "sha256": "d5cce562c2b5e7ae40daf5ea32b3a3bf6272bf69b0f63903bfeaed92a0e48166"
+  },
+  "assets/audio/world/lookout-sail-ho.mp3": {
+    "url": "assets/audio/world/lookout-sail-ho.c2daa66a1c045cf1.mp3",
+    "bytes": 23467,
+    "sha256": "c2daa66a1c045cf1303a0eff2f1f80920699b1f36fb4393efe284b055ad9d269"
+  },
+  "assets/audio/world/lookout-land-ho.mp3": {
+    "url": "assets/audio/world/lookout-land-ho.50a03f67316dd98b.mp3",
+    "bytes": 25132,
+    "sha256": "50a03f67316dd98b7f23efe08475f5690f71d9a4c5c46f65b89bab69fae644f9"
+  },
+  "assets/audio/world/lookout-whale-ho.mp3": {
+    "url": "assets/audio/world/lookout-whale-ho.081979dfe0ee591d.mp3",
+    "bytes": 24168,
+    "sha256": "081979dfe0ee591df8dd4b1e52de3073c48df3bafa6baf385fd93bed3136c75c"
+  },
   "assets/caravel-oak-albedo.webp": {
     "url": "assets/caravel-oak-albedo.984a2b77f5f56053.webp",
     "bytes": 560816,

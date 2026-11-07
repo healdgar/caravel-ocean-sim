@@ -2,24 +2,348 @@ import { SOUND_ASSETS } from './audio-assets.js';
 import { VOICE_ASSETS, CREW_VOICES } from './voice-assets.js';
 import { createVoiceDirector } from './voice-lines.js';
 import { GUNNERY_AUDIO_ASSETS } from './gunnery-audio-assets.js';
+import { WORLD_AUDIO_ASSETS } from './world-audio-assets.js';
 import { createGunneryAudio } from './gunnery-audio.js';
 import { weatherClamp, weatherAudioLevels, createHullAudioState, createTimberAudioState } from './weather-state.js';
 
-const ALL_SOUNDS={...SOUND_ASSETS,...VOICE_ASSETS,...GUNNERY_AUDIO_ASSETS};
+const ALL_SOUNDS={...SOUND_ASSETS,...VOICE_ASSETS,...GUNNERY_AUDIO_ASSETS,...WORLD_AUDIO_ASSETS};
+
+export function indigenousVoiceClipForCulture(cultureId=''){
+  const id=String(cultureId??'').toLowerCase();
+  if(id.includes('kalinago')||id.includes('lesser-antilles'))return 'indigenous-kalinago';
+  if(id.includes('algonquian')||id.includes('abenaki')||id.includes('powhatan')||id.includes('mid-atlantic'))return 'indigenous-algonquian';
+  if(id.includes('tupinamba')||id.includes('tupi')||id.includes('brazil')||id.includes('guiana'))return 'indigenous-tupinamba';
+  if(id.includes('maya')||id.includes('mesoamerica')||id.includes('yucatan'))return 'indigenous-maya';
+  return 'indigenous-taino';
+}
+
+export function probeShorelineSurf(arg1,arg2,settings={},weather={}){
+  const isFirstTerrain=Boolean(arg1&&(typeof arg1.height==='function'||typeof arg1.heightAt==='function'||Array.isArray(arg1.ports)||arg1.port));
+  const listener=isFirstTerrain?arg2:arg1;
+  const terrain=isFirstTerrain?arg1:arg2;
+  if(!listener||!terrain)return {active:false,nearShore:false,distance:Infinity,shoreDistance:Infinity,gain:0,lapGain:0,pan:0,rate:1,breakerIntensity:0,shorePosition:null};
+  const sampleH=typeof terrain.heightAt==='function'
+    ?(x,z)=>terrain.heightAt(x,z)
+    :typeof terrain.height==='function'
+      ?(x,z)=>terrain.height(x,z)
+      :null;
+  let bestDist=Infinity,bestX=listener.x,bestZ=listener.z,slope=0.15;
+  if(sampleH){
+    const h0=Number(sampleH(listener.x,listener.z));
+    const distances=[8,18,36,68,115,175,250];
+    const dirs=8;
+    for(let i=0;i<dirs;i++){
+      const angle=(i*Math.PI*2)/dirs;
+      const dx=Math.cos(angle),dz=Math.sin(angle);
+      let prevD=0,prevH=Number.isFinite(h0)?h0:-10;
+      for(const d of distances){
+        const x=listener.x+dx*d,z=listener.z+dz*d;
+        const h=Number(sampleH(x,z));
+        if(!Number.isFinite(h))continue;
+        const crossesShore=(prevH<=0.35&&h>=-0.45)||(prevH>=-0.45&&h<=0.35)||(h>-0.6&&h<4.5);
+        if(crossesShore&&d<bestDist){
+          const frac=prevH!==h?weatherClamp((0-prevH)/(h-prevH),0,1):0.5;
+          bestDist=prevD+(d-prevD)*frac;
+          bestX=listener.x+dx*bestDist;
+          bestZ=listener.z+dz*bestDist;
+          slope=Math.abs(h-prevH)/Math.max(1,d-prevD);
+          break;
+        }
+        prevD=d;prevH=h;
+      }
+    }
+  }
+  const ports=Array.isArray(terrain.ports)?terrain.ports:terrain.port?[terrain.port]:[];
+  for(const port of ports){
+    const px=port?.harbourX??port?.x??port?.center?.x??port?.center?.[0],pz=port?.harbourZ??port?.z??port?.center?.z??port?.center?.[1];
+    if(!Number.isFinite(px)||!Number.isFinite(pz))continue;
+    const d=Math.hypot(px-listener.x,pz-listener.z);
+    if(d<bestDist){bestDist=d;bestX=px;bestZ=pz;}
+  }
+  if(!Number.isFinite(bestDist)||bestDist>260){
+    return {active:false,nearShore:false,distance:Infinity,shoreDistance:Infinity,gain:0,lapGain:0,pan:0,rate:1,breakerIntensity:0,shorePosition:null};
+  }
+  const wind=Number.isFinite(settings.windSpeed)?settings.windSpeed:6;
+  const swell=Number.isFinite(settings.swellHs)?settings.swellHs:Number.isFinite(settings.swell1Height)?settings.swell1Height:0.6;
+  const storm=Number.isFinite(weather?.intensity)?weather.intensity:0;
+  const breakerIntensity=weatherClamp((wind/18)*0.45+(swell/2.4)*0.35+storm*0.25+Math.min(0.2,slope*0.5),0.12,1);
+  const atten=1/(1+Math.max(0,bestDist-10)/58);
+  const gain=weatherClamp((0.09+breakerIntensity*0.24)*atten,0,0.34);
+  const dx=bestX-listener.x,dz=bestZ-listener.z,horiz=Math.hypot(dx,dz)||1;
+  const rx=Number.isFinite(listener.rx)?listener.rx:Number.isFinite(listener.rightX)?listener.rightX:1;
+  const rz=Number.isFinite(listener.rz)?listener.rz:Number.isFinite(listener.rightZ)?listener.rightZ:0;
+  const pan=weatherClamp((dx*rx+dz*rz)/horiz,-1,1)*0.82;
+  const rate=weatherClamp(1.12-breakerIntensity*0.24,0.84,1.14);
+  const active=gain>0.008;
+  return {active,nearShore:active,distance:bestDist,shoreDistance:bestDist,gain,lapGain:gain,pan,rate,breakerIntensity,shorePosition:{x:bestX,y:0,z:bestZ}};
+}
+
+export function computeTownAmbienceState(arg1,arg2,arg3={}){
+  const isFirstPorts=Array.isArray(arg1)||Boolean(arg1&&(Array.isArray(arg1.ports)||arg1.port));
+  const listener=isFirstPorts?arg2:arg1;
+  const terrain=isFirstPorts?arg1:arg2;
+  const opts=typeof arg3==='number'?{sunElev:arg3}:(arg3??{});
+  const sunElev=opts.sunElev??25,time=opts.time??0,underFire=Boolean(opts.underFire);
+  const ports=Array.isArray(terrain)?terrain:Array.isArray(terrain?.ports)?terrain.ports:terrain?.port?[terrain.port]:[];
+  if(!listener||!ports.length){
+    return {active:false,nearTown:false,distance:Infinity,gain:0,crowdGain:0,pan:0,underFire:false,hasIndigenous:false,cultureId:null,position:null,livingBuildings:0,livingPeople:0,dayFactor:1};
+  }
+  let nearest=null,bestDist=Infinity,bestX=0,bestZ=0;
+  for(const port of ports){
+    const px=port?.x??port?.harbourX??port?.center?.x??port?.center?.[0],pz=port?.z??port?.harbourZ??port?.center?.z??port?.center?.[1];
+    if(!Number.isFinite(px)||!Number.isFinite(pz))continue;
+    const d=Math.hypot(px-listener.x,pz-listener.z);
+    if(d<bestDist){bestDist=d;nearest=port;bestX=px;bestZ=pz;}
+  }
+  if(!nearest||bestDist>320){
+    return {active:false,nearTown:false,distance:Infinity,gain:0,crowdGain:0,pan:0,underFire:false,hasIndigenous:false,cultureId:null,position:null,livingBuildings:0,livingPeople:0,dayFactor:1};
+  }
+  const instances=Array.isArray(nearest.instances)?nearest.instances:[];
+  const livingBuildings=instances.length?instances.filter(inst=>!inst?.damage?.collapsed&&inst?.damageState?.state!=='ruined').length:12;
+  const rawPeople=nearest.streets?.people??nearest.townsfolk?.people??0;
+  const livingPeople=typeof rawPeople==='number'?rawPeople:Array.isArray(rawPeople)?rawPeople.filter(p=>p&&p.alive!==false&&!p.dead).length:0;
+  const dayFactor=sunElev>2?1:sunElev>-6?0.58:0.28;
+  const popFactor=weatherClamp(livingBuildings*0.035+Math.min(18,livingPeople)*0.025+0.22,0.15,1);
+  const attackedBuildings=instances.some(inst=>(inst?.damageState?.hits??0)>0||(inst?.damage?.hits??0)>0);
+  const portUnderFire=Boolean(underFire||(nearest.underFireUntil&&time<nearest.underFireUntil)||(nearest.streets?.underFireCount>0)||(nearest.streets?.fleeTimer>0)||(nearest.townsfolk?.fleeTimer>0)||attackedBuildings);
+  const atten=1/(1+Math.max(0,bestDist-14)/68);
+  const gain=weatherClamp(0.25*popFactor*dayFactor*atten,0,0.28);
+  const dx=bestX-listener.x,dz=bestZ-listener.z,horiz=Math.hypot(dx,dz)||1;
+  const rx=Number.isFinite(listener.rx)?listener.rx:Number.isFinite(listener.rightX)?listener.rightX:1;
+  const rz=Number.isFinite(listener.rz)?listener.rz:Number.isFinite(listener.rightZ)?listener.rightZ:0;
+  const pan=weatherClamp((dx*rx+dz*rz)/horiz,-1,1)*0.8;
+  const ind=nearest.indigenousSettlement??null;
+  const hasIndigenous=Boolean(ind||nearest.hasIndigenousSettlement||nearest.isSovereignPolity||nearest.cultureId);
+  const cultureId=ind?.cultureId??ind?.polityId??nearest.cultureId??null;
+  const active=gain>0.008&&livingBuildings>0;
+  return {
+    active,
+    nearTown:active,
+    distance:bestDist,
+    gain,
+    crowdGain:gain,
+    pan,
+    underFire:portUnderFire,
+    hasIndigenous,
+    cultureId,
+    position:{x:bestX,y:2,z:bestZ},
+    livingBuildings,
+    livingPeople,
+    dayFactor
+  };
+}
+
+export function computeHullFloodingAudioState(boat,vessels=[],listener={x:0,y:0,z:0}){
+  const list=[];
+  if(boat)list.push(boat);
+  if(Array.isArray(vessels)){
+    for(const v of vessels){
+      const ship=v?.boat??v;
+      if(ship&&!list.includes(ship))list.push(ship);
+    }
+  }
+  let inflowActive=false,inflowRate=0,inflowGain=0,inflowPosition=null,bestInflowScore=0;
+  let sinkingActive=false,sinkingIntensity=0,sinkingGain=0,sinkingPosition=null,bestSinkScore=0;
+  for(const ship of list){
+    const dmg=ship?.damage;
+    if(!dmg||dmg.settledWreck)continue;
+    const sx=ship.x??0,sy=ship.heave??0,sz=ship.z??0;
+    const d=Math.hypot(sx-listener.x,sy-(listener.y??0),sz-listener.z);
+    if(d>160)continue;
+    let holeFlow=0,hx=sx,hy=sy,hz=sz;
+    if(Array.isArray(dmg.holes)){
+      const hRad=(ship.heading??0)*Math.PI/180,sinH=Math.sin(hRad),cosH=Math.cos(hRad);
+      for(const hole of dmg.holes){
+        const f=Math.max(hole?.flow??0,(hole?.submerged??0)*0.35);
+        if(f>holeFlow){
+          holeFlow=f;
+          const lp=hole?.local??hole?.localPosition;
+          if(Array.isArray(lp)||ArrayBuffer.isView(lp)){
+            hx=sx+lp[2]*sinH+lp[0]*cosH;
+            hy=sy+(lp[1]??0);
+            hz=sz+lp[2]*cosH-lp[0]*sinH;
+          }
+        }
+      }
+    }
+    const breachFlow=Math.max(holeFlow,(dmg.waterlineBreachArea??0)*2.5,(dmg.floodingRate??0)*0.8);
+    if(breachFlow>0.015){
+      const atten=1/(1+Math.max(0,d-6)/26);
+      const score=breachFlow*atten;
+      if(score>bestInflowScore){
+        bestInflowScore=score;
+        inflowActive=true;
+        inflowRate=breachFlow;
+        inflowGain=weatherClamp((0.12+Math.min(0.22,breachFlow*0.25))*atten,0.02,0.32);
+        inflowPosition={x:hx,y:hy,z:hz};
+      }
+    }
+    const isSinking=Boolean(dmg.sunk||(dmg.sinkingDepth??0)>0.05||(dmg.floodingTonnes??0)>32||(dmg.floodingLevel??0)>0.35);
+    if(isSinking){
+      const intensity=weatherClamp(
+        (dmg.sunk?0.85:0)+Math.min(0.6,(dmg.sinkingDepth??0)/2.5)+Math.min(0.5,(dmg.floodingTonnes??0)/28)+Math.min(0.5,dmg.floodingLevel??0),
+        0.2,1
+      );
+      const atten=1/(1+Math.max(0,d-8)/42);
+      const score=intensity*atten;
+      if(score>bestSinkScore){
+        bestSinkScore=score;
+        sinkingActive=true;
+        sinkingIntensity=intensity;
+        sinkingGain=weatherClamp((0.16+intensity*0.20)*atten,0.03,0.36);
+        sinkingPosition={x:sx,y:sy,z:sz};
+      }
+    }
+  }
+  return {
+    inflowActive,
+    inflowRate,
+    holeInflow:inflowRate,
+    inflowGain,
+    inflowPosition,
+    holePosition:inflowPosition,
+    sinkingActive,
+    sinkingIntensity,
+    sinkingGain,
+    sinkingPosition,
+  };
+}
+
+export function collectFootstepEvents(arg1,arg2={}){
+  const hasMapFirst=Boolean(arg1&&typeof arg1.get==='function'&&typeof arg1.set==='function');
+  const opts=hasMapFirst?arg2:(arg1??{});
+  const walkerTracker=hasMapFirst?arg1:(opts.memory??opts.walkerTracker);
+  if(!walkerTracker||typeof walkerTracker.get!=='function')return [];
+  const {boat,crew=[],fortSoldiers=null,ports=[],listener={x:0,y:0,z:0}}=opts;
+  const time=Number.isFinite(opts.time)?opts.time:null;
+  if(time!==null&&typeof walkerTracker.get==='function'){
+    try{
+      const lastStepTime=walkerTracker.get('__lastStepTime')??-10;
+      if(time-lastStepTime<0.085)return [];
+    }catch{/* WeakMap does not accept string keys */}
+  }
+  const events=[];
+  const D2R=Math.PI/180;
+  if(boat&&Number.isFinite(boat.deckWalkX)&&Number.isFinite(boat.deckWalkZ)){
+    try{
+      const prev=walkerTracker.get(boat);
+      if(prev&&Number.isFinite(prev.x)){
+        const moved=Math.hypot(boat.deckWalkX-prev.x,boat.deckWalkZ-prev.z);
+        if(moved>=0.65){
+          const h=(boat.heading??0)*D2R,sinH=Math.sin(h),cosH=Math.cos(h);
+          const wx=(boat.x??0)+boat.deckWalkZ*sinH+boat.deckWalkX*cosH;
+          const wz=(boat.z??0)+boat.deckWalkZ*cosH-boat.deckWalkX*sinH;
+          events.push({kind:'deck',surface:'deck',id:'footstep-deck',position:{x:wx,y:(boat.heave??0)+1.5,z:wz},gain:0.18,rate:0.96+(moved%0.12)});
+          walkerTracker.set(boat,{x:boat.deckWalkX,z:boat.deckWalkZ});
+        }
+      }else{
+        walkerTracker.set(boat,{x:boat.deckWalkX,z:boat.deckWalkZ});
+      }
+    }catch{/* ignore */}
+  }
+  const roster=Array.isArray(crew)&&crew.length?crew:(boat?.crew?.state?.crew??[]);
+  if(boat&&Array.isArray(roster)){
+    const h=(boat.heading??0)*D2R,sinH=Math.sin(h),cosH=Math.cos(h);
+    for(const s of roster){
+      if(!s||s.visible===false||s.dead||s.casualtyState==='fallen'||s.incapacitated||s.overboard||(s.walk??0)<=0.12||!Number.isFinite(s.walkTime))continue;
+      const stepIdx=Math.floor(s.walkTime/0.52);
+      const prevIdx=walkerTracker.get(s);
+      walkerTracker.set(s,stepIdx);
+      if(prevIdx===undefined||stepIdx<=prevIdx)continue;
+      const sx=s.position?.[0]??s.x??0,sy=s.position?.[1]??s.y??1.2,sz=s.position?.[2]??s.z??0;
+      const wx=(boat.x??0)+sz*sinH+sx*cosH;
+      const wy=(boat.heave??0)+sy;
+      const wz=(boat.z??0)+sz*cosH-sx*sinH;
+      const d=Math.hypot(wx-listener.x,wy-(listener.y??0),wz-listener.z);
+      if(d<=22){
+        events.push({kind:'deck',surface:'deck',id:'footstep-deck',position:{x:wx,y:wy,z:wz},gain:0.16,rate:0.94+((stepIdx&3)*0.04)});
+        if(events.length>=2)break;
+      }
+    }
+  }
+  const garrisons=fortSoldiers?.state?.garrisons??(fortSoldiers?.state?.soldiers?[fortSoldiers.state]:fortSoldiers?.soldiers?[fortSoldiers]:[]);
+  if(events.length<2&&Array.isArray(garrisons)){
+    for(const g of garrisons){
+      const soldiers=g?.soldiers??[];
+      for(const s of soldiers){
+        if(!s||s.visible===false||s.dead||s.casualtyState==='fallen'||s.falling||(s.walk??0)<=0.12||!Number.isFinite(s.walkTime))continue;
+        const stepIdx=Math.floor(s.walkTime/0.54);
+        const prevIdx=walkerTracker.get(s);
+        walkerTracker.set(s,stepIdx);
+        if(prevIdx===undefined||stepIdx<=prevIdx)continue;
+        const sx=s.x??s.position?.[0]??0,sy=s.y??s.position?.[1]??2,sz=s.z??s.position?.[2]??0;
+        const d=Math.hypot(sx-listener.x,sy-(listener.y??0),sz-listener.z);
+        if(d<=26){
+          events.push({kind:'ground',surface:'ground',id:'footstep-ground',position:{x:sx,y:sy,z:sz},gain:0.15,rate:0.94+((stepIdx&3)*0.04)});
+          if(events.length>=2)break;
+        }
+      }
+      if(events.length>=2)break;
+    }
+  }
+  const portList=Array.isArray(ports)?ports:[];
+  if(events.length<2){
+    for(const port of portList){
+      const people=port?.streets?.people??port?.townsfolk?.people??[];
+      if(Array.isArray(people)){
+        for(const p of people){
+          if(!p||p.visible===false||p.alive===false||p.dead)continue;
+          const wt=Number.isFinite(p.walkTime)?p.walkTime:Number.isFinite(p.phase)?p.phase:null;
+          if(wt===null||((p.speed??p.walk??1)<=0.08))continue;
+          const stepIdx=Math.floor(wt/0.55);
+          const prevIdx=walkerTracker.get(p);
+          walkerTracker.set(p,stepIdx);
+          if(prevIdx===undefined||stepIdx<=prevIdx)continue;
+          const d=Math.hypot((p.x??0)-listener.x,(p.y??1.5)-(listener.y??0),(p.z??0)-listener.z);
+          if(d<=26){
+            events.push({kind:'ground',surface:'ground',id:'footstep-ground',position:{x:p.x??0,y:p.y??1.5,z:p.z??0},gain:0.14,rate:0.96+((stepIdx&3)*0.03)});
+            if(events.length>=2)break;
+          }
+        }
+      }else if(typeof people==='number'&&people>0&&port?.streets?.samples?.length>=4){
+        const samples=port.streets.samples;
+        const stepIdx=Math.floor((time??0)/0.58);
+        const prevIdx=walkerTracker.get(port);
+        walkerTracker.set(port,stepIdx);
+        if(prevIdx!==undefined&&stepIdx>prevIdx){
+          for(let k=0;k<samples.length;k+=16){
+            const sx=samples[k],sy=samples[k+1],sz=samples[k+2];
+            const d=Math.hypot(sx-listener.x,sy-(listener.y??0),sz-listener.z);
+            if(d<=22){
+              events.push({kind:'ground',surface:'ground',id:'footstep-ground',position:{x:sx,y:sy,z:sz},gain:0.14,rate:0.95+((stepIdx&3)*0.03)});
+              break;
+            }
+          }
+        }
+      }
+      if(events.length>=2)break;
+    }
+  }
+  if(events.length&&time!==null){
+    try{walkerTracker.set('__lastStepTime',time);}catch{/* WeakMap */}
+  }
+  return events;
+}
 
 // One context, bounded ambience sources and at most eight event voices. Nothing is
 // fetched or started until the listener enables sound with a browser gesture.
 export function createSceneAudio({onStatus=()=>{}}={}){
   let context,master,limiter,loading,enabled=false,hidden=false,ready=false,volume=.7;
-  let time=0,nextBird=25,nextFirePop=0,lastBellHalfHour=-1;
+  let time=0,nextBird=25,nextShoreBird=8,nextFirePop=0,nextBubbleAt=0,nextTownPanic=0,nextIndigenousVoice=4,nextSailLuffAt=0;
+  let lastScreamAt=-100,lastOarStrokeAt=-100,prevRowPhase=null,lastLookoutKind=null,lastLookoutCallAt=-100;
   let listener={x:0,y:2,z:0,rx:1,rz:0},shipDistance=1,anchorReeling=false,anchorPosition={x:0,y:0,z:0},previewCursor=0,previewUntil=0;
-  const buffers=new Map(),loops=new Map(),voices=new Set(),reports=new Set(),pending=[];
+  const buffers=new Map(),loops=new Map(),voices=new Set(),reports=new Set(),pending=[],walkerTracker=new Map();
   const status=()=>onStatus({enabled,ready,loading:!!loading,missing:Object.keys(ALL_SOUNDS).length-buffers.size});
   const mute=()=>{if(context)master.gain.setTargetAtTime(enabled&&!hidden?volume:0,context.currentTime,.06);};
   const dialogue=createVoiceDirector({play:(...args)=>play(...args,true),assets:VOICE_ASSETS,crew:CREW_VOICES,available:()=>enabled&&!hidden&&ready&&context?.state==='running'&&context.currentTime>=previewUntil});
   const gunsAudio=createGunneryAudio({play,listener:()=>listener,available:()=>enabled&&!hidden&&ready&&context?.state==='running'});
   const hullAudio=createHullAudioState(),timberAudio=createTimberAudioState();
-  function stopEvents(){dialogue.clear();gunsAudio.clear();hullAudio.reset();timberAudio.reset();previewUntil=0;for(const v of [...voices,...reports]){try{v.stop();}catch{/* already ended */}}voices.clear();reports.clear();pending.length=0;}
+  function stopEvents(){
+    dialogue.clear();gunsAudio.clear();hullAudio.reset();timberAudio.reset();walkerTracker.clear();
+    previewUntil=0;prevRowPhase=null;lastLookoutKind=null;
+    for(const v of [...voices,...reports]){try{v.stop();}catch{/* already ended */}}
+    voices.clear();reports.clear();pending.length=0;
+  }
   function creak(sound){if(sound&&shipDistance>.01)play(sound.id,sound.gain*shipDistance,sound.position,sound.rate,sound.spatial,sound.options);}
   function play(id,gain,position,rate=1,spatial=false,options={}){
     const pool=id==='cannon-report'?reports:voices,limit=id==='cannon-report'?12:8;
@@ -31,8 +355,10 @@ export function createSceneAudio({onStatus=()=>{}}={}){
     const range=Math.hypot(dx,(position.y??position.heave??0)-listener.y,dz);
     level.gain.value=weatherClamp(gain,0,1)*(spatial?1/(1+Math.max(0,range-8)/(options.reach??24)):1);
     const filters=[];let tail=source;
-    for(const[type,hz]of[['highpass',options.highpassHz],['lowpass',options.lowpassHz]])if(Number.isFinite(hz)){
-      const filter=context.createBiquadFilter();filter.type=type;filter.frequency.value=hz;filter.Q.value=.6;tail.connect(filter);tail=filter;filters.push(filter);
+    if(typeof context.createBiquadFilter==='function'){
+      for(const[type,hz]of[['highpass',options.highpassHz],['lowpass',options.lowpassHz]])if(Number.isFinite(hz)){
+        const filter=context.createBiquadFilter();filter.type=type;filter.frequency.value=hz;filter.Q.value=.6;tail.connect(filter);tail=filter;filters.push(filter);
+      }
     }
     tail.connect(level).connect(pan).connect(master);pool.add(source);
     const offset=weatherClamp(options.offset??0,0,Math.max(0,source.buffer.duration-.01));
@@ -45,7 +371,7 @@ export function createSceneAudio({onStatus=()=>{}}={}){
     source.onended=()=>{pool.delete(source);source.disconnect();for(const filter of filters)filter.disconnect();level.disconnect();pan.disconnect();};source.start(0,offset,duration);return seconds;
   }
   function playSynth(kind,position=listener,gain=0.25){
-    if(!enabled||hidden||!ready||!context||context.state!=='running'||voices.size>=8)return false;
+    if(!enabled||hidden||!ready||!context||context.state!=='running'||voices.size>=8||typeof context.createOscillator!=='function')return false;
     const now=context.currentTime;
     const dx=(position?.x??listener.x)-listener.x,dz=(position?.z??listener.z)-listener.z,d=Math.hypot(dx,dz);
     const range=Math.hypot(dx,((position?.y??position?.heave??0)-listener.y),dz);
@@ -120,12 +446,15 @@ export function createSceneAudio({onStatus=()=>{}}={}){
   }
   function startLoop(id,asset){
     if(!asset?.loop||!buffers.has(id)||loops.has(id))return;
-    const source=context.createBufferSource(),gain=context.createGain();source.buffer=buffers.get(id);
+    const source=context.createBufferSource(),gain=context.createGain(),pan=typeof context.createStereoPanner==='function'?context.createStereoPanner():null;
+    source.buffer=buffers.get(id);
     source.loop=true;source.loopEnd=Math.min(asset.seconds,source.buffer.duration);gain.gain.value=0;
-    source.connect(gain).connect(master);source.start(0,Math.random()*source.loopEnd);loops.set(id,{source,gain});
+    if(pan)source.connect(gain).connect(pan).connect(master);
+    else source.connect(gain).connect(master);
+    source.start(0,Math.random()*source.loopEnd);loops.set(id,{source,gain,pan});
   }
   function startLoops(){
-    for(const [id,asset] of Object.entries(ALL_SOUNDS))if(id!=='anchor-reel')startLoop(id,asset);
+    for(const [id,asset] of Object.entries(ALL_SOUNDS))if(id!=='anchor-reel'&&!asset.lazyLoop)startLoop(id,asset);
   }
   async function enable(){
     if(!context){
@@ -185,9 +514,76 @@ export function createSceneAudio({onStatus=()=>{}}={}){
     },
     event(ev,boat){
       if(!ev||!enabled||hidden||!ready)return false;
-      const pos=ev.position??ev.vessel??boat??listener;
-      const p={x:pos.x??listener.x,y:pos.y??pos.heave??listener.y,z:pos.z??listener.z};
+      const pos=ev.position??ev.worldPosition??ev.vessel??boat??listener;
+      const p=Array.isArray(pos)||ArrayBuffer.isView(pos)
+        ?{x:pos[0]??listener.x,y:pos[1]??listener.y,z:pos[2]??listener.z}
+        :{x:pos.x??listener.x,y:pos.y??pos.heave??listener.y,z:pos.z??listener.z};
       switch(ev.type){
+        case 'overboard':
+        case 'falling-from-aloft':
+        case 'fell-from-aloft':
+        case 'casualty-scream':{
+          if(ev.propagate)return gunsAudio.event({...ev,type:'casualty-scream',position:p});
+          if(time-lastScreamAt<0.10)return false;
+          lastScreamAt=time;
+          const sex=ev.sex??ev.sailor?.sex??'male';
+          const isOverboard=Boolean(ev.overboard||ev.type==='overboard'||ev.type==='falling-from-aloft'||ev.cause==='overboard'||ev.cause==='aloft');
+          const clip=ev.crowd?'crowd-panic':isOverboard?(sex==='female'?'scream-female':'scream-overboard'):(sex==='female'?'scream-female':'scream-male');
+          play(clip,ev.gain??0.30,p,ev.rate??(0.96+Math.random()*0.08),true,{reach:ev.reach??85});
+          return true;
+        }
+        case 'timber-crumble':
+        case 'tree-fall':
+          if(ev.propagate)return gunsAudio.event({...ev,position:p});
+          play('timber-crumble',ev.gain??0.36,p,ev.type==='tree-fall'?0.82:(ev.rate??1),true,{reach:ev.reach??110});
+          return true;
+        case 'stone-crumble':
+        case 'masonry-collapse':
+          if(ev.propagate)return gunsAudio.event({...ev,position:p});
+          play('stone-crumble',ev.gain??0.38,p,ev.collapsed?0.84:(ev.rate??1),true,{reach:ev.reach??120});
+          return true;
+        case 'mast-snap':
+          if(ev.propagate)return gunsAudio.event({...ev,position:p});
+          play('mast-snap',ev.gain??0.42,p,ev.rate??0.96,true,{reach:ev.reach??135});
+          play('timber-creak',0.32,p,1.28,true,{offset:0.15,duration:0.8,reach:110});
+          return true;
+        case 'water-bubble':
+        case 'hull-flooding':
+          play('water-bubble',ev.gain??0.30,p,ev.rate??1,true,{reach:ev.reach??48});
+          return true;
+        case 'enemy-voice':{
+          if(ev.propagate)return gunsAudio.event({...ev,position:p});
+          const clip=ev.action==='boarding'?'enemy-boarding-cry':ev.action==='surrender'?'enemy-surrender-cry':'enemy-fire-order';
+          play(clip,ev.gain??0.34,p,ev.rate??1,true,{reach:ev.reach??125});
+          return true;
+        }
+        case 'indigenous-voice':{
+          const clip=indigenousVoiceClipForCulture(ev.cultureId);
+          play(clip,ev.gain??0.30,p,ev.rate??1,true,{reach:ev.reach??95});
+          return true;
+        }
+        case 'lookout-sighting':
+        case 'lookout-call':{
+          const clip=ev.kind==='land'?'lookout-land-ho':(ev.kind==='whale'||ev.kind==='dolphin'||ev.kind==='humpback'||ev.kind==='sperm-whale'||ev.kind==='orca')?'lookout-whale-ho':'lookout-sail-ho';
+          play(clip,ev.gain??0.32,{x:p.x,y:(p.y??0)+11,z:p.z},ev.rate??1,true,{reach:ev.reach??90});
+          return true;
+        }
+        case 'town-panic':
+          if(ev.propagate)return gunsAudio.event({...ev,position:p});
+          play('crowd-panic',ev.gain??0.30,p,ev.rate??1,true,{reach:ev.reach??135});
+          return true;
+        case 'oar-stroke':
+          play('oar-stroke',ev.gain??0.22,p,ev.rate??(0.95+Math.random()*0.1),true,{reach:ev.reach??38});
+          return true;
+        case 'sail-luff':
+          play('sail-luff',ev.gain??0.24,p,ev.rate??(0.95+Math.random()*0.1),true,{reach:ev.reach??42});
+          return true;
+        case 'footstep-deck':
+          play('footstep-deck',ev.gain??0.18,p,ev.rate??(0.94+Math.random()*0.12),true,{reach:ev.reach??22});
+          return true;
+        case 'footstep-ground':
+          play('footstep-ground',ev.gain??0.16,p,ev.rate??(0.94+Math.random()*0.12),true,{reach:ev.reach??26});
+          return true;
         case 'dock-start':
           play('wind-strong',.28,p,1.65,true,{offset:.2,duration:.42,highpassHz:520});
           play('timber-creak',.24,p,1.25,true,{offset:.1,duration:.55});
@@ -212,6 +608,7 @@ export function createSceneAudio({onStatus=()=>{}}={}){
           playSynth('sword',p,.34);
           if(((ev.round??1)%2)===1){
             play('cannon-report',.24,p,1.68,true,{duration:.26,highpassHz:340});
+            play('enemy-boarding-cry',.28,p,1,true,{reach:95});
           }else{
             play('cannon-rammer',.26,p,1.35,true,{duration:.35});
           }
@@ -240,6 +637,7 @@ export function createSceneAudio({onStatus=()=>{}}={}){
           }
           return true;
         case 'sail-handling':
+          play('sail-luff',.22,p,1.02,true,{duration:1.4,reach:42});
           play('hull-slap',.22,p,1.38,true,{duration:.42,highpassHz:320});
           play('timber-creak',.20,p,1.28,true,{offset:.3,duration:.55,highpassHz:260});
           return true;
@@ -247,6 +645,7 @@ export function createSceneAudio({onStatus=()=>{}}={}){
           return playSynth('spyglass',listener,.28);
         case 'surrender':
           playSynth('surrender-drum',p,.42);
+          play('enemy-surrender-cry',.32,p,1,true,{reach:115});
           play('timber-creak',.26,p,.92,true,{duration:.8});
           return true;
         case 'watch-bell':
@@ -255,7 +654,7 @@ export function createSceneAudio({onStatus=()=>{}}={}){
           return false;
       }
     },
-    update(dt,settings,boat,frame,weather,activeFires=null){
+    update(dt,settings,boat,frame,weather,activeFires=null,worldState=null){
       time+=dt;volume=weatherClamp(settings.soundVolume??.7);
       listener.x=frame[16];listener.y=frame[17];listener.z=frame[18];
       const right=Math.hypot(frame[20],frame[22])||1;listener.rx=frame[20]/right;listener.rz=frame[22]/right;
@@ -274,6 +673,159 @@ export function createSceneAudio({onStatus=()=>{}}={}){
       const wind=boat.enabled?(boat.sailState?.apparentSpeed??settings.windSpeed):settings.windSpeed;
       const levels=weatherAudioLevels({wind,...flow,intensity:weather.intensity,type:weather.type,ship:shipDistance});
       levels['hull-wash']=hullMix.wash*shipDistance;
+
+      // Shoreline surf crashing & lapping
+      const terrain=worldState?.terrain??boat?.terrain??null;
+      const shore=probeShorelineSurf(listener,terrain,settings,weather);
+      if(shore.active){
+        startLoop('shore-surf',ALL_SOUNDS['shore-surf']);
+        levels['shore-surf']=shore.gain;
+        const surfLoop=loops.get('shore-surf');
+        if(surfLoop){
+          surfLoop.source.playbackRate.value=shore.rate;
+          if(surfLoop.pan)surfLoop.pan.pan.value=shore.pan;
+        }
+      }else{
+        levels['shore-surf']=0;
+      }
+
+      // Busy towns ambience & bombardment panic
+      const townSource=worldState?.ports??terrain;
+      const sunElev=worldState?.sunElev??settings.sunElev??25;
+      const townState=computeTownAmbienceState(listener,townSource,{sunElev,time,underFire:Boolean(worldState?.underFire)});
+      if(townState.active){
+        startLoop('town-ambience',ALL_SOUNDS['town-ambience']);
+        levels['town-ambience']=townState.underFire?townState.gain*0.35:townState.gain;
+        const townLoop=loops.get('town-ambience');
+        if(townLoop?.pan)townLoop.pan.pan.value=townState.pan;
+        if(townState.underFire&&time>=nextTownPanic&&townState.position){
+          play('crowd-panic',Math.min(0.32,townState.gain*1.35),townState.position,0.96+Math.random()*0.08,true,{reach:140});
+          playSynth('bell',townState.position,0.24);
+          nextTownPanic=time+3.4+Math.random()*2.5;
+        }
+      }else{
+        levels['town-ambience']=0;
+      }
+
+      // Native American languages at sovereign Indigenous settlements or Taíno canoes
+      let indigenousCulture=townState.hasIndigenous&&townState.distance<220?townState.cultureId:null;
+      let indigenousPos=townState.position;
+      if(!indigenousCulture){
+        if(boat?.modelId==='taino-canoe'&&shipDistance>0.1){
+          indigenousCulture=boat.cultureId??'taino-greater-antilles';
+          indigenousPos={x:boat.x,y:(boat.heave??0)+1.5,z:boat.z};
+        }else if(Array.isArray(worldState?.vessels)){
+          for(const v of worldState.vessels){
+            const vs=v?.boat??v;
+            if(!vs)continue;
+            if(v?.faction==='indigenous-confederacy'||vs?.modelId==='taino-canoe'){
+              const d=Math.hypot((vs.x??0)-listener.x,(vs.z??0)-listener.z);
+              if(d<160){
+                indigenousCulture=v?.cultureId??vs?.cultureId??'taino-greater-antilles';
+                indigenousPos={x:vs.x??0,y:(vs.heave??0)+1.5,z:vs.z??0};
+                break;
+              }
+            }
+          }
+        }
+      }
+      if(indigenousCulture&&indigenousPos&&time>=nextIndigenousVoice){
+        play(indigenousVoiceClipForCulture(indigenousCulture),0.26,indigenousPos,0.97+Math.random()*0.06,true,{reach:95});
+        nextIndigenousVoice=time+12+Math.random()*16;
+      }
+
+      // Coastal shorebirds near land/ports
+      if(((shore.active&&shore.distance<260)||(townState.active&&townState.distance<300))&&sunElev>-8&&(weather?.intensity??0)<0.75&&time>=nextShoreBird){
+        const birdPos=shore.shorePosition??townState.position??listener;
+        play('shore-birds',0.18,{x:birdPos.x,y:birdPos.y+6,z:birdPos.z},0.95+Math.random()*0.1,true,{reach:120});
+        nextShoreBird=time+14+Math.random()*24;
+      }
+
+      // Bubbling & gurgling water escaping a flooding or sinking ship
+      const floodState=computeHullFloodingAudioState(boat,worldState?.vessels,listener);
+      if((floodState.inflowActive||floodState.sinkingActive)&&time>=nextBubbleAt){
+        if(floodState.sinkingActive&&floodState.sinkingPosition){
+          play('water-bubble',floodState.sinkingGain,floodState.sinkingPosition,0.84+Math.random()*0.14,true,{reach:65});
+          play('timber-creak',floodState.sinkingGain*0.72,floodState.sinkingPosition,0.78+Math.random()*0.14,true,{duration:0.85,lowpassHz:620,reach:65});
+          nextBubbleAt=time+1.35+Math.random()*0.85;
+        }else if(floodState.inflowActive&&floodState.inflowPosition){
+          play('water-bubble',floodState.inflowGain,floodState.inflowPosition,1.04+Math.random()*0.16,true,{duration:1.5,highpassHz:140,reach:38});
+          nextBubbleAt=time+1.75+Math.random()*1.05;
+        }
+      }
+
+      // Footsteps of people walking on ship decks and on the ground
+      const footstepEvents=collectFootstepEvents(walkerTracker,{
+        boat,
+        crew:worldState?.crew,
+        fortSoldiers:worldState?.fortSoldiers,
+        ports:worldState?.ports??(Array.isArray(terrain?.ports)?terrain.ports:terrain?.port?[terrain.port]:[]),
+        listener,
+        time,
+      });
+      for(const step of footstepEvents){
+        play(step.id,step.gain,step.position,step.rate,true,{reach:step.kind==='deck'?20:25});
+      }
+
+      // Drain queued fort garrison / rampart fall casualty screams
+      const fortAudioLists=[];
+      if(Array.isArray(worldState?.fortSoldiers?.state?.audioEvents))fortAudioLists.push(worldState.fortSoldiers.state.audioEvents);
+      if(Array.isArray(worldState?.fortSoldiers?.audioEvents))fortAudioLists.push(worldState.fortSoldiers.audioEvents);
+      if(Array.isArray(worldState?.fortSoldiers?.state?.garrisons)){
+        for(const g of worldState.fortSoldiers.state.garrisons){
+          if(Array.isArray(g?.audioEvents))fortAudioLists.push(g.audioEvents);
+        }
+      }
+      for(const list of fortAudioLists){
+        while(list.length){
+          const ev=list.shift();
+          this.event(ev,boat);
+        }
+      }
+
+      // Rowing oarlocks & blade catch
+      const rowEvs=worldState?.rowingEvents;
+      if(Array.isArray(rowEvs)&&rowEvs.length&&time-lastOarStrokeAt>=0.45){
+        const ev=rowEvs.find(e=>e.kind==='entry')??rowEvs[0];
+        play('oar-stroke',0.22,{x:ev.x??boat.x,y:boat.heave??0,z:ev.z??boat.z},0.95+Math.random()*0.1,true,{reach:38});
+        lastOarStrokeAt=time;
+      }else if(boat?.rowingState){
+        const rs=boat.rowingState;
+        const effort=Math.max(rs.effortPort??0,rs.effortStarboard??0,boat.rowingEffort??0);
+        if(effort>0.05&&(rs.rate??0)>0.05&&Number.isFinite(rs.phase)){
+          const wrappedCrossing=prevRowPhase!==null&&((rs.phase<prevRowPhase&&(prevRowPhase-rs.phase)>Math.PI)||(Math.floor(rs.phase/(Math.PI*2))>Math.floor(prevRowPhase/(Math.PI*2))));
+          if(wrappedCrossing&&time-lastOarStrokeAt>=0.45){
+            play('oar-stroke',0.22*Math.min(1,effort+0.3),{x:boat.x,y:boat.heave??0,z:boat.z},0.95+Math.random()*0.1,true,{reach:38});
+            lastOarStrokeAt=time;
+          }
+          prevRowPhase=rs.phase;
+        }
+      }
+
+      // Sail canvas luffing / flogging when pinching into wind
+      const sails=boat?.sailState;
+      const sailArea=sails?.area??(((boat?.sailFore??0)+(boat?.sailMain??0)+(boat?.sailMizzen??0))*20);
+      if(sails&&sailArea>1&&(sails.apparentSpeed??wind)>2.2&&shipDistance>0.05){
+        const fill=Math.max(sails.squareFill??0,sails.lateenFill??0);
+        const isLuffing=(sails.luffing??0)>0.25||(fill<0.26&&Math.abs(sails.apparentAngle??0)<0.85);
+        if(isLuffing&&time>=nextSailLuffAt){
+          play('sail-luff',Math.min(0.26,0.14+(1-fill)*0.12)*shipDistance,{x:boat.x,y:(boat.heave??0)+6,z:boat.z},0.94+Math.random()*0.12,true,{reach:42});
+          nextSailLuffAt=time+2.4+Math.random()*1.8;
+        }
+      }
+
+      // Lookout sighting calls ("Sail ho!", "Land ho!", "Whale off the bow!")
+      const sighting=boat?.lookoutSighting;
+      if(sighting?.kind){
+        if(sighting.kind!==lastLookoutKind&&time-lastLookoutCallAt>=10){
+          lastLookoutKind=sighting.kind;
+          lastLookoutCallAt=time;
+          this.event({type:'lookout-call',kind:sighting.kind,position:boat},boat);
+        }
+      }else{
+        lastLookoutKind=null;
+      }
+
       // Spatial shipboard fire crackle & roar when any vessel is burning nearby
       const fires=Array.isArray(activeFires)&&activeFires.length?activeFires:(boat?.damage?.worldFires??[]);
       let fireAudioLevel=0,nearestFirePos=null;

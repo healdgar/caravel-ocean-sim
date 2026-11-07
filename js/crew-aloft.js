@@ -29,7 +29,7 @@ function crewStillHeld(boat, s, j) {
   return j.lookoutAtStation || j.stage === 'lookout-approach' || j.stage === 'lookout-return' || !crewRunnerGone(boat, j.mast, j.side);
 }
 
-function crewThrowFromMast(boat, s, side, cause) {
+export function crewThrowFromMast(boat, s, side, cause) {
   const sx = boat.beam / 3.6, sy = vesselVerticalScale(boat), sz = boat.length / 12, [x, y, z] = s.position;
   const brokenAt = crewMastTop(boat, s.job.mast) * sy, drop = Math.max(0, y - crewDeckHeight(boat, z / sz, x / sx) * sy);
   const throwSpeed = Math.min(ALOFT_THROW_LIMIT_MPS, ALOFT_THROW_MPS + Math.max(0, y - brokenAt) * ALOFT_THROW_PER_METRE);
@@ -50,6 +50,7 @@ function crewThrowFromMast(boat, s, side, cause) {
   s.aloftFall = { vx: side * throwSpeed, vy: 0, drop, before: s.casualtyState, cause };
   // Down as far as everything else aboard is concerned, until he lands and it is known how badly.
   s.casualtyState = 'fallen';
+  boat.crewEvents?.({ type: 'falling-from-aloft', sailor: s, drop, cause });
 }
 
 // Called each crew step, and does nothing unless a mast has lost something since the last.

@@ -77,6 +77,8 @@ export function createTownShots(streets) {
         flights.set(projectile, { start: [from[0], from[1], from[2]], end, strike, blast: 0, reach: PASSING_REACH_M, seed: (projectile.townSeed ??= nextSeed()) });
       }
       if (!hit) return;
+      streets.underFireCount = (streets.underFireCount ?? 0) + 1;
+      streets.lastShotPoint = [...end];
       const root = Math.sqrt(joules / 1e6);
       burst(end[0], end[1], end[2], within(LANDING_BLAST_M, root * LANDING_BLAST_M.perRootMegajoule), within(LANDING_REACH_M, root * LANDING_REACH_M.perRootMegajoule));
       const building = hit.building;
