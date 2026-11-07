@@ -1,0 +1,1047 @@
+{
+  "blockEditor": null,
+  "blocks": [],
+  "counts": {
+    "Circle": 4,
+    "Line": 32,
+    "Polyline": 4
+  },
+  "currentLayer": "EMBRASURE",
+  "dimStyles": [
+    "Standard"
+  ],
+  "dirty": false,
+  "entities": [
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "center": {
+          "x": -21.5,
+          "y": -21.5,
+          "z": 0
+        },
+        "radius": 6,
+        "type": "circle"
+      },
+      "handle": "100",
+      "layer": "BASTION",
+      "transparency": "ByLayer",
+      "type": "Circle"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "center": {
+          "x": 21.5,
+          "y": -21.5,
+          "z": 0
+        },
+        "radius": 6,
+        "type": "circle"
+      },
+      "handle": "101",
+      "layer": "BASTION",
+      "transparency": "ByLayer",
+      "type": "Circle"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "center": {
+          "x": 21.5,
+          "y": 21.5,
+          "z": 0
+        },
+        "radius": 6,
+        "type": "circle"
+      },
+      "handle": "102",
+      "layer": "BASTION",
+      "transparency": "ByLayer",
+      "type": "Circle"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "center": {
+          "x": -21.5,
+          "y": 21.5,
+          "z": 0
+        },
+        "radius": 6,
+        "type": "circle"
+      },
+      "handle": "103",
+      "layer": "BASTION",
+      "transparency": "ByLayer",
+      "type": "Circle"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "a": {
+          "x": -21.5,
+          "y": -29.5,
+          "z": 0
+        },
+        "b": {
+          "x": -29.5,
+          "y": -21.5,
+          "z": 0
+        },
+        "type": "line"
+      },
+      "handle": "104",
+      "layer": "BASTION",
+      "transparency": "ByLayer",
+      "type": "Line"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "a": {
+          "x": -29.5,
+          "y": -21.5,
+          "z": 0
+        },
+        "b": {
+          "x": -21.5,
+          "y": -13.5,
+          "z": 0
+        },
+        "type": "line"
+      },
+      "handle": "105",
+      "layer": "BASTION",
+      "transparency": "ByLayer",
+      "type": "Line"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "a": {
+          "x": -21.5,
+          "y": -13.5,
+          "z": 0
+        },
+        "b": {
+          "x": -13.5,
+          "y": -21.5,
+          "z": 0
+        },
+        "type": "line"
+      },
+      "handle": "106",
+      "layer": "BASTION",
+      "transparency": "ByLayer",
+      "type": "Line"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "a": {
+          "x": -13.5,
+          "y": -21.5,
+          "z": 0
+        },
+        "b": {
+          "x": -21.5,
+          "y": -29.5,
+          "z": 0
+        },
+        "type": "line"
+      },
+      "handle": "107",
+      "layer": "BASTION",
+      "transparency": "ByLayer",
+      "type": "Line"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "a": {
+          "x": 21.5,
+          "y": -29.5,
+          "z": 0
+        },
+        "b": {
+          "x": 29.5,
+          "y": -21.5,
+          "z": 0
+        },
+        "type": "line"
+      },
+      "handle": "108",
+      "layer": "BASTION",
+      "transparency": "ByLayer",
+      "type": "Line"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "a": {
+          "x": 29.5,
+          "y": -21.5,
+          "z": 0
+        },
+        "b": {
+          "x": 21.5,
+          "y": -13.5,
+          "z": 0
+        },
+        "type": "line"
+      },
+      "handle": "109",
+      "layer": "BASTION",
+      "transparency": "ByLayer",
+      "type": "Line"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "a": {
+          "x": 21.5,
+          "y": -13.5,
+          "z": 0
+        },
+        "b": {
+          "x": 13.5,
+          "y": -21.5,
+          "z": 0
+        },
+        "type": "line"
+      },
+      "handle": "10A",
+      "layer": "BASTION",
+      "transparency": "ByLayer",
+      "type": "Line"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "a": {
+          "x": 13.5,
+          "y": -21.5,
+          "z": 0
+        },
+        "b": {
+          "x": 21.5,
+          "y": -29.5,
+          "z": 0
+        },
+        "type": "line"
+      },
+      "handle": "10B",
+      "layer": "BASTION",
+      "transparency": "ByLayer",
+      "type": "Line"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "a": {
+          "x": 21.5,
+          "y": 29.5,
+          "z": 0
+        },
+        "b": {
+          "x": 29.5,
+          "y": 21.5,
+          "z": 0
+        },
+        "type": "line"
+      },
+      "handle": "10C",
+      "layer": "BASTION",
+      "transparency": "ByLayer",
+      "type": "Line"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "a": {
+          "x": 29.5,
+          "y": 21.5,
+          "z": 0
+        },
+        "b": {
+          "x": 21.5,
+          "y": 13.5,
+          "z": 0
+        },
+        "type": "line"
+      },
+      "handle": "10D",
+      "layer": "BASTION",
+      "transparency": "ByLayer",
+      "type": "Line"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "a": {
+          "x": 21.5,
+          "y": 13.5,
+          "z": 0
+        },
+        "b": {
+          "x": 13.5,
+          "y": 21.5,
+          "z": 0
+        },
+        "type": "line"
+      },
+      "handle": "10E",
+      "layer": "BASTION",
+      "transparency": "ByLayer",
+      "type": "Line"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "a": {
+          "x": 13.5,
+          "y": 21.5,
+          "z": 0
+        },
+        "b": {
+          "x": 21.5,
+          "y": 29.5,
+          "z": 0
+        },
+        "type": "line"
+      },
+      "handle": "10F",
+      "layer": "BASTION",
+      "transparency": "ByLayer",
+      "type": "Line"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "a": {
+          "x": -21.5,
+          "y": 29.5,
+          "z": 0
+        },
+        "b": {
+          "x": -29.5,
+          "y": 21.5,
+          "z": 0
+        },
+        "type": "line"
+      },
+      "handle": "110",
+      "layer": "BASTION",
+      "transparency": "ByLayer",
+      "type": "Line"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "a": {
+          "x": -29.5,
+          "y": 21.5,
+          "z": 0
+        },
+        "b": {
+          "x": -21.5,
+          "y": 13.5,
+          "z": 0
+        },
+        "type": "line"
+      },
+      "handle": "111",
+      "layer": "BASTION",
+      "transparency": "ByLayer",
+      "type": "Line"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "a": {
+          "x": -21.5,
+          "y": 13.5,
+          "z": 0
+        },
+        "b": {
+          "x": -13.5,
+          "y": 21.5,
+          "z": 0
+        },
+        "type": "line"
+      },
+      "handle": "112",
+      "layer": "BASTION",
+      "transparency": "ByLayer",
+      "type": "Line"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "a": {
+          "x": -13.5,
+          "y": 21.5,
+          "z": 0
+        },
+        "b": {
+          "x": -21.5,
+          "y": 29.5,
+          "z": 0
+        },
+        "type": "line"
+      },
+      "handle": "113",
+      "layer": "BASTION",
+      "transparency": "ByLayer",
+      "type": "Line"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "a": {
+          "x": -15.4,
+          "y": -21.5,
+          "z": 0
+        },
+        "b": {
+          "x": 15.4,
+          "y": -21.5,
+          "z": 0
+        },
+        "type": "line"
+      },
+      "handle": "114",
+      "layer": "CURTAIN",
+      "transparency": "ByLayer",
+      "type": "Line"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "a": {
+          "x": -15.4,
+          "y": -18.5,
+          "z": 0
+        },
+        "b": {
+          "x": 15.4,
+          "y": -18.5,
+          "z": 0
+        },
+        "type": "line"
+      },
+      "handle": "115",
+      "layer": "CURTAIN",
+      "transparency": "ByLayer",
+      "type": "Line"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "a": {
+          "x": -21.5,
+          "y": -15.4,
+          "z": 0
+        },
+        "b": {
+          "x": -21.5,
+          "y": 15.4,
+          "z": 0
+        },
+        "type": "line"
+      },
+      "handle": "116",
+      "layer": "CURTAIN",
+      "transparency": "ByLayer",
+      "type": "Line"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "a": {
+          "x": -18.5,
+          "y": -15.4,
+          "z": 0
+        },
+        "b": {
+          "x": -18.5,
+          "y": 15.4,
+          "z": 0
+        },
+        "type": "line"
+      },
+      "handle": "117",
+      "layer": "CURTAIN",
+      "transparency": "ByLayer",
+      "type": "Line"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "a": {
+          "x": 21.5,
+          "y": -15.4,
+          "z": 0
+        },
+        "b": {
+          "x": 21.5,
+          "y": 15.4,
+          "z": 0
+        },
+        "type": "line"
+      },
+      "handle": "118",
+      "layer": "CURTAIN",
+      "transparency": "ByLayer",
+      "type": "Line"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "a": {
+          "x": 18.5,
+          "y": -15.4,
+          "z": 0
+        },
+        "b": {
+          "x": 18.5,
+          "y": 15.4,
+          "z": 0
+        },
+        "type": "line"
+      },
+      "handle": "119",
+      "layer": "CURTAIN",
+      "transparency": "ByLayer",
+      "type": "Line"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "a": {
+          "x": -15.4,
+          "y": 21.5,
+          "z": 0
+        },
+        "b": {
+          "x": -2.2,
+          "y": 21.5,
+          "z": 0
+        },
+        "type": "line"
+      },
+      "handle": "11A",
+      "layer": "CURTAIN",
+      "transparency": "ByLayer",
+      "type": "Line"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "a": {
+          "x": 2.2,
+          "y": 21.5,
+          "z": 0
+        },
+        "b": {
+          "x": 15.4,
+          "y": 21.5,
+          "z": 0
+        },
+        "type": "line"
+      },
+      "handle": "11B",
+      "layer": "CURTAIN",
+      "transparency": "ByLayer",
+      "type": "Line"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "a": {
+          "x": -2.2,
+          "y": 18.5,
+          "z": 0
+        },
+        "b": {
+          "x": -2.2,
+          "y": 25.5,
+          "z": 0
+        },
+        "type": "line"
+      },
+      "handle": "11C",
+      "layer": "GATE",
+      "transparency": "ByLayer",
+      "type": "Line"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "a": {
+          "x": 2.2,
+          "y": 18.5,
+          "z": 0
+        },
+        "b": {
+          "x": 2.2,
+          "y": 25.5,
+          "z": 0
+        },
+        "type": "line"
+      },
+      "handle": "11D",
+      "layer": "GATE",
+      "transparency": "ByLayer",
+      "type": "Line"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "closed": true,
+        "const_width": 0,
+        "elevation": 0,
+        "plinegen": false,
+        "type": "lwPolyline",
+        "vertices": [
+          {
+            "bulge": 0,
+            "end_width": 0,
+            "p": {
+              "x": -5,
+              "y": 7.5
+            },
+            "start_width": 0
+          },
+          {
+            "bulge": 0,
+            "end_width": 0,
+            "p": {
+              "x": 5,
+              "y": 7.5
+            },
+            "start_width": 0
+          },
+          {
+            "bulge": 0,
+            "end_width": 0,
+            "p": {
+              "x": 5,
+              "y": 35.5
+            },
+            "start_width": 0
+          },
+          {
+            "bulge": 0,
+            "end_width": 0,
+            "p": {
+              "x": -5,
+              "y": 35.5
+            },
+            "start_width": 0
+          }
+        ]
+      },
+      "handle": "11E",
+      "layer": "GATE",
+      "transparency": "ByLayer",
+      "type": "Polyline"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "closed": true,
+        "const_width": 0,
+        "elevation": 0,
+        "plinegen": false,
+        "type": "lwPolyline",
+        "vertices": [
+          {
+            "bulge": 0,
+            "end_width": 0,
+            "p": {
+              "x": -18,
+              "y": -18
+            },
+            "start_width": 0
+          },
+          {
+            "bulge": 0,
+            "end_width": 0,
+            "p": {
+              "x": 18,
+              "y": -18
+            },
+            "start_width": 0
+          },
+          {
+            "bulge": 0,
+            "end_width": 0,
+            "p": {
+              "x": 18,
+              "y": 18
+            },
+            "start_width": 0
+          },
+          {
+            "bulge": 0,
+            "end_width": 0,
+            "p": {
+              "x": -18,
+              "y": 18
+            },
+            "start_width": 0
+          }
+        ]
+      },
+      "handle": "11F",
+      "layer": "PARADE",
+      "transparency": "ByLayer",
+      "type": "Polyline"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "closed": true,
+        "const_width": 0,
+        "elevation": 0,
+        "plinegen": false,
+        "type": "lwPolyline",
+        "vertices": [
+          {
+            "bulge": 0,
+            "end_width": 0,
+            "p": {
+              "x": -11.9,
+              "y": -19.7
+            },
+            "start_width": 0
+          },
+          {
+            "bulge": 0,
+            "end_width": 0,
+            "p": {
+              "x": -5.1,
+              "y": -19.7
+            },
+            "start_width": 0
+          },
+          {
+            "bulge": 0,
+            "end_width": 0,
+            "p": {
+              "x": -5.1,
+              "y": -11.3
+            },
+            "start_width": 0
+          },
+          {
+            "bulge": 0,
+            "end_width": 0,
+            "p": {
+              "x": -11.9,
+              "y": -11.3
+            },
+            "start_width": 0
+          }
+        ]
+      },
+      "handle": "120",
+      "layer": "PARADE",
+      "transparency": "ByLayer",
+      "type": "Polyline"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "closed": true,
+        "const_width": 0,
+        "elevation": 0,
+        "plinegen": false,
+        "type": "lwPolyline",
+        "vertices": [
+          {
+            "bulge": 0,
+            "end_width": 0,
+            "p": {
+              "x": -6,
+              "y": -4.5
+            },
+            "start_width": 0
+          },
+          {
+            "bulge": 0,
+            "end_width": 0,
+            "p": {
+              "x": 6,
+              "y": -4.5
+            },
+            "start_width": 0
+          },
+          {
+            "bulge": 0,
+            "end_width": 0,
+            "p": {
+              "x": 6,
+              "y": 4.5
+            },
+            "start_width": 0
+          },
+          {
+            "bulge": 0,
+            "end_width": 0,
+            "p": {
+              "x": -6,
+              "y": 4.5
+            },
+            "start_width": 0
+          }
+        ]
+      },
+      "handle": "121",
+      "layer": "PARADE",
+      "transparency": "ByLayer",
+      "type": "Polyline"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "a": {
+          "x": -21.5,
+          "y": -21.5,
+          "z": 0
+        },
+        "b": {
+          "x": -21.5,
+          "y": -28.5,
+          "z": 0
+        },
+        "type": "line"
+      },
+      "handle": "122",
+      "layer": "EMBRASURE",
+      "transparency": "ByLayer",
+      "type": "Line"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "a": {
+          "x": -21.5,
+          "y": -21.5,
+          "z": 0
+        },
+        "b": {
+          "x": -28.5,
+          "y": -21.5,
+          "z": 0
+        },
+        "type": "line"
+      },
+      "handle": "123",
+      "layer": "EMBRASURE",
+      "transparency": "ByLayer",
+      "type": "Line"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "a": {
+          "x": 21.5,
+          "y": -21.5,
+          "z": 0
+        },
+        "b": {
+          "x": 21.5,
+          "y": -28.5,
+          "z": 0
+        },
+        "type": "line"
+      },
+      "handle": "124",
+      "layer": "EMBRASURE",
+      "transparency": "ByLayer",
+      "type": "Line"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "a": {
+          "x": 21.5,
+          "y": -21.5,
+          "z": 0
+        },
+        "b": {
+          "x": 28.5,
+          "y": -21.5,
+          "z": 0
+        },
+        "type": "line"
+      },
+      "handle": "125",
+      "layer": "EMBRASURE",
+      "transparency": "ByLayer",
+      "type": "Line"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "a": {
+          "x": 21.5,
+          "y": 21.5,
+          "z": 0
+        },
+        "b": {
+          "x": 21.5,
+          "y": 28.5,
+          "z": 0
+        },
+        "type": "line"
+      },
+      "handle": "126",
+      "layer": "EMBRASURE",
+      "transparency": "ByLayer",
+      "type": "Line"
+    },
+    {
+      "color": "ByLayer",
+      "geometry": {
+        "a": {
+          "x": -21.5,
+          "y": 21.5,
+          "z": 0
+        },
+        "b": {
+          "x": -21.5,
+          "y": 28.5,
+          "z": 0
+        },
+        "type": "line"
+      },
+      "handle": "127",
+      "layer": "EMBRASURE",
+      "transparency": "ByLayer",
+      "type": "Line"
+    }
+  ],
+  "entityCount": 40,
+  "extents": [
+    [
+      -29.5,
+      -29.5
+    ],
+    [
+      29.5,
+      35.5
+    ]
+  ],
+  "layers": [
+    {
+      "color": "White",
+      "frozen": false,
+      "linetype": "Continuous",
+      "locked": false,
+      "name": "0",
+      "on": true
+    },
+    {
+      "color": "White",
+      "frozen": false,
+      "linetype": "Continuous",
+      "locked": false,
+      "name": "Defpoints",
+      "on": true
+    },
+    {
+      "color": "Color 30",
+      "frozen": false,
+      "linetype": "Continuous",
+      "locked": false,
+      "name": "CURTAIN",
+      "on": true
+    },
+    {
+      "color": "Yellow",
+      "frozen": false,
+      "linetype": "Continuous",
+      "locked": false,
+      "name": "BASTION",
+      "on": true
+    },
+    {
+      "color": "White",
+      "frozen": false,
+      "linetype": "Continuous",
+      "locked": false,
+      "name": "EMBRASURE",
+      "on": true
+    },
+    {
+      "color": "Green",
+      "frozen": false,
+      "linetype": "Continuous",
+      "locked": false,
+      "name": "GATE",
+      "on": true
+    },
+    {
+      "color": "Color 8",
+      "frozen": false,
+      "linetype": "Continuous",
+      "locked": false,
+      "name": "PARADE",
+      "on": true
+    }
+  ],
+  "layouts": [
+    "Layout1",
+    "Layout2"
+  ],
+  "linetypes": [
+    "ByBlock",
+    "ByLayer",
+    "Continuous"
+  ],
+  "path": "/Users/alexwall/dev/waterworld/assets/artcraft/fort-trace-italienne.dxf",
+  "readNotes": [],
+  "selection": [],
+  "skipped": {
+    "count": 0,
+    "sections": {}
+  },
+  "space": "Model",
+  "textStyles": [
+    "Standard"
+  ],
+  "title": "fort-trace-italienne.dxf",
+  "undo": [
+    "Line",
+    "Line",
+    "Line",
+    "Line",
+    "Line",
+    "Line",
+    "Layers",
+    "Rectangle",
+    "Rectangle",
+    "Rectangle",
+    "Layers",
+    "Rectangle",
+    "Line",
+    "Line",
+    "Layers",
+    "Line",
+    "Line",
+    "Line",
+    "Line",
+    "Line"
+  ],
+  "view": {
+    "center": [
+      0,
+      3
+    ],
+    "height": 68.25
+  }
+}

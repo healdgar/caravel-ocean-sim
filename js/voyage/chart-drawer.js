@@ -537,6 +537,10 @@ function chartDrawLettering(ctx, v) {
   }
 }
 
+// Authored via VectorCraft v0.22.0 (`assets/artcraft/compass-rose-1550.svg`)
+export const VECTORCRAFT_FLEUR_DE_LIS_PATH =
+  'M120 4 C124 12 127 18 124 25 C129 20 135 19 137 24 C138 28 132 32 125 30 L127 36 L113 36 L115 30 C108 32 102 28 103 24 C105 19 111 20 116 25 C113 18 116 12 120 4 Z';
+
 /** Decorative fleur-de-lis, drawn with its base at the origin and pointing up. */
 function chartFleur(ctx, s) {
   ctx.beginPath();
@@ -551,6 +555,11 @@ function chartFleur(ctx, s) {
   }
   ctx.rect(-s * 0.3, -s * 0.16, s * 0.6, s * 0.09);
   ctx.moveTo(-s * 0.12, -s * 0.07); ctx.lineTo(0, s * 0.12); ctx.lineTo(s * 0.12, -s * 0.07); ctx.closePath();
+  ctx.save();
+  ctx.strokeStyle = '#dfc07c';
+  ctx.lineWidth = Math.max(0.75, s * 0.055);
+  ctx.stroke();
+  ctx.restore();
   ctx.fill();
 }
 

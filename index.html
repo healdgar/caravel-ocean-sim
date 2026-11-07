@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Ocean Sailing Simulator</title>
 <style>
-  :root { color-scheme:dark; --in-oklab: ; --view-top:0px; --view-height:100dvh; --keyboard-inset:0px; --controls-bottom:108px; --instruments-bottom:92px; --ink:#f3eee3; --muted:#c6baa8; --gold:#edbd78; --glass:#101d25e8; --nautical-wood-tex:none; --nautical-border:color-mix(in oklab,#edbd78 48%,#5c3a21 52%); }
+  :root { color-scheme:dark; --in-oklab: ; --view-top:0px; --view-height:100dvh; --keyboard-inset:0px; --controls-bottom:108px; --instruments-bottom:92px; --ink:#f3eee3; --muted:#c6baa8; --gold:#edbd78; --glass:#101d25e8; --nautical-wood-tex:none; --nautical-border:color-mix(in oklab,#edbd78 48%,#5c3a21 52%); --ww-hud-bg:rgba(22,17,12,.92); --ww-hud-glass-blur:12px; --ww-hud-brass:#c89b3c; --ww-hud-brass-subtle:rgba(200,155,60,.32); --ww-hud-parchment:#f2e2be; --ww-hud-body:#dfd2b5; --ww-hud-radius:12px; --ww-title-wrap:balance; --ww-body-wrap:pretty; }
   @supports (background:linear-gradient(in oklab,white,black)) { :root { --in-oklab:in oklab; } }
   html,body { margin:0; height:100%; background:#000; overflow:hidden; font:13px/1.4 system-ui,sans-serif; color:var(--ink); }
   [hidden] { display:none!important; }
@@ -205,9 +205,9 @@
   #voyage-hud select { min-height:30px; font-size:12px; }
   #voyage-hud .voyage-status { font:12px system-ui,sans-serif; color:#cdbb98; justify-content:space-between; }
   #career-prompt { position:fixed; inset:0; z-index:60; display:flex; align-items:center; justify-content:center; padding:16px; background:rgba(8,12,18,.62); }
-  #career-prompt .career-card { max-width:420px; padding:20px 22px; border:1px solid #e9cf9a; border-radius:10px; background:#2a2115; color:#f0e4ca; font:15px Georgia,serif; }
-  #career-prompt h2 { margin:0 0 8px; font-size:19px; font-weight:normal; }
-  #career-prompt .career-summary { margin:0 0 16px; color:#cdbb98; }
+  #career-prompt .career-card { max-width:440px; padding:20px 22px; border:1.5px solid var(--ww-hud-brass,#e9cf9a); border-radius:var(--ww-hud-radius,12px); background:var(--ww-hud-bg,#2a2115); backdrop-filter:blur(var(--ww-hud-glass-blur,12px)); box-shadow:0 18px 48px rgba(0,0,0,.65),inset 0 0 0 1px var(--ww-hud-brass-subtle,rgba(200,155,60,.32)); color:var(--ww-hud-parchment,#f0e4ca); font:15px Georgia,serif; }
+  #career-prompt h2 { margin:0 0 8px; font-size:21px; font-weight:normal; text-wrap:var(--ww-title-wrap,balance); }
+  #career-prompt .career-summary { margin:0 0 16px; color:var(--ww-hud-body,#cdbb98); text-wrap:var(--ww-body-wrap,pretty); }
   #career-prompt .career-actions { display:flex; flex-wrap:wrap; gap:10px; }
   #career-prompt button { min-height:44px; padding:6px 16px; border:1px solid #c9a46a; border-radius:7px; background:#1c1a14; color:#f0e4ca; font:14px Georgia,serif; cursor:pointer; }
   #career-prompt .career-continue { background:#c9a46a; color:#1c1a14; }
@@ -220,12 +220,12 @@
   #port-call[hidden] { display:none; }
   #port-call:disabled { opacity:.75; cursor:default; }
   #port-panel { position:fixed; inset:0; z-index:55; display:flex; align-items:flex-start; justify-content:center; padding:max(12px,env(safe-area-inset-top,0px)) 12px 12px; background:rgba(8,12,18,.62); }
-  #port-panel .port-card { width:min(620px,100%); max-height:100%; overflow-y:auto; padding:16px 18px; border:1px solid #e9cf9a; border-radius:10px; background:#2a2115; color:#f0e4ca; font:15px Georgia,serif; }
+  #port-panel .port-card { width:min(620px,100%); max-height:100%; overflow-y:auto; padding:16px 18px; border:1.5px solid var(--ww-hud-brass,#e9cf9a); border-radius:var(--ww-hud-radius,12px); background:var(--ww-hud-bg,#2a2115); backdrop-filter:blur(var(--ww-hud-glass-blur,12px)); box-shadow:0 18px 48px rgba(0,0,0,.65),inset 0 0 0 1px var(--ww-hud-brass-subtle,rgba(200,155,60,.32)); color:var(--ww-hud-parchment,#f0e4ca); font:15px Georgia,serif; }
   #port-panel .port-header { position:sticky; top:-16px; z-index:1; display:flex; align-items:flex-start; gap:12px; margin:-16px -18px 10px; padding:14px 18px 10px; background:#2a2115; border-bottom:1px solid rgba(233,207,154,.3); }
   #port-panel .port-header > div { flex:1; min-width:0; }
-  #port-panel h2 { margin:0; font-size:19px; font-weight:normal; }
-  #port-panel h3 { margin:0 0 4px; font-size:16px; font-weight:normal; color:#f6d48d; }
-  #port-panel .port-note { margin:2px 0 6px; font-size:13px; color:#cdbb98; }
+  #port-panel h2 { margin:0; font-size:21px; font-weight:normal; text-wrap:var(--ww-title-wrap,balance); }
+  #port-panel h3 { margin:0 0 4px; font-size:16px; font-weight:normal; color:#f6d48d; text-wrap:var(--ww-title-wrap,balance); }
+  #port-panel .port-note { margin:2px 0 6px; font-size:13px; color:var(--ww-hud-body,#cdbb98); text-wrap:var(--ww-body-wrap,pretty); }
   #port-panel .port-purse { margin:2px 0 0; font-size:16px; white-space:nowrap; font-variant-numeric:tabular-nums; }
   #port-panel .port-close { flex:none; width:44px; height:44px; border:1px solid #c9a46a; border-radius:7px; background:#1c1a14; color:#f0e4ca; font-size:16px; cursor:pointer; }
   #port-panel .port-section { padding:8px 0 12px; border-bottom:1px solid rgba(233,207,154,.18); }
@@ -238,9 +238,9 @@
   #port-panel .port-button { min-height:44px; padding:6px 12px; border:1px solid #c9a46a; border-radius:7px; background:#1c1a14; color:#f0e4ca; font:14px Georgia,serif; cursor:pointer; }
   #port-panel .port-button:disabled { opacity:.45; cursor:default; }
   #port-panel .port-danger { background:#7c2f22; border-color:#d98b76; }
-  #voyage-hud .voyage-callout { padding:9px 11px; border:1px solid #e9cf9a; border-radius:8px; background:#2a2115; }
-  #voyage-hud .voyage-callout-title { margin:0 0 3px; font-size:16px; color:#f6d48d; }
-  #voyage-hud .voyage-callout-text { margin:0; font-size:14px; line-height:1.35; }
+  #voyage-hud .voyage-callout { padding:9px 11px; border:1px solid var(--ww-hud-brass,#e9cf9a); border-radius:8px; background:#2a2115; box-shadow:inset 0 0 0 1px var(--ww-hud-brass-subtle,rgba(200,155,60,.32)); }
+  #voyage-hud .voyage-callout-title { margin:0 0 3px; font-size:16px; color:#f6d48d; text-wrap:var(--ww-title-wrap,balance); }
+  #voyage-hud .voyage-callout-text { margin:0; font-size:14px; line-height:1.35; text-wrap:var(--ww-body-wrap,pretty); }
   #voyage-hud .voyage-callout-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
   #voyage-hud .voyage-callout-actions button:first-child { background:#c9a46a; border-color:#e9cf9a; color:#1c1a14; font-weight:600; }
   #voyage-hud .voyage-toast { margin:0; font-size:13px; font-style:italic; color:#f1e3c4; }

@@ -1,0 +1,218 @@
+{
+  "bodies": [
+    {
+      "area_mm2": 3657275.0129728722,
+      "bbox": {
+        "max": [
+          2750.0000000000005,
+          232.5000000000001,
+          182.00000000000003
+        ],
+        "min": [
+          0.0,
+          -232.5000000000002,
+          -182.0
+        ]
+      },
+      "center_of_mass": [
+        1197.369074557999,
+        -1.0362658617079528e-6,
+        -7.945777625417012e-8
+      ],
+      "closed": true,
+      "density_g_cm3": 8.8,
+      "edges": 28,
+      "face_types": {
+        "cone": 6,
+        "cylinder": 10,
+        "plane": 11
+      },
+      "faces": 27,
+      "kernel": {
+        "edges": 128,
+        "faces": 57,
+        "shells": 1,
+        "vertices": 80
+      },
+      "mass_g": 1346384.6533751625,
+      "material": "Gunmetal Bronze",
+      "name": "DemiCulverinBarrel",
+      "vertices": 28,
+      "volume_mm3": 152998256.06535938
+    },
+    {
+      "area_mm2": 574515.5048099635,
+      "bbox": {
+        "max": [
+          -159.9999999973442,
+          198.00000000000003,
+          197.99752047833087
+        ],
+        "min": [
+          -500.0000000000017,
+          -198.00000000227638,
+          -197.99752047833084
+        ]
+      },
+      "center_of_mass": [
+        -318.06126925018026,
+        -3.0269147143367167e-7,
+        -2.3706696503303505e-7
+      ],
+      "closed": true,
+      "density_g_cm3": 8.5,
+      "edges": 11,
+      "face_types": {
+        "cone": 7,
+        "cylinder": 1,
+        "plane": 4
+      },
+      "faces": 12,
+      "kernel": {
+        "edges": 63,
+        "faces": 32,
+        "shells": 1,
+        "vertices": 33
+      },
+      "mass_g": 32856.340568928696,
+      "material": "Brass",
+      "name": "ShipsWatchBell",
+      "vertices": 11,
+      "volume_mm3": 3865451.83163867
+    }
+  ],
+  "body_count": 2,
+  "params": [],
+  "sketches": [
+    {
+      "curves": 23,
+      "dof": 44,
+      "id": 1,
+      "name": "DemiCulverinProfile",
+      "profiles": 1,
+      "status": "solved",
+      "visible": false
+    },
+    {
+      "curves": 1,
+      "dof": 3,
+      "id": 3,
+      "name": "TrunnionSketch",
+      "profiles": 1,
+      "status": "solved",
+      "visible": false
+    },
+    {
+      "curves": 13,
+      "dof": 26,
+      "id": 5,
+      "name": "WatchBellProfile",
+      "profiles": 1,
+      "status": "solved",
+      "visible": false
+    }
+  ],
+  "timeline": [
+    {
+      "boolean_diagnostics": {
+        "events": [],
+        "truncated": false
+      },
+      "error": null,
+      "id": 1,
+      "ms": 0.22775,
+      "name": "DemiCulverinProfile",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "Sketch",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [],
+        "truncated": false
+      },
+      "error": null,
+      "id": 2,
+      "ms": 30.271417,
+      "name": "Revolve1",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "RevolveFeature",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [],
+        "truncated": false
+      },
+      "error": null,
+      "id": 3,
+      "ms": 0.053958,
+      "name": "TrunnionSketch",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "Sketch",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [
+          {
+            "face_shift_mm": 0.0,
+            "rotation_rad": 0.0,
+            "strategy": "refined_tolerance",
+            "tolerance_mm": 1.3907193282614576,
+            "translation_mm": 0.0
+          }
+        ],
+        "truncated": false
+      },
+      "error": null,
+      "id": 4,
+      "ms": 1872.730292,
+      "name": "Extrude1",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "ExtrudeFeature",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [],
+        "truncated": false
+      },
+      "error": null,
+      "id": 5,
+      "ms": 0.095834,
+      "name": "WatchBellProfile",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "Sketch",
+      "warning": null
+    },
+    {
+      "boolean_diagnostics": {
+        "events": [],
+        "truncated": false
+      },
+      "error": null,
+      "id": 6,
+      "ms": 9.580959,
+      "name": "Revolve2",
+      "rolled_back": false,
+      "suppressed": false,
+      "type": "RevolveFeature",
+      "warning": null
+    }
+  ],
+  "total": {
+    "area_mm2": 4231790.517782835,
+    "edges": 39,
+    "faces": 39,
+    "mass_g": 1379240.9939440913,
+    "open_bodies_skipped": 0,
+    "vertices": 39,
+    "volume_mm3": 156863707.89699805
+  }
+}

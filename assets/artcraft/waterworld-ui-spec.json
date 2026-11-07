@@ -1,0 +1,39 @@
+{
+  "generator": "FigCraft v0.16.0",
+  "file": "assets/artcraft/waterworld-ui.figcraft",
+  "mockup": "assets/artcraft/waterworld-ui-mockup.png",
+  "devModeCss": "/* Port Arrival Modal */\nwidth: 440px;\nheight: 404px;\nborder-radius: 12px;\nbackground: #16110C;\nborder: 2px solid #C89B3C;\n",
+  "tokens": {
+    "--ww-hud-bg": "rgba(22, 17, 12, 0.92)",
+    "--ww-hud-glass-blur": "12px",
+    "--ww-hud-brass": "#c89b3c",
+    "--ww-hud-brass-subtle": "rgba(200, 155, 60, 0.32)",
+    "--ww-hud-parchment": "#f2e2be",
+    "--ww-hud-body": "#dfd2b5",
+    "--ww-hud-radius": "12px",
+    "--ww-title-wrap": "balance",
+    "--ww-body-wrap": "pretty"
+  },
+  "nodes": {
+    "modal": {
+      "id": 3,
+      "name": "Port Arrival Modal",
+      "width": 440,
+      "height": 404,
+      "cornerRadius": 12
+    },
+    "title": {
+      "id": 5,
+      "name": "Port Modal Title",
+      "wrapStyle": "balance",
+      "fontSize": 21
+    },
+    "body": {
+      "id": 8,
+      "name": "Port Narrative Body",
+      "wrapStyle": "pretty",
+      "fontSize": 14,
+      "lineHeight": "22"
+    }
+  }
+}

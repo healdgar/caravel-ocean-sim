@@ -61,11 +61,17 @@ struct PropVertex {@builtin(position) position:vec4f,@location(0) world:vec3f,@l
   let sky=textureSampleLevel(envCube,sampC,vec3f(0,1,0),${ENV_MIPS - 1}.0).rgb;
   let sea=textureSampleLevel(envCube,sampC,normalize(vec3f(n.x,-.65,n.z)),${ENV_MIPS - 1}.0).rgb;
   let view=normalize(F.camPos.xyz-v.world);
-  let rough=clamp(0.90-luma*0.18,0.56,0.92);let f0=vec3f(.04);
+  // TextureCraft-calibrated cavity AO, tidal waterline darkening & hawser curvature edge wear
+  let tidalWet=1.0-smoothstep(0.05,1.45,v.world.y);
+  let curvature=clamp(length(fwidth(n))*0.42*bumpFilter,0.0,1.0);
+  let cavityAO=clamp(0.72+0.28*smoothstep(0.08,0.52,luma)-0.16*tidalWet,0.52,1.0);
+  let edgeChafe=curvature*smoothstep(0.35,1.65,v.world.y)*0.12;
+  let weatheredAlbedo=clamp(albedo*cavityAO+vec3f(0.11,0.09,0.07)*edgeChafe,vec3f(0.02),vec3f(0.95));
+  let rough=clamp(0.90-luma*0.18-tidalWet*0.18+edgeChafe*0.10,0.44,0.92);let f0=vec3f(.04);
   let spec=vesselSpecular(n,view,sun,rough,f0);
   let reflected=textureSampleLevel(envCube,sampC,reflect(-view,n),rough*${ENV_MIPS - 1}.0).rgb;
-  let col=lunarSurface(n,view,albedo,rough,f0,sunVis[1]*lunarShadowVisibility(shadowSample))+lightningSurface(n,view,albedo,rough)+gunFlashSurface(v.world,n,view,albedo,rough)
-    +albedo*(direct*max(dot(n,sun),0.0)/PI+vesselAmbient(n,sky,sea))+direct*spec*max(dot(n,sun),0.0)
+  let col=lunarSurface(n,view,weatheredAlbedo,rough,f0,sunVis[1]*lunarShadowVisibility(shadowSample))+lightningSurface(n,view,weatheredAlbedo,rough)+gunFlashSurface(v.world,n,view,weatheredAlbedo,rough)
+    +weatheredAlbedo*(direct*max(dot(n,sun),0.0)/PI+vesselAmbient(n,sky,sea))+direct*spec*max(dot(n,sun),0.0)
     +reflected*F.windP[1].w*vesselEnvironment(n,view,rough,f0);
   return vec4f(surfaceAir(col,v.world),1);
 }

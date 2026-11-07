@@ -44,6 +44,46 @@ export function gunneryAmmoFlight(ammo){
   return {speed:1,drag:1,dispersion:0};
 }
 export const GUNNERY_LIMITS=Object.freeze({guns:128,projectiles:128,events:512,fixedStep:1/120,maxAdvance:.5,maxFlight:30,maxRange:8000});
+// Physical CAD volume/density oracle evaluated by SolidCraft (assets/artcraft/solidcraft-ordnance-oracle.json):
+// - DemiCulverinBarrel (9-pounder, 102 mm bore, 2.75 m barrel, Gunmetal Bronze 8.8 g/cm3):
+//   volume = 152,998,256.07 mm3 -> mass = 1,346.385 kg, center_of_mass X = 1197.37 mm (43.54% from cascabel).
+// - ShipsWatchBell (396 mm mouth diameter, 340 mm height, Brass 8.5 g/cm3):
+//   volume = 3,865,451.83 mm3 -> mass = 32.856 kg.
+export const SOLIDCRAFT_ORDNANCE_ORACLE=Object.freeze({
+  demiCulverin9lb:Object.freeze({
+    name:'DemiCulverinBarrel',
+    material:'Gunmetal Bronze',
+    densityGCm3:8.8,
+    volumeMm3:152998256.06535938,
+    areaMm2:3657275.0129728722,
+    massKg:1346.3846533751625,
+    lengthMm:2750,
+    boreMm:102,
+    centerOfMassMm:1197.369074557999,
+    trunnionBalanceRatio:1197.369074557999/2750,
+    referenceCalibreLb:9,
+  }),
+  shipsWatchBell:Object.freeze({
+    name:'ShipsWatchBell',
+    material:'Brass',
+    densityGCm3:8.5,
+    volumeMm3:3865451.83163867,
+    areaMm2:574515.5048099635,
+    massKg:32.856340568928696,
+    heightMm:340,
+    mouthRadiusMm:198,
+  }),
+});
+export function solidcraftBarrelMassKg(calibre=9,kind='cannon'){
+  if(kind==='bow')return 50;
+  const c=gunneryClamp(gunneryFinite(calibre,9),.25,68);
+  const ref=SOLIDCRAFT_ORDNANCE_ORACLE.demiCulverin9lb;
+  if(kind==='swivel')return gunneryClamp(ref.massKg*Math.pow(c/ref.referenceCalibreLb,.88)*.52,55,240);
+  if(kind==='carronade')return gunneryClamp(ref.massKg*Math.pow(c/ref.referenceCalibreLb,.72)*.48,220,1950);
+  // Smooth continuous scaling anchored to the SolidCraft 9-lb bronze demi-culverin (1346.38 kg)
+  // and 16th–18th C ordnance tables (6-lb ~960 kg, 12-lb ~1700 kg, 24-lb ~2550 kg, 32-lb ~3020 kg).
+  return gunneryClamp(ref.massKg*Math.pow(c/ref.referenceCalibreLb,.635),120,5200);
+}
 const GUNNERY_DRILL=Object.freeze(['swab','load','ram','runout','prime']);
 const gunneryClamp=(x,a,b)=>Math.max(a,Math.min(b,x));
 const gunneryFinite=(x,fallback)=>Number.isFinite(x)?x:fallback;
@@ -93,7 +133,8 @@ export function createGunneryState(gunDefs=[],options={}){
       speedVariation:gunneryClamp(gunneryFinite(def.speedVariation,.008),0,.1),
       recoilLength:gunneryClamp(gunneryFinite(def.recoilLength,calibre<6?.18:1.1),0,2),
       recoilDuration:gunneryClamp(gunneryFinite(def.recoilDuration,.85),.1,3),
-      breechMass:gunneryClamp(gunneryFinite(def.breechMass,calibre>=32?3000:calibre>=24?2600:calibre>=12?1800:180),50,6000),
+      breechMass:gunneryClamp(gunneryFinite(def.breechMass,solidcraftBarrelMassKg(calibre,def.kind||(swivel?'swivel':'cannon'))),50,6000),
+      trunnionBalanceRatio:gunneryClamp(gunneryFinite(def.trunnionBalanceRatio,SOLIDCRAFT_ORDNANCE_ORACLE.demiCulverin9lb.trunnionBalanceRatio),.35,.55),
       gasMomentumMultiplier:gunneryClamp(gunneryFinite(def.gasMomentumMultiplier,1.25),1,2),
       stage:'secured',elapsed:0,progress:0,offset:gunneryClamp(gunneryFinite(def.recoilLength,calibre<6?.18:1.1),0,2),recoil:0,
       loading:false,queued:false,roundsFired:0,lastShot:-Infinity,lastBlocked:null};

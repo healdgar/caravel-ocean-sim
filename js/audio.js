@@ -8,6 +8,22 @@ import { weatherClamp, weatherAudioLevels, createHullAudioState, createTimberAud
 
 const ALL_SOUNDS={...SOUND_ASSETS,...VOICE_ASSETS,...GUNNERY_AUDIO_ASSETS,...WORLD_AUDIO_ASSETS};
 
+// Integrated loudness (LUFS) & true-peak dB measured by SoundCraft 0.18.0 (`assets/artcraft/soundcraft-loudness-audit.json`).
+export const SOUNDCRAFT_LUFS_AUDIT=Object.freeze({
+  'cannon-report':Object.freeze({lufs:-23.62,peakDb:-8.51,truePeakDb:-8.49,targetLufs:-14.0,trimGain:2.3679}),
+  'cannon-recoil':Object.freeze({lufs:-19.21,peakDb:-6.48,truePeakDb:-6.36,targetLufs:-18.5,trimGain:1.0847}),
+  'cannon-rammer':Object.freeze({lufs:-26.94,peakDb:-7.32,truePeakDb:-7.05,targetLufs:-20.0,trimGain:2.0057}),
+  'cannon-run-out':Object.freeze({lufs:-25.29,peakDb:-8.76,truePeakDb:-8.76,targetLufs:-19.5,trimGain:1.9475}),
+  'captain-guns-give-fire':Object.freeze({lufs:-18.95,peakDb:-7.48,truePeakDb:-7.48,targetLufs:-16.0,trimGain:1.4039}),
+  'crew-guns-ready':Object.freeze({lufs:-18.95,peakDb:-7.07,truePeakDb:-7.03,targetLufs:-16.5,trimGain:1.3255}),
+  'lookout-sail-ho':Object.freeze({lufs:-19.64,peakDb:-7.02,truePeakDb:-7.00,targetLufs:-16.0,trimGain:1.5199}),
+  'lookout-land-ho':Object.freeze({lufs:-18.35,peakDb:-8.13,truePeakDb:-8.13,targetLufs:-16.0,trimGain:1.3105}),
+  'lookout-whale-ho':Object.freeze({lufs:-18.85,peakDb:-6.48,truePeakDb:-6.45,targetLufs:-16.0,trimGain:1.3888}),
+});
+export function soundcraftLufsTrim(id){
+  return SOUNDCRAFT_LUFS_AUDIT[id]?.trimGain??1;
+}
+
 export function indigenousVoiceClipForCulture(cultureId=''){
   const id=String(cultureId??'').toLowerCase();
   if(id.includes('kalinago')||id.includes('lesser-antilles'))return 'indigenous-kalinago';
@@ -353,7 +369,7 @@ export function createSceneAudio({onStatus=()=>{}}={}){
     const dx=position.x-listener.x,dz=position.z-listener.z,d=Math.hypot(dx,dz);
     pan.pan.value=weatherClamp((dx*listener.rx+dz*listener.rz)/Math.max(d,1),-1,1)*.85;
     const range=Math.hypot(dx,(position.y??position.heave??0)-listener.y,dz);
-    level.gain.value=weatherClamp(gain,0,1)*(spatial?1/(1+Math.max(0,range-8)/(options.reach??24)):1);
+    level.gain.value=weatherClamp(gain*soundcraftLufsTrim(id),0,1)*(spatial?1/(1+Math.max(0,range-8)/(options.reach??24)):1);
     const filters=[];let tail=source;
     if(typeof context.createBiquadFilter==='function'){
       for(const[type,hz]of[['highpass',options.highpassHz],['lowpass',options.lowpassHz]])if(Number.isFinite(hz)){

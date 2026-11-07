@@ -1,0 +1,186 @@
+{
+  "tool": "SoundCraft 0.18.0",
+  "sampleRate": 48000,
+  "clips": {
+    "cannon-report": {
+      "file": "assets/audio/gunnery/cannon-report.mp3",
+      "category": "gunnery",
+      "seconds": 0.52,
+      "lufs": -23.62,
+      "peakDb": -8.51,
+      "truePeakDb": -8.49,
+      "targetLufs": -14,
+      "appliedTrimDb": 7.49,
+      "trimGain": 2.3679,
+      "stripSilenceRanges": {
+        "tracks": [
+          {
+            "ranges": [],
+            "track": 2
+          }
+        ]
+      },
+      "importedClips": []
+    },
+    "cannon-recoil": {
+      "file": "assets/audio/gunnery/cannon-recoil.mp3",
+      "category": "gunnery",
+      "seconds": 1.6,
+      "lufs": -19.21,
+      "peakDb": -6.48,
+      "truePeakDb": -6.36,
+      "targetLufs": -18.5,
+      "appliedTrimDb": 0.71,
+      "trimGain": 1.0847,
+      "stripSilenceRanges": {
+        "tracks": [
+          {
+            "ranges": [],
+            "track": 2
+          }
+        ]
+      },
+      "importedClips": []
+    },
+    "cannon-rammer": {
+      "file": "assets/audio/gunnery/cannon-rammer.mp3",
+      "category": "gunnery",
+      "seconds": 0.55,
+      "lufs": -26.94,
+      "peakDb": -7.32,
+      "truePeakDb": -7.05,
+      "targetLufs": -20,
+      "appliedTrimDb": 6.05,
+      "trimGain": 2.0057,
+      "stripSilenceRanges": {
+        "tracks": [
+          {
+            "ranges": [],
+            "track": 2
+          }
+        ]
+      },
+      "importedClips": []
+    },
+    "cannon-run-out": {
+      "file": "assets/audio/gunnery/cannon-run-out.mp3",
+      "category": "gunnery",
+      "seconds": 1.2,
+      "lufs": -25.29,
+      "peakDb": -8.76,
+      "truePeakDb": -8.76,
+      "targetLufs": -19.5,
+      "appliedTrimDb": 5.79,
+      "trimGain": 1.9475,
+      "stripSilenceRanges": {
+        "tracks": [
+          {
+            "ranges": [],
+            "track": 2
+          }
+        ]
+      },
+      "importedClips": []
+    },
+    "captain-guns-give-fire": {
+      "file": "assets/audio/gunnery/captain-guns-give-fire.mp3",
+      "category": "voice",
+      "seconds": 2,
+      "lufs": -18.95,
+      "peakDb": -7.48,
+      "truePeakDb": -7.48,
+      "targetLufs": -16,
+      "appliedTrimDb": 2.95,
+      "trimGain": 1.4039,
+      "stripSilenceRanges": {
+        "tracks": [
+          {
+            "ranges": [],
+            "track": 2
+          }
+        ]
+      },
+      "importedClips": []
+    },
+    "crew-guns-ready": {
+      "file": "assets/audio/gunnery/crew-guns-ready.mp3",
+      "category": "voice",
+      "seconds": 2.32,
+      "lufs": -18.95,
+      "peakDb": -7.07,
+      "truePeakDb": -7.03,
+      "targetLufs": -16.5,
+      "appliedTrimDb": 2.45,
+      "trimGain": 1.3255,
+      "stripSilenceRanges": {
+        "tracks": [
+          {
+            "ranges": [],
+            "track": 2
+          }
+        ]
+      },
+      "importedClips": []
+    },
+    "lookout-sail-ho": {
+      "file": "assets/audio/world/lookout-sail-ho.mp3",
+      "category": "voice",
+      "seconds": 3.84,
+      "lufs": -19.64,
+      "peakDb": -7.02,
+      "truePeakDb": -7,
+      "targetLufs": -16,
+      "appliedTrimDb": 3.64,
+      "trimGain": 1.5199,
+      "stripSilenceRanges": {
+        "tracks": [
+          {
+            "ranges": [],
+            "track": 2
+          }
+        ]
+      },
+      "importedClips": []
+    },
+    "lookout-land-ho": {
+      "file": "assets/audio/world/lookout-land-ho.mp3",
+      "category": "voice",
+      "seconds": 3.68,
+      "lufs": -18.35,
+      "peakDb": -8.13,
+      "truePeakDb": -8.13,
+      "targetLufs": -16,
+      "appliedTrimDb": 2.35,
+      "trimGain": 1.3105,
+      "stripSilenceRanges": {
+        "tracks": [
+          {
+            "ranges": [],
+            "track": 2
+          }
+        ]
+      },
+      "importedClips": []
+    },
+    "lookout-whale-ho": {
+      "file": "assets/audio/world/lookout-whale-ho.mp3",
+      "category": "voice",
+      "seconds": 3.84,
+      "lufs": -18.85,
+      "peakDb": -6.48,
+      "truePeakDb": -6.45,
+      "targetLufs": -16,
+      "appliedTrimDb": 2.85,
+      "trimGain": 1.3888,
+      "stripSilenceRanges": {
+        "tracks": [
+          {
+            "ranges": [],
+            "track": 2
+          }
+        ]
+      },
+      "importedClips": []
+    }
+  }
+}

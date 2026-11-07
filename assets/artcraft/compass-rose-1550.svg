@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="240" height="240" viewBox="0 0 240 240">
+  <title>compass_rose_1550</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <g>
+      <circle cx="120" cy="120" r="100" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <circle cx="120" cy="120" r="80" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <circle cx="120" cy="120" r="60" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <circle cx="120" cy="120" r="40" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <circle cx="120" cy="120" r="20" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <line x1="120" y1="120" x2="120" y2="20" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <line x1="120" y1="120" x2="139.509" y2="21.921" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <line x1="120" y1="120" x2="158.268" y2="27.612" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <line x1="120" y1="120" x2="175.557" y2="36.853" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <line x1="120" y1="120" x2="190.711" y2="49.289" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <line x1="120" y1="120" x2="203.147" y2="64.443" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <line x1="120" y1="120" x2="212.388" y2="81.732" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <line x1="120" y1="120" x2="218.079" y2="100.491" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <line x1="120" y1="120" x2="220" y2="120" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <line x1="120" y1="120" x2="218.079" y2="139.509" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <line x1="120" y1="120" x2="212.388" y2="158.268" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <line x1="120" y1="120" x2="203.147" y2="175.557" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <line x1="120" y1="120" x2="190.711" y2="190.711" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <line x1="120" y1="120" x2="175.557" y2="203.147" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <line x1="120" y1="120" x2="158.268" y2="212.388" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <line x1="120" y1="120" x2="139.509" y2="218.079" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <line x1="120" y1="120" x2="120" y2="220" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <line x1="120" y1="120" x2="100.491" y2="218.079" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <line x1="120" y1="120" x2="81.732" y2="212.388" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <line x1="120" y1="120" x2="64.443" y2="203.147" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <line x1="120" y1="120" x2="49.289" y2="190.711" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <line x1="120" y1="120" x2="36.853" y2="175.557" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <line x1="120" y1="120" x2="27.612" y2="158.268" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <line x1="120" y1="120" x2="21.921" y2="139.509" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <line x1="120" y1="120" x2="20" y2="120" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <line x1="120" y1="120" x2="21.921" y2="100.491" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <line x1="120" y1="120" x2="27.612" y2="81.732" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <line x1="120" y1="120" x2="36.853" y2="64.443" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <line x1="120" y1="120" x2="49.289" y2="49.289" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <line x1="120" y1="120" x2="64.443" y2="36.853" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <line x1="120" y1="120" x2="81.732" y2="27.612" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+      <line x1="120" y1="120" x2="100.491" y2="21.921" fill="#7b532c" stroke="#2a1b0e" stroke-miterlimit="10"/>
+    </g>
+    <polygon points="134.437,47.422 126.506,104.294 161.112,58.471 132.021,107.979 181.529,78.888 135.706,113.494 192.578,105.563 137,120 192.578,134.437 135.706,126.506 181.529,161.112 132.021,132.021 161.112,181.529 126.506,135.706 134.437,192.578 120,137 105.563,192.578 113.494,135.706 78.888,181.529 107.979,132.021 58.471,161.112 104.294,126.506 47.422,134.437 103,120 47.422,105.563 104.294,113.494 58.471,78.888 107.979,107.979 78.888,58.471 113.494,104.294 105.563,47.422 120,103" fill="#b38443" stroke="#2a1b0e" stroke-miterlimit="10"/>
+    <polygon points="152.911,40.546 134.849,105.151 199.454,87.089 141,120 199.454,152.911 134.849,134.849 152.911,199.454 120,141 87.089,199.454 105.151,134.849 40.546,152.911 99,120 40.546,87.089 105.151,105.151 87.089,40.546 120,99" fill="#dfc07c" stroke="#2a1b0e" stroke-width="1.35" stroke-miterlimit="10"/>
+    <polygon points="120,24 136.971,103.029 216,120 136.971,136.971 120,216 103.029,136.971 24,120 103.029,103.029" fill="#9e2418" stroke="#dfc07c" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M120 4 C124 12 127 18 124 25 C129 20 135 19 137 24 C138 28 132 32 125 30 L127 36 L113 36 L115 30 C108 32 102 28 103 24 C105 19 111 20 116 25 C113 18 116 12 120 4 Z" fill="#3d2814" stroke="#dfc07c" stroke-width="1.5" stroke-miterlimit="10"/>
+    <circle cx="120" cy="120" r="16" fill="#dfc07c" stroke="#dfc07c" stroke-width="1.5" stroke-miterlimit="10"/>
+    <circle cx="120" cy="120" r="6" fill="#dfc07c" stroke="#dfc07c" stroke-width="1.5" stroke-miterlimit="10"/>
+  </g>
+</svg>

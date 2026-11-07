@@ -1,0 +1,165 @@
+{
+  "commands": [
+    {
+      "command": "material.create",
+      "params": {
+        "name": "Gunmetal Bronze",
+        "density_g_cm3": 8.8,
+        "color": "#c49348",
+        "pbr": {
+          "metallic": 0.9,
+          "roughness": 0.28,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "sketch.create",
+      "params": {
+        "plane": "XY",
+        "name": "DemiCulverinProfile"
+      }
+    },
+    {
+      "command": "sketch.line",
+      "params": {
+        "closed": true,
+        "points": [
+          [0, 0],
+          [0, 48],
+          [75, 48],
+          [75, 92],
+          [145, 92],
+          [145, 182],
+          [220, 182],
+          [220, 168],
+          [980, 162],
+          [980, 174],
+          [1030, 174],
+          [1030, 152],
+          [1680, 146],
+          [1680, 158],
+          [1725, 158],
+          [1725, 134],
+          [2560, 106],
+          [2660, 142],
+          [2720, 142],
+          [2750, 118],
+          [2750, 58],
+          [240, 58],
+          [190, 0]
+        ]
+      }
+    },
+    {
+      "command": "sketch.finish",
+      "params": {}
+    },
+    {
+      "command": "solid.revolve",
+      "params": {
+        "sketch": "DemiCulverinProfile",
+        "axis": "x",
+        "angle": 360,
+        "operation": "new",
+        "body_name": "DemiCulverinBarrel"
+      }
+    },
+    {
+      "command": "sketch.create",
+      "params": {
+        "plane": "XZ",
+        "name": "TrunnionSketch"
+      }
+    },
+    {
+      "command": "sketch.circle.center",
+      "params": {
+        "center": [1180, 0],
+        "radius": 56
+      }
+    },
+    {
+      "command": "sketch.finish",
+      "params": {}
+    },
+    {
+      "command": "solid.extrude",
+      "params": {
+        "sketch": "TrunnionSketch",
+        "distance": 465,
+        "direction": "symmetric",
+        "operation": "join",
+        "targets": ["DemiCulverinBarrel"]
+      }
+    },
+    {
+      "command": "material.assign",
+      "params": {
+        "bodies": ["DemiCulverinBarrel"],
+        "material": "Gunmetal Bronze"
+      }
+    },
+    {
+      "command": "sketch.create",
+      "params": {
+        "plane": "XY",
+        "name": "WatchBellProfile"
+      }
+    },
+    {
+      "command": "sketch.line",
+      "params": {
+        "closed": true,
+        "points": [
+          [-500, 0],
+          [-500, 36],
+          [-465, 36],
+          [-465, 92],
+          [-380, 108],
+          [-260, 132],
+          [-195, 168],
+          [-160, 198],
+          [-160, 172],
+          [-215, 142],
+          [-370, 92],
+          [-445, 76],
+          [-445, 0]
+        ]
+      }
+    },
+    {
+      "command": "sketch.finish",
+      "params": {}
+    },
+    {
+      "command": "solid.revolve",
+      "params": {
+        "sketch": "WatchBellProfile",
+        "axis": "x",
+        "angle": 360,
+        "operation": "new",
+        "body_name": "ShipsWatchBell"
+      }
+    },
+    {
+      "command": "material.assign",
+      "params": {
+        "bodies": ["ShipsWatchBell"],
+        "material": "Brass"
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": ["ShipsWatchBell"],
+        "color": "#d8aa4e",
+        "pbr": {
+          "metallic": 0.94,
+          "roughness": 0.22,
+          "dielectric_ior": 1.5
+        }
+      }
+    }
+  ]
+}

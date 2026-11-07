@@ -32,6 +32,19 @@ const GATE_APRON_REACH_M = 14;
 // How far either side of a wall's centre line there is no walking: wall, firing step and berm.
 export const WALL_SOLID_HALF_WIDTH_M = 1.5;
 
+// Verified via CADCraft v0.18.0 (`assets/artcraft/fort-trace-italienne.dxf`):
+// 16th-century trace italienne bastion-to-curtain geometric ratios.
+export const CADCRAFT_TRACE_ITALIENNE_RATIOS = Object.freeze({
+  cornerInsetRatio: 0.86,
+  bastionRadiusRatio: 0.24,
+  maxBastionRadiusM: 6.4,
+  wallClearanceM: FORT_WALL_CLEARANCE_M,
+  wallSolidHalfWidthM: WALL_SOLID_HALF_WIDTH_M,
+  gateHalfWidthM: FORT_GATE_HALF_WIDTH_M,
+  embrasureEveryBays: EMBRASURE_EVERY_BAYS,
+  bastionBays: BASTION_BAYS,
+});
+
 function curtainBetween([ax, az], [bx, bz], stop) {
   const dx = bx - ax, dz = bz - az, length = Math.hypot(dx, dz) || 1;
   const ux = dx / length, uz = dz / length;
@@ -121,7 +134,12 @@ export function squareFortPlan(width, length) {
     outline: corners,
     guardhouse: { x: -10, z: gateZ - 8.6, halfWidth: 3.4, halfLength: 4.2 },
     hallSlot: [0, -6, 0],
-    cottageSlots: [[22, -14, 0], [-22, -14, Math.PI], [22, 12, 0], [-22, 12, Math.PI]],
+    cottageSlots: (() => {
+      const cx = Math.min(22, Math.max(8, hw * 0.86 - FORT_WALL_CLEARANCE_M - 4.5));
+      const czSouth = -Math.min(14, Math.max(6, hl * 0.86 - FORT_WALL_CLEARANCE_M - 4.5));
+      const czNorth = Math.min(12, Math.max(5, hl * 0.86 - FORT_WALL_CLEARANCE_M - 5.5));
+      return [[cx, czSouth, 0], [-cx, czSouth, Math.PI], [cx, czNorth, 0], [-cx, czNorth, Math.PI]];
+    })(),
     guns: [
       bastionGunOnBay(corners[0], bastionRadius, 18),
       bastionGunOnBay(corners[0], bastionRadius, 12),
