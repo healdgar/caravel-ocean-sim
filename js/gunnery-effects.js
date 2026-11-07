@@ -129,7 +129,8 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
   const resources=[{buffer:frameUBO},transView,skyView,sampler,envView,{buffer:sunVis},seaView,seaSampler,{buffer:volumeBuffer},{buffer:ballBuffer},{buffer:contactBuffer},null,{buffer:arcBuffer}];
   // Auto layouts reflect each entry point. Keep this table explicit so resource
   // changes are checked by native pipeline creation and integration tests.
-  const bindings=[[0,1,2,3,4,5,9],[0,1,2,3,5,8,11],[0,1,2,3,4,5,10],[0,1,2,3,4,5,10],[0,1,2,3,4,5,6,7,10],[0,1,2,3,5,12],[0,1,2,3,5,10],[0,1,2,3,5,10]];
+  const bindings=[[0,1,2,3,4,5,9],[0,1,2,3,5,8,11],[0,1,2,3,4,5,6,7,10],[0,1,2,3,4,5,10],[0,1,2,3,4,5,6,7,10],[0,1,2,3,5,12],[0,1,2,3,5,10],[0,1,2,3,5,10]];
+  const crownWaves=surfaceWaveGroups(device,pipelines[2],surfaceWaves);
   const ringWaves=surfaceWaveGroups(device,pipelines[4],surfaceWaves);
   let volumeCount=0,impactCount=0,ballCount=0,arcSegmentCount=0,depthTexture=null,depthWidth=0,depthHeight=0,depthSource=null,depthGroup=null;
   let volumeGroup=null,depthReady=false;
@@ -338,7 +339,7 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
         pass.setPipeline(pipelines[5]);pass.setBindGroup(0,groups[5]);pass.draw(6,arcSegmentCount);
       }
       if(impactCount){
-        pass.setPipeline(pipelines[2]);pass.setBindGroup(0,groups[2]);pass.draw(GUNNERY_CROWN_SEGMENTS*GUNNERY_CROWN_ROWS*6,impactCount);
+        pass.setPipeline(pipelines[2]);pass.setBindGroup(0,groups[2]);if(crownWaves)pass.setBindGroup(1,crownWaves[surfaceWaves.current]);pass.draw(GUNNERY_CROWN_SEGMENTS*GUNNERY_CROWN_ROWS*6,impactCount);
         pass.setPipeline(pipelines[3]);pass.setBindGroup(0,groups[3]);pass.draw(6,impactCount*GUNNERY_DROP_COUNT);
         pass.setPipeline(pipelines[7]);pass.setBindGroup(0,groups[7]);pass.draw(6,impactCount*GUNNERY_DUST_COUNT);
         pass.setPipeline(pipelines[6]);pass.setBindGroup(0,groups[6]);pass.draw(6,impactCount*GUNNERY_EARTH_COUNT);

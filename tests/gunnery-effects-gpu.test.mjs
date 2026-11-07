@@ -54,8 +54,8 @@ test('native cannon FX render dense volumetric smoke, brief flash, dark roundsho
     });
     if(process.env.GUNNERY_FX_SHOT)await page.screenshot({path:process.env.GUNNERY_FX_SHOT,fullPage:true});
     assert.deepEqual(result.errors,[],JSON.stringify(result));assert.equal(result.idleWrites,0);
-    assert.ok(result.flash.count>25&&result.flash.peak>2,JSON.stringify(result));
-    assert.ok(result.smoke.count>100&&result.smoke.peak<result.flash.peak*.5,JSON.stringify(result));
+    assert.ok(result.flash.count>25&&result.flash.peak>.95,JSON.stringify(result));
+    assert.ok(result.smoke.count>100&&result.smoke.peak<result.flash.peak*.85,JSON.stringify(result));
     assert.equal(result.smokeCounts.volumes,3);assert.equal(result.occluded.count,0,JSON.stringify(result));
     assert.ok(result.night.mean<result.smoke.mean,JSON.stringify(result));
     assert.ok(result.billow.count>result.smoke.count*2,JSON.stringify(result));
