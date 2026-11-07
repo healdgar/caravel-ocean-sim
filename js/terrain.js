@@ -16,6 +16,7 @@ import {bakeLandImpactDeformations} from './part-assembly.js';
 import {buildingFracturePipeline,createPortFractures} from './building-fracture.js';
 import {streetEdgeAt} from './town-streets.js';
 import {createLandCraterLedger,createLandCraters,landCraterSize} from './land-craters.js';
+import {createGroundDetail} from './ground-detail.js';
 
 import {
   portClearanceEnvelope,
@@ -704,6 +705,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     cp.dispatchWorkgroups(Math.ceil((activeRegion.albedoSize>>m)/8),Math.ceil((activeRegion.albedoSize>>m)/8));
   }
   cp.end();device.queue.submit([enc.finish()]);
+  const groundDetail=await createGroundDetail({device,computePipe,mipPipe});
   let nearAlbedo=albedo;
   if(nearTile){
     const image=await nearBitmapPromise;
@@ -880,7 +882,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     return {texture,window,resources:[[14,texture.createView()],[15,{buffer:window}]]};
   };
   let activeTownField=townField(proceduralPack?.port?.streets);
-  let nearResources=[...opaqueResources,[12,{buffer:nearDomain}],[13,nearAlbedo.createView()],...activeTownField.resources];
+  let nearResources=[...opaqueResources,[12,{buffer:nearDomain}],[13,nearAlbedo.createView()],...activeTownField.resources,...groundDetail.resources];
   const leafResources=resources.filter(([binding])=>binding!==9&&binding!==11);
   const groups=[bind(terrainPipe,nearResources),bind(opaqueTreePipe,nearResources),bind(treePipe,leafResources)];
   const groundGroup=bind(groundPipe,opaqueResources);
@@ -1017,7 +1019,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       [5,lighting.createView()],[6,{buffer:sUniform}],[7,sAlbedo.createView()],
       [8,landSampler],[9,sBiome.createView()],[11,{buffer:leafMean}],
       [12,{buffer:nearDomain}],[13,nearAlbedo.createView()],
-      ...sTownField.resources,
+      ...sTownField.resources,...groundDetail.resources,
     ];
     const terrainGroup=bind(terrainPipe,secOpaqueResources);
     const submergedSecGroup=submerged?.bindGroup(secOpaqueResources.map(([binding,resource])=>({binding,resource})));
@@ -1357,7 +1359,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     // The buildings moved, so their ways did too.
     const oldTownField=activeTownField;
     activeTownField=townField(upgradedPack.port?.streets);
-    nearResources=[...opaqueResources,[12,{buffer:nearDomain}],[13,nearAlbedo.createView()],...activeTownField.resources];
+    nearResources=[...opaqueResources,[12,{buffer:nearDomain}],[13,nearAlbedo.createView()],...activeTownField.resources,...groundDetail.resources];
     groups[0]=bind(terrainPipe,nearResources);groups[1]=bind(opaqueTreePipe,nearResources);craterLand=null;
     submergedGroup=submerged?.bindGroup(nearResources.map(([binding,resource])=>({binding,resource})));
     oldTownField.texture.destroy();oldTownField.window.destroy();
@@ -1547,7 +1549,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     get forestStrikeKey(){return forest?forestStrikeKey:null;},
     farTreeTriangles:treeMeshes[0].map(mesh=>mesh.opaque.count/3),
     groundStats,groundTriangles:groundMeshes.map(mesh=>mesh.count/3),canopyStats,forestStats,canopyInspectionURL:canopyInspectionLink,
-    prepare:updateTrees,
+    prepare:updateTrees,groundDetail,
     setPixelError(next){if(Number.isFinite(next)&&next>0){currentPixelError=next;forestMass?.setPixelError?.(next);forest?.setPixelError?.(next);groundCull.setPixelError(next,isMobile&&next>3.8?1.35:1);treeCull?.setPixelError(next);}},
     nearStats:{loaded:!!nearTile,error:nearFailure,domain:nearTile?.manifest.domain??null,triangles:(fineMesh?.indices.length??0)/3},
     height:(x,z)=>heightSample(x-worldOffset.x,z-worldOffset.z),
@@ -1621,7 +1623,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       portMesh?.vertices?.destroy?.();portMesh?.indices?.destroy?.();portFractures?.destroy();
       fine?.vertices?.destroy?.();fine?.indices?.destroy?.();fine?.submerged?.destroy?.();
       uniform?.destroy?.();nearDomain?.destroy?.();nearElevation?.destroy?.();coastalField?.destroy();
-      elevation?.destroy?.();lighting?.destroy?.();albedo?.destroy?.();
+      elevation?.destroy?.();lighting?.destroy?.();albedo?.destroy?.();groundDetail.dispose();
       activeTownField?.texture.destroy();activeTownField?.window.destroy();
       if(nearAlbedo&&nearAlbedo!==albedo)nearAlbedo?.destroy?.();
       biomeTexture?.destroy?.();leafTexture?.destroy?.();leafMean?.destroy?.();
