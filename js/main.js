@@ -94,6 +94,7 @@ import { boatTargets, boatSpring, boatRotate, stepBoatSteering, stepBoatView, st
 import { SHIP_COLORS, DEFAULT_SHIP_COLORS, getShipColorsInfo, setVesselColors, strikeVesselColors, createShipColorsRenderer } from './ship-colors.js';
 import { createDockingBoardingState, computeBoardingStrength } from './boarding-docking.js';
 import { createFreeCannon } from './free-cannon.js';
+import { createCastleDuelController } from './castle-duel.js';
 import { cameraModeFromLink, propulsionFromLink, createShareLink, encodeGameStateParam, decodeGameStateParam, ROUGH_SEAS } from './sharing.js';
 import { ORBIT_LIMIT, orbitElevation, orbitDistance, panOrbit, placeOrbitCamera } from './camera.js';
 // WebGPU ocean — custom renderer.
@@ -1176,9 +1177,7 @@ async function main() {
       if(event.type==='shot')gunEffects.emitShot({...event,id:shotKey,chargeKg:event.mass*.3});
       else if(event.type==='impact'&&event.kind==='water'){
         gunEffects.emitImpact({...event,id:shotKey,position:event.surfacePosition,massKg:event.mass});
-        surfaceWaves.emit({source:'roundshot',id:shotKey,kind:'entry',x:event.surfacePosition[0],z:event.surfacePosition[2],
-          radiusMetres:Math.max(.18,event.radius*2),closingSpeed:Math.max(0,-event.velocity[1]),velocity:event.velocity,massKg:event.mass,
-          age:Math.max(0,ownerBoat.gunnery.time-event.time)});
+        emitCannonWaterWaves(shotKey,event,Math.max(0,ownerBoat.gunnery.time-event.time));
       }else if(event.type==='impact'){
         const rep=event.damageReport;
         const boostMass=rep?.magazineExploded?Math.max(120,event.mass*14):rep?.silenced?Math.max(45,event.mass*4):event.mass;
@@ -1192,6 +1191,26 @@ async function main() {
       }
     },
   });
+  const pendingSplashWaves=[];
+  const emitCannonWaterWaves=(shotKey,event,age=0)=>{
+    const sx=event.surfacePosition?.[0]??0,sz=event.surfacePosition?.[2]??0;
+    const rad=Math.max(0.24,(event.radius??0.09)*2.4);
+    const vy=event.velocity?.[1]??-45;
+    const spd=Math.max(14,-vy,Math.hypot(event.velocity?.[0]??0,vy,event.velocity?.[2]??0)*0.65);
+    const mass=event.mass??10.9;
+    surfaceWaves.emit({source:'roundshot',id:shotKey,kind:'entry',x:sx,z:sz,
+      radiusMetres:rad,closingSpeed:spd,velocity:event.velocity??[0,-spd,0],massKg:mass,age});
+    pendingSplashWaves.push({
+      dueTime:(typeof simTime==='number'?simTime:0)+0.36,
+      id:shotKey+'-plume',
+      x:sx,
+      z:sz,
+      radiusMetres:Math.max(0.32,rad*1.28),
+      closingSpeed:Math.max(11,spd*0.76),
+      velocity:[0,-Math.max(11,spd*0.76),0],
+      massKg:mass*0.9,
+    });
+  };
   const shipGuns=createShipGunnery(boat,makeGunneryOptions(boat,''));
   {
     const origPrepare=shipGuns.prepare.bind(shipGuns);
@@ -1223,6 +1242,7 @@ async function main() {
     if(event.type==='shot')gunEffects.emitShot({...event,id:shotKey,chargeKg:event.mass*.3});
     else if(event.type==='impact'&&event.kind==='water'){
       gunEffects.emitImpact({...event,id:shotKey,position:event.surfacePosition,massKg:event.mass});
+      emitCannonWaterWaves(shotKey,event,0);
     }else if(event.type==='impact'){
       gunEffects.emitImpact({...event,id:shotKey,position:event.surfacePosition,massKg:event.mass,kind:event.kind});
     }
@@ -1240,6 +1260,23 @@ async function main() {
     onEvent:event=>{if(event.type==='shot')sceneAudio.gunneryEvent(event);else showShoreShot('free-',event);},
   });
   window.oceanFreeCannon=freeCannon;
+  const castleDuel=createCastleDuelController({
+    getTerrain:()=>terrain,
+    getVessels:()=>vessels,
+    getCamera:()=>cam,
+    setCameraMode:mode=>{if(typeof setCameraMode==='function')setCameraMode(mode);},
+    getSimTime:()=>simTime,
+    getSettings:()=>P,
+    applySunPreset:elev=>{
+      P.sunElev=elev;
+      const s=typeof seaSliders!=='undefined'?seaSliders.get('sunElev'):null;
+      if(s){s.input.value=String(elev);s.output.textContent=String(elev);}
+      envFull=true;
+    },
+    onShoreShot:showShoreShot,
+    gunEffects,
+  });
+  window.castleDuel=castleDuel;
   if(qs.get('ammo'))for(const v of vessels)v.gunnery.setAmmo?.(qs.get('ammo'));
   if(BROADSIDE_SCENARIO&&qs.get('gunsReady')!=='0'){
     shipGuns.readyAtQuarters(BROADSIDE_SIDE);
@@ -1892,6 +1929,46 @@ async function main() {
     const voyageLatitude=voyageCtl?.voyage?.true?.lat;
     return Number.isFinite(voyageLatitude)?voyageLatitude:terrain?.region?.latitude??astronomy.state?.observer?.latitude??SEA_LATITUDE_UNKNOWN;
   }
+  function writeFireLightsToFrame(f){
+    f[23]=0;f[27]=0;f[31]=0;f[54]=0;
+    f[55]=0;f[61]=0;f[62]=0;f[87]=0;
+    if(!Array.isArray(activeFires)||activeFires.length===0)return;
+    const sunDirY=f[33]??Math.sin(P.sunElev*D2R);
+    const nightFactor=1-Math.max(0,Math.min(1,(sunDirY+0.06)/0.24));
+    const fireExposure=Math.min(1.0,1.35/Math.max(f[68]||1,1e-3))*(1.0+2.8*nightFactor);
+    const clusters=[];
+    for(const wf of activeFires){
+      const pos=wf?.position;
+      const rawInt=wf?.intensity??0;
+      if(!pos||rawInt<=0.01)continue;
+      let merged=false;
+      for(const c of clusters){
+        const d2=(c.x-pos[0])**2+(c.y-pos[1])**2+(c.z-pos[2])**2;
+        if(d2<144){
+          const nextW=c.w+rawInt;
+          c.x=(c.x*c.w+pos[0]*rawInt)/nextW;
+          c.y=(c.y*c.w+pos[1]*rawInt)/nextW;
+          c.z=(c.z*c.w+pos[2]*rawInt)/nextW;
+          c.w=Math.min(3.6,nextW);
+          merged=true;
+          break;
+        }
+      }
+      if(!merged)clusters.push({x:pos[0],y:pos[1],z:pos[2],w:Math.min(3.2,rawInt)});
+    }
+    if(!clusters.length)return;
+    clusters.sort((a,b)=>{
+      const da=Math.hypot(a.x-cam.x,a.y-cam.y,a.z-cam.z);
+      const db=Math.hypot(b.x-cam.x,b.y-cam.y,b.z-cam.z);
+      return (b.w/(1+db*0.02))-(a.w/(1+da*0.02));
+    });
+    const c0=clusters[0];
+    f[23]=c0.x;f[27]=c0.y;f[31]=c0.z;f[54]=c0.w*fireExposure;
+    if(clusters.length>1){
+      const c1=clusters[1];
+      f[55]=c1.x;f[61]=c1.y;f[62]=c1.z;f[87]=c1.w*fireExposure;
+    }
+  }
   function writeFrame(time) {
     const aspect = W / H;
     const tanY = Math.tan(cam.fovY * 0.5), tanX = tanY * aspect;
@@ -1950,6 +2027,7 @@ async function main() {
     f[90] = (33.1e-3 + 4.40e-3 * P.haze) * 1e-3;
     f[91] = 1.1e-4;
     f[92]=weather.intensity;f[93]=weather.type;f[94]=weather.flash;f[95]=weather.time;
+    writeFireLightsToFrame(f);
     device.queue.writeBuffer(frameUBO, 0, f);
     opticsData[0]=P.turbidity*(terrain?.turbidityScale??1);opticsData[1]=qs.get('waterOptics')==='0'?0:1;
     opticsData[2]=waterH;opticsData[3]=1;
@@ -3636,9 +3714,20 @@ async function main() {
   if (qs.get('ui') === '0') { document.getElementById('hud').style.display = 'none'; panel.classList.add('hidden'); boatPanel.hidden = true;performancePanel.hidden=true; cameraDock.hidden=true;helm.root.hidden=true;lookHint.hidden=true; }
   if(qs.get('ui')==='0')dolphinControls.toast.style.display='none';
   if(qs.get('profile')==='1')document.body.classList.add('show-performance');
+  if(qs.get('castles')==='1'||qs.get('mode')==='castles')castleDuel.start();
 
 
   const hudFps = document.getElementById('fps');
+  const vesselHasVisibleCrew = v => Boolean(
+    v?.crew && (
+      !v.boat.damage?.sunk ||
+      v.crew.state?.crew?.some(s => s.visible !== false && !s.overboard?.gone)
+    )
+  );
+  const vesselHasActiveSurvivorsOrDebris = v => Boolean(
+    vesselHasVisibleCrew(v) ||
+    (v?.boat?.damage?.fracture?.flying?.size ?? 0) > 0
+  );
 
   // --------------------------------------------------------------------------------------
   // Frame
@@ -3672,7 +3761,7 @@ async function main() {
     }
     surfaceWaves.encode(cp);
     for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter)v.pose?.encode(cp,v.boat.showProw);
-    for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter&&!v.boat.damage?.sunk)v.crew?.encodePose(cp);
+    for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter&&vesselHasVisibleCrew(v))v.crew?.encodePose(cp);
     fortSoldiers?.encodePose(cp);
     townsfolk?.encode(cp);
     props?.encode(cp);
@@ -3785,12 +3874,23 @@ async function main() {
             :null;
       flushedRowingEvents=rowingSurfaceEvents.flush({time:rowingSurfaceWrapped?rowingSurfaceTime-LOOP:rowingSurfaceTime,dt,
         hidden:document.hidden,resetSea:needSpectrum||elapsed>.5||rowingSurfaceWrapped});
+      for(let wi=pendingSplashWaves.length-1;wi>=0;wi--){
+        const pw=pendingSplashWaves[wi];
+        if(simTime+dt>=pw.dueTime||simTime<pw.dueTime-30){
+          surfaceWaves.emit({source:'roundshot-plume',id:pw.id,kind:'entry',x:pw.x,z:pw.z,
+            radiusMetres:pw.radiusMetres,closingSpeed:pw.closingSpeed,velocity:pw.velocity,massKg:pw.massKg,age:0});
+          pendingSplashWaves.splice(wi,1);
+        }
+      }
       surfaceWaves.update(boat,dt);
     }
     if(voyageCtl?.active&&dt>0)voyageCtl.update(dt,now);
     instruments.update(now);
     helm.update(now);
     updateCamera(camDt);
+    if(castleDuel.active){
+      castleDuel.update(dt,[Math.cos(P.windDir*D2R)*P.windSpeed,0,Math.sin(P.windDir*D2R)*P.windSpeed]);
+    }
     simTime += dt;
     if (simTime > LOOP) simTime -= LOOP;
     frameIndex++;
@@ -3815,7 +3915,7 @@ async function main() {
     for(const v of vessels.slice(1)){v.boat.showProw=!v.dormantEncounter&&followerEnabled;v.boat.crew=boat.crew;v.boat.effects=boat.effects;}
     for(const [index,v] of vessels.entries()){
       const ship=v.boat,data=v.hullData,dmg=ship.damage;
-      if(v.bakedWreck&&(needSpectrum||(dmg?.pendingBakes?.length??0)>0))v.bakedWreck=false;
+      if(v.bakedWreck&&(needSpectrum||(dmg?.pendingBakes?.length??0)>0||vesselHasActiveSurvivorsOrDebris(v)))v.bakedWreck=false;
       if(v.bakedWreck){
         if(dt>0&&v.gunnery.state.projectiles.length>0){
           v.gunnery.update(dt,[Math.cos(P.windDir*D2R)*P.windSpeed,0,Math.sin(P.windDir*D2R)*P.windSpeed]);
@@ -3825,7 +3925,7 @@ async function main() {
       if(!index||followerEnabled){
         if(dt>0)v.gunnery.update(dt,[Math.cos(P.windDir*D2R)*P.windSpeed,0,Math.sin(P.windDir*D2R)*P.windSpeed]);
       }
-      const settlingBake=Boolean(dmg?.settledWreck&&(dmg?.pendingBakes?.length??0)===0&&v.gunnery.state.projectiles.length===0);
+      const settlingBake=Boolean(dmg?.settledWreck&&(dmg?.pendingBakes?.length??0)===0&&v.gunnery.state.projectiles.length===0&&!vesselHasActiveSurvivorsOrDebris(v));
       if(settlingBake){
         while(dmg?.pendingBakes?.length)v.pose.updateDamage?.(ship);
         for(const g of v.gunnery.state.guns)g.offset=0;
@@ -3862,7 +3962,7 @@ async function main() {
       v.shadows.update(data,frameF.subarray(frameF[115]>.5?96:32,frameF[115]>.5?99:35),ship.showProw&&!v.entirelySubmerged&&qs.get('shadows')!=='0');
       if(!index&&dmg?.sunk&&!playerWreckRaised){playerWreckRaised=true;voyageCtl?.presentShipwreck?.();}
       // Paused frames keep the last pose, but a ship opened paused must still show its crew.
-      if((!index||followerEnabled)&&!dmg?.sunk){
+      if((!index||followerEnabled)&&vesselHasVisibleCrew(v)){
         frameStages.mark('Ship state');
         if(dt>0||!v.crew?.posed){v.crew?.update(ship,dt,P.windSpeed,cam);v.wetness.updateCrew(v.crew?.state,ship);}
         else v.crew.refreshDraw(ship,cam);
@@ -3885,7 +3985,7 @@ async function main() {
     frameStages.mark('Ship state');
     if(dt>0)rowingSurfaceEvents.collect(followerEnabled?vessels:[vessels[0]],{time:simTime,dt,
       hidden:document.hidden,resetSea:needSpectrum||elapsed>.5||rowingSurfaceWrapped});
-    if(terrain?.port&&terrain.port!==activePortRef){
+    if(!castleDuel.active&&terrain?.port&&terrain.port!==activePortRef){
       activePortRef=terrain.port;
       portGunnery=createPortGunnery(activePortRef,{
         getVessels:()=>followerEnabled?vessels:[vessels[0]],
@@ -3894,20 +3994,28 @@ async function main() {
       });
     }
     const windVec=[Math.cos(P.windDir*D2R)*P.windSpeed,0,Math.sin(P.windDir*D2R)*P.windSpeed];
-    portGunnery?.update(dt,windVec);
-    freeCannon.update(dt,{firing:cameraMode==='free'&&keys.KeyF===true,eye:[cam.x,cam.y,cam.z],
-      forward:[Math.cos(cam.pitch)*Math.sin(cam.yaw),Math.sin(cam.pitch),-Math.cos(cam.pitch)*Math.cos(cam.yaw)],wind:windVec});
-    fortSoldiers?.update(terrain?.port??null,dt,P.windSpeed,cam,!portGunnery);
+    if(!castleDuel.active){
+      portGunnery?.update(dt,windVec);
+      freeCannon.update(dt,{firing:cameraMode==='free'&&keys.KeyF===true,eye:[cam.x,cam.y,cam.z],
+        forward:[Math.cos(cam.pitch)*Math.sin(cam.yaw),Math.sin(cam.pitch),-Math.cos(cam.pitch)*Math.cos(cam.yaw)],wind:windVec});
+      fortSoldiers?.update(terrain?.port??null,dt,P.windSpeed,cam,!portGunnery);
+    }else{
+      fortSoldiers?.update(castleDuel.port,dt,P.windSpeed,cam,false);
+    }
     townsfolk?.follow(terrain?.ports,cam);
     props?.follow(terrain?.ports,cam);
     terrain?.updatePortDamage?.(simTime);
     const activeVesselCount=followerEnabled?vessels.length:1;
     allProjectiles.length=0;
     for(let i=0;i<activeVesselCount;i++)for(const p of vessels[i].gunnery.state.projectiles)allProjectiles.push(p);
-    if(portGunnery){const portProj=portGunnery.projectiles;for(let i=0;i<portProj.length;i++)allProjectiles.push(portProj[i]);}
-    for(const p of freeCannon.state.projectiles)allProjectiles.push(p);
+    if(castleDuel.active){
+      for(const p of castleDuel.projectiles)allProjectiles.push(p);
+    }else{
+      if(portGunnery){const portProj=portGunnery.projectiles;for(let i=0;i<portProj.length;i++)allProjectiles.push(portProj[i]);}
+      for(const p of freeCannon.state.projectiles)allProjectiles.push(p);
+    }
     gunEffects.setProjectiles(allProjectiles);
-    if(boat.showProw&&boat.effects!==false){
+    if(!castleDuel.active&&boat.showProw&&boat.effects!==false){
       const aimFallback=(helm.inBattle||!captainPanel.hidden)?(shipGuns.selectedSide??BROADSIDE_SIDE??'port'):null;
       const aimArcs=shipGuns.computeAimTrajectories?.({wind:windVec,fallbackSide:aimFallback})??[];
       gunEffects.setAimArcs?.(aimArcs);
@@ -3918,7 +4026,13 @@ async function main() {
     hullContactProbe.update(boat,dt,{enabled:sceneAudio.enabled&&sceneAudio.ready&&boat.effects!==false,hidden:document.hidden,resetSea:needSpectrum||elapsed>.5});
     activeFires.length=0;
     for(let i=0;i<activeVesselCount;i++){const fires=vessels[i].boat.damage?.worldFires;if(fires)for(const f of fires)activeFires.push(f);}
-    if(portGunnery){const portFires=portGunnery.worldFires;for(let i=0;i<portFires.length;i++)activeFires.push(portFires[i]);}
+    if(castleDuel.active){
+      for(const f of castleDuel.worldFires)activeFires.push(f);
+    }else if(portGunnery){
+      const portFires=portGunnery.worldFires;for(let i=0;i<portFires.length;i++)activeFires.push(portFires[i]);
+    }
+    writeFireLightsToFrame(frameF);
+    device.queue.writeBuffer(frameUBO,0,frameF);
     gunEffects.update(dt,{wind:windVec,eye:[cam.x,cam.y,cam.z],fires:activeFires});
     wakePool.update(vessels);
     device.queue.writeBuffer(fleetHullUBO,0,fleetHullData);sceneShadows.update(vessels);
@@ -4008,7 +4122,7 @@ async function main() {
     const drawProw=vessels.some(v=>v.boat.showProw);
     const gunTransparent=gunEffects.transparentActive;
     mainPass.colorAttachments[0].resolveTarget=hdrView;
-    for(const [i,v] of vessels.entries())if((!v.bakedWreck||skyChanged)&&!v.dormantEncounter)v.shadows.encode(enc,profiler,v.boat.damage?.sunk?null:v.crew?.drawShadow,i?v.id+' ':'');
+    for(const [i,v] of vessels.entries())if((!v.bakedWreck||skyChanged)&&!v.dormantEncounter)v.shadows.encode(enc,profiler,vesselHasVisibleCrew(v)?v.crew?.drawShadow:null,i?v.id+' ':'');
     seaShadows.encode(enc,i=>{const v=vessels[i];return (!v.bakedWreck||skyChanged)&&!v.dormantEncounter&&v.shadows.data[19]>0;});
     const terrainCamera={x:frameF[16],y:frameF[17],z:frameF[18],screenHeight:H,pixelError:polygons.pixelError,
       tanHalfFovY:Math.hypot(frameF[24],frameF[25],frameF[26]),forward:frameF.subarray(28,31)};
@@ -4036,7 +4150,7 @@ async function main() {
       if(v.bakedWreck&&v.entirelySubmerged&&Math.hypot((v.boat.x??0)-cam.x,(v.boat.z??0)-cam.z)>350)continue;
       v.render.submerged.bind(underwater);underwater.setBindGroup(0,v.submergedGroup);underwater.setBindGroup(1,v.submergedLighting);
       underwater.setVertexBuffer(0,v.vertexBuffer);if(v.pose)underwater.setVertexBuffer(1,v.pose.buffer);underwater.setIndexBuffer(v.render.indexBuffer,'uint32');underwater.drawIndexed(v.asset.indices.length);
-      if(!v.boat.damage?.sunk)v.crew?.drawSubmerged(underwater);
+      if(vesselHasVisibleCrew(v))v.crew?.drawSubmerged(underwater);
       if(!v.bakedWreck)v.anchorRenderer.drawSubmerged(underwater);
     }
     dolphins.drawSubmerged(underwater);marineLife.drawSubmerged(underwater);underwater.end();
@@ -4047,7 +4161,7 @@ async function main() {
         if(!v.boat.showProw||(v.bakedWreck&&v.entirelySubmerged))continue;
         v.render.submerged.bind(aboveWater,true);aboveWater.setBindGroup(0,v.submergedGroup);aboveWater.setBindGroup(1,v.submergedLighting);
         aboveWater.setVertexBuffer(0,v.vertexBuffer);if(v.pose)aboveWater.setVertexBuffer(1,v.pose.buffer);aboveWater.setIndexBuffer(v.render.indexBuffer,'uint32');aboveWater.drawIndexed(v.asset.indices.length);
-        if(!v.boat.damage?.sunk)v.crew?.drawSubmerged(aboveWater,true);
+        if(vesselHasVisibleCrew(v))v.crew?.drawSubmerged(aboveWater,true);
         if(!v.bakedWreck)v.anchorRenderer.drawSubmerged(aboveWater,true);
       }
       dolphins.drawSubmerged(aboveWater,true);marineLife.drawSubmerged(aboveWater,true);aboveWater.end();
@@ -4072,7 +4186,7 @@ async function main() {
       rp.setVertexBuffer(0,v.vertexBuffer);if(v.pose)rp.setVertexBuffer(1,v.pose.buffer);rp.setIndexBuffer(v.render.indexBuffer,'uint32');rp.drawIndexed(v.asset.indices.length);
     };
     for(const v of hulls)if(!hullBelongsDamaged(v))drawHull(v,v.render.pipeline,v.bindGroup,v.lighting);
-    for(const v of hulls)if(!v.boat.damage?.sunk)v.crew?.drawOpaque(rp);
+    for(const v of hulls)if(vesselHasVisibleCrew(v))v.crew?.drawOpaque(rp);
     fortSoldiers?.draw(rp);
     townsfolk?.draw(rp);
     props?.draw(rp);
@@ -4114,7 +4228,7 @@ async function main() {
     }
     if(drawProw){
       for(const v of hulls){
-        if(!v.boat.damage?.sunk)v.crew?.drawCut(rp);
+        if(vesselHasVisibleCrew(v))v.crew?.drawCut(rp);
         if(!v.bakedWreck)v.anchorRenderer.draw(rp);
         if(!v.boat.damage?.sunk)v.flood?.draw(rp);
       }

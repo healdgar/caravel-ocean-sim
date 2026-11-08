@@ -1660,6 +1660,38 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     return true;
   }
 
+  let savedPortOverride=null;
+  function setCustomPort(customPort=null,customPortGeometry=null){
+    if(terrainDisposed||!proceduralPack)return false;
+    portsDirty=true;
+    if(customPort&&customPortGeometry){
+      if(!savedPortOverride){
+        savedPortOverride={port:proceduralPack.port,portGeometry:proceduralPack.portGeometry};
+      }
+      proceduralPack.port=customPort;
+      proceduralPack.portGeometry=customPortGeometry;
+    }else if(savedPortOverride){
+      proceduralPack.port=savedPortOverride.port;
+      proceduralPack.portGeometry=savedPortOverride.portGeometry;
+      savedPortOverride=null;
+    }else{
+      return false;
+    }
+    const nextGeo=proceduralPack.portGeometry;
+    const nextPort=proceduralPack.port;
+    const oldPort=portMesh;
+    portVertsCpu=nextGeo?.vertices??null;
+    portMesh=nextGeo?.indices?.length?{
+      vertices:buffer(nextGeo.vertices,GPUBufferUsage.VERTEX,'coastal port prefab vertices custom'),
+      indices:buffer(nextGeo.indices,GPUBufferUsage.INDEX,'coastal port prefab indices custom'),
+      count:nextGeo.indices.length,
+    }:null;
+    oldPort?.vertices?.destroy?.();oldPort?.indices?.destroy?.();
+    portFractures?.destroy();
+    portFractures=portFracturesFor(nextGeo,nextPort,portMesh?.indices);
+    return true;
+  }
+
   const discoveryListeners=new Set();
   const discovery={
     enabled:Boolean(proceduralPack),
@@ -1999,7 +2031,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       const slope=Math.hypot(heightSample(lx+2,lz)-heightSample(lx-2,lz),heightSample(lx,lz+2)-heightSample(lx,lz-2))/4;
       return Math.max(surveyed,(1-step(.12,.3,green))*(1-step(1.5,3.5,heightSample(lx,lz)))*(1-step(.12,.3,slope)));
     },
-    discovery,applyUpgradedPack,
+    discovery,applyUpgradedPack,setCustomPort,
     safeStart(view,boat){return safeLandfallStart(heights,view,boat,this.region,this.height);},
     constrain(boat,x,z,extraOptions=null){return constrainIslandMotion(heights,boat,x,z,this.height,this.region,{ports:this.ports,beaches:proceduralPack?.beaches??null,onGrounding:this.onGrounding,...(extraOptions||{})});},
     waveShelter(x,z,swellDirRad=0){

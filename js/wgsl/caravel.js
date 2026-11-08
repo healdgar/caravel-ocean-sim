@@ -858,7 +858,7 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
     let moonScatter=.70/PI+.30*(34.0/(2.0*PI))*pow(max(dot(-v,ml),0.0),32.0);
     col+=lunarIlluminance()*moonVisibility*canvasTransmission(canvasDepth,throughMoon)*throughMoon*moonScatter;
   }
-  col+=lightningSurface(n,v,albedo,rough)+gunFlashSurface(in.world,n,v,albedo,rough);
+  col+=lightningSurface(n,v,albedo,rough)+gunFlashSurface(in.world,n,v,albedo,rough)+worldFireSurface(in.world,n,v,albedo,rough);
   if(in.material==9u || in.material==13u){col+=lightningLight()*albedo*max(dot(-n,lightningDirection()),0.0)*.12;}
   // Captain's & Admiral's cabin candle lanterns glowing through stern and quarter-gallery windows
   // in the evening, night, and early morning (compensated for night exposure so they never cause bloom glare).

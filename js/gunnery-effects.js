@@ -231,45 +231,61 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
         const pos=gunneryFxVector(f.position),int=gunneryFxClamp(f.intensity,0.05,1.6),age=gunneryFxFinite(f.age,0),seed=gunneryFxFinite(f.seed,1.7);
         const wind=gunneryFxVector(options.wind);
         const pulse=0.88+0.14*Math.sin(age*11.3+seed*19.0)+0.08*Math.cos(age*19.7-seed*7.3);
-        const rHoriz=(0.48+0.52*int)*pulse;
-        const rVert=(0.82+0.95*int)*pulse;
+        const rHoriz=(0.56+0.60*int)*pulse;
+        const rVert=(0.98+1.18*int)*pulse;
         // 1. Primary roaring shipboard/structure flame volume (direction=[0,1,0] -> radii[2] is vertical)
         ordered.push({
-          centre:[pos[0]+wind[0]*0.03,pos[1]+0.35*rVert,pos[2]+wind[2]*0.03],
+          centre:[pos[0]+wind[0]*0.03,pos[1]+0.36*rVert,pos[2]+wind[2]*0.03],
           direction:[0,1,0],
           radii:[rHoriz,rHoriz,rVert],
           type:1,
           subtype:1.0,
-          extinction:0.65+0.55*int,
+          extinction:0.86+0.68*int,
           age,
           seed:seed*53,
         });
-        // 2. Upper flickering flame tongues & rising hot embers
-        const tongueFlicker=0.82+0.24*Math.sin(age*16.4+seed*31.0);
+        // 2. Upper flickering flame tongues & whipping fire sheets
+        const tongueFlicker=0.82+0.26*Math.sin(age*16.4+seed*31.0);
         ordered.push({
           centre:[
-            pos[0]+wind[0]*0.10+Math.sin(age*6.7+seed*13.0)*0.18*int,
-            pos[1]+0.78*rVert,
-            pos[2]+wind[2]*0.10+Math.cos(age*5.9+seed*17.0)*0.18*int,
+            pos[0]+wind[0]*0.10+Math.sin(age*6.7+seed*13.0)*0.22*int,
+            pos[1]+0.82*rVert,
+            pos[2]+wind[2]*0.10+Math.cos(age*5.9+seed*17.0)*0.22*int,
           ],
           direction:[0,1,0],
-          radii:[rHoriz*0.68*tongueFlicker,rHoriz*0.68*tongueFlicker,rVert*0.76*tongueFlicker],
+          radii:[rHoriz*0.76*tongueFlicker,rHoriz*0.76*tongueFlicker,rVert*0.92*tongueFlicker],
           type:1,
           subtype:1.25,
-          extinction:(0.48+0.44*int)*tongueFlicker,
+          extinction:(0.68+0.54*int)*tongueFlicker,
           age:age*1.35+1.7,
           seed:seed*71+13,
         });
-        // 3. Cycling, rising & wind-drifting dark pitch/tar smoke plume (3 overlapping parcels)
+        // 3. Buoyant rising spark & glowing ember crown
+        const sparkFlicker=0.85+0.20*Math.cos(age*13.1+seed*41.0);
+        ordered.push({
+          centre:[
+            pos[0]+wind[0]*0.22+Math.cos(age*4.8+seed*23.0)*0.28*int,
+            pos[1]+1.32*rVert,
+            pos[2]+wind[2]*0.22+Math.sin(age*5.1+seed*19.0)*0.28*int,
+          ],
+          direction:[0,1,0],
+          radii:[rHoriz*0.88*sparkFlicker,rHoriz*0.88*sparkFlicker,rVert*0.85*sparkFlicker],
+          type:1,
+          subtype:1.55,
+          extinction:(0.46+0.42*int)*sparkFlicker,
+          age:age*1.65+3.4,
+          seed:seed*89+29,
+        });
+        // 4. Cycling, rising & wind-drifting dark pitch/tar smoke plume (3 overlapping parcels)
         const period=5.4;
         for(let pIdx=0;pIdx<3;pIdx++){
           const phase=((age+pIdx*(period/3)+seed*2.1)%period)/period;
           const env=Math.sin(phase*Math.PI);
           if(env<0.04)continue;
-          const rise=(1.35+phase*6.8)*(0.75+0.55*int);
+          const rise=(1.45+phase*7.2)*(0.75+0.55*int);
           const drift=phase*phase*2.4;
-          const radH=(0.95+phase*2.45)*(0.75+0.55*int);
-          const radV=(1.15+phase*2.85)*(0.75+0.55*int);
+          const radH=(1.02+phase*2.55)*(0.75+0.55*int);
+          const radV=(1.22+phase*2.95)*(0.75+0.55*int);
           ordered.push({
             centre:[
               pos[0]+wind[0]*drift+Math.sin(phase*6.28+seed*11+pIdx)*0.28,
@@ -280,7 +296,7 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
             radii:[radH,radH,radV],
             type:0,
             subtype:2.0+phase*0.8,
-            extinction:(3.6*int*env)/Math.max(1.0,radH*0.55),
+            extinction:(3.8*int*env)/Math.max(1.0,radH*0.55),
             age:age*0.45+pIdx*3.1,
             seed:seed*97+pIdx*29,
           });
@@ -343,9 +359,7 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
         pass.setPipeline(pipelines[3]);pass.setBindGroup(0,groups[3]);pass.draw(6,impactCount*GUNNERY_DROP_COUNT);
         pass.setPipeline(pipelines[7]);pass.setBindGroup(0,groups[7]);pass.draw(6,impactCount*GUNNERY_DUST_COUNT);
         pass.setPipeline(pipelines[6]);pass.setBindGroup(0,groups[6]);pass.draw(6,impactCount*GUNNERY_EARTH_COUNT);
-        if(!surfaceWaves){
-          pass.setPipeline(pipelines[4]);pass.setBindGroup(0,groups[4]);if(ringWaves)pass.setBindGroup(1,ringWaves[surfaceWaves.current]);pass.draw(GUNNERY_RING_SEGMENTS*GUNNERY_RING_COUNT*6,impactCount);
-        }
+        pass.setPipeline(pipelines[4]);pass.setBindGroup(0,groups[4]);if(ringWaves)pass.setBindGroup(1,ringWaves[surfaceWaves.current]);pass.draw(GUNNERY_RING_SEGMENTS*GUNNERY_RING_COUNT*6,impactCount);
       }
       if(volumeCount&&depthReady){pass.setPipeline(pipelines[1]);pass.setBindGroup(0,volumeGroup);pass.draw(36,volumeCount);}
     },

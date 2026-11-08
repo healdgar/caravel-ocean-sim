@@ -85,22 +85,27 @@ function overboardCountLost(boat, s) {
   c.able = Math.max(0, (c.total ?? 0) - c.killed - (c.wounded ?? 0));
 }
 
-export function sendCrewOverboard(boat, s, { side = Math.sign(s.x || 1) || 1, outward = 2.5, cause = 'blast', dead = false, hurt = false } = {}) {
+export function sendCrewOverboard(boat, s, { side = Math.sign(s.x || 1) || 1, outward = 2.5, cause = 'blast', dead = false, hurt = false, awash = false } = {}) {
   if (!boat || !s?.position || s.overboard) return null;
   const alive = !dead && s.casualtyState !== 'fallen';
   const wounded = hurt || s.casualtyState === 'wounded';
   overboardCountLost(boat, s);
   const { ax, ay, az } = overboardBasis(boat);
   const [lx, ly, lz] = s.position;
-  const launchX = lx + side * 0.3, launch = Math.min(outward, OVERBOARD_LAUNCH_LIMIT_MPS);
+  const launchX = lx + side * (awash ? 0.14 : 0.3), launch = Math.min(outward, OVERBOARD_LAUNCH_LIMIT_MPS);
+  const worldX = (boat.x ?? 0) + launchX * ax[0] + ly * ay[0] + lz * az[0];
+  const worldY = awash ? OVERBOARD_FLOAT_Y : (boat.heave ?? 0) + launchX * ax[1] + ly * ay[1] + lz * az[1];
+  const worldZ = (boat.z ?? 0) + launchX * ax[2] + ly * ay[2] + lz * az[2];
+  const swimYaw = ((boat.heading ?? 0) * Math.PI) / 180 + (side >= 0 ? 0.85 : -0.85) + (((s.crewIndex ?? 0) % 5) - 2) * 0.32;
   s.overboard = {
-    x: (boat.x ?? 0) + launchX * ax[0] + ly * ay[0] + lz * az[0],
-    y: (boat.heave ?? 0) + launchX * ax[1] + ly * ay[1] + lz * az[1],
-    z: (boat.z ?? 0) + launchX * ax[2] + ly * ay[2] + lz * az[2],
-    vx: side * launch * ax[0], vy: 1.4, vz: side * launch * ax[2],
-    age: 0, afloat: 0, inWater: false, alive, wounded, side, cause, hauling: 0, gone: false,
+    x: worldX,
+    y: worldY,
+    z: worldZ,
+    vx: side * launch * ax[0], vy: awash ? 0 : 1.4, vz: side * launch * ax[2],
+    age: 0, afloat: 0, inWater: Boolean(awash), alive, wounded, side, cause, hauling: 0, gone: false,
     drownAt: alive ? (wounded ? OVERBOARD_DROWN_WOUNDED_SECONDS : OVERBOARD_DROWN_SECONDS) : 0,
     heading: boat.heading ?? 0,
+    swimYaw,
   };
   s.casualtyState = 'fallen';
   s.health = alive ? Math.max(0.2, s.health ?? 1) : 0;
@@ -110,6 +115,9 @@ export function sendCrewOverboard(boat, s, { side = Math.sign(s.x || 1) || 1, ou
   s.knockbackVz = 0;
   s.knockdownTimer = 0;
   boat.crewEvents?.({ type: 'overboard', sailor: s, alive, side, cause, position: [s.overboard.x, s.overboard.y, s.overboard.z] });
+  if (awash) {
+    boat.crewEvents?.({ type: 'overboard-splash', sailor: s, position: [worldX, 0, worldZ] });
+  }
   return s.overboard;
 }
 
@@ -158,7 +166,15 @@ export function stepCrewOverboard(boat, s, dt) {
     // Wind and sea carry him a little, and much less than they carry a hull.
     o.x += Math.sin(o.age * 0.11) * OVERBOARD_DRIFT_MPS * dt;
     o.z += Math.cos(o.age * 0.07) * OVERBOARD_DRIFT_MPS * dt;
-    o.y = OVERBOARD_FLOAT_Y + Math.sin(o.age * 1.3 + (s.crewIndex ?? 0)) * 0.05;
+    if (o.alive && (o.cause === 'sinking' || o.afloat > 1.8)) {
+      const swimSpeed = o.wounded ? 0.18 : 0.32;
+      o.swimYaw = (o.swimYaw ?? 0) + Math.sin(o.age * 0.42 + (s.crewIndex ?? 0) * 1.3) * 0.16 * dt;
+      o.x += Math.sin(o.swimYaw) * swimSpeed * dt;
+      o.z += Math.cos(o.swimYaw) * swimSpeed * dt;
+    }
+    const waveBob = Math.sin(o.age * 1.45 + (s.crewIndex ?? 0) * 0.9 + o.x * 0.18) * 0.055
+      + Math.cos(o.age * 1.05 + o.z * 0.16) * 0.032;
+    o.y = Math.min(-0.015, Math.max(-0.27, OVERBOARD_FLOAT_Y + waveBob));
     const range = Math.hypot(o.x - boatX, o.z - boatZ);
     if (o.alive && o.afloat >= o.drownAt) {
       o.alive = false;
@@ -183,7 +199,8 @@ export function stepCrewOverboard(boat, s, dt) {
     }
   }
   const { ax, ay, az } = overboardBasis(boat);
-  const dx = o.x - boatX, dy = o.y - (boat.heave ?? 0), dz = o.z - boatZ;
+  const waveLift = o.inWater && Number.isFinite(boat.target?.heave) ? boat.target.heave : 0;
+  const dx = o.x - boatX, dy = (o.y + waveLift) - (boat.heave ?? 0), dz = o.z - boatZ;
   const lx = overboardDot(ax, dx, dy, dz), ly = overboardDot(ay, dx, dy, dz), lz = overboardDot(az, dx, dy, dz);
   const sx = (boat.beam ?? 3.6) / 3.6, sz = (boat.length ?? 12) / 12, sy = vesselVerticalScale(boat) || 1;
   s.position[0] = lx;
@@ -197,12 +214,29 @@ export function stepCrewOverboard(boat, s, dt) {
   s.walk = 0;
   s.brace = 0;
   // The crew are drawn from this matrix, which the deck step would otherwise have written.
-  s.yaw = s.collapseYaw ?? s.yaw ?? 0;
-  s.climbPitch = (s.fallDir ?? 1) * Math.PI * 0.47;
+  if (o.inWater && o.alive) {
+    s.yaw = (o.swimYaw ?? 0) - ((boat.heading ?? 0) * Math.PI) / 180;
+    s.climbPitch = 0.18 + Math.sin(o.age * 2.6 + (s.crewIndex ?? 0)) * 0.06;
+  } else {
+    s.yaw = s.collapseYaw ?? s.yaw ?? 0;
+    s.climbPitch = (s.fallDir ?? 1) * Math.PI * 0.47;
+  }
   if (s.transform && s.rotation) {
     const sinYaw = Math.sin(s.yaw / 2), cosYaw = Math.cos(s.yaw / 2), sinPitch = Math.sin(s.climbPitch / 2), cosPitch = Math.cos(s.climbPitch / 2);
     s.rotation.set([cosYaw * sinPitch, sinYaw * cosPitch, -sinYaw * sinPitch, cosYaw * cosPitch]);
     gltfTRS(s.transform, s.position, s.rotation, s.scale);
+    if (o.inWater && (Math.abs(boat.roll ?? 0) > 0.01 || Math.abs(boat.pitch ?? 0) > 0.01)) {
+      const cr = Math.cos(boat.roll ?? 0), sr = Math.sin(boat.roll ?? 0);
+      const cp = Math.cos(boat.pitch ?? 0), sp = Math.sin(boat.pitch ?? 0);
+      for (let c = 0; c < 12; c += 4) {
+        const vx = s.transform[c], vy = s.transform[c + 1], vz = s.transform[c + 2];
+        const yy = cp * vy + sp * vz;
+        const nVz = -sp * vy + cp * vz;
+        s.transform[c] = cr * vx + sr * yy;
+        s.transform[c + 1] = -sr * vx + cr * yy;
+        s.transform[c + 2] = nVz;
+      }
+    }
   }
 }
 

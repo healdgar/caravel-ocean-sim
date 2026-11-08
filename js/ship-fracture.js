@@ -598,7 +598,7 @@ function blowOff(state, s, now, { side = 0, power = 1, up = 1, drop = false } = 
     : [outward * (1.8 + 4.2 * a) * effPower, (0.8 + 3.2 * b) * up * effPower, (c - 0.5) * 4.0 * effPower];
   const rate = drop ? 1 + 2 * b : (2 + 5 * c) * Math.min(1.5, effPower);
   const axis = [a - 0.5, b - 0.5, c - 0.5], n = Math.hypot(...axis) || 1;
-  writeFlight(state, s, { pivot: shard.centroid, velocity, spin: axis.map((v) => (v / n) * rate), linger: 3 }, now);
+  writeFlight(state, s, { pivot: shard.centroid, velocity, spin: axis.map((v) => (v / n) * rate), linger: 95, sink: 0.012 }, now);
   return true;
 }
 
@@ -667,8 +667,8 @@ function fellMast(state, mastId, stage, side, now, { snap = false } = {}) {
     velocity: [(side * clear) / fall, 0, (shardNoise(fresh[0], 4) - 0.5) * 2],
     spin: [-roll * side * third * rate, -roll * third * rate, -side * third * rate],
     hinge,
-    sink: 0.04,
-    linger: Math.min(90, 25 + length),
+    sink: 0.012,
+    linger: Math.min(180, 75 + length),
   };
   for (const s of fresh) {
     // Rope has no stiffness to fall with. It goes with the mast as it starts to lean, then is gone, parted.
@@ -759,6 +759,34 @@ function destroyWreckedParts(state, damage, now) {
   for (const s of state.fracture.strikable) {
     const shard = state.fracture.shards[s];
     if (shard.kind === SHARD_KINDS.whole && !state.broken[s] && (partDamage[shard.partId] ?? 0) >= 0.65 && blowOff(state, s, now, {})) released++;
+  }
+  return released;
+}
+
+/**
+ * When a vessel founders and sinks, loose upper-works wooden timbers, hatches, rails, and planking
+ * float free and continue to bob on the waves above the wreck.
+ */
+export function releaseSinkingWreckage(fracture, damage, now = 0) {
+  const state = shipFractureStateOf(damage, fracture);
+  if (!state || state.sunkWreckageReleased) return 0;
+  state.sunkWreckageReleased = true;
+  let released = 0;
+  const candidates = [];
+  for (const s of fracture.strikable) {
+    if (state.broken[s]) continue;
+    const shard = fracture.shards[s];
+    if (!shard || (shard.kind !== SHARD_KINDS.skin && shard.kind !== SHARD_KINDS.whole)) continue;
+    if (shard.centroid[1] < 0.05) continue;
+    candidates.push(s);
+  }
+  candidates.sort((a, b) => fracture.shards[b].centroid[1] - fracture.shards[a].centroid[1]);
+  const targetCount = Math.min(20, Math.max(8, Math.floor(candidates.length * 0.22)));
+  const stride = Math.max(1, Math.floor(candidates.length / Math.max(1, targetCount)));
+  for (let i = 0; i < candidates.length && released < targetCount; i += stride) {
+    const s = candidates[i];
+    const side = fracture.shards[s].centroid[0] >= 0 ? 1 : -1;
+    if (blowOff(state, s, now, { side, power: 0.55, up: 0.35 })) released++;
   }
   return released;
 }
@@ -984,11 +1012,18 @@ export async function createShipFractureGPU({ device, computePipe, posedBuffer, 
       return wrote;
     },
     // The clock runs only while something is in the air, a single small write per frame.
-    tick(damage, now) {
-      if (destroyed || !current || damage?.fracture !== current || !current.flying.size) return;
+    tick(damage, now, boat = null) {
+      if (destroyed) return;
+      if (damage?.sunk && current && !current.sunkWreckageReleased) {
+        if (releaseSinkingWreckage(fracture, damage, now)) active = true;
+      }
+      if (!current || damage?.fracture !== current || !current.flying.size) return;
       settleFinishedFlights(current, now);
       clockData[0] = now - current.epoch;
-      device.queue.writeBuffer(clockBuffer, 0, clockData, 0, 1);
+      clockData[2] = boat ? Math.max(0, (boat.target?.heave ?? 0) - (boat.heave ?? 0)) : 0;
+      clockData[3] = boat?.roll ?? 0;
+      clockData[7] = boat?.pitch ?? 0;
+      device.queue.writeBuffer(clockBuffer, 0, clockData, 0, 8);
       flush();
     },
     reset() {

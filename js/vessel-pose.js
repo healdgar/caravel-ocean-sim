@@ -57,7 +57,7 @@ export async function createVesselPose({device,computePipe,sourceBuffer,mesh=nul
   return {buffer,assets,vertexCount,partAssembly:assembly,
     get scarred(){return baked||assembly?.active===true||shards?.active===true;},
     update(boat,time,wind){
-      clock=time;shards?.tick(boat?.damage,time);
+      clock=time;shards?.tick(boat?.damage,time,boat);
       if(destroyed||!rigData)return false;
       writeRigGPUFrame(rigData,boat,time,wind,state);device.queue.writeBuffer(stateBuffer,0,state);initialized=true;return true;
     },

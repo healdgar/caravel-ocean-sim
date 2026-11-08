@@ -34,7 +34,32 @@ fn shardFlight(position:vec3f,restNormal:vec3f,origin:vec4f,flight:vec4f,spinHid
     let turned=fractureRotate(normal/max(scaleOfNormal,1e-5)/scale,axis,c,s)*scale;
     normal=normalize(turned)*scaleOfNormal;
   }
-  return ShardPose(origin.xyz+(relative+displacement)/scale,normal);
+  var worldMetres=origin.xyz*scale+relative+displacement;
+  if(age>settle&&motion.y>0.0&&(clock.pad0>0.001||abs(clock.pad1)>0.001||abs(clock.scale.w)>0.001)){
+    let waterAge=age-settle;
+    let blend=smoothstep(0.0,0.45,waterAge);
+    let seed=origin.x*1.73+origin.z*2.19;
+    let waveBob=(sin(clock.now*1.85+seed)*0.09+cos(clock.now*1.27-seed*0.7)*0.06)*blend;
+    let waveRockX=sin(clock.now*1.65+seed*1.3)*0.11*blend;
+    let waveRockZ=cos(clock.now*1.42-seed*0.9)*0.14*blend;
+    let cr=cos(clock.pad1-waveRockZ);let sr=sin(clock.pad1-waveRockZ);
+    let cp=cos(clock.scale.w-waveRockX);let sp=sin(clock.scale.w-waveRockX);
+    let wy=worldMetres.y+clock.pad0*blend+waveBob;
+    let wz=worldMetres.z;
+    let yy=cp*wy+sp*wz;
+    let lz=-sp*wy+cp*wz;
+    let lx=cr*worldMetres.x+sr*yy;
+    let ly=-sr*worldMetres.x+cr*yy;
+    worldMetres=vec3f(lx,ly,lz);
+    let nScale=length(normal);
+    let nUnit=normal/max(nScale,1e-5)/scale;
+    let nyy=cp*nUnit.y+sp*nUnit.z;
+    let nlz=-sp*nUnit.y+cp*nUnit.z;
+    let nlx=cr*nUnit.x+sr*nyy;
+    let nly=-sr*nUnit.x+cr*nyy;
+    normal=normalize(vec3f(nlx,nly,nlz)*scale)*nScale;
+  }
+  return ShardPose(worldMetres/scale,normal);
 }
 `;
 

@@ -16,16 +16,25 @@ export function surfaceWaveEmission(event){
   const velocity=event.velocity??[0,0,0];if(velocity.length!==3||!Array.from(velocity).every(Number.isFinite))return null;
   const age=event.age??0;if(!Number.isFinite(age)||age<0||age>SURFACE_WAVE_LIMITS.maxEventAge)return null;
   if(event.massKg!==undefined&&(!Number.isFinite(event.massKg)||event.massKg<=0))return null;
-  const radius=surfaceWaveClamp(radiusMetres,.15,12),speed=Math.hypot(velocity[0],velocity[2]);
+  const isRoundshot=event.source==='roundshot'||event.source==='roundshot-plume';
+  const speed=Math.hypot(velocity[0],velocity[2]),speed3D=Math.hypot(velocity[0],velocity[1],velocity[2]);
+  const effRadius=isRoundshot
+    ?surfaceWaveClamp(radiusMetres*7.5+Math.cbrt((event.massKg??5.4)*Math.max(closingSpeed,speed3D)**2/40000)*.48,1.15,2.4)
+    :radiusMetres;
+  const radius=surfaceWaveClamp(effRadius,.15,12);
   const normalSpeed=event.kind==='trail'?Math.min(2,speed*.09):Math.min(25,closingSpeed);
   if(normalSpeed<=0)return null;
   const waterMass=1000*Math.PI*radius*radius*Math.max(.25,radius);
   const momentum=(event.massKg??waterMass)*normalSpeed;
   const sign=event.kind==='emerge'?-1:1;
-  const kick=sign*surfaceWaveClamp(momentum/waterMass*.12,0,5)*Math.exp(-age*.7);
+  const rawKick=isRoundshot
+    ?surfaceWaveClamp(2.8+Math.sqrt((event.massKg??5.4)*Math.max(closingSpeed,speed3D)/320),2.4,4.95)
+    :surfaceWaveClamp(momentum/waterMass*.12,0,5);
+  const kick=sign*rawKick*Math.exp(-age*.7);
   const direction=speed>1e-6?[velocity[0]/speed,velocity[2]/speed]:[1,0];
+  const foam=isRoundshot?surfaceWaveClamp(Math.abs(kick)*.28+.22,.65,1):Math.min(1,Math.abs(kick)*.4);
   return {source:event.source,id:event.id,x,z,radius,kick,direction,trail:event.kind==='trail',age,
-    foam:Math.min(1,Math.abs(kick)*.4),priority:event.kind==='entry'?2:event.kind==='emerge'?1:0};
+    foam,priority:event.kind==='entry'?2:event.kind==='emerge'?1:0};
 }
 
 export async function createSurfaceWaves({device,computePipe,size=512}){

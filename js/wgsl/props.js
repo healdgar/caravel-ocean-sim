@@ -71,7 +71,7 @@ struct PropVertex {@builtin(position) position:vec4f,@location(0) world:vec3f,@l
   let rough=clamp(0.90-luma*0.18-tidalWet*0.18+edgeChafe*0.10,0.44,0.92);let f0=vec3f(.04);
   let spec=vesselSpecular(n,view,sun,rough,f0);
   let reflected=textureSampleLevel(envCube,sampC,reflect(-view,n),rough*${ENV_MIPS - 1}.0).rgb;
-  let col=lunarSurface(n,view,weatheredAlbedo,rough,f0,sunVis[1]*lunarShadowVisibility(shadowSample))+lightningSurface(n,view,weatheredAlbedo,rough)+gunFlashSurface(v.world,n,view,weatheredAlbedo,rough)
+  let col=lunarSurface(n,view,weatheredAlbedo,rough,f0,sunVis[1]*lunarShadowVisibility(shadowSample))+lightningSurface(n,view,weatheredAlbedo,rough)+gunFlashSurface(v.world,n,view,weatheredAlbedo,rough)+worldFireSurface(v.world,n,view,weatheredAlbedo,rough)
     +weatheredAlbedo*(direct*max(dot(n,sun),0.0)/PI+vesselAmbient(n,sky,sea))+direct*spec*max(dot(n,sun),0.0)
     +reflected*F.windP[1].w*vesselEnvironment(n,view,rough,f0);
   return vec4f(surfaceAir(col,v.world),1);

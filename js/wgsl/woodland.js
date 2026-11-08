@@ -231,7 +231,7 @@ fn woodlandFinish(world:vec3f,normal:vec3f,albedo:vec3f,leaf:f32)->vec4f {
   // Authored diffuse self-occlusion only; no claim of resolved leaf scattering
   // or crown-to-crown shadows. Terrain/cloud sunlight is shared with the land.
   var colour=albedo*(sunlight*diffuse/PI+ambient*mix(0.48,0.38,leaf));
-  colour+=lightningSurface(normal,v,albedo,mix(0.92,0.88,leaf));
+  colour+=lightningSurface(normal,v,albedo,mix(0.92,0.88,leaf))+worldFireSurface(world,normal,v,albedo,mix(0.92,0.88,leaf));
   colour=surfaceAir(colour,world);
   let cloud=marchCloudsTo(F.camPos.xyz*0.001,normalize(world-F.camPos.xyz),12u,0.5,
     sunIlluminance(),skyAtmo(vec3f(0,1,0)),distance(world,F.camPos.xyz)*0.001);

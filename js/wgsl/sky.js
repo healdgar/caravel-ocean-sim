@@ -212,6 +212,30 @@ fn lightningSurface(n:vec3f,v:vec3f,albedo:vec3f,rough:f32)->vec3f {
   let spec=pow(max(dot(n,halfVector),0.0),exponent)*(exponent+2.0)*.003;
   return lightningLight()*(albedo*(.06+.32*nl)+spec*nl);
 }
+fn evalOneFireLight(world:vec3f,n:vec3f,v:vec3f,albedo:vec3f,rough:f32,light:vec4f,seed:f32)->vec3f {
+  if(light.w<=1e-6){return vec3f(0.0);}
+  let t=F.camPos.w+seed;
+  let wobble=vec3f(sin(t*7.3)*0.28,1.85+0.26*sin(t*11.1),cos(t*6.7)*0.28);
+  let delta=(light.xyz+wobble)-world;
+  let d2=dot(delta,delta);
+  if(d2>6400.0){return vec3f(0.0);}
+  let d=max(0.65,sqrt(d2));
+  let l=delta/d;
+  let flicker=0.84+0.12*sin(t*14.3)+0.08*cos(t*23.7)+0.05*sin(t*39.1);
+  let edgeFade=1.0-smoothstep(4200.0,6400.0,d2);
+  let atten=edgeFade/(1.4+0.048*d2+0.00018*d2*d2);
+  let nl=max(dot(n,l),0.0)*0.86+0.14;
+  let h=normalize(l+v+vec3f(1e-5));
+  let expVal=mix(88.0,6.0,rough);
+  let spec=pow(max(dot(n,h),0.0),expVal)*(expVal+2.0)*0.0034;
+  let warmTint=mix(vec3f(1.0,0.46,0.11),vec3f(1.0,0.28,0.03),clamp(d/48.0,0.0,1.0));
+  return warmTint*(light.w*flicker*18.5*atten)*(albedo*0.38*nl+spec*max(dot(n,l),0.10));
+}
+fn worldFireSurface(world:vec3f,n:vec3f,v:vec3f,albedo:vec3f,rough:f32)->vec3f {
+  let f0=vec4f(F.camRight.w,F.camUp.w,F.camFwd.w,F.cascInvL[1].z);
+  let f1=vec4f(F.cascInvL[1].w,F.windP[1].y,F.windP[1].z,F.foamP.w);
+  return evalOneFireLight(world,n,v,albedo,rough,f0,0.0)+evalOneFireLight(world,n,v,albedo,rough,f1,2.17);
+}
 fn lightningCloud(dir:vec3f)->vec3f {
   if(F.reserved.z<.0001){return vec3f(0);}
   return lightningLight()*(.06+.5*pow(max(dot(dir,lightningDirection()),0.0),6.0));

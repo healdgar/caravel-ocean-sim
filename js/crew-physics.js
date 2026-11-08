@@ -181,6 +181,7 @@ export function getCrewMixerMasks(animator) {
 }
 
 function crewPhysResolveActionKey(s) {
+  if (s.overboard?.inWater) return s.overboard.alive ? 'overboard:swim' : 'overboard:float';
   if (s.casualtyState === 'fallen') return 'ragdoll:fallen';
   if ((s.knockdownTimer ?? 0) > 0) return 'ragdoll:knockdown';
   if (s.seatedPose) return 'seated:rowing';
@@ -624,6 +625,10 @@ export function stepCrewPhysicsState(s, boat, dt, company = null) {
     usingSpyglass: true,
   });
 
+  if (s.overboard?.inWater) {
+    if (s.ragdoll?.active) s.ragdoll.active = false;
+    return phys;
+  }
   if (s.casualtyState === 'fallen' || (s.knockdownTimer ?? 0) > 0) {
     stepArticulatedRagdoll(s, boat, safeDt);
     return phys;
@@ -1090,6 +1095,11 @@ export function applyCrewRealism(a, s, boat = null, dt = 1 / 60) {
   if (!a || !s) return;
   if (!s.phys) stepCrewPhysicsState(s, boat, dt);
 
+  if (s.overboard?.inWater) {
+    poseCrewFingers(a, s, 0.22, 0.22);
+    applyPoseInertializer(a, s, dt);
+    return;
+  }
   const isDown = s.casualtyState === 'fallen' || (s.knockdownTimer ?? 0) > 0;
   if (isDown) {
     applyArticulatedRagdollPose(a, s, boat);

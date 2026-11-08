@@ -4,10 +4,10 @@ import {SKY_RENDER_FUNCS} from './sky.js';
 import {VESSEL_LIGHTING} from './vessel.js';
 
 export const GUNNERY_CROWN_SEGMENTS=32;
-export const GUNNERY_CROWN_ROWS=5;
+export const GUNNERY_CROWN_ROWS=7;
 export const GUNNERY_DROP_COUNT=32;
-export const GUNNERY_RING_SEGMENTS=48;
-export const GUNNERY_RING_COUNT=4;
+export const GUNNERY_RING_SEGMENTS=64;
+export const GUNNERY_RING_COUNT=6;
 export const GUNNERY_EARTH_COUNT=420;
 export const GUNNERY_DUST_COUNT=36;
 
@@ -213,24 +213,37 @@ struct GunneryVolumeVertex{@builtin(position)position:vec4f,@location(0)world:ve
     let subtype=volume.optical.w;
     if(volume.centre.w>.5){
       if(subtype>=0.9){
-        // Shipboard fire (direction=[0,1,0] -> local.z is vertical in [-1, 1])
+        // Shipboard & fort fire (direction=[0,1,0] -> local.z is vertical in [-1, 1])
         let h=clamp(local.z*0.5+0.5,0.0,1.0);
-        let taper=mix(1.0,0.34,h*h);
-        let rHoriz=length(local.xy)/max(0.22,taper);
-        let advectPos=vec3f(local.x*2.6,local.y*2.6,local.z*2.1-age*4.8)+vec3f(volume.optical.z);
+        let isSparkCrown=subtype>1.4;
+        let taper=select(mix(1.0,0.28,h*h),mix(0.65,1.15,h),isSparkCrown);
+        let swirl=vec2f(sin(h*5.2-age*7.4+volume.optical.z),cos(h*4.8-age*6.3-volume.optical.z))*0.14*h;
+        let rHoriz=length(local.xy-swirl)/max(0.20,taper);
+        let advectPos=vec3f(local.x*3.1,local.y*3.1,local.z*2.4-age*5.8)+vec3f(volume.optical.z);
         let fTurb=gunneryCloudFbm(advectPos);
-        let tongueMask=clamp(1.08-rHoriz+(fTurb-0.46)*(0.55+0.55*h),0.0,1.0);
-        let vertEnv=smoothstep(0.0,0.16,h)*(1.0-smoothstep(0.58,1.0,h));
-        let flameShape=tongueMask*vertEnv;
-        if(flameShape<0.01){continue;}
-        let temp=clamp(flameShape*(1.05-0.48*h)+0.24*fTurb,0.0,1.0);
-        let colBase=mix(vec3f(0.42,0.03,0.004),vec3f(1.35,0.22,0.016),smoothstep(0.12,0.62,temp));
-        let colCore=mix(colBase,vec3f(2.35,0.52,0.045),smoothstep(0.62,0.95,temp));
-        // Add rising glowing embers near the top of the upper flame tongue
-        let sparkNoise=gunneryNoise3(advectPos*4.2+vec3f(0.0,0.0,-age*6.0));
-        let sparks=select(0.0,smoothstep(0.84,0.96,sparkNoise)*h*1.5,subtype>1.1);
-        emission=(colCore*flameShape+vec3f(1.8,0.32,0.025)*sparks)*clamp(volume.optical.x,0.35,1.0)*selfExposure;
-        extinction=density*flameShape*5.2;
+        let fineLick=gunneryNoise3(advectPos*2.6+vec3f(0.0,0.0,-age*4.4));
+        let tongueMask=clamp(1.12-rHoriz+(fTurb-0.44)*(0.58+0.62*h)+(fineLick-0.5)*0.34,0.0,1.0);
+        let vertEnv=smoothstep(0.0,0.14,h)*(1.0-smoothstep(0.56,1.0,h));
+        let flameShape=select(tongueMask*vertEnv,clamp(1.0-rHoriz*0.88,0.0,1.0)*smoothstep(0.0,0.22,h)*(1.0-smoothstep(0.65,1.0,h)),isSparkCrown);
+        if(flameShape<0.008){continue;}
+        let temp=clamp(flameShape*(1.12-0.46*h)+0.26*fTurb+0.16*fineLick,0.0,1.0);
+        let colOuter=vec3f(0.68,0.042,0.004);
+        let colMid=vec3f(2.25,0.38,0.024);
+        let colInner=vec3f(4.45,1.48,0.18);
+        let colWhiteHot=vec3f(6.9,3.8,1.25);
+        let c1=mix(colOuter,colMid,smoothstep(0.08,0.52,temp));
+        let c2=mix(c1,colInner,smoothstep(0.48,0.84,temp));
+        let colCore=mix(c2,colWhiteHot,smoothstep(0.78,0.98,temp)*(1.0-smoothstep(0.0,0.45,h)));
+        // Buoyant glowing embers & flying sparks
+        let sparkPos=advectPos*4.8+vec3f(sin(age*3.7)*0.8,cos(age*4.1)*0.8,-age*7.2);
+        let sparkN1=gunneryNoise3(sparkPos);
+        let sparkN2=gunneryNoise3(sparkPos*2.1+vec3f(13.7,7.1,3.9));
+        let sparkMask=smoothstep(0.76,0.93,sparkN1)*smoothstep(0.52,0.82,sparkN2);
+        let sparks=select(sparkMask*h*1.6,sparkMask*(0.6+1.8*h),subtype>1.1);
+        let nightFlameBoost=1.0+0.65*(1.0-smoothstep(-0.08,0.14,F.sunDir.y));
+        let flameEmit=select(colCore*flameShape*(1.05-0.25*step(1.15,subtype)),colCore*flameShape*0.28,isSparkCrown);
+        emission=(flameEmit+vec3f(3.6,0.92,0.09)*sparks)*clamp(volume.optical.x,0.35,1.35)*selfExposure*nightFlameBoost;
+        extinction=density*select(flameShape*5.6,max(flameShape*1.8,sparks*3.2),isSparkCrown);
       }else{
         let flame=max(0.0,1.0-dot(local,local));
         let coreNoise=.65+.35*df.y;
@@ -270,10 +283,10 @@ struct GunneryVolumeVertex{@builtin(position)position:vec4f,@location(0)world:ve
       let throatCore=max(0.0,1.0-length(local-vec3f(0.0,-.05,-.28))*1.45);
       let fireUnderGlow=select(
         0.0,
-        (1.0-smoothstep(0.0,0.68,heightGrad))*max(0.0,1.0-length(local.xy)*0.95)*(0.65+0.35*df.y)*max(0.15,2.55-subtype),
+        (1.0-smoothstep(0.0,0.78,heightGrad))*max(0.0,1.0-length(local.xy)*0.98)*(0.58+0.42*df.y)*max(0.22,2.75-subtype)*(1.0+0.6*(1.0-smoothstep(-0.08,0.14,F.sunDir.y))),
         isFireSmoke
       );
-      let internalEmber=(vec3f(2.4,0.42,.03)*(emberFactor*throatCore*throatCore*density)+vec3f(0.55,0.08,0.006)*(fireUnderGlow*density))*selfExposure;
+      let internalEmber=(vec3f(2.4,0.42,.03)*(emberFactor*throatCore*throatCore*density)+vec3f(1.15,0.22,0.018)*(fireUnderGlow*density))*selfExposure;
       emission=cloudAlbedo*(ambient+sunlight*directTransfer)+internalEmber;
     }
     let opacity=1.0-exp(-extinction*stepSize);
@@ -311,20 +324,27 @@ fn gunnerySeaDisplacement(q:vec2f)->vec3f{
 }
 fn gunnerySeaHeight(p:vec2f)->f32{var q=p;for(var i=0u;i<2u;i++){q=p-gunnerySeaDisplacement(q).xz;}return gunnerySeaDisplacement(q).y;}
 fn gunneryContactHeading(c:GunneryContact)->vec2f{let horizontal=c.motion.xz;return normalize(horizontal+vec2f(.00001));}
-fn gunneryImpactLift(c:GunneryContact)->f32{return clamp(2.5+abs(c.motion.y)*.42+length(c.motion.xyz)*.014,3.0,12.0)*sqrt(c.motion.w);}
-fn gunneryImpactRadial(c:GunneryContact)->f32{return clamp(1.3+length(c.motion.xyz)*.01,1.6,5.5)*sqrt(c.motion.w);}
+fn gunneryImpactLift(c:GunneryContact)->f32{return clamp(3.0+abs(c.motion.y)*.14+length(c.motion.xyz)*.010,3.8,7.8)*sqrt(c.motion.w);}
+fn gunneryImpactRadial(c:GunneryContact)->f32{return clamp(1.2+length(c.motion.xyz)*.008,1.4,3.4)*sqrt(c.motion.w);}
 fn gunneryEarthAlbedo(c:GunneryContact)->vec3f{return mix(vec3f(.12,.08,.052),vec3f(.3,.235,.16),c.extra.z);}
 fn gunneryWaterRadiance(world:vec3f,normal:vec3f,foam:f32)->vec3f{
   let eye=normalize(F.camPos.xyz-world);var n=normalize(normal);if(dot(n,eye)<0.0){n=-n;}
   let direct=sunIlluminance()*sunVis[0]*step(0.0,F.sunDir.y);
   let reflected=textureSampleLevel(envCube,sampC,reflect(-eye,n),1.2).rgb;
-  let diffuse=skyAtmo(vec3f(0,1,0))*.6+direct*max(F.sunDir.y,.08)*.23+lightningLight()*.3;
+  let nightFloor=vec3f(0.012,0.018,0.028)*min(1.0,1.2/max(F.post.x,1e-3))*(1.0-smoothstep(-0.08,0.12,F.sunDir.y));
+  var fireGlow=vec3f(0.0);
+  if(F.cascInvL[1].z>1e-5){
+    let fPos=vec3f(F.camRight.w,F.camUp.w,F.camFwd.w);
+    let fd0=max(1.2,length(fPos-world));
+    fireGlow+=vec3f(1.0,0.38,0.07)*(F.cascInvL[1].z*12.0/(4.0+fd0*fd0*0.25));
+  }
+  let diffuse=skyAtmo(vec3f(0,1,0))*.72+direct*max(F.sunDir.y,.10)*.28+lightningLight()*.3+nightFloor+fireGlow;
   let glint=vesselSpecular(n,eye,F.sunDir.xyz,.16,vec3f(.0204))*direct*max(0.0,dot(n,F.sunDir.xyz));
-  return mix(reflected*.88+glint,diffuse,foam);
+  return mix(reflected*.88+glint+fireGlow*0.35,diffuse*1.12,foam);
 }
 struct GunneryWaterVertex{@builtin(position)position:vec4f,@location(0)world:vec3f,@location(1)uv:vec2f,@location(2)@interpolate(flat)id:u32};
-// The initial crown is a connected film launched from the real impact's fixed
-// birth height. Detached water follows gravity, never the next passing crest.
+// The initial crown combines an outer tulip splash rim and a tall central Worthington
+// water column launched from the impact cavity.
 @vertex fn gunneryCrownVS(@builtin(vertex_index)vertex:u32,@builtin(instance_index)id:u32)->GunneryWaterVertex{
   let c=gunneryContacts[id];let age=c.root.w;let uv=gunneryCorner(vertex);let cell=vertex/6u;
   // Ground goes up in pieces, not in a sheet.
@@ -332,27 +352,29 @@ struct GunneryWaterVertex{@builtin(position)position:vec4f,@location(0)world:vec
   let angle=(f32(cell%${GUNNERY_CROWN_SEGMENTS}u)+uv.x)*(2.0*PI)/${GUNNERY_CROWN_SEGMENTS}.0;
   let row=(f32(cell/${GUNNERY_CROWN_SEGMENTS}u)+uv.y)/${GUNNERY_CROWN_ROWS}.0;
   let lift=gunneryImpactLift(c);let radial=gunneryImpactRadial(c);let heading=gunneryContactHeading(c);let side=vec2f(heading.y,-heading.x);
-  let lobe=.77+.18*sin(angle*7.0+c.detail.x*70.0)+.08*sin(angle*13.0-c.detail.x*43.0);
-  let radius=(.06+radial*age*row)*c.motion.w;
-  let drift=heading*min(12.0,length(c.motion.xz)*.025)*age;
-  let horizontal=side*cos(angle)*radius+heading*sin(angle)*radius*1.18+drift*row;
-  let rise=max(0.0,lift*age-4.905*age*age)*row*lobe;
+  let lobe=.86+.09*sin(angle*5.0+c.detail.x*70.0)+.05*sin(angle*11.0-c.detail.x*43.0);
+  let radius=(.12+radial*age*(0.18+0.42*pow(row,1.25)))*c.motion.w;
+  let drift=heading*min(8.0,length(c.motion.xz)*.018)*age;
+  let horizontal=side*cos(angle)*radius+heading*sin(angle)*radius*1.12+drift*row;
+  let rise=max(0.0,lift*age-4.905*age*age)*pow(max(0.02,row),0.82)*lobe;
   let baseY=select(gunnerySeaHeight(c.root.xz+horizontal),c.root.y,c.extra.x>.5);
-  let world=vec3f(c.root.x+horizontal.x,baseY+.025+rise,c.root.z+horizontal.y);
+  let world=vec3f(c.root.x+horizontal.x,baseY+.02+rise,c.root.z+horizontal.y);
   return GunneryWaterVertex(F.viewProj*vec4f(world-F.camPos.xyz,1),world,vec2f(angle,row),id);
 }
 @fragment fn gunneryCrownFS(v:GunneryWaterVertex)->@location(0)vec4f{
-  let c=gunneryContacts[v.id];let age=c.root.w;let life=gunneryImpactLift(c)/4.905;
+  let c=gunneryContacts[v.id];let age=c.root.w;let life=min(1.45,gunneryImpactLift(c)/4.905);
   if(age>=life||age<=0.0){discard;}
   let kind=c.extra.x;
-  let rim=smoothstep(.4,1.0,v.uv.y);let breakup=smoothstep(.15,.8,age)*v.uv.y;
-  let lace=.5+.27*sin(v.uv.x*19.0+c.detail.x*31.0)*sin(v.uv.y*14.0+c.detail.x*59.0)+.2*sin(v.uv.x*31.0-v.uv.y*8.0);
-  let film=smoothstep(breakup*.58,breakup*.58+.15,lace);
-  let foam=clamp(.12+rim*.7+breakup*.2,0.0,1.0);
-  let baseAlpha=film*(.18+foam*.52)*smoothstep(0.0,.035,age)*(1.0-smoothstep(life*.6,life,age));
-  let alpha=select(baseAlpha,min(1.0,baseAlpha*1.55),kind>.5);
+  let nVal=gunneryCloudFbm(v.world*1.65+vec3f(c.detail.x*13.0,-age*4.2,c.detail.x*29.0));
+  let topFade=1.0-smoothstep(0.48,0.96,v.uv.y+0.24*(1.0-nVal));
+  let botFade=smoothstep(0.0,0.18,v.uv.y);
+  let lifeFade=smoothstep(0.0,.03,age)*(1.0-smoothstep(life*.45,life,age));
+  let spray=smoothstep(0.26,0.78,nVal+0.22*(1.0-v.uv.y));
+  let foam=clamp(.52+0.38*spray,0.0,1.0);
+  let baseAlpha=topFade*botFade*spray*lifeFade*0.64;
+  let alpha=select(min(0.76,baseAlpha),min(0.95,baseAlpha*1.35),kind>.5);
   if(alpha<.002){discard;}
-  let n=normalize(cross(dpdy(v.world),dpdx(v.world)));
+  let n=normalize(vec3f(v.world.x-c.root.x,max(0.35,0.65*c.motion.w),v.world.z-c.root.z));
   let waterRad=gunneryWaterRadiance(v.world,n,foam);
   let direct=sunIlluminance()*sunVis[0]*step(0.0,F.sunDir.y);
   let ambient=skyAtmo(vec3f(0,1,0))*.6+direct*max(F.sunDir.y,.08)*.25+lightningLight()*.25;
@@ -370,9 +392,9 @@ struct GunneryWaterVertex{@builtin(position)position:vec4f,@location(0)world:vec
   let wind=c.detail.yzw*(age-.7*(1.0-exp(-age/.7)))*.16;
   let world=c.root.xyz+launch*age+vec3f(0,.04-4.905*age*age,0)+wind;
   let corner=gunneryCorner(vertex)*2.0-1.0;
-  let kindBoost=select(1.0,2.15,c.extra.x>.5);
+  let kindBoost=select(1.45,2.15,c.extra.x>.5);
   // Thrown earth flies as the clods below.
-  let radius=(.012+random*.028)*c.motion.w*kindBoost*select(1.0,0.0,c.extra.y>0.0);
+  let radius=(.018+random*.036)*c.motion.w*kindBoost*select(1.0,0.0,c.extra.y>0.0);
   let eye=normalize(F.camPos.xyz-world);let right=normalize(F.camRight.xyz);let up=normalize(F.camUp.xyz);
   let surface=world+(right*corner.x+up*corner.y)*radius;
   return GunneryWaterVertex(F.viewProj*vec4f(surface-F.camPos.xyz,1),surface,corner,id);
@@ -380,23 +402,24 @@ struct GunneryWaterVertex{@builtin(position)position:vec4f,@location(0)world:vec
 @fragment fn gunneryDropFS(v:GunneryWaterVertex)->@location(0)vec4f{
   let c=gunneryContacts[v.id];let radius=dot(v.uv,v.uv);
   let minHeight=c.root.y-select(0.0,6.5,c.extra.x>.5);
-  if(radius>=1.0||c.root.w>3.0||v.world.y<minHeight){discard;}
+  if(radius>=1.0||c.root.w>3.4||v.world.y<minHeight){discard;}
   let eye=normalize(F.camPos.xyz-v.world);let n=normalize(normalize(F.camRight.xyz)*v.uv.x+normalize(F.camUp.xyz)*v.uv.y+eye*sqrt(max(.001,1.0-radius)));
-  let alpha=(1.0-smoothstep(.3,1.0,radius))*.7;
+  let alpha=(1.0-smoothstep(.3,1.0,radius))*.78;
   let kind=c.extra.x;
-  let waterRad=gunneryWaterRadiance(v.world,n,.45);
+  let waterRad=gunneryWaterRadiance(v.world,n,.72);
   let direct=sunIlluminance()*sunVis[0]*step(0.0,F.sunDir.y);
   let ambient=skyAtmo(vec3f(0,1,0))*.55+direct*max(dot(n,F.sunDir.xyz),.12)*.32+lightningLight()*.25;
   let fragAlbedo=select(select(vec3f(.38,.24,.12),vec3f(.44,.36,.25),kind>1.5),vec3f(.64,.42,.28),kind>2.5);
   let rad=select(waterRad,fragAlbedo*ambient,kind>.5);
   return vec4f(surfaceAir(rad,v.world)*alpha,alpha);
 }
-// Earth thrown by a strike on the ground, from nothing but the contact and its age. What comes from near the middle
-// of the pit flies fastest and highest, what comes from its edge barely clears the rim, and a flat shot throws it on ahead.
+// Earth thrown by a strike on the ground OR 420 ballistic whitewater spray jets & droplets on water impacts.
 @vertex fn gunneryEarthVS(@builtin(vertex_index)vertex:u32,@builtin(instance_index)instance:u32)->GunneryWaterVertex{
   let id=instance/${GUNNERY_EARTH_COUNT}u;let c=gunneryContacts[id];let age=c.root.w;
   var o=GunneryWaterVertex(vec4f(0.0,0.0,-1.0,1.0),vec3f(0.0),vec2f(0.0),id);
-  let pit=c.extra.y;if(pit<=0.0){return o;}
+  let isWater=c.extra.x<.5;
+  let pit=select(c.extra.y,max(0.85,c.motion.w*1.55),isWater);
+  if(pit<=0.0){return o;}
   let n=f32(instance%${GUNNERY_EARTH_COUNT}u);
   let r1=fract(sin(n*12.9898+c.detail.x*78.233)*43758.5453);
   let r2=fract(sin(n*39.3461+c.detail.x*11.135)*24634.6345);
@@ -405,22 +428,32 @@ struct GunneryWaterVertex{@builtin(position)position:vec4f,@location(0)world:vec
   let heading=gunneryContactHeading(c);let side=vec2f(heading.y,-heading.x);
   let flatness=1.0-abs(c.motion.y)/max(length(c.motion.xyz),.001);
   let start=mix(.16,1.0,sqrt(r1));
-  let speed=sqrt(9.81*pit)*1.05*pow(start,-.95)*(.65+r2*.7);
+  let speed=select(
+    sqrt(9.81*pit)*1.05*pow(start,-.95)*(.65+r2*.7),
+    gunneryImpactLift(c)*mix(0.48,1.38,pow(1.0-r1,0.55))*(0.68+r2*0.58),
+    isWater
+  );
   let turn=n*2.399963+c.detail.x*63.0;
-  let outward=normalize(side*cos(turn)+heading*(sin(turn)+flatness*.75)+vec2f(.0001));
-  let elevation=mix(.8,1.3,r3);
+  let fwdBias=select(flatness*.75,flatness*0.65*smoothstep(0.35,0.95,r1),isWater);
+  let outward=normalize(side*cos(turn)+heading*(sin(turn)+fwdBias)+vec2f(.0001));
+  let elevation=select(mix(.8,1.3,r3),mix(0.88,1.48,mix(r3,1.0-r1*0.65,0.55)),isWater);
   let up=sin(elevation)*speed;let along=cos(elevation)*speed;
   let flight=2.0*up/9.81;
   if(age<=0.0||age>=flight+.08){return o;}
   let rise=up*age-4.905*age*age;
-  let wind=c.detail.yzw*(age-.7*(1.0-exp(-age/.7)))*.05;
-  let centre=c.root.xyz+vec3f(outward.x*(start*pit*.55+along*age),rise,outward.y*(start*pit*.55+along*age))+wind;
+  let wind=c.detail.yzw*(age-.7*(1.0-exp(-age/.7)))*select(.05,.14,isWater);
+  let radStart=select(start*pit*.55,start*0.35*c.motion.w,isWater);
+  let centre=c.root.xyz+vec3f(outward.x*(radStart+along*age),rise,outward.y*(radStart+along*age))+wind;
   let corner=gunneryCorner(vertex)*2.0-1.0;
   let spin=age*(2.0+r2*9.0)+r1*6.28;
   let turned=vec2f(corner.x*cos(spin)-corner.y*sin(spin),corner.x*sin(spin)+corner.y*cos(spin));
-  // Mostly crumbs, a few real lumps.
-  let size=mix(.022,.13,r4*r4*r4)*sqrt(pit/1.2);
-  let world=centre+(normalize(F.camRight.xyz)*turned.x+normalize(F.camUp.xyz)*turned.y)*size;
+  let size=select(
+    mix(.022,.13,r4*r4*r4)*sqrt(pit/1.2),
+    mix(.038,.165,r4*r4)*sqrt(c.motion.w)*(1.0+0.35*sin(age/max(flight,0.1)*PI)),
+    isWater
+  );
+  let stretchY=select(1.0,1.45,isWater);
+  let world=centre+(normalize(F.camRight.xyz)*turned.x+normalize(F.camUp.xyz)*turned.y*stretchY)*size;
   o.position=F.viewProj*vec4f(world-F.camPos.xyz,1.0);
   o.world=world;
   o.uv=corner;
@@ -434,21 +467,31 @@ struct GunneryWaterVertex{@builtin(position)position:vec4f,@location(0)world:vec
   let right=normalize(F.camRight.xyz);let up=normalize(F.camUp.xyz);let eye=normalize(F.camPos.xyz-v.world);
   let n=normalize(right*v.uv.x+up*v.uv.y+eye*sqrt(max(.04,1.0-radius*radius)));
   let direct=sunIlluminance()*sunVis[0]*step(0.0,F.sunDir.y);
+  if(c.extra.x<.5){
+    if(v.world.y<c.root.y-0.15){discard;}
+    let wAlpha=(1.0-smoothstep(0.25,1.0,radius))*0.82;
+    let wLit=skyAtmo(vec3f(0,1,0))*.85+direct*(.32+.68*max(dot(n,F.sunDir.xyz),.0))/PI+lightningLight()*.3;
+    return vec4f(surfaceAir(vec3f(.94,.97,1.0)*wLit,v.world)*wAlpha,wAlpha);
+  }
   let lit=skyAtmo(vec3f(0,1,0))*.6+direct*max(dot(n,F.sunDir.xyz),.0)/PI+lightningLight()*.25;
   return vec4f(surfaceAir(gunneryEarthAlbedo(c)*lit,v.world),1.0);
 }
-// The dust that goes up with it: soft puffs thrown out and slowed by the air, spreading as they drift and settle.
+// The dust that goes up with a ground strike OR rising sea-spray mist & churning whitewater boil on water impacts.
 struct GunneryDustVertex{@builtin(position)position:vec4f,@location(0)world:vec3f,@location(1)uv:vec2f,@location(2)@interpolate(flat)id:u32,@location(3)@interpolate(flat)alpha:f32,@location(4)@interpolate(flat)seed:f32};
 @vertex fn gunneryDustVS(@builtin(vertex_index)vertex:u32,@builtin(instance_index)instance:u32)->GunneryDustVertex{
   let id=instance/${GUNNERY_DUST_COUNT}u;let c=gunneryContacts[id];let age=c.root.w;
   var o=GunneryDustVertex(vec4f(0.0,0.0,-1.0,1.0),vec3f(0.0),vec2f(0.0),id,0.0,0.0);
-  let pit=c.extra.y;if(pit<=0.0||age<=0.0){return o;}
+  let isWater=c.extra.x<.5;
+  let pit=select(c.extra.y,max(1.0,c.motion.w*1.65),isWater);
+  if(pit<=0.0||age<=0.0){return o;}
   let n=f32(instance%${GUNNERY_DUST_COUNT}u);
   let r1=fract(sin(n*14.1731+c.detail.x*61.37)*43758.5453);
   let r2=fract(sin(n*47.2389+c.detail.x*23.91)*24634.6345);
   let r3=fract(sin(n*83.6127+c.detail.x*47.53)*17431.1953);
   let r4=fract(sin(n*29.8153+c.detail.x*91.27)*31158.8231);
-  o.alpha=.13*smoothstep(0.0,.05,age)*exp(-age/(.55+r4*1.1));
+  let decayTau=select(.55+r4*1.1,.65+r4*.85,isWater);
+  let baseOp=select(.13,.15,isWater);
+  o.alpha=baseOp*smoothstep(0.0,.04,age)*exp(-age/decayTau);
   if(o.alpha<.003){return o;}
   let size=pit/1.2;
   let heading=gunneryContactHeading(c);let side=vec2f(heading.y,-heading.x);
@@ -456,11 +499,16 @@ struct GunneryDustVertex{@builtin(position)position:vec4f,@location(0)world:vec3
   let turn=n*2.399963+c.detail.x*29.0;
   let outward=normalize(side*cos(turn)+heading*(sin(turn)+flatness*.6)+vec2f(.0001));
   let flung=1.0-exp(-age/.42);
-  let far=mix(.8,7.5,r1*r1)*size*.42*flung;
-  let high=mix(.5,8.0,r2*r2*r2)*size*.6*flung+.12*age;
+  let isSurfaceBoil=isWater&&n<14.0;
+  let far=select(mix(.8,7.5,r1*r1)*size*.42*flung,mix(0.22,2.6,r1)*size*0.48*flung,isSurfaceBoil);
+  let high=select(
+    mix(.5,8.0,r2*r2*r2)*size*.6*flung+.12*age,
+    select((0.4+3.6*pow(r2,1.6))*size*flung*(1.0-0.35*smoothstep(0.7,2.0,age)),0.06+0.20*r2,isSurfaceBoil),
+    isWater
+  );
   let wind=c.detail.yzw*(age-.7*(1.0-exp(-age/.7)))*.22;
-  let radius=(.22+.95*sqrt(age)*(.55+r3*.8))*size;
-  let centre=c.root.xyz+vec3f(outward.x*far,high+radius*.35,outward.y*far)+wind;
+  let radius=select((.22+.95*sqrt(age)*(.55+r3*.8))*size,(.28+.85*sqrt(age)*(.55+r3*.65))*size,isWater);
+  let centre=vec3f(c.root.x+outward.x*far,c.root.y+high+radius*select(.35,.18,isSurfaceBoil),c.root.z+outward.y*far)+wind;
   let corner=gunneryCorner(vertex)*2.0-1.0;
   let world=centre+(normalize(F.camRight.xyz)*corner.x+normalize(F.camUp.xyz)*corner.y)*radius;
   o.position=F.viewProj*vec4f(world-F.camPos.xyz,1.0);
@@ -477,24 +525,37 @@ struct GunneryDustVertex{@builtin(position)position:vec4f,@location(0)world:vec3
   let n=normalize(right*v.uv.x+up*v.uv.y+eye*sqrt(max(.05,1.0-d)));
   let direct=sunIlluminance()*sunVis[0]*step(0.0,F.sunDir.y);
   let lit=skyAtmo(vec3f(0,1,0))*.7+direct*(.35+.65*max(dot(n,F.sunDir.xyz),0.0))/PI+lightningLight()*.25;
+  if(c.extra.x<.5){
+    return vec4f(surfaceAir(vec3f(.92,.96,1.0)*lit*1.22,v.world)*alpha,alpha);
+  }
   return vec4f(surfaceAir(mix(vec3f(.3,.235,.17),vec3f(.62,.53,.4),c.extra.z)*lit,v.world)*alpha,alpha);
 }
 @vertex fn gunneryRingVS(@builtin(vertex_index)vertex:u32,@builtin(instance_index)id:u32)->GunneryWaterVertex{
   let c=gunneryContacts[id];let ring=vertex/(${GUNNERY_RING_SEGMENTS}u*6u);let uv=gunneryCorner(vertex);let segment=(vertex/6u)%${GUNNERY_RING_SEGMENTS}u;
-  let age=c.root.w-f32(ring)*.15;let angle=(f32(segment)+uv.x)*(2.0*PI)/${GUNNERY_RING_SEGMENTS}.0;
-  let crossSection=uv.y*2.0-1.0;let radius=(.1+max(0.0,age)*2.1*sqrt(c.motion.w))+crossSection*(.055+max(0.0,age)*.018);
+  let age=c.root.w-f32(ring)*.24;let angle=(f32(segment)+uv.x)*(2.0*PI)/${GUNNERY_RING_SEGMENTS}.0;
+  let crossSection=uv.y*2.0-1.0;
+  let waveSpeed=(3.2-f32(ring)*.22)*sqrt(max(0.5,c.motion.w));
+  let bandHalfWidth=.44+max(0.0,age)*.16;
+  let wobble=(sin(angle*5.0+c.detail.x*37.0+f32(ring)*1.9)*.14+cos(angle*11.0-c.detail.x*23.0+max(0.0,age)*2.2)*.08)*(.35+.65*clamp(age,0.0,1.0));
+  let radius=(.26+max(0.0,age)*waveSpeed)*(1.0+wobble)+crossSection*bandHalfWidth;
   let q=c.root.xz+vec2f(cos(angle),sin(angle))*radius;
-  let crest=(1.0-crossSection*crossSection)*.07*c.motion.w*exp(-max(0.0,age)*.8);
-  let world=vec3f(q.x,gunnerySeaHeight(q)+.025+crest,q.y);
+  let waveProfile=cos(crossSection*1.5707963);
+  let crest=waveProfile*(.26+.18*exp(-max(0.0,age)*1.1))*c.motion.w*exp(-max(0.0,age)*.45)*exp(-f32(ring)*.28)*step(0.0,age);
+  let world=vec3f(q.x,gunnerySeaHeight(q)+.024+crest,q.y);
   return GunneryWaterVertex(F.viewProj*vec4f(world-F.camPos.xyz,1),world,vec2f(crossSection,angle),id*${GUNNERY_RING_COUNT}u+ring);
 }
 @fragment fn gunneryRingFS(v:GunneryWaterVertex)->@location(0)vec4f{
   let c=gunneryContacts[v.id/${GUNNERY_RING_COUNT}u];if(c.extra.x>.5){discard;}
-  let ring=v.id%${GUNNERY_RING_COUNT}u;let age=c.root.w-f32(ring)*.15;if(age<=0.0||age>=8.0){discard;}
-  let edge=1.0-smoothstep(.3,1.0,abs(v.uv.x));let broken=.7+.2*sin(v.uv.y*13.0+c.detail.x*71.0)+.1*sin(v.uv.y*29.0-c.detail.x*49.0);
-  let alpha=edge*broken*exp(-age*.48)*smoothstep(0.0,.08,age)*(1.0-smoothstep(5.5,8.0,age))*.55;
+  let ring=v.id%${GUNNERY_RING_COUNT}u;let age=c.root.w-f32(ring)*.24;if(age<=0.0||age>=6.5){discard;}
+  let edge=pow(max(0.0,1.0-abs(v.uv.x)),1.65);
+  let nVal=gunneryCloudFbm(vec3f(cos(v.uv.y)*2.4+v.world.x*.35,sin(v.uv.y)*2.4+v.world.z*.35,age*.85+f32(ring)*1.7+c.detail.x*19.0));
+  let ringFade=exp(-f32(ring)*.52);
+  let broken=smoothstep(0.22+0.26*(1.0-ringFade),0.78,nVal);
+  let crestFoam=clamp(exp(-age*.55)*ringFade*.88+.14*broken,0.12,0.92);
+  let alpha=edge*broken*ringFade*exp(-age*.48)*smoothstep(0.0,.06,age)*(1.0-smoothstep(4.5,6.5,age))*.54;
+  if(alpha<.002){discard;}
   let n=normalize(cross(dpdy(v.world),dpdx(v.world)));
-  return vec4f(surfaceAir(gunneryWaterRadiance(v.world,n,exp(-age*.9)*.8),v.world)*alpha,alpha);
+  return vec4f(surfaceAir(gunneryWaterRadiance(v.world,n,crestFoam),v.world)*alpha,alpha);
 }
 struct GunneryArcVertex{
   @builtin(position)position:vec4f,

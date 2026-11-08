@@ -801,7 +801,7 @@ fn landFinishShadowed(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibi
   let specMask=select(clamp((0.72-effRough)/0.42,0.0,1.0)*(0.08+0.92*effWet),0.65,isMetal);
   col+=direct*min(specBRDF,1.5)*specMask*(0.25+0.75*archShadow)+skyRefl;
   col+=lunarSurface(n,v,albedo*(1.0-effWet*.32),effRough,vec3f(f0),vec3f(mix(1.0,bakedLight.g,inPrimaryDomain)));
-  col+=lightningSurface(n,v,albedo,effRough)+landWindowEmission;
+  col+=lightningSurface(n,v,albedo,effRough)+worldFireSurface(world,n,v,albedo,effRough)+landWindowEmission;
   col=surfaceAir(col,world);
   // Clip cloud integration at high mountain surfaces: clouds behind mountain peaks
   // stay hidden and low clouds in front veil upper slopes, while low coastal plains
@@ -1340,7 +1340,8 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
   let wet=(1.0-smoothstep(0.6,3.2,world.y))*.55;
   var color=albedo*(1.0-wet*.3)*(direct*diffuse/PI+ambient*visibility);
   color+=lunarSurface(n,normalize(F.camPos.xyz-world),albedo,.84,vec3f(.035),vec3f(textureSampleLevel(landLight,sampC,uv,0).g));
-  color+=lightningSurface(n,normalize(F.camPos.xyz-world),albedo,.84);
+  let vEye=normalize(F.camPos.xyz-world);
+  color+=lightningSurface(n,vEye,albedo,.84)+worldFireSurface(world,n,vEye,albedo,.84);
   return vec4f(surfaceAir(color,world),1);
 }
 @fragment fn leafFS(in:LandVertex,@builtin(front_facing) front:bool)->@location(0) vec4f{

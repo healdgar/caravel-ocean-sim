@@ -342,7 +342,11 @@ ${OCEAN_HULL_MASK}
   ${coast?'body = coastalBody(body, cws.bed);':''}
   var col = body * (1.0 - Fr) + refl * Fr + spec+moonSpec;
   col = mix(col, foamLit, foamMask * 0.95);
-  col += lightningSurface(nrm,normalize(-in.rel),mix(F.waterCol.rgb,foamAlb,foamMask),.23)
+  let oceanWorld = in.rel + F.camPos.xyz;
+  let oceanView = normalize(-in.rel);
+  let oceanAlb = mix(F.waterCol.rgb,foamAlb,foamMask);
+  col += lightningSurface(nrm,oceanView,oceanAlb,.23)
+    +worldFireSurface(oceanWorld,nrm,oceanView,oceanAlb,mix(.14,.42,foamMask))
     +lightningCloud(reflect(normalize(in.rel),nrm))*Fr;
   ${coast?'col = coastalSwash(col, in.xz, cws.bed, effHeight, foamLit);':''}
 

@@ -244,6 +244,7 @@ export function stepCompany(company,boat,dt,wind) {
   for(const s of company.crew){
     if(s.overboard){
       if(!s.overboard.gone){
+        s.time=(s.time??0)+dt*1.35;
         stepCrewOverboard(boat,s,dt);
         if(s.overboard)stepCrewPhysicsState(s,boat,dt,company);
       }
@@ -253,6 +254,23 @@ export function stepCompany(company,boat,dt,wind) {
       stepCrewAloftFall(boat,s,dt);
       stepCrewPhysicsState(s,boat,dt,company);
       continue;
+    }
+    if(boat?.damage?.sunk||(boat?.damage?.floodingSinkage??0)>0.45){
+      const roll=boat.roll??0,pitch=boat.pitch??0;
+      const cr=Math.cos(roll),sr=Math.sin(roll),cp=Math.cos(pitch),sp=Math.sin(pitch);
+      const [lx,ly,lz]=s.position;
+      const yy=sr*lx+cr*ly,yp=cp*yy-sp*lz;
+      const worldFootY=(boat.heave??0)+yp;
+      const waveY=Number.isFinite(boat.target?.heave)?boat.target.heave:0;
+      if(worldFootY<=waveY-0.16&&s.visible!==false){
+        const side=Math.sign(s.x||lx||(((s.crewIndex??0)%2)?1:-1))||1;
+        const wasDead=s.casualtyState==='fallen';
+        if(sendCrewOverboard(boat,s,{side,outward:0.45,cause:'sinking',dead:wasDead,hurt:s.casualtyState==='wounded',awash:true})){
+          stepCrewOverboard(boat,s,dt);
+          if(s.overboard)stepCrewPhysicsState(s,boat,dt,company);
+          continue;
+        }
+      }
     }
     // Apply blast knockback velocity (from cannon impacts, magazine explosions or a sea) within deck bounds
     if(dt>0&&((Math.abs(s.knockbackVx??0)>1e-3)||(Math.abs(s.knockbackVz??0)>1e-3))){
@@ -647,7 +665,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
           s.lodTier=crewSailorTier(apparent,s.lodTier??0);
           const clipOnly=crewClipOnly(apparent,s);
           // Coming back within reach of their own pose, they take it at once.
-          const snap=!s.posedOnce||s.pendingWounds?.length||(s.knockdownTimer??0)>0||(s.clipOnly&&!clipOnly);
+          const snap=!s.posedOnce||s.pendingWounds?.length||(s.knockdownTimer??0)>0||(s.clipOnly&&!clipOnly)||Boolean(s.overboard?.inWater&&s.overboard?.alive);
           s.clipOnly=clipOnly;
           if(clipOnly){s.posedOnce=true;b.clip.set(i,s.time,s.walkTime,s.walk);}else b.clip.off(i);
           const interval=snap?1:crewPoseInterval(apparent);
@@ -669,13 +687,16 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
           b.blends[i*2]=Math.min(1,(s.poseAge+1)/interval);b.blends[i*2+1]=s.poseSlot??0;
           const offset=i*CREW_ACTOR_FLOATS;
           b.actors.set(s.transform,offset);
-          const woundAmt=s.casualtyState==='fallen'?1.0:s.casualtyState==='wounded'?Math.max(0.45,Math.min(0.95,s.woundSeverity??(1-(s.health??0.5)))):0;
-          const scorchAmt=Math.max(0,Math.min(0.95,s.scorchAmount??(s.casualtyState==='fallen'?0.35:s.casualtyState==='wounded'?0.18:0)));
+          const isLivingSwimmer=Boolean(s.overboard?.inWater&&s.overboard?.alive);
+          const woundAmt=isLivingSwimmer
+            ?(s.overboard.wounded?0.45:0)
+            :s.casualtyState==='fallen'?1.0:s.casualtyState==='wounded'?Math.max(0.45,Math.min(0.95,s.woundSeverity??(1-(s.health??0.5)))):0;
+          const scorchAmt=Math.max(0,Math.min(0.95,s.scorchAmount??(!isLivingSwimmer&&s.casualtyState==='fallen'?0.35:s.casualtyState==='wounded'?0.18:0)));
           s.cutShader=crewNeedsCutShader(crewApparentDistance(s.position,boat,camera,1),boat.enabled===true,woundAmt+scorchAmt);
-          const bandageSeed=(s.casualtyState==='wounded'||s.casualtyState==='fallen')?(0.06+(((s.crewIndex??i)*0.37)%0.32)):0;
-          const shirt=s.casualtyState==='fallen'
+          const bandageSeed=(!isLivingSwimmer&&(s.casualtyState==='wounded'||s.casualtyState==='fallen'))?(0.06+(((s.crewIndex??i)*0.37)%0.32)):0;
+          const shirt=(!isLivingSwimmer&&s.casualtyState==='fallen')
             ?[s.shirt[0]*0.55+0.20,s.shirt[1]*0.32,s.shirt[2]*0.32]
-            :s.casualtyState==='wounded'
+            :(s.casualtyState==='wounded'||(isLivingSwimmer&&s.overboard.wounded))
               ?[s.shirt[0]*0.78+0.12,s.shirt[1]*0.62,s.shirt[2]*0.62]
               :s.shirt;
           b.actors.set(shirt,offset+16);b.actors.set(s.trousers,offset+20);b.actors.set(s.skin,offset+24);b.actors.set(s.hair,offset+28);

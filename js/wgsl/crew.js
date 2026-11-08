@@ -230,7 +230,7 @@ fn crewShade(v:CrewVertex,front:bool,baseIn:vec3f)->vec4f {
   let reflected=textureSampleLevel(envCube,sampC,reflect(-view,n),rough*${ENV_MIPS-1}.0).rgb;
   let grazing=1.0-clamp(dot(n,view),0.0,1.0);
   let clothSheen=grazing*grazing*grazing*grazing*(1.0-clamp(v.skin,0.0,1.0))*(1.0-wet.x*0.7)*0.045;
-  let col=lunarSurface(n,view,albedo,rough,f0,sunVis[1]*lunarShadowVisibility(shadowSample))+lightningSurface(n,view,albedo,rough)+gunFlashSurface(v.world,n,view,albedo,rough)+albedo*(direct*(diffuse/PI+clothSheen)+ambient*(1.0+clothSheen*0.5))+direct*spec*max(dot(n,sun),0.0)
+  let col=lunarSurface(n,view,albedo,rough,f0,sunVis[1]*lunarShadowVisibility(shadowSample))+lightningSurface(n,view,albedo,rough)+gunFlashSurface(v.world,n,view,albedo,rough)+worldFireSurface(v.world,n,view,albedo,rough)+albedo*(direct*(diffuse/PI+clothSheen)+ambient*(1.0+clothSheen*0.5))+direct*spec*max(dot(n,sun),0.0)
     +reflected*F.windP[1].w*vesselEnvironment(n,view,rough,f0);
   // Match timber, canvas and land: the same directional sky and marine haze
   // must veil every surface along this view ray, including shadowed sailors.
