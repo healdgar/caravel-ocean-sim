@@ -676,105 +676,10 @@ export function createLandfallUI({dock,active,stage,weather,region=ISLAND,discov
   };
 
   if(discovery&&discovery.enabled){
-    discovery.subscribe(state=>{
+    discovery.subscribe(()=>{
       if(appliedHideTimer){clearTimeout(appliedHideTimer);appliedHideTimer=null;}
-      const pct=state.stats?.restoredEstuaryPct??14.2;
-      const palms=state.stats?.palmCount??0;
-      if(state.status==='charting'){
-        discoveryCard.hidden=false;
-        discoveryCard.innerHTML=`<div class="discovery-eyebrow">Uncharted Waters · First Explorer</div>
-          <p class="discovery-body">${state.message||'You are the first mariner to sail to this location. Generating 1550 historical territory in the background…'}</p>
-          <div class="discovery-bar" role="progressbar" aria-label="Reconstructing 1550 territory"><span></span></div>`;
-        if(bannerDismissedForState!=='charting'){
-          discoveryBanner.hidden=false;
-          discoveryBanner.innerHTML=`<div class="discovery-header"><span class="discovery-eyebrow">Uncharted Waters · First Explorer</span>
-            <button type="button" class="icon-button" aria-label="Dismiss notice" style="width:28px;height:28px;min-height:28px;padding:4px"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
-            <p class="discovery-title">First Mariner at ${region.name}</p>
-            <p class="discovery-body">${state.message}</p>
-            <div class="discovery-bar" role="progressbar" aria-label="Reconstructing 1550 territory"><span></span></div>`;
-          discoveryBanner.querySelector('button').onclick=()=>{bannerDismissedForState='charting';discoveryBanner.hidden=true;};
-        }
-      }else if(state.status==='ready'){
-        const detail=`${pct}% modern coastal fill restored to 1550 tidal estuaries${palms?` · ${palms} coastal palms`:''}`;
-        discoveryCard.hidden=false;
-        discoveryCard.innerHTML=`<div class="discovery-eyebrow">Discovery Complete · 1550 Territory Ready</div>
-          <p class="discovery-body">Congratulations on your discovery! ${detail}. Cached for all future mariners.</p>
-          <div class="discovery-actions"><button type="button" class="discovery-swap-btn">Swap to 1550 Upgraded Territory</button></div>`;
-        discoveryCard.querySelector('.discovery-swap-btn').onclick=triggerSwap;
-        if(bannerDismissedForState!=='ready'){
-          discoveryBanner.hidden=false;
-          discoveryBanner.innerHTML=`<div class="discovery-header"><span class="discovery-eyebrow">Discovery Complete · 1550 Territory Ready</span>
-            <button type="button" class="icon-button" id="discovery-close" aria-label="Dismiss notice" style="width:28px;height:28px;min-height:28px;padding:4px"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
-            <p class="discovery-title">Congratulations on your discovery, Captain!</p>
-            <p class="discovery-body">The 1550 historical territory for ${region.name} (${detail}) has been generated and cached for all mariners.</p>
-            <div class="discovery-actions">
-              <button type="button" class="discovery-swap-btn" id="landfall-upgrade-swap">Swap to 1550 Upgraded Territory</button>
-              <button type="button" id="landfall-upgrade-later">Keep current chart</button>
-            </div>`;
-          discoveryBanner.querySelector('#landfall-upgrade-swap').onclick=triggerSwap;
-          discoveryBanner.querySelector('#landfall-upgrade-later').onclick=discoveryBanner.querySelector('#discovery-close').onclick=()=>{
-            bannerDismissedForState='ready';discoveryBanner.hidden=true;
-          };
-        }
-      }else if(state.status==='cached'){
-        const detail=`${pct}% modern coastal fill restored to 1550 estuaries · Mariner #${state.visits}`;
-        discoveryCard.hidden=false;
-        discoveryCard.innerHTML=`<div class="discovery-eyebrow">Charted 1550 Coastline · Mariner #${state.visits}</div>
-          <p class="discovery-body">Discovered and cached by a fellow mariner (${detail}).</p>
-          <div class="discovery-actions"><button type="button" class="discovery-swap-btn">Swap to 1550 Upgraded Territory</button></div>`;
-        discoveryCard.querySelector('.discovery-swap-btn').onclick=triggerSwap;
-        if(bannerDismissedForState!=='cached'){
-          discoveryBanner.hidden=false;
-          discoveryBanner.innerHTML=`<div class="discovery-header"><span class="discovery-eyebrow">Charted 1550 Coastline · Mariner #${state.visits}</span>
-            <button type="button" class="icon-button" id="discovery-close" aria-label="Dismiss notice" style="width:28px;height:28px;min-height:28px;padding:4px"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
-            <p class="discovery-title">1550 Territory Available for ${region.name}</p>
-            <p class="discovery-body">${detail}.</p>
-            <div class="discovery-actions">
-              <button type="button" class="discovery-swap-btn" id="landfall-upgrade-swap">Swap to 1550 Upgraded Territory</button>
-              <button type="button" id="landfall-upgrade-later">Dismiss</button>
-            </div>`;
-          discoveryBanner.querySelector('#landfall-upgrade-swap').onclick=triggerSwap;
-          discoveryBanner.querySelector('#landfall-upgrade-later').onclick=discoveryBanner.querySelector('#discovery-close').onclick=()=>{
-            bannerDismissedForState='cached';discoveryBanner.hidden=true;
-          };
-        }
-      }else if(state.status==='applied'){
-        const detail=`${pct}% modern coastal fill restored to 1550 tidal estuaries${palms?` · ${palms} coastal palms`:''}`;
-        discoveryCard.hidden=false;
-        discoveryCard.innerHTML=`<div class="discovery-eyebrow">1550 Historical Territory Active</div>
-          <p class="discovery-body">Sailing the reconstructed 1550 AI orthophoto + Depth Anything V2 + SRTM coastline of ${region.name} (${detail}).</p>
-          <div class="discovery-actions"><button type="button" class="discovery-revert-btn">Compare: Switch to 2026 Modern Baseline</button></div>`;
-        discoveryCard.querySelector('.discovery-revert-btn').onclick=triggerRevert;
-        discoveryBanner.hidden=false;
-        discoveryBanner.innerHTML=`<div class="discovery-header"><span class="discovery-eyebrow">${state.isCurated1550?'Curated 1550 Spanish Main Port':'1550 Historical Territory Active'}</span>
-          <button type="button" class="icon-button" id="discovery-close" aria-label="Dismiss notice" style="width:28px;height:28px;min-height:28px;padding:4px"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
-          <p class="discovery-title">${state.isCurated1550?`1550 Territory Active — ${region.name}`:'Territory Upgraded — Congratulations, Captain!'}</p>
-          <p class="discovery-body">Sailing the reconstructed 1550 coastline, tidal mangrove estuaries, beaches and primary canopy (${detail}).</p>
-          <div class="discovery-actions">
-            <button type="button" id="landfall-upgrade-revert">Compare: 2026 Modern Baseline</button>
-            <button type="button" id="landfall-upgrade-dismiss">Dismiss</button>
-          </div>`;
-        discoveryBanner.querySelector('#landfall-upgrade-revert').onclick=triggerRevert;
-        discoveryBanner.querySelector('#landfall-upgrade-dismiss').onclick=discoveryBanner.querySelector('#discovery-close').onclick=()=>{discoveryBanner.hidden=true;};
-        appliedHideTimer=setTimeout(()=>{discoveryBanner.hidden=true;},8500);
-      }else if(state.status==='reverted'){
-        discoveryCard.hidden=false;
-        discoveryCard.innerHTML=`<div class="discovery-eyebrow">2026 Modern Baseline Active</div>
-          <p class="discovery-body">Viewing the uncarved 2026 modern satellite + SRTM baseline for ${region.name}.</p>
-          <div class="discovery-actions"><button type="button" class="discovery-swap-btn">Switch to 1550 Historical Territory</button></div>`;
-        discoveryCard.querySelector('.discovery-swap-btn').onclick=triggerSwap;
-        discoveryBanner.hidden=false;
-        discoveryBanner.innerHTML=`<div class="discovery-header"><span class="discovery-eyebrow">2026 Modern Baseline Active</span>
-          <button type="button" class="icon-button" id="discovery-close" aria-label="Dismiss notice" style="width:28px;height:28px;min-height:28px;padding:4px"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
-          <p class="discovery-title">Viewing 2026 Modern Baseline — ${region.name}</p>
-          <p class="discovery-body">Modern reclaimed piers, landfill and 2026 coastline restored for comparison.</p>
-          <div class="discovery-actions">
-            <button type="button" class="discovery-swap-btn" id="landfall-upgrade-swap">Switch to 1550 Historical Territory</button>
-            <button type="button" id="landfall-upgrade-dismiss">Dismiss</button>
-          </div>`;
-        discoveryBanner.querySelector('#landfall-upgrade-swap').onclick=triggerSwap;
-        discoveryBanner.querySelector('#landfall-upgrade-dismiss').onclick=discoveryBanner.querySelector('#discovery-close').onclick=()=>{discoveryBanner.hidden=true;};
-      }
+      discoveryBanner.hidden=true;
+      if(discoveryCard)discoveryCard.hidden=true;
     });
   }
 

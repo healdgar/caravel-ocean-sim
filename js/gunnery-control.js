@@ -2259,18 +2259,17 @@ export function stepVesselDamage(boat, dt, terrain = null) {
     const freeboard = boat.hydrodynamics?.freeboard ?? 1.8;
     const draft = boat.hydrodynamics?.draft ?? 2.2;
     let maxSink = openOceanMaxSink;
-    if (terrain && typeof terrain.height === 'function') {
-      const bedY = terrain.height(boat.x ?? 0, boat.z ?? 0);
-      if (Number.isFinite(bedY)) {
-        if (bedY >= -freeboard * 0.85 || boat.aground || damage.wreckedOnRocks) {
+    if (damage.wreckedOnRocks) {
+      if (terrain && typeof terrain.height === 'function') {
+        const bedY = terrain.height(boat.x ?? 0, boat.z ?? 0);
+        if (Number.isFinite(bedY)) {
           maxSink = Math.max(0.18, Math.min(1.35, Math.max(0, -bedY) * 0.45 + 0.35));
-        } else if (bedY < 0) {
-          const bedMaxSink = Math.max(0.5, -bedY - freeboard - draft * 0.45);
-          maxSink = Math.min(openOceanMaxSink, bedMaxSink);
+        } else {
+          maxSink = 0.65;
         }
+      } else {
+        maxSink = 0.65;
       }
-    } else if (boat.aground || damage.wreckedOnRocks) {
-      maxSink = 0.65;
     }
     damage.maxSinkDepth = +maxSink.toFixed(3);
     // Downflooding through gunports and weather-deck hatches accelerates descent once awash.

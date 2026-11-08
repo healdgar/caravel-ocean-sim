@@ -69,6 +69,77 @@ struct FracturePoseVertex {position:vec4f,normal:vec4f};
 @group(0)@binding(1)var<storage,read>fractureVertexShards:array<u32>;
 @group(0)@binding(2)var<storage,read>fractureRecords:array<vec4f>;
 @group(0)@binding(3)var<uniform>fractureClock:FractureClock;
+fn fractureBoatRotate(v:vec3f,heading:f32,pitch:f32,roll:f32)->vec3f {
+  let cr=cos(roll);let sr=sin(roll);
+  let cp=cos(pitch);let sp=sin(pitch);
+  let ch=cos(heading);let sh=sin(heading);
+  let xx=cr*v.x-sr*v.y;let yy=sr*v.x+cr*v.y;
+  let yp=cp*yy-sp*v.z;let zp=sp*yy+cp*v.z;
+  return vec3f(ch*xx-sh*zp,yp,sh*xx+ch*zp);
+}
+fn shardFlightWorld(position:vec3f,restNormal:vec3f,origin:vec4f,flight:vec4f,spinHide:vec4f,motion:vec4f,spawn0:vec4f,spawn1:vec4f,right:vec3f,up:vec3f,fwd:vec3f,boatOrigin:vec3f,waterY:f32,clock:FractureClock)->ShardPose {
+  let age=select(max(0.0,clock.now-origin.w),motion.w,motion.w>=0.0);
+  if(spinHide.w>=0.0&&age>=spinHide.w){return ShardPose(origin.xyz,restNormal);}
+  let scale=clock.scale.xyz;
+  let hinge=motion.x;
+  let rate=length(spinHide.xyz);
+  let startWorldPivot=spawn0.xyz+fractureBoatRotate(origin.xyz*scale,spawn0.w,spawn1.x,spawn1.y);
+  let velWorld=fractureBoatRotate(flight.xyz,spawn0.w,0.0,0.0);
+  let g=max(0.1,clock.gravity*motion.y);
+  let h0=startWorldPivot.y-waterY;
+  let vy0=select(0.0,max(0.0,velWorld.y),h0>0.05);
+  let fallTime=select(0.25,(vy0+sqrt(vy0*vy0+2.0*g*max(0.0,h0)))/g,h0>0.0);
+  let settle=hinge+fallTime;
+  let free=max(0.0,min(age,settle)-hinge);
+  let held=min(age,hinge);
+  var angle=rate*free;
+  if(hinge>0.0){angle+=0.5*rate*held*held/hinge;}
+  let waterAge=max(0.0,age-settle);
+  let waterBlend=smoothstep(0.0,0.40,waterAge);
+  let seed=origin.x*1.73+origin.z*2.19;
+  let waveBob=(sin(clock.now*1.85+seed)*0.08+cos(clock.now*1.27-seed*0.7)*0.05)*waterBlend;
+  let sinkDrop=motion.z*waterAge;
+  let airY=select(mix(startWorldPivot.y,waterY,smoothstep(0.0,settle,age)),startWorldPivot.y+vy0*free-0.5*g*free*free,h0>0.0);
+  let pivotY=select(airY,waterY,age>=settle)+waveBob-sinkDrop;
+  let worldPivot=vec3f(startWorldPivot.x+velWorld.x*free,pivotY,startWorldPivot.z+velWorld.z*free);
+  let relative0=(position-origin.xyz)*scale;
+  let scaleOfNormal=length(restNormal);
+  let restUnitN=normalize(restNormal/max(scaleOfNormal,1e-5)/scale);
+  var spunLocal=relative0;
+  var spunN=restUnitN;
+  if(rate>1e-5){
+    let axis=spinHide.xyz/rate;
+    let c=cos(angle);let s=sin(angle);
+    spunLocal=fractureRotate(relative0,axis,c,s);
+    spunN=fractureRotate(restUnitN,axis,c,s);
+  }
+  let flightWorldRel=fractureBoatRotate(spunLocal,spawn0.w,spawn1.x,spawn1.y);
+  let flightWorldN=fractureBoatRotate(spunN,spawn0.w,spawn1.x,spawn1.y);
+  let sideSign=select(-1.0,1.0,origin.x>=0.0);
+  var flatLocal=relative0;
+  var flatUnitN=restUnitN;
+  if(spawn1.z>1.5){
+    flatLocal=vec3f(relative0.x,relative0.z,-relative0.y);
+    flatUnitN=vec3f(restUnitN.x,restUnitN.z,-restUnitN.y);
+  }else if(spawn1.z>0.5){
+    flatLocal=vec3f(relative0.y*sideSign,-relative0.x*sideSign,relative0.z);
+    flatUnitN=vec3f(restUnitN.y*sideSign,-restUnitN.x*sideSign,restUnitN.z);
+  }
+  flatLocal.y=clamp(flatLocal.y,-0.16,0.16);
+  if(flatUnitN.y<0.0){flatUnitN=-flatUnitN;}
+  let waveRockX=sin(clock.now*1.65+seed*1.3)*0.08*waterBlend;
+  let waveRockZ=cos(clock.now*1.42-seed*0.9)*0.10*waterBlend;
+  let flatYaw=spawn0.w+seed*0.45;
+  let flatWorldRel=fractureBoatRotate(flatLocal,flatYaw,waveRockX,waveRockZ);
+  let flatWorldN=fractureBoatRotate(flatUnitN,flatYaw,waveRockX,waveRockZ);
+  let flatBlend=smoothstep(hinge*0.6,settle,age);
+  let worldRel=mix(flightWorldRel,flatWorldRel,flatBlend);
+  let worldN=normalize(mix(flightWorldN,flatWorldN,flatBlend));
+  let d=(worldPivot+worldRel)-boatOrigin;
+  let localMetres=vec3f(dot(d,right),dot(d,up),-dot(d,fwd));
+  let localN=vec3f(dot(worldN,right),dot(worldN,up),-dot(worldN,fwd));
+  return ShardPose(localMetres/scale,normalize(localN*scale)*scaleOfNormal);
+}
 @compute @workgroup_size(64)fn main(@builtin(global_invocation_id)id:vec3u){
   let vertex=id.x;
   if(vertex>=arrayLength(&fracturePosed)||vertex>=arrayLength(&fractureVertexShards)){return;}
@@ -78,6 +149,20 @@ struct FracturePoseVertex {position:vec4f,normal:vec4f};
   let motion=fractureRecords[at+3u];
   if(motion.w<-1.5){return;}
   let current=fracturePosed[vertex];
+  let header=fractureRecords[3u];
+  if(header.w>0.5){
+    let shardCount=u32(round(header.y));
+    let spawnAt=shardCount*4u+shard*2u;
+    if(spawnAt+1u<arrayLength(&fractureRecords)&&fractureRecords[spawnAt+1u].w>0.5){
+      let r0=fractureRecords[0u];
+      let r1=fractureRecords[1u];
+      let r2=fractureRecords[2u];
+      let pose=shardFlightWorld(current.position.xyz,current.normal.xyz,fractureRecords[at],fractureRecords[at+1u],fractureRecords[at+2u],motion,fractureRecords[spawnAt],fractureRecords[spawnAt+1u],r0.xyz,r1.xyz,r2.xyz,vec3f(r0.w,r1.w,r2.w),header.x,fractureClock);
+      fracturePosed[vertex].position=vec4f(pose.position,current.position.w);
+      fracturePosed[vertex].normal=vec4f(pose.normal,current.normal.w);
+      return;
+    }
+  }
   let pose=shardFlight(current.position.xyz,current.normal.xyz,fractureRecords[at],fractureRecords[at+1u],fractureRecords[at+2u],motion,fractureClock);
   fracturePosed[vertex].position=vec4f(pose.position,current.position.w);
   fracturePosed[vertex].normal=vec4f(pose.normal,current.normal.w);

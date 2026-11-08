@@ -18,10 +18,11 @@ export const CASTLE_DUEL_DISTANCE_M = 210;
 export const CASTLE_DUEL_MUZZLE_SPEED_MPS = 72;
 
 const DUEL_RELOAD_DURATIONS = Object.freeze({
-  runIn: 0.45,
-  sponge: 0.55,
-  load: 0.65,
-  runOut: 0.55,
+  swab: 0.35,
+  load: 0.45,
+  ram: 0.35,
+  runout: 0.45,
+  prime: 0.25,
 });
 
 function configureCastleDuelBattery(battery, muzzleSpeed = CASTLE_DUEL_MUZZLE_SPEED_MPS) {
@@ -89,6 +90,7 @@ function countCastleStatus(inst, battery) {
 
 export function createCastleDuelController({
   getTerrain,
+  ensureTerrain,
   getVessels,
   getCamera,
   setCameraMode,
@@ -142,30 +144,13 @@ export function createCastleDuelController({
     document.head.appendChild(st);
   }
 
-  // Build UI elements
-  const toggleBtn = document.createElement('button');
-  toggleBtn.id = 'castle-duel-toggle-btn';
-  toggleBtn.type = 'button';
-  toggleBtn.textContent = '🏰 Castle Duel';
-  toggleBtn.title = 'Play the Two Castles Cannon Duel mini-game (no aim arcs!)';
-  Object.assign(toggleBtn.style, {
-    position: 'fixed',
-    top: '12px',
-    right: '14px',
-    zIndex: '1200',
-    padding: '7px 13px',
-    borderRadius: '8px',
-    border: '1px solid rgba(235, 192, 118, 0.55)',
-    background: 'linear-gradient(180deg, rgba(46, 31, 18, 0.92), rgba(24, 16, 9, 0.94))',
-    color: '#f5dec0',
-    fontFamily: 'system-ui, -apple-system, sans-serif',
-    fontSize: '13px',
-    fontWeight: '600',
-    letterSpacing: '0.02em',
-    cursor: 'pointer',
-    boxShadow: '0 4px 14px rgba(0,0,0,0.45)',
-  });
-  document.body.appendChild(toggleBtn);
+  // Launch button is mounted inside the Debug Menu (#environment-debug) via bindLaunchButton
+  let launchBtn = null;
+  let closePanelFn = null;
+  function syncLaunchBtn() {
+    if (!launchBtn) return;
+    launchBtn.textContent = active ? '🏰 Exit Castle Duel' : '🏰 Castle Duel';
+  }
 
   const hud = document.createElement('div');
   hud.id = 'castle-duel-hud';
@@ -405,7 +390,8 @@ export function createCastleDuelController({
       label: 'Castillo de San Felipe (Player)',
       x: centerX,
       y: 1.6,
-      baseY: -8.5,
+      baseY: 1.6,
+      foundationDepth: 12.0,
       z: centerZ + halfSpan,
       yaw: 0, // -Z faces North toward enemyCastle
       width: 36,
@@ -422,7 +408,8 @@ export function createCastleDuelController({
       label: 'Fuerte del Moro (Enemy)',
       x: centerX,
       y: 1.6,
-      baseY: -8.5,
+      baseY: 1.6,
+      foundationDepth: 12.0,
       z: centerZ - halfSpan,
       yaw: Math.PI, // -Z faces South (+Z) toward playerCastle
       width: 36,
@@ -497,9 +484,8 @@ export function createCastleDuelController({
     const frontGuns = getFrontBatteryGuns(playerBattery).filter((g) => !g.dismounted);
     if (!frontGuns.length) return 0;
 
-    // Ready any gun that has finished or nearly finished loading so firing feels snappy
-    let readyList = frontGuns.filter((g) => g.stage === 'ready' && !g.queued);
-    if (!readyList.length) {
+    if (salvo) {
+      // When the player clicks "Fire Salvo", ready all front embrasure guns immediately so a full broadside fires
       for (const g of frontGuns) {
         g.stage = 'ready';
         g.loading = false;
@@ -507,20 +493,22 @@ export function createCastleDuelController({
         g.offset = 0;
         g.queued = false;
       }
-      readyList = frontGuns;
-    }
-
-    if (salvo) {
       return fireGunnery(playerBattery.state, 'port', {
-        interval: 0.14,
+        interval: 0.12,
         ammo: ammoType,
-        only: readyList,
+        only: frontGuns,
       });
     }
-    const chosen = readyList[nextGunCursor % readyList.length];
-    nextGunCursor = (nextGunCursor + 1) % Math.max(1, readyList.length);
+
+    const chosen = frontGuns[nextGunCursor % frontGuns.length];
+    nextGunCursor = (nextGunCursor + 1) % Math.max(1, frontGuns.length);
+    chosen.stage = 'ready';
+    chosen.loading = false;
+    chosen.progress = 1;
+    chosen.offset = 0;
+    chosen.queued = false;
     return fireGunnery(playerBattery.state, 'port', {
-      interval: 0.05,
+      interval: 0.04,
       ammo: ammoType,
       only: [chosen],
     });
@@ -590,13 +578,24 @@ export function createCastleDuelController({
     }
   }
 
+  let startingPromise = null;
   function start() {
+    if (!getTerrain?.() && typeof ensureTerrain === 'function') {
+      if (!startingPromise) {
+        if (launchBtn) launchBtn.textContent = '⏳ Loading Castles…';
+        startingPromise = Promise.resolve(ensureTerrain()).then((t) => {
+          startingPromise = null;
+          if (t) start();
+          else syncLaunchBtn();
+        });
+      }
+      return true;
+    }
     if (!buildArena()) return false;
     active = true;
     hud.hidden = false;
     document.body.classList.add('castle-duel-active');
-    toggleBtn.textContent = '🏰 Exit Castle Duel';
-    toggleBtn.style.background = 'linear-gradient(180deg, rgba(145, 48, 24, 0.95), rgba(88, 24, 12, 0.96))';
+    syncLaunchBtn();
     gunEffects?.setAimArcs?.([]);
     return true;
   }
@@ -606,18 +605,26 @@ export function createCastleDuelController({
     active = false;
     hud.hidden = true;
     document.body.classList.remove('castle-duel-active');
-    toggleBtn.textContent = '🏰 Castle Duel';
-    toggleBtn.style.background = 'linear-gradient(180deg, rgba(46, 31, 18, 0.92), rgba(24, 16, 9, 0.94))';
+    syncLaunchBtn();
     const terrain = getTerrain?.();
     terrain?.setCustomPort?.(null, null);
     setCameraMode?.('ship');
   }
 
-  // Wire UI controls
-  toggleBtn.addEventListener('click', () => {
-    if (active) stop();
-    else start();
-  });
+  function bindLaunchButton(btn, onClosePanel = null) {
+    launchBtn = btn;
+    closePanelFn = onClosePanel;
+    if (!btn) return;
+    syncLaunchBtn();
+    btn.addEventListener('click', () => {
+      if (active) {
+        stop();
+      } else {
+        start();
+        closePanelFn?.();
+      }
+    });
+  }
   hud.querySelector('#cd-elev-down').addEventListener('click', () => {
     setElevation(elevationDeg - 0.5);
     if (viewPreset !== 'free') positionDuelCamera();
@@ -733,6 +740,7 @@ export function createCastleDuelController({
     },
     start,
     stop,
+    bindLaunchButton,
     rematch: buildArena,
     setElevation,
     setTraverse,

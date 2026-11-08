@@ -1262,6 +1262,7 @@ async function main() {
   window.oceanFreeCannon=freeCannon;
   const castleDuel=createCastleDuelController({
     getTerrain:()=>terrain,
+    ensureTerrain:()=>terrain?Promise.resolve(terrain):spawnTerrainLate({region:{id:'cartagena',name:'Cartagena',latitude:10.42,longitude:-75.55}}),
     getVessels:()=>vessels,
     getCamera:()=>cam,
     setCameraMode:mode=>{if(typeof setCameraMode==='function')setCameraMode(mode);},
@@ -3700,6 +3701,7 @@ async function main() {
   }
   syncAstronomySliders(astronomy.mode==='astronomy');
   const dolphinControls=createDolphinControls({parent:seaBody,encounter:dolphins.state,boat,getTerrain:()=>terrain,getVessels:()=>followerEnabled?dolphinVessels:dolphinPlayer,
+    castleDuel,onClosePanel:()=>setPanelOpen(false),onCoastlineSwap:()=>{envFull=true;},
     onView:()=>{setCameraMode('ship');shipOrbit.fleet=false;shipOrbit.wildlife=true;shipOrbit.marine=false;shipOrbit.fleetZoom=1;shipOrbit.elevation=.28;setPanelOpen(false);}});
   const marineControls=createMarineControls({parent:dolphinControls.root,encounter:marineLife.state,boat,getTerrain:()=>terrain,getVessels:()=>followerEnabled?dolphinVessels:dolphinPlayer,notice:dolphinControls.notice,
     onView:()=>{setCameraMode('ship');shipOrbit.fleet=false;shipOrbit.wildlife=true;shipOrbit.marine=true;shipOrbit.fleetZoom=1;shipOrbit.elevation=.28;setPanelOpen(false);}});

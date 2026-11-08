@@ -72,7 +72,7 @@ export async function createVesselPose({device,computePipe,sourceBuffer,mesh=nul
       const pending=boat?.damage?.pendingBakes;
       if(mesh instanceof Float32Array&&Array.isArray(pending)&&pending.length>0){
         const batch=pending.splice(0,6);
-        shards?.apply(boat.damage,batch,clock);
+        shards?.apply(boat.damage,batch,clock,boat);
         const range=bakeVesselImpactMarks(mesh,batch,9);
         if(range){
           baked=true;

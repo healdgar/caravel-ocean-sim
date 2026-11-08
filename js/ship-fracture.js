@@ -536,6 +536,8 @@ export function createShipFractureState(fracture) {
   return {
     fracture,
     records,
+    spawnRecords: new Float32Array(fracture.shardCount * 8),
+    hasSpawnPose: new Uint8Array(fracture.shardCount),
     broken: new Uint8Array(fracture.shardCount),
     wear: new Float32Array(fracture.shardCount),
     brokenCount: 0,
@@ -547,6 +549,67 @@ export function createShipFractureState(fracture) {
     partsGone: null,
     sideTops: null,
   };
+}
+
+function computeShardFlatMode(fracture, s) {
+  const shard = fracture.shards[s];
+  if (!shard) return 0;
+  if (shard.kind === SHARD_KINDS.spar) return 2;
+  const [sx, sy, sz] = fracture.scale;
+  const dx = (shard.max[0] - shard.min[0]) * sx;
+  const dy = (shard.max[1] - shard.min[1]) * sy;
+  const dz = (shard.max[2] - shard.min[2]) * sz;
+  if (dy <= dx && dy <= dz) return 0;
+  if (dx <= dy && dx <= dz) return 1;
+  return 2;
+}
+
+function recordShardSpawnPose(state, s, boat) {
+  if (!state || !boat || s <= 0 || s >= state.fracture.shardCount) return false;
+  const at = s * FRACTURE_RECORD_FLOATS;
+  const gravity = state.records[at + 13];
+  const hideAt = state.records[at + 11];
+  const activeFlag = gravity > 0 && hideAt !== 0 ? 1 : 0;
+  const spAt = s * 8;
+  const d2r = Math.PI / 180;
+  state.spawnRecords[spAt] = boat.x ?? 0;
+  state.spawnRecords[spAt + 1] = boat.heave ?? 0;
+  state.spawnRecords[spAt + 2] = boat.z ?? 0;
+  state.spawnRecords[spAt + 3] = (boat.heading ?? 0) * d2r;
+  state.spawnRecords[spAt + 4] = boat.pitch ?? 0;
+  state.spawnRecords[spAt + 5] = boat.roll ?? 0;
+  state.spawnRecords[spAt + 6] = computeShardFlatMode(state.fracture, s);
+  state.spawnRecords[spAt + 7] = activeFlag;
+  state.hasSpawnPose[s] = 1;
+  state.dirty.add(s);
+  return true;
+}
+
+function writeBoatAxis(out, offset, x, y, z, heading, pitch, roll) {
+  const cr = Math.cos(roll), sr = Math.sin(roll);
+  const cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const ch = Math.cos(heading), sh = Math.sin(heading);
+  const xx = cr * x - sr * y, yy = sr * x + cr * y;
+  const yp = cp * yy - sp * z, zp = sp * yy + cp * z;
+  out[offset] = ch * xx - sh * zp;
+  out[offset + 1] = yp;
+  out[offset + 2] = sh * xx + ch * zp;
+}
+
+function fillHullFrameHeader(out, boat, shardCount) {
+  const heading = ((boat?.heading ?? 0) * Math.PI) / 180;
+  const pitch = boat?.pitch ?? 0;
+  const roll = boat?.roll ?? 0;
+  writeBoatAxis(out, 0, 1, 0, 0, heading, pitch, roll);
+  out[3] = boat?.x ?? 0;
+  writeBoatAxis(out, 4, 0, 1, 0, heading, pitch, roll);
+  out[7] = boat?.heave ?? 0;
+  writeBoatAxis(out, 8, 0, 0, -1, heading, pitch, roll);
+  out[11] = boat?.z ?? 0;
+  out[12] = boat?.target?.heave ?? 0;
+  out[13] = shardCount;
+  out[14] = 0;
+  out[15] = 2;
 }
 
 export function shipFractureStateOf(damage, fracture) {
@@ -772,6 +835,12 @@ export function releaseSinkingWreckage(fracture, damage, now = 0) {
   if (!state || state.sunkWreckageReleased) return 0;
   state.sunkWreckageReleased = true;
   let released = 0;
+  const mastIds = Object.keys(fracture.masts ?? {});
+  for (let i = 0; i < mastIds.length; i++) {
+    const mastId = mastIds[i];
+    const side = (i & 1) ? 1 : -1;
+    released += fellMast(state, mastId, 'full', side, now);
+  }
   const candidates = [];
   for (const s of fracture.strikable) {
     if (state.broken[s]) continue;
@@ -781,12 +850,12 @@ export function releaseSinkingWreckage(fracture, damage, now = 0) {
     candidates.push(s);
   }
   candidates.sort((a, b) => fracture.shards[b].centroid[1] - fracture.shards[a].centroid[1]);
-  const targetCount = Math.min(20, Math.max(8, Math.floor(candidates.length * 0.22)));
+  const targetCount = Math.min(24, Math.max(10, Math.floor(candidates.length * 0.28)));
   const stride = Math.max(1, Math.floor(candidates.length / Math.max(1, targetCount)));
-  for (let i = 0; i < candidates.length && released < targetCount; i += stride) {
+  for (let i = 0; i < candidates.length && released < targetCount + 12; i += stride) {
     const s = candidates[i];
     const side = fracture.shards[s].centroid[0] >= 0 ? 1 : -1;
-    if (blowOff(state, s, now, { side, power: 0.55, up: 0.35 })) released++;
+    if (blowOff(state, s, now, { side, power: 0.45, up: 0, drop: true })) released++;
   }
   return released;
 }
@@ -826,6 +895,8 @@ export function syncFractureWithDamage(fracture, damage) {
 function restoreShard(state, s) {
   if (state.broken[s]) { state.broken[s] = 0; state.brokenCount--; }
   state.wear[s] = 0;
+  state.hasSpawnPose[s] = 0;
+  state.spawnRecords.fill(0, s * 8, (s + 1) * 8);
   state.flying.delete(s);
   state.records[s * FRACTURE_RECORD_FLOATS + 15] = INTACT;
   state.dirty.add(s);
@@ -958,11 +1029,14 @@ export async function createShipFractureGPU({ device, computePipe, posedBuffer, 
   }
   const owner = fractureGPUOwners.get(assets);
   owner.references++;
-  const recordBytes = fracture.shardCount * FRACTURE_RECORD_FLOATS * 4;
+  const spawnBaseFloats = fracture.shardCount * FRACTURE_RECORD_FLOATS;
+  const totalGpuFloats = spawnBaseFloats + fracture.shardCount * 8;
+  const recordBytes = totalGpuFloats * 4;
   const records = device.createBuffer({ label: `${fracture.modelId} shard flights`, size: recordBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
   const clockBuffer = device.createBuffer({ label: `${fracture.modelId} fracture clock`, size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   const clockData = new Float32Array([0, GRAVITY, 0, 0, fracture.scale[0], fracture.scale[1], fracture.scale[2], 0]);
-  const intact = new Float32Array(fracture.shardCount * FRACTURE_RECORD_FLOATS);
+  const hullHeader = new Float32Array(16);
+  const intact = new Float32Array(totalGpuFloats);
   for (let s = 0; s < fracture.shardCount; s++) intact[s * FRACTURE_RECORD_FLOATS + 15] = INTACT;
   device.queue.writeBuffer(records, 0, intact);
   device.queue.writeBuffer(clockBuffer, 0, clockData);
@@ -972,16 +1046,38 @@ export async function createShipFractureGPU({ device, computePipe, posedBuffer, 
   });
   const workgroups = Math.ceil(fracture.vertexShards.length / 64);
   let current = null, active = false, destroyed = false, seenRevision = -1;
-  const flush = () => {
+  const ensureSpawnPoses = (boat) => {
+    if (!current || !boat) return;
+    for (const s of current.dirty) {
+      if (s > 0 && current.broken[s] && !current.hasSpawnPose[s]) {
+        recordShardSpawnPose(current, s, boat);
+      }
+    }
+  };
+  const flush = (boat = null) => {
     if (!current?.dirty.size) return false;
-    for (const s of current.dirty) device.queue.writeBuffer(records, s * FRACTURE_RECORD_FLOATS * 4, current.records, s * FRACTURE_RECORD_FLOATS, FRACTURE_RECORD_FLOATS);
+    ensureSpawnPoses(boat);
+    for (const s of current.dirty) {
+      device.queue.writeBuffer(records, s * FRACTURE_RECORD_FLOATS * 4, current.records, s * FRACTURE_RECORD_FLOATS, FRACTURE_RECORD_FLOATS);
+      device.queue.writeBuffer(records, (spawnBaseFloats + s * 8) * 4, current.spawnRecords, s * 8, 8);
+    }
     current.dirty.clear();
     return true;
   };
   return {
     assets,
     get active() { return active; },
-    apply(damage, events, now) { return applyFractureEvents(fracture, damage, events, now); },
+    apply(damage, events, now, boat = null) {
+      const count = applyFractureEvents(fracture, damage, events, now);
+      if (count && boat && damage?.fracture) {
+        for (const s of damage.fracture.dirty) {
+          if (s > 0 && damage.fracture.broken[s] && !damage.fracture.hasSpawnPose[s]) {
+            recordShardSpawnPose(damage.fracture, s, boat);
+          }
+        }
+      }
+      return count;
+    },
     // Called every frame, but does nothing unless something changed.
     sync(damage, boat = null) {
       if (destroyed) return false;
@@ -1007,24 +1103,32 @@ export async function createShipFractureGPU({ device, computePipe, posedBuffer, 
         seenRevision = damage.revision;
         syncFractureWithDamage(fracture, damage);
       }
-      const wrote = flush();
+      const wrote = flush(boat);
       active = current.brokenCount > 0;
+      if (active && boat) {
+        fillHullFrameHeader(hullHeader, boat, fracture.shardCount);
+        device.queue.writeBuffer(records, 0, hullHeader, 0, 16);
+      }
       return wrote;
     },
-    // The clock runs only while something is in the air, a single small write per frame.
+    // The clock runs while something is broken or in the air.
     tick(damage, now, boat = null) {
       if (destroyed) return;
       if (damage?.sunk && current && !current.sunkWreckageReleased) {
         if (releaseSinkingWreckage(fracture, damage, now)) active = true;
       }
-      if (!current || damage?.fracture !== current || !current.flying.size) return;
-      settleFinishedFlights(current, now);
+      if (!current || damage?.fracture !== current || (!current.flying.size && !current.brokenCount)) return;
+      if (current.flying.size) settleFinishedFlights(current, now);
+      if (boat) {
+        fillHullFrameHeader(hullHeader, boat, fracture.shardCount);
+        device.queue.writeBuffer(records, 0, hullHeader, 0, 16);
+      }
       clockData[0] = now - current.epoch;
       clockData[2] = boat ? Math.max(0, (boat.target?.heave ?? 0) - (boat.heave ?? 0)) : 0;
       clockData[3] = boat?.roll ?? 0;
       clockData[7] = boat?.pitch ?? 0;
       device.queue.writeBuffer(clockBuffer, 0, clockData, 0, 8);
-      flush();
+      flush(boat);
     },
     reset() {
       if (destroyed) return;
