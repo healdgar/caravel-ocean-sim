@@ -5226,10 +5226,18 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
   let activeInstIndex = 0;
   let activeYGround = 0;
   let activeYTop = 10;
+  let activeInstYaw = 0;
   let partGroupDepth = 0;
   let sectionStart = 0;
   let currentSectionKey = null;
   const instPartCounters = new Map();
+
+  const encodeArchKind = (kind) => {
+    if (!(kind >= 9.5 && kind < 18.5)) return kind;
+    const kFloor = Math.floor(kind + 0.01);
+    const yawModPi = ((activeInstYaw % Math.PI) + Math.PI) % Math.PI;
+    return kFloor + 0.02 + (yawModPi / Math.PI) * 0.46;
+  };
 
   const nextPartId = (baseKey) => {
     const count = instPartCounters.get(baseKey) ?? 0;
@@ -5331,9 +5339,9 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     return Math.max(0.22, Math.min(1.0, combined));
   };
 
-  const pushVertex = (p, n, kind, shade) => {
+  const pushVertex = (p, n, kind, shade, rawShade = false) => {
     const idx = verts.length / 8;
-    const vShade = computeVertexArchAO(p, n, kind, shade);
+    const vShade = rawShade ? shade : computeVertexArchAO(p, n, kind, shade);
     verts.push(p[0], p[1], p[2], n[0], n[1], n[2], kind, vShade);
     for (let k = 0; k < 3; k++) {
       bounds.min[k] = Math.min(bounds.min[k], p[k]);
@@ -5367,7 +5375,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         let wz = -lnx * sinY + lnz * cosY;
         const nLen = Math.hypot(wx, wy, wz) || 1;
         wx /= nLen; wy /= nLen; wz /= nLen;
-        const kind = vArr[off + 6];
+        const kind = encodeArchKind(vArr[off + 6]);
         const kindOffset =
           kind >= 9.5 && kind < 10.5 ? 0.095 :
           kind >= 13.5 && kind < 14.5 ? 0.065 :
@@ -5398,8 +5406,24 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     let nz = uy * vx - ux * vy;
     const len = Math.hypot(nx, ny, nz) || 1;
     nx /= len; ny /= len; nz /= len;
-    // Tag unshared 4-vertex architectural quads (+0.125) so Voronoi block detachment transforms each quad face rigidly
-    const qKind = kind >= 9.5 && kind < 18.5 ? Math.floor(kind) + 0.125 : kind;
+    if (Math.floor(kind + 0.01) === 14 && shade > 0.25) {
+      // Glazed window/room quad: encode exact [0..1] window corner UVs in (kind, shade) so casement & room align 1:1
+      if (Math.abs(ny) <= 0.7) {
+        const i0 = pushVertex(a, [nx, ny, nz], 14.02, 0.96, true);
+        const i1 = pushVertex(b, [nx, ny, nz], 14.46, 0.96, true);
+        const i2 = pushVertex(c, [nx, ny, nz], 14.46, 0.32, true);
+        const i3 = pushVertex(d, [nx, ny, nz], 14.02, 0.32, true);
+        indices.push(i0, i1, i2, i0, i2, i3);
+      } else {
+        const i0 = pushVertex(a, [nx, ny, nz], 14.02, 0.32, true);
+        const i1 = pushVertex(b, [nx, ny, nz], 14.02, 0.32, true);
+        const i2 = pushVertex(c, [nx, ny, nz], 14.02, 0.32, true);
+        const i3 = pushVertex(d, [nx, ny, nz], 14.02, 0.32, true);
+        indices.push(i0, i1, i2, i0, i2, i3);
+      }
+      return;
+    }
+    const qKind = encodeArchKind(kind);
     const i0 = pushVertex(a, [nx, ny, nz], qKind, shade);
     const i1 = pushVertex(b, [nx, ny, nz], qKind, shade);
     const i2 = pushVertex(c, [nx, ny, nz], qKind, shade);
@@ -5415,8 +5439,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     let nz = uy * vx - ux * vy;
     const len = Math.hypot(nx, ny, nz) || 1;
     nx /= len; ny /= len; nz /= len;
-    // Tag unshared 3-vertex architectural triangles (+0.25) so Voronoi block detachment transforms each triangle face rigidly
-    const tKind = kind >= 9.5 && kind < 18.5 ? Math.floor(kind) + 0.25 : kind;
+    const tKind = encodeArchKind(kind);
     const i0 = pushVertex(a, [nx, ny, nz], tKind, shade);
     const i1 = pushVertex(b, [nx, ny, nz], tKind, shade);
     const i2 = pushVertex(c, [nx, ny, nz], tKind, shade);
@@ -5458,9 +5481,16 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     const spanX = Math.abs(x1 - x0);
     const spanY = Math.abs(y1 - y0);
     const spanZ = Math.abs(z1 - z0);
-    const nx = spanX >= 2.2 ? Math.min(12, Math.max(2, Math.round(spanX / 1.75))) : 1;
-    const ny = spanY >= 1.8 ? Math.min(8, Math.max(2, Math.round(spanY / 1.45))) : 1;
-    const nz = spanZ >= 2.2 ? Math.min(12, Math.max(2, Math.round(spanZ / 1.75))) : 1;
+    const isGlazedWin = Math.floor(kind + 0.01) === 14 && shade > 0.25;
+    const nx = isGlazedWin
+      ? (spanX >= 1.65 ? Math.min(8, Math.max(1, Math.round(spanX / 1.15))) : 1)
+      : (spanX >= 2.2 ? Math.min(12, Math.max(2, Math.round(spanX / 1.75))) : 1);
+    const ny = isGlazedWin
+      ? 1
+      : (spanY >= 1.8 ? Math.min(8, Math.max(2, Math.round(spanY / 1.45))) : 1);
+    const nz = isGlazedWin
+      ? (spanZ >= 1.65 ? Math.min(8, Math.max(1, Math.round(spanZ / 1.15))) : 1)
+      : (spanZ >= 2.2 ? Math.min(12, Math.max(2, Math.round(spanZ / 1.75))) : 1);
 
     pushSubdividedQuad(p000, p100, p110, p010, nx, ny, kind, shade * 0.94);
     pushSubdividedQuad(p100, p101, p111, p110, nz, ny, kind, shade);
@@ -5634,7 +5664,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
   // Emits analytic smooth radial-and-slope normals per vertex so curved towers, domes, and columns shade smoothly
   const emitCylinder = (toWorld, cx, cz, y0, y1, r0, r1, segs = 8, kind = 11, shade = 0.88, capTop = true) => {
     const topCenter = toWorld(cx, y1, cz);
-    const qKind = kind >= 9.5 && kind < 18.5 ? Math.floor(kind) + 0.125 : kind;
+    const qKind = encodeArchKind(kind);
     const dy = Math.max(0.05, Math.abs(y1 - y0));
     const slopeNy = (r0 - r1) / dy;
     const worldNormalAt = (px, py, pz, lx, ly, lz) => {
@@ -5725,7 +5755,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       return [wx / nL, wy / nL, wz / nL];
     };
 
-    const qKind = kind >= 9.5 && kind < 18.5 ? Math.floor(kind) + 0.125 : kind;
+    const qKind = encodeArchKind(kind);
     const stations = Array.isArray(profile) ? profile : [[0, 0.18, 1], [1, 0.18, 1]];
 
     for (let k = 0; k < stations.length - 1; k++) {
@@ -6201,6 +6231,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     const yTop = inst.y + inst.height;
     activeYGround = yGround;
     activeYTop = yTop;
+    activeInstYaw = inst.yaw ?? 0;
     const cosY = Math.cos(inst.yaw);
     const sinY = Math.sin(inst.yaw);
     const isOverWater = OVER_WATER_PREFAB_IDS.has(inst.prefabId);

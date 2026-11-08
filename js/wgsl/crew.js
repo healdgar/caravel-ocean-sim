@@ -247,7 +247,8 @@ fn crewShade(v:CrewVertex,front:bool,baseIn:vec3f)->vec4f {
 export const CREW_SHADOW = VESSEL_RIG + CREW_SKIN + SHADOW_FRAME + /* wgsl */ `
 @group(0) @binding(0) var<uniform> SH:ShadowFrame;
 @vertex fn vs(v:CrewInput)->@builtin(position) vec4f {
-  return SH.lightView*vec4f(rotateHull((crewSkin(v)*vec4f(crewSurface(v).position,1)).xyz),1);
+  if(actors[v.instance].shirt.w>0.5){return vec4f(2,2,0,1);}
+  return SH.lightView*vec4f(rotateHull((crewSkin(v)*vec4f(crewSurface(v).position,1)).xyz)+hull.origin.xyz-SH.origin.xyz,1);
 }
 `;
 

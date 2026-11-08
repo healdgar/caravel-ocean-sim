@@ -9,7 +9,7 @@ import { DRESS_MASK_SCALE, indigenousDress } from './indigenous-dress.js';
 import { createDistantCrewLOD } from './crew-lod.js';
 import { bakeTownClips } from './town-clips.js';
 import { TOWN_SHOTS_WORDS, createTownShots } from './town-shots.js';
-import { TOWN_FATE_WORDS, TOWN_SHOT_LIMIT, TOWN_SHOT_WORDS, TOWNSFOLK_BODY_WORDS, TOWNSFOLK_LOOKS, TOWNSFOLK_RENDER, TOWNSFOLK_TIERS, TOWNSFOLK_WALK } from './wgsl/townsfolk.js';
+import { TOWN_FATE_WORDS, TOWN_SHOT_LIMIT, TOWN_SHOT_WORDS, TOWNSFOLK_BODY_WORDS, TOWNSFOLK_LOOKS, TOWNSFOLK_RENDER, TOWNSFOLK_SHADOW, TOWNSFOLK_TIERS, TOWNSFOLK_WALK } from './wgsl/townsfolk.js';
 import { WALKER_WORDS } from './town-streets.js';
 
 const MODELS = 2;
@@ -84,8 +84,12 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
       { shaderLocation: 4, offset: 44, format: 'float32x4' },
     ],
   }];
-  const [renderModule, walkModule] = await Promise.all([shader(TOWNSFOLK_RENDER, 'townsfolk'), shader(TOWNSFOLK_WALK, 'townsfolk walk')]);
-  const [pipeline, walkPipeline] = await Promise.all([
+  const [renderModule, shadowModule, walkModule] = await Promise.all([
+    shader(TOWNSFOLK_RENDER, 'townsfolk'),
+    shader(TOWNSFOLK_SHADOW, 'townsfolk shadow'),
+    shader(TOWNSFOLK_WALK, 'townsfolk walk'),
+  ]);
+  const [pipeline, shadowPipeline, walkPipeline] = await Promise.all([
     device.createRenderPipelineAsync({
       label: 'townsfolk', layout: 'auto',
       vertex: { module: renderModule, entryPoint: 'townsfolkVS', buffers: layout },
@@ -93,6 +97,12 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
       primitive: { topology: 'triangle-list', cullMode: 'none' },
       depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
       multisample: { count: samples },
+    }),
+    device.createRenderPipelineAsync({
+      label: 'townsfolk shadow', layout: 'auto',
+      vertex: { module: shadowModule, entryPoint: 'townsfolkShadowVS', buffers: layout },
+      primitive: { topology: 'triangle-list', cullMode: 'none' },
+      depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'less', depthBias: 2, depthBiasSlopeScale: 1.5 },
     }),
     device.createComputePipelineAsync({ label: 'townsfolk walk', layout: 'auto', compute: { module: walkModule, entryPoint: 'main' } }),
   ]);
@@ -167,17 +177,28 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
       entries: [frameUBO, walkers, route, bodies, draws, uniform, shots, fates].map((b, binding) => ({ binding, resource: { buffer: b } })),
     });
     const groups = [];
+    const shadowGroups = [];
     for (let m = 0; m < MODELS; m++) for (let t = 0; t < TOWNSFOLK_TIERS; t++) {
+      const bodySlice = { buffer: bodies, offset: (m * TOWNSFOLK_TIERS + t) * bucketSpan * BODY_BYTES, size: bucketSpan * BODY_BYTES };
       groups.push(device.createBindGroup({
         label: 'townsfolk', layout: pipeline.getBindGroupLayout(0),
         entries: [
           [0, { buffer: frameUBO }], [1, { buffer: hull }], [4, transView], [5, sampClamp], [6, envCubeView], [7, { buffer: sunVisBuf }], [9, skyView],
-          [10, { buffer: bodies, offset: (m * TOWNSFOLK_TIERS + t) * bucketSpan * BODY_BYTES, size: bucketSpan * BODY_BYTES }],
+          [10, bodySlice],
           [11, { buffer: geometries[m].palette }], [12, { buffer: looks }],
         ].map(([binding, resource]) => ({ binding, resource })),
       }));
+      shadowGroups.push(device.createBindGroup({
+        label: 'townsfolk shadow', layout: shadowPipeline.getBindGroupLayout(0),
+        entries: [
+          [0, { buffer: shadows.uniform }],
+          [1, bodySlice],
+          [2, { buffer: geometries[m].palette }],
+          [3, { buffer: looks }],
+        ].map(([binding, resource]) => ({ binding, resource })),
+      }));
     }
-    crowd = { port, people, walkers, route, looks, bodies, draws, uniform, shots, fates, shotLog, shotWords: new Uint32Array(shotBytes), shotFloats: new Float32Array(shotBytes), shotsSent: 0, drawArguments, walkGroup, groups, geometries };
+    crowd = { port, people, walkers, route, looks, bodies, draws, uniform, shots, fates, shotLog, shotWords: new Uint32Array(shotBytes), shotFloats: new Float32Array(shotBytes), shotsSent: 0, drawArguments, walkGroup, groups, shadowGroups, geometries };
   }
 
   return {
@@ -217,6 +238,20 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
           const lod = crowd.geometries[m].lods[t] ?? crowd.geometries[m].lods.at(-1);
           const bucket = m * TOWNSFOLK_TIERS + t;
           pass.setBindGroup(0, crowd.groups[bucket]);
+          pass.setIndexBuffer(lod.buffer, 'uint32');
+          pass.drawIndexedIndirect(crowd.draws, bucket * TOWN_DRAW_WORDS * 4);
+        }
+      }
+    },
+    drawShadow(pass) {
+      if (!crowd) return;
+      pass.setPipeline(shadowPipeline);
+      for (let m = 0; m < MODELS; m++) {
+        pass.setVertexBuffer(0, crowd.geometries[m].vertex);
+        for (let t = 0; t < TOWNSFOLK_TIERS; t++) {
+          const lod = crowd.geometries[m].lods[t] ?? crowd.geometries[m].lods.at(-1);
+          const bucket = m * TOWNSFOLK_TIERS + t;
+          pass.setBindGroup(0, crowd.shadowGroups[bucket]);
           pass.setIndexBuffer(lod.buffer, 'uint32');
           pass.drawIndexedIndirect(crowd.draws, bucket * TOWN_DRAW_WORDS * 4);
         }

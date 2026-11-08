@@ -4,7 +4,7 @@
 // is broken apart by cannonfire. Each model's texture is decoded by the browser, and loaded only once a port needs it.
 import { PROP_MODELS, PROP_WORDS, preparePortJetties, readPropModel, stepJettyFracture } from './port-props.js';
 import { FRACTURE_GRAVITY } from './ship-fracture.js';
-import { PROP_DRAW_WORDS, PROPS_CULL, PROPS_FRACTURED_RENDER, PROPS_RENDER } from './wgsl/props.js';
+import { PROP_DRAW_WORDS, PROPS_CULL, PROPS_FRACTURED_RENDER, PROPS_RENDER, PROPS_SHADOW } from './wgsl/props.js';
 
 const PROP_REACH_M = 3000;
 const PROP_CHECK_FRAMES = 30;
@@ -58,12 +58,13 @@ export function createProps({ device, frameUBO, transView, skyView, sampClamp, e
         if (!response.ok) throw Error(`Prop asset unavailable: ${spec.file}`);
         return readPropModel(new Uint8Array(await response.arrayBuffer()), spec);
       }));
-      const [renderModule, fracturedModule, cullModule] = await Promise.all([
+      const [renderModule, fracturedModule, shadowModule, cullModule] = await Promise.all([
         shader(PROPS_RENDER, 'props'),
         shader(PROPS_FRACTURED_RENDER, 'props fractured'),
+        shader(PROPS_SHADOW, 'props shadow'),
         shader(PROPS_CULL, 'props cull'),
       ]);
-      const [pipeline, fracturedPipeline, cullPipeline, resetPipeline] = await Promise.all([
+      const [pipeline, fracturedPipeline, shadowPipeline, cullPipeline, resetPipeline] = await Promise.all([
         device.createRenderPipelineAsync({
           label: 'props', layout: 'auto',
           vertex: { module: renderModule, entryPoint: 'propVS', buffers: VERTEX_LAYOUT },
@@ -79,6 +80,12 @@ export function createProps({ device, frameUBO, transView, skyView, sampClamp, e
           primitive: { topology: 'triangle-list', cullMode: 'none' },
           depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
           multisample: { count: samples },
+        }),
+        device.createRenderPipelineAsync({
+          label: 'props shadow', layout: 'auto',
+          vertex: { module: shadowModule, entryPoint: 'propShadowVS', buffers: VERTEX_LAYOUT },
+          primitive: { topology: 'triangle-list', cullMode: 'none' },
+          depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'less', depthBias: 2, depthBiasSlopeScale: 1.5 },
         }),
         device.createComputePipelineAsync({ label: 'props cull', layout: 'auto', compute: { module: cullModule, entryPoint: 'main' } }),
         device.createComputePipelineAsync({ label: 'props reset', layout: 'auto', compute: { module: cullModule, entryPoint: 'reset' } }),
@@ -100,7 +107,7 @@ export function createProps({ device, frameUBO, transView, skyView, sampClamp, e
       hullData.set([1, 0, 0, 1], 0); hullData.set([0, 1, 0, 0], 4); hullData.set([0, 0, -1, 0], 8); hullData.set([3.6, 12, 1, 1], 12);
       kit = {
         models,
-        pieces, pipeline, fracturedPipeline, cullPipeline, resetPipeline,
+        pieces, pipeline, fracturedPipeline, shadowPipeline, cullPipeline, resetPipeline,
         lighting: shadows.bind(pipeline),
         fracturedLighting: shadows.bind(fracturedPipeline),
         vertexBuffer: buffer('prop vertices', vertices, B.VERTEX),
@@ -198,7 +205,14 @@ export function createProps({ device, frameUBO, transView, skyView, sampClamp, e
         [11, piece.pigment.createView()], [12, kit.sampler],
       ].map(([binding, resource]) => ({ binding, resource })),
     }));
-    scene = { count: placed.length, props, shown, draws, cullGroup, resetGroup, groups, entries: entriesList, fracturedProps: [] };
+    const shadowGroups = kit.pieces.map((piece, m) => device.createBindGroup({
+      label: 'props shadow', layout: kit.shadowPipeline.getBindGroupLayout(0),
+      entries: [
+        [0, { buffer: shadows.uniform }],
+        [1, { buffer: shown, offset: starts[m] * PROP_BYTES, size: Math.max(1, Math.ceil(counts[m] / LIST_ALIGNMENT)) * LIST_ALIGNMENT * PROP_BYTES }],
+      ].map(([binding, resource]) => ({ binding, resource })),
+    }));
+    scene = { count: placed.length, props, shown, draws, cullGroup, resetGroup, groups, shadowGroups, entries: entriesList, fracturedProps: [] };
   }
 
   // What stood on a pier goes when the pier does; what a cannonball strikes switches to its fractured shard draw.
@@ -289,6 +303,16 @@ export function createProps({ device, frameUBO, transView, skyView, sampClamp, e
           pass.setBindGroup(0, fj.group);
           pass.drawIndexed(fj.piece.indexCount, 1, fj.piece.firstIndex, fj.piece.baseVertex, 0);
         }
+      }
+    },
+    drawShadow(pass) {
+      if (!scene || !kit) return;
+      pass.setPipeline(kit.shadowPipeline);
+      pass.setVertexBuffer(0, kit.vertexBuffer);
+      pass.setIndexBuffer(kit.indexBuffer, 'uint32');
+      for (let m = 0; m < kit.pieces.length; m++) {
+        pass.setBindGroup(0, scene.shadowGroups[m]);
+        pass.drawIndexedIndirect(scene.draws, m * PROP_DRAW_WORDS * 4);
       }
     },
     destroy() { dispose(); },

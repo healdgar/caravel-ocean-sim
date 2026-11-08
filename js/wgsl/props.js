@@ -3,7 +3,7 @@
 import { FRAME_WGSL, ATMO_CORE_WGSL, ENV_MIPS } from './common.js';
 import { VESSEL_RIG, VESSEL_LIGHTING } from './vessel.js';
 import { SKY_RENDER_FUNCS } from './sky.js';
-import { SHADOW_SAMPLE } from './shadows.js';
+import { SHADOW_FRAME, SHADOW_SAMPLE } from './shadows.js';
 
 export const PROP_DRAW_WORDS = 5;
 const PROP_SMALLEST_PIXELS = 2.5;
@@ -34,8 +34,9 @@ fn inFrustum(relative:vec3f,radius:f32)->bool {
   let prop=props[id.x];
   if(prop.radius<=0.0){return;}
   let relative=prop.position-F.camPos.xyz;
-  if(!inFrustum(relative,prop.radius)){return;}
-  let depth=max(dot(relative,normalize(F.camFwd.xyz)),.1);
+  let cullR=select(prop.radius,prop.radius+18.0,length(relative)<110.0);
+  if(!inFrustum(relative,cullR)){return;}
+  let depth=max(dot(relative,normalize(F.camFwd.xyz)),1.2);
   if(2.0*prop.radius*F.screen.y/(2.0*length(F.camUp.xyz))/depth<${PROP_SMALLEST_PIXELS.toFixed(1)}){return;}
   let slot=atomicAdd(&draws[prop.model*${PROP_DRAW_WORDS}u+1u],1u);
   shown[prop.first+slot]=prop;
@@ -174,3 +175,14 @@ fn propFractureRotate(v:vec3f,axis:vec3f,c:f32,s:f32)->vec3f {
   return out;
 }
 ` + PROP_FRAGMENT;
+
+export const PROPS_SHADOW = SHADOW_FRAME + PROP_RECORD + /* wgsl */ `
+@group(0) @binding(0) var<uniform> SH:ShadowFrame;
+@group(0) @binding(1) var<storage,read> shown:array<Prop>;
+struct PropInput {@location(0) position:vec3f,@location(1) normal:vec3f,@location(2) uv:vec2f,@builtin(instance_index) instance:u32};
+@vertex fn propShadowVS(v:PropInput)->@builtin(position) vec4f {
+  let prop=shown[v.instance];let c=cos(prop.yaw);let s=sin(prop.yaw);let p=v.position*prop.scale;
+  let world=vec3f(p.x*c+p.z*s,p.y,p.z*c-p.x*s)+prop.position;
+  return SH.lightView*vec4f(world-SH.origin.xyz,1.0);
+}
+`;

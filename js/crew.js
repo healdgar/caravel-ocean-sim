@@ -1928,7 +1928,8 @@ export async function createFortSoldiers({
     const common = [{ buffer: fortHullUBO }, { buffer: bones }, { buffer: actor }];
     const mainResources = [{ buffer: frameUBO }, ...common, transView, sampClamp, envCubeView, { buffer: sunVisBuf }, { buffer: dryMoistureBuf }, skyView, { binding: 13, resource: captainTexView }, { binding: 14, resource: captainSampler }];
     const main = group(pipeline, mainResources);
-    return { model, isIndigenousBatch, isCaptainBatch, ownsGeometry: !sharedGeo, people: [], poses, actors, vertex, index, lods, bones, actor, main, clip };
+    const shadow = group(shadowPipeline, [{ buffer: shadows.uniform }, ...common]);
+    return { model, isIndigenousBatch, isCaptainBatch, ownsGeometry: !sharedGeo, people: [], poses, actors, vertex, index, lods, bones, actor, main, shadow, clip };
   });
   const lighting = shadows.bind(pipeline);
 
@@ -2078,6 +2079,18 @@ export async function createFortSoldiers({
         if (!b.people.length) continue;
         const lod = b.lods?.[activeTier] ?? { buffer: b.index, indexCount: b.model.indices.length };
         pass.setBindGroup(0, b.main);
+        pass.setVertexBuffer(0, b.vertex);
+        pass.setIndexBuffer(lod.buffer, 'uint32');
+        pass.drawIndexed(lod.indexCount ?? lod.indices.length, b.people.length);
+      }
+    },
+    drawShadow(pass) {
+      if (!drawEnabled) return;
+      pass.setPipeline(shadowPipeline);
+      for (const b of batches) {
+        if (!b.people.length) continue;
+        const lod = b.lods?.[activeTier] ?? { buffer: b.index, indexCount: b.model.indices.length };
+        pass.setBindGroup(0, b.shadow);
         pass.setVertexBuffer(0, b.vertex);
         pass.setIndexBuffer(lod.buffer, 'uint32');
         pass.drawIndexed(lod.indexCount ?? lod.indices.length, b.people.length);

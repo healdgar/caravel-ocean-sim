@@ -188,6 +188,20 @@ fn forestClusterVertex(tree:u32,vertex:u32,kindValue:f32)->ForestVertex{
  return forestClusterVertex(item.x,cluster.first+index,4.);
 }
 `;
+export const FOREST_CLUSTER_SHADOW_WGSL = /* wgsl */ `
+@vertex fn forestClusterWoodShadowVS(@builtin(instance_index)instance:u32,@builtin(vertex_index)index:u32)->@builtin(position)vec4f{
+ let item=forestClusterList[forestBin.x+instance];let cluster=forestClusters[item.y];
+ if(index>=(cluster.shape>>1u)*3u){return vec4f(2.,2.,0.,1.);}
+ let v=forestClusterVertex(item.x,forestClusterIndices[cluster.first+index],3.);
+ return landSH.lightView*vec4f(v.world-landSH.origin.xyz,1.);
+}
+@vertex fn forestClusterLeafShadowVS(@builtin(instance_index)instance:u32,@builtin(vertex_index)index:u32)->@builtin(position)vec4f{
+ let item=forestClusterList[forestBin.x+instance];let cluster=forestClusters[item.y];
+ if(index>=(cluster.shape>>1u)/4u*${FOREST_LEAF_VERTICES}u){return vec4f(2.,2.,0.,1.);}
+ let v=forestClusterVertex(item.x,cluster.first+index,4.);
+ return landSH.lightView*vec4f(v.world-landSH.origin.xyz,1.);
+}
+`;
 
 const CLUSTER_TRIANGLES = 128;
 const CLUSTER_INDICES = CLUSTER_TRIANGLES * 3;
@@ -196,7 +210,7 @@ const CLUSTER_LEAVES = CLUSTER_TRIANGLES / 4;
 const CLUSTERS_PER_DRAW = 200000;
 const LEAF_PATTERN = [0, 1, 2, 0, 2, 3, 3, 2, 4, 3, 4, 5];
 
-export async function createForestClusters({ device, shader, module, frame, source, prototypes, roots, visible, commands, parameters, format, samples, sceneEntries, cloudEntries, surfaceEntries, firstMaterials, bind }) {
+export async function createForestClusters({ device, shader, module, frame, source, prototypes, roots, visible, commands, parameters, format, samples, sceneEntries, cloudEntries, surfaceEntries, firstMaterials, bind, hasLandShadow = false }) {
   const B = GPUBufferUsage, owned = [], count = prototypes.length;
   const make = (data, usage, label) => {
     const buffer = device.createBuffer({ label, size: Math.max(4, data.byteLength), usage: usage | B.COPY_DST });
@@ -216,19 +230,28 @@ export async function createForestClusters({ device, shader, module, frame, sour
     fragment: { module, entryPoint: fragment, targets: [target] }, primitive: { topology: 'triangle-list', cullMode: 'none' },
     depthStencil: { format: 'depth32float', ...depthStencil }, multisample: { count: samples, alphaToCoverageEnabled: false },
   });
+  const renderShadow = (entryPoint) => device.createRenderPipelineAsync({
+    label: `forest clusters ${entryPoint}`, layout: 'auto', vertex: { module, entryPoint },
+    primitive: { topology: 'triangle-list', cullMode: 'none' },
+    depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'less', depthBias: 2, depthBiasSlopeScale: 1.5 },
+  });
   const lay = { depthWriteEnabled: true, depthCompare: 'greater' };
-  const [select, reset, woodPipeline, leafDepthPipeline, leafPipeline] = await Promise.all([
+  const [select, reset, woodPipeline, leafDepthPipeline, leafPipeline, woodShadowPipeline, leafShadowPipeline] = await Promise.all([
     device.createComputePipelineAsync({ label: 'forest cluster cut', layout: 'auto', compute: { module: compute, entryPoint: 'forestClusterSelect' } }),
     device.createComputePipelineAsync({ label: 'forest cluster reset', layout: 'auto', compute: { module: compute, entryPoint: 'forestClusterReset' } }),
     render('forestClusterWoodVS', 'forestNativeOpaqueFS', { format }, lay),
     render('forestClusterLeafVS', 'forestNativeLeafDepthFS', { format, writeMask: 0 }, lay),
     render('forestClusterLeafVS', 'forestNativeLeafFS', { format }, { depthWriteEnabled: false, depthCompare: 'equal' }),
+    hasLandShadow ? renderShadow('forestClusterWoodShadowVS') : null,
+    hasLandShadow ? renderShadow('forestClusterLeafShadowVS') : null,
   ]);
   const resetGroup = device.createBindGroup({ layout: reset.getBindGroupLayout(0), entries: [{ binding: 6, resource: { buffer: draws } }, { binding: 7, resource: { buffer: parameters } }] });
   const groups = {
     wood: { zero: bind(woodPipeline), cloud: cloudEntries(woodPipeline) },
     leafDepth: { zero: bind(leafDepthPipeline, [0]) },
     leaf: { zero: bind(leafPipeline), cloud: cloudEntries(leafPipeline) },
+    woodShadow: woodShadowPipeline ? { zero: bind(woodShadowPipeline, [0, 19]), empty1: device.createBindGroup({ layout: woodShadowPipeline.getBindGroupLayout(1), entries: [] }) } : null,
+    leafShadow: leafShadowPipeline ? { zero: bind(leafShadowPipeline, [0, 19]), empty1: device.createBindGroup({ layout: leafShadowPipeline.getBindGroupLayout(1), entries: [] }) } : null,
   };
   const species = prototypes.map((p, id) => {
     const info = source.manifest.prototypes.find((q) => q.id === id);
@@ -243,12 +266,18 @@ export async function createForestClusters({ device, shader, module, frame, sour
       layout: pipeline.getBindGroupLayout(3),
       entries: [{ binding: 0, resource: { buffer: list } }, { binding: 1, resource: { buffer: clusters } }, { binding: 2, resource: { buffer: vertices } }, ...(hasIndices ? [{ binding: 3, resource: { buffer: indices } }] : []), { binding: 4, resource: { buffer: bounds } }],
     });
+    const shadowSurface = (pipeline, offset) => device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(2),
+      entries: [{ binding: 0, resource: { buffer: roots } }, { binding: 2, resource: { buffer: offset } }],
+    });
     return {
       info, bucket, rootCount: p.rootCount,
       select: device.createBindGroup({ layout: select.getBindGroupLayout(0), entries: [frameEntry(0), ...[roots, visible, commands, clusters, list, draws, parameters, bucket].map((buffer, k) => ({ binding: k + 1, resource: { buffer } }))] }),
       wood: { surface: surfaceEntries(woodPipeline, p.id, wood, true), cluster: clusterGroup(woodPipeline, true) },
       leafDepth: { surface: surfaceEntries(leafDepthPipeline, p.id, leaf, false), cluster: clusterGroup(leafDepthPipeline, false) },
       leaf: { surface: surfaceEntries(leafPipeline, p.id, leaf, true), cluster: clusterGroup(leafPipeline, false) },
+      woodShadow: woodShadowPipeline ? { surface: shadowSurface(woodShadowPipeline, wood), cluster: clusterGroup(woodShadowPipeline, true) } : null,
+      leafShadow: leafShadowPipeline ? { surface: shadowSurface(leafShadowPipeline, leaf), cluster: clusterGroup(leafShadowPipeline, false) } : null,
     };
   });
   function frameEntry(binding) { return { binding, resource: { buffer: bind.frameUBO } }; }
@@ -293,6 +322,14 @@ export async function createForestClusters({ device, shader, module, frame, sour
     drawOpaque(pass) { drawWith(pass, woodPipeline, groups.wood.zero, groups.wood.cloud, 'wood', false); },
     drawLeafDepth(pass) { drawWith(pass, leafDepthPipeline, groups.leafDepth.zero, null, 'leafDepth', true); },
     drawLeaves(pass) { drawWith(pass, leafPipeline, groups.leaf.zero, groups.leaf.cloud, 'leaf', true); },
+    drawShadow(pass) {
+      if (woodShadowPipeline && groups.woodShadow) {
+        drawWith(pass, woodShadowPipeline, groups.woodShadow.zero, groups.woodShadow.empty1, 'woodShadow', false);
+      }
+      if (leafShadowPipeline && groups.leafShadow) {
+        drawWith(pass, leafShadowPipeline, groups.leafShadow.zero, groups.leafShadow.empty1, 'leafShadow', true);
+      }
+    },
     destroy() { for (const buffer of owned) buffer.destroy(); },
   };
 }

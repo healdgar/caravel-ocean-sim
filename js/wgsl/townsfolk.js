@@ -5,6 +5,8 @@
 // person, written only when something befalls them. js/town-shots.js says what it is given.
 import { FRAME_WGSL, SIM_CLOCK_LOOP_S } from './common.js';
 import { CREW_RENDER } from './crew.js';
+import { SHADOW_FRAME } from './shadows.js';
+import { DRESS_MASK_SCALE } from '../indigenous-dress.js';
 import { ROUTE_STEP_M } from '../town-streets.js';
 import { CREW_WALK_CYCLE_METRES } from '../crew-motion.js';
 
@@ -277,8 +279,9 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
   }
   if(hidden){return;}
   let relative=position+vec3f(0.0,${(BODY_HEIGHT_M * 0.5).toFixed(3)},0.0)-F.camPos.xyz;
-  if(!inFrustum(relative,select(${BODY_BOUND_M.toFixed(2)},${LYING_BOUND_M.toFixed(2)},fate.mode>=FALLING))){return;}
-  let depth=max(dot(relative,normalize(F.camFwd.xyz)),.1);
+  let cullR=select(select(${BODY_BOUND_M.toFixed(2)},${LYING_BOUND_M.toFixed(2)},fate.mode>=FALLING),18.0,length(relative)<110.0);
+  if(!inFrustum(relative,cullR)){return;}
+  let depth=max(dot(relative,normalize(F.camFwd.xyz)),1.2);
   let pixels=${BODY_HEIGHT_M.toFixed(3)}*F.screen.y/(2.0*length(F.camUp.xyz))/depth;
   if(pixels<${SMALLEST_PIXELS.toFixed(1)}){return;}
   let tier=select(select(select(3u,2u,pixels>${FAR_PIXELS.toFixed(1)}),1u,pixels>${MID_PIXELS.toFixed(1)}),0u,pixels>${NEAR_PIXELS.toFixed(1)});
@@ -400,5 +403,39 @@ fn townPoseBones(frame:u32,bones:vec4u,weights:vec4f)->mat4x4f {
   out.helm=0.0;out.wet=max(vec2f(rainWet*0.65,rainWet*0.75),vec2f(seaWet,seaWet));
   out.bodyPos=v.position;out.damage=vec3f(woundAmt,scorchAmt,bSeed);
   return out;
+}
+`;
+
+export const TOWNSFOLK_SHADOW = SHADOW_FRAME + TOWN_BODY + /* wgsl */ `
+struct TownLook {shirt:vec4f,trousers:vec4f,skin:vec4f,hair:vec4f,face:vec4f};
+struct CrewInput {
+  @location(0) position:vec3f, @location(1) normal:vec3f,
+  @location(2) color:vec3f, @location(3) bones:vec4u, @location(4) weights:vec4f,
+  @builtin(instance_index) instance:u32
+};
+@group(0) @binding(0) var<uniform> SH:ShadowFrame;
+@group(0) @binding(1) var<storage,read> bodies:array<TownBody>;
+@group(0) @binding(2) var<storage,read> poses:array<mat4x4f>;
+@group(0) @binding(3) var<storage,read> looks:array<TownLook>;
+fn crewDressOf(hairW:f32)->u32 {return u32(fract(hairW)*${DRESS_MASK_SCALE}.0+.5);}
+fn crewPieceHidden(color:vec3f,dress:u32)->bool {
+  let piece=u32(color.r*.5);
+  return piece>0u&&((dress>>(piece-1u))&1u)==0u;
+}
+fn townPoseBones(frame:u32,bones:vec4u,weights:vec4f)->mat4x4f {
+  let at=frame*65u;
+  return poses[at+bones.x]*weights.x+poses[at+bones.y]*weights.y+poses[at+bones.z]*weights.z+poses[at+bones.w]*weights.w;
+}
+@vertex fn townsfolkShadowVS(v:CrewInput)->@builtin(position) vec4f {
+  let body=bodies[v.instance];let look=looks[body.look];
+  let dress=crewDressOf(look.hair.w);
+  let surfacePos=select(v.position,vec3f(0.0,1.62,0.0),crewPieceHidden(v.color,dress));
+  let blend=fract(body.blend);
+  var pose=townPoseBones(body.frameA,v.bones,v.weights);
+  if(blend>0.0){pose=pose*(1.0-blend)+townPoseBones(body.frameB,v.bones,v.weights)*blend;}
+  let c=cos(body.heading);let s=sin(body.heading);
+  let local=(pose*vec4f(surfacePos,1)).xyz;
+  let world=vec3f(local.x*c+local.z*s,local.y,local.z*c-local.x*s)+body.position;
+  return SH.lightView*vec4f(world-SH.origin.xyz,1.0);
 }
 `;

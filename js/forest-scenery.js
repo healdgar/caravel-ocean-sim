@@ -6,7 +6,7 @@ import {createTaskYieldBudget,yieldCooperativeTask} from './task-yield.js';
 import {loadForestImpostors,createForestImpostorResources,FOREST_IMPOSTOR_WGSL} from './forest-impostor.js';
 import {loadForestLight,forestLightGPUBytes,FOREST_LIGHT_WGSL} from './forest-light.js';
 import {loadForestNativeLOD} from './forest-native-lod.js';
-import {loadForestClusters,createForestClusters,FOREST_CLUSTER_ASSETS,SUBTROPICAL_FOREST_CLUSTER_ASSETS,FOREST_CLUSTER_VERTEX_WGSL} from './forest-clusters.js';
+import {loadForestClusters,createForestClusters,FOREST_CLUSTER_ASSETS,SUBTROPICAL_FOREST_CLUSTER_ASSETS,FOREST_CLUSTER_VERTEX_WGSL,FOREST_CLUSTER_SHADOW_WGSL} from './forest-clusters.js';
 import {FOREST_FALL_BEARINGS,FOREST_FALL_HEIGHT_STEPS,FOREST_FALL_REST_MIN_DEG,FOREST_FALL_SECONDS,FOREST_LONG_FALLEN,FOREST_WOUND_BEARINGS,buildForestTrunkGridAsync,forestStrikesFromSave,forestStrikesToSave,forestTrunkShape,reapplyForestStrikes,strikeForestRoot,strikeForestTree} from './forest-trunks.js';
 import {FOREST_SURFACE_ASSETS,SUBTROPICAL_FOREST_SURFACE_ASSETS,chooseForestSurfaceCodec,createForestSurfaceTextures,forestMaterialOptics,loadForestSurfaceSet} from './forest-surfaces.js';
 import {loadForestVolumes,createForestVolumeResources,FOREST_VOLUME_ASSETS,SUBTROPICAL_FOREST_VOLUME_ASSETS,PORTUGAL_FOREST_VOLUME_ASSETS,FOREST_VOLUME_WGSL,FOREST_VOLUME_SHELL_WGSL} from './forest-volume.js';
@@ -528,8 +528,9 @@ fn forestMipLinear(c:vec3f)->vec3f{
 @compute @workgroup_size(8,8,1)fn forestSurfaceInit(@builtin(global_invocation_id)id:vec3u){
  let size=textureDimensions(forestMipColourOut);if(any(id.xy>=size)||id.z>=textureNumLayers(forestMipColourOut)){return;}
  let p=vec2i(id.xy);let layer=i32(id.z);let c=textureLoad(forestMipAlbedo,p,layer,0);
- let n=normalize(textureLoad(forestMipNormal,p,layer,0).xyz*2.-1.);
- var roughness=forestMipOptics[id.z].x;
+ let nTex=textureLoad(forestMipNormal,p,layer,0);
+ let n=normalize(nTex.xyz*2.-1.);
+ var roughness=select(forestMipOptics[id.z].x,nTex.a,nTex.a<0.995);
  if(forestMipOptics[id.z].y>0.){roughness=textureLoad(forestMipRoughness,p,layer,0).r;}
  textureStore(forestMipColourOut,p,layer,vec4f(forestMipLinear(c.rgb)*c.a,c.a));
  textureStore(forestMipNormalOut,p,layer,vec4f((n*c.a*127.+vec3f(128.))/255.,roughness*c.a));
@@ -736,8 +737,7 @@ fn forestPlace(r:ForestRoot,rootId:u32,posLocal:vec3f,normAdj:vec3f,kind:vec2f,l
  o.nativeMaterial=i32(nativeMaterial);if(o.nativeMaterial>=0){o.nativeMaterial+=i32(forestBin.y);}
  o.kind=kind;o.leafUV=leafUV;o.colour=tint;o.canopyAO=canopyAO;o.coverageSeed=forestCoverageHash(vertex^(rootId*0x9e3779b9u));o.pos=F.viewProj*vec4f(earthCurve(o.world-F.camPos.xyz,F.camPos.y),1);return o;
 }
-@vertex fn forestCanopyVS(@location(0)position:vec3f,@location(1)normal:vec3f,@location(2)kind:vec2f,
- @location(5)leafUV:vec2f,@location(6)colour:vec3f,@location(7)nativeMaterial:f32,@builtin(instance_index)instance:u32,@builtin(vertex_index)vertex:u32)->ForestVertex{
+fn forestCanopyVertex(position:vec3f,normal:vec3f,kind:vec2f,leafUV:vec2f,colour:vec3f,nativeMaterial:f32,instance:u32,vertex:u32)->ForestVertex{
  let r=forestRoots[forestVisible[forestBin.x+instance]];let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
  let tierId=forestBin.z>>16u;
  let isSubBroadleaf=(forestBin.z&768u)!=0u;
@@ -766,6 +766,10 @@ fn forestPlace(r:ForestRoot,rootId:u32,posLocal:vec3f,normAdj:vec3f,kind:vec2f,l
   normAdj=normalize(normAdj+(t1*uvOff.x+t2*uvOff.y)*domeCurve);
  }
  return forestPlace(r,forestVisible[forestBin.x+instance],posLocal,normAdj,kind,leafUV,colour,nativeMaterial,vertex,forestNativeCanopyAO(vertex));
+}
+@vertex fn forestCanopyVS(@location(0)position:vec3f,@location(1)normal:vec3f,@location(2)kind:vec2f,
+ @location(5)leafUV:vec2f,@location(6)colour:vec3f,@location(7)nativeMaterial:f32,@builtin(instance_index)instance:u32,@builtin(vertex_index)vertex:u32)->ForestVertex{
+ return forestCanopyVertex(position,normal,kind,leafUV,colour,nativeMaterial,instance,vertex);
 }
 // Native wood clustering + original-leaf field surface. The reduced mesh has
 // source linear pigment, not native UV/material maps or an atlas cutout.
@@ -856,11 +860,12 @@ fn forestMappedNormal(geometric:vec3f,detail:vec3f,dx:vec3f,dy:vec3f,ux:vec2f,uy
  }
  let material=forestNativeMaterials[u32(in.nativeMaterial)];let surface=forestReadNative(material,in.leafUV,ux,uy);
  let colour=forestOwnColour(surface.pigment)*in.colour;
- let n=forestMappedNormal(geometric,surface.detail.xyz,dx,dy,ux,uy)*select(-1.,1.,front);
- let roughness=clamp(surface.detail.a/max(surface.pigment.a,FOREST_THINNEST_COVERAGE),0.,1.);
+ let n=forestMappedNormal(geometric,surface.detail.xyz*vec3f(1.25,1.25,1.0),dx,dy,ux,uy)*select(-1.,1.,front);
+ let roughness=clamp(surface.detail.a/max(surface.pigment.a,FOREST_THINNEST_COVERAGE),0.22,0.98);
+ let barkWet=clamp(material.coordinates.w*(1.0-roughness),0.0,0.28);
  // Static escape through this specimen's original leaf-area field. Terrain
  // and cloud shadows remain dynamic in landFinish; this is not a sun shadow.
- return landFinish(in.world,n,colour,max(dot(n,F.sunDir.xyz),0.)*(.35+.65*in.canopyAO),(.36+max(n.y,0.)*.25)*in.canopyAO,0.,roughness);
+ return landFinish(in.world,n,colour,max(dot(n,F.sunDir.xyz),0.)*(.35+.65*in.canopyAO),(.36+max(n.y,0.)*.25)*in.canopyAO,barkWet,roughness);
 }
 fn forestNativeAlpha(material:ForestLeafMaterial,uv:vec2f,ux:vec2f,uy:vec2f)->f32{
  let family=u32(material.coordinates.x);let layer=i32(material.coordinates.y);let repeating=material.coordinates.z>0.;
@@ -893,19 +898,28 @@ struct ForestLeafCoverage {@location(0)colour:vec4f,@builtin(sample_mask)mask:u3
  var colour=forestOwnColour(pigment)*in.colour;
  let uvOff=in.leafUV-vec2f(.5,.5);
  let frondCurve=vec3f(uvOff.x*0.06,uvOff.y*0.05,0.0);
- let mappedN=forestMappedNormal(normalize(in.normal),surface.detail.xyz,dx,dy,ux,uy)*select(-1.,1.,front);
+ let mappedN=forestMappedNormal(normalize(in.normal),surface.detail.xyz*vec3f(1.35,1.35,1.0),dx,dy,ux,uy)*select(-1.,1.,front);
  let n=normalize(mappedN+frondCurve);
  if(!front){colour=mix(colour,forestNativeLinear(material.underside.rgb)*in.colour,material.optics.y);}
  let exposure=clamp(in.kind.y,0.,1.);let nDotL=dot(n,F.sunDir.xyz);
  let backlit=max(-nDotL,0.)*material.optics.z;
- colour=colour*mix(vec3f(1.0),vec3f(1.10,1.14,0.80),backlit*exposure);
+ colour=colour*mix(vec3f(1.0),vec3f(1.12,1.16,0.78),backlit*exposure);
  let diffuse=(max(nDotL,0.)+backlit)*(.22+.78*exposure*exposure)*(.35+.65*in.canopyAO);
  let ambient=(.12+exposure*.56+abs(n.y)*.09)*in.canopyAO;
- let roughness=clamp(max(0.88,surface.detail.a/max(pigment.a,FOREST_THINNEST_COVERAGE)),0.86,0.96);
- let lit=landFinish(in.world,n,colour,diffuse,ambient,0.,roughness);
+ let rawRough=surface.detail.a/max(pigment.a,FOREST_THINNEST_COVERAGE);
+ let roughness=clamp(rawRough,0.24,0.92);
+ let cuticleWet=clamp((1.0-roughness)*0.42*(0.35+0.65*exposure),0.0,0.36);
+ let lit=landFinish(in.world,n,colour,diffuse,ambient,cuticleWet,roughness);
  return vec4f(lit.rgb,pigment.a);
 }
 `+FOREST_CLUSTER_VERTEX_WGSL+FOREST_IMPOSTOR_WGSL+FOREST_VOLUME_WGSL+FOREST_VOLUME_SHELL_WGSL;
+export const FOREST_SHADOW_WGSL=/* wgsl */`
+@vertex fn forestCanopyShadowVS(@location(0)position:vec3f,@location(1)normal:vec3f,@location(2)kind:vec2f,
+ @location(5)leafUV:vec2f,@location(6)colour:vec3f,@location(7)nativeMaterial:f32,@builtin(instance_index)instance:u32,@builtin(vertex_index)vertex:u32)->@builtin(position)vec4f{
+ let v=forestCanopyVertex(position,normal,kind,leafUV,colour,nativeMaterial,instance,vertex);
+ return landSH.lightView*vec4f(v.world-landSH.origin.xyz,1.);
+}
+`+FOREST_CLUSTER_SHADOW_WGSL;
 export const FOREST_CULL_WGSL=FRAME_WGSL+ROOT_WGSL+/* wgsl */`
 struct ForestPrototype {bound:vec4f,roots:vec4u,wood:vec4u,leaf:vec4u,far:vec4u};
 @group(0)@binding(0)var<uniform>F:Frame;
@@ -1175,16 +1189,18 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     if(terrainOcclusion){terrainVisibility=createForestTerrainOcclusion({device,...terrainOcclusion});cullSource=withForestTerrainOcclusion(cullSource);}
     if(volume)cullSource=forestWithVolumeCommands(cullSource);
     const computePromise=shader(cullSource,'forest GPU cull and compact');
+    const hasLandShadow=resources.some(([id])=>id===19);
     const pipe=(fragment,target={format},depthStencil={depthWriteEnabled:true,depthCompare:'greater'})=>device.createRenderPipelineAsync({label:'instanced forest '+fragment,layout:'auto',vertex:{module,entryPoint:'forestCanopyVS',buffers:[FOREST_VERTEX_LAYOUT]},
       fragment:{module,entryPoint:fragment,targets:[target]},primitive:{topology:'triangle-list',cullMode:'none'},
       depthStencil:{format:'depth32float',...depthStencil},multisample:{count:samples,alphaToCoverageEnabled:false}});
-    const [reset,cull,sort,opaque,leafDepth,leaf,middlePipeline,volumePipeline,impostor]=await Promise.all([
+    const [reset,cull,sort,opaque,leafDepth,leaf,shadowPipe,middlePipeline,volumePipeline,impostor]=await Promise.all([
       computePromise.then(compute=>device.createComputePipelineAsync({label:'forest reset indirect counts',layout:'auto',compute:{module:compute,entryPoint:'forestReset'}})),
       computePromise.then(compute=>device.createComputePipelineAsync({label:'forest cull and LOD',layout:'auto',compute:{module:compute,entryPoint:'forestCull'}})),
       nativeMid?computePromise.then(compute=>device.createComputePipelineAsync({label:'forest sort visible roots',layout:'auto',compute:{module:compute,entryPoint:'forestSort'}})):null,
       pack.skipNative?null:pipe('forestNativeOpaqueFS'),
       pack.skipNative?null:pipe('forestNativeLeafDepthFS',{format,writeMask:0}),
       pack.skipNative?null:pipe('forestNativeLeafFS',{format},{depthWriteEnabled:false,depthCompare:'equal'}),
+      (!pack.skipNative&&hasLandShadow)?device.createRenderPipelineAsync({label:'instanced forest shadow',layout:'auto',vertex:{module,entryPoint:'forestCanopyShadowVS',buffers:[FOREST_VERTEX_LAYOUT]},primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less',depthBias:2,depthBiasSlopeScale:1.5}}):null,
       middle?device.createRenderPipelineAsync({label:'instanced forest generated native middle',layout:'auto',vertex:{module,entryPoint:'forestMiddleVS',buffers:[FOREST_MIDDLE_VERTEX_LAYOUT]},fragment:{module,entryPoint:'forestMiddleFS',targets:[{format}]},primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples,alphaToCoverageEnabled:false}}):null,
       volume?device.createRenderPipelineAsync({label:volumeShell?'instanced forest shaded native crown shell':'instanced forest native foliage volume',layout:'auto',vertex:{module,entryPoint:volumeShell?'forestVolumeShellVS':'forestVolumeVS',buffers:volumeShell?[FOREST_MIDDLE_VERTEX_LAYOUT]:[]},fragment:{module,entryPoint:volumeShell?'forestVolumeShellFS':'forestVolumeFS',targets:[{format}]},primitive:{topology:'triangle-list',cullMode:volumeShell?'none':'back'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples,alphaToCoverageEnabled:!volumeShell}}):null,
       atlas?device.createRenderPipelineAsync({label:'instanced forest native depth impostor',layout:'auto',vertex:{module,entryPoint:'forestImpostorVS'},
@@ -1195,11 +1211,13 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     const sortGroup=sort?device.createBindGroup({layout:sort.getBindGroupLayout(0),entries:[{binding:2,resource:{buffer:prototypes}},{binding:3,resource:{buffer:visible}},{binding:4,resource:{buffer:commands}},{binding:6,resource:{buffer:parameters}}]}):null;
     const cullBuffers=[frameUBO,roots,prototypes,visible,commands,previous,parameters,residency,...(forestMass?[forestMass.state]:[]),...(forestMass?.neighbors?[forestMass.neighbors]:[])];
     const cullGroup=device.createBindGroup({layout:cull.getBindGroupLayout(0),entries:[...cullBuffers.map((buffer,binding)=>({binding,resource:{buffer}})),...(terrainVisibility?.entries??[])]});
+    const sceneIds=[0,1,2,3,4,5,6,19,20,21];
     const bind=(p,ids)=>device.createBindGroup({layout:p.getBindGroupLayout(0),entries:resources.filter(([i])=>ids.includes(i)).map(([binding,resource])=>({binding,resource}))});
-    const opaqueGroup=opaque?bind(opaque,[0,1,2,3,4,5,6]):null,leafGroup=leaf?bind(leaf,[0,1,2,3,4,5,6]):null,leafDepthGroup=leafDepth?bind(leafDepth,[0]):null;
-    const middleGroup=middlePipeline?bind(middlePipeline,[0,1,2,3,4,5,6]):null,middleCloud=middlePipeline?clouds.bindVolume(middlePipeline):null;
-    const volumeGroup=volumePipeline?bind(volumePipeline,[0,1,2,3,4,5,6]):null,volumeCloud=volumePipeline?clouds.bindVolume(volumePipeline):null;
-    const impostorGroup=impostor?bind(impostor,[0,1,2,3,4,5,6]):null,impostorAtlas=impostor?atlas.bind(impostor):null;
+    const opaqueGroup=opaque?bind(opaque,sceneIds):null,leafGroup=leaf?bind(leaf,sceneIds):null,leafDepthGroup=leafDepth?bind(leafDepth,[0]):null;
+    const shadowGroup=shadowPipe?bind(shadowPipe,[0,19]):null,shadowEmpty1=shadowPipe?device.createBindGroup({layout:shadowPipe.getBindGroupLayout(1),entries:[]}):null;
+    const middleGroup=middlePipeline?bind(middlePipeline,sceneIds):null,middleCloud=middlePipeline?clouds.bindVolume(middlePipeline):null;
+    const volumeGroup=volumePipeline?bind(volumePipeline,sceneIds):null,volumeCloud=volumePipeline?clouds.bindVolume(volumePipeline):null;
+    const impostorGroup=impostor?bind(impostor,sceneIds):null,impostorAtlas=impostor?atlas.bind(impostor):null;
     const opaqueCloud=opaque?clouds.bindVolume(opaque):null,leafCloud=leaf?clouds.bindVolume(leaf):null;
     const impostorCloud=impostor?clouds.bindVolume(impostor):null;
     let materialBase=0;
@@ -1274,11 +1292,17 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
             return device.createBindGroup({layout:pipeline.getBindGroupLayout(2),entries});
           };
           bin.opaque=group(opaque);if(tier!==1){bin.leaf=group(leaf);bin.leafDepth=group(leafDepth,false);}
+          if(shadowPipe){
+            bin.shadow=device.createBindGroup({layout:shadowPipe.getBindGroupLayout(2),entries:[
+              ...[roots,visible,bin.offset].map((buffer,binding)=>({binding,resource:{buffer}})),
+              {binding:14,resource:{buffer:canopyLight}},
+            ]});
+          }
         }
         if(clusterSource){
           const firstMaterials=[];let materialCursor=0;for(const p of m.prototypes){firstMaterials.push(materialCursor);materialCursor+=p.nativeMaterials.length;}
-          const clusterBind=(p,ids=[0,1,2,3,4,5,6])=>bind(p,ids);clusterBind.frameUBO=frameUBO;
-          clusters=await createForestClusters({device,shader,module,frame:FRAME_WGSL,source:clusterSource,prototypes:m.prototypes,roots,visible,commands,parameters,format,samples,bind:clusterBind,
+          const clusterBind=(p,ids=sceneIds)=>bind(p,ids);clusterBind.frameUBO=frameUBO;
+          clusters=await createForestClusters({device,shader,module,frame:FRAME_WGSL,source:clusterSource,prototypes:m.prototypes,roots,visible,commands,parameters,format,samples,bind:clusterBind,hasLandShadow,
             cloudEntries:p=>clouds.bindVolume(p),
             surfaceEntries:(pipeline,id,offset,normals)=>{
               const entries=[{binding:0,resource:{buffer:roots}},{binding:2,resource:{buffer:offset}},{binding:5,resource:nativeSampler},{binding:6,resource:{buffer:materials}},{binding:13,resource:nativeRepeatSampler}];
@@ -1398,6 +1422,22 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       },
       setPixelError(next){if(!destroyed&&Number.isFinite(next)&&next>0&&Math.abs(next-currentNearPixels)>1e-4){currentNearPixels=next;stats.nearPixels=next;device.queue.writeBuffer(parameters,0,new Float32Array([activeRootCount,m.prototypes.length,next,nativeStatus.resident?modeIndex:effectiveModeIndex]));}},
       encode(pass){if(!activeRootCount)return;pass.setPipeline(reset);pass.setBindGroup(0,resetGroup);pass.dispatchWorkgroups(Math.ceil(m.prototypes.length*commandSlots/64));pass.setPipeline(cull);pass.setBindGroup(0,cullGroup);pass.dispatchWorkgroups(Math.ceil(activeRootCount/64));if(sort){pass.setPipeline(sort);pass.setBindGroup(0,sortGroup);pass.dispatchWorkgroups(m.prototypes.length*visibleTiers);}clusters?.encode(pass);},
-      drawOpaque(pass){drawMiddle(pass);draw(pass,opaque,opaqueGroup,opaqueCloud,false);clusters?.drawOpaque(pass);if(volumeShell)drawVolumes(pass);},drawCutout(pass){draw(pass,leafDepth,leafDepthGroup,null,true,'leafDepth');draw(pass,leaf,leafGroup,leafCloud,true);clusters?.drawLeafDepth(pass);clusters?.drawLeaves(pass);if(!volumeShell)drawVolumes(pass);drawImpostors(pass);},destroy(){destroyed=true;abort.abort();nativeStatus.status='destroyed';nativeStatus.resident=false;for(const b of allocated)b.destroy();native?.surfaces.destroy();atlas?.destroy();volume?.destroy();terrainVisibility?.destroy();}};
+      drawOpaque(pass){drawMiddle(pass);draw(pass,opaque,opaqueGroup,opaqueCloud,false);clusters?.drawOpaque(pass);if(volumeShell)drawVolumes(pass);},drawCutout(pass){draw(pass,leafDepth,leafDepthGroup,null,true,'leafDepth');draw(pass,leaf,leafGroup,leafCloud,true);clusters?.drawLeafDepth(pass);clusters?.drawLeaves(pass);if(!volumeShell)drawVolumes(pass);drawImpostors(pass);},
+      drawShadow(pass){
+        if(clusters){clusters.drawShadow(pass);return;}
+        if(!native||!shadowPipe)return;
+        pass.setPipeline(shadowPipe);pass.setBindGroup(0,shadowGroup);pass.setBindGroup(1,shadowEmpty1);pass.setVertexBuffer(0,native.vertices);pass.setIndexBuffer(native.indices,'uint32');
+        for(const p of m.prototypes){
+          for(const slot of [0,1]){
+            if(!p[['wood','leaf'][slot]].indexCount)continue;
+            pass.setBindGroup(2,bins[p.id][0].shadow);pass.drawIndexedIndirect(commands,(p.id*4+slot)*20);
+          }
+          if(nativeMid){
+            pass.setBindGroup(2,bins[p.id][2].shadow);pass.drawIndexedIndirect(commands,(m.prototypes.length*4+p.id*4)*20);
+            pass.drawIndexedIndirect(commands,(m.prototypes.length*4+p.id*4+1)*20);
+          }
+        }
+      },
+      destroy(){destroyed=true;abort.abort();nativeStatus.status='destroyed';nativeStatus.resident=false;for(const b of allocated)b.destroy();native?.surfaces.destroy();atlas?.destroy();volume?.destroy();terrainVisibility?.destroy();}};
   }catch(error){destroyed=true;abort.abort();for(const b of allocated)b.destroy();native?.surfaces.destroy();atlas?.destroy();volume?.destroy();terrainVisibility?.destroy();throw error;}
 }

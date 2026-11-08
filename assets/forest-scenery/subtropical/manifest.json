@@ -112,20 +112,20 @@
           "name": "bark",
           "albedo": {
             "file": "royal-palm-bark-albedo.png",
-            "bytes": 353480,
-            "sha256": "02c53b5ca2787d46f4ce100fe6b722e4e7d37ff6972e951a3c248eec12031a6f",
+            "bytes": 1186778,
+            "sha256": "c9de77f0e8521f2331e3979864f6048ed5eaab4b9e6d5ea1f871197c32c53b77",
             "encoding": "srgb"
           },
           "normal": {
             "file": "royal-palm-bark-normal.png",
-            "bytes": 263186,
-            "sha256": "a43c9e686d0416b1fd1bd0cf197ea809bcf895e7b55e44221ee1c257ed7a3680",
+            "bytes": 1627252,
+            "sha256": "82b3375621ac963a536a3f5b2aa085eaa4adb96187ec9f4838814348e8add471",
             "encoding": "linear"
           },
           "roughnessMap": {
             "file": "royal-palm-bark-roughness.png",
-            "bytes": 162064,
-            "sha256": "7ee573b82a9876fdf3645cec3f5d2596c7dc2ad1f80f29b90339db069a578cf7",
+            "bytes": 725739,
+            "sha256": "30407ce6d60e9aac82b20a21786094aa2498b46c6645805cd15f0f493296d342",
             "encoding": "linear"
           },
           "roughness": 1,
@@ -176,14 +176,14 @@
           "name": "foliage_0",
           "albedo": {
             "file": "royal-palm-foliage-0-albedo.png",
-            "bytes": 12558,
-            "sha256": "4030232d573239f1e833ab2b463e48576adff2e41301682a31e706c8b3e65b79",
+            "bytes": 106890,
+            "sha256": "d5a4fa04ba11b939c53bc222fa04be5747907f8fe1adac40482d573369142994",
             "encoding": "srgb"
           },
           "normal": {
             "file": "royal-palm-foliage-0-normal.png",
-            "bytes": 790,
-            "sha256": "6e0e95ad22fadb014444aab1cbf8d51d6f05ef4c7020dbcd9684b9b546ebf271",
+            "bytes": 211119,
+            "sha256": "1aaaebf3a5a0e2aa3ce56970994f224740467ebfa83a10e388af685c70782841",
             "encoding": "linear"
           },
           "roughness": 0.712,
@@ -202,14 +202,14 @@
           "name": "foliage_1",
           "albedo": {
             "file": "royal-palm-foliage-1-albedo.png",
-            "bytes": 10512,
-            "sha256": "c45acabb33fea1dc5605c505dbd42ac3bc075f1ccdd892036d48b5b76dfcff13",
+            "bytes": 107934,
+            "sha256": "41e8b3f36a314d8c327d701c3bd3255f7ff61ecc2b6ff4002e70be276d86b373",
             "encoding": "srgb"
           },
           "normal": {
             "file": "royal-palm-foliage-1-normal.png",
-            "bytes": 807,
-            "sha256": "c8c1057f40710dd543a0805985621016ce2d802a6c714b4339453be0f3f5b159",
+            "bytes": 210679,
+            "sha256": "3278f2b55b9c57daa8a79fe6680d7f3c4b419fbf5a0fc825c0ddf62c35876cba",
             "encoding": "linear"
           },
           "roughness": 0.712,
@@ -228,14 +228,14 @@
           "name": "foliage_2",
           "albedo": {
             "file": "royal-palm-foliage-2-albedo.png",
-            "bytes": 12610,
-            "sha256": "dc10fab7cbb1602e97d969f9b156ae60bf99a0992af4fe6ed0fcd50c0d7bc3c0",
+            "bytes": 107338,
+            "sha256": "a4dbf818240c699a0de6164912a8839f5f55e8ab856404d8f038df970e75847e",
             "encoding": "srgb"
           },
           "normal": {
             "file": "royal-palm-foliage-2-normal.png",
-            "bytes": 797,
-            "sha256": "3b4445037962ef21baf75b79bb01bb0c351a8f82bd570a95b627b3117f91c8e8",
+            "bytes": 211163,
+            "sha256": "605e7e03afc98a7ff5a1c485e74ec7ee5755e815bcf665d86d22b0ce14227421",
             "encoding": "linear"
           },
           "roughness": 0.712,
@@ -297,20 +297,20 @@
           "name": "bark",
           "albedo": {
             "file": "palm-bark-albedo.png",
-            "bytes": 315975,
-            "sha256": "5f8b380b54edd755f9051c126ef12f6ee458b7c4d62f77bfec39634e8b4ce991",
+            "bytes": 1258233,
+            "sha256": "9ef43e09af05e3ac04a50e989343841c540c5b3dfed7975c9bc7f625bda324a3",
             "encoding": "srgb"
           },
           "normal": {
             "file": "palm-bark-normal.png",
-            "bytes": 371858,
-            "sha256": "5e8a7d1f000c5f79b55a69c75cd7c0f24dfc433a4b1e55fc6db8826a9956a0d9",
+            "bytes": 1604899,
+            "sha256": "99ee68b5d31179e0046f6388491308effa83f5eba4cfaddcba60dbb830275c44",
             "encoding": "linear"
           },
           "roughnessMap": {
             "file": "palm-bark-roughness.png",
-            "bytes": 165560,
-            "sha256": "fa4b7953ce014aab2b0af6dca29f324b3874df51239280269d6e3b06a5f681c5",
+            "bytes": 696289,
+            "sha256": "5d6e0ae7c1deafbee3294309ba43b5cd07ebd48b04aa730cb04f541196d8083e",
             "encoding": "linear"
           },
           "roughness": 1,
@@ -361,14 +361,14 @@
           "name": "foliage_0",
           "albedo": {
             "file": "palm-foliage-0-albedo.png",
-            "bytes": 12246,
-            "sha256": "ff738996d9046ac4fc05ed9c1f637f7d5a961d447595bb75f997bd071bece01d",
+            "bytes": 130298,
+            "sha256": "5ce91b047f01bbbfec41b0a8df7786379ab4cb422bd48a1b9c322680be073095",
             "encoding": "srgb"
           },
           "normal": {
             "file": "palm-foliage-0-normal.png",
-            "bytes": 804,
-            "sha256": "0a1ea0e5b9ebf61b73b1148a77fe3d103318f0b503cc6145649543e2e551f300",
+            "bytes": 202725,
+            "sha256": "d0e4b1e17562672a477a473fee6292232b8a973035433b1bd84a87ce5ba5852e",
             "encoding": "linear"
           },
           "roughness": 0.7,
@@ -387,14 +387,14 @@
           "name": "foliage_1",
           "albedo": {
             "file": "palm-foliage-1-albedo.png",
-            "bytes": 11845,
-            "sha256": "1d391dc0c7bcc708c5e4dce917d3c7ea042336cfee0d8f0b414e17ab37a36ffb",
+            "bytes": 131209,
+            "sha256": "5b370a9f48214a0898bd09671cc4274c444f7ae67c554525b7e7efc0c91700c9",
             "encoding": "srgb"
           },
           "normal": {
             "file": "palm-foliage-1-normal.png",
-            "bytes": 807,
-            "sha256": "52e8d254a6eccafe7913a5a3d088f20671330d55210fe1762ecaa206cdd8dcaa",
+            "bytes": 202394,
+            "sha256": "4d48beb23317fb2828e43ea379ca3138761c8cb178aeb4064cf56d40db990294",
             "encoding": "linear"
           },
           "roughness": 0.7,
@@ -413,14 +413,14 @@
           "name": "foliage_2",
           "albedo": {
             "file": "palm-foliage-2-albedo.png",
-            "bytes": 13732,
-            "sha256": "4695cc3f1dc582a8989ddd51d2ba571de52e78fb4580b681dde11b44072e0e5d",
+            "bytes": 130246,
+            "sha256": "cb957bdfa882cf979f8ac0f8fa3cfcca953a78e7602eee54fdf3f60829dd74c7",
             "encoding": "srgb"
           },
           "normal": {
             "file": "palm-foliage-2-normal.png",
-            "bytes": 786,
-            "sha256": "1bcef7071606cca0ed639101775ee80fb61e16a09933c02e2697b691458136a6",
+            "bytes": 202095,
+            "sha256": "240763797e7ad994ed796e5b0d3bf3955f37a04534337f3aebd7f3b578d19570",
             "encoding": "linear"
           },
           "roughness": 0.7,
@@ -482,20 +482,20 @@
           "name": "bark",
           "albedo": {
             "file": "ceiba-bark-albedo.png",
-            "bytes": 328630,
-            "sha256": "80099f64eda774d43e375bf297b8715beeffccbcc144b0c0fb3598b7751663bb",
+            "bytes": 1097476,
+            "sha256": "caf208a2d2b776aac655cf53a6cdb472840d7821142a32ac078ca0cf5745c83e",
             "encoding": "srgb"
           },
           "normal": {
             "file": "ceiba-bark-normal.png",
-            "bytes": 235223,
-            "sha256": "2248bbbd0e415c69563c71410259012bcadfd8dbfebfe4931b52a62de31cec5a",
+            "bytes": 1676683,
+            "sha256": "43c0a6cb3b3e683a271b8b746b1214f924a8f5551daea5db0bcf61249371ac70",
             "encoding": "linear"
           },
           "roughnessMap": {
             "file": "ceiba-bark-roughness.png",
-            "bytes": 162343,
-            "sha256": "e8e80c47229f6a82a147e2748c070ee88e82e6162d9be44ae796048dd6523d1f",
+            "bytes": 645823,
+            "sha256": "7cfbcfb13dd0eeb75352add7e8cd0c887f994c939140cce3e0a69639b5116993",
             "encoding": "linear"
           },
           "roughness": 1,
@@ -546,14 +546,14 @@
           "name": "foliage_0",
           "albedo": {
             "file": "ceiba-foliage-0-albedo.png",
-            "bytes": 12652,
-            "sha256": "7a32df4f858d31967c50140ece9a55f32a430abd5cd0df784e895c79ac863e2a",
+            "bytes": 102530,
+            "sha256": "f1becca09f528acc4b1543cca2884a8a54047fddcb71ec96264ad7beda375170",
             "encoding": "srgb"
           },
           "normal": {
             "file": "ceiba-foliage-0-normal.png",
-            "bytes": 6293,
-            "sha256": "12efe2d76e45754db581db2aa928c21dc5b5be71a7c25e8629ff7f993d25af93",
+            "bytes": 131732,
+            "sha256": "dc7e087f8143062826e204aa111caf3b4de726793bc623e7ffbeb3a0b97a7077",
             "encoding": "linear"
           },
           "roughness": 0.832,
@@ -572,14 +572,14 @@
           "name": "foliage_1",
           "albedo": {
             "file": "ceiba-foliage-1-albedo.png",
-            "bytes": 10008,
-            "sha256": "93ad7f3d841bb3cf68e46b4eb9e8783e2cd6bc216c0a720e7a375593e33a97ec",
+            "bytes": 102819,
+            "sha256": "5b26c79e4abce1694df96ac481f142c9c5eda9de4110ef6bc54050fae631a13c",
             "encoding": "srgb"
           },
           "normal": {
             "file": "ceiba-foliage-1-normal.png",
-            "bytes": 5101,
-            "sha256": "8d167e9b0cf740cb05d57d4bc07f0dc266cf1ca6e22ef45286baf21a44bfc9df",
+            "bytes": 131558,
+            "sha256": "31c84758d5f9f9953c2e3e26930f679847b086963ee617a0f93a3a15d0af3d63",
             "encoding": "linear"
           },
           "roughness": 0.832,
@@ -598,14 +598,14 @@
           "name": "foliage_2",
           "albedo": {
             "file": "ceiba-foliage-2-albedo.png",
-            "bytes": 12893,
-            "sha256": "de875ad975e793fdea78f5cdd426abfbaf318879c60cc82b547e791bc6922ff1",
+            "bytes": 102330,
+            "sha256": "9afbf702251906365ceff4472ba71c3620703020ffbf159f6fa4e2a85dbbe790",
             "encoding": "srgb"
           },
           "normal": {
             "file": "ceiba-foliage-2-normal.png",
-            "bytes": 6236,
-            "sha256": "04844eb1f23ba949b7d1bbbe80c2e902c268fa5595ba609431dca5d3ff3ad697",
+            "bytes": 131547,
+            "sha256": "6af6dabe1fc55ee97e01a33366ccdc02fa40f00d18570ea57857a2feaacb28e9",
             "encoding": "linear"
           },
           "roughness": 0.832,
@@ -667,20 +667,20 @@
           "name": "bark",
           "albedo": {
             "file": "mangrove-bark-albedo.png",
-            "bytes": 278962,
-            "sha256": "48057947268ddcb2a9ddaaf5c726cc625d4d327260d266c695ea8a7929ed794d",
+            "bytes": 1379911,
+            "sha256": "72c816d28e41409d943f5d9a72016a4d9e9f4dc89a52d24210b059d8bf8dd027",
             "encoding": "srgb"
           },
           "normal": {
             "file": "mangrove-bark-normal.png",
-            "bytes": 318121,
-            "sha256": "238ca9ee6d7ca85b573e11f772c77b59fef9297e5717b050b5f7c693ad1721d7",
+            "bytes": 1624548,
+            "sha256": "95e7e514b96b82cc3600480f388717027a9ccd4ff82dac5565e962435345fdc0",
             "encoding": "linear"
           },
           "roughnessMap": {
             "file": "mangrove-bark-roughness.png",
-            "bytes": 161262,
-            "sha256": "ff822671ab5cec40a0b0bf03b495d80798e7f8afb3964474af086834bf98c1b1",
+            "bytes": 712911,
+            "sha256": "fc9466213d57dc2ea750d6511a3f38395913dc409782285a09c5477399531aa7",
             "encoding": "linear"
           },
           "roughness": 1,
@@ -731,14 +731,14 @@
           "name": "foliage_0",
           "albedo": {
             "file": "mangrove-foliage-0-albedo.png",
-            "bytes": 10412,
-            "sha256": "8a3a95c9a439bceefb469da3230b32ea850f80c14247f27ee939cf95ad58e530",
+            "bytes": 100741,
+            "sha256": "4ce305e8f15392eb6f23fe1d513806c96b15acf13378b6140fa94c9208b0b2f5",
             "encoding": "srgb"
           },
           "normal": {
             "file": "mangrove-foliage-0-normal.png",
-            "bytes": 810,
-            "sha256": "8e37ae55118ea253e44a726ea38f8aec1f41a773c280d54d0836be9460916902",
+            "bytes": 174904,
+            "sha256": "1be62328bd4e534c6c6421b0d519725118d28b4a56e0a19f7e90050ee0ea492f",
             "encoding": "linear"
           },
           "roughness": 0.6699999999999999,
@@ -757,14 +757,14 @@
           "name": "foliage_1",
           "albedo": {
             "file": "mangrove-foliage-1-albedo.png",
-            "bytes": 10299,
-            "sha256": "6f18d947513aaef730c3601c277815cdb183d43cef83368ebfc7b609ced92e8e",
+            "bytes": 102060,
+            "sha256": "6119dfa8bb0bc5c1442bdb5a8ed7c3d1aba387ced2106149feecb48ed0ad0880",
             "encoding": "srgb"
           },
           "normal": {
             "file": "mangrove-foliage-1-normal.png",
-            "bytes": 809,
-            "sha256": "d29382cdbdc0b54549ee4e6a88042e90d145853d1468936c4f291098a81b64c8",
+            "bytes": 174609,
+            "sha256": "e9a1a6bc668cc50f3259c7fa1fdaba643c33f59b05731d7644e4f1ccdc72d460",
             "encoding": "linear"
           },
           "roughness": 0.6699999999999999,
@@ -783,14 +783,14 @@
           "name": "foliage_2",
           "albedo": {
             "file": "mangrove-foliage-2-albedo.png",
-            "bytes": 11768,
-            "sha256": "734c72ece16bdc0ad8a6783dcd94b5636b693b838fabee71774807bcf090cd20",
+            "bytes": 101172,
+            "sha256": "9722b84eddb35ee0142e84de8e8b5850861f8fac4fff37defb2cea45e7a6da53",
             "encoding": "srgb"
           },
           "normal": {
             "file": "mangrove-foliage-2-normal.png",
-            "bytes": 807,
-            "sha256": "7939db2ba3c29821eb36694a7a50ab86422e3c020496a9060f550c92dac9091d",
+            "bytes": 175029,
+            "sha256": "8571ce38e63f3890b500ab15cbf1cf08d3b405ba9bc08dc36a1f1722935138b7",
             "encoding": "linear"
           },
           "roughness": 0.6699999999999999,

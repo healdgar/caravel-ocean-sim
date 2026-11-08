@@ -125,3 +125,130 @@ export async function createVesselShadows({device,hullUBO,mesh,meshIndices=null,
     destroy(){solid?.destroy();canvas?.destroy();transmission?.destroy();uniform.destroy();for(const b of [...indices,...fallback])b.destroy();},
   };
 }
+
+export function fitLandShadow(out, camera, groundY, sun, resolution = 4096, radius = 72, enabled = true) {
+  const [sx, sy, sz] = sun;
+  const horizontal = Math.hypot(sx, sz);
+  const rx = horizontal > 1e-5 ? sz / horizontal : 1;
+  const rz = horizontal > 1e-5 ? -sx / horizontal : 0;
+  const ux = sy * rz, uy = sz * rx - sx * rz, uz = -sy * rx;
+  const fwdX = camera?.forward?.[0] ?? 0;
+  const fwdZ = camera?.forward?.[2] ?? 0;
+  const lead = Math.min(22, radius * 0.28);
+  const cxWorld = (camera?.x ?? 0) + fwdX * lead;
+  const czWorld = (camera?.z ?? 0) + fwdZ * lead;
+  const cyWorld = Number.isFinite(groundY) ? Math.max(0, groundY) : 0;
+  // Quantize world origin to a coarse grid and snap light-space center to texels
+  // so shadows remain 100% locked to world texels without swimming when moving.
+  const originX = Math.round(cxWorld / 64) * 64;
+  const originY = Math.round(cyWorld / 16) * 16;
+  const originZ = Math.round(czWorld / 64) * 64;
+  const dx = cxWorld - originX;
+  const dy = cyWorld - originY;
+  const dz = czWorld - originZ;
+  const px0 = rx * dx + rz * dz;
+  const py0 = ux * dx + uy * dy + uz * dz;
+  const pz0 = -sx * dx - sy * dy - sz * dz;
+  const width = Math.ceil(radius * 2);
+  const height = Math.ceil(radius * 2);
+  const tx = width / resolution;
+  const ty = height / resolution;
+  const cx = Math.round(px0 / tx) * tx;
+  const cy = Math.round(py0 / ty) * ty;
+  const zmin = pz0 - 180;
+  const zmax = pz0 + 180;
+  const depth = zmax - zmin;
+  out.fill(0);
+  out[0] = (rx * 2) / width; out[8] = (rz * 2) / width; out[12] = (-cx * 2) / width;
+  out[1] = (ux * 2) / height; out[5] = (uy * 2) / height; out[9] = (uz * 2) / height; out[13] = (-cy * 2) / height;
+  out[2] = -sx / depth; out[6] = -sy / depth; out[10] = -sz / depth; out[14] = -zmin / depth; out[15] = 1;
+  out[16] = originX; out[17] = originY; out[18] = originZ;
+  out[19] = enabled && sy > 0.01 ? 1 : 0;
+  out.set(sun, 20); out[23] = depth; out[24] = tx; out[25] = ty;
+  return out;
+}
+
+export function createLandShadows(device, resolution = 4096) {
+  const B = GPUBufferUsage, T = GPUTextureUsage;
+  const data = new Float32Array(28);
+  const uniform = device.createBuffer({ label: 'land shadow frame', size: 112, usage: B.UNIFORM | B.COPY_DST });
+  const solid = device.createTexture({
+    label: 'land solid shadow',
+    size: [resolution, resolution],
+    format: 'depth32float',
+    usage: T.RENDER_ATTACHMENT | T.TEXTURE_BINDING,
+  });
+  const canvas = device.createTexture({
+    label: 'land dummy canvas shadow',
+    size: [1, 1],
+    format: 'depth32float',
+    usage: T.RENDER_ATTACHMENT | T.TEXTURE_BINDING,
+  });
+  const transmission = device.createTexture({
+    label: 'land dummy shadow transmission',
+    size: [1, 1],
+    format: 'rgba16float',
+    usage: T.RENDER_ATTACHMENT | T.TEXTURE_BINDING,
+  });
+  const solidView = solid.createView();
+  const canvasView = canvas.createView();
+  const transmissionView = transmission.createView();
+  // Clear dummy 1x1 canvas shadow to 1.0 (unoccluded) and transmission to 0 once at creation.
+  {
+    const enc = device.createCommandEncoder({ label: 'land shadow init' });
+    enc.beginRenderPass({
+      colorAttachments: [{ view: transmissionView, clearValue: [0, 0, 0, 0], loadOp: 'clear', storeOp: 'store' }],
+      depthStencilAttachment: { view: canvasView, depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: 'store' },
+    }).end();
+    device.queue.submit([enc.finish()]);
+  }
+  const compare = device.createSampler({ compare: 'less-equal', minFilter: 'linear', magFilter: 'linear' });
+  const linear = device.createSampler({ minFilter: 'linear', magFilter: 'linear' });
+  const passDesc = {
+    label: 'land solid shadows',
+    colorAttachments: [],
+    depthStencilAttachment: { view: solidView, depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: 'store' },
+  };
+  return {
+    resolution,
+    uniform,
+    data,
+    solidView,
+    compare,
+    terrainResources: [
+      [19, { buffer: uniform }],
+      [20, solidView],
+      [21, compare],
+    ],
+    update(camera, groundY, sun, radius = 72, enabled = true) {
+      fitLandShadow(data, camera, groundY, sun, resolution, radius, enabled);
+      device.queue.writeBuffer(uniform, 0, data);
+    },
+    encode(encoder, profiler, drawCasters) {
+      if (!data[19]) return;
+      passDesc.timestampWrites = profiler?.writes('Land shadows');
+      const pass = encoder.beginRenderPass(passDesc);
+      drawCasters?.(pass);
+      pass.end();
+    },
+    bind(pipe, groupIndex = 1) {
+      return device.createBindGroup({
+        layout: pipe.getBindGroupLayout(groupIndex),
+        entries: [
+          { binding: 0, resource: { buffer: uniform } },
+          { binding: 1, resource: solidView },
+          { binding: 2, resource: compare },
+          { binding: 3, resource: canvasView },
+          { binding: 4, resource: transmissionView },
+          { binding: 5, resource: linear },
+        ],
+      });
+    },
+    destroy() {
+      solid.destroy();
+      canvas.destroy();
+      transmission.destroy();
+      uniform.destroy();
+    },
+  };
+}

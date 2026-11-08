@@ -58,7 +58,7 @@ import {readyFleetModels,fleetFromSearch,fleetToSearch,fleetFormation,broadsideF
 import {withPooledFleetWakes} from './wgsl/fleet-wakes.js';
 import {SCENE_WAKE_SAMPLE} from './wgsl/surface-coupling.js';
 import {withSceneShadowCount, SHADOW_CAST} from './wgsl/shadows.js';
-import { createVesselShadows, createSceneShadows } from './shadows.js';
+import { createVesselShadows, createSceneShadows, createLandShadows } from './shadows.js';
 import { createSeaShadows } from './sea-shadows.js';
 import { createWaterInteraction } from './interaction.js';
 import { WATER_CONTACTS, WAKE_UPDATE, SPRAY_UPDATE, SHEET_UPDATE, WATER_EFFECTS } from './wgsl/interaction.js';
@@ -394,7 +394,8 @@ async function main() {
   const surfaceWavesPromise = createSurfaceWaves({ device, computePipe });
   const waterOpticsPromise = surfaceWavesPromise.then(sw => createWaterOptics({ device, shader, seaView: fullArr(dispTex), seaSampler: samplerSim, format: HDR, surfaceWaves: sw }));
   const cloudsPromise = createVolumetricClouds({ device, frameUBO, transView, skyView, sampler: sampClamp, computePipe });
-  const terrainPromise = LAND_STAGE ? createTerrain({ waterOptics: waterOpticsPromise, device, frameUBO, transView, skyView, sampler: sampClamp, envCubeView, clouds: cloudsPromise, shader, computePipe, mipPipe: rgba8MipPipePromise, format: HDR, samples: MSAA, portDamage }) : Promise.resolve(null);
+  const landShadows = createLandShadows(device, /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ? 2048 : 4096);
+  const terrainPromise = LAND_STAGE ? createTerrain({ waterOptics: waterOpticsPromise, device, frameUBO, transView, skyView, sampler: sampClamp, envCubeView, clouds: cloudsPromise, shader, computePipe, mipPipe: rgba8MipPipePromise, format: HDR, samples: MSAA, portDamage, landShadows }) : Promise.resolve(null);
   const prewarmPromises = [
     computePipe(SCENE_DECK_UPDATE, 'deck wash'),
     shader(DECK_RENDER, 'deck water'),
@@ -657,11 +658,11 @@ async function main() {
   }
   const playerVessel=vessels[0],shipAsset=playerVessel.asset,hullUBO=playerVessel.hullUBO,crew=playerVessel.crew,interaction=playerVessel.interaction,shadows=playerVessel.shadows;
   let fortSoldiers=null;
-  try{if(sharedCrew)fortSoldiers=await createFortSoldiers({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,shader,format:HDR,samples:MSAA,shared:sharedCrew});}catch(error){console.warn('Fort garrison initialization:',error);}
-  const props=createProps({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,shader,format:HDR,samples:MSAA});
+  try{if(sharedCrew)fortSoldiers=await createFortSoldiers({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,shared:sharedCrew});}catch(error){console.warn('Fort garrison initialization:',error);}
+  const props=createProps({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA});
   window.oceanProps=props;
   let townsfolk=null;
-  try{if(sharedCrew)townsfolk=await createTownsfolk({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,shader,format:HDR,samples:MSAA,shared:sharedCrew,isMobile:/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)});}catch(error){console.warn('Townsfolk initialization:',error);}
+  try{if(sharedCrew)townsfolk=await createTownsfolk({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,shared:sharedCrew,isMobile:/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)});}catch(error){console.warn('Townsfolk initialization:',error);}
   const spindriftPromise=createSpindrift({device,frameUBO,hullUBO,seaView:fullArr(dispTex),derivView:fullArr(derivTex),seaSampler:samplerSim,envView:envCubeView,transView,sunVis:sunVisBuf,shader,computePipe,shadows});
   const weatherRendererPromise=createWeatherRenderer({device,frameUBO,hullUBO,transView,skyView,sampler:sampClamp,shader,format:HDR,samples:MSAA});
   const hullContactProbePromise=createHullContactProbe({device,frameUBO,hullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,modelId:shipAsset.model.id});
@@ -724,6 +725,7 @@ async function main() {
       placement,
       options:{lateSpawn:true},
       portDamage,
+      landShadows,
     });
     if(!nextTerrain)return null;
     coastalOcean??=oceanVariant(await coastalOceanPromise);
@@ -4012,6 +4014,19 @@ async function main() {
       tanHalfFovY:Math.hypot(frameF[24],frameF[25],frameF[26]),forward:frameF.subarray(28,31)};
     frameStages.mark('GPU commands');
     terrain?.prepare(terrainCamera,frameF);
+    if(terrain){
+      const camGroundY=terrain.groundSample(terrainCamera.x,terrainCamera.z);
+      const camGroundDist=Math.max(0,terrainCamera.y-Math.max(0,Number.isFinite(camGroundY)?camGroundY:0));
+      const landShadowRadius=Math.max(30,Math.min(180,26+camGroundDist*0.9));
+      const landShadowSun=frameF.subarray(frameF[115]>0.5?96:32,frameF[115]>0.5?99:35);
+      landShadows.update(terrainCamera,camGroundY,landShadowSun,landShadowRadius,qs.get('shadows')!=='0');
+      landShadows.encode(enc,profiler,pass=>{
+        terrain.drawShadow(pass,terrainCamera,frameF);
+        props?.drawShadow?.(pass);
+        townsfolk?.drawShadow?.(pass);
+        fortSoldiers?.drawShadow?.(pass);
+      });
+    }
     frameStages.mark('Scenery');
     submergedPass.timestampWrites=profiler.writes('Submerged geometry');
     const underwater=enc.beginRenderPass(submergedPass);

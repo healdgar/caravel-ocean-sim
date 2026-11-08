@@ -592,8 +592,8 @@
           ],
           "albedo": {
             "file": "oak-bark-albedo.png",
-            "bytes": 300022,
-            "sha256": "6f31c17062c75f86c21974100a9c40d80fa4d3087c5f23b05b23651be14c3918",
+            "bytes": 1253954,
+            "sha256": "bec57a5718ce313435a1ddf513c52a6f6b5c8bfc02ceffd063fbe7b5a5176a3a",
             "encoding": "srgb",
             "width": 512,
             "height": 1024,
@@ -601,8 +601,8 @@
           },
           "normal": {
             "file": "oak-bark-normal.png",
-            "bytes": 574672,
-            "sha256": "288e8c40c3d96ece93b7c98960fa22da9bf9ec2b22d5671a7c561e2ee1351e15",
+            "bytes": 1573114,
+            "sha256": "511b53d35405a19dacde3c9996e5487f14d47e20c0c45f54751532c866518528",
             "encoding": "linear",
             "width": 512,
             "height": 1024,
@@ -610,8 +610,8 @@
           },
           "roughnessMap": {
             "file": "oak-bark-roughness.png",
-            "bytes": 166388,
-            "sha256": "84d1c6fc052df9808375943000cc846cd530c276205d7c7846853a64cc39274c",
+            "bytes": 722342,
+            "sha256": "99ea11ee38b47cb4df40af0987b4139d65b55f7ec936f8fdc4f94b732bba5b48",
             "encoding": "linear",
             "width": 512,
             "height": 1024,
@@ -698,8 +698,8 @@
           "index": 2,
           "albedo": {
             "file": "leaf-oak-0-albedo.png",
-            "bytes": 16023,
-            "sha256": "3cd50a563054f9d215dc0f73562960fac3f564767a57d501ebbc1d6e20b05e5b",
+            "bytes": 82783,
+            "sha256": "1866133bfb120c2262b4ac91760d068d717cc9c8f0acf08fbc3d73ce546af41f",
             "encoding": "srgb",
             "width": 256,
             "height": 256,
@@ -707,8 +707,8 @@
           },
           "normal": {
             "file": "leaf-oak-0-normal.png",
-            "bytes": 6967,
-            "sha256": "64345604f036737417f524c77adc9e529396e56ae617b1c430524b3cad0ae402",
+            "bytes": 167799,
+            "sha256": "98522c2c0155e06b8b4998a2cc2e040c23adfe1f411235d6c77feb5695c54d9a",
             "encoding": "linear",
             "width": 256,
             "height": 256,
@@ -742,8 +742,8 @@
           "index": 3,
           "albedo": {
             "file": "leaf-oak-1-albedo.png",
-            "bytes": 18409,
-            "sha256": "37c5b493429dc7352e7c14d661069f4177905b27f02522d8264e1db73bf2133b",
+            "bytes": 82971,
+            "sha256": "0058b47d08ac8ae06ba4707202c3b23a449e2256fcdb289a3cb35c58297ebae7",
             "encoding": "srgb",
             "width": 256,
             "height": 256,
@@ -751,8 +751,8 @@
           },
           "normal": {
             "file": "leaf-oak-1-normal.png",
-            "bytes": 9318,
-            "sha256": "ff3e82053c6ea2b8b7f3ac7e8ca0cb1814e1151f001f31e28724e5905365b7a2",
+            "bytes": 167569,
+            "sha256": "69fe8a42a7bde8b0dbffd3f1476dd58dc2600d0e834e06c386c6fa7370479b96",
             "encoding": "linear",
             "width": 256,
             "height": 256,
@@ -786,8 +786,8 @@
           "index": 4,
           "albedo": {
             "file": "leaf-oak-2-albedo.png",
-            "bytes": 15914,
-            "sha256": "ca2db7500808ffd761fafd26b2e045840a1f0a58dc2ba641e0a8399ba5df8fbd",
+            "bytes": 82686,
+            "sha256": "2205249ea46646f4338bb4f73627ce5ef15dc72656a73a99a4e5eec81702930a",
             "encoding": "srgb",
             "width": 256,
             "height": 256,
@@ -795,8 +795,8 @@
           },
           "normal": {
             "file": "leaf-oak-2-normal.png",
-            "bytes": 6731,
-            "sha256": "d455e487df35afa01302d8c9a8b91b90032bdc28a96889286e3e7bde47dc7406",
+            "bytes": 167691,
+            "sha256": "bb3c501a05cc8c7e874e1c174ba2e99e9660d5e770c36f5a98286624d9bc7001",
             "encoding": "linear",
             "width": 256,
             "height": 256,
@@ -1478,8 +1478,8 @@
           ],
           "albedo": {
             "file": "maple-bark-albedo.png",
-            "bytes": 322095,
-            "sha256": "35263a2726aafef2f4c6fd076d2cad6b2a6b5501f0e847a064e19f4acc4b370f",
+            "bytes": 1288176,
+            "sha256": "1a1400cdfae64c658c8afe9094bb55d5c47c63dcd69319194e0876ea0e379c2b",
             "encoding": "srgb",
             "width": 512,
             "height": 1024,
@@ -1487,8 +1487,8 @@
           },
           "normal": {
             "file": "maple-bark-normal.png",
-            "bytes": 484171,
-            "sha256": "359aeec55cb558568906e051a05c97ddd0ceaea8cbc0105d65e0a576a7a8e969",
+            "bytes": 1587963,
+            "sha256": "4f8fb2a6129936467a61080c4ebddc25bd681dd17372f816facbeb558ccff1e0",
             "encoding": "linear",
             "width": 512,
             "height": 1024,
@@ -1496,8 +1496,8 @@
           },
           "roughnessMap": {
             "file": "maple-bark-roughness.png",
-            "bytes": 166084,
-            "sha256": "9b8ba37eea603ae9bff11145460b41d60c19a55990545033dfc1f087be022b19",
+            "bytes": 699793,
+            "sha256": "bfe9c30fba924bce4d65dcd1c5a310b9b903d4875f0d1c696cd2fdbc7f4db491",
             "encoding": "linear",
             "width": 512,
             "height": 1024,
@@ -1584,8 +1584,8 @@
           "index": 2,
           "albedo": {
             "file": "leaf-maple-0-albedo.png",
-            "bytes": 10390,
-            "sha256": "0b661c4696993d0b151995fabfbf4e0b2c56698e832bb24c34b1ab24824e3041",
+            "bytes": 81483,
+            "sha256": "afb4718aae43d488e7957cfa35d18187fe29f947cc50aac56f4d1b6e8838d51a",
             "encoding": "srgb",
             "width": 256,
             "height": 256,
@@ -1593,8 +1593,8 @@
           },
           "normal": {
             "file": "leaf-maple-0-normal.png",
-            "bytes": 4698,
-            "sha256": "fd457168eb472e7d896c52e8456735bf85e4b763b658ad4c101cb9aa2fc72dfa",
+            "bytes": 166308,
+            "sha256": "5bf41cf1832fbe8cdd82464b44f9be5e1cf69ab371728b396af6d9590664b29c",
             "encoding": "linear",
             "width": 256,
             "height": 256,
@@ -1628,8 +1628,8 @@
           "index": 3,
           "albedo": {
             "file": "leaf-maple-1-albedo.png",
-            "bytes": 10203,
-            "sha256": "fb77e8dd91b60bba751d405ab78fb7b917ae4e35af75fa22c27185d88e9d4e22",
+            "bytes": 82077,
+            "sha256": "cfe97504caecd090e0a32df6446c52badf4896b146344f59d12f0a76e9e01641",
             "encoding": "srgb",
             "width": 256,
             "height": 256,
@@ -1637,8 +1637,8 @@
           },
           "normal": {
             "file": "leaf-maple-1-normal.png",
-            "bytes": 5159,
-            "sha256": "3153d4e0dc592f279398b7e51aca12f245c31f18e05481178099ea57c4229328",
+            "bytes": 166007,
+            "sha256": "e0e6e82e345697b85bcd09790ae50579da3a5f4a36d836a505d3fe664a927a75",
             "encoding": "linear",
             "width": 256,
             "height": 256,
@@ -1672,8 +1672,8 @@
           "index": 4,
           "albedo": {
             "file": "leaf-maple-2-albedo.png",
-            "bytes": 10847,
-            "sha256": "8e735663d773494823f101a92799d45a2b211a7b7d2cd13d743e1530d4de52fb",
+            "bytes": 81510,
+            "sha256": "07c4d229f73580f8c08a9cc5acd89fe0d704ce114489e769cb854c3c3c1b1774",
             "encoding": "srgb",
             "width": 256,
             "height": 256,
@@ -1681,8 +1681,8 @@
           },
           "normal": {
             "file": "leaf-maple-2-normal.png",
-            "bytes": 5065,
-            "sha256": "15d6e444fc3fc5ec117a594fd1ca362746f223d301d4a7e753fb8537caf3222e",
+            "bytes": 166177,
+            "sha256": "5ed3700efc87761337694a17312bbfb2a598dd03dfba1d2562c5d520d4f7920a",
             "encoding": "linear",
             "width": 256,
             "height": 256,
@@ -2299,8 +2299,8 @@
           ],
           "albedo": {
             "file": "birch-bark-albedo.png",
-            "bytes": 386810,
-            "sha256": "39238644cec71518801eafd50aa95e10b93f00d31345d47724d15503861dbf10",
+            "bytes": 1134049,
+            "sha256": "92dbb6d852d8c62620fe1f9d306de78b0bc65933be4153d8fbd8c81485828304",
             "encoding": "srgb",
             "width": 512,
             "height": 1024,
@@ -2308,8 +2308,8 @@
           },
           "normal": {
             "file": "birch-bark-normal.png",
-            "bytes": 212532,
-            "sha256": "6b81676337b82e468c9e157c4984a58c94ce5f475a36f78de10d76ef2fd4ab12",
+            "bytes": 1654402,
+            "sha256": "0e4b1b4fadecf78fdfff0bfb7be4d7109784ed6bd9e1a50e080e00c500333153",
             "encoding": "linear",
             "width": 512,
             "height": 1024,
@@ -2317,8 +2317,8 @@
           },
           "roughnessMap": {
             "file": "birch-bark-roughness.png",
-            "bytes": 165509,
-            "sha256": "66829488b49c016b3fe83abcb80bbca4923253b01fb80dcff6d09a23f156b85a",
+            "bytes": 611351,
+            "sha256": "e1e19b5d64eba902341451d9fea33d666778b8179a1f187020f38fe26c62a457",
             "encoding": "linear",
             "width": 512,
             "height": 1024,
@@ -2352,8 +2352,8 @@
           "index": 1,
           "albedo": {
             "file": "leaf-birch-0-albedo.png",
-            "bytes": 16615,
-            "sha256": "daa561c938a18874f1efc128b0b9caf7e2f68177f2f0c0f5bbe5014f416f093e",
+            "bytes": 84771,
+            "sha256": "5391c40fe83acfbddf5997fcfc3ba1a5821bf724cea5a3498ba8a050d8895be3",
             "encoding": "srgb",
             "width": 256,
             "height": 256,
@@ -2361,8 +2361,8 @@
           },
           "normal": {
             "file": "leaf-birch-0-normal.png",
-            "bytes": 16069,
-            "sha256": "f4fababaf192c89fe65f86adae9b5a3109973f12367b2557be2c7d2b371a4c01",
+            "bytes": 127824,
+            "sha256": "5868e701876f56db74c645ae6df6fcd277ae7b29d03ec513f1be9eff10876667",
             "encoding": "linear",
             "width": 256,
             "height": 256,
@@ -2396,8 +2396,8 @@
           "index": 2,
           "albedo": {
             "file": "leaf-birch-1-albedo.png",
-            "bytes": 15676,
-            "sha256": "114b6aa56bceca8847f1bb00e7083825007d85ce48be060f53a1b6dcd8fc4905",
+            "bytes": 85086,
+            "sha256": "b03a6fe49e65557296cce9d63cad13797f8f2fd770b4b3331e8e3b54afaaa4e3",
             "encoding": "srgb",
             "width": 256,
             "height": 256,
@@ -2405,8 +2405,8 @@
           },
           "normal": {
             "file": "leaf-birch-1-normal.png",
-            "bytes": 14559,
-            "sha256": "2e36c465d4d3bcb05b149e13e77c778ad69b817a3b79617d83fc1ff1604ef67b",
+            "bytes": 127683,
+            "sha256": "ad70c1c5b5c2a9706a2a21cb8ca0a3edfaaaff822f693b460f1c0fd0ce80fe51",
             "encoding": "linear",
             "width": 256,
             "height": 256,
@@ -2440,8 +2440,8 @@
           "index": 3,
           "albedo": {
             "file": "leaf-birch-2-albedo.png",
-            "bytes": 16973,
-            "sha256": "13cb4883748dd2eb523148e9f7f99a91b37e01d99949e486035ca8225a50d623",
+            "bytes": 84616,
+            "sha256": "3fdb3be03b6aa2a529484ec5491c0866a6df330b0efeb115da1628564e0d453c",
             "encoding": "srgb",
             "width": 256,
             "height": 256,
@@ -2449,8 +2449,8 @@
           },
           "normal": {
             "file": "leaf-birch-2-normal.png",
-            "bytes": 15909,
-            "sha256": "48e399269841f046c1935af55dc5e357fb28c7bcff11d6c94ebc987897f146b3",
+            "bytes": 127390,
+            "sha256": "4d07735cadebc9e3a46095144e1e2eff7d59bc3598183e5ba21ed9a605473203",
             "encoding": "linear",
             "width": 256,
             "height": 256,
@@ -3132,8 +3132,8 @@
           ],
           "albedo": {
             "file": "elm-bark-albedo.png",
-            "bytes": 303750,
-            "sha256": "88c2e46bdcaf4eff157c7290c9ab6565e7e13d539ae63b3079c957adbac4fce7",
+            "bytes": 1223233,
+            "sha256": "e43f4db9ebef374a41d894efb60543eb4968dc3708e9b239aaac90745cd454db",
             "encoding": "srgb",
             "width": 512,
             "height": 1024,
@@ -3141,8 +3141,8 @@
           },
           "normal": {
             "file": "elm-bark-normal.png",
-            "bytes": 575178,
-            "sha256": "44fae9dacd9fe191be88ab4affc198e235d0acc1b0496a2baf596b9f382873ad",
+            "bytes": 1567147,
+            "sha256": "a5a5cbadc52cb5b2df66d4b8945c0e3866386200e44df5d95699aef3aad5af05",
             "encoding": "linear",
             "width": 512,
             "height": 1024,
@@ -3150,8 +3150,8 @@
           },
           "roughnessMap": {
             "file": "elm-bark-roughness.png",
-            "bytes": 165211,
-            "sha256": "ba63241a1b325adca7bdeeac8c8c66039c045f98508279ceaf92a7bde64edc63",
+            "bytes": 689572,
+            "sha256": "a98a475c280123ca73b79394cf2648b6f80bb709dcf7871b0783278aaad1767c",
             "encoding": "linear",
             "width": 512,
             "height": 1024,
@@ -3238,8 +3238,8 @@
           "index": 2,
           "albedo": {
             "file": "leaf-elm-0-albedo.png",
-            "bytes": 21381,
-            "sha256": "1fa5daebcbf3826fdf471d3972118d13593ad452e9d21fd532011260d0406f0d",
+            "bytes": 109292,
+            "sha256": "c1ead0e12030b2b0c34d7e2c2f09d1c326e8310b0738e9f22dd33a616c944835",
             "encoding": "srgb",
             "width": 256,
             "height": 256,
@@ -3247,8 +3247,8 @@
           },
           "normal": {
             "file": "leaf-elm-0-normal.png",
-            "bytes": 25222,
-            "sha256": "4f5eb56d1dfd36765fe1e40a5fd144bdea523038e52999dd86e734eefeba1dda",
+            "bytes": 186779,
+            "sha256": "beeda6522072477d8e31c2e7ead2fddb172b8550e1bff1e6f6596fba5d526652",
             "encoding": "linear",
             "width": 256,
             "height": 256,
@@ -3282,8 +3282,8 @@
           "index": 3,
           "albedo": {
             "file": "leaf-elm-1-albedo.png",
-            "bytes": 22362,
-            "sha256": "172e8dc498d52bc4e456d4dce8792a613deefab108b8b9230b3b0f8a1dfb0b4c",
+            "bytes": 109890,
+            "sha256": "c9d780d574a7ecc762bb724e47d40c1e97b4aa860d68383924c60987bd208252",
             "encoding": "srgb",
             "width": 256,
             "height": 256,
@@ -3291,8 +3291,8 @@
           },
           "normal": {
             "file": "leaf-elm-1-normal.png",
-            "bytes": 25046,
-            "sha256": "288427c8345e1756353cacbdeb5e09d268e56ee529b85b27519c43b7377c0b5b",
+            "bytes": 186527,
+            "sha256": "e17236c07b67908f6d70b103219ff103b72c9b7d3f5e772e489081d8b57a454a",
             "encoding": "linear",
             "width": 256,
             "height": 256,
@@ -3326,8 +3326,8 @@
           "index": 4,
           "albedo": {
             "file": "leaf-elm-2-albedo.png",
-            "bytes": 16961,
-            "sha256": "86badb7a7e03cc250ee37d7a592121a06d2cd7df823da1f302684bd5f093aadd",
+            "bytes": 109462,
+            "sha256": "436b5161a538c55a12e625e737f8018fb7a1899ee4c48b0b329410dc0ec7af0b",
             "encoding": "srgb",
             "width": 256,
             "height": 256,
@@ -3335,8 +3335,8 @@
           },
           "normal": {
             "file": "leaf-elm-2-normal.png",
-            "bytes": 17925,
-            "sha256": "93ebe1caf032dd722fddffc2caf7e6b2e2e389b5fa5cfcbb9ad2346cef5ed55f",
+            "bytes": 186455,
+            "sha256": "d3d5c35b31c58ed2b1f2f88a06f2757a874201b781077ff7882d0d88e0cf87f5",
             "encoding": "linear",
             "width": 256,
             "height": 256,
@@ -4018,8 +4018,8 @@
           ],
           "albedo": {
             "file": "chestnut-bark-albedo.png",
-            "bytes": 295765,
-            "sha256": "363e805df52e9c3c913626ac9958e8b85baa073fcdf5d42c9a817dc6817ff43b",
+            "bytes": 1256890,
+            "sha256": "e929ab50808b7e8907b46ddb517a14a2f65a2c4aad068a630a140380689005a4",
             "encoding": "srgb",
             "width": 512,
             "height": 1024,
@@ -4027,8 +4027,8 @@
           },
           "normal": {
             "file": "chestnut-bark-normal.png",
-            "bytes": 537490,
-            "sha256": "da0e88d25c595e956f2bcaa070b98257e65fb2bf2eb7a7cefc08a30107dd969a",
+            "bytes": 1578693,
+            "sha256": "03daec2499b7601ca0d7955e5858997831ee0c232189dd101fd2508d9bf3a6f6",
             "encoding": "linear",
             "width": 512,
             "height": 1024,
@@ -4036,8 +4036,8 @@
           },
           "roughnessMap": {
             "file": "chestnut-bark-roughness.png",
-            "bytes": 167445,
-            "sha256": "bf8bb84227e18a8df5592b0b8e399570a6d34b54440eb9519882e32c8cbb90ef",
+            "bytes": 683789,
+            "sha256": "7f9177f0501578e8cfd3cc3723db30851fab7688f0f496f87234d7711af7e945",
             "encoding": "linear",
             "width": 512,
             "height": 1024,
@@ -4124,8 +4124,8 @@
           "index": 2,
           "albedo": {
             "file": "leaf-chestnut-0-albedo.png",
-            "bytes": 20081,
-            "sha256": "85d0dab5131cee9a33409db4f23e1cddb3d67c66783e04a826e0bf22ea3751d2",
+            "bytes": 101040,
+            "sha256": "c5c81ac225c55e106d0e2b8106f4f07fabb6072fab392eb5b384b56b143d56fb",
             "encoding": "srgb",
             "width": 256,
             "height": 256,
@@ -4133,8 +4133,8 @@
           },
           "normal": {
             "file": "leaf-chestnut-0-normal.png",
-            "bytes": 15072,
-            "sha256": "6a94fe4609da64fcaea769b85b825f161ac479250202942d03c4570d59535ef9",
+            "bytes": 180948,
+            "sha256": "63750516f1b376397a5731a91f493c6154f0d1ef3737122785ed472c67a5b001",
             "encoding": "linear",
             "width": 256,
             "height": 256,
@@ -4168,8 +4168,8 @@
           "index": 3,
           "albedo": {
             "file": "leaf-chestnut-1-albedo.png",
-            "bytes": 21819,
-            "sha256": "372b6681fc07a64df7ab985da756be84b19fa4c2ec183aeeea430255dbbbccc5",
+            "bytes": 101862,
+            "sha256": "0a72637974c904f2d3decd098bcdeeff71b00ac69c76d5c2254da54a5ec14af8",
             "encoding": "srgb",
             "width": 256,
             "height": 256,
@@ -4177,8 +4177,8 @@
           },
           "normal": {
             "file": "leaf-chestnut-1-normal.png",
-            "bytes": 14838,
-            "sha256": "0bd23f596a53f3267a071bae6c935a40912de9c8238cc93f73a873f845877ee4",
+            "bytes": 180662,
+            "sha256": "57e38f73ed810ac5b3aa46ca15919b01922260ed777d6f57580794b63100f348",
             "encoding": "linear",
             "width": 256,
             "height": 256,
@@ -4212,8 +4212,8 @@
           "index": 4,
           "albedo": {
             "file": "leaf-chestnut-2-albedo.png",
-            "bytes": 18099,
-            "sha256": "9075364ea6953a4302514962f849f1c3d17c96fa432d2bd44f8be73733a8f249",
+            "bytes": 101068,
+            "sha256": "cf33787428a63d8e8a42e6f3e37a1fb82bdb207ce185978a9fc0162fd3f6defa",
             "encoding": "srgb",
             "width": 256,
             "height": 256,
@@ -4221,8 +4221,8 @@
           },
           "normal": {
             "file": "leaf-chestnut-2-normal.png",
-            "bytes": 13700,
-            "sha256": "4816220f2edf080391df6b62916c040eee590eb76153395a04f656e10092b358",
+            "bytes": 180929,
+            "sha256": "3b6490e0cedddbd287feffbcc6b5d2e99d0df1fe636dcb95b84b188a45adf819",
             "encoding": "linear",
             "width": 256,
             "height": 256,
@@ -6149,16 +6149,16 @@
       }
     },
     "oak-bark-albedo.png": {
-      "bytes": 300022,
-      "sha256": "6f31c17062c75f86c21974100a9c40d80fa4d3087c5f23b05b23651be14c3918"
+      "bytes": 1253954,
+      "sha256": "bec57a5718ce313435a1ddf513c52a6f6b5c8bfc02ceffd063fbe7b5a5176a3a"
     },
     "oak-bark-normal.png": {
-      "bytes": 574672,
-      "sha256": "288e8c40c3d96ece93b7c98960fa22da9bf9ec2b22d5671a7c561e2ee1351e15"
+      "bytes": 1573114,
+      "sha256": "511b53d35405a19dacde3c9996e5487f14d47e20c0c45f54751532c866518528"
     },
     "oak-bark-roughness.png": {
-      "bytes": 166388,
-      "sha256": "84d1c6fc052df9808375943000cc846cd530c276205d7c7846853a64cc39274c"
+      "bytes": 722342,
+      "sha256": "99ea11ee38b47cb4df40af0987b4139d65b55f7ec936f8fdc4f94b732bba5b48"
     },
     "oak-wounds-albedo.png": {
       "bytes": 43954,
@@ -6173,40 +6173,40 @@
       "sha256": "4ec942c5982941db0e0c19913f9351eb7d30d6f77c4587f615b472dee6f38a75"
     },
     "leaf-oak-0-albedo.png": {
-      "bytes": 16023,
-      "sha256": "3cd50a563054f9d215dc0f73562960fac3f564767a57d501ebbc1d6e20b05e5b"
+      "bytes": 82783,
+      "sha256": "1866133bfb120c2262b4ac91760d068d717cc9c8f0acf08fbc3d73ce546af41f"
     },
     "leaf-oak-0-normal.png": {
-      "bytes": 6967,
-      "sha256": "64345604f036737417f524c77adc9e529396e56ae617b1c430524b3cad0ae402"
+      "bytes": 167799,
+      "sha256": "98522c2c0155e06b8b4998a2cc2e040c23adfe1f411235d6c77feb5695c54d9a"
     },
     "leaf-oak-1-albedo.png": {
-      "bytes": 18409,
-      "sha256": "37c5b493429dc7352e7c14d661069f4177905b27f02522d8264e1db73bf2133b"
+      "bytes": 82971,
+      "sha256": "0058b47d08ac8ae06ba4707202c3b23a449e2256fcdb289a3cb35c58297ebae7"
     },
     "leaf-oak-1-normal.png": {
-      "bytes": 9318,
-      "sha256": "ff3e82053c6ea2b8b7f3ac7e8ca0cb1814e1151f001f31e28724e5905365b7a2"
+      "bytes": 167569,
+      "sha256": "69fe8a42a7bde8b0dbffd3f1476dd58dc2600d0e834e06c386c6fa7370479b96"
     },
     "leaf-oak-2-albedo.png": {
-      "bytes": 15914,
-      "sha256": "ca2db7500808ffd761fafd26b2e045840a1f0a58dc2ba641e0a8399ba5df8fbd"
+      "bytes": 82686,
+      "sha256": "2205249ea46646f4338bb4f73627ce5ef15dc72656a73a99a4e5eec81702930a"
     },
     "leaf-oak-2-normal.png": {
-      "bytes": 6731,
-      "sha256": "d455e487df35afa01302d8c9a8b91b90032bdc28a96889286e3e7bde47dc7406"
+      "bytes": 167691,
+      "sha256": "bb3c501a05cc8c7e874e1c174ba2e99e9660d5e770c36f5a98286624d9bc7001"
     },
     "maple-bark-albedo.png": {
-      "bytes": 322095,
-      "sha256": "35263a2726aafef2f4c6fd076d2cad6b2a6b5501f0e847a064e19f4acc4b370f"
+      "bytes": 1288176,
+      "sha256": "1a1400cdfae64c658c8afe9094bb55d5c47c63dcd69319194e0876ea0e379c2b"
     },
     "maple-bark-normal.png": {
-      "bytes": 484171,
-      "sha256": "359aeec55cb558568906e051a05c97ddd0ceaea8cbc0105d65e0a576a7a8e969"
+      "bytes": 1587963,
+      "sha256": "4f8fb2a6129936467a61080c4ebddc25bd681dd17372f816facbeb558ccff1e0"
     },
     "maple-bark-roughness.png": {
-      "bytes": 166084,
-      "sha256": "9b8ba37eea603ae9bff11145460b41d60c19a55990545033dfc1f087be022b19"
+      "bytes": 699793,
+      "sha256": "bfe9c30fba924bce4d65dcd1c5a310b9b903d4875f0d1c696cd2fdbc7f4db491"
     },
     "maple-wounds-albedo.png": {
       "bytes": 51162,
@@ -6221,76 +6221,76 @@
       "sha256": "467563f7a656df062e1f2d3ed1b6694436c7df728361f57639c180c2e06eabd7"
     },
     "leaf-maple-0-albedo.png": {
-      "bytes": 10390,
-      "sha256": "0b661c4696993d0b151995fabfbf4e0b2c56698e832bb24c34b1ab24824e3041"
+      "bytes": 81483,
+      "sha256": "afb4718aae43d488e7957cfa35d18187fe29f947cc50aac56f4d1b6e8838d51a"
     },
     "leaf-maple-0-normal.png": {
-      "bytes": 4698,
-      "sha256": "fd457168eb472e7d896c52e8456735bf85e4b763b658ad4c101cb9aa2fc72dfa"
+      "bytes": 166308,
+      "sha256": "5bf41cf1832fbe8cdd82464b44f9be5e1cf69ab371728b396af6d9590664b29c"
     },
     "leaf-maple-1-albedo.png": {
-      "bytes": 10203,
-      "sha256": "fb77e8dd91b60bba751d405ab78fb7b917ae4e35af75fa22c27185d88e9d4e22"
+      "bytes": 82077,
+      "sha256": "cfe97504caecd090e0a32df6446c52badf4896b146344f59d12f0a76e9e01641"
     },
     "leaf-maple-1-normal.png": {
-      "bytes": 5159,
-      "sha256": "3153d4e0dc592f279398b7e51aca12f245c31f18e05481178099ea57c4229328"
+      "bytes": 166007,
+      "sha256": "e0e6e82e345697b85bcd09790ae50579da3a5f4a36d836a505d3fe664a927a75"
     },
     "leaf-maple-2-albedo.png": {
-      "bytes": 10847,
-      "sha256": "8e735663d773494823f101a92799d45a2b211a7b7d2cd13d743e1530d4de52fb"
+      "bytes": 81510,
+      "sha256": "07c4d229f73580f8c08a9cc5acd89fe0d704ce114489e769cb854c3c3c1b1774"
     },
     "leaf-maple-2-normal.png": {
-      "bytes": 5065,
-      "sha256": "15d6e444fc3fc5ec117a594fd1ca362746f223d301d4a7e753fb8537caf3222e"
+      "bytes": 166177,
+      "sha256": "5ed3700efc87761337694a17312bbfb2a598dd03dfba1d2562c5d520d4f7920a"
     },
     "birch-bark-albedo.png": {
-      "bytes": 386810,
-      "sha256": "39238644cec71518801eafd50aa95e10b93f00d31345d47724d15503861dbf10"
+      "bytes": 1134049,
+      "sha256": "92dbb6d852d8c62620fe1f9d306de78b0bc65933be4153d8fbd8c81485828304"
     },
     "birch-bark-normal.png": {
-      "bytes": 212532,
-      "sha256": "6b81676337b82e468c9e157c4984a58c94ce5f475a36f78de10d76ef2fd4ab12"
+      "bytes": 1654402,
+      "sha256": "0e4b1b4fadecf78fdfff0bfb7be4d7109784ed6bd9e1a50e080e00c500333153"
     },
     "birch-bark-roughness.png": {
-      "bytes": 165509,
-      "sha256": "66829488b49c016b3fe83abcb80bbca4923253b01fb80dcff6d09a23f156b85a"
+      "bytes": 611351,
+      "sha256": "e1e19b5d64eba902341451d9fea33d666778b8179a1f187020f38fe26c62a457"
     },
     "leaf-birch-0-albedo.png": {
-      "bytes": 16615,
-      "sha256": "daa561c938a18874f1efc128b0b9caf7e2f68177f2f0c0f5bbe5014f416f093e"
+      "bytes": 84771,
+      "sha256": "5391c40fe83acfbddf5997fcfc3ba1a5821bf724cea5a3498ba8a050d8895be3"
     },
     "leaf-birch-0-normal.png": {
-      "bytes": 16069,
-      "sha256": "f4fababaf192c89fe65f86adae9b5a3109973f12367b2557be2c7d2b371a4c01"
+      "bytes": 127824,
+      "sha256": "5868e701876f56db74c645ae6df6fcd277ae7b29d03ec513f1be9eff10876667"
     },
     "leaf-birch-1-albedo.png": {
-      "bytes": 15676,
-      "sha256": "114b6aa56bceca8847f1bb00e7083825007d85ce48be060f53a1b6dcd8fc4905"
+      "bytes": 85086,
+      "sha256": "b03a6fe49e65557296cce9d63cad13797f8f2fd770b4b3331e8e3b54afaaa4e3"
     },
     "leaf-birch-1-normal.png": {
-      "bytes": 14559,
-      "sha256": "2e36c465d4d3bcb05b149e13e77c778ad69b817a3b79617d83fc1ff1604ef67b"
+      "bytes": 127683,
+      "sha256": "ad70c1c5b5c2a9706a2a21cb8ca0a3edfaaaff822f693b460f1c0fd0ce80fe51"
     },
     "leaf-birch-2-albedo.png": {
-      "bytes": 16973,
-      "sha256": "13cb4883748dd2eb523148e9f7f99a91b37e01d99949e486035ca8225a50d623"
+      "bytes": 84616,
+      "sha256": "3fdb3be03b6aa2a529484ec5491c0866a6df330b0efeb115da1628564e0d453c"
     },
     "leaf-birch-2-normal.png": {
-      "bytes": 15909,
-      "sha256": "48e399269841f046c1935af55dc5e357fb28c7bcff11d6c94ebc987897f146b3"
+      "bytes": 127390,
+      "sha256": "4d07735cadebc9e3a46095144e1e2eff7d59bc3598183e5ba21ed9a605473203"
     },
     "elm-bark-albedo.png": {
-      "bytes": 303750,
-      "sha256": "88c2e46bdcaf4eff157c7290c9ab6565e7e13d539ae63b3079c957adbac4fce7"
+      "bytes": 1223233,
+      "sha256": "e43f4db9ebef374a41d894efb60543eb4968dc3708e9b239aaac90745cd454db"
     },
     "elm-bark-normal.png": {
-      "bytes": 575178,
-      "sha256": "44fae9dacd9fe191be88ab4affc198e235d0acc1b0496a2baf596b9f382873ad"
+      "bytes": 1567147,
+      "sha256": "a5a5cbadc52cb5b2df66d4b8945c0e3866386200e44df5d95699aef3aad5af05"
     },
     "elm-bark-roughness.png": {
-      "bytes": 165211,
-      "sha256": "ba63241a1b325adca7bdeeac8c8c66039c045f98508279ceaf92a7bde64edc63"
+      "bytes": 689572,
+      "sha256": "a98a475c280123ca73b79394cf2648b6f80bb709dcf7871b0783278aaad1767c"
     },
     "elm-wounds-albedo.png": {
       "bytes": 44396,
@@ -6305,40 +6305,40 @@
       "sha256": "2c9c332ce865214b8973f1e0408bbec640ec118121f72384b41b7c5f0912a419"
     },
     "leaf-elm-0-albedo.png": {
-      "bytes": 21381,
-      "sha256": "1fa5daebcbf3826fdf471d3972118d13593ad452e9d21fd532011260d0406f0d"
+      "bytes": 109292,
+      "sha256": "c1ead0e12030b2b0c34d7e2c2f09d1c326e8310b0738e9f22dd33a616c944835"
     },
     "leaf-elm-0-normal.png": {
-      "bytes": 25222,
-      "sha256": "4f5eb56d1dfd36765fe1e40a5fd144bdea523038e52999dd86e734eefeba1dda"
+      "bytes": 186779,
+      "sha256": "beeda6522072477d8e31c2e7ead2fddb172b8550e1bff1e6f6596fba5d526652"
     },
     "leaf-elm-1-albedo.png": {
-      "bytes": 22362,
-      "sha256": "172e8dc498d52bc4e456d4dce8792a613deefab108b8b9230b3b0f8a1dfb0b4c"
+      "bytes": 109890,
+      "sha256": "c9d780d574a7ecc762bb724e47d40c1e97b4aa860d68383924c60987bd208252"
     },
     "leaf-elm-1-normal.png": {
-      "bytes": 25046,
-      "sha256": "288427c8345e1756353cacbdeb5e09d268e56ee529b85b27519c43b7377c0b5b"
+      "bytes": 186527,
+      "sha256": "e17236c07b67908f6d70b103219ff103b72c9b7d3f5e772e489081d8b57a454a"
     },
     "leaf-elm-2-albedo.png": {
-      "bytes": 16961,
-      "sha256": "86badb7a7e03cc250ee37d7a592121a06d2cd7df823da1f302684bd5f093aadd"
+      "bytes": 109462,
+      "sha256": "436b5161a538c55a12e625e737f8018fb7a1899ee4c48b0b329410dc0ec7af0b"
     },
     "leaf-elm-2-normal.png": {
-      "bytes": 17925,
-      "sha256": "93ebe1caf032dd722fddffc2caf7e6b2e2e389b5fa5cfcbb9ad2346cef5ed55f"
+      "bytes": 186455,
+      "sha256": "d3d5c35b31c58ed2b1f2f88a06f2757a874201b781077ff7882d0d88e0cf87f5"
     },
     "chestnut-bark-albedo.png": {
-      "bytes": 295765,
-      "sha256": "363e805df52e9c3c913626ac9958e8b85baa073fcdf5d42c9a817dc6817ff43b"
+      "bytes": 1256890,
+      "sha256": "e929ab50808b7e8907b46ddb517a14a2f65a2c4aad068a630a140380689005a4"
     },
     "chestnut-bark-normal.png": {
-      "bytes": 537490,
-      "sha256": "da0e88d25c595e956f2bcaa070b98257e65fb2bf2eb7a7cefc08a30107dd969a"
+      "bytes": 1578693,
+      "sha256": "03daec2499b7601ca0d7955e5858997831ee0c232189dd101fd2508d9bf3a6f6"
     },
     "chestnut-bark-roughness.png": {
-      "bytes": 167445,
-      "sha256": "bf8bb84227e18a8df5592b0b8e399570a6d34b54440eb9519882e32c8cbb90ef"
+      "bytes": 683789,
+      "sha256": "7f9177f0501578e8cfd3cc3723db30851fab7688f0f496f87234d7711af7e945"
     },
     "chestnut-wounds-albedo.png": {
       "bytes": 45377,
@@ -6353,28 +6353,28 @@
       "sha256": "77c546db14203e80a9b3ac8e60a3e5b36940db4bdce11721cfa22c06e4923f40"
     },
     "leaf-chestnut-0-albedo.png": {
-      "bytes": 20081,
-      "sha256": "85d0dab5131cee9a33409db4f23e1cddb3d67c66783e04a826e0bf22ea3751d2"
+      "bytes": 101040,
+      "sha256": "c5c81ac225c55e106d0e2b8106f4f07fabb6072fab392eb5b384b56b143d56fb"
     },
     "leaf-chestnut-0-normal.png": {
-      "bytes": 15072,
-      "sha256": "6a94fe4609da64fcaea769b85b825f161ac479250202942d03c4570d59535ef9"
+      "bytes": 180948,
+      "sha256": "63750516f1b376397a5731a91f493c6154f0d1ef3737122785ed472c67a5b001"
     },
     "leaf-chestnut-1-albedo.png": {
-      "bytes": 21819,
-      "sha256": "372b6681fc07a64df7ab985da756be84b19fa4c2ec183aeeea430255dbbbccc5"
+      "bytes": 101862,
+      "sha256": "0a72637974c904f2d3decd098bcdeeff71b00ac69c76d5c2254da54a5ec14af8"
     },
     "leaf-chestnut-1-normal.png": {
-      "bytes": 14838,
-      "sha256": "0bd23f596a53f3267a071bae6c935a40912de9c8238cc93f73a873f845877ee4"
+      "bytes": 180662,
+      "sha256": "57e38f73ed810ac5b3aa46ca15919b01922260ed777d6f57580794b63100f348"
     },
     "leaf-chestnut-2-albedo.png": {
-      "bytes": 18099,
-      "sha256": "9075364ea6953a4302514962f849f1c3d17c96fa432d2bd44f8be73733a8f249"
+      "bytes": 101068,
+      "sha256": "cf33787428a63d8e8a42e6f3e37a1fb82bdb207ce185978a9fc0162fd3f6defa"
     },
     "leaf-chestnut-2-normal.png": {
-      "bytes": 13700,
-      "sha256": "4816220f2edf080391df6b62916c040eee590eb76153395a04f656e10092b358"
+      "bytes": 180929,
+      "sha256": "3b6490e0cedddbd287feffbcc6b5d2e99d0df1fe636dcb95b84b188a45adf819"
     },
     "source-catalog.json": {
       "bytes": 35805,
@@ -6466,8 +6466,8 @@
   },
   "impostors": {
     "file": "impostors/manifest.json",
-    "bytes": 436773,
-    "sha256": "2492b7b533dec0ea5b88efacc48590a414ff8ba3239097d9fc64b2562fe6c4ab"
+    "bytes": 436810,
+    "sha256": "b12c4bd709aad84b5c5d07649f5ec72c2cdd724d014b1c578500bf6791fa782b"
   },
   "runtimePackaging": {
     "format": "waterworld.lossless-runtime",

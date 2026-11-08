@@ -73,7 +73,7 @@ fn shadowCanvasTransmission(sample:vec4f)->vec3f {
 fn vesselShadow(world:vec3f,normal:vec3f)->vec3f {
   if(SH.origin.w<0.5){return vec3f(1);}
   let facing=select(-1.0,1.0,dot(normal,SH.sun.xyz)>=0.0);
-  let offset=normal*facing*0.008+SH.sun.xyz*0.006;
+  let offset=normal*facing*0.005+SH.sun.xyz*0.004;
   let p=SH.lightView*vec4f(world-SH.origin.xyz+offset,1.0);
   let uv=p.xy*vec2f(0.5,-0.5)+0.5;
   if(any(uv<vec2f(0)) || any(uv>vec2f(1)) || p.z<0.0){return vec3f(1);}
@@ -92,7 +92,8 @@ fn vesselShadow(world:vec3f,normal:vec3f)->vec3f {
   // Solar angular radius grows the penumbra with receiver distance. The cap
   // bounds the nine-tap filter cost and prevents thin rigging washing out.
   let distance=max(p.z-blocker,0.0)*SH.sun.w;
-  let radius=clamp(distance*0.004675/SH.texel.xy,vec2f(1.5),vec2f(6.0));
+  let minR=select(0.82,1.5,distance>1.2);
+  let radius=clamp(distance*0.004675/SH.texel.xy,vec2f(minR),vec2f(6.0));
   let tentRadius=min(radius,vec2f(2.5));let spread=max(radius/2.5,vec2f(1));
   let horizontal=shadowTentAxis(uv.x,f32(dim.x),tentRadius.x);
   let vertical=shadowTentAxis(uv.y,f32(dim.y),tentRadius.y);

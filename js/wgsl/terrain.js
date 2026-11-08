@@ -4,6 +4,7 @@ import { CLOUD_SAMPLE } from './clouds.js';
 import { STREET_FIELD_RANGE_M, STREET_FIELD_EDGE_M } from '../town-streets.js';
 import { LAND_CRATER_RENDER } from './land-craters.js';
 import { GROUND_DETAIL_RENDER } from './ground-detail.js';
+import { SHADOW_FRAME } from './shadows.js';
 
 // Procedurals need their sampling rate in material coordinates, just as image
 // textures need mip/anisotropic footprints. See pbr-book.org/4ed/Textures_and_Materials/Texture_Sampling_and_Antialiasing.
@@ -550,7 +551,7 @@ fn main(@builtin(global_invocation_id) id:vec3u){
 }
 `;
 
-export const TERRAIN = FRAME_WGSL + ATMO_CORE_WGSL + /* wgsl */ `
+export const TERRAIN = FRAME_WGSL + ATMO_CORE_WGSL + SHADOW_FRAME + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F:Frame;
 @group(0) @binding(1) var transLUT:texture_2d<f32>;
 @group(0) @binding(2) var skyLUT:texture_2d<f32>;
@@ -571,6 +572,33 @@ struct NearLand {domain:vec4f,grid:vec4f};
 @group(0) @binding(15) var<uniform> townWindow:vec4f;
 ` + SKY_RENDER_FUNCS + CLOUD_SAMPLE + TERRAIN_FILTERING + TERRAIN_NEAR_MATERIAL + GROUND_DETAIL_RENDER + /* wgsl */ `
 @group(0) @binding(18) var<storage,read> archMaterialBuf:array<u32>;
+@group(0) @binding(19) var<uniform> landSH:ShadowFrame;
+@group(0) @binding(20) var landSolidShadow:texture_depth_2d;
+@group(0) @binding(21) var landShadowCompare:sampler_comparison;
+fn landShadowVisibility(world:vec3f,normal:vec3f)->f32{
+  if(landSH.origin.w<0.5){return 1.0;}
+  let facing=select(-1.0,1.0,dot(normal,landSH.sun.xyz)>=0.0);
+  let offset=normal*facing*0.025+landSH.sun.xyz*0.020;
+  let p=landSH.lightView*vec4f(world-landSH.origin.xyz+offset,1.0);
+  let uv=p.xy*vec2f(0.5,-0.5)+0.5;
+  let edge=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
+  let fade=smoothstep(0.0,0.06,edge)*step(0.0,p.z)*step(p.z,1.0);
+  if(fade<=0.0){return 1.0;}
+  let dim=vec2f(textureDimensions(landSolidShadow));
+  let texel=1.0/max(dim,vec2f(1.0));
+  let refZ=min(p.z-0.00018,0.99999);
+  var sum=0.0;
+  sum+=textureSampleCompareLevel(landSolidShadow,landShadowCompare,uv+vec2f(-texel.x,-texel.y),refZ)*0.075;
+  sum+=textureSampleCompareLevel(landSolidShadow,landShadowCompare,uv+vec2f(0.0,-texel.y),refZ)*0.125;
+  sum+=textureSampleCompareLevel(landSolidShadow,landShadowCompare,uv+vec2f(texel.x,-texel.y),refZ)*0.075;
+  sum+=textureSampleCompareLevel(landSolidShadow,landShadowCompare,uv+vec2f(-texel.x,0.0),refZ)*0.125;
+  sum+=textureSampleCompareLevel(landSolidShadow,landShadowCompare,uv,refZ)*0.200;
+  sum+=textureSampleCompareLevel(landSolidShadow,landShadowCompare,uv+vec2f(texel.x,0.0),refZ)*0.125;
+  sum+=textureSampleCompareLevel(landSolidShadow,landShadowCompare,uv+vec2f(-texel.x,texel.y),refZ)*0.075;
+  sum+=textureSampleCompareLevel(landSolidShadow,landShadowCompare,uv+vec2f(0.0,texel.y),refZ)*0.125;
+  sum+=textureSampleCompareLevel(landSolidShadow,landShadowCompare,uv+vec2f(texel.x,texel.y),refZ)*0.075;
+  return mix(1.0,sum,fade);
+}
 const ARCH_LAYER_STRIDE:u32=87360u;
 fn archMipOffset(mip:u32)->u32{
   switch(mip){
@@ -607,17 +635,42 @@ fn sampleArchLayerGrad(layer:i32,uv:vec2f,ddx:vec2f,ddy:vec2f)->vec4f{
   return mix(s0,sampleArchLayerMip(uLayer,uv,m1),fract(lod));
 }
 struct ArchPBR{albedo:vec3f,normalOffset:vec3f,roughness:f32,ao:f32};
-fn sampleArchMaterialPBR(matIdx:i32,world:vec3f,n:vec3f,dx:vec3f,dy:vec3f,scale:vec2f,lodFade:f32)->ArchPBR{
+fn sampleArchMaterialPBR(matIdx:i32,world:vec3f,n:vec3f,dx:vec3f,dy:vec3f,scale:vec2f,lodFade:f32,instYaw:f32)->ArchPBR{
   let evenLayer=matIdx*2;
   let oddLayer=evenLayer+1;
-  let topW=smoothstep(0.88,0.96,abs(n.y));
-  let nxP=pow(max(abs(n.x),1e-3),6.0);
-  let nzP=pow(max(abs(n.z),1e-3),6.0);
+  let relP=world-vec3f(LAND.domain.x,0.0,LAND.domain.y);
+  let horizN=length(n.xz);
+  // Sloped roofs (terracotta barrel tiles matIdx==3 & palm thatch matIdx==5):
+  // Project UVs directly onto the roof slope's horizontal eave tangent (tileTan) and down-slope fall-line (slopeT)
+  // so barrel tile flutes and thatch courses run straight down every roof slope from ridge to eave.
+  let tileTan=select(vec3f(1.0,0.0,0.0),vec3f(-n.z,0.0,n.x)/horizN,horizN>0.08);
+  if((matIdx==3||matIdx==5)&&abs(n.y)>0.15&&abs(n.y)<0.96&&horizN>0.08){
+    let slopeT=normalize(cross(tileTan,n));
+    let uvR=vec2f(dot(relP,tileTan),dot(relP,slopeT))*scale;
+    let dxR=vec2f(dot(dx,tileTan),dot(dx,slopeT))*scale;
+    let dyR=vec2f(dot(dy,tileTan),dot(dy,slopeT))*scale;
+    let bR=sampleArchLayerGrad(evenLayer,uvR,dxR,dyR);
+    let nR=sampleArchLayerGrad(oddLayer,uvR,dxR,dyR);
+    let albedoR=pow(max(bR.rgb,vec3f(0.01)),vec3f(2.2));
+    let tnR=nR.rgb*2.0-1.0;
+    let normOffR=(tileTan*tnR.x+slopeT*tnR.y)*lodFade;
+    return ArchPBR(albedoR,normOffR,bR.a,mix(1.0,nR.a,lodFade));
+  }
+  // Rotate world position, normal, and screen derivatives into the building/pier's local horizontal axes
+  let cY=cos(instYaw);
+  let sY=sin(instYaw);
+  let bP=vec3f(relP.x*cY-relP.z*sY,world.y,relP.x*sY+relP.z*cY);
+  let bN=vec3f(n.x*cY-n.z*sY,n.y,n.x*sY+n.z*cY);
+  let bDx=vec3f(dx.x*cY-dx.z*sY,dx.y,dx.x*sY+dx.z*cY);
+  let bDy=vec3f(dy.x*cY-dy.z*sY,dy.y,dy.x*sY+dy.z*cY);
+  let topW=smoothstep(0.88,0.96,abs(bN.y));
+  let nxP=pow(max(abs(bN.x),1e-3),6.0);
+  let nzP=pow(max(abs(bN.z),1e-3),6.0);
   let wallX=(nxP/max(nxP+nzP,1e-5))*(1.0-topW);
   let wallZ=(nzP/max(nxP+nzP,1e-5))*(1.0-topW);
-  let uvX=vec2f(world.z,-world.y)*scale;let dxX=vec2f(dx.z,-dx.y)*scale;let dyX=vec2f(dy.z,-dy.y)*scale;
-  let uvY=vec2f(world.x,world.z)*scale;let dxY=vec2f(dx.x,dx.z)*scale;let dyY=vec2f(dy.x,dy.z)*scale;
-  let uvZ=vec2f(world.x,-world.y)*scale;let dxZ=vec2f(dx.x,-dx.y)*scale;let dyZ=vec2f(dy.x,-dy.y)*scale;
+  let uvX=vec2f(bP.z,-bP.y)*scale;let dxX=vec2f(bDx.z,-bDx.y)*scale;let dyX=vec2f(bDy.z,-bDy.y)*scale;
+  let uvY=vec2f(bP.x,bP.z)*scale;let dxY=vec2f(bDx.x,bDx.z)*scale;let dyY=vec2f(bDy.x,bDy.z)*scale;
+  let uvZ=vec2f(bP.x,-bP.y)*scale;let dxZ=vec2f(bDx.x,-bDx.y)*scale;let dyZ=vec2f(bDy.x,-bDy.y)*scale;
   let bX=sampleArchLayerGrad(evenLayer,uvX,dxX,dyX);
   let bY=sampleArchLayerGrad(evenLayer,uvY,dxY,dyY);
   let bZ=sampleArchLayerGrad(evenLayer,uvZ,dxZ,dyZ);
@@ -631,10 +684,11 @@ fn sampleArchMaterialPBR(matIdx:i32,world:vec3f,n:vec3f,dx:vec3f,dy:vec3f,scale:
   let tnX=(nX.rgb*2.0-1.0);
   let tnY=(nY.rgb*2.0-1.0);
   let tnZ=(nZ.rgb*2.0-1.0);
-  let pX=vec3f(0.0,tnX.y,tnX.x*select(-1.0,1.0,n.x>=0.0));
-  let pY=vec3f(tnY.x,0.0,tnY.y*select(-1.0,1.0,n.y>=0.0));
-  let pZ=vec3f(tnZ.x*select(-1.0,1.0,n.z>=0.0),tnZ.y,0.0);
-  let normalOffset=(pX*wallX+pY*topW+pZ*wallZ)*lodFade;
+  let pX=vec3f(0.0,tnX.y,tnX.x*select(-1.0,1.0,bN.x>=0.0));
+  let pY=vec3f(tnY.x,0.0,tnY.y*select(-1.0,1.0,bN.y>=0.0));
+  let pZ=vec3f(tnZ.x*select(-1.0,1.0,bN.z>=0.0),tnZ.y,0.0);
+  let localNOff=(pX*wallX+pY*topW+pZ*wallZ)*lodFade;
+  let normalOffset=vec3f(localNOff.x*cY+localNOff.z*sY,localNOff.y,-localNOff.x*sY+localNOff.z*cY);
   return ArchPBR(albedo,normalOffset,rough,ao);
 }
 struct LandVertex {
@@ -690,7 +744,7 @@ struct LandVertex {
 // (Kaplanyan and Tokuyoshi's geometric specular antialiasing). Set where a normal has its relief.
 var<private> landNormalSpread:f32=0.0;
 var<private> landWindowEmission:vec3f=vec3f(0.0);
-fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibility:f32,wet:f32,roughness:f32)->vec4f{
+fn landFinishShadowed(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibility:f32,wet:f32,roughness:f32,shadowVis:f32)->vec4f{
   let uv=(world.xz-LAND.domain.xy)/LAND.domain.z+0.5;
   let edgeDist=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
   let inPrimaryDomain=clamp(LAND.domain.w,0.0,1.0)*smoothstep(0.0,0.36,edgeDist);
@@ -701,7 +755,7 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibility:f32
     let cloudSunVis=select(0.0,volumeSurfaceSunVisibility(world*0.001,F.sunDir.xyz),F.sunDir.y>0.0);
     sunlight=mix(cloudSunVis,bakedLight.r,inPrimaryDomain);
   }
-  let direct=sunIlluminance()*sunlight;
+  let direct=sunIlluminance()*sunlight*shadowVis;
   // Directional sky-hemisphere + ground/sea bounce irradiance from envCube
   let skyDir=normalize(vec3f(n.x*0.65,max(n.y,0.12),n.z*0.65));
   let skyIrr=textureSampleLevel(envCube,sampC,skyDir,6.0).rgb;
@@ -758,6 +812,9 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibility:f32
   }
   return vec4f(col,1.0);
 }
+fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibility:f32,wet:f32,roughness:f32)->vec4f{
+  return landFinishShadowed(world,n,albedo,diffuse,ambientVisibility,wet,roughness,landShadowVisibility(world,n));
+}
 // What a crater does to ground it lies on. Plain ground has no cover to mix, so it never reads the rest.
 struct LandPit{normal:vec3f,cover:f32,soil:vec3f,relief:f32,sun:f32,sky:f32,pool:f32,damp:f32,sand:f32};
 fn landOpaque(in:LandVertex)->vec4f{return landSurface(in,LandPit(vec3f(0.0),-1.0,vec3f(0.0),0.0,1.0,1.0,0.0,1.0,0.0));}
@@ -795,6 +852,8 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
   let materialWidth=landMaterialFootprint3(dx,dy);
   let bldgUV=clamp(vec2f(in.kind.x-20.0,in.kind.y),vec2f(0.001),vec2f(0.999));
   let bldgDx=dpdx(bldgUV);let bldgDy=dpdy(bldgUV);
+  let winUV=clamp(vec2f((in.kind.x-14.02)/0.44,(in.kind.y-0.32)/0.64),vec2f(0.0),vec2f(1.0));
+  let winDx=dpdx(winUV);let winDy=dpdy(winUV);
   var albedo=source;var relief=0.0;var roughness=0.95;
   var ambientVisibility=0.42+0.35*max(n.y,0.0);
   let crown=in.kind.x>3.5;
@@ -945,6 +1004,7 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
     let portShade=clamp(in.kind.y,0.18,1.0);
     let aoVis=0.32+0.68*portShade;
     let shadeAlbedo=0.52+0.48*portShade;
+    let instYaw=clamp((fract(in.kind.x)-0.02)/0.46,0.0,1.0)*PI;
     let camDist=distance(world,F.camPos.xyz);
     let microLodFade=(1.0-smoothstep(140.0,340.0,camDist))*detailFade;
     let archLodFade=(1.0-smoothstep(320.0,900.0,camDist))*detailFade;
@@ -953,7 +1013,7 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
     var archNormalOffset=vec3f(0.0);
     if(in.kind.x<10.5){
       // Kind 10: MaterialCraft-cooked weathered Iberian oak, Spanish cedar & pitch-pine timber
-      let pbr=sampleArchMaterialPBR(0,world,n,dx,dy,vec2f(0.32,0.52),archLodFade);
+      let pbr=sampleArchMaterialPBR(0,world,n,dx,dy,vec2f(0.32,0.52),archLodFade,instYaw);
       albedo=pbr.albedo*shadeAlbedo*(0.96+detailA*0.08+detailB*0.04);
       archNormalOffset=pbr.normalOffset*0.55;
       relief=detailA*0.004*archLodFade;
@@ -965,7 +1025,7 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       roughness=mix(roughness,0.92,pilingTide*0.5);
     }else if(in.kind.x<11.5){
       // Kind 11: MaterialCraft-cooked coursed Pedra Lioz & coral-limestone ashlar masonry
-      let pbr=sampleArchMaterialPBR(1,world,n,dx,dy,vec2f(0.46,0.52),archLodFade);
+      let pbr=sampleArchMaterialPBR(1,world,n,dx,dy,vec2f(0.46,0.52),archLodFade,instYaw);
       let vertWall=1.0-smoothstep(0.35,0.85,abs(n.y));
       let damp=smoothstep(0.2,3.8,world.y);
       let stoneBase=pbr.albedo*mix(vec3f(0.76,0.73,0.68),vec3f(1.0,0.98,0.94),damp)*(0.96+detailA*0.06+detailB*0.03);
@@ -978,7 +1038,7 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       ambientVisibility=(0.46+0.34*max(n.y,0.0))*aoVis*pbr.ao;
     }else if(in.kind.x<12.5){
       // Kind 12: MaterialCraft-cooked warm Iberian & colonial limewashed stucco
-      let pbr=sampleArchMaterialPBR(2,world,n,dx,dy,vec2f(0.38,0.38),archLodFade);
+      let pbr=sampleArchMaterialPBR(2,world,n,dx,dy,vec2f(0.38,0.38),archLodFade,instYaw);
       let damp=smoothstep(0.5,4.2,world.y);
       let warmStucco=pbr.albedo*mix(vec3f(0.74,0.69,0.62),vec3f(1.0,0.97,0.92),damp);
       albedo=warmStucco*shadeAlbedo*(0.97+detailA*0.05+detailB*0.03);
@@ -988,11 +1048,15 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       ambientVisibility=(0.48+0.36*max(n.y,0.0))*aoVis*pbr.ao;
     }else if(in.kind.x<13.5){
       // Kind 13: MaterialCraft-cooked fired terracotta barrel roof tiles (telha mourisca / tejas curvas)
-      let pbr=sampleArchMaterialPBR(3,world,n,dx,dy,vec2f(0.62,0.68),archLodFade);
+      let pbr=sampleArchMaterialPBR(3,world,n,dx,dy,vec2f(0.62,0.68),archLodFade,instYaw);
       let horizLen=length(n.xz);
-      let tileTan=select(vec3f(0.7071,0.0,-0.7071),normalize(vec3f(n.x,-(n.x*n.x+n.z*n.z)/max(n.y,0.18),n.z)),horizLen>0.08);
-      let flute=landFilteredWave(world,dx,dy,vec3f(9.5,0.0,-9.5)+tileTan*0.001,detailA*0.45)*microLodFade;
-      let courseWave=landFilteredCourse(world.y*2.4,dx.y*2.4,dy.y*2.4,1.8);
+      let eaveDir=select(vec3f(1.0,0.0,0.0),vec3f(-n.z,0.0,n.x)/max(horizLen,1e-4),horizLen>0.08);
+      let slopeDir=normalize(cross(eaveDir,n));
+      let flute=landFilteredWave(world,dx,dy,eaveDir*13.4,detailA*0.35)*microLodFade;
+      let slopeCoord=dot(world,slopeDir)*2.6;
+      let slopeDx=dot(dx,slopeDir)*2.6;
+      let slopeDy=dot(dy,slopeDir)*2.6;
+      let courseWave=landFilteredCourse(slopeCoord,slopeDx,slopeDy,1.8);
       let courseStep=max(0.0,courseWave-0.26)*archLodFade;
       albedo=pbr.albedo*shadeAlbedo*(0.96+detailA*0.07+flute*0.025-courseStep*0.04);
       archNormalOffset=pbr.normalOffset*0.72;
@@ -1001,40 +1065,60 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       ambientVisibility=(0.48+0.36*max(n.y,0.0))*aoVis*pbr.ao;
     }else if(in.kind.x<14.5){
       // Kind 14: MaterialCraft-cooked 16th-century leaded-glass casements (vidrieras emplomadas) & deep arched portals
-      let pbr=sampleArchMaterialPBR(4,world,n,dx,dy,vec2f(0.85,0.85),archLodFade);
-      let hCoord=(world.x-world.z)*0.7071;
-      let hDx=(dx.x-dx.z)*0.7071;
-      let hDy=(dy.x-dy.z)*0.7071;
-      let rejaX=max(0.0,landFilteredCourse(hCoord*3.4,hDx*3.4,hDy*3.4,2.0)-0.34);
-      let rejaY=max(0.0,landFilteredCourse(world.y*2.2,dx.y*2.2,dy.y*2.2,1.8)-0.34);
-      let rejaWave=clamp(0.62*rejaX+0.48*rejaY,0.0,1.0)*archLodFade;
       let isGlazedWindow=in.kind.y>0.25;
       if(isGlazedWindow){
-        let d1=landFilteredCourse((hCoord+world.y)*2.8,(hDx+dx.y)*2.8,(hDy+dy.y)*2.8,1.8);
-        let d2=landFilteredCourse((hCoord-world.y)*2.8,(hDx-dx.y)*2.8,(hDy-dy.y)*2.8,1.8);
-        let leadCame=clamp(max(d1-0.36,d2-0.36)*2.2,0.0,1.0)*microLodFade;
-        let frameMask=clamp(max(rejaWave,leadCame*0.85),0.0,1.0);
-        let roomDepth=pbr.albedo*(0.65+0.35*portShade);
-        let ironCol=vec3f(0.095,0.088,0.082)*(0.70+0.30*portShade);
-        albedo=mix(roomDepth,ironCol,frameMask);
-        archNormalOffset=pbr.normalOffset*0.45;
+        // Sample MaterialCraft room/casement texture directly in window-locked [0..1] UV coordinates
+        let bWin=sampleArchLayerGrad(8,winUV,winDx,winDy);
+        let nWin=sampleArchLayerGrad(9,winUV,winDx,winDy);
+        let winAlbedo=pow(max(bWin.rgb,vec3f(0.01)),vec3f(2.2));
+        let winRough=bWin.a;
+        let winAO=mix(1.0,nWin.a,archLodFade);
+        let tnWin=nWin.rgb*2.0-1.0;
+        let horizLenW=length(n.xz);
+        let winRight=select(vec3f(1.0,0.0,0.0),vec3f(-n.z,0.0,n.x)/max(horizLenW,1e-4),horizLenW>0.08);
+        let winUp=vec3f(0.0,1.0,0.0);
+        let winShade=0.84-0.14*winUV.y;
+        // Crisp window-aligned timber casement border, central mullion (u=0.50), transom (v=0.38) & diamond lead cames
+        let borderDist=min(min(winUV.x,1.0-winUV.x),min(winUV.y,1.0-winUV.y));
+        let outerFrame=1.0-smoothstep(0.075,0.098,borderDist);
+        let mullion=1.0-smoothstep(0.028,0.044,abs(winUV.x-0.50));
+        let transom=1.0-smoothstep(0.026,0.042,abs(winUV.y-0.38));
+        let woodFrame=max(outerFrame,max(mullion,transom))*archLodFade;
+        let cameFoot=max(length(winDx),length(winDy))*4.0;
+        let cameFade=(1.0-smoothstep(0.18,0.55,cameFoot))*microLodFade;
+        let dA=abs(fract((winUV.x+winUV.y)*3.0)-0.5);
+        let dB=abs(fract((winUV.x-winUV.y)*3.0)-0.5);
+        let leadCame=(1.0-smoothstep(0.032,0.058,min(dA,dB)))*cameFade*(1.0-woodFrame);
+        let frameMask=clamp(max(woodFrame,leadCame*0.85),0.0,1.0);
+        let roomDepth=winAlbedo*(0.72+0.28*winShade);
+        let woodCol=vec3f(0.082,0.056,0.036)*(0.75+0.25*winShade);
+        let leadCol=vec3f(0.095,0.092,0.088)*(0.75+0.25*winShade);
+        albedo=mix(mix(roomDepth,leadCol,leadCame),woodCol,woodFrame);
+        archNormalOffset=(winRight*tnWin.x-winUp*tnWin.y)*0.45*archLodFade;
         relief=frameMask*0.004;
-        roughness=mix(pbr.roughness,0.52,frameMask);
-        surfaceWet=0.62*(1.0-frameMask*0.85);
+        roughness=mix(winRough,mix(0.48,0.68,woodFrame),frameMask);
+        surfaceWet=0.62*(1.0-frameMask*0.88);
         mirrorSpread=smoothstep(.04,.4,length(dx)+length(dy))*.03;
-        ambientVisibility=(0.44+0.32*portShade)*pbr.ao;
+        ambientVisibility=(0.52+0.28*winShade)*winAO;
         let candleSched=(1.0-smoothstep(-0.04,0.14,F.sunDir.y))*(1.0-clamp(structDmg*2.2,0.0,1.0));
         if(candleSched>0.001){
-          let winId=floor(hCoord*0.35)*31.7+floor(world.y*0.32)*73.1;
+          let winId=floor(world.x*0.35+world.z*0.35)*31.7+floor(world.y*0.32)*73.1;
           let winSeed=fract(sin(winId)*43758.5453);
           if(winSeed>0.32){
             let flicker=0.86+0.09*sin(F.camPos.w*5.4+winSeed*19.0)+0.05*cos(F.camPos.w*13.1-winSeed*29.0);
-            let paneGlow=(0.55+0.45*smoothstep(-0.4,0.4,sin(world.y*2.2)))*(1.0-frameMask*0.88);
+            let paneGlow=(0.60+0.40*(1.0-winUV.y))*(1.0-frameMask*0.90);
             let candleExp=1.0/max(F.post.x,1.0);
             landWindowEmission=vec3f(0.34,0.145,0.032)*(candleSched*flicker*paneGlow*candleExp*(0.65+0.35*winSeed));
           }
         }
       }else{
+        let cY=cos(instYaw);let sY=sin(instYaw);
+        let hCoord=(world.x*cY-world.z*sY);
+        let hDx=(dx.x*cY-dx.z*sY);
+        let hDy=(dy.x*cY-dy.z*sY);
+        let rejaX=max(0.0,landFilteredCourse(hCoord*3.4,hDx*3.4,hDy*3.4,2.0)-0.34);
+        let rejaY=max(0.0,landFilteredCourse(world.y*2.2,dx.y*2.2,dy.y*2.2,1.8)-0.34);
+        let rejaWave=clamp(0.62*rejaX+0.48*rejaY,0.0,1.0)*archLodFade;
         albedo=vec3f(0.048,0.040,0.033)*(1.0-0.22*rejaWave)*portShade*(1.0+detailB*0.08);
         relief=(detailB*0.004+rejaWave*0.006)*archLodFade;
         roughness=mix(0.84,0.48,rejaWave);
@@ -1042,7 +1126,7 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       }
     }else if(in.kind.x<15.5){
       // Kind 15: MaterialCraft-cooked layered palm-thatch & bundled reed roof
-      let pbr=sampleArchMaterialPBR(5,world,n,dx,dy,vec2f(0.55,0.62),archLodFade);
+      let pbr=sampleArchMaterialPBR(5,world,n,dx,dy,vec2f(0.55,0.62),archLodFade,instYaw);
       albedo=pbr.albedo*shadeAlbedo*(0.96+detailA*0.08+detailB*0.04);
       archNormalOffset=pbr.normalOffset*0.60;
       relief=detailA*0.004*archLodFade;
@@ -1050,7 +1134,7 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       ambientVisibility=(0.44+0.36*max(n.y,0.0))*aoVis*pbr.ao;
     }else if(in.kind.x<16.5){
       // Kind 16: MaterialCraft-cooked granite & river-cobble calçada / empedrado pavement
-      let pbr=sampleArchMaterialPBR(6,world,n,dx,dy,vec2f(0.58,0.58),archLodFade);
+      let pbr=sampleArchMaterialPBR(6,world,n,dx,dy,vec2f(0.58,0.58),archLodFade,instYaw);
       albedo=pbr.albedo*shadeAlbedo*(0.96+detailA*0.08+detailB*0.04);
       archNormalOffset=pbr.normalOffset*0.68;
       relief=detailA*0.004*archLodFade;
@@ -1058,7 +1142,7 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       ambientVisibility=(0.48+0.36*max(n.y,0.0))*aoVis*pbr.ao;
     }else if(in.kind.x<17.5){
       // Kind 17: MaterialCraft-cooked paper-birch & cedar bark sheathing
-      let pbr=sampleArchMaterialPBR(7,world,n,dx,dy,vec2f(0.52,0.58),archLodFade);
+      let pbr=sampleArchMaterialPBR(7,world,n,dx,dy,vec2f(0.52,0.58),archLodFade,instYaw);
       albedo=pbr.albedo*shadeAlbedo*(0.96+detailA*0.07+detailB*0.04);
       archNormalOffset=pbr.normalOffset*0.50;
       relief=detailA*0.004*archLodFade;
@@ -1066,7 +1150,7 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       ambientVisibility=(0.48+0.36*max(n.y,0.0))*aoVis*pbr.ao;
     }else{
       // Kind 18: MaterialCraft-cooked sand-cast ordnance iron & forged harbor metal
-      let pbr=sampleArchMaterialPBR(8,world,n,dx,dy,vec2f(0.65,0.65),archLodFade);
+      let pbr=sampleArchMaterialPBR(8,world,n,dx,dy,vec2f(0.65,0.65),archLodFade,instYaw);
       let bareIron=clamp(0.18+detailA*0.14+max(0.0,n.y)*0.08-max(0.0,-detailB)*0.08,0.06,0.34);
       albedo=pbr.albedo*(0.75+0.25*bareIron)*(0.68+0.32*portShade);
       archNormalOffset=pbr.normalOffset*0.48;
@@ -1198,8 +1282,7 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
   let diffuse=(max(nDotL,0.0)+max(-nDotL,0.0)*canopyBackscatter)*pit.sun;
   return landFinish(world,n,albedo,diffuse,ambientVisibility,wet,roughness);
 }
-@fragment fn fs(in:LandVertex,@builtin(front_facing) front:bool)->@location(0) vec4f{return landOpaque(in);}
-@fragment fn opaqueFS(in:LandVertex,@builtin(front_facing) front:bool)->@location(0) vec4f{return landOpaque(in);}
+@fragment fn fs(in:LandVertex)->@location(0) vec4f{return landOpaque(in);}
 // The props use local atmosphere and the terrain's cached cloud sunlight. A
 // twelve-step volume integration per grass blade would defeat their budget.
 @fragment fn groundFS(in:LandVertex,@builtin(front_facing) front:bool)->@location(0) vec4f{
@@ -1216,7 +1299,7 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
   let foliage=mix(dry,green,smoothstep(.12,.7,vegetation))*shade;
   let albedo=select(rock,foliage,grass);
   let sunlight=textureSampleLevel(landLight,sampC,uv,0).r;
-  let direct=sunIlluminance()*sunlight;
+  let direct=sunIlluminance()*sunlight*landShadowVisibility(world,n);
   let ambient=textureSampleLevel(envCube,sampC,vec3f(0,1,0),7).rgb;
   let diffuse=max(dot(n,F.sunDir.xyz),0.0)+select(0.0,max(dot(-n,F.sunDir.xyz),0.0)*.38,grass);
   let visibility=select(.35+.30*max(n.y,0.0),.32+in.kind.y*.32,grass);
@@ -1242,7 +1325,7 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
   let diffuse=(max(nDotL,0.0)+backlit)*(0.22+0.78*exposure*exposure);
   let ambientVisibility=0.12+exposure*0.56+abs(n.y)*0.09;
   if(leaf.a<0.015){discard;}
-  let color=landFinish(world,n,albedo,diffuse,ambientVisibility,0.0,0.92);
+  let color=landFinishShadowed(world,n,albedo,diffuse,ambientVisibility,0.16*exposure,0.52,mix(0.68,1.0,landShadowVisibility(world,n)));
   return vec4f(color.rgb,leaf.a);
 }
 `+LAND_CRATER_RENDER+/* wgsl */ `
@@ -1282,7 +1365,7 @@ struct CanopyVertex {
   let nDotL=dot(n,F.sunDir.xyz);
   let diffuse=max(nDotL,0.0)+select(0.0,max(-nDotL,0.0)*0.22*exposure,crown);
   let ambient=select(.36+max(n.y,0)*.25,.14+exposure*.48+max(n.y,0)*.09,crown);
-  return landFinish(in.world,n,col,diffuse,ambient,0,select(0.94,0.92,crown));
+  return landFinishShadowed(in.world,n,col,diffuse,ambient,0,select(0.94,0.92,crown),1.0);
 }
 @fragment fn canopyLeafFS(in:CanopyVertex,@builtin(front_facing) front:bool)->@location(0) vec4f{
   let uvCentered=in.leafUV-vec2f(0.5,0.5);
@@ -1296,7 +1379,16 @@ struct CanopyVertex {
   let diffuse=(max(nDotL,0)+backlit)*(.22+.78*exposure*exposure);
   let ambient=.12+exposure*.56+abs(n.y)*.09;
   if(alpha<.015){discard;}
-  let color=landFinish(in.world,n,warmCol,diffuse,ambient,0,.92);
+  let color=landFinishShadowed(in.world,n,warmCol,diffuse,ambient,0,.92,1.0);
   return vec4f(color.rgb,alpha);
+}
+@vertex fn portShadowVS(@location(0) position:vec3f)->@builtin(position) vec4f{
+  return landSH.lightView*vec4f(position-landSH.origin.xyz,1.0);
+}
+@vertex fn treeShadowVS(@location(0) position:vec3f,@location(3) rootScale:vec4f,@location(4) yawKind:vec4f)->@builtin(position) vec4f{
+  let c=cos(yawKind.x);let s=sin(yawKind.x);
+  let local=vec3f(c*position.x-s*position.z,position.y,s*position.x+c*position.z)*rootScale.w;
+  let world=rootScale.xyz+local;
+  return landSH.lightView*vec4f(world-landSH.origin.xyz,1.0);
 }
 `;

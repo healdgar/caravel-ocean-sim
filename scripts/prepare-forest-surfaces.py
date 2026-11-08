@@ -54,12 +54,13 @@ def read_png(path):
 def surface_base(folder, material):
     """Level zero as js/forest-scenery.js forestSurfaceInit computes it."""
     albedo = read_png(folder / material['albedo']['file'])
-    tangent = read_png(folder / material['normal']['file'])[..., :3] * 2 - 1
+    normal_rgba = read_png(folder / material['normal']['file'])
+    tangent = normal_rgba[..., :3] * 2 - 1
     tangent /= np.maximum(np.linalg.norm(tangent, axis=-1, keepdims=True), 1e-12)
     if material.get('roughnessMap'):
         roughness = read_png(folder / material['roughnessMap']['file'])[..., 0]
     else:
-        roughness = np.full(albedo.shape[:2], float(material['roughness']))
+        roughness = np.where(normal_rgba[..., 3] < 0.995, normal_rgba[..., 3], float(material['roughness']))
     coverage = albedo[..., 3]
     pigment = np.dstack((linear_from_srgb(albedo[..., :3]) * coverage[..., None], coverage))
     detail = np.dstack((tangent * coverage[..., None], roughness * coverage))
