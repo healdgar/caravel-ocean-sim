@@ -513,7 +513,7 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
     }
     return MOST_ROOM_CELLS * CELL_M;
   };
-  const pavingOf = (c) => (paves ? smoothstep(0.1, 0.24, Math.pow(traffic[c] / busiest, 0.6)) : 0);
+  const pavingOf = (c) => (paves ? smoothstep(0.01, 0.06, Math.pow(traffic[c] / busiest, 0.5)) : 0);
   const fieldWays = ways.map(({ line, cells }) => {
     const points = line.map(([x, z]) => {
       // The nearest of this way's cells says how it is used here.

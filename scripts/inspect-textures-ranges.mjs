@@ -138,36 +138,49 @@ async function runAudit() {
             var rough = 0.78;
 
             if (P.familyId == 0u) {
-              // Street Cobblestone (way.g) with stoneFade derivative + grazing filter
-              let stoneFade = (1.0 - smoothstep(0.03, 0.14, footprint)) * smoothstep(0.08, 0.36, sinE);
-              let su = floor(wx * 3.1);
-              let sv = floor(wz * 3.1);
+              // Street Cobblestone (way.g) with two-octave cascade (3.4/m fine + 1.35/m mid) & separated bump fade
+              let streetGrazing = smoothstep(0.05, 0.22, sinE);
+              let stoneFineFade = (1.0 - smoothstep(0.032, 0.085, footprint)) * streetGrazing;
+              let stoneMidFade = (1.0 - smoothstep(0.080, 0.220, footprint)) * streetGrazing;
+              let stoneBumpFade = (1.0 - smoothstep(0.016, 0.048, footprint)) * streetGrazing;
+              let su = floor(wx * 3.4);
+              let sv = floor(wz * 3.4);
               let jitter = (hash2(vec2f(su, sv)) - 0.5) * 0.18;
-              let cx = abs(fract(wx * 3.1 + jitter) - 0.5);
-              let cz = abs(fract(wz * 3.1 - jitter) - 0.5);
-              let mortar = smoothstep(0.34, 0.47, max(cx, cz));
-              let landStones = (1.0 - mortar * 0.45) * (0.90 + 0.16 * hash2(vec2f(su * 1.7, sv * 2.3)));
-              let cobbleTint = mix(1.0, 0.86 + 0.22 * landStones, stoneFade);
-              let roadTint = vec3f(0.26, 0.23, 0.19) * cobbleTint;
-              let domeX = (fract(wx * 3.1 + jitter) - 0.5) * 0.32 * stoneFade;
-              let domeZ = (fract(wz * 3.1 - jitter) - 0.5) * 0.32 * stoneFade;
+              let cx = abs(fract(wx * 3.4 + jitter) - 0.5);
+              let cz = abs(fract(wz * 3.4 - jitter) - 0.5);
+              let mortarFine = smoothstep(0.34, 0.47, max(cx, cz));
+              let qMid = vec2f(wx * 0.8 - wz * 0.6, wx * 0.6 + wz * 0.8) * 1.35 + vec2f(17.3, 41.7);
+              let mu = floor(qMid.x);
+              let mv = floor(qMid.y);
+              let mJitter = (hash2(vec2f(mu, mv)) - 0.5) * 0.18;
+              let mcx = abs(fract(qMid.x + mJitter) - 0.5);
+              let mcz = abs(fract(qMid.y - mJitter) - 0.5);
+              let mortarMid = smoothstep(0.34, 0.47, max(mcx, mcz));
+              let midWeight = stoneMidFade * (1.0 - 0.55 * stoneFineFade);
+              let toneMix = (hash2(vec2f(su * 1.7, sv * 2.3)) - 0.5) * 0.20 * stoneFineFade + (hash2(vec2f(mu * 1.3, mv * 2.9)) - 0.5) * 0.16 * midWeight;
+              let mortarMix = mortarFine * 0.42 * stoneFineFade + mortarMid * 0.32 * midWeight;
+              let macroPlate = (vnoise(vec2f(wx * 0.45, wz * 0.45)) - 0.5) * 0.18;
+              let roadTint = vec3f(0.236, 0.214, 0.189) * (1.0 + macroPlate + toneMix) * (1.0 - mortarMix);
+              let domeX = (fract(wx * 3.4 + jitter) - 0.5) * 0.30 * stoneBumpFade;
+              let domeZ = (fract(wz * 3.4 - jitter) - 0.5) * 0.30 * stoneBumpFade;
               n = normalize(vec3f(-domeX, 1.0, -domeZ));
               col = roadTint;
-              rough = 0.80;
+              rough = 0.82;
             } else if (P.familyId == 1u) {
-              // Kind 16 Architectural Calçada Cobblestone
-              let cobbleFade = (1.0 - smoothstep(0.035, 0.16, footprint)) * grazing;
-              let cFreq = 0.34;
+              // Kind 16 Architectural Calçada Cobblestone (mipmapped colour, early bump damping)
+              let cobbleColorFade = (1.0 - smoothstep(0.08, 0.32, footprint)) * grazing;
+              let cobbleBumpFade = (1.0 - smoothstep(0.035, 0.14, footprint)) * grazing;
+              let cFreq = 0.42;
               let cCell = vec2f(wx * cFreq, wz * cFreq);
               let cid = floor(cCell);
               let cHash = hash2(cid);
               let cu = fract(cCell.x + (cHash - 0.5) * 0.22) - 0.5;
               let cv = fract(cCell.y + (fract(cHash * 17.3) - 0.5) * 0.22) - 0.5;
               let mortar = smoothstep(0.32, 0.47, max(abs(cu), abs(cv)));
-              let base = vec3f(0.46, 0.43, 0.38) * (0.92 + 0.16 * (cHash - 0.5) * cobbleFade);
+              let base = vec3f(0.46, 0.43, 0.38) * (0.92 + 0.16 * (cHash - 0.5) * cobbleColorFade);
               let mortarCol = base * 0.72;
-              col = mix(base, mix(base, mortarCol, mortar * 0.42), cobbleFade);
-              n = normalize(vec3f(-cu * 0.35 * cobbleFade, 1.0, -cv * 0.35 * cobbleFade));
+              col = mix(base, mix(base, mortarCol, mortar * 0.42), cobbleColorFade);
+              n = normalize(vec3f(-cu * 0.35 * cobbleBumpFade, 1.0, -cv * 0.35 * cobbleBumpFade));
               rough = 0.82;
             } else if (P.familyId == 2u) {
               // Kind 10 Maritime Timber Planking
@@ -439,6 +452,22 @@ async function runAudit() {
     });
     await gamePage.waitForTimeout(1000);
     await gamePage.screenshot({ path: path.join(ARTIFACT_DIR, 'verify_rooflines_and_cobble.png') });
+
+    // Shot A2: Street-Level Cobblestone Near-to-Mid-Range Transition (matching the user's plaza/street view)
+    await gamePage.evaluate(() => {
+      const f = window.oceanFleet;
+      const dock = f.terrain.views.dock;
+      f.vessels[0].boat.showProw = false;
+      const cam = f.freeCam;
+      cam.x = dock.x - 28;
+      cam.y = 8.2;
+      cam.z = dock.z - 56;
+      cam.yaw = -0.22;
+      cam.pitch = -0.36;
+      cam.fovY = (40 * Math.PI) / 180;
+    });
+    await gamePage.waitForTimeout(1000);
+    await gamePage.screenshot({ path: path.join(ARTIFACT_DIR, 'verify_street_cobble_transition.png') });
 
     // Shot B: Close-up of Ship 3-Strand Laid Hemp Ropes & Tarred Standing Shrouds
     await gamePage.evaluate(() => {

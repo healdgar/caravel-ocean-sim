@@ -626,13 +626,16 @@ fn sampleArchLayerMip(layer:u32,uv:vec2f,mip:u32)->vec4f{
 }
 fn sampleArchLayerGrad(layer:i32,uv:vec2f,ddx:vec2f,ddy:vec2f)->vec4f{
   let uLayer=u32(max(layer,0));
-  let foot=max(length(ddx),length(ddy))*256.0;
+  let lx=length(ddx);let ly=length(ddy);
+  let major=select(ddy,ddx,lx>=ly);
+  let foot=max(min(lx,ly),max(lx,ly)*0.35)*256.0;
   let lod=clamp(log2(max(foot,1.0)),0.0,5.0);
   let m0=u32(floor(lod));
   let m1=min(m0+1u,5u);
-  let s0=sampleArchLayerMip(uLayer,uv,m0);
+  let s0=0.5*(sampleArchLayerMip(uLayer,uv-major*0.25,m0)+sampleArchLayerMip(uLayer,uv+major*0.25,m0));
   if(m0==m1){return s0;}
-  return mix(s0,sampleArchLayerMip(uLayer,uv,m1),fract(lod));
+  let s1=0.5*(sampleArchLayerMip(uLayer,uv-major*0.25,m1)+sampleArchLayerMip(uLayer,uv+major*0.25,m1));
+  return mix(s0,s1,fract(lod));
 }
 struct ArchPBR{albedo:vec3f,normalOffset:vec3f,roughness:f32,ao:f32};
 fn sampleArchMaterialPBR(matIdx:i32,world:vec3f,n:vec3f,dx:vec3f,dy:vec3f,scale:vec2f,lodFade:f32,instYaw:f32)->ArchPBR{
@@ -1133,17 +1136,17 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       roughness=clamp(pbr.roughness,0.82,0.95);
       ambientVisibility=(0.44+0.36*max(n.y,0.0))*aoVis*pbr.ao;
     }else if(in.kind.x<16.5){
-      // Kind 16: MaterialCraft-cooked granite & river-cobble calçada / empedrado pavement
+      // Kind 16: MaterialCraft-cooked granite & river-cobble calçada / empedrado pavement.
+      // Albedo is trilinearly mipmapped by sampleArchLayerGrad across 6 mip levels; only normal/bump
+      // relief needs early derivative damping to prevent grazing-angle specular shimmer.
       let cobbleAniso=max(length(dx),length(dy));
-      let cobbleGrazing=smoothstep(0.08,0.38,max(abs(n.y),0.12));
-      let cobbleFade=archLodFade*(1.0-smoothstep(0.032,0.12,cobbleAniso))*cobbleGrazing;
-      let pbr=sampleArchMaterialPBR(6,world,n,dx,dy,vec2f(0.34,0.34),cobbleFade,instYaw);
-      let cobbleMean=vec3f(0.245,0.228,0.205);
-      albedo=mix(cobbleMean,pbr.albedo,cobbleFade)*shadeAlbedo*(0.97+detailA*0.04*cobbleFade+detailB*0.02*cobbleFade);
-      archNormalOffset=pbr.normalOffset*0.36*cobbleFade;
-      relief=detailA*0.0025*cobbleFade;
-      roughness=clamp(mix(0.84,pbr.roughness,cobbleFade),0.68,0.92);
-      ambientVisibility=(0.48+0.36*max(n.y,0.0))*aoVis*mix(1.0,pbr.ao,0.52*cobbleFade);
+      let cobbleBumpFade=archLodFade*(1.0-smoothstep(0.035,0.14,cobbleAniso))*smoothstep(0.06,0.28,max(abs(n.y),0.12));
+      let pbr=sampleArchMaterialPBR(6,world,n,dx,dy,vec2f(0.42,0.42),archLodFade,instYaw);
+      albedo=pbr.albedo*shadeAlbedo*(0.96+detailA*0.05*archLodFade+detailB*0.03*archLodFade);
+      archNormalOffset=pbr.normalOffset*0.44*cobbleBumpFade;
+      relief=detailA*0.003*cobbleBumpFade;
+      roughness=clamp(mix(0.84,pbr.roughness,archLodFade),0.68,0.92);
+      ambientVisibility=(0.48+0.36*max(n.y,0.0))*aoVis*mix(1.0,pbr.ao,0.68*archLodFade);
     }else if(in.kind.x<17.5){
       // Kind 17: MaterialCraft-cooked paper-birch & cedar bark sheathing
       let pbr=sampleArchMaterialPBR(7,world,n,dx,dy,vec2f(0.52,0.58),archLodFade,instYaw);
@@ -1205,17 +1208,41 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
         var surfaceRelief=wear*.03-ruts*.05+gd.fine.g*.0035+gd.mid.g*.012;
         // Between the tracks of a country road, grass the wheels never reach.
         surface=mix(surface,albedo,rutted*smoothstep(1.55,2.1,-frayed+fringe*1.4)*gd.near*.9);
-        let paved=smoothstep(.6,.9,way.g);
+        let paved=smoothstep(.52,.78,way.g);
         if(paved>0.0){
-          let anisoFoot=max(length(dx),length(dy));
-          let streetGrazing=smoothstep(0.08,0.38,max(n.y,0.0));
-          let stoneFade=(1.0-smoothstep(.008,.036,anisoFoot))*streetGrazing;
-          var stones=vec2f(0.0,1.0);
-          if(stoneFade>0.0){stones=landStones(world.xz*3.1);}
-          let macroTone=wear*.08+gd.big.a*.18+gd.mid.a*.10*stoneFade+gd.fine.a*.12*stoneFade;
-          let setts=vec3f(.238,.216,.192)*(1.0+macroTone+stones.x*.14*stoneFade)*(1.0-(1.0-stones.y)*.24*stoneFade);
+          // Anisotropic 2-tap cobblestone cascade with separated bump vs colour filtering:
+          // Isotropic max(|dx|,|dy|) grows as D^2/H on oblique streets and creates an artificial fade wall ~10m ahead.
+          // Using anisotropic footprint max(minAxis, maxAxis*0.28) + 2-tap supersampling along the foreshortened
+          // major axis keeps cobblestones crisp across the street/plaza (out to ~45-80m) without Moiré shimmer.
+          let lx=length(dx.xz);let ly=length(dy.xz);
+          let majorXZ=select(dy.xz,dx.xz,lx>=ly);
+          let roadFoot=max(min(lx,ly),max(lx,ly)*0.28);
+          let anisoFoot=max(lx,ly);
+          let streetGrazing=smoothstep(0.04,0.18,max(n.y,0.0));
+          let stoneFineFade=(1.0-smoothstep(0.042,0.115,roadFoot))*streetGrazing;
+          let stoneMidFade=(1.0-smoothstep(0.095,0.260,roadFoot))*streetGrazing;
+          let stoneBumpFade=(1.0-smoothstep(0.018,0.055,anisoFoot))*streetGrazing;
+          var stonesFine=vec2f(0.0,1.0);
+          if(stoneFineFade>0.0){
+            stonesFine=0.5*(landStones((world.xz-majorXZ*0.25)*3.4)+landStones((world.xz+majorXZ*0.25)*3.4));
+          }
+          var stonesMid=vec2f(0.0,1.0);
+          if(stoneMidFade>0.0){
+            let p0=world.xz-majorXZ*0.25;
+            let p1=world.xz+majorXZ*0.25;
+            let qMid0=vec2f(p0.x*0.8-p0.y*0.6,p0.x*0.6+p0.y*0.8)*1.35+vec2f(17.3,41.7);
+            let qMid1=vec2f(p1.x*0.8-p1.y*0.6,p1.x*0.6+p1.y*0.8)*1.35+vec2f(17.3,41.7);
+            stonesMid=0.5*(landStones(qMid0)+landStones(qMid1));
+          }
+          let midWeight=stoneMidFade*(1.0-0.55*stoneFineFade);
+          let stoneColorFade=max(stoneFineFade,stoneMidFade);
+          let toneMix=stonesFine.x*0.22*stoneFineFade+stonesMid.x*0.18*midWeight;
+          let mortarMix=(1.0-stonesFine.y)*0.46*stoneFineFade+(1.0-stonesMid.y)*0.34*midWeight;
+          let macroTone=wear*.12+gd.big.a*.28+gd.mid.a*.24+gd.mid.b*.22+gd.fine.a*.32*stoneFineFade;
+          let setts=vec3f(.236,.214,.189)*(1.0+macroTone+toneMix)*(1.0-mortarMix);
           surface=mix(surface,setts,paved);
-          surfaceRelief=mix(surfaceRelief,(stones.y-.55)*.022*stoneFade,paved);
+          let bumpVal=(stonesFine.y-.55)*.052*stoneBumpFade+(stonesMid.y-.55)*.024*stoneMidFade*(1.0-stoneBumpFade)+gd.mid.b*.012;
+          surfaceRelief=mix(surfaceRelief,bumpVal,paved);
         }
         albedo=mix(albedo*(1.0-trodden*.2),surface,onWay);
         relief=mix(relief,surfaceRelief,onWay);
