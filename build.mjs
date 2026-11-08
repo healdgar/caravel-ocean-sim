@@ -121,6 +121,7 @@ const runtimeAssetTypes = new Map([
   ['assets/canopy-scenery/saba/instances.bin','application/octet-stream'],
   ['assets/ports/1550/buildings-1550-lrm.bin','application/octet-stream'],
   ['assets/ports/1550/buildings-1550-photo-atlas.jpg','image/jpeg'],
+  ['assets/ports/1550/land-materials-pbr.png','image/png'],
 ]);
 // The optional exporter declares this pack only after real source baking. Never
 // manufacture a near tile to satisfy a build or fetch absent optional assets.
