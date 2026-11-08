@@ -1616,6 +1616,8 @@ export function reviveGarrisonSoldiers(building) {
     s.homeLxz = undefined;
     s.homeRouteZ = undefined;
     s.garrisonFall = null;
+    s.fallenElapsedS = 0;
+    s.visible = true;
     s.casualtyState = 'able';
     s.health = 1;
     s.woundSeverity = 0;
@@ -1631,6 +1633,8 @@ export function reviveGarrisonSoldiers(building) {
   }
 }
 
+export const GARRISON_CASUALTY_STAY_S = 86400;
+
 export function stepFortGarrison(garrison, dt = 0, wind = 0) {
   if (!garrison?.soldiers?.length) return garrison;
   dt = Math.max(0, Math.min(0.1, Number.isFinite(dt) ? dt : 0));
@@ -1642,14 +1646,19 @@ export function stepFortGarrison(garrison, dt = 0, wind = 0) {
     s.time += dt;
     const inst = s.building;
     const dmg = inst?.damageState;
-    const ruined = dmg?.state === 'ruined' && s.casualtyState !== 'fallen';
-    s.visible = !ruined;
-    if (ruined) {
-      s.walk = 0;
-      s.brace = 0;
-      s.work = 0;
-      continue;
+    if (dmg?.state === 'ruined' && s.casualtyState !== 'fallen') {
+      garrisonSoldierFalls(dmg?.fracture, s, inst, false, garrison);
     }
+    if (s.casualtyState === 'fallen') {
+      s.fallenElapsedS = (s.fallenElapsedS ?? 0) + dt;
+      if (s.fallenElapsedS >= GARRISON_CASUALTY_STAY_S) {
+        s.visible = false;
+        continue;
+      }
+    } else {
+      s.fallenElapsedS = 0;
+    }
+    s.visible = true;
     const impacts = dmg?.impacts?.length ? dmg.impacts : dmg?.craters;
     const seenImpacts = s._seenImpacts ?? 0;
     if (impacts && impacts.length > seenImpacts) {
@@ -1729,16 +1738,22 @@ export function stepFortGarrison(garrison, dt = 0, wind = 0) {
         const hw = (inst?.width ?? 10) * 0.5 + 1.1, hl = (inst?.length ?? inst?.depth ?? 12) * 0.5 + 1.1;
         const offEdge = Math.abs(s.lx) > hw || Math.abs(s.lz) > hl;
         const slope = s.lx * (inst?.slopeX ?? 0) + s.lz * (inst?.slopeZ ?? 0);
+        const footing = !offEdge && state?.fracture ? footingUnder(state, s.lx, s.ly, s.lz) : null;
         const floorTo = offEdge
-          ? Math.max(0, inst?.y ?? 0) - slope
-          : (state?.fracture ? restingHeightUnder(state, wx0, wz0, s.ly + 0.5) - slope : (s.baseLy ?? 0));
+          ? Math.max(0, inst?.baseY ?? inst?.y ?? 0) - slope
+          : footing && footing.stood && !footing.stands
+            ? Math.max(0, inst?.baseY ?? inst?.y ?? 0, restingHeightUnder(state, wx0, wz0, s.ly + 0.5)) - slope
+            : footing?.floor !== null && footing?.floor !== undefined
+              ? footing.floor - slope
+              : (s.baseLy ?? 0);
         s.garrisonFall = { to: Math.min(s.baseLy ?? 0, floorTo), speed: -s.knockbackVy };
         s.knockbackVy = 0;
       } else {
         const hw = (inst?.width ?? 10) * 0.5 + 1.1, hl = (inst?.length ?? inst?.depth ?? 12) * 0.5 + 1.1;
-        if ((Math.abs(s.lx) > hw || Math.abs(s.lz) > hl) && (s.baseLy ?? 0) > (inst?.y ?? 0) + 0.35) {
+        const baseGroundY = Math.max(0, inst?.baseY ?? inst?.y ?? 0);
+        if ((Math.abs(s.lx) > hw || Math.abs(s.lz) > hl) && (s.baseLy ?? 0) > baseGroundY + 0.35) {
           const slope = s.lx * (inst?.slopeX ?? 0) + (s.lz ?? 0) * (inst?.slopeZ ?? 0);
-          const groundTo = Math.max(0, inst?.y ?? 0) - slope;
+          const groundTo = baseGroundY - slope;
           if (s.garrisonFall) s.garrisonFall.to = Math.min(s.garrisonFall.to, groundTo);
           else s.garrisonFall = { to: groundTo, speed: 0 };
         }
@@ -1756,7 +1771,7 @@ export function stepFortGarrison(garrison, dt = 0, wind = 0) {
       s.knockdownTimer = Math.max(0, s.knockdownTimer - dt);
       s._poseReady = false;
     }
-    const isDown = s.casualtyState === 'fallen' || (s.knockdownTimer ?? 0) > 0;
+    let isDown = s.casualtyState === 'fallen' || (s.knockdownTimer ?? 0) > 0;
     if (isDown && (s.ragdoll?.age ?? 0) < 2.2) {
       s._poseReady = false;
     }
@@ -1767,10 +1782,14 @@ export function stepFortGarrison(garrison, dt = 0, wind = 0) {
     if (!isDown && s.gunIndex !== null && inst?.gunnery?.guns?.[s.gunIndex]) {
       const gun = inst.gunnery.guns[s.gunIndex];
       if (gun.dismounted) {
-        s.visible = false;
-        continue;
+        s.casualtyState = 'fallen';
+        s.health = 0;
+        s.woundSeverity = Math.max(s.woundSeverity ?? 0, 0.85);
+        s._poseReady = false;
+        isDown = true;
+      } else {
+        working = gun.loading || ['swab', 'load', 'ram', 'runout', 'prime', 'recoil'].includes(gun.stage);
       }
-      working = gun.loading || ['swab', 'load', 'ram', 'runout', 'prime', 'recoil'].includes(gun.stage);
     }
 
     if (!isDown && !underFire && !working && s.routeZ && Math.abs(s.routeZ[1] - s.routeZ[0]) > 0.05) {
@@ -1829,7 +1848,7 @@ export function stepFortGarrison(garrison, dt = 0, wind = 0) {
     s.rotation.set([0, Math.sin(half), 0, Math.cos(half)]);
     gltfTRS(s.transform, [wx - ox, wy - oy, wz - oz], s.rotation, s.scale);
     stepCrewPhysicsState(s, null, dt, garrison);
-    s._poseReady = !moving && s.walk < 1e-3 && yawDiff < 1e-3;
+    s._poseReady = !moving && s.walk < 1e-3 && yawDiff < 1e-3 && !(isDown && (s.ragdoll?.age ?? 0) < 2.2) && !s.garrisonFall;
   }
   return garrison;
 }

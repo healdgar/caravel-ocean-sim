@@ -1134,12 +1134,16 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       ambientVisibility=(0.44+0.36*max(n.y,0.0))*aoVis*pbr.ao;
     }else if(in.kind.x<16.5){
       // Kind 16: MaterialCraft-cooked granite & river-cobble calçada / empedrado pavement
-      let pbr=sampleArchMaterialPBR(6,world,n,dx,dy,vec2f(0.58,0.58),archLodFade,instYaw);
-      albedo=pbr.albedo*shadeAlbedo*(0.96+detailA*0.08+detailB*0.04);
-      archNormalOffset=pbr.normalOffset*0.68;
-      relief=detailA*0.004*archLodFade;
-      roughness=clamp(pbr.roughness,0.66,0.92);
-      ambientVisibility=(0.48+0.36*max(n.y,0.0))*aoVis*pbr.ao;
+      let cobbleAniso=max(length(dx),length(dy));
+      let cobbleGrazing=smoothstep(0.08,0.38,max(abs(n.y),0.12));
+      let cobbleFade=archLodFade*(1.0-smoothstep(0.032,0.12,cobbleAniso))*cobbleGrazing;
+      let pbr=sampleArchMaterialPBR(6,world,n,dx,dy,vec2f(0.34,0.34),cobbleFade,instYaw);
+      let cobbleMean=vec3f(0.245,0.228,0.205);
+      albedo=mix(cobbleMean,pbr.albedo,cobbleFade)*shadeAlbedo*(0.97+detailA*0.04*cobbleFade+detailB*0.02*cobbleFade);
+      archNormalOffset=pbr.normalOffset*0.36*cobbleFade;
+      relief=detailA*0.0025*cobbleFade;
+      roughness=clamp(mix(0.84,pbr.roughness,cobbleFade),0.68,0.92);
+      ambientVisibility=(0.48+0.36*max(n.y,0.0))*aoVis*mix(1.0,pbr.ao,0.52*cobbleFade);
     }else if(in.kind.x<17.5){
       // Kind 17: MaterialCraft-cooked paper-birch & cedar bark sheathing
       let pbr=sampleArchMaterialPBR(7,world,n,dx,dy,vec2f(0.52,0.58),archLodFade,instYaw);
@@ -1203,12 +1207,15 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
         surface=mix(surface,albedo,rutted*smoothstep(1.55,2.1,-frayed+fringe*1.4)*gd.near*.9);
         let paved=smoothstep(.6,.9,way.g);
         if(paved>0.0){
-          let stoneFade=1.0-smoothstep(.015,.11,footprint);
+          let anisoFoot=max(length(dx),length(dy));
+          let streetGrazing=smoothstep(0.08,0.38,max(n.y,0.0));
+          let stoneFade=(1.0-smoothstep(.008,.036,anisoFoot))*streetGrazing;
           var stones=vec2f(0.0,1.0);
-          if(stoneFade>0.0){stones=landStones(world.xz*4.4);}
-          let setts=vec3f(.235,.212,.187)*(1.0+wear*.12+stones.x*.22*stoneFade+gd.fine.a*.5+gd.mid.a*.3+gd.big.a*.35)*(1.0-(1.0-stones.y)*.5*stoneFade);
+          if(stoneFade>0.0){stones=landStones(world.xz*3.1);}
+          let macroTone=wear*.08+gd.big.a*.18+gd.mid.a*.10*stoneFade+gd.fine.a*.12*stoneFade;
+          let setts=vec3f(.238,.216,.192)*(1.0+macroTone+stones.x*.14*stoneFade)*(1.0-(1.0-stones.y)*.24*stoneFade);
           surface=mix(surface,setts,paved);
-          surfaceRelief=mix(surfaceRelief,(stones.y-.55)*.07*stoneFade,paved);
+          surfaceRelief=mix(surfaceRelief,(stones.y-.55)*.022*stoneFade,paved);
         }
         albedo=mix(albedo*(1.0-trodden*.2),surface,onWay);
         relief=mix(relief,surfaceRelief,onWay);

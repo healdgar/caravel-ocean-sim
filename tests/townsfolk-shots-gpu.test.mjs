@@ -281,18 +281,28 @@ test('someone who runs to a closed door stays in till it is over, and comes out 
   assert.ok(ran.some(who=>seen.slice(3).some(f=>f.bodies.includes(who))),'out again on their way back');
 });
 
-test('those struck lie where they fell at night, when the rest have gone home',async()=>{
-  const {byDay,byNight,errors}=await inPage(async spec=>{
+test('those struck lie where they fell at night, when the rest have gone home, and stay on the ground for a full day',async()=>{
+  const {byDay,byNight,after23Hours,after25Hours,errors}=await inPage(async spec=>{
     const t=town(spec),first=(await run(t,10)).bodies[0];
     await run(t,10.02,[{start:[first.x,1,first.z-30],end:[first.x,1,first.z+30],strike:.4,reach:.01}]);
     const byDay=(await run(t,20)).bodies.length;
     t.frameData[33]=-1;
     const night=await run(t,30);
-    return {byDay,byNight:night.bodies.filter(b=>b.frameA>=35).length,errors:[...townErrors]};
+    const after23h=await run(t,10+82800);
+    const after25h=await run(t,10+90000);
+    return {
+      byDay,
+      byNight:night.bodies.filter(b=>b.frameA>=35).length,
+      after23Hours:after23h.bodies.filter(b=>b.frameA>=35).length,
+      after25Hours:after25h.bodies.filter(b=>b.frameA>=35).length,
+      errors:[...townErrors],
+    };
   },street(strung(0)));
   assert.deepEqual(errors,[]);
   assert.equal(byDay,PEOPLE);
   assert.equal(byNight,1,'one person was struck');
+  assert.equal(after23Hours,1,'casualty body remains on the ground after 23 hours (< 1 day)');
+  assert.equal(after25Hours,0,'casualty body clears after 25 hours (> 1 day)');
 });
 
 test('the list JavaScript sends says where shot went and nothing about anyone',()=>{

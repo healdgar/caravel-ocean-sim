@@ -1800,8 +1800,8 @@ export function syncPortInstancesToTerrain(portOrInstances, heights, region, { g
         inst.prefabId === 'torreon_atalaya_farol' ||
         inst.prefabId === 'curtain_wall_and_gate' ||
         inst.prefabId === 'english_triangular_palisade_fort';
-      const padSlopeX = isFort ? 0 : Math.max(-0.08, Math.min(0.08, rawSlopeX));
-      const padSlopeZ = isFort ? 0 : Math.max(-0.08, Math.min(0.08, rawSlopeZ));
+      const padSlopeX = 0;
+      const padSlopeZ = 0;
       const padY = levelledLast(inst)
         ? inst.y ?? 2.8
         : inst.indigenous && !isFort
@@ -1895,18 +1895,16 @@ export function syncPortInstancesToTerrain(portOrInstances, heights, region, { g
       inst.prefabId === 'torreon_atalaya_farol' ||
       inst.prefabId === 'curtain_wall_and_gate' ||
       inst.prefabId === 'english_triangular_palisade_fort';
-    if (isFort) {
+    if (isFort || !inst.indigenous) {
       inst.slopeX = 0;
       inst.slopeZ = 0;
-      inst.y = Math.max(inst.y ?? 3.2, hCenter);
+      inst.y = isFort ? Math.max(inst.y ?? 3.2, hCenter) : Math.max(0.85, hCenter);
     } else if (inst.prefabId === 'indigenous_canoe_landing') {
       inst.slopeX = Math.max(-0.12, Math.min(0.12, inst.slopeX));
       inst.slopeZ = Math.max(-0.12, Math.min(0.12, inst.slopeZ));
       inst.y = Math.max(0.28, hCenter);
-    } else if (inst.indigenous) {
-      inst.y = Math.max(0.38, hCenter);
     } else {
-      inst.y = Math.max(0.85, hCenter);
+      inst.y = Math.max(0.38, hCenter);
     }
     inst.baseY = inst.y;
   }
@@ -4961,7 +4959,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     }
   }
 
-  syncPortInstancesToTerrain(instances, heights, region, { gradePads: !hasOrthoFootprints });
+  syncPortInstancesToTerrain(instances, heights, region, { gradePads: true });
 
   const indigenousSettlement =
     region.indigenousSettlement ??
@@ -6235,8 +6233,13 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     const cosY = Math.cos(inst.yaw);
     const sinY = Math.sin(inst.yaw);
     const isOverWater = OVER_WATER_PREFAB_IDS.has(inst.prefabId);
-    const slopeX = isOverWater ? 0 : (inst.slopeX ?? 0);
-    const slopeZ = isOverWater ? 0 : (inst.slopeZ ?? 0);
+    const allowEarthShear =
+      !isOverWater &&
+      (Boolean(inst.indigenous) ||
+        inst.prefabId === 'algonquian_longhouse' ||
+        inst.prefabId === 'indigenous_canoe_landing');
+    const slopeX = allowEarthShear ? (inst.slopeX ?? 0) : 0;
+    const slopeZ = allowEarthShear ? (inst.slopeZ ?? 0) : 0;
     const toWorld = (lx, ly, lz) => [
       inst.x + lx * cosY + lz * sinY,
       ly + lx * slopeX + lz * slopeZ,

@@ -475,11 +475,12 @@ fn evalEnsignColor(u: f32, v: f32, code: i32, isPennant: bool, weaveFade: f32) -
 }
 
 @fragment fn fs(v: ColorsVertexOut) -> @location(0) vec4f {
-  let n = normalize(v.normal);
+  var n = normalize(v.normal);
   let eye = normalize(F.camPos.xyz - v.world);
   let mode = v.uvMode.z;
   let code = i32(round(v.uvMode.w));
   let weaveFade = 1.0 - smoothstep(0.35, 1.2, max(fwidth(v.uvMode.x * 140.0), fwidth(v.uvMode.y * 95.0)));
+  let ropeLayFoot = fwidth(v.uvMode.y * 54.0) + length(fwidth(n)) * 2.5;
 
   var color = vec3f(0.11, 0.075, 0.042);
   var rough = 0.78;
@@ -497,12 +498,28 @@ fn evalEnsignColor(u: f32, v: f32, code: i32, isPennant: bool, weaveFade: f32) -
     color = evalEnsignColor(clamp(v.uvMode.x, 0.0, 1.0), clamp(v.uvMode.y, 0.0, 1.0), code, mode > 2.5, weaveFade);
     rough = 0.86;
   } else if (mode < 4.5 || mode > 6.5) {
-    // mode 4 (world-space) or mode 7 (vessel-space): Braided hemp line / parrel truss / outlicker sheet
+    // mode 4 (world-space) or mode 7 (vessel-space): 3-strand laid hemp line / parrel truss / outlicker sheet
     let isHook = v.uvMode.x > 0.94;
-    let twist = 0.86 + 0.14 * sin(v.uvMode.y * 42.0 + v.uvMode.x * 18.0);
-    color = select(vec3f(0.44, 0.34, 0.19) * twist, vec3f(0.055, 0.058, 0.062), isHook);
-    rough = select(0.84, 0.42, isHook);
+    let ropeAz = atan2(n.x, n.z);
+    let layPhase = v.uvMode.y * 54.0 + ropeAz * 3.0;
+    let layFade = 1.0 - smoothstep(0.55, 2.5, ropeLayFoot);
+    let strandU = fract(layPhase * 0.15915494) - 0.5;
+    let strandCrown = sqrt(max(0.06, 1.0 - 3.55 * strandU * strandU));
+    let strandAO = smoothstep(0.48, 0.18, abs(strandU));
+    let yarnTwist = sin(v.uvMode.y * 220.0 - ropeAz * 9.0) * (1.0 - smoothstep(0.18, 0.95, ropeLayFoot));
+    let hempCrown = vec3f(0.44, 0.325, 0.18);
+    let hempValley = vec3f(0.15, 0.098, 0.050);
+    let hempLaid = mix(hempValley, hempCrown * (1.0 + 0.08 * yarnTwist), 0.22 + 0.78 * strandCrown * strandAO);
+    let hempColor = mix(mix(hempValley, hempCrown, 0.68), hempLaid, layFade);
+    color = select(hempColor, vec3f(0.055, 0.058, 0.062), isHook);
+    rough = select(0.84 - 0.06 * strandCrown * layFade, 0.42, isHook);
     f0 = select(vec3f(0.035), vec3f(0.14), isHook);
+    if (!isHook) {
+      let ropeTang = normalize(cross(n, vec3f(0.35, 0.86, 0.35)) + vec3f(0.001, 0.0, 0.0));
+      let ropeBitang = cross(n, ropeTang);
+      let dStrand = clamp(-2.85 * strandU, -1.0, 1.0) * layFade;
+      n = normalize(n + ropeTang * (dStrand * 0.32) + ropeBitang * (dStrand * 0.22));
+    }
   } else {
     // mode 5: Weathered oak boarding gangplank with iron cleats
     let plankGrain = 0.90 + 0.10 * sin(v.uvMode.x * 38.0 + v.uvMode.y * 12.0);

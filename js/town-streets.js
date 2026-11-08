@@ -657,7 +657,8 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
     floats[at + 8] = (count - 1) * ROUTE_STEP_M;
     floats[at + 9] = random(); // How readily they stay out after dark.
     words[at + 10] = Math.floor(random() * 0xffff);
-    words[at + 11] = (w & 1) | (OPEN_AIR.has(trip.a.inst.prefabId) ? 2 : 0) | (OPEN_AIR.has(trip.b.inst.prefabId) ? 4 : 0);
+    const pierTrip = trip.a.inst.prefabId === 'timber_mole_pier' || trip.b.inst.prefabId === 'timber_mole_pier';
+    words[at + 11] = (w & 1) | (OPEN_AIR.has(trip.a.inst.prefabId) ? 2 : 0) | (OPEN_AIR.has(trip.b.inst.prefabId) ? 4 : 0) | (pierTrip ? 8 : 0);
   }
 
   return {

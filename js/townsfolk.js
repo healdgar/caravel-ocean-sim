@@ -9,7 +9,7 @@ import { DRESS_MASK_SCALE, indigenousDress } from './indigenous-dress.js';
 import { createDistantCrewLOD } from './crew-lod.js';
 import { bakeTownClips } from './town-clips.js';
 import { TOWN_SHOTS_WORDS, createTownShots } from './town-shots.js';
-import { TOWN_FATE_WORDS, TOWN_SHOT_LIMIT, TOWN_SHOT_WORDS, TOWNSFOLK_BODY_WORDS, TOWNSFOLK_LOOKS, TOWNSFOLK_RENDER, TOWNSFOLK_SHADOW, TOWNSFOLK_TIERS, TOWNSFOLK_WALK } from './wgsl/townsfolk.js';
+import { TOWN_CASUALTY_STAY_S, TOWN_FATE_WORDS, TOWN_SHOT_LIMIT, TOWN_SHOT_WORDS, TOWNSFOLK_BODY_WORDS, TOWNSFOLK_LOOKS, TOWNSFOLK_RENDER, TOWNSFOLK_SHADOW, TOWNSFOLK_TIERS, TOWNSFOLK_WALK } from './wgsl/townsfolk.js';
 import { WALKER_WORDS } from './town-streets.js';
 
 const MODELS = 2;
@@ -130,15 +130,17 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
   let indigenousModels = null;
 
   let activePort = null, crowd = null, frameCount = 0;
-  // Each town's people as they were left, for as long as its port is in memory, so turning away and back raises no one.
+  // Each town's people as they were left, kept for a full day (TOWN_CASUALTY_STAY_S = 86,400s) so fallen bodies stay on the ground for a day.
   const fatesOfTown = new WeakMap();
+  const fatesByKey = new Map();
+  const townKeyOf = (port) => String(port?.regionId ?? port?.id ?? port?.name ?? '');
   function dispose() {
     if (!crowd) return;
     for (const b of [crowd.walkers, crowd.route, crowd.bodies, crowd.draws, crowd.uniform, crowd.looks, crowd.shots]) b.destroy();
     delete crowd.port.townsfolkWatch;
     crowd = null;
   }
-  function buildCrowd(port) {
+  function buildCrowd(port, nowMs = Date.now()) {
     dispose();
     const streets = port?.streets;
     if (!streets?.people) return;
@@ -165,11 +167,20 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     crowdWords[24] = bucketSpan; crowdWords[25] = TOWNSFOLK_LOOKS;
     const uniform = buffer('townsfolk crowd', crowdWords, B.UNIFORM);
     const shots = device.createBuffer({ label: 'townsfolk shots', size: TOWN_SHOTS_WORDS * 4, usage: B.UNIFORM | B.COPY_DST });
-    let fates = fatesOfTown.get(port);
-    if (!fates) {
-      fates = device.createBuffer({ label: 'townsfolk fates', size: people * TOWN_FATE_WORDS * 4, usage: B.STORAGE });
-      fatesOfTown.set(port, fates);
+    const key = townKeyOf(port);
+    let fateRecord = fatesOfTown.get(port) ?? (key ? fatesByKey.get(key) : null);
+    if (fateRecord && fateRecord.people !== people) fateRecord = null;
+    if (fateRecord && fateRecord.struckAtMs !== null && nowMs - fateRecord.struckAtMs >= TOWN_CASUALTY_STAY_S * 1000) {
+      device.queue.writeBuffer(fateRecord.buffer, 0, new Uint32Array(people * TOWN_FATE_WORDS));
+      fateRecord.struckAtMs = null;
     }
+    if (!fateRecord) {
+      const fatesBuf = device.createBuffer({ label: 'townsfolk fates', size: people * TOWN_FATE_WORDS * 4, usage: B.STORAGE | B.COPY_DST });
+      fateRecord = { buffer: fatesBuf, people, struckAtMs: null };
+    }
+    fatesOfTown.set(port, fateRecord);
+    if (key) fatesByKey.set(key, fateRecord);
+    const fates = fateRecord.buffer;
     const shotLog = createTownShots(streets), shotBytes = new ArrayBuffer(TOWN_SHOTS_WORDS * 4);
     port.townsfolkWatch = shotLog.note;
     const walkGroup = device.createBindGroup({
@@ -198,13 +209,13 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
         ].map(([binding, resource]) => ({ binding, resource })),
       }));
     }
-    crowd = { port, people, walkers, route, looks, bodies, draws, uniform, shots, fates, shotLog, shotWords: new Uint32Array(shotBytes), shotFloats: new Float32Array(shotBytes), shotsSent: 0, drawArguments, walkGroup, groups, shadowGroups, geometries };
+    crowd = { port, people, walkers, route, looks, bodies, draws, uniform, shots, fates, fateRecord, shotLog, shotWords: new Uint32Array(shotBytes), shotFloats: new Float32Array(shotBytes), shotsSent: 0, drawArguments, walkGroup, groups, shadowGroups, geometries };
   }
 
   return {
     get people() { return crowd?.people ?? 0; },
     // Whichever town with ways is nearest the eye, once in a while.
-    follow(ports, camera) {
+    follow(ports, camera, nowMs = Date.now()) {
       if (frameCount++ % PORT_CHECK_FRAMES) return;
       let best = null, bestDistance = PORT_REACH_M;
       for (const port of ports ?? []) {
@@ -212,14 +223,19 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
         const d = Math.hypot(port.center.x - camera.x, port.center.z - camera.z);
         if (d < bestDistance) { bestDistance = d; best = port; }
       }
-      if (best !== activePort) { activePort = best; buildCrowd(best); }
+      if (best !== activePort) { activePort = best; buildCrowd(best, nowMs); }
+      else if (crowd?.fateRecord?.struckAtMs !== null && crowd?.fateRecord?.struckAtMs !== undefined && nowMs - crowd.fateRecord.struckAtMs >= TOWN_CASUALTY_STAY_S * 1000) {
+        device.queue.writeBuffer(crowd.fates, 0, new Uint32Array(crowd.people * TOWN_FATE_WORDS));
+        crowd.fateRecord.struckAtMs = null;
+      }
     },
-    encode(pass) {
+    encode(pass, nowMs = Date.now()) {
       if (!crowd) return;
       device.queue.writeBuffer(crowd.draws, 0, crowd.drawArguments);
       // Nothing while nothing flies, and once more after the last of it to say so.
       const shotCount = crowd.shotLog.collect(crowd.shotWords, crowd.shotFloats);
       if (shotCount || crowd.shotsSent) {
+        if (shotCount && crowd.fateRecord) crowd.fateRecord.struckAtMs = nowMs;
         device.queue.writeBuffer(crowd.shots, 0, crowd.shotWords, 0, TOWN_SHOTS_WORDS - TOWN_SHOT_WORDS * (TOWN_SHOT_LIMIT - shotCount));
         crowd.shotsSent = shotCount;
       }

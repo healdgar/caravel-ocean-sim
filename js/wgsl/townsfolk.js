@@ -17,6 +17,7 @@ export const TOWN_FATE_WORDS = 12;
 export const TOWN_SHOT_LIMIT = 64;
 export const TOWN_SHOT_WORDS = 12;
 export const [TOWN_ABOUT, TOWN_AFRAID, TOWN_FALLING, TOWN_DOWN] = [0, 1, 2, 3];
+export const TOWN_CASUALTY_STAY_S = 86400;
 export const TOWN_COWER_FRAMES = 10;
 export const TOWN_FALL_FRAMES = 21;
 export const TOWN_FALL_RATE = 15;
@@ -115,6 +116,9 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
     fates[id.x]=fate;
   }else if(fate.mode==FALLING&&age>=${(TOWN_FALL_FRAMES / TOWN_FALL_RATE).toFixed(3)}){
     fate.mode=DOWN;
+    fates[id.x]=fate;
+  }else if(fate.mode==DOWN&&age>=${TOWN_CASUALTY_STAY_S.toFixed(1)}){
+    fate.mode=ABOUT;
     fates[id.x]=fate;
   }
   var metres=fate.along;var going=fate.going;var lane=fate.lane;var walked=0.0;var ran=0.0;var stopped=false;var hidden=false;
@@ -257,7 +261,8 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
     let rightVec=vec2f(spot.forward.y,-spot.forward.x);
     let endXZ=spot.position.xz+vHoriz*(tAirFlat+0.16);
     let endLat=abs(dot(endXZ-spot.centerXZ,rightVec));
-    let overPier=spot.position.y>0.35 && spot.position.y<3.8 && endLat>(spot.halfWidth+0.95);
+    let onPierWay=(w.flags&8u)!=0u && spot.position.y>1.75 && spot.position.y<3.1 && spot.halfWidth<1.35;
+    let overPier=onPierWay && endLat>(spot.halfWidth+2.6);
     if(overPier){
       let tSplash=clamp((vy0+sqrt(max(0.0,vy0*vy0+2.0*g*max(0.0,spot.position.y+0.10))))/g,0.32,1.20);
       let flyT=min(throwAge,tSplash);
@@ -272,9 +277,15 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
       let groundT=max(0.0,throwAge-tAirFlat);
       let slideMax=max(1e-4,1.0-exp(-(fallSpan-tAirFlat)*5.0));
       let slideT=select(0.0,clamp((1.0-exp(-groundT*5.0))/slideMax,0.0,1.0)*0.16,groundT>0.0);
+      let dispXZ=vHoriz*(flyT+slideT);
+      let alongDelta=dot(dispXZ,spot.forward);
+      let landSpot=wayAt(w,clamp(metres+alongDelta,0.0,w.length),lane);
+      let latSlopeLift=select(0.0,min(0.45,abs(dot(dispXZ,rightVec))*0.09)+0.06,spot.position.y>0.05);
+      let groundY=select(spot.position.y,max(spot.position.y,landSpot.position.y)+latSlopeLift,spot.position.y>0.05);
+      let baseY=mix(spot.position.y,groundY,clamp(throwAge/max(tAirFlat,0.01),0.0,1.0));
       let arcY=max(0.0,vy0*flyT-0.5*g*flyT*flyT);
       let bounceY=select(0.0,sin(groundT/0.24*3.14159)*min(0.18,vy0*0.045),groundT>0.0 && groundT<0.24);
-      position=vec3f(spot.position.x+vHoriz.x*(flyT+slideT),spot.position.y+select(arcY,bounceY,throwAge>=tAirFlat),spot.position.z+vHoriz.y*(flyT+slideT));
+      position=vec3f(spot.position.x+dispXZ.x,baseY+select(arcY,bounceY,throwAge>=tAirFlat),spot.position.z+dispXZ.y);
     }
   }
   if(hidden){return;}

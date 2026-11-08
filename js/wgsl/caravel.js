@@ -376,32 +376,71 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
   if(in.material==25u){albedo=vec3f(.48,.28,.055);rough=.42;metal=.68;}
   if(in.material==26u){albedo=vec3f(.015,.035,.09);rough=.88;}
   if(paintedWood && metal < 0.1){albedo*=mix(.88,1.04,relief)*(1.0-join*.46);}
-  let ropeAA=fwidth(p.x+p.y+p.z);
+  let ropeAA = max(materialFootprint, fwidth(in.uv.y) * (hull.size.y * 0.12));
   if(in.material == 2u || in.material == 12u || in.material==19u) {
-    // 3D Helical 3-strand laid hemp rope: right-hand hawser lay spiraling around the rope cross-section
-    // plus counter-twisted spun-yarn micro-fibres, with distinct Stockholm-tarred standing rigging (2u)
-    // vs. golden laid hemp running rigging (12u) and marline-hitched sail bolt-ropes (19u).
-    let ropeFilter = 1.0 - smoothstep(0.02, 0.12, ropeAA);
-    let ropeAz = atan2(in.normalLocal.x, in.normalLocal.z);
-    let ropeAxial = select(in.uv.y * 16.0, (p.x + p.y + p.z) * 4.2, in.uv.y == 0.0 && in.uv.x < 10.0);
-    let layPhase = ropeAxial * 42.0 + ropeAz * 3.0;
-    let strandCrown = sin(layPhase);
-    let strandGroove = smoothstep(-0.92, -0.35, strandCrown);
-    let yarnTwist = sin(ropeAxial * 210.0 - ropeAz * 9.0) * (1.0 - smoothstep(0.008, 0.045, ropeAA));
-    let marlineHitch = select(0.0, smoothstep(0.84, 0.96, sin(ropeAxial * 18.0)), in.material == 19u);
-    let baseHemp = select(
-      select(vec3f(0.34, 0.25, 0.135), vec3f(0.072, 0.050, 0.032), in.material == 2u),
-      vec3f(0.25, 0.175, 0.092),
-      in.material == 19u
+    // MaterialCraft 3D Helical 3-Strand Laid Hemp Hawser (Z-twist lay + S-twist spun-yarn plies):
+    // True cylindrical strand cross-section with recessed V-grooves, yarn-to-yarn bast fibre variation,
+    // Stockholm pine-tar resin optics on standing rigging (2u), golden hackled hemp on running rigging (12u),
+    // and marline-hitched sail bolt-ropes (19u), with exact Nyquist derivative band-limiting.
+    let rLocal = normalize(in.normalLocal);
+    let isDynLine = in.uv.x >= 99.5;
+    let isBoltRope = in.material == 19u;
+    let ropeMeters = select(
+      select(in.uv.y * (hull.size.y / 9.0), in.uv.y * (hull.size.y * 0.65), isDynLine),
+      (in.uv.x + in.uv.y) * (hull.size.y * 0.48),
+      isBoltRope
     );
-    let ropeShade = mix(1.0, (0.62 + 0.38 * strandGroove) * (1.0 + 0.09 * yarnTwist), ropeFilter);
-    albedo = mix(baseHemp * ropeShade, vec3f(0.065, 0.045, 0.028), marlineHitch * 0.72 * ropeFilter);
-    rough = select(0.86, 0.76, in.material == 2u) - 0.04 * strandCrown * ropeFilter;
-    // Perturb rope normal along helical strand tangent for true 3D cylindrical hawser relief
+    let azFromNormal = select(atan2(rLocal.x, rLocal.z), atan2(rLocal.y, rLocal.x + rLocal.z * 0.7), abs(rLocal.y) > 0.76 && abs(rLocal.x) < 0.45);
+    let ropeAz = select(in.uv.x * (6.2831853 / 0.7), azFromNormal, isDynLine || isBoltRope || in.uv.y == 0.0);
+    let layPhase = ropeMeters * 52.0 + ropeAz * 3.0;
+    let layFootprint = ropeAA * 52.0;
+    let ropeLayFade = 1.0 - smoothstep(0.55, 2.6, layFootprint);
+    let ropeYarnFade = 1.0 - smoothstep(0.18, 0.95, layFootprint);
+
+    // Cylindrical 3-strand profile: u in [-0.5, 0.5] across each strand lobe
+    let strandU = fract(layPhase * 0.15915494) - 0.5;
+    let strandId = floor(layPhase * 0.15915494);
+    let strandCrown = sqrt(max(0.06, 1.0 - 3.55 * strandU * strandU));
+    let strandValleyAO = smoothstep(0.48, 0.18, abs(strandU));
+
+    // Counter-twisted (S-twist) spun-yarn plies & individual hemp bast fibre hash
+    let yarnCoord = ropeMeters * 240.0 - ropeAz * 9.0 + strandId * 2.1;
+    let yarnId = floor(yarnCoord * 0.15915494);
+    let yarnHash = fract(sin(yarnId * 127.1 + strandId * 311.7) * 43758.5453);
+    let yarnTwist = sin(yarnCoord) * ropeYarnFade;
+    let microFibre = sin(ropeMeters * 680.0 - ropeAz * 21.0 + yarnHash * 6.28) * (1.0 - smoothstep(0.06, 0.32, layFootprint));
+
+    // Marline serving hitches on bolt-ropes (19u) every ~4.5 cm
+    let hitchPhase = fract(ropeMeters * 22.0);
+    let marlineHitch = select(0.0, 1.0 - smoothstep(0.06, 0.15, abs(hitchPhase - 0.5)), isBoltRope);
+    let marlineShadow = select(0.0, (1.0 - smoothstep(0.12, 0.26, abs(hitchPhase - 0.5))) * (1.0 - marlineHitch), isBoltRope);
+
+    let crownHemp = select(
+      select(vec3f(0.43, 0.315, 0.175), vec3f(0.088, 0.058, 0.035), in.material == 2u),
+      vec3f(0.31, 0.22, 0.118),
+      isBoltRope
+    );
+    let valleyHemp = select(
+      select(vec3f(0.145, 0.095, 0.048), vec3f(0.024, 0.016, 0.010), in.material == 2u),
+      vec3f(0.11, 0.072, 0.036),
+      isBoltRope
+    );
+    let yarnTone = 0.92 + 0.16 * (yarnHash - 0.5) * ropeYarnFade + 0.08 * yarnTwist + 0.04 * microFibre;
+    let laidColor = mix(valleyHemp, crownHemp * yarnTone, (0.22 + 0.78 * strandCrown * strandValleyAO));
+    let avgRopeColor = mix(valleyHemp, crownHemp, 0.68);
+    var ropeAlbedo = mix(avgRopeColor, laidColor, ropeLayFade) * (1.0 - 0.24 * marlineShadow * ropeLayFade);
+    albedo = mix(ropeAlbedo, vec3f(0.058, 0.038, 0.022) * (0.85 + 0.15 * strandCrown), marlineHitch * 0.86 * ropeLayFade);
+
+    // Tarred standing rigging (2u) has a resinous pine-tar sheen on the strand crowns; running hemp (12u) is fibrous matte
+    let baseRough = select(0.86, 0.64, in.material == 2u);
+    rough = clamp(baseRough - 0.08 * strandCrown * ropeLayFade + 0.06 * (1.0 - strandValleyAO) * ropeLayFade - 0.04 * yarnTwist, 0.48, 0.95);
+
+    // True cylindrical tangent & bitangent normal perturbation from the circular strand slope (-d/du of strandCrown) + yarn twist
     let ropeTang = normalize(cross(n, vec3f(0.35, 0.86, 0.35)) + vec3f(0.001, 0.0, 0.0));
     let ropeBitang = cross(n, ropeTang);
-    let dStrand = cos(layPhase) * ropeFilter;
-    n = normalize(n + (ropeTang * dStrand * 0.28 + ropeBitang * dStrand * 0.18));
+    let dStrand = clamp(-2.85 * strandU, -1.0, 1.0) * ropeLayFade + 0.24 * cos(yarnCoord) * ropeYarnFade;
+    let dHitch = select(0.0, clamp((0.5 - hitchPhase) * 14.0, -1.0, 1.0) * marlineHitch * ropeLayFade, isBoltRope);
+    n = normalize(n + ropeTang * (dStrand * 0.34 + dHitch * 0.28) + ropeBitang * (dStrand * 0.24));
     ${damaged?`if(in.damage>0.25){
       albedo*=mix(1.0,0.45+0.35*ropeFray(p),clamp(in.damage,0.0,1.0));
       rough=0.96;
@@ -769,12 +808,15 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
   ${damaged?'if(holedTimber && p.y<deckFloor(p.z)+.06 && (!front || in.normalLocal.x*sign(p.x)< -.2)){directTransmission*=.04;environmentTransmission*=.1;}':''}
   var col=(diffuse/PI+spec)*direct*nl*directTransmission;
   col+=(diffuseAmbient*ambient*ao + reflected*F.windP[1].w*vesselEnvironment(n,v,rough,f0))*environmentTransmission;
-  // Grazing-angle flax & hemp fibre rim sheen on sails and ropes
+  // Grazing-angle flax & hemp micro-fibre fuzz rim sheen on sails and ropes
   if(in.material==2u || in.material==12u || in.material==19u || in.material==9u || in.material==13u){
     let grazing=1.0-clamp(dot(n,v),0.0,1.0);
     let g2=grazing*grazing;
-    let fiberSheen=g2*g2*(1.0-wet.x*0.65)*select(0.055,0.038,in.material==9u || in.material==13u);
-    col+=(direct*nl + ambient*0.35)*albedo*fiberSheen*directTransmission;
+    let isRopeMat = in.material==2u || in.material==12u || in.material==19u;
+    let rimBacklight = select(nl, max(nl, 0.28 + 0.72 * clamp(dot(-v, l), 0.0, 1.0)), isRopeMat);
+    let sheenTint = select(albedo, mix(albedo, vec3f(0.62, 0.48, 0.28), select(0.35, 0.14, in.material==2u)), isRopeMat);
+    let fiberSheen=g2*g2*(1.0-wet.x*0.65)*select(0.038, 0.115, isRopeMat);
+    col+=(direct*rimBacklight + ambient*0.42)*sheenTint*fiberSheen*directTransmission;
   }
   // Upward-reflected solar water-caustic shimmer on lower hull planks & overhanging stern counters
   if(!vesselWaterCapture && l.y>0.02 && in.world.y>waterSurfY-0.05 && in.world.y<waterSurfY+3.2 && n.y<0.35 && abs(p.x)>0.18){
