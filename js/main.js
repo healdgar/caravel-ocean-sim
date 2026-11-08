@@ -2314,7 +2314,11 @@ async function main() {
     voyageCtl?.triggerSailEncounter?.();
     updateCrewUI();helm?.update?.(performance.now(),true);
   };
-  boardingActionsRow.append(dockPierBtn,castOffBtn,boardShipBtn,sightSailBtn);
+  const captainCastleDuelBtn=document.createElement('button');captainCastleDuelBtn.type='button';captainCastleDuelBtn.id='captain-castle-duel-btn';
+  captainCastleDuelBtn.textContent='🏰 Castle Duel';
+  captainCastleDuelBtn.title='Launch the 2-castle artillery side game across a 210 m channel (no aim arcs)';
+  castleDuel?.bindLaunchButton?.(captainCastleDuelBtn,()=>setCaptainOpen(false));
+  boardingActionsRow.append(dockPierBtn,castOffBtn,boardShipBtn,sightSailBtn,captainCastleDuelBtn);
   boardingSection.append(boardingActionsRow,boardingStatus);
   captainBody.append(boardingSection);
   function updateAnchorUI(){
@@ -3703,6 +3707,16 @@ async function main() {
   const dolphinControls=createDolphinControls({parent:seaBody,encounter:dolphins.state,boat,getTerrain:()=>terrain,getVessels:()=>followerEnabled?dolphinVessels:dolphinPlayer,
     castleDuel,onClosePanel:()=>setPanelOpen(false),onCoastlineSwap:()=>{envFull=true;},
     onView:()=>{setCameraMode('ship');shipOrbit.fleet=false;shipOrbit.wildlife=true;shipOrbit.marine=false;shipOrbit.fleetZoom=1;shipOrbit.elevation=.28;setPanelOpen(false);}});
+  {
+    const perfDebugBox=document.createElement('div');
+    perfDebugBox.style.cssText='margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.14);';
+    perfDebugBox.innerHTML='<strong style="display:block;font-size:12px;margin-bottom:6px;opacity:0.85;">Debug &amp; Side Modes</strong><div class="encounter-buttons" style="display:flex;gap:6px;flex-wrap:wrap;"><button type="button" id="perf-castle-duel-btn">🏰 Castle Duel</button><button type="button" id="perf-coastline-btn">Switch Coastline (1550 / 2026)</button></div>';
+    const perfDuelBtn=perfDebugBox.querySelector('#perf-castle-duel-btn');
+    const perfCoastBtn=perfDebugBox.querySelector('#perf-coastline-btn');
+    castleDuel?.bindLaunchButton?.(perfDuelBtn,()=>setPerformanceOpen(false));
+    perfCoastBtn.onclick=()=>{document.getElementById('debug-coastline-btn')?.click();};
+    performancePanel.querySelector('.panel-body')?.prepend(perfDebugBox);
+  }
   const marineControls=createMarineControls({parent:dolphinControls.root,encounter:marineLife.state,boat,getTerrain:()=>terrain,getVessels:()=>followerEnabled?dolphinVessels:dolphinPlayer,notice:dolphinControls.notice,
     onView:()=>{setCameraMode('ship');shipOrbit.fleet=false;shipOrbit.wildlife=true;shipOrbit.marine=true;shipOrbit.fleetZoom=1;shipOrbit.elevation=.28;setPanelOpen(false);}});
   const marineDebug=qs.get('shark')==='1'?'shark':qs.has('whale')?(['breach','fluke','blow'].includes(qs.get('whale'))?qs.get('whale'):'breach'):null;

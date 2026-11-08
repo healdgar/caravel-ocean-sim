@@ -144,12 +144,12 @@ export function createCastleDuelController({
     document.head.appendChild(st);
   }
 
-  // Launch button is mounted inside the Debug Menu (#environment-debug) via bindLaunchButton
-  let launchBtn = null;
-  let closePanelFn = null;
+  // Launch buttons mounted inside Debug / Menu panels via bindLaunchButton
+  const launchBtns = new Set();
   function syncLaunchBtn() {
-    if (!launchBtn) return;
-    launchBtn.textContent = active ? '🏰 Exit Castle Duel' : '🏰 Castle Duel';
+    for (const btn of launchBtns) {
+      btn.textContent = active ? '🏰 Exit Castle Duel' : '🏰 Castle Duel';
+    }
   }
 
   const hud = document.createElement('div');
@@ -612,16 +612,15 @@ export function createCastleDuelController({
   }
 
   function bindLaunchButton(btn, onClosePanel = null) {
-    launchBtn = btn;
-    closePanelFn = onClosePanel;
     if (!btn) return;
+    launchBtns.add(btn);
     syncLaunchBtn();
     btn.addEventListener('click', () => {
       if (active) {
         stop();
       } else {
         start();
-        closePanelFn?.();
+        onClosePanel?.();
       }
     });
   }
