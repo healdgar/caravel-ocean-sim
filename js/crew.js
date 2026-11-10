@@ -6,10 +6,10 @@ import { hullDeck, vesselDeck, HULL_VERTICAL_SCALE, modelDeck, modelHullDeck, mo
 import { SAIL_KEYS, sailingState } from './sailing.js';
 import { requestYardTransfer } from './lateen.js';
 import { assignCrewWork, stepCrewWork, updateCrewGunneryAttendance, updateCrewRowingAttendance, hasExtendedCrewModel, crewSeatedPose, crewDeckHeight, crewHelmStand } from './crew-work.js';
-import { poseCrewWork } from './crew-pose.js';
+import { poseCrewWork, crewAfloatSeconds } from './crew-pose.js';
 import { stepCrewPhysicsState, applyCrewRealism } from './crew-physics.js';
 import { applyCrewWounds, clearCrewWounds, recordCrewWound } from './crew-wounds.js';
-import { crewClearsRail, crewOpenEdgeInset, sendCrewOverboard, stepCrewOverboard, stepGaleKnockdowns, clearCrewOverboard } from './crew-overboard.js';
+import { crewClearsRail, crewOpenEdgeInset, crewFeetAwash, sendCrewOverboard, stepCrewOverboard, stepGaleKnockdowns, clearCrewOverboard } from './crew-overboard.js';
 import { crewLoseHandsAloft, stepCrewAloftFall } from './crew-aloft.js';
 import { createGunneryTools } from './gunnery-tools.js';
 import { CREW_RENDER, CREW_SHADOW, CREW_POSE_BLEND } from './wgsl/crew.js';
@@ -23,7 +23,7 @@ import { crewDeckHazard, crewMotionPolicy, crewTurnTowards, crewAdvanceWalk } fr
 import { crewNavigationStation, crewNavigationRoute, crewRoutineSegmentClear } from './crew-navigation.js';
 import { crewTrafficStep, crewTrafficAfterStep } from './crew-traffic.js';
 import { crewDeckField, crewDeckRoom } from './crew-deck.js';
-import { selectCrewLOD, CREW_LOD_TIERS, createCrewLODs, crewPoseInterval, crewApparentDistance, crewLensZoom, crewSailorTier, crewDrawRuns, crewNeedsCutShader, crewClipOnly, crewPoseDue, crewPoseSolved, fortPoseDue } from './crew-lod.js';
+import { selectCrewLOD, CREW_LOD_TIERS, createCrewLODs, crewPoseInterval, crewApparentDistance, crewLensZoom, crewSailorTier, crewDrawRuns, crewNeedsCutShader, crewClipOnly, crewBakedPose, crewPoseDue, crewPoseSolved, fortPoseDue } from './crew-lod.js';
 import { createCrewClipPipeline, createCrewClipBatch, createCrewTurnPipeline, createCrewTurnBatch } from './crew-clip-pose.js';
 
 // Authored, disjoint stations keep a full company clear of stairs and masts.
@@ -256,14 +256,9 @@ export function stepCompany(company,boat,dt,wind) {
       continue;
     }
     if(boat?.damage?.sunk||(boat?.damage?.floodingSinkage??0)>0.45){
-      const roll=boat.roll??0,pitch=boat.pitch??0;
-      const cr=Math.cos(roll),sr=Math.sin(roll),cp=Math.cos(pitch),sp=Math.sin(pitch);
-      const [lx,ly,lz]=s.position;
-      const yy=sr*lx+cr*ly,yp=cp*yy-sp*lz;
-      const worldFootY=(boat.heave??0)+yp;
-      const waveY=Number.isFinite(boat.target?.heave)?boat.target.heave:0;
-      if(worldFootY<=waveY-0.16&&s.visible!==false){
-        const side=Math.sign(s.x||lx||(((s.crewIndex??0)%2)?1:-1))||1;
+      // The sea takes a hand when it stands over his feet where he is, not where her middle is.
+      if(s.visible!==false&&crewFeetAwash(boat,s)){
+        const side=Math.sign(s.x||s.position[0]||(((s.crewIndex??0)%2)?1:-1))||1;
         const wasDead=s.casualtyState==='fallen';
         if(sendCrewOverboard(boat,s,{side,outward:0.45,cause:'sinking',dead:wasDead,hurt:s.casualtyState==='wounded',awash:true})){
           stepCrewOverboard(boat,s,dt);
@@ -696,11 +691,15 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
           // A wound or a fall shows at once. Anyone not on show keeps their slot until they are.
           const apparent=crewApparentDistance(s.position,boat,camera);
           s.lodTier=crewSailorTier(apparent,s.lodTier??0);
-          const clipOnly=crewClipOnly(apparent,s);
+          // A man in the water, or anyone far off, is posed on the GPU from a baked clip and solved for no further.
+          let baked=crewBakedPose(apparent,s);
+          if(baked==='walk')clips.set(i,s.time,s.walkTime,s.walk);
+          else if(!baked||!clips.loop(i,baked,crewAfloatSeconds(s))){baked=null;clips.off(i);}
+          const clipOnly=Boolean(baked);
           // Coming back within reach of their own pose, they take it at once.
-          const snap=!s.posedOnce||s.pendingWounds?.length||(s.knockdownTimer??0)>0||(s.clipOnly&&!clipOnly)||Boolean(s.overboard?.inWater&&s.overboard?.alive);
+          const snap=!s.posedOnce||s.pendingWounds?.length||(s.knockdownTimer??0)>0||(s.clipOnly&&!clipOnly);
           s.clipOnly=clipOnly;
-          if(clipOnly){s.posedOnce=true;clips.set(i,s.time,s.walkTime,s.walk);}else clips.off(i);
+          if(clipOnly)s.posedOnce=true;
           const interval=snap?1:crewPoseInterval(apparent);
           s.poseAge=(s.poseAge??i)+1;
           const due=crewPoseDue(s,clipOnly,snap,interval);
@@ -2073,7 +2072,7 @@ export async function createFortSoldiers({
     const poses = new Float32Array(MAX_FORT_SOLDIERS_PER_BATCH * 65 * 16);
     const actors = new Float32Array(MAX_FORT_SOLDIERS_PER_BATCH * CREW_ACTOR_FLOATS);
     const bones = buffer('fort crew joints', poses, B.STORAGE);
-    const clip = createCrewClipBatch(device, clipPipeline, model, bones, MAX_FORT_SOLDIERS_PER_BATCH);
+    const clip = createCrewClipBatch(device, clipPipeline, model, bones, MAX_FORT_SOLDIERS_PER_BATCH, !isIndigenousBatch);
     const captainClip = captainModel && !isIndigenousBatch ? createCrewClipBatch(device, clipPipeline, captainModel, bones, MAX_FORT_SOLDIERS_PER_BATCH) : null;
     const actor = buffer('fort crew transforms', actors, B.STORAGE);
     const common = [{ buffer: fortHullUBO }, { buffer: bones }, { buffer: actor }];

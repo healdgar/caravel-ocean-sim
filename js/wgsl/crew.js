@@ -279,9 +279,10 @@ export const CREW_POSE_BLEND = /* wgsl */ `
 }
 `;
 
-// A body's joints straight from its baked clips: standing and walking, blended, between frames.
+// A body's joints straight from its baked clips, between frames: standing and walking, blended, or one loop of a
+// man swimming or a body afloat. A body's `w` says which, as CREW_CLIP_MODES in js/crew-clip-pose.js.
 export const CREW_CLIP_POSE = /* wgsl */ `
-struct CrewClipLayout {idleFirst:u32,idleFrames:u32,walkFirst:u32,walkFrames:u32};
+struct CrewClipLayout {idleFirst:u32,idleFrames:u32,walkFirst:u32,walkFrames:u32,swimFirst:u32,swimFrames:u32,floatFirst:u32,floatFrames:u32};
 @group(0) @binding(0) var<storage,read> palettes:array<mat4x4f>;
 @group(0) @binding(1) var<uniform> layout_:CrewClipLayout;
 @group(0) @binding(2) var<storage,read> bodies:array<vec4f>;
@@ -296,6 +297,8 @@ fn clipJoint(first:u32,frames:u32,frame:f32,joint:u32)->mat4x4f {
   let body=bodies[id.x/65u];
   if(body.w<0.5){return;}
   let joint=id.x%65u;
+  if(body.w>2.5){shownJoints[id.x]=clipJoint(layout_.floatFirst,max(layout_.floatFrames,1u),body.x,joint);return;}
+  if(body.w>1.5){shownJoints[id.x]=clipJoint(layout_.swimFirst,max(layout_.swimFrames,1u),body.x,joint);return;}
   shownJoints[id.x]=mixJoints(clipJoint(layout_.idleFirst,layout_.idleFrames,body.x,joint),clipJoint(layout_.walkFirst,layout_.walkFrames,body.y,joint),body.z);
 }
 `;

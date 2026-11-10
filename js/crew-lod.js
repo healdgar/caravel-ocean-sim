@@ -228,6 +228,19 @@ export function crewClipOnly(apparentMetres,sailor){
   return apparentMetres>=CREW_CLIP_ONLY_M&&!sailor.seatedPose&&!sailor.pendingWounds?.length&&!sailor.crewInjuries?.length&&!sailor.stuckArrows?.length&&!((sailor.knockdownTimer??0)>0)&&sailor.casualtyState!=='fallen';
 }
 
+// A man in the water with no wound to show swims, or floats, as every other does, so a baked loop serves him at
+// any distance and JavaScript solves nothing for him. One who is hurt, or only now hit, keeps his own solved pose.
+export function crewAfloatClip(sailor){
+  const o=sailor.overboard;
+  if(!o?.inWater||o.gone||sailor.pendingWounds?.length||sailor.crewInjuries?.length||sailor.stuckArrows?.length)return null;
+  return o.alive?'Swim':'Float';
+}
+// Which baked clip poses a sailor this frame, if any: a loop for a man in the water, 'walk' for the standing and
+// walking clips of one far off, and none for one whose pose is solved for him.
+export function crewBakedPose(apparentMetres,sailor){
+  return crewAfloatClip(sailor)??(crewClipOnly(apparentMetres,sailor)?'walk':null);
+}
+
 // A fallen body whose ragdoll has gone to sleep. It is solved twice more, so that both poses the GPU shows it
 // between are the one it rests in, and then not again until something wakes it.
 const CREW_REST_POSES=2;

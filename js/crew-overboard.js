@@ -41,6 +41,32 @@ function overboardBasis(boat) {
   return { ax, ay, az };
 }
 const overboardDot = (a, x, y, z) => a[0] * x + a[1] * y + a[2] * z;
+// The bearing over the ground of her own +Z, in the sense a swimmer's course is kept: x by its sine, z by its cosine.
+function overboardShipYaw(boat) {
+  const along = [0, 0, 0];
+  boatRotate(along, 0, 0, 1, ((boat.heading ?? 0) * Math.PI) / 180, 0, 0);
+  return Math.atan2(along[0], along[2]);
+}
+
+// The sea's height at a point near her, in world metres. All she knows of the sea is the reading under her own
+// middle and the slope across her that came back with it, so that is a tilted plane, trusted for about her own
+// length and fading to the level reading beyond.
+export function overboardSeaLevel(boat, x, z) {
+  const middle = Number.isFinite(boat?.target?.heave) ? boat.target.heave : 0;
+  const dx = x - (boat.x ?? 0), dz = z - (boat.z ?? 0), reach = Math.max(6, boat.length ?? 12);
+  const trust = Math.max(0, Math.min(1, 2 - Math.hypot(dx, dz) / reach));
+  return middle + ((boat.waveSlopeX ?? 0) * dx + (boat.waveSlopeZ ?? 0) * dz) * trust;
+}
+
+// Whether the sea stands this deep over a hand's feet where he is. A flooded hull pitching in a swell may have
+// her bow under while her stern is dry.
+export function crewFeetAwash(boat, s, depth = 0.16) {
+  const { ax, ay, az } = overboardBasis(boat), [lx, ly, lz] = s.position;
+  const x = (boat.x ?? 0) + lx * ax[0] + ly * ay[0] + lz * az[0];
+  const y = (boat.heave ?? 0) + lx * ax[1] + ly * ay[1] + lz * az[1];
+  const z = (boat.z ?? 0) + lx * ax[2] + ly * ay[2] + lz * az[2];
+  return y <= overboardSeaLevel(boat, x, z) - depth;
+}
 
 // Height of the rail above the deck at a station, in metres. An open hull's gunwale is
 // its shell; a decked ship's is her bulwark. Given a side, only what is left of it there counts.
@@ -96,13 +122,15 @@ export function sendCrewOverboard(boat, s, { side = Math.sign(s.x || 1) || 1, ou
   const worldX = (boat.x ?? 0) + launchX * ax[0] + ly * ay[0] + lz * az[0];
   const worldY = awash ? OVERBOARD_FLOAT_Y : (boat.heave ?? 0) + launchX * ax[1] + ly * ay[1] + lz * az[1];
   const worldZ = (boat.z ?? 0) + launchX * ax[2] + ly * ay[2] + lz * az[2];
-  const swimYaw = ((boat.heading ?? 0) * Math.PI) / 180 + (side >= 0 ? 0.85 : -0.85) + (((s.crewIndex ?? 0) % 5) - 2) * 0.32;
+  // He makes away from her on his own side, whichever way she heads.
+  const swimYaw = overboardShipYaw(boat) + (side >= 0 ? 0.85 : -0.85) + (((s.crewIndex ?? 0) % 5) - 2) * 0.32;
   s.overboard = {
     x: worldX,
     y: worldY,
     z: worldZ,
     vx: side * launch * ax[0], vy: awash ? 0 : 1.4, vz: side * launch * ax[2],
-    age: 0, afloat: 0, inWater: Boolean(awash), alive, wounded, side, cause, hauling: 0, gone: false,
+    // In the water his height is kept from the sea's surface where he is, and in the air from the world's datum.
+    age: 0, afloat: 0, inWater: Boolean(awash), yFromSea: Boolean(awash), alive, wounded, side, cause, hauling: 0, gone: false,
     drownAt: alive ? (wounded ? OVERBOARD_DROWN_WOUNDED_SECONDS : OVERBOARD_DROWN_SECONDS) : 0,
     heading: boat.heading ?? 0,
     swimYaw,
@@ -151,14 +179,21 @@ export function stepCrewOverboard(boat, s, dt) {
   o.age += dt;
   const boatX = boat.x ?? 0, boatZ = boat.z ?? 0;
   if (!o.inWater) {
+    // A shot or a splash has thrown him up out of the water: he leaves it from where he lay in it.
+    if (o.yFromSea) {
+      o.y += overboardSeaLevel(boat, o.x, o.z);
+      o.yFromSea = false;
+    }
     o.vy -= OVERBOARD_GRAVITY * dt;
     o.y += o.vy * dt;
     o.x += o.vx * dt;
     o.z += o.vz * dt;
-    if (o.y <= OVERBOARD_FLOAT_Y) {
+    // He meets the sea where it is drawn under him. From here his height is kept from its surface.
+    if (o.y <= overboardSeaLevel(boat, o.x, o.z) + OVERBOARD_FLOAT_Y) {
       o.y = OVERBOARD_FLOAT_Y;
       o.vx = o.vy = o.vz = 0;
       o.inWater = true;
+      o.yFromSea = true;
       boat.crewEvents?.({ type: 'overboard-splash', sailor: s, position: [o.x, 0, o.z] });
     }
   } else {
@@ -199,7 +234,7 @@ export function stepCrewOverboard(boat, s, dt) {
     }
   }
   const { ax, ay, az } = overboardBasis(boat);
-  const waveLift = o.inWater && Number.isFinite(boat.target?.heave) ? boat.target.heave : 0;
+  const waveLift = o.inWater ? overboardSeaLevel(boat, o.x, o.z) : 0;
   const dx = o.x - boatX, dy = (o.y + waveLift) - (boat.heave ?? 0), dz = o.z - boatZ;
   const lx = overboardDot(ax, dx, dy, dz), ly = overboardDot(ay, dx, dy, dz), lz = overboardDot(az, dx, dy, dz);
   const sx = (boat.beam ?? 3.6) / 3.6, sz = (boat.length ?? 12) / 12, sy = vesselVerticalScale(boat) || 1;
@@ -215,7 +250,8 @@ export function stepCrewOverboard(boat, s, dt) {
   s.brace = 0;
   // The crew are drawn from this matrix, which the deck step would otherwise have written.
   if (o.inWater && o.alive) {
-    s.yaw = (o.swimYaw ?? 0) - ((boat.heading ?? 0) * Math.PI) / 180;
+    // His course is over the ground, and he is drawn in her frame.
+    s.yaw = (o.swimYaw ?? 0) - overboardShipYaw(boat);
     s.climbPitch = 0.18 + Math.sin(o.age * 2.6 + (s.crewIndex ?? 0)) * 0.06;
   } else {
     s.yaw = s.collapseYaw ?? s.yaw ?? 0;
