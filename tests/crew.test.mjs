@@ -375,6 +375,31 @@ test('far sailors pose from baked clips unless their own pose still matters',asy
   assert.equal(crewClipOnly(90,{pendingWounds:[]}),true);
   assert.equal(crewClipOnly(90,{knockdownTimer:.5}),false);
   assert.equal(crewClipOnly(90,{casualtyState:'fallen'}),false);
+  // Wounds he carries are in his own pose only: a baked clip would give him his arm back.
+  assert.equal(crewClipOnly(90,{crewInjuries:[{kind:'severed',bone:'lowerarm_l'}]}),false);
+  assert.equal(crewClipOnly(90,{stuckArrows:[{}]}),false);
+  assert.equal(crewClipOnly(90,{crewInjuries:null,stuckArrows:[]}),true);
+});
+
+test('a body that has come to rest is solved twice more and then left until it is disturbed',async()=>{
+  const {crewPoseDue,crewPoseSolved,crewBodyAtRest}=await import('../js/crew-lod.js');
+  const body={casualtyState:'fallen',visible:true,poseAge:9,ragdoll:{active:true,settled:false}};
+  assert.equal(crewPoseDue(body,false,false,3),true,'still tumbling');
+  crewPoseSolved(body);
+  body.ragdoll.settled=true;
+  assert.equal(crewBodyAtRest(body),true);
+  for(let i=0;i<2;i++){assert.equal(crewPoseDue(body,false,false,3),true);crewPoseSolved(body);}
+  assert.equal(crewPoseDue(body,false,false,3),false,'both shown poses are now the resting one');
+  assert.equal(crewPoseDue(body,false,true,1),true,'a new wound still shows at once');
+  body.ragdoll.settled=false;
+  assert.equal(crewPoseDue(body,false,false,3),true,'and so does whatever woke it');
+  crewPoseSolved(body);
+  assert.equal(body.posedAtRest,0);
+  // Standing hands, and anyone posed by clips, are untouched by any of this.
+  assert.equal(crewPoseDue({visible:true,poseAge:3},false,false,3),true);
+  assert.equal(crewPoseDue({visible:true,poseAge:2},false,false,3),false);
+  assert.equal(crewPoseDue({visible:false,poseAge:9},false,false,3),false);
+  assert.equal(crewPoseDue({visible:true,poseAge:9},true,true,1),false);
 });
 
 test('baked clips store every frame in order and wrap time without a jump',async()=>{

@@ -6,6 +6,7 @@ import { sweepCrewBodies, recordCrewWound, applyCrewWounds, clearCrewWounds, cre
 import { applyArrowImpact, applyCrewCasualtiesAndMorale, createGunnerySolidSweep, createVesselDamageState, resolveWaterGunneryImpact, sweepShipSegment, vesselRailHeight } from '../js/gunnery-control.js';
 import { bindVesselModel } from '../js/vessels.js';
 import { reviveCompany, createFortGarrison, stepFortGarrison, reviveGarrisonSoldiers } from '../js/crew.js';
+import { sendCrewOverboard, stepCrewOverboard } from '../js/crew-overboard.js';
 
 const sailor = (i, position, extra = {}) => ({ id: 's' + i, crewIndex: i, visible: true, casualtyState: 'able', health: 1, yaw: 0, scale: [1, 1, 1], position: Float32Array.from(position), ...extra });
 const makeBoat = (modelId, crew, extra = {}) => {
@@ -213,6 +214,8 @@ test('repeated cannonball and water-blast impacts maim fallen bodies and overboa
   assert.ok(severedAfterFirst >= 1, 'fallen corpse loses a limb on re-hit');
 
   // 2. A water splash right next to an overboard swimmer kills, maims, and launches them out of the water.
+  // He was counted lost when he went over, so the muster does not change when the sea gives him up for good.
+  const muster = { ...boat.damage.crewCasualties };
   const waterRes = resolveWaterGunneryImpact(
     { type: 'impact', kind: 'water', ammo: 'round', shotId: 11, surfacePosition: [14.8, 0, 8.4], velocity: [0, -45, 180] },
     { getVessels: () => [boat] },
@@ -222,4 +225,36 @@ test('repeated cannonball and water-blast impacts maim fallen bodies and overboa
   assert.equal(swimmer.overboard.inWater, false);
   assert.ok(swimmer.overboard.vy > 1.5, 'water blast launches overboard body into the air');
   assert.equal(swimmer.pendingWounds?.[0]?.kind, 'ball-maim');
+  assert.deepEqual(boat.damage.crewCasualties, muster, 'a man already lost over the side is not lost a second time');
+});
+
+test('a swimmer struck by a ball was counted when he went over, and is not counted again', () => {
+  const hand = sailor(0, [0, 3.2, 0]), mate = sailor(1, [1.5, 3.2, 2], { casualtyState: 'wounded', health: 0.5 });
+  const boat = makeBoat('nina', [hand, mate]);
+  const c = boat.damage.crewCasualties;
+  Object.assign(c, { total: 2, killed: 0, wounded: 1, able: 1 });
+  sendCrewOverboard(boat, hand, { side: 1, outward: 2, awash: true });
+  assert.deepEqual({ killed: c.killed, wounded: c.wounded, able: c.able }, { killed: 1, wounded: 1, able: 0 });
+  // Where he floats, in her frame, which is where shot looks for him.
+  stepCrewOverboard(boat, hand, 0.016);
+  const [x, y, z] = hand.position;
+  const sweep = createGunnerySolidSweep({ sourceBoat: null, getVessels: () => [boat] });
+  sweep([x - 3, y + 0.1, z], [x + 3, y + 0.1, z], { id: 21, ammo: 'round', radius: 0.1, mass: 8, velocity: [260, 0, 0] });
+  assert.equal(hand.overboard.alive, false, `the ball found him in the water at ${[x, y, z]}`);
+  assert.deepEqual({ killed: c.killed, wounded: c.wounded, able: c.able }, { killed: 1, wounded: 1, able: 0 }, 'one man dead once, and his wounded shipmate still wounded');
+});
+
+test('a swimmer shot to pieces is seen again when the hull is given a new company', () => {
+  const swimmer = sailor(0, [14, -0.1, 8], {
+    casualtyState: 'fallen',
+    overboard: { x: 14, y: -0.1, z: 8, vx: 0, vy: 0, vz: 0, age: 5, afloat: 5, inWater: true, alive: true, wounded: false, side: 1, cause: 'sinking', gone: false },
+  });
+  const boat = makeBoat('nina', [swimmer]);
+  // Close enough that nothing is left of him.
+  resolveWaterGunneryImpact({ type: 'impact', kind: 'water', ammo: 'round', shotId: 3, surfacePosition: [14.2, 0, 8.1], velocity: [0, -45, 180] }, { getVessels: () => [boat] });
+  assert.equal(swimmer.visible, false);
+  assert.equal(swimmer.overboard.gone, true);
+  reviveCompany(boat.crewCompany);
+  assert.equal(swimmer.visible, true, 'the next ship in this hull has all her hands on show');
+  assert.equal(swimmer.overboard, null);
 });

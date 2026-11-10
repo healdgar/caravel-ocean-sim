@@ -1145,7 +1145,7 @@ export function stepCrewWork(s,company,boat,dt) {
     s.intent=o.hazard||choice==='brace'?'brace':choice==='standby'?'standby':'work';s.decisionIn=.5;
   }
   const active=s.intent==='work';let moving=false;
-  if(!hasExtendedCrewModel(boat.modelId))s.visible=boat.beam>=3.2&&boat.length>=10.5;
+  if(!hasExtendedCrewModel(boat.modelId))s.visible=!s.obliterated&&boat.beam>=3.2&&boat.length>=10.5;
   if(active){
     j.elapsed+=dt;
     if(j.kind==='gunnery'&&j.stage==='working'){

@@ -226,6 +226,9 @@ const CREW_PHYS_RAGDOLL_CONSTRAINTS = [
 ];
 
 const CREW_PHYS_RAGDOLL_RADII = [0.13, 0.15, 0.11, 0.06, 0.05, 0.06, 0.05, 0.07, 0.06, 0.07, 0.06];
+// A fallen body sleeps once it is this old and no part of it has moved this fast for this long. It wakes when it
+// is struck, thrown or moved, or when her deck has tilted this far, in radians, from how it lay.
+const RAGDOLL_SLEEP_AGE_S = 3, RAGDOLL_QUIET_S = 0.5, RAGDOLL_REST_SPEED_MPS = 0.12, RAGDOLL_WAKE_TILT = 0.14;
 
 export function initArticulatedRagdoll(s, boat) {
   const px = s.position?.[0] ?? 0;
@@ -252,8 +255,13 @@ export function initArticulatedRagdoll(s, boat) {
     [-0.11, 0.48, -0.02],
     [-0.12, 0.08, -0.02],
   ];
-  const vxBase = (s.knockbackVx ?? 0) * ((boat?.beam ?? 3.6) / 3.6);
-  const vzBase = (s.knockbackVz ?? 0) * ((boat?.length ?? 12) / 12);
+  // Aboard, a throw is in her design units along her own axes, as these points are. Ashore it is along the
+  // building's axes, and these points are in the world.
+  const inst = boat ? null : s.building;
+  const instCos = Math.cos(inst?.yaw ?? 0), instSin = Math.sin(inst?.yaw ?? 0);
+  const throwX = s.knockbackVx ?? 0, throwZ = s.knockbackVz ?? 0;
+  const vxBase = boat ? throwX * ((boat.beam ?? 3.6) / 3.6) : throwX * instCos + throwZ * instSin;
+  const vzBase = boat ? throwZ * ((boat.length ?? 12) / 12) : -throwX * instSin + throwZ * instCos;
   const tumbleZ = fallSign * 2.4;
   const tumbleX = (((s.crewIndex ?? 0) % 3) - 1) * 0.95;
 
@@ -277,7 +285,11 @@ export function initArticulatedRagdoll(s, boat) {
   s.ragdoll = {
     active: true,
     age: 0,
+    // Asleep: it has lain still, and is neither stepped nor posed again until something moves it.
     settled: false,
+    quiet: 0,
+    restRoll: 0,
+    restPitch: 0,
     anchorX: px,
     anchorY: py,
     anchorZ: pz,
@@ -300,7 +312,15 @@ export function stepArticulatedRagdoll(s, boat, dt) {
   const dRootX = px - rag.anchorX;
   const dRootY = py - rag.anchorY;
   const dRootZ = pz - rag.anchorZ;
-  if (Math.hypot(dRootX, dRootY, dRootZ) > 1e-5) {
+  const rootMoved = Math.hypot(dRootX, dRootY, dRootZ) > 1e-5;
+  if (rag.settled) {
+    const thrown = Math.abs(s.knockbackVx ?? 0) > 1e-3 || Math.abs(s.knockbackVz ?? 0) > 1e-3 || (s.knockbackVy ?? 0) > 1e-3;
+    const tilted = Math.abs((boat?.roll ?? 0) - rag.restRoll) > RAGDOLL_WAKE_TILT || Math.abs((boat?.pitch ?? 0) - rag.restPitch) > RAGDOLL_WAKE_TILT;
+    if (!rootMoved && !thrown && !tilted && s.casualtyState === 'fallen') return rag;
+    rag.settled = false;
+    rag.quiet = 0;
+  }
+  if (rootMoved) {
     for (let i = 0; i < 11; i++) {
       rag.pos[i * 3 + 0] += dRootX;
       rag.pos[i * 3 + 1] += dRootY;
@@ -466,19 +486,6 @@ export function stepArticulatedRagdoll(s, boat, dt) {
         let lx = relX * instCosY - relZ * instSinY;
         let lz = relX * instSinY + relZ * instCosY;
         floorY = (s.baseLy ?? inst.y ?? baseFloorY) + lx * (inst.slopeX ?? 0) + lz * (inst.slopeZ ?? 0);
-        const impacts = inst.damageState?.impacts;
-        if (impacts?.length) {
-          for (let k = 0; k < impacts.length; k++) {
-            const imp = impacts[k];
-            const lp = imp.localPos;
-            if (!lp) continue;
-            const dImp = Math.hypot(lx - lp[0], lz - lp[2]);
-            const rad = imp.radius ?? 1.8;
-            if (dImp < rad) {
-              floorY -= (1 - dImp / rad) * Math.min(0.45, (imp.strength ?? 0.5) * 0.35);
-            }
-          }
-        }
         const maxLX = instHW + 1.8 - r;
         const maxLZ = instHL + 2.4 - r;
         const rootOnRoof = Math.abs(s.lx ?? 0) <= instHW + 1.2 && Math.abs(s.lz ?? 0) <= instHL + 1.2;
@@ -499,6 +506,18 @@ export function stepArticulatedRagdoll(s, boat, dt) {
         rag.pos[idx + 2] -= (rag.pos[idx + 2] - rag.prev[idx + 2]) * fric;
       }
     }
+  }
+  // A dead body that has stopped moving goes to sleep. One getting up never does.
+  let fastest = 0;
+  for (let i = 0; i < 33; i++) {
+    const moved = Math.abs(rag.pos[i] - rag.prev[i]);
+    if (moved > fastest) fastest = moved;
+  }
+  rag.quiet = fastest < RAGDOLL_REST_SPEED_MPS * h ? rag.quiet + stepDt : 0;
+  if (s.casualtyState === 'fallen' && rag.age >= RAGDOLL_SLEEP_AGE_S && rag.quiet >= RAGDOLL_QUIET_S) {
+    rag.settled = true;
+    rag.restRoll = roll;
+    rag.restPitch = pitch;
   }
   return rag;
 }

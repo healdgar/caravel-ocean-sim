@@ -224,6 +224,24 @@ export function crewNeedsCutShader(metresFromEye,firstPerson,woundAndScorch){
 // seated, fallen or just hurt still needs their own solved pose.
 const CREW_CLIP_ONLY_M=50;
 export function crewClipOnly(apparentMetres,sailor){
-  return apparentMetres>=CREW_CLIP_ONLY_M&&!sailor.seatedPose&&!sailor.pendingWounds?.length&&!sailor.wounds?.length&&!((sailor.knockdownTimer??0)>0)&&sailor.casualtyState!=='fallen';
+  // A lost limb and a stuck arrow are in his own solved pose, and a baked clip has neither.
+  return apparentMetres>=CREW_CLIP_ONLY_M&&!sailor.seatedPose&&!sailor.pendingWounds?.length&&!sailor.crewInjuries?.length&&!sailor.stuckArrows?.length&&!((sailor.knockdownTimer??0)>0)&&sailor.casualtyState!=='fallen';
+}
+
+// A fallen body whose ragdoll has gone to sleep. It is solved twice more, so that both poses the GPU shows it
+// between are the one it rests in, and then not again until something wakes it.
+const CREW_REST_POSES=2;
+export function crewBodyAtRest(sailor){
+  return sailor.casualtyState==='fallen'&&!sailor.overboard&&Boolean(sailor.ragdoll?.active&&sailor.ragdoll.settled);
+}
+// Whether to solve a sailor's skeleton this frame. `snap` is a change that has to show at once.
+export function crewPoseDue(sailor,clipOnly,snap,interval){
+  if(clipOnly)return false;
+  if(snap)return true;
+  if(sailor.visible===false||(sailor.poseAge??0)<interval)return false;
+  return !(crewBodyAtRest(sailor)&&(sailor.posedAtRest??0)>=CREW_REST_POSES);
+}
+export function crewPoseSolved(sailor){
+  sailor.posedAtRest=crewBodyAtRest(sailor)?(sailor.posedAtRest??0)+1:0;
 }
 

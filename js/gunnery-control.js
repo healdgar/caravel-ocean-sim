@@ -421,7 +421,7 @@ function woundCrewBySplinters(targetBoat, damage, localPos, energy, ammo) {
       s.ballHits = (s.ballHits ?? 1) + 1;
       recordCrewWound(s, 'ball-maim', [s.position[0] - dx * 0.3, s.position[1] + 0.2, s.position[2] - dz * 0.3], [dx, dy, dz], (roll * 7.3890560989) % 1);
       fellCrewBody({ sailor: s, direction: [dx, dy, dz], speed: 2.1 * (1 - distance / reach) + 0.5 }, true, false, ammo);
-      if (s.ballHits >= 5) s.visible = false;
+      if (s.ballHits >= 5) { s.obliterated = true; s.visible = false; }
       continue;
     }
     const killed = roll < chance * 0.25;
@@ -468,7 +468,7 @@ function strikeSoldierWithBall(hit, projectile, port = null, direction = null) {
   s.woundSeverity = 1.0;
   if (!isArrowAmmo(projectile.ammo)) {
     s.scorchAmount = Math.min(1, (s.scorchAmount ?? 0) + (projectile.ammo === 'hot' ? 0.75 : 0.42));
-    if (s.ballHits >= 4) s.visible = false;
+    if (s.ballHits >= 4) { s.obliterated = true; s.visible = false; }
   }
   s._poseReady = false;
   if (port?.garrison && !wasFallen) {
@@ -511,14 +511,11 @@ function strikeCrewBodyWithBall(targetBoat, hit, projectile, direction) {
     s.overboard.vy = Math.min(4.8, 2.2 + speed / 95);
     if (s.ballHits >= 3) {
       s.overboard.gone = true;
+      s.obliterated = true;
       s.visible = false;
     }
+    // He was counted lost when he went over the side.
     if (wasAliveSwimmer) {
-      const c = damage.crewCasualties;
-      if (c) {
-        c.killed = Math.min(c.total ?? 0, (c.killed ?? 0) + 1);
-        c.wounded = Math.max(0, (c.wounded ?? 0) - 1);
-      }
       targetBoat.crewEvents?.({ type: 'casualty-scream', sailor: s, sex: s.sex ?? 'male', cause: 'round-shot', position: [s.overboard.x, s.overboard.y, s.overboard.z] });
     }
     return;
@@ -531,6 +528,7 @@ function strikeCrewBodyWithBall(targetBoat, hit, projectile, direction) {
     hitZone: 'crew',
   });
   if (wasFallen && s.ballHits >= 4) {
+    s.obliterated = true;
     s.visible = false;
   }
 }
@@ -4314,14 +4312,11 @@ export function resolveWaterGunneryImpact(event, { getVessels = () => [] } = {})
       o.vy = (2.6 + Math.min(3.2, speed / 95)) * falloff;
       if (s.ballHits >= 3 || dist < 1.35) {
         o.gone = true;
+        s.obliterated = true;
         s.visible = false;
       }
+      // He was counted lost when he went over the side.
       if (wasAlive) {
-        const c = targetBoat.damage?.crewCasualties;
-        if (c) {
-          c.killed = Math.min(c.total ?? 0, (c.killed ?? 0) + 1);
-          c.wounded = Math.max(0, (c.wounded ?? 0) - 1);
-        }
         targetBoat.crewEvents?.({ type: 'casualty-scream', sailor: s, sex: s.sex ?? 'male', cause: 'round-shot', position: [o.x, o.y, o.z] });
       }
       bodiesStruck++;

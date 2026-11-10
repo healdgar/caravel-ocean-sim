@@ -84,6 +84,11 @@ export function clearCrewWounds(s) {
   s.stuckArrowPoses = null;
   s.crewInjuries = null;
   s.ballHits = 0;
+  // Shot had left nothing of him to draw. Whoever stands in his place is seen again.
+  if (s.obliterated) {
+    s.obliterated = false;
+    s.visible = true;
+  }
 }
 
 // What a hit does to the bone it found. Pure, so the chances can be tested directly.

@@ -23,7 +23,7 @@ import { crewDeckHazard, crewMotionPolicy, crewTurnTowards, crewAdvanceWalk } fr
 import { crewNavigationStation, crewNavigationRoute, crewRoutineSegmentClear } from './crew-navigation.js';
 import { crewTrafficStep, crewTrafficAfterStep } from './crew-traffic.js';
 import { crewDeckField, crewDeckRoom } from './crew-deck.js';
-import { selectCrewLOD, CREW_LOD_TIERS, createCrewLODs, crewPoseInterval, crewApparentDistance, crewLensZoom, crewSailorTier, crewDrawRuns, crewNeedsCutShader, crewClipOnly } from './crew-lod.js';
+import { selectCrewLOD, CREW_LOD_TIERS, createCrewLODs, crewPoseInterval, crewApparentDistance, crewLensZoom, crewSailorTier, crewDrawRuns, crewNeedsCutShader, crewClipOnly, crewPoseDue, crewPoseSolved } from './crew-lod.js';
 import { createCrewClipPipeline, createCrewClipBatch, createCrewTurnPipeline, createCrewTurnBatch } from './crew-clip-pose.js';
 
 // Authored, disjoint stations keep a full company clear of stairs and masts.
@@ -491,7 +491,7 @@ export function stepDeckhand(s,boat,dt,wind=0,company=null) {
   }
   // Preserve human proportions when resizing the hull; do not squeeze a person
   // through a walkway narrower than their shoulders.
-  s.visible=boat.beam>=(s.company?3.2:2.8)&&boat.length>=(s.company?10.5:8);
+  s.visible=!s.obliterated&&boat.beam>=(s.company?3.2:2.8)&&boat.length>=(s.company?10.5:8);
   const moving=isDown?false:crewStepInboard(s,boat,dt)||crewPatrolMotion(s,boat,dt,company),lengthScale=boat.length/12;
   const blend=1-Math.exp(-dt*8);s.walk+=(Number(moving)-s.walk)*blend;s.brace+=(Number(s.intent==='brace')-s.brace)*blend;
   if((boat.modelId==='victory'||ADDITIONAL_DESIGNS[boat.modelId])&&s.role!=='Helmsman'){
@@ -670,9 +670,9 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
           if(clipOnly){s.posedOnce=true;b.clip.set(i,s.time,s.walkTime,s.walk);}else b.clip.off(i);
           const interval=snap?1:crewPoseInterval(apparent);
           s.poseAge=(s.poseAge??i)+1;
-          const due=!clipOnly&&(snap||(s.visible!==false&&s.poseAge>=interval));
+          const due=crewPoseDue(s,clipOnly,snap,interval);
           if(due){
-            s.posedOnce=true;s.poseAge=0;
+            s.posedOnce=true;s.poseAge=0;crewPoseSolved(s);
             a.sample('Idle',s.time,'Walk',s.walkTime,s.walk);
             if(s.brace>.001 && !(s.job?.rung>0))a.blend('Brace',s.time,s.brace);
             poseCrewWork(a,s,boat);
@@ -1526,7 +1526,8 @@ export function createFortGarrison(port) {
   const instances = port?.instances ?? [];
   const origin = [port?.center?.x ?? 0, 0, port?.center?.z ?? 0];
   const soldiers = [];
-  const byBuilding = new Map();
+  // `units` is every building's men. `byBuilding` is by name, and two buildings of one plan may share a name.
+  const byBuilding = new Map(), units = [];
   const cultureId = port?.indigenousSettlement?.cultureId ?? null;
   for (const inst of instances) {
     let unit = null;
@@ -1543,9 +1544,10 @@ export function createFortGarrison(port) {
       soldiers.push(s);
     }
     inst.garrisonSoldiers = unit;
+    units.push(unit);
     byBuilding.set(inst.id ?? inst.prefabId, unit);
   }
-  const garrison = { port, origin, soldiers, byBuilding, time: 0 };
+  const garrison = { port, origin, soldiers, byBuilding, units, time: 0, dateMs: null };
   if (port && typeof port === 'object') port.garrison = garrison;
   return garrison;
 }
@@ -1553,7 +1555,7 @@ export function createFortGarrison(port) {
 // Whoever had the stretch under him shot away comes down with it, to whatever is beneath. One walking a rampart
 // keeps to what is left of his beat. Runs only when a building has lost something since the last look.
 function settleGarrisonOnWhatIsLeft(garrison) {
-  for (const unit of garrison.byBuilding.values()) {
+  for (const unit of garrison.units ?? garrison.byBuilding.values()) {
     const inst = unit[0]?.building, damage = inst?.damageState, state = damage?.fracture;
     if (!state || state.brokenCount === (damage.garrisonSawBroken ?? 0)) continue;
     damage.garrisonSawBroken = state.brokenCount;
@@ -1563,12 +1565,13 @@ function settleGarrisonOnWhatIsLeft(garrison) {
     for (const s of unit) { if (s.ly < low) low = s.ly; if (s.ly > high) high = s.ly; }
     const near = state.fracture.shards.filter((shard) => shard && shard.localMin[1] <= high + 0.2 && shard.localMax[1] >= low - 1.1);
     for (const s of unit) {
-      if (s.casualtyState === 'fallen') continue;
       const footing = footingUnder(state, s.lx, s.ly, s.lz, near);
+      // A body already lying there comes down with the stretch too, and has nothing more to say.
       if (footing.stood && !footing.stands) {
         garrisonSoldierFalls(state, s, inst, settled, garrison);
         continue;
       }
+      if (s.casualtyState === 'fallen') continue;
       if (footing.floor !== null && footing.floor < s.ly - 0.05) {
         // What he stood on has gone, and the floor is a step below.
         s.homeBaseLy ??= s.baseLy;
@@ -1605,18 +1608,24 @@ export function garrisonSoldierFalls(state, s, inst = {}, settled = false, garri
   const cosY = Math.cos(inst.yaw ?? 0), sinY = Math.sin(inst.yaw ?? 0);
   const wx = (inst.x ?? 0) + (s.lx ?? 0) * cosY + (s.lz ?? 0) * sinY, wz = (inst.z ?? 0) - (s.lx ?? 0) * sinY + (s.lz ?? 0) * cosY;
   const slope = (s.lx ?? 0) * (inst.slopeX ?? 0) + (s.lz ?? 0) * (inst.slopeZ ?? 0);
-  const to = (state?.fracture ? restingHeightUnder(state, wx, wz, s.ly) : 0) - slope;
+  // `s.ly` is a height in the world, so a building whose pieces are not yet known leaves him on its own ground.
+  const to = (state?.fracture ? restingHeightUnder(state, wx, wz, s.ly) : (inst.baseY ?? inst.y ?? 0)) - slope;
+  const wasDown = s.casualtyState === 'fallen';
   s.homeBaseLy ??= s.baseLy;
-  s.casualtyState = 'fallen';
-  s.woundSeverity = Math.max(s.woundSeverity ?? 0, 0.72);
-  const roll = (((s.crewIndex ?? 0) * 0.6180339887 + 0.23) % 1 + 1) % 1;
-  recordCrewWound(s, 'fall', [wx, (s.ly ?? 2) + 0.45, wz], [0, -1, 0], roll);
+  if (!wasDown) {
+    s.casualtyState = 'fallen';
+    s.fallenAtMs = Number.isFinite(garrison?.dateMs) ? garrison.dateMs : null;
+    s.woundSeverity = Math.max(s.woundSeverity ?? 0, 0.72);
+    const roll = (((s.crewIndex ?? 0) * 0.6180339887 + 0.23) % 1 + 1) % 1;
+    recordCrewWound(s, 'fall', [wx, (s.ly ?? 2) + 0.45, wz], [0, -1, 0], roll);
+  }
   s.walk = 0;
   s._poseReady = false;
   if (settled) s.baseLy = to;
   else {
-    s.garrisonFall = { to, speed: 0 };
-    if (garrison && typeof garrison === 'object') {
+    if (s.garrisonFall) s.garrisonFall.to = Math.min(s.garrisonFall.to, to);
+    else s.garrisonFall = { to, speed: 0 };
+    if (!wasDown && garrison && typeof garrison === 'object') {
       (garrison.audioEvents ??= []).push({
         type: 'casualty-scream',
         sex: s.sex ?? 'male',
@@ -1638,6 +1647,7 @@ export function reviveGarrisonSoldiers(building) {
     s.homeRouteZ = undefined;
     s.garrisonFall = null;
     s.fallenElapsedS = 0;
+    s.fallenAtMs = null;
     s.visible = true;
     s.casualtyState = 'able';
     s.health = 1;
@@ -1654,48 +1664,81 @@ export function reviveGarrisonSoldiers(building) {
   }
 }
 
+// A day, on the game's calendar when the caller gives its date, and otherwise in seconds stepped at this port.
 export const GARRISON_CASUALTY_STAY_S = 86400;
+const GARRISON_BODY_HEIGHT_M = 1.7;
 
-export function stepFortGarrison(garrison, dt = 0, wind = 0) {
+// The craters a building has taken since its garrison last looked. Its list is capped and drops the oldest, so the
+// place kept in it is the last crater seen and not a count. A rebuilt building has a new record, and a new list.
+function garrisonFreshCraters(damage) {
+  const craters = damage?.craters;
+  if (!craters?.length) return null;
+  const last = craters[craters.length - 1];
+  if (damage.garrisonSawCrater === last) return null;
+  const from = craters.lastIndexOf(damage.garrisonSawCrater) + 1;
+  damage.garrisonSawCrater = last;
+  damage.garrisonCraterSerial = (damage.garrisonCraterSerial ?? 0) + craters.length - from;
+  return from ? craters.slice(from) : craters;
+}
+
+export function stepFortGarrison(garrison, dt = 0, wind = 0, dateMs = null) {
   if (!garrison?.soldiers?.length) return garrison;
   dt = Math.max(0, Math.min(0.1, Number.isFinite(dt) ? dt : 0));
   garrison.time = (garrison.time ?? 0) + dt;
+  garrison.dateMs = Number.isFinite(dateMs) ? dateMs : null;
   settleGarrisonOnWhatIsLeft(garrison);
+  for (const unit of garrison.units ?? garrison.byBuilding?.values() ?? []) unit.freshCraters = garrisonFreshCraters(unit[0]?.building?.damageState);
   const ox = garrison.origin[0], oy = garrison.origin[1], oz = garrison.origin[2];
   const blend = 1 - Math.exp(-dt * 8);
   for (const s of garrison.soldiers) {
     s.time += dt;
     const inst = s.building;
     const dmg = inst?.damageState;
+    // Men who come into being on a ruin fell with it while nobody was there: they lie where it left them, unheard.
+    const firstLook = !s.garrisonSeen;
+    s.garrisonSeen = true;
     if (dmg?.state === 'ruined' && s.casualtyState !== 'fallen') {
-      garrisonSoldierFalls(dmg?.fracture, s, inst, false, garrison);
+      garrisonSoldierFalls(dmg?.fracture, s, inst, firstLook, garrison);
+      if (firstLook && Number.isFinite(dmg.lastHitDateMs)) s.fallenAtMs = dmg.lastHitDateMs;
     }
     if (s.casualtyState === 'fallen') {
       s.fallenElapsedS = (s.fallenElapsedS ?? 0) + dt;
-      if (s.fallenElapsedS >= GARRISON_CASUALTY_STAY_S) {
+      if (garrison.dateMs !== null) s.fallenAtMs ??= garrison.dateMs;
+      const lain = garrison.dateMs !== null && Number.isFinite(s.fallenAtMs) ? (garrison.dateMs - s.fallenAtMs) / 1000 : s.fallenElapsedS;
+      if (lain >= GARRISON_CASUALTY_STAY_S) {
         s.visible = false;
         continue;
       }
     } else {
       s.fallenElapsedS = 0;
+      s.fallenAtMs = null;
     }
-    s.visible = true;
-    const impacts = dmg?.impacts?.length ? dmg.impacts : dmg?.craters;
-    const seenImpacts = s._seenImpacts ?? 0;
-    if (impacts && impacts.length > seenImpacts) {
-      for (let k = seenImpacts; k < impacts.length; k++) {
-        const imp = impacts[k];
-        const lp = imp.localPos ?? imp.localPosition;
+    // Shot that has taken a body to pieces leaves nothing to draw until the building is manned again.
+    s.visible = !s.obliterated;
+    const impacts = inst?.garrisonSoldiers?.freshCraters;
+    if (impacts) {
+      const serial = (dmg.garrisonCraterSerial ?? impacts.length) - impacts.length;
+      const baseY = inst?.baseY ?? inst?.y ?? 0;
+      for (let i = 0; i < impacts.length; i++) {
+        const imp = impacts[i], k = serial + i;
+        const lp = imp.localPosition;
         if (!lp) continue;
         const dx = s.lx - lp[0];
         const dz = s.lz - lp[2];
-        const d = Math.hypot(dx, dz);
-        const blastR = Math.max(6.0, (imp.radius ?? 2.0) * 3.2);
+        // A body stands from his feet to his head, and a crater is where the shot struck, at whatever height.
+        const craterY = imp.position?.[1] ?? baseY + lp[1], feet = s.ly ?? baseY;
+        const dy = Math.max(0, feet - craterY, craterY - (feet + GARRISON_BODY_HEIGHT_M));
+        const d = Math.hypot(dx, dy, dz);
+        const flat = Math.hypot(dx, dz);
+        // A magazine's crater is as wide as its blast. A shot's is the stone it broke, and its splinters go a few
+        // times that far and no farther.
+        const blastR = imp.isExplosion ? Math.max(6.0, (imp.radius ?? 2.0) * 3.2) : (imp.radius ?? 1.0) * 3.2;
+        const killR = imp.isExplosion ? 5.5 : Math.min(2.6, (imp.radius ?? 1.0) * 1.6);
         if (d < blastR) {
           const prox = Math.max(0.15, 1 - d / blastR);
           const strength = imp.strength ?? imp.severity ?? 0.75;
-          const dirX = d > 1e-3 ? dx / d : (((s.crewIndex ?? 0) % 2 === 0) ? 1 : -1);
-          const dirZ = d > 1e-3 ? dz / d : 0.5;
+          const dirX = flat > 1e-3 ? dx / flat : (((s.crewIndex ?? 0) % 2 === 0) ? 1 : -1);
+          const dirZ = flat > 1e-3 ? dz / flat : 0.5;
           const cosB = Math.cos(inst?.yaw ?? 0), sinB = Math.sin(inst?.yaw ?? 0);
           const wDirX = dirX * cosB + dirZ * sinB;
           const wDirZ = -dirX * sinB + dirZ * cosB;
@@ -1716,13 +1759,14 @@ export function stepFortGarrison(garrison, dt = 0, wind = 0) {
             hitY,
             (s.position?.[2] ?? inst?.z ?? 0) - wDirZ * 0.18 - wDirX * sideSign,
           ];
-          recordCrewWound(s, imp.isExplosion || d < 2.2 ? 'ball' : 'splinter', worldHitOnBody, [wDirX, 0.25, wDirZ], roll);
+          recordCrewWound(s, imp.isExplosion || d < Math.min(2.2, killR) ? 'ball' : 'splinter', worldHitOnBody, [wDirX, 0.25, wDirZ], roll);
           const wasAble = s.casualtyState !== 'fallen';
-          if (d < (imp.isExplosion ? 5.5 : 2.6) && strength > 0.45) {
+          if (d < killR && strength > 0.45) {
             s.casualtyState = 'fallen';
             s.health = 0;
             s.woundSeverity = 1.0;
             if (wasAble) {
+              s.fallenAtMs = garrison.dateMs;
               (garrison.audioEvents ??= []).push({
                 type: 'casualty-scream',
                 sex: s.sex ?? 'male',
@@ -1741,7 +1785,6 @@ export function stepFortGarrison(garrison, dt = 0, wind = 0) {
           s._poseReady = false;
         }
       }
-      s._seenImpacts = impacts.length;
     }
     if (dt > 0 && (Math.abs(s.knockbackVx ?? 0) > 1e-3 || Math.abs(s.knockbackVz ?? 0) > 1e-3 || (s.knockbackVy ?? 0) > 1e-3)) {
       s.homeLxz ??= [s.lx, s.lz];
@@ -1793,7 +1836,8 @@ export function stepFortGarrison(garrison, dt = 0, wind = 0) {
       s._poseReady = false;
     }
     let isDown = s.casualtyState === 'fallen' || (s.knockdownTimer ?? 0) > 0;
-    if (isDown && (s.ragdoll?.age ?? 0) < 2.2) {
+    // A body is posed afresh until it has come to rest, and then left as it lies.
+    if (isDown && !s.ragdoll?.settled) {
       s._poseReady = false;
     }
     const underFire = (dmg?.fires?.length ?? 0) > 0 || (dmg?.state === 'burning');
@@ -1869,7 +1913,7 @@ export function stepFortGarrison(garrison, dt = 0, wind = 0) {
     s.rotation.set([0, Math.sin(half), 0, Math.cos(half)]);
     gltfTRS(s.transform, [wx - ox, wy - oy, wz - oz], s.rotation, s.scale);
     stepCrewPhysicsState(s, null, dt, garrison);
-    s._poseReady = !moving && s.walk < 1e-3 && yawDiff < 1e-3 && !(isDown && (s.ragdoll?.age ?? 0) < 2.2) && !s.garrisonFall;
+    s._poseReady = !moving && s.walk < 1e-3 && yawDiff < 1e-3 && !(isDown && !s.ragdoll?.settled) && !s.garrisonFall;
   }
   return garrison;
 }
