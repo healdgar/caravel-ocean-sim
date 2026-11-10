@@ -5,7 +5,7 @@
 // of shore for curated 1550s Caribbean ports or any global (lat, lon) landfall.
 
 import { layTownStreets, streetEdgeAt } from './town-streets.js';
-import { layPortProps } from './port-props.js';
+import { layPortProps, pierBentStations, pierBrowStations, pierCraneStation } from './port-props.js';
 import { emitTripoHarborCrane, emitTripoDockCleat } from './tripo-pier-assets.js';
 import {
   bastionBayIsEmbrasure,
@@ -6452,9 +6452,10 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       emitBox(toWorld, -hw - 0.22, -hw, yTop - 1.35, yTop - 0.95, -hl + 0.8, hl - 0.8, 10, 0.64, true);
       emitBox(toWorld, hw, hw + 0.22, yTop - 1.35, yTop - 0.95, -hl + 0.8, hl - 0.8, 10, 0.64, true);
       // Paired cylindrical timber pilings iterated every 4.8m + transverse cross-beam caps, diagonal X-braces, fender piles & mooring bollards
-      const bays = snapBays(inst.length - 2.4, 4.8, 4);
-      for (let b = 0; b <= bays; b++) {
-        const z = -hl + 1.2 + (b / bays) * (inst.length - 2.4);
+      // A post on every other bent. The cleats between them are props (js/port-props.js), which a shot can break.
+      const bents = pierBentStations(inst.length);
+      for (let b = 0; b < bents.length; b++) {
+        const z = bents[b];
         beginSection('foundation_pilings');
         emitCylinder(toWorld, -hw + 0.48, z, yBase, yTop + 0.58, 0.26, 0.24, 6, 10, 0.66, true);
         emitCylinder(toWorld, hw - 0.48, z, yBase, yTop + 0.58, 0.26, 0.24, 6, 10, 0.66, true);
@@ -6466,15 +6467,10 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         emitBox(toWorld, -hw + 0.6, hw - 0.6, deckBottom - 1.65, deckBottom - 1.32, z - 0.14, z + 0.14, 10, 0.56, true);
         if (b % 2 === 0) {
           beginSection('mooring_bollards');
-          if (b % 4 === 0) {
-            emitTripoDockCleat(pushTri, toWorld, -hw + 0.78, yTop + 0.26, z, 0.72, Math.PI * 0.5);
-            emitTripoDockCleat(pushTri, toWorld, hw - 0.78, yTop + 0.26, z, 0.72, -Math.PI * 0.5);
-          } else {
-            emitCylinder(toWorld, -hw + 0.78, z, yTop + 0.26, yTop + 0.94, 0.20, 0.22, 8, 10, 0.68, true);
-            emitCylinder(toWorld, -hw + 0.78, z, yTop + 0.94, yTop + 1.04, 0.24, 0.21, 8, 18, 0.64, true);
-            emitCylinder(toWorld, hw - 0.78, z, yTop + 0.26, yTop + 0.94, 0.20, 0.22, 8, 10, 0.68, true);
-            emitCylinder(toWorld, hw - 0.78, z, yTop + 0.94, yTop + 1.04, 0.24, 0.21, 8, 18, 0.64, true);
-          }
+          emitCylinder(toWorld, -hw + 0.78, z, yTop + 0.26, yTop + 0.94, 0.20, 0.22, 8, 10, 0.68, true);
+          emitCylinder(toWorld, -hw + 0.78, z, yTop + 0.94, yTop + 1.04, 0.24, 0.21, 8, 18, 0.64, true);
+          emitCylinder(toWorld, hw - 0.78, z, yTop + 0.26, yTop + 0.94, 0.20, 0.22, 8, 10, 0.68, true);
+          emitCylinder(toWorld, hw - 0.78, z, yTop + 0.94, yTop + 1.04, 0.24, 0.21, 8, 18, 0.64, true);
         }
       }
       // Boatman's timber landing stage & water stairs descending into the water on the sheltered flank
@@ -6506,7 +6502,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       emitBox(toWorld, -hw * 0.38 - 1.45, -hw * 0.38 + 1.45, yTop + 1.06, yTop + 1.16, capZ - 0.08, capZ + 0.08, 10, 0.82, true);
       emitBox(toWorld, -hw * 0.38 - 0.08, -hw * 0.38 + 0.08, yTop + 1.06, yTop + 1.16, capZ - 1.45, capZ + 1.45, 10, 0.82, true);
       // Brow gangway plank staged at the embarkation berth edge
-      emitBox(toWorld, hw - 1.6, hw + 1.45, yTop + 0.05, yTop + 0.24, -hl + 8.2, -hl + 9.6, 10, 0.82, true);
+      emitBox(toWorld, hw - 1.6, hw + 1.45, yTop + 0.05, yTop + 0.24, ...pierBrowStations(inst.length), 10, 0.82, true);
       // Seaward pier-head Manueline stepped octagonal Pedra Lioz Padrão plinth, iron fire-basket cresset beacon & Tripo treadwheel harbor crane
       beginSection('pier_beacon_and_crane');
       const bz = -hl + 2.1;
@@ -6536,7 +6532,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         );
       }
       // Tripo-generated 16th-century treadwheel harbor crane (Guindaste da Ribeira) with slung cargo cask
-      const craneZ = -hl * 0.32;
+      const craneZ = pierCraneStation(inst.length);
       emitTripoHarborCrane(pushTri, toWorld, hw - 1.35, yTop, craneZ, 5.8, 0);
       emitCylinder(toWorld, hw + 1.30, craneZ - 0.12, yTop + 1.95, yTop + 5.55, 0.045, 0.045, 6, 18, 0.68, true);
       emitCylinder(toWorld, hw + 1.30, craneZ - 0.12, yTop + 1.15, yTop + 1.95, 0.42, 0.38, 10, 10, 0.76, true);

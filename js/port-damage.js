@@ -5,9 +5,12 @@
 // The career save holds every port. A share link holds the one in view, as much as fits.
 // The ground has its record here too: nobody rebuilds a crater, so it stays until the save does.
 // So do trees shot down, a list per coast. Nothing regrows them.
+// A port's cleats and jetties are kept with its buildings: which of their timbers are gone and where the rest lie
+// (js/port-props.js writes and replays the record). They are put back as a timber building is.
 import { encodeBuildingEvent } from './building-fracture.js';
 import { reviveGarrisonSoldiers } from './crew.js';
 import { classifyBuildingMaterial, createBuildingDamageState } from './gunnery-control.js';
+import { jettyDamageRecord, restoreJettyDamage } from './port-props.js';
 
 const PORT_DAY_MS = 86400000;
 // Days to rebuild from nothing, by what it is built of. A week's clearing up comes first, however light the damage.
@@ -28,6 +31,8 @@ const planKeyOf = (building) => {
 };
 const portKeyOf = (port) => String(port?.regionId ?? port?.id ?? port?.name ?? 'port');
 const buildingKeyOf = (building, index) => String(building.id ?? `${building.prefabId ?? 'building'}_${index}`);
+// Beside the buildings in a port's record, under a name no building has.
+const propKeyOf = (index) => `prop:${index}`;
 
 export function buildingRebuildDays(damage) {
   const days = REBUILD_DAYS[damage?.materialClass] ?? REBUILD_DAYS.masonry;
@@ -102,6 +107,8 @@ export function createPortDamageStore(saved = null, { dateMs = null } = {}) {
     const date = today();
     return date !== null && Number.isFinite(lastHit) && date - lastHit >= buildingRebuildDays(damageLike) * PORT_DAY_MS;
   };
+  // The hits each prop had when its day was last taken. Nothing tells the store of a hit on a prop as it lands.
+  const propHits = new WeakMap();
   const capture = (port) => {
     const instances = port?.instances;
     if (!Array.isArray(instances)) return;
@@ -110,6 +117,12 @@ export function createPortDamageStore(saved = null, { dateMs = null } = {}) {
       if (!building?.damageState) return;
       const record = buildingDamageRecord(building);
       if (record) (ports[key] ??= {})[buildingKeyOf(building, index)] = record;
+    });
+    (port.props ?? []).forEach((prop, index) => {
+      const d = prop?.damageState;
+      if (d && propHits.get(prop) !== d.hits) { propHits.set(prop, d.hits); d.lastHitDateMs = today(); }
+      const record = jettyDamageRecord(prop);
+      if (record) (ports[key] ??= {})[propKeyOf(index)] = record;
     });
   };
   return {
@@ -132,6 +145,18 @@ export function createPortDamageStore(saved = null, { dateMs = null } = {}) {
           return;
         }
         applyBuildingDamageRecord(building, record);
+        restored++;
+      });
+      (port.props ?? []).forEach((prop, index) => {
+        const name = propKeyOf(index), record = records[name];
+        if (!record) return;
+        if (overdue(record.a, { integrity: record.i, materialClass: 'timber' })) {
+          delete records[name];
+          return;
+        }
+        // One that has moved, or is cut into other shards than when it was saved, stands whole.
+        if (!restoreJettyDamage(prop, record)) return;
+        propHits.set(prop, record.h);
         restored++;
       });
       if (!Object.keys(records).length) delete ports[key];

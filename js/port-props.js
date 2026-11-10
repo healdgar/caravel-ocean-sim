@@ -27,21 +27,24 @@ const JETTY_NEAREST_M = 60, JETTY_FURTHEST_M = 600, JETTY_WALK_M = 6, JETTY_BEAR
 const JETTY_OUT_M = 5, JETTY_ROOT_HIGHEST_M = JETTY_DECK_ABOVE_SEA_M, JETTY_SLOPE_PROBE_M = 12;
 const JETTY_BUILDING_GAP_M = 12, JETTY_APART_M = 70;
 const CLEATED = Object.freeze({ timber_mole_pier: 'both', stone_quay_seawall: 'sea' });
+// A timber pier as js/coastal-world.js builds it, measured along it from its middle. Its piles stand in bents, with
+// a bollard post on every other bent. Its crane and its boarding brow take up part of its +x edge.
+const PIER_BENT_INSET_M = 1.2, PIER_BAY_M = 4.8, PIER_FEWEST_BAYS = 4;
+const PIER_CRANE_CLEAR_M = 2.2, PIER_BROW_CLEAR_M = 0.5;
+export function pierBentStations(length) {
+  const run = length - 2 * PIER_BENT_INSET_M, bays = Math.max(PIER_FEWEST_BAYS, Math.round(run / PIER_BAY_M));
+  return Array.from({ length: bays + 1 }, (_, b) => -length / 2 + PIER_BENT_INSET_M + (b / bays) * run);
+}
+export const pierCraneStation = (length) => -length * 0.16;
+export const pierBrowStations = (length) => [-length / 2 + 8.2, -length / 2 + 9.6];
 
 const MAX_JETTY_TRI_EDGE_M = 4.6;
 const JETTY_BAYS = 8;
 const JETTY_ANCHOR_MAX_Y_M = 0.6;
+const JETTY_LANDING_PASSES = 3;
 
+// The models as last read, so a prop can be struck by anything that knows only where it stands.
 const loadedPropModels = new Array(PROP_MODELS.length).fill(null);
-
-export function registerPropModel(index, model) {
-  if (index >= 0 && model) loadedPropModels[index] = model;
-  return model;
-}
-
-export function getLoadedPropModels() {
-  return loadedPropModels;
-}
 
 const footprintRadius = (inst) => Math.hypot(inst.length ?? 20, inst.width ?? 16) / 2;
 
@@ -56,9 +59,20 @@ function layCleats(port, groundAt, add) {
       const low = (side) => { const [x, z] = world(side * (halfWidth + QUAY_SEA_PROBE_M), 0); return groundAt(x, z); };
       edges = [low(-1) < low(1) ? -1 : 1];
     }
-    const top = inst.y + inst.height, count = Math.floor((inst.length - 2 * CLEAT_END_CLEARANCE_M) / CLEAT_SPACING_M);
-    for (const edge of edges) for (let k = 0; k <= count; k++) {
-      const along = -halfLength + CLEAT_END_CLEARANCE_M + k * CLEAT_SPACING_M, [x, z] = world(edge * (halfWidth - CLEAT_EDGE_INSET_M), along);
+    const top = inst.y + inst.height, stations = [];
+    if (sides === 'both') {
+      // Midway between bents in every other bay, so no cleat stands in a pile head or on a bollard post.
+      const bents = pierBentStations(inst.length);
+      for (let b = 1; b + 1 < bents.length; b += 2) stations.push((bents[b] + bents[b + 1]) / 2);
+    } else {
+      const count = Math.floor((inst.length - 2 * CLEAT_END_CLEARANCE_M) / CLEAT_SPACING_M);
+      for (let k = 0; k <= count; k++) stations.push(-halfLength + CLEAT_END_CLEARANCE_M + k * CLEAT_SPACING_M);
+    }
+    const crane = pierCraneStation(inst.length), [browFrom, browTo] = pierBrowStations(inst.length);
+    const taken = (edge, along) => sides === 'both' && edge > 0 && (Math.abs(along - crane) < PIER_CRANE_CLEAR_M || (along > browFrom - PIER_BROW_CLEAR_M && along < browTo + PIER_BROW_CLEAR_M));
+    for (const edge of edges) for (const along of stations) {
+      if (taken(edge, along)) continue;
+      const [x, z] = world(edge * (halfWidth - CLEAT_EDGE_INSET_M), along);
       add(CLEAT, x, top, z, inst.yaw, owner);
     }
   });
@@ -104,11 +118,6 @@ export function layPortProps(port, groundAt) {
   if (port?.instances?.length && port.center) {
     layCleats(port, groundAt, add);
     layJetties(port, groundAt, add);
-    if (typeof groundAt === 'function' && !Object.isFrozen(port)) {
-      try {
-        Object.defineProperty(port, 'groundAt', { value: groundAt, configurable: true, writable: true });
-      } catch { /* ignore sealed port */ }
-    }
   }
   return placed;
 }
@@ -415,12 +424,109 @@ export function ensureJettyFracture(jetty, model = null, groundAt = null) {
     flight: createShipFractureState({ shardCount: shards.length, scale: [1, 1, 1] }),
     now: 0,
     damaged: false,
-    revision: 0,
+    // Shards lying where they fell, and how far from the model the furthest of them and of those in the air get.
+    kept: 0,
+    reach: 0,
+    flightReach: 0,
+    // Told each time a shot breaks something off, so whoever draws it need not watch for it.
+    onStruck: null,
     seed: seed || 1,
     groundAt: typeof groundAt === 'function' ? groundAt : () => 0,
   };
   jetty.fracture = state;
+  if (jetty.savedDamage) {
+    replayJettyDamage(jetty, state, jetty.savedDamage);
+    delete jetty.savedDamage;
+  }
   return state;
+}
+
+// How far out a prop must be drawn: nothing once what it stood on has gone or the last of it has sunk, and past its
+// own size while timber is in the air or lies where it fell.
+export function propDrawRadius(prop, model, ownerState = null) {
+  if (ownerState === 'ruined' || ownerState === 'breached') return 0;
+  const state = prop?.fracture;
+  if (!state?.damaged) return model.radius;
+  const flying = state.flight.flying.size > 0;
+  if (state.aliveCount <= 0 && !flying && state.kept <= 0) return 0;
+  return model.radius + Math.max(state.reach, flying ? state.flightReach : 0);
+}
+
+const SAVED_SHARD_NUMBERS = 7;
+const savedNumber = (value) => +value.toFixed(3);
+const propDamageState = (jetty, state) => (jetty.damageState ??= {
+  materialClass: 'timber', hits: 0, breaches: 0, integrity: 1, state: 'intact', brokenShards: 0, collapsedShards: 0, totalShards: state.shards.length,
+});
+function gradeJettyDamage(damage, state) {
+  damage.integrity = state.aliveCount / Math.max(1, state.shards.length);
+  damage.state = state.aliveCount === 0 ? 'ruined' : damage.integrity < 0.55 ? 'breached' : state.damaged ? 'damaged' : 'intact';
+}
+
+// What a struck prop is saved as: `g` the shards gone, `k` each one lying where it fell as its id, how far it moved
+// and the turn it took (an axis as long as the angle, in radians). One still in the air is saved where it will land.
+// Null for a prop nothing has broken.
+export function jettyDamageRecord(jetty) {
+  if (jetty?.savedDamage) return jetty.savedDamage;
+  const state = jetty?.fracture;
+  if (!state?.damaged) return null;
+  const records = state.flight.records, gone = [], kept = [];
+  for (let s = 0; s < state.shards.length; s++) {
+    if (state.alive[s]) continue;
+    const at = s * FRACTURE_RECORD_FLOATS;
+    if (records[at + 11] >= 0) { gone.push(s); continue; }
+    const settle = records[at + 7], hinge = records[at + 12], free = Math.max(0, settle - hinge), rate = Math.hypot(records[at + 8], records[at + 9], records[at + 10]);
+    const turn = (rate * free + (hinge > 0 ? 0.5 * rate * hinge : 0)) % (2 * Math.PI), perRate = rate > 1e-6 ? turn / rate : 0;
+    kept.push(s,
+      savedNumber(records[at + 4] * free), savedNumber(records[at + 5] * free - 0.5 * FRACTURE_GRAVITY * records[at + 13] * free * free), savedNumber(records[at + 6] * free),
+      savedNumber(records[at + 8] * perRate), savedNumber(records[at + 9] * perRate), savedNumber(records[at + 10] * perRate));
+  }
+  const damage = jetty.damageState;
+  const record = { m: PROP_MODELS[jetty.model]?.id ?? null, x: Math.round(jetty.x ?? 0), z: Math.round(jetty.z ?? 0), n: state.shards.length, i: +(state.aliveCount / Math.max(1, state.shards.length)).toFixed(4), h: damage?.hits ?? 0, a: damage?.lastHitDateMs ?? null };
+  if (gone.length) record.g = gone;
+  if (kept.length) record.k = kept;
+  return record;
+}
+
+// Puts back what `jettyDamageRecord` saved, or holds it until the model is read. False if the record is of some
+// other prop, or of this one cut into different shards: then it stands whole.
+export function restoreJettyDamage(jetty, record) {
+  if (!jetty || !record || record.m !== (PROP_MODELS[jetty.model]?.id ?? null)) return false;
+  if (Math.abs(record.x - (jetty.x ?? 0)) > 1 || Math.abs(record.z - (jetty.z ?? 0)) > 1) return false;
+  if (jetty.fracture) return replayJettyDamage(jetty, jetty.fracture, record);
+  jetty.savedDamage = record;
+  return true;
+}
+
+function replayJettyDamage(jetty, state, record) {
+  const count = state.shards.length, kept = record.k ?? [], gone = record.g ?? [];
+  if (record.n !== count || state.damaged || kept.length % SAVED_SHARD_NUMBERS) return false;
+  const records = state.flight.records;
+  const release = (s, flight) => {
+    if (!(s >= 0 && s < count) || !state.alive[s]) return false;
+    state.alive[s] = 0;
+    state.aliveCount--;
+    records.set(flight, s * FRACTURE_RECORD_FLOATS);
+    state.flight.dirty.add(s);
+    return true;
+  };
+  for (const s of gone) { const pivot = state.shards[s]?.center; if (pivot) release(s, [pivot[0], pivot[1], pivot[2], 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0]); }
+  for (let k = 0; k < kept.length; k += SAVED_SHARD_NUMBERS) {
+    const s = kept[k], pivot = state.shards[s]?.center;
+    // A flight of one second with no gravity, stopped at its end: the shader and evaluateShardFlight pose it alike.
+    if (pivot && release(s, [pivot[0], pivot[1], pivot[2], 0, kept[k + 1], kept[k + 2], kept[k + 3], 1, kept[k + 4], kept[k + 5], kept[k + 6], -1, 0, 0, 0, 1])) {
+      state.kept++;
+      state.reach = Math.max(state.reach, Math.hypot(kept[k + 1], kept[k + 2], kept[k + 3]));
+    }
+  }
+  if (state.aliveCount === count) return false;
+  state.damaged = true;
+  const damage = propDamageState(jetty, state);
+  damage.hits = record.h ?? 1;
+  damage.breaches = Math.max(1, damage.breaches);
+  damage.brokenShards = count - state.aliveCount;
+  damage.lastHitDateMs = record.a ?? null;
+  gradeJettyDamage(damage, state);
+  return true;
 }
 
 export function preparePortJetties(port, models = loadedPropModels, groundAt = null) {
@@ -517,16 +623,27 @@ function releaseJettyShard(jetty, state, shardId, direct, localHit, shotDir, ene
     ax = 1; ay = 0; az = 0;
   }
 
-  const worldPivot = jettyLocalToWorld(jetty, pivot[0], pivot[1], pivot[2], state.model);
-  const rawGround = Number(state.groundAt?.(worldPivot[0], worldPivot[2]));
-  const groundY = Number.isFinite(rawGround) ? rawGround : 0;
-  const overBeach = groundY > 0.05;
-  const landingY = overBeach ? groundY : Math.max(groundY, -0.25);
-  const drop = Math.max(0.25, worldPivot[1] - landingY);
-  const disc = Math.max(0, vy * vy + 2 * FRACTURE_GRAVITY * drop);
-  const settleTime = Math.min(3.5, (vy + Math.sqrt(disc)) / FRACTURE_GRAVITY);
+  // It comes down where it is thrown to, which may be beach when it left from over water, or the other way about:
+  // the time of flight says where, and the ground there says the time, so go round until they agree.
+  const worldPivot = jettyLocalToWorld(jetty, pivot[0], pivot[1], pivot[2], state.model), [worldVx, , worldVz] = jettyLocalToWorldDir(jetty, vx, vy, vz);
+  let landX = worldPivot[0], landZ = worldPivot[2], settleTime = 0, drop = 0, overBeach = false;
+  for (let pass = 0; pass < JETTY_LANDING_PASSES; pass++) {
+    const rawGround = Number(state.groundAt?.(landX, landZ)), groundY = Number.isFinite(rawGround) ? rawGround : 0;
+    overBeach = groundY > 0.05;
+    drop = Math.max(0.25, worldPivot[1] - (overBeach ? groundY : Math.max(groundY, -0.25)));
+    settleTime = (vy + Math.sqrt(vy * vy + 2 * FRACTURE_GRAVITY * drop)) / FRACTURE_GRAVITY;
+    landX = worldPivot[0] + worldVx * settleTime;
+    landZ = worldPivot[2] + worldVz * settleTime;
+  }
   const hold = 3.2 + nextFractureRand(state) * 1.4;
-  const sinkDepth = overBeach ? 0.22 : 0.85;
+  // What lands on the beach lies there. What lands in water goes under while it lingers, then is gone.
+  const sinkDepth = overBeach ? 0 : 0.85, thrown = Math.hypot(vx, vz) * settleTime;
+  if (!state.flight.flying.size) state.flightReach = 0;
+  state.flightReach = Math.max(state.flightReach, thrown + Math.max(0, vy) * vy / (2 * FRACTURE_GRAVITY) + sinkDepth);
+  if (overBeach) {
+    state.kept++;
+    state.reach = Math.max(state.reach, Math.hypot(thrown, drop));
+  }
 
   writeFlight(
     state.flight,
@@ -620,7 +737,7 @@ export function sweepJettySegment(from, to, radius = 0.08, port, options = null)
       const ownerState = port.instances?.[prop.owner]?.damageState?.state;
       if (ownerState === 'ruined' || ownerState === 'breached') continue;
     }
-    const model = prop.fracture?.model ?? loadedPropModels[prop.model] ?? port?.propModels?.[prop.model];
+    const model = prop.fracture?.model ?? loadedPropModels[prop.model];
     if (!model?.fracture) continue;
     const state = ensureJettyFracture(prop, model, port?.groundAt);
     if (!state || state.aliveCount <= 0) continue;
@@ -739,33 +856,15 @@ export function applyJettyImpactDamage(jetty, event = {}, options = {}) {
   }
 
   const totalReleased = releasedShards.length + collapsedShards.length;
-  if (totalReleased > 0) {
-    state.damaged = true;
-    state.revision = (state.revision ?? 0) + 1;
-  }
+  if (totalReleased > 0) state.damaged = true;
 
-  const damage = (jetty.damageState ??= {
-    materialClass: 'timber',
-    hits: 0,
-    breaches: 0,
-    integrity: 1,
-    state: 'intact',
-    brokenShards: 0,
-    collapsedShards: 0,
-    totalShards: state.shards.length,
-  });
+  const damage = propDamageState(jetty, state);
   damage.hits++;
   damage.brokenShards += releasedShards.length;
   damage.collapsedShards += collapsedShards.length;
   if (totalReleased > 0) damage.breaches++;
-  damage.integrity = state.aliveCount / Math.max(1, state.shards.length);
-  damage.state = state.aliveCount === 0
-    ? 'ruined'
-    : damage.integrity < 0.55
-      ? 'breached'
-      : state.damaged
-        ? 'damaged'
-        : 'intact';
+  gradeJettyDamage(damage, state);
+  if (totalReleased > 0) state.onStruck?.(jetty);
 
   return {
     kind: 'jetty',
@@ -795,15 +894,7 @@ export function stepJettyFracture(jetty, dt = 1 / 60) {
   return state.flight.flying.size > 0;
 }
 
-export function stepPortJetties(port, dt = 1 / 60) {
-  if (!Array.isArray(port?.props)) return 0;
-  let active = 0;
-  for (const prop of port.props) {
-    if (prop?.fracture?.damaged && stepJettyFracture(prop, dt)) active++;
-  }
-  return active;
-}
-
+// Where a shard is and how it lies, for a test or a tool to ask. The game draws from the same record on the GPU.
 export function evaluateJettyShardPose(jetty, shardId, now = jetty?.fracture?.now ?? 0) {
   const state = jetty?.fracture;
   if (!state || shardId < 0 || shardId >= state.shards.length) return null;
