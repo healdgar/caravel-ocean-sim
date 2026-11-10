@@ -119,15 +119,17 @@ if (qs.has('sovereignPolity')) {
 }
 const careerBrowserStorage=name=>{try{return window[name];}catch{return null;}};
 const careerStore=createCareerStore({storage:careerBrowserStorage('localStorage'),session:careerBrowserStorage('sessionStorage')});
-// Only reset=1 erases the save. newVoyage=1 starts afresh beside it and never erases anything.
-if(qs.get('reset')==='1'){
+// Everything a career leaves in storage, erased in one place: the save, the voyage key older
+// builds wrote beside it, and the sovereignty record.
+function eraseSavedCareer(){
   try{
-    careerStore.clear?.();
+    careerStore.clear();
     careerBrowserStorage('localStorage')?.removeItem?.('waterworld.voyage.v1');
-    careerBrowserStorage('localStorage')?.removeItem?.('waterworld.career.v1');
     resetActiveIndigenousSovereigntyState({persist:true});
-  }catch{/* ignore */}
+  }catch{/* storage may be blocked */}
 }
+// Only reset=1 erases the save. newVoyage=1 starts afresh beside it and never erases anything.
+if(qs.get('reset')==='1')eraseSavedCareer();
 // Both are one-shot: they leave the address bar once read, so a reload, a restored tab or a copied
 // link continues the career instead of erasing or restarting it. `qs` keeps them for this load.
 if(qs.has('reset')||qs.has('newVoyage')){
@@ -2758,13 +2760,10 @@ async function main() {
         const sov=getActiveIndigenousSovereigntyState();
         return Boolean(sov&&(sov.allegiance==='rogue-liberator'||(sov.treatiesSigned??0)>0||(sov.totalTrades??0)>0||(sov.totalColonizersRepelled??0)>0||Object.values(sov.regions??{}).some(r=>(r.strengthScore??0)>0||(r.tradeCount??0)>0)));
       },
+      // A tab that does not own the save starts afresh beside it, as newVoyage=1 always has.
+      resetVoyagePrompt:()=>careerStore.owned()&&careerStore.has()?'Erase saved career?':'Abandon this voyage?',
       onResetVoyage:()=>{
-        try{
-          careerStore.clear?.();
-          careerBrowserStorage('localStorage')?.removeItem?.('waterworld.voyage.v1');
-          careerBrowserStorage('localStorage')?.removeItem?.('waterworld.career.v1');
-          resetActiveIndigenousSovereigntyState({persist:true});
-        }catch{/* ignore */}
+        if(careerStore.owned())eraseSavedCareer();
         const url=new URL(location.pathname,location.href);
         url.searchParams.set('newVoyage','1');
         location.href=url.href;
@@ -3007,8 +3006,7 @@ async function main() {
           location.href=url.href;
         },
         onNewVoyage:()=>{
-          careerStore.clear();careerStore.claim();careerPort?.reset();portDamage.clear();
-          resetActiveIndigenousSovereigntyState({persist:true});
+          eraseSavedCareer();careerStore.claim();careerPort?.reset();portDamage.clear();
         },
       });
     }

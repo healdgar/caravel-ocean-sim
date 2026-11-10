@@ -59,3 +59,37 @@ test('reset=1 erases the save once, and a reload does not erase what was saved s
     assert.deepEqual(errors,[]);
   }finally{await context.close();}
 });
+
+// The Reset voyage button on the voyage panel, clicked as the player clicks it.
+const resetButton=page=>page.locator('.voyage-reset');
+const clickReset=page=>resetButton(page).evaluate(button=>button.click());
+
+test('Reset voyage asks once more, then erases the career this tab owns',{timeout:420000},async()=>{
+  const {context,page,errors}=await pageWithForeignSave('/?continue=1');
+  try{
+    await clickReset(page);
+    assert.equal(await resetButton(page).textContent(),'Erase saved career?','the first click says what the second will erase');
+    assert.match((await saved(page)).career??'',/"marker":"kept"/,'and erases nothing');
+    await Promise.all([page.waitForNavigation({timeout:60000}),clickReset(page)]);
+    await ready(page);
+    const after=await saved(page);
+    assert.doesNotMatch(after.career??'',/"marker":"kept"/,'the second click erases the career');
+    assert.equal(after.voyage,null,'and the voyage key older builds wrote');
+    assert.doesNotMatch(after.search,/newVoyage|reset/,'and the fresh start leaves nothing in the address bar to repeat it');
+    assert.deepEqual(errors,[]);
+  }finally{await context.close();}
+});
+
+test('Reset voyage in a tab that does not own the save starts afresh beside it',{timeout:420000},async()=>{
+  const {context,page,errors}=await pageWithForeignSave('/?newVoyage=1');
+  try{
+    await clickReset(page);
+    assert.equal(await resetButton(page).textContent(),'Abandon this voyage?','it does not claim it will erase a career that is not this tab\'s');
+    await Promise.all([page.waitForNavigation({timeout:60000}),clickReset(page)]);
+    await ready(page);
+    const after=await saved(page);
+    assert.match(after.career??'',/"marker":"kept"/,'the career another tab saved is still there');
+    assert.match(after.voyage??'',/"marker":"kept"/,'so is its voyage');
+    assert.deepEqual(errors,[]);
+  }finally{await context.close();}
+});

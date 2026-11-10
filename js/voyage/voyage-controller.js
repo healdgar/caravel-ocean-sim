@@ -79,6 +79,32 @@ export function shipWatch(solarHours) {
  *  onSpectrum(), onEnv(), resolveLandfallRegion(lat, lon): region spec (curated port id or coords),
  *  loadLandRings(): Promise<rings>, demLoader (optional tile loader), storage (localStorage).
  */
+/**
+ * A button that erases something takes a second, deliberate click. The first arms it and says
+ * what will be lost; left alone it stands down by itself.
+ */
+export function armBeforeErasing(button, { prompt, onConfirm, standDownMs = 6000, schedule = setTimeout, cancel = clearTimeout }) {
+  const label = button.textContent;
+  let timer = null;
+  const standDown = () => {
+    if (timer !== null) cancel(timer);
+    timer = null;
+    delete button.dataset.armed;
+    button.textContent = label;
+  };
+  button.onclick = () => {
+    if (button.dataset.armed !== '1') {
+      button.dataset.armed = '1';
+      button.textContent = typeof prompt === 'function' ? prompt() : prompt;
+      timer = schedule(standDown, standDownMs);
+      return;
+    }
+    standDown();
+    onConfirm();
+  };
+  return { standDown };
+}
+
 export function createVoyageController(cfg) {
   const {
     boat,
@@ -186,7 +212,7 @@ export function createVoyageController(cfg) {
         <button type="button" class="voyage-keep" title="Helmsman: keep her as she goes (K)">Keep her so</button>
         <button type="button" class="voyage-tack" title="Go about (T)">Tack</button>
         <label class="voyage-beat"><input type="checkbox"> Beat</label>
-        <button type="button" class="voyage-reset" title="Reset saved career and start a new 1550 voyage">Reset voyage</button>
+        <button type="button" class="voyage-reset" title="Erase the saved career and start a new 1550 voyage. Asks once more before erasing.">Reset voyage</button>
       </div>
       <div class="voyage-row voyage-status"><span class="voyage-pos"></span><span class="voyage-helmsman"></span><span class="voyage-wind"></span><span class="voyage-stores"></span></div>
       <div class="voyage-callout" role="alert" hidden></div>
@@ -241,15 +267,18 @@ export function createVoyageController(cfg) {
     beat.onchange = () => { helmsman.beat = beat.checked; };
     const resetBtn = root.querySelector('.voyage-reset');
     if (resetBtn) {
-      resetBtn.onclick = () => {
-        if (cfg.onResetVoyage) {
-          cfg.onResetVoyage();
-        } else {
-          try { storage?.removeItem?.(VOYAGE_STORAGE_KEY); } catch { /* ignore */ }
-          start({ dateMs: DEFAULT_DEPARTURE.dateMs, passive: Boolean(voyage?.passive) });
-          showToast('Voyage reset to 1550.');
-        }
-      };
+      armBeforeErasing(resetBtn, {
+        prompt: () => cfg.resetVoyagePrompt?.() ?? 'Erase this voyage?',
+        onConfirm: () => {
+          if (cfg.onResetVoyage) {
+            cfg.onResetVoyage();
+          } else {
+            try { storage?.removeItem?.(VOYAGE_STORAGE_KEY); } catch { /* ignore */ }
+            start({ dateMs: DEFAULT_DEPARTURE.dateMs, passive: Boolean(voyage?.passive) });
+            showToast('Voyage reset to 1550.');
+          }
+        },
+      });
     }
     return { root, toggle, warpButtons, canvasSel, beat, resetBtn };
   }
