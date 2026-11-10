@@ -37,6 +37,11 @@ const instrument=()=>{
       for(let i=0;i<words[0];i++){const a=4+i*12;townShots.push({start:[...floats.subarray(a,a+3)],strike:floats[a+3],end:[...floats.subarray(a+4,a+7)],blast:floats[a+7],reach:floats[a+8]});}
     }
     if(b.label==='townsfolk crowd'&&data.byteLength>=48)window.townClips=[...new Uint32Array(data.buffer,data.byteOffset,12)];
+    // The date the pass is told, in hours, moved on by as much as the test asks: whatever clock the game gives it.
+    if(b.label==='townsfolk crowd'&&data.byteLength>=112&&window.townHoursOn){
+      data=new Uint32Array(data.buffer.slice(data.byteOffset,data.byteOffset+data.byteLength));
+      new Float32Array(data.buffer)[26]+=townHoursOn;
+    }
     return write.call(this,b,offset,data,...rest);
   };
   const pull=async buffer=>{
@@ -51,7 +56,8 @@ const instrument=()=>{
   };
   window.readBodies=async()=>{
     await new Promise(requestAnimationFrame);
-    const span=town.bodies.size/8/32,[bytes,drawBytes]=await Promise.all([pull(town.bodies),pull(town.draws)]),w=new Uint32Array(bytes),f=new Float32Array(bytes),draws=new Uint32Array(drawBytes),out=[];
+    // A run of bodies for each of the draws listed: eight of those drawn, and then those who cast a shadow.
+    const span=town.bodies.size/(town.draws.size/20)/32,[bytes,drawBytes]=await Promise.all([pull(town.bodies),pull(town.draws)]),w=new Uint32Array(bytes),f=new Float32Array(bytes),draws=new Uint32Array(drawBytes),out=[];
     for(let b=0;b<8;b++)for(let s=0;s<draws[b*5+1];s++){const a=(b*span+s)*8;out.push({x:f[a],y:f[a+1],z:f[a+2],frame:w[a+4]});}
     return out;
   };
@@ -196,6 +202,19 @@ test('a ball among people strikes those it reaches and frightens those near, and
     assert.ok(returned.gone&&returned.back&&returned.relaid,JSON.stringify({...returned,fates:undefined}));
     assert.equal(returned.records,1,'one record of them, kept');
     for(const was of struck)assert.equal(returned.fates[was.i].mode,TOWN_DOWN,'still down');
+
+    // Coming back a day and an hour later by the calendar, they are gone from where they lay.
+    const dayOn=await page.evaluate(async()=>{
+      const terrain=oceanFleet.terrain,ports=Object.getOwnPropertyDescriptor(terrain,'ports'),frames=async n=>{for(let i=0;i<n;i++)await new Promise(requestAnimationFrame);};
+      Object.defineProperty(terrain,'ports',{configurable:true,get:()=>[]});
+      await frames(100);
+      window.townHoursOn=25;
+      Object.defineProperty(terrain,'ports',ports);
+      await frames(100);
+      return {records:townCreated.filter(label=>label==='townsfolk fates').length,fates:await readFates()};
+    });
+    assert.equal(dayOn.records,1,'the same record of them');
+    for(const was of struck)assert.equal(dayOn.fates[was.i].mode,TOWN_ABOUT,'a day on, no longer lying there');
 
     // A building hit often enough comes down, and the people get word of it from where it falls.
     const fell=await page.evaluate(async({eye,spot})=>{

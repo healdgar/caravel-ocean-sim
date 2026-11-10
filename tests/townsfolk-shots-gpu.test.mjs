@@ -23,7 +23,7 @@ const PEOPLE=96,LENGTH=200,STEP=1.25,WALK_SPEED=1.25,INDOORS=10,HALF_WIDTH=1.5;
 
 // Runs in the page. `town(options)` builds a crowd, and `run(town,seconds,shots)` is one frame at that time.
 async function setUp(){
-  const {TOWNSFOLK_WALK,TOWNSFOLK_RENDER,TOWN_FATE_WORDS,TOWN_SHOT_WORDS:SW,TOWN_SHOT_LIMIT:SL}=await import('/js/wgsl/townsfolk.js');
+  const {TOWNSFOLK_WALK,TOWNSFOLK_RENDER,TOWNSFOLK_SHADOW,TOWNSFOLK_BUCKETS:BUCKETS,TOWNSFOLK_SHADOW_BUCKET:SHADE,TOWN_FATE_WORDS,TOWN_SHOT_WORDS:SW,TOWN_SHOT_LIMIT:SL}=await import('/js/wgsl/townsfolk.js');
   const device=await(await navigator.gpu.requestAdapter()).requestDevice(),B=GPUBufferUsage,errors=[];
   device.onuncapturederror=e=>errors.push(e.error.message);
   const module=device.createShaderModule({code:TOWNSFOLK_WALK});
@@ -32,6 +32,8 @@ async function setUp(){
   const renderMod=device.createShaderModule({code:TOWNSFOLK_RENDER});
   const badRender=(await renderMod.getCompilationInfo()).messages.filter(m=>m.type==='error');
   if(badRender.length)throw Error(badRender.map(m=>m.message).join('\n'));
+  const badShadow=(await device.createShaderModule({code:TOWNSFOLK_SHADOW}).getCompilationInfo()).messages.filter(m=>m.type==='error');
+  if(badShadow.length)throw Error(badShadow.map(m=>m.message).join('\n'));
   const pipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'main'}});
   const made=(data,usage)=>{const b=device.createBuffer({size:data.byteLength,usage:usage|B.COPY_DST|B.COPY_SRC});device.queue.writeBuffer(b,0,data);return b;};
   const LOOKS=48;
@@ -49,7 +51,7 @@ async function setUp(){
       w[at+10]=i%LOOKS;w[at+11]=(i>=LOOKS?1:0)|flags;
     });
     const span=people.length;
-    const clips=new Uint32Array(28);
+    const clips=new Uint32Array(28),calendar=new Float32Array(clips.buffer);
     // idle 0+10, walk 10+10, run 20+10, cower 30+5, face 35+6, back 41+6, the same for both.
     for(const m of [0,1])clips.set([0,10,10,10,20,10,30,5,35,6,41,6],m*12);
     clips[24]=span;clips[25]=LOOKS;
@@ -59,17 +61,19 @@ async function setUp(){
     frameData[25]=1;frameData[30]=1;frameData[33]=sun;frameData[37]=1000;
     const parts={
       frame,walkers:made(new Uint8Array(walkers),B.STORAGE),route:made(new Float32Array(samples),B.STORAGE),
-      bodies:device.createBuffer({size:8*span*32,usage:B.STORAGE|B.COPY_SRC}),
-      draws:made(new Uint32Array(40),B.STORAGE),
+      bodies:device.createBuffer({size:BUCKETS*span*32,usage:B.STORAGE|B.COPY_SRC}),
+      draws:made(new Uint32Array(BUCKETS*5),B.STORAGE),
       crowd:made(clips,B.UNIFORM),shots:device.createBuffer({size:(4+SL*SW)*4,usage:B.UNIFORM|B.COPY_DST}),
       fates:device.createBuffer({size:people.length*TOWN_FATE_WORDS*4,usage:B.STORAGE|B.COPY_SRC}),
     };
     const group=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:['frame','walkers','route','bodies','draws','crowd','shots','fates'].map((name,binding)=>({binding,resource:{buffer:parts[name]}}))});
-    return {parts,group,frameData,people:people.length,span};
+    return {parts,group,frameData,clips,calendar,people:people.length,span};
   };
-  window.run=async(t,seconds,shots=[],{wantBodies=true}={})=>{
+  // `hours` is the game's date as the pass is told it, and stays as it was last given.
+  window.run=async(t,seconds,shots=[],{wantBodies=true,hours}={})=>{
     t.frameData[19]=seconds;device.queue.writeBuffer(t.parts.frame,0,t.frameData);
-    device.queue.writeBuffer(t.parts.draws,0,new Uint32Array(40));
+    device.queue.writeBuffer(t.parts.draws,0,new Uint32Array(BUCKETS*5));
+    if(hours!==undefined){t.calendar[26]=hours;device.queue.writeBuffer(t.parts.crowd,0,t.clips);}
     const words=new Uint32Array(4+SL*SW),floats=new Float32Array(words.buffer);
     words[0]=shots.length;
     shots.forEach((s,i)=>floats.set([...s.start,s.strike??0,...s.end,s.blast??0,s.reach??1,s.seed??(i+1)],4+i*SW));
@@ -83,12 +87,13 @@ async function setUp(){
     const fateBytes=await take(fateRead),fateWords=new Uint32Array(fateBytes),fateFloats=new Float32Array(fateBytes);
     const fates=[];
     for(let i=0;i<t.people;i++){const a=i*TOWN_FATE_WORDS;fates.push({mode:fateWords[a],since:fateFloats[a+1],until:fateFloats[a+2],runFor:fateFloats[a+3],along:fateFloats[a+4],going:fateFloats[a+5],lane:fateFloats[a+6],clock:fateFloats[a+8],how:fateWords[a+11]});}
-    const out={fates,bodies:[]};
+    const out={fates,bodies:[],shadows:[]};
     if(wantBodies){
       const bytes=await take(bodyRead),draws=new Uint32Array(await take(drawRead)),bw=new Uint32Array(bytes),bf=new Float32Array(bytes);
-      for(let bucket=0;bucket<8;bucket++)for(let slot=0;slot<draws[bucket*5+1];slot++){
+      // Those drawn, a run for each model at each level of detail, and then a run for each model of who casts a shadow.
+      for(let bucket=0;bucket<BUCKETS;bucket++)for(let slot=0;slot<draws[bucket*5+1];slot++){
         const a=(bucket*t.span+slot)*8,who=bw[a+7];
-        out.bodies.push({who,x:bf[a],y:bf[a+1],z:bf[a+2],heading:bf[a+3],frameA:bw[a+4],frameB:bw[a+5],blend:bf[a+6]});
+        (bucket<SHADE?out.bodies:out.shadows).push({who,tier:bucket%4,x:bf[a],y:bf[a+1],z:bf[a+2],heading:bf[a+3],frameA:bw[a+4],frameB:bw[a+5],blend:bf[a+6]});
       }
     }
     return out;
@@ -281,28 +286,61 @@ test('someone who runs to a closed door stays in till it is over, and comes out 
   assert.ok(ran.some(who=>seen.slice(3).some(f=>f.bodies.includes(who))),'out again on their way back');
 });
 
-test('those struck lie where they fell at night, when the rest have gone home, and stay on the ground for a full day',async()=>{
-  const {byDay,byNight,after23Hours,after25Hours,errors}=await inPage(async spec=>{
-    const t=town(spec),first=(await run(t,10)).bodies[0];
-    await run(t,10.02,[{start:[first.x,1,first.z-30],end:[first.x,1,first.z+30],strike:.4,reach:.01}]);
+test('those struck lie where they fell at night, when the rest have gone home, and each lies a day by the calendar',async()=>{
+  // The frame clock never leaves its ten minutes, as in the game. Only the date the pass is told moves on.
+  const seen=await inPage(async spec=>{
+    const t=town(spec),lying=frame=>frame.bodies.filter(b=>b.frameA>=35).map(b=>b.who).sort((a,b)=>a-b);
+    const through=b=>[{start:[b.x,1,b.z-30],end:[b.x,1,b.z+30],strike:.4,reach:.01}];
+    const first=(await run(t,10,[],{hours:100})).bodies[0];
+    await run(t,10.02,through(first));
     const byDay=(await run(t,20)).bodies.length;
     t.frameData[33]=-1;
-    const night=await run(t,30);
-    const after23h=await run(t,10+82800);
-    const after25h=await run(t,10+90000);
-    return {
-      byDay,
-      byNight:night.bodies.filter(b=>b.frameA>=35).length,
-      after23Hours:after23h.bodies.filter(b=>b.frameA>=35).length,
-      after25Hours:after25h.bodies.filter(b=>b.frameA>=35).length,
-      errors:[...townErrors],
-    };
+    const byNight=lying(await run(t,30));
+    // The frame clock comes round to before the moment he fell, and an hour has gone by.
+    const roundTheClock=lying(await run(t,5,[],{hours:101}));
+    // Twenty hours after the first, a second falls well away from him.
+    const second=(await run(t,40,[],{hours:120})).bodies.find(b=>b.frameA<35&&Math.abs(b.x-first.x)>20);
+    await run(t,40.02,through(second));
+    const at123=lying(await run(t,50,[],{hours:123}));
+    const day=await run(t,60,[],{hours:124.5});
+    const at143=lying(await run(t,70,[],{hours:143}));
+    const later=await run(t,80,[],{hours:144.5});
+    return {first:first.who,second:second.who,byDay,byNight,roundTheClock,at123,at124:lying(day),firstFate:day.fates[first.who],secondFate:day.fates[second.who],at143,at144:lying(later),lastFate:later.fates[second.who],errors:[...townErrors]};
+  },street(strung(0)));
+  assert.deepEqual(seen.errors,[]);
+  assert.equal(seen.byDay,PEOPLE);
+  assert.deepEqual(seen.byNight,[seen.first],'one person was struck, and lies there after dark');
+  assert.deepEqual(seen.roundTheClock,[seen.first],'the turn of the frame clock raises no one');
+  const both=[seen.first,seen.second].sort((a,b)=>a-b);
+  assert.deepEqual(seen.at123,both,'a day less an hour after the first fell, both lie there');
+  assert.deepEqual(seen.at124,[seen.second],'a day after, the first is gone and the second, who fell later, is not');
+  assert.deepEqual({mode:seen.firstFate.mode,since:seen.firstFate.since,clock:seen.firstFate.clock,how:seen.firstFate.how},{mode:TOWN_ABOUT,since:0,clock:0,how:0},'and the first is about again with nothing left of it');
+  assert.equal(seen.secondFate.mode,TOWN_DOWN);
+  assert.equal(seen.secondFate.clock,120,'each keeps the hour they fell');
+  assert.deepEqual(seen.at143,[seen.second]);
+  assert.deepEqual(seen.at144,[],'the second lies his own day too');
+  assert.equal(seen.lastFate.mode,TOWN_ABOUT);
+});
+
+test('everyone drawn casts a shadow, and so does someone just out of sight, who is not drawn',async()=>{
+  // The view is forty metres wide here, about the middle of the street.
+  const {bodies,shadows,errors}=await inPage(async spec=>{
+    const t=town(spec);
+    t.frameData[0]=1/20;t.frameData[16]=100;
+    return {...await run(t,5),errors:[...townErrors]};
   },street(strung(0)));
   assert.deepEqual(errors,[]);
-  assert.equal(byDay,PEOPLE);
-  assert.equal(byNight,1,'one person was struck');
-  assert.equal(after23Hours,1,'casualty body remains on the ground after 23 hours (< 1 day)');
-  assert.equal(after25Hours,0,'casualty body clears after 25 hours (> 1 day)');
+  const drawn=new Set(bodies.map(b=>b.who)),cast=new Map(shadows.map(b=>[b.who,b]));
+  assert.ok(drawn.size>10&&drawn.size<PEOPLE/2,`${drawn.size} drawn`);
+  assert.equal(shadows.length,cast.size,'no one casts two');
+  for(const body of bodies){
+    assert.ok(Math.abs(body.x-100)<20+1.3+.01,`${body.who} at ${body.x} is drawn only if in view`);
+    assert.deepEqual({...cast.get(body.who),tier:0},{...body,tier:0},'and casts a shadow from the same place in the same pose');
+  }
+  const unseen=shadows.filter(b=>!drawn.has(b.who));
+  assert.ok(unseen.length>=8,`${unseen.length} cast a shadow from out of sight`);
+  for(const body of unseen)assert.ok(Math.abs(body.x-100)>20&&Math.abs(body.x-100)<=38.01,`${body.who} at ${body.x} is beside the view and near it`);
+  assert.equal(cast.size,[...Array(PEOPLE).keys()].filter(i=>Math.abs((i+.5)*LENGTH/PEOPLE+5*WALK_SPEED-100)<=38).length,'and no one further off is kept at all');
 });
 
 test('the list JavaScript sends says where shot went and nothing about anyone',()=>{

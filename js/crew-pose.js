@@ -264,43 +264,51 @@ function poseGroundedGunBody(a,s,boat,requestedLean,hands=null,{floorAt=null,sto
   const point=name=>poseHullPoint(posePosition(a.world[poseNodeIndex(a,name)]),s);
   s.moisturePoints=[feet[0].sole.map((v,i)=>(v+feet[1].sole[i])*.5),point('pelvis'),point('spine_02'),point('Head')];
 }
-export function poseCrewWork(a,s,boat){
-  const j=s.job;s.grips=null;s.walkContacts=null;s.gunContacts=null;
-  if(s.overboard?.inWater){
-    poseNeutralSeatedBody(a);
-    const pelvis=poseNodeIndex(a,'pelvis'),head=poseNodeIndex(a,'Head'),neck=poseNodeIndex(a,'neck_01');
-    const seed=(s.crewIndex??0)*1.37,t=(s.time??0)*2.8+seed;
-    if(s.overboard.alive){
-      // Active breaststroke / treading-water pose: body submerged to the shoulders with head held clear of the sea.
-      if(pelvis>=0){
-        const p=posePosition(a.world[pelvis]);
-        poseMoveBone(a,pelvis,[p[0],p[1]-1.08+0.04*Math.sin(t),p[2]]);
-      }
-      if(neck>=0)turnBone(a,neck,[0,1,0],[0,0.92,-0.38]);
-      if(head>=0)turnBone(a,head,[0,1,0],[0.16*Math.sin(t*0.45),0.86,-0.48]);
-      const scull=Math.sin(t),reach=Math.cos(t);
-      const handL=[0.32+0.18*Math.max(0,scull),0.04+0.05*reach,0.18+0.16*reach];
-      const handR=[-0.32-0.18*Math.max(0,scull),0.04+0.05*reach,0.18+0.16*reach];
-      solveCrewLimb(a,['upperarm_l','lowerarm_l','hand_l'],handL,[0.65,0.12,-0.10]);
-      solveCrewLimb(a,['upperarm_r','lowerarm_r','hand_r'],handR,[-0.65,0.12,-0.10]);
-      const kick=Math.sin(t*1.2);
-      solveCrewLimb(a,['thigh_l','calf_l','foot_l'],[0.18+0.06*kick,-0.72+0.12*kick,-0.10-0.08*kick],[0.26,-0.35,0.65]);
-      solveCrewLimb(a,['thigh_r','calf_r','foot_r'],[-0.18+0.06*kick,-0.72-0.12*kick,-0.10+0.08*kick],[-0.26,-0.35,0.65]);
-      return;
-    }
-    // Dead sailor floating awash on the waves: limbs buoyantly splayed and rocking with the swell.
+// A man in the water. His stroke, and a dead body's sway, each repeat exactly, so that either is baked once as a
+// loop for the GPU to play; one with a wound to show is solved here from the same numbers.
+export const CREW_AFLOAT_RATE=2.8;
+export const CREW_AFLOAT_LOOPS=[
+  {name:'Swim',alive:true,duration:4*Math.PI/CREW_AFLOAT_RATE,rate:10},
+  {name:'Float',alive:false,duration:2*Math.PI/(.35*CREW_AFLOAT_RATE),rate:5},
+];
+// Where in his stroke a sailor is, in seconds. Each starts somewhere of his own.
+export function crewAfloatSeconds(s){return (s.time??0)+(s.crewIndex??0)*1.37/CREW_AFLOAT_RATE;}
+export function poseCrewAfloat(a,alive,seconds){
+  poseNeutralSeatedBody(a);
+  const pelvis=poseNodeIndex(a,'pelvis'),head=poseNodeIndex(a,'Head'),neck=poseNodeIndex(a,'neck_01'),t=seconds*CREW_AFLOAT_RATE;
+  if(alive){
+    // Active breaststroke / treading-water pose: body submerged to the shoulders with head held clear of the sea.
     if(pelvis>=0){
       const p=posePosition(a.world[pelvis]);
-      poseMoveBone(a,pelvis,[p[0],p[1]-0.82,p[2]]);
+      poseMoveBone(a,pelvis,[p[0],p[1]-1.08+0.04*Math.sin(t),p[2]]);
     }
-    const sway=Math.sin(t*0.35);
-    if(head>=0)turnBone(a,head,[0,1,0],[0.25*sway,0.94,0.22]);
-    solveCrewLimb(a,['upperarm_l','lowerarm_l','hand_l'],[0.46,0.24+0.05*sway,0.08],[0.7,0.3,0.1]);
-    solveCrewLimb(a,['upperarm_r','lowerarm_r','hand_r'],[-0.46,0.24-0.05*sway,0.08],[-0.7,0.3,0.1]);
-    solveCrewLimb(a,['thigh_l','calf_l','foot_l'],[0.22,-0.68,0.06+0.04*sway],[0.25,-0.3,0.8]);
-    solveCrewLimb(a,['thigh_r','calf_r','foot_r'],[-0.22,-0.68,0.06-0.04*sway],[-0.25,-0.3,0.8]);
+    if(neck>=0)turnBone(a,neck,[0,1,0],[0,0.92,-0.38]);
+    if(head>=0)turnBone(a,head,[0,1,0],[0.16*Math.sin(t*0.5),0.86,-0.48]);
+    const scull=Math.sin(t),reach=Math.cos(t);
+    const handL=[0.32+0.18*Math.max(0,scull),0.04+0.05*reach,0.18+0.16*reach];
+    const handR=[-0.32-0.18*Math.max(0,scull),0.04+0.05*reach,0.18+0.16*reach];
+    solveCrewLimb(a,['upperarm_l','lowerarm_l','hand_l'],handL,[0.65,0.12,-0.10]);
+    solveCrewLimb(a,['upperarm_r','lowerarm_r','hand_r'],handR,[-0.65,0.12,-0.10]);
+    const kick=Math.sin(t*1.5);
+    solveCrewLimb(a,['thigh_l','calf_l','foot_l'],[0.18+0.06*kick,-0.72+0.12*kick,-0.10-0.08*kick],[0.26,-0.35,0.65]);
+    solveCrewLimb(a,['thigh_r','calf_r','foot_r'],[-0.18+0.06*kick,-0.72-0.12*kick,-0.10+0.08*kick],[-0.26,-0.35,0.65]);
     return;
   }
+  // Dead sailor floating awash on the waves: limbs buoyantly splayed and rocking with the swell.
+  if(pelvis>=0){
+    const p=posePosition(a.world[pelvis]);
+    poseMoveBone(a,pelvis,[p[0],p[1]-0.82,p[2]]);
+  }
+  const sway=Math.sin(t*0.35);
+  if(head>=0)turnBone(a,head,[0,1,0],[0.25*sway,0.94,0.22]);
+  solveCrewLimb(a,['upperarm_l','lowerarm_l','hand_l'],[0.46,0.24+0.05*sway,0.08],[0.7,0.3,0.1]);
+  solveCrewLimb(a,['upperarm_r','lowerarm_r','hand_r'],[-0.46,0.24-0.05*sway,0.08],[-0.7,0.3,0.1]);
+  solveCrewLimb(a,['thigh_l','calf_l','foot_l'],[0.22,-0.68,0.06+0.04*sway],[0.25,-0.3,0.8]);
+  solveCrewLimb(a,['thigh_r','calf_r','foot_r'],[-0.22,-0.68,0.06-0.04*sway],[-0.25,-0.3,0.8]);
+}
+export function poseCrewWork(a,s,boat){
+  const j=s.job;s.grips=null;s.walkContacts=null;s.gunContacts=null;
+  if(s.overboard?.inWater){poseCrewAfloat(a,s.overboard.alive,crewAfloatSeconds(s));return;}
   if(s.casualtyState==='fallen'||(s.knockdownTimer??0)>0){
     if(applyArticulatedRagdollPose(a,s,boat))return;
     const seed=(s.crewIndex??0)*1.37;

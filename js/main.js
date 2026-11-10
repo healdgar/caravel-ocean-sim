@@ -2981,7 +2981,7 @@ async function main() {
     }
     updateCrewUI();
     window.oceanVoyage=voyageCtl;
-    portDamage.setClock(()=>voyageCtl?.voyage?.dateMs??Date.parse(astronomy.state?.date));
+    portDamage.setClock(gameDateMs);
     // A port call: at a port with buildings, with no fight on, in a tab that owns the save.
     const hullMassKg=id=>{const rt=getShipModel(id).runtime;return boatHydrodynamics(rt.length,rt.beam,getShipParts(id).loading.provisionDays,0,id).mass;};
     careerPort=createCareerPort({
@@ -3790,7 +3790,7 @@ async function main() {
     for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter)v.pose?.encode(cp,v.boat.showProw);
     for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter&&vesselHasVisibleCrew(v))v.crew?.encodePose(cp);
     fortSoldiers?.encodePose(cp);
-    townsfolk?.encode(cp);
+    townsfolk?.encode(cp,gameDateMs());
     props?.encode(cp,simF[53],simTime);
     for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter)v.interaction.encode(cp,wakePool.next);
     wakePool.commit();
@@ -3839,6 +3839,9 @@ async function main() {
   const frameWind=[0,0,0];
   const NO_AIM_ARCS=[];
   let governedSections=0;
+  // The game's date: the voyage's calendar, or the sky's where no voyage keeps one. Repairs ashore, the fallen's
+  // day on the ground and the townsfolk's all count by it.
+  function gameDateMs(){return voyageCtl?.voyage?.dateMs??Date.parse(astronomy.state?.date);}
   function frame(now) {
     if (shooting) return;  // paused while a screenshot is read back
     if(bloomMeasureRequested&&bloomFrameReady){measureBloomAlone();return;}
@@ -4034,10 +4037,10 @@ async function main() {
     }
     const windVec=frameWind;
     if(!castleDuel.active){
-      portGunnery?.update(dt,windVec);
+      portGunnery?.update(dt,windVec,gameDateMs());
       freeCannon.update(dt,{firing:cameraMode==='free'&&keys.KeyF===true,eye:[cam.x,cam.y,cam.z],
         forward:[Math.cos(cam.pitch)*Math.sin(cam.yaw),Math.sin(cam.pitch),-Math.cos(cam.pitch)*Math.cos(cam.yaw)],wind:windVec});
-      fortSoldiers?.update(terrain?.port??null,dt,P.windSpeed,cam,!portGunnery);
+      fortSoldiers?.update(terrain?.port??null,dt,P.windSpeed,cam,!portGunnery,gameDateMs());
     }else{
       fortSoldiers?.update(castleDuel.port,dt,P.windSpeed,cam,false);
     }

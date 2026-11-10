@@ -165,8 +165,12 @@ test('crew climb real runners, operate sails and hatch, hold in danger, and retu
         }
         assert.ok(Math.abs(s.position[0])>.52,'climber clears the mast');
       }
-      // A hand going by another in a tight place turns his shoulders and brushes past: .38 is two torsos, depth to depth.
-      for(let j=0;j<k;j++)assert.ok(Math.hypot(...Array.from(s.position).map((v,n)=>v-c.crew[j].position[n]))>.38,'bodies remain separated');
+      // Half a metre between two bodies, except while one of them has his shoulders round to brush past the other in a
+      // tight place: then .38, which is two torsos depth to depth.
+      for(let j=0;j<k;j++){
+        const o=c.crew[j],apart=Math.hypot(...Array.from(s.position).map((v,n)=>v-o.position[n])),turned=Math.abs(s.shoulderTurn??0)>.02||Math.abs(o.shoulderTurn??0)>.02;
+        assert.ok(apart>(turned?.38:.50),`bodies remain separated: ${s.id} and ${o.id} ${apart.toFixed(3)} m apart at step ${i}, shoulders ${turned?'turned':'square'}`);
+      }
     }
     if(i===100){const sailor=c.crew.find(s=>s.job?.stage==='ascending'),position=Array.from(sailor.position),rung=sailor.job.rung;
       stepCompany(c,{...b,roll:.6},.1,8);assert.equal(sailor.job.rung,rung);assert.deepEqual(Array.from(sailor.position),position);assert.equal(sailor.intent,'brace');}
@@ -375,6 +379,61 @@ test('far sailors pose from baked clips unless their own pose still matters',asy
   assert.equal(crewClipOnly(90,{pendingWounds:[]}),true);
   assert.equal(crewClipOnly(90,{knockdownTimer:.5}),false);
   assert.equal(crewClipOnly(90,{casualtyState:'fallen'}),false);
+  // Wounds he carries are in his own pose only: a baked clip would give him his arm back.
+  assert.equal(crewClipOnly(90,{crewInjuries:[{kind:'severed',bone:'lowerarm_l'}]}),false);
+  assert.equal(crewClipOnly(90,{stuckArrows:[{}]}),false);
+  assert.equal(crewClipOnly(90,{crewInjuries:null,stuckArrows:[]}),true);
+});
+
+test('a body that has come to rest is solved twice more and then left until it is disturbed',async()=>{
+  const {crewPoseDue,crewPoseSolved,crewBodyAtRest}=await import('../js/crew-lod.js');
+  const body={casualtyState:'fallen',visible:true,poseAge:9,ragdoll:{active:true,settled:false}};
+  assert.equal(crewPoseDue(body,false,false,3),true,'still tumbling');
+  crewPoseSolved(body);
+  body.ragdoll.settled=true;
+  assert.equal(crewBodyAtRest(body),true);
+  for(let i=0;i<2;i++){assert.equal(crewPoseDue(body,false,false,3),true);crewPoseSolved(body);}
+  assert.equal(crewPoseDue(body,false,false,3),false,'both shown poses are now the resting one');
+  assert.equal(crewPoseDue(body,false,true,1),true,'a new wound still shows at once');
+  body.ragdoll.settled=false;
+  assert.equal(crewPoseDue(body,false,false,3),true,'and so does whatever woke it');
+  crewPoseSolved(body);
+  assert.equal(body.posedAtRest,0);
+  // Standing hands, and anyone posed by clips, are untouched by any of this.
+  assert.equal(crewPoseDue({visible:true,poseAge:3},false,false,3),true);
+  assert.equal(crewPoseDue({visible:true,poseAge:2},false,false,3),false);
+  assert.equal(crewPoseDue({visible:false,poseAge:9},false,false,3),false);
+  assert.equal(crewPoseDue({visible:true,poseAge:9},true,true,1),false);
+});
+
+test('a garrison is solved on its stride, except what has just changed or is still falling',async()=>{
+  const {fortPoseDue,crewPoseSolved}=await import('../js/crew-lod.js');
+  const sentry={_poseReady:false,walk:1};
+  assert.equal(fortPoseDue(sentry,false,false,false),false,'a walking sentry waits for the stride');
+  assert.equal(fortPoseDue(sentry,true,false,false),true);
+  assert.equal(fortPoseDue(sentry,false,false,true),true,'the frame he sets off is solved at once');
+  assert.equal(fortPoseDue(sentry,false,true,false),true,'and so is everyone at a new port');
+  assert.equal(fortPoseDue({pendingWounds:[{}]},false,false,false),true);
+  assert.equal(fortPoseDue({casualtyState:'fallen',ragdoll:{active:true,settled:false}},false,false,false),true,'a body still tumbling is solved every frame');
+  assert.equal(fortPoseDue({knockdownTimer:.4},false,false,false),true);
+  assert.equal(fortPoseDue({garrisonFall:{to:0,speed:1}},false,false,false),true);
+  const body={casualtyState:'fallen',ragdoll:{active:true,settled:true}};
+  assert.equal(fortPoseDue(body,true,false,false),true,'once as it lies');
+  crewPoseSolved(body);
+  assert.equal(fortPoseDue(body,true,false,false),false,'and then not again, stride or no');
+  assert.equal(fortPoseDue(body,false,true,false),true,'until its slot is another port\'s');
+});
+
+test('only the captain\'s painted body looks its texture up, and only where it is drawn',async()=>{
+  const {CREW_RENDER,crewRenderWGSL,CREW_CLOTH_SHEEN}=await import('../js/wgsl/crew.js');
+  const entry=CREW_RENDER.slice(CREW_RENDER.indexOf('fn crewFS'));
+  assert.doesNotMatch(CREW_RENDER,/textureSampleBias\(captainTex/,'no lookup that every sailor\'s fragment pays for');
+  assert.match(entry,/if\(v\.color\.b<-1\.0\)\{base=textureSampleGrad\(captainTex,/,'the lookup sits behind the painted-vertex test');
+  assert.ok(entry.indexOf('dpdx(')<entry.indexOf('if(v.color.b<-1.0)'),'and its footprint is measured before the branch, where derivatives are defined');
+  // The cloth's sheen is the one term a hull lacks, and it can be taken away to compare the rest.
+  assert.ok(CREW_CLOTH_SHEEN>0&&CREW_CLOTH_SHEEN<.1);
+  assert.notEqual(crewRenderWGSL(0),CREW_RENDER);
+  assert.equal(crewRenderWGSL(CREW_CLOTH_SHEEN),CREW_RENDER);
 });
 
 test('baked clips store every frame in order and wrap time without a jump',async()=>{
@@ -396,6 +455,58 @@ test('baked clips store every frame in order and wrap time without a jump',async
   assert.ok(Math.abs(crewClipFrame(clips[1],1.25)-2.5)<1e-9,'a clip repeats');
   assert.ok(Math.abs(crewClipFrame(clips[1],-.25)-7.5)<1e-9,'time before the start wraps backwards');
   assert.ok(crewClipFrame(clips[0],1.9999)<clips[0].frames);
+});
+
+test('a whole man in the water is posed from a baked loop, and only one with a wound to show is solved for',async()=>{
+  const {crewAfloatClip,crewBakedPose,crewPoseDue}=await import('../js/crew-lod.js');
+  const swimmer={casualtyState:'fallen',overboard:{inWater:true,alive:true},posedOnce:true,poseAge:99,visible:true};
+  assert.equal(crewAfloatClip(swimmer),'Swim');
+  assert.equal(crewBakedPose(3,swimmer),'Swim','however near he is');
+  assert.equal(crewPoseDue(swimmer,Boolean(crewBakedPose(3,swimmer)),false,1),false,'so nothing is solved for him');
+  assert.equal(crewAfloatClip({...swimmer,overboard:{inWater:true,alive:false}}),'Float','a drowned man floats');
+  assert.equal(crewAfloatClip({...swimmer,overboard:{inWater:false,alive:true}}),null,'in the air he is still a falling body');
+  assert.equal(crewAfloatClip({...swimmer,overboard:{inWater:true,alive:false,gone:true}}),null,'and one out of sight is nobody');
+  assert.equal(crewAfloatClip({...swimmer,crewInjuries:[{kind:'severed',bone:'hand_l'}]}),null,'a lost hand is in his own pose');
+  assert.equal(crewAfloatClip({...swimmer,stuckArrows:[{}]}),null);
+  assert.equal(crewAfloatClip({...swimmer,pendingWounds:[{}]}),null,'a hit shows at once');
+  assert.equal(crewBakedPose(80,{casualtyState:'able'}),'walk');
+  assert.equal(crewBakedPose(10,{casualtyState:'able'}),null);
+});
+
+test('the swimming and floating loops are the pose a swimmer is solved with, baked, and each closes on itself',async()=>{
+  const {bakeCrewClips,crewClipFrame,CREW_SOLVED_LOOPS,CREW_CLIP_MODES}=await import('../js/crew-clip-pose.js');
+  const {crewAfloatSeconds,CREW_AFLOAT_RATE}=await import('../js/crew-pose.js');
+  const a=model.animator,J=65*16;
+  const {palettes,clips}=bakeCrewClips(a,30,CREW_SOLVED_LOOPS);
+  // The order the shader's layout reads them in.
+  assert.deepEqual(clips.map(c=>c.name),['Idle','Walk','Swim','Float']);
+  assert.deepEqual([CREW_CLIP_MODES.Swim,CREW_CLIP_MODES.Float],[2,3]);
+  assert.equal(palettes.length,clips.reduce((n,c)=>n+c.frames,0)*J);
+  // Where a palette puts a joint: the palette maps the bind pose, so it is applied to the joint's place at rest.
+  a.sample(null,0);
+  const rest=new Map(['pelvis','Head','hand_l','hand_r','foot_l','foot_r','calf_r'].map(name=>[name,[...a.world[a.nodeIndex(name)].slice(12,15)]]));
+  const place=(palette,name)=>{const at=a.joints.indexOf(a.nodeIndex(name))*16,[x,y,z]=rest.get(name);
+    return [0,1,2].map(k=>palette[at+k]*x+palette[at+4+k]*y+palette[at+8+k]*z+palette[at+12+k]);};
+  const far=(p,q)=>Math.hypot(...p.map((v,i)=>v-q[i]));
+  for(const clip of clips.slice(2)){
+    const loop=CREW_SOLVED_LOOPS.find(l=>l.name===clip.name),frame=f=>palettes.slice((clip.first+f)*J,(clip.first+f+1)*J);
+    assert.ok(clip.frames>=20&&clip.frames<=80,`${clip.name} is a few dozen frames, not thousands: ${clip.frames}`);
+    loop.pose(a,loop.duration);const end=a.palette.slice(),first=frame(0);
+    let worst=0;for(let i=0;i<J;i++)worst=Math.max(worst,Math.abs(end[i]-first[i]));
+    assert.ok(worst<1e-4,`${clip.name} ends where it began: ${worst}`);
+    // Between one frame and the next, around the join as anywhere, a hand moves a few centimetres at most.
+    let step=0;for(let f=0;f<clip.frames;f++)step=Math.max(step,far(place(frame(f),'hand_l'),place(frame((f+1)%clip.frames),'hand_l')));
+    assert.ok(step<0.09,`${clip.name} has no jump in it: ${step}`);
+  }
+  // What a wounded swimmer is solved with, at the instant of one baked frame, is that frame.
+  const swim=clips[2],at=11,seconds=at/swim.frames*swim.duration,crewIndex=4;
+  const s={casualtyState:'fallen',overboard:{inWater:true,alive:true},crewIndex,time:seconds-crewIndex*1.37/CREW_AFLOAT_RATE,position:[0,0,0],scale:[1,1,1],yaw:0};
+  assert.ok(Math.abs(crewAfloatSeconds(s)-seconds)<1e-9);
+  assert.ok(Math.abs(crewClipFrame(swim,crewAfloatSeconds(s))-at)<1e-6);
+  a.sample('Idle',0);poseCrewWork(a,s,boat);const solved=a.palette.slice(),baked=palettes.slice((swim.first+at)*J,(swim.first+at+1)*J);
+  for(const name of ['pelvis','Head','hand_l','hand_r','foot_l','foot_r','calf_r'])assert.ok(far(place(solved,name),place(baked,name))<1e-4,`${name} is where the solved pose has it`);
+  // And he moves: a stroke is not a statue.
+  assert.ok(far(place(palettes.slice(swim.first*J,(swim.first+1)*J),'hand_l'),place(palettes.slice((swim.first+Math.round(swim.frames/4))*J,(swim.first+Math.round(swim.frames/4)+1)*J),'hand_l'))>0.08);
 });
 
 test('captain GLB carries its embedded high-resolution texture, UV sentinels, 65-joint rig and decimated LODs',()=>{

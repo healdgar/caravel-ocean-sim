@@ -88,7 +88,7 @@ async function fleetRuntimeSnapshot(page){
   });
 }
 function assertFleetSnapshot(snapshot,expected){
-  assert.equal(snapshot.active,expected);assert.deepEqual(snapshot.crewBuffers,{joints:2*expected,actors:2*expected,vertices:2,indices:2},'only immutable crew geometry is shared; real joint/actor GPU buffers belong to each vessel');assert.ok(snapshot.sources.every(source=>source.assetFrozen&&source.groupsFrozen));assert.deepEqual(snapshot.errors,[]);assert.equal(snapshot.lost,null);
+  assert.equal(snapshot.active,expected);assert.deepEqual(snapshot.crewBuffers,{joints:2*expected,actors:2*expected,vertices:3,indices:3},'only immutable crew geometry is shared (the men\'s, the women\'s and the captain\'s body, once each); real joint/actor GPU buffers belong to each vessel, two apiece');assert.ok(snapshot.sources.every(source=>source.assetFrozen&&source.groupsFrozen));assert.deepEqual(snapshot.errors,[]);assert.equal(snapshot.lost,null);
   for(const [kind,count]of Object.entries(snapshot.unique))assert.equal(count,expected,'each active ship owns '+kind);
   assert.deepEqual(snapshot.wakes.layers,[expected,expected]);assert.equal(snapshot.wakes.count,expected);
   assert.equal(snapshot.shadows.length,3);assert.ok(snapshot.shadows.every(s=>s.layers===expected&&s.width===2048&&s.height===2048));

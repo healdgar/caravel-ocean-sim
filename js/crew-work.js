@@ -430,6 +430,8 @@ function crewWorkTrafficClear(s,boat,x0,z0,x1,z1){
   const sx=boat.beam/3.6,sz=boat.length/12;
   return crewWorkSegmentClear(s,boat,[x0/sx,crewDeckHeight(boat,z0/sz,x0/sx),z0/sz],[x1/sx,crewDeckHeight(boat,z1/sz,x1/sx),z1/sz]);
 }
+// What a hand at work asks of the traffic, written again for each of them rather than made each time.
+const crewWorkStepAsked={x:0,z:0,toX:0,toZ:0,speed:0,dt:0,segmentClear:crewWorkTrafficClear,rejoin:crewWorkRejoin};
 // The route to the next waypoint need only be asked about once, until something is shot away.
 function crewWorkRouteClear(s,boat,j,p,target,next){
   const revision=boat.damage?.fracture?.revision??0;
@@ -1145,7 +1147,7 @@ export function stepCrewWork(s,company,boat,dt) {
     s.intent=o.hazard||choice==='brace'?'brace':choice==='standby'?'standby':'work';s.decisionIn=.5;
   }
   const active=s.intent==='work';let moving=false;
-  if(!hasExtendedCrewModel(boat.modelId))s.visible=boat.beam>=3.2&&boat.length>=10.5;
+  if(!hasExtendedCrewModel(boat.modelId))s.visible=!s.obliterated&&boat.beam>=3.2&&boat.length>=10.5;
   if(active){
     j.elapsed+=dt;
     if(j.kind==='gunnery'&&j.stage==='working'){
@@ -1187,7 +1189,8 @@ export function stepCrewWork(s,company,boat,dt) {
       const motion=crewMotionPolicy(boat,{purpose:'work',grade:horizontal>1e-8?(b[1]-a[1])/horizontal:0,hazard:o.hazard});
       // Off the line of his route only on a level deck, and never on a thwart-stepping rowed hull.
       const onDeck=crewWorkOnDeck(boat,p,target);
-      const passing=onDeck?crewTrafficStep(s,company,boat,{x:a[0],z:a[2],toX:b[0],toZ:b[2],speed:motion.speedMetresPerSecond,dt,segmentClear:crewWorkTrafficClear,rejoin:crewWorkRejoin}):null;
+      const asked=crewWorkStepAsked;asked.x=a[0];asked.z=a[2];asked.toX=b[0];asked.toZ=b[2];asked.speed=motion.speedMetresPerSecond;asked.dt=dt;
+      const passing=onDeck?crewTrafficStep(s,company,boat,asked):null;
       // Nobody walks a rowed hull's one gangway both ways, as that hull's own planner sees to it.
       const standing=!onDeck&&!Object.hasOwn(ROWING_DESIGNS,boat.modelId??'')&&crewTrafficGate(s,company,boat,a[0],a[2],dt);
       if(!onDeck)s.trafficWalkingNow=true;

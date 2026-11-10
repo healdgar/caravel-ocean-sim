@@ -224,6 +224,47 @@ export function crewNeedsCutShader(metresFromEye,firstPerson,woundAndScorch){
 // seated, fallen or just hurt still needs their own solved pose.
 const CREW_CLIP_ONLY_M=50;
 export function crewClipOnly(apparentMetres,sailor){
-  return apparentMetres>=CREW_CLIP_ONLY_M&&!sailor.seatedPose&&!sailor.pendingWounds?.length&&!sailor.wounds?.length&&!((sailor.knockdownTimer??0)>0)&&sailor.casualtyState!=='fallen';
+  // A lost limb and a stuck arrow are in his own solved pose, and a baked clip has neither.
+  return apparentMetres>=CREW_CLIP_ONLY_M&&!sailor.seatedPose&&!sailor.pendingWounds?.length&&!sailor.crewInjuries?.length&&!sailor.stuckArrows?.length&&!((sailor.knockdownTimer??0)>0)&&sailor.casualtyState!=='fallen';
+}
+
+// A man in the water with no wound to show swims, or floats, as every other does, so a baked loop serves him at
+// any distance and JavaScript solves nothing for him. One who is hurt, or only now hit, keeps his own solved pose.
+export function crewAfloatClip(sailor){
+  const o=sailor.overboard;
+  if(!o?.inWater||o.gone||sailor.pendingWounds?.length||sailor.crewInjuries?.length||sailor.stuckArrows?.length)return null;
+  return o.alive?'Swim':'Float';
+}
+// Which baked clip poses a sailor this frame, if any: a loop for a man in the water, 'walk' for the standing and
+// walking clips of one far off, and none for one whose pose is solved for him.
+export function crewBakedPose(apparentMetres,sailor){
+  return crewAfloatClip(sailor)??(crewClipOnly(apparentMetres,sailor)?'walk':null);
+}
+
+// A fallen body whose ragdoll has gone to sleep. It is solved twice more, so that both poses the GPU shows it
+// between are the one it rests in, and then not again until something wakes it.
+const CREW_REST_POSES=2;
+export function crewBodyAtRest(sailor){
+  return sailor.casualtyState==='fallen'&&!sailor.overboard&&Boolean(sailor.ragdoll?.active&&sailor.ragdoll.settled);
+}
+// Whether to solve a sailor's skeleton this frame. `snap` is a change that has to show at once.
+export function crewPoseDue(sailor,clipOnly,snap,interval){
+  if(clipOnly)return false;
+  if(snap)return true;
+  if(sailor.visible===false||(sailor.poseAge??0)<interval)return false;
+  return !(crewBodyAtRest(sailor)&&(sailor.posedAtRest??0)>=CREW_REST_POSES);
+}
+export function crewPoseSolved(sailor){
+  sailor.posedAtRest=crewBodyAtRest(sailor)?(sailor.posedAtRest??0)+1:0;
+}
+// Whether to solve a soldier ashore this frame. A garrison is solved at a stride of frames set by how far off it
+// is, and its joints are shown as solved, with nothing between. So what has just changed is solved at once, a body
+// in the air or tumbling every frame, a walking sentry on the stride, and a body come to rest once and no more.
+// `everyone` is a new port, where every slot still holds somebody else's pose.
+export function fortPoseDue(soldier,onStride,everyone,stirred){
+  if(everyone||stirred||soldier.pendingWounds?.length)return true;
+  if(crewBodyAtRest(soldier))return (soldier.posedAtRest??0)<1;
+  if(soldier.casualtyState==='fallen'||(soldier.knockdownTimer??0)>0||soldier.garrisonFall)return true;
+  return onStride;
 }
 
