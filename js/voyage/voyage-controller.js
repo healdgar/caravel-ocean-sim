@@ -27,6 +27,8 @@ import {
   warpTier,
   WARP_TIERS,
   DEFAULT_DEPARTURE,
+  voyageDateInEra,
+  normaliseVoyageEra,
   NM_PER_LEAGUE,
 } from './passage.js';
 import { createHelmsman, steerHelmsman, orderCourse, orderTack, applyCanvasOrder, canvasAdvice, CANVAS_ORDERS } from './helmsman.js';
@@ -796,7 +798,7 @@ export function createVoyageController(cfg) {
     });
     if (opts.dateMs === undefined) {
       alignDateToDaylightIfNight(voyage, (P?.sunAzim ?? 135) > 180 ? 14.2 : 9.8);
-    }
+    } else normaliseVoyageEra(voyage);
     voyage.passive = passive;
     voyage.compassCourse = voyageWrap360(boat.heading - voyage.variation);
     orderCourse(helmsman, voyage.compassCourse);
@@ -904,34 +906,28 @@ export function createVoyageController(cfg) {
 
   function syncAstronomy() {
     if (!astronomy || !voyage) return;
-    if (Number.isFinite(voyage.dateMs) && new Date(voyage.dateMs).getUTCFullYear() > 1800) {
-      const elapsedDays = Math.max(0, (voyage.dayAtSea ?? 1) - 1);
-      voyage.departureDateMs = DEFAULT_DEPARTURE.dateMs;
-      voyage.dateMs = DEFAULT_DEPARTURE.dateMs + elapsedDays * 86400000;
-    }
     if (astronomy.revision !== undefined && astronomy.revision !== lastAstroRevision) {
       if (astronomy.mode === 'manual') {
         respectManualSky = true;
       } else {
         respectManualSky = false;
         const userTimeMs = astronomy.epochMs + (astronomy.elapsedSeconds || 0) * 1000;
-        if (Number.isFinite(userTimeMs) && new Date(userTimeMs).getUTCFullYear() <= 1850) {
-          voyage.dateMs = userTimeMs;
-        }
+        // A night picked from after the voyage's era is shown by the sky panel but never dates the log.
+        if (voyageDateInEra(userTimeMs)) voyage.dateMs = userTimeMs;
       }
       lastAstroRevision = astronomy.revision;
     }
     // Always keep the geographic observer anchor synced to the ship's live lat/lon.
     astronomy.anchor = { latitude: voyage.true.lat, longitude: voyage.true.lon, x: boat.x, z: boat.z };
-    if (!respectManualSky) {
+    // Free sail leaves the sky clock to the sky panel: writing it here every frame would stop its
+    // time-lapse rate from ever accumulating and replace whatever night the player picked.
+    if (!voyage.passive && !respectManualSky) {
+      // Sun, moon and stars follow the warped voyage clock and the ship's true position.
+      astronomy.mode = 'astronomy';
+      astronomy.rate = 0;
       astronomy.epochMs = voyage.dateMs;
       astronomy.elapsedSeconds = 0;
-      if (!voyage.passive) {
-        // Sun, moon and stars follow the warped voyage clock and the ship's true position.
-        astronomy.mode = 'astronomy';
-        astronomy.rate = 0;
-        astronomy.update?.(0, boat);
-      }
+      astronomy.update?.(0, boat);
     }
   }
 

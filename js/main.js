@@ -13,7 +13,7 @@ import { setVesselHullIntegrity, vesselDamageSnapshot, restoreVesselDamageSnapsh
 import { createPortDamageStore } from './port-damage.js';
 import { careerGreatCircleKm, createCareerStore, applyShipwreckRecovery, nearestFoundedPort } from './career-save.js';
 import {lookoutEyeHeight} from './voyage/landfall-approach.js';
-import { serializeVoyage } from './voyage/passage.js';
+import { serializeVoyage, normaliseVoyageEra } from './voyage/passage.js';
 import { resetActiveIndigenousSovereigntyState } from './indigenous-sovereignty.js';
 import { coastalRegionStageURL } from './landfall.js';
 import { showCareerPrompt, showPortPanel, showCareerEnding, careerMoney } from './career-ui.js';
@@ -2922,7 +2922,6 @@ async function main() {
         const v=voyageCtl.voyage;
         if(terrain?.region?.year&&terrain.region.year!==1550&&!qs.has('astroDate')&&!urlGameState?.voyage?.dateMs){
           v.dateMs=Date.UTC(terrain.region.year,2,24,12,0,0);
-          v.departureDateMs=v.dateMs;
         }
         const qLat=Number(qs.get('lat')),qLon=Number(qs.get('lon'));
         if(Number.isFinite(qLat)&&Number.isFinite(qLon)&&qs.has('lat')&&qs.has('lon')){
@@ -2937,7 +2936,7 @@ async function main() {
         if(urlGameState?.voyage){
           const uv=urlGameState.voyage;
           if(Number.isFinite(uv.day))v.dayAtSea=uv.day;
-          if(Number.isFinite(uv.dateMs))v.dateMs=uv.dateMs;
+          if(Number.isFinite(uv.dateMs)){v.dateMs=uv.dateMs;normaliseVoyageEra(v);}
           if(v.provisions){
             if(Number.isFinite(uv.waterDays))v.provisions.water=uv.waterDays;
             if(Number.isFinite(uv.foodDays))v.provisions.food=uv.foodDays;

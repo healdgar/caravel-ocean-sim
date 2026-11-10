@@ -52,6 +52,20 @@ export const DEFAULT_DEPARTURE = Object.freeze({
   dateMs: Date.UTC(1550, 2, 24, 8, 0, 0), // = 14 March 1550 Julian
 });
 
+/** The last year a voyage may be dated. The sky panel may show any night; the log, the markets and the colonies know only this age. */
+export const VOYAGE_LAST_YEAR = 1800;
+export const voyageDateInEra = (dateMs) => Number.isFinite(dateMs) && new Date(dateMs).getUTCFullYear() <= VOYAGE_LAST_YEAR;
+/**
+ * A voyage dated after its era sails again from the default departure, keeping its days at sea.
+ * Call it where a date enters a voyage (a restored save, a shared link, a new start), never per frame.
+ */
+export function normaliseVoyageEra(voyage) {
+  if (!voyage || !Number.isFinite(voyage.dateMs) || voyageDateInEra(voyage.dateMs)) return voyage;
+  const elapsedDays = Math.max(0, (voyage.dayAtSea ?? 1) - 1);
+  voyage.dateMs = DEFAULT_DEPARTURE.dateMs + elapsedDays * 86400000;
+  return voyage;
+}
+
 /**
  * Create a new voyage (plain serializable data).
  */
@@ -373,11 +387,7 @@ export function serializeVoyage(voyage) {
 export function restoreVoyage(json) {
   const v = typeof json === 'string' ? JSON.parse(json) : json;
   if (!v || v.version !== 1 || !v.true || !v.dr) return null;
-  if (Number.isFinite(v.dateMs) && new Date(v.dateMs).getUTCFullYear() > 1800) {
-    const elapsedDays = Math.max(0, (v.dayAtSea ?? 1) - 1);
-    v.departureDateMs = DEFAULT_DEPARTURE.dateMs;
-    v.dateMs = DEFAULT_DEPARTURE.dateMs + elapsedDays * 86400000;
-  }
+  normaliseVoyageEra(v);
   v.weather = null;
   v.weatherSampleMs = -Infinity;
   v.interrupt = null;
