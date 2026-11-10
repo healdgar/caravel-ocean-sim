@@ -5,8 +5,30 @@ import { GUNNERY_AUDIO_ASSETS } from './gunnery-audio-assets.js';
 import { WORLD_AUDIO_ASSETS } from './world-audio-assets.js';
 import { createGunneryAudio } from './gunnery-audio.js';
 import { weatherClamp, weatherAudioLevels, createHullAudioState, createTimberAudioState } from './weather-state.js';
+import { CREW_WALK_CLIP_SECONDS, CREW_WALK_CYCLE_METRES } from './crew-motion.js';
+import { WALKER_WORDS, ROUTE_STEP_M } from './town-streets.js';
 
 const ALL_SOUNDS={...SOUND_ASSETS,...VOICE_ASSETS,...GUNNERY_AUDIO_ASSETS,...WORLD_AUDIO_ASSETS};
+// Wind, weather, the hull, the crew's voices, footsteps and the guns are decoded when sound is enabled. What
+// belongs to a place or an occasion (a shore, a town, a people, a sighting, a battle's wreckage and the
+// captain's ten spoken gun-laying orders) is fetched and decoded when it is first wanted.
+const BATTLE_SOUNDS=Object.freeze(['timber-crumble','stone-crumble','mast-snap',
+  ...Object.keys(ALL_SOUNDS).filter(id=>id.startsWith('enemy-')||id.startsWith('captain-guns-lay-'))]);
+const ON_DEMAND_SOUNDS=new Set([...BATTLE_SOUNDS,'shore-surf','shore-birds','town-ambience','crowd-panic',
+  ...Object.keys(ALL_SOUNDS).filter(id=>id.startsWith('indigenous-')||id.startsWith('lookout-'))]);
+const EAGER_SOUNDS=Object.freeze(Object.keys(ALL_SOUNDS).filter(id=>!ON_DEMAND_SOUNDS.has(id)));
+// A clip asked for before it is decoded still starts if it is ready this soon; later than that its moment
+// has passed. An order must be prompter, because the next line waits only for its stated length.
+const LATE_START_SECONDS=1.5,ORDER_LATE_START_SECONDS=.4;
+// A loop wanted only now and then is stopped once it has been silent this long.
+const LOOP_REST_SECONDS=8;
+// The shore and the nearest town are looked for this often, not every frame.
+const PLACE_PROBE_SECONDS=.25;
+// Speech has voices of its own, so falling timber cannot crowd out an order.
+const speechSound=id=>/^(captain-|crew-|lookout-|enemy-|indigenous-)/.test(id);
+const orderSound=id=>id.startsWith('captain-')||id.startsWith('crew-guns-');
+// A long tail may overlap itself once; no shorter effect stacks more than three deep.
+const sameSoundLimit=seconds=>seconds>=2?2:3;
 
 // Integrated loudness (LUFS) & true-peak dB measured by SoundCraft 0.18.0 (`assets/artcraft/soundcraft-loudness-audit.json`).
 export const SOUNDCRAFT_LUFS_AUDIT=Object.freeze({
@@ -56,7 +78,9 @@ export function probeShorelineSurf(arg1,arg2,settings={},weather={}){
         const x=listener.x+dx*d,z=listener.z+dz*d;
         const h=Number(sampleH(x,z));
         if(!Number.isFinite(h))continue;
-        const crossesShore=(prevH<=0.35&&h>=-0.45)||(prevH>=-0.45&&h<=0.35)||(h>-0.6&&h<4.5);
+        // Surf breaks where the ground passes through the waterline between two probes. Low ground
+        // inland is not a shore, however near sea level it lies.
+        const crossesShore=(prevH<=0.35&&h>=-0.45)||(prevH>=-0.45&&h<=0.35);
         if(crossesShore&&d<bestDist){
           const frac=prevH!==h?weatherClamp((0-prevH)/(h-prevH),0,1):0.5;
           bestDist=prevD+(d-prevD)*frac;
@@ -139,8 +163,9 @@ export function computeTownAmbienceState(arg1,arg2,arg3={}){
   const rx=Number.isFinite(listener.rx)?listener.rx:Number.isFinite(listener.rightX)?listener.rightX:1;
   const rz=Number.isFinite(listener.rz)?listener.rz:Number.isFinite(listener.rightZ)?listener.rightZ:0;
   const pan=weatherClamp((dx*rx+dz*rz)/horiz,-1,1)*0.8;
+  // Every port carries a settlement profile and a culture; only the profile's own flag says people live there.
   const ind=nearest.indigenousSettlement??null;
-  const hasIndigenous=Boolean(ind||nearest.hasIndigenousSettlement||nearest.isSovereignPolity||nearest.cultureId);
+  const hasIndigenous=Boolean(ind?.hasIndigenousSettlement||nearest.hasIndigenousSettlement);
   const cultureId=ind?.cultureId??ind?.polityId??nearest.cultureId??null;
   const active=gain>0.008&&livingBuildings>0;
   return {
@@ -237,155 +262,250 @@ export function computeHullFloodingAudioState(boat,vessels=[],listener={x:0,y:0,
   };
 }
 
-export function collectFootstepEvents(arg1,arg2={}){
-  const hasMapFirst=Boolean(arg1&&typeof arg1.get==='function'&&typeof arg1.set==='function');
-  const opts=hasMapFirst?arg2:(arg1??{});
-  const walkerTracker=hasMapFirst?arg1:(opts.memory??opts.walkerTracker);
-  if(!walkerTracker||typeof walkerTracker.get!=='function')return [];
+// What the footstep listener keeps between frames: each walker's last counted footfall, held weakly so a
+// port's people are released with the port, and when a step last sounded.
+export function createFootstepMemory(){return {steps:new WeakMap(),towns:new WeakMap(),lastStepAt:-10};}
+// Two footfalls to a walk cycle. walkTime runs in seconds of the walk clip (crewAdvanceWalk), not in radians.
+function footfallIndex(walkTime,clipSeconds){
+  return Math.floor(walkTime/((clipSeconds>0?clipSeconds:CREW_WALK_CLIP_SECONDS)/2));
+}
+// Townsfolk are drawn on the GPU from one rule of the clock (the ABOUT branch of TOWNSFOLK_WALK in
+// js/wgsl/townsfolk.js). This is that rule for one walker: where they stand and how far they have walked
+// this leg of their day, or null while they are indoors or at home after dark.
+export function townWalkerStride(streets,index,clock,sunY=1,out={position:{x:0,y:0,z:0},walked:0,stopped:false,cycle:0},
+  words=new Uint32Array(streets.walkers.buffer,streets.walkers.byteOffset,streets.walkers.length)){
+  const w=streets.walkers,at=index*WALKER_WORDS,route=streets.samples;
+  const first=words[at],count=words[at+1],phase=w[at+2],speed=w[at+3],side=w[at+4],pauseAt=w[at+5],pauseFor=w[at+6],indoors=w[at+7],length=w[at+8],abroad=w[at+9],flags=words[at+11];
+  if(!(count>=2)||!(speed>0))return null;
+  const dusk=weatherClamp((sunY+.1)/.24,0,1);
+  if(abroad>.1+.9*dusk*dusk*(3-2*dusk))return null;
+  const walking=length/speed,leg=walking+pauseFor+indoors;
+  const turns=clock/(2*leg)+phase,turn=(turns-Math.floor(turns))*2*leg;
+  const back=turn>=leg,inLeg=turn-(back?leg:0);
+  const arrived=inLeg>=walking+pauseFor;
+  if(arrived&&((flags>>(back?1:2))&1)===0)return null;
+  const stopAt=walking*pauseAt;
+  const walked=Math.min(length,(Math.min(inLeg,stopAt)+Math.max(0,inLeg-stopAt-pauseFor))*speed);
+  const metres=back?length-walked:walked,lane=back?-1:1;
+  const along=metres/ROUTE_STEP_M,i=Math.min(Math.floor(Math.max(along,0)),count-2),t=weatherClamp(along-i,0,1);
+  const a=(first+i)*4,b=a+4,ahead=(first+Math.min(i+3,count-1))*4,behind=(first+Math.max(i-2,0))*4;
+  const fx=route[ahead]-route[behind]+1e-4,fz=route[ahead+2]-route[behind+2],fl=Math.hypot(fx,fz)||1;
+  const room=route[a+3]+(route[b+3]-route[a+3])*t,aside=lane*side*room;
+  out.position.x=route[a]+(route[b]-route[a])*t+fz/fl*aside;
+  out.position.y=route[a+1]+(route[b+1]-route[a+1])*t;
+  out.position.z=route[a+2]+(route[b+2]-route[a+2])*t-fx/fl*aside;
+  out.walked=walked;
+  out.stopped=arrived||(pauseFor>0&&inLeg>=stopAt&&inLeg<stopAt+pauseFor);
+  // The walk clip's frame follows the ground covered, as the shader draws it.
+  out.cycle=walked/CREW_WALK_CYCLE_METRES+phase*7;
+  return out;
+}
+const TOWN_STEP_REACH_M=18,TOWN_STEP_UNSEEN=-2147483648;
+// Footfalls of the townsfolk within earshot. opts.clock is the frame clock the GPU walks them by.
+function townFootfalls(memory,port,listener,clock,sunY,share,events){
+  const streets=port?.streets;
+  if(!streets||!(streets.people>0)||!streets.walkers||!streets.samples||!Number.isFinite(clock))return;
+  let town=memory.towns.get(streets);
+  if(!town){
+    const s=streets.samples,box=[Infinity,-Infinity,Infinity,-Infinity];
+    for(let k=0;k<s.length;k+=4){box[0]=Math.min(box[0],s[k]);box[1]=Math.max(box[1],s[k]);box[2]=Math.min(box[2],s[k+2]);box[3]=Math.max(box[3],s[k+2]);}
+    const w=streets.walkers,people=Math.min(streets.people,Math.floor(w.length/WALKER_WORDS));
+    town={box,words:new Uint32Array(w.buffer,w.byteOffset,w.length),last:new Int32Array(people).fill(TOWN_STEP_UNSEEN),
+      stride:{position:{x:0,y:0,z:0},walked:0,stopped:false,cycle:0}};
+    memory.towns.set(streets,town);
+  }
+  const {box,words,last,stride}=town,reach=TOWN_STEP_REACH_M+3;
+  const outside=listener.x<box[0]-reach||listener.x>box[1]+reach||listener.z<box[2]-reach||listener.z>box[3]+reach;
+  // A walker the guns have frightened runs by a clock kept on the GPU, which nothing here can read.
+  if(outside||streets.underFireFrames>0){last.fill(TOWN_STEP_UNSEEN);return;}
+  const shown=Math.min(last.length,Math.max(1,Math.round(streets.people*share)));
+  for(let index=0;index<shown;index++){
+    const here=townWalkerStride(streets,index,clock,sunY,stride,words);
+    if(!here||here.stopped){last[index]=TOWN_STEP_UNSEEN;continue;}
+    const step=Math.floor(here.cycle*2),before=last[index];
+    last[index]=step;
+    if(before===TOWN_STEP_UNSEEN||step<=before||events.length>=2)continue;
+    const p=here.position,d=Math.hypot(p.x-listener.x,p.y-(listener.y??0),p.z-listener.z);
+    if(d>TOWN_STEP_REACH_M)continue;
+    events.push({kind:'ground',surface:'ground',id:'footstep-ground',position:{x:p.x,y:p.y,z:p.z},gain:0.050/(1+d/6.0),rate:0.92+((step&1)*0.07)+((step&3)*0.015)});
+  }
+}
+
+// Footsteps due this frame, two at most, from the captain's own walk, the crew on deck, the garrison on the
+// ramparts and the townsfolk ashore. memory comes from createFootstepMemory and is the caller's to keep.
+export function collectFootstepEvents(memory,opts={}){
+  if(!memory?.steps)return [];
   const {boat,crew=[],fortSoldiers=null,ports=[],listener={x:0,y:0,z:0}}=opts;
   const time=Number.isFinite(opts.time)?opts.time:null;
-  if(time!==null&&typeof walkerTracker.get==='function'){
-    try{
-      const lastStepTime=walkerTracker.get('__lastStepTime')??-10;
-      if(time-lastStepTime<0.24)return [];
-    }catch{/* WeakMap does not accept string keys */}
-  }
-  const events=[];
+  if(time!==null&&time-memory.lastStepAt<0.24)return [];
+  const steps=memory.steps,events=[];
   const D2R=Math.PI/180;
-  const STRIDE_RAD=Math.PI;
   if(boat&&Number.isFinite(boat.deckWalkX)&&Number.isFinite(boat.deckWalkZ)){
-    try{
-      const prev=walkerTracker.get(boat);
-      if(prev&&Number.isFinite(prev.x)){
-        const moved=Math.hypot(boat.deckWalkX-prev.x,boat.deckWalkZ-prev.z);
-        if(moved>=0.78){
-          const h=(boat.heading??0)*D2R,sinH=Math.sin(h),cosH=Math.cos(h);
-          const wx=(boat.x??0)+boat.deckWalkZ*sinH+boat.deckWalkX*cosH;
-          const wz=(boat.z??0)+boat.deckWalkZ*cosH-boat.deckWalkX*sinH;
-          events.push({kind:'deck',surface:'deck',id:'footstep-deck',position:{x:wx,y:(boat.heave??0)+1.5,z:wz},gain:0.065,rate:0.92+((prev.step=(prev.step??0)+1)&1)*0.07});
-          walkerTracker.set(boat,{x:boat.deckWalkX,z:boat.deckWalkZ,step:prev.step});
-        }
-      }else{
-        walkerTracker.set(boat,{x:boat.deckWalkX,z:boat.deckWalkZ,step:0});
+    const prev=steps.get(boat);
+    if(prev&&Number.isFinite(prev.x)){
+      const moved=Math.hypot(boat.deckWalkX-prev.x,boat.deckWalkZ-prev.z);
+      if(moved>=0.78){
+        const h=(boat.heading??0)*D2R,sinH=Math.sin(h),cosH=Math.cos(h);
+        const wx=(boat.x??0)+boat.deckWalkZ*sinH+boat.deckWalkX*cosH;
+        const wz=(boat.z??0)+boat.deckWalkZ*cosH-boat.deckWalkX*sinH;
+        prev.step++;prev.x=boat.deckWalkX;prev.z=boat.deckWalkZ;
+        events.push({kind:'deck',surface:'deck',id:'footstep-deck',position:{x:wx,y:(boat.heave??0)+1.5,z:wz},gain:0.065,rate:0.92+(prev.step&1)*0.07});
       }
-    }catch{/* ignore */}
+    }else steps.set(boat,{x:boat.deckWalkX,z:boat.deckWalkZ,step:0});
   }
+  // Has this walker's foot come down since it was last looked at? A walker seen for the first time is only noted.
+  const landed=s=>{
+    const step=footfallIndex(s.walkTime,s.walkClipDuration),before=steps.get(s);
+    if(before===undefined)steps.set(s,{step});else if(step!==before.step){const forward=step>before.step;before.step=step;if(forward)return step;}
+    return -1;
+  };
   const roster=Array.isArray(crew)&&crew.length?crew:(boat?.crew?.state?.crew??[]);
   if(boat&&Array.isArray(roster)){
     const h=(boat.heading??0)*D2R,sinH=Math.sin(h),cosH=Math.cos(h);
     for(const s of roster){
-      if(!s||s.visible===false||s.dead||s.casualtyState==='fallen'||s.incapacitated||s.overboard||(s.walk??0)<=0.18||!Number.isFinite(s.walkTime))continue;
-      const stepIdx=Math.floor(s.walkTime/STRIDE_RAD);
-      const prevIdx=walkerTracker.get(s);
-      walkerTracker.set(s,stepIdx);
-      if(prevIdx===undefined||stepIdx<=prevIdx)continue;
+      if(!s||typeof s!=='object'||s.visible===false||s.dead||s.casualtyState==='fallen'||s.incapacitated||s.overboard||(s.walk??0)<=0.18||!Number.isFinite(s.walkTime))continue;
+      const step=landed(s);
+      if(step<0||events.length>=2)continue;
       const sx=s.position?.[0]??s.x??0,sy=s.position?.[1]??s.y??1.2,sz=s.position?.[2]??s.z??0;
       const wx=(boat.x??0)+sz*sinH+sx*cosH;
       const wy=(boat.heave??0)+sy;
       const wz=(boat.z??0)+sz*cosH-sx*sinH;
       const d=Math.hypot(wx-listener.x,wy-(listener.y??0),wz-listener.z);
-      if(d<=16){
-        const prox=1/(1+d/5.5);
-        events.push({kind:'deck',surface:'deck',id:'footstep-deck',position:{x:wx,y:wy,z:wz},gain:0.055*prox,rate:0.91+((stepIdx&1)*0.07)+((stepIdx&3)*0.015)});
-        if(events.length>=2)break;
-      }
+      if(d<=16)events.push({kind:'deck',surface:'deck',id:'footstep-deck',position:{x:wx,y:wy,z:wz},gain:0.055/(1+d/5.5),rate:0.91+((step&1)*0.07)+((step&3)*0.015)});
     }
   }
   const garrisons=fortSoldiers?.state?.garrisons??(fortSoldiers?.state?.soldiers?[fortSoldiers.state]:fortSoldiers?.soldiers?[fortSoldiers]:[]);
-  if(events.length<2&&Array.isArray(garrisons)){
+  if(Array.isArray(garrisons)){
     for(const g of garrisons){
-      const soldiers=g?.soldiers??[];
-      for(const s of soldiers){
-        if(!s||s.visible===false||s.dead||s.casualtyState==='fallen'||s.falling||(s.walk??0)<=0.18||!Number.isFinite(s.walkTime))continue;
-        const stepIdx=Math.floor(s.walkTime/STRIDE_RAD);
-        const prevIdx=walkerTracker.get(s);
-        walkerTracker.set(s,stepIdx);
-        if(prevIdx===undefined||stepIdx<=prevIdx)continue;
+      for(const s of g?.soldiers??[]){
+        if(!s||typeof s!=='object'||s.visible===false||s.dead||s.casualtyState==='fallen'||s.falling||(s.walk??0)<=0.18||!Number.isFinite(s.walkTime))continue;
+        const step=landed(s);
+        if(step<0||events.length>=2)continue;
         const sx=s.x??s.position?.[0]??0,sy=s.y??s.position?.[1]??2,sz=s.z??s.position?.[2]??0;
         const d=Math.hypot(sx-listener.x,sy-(listener.y??0),sz-listener.z);
-        if(d<=18){
-          const prox=1/(1+d/6.0);
-          events.push({kind:'ground',surface:'ground',id:'footstep-ground',position:{x:sx,y:sy,z:sz},gain:0.052*prox,rate:0.91+((stepIdx&1)*0.07)+((stepIdx&3)*0.015)});
-          if(events.length>=2)break;
-        }
+        if(d<=18)events.push({kind:'ground',surface:'ground',id:'footstep-ground',position:{x:sx,y:sy,z:sz},gain:0.052/(1+d/6.0),rate:0.91+((step&1)*0.07)+((step&3)*0.015)});
       }
-      if(events.length>=2)break;
     }
   }
-  const portList=Array.isArray(ports)?ports:[];
-  if(events.length<2){
-    for(const port of portList){
-      const people=port?.streets?.people??port?.townsfolk?.people??[];
-      if(Array.isArray(people)){
-        for(const p of people){
-          if(!p||p.visible===false||p.alive===false||p.dead)continue;
-          const wt=Number.isFinite(p.walkTime)?p.walkTime:Number.isFinite(p.phase)?p.phase:null;
-          if(wt===null||((p.speed??p.walk??1)<=0.12))continue;
-          const stepIdx=Math.floor(wt/STRIDE_RAD);
-          const prevIdx=walkerTracker.get(p);
-          walkerTracker.set(p,stepIdx);
-          if(prevIdx===undefined||stepIdx<=prevIdx)continue;
-          const d=Math.hypot((p.x??0)-listener.x,(p.y??1.5)-(listener.y??0),(p.z??0)-listener.z);
-          if(d<=18){
-            const prox=1/(1+d/6.0);
-            events.push({kind:'ground',surface:'ground',id:'footstep-ground',position:{x:p.x??0,y:p.y??1.5,z:p.z??0},gain:0.050*prox,rate:0.92+((stepIdx&1)*0.07)+((stepIdx&3)*0.015)});
-            if(events.length>=2)break;
-          }
-        }
-      }
-      if(events.length>=2)break;
-    }
-  }
-  if(events.length&&time!==null){
-    try{walkerTracker.set('__lastStepTime',time);}catch{/* WeakMap */}
-  }
+  const clock=opts.clock,sunY=Number.isFinite(opts.sunY)?opts.sunY:1,share=weatherClamp(opts.townShare??1,0,1);
+  for(const port of Array.isArray(ports)?ports:[])townFootfalls(memory,port,listener,clock,sunY,share,events);
+  if(events.length&&time!==null)memory.lastStepAt=time;
   return events;
 }
 
-// One context, bounded ambience sources and at most eight event voices. Nothing is
-// fetched or started until the listener enables sound with a browser gesture.
+// One context, bounded ambience sources, and three bounded sets of event voices: twelve gun reports, four
+// spoken voices, and eight for everything else. Nothing is fetched or started until the listener enables
+// sound with a browser gesture.
 export function createSceneAudio({onStatus=()=>{}}={}){
   let context,master,limiter,loading,enabled=false,hidden=false,ready=false,volume=.7;
   let time=0,nextBird=25,nextShoreBird=8,nextFirePop=0,nextBubbleAt=0,nextTownPanic=0,nextIndigenousVoice=4,nextSailLuffAt=0;
   let lastScreamAt=-100,lastOarStrokeAt=-100,prevRowPhase=null,lastLookoutKind=null,lastLookoutCallAt=-100;
   let listener={x:0,y:2,z:0,rx:1,rz:0},shipDistance=1,anchorReeling=false,anchorPosition={x:0,y:0,z:0},previewCursor=0,previewUntil=0;
-  const buffers=new Map(),loops=new Map(),voices=new Set(),reports=new Set(),pending=[],walkerTracker=new Map();
-  const status=()=>onStatus({enabled,ready,loading:!!loading,missing:Object.keys(ALL_SOUNDS).length-buffers.size});
+  let footsteps=createFootstepMemory(),epoch=0,battleWarmed=false,warmedCulture=null;
+  let shoreProbe=null,townProbe=null,nextProbeAt=0,probedTerrain=null,probedTowns=null;
+  const buffers=new Map(),decoding=new Map(),failed=new Set(),loops=new Map(),pending=[];
+  const voices=new Set(),reports=new Set(),speech=new Set(),playing=new Map();
+  // missing counts the clips that could not be fetched or decoded, not those that have yet to be asked for.
+  const status=()=>onStatus({enabled,ready,loading:!!loading,missing:failed.size});
   const mute=()=>{if(context)master.gain.setTargetAtTime(enabled&&!hidden?volume:0,context.currentTime,.06);};
   const dialogue=createVoiceDirector({play:(...args)=>play(...args,true),assets:VOICE_ASSETS,crew:CREW_VOICES,available:()=>enabled&&!hidden&&ready&&context?.state==='running'&&context.currentTime>=previewUntil});
   const gunsAudio=createGunneryAudio({play,listener:()=>listener,available:()=>enabled&&!hidden&&ready&&context?.state==='running'});
   const hullAudio=createHullAudioState(),timberAudio=createTimberAudioState();
+  const panTo=p=>{const dx=p.x-listener.x,dz=p.z-listener.z;return weatherClamp((dx*listener.rx+dz*listener.rz)/(Math.hypot(dx,dz)||1),-1,1);};
   function stopEvents(){
-    dialogue.clear();gunsAudio.clear();hullAudio.reset();timberAudio.reset();walkerTracker.clear();
-    previewUntil=0;prevRowPhase=null;lastLookoutKind=null;
-    for(const v of [...voices,...reports]){try{v.stop();}catch{/* already ended */}}
-    voices.clear();reports.clear();pending.length=0;
+    dialogue.clear();gunsAudio.clear();hullAudio.reset();timberAudio.reset();footsteps=createFootstepMemory();
+    previewUntil=0;prevRowPhase=null;lastLookoutKind=null;nextProbeAt=0;epoch++;
+    for(const source of [...playing.keys()]){try{source.stop();}catch{/* already ended */}}
+    voices.clear();reports.clear();speech.clear();playing.clear();pending.length=0;
+  }
+  // Fetch and decode one clip, once. A failure is remembered until sound is next enabled.
+  function load(id){
+    if(!context||!ALL_SOUNDS[id]||buffers.has(id)||failed.has(id))return null;
+    let job=decoding.get(id);
+    if(!job){
+      job=(async()=>{
+        const response=await fetch(ALL_SOUNDS[id].url);if(!response.ok)throw Error('Sound unavailable: '+id);
+        buffers.set(id,await context.decodeAudioData(await response.arrayBuffer()));
+      })().catch(()=>{failed.add(id);if(ready)status();}).finally(()=>{decoding.delete(id);});
+      decoding.set(id,job);
+    }
+    return job;
+  }
+  // The clips of a battle are wanted together, and soon after its first order.
+  function warmBattle(){
+    if(battleWarmed||!enabled||!ready)return;
+    battleWarmed=true;for(const id of BATTLE_SOUNDS)load(id);
+  }
+  // The garrison queues its cries for us to sound. Unheard, they are dropped as they come and not kept for later.
+  function drainFortCries(fort,each){
+    const drain=list=>{if(!Array.isArray(list)||!list.length)return;if(each)for(const cry of list.splice(0))each(cry);else list.length=0;};
+    drain(fort?.state?.audioEvents);drain(fort?.audioEvents);
+    if(Array.isArray(fort?.state?.garrisons))for(const garrison of fort.state.garrisons)drain(garrison?.audioEvents);
   }
   function creak(sound){if(sound&&shipDistance>.01)play(sound.id,sound.gain*shipDistance,sound.position,sound.rate,sound.spatial,sound.options);}
+  // Free a voice's place at once; it fades over a few hundredths of a second so that it does not click off.
+  function cutShort(source){
+    const voice=playing.get(source),at=context.currentTime;
+    voice.pool.delete(source);
+    try{
+      if(typeof voice.level.gain.cancelScheduledValues==='function')voice.level.gain.cancelScheduledValues(at);
+      voice.level.gain.setTargetAtTime(0,at,.012);source.stop(at+.05);
+    }catch{/* already ended */}
+  }
+  // Returns the seconds the clip will sound for, or nothing when it cannot be played.
   function play(id,gain,position,rate=1,spatial=false,options={}){
-    const pool=id==='cannon-report'?reports:voices,limit=id==='cannon-report'?12:8;
-    if(!enabled||hidden||!ready||!buffers.has(id)||pool.size>=limit||context.state!=='running')return;
+    if(!enabled||hidden||!ready||context.state!=='running')return;
+    if(buffers.has(id))return start(id,gain,position,rate,spatial,options);
+    const job=ON_DEMAND_SOUNDS.has(id)?load(id):null;
+    if(!job)return;
+    // Not decoded yet: the caller is told how long the clip runs, and it starts if it is ready while it still matters.
+    const asked=context.currentTime,from=epoch,where={x:position.x,y:position.y??position.heave??0,z:position.z};
+    job.then(()=>{
+      if(from===epoch&&buffers.has(id)&&enabled&&!hidden&&context.currentTime-asked<=(orderSound(id)?ORDER_LATE_START_SECONDS:LATE_START_SECONDS))start(id,gain,where,rate,spatial,options);
+    });
+    const seconds=ALL_SOUNDS[id].seconds;
+    return Math.min(seconds-Math.min(options.offset??0,seconds),Number.isFinite(options.duration)?Math.max(.02,options.duration):seconds)/rate;
+  }
+  function start(id,gain,position,rate,spatial,options){
+    if(context.state!=='running')return;
+    const pool=id==='cannon-report'?reports:speechSound(id)?speech:voices,limit=pool===reports?12:pool===speech?4:8;
+    const buffer=buffers.get(id);
+    const offset=weatherClamp(options.offset??0,0,Math.max(0,buffer.duration-.01));
+    const duration=Math.min(buffer.duration-offset,Number.isFinite(options.duration)?Math.max(.02,options.duration):buffer.duration),seconds=duration/rate;
+    if(pool===voices){
+      // No one sound may take every voice.
+      let same=0;for(const source of pool)if(playing.get(source).id===id)same++;
+      if(same>=sameSoundLimit(seconds))return;
+    }
+    if(pool.size>=limit){
+      // An order is not lost to chatter: it takes the place of the oldest voice that is not itself an order.
+      if(pool!==speech||!orderSound(id))return;
+      let oldest=null;
+      for(const source of pool){oldest??=source;if(!orderSound(playing.get(source).id)){oldest=source;break;}}
+      cutShort(oldest);
+    }
     const source=context.createBufferSource(),level=context.createGain(),pan=context.createStereoPanner();
-    source.buffer=buffers.get(id);source.playbackRate.value=rate;
+    source.buffer=buffer;source.playbackRate.value=rate;
     const dx=position.x-listener.x,dz=position.z-listener.z,d=Math.hypot(dx,dz);
     pan.pan.value=weatherClamp((dx*listener.rx+dz*listener.rz)/Math.max(d,1),-1,1)*.85;
     const range=Math.hypot(dx,(position.y??position.heave??0)-listener.y,dz);
-    level.gain.value=weatherClamp(gain*soundcraftLufsTrim(id),0,1)*(spatial?1/(1+Math.max(0,range-8)/(options.reach??24)):1);
+    // The loudness trim is applied to the clamped gain, not clamped with it: a trim above one would otherwise
+    // flatten every loud call of that clip to the same level. The limiter on the master follows.
+    level.gain.value=weatherClamp(gain,0,1)*soundcraftLufsTrim(id)*(spatial?1/(1+Math.max(0,range-8)/(options.reach??24)):1);
     const filters=[];let tail=source;
     if(typeof context.createBiquadFilter==='function'){
       for(const[type,hz]of[['highpass',options.highpassHz],['lowpass',options.lowpassHz]])if(Number.isFinite(hz)){
         const filter=context.createBiquadFilter();filter.type=type;filter.frequency.value=hz;filter.Q.value=.6;tail.connect(filter);tail=filter;filters.push(filter);
       }
     }
-    tail.connect(level).connect(pan).connect(master);pool.add(source);
-    const offset=weatherClamp(options.offset??0,0,Math.max(0,source.buffer.duration-.01));
-    const duration=Math.min(source.buffer.duration-offset,Number.isFinite(options.duration)?Math.max(.02,options.duration):source.buffer.duration),seconds=duration/rate;
+    tail.connect(level).connect(pan).connect(master);pool.add(source);playing.set(source,{id,pool,level});
     if((options.attack||options.release)&&typeof level.gain.setValueAtTime==='function'&&typeof level.gain.linearRampToValueAtTime==='function'){
       const at=context.currentTime,target=level.gain.value,attack=Math.min(seconds*.3,options.attack??0),release=Math.min(seconds*.8,options.release??0);
       level.gain.setValueAtTime(0,at);level.gain.linearRampToValueAtTime(target,at+attack);
       level.gain.setValueAtTime(target,at+Math.max(attack,seconds-release));level.gain.linearRampToValueAtTime(0,at+seconds);
     }
-    source.onended=()=>{pool.delete(source);source.disconnect();for(const filter of filters)filter.disconnect();level.disconnect();pan.disconnect();};source.start(0,offset,duration);return seconds;
+    source.onended=()=>{pool.delete(source);playing.delete(source);source.disconnect();for(const filter of filters)filter.disconnect();level.disconnect();pan.disconnect();};
+    source.start(0,offset,duration);return seconds;
   }
   function playSynth(kind,position=listener,gain=0.25){
     if(!enabled||hidden||!ready||!context||context.state!=='running'||voices.size>=8||typeof context.createOscillator!=='function')return false;
@@ -461,14 +581,22 @@ export function createSceneAudio({onStatus=()=>{}}={}){
     pan.disconnect();
     return false;
   }
+  // Called every frame a loop is wanted: it starts as soon as its clip is decoded.
   function startLoop(id,asset){
-    if(!asset?.loop||!buffers.has(id)||loops.has(id))return;
+    if(!asset?.loop||loops.has(id))return;
+    if(!buffers.has(id)){load(id);return;}
     const source=context.createBufferSource(),gain=context.createGain(),pan=typeof context.createStereoPanner==='function'?context.createStereoPanner():null;
     source.buffer=buffers.get(id);
     source.loop=true;source.loopEnd=Math.min(asset.seconds,source.buffer.duration);gain.gain.value=0;
     if(pan)source.connect(gain).connect(pan).connect(master);
     else source.connect(gain).connect(master);
-    source.start(0,Math.random()*source.loopEnd);loops.set(id,{source,gain,pan});
+    source.start(0,Math.random()*source.loopEnd);loops.set(id,{source,gain,pan,silentSince:null});
+  }
+  function stopLoop(id){
+    const loop=loops.get(id);if(!loop)return;
+    loops.delete(id);
+    try{loop.source.stop();}catch{/* already ended */}
+    loop.source.disconnect();loop.gain.disconnect();loop.pan?.disconnect();
   }
   function startLoops(){
     for(const [id,asset] of Object.entries(ALL_SOUNDS))if(id!=='anchor-reel'&&!asset.lazyLoop)startLoop(id,asset);
@@ -484,12 +612,10 @@ export function createSceneAudio({onStatus=()=>{}}={}){
     enabled=true;
     const resumePromise=context.resume().catch(()=>{});
     mute();
-    if(buffers.size<Object.keys(ALL_SOUNDS).length&&!loading){
-      loading=Promise.allSettled(Object.entries(ALL_SOUNDS).map(async([id,asset])=>{
-        if(buffers.has(id))return;
-        const response=await fetch(asset.url);if(!response.ok)throw Error('Sound unavailable: '+id);
-        buffers.set(id,await context.decodeAudioData(await response.arrayBuffer()));
-      })).then(()=>{ready=true;loading=null;startLoops();status();});
+    if(!loading){
+      // Whatever failed last time is tried again, here or when it is next wanted.
+      failed.clear();battleWarmed=false;warmedCulture=null;
+      if(EAGER_SOUNDS.some(id=>!buffers.has(id)))loading=Promise.all(EAGER_SOUNDS.map(id=>load(id))).then(()=>{ready=true;loading=null;startLoops();status();});
     }
     status();await loading;await resumePromise;timberAudio.reset();
   }
@@ -503,8 +629,8 @@ export function createSceneAudio({onStatus=()=>{}}={}){
     },
     visibility(value){hidden=value;stopEvents();if(context){if(hidden)context.suspend();else if(enabled)context.resume().catch(()=>{});}mute();},
     order(id,options){return dialogue.order(id,options);},
-    gunneryOrder(id,boat){return gunsAudio.order(id,boat);},
-    gunneryEvent(event){return gunsAudio.event(event);},
+    gunneryOrder(id,boat){warmBattle();return gunsAudio.order(id,boat);},
+    gunneryEvent(event){warmBattle();return gunsAudio.event(event);},
     previewCrew(id,boat){
       if(dialogue.busy||(context?.currentTime??0)<previewUntil)return false;
       const person=CREW_VOICES.find(p=>p.id===id)??CREW_VOICES[previewCursor++%Math.max(1,CREW_VOICES.length)];
@@ -691,56 +817,68 @@ export function createSceneAudio({onStatus=()=>{}}={}){
       const hullMix=hullAudio.update(dt,flow);
       const strain=Math.abs(boat.rollVelocity??0)*2+Math.abs(boat.pitchVelocity??0)+Math.abs(boat.heaveVelocity??0)*.08;
       const timberSound=timberAudio.update(dt,{strain,position:boat,revision:boat.revision,audible:enabled&&!hidden&&ready&&shipDistance>.01});
-      if(!enabled||hidden||!ready)return;
+      if(!enabled||hidden||!ready){drainFortCries(worldState?.fortSoldiers);return;}
       if(anchorReeling){anchorPosition={x:boat.x,y:(boat.heave??0)+3,z:boat.z};startLoop('anchor-reel',ALL_SOUNDS['anchor-reel']);}
       mute();
       const wind=boat.enabled?(boat.sailState?.apparentSpeed??settings.windSpeed):settings.windSpeed;
       const levels=weatherAudioLevels({wind,...flow,intensity:weather.intensity,type:weather.type,ship:shipDistance});
       levels['hull-wash']=hullMix.wash*shipDistance;
 
-      // Shoreline surf crashing & lapping
+      // Where the nearest shore and town lie changes slowly, so they are looked for a few times a second; which
+      // ear they fall on follows the listener every frame.
       const terrain=worldState?.terrain??boat?.terrain??null;
-      const shore=probeShorelineSurf(listener,terrain,settings,weather);
+      const townSource=worldState?.ports??terrain;
+      const sunElev=worldState?.sunElev??settings.sunElev??25;
+      // The caller may hand over a fresh list of the same ports each frame, so a list is known by its first port.
+      const towns=Array.isArray(townSource)?townSource[0]??null:townSource;
+      if(time>=nextProbeAt||terrain!==probedTerrain||towns!==probedTowns){
+        shoreProbe=probeShorelineSurf(listener,terrain,settings,weather);
+        townProbe=computeTownAmbienceState(listener,townSource,{sunElev,time,underFire:Boolean(worldState?.underFire)});
+        probedTerrain=terrain;probedTowns=towns;nextProbeAt=time+PLACE_PROBE_SECONDS;
+        if(shoreProbe.active||townProbe.active)load('shore-birds');
+      }
+      const shore=shoreProbe,townState=townProbe;
+
+      // Shoreline surf crashing & lapping
       if(shore.active){
         startLoop('shore-surf',ALL_SOUNDS['shore-surf']);
         levels['shore-surf']=shore.gain;
         const surfLoop=loops.get('shore-surf');
         if(surfLoop){
           surfLoop.source.playbackRate.value=shore.rate;
-          if(surfLoop.pan)surfLoop.pan.pan.value=shore.pan;
+          if(surfLoop.pan)surfLoop.pan.pan.value=panTo(shore.shorePosition)*.82;
         }
       }else{
         levels['shore-surf']=0;
       }
 
       // Busy towns ambience (multi-person walking + unintelligible background crowd chatter) & bombardment panic
-      const townSource=worldState?.ports??terrain;
-      const sunElev=worldState?.sunElev??settings.sunElev??25;
-      const townState=computeTownAmbienceState(listener,townSource,{sunElev,time,underFire:Boolean(worldState?.underFire)});
       if(townState.active){
+        const townPan=panTo(townState.position)*.8;
         startLoop('town-ambience',ALL_SOUNDS['town-ambience']);
         levels['town-ambience']=townState.underFire?townState.gain*0.35:townState.gain;
         const townLoop=loops.get('town-ambience');
-        if(townLoop?.pan)townLoop.pan.pan.value=townState.pan;
+        if(townLoop?.pan)townLoop.pan.pan.value=townPan;
         if(townState.underFire){
           startLoop('crowd-panic',ALL_SOUNDS['crowd-panic']);
           levels['crowd-panic']=Math.min(0.26,townState.gain*1.15);
           const panicLoop=loops.get('crowd-panic');
           if(panicLoop){
             panicLoop.source.playbackRate.value=1.0;
-            if(panicLoop.pan)panicLoop.pan.pan.value=townState.pan;
+            if(panicLoop.pan)panicLoop.pan.pan.value=townPan;
           }
           if(time>=nextTownPanic&&townState.position){
             playSynth('bell',townState.position,0.20);
             nextTownPanic=time+8.5+Math.random()*5.5;
           }
         }else if(townState.busyWalkGain>0.006){
+          // There is no clip of a peaceful crowd yet: the panic loop, slowed and quiet, stands in for one.
           startLoop('crowd-panic',ALL_SOUNDS['crowd-panic']);
           levels['crowd-panic']=townState.busyWalkGain;
           const panicLoop=loops.get('crowd-panic');
           if(panicLoop){
             panicLoop.source.playbackRate.value=0.88;
-            if(panicLoop.pan)panicLoop.pan.pan.value=townState.pan;
+            if(panicLoop.pan)panicLoop.pan.pan.value=townPan;
           }
         }else{
           levels['crowd-panic']=0;
@@ -772,9 +910,14 @@ export function createSceneAudio({onStatus=()=>{}}={}){
           }
         }
       }
-      if(indigenousCulture&&indigenousPos&&time>=nextIndigenousVoice){
-        play(indigenousVoiceClipForCulture(indigenousCulture),0.26,indigenousPos,0.97+Math.random()*0.06,true,{reach:95});
-        nextIndigenousVoice=time+12+Math.random()*16;
+      if(indigenousCulture&&indigenousPos){
+        // Their speech is fetched when they are first in earshot, ahead of the first words.
+        if(indigenousCulture!==warmedCulture){warmedCulture=indigenousCulture;load(indigenousVoiceClipForCulture(indigenousCulture));}
+        if(time>=nextIndigenousVoice){
+          // The long wait follows only words that were spoken; with every voice taken they try again shortly.
+          const spoken=play(indigenousVoiceClipForCulture(indigenousCulture),0.26,indigenousPos,0.97+Math.random()*0.06,true,{reach:95})>0;
+          nextIndigenousVoice=time+(spoken?12+Math.random()*16:1.5);
+        }
       }
 
       // Coastal shorebirds near land/ports
@@ -798,33 +941,24 @@ export function createSceneAudio({onStatus=()=>{}}={}){
       }
 
       // Footsteps of people walking on ship decks and on the ground
-      const footstepEvents=collectFootstepEvents(walkerTracker,{
+      const footstepEvents=collectFootstepEvents(footsteps,{
         boat,
         crew:worldState?.crew,
         fortSoldiers:worldState?.fortSoldiers,
         ports:worldState?.ports??(Array.isArray(terrain?.ports)?terrain.ports:terrain?.port?[terrain.port]:[]),
         listener,
         time,
+        // The townsfolk are walked on the GPU by the frame's clock and sun; their footfalls are found from the same two.
+        clock:frame[19],
+        sunY:frame[33],
+        townShare:worldState?.townShare,
       });
       for(const step of footstepEvents){
         play(step.id,step.gain,step.position,step.rate,true,{duration:0.22,attack:0.015,release:0.12,lowpassHz:step.kind==='deck'?1650:1850,reach:step.kind==='deck'?14:16});
       }
 
       // Drain queued fort garrison / rampart fall casualty screams
-      const fortAudioLists=[];
-      if(Array.isArray(worldState?.fortSoldiers?.state?.audioEvents))fortAudioLists.push(worldState.fortSoldiers.state.audioEvents);
-      if(Array.isArray(worldState?.fortSoldiers?.audioEvents))fortAudioLists.push(worldState.fortSoldiers.audioEvents);
-      if(Array.isArray(worldState?.fortSoldiers?.state?.garrisons)){
-        for(const g of worldState.fortSoldiers.state.garrisons){
-          if(Array.isArray(g?.audioEvents))fortAudioLists.push(g.audioEvents);
-        }
-      }
-      for(const list of fortAudioLists){
-        while(list.length){
-          const ev=list.shift();
-          this.event(ev,boat);
-        }
-      }
+      drainFortCries(worldState?.fortSoldiers,cry=>this.event(cry,boat));
 
       // Rowing oarlocks & blade catch
       const rowEvs=worldState?.rowingEvents;
@@ -859,7 +993,7 @@ export function createSceneAudio({onStatus=()=>{}}={}){
 
       // Lookout sighting calls when a new horizon contact is sighted
       const sight=boat?.lookoutSighting;
-      if(sight?.kind&&sight.kind!=='dolphin'&&sight.kind!==lastLookoutKind){
+      if(sight?.kind&&sight.kind!=='dolphin'&&sight.kind!==lastLookoutKind&&time-lastLookoutCallAt>=14){
         this.event({type:'lookout-sighting',...sight,fromUpdate:true,position:{x:sight.x??boat.x,y:sight.y??((boat.heave??0)+12),z:sight.z??boat.z}},boat);
       }
 
@@ -886,6 +1020,13 @@ export function createSceneAudio({onStatus=()=>{}}={}){
       for(const [id,loop] of loops){
         const gain=id==='anchor-reel'?(anchorReeling ? .3/(1+Math.max(0,Math.hypot(anchorPosition.x-listener.x,anchorPosition.y-listener.y,anchorPosition.z-listener.z)-8)/24):0):levels[id]??0;
         loop.gain.gain.setTargetAtTime(gain,context.currentTime,id==='anchor-reel'?.08:.45);
+        // The reel, the shore and the towns are heard only now and then: once such a loop has rested a while
+        // it is stopped, and started afresh when it is next wanted.
+        if(gain>0)loop.silentSince=null;
+        else if(id==='anchor-reel'||ALL_SOUNDS[id].lazyLoop){
+          loop.silentSince??=time;
+          if(time-loop.silentSince>=LOOP_REST_SECONDS)stopLoop(id);
+        }
       }
       if(weather.event)pending.push({at:time+weather.event.delay,...weather.event,audioAt:time+weather.event.delay});
       for(let i=pending.length-1;i>=0;i--)if(time>=pending[i].audioAt){

@@ -32,6 +32,10 @@ export function gunnerySoundDelay(source,ear,temperatureC=15){
 
 // A gun carries for miles, so a report falls off far more slowly than a voice or a block on deck.
 const REPORT_REACH_M=150;
+// Falling timber and stone sound in full for a collapse, a felled tree, a mast or a magazine. An ordinary hit
+// gets the opening of the tail, and no more than one in this many seconds: a broadside landing would otherwise
+// hold every voice for three seconds.
+const DEBRIS_TAIL_GAP_SECONDS=.5,DEBRIS_TAIL_SECONDS=1.4,DEBRIS_TAIL_RELEASE_SECONDS=.6;
 // Playback is supplied by the scene's one Web Audio context. Report arrivals
 // within 100 ms share an acoustic voice, while every physical gun still fires.
 // This gives a rolling broadside without creating fifty full-length sources.
@@ -63,7 +67,7 @@ export function createGunneryAudio({play,available=()=>true,listener=()=>({x:0,y
     }
     return playSpeech('captain-guns-'+request.id,request.position);
   }
-  let lastImpactAt=-100,lastScreamAt=-100,lastEnemyVoiceAt=-100,lastPanicAt=-100;
+  let lastImpactAt=-100,lastScreamAt=-100,lastEnemyVoiceAt=-100,lastPanicAt=-100,lastDebrisAt=-100;
   function enqueue(id,position,gain,report=false,rate=1,options=undefined){
     const ear=listener(),distance=Math.hypot(position.x-ear.x,position.y-(ear.y??0),position.z-ear.z);
     if(!Number.isFinite(distance)||distance>18000)return false;
@@ -84,6 +88,12 @@ export function createGunneryAudio({play,available=()=>true,listener=()=>({x:0,y
     }
     arrivals.push({id,position:{...position},at,gain,report,count:1,range:distance,rate,options});
     return true;
+  }
+  function debris(id,position,gain,rate,options,whole){
+    if(whole)return enqueue(id,position,gain,false,rate,options);
+    if(clock-lastDebrisAt<DEBRIS_TAIL_GAP_SECONDS)return false;
+    lastDebrisAt=clock;
+    return enqueue(id,position,gain,false,rate,{...options,duration:DEBRIS_TAIL_SECONDS,release:DEBRIS_TAIL_RELEASE_SECONDS});
   }
   return {
     order(id,boat){
@@ -188,28 +198,28 @@ export function createGunneryAudio({play,available=()=>true,listener=()=>({x:0,y
         }
         if(kind==='scenery'){
           const felled=Boolean(event.felled||rep.felled);
-          enqueue('cannon-recoil',position,.24,false,1.08,{duration:.42,lowpassHz:820});
-          return enqueue('timber-crumble',position,felled?.38:.28,false,felled?.84:1.06,{reach:105});
+          const thump=enqueue('cannon-recoil',position,.24,false,1.08,{duration:.42,lowpassHz:820});
+          return debris('timber-crumble',position,felled?.38:.28,felled?.84:1.06,{reach:105},felled)||thump;
         }
         if(kind==='building'){
           const isTimber=Boolean(event.materialClass==='timber'||event.timberClass||rep.timberClass);
           const collapsed=Boolean(event.collapsed||rep.collapsed);
-          enqueue('cannon-recoil',position,.28,false,.85,{duration:.52,lowpassHz:680});
+          const thump=enqueue('cannon-recoil',position,.28,false,.85,{duration:.52,lowpassHz:680});
           enqueue('cannon-rammer',position,.22,false,.78,{duration:.38});
           if(isTimber){
-            return enqueue('timber-crumble',position,collapsed?.38:.30,false,collapsed?.85:1.02,{reach:115});
+            return debris('timber-crumble',position,collapsed?.38:.30,collapsed?.85:1.02,{reach:115},collapsed)||thump;
           }
-          return enqueue('stone-crumble',position,collapsed?.40:.32,false,collapsed?.84:1,{reach:120});
+          return debris('stone-crumble',position,collapsed?.40:.32,collapsed?.84:1,{reach:120},collapsed)||thump;
         }
         if(kind==='terrain'){
-          enqueue('cannon-recoil',position,.28,false,.85,{duration:.52,lowpassHz:680});
+          const thump=enqueue('cannon-recoil',position,.28,false,.85,{duration:.52,lowpassHz:680});
           enqueue('cannon-rammer',position,.22,false,.78,{duration:.38});
-          return enqueue('stone-crumble',position,.26,false,.74,{lowpassHz:920,reach:100});
+          return debris('stone-crumble',position,.26,.74,{lowpassHz:920,reach:100},false)||thump;
         }
         // Hull / superstructure timber impact & oak splinters
         enqueue('cannon-recoil',position,.35,false,1.18,{duration:.48,lowpassHz:920});
         enqueue('hull-slap',position,.30,false,.84,{duration:.44,release:.16});
-        enqueue('timber-crumble',position,.32,false,.96,{reach:95});
+        debris('timber-crumble',position,.32,.96,{reach:95},false);
         return enqueue('timber-creak',position,.38,false,1.42,{offset:.10,duration:.65,highpassHz:240});
       }
       const id=event.type==='load'||event.type==='ram'?'cannon-rammer':event.type==='run-out'?'cannon-run-out':null;
@@ -238,7 +248,7 @@ export function createGunneryAudio({play,available=()=>true,listener=()=>({x:0,y
         }
       }
     },
-    clear(){arrivals.length=0;pendingOrder=null;pendingGiveFire=null;pendingReady=null;voiceUntil=clock;lastOrder='';lastOrderAt=-100;lastReadyAt=-100;lastImpactAt=-100;lastScreamAt=-100;lastEnemyVoiceAt=-100;lastPanicAt=-100;seenShots.clear();shotHistory.length=0;},
+    clear(){arrivals.length=0;pendingOrder=null;pendingGiveFire=null;pendingReady=null;voiceUntil=clock;lastOrder='';lastOrderAt=-100;lastReadyAt=-100;lastImpactAt=-100;lastScreamAt=-100;lastEnemyVoiceAt=-100;lastPanicAt=-100;lastDebrisAt=-100;seenShots.clear();shotHistory.length=0;},
     get pending(){return arrivals.length;},
     get busy(){return clock<voiceUntil;},
   };
