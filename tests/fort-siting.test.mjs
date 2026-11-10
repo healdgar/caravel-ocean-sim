@@ -7,12 +7,13 @@ import fs from 'node:fs';
 import zlib from 'node:zlib';
 import {HISTORICAL_COLONIAL_PORTS,buildPortPrefabGeometry,generateProceduralCoastalPack,getBuildingParts,placeCoastalPort,resolveGlobalCoastalRegion,smoothCoastlineAndForeshoreBeaches,synthesizeCoastalTerrain} from '../js/coastal-world.js';
 import {FORT_RECORDS,fortRecordsFor} from '../js/fort-records.js';
-import {depthInOutline,enclosurePlan,fortLocalToWorld,traceWalls,triangularFortPlan,squareFortPlan} from '../js/fort-plan.js';
+import {depthInOutline,drawFortTrace,enclosurePlan,fortLocalToWorld,traceWalls,triangularFortPlan,squareFortPlan} from '../js/fort-plan.js';
 import {buildingGunBears,buildingGunMuzzlePose,classifyBuildingMaterial,createBuildingGunDefinitions,createBuildingGunnery,sweepBuildingSegment} from '../js/gunnery-control.js';
 import {createFortGarrison} from '../js/crew.js';
 import {noteBuildingMeshes,prepareBuildingFracture,applyBuildingFractureEvents} from '../js/building-fracture.js';
 import {createPortDamageStore} from '../js/port-damage.js';
-import {worldOfPosition} from '../js/harbour-defences.js';
+import {planHarbourDefences,worldOfPosition} from '../js/harbour-defences.js';
+import {readHarbourGeography} from '../js/harbour-geography.js';
 import {applyBuildingImpactDamage} from '../js/gunnery-control.js';
 import {terrainSurfaceSample} from '../js/terrain-model.js';
 
@@ -384,5 +385,65 @@ test('fort cannons sit flush on their banquettes and bulwarks, clear of stone me
         }
       }
     }
+  }
+});
+
+test('a gun that cannot stand on the wall it was given goes to another wall with room for it',()=>{
+  // A battery on a shore that steps back twice towards its left end. Each of its seven walls is given one gun, and the
+  // one on the short end wall would share a platform with the first gun of the front, round the corner.
+  const shore=(x)=>x<-26.5?4:x<-12.5?1:-2;
+  const {trace}=drawFortTrace({shape:'battery',landAt:(x,z)=>z>=shore(x)});
+  const walls=traceWalls(trace),end=walls.at(-1);
+  assert.ok(end.length>=4&&end.length<8&&Math.abs(end.nx+1)<1e-6,`the end wall is short and looks along the shore (${end.length.toFixed(1)} m)`);
+  assert.equal(trace.guns.filter(gun=>gun.wall===end.index).length,0,'the end wall has no room for a gun beside the front one');
+  assert.equal(trace.guns.length,7,'the battery still mounts its seven guns');
+  for(const gun of trace.guns){
+    const wall=walls[gun.wall];
+    assert.ok(gun.along>0&&gun.along<wall.length,'each gun stands on its own wall');
+    assert.ok(depthInOutline(trace.outline,gun.x-gun.nx*2.17,gun.z-gun.nz*2.17)>=2.1,'with room for its carriage behind the parapet');
+    for(const other of trace.guns)if(other!==gun)assert.ok(Math.hypot(other.x-gun.x,other.z-gun.z)>=4,'and no two share a platform');
+  }
+  // A fort that has no wall to spare mounts fewer, as it did.
+  const small=drawFortTrace({shape:'battery',sizeM:[36,9],landAt:(x,z)=>z>=shore(x),guns:12});
+  assert.ok(small.trace.guns.length<12&&small.trace.guns.length>=3,`${small.trace.guns.length} guns on a small battery asked for twelve`);
+});
+
+test('a hill citadel stands on its hill where the record puts it, however high and far from the water',()=>{
+  // A shore running east and west with the sea to the south, a low shelf for the town, and the record's place on a
+  // level height behind it. São Filipe stands 120 m up, and San Antonio was said in 1668 to be too far from the coast.
+  for(const [id,piece,inland,high] of [['ribeira-grande','Filipe',900,95],['cumana','San Antonio',1100,60]]){
+    const region=resolveGlobalCoastalRegion({id,year:1689,size:257,biomeSize:64,albedoSize:64,vegetationCandidates:100});
+    const record=FORT_RECORDS[id].forts.find(f=>f.name.includes(piece)),truth=worldOfPosition(region,record.lat,record.lon);
+    assert.equal(record.role,'citadel');
+    const n=region.size,heights=new Float32Array(n*n),shoreZ=truth.z+inland;
+    for(let j=0;j<n;j++)for(let i=0;i<n;i++){
+      const d=shoreZ-(region.z+(j/(n-1)-.5)*region.span);
+      heights[j*n+i]=d<0?Math.max(-30,d*.05-1):d<350?1+d*.02:d<500?8+(d-350)/150*(high-8):high;
+    }
+    const harbour=readHarbourGeography(heights,region,{town:{x:truth.x,z:shoreZ-60},seaward:180});
+    const plan=planHarbourDefences({harbour,region,portId:id,year:1689,coastIsReal:true,stage:'colony'});
+    const fort=plan.forts.find(f=>f.name.includes(piece));
+    assert.ok(fort,`${id}: ${piece} stands`);
+    assert.equal(fort.source,'record',`${id}: ${piece} is sited by its record`);
+    assert.ok(distance(fort.spot,truth)<=64,`${id}: ${piece} stands ${distance(fort.spot,truth).toFixed(0)} m from its place`);
+    assert.ok(fort.spot.h>=high-1,`${id}: ${piece} stands on its height, at ${fort.spot.h.toFixed(0)} m of ${high}`);
+  }
+});
+
+test('Lisbon keeps its castle beside the town and its battery at the water, by limits its own record carries',()=>{
+  const castle=FORT_RECORDS.lisbon.forts.find(f=>f.name.includes('Jorge'));
+  assert.ok(castle.waterWithinM<=500&&castle.groundBelowM<=50&&castle.command>0,'the castle is held near the water and low by its record');
+  for(const [id,port] of Object.entries(FORT_RECORDS))for(const record of port.forts){
+    if(record!==castle)assert.ok(record.waterWithinM===undefined&&record.groundBelowM===undefined&&record.command===undefined,`${id}: ${record.name} goes by the general limits`);
+  }
+  for(const year of [1550,1650]){
+    const {port,region,heights}=portOn('lisbon',year),fort=named(port,'Jorge'),battery=named(port,'Baluarte da Ribeira');
+    assert.equal(fort.guards.source,'record');
+    assert.ok(terrainSurfaceSample(heights,fort.x,fort.z,region)<=castle.groundBelowM,`the castle stands on ${terrainSurfaceSample(heights,fort.x,fort.z,region).toFixed(0)} m`);
+    const houses=port.instances.filter(i=>!FORT_PREFABS.has(i.prefabId)&&!i.homeFortId&&i.category!=='infrastructure'&&distance(i,port.center)<600);
+    const nearest=Math.min(...houses.map(i=>distance(i,fort)));
+    assert.ok(nearest<=220,`the castle stands ${nearest.toFixed(0)} m from the nearest of ${houses.length} town buildings`);
+    assert.equal(battery.guards.source,'record');
+    assert.ok(nearestWater(battery,heights,region).d<=120,`the battery stands ${nearestWater(battery,heights,region).d.toFixed(0)} m from the water`);
   }
 });

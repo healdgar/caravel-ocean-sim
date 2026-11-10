@@ -1242,11 +1242,12 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
   if(structDmg>0.005){
     let dmgW=clamp(structDmg,0.0,1.0);
     let spallDetail=landOrientedDetail(world+vec3f(5.7,2.3,9.1),n,dx,dy,3.2);
-    let gritDetail=-spallDetail;
     let fissure=landOrientedJoint(world+vec3f(11.3,4.7,6.9),n,dx,dy);
-    let isAperture=abs(in.kind.x-14.0)<=0.4;
+    // A kind is the whole number: its fraction carries the building's turn, or a window's own coordinate.
+    let isAperture=in.kind.x>=13.5&&in.kind.x<14.5;
+    let isThatch=in.kind.x>=14.5&&in.kind.x<15.5;
     let isCastIron=in.kind.x>=17.5&&in.kind.x<18.5;
-    let isStoneRubble=in.kind.x>=10.5&&in.kind.x<16.5&&!isAperture&&abs(in.kind.x-15.0)>0.4;
+    let isStoneRubble=in.kind.x>=10.5&&in.kind.x<16.5&&!isAperture&&!isThatch;
     if(isAperture){
       let sootVoid=vec3f(0.024,0.020,0.018);
       albedo=mix(albedo,sootVoid,clamp(dmgW*0.58+fissure*0.25,0.0,0.78));
@@ -1260,6 +1261,7 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       relief+=(spallDetail*0.018-fissure*0.022)*dmgW*detailFade;
       roughness=clamp(roughness+dmgW*0.18,0.32,0.76);
     }else if(isStoneRubble){
+      let gritDetail=landOrientedDetail(world+vec3f(14.1,8.7,3.9),n,dx,dy,8.5);
       let shadeKeep=clamp(in.kind.y,0.38,1.0);
       let exposedCore=select(vec3f(0.45,0.40,0.33),vec3f(0.40,0.25,0.16),in.kind.x>=11.5&&in.kind.x<13.5)*shadeKeep*(0.94+0.14*gritDetail);
       let spallPatch=clamp(dmgW*0.48+spallDetail*0.32,0.0,0.68);
@@ -1272,7 +1274,7 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       ambientVisibility*=mix(1.0,0.62+0.38*clamp(1.0-fissure*0.65+spallDetail*0.20,0.0,1.0),dmgW*0.75);
       roughness=max(roughness,0.93);
     }else{
-      let splinterNoise=spallDetail;
+      let splinterNoise=landOrientedDetail(world+vec3f(3.3,7.9,12.1),n,dx,dy,5.5);
       let rawWood=select(vec3f(0.14,0.105,0.080),vec3f(0.28,0.18,0.095),in.kind.x>=9.5);
       let sootTint=vec3f(0.065,0.056,0.048);
       let dmgAlbedo=mix(albedo,rawWood,clamp(dmgW*0.45+splinterNoise*0.25,0.0,0.65));

@@ -5,7 +5,7 @@
 // of shore for curated 1550s Caribbean ports or any global (lat, lon) landfall.
 
 import { layTownStreets, streetEdgeAt } from './town-streets.js';
-import { layPortProps } from './port-props.js';
+import { layPortProps, pierBentStations, pierBrowStations, pierCraneStation } from './port-props.js';
 import { emitTripoHarborCrane, emitTripoDockCleat } from './tripo-pier-assets.js';
 import {
   bastionBayIsEmbrasure,
@@ -256,6 +256,7 @@ export const SPANISH_MAIN_1550_REGIONS = Object.freeze({
     longitude: -63.238,
     climate: 'tropical',
     coastalArchetype: 'volcanic-island',
+    steepIslandDem: true,
     portType: 'careening-anchorage',
     settlementKind: 'colonial-port',
     hasColonialPort: true,
@@ -1792,18 +1793,13 @@ export function syncPortInstancesToTerrain(portOrInstances, heights, region, { g
           region
         );
       const centerGroundY = sampleLocal(0, 0);
-      const probeX = Math.max(1.5, hw * 0.85);
-      const probeZ = Math.max(1.5, hl * 0.85);
-      const rawSlopeX = (sampleLocal(probeX, 0) - sampleLocal(-probeX, 0)) / (2 * probeX);
-      const rawSlopeZ = (sampleLocal(0, probeZ) - sampleLocal(0, -probeZ)) / (2 * probeZ);
       const isFort =
         inst.prefabId === 'stone_sea_bastion' ||
         inst.prefabId === 'bastion_trace_fortress' ||
         inst.prefabId === 'torreon_atalaya_farol' ||
         inst.prefabId === 'curtain_wall_and_gate' ||
         inst.prefabId === 'english_triangular_palisade_fort';
-      const padSlopeX = 0;
-      const padSlopeZ = 0;
+      // A pad is level.
       const padY = levelledLast(inst)
         ? inst.y ?? 2.8
         : inst.indigenous && !isFort
@@ -1811,6 +1807,7 @@ export function syncPortInstancesToTerrain(portOrInstances, heights, region, { g
           : isFort
             ? Math.max(inst.y ?? 2.8, centerGroundY)
             : Math.max(1.6, centerGroundY);
+      const targetH = Math.max(0.45, padY);
 
       const coreX = hw + step * 1.05;
       const coreZ = hl + step * 1.05;
@@ -1847,7 +1844,6 @@ export function syncPortInstancesToTerrain(portOrInstances, heights, region, { g
             const sz = tz * tz * (3 - 2 * tz);
             wBlend = sx * sz;
           }
-          const targetH = Math.max(0.45, padY + lxSigned * padSlopeX + lzSigned * padSlopeZ);
           heights[k] = heights[k] * (1 - wBlend) + targetH * wBlend;
         }
       }
@@ -1880,17 +1876,6 @@ export function syncPortInstancesToTerrain(portOrInstances, heights, region, { g
         region
       );
     const hCenter = sampleLocal(0, 0);
-    const probeX = Math.max(1.5, (inst.width ?? 8) * 0.42);
-    const probeZ = Math.max(1.5, (inst.length ?? 8) * 0.42);
-    const hPosX = sampleLocal(probeX, 0);
-    const hNegX = sampleLocal(-probeX, 0);
-    const hPosZ = sampleLocal(0, probeZ);
-    const hNegZ = sampleLocal(0, -probeZ);
-    const rawSlopeX = (hPosX - hNegX) / (2 * probeX);
-    const rawSlopeZ = (hPosZ - hNegZ) / (2 * probeZ);
-    inst.slopeX = Math.max(-0.20, Math.min(0.20, rawSlopeX));
-    inst.slopeZ = Math.max(-0.20, Math.min(0.20, rawSlopeZ));
-
     const isFort =
       inst.prefabId === 'stone_sea_bastion' ||
       inst.prefabId === 'bastion_trace_fortress' ||
@@ -1901,12 +1886,14 @@ export function syncPortInstancesToTerrain(portOrInstances, heights, region, { g
       inst.slopeX = 0;
       inst.slopeZ = 0;
       inst.y = isFort ? Math.max(inst.y ?? 3.2, hCenter) : Math.max(0.85, hCenter);
-    } else if (inst.prefabId === 'indigenous_canoe_landing') {
-      inst.slopeX = Math.max(-0.12, Math.min(0.12, inst.slopeX));
-      inst.slopeZ = Math.max(-0.12, Math.min(0.12, inst.slopeZ));
-      inst.y = Math.max(0.28, hCenter);
     } else {
-      inst.y = Math.max(0.38, hCenter);
+      // Only a native building follows the lie of its ground, a canoe landing less steeply than a house.
+      const landing = inst.prefabId === 'indigenous_canoe_landing', steepest = landing ? 0.12 : 0.20;
+      const probeX = Math.max(1.5, (inst.width ?? 8) * 0.42);
+      const probeZ = Math.max(1.5, (inst.length ?? 8) * 0.42);
+      inst.slopeX = Math.max(-steepest, Math.min(steepest, (sampleLocal(probeX, 0) - sampleLocal(-probeX, 0)) / (2 * probeX)));
+      inst.slopeZ = Math.max(-steepest, Math.min(steepest, (sampleLocal(0, probeZ) - sampleLocal(0, -probeZ)) / (2 * probeZ)));
+      inst.y = Math.max(landing ? 0.28 : 0.38, hCenter);
     }
     inst.baseY = inst.y;
   }
@@ -2595,6 +2582,9 @@ export function resolveGlobalCoastalRegion(spec = 'cartagena') {
     longitude,
     climate,
     coastalArchetype,
+    // Its real elevation data wants the steep-island treatment: ringing drowned, sea cliffs and guts restored.
+    // Written for Saba and right there; a record may ask for it, and relief alone never does.
+    steepIslandDem: Boolean(spec.steepIslandDem ?? isSabaIsland),
     portType,
     settlementKind,
     hasColonialPort,
@@ -3769,6 +3759,81 @@ function extractAndCarveHarborQuaysAndPiers(region, heights, orthoFootprints) {
     if (!tooClose) selected.push(p);
   }
   return selected;
+}
+
+// Where a ship lies to send her people ashore. A line reaches 36 m (MOORING_LINE_REACH_M in boarding-docking.js) to
+// whatever that file's findNearestPier will take one to, and createCoastalViews starts a 20 m caravel here, which
+// safeLandfallStart moves off, out of reach, if any of her swinging room is shoaler than 3.1 m. A pier slides along
+// its heading to find its shore and no coast is straight, so a berth measured off the shoreline can be neither. It is
+// found from the piers as they stand: the wanted place if she floats there with a line ashore, else the nearest water
+// by a pier where she does, and failing that the nearest that can be dredged for her. Mud is dredged; land never.
+const DOCK_BERTH_PIER = /jetty|pier|wharf|dock|quay|mole|slip/i;
+const DOCK_BERTH_SWING_M = 22;
+const DOCK_BERTH_WATER_M = 3.8;
+const DOCK_BERTH_DREDGED_M = 4.8;
+const DOCK_BERTH_NEAREST_M = 12;
+const DOCK_BERTH_FURTHEST_M = 30;
+export function settleDockBerth(heights, region, instances, wanted) {
+  const piers = instances.filter((inst) => DOCK_BERTH_PIER.test(inst.prefabId ?? ''));
+  if (!piers.length) return { x: wanted.x, z: wanted.z };
+  const n = region.size, span = region.span, cell = span / (n - 1), keep = span * 0.42;
+  const lineTo = (x, z) => {
+    let nearest = Infinity;
+    for (const pier of piers) {
+      const c = Math.cos(pier.yaw ?? 0), s = Math.sin(pier.yaw ?? 0), dx = x - pier.x, dz = z - pier.z;
+      const lx = dx * c - dz * s, lz = dx * s + dz * c, hw = (pier.width ?? 0) * 0.5, hl = (pier.length ?? 0) * 0.5;
+      nearest = Math.min(nearest, Math.hypot(lx - Math.max(-hw, Math.min(hw, lx)), lz - Math.max(-hl, Math.min(hl, lz))));
+    }
+    return nearest;
+  };
+  const shoalest = (x, z) => {
+    let top = terrainSample(heights, x, z, region);
+    for (const [radius, count] of [[DOCK_BERTH_SWING_M, 16], [DOCK_BERTH_SWING_M * 0.5, 8]]) {
+      for (let k = 0; k < count && top <= -DOCK_BERTH_WATER_M; k++) {
+        const turn = (k / count) * 2 * Math.PI;
+        top = Math.max(top, terrainSample(heights, x + Math.cos(turn) * radius, z + Math.sin(turn) * radius, region));
+      }
+    }
+    return top;
+  };
+  const inWaters = (x, z) => Math.abs(x - region.x) <= keep && Math.abs(z - region.z) <= keep;
+  if (inWaters(wanted.x, wanted.z) && lineTo(wanted.x, wanted.z) <= DOCK_BERTH_FURTHEST_M && shoalest(wanted.x, wanted.z) <= -DOCK_BERTH_WATER_M) {
+    return { x: wanted.x, z: wanted.z };
+  }
+  // Every height her swinging room is read from: none of it may be land if the berth is to be dredged.
+  const dredgeReach = DOCK_BERTH_SWING_M + cell * 1.5;
+  const cellsWithin = (x, z, radius, visit) => {
+    const i0 = Math.max(0, Math.floor(((x - radius - region.x) / span + 0.5) * (n - 1))), i1 = Math.min(n - 1, Math.ceil(((x + radius - region.x) / span + 0.5) * (n - 1)));
+    const j0 = Math.max(0, Math.floor(((z - radius - region.z) / span + 0.5) * (n - 1))), j1 = Math.min(n - 1, Math.ceil(((z + radius - region.z) / span + 0.5) * (n - 1)));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      const d = Math.hypot(region.x + (i / (n - 1) - 0.5) * span - x, region.z + (j / (n - 1) - 0.5) * span - z);
+      if (d <= radius && visit(j * n + i, d) === false) return false;
+    }
+    return true;
+  };
+  let afloat = null, inMud = null;
+  for (const pier of piers) {
+    const c = Math.cos(pier.yaw ?? 0), s = Math.sin(pier.yaw ?? 0);
+    const hw = (pier.width ?? 0) * 0.5 + DOCK_BERTH_FURTHEST_M, hl = (pier.length ?? 0) * 0.5 + DOCK_BERTH_FURTHEST_M;
+    for (let lz = -hl; lz <= hl; lz += 4) for (let lx = -hw; lx <= hw; lx += 4) {
+      const x = pier.x + lx * c + lz * s, z = pier.z - lx * s + lz * c;
+      if (!inWaters(x, z)) continue;
+      const off = Math.hypot(x - wanted.x, z - wanted.z);
+      if (afloat && off >= afloat.off) continue;
+      const line = lineTo(x, z);
+      if (line < DOCK_BERTH_NEAREST_M || line > DOCK_BERTH_FURTHEST_M) continue;
+      if (shoalest(x, z) <= -DOCK_BERTH_WATER_M) afloat = { x, z, off };
+      else if (!afloat && (!inMud || off < inMud.off) && cellsWithin(x, z, dredgeReach, (k) => heights[k] <= 0.25)) inMud = { x, z, off };
+    }
+  }
+  if (afloat) return { x: afloat.x, z: afloat.z };
+  if (!inMud) return { x: wanted.x, z: wanted.z };
+  cellsWithin(inMud.x, inMud.z, dredgeReach + cell * 3, (k, d) => {
+    if (heights[k] > 0.25) return;
+    const ease = coastalSmoothstep(dredgeReach + cell * 3, dredgeReach, d);
+    heights[k] = Math.min(heights[k], -DOCK_BERTH_DREDGED_M * ease);
+  });
+  return { x: inMud.x, z: inMud.z };
 }
 
 export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, satelliteData = null, shoreDist = null, coastIsReal = false } = {}) {
@@ -5042,7 +5107,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
   const berthDepth = -terrainSample(heights, berthPos.x, berthPos.z, region);
   const dockAlongOffset = isLisbonRoyalDock ? 22 : -6;
   const dockInlandOffset = isLisbonRoyalDock ? -84 : -62;
-  const dockPos = worldFromCoastalFrame(region, bestShoreAlong + dockAlongOffset, bestShoreInland + dockInlandOffset);
+  const dockPos = settleDockBerth(heights, region, instances, worldFromCoastalFrame(region, bestShoreAlong + dockAlongOffset, bestShoreInland + dockInlandOffset));
   const dockDepth = -terrainSample(heights, dockPos.x, dockPos.z, region);
   const dockHeading = (((region.shoreBearing ?? 112) - (isLisbonRoyalDock ? 100 : 108)) % 360 + 360) % 360;
 
@@ -5266,6 +5331,11 @@ export async function load1550BuildingLRMTemplates(fetchImpl = typeof fetch === 
   return pendingLRMBuildingPromise;
 }
 
+// A kind-14 opening asked for above this shade is a glazed window, and at or below it a dark portal. The terrain shader
+// draws the line at the same place (isGlazedWindow), so no face of an opening is ever shaded across it.
+const GLAZED_ABOVE_SHADE = 0.25;
+const DARK_PORTAL_SHADE = GLAZED_ABOVE_SHADE;
+
 export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplates = cachedLRMBuildingTemplates) {
   const hasPalms = palms instanceof Float32Array && palms.length >= 8;
   if (!portPlacement?.instances?.length && !hasPalms) {
@@ -5386,11 +5456,10 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       0.014 * Math.cos(p[1] * 1.15 - p[0] * 0.41) +
       0.022 * (n[0] * 0.6 + n[1] * 0.5 - n[2] * 0.4);
     if (kFloor === 14) {
-      // Window panes (baseShade > 0.25) vs recessed dark portals (baseShade <= 0.25):
-      // never cross the 0.25 shader threshold (isGlazedWindow = in.kind.y > 0.25) across vertices of a quad!
+      // Window panes against recessed dark portals: never cross the shader's line across the vertices of a quad.
       const revealGrad = 0.90 + 0.14 * Math.sin(p[1] * 1.35 + p[0] * 0.45 + p[2] * 0.45);
       const shaded = baseShade * revealGrad * soffitAO;
-      if (baseShade <= 0.25) {
+      if (baseShade <= GLAZED_ABOVE_SHADE) {
         return Math.max(0.12, Math.min(0.22, shaded));
       }
       return Math.max(0.30, Math.min(1.0, shaded));
@@ -5464,7 +5533,9 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       }
     });
 
-  const pushQuad = (a, b, c, d, kind, shade) => {
+  // `glazed` says which a kind-14 opening is, a window or a dark portal, for every face of whatever it is part of.
+  // Left out, the face's own shade says. A box must say: it lights its faces differently, and one opening is one thing.
+  const pushQuad = (a, b, c, d, kind, shade, glazed = null) => {
     const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
     const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
     let nx = uz * vy - uy * vz;
@@ -5472,7 +5543,8 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     let nz = uy * vx - ux * vy;
     const len = Math.hypot(nx, ny, nz) || 1;
     nx /= len; ny /= len; nz /= len;
-    if (Math.floor(kind + 0.01) === 14 && shade > 0.25) {
+    const opening = Math.floor(kind + 0.01) === 14;
+    if (opening && (glazed ?? shade > GLAZED_ABOVE_SHADE)) {
       // Glazed window/room quad: encode exact [0..1] window corner UVs in (kind, shade) so casement & room align 1:1
       if (Math.abs(ny) <= 0.7) {
         const i0 = pushVertex(a, [nx, ny, nz], 14.02, 0.96, true);
@@ -5489,11 +5561,12 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       }
       return;
     }
-    const qKind = encodeArchKind(kind);
-    const i0 = pushVertex(a, [nx, ny, nz], qKind, shade);
-    const i1 = pushVertex(b, [nx, ny, nz], qKind, shade);
-    const i2 = pushVertex(c, [nx, ny, nz], qKind, shade);
-    const i3 = pushVertex(d, [nx, ny, nz], qKind, shade);
+    // A portal stays dark on its lit faces too: past the line the shader would glaze it.
+    const qKind = encodeArchKind(kind), qShade = opening ? Math.min(shade, GLAZED_ABOVE_SHADE) : shade;
+    const i0 = pushVertex(a, [nx, ny, nz], qKind, qShade);
+    const i1 = pushVertex(b, [nx, ny, nz], qKind, qShade);
+    const i2 = pushVertex(c, [nx, ny, nz], qKind, qShade);
+    const i3 = pushVertex(d, [nx, ny, nz], qKind, qShade);
     indices.push(i0, i1, i2, i0, i2, i3);
   };
 
@@ -5512,9 +5585,9 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     indices.push(i0, i1, i2);
   };
 
-  const pushSubdividedQuad = (p00, p10, p11, p01, nu, nv, kind, shade) => {
+  const pushSubdividedQuad = (p00, p10, p11, p01, nu, nv, kind, shade, glazed = null) => {
     if (nu <= 1 && nv <= 1) {
-      pushQuad(p00, p10, p11, p01, kind, shade);
+      pushQuad(p00, p10, p11, p01, kind, shade, glazed);
       return;
     }
     const bilerp = (u, v) => [
@@ -5526,7 +5599,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       const v0 = j / nv, v1 = (j + 1) / nv;
       for (let i = 0; i < nu; i++) {
         const u0 = i / nu, u1 = (i + 1) / nu;
-        pushQuad(bilerp(u0, v0), bilerp(u1, v0), bilerp(u1, v1), bilerp(u0, v1), kind, shade);
+        pushQuad(bilerp(u0, v0), bilerp(u1, v0), bilerp(u1, v1), bilerp(u0, v1), kind, shade, glazed);
       }
     }
   };
@@ -5547,7 +5620,8 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     const spanX = Math.abs(x1 - x0);
     const spanY = Math.abs(y1 - y0);
     const spanZ = Math.abs(z1 - z0);
-    const isGlazedWin = Math.floor(kind + 0.01) === 14 && shade > 0.25;
+    // Decided once, on the shade the box was asked for, before any face is lit.
+    const isGlazedWin = Math.floor(kind + 0.01) === 14 && shade > GLAZED_ABOVE_SHADE;
     const nx = isGlazedWin
       ? (spanX >= 1.65 ? Math.min(8, Math.max(1, Math.round(spanX / 1.15))) : 1)
       : (spanX >= 2.2 ? Math.min(12, Math.max(2, Math.round(spanX / 1.75))) : 1);
@@ -5558,13 +5632,13 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       ? (spanZ >= 1.65 ? Math.min(8, Math.max(1, Math.round(spanZ / 1.15))) : 1)
       : (spanZ >= 2.2 ? Math.min(12, Math.max(2, Math.round(spanZ / 1.75))) : 1);
 
-    pushSubdividedQuad(p000, p100, p110, p010, nx, ny, kind, shade * 0.94);
-    pushSubdividedQuad(p100, p101, p111, p110, nz, ny, kind, shade);
-    pushSubdividedQuad(p101, p001, p011, p111, nx, ny, kind, shade * 0.96);
-    pushSubdividedQuad(p001, p000, p010, p011, nz, ny, kind, shade * 0.88);
-    pushSubdividedQuad(p010, p110, p111, p011, nx, nz, kind, Math.min(1, shade * 1.06));
+    pushSubdividedQuad(p000, p100, p110, p010, nx, ny, kind, shade * 0.94, isGlazedWin);
+    pushSubdividedQuad(p100, p101, p111, p110, nz, ny, kind, shade, isGlazedWin);
+    pushSubdividedQuad(p101, p001, p011, p111, nx, ny, kind, shade * 0.96, isGlazedWin);
+    pushSubdividedQuad(p001, p000, p010, p011, nz, ny, kind, shade * 0.88, isGlazedWin);
+    pushSubdividedQuad(p010, p110, p111, p011, nx, nz, kind, Math.min(1, shade * 1.06), isGlazedWin);
     if (includeBottom) {
-      pushQuad(p001, p101, p100, p000, kind, shade * 0.65);
+      pushQuad(p001, p101, p100, p000, kind, shade * 0.65, isGlazedWin);
     }
   };
 
@@ -5651,7 +5725,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         const yFoot = yBase + (inst.foundationDepth ?? 0);
         // The arch, an opening in the scarp with a stone frame, and a timber bridge out over the batter.
         emitBox(frame, gateAt - trace.gate.halfWidth - 0.8, gateAt + trace.gate.halfWidth + 0.8, yFoot, top + 0.9, -0.5, TRACE_PARAPET_M, wallKind, 0.9);
-        emitBox(frame, gateAt - trace.gate.halfWidth * 0.7, gateAt + trace.gate.halfWidth * 0.7, yFoot, top - 1.2, -0.56, TRACE_PARAPET_M + 0.1, 14, 0.26);
+        emitBox(frame, gateAt - trace.gate.halfWidth * 0.7, gateAt + trace.gate.halfWidth * 0.7, yFoot, top - 1.2, -0.56, TRACE_PARAPET_M + 0.1, 14, DARK_PORTAL_SHADE);
         emitBox(frame, gateAt - trace.gate.halfWidth * 0.75, gateAt + trace.gate.halfWidth * 0.75, yFoot + 0.3, yFoot + 0.55, -TRACE_BATTER_M - 1.8, 0, 10, 0.76, true);
       } else {
         span(from, to);
@@ -6373,9 +6447,10 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       emitBox(toWorld, -hw - 0.22, -hw, yTop - 1.35, yTop - 0.95, -hl + 0.8, hl - 0.8, 10, 0.64, true);
       emitBox(toWorld, hw, hw + 0.22, yTop - 1.35, yTop - 0.95, -hl + 0.8, hl - 0.8, 10, 0.64, true);
       // Paired cylindrical timber pilings iterated every 4.8m + transverse cross-beam caps, diagonal X-braces, fender piles & mooring bollards
-      const bays = snapBays(inst.length - 2.4, 4.8, 4);
-      for (let b = 0; b <= bays; b++) {
-        const z = -hl + 1.2 + (b / bays) * (inst.length - 2.4);
+      // A post on every other bent. The cleats between them are props (js/port-props.js), which a shot can break.
+      const bents = pierBentStations(inst.length);
+      for (let b = 0; b < bents.length; b++) {
+        const z = bents[b];
         beginSection('foundation_pilings');
         emitCylinder(toWorld, -hw + 0.48, z, yBase, yTop + 0.58, 0.26, 0.24, 6, 10, 0.66, true);
         emitCylinder(toWorld, hw - 0.48, z, yBase, yTop + 0.58, 0.26, 0.24, 6, 10, 0.66, true);
@@ -6387,15 +6462,10 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         emitBox(toWorld, -hw + 0.6, hw - 0.6, deckBottom - 1.65, deckBottom - 1.32, z - 0.14, z + 0.14, 10, 0.56, true);
         if (b % 2 === 0) {
           beginSection('mooring_bollards');
-          if (b % 4 === 0) {
-            emitTripoDockCleat(pushTri, toWorld, -hw + 0.78, yTop + 0.26, z, 0.72, Math.PI * 0.5);
-            emitTripoDockCleat(pushTri, toWorld, hw - 0.78, yTop + 0.26, z, 0.72, -Math.PI * 0.5);
-          } else {
-            emitCylinder(toWorld, -hw + 0.78, z, yTop + 0.26, yTop + 0.94, 0.20, 0.22, 8, 10, 0.68, true);
-            emitCylinder(toWorld, -hw + 0.78, z, yTop + 0.94, yTop + 1.04, 0.24, 0.21, 8, 18, 0.64, true);
-            emitCylinder(toWorld, hw - 0.78, z, yTop + 0.26, yTop + 0.94, 0.20, 0.22, 8, 10, 0.68, true);
-            emitCylinder(toWorld, hw - 0.78, z, yTop + 0.94, yTop + 1.04, 0.24, 0.21, 8, 18, 0.64, true);
-          }
+          emitCylinder(toWorld, -hw + 0.78, z, yTop + 0.26, yTop + 0.94, 0.20, 0.22, 8, 10, 0.68, true);
+          emitCylinder(toWorld, -hw + 0.78, z, yTop + 0.94, yTop + 1.04, 0.24, 0.21, 8, 18, 0.64, true);
+          emitCylinder(toWorld, hw - 0.78, z, yTop + 0.26, yTop + 0.94, 0.20, 0.22, 8, 10, 0.68, true);
+          emitCylinder(toWorld, hw - 0.78, z, yTop + 0.94, yTop + 1.04, 0.24, 0.21, 8, 18, 0.64, true);
         }
       }
       // Boatman's timber landing stage & water stairs descending into the water on the sheltered flank
@@ -6427,7 +6497,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       emitBox(toWorld, -hw * 0.38 - 1.45, -hw * 0.38 + 1.45, yTop + 1.06, yTop + 1.16, capZ - 0.08, capZ + 0.08, 10, 0.82, true);
       emitBox(toWorld, -hw * 0.38 - 0.08, -hw * 0.38 + 0.08, yTop + 1.06, yTop + 1.16, capZ - 1.45, capZ + 1.45, 10, 0.82, true);
       // Brow gangway plank staged at the embarkation berth edge
-      emitBox(toWorld, hw - 1.6, hw + 1.45, yTop + 0.05, yTop + 0.24, -hl + 8.2, -hl + 9.6, 10, 0.82, true);
+      emitBox(toWorld, hw - 1.6, hw + 1.45, yTop + 0.05, yTop + 0.24, ...pierBrowStations(inst.length), 10, 0.82, true);
       // Seaward pier-head Manueline stepped octagonal Pedra Lioz Padrão plinth, iron fire-basket cresset beacon & Tripo treadwheel harbor crane
       beginSection('pier_beacon_and_crane');
       const bz = -hl + 2.1;
@@ -6457,7 +6527,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         );
       }
       // Tripo-generated 16th-century treadwheel harbor crane (Guindaste da Ribeira) with slung cargo cask
-      const craneZ = -hl * 0.32;
+      const craneZ = pierCraneStation(inst.length);
       emitTripoHarborCrane(pushTri, toWorld, hw - 1.35, yTop, craneZ, 5.8, 0);
       emitCylinder(toWorld, hw + 1.30, craneZ - 0.12, yTop + 1.95, yTop + 5.55, 0.045, 0.045, 6, 18, 0.68, true);
       emitCylinder(toWorld, hw + 1.30, craneZ - 0.12, yTop + 1.15, yTop + 1.95, 0.42, 0.38, 10, 10, 0.76, true);
@@ -7292,7 +7362,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         emitBox(toWorld, -lhHW * 0.58, lhHW * 0.58, yEave + vaultRise - 0.05, yEave + vaultRise + 0.09, bz - 0.08, bz + 0.08, 10, 0.76, true);
         if (b > 0 && b < nBays && b % 2 === 1) {
           beginSection('roof_smoke_holes');
-          emitBox(toWorld, -0.55, 0.55, yEave + vaultRise - 0.04, yEave + vaultRise + 0.12, bz - 0.55, bz + 0.55, 14, 0.28, true);
+          emitBox(toWorld, -0.55, 0.55, yEave + vaultRise - 0.04, yEave + vaultRise + 0.12, bz - 0.55, bz + 0.55, 14, DARK_PORTAL_SHADE, true);
         }
       }
       // End doorway portals on -hl and +hl with projecting bark rain-hoods & red-ochre clan lintel (kind 13)
@@ -7302,7 +7372,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         const zOut = sideZ * (hl + 0.65);
         const zMin = Math.min(zFace, zOut), zMax = Math.max(zFace, zOut);
         emitBox(toWorld, -1.05, 1.05, yPlinth + 1.85, yPlinth + 2.25, zMin, zMax, 13, 0.88, true);
-        emitBox(toWorld, -0.78, 0.78, yPlinth, yPlinth + 1.85, zFace - 0.18, zFace + 0.18, 14, 0.26);
+        emitBox(toWorld, -0.78, 0.78, yPlinth, yPlinth + 1.85, zFace - 0.18, zFace + 0.18, 14, DARK_PORTAL_SHADE);
       }
     } else if (inst.prefabId === 'indigenous_palisade_ring') {
       // Woodland / Tupinambá Circular Split-Log Palisade Stockade, Council Firepit & Three Sisters Maize-Bean-Squash Mounds:
@@ -7385,7 +7455,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       for (const px of [-cHW + 0.45, -cHW * 0.34, cHW * 0.34, cHW - 0.45]) {
         emitCylinder(toWorld, px, -hl + 0.35, yGround - 0.8, yEave, 0.24, 0.21, 6, 10, 0.76, true);
       }
-      emitBox(toWorld, -1.15, 1.15, yPlinth, yEave - 0.45, -hl + 2.45, -hl + 2.75, 14, 0.28);
+      emitBox(toWorld, -1.15, 1.15, yPlinth, yEave - 0.45, -hl + 2.45, -hl + 2.75, 14, DARK_PORTAL_SHADE);
       // Multi-tiered royal palm-thatch hipped roof (kind 15) + carved ridge pole crest (kind 10)
       beginSection('caney_palm_thatch_roof');
       emitRoof(toWorld, -cHW - 0.35, cHW + 0.35, yEave, yPeak, -hl - 0.35, hl + 0.35, 0.95, 0.36, 10, 15);
@@ -7407,7 +7477,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         const a = (p / 10) * Math.PI * 2;
         emitCylinder(toWorld, Math.cos(a) * (rBohio + 0.08), Math.sin(a) * (rBohio + 0.08), yGround - 0.6, yEave, 0.15, 0.13, 5, 10, 0.74, true);
       }
-      emitBox(toWorld, -0.68, 0.68, yPlinth, yEave - 0.35, -rBohio - 0.12, -rBohio + 0.18, 14, 0.28);
+      emitBox(toWorld, -0.68, 0.68, yPlinth, yEave - 0.35, -rBohio - 0.12, -rBohio + 0.18, 14, DARK_PORTAL_SHADE);
       // 3-tier overhanging conical palm-thatch roof (kind 15) + center pole finial (kind 10)
       beginSection('bohio_conical_thatch_roof');
       emitCylinder(toWorld, 0, 0, yEave - 0.25, yEave + coneH * 0.36, rBohio + 0.72, rBohio * 0.68, 10, 15, 0.88, false);
@@ -7475,7 +7545,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       beginSection('oca_ridge_and_portals');
       emitBox(toWorld, -0.24, 0.24, yPlinth + ocaH - 0.1, yPlinth + ocaH + 0.28, -hl - 0.4, hl + 0.4, 10, 0.78, true);
       for (const pz of [-hl * 0.55, 0, hl * 0.55]) {
-        emitBox(toWorld, -oHW - 0.08, oHW + 0.08, yPlinth, yPlinth + 1.65, pz - 0.72, pz + 0.72, 14, 0.28);
+        emitBox(toWorld, -oHW - 0.08, oHW + 0.08, yPlinth, yPlinth + 1.65, pz - 0.72, pz + 0.72, 14, DARK_PORTAL_SHADE);
       }
     } else if (inst.prefabId === 'palafito_estuary_village') {
       // Tierra Firme / Maracaibo / Warao Over-Water Lagoon Stilt Palafito Cluster:
@@ -7499,7 +7569,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       for (const zCenter of [-hl + hutL + 0.4, hl - hutL - 0.4]) {
         beginSection('palafito_hut_walls_and_roof');
         emitBox(toWorld, -hutW, hutW, yDeck, yHutEave, zCenter - hutL, zCenter + hutL, 12, 0.86);
-        emitBox(toWorld, -0.65, 0.65, yDeck, yHutEave - 0.45, zCenter - hutL - 0.08, zCenter + hutL + 0.08, 14, 0.28);
+        emitBox(toWorld, -0.65, 0.65, yDeck, yHutEave - 0.45, zCenter - hutL - 0.08, zCenter + hutL + 0.08, 14, DARK_PORTAL_SHADE);
         emitRoof(toWorld, -hutW, hutW, yHutEave, yHutPeak, zCenter - hutL, zCenter + hutL, 0.75, 0.28, 10, 15);
       }
     } else if (inst.prefabId === 'maya_limestone_shrine_and_na') {
@@ -7527,7 +7597,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       const sW = pyrR * 0.42;
       emitBox(toWorld, -sW, sW, yT3, ySanctTop, pyrZ - sW * 0.85, pyrZ + sW * 0.85, 12, 0.95, true);
       emitBox(toWorld, -sW - 0.18, sW + 0.18, ySanctTop - 0.38, ySanctTop + 0.12, pyrZ - sW, pyrZ + sW, 11, 0.92, true);
-      emitBox(toWorld, -0.68, 0.68, yT3, ySanctTop - 0.65, pyrZ - sW * 0.92, pyrZ - sW * 0.5, 14, 0.26);
+      emitBox(toWorld, -0.68, 0.68, yT3, ySanctTop - 0.65, pyrZ - sW * 0.92, pyrZ - sW * 0.5, 14, DARK_PORTAL_SHADE);
       // Apsidal palm-thatched Maya Nah house behind the shrine (+Z)
       const naZ = hl * 0.44;
       const naW = Math.min(3.8, hw * 0.68);
@@ -7682,7 +7752,7 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       beginSection('river_gatehouse_and_watchtower');
       const gateFrame = (lx, ly, lz) => toWorld(fortPlan.gate.x + fortPlan.gate.ux * lx - fortPlan.gate.nx * lz, ly, fortPlan.gate.z + fortPlan.gate.uz * lx - fortPlan.gate.nz * lz);
       emitBox(gateFrame, -2.4, 2.4, yPlinth, yWallTop + 1.8, -1.2, 1.2, 10, 0.78, true);
-      emitBox(gateFrame, -1.25, 1.25, yPlinth, yWallTop - 0.9, -1.3, 1.3, 14, 0.26);
+      emitBox(gateFrame, -1.25, 1.25, yPlinth, yWallTop - 0.9, -1.3, 1.3, 14, DARK_PORTAL_SHADE);
       emitRoof(gateFrame, -2.7, 2.7, yWallTop + 1.8, yWallTop + 3.4, -1.5, 1.5, 0.45, 0.35, 10, 10);
 
       // Mounted Demi-Culverin / Saker Ordnance Guns on Timber Carriages, sitting flush on the raised bulwark timber decks
@@ -9529,6 +9599,57 @@ function fetchCachedTerrariumTileRgba(demUrl, signal) {
 // satellite orthophoto tiles (https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x})
 // in parallel. Applies Saba's coastal bathymetry skirt model and spectral satellite
 // auto-placement of 3D forests, coconut palms, and sandy beaches.
+// Coarse radar elevation rings round a steep island that stands in deep water: a skirt of false land a few metres
+// high lies off the true shore, with needle patches too small to be ground. Here land counts only where it rises
+// above that ringing in a patch big enough to be real, or touches such a patch; the rest goes back to the sea.
+// A real low coast fails the same test (measured on the shipped ports: a fifth of the land at Acapulco and Rio, and
+// the islets of Fort-Royal's bay), so this runs only for a region that asks for it with steepIslandDem.
+// Returns how many cells it drowned.
+export function drownDemCoastalRinging(rawDem, n, maxDem, landCount) {
+  const coreThresh = maxDem > 240 ? 5.2 : 2.4;
+  const minComponentCells = Math.max(48, Math.min(180, Math.floor(landCount * 0.015)));
+  const visited = new Uint8Array(n * n);
+  const coreMask = new Uint8Array(n * n);
+  let keptCoreCells = 0;
+  for (let k = 0; k < n * n; k++) {
+    if (rawDem[k] <= coreThresh || visited[k]) continue;
+    const q = [k];
+    visited[k] = 1;
+    for (let head = 0; head < q.length; head++) {
+      const cur = q[head];
+      const cx = cur % n, cy = (cur / n) | 0;
+      if (cx > 0 && !visited[cur - 1] && rawDem[cur - 1] > coreThresh) { visited[cur - 1] = 1; q.push(cur - 1); }
+      if (cx + 1 < n && !visited[cur + 1] && rawDem[cur + 1] > coreThresh) { visited[cur + 1] = 1; q.push(cur + 1); }
+      if (cy > 0 && !visited[cur - n] && rawDem[cur - n] > coreThresh) { visited[cur - n] = 1; q.push(cur - n); }
+      if (cy + 1 < n && !visited[cur + n] && rawDem[cur + n] > coreThresh) { visited[cur + n] = 1; q.push(cur + n); }
+    }
+    if (q.length >= minComponentCells) {
+      for (let idx = 0; idx < q.length; idx++) coreMask[q[idx]] = 1;
+      keptCoreCells += q.length;
+    }
+  }
+  if (keptCoreCells < minComponentCells) return 0;
+  const validLand = new Uint8Array(coreMask);
+  const fringeThresh = maxDem > 240 ? 2.2 : 1.0;
+  for (let y = 1; y < n - 1; y++) {
+    for (let x = 1; x < n - 1; x++) {
+      const k = y * n + x;
+      if (validLand[k] || rawDem[k] <= fringeThresh) continue;
+      if (coreMask[k - 1] || coreMask[k + 1] || coreMask[k - n] || coreMask[k + n]) {
+        validLand[k] = 1;
+      }
+    }
+  }
+  let drowned = 0;
+  for (let k = 0; k < n * n; k++) {
+    if (!validLand[k] && rawDem[k] > 0.25) {
+      rawDem[k] = -1.5;
+      drowned++;
+    }
+  }
+  return drowned;
+}
+
 export async function upgradeProceduralPackWithRealDEM(
   pack,
   { fetchTile = null, fetchSatelliteTile = null, zoom = 13, demSpan = null, timeoutMs = 12000, _snapAttempted = false, isNeighborSection = false, snapToCoast = true } = {}
@@ -9821,57 +9942,17 @@ export async function upgradeProceduralPackWithRealDEM(
       for (const item of satLoaded) item?.bmp?.close?.();
     }
 
-    // Suppress coarse SRTM/GMTED coastal ringing (0.25..5m offshore radar sidelobes) and tiny disconnected
-    // offshore needle patches around steep mountainous/volcanic relief (matching scripts/prepare-land.py:61-79).
-    if (!isNeighborSection && maxDem > 120) {
-      const coreThresh = maxDem > 240 ? 5.2 : 2.4;
-      const minComponentCells = Math.max(48, Math.min(180, Math.floor(landCount * 0.015)));
-      const visited = new Uint8Array(n * n);
-      const coreMask = new Uint8Array(n * n);
-      let keptCoreCells = 0;
-      for (let k = 0; k < n * n; k++) {
-        if (rawDem[k] <= coreThresh || visited[k]) continue;
-        const q = [k];
-        visited[k] = 1;
-        for (let head = 0; head < q.length; head++) {
-          const cur = q[head];
-          const cx = cur % n, cy = (cur / n) | 0;
-          if (cx > 0 && !visited[cur - 1] && rawDem[cur - 1] > coreThresh) { visited[cur - 1] = 1; q.push(cur - 1); }
-          if (cx + 1 < n && !visited[cur + 1] && rawDem[cur + 1] > coreThresh) { visited[cur + 1] = 1; q.push(cur + 1); }
-          if (cy > 0 && !visited[cur - n] && rawDem[cur - n] > coreThresh) { visited[cur - n] = 1; q.push(cur - n); }
-          if (cy + 1 < n && !visited[cur + n] && rawDem[cur + n] > coreThresh) { visited[cur + n] = 1; q.push(cur + n); }
-        }
-        if (q.length >= minComponentCells) {
-          for (let idx = 0; idx < q.length; idx++) coreMask[q[idx]] = 1;
-          keptCoreCells += q.length;
-        }
-      }
-      if (keptCoreCells >= minComponentCells) {
-        const validLand = new Uint8Array(coreMask);
-        const fringeThresh = maxDem > 240 ? 2.2 : 1.0;
-        for (let y = 1; y < n - 1; y++) {
-          for (let x = 1; x < n - 1; x++) {
-            const k = y * n + x;
-            if (validLand[k] || rawDem[k] <= fringeThresh) continue;
-            if (coreMask[k - 1] || coreMask[k + 1] || coreMask[k - n] || coreMask[k + n]) {
-              validLand[k] = 1;
-            }
-          }
-        }
-        for (let k = 0; k < n * n; k++) {
-          if (!validLand[k] && rawDem[k] > 0.25) {
-            rawDem[k] = -1.5;
-          }
-        }
-      }
-    }
+    // Ringing round a steep island, where the region says its elevation data has it.
+    if (!isNeighborSection && region.steepIslandDem && maxDem > 120) drownDemCoastalRinging(rawDem, n, maxDem, landCount);
 
     // Apply Saba's exact coastal bathymetry model (scripts/prepare-land-imagery.py:76-83):
-    // Measured land elevations > 0.25m are retained; on steep volcanic/mountainous relief (maxDem > 240m),
-    // restore high-frequency sea-cliff scarps and radial ravines ("guts") attenuated by Z13 bilinear interpolation.
+    // Measured land elevations > 0.25m are retained. Where the region is a steep island (steepIslandDem) with relief
+    // over 240 m, restore the sea-cliff scarps and radial ravines ("guts") that Z13 bilinear interpolation flattens.
+    // Only there: the scarp is up to 62 m of made-up cliff within 165 m of the shore, which buries a harbour town's
+    // ground, and its sharpening throws 895 m needles beside a void in the elevation data (Acapulco, Portobelo).
     const { distLand, distWater, step } = computeCoastalShoreDistances(rawDem, n, span, 0.25);
     const heights = new Float32Array(n * n);
-    const sharpenSteepRelief = maxDem > 240;
+    const sharpenSteepRelief = Boolean(region.steepIslandDem) && maxDem > 240;
     const seed = (region.vegetationSeed ?? coastalHashCoords(region.latitude, region.longitude)) >>> 0;
     for (let j = 0; j < n; j++) {
       const z = region.z + (j / (n - 1) - 0.5) * span;
