@@ -445,7 +445,7 @@ export function stepBoatSurge(boat, slope, dt, windSpeed = 0, windDirection = 0)
   boat.surgeAcceleration = (velocity - initial) / dt;
   boat.leewayVelocity = sideways; boat.leewayDistance = sidewaysDistance;
   sailForces(boat, windSpeed, windDirection, velocity, sideways);
-  stepVesselRopeChain(boat, dt, boat.waveSampleTime || 0, windSpeed);
+  stepVesselRopeChain(boat, dt);
   return distance;
 }
 

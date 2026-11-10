@@ -11,9 +11,12 @@ function ropeWaveClamp(x, lo, hi) {
 /**
  * Steps the per-vessel 2D coupled chain-pendulum oscillator driven by hull roll,
  * pitch, angular velocities, angular accelerations, and heave.
- * Runs in O(1) once per vessel per frame.
+ * Runs in O(1). The vessel's physics step advances it; a vessel whose physics
+ * did not run this frame is advanced by packRopeChainUniform instead, so the
+ * oscillator moves by exactly one frame of time whichever path runs. A step of
+ * no duration (paused) leaves the state untouched.
  */
-export function stepVesselRopeChain(boat, dt = 0, time = 0, windSpeed = 0) {
+export function stepVesselRopeChain(boat, dt = 0) {
   if (!boat || typeof boat !== 'object') {
     return { active: 0, swayX: 0, swayZ: 0 };
   }
@@ -32,15 +35,12 @@ export function stepVesselRopeChain(boat, dt = 0, time = 0, windSpeed = 0) {
       velZ: 0,
       lastRollVel: rollVel,
       lastPitchVel: pitchVel,
-      time,
-      windSpeed,
+      steppedSinceUniform: false,
     };
     vesselRopeChainStates.set(boat, state);
   }
 
   state.active = 1;
-  state.time = Number.isFinite(time) ? time : state.time;
-  state.windSpeed = Number.isFinite(windSpeed) ? windSpeed : state.windSpeed;
 
   if (dt > 0 && Number.isFinite(dt)) {
     const clampedDt = Math.min(dt, 0.25);
@@ -69,12 +69,7 @@ export function stepVesselRopeChain(boat, dt = 0, time = 0, windSpeed = 0) {
       state.swayX = ropeWaveClamp(state.swayX + state.velX * h, -0.85, 0.85);
       state.swayZ = ropeWaveClamp(state.swayZ + state.velZ * h, -0.85, 0.85);
     }
-  } else {
-    // Instantaneous blend when paused or stepped with dt = 0
-    const instX = ropeWaveClamp(-Math.sin(roll) - 0.35 * rollVel, -0.85, 0.85);
-    const instZ = ropeWaveClamp(Math.sin(pitch) + 0.35 * pitchVel, -0.85, 0.85);
-    state.swayX = state.swayX * 0.85 + instX * 0.15;
-    state.swayZ = state.swayZ * 0.85 + instZ * 0.15;
+    state.steppedSinceUniform = true;
   }
 
   return state;
@@ -96,12 +91,10 @@ export function resolveVesselRopeChain(boat) {
     };
   }
   const tracked = vesselRopeChainStates.get(boat);
+  // The live state is read back through the packed hull uniform, so crew hands,
+  // posed meshes and every shader see one and the same quantised sway.
   if (tracked?.active) {
-    return {
-      active: 1,
-      swayX: tracked.swayX,
-      swayZ: tracked.swayZ,
-    };
+    return unpackRopeChainUniform(Math.fround(encodeRopeChainFloat(tracked.swayX, tracked.swayZ)));
   }
   return { active: 0, swayX: 0, swayZ: 0 };
 }
@@ -109,10 +102,16 @@ export function resolveVesselRopeChain(boat) {
 /**
  * Packs the active chain-pendulum state (swayX, swayZ) into a single positive float
  * for hull.size.z (data[14] in Hull UBO). Values > 0.5 indicate live wave/chain mode.
+ * Called once per vessel per frame: it advances the oscillator only when the
+ * vessel's own physics step has not already done so since the last call.
  */
-export function packRopeChainUniform(boat, dt = 0, time = 0, windSpeed = 0) {
-  const state = stepVesselRopeChain(boat, dt, time, windSpeed);
-  return encodeRopeChainFloat(state.swayX, state.swayZ);
+export function packRopeChainUniform(boat, dt = 0) {
+  if (!boat || typeof boat !== 'object') return 0;
+  const state = vesselRopeChainStates.get(boat);
+  if (state?.steppedSinceUniform) state.steppedSinceUniform = false;
+  else stepVesselRopeChain(boat, dt).steppedSinceUniform = false;
+  const chain = resolveVesselRopeChain(boat);
+  return chain.active ? encodeRopeChainFloat(chain.swayX, chain.swayZ) : 0;
 }
 
 export function encodeRopeChainFloat(swayX = 0, swayZ = 0) {
@@ -219,10 +218,6 @@ export function computeRopeWaveModes(a, b, index, compliance, swayX, swayZ, time
   ];
 
   return { mode1, mode2, mode3 };
-}
-
-export function ropeWaveHarmonicDifference(n, t, anchor) {
-  return 2.0 * Math.cos(Math.PI * n * (t + anchor) * 0.5) * Math.sin(Math.PI * n * (t - anchor) * 0.5);
 }
 
 export function evaluateRopeWaveDisplacement(a, b, t, index, compliance, swayX, swayZ, time, wind) {

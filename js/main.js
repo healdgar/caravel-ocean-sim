@@ -3969,7 +3969,7 @@ async function main() {
       data[3]=vesselVerticalScale(ship);
       boatRotate(data.subarray(4,7),0,1,0,ship.heading*D2R,ship.pitch,ship.roll);
       boatRotate(data.subarray(8,11),0,0,-1,ship.heading*D2R,ship.pitch,ship.roll);
-      data[12]=ship.beam;data[13]=ship.length;data[14]=packRopeChainUniform(ship,dt,simTime,settlingBake?0:P.windSpeed);data[15]=ship.rudder;
+      data[12]=ship.beam;data[13]=ship.length;data[14]=packRopeChainUniform(ship,dt);data[15]=ship.rudder;
       data[16]=ship.x;data[17]=ship.heave;data[18]=ship.z;data[19]=simTime;
       data[20]=P.windDir*D2R-ship.heading*D2R;data[21]=settlingBake?0:P.windSpeed;
       const deckSubmerged=Boolean(dmg?.sunk&&(dmg.sinkingDepth??0)>(ship.hydrodynamics?.freeboard??1.8));

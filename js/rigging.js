@@ -21,13 +21,15 @@ export function shroudGeometry(mast,side) {
   const rungs=Math.ceil((head[1]-Math.min(...feet.map(p=>p[1])))*HULL_VERTICAL_SCALE/.35);
   return {head,feet,rungs};
 }
-export function shroudPoint(mast,side,rung,across=.5,pose=null) {
+// `rope` ({chain,time,wind}) is the live rope sway the hull shader draws with;
+// given it, a hand on the runner follows the swinging rope and not its chord.
+export function shroudPoint(mast,side,rung,across=.5,pose=null,rope=null) {
   const {head,feet,rungs}=shroudGeometry(mast,side),t=Math.max(0,Math.min(1,rung/rungs));
-  if(pose)return standingRopePoint({kind:'runner',mast,side,a:feet[0].map((v,i)=>v*(1-across)+feet[1][i]*across),b:head},t,pose);
+  if(pose)return standingRopePoint({kind:'runner',mast,side,a:feet[0].map((v,i)=>v*(1-across)+feet[1][i]*across),b:head},t,pose,rope?.chain,rope?.time,rope?.wind,standingLineIndex('runner',mast,side));
   return head.map((v,i)=>(feet[0][i]*(1-across)+feet[1][i]*across)*(1-t)+v*t);
 }
 // Rope ascent uses the central runner, without transverse ratlines.
-export function climbingPoint(mast,side,step,pose=null){return shroudPoint(mast,side,step,.5,pose);}
+export function climbingPoint(mast,side,step,pose=null,rope=null){return shroudPoint(mast,side,step,.5,pose,rope);}
 
 // Working halyard leads terminate beside the assigned deck hands.
 export const SAIL_TACKLES = NINA_DESIGN.tackles;
@@ -38,10 +40,20 @@ export function tacklePoint(mast,height){
   const f=Math.max(0,Math.min(1,(height-bottom[1])/(top[1]-bottom[1])));
   return bottom.map((v,i)=>v+(top[i]-v)*f);
 }
-export function workingTacklePoint(mast,height){
+export function workingTacklePoint(mast,height,rope=null){
   const a=tacklePoint(mast,-10),b=tacklePoint(mast,30),side=Math.sign(a[0]);
   const t=Math.max(0,Math.min(1,(height-a[1])/(b[1]-a[1])));
-  return standingRopePoint({kind:'fall',mast,side,a,b},t,null);
+  return standingRopePoint({kind:'fall',mast,side,a,b},t,null,rope?.chain,rope?.time,rope?.wind,standingLineIndex('fall',mast,side));
+}
+// Index of the first drawn standing line of a kind on one mast and side: the
+// same index the hull shader gives that rope's wave phase.
+let standingLineIndices=null;
+function standingLineIndex(kind,mast,side){
+  if(!standingLineIndices){
+    standingLineIndices=new Map();
+    for(const [index,line] of standingRiggingLines().entries()){const key=line.kind+':'+line.mast+':'+line.side;if(!standingLineIndices.has(key))standingLineIndices.set(key,index);}
+  }
+  return standingLineIndices.get(kind+':'+mast+':'+side)??0;
 }
 
 // Shared centre lines for visible standing rigging and sail clearance.
@@ -72,12 +84,12 @@ export function standingRiggingLines(){
 
 export function standingRopePoint(line,t,pose,ropeChain=null,time=0,wind=7,index=0){
   const point=line.a.map((v,i)=>v+(line.b[i]-v)*t);
-  let res;
+  let res,ease=0;
   if(line.kind==='forestay'){
     res=point;
   }else{
     const lee=(pose?.side??-1)*line.side>0?1:0;
-    const ease=line.kind==='fall'?1:Math.max(lee,Math.min(1,(pose?.dip??0)/.12));
+    ease=line.kind==='fall'?1:Math.max(lee,Math.min(1,(pose?.dip??0)/.12));
     // Eased pendants are gathered alongside the mast. Their fixed deck ends
     // remain visible; paid-out length curves down to the same belaying points.
     const low=1-t,foot=Math.pow(low,32),m=RIG_MASTS[line.mast];
@@ -89,6 +101,9 @@ export function standingRopePoint(line,t,pose,ropeChain=null,time=0,wind=7,index
   if(ropeChain?.active>0){
     const isSlack=line.kind==='fall'||((pose?.side??-1)*line.side>0&&['shroud','runner','stay'].includes(line.kind));
     const wave=evaluateRopeWaveDisplacement(line.a,line.b,t,index,isSlack?.048:.014,ropeChain.swayX??0,ropeChain.swayZ??0,time,wind);
+    // A pendant gathered alongside its mast lies against the spar: it may swing
+    // outboard and fore and aft, never inboard through the timber.
+    wave[0]-=line.side*Math.min(0,line.side*wave[0])*ease;
     return [res[0]+wave[0],res[1]+wave[1],res[2]+wave[2]];
   }
   return res;
