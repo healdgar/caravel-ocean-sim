@@ -3734,12 +3734,19 @@ async function main() {
 
 
   const hudFps = document.getElementById('fps');
-  const vesselHasVisibleCrew = v => Boolean(
-    v?.crew && (
+  const scanForVisibleCrew = v => Boolean(
+    v.crew && (
       !v.boat.damage?.sunk ||
       v.crew.state?.crew?.some(s => s.visible !== false && !s.overboard?.gone)
     )
   );
+  // Asked about ten times a frame for each vessel, and for a sunk hull every answer scanned her whole crew.
+  // The answer is worked out once per vessel per frame, the first time it is wanted, and kept on her until the next.
+  const vesselHasVisibleCrew = v => {
+    if (!v) return false;
+    if (v.crewSeenFrame !== frameIndex) { v.crewSeenFrame = frameIndex; v.crewSeen = scanForVisibleCrew(v); }
+    return v.crewSeen;
+  };
   const vesselHasActiveSurvivorsOrDebris = v => Boolean(
     vesselHasVisibleCrew(v) ||
     (v?.boat?.damage?.fracture?.flying?.size ?? 0) > 0 ||
