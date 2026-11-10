@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {ROWING_DESIGNS,rowingBenchDescriptors,rowingDeck,rowingHullWidth,rowingRigContext} from '../js/models/rowing.js';
 import {hullLoftSheer} from '../js/hull-loft.js';
-import {createMeshWriter} from '../js/mesh-writer.js';
+import {createMeshWriter,shipOakGrain} from '../js/mesh-writer.js';
 import {createRowingShipMesh} from '../js/rowing-ships.js';
 import {createCompany,stepCompany,issueCaptainOrder} from '../js/crew.js';
 import {advanceSails,sailingState} from '../js/sailing.js';
@@ -27,7 +27,9 @@ function crewBenchSkinVertex(mesh,s,index){
 test('shared thwart descriptors preserve actual full-beam bench and supporting-leg mesh bytes',()=>{
   for(const [id,d]of Object.entries(ROWING_DESIGNS)){
     const parts=new Map();createRowingShipMesh(id,{parts});
-    const old=createMeshWriter(),sx=d.runtime.beam/d.frame.beam,zs=[...new Set([...d.stations.map(s=>s.seat[2]),...Object.values(d.crewStations).map(s=>s.z)])].sort((a,b)=>a-b);
+    // The oracle writes with the ship's own oak grain (in metres), exactly as the mesh does;
+    // positions, normals and materials stay byte-checked.
+    const sx=d.runtime.beam/d.frame.beam,old=createMeshWriter({grain:shipOakGrain(d.frame.verticalScale,d.runtime.length/d.frame.length,sx)}),zs=[...new Set([...d.stations.map(s=>s.seat[2]),...Object.values(d.crewStations).map(s=>s.z)])].sort((a,b)=>a-b);
     for(const z of zs){
       const y=d.seatHeight+hullLoftSheer(d.profile,z),w=Math.max(0,rowingHullWidth(id,z,y)-d.shellThicknessMetres/sx);if(w<.1)continue;
       old.box([-w,y-.032,z-.065],[w,y,z+.065],1);
