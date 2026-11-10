@@ -1154,8 +1154,8 @@ async function main() {
       // The captain's recorded orders are for gun crews.
       if(ownerBoat.gunnery?.guns?.[0]?.kind!=='bow'){
         if(ownerBoat.faction==='enemy'){
-          if((id==='fire-port'||id==='fire-starboard')&&Math.hypot((ownerBoat.x??0)-cam.x,(ownerBoat.z??0)-cam.z)<95&&simTime-(ownerBoat._lastEnemyVoiceAt??-120)>=75){
-            ownerBoat._lastEnemyVoiceAt=simTime;
+          if((id==='fire-port'||id==='fire-starboard')&&Math.hypot((ownerBoat.x??0)-cam.x,(ownerBoat.z??0)-cam.z)<95&&simElapsed-(ownerBoat._lastEnemyVoiceAt??-Infinity)>=75){
+            ownerBoat._lastEnemyVoiceAt=simElapsed;
             sceneAudio.event?.({type:'enemy-voice',action:'fire',order:id,position:[ownerBoat.x??0,(ownerBoat.heave??0)+2,ownerBoat.z??0]},ownerBoat);
           }
         }else{
@@ -1930,6 +1930,9 @@ async function main() {
   // Per-frame uniforms
   // --------------------------------------------------------------------------------------
   let simTime = Number(qs.get('t')) || 0;
+  // Seconds simulated since the page loaded. simTime starts again every LOOP seconds, so whatever asks how long
+  // ago something happened, or how long the game has run, asks this.
+  let simElapsed = 0;
   let frameIndex = 0;
   let simPaused = qs.get('paused') === '1';
   let pauseButton = null;
@@ -3905,7 +3908,7 @@ async function main() {
       const activeWhale=marineLife.state?.active&&marineLife.state.count>0?marineLife.state.animals[0]:null;
       const targetVessel=findSpyglassTargetVessel();
       const activeDolphin=dolphins.state?.active&&dolphins.state.pods?.[0]?.animals?.[0]?dolphins.state.pods[0].animals[0]:null;
-      boat.lookoutSighting=simTime<8?null:activeWhale
+      boat.lookoutSighting=simElapsed<8?null:activeWhale
         ?{kind:activeWhale.type||'whale',x:activeWhale.x,y:activeWhale.depth??0,z:activeWhale.z}
         :targetVessel?.boat
           ?{kind:targetVessel.faction==='enemy'?'enemy-ship':'ship',x:targetVessel.boat.x,y:(targetVessel.boat.heave??0)+3,z:targetVessel.boat.z}
@@ -3929,7 +3932,7 @@ async function main() {
     helm.update(now);
     updateCamera(camDt);
     if(castleDuel.active)castleDuel.update(dt,frameWind);
-    simTime += dt;
+    simTime += dt; simElapsed += dt;
     if (simTime > LOOP) simTime -= LOOP;
     frameIndex++;
 
