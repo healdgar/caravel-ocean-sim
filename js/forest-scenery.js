@@ -1116,24 +1116,7 @@ export const forestWithNativeLod=source=>forestCullReplace(forestCullReplace(for
  let base=p.roots.x*4u+p.roots.y*select(select(select(1u,3u,mid2Lod),2u,midLod),0u,nearLod);
  visible[base+slot]=id.x;
  if(nearLod){atomicAdd(&commands[(pi*4u+1u)*5u+1u],1u);}
- if(midLod||mid2Lod){atomicAdd(&commands[(midCommandBase+1u)*5u+1u],1u);}`)+/* wgsl */`
-var<workgroup> forestSortCount:u32;
-@compute @workgroup_size(64)fn forestSort(@builtin(workgroup_id)wg:vec3u,@builtin(local_invocation_id)lid:vec3u){
- let pi=min(wg.x>>2u,u32(parameters.y)-1u);let tier=wg.x&3u;let p=prototypes[pi];
- let cmdSlot=select(pi*4u+tier*2u,u32(parameters.y)*4u+pi*4u+(tier-2u)*2u,tier>=2u);
- if(lid.x==0u){forestSortCount=select(0u,atomicLoad(&commands[cmdSlot*5u+1u]),(wg.x>>2u)<u32(parameters.y));}
- let count=workgroupUniformLoad(&forestSortCount);let base=p.roots.x*4u+p.roots.y*tier;
- let sortSteps=min(count,64u);
- for(var step=0u;step<sortSteps;step++){
-  let parity=step&1u;
-  for(var i=lid.x*2u+parity;i+1u<count;i+=128u){
-   let a=visible[base+i];let b=visible[base+i+1u];
-   if(a>b){visible[base+i]=b;visible[base+i+1u]=a;}
-  }
-  storageBarrier();
- }
-}
-`;
+ if(midLod||mid2Lod){atomicAdd(&commands[(midCommandBase+1u)*5u+1u],1u);}`);
 
 export async function createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack,groundSample,forestMass=null,forestMiddle=forestMass?.middle??null,mode='auto',nearPixels=3,
   impostorPixels=typeof location==='undefined'?32:Number(new URLSearchParams(location.search).get('forestImpostorPixels')||32),
@@ -1229,10 +1212,9 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     const pipe=(fragment,target={format},depthStencil={depthWriteEnabled:true,depthCompare:'greater'})=>device.createRenderPipelineAsync({label:'instanced forest '+fragment,layout:'auto',vertex:{module,entryPoint:'forestCanopyVS',buffers:[FOREST_VERTEX_LAYOUT]},
       fragment:{module,entryPoint:fragment,targets:[target]},primitive:{topology:'triangle-list',cullMode:'none'},
       depthStencil:{format:'depth32float',...depthStencil},multisample:{count:samples,alphaToCoverageEnabled:false}});
-    const [reset,cull,sort,opaque,leafDepth,leaf,shadowPipe,middlePipeline,volumePipeline,impostor]=await Promise.all([
+    const [reset,cull,opaque,leafDepth,leaf,shadowPipe,middlePipeline,volumePipeline,impostor]=await Promise.all([
       computePromise.then(compute=>device.createComputePipelineAsync({label:'forest reset indirect counts',layout:'auto',compute:{module:compute,entryPoint:'forestReset'}})),
       computePromise.then(compute=>device.createComputePipelineAsync({label:'forest cull and LOD',layout:'auto',compute:{module:compute,entryPoint:'forestCull'}})),
-      nativeMid?computePromise.then(compute=>device.createComputePipelineAsync({label:'forest sort visible roots',layout:'auto',compute:{module:compute,entryPoint:'forestSort'}})):null,
       pack.skipNative?null:pipe('forestNativeOpaqueFS'),
       pack.skipNative?null:pipe('forestNativeLeafDepthFS',{format,writeMask:0}),
       pack.skipNative?null:pipe('forestNativeLeafFS',{format},{depthWriteEnabled:false,depthCompare:'equal'}),
@@ -1244,7 +1226,6 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
         depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples,alphaToCoverageEnabled:true}}):null,
     ]);
     const resetGroup=device.createBindGroup({layout:reset.getBindGroupLayout(0),entries:[{binding:4,resource:{buffer:commands}},{binding:6,resource:{buffer:parameters}}]});
-    const sortGroup=sort?device.createBindGroup({layout:sort.getBindGroupLayout(0),entries:[{binding:2,resource:{buffer:prototypes}},{binding:3,resource:{buffer:visible}},{binding:4,resource:{buffer:commands}},{binding:6,resource:{buffer:parameters}}]}):null;
     const cullBuffers=[frameUBO,roots,prototypes,visible,commands,previous,parameters,residency,...(forestMass?[forestMass.state]:[]),...(forestMass?.neighbors?[forestMass.neighbors]:[])];
     const cullGroup=device.createBindGroup({layout:cull.getBindGroupLayout(0),entries:[...cullBuffers.map((buffer,binding)=>({binding,resource:{buffer}})),...(terrainVisibility?.entries??[])]});
     const sceneIds=[0,1,2,3,4,5,6,19,20,21];
