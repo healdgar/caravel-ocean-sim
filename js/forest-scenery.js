@@ -1197,8 +1197,10 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
         floats[base+10]=forestMiddleUpward(lp.woodTiers[1].maximumReportedErrorMetres);words[base+11]=1;
         floats[base+14]=forestMiddleUpward(lp.woodTiers[2].maximumReportedErrorMetres);words[base+15]=1;
         const isBroadleafDense=Boolean(p.cohort)||(isSubtropicalPack&&(p.species==='ceiba'||p.species==='mangrove'));
-        const mid1LeafIndices=Math.max(6,Math.floor((lp.leafRibbons.indexCount/6)*(isBroadleafDense?0.68:0.48))*6);
-        const mid2LeafIndices=Math.max(6,Math.floor((lp.leafRibbons.indexCount/6)*(isBroadleafDense?0.42:0.24))*6);
+        // These two tiers draw only when the pack's clusters are absent. Ordinary crowns keep the shares the
+        // frame-rate work of 8c6d5e3 settled on: a larger second share put 26M leaf triangles into one close view.
+        const mid1LeafIndices=Math.max(6,Math.floor((lp.leafRibbons.indexCount/6)*(isBroadleafDense?0.68:0.36))*6);
+        const mid2LeafIndices=Math.max(6,Math.floor((lp.leafRibbons.indexCount/6)*(isBroadleafDense?0.42:0.05))*6);
         draws.set([lp.woodTiers[1].indexCount,0,lp.woodTiers[1].firstIndex,0,0],(m.prototypes.length*4+p.id*4)*5);
         draws.set([mid1LeafIndices,0,lp.leafRibbons.firstIndex,0,0],(m.prototypes.length*4+p.id*4+1)*5);
         draws.set([lp.woodTiers[2].indexCount,0,lp.woodTiers[2].firstIndex,0,0],(m.prototypes.length*4+p.id*4+2)*5);
