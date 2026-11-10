@@ -12,6 +12,72 @@ export const HULL_CRATER_LIMIT = 127;
 // The frame's clock, Frame.camPos.w, starts again after this many seconds: the spectrum's time loop.
 export const SIM_CLOCK_LOOP_S = 600;
 
+// The frame block has no vec4 to spare, so its two fire lights ride in components nothing else reads
+// (see Frame below, and worldFireSurface in sky.js): light 0 is x, y, z, intensity at floats 23, 27, 31, 54,
+// light 1 at 55, 61, 62, 87. One patch from the first to the last of them carries a change to the GPU.
+export const FRAME_FIRE_SLOTS = Object.freeze([23, 27, 31, 54, 55, 61, 62, 87]);
+export const FRAME_FIRE_PATCH_FIRST = 23;
+export const FRAME_FIRE_PATCH_FLOATS = 65;
+const FRAME_FIRE_MERGE_M2 = 144;   // fires within 12 m burn as one light
+const FRAME_FIRE_SUN_Y = 33, FRAME_FIRE_EXPOSURE = 68;
+let frameFireClusters = new Float64Array(4 * 16);   // x, y, z, weight; grown only past its high-water mark
+
+/**
+ * Chooses the two fire lights the frame can carry and writes them into its fire slots, touching no
+ * other float. Fires close together merge into one light at their weighted centre; the two that
+ * matter most from the eye win. Reads the sun's height and the exposure from the frame, so it runs
+ * after those are written. Returns whether any slot changed, so an unchanged frame needs no upload.
+ */
+export function packFrameFireLights(frame, fires, eyeX, eyeY, eyeZ) {
+  let count = 0, clusters = frameFireClusters;
+  const total = Array.isArray(fires) ? fires.length : 0;
+  for (let i = 0; i < total; i++) {
+    const fire = fires[i], position = fire?.position, strength = fire?.intensity ?? 0;
+    if (!position || !(strength > 0.01)) continue;
+    let merged = false;
+    for (let c = 0; c < count * 4; c += 4) {
+      const dx = clusters[c] - position[0], dy = clusters[c + 1] - position[1], dz = clusters[c + 2] - position[2];
+      if (dx * dx + dy * dy + dz * dz >= FRAME_FIRE_MERGE_M2) continue;
+      const weight = clusters[c + 3], sum = weight + strength;
+      clusters[c] = (clusters[c] * weight + position[0] * strength) / sum;
+      clusters[c + 1] = (clusters[c + 1] * weight + position[1] * strength) / sum;
+      clusters[c + 2] = (clusters[c + 2] * weight + position[2] * strength) / sum;
+      clusters[c + 3] = Math.min(3.6, sum);
+      merged = true;
+      break;
+    }
+    if (merged) continue;
+    if (count * 4 === clusters.length) {
+      const larger = new Float64Array(clusters.length * 2);
+      larger.set(clusters);
+      clusters = frameFireClusters = larger;
+    }
+    const c = count++ * 4;
+    clusters[c] = position[0]; clusters[c + 1] = position[1]; clusters[c + 2] = position[2];
+    clusters[c + 3] = Math.min(3.2, strength);
+  }
+  // The strongest two as seen from the eye; the earlier fire keeps its place in a tie.
+  let first = -1, second = -1, firstScore = -Infinity, secondScore = -Infinity;
+  for (let c = 0; c < count * 4; c += 4) {
+    const score = clusters[c + 3] / (1 + Math.hypot(clusters[c] - eyeX, clusters[c + 1] - eyeY, clusters[c + 2] - eyeZ) * 0.02);
+    if (score > firstScore) { second = first; secondScore = firstScore; first = c; firstScore = score; }
+    else if (score > secondScore) { second = c; secondScore = score; }
+  }
+  // Fires hold their own against a bright exposure and carry further at night.
+  const night = 1 - Math.max(0, Math.min(1, (frame[FRAME_FIRE_SUN_Y] + 0.06) / 0.24));
+  const exposure = Math.min(1.0, 1.35 / Math.max(frame[FRAME_FIRE_EXPOSURE] || 1, 1e-3)) * (1.0 + 2.8 * night);
+  let changed = false;
+  for (let light = 0; light < 2; light++) {
+    const c = light ? second : first, slot = light * 4;
+    for (let k = 0; k < 4; k++) {
+      const value = Math.fround(c < 0 ? 0 : k < 3 ? clusters[c + k] : clusters[c + 3] * exposure);
+      const at = FRAME_FIRE_SLOTS[slot + k];
+      if (frame[at] !== value) { frame[at] = value; changed = true; }
+    }
+  }
+  return changed;
+}
+
 // Per-frame uniform block shared by every render / sky shader.
 // Layout must match the Float32Array offsets in main.js (FR_* constants).
 export const FRAME_WGSL = /* wgsl */ `
@@ -34,20 +100,20 @@ fn earthCurve(rel: vec3f, eyeY: f32) -> vec3f {
 struct Frame {
   viewProj: mat4x4f,   // camera-relative view-projection (reverse-Z, infinite)
   camPos:   vec4f,     // xyz metres, w = time (s)
-  camRight: vec4f,     // xyz * tan(fovX/2)
-  camUp:    vec4f,     // xyz * tan(fovY/2)
-  camFwd:   vec4f,     // xyz
+  camRight: vec4f,     // xyz * tan(fovX/2), w = fire light 0 x
+  camUp:    vec4f,     // xyz * tan(fovY/2), w = fire light 0 y
+  camFwd:   vec4f,     // xyz, w = fire light 0 z
   sunDir:   vec4f,     // xyz towards sun, w = solar illuminance scale
   screen:   vec4f,     // w, h, 1/w, 1/h
-  cascL:    array<vec4f, 2>,  // cascade patch sizes (m), index [c>>2][c&3]
-  cascInvL: array<vec4f, 2>,
-  windP:    array<vec4f, 2>,  // [0].xy = wind direction, [0].z = wind speed; [1] = hull heading, length, beam, reflection enable
-  lodP:     vec4f,     // CDLOD base range, grid quads per node, -, -
-  post:     vec4f,     // exposure, bloom strength, frame index, -
+  cascL:    array<vec4f, 2>,  // cascade patch sizes (m), index [c>>2][c&3]; past the last cascade, [1].zw = swell height, swell length
+  cascInvL: array<vec4f, 2>,  // their reciprocals; past the last cascade, [1].z = fire light 0 intensity, [1].w = fire light 1 x
+  windP:    array<vec4f, 2>,  // [0] = wind direction xy, wind speed, swell direction; [1] = hull heading, fire light 1 y, fire light 1 z, reflection enable
+  lodP:     vec4f,     // CDLOD base range, grid quads per node, foam level sizes
+  post:     vec4f,     // exposure, bloom strength, frame index, debug view
   atmo:     vec4f,     // haze, camera altitude km, lightning horizontal direction x/z
   waterCol: vec4f,     // body scatter colour rgb, unresolved slope variance
   sssCol:   vec4f,     // sss colour rgb, sss strength
-  foamP:    vec4f,     // J threshold, J gain, foam intensity, lace sharpness
+  foamP:    vec4f,     // J threshold, J gain, foam intensity, fire light 1 intensity
   fogExt:   vec4f,     // rgb extinction per metre near sea level
   reserved: vec4f,     // precipitation intensity/type, lightning radiance, weather clock
 };

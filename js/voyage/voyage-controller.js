@@ -27,6 +27,8 @@ import {
   warpTier,
   WARP_TIERS,
   DEFAULT_DEPARTURE,
+  voyageDateInEra,
+  normaliseVoyageEra,
   NM_PER_LEAGUE,
 } from './passage.js';
 import { createHelmsman, steerHelmsman, orderCourse, orderTack, applyCanvasOrder, canvasAdvice, CANVAS_ORDERS } from './helmsman.js';
@@ -77,6 +79,32 @@ export function shipWatch(solarHours) {
  *  onSpectrum(), onEnv(), resolveLandfallRegion(lat, lon): region spec (curated port id or coords),
  *  loadLandRings(): Promise<rings>, demLoader (optional tile loader), storage (localStorage).
  */
+/**
+ * A button that erases something takes a second, deliberate click. The first arms it and says
+ * what will be lost; left alone it stands down by itself.
+ */
+export function armBeforeErasing(button, { prompt, onConfirm, standDownMs = 6000, schedule = setTimeout, cancel = clearTimeout }) {
+  const label = button.textContent;
+  let timer = null;
+  const standDown = () => {
+    if (timer !== null) cancel(timer);
+    timer = null;
+    delete button.dataset.armed;
+    button.textContent = label;
+  };
+  button.onclick = () => {
+    if (button.dataset.armed !== '1') {
+      button.dataset.armed = '1';
+      button.textContent = typeof prompt === 'function' ? prompt() : prompt;
+      timer = schedule(standDown, standDownMs);
+      return;
+    }
+    standDown();
+    onConfirm();
+  };
+  return { standDown };
+}
+
 export function createVoyageController(cfg) {
   const {
     boat,
@@ -184,7 +212,7 @@ export function createVoyageController(cfg) {
         <button type="button" class="voyage-keep" title="Helmsman: keep her as she goes (K)">Keep her so</button>
         <button type="button" class="voyage-tack" title="Go about (T)">Tack</button>
         <label class="voyage-beat"><input type="checkbox"> Beat</label>
-        <button type="button" class="voyage-reset" title="Reset saved career and start a new 1550 voyage">Reset voyage</button>
+        <button type="button" class="voyage-reset" title="Erase the saved career and start a new 1550 voyage. Asks once more before erasing.">Reset voyage</button>
       </div>
       <div class="voyage-row voyage-status"><span class="voyage-pos"></span><span class="voyage-helmsman"></span><span class="voyage-wind"></span><span class="voyage-stores"></span></div>
       <div class="voyage-callout" role="alert" hidden></div>
@@ -239,15 +267,18 @@ export function createVoyageController(cfg) {
     beat.onchange = () => { helmsman.beat = beat.checked; };
     const resetBtn = root.querySelector('.voyage-reset');
     if (resetBtn) {
-      resetBtn.onclick = () => {
-        if (cfg.onResetVoyage) {
-          cfg.onResetVoyage();
-        } else {
-          try { storage?.removeItem?.(VOYAGE_STORAGE_KEY); } catch { /* ignore */ }
-          start({ dateMs: DEFAULT_DEPARTURE.dateMs, passive: Boolean(voyage?.passive) });
-          showToast('Voyage reset to 1550.');
-        }
-      };
+      armBeforeErasing(resetBtn, {
+        prompt: () => cfg.resetVoyagePrompt?.() ?? 'Erase this voyage?',
+        onConfirm: () => {
+          if (cfg.onResetVoyage) {
+            cfg.onResetVoyage();
+          } else {
+            try { storage?.removeItem?.(VOYAGE_STORAGE_KEY); } catch { /* ignore */ }
+            start({ dateMs: DEFAULT_DEPARTURE.dateMs, passive: Boolean(voyage?.passive) });
+            showToast('Voyage reset to 1550.');
+          }
+        },
+      });
     }
     return { root, toggle, warpButtons, canvasSel, beat, resetBtn };
   }
@@ -429,14 +460,11 @@ export function createVoyageController(cfg) {
       return;
     }
 
-    // Inside battle range at 1× real time: in live 3D gameplay (where main.js steps boat.x/boat.z),
-    // never tractor-beam or drag the target; let the two hulls maneuver naturally into grappling reach.
-    // In headless tests where boat.x/boat.z are static mock coordinates, integrate relative closing motion.
-    const hullSteppedExternally =
-      pursuit.prevBoatX !== undefined &&
-      Math.hypot((boat.x ?? 0) - pursuit.prevBoatX, (boat.z ?? 0) - pursuit.prevBoatZ) > 1e-5;
-    pursuit.prevBoatX = boat.x ?? 0;
-    pursuit.prevBoatZ = boat.z ?? 0;
+    // Inside battle range at 1× real time the game sails both hulls, so the target is never dragged:
+    // the two manoeuvre into grappling reach by themselves. Only a caller that sails no hulls and says
+    // so (cfg.closeHullsInPursuit) has the range closed for it here. It is never guessed from whether
+    // the player moved: a ship aground or moored is still, and her chase must not be hauled alongside.
+    const closeHulls = Boolean(cfg.closeHullsInPursuit);
 
     if (pursuit.mode === 'fight') {
       if (dist <= 165) {
@@ -447,19 +475,19 @@ export function createVoyageController(cfg) {
       if (tb && Number.isFinite(tb.surgeVelocity) && tb.surgeVelocity > 2.2) {
         tb.surgeVelocity = Math.max(1.8, tb.surgeVelocity - 0.6 * dt);
       }
-      if (!hullSteppedExternally && dist > pursuit.boardRangeM) {
+      if (closeHulls && dist > pursuit.boardRangeM) {
         const closeStep = Math.min(dist - (pursuit.boardRangeM - 2), 14.5 * dt);
         tb.x -= dirX * closeStep;
         tb.z -= dirZ * closeStep;
         dist = Math.hypot((tb.x ?? 0) - (boat.x ?? 0), (tb.z ?? 0) - (boat.z ?? 0));
       }
-      if (dist <= Math.max(pursuit.boardRangeM, !hullSteppedExternally ? 46 : pursuit.boardRangeM) && !pursuit.actionTriggered) {
+      if (dist <= (closeHulls ? Math.max(pursuit.boardRangeM, 46) : pursuit.boardRangeM) && !pursuit.actionTriggered) {
         pursuit.actionTriggered = true;
         pursuit.active = false;
         cfg.onBoardVessel?.(pursuit.encounter, targetV);
       }
     } else if (pursuit.mode === 'hail') {
-      if (!hullSteppedExternally && dist > pursuit.hailRangeM) {
+      if (closeHulls && dist > pursuit.hailRangeM) {
         const closeStep = Math.min(dist - (pursuit.hailRangeM - 2), 12.0 * dt);
         tb.x -= dirX * closeStep;
         tb.z -= dirZ * closeStep;
@@ -796,7 +824,7 @@ export function createVoyageController(cfg) {
     });
     if (opts.dateMs === undefined) {
       alignDateToDaylightIfNight(voyage, (P?.sunAzim ?? 135) > 180 ? 14.2 : 9.8);
-    }
+    } else normaliseVoyageEra(voyage);
     voyage.passive = passive;
     voyage.compassCourse = voyageWrap360(boat.heading - voyage.variation);
     orderCourse(helmsman, voyage.compassCourse);
@@ -904,34 +932,28 @@ export function createVoyageController(cfg) {
 
   function syncAstronomy() {
     if (!astronomy || !voyage) return;
-    if (Number.isFinite(voyage.dateMs) && new Date(voyage.dateMs).getUTCFullYear() > 1800) {
-      const elapsedDays = Math.max(0, (voyage.dayAtSea ?? 1) - 1);
-      voyage.departureDateMs = DEFAULT_DEPARTURE.dateMs;
-      voyage.dateMs = DEFAULT_DEPARTURE.dateMs + elapsedDays * 86400000;
-    }
     if (astronomy.revision !== undefined && astronomy.revision !== lastAstroRevision) {
       if (astronomy.mode === 'manual') {
         respectManualSky = true;
       } else {
         respectManualSky = false;
         const userTimeMs = astronomy.epochMs + (astronomy.elapsedSeconds || 0) * 1000;
-        if (Number.isFinite(userTimeMs) && new Date(userTimeMs).getUTCFullYear() <= 1850) {
-          voyage.dateMs = userTimeMs;
-        }
+        // A night picked from after the voyage's era is shown by the sky panel but never dates the log.
+        if (voyageDateInEra(userTimeMs)) voyage.dateMs = userTimeMs;
       }
       lastAstroRevision = astronomy.revision;
     }
     // Always keep the geographic observer anchor synced to the ship's live lat/lon.
     astronomy.anchor = { latitude: voyage.true.lat, longitude: voyage.true.lon, x: boat.x, z: boat.z };
-    if (!respectManualSky) {
+    // Free sail leaves the sky clock to the sky panel: writing it here every frame would stop its
+    // time-lapse rate from ever accumulating and replace whatever night the player picked.
+    if (!voyage.passive && !respectManualSky) {
+      // Sun, moon and stars follow the warped voyage clock and the ship's true position.
+      astronomy.mode = 'astronomy';
+      astronomy.rate = 0;
       astronomy.epochMs = voyage.dateMs;
       astronomy.elapsedSeconds = 0;
-      if (!voyage.passive) {
-        // Sun, moon and stars follow the warped voyage clock and the ship's true position.
-        astronomy.mode = 'astronomy';
-        astronomy.rate = 0;
-        astronomy.update?.(0, boat);
-      }
+      astronomy.update?.(0, boat);
     }
   }
 

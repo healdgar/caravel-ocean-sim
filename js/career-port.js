@@ -6,15 +6,16 @@ import {
   hullValue, repairQuote, shipOffers, careerWorth, careerEnding, CAREER_FOOD_DAYS_LIMIT, CAREER_WATER_DAYS_LIMIT,
 } from './career-trade.js';
 import { repairVessel } from './vessel-damage.js';
+import { DEFAULT_DEPARTURE, voyageDateInEra } from './voyage/passage.js';
 
 const WAGES_MORALE_GAIN = 0.1;
 
 export function createCareerPort({ era, store, boat, getVoyage, getCompany, getPort, capacityOf, hullMassOf, saveVoyage = () => {}, passDays = () => {}, onPutToSea = () => {}, onRepaired = () => {}, onCrewRestored = () => {}, onShipBought = () => {}, onRetired = () => {} }) {
   let ledger = null;
-  const DEFAULT_ERA_DATE_MS = Date.parse('1550-03-24T12:00:00Z');
+  // The voyage keeps its own date inside the era (normaliseVoyageEra); only a ship with no voyage needs a date lent to her.
   const dateMs = () => {
     const raw = getVoyage()?.dateMs;
-    return Number.isFinite(raw) && new Date(raw).getUTCFullYear() <= 1800 ? raw : DEFAULT_ERA_DATE_MS;
+    return voyageDateInEra(raw) ? raw : DEFAULT_DEPARTURE.dateMs;
   };
   const load = () => (ledger ??= ensureCareerLedger(store.read()?.career ?? {}, era, dateMs()));
   const save = () => {

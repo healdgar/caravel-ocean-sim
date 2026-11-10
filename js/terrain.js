@@ -915,8 +915,13 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     count:proceduralPack.portGeometry.indices.length,
   }:null;
   // Buildings under fire draw from their own buffers, made when each is first hit.
-  const portFracturesFor=(geometry,port,indexBuffer)=>port?.instances?.length&&geometry?.partAssembly&&indexBuffer
-    ?(portDamage?.restore(port),createPortFractures({device,port,geometry,portIndices:indexBuffer,groundAt:(x,z)=>heightSample(x,z),damageStore:portDamage})):null;
+  // A port set up for a side game is no part of the career: its damage is neither restored from the store nor kept in it.
+  const portFracturesFor=(geometry,port,indexBuffer)=>{
+    if(!(port?.instances?.length&&geometry?.partAssembly&&indexBuffer))return null;
+    const damageStore=port.transient?null:portDamage;
+    damageStore?.restore(port);
+    return createPortFractures({device,port,geometry,portIndices:indexBuffer,groundAt:(x,z)=>heightSample(x,z),damageStore});
+  };
   let portFractures=portFracturesFor(proceduralPack?.portGeometry,proceduralPack?.port,portMesh?.indices);
   if(portMesh&&proceduralPack?.port?.instances?.length)buildingFracturePipeline(device).catch(()=>{});
   const fine=fineMesh?{vertices:buffer(fineMesh.vertices,GPUBufferUsage.VERTEX,'Wells Bay immutable near vertices'),
@@ -1613,7 +1618,11 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       }
     }
     if(upgradedPack.views)proceduralPack.views=upgradedPack.views;
-    if(upgradedPack.port)proceduralPack.port=upgradedPack.port;
+    // With a custom port standing in, the new coast's own port waits behind it: setCustomPort(null) brings it out.
+    // Either way the port keeps the geometry it is drawn from, so a later swap never restores another coast's.
+    const heldPort=savedPortOverride,portOwner=heldPort??proceduralPack;
+    if(upgradedPack.port)portOwner.port=upgradedPack.port;
+    portOwner.portGeometry=upgradedPack.portGeometry??null;
     if(upgradedPack.beaches)proceduralPack.beaches=upgradedPack.beaches;
     if(upgradedPack.vegetation){
       proceduralPack.vegetation=upgradedPack.vegetation;
@@ -1632,18 +1641,20 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       device.queue.writeTexture({texture:albedo},upgradedPack.albedo,{bytesPerRow:activeRegion.albedoSize*4},[activeRegion.albedoSize,activeRegion.albedoSize]);
       regenerateAlbedoMips();
     }
-    const oldVerts=vertices,oldIdx=indices,oldSubIdx=submergedIndices!==indices?submergedIndices:null,oldPort=portMesh;
+    const oldVerts=vertices,oldIdx=indices,oldSubIdx=submergedIndices!==indices?submergedIndices:null,oldPort=heldPort?null:portMesh;
     mesh=upgradedPack.mesh;
     vertices=buffer(mesh.vertices,GPUBufferUsage.VERTEX,'island vertices 1550');
     indices=buffer(mesh.indices,GPUBufferUsage.INDEX,'island indices 1550');
     submergedIndices=mesh.submergedIndices?buffer(mesh.submergedIndices,GPUBufferUsage.INDEX,'submerged island indices 1550'):indices;
     submergedCount=mesh.submergedIndices?.length??mesh.indices.length;
-    portVertsCpu=upgradedPack.portGeometry?.vertices??null;
-    portMesh=upgradedPack.portGeometry?.indices?.length?{
-      vertices:buffer(upgradedPack.portGeometry.vertices,GPUBufferUsage.VERTEX,'coastal port prefab vertices 1550'),
-      indices:buffer(upgradedPack.portGeometry.indices,GPUBufferUsage.INDEX,'coastal port prefab indices 1550'),
-      count:upgradedPack.portGeometry.indices.length,
-    }:null;
+    if(!heldPort){
+      portVertsCpu=upgradedPack.portGeometry?.vertices??null;
+      portMesh=upgradedPack.portGeometry?.indices?.length?{
+        vertices:buffer(upgradedPack.portGeometry.vertices,GPUBufferUsage.VERTEX,'coastal port prefab vertices 1550'),
+        indices:buffer(upgradedPack.portGeometry.indices,GPUBufferUsage.INDEX,'coastal port prefab indices 1550'),
+        count:upgradedPack.portGeometry.indices.length,
+      }:null;
+    }
     oldVerts?.destroy?.();oldIdx?.destroy?.();oldSubIdx?.destroy?.();
     oldPort?.vertices?.destroy?.();oldPort?.indices?.destroy?.();
     // The buildings moved, so their ways did too.
@@ -1653,10 +1664,12 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     groups[0]=bind(terrainPipe,nearResources);groups[1]=bind(opaqueTreePipe,nearResources);craterLand=null;
     submergedGroup=submerged?.bindGroup(nearResources.map(([binding,resource])=>({binding,resource})));
     oldTownField.texture.destroy();oldTownField.window.destroy();
-    portDamage?.capture(proceduralPack?.port);
-    portFractures?.destroy();
-    portFractures=portFracturesFor(upgradedPack.portGeometry,upgradedPack.port,portMesh?.indices);
-    portFractures?.restoreNow().catch((error)=>console.error('Port damage restore failed',error));
+    if(!heldPort){
+      portDamage?.capture(proceduralPack?.port);
+      portFractures?.destroy();
+      portFractures=portFracturesFor(upgradedPack.portGeometry,upgradedPack.port,portMesh?.indices);
+      portFractures?.restoreNow().catch((error)=>console.error('Port damage restore failed',error));
+    }
 
     groundPatches=createGroundCoverPatches(activeRegion,groundSample,null);
     groundStats.patches=groundPatches.length;
@@ -1679,35 +1692,48 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     return true;
   }
 
+  // Stands a custom port (a side game's) in place of this coast's own, or with no arguments brings the coast's own
+  // back. False when there is no procedural coast to stand it on, or nothing to bring back.
   let savedPortOverride=null;
   function setCustomPort(customPort=null,customPortGeometry=null){
     if(terrainDisposed||!proceduralPack)return false;
+    const standIn=Boolean(customPort&&customPortGeometry);
+    if(!standIn&&!savedPortOverride)return false;
     portsDirty=true;
-    if(customPort&&customPortGeometry){
+    // The same stone raised again needs no new buffers: only the indices a struck building had blanked.
+    const sameMesh=standIn&&Boolean(savedPortOverride)&&proceduralPack.portGeometry===customPortGeometry&&Boolean(portMesh);
+    if(standIn){
       if(!savedPortOverride){
+        // The coast's own port leaves the scene with its damage on record, as any port going out of sight does.
+        portDamage?.capture(proceduralPack.port);
         savedPortOverride={port:proceduralPack.port,portGeometry:proceduralPack.portGeometry};
       }
       proceduralPack.port=customPort;
       proceduralPack.portGeometry=customPortGeometry;
-    }else if(savedPortOverride){
+    }else{
       proceduralPack.port=savedPortOverride.port;
       proceduralPack.portGeometry=savedPortOverride.portGeometry;
       savedPortOverride=null;
-    }else{
-      return false;
+      portDamage?.capture(proceduralPack.port);
     }
     const nextGeo=proceduralPack.portGeometry;
     const nextPort=proceduralPack.port;
-    const oldPort=portMesh;
-    portVertsCpu=nextGeo?.vertices??null;
-    portMesh=nextGeo?.indices?.length?{
-      vertices:buffer(nextGeo.vertices,GPUBufferUsage.VERTEX,'coastal port prefab vertices custom'),
-      indices:buffer(nextGeo.indices,GPUBufferUsage.INDEX,'coastal port prefab indices custom'),
-      count:nextGeo.indices.length,
-    }:null;
-    oldPort?.vertices?.destroy?.();oldPort?.indices?.destroy?.();
+    if(sameMesh){
+      device.queue.writeBuffer(portMesh.indices,0,nextGeo.indices);
+    }else{
+      const oldPort=portMesh;
+      portVertsCpu=nextGeo?.vertices??null;
+      portMesh=nextGeo?.indices?.length?{
+        vertices:buffer(nextGeo.vertices,GPUBufferUsage.VERTEX,'coastal port prefab vertices custom'),
+        indices:buffer(nextGeo.indices,GPUBufferUsage.INDEX,'coastal port prefab indices custom'),
+        count:nextGeo.indices.length,
+      }:null;
+      oldPort?.vertices?.destroy?.();oldPort?.indices?.destroy?.();
+    }
     portFractures?.destroy();
     portFractures=portFracturesFor(nextGeo,nextPort,portMesh?.indices);
+    // Its own port comes back as it was left: what was shot down is down, on the new buffers.
+    if(!standIn)portFractures?.restoreNow().catch((error)=>console.error('Port damage restore failed',error));
     return true;
   }
 

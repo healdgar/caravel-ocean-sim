@@ -13,7 +13,7 @@ import { setVesselHullIntegrity, vesselDamageSnapshot, restoreVesselDamageSnapsh
 import { createPortDamageStore } from './port-damage.js';
 import { careerGreatCircleKm, createCareerStore, applyShipwreckRecovery, nearestFoundedPort } from './career-save.js';
 import {lookoutEyeHeight} from './voyage/landfall-approach.js';
-import { serializeVoyage } from './voyage/passage.js';
+import { serializeVoyage, normaliseVoyageEra } from './voyage/passage.js';
 import { resetActiveIndigenousSovereigntyState } from './indigenous-sovereignty.js';
 import { coastalRegionStageURL } from './landfall.js';
 import { showCareerPrompt, showPortPanel, showCareerEnding, careerMoney } from './career-ui.js';
@@ -94,14 +94,14 @@ import { boatTargets, boatSpring, boatRotate, stepBoatSteering, stepBoatView, st
 import { SHIP_COLORS, DEFAULT_SHIP_COLORS, getShipColorsInfo, setVesselColors, strikeVesselColors, createShipColorsRenderer } from './ship-colors.js';
 import { createDockingBoardingState, computeBoardingStrength } from './boarding-docking.js';
 import { createFreeCannon } from './free-cannon.js';
-import { createCastleDuelController } from './castle-duel.js';
+import { createCastleDuelController, CASTLE_DUEL_DISTANCE_M } from './castle-duel.js';
 import { cameraModeFromLink, propulsionFromLink, createShareLink, encodeGameStateParam, decodeGameStateParam, ROUGH_SEAS } from './sharing.js';
 import { ORBIT_LIMIT, orbitElevation, orbitDistance, panOrbit, placeOrbitCamera } from './camera.js';
 // WebGPU ocean — custom renderer.
 // FFT ocean (6 cascades) + CDLOD surface mesh + physically based sky + HDR post.
 // All per-frame data lives in preallocated typed arrays / descriptors (no per-frame garbage
 // apart from the unavoidable swap-chain view and command buffer objects).
-import { N, CASCADES, SKY_W, SKY_H, ENV_SIZE, ENV_MIPS, SIM_CLOCK_LOOP_S } from './wgsl/common.js';
+import { N, CASCADES, SKY_W, SKY_H, ENV_SIZE, ENV_MIPS, SIM_CLOCK_LOOP_S, FRAME_FIRE_PATCH_FIRST, FRAME_FIRE_PATCH_FLOATS, packFrameFireLights } from './wgsl/common.js';
 import { SIM_INIT, FFT_ROWS, FFT_COLS, SIM_MIPS, FOAM_TEX, RGBA8_MIPS, SCENE_FOAM_UPDATE, ARRAY16_MIPS, FOAM_RES } from './wgsl/sim.js';
 import { TRANS_LUT, MS_LUT, SKYVIEW_LUT, ENV_CUBE, CUBE_MIPS, SUN_VIS } from './wgsl/sky.js';
 import { SKY_BG, SCENE_HEIGHT_PROBE, createOpticalOcean,withFleetHullCount } from './wgsl/ocean.js';
@@ -119,15 +119,17 @@ if (qs.has('sovereignPolity')) {
 }
 const careerBrowserStorage=name=>{try{return window[name];}catch{return null;}};
 const careerStore=createCareerStore({storage:careerBrowserStorage('localStorage'),session:careerBrowserStorage('sessionStorage')});
-// Only reset=1 erases the save. newVoyage=1 starts afresh beside it and never erases anything.
-if(qs.get('reset')==='1'){
+// Everything a career leaves in storage, erased in one place: the save, the voyage key older
+// builds wrote beside it, and the sovereignty record.
+function eraseSavedCareer(){
   try{
-    careerStore.clear?.();
+    careerStore.clear();
     careerBrowserStorage('localStorage')?.removeItem?.('waterworld.voyage.v1');
-    careerBrowserStorage('localStorage')?.removeItem?.('waterworld.career.v1');
     resetActiveIndigenousSovereigntyState({persist:true});
-  }catch{/* ignore */}
+  }catch{/* storage may be blocked */}
 }
+// Only reset=1 erases the save. newVoyage=1 starts afresh beside it and never erases anything.
+if(qs.get('reset')==='1')eraseSavedCareer();
 // Both are one-shot: they leave the address bar once read, so a reload, a restored tab or a copied
 // link continues the career instead of erasing or restarting it. `qs` keeps them for this load.
 if(qs.has('reset')||qs.has('newVoyage')){
@@ -1152,8 +1154,8 @@ async function main() {
       // The captain's recorded orders are for gun crews.
       if(ownerBoat.gunnery?.guns?.[0]?.kind!=='bow'){
         if(ownerBoat.faction==='enemy'){
-          if((id==='fire-port'||id==='fire-starboard')&&Math.hypot((ownerBoat.x??0)-cam.x,(ownerBoat.z??0)-cam.z)<95&&simTime-(ownerBoat._lastEnemyVoiceAt??-120)>=75){
-            ownerBoat._lastEnemyVoiceAt=simTime;
+          if((id==='fire-port'||id==='fire-starboard')&&Math.hypot((ownerBoat.x??0)-cam.x,(ownerBoat.z??0)-cam.z)<95&&simElapsed-(ownerBoat._lastEnemyVoiceAt??-Infinity)>=75){
+            ownerBoat._lastEnemyVoiceAt=simElapsed;
             sceneAudio.event?.({type:'enemy-voice',action:'fire',order:id,position:[ownerBoat.x??0,(ownerBoat.heave??0)+2,ownerBoat.z??0]},ownerBoat);
           }
         }else{
@@ -1271,22 +1273,24 @@ async function main() {
     onEvent:event=>{if(event.type==='shot')sceneAudio.gunneryEvent(event);else showShoreShot('free-',event);},
   });
   window.oceanFreeCannon=freeCannon;
+  // A region is some 8 km across: its centre this far off leaves the ship in open water.
+  const DUEL_COAST_OFFSET_M=12000;
+  // The free camera's keys, left to the player while he flies it over the duel. Space and F are the duel's.
+  const DUEL_FLY_KEYS=new Set(['KeyW','KeyA','KeyS','KeyD','KeyQ','KeyE','KeyC','ShiftLeft','ShiftRight']);
   const castleDuel=createCastleDuelController({
     getTerrain:()=>terrain,
-    ensureTerrain:()=>terrain?Promise.resolve(terrain):spawnTerrainLate({region:{id:'cartagena',name:'Cartagena',latitude:10.42,longitude:-75.55}}),
+    // At open sea a coast is raised for the duel well clear of the ship, and taken away when it ends.
+    ensureTerrain:()=>terrain?Promise.resolve(terrain):spawnTerrainLate({region:{id:'cartagena',name:'Cartagena',latitude:10.42,longitude:-75.55},placement:{x:boat.x+DUEL_COAST_OFFSET_M,z:boat.z}}),
+    disposeTerrain:raised=>disposeTerrainLate(raised),
     getVessels:()=>vessels,
     getCamera:()=>cam,
-    setCameraMode:mode=>{if(typeof setCameraMode==='function')setCameraMode(mode);},
-    getSimTime:()=>simTime,
-    getSettings:()=>P,
-    applySunPreset:elev=>{
-      P.sunElev=elev;
-      const s=typeof seaSliders!=='undefined'?seaSliders.get('sunElev'):null;
-      if(s){s.input.value=String(elev);s.output.textContent=String(elev);}
-      envFull=true;
-    },
+    setCameraMode:mode=>setCameraMode(mode),
+    saveScene:()=>saveDuelScene(),
+    restoreScene:saved=>restoreDuelScene(saved),
+    getSunElevation:()=>astronomy.mode==='astronomy'?(astronomy.state?.sun?.altitude??P.sunElev):P.sunElev,
+    setSunElevation:elev=>setManualSun(elev,P.sunAzim),
     onShoreShot:showShoreShot,
-    gunEffects,
+    onNotice:text=>voyageCtl?.showToast?.(text,7),
   });
   window.castleDuel=castleDuel;
   if(qs.get('ammo'))for(const v of vessels)v.gunnery.setAmmo?.(qs.get('ammo'));
@@ -1319,7 +1323,7 @@ async function main() {
           voyageCtl.voyage.provisions.food=Math.min(120,(voyageCtl.voyage.provisions.food??40)+(p?.foodDays??14));
         }
         voyageCtl?.logExternal?.(`🏴 ${ev.state.statusText}`,'combat');
-      }else if(ev.type==='boarding-repulsed'){
+      }else if(ev.type==='boarding-repulsed'||ev.type==='boarding-abandoned'){
         voyageCtl?.logExternal?.(`⚔️ ${ev.state.statusText}`,'combat');
       }else if(ev.type==='dock-complete'||ev.type==='cast-off-complete'){
         voyageCtl?.logExternal?.(`🪢 ${ev.state.statusText}`,'order');
@@ -1574,6 +1578,8 @@ async function main() {
   const keys = Object.create(null);
   addEventListener('keydown', (e) => {
     if (/INPUT|SELECT/.test(e.target.tagName)) return;
+    // The castle duel has the keyboard: none of the ship's or the voyage's keys act while it runs.
+    if (castleDuel.active) { if (castleDuel.freeView && DUEL_FLY_KEYS.has(e.code)) keys[e.code] = true; return; }
     if (voyageCtl?.onKey(e)) { e.preventDefault(); return; }
     if (e.code === 'KeyM' && !e.repeat && chartDrawer) { chartDrawer.toggle(); e.preventDefault(); return; }
     if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.code) || (boat.enabled && ['KeyA','KeyD','KeyW','KeyS','KeyQ','KeyE','KeyX'].includes(e.code))) e.preventDefault();
@@ -1924,6 +1930,9 @@ async function main() {
   // Per-frame uniforms
   // --------------------------------------------------------------------------------------
   let simTime = Number(qs.get('t')) || 0;
+  // Seconds simulated since the page loaded. simTime starts again every LOOP seconds, so whatever asks how long
+  // ago something happened, or how long the game has run, asks this.
+  let simElapsed = 0;
   let frameIndex = 0;
   let simPaused = qs.get('paused') === '1';
   let pauseButton = null;
@@ -1940,46 +1949,6 @@ async function main() {
   function seaLatitude(){
     const voyageLatitude=voyageCtl?.voyage?.true?.lat;
     return Number.isFinite(voyageLatitude)?voyageLatitude:terrain?.region?.latitude??astronomy.state?.observer?.latitude??SEA_LATITUDE_UNKNOWN;
-  }
-  function writeFireLightsToFrame(f){
-    f[23]=0;f[27]=0;f[31]=0;f[54]=0;
-    f[55]=0;f[61]=0;f[62]=0;f[87]=0;
-    if(!Array.isArray(activeFires)||activeFires.length===0)return;
-    const sunDirY=f[33]??Math.sin(P.sunElev*D2R);
-    const nightFactor=1-Math.max(0,Math.min(1,(sunDirY+0.06)/0.24));
-    const fireExposure=Math.min(1.0,1.35/Math.max(f[68]||1,1e-3))*(1.0+2.8*nightFactor);
-    const clusters=[];
-    for(const wf of activeFires){
-      const pos=wf?.position;
-      const rawInt=wf?.intensity??0;
-      if(!pos||rawInt<=0.01)continue;
-      let merged=false;
-      for(const c of clusters){
-        const d2=(c.x-pos[0])**2+(c.y-pos[1])**2+(c.z-pos[2])**2;
-        if(d2<144){
-          const nextW=c.w+rawInt;
-          c.x=(c.x*c.w+pos[0]*rawInt)/nextW;
-          c.y=(c.y*c.w+pos[1]*rawInt)/nextW;
-          c.z=(c.z*c.w+pos[2]*rawInt)/nextW;
-          c.w=Math.min(3.6,nextW);
-          merged=true;
-          break;
-        }
-      }
-      if(!merged)clusters.push({x:pos[0],y:pos[1],z:pos[2],w:Math.min(3.2,rawInt)});
-    }
-    if(!clusters.length)return;
-    clusters.sort((a,b)=>{
-      const da=Math.hypot(a.x-cam.x,a.y-cam.y,a.z-cam.z);
-      const db=Math.hypot(b.x-cam.x,b.y-cam.y,b.z-cam.z);
-      return (b.w/(1+db*0.02))-(a.w/(1+da*0.02));
-    });
-    const c0=clusters[0];
-    f[23]=c0.x;f[27]=c0.y;f[31]=c0.z;f[54]=c0.w*fireExposure;
-    if(clusters.length>1){
-      const c1=clusters[1];
-      f[55]=c1.x;f[61]=c1.y;f[62]=c1.z;f[87]=c1.w*fireExposure;
-    }
   }
   function writeFrame(time) {
     const aspect = W / H;
@@ -2011,9 +1980,11 @@ async function main() {
     const f = frameF;
     f.set(viewProj, 0);
     f[16] = cam.x; f[17] = cam.y; f[18] = cam.z; f[19] = time;
-    f[20] = rx * tanX; f[21] = ry * tanX; f[22] = rz * tanX; f[23] = 0;
-    f[24] = ux * tanY; f[25] = uy * tanY; f[26] = uz * tanY; f[27] = 0;
-    f[28] = fx; f[29] = fy; f[30] = fz; f[31] = 0;
+    // The fourth float of each camera vector, with 54, 55, 61, 62 and 87, is a fire-light slot: packFrameFireLights
+    // owns those, once the frame's fires are known. Until then they hold the last frame's lights.
+    f[20] = rx * tanX; f[21] = ry * tanX; f[22] = rz * tanX;
+    f[24] = ux * tanY; f[25] = uy * tanY; f[26] = uz * tanY;
+    f[28] = fx; f[29] = fy; f[30] = fz;
     const se = P.sunElev * D2R, sa = P.sunAzim * D2R;
     f[32] = Math.sin(sa) * Math.cos(se); f[33] = Math.sin(se); f[34] = -Math.cos(sa) * Math.cos(se); f[35] = 14.0;
     if(astronomy.mode==='astronomy')f.set(astronomy.state.sun.direction,32);
@@ -2022,7 +1993,7 @@ async function main() {
     for (let c = 0; c < C; c++) { f[40 + c] = CASC_L[c]; f[48 + c] = 1 / CASC_L[c]; }
     f[46] = P.swellHs; f[47] = P.swellLength;
     f[56] = Math.cos(P.windDir * D2R); f[57] = Math.sin(P.windDir * D2R); f[58] = P.windSpeed; f[59] = P.swellDir * D2R + 2 * Math.PI;
-    f[60] = boat.heading * D2R; f[61] = boat.length; f[62] = boat.beam;
+    f[60] = boat.heading * D2R;
     f[63] = boat.showProw && qs.get('boatReflections') !== '0' ? 1 : 0;
     f[64] = Math.max(4, R0 * polygons.oceanRangeScale); f[65] = GRID; f[66] = FOAM_LEVEL_SIZE[0]; f[67] = FOAM_LEVEL_SIZE[1];
     f[68] = P.exposure*(astronomy.mode==='astronomy'?astronomy.state.exposureScale:1); f[69] = P.bloom; f[70] = frameIndex; f[71] = DBG;
@@ -2033,13 +2004,12 @@ async function main() {
     const seaColour=deepSeaColour(seaLatitude());
     f[76] = seaColour[0] * P.turbidity; f[77] = seaColour[1] * P.turbidity; f[78] = seaColour[2] * P.turbidity; f[79] = 0.0024;
     f[80] = 0.030; f[81] = 0.105; f[82] = 0.100; f[83] = 2.6;
-    f[84] = 0.45; f[85] = 1.0; f[86] = Math.min(1,P.foam); f[87] = 1.0;
+    f[84] = 0.45; f[85] = 1.0; f[86] = Math.min(1,P.foam);
     f[88] = (5.802e-3 + 4.40e-3 * P.haze) * 1e-3;
     f[89] = (13.558e-3 + 4.40e-3 * P.haze) * 1e-3;
     f[90] = (33.1e-3 + 4.40e-3 * P.haze) * 1e-3;
     f[91] = 1.1e-4;
     f[92]=weather.intensity;f[93]=weather.type;f[94]=weather.flash;f[95]=weather.time;
-    writeFireLightsToFrame(f);
     device.queue.writeBuffer(frameUBO, 0, f);
     opticsData[0]=P.turbidity*(terrain?.turbidityScale??1);opticsData[1]=qs.get('waterOptics')==='0'?0:1;
     opticsData[2]=waterH;opticsData[3]=1;
@@ -2325,11 +2295,7 @@ async function main() {
     voyageCtl?.triggerSailEncounter?.();
     updateCrewUI();helm?.update?.(performance.now(),true);
   };
-  const captainCastleDuelBtn=document.createElement('button');captainCastleDuelBtn.type='button';captainCastleDuelBtn.id='captain-castle-duel-btn';
-  captainCastleDuelBtn.textContent='🏰 Castle Duel';
-  captainCastleDuelBtn.title='Launch the 2-castle artillery side game across a 210 m channel (no aim arcs)';
-  castleDuel?.bindLaunchButton?.(captainCastleDuelBtn,()=>setCaptainOpen(false));
-  boardingActionsRow.append(dockPierBtn,castOffBtn,boardShipBtn,sightSailBtn,captainCastleDuelBtn);
+  boardingActionsRow.append(dockPierBtn,castOffBtn,boardShipBtn,sightSailBtn);
   boardingSection.append(boardingActionsRow,boardingStatus);
   captainBody.append(boardingSection);
   function updateAnchorUI(){
@@ -2501,9 +2467,14 @@ async function main() {
       } : undefined,
       sovereignty: serializeIndigenousSovereignty(getActiveIndigenousSovereigntyState()),
     };
-    const damagedPort = portDamage.forLink(terrain?.port, terrain?.forestStrikeKey ?? null);
+    const damagedPort = portDamage.forLink(terrain?.port?.transient ? null : terrain?.port, terrain?.forestStrikeKey ?? null);
     if (damagedPort) gameState.portDamage = damagedPort;
     return { cam, orbit: shipOrbit, astronomy: astronomy.share(), voyage: vInfo, gameState };
+  };
+  // The ports whose damage belongs to the career: never one set up for a side game.
+  const careerPorts = () => {
+    const ports = terrain?.ports;
+    return ports?.some(port => port.transient) ? ports.filter(port => !port.transient) : ports;
   };
   const careerSnapshot = () => ({
     url: createShareLink(location.href, P, boat, cameraMode, buildShareCameraPayload()).toString(),
@@ -2520,7 +2491,7 @@ async function main() {
       rawMaterialsTonnes: boat.rawMaterialsTonnes ?? 0,
       damage: vesselDamageSnapshot(boat),
     },
-    portDamage: portDamage.snapshot(terrain?.ports),
+    portDamage: portDamage.snapshot(careerPorts()),
   });
   const restoreCareerVessel = saved => {
     if (!saved) return;
@@ -2758,13 +2729,10 @@ async function main() {
         const sov=getActiveIndigenousSovereigntyState();
         return Boolean(sov&&(sov.allegiance==='rogue-liberator'||(sov.treatiesSigned??0)>0||(sov.totalTrades??0)>0||(sov.totalColonizersRepelled??0)>0||Object.values(sov.regions??{}).some(r=>(r.strengthScore??0)>0||(r.tradeCount??0)>0)));
       },
+      // A tab that does not own the save starts afresh beside it, as newVoyage=1 always has.
+      resetVoyagePrompt:()=>careerStore.owned()&&careerStore.has()?'Erase saved career?':'Abandon this voyage?',
       onResetVoyage:()=>{
-        try{
-          careerStore.clear?.();
-          careerBrowserStorage('localStorage')?.removeItem?.('waterworld.voyage.v1');
-          careerBrowserStorage('localStorage')?.removeItem?.('waterworld.career.v1');
-          resetActiveIndigenousSovereigntyState({persist:true});
-        }catch{/* ignore */}
+        if(careerStore.owned())eraseSavedCareer();
         const url=new URL(location.pathname,location.href);
         url.searchParams.set('newVoyage','1');
         location.href=url.href;
@@ -2922,7 +2890,6 @@ async function main() {
         const v=voyageCtl.voyage;
         if(terrain?.region?.year&&terrain.region.year!==1550&&!qs.has('astroDate')&&!urlGameState?.voyage?.dateMs){
           v.dateMs=Date.UTC(terrain.region.year,2,24,12,0,0);
-          v.departureDateMs=v.dateMs;
         }
         const qLat=Number(qs.get('lat')),qLon=Number(qs.get('lon'));
         if(Number.isFinite(qLat)&&Number.isFinite(qLon)&&qs.has('lat')&&qs.has('lon')){
@@ -2937,7 +2904,7 @@ async function main() {
         if(urlGameState?.voyage){
           const uv=urlGameState.voyage;
           if(Number.isFinite(uv.day))v.dayAtSea=uv.day;
-          if(Number.isFinite(uv.dateMs))v.dateMs=uv.dateMs;
+          if(Number.isFinite(uv.dateMs)){v.dateMs=uv.dateMs;normaliseVoyageEra(v);}
           if(v.provisions){
             if(Number.isFinite(uv.waterDays))v.provisions.water=uv.waterDays;
             if(Number.isFinite(uv.foodDays))v.provisions.food=uv.foodDays;
@@ -3008,8 +2975,7 @@ async function main() {
           location.href=url.href;
         },
         onNewVoyage:()=>{
-          careerStore.clear();careerStore.claim();careerPort?.reset();portDamage.clear();
-          resetActiveIndigenousSovereigntyState({persist:true});
+          eraseSavedCareer();careerStore.claim();careerPort?.reset();portDamage.clear();
         },
       });
     }
@@ -3221,6 +3187,23 @@ async function main() {
     if(document.pointerLockElement) document.exitPointerLock();
     for(const k in keys) keys[k]=false;
     updateHelp(true);
+  }
+  // What the castle duel borrows of the view and the sky, and the same given back when it stops.
+  function saveDuelScene(){
+    if(spyglassActive)setSpyglassActive(false);
+    for(const k in keys)keys[k]=false;
+    return {cameraMode,cam:{...cam},orbit:{...shipOrbit},showProw:boat.showProw,eyeSide:boat.eyeSide,eyeSideVelocity:boat.eyeSideVelocity,
+      hasLooked:document.body.classList.contains('has-looked'),skyMode:astronomy.mode,sunElev:P.sunElev,sunAzim:P.sunAzim};
+  }
+  function restoreDuelScene(saved){
+    if(!saved)return;
+    setCameraMode(saved.cameraMode);
+    Object.assign(cam,saved.cam);Object.assign(shipOrbit,saved.orbit);
+    boat.showProw=saved.showProw;prowToggle.checked=saved.showProw;boat.eyeSide=saved.eyeSide;boat.eyeSideVelocity=saved.eyeSideVelocity;
+    for(const k in keys)keys[k]=false;
+    document.body.classList.toggle('has-looked',saved.hasLooked);
+    if(P.sunElev!==saved.sunElev||P.sunAzim!==saved.sunAzim){P.sunElev=saved.sunElev;P.sunAzim=saved.sunAzim;showSunSliders();envFull=true;}
+    if(astronomy.mode!==saved.skyMode)applyAstronomy({mode:saved.skyMode});
   }
   updateHelp();
   const propulsionRow=document.createElement('label');propulsionRow.textContent='Propulsion';
@@ -3525,6 +3508,19 @@ async function main() {
   const astroStatus=document.createElement('p');astroStatus.id='astronomy-status';astronomyControls.append(astroStatus);
   const skyHelp=document.createElement('p');skyHelp.textContent='Use Time of day & Time of year for astronomical Sun, Moon & stars at this latitude/longitude, or Sun elevation & azimuth for direct manual angles.';astronomyControls.append(skyHelp);
   const landfallMirrorSliders={};
+  function showSunSliders(){
+    for(const k of ['sunElev','sunAzim']){
+      const s=seaSliders?.get(k);
+      if(s){s.input.value=String(P[k]);s.output.textContent=String(P[k]);}
+      const m=landfallMirrorSliders[k];
+      if(m){m.input.value=String(P[k]);m.output.textContent=String(P[k]);}
+    }
+  }
+  // The Sun set by hand, as its two sliders set it: the sky leaves the almanac for manual angles.
+  function setManualSun(elevation,azimuth){
+    if(astronomy.mode!=='manual')applyAstronomy({mode:'manual'});
+    P.sunElev=elevation;P.sunAzim=azimuth;showSunSliders();envFull=true;
+  }
   function syncAstronomySliders(syncSunAngles=false){
     skyMode.value=astronomy.mode;
     if(astronomy.state?.date)skyDate.value=astronomy.state.date.slice(0,19);
@@ -3544,12 +3540,7 @@ async function main() {
     if(syncSunAngles&&astronomy.mode==='astronomy'&&astronomy.state?.sun){
       P.sunElev=Math.max(-90,Math.min(90,Number(astronomy.state.sun.altitude.toFixed(1))));
       P.sunAzim=Number((((astronomy.state.sun.azimuth%360)+360)%360).toFixed(1));
-      for(const k of ['sunElev','sunAzim']){
-        const s=seaSliders?.get(k);
-        if(s){s.input.value=String(P[k]);s.output.textContent=String(P[k]);}
-        const m=landfallMirrorSliders[k];
-        if(m){m.input.value=String(P[k]);m.output.textContent=String(P[k]);}
-      }
+      showSunSliders();
     }
   }
   function applyAstronomy(values,syncSunAngles=false){try{astronomy.set(values,boat);envFull=true;syncAstronomySliders(syncSunAngles);astroStatus.textContent=astronomy.mode==='astronomy'?'Real Sun/Moon directions; sky clock is separate from wave simulation.':'Manual Sun controls active.';}catch(error){astroStatus.textContent=error.message;}}
@@ -3716,7 +3707,7 @@ async function main() {
   }
   syncAstronomySliders(astronomy.mode==='astronomy');
   const dolphinControls=createDolphinControls({parent:seaBody,encounter:dolphins.state,boat,getTerrain:()=>terrain,getVessels:()=>followerEnabled?dolphinVessels:dolphinPlayer,
-    castleDuel,onClosePanel:()=>setPanelOpen(false),onCoastlineSwap:()=>{envFull=true;},
+    onCoastlineSwap:()=>{envFull=true;},
     onView:()=>{setCameraMode('ship');shipOrbit.fleet=false;shipOrbit.wildlife=true;shipOrbit.marine=false;shipOrbit.fleetZoom=1;shipOrbit.elevation=.28;setPanelOpen(false);}});
   {
     const perfDebugBox=document.createElement('div');
@@ -3724,8 +3715,9 @@ async function main() {
     perfDebugBox.innerHTML='<strong style="display:block;font-size:12px;margin-bottom:6px;opacity:0.85;">Debug &amp; Side Modes</strong><div class="encounter-buttons" style="display:flex;gap:6px;flex-wrap:wrap;"><button type="button" id="perf-castle-duel-btn">🏰 Castle Duel</button><button type="button" id="perf-coastline-btn">Switch Coastline (1550 / 2026)</button></div>';
     const perfDuelBtn=perfDebugBox.querySelector('#perf-castle-duel-btn');
     const perfCoastBtn=perfDebugBox.querySelector('#perf-coastline-btn');
-    castleDuel?.bindLaunchButton?.(perfDuelBtn,()=>setPerformanceOpen(false));
-    perfCoastBtn.onclick=()=>{document.getElementById('debug-coastline-btn')?.click();};
+    perfDuelBtn.title=`Two castles trade shot across a ${CASTLE_DUEL_DISTANCE_M} m strait, laid by eye. The ship and the voyage wait until it ends.`;
+    castleDuel.bindLaunchButton(perfDuelBtn,()=>setPerformanceOpen(false));
+    perfCoastBtn.onclick=()=>dolphinControls.swapCoastline();
     performancePanel.querySelector('.panel-body')?.prepend(perfDebugBox);
   }
   const marineControls=createMarineControls({parent:dolphinControls.root,encounter:marineLife.state,boat,getTerrain:()=>terrain,getVessels:()=>followerEnabled?dolphinVessels:dolphinPlayer,notice:dolphinControls.notice,
@@ -3745,12 +3737,19 @@ async function main() {
 
 
   const hudFps = document.getElementById('fps');
-  const vesselHasVisibleCrew = v => Boolean(
-    v?.crew && (
+  const scanForVisibleCrew = v => Boolean(
+    v.crew && (
       !v.boat.damage?.sunk ||
       v.crew.state?.crew?.some(s => s.visible !== false && !s.overboard?.gone)
     )
   );
+  // Asked about ten times a frame for each vessel, and for a sunk hull every answer scanned her whole crew.
+  // The answer is worked out once per vessel per frame, the first time it is wanted, and kept on her until the next.
+  const vesselHasVisibleCrew = v => {
+    if (!v) return false;
+    if (v.crewSeenFrame !== frameIndex) { v.crewSeenFrame = frameIndex; v.crewSeen = scanForVisibleCrew(v); }
+    return v.crewSeen;
+  };
   const vesselHasActiveSurvivorsOrDebris = v => Boolean(
     vesselHasVisibleCrew(v) ||
     (v?.boat?.damage?.fracture?.flying?.size ?? 0) > 0 ||
@@ -3836,6 +3835,10 @@ async function main() {
     device.queue.writeBuffer(foamUBO, 0, foamUArr);
   }
 
+  // This frame's wind as a velocity, written once and read by everything that flies or drifts.
+  const frameWind=[0,0,0];
+  const NO_AIM_ARCS=[];
+  let governedSections=0;
   function frame(now) {
     if (shooting) return;  // paused while a screenshot is read back
     if(bloomMeasureRequested&&bloomFrameReady){measureBloomAlone();return;}
@@ -3843,14 +3846,17 @@ async function main() {
     requestAnimationFrame(frame);
     landfallUI.update(now);
     const elapsed = Math.max(0, (now - last) / 1000);
-    if(terrain?.streamBusy){resolution.reset();polygons.reset();}
-    const gpuHeadroom=profiler.totalMs>0&&profiler.totalMs<13.5&&frameWorkMs<8;
-    const adaptiveElapsed=gpuHeadroom?Math.min(elapsed,1/60):elapsed;
+    // A coastal section landing stalls a frame for reasons no budget can cure, so the governors start their count
+    // again each time one does. They are not held for as long as the stream is busy: a long stream, or a busy flag
+    // left set by a section that failed, would switch them off. They judge the cadence delivered, the same whether
+    // or not the performance panel is open to time the GPU.
+    const sectionsStreamed=terrain?.streamedSectionCount??0;
+    if(sectionsStreamed!==governedSections){governedSections=sectionsStreamed;resolution.reset();polygons.reset();}
     // A polygon budget down to half is hard to see, so it goes along with sharpness. Further cuts
     // wait until the image is at half size, and come back before any sharpness does.
-    const resChanged = resolution.sample(adaptiveElapsed,!document.hidden,frameWorkMs,{mayRaise:polygons.mode!=='auto'||polygons.scale>=POLYGON_COMFORT,mayLower:!polygons.trying});
+    const resChanged = resolution.sample(elapsed,!document.hidden,frameWorkMs,{mayRaise:polygons.mode!=='auto'||polygons.scale>=POLYGON_COMFORT,mayLower:!polygons.trying});
     if(resChanged)polygons.reset();
-    if(polygons.sample(adaptiveElapsed,!document.hidden,frameWorkMs,{mayLower:!resolution.trying,mayLowerFurther:resolution.mode!=='auto'||resolution.scale<=POLYGONS_YIELD_AT}))terrain?.setPixelError?.(polygons.pixelError);
+    if(polygons.sample(elapsed,!document.hidden,frameWorkMs,{mayLower:!resolution.trying,mayLowerFurther:resolution.mode!=='auto'||resolution.scale<=POLYGONS_YIELD_AT}))terrain?.setPixelError?.(polygons.pixelError);
     resize();
     let camDt = Math.min(0.1, elapsed);
     last = now;
@@ -3882,26 +3888,32 @@ async function main() {
     }
     if (fixedDt) camDt = fixedDt;
     const dt = simPaused ? 0 : camDt;
+    // While the castle duel runs the ships, their guns and crews, and the voyage wait as they were.
+    const shipDt=castleDuel.active?0:dt;
+    frameWind[0]=Math.cos(P.windDir*D2R)*P.windSpeed;frameWind[2]=Math.sin(P.windDir*D2R)*P.windSpeed;
     if(needSpectrum)for(const v of vessels){v.boat.revision++;v.probe.state.time=-1;}
     if(needSpectrum)surfaceWaves.reset();
     const rowingSurfaceTime=simTime+dt,rowingSurfaceWrapped=rowingSurfaceTime>LOOP;
     let flushedRowingEvents=null;
     if(dt>0||needSpectrum||frameIndex===0){
-      boat.externalForce=anchor.step(dt,boat,anchorEnvironment);
-      for(const event of anchor.events)sceneAudio.anchor(event,boat);
-      dockingBoarding.step(dt);
-      updateBoat(dt,needSpectrum||elapsed>.5);
+      // A waiting ship is still seated on a sea that has just been changed under her.
+      if(shipDt>0||needSpectrum||frameIndex===0){
+        boat.externalForce=anchor.step(shipDt,boat,anchorEnvironment);
+        for(const event of anchor.events)sceneAudio.anchor(event,boat);
+        dockingBoarding.step(shipDt);
+        updateBoat(shipDt,needSpectrum||elapsed>.5);
+      }
       dolphins.update(dt,boat,P,terrain,followerEnabled?dolphinVessels:dolphinPlayer);dolphinControls.update(now);
       marineLife.update(dt,boat,P,terrain,followerEnabled?dolphinVessels:dolphinPlayer);marineControls.update(now);
       const activeWhale=marineLife.state?.active&&marineLife.state.count>0?marineLife.state.animals[0]:null;
       const targetVessel=findSpyglassTargetVessel();
-      const activeDolphin=dolphins.state?.active&&dolphins.state.pods?.[0]?.animals?.[0]?dolphins.state.pods[0].animals[0]:null;
-      boat.lookoutSighting=simTime<8?null:activeWhale
+      const activeDolphin=dolphins.state?.active?dolphins.state.animals[0]:null;
+      boat.lookoutSighting=simElapsed<8?null:activeWhale
         ?{kind:activeWhale.type||'whale',x:activeWhale.x,y:activeWhale.depth??0,z:activeWhale.z}
         :targetVessel?.boat
           ?{kind:targetVessel.faction==='enemy'?'enemy-ship':'ship',x:targetVessel.boat.x,y:(targetVessel.boat.heave??0)+3,z:targetVessel.boat.z}
           :activeDolphin
-            ?{kind:'dolphin',x:activeDolphin.x,y:activeDolphin.y??0,z:activeDolphin.z}
+            ?{kind:'dolphin',x:activeDolphin.x,y:activeDolphin.depth,z:activeDolphin.z}
             :null;
       flushedRowingEvents=rowingSurfaceEvents.flush({time:rowingSurfaceWrapped?rowingSurfaceTime-LOOP:rowingSurfaceTime,dt,
         hidden:document.hidden,resetSea:needSpectrum||elapsed>.5||rowingSurfaceWrapped});
@@ -3915,18 +3927,16 @@ async function main() {
       }
       surfaceWaves.update(boat,dt);
     }
-    if(voyageCtl?.active&&dt>0)voyageCtl.update(dt,now);
+    if(voyageCtl?.active&&shipDt>0)voyageCtl.update(shipDt,now);
     instruments.update(now);
     helm.update(now);
     updateCamera(camDt);
-    if(castleDuel.active){
-      castleDuel.update(dt,[Math.cos(P.windDir*D2R)*P.windSpeed,0,Math.sin(P.windDir*D2R)*P.windSpeed]);
-    }
-    simTime += dt;
+    if(castleDuel.active)castleDuel.update(dt,frameWind);
+    simTime += dt; simElapsed += dt;
     if (simTime > LOOP) simTime -= LOOP;
     frameIndex++;
 
-    astronomy.update(simPaused ? 0 : elapsed,boat);
+    astronomy.update(simPaused||castleDuel.active ? 0 : elapsed,boat);
     if(voyageCtl?.active&&!voyageCtl.voyage?.passive&&(frameIndex&7)===0)syncAstronomySliders(true);
     weather.step(dt,P,cam);
     frameStages.mark('Sailing and voyage');
@@ -3948,13 +3958,11 @@ async function main() {
       const ship=v.boat,data=v.hullData,dmg=ship.damage;
       if(v.bakedWreck&&(needSpectrum||(dmg?.pendingBakes?.length??0)>0||vesselHasActiveSurvivorsOrDebris(v)))v.bakedWreck=false;
       if(v.bakedWreck){
-        if(dt>0&&v.gunnery.state.projectiles.length>0){
-          v.gunnery.update(dt,[Math.cos(P.windDir*D2R)*P.windSpeed,0,Math.sin(P.windDir*D2R)*P.windSpeed]);
-        }
+        if(shipDt>0&&v.gunnery.state.projectiles.length>0)v.gunnery.update(shipDt,frameWind);
         continue;
       }
       if(!index||followerEnabled){
-        if(dt>0)v.gunnery.update(dt,[Math.cos(P.windDir*D2R)*P.windSpeed,0,Math.sin(P.windDir*D2R)*P.windSpeed]);
+        if(shipDt>0)v.gunnery.update(shipDt,frameWind);
       }
       const settlingBake=Boolean(dmg?.settledWreck&&(dmg?.pendingBakes?.length??0)===0&&v.gunnery.state.projectiles.length===0&&!vesselHasActiveSurvivorsOrDebris(v));
       if(settlingBake){
@@ -3995,7 +4003,7 @@ async function main() {
       // Paused frames keep the last pose, but a ship opened paused must still show its crew.
       if((!index||followerEnabled)&&vesselHasVisibleCrew(v)){
         frameStages.mark('Ship state');
-        if(dt>0||!v.crew?.posed){v.crew?.update(ship,dt,P.windSpeed,cam);v.wetness.updateCrew(v.crew?.state,ship);}
+        if(shipDt>0||!v.crew?.posed){v.crew?.update(ship,shipDt,P.windSpeed,cam);v.wetness.updateCrew(v.crew?.state,ship);}
         else v.crew.refreshDraw(ship,cam);
         frameStages.mark('Crew');
       }
@@ -4009,8 +4017,8 @@ async function main() {
         const savedEffects=ship.effects;ship.effects=false;
         v.interaction.update(ship,0,simTime,frameIndex,0,0,true,0);
         ship.effects=savedEffects;
-      }else if(dt>0&&!v.dormantEncounter){
-        v.interaction.update(ship,dt,simTime,frameIndex,P.windSpeed,P.windDir*D2R,needSpectrum,weather.intensity*(weather.type===1?.1:1));
+      }else if(shipDt>0&&!v.dormantEncounter){
+        v.interaction.update(ship,shipDt,simTime,frameIndex,P.windSpeed,P.windDir*D2R,needSpectrum,weather.intensity*(weather.type===1?.1:1));
       }
     }
     frameStages.mark('Ship state');
@@ -4024,7 +4032,7 @@ async function main() {
         onEvent:event=>showShoreShot('port-',event),
       });
     }
-    const windVec=[Math.cos(P.windDir*D2R)*P.windSpeed,0,Math.sin(P.windDir*D2R)*P.windSpeed];
+    const windVec=frameWind;
     if(!castleDuel.active){
       portGunnery?.update(dt,windVec);
       freeCannon.update(dt,{firing:cameraMode==='free'&&keys.KeyF===true,eye:[cam.x,cam.y,cam.z],
@@ -4052,7 +4060,7 @@ async function main() {
       gunEffects.setAimArcs?.(aimArcs);
       if(!captainPanel.hidden&&(frameIndex&3)===0)gunControls.update();
     }else{
-      gunEffects.setAimArcs?.([]);
+      gunEffects.setAimArcs?.(NO_AIM_ARCS);
     }
     hullContactProbe.update(boat,dt,{enabled:sceneAudio.enabled&&sceneAudio.ready&&boat.effects!==false,hidden:document.hidden,resetSea:needSpectrum||elapsed>.5});
     activeFires.length=0;
@@ -4062,8 +4070,8 @@ async function main() {
     }else if(portGunnery){
       const portFires=portGunnery.worldFires;for(let i=0;i<portFires.length;i++)activeFires.push(portFires[i]);
     }
-    writeFireLightsToFrame(frameF);
-    device.queue.writeBuffer(frameUBO,0,frameF);
+    // The frame block went up whole in writeFrame. Only its fire lights wait on this frame's fires, and only a change in them is sent.
+    if(packFrameFireLights(frameF,activeFires,cam.x,cam.y,cam.z))device.queue.writeBuffer(frameUBO,FRAME_FIRE_PATCH_FIRST*4,frameF,FRAME_FIRE_PATCH_FIRST,FRAME_FIRE_PATCH_FLOATS);
     gunEffects.update(dt,{wind:windVec,eye:[cam.x,cam.y,cam.z],fires:activeFires});
     wakePool.update(vessels);
     device.queue.writeBuffer(fleetHullUBO,0,fleetHullData);sceneShadows.update(vessels);
