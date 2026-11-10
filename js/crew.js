@@ -523,6 +523,9 @@ export function isCaptainActor(s){
   if(!s||s.indigenous)return false;
   return s.role==='Captain'||Boolean(s.roles?.includes('captain'))||s.role==='Capitán de Presidio'||s.role==='Captain of the Guard';
 }
+// The whole part of an actor's skin.w, which tells the shader whose body it is drawing: a man's, a woman's, or the
+// captain's worn by a woman, whose painted beard is then painted out. `own` is a body of its batch's own sex.
+export const crewBodyKind=(s,own)=>own?Number(s.sex==='female'):s.sex==='female'?2:0;
 export const CAPTAIN_TEXTURE_PX=1024;
 async function uploadCaptainTexture(device,model){
   if(!model?.image||typeof createImageBitmap!=='function'){
@@ -736,7 +739,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
               ?[s.shirt[0]*0.78+0.12,s.shirt[1]*0.62,s.shirt[2]*0.62]
               :s.shirt;
           b.actors.set(shirt,offset+16);b.actors.set(s.trousers,offset+20);b.actors.set(s.skin,offset+24);b.actors.set(s.hair,offset+28);
-          b.actors.set(s.face,offset+32);b.actors[offset+27]=Number(own&&s.sex==='female')+bandageSeed;
+          b.actors.set(s.face,offset+32);b.actors[offset+27]=crewBodyKind(s,own)+bandageSeed;
           // The tiller station is below the camera; all crew remain visible.
           // Fractional part of shirt.w (< 0.5) carries wound severity to the crew shader.
           b.actors[offset+19]=!s.visible?1.0:(woundAmt*0.45);
@@ -2145,7 +2148,7 @@ export async function createFortSoldiers({
         b.actors.set(s.face, offset + 32);
         b.actors[offset + 19] = Number(!s.visible);
         b.actors[offset + 23] = 1;
-        b.actors[offset + 27] = Number(own && s.sex === 'female');
+        b.actors[offset + 27] = crewBodyKind(s, own);
         // A fort's moisture lookup is always the first entry, so the whole of this slot's fraction is free.
         b.actors[offset + 31] = (s.dress ?? 0) / DRESS_MASK_SCALE;
       }
@@ -2219,7 +2222,7 @@ export async function createFortSoldiers({
           b.actors.set(shirt, offset + 16);
           b.actors[offset + 19] = !s.visible ? 1.0 : (woundAmt * 0.45);
           b.actors[offset + 23] = 1 + scorchAmt * 0.42;
-          b.actors[offset + 27] = Number(own && s.sex === 'female') + bandageSeed;
+          b.actors[offset + 27] = crewBodyKind(s, own) + bandageSeed;
           // Only someone close enough to see their hands needs a skeleton solved for them.
           const away = camera ? Math.hypot(s.position[0] - camera.x, (s.position[1] ?? 0) - (camera.y ?? 0), s.position[2] - camera.z) / crewLensZoom(camera) : 0;
           const stirred = !s._poseReady && s.poseWasReady !== false;
