@@ -11,9 +11,9 @@ import { applyShipImpactDamage, createGunnerySolidSweep, createVesselDamageState
 import { crewClearsRail, crewRailAboveDeck } from '../js/crew-overboard.js';
 import { modelDeck } from '../js/hull.js';
 import { locatePartAtLocalPoint } from '../js/part-assembly.js';
-import { repairVessel, vesselDamageSnapshot, restoreVesselDamageSnapshot, raiseVesselRig } from '../js/vessel-damage.js';
+import { repairVessel, vesselDamageSnapshot, restoreVesselDamageSnapshot, raiseVesselRig, refloatVessel } from '../js/vessel-damage.js';
 import { buildVesselRigConnectors } from '../js/ship-colors.js';
-import { SHARD_KINDS, FRACTURE_RECORD_FLOATS, applyFractureEvents, evaluateShardFlight, fracturePartsGone, settleFinishedFlights, shipFractureStateOf, shipMastSpecs, syncFractureWithDamage } from '../js/ship-fracture.js';
+import { SHARD_KINDS, FRACTURE_RECORD_FLOATS, applyFractureEvents, evaluateShardFlight, fracturePartsGone, settleFinishedFlights, shipFractureStateOf, shipMastSpecs, syncFractureWithDamage, releaseSinkingWreckage, brokenShardList, evaluateBrokenShardWorldPivot, shatterFloatingWreckageOnSegment, blastFloatingWreckageAt, shipSeaLevel, createShipFractureGPU } from '../js/ship-fracture.js';
 
 const cache = createShipAssetCache();
 const ready = Object.values(SHIP_MODELS).filter((m) => m.status === 'ready' && m.geometry);
@@ -582,4 +582,151 @@ test('a shot at a mast hurts that mast, wherever along her it stands', () => {
       assert.equal(hit?.mastGroup, mastId, `${id}: a shot at her ${mastId} at ${(z * sz).toFixed(1)} m`);
     }
   }
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Wreckage: what a sinking ship sheds, and the timber left floating where she fought.
+
+test('a sunk ship stays dismasted through later hits, and sheds her timber once however often she is loaded', () => {
+  const f = cache.get('victory').fracture, boat = shipOf('victory');
+  const damage = boat.damage = createVesselDamageState(boat);
+  const mastShards = Object.values(f.masts).flatMap((mast) => [...mast.upper, ...mast.lower]);
+  damage.sunk = true;
+  assert.ok(releaseSinkingWreckage(f, damage, 10) > mastShards.length, 'she sheds her masts and some of her upper works');
+  assert.ok(mastShards.every((s) => damage.fracture.broken[s]), 'every mast goes by the board as she founders');
+  damage.revision++;
+  syncFractureWithDamage(f, damage);
+  assert.ok(mastShards.every((s) => damage.fracture.broken[s]), 'and none stands again when she is next struck');
+  assert.equal(releaseSinkingWreckage(f, damage, 20), 0, 'she founders once');
+  let saved = JSON.parse(JSON.stringify(vesselDamageSnapshot(boat)));
+  const lost = saved.brokenShards.length;
+  assert.ok(lost > 0);
+  for (let load = 1; load <= 3; load++) {
+    const again = shipOf('victory');
+    again.damage = createVesselDamageState(again);
+    restoreVesselDamageSnapshot(again, saved);
+    // What a frame does for her: bring the shards in step with her damage, then offer her the release.
+    syncFractureWithDamage(f, again.damage);
+    assert.equal(releaseSinkingWreckage(f, again.damage, 30 + load), 0, `load ${load}: a wreck in a save has shed already`);
+    assert.ok(mastShards.every((s) => again.damage.fracture.broken[s]), `load ${load}: her masts are still gone`);
+    saved = JSON.parse(JSON.stringify(vesselDamageSnapshot(again)));
+    assert.equal(saved.brokenShards.length, lost, `load ${load}: she has lost no more of her hull`);
+  }
+  // Raised and sunk again, she is a second wreck.
+  const raised = shipOf('victory');
+  raised.damage = createVesselDamageState(raised);
+  raised.damage.sunk = true;
+  releaseSinkingWreckage(f, raised.damage, 1);
+  refloatVessel(raised);
+  syncFractureWithDamage(f, raised.damage);
+  assert.ok(mastShards.some((s) => !raised.damage.fracture.broken[s]), 'a ship refloated has the masts her damage says');
+});
+
+// Planking shot off her side, and the frame it left her from. `depth` is how far she has since settled.
+function shipWithTimberAdrift(depth = 0, wave = 0.4) {
+  const f = cache.get('victory').fracture, boat = shipOf('victory');
+  boat.x = 400; boat.z = -250; boat.heading = 35; boat.target = { heave: wave }; boat.heave = wave - 0.2;
+  const damage = boat.damage = createVesselDamageState(boat), state = shipFractureStateOf(damage, f);
+  const side = f.strikable.filter((s) => f.shards[s].kind === SHARD_KINDS.skin && f.shards[s].centroid[0] > 0.5 && f.shards[s].centroid[1] > 0.6).slice(0, 14);
+  applyFractureEvents(f, damage, side.map((s) => ({ kind: 'hull', x: f.shards[s].centroid[0], y: f.shards[s].centroid[1], z: f.shards[s].centroid[2], severity: 3, stepDepth: 0.5, side: 1 })), 1);
+  const adrift = f.strikable.filter((s) => state.broken[s]);
+  for (const s of adrift) evaluateBrokenShardWorldPivot(state, s, 1, boat, shipSeaLevel(boat));
+  boat.heave -= depth;
+  return { f, boat, state, adrift };
+}
+const pivotOf = (state, s, boat, now) => evaluateBrokenShardWorldPivot(state, s, now, boat, shipSeaLevel(boat));
+
+test('timber adrift lies on the sea, not on the waterline of the ship that sank under it', () => {
+  const { boat, state, adrift } = shipWithTimberAdrift(14);
+  assert.ok(adrift.length >= 8, 'she lost planking');
+  const sea = shipSeaLevel(boat);
+  for (const s of adrift) {
+    const at = pivotOf(state, s, boat, 30);
+    assert.ok(at && Math.abs(at[1] - sea) < 0.8, `piece ${s} floats at the sea, ${at?.[1].toFixed(2)} against ${sea}`);
+  }
+  // A ball skimming the sea through one of them smashes it and is not stopped; one fourteen metres up meets nothing.
+  const target = adrift[0], at = pivotOf(state, target, boat, 30);
+  const high = shatterFloatingWreckageOnSegment([at[0] - 2, sea + 14, at[2]], [at[0] + 2, sea + 14, at[2]], 0.08, boat, 1, 30);
+  assert.equal(high, 0, 'nothing floats where the ship used to be');
+  const blocked = shatterFloatingWreckageOnSegment([at[0] - 2, at[1], at[2]], [at[0] + 2, at[1], at[2]], 0.08, boat, 0.1, 30);
+  assert.equal(blocked, 0, 'a shot stopped short of it does not reach it');
+  const smashed = shatterFloatingWreckageOnSegment([at[0] - 2, at[1], at[2]], [at[0] + 2, at[1], at[2]], 0.08, boat, 1, 30);
+  assert.ok(smashed >= 1, 'the piece on the line is smashed');
+  assert.equal(pivotOf(state, target, boat, 30), null, 'and is gone');
+  assert.ok(adrift.some((s) => pivotOf(state, s, boat, 30)), 'the rest still float');
+});
+
+test('a ball flies on through floating timber: the solid sweep never reports it as what stopped the shot', () => {
+  const { boat, state, adrift } = shipWithTimberAdrift(40);
+  state.lastNow = 30;
+  const at = pivotOf(state, adrift[2], boat, 30);
+  const sweep = createGunnerySolidSweep({ sourceBoat: { id: 'gun' }, getVessels: () => [boat] });
+  const hit = sweep([at[0] - 3, at[1] + 0.05, at[2]], [at[0] + 3, at[1] + 0.05, at[2]], { radius: 0.08, ammo: 'round' });
+  assert.equal(hit, null, 'nothing solid is on the line, so the ball is still flying');
+  assert.equal(pivotOf(state, adrift[2], boat, 30), null, 'and the piece it went through is matchwood');
+  const preview = shipWithTimberAdrift(40);
+  preview.state.lastNow = 30;
+  const there = pivotOf(preview.state, preview.adrift[2], preview.boat, 30);
+  createGunnerySolidSweep({ sourceBoat: { id: 'gun' }, getVessels: () => [preview.boat] })([there[0] - 3, there[1], there[2]], [there[0] + 3, there[1], there[2]], { radius: 0.08, ammo: 'round', previewOnly: true });
+  assert.ok(pivotOf(preview.state, preview.adrift[2], preview.boat, 30), 'taking aim smashes nothing');
+});
+
+test('a second ball leaves planking still in the air alone, and only throws up what already floats', () => {
+  const { boat, state, adrift } = shipWithTimberAdrift(0);
+  const before = adrift.map((s) => Array.from(recordOf(state, s)));
+  const mid = pivotOf(state, adrift[0], boat, 1.1);
+  assert.deepEqual(blastFloatingWreckageAt(mid, 4.6, boat, { now: 1.1 }), { shattered: 0, blasted: 0 }, 'a tenth of a second on, every piece is still flying');
+  assert.deepEqual(adrift.map((s) => Array.from(recordOf(state, s))), before, 'and none of them was touched');
+  const afloat = pivotOf(state, adrift[0], boat, 30), sea = shipSeaLevel(boat);
+  const result = blastFloatingWreckageAt(afloat, 4.6, boat, { now: 30 });
+  assert.ok(result.shattered + result.blasted >= 1, 'half a minute on, a ball landing among them throws them about');
+  for (const s of adrift) {
+    const at = pivotOf(state, s, boat, 30);
+    if (at) assert.ok(at[1] < sea + 0.8, `a piece thrown up again starts from the sea, not ${at[1].toFixed(2)}`);
+  }
+});
+
+test('a shot nowhere near a wreck costs her floating timber nothing to rule out', () => {
+  const f = cache.get('victory').fracture, boat = shipOf('victory');
+  boat.target = { heave: 0 };
+  const damage = boat.damage = createVesselDamageState(boat), state = shipFractureStateOf(damage, f);
+  for (let i = 0; i < 4000 && state.brokenCount < 180; i++) {
+    const c = f.shards[f.strikable[(i * 7) % f.strikable.length]].centroid;
+    applyFractureEvents(f, damage, [{ kind: 'hull', x: c[0], y: c[1], z: c[2], severity: 2, stepDepth: 0.4 }], 1);
+  }
+  assert.ok(state.brokenCount >= 180);
+  const started = performance.now();
+  let met = 0;
+  for (let i = 0; i < 20000; i++) met += shatterFloatingWreckageOnSegment([600, 0.2, 600 + i * 0.001], [601, 0.2, 601], 0.08, boat, 1, 100);
+  const took = performance.now() - started;
+  assert.equal(met, 0);
+  // The pieces are worked out once and boxed. Walking all of them for every step took about 1.8 s here.
+  assert.ok(took < 300, `twenty thousand steps of distant shot took ${took.toFixed(0)} ms`);
+});
+
+test('a wreck at rest uploads nothing, timber adrift costs her frame and the clock, and pieces go up in runs', async () => {
+  const { f, boat, state } = shipWithTimberAdrift(0);
+  globalThis.GPUBufferUsage ??= { STORAGE: 1, COPY_DST: 2, UNIFORM: 4 };
+  const writes = [];
+  const device = {
+    createBuffer: ({ label }) => ({ label, destroy() {} }),
+    createBindGroup: () => ({}),
+    queue: { writeBuffer: (buffer, offset, data, start = 0, count = data.length - start) => writes.push({ label: buffer.label, offset, floats: count }) },
+  };
+  const gpu = await createShipFractureGPU({ device, computePipe: async () => ({ getBindGroupLayout: () => ({}) }), posedBuffer: {}, fracture: f });
+  writes.length = 0;
+  gpu.sync(boat.damage, boat);
+  gpu.tick(boat.damage, 1.5, boat);
+  const flights = writes.filter((w) => w.label.endsWith('shard flights') && w.offset > 0);
+  assert.ok(flights.length < state.brokenCount, `${state.brokenCount} pieces went up in ${flights.length} writes, not two each`);
+  assert.equal(flights.reduce((sum, w) => sum + w.floats, 0), state.brokenCount * (FRACTURE_RECORD_FLOATS + 8), 'and every piece went up');
+  const frame = (now) => { writes.length = 0; gpu.sync(boat.damage, boat); gpu.tick(boat.damage, now, boat); return writes.map((w) => `${w.label.replace(/^\S+ /, '')}@${w.offset}`).sort(); };
+  assert.deepEqual(frame(20), ['fracture clock@0', 'shard flights@0'], 'while timber floats: her frame once, and the clock');
+  // Everything sinks or is hidden in the end.
+  let now = 20;
+  while (state.flying.size && now < 400) frame(now += 5);
+  assert.equal(state.flying.size, 0);
+  frame(now += 1);
+  assert.deepEqual(frame(now += 1), [], 'a wreck with nothing adrift and nothing in the air uploads nothing');
+  assert.equal(gpu.active, true, 'though her missing pieces are still posed away');
 });

@@ -55,6 +55,7 @@ export function refloatVessel(boat) {
   const damage = boat?.damage;
   if (!damage) return;
   damage.sunk = false;
+  damage.wreckageReleased = false;
   damage.settledWreck = false;
   damage.restingOnBottom = false;
   damage.bottomTime = 0;
@@ -176,7 +177,8 @@ export function restoreVesselDamageSnapshot(boat, snapshot) {
   if (Number.isFinite(snapshot.powderKg) && boat.magazine) boat.magazine.powderKg = snapshot.powderKg;
   if (snapshot.hullCracked) damage.hullCracked = true;
   if (snapshot.surrendered) damage.surrendered = true;
-  if (snapshot.sunk) damage.sunk = true;
+  // A wreck in a save went down before it was saved, so she has shed her masts and loose timber already.
+  if (snapshot.sunk) { damage.sunk = true; damage.wreckageReleased = true; }
   damage.revision = (damage.revision ?? 0) + 1;
   return true;
 }

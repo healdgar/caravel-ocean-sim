@@ -12,7 +12,7 @@ import { createShipAssetCache } from './ship-mesh.js';
 import { PORT_PREFABS, getBuildingParts } from './coastal-world.js';
 import { GROUNDING_SUBSTRATES, classifyGroundingSubstrate, setGroundingDamageHandler } from './terrain-model.js';
 import { locatePartAtLocalPoint, isSuperstructurePartId, computeArchetypeScaleSpec } from './part-assembly.js';
-import { shipMastSpecs, fracturePartsGone, sweepFloatingWreckageSegment, blastFloatingWreckageAt } from './ship-fracture.js';
+import { shipMastSpecs, fracturePartsGone, shatterFloatingWreckageOnSegment, blastFloatingWreckageAt } from './ship-fracture.js';
 import { shipColliderCrossings, shipColliderNormal, shipColliderTrace } from './ship-collider.js';
 import { buildingReach, traceShotAtBuilding } from './building-fracture.js';
 import { sweepJettySegment, applyJettyImpactDamage } from './port-props.js';
@@ -1287,28 +1287,7 @@ export function applyShipImpactDamage(targetBoat, event) {
   const mass = event.mass ?? 5.4;
   const energy = event.energy ?? (0.5 * mass * speed * speed);
   const pos = event.surfacePosition ?? event.position ?? [targetBoat.x ?? 0, targetBoat.heave ?? 0, targetBoat.z ?? 0];
-  if (event.hitZone === 'debris') {
-    blastFloatingWreckageAt(pos, 4.8, targetBoat, { velocity: vel, directShard: event.shardIndex ?? -1 });
-    event.timberCrumble = true;
-    const c = damage.crewCasualties;
-    const report = {
-      kind: 'ship',
-      ammo: event.ammo ?? 'round',
-      targetId: targetBoat.id ?? targetBoat.modelId ?? 'ship',
-      targetName: targetBoat.model?.name ?? targetBoat.modelId ?? 'Vessel',
-      hitZone: 'debris',
-      hullIntegrity: +(damage.hullIntegrity ?? 0).toFixed(3),
-      rigIntegrity: +(damage.rigIntegrity ?? 0).toFixed(3),
-      sunk: Boolean(damage.sunk),
-      energyKj: +(energy / 1000).toFixed(1),
-      crewAble: c?.able ?? 0,
-      crewWounded: c?.wounded ?? 0,
-      crewKilled: c?.killed ?? 0,
-      crewTotal: c?.total ?? 0,
-    };
-    damage.lastHit = report;
-    return report;
-  }
+  // Timber she has already lost, afloat alongside, is thrown up again by a ball striking her there.
   if ((damage.fracture?.brokenCount ?? 0) > 0) {
     blastFloatingWreckageAt(pos, 3.6, targetBoat, { velocity: vel });
   }
@@ -2331,17 +2310,19 @@ export function stepVesselDamage(boat, dt, terrain = null) {
     const freeboard = boat.hydrodynamics?.freeboard ?? 1.8;
     const draft = boat.hydrodynamics?.draft ?? 2.2;
     let maxSink = openOceanMaxSink;
-    if (damage.wreckedOnRocks) {
-      if (terrain && typeof terrain.height === 'function') {
-        const bedY = terrain.height(boat.x ?? 0, boat.z ?? 0);
-        if (Number.isFinite(bedY)) {
-          maxSink = Math.max(0.18, Math.min(1.35, Math.max(0, -bedY) * 0.45 + 0.35));
-        } else {
-          maxSink = 0.65;
-        }
+    // The bed stops her wherever it is, not only on rocks: a ship sunk in a harbour rests there with her
+    // upper works above water, and one stranded on a shoal does not go down through it.
+    const stranded = boat.aground || damage.wreckedOnRocks;
+    const bedY = terrain && typeof terrain.height === 'function' ? terrain.height(boat.x ?? 0, boat.z ?? 0) : NaN;
+    if (Number.isFinite(bedY)) {
+      if (stranded || bedY >= -freeboard * 0.85) {
+        maxSink = Math.max(0.18, Math.min(1.35, Math.max(0, -bedY) * 0.45 + 0.35));
       } else {
-        maxSink = 0.65;
+        // Her keel beds a little way into the bottom.
+        maxSink = Math.min(openOceanMaxSink, Math.max(0.5, -bedY - freeboard - draft * 0.45));
       }
+    } else if (stranded) {
+      maxSink = 0.65;
     }
     damage.maxSinkDepth = +maxSink.toFixed(3);
     // Downflooding through gunports and weather-deck hatches accelerates descent once awash.
@@ -4168,10 +4149,6 @@ export function createGunnerySolidSweep({ sourceBoat, sourceBuilding = null, get
       const targetBoat = entry?.boat ?? entry;
       const hit = sweepShipSegment(from, to, radius, targetBoat, sourceBoat, opts);
       if (hit && (!best || hit.fraction < best.fraction)) best = hit;
-      if (!previewOnly && !arrow && (targetBoat?.damage?.fracture?.brokenCount ?? 0) > 0) {
-        const dHit = sweepFloatingWreckageSegment(from, to, radius, targetBoat);
-        if (dHit && (!best || dHit.fraction < best.fraction)) best = dHit;
-      }
     }
     const terrain = getTerrain();
     if (terrain) {
@@ -4198,15 +4175,22 @@ export function createGunnerySolidSweep({ sourceBoat, sourceBuilding = null, get
     // Aiming previews never harm anyone. An arrow stops in the first body it meets; a ball
     // passes through every body before whatever it strikes first.
     if (!previewOnly) {
+      // Timber adrift is smashed on the way too, and never stops a ball. An arrow has no weight to do it.
+      if (!arrow && projectile) for (const entry of vessels) {
+        const targetBoat = entry?.boat ?? entry;
+        if ((targetBoat?.damage?.fracture?.brokenCount ?? 0) > 0) shatterFloatingWreckageOnSegment(from, to, radius, targetBoat, best?.fraction ?? 1);
+      }
+      const segLen = Math.hypot(to[0] - from[0], to[2] - from[2]), midX = (from[0] + to[0]) * 0.5, midZ = (from[2] + to[2]) * 0.5;
       for (const entry of vessels) {
         const targetBoat = entry?.boat ?? entry;
         const crew = targetBoat?.crewCompany?.crew;
         if (!crew?.length || targetBoat.showProw === false) continue;
+        // Nobody of hers is within reach of this step, swimmer or not, so there is no need to ask who is in the water.
+        if (Math.hypot(midX - (targetBoat.x ?? 0), midZ - (targetBoat.z ?? 0)) > 460 + segLen) continue;
         const hasOverboard = crew.some((s) => s.overboard && !s.overboard.gone);
         if (targetBoat === sourceBoat && !hasOverboard) continue;
-        const segLen = Math.hypot(to[0] - from[0], to[2] - from[2]);
         const span = (hasOverboard ? 460 : Math.max(targetBoat.length ?? 20, targetBoat.beam ?? 6) * 0.6 + 4) + segLen;
-        if (Math.hypot((from[0] + to[0]) * 0.5 - (targetBoat.x ?? 0), (from[2] + to[2]) * 0.5 - (targetBoat.z ?? 0)) > span) continue;
+        if (Math.hypot(midX - (targetBoat.x ?? 0), midZ - (targetBoat.z ?? 0)) > span) continue;
         const localFrom = vesselWorldToLocal(targetBoat, from), localTo = vesselWorldToLocal(targetBoat, to);
         const rawHits = sweepCrewBodies(localFrom, localTo, radius, crew, best?.fraction ?? 1);
         const hits = targetBoat === sourceBoat ? rawHits.filter((h) => h.sailor?.overboard && h.fraction > 0.04) : rawHits;
