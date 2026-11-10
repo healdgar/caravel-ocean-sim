@@ -26,6 +26,23 @@ const choose=(page,label)=>page.locator('.voyage-callout button').filter({hasTex
 const sightSail=page=>page.evaluate(()=>document.getElementById('sight-sail-btn').click());
 const framesPerSecondAlive=page=>page.evaluate(()=>new Promise(resolve=>{let frames=0;const start=performance.now();const tick=()=>{frames++;performance.now()-start<1000?requestAnimationFrame(tick):resolve(frames);};requestAnimationFrame(tick);}));
 
+test('a captain who has stood with a native nation may give them the prize',{timeout:420000},async()=>{
+  const context=await browser.newContext({viewport:{width:1280,height:800}});
+  try{
+    // He arrives having gone over to the Taíno: armed their settlement, defended it, proclaimed their sovereignty.
+    const {page,errors}=await open(context,'/?sovereignPolity=taino-greater-antilles');
+    await sightSail(page);await page.waitForFunction(()=>window.oceanVoyage.voyage.interrupt?.type==='sail');
+    const captured=await page.evaluate(()=>{const db=window.oceanDockingBoarding,target=window.oceanFleet.vessels[1];return Boolean(db.capturePrizeVessel(target,'boarded-and-fought'));});
+    assert.equal(captured,true);
+    await page.waitForFunction(()=>window.oceanVoyage.voyage.interrupt?.type==='prize-disposition',null,{timeout:10000});
+    const buttons=await calloutButtons(page);
+    assert.equal(buttons.length,4);
+    assert.match(buttons.find(b=>b.includes('Indigenous')),/Gift Prize(?: & Cannon)? to Indigenous Allies \(\+\d+ d food, \+\d+ d water\)/);
+    for(const kind of ['Fleet','Impress','Scuttle'])assert.ok(buttons.some(b=>b.includes(kind)),`${kind} is still offered`);
+    assert.deepEqual(errors,[]);
+  }finally{await context.close();}
+});
+
 test('a captured ship offers truthful prize choices and impressing her crew keeps the game running',{timeout:420000},async()=>{
   const context=await browser.newContext({viewport:{width:1280,height:800}});
   try{
@@ -37,7 +54,10 @@ test('a captured ship offers truthful prize choices and impressing her crew keep
     assert.equal(captured,true);
     await page.waitForFunction(()=>window.oceanVoyage.voyage.interrupt?.type==='prize-disposition',null,{timeout:10000});
     const buttons=await calloutButtons(page);
-    assert.equal(buttons.length,4);
+    // Fleet, impress, scuttle. A captain who has met no native nation has none to give the prize to.
+    assert.equal(buttons.length,3);
+    assert.equal(buttons.some(b=>b.includes('Indigenous')),false,'no gift is offered before any contact');
+    assert.match(buttons.find(b=>b.includes('Fleet')),/Add to Fleet as Allied Consort \(\+\d+ d food, \+\d+ d water\)/);
     assert.match(buttons.find(b=>b.includes('Impress')),/Impress \d+ Hands & Plunder 4 Cannon \(\+24 d food, \+18 d water\)/);
     assert.match(buttons.find(b=>b.includes('Scuttle')),/hull \+55%/);
     const before=await page.evaluate(()=>{const b=window.oceanFleet.vessels[0].boat;return {able:b.damage.crewCasualties.able,actors:window.oceanFleet.vessels[0].crew.state.crew.length,food:window.oceanVoyage.voyage.provisions.food};});
