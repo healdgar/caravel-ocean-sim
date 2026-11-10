@@ -228,7 +228,11 @@ Each row is one scene from `node scripts/crew-traffic.mjs`, with the full watch 
 
 The busy deck is where the time goes now, not the standing: a hand walks round whoever is in the way where others used to stop dead for him, so a work trip through a crowded Niña is longer than it was (her lookout's walk home, ×1.73), while bystanders on her deck went from 78% blocked to 3%. Clear-deck orders are 1 to 6% slower because a body now turns where it used to snap. Her crowded sail order is the worst of it, 12% longer than before.
 
+Niña's fore shrouds have since been shortened, and her order on a clear deck now takes 40.8 s. On a crowded one it still takes 45.8 s, because the five seconds are spent on deck getting round people and not on the climb. That is why `tests/crew-traffic.test.mjs` counts what a crowd costs in seconds and not as a share of the order.
+
 Victory's simulation, the fastest of three runs of a minute each in node: watch 0.81 → 0.73 ms a step, sail 0.45 → 0.52, gun drill 0.33 → 0.65. The next stretch of route is now checked once and not every frame, which is why a watch got cheaper. The shoulder pass takes under 0.01 ms a batch on the GPU, and only while someone is turned.
+
+Most of what was left was not the passing. A hand beginning a leg of his round asks `crewNavigationStation` where to stand at the end of it, and that laid out eight places round every obstacle aboard and put them in order before trying the place he asked for, which nearly always does: a third of a watch's step on Victory. It tries that place first now. The box test of a line against an obstacle makes no arrays, each hull remembers its deck field, and a step past someone writes who is near and what it came to into records that are kept. The scenes come out the same, row for row. Fastest of three runs of each whole scene, on a machine with other work on it: Victory's watch 0.50 → 0.23 ms a step, sail 0.46 → 0.26, gun drill 0.36 → 0.24, and Niña's 0.08 → 0.04, 0.08 → 0.06, 0.08 → 0.07. Counted and not timed, with node's nursery held at 1 MiB: 11,318 → 3,751 collections in Victory's three-minute watch, 4,256 → 2,527 in her sail order and 6,385 → 3,274 in her gun drill. The largest share of what is still allocated there is the script's own measuring.
 
 ## When the mast comes down
 

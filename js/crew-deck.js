@@ -61,9 +61,19 @@ export function crewDeckFloor(boat,z,x=0){
   return Object.hasOwn(ROWING_DESIGNS,id)||Object.hasOwn(LATER_SAIL_DESIGNS,id)?proceduralDeck(id,z,x):modelDeck(boat,z);
 }
 const crewDeckFields=new Map();
+// Every walker asks for his ship's field two or three times a frame, so each hull remembers the one it was last given
+// and what size it was then: naming it by model and scale makes two numbers into text.
+const crewDeckFieldOfHull=new WeakMap();
 export function crewDeckField(boat){
   const id=boat.modelId??'nina',mask=CREW_DECK_MASKS[id];if(!mask)return null;
-  const sx=(boat.beam??3.6)/3.6,sz=(boat.length??12)/12,key=id+'/'+sx+'/'+sz,known=crewDeckFields.get(key);
+  const beam=boat.beam??3.6,length=boat.length??12,held=crewDeckFieldOfHull.get(boat);
+  if(held&&held.id===id&&held.beam===beam&&held.length===length)return held.field;
+  const field=crewDeckFieldBuilt(boat,id,mask,beam/3.6,length/12);
+  crewDeckFieldOfHull.set(boat,{id,beam,length,field});
+  return field;
+}
+function crewDeckFieldBuilt(boat,id,mask,sx,sz){
+  const key=id+'/'+sx+'/'+sz,known=crewDeckFields.get(key);
   if(known)return known;
   const {x0,z0,dx,dz,nx,nz}=mask,open=crewDeckDecode(mask.runs,nx*nz),cellX=dx*sx,cellZ=dz*sz,cost=new Float64Array(nx*nz);
   // A gun keeps the whole of its recoil to itself, whichever way it stands now.

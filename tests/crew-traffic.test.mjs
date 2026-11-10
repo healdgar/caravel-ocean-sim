@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { BODY_DEEP_M, bodiesOverlap, clearDeckOrder, isWalking, runScene, stageWalkers } from '../scripts/crew-traffic.mjs';
 import { createCompany, stepCompany } from '../js/crew.js';
+import { crewTrafficStep } from '../js/crew-traffic.js';
 import { crewOpenEdgeInset } from '../js/crew-overboard.js';
 import { crewNavigationClear } from '../js/crew-navigation.js';
 import { modelDeckWidth, vesselVerticalScale } from '../js/hull.js';
@@ -201,10 +202,34 @@ test('with her rail shot away beside them, two passing keep off the open edge', 
   assert.ok(!stage.walkers.some(isWalking), 'and both get by');
 });
 
+test('what a step past someone came to is written in the walker\'s own record, with nothing left in it from the step before', () => {
+  // A walks up the waist at B, who stands in his way with nothing to do.
+  const lane = [[0.6, -1.2], [0.6, 3.0]], { boat, company, walkers: [a, b] } = stageWalkers('nina', [lane, reversed(lane)]);
+  b.job = null; b.position[2] = a.position[2] + 1.1;
+  const asked = { x: 0, z: 0, toX: lane[1][0], toZ: lane[1][1], speed: 1.4, dt: FRAME, segmentClear: () => true, rejoin: () => true };
+  const step = (s) => { asked.x = s.position[0]; asked.z = s.position[2]; return crewTrafficStep(s, company, boat, asked); };
+  const first = step(a);
+  assert.ok(first, 'he has someone to get past');
+  assert.equal(first.stander, b, 'who is standing, and is named');
+  const kept = { ...first };
+  // The other man gone, and A off his line: he is put back on it, and told so in the same record.
+  b.position[2] += 30; a.trafficOffRoute = true;
+  const second = step(a);
+  assert.equal(second, first, 'one record a walker, not one a step');
+  assert.deepEqual({ ...second }, { x: asked.x, z: asked.z, holding: false, blocked: false, hemmed: false, ask: null, stander: null }, `nothing of ${JSON.stringify({ ...kept, stander: kept.stander?.id })} is left`);
+  // Somebody else's step is somebody else's record.
+  b.job = { ...a.job, path: a.job.path.slice(), position: a.job.position.slice() }; b.position[2] = a.position[2] + 1.1; b.trafficOffRoute = true; a.job = null;
+  asked.toZ = lane[0][1];
+  const his = step(b);
+  assert.ok(his && his !== first, 'each walker has his own');
+});
+
 test('a crowded sail order finishes in about the time a clear deck takes, with nobody standing blocked', { timeout: 300000 }, () => {
   for (const id of ['nina', 'victory', 'santa-maria']) {
+    // What a crowd costs is the seconds spent getting round people on deck, and a longer or shorter climb does not change
+    // it. As a share of the whole order it moved when a ship's shrouds were shortened and nobody's walk had changed.
     const order = clearDeckOrder(id);
-    assert.ok(order.ratio !== null && order.ratio < 1.12, `${id} crowded ${order.crowded} s against ${order.clear} s clear`);
+    assert.ok(order.crowded !== null && order.clear !== null && order.crowded - order.clear < 5.5, `${id} crowded ${order.crowded} s against ${order.clear} s clear`);
     const scene = runScene(id, 'sail');
     assert.ok(scene.longestStop < 6, `${id}: nobody stands waiting to get by for long: ${scene.longestStop} s, between ${scene.worstPair}`);
     assert.ok(scene.throughPerMin === 0, `${id}: nobody walks through anybody: ${scene.throughPerMin} a minute`);

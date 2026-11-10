@@ -381,9 +381,12 @@ function crewPatrolTrafficClear(s,boat,x0,z0,x1,z1){
 // Back onto his round from wherever passing someone has left him. Failing that, the round is over.
 function crewPatrolRejoin(s,boat,x,z){
   const sx=boat.beam/3.6,sz=boat.length/12,here=[x/sx,crewDeckHeight(boat,z/sz,x/sx),z/sz],to=s.navigationPath?.[s.navigationCursor];
-  if(to&&crewRoutineSegmentClear(s,boat,here,to))return true;
-  crewFinishPatrol(s);return true;
+  // A man on his rounds can always get back to them: straight to his next point, or by ending the leg where he is.
+  if(!(to&&crewRoutineSegmentClear(s,boat,here,to)))crewFinishPatrol(s);
+  return true;
 }
+// What a man on his rounds asks of the traffic, written again for each of them rather than made each time.
+const crewPatrolStepAsked={x:0,z:0,toX:0,toZ:0,speed:0,dt:0,segmentClear:crewPatrolTrafficClear,rejoin:crewPatrolRejoin};
 function crewFinishPatrol(s){
   s.target=s.route?(s.target===s.route[1]?s.route[0]:s.route[1]):s.target>0?-2.2:.1;s.wait=2.5;s.navigationPath=null;
 }
@@ -409,7 +412,8 @@ function crewPatrolMotion(s,boat,dt,company){
   if(!target){crewFinishPatrol(s);return false;}
   const dx=(target[0]-from[0])*sx,dy=(target[1]-from[1])*sy,dz=(target[2]-from[2])*sz,horizontal=Math.hypot(dx,dz),distance=Math.hypot(horizontal,dy);
   const motion=crewMotionPolicy(boat,{grade:horizontal>1e-8?dy/horizontal:0,hazard:s.observation.hazard});
-  const passing=company?crewTrafficStep(s,company,boat,{x:from[0]*sx,z:from[2]*sz,toX:target[0]*sx,toZ:target[2]*sz,speed:motion.speedMetresPerSecond,dt,segmentClear:crewPatrolTrafficClear,rejoin:crewPatrolRejoin}):null;
+  const asked=crewPatrolStepAsked;asked.x=from[0]*sx;asked.z=from[2]*sz;asked.toX=target[0]*sx;asked.toZ=target[2]*sz;asked.speed=motion.speedMetresPerSecond;asked.dt=dt;
+  const passing=company?crewTrafficStep(s,company,boat,asked):null;
   if(passing){
     const walked=Math.hypot(passing.x-from[0]*sx,passing.z-from[2]*sz);
     // A round is nothing to wait for, or to go out of the way for: he turns back from someone standing in it.

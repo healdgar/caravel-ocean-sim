@@ -117,10 +117,12 @@ function crewNavigationInside(p,o,body){
   return p[1]<o.max[1]-.001&&p[1]+body.height>o.min[1]+.001&&p[0]>o.min[0]-body.radius&&p[0]<o.max[0]+body.radius&&p[2]>o.min[2]-body.radius&&p[2]<o.max[2]+body.radius;
 }
 function crewNavigationIntersects(a,b,o,body){
-  const min=[o.min[0]-body.radius,o.min[1]-body.height+.001,o.min[2]-body.radius],max=[o.max[0]+body.radius,o.max[1]-.001,o.max[2]+body.radius];let lo=0,hi=1;
+  // Asked of every obstacle aboard for every line a walker tries, so the swollen box is two numbers an axis and no arrays.
+  let lo=0,hi=1;
   for(let i=0;i<3;i++){
-    const delta=b[i]-a[i];if(Math.abs(delta)<1e-12){if(a[i]<=min[i]||a[i]>=max[i])return false;continue;}
-    let A=(min[i]-a[i])/delta,B=(max[i]-a[i])/delta;if(A>B)[A,B]=[B,A];lo=Math.max(lo,A);hi=Math.min(hi,B);if(lo>=hi)return false;
+    const min=i===1?o.min[1]-body.height+.001:o.min[i]-body.radius,max=i===1?o.max[1]-.001:o.max[i]+body.radius;
+    const delta=b[i]-a[i];if(Math.abs(delta)<1e-12){if(a[i]<=min||a[i]>=max)return false;continue;}
+    let A=(min-a[i])/delta,B=(max-a[i])/delta;if(A>B){const swap=A;A=B;B=swap;}lo=Math.max(lo,A);hi=Math.min(hi,B);if(lo>=hi)return false;
   }
   return hi>0&&lo<1;
 }
@@ -231,6 +233,14 @@ export function crewNavigationStation(pointDesign,boat,options={}){
   const inset=crewOpenEdgeInset(boat,pointDesign[2],Math.sign(pointDesign[0]));
   if(inset)candidates.push([Math.sign(p[0])*Math.max(0,(modelDeckWidth(boat,pointDesign[2])-inset)*scale[0]-body.radius-.02),p[1],p[2]]);
   const near=obstacles.filter(o=>p[1]<o.max[1]&&p[1]+body.height>o.min[1]);
+  const stands=candidate=>{
+    const q=crewNavigationDesign(candidate,scale),floor=modelDeck(boat,q[2]);
+    if(Math.abs(floor-pointDesign[1])*scale[1]>.06||!crewNavigationOnDeck(candidate,boat,scale,body)||near.some(o=>crewNavigationInside(candidate,o,body)))return null;
+    q[1]=floor;return q;
+  };
+  // The point asked for is the nearest there is, and nearly always it will do. A man beginning a leg of his round asks
+  // this, so the eight places round everything on a deck are laid out and put in order only when it will not.
+  const asked=stands(p);if(asked)return asked;
   for(const o of near){
     const x0=o.min[0]-body.radius-.02,x1=o.max[0]+body.radius+.02,z0=o.min[2]-body.radius-.02,z1=o.max[2]+body.radius+.02;
     for(const x of[x0,x1])candidates.push([x,p[1],p[2]]);
@@ -238,11 +248,7 @@ export function crewNavigationStation(pointDesign,boat,options={}){
     for(const x of[x0,x1])for(const z of[z0,z1])candidates.push([x,p[1],z]);
   }
   candidates.sort((a,b)=>Math.hypot(a[0]-p[0],a[2]-p[2])-Math.hypot(b[0]-p[0],b[2]-p[2]));
-  for(const candidate of candidates){
-    const q=crewNavigationDesign(candidate,scale),floor=modelDeck(boat,q[2]);
-    if(Math.abs(floor-pointDesign[1])*scale[1]>.06||!crewNavigationOnDeck(candidate,boat,scale,body)||near.some(o=>crewNavigationInside(candidate,o,body)))continue;
-    q[1]=floor;return q;
-  }
+  for(const candidate of candidates){const q=stands(candidate);if(q)return q;}
   return null;
 }
 function crewNavigationDetour(a,b,boat,obstacles,body,scale){

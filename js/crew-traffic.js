@@ -266,7 +266,18 @@ function crewTrafficAllowed(s,boat,field,x,z,nx,nz,atLeast,segmentClear){
   return true;
 }
 const crewTrafficVelocity=[0,0],crewTrafficSpot=[0,0];
-const crewTrafficNear=[];
+// Who is near the walker being stepped, in records kept from one walker to the next, and what his step came to, in a
+// record each walker keeps. Neither is made afresh for every walker in every frame.
+const crewTrafficNear=[],crewTrafficNearKept=[],crewTrafficNearer=(a,b)=>a.d-b.d,TRAFFIC_RADII=[TRAFFIC_ROOMY,TRAFFIC_BRUSH,TRAFFIC_TURNED];
+function crewTrafficNote(o,px,pz,d,t,moving,ovx,ovz,gap){
+  const n=crewTrafficNearKept[crewTrafficNear.length]??={o:null,px:0,pz:0,d:0,t:0,moving:false,ovx:0,ovz:0,gap:0};
+  n.o=o;n.px=px;n.pz=pz;n.d=d;n.t=t;n.moving=moving;n.ovx=ovx;n.ovz=ovz;n.gap=gap;crewTrafficNear.push(n);
+}
+function crewTrafficOutcome(s,x,z,holding,blocked,hemmed,ask,stander=null){
+  const out=s.trafficOutcome??={x:0,z:0,holding:false,blocked:false,hemmed:false,ask:null,stander:null};
+  out.x=x;out.z=z;out.holding=holding;out.blocked=blocked;out.hemmed=hemmed;out.ask=ask;out.stander=stander;
+  return out;
+}
 
 // His way back along the route to the last of the room, and then on again. False if he has come no way that had any.
 function crewTrafficRetreat(s,boat,lane,here){
@@ -290,8 +301,9 @@ export function crewTrafficGate(s,company,boat,x,z,dt){
   s.trafficHolding=(s.trafficHolding??0)+dt;
   return !crewTrafficRetreat(s,boat,lane,crewTrafficSpanA.here);
 }
-// One step for a walker free to leave the line of his route, in metres: {x,z} is where he should be. Null when he is on
-// the route and it is clear, so that he walks it exactly. rejoin(s,boat,x,z) finds a straight way back onto his route.
+// One step for a walker free to leave the line of his route, in metres: {x,z} is where he should be, in a record that is
+// his and is written again at his next step. Null when he is on the route and it is clear, so that he walks it exactly.
+// rejoin(s,boat,x,z) finds a straight way back onto his route. What is asked may be one record used for every walker.
 export function crewTrafficStep(s,company,boat,{x,z,toX,toZ,speed,dt,segmentClear,rejoin}){
   const field=crewDeckField(boat);
   s.trafficWalkingNow=true;
@@ -319,7 +331,7 @@ export function crewTrafficStep(s,company,boat,{x,z,toX,toZ,speed,dt,segmentClea
       // Both in it, and it is his to give up. He goes back the way he came, to where there is room.
       if(crewTrafficSpanA.inside&&crewTrafficRetreat(s,boat,lane,crewTrafficSpanA.here)){
         s.trafficHolding=(s.trafficHolding??0)+dt;
-        return {x,z,holding:true,blocked:false,hemmed:false,ask:null};
+        return crewTrafficOutcome(s,x,z,true,false,false,null);
       }
       crewTrafficWaitSpot(lane,crewTrafficSpanA,field,boat,s,company,crewTrafficSpot);
       const hx=crewTrafficSpot[0]-x,hz=crewTrafficSpot[1]-z,hd=Math.hypot(hx,hz);
@@ -343,17 +355,17 @@ export function crewTrafficStep(s,company,boat,{x,z,toX,toZ,speed,dt,segmentClea
     const rx=prefX-ovx,rz=prefZ-ovz,r2=rx*rx+rz*rz,t=r2>1e-9?Math.max(0,Math.min(TRAFFIC_LOOK_TIME,(px*rx+pz*rz)/r2)):0,gap=Math.hypot(px-rx*t,pz-rz*t);
     // Closing on them is the concern. Someone already near and not getting nearer is only someone to keep in mind.
     // Going by someone at arm's length is enough for a body standing still, and more is wanted of two on the move.
-    if(gap<(moving?TRAFFIC_ROOMY:TRAFFIC_BY_STANDER)&&gap<d-.003){threat=true;crewTrafficNear.push({o,px,pz,d,t,moving,ovx,ovz,gap});}
-    else if(d<1.4)crewTrafficNear.push({o,px,pz,d,t,moving,ovx,ovz,gap});
+    if(gap<(moving?TRAFFIC_ROOMY:TRAFFIC_BY_STANDER)&&gap<d-.003){threat=true;crewTrafficNote(o,px,pz,d,t,moving,ovx,ovz,gap);}
+    else if(d<1.4)crewTrafficNote(o,px,pz,d,t,moving,ovx,ovz,gap);
   }
   if(!threat&&!holding){
     s.shoulderTurnTarget=0;
     if(!s.trafficOffRoute)return null;
     // Nobody about, and off his route: back onto it, in a line that is known to be clear. Failing that, the route wants mending.
-    if(rejoin(s,boat,x,z)){s.trafficOffRoute=false;return {x,z,holding:false,blocked:false,hemmed:false,ask:null};}
-    return {x,z,holding:false,blocked:true,hemmed:false,ask:null};
+    if(rejoin(s,boat,x,z)){s.trafficOffRoute=false;return crewTrafficOutcome(s,x,z,false,false,false,null);}
+    return crewTrafficOutcome(s,x,z,false,true,false,null);
   }
-  crewTrafficNear.sort((a,b)=>a.d-b.d);
+  crewTrafficNear.sort(crewTrafficNearer);
   if(crewTrafficNear.length>TRAFFIC_NEIGHBOURS)crewTrafficNear.length=TRAFFIC_NEIGHBOURS;
   // Someone standing idle where a hand at work has to go, with no way round them: they can step aside. No need to wait until nose to nose.
   let ask=null;
@@ -393,7 +405,7 @@ export function crewTrafficStep(s,company,boat,{x,z,toX,toZ,speed,dt,segmentClea
     }
   }
   const vx=s.trafficVx??0,vz=s.trafficVz??0;let solved=false;
-  for(const radius of[TRAFFIC_ROOMY,TRAFFIC_BRUSH,TRAFFIC_TURNED]){
+  for(const radius of TRAFFIC_RADII){
     let count=0;
     for(const n of crewTrafficNear){
       const o=n.o,hurt=o.casualtyState==='fallen';
@@ -414,7 +426,7 @@ export function crewTrafficStep(s,company,boat,{x,z,toX,toZ,speed,dt,segmentClea
     outX=0;outZ=0;
     // If that was no good, the route itself, from where he is. He may have to get back onto it first.
     if(!holding){
-      if(s.trafficOffRoute&&rejoin(s,boat,x,z)){s.trafficOffRoute=false;return {x,z,holding:false,blocked:false,hemmed:false,ask};}
+      if(s.trafficOffRoute&&rejoin(s,boat,x,z)){s.trafficOffRoute=false;return crewTrafficOutcome(s,x,z,false,false,false,ask);}
       if(!s.trafficOffRoute&&crewTrafficAllowed(s,boat,field,x,z,x+dirX*pace*dt,z+dirZ*pace*dt,-1,segmentClear)){outX=dirX*pace;outZ=dirZ*pace;}
     }
   }
@@ -461,7 +473,7 @@ export function crewTrafficStep(s,company,boat,{x,z,toX,toZ,speed,dt,segmentClea
       if(crewTrafficRetreat(s,boat,lane,crewTrafficSpanA.here))break;
     }
   }
-  return {x:nx,z:nz,holding,blocked,hemmed,ask,stander};
+  return crewTrafficOutcome(s,nx,nz,holding,blocked,hemmed,ask,stander);
 }
 // Is someone who goes first standing nose to nose with this walker? Then the place to go back to is the nearest on his own
 // trail that puts him out of their way, as a point in metres, or null if there is no need or nowhere. After long enough,
