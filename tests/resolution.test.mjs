@@ -159,3 +159,16 @@ test('one budget holds still while the other is trying more detail',()=>{
   for(let t=0;t<8;t+=.05)below.sample(.05,true,8,{mayLowerFurther:false});
   assert.equal(below.scale,.25,'polygons wait below half until the image has given up its share');
 });
+
+test('a floor on the governor does not override a polygon budget that was chosen', () => {
+  const chosen=createAdaptivePolygons('0.25',{minimum:.35});
+  assert.equal(chosen.scale,.25);
+  assert.ok(Math.abs(chosen.pixelError-3/Math.sqrt(.25))<1e-9,'a quarter budget draws a quarter, whatever the governor may lower to');
+  assert.equal(chosen.maxNodes(8192),Math.round(8192*.25));
+  const governed=createAdaptivePolygons('auto',{minimum:.35});
+  for(let i=0;i<400;i++)governed.sample(.2,true,200);
+  assert.equal(governed.scale,.35,'left to itself the governor stops at its floor');
+  assert.ok(Math.abs(governed.pixelError-3/Math.sqrt(.35))<1e-9);
+  governed.setMode('0.1');
+  assert.ok(Math.abs(governed.oceanRangeScale-Math.sqrt(.1))<1e-9,'and a later choice below the floor is honoured');
+});

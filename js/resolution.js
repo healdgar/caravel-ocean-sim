@@ -126,21 +126,25 @@ const POLYGON_MODE_ALIASES = Object.freeze({
   'ultra-low': '0.1',
 });
 
-export function createAdaptivePolygons(initialMode = 'auto', { basePixelError = 3, minimum = 0.06, targetFPS = 60 } = {}) {
+// `minimum` is how far the governor may lower the budget by itself. A budget the player or the address
+// bar chose is given as chosen, down to the least the game can draw with.
+const POLYGON_CHOSEN_MINIMUM = 0.06;
+export function createAdaptivePolygons(initialMode = 'auto', { basePixelError = 3, minimum = POLYGON_CHOSEN_MINIMUM, targetFPS = 60 } = {}) {
   let mode = POLYGON_MODE_ALIASES[initialMode] ?? 'auto';
   let scale = mode === 'auto' || mode === 'native' || mode === 'fixed' ? 1 : Number(mode);
   const samples = new Float64Array(240), workSamples = new Float64Array(240);
   let count = 0, seconds = 0, settle = ADAPTIVE_STARTUP_SETTLE_SECONDS, fps = 0;
   const probe = createHeadroomProbe(4);
   const reset = () => { count = 0; seconds = 0; settle = 1.6; };
+  const granted = () => Math.max(mode === 'auto' ? minimum : Math.min(minimum, POLYGON_CHOSEN_MINIMUM), scale);
   return {
     get mode() { return mode; },
     get scale() { return scale; },
     get fps() { return fps; },
     get trying() { return probe.trying; },
-    get pixelError() { return basePixelError / Math.sqrt(Math.max(minimum, scale)); },
-    get oceanRangeScale() { return Math.sqrt(Math.max(minimum, scale)); },
-    maxNodes(baseMax = 8192) { return Math.max(256, Math.round(baseMax * Math.max(minimum, scale))); },
+    get pixelError() { return basePixelError / Math.sqrt(granted()); },
+    get oceanRangeScale() { return Math.sqrt(granted()); },
+    maxNodes(baseMax = 8192) { return Math.max(256, Math.round(baseMax * granted())); },
     minimum, targetFPS, basePixelError, reset,
     setMode(next) {
       const normalized = POLYGON_MODE_ALIASES[next];
