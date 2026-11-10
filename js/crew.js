@@ -23,7 +23,7 @@ import { crewDeckHazard, crewMotionPolicy, crewTurnTowards, crewAdvanceWalk } fr
 import { crewNavigationStation, crewNavigationRoute, crewRoutineSegmentClear } from './crew-navigation.js';
 import { crewTrafficStep, crewTrafficAfterStep } from './crew-traffic.js';
 import { crewDeckField, crewDeckRoom } from './crew-deck.js';
-import { selectCrewLOD, CREW_LOD_TIERS, createCrewLODs, crewPoseInterval, crewApparentDistance, crewLensZoom, crewSailorTier, crewDrawRuns, crewNeedsCutShader, crewClipOnly, crewPoseDue, crewPoseSolved } from './crew-lod.js';
+import { selectCrewLOD, CREW_LOD_TIERS, createCrewLODs, crewPoseInterval, crewApparentDistance, crewLensZoom, crewSailorTier, crewDrawRuns, crewNeedsCutShader, crewClipOnly, crewPoseDue, crewPoseSolved, fortPoseDue } from './crew-lod.js';
 import { createCrewClipPipeline, createCrewClipBatch, createCrewTurnPipeline, createCrewTurnBatch } from './crew-clip-pose.js';
 
 // Authored, disjoint stations keep a full company clear of stairs and masts.
@@ -524,13 +524,23 @@ export function isCaptainActor(s){
   if(!s||s.indigenous)return false;
   return s.role==='Captain'||Boolean(s.roles?.includes('captain'))||s.role==='Capitán de Presidio'||s.role==='Captain of the Guard';
 }
+export const CAPTAIN_TEXTURE_PX=1024;
 async function uploadCaptainTexture(device,model){
   if(!model?.image||typeof createImageBitmap!=='function'){
     const texture=device.createTexture({label:'captain pigment fallback',size:[1,1],format:'rgba8unorm-srgb',usage:(globalThis.GPUTextureUsage?.TEXTURE_BINDING??4)|(globalThis.GPUTextureUsage?.COPY_DST??2)});
     device.queue.writeTexture?.({texture},new Uint8Array([180,140,110,255]),{bytesPerRow:4},[1,1]);
     return texture;
   }
-  const bitmap=await createImageBitmap(new Blob([model.image],{type:model.mime||'image/jpeg'}),{colorSpaceConversion:'none'});
+  const blob=new Blob([model.image],{type:model.mime||'image/jpeg'});
+  let bitmap=await createImageBitmap(blob,{colorSpaceConversion:'none'});
+  // One figure of a few thousand triangles, never more than a screen high: a texel of this is finer than a pixel
+  // of him at any distance the camera reaches, and it is a quarter of the memory the painted file would take.
+  const longest=Math.max(bitmap.width,bitmap.height);
+  if(longest>CAPTAIN_TEXTURE_PX){
+    const scale=CAPTAIN_TEXTURE_PX/longest,full=bitmap;
+    bitmap=await createImageBitmap(full,{resizeWidth:Math.max(1,Math.round(full.width*scale)),resizeHeight:Math.max(1,Math.round(full.height*scale)),resizeQuality:'high',colorSpaceConversion:'none'});
+    full.close();
+  }
   const levels=Math.floor(Math.log2(Math.max(bitmap.width,bitmap.height)))+1;
   const texture=device.createTexture({label:'captain pigment',size:[bitmap.width,bitmap.height],mipLevelCount:levels,format:'rgba8unorm-srgb',usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST|GPUTextureUsage.RENDER_ATTACHMENT});
   for(let level=0;level<levels;level++){
@@ -591,21 +601,33 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
   const poseBlendPipeline=shared?.poseBlendPipeline??await shader(CREW_POSE_BLEND,'crew pose blend').then(blendModule=>device.createComputePipelineAsync({label:'crew pose blend',layout:'auto',compute:{module:blendModule,entryPoint:'main'}}));
   const clipPipeline=shared?.clipPipeline??await createCrewClipPipeline(device,shader);
   const turnPipeline=shared?.turnPipeline??await createCrewTurnPipeline(device,shader);
-  const batches=models.map((model,i)=>{
-    const isCaptainBatch=i===2;
-    const people=state.crew.filter(s=>isCaptainBatch?isCaptainActor(s):(!isCaptainActor(s)&&s.sex===(i?'female':'male')));
-    for(const s of people)s.walkClipDuration=model.animator.clips.get('Walk').duration;
+  // Each body's mesh is uploaded once and shared by the fleet: the men's, the women's and the captain's.
+  const geometry=models.map((model,i)=>{
+    if(shared?.geometry?.[i])return shared.geometry[i];
+    const vertex=buffer('crew vertices',model.vertices,B.VERTEX),index=buffer('crew indices',model.indices,B.INDEX);
+    const lods=(model.lods??[{id:'near',level:0,indices:model.indices,indexCount:model.indices.length,triangles:model.indices.length/3}]).map((tier,t)=>({...tier,buffer:t===0?index:buffer('crew indices '+tier.id,tier.indices,B.INDEX)}));
+    return {vertex,index,lods};
+  });
+  const captainModel=models[2],captainGeometry=geometry[2];
+  // A vessel has two batches of bodies, by sex. Her captain is one more body in his or her own, last in it, and
+  // drawn from it with the captain's mesh: one person is not worth a third set of joint and actor storage.
+  const batches=models.slice(0,2).map((model,i)=>{
+    const ofSex=state.crew.filter(s=>s.sex===(i?'female':'male')),hands=ofSex.filter(s=>!isCaptainActor(s)),captains=ofSex.filter(isCaptainActor);
+    const people=[...hands,...captains];
+    for(const s of hands)s.walkClipDuration=model.animator.clips.get('Walk').duration;
+    for(const s of captains)s.walkClipDuration=captainModel.animator.clips.get('Walk').duration;
     // A one-person company legitimately has no actors in one sex batch.
     // Bind valid storage buffers, but submit no phantom instance for that batch.
     const poses=new Float32Array(Math.max(1,people.length)*65*16),actors=new Float32Array(Math.max(1,people.length)*CREW_ACTOR_FLOATS);
-    const vertex=shared?.geometry?.[i]?.vertex??buffer('crew vertices',model.vertices,B.VERTEX),index=shared?.geometry?.[i]?.index??buffer('crew indices',model.indices,B.INDEX);
-    const lods=shared?.geometry?.[i]?.lods??(model.lods??[{id:'near',level:0,indices:model.indices,indexCount:model.indices.length,triangles:model.indices.length/3}]).map((tier,t)=>({...tier,buffer:t===0?index:buffer('crew indices '+tier.id,tier.indices,B.INDEX)}));
+    const {vertex,index,lods}=geometry[i];
     const bones=buffer('crew joints',poses,B.STORAGE),actor=buffer('crew transforms',actors,B.STORAGE);
     // Two solved poses per sailor, and how far along the way from one to the other each is.
     const blends=new Float32Array(Math.max(1,people.length)*2);
     const solved=device.createBuffer({label:'crew solved poses',size:poses.byteLength*2,usage:B.STORAGE|B.COPY_DST}),blend=buffer('crew pose blends',blends,B.STORAGE);
     const poseBlendGroup=device.createBindGroup({label:'crew pose blend',layout:poseBlendPipeline.getBindGroupLayout(0),entries:[solved,blend,bones].map((resource,binding)=>({binding,resource:{buffer:resource}}))});
     const clip=createCrewClipBatch(device,clipPipeline,model,bones,people.length);
+    // The captain's body is built on its own rig, so far off its joints come from its own baked clips.
+    const captainClip=captains.length?createCrewClipBatch(device,clipPipeline,captainModel,bones,people.length):null;
     const turn=createCrewTurnBatch(device,turnPipeline,model,bones,people.length);
     const common=[{buffer:hullUBO},{buffer:bones},{buffer:actor}];
     const mainResources=[{buffer:frameUBO},...common,transView,sampClamp,envCubeView,{buffer:sunVisBuf},{buffer:wetness.state},skyView,{binding:13,resource:captainTexView},{binding:14,resource:captainSampler}];
@@ -613,8 +635,15 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
     // The depth entry reads only what the vertex stage does, and the frame.
     const cutDepth=device.createBindGroup({layout:cutDepthPipeline.getBindGroupLayout(0),entries:[0,1,2,3,8].map(binding=>({binding,resource:mainResources[binding]}))});
     const shadow=group(shadowPipeline,[{buffer:shadows.uniform},...common]);
-    return {model,isCaptainBatch,people,poses,actors,vertex,index,lods,bones,actor,main,mainCut,cutDepth,shadow,mainResources,solved,blend,blends,poseBlendGroup,clip,turn};
+    // What is drawn from this batch's storage: its own bodies, then the captain's, each a run of its slots.
+    const parts=[{model,vertex,index,lods,first:0,people:hands},...(captains.length?[{model:captainModel,...captainGeometry,first:hands.length,people:captains}]:[])];
+    return {model,people,hands:hands.length,parts,poses,actors,bones,actor,main,mainCut,cutDepth,shadow,mainResources,solved,blend,blends,poseBlendGroup,clip,captainClip,turn};
   });
+  const partRuns=(part,tierOf)=>{const runs=crewDrawRuns(part.people,tierOf);if(part.first)for(const run of runs)run.first+=part.first;return runs;};
+  const shownTierOf=s=>s.visible===false||s.cutShader?-1:s.lodTier,cutTierOf=s=>s.visible!==false&&s.cutShader?s.lodTier:-1;
+  const shadowTierOf=s=>s.visible===false||s.lodTier>=2?-1:Math.min(CREW_LOD_TIERS.length-1,s.lodTier+1);
+  const partTriangles=(part,tier)=>(tier===null?part.model.indices.length/3:(part.lods?.[tier]?.triangles??part.model.indices.length/3))*part.people.length;
+  const everyPart=batches.flatMap(b=>b.parts);
   const lighting=shadows.bind(pipeline),cutLighting=shadows.bind(cutPipeline);
   const submerged=waterOptics?await waterOptics.capture({source:CREW_RENDER,entry:'crewFS',pipeline,vertex:{buffers:layout},groups:2}):null;
   const submergedLighting=submerged?shadows.bind(submerged.pipeline):null;
@@ -622,20 +651,24 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
   const gunTools=await createGunneryTools({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,shader,format,samples,waterOptics,shared:shared?.gunTools});
   let enabled=true,drawEnabled=false,posed=false,activeTier=0,shadowTier=1,poseFrame=0;
   const drawBatch=(pass,b,shadow,cutGroup=null)=>{
-    const runs=shadow?b.shadowRuns:cutGroup?b.cutRuns:b.runs;
-    if(!b.people.length||runs?.length===0||(cutGroup&&!runs))return;
-    pass.setBindGroup(0,shadow?b.shadow:cutGroup??b.main);pass.setVertexBuffer(0,b.vertex);
-    let bound=null;
-    for(const run of runs??[{tier:shadow?shadowTier:activeTier,first:0,count:b.people.length}]){
-      const lod=b.lods?.[run.tier]??b.lods?.[0]??{buffer:b.index,indexCount:b.model.indices.length};
-      if(lod.buffer!==bound){pass.setIndexBuffer(lod.buffer,'uint32');bound=lod.buffer;}
-      pass.drawIndexed(lod.indexCount??lod.indices.length,run.count,0,0,run.first);
+    let grouped=false;
+    for(const part of b.parts){
+      const runs=shadow?part.shadowRuns:cutGroup?part.cutRuns:part.runs;
+      if(!part.people.length||runs?.length===0||(cutGroup&&!runs))continue;
+      if(!grouped){pass.setBindGroup(0,shadow?b.shadow:cutGroup??b.main);grouped=true;}
+      pass.setVertexBuffer(0,part.vertex);
+      let bound=null;
+      for(const run of runs??[{tier:shadow?shadowTier:activeTier,first:part.first,count:part.people.length}]){
+        const lod=part.lods?.[run.tier]??part.lods?.[0]??{buffer:part.index,indexCount:part.model.indices.length};
+        if(lod.buffer!==bound){pass.setIndexBuffer(lod.buffer,'uint32');bound=lod.buffer;}
+        pass.drawIndexed(lod.indexCount??lod.indices.length,run.count,0,0,run.first);
+      }
     }
   };
-  return {state,assets:{models,pipeline,cutDepthPipeline,cutPipeline,shadowPipeline,poseBlendPipeline,clipPipeline,turnPipeline,captainTexture,captainTexView,captainSampler,gunTools:gunTools.assets,geometry:batches.map(({vertex,index,lods})=>({vertex,index,lods}))},triangles:batches.reduce((n,b)=>n+b.model.indices.length/3*b.people.length,0),lods:CREW_LOD_TIERS,
+  return {state,assets:{models,pipeline,cutDepthPipeline,cutPipeline,shadowPipeline,poseBlendPipeline,clipPipeline,turnPipeline,captainTexture,captainTexView,captainSampler,gunTools:gunTools.assets,geometry},triangles:everyPart.reduce((n,part)=>n+partTriangles(part,null),0),lods:CREW_LOD_TIERS,
     get lodLevel(){return activeTier;},
     get posed(){return posed;},
-    get activeTriangles(){return batches.reduce((n,b)=>n+((b.lods?.[activeTier]?.triangles)??(b.model.indices.length/3))*b.people.length,0);},
+    get activeTriangles(){return everyPart.reduce((n,part)=>n+partTriangles(part,activeTier),0);},
     joints:65,
     order(boat,id){return issueCaptainOrder(state,boat,id);},
     // A paused frame moves nobody, but the camera and the crew and ship toggles still apply.
@@ -650,15 +683,15 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
         gunTools.update(state,boat,false);
         // Hidden rendering does not turn a seated body's moisture samples back
         // into standing-height probes or change its physical rowing attendance.
-        if(Object.hasOwn(ROWING_DESIGNS,modelId))for(const b of batches)for(const s of b.people)if(s.seatedPose){const a=b.model.animator;a.sample('Idle',s.time);poseCrewWork(a,s,boat);}
+        if(Object.hasOwn(ROWING_DESIGNS,modelId))for(const b of batches)for(const part of b.parts)for(const s of part.people)if(s.seatedPose){const a=part.model.animator;a.sample('Idle',s.time);poseCrewWork(a,s,boat);}
         return;
       }
       posed=true;poseFrame++;
       for(const b of batches){
-        const a=b.model.animator;
-        b.clip.begin(b.people.length);
+        b.clip.begin(b.people.length);b.captainClip?.begin(b.people.length);
         for(let i=0;i<b.people.length;i++){
-          const s=b.people[i];
+          // The captain's slots follow the hands', and are solved on the captain's own rig.
+          const s=b.people[i],own=i<b.hands,a=own?b.model.animator:captainModel.animator,clips=own?b.clip:b.captainClip;
           s.poseElapsed=(s.poseElapsed??0)+dt;
           // A wound or a fall shows at once. Anyone not on show keeps their slot until they are.
           const apparent=crewApparentDistance(s.position,boat,camera);
@@ -667,7 +700,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
           // Coming back within reach of their own pose, they take it at once.
           const snap=!s.posedOnce||s.pendingWounds?.length||(s.knockdownTimer??0)>0||(s.clipOnly&&!clipOnly)||Boolean(s.overboard?.inWater&&s.overboard?.alive);
           s.clipOnly=clipOnly;
-          if(clipOnly){s.posedOnce=true;b.clip.set(i,s.time,s.walkTime,s.walk);}else b.clip.off(i);
+          if(clipOnly){s.posedOnce=true;clips.set(i,s.time,s.walkTime,s.walk);}else clips.off(i);
           const interval=snap?1:crewPoseInterval(apparent);
           s.poseAge=(s.poseAge??i)+1;
           const due=crewPoseDue(s,clipOnly,snap,interval);
@@ -700,7 +733,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
               ?[s.shirt[0]*0.78+0.12,s.shirt[1]*0.62,s.shirt[2]*0.62]
               :s.shirt;
           b.actors.set(shirt,offset+16);b.actors.set(s.trousers,offset+20);b.actors.set(s.skin,offset+24);b.actors.set(s.hair,offset+28);
-          b.actors.set(s.face,offset+32);b.actors[offset+27]=Number(!b.isCaptainBatch&&s.sex==='female')+bandageSeed;
+          b.actors.set(s.face,offset+32);b.actors[offset+27]=Number(own&&s.sex==='female')+bandageSeed;
           // The tiller station is below the camera; all crew remain visible.
           // Fractional part of shirt.w (< 0.5) carries wound severity to the crew shader.
           b.actors[offset+19]=!s.visible?1.0:(woundAmt*0.45);
@@ -708,10 +741,8 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
           b.actors[offset+23]=Number(boat.enabled===true)+scorchAmt*0.42;
           b.actors[offset+31]=wetness.crewOffset+(s.crewIndex??state.crew.indexOf(s))*4;
         }
-        b.runs=crewDrawRuns(b.people,s=>s.visible===false||s.cutShader?-1:s.lodTier);
-        b.cutRuns=crewDrawRuns(b.people,s=>s.visible!==false&&s.cutShader?s.lodTier:-1);
-        b.shadowRuns=crewDrawRuns(b.people,s=>s.visible===false||s.lodTier>=2?-1:Math.min(CREW_LOD_TIERS.length-1,s.lodTier+1));
-        device.queue.writeBuffer(b.blend,0,b.blends);device.queue.writeBuffer(b.actor,0,b.actors);b.clip.upload();b.turn.update(b.people);
+        for(const part of b.parts){part.runs=partRuns(part,shownTierOf);part.cutRuns=partRuns(part,cutTierOf);part.shadowRuns=partRuns(part,shadowTierOf);}
+        device.queue.writeBuffer(b.blend,0,b.blends);device.queue.writeBuffer(b.actor,0,b.actors);b.clip.upload();b.captainClip?.upload();b.turn.update(b.people);
       }
       // After posing, so an arrow's bone is this frame's.
       gunTools.update(state,boat,true);
@@ -721,25 +752,37 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
       if(!drawEnabled)return;
       pass.setPipeline(poseBlendPipeline);
       for(const b of batches)if(b.people.length){pass.setBindGroup(0,b.poseBlendGroup);pass.dispatchWorkgroups(Math.ceil(b.people.length*65/64));}
-      for(const b of batches)if(b.people.length)b.clip.encode(pass);
+      for(const b of batches)if(b.people.length){b.clip.encode(pass);b.captainClip?.encode(pass);}
       for(const b of batches)if(b.people.length)b.turn.encode(pass);
     },
     drawSubmerged(pass,above=false){
       if(!submerged||!drawEnabled)return;
       submerged.bind(pass,above);pass.setBindGroup(1,submergedLighting);
-      for(const b of batches){if(!b.people.length)continue;const lod=b.lods?.at(-1)??{buffer:b.index,indexCount:b.model.indices.length};pass.setBindGroup(0,b.submerged);pass.setVertexBuffer(0,b.vertex);pass.setIndexBuffer(lod.buffer,'uint32');pass.drawIndexed(lod.indexCount??lod.indices.length,b.people.length);}
+      for(const b of batches){
+        if(!b.people.length)continue;
+        pass.setBindGroup(0,b.submerged);
+        for(const part of b.parts){
+          if(!part.people.length)continue;
+          const lod=part.lods?.at(-1)??{buffer:part.index,indexCount:part.model.indices.length};
+          pass.setVertexBuffer(0,part.vertex);pass.setIndexBuffer(lod.buffer,'uint32');pass.drawIndexed(lod.indexCount??lod.indices.length,part.people.length,0,0,part.first);
+        }
+      }
       gunTools.drawSubmerged(pass,above);
     },
     // Opaque sailors belong with the opaque scene. Anyone being cut follows it.
     drawOpaque(pass){if(!drawEnabled)return;pass.setPipeline(pipeline);pass.setBindGroup(1,lighting);for(const b of batches)drawBatch(pass,b,false);gunTools.draw(pass);},
     drawCut(pass){
-      if(!drawEnabled||!batches.some(b=>b.cutRuns?.length))return;
+      if(!drawEnabled||!everyPart.some(part=>part.cutRuns?.length))return;
       pass.setPipeline(cutDepthPipeline);for(const b of batches)drawBatch(pass,b,false,b.cutDepth);
       pass.setPipeline(cutPipeline);pass.setBindGroup(1,cutLighting);for(const b of batches)drawBatch(pass,b,false,b.mainCut);
     },
     drawShadow(pass){if(!drawEnabled)return;pass.setPipeline(shadowPipeline);for(const b of batches)drawBatch(pass,b,true);gunTools.drawShadow(pass);},
     status(){return state.crew.length&&!state.crew.some(s=>s.visible)?hasExtendedCrewModel(modelId)?'Crew hidden':'Crew needs a larger deck':companyStatus(state);},
-    destroy(){gunTools.destroy();if(!shared)captainTexture?.destroy?.();for(const b of batches)for(const resource of [...(shared?[]:[b.vertex,b.index,...(b.lods?.slice(1).map(l=>l.buffer)??[])]),b.bones,b.actor,b.solved,b.blend])resource.destroy();for(const b of batches){b.clip.destroy();b.turn.destroy();}},
+    destroy(){
+      gunTools.destroy();
+      if(!shared){captainTexture?.destroy?.();for(const g of geometry)for(const resource of [g.vertex,g.index,...(g.lods?.slice(1).map(l=>l.buffer)??[])])resource.destroy();}
+      for(const b of batches){for(const resource of [b.bones,b.actor,b.solved,b.blend])resource.destroy();b.clip.destroy();b.captainClip?.destroy();b.turn.destroy();}
+    },
   };
 }
 
@@ -1919,6 +1962,8 @@ export function stepFortGarrison(garrison, dt = 0, wind = 0, dateMs = null) {
 }
 
 const MAX_FORT_SOLDIERS_PER_BATCH = 96;
+// Of a batch's slots, how many its captains may take from its soldiers.
+const MAX_FORT_CAPTAINS_PER_BATCH = 8;
 
 export async function createFortSoldiers({
   device,
@@ -1992,30 +2037,52 @@ export async function createFortSoldiers({
     entries: resources.map((resource, binding) => resource?.resource !== undefined ? resource : ({ binding, resource })),
   });
   const indigenousModels = createIndigenousCrewModels(models);
-  const allModels = [models[0], models[1], indigenousModels[0], indigenousModels[1], ...(models[2] ? [models[2]] : [])];
+  const allModels = [models[0], models[1], indigenousModels[0], indigenousModels[1]];
   const clipPipeline = shared?.clipPipeline ?? await createCrewClipPipeline(device, shader);
-  const batches = allModels.map((model, i) => {
-    const isIndigenousBatch = i === 2 || i === 3;
-    const isCaptainBatch = i === 4;
-    const sharedGeo = i === 0 || i === 1 ? shared?.geometry?.[i] : isCaptainBatch ? shared?.geometry?.[2] : shared?.indigenousGeometry?.[i - 2];
-    const poses = new Float32Array(MAX_FORT_SOLDIERS_PER_BATCH * 65 * 16);
-    const actors = new Float32Array(MAX_FORT_SOLDIERS_PER_BATCH * CREW_ACTOR_FLOATS);
-    const vertex = sharedGeo?.vertex ?? buffer('fort crew vertices', model.vertices, B.VERTEX);
-    const index = sharedGeo?.index ?? buffer('fort crew indices', model.indices, B.INDEX);
-    const lods = sharedGeo?.lods ?? (model.lods ?? [{ id: 'near', level: 0, indices: model.indices, indexCount: model.indices.length, triangles: model.indices.length / 3 }]).map((tier, t) => ({
+  const fortGeometry = (model, given) => {
+    if (given) return { ...given, model, owned: false };
+    const vertex = buffer('fort crew vertices', model.vertices, B.VERTEX);
+    const index = buffer('fort crew indices', model.indices, B.INDEX);
+    const lods = (model.lods ?? [{ id: 'near', level: 0, indices: model.indices, indexCount: model.indices.length, triangles: model.indices.length / 3 }]).map((tier, t) => ({
       ...tier,
       buffer: t === 0 ? index : buffer('fort crew indices ' + tier.id, tier.indices, B.INDEX),
     }));
+    return { vertex, index, lods, model, owned: true };
+  };
+  // A fort's captains are few. Each is one more body in the batch of his or her own sex, after its soldiers, drawn
+  // from that batch's storage with the captain's mesh.
+  const captainModel = models[2] ?? null;
+  const captainGeometry = captainModel ? fortGeometry(captainModel, shared?.geometry?.[2]) : null;
+  const batches = allModels.map((model, i) => {
+    const isIndigenousBatch = i === 2 || i === 3;
+    const geometry = fortGeometry(model, isIndigenousBatch ? shared?.indigenousGeometry?.[i - 2] : shared?.geometry?.[i]);
+    const poses = new Float32Array(MAX_FORT_SOLDIERS_PER_BATCH * 65 * 16);
+    const actors = new Float32Array(MAX_FORT_SOLDIERS_PER_BATCH * CREW_ACTOR_FLOATS);
     const bones = buffer('fort crew joints', poses, B.STORAGE);
     const clip = createCrewClipBatch(device, clipPipeline, model, bones, MAX_FORT_SOLDIERS_PER_BATCH);
+    const captainClip = captainModel && !isIndigenousBatch ? createCrewClipBatch(device, clipPipeline, captainModel, bones, MAX_FORT_SOLDIERS_PER_BATCH) : null;
     const actor = buffer('fort crew transforms', actors, B.STORAGE);
     const common = [{ buffer: fortHullUBO }, { buffer: bones }, { buffer: actor }];
     const mainResources = [{ buffer: frameUBO }, ...common, transView, sampClamp, envCubeView, { buffer: sunVisBuf }, { buffer: dryMoistureBuf }, skyView, { binding: 13, resource: captainTexView }, { binding: 14, resource: captainSampler }];
     const main = group(pipeline, mainResources);
     const shadow = group(shadowPipeline, [{ buffer: shadows.uniform }, ...common]);
-    return { model, isIndigenousBatch, isCaptainBatch, ownsGeometry: !sharedGeo, people: [], poses, actors, vertex, index, lods, bones, actor, main, shadow, clip };
+    return { model, isIndigenousBatch, geometry, people: [], soldiers: 0, actors, bones, actor, main, shadow, clip, captainClip };
   });
   const lighting = shadows.bind(pipeline);
+  // One batch's bodies at the garrison's level of detail: its soldiers, then any captains after them.
+  const drawFortRun = (pass, geometry, first, count) => {
+    if (!count || !geometry) return;
+    const lod = geometry.lods?.[activeTier] ?? { buffer: geometry.index, indexCount: geometry.model.indices.length };
+    pass.setVertexBuffer(0, geometry.vertex);
+    pass.setIndexBuffer(lod.buffer, 'uint32');
+    pass.drawIndexed(lod.indexCount ?? lod.indices.length, count, 0, 0, first);
+  };
+  const drawFortBatch = (pass, b, group) => {
+    if (!b.people.length) return;
+    pass.setBindGroup(0, group);
+    drawFortRun(pass, b.geometry, 0, b.soldiers);
+    drawFortRun(pass, captainGeometry, b.soldiers, b.people.length - b.soldiers);
+  };
 
   let activePort = null;
   let garrison = null;
@@ -2037,16 +2104,19 @@ export async function createFortSoldiers({
     hullData[17] = garrison.origin[1];
     hullData[18] = garrison.origin[2];
     device.queue.writeBuffer(fortHullUBO, 0, hullData);
-    batches[0].people = garrison.soldiers.filter(s => !s.indigenous && !isCaptainActor(s) && s.sex === 'male').slice(0, MAX_FORT_SOLDIERS_PER_BATCH);
-    batches[1].people = garrison.soldiers.filter(s => !s.indigenous && !isCaptainActor(s) && s.sex === 'female').slice(0, MAX_FORT_SOLDIERS_PER_BATCH);
-    batches[2].people = garrison.soldiers.filter(s => s.indigenous && s.sex === 'male').slice(0, MAX_FORT_SOLDIERS_PER_BATCH);
-    batches[3].people = garrison.soldiers.filter(s => s.indigenous && s.sex === 'female').slice(0, MAX_FORT_SOLDIERS_PER_BATCH);
-    if (batches[4]) batches[4].people = garrison.soldiers.filter(s => isCaptainActor(s)).slice(0, MAX_FORT_SOLDIERS_PER_BATCH);
+    batches.forEach((b, index) => {
+      const sex = index % 2 ? 'female' : 'male';
+      const ofSex = garrison.soldiers.filter(s => Boolean(s.indigenous) === b.isIndigenousBatch && s.sex === sex);
+      // Without the captain's mesh a captain is drawn as any other soldier.
+      const captains = captainGeometry ? ofSex.filter(isCaptainActor) : [];
+      const soldiers = ofSex.filter(s => !captains.includes(s)).slice(0, MAX_FORT_SOLDIERS_PER_BATCH - Math.min(captains.length, MAX_FORT_CAPTAINS_PER_BATCH));
+      b.people = [...soldiers, ...captains.slice(0, MAX_FORT_CAPTAINS_PER_BATCH)];
+      b.soldiers = soldiers.length;
+    });
     for (const b of batches) {
-      const walkDur = b.model.animator.clips.get('Walk').duration;
       for (let i = 0; i < b.people.length; i++) {
-        const s = b.people[i];
-        s.walkClipDuration = walkDur;
+        const s = b.people[i], own = i < b.soldiers;
+        s.walkClipDuration = (own ? b.model : captainModel).animator.clips.get('Walk').duration;
         const offset = i * CREW_ACTOR_FLOATS;
         b.actors.set(s.transform, offset);
         b.actors.set(s.shirt, offset + 16);
@@ -2056,7 +2126,7 @@ export async function createFortSoldiers({
         b.actors.set(s.face, offset + 32);
         b.actors[offset + 19] = Number(!s.visible);
         b.actors[offset + 23] = 1;
-        b.actors[offset + 27] = Number(!b.isCaptainBatch && s.sex === 'female');
+        b.actors[offset + 27] = Number(own && s.sex === 'female');
         // A fort's moisture lookup is always the first entry, so the whole of this slot's fraction is free.
         b.actors[offset + 31] = (s.dress ?? 0) / DRESS_MASK_SCALE;
       }
@@ -2068,7 +2138,8 @@ export async function createFortSoldiers({
     get state() { return garrison; },
     get lodLevel() { return activeTier; },
     setPort(nextPort) { syncPort(nextPort); },
-    update(nextPort, dt, wind = 0, camera = null, stepSimulation = true) {
+    // `dateMs` is the game's date, by which a fallen soldier's day on the ground is counted.
+    update(nextPort, dt, wind = 0, camera = null, stepSimulation = true, dateMs = null) {
       if (nextPort !== activePort || (nextPort && nextPort.garrison && nextPort.garrison !== garrison)) {
         syncPort(nextPort);
       }
@@ -2084,7 +2155,7 @@ export async function createFortSoldiers({
           return;
         }
       }
-      if (stepSimulation && dt > 0) stepFortGarrison(garrison, dt, wind);
+      if (stepSimulation && dt > 0) stepFortGarrison(garrison, dt, wind, dateMs);
       let minDist = Infinity;
       let anyVisible = false;
       if (camera && Number.isFinite(camera.x) && Number.isFinite(camera.z)) {
@@ -2104,14 +2175,16 @@ export async function createFortSoldiers({
       if (!drawEnabled) return;
 
       const stride = activeTier === 0 ? 1 : activeTier === 1 ? 2 : 4;
-      const shouldSamplePoses = posesDirty || (sampleTick++ % stride) === 0;
+      const everyone = posesDirty, shouldSamplePoses = posesDirty || (sampleTick++ % stride) === 0;
       posesDirty = false;
       for (const b of batches) {
         if (!b.people.length) continue;
-        const a = b.model.animator;
         b.clip.begin(b.people.length);
+        b.captainClip?.begin(b.people.length);
         for (let i = 0; i < b.people.length; i++) {
-          const s = b.people[i];
+          // A captain's slot follows the soldiers', and is solved on the captain's own rig.
+          const s = b.people[i], own = i < b.soldiers;
+          const a = (own ? b.model : captainModel).animator, clips = own ? b.clip : b.captainClip;
           const offset = i * CREW_ACTOR_FLOATS;
           const woundAmt = s.casualtyState === 'fallen'
             ? 1.0
@@ -2131,66 +2204,55 @@ export async function createFortSoldiers({
           b.actors.set(shirt, offset + 16);
           b.actors[offset + 19] = !s.visible ? 1.0 : (woundAmt * 0.45);
           b.actors[offset + 23] = 1 + scorchAmt * 0.42;
-          b.actors[offset + 27] = Number(!b.isCaptainBatch && s.sex === 'female') + bandageSeed;
+          b.actors[offset + 27] = Number(own && s.sex === 'female') + bandageSeed;
           // Only someone close enough to see their hands needs a skeleton solved for them.
           const away = camera ? Math.hypot(s.position[0] - camera.x, (s.position[1] ?? 0) - (camera.y ?? 0), s.position[2] - camera.z) / crewLensZoom(camera) : 0;
+          const stirred = !s._poseReady && s.poseWasReady !== false;
+          s.poseWasReady = s._poseReady;
           if (crewClipOnly(away, s)) {
-            b.clip.set(i, s.time, s.walkTime, s.walk);
+            clips.set(i, s.time, s.walkTime, s.walk);
             continue;
           }
-          b.clip.off(i);
-          if (shouldSamplePoses || s.pendingWounds?.length || !s._poseReady) {
+          clips.off(i);
+          if (fortPoseDue(s, shouldSamplePoses, everyone, stirred)) {
             a.sample('Idle', s.time, 'Walk', s.walkTime, s.walk);
             if (s.brace > 0.001) a.blend('Brace', s.time, s.brace);
             applyCrewRealism(a, s, null, dt);
             applyCrewWounds(a, s);
             device.queue.writeBuffer(b.bones, i * 65 * 64, a.palette);
+            crewPoseSolved(s);
           }
         }
         b.clip.upload();
+        b.captainClip?.upload();
         device.queue.writeBuffer(b.actor, 0, b.actors, 0, b.people.length * CREW_ACTOR_FLOATS);
       }
     },
     encodePose(pass) {
       if (!drawEnabled) return;
-      for (const b of batches) if (b.people.length) b.clip.encode(pass);
+      for (const b of batches) if (b.people.length) { b.clip.encode(pass); b.captainClip?.encode(pass); }
     },
     draw(pass) {
       if (!drawEnabled) return;
       pass.setPipeline(pipeline);
       pass.setBindGroup(1, lighting);
-      for (const b of batches) {
-        if (!b.people.length) continue;
-        const lod = b.lods?.[activeTier] ?? { buffer: b.index, indexCount: b.model.indices.length };
-        pass.setBindGroup(0, b.main);
-        pass.setVertexBuffer(0, b.vertex);
-        pass.setIndexBuffer(lod.buffer, 'uint32');
-        pass.drawIndexed(lod.indexCount ?? lod.indices.length, b.people.length);
-      }
+      for (const b of batches) drawFortBatch(pass, b, b.main);
     },
     drawShadow(pass) {
       if (!drawEnabled || activeTier >= 2) return;
       pass.setPipeline(shadowPipeline);
-      for (const b of batches) {
-        if (!b.people.length) continue;
-        const lod = b.lods?.[activeTier] ?? { buffer: b.index, indexCount: b.model.indices.length };
-        pass.setBindGroup(0, b.shadow);
-        pass.setVertexBuffer(0, b.vertex);
-        pass.setIndexBuffer(lod.buffer, 'uint32');
-        pass.drawIndexed(lod.indexCount ?? lod.indices.length, b.people.length);
-      }
+      for (const b of batches) drawFortBatch(pass, b, b.shadow);
     },
     destroy() {
       fortHullUBO.destroy();
       dryMoistureBuf.destroy();
       if (!shared?.captainTexture) captainTexture?.destroy?.();
+      for (const geometry of [captainGeometry, ...batches.map(b => b.geometry)]) {
+        if (!geometry?.owned) continue;
+        for (const resource of [geometry.vertex, geometry.index, ...(geometry.lods?.slice(1).map(l => l.buffer) ?? [])]) resource?.destroy?.();
+      }
       for (const b of batches) {
-        if (b.ownsGeometry) {
-          for (const resource of [b.vertex, b.index, ...(b.lods?.slice(1).map(l => l.buffer) ?? [])]) {
-            resource?.destroy?.();
-          }
-        }
-        b.bones.destroy();b.clip.destroy();
+        b.bones.destroy();b.clip.destroy();b.captainClip?.destroy();
         b.actor.destroy();
       }
     },

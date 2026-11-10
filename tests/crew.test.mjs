@@ -402,6 +402,36 @@ test('a body that has come to rest is solved twice more and then left until it i
   assert.equal(crewPoseDue({visible:true,poseAge:9},true,true,1),false);
 });
 
+test('a garrison is solved on its stride, except what has just changed or is still falling',async()=>{
+  const {fortPoseDue,crewPoseSolved}=await import('../js/crew-lod.js');
+  const sentry={_poseReady:false,walk:1};
+  assert.equal(fortPoseDue(sentry,false,false,false),false,'a walking sentry waits for the stride');
+  assert.equal(fortPoseDue(sentry,true,false,false),true);
+  assert.equal(fortPoseDue(sentry,false,false,true),true,'the frame he sets off is solved at once');
+  assert.equal(fortPoseDue(sentry,false,true,false),true,'and so is everyone at a new port');
+  assert.equal(fortPoseDue({pendingWounds:[{}]},false,false,false),true);
+  assert.equal(fortPoseDue({casualtyState:'fallen',ragdoll:{active:true,settled:false}},false,false,false),true,'a body still tumbling is solved every frame');
+  assert.equal(fortPoseDue({knockdownTimer:.4},false,false,false),true);
+  assert.equal(fortPoseDue({garrisonFall:{to:0,speed:1}},false,false,false),true);
+  const body={casualtyState:'fallen',ragdoll:{active:true,settled:true}};
+  assert.equal(fortPoseDue(body,true,false,false),true,'once as it lies');
+  crewPoseSolved(body);
+  assert.equal(fortPoseDue(body,true,false,false),false,'and then not again, stride or no');
+  assert.equal(fortPoseDue(body,false,true,false),true,'until its slot is another port\'s');
+});
+
+test('only the captain\'s painted body looks its texture up, and only where it is drawn',async()=>{
+  const {CREW_RENDER,crewRenderWGSL,CREW_CLOTH_SHEEN}=await import('../js/wgsl/crew.js');
+  const entry=CREW_RENDER.slice(CREW_RENDER.indexOf('fn crewFS'));
+  assert.doesNotMatch(CREW_RENDER,/textureSampleBias\(captainTex/,'no lookup that every sailor\'s fragment pays for');
+  assert.match(entry,/if\(v\.color\.b<-1\.0\)\{base=textureSampleGrad\(captainTex,/,'the lookup sits behind the painted-vertex test');
+  assert.ok(entry.indexOf('dpdx(')<entry.indexOf('if(v.color.b<-1.0)'),'and its footprint is measured before the branch, where derivatives are defined');
+  // The cloth's sheen is the one term a hull lacks, and it can be taken away to compare the rest.
+  assert.ok(CREW_CLOTH_SHEEN>0&&CREW_CLOTH_SHEEN<.1);
+  assert.notEqual(crewRenderWGSL(0),CREW_RENDER);
+  assert.equal(crewRenderWGSL(CREW_CLOTH_SHEEN),CREW_RENDER);
+});
+
 test('baked clips store every frame in order and wrap time without a jump',async()=>{
   const {bakeCrewClips,crewClipFrame}=await import('../js/crew-clip-pose.js');
   const joints=65*16,sampled=[];

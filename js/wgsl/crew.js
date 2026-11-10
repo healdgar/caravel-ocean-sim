@@ -4,6 +4,9 @@ import { SKY_RENDER_FUNCS } from './sky.js';
 import { SHADOW_SAMPLE, SHADOW_FRAME } from './shadows.js';
 import { DRESS_MASK_SCALE } from '../indigenous-dress.js';
 
+// The captain's painted texture is read a third of a mip level sharper than its footprint: 2^-0.35 of it.
+const CAPTAIN_TEXTURE_SHARPEN = (2 ** -0.35).toFixed(4);
+
 export const CREW_SKIN = /* wgsl */ `
 @group(0) @binding(1) var<uniform> hull:Hull;
 @group(0) @binding(2) var<storage,read> joints:array<mat4x4f>;
@@ -76,7 +79,11 @@ fn crewMorph(p:vec3f,normal:vec3f,f:vec4f,sex:f32)->CrewSurface {
 // Shading never discards, so the GPU shades only what shows. Anyone with something to cut away,
 // someone fading out of a first-person sightline or in torn clothes, lays depth with `surviving`
 // after the opaque scene, then shades what is left.
-export const CREW_RENDER = FRAME_WGSL + ATMO_CORE_WGSL + VESSEL_RIG + VESSEL_LIGHTING + CREW_SKIN + SHADOW_SAMPLE + SKY_RENDER_FUNCS + /* wgsl */ `
+// How much of the light on dry cloth it throws back toward a grazing eye. Skin has none of it, and nor has a hull.
+export const CREW_CLOTH_SHEEN = 0.045;
+// The crew's shading. The sheen is a parameter so that a test can take the cloth's own lobe away and hold everything
+// else to the vessel's lighting, term for term.
+export const crewRenderWGSL = (clothSheen = CREW_CLOTH_SHEEN) => FRAME_WGSL + ATMO_CORE_WGSL + VESSEL_RIG + VESSEL_LIGHTING + CREW_SKIN + SHADOW_SAMPLE + SKY_RENDER_FUNCS + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F:Frame;
 @group(0) @binding(4) var transLUT:texture_2d<f32>;
 @group(0) @binding(5) var sampC:sampler;
@@ -229,7 +236,7 @@ fn crewShade(v:CrewVertex,front:bool,baseIn:vec3f)->vec4f {
   let spec=vesselSpecular(n,view,sun,rough,f0);
   let reflected=textureSampleLevel(envCube,sampC,reflect(-view,n),rough*${ENV_MIPS-1}.0).rgb;
   let grazing=1.0-clamp(dot(n,view),0.0,1.0);
-  let clothSheen=grazing*grazing*grazing*grazing*(1.0-clamp(v.skin,0.0,1.0))*(1.0-wet.x*0.7)*0.045;
+  let clothSheen=grazing*grazing*grazing*grazing*(1.0-clamp(v.skin,0.0,1.0))*(1.0-wet.x*0.7)*${clothSheen.toFixed(4)};
   let col=lunarSurface(n,view,albedo,rough,f0,sunVis[1]*lunarShadowVisibility(shadowSample))+lightningSurface(n,view,albedo,rough)+gunFlashSurface(v.world,n,view,albedo,rough)+worldFireSurface(v.world,n,view,albedo,rough)+albedo*(direct*(diffuse/PI+clothSheen)+ambient*(1.0+clothSheen*0.5))+direct*spec*max(dot(n,sun),0.0)
     +reflected*F.windP[1].w*vesselEnvironment(n,view,rough,f0);
   // Match timber, canvas and land: the same directional sky and marine haze
@@ -240,10 +247,15 @@ fn crewShade(v:CrewVertex,front:bool,baseIn:vec3f)->vec4f {
   return crewShade(v,front,v.color);
 }
 @fragment fn crewFS(v:CrewVertex,@builtin(front_facing) front:bool)->@location(0) vec4f {
-  let tex=textureSampleBias(captainTex,captainSampler,v.color.rg,-0.35).rgb;
-  return crewShade(v,front,select(v.color,tex,v.color.b<-1.0));
+  // Only the captain's body is painted, and only its fragments look the painting up. The footprint is measured out
+  // here, where every fragment runs, and is drawn in by the same third of a level the lookup was sharpened by.
+  let footX=dpdx(v.color.rg)*${CAPTAIN_TEXTURE_SHARPEN};let footY=dpdy(v.color.rg)*${CAPTAIN_TEXTURE_SHARPEN};
+  var base=v.color;
+  if(v.color.b<-1.0){base=textureSampleGrad(captainTex,captainSampler,v.color.rg,footX,footY).rgb;}
+  return crewShade(v,front,base);
 }
 `;
+export const CREW_RENDER = crewRenderWGSL();
 export const CREW_SHADOW = VESSEL_RIG + CREW_SKIN + SHADOW_FRAME + /* wgsl */ `
 @group(0) @binding(0) var<uniform> SH:ShadowFrame;
 @vertex fn vs(v:CrewInput)->@builtin(position) vec4f {

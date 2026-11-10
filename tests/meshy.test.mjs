@@ -177,7 +177,8 @@ test('offline inspector recognizes existing rigs and rejects raw unrigged source
 
 test('textured prepared assets report rig compatibility separately from renderer compatibility',async t=>{
   const dir=await temp(t),asset=readGLB(await fs.readFile(path.join(ROOT,'assets/crew/sailor-classic.glb')));
-  // A texture declaration changes loader support, not the preserved rig/animation.
+  // A texture the renderer cannot use changes loader support, not the preserved rig/animation. The loader takes one
+  // texture when its image is embedded, as the captain's is; this one declares a texture and embeds nothing.
   asset.json.textures=[{}];
   const raw=Buffer.from(JSON.stringify(asset.json)),json=Buffer.alloc((raw.length+3)&~3,32);raw.copy(json);
   const head=Buffer.alloc(20);head.writeUInt32LE(0x46546c67);head.writeUInt32LE(2,4);
@@ -186,5 +187,5 @@ test('textured prepared assets report rig compatibility separately from renderer
   const file=path.join(dir,'textured.glb');await fs.writeFile(file,Buffer.concat([head,json,bh,asset.bin]));
   const result=await inspectCrew(file);
   assert.deepEqual(result.matchingRigTemplates,['male']);assert.equal(result.loaderCompatible,false);
-  assert.equal(result.structuralMatch,false);assert.match(result.loaderError,/vertex colours/);
+  assert.equal(result.structuralMatch,false);assert.match(result.loaderError,/at most one embedded texture/);
 });

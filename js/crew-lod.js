@@ -244,4 +244,14 @@ export function crewPoseDue(sailor,clipOnly,snap,interval){
 export function crewPoseSolved(sailor){
   sailor.posedAtRest=crewBodyAtRest(sailor)?(sailor.posedAtRest??0)+1:0;
 }
+// Whether to solve a soldier ashore this frame. A garrison is solved at a stride of frames set by how far off it
+// is, and its joints are shown as solved, with nothing between. So what has just changed is solved at once, a body
+// in the air or tumbling every frame, a walking sentry on the stride, and a body come to rest once and no more.
+// `everyone` is a new port, where every slot still holds somebody else's pose.
+export function fortPoseDue(soldier,onStride,everyone,stirred){
+  if(everyone||stirred||soldier.pendingWounds?.length)return true;
+  if(crewBodyAtRest(soldier))return (soldier.posedAtRest??0)<1;
+  if(soldier.casualtyState==='fallen'||(soldier.knockdownTimer??0)>0||soldier.garrisonFall)return true;
+  return onStride;
+}
 

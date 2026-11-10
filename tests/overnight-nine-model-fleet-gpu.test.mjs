@@ -90,7 +90,7 @@ for(const path of ['/', '/docs/index.html'])test(`${path} nine distinct real mod
     await page.getByRole('button',{name:'Camera views',exact:true}).click();await page.getByRole('button',{name:'View fleet',exact:true}).click();
     let frame;for(let i=0;i<8;i++)frame=await nineStep(page);const s=await nineSnapshot(page);
     assert.equal(s.startup,'ready');assert.equal(s.active,9);assert.equal(s.assets,9);assert.equal(s.config,8);assert.deepEqual(s.rows.map(v=>v.model),nineModels);assert.deepEqual(s.rows.map(v=>v.code),nineCodes);
-    assert.deepEqual(s.rows.map(v=>v.crew),nineCompanies);assert.equal(frame.draws.crew,undefined,'the whole-fleet camera is beyond crew range');assert.deepEqual(s.sharedCrew,{vertices:2,indices:2,joints:18,actors:18});
+    assert.deepEqual(s.rows.map(v=>v.crew),nineCompanies);assert.equal(frame.draws.crew,undefined,'the whole-fleet camera is beyond crew range');assert.deepEqual(s.sharedCrew,{vertices:3,indices:3,joints:18,actors:18},'three shared bodies, and two batches of joints and actors for each of nine vessels');
     assert.deepEqual(s.rows.map(v=>v.masts),nineMasts);assert.deepEqual(s.rows.map(v=>v.guns),nineGuns);assert.deepEqual(s.rows.map(v=>v.anchor),nineModels.map(id=>id!=='taino-canoe'));
     assert.deepEqual(s.wake,{count:9,layers:[9,9]});for(const [kind,count]of Object.entries(s.unique))assert.equal(count,kind==='rowing'?3:9,'separate mutable '+kind+' state');
     assert.equal(new Set(s.rows.map(v=>v.source)).size,9,'each requested class has its actual distinct immutable mesh');

@@ -2071,7 +2071,7 @@ test('crew and vessel materials share sunlight, shadows, reflected light and dir
     await page.route('**/__lighting',r=>r.fulfill({contentType:'text/html',body:'<!doctype html>'}));
     await page.goto(`${origin}/__lighting`);
     const result=await page.evaluate(async()=>{
-      const {CREW_RENDER}=await import('/js/wgsl/crew.js'),{CARAVEL}=await import('/js/wgsl/caravel.js');
+      const {CREW_RENDER,crewRenderWGSL}=await import('/js/wgsl/crew.js'),{CARAVEL}=await import('/js/wgsl/caravel.js');
       const device=await(await navigator.gpu.requestAdapter()).requestDevice(),errors=[];
       device.onuncapturederror=e=>errors.push(e.error.message);
       const B=GPUBufferUsage,T=GPUTextureUsage;
@@ -2114,7 +2114,10 @@ test('crew and vessel materials share sunlight, shadows, reflected light and dir
       }`;
       // Match caulk's albedo/roughness to dry linen: identical optical inputs
       // should yield identical radiance, regardless of which mesh draws them.
-      const pipelines=await Promise.all([[CREW_RENDER,crewVS],[CARAVEL,boatVS]].map(async([code,vs])=>{
+      // Cloth has one lobe a hull has not, a sheen toward a grazing eye. The first
+      // pipeline is the crew's shading without it, held to the hull's everywhere;
+      // the third is the crew's shading as shipped.
+      const pipelines=await Promise.all([[crewRenderWGSL(0),crewVS],[CARAVEL,boatVS],[CREW_RENDER,crewVS]].map(async([code,vs])=>{
         const module=device.createShaderModule({code:code+common+vs});
         const info=await module.getCompilationInfo();for(const m of info.messages)if(m.type==='error')errors.push(m.message);
         return device.createRenderPipelineAsync({layout:'auto',vertex:{module,entryPoint:'fixtureVS'},fragment:{module,entryPoint:'fs',targets:[{format:'rgba32float'}]}});
@@ -2124,6 +2127,7 @@ test('crew and vessel materials share sunlight, shadows, reflected light and dir
         [[0,buf(frame)],[1,buf(hull)],[4,view(trans)],[5,sampler],[6,env.createView({dimension:'cube'})],[7,buf(sun)],[9,view(sky)],[16,buf(fixture)]],
         [[0,buf(frame)],[1,view(trans)],[2,view(sky)],[3,sampler],[4,env.createView({dimension:'cube'})],[5,buf(sun)],[6,buf(hull)],
           [7,view(water)],[8,disp.createView({dimension:'2d-array'})],[9,sampler],[10,view(oak)],[11,sampler],[12,view(deck)],[16,buf(fixture)]],
+        [[0,buf(frame)],[1,buf(hull)],[4,view(trans)],[5,sampler],[6,env.createView({dimension:'cube'})],[7,buf(sun)],[9,view(sky)],[16,buf(fixture)]],
       ].map((entries,i)=>device.createBindGroup({layout:pipelines[i].getBindGroupLayout(0),entries:entries.map(([binding,resource])=>({binding,resource}))}));
       const shadowGroups=pipelines.map(pipe=>device.createBindGroup({layout:pipe.getBindGroupLayout(1),entries:[
         buf(shadow),view(depths[0]),compare,view(depths[1]),view(cloth),sampler,
@@ -2157,7 +2161,7 @@ test('crew and vessel materials share sunlight, shadows, reflected light and dir
         device.queue.writeBuffer(frame,0,f);device.queue.writeBuffer(fixture,0,q);
         device.queue.writeBuffer(shadow,0,sh);device.queue.writeBuffer(sun,0,new Float32Array([c.sun??1,0,0,0]));
         const colors=[];
-        for(let i=0;i<2;i++){
+        for(let i=0;i<pipelines.length;i++){
           const enc=device.createCommandEncoder();
           for(let j=0;j<2;j++)enc.beginRenderPass({colorAttachments:[],depthStencilAttachment:{view:view(depths[j]),depthClearValue:(j===0?c.solid:c.canvas)??1,depthLoadOp:'clear',depthStoreOp:'store'}}).end();
           const pass=enc.beginRenderPass({colorAttachments:[{view:view(output),clearValue:[0,0,0,0],loadOp:'clear',storeOp:'store'}]});
@@ -2165,7 +2169,7 @@ test('crew and vessel materials share sunlight, shadows, reflected light and dir
           enc.copyTextureToBuffer({texture:output},{buffer:read,bytesPerRow:256},[4,4]);device.queue.submit([enc.finish()]);
           await read.mapAsync(GPUMapMode.READ);colors.push(Array.from(new Float32Array(read.getMappedRange()).slice(0,3)));read.unmap();
         }
-        report.push({name:c.name,crew:colors[0],boat:colors[1]});
+        report.push({name:c.name,grazing:Boolean(c.normal),crew:colors[0],boat:colors[1],sheen:colors[2]});
       }
       device.destroy();return {errors,report};
     });
@@ -2174,7 +2178,13 @@ test('crew and vessel materials share sunlight, shadows, reflected light and dir
       const a=sample.crew[channel],b=sample.boat[channel];
       assert.ok(Number.isFinite(a)&&Number.isFinite(b),JSON.stringify(sample));
       assert.ok(Math.abs(a-b)<2e-5+Math.abs(b)*.001,JSON.stringify(sample));
+      // Square to the eye the cloth has no sheen. Edge on it has, and sheen only ever adds light.
+      const lit=sample.sheen[channel];
+      assert.ok(Number.isFinite(lit),JSON.stringify(sample));
+      if(sample.grazing)assert.ok(lit>=b-(2e-5+Math.abs(b)*.001),JSON.stringify(sample));
+      else assert.ok(Math.abs(lit-b)<2e-5+Math.abs(b)*.001,JSON.stringify(sample));
     }
+    for(const sample of result.report.filter(s=>s.grazing))assert.ok(sample.sheen.some((lit,channel)=>lit>sample.boat[channel]*1.002+2e-5),'cloth seen edge on is brighter than caulk: '+JSON.stringify(sample));
     const byName=Object.fromEntries(result.report.map(s=>[s.name,s.crew]));
     assert.ok(byName.front[0]>byName['solid shadow'][0]*2,'solid objects block direct sunlight');
     assert.ok(byName['canvas shadow'][0]>byName['solid shadow'][0]&&byName['canvas shadow'][0]<byName.front[0],'canvas transmits part of the sun');
