@@ -1965,6 +1965,20 @@ const MAX_FORT_SOLDIERS_PER_BATCH = 96;
 // Of a batch's slots, how many its captains may take from its soldiers.
 const MAX_FORT_CAPTAINS_PER_BATCH = 8;
 
+// From how far a garrison is drawn at all.
+export const GARRISON_SIGHT_M = 1250;
+// How far from its origin, the middle of the port, a garrison's people stand. A fort may guard the river mouth
+// kilometres from the town.
+export function garrisonReach(garrison) {
+  let reach = 0;
+  for (const s of garrison?.soldiers ?? []) reach = Math.max(reach, Math.hypot(s.position[0] - garrison.origin[0], s.position[2] - garrison.origin[2]));
+  return reach;
+}
+// Whether a camera is near enough to any ground the garrison holds for it to be worth stepping and drawing.
+export function garrisonWithinSight(garrison, camera, reach = garrisonReach(garrison)) {
+  return Math.hypot(camera.x - garrison.origin[0], camera.z - garrison.origin[2]) <= reach + GARRISON_SIGHT_M;
+}
+
 export async function createFortSoldiers({
   device,
   frameUBO,
@@ -2086,6 +2100,7 @@ export async function createFortSoldiers({
 
   let activePort = null;
   let garrison = null;
+  let reach = 0;
   let drawEnabled = false;
   let activeTier = 0;
   let sampleTick = 0;
@@ -2100,6 +2115,7 @@ export async function createFortSoldiers({
       return;
     }
     garrison = nextPort.garrison ?? createFortGarrison(nextPort);
+    reach = garrisonReach(garrison);
     hullData[16] = garrison.origin[0];
     hullData[17] = garrison.origin[1];
     hullData[18] = garrison.origin[2];
@@ -2147,13 +2163,9 @@ export async function createFortSoldiers({
         drawEnabled = false;
         return;
       }
-      if (camera && Number.isFinite(camera.x) && Number.isFinite(camera.z)) {
-        const portCullRadius = Math.max(600, (activePort?.clearRadius ?? 260) + 1150);
-        const dx = camera.x - garrison.origin[0], dz = camera.z - garrison.origin[2];
-        if (dx * dx + dz * dz > portCullRadius * portCullRadius) {
-          drawEnabled = false;
-          return;
-        }
+      if (camera && Number.isFinite(camera.x) && Number.isFinite(camera.z) && !garrisonWithinSight(garrison, camera, reach)) {
+        drawEnabled = false;
+        return;
       }
       if (stepSimulation && dt > 0) stepFortGarrison(garrison, dt, wind, dateMs);
       let minDist = Infinity;
@@ -2171,7 +2183,7 @@ export async function createFortSoldiers({
       }
       const lod = selectCrewLOD({ x: 0, z: 0, heave: 0 }, { x: Math.min(minDist, 380), y: 0, z: 0 });
       activeTier = lod.mainTier;
-      drawEnabled = minDist <= 1250 && anyVisible;
+      drawEnabled = minDist <= GARRISON_SIGHT_M && anyVisible;
       if (!drawEnabled) return;
 
       const stride = activeTier === 0 ? 1 : activeTier === 1 ? 2 : 4;

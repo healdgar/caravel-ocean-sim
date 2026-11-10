@@ -2,7 +2,7 @@
 // What a bombardment does to the men on a fort's walls, and how long it goes on doing it.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createFortGarrison, stepFortGarrison, reviveGarrisonSoldiers, GARRISON_CASUALTY_STAY_S } from '../js/crew.js';
+import { createFortGarrison, stepFortGarrison, reviveGarrisonSoldiers, garrisonReach, garrisonWithinSight, GARRISON_SIGHT_M, GARRISON_CASUALTY_STAY_S } from '../js/crew.js';
 import { clearCrewWounds } from '../js/crew-wounds.js';
 import { initArticulatedRagdoll } from '../js/crew-physics.js';
 import { createGunnerySolidSweep } from '../js/gunnery-control.js';
@@ -185,4 +185,15 @@ test('a throw across a turned building carries the limbs the way it carries the 
   assert.ok(Math.abs(east[1] - still[1] + 5) < 1e-3, `all of it along world -Z: ${east[1] - still[1]}`);
   const square = thrown(0, 5, 0);
   assert.ok(Math.abs(square[0] - still[0] - 5) < 1e-3, 'and a building that is not turned throws as before');
+});
+
+test('a fort far from the middle of its port is in sight of a camera standing in it', () => {
+  // As at Lisbon, where the fort at the river mouth stands four kilometres from the town.
+  const fort = tower({ x: -4006, z: 936 }), garrison = garrisonOf(fort), man = garrison.soldiers[0];
+  const reach = garrisonReach(garrison);
+  assert.ok(reach > 3900 && reach < 4200, `the garrison reaches its fort: ${reach}`);
+  assert.ok(garrisonWithinSight(garrison, { x: man.position[0] + 20, z: man.position[2] }), 'a camera beside its sentry sees it');
+  assert.ok(garrisonWithinSight(garrison, { x: 0, z: 0 }), 'and so does one in the town, which further tests then cull by the nearest man');
+  assert.ok(!garrisonWithinSight(garrison, { x: reach + GARRISON_SIGHT_M + 500, z: 0 }), 'one beyond every man of it does not');
+  assert.ok(!garrisonWithinSight(garrisonOf(tower()), { x: GARRISON_SIGHT_M + 200, z: 0 }), 'nor one far from a fort in the town');
 });
