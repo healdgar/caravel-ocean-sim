@@ -5,6 +5,7 @@ import {hullLoftPoint,hullLoftBottom,hullLoftSheer} from './hull-loft.js';
 import {rowingStationPose,rowingSteeringPose} from './rowing.js';
 import {rowingAnchorFitting,rowingSurfaceSpar,proceduralRigContext} from './additional-rig.js';
 import {surfaceRestPoint,rigSurfacePose,surfaceClothPoint,surfaceYardPoint,surfaceRopePoint} from './rig-surface.js';
+import {resolveVesselRopeChain} from './rope-wave.js';
 
 const rowingMeshAdd=(a,b)=>a.map((v,i)=>v+b[i]),rowingMeshSub=(a,b)=>a.map((v,i)=>v-b[i]),rowingMeshMul=(a,s)=>a.map(v=>v*s);
 const rowingMeshDot=(a,b)=>a.reduce((sum,v,i)=>sum+v*b[i],0);
@@ -200,7 +201,7 @@ export function createRowingShipMesh(modelId,{groups,parts}={}){
     const start=out.length,a=rowingAnchorFitting(modelId,side);tube(a.root,a.tip,.035/sy,1,.028/sy,6);
     group('anchor.'+(side<0?'port':'starboard'),'anchor.'+(side<0?'port':'starboard')+'.root',start);
   }
-  for(const m of context.masts){const start=out.length;tube(m.foot,m.head,m.radius,1,.018,12);group('mast.'+m.id,'mast.'+m.id,start);}
+  for(const m of context.masts){const start=out.length;tube(m.foot,m.head,m.radius,10,.018,12);group('mast.'+m.id,'mast.'+m.id,start);}
   for(const s of context.surfaces){
     const start=out.length,n=20;
     for(let i=0;i<n;i++)for(let j=0;j<n;j++){
@@ -253,7 +254,7 @@ export function createRowingAssetPose(asset,options={}){
       const normal=rowingMeshUnit([0,1,2].map(i=>axes.reduce((sum,a,j)=>sum+a[i]*entry.n[j],0)*liveScale[i]));
       write(target,entry.at,point.map((v,i)=>v/liveScale[i]),normal);
     }
-    runtime.state=boat.sailState??{};runtime.time=time;runtime.wind=wind;for(const s of d.surfaces)poses.set(s.id,rigSurfacePose(s,runtime.state));
+    runtime.state=boat.sailState??{};runtime.time=time;runtime.wind=wind;runtime.ropeChain=resolveVesselRopeChain(boat);for(const s of d.surfaces)poses.set(s.id,rigSurfacePose(s,runtime.state));
     for(const sample of samples){
       const {surface:s,u,v}=sample,pose=poses.get(s.id),e=.0005,point=surfaceClothPoint(s,u,v,pose,runtime,time,wind),du=rowingMeshSub(surfaceClothPoint(s,u+e,v,pose,runtime,time,wind),surfaceClothPoint(s,u-e,v,pose,runtime,time,wind)),dv=rowingMeshSub(surfaceClothPoint(s,u,v+e,pose,runtime,time,wind),surfaceClothPoint(s,u,v-e,pose,runtime,time,wind));
       const normal=rowingMeshUnit(rowingMeshCross(du,dv));for(const at of sample.indices)write(target,at,point,normal);

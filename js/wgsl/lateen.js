@@ -55,10 +55,14 @@ fn sailBasePoint(position:vec3f,uv:vec2f,id:u32,material:u32,anchored:bool)->vec
 fn rigMastPoint(mast:u32,y:f32)->vec3f {
   let m=rigMasts[mast];return vec3f(0,y,m.x+m.z*(y-m.w)/(m.y-m.w));
 }
+fn standingEase(line:RigLine,pose:vec4f)->f32 {
+  let side=line.control.z;let kind=u32(line.control.x);if(kind==2u){return 0.0;}
+  return select(max(select(0.0,1.0,pose.y*side>0.0),clamp(pose.z/.12,0.0,1.0)),1.0,kind==1u);
+}
 fn standingPoint(line:RigLine,t:f32,pose:vec4f)->vec3f {
   let a=line.a.xyz;let b=line.b.xyz;let side=line.control.z;let kind=u32(line.control.x);let mast=u32(line.control.y);
   let point=mix(a,b,t);if(kind==2u){return point;}
-  let ease=select(max(select(0.0,1.0,pose.y*side>0.0),clamp(pose.z/.12,0.0,1.0)),1.0,kind==1u);
+  let ease=standingEase(line,pose);
   let low=1.0-t;let foot=pow(low,32.0);let y=point.y-.12*sin(3.14159265*t);
   let axis=rigMastPoint(mast,y);
   let clear=vec3f(b.x+side*.08*low+(a.x-b.x-side*.08)*foot,y,axis.z+(a.z-rigMastPoint(mast,a.y).z)*foot);
@@ -93,7 +97,11 @@ fn rigRopePoint(index:u32,t:f32)->vec3f {
   let side=line.control.z;let pose=hull.lateen[mast];var a=line.a.xyz;var b=line.b.xyz;
   if(kind<3u){
     let standCompliance=select(0.014,0.048,kind==1u || (pose.y*side>0.0 && kind==0u));
-    return standingPoint(line,t,pose)+hullRopeWaveAt(a,b,t,f32(index),standCompliance);
+    // A pendant gathered alongside its mast lies against the spar: it may swing
+    // outboard and fore and aft, never inboard through the timber.
+    var wave=hullRopeWaveAt(a,b,t,f32(index),standCompliance);
+    wave.x-=side*min(0.0,side*wave.x)*standingEase(line,pose);
+    return standingPoint(line,t,pose)+wave;
   }
   if(kind==3u){a=sailPoint(sailRestPoint(id,vec2f(0,1)),vec2f(0,1),id,13u,false);}
   if(kind==4u){b=yardPoint(id,line.b.xyz);}

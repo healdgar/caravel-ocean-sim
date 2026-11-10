@@ -6,6 +6,7 @@ import {ROWING_DESIGNS,rowingDesign,rowingDeck} from './models/rowing.js';
 import {LATER_SAIL_DESIGNS,laterSailDesign,laterSailDeck,laterSailStairFlights} from './models/later-sail.js';
 import {proceduralRigContext,laterSailSteeringPose,rowingAnchorFitting,rowingSurfaceSpar} from './additional-rig.js';
 import {rigSurfacePose,surfaceRestPoint,surfaceClothPoint,surfaceYardPoint,surfaceRopePoint,withRigPoseContext} from './rig-surface.js';
+import {resolveVesselRopeChain} from './rope-wave.js';
 import {rowingStationPose,rowingSteeringPose} from './rowing.js';
 
 const proceduralNodeAdd=(a,b)=>a.map((v,i)=>v+b[i]);
@@ -168,7 +169,7 @@ export function proceduralShipNodeTransform(boat,model,node,options={}){
   }
   if(motion.type==='procedural-fall'){
     const line=context.lines[motion.lineIndex];if(line?.kind!=='working-fall')throw Error('Absent physical working fall');
-    const t=options.t??(options.height>0?proceduralNodeClamp((options.height-line.a[1])/(line.b[1]-line.a[1])):1),runtime={...context,state:boat.sailState??{},time,wind};
+    const t=options.t??(options.height>0?proceduralNodeClamp((options.height-line.a[1])/(line.b[1]-line.a[1])):1),runtime={...context,state:boat.sailState??{},time,wind,ropeChain:resolveVesselRopeChain(boat)};
     const a=surfaceRopePoint(line,Math.max(0,t-.001),runtime),b=surfaceRopePoint(line,Math.min(1,t+.001),runtime);
     return proceduralNodeAxisFrame(surfaceRopePoint(line,t,runtime),proceduralNodeSub(b,a));
   }

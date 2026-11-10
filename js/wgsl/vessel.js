@@ -51,7 +51,7 @@ fn gunFlashSurface(world:vec3f,n:vec3f,eye:vec3f,albedo:vec3f,rough:f32)->vec3f 
 ${ROPE_WAVE_WGSL}
 fn hullRopeWaveAt(a:vec3f,b:vec3f,t:f32,index:f32,compliance:f32)->vec3f {
   let chain=unpackHullRopeChain(hull.size.z,hull.right.y,hull.forward.y);
-  return evaluateRopeWaveAt(a,b,t,index,compliance,chain,hull.origin.w,max(hull.rig.y,hull.sailWind.z));
+  return evaluateRopeWaveAt(a,b,t,index,compliance,chain,hull.origin.w,hull.rig.y);
 }
 ${LATEEN_MOTION}
 ${VICTORY_MOTION}

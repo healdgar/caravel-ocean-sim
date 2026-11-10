@@ -15,7 +15,7 @@ import { ROWING_DESIGNS } from './models/rowing.js';
 import { LATER_SAIL_DESIGNS } from './models/later-sail.js';
 import { proceduralRigContext } from './additional-rig.js';
 import { rigSurfacePose, surfaceYardPoint, surfaceClothPoint } from './rig-surface.js';
-import { evaluateRopeWaveDisplacement, resolveVesselRopeChain } from './rope-wave.js';
+import { evaluateRopeWaveDisplacement, resolveVesselRopeChain, ROPE_WAVE_WGSL } from './rope-wave.js';
 export { sternEnsignDesignStation };
 
 function getAdditionalRigDesign(modelId) {
@@ -163,7 +163,61 @@ export function strikeVesselColors(boat, reason = 'Struck colors') {
   return SHIP_COLORS.surrender;
 }
 
-export const SHIP_COLORS_RENDER = FRAME_WGSL + ATMO_CORE_WGSL + SKY_RENDER_FUNCS + VESSEL_LIGHTING + SCENE_SHADOW_SAMPLE + /* wgsl */ `
+/**
+ * Vessel-design-space rig connectors (mode 6 oak/iron spars & parrel trucks, mode 7 hemp
+ * parrel trusses & stern outlicker sheets):
+ *  - Every yard is physically bound to its mast by a parrel collar & truss yoke (racamento).
+ *  - Every overhanging rear sail (mizzen on Niña, Pinta, Santa María) is connected by a live
+ *    mizzen outlicker sheet (escota de mesana) to a stout stern outlicker / bumkin spar (botaló)
+ *    anchored into the stern transom and braced to the hull quarters.
+ *
+ * The mesh is static per ship model. Each tube runs between two anchors (a point on a mast, a
+ * yard, a clew) plus fixed offsets, and the vertex shader builds its ring, its catenary sag and
+ * its rope wave. Only the handful of anchor points depend on the rig's state; they are uploaded
+ * when they change and not otherwise. `traceRigConnectors` is the single description of the
+ * rig: run once per model it records the tubes, run per vessel it records only the anchors.
+ */
+export const RIG_CONNECTOR_WGSL = /* wgsl */ `
+struct RigTube {
+  a: vec4f,     // offset from anchor A, anchor A index
+  b: vec4f,     // offset from anchor B, anchor B index
+  cat: vec4f,   // catenary span t0, t1 (t0 < 0: straight tube), sag, line index
+  shape: vec4f, // radius at a, radius at b, gate anchor index, sides
+};
+struct RigConnectorPoint {
+  position: vec3f,
+  normal: vec3f,
+  visible: f32,
+};
+fn rigCatenaryPoint(a: vec3f, b: vec3f, t: f32, sag: f32, line: f32, sway: vec2f, time: f32, wind: f32) -> vec3f {
+  let wave = evaluateRopeWaveAt(a, b, t, line, sag * 1.35, RopeChainState(1.0, sway.x, sway.y), time, wind);
+  return a + (b - a) * t - vec3f(0.0, 4.0 * t * (1.0 - t) * sag, 0.0) + wave;
+}
+fn rigConnectorVertex(tube: RigTube, anchorA: vec4f, anchorB: vec4f, gate: f32, ring: f32, end: f32, sway: vec2f, time: f32, wind: f32) -> RigConnectorPoint {
+  var a = anchorA.xyz + tube.a.xyz;
+  var b = anchorB.xyz + tube.b.xyz;
+  if (tube.cat.x >= 0.0) {
+    let head = rigCatenaryPoint(a, b, tube.cat.x, tube.cat.z, tube.cat.w, sway, time, wind);
+    let tail = rigCatenaryPoint(a, b, tube.cat.y, tube.cat.z, tube.cat.w, sway, time, wind);
+    a = head;
+    b = tail;
+  }
+  let chord = b - a;
+  let span = length(chord);
+  if (gate < 0.5 || span < 1e-5) {
+    return RigConnectorPoint(a, vec3f(0.0, 1.0, 0.0), 0.0);
+  }
+  let dir = chord / span;
+  let seed = select(vec3f(0.0, 1.0, 0.0), vec3f(1.0, 0.0, 0.0), abs(dir.y) > 0.9);
+  let across = normalize(cross(dir, seed));
+  let up = cross(dir, across);
+  let angle = ring * 6.283185307179586;
+  let normal = across * cos(angle) + up * sin(angle);
+  return RigConnectorPoint(a + chord * end + normal * mix(tube.shape.x, tube.shape.y, end), normal, 1.0);
+}
+`;
+
+export const SHIP_COLORS_RENDER = FRAME_WGSL + ATMO_CORE_WGSL + SKY_RENDER_FUNCS + VESSEL_LIGHTING + SCENE_SHADOW_SAMPLE + ROPE_WAVE_WGSL + RIG_CONNECTOR_WGSL + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var transLUT: texture_2d<f32>;
 @group(0) @binding(2) var skyLUT: texture_2d<f32>;
@@ -179,8 +233,11 @@ struct ShipColorsPose {
   crowsNest: vec4f,
   windAndState: vec4f,
   rigExtra: vec4f,
+  rigChain: vec4f, // rope sway x, z of the rig connector catenaries
 };
 @group(0) @binding(6) var<uniform> P: ShipColorsPose;
+@group(0) @binding(7) var<storage, read> rigTubes: array<RigTube>;
+@group(0) @binding(8) var<storage, read> rigAnchors: array<vec4f>;
 
 struct ColorsVertexOut {
   @builtin(position) position: vec4f,
@@ -220,11 +277,22 @@ struct ColorsVertexOut {
   var localNorm = norm;
 
   if (mode > 5.5) {
-    // mode 6 (vessel-space oak/iron spar/parrel) or mode 7 (vessel-space braided hemp rig/sheet)
-    localPos = vec3f(pos.x * sx, pos.y * sy, pos.z * sz);
-    let world = P.origin.xyz + P.right.xyz * localPos.x + P.up.xyz * localPos.y + P.aft.xyz * localPos.z;
-    let nWorld = normalize(P.right.xyz * norm.x + P.up.xyz * norm.y + P.aft.xyz * norm.z);
+    // mode 6 (vessel-space oak/iron spar/parrel) or mode 7 (vessel-space braided hemp rig/sheet):
+    // a static tube mesh, posed here between this vessel's rig anchors.
+    let tube = rigTubes[u32(pos.x)];
+    let rigPoint = rigConnectorVertex(tube, rigAnchors[u32(tube.a.w)], rigAnchors[u32(tube.b.w)],
+      rigAnchors[u32(tube.shape.z)].w, pos.y, pos.z, P.rigChain.xy, time, P.windAndState.z);
     var out: ColorsVertexOut;
+    if (rigPoint.visible < 0.5) {
+      out.position = vec4f(0.0, 0.0, -2.0, 1.0);
+      out.world = vec3f(0.0);
+      out.normal = vec3f(0.0, 1.0, 0.0);
+      out.uvMode = vec4f(0.0);
+      return out;
+    }
+    localPos = rigPoint.position * vec3f(sx, sy, sz);
+    let world = P.origin.xyz + P.right.xyz * localPos.x + P.up.xyz * localPos.y + P.aft.xyz * localPos.z;
+    let nWorld = normalize(P.right.xyz * rigPoint.normal.x + P.up.xyz * rigPoint.normal.y + P.aft.xyz * rigPoint.normal.z);
     out.position = F.viewProj * vec4f(world - F.camPos.xyz, 1.0);
     out.world = world;
     out.normal = nWorld;
@@ -684,133 +752,123 @@ function mastSectionLost(boat, z, y) {
   return stage >= 2 || (stage >= 1 && y >= spec[2]);
 }
 
+const RIG_TUBE_FLOATS = 16;
+const RIG_CONNECTOR_VERTEX_FLOATS = 10;
+
 /**
- * Builds vessel-design-space rig connectors (mode 6 oak/iron spars & parrel trucks, mode 7 hemp
- * parrel trusses & stern outlicker sheets) so that:
- *  - Every yard is physically bound to its mast by a parrel collar & truss yoke (racamento).
- *  - Every overhanging rear sail (mizzen on Niña, Pinta, Santa María) is connected by a live
- *    mizzen outlicker sheet (escota de mesana) to a stout stern outlicker / bumkin spar (botaló)
- *    anchored into the stern transom and braced to the hull quarters.
+ * Recorder for traceRigConnectors. With a `topology` object it records tubes and their static
+ * vertices as well as anchors; without one it records anchors alone into `anchors`.
  */
-export function buildVesselRigConnectors(boat, time = 0, windSpeed = 8) {
-  const modelId = boat?.modelId ?? 'nina';
-  if (modelId === 'taino-canoe') {
-    return new Float32Array(0);
+function createRigConnectorRecorder(topology, anchors) {
+  return {
+    topology,
+    anchors,
+    count: 0,
+    gateAnchor: 0,
+    begin() {
+      this.count = 0;
+      this.gateAnchor = this.anchorXYZ(0, 0, 0, 1);
+    },
+    anchorXYZ(x, y, z, w = 1) {
+      const at = this.count * 4;
+      this.anchors[at] = x;
+      this.anchors[at + 1] = y;
+      this.anchors[at + 2] = z;
+      this.anchors[at + 3] = w;
+      return this.count++;
+    },
+    anchor(p) {
+      return this.anchorXYZ(p[0], p[1], p[2], 1);
+    },
+    // A gate hides every tube recorded under it when its mast has gone by the board.
+    gate(visible) {
+      this.gateAnchor = this.anchorXYZ(0, 0, 0, visible ? 1 : 0);
+      return this.gateAnchor;
+    },
+    useGate(index) {
+      this.gateAnchor = index;
+    },
+    pushTube(ai, ax, ay, az, bi, bx, by, bz, t0, t1, sag, line, r0, r1, sides, mode, uFlag) {
+      const t = topology, index = t.tubes.length / RIG_TUBE_FLOATS;
+      t.tubes.push(ax, ay, az, ai, bx, by, bz, bi, t0, t1, sag, line, r0, r1, this.gateAnchor, sides);
+      for (let i = 0; i < sides; i++) {
+        const f0 = i / sides, f1 = (i + 1) / sides;
+        for (const [ring, end] of [[f0, 0], [f1, 0], [f0, 1], [f0, 1], [f1, 0], [f1, 1]]) {
+          t.vertices.push(index, ring, end, 0, 0, 0, uFlag, end, mode, 1);
+        }
+      }
+    },
+    tube(ai, ax, ay, az, bi, bx, by, bz, r0, r1, sides, mode, uFlag = 0) {
+      this.pushTube(ai, ax, ay, az, bi, bx, by, bz, -1, 0, 0, 0, r0, r1, sides, mode, uFlag);
+    },
+    catenary(ai, ax, ay, az, bi, bx, by, bz, sag, radius, segs, mode = 7, uFlag = 0.45) {
+      const line = topology.lines++;
+      for (let i = 1; i <= segs; i++) {
+        this.pushTube(ai, ax, ay, az, bi, bx, by, bz, (i - 1) / segs, i / segs, sag, line, radius, radius, 5, mode, uFlag);
+      }
+    },
+  };
+}
+
+function rigParrelCollar(rec, mast, yard, mastRadius = 0.085) {
+  if (!rec.topology) return;
+  const ringSegs = 6;
+  const rRing = mastRadius + 0.025;
+  for (let i = 0; i < ringSegs; i++) {
+    const a0 = (i / ringSegs) * Math.PI * 2;
+    const a1 = ((i + 1) / ringSegs) * Math.PI * 2;
+    const x0 = Math.cos(a0) * rRing, z0 = Math.sin(a0) * rRing;
+    rec.tube(mast, x0, 0.02, z0, mast, Math.cos(a1) * rRing, 0.02, Math.sin(a1) * rRing, 0.020, 0.020, 5, 7, 0.45);
+    // Wooden parrel truck bead (vertello)
+    if (i % 2 === 0) rec.tube(mast, x0, 0.02 - 0.028, z0, mast, x0, 0.02 + 0.028, z0, 0.026, 0.026, 5, 6, 0);
   }
+  // Iron-strapped yard sling band around the yard at the tie point
+  rec.tube(yard, 0, -0.035, -0.035, yard, 0, 0.035, 0.035, 0.034, 0.034, 6, 6, 1);
+  // Upper and lower hemp truss yoke legs & halyard tie (racamento & ostaga) bridging mast to yard
+  rec.tube(mast, 0, 0.16, 0, yard, 0, 0, 0, 0.022, 0.020, 5, 7, 0.5);
+  rec.tube(mast, 0, -0.06, -0.04, yard, 0, 0, 0, 0.020, 0.018, 5, 7, 0.5);
+  rec.tube(mast, 0, -0.06, 0.04, yard, 0, 0, 0, 0.020, 0.018, 5, 7, 0.5);
+}
+
+function rigSternOutlickerAndSheet(rec, clewPos, hullEndZ, transomY, quarterHalfBeam, outlickerTipZ, sheetParted = false) {
+  const tipZ = Math.max(outlickerTipZ, clewPos[2] + 0.16);
+  const tipY = transomY + 0.02;
+  const guyZ = hullEndZ - 0.28;
+  const transom = rec.anchorXYZ(0, transomY, hullEndZ);
+  const tip = rec.anchorXYZ(0, tipY, tipZ);
+  const portQuarter = rec.anchorXYZ(-quarterHalfBeam, transomY - 0.04, guyZ);
+  const starboardQuarter = rec.anchorXYZ(quarterHalfBeam, transomY - 0.04, guyZ);
+  const cleat = rec.anchorXYZ(quarterHalfBeam * 0.35, transomY + 0.05, hullEndZ - 0.22);
+  const clew = rec.anchor(clewPos);
+  const sheetGate = rec.gate(!sheetParted);
+  if (!rec.topology) return;
+  rec.useGate(0);
+  // Heavy oak stern outlicker / bumkin spar (botaló de mesana) rooted inside the stern transom
+  rec.tube(transom, 0, -0.03, -0.35, tip, 0, 0, 0, 0.046, 0.034, 8, 6, 0);
+  // Diagonal oak knee brace under the transom counter
+  rec.tube(transom, 0, -0.38, -0.18, transom, 0, -0.01, 0.24, 0.036, 0.030, 6, 6, 0);
+  // Forged iron cranse bands at transom exit and outlicker tip sheave block
+  rec.tube(transom, 0, -0.02, -0.03, transom, 0, -0.02, 0.04, 0.052, 0.052, 6, 6, 1);
+  rec.tube(tip, 0, 0, -0.08, tip, 0, 0, 0.02, 0.046, 0.042, 6, 6, 1);
+  // Port and starboard quarter guy stays (vientos del botaló) anchoring the outlicker tip to the hull quarters
+  rec.catenary(portQuarter, 0, 0, 0, tip, 0, 0, -0.04, 0.03, 0.016, 4, 7, 0.4);
+  rec.catenary(starboardQuarter, 0, 0, 0, tip, 0, 0, -0.04, 0.03, 0.016, 4, 7, 0.4);
+  // Live mizzen outlicker sheet (escota de mesana) from the rear sail's aft clew to the outlicker block & forward to taffrail cleat
+  rec.useGate(sheetGate);
+  rec.catenary(clew, 0, 0, 0, tip, 0, 0.03, -0.04, 0.04, 0.020, 6, 7, 0.5);
+  rec.catenary(tip, 0, 0.03, -0.04, cleat, 0, 0, 0, 0.02, 0.016, 4, 7, 0.5);
+}
+
+function rigCatenaryBetween(rec, a, b, sag, radius, segs, mode, uFlag) {
+  if (rec.topology) rec.catenary(a, 0, 0, 0, b, 0, 0, 0, sag, radius, segs, mode, uFlag);
+}
+
+function traceRigConnectors(boat, time, windSpeed, rec) {
+  const modelId = boat?.modelId ?? 'nina';
+  rec.begin();
+  if (modelId === 'taino-canoe') return;
   if (!_lateenPosesScratch) _lateenPosesScratch = createLateenPoses([1, 1, 1], -1);
   const stern = sternEnsignDesignStation(boat);
-  const values = [];
-  const put = (p, n, u, v, mode) => {
-    values.push(p[0], p[1], p[2], n[0], n[1], n[2], u, v, mode, 1);
-  };
-  const addTube = (a, b, r0, r1, sides, mode, uFlag = 0) => {
-    const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
-    const len = Math.hypot(dx, dy, dz);
-    if (len < 1e-5) return;
-    const d = [dx / len, dy / len, dz / len];
-    const seed = Math.abs(d[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0];
-    const ux = d[1] * seed[2] - d[2] * seed[1];
-    const uy = d[2] * seed[0] - d[0] * seed[2];
-    const uz = d[0] * seed[1] - d[1] * seed[0];
-    const um = Math.hypot(ux, uy, uz) || 1;
-    const u = [ux / um, uy / um, uz / um];
-    const v = [d[1] * u[2] - d[2] * u[1], d[2] * u[0] - d[0] * u[2], d[0] * u[1] - d[1] * u[0]];
-    for (let i = 0; i < sides; i++) {
-      const t0 = (i / sides) * Math.PI * 2;
-      const t1 = ((i + 1) / sides) * Math.PI * 2;
-      const n0 = [u[0] * Math.cos(t0) + v[0] * Math.sin(t0), u[1] * Math.cos(t0) + v[1] * Math.sin(t0), u[2] * Math.cos(t0) + v[2] * Math.sin(t0)];
-      const n1 = [u[0] * Math.cos(t1) + v[0] * Math.sin(t1), u[1] * Math.cos(t1) + v[1] * Math.sin(t1), u[2] * Math.cos(t1) + v[2] * Math.sin(t1)];
-      const a0 = [a[0] + n0[0] * r0, a[1] + n0[1] * r0, a[2] + n0[2] * r0];
-      const a1 = [a[0] + n1[0] * r0, a[1] + n1[1] * r0, a[2] + n1[2] * r0];
-      const b0 = [b[0] + n0[0] * r1, b[1] + n0[1] * r1, b[2] + n0[2] * r1];
-      const b1 = [b[0] + n1[0] * r1, b[1] + n1[1] * r1, b[2] + n1[2] * r1];
-      put(a0, n0, uFlag, 0, mode);
-      put(a1, n1, uFlag, 0, mode);
-      put(b0, n0, uFlag, 1, mode);
-      put(b0, n0, uFlag, 1, mode);
-      put(a1, n1, uFlag, 0, mode);
-      put(b1, n1, uFlag, 1, mode);
-    }
-  };
-  const chain = resolveVesselRopeChain(boat);
-  const swayX = chain.active > 0 ? chain.swayX : -Math.sin(boat?.roll ?? 0);
-  const swayZ = chain.active > 0 ? chain.swayZ : Math.sin(boat?.pitch ?? 0);
-  let catenaryIndex = 0;
-  const addCatenary = (a, b, sag, radius, segs, mode = 7, uFlag = 0.45) => {
-    const lineIdx = catenaryIndex++;
-    let prev = a;
-    for (let i = 1; i <= segs; i++) {
-      const t = i / segs;
-      const dip = 4 * t * (1 - t) * sag;
-      const wave = evaluateRopeWaveDisplacement(a, b, t, lineIdx, sag * 1.35, swayX, swayZ, time, windSpeed);
-      const cur = [
-        a[0] + (b[0] - a[0]) * t + wave[0],
-        a[1] + (b[1] - a[1]) * t - dip + wave[1],
-        a[2] + (b[2] - a[2]) * t + wave[2],
-      ];
-      addTube(prev, cur, radius, radius, 5, mode, uFlag);
-      prev = cur;
-    }
-  };
-  const addParrelCollar = (mastPos, yardPos, mastRadius = 0.085) => {
-    const ringSegs = 6;
-    const rRing = mastRadius + 0.025;
-    for (let i = 0; i < ringSegs; i++) {
-      const a0 = (i / ringSegs) * Math.PI * 2;
-      const a1 = ((i + 1) / ringSegs) * Math.PI * 2;
-      const p0 = [mastPos[0] + Math.cos(a0) * rRing, mastPos[1] + 0.02, mastPos[2] + Math.sin(a0) * rRing];
-      const p1 = [mastPos[0] + Math.cos(a1) * rRing, mastPos[1] + 0.02, mastPos[2] + Math.sin(a1) * rRing];
-      addTube(p0, p1, 0.020, 0.020, 5, 7, 0.45);
-      if (i % 2 === 0) {
-        // Wooden parrel truck bead (vertello)
-        addTube(
-          [p0[0], p0[1] - 0.028, p0[2]],
-          [p0[0], p0[1] + 0.028, p0[2]],
-          0.026,
-          0.026,
-          5,
-          6,
-          0
-        );
-      }
-    }
-    // Iron-strapped yard sling band around the yard at the tie point
-    addTube(
-      [yardPos[0], yardPos[1] - 0.035, yardPos[2] - 0.035],
-      [yardPos[0], yardPos[1] + 0.035, yardPos[2] + 0.035],
-      0.034,
-      0.034,
-      6,
-      6,
-      1
-    );
-    // Upper and lower hemp truss yoke legs & halyard tie (racamento & ostaga) bridging mast to yard
-    addTube([mastPos[0], mastPos[1] + 0.16, mastPos[2]], yardPos, 0.022, 0.020, 5, 7, 0.5);
-    addTube([mastPos[0], mastPos[1] - 0.06, mastPos[2] - 0.04], yardPos, 0.020, 0.018, 5, 7, 0.5);
-    addTube([mastPos[0], mastPos[1] - 0.06, mastPos[2] + 0.04], yardPos, 0.020, 0.018, 5, 7, 0.5);
-  };
-  const addSternOutlickerAndSheet = (clewPos, hullEndZ, transomY, quarterHalfBeam, outlickerTipZ, sheetParted = false) => {
-    const rootZ = hullEndZ - 0.35;
-    const tipZ = Math.max(outlickerTipZ, clewPos[2] + 0.16);
-    const tipY = transomY + 0.02;
-    // Heavy oak stern outlicker / bumkin spar (botaló de mesana) rooted inside the stern transom
-    addTube([0, transomY - 0.03, rootZ], [0, tipY, tipZ], 0.046, 0.034, 8, 6, 0);
-    // Diagonal oak knee brace under the transom counter
-    addTube([0, transomY - 0.38, hullEndZ - 0.18], [0, transomY - 0.01, hullEndZ + 0.24], 0.036, 0.030, 6, 6, 0);
-    // Forged iron cranse bands at transom exit and outlicker tip sheave block
-    addTube([0, transomY - 0.02, hullEndZ - 0.03], [0, transomY - 0.02, hullEndZ + 0.04], 0.052, 0.052, 6, 6, 1);
-    addTube([0, tipY, tipZ - 0.08], [0, tipY, tipZ + 0.02], 0.046, 0.042, 6, 6, 1);
-    // Port and starboard quarter guy stays (vientos del botaló) anchoring the outlicker tip to the hull quarters
-    const guyZ = hullEndZ - 0.28;
-    addCatenary([-quarterHalfBeam, transomY - 0.04, guyZ], [0, tipY, tipZ - 0.04], 0.03, 0.016, 4, 7, 0.4);
-    addCatenary([quarterHalfBeam, transomY - 0.04, guyZ], [0, tipY, tipZ - 0.04], 0.03, 0.016, 4, 7, 0.4);
-    // Live mizzen outlicker sheet (escota de mesana) from the rear sail's aft clew to the outlicker block & forward to taffrail cleat
-    if (sheetParted) return;
-    const blockPos = [0, tipY + 0.03, tipZ - 0.04];
-    addCatenary(clewPos, blockPos, 0.04, 0.020, 6, 7, 0.5);
-    addCatenary(blockPos, [quarterHalfBeam * 0.35, transomY + 0.05, hullEndZ - 0.22], 0.02, 0.016, 4, 7, 0.5);
-  };
-
   const rigState = boat?.sailState ?? boat;
 
   if (modelId === 'victory') {
@@ -827,34 +885,28 @@ export function buildVesselRigConnectors(boat, time = 0, windSpeed = 8) {
       if (sail.kind === 'square') {
         const yardPos = victoryYardPoint(sail.id, sail.pivot, vPose);
         const mastPos = victoryMastPoint(sail.mast, yardPos[1]);
-        if (mastSectionLost(boat, mastPos[2], mastPos[1])) continue;
-        addParrelCollar(mastPos, yardPos, VICTORY_MASTS[sail.mast]?.r0 ?? 0.10);
+        rec.gate(!mastSectionLost(boat, mastPos[2], mastPos[1]));
+        rigParrelCollar(rec, rec.anchor(mastPos), rec.anchor(yardPos), VICTORY_MASTS[sail.mast]?.r0 ?? 0.10);
       } else if (sail.kind === 'spanker') {
         const gaffThroat = victoryYardPoint(sail.id, sail.corners[0], vPose);
         const gaffPeak = victoryYardPoint(sail.id, sail.corners[1], vPose);
         const gaffMastPos = victoryMastPoint(sail.mast, gaffThroat[1]);
-        if (!mastSectionLost(boat, gaffMastPos[2], gaffMastPos[1])) {
-          addParrelCollar(gaffMastPos, gaffThroat, 0.085);
-          const peakHalyardHead = victoryMastPoint(sail.mast, gaffThroat[1] + 0.82);
-          addCatenary(peakHalyardHead, gaffPeak, 0.018, 0.015, 3, 7, 0.48);
-        }
+        rec.gate(!mastSectionLost(boat, gaffMastPos[2], gaffMastPos[1]));
+        rigParrelCollar(rec, rec.anchor(gaffMastPos), rec.anchor(gaffThroat), 0.085);
+        rigCatenaryBetween(rec, rec.anchor(victoryMastPoint(sail.mast, gaffThroat[1] + 0.82)), rec.anchor(gaffPeak), 0.018, 0.015, 3, 7, 0.48);
         const boomJaws = victoryYardPoint(sail.id, sail.corners[3], vPose);
         const boomEnd = victoryYardPoint(sail.id, sail.corners[2], vPose);
         const boomMastPos = victoryMastPoint(sail.mast, boomJaws[1]);
-        if (!mastSectionLost(boat, boomMastPos[2], boomMastPos[1])) {
-          addParrelCollar(boomMastPos, boomJaws, 0.095);
-          const toppingHead = victoryMastPoint(sail.mast, gaffThroat[1] + 0.35);
-          addCatenary(toppingHead, boomEnd, 0.022, 0.015, 3, 7, 0.48);
-        }
+        rec.gate(!mastSectionLost(boat, boomMastPos[2], boomMastPos[1]));
+        rigParrelCollar(rec, rec.anchor(boomMastPos), rec.anchor(boomJaws), 0.095);
+        rigCatenaryBetween(rec, rec.anchor(victoryMastPoint(sail.mast, gaffThroat[1] + 0.35)), rec.anchor(boomEnd), 0.022, 0.015, 3, 7, 0.48);
       }
     }
     // Fixed mizzen crossjack yard at y = 4.87
     const cjMastPos = victoryMastPoint(2, 4.87);
-    const cjYardPos = [0, 4.87, cjMastPos[2] - 0.15];
-    if (!mastSectionLost(boat, cjMastPos[2], cjMastPos[1])) {
-      addParrelCollar(cjMastPos, cjYardPos, VICTORY_MASTS[2]?.r0 ?? 0.09);
-    }
-    return new Float32Array(values);
+    rec.gate(!mastSectionLost(boat, cjMastPos[2], cjMastPos[1]));
+    rigParrelCollar(rec, rec.anchor(cjMastPos), rec.anchorXYZ(0, 4.87, cjMastPos[2] - 0.15), VICTORY_MASTS[2]?.r0 ?? 0.09);
+    return;
   }
 
   const design = getAdditionalRigDesign(modelId);
@@ -864,22 +916,20 @@ export function buildVesselRigConnectors(boat, time = 0, windSpeed = 8) {
       const sail = SAIL_PLAN[s];
       const yardPos = lateenYardPoint(s, sail.pivot, poses[s]);
       const mastPos = mastPoint(sail.mast, yardPos[1]);
-      if (mastSectionLost(boat, mastPos[2], mastPos[1])) continue;
-      addParrelCollar(mastPos, yardPos, RIG_MASTS[sail.mast]?.r ?? 0.085);
+      rec.gate(!mastSectionLost(boat, mastPos[2], mastPos[1]));
+      rigParrelCollar(rec, rec.anchor(mastPos), rec.anchor(yardPos), RIG_MASTS[sail.mast]?.r ?? 0.085);
     }
     // Rear sail (mizzen, index 2) aft clew (u = 0, v = 1) connected to stern outlicker & transom
     const clewPos = lateenClothPoint(2, 0, 1, poses[2], time, windSpeed, true, poses);
     const hullEndZ = 5.60;
     const transomY = modelDeck(boat ?? { modelId: 'nina' }, 5.55) + 0.14;
     const quarterHalfBeam = Math.max(0.42, modelDeckWidth(boat ?? { modelId: 'nina' }, 5.55) * 0.72);
-    addSternOutlickerAndSheet(clewPos, hullEndZ, transomY, quarterHalfBeam, stern.z + 0.12, mastSectionLost(boat, clewPos[2] - 2, Infinity));
-    return new Float32Array(values);
+    rigSternOutlickerAndSheet(rec, clewPos, hullEndZ, transomY, quarterHalfBeam, stern.z + 0.12, mastSectionLost(boat, clewPos[2] - 2, Infinity));
+    return;
   }
 
   const rigCtx = proceduralRigContext(modelId);
-  if (!design || !rigCtx || !rigCtx.surfaces?.length) {
-    return new Float32Array(values);
-  }
+  if (!design || !rigCtx || !rigCtx.surfaces?.length) return;
   for (const surface of rigCtx.surfaces) {
     if (surface.kind === 'headsail') continue;
     const mast = rigCtx.masts?.[surface.mast];
@@ -887,7 +937,7 @@ export function buildVesselRigConnectors(boat, time = 0, windSpeed = 8) {
 
     if (surface.name === 'spritsail') {
       // Connect Santa María's spritsail yard to the bowsprit with a sling collar & spritsail lifts
-      if (mastSectionLost(boat, mast?.z ?? -3.7, Infinity)) continue;
+      rec.gate(!mastSectionLost(boat, mast?.z ?? -3.7, Infinity));
       const spar = surface.spars?.[0];
       const headA = spar ? spar.a : surface.corners?.[0];
       const headB = spar ? spar.b : surface.corners?.[1];
@@ -900,41 +950,34 @@ export function buildVesselRigConnectors(boat, time = 0, windSpeed = 8) {
       const bowspritPos = bs
         ? [bs.a[0] + (bs.b[0] - bs.a[0]) * tBs, bs.a[1] + (bs.b[1] - bs.a[1]) * tBs, bs.a[2] + (bs.b[2] - bs.a[2]) * tBs]
         : [0, yardPos[1] + 0.12, yardPos[2]];
-      addParrelCollar(bowspritPos, yardPos, bs?.r0 ?? 0.065);
+      rigParrelCollar(rec, rec.anchor(bowspritPos), rec.anchor(yardPos), bs?.r0 ?? 0.065);
       if (headA && headB && bs) {
-        const portTip = surfaceYardPoint(surface, [headA[0] * 0.88, headA[1], headA[2]], pose);
-        const stbdTip = surfaceYardPoint(surface, [headB[0] * 0.88, headB[1], headB[2]], pose);
-        addCatenary(bs.b, portTip, 0.015, 0.013, 3, 7, 0.45);
-        addCatenary(bs.b, stbdTip, 0.015, 0.013, 3, 7, 0.45);
+        const bowspritEnd = rec.anchor(bs.b);
+        rigCatenaryBetween(rec, bowspritEnd, rec.anchor(surfaceYardPoint(surface, [headA[0] * 0.88, headA[1], headA[2]], pose)), 0.015, 0.013, 3, 7, 0.45);
+        rigCatenaryBetween(rec, bowspritEnd, rec.anchor(surfaceYardPoint(surface, [headB[0] * 0.88, headB[1], headB[2]], pose)), 0.015, 0.013, 3, 7, 0.45);
       }
       continue;
     }
 
     if (!mast) continue;
+    const mastAt = (y) => (rigCtx.mastPoint ? rigCtx.mastPoint(surface.mast, y) : [0, y, mast.z ?? 0]);
 
     if (surface.kind === 'gaff' || surface.kind === 'bermudan') {
       for (const spar of surface.spars ?? []) {
         const throatPos = surfaceYardPoint(surface, spar.a, pose);
         const tipPos = surfaceYardPoint(surface, spar.b, pose);
-        const mastPos = rigCtx.mastPoint
-          ? rigCtx.mastPoint(surface.mast, throatPos[1])
-          : [0, throatPos[1], mast.z ?? 0];
-        if (mastSectionLost(boat, mastPos[2], mastPos[1])) continue;
-        addParrelCollar(mastPos, throatPos, mast.radius ?? 0.075);
+        const mastPos = mastAt(throatPos[1]);
+        rec.gate(!mastSectionLost(boat, mastPos[2], mastPos[1]));
+        rigParrelCollar(rec, rec.anchor(mastPos), rec.anchor(throatPos), mast.radius ?? 0.075);
         const topLiftY = Math.min(mast.topY ?? (throatPos[1] + 1.2), throatPos[1] + 1.15);
-        const liftHead = rigCtx.mastPoint
-          ? rigCtx.mastPoint(surface.mast, topLiftY)
-          : [0, topLiftY, mast.z ?? 0];
-        addCatenary(liftHead, tipPos, 0.02, 0.014, 3, 7, 0.48);
+        rigCatenaryBetween(rec, rec.anchor(mastAt(topLiftY)), rec.anchor(tipPos), 0.02, 0.014, 3, 7, 0.48);
       }
       if (surface.kind === 'bermudan' && surface.corners?.[0]) {
         const headCorner = surface.corners[0];
-        const headMastPos = rigCtx.mastPoint
-          ? rigCtx.mastPoint(surface.mast, headCorner[1])
-          : [0, headCorner[1], mast.z ?? 0];
-        if (!mastSectionLost(boat, headMastPos[2], headMastPos[1])) {
-          addTube(headMastPos, headCorner, 0.018, 0.016, 5, 7, 0.5);
-        }
+        const headMastPos = mastAt(headCorner[1]);
+        rec.gate(!mastSectionLost(boat, headMastPos[2], headMastPos[1]));
+        const head = rec.anchor(headMastPos), corner = rec.anchor(headCorner);
+        if (rec.topology) rec.tube(head, 0, 0, 0, corner, 0, 0, 0, 0.018, 0.016, 5, 7, 0.5);
       }
       continue;
     }
@@ -946,20 +989,14 @@ export function buildVesselRigConnectors(boat, time = 0, windSpeed = 8) {
       ? [0.5 * (spar.a[0] + spar.b[0]), 0.5 * (spar.a[1] + spar.b[1]), 0.5 * (spar.a[2] + spar.b[2])]
       : surface.pivot;
     const yardPos = surfaceYardPoint(surface, restCenter, pose);
-    const mastPos = rigCtx.mastPoint
-      ? rigCtx.mastPoint(surface.mast, yardPos[1])
-      : [0, yardPos[1], mast.z ?? 0];
-    if (mastSectionLost(boat, mastPos[2], mastPos[1])) continue;
-    addParrelCollar(mastPos, yardPos, mast.radius ?? 0.08);
+    const mastPos = mastAt(yardPos[1]);
+    rec.gate(!mastSectionLost(boat, mastPos[2], mastPos[1]));
+    rigParrelCollar(rec, rec.anchor(mastPos), rec.anchor(yardPos), mast.radius ?? 0.08);
     if (surface.kind === 'square' && headA && headB) {
       const liftY = Math.min(mast.topY ?? (yardPos[1] + 0.52), yardPos[1] + 0.52);
-      const liftHead = rigCtx.mastPoint
-        ? rigCtx.mastPoint(surface.mast, liftY)
-        : [0, liftY, mast.z ?? 0];
-      const portTip = surfaceYardPoint(surface, [headA[0] * 0.86, headA[1], headA[2]], pose);
-      const stbdTip = surfaceYardPoint(surface, [headB[0] * 0.86, headB[1], headB[2]], pose);
-      addCatenary(liftHead, portTip, 0.015, 0.013, 3, 7, 0.45);
-      addCatenary(liftHead, stbdTip, 0.015, 0.013, 3, 7, 0.45);
+      const liftHead = rec.anchor(mastAt(liftY));
+      rigCatenaryBetween(rec, liftHead, rec.anchor(surfaceYardPoint(surface, [headA[0] * 0.86, headA[1], headA[2]], pose)), 0.015, 0.013, 3, 7, 0.45);
+      rigCatenaryBetween(rec, liftHead, rec.anchor(surfaceYardPoint(surface, [headB[0] * 0.86, headB[1], headB[2]], pose)), 0.015, 0.013, 3, 7, 0.45);
     }
   }
   // Connect overhanging rear lateen sail (mizzen on Pinta & Santa María) to the stern outlicker & hull transom
@@ -970,10 +1007,116 @@ export function buildVesselRigConnectors(boat, time = 0, windSpeed = 8) {
     const hullEndZ = 6.0;
     const transomY = modelDeck(boat ?? { modelId }, 5.95) + 0.14;
     const quarterHalfBeam = Math.max(0.48, modelDeckWidth(boat ?? { modelId }, 5.95) * 0.72);
-    addSternOutlickerAndSheet(clewPos, hullEndZ, transomY, quarterHalfBeam, stern.z + 0.12, mastSectionLost(boat, rigCtx.masts?.[mizzenSurface.mast]?.z ?? 4, Infinity));
+    rigSternOutlickerAndSheet(rec, clewPos, hullEndZ, transomY, quarterHalfBeam, stern.z + 0.12, mastSectionLost(boat, rigCtx.masts?.[mizzenSurface.mast]?.z ?? 4, Infinity));
   }
+}
 
-  return new Float32Array(values);
+const rigConnectorTopologies = new Map();
+/** Static tube table and vertex mesh of one ship model's rig connectors. */
+export function rigConnectorTopology(modelId = 'nina') {
+  let topology = rigConnectorTopologies.get(modelId);
+  if (!topology) {
+    const recorded = { tubes: [], vertices: [], lines: 0 };
+    const rec = createRigConnectorRecorder(recorded, []);
+    traceRigConnectors({ modelId }, 0, 8, rec);
+    topology = Object.freeze({
+      modelId,
+      anchorCount: rec.count,
+      tubes: new Float32Array(recorded.tubes),
+      vertices: new Float32Array(recorded.vertices),
+      vertexCount: recorded.vertices.length / RIG_CONNECTOR_VERTEX_FLOATS,
+    });
+    rigConnectorTopologies.set(modelId, topology);
+  }
+  return topology;
+}
+
+/**
+ * Writes one vessel's anchors (vec4 each: design-space point, or a gate's visibility in w)
+ * into `anchors`, which must hold `rigConnectorTopology(model).anchorCount` of them.
+ * Returns false if the vessel's rig did not describe the model's anchors, which would
+ * otherwise draw tubes between the wrong points.
+ */
+export function writeRigConnectorAnchors(boat, time, windSpeed, anchors, recorder = createRigConnectorRecorder(null, anchors)) {
+  recorder.anchors = anchors;
+  traceRigConnectors(boat, time, windSpeed, recorder);
+  return recorder.count * 4 === anchors.length;
+}
+
+/** The sway the connector catenaries hang by: the live rope chain, else the hull's own heel and trim. */
+export function rigConnectorSway(boat, out = [0, 0]) {
+  const chain = resolveVesselRopeChain(boat);
+  out[0] = chain.active > 0 ? chain.swayX : -Math.sin(boat?.roll ?? 0);
+  out[1] = chain.active > 0 ? chain.swayZ : Math.sin(boat?.pitch ?? 0);
+  return out;
+}
+
+/**
+ * CPU mirror of rigConnectorVertex in RIG_CONNECTOR_WGSL: expands the static mesh into the
+ * design-space vertices the shader draws (position, normal, u, v, mode, 1), leaving out
+ * hidden tubes. The renderer never calls it; it is the oracle the shader is tested against.
+ */
+export function expandRigConnectors(topology, anchors, swayX, swayZ, time, windSpeed) {
+  const { tubes, vertices } = topology, out = [];
+  let current = -1, visible = false, radius0 = 0, radius1 = 0;
+  const a = [0, 0, 0], b = [0, 0, 0], across = [0, 0, 0], up = [0, 0, 0];
+  const pointOn = (from, to, t, sag, line, target) => {
+    const wave = evaluateRopeWaveDisplacement(from, to, t, line, sag * 1.35, swayX, swayZ, time, windSpeed);
+    target[0] = from[0] + (to[0] - from[0]) * t + wave[0];
+    target[1] = from[1] + (to[1] - from[1]) * t - 4 * t * (1 - t) * sag + wave[1];
+    target[2] = from[2] + (to[2] - from[2]) * t + wave[2];
+  };
+  for (let i = 0; i < vertices.length; i += RIG_CONNECTOR_VERTEX_FLOATS) {
+    const index = vertices[i];
+    if (index !== current) {
+      current = index;
+      const at = index * RIG_TUBE_FLOATS, ai = tubes[at + 3] * 4, bi = tubes[at + 7] * 4;
+      for (let k = 0; k < 3; k++) {
+        a[k] = anchors[ai + k] + tubes[at + k];
+        b[k] = anchors[bi + k] + tubes[at + 4 + k];
+      }
+      if (tubes[at + 8] >= 0) {
+        const from = [0, 0, 0], to = [0, 0, 0];
+        pointOn(a, b, tubes[at + 8], tubes[at + 10], tubes[at + 11], from);
+        pointOn(a, b, tubes[at + 9], tubes[at + 10], tubes[at + 11], to);
+        for (let k = 0; k < 3; k++) { a[k] = from[k]; b[k] = to[k]; }
+      }
+      radius0 = tubes[at + 12];
+      radius1 = tubes[at + 13];
+      const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2], span = Math.hypot(dx, dy, dz);
+      visible = anchors[tubes[at + 14] * 4 + 3] >= 0.5 && span >= 1e-5;
+      if (visible) {
+        const d = [dx / span, dy / span, dz / span];
+        const seed = Math.abs(d[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0];
+        const ux = d[1] * seed[2] - d[2] * seed[1], uy = d[2] * seed[0] - d[0] * seed[2], uz = d[0] * seed[1] - d[1] * seed[0];
+        const um = Math.hypot(ux, uy, uz) || 1;
+        across[0] = ux / um; across[1] = uy / um; across[2] = uz / um;
+        up[0] = d[1] * across[2] - d[2] * across[1];
+        up[1] = d[2] * across[0] - d[0] * across[2];
+        up[2] = d[0] * across[1] - d[1] * across[0];
+      }
+    }
+    if (!visible) continue;
+    const angle = vertices[i + 1] * Math.PI * 2, end = vertices[i + 2], c = Math.cos(angle), s = Math.sin(angle);
+    const radius = radius0 + (radius1 - radius0) * end;
+    const n = [across[0] * c + up[0] * s, across[1] * c + up[1] * s, across[2] * c + up[2] * s];
+    out.push(
+      a[0] + (b[0] - a[0]) * end + n[0] * radius,
+      a[1] + (b[1] - a[1]) * end + n[1] * radius,
+      a[2] + (b[2] - a[2]) * end + n[2] * radius,
+      n[0], n[1], n[2], vertices[i + 6], vertices[i + 7], vertices[i + 8], 1,
+    );
+  }
+  return new Float32Array(out);
+}
+
+/** Design-space rig connector vertices of one vessel, as the shader draws them (see expandRigConnectors). */
+export function buildVesselRigConnectors(boat, time = 0, windSpeed = 8) {
+  const topology = rigConnectorTopology(boat?.modelId ?? 'nina');
+  const anchors = new Float32Array(topology.anchorCount * 4);
+  if (!writeRigConnectorAnchors(boat, time, windSpeed, anchors)) throw Error('Rig connector anchors do not match the model');
+  const sway = rigConnectorSway(boat);
+  return expandRigConnectors(topology, anchors, sway[0], sway[1], time, windSpeed);
 }
 
 export async function createShipColorsRenderer({
@@ -1008,7 +1151,6 @@ export async function createShipColorsRenderer({
   });
   let mooringVertexCount = 0;
 
-  const maxRigConnectorVerts = 12288;
 
   const layout = [{
     arrayStride: 40,
@@ -1033,19 +1175,40 @@ export async function createShipColorsRenderer({
   const lighting = shadows.bind(pipeline);
   const slots = [];
   const axis = [0, 0, 0];
+  const sway = [0, 0];
 
-  for (let i = 0; i < maxVessels; i++) {
-    const poseData = new Float32Array(32);
-    const poseBuffer = device.createBuffer({
-      label: `ship colors pose ${i}`,
-      size: poseData.byteLength,
-      usage: B.UNIFORM | B.COPY_DST,
-    });
-    const rigVertexBuffer = device.createBuffer({
-      label: `ship rig connectors ${i}`,
-      size: maxRigConnectorVerts * 40,
-      usage: B.VERTEX | B.COPY_DST,
-    });
+  // Rig connectors: one static mesh and tube table per ship model, shared by every
+  // vessel of that model. A slot owns only its vessel's anchors.
+  const rigModels = new Map();
+  const noRigTubes = device.createBuffer({ label: 'ship rig connector tubes (none)', size: RIG_TUBE_FLOATS * 4, usage: B.STORAGE });
+  const noRigAnchors = device.createBuffer({ label: 'ship rig connector anchors (none)', size: 16, usage: B.STORAGE });
+  function rigModel(modelId) {
+    let model = rigModels.get(modelId);
+    if (!model) {
+      const topology = rigConnectorTopology(modelId);
+      model = { topology, vertexCount: topology.vertexCount, vertexBuffer: null, tubeBuffer: noRigTubes };
+      if (topology.vertexCount > 0) {
+        model.vertexBuffer = device.createBuffer({ label: 'ship rig connector mesh ' + modelId, size: topology.vertices.byteLength, usage: B.VERTEX | B.COPY_DST });
+        device.queue.writeBuffer(model.vertexBuffer, 0, topology.vertices);
+        model.tubeBuffer = device.createBuffer({ label: 'ship rig connector tubes ' + modelId, size: topology.tubes.byteLength, usage: B.STORAGE | B.COPY_DST });
+        device.queue.writeBuffer(model.tubeBuffer, 0, topology.tubes);
+      }
+      rigModels.set(modelId, model);
+    }
+    return model;
+  }
+  function bindSlot(slot, model) {
+    slot.rig = model;
+    slot.rigVertexCount = 0;
+    slot.anchorBuffer?.destroy();
+    slot.anchorBuffer = null;
+    if (model?.vertexCount > 0) {
+      const floats = model.topology.anchorCount * 4;
+      slot.anchorBuffer = device.createBuffer({ label: 'ship rig connector anchors ' + slot.index, size: floats * 4, usage: B.STORAGE | B.COPY_DST });
+      slot.anchors = new Float32Array(floats);
+      slot.anchorsSent = new Float32Array(floats).fill(NaN);
+      slot.recorder = createRigConnectorRecorder(null, slot.anchors);
+    }
     const resources = [
       { buffer: frameUBO },
       transView,
@@ -1053,13 +1216,26 @@ export async function createShipColorsRenderer({
       sampClamp,
       envCubeView,
       { buffer: sunVisBuf },
-      { buffer: poseBuffer },
+      { buffer: slot.poseBuffer },
+      { buffer: model?.tubeBuffer ?? noRigTubes },
+      { buffer: slot.anchorBuffer ?? noRigAnchors },
     ];
-    const bindGroup = device.createBindGroup({
+    slot.bindGroup = device.createBindGroup({
       layout: pipeline.getBindGroupLayout(0),
       entries: resources.map((resource, binding) => ({ binding, resource })),
     });
-    slots.push({ poseData, poseBuffer, rigVertexBuffer, rigVertexCount: 0, bindGroup, active: false });
+  }
+
+  for (let i = 0; i < maxVessels; i++) {
+    const poseData = new Float32Array(36);
+    const poseBuffer = device.createBuffer({
+      label: `ship colors pose ${i}`,
+      size: poseData.byteLength,
+      usage: B.UNIFORM | B.COPY_DST,
+    });
+    const slot = { index: i, poseData, poseBuffer, rig: null, rigVertexCount: 0, anchorBuffer: null, anchors: null, anchorsSent: null, recorder: null, bindGroup: null, active: false };
+    bindSlot(slot, null);
+    slots.push(slot);
   }
 
   return {
@@ -1120,14 +1296,27 @@ export async function createShipColorsRenderer({
       p[29] = stern.outlickerSpan ?? 0.5;
       p[30] = visMask;
       p[31] = 0;
+      rigConnectorSway(boat, sway);
+      p[32] = sway[0];
+      p[33] = sway[1];
 
       device.queue.writeBuffer(slot.poseBuffer, 0, p);
 
-      const rigVerts = buildVesselRigConnectors(boat, time ?? 0, windSpeed);
-      const rigCount = Math.min(maxRigConnectorVerts, Math.floor(rigVerts.length / 10));
-      slot.rigVertexCount = rigCount;
-      if (rigCount > 0) {
-        device.queue.writeBuffer(slot.rigVertexBuffer, 0, rigVerts.buffer, rigVerts.byteOffset, rigCount * 40);
+      // The connector mesh is static; only the anchors follow the rig, and they are
+      // uploaded when the rig has moved them and not otherwise.
+      const model = rigModel(boat.modelId ?? 'nina');
+      if (slot.rig !== model) bindSlot(slot, model);
+      slot.rigVertexCount = 0;
+      if (model.vertexCount > 0 && writeRigConnectorAnchors(boat, time ?? 0, windSpeed, slot.anchors, slot.recorder)) {
+        slot.rigVertexCount = model.vertexCount;
+        const anchors = slot.anchors, sent = slot.anchorsSent;
+        for (let k = 0; k < anchors.length; k++) {
+          if (anchors[k] !== sent[k]) {
+            device.queue.writeBuffer(slot.anchorBuffer, 0, anchors);
+            sent.set(anchors);
+            break;
+          }
+        }
       }
     },
     updateMooringVertices(verts) {
@@ -1151,7 +1340,7 @@ export async function createShipColorsRenderer({
         pass.setVertexBuffer(0, vertexBuffer);
         pass.draw(vertexCount);
         if (slots[i].rigVertexCount > 0) {
-          pass.setVertexBuffer(0, slots[i].rigVertexBuffer);
+          pass.setVertexBuffer(0, slots[i].rig.vertexBuffer);
           pass.draw(slots[i].rigVertexCount);
         }
       }
@@ -1166,8 +1355,14 @@ export async function createShipColorsRenderer({
       mooringVertexBuffer.destroy();
       for (const s of slots) {
         s.poseBuffer.destroy();
-        s.rigVertexBuffer.destroy();
+        s.anchorBuffer?.destroy();
       }
+      for (const model of rigModels.values()) {
+        model.vertexBuffer?.destroy();
+        if (model.tubeBuffer !== noRigTubes) model.tubeBuffer.destroy();
+      }
+      noRigTubes.destroy();
+      noRigAnchors.destroy();
     },
   };
 }

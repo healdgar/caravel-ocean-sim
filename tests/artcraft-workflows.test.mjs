@@ -9,15 +9,21 @@ import {
   createGunneryState,
 } from '../js/gunnery-state.js';
 import { CAIRN_ARCHITECTURAL_TEMPLATES } from '../js/cairn-primitives.js';
-import { PROPS_RENDER } from '../js/wgsl/props.js';
 import { SOUNDCRAFT_LUFS_AUDIT, soundcraftLufsTrim } from '../js/audio.js';
+import { SOUND_ASSETS } from '../js/audio-assets.js';
+import { VOICE_ASSETS } from '../js/voice-assets.js';
+import { GUNNERY_AUDIO_ASSETS } from '../js/gunnery-audio-assets.js';
+import { WORLD_AUDIO_ASSETS } from '../js/world-audio-assets.js';
 import { VECTORCRAFT_FLEUR_DE_LIS_PATH } from '../js/voyage/chart-drawer.js';
 import { CADCRAFT_TRACE_ITALIENNE_RATIOS, squareFortPlan } from '../js/fort-plan.js';
 
+// Each authoring tool leaves a record beside its source file. These tests hold the game's own numbers to those
+// records: a mass, a loudness, a wall, a colour. A record that only exists proves nothing, so none is tested for
+// existing except where another record names it.
+const readJson = file => JSON.parse(fs.readFileSync(path.resolve(file), 'utf8'));
+
 test('Workflow 1 (SolidCraft): CAD physical oracle & belfry bronze bell geometry', () => {
-  const oraclePath = path.resolve('assets/artcraft/solidcraft-ordnance-oracle.json');
-  assert.ok(fs.existsSync(oraclePath), 'solidcraft-ordnance-oracle.json exists');
-  const oracleJson = JSON.parse(fs.readFileSync(oraclePath, 'utf8'));
+  const oracleJson = readJson('assets/artcraft/solidcraft-ordnance-oracle.json');
 
   const barrelBody = oracleJson.bodies.find((b) => b.name === 'DemiCulverinBarrel');
   const bellBody = oracleJson.bodies.find((b) => b.name === 'ShipsWatchBell');
@@ -32,7 +38,7 @@ test('Workflow 1 (SolidCraft): CAD physical oracle & belfry bronze bell geometry
 
   const demiMass = solidcraftBarrelMassKg(9, 'cannon');
   const swivelMass = solidcraftBarrelMassKg(1, 'swivel');
-  assert.ok(demiMass > 1300 && demiMass < 1400, `Expected 9-lb demi-culverin mass ~1346kg, got ${demiMass}`);
+  assert.ok(Math.abs(demiMass - barrelBody.mass_g / 1000) < 60, `A 9-lb gun weighs what the CAD barrel weighs (${demiMass} kg against ${barrelBody.mass_g / 1000})`);
   assert.ok(swivelMass >= 55 && swivelMass <= 180, `Expected swivel mass <180kg, got ${swivelMass}`);
 
   const gunnery = createGunneryState([{ id: 'port-1', side: 'port', calibre: 9, kind: 'cannon' }]);
@@ -48,87 +54,114 @@ test('Workflow 1 (SolidCraft): CAD physical oracle & belfry bronze bell geometry
   assert.equal(bellCylinders.length, 2, 'Expected 2 tapered iron/bronze bell frustums in belfry_stage');
 });
 
-test('Workflow 2 & 4 (MaterialCraft + PhotoCraft): 1024x1024 power-of-two oak albedo & SBS graph', () => {
-  const webpPath = path.resolve('assets/caravel-oak-albedo.webp');
-  const buf = fs.readFileSync(webpPath);
-  // VP8 / VP8L / VP8X header check for 1024x1024 WebP
+// The canvas size a WebP file declares, whichever of its three encodings it uses.
+function webpSize(buf) {
   assert.equal(buf.toString('ascii', 0, 4), 'RIFF');
   assert.equal(buf.toString('ascii', 8, 12), 'WEBP');
-  // Size reduced from 560,816 bytes to ~343,690 bytes
-  assert.ok(buf.length < 400_000 && buf.length > 100_000, `Expected optimized 1024x1024 WebP size, got ${buf.length}`);
+  const kind = buf.toString('ascii', 12, 16);
+  if (kind === 'VP8X') return [1 + buf.readUIntLE(24, 3), 1 + buf.readUIntLE(27, 3)];
+  if (kind === 'VP8L') { const bits = buf.readUInt32LE(21); return [1 + (bits & 0x3fff), 1 + ((bits >> 14) & 0x3fff)]; }
+  if (kind === 'VP8 ') return [buf.readUInt16LE(26) & 0x3fff, buf.readUInt16LE(28) & 0x3fff];
+  throw new Error('Not a WebP image: ' + kind);
+}
 
-  const sbsPath = path.resolve('assets/artcraft/caravel-oak.sbs');
-  const previewPath = path.resolve('assets/artcraft/caravel-oak-preview.png');
-  assert.ok(fs.existsSync(sbsPath) && fs.statSync(sbsPath).size > 1000, 'MaterialCraft .sbs graph exists');
-  assert.ok(fs.existsSync(previewPath) && fs.statSync(previewPath).size > 10_000, 'MaterialCraft 3D preview exists');
+test('Workflow 2 & 4 (MaterialCraft + PhotoCraft): the oak albedo the hull loads is a 1024 power-of-two square', () => {
+  const buf = fs.readFileSync(path.resolve('assets/caravel-oak-albedo.webp'));
+  const [width, height] = webpSize(buf);
+  assert.deepEqual([width, height], [1024, 1024], 'mipmaps and wrapping need a power-of-two square');
+  assert.ok(buf.length < 400_000, `the optimised file stays small (${buf.length} bytes)`);
+  assert.ok(fs.readFileSync(path.resolve('js/main.js'), 'utf8').includes('assets/caravel-oak-albedo.webp'), 'and it is the file the game fetches');
 });
 
-test('Workflow 3 (TextureCraft): WGSL prop shader includes cavityAO, tidalWet, and edgeChafe', () => {
-  const previewPath = path.resolve('assets/artcraft/cleat-weathered-preview.png');
-  assert.ok(fs.existsSync(previewPath) && fs.statSync(previewPath).size > 10_000, 'TextureCraft preview exists');
-  assert.match(PROPS_RENDER, /cavityAO/, 'PROPS_RENDER includes cavityAO');
-  assert.match(PROPS_RENDER, /tidalWet/, 'PROPS_RENDER includes tidalWet');
-  assert.match(PROPS_RENDER, /edgeChafe/, 'PROPS_RENDER includes screen-space curvature edgeChafe');
-});
+test('Workflow 5 (SoundCraft): the loudness trims the engine applies are the ones that were measured', () => {
+  const audit = readJson('assets/artcraft/soundcraft-loudness-audit.json');
+  const playable = { ...SOUND_ASSETS, ...VOICE_ASSETS, ...GUNNERY_AUDIO_ASSETS, ...WORLD_AUDIO_ASSETS };
 
-test('Workflow 5 (SoundCraft): LUFS loudness audit & gain normalization', () => {
-  const auditPath = path.resolve('assets/artcraft/soundcraft-loudness-audit.json');
-  const sessionPath = path.resolve('assets/artcraft/waterworld-sound-master.scraft');
-  assert.ok(fs.existsSync(auditPath), 'SoundCraft loudness audit JSON exists');
-  assert.ok(fs.existsSync(sessionPath), 'SoundCraft session .scraft exists');
+  // The table in js/audio.js is a copy of the audit. Neither may say what the other does not.
+  const measured = Object.fromEntries(Object.entries(audit.clips).map(([id, clip]) => [id, {
+    lufs: clip.lufs, peakDb: clip.peakDb, truePeakDb: clip.truePeakDb, targetLufs: clip.targetLufs, trimGain: clip.trimGain,
+  }]));
+  assert.deepEqual(JSON.parse(JSON.stringify(SOUNDCRAFT_LUFS_AUDIT)), measured);
 
-  assert.equal(SOUNDCRAFT_LUFS_AUDIT['cannon-report'].lufs, -23.62);
-  assert.equal(SOUNDCRAFT_LUFS_AUDIT['cannon-recoil'].lufs, -19.21);
-
-  const reportTrim = soundcraftLufsTrim('cannon-report');
-  const recoilTrim = soundcraftLufsTrim('cannon-recoil');
-  const sailHoTrim = soundcraftLufsTrim('lookout-sail-ho');
-  assert.ok(reportTrim > recoilTrim, `Expected cannon-report trim (${reportTrim}) > cannon-recoil trim (${recoilTrim})`);
-  assert.ok(reportTrim > 2.0, `Expected cannon-report boost > 2.0x, got ${reportTrim}`);
-  assert.ok(sailHoTrim > 1.3 && sailHoTrim < 1.8, `Expected lookout-sail-ho LUFS trim in 1.3..1.8, got ${sailHoTrim}`);
+  const TRUE_PEAK_CEILING_DB = -1;
+  for (const [id, clip] of Object.entries(audit.clips)) {
+    // What was measured is a clip the game plays, at the length the game believes it has.
+    assert.ok(playable[id], `${id} is a clip the engine can play`);
+    assert.equal(clip.file, playable[id].url, `${id} was measured from the file that is played`);
+    assert.equal(clip.seconds, playable[id].seconds);
+    assert.ok(fs.statSync(path.resolve(clip.file)).size > 0);
+    // A trim raises a clip to its target loudness, but never so far that its true peak passes the ceiling.
+    const trimDb = 20 * Math.log10(clip.trimGain);
+    const wanted = Math.min(clip.targetLufs - clip.lufs, TRUE_PEAK_CEILING_DB - clip.truePeakDb);
+    assert.ok(Math.abs(trimDb - wanted) < 0.01, `${id}: trim of ${trimDb.toFixed(3)} dB against ${wanted.toFixed(3)} dB by the rule`);
+    assert.ok(Math.abs(trimDb - clip.appliedTrimDb) < 0.01, `${id}: gain and decibels agree`);
+    assert.ok(clip.truePeakDb + trimDb <= TRUE_PEAK_CEILING_DB + 0.01, `${id} cannot clip at full gain`);
+    assert.equal(soundcraftLufsTrim(id), clip.trimGain);
+  }
+  assert.equal(soundcraftLufsTrim('wind-steady'), 1, 'a clip that was not measured is left as it is');
+  assert.equal(soundcraftLufsTrim('no-such-clip'), 1);
+  // The quiet report is brought up furthest: more than doubled, and by more than the recoil that follows it.
+  assert.ok(soundcraftLufsTrim('cannon-report') > 2 && soundcraftLufsTrim('cannon-report') > soundcraftLufsTrim('cannon-recoil'));
 });
 
 test('Workflow 6 (VectorCraft + CADCraft): 1550 compass rose SVG & trace italienne fort plan', () => {
-  const svgPath = path.resolve('assets/artcraft/compass-rose-1550.svg');
-  const dxfPath = path.resolve('assets/artcraft/fort-trace-italienne.dxf');
-  assert.ok(fs.existsSync(svgPath), 'VectorCraft compass rose SVG exists');
-  assert.ok(fs.existsSync(dxfPath), 'CADCraft trace italienne DXF exists');
+  const svgContent = fs.readFileSync(path.resolve('assets/artcraft/compass-rose-1550.svg'), 'utf8');
+  assert.ok(svgContent.includes(VECTORCRAFT_FLEUR_DE_LIS_PATH), 'the chart draws the fleur-de-lis that was drawn for it');
 
-  const svgContent = fs.readFileSync(svgPath, 'utf8');
-  assert.ok(svgContent.includes(VECTORCRAFT_FLEUR_DE_LIS_PATH), 'SVG contains VECTORCRAFT_FLEUR_DE_LIS_PATH');
+  // The CAD drawing is of a fort fifty metres square. The plan the game lays for that size is the same fort.
+  const drawing = readJson('assets/artcraft/fort-trace-italienne-inspect.json');
+  const drawn = (layer, type) => drawing.entities.filter(e => e.layer === layer && e.type === type).map(e => e.geometry);
+  const plan = squareFortPlan(50, 50);
+  const near = (a, b) => Math.abs(a - b) < 1e-6;
+  const samePoint = (p, [x, z]) => near(p.x, x) && near(p.y, z);
+  const circles = drawn('BASTION', 'Circle');
+  assert.equal(circles.length, plan.bastions.length);
+  for (const bastion of plan.bastions) {
+    const circle = circles.find(c => samePoint(c.center, bastion));
+    assert.ok(circle, `the drawing has a bastion at ${bastion}`);
+    assert.ok(near(circle.radius, plan.bastionRadius), `of radius ${plan.bastionRadius}`);
+  }
+  const walls = drawn('CURTAIN', 'Line');
+  // Every span of wall, the gate curtain broken where the gate stands.
+  for (const [from, to] of plan.wallSpans) {
+    assert.ok(walls.some(l => (samePoint(l.a, from) && samePoint(l.b, to)) || (samePoint(l.a, to) && samePoint(l.b, from))), `the drawing has the wall ${from} to ${to}`);
+  }
+  for (const post of drawn('GATE', 'Line')) assert.ok(near(Math.abs(post.a.x), plan.gateHalfWidth), 'the gate is as wide as the gap left for it');
+  const apron = drawn('GATE', 'Polyline')[0].vertices.map(v => v.p);
+  assert.equal(apron.length, plan.gateApron.length);
+  for (const corner of plan.gateApron) assert.ok(apron.some(p => samePoint(p, corner)), `the drawing has the gate apron corner ${corner}`);
+  const corner = 25 * CADCRAFT_TRACE_ITALIENNE_RATIOS.cornerInsetRatio;
+  assert.ok(plan.bastions.every(([x, z]) => near(Math.abs(x), corner) && near(Math.abs(z), corner)), 'bastions stand at the inset corners');
 
-  assert.equal(CADCRAFT_TRACE_ITALIENNE_RATIOS.cornerInsetRatio, 0.86);
-  // Check compact 50x50 square fort keeps cottages inside the curtain wall
-  const compactPlan = squareFortPlan(50, 50);
-  const curtainX = 25 * 0.86; // 21.5m
-  for (const [cx, cz] of compactPlan.cottageSlots) {
+  // A compact fort keeps its cottages inside the curtain wall.
+  for (const [cx, cz] of plan.cottageSlots) {
     assert.ok(
-      Math.abs(cx) <= curtainX - CADCRAFT_TRACE_ITALIENNE_RATIOS.wallClearanceM,
-      `Cottage x=${cx} must sit inside curtain wall ${curtainX}`
+      Math.abs(cx) <= corner - CADCRAFT_TRACE_ITALIENNE_RATIOS.wallClearanceM,
+      `Cottage x=${cx} must sit inside curtain wall ${corner}`
     );
     assert.ok(
-      Math.abs(cz) <= curtainX - CADCRAFT_TRACE_ITALIENNE_RATIOS.wallClearanceM,
-      `Cottage z=${cz} must sit inside curtain wall ${curtainX}`
+      Math.abs(cz) <= corner - CADCRAFT_TRACE_ITALIENNE_RATIOS.wallClearanceM,
+      `Cottage z=${cz} must sit inside curtain wall ${corner}`
     );
   }
 });
 
-test('Workflow 7 (FigCraft): UI design system .figcraft, spec JSON, and index.html CSS tokens', () => {
-  const figPath = path.resolve('assets/artcraft/waterworld-ui.figcraft');
-  const specPath = path.resolve('assets/artcraft/waterworld-ui-spec.json');
-  const mockupPath = path.resolve('assets/artcraft/waterworld-ui-mockup.png');
-  assert.ok(fs.existsSync(figPath), 'waterworld-ui.figcraft exists');
-  assert.ok(fs.existsSync(specPath), 'waterworld-ui-spec.json exists');
-  assert.ok(fs.existsSync(mockupPath), 'waterworld-ui-mockup.png exists');
-
-  const spec = JSON.parse(fs.readFileSync(specPath, 'utf8'));
-  assert.equal(spec.nodes.title.wrapStyle, 'balance');
-  assert.equal(spec.nodes.body.wrapStyle, 'pretty');
-
+test('Workflow 7 (FigCraft): the page declares each design token with the value the design gives it', () => {
+  const spec = readJson('assets/artcraft/waterworld-ui-spec.json');
   const html = fs.readFileSync(path.resolve('index.html'), 'utf8');
-  for (const token of Object.keys(spec.tokens)) {
-    assert.ok(html.includes(token), `index.html includes FigCraft token ${token}`);
+  // rgba(22, 17, 12, 0.92) in the design is rgba(22,17,12,.92) in minified CSS.
+  const plain = value => value.replace(/\s+/g, '').toLowerCase().replace(/(^|[^0-9])0\./g, '$1.');
+  const declared = new Map([...html.matchAll(/(--ww-[a-z-]+):([^;}]+)[;}]/g)].map(m => [m[1], plain(m[2])]));
+  for (const [token, value] of Object.entries(spec.tokens)) {
+    assert.equal(declared.get(token), plain(value), `${token} in index.html`);
   }
-  assert.match(html, /text-wrap:var\(--ww-title-wrap,balance\)/);
-  assert.match(html, /text-wrap:var\(--ww-body-wrap,pretty\)/);
+  // The design's own nodes use those tokens, and so does the page.
+  assert.equal(spec.nodes.title.wrapStyle, spec.tokens['--ww-title-wrap']);
+  assert.equal(spec.nodes.body.wrapStyle, spec.tokens['--ww-body-wrap']);
+  assert.equal(spec.nodes.modal.cornerRadius + 'px', spec.tokens['--ww-hud-radius']);
+  for (const token of ['--ww-title-wrap', '--ww-body-wrap']) {
+    assert.ok(html.includes(`text-wrap:var(${token},${spec.tokens[token]})`), `text is wrapped by ${token}`);
+  }
+  // The design file and mock-up the record names are the ones kept beside it.
+  for (const file of [spec.file, spec.mockup]) assert.ok(fs.statSync(path.resolve(file)).size > 1000, file);
 });

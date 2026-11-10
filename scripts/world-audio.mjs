@@ -9,9 +9,22 @@ import { editAudio, generateSound, resolveAudioKey, reviewWave } from './audio.m
 import { paidRequest, speechRequest } from './voices.mjs';
 
 const WORKTREE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const MAIN_AUDIO_ROOT = existsSync('/Users/alexwall/dev/waterworld/.env.local')
-  ? '/Users/alexwall/dev/waterworld'
-  : WORKTREE_ROOT;
+// Unversioned takes (.audio/) and the key file live in the main checkout. Run from a git
+// worktree, that is the directory holding the shared .git directory; nothing is assumed
+// about where the repository sits on disk.
+export function worldAudioRoot(worktreeRoot, gitCommonDir) {
+  const common = String(gitCommonDir ?? '').trim();
+  if (!common || path.basename(common) !== '.git') return worktreeRoot;
+  return path.dirname(path.resolve(worktreeRoot, common));
+}
+function gitCommonDirOf(cwd) {
+  try {
+    return execFileSync('git', ['rev-parse', '--git-common-dir'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch {
+    return '';
+  }
+}
+const MAIN_AUDIO_ROOT = worldAudioRoot(WORKTREE_ROOT, gitCommonDirOf(WORKTREE_ROOT));
 const WORLD_TAKE_DIR = path.join(MAIN_AUDIO_ROOT, '.audio/world');
 const PILOT_TAKE_DIR = path.join(MAIN_AUDIO_ROOT, '.audio/pilot');
 
@@ -54,13 +67,17 @@ export async function generateWorldAudio({
         await fs.writeFile(
           dstJson,
           JSON.stringify(
+            // No generation record survives for this pilot take: say so rather than
+            // inventing a model and prompt for it.
             {
               id: item.id,
               take,
               status: 'complete',
               bytes: bytes.length,
               sha256: worldHash(bytes),
-              request: { model_id: 'eleven_text_to_sound_v2', text: item.sourceTake },
+              provenance: 'unknown',
+              reusedTake: item.sourceTake,
+              request: null,
             },
             null,
             2
@@ -220,20 +237,11 @@ export async function promoteWorldAudio({
       sex: recipe.sex ?? null,
       seconds: +seconds.toFixed(3),
     };
-    provenance.push({
-      id,
-      take,
-      category: recipe.category,
-      provider: 'ElevenLabs',
-      model: record.request?.model_id ?? 'eleven_text_to_sound_v2',
-      voiceId: recipe.voiceId ?? null,
-      text: recipe.text ?? null,
-      prompt: recipe.prompt ?? null,
+    provenance.push(worldProvenanceEntry(recipe, record, take, {
       seconds: +seconds.toFixed(3),
-      sourceSha256: record.sha256,
       sha256: worldHash(bytes),
       bytes: bytes.length,
-    });
+    }));
   }
   await fs.writeFile(path.join(out, 'provenance.json'), JSON.stringify(provenance, null, 2) + '\n');
   await fs.writeFile(
@@ -248,6 +256,29 @@ export async function promoteWorldAudio({
       bytes: provenance.reduce((s, a) => s + a.bytes, 0),
     })
   );
+}
+
+// What is recorded about where a promoted clip came from. Only what the take's own record
+// states is asserted; anything it does not state is 'unknown'.
+export function worldProvenanceEntry(recipe, record, take, measured = {}) {
+  const request = record?.request ?? null;
+  const known = Boolean(request) && record?.provenance !== 'unknown';
+  const spoken = recipe.kind === 'voice';
+  return {
+    id: recipe.id,
+    take,
+    category: recipe.category,
+    provider: known ? 'ElevenLabs' : 'unknown',
+    model: known ? request.model_id ?? 'unknown' : 'unknown',
+    voiceId: recipe.voiceId ?? null,
+    text: spoken ? request?.text ?? recipe.text ?? null : null,
+    prompt: spoken ? null : known ? request.text ?? recipe.prompt ?? null : null,
+    ...(recipe.kind === 'pilot-reuse' ? { reusedTake: recipe.sourceTake } : {}),
+    seconds: measured.seconds,
+    sourceSha256: record?.sha256 ?? null,
+    sha256: measured.sha256,
+    bytes: measured.bytes,
+  };
 }
 
 async function main(args) {

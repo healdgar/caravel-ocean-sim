@@ -223,6 +223,8 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
   return {
     get people() { return crowd?.people ?? 0; },
     // Whichever town with ways is nearest the eye, once in a while.
+    // The share of each town's people that is drawn, for whoever must agree with the picture: their footsteps.
+    share: isMobile ? MOBILE_SHARE : 1,
     follow(ports, camera) {
       if (frameCount++ % PORT_CHECK_FRAMES) return;
       let best = null, bestDistance = PORT_REACH_M;

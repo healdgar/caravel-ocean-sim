@@ -450,8 +450,8 @@ export function createVictoryMesh({groups,parts}={}){
   group('bow.grating','hull',gratingStart);
   // Bowsprit, jibboom and flying jibboom are stepped spars, not an oversize mast.
   const bowspritStart=out.length;
-  tube([0,2.1,-4.8],[0,3.06,-8.25],.14,1,.075,16);
-  tube([0,2.92,-7.75],[0,3.28,-10.56],.062,1,.022,12);
+  tube([0,2.1,-4.8],[0,3.06,-8.25],.14,10,.075,16);
+  tube([0,2.92,-7.75],[0,3.28,-10.56],.062,10,.022,12);
   tube([0,2.88,-8.0],[0,1.78,-8.0],.035,20,.025,8);
   for(const side of [-1,1])for(const end of [-8.2,-10.5]){
     const z=-5.55,y=.88+victorySheer(z),root=[side*victoryHullHalfWidth(z,y),y,z];
@@ -533,13 +533,14 @@ export function createVictoryMesh({groups,parts}={}){
   // trestletrees, crosstrees and rope-rung shrouds.
   for(const [index,m]of VICTORY_MASTS.entries()){
     const trunkStart=out.length,foot=victoryMastPoint(index,victoryVesselDeck(m.z));
-    tube(victoryMastPoint(index,-.42),foot,m.radius*.96,1,m.radius*.94,10);
+    tube(victoryMastPoint(index,-.42),foot,m.radius*.96,10,m.radius*.94,10);
     group('mast.trunk.'+m.id,'mast.'+m.id,trunkStart);
     const start=out.length,stumpTop=victoryMastPoint(index,foot[1]+.38),shaftBot=victoryMastPoint(index,foot[1]+.382);
     tube(foot,stumpTop,m.radius,21,m.radius*.96,18);
     tube(shaftBot,victoryMastPoint(index,m.platform+.48),m.radius*.95,21,m.radius*.72,18);
-    tube(victoryMastPoint(index,m.platform-.25),victoryMastPoint(index,m.topmastPlatform+.3),m.radius*.58,1,m.radius*.34,14);
-    tube(victoryMastPoint(index,m.topmastPlatform-.22),victoryMastPoint(index,m.height),m.radius*.29,1,.015,10);
+    // Topmast and topgallant mast are bare spars (material 10); the lower mast is painted.
+    tube(victoryMastPoint(index,m.platform-.25),victoryMastPoint(index,m.topmastPlatform+.3),m.radius*.58,10,m.radius*.34,14);
+    tube(victoryMastPoint(index,m.topmastPlatform-.22),victoryMastPoint(index,m.height),m.radius*.29,10,.015,10);
     for(let y=foot[1]+.25;y<m.platform;y+=.3){const p=victoryMastPoint(index,y);ring(p,m.radius*.97,.009,20,'y',12);}
     for(const [height,r]of [[m.platform,.53],[m.topmastPlatform,.29]]){
       const p=victoryMastPoint(index,height),corners=Array.from({length:8},(_,i)=>{const a=i*Math.PI/4;return [Math.cos(a)*r,height,p[2]+Math.sin(a)*r*.72];});

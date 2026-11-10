@@ -9,6 +9,7 @@ import { SAIL_PLAN, lateenClothPoint, lateenYardPoint } from './lateen.js';
 import {additionalDesign,additionalDeck} from './models/additional.js';
 import {additionalRigContext} from './additional-rig.js';
 import {rigSurfacePose,surfaceClothPoint,surfaceYardPoint,surfaceRopePoint} from './rig-surface.js';
+import {resolveVesselRopeChain} from './rope-wave.js';
 import {createProceduralShipDefinition,resolveProceduralShipNode} from './procedural-models.js';
 
 const MAST_IDS=['fore','main','mizzen'];
@@ -209,7 +210,7 @@ export function resolveShipNode(boat,nodeId,{space='vessel',time=0,wind=0,side=-
     }else if(motion?.type==='surface-working-fall'){
       const line=context.lines.find(l=>l.kind==='working-fall'&&l.mast===motion.mast);
       if(!line)throw Error('Missing '+model.id+' physical working fall');
-      const t=height>0?Math.max(0,Math.min(1,(height-line.a[1])/(line.b[1]-line.a[1]))):1;p=surfaceRopePoint(line,t,{...context,state:boat.sailState??{},time,wind});
+      const t=height>0?Math.max(0,Math.min(1,(height-line.a[1])/(line.b[1]-line.a[1]))):1;p=surfaceRopePoint(line,t,{...context,state:boat.sailState??{},time,wind,ropeChain:resolveVesselRopeChain(boat)});
     }else if(motion?.type==='surface-tiller'||motion?.type==='surface-tiller-grip'){
       const base=motion.type==='surface-tiller-grip'?[d.steering.handle[0],d.steering.handle[1],d.steering.handle[2]+along/(boat.length/d.frame.length)]:node.position;
       const q=delta(base,d.steering.pivot);p=[d.steering.pivot[0]+Math.cos(angle)*q[0]+Math.sin(angle)*q[2],base[1],d.steering.pivot[2]-Math.sin(angle)*q[0]+Math.cos(angle)*q[2]];
@@ -252,8 +253,8 @@ export function resolveShipNode(boat,nodeId,{space='vessel',time=0,wind=0,side=-
     const mast=n.motion?.mast,poses=boat.sailState?.rig,pose=poses?.[mast]??{side:-1,opening:.30,dip:0,fill:0,deployed:1,pressure:1};
     if(n.motion?.type==='lateen-cloth')return lateenClothPoint(mast,n.motion.u,n.motion.v,pose,time,wind,true,poses);
     if(n.motion?.type==='lateen-yard')return lateenYardPoint(mast,n.motion.point,pose);
-    if(n.motion?.type==='runner')return climbingPoint(mast,side,step,poses?.[mast]);
-    if(n.motion?.type==='working-fall')return workingTacklePoint(mast,height);
+    if(n.motion?.type==='runner')return climbingPoint(mast,side,step,poses?.[mast],{chain:resolveVesselRopeChain(boat),time,wind});
+    if(n.motion?.type==='working-fall')return workingTacklePoint(mast,height,{chain:resolveVesselRopeChain(boat),time,wind});
     if(n.motion?.type==='tiller-grip'){const p=tillerPoint(boat,along);return [p[0]/(boat.beam/model.designFrame.beam),p[1]/model.designFrame.verticalScale,p[2]/(boat.length/model.designFrame.length)];}
     if(n.motion)throw Error('Unknown structure motion: '+n.motion.type);
     const p=[...n.position],parent=n.parent===null?null:position(model.nodes[n.parent]);

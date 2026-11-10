@@ -133,7 +133,7 @@ test('timber carries the Niña’s grain at the same size in metres',()=>{
 
 test('masts carry their grain up the spar, not around it',()=>{
   for(const id of NEW_SHIPS){
-    const mast=vertices(built(id).parts.get('mast.main')).filter(v=>v[6]===1&&Math.hypot(v[3],v[5])>.9);
+    const mast=vertices(built(id).parts.get('mast.main')).filter(v=>v[6]===10&&Math.hypot(v[3],v[5])>.9);assert.ok(mast.length>0,id+' main mast is built in the spar material');
     const dv=Math.max(...mast.map(v=>v[8]))-Math.min(...mast.map(v=>v[8])),du=Math.max(...mast.map(v=>v[7]))-Math.min(...mast.map(v=>v[7]));
     assert.ok(dv>du*3,`${id} main mast v spans ${dv.toFixed(2)}, u ${du.toFixed(2)}`);
   }
