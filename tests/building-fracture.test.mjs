@@ -2,7 +2,7 @@
 // Hits must take blocks off a building, not pull its vertices around. They land on the ground, and what they held up comes down.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { applyBuildingFractureEvents, BUILDING_SHARD_KINDS, buildingFractureStateOf, footingUnder, prepareBuildingFracture, prepareBuildingFractureSteps, replayBuildingFracture, supportScan, traceShotThroughBreach } from '../js/building-fracture.js';
+import { applyBuildingFractureEvents, BUILDING_SHARD_KINDS, buildingFractureStateOf, buildingKindWithYaw, footingUnder, prepareBuildingFracture, prepareBuildingFractureSteps, replayBuildingFracture, restingHeightUnder, supportScan, traceShotThroughBreach } from '../js/building-fracture.js';
 import { getBuildingParts, PORT_PREFABS } from '../js/coastal-world.js';
 import { evaluateShardFlight, FRACTURE_RECORD_FLOATS, settleFinishedFlights } from '../js/ship-fracture.js';
 import { applyBuildingImpactDamage, classifyBuildingMaterial, createBuildingDamageState, createGunnerySolidSweep, sweepBuildingSegment } from '../js/gunnery-control.js';
@@ -448,11 +448,12 @@ function garrisoned(prefabId, ground = 0) {
   const state = buildingFractureStateOf(instance.damageState, fracture);
   return { ...built, port, garrison, state, soldiers: garrison.soldiers };
 }
-// Knock out whatever is under a point, as if a shot had taken it.
-function breakUnder(state, x, y, z, reach = 0.2) {
+// Knock out whatever stands under a point, as if a shot had taken it. The paving of a deck is the floor itself,
+// not something standing on it, and goes only when asked for.
+function breakUnder(state, x, y, z, reach = 0.2, { paving = false } = {}) {
   let broken = 0;
   for (const shard of state.fracture.shards) {
-    if (!shard || state.broken[shard.index]) continue;
+    if (!shard || state.broken[shard.index] || (shard.floorSlab && !paving)) continue;
     const lo = shard.localMin, hi = shard.localMax;
     if (lo[1] > y + 0.2 || hi[1] < y - 1.1 || x < lo[0] - reach || x > hi[0] + reach || z < lo[2] - reach || z > hi[2] + reach) continue;
     state.broken[shard.index] = 1;
@@ -515,6 +516,100 @@ test('men on a fort\'s deck step down to it, but do not fall, when the parapet g
   for (const s of soldiers) if (s.casualtyState !== 'fallen') assert.ok(s.baseLy <= levels.get(s) + 1e-6, 'nobody rises');
   const down = soldiers.filter((s) => s.casualtyState === 'fallen');
   assert.ok(down.every((s) => footingUnder(state, s.lx, levels.get(s), s.lz).floor === null), 'only those with no floor left fall');
+});
+
+test('a deck shot away under a man is a hole: he falls through it, and so does whatever comes down there after', () => {
+  const { state, garrison, soldiers, fracture } = garrisoned('stone_sea_bastion');
+  const onDeck = soldiers.filter((s) => { const f = footingUnder(state, s.lx, s.ly, s.lz); return f.stands && f.floor !== null; });
+  assert.ok(onDeck.length >= 1, `${onDeck.length} men stand on the paving`);
+  const doomed = onDeck[0], deck = doomed.ly, others = soldiers.filter((s) => Math.hypot(s.lx - doomed.lx, s.lz - doomed.lz) > 4);
+  assert.ok(others.length, 'someone stands well away from him');
+  const standing = new Map(others.map((s) => [s, footingUnder(state, s.lx, s.ly, s.lz).stands]));
+  // A slab of the same deck, well away from him.
+  const far = fracture.shards.find((shard) => shard?.floorSlab && Math.abs(shard.floorLevel - doomed.ly) < 0.6 && Math.hypot((shard.localMin[0] + shard.localMax[0]) / 2 - doomed.lx, (shard.localMin[2] + shard.localMax[2]) / 2 - doomed.lz) > 5);
+  assert.ok(far, 'the deck is paved in more than one slab');
+  const [wx, , wz] = fracture.toWorld(doomed.lx, deck, doomed.lz);
+  assert.ok(Math.abs(restingHeightUnder(state, wx, wz, deck + 0.2) - deck) < 0.3, 'whole, the deck is what rubble lands on');
+  // The paving under him goes, and nothing else.
+  let taken = 0;
+  for (const shard of fracture.shards) {
+    if (!shard?.floorSlab || state.broken[shard.index]) continue;
+    const lo = shard.localMin, hi = shard.localMax;
+    if (doomed.lx < lo[0] - 0.6 || doomed.lx > hi[0] + 0.6 || doomed.lz < lo[2] - 0.6 || doomed.lz > hi[2] + 0.6 || Math.abs(hi[1] - deck) > 0.6) continue;
+    state.broken[shard.index] = 1; state.brokenCount++; taken++;
+  }
+  assert.ok(taken > 0, 'there was paving under him');
+  assert.ok(Math.abs(fracture.floorAt(wx, wz, deck + 0.2) - deck) < 0.3, 'as built, there was a deck here');
+  const under = fracture.floorAt(wx, wz, deck + 0.2, state.broken);
+  assert.ok(under < deck - 1.5, `with its slabs gone the deck is no floor: what is left lies at ${under}, the deck at ${deck}`);
+  assert.ok(restingHeightUnder(state, wx, wz, deck + 0.2) < deck - 1.5, 'so rubble coming down there lands below, not on air');
+  const footing = footingUnder(state, doomed.lx, deck, doomed.lz);
+  assert.deepEqual([footing.stood, footing.stands], [true, false], 'he had a floor and has none');
+  for (const s of others) assert.equal(footingUnder(state, s.lx, s.ly, s.lz).stands, standing.get(s), 'nobody else has lost his footing');
+  const [fx, , fz] = fracture.toWorld((far.localMin[0] + far.localMax[0]) / 2, deck, (far.localMin[2] + far.localMax[2]) / 2);
+  assert.ok(Math.abs(fracture.floorAt(fx, fz, deck + 0.2, state.broken) - far.floorLevel) < 1e-6, 'the paving away from the breach still holds');
+  state.flying.add(1);
+  stepFortGarrison(garrison, 0.016);
+  assert.equal(doomed.casualtyState, 'fallen', 'he goes down through it');
+  for (let i = 0; i < 200 && doomed.garrisonFall; i++) stepFortGarrison(garrison, 0.05);
+  assert.ok(doomed.baseLy < deck - 1.5, `and comes to rest below the deck (${doomed.baseLy.toFixed(2)} from ${deck.toFixed(2)})`);
+  for (const s of others) assert.notEqual(s.casualtyState, 'fallen', 'the others keep their feet');
+});
+
+test('rubble shoved by a later ball comes to rest where it was shoved to, and its heap goes with it', () => {
+  const { fracture, instance } = prepared('royal_warehouse'), half = instance.length / 2;
+  const damage = {};
+  applyBuildingFractureEvents(fracture, damage, [shot(0.1, 2.2, -half - 0.017)], 0);
+  const state = damage.fracture;
+  const restOf = (s) => evaluateShardFlight(recordOf(state, s), NOWHERE, fracture.shards[s].centroid, [1, 1, 1]);
+  // Every piece lying on land is in the heap of the cell it lies in, once, and nowhere else.
+  const heapKeyOf = (x, z) => (Math.floor(x / 1.5) + 32768) * 65536 + (Math.floor(z / 1.5) + 32768);
+  const heapsAgree = () => {
+    const expected = new Map();
+    for (const piece of fracture.strikable) {
+      if (!state.broken[piece] || recordOf(state, piece)[11] >= 0) continue;
+      const at = restOf(piece), key = heapKeyOf(at[0], at[2]);
+      expected.set(key, (expected.get(key) ?? 0) + (fracture.shards[piece].volume * 1.4) / 2.25);
+    }
+    let off = 0;
+    for (const key of new Set([...expected.keys(), ...state.heap.keys()])) off += Math.abs((expected.get(key) ?? 0) - (state.heap.get(key) ?? 0));
+    return off;
+  };
+  assert.ok(heapsAgree() < 1e-4, 'to begin with, the heaps are where the rubble is');
+  // A piece that fell quickly: the old code slowed any flight shorter than 0.32 s, so such a piece stopped short.
+  const lying = fracture.strikable.filter((s) => state.broken[s] && recordOf(state, s)[11] < 0 && recordOf(state, s)[7] < 0.32);
+  assert.ok(lying.length, 'a block that came down in under a third of a second');
+  const s = lying[0], before = restOf(s);
+  // A ball into the ground a little to one side of it.
+  const at = [before[0] - 0.5, before[1], before[2]];
+  const local = fracture.toLocal(at[0], at[1], at[2]);
+  applyBuildingFractureEvents(fracture, damage, [shot(local[0], local[1], local[2], { ny: 1, nz: 0 })], 5);
+  const after = restOf(s), moved = Math.hypot(after[0] - before[0], after[2] - before[2]);
+  assert.ok(moved > 0.05, `the piece was shoved (${moved.toFixed(3)} m)`);
+  assert.ok(after[0] - before[0] > 0, 'away from the ball, not back toward the wall it fell from');
+  const record = recordOf(state, s);
+  assert.ok(Math.abs(record[0] + record[4] * record[7] - after[0]) < 1e-4 && Math.abs(record[2] + record[6] * record[7] - after[2]) < 1e-4, 'its record ends exactly there');
+  assert.ok(heapsAgree() < 1e-4, `and the heaps are still where the rubble is (off by ${heapsAgree().toFixed(4)} m)`);
+});
+
+test('what a breach shows is laid along the wall: raw stone and earth carry the building\'s own yaw', () => {
+  const kindsOf = (yaw) => {
+    const { vertices } = prepared('stone_sea_bastion', { yaw });
+    const seen = new Map();
+    for (let v = 0; v < vertices.length; v += 8) {
+      const kind = vertices[v + 6];
+      if (kind >= 9.5 && kind < 18.5) seen.set(Math.round((kind - Math.floor(kind + 0.01)) * 1000) / 1000, Math.floor(kind + 0.01));
+    }
+    return seen;
+  };
+  // Square on, everything reads as yaw nought. The old tags were 11.125 and 16.125, a fixed 41 degrees.
+  assert.deepEqual([...kindsOf(0).keys()], [0.02], 'no stale fraction in a building square to the world');
+  const yaw = 2.2, turned = kindsOf(yaw), expected = Math.round((buildingKindWithYaw(11, yaw) - 11) * 1000) / 1000;
+  assert.ok(turned.has(expected), `a turned fort's raw faces carry its yaw (${[...turned.keys()]})`);
+  assert.ok(!turned.has(0.125), 'and none carries the old fixed tag');
+  // The land shader's own decoding gives the yaw back, modulo a half turn.
+  const decoded = Math.min(1, Math.max(0, ((buildingKindWithYaw(16, yaw) % 1) - 0.02) / 0.46)) * Math.PI;
+  assert.ok(Math.abs(decoded - (yaw % Math.PI)) < 1e-6);
 });
 
 test('a saved ruin has its men already down, and a rebuilt one has them back at their posts', () => {

@@ -24,6 +24,12 @@ export const BUILDING_SHARD_KINDS = Object.freeze({ block: 1, whole: 2, cell: 3,
 const STRIDE = 8;
 // A longer normal reads as damaged in the land shader: raw stone, raw wood.
 const RAW_SURFACE = 1.6, RAW_LENGTH_SQUARED = 2;
+// A masonry kind carries its building's yaw in its fraction, so the land shader lays the stone along the wall.
+// This is the encoding coastal-world.js writes for kinds 10 to 18; what a breach shows must be written the same.
+export function buildingKindWithYaw(kind, yaw) {
+  const turn = ((yaw % Math.PI) + Math.PI) % Math.PI;
+  return Math.floor(kind + 0.01) + 0.02 + (turn / Math.PI) * 0.46;
+}
 const TOUCH = 0.09;
 const NOT_HELD = 255, TIE_REACH = 1.5;
 
@@ -147,6 +153,7 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
   // A rampart has earth under it, up to its own height. A keep standing on it does not.
   const rampartTop = (instance.baseY ?? instance.y ?? 0) + (instance.height ?? Infinity) + 0.2;
   const cosY = Math.cos(instance.yaw ?? 0), sinY = Math.sin(instance.yaw ?? 0), originX = instance.x ?? 0, originZ = instance.z ?? 0;
+  const RAW_STONE_KIND = buildingKindWithYaw(11, instance.yaw ?? 0), RAW_EARTH_KIND = buildingKindWithYaw(16, instance.yaw ?? 0);
   const toLocal = (x, y, z) => { const dx = x - originX, dz = z - originZ; return [dx * cosY - dz * sinY, y, dx * sinY + dz * cosY]; };
   const toWorld = (x, y, z) => [originX + x * cosY + z * sinY, y, originZ - x * sinY + z * cosY];
 
@@ -281,13 +288,24 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
     for (let i = 0; i < STRIDE; i++) out[i] = a[i] + (b[i] - a[i]) * t;
     return out;
   };
-  const emitFloorSlab = (corners, part, surface) => {
+  // Each slab keeps the level it paves and its outline in the building's frame, and each cell the slabs over it,
+  // so `floorAt` can say whether the floor at a point is still there once slabs have been shot away.
+  const slabsByCell = new Map();
+  const emitFloorSlab = (corners, part, surface, level) => {
     const s = newShard(BUILDING_SHARD_KINDS.block, part, surface);
     shards[s].floorSlab = true;
     shards[s].anchored = true;
+    shards[s].floorLevel = level;
+    const outline = shards[s].floorOutline = corners.map((q) => { const [lx, , lz] = toLocal(q[0], q[1], q[2]); return [lx, lz]; });
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (const [x, z] of outline) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (z < z0) z0 = z; if (z > z1) z1 = z; }
+    for (let x = Math.floor(x0); x <= Math.floor(x1); x++) for (let z = Math.floor(z0); z <= Math.floor(z1); z++) {
+      const key = floorKey(x, z), had = slabsByCell.get(key);
+      if (had) had.push(s); else slabsByCell.set(key, [s]);
+    }
     geometry[s].blocks.push({ corners, depth: FLOOR_SLAB_DEPTH });
   };
-  const cutFloorTri = (a, b, c, part, surface, depth = 0) => {
+  const cutFloorTri = (a, b, c, part, surface, level, depth = 0) => {
     const dab = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
     const dbc = Math.hypot(c[0] - b[0], c[1] - b[1], c[2] - b[2]);
     const dca = Math.hypot(a[0] - c[0], a[1] - c[1], a[2] - c[2]);
@@ -295,33 +313,35 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
     if (maxEdge > 5.2 * blockScale && depth < 5) {
       if (dab >= dbc && dab >= dca) {
         const m = lerpVertex(a, b);
-        cutFloorTri(a, m, c, part, surface, depth + 1);
-        cutFloorTri(m, b, c, part, surface, depth + 1);
+        cutFloorTri(a, m, c, part, surface, level, depth + 1);
+        cutFloorTri(m, b, c, part, surface, level, depth + 1);
       } else if (dbc >= dca) {
         const m = lerpVertex(b, c);
-        cutFloorTri(a, b, m, part, surface, depth + 1);
-        cutFloorTri(a, m, c, part, surface, depth + 1);
+        cutFloorTri(a, b, m, part, surface, level, depth + 1);
+        cutFloorTri(a, m, c, part, surface, level, depth + 1);
       } else {
         const m = lerpVertex(c, a);
-        cutFloorTri(a, b, m, part, surface, depth + 1);
-        cutFloorTri(m, b, c, part, surface, depth + 1);
+        cutFloorTri(a, b, m, part, surface, level, depth + 1);
+        cutFloorTri(m, b, c, part, surface, level, depth + 1);
       }
       return;
     }
     const ab = lerpVertex(a, b), bc = lerpVertex(b, c), ca = lerpVertex(c, a);
     const cen = lerpVertex(ab, c, 1 / 3);
-    emitFloorSlab([a, ab, cen, ca], part, surface);
-    emitFloorSlab([b, bc, cen, ab], part, surface);
-    emitFloorSlab([c, ca, cen, bc], part, surface);
+    emitFloorSlab([a, ab, cen, ca], part, surface, level);
+    emitFloorSlab([b, bc, cen, ab], part, surface, level);
+    emitFloorSlab([c, ca, cen, bc], part, surface, level);
   };
   const rampartPolygon = (face, part, surface) => {
     recordFloor(face);
+    // The level `recordFloor` has just noted for this face.
+    const level = faceSpan(face)[4];
     const corners = face.v.map((v) => vertices.slice(v * STRIDE, (v + 1) * STRIDE));
     if (corners.length === 3) {
-      cutFloorTri(corners[0], corners[1], corners[2], part, surface);
+      cutFloorTri(corners[0], corners[1], corners[2], part, surface, level);
     } else if (corners.length === 4) {
-      cutFloorTri(corners[0], corners[1], corners[2], part, surface);
-      cutFloorTri(corners[0], corners[2], corners[3], part, surface);
+      cutFloorTri(corners[0], corners[1], corners[2], part, surface, level);
+      cutFloorTri(corners[0], corners[2], corners[3], part, surface, level);
     }
   };
 
@@ -344,14 +364,10 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
     const covered = (plates.get(floorKey((qx0 + qx1) * 0.5, (qz0 + qz1) * 0.5)) ?? []).some((h) => h > y + 0.05 && h < y + 2.5);
     if (covered) return;
     const at = face.v[0] * STRIDE;
-    const rect = (ax, bx, az, bz, drop = 0) => [[ax, az], [bx, az], [bx, bz], [ax, bz]].map(([x, z]) => {
-      const w = toWorld(x, y - drop, z), out = new Float32Array(STRIDE);
-      out[0] = w[0]; out[1] = y - drop; out[2] = w[2];
-      out[3] = drop > 0 ? 0 : vertices[at + 3];
-      out[4] = drop > 0 ? RAW_SURFACE : vertices[at + 4];
-      out[5] = drop > 0 ? 0 : vertices[at + 5];
-      out[6] = drop > 0 ? 16.125 : vertices[at + 6];
-      out[7] = drop > 0 ? 0.46 : vertices[at + 7];
+    const rect = (ax, bx, az, bz) => [[ax, az], [bx, az], [bx, bz], [ax, bz]].map(([x, z]) => {
+      const w = toWorld(x, y, z), out = new Float32Array(STRIDE);
+      out[0] = w[0]; out[1] = y; out[2] = w[2];
+      for (let c = 3; c < STRIDE; c++) out[c] = vertices[at + c];
       return out;
     });
     const midX = Math.max(qx0, x0), midX1 = Math.min(qx1, x1), midZ = Math.max(qz0, z0), midZ1 = Math.min(qz1, z1);
@@ -364,7 +380,7 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
         const ax = midX + ((midX1 - midX) * ix) / nx, bx = midX + ((midX1 - midX) * (ix + 1)) / nx;
         for (let iz = 0; iz < nz; iz++) {
           const az = midZ + ((midZ1 - midZ) * iz) / nz, bz = midZ + ((midZ1 - midZ) * (iz + 1)) / nz;
-          emitFloorSlab(rect(ax, bx, az, bz), part, surface);
+          emitFloorSlab(rect(ax, bx, az, bz), part, surface, y);
         }
       }
     }
@@ -560,7 +576,7 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
       for (let c = 0; c < 3; c++) q[c] = (1 - w) * ((1 - u) * corner[0][c] + u * corner[1][c]) + w * ((1 - u) * corner[3][c] + u * corner[2][c]);
       const depth = CORE_DEPTH + 0.75 * blockNoise(Math.round(q[0] * 2) * 3.1 + Math.round(q[1] * 2) * 7.7 + Math.round(q[2] * 2) * 13.3, 7) + layer * EARTH_THICK_M;
       for (let c = 0; c < 3; c++) { q[c] -= n[c] * depth; q[3 + c] = n[c] * RAW_SURFACE; }
-      q[6] = 16.125; q[7] = 0.46;
+      q[6] = RAW_EARTH_KIND; q[7] = 0.46;
       return q;
     };
     for (let layer = 0; layer < EARTH_LAYERS; layer++) for (let j = 0; j < cellsUp; j++) for (let i = 0; i < cellsAcross; i++) {
@@ -643,7 +659,7 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
       }
     }
     for (const { corners: front, depth } of blocks) {
-      const rawKind = front[0][6] >= 19.5 ? 11.125 : front[0][6];
+      const rawKind = front[0][6] >= 19.5 ? RAW_STONE_KIND : front[0][6];
       const v = pushVertex(s, front[0][0], front[0][1], front[0][2], front[0][3], front[0][4], front[0][5], front[0][6], front[0][7]);
       for (let i = 1; i < 4; i++) pushVertex(s, front[i][0], front[i][1], front[i][2], front[i][3], front[i][4], front[i][5], front[i][6], front[i][7]);
       pushQuadIndices(v);
@@ -680,11 +696,35 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
   }
 
   yield* linkShards(shards);
-  // The highest floor at or below a height: a storey can stand over the place a stone comes down.
-  const floorAt = (x, z, below = Infinity) => {
-    const [lx, , lz] = toLocal(x, 0, z), list = floors.get(floorKey(lx, lz));
+  // Whether the floor at a level still stands at a point, given which shards have gone. Where it was paved in
+  // slabs, the slab under the point decides; a point on the level but under no slab stands while any slab of it
+  // in that cell does. A floor that was never slabs cannot be shot away.
+  const floorStands = (slabs, level, lx, lz, broken) => {
+    let paved = false, sound = false;
+    for (const s of slabs) {
+      const shard = shards[s];
+      if (Math.abs(shard.floorLevel - level) > 0.02) continue;
+      paved = true;
+      const outline = shard.floorOutline;
+      let inside = false;
+      for (let i = 0, j = outline.length - 1; i < outline.length; j = i++) {
+        const [ax, az] = outline[i], [bx, bz] = outline[j];
+        if ((az > lz) !== (bz > lz) && lx < ((bx - ax) * (lz - az)) / (bz - az) + ax) inside = !inside;
+      }
+      if (inside) return !broken[s];
+      if (!broken[s]) sound = true;
+    }
+    return !paved || sound;
+  };
+  // The highest floor at or below a height: a storey can stand over the place a stone comes down. With `broken`
+  // (a fracture state's own list) it is the highest that is still there, so a breach in a deck is a hole to
+  // whatever lies under it. Without, it is the building as built.
+  const floorAt = (x, z, below = Infinity, broken = null) => {
+    const [lx, , lz] = toLocal(x, 0, z), key = floorKey(lx, lz), list = floors.get(key);
+    if (!list) return -Infinity;
+    const slabs = broken ? slabsByCell.get(key) : null;
     let best = -Infinity;
-    if (list) for (const y of list) if (y <= below && y > best) best = y;
+    for (const y of list) if (y <= below && y > best && (!slabs || floorStands(slabs, y, lx, lz, broken))) best = y;
     return best;
   };
   anchorShards(shards, groundAt, floorAt);
@@ -945,7 +985,7 @@ function releaseShard(state, s, now, { direction = null, power = 1, proximity = 
   let settle = 0.2, landX = pivot[0], landZ = pivot[2], restY = pivot[1], water = false;
   for (let i = 0; i < 3; i++) {
     if (i === 2) [landX, landZ] = rollDownHeap(state, landX, landZ);
-    const ground = Math.max(fracture.groundAt(landX, landZ), fracture.floorAt(landX, landZ, shard.floorSlab ? shard.min[1] - 0.15 : pivot[1]));
+    const ground = Math.max(fracture.groundAt(landX, landZ), fracture.floorAt(landX, landZ, shard.floorSlab ? shard.min[1] - 0.15 : pivot[1], state.broken));
     water = shard.timber && ground < -0.2;
     const heap = water ? 0 : state.heap.get(heapKey(landX, landZ)) ?? 0;
     // It never lands higher than it started, nor buried below the ground.
@@ -1039,7 +1079,14 @@ function strikeBuilding(state, point, normal, { radius, amount, power, now, drop
       state.scorch[s] = Math.min(0.85, state.scorch[s] + 0.25);
       state.scorchDirty = true;
       state.touched = true;
+      // What lies on the ground is part of a heap; a piece that goes, or moves, takes its share with it.
+      const onHeap = hideAt < 0, share = (shard.volume * 1.4) / (HEAP_CELL * HEAP_CELL);
+      const leaveHeap = () => {
+        const key = heapKey(curX, curZ), left = (state.heap.get(key) ?? 0) - share;
+        if (left > 1e-6) state.heap.set(key, left); else state.heap.delete(key);
+      };
       if (rehits >= 3) {
+        if (onHeap) leaveHeap();
         const gY = Math.max(0, state.fracture.groundAt(shard.centroid[0], shard.centroid[2]));
         r.set([shard.centroid[0], Math.max(gY, shard.centroid[1]), shard.centroid[2], 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], at);
         state.flying.delete(s);
@@ -1054,9 +1101,15 @@ function strikeBuilding(state, point, normal, { radius, amount, power, now, drop
           nextX = shard.centroid[0] + (offX / offD) * 11.5;
           nextZ = shard.centroid[2] + (offZ / offD) * 11.5;
         }
-        const dur = Math.max(0.32, settle);
+        // Its resting place is its pivot plus its velocity over the whole of `settle`, so that is what to divide by.
+        const dur = Math.max(1e-3, settle);
         r[at + 4] = (nextX - r[at]) / dur;
         r[at + 6] = (nextZ - r[at + 2]) / dur;
+        if (onHeap) {
+          leaveHeap();
+          const key = heapKey(nextX, nextZ);
+          state.heap.set(key, (state.heap.get(key) ?? 0) + share);
+        }
         state.dirty.add(s);
         state.revision++;
       }
@@ -1154,7 +1207,7 @@ export function applyBuildingFractureEvents(fracture, damage, events, now = 0) {
 // and whatever heap is there already. Read when something lets go, never by the frame.
 export function restingHeightUnder(state, x, z, below = Infinity) {
   const { fracture } = state;
-  return Math.max(fracture.groundAt(x, z), fracture.floorAt(x, z, below)) + (state.heap.get(heapKey(x, z)) ?? 0);
+  return Math.max(fracture.groundAt(x, z), fracture.floorAt(x, z, below, state.broken)) + (state.heap.get(heapKey(x, z)) ?? 0);
 }
 
 const FOOT_MARGIN = 0.2, FOOT_REACH = 1.1;
@@ -1172,9 +1225,11 @@ export function footingUnder(state, localX, y, localZ, shards = state.fracture.s
     stood = true;
     if (!broken[shard.index]) { stands = true; break; }
   }
-  const world = fracture.toWorld(localX, y, localZ), level = fracture.floorAt(world[0], world[2], y + FOOT_MARGIN);
+  // The floor as built says whether he ever had one; the floor as it is now says whether he still does.
+  const world = fracture.toWorld(localX, y, localZ);
+  const built = fracture.floorAt(world[0], world[2], y + FOOT_MARGIN), level = fracture.floorAt(world[0], world[2], y + FOOT_MARGIN, broken);
   const floor = y - level <= FOOT_REACH ? level : null;
-  return { stood: stood || floor !== null, stands: stands || floor !== null, floor: stands ? null : floor };
+  return { stood: stood || y - built <= FOOT_REACH, stands: stands || floor !== null, floor: stands ? null : floor };
 }
 
 // Where a line enters a box, along it, or Infinity. The line runs both ways: `t` may lie behind its start.
