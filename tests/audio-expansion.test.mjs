@@ -118,6 +118,54 @@ test('promoted world audio SFX and voice assets match provenance and valid MP3 p
   }
 });
 
+test('world audio tooling finds its takes from any checkout and records unknown provenance as unknown', async () => {
+  const { worldAudioRoot, worldProvenanceEntry } = await import('../scripts/world-audio.mjs');
+  // The unversioned takes live beside the shared .git directory, wherever the repository sits.
+  assert.equal(worldAudioRoot('/srv/game', '.git\n'), '/srv/game', 'the main checkout is its own root');
+  assert.equal(worldAudioRoot('/srv/game/.claude/worktrees/a1', '/srv/game/.git\n'), '/srv/game', 'a worktree resolves to the main checkout');
+  assert.equal(worldAudioRoot('/srv/export', ''), '/srv/export', 'outside git, the tree itself');
+  assert.equal(worldAudioRoot('/srv/export', '/srv/bare.git'), '/srv/export', 'a bare repository has no checkout beside it');
+  const source = await fs.readFile(new URL('../scripts/world-audio.mjs', import.meta.url), 'utf8');
+  assert.ok(!/['"`]\/(Users|home)\//.test(source), 'no path on one person\'s machine is written into the script');
+
+  const measured = { seconds: 2.25, sha256: 'bb', bytes: 3 };
+  const generated = worldProvenanceEntry(
+    { id: 'surf', category: 'nature', prompt: 'the recipe as it reads today' },
+    { sha256: 'aa', request: { model_id: 'eleven_text_to_sound_v2', text: 'the prompt as it was sent' } },
+    'surf-01.mp3',
+    measured,
+  );
+  assert.deepEqual(
+    [generated.provider, generated.model, generated.prompt, generated.sourceSha256, generated.sha256, generated.bytes, generated.seconds],
+    ['ElevenLabs', 'eleven_text_to_sound_v2', 'the prompt as it was sent', 'aa', 'bb', 3, 2.25],
+    'a generated take records what its own request says, not what the recipe says now',
+  );
+  const reuse = { id: 'shore-birds', category: 'nature', kind: 'pilot-reuse', sourceTake: 'tern-calls-01.mp3' };
+  for (const record of [{ sha256: 'cc', provenance: 'unknown', reusedTake: 'tern-calls-01.mp3', request: null }, { sha256: 'cc' }, null]) {
+    const entry = worldProvenanceEntry(reuse, record, 'shore-birds-01.mp3', measured);
+    assert.deepEqual(
+      [entry.provider, entry.model, entry.prompt, entry.text, entry.reusedTake],
+      ['unknown', 'unknown', null, null, 'tern-calls-01.mp3'],
+      'a reused take with no generation record claims no model and no prompt',
+    );
+  }
+  const spoken = worldProvenanceEntry(
+    { id: 'hail', category: 'voice', kind: 'voice', voiceId: 'v1', text: 'Sail ho' },
+    { sha256: 'dd', request: { model_id: 'eleven_v3', text: 'Sail ho!' } },
+    'hail-01.mp3',
+    measured,
+  );
+  assert.deepEqual([spoken.model, spoken.text, spoken.prompt, spoken.voiceId], ['eleven_v3', 'Sail ho!', null, 'v1']);
+
+  // The committed record obeys the same rule: a model is named only beside the words sent to it.
+  const provenance = JSON.parse(await fs.readFile(new URL('../assets/audio/world/provenance.json', import.meta.url), 'utf8'));
+  for (const entry of provenance) {
+    if (entry.model === 'unknown') assert.equal(entry.provider, 'unknown', entry.id);
+    else assert.ok(entry.prompt || entry.text, `${entry.id} names ${entry.model} and so records what was asked of it`);
+  }
+  assert.equal(provenance.find(entry => entry.id === 'shore-birds').reusedTake, 'tern-calls-01.mp3');
+});
+
 test('1. screaming and crying out people distinguish male, female, overboard, and crowd panic', () => {
   const { played, sound } = createGunneryFixture();
 
