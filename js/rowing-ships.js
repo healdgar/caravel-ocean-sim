@@ -201,7 +201,7 @@ export function createRowingShipMesh(modelId,{groups,parts}={}){
     const start=out.length,a=rowingAnchorFitting(modelId,side);tube(a.root,a.tip,.035/sy,1,.028/sy,6);
     group('anchor.'+(side<0?'port':'starboard'),'anchor.'+(side<0?'port':'starboard')+'.root',start);
   }
-  for(const m of context.masts){const start=out.length;tube(m.foot,m.head,m.radius,1,.018,12);group('mast.'+m.id,'mast.'+m.id,start);}
+  for(const m of context.masts){const start=out.length;tube(m.foot,m.head,m.radius,10,.018,12);group('mast.'+m.id,'mast.'+m.id,start);}
   for(const s of context.surfaces){
     const start=out.length,n=20;
     for(let i=0;i<n;i++)for(let j=0;j<n;j++){

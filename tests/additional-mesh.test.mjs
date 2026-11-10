@@ -141,7 +141,9 @@ test('indexed CPU pose follows the approved mixed-rig evaluator through fill, lu
           const expected=surfaceClothPoint(surface,asset.vertices[i+7],asset.vertices[i+8],full.poses.get(surface.id),full,time,wind);
           for(let j=0;j<3;j++)additionalMeshTestNear(target[i+j],expected[j],2e-6);
         }
-        if(kind===10&&i%63===0){
+        // A spar that belongs to no surface is a mast or bowsprit, and stands where it was built.
+        if(kind===10&&!surface){for(let j=0;j<3;j++)assert.equal(target[i+j],asset.vertices[i+j]);}
+        if(kind===10&&surface&&i%63===0){
           const expected=surfaceYardPoint(surface,Array.from(asset.vertices.subarray(i,i+3)),full.poses.get(surface.id));
           for(let j=0;j<3;j++)additionalMeshTestNear(target[i+j],expected[j],2e-6);
         }

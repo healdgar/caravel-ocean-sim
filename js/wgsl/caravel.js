@@ -4,6 +4,46 @@ import { DECK_PROFILE, DECK_SAMPLING } from './deck.js';
 import { VESSEL_RIG, VESSEL_LIGHTING, CANVAS_OPTICS } from './vessel.js';
 import { SHADOW_SAMPLE } from './shadows.js';
 import { ADDITIONAL_DESIGNS } from '../models/additional.js';
+import { LATER_SAIL_DESIGNS } from '../models/later-sail.js';
+import { vesselDeck } from '../hull.js';
+
+// Rules that decide which finish a fragment of a vessel receives, kept as functions of plain
+// values so a test can ask them questions without drawing a ship.
+export const VESSEL_FINISH_RULES = /* wgsl */ `
+// The later sailing ships (js/later-sail-ships.js) build their masts as general trim.
+fn laterSailModel(model:f32)->bool {return ${Object.values(LATER_SAIL_DESIGNS).map(d=>`abs(model-${d.modelCode}.0)<.5`).join(' || ')};}
+// The Niña's bowsprit as js/caravel.js builds it: a tapering spar from the forecastle to its tip.
+fn ninaBowspritTimber(p:vec3f)->bool {
+  let a=vec3f(0.0,${(vesselDeck(-4.8)+0.12).toFixed(5)},-4.8);let ab=vec3f(0.0,2.05,-8.4)-a;
+  let t=clamp(dot(p-a,ab)/dot(ab,ab),0.0,1.0);
+  return distance(p,a+ab*t)<mix(0.145,0.045,t)+0.012;
+}
+// Masts and spars carry material 10. General trim (material 1) near the centreline is not a
+// mast: binnacles, bitts, stair rails and deck beams keep their own look. Two ships whose
+// meshes still build spars as trim are recognised by narrow tests until those meshes say so
+// themselves: the later sailing ships, and the Niña's bowsprit by its own volume.
+fn vesselMastSpar(material:u32,model:f32,p:vec3f)->bool {
+  return material==10u || (material==1u && ((laterSailModel(model) && abs(p.x)<0.24 && p.y>0.65) || (model<.5 && ninaBowspritTimber(p))));
+}
+// Painted iron hoops survive only on the later ships' trim-built masts, which have none
+// modelled; every other mast carries its hoops and wooldings as geometry. The band edge is
+// filtered to its footprint (the change of height*1.35 across a pixel) so it fades at range
+// and does not crawl.
+fn mastHoopBand(material:u32,model:f32,height:f32,footprint:f32)->f32 {
+  if(!(laterSailModel(model) && material==1u && height>0.85 && height<6.4)){return 0.0;}
+  let offBand=abs(fract(height*1.35)-0.5);
+  return (1.0-smoothstep(0.036-footprint,0.036+footprint,offBand))*(1.0-smoothstep(0.25,0.5,footprint));
+}
+// The sea touches the outside of the hull only: planking that faces outboard, and the end
+// faces of bow and stern. Decks, thwarts and the inner face of the planking stay dry.
+fn hullExteriorFace(p:vec3f,normal:vec3f)->bool {
+  return abs(p.x)>0.18 && normal.y<0.5 && (normal.x*sign(p.x)>0.12 || (normal.z*sign(p.z)>0.6 && abs(p.z)>4.6));
+}
+// Ten cloths across a sail. The seam distance is nil on the stitching; each cloth bellies
+// between two seams, so the pillow is greatest midway and nil on the stitching.
+fn sailClothSeam(u:f32)->f32 {return abs(fract(u*10.0)-0.5);}
+fn sailPanelPillow(u:f32)->f32 {return sin(fract(u*10.0+0.5)*3.14159265);}
+`;
 
 // Exact marker recognized by createSubmergedShader. Both hull and rudder retain
 // their authored material IDs/finishes; only the surrounding optical medium
@@ -69,7 +109,7 @@ fn vesselIronTransmission(film:f32,nv:f32,nl:f32)->f32 {
 // Two shaders from one source. A whole ship has no damage code at all: no discard, so the GPU
 // shades only what the eye can see of her. A damaged ship lays depth with `surviving`, which
 // decides what shot and tearing have taken away, then `fs` shades just the surface that is left.
-function vesselSource(damaged) { return FRAME_WGSL + ATMO_CORE_WGSL + DECK_PROFILE + VESSEL_RIG + VESSEL_LIGHTING + CANVAS_OPTICS + SHADOW_SAMPLE + VESSEL_MATERIAL_MEDIUM + IRON_SURFACE + /* wgsl */ `
+function vesselSource(damaged) { return FRAME_WGSL + ATMO_CORE_WGSL + DECK_PROFILE + VESSEL_RIG + VESSEL_LIGHTING + CANVAS_OPTICS + SHADOW_SAMPLE + VESSEL_MATERIAL_MEDIUM + IRON_SURFACE + VESSEL_FINISH_RULES + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var transLUT: texture_2d<f32>;
 @group(0) @binding(2) var skyLUT: texture_2d<f32>;
@@ -125,10 +165,10 @@ fn oceanHeight(p: vec2f) -> f32 {
   return h;
 }
 // Roughness-filtered ocean radiance, with continuous screen-edge confidence.
-fn waterLight(world: vec3f, direction: vec3f, roughness: f32) -> vec3f {
+// waterY is the sea surface height under the fragment, sampled once by the caller.
+fn waterLight(world: vec3f, direction: vec3f, roughness: f32, waterY: f32) -> vec3f {
   let env = textureSampleLevel(envCube, sampC, direction, roughness * 8.0).rgb;
   let dy = min(direction.y, -0.03);
-  let waterY = oceanHeight(world.xz);
   let t = clamp((waterY - world.y) / dy, 0.0, 100.0);
   let clip = F.viewProj * vec4f(world + direction * t - F.camPos.xyz, 1.0);
   let uv = clip.xy / max(clip.w, 0.0001) * vec2f(0.5, -0.5) + 0.5;
@@ -209,7 +249,8 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
   let isProceduralFleet=hull.rig.w<.5 && abs(hull.size.y-20.0)>.2;
   let isCopper=in.material==22u || (in.material==20u && isProceduralFleet && p.y < -0.05);
   let isGilt=in.material==25u || (in.material==20u && isProceduralFleet && abs(p.y - 0.53) < 0.018 && abs(in.normalLocal.x) > 0.35);
-  let isMastSpar=(in.material==1u && abs(p.x)<0.24 && p.y>0.65) || in.material==10u;
+  let isMastSpar=vesselMastSpar(in.material,hull.rig.w,p);
+  let hoopFootprint=max(fwidth(p.y*1.35),0.0005);
   ${damaged?`// Timber stands raw and splintered around a hole, and whatever is seen through it lies in the dark of the hold.
   let holedTimber=u32(hullDamage.scale.w)>0u && vesselWoodMaterial(in.material,paintedWood);
   let holeRim=select(0.0,max(hullHoleRim(p),0.0),holedTimber);
@@ -277,7 +318,7 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
   let cuRelief=(cuUV.y*0.0012 - cuSeam*0.0018 + cuNail*0.0009)*(1.0-smoothstep(0.02,0.09,materialFootprint));
   let cuGradient=(dpdx(cuRelief)*sx+dpdy(cuRelief)*sy)/max(abs(det),0.000001)*sign(det);
   // Precompute sail canvas panel pillowing, seam puckering & reef-band surface-gradient relief outside control flow
-  let clothSeam=abs(fract(in.uv.x*10.0)-0.5);
+  let clothSeam=sailClothSeam(in.uv.x);
   let clothAA=max(fwidth(clothSeam),0.001);
   let weaveAA=max(fwidth(in.uv.x+in.uv.y),0.001);
   let clothEdge=vesselClothEdge(in.uv,in.material);
@@ -287,7 +328,7 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
   let reefGrommet=select(0.0,1.0-smoothstep(0.003,0.007,length(vec2f((fract(in.uv.x*20.0)-0.5)*0.05,reefDist))),in.material==9u && reefDist<0.012);
   let cornerDist=min(min(length(in.uv),length(in.uv-vec2f(1.0,0.0))),min(length(in.uv-vec2f(0.0,1.0)),length(in.uv-vec2f(1.0,1.0))));
   let cornerPatch=1.0-smoothstep(0.055,0.085,cornerDist);
-  let panelPillow=sin(fract(in.uv.x*10.0)*3.14159265);
+  let panelPillow=sailPanelPillow(in.uv.x);
   let seamPucker=sin(in.uv.y*95.0+floor(in.uv.x*10.0)*2.3)*(1.0-smoothstep(0.0,0.08,clothSeam));
   let canvasRelief=(panelPillow*0.0032 + seamPucker*0.0011 + reefBand*0.0018 + cornerPatch*0.0012)*(1.0-smoothstep(0.004,0.025,weaveAA));
   let canvasGradient=(dpdx(canvasRelief)*sx+dpdy(canvasRelief)*sy)/max(abs(det),0.000001)*sign(det);
@@ -316,12 +357,10 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
       let checkCrack = smoothstep(0.86, 0.95, sin(sparAngle * 11.0 + p.y * 2.5));
       albedo = timber * vec3f(1.08, 0.92, 0.68) * sparGrain * (1.0 - checkCrack * 0.28);
       rough = clamp(0.74 + (1.0 - sparGrain) * 0.14 + checkCrack * 0.12, 0.68, 0.90);
-      let isMastHoop = in.material == 1u && p.y > 0.85 && p.y < 6.4 && abs(fract(p.y * 1.35) - 0.5) < 0.036;
-      if(isMastHoop) {
-        albedo = vec3f(0.032, 0.031, 0.029);
-        rough = 0.58;
-        metal = 0.45;
-      }
+      let mastHoop = mastHoopBand(in.material, hull.rig.w, p.y, hoopFootprint);
+      albedo = mix(albedo, vec3f(0.032, 0.031, 0.029), mastHoop);
+      rough = mix(rough, 0.58, mastHoop);
+      metal = mix(metal, 0.45, mastHoop);
     } else if((isProceduralFleet || isAdditionalIberian) && in.material == 1u) {
       let isKeelOrPost = (abs(p.x) < 0.068 && p.y < -0.46) || (abs(p.x) < 0.055 && p.z > 5.25 && p.y < 1.05);
       let isCapRail = p.y > 0.58 && in.normalLocal.y > 0.52 && abs(p.x) > 0.32;
@@ -519,8 +558,13 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
   if(in.material == 16u) { albedo=timber*vec3f(.20,.18,.15); }
   if(in.material == 17u) { albedo=timber*vec3f(1.10,1.0,.80); }
   // Dynamic waterline wave-lap capillary meniscus on exterior hull planking and sheathing
-  let waterSurfY = select(0.0, oceanHeight(in.world.xz), !vesselWaterCapture && in.world.y < 2.2);
-  let waveMeniscus = select(0.0, smoothstep(0.28, 0.0, abs(in.world.y - waterSurfY)) * step(waterSurfY - 0.06, in.world.y), !vesselWaterCapture && in.world.y < 2.2 && abs(p.x) > 0.18);
+  // The sea surface under this fragment: three cascade samples, taken once and shared by the
+  // waterline, the caustics and every water reflection below. The underwater capture uses none.
+  var oceanY = 0.0;
+  if(!vesselWaterCapture || F.screen.x < 0.0) { oceanY = oceanHeight(in.world.xz); }
+  let waterSurfY = select(0.0, oceanY, !vesselWaterCapture && in.world.y < 2.2);
+  let hullExterior = hullExteriorFace(p, in.normalLocal);
+  let waveMeniscus = select(0.0, smoothstep(0.28, 0.0, abs(in.world.y - waterSurfY)) * step(waterSurfY - 0.06, in.world.y), !vesselWaterCapture && in.world.y < 2.2 && hullExterior);
   wet = max(wet, vec2f(waveMeniscus * 0.65, waveMeniscus * 0.82));
   if(in.material==2u || in.material==12u || in.material==19u){
     albedo*=mix(1.0,.58,wet.x);rough=mix(rough,.65,wet.x);
@@ -784,8 +828,8 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
     // The invalid-dimensions fallback keeps the original resources reachable
     // to automatic layout reflection, matching the capture fog bypass pattern.
     sky=textureSampleLevel(envCube,sampC,vec3f(0.0,1.0,0.0),${ENV_MIPS - 1}.0).rgb;
-    reflected=waterLight(in.world,reflect(-v,n),rough);
-    bounce=waterLight(in.world,normalize(vec3f(n.x,-0.65,n.z)),0.9);
+    reflected=waterLight(in.world,reflect(-v,n),rough,oceanY);
+    bounce=waterLight(in.world,normalize(vec3f(n.x,-0.65,n.z)),0.9,oceanY);
   }
   let skyVisibility=0.5+0.5*n.y;
   let ambient=vesselAmbient(n,sky,bounce);
@@ -819,7 +863,7 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
     col+=(direct*rimBacklight + ambient*0.42)*sheenTint*fiberSheen*directTransmission;
   }
   // Upward-reflected solar water-caustic shimmer on lower hull planks & overhanging stern counters
-  if(!vesselWaterCapture && l.y>0.02 && in.world.y>waterSurfY-0.05 && in.world.y<waterSurfY+3.2 && n.y<0.35 && abs(p.x)>0.18){
+  if(!vesselWaterCapture && l.y>0.02 && in.world.y>waterSurfY-0.05 && in.world.y<waterSurfY+3.2 && n.y<0.35 && hullExterior){
     let hAbove=max(0.0,in.world.y-waterSurfY);
     let cFade=(1.0-smoothstep(0.0,3.2,hAbove))*clamp(0.42-n.y,0.0,1.0)*step(0.0,dot(vec3f(l.x,0.0,l.z),vec3f(n.x,0.0,n.z))+0.35);
     if(cFade>0.005){
@@ -833,7 +877,7 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
   if(!vesselWaterCapture&&isIron&&iron.film>0.0001){
     let filmF0=vec3f(vesselIronWaterF0);
     col+=iron.film*vesselSpecular(n,v,l,iron.filmRough,filmF0)*direct*nl;
-    let filmReflection=waterLight(in.world,reflect(-v,n),iron.filmRough);
+    let filmReflection=waterLight(in.world,reflect(-v,n),iron.filmRough,oceanY);
     col+=iron.film*filmReflection*F.windP[1].w*vesselEnvironment(n,v,iron.filmRough,filmF0);
   }
   if(in.material == 9u || in.material == 13u) {

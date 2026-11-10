@@ -288,7 +288,7 @@ export function createAdditionalShipMesh(modelId,{groups,parts}={}){
   // The bowsprit heel stands on bitts on the forecastle deck, and the spar is
   // lashed down over the stem head with a gammoning, as on the Niña.
   const bowStart=out.length,sprit=design.bowsprit,spritAxis=sub(sprit.b,sprit.a),spritAt=t=>add(sprit.a,mul(spritAxis,t));
-  tube(sprit.a,sprit.b,sprit.radius,1,sprit.radius*.5,16);
+  tube(sprit.a,sprit.b,sprit.radius,10,sprit.radius*.5,16);
   const bittZ=sprit.a[2]+.02,bittDeck=additionalDeck(modelId,bittZ);
   for(const x of [-.13,.13])tube([x,bittDeck,bittZ],[x,sprit.a[1]+.05,bittZ],.042,17,.036,8);
   tube([-.20,sprit.a[1]-.075,bittZ],[.20,sprit.a[1]-.075,bittZ],.04,17,.04,8);
@@ -327,7 +327,7 @@ export function createAdditionalShipMesh(modelId,{groups,parts}={}){
     group('gun.'+gun.id,'hull',start);
   }
   for(const [index,m] of context.masts.entries()){
-    const start=out.length;tube(m.foot,m.head,m.radius,1,m.radius*.4,16);
+    const start=out.length;tube(m.foot,m.head,m.radius,10,m.radius*.4,16);
     for(let y=m.foot[1]+.45;y<m.head[1]*.65;y+=1.1)ring(context.mastPoint(index,y),m.radius*(1-(y-m.foot[1])/(m.head[1]-m.foot[1]))+.004,.008,2,'y',10);
     group('mast.'+m.id,'mast.'+m.id,start);
   }
