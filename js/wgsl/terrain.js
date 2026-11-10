@@ -573,18 +573,33 @@ struct NearLand {domain:vec4f,grid:vec4f};
 @group(0) @binding(19) var<uniform> landSH:ShadowFrame;
 @group(0) @binding(20) var landSolidShadow:texture_depth_2d;
 @group(0) @binding(21) var landShadowCompare:sampler_comparison;
+// How far inside the shadow map a place lies: 0 at its edge and beyond, 1 well within. Reads no texture.
+fn landShadowCover(p:vec4f)->f32{
+  let uv=p.xy*vec2f(0.5,-0.5)+0.5;
+  let edge=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
+  return smoothstep(0.0,0.06,edge)*step(0.0,p.z)*step(p.z,1.0);
+}
+fn landShadowCoverage(world:vec3f)->f32{
+  if(landSH.origin.w<0.5){return 0.0;}
+  return landShadowCover(landSH.lightView*vec4f(world-landSH.origin.xyz,1.0));
+}
+// The light is the sun by day and the moon once it takes over (F.celestial.w), and the map is drawn from
+// whichever it is. Callers pass the result through solarShadowVisibility and lunarShadowVisibility.
 fn landShadowVisibility(world:vec3f,normal:vec3f)->f32{
   if(landSH.origin.w<0.5){return 1.0;}
   let facing=select(-1.0,1.0,dot(normal,landSH.sun.xyz)>=0.0);
   let offset=normal*facing*0.032+landSH.sun.xyz*0.025;
   let p=landSH.lightView*vec4f(world-landSH.origin.xyz+offset,1.0);
   let uv=p.xy*vec2f(0.5,-0.5)+0.5;
-  let edge=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
-  let fade=smoothstep(0.0,0.06,edge)*step(0.0,p.z)*step(p.z,1.0);
+  let fade=landShadowCover(p);
   if(fade<=0.0){return 1.0;}
-  let refZ=min(p.z-0.00022,0.99999);
+  // Eight centimetres along the ray, whatever depth the box was fitted to.
+  let refZ=min(p.z-0.08/max(landSH.sun.w,1.0),0.99999);
   let camDelta=world-F.camPos.xyz;
-  if(dot(camDelta,camDelta)>5625.0){
+  // Far ground takes one filtered tap and near ground four. The change is scattered over a band of
+  // distance, pixel by pixel, so it never draws a ring on the ground.
+  let scatter=fract(52.9829189*fract(dot(floor(world.xz*6.0),vec2f(0.06711056,0.00583715))));
+  if(dot(camDelta,camDelta)>mix(4225.0,7225.0,scatter)){
     let s1=textureSampleCompareLevel(landSolidShadow,landShadowCompare,uv,refZ);
     return mix(1.0,s1,fade);
   }
@@ -712,20 +727,29 @@ struct LandVertex {
   let shifted=position+vec3f(nearTerrain.grid.y,0.0,nearTerrain.grid.z);
   o.pos=F.viewProj*vec4f(earthCurve(shifted-F.camPos.xyz,F.camPos.y),1.0);return o;
 }
+fn treeWindForce()->f32{return clamp(F.windP[0].z/12.0,0.0,2.2)*0.018;}
+fn treeWindDirection(phase:f32)->vec2f{
+  let wind=F.windP[0].xy;let crosswind=vec2f(-wind.y,wind.x);
+  let gust=0.7+0.3*sin(F.camPos.w*0.65+phase);
+  return wind*gust+crosswind*sin(F.camPos.w*0.49+phase)*0.22;
+}
+// Where one vertex of a tree stands: root.w is its width, shape.x its height and shape.y its turn.
+// The colour pass and the shadow pass both place trees with this, so a shadow lies under its tree.
+fn treeWorld(position:vec3f,root:vec4f,shape:vec4f)->vec3f{
+  let phase=shape.y*2.0*PI;let c=cos(phase);let s=sin(phase);
+  let local=vec3f((position.x*c-position.z*s)*root.w,position.y*shape.x,(position.x*s+position.z*c)*root.w);
+  // Bend the entire connected structure by height. The same wind field and
+  // seed at every tier preserve branch attachments and tree identity at LODs.
+  let swayXZ=treeWindDirection(phase)*treeWindForce()*shape.x*position.y*position.y;
+  return root.xyz+local+vec3f(swayXZ.x,0.0,swayXZ.y);
+}
 @vertex fn treeVS(@location(0) position:vec3f,@location(1) normal:vec3f,@location(2) kind:vec2f,
   @location(3) root:vec4f,@location(4) shape:vec4f,@location(5) leafUV:vec2f)->LandVertex{
   let phase=shape.y*2.0*PI;
   let angle=phase;let c=cos(angle);let s=sin(angle);
-  let local=vec3f((position.x*c-position.z*s)*root.w,position.y*shape.x,(position.x*s+position.z*c)*root.w);
-  // Bend the entire connected structure by height. The same wind field and
-  // seed at every tier preserve branch attachments and tree identity at LODs.
-  let wind=F.windP[0].xy;let crosswind=vec2f(-wind.y,wind.x);
-  let windForce=clamp(F.windP[0].z/12.0,0.0,2.2)*0.018;
-  let gust=0.7+0.3*sin(F.camPos.w*0.65+phase);
-  let windDirection=wind*gust+crosswind*sin(F.camPos.w*0.49+phase)*0.22;
-  let swayXZ=windDirection*windForce*shape.x*position.y*position.y;
-  let sway=vec3f(swayXZ.x,0,swayXZ.y);
-  var o:LandVertex;o.world=root.xyz+local+sway;
+  let windForce=treeWindForce();
+  let windDirection=treeWindDirection(phase);
+  var o:LandVertex;o.world=treeWorld(position,root,shape);
   let scaled=normal/max(vec3f(root.w,shape.x,root.w),vec3f(0.001));
   var rotated=vec3f(scaled.x*c-scaled.z*s,scaled.y,scaled.x*s+scaled.z*c);
   rotated.y-=dot(rotated.xz,windDirection)*windForce*2.0*position.y;
@@ -768,7 +792,8 @@ fn landFinishShadowed(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibi
     let cloudSunVis=clamp(exp(-max(cD,0.0)*CF.shape.z*0.6)*mix(1.0,cL,0.5),0.0,1.0);
     sunlight=mix(cloudSunVis,bakedLight.r,inPrimaryDomain);
   }
-  let direct=sunIlluminance()*sunlight*shadowVis;
+  // By day the map shades the sun; once the moon is the light it shades the moon and the sun is down.
+  let direct=sunIlluminance()*sunlight*solarShadowVisibility(vec3f(shadowVis)).x;
   // Directional sky-hemisphere + ground/sea bounce irradiance from envCube
   let skyDir=normalize(vec3f(n.x*0.65,max(n.y,0.12),n.z*0.65));
   let skyIrr=textureSampleLevel(envCube,sampC,skyDir,6.0).rgb;
@@ -810,7 +835,7 @@ fn landFinishShadowed(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibi
   let skyRefl=envSpec*reflStrength;
   let specMask=select(clamp((0.72-effRough)/0.42,0.0,1.0)*(0.08+0.92*effWet),0.65,isMetal);
   col+=direct*min(specBRDF,1.5)*specMask*(0.25+0.75*archShadow)+skyRefl;
-  col+=lunarSurface(n,v,albedo*(1.0-effWet*.32),effRough,vec3f(f0),vec3f(mix(1.0,bakedLight.g,inPrimaryDomain)));
+  col+=lunarSurface(n,v,albedo*(1.0-effWet*.32),effRough,vec3f(f0),vec3f(mix(1.0,bakedLight.g,inPrimaryDomain))*lunarShadowVisibility(vec3f(shadowVis)));
   col+=lightningSurface(n,v,albedo,effRough)+worldFireSurface(world,n,v,albedo,effRough)+landWindowEmission;
   col=surfaceAir(col,world);
   // Clip cloud integration at high mountain surfaces: clouds behind mountain peaks
@@ -1302,12 +1327,14 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
   roughness=mix(roughness,min(roughness,0.24),shoreWet*0.65);
   let nDotL=dot(n,F.sunDir.xyz);
   var sunReach=pit.sun;
-  if(in.kind.x<2.5&&F.sunDir.y>0.02){
+  // Woodland beyond the shadow map still shades the ground beside it, read from the vegetation up-sun.
+  // Inside the map the trees cast for themselves, and shading twice would darken the ground twice.
+  let beyondShadowMap=(1.0-landShadowCoverage(world))*smoothstep(60.0,120.0,distance(world,F.camPos.xyz));
+  if(in.kind.x<2.5&&F.sunDir.y>0.02&&beyondShadowMap>0.0){
     let sunStep=F.sunDir.xz*(14.0/max(F.sunDir.y,0.28))/LAND.domain.z;
     let vegSun=textureSampleLevel(vegetationMask,landSampler,clamp(uv+sunStep,vec2f(0.0),vec2f(1.0)),0.0).r;
     let farCanopyShadow=smoothstep(0.18,0.62,vegSun)*(1.0-smoothstep(0.55,0.92,vegetation)*0.55);
-    let farFade=smoothstep(115.0,175.0,distance(world,F.camPos.xyz));
-    sunReach*=1.0-farCanopyShadow*0.48*farFade;
+    sunReach*=1.0-farCanopyShadow*0.48*beyondShadowMap;
   }
   let diffuse=(max(nDotL,0.0)+max(-nDotL,0.0)*canopyBackscatter)*sunReach;
   return landFinish(world,n,albedo,diffuse,ambientVisibility,wet,roughness);
@@ -1329,13 +1356,14 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
   let foliage=mix(dry,green,smoothstep(.12,.7,vegetation))*shade;
   let albedo=select(rock,foliage,grass);
   let sunlight=textureSampleLevel(landLight,sampC,uv,0).r;
-  let direct=sunIlluminance()*sunlight*landShadowVisibility(world,n);
+  let shadowed=vec3f(landShadowVisibility(world,n));
+  let direct=sunIlluminance()*sunlight*solarShadowVisibility(shadowed).x;
   let ambient=textureSampleLevel(envCube,sampC,vec3f(0,1,0),7).rgb;
   let diffuse=max(dot(n,F.sunDir.xyz),0.0)+select(0.0,max(dot(-n,F.sunDir.xyz),0.0)*.38,grass);
   let visibility=select(.35+.30*max(n.y,0.0),.32+in.kind.y*.32,grass);
   let wet=(1.0-smoothstep(0.6,3.2,world.y))*.55;
   var color=albedo*(1.0-wet*.3)*(direct*diffuse/PI+ambient*visibility);
-  color+=lunarSurface(n,normalize(F.camPos.xyz-world),albedo,.84,vec3f(.035),vec3f(textureSampleLevel(landLight,sampC,uv,0).g));
+  color+=lunarSurface(n,normalize(F.camPos.xyz-world),albedo,.84,vec3f(.035),vec3f(textureSampleLevel(landLight,sampC,uv,0).g)*lunarShadowVisibility(shadowed));
   let vEye=normalize(F.camPos.xyz-world);
   color+=lightningSurface(n,vEye,albedo,.84)+worldFireSurface(world,n,vEye,albedo,.84);
   return vec4f(surfaceAir(color,world),1);
@@ -1416,12 +1444,9 @@ struct CanopyVertex {
 @vertex fn portShadowVS(@location(0) position:vec3f)->@builtin(position) vec4f{
   return landSH.lightView*vec4f(position-landSH.origin.xyz,1.0);
 }
-@vertex fn treeShadowVS(@location(0) position:vec3f,@location(3) rootScale:vec4f,@location(4) yawKind:vec4f)->@builtin(position) vec4f{
-  let rc=landSH.lightView*vec4f(rootScale.xyz+vec3f(0.0,6.0*rootScale.w,0.0)-landSH.origin.xyz,1.0);
+@vertex fn treeShadowVS(@location(0) position:vec3f,@location(3) root:vec4f,@location(4) shape:vec4f)->@builtin(position) vec4f{
+  let rc=landSH.lightView*vec4f(root.xyz+vec3f(0.0,0.5*shape.x,0.0)-landSH.origin.xyz,1.0);
   if(abs(rc.x)>1.22||abs(rc.y)>1.22||rc.z<-0.08||rc.z>1.08){return vec4f(2.0,2.0,0.0,1.0);}
-  let c=cos(yawKind.x);let s=sin(yawKind.x);
-  let local=vec3f(c*position.x-s*position.z,position.y,s*position.x+c*position.z)*rootScale.w;
-  let world=rootScale.xyz+local;
-  return landSH.lightView*vec4f(world-landSH.origin.xyz,1.0);
+  return landSH.lightView*vec4f(treeWorld(position,root,shape)-landSH.origin.xyz,1.0);
 }
 `;

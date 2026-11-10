@@ -4163,9 +4163,9 @@ async function main() {
     if(terrain){
       const camGroundY=terrain.groundSample(terrainCamera.x,terrainCamera.z);
       const camGroundDist=Math.max(0,terrainCamera.y-Math.max(0,Number.isFinite(camGroundY)?camGroundY:0));
-      const landShadowRadius=Math.max(185,Math.min(340,165+camGroundDist*0.9));
+      const landShadowRadius=Math.min(340,165+camGroundDist*0.9);
       const landShadowSun=frameF.subarray(frameF[115]>0.5?96:32,frameF[115]>0.5?99:35);
-      landShadows.update(terrainCamera,camGroundY,landShadowSun,landShadowRadius,qs.get('shadows')!=='0');
+      landShadows.update(terrainCamera,camGroundY,landShadowSun,landShadowRadius,qs.get('shadows')!=='0',terrain.groundSample);
       landShadows.encode(enc,profiler,pass=>{
         terrain.drawShadow(pass,terrainCamera,frameF);
         props?.drawShadow?.(pass);

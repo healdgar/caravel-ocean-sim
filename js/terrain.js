@@ -729,7 +729,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     label:entryPoint==='portShadowVS'?'port shadow':'tree shadow',layout:'auto',
     vertex:{module,entryPoint,buffers},
     primitive:{topology:'triangle-list',cullMode:'none'},
-    depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less',depthBias:2,depthBiasSlopeScale:1.5},
+    // No constant bias: it counts in steps of the depth format, and a float's are too fine to matter.
+    depthStencil:{format:activeLandShadows.format,depthWriteEnabled:true,depthCompare:'less',depthBiasSlopeScale:1.5},
   });
   const terrainPipesPromise=modulePromise.then(module=>Promise.all([
     makePipe(module,'vs',[meshLayout]),
@@ -1109,7 +1110,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const bind=(pipe,entries)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:entries.map(([binding,resource])=>({binding,resource}))});
   const resources=[[0,{buffer:frameUBO}],[1,transView],[2,skyView],[3,sampler],[4,envCubeView],[5,lighting.createView()],[6,{buffer:uniform}],[7,albedo.createView()],[8,landSampler],[9,biomeTexture.createView()],[10,leafTexture.createView()],[11,{buffer:leafMean}],...activeLandShadows.terrainResources];
   const portShadowGroup=bind(portShadowPipe,[[19,{buffer:activeLandShadows.uniform}]]);
-  const treeShadowGroup=bind(treeShadowPipe,[[19,{buffer:activeLandShadows.uniform}]]);
+  const treeShadowGroup=bind(treeShadowPipe,[[0,{buffer:frameUBO}],[19,{buffer:activeLandShadows.uniform}]]);
   clouds=await cloudsResolvedPromise;waterOptics=await waterOpticsResolvedPromise;
   const [forestMassPack,forestMiddlePack]=await Promise.all([forestMassPromise,forestMiddlePromise]);
   let forestMass=null,proceduralMiddle=null;
@@ -1957,6 +1958,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       importedCanopy?.destroy?.();
       forest?.destroy?.();
       forestMass?.destroy?.();
+      if(ownsLandShadows)activeLandShadows.destroy();
       proceduralMiddle?.vertices?.destroy?.();proceduralMiddle?.indices?.destroy?.();proceduralMiddle?.woodIndices?.destroy?.();
     },
     updatePortDamage(now=0){
