@@ -103,6 +103,34 @@ test('men who come into being on a ruin lie on its own ground and make no sound'
   assert.equal(watched.audioEvents.filter((e) => e.type === 'casualty-scream').length, watched.soldiers.length);
 });
 
+test('a man already down still comes to rest on what is left when his wall is shot away', () => {
+  const fort = tower(), garrison = garrisonOf(fort), [man, other] = garrison.soldiers;
+  stepFortGarrison(garrison, 0.05);
+  // Shot at chest height kills each where he stands. It comes from outside, so it throws him inward along the wall.
+  for (const s of [man, other]) crater(fort, { localPosition: [s.lx + Math.sign(s.lx || 1) * 0.4, s.ly + 1.2, s.lz + Math.sign(s.lz || 1) * 0.4], radius: 1.4, severity: 0.9 });
+  for (let i = 0; i < 80; i++) stepFortGarrison(garrison, 0.05);
+  assert.equal(man.casualtyState, 'fallen');
+  assert.equal(other.casualtyState, 'fallen');
+  assert.equal(man.garrisonFall ?? null, null, 'thrown up and come down again, he lies on the wall');
+  const top = man.baseLy, otherTop = other.baseLy, screams = garrison.audioEvents?.length ?? 0;
+  assert.ok(top > 2, `on top of it: ${top}`);
+  // The building in pieces: the stretch under each of them, from the ground to his feet, and no floor inside.
+  const stretch = (s, index) => ({ index, localMin: [s.lx - 1.5, 0, s.lz - 1.5], localMax: [s.lx + 1.5, s.ly, s.lz + 1.5] });
+  const state = { brokenCount: 0, broken: [false, false], flying: new Set(), heap: new Map(), fracture: { shards: [stretch(man, 0), stretch(other, 1)], toWorld: (x, y, z) => [x, y, z], floorAt: () => -Infinity, groundAt: () => 0 } };
+  fort.damageState.fracture = state;
+  stepFortGarrison(garrison, 0.05);
+  assert.equal(man.baseLy, top, 'nothing has gone yet');
+  // The stretch under the first is shot away.
+  state.broken[0] = true; state.brokenCount = 1; state.flying.add(0);
+  stepFortGarrison(garrison, 0.05);
+  assert.ok(man.garrisonFall, 'he goes down with it, dead or not');
+  for (let i = 0; i < 80; i++) stepFortGarrison(garrison, 0.05);
+  assert.ok(man.baseLy < 0.05 && man.ly < 0.05, `to the ground at its foot, not left in the air where the wall was: ${man.baseLy}`);
+  assert.equal(man.garrisonFall ?? null, null);
+  assert.equal(other.baseLy, otherTop, 'the one whose stretch still stands lies where he was');
+  assert.equal(garrison.audioEvents?.length ?? 0, screams, 'and a dead man does not cry out again');
+});
+
 test('a body shot to pieces stays out of sight until the building is manned again', () => {
   const fort = tower(), garrison = garrisonOf(fort);
   // The one nearest the guns, with nobody and nothing between.
