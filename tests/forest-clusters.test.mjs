@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import fs from 'node:fs';
 import zlib from 'node:zlib';
-import {FOREST_CLUSTER_ASSETS,SUBTROPICAL_FOREST_CLUSTER_ASSETS,FOREST_CLUSTER_VERTEX_WORDS,FOREST_CLUSTER_WORDS,FOREST_LEAF_VERTICES,forestClusterIsDrawn,packForestClusterVertex} from '../js/forest-clusters.js';
+import {FOREST_CLUSTER_ASSETS,SUBTROPICAL_FOREST_CLUSTER_ASSETS,PORTUGAL_FOREST_CLUSTER_ASSETS,FOREST_CLUSTER_VERTEX_WORDS,FOREST_CLUSTER_WORDS,FOREST_LEAF_VERTICES,forestClusterIsDrawn,packForestClusterVertex} from '../js/forest-clusters.js';
 import {reapplyForestStrikes,strikeForestRoot} from '../js/forest-trunks.js';
 
 const MAX_TRIANGLES=128,STORAGE_BINDING_LIMIT=134217728;
@@ -21,7 +21,7 @@ function loadPack(pack){
 }
 const cluster=({floats,uints},i)=>{const at=i*FOREST_CLUSTER_WORDS;return{err:floats[at+12],parentErr:floats[at+13],first:uints[at+14],triangles:uints[at+15]>>>1,leaf:(uints[at+15]&1)===1,radius:floats[at+11]};};
 
-for(const pack of ['saba','subtropical'])test(`${pack} clusters are verified, bounded and ordered so the GPU can take a prefix`,()=>{
+for(const pack of ['saba','subtropical','portugal'])test(`${pack} clusters are verified, bounded and ordered so the GPU can take a prefix`,()=>{
   const data=loadPack(pack);
   assert.equal(data.manifest.format,'waterworld.forest-clusters');
   const forest=JSON.parse(fs.readFileSync(`assets/forest-scenery/${pack}/manifest.json`,'utf8'));
@@ -39,6 +39,23 @@ for(const pack of ['saba','subtropical'])test(`${pack} clusters are verified, bo
     }
     assert.ok(roots>0,`${p.species} needs a coarsest cut`);
     assert.ok(p.stats.leafClusters>0,`${p.species} has leaves`);
+  }
+});
+
+test('Lisbon\'s trees keep every leaf at the finest cut, and a town-wide view needs a fraction of their triangles',()=>{
+  // The pack stores a leaf as one quad where the others store two; the baker cuts each in half to match.
+  const data=loadPack('portugal'),forest=JSON.parse(fs.readFileSync('assets/forest-scenery/portugal/manifest.json','utf8'));
+  for(const p of data.manifest.prototypes){
+    const source=forest.prototypes[p.id];let finestLeaves=0,finest=0,far=0;
+    for(let i=p.firstCluster;i<p.firstCluster+p.clusterCount;i++){
+      const c=cluster(data,i);
+      if(c.err===0&&c.leaf)finestLeaves+=c.triangles;
+      if(c.err===0)finest+=c.triangles;
+      // Two hundred metres off on a 1117-pixel-high screen, at the leaf limit the game cuts to.
+      if(forestClusterIsDrawn({error:c.err,parentError:c.parentErr,lodDistance:200,parentDistance:200},1117,.6))far+=c.triangles;
+    }
+    assert.equal(finestLeaves,source.leaf.indexCount/6*4,`${p.species} ${source.cohort} lost or gained leaves in the bake`);
+    assert.ok(far>0&&far<finest*.6,`${p.species} ${source.cohort} draws ${far} of ${finest} triangles from 200 m`);
   }
 });
 
@@ -120,7 +137,8 @@ test('cluster assets are written as literal paths, so the build publishes them',
   const build=fs.readFileSync('build.mjs','utf8');
   assert.match(build,/FOREST_CLUSTER_ASSETS/);
   assert.match(build,/SUBTROPICAL_FOREST_CLUSTER_ASSETS/);
-  for(const file of [...Object.values(FOREST_CLUSTER_ASSETS),...Object.values(SUBTROPICAL_FOREST_CLUSTER_ASSETS)]){
+  assert.match(build,/\.\.\.Object\.values\(PORTUGAL_FOREST_CLUSTER_ASSETS\)/,'Lisbon\'s pack is published with its clusters');
+  for(const file of [...Object.values(FOREST_CLUSTER_ASSETS),...Object.values(SUBTROPICAL_FOREST_CLUSTER_ASSETS),...Object.values(PORTUGAL_FOREST_CLUSTER_ASSETS)]){
     assert.ok(source.includes(`'${file}'`),`${file} must appear literally`);
     assert.ok(fs.existsSync(file),`${file} must exist`);
   }

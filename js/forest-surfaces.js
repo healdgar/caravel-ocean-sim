@@ -26,6 +26,17 @@ export const SUBTROPICAL_FOREST_SURFACE_ASSETS=Object.freeze({
   'family-1-albedo.astc.bin.gz':'assets/forest-scenery/subtropical/surfaces/family-1-albedo.astc.bin.gz',
   'family-1-detail.astc.bin.gz':'assets/forest-scenery/subtropical/surfaces/family-1-detail.astc.bin.gz',
 });
+export const PORTUGAL_FOREST_SURFACE_ASSETS=Object.freeze({
+  'manifest.json':'assets/forest-scenery/portugal/surfaces/manifest.json',
+  'family-0-albedo.bc7.bin.gz':'assets/forest-scenery/portugal/surfaces/family-0-albedo.bc7.bin.gz',
+  'family-0-detail.bc7.bin.gz':'assets/forest-scenery/portugal/surfaces/family-0-detail.bc7.bin.gz',
+  'family-1-albedo.bc7.bin.gz':'assets/forest-scenery/portugal/surfaces/family-1-albedo.bc7.bin.gz',
+  'family-1-detail.bc7.bin.gz':'assets/forest-scenery/portugal/surfaces/family-1-detail.bc7.bin.gz',
+  'family-0-albedo.astc.bin.gz':'assets/forest-scenery/portugal/surfaces/family-0-albedo.astc.bin.gz',
+  'family-0-detail.astc.bin.gz':'assets/forest-scenery/portugal/surfaces/family-0-detail.astc.bin.gz',
+  'family-1-albedo.astc.bin.gz':'assets/forest-scenery/portugal/surfaces/family-1-albedo.astc.bin.gz',
+  'family-1-detail.astc.bin.gz':'assets/forest-scenery/portugal/surfaces/family-1-detail.astc.bin.gz',
+});
 export const FOREST_SURFACE_CODECS=Object.freeze({
   bc7:Object.freeze({feature:'texture-compression-bc',albedo:'bc7-rgba-unorm-srgb',detail:'bc7-rgba-unorm'}),
   astc:Object.freeze({feature:'texture-compression-astc',albedo:'astc-4x4-unorm-srgb',detail:'astc-4x4-unorm'}),
@@ -50,6 +61,9 @@ export function forestMaterialOptics(optics,index,material,familyId,layer){
 }
 
 const forestSurfaceDigest=async raw=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',raw)),v=>v.toString(16).padStart(2,'0')).join('');
+// A layer serves the material it was baked from and any others that share its maps: a pack's cohorts
+// of one species wear the same bark and leaves.
+const forestSurfaceLayerMaterials=layer=>[layer.material,...(layer.shares??[])];
 const forestSurfaceSameSources=(layer,material)=>['albedo','normal','roughnessMap'].every(kind=>(material[kind]?.sha256??null)===(layer.sources?.[kind]??null));
 
 // Null when this pack's set does not describe these exact materials, so edited maps are never shown stale.
@@ -63,8 +77,9 @@ export async function loadForestSurfaceSet({assets,materials,codec,fetchAsset=fe
   const manifest=await(await load('manifest.json')).json();
   if(manifest?.format!=='waterworld.forest-surfaces'||manifest.version!==1||!Array.isArray(manifest.families)||manifest.families.length>4)throw Error('Invalid forest surface set');
   const placed=manifest.families.flatMap(family=>family.layers);
-  if(placed.length!==materials.length||new Set(placed.map(layer=>layer.material)).size!==materials.length)return null;
-  for(const layer of placed)if(!materials[layer.material]||!forestSurfaceSameSources(layer,materials[layer.material]))return null;
+  const served=placed.flatMap(forestSurfaceLayerMaterials);
+  if(served.length!==materials.length||new Set(served).size!==materials.length)return null;
+  for(const layer of placed)for(const index of forestSurfaceLayerMaterials(layer))if(!materials[index]||!forestSurfaceSameSources(layer,materials[index]))return null;
   const families=await Promise.all(manifest.families.map(async family=>{
     const read=async kind=>{
       const file=family.files[codec][kind],packed=await(await load(file.gzip.file)).arrayBuffer();
@@ -96,7 +111,10 @@ export function createForestSurfaceTextures({device,set,materials}){
   };
   try{
     for(const [id,family]of set.families.entries()){
-      const rows=family.layers.map((layer,row)=>{forestMaterialOptics(optics,layer.material,materials[layer.material],id,row);return{material:materials[layer.material]};});
+      const rows=family.layers.map((layer,row)=>{
+        for(const index of forestSurfaceLayerMaterials(layer))forestMaterialOptics(optics,index,materials[index],id,row);
+        return{material:materials[layer.material]};
+      });
       families.push({id,width:family.width,height:family.height,levels:family.levels,rows,
         albedo:upload('forest immutable native pigment and coverage blocks',formats.albedo,family,family.albedo.data),
         normal:upload('forest immutable native normal and roughness blocks',formats.detail,family,family.detail.data)});

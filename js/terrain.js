@@ -16,7 +16,7 @@ import {bakeLandImpactDeformations} from './part-assembly.js';
 import {buildingFracturePipeline,createPortFractures} from './building-fracture.js';
 import {streetEdgeAt} from './town-streets.js';
 import {createLandCraterLedger,createLandCraters,landCraterSize} from './land-craters.js';
-import {createGroundDetail} from './ground-detail.js';
+import {sharedGroundDetail} from './ground-detail.js';
 import {createLandShadows} from './shadows.js';
 
 import {
@@ -729,7 +729,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     label:entryPoint==='portShadowVS'?'port shadow':'tree shadow',layout:'auto',
     vertex:{module,entryPoint,buffers},
     primitive:{topology:'triangle-list',cullMode:'none'},
-    depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less',depthBias:2,depthBiasSlopeScale:1.5},
+    // No constant bias: it counts in steps of the depth format, and a float's are too fine to matter.
+    depthStencil:{format:activeLandShadows.format,depthWriteEnabled:true,depthCompare:'less',depthBiasSlopeScale:1.5},
   });
   const terrainPipesPromise=modulePromise.then(module=>Promise.all([
     makePipe(module,'vs',[meshLayout]),
@@ -743,8 +744,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   ]));
   terrainPipesPromise.catch(()=>{});
   const submergedPipesPromise=waterOpticsResolvedPromise.then(wo=>wo?Promise.all([
-    wo.capture({source:TERRAIN,vertex:{buffers:[meshLayout]},world:'in.world',groups:2}),
-    wo.capture({source:TERRAIN,vertex:{entryPoint:'groundVS',buffers:treeBuffers},entry:'groundFS',world:'in.world',groups:1}),
+    wo.capture({source:TERRAIN,vertex:{buffers:[meshLayout]},world:'in.world',groups:2,land:true}),
+    wo.capture({source:TERRAIN,vertex:{entryPoint:'groundVS',buffers:treeBuffers},entry:'groundFS',world:'in.world',groups:1,land:true}),
   ]):[null,null]);
   submergedPipesPromise.catch(()=>{});
   const leafBitmapPromise=load('assets/tree-foliage.png').then(r=>r.blob()).then(b=>createImageBitmap(b));
@@ -761,7 +762,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     skipNative:skipNativeForest&&!useSubtropicalForest&&!usePortugalForest,
     deferNative:!skipNativeForest&&useProcedural&&!useSubtropicalForest&&!usePortugalForest,
     skipRoots:useProcedural,
-    deferSurfaces:!usePortugalForest&&Boolean(chooseForestSurfaceCodec(device,search.get('forestSurfaces')||'auto')),
+    deferSurfaces:Boolean(chooseForestSurfaceCodec(device,search.get('forestSurfaces')||'auto')),
     onManifest:resolveForestManifest,
     onRoots:resolveForestRoots,
   }).catch(error=>{forestFailure=error.message;resolveForestManifest(null);resolveForestRoots(null);return null;});
@@ -981,7 +982,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     cp.dispatchWorkgroups(Math.ceil((activeRegion.albedoSize>>m)/8),Math.ceil((activeRegion.albedoSize>>m)/8));
   }
   cp.end();device.queue.submit([enc.finish()]);
-  const groundDetail=await createGroundDetail({device,computePipe,mipPipe});
+  const groundDetail=await sharedGroundDetail({device,computePipe,mipPipe});
   let nearAlbedo=albedo;
   if(nearTile){
     const image=await nearBitmapPromise;
@@ -1109,7 +1110,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const bind=(pipe,entries)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:entries.map(([binding,resource])=>({binding,resource}))});
   const resources=[[0,{buffer:frameUBO}],[1,transView],[2,skyView],[3,sampler],[4,envCubeView],[5,lighting.createView()],[6,{buffer:uniform}],[7,albedo.createView()],[8,landSampler],[9,biomeTexture.createView()],[10,leafTexture.createView()],[11,{buffer:leafMean}],...activeLandShadows.terrainResources];
   const portShadowGroup=bind(portShadowPipe,[[19,{buffer:activeLandShadows.uniform}]]);
-  const treeShadowGroup=bind(treeShadowPipe,[[19,{buffer:activeLandShadows.uniform}]]);
+  const treeShadowGroup=bind(treeShadowPipe,[[0,{buffer:frameUBO}],[19,{buffer:activeLandShadows.uniform}]]);
   clouds=await cloudsResolvedPromise;waterOptics=await waterOpticsResolvedPromise;
   const [forestMassPack,forestMiddlePack]=await Promise.all([forestMassPromise,forestMiddlePromise]);
   let forestMass=null,proceduralMiddle=null;
@@ -1957,6 +1958,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       importedCanopy?.destroy?.();
       forest?.destroy?.();
       forestMass?.destroy?.();
+      if(ownsLandShadows)activeLandShadows.destroy();
       proceduralMiddle?.vertices?.destroy?.();proceduralMiddle?.indices?.destroy?.();proceduralMiddle?.woodIndices?.destroy?.();
     },
     updatePortDamage(now=0){

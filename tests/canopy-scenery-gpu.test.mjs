@@ -13,7 +13,7 @@ test('real528B canopy draws preserve linear material, world placement and separa
       ?['--enable-unsafe-webgpu','--use-angle=metal','--disable-gpu-watchdog']:['--enable-unsafe-webgpu','--use-angle=swiftshader','--enable-unsafe-swiftshader','--disable-gpu-watchdog']});
     const page=await browser.newPage();await page.route('**/__canopy_gpu',route=>route.fulfill({contentType:'text/html',body:'<!doctype html>'}));await page.goto('http://127.0.0.1:'+server.address().port+'/__canopy_gpu');
     const result=await page.evaluate(async()=>{
-      const {TERRAIN}=await import('/js/wgsl/terrain.js'),{withCelestialFrame}=await import('/js/wgsl/celestial.js'),{createCanopyRenderer}=await import('/js/canopy-scenery.js');
+      const {TERRAIN}=await import('/js/wgsl/terrain.js'),{withCelestialFrame}=await import('/js/wgsl/celestial.js'),{createCanopyRenderer}=await import('/js/canopy-scenery.js'),{createLandShadows}=await import('/js/shadows.js');
       const device=await(await navigator.gpu.requestAdapter()).requestDevice(),errors=[],B=GPUBufferUsage,T=GPUTextureUsage;device.addEventListener('uncapturederror',event=>errors.push(event.error.message));
       const buffers=[],textures=[],pipes=new Map(),makePipe=device.createRenderPipelineAsync.bind(device);
       device.createRenderPipelineAsync=async descriptor=>{const pipeline=await makePipe(descriptor);pipes.set(descriptor.label,pipeline);return pipeline;};
@@ -23,7 +23,10 @@ test('real528B canopy draws preserve linear material, world placement and separa
       const frame=buffer(frameData,B.UNIFORM,'actual528B canopy test Frame'),land=buffer(new Float32Array([0,0,128,1]),B.UNIFORM,'canopy land domain'),cloudFrame=buffer(new Float32Array(32),B.UNIFORM,'inactive production CloudFrame');
       const trans=tex(),sky=tex('2d',1,false),env=tex('2d',6),light=tex(),density=tex('3d',1,false),cloudLight=tex('3d',1,false),sampler=device.createSampler({minFilter:'linear',magFilter:'linear'});
       const leaf=device.createTexture({size:[1,1],format:'rgba8unorm',usage:T.TEXTURE_BINDING|T.COPY_DST});textures.push(leaf);
-      const resources=[[0,{buffer:frame}],[1,trans.createView()],[2,sky.createView()],[3,sampler],[4,env.createView({dimension:'cube'})],[5,light.createView()],[6,{buffer:land}],[8,sampler],[10,leaf.createView()]];
+      // The canopy takes the land shadow map since 6ecec5c. The production map is bound and left switched
+      // off, as ?shadows=0 leaves it, so the crowns stand in the full light the oracle below assumes.
+      const landShadows=createLandShadows(device,64);landShadows.update({x:0,y:0,z:0,forward:[0,0,-1]},0,[0,1,0],72,false);
+      const resources=[[0,{buffer:frame}],[1,trans.createView()],[2,sky.createView()],[3,sampler],[4,env.createView({dimension:'cube'})],[5,light.createView()],[6,{buffer:land}],[8,sampler],[10,leaf.createView()],...landShadows.terrainResources];
       const clouds={bindVolume:pipe=>device.createBindGroup({layout:pipe.getBindGroupLayout(1),entries:[{buffer:cloudFrame},density.createView(),cloudLight.createView(),sampler].map((resource,binding)=>({binding,resource}))})};
       const module=device.createShaderModule({code:withCelestialFrame(TERRAIN),label:'complete production canopy/terrain528B'});errors.push(...(await module.getCompilationInfo()).messages.filter(m=>m.type==='error').map(m=>m.message));
       const colours={wood:[.18,.30,.07],leaf:[.05,.30,.09],far:[.60,.04,.12]};
@@ -50,7 +53,7 @@ test('real528B canopy draws preserve linear material, world placement and separa
       const opaque=pipes.get('imported canopy canopyOpaqueFS');device.pushErrorScope('validation');device.createBindGroup({layout:opaque.getBindGroupLayout(0),entries:resources.filter(([id])=>[0,1,2,3,4,5,6,10].includes(id)).map(([binding,resource])=>({binding,resource}))});const extraneousLeafBinding=await device.popErrorScope();
       const exactImages={borrowedRGB:JSON.stringify(visible.pixels)===JSON.stringify(changedImageRGB.pixels),wind:JSON.stringify(visible.pixels)===JSON.stringify(wind.pixels),translated:JSON.stringify(visible.pixels)===JSON.stringify(translated.pixels)};
       const result={errors,visible:{wood:visible.wood,leaf:visible.leaf,stats:visible.stats},cutout:{wood:cutout.wood,leaf:cutout.leaf},opaqueFar:{centre:opaqueFar.centre,stats:opaqueFar.stats},resolvedFar:{centre:resolvedFar.centre},exactImages,opaqueOmitsLeafTexture:!!extraneousLeafBinding,colours};
-      near.destroy();far.destroy();unresolvedFar.destroy();shifted.destroy();for(const b of buffers)b.destroy();for(const texture of textures)texture.destroy();await device.queue.onSubmittedWorkDone();device.destroy();return result;
+      near.destroy();far.destroy();unresolvedFar.destroy();shifted.destroy();landShadows.destroy();for(const b of buffers)b.destroy();for(const texture of textures)texture.destroy();await device.queue.onSubmittedWorkDone();device.destroy();return result;
     });
     t.diagnostic(JSON.stringify(result));assert.deepEqual(result.errors,[]);assert.equal(result.opaqueOmitsLeafTexture,true,'opaque native layout actually excludes leaf texture access');
     const near=(a,b)=>assert.ok(Math.abs(a-b)<2e-6,a+' != '+b);

@@ -126,37 +126,70 @@ export async function createVesselShadows({device,hullUBO,mesh,meshIndices=null,
   };
 }
 
-export function fitLandShadow(out, camera, groundY, sun, resolution = 4096, radius = 72, enabled = true) {
+// Radii the land shadow box may take. Its texels change size only when the box moves from one to the
+// next, and the next is held until the need has left it by a margin, so a camera that bobs at a step's
+// edge does not flick the whole map between two scales.
+export const LAND_SHADOW_RADII = Object.freeze([185, 220, 260, 300, 340]);
+export function landShadowRadiusStep(wanted, held = 0) {
+  const fit = LAND_SHADOW_RADII.find((radius) => radius >= wanted) ?? LAND_SHADOW_RADII.at(-1);
+  return fit > held || wanted < fit * 0.95 ? fit : held;
+}
+// Where the box sits: ahead of the camera, so more of it lies in view.
+function landShadowCentre(camera, radius) {
+  const lead = Math.min(115, radius * 0.45);
+  return [(camera?.x ?? 0) + (camera?.forward?.[0] ?? 0) * lead, (camera?.z ?? 0) + (camera?.forward?.[2] ?? 0) * lead];
+}
+// The lowest and highest ground in the box's disc, read at its centre and around two rings.
+export function landShadowRelief(groundAt, camera, radius) {
+  const [x, z] = landShadowCentre(camera, radius);
+  let low = Infinity, high = -Infinity;
+  const read = (px, pz) => { const y = groundAt(px, pz); if (Number.isFinite(y)) { low = Math.min(low, y); high = Math.max(high, y); } };
+  read(x, z);
+  for (let i = 0; i < 16; i++) {
+    const angle = i * Math.PI / 8, reach = radius * (i & 1 ? 0.55 : 1);
+    read(x + Math.cos(angle) * reach, z + Math.sin(angle) * reach);
+  }
+  return low <= high ? [low, high] : [NaN, NaN];
+}
+// Casters are taken this far above the highest ground in the box: crowns, roofs and masts ashore.
+const LAND_SHADOW_CASTER_RISE = 48;
+const LAND_SHADOW_HEIGHT_STEP = 16;
+
+// Fits the light's box to a disc of ground ahead of the camera. `low` and `high` are the lowest and
+// highest ground in that disc; without them the ground is taken as level. The box is as tall as the
+// disc looks from the sun, so a low sun spends its rows on ground and not on empty air, and as deep
+// as the relief needs, so no height inside the disc falls out of it. Its centre moves in whole texels
+// measured from the world's origin, so the texels stay on the same ground wherever the camera goes.
+export function fitLandShadow(out, camera, groundY, sun, resolution = 4096, radius = 72, enabled = true, low = groundY, high = groundY) {
   const [sx, sy, sz] = sun;
   const horizontal = Math.hypot(sx, sz);
   const rx = horizontal > 1e-5 ? sz / horizontal : 1;
   const rz = horizontal > 1e-5 ? -sx / horizontal : 0;
   const ux = sy * rz, uy = sz * rx - sx * rz, uz = -sy * rx;
-  const fwdX = camera?.forward?.[0] ?? 0;
-  const fwdZ = camera?.forward?.[2] ?? 0;
-  const lead = Math.min(115, radius * 0.45);
-  const cxWorld = (camera?.x ?? 0) + fwdX * lead;
-  const czWorld = (camera?.z ?? 0) + fwdZ * lead;
+  const [cxWorld, czWorld] = landShadowCentre(camera, radius);
   const cyWorld = Number.isFinite(groundY) ? Math.max(0, groundY) : 0;
-  // Quantize world origin to a coarse grid and snap light-space center to texels
-  // so shadows remain 100% locked to world texels without swimming when moving.
+  const floor = Math.floor(Math.min(cyWorld, Number.isFinite(low) ? Math.max(0, low) : cyWorld) / LAND_SHADOW_HEIGHT_STEP) * LAND_SHADOW_HEIGHT_STEP - 2;
+  const top = Math.ceil((Math.max(cyWorld, Number.isFinite(high) ? high : cyWorld) + LAND_SHADOW_CASTER_RISE) / LAND_SHADOW_HEIGHT_STEP) * LAND_SHADOW_HEIGHT_STEP;
+  // The uniform holds positions from a nearby origin, which keeps them exact in 32-bit floats.
   const originX = Math.round(cxWorld / 64) * 64;
   const originY = Math.round(cyWorld / 16) * 16;
   const originZ = Math.round(czWorld / 64) * 64;
-  const dx = cxWorld - originX;
-  const dy = cyWorld - originY;
-  const dz = czWorld - originZ;
-  const px0 = rx * dx + rz * dz;
-  const py0 = ux * dx + uy * dy + uz * dz;
-  const pz0 = -sx * dx - sy * dy - sz * dz;
+  // The disc and its heights as the light sees them: across, up its own rows, and along its rays.
+  const up = Math.hypot(ux, uz), along = Math.max(0, uy);
   const width = Math.ceil(radius * 2);
-  const height = Math.ceil(radius * 2);
+  const rowLow = -radius * up + Math.min(floor * along, top * along), rowHigh = radius * up + Math.max(floor * along, top * along);
+  const height = Math.max(Math.ceil(rowHigh - rowLow), 1);
   const tx = width / resolution;
   const ty = height / resolution;
-  const cx = Math.round(px0 / tx) * tx;
-  const cy = Math.round(py0 / ty) * ty;
-  const zmin = pz0 - 180;
-  const zmax = pz0 + 180;
+  // Centre in the light's own axes from the world's origin, then to the nearest whole texel.
+  const px = Math.round((rx * cxWorld + rz * czWorld) / tx) * tx;
+  const py = Math.round((ux * cxWorld + uz * czWorld + (rowLow + rowHigh) / 2) / ty) * ty;
+  const cx = px - (rx * originX + rz * originZ);
+  const cy = py - (ux * originX + uy * originY + uz * originZ);
+  const pz0 = -sx * (cxWorld - originX) + sy * originY - sz * (czWorld - originZ);
+  const reach = radius * horizontal + 24;
+  const zmin = pz0 - reach - sy * top;
+  const zmax = pz0 + reach - sy * floor;
   const depth = zmax - zmin;
   out.fill(0);
   out[0] = (rx * 2) / width; out[8] = (rz * 2) / width; out[12] = (-cx * 2) / width;
@@ -164,24 +197,27 @@ export function fitLandShadow(out, camera, groundY, sun, resolution = 4096, radi
   out[2] = -sx / depth; out[6] = -sy / depth; out[10] = -sz / depth; out[14] = -zmin / depth; out[15] = 1;
   out[16] = originX; out[17] = originY; out[18] = originZ;
   out[19] = enabled && sy > 0.01 ? 1 : 0;
-  out.set(sun, 20); out[23] = depth; out[24] = tx; out[25] = ty;
+  // The last two mark this as the land's map, which holds no cloth, for receivers that read either kind.
+  out.set(sun, 20); out[23] = depth; out[24] = tx; out[25] = ty; out[26] = 1;
   return out;
 }
 
+export const LAND_SHADOW_FORMAT = 'depth32float';
 export function createLandShadows(device, resolution = 4096) {
   const B = GPUBufferUsage, T = GPUTextureUsage;
   const data = new Float32Array(28);
+  let heldRadius = 0;
   const uniform = device.createBuffer({ label: 'land shadow frame', size: 112, usage: B.UNIFORM | B.COPY_DST });
   const solid = device.createTexture({
     label: 'land solid shadow',
     size: [resolution, resolution],
-    format: 'depth32float',
+    format: LAND_SHADOW_FORMAT,
     usage: T.RENDER_ATTACHMENT | T.TEXTURE_BINDING,
   });
   const canvas = device.createTexture({
     label: 'land dummy canvas shadow',
     size: [1, 1],
-    format: 'depth32float',
+    format: LAND_SHADOW_FORMAT,
     usage: T.RENDER_ATTACHMENT | T.TEXTURE_BINDING,
   });
   const transmission = device.createTexture({
@@ -211,6 +247,7 @@ export function createLandShadows(device, resolution = 4096) {
   };
   return {
     resolution,
+    format: LAND_SHADOW_FORMAT,
     uniform,
     data,
     solidView,
@@ -220,8 +257,11 @@ export function createLandShadows(device, resolution = 4096) {
       [20, solidView],
       [21, compare],
     ],
-    update(camera, groundY, sun, radius = 72, enabled = true) {
-      fitLandShadow(data, camera, groundY, sun, resolution, radius, enabled);
+    // `groundAt(x, z)` gives the ground's height, from which the box takes the relief it must hold.
+    update(camera, groundY, sun, radius = 72, enabled = true, groundAt = null) {
+      heldRadius = landShadowRadiusStep(radius, heldRadius);
+      const [low, high] = groundAt ? landShadowRelief(groundAt, camera, heldRadius) : [groundY, groundY];
+      fitLandShadow(data, camera, groundY, sun, resolution, heldRadius, enabled, low, high);
       device.queue.writeBuffer(uniform, 0, data);
     },
     encode(encoder, profiler, drawCasters) {

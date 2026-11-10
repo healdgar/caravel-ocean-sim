@@ -5,6 +5,7 @@ export const SEA_SHADOW_REDUCTION = 4;
 export const SEA_SHADOW_LEVELS = 7;
 const SEA_SHADOW_HEIGHT_RANGE_M = 64;
 export const SHADOW_FRAME = /* wgsl */ `
+// texel.xy is one texel's size in metres. texel.z is 1 for the land's map, which holds no cloth.
 struct ShadowFrame { lightView:mat4x4f, origin:vec4f, sun:vec4f, texel:vec4f };
 `;
 
@@ -42,6 +43,8 @@ const SHADOW_SAMPLE_BASE = SHADOW_FRAME + /* wgsl */ `
 @group(1) @binding(3) var canvasShadow:texture_depth_2d;
 @group(1) @binding(4) var canvasFilter:texture_2d<f32>;
 @group(1) @binding(5) var shadowLinear:sampler;
+// The widest tent that still needs only two taps along each axis.
+const LAND_SHADOW_TENT_TEXELS=1.5;
 struct ShadowTentAxis {position:vec3f,weight:vec3f};
 fn shadowTentIntegral(x:f32,radius:f32)->f32 {
   let q=clamp(x,-radius,radius);
@@ -72,15 +75,19 @@ fn shadowCanvasTransmission(sample:vec4f)->vec3f {
 }
 fn vesselShadow(world:vec3f,normal:vec3f)->vec3f {
   if(SH.origin.w<0.5){return vec3f(1);}
+  // People and goods ashore read the land's map with this. It has no cloth, and its texels are too
+  // coarse to resolve a penumbra, so they skip the blocker search and the cloth, and take the four
+  // taps a tent of fixed width needs. A ship's own map keeps the full filter.
+  let isLand=SH.texel.z>0.5;
   let facing=select(-1.0,1.0,dot(normal,SH.sun.xyz)>=0.0);
-  let offset=normal*facing*0.005+SH.sun.xyz*0.004;
+  let offset=normal*facing*select(0.008,0.005,isLand)+SH.sun.xyz*select(0.006,0.004,isLand);
   let p=SH.lightView*vec4f(world-SH.origin.xyz+offset,1.0);
   let uv=p.xy*vec2f(0.5,-0.5)+0.5;
   if(any(uv<vec2f(0)) || any(uv>vec2f(1)) || p.z<0.0){return vec3f(1);}
   let dim=vec2i(textureDimensions(solidShadow));
   let texel=uv*vec2f(dim)-.5;let cell=vec2i(floor(texel));let phase=fract(texel);
   var blockerSum=0.0;var blockerWeight=0.0;
-  for(var corner=0u;corner<4u;corner++){
+  for(var corner=0u;corner<4u&&!isLand;corner++){
     let step=vec2i(i32(corner&1u),i32(corner>>1u));let at=clamp(cell+step,vec2i(0),dim-1);
     let weight=select(1.0-phase.x,phase.x,step.x==1)*select(1.0-phase.y,phase.y,step.y==1);
     let depth=min(textureLoad(solidShadow,at,0),textureLoad(canvasShadow,at,0));
@@ -92,8 +99,7 @@ fn vesselShadow(world:vec3f,normal:vec3f)->vec3f {
   // Solar angular radius grows the penumbra with receiver distance. The cap
   // bounds the nine-tap filter cost and prevents thin rigging washing out.
   let distance=max(p.z-blocker,0.0)*SH.sun.w;
-  let minR=select(0.82,1.5,distance>1.2);
-  let radius=clamp(distance*0.004675/SH.texel.xy,vec2f(minR),vec2f(6.0));
+  let radius=select(clamp(distance*0.004675/SH.texel.xy,vec2f(1.5),vec2f(6.0)),vec2f(LAND_SHADOW_TENT_TEXELS),isLand);
   let tentRadius=min(radius,vec2f(2.5));let spread=max(radius/2.5,vec2f(1));
   let horizontal=shadowTentAxis(uv.x,f32(dim.x),tentRadius.x);
   let vertical=shadowTentAxis(uv.y,f32(dim.y),tentRadius.y);
@@ -120,6 +126,7 @@ fn vesselShadow(world:vec3f,normal:vec3f)->vec3f {
       +dot(max(-slope,vec2f(0)),(vec2f(1)-samplePhase)/vec2f(dim));
     let depth=min(reference+dot(slope,delta)-footprintBias,0.99999);
     let solid=textureSampleCompareLevel(solidShadow,shadowCompare,q,depth);
+    if(isLand){result+=vec3f(solid*weight);continue;}
     let cloth=textureSampleCompareLevel(canvasShadow,shadowCompare,q,depth);
     let transmission=shadowCanvasTransmission(textureSampleLevel(canvasFilter,shadowLinear,q,0.0));
     result+=solid*mix(transmission,vec3f(1),cloth)*weight;

@@ -69,13 +69,17 @@ test('casualty persistence constants keep blasted townsfolk and garrison bodies 
 });
 
 test('shader source audit: cobblestone, shoreline, and rope shaders enforce derivative footprint & grazing-angle band-limiting', () => {
-  // 1. Cobblestone Kind 16 & town street cobblestones in terrain.js
-  assert.ok(
-    TERRAIN_RENDER.includes('cobbleBumpFade') &&
-      TERRAIN_RENDER.includes('stoneColorFade') &&
-      TERRAIN_RENDER.includes('stoneBumpFade'),
-    'TERRAIN_RENDER must separate stoneColorFade (Nyquist colour limit) from stoneBumpFade/cobbleBumpFade (early normal-bump damping)'
-  );
+  // 1. Cobblestone Kind 16 & town street paving in terrain.js.
+  // aca94ea replaced the procedural sett cascade of e1f3e9f (stoneColorFade, stoneBumpFade) with stones read
+  // from the baked ground-detail texture. A texture read with its own gradients is band-limited by its mip
+  // chain, so the paved block must hold no pattern computed per pixel, and its relief must fade with the
+  // pixel's footprint. Kind 16 keeps its own early damping of the normal bump.
+  const paved = pavedStreetBlock();
+  assert.match(paved, /let cobbleTone=gd\.fine\.g\*[\d.]+\+gd\.mid\.g\*[\d.]+\+gd\.mid\.b\*[\d.]+;/, 'street stones take their tone from the baked ground detail');
+  assert.ok(!/fract\(|floor\(|sin\(|cos\(|hash|noise/i.test(paved), 'the paved block computes no pattern of its own that could alias');
+  assert.match(TERRAIN_RENDER, /fn groundDetailTexel\([^)]*\)->vec4f\{[^}]*textureSampleGrad\(groundDetailTexture/, 'ground detail is read through its mip chain with the surface\'s own gradients');
+  assert.ok(streetBumpFade(1) === 0 && streetBumpFade(0) === 1, 'street relief fades out with the pixel footprint');
+  assert.ok(kind16BumpFade(1, 1) === 0 && kind16BumpFade(0, 1) === 1, 'Kind 16 relief fades out with the pixel footprint');
   assert.ok(
     TERRAIN_RENDER.includes('rippleW=landDetailWeight') && TERRAIN_RENDER.includes('rippled=landDetailWeight(cycles)'),
     'TERRAIN_RENDER must include landDetailWeight derivative filtering on beach & shoreline ripples'
@@ -94,7 +98,26 @@ test('shader source audit: cobblestone, shoreline, and rope shaders enforce deri
   );
 });
 
-test('multi-range texture evaluation: cobblestones, roof tiles, and hemp ropes band-limit smoothly from 2m to 180m without mid-range interference spikes', () => {
+// The paved branch of a town way, as it ships.
+function pavedStreetBlock() {
+  const start = TERRAIN_RENDER.indexOf('if(paved>0.0){'), end = TERRAIN_RENDER.indexOf('albedo=mix(albedo*(1.0-trodden', start);
+  assert.ok(start > 0 && end > start, 'the paved street block is missing from the terrain shader');
+  return TERRAIN_RENDER.slice(start, end);
+}
+// The fades the shipped shader applies, with their limits read from its source and not copied here.
+function streetBumpFade(footprint) {
+  const found = /let bumpVal=\([^;]*\)\*\(1\.0-smoothstep\(([\d.]+),([\d.]+),footprint\)\);/.exec(pavedStreetBlock());
+  assert.ok(found, 'street relief must fade with the pixel footprint');
+  return 1 - smoothstep(Number(found[1]), Number(found[2]), footprint);
+}
+function kind16BumpFade(footprint, upward) {
+  const found = /let cobbleBumpFade=archLodFade\*\(1\.0-smoothstep\(([\d.]+),([\d.]+),cobbleAniso\)\)\*smoothstep\(([\d.]+),([\d.]+),max\(abs\(n\.y\),([\d.]+)\)\);/.exec(TERRAIN_RENDER);
+  assert.ok(found, 'Kind 16 relief must fade with the pixel footprint and at grazing faces');
+  const [low, high, steep, flat, least] = found.slice(1).map(Number);
+  return (1 - smoothstep(low, high, footprint)) * smoothstep(steep, flat, Math.max(Math.abs(upward), least));
+}
+
+test('multi-range texture evaluation: paving and hemp ropes band-limit smoothly from 2m to 180m without mid-range interference spikes', () => {
   const rangesM = [2, 6, 15, 35, 80, 180];
   const grazingAnglesDeg = [45, 18];
   const patchSize = 48;
@@ -102,49 +125,38 @@ test('multi-range texture evaluation: cobblestones, roof tiles, and hemp ropes b
 
   for (const angleDeg of grazingAnglesDeg) {
     const sinElev = Math.sin((angleDeg * Math.PI) / 180);
-    const cobbleResults = [];
-    const streetResults = [];
     const ropeResults = [];
+    let previousStreet = 1, previousKind16 = 1;
 
     for (const distM of rangesM) {
       // World-space footprint per pixel along the ground plane (foreshortened by 1/sinElev)
       const pixelWorldDx = distM / focalPx;
       const pixelWorldDy = distM / (focalPx * Math.max(0.15, sinElev));
       const cobbleFootprint = Math.max(pixelWorldDx, pixelWorldDy);
-      const cobbleGrazing = smoothstep(0.08, 0.38, sinElev);
-      const cobbleFade = (1.0 - smoothstep(0.08, 0.32, cobbleFootprint)) * cobbleGrazing;
-      const cellFoot = cobbleFootprint * 3.1;
-      const streetGrazing = smoothstep(0.05, 0.22, sinElev);
-      const stoneColorFade = (1.0 - smoothstep(0.16, 0.46, cellFoot)) * streetGrazing;
-      const mortarFade = (1.0 - smoothstep(0.11, 0.34, cellFoot)) * streetGrazing;
+      // 1 and 2. Paving, from the limits in the shipped shader. Its stones are a mip-mapped texture, which the
+      // sampler band-limits at every range, so no checkerboard can form at 35 m as the procedural setts could.
+      // Their relief also feeds the specular highlight, so from 80 m, where the earlier audit capped
+      // high-frequency energy, under a tenth of it may remain, none at 180 m, and it must never return with
+      // distance. At 15 m the stones stay legible.
+      const street = streetBumpFade(cobbleFootprint), kind16 = kind16BumpFade(cobbleFootprint, 1);
+      assert.ok(street <= previousStreet + 1e-9 && kind16 <= previousKind16 + 1e-9, `paving relief returned at ${distM}m (${angleDeg}°)`);
+      previousStreet = street; previousKind16 = kind16;
+      if (distM >= 80) {
+        assert.ok(street < 0.1, `street relief at ${distM}m (${angleDeg}°) was ${street.toFixed(3)}, expected < 0.1`);
+        assert.ok(kind16 < 0.1, `Kind 16 relief at ${distM}m (${angleDeg}°) was ${kind16.toFixed(3)}, expected < 0.1`);
+      }
+      if (distM >= 180) assert.ok(street === 0 && kind16 === 0, `paving relief survives at ${distM}m (${angleDeg}°)`);
+      if (distM <= 15 && angleDeg === 45) {
+        assert.ok(street > 0.9, `street stones lose their relief at ${distM}m (${street.toFixed(3)}), a premature fade`);
+        assert.ok(kind16 > 0.9, `Kind 16 stones lose their relief at ${distM}m (${kind16.toFixed(3)}), a premature fade`);
+      }
 
-      const cobbleGrid = new Float32Array(patchSize * patchSize);
-      const streetGrid = new Float32Array(patchSize * patchSize);
       const ropeGrid = new Float32Array(patchSize * patchSize);
 
       for (let py = 0; py < patchSize; py++) {
         for (let px = 0; px < patchSize; px++) {
           const wx = (px - patchSize * 0.5) * pixelWorldDx;
           const wz = distM + (py - patchSize * 0.5) * pixelWorldDy;
-
-          // 1. Kind 16 Architectural Cobblestone response
-          const cFreq = 0.34;
-          const cu = wx * cFreq;
-          const cv = wz * cFreq;
-          const cellX = Math.abs(fract(cu) - 0.5);
-          const cellZ = Math.abs(fract(cv) - 0.5);
-          const mortar = smoothstep(0.32, 0.47, Math.max(cellX, cellZ));
-          const stoneBase = 0.52;
-          const mortarColor = 0.38;
-          cobbleGrid[py * patchSize + px] = mix(stoneBase, mix(stoneBase, mortarColor, mortar * 0.42), cobbleFade);
-
-          // 2. Town Street Cobblestone response
-          const su = wx * 3.1;
-          const sv = wz * 3.1;
-          const sCell = Math.max(Math.abs(fract(su) - 0.5), Math.abs(fract(sv) - 0.5));
-          const sMortar = smoothstep(0.34, Math.min(0.49, 0.44 + cellFoot * 0.25), sCell) / (1.0 + cellFoot * 2.6);
-          const stoneTone = (((Math.floor(su) * 17 + Math.floor(sv) * 31) & 15) / 15.0 - 0.5) * 0.18 * stoneColorFade;
-          streetGrid[py * patchSize + px] = 0.24 * (1.0 + stoneTone) * (1.0 - sMortar * 0.30 * mortarFade);
 
           // 3. 3-Strand Hemp Rope Hawser response
           const layPhase = wx * 52.0 + (py / patchSize) * 6.2831853 * 3.0;
@@ -160,42 +172,14 @@ test('multi-range texture evaluation: cobblestones, roof tiles, and hemp ropes b
         }
       }
 
-      cobbleResults.push({ distM, ...computeRangePatchMetrics(cobbleGrid, patchSize, patchSize) });
-      streetResults.push({ distM, ...computeRangePatchMetrics(streetGrid, patchSize, patchSize) });
       ropeResults.push({ distM, ...computeRangePatchMetrics(ropeGrid, patchSize, patchSize) });
     }
 
     // At moderate (35m) and far (80m, 180m) ranges, signFlipRate must be near zero (< 0.05) — no Nyquist checkerboarding!
-    for (const r of cobbleResults.filter((x) => x.distM >= 35)) {
-      assert.ok(
-        r.signFlipRate < 0.05,
-        `Kind 16 cobblestone signFlipRate at ${r.distM}m (${angleDeg}°) was ${r.signFlipRate.toFixed(4)}, expected < 0.05`
-      );
-    }
-    for (const r of streetResults.filter((x) => x.distM >= 35)) {
-      assert.ok(
-        r.signFlipRate < 0.05,
-        `Street cobblestone signFlipRate at ${r.distM}m (${angleDeg}°) was ${r.signFlipRate.toFixed(4)}, expected < 0.05`
-      );
-      if (r.distM >= 80) {
-        assert.ok(
-          r.hfLaplacian < 0.015,
-          `Street cobblestone hfLaplacian at ${r.distM}m (${angleDeg}°) was ${r.hfLaplacian.toFixed(4)}, expected < 0.015`
-        );
-      }
-    }
     for (const r of ropeResults.filter((x) => x.distM >= 35)) {
       assert.ok(
         r.signFlipRate < 0.05,
         `Hemp rope hawser signFlipRate at ${r.distM}m (${angleDeg}°) was ${r.signFlipRate.toFixed(4)}, expected < 0.05`
-      );
-    }
-    // At 15m (45°), street cobblestones must still retain crisp, legible stone contrast (no premature 10m fadeout)
-    if (angleDeg === 45) {
-      const street15m = streetResults.find((x) => x.distM === 15);
-      assert.ok(
-        street15m.hfLaplacian > 0.005,
-        `Street cobblestone at 15m (45°) must remain legible (got hfLaplacian=${street15m.hfLaplacian.toFixed(4)}, expected > 0.005)`
       );
     }
     // Close range (2m) must preserve rich 3-strand relief on ropes
