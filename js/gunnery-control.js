@@ -3430,6 +3430,18 @@ export function createBuildingGunDefinitions(building) {
     });
   };
 
+  // The opening nearest a point along a crenellated wall of an untraced fort. The bays are the ones the fort is built
+  // with (coastal-world.js): `nominal` metres each, between corner merlons 1.6 m in from either end of the wall.
+  const nearestEmbrasure = (target, half, nominal) => {
+    const bays = Math.max(3, Math.round((half * 2 - 3.2) / nominal)), span = (half * 2 - 3.2) / bays;
+    let best = -half + 1.6 + 0.5 * span;
+    for (let m = 1; m < bays; m++) {
+      const at = -half + 1.6 + (m + 0.5) * span;
+      if (Math.abs(at - target) < Math.abs(best - target)) best = at;
+    }
+    return best;
+  };
+
   if (building.trace) {
     // A fort drawn to its ground has its guns where its trace puts them, each with its own arc.
     const drop = building.trace.lowDrop ?? 0, lowZ = building.trace.lowZ;
@@ -3439,16 +3451,7 @@ export function createBuildingGunDefinitions(building) {
       guns[guns.length - 1].arcCos = TRACE_GUN_ARC_COS;
     }
   } else if (prefabId === 'bastion_trace_fortress') {
-    const nBaysX = Math.max(3, Math.round(((building.width ?? 38) - 3.2) / 4.6));
-    const baySpanX = ((building.width ?? 38) - 3.2) / nBaysX;
-    const snapEx = (targetX) => {
-      let best = -hw + 1.6 + 0.5 * baySpanX;
-      for (let m = 0; m < nBaysX; m++) {
-        const ex = -hw + 1.6 + (m + 0.5) * baySpanX;
-        if (Math.abs(ex - targetX) < Math.abs(best - targetX)) best = ex;
-      }
-      return best;
-    };
+    const snapEx = (targetX) => nearestEmbrasure(targetX, hw, 4.6), snapEz = (targetZ) => nearestEmbrasure(targetZ, hl, 4.8);
     for (let i = -1.5; i <= 1.5; i += 1.0) {
       const gx = snapEx(i * (hw * 0.34));
       addEmbrasureGun('port', -1, gx, yTop + 0.58, -hl + 0.8, [0, 0, -1], 32);
@@ -3457,19 +3460,11 @@ export function createBuildingGunDefinitions(building) {
       const gx = snapEx(i * (hw * 0.34));
       addEmbrasureGun('starboard', 1, gx, yTop + 0.58, hl - 0.8, [0, 0, 1], 32);
     }
-    addEmbrasureGun('port', -1, -hw + 0.8, yTop + 0.58, 0, [-1, 0, 0], 24);
-    addEmbrasureGun('starboard', 1, hw - 0.8, yTop + 0.58, 0, [1, 0, 0], 24);
+    // The flank guns too: a side wall with an even count of bays has a merlon, not an opening, at its middle.
+    addEmbrasureGun('port', -1, -hw + 0.8, yTop + 0.58, snapEz(0), [-1, 0, 0], 24);
+    addEmbrasureGun('starboard', 1, hw - 0.8, yTop + 0.58, snapEz(0), [1, 0, 0], 24);
   } else if (prefabId === 'stone_sea_bastion') {
-    const nBaysX = Math.max(3, Math.round(((building.width ?? 24) - 3.2) / 4.6));
-    const baySpanX = ((building.width ?? 24) - 3.2) / nBaysX;
-    const snapEx = (targetX) => {
-      let best = -hw + 1.6 + 0.5 * baySpanX;
-      for (let m = 0; m < nBaysX; m++) {
-        const ex = -hw + 1.6 + (m + 0.5) * baySpanX;
-        if (Math.abs(ex - targetX) < Math.abs(best - targetX)) best = ex;
-      }
-      return best;
-    };
+    const snapEx = (targetX) => nearestEmbrasure(targetX, hw, 4.6);
     for (let i = -1; i <= 1; i++) {
       const gx = snapEx(i * (hw * 0.48));
       addEmbrasureGun('port', -1, gx, yTop + 0.58, -hl + 0.8, [0, 0, -1], 24);

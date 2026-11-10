@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {shipMastSpecs} from '../js/ship-fracture.js';
-import {createShipGunnery,createPortGunnery,createVesselDamageState,applyCrewCasualtiesAndMorale,sweepShipSegment,applyShipImpactDamage,sweepBuildingSegment,applyBuildingImpactDamage,sweepScenerySegment,applySceneryImpactDamage,sweepTerrainSegment,applyTerrainImpactDamage,createGunnerySolidSweep,resolveVesselCollisions,applyShipCollisionDamage,classifyGroundingSubstrate,applyGroundingImpactDamage,stepVesselDamage,computeCrewEfficiency} from '../js/gunnery-control.js';
+import {createShipGunnery,createPortGunnery,createVesselDamageState,applyCrewCasualtiesAndMorale,sweepShipSegment,applyShipImpactDamage,sweepBuildingSegment,applyBuildingImpactDamage,sweepScenerySegment,applySceneryImpactDamage,sweepTerrainSegment,applyTerrainImpactDamage,createGunnerySolidSweep,resolveVesselCollisions,applyShipCollisionDamage,classifyGroundingSubstrate,applyGroundingImpactDamage,stepVesselDamage,computeCrewEfficiency,createBuildingGunDefinitions} from '../js/gunnery-control.js';
 import {constrainIslandMotion} from '../js/terrain-model.js';
 import {GUNNERY_ORDER_SECONDS} from '../js/gunnery-audio.js';
 import {boatHydrodynamics} from '../js/boat.js';
@@ -10,7 +10,7 @@ import {createFollower,steerFollower,stepVesselCombatAI} from '../js/follower.js
 import {createCompany,stepCompany} from '../js/crew.js';
 import {SHIP_COLORS,setVesselColors,strikeVesselColors,buildShipColorsGeometry} from '../js/ship-colors.js';
 import {advanceSails,sailingState,sailMastCap,sailCanvasTarget,sailLosingCanvas} from '../js/sailing.js';
-import {resolveGlobalCoastalRegion,synthesizeCoastalTerrain,placeCoastalPort,buildPortPrefabGeometry,generateProceduralCoastalPack} from '../js/coastal-world.js';
+import {resolveGlobalCoastalRegion,synthesizeCoastalTerrain,placeCoastalPort,buildPortPrefabGeometry,generateProceduralCoastalPack,getBuildingParts} from '../js/coastal-world.js';
 import {applyBuildingFractureEvents,prepareBuildingFracture} from '../js/building-fracture.js';
 function fixture(options={}){
  const boat={modelId:'nina',length:20,beam:6,heading:0,x:0,z:0,heave:0,pitch:0,roll:0,propulsion:'sail',surgeVelocity:0};
@@ -1273,4 +1273,31 @@ test('the bed stops a sinking ship: a harbour wreck rests on it, a stranded one 
  // Off soundings she goes all the way, as before.
  assert.ok(sink({height:()=>-900}).damage.sinkingDepth>=21,'deep water still swallows her');
  assert.ok(sink(null).damage.sinkingDepth>=21,'and so does a sea with no chart under it');
+});
+
+test('every gun of an untraced fort looks out through an opening in its parapet, never through a merlon',()=>{
+ // The catalog fortress is 42 m long: eight bays to a side wall, so the middle of that wall is a merlon.
+ for(const prefabId of ['bastion_trace_fortress','stone_sea_bastion'])for(const size of [null,{length:30,width:26},{length:37,width:33},{length:47,width:41},{length:56,width:52}]){
+  const parts=size?getBuildingParts(prefabId,size):getBuildingParts(prefabId),{length,width,height}=parts.dimensions;
+  const merlons=parts.partAssembly.parts.filter(part=>part.partKey==='parapet_merlons').map(part=>part.bounds);
+  assert.ok(merlons.length>=8,`${prefabId} has a crenellated parapet (${merlons.length} merlons)`);
+  const guns=createBuildingGunDefinitions({prefabId,width,length,height});
+  assert.ok(guns.length>=5);
+  if(prefabId==='bastion_trace_fortress')assert.equal(guns.filter(gun=>gun.directionDesign[0]!==0).length,2,'a flank gun to either side');
+  for(const gun of guns){
+   // Her bore, from the breech to two metres beyond the wall: the slab test against each merlon's box.
+   const from=gun.breechDesign,dir=gun.directionDesign,reach=4;
+   const fouled=merlons.find(box=>{
+    let near=0,far=reach;
+    for(let axis=0;axis<3;axis++){
+     const lo=box.min[axis]-.12,hi=box.max[axis]+.12;
+     if(Math.abs(dir[axis])<1e-9){if(from[axis]<lo||from[axis]>hi)return false;continue;}
+     const a=(lo-from[axis])/dir[axis],b=(hi-from[axis])/dir[axis];
+     near=Math.max(near,Math.min(a,b));far=Math.min(far,Math.max(a,b));
+    }
+    return near<=far;
+   });
+   assert.equal(fouled,undefined,`${prefabId} ${width}x${length}: the gun at ${gun.localPosition.map(v=>v.toFixed(2))} firing ${dir} is behind the merlon ${JSON.stringify(fouled)}`);
+  }
+ }
 });
