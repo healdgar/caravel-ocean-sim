@@ -14,12 +14,15 @@ const ALL_SOUNDS={...SOUND_ASSETS,...VOICE_ASSETS,...GUNNERY_AUDIO_ASSETS,...WOR
 // captain's ten spoken gun-laying orders) is fetched and decoded when it is first wanted.
 const BATTLE_SOUNDS=Object.freeze(['timber-crumble','stone-crumble','mast-snap',
   ...Object.keys(ALL_SOUNDS).filter(id=>id.startsWith('enemy-')||id.startsWith('captain-guns-lay-'))]);
-const ON_DEMAND_SOUNDS=new Set([...BATTLE_SOUNDS,'shore-surf','shore-birds','town-ambience','crowd-panic',
+const ON_DEMAND_SOUNDS=new Set([...BATTLE_SOUNDS,'shore-surf','shore-birds','town-ambience','town-bustle','crowd-panic',
   ...Object.keys(ALL_SOUNDS).filter(id=>id.startsWith('indigenous-')||id.startsWith('lookout-'))]);
 const EAGER_SOUNDS=Object.freeze(Object.keys(ALL_SOUNDS).filter(id=>!ON_DEMAND_SOUNDS.has(id)));
 // A clip asked for before it is decoded still starts if it is ready this soon; later than that its moment
 // has passed. An order must be prompter, because the next line waits only for its stated length.
 const LATE_START_SECONDS=1.5,ORDER_LATE_START_SECONDS=.4;
+// The bustle clip is 7 dB louder on file than the panic loop that once stood in for it; this keeps the
+// bustle as loud in the mix as busyWalkGain was tuned to make it.
+const TOWN_BUSTLE_TRIM=.45;
 // A loop wanted only now and then is stopped once it has been silent this long.
 const LOOP_REST_SECONDS=8;
 // The shore and the nearest town are looked for this often, not every frame.
@@ -862,29 +865,28 @@ export function createSceneAudio({onStatus=()=>{}}={}){
         if(townState.underFire){
           startLoop('crowd-panic',ALL_SOUNDS['crowd-panic']);
           levels['crowd-panic']=Math.min(0.26,townState.gain*1.15);
+          levels['town-bustle']=0;
           const panicLoop=loops.get('crowd-panic');
-          if(panicLoop){
-            panicLoop.source.playbackRate.value=1.0;
-            if(panicLoop.pan)panicLoop.pan.pan.value=townPan;
-          }
+          if(panicLoop?.pan)panicLoop.pan.pan.value=townPan;
           if(time>=nextTownPanic&&townState.position){
             playSynth('bell',townState.position,0.20);
             nextTownPanic=time+8.5+Math.random()*5.5;
           }
-        }else if(townState.busyWalkGain>0.006){
-          // There is no clip of a peaceful crowd yet: the panic loop, slowed and quiet, stands in for one.
-          startLoop('crowd-panic',ALL_SOUNDS['crowd-panic']);
-          levels['crowd-panic']=townState.busyWalkGain;
-          const panicLoop=loops.get('crowd-panic');
-          if(panicLoop){
-            panicLoop.source.playbackRate.value=0.88;
-            if(panicLoop.pan)panicLoop.pan.pan.value=townPan;
-          }
         }else{
           levels['crowd-panic']=0;
+          if(townState.busyWalkGain>0.006){
+            // People about their day: its own clip, an unhurried crowd, not the panic slowed down.
+            startLoop('town-bustle',ALL_SOUNDS['town-bustle']);
+            levels['town-bustle']=townState.busyWalkGain*TOWN_BUSTLE_TRIM;
+            const bustle=loops.get('town-bustle');
+            if(bustle?.pan)bustle.pan.pan.value=townPan;
+          }else{
+            levels['town-bustle']=0;
+          }
         }
       }else{
         levels['town-ambience']=0;
+        levels['town-bustle']=0;
         levels['crowd-panic']=0;
       }
 

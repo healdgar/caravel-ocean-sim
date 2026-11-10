@@ -155,6 +155,20 @@
     "bytes": 45600
   },
   {
+    "id": "town-bustle",
+    "take": "01",
+    "category": "town",
+    "provider": "ElevenLabs",
+    "model": "eleven_text_to_sound_v2",
+    "voiceId": null,
+    "text": null,
+    "prompt": "Calm outdoor 16th century harbour town street on an ordinary market morning, a loose unhurried crowd of townsfolk strolling past on packed earth and cobblestones, relaxed indistinct conversation as a murmur with no intelligible words, soft footsteps, a little easy laughter, even level throughout, no shouting, no running, no bells, no music, no motors or modern sounds.",
+    "seconds": 7.8,
+    "sourceSha256": "39a3ddf562384505114fb4138b25f1ed2b3d43a626497cdf5e82b4575bd93f46",
+    "sha256": "ca184a9bc942f5eaeea929eb9e988011b022301d3594f34b49004c710e923bd4",
+    "bytes": 59097
+  },
+  {
     "id": "footstep-deck",
     "take": "01",
     "category": "footstep",

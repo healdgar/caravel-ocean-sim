@@ -146,6 +146,20 @@
       "gain": 0.22
     },
     {
+      "id": "town-bustle",
+      "kind": "sfx",
+      "category": "town",
+      "seconds": 10.0,
+      "loop": true,
+      "promptInfluence": 0.45,
+      "prompt": "Calm outdoor 16th century harbour town street on an ordinary market morning, a loose unhurried crowd of townsfolk strolling past on packed earth and cobblestones, relaxed indistinct conversation as a murmur with no intelligible words, soft footsteps, a little easy laughter, even level throughout, no shouting, no running, no bells, no music, no motors or modern sounds.",
+      "filter": "highpass=f=110,lowpass=f=5000,acompressor=threshold=-20dB:ratio=2.4:attack=18:release=180,alimiter=limit=0.82",
+      "startSeconds": 0.4,
+      "maxDuration": 9.2,
+      "loopCrossfade": 1.4,
+      "gain": 0.2
+    },
+    {
       "id": "footstep-deck",
       "kind": "sfx",
       "category": "footstep",

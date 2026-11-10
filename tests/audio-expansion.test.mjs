@@ -125,7 +125,8 @@ function installMockAudioContext(t, { hold = false } = {}) {
         ...node(),
         loop: false,
         ended: false,
-        playbackRate: parameter(),
+        // A real source plays at its recorded rate until told otherwise.
+        playbackRate: Object.assign(parameter(), { value: 1 }),
         start(when, offset, duration) {
           const level = levelOf(this);
           starts.push({
@@ -175,7 +176,7 @@ test('promoted world audio SFX and voice assets match provenance and valid MP3 p
   const provenance = JSON.parse(
     await fs.readFile(new URL('../assets/audio/world/provenance.json', import.meta.url), 'utf8'),
   );
-  assert.equal(provenance.length, 27);
+  assert.equal(provenance.length, 28);
   for (const record of provenance) {
     const asset = WORLD_AUDIO_ASSETS[record.id];
     assert.ok(asset, `missing WORLD_AUDIO_ASSETS entry for ${record.id}`);
@@ -624,6 +625,11 @@ test('10. busy towns ambience scales by population and time of day, and switches
   assert.ok(town, 'town-ambience loop started near port');
   const peaceful = town.level.value;
   assert.ok(peaceful > 0.1);
+  const bustle = starts.find(s => s.loop && s.id === 'town-bustle');
+  assert.ok(bustle, 'people about their day have their own loop');
+  assert.ok(bustle.level.value > 0 && bustle.level.value < peaceful, 'under the hum of the town');
+  assert.equal(bustle.source.playbackRate.value, 1, 'played as it was recorded');
+  assert.ok(!starts.some(s => s.loop && s.id === 'crowd-panic'), 'and no panic is heard in a town at peace');
 
   // Bombardment via createTownShots.note marks town under fire
   const shotResponse = createTownShots(port.streets);
@@ -637,6 +643,7 @@ test('10. busy towns ambience scales by population and time of day, and switches
   assert.equal(panic.source.playbackRate.value, 1, 'at its true pitch');
   assert.ok(panic.level.value > peaceful * 0.5, 'and loud');
   assert.ok(town.level.value < peaceful * 0.5, 'while the ordinary hum of the town drops away');
+  assert.ok(bustle.level.value < 0.005, 'and the bustle stops');
   assert.ok(!stops.includes(town.source), 'the town loop keeps running while the town is in earshot');
 });
 
@@ -915,7 +922,7 @@ test('a broadside landing does not queue a three-second tail of wreckage for eve
 test('only what is always wanted is decoded when sound is enabled; the rest when it is first wanted', async t => {
   const { engine, starts, fetched, contexts, failing, statuses } = await enabledEngine(t);
   const ofAPlaceOrOccasion = id => /^(indigenous-|lookout-|enemy-|captain-guns-lay-)/.test(id)
-    || ['timber-crumble', 'stone-crumble', 'mast-snap', 'shore-surf', 'shore-birds', 'town-ambience', 'crowd-panic'].includes(id);
+    || ['timber-crumble', 'stone-crumble', 'mast-snap', 'shore-surf', 'shore-birds', 'town-ambience', 'town-bustle', 'crowd-panic'].includes(id);
   const every = Object.keys(EVERY_SOUND);
   assert.deepEqual(fetched.filter(ofAPlaceOrOccasion), [], 'nothing of a particular place or occasion is fetched at the start');
   assert.deepEqual([...fetched].sort(), every.filter(id => !ofAPlaceOrOccasion(id)).sort(), 'everything else is, once each');
