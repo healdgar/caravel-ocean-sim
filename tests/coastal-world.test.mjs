@@ -2230,3 +2230,45 @@ test('real elevation keeps its low coast and its own relief unless the region is
   assert.equal(resolveGlobalCoastalRegion({ latitude: 17.63, longitude: -63.24 }).steepIslandDem, true);
   for (const id of ['havana', 'lisbon', 'acapulco', 'rio-de-janeiro', 'st-kitts', 'tenerife']) assert.ok(!resolveGlobalCoastalRegion(id).steepIslandDem, id);
 });
+
+test('damage shading reads a building kind as a whole number, whatever turn or window coordinate its fraction carries', async () => {
+  const { TERRAIN } = await import('../js/wgsl/terrain.js');
+  // The shader's own tests, run here on every value the mesh writes. Their syntax is JavaScript's but for abs.
+  const names = ['isAperture', 'isThatch', 'isCastIron', 'isStoneRubble'].filter((name) => TERRAIN.includes(`let ${name}=`));
+  const source = names.map((name) => `const ${name}=${TERRAIN.match(new RegExp(`let ${name}=([^;]+);`))[1]};`).join('').replace(/in\.kind\.x/g, 'k').replace(/\babs\(/g, 'Math.abs(');
+  const shadedAs = new Function('k', `${source}return isAperture?'opening':isCastIron?'iron':isStoneRubble?'stone':'timber';`);
+  const wanted = { 10: 'timber', 11: 'stone', 12: 'stone', 13: 'stone', 14: 'opening', 15: 'timber', 16: 'stone', 17: 'timber', 18: 'iron' };
+  // buildPortPrefabGeometry writes kind + 0.02 + (turn / pi) * 0.46, and across a glazed window 14.02 to 14.46.
+  for (const [kind, as] of Object.entries(wanted)) for (let step = 0; step <= 46; step++) {
+    const k = Number(kind) + 0.02 + step * 0.01;
+    assert.equal(shadedAs(k), as, `kind ${k.toFixed(2)}, a building turned ${Math.round((step / 46) * 180)} degrees`);
+  }
+  // Spalled stone, its grit and splintered timber each have their own noise: one sample reused makes them move as one.
+  const offsets = ['spallDetail', 'gritDetail', 'splinterNoise'].map((name) => TERRAIN.match(new RegExp(`let ${name}=landOrientedDetail\\(world\\+vec3f\\(([^)]+)\\)`))?.[1]);
+  assert.ok(offsets.every(Boolean), `each is its own sample: ${offsets}`);
+  assert.equal(new Set(offsets).size, 3);
+});
+
+test('an opening is one thing on every face: a fort gate is dark all round, and a window glazed all round', () => {
+  const pack = generateProceduralCoastalPack('lisbon', { size: 257, biomeSize: 64, albedoSize: 64, vegetationCandidates: 100 });
+  const geometry = pack.portGeometry ?? buildPortPrefabGeometry(pack.port);
+  const openings = (group) => {
+    const shades = [];
+    for (let i = group.firstIndex; i < group.firstIndex + group.indexCount; i++) {
+      const at = geometry.indices[i] * 8;
+      if (Math.floor(geometry.vertices[at + 6] + 0.01) === 14) shades.push(geometry.vertices[at + 7]);
+    }
+    return shades;
+  };
+  const gates = geometry.groups.filter((group) => group.partKey === 'fort_gate');
+  assert.ok(gates.length >= 2, `${gates.length} fort gates at Lisbon`);
+  for (const gate of gates) {
+    const shades = openings(gate);
+    assert.ok(shades.length >= 20, 'the gate has its opening');
+    // The terrain shader glazes whatever of kind 14 is lit above a quarter.
+    assert.deepEqual(shades.filter((shade) => shade > 0.25), [], `${gate.id}: no face of the gateway is glass`);
+  }
+  const windows = geometry.groups.filter((group) => /window/.test(group.partKey)).map(openings).filter((shades) => shades.length);
+  assert.ok(windows.length > 10, `${windows.length} window parts`);
+  for (const shades of windows) assert.ok(shades.every((shade) => shade > 0.25), 'every face of a window is glazed');
+});
