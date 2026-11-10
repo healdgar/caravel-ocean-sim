@@ -3913,9 +3913,10 @@ export function applySceneryImpactDamage(terrain, event) {
   const forestTree = event.forestTree ?? null;
   if (forestTree) {
     const hot = event.ammo === 'hot';
-    const treeEnergy = Math.max(energy * 3.5, 2_500_000);
+    // The ball's own energy, and whether it met the trunk or a limb: the trunk model decides what that does to
+    // this tree, so a slender palm snaps at once and a hardwood takes a wound first.
     terrain.pendingForestStrikes ??= [];
-    terrain.pendingForestStrikes.push({ tree: { ...forestTree, onTrunk: true }, impact: { energy: treeEnergy, bearing: Math.atan2(vel[2], vel[0]), hot } });
+    terrain.pendingForestStrikes.push({ tree: forestTree, impact: { energy, bearing: Math.atan2(vel[2], vel[0]), hot } });
     const firePort = hot ? terrain.port ?? terrain.ports?.[0] ?? null : null;
     if (firePort) {
       firePort.sceneryFires ??= [];

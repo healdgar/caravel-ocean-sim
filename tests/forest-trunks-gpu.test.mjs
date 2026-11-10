@@ -28,6 +28,13 @@ async function open(region, params = {}, state = null) {
   await page.waitForFunction(() => window.oceanStartup?.state === 'ready' || window.oceanStartup?.state === 'failed', null, { timeout: 240000, polling: 200 });
   assert.equal(await page.evaluate(() => window.oceanStartup.state), 'ready');
   await page.waitForFunction(() => window.oceanFleet?.terrain?.forestTrunks?.trees > 0, null, { timeout: 120000, polling: 200 });
+  // The forest comes in over the first seconds after the coast is ready, each time as a new set of roots, and a
+  // tree of an early set may not be in the last. A tree is picked, and shot at, once the set has held still.
+  await page.waitForFunction(() => {
+    const grid = oceanFleet.terrain.forestTrunks, now = performance.now();
+    if (window.forestSetSeen !== grid) { window.forestSetSeen = grid; window.forestSetSince = now; }
+    return now - window.forestSetSince > 8000;
+  }, null, { timeout: 120000, polling: 250 });
   return { page, errors };
 }
 
@@ -154,6 +161,7 @@ test('the free cannon wounds a hardwood, the next ball fells it, and the sweep c
     await page.waitForTimeout(4000);
     const before = await page.screenshot();
     let rounds = 1, state;
+    assert.deepEqual(await readTree(page, tree).then((r) => [r.found, r.struck, r.impacts]), [true, 0, 0], 'the chestnut picked is standing here to be shot at');
     await fire(page, rounds);
     await page.waitForFunction(() => oceanFleet.terrain.sceneryImpacts?.length > 0, null, { timeout: 30000, polling: 50 });
     await page.waitForTimeout(400);
