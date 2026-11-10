@@ -364,7 +364,9 @@ export function createAdditionalShipMesh(modelId,{groups,parts}={}){
   const runningStart=out.length;
   const restContext={...withRigPoseContext(context,{}),time:0,wind:0};
   for(const [index,line] of context.lines.entries())if(!line.static){
-    const segments=line.kind==='sheet'?10:5;
+    // Twelve straight tubes hold a line within half its width of the curve of its three wave modes in a fresh
+    // breeze (a lazy sheet within 1 cm); five left a halyard 2 cm off it, turning 8 degrees at each joint.
+    const segments=12;
     for(let j=0;j<segments;j++){
       const t=j/segments,T=(j+1)/segments;
       tube(surfaceRopePoint(line,t,restContext),surfaceRopePoint(line,T,restContext),line.r??.007,12,line.r??.007,4,[[100+index,t],[100+index,T]],true);

@@ -19,6 +19,7 @@ import { victoryPose, victoryClothPoint, victoryYardPoint } from '../js/victory-
 import { requirePlayableShipModel, resolveShipNode } from '../js/ship-models.js';
 import { createShipAssetCache } from '../js/ship-mesh.js';
 import { createAdditionalAssetPose } from '../js/additional-ships.js';
+import { proceduralRigContext } from '../js/additional-rig.js';
 import { createRigGPUFrame, writeRigGPUFrame } from '../js/rig-gpu-data.js';
 import {
   buildVesselRigConnectors,
@@ -272,6 +273,37 @@ test('Niña, HMS Victory, descriptor-driven vessels, and stern outlicker sheets 
       }
       assert.ok(braceShift > 0.01, `${modelId} spar-to-mast connectors must track live sailState bracing (got ${braceShift})`);
     }
+  }
+});
+
+test('a running line is drawn in enough straight pieces to curve: no halyard, tack or fall turns six degrees at a joint in a fresh breeze', () => {
+  for (const id of ['pinta', 'santa-maria']) {
+    const asset = createShipAssetCache().get(id), pose = createAdditionalAssetPose(asset), source = asset.vertices;
+    const kinds = proceduralRigContext(id).lines.map((line) => line.kind);
+    let measured = 0;
+    for (const time of [0.7, 2.3, 4.1, 6.6, 9.2]) {
+      const posed = new Float32Array(source), lines = new Map();
+      pose({ modelId: id, sailState: {}, ropeChain: { active: 1, swayX: 0.3, swayZ: 0.2 } }, time, 14, posed);
+      // The centre of each ring of the tube the mesh draws, by line and by how far along it the ring lies.
+      for (let i = 0; i < source.length; i += 9) {
+        if (Math.floor(source[i + 6]) !== 12 || source[i + 7] < 100) continue;
+        const index = Math.round(source[i + 7] - 100), t = Math.round(source[i + 8] * 1e5);
+        const line = lines.get(index) ?? lines.set(index, new Map()).get(index), ring = line.get(t) ?? line.set(t, [0, 0, 0, 0]).get(t);
+        for (let k = 0; k < 3; k++) ring[k] += posed[i + k];
+        ring[3]++;
+      }
+      for (const [index, line] of lines) {
+        if (kinds[index] === 'sheet') continue; // A lazy sheet turns a real corner at its lead.
+        const joints = [...line.entries()].sort((a, b) => a[0] - b[0]).map(([, ring]) => ring.slice(0, 3).map((v) => v / ring[3]));
+        for (let j = 1; j < joints.length - 1; j++) {
+          const u = joints[j].map((v, k) => v - joints[j - 1][k]), w = joints[j + 1].map((v, k) => v - joints[j][k]);
+          const turn = Math.acos(Math.min(1, (u[0] * w[0] + u[1] * w[1] + u[2] * w[2]) / (Math.hypot(...u) * Math.hypot(...w)))) * 180 / Math.PI;
+          assert.ok(turn < 6, `${id} ${kinds[index]} ${index} turns ${turn.toFixed(1)} degrees at joint ${j} of ${joints.length - 1}`);
+          measured++;
+        }
+      }
+    }
+    assert.ok(measured > 100, `${id}: ${measured} joints measured`);
   }
 });
 
