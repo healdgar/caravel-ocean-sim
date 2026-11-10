@@ -762,7 +762,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     skipNative:skipNativeForest&&!useSubtropicalForest&&!usePortugalForest,
     deferNative:!skipNativeForest&&useProcedural&&!useSubtropicalForest&&!usePortugalForest,
     skipRoots:useProcedural,
-    deferSurfaces:!usePortugalForest&&Boolean(chooseForestSurfaceCodec(device,search.get('forestSurfaces')||'auto')),
+    deferSurfaces:Boolean(chooseForestSurfaceCodec(device,search.get('forestSurfaces')||'auto')),
     onManifest:resolveForestManifest,
     onRoots:resolveForestRoots,
   }).catch(error=>{forestFailure=error.message;resolveForestManifest(null);resolveForestRoots(null);return null;});

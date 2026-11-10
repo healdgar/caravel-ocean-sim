@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {once} from 'node:events';
 import {chromium} from 'playwright';
 import {createDevServer} from '../server.mjs';
-import {coastalRegionStageURL} from '../js/landfall.js';
+import {coastalRegionStageURL,landfallStageURL} from '../js/landfall.js';
 
 let browser,server,base;
 before(async()=>{
@@ -33,7 +33,8 @@ const drawn=page=>page.evaluate(async()=>{
   return totals;
 });
 async function open(query,region='lisbon'){
-  const url=coastalRegionStageURL(base,region,'dock','clear',1650);
+  // Saba is the surveyed home island, approached from the sea; the others are generated coasts, seen from the dock.
+  const url=region==='saba'?landfallStageURL(base,'coast','clear'):coastalRegionStageURL(base,region,'dock','clear',1650);
   for(const [k,v] of Object.entries({w:960,h:540,polygons:'fixed',...query}))url.searchParams.set(k,String(v));
   const page=await browser.newPage({viewport:{width:960,height:540}}),errors=[];
   page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error'&&!/404|favicon/.test(m.text()))errors.push(m.text());});
@@ -48,16 +49,31 @@ async function open(query,region='lisbon'){
   return {page,errors,requested};
 }
 
-test('temperate trees draw as clusters, the far canopy stays, and native geometry is never fetched',{timeout:360000},async()=>{
+// Lisbon wears the Portugal pack since 224cd17. That pack has no crown shells: its far trees are small models
+// from the native streams, drawn by the native wood pipeline, as the tropical pack's are.
+test('Lisbon\'s trees draw as clusters, far ones keep their small models, and no map the compressed set replaces is fetched',{timeout:360000},async()=>{
   const {page,errors,requested}=await open({});
   try{
     const totals=await drawn(page);
     assert.ok(totals['forest clusters forestNativeOpaqueFS']>1000,JSON.stringify(totals));
     assert.ok(totals['forest clusters forestNativeLeafFS']>1000,JSON.stringify(totals));
     assert.equal(totals['forest clusters forestNativeLeafDepthFS'],totals['forest clusters forestNativeLeafFS'],'every leaf lays depth and then shades');
-    assert.ok(totals['instanced forest shaded native crown shell']>0,'the far canopy keeps its look');
+    assert.ok((totals['instanced forest forestNativeOpaqueFS']??0)>0,`far trees still draw their small models: ${JSON.stringify(totals)}`);
+    assert.ok(totals['instanced forest forestNativeOpaqueFS']<totals['forest clusters forestNativeOpaqueFS'],'the native pipeline draws far models only, a small part of the wood');
+    for(const label of ['forestNativeLeafFS','forestNativeLeafDepthFS'])assert.equal(totals[`instanced forest ${label}`]??0,0,`${label} must not draw beside clusters`);
+    assert.ok(requested.some(path=>path.includes('/portugal/clusters/vertices.bin')),'Lisbon draws the Portugal pack\'s own clusters');
+    assert.ok(requested.some(path=>/\/portugal\/surfaces\/family-\d+-albedo\.(bc7|astc)\.bin/.test(path)),'bark and leaves arrive block-compressed');
+    assert.deepEqual(requested.filter(path=>path.includes('/forest-scenery/')&&path.endsWith('.png')),[],'the maps the compressed set replaces are never downloaded');
+    assert.deepEqual(errors,[]);
+  }finally{await page.close();}
+});
+
+test('the surveyed island keeps crown shells on its far canopy',{timeout:360000},async()=>{
+  const {page,errors}=await open({},'saba');
+  try{
+    const totals=await drawn(page);
+    assert.ok(totals['instanced forest shaded native crown shell']>0,`the far canopy keeps its look: ${JSON.stringify(totals)}`);
     for(const label of ['forestNativeOpaqueFS','forestNativeLeafFS','forestNativeLeafDepthFS'])assert.equal(totals[`instanced forest ${label}`]??0,0,`${label} must not draw beside clusters`);
-    assert.ok(!requested.some(path=>path.endsWith('saba/vertices.bin.gz')),'clusters replace the native vertex stream');
     assert.deepEqual(errors,[]);
   }finally{await page.close();}
 });
