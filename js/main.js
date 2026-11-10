@@ -119,13 +119,22 @@ if (qs.has('sovereignPolity')) {
 }
 const careerBrowserStorage=name=>{try{return window[name];}catch{return null;}};
 const careerStore=createCareerStore({storage:careerBrowserStorage('localStorage'),session:careerBrowserStorage('sessionStorage')});
-if(qs.get('reset')==='1'||qs.get('newVoyage')==='1'){
+// Only reset=1 erases the save. newVoyage=1 starts afresh beside it and never erases anything.
+if(qs.get('reset')==='1'){
   try{
     careerStore.clear?.();
     careerBrowserStorage('localStorage')?.removeItem?.('waterworld.voyage.v1');
     careerBrowserStorage('localStorage')?.removeItem?.('waterworld.career.v1');
     resetActiveIndigenousSovereigntyState({persist:true});
   }catch{/* ignore */}
+}
+// Both are one-shot: they leave the address bar once read, so a reload, a restored tab or a copied
+// link continues the career instead of erasing or restarting it. `qs` keeps them for this load.
+if(qs.has('reset')||qs.has('newVoyage')){
+  try{
+    const stripped=new URL(location.href);stripped.searchParams.delete('reset');stripped.searchParams.delete('newVoyage');
+    history.replaceState(history.state,'',stripped);
+  }catch{/* a sandboxed page may refuse */}
 }
 // A tab owns the save if it asked to continue, or if there is nothing yet to protect.
 if(qs.get('continue')==='1'||!careerStore.has())careerStore.claim();
