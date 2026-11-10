@@ -67,10 +67,13 @@ test('genuine native-field forest mass draws opaque depth without per-frame CPU 
       const make=(data,usage,label)=>{const b=device.createBuffer({label,size:data.byteLength,usage:usage|B.COPY_DST});device.queue.writeBuffer(b,0,data);allocated.push(b);return b;};
       const fd=new Float32Array(96),frame=make(fd,B.UNIFORM,'test field opacity frame'),dummy=make(new Float32Array(4),B.UNIFORM,'test neutral lighting stub');
       const start=TERRAIN.indexOf('struct CanopyVertex'),end=TERRAIN.indexOf('@fragment fn canopyLeafFS',start);if(start<0||end<=start)throw Error('Production opaque canopy functions missing');
-      // canopyOpaqueFS calls the shared filtered noise and bump helpers since 514b716.
+      // canopyOpaqueFS calls the shared filtered noise and bump helpers since 514b716, and takes the land
+      // shadow map since 6ecec5c. This harness has no map, so the canopy stands in full light as before.
       const module=await shader(FRAME_WGSL+NOISE_WGSL+TERRAIN_FILTERING+`@group(0)@binding(0)var<uniform>F:Frame;
 @group(1)@binding(0)var<uniform>neutral:vec4f;
 fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,roughness:f32)->vec4f{return vec4f(albedo+neutral.xyz,1);}
+fn landShadowVisibility(world:vec3f,normal:vec3f)->f32{return 1.0;}
+fn landFinishShadowed(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,roughness:f32,shadow:f32)->vec4f{return landFinish(world,n,albedo,diffuse,ambient,wet,roughness);}
 `+TERRAIN.slice(start,end)+FOREST_MASS_VERTEX_WGSL);
       const clouds={bindVolume:pipeline=>device.createBindGroup({layout:pipeline.getBindGroupLayout(1),entries:[{binding:0,resource:{buffer:dummy}}]})};
       const renderer=await createForestMassRenderer({device,module,frameUBO:frame,shader,resources:[[0,{buffer:frame}]],clouds,format:'rgba8unorm',samples:4,pack:guarded,mode:'far'});
