@@ -689,7 +689,7 @@ export function drawFortTrace({ shape = 'star', sizeM = null, bastions = 4, land
   // A flank looks along its own curtain at the next bastion: its guns are for the ditch, and they stay out of this.
   const ranked = walls.filter((wall) => wall.length >= 4 && wall.index !== gateWall && wall.kind !== 'flank' && gunSlotFits(wall, wall.length * 0.5)).map((wall) => {
     const mx = (wall.ax + wall.bx) / 2, mz = (wall.az + wall.bz) / 2;
-    return { wall, open: openAt(mx + shiftX, mz + shiftZ, wall.nx, wall.nz), room: Math.max(1, Math.floor(wall.length / spacing)), count: 0 };
+    return { wall, open: openAt(mx + shiftX, mz + shiftZ, wall.nx, wall.nz), room: Math.max(1, Math.floor(wall.length / spacing)), count: 0, guns: [] };
   }).sort((a, b) => b.open - b.wall.nz * 0.3 - (a.open - a.wall.nz * 0.3));
   let placed = 0;
   for (let round = 0; round < 8 && placed < most; round++) {
@@ -702,7 +702,10 @@ export function drawFortTrace({ shape = 'star', sizeM = null, bastions = 4, land
       placed++;
     }
   }
-  for (const { wall, count } of ranked) {
+  // A wall's guns, so many spread evenly along it. One with no room behind it, or that would share a platform with
+  // another wall's gun round a sharp corner, is left out.
+  const standGuns = (entry, count) => {
+    const { wall } = entry, standing = ranked.flatMap((other) => (other === entry ? [] : other.guns)), first = standing.length;
     const margin = count > 1 ? Math.min(wall.length * 0.22, 2.2) : 0;
     const usable = wall.length - margin * 2;
     for (let s = 0; s < count; s++) {
@@ -710,11 +713,28 @@ export function drawFortTrace({ shape = 'star', sizeM = null, bastions = 4, land
       if (!gunSlotFits(wall, along)) continue;
       const x = wall.ax + wall.ux * along, z = wall.az + wall.uz * along;
       const cx = x - wall.nx * carriageDepth, cz = z - wall.nz * carriageDepth;
-      // Round a sharp corner two guns would share a platform.
-      if (trace.guns.some((gun) => Math.hypot(gun.x - x, gun.z - z) < GUN_APART_M || Math.hypot(gun.x - gun.nx * carriageDepth - cx, gun.z - gun.nz * carriageDepth - cz) < 2.2)) continue;
-      trace.guns.push({ x, z, nx: wall.nx, nz: wall.nz, wall: wall.index, along });
+      if (standing.some((gun) => Math.hypot(gun.x - x, gun.z - z) < GUN_APART_M || Math.hypot(gun.x - gun.nx * carriageDepth - cx, gun.z - gun.nz * carriageDepth - cz) < 2.2)) continue;
+      standing.push({ x, z, nx: wall.nx, nz: wall.nz, wall: wall.index, along });
+    }
+    return standing.slice(first);
+  };
+  for (const entry of ranked) entry.guns = standGuns(entry, entry.count);
+  // A gun left out goes to the best wall with room for one more, so a fort mounts what its walls were given.
+  let owed = placed - ranked.reduce((sum, entry) => sum + entry.guns.length, 0);
+  for (let carried = true; owed > 0 && carried;) {
+    carried = false;
+    for (const entry of ranked) {
+      if (owed <= 0) break;
+      if (entry.count >= entry.room) continue;
+      const guns = standGuns(entry, entry.count + 1);
+      if (guns.length <= entry.guns.length) continue;
+      entry.guns = guns;
+      entry.count++;
+      owed--;
+      carried = true;
     }
   }
+  trace.guns = ranked.flatMap((entry) => entry.guns);
   const yard = innerYard(lowZ === null ? outline : clipOutlineAt(outline, lowZ, false), TRACE_RAMPART_EDGE_M + 3);
   if (yard && !keep) {
     if (yard.halfWidth >= 9 && yard.halfLength >= 7) {

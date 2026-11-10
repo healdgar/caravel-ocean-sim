@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import zlib from 'node:zlib';
 import {HISTORICAL_COLONIAL_PORTS,buildPortPrefabGeometry,generateProceduralCoastalPack,getBuildingParts,placeCoastalPort,resolveGlobalCoastalRegion,smoothCoastlineAndForeshoreBeaches,synthesizeCoastalTerrain} from '../js/coastal-world.js';
 import {FORT_RECORDS,fortRecordsFor} from '../js/fort-records.js';
-import {depthInOutline,enclosurePlan,fortLocalToWorld,traceWalls,triangularFortPlan,squareFortPlan} from '../js/fort-plan.js';
+import {depthInOutline,drawFortTrace,enclosurePlan,fortLocalToWorld,traceWalls,triangularFortPlan,squareFortPlan} from '../js/fort-plan.js';
 import {buildingGunBears,buildingGunMuzzlePose,classifyBuildingMaterial,createBuildingGunDefinitions,createBuildingGunnery,sweepBuildingSegment} from '../js/gunnery-control.js';
 import {createFortGarrison} from '../js/crew.js';
 import {noteBuildingMeshes,prepareBuildingFracture,applyBuildingFractureEvents} from '../js/building-fracture.js';
@@ -386,6 +386,26 @@ test('fort cannons sit flush on their banquettes and bulwarks, clear of stone me
       }
     }
   }
+});
+
+test('a gun that cannot stand on the wall it was given goes to another wall with room for it',()=>{
+  // A battery on a shore that steps back twice towards its left end. Each of its seven walls is given one gun, and the
+  // one on the short end wall would share a platform with the first gun of the front, round the corner.
+  const shore=(x)=>x<-26.5?4:x<-12.5?1:-2;
+  const {trace}=drawFortTrace({shape:'battery',landAt:(x,z)=>z>=shore(x)});
+  const walls=traceWalls(trace),end=walls.at(-1);
+  assert.ok(end.length>=4&&end.length<8&&Math.abs(end.nx+1)<1e-6,`the end wall is short and looks along the shore (${end.length.toFixed(1)} m)`);
+  assert.equal(trace.guns.filter(gun=>gun.wall===end.index).length,0,'the end wall has no room for a gun beside the front one');
+  assert.equal(trace.guns.length,7,'the battery still mounts its seven guns');
+  for(const gun of trace.guns){
+    const wall=walls[gun.wall];
+    assert.ok(gun.along>0&&gun.along<wall.length,'each gun stands on its own wall');
+    assert.ok(depthInOutline(trace.outline,gun.x-gun.nx*2.17,gun.z-gun.nz*2.17)>=2.1,'with room for its carriage behind the parapet');
+    for(const other of trace.guns)if(other!==gun)assert.ok(Math.hypot(other.x-gun.x,other.z-gun.z)>=4,'and no two share a platform');
+  }
+  // A fort that has no wall to spare mounts fewer, as it did.
+  const small=drawFortTrace({shape:'battery',sizeM:[36,9],landAt:(x,z)=>z>=shore(x),guns:12});
+  assert.ok(small.trace.guns.length<12&&small.trace.guns.length>=3,`${small.trace.guns.length} guns on a small battery asked for twelve`);
 });
 
 test('a hill citadel stands on its hill where the record puts it, however high and far from the water',()=>{
