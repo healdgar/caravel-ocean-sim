@@ -13,7 +13,10 @@ function opticsMatching(source,start,open,close){
   throw new Error('Incomplete water capture shader');
 }
 
-export function createSubmergedShader(source,entry='fs',world='v.world',surfaceWaves=false){
+// `land` marks ground, which is captured up to WATER_CAPTURE_LAND_MARGIN above the surface so a shore seen
+// through a wave has ground behind it; everything else stops at the surface.
+export const WATER_CAPTURE_LAND_MARGIN=0.45,WATER_CAPTURE_MARGIN=0.015;
+export function createSubmergedShader(source,entry='fs',world='v.world',surfaceWaves=false,land=false){
   // Explicit vessel-material opt-in. Do not guess by material number, rename
   // arbitrary booleans or apply an air/water toggle to unrelated scene shaders.
   const vesselMarker='const vesselWaterCapture=false;';
@@ -31,10 +34,6 @@ export function createSubmergedShader(source,entry='fs',world='v.world',surfaceW
     // original resource binding while submerged captures bypass air fog.
     source=source.slice(0,start+1)+`if(F.screen.x>=0.0&&captureMode.x<.5){return ${argument};}`+source.slice(start+1);
   }
-  // Terrain already integrates clouds in its normal material path. The ocean
-  // must integrate only the air segment before the surface, not that path twice.
-  source=source.replace(/let\s+ray\s*=\s*marchCloudsTo\s*\(/,
-    'if(F.screen.x>=0.0&&captureMode.x<.5){return vec4f(col,1.0);}\n  let ray=marchCloudsTo(');
   const marker=new RegExp(`@fragment\\s+fn\\s+${entry}\\s*\\(`).exec(source);
   if(!marker)throw new Error(`Missing capture fragment ${entry}`);
   const argsStart=source.indexOf('(',marker.index),argsEnd=opticsMatching(source,argsStart,'(',')');
@@ -45,8 +44,7 @@ export function createSubmergedShader(source,entry='fs',world='v.world',surfaceW
   const originalSignature=source.slice(marker.index,bodyStart).replace(new RegExp(`\\b${entry}\\s*\\(`),'submergedFS(');
   const materialSignature=`fn waterCaptureMaterial(${plain})->vec4f `;
   source=source.slice(0,marker.index)+materialSignature+source.slice(bodyStart);
-  const isTerrain=/marchCloudsTo\s*\(/.test(source);
-  const shoreMargin=isTerrain?0.45:0.015;
+  const shoreMargin=land?WATER_CAPTURE_LAND_MARGIN:WATER_CAPTURE_MARGIN;
   // Material derivatives past the early exit above are never read at a surface edge that matters.
   return 'diagnostic(off,derivative_uniformity);\n'+source+/* wgsl */ `
 @group(3) @binding(0) var captureSea:texture_2d_array<f32>;
@@ -96,17 +94,17 @@ export function createWaterOptics({device,shader,seaView,seaSampler,format='rgba
     return b;
   });
   return {
-    async capture({source,pipeline,vertex,entry='fs',world='v.world',groups=1}){
+    async capture({source,pipeline,vertex,entry='fs',world='v.world',groups=1,land=false}){
       if(groups>3)throw new Error('Water capture reserves bind group 3');
       const vertexState={entryPoint:'vs',...vertex};
       // The module is always generated here; a caller-supplied surface pipeline
       // or module does not affect this capture's state.
       delete vertexState.module;
-      const key=JSON.stringify([source,entry,world,vertexState,groups]);
+      const key=JSON.stringify([source,entry,world,vertexState,groups,land]);
       if(captures.has(key))return captures.get(key);
       const pending=(async()=>{
         const captureNeedsWaves=surfaceWaves&&!/\bfn\s+surfaceWaveAt\s*\(/.test(source);
-        const module=await shader(createSubmergedShader(source,entry,world,!!surfaceWaves),'submerged material');
+        const module=await shader(createSubmergedShader(source,entry,world,!!surfaceWaves,land),'submerged material');
         const captured=await device.createRenderPipelineAsync({label:'submerged opaque material',
           layout:'auto',
           vertex:{...vertexState,module},fragment:{module,entryPoint:'submergedFS',targets:[{format}]},

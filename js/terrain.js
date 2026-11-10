@@ -744,8 +744,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   ]));
   terrainPipesPromise.catch(()=>{});
   const submergedPipesPromise=waterOpticsResolvedPromise.then(wo=>wo?Promise.all([
-    wo.capture({source:TERRAIN,vertex:{buffers:[meshLayout]},world:'in.world',groups:2}),
-    wo.capture({source:TERRAIN,vertex:{entryPoint:'groundVS',buffers:treeBuffers},entry:'groundFS',world:'in.world',groups:1}),
+    wo.capture({source:TERRAIN,vertex:{buffers:[meshLayout]},world:'in.world',groups:2,land:true}),
+    wo.capture({source:TERRAIN,vertex:{entryPoint:'groundVS',buffers:treeBuffers},entry:'groundFS',world:'in.world',groups:1,land:true}),
   ]):[null,null]);
   submergedPipesPromise.catch(()=>{});
   const leafBitmapPromise=load('assets/tree-foliage.png').then(r=>r.blob()).then(b=>createImageBitmap(b));
