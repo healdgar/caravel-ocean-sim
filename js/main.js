@@ -101,7 +101,7 @@ import { ORBIT_LIMIT, orbitElevation, orbitDistance, panOrbit, placeOrbitCamera 
 // FFT ocean (6 cascades) + CDLOD surface mesh + physically based sky + HDR post.
 // All per-frame data lives in preallocated typed arrays / descriptors (no per-frame garbage
 // apart from the unavoidable swap-chain view and command buffer objects).
-import { N, CASCADES, SKY_W, SKY_H, ENV_SIZE, ENV_MIPS, SIM_CLOCK_LOOP_S } from './wgsl/common.js';
+import { N, CASCADES, SKY_W, SKY_H, ENV_SIZE, ENV_MIPS, SIM_CLOCK_LOOP_S, FRAME_FIRE_PATCH_FIRST, FRAME_FIRE_PATCH_FLOATS, packFrameFireLights } from './wgsl/common.js';
 import { SIM_INIT, FFT_ROWS, FFT_COLS, SIM_MIPS, FOAM_TEX, RGBA8_MIPS, SCENE_FOAM_UPDATE, ARRAY16_MIPS, FOAM_RES } from './wgsl/sim.js';
 import { TRANS_LUT, MS_LUT, SKYVIEW_LUT, ENV_CUBE, CUBE_MIPS, SUN_VIS } from './wgsl/sky.js';
 import { SKY_BG, SCENE_HEIGHT_PROBE, createOpticalOcean,withFleetHullCount } from './wgsl/ocean.js';
@@ -1947,46 +1947,6 @@ async function main() {
     const voyageLatitude=voyageCtl?.voyage?.true?.lat;
     return Number.isFinite(voyageLatitude)?voyageLatitude:terrain?.region?.latitude??astronomy.state?.observer?.latitude??SEA_LATITUDE_UNKNOWN;
   }
-  function writeFireLightsToFrame(f){
-    f[23]=0;f[27]=0;f[31]=0;f[54]=0;
-    f[55]=0;f[61]=0;f[62]=0;f[87]=0;
-    if(!Array.isArray(activeFires)||activeFires.length===0)return;
-    const sunDirY=f[33]??Math.sin(P.sunElev*D2R);
-    const nightFactor=1-Math.max(0,Math.min(1,(sunDirY+0.06)/0.24));
-    const fireExposure=Math.min(1.0,1.35/Math.max(f[68]||1,1e-3))*(1.0+2.8*nightFactor);
-    const clusters=[];
-    for(const wf of activeFires){
-      const pos=wf?.position;
-      const rawInt=wf?.intensity??0;
-      if(!pos||rawInt<=0.01)continue;
-      let merged=false;
-      for(const c of clusters){
-        const d2=(c.x-pos[0])**2+(c.y-pos[1])**2+(c.z-pos[2])**2;
-        if(d2<144){
-          const nextW=c.w+rawInt;
-          c.x=(c.x*c.w+pos[0]*rawInt)/nextW;
-          c.y=(c.y*c.w+pos[1]*rawInt)/nextW;
-          c.z=(c.z*c.w+pos[2]*rawInt)/nextW;
-          c.w=Math.min(3.6,nextW);
-          merged=true;
-          break;
-        }
-      }
-      if(!merged)clusters.push({x:pos[0],y:pos[1],z:pos[2],w:Math.min(3.2,rawInt)});
-    }
-    if(!clusters.length)return;
-    clusters.sort((a,b)=>{
-      const da=Math.hypot(a.x-cam.x,a.y-cam.y,a.z-cam.z);
-      const db=Math.hypot(b.x-cam.x,b.y-cam.y,b.z-cam.z);
-      return (b.w/(1+db*0.02))-(a.w/(1+da*0.02));
-    });
-    const c0=clusters[0];
-    f[23]=c0.x;f[27]=c0.y;f[31]=c0.z;f[54]=c0.w*fireExposure;
-    if(clusters.length>1){
-      const c1=clusters[1];
-      f[55]=c1.x;f[61]=c1.y;f[62]=c1.z;f[87]=c1.w*fireExposure;
-    }
-  }
   function writeFrame(time) {
     const aspect = W / H;
     const tanY = Math.tan(cam.fovY * 0.5), tanX = tanY * aspect;
@@ -2017,9 +1977,11 @@ async function main() {
     const f = frameF;
     f.set(viewProj, 0);
     f[16] = cam.x; f[17] = cam.y; f[18] = cam.z; f[19] = time;
-    f[20] = rx * tanX; f[21] = ry * tanX; f[22] = rz * tanX; f[23] = 0;
-    f[24] = ux * tanY; f[25] = uy * tanY; f[26] = uz * tanY; f[27] = 0;
-    f[28] = fx; f[29] = fy; f[30] = fz; f[31] = 0;
+    // The fourth float of each camera vector, with 54, 55, 61, 62 and 87, is a fire-light slot: packFrameFireLights
+    // owns those, once the frame's fires are known. Until then they hold the last frame's lights.
+    f[20] = rx * tanX; f[21] = ry * tanX; f[22] = rz * tanX;
+    f[24] = ux * tanY; f[25] = uy * tanY; f[26] = uz * tanY;
+    f[28] = fx; f[29] = fy; f[30] = fz;
     const se = P.sunElev * D2R, sa = P.sunAzim * D2R;
     f[32] = Math.sin(sa) * Math.cos(se); f[33] = Math.sin(se); f[34] = -Math.cos(sa) * Math.cos(se); f[35] = 14.0;
     if(astronomy.mode==='astronomy')f.set(astronomy.state.sun.direction,32);
@@ -2028,7 +1990,7 @@ async function main() {
     for (let c = 0; c < C; c++) { f[40 + c] = CASC_L[c]; f[48 + c] = 1 / CASC_L[c]; }
     f[46] = P.swellHs; f[47] = P.swellLength;
     f[56] = Math.cos(P.windDir * D2R); f[57] = Math.sin(P.windDir * D2R); f[58] = P.windSpeed; f[59] = P.swellDir * D2R + 2 * Math.PI;
-    f[60] = boat.heading * D2R; f[61] = boat.length; f[62] = boat.beam;
+    f[60] = boat.heading * D2R;
     f[63] = boat.showProw && qs.get('boatReflections') !== '0' ? 1 : 0;
     f[64] = Math.max(4, R0 * polygons.oceanRangeScale); f[65] = GRID; f[66] = FOAM_LEVEL_SIZE[0]; f[67] = FOAM_LEVEL_SIZE[1];
     f[68] = P.exposure*(astronomy.mode==='astronomy'?astronomy.state.exposureScale:1); f[69] = P.bloom; f[70] = frameIndex; f[71] = DBG;
@@ -2039,13 +2001,12 @@ async function main() {
     const seaColour=deepSeaColour(seaLatitude());
     f[76] = seaColour[0] * P.turbidity; f[77] = seaColour[1] * P.turbidity; f[78] = seaColour[2] * P.turbidity; f[79] = 0.0024;
     f[80] = 0.030; f[81] = 0.105; f[82] = 0.100; f[83] = 2.6;
-    f[84] = 0.45; f[85] = 1.0; f[86] = Math.min(1,P.foam); f[87] = 1.0;
+    f[84] = 0.45; f[85] = 1.0; f[86] = Math.min(1,P.foam);
     f[88] = (5.802e-3 + 4.40e-3 * P.haze) * 1e-3;
     f[89] = (13.558e-3 + 4.40e-3 * P.haze) * 1e-3;
     f[90] = (33.1e-3 + 4.40e-3 * P.haze) * 1e-3;
     f[91] = 1.1e-4;
     f[92]=weather.intensity;f[93]=weather.type;f[94]=weather.flash;f[95]=weather.time;
-    writeFireLightsToFrame(f);
     device.queue.writeBuffer(frameUBO, 0, f);
     opticsData[0]=P.turbidity*(terrain?.turbidityScale??1);opticsData[1]=qs.get('waterOptics')==='0'?0:1;
     opticsData[2]=waterH;opticsData[3]=1;
@@ -4095,8 +4056,8 @@ async function main() {
     }else if(portGunnery){
       const portFires=portGunnery.worldFires;for(let i=0;i<portFires.length;i++)activeFires.push(portFires[i]);
     }
-    writeFireLightsToFrame(frameF);
-    device.queue.writeBuffer(frameUBO,0,frameF);
+    // The frame block went up whole in writeFrame. Only its fire lights wait on this frame's fires, and only a change in them is sent.
+    if(packFrameFireLights(frameF,activeFires,cam.x,cam.y,cam.z))device.queue.writeBuffer(frameUBO,FRAME_FIRE_PATCH_FIRST*4,frameF,FRAME_FIRE_PATCH_FIRST,FRAME_FIRE_PATCH_FLOATS);
     gunEffects.update(dt,{wind:windVec,eye:[cam.x,cam.y,cam.z],fires:activeFires});
     wakePool.update(vessels);
     device.queue.writeBuffer(fleetHullUBO,0,fleetHullData);sceneShadows.update(vessels);
