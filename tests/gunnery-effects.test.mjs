@@ -34,8 +34,16 @@ test('three connected powder billows expand, decelerate, dilute and expire with 
   for(const p of samples){assert.ok([...p.centre,...p.radii,p.extinction].every(Number.isFinite));assert.ok(p.radii.every(v=>v>0));}
   for(let i=1;i<samples.length;i++){assert.ok(samples[i].radii[0]>samples[i-1].radii[0]);assert.ok(samples[i].extinction<samples[i-1].extinction);}
   assert.ok(samples[1].centre[0]-samples[0].centre[0]>(samples[4].centre[0]-samples[3].centre[0])*.3,'initial muzzle momentum decays');
-  assert.equal(samples.at(-1).extinction,0);
-  shot.age=0;for(let i=0;i<80;i++)state.step(.25,{wind:[0,0,0]});assert.equal(state.active,false);
+  // It expires when it can no longer be seen: nothing is built or sorted for smoke too thin to draw.
+  const life=GUNNERY_FX_LIMITS.smokeSeconds,floor=.015,densest=age=>{shot.age=age;return Math.max(...[0,1,2].map(k=>gunnerySmokeParcel(shot,k)?.extinction??0));};
+  assert.ok(life>2&&life<6,`a discharge is kept ${life} s`);
+  for(const scale of [.82,1,2.25]){
+    shot.scale=scale;
+    assert.ok(densest(life)<floor,`at the end of its life a charge of scale ${scale} has no parcel left to draw (${densest(life)})`);
+    assert.ok(densest(life-.4)>=floor,`and it is not dropped while one can still be seen (${densest(life-.4)})`);
+  }
+  shot.age=0;for(let t=0;t<life-.3;t+=.25)state.step(.25,{wind:[0,0,0]});assert.equal(state.active,true,'kept while it shows');
+  state.step(.25,{wind:[0,0,0]});state.step(.25,{wind:[0,0,0]});assert.equal(state.active,false,'and dropped as soon as it does not');
   assert.ok(GUNNERY_FX_LIMITS.flashSeconds<.1);
 });
 
@@ -45,4 +53,60 @@ test('roundshot poses and fixed impact births are copied without altering ballis
   const impact={position:[2,.7,5],velocity:[180,-25,10],massKg:14};state.emitImpact(impact);state.step(.2,{wind:[10,0,0]});
   assert.deepEqual(state.impacts[0].position,[2,.7,5]);assert.deepEqual(state.impacts[0].velocity,[180,-25,10]);
   assert.equal(state.projectiles[0].position[1],2,'only the ballistics owner moves a projectile');
+});
+
+// A device that records what is asked of it, so the renderer's bookkeeping can be checked without a GPU.
+async function recordedEffects(){
+  globalThis.GPUBufferUsage??={STORAGE:1,COPY_DST:2,UNIFORM:4};globalThis.GPUTextureUsage??={STORAGE_BINDING:1,TEXTURE_BINDING:2};
+  const {createGunneryEffects}=await import('../js/gunnery-effects.js');
+  const log={pipelines:[],buffers:[],groups:0,volumeFloats:0,draws:[]};
+  const device={
+    createBuffer:d=>{log.buffers.push(d);return {label:d.label,destroy(){}};},
+    createRenderPipelineAsync:async d=>{log.pipelines.push(d);return {label:d.label,getBindGroupLayout:()=>({})};},
+    createComputePipelineAsync:async d=>({label:d.label,getBindGroupLayout:()=>({})}),
+    createBindGroup:()=>(log.groups++,{}),
+    createTexture:()=>({createView:()=>({}),destroy(){}}),
+    queue:{writeBuffer(buffer,offset,data,start=0,count=0){if(buffer.label==='black powder smoke volumes')log.volumeFloats=count;}},
+  };
+  const effects=await createGunneryEffects({device,frameUBO:{},shader:async()=>({}),samples:4});
+  const encoder={beginComputePass:()=>({setPipeline(){},setBindGroup(){},dispatchWorkgroups(){},end(){}})};
+  const pass={setPipeline:p=>log.draws.push(p.label),setBindGroup(){},draw(){}};
+  return {effects,log,encoder,pass};
+}
+
+test('the smoke has one pipeline, the one the game draws: single-sampled, with no depth attachment',async()=>{
+  const {effects,log,encoder,pass}=await recordedEffects();
+  const volume=log.pipelines.filter(p=>p.vertex.entryPoint==='gunneryVolumeVS');
+  assert.deepEqual(volume.map(p=>p.label),['gunneryVolume'],'one volume pipeline, under the name the frame counters look for');
+  assert.equal(volume[0].multisample.count,1);assert.equal(volume[0].depthStencil,undefined);
+  for(const p of log.pipelines)if(p!==volume[0]){assert.equal(p.multisample.count,4);assert.equal(p.depthStencil.format,'depth32float');}
+  // Iron on timber, stone or earth is no powder: a contact is a row for the GPU and never a volume built here.
+  effects.emitImpact({position:[4,0,0],velocity:[150,-30,0],kind:'earth',pit:1});effects.emitImpact({position:[8,2,0],velocity:[150,-30,0],kind:'wood'});
+  effects.update(.2,{eye:[0,3,20]});assert.deepEqual([effects.counts.impacts,effects.counts.volumes],[2,0]);
+  effects.clear();
+  effects.emitShot(fxShot);effects.update(.2,{eye:[0,3,20]});
+  effects.drawVolumes(pass);assert.deepEqual(log.draws,[],'nothing is drawn against a depth that was not resolved this frame');
+  effects.resolveDepth(encoder,{},64,64);effects.drawVolumes(pass);assert.deepEqual(log.draws,['gunneryVolume']);
+  assert.equal(effects.draw,undefined,'and no second way to draw them that only a test would use');
+});
+
+test('smoke costs no bind group a frame while it is handed the same depth view, and builds nothing once it has cleared',async()=>{
+  const {effects,log,encoder}=await recordedEffects();
+  for(let i=0;i<52;i++)effects.emitShot({position:[i*2.2,4,0],direction:[0,.05,1],chargeKg:4});
+  const view={};let made=-1,framesWithShots=0,framesWithSmoke=0;
+  for(let t=0;t<12;t+=1/30){
+    effects.update(1/30,{eye:[50,6,-80],wind:[1.5,0,.5]});
+    if(effects.state.shots.length)framesWithShots++;
+    if(effects.counts.volumes)framesWithSmoke++;
+    if(effects.resolveDepth(encoder,view,640,360)){if(made<0)made=log.groups;else assert.equal(log.groups,made,'no bind group after the first frame of smoke');}
+  }
+  assert.ok(made>0);assert.ok(framesWithSmoke>60);
+  assert.ok(framesWithShots-framesWithSmoke<=6,`a discharge is carried ${framesWithShots} frames for ${framesWithSmoke} frames of smoke`);
+  assert.equal(effects.active,false,'twelve seconds on, nothing is left to step');
+  const volumes=log.buffers.find(b=>b.label==='black powder smoke volumes');
+  assert.equal(volumes.size,GUNNERY_FX_LIMITS.volumes*20*4,'the buffer holds what can be drawn and no more');
+  // The game keeps the view: a new one every frame would defeat the cache above.
+  const {readFileSync}=await import('node:fs');
+  const call=readFileSync(new URL('../js/main.js',import.meta.url),'utf8').match(/gunEffects\.resolveDepth\(([^;]*)\);/);
+  assert.ok(call,'main.js resolves the smoke\'s depth');assert.ok(!call[1].includes('createView('),`main.js passes a kept view, not ${call[1]}`);
 });

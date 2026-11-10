@@ -5,7 +5,8 @@ import {coupleSurfaceHeight} from './wgsl/surface-coupling.js';
 import {isArrowAmmo} from './gunnery-state.js';
 import {surfaceWaveGroups} from './surface-bindings.js';
 
-export const GUNNERY_FX_LIMITS=Object.freeze({shots:128,smoke:512,impacts:96,projectiles:128,arcSegments:256,smokeSeconds:18,impactSeconds:8,flashSeconds:.085});
+// Smoke thinner than this draws nothing, so a parcel below it is not built and a shot wholly below it is dropped.
+const GUNNERY_SMOKE_FLOOR=.015,GUNNERY_SMOKE_PARCELS=3,GUNNERY_MAX_VOLUMES=256;
 const gunneryFxFinite=(v,fallback=0)=>Number.isFinite(v)?v:fallback;
 const gunneryFxVector=(v,fallback=[0,0,0])=>fallback.map((n,i)=>gunneryFxFinite(v?.[i],n));
 const gunneryFxClamp=(n,a,b)=>Math.max(a,Math.min(b,n));
@@ -90,6 +91,7 @@ export function createGunneryEffectState(){
 
 // A small number of connected, expanding volumes per muzzle replaces smoke
 // cards. These are bounded authored black-powder billows, not a fluid solver.
+// A parcel's density depends on its age alone: the charge scales its size and its powder alike.
 export function gunnerySmokeParcel(shot,index){
   const t=shot.age-index*.020;if(t<0)return null;
   const direction=shot.direction,scale=shot.scale;
@@ -108,13 +110,26 @@ export function gunnerySmokeParcel(shot,index){
   centre[1]+=Math.cos(phase)*eddy*.48;
   const vertical=across*(1.04+.15*Math.sin(shot.seed*17+index)+.24*Math.min(1,t*.45));
   const dilution=.46*Math.exp(-t/.92)+.54*Math.exp(-t/3.1);
-  const extinction=(16.2-index*2.5)*scale**3/(across*across*along)*dilution*(1-gunneryFxClamp((t-13)/5,0,1));
+  const extinction=(16.2-index*2.5)*scale**3/(across*across*along)*dilution;
   return {centre,radii:[across,vertical,along],direction,extinction,age:t,seed:shot.seed*79+index*11,subtype:index*.35};
 }
+// How long a discharge's smoke can be seen: the age at which its last parcel has thinned below the floor, found
+// from the parcels themselves so it follows any retuning of them. About four seconds.
+function gunnerySmokeLifetime(){
+  const shot={age:0,position:[0,0,0],direction:[1,0,0],scale:1,seed:0,drift:[0,0,0]};
+  let last=0;
+  for(let age=.05;age<60;age+=.05){
+    shot.age=age;
+    for(let k=0;k<GUNNERY_SMOKE_PARCELS;k++)if(gunnerySmokeParcel(shot,k)?.extinction>=GUNNERY_SMOKE_FLOOR)last=age;
+    if(age-last>2)break;
+  }
+  return Math.round((last+.1)*100)/100;
+}
+export const GUNNERY_FX_LIMITS=Object.freeze({shots:128,impacts:96,projectiles:128,arcSegments:256,volumes:GUNNERY_MAX_VOLUMES,smokeSeconds:gunnerySmokeLifetime(),impactSeconds:8,flashSeconds:.085});
 
 export async function createGunneryEffects({device,frameUBO,transView,skyView,sampler,envView,sunVis,seaView,seaSampler,shader,format='rgba16float',samples=4,surfaceWaves=null}){
   const state=createGunneryEffectState(),B=GPUBufferUsage,T=GPUTextureUsage;
-  const volumes=new Float32Array((GUNNERY_FX_LIMITS.smoke+GUNNERY_FX_LIMITS.shots)*20);
+  const volumes=new Float32Array(GUNNERY_FX_LIMITS.volumes*20);
   const balls=new Float32Array(GUNNERY_FX_LIMITS.projectiles*4),contacts=new Float32Array(GUNNERY_FX_LIMITS.impacts*16);
   const arcs=new Float32Array(GUNNERY_FX_LIMITS.arcSegments*12);
   const make=(label,bytes)=>device.createBuffer({label,size:bytes,usage:B.STORAGE|B.COPY_DST});
@@ -123,13 +138,12 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
   const module=await shader(source,'black powder cannon effects');
   const transparent={color:{srcFactor:'one',dstFactor:'one-minus-src-alpha'},alpha:{srcFactor:'one',dstFactor:'one-minus-src-alpha'}};
   const types=[['gunneryBall',false],['gunneryVolume',true],['gunneryCrown',true],['gunneryDrop',true],['gunneryRing',true],['gunneryArc',true],['gunneryEarth',true],['gunneryDust',true]];
+  // Everything but the volumes draws in the scene's multisampled pass. The volumes march against a resolved copy of
+  // its depth, so they draw afterwards, onto the resolved colour, in a pass with no depth and one sample.
   const pipelines=await Promise.all(types.map(([entry,blend],i)=>device.createRenderPipelineAsync({label:entry,layout:'auto',
     vertex:{module,entryPoint:entry+'VS'},fragment:{module,entryPoint:entry+'FS',targets:[{format,...(blend?{blend:transparent}:{})}]},
     primitive:{topology:'triangle-list',cullMode:i===1?'front':'none'},
-    depthStencil:{format:'depth32float',depthWriteEnabled:i===0,depthCompare:i===1?'always':'greater'},multisample:{count:samples}})));
-  const volume1xPipe=await device.createRenderPipelineAsync({label:'gunneryVolume1x',layout:'auto',
-    vertex:{module,entryPoint:'gunneryVolumeVS'},fragment:{module,entryPoint:'gunneryVolumeFS',targets:[{format,blend:transparent}]},
-    primitive:{topology:'triangle-list',cullMode:'front'},multisample:{count:1}});
+    ...(i===1?{multisample:{count:1}}:{depthStencil:{format:'depth32float',depthWriteEnabled:i===0,depthCompare:'greater'},multisample:{count:samples}})})));
   const resources=[{buffer:frameUBO},transView,skyView,sampler,envView,{buffer:sunVis},seaView,seaSampler,{buffer:volumeBuffer},{buffer:ballBuffer},{buffer:contactBuffer},null,{buffer:arcBuffer}];
   // Auto layouts reflect each entry point. Keep this table explicit so resource
   // changes are checked by native pipeline creation and integration tests.
@@ -137,7 +151,7 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
   const crownWaves=surfaceWaveGroups(device,pipelines[2],surfaceWaves);
   const ringWaves=surfaceWaveGroups(device,pipelines[4],surfaceWaves);
   let volumeCount=0,impactCount=0,ballCount=0,arcSegmentCount=0,depthTexture=null,depthWidth=0,depthHeight=0,depthSource=null,depthGroup=null;
-  let volumeGroup=null,volume1xGroup=null,depthReady=false;
+  let volumeGroup=null,depthReady=false;
   const groups=pipelines.map((pipe,i)=>i===1?null:device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:bindings[i].map(binding=>({binding,resource:resources[binding]}))}));
   const depthModule=await shader(GUNNERY_DEPTH_RESOLVE(samples),'cannon effects depth snapshot');
   const depthPipeline=await device.createComputePipelineAsync({label:'resolve cannon effects depth',layout:'auto',compute:{module:depthModule,entryPoint:'gunneryResolveDepth'}});
@@ -159,10 +173,10 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
       const eye=gunneryFxVector(options.eye),ordered=[];
       const coalesce=state.shots.length>6;
       for(const shot of state.shots){
-        const parcelsPerShot=state.shots.length>52?2:3;
+        const parcelsPerShot=state.shots.length>52?2:GUNNERY_SMOKE_PARCELS;
         for(let k=0;k<parcelsPerShot;k++){
           const p=gunnerySmokeParcel(shot,k);
-          if(!p||p.extinction<.015||p.age>10.5)continue;
+          if(!p||p.extinction<GUNNERY_SMOKE_FLOOR)continue;
           if(coalesce&&shot.age>.25){
             const mergeR2=(Math.max(1.8,p.radii[0]*.68))**2;
             let merged=false;
@@ -192,11 +206,7 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
             type:1,extinction:1-t,age:shot.age,seed:shot.seed*79});
         }
       }
-      for(const e of state.impacts){
-        if(!(e.kindCode>0)||e.age>=5.5)continue;
-        // Iron striking timber, stone or earth makes no flash and no powder smoke. Its debris and dust are drawn from the contact below.
-        if(e.pit>0)continue;
-      }
+      // Iron striking timber, stone or earth makes no flash and no powder smoke: its debris and dust are drawn from the contacts.
       for(const f of fires){
         if(!f?.position||!(f.intensity>0.02))continue;
         const pos=gunneryFxVector(f.position),int=gunneryFxClamp(f.intensity,0.05,1.6),age=gunneryFxFinite(f.age,0),seed=gunneryFxFinite(f.seed,1.7);
@@ -259,7 +269,7 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
         }
       }
       ordered.sort((a,b)=>b.centre.reduce((sum,v,k)=>sum+(v-eye[k])**2,0)-a.centre.reduce((sum,v,k)=>sum+(v-eye[k])**2,0));
-      const maxVolumes=Math.min(256,GUNNERY_FX_LIMITS.smoke+GUNNERY_FX_LIMITS.shots);
+      const maxVolumes=GUNNERY_FX_LIMITS.volumes;
       const selected=ordered.length>maxVolumes?ordered.slice(ordered.length-maxVolumes):ordered;
       for(const p of selected){if(volumeCount>=maxVolumes)break;writeVolume(volumeCount++,p.centre,p.direction,p.radii,p.type,p.extinction,p.age,p.seed,p.subtype??0);}
       for(const p of state.projectiles){
@@ -302,10 +312,9 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
         depthTexture?.destroy();depthWidth=width;depthHeight=height;
         depthTexture=device.createTexture({label:'cannon smoke opaque depth',size:[width,height],format:'r32float',usage:T.STORAGE_BINDING|T.TEXTURE_BINDING});
         depthSource=null;
-        const entries=volumeEntries();
-        volumeGroup=device.createBindGroup({layout:pipelines[1].getBindGroupLayout(0),entries});
-        volume1xGroup=device.createBindGroup({layout:volume1xPipe.getBindGroupLayout(0),entries});
+        volumeGroup=device.createBindGroup({layout:pipelines[1].getBindGroupLayout(0),entries:volumeEntries()});
       }
+      // Keyed on the view itself: pass the same view each frame, or this makes a bind group a frame.
       if(source!==depthSource){depthSource=source;depthGroup=device.createBindGroup({layout:depthPipeline.getBindGroupLayout(0),entries:[{binding:0,resource:source},{binding:1,resource:depthTexture.createView()}]});}
       const pass=encoder.beginComputePass({label:'cannon smoke scene depth'});pass.setPipeline(depthPipeline);pass.setBindGroup(0,depthGroup);pass.dispatchWorkgroups(Math.ceil(width/8),Math.ceil(height/8));pass.end();depthReady=true;return true;
     },
@@ -321,11 +330,8 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
         pass.setPipeline(pipelines[4]);pass.setBindGroup(0,groups[4]);if(ringWaves)pass.setBindGroup(1,ringWaves[surfaceWaves.current]);pass.draw(GUNNERY_RING_SEGMENTS*GUNNERY_RING_COUNT*6,impactCount);
       }
     },
+    // After the scene pass has ended and `resolveDepth` has run, in a pass on the resolved colour.
     drawVolumes(pass){
-      if(volumeCount&&depthReady){pass.setPipeline(volume1xPipe);pass.setBindGroup(0,volume1xGroup);pass.draw(36,volumeCount);}
-    },
-    draw(pass){
-      this.drawInPass(pass);
       if(volumeCount&&depthReady){pass.setPipeline(pipelines[1]);pass.setBindGroup(0,volumeGroup);pass.draw(36,volumeCount);}
     },
     clear(){state.clear();volumeCount=impactCount=ballCount=arcSegmentCount=0;depthReady=false;},
