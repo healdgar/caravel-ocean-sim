@@ -16,7 +16,7 @@ import {bakeLandImpactDeformations} from './part-assembly.js';
 import {buildingFracturePipeline,createPortFractures} from './building-fracture.js';
 import {streetEdgeAt} from './town-streets.js';
 import {createLandCraterLedger,createLandCraters,landCraterSize} from './land-craters.js';
-import {createGroundDetail} from './ground-detail.js';
+import {sharedGroundDetail} from './ground-detail.js';
 import {createLandShadows} from './shadows.js';
 
 import {
@@ -982,7 +982,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     cp.dispatchWorkgroups(Math.ceil((activeRegion.albedoSize>>m)/8),Math.ceil((activeRegion.albedoSize>>m)/8));
   }
   cp.end();device.queue.submit([enc.finish()]);
-  const groundDetail=await createGroundDetail({device,computePipe,mipPipe});
+  const groundDetail=await sharedGroundDetail({device,computePipe,mipPipe});
   let nearAlbedo=albedo;
   if(nearTile){
     const image=await nearBitmapPromise;

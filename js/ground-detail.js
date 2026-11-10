@@ -1,10 +1,26 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-// Bakes the land's detail texture once, on the GPU, when the land loads. Nothing here runs per frame.
+// Bakes the land's detail texture once, on the GPU, when the first land loads. Nothing here runs per frame.
 import { GROUND_DETAIL_BAKE, GROUND_DETAIL_MEAN, GROUND_DETAIL_SIZE } from './wgsl/ground-detail.js';
 
 export const ARCH_MATERIAL_SIZE = 256;
 export const ARCH_MATERIAL_LAYERS = 18;
 export const ARCH_LAYER_STRIDE = 87360; // 256^2 + 128^2 + 64^2 + 32^2 + 16^2 + 8^2
+
+// Nothing in the bake depends on the port, so every terrain on a device takes the same one: a second
+// landfall fetches, decodes, mips and bakes nothing. A terrain's dispose() leaves it standing for the
+// next, and it goes with the device. flatten() therefore flattens it for every terrain that follows.
+const groundDetailByDevice = new WeakMap();
+export function sharedGroundDetail(options) {
+  const { device } = options;
+  let shared = groundDetailByDevice.get(device);
+  if (!shared) {
+    shared = createGroundDetail(options).then((detail) => ({ ...detail, dispose() {} }));
+    groundDetailByDevice.set(device, shared);
+    // A bake that failed must not be handed to the next terrain as well.
+    shared.catch(() => { if (groundDetailByDevice.get(device) === shared) groundDetailByDevice.delete(device); });
+  }
+  return shared;
+}
 
 export async function createGroundDetail({ device, computePipe, mipPipe }) {
   const mips = 1 + Math.log2(GROUND_DETAIL_SIZE);
