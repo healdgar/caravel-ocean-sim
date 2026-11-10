@@ -31,8 +31,8 @@ export function createGunneryEffectState(){
     if(impacts.length===GUNNERY_FX_LIMITS.impacts)impacts.shift();
     // A tree or timber jetty throws splinters as a hull does.
     const kindCode=event.kind==='ship'||event.kind==='scenery'||event.kind==='jetty'?1:event.kind==='terrain'?2:event.kind==='building'?3:0;
-    // A ball on the ground throws as much as the pit it digs: the land model reckons that, from the strike's energy.
-    const pit=(event.kind==='terrain'||(event.kind==='building'&&Boolean(event.floorHit)))?landCraterSize(.5*gunneryFxFinite(event.massKg,12)*speed*speed).radius:0;
+    // Every solid strike (hull timber, earth, or masonry) throws debris and dust from its contact energy, never powder smoke.
+    const pit=kindCode>0?landCraterSize(.5*gunneryFxFinite(event.massKg,12)*speed*speed).radius:0;
     impacts.push({id:event.id??++serial,position:gunneryFxVector(event.position),velocity,age:0,seed:(++serial*.61803398875)%1,
       scale:gunneryFxClamp(Math.cbrt(gunneryFxFinite(event.massKg,12)/12),.4,1.6),wind:[0,0,0],kindCode,pit,sand:gunneryFxClamp(gunneryFxFinite(event.damageReport?.sand,0),0,1)});return true;
   }
@@ -91,24 +91,25 @@ export function createGunneryEffectState(){
 // A small number of connected, expanding volumes per muzzle replaces smoke
 // cards. These are bounded authored black-powder billows, not a fluid solver.
 export function gunnerySmokeParcel(shot,index){
-  const t=shot.age-index*.022;if(t<0)return null;
+  const t=shot.age-index*.020;if(t<0)return null;
   const direction=shot.direction,scale=shot.scale;
-  const travel=(.42+index*1.18)+(12.2-index*1.55)*(1-Math.exp(-t/(.26+index*.085)))*scale;
-  const across=(.58+3.45*Math.pow(t,.70))*scale*(1-index*.06);
-  const along=(.92+Math.min(t,.48)*(8.6-index*1.0)+t*.98)*scale;
+  // Three overlapping, axially-connected plume sections (0: leading vortex head,
+  // 1: turbulent mid-body, 2: trailing muzzle stem) that form one continuous tapered jet
+  // early on and shear apart into drifting, wispy cloud banks as wind entrains them.
+  const seedJitter=Math.sin(shot.seed*53+index*7.1)*.28;
+  const travel=(.55+index*.32)+(8.6-index*1.85+seedJitter)*(1-Math.exp(-t/(.20+index*.06)))*scale;
+  const across=(.36+1.75*Math.pow(t,.65))*scale*(1-index*.08);
+  const along=(.95+Math.min(t,.45)*(4.4-index*.55)+t*1.18)*scale;
   const centre=shot.position.map((v,k)=>v+direction[k]*travel+shot.drift[k]);
-  centre[1]+=(.64*t+.72*(1-Math.exp(-t/.82)))*scale;
-  const eddy=across*Math.min(1,t*.85)*.28,phase=shot.seed*37+index*2.4;
+  centre[1]+=(.78*t+.58*(1-Math.exp(-t/.65)))*(1+index*.14)*scale;
+  const eddy=across*Math.min(1,t*.85)*.28,phase=shot.seed*37+index*.82+t*.55;
   const transverse=[direction[2],0,-direction[0]],transverseLength=Math.hypot(...transverse)||1;
   for(let k=0;k<3;k++)centre[k]+=transverse[k]/transverseLength*Math.sin(phase)*eddy;
-  centre[1]+=Math.cos(phase)*eddy*.65;
-  const vertical=across*(1.12+.14*Math.sin(shot.seed*17+index)+.22*Math.min(1,t*.4));
-  // Random phase changes contours; no per-frame random spawning or even rows.
-  // Black powder produces a substantial condensed aerosol load. A single
-  // fresh discharge must obscure its own gun, and adjacent guns must combine
-  // into a dense cloud-like bank before dilution clears it.
-  const extinction=(148-index*20)*scale**3/(across*across*along)*Math.exp(-t/10.5)*(1-gunneryFxClamp((t-13)/5,0,1));
-  return {centre,radii:[across,vertical,along],direction,extinction,age:t,seed:shot.seed*79+index*11};
+  centre[1]+=Math.cos(phase)*eddy*.48;
+  const vertical=across*(1.04+.15*Math.sin(shot.seed*17+index)+.24*Math.min(1,t*.45));
+  const dilution=.46*Math.exp(-t/.92)+.54*Math.exp(-t/3.1);
+  const extinction=(16.2-index*2.5)*scale**3/(across*across*along)*dilution*(1-gunneryFxClamp((t-13)/5,0,1));
+  return {centre,radii:[across,vertical,along],direction,extinction,age:t,seed:shot.seed*79+index*11,subtype:index*.35};
 }
 
 export async function createGunneryEffects({device,frameUBO,transView,skyView,sampler,envView,sunVis,seaView,seaSampler,shader,format='rgba16float',samples=4,surfaceWaves=null}){
@@ -126,6 +127,9 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
     vertex:{module,entryPoint:entry+'VS'},fragment:{module,entryPoint:entry+'FS',targets:[{format,...(blend?{blend:transparent}:{})}]},
     primitive:{topology:'triangle-list',cullMode:i===1?'front':'none'},
     depthStencil:{format:'depth32float',depthWriteEnabled:i===0,depthCompare:i===1?'always':'greater'},multisample:{count:samples}})));
+  const volume1xPipe=await device.createRenderPipelineAsync({label:'gunneryVolume1x',layout:'auto',
+    vertex:{module,entryPoint:'gunneryVolumeVS'},fragment:{module,entryPoint:'gunneryVolumeFS',targets:[{format,blend:transparent}]},
+    primitive:{topology:'triangle-list',cullMode:'front'},multisample:{count:1}});
   const resources=[{buffer:frameUBO},transView,skyView,sampler,envView,{buffer:sunVis},seaView,seaSampler,{buffer:volumeBuffer},{buffer:ballBuffer},{buffer:contactBuffer},null,{buffer:arcBuffer}];
   // Auto layouts reflect each entry point. Keep this table explicit so resource
   // changes are checked by native pipeline creation and integration tests.
@@ -133,7 +137,7 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
   const crownWaves=surfaceWaveGroups(device,pipelines[2],surfaceWaves);
   const ringWaves=surfaceWaveGroups(device,pipelines[4],surfaceWaves);
   let volumeCount=0,impactCount=0,ballCount=0,arcSegmentCount=0,depthTexture=null,depthWidth=0,depthHeight=0,depthSource=null,depthGroup=null;
-  let volumeGroup=null,depthReady=false;
+  let volumeGroup=null,volume1xGroup=null,depthReady=false;
   const groups=pipelines.map((pipe,i)=>i===1?null:device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:bindings[i].map(binding=>({binding,resource:resources[binding]}))}));
   const depthModule=await shader(GUNNERY_DEPTH_RESOLVE(samples),'cannon effects depth snapshot');
   const depthPipeline=await device.createComputePipelineAsync({label:'resolve cannon effects depth',layout:'auto',compute:{module:depthModule,entryPoint:'gunneryResolveDepth'}});
@@ -146,7 +150,7 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
     volumes.set([...centre,type,...right,radii[0],...up,radii[1],...direction,radii[2],extinction,age,seed,subtype],at*20);
   }
   return {state,emitShot:state.emitShot,emitImpact:state.emitImpact,setProjectiles:state.setProjectiles,setAimArcs:state.setAimArcs,
-    get active(){return state.active;},get transparentActive(){return !!(volumeCount||impactCount||arcSegmentCount);},
+    get active(){return state.active;},get transparentActive(){return !!(volumeCount||impactCount||arcSegmentCount);},get volumesActive(){return !!volumeCount;},
     get counts(){return {volumes:volumeCount,impacts:impactCount,projectiles:ballCount,arcs:arcSegmentCount};},
     update(dt,options={}){
       state.step(dt,options);depthReady=false;volumeCount=impactCount=ballCount=arcSegmentCount=0;
@@ -158,7 +162,7 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
         const parcelsPerShot=state.shots.length>52?2:3;
         for(let k=0;k<parcelsPerShot;k++){
           const p=gunnerySmokeParcel(shot,k);
-          if(!p||p.extinction<.015)continue;
+          if(!p||p.extinction<.015||p.age>10.5)continue;
           if(coalesce&&shot.age>.25){
             const mergeR2=(Math.max(1.8,p.radii[0]*.68))**2;
             let merged=false;
@@ -172,7 +176,7 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
                   m.centre[c]+=((p.centre[c]-m.centre[c])*w*.35);
                   m.radii[c]=Math.min(24,Math.max(m.radii[c],p.radii[c])*(1+.045*w));
                 }
-                m.extinction=Math.min(26,m.extinction+p.extinction*.42);
+                m.extinction=Math.min(4.2,m.extinction+p.extinction*.22);
                 merged=true;
                 break;
               }
@@ -190,41 +194,8 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
       }
       for(const e of state.impacts){
         if(!(e.kindCode>0)||e.age>=5.5)continue;
-        const sc=Math.max(0.6,e.scale??1.0),age=e.age;
-        // Iron striking earth makes no flash and no powder smoke. Its earth and dust are drawn from the contact below.
+        // Iron striking timber, stone or earth makes no flash and no powder smoke. Its debris and dust are drawn from the contact below.
         if(e.pit>0)continue;
-        if(age<0.12){
-          const ft=age/0.12;
-          const rFlash=(0.45+0.95*Math.sin(ft*Math.PI))*sc;
-          ordered.push({
-            centre:[e.position[0],e.position[1]+0.25*sc,e.position[2]],
-            direction:[0,1,0],
-            radii:[rFlash,rFlash*1.15,rFlash],
-            type:1,
-            extinction:(1-ft)*0.95,
-            age,
-            seed:e.seed*61,
-          });
-        }
-        const expand=(0.85+2.35*Math.pow(age,0.58))*sc;
-        const fade=Math.exp(-age/2.4)*(1-gunneryFxClamp((age-4.2)/1.3,0,1));
-        const ext=(4.8*sc/(expand*0.65))*fade;
-        if(ext>0.02){
-          const w=e.wind??[0,0,0];
-          ordered.push({
-            centre:[
-              e.position[0]+w[0]*age*0.28,
-              e.position[1]+(0.55+1.35*Math.pow(age,0.65))*sc,
-              e.position[2]+w[2]*age*0.28,
-            ],
-            direction:[0,1,0],
-            radii:[expand,expand*1.18,expand],
-            type:0,
-            extinction:ext,
-            age:age*0.8,
-            seed:e.seed*83,
-          });
-        }
       }
       for(const f of fires){
         if(!f?.position||!(f.intensity>0.02))continue;
@@ -235,68 +206,53 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
         const rVert=(0.98+1.18*int)*pulse;
         // 1. Primary roaring shipboard/structure flame volume (direction=[0,1,0] -> radii[2] is vertical)
         ordered.push({
-          centre:[pos[0]+wind[0]*0.03,pos[1]+0.36*rVert,pos[2]+wind[2]*0.03],
+          centre:[pos[0]+wind[0]*0.03,pos[1]+0.38*rVert,pos[2]+wind[2]*0.03],
           direction:[0,1,0],
-          radii:[rHoriz,rHoriz,rVert],
+          radii:[rHoriz,rHoriz,rVert*1.05],
           type:1,
           subtype:1.0,
-          extinction:0.86+0.68*int,
+          extinction:0.92+0.74*int,
           age,
           seed:seed*53,
         });
-        // 2. Upper flickering flame tongues & whipping fire sheets
-        const tongueFlicker=0.82+0.26*Math.sin(age*16.4+seed*31.0);
+        // 2. Upper flickering flame tongues & buoyant glowing ember crown
+        const tongueFlicker=0.84+0.24*Math.sin(age*15.4+seed*31.0);
         ordered.push({
           centre:[
-            pos[0]+wind[0]*0.10+Math.sin(age*6.7+seed*13.0)*0.22*int,
-            pos[1]+0.82*rVert,
-            pos[2]+wind[2]*0.10+Math.cos(age*5.9+seed*17.0)*0.22*int,
+            pos[0]+wind[0]*0.12+Math.sin(age*6.3+seed*13.0)*0.24*int,
+            pos[1]+0.96*rVert,
+            pos[2]+wind[2]*0.12+Math.cos(age*5.7+seed*17.0)*0.24*int,
           ],
           direction:[0,1,0],
-          radii:[rHoriz*0.76*tongueFlicker,rHoriz*0.76*tongueFlicker,rVert*0.92*tongueFlicker],
+          radii:[rHoriz*0.84*tongueFlicker,rHoriz*0.84*tongueFlicker,rVert*0.96*tongueFlicker],
           type:1,
-          subtype:1.25,
-          extinction:(0.68+0.54*int)*tongueFlicker,
+          subtype:1.30,
+          extinction:(0.76+0.62*int)*tongueFlicker,
           age:age*1.35+1.7,
           seed:seed*71+13,
         });
-        // 3. Buoyant rising spark & glowing ember crown
-        const sparkFlicker=0.85+0.20*Math.cos(age*13.1+seed*41.0);
-        ordered.push({
-          centre:[
-            pos[0]+wind[0]*0.22+Math.cos(age*4.8+seed*23.0)*0.28*int,
-            pos[1]+1.32*rVert,
-            pos[2]+wind[2]*0.22+Math.sin(age*5.1+seed*19.0)*0.28*int,
-          ],
-          direction:[0,1,0],
-          radii:[rHoriz*0.88*sparkFlicker,rHoriz*0.88*sparkFlicker,rVert*0.85*sparkFlicker],
-          type:1,
-          subtype:1.55,
-          extinction:(0.46+0.42*int)*sparkFlicker,
-          age:age*1.65+3.4,
-          seed:seed*89+29,
-        });
-        // 4. Cycling, rising & wind-drifting dark pitch/tar smoke plume (3 overlapping parcels)
-        const period=5.4;
-        for(let pIdx=0;pIdx<3;pIdx++){
-          const phase=((age+pIdx*(period/3)+seed*2.1)%period)/period;
-          const env=Math.sin(phase*Math.PI);
+        // 3. Cycling, rising & wind-drifting dense pitch/tar smoke column (6 overlapping parcels)
+        const period=6.4;
+        const smokeScale=1.05+0.88*int;
+        for(let pIdx=0;pIdx<6;pIdx++){
+          const phase=((age+pIdx*(period/6)+seed*2.1)%period)/period;
+          const env=Math.pow(Math.sin(phase*Math.PI),0.62);
           if(env<0.04)continue;
-          const rise=(1.45+phase*7.2)*(0.75+0.55*int);
-          const drift=phase*phase*2.4;
-          const radH=(1.02+phase*2.55)*(0.75+0.55*int);
-          const radV=(1.22+phase*2.95)*(0.75+0.55*int);
+          const rise=(1.35+phase*18.8)*smokeScale;
+          const drift=phase*(1.1+phase*3.4);
+          const radH=(1.48+phase*4.15)*smokeScale;
+          const radV=(1.85+phase*4.75)*smokeScale;
           ordered.push({
             centre:[
-              pos[0]+wind[0]*drift+Math.sin(phase*6.28+seed*11+pIdx)*0.28,
+              pos[0]+wind[0]*drift+Math.sin(phase*6.28+seed*11+pIdx)*0.55*smokeScale,
               pos[1]+rise,
-              pos[2]+wind[2]*drift+Math.cos(phase*6.28+seed*17+pIdx)*0.28,
+              pos[2]+wind[2]*drift+Math.cos(phase*6.28+seed*17+pIdx)*0.55*smokeScale,
             ],
             direction:[0,1,0],
             radii:[radH,radH,radV],
             type:0,
             subtype:2.0+phase*0.8,
-            extinction:(3.8*int*env)/Math.max(1.0,radH*0.55),
+            extinction:(26.0+22.0*int)*env,
             age:age*0.45+pIdx*3.1,
             seed:seed*97+pIdx*29,
           });
@@ -345,12 +301,15 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
       if(!depthTexture||width!==depthWidth||height!==depthHeight){
         depthTexture?.destroy();depthWidth=width;depthHeight=height;
         depthTexture=device.createTexture({label:'cannon smoke opaque depth',size:[width,height],format:'r32float',usage:T.STORAGE_BINDING|T.TEXTURE_BINDING});
-        depthSource=null;volumeGroup=device.createBindGroup({layout:pipelines[1].getBindGroupLayout(0),entries:volumeEntries()});
+        depthSource=null;
+        const entries=volumeEntries();
+        volumeGroup=device.createBindGroup({layout:pipelines[1].getBindGroupLayout(0),entries});
+        volume1xGroup=device.createBindGroup({layout:volume1xPipe.getBindGroupLayout(0),entries});
       }
       if(source!==depthSource){depthSource=source;depthGroup=device.createBindGroup({layout:depthPipeline.getBindGroupLayout(0),entries:[{binding:0,resource:source},{binding:1,resource:depthTexture.createView()}]});}
       const pass=encoder.beginComputePass({label:'cannon smoke scene depth'});pass.setPipeline(depthPipeline);pass.setBindGroup(0,depthGroup);pass.dispatchWorkgroups(Math.ceil(width/8),Math.ceil(height/8));pass.end();depthReady=true;return true;
     },
-    draw(pass){
+    drawInPass(pass){
       if(arcSegmentCount){
         pass.setPipeline(pipelines[5]);pass.setBindGroup(0,groups[5]);pass.draw(6,arcSegmentCount);
       }
@@ -361,6 +320,12 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
         pass.setPipeline(pipelines[6]);pass.setBindGroup(0,groups[6]);pass.draw(6,impactCount*GUNNERY_EARTH_COUNT);
         pass.setPipeline(pipelines[4]);pass.setBindGroup(0,groups[4]);if(ringWaves)pass.setBindGroup(1,ringWaves[surfaceWaves.current]);pass.draw(GUNNERY_RING_SEGMENTS*GUNNERY_RING_COUNT*6,impactCount);
       }
+    },
+    drawVolumes(pass){
+      if(volumeCount&&depthReady){pass.setPipeline(volume1xPipe);pass.setBindGroup(0,volume1xGroup);pass.draw(36,volumeCount);}
+    },
+    draw(pass){
+      this.drawInPass(pass);
       if(volumeCount&&depthReady){pass.setPipeline(pipelines[1]);pass.setBindGroup(0,volumeGroup);pass.draw(36,volumeCount);}
     },
     clear(){state.clear();volumeCount=impactCount=ballCount=arcSegmentCount=0;depthReady=false;},

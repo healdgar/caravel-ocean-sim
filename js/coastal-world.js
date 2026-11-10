@@ -180,10 +180,10 @@ function coastalValueNoiseDeriv2D(x, z, seed) {
   const iz = Math.floor(z);
   const fx = x - ix;
   const fz = z - iz;
-  const u = fx * fx * (3 - 2 * fx);
-  const v = fz * fz * (3 - 2 * fz);
-  const du = 6 * fx * (1 - fx);
-  const dv = 6 * fz * (1 - fz);
+  const u = fx * fx * fx * (fx * (fx * 6 - 15) + 10);
+  const v = fz * fz * fz * (fz * (fz * 6 - 15) + 10);
+  const du = 30 * fx * fx * (fx * (fx - 2) + 1);
+  const dv = 30 * fz * fz * (fz * (fz - 2) + 1);
   const a = coastalHash2D(ix, iz, seed);
   const b = coastalHash2D(ix + 1, iz, seed);
   const c = coastalHash2D(ix, iz + 1, seed);
@@ -226,11 +226,13 @@ export function coastalUberNoise2D(
   for (let i = 0; i < octaves; i++) {
     const { val, dx, dz } = coastalValueNoiseDeriv2D(px * freq, pz * freq, (seed + i * 2029) >>> 0);
     const s = 2 * val - 1;
-    const ridge = 1 - Math.abs(s);
-    const ridgeSign = s >= 0 ? -2 : 2;
+    const smoothAbsS = Math.sqrt(s * s + 0.045);
+    const ridge = Math.max(0, 1.09 - smoothAbsS);
+    const dRidgeDval = -2 * (s / smoothAbsS);
     const blended = val * (1 - sharpness) + ridge * ridge * sharpness;
-    const dBlendedX = dx * (1 - sharpness + sharpness * 2 * ridge * ridgeSign);
-    const dBlendedZ = dz * (1 - sharpness + sharpness * 2 * ridge * ridgeSign);
+    const dBlendedDval = 1 - sharpness + sharpness * 2 * ridge * dRidgeDval;
+    const dBlendedX = dx * dBlendedDval;
+    const dBlendedZ = dz * dBlendedDval;
     gxSum += dBlendedX * amp;
     gzSum += dBlendedZ * amp;
     const damp = 1 / (1 + erosion * (gxSum * gxSum + gzSum * gzSum));
@@ -2495,7 +2497,15 @@ export function resolveGlobalCoastalRegion(spec = 'cartagena') {
   const portTypes = ['fortified-harbor', 'headland-fortress', 'silver-terminal', 'river-citadel', 'rendezvous-basin', 'careening-anchorage'];
   const idx = Math.floor(rand() * archetypes.length);
   const matchedHistoricalPort = findHistoricalColonialPort(latitude, longitude, spec.id, simYear, 0.32);
-  const coastalArchetype = spec.coastalArchetype ?? colPortById?.coastalArchetype ?? matchedHistoricalPort?.coastalArchetype ?? archetypes[idx];
+  const isSabaIsland =
+    spec.id === 'saba' || (Math.abs(latitude - 17.635) < 0.045 && Math.abs(longitude - -63.238) < 0.045);
+  const isVolcanicAntilles =
+    isSabaIsland || (latitude >= 12.0 && latitude <= 18.5 && longitude >= -63.6 && longitude <= -60.8);
+  const coastalArchetype =
+    spec.coastalArchetype ??
+    colPortById?.coastalArchetype ??
+    matchedHistoricalPort?.coastalArchetype ??
+    (isVolcanicAntilles ? 'volcanic-island' : archetypes[idx]);
   const indigenousCulture = resolveIndigenousCultureRegion(latitude, longitude);
   const sovRecord = indigenousCulture ? resolveRegionSovereigntyRecord(indigenousCulture.id, spec) : null;
   const indigenousRepelledColony = Boolean(
@@ -2505,6 +2515,7 @@ export function resolveGlobalCoastalRegion(spec = 'cartagena') {
   );
   const explicitNoPort =
     indigenousRepelledColony ||
+    (isSabaIsland && spec.hasColonialPort !== true) ||
     spec.hasColonialPort === false ||
     spec.settlementKind === 'wilderness-anchorage' ||
     spec.portType === 'wilderness-anchorage' ||
@@ -2530,13 +2541,15 @@ export function resolveGlobalCoastalRegion(spec = 'cartagena') {
         : 'wilderness-anchorage'
   );
   const ringBearing = coastalInferBearingFromRings(latitude, longitude, spec.coastlineRings);
-  const presetBearing = colPortById?.shoreBearing ?? matchedHistoricalPort?.shoreBearing ?? null;
+  const presetBearing = colPortById?.shoreBearing ?? matchedHistoricalPort?.shoreBearing ?? (isSabaIsland ? 315 : null);
   const shoreBearing = Number.isFinite(spec.shoreBearing)
     ? ((spec.shoreBearing % 360) + 360) % 360
     : ringBearing ?? presetBearing ?? Math.round(rand() * 359);
   const peakElevationMetres = Number.isFinite(spec.peakElevationMetres)
     ? Math.max(40, Math.min(900, spec.peakElevationMetres))
-    : Math.round(95 + rand() * (coastalArchetype === 'volcanic-island' ? 680 : 320));
+    : isSabaIsland
+      ? 848
+      : Math.round(95 + rand() * (coastalArchetype === 'volcanic-island' ? 680 : 320));
   const size = spec.size ?? 129;
   const biomeSize = spec.biomeSize ?? (size - 1);
   const albedoSize = spec.albedoSize ?? (size - 1);
@@ -2657,12 +2670,23 @@ export function synthesizeCoastalTerrain(regionSpec = 'cartagena') {
       });
 
       let signedShore;
+      let islandRadius = span * 0.255;
+      let islandDist = 0;
+      let islandTheta = 0;
+      let islandLobeDelta = 0;
       if (isIsland) {
-        // Volcanic island centered near (along=0, inland=450m) with a concave bay at (along=0, inland=-950m)
-        const radius = span * 0.27;
-        const dist = Math.hypot(along, inland - 420);
-        const bayIndent = 340 * Math.exp(-(along * along) / (2 * 520 * 520)) * coastalSmoothstep(600, -900, inland);
-        signedShore = radius - dist - bayIndent + macroWarping * 0.45 + mesoDetail * 0.35;
+        // Steep volcanic island cone centered near (along=0, inland=180m) with radial ridge lobes and Wells Bay cove
+        islandDist = Math.hypot(along, inland - 180);
+        islandTheta = Math.atan2(inland - 180, along);
+        const lobeMod =
+          120 * Math.cos(islandTheta * 4 - 0.55) +
+          85 * Math.sin(islandTheta * 7 + 1.1) +
+          55 * Math.cos(islandTheta * 11 - 0.8);
+        const bayIndent = 210 * Math.exp(-(along * along) / (2 * 440 * 440)) * (inland < 180 ? 1 : 0);
+        islandLobeDelta = lobeMod - bayIndent;
+        const effRadius = islandRadius + islandLobeDelta;
+        const shoreNoiseFade = coastalSmoothstep(effRadius + 280, effRadius - 140, islandDist);
+        signedShore = effRadius - islandDist + (macroWarping * 0.36 + mesoDetail * 0.28) * shoreNoiseFade;
       } else {
         // Mainland / major island coast with a sheltered concave bay around along = 0,
         // protective rocky headlands around |along| ~ 1050m, and a harbor-guarding Morro headland at along ~ +115m.
@@ -2693,11 +2717,55 @@ export function synthesizeCoastalTerrain(regionSpec = 'cartagena') {
       let h;
       if (signedShore <= 0) {
         const offshoreDist = -signedShore;
-        const nearShoreSlope = 0.052 * bayShelter + 0.075 * (1 - bayShelter);
-        const deepShelf = Math.max(0, offshoreDist - 95) * 0.085;
+        const nearShoreSlope = isIsland
+          ? 0.085 * bayShelter + 0.145 * (1 - bayShelter)
+          : 0.052 * bayShelter + 0.075 * (1 - bayShelter);
+        const deepShelf = Math.max(0, offshoreDist - (isIsland ? 55 : 95)) * (isIsland ? 0.135 : 0.085);
         const baseDepth = -Math.min(120, offshoreDist * nearShoreSlope + deepShelf);
         const channelDepth = -Math.min(28, 14.5 + offshoreDist * 0.025) * inChannel * coastalSmoothstep(-32, -135, signedShore);
         h = Math.max(-120, Math.min(baseDepth, channelDepth));
+      } else if (isIsland) {
+        // Steep volcanic island cone (Saba / Mount Scenery archetype):
+        // sheer sea-cliffs rising directly from the surf, radial eroded volcanic ravines ("guts"), and central stratovolcano peak
+        const coveShelter = bayShelter * coastalSmoothstep(280, -450, inland);
+        const seaCliffScarp =
+          (1 - coveShelter * 0.62) *
+          (78 * coastalSmoothstep(0, 68, signedShore) + 64 * coastalSmoothstep(48, 195, signedShore));
+        const radialMid = coastalSmoothstep(140, 680, islandDist);
+        const thetaWarp =
+          (coastalFbm2D(nx * 3.1 + 1.7, nz * 3.1 - 2.2, seed ^ 0x517cc1b7, 3) - 0.5) * 1.35 +
+          (uber - 0.5) * 1.65;
+        const radialRibs =
+          Math.sin(islandTheta * 8 + thetaWarp) * 0.58 +
+          Math.cos(islandTheta * 13 - thetaWarp * 1.2) * 0.42;
+        const gutCarve =
+          Math.max(-42, Math.min(58, radialRibs * 54)) *
+          coastalSmoothstep(14, 280, signedShore) *
+          radialMid;
+        const smoothConeDist = Math.max(0, islandRadius + islandLobeDelta * radialMid - islandDist);
+        const radialCone = Math.pow(coastalSmoothstep(0, islandRadius * 0.92, smoothConeDist), 1.12);
+        const summitDome = Math.exp(-(islandDist * islandDist) / (2 * 590 * 590));
+        const summitCrags =
+          (coastalUberNoise2D(nx * 4.4 - 0.9, nz * 4.4 + 1.4, seed ^ 0x39a1d7f3, {
+            octaves: 4,
+            warp: 0.42,
+            erosion: 1.6,
+            sharpness: 0.58,
+          }) - 0.42) *
+          85 *
+          coastalSmoothstep(40, 380, signedShore);
+        const volcanoHeight =
+          peak * (0.58 * radialCone * (0.48 + 0.52 * uber) + 0.46 * summitDome * (0.72 + 0.28 * uber)) +
+          summitCrags +
+          mesoDetail * 0.62 * coastalSmoothstep(10, 220, signedShore);
+        const terraceMask =
+          region.hasColonialPort !== false
+            ? Math.exp(-(along * along) / (2 * 240 * 240)) *
+              coastalSmoothstep(8, 52, signedShore) *
+              coastalSmoothstep(290, 145, signedShore)
+            : 0;
+        const rawIsland = Math.max(0.35, seaCliffScarp + volcanoHeight + gutCarve);
+        h = rawIsland * (1 - terraceMask * 0.65) + 3.4 * (terraceMask * 0.65);
       } else {
         // Foreshore beach zone (0..320m inland in the sheltered bay) transitions to coastal terrace and derivative-eroded mountains
         const beachRamp = Math.min(signedShore, 340) * (0.018 * bayShelter + 0.065 * (1 - bayShelter) + 0.16 * headlandFactor);
@@ -8090,12 +8158,16 @@ export function synthesizeCoastalBiome(regionSpec, heights, beaches = null, port
       const sx = (coastalSampleClamped(heights, x + 12, z, region) - coastalSampleClamped(heights, x - 12, z, region)) / 24;
       const sz = (coastalSampleClamped(heights, x, z + 12, region) - coastalSampleClamped(heights, x, z - 12, region)) / 24;
       const slope = Math.hypot(sx, sz);
-      if (slope > 1.12) {
+      const cloudForestBoost = region.coastalArchetype === 'volcanic-island' ? coastalSmoothstep(120, 340, h) * 0.22 : 0;
+      const maxVegSlope = 0.88 + cloudForestBoost;
+      if (slope > maxVegSlope || (h < 28 && slope > 0.36)) {
         mask[idx] = 0;
         continue;
       }
       const patchNoise = coastalFbm2D(u * 6.5 + 1.9, v * 6.5 - 2.4, seed, 4);
-      const moisture = coastalSmoothstep(minTreeElev, 2.8, h) * coastalSmoothstep(1.12, 0.35, slope);
+      const moisture =
+        coastalSmoothstep(minTreeElev, 2.8, h) *
+        coastalSmoothstep(maxVegSlope - 0.04, 0.30 + cloudForestBoost * 0.85, slope);
       const proceduralVeg = Math.min(1, moisture * (0.84 + 0.32 * patchNoise));
       const sat = sampleSatelliteEquirectangular(satelliteData, u, v);
       let vegProb = proceduralVeg;
@@ -8110,17 +8182,22 @@ export function synthesizeCoastalBiome(regionSpec, heights, beaches = null, port
             (sat.r > sat.g + 8 && sat.r > sat.b + 18) || sat.sandChroma > 0.34;
           vegProb =
             isForest1550 && !isWarmClearingOrRoof
-              ? Math.min(1, 0.72 + sat.greenness * 1.15) * coastalSmoothstep(1.12, 0.42, slope)
+              ? Math.min(1, 0.72 + sat.greenness * 1.15) * coastalSmoothstep(0.84, 0.32, slope)
               : 0;
         } else {
           // Combine 2026 satellite spectral excess-green index with 1550s historical reforestation
-          // of modern urban concrete/roofs so natural beaches/cliffs stay open while cities revert to jungle.
-          const satGreen = Math.min(1, sat.greenness * 1.18);
+          // of modern urban concrete/roofs so natural bare rocky cliffs/talus stay open while cities revert to jungle.
+          const satGreen = Math.min(1, sat.greenness * 1.25);
+          const isBareRockOrTalus =
+            !sat.isUrban && sat.greenness < 0.065 && (sat.r >= sat.g * 0.98 || slope > 0.34);
           const restoredUrban =
-            sat.isUrban && h > 1.6 && slope < 0.65 && sat.sandChroma < 0.35
+            sat.isUrban && h > 1.6 && slope < 0.55 && sat.sandChroma < 0.35
               ? (0.76 + 0.22 * patchNoise) * moisture
               : 0;
-          vegProb = Math.max(satGreen, restoredUrban, proceduralVeg * 0.88) * coastalSmoothstep(1.12, 0.42, slope);
+          const naturalVeg = isBareRockOrTalus
+            ? satGreen * 0.35
+            : Math.max(satGreen, proceduralVeg * (slope > 0.36 ? 0.45 : 0.78));
+          vegProb = Math.max(naturalVeg, restoredUrban) * coastalSmoothstep(0.84, 0.32, slope);
         }
       }
       mask[idx] = Math.max(0, Math.min(255, Math.round(255 * vegProb)));
@@ -8205,16 +8282,24 @@ export function synthesizeCoastalAlbedo(
       const forestR = soilR * (1 - canopyBlend) + lushR * canopyBlend;
       const forestG = soilG * (1 - canopyBlend) + lushG * canopyBlend;
       const forestB = soilB * (1 - canopyBlend) + lushB * canopyBlend;
-      const cliffWeight = coastalSmoothstep(0.42, 0.78, slope);
-      // Stratified coastal stone: dipping sedimentary/volcanic beds, mineral warmth & dark wave-splashed basal rock
+      const cloudCliffShift =
+        region.coastalArchetype === 'volcanic-island' ? coastalSmoothstep(130, 360, h) * 0.22 : 0;
+      const cliffWeight = coastalSmoothstep(0.34 + cloudCliffShift, 0.70 + cloudCliffShift, slope) * (1 - canopyBlend * 0.55);
+      // Stratified coastal stone: dipping volcanic/sedimentary beds, iron-oxide mineral warmth & dark wave-splashed basal rock
       const strataPhase = h * 0.52 + canopyMottle * 2.4 + sandNoise * 1.1;
       const strataBand = Math.sin(strataPhase) * 0.5 + Math.sin(strataPhase * 2.7 + 1.1) * 0.3;
       const jointShadow = Math.max(0, Math.abs((fineGrain / 7) + sandNoise * 0.5) - 0.55);
       const basalSplash = coastalSmoothstep(2.4, 0.2, h) * coastalSmoothstep(36, 8, inlandM);
-      const rockShade = (1 + strataBand * 0.13 - jointShadow * 0.22) * (1 - basalSplash * 0.34);
-      const rockR = (116 + sandNoise * 11 + strataBand * 9 + fineGrain * 0.65) * rockShade;
-      const rockG = (108 + sandNoise * 9 + strataBand * 6 + fineGrain * 0.55) * rockShade;
-      const rockB = (97 + sandNoise * 8 - strataBand * 4 + fineGrain * 0.50) * rockShade;
+      const rockShade = (1 + strataBand * 0.14 - jointShadow * 0.22) * (1 - basalSplash * 0.34);
+      const isVolcanic = region.coastalArchetype === 'volcanic-island';
+      const volcanicWarmth =
+        (isVolcanic ? 0.68 : 0.32) *
+        coastalSmoothstep(280, 24, h) *
+        Math.max(0, 0.55 + 0.45 * canopyMottle);
+      const rockBaseLuma = isVolcanic ? 88 : 114;
+      const rockR = (rockBaseLuma + volcanicWarmth * 28 + sandNoise * 11 + strataBand * 10 + fineGrain * 0.65) * rockShade;
+      const rockG = (rockBaseLuma - 12 - volcanicWarmth * 6 + sandNoise * 9 + strataBand * 6 + fineGrain * 0.55) * rockShade;
+      const rockB = (rockBaseLuma - 22 - volcanicWarmth * 14 + sandNoise * 8 - strataBand * 4 + fineGrain * 0.50) * rockShade;
 
       let r = forestR * (1 - cliffWeight) + rockR * cliffWeight;
       let g = forestG * (1 - cliffWeight) + rockG * cliffWeight;
@@ -8444,7 +8529,8 @@ export function seedCoastalVegetation(
     const sx = (coastalSampleClamped(heights, x + 12, z, region) - coastalSampleClamped(heights, x - 12, z, region)) / 24;
     const sz = (coastalSampleClamped(heights, x, z + 12, region) - coastalSampleClamped(heights, x, z - 12, region)) / 24;
     const slope = Math.hypot(sx, sz);
-    if (slope > 1.12) continue;
+    const maxTreeSlope = region.coastalArchetype === 'volcanic-island' && h > 160 ? 1.02 : 0.85;
+    if (slope > maxTreeSlope) continue;
 
     const prob = vegetationProbability(biomeMask, m, u, v);
     if (prob <= 0 || density > prob * 0.98) continue;
@@ -8452,6 +8538,7 @@ export function seedCoastalVegetation(
     const gi = Math.min(n - 1, Math.max(0, Math.round(u * (n - 1))));
     const gj = Math.min(n - 1, Math.max(0, Math.round(v * (n - 1))));
     const inlandM = distInfo.distWater[gj * n + gi];
+    if (region.coastalArchetype === 'volcanic-island' && inlandM < 92 && (slope > 0.32 || h < 24)) continue;
     const bi = Math.min(m - 1, Math.max(0, Math.floor(u * m)));
     const bj = Math.min(m - 1, Math.max(0, Math.floor(v * m)));
     const bIdx = bj * m + bi;
@@ -8462,9 +8549,10 @@ export function seedCoastalVegetation(
     const isPalmClimate =
       (region.climate === 'tropical' || region.climate === 'subtropical') &&
       Math.abs(region.latitude ?? 0) < 33.2;
-    const isLowlandOrInlandPalm = isPalmClimate && h <= 110 && (nearSandyShore || shape < 0.48);
+    const isLowlandOrInlandPalm =
+      isPalmClimate && h <= 110 && slope <= 0.34 && (nearSandyShore || (h >= 12 && shape < 0.42));
 
-    if ((h < 10.5 && nearSandyShore) || isLowlandOrInlandPalm) {
+    if ((h < 10.5 && nearSandyShore && slope <= 0.32) || isLowlandOrInlandPalm) {
       // Foreshore coconut palm fringe (Cocos nucifera: 18-26m height) + lowland/inland Roystonea regia & Sabal palmetto palms
       const isPalm = isPalmClimate;
       const tNorm = (baseRadius - 3.2) / 4.4;
@@ -9012,25 +9100,38 @@ export function smoothCoastlineAndForeshoreBeaches(
 
   const maxLittoralM = Math.max(48, step * 2.8);
   const maxBeachM = Math.max(44, step * 2.5);
+  work.set(heights);
+  const sampleLocalSlope = (i, j) => {
+    const il = Math.max(0, i - 1), ir = Math.min(n - 1, i + 1);
+    const jd = Math.max(0, j - 1), ju = Math.min(n - 1, j + 1);
+    const gx = (work[j * n + ir] - work[j * n + il]) / (Math.max(1, ir - il) * step);
+    const gz = (work[ju * n + i] - work[jd * n + i]) / (Math.max(1, ju - jd) * step);
+    return Math.hypot(gx, gz);
+  };
   for (let j = 0; j < n; j++) {
     for (let i = 0; i < n; i++) {
       if (isPortProtected(i, j)) continue;
       const k = j * n + i;
       const s = sdf[k];
       const h = heights[k];
-      if (s <= 0 && s >= -maxLittoralM && h < 5.5) {
+      const localSlope = sampleLocalSlope(i, j);
+      const gentleCoastWeight = coastalSmoothstep(0.32, 0.12, localSlope);
+      if (s <= 0 && s >= -maxLittoralM && h < 5.5 && gentleCoastWeight > 0.02) {
         // Continuous multi-cell nearshore shoal ramp: 0.0m at s=0, ~-0.45m at 1st wet cell, -2.1m at maxLittoralM
         const dSea = -s;
         const uSea = Math.min(1, dSea / maxLittoralM);
         const targetSea = -(0.12 + 1.98 * Math.pow(uSea, 0.92));
-        const wRamp = 1 - coastalSmoothstep(0.35, 1.0, uSea);
+        const wRamp = (1 - coastalSmoothstep(0.35, 1.0, uSea)) * gentleCoastWeight;
         heights[k] = h * (1 - wRamp) + Math.max(h, targetSea) * wRamp;
-      } else if (s > 0 && s <= maxBeachM && h < 8.5) {
-        // Continuous multi-cell foreshore beach ramp: 0.05m at s=0, ~+0.42m at 1st dry cell, rising smoothly inland
+      } else if (s > 0 && s <= maxBeachM && h < 8.5 && gentleCoastWeight > 0.02) {
+        // Continuous multi-cell foreshore beach ramp on gentle sandy shores (steep sea-cliffs keep full vertical relief)
         const uLand = Math.min(1, s / maxBeachM);
         const minBeachFloor = 0.05 + 1.45 * uLand;
         const gentleBeachTarget = Math.max(minBeachFloor, Math.min(h, 0.08 + 2.35 * Math.pow(uLand, 0.92)));
-        const wBeach = (1 - coastalSmoothstep(0.3, 1.0, uLand)) * (1 - coastalSmoothstep(5.0, 8.5, h));
+        const wBeach =
+          (1 - coastalSmoothstep(0.3, 1.0, uLand)) *
+          (1 - coastalSmoothstep(5.0, 8.5, h)) *
+          gentleCoastWeight;
         heights[k] = Math.max(minBeachFloor, h * (1 - wBeach * 0.78) + gentleBeachTarget * (wBeach * 0.78));
       }
     }
@@ -9046,6 +9147,8 @@ export function smoothCoastlineAndForeshoreBeaches(
         const s = sdf[k];
         const h = work[k];
         if (s < -step * 1.5 || s > 185 || h > 8.2) continue;
+        const localSlope = sampleLocalSlope(i, j);
+        if (localSlope > 0.34) continue;
         let sum8 = 0;
         let higherCount = 0;
         for (let dj = -1; dj <= 1; dj++) {
@@ -9083,6 +9186,9 @@ export function smoothCoastlineAndForeshoreBeaches(
         const s = sdf[k];
         const h = work[k];
         if (Math.abs(s) > smoothBandM || h > 6.5 || h < -8.0) continue;
+        const localSlope = sampleLocalSlope(i, j);
+        const gentleWeight = coastalSmoothstep(0.32, 0.12, localSlope);
+        if (gentleWeight <= 0.02) continue;
         const g =
           (work[(j - 1) * n + (i - 1)] +
             2 * work[(j - 1) * n + i] +
@@ -9094,7 +9200,10 @@ export function smoothCoastlineAndForeshoreBeaches(
             2 * work[(j + 1) * n + i] +
             work[(j + 1) * n + (i + 1)]) *
           0.0625;
-        const w = (1 - coastalSmoothstep(smoothBandM * 0.45, smoothBandM, Math.abs(s))) * (1 - coastalSmoothstep(4.2, 6.5, Math.max(0, h)));
+        const w =
+          (1 - coastalSmoothstep(smoothBandM * 0.45, smoothBandM, Math.abs(s))) *
+          (1 - coastalSmoothstep(4.2, 6.5, Math.max(0, h))) *
+          gentleWeight;
         heights[k] = h * (1 - w * 0.82) + g * (w * 0.82);
       }
     }
@@ -9380,8 +9489,8 @@ const _terrariumTileRgbaCache = new Map();
 function fetchCachedTerrariumTileRgba(demUrl, signal) {
   let cached = _terrariumTileRgbaCache.get(demUrl);
   if (cached) return cached;
-  const p = fetch(demUrl, { signal, mode: 'cors' })
-    .then(async (res) => {
+  const fetchOnce = () =>
+    fetch(demUrl, { signal, mode: 'cors' }).then(async (res) => {
       if (!res?.ok) throw new Error(`Terrarium HTTP ${res?.status}`);
       const bmp = await createImageBitmap(await res.blob(), {
         premultiplyAlpha: 'none',
@@ -9397,6 +9506,11 @@ function fetchCachedTerrariumTileRgba(demUrl, signal) {
       const rgba = new Uint8ClampedArray(256 * 256 * 4);
       rgba.set(ctx.getImageData(0, 0, 256, 256).data);
       return rgba;
+    });
+  const p = fetchOnce()
+    .catch((err) => {
+      if (signal?.aborted) throw err;
+      return fetchOnce();
     })
     .catch((err) => {
       _terrariumTileRgbaCache.delete(demUrl);
@@ -9707,20 +9821,105 @@ export async function upgradeProceduralPackWithRealDEM(
       for (const item of satLoaded) item?.bmp?.close?.();
     }
 
+    // Suppress coarse SRTM/GMTED coastal ringing (0.25..5m offshore radar sidelobes) and tiny disconnected
+    // offshore needle patches around steep mountainous/volcanic relief (matching scripts/prepare-land.py:61-79).
+    if (!isNeighborSection && maxDem > 120) {
+      const coreThresh = maxDem > 240 ? 5.2 : 2.4;
+      const minComponentCells = Math.max(48, Math.min(180, Math.floor(landCount * 0.015)));
+      const visited = new Uint8Array(n * n);
+      const coreMask = new Uint8Array(n * n);
+      let keptCoreCells = 0;
+      for (let k = 0; k < n * n; k++) {
+        if (rawDem[k] <= coreThresh || visited[k]) continue;
+        const q = [k];
+        visited[k] = 1;
+        for (let head = 0; head < q.length; head++) {
+          const cur = q[head];
+          const cx = cur % n, cy = (cur / n) | 0;
+          if (cx > 0 && !visited[cur - 1] && rawDem[cur - 1] > coreThresh) { visited[cur - 1] = 1; q.push(cur - 1); }
+          if (cx + 1 < n && !visited[cur + 1] && rawDem[cur + 1] > coreThresh) { visited[cur + 1] = 1; q.push(cur + 1); }
+          if (cy > 0 && !visited[cur - n] && rawDem[cur - n] > coreThresh) { visited[cur - n] = 1; q.push(cur - n); }
+          if (cy + 1 < n && !visited[cur + n] && rawDem[cur + n] > coreThresh) { visited[cur + n] = 1; q.push(cur + n); }
+        }
+        if (q.length >= minComponentCells) {
+          for (let idx = 0; idx < q.length; idx++) coreMask[q[idx]] = 1;
+          keptCoreCells += q.length;
+        }
+      }
+      if (keptCoreCells >= minComponentCells) {
+        const validLand = new Uint8Array(coreMask);
+        const fringeThresh = maxDem > 240 ? 2.2 : 1.0;
+        for (let y = 1; y < n - 1; y++) {
+          for (let x = 1; x < n - 1; x++) {
+            const k = y * n + x;
+            if (validLand[k] || rawDem[k] <= fringeThresh) continue;
+            if (coreMask[k - 1] || coreMask[k + 1] || coreMask[k - n] || coreMask[k + n]) {
+              validLand[k] = 1;
+            }
+          }
+        }
+        for (let k = 0; k < n * n; k++) {
+          if (!validLand[k] && rawDem[k] > 0.25) {
+            rawDem[k] = -1.5;
+          }
+        }
+      }
+    }
+
     // Apply Saba's exact coastal bathymetry model (scripts/prepare-land-imagery.py:76-83):
-    // Measured land elevations > 0.25m are retained verbatim; wet cells use the shore-distance skirt
-    // depth = min(120, 2 + 0.15 * shoreDistanceMetres) so real coastlines, headlands, and bays are preserved 1:1.
-    const { distLand, step } = computeCoastalShoreDistances(rawDem, n, span, 0.25);
+    // Measured land elevations > 0.25m are retained; on steep volcanic/mountainous relief (maxDem > 240m),
+    // restore high-frequency sea-cliff scarps and radial ravines ("guts") attenuated by Z13 bilinear interpolation.
+    const { distLand, distWater, step } = computeCoastalShoreDistances(rawDem, n, span, 0.25);
     const heights = new Float32Array(n * n);
-    for (let k = 0; k < n * n; k++) {
-      const demH = rawDem[k];
-      if (demH > 0.25) {
-        heights[k] = Math.min(895, demH);
-      } else {
-        const shoreDistance = Math.max(0, distLand[k] - step * 0.5);
-        const deepDrop = Math.max(0, shoreDistance - 28) * 0.14;
-        const authoredDepth = Math.min(120, 2 + 0.15 * shoreDistance + deepDrop);
-        heights[k] = Math.max(-120, demH < -2 ? Math.min(demH, -authoredDepth) : -authoredDepth);
+    const sharpenSteepRelief = maxDem > 240;
+    const seed = (region.vegetationSeed ?? coastalHashCoords(region.latitude, region.longitude)) >>> 0;
+    for (let j = 0; j < n; j++) {
+      const z = region.z + (j / (n - 1) - 0.5) * span;
+      for (let i = 0; i < n; i++) {
+        const k = j * n + i;
+        const demH = rawDem[k];
+        if (demH > 0.25) {
+          let hVal = demH;
+          if (sharpenSteepRelief && i > 0 && i < n - 1 && j > 0 && j < n - 1) {
+            const hl = rawDem[k - 1], hr = rawDem[k + 1], hd = rawDem[k - n], hu = rawDem[k + n];
+            const gx = (hr - hl) / (2 * step);
+            const gz = (hu - hd) / (2 * step);
+            const slope = Math.hypot(gx, gz);
+            const inlandM = distWater[k];
+            const maxN3 = Math.max(
+              rawDem[Math.max(0, j - 3) * n + i],
+              rawDem[Math.min(n - 1, j + 3) * n + i],
+              rawDem[j * n + Math.max(0, i - 3)],
+              rawDem[j * n + Math.min(n - 1, i + 3)]
+            );
+            if (slope > 0.14 || (inlandM <= 165 && maxN3 > 16.0)) {
+              const x = region.x + (i / (n - 1) - 0.5) * span;
+              const laplacian = demH - 0.25 * (hl + hr + hd + hu);
+              const uberVal = coastalUberNoise2D(x * 0.0068, z * 0.0068, seed + 613, {
+                octaves: 3,
+                warp: 0.36,
+                erosion: 1.5,
+                sharpness: 0.55,
+              });
+              const gutNoise = (uberVal - 0.46) * Math.min(28, 7.5 + slope * 22);
+              const steepW = coastalSmoothstep(0.14, 0.46, slope) * coastalSmoothstep(0.8, 12.0, demH);
+              const coastalCliffScarp =
+                inlandM <= 165 && maxN3 > 16.0
+                  ? coastalSmoothstep(16.0, 44.0, maxN3) *
+                    coastalSmoothstep(3.0, 42.0, inlandM) *
+                    coastalSmoothstep(165.0, 62.0, inlandM) *
+                    (36.0 + uberVal * 26.0)
+                  : 0;
+              hVal = Math.max(0.35, demH + (laplacian * 1.95 + gutNoise) * steepW + coastalCliffScarp);
+            }
+          }
+          heights[k] = Math.min(895, hVal);
+        } else {
+          const shoreDistance = Math.max(0, distLand[k] - step * 0.5);
+          const deepDrop = Math.max(0, shoreDistance - 28) * 0.14;
+          const authoredDepth = Math.min(120, 2 + 0.15 * shoreDistance + deepDrop);
+          heights[k] = Math.max(-120, demH < -2 ? Math.min(demH, -authoredDepth) : -authoredDepth);
+        }
       }
     }
 
@@ -9862,11 +10061,16 @@ export function build1550HistoricalTerritoryPack(basePack, options = {}) {
 
         if (h > 0.25) {
           // High-frequency canopy & headland ridge micro-relief (Depth-Anything V2 high-pass detail proxy)
+          const il = Math.max(0, i - 1), ir = Math.min(n - 1, i + 1);
+          const jd = Math.max(0, j - 1), ju = Math.min(n - 1, j + 1);
+          const gx = (baseHeights[j * n + ir] - baseHeights[j * n + il]) / (Math.max(1, ir - il) * step);
+          const gz = (baseHeights[ju * n + i] - baseHeights[jd * n + i]) / (Math.max(1, ju - jd) * step);
+          const localSlope = Math.hypot(gx, gz);
           const ridgeDetail =
-            (coastalUberNoise2D(x * 0.0055, z * 0.0055, seed + 701, 3, 0.38) - 0.48) * 3.2 +
+            (coastalUberNoise2D(x * 0.0055, z * 0.0055, seed + 701, { octaves: 3, warp: 0.38 }) - 0.48) * 3.2 +
             (sat ? (sat.greenness - 0.22) * 2.1 : 0);
 
-          if (h <= 6.2 && inlandM <= 340 && !inBastionCore) {
+          if (h <= 6.2 && inlandM <= 340 && !inBastionCore && localSlope < 0.26) {
             lowCoastalCells++;
             // Shadow-proof 1550 water check: includes deep teal bay & tributary river channels (e.g. Havana Bay, Río Ozama)
             const is1550Water =
@@ -9879,11 +10083,11 @@ export function build1550HistoricalTerritoryPack(basePack, options = {}) {
               x * 0.0038 + 0.7 * coastalFbm2D(x * 0.0016, z * 0.0016, seed + 719, 2),
               z * 0.0038 + 0.7 * coastalFbm2D(z * 0.0016 + 9.4, x * 0.0016, seed + 727, 2),
               seed + 733,
-              3,
-              0.25
+              { octaves: 3, warp: 0.25 }
             );
             const isModernFillCarve =
               !hasDedicated1550Ortho &&
+              region.coastalArchetype !== 'volcanic-island' &&
               ((sat && sat.isUrban && h <= 5.2 && inlandM <= 260) ||
                 (h <= 2.2 && inlandM <= 36 && creekNoise < 0.28));
 
@@ -9900,8 +10104,14 @@ export function build1550HistoricalTerritoryPack(basePack, options = {}) {
             }
           }
           // Natural 1550 headland/inland relief with sharpened bluffs and old-growth canopy domes (kept subtle on flat barrier islands)
+          const cliffSharpener =
+            localSlope > 0.22
+              ? (h - 0.25 * (baseHeights[j * n + il] + baseHeights[j * n + ir] + baseHeights[jd * n + i] + baseHeights[ju * n + i])) * 0.85
+              : 0;
           const reliefBoost =
-            h > 7.5 ? ridgeDetail * 0.85 : Math.max(-0.25, ridgeDetail * Math.min(0.45, Math.max(0.06, (h - 1.5) * 0.07)));
+            h > 7.5
+              ? ridgeDetail * (localSlope > 0.28 ? 1.45 : 0.85) + cliffSharpener
+              : Math.max(-0.25, ridgeDetail * Math.min(0.45, Math.max(0.06, (h - 1.5) * 0.07)));
           carvedDem[k] = Math.max(0.45, Math.min(895, h + reliefBoost));
         } else {
           // If 1550 orthophoto shows land/forest/settlement here, elevate above sea level
@@ -9990,15 +10200,20 @@ export function build1550HistoricalTerritoryPack(basePack, options = {}) {
           rgba1550[idx + 2] = Math.min(255, Math.round(150 + mottle * 14));
           rgba1550[idx + 3] = 255;
         } else {
-          // Convert any urban/road/cleared pixels into lush 1550 primary tropical rainforest or mangrove
+          // Convert modern urban/road/cleared pixels into lush 1550 primary tropical rainforest or mangrove,
+          // while preserving natural satellite orthophoto colors on non-urban volcanic cliffs, talus, and forest canopy!
+          const satSample = sampleSatelliteEquirectangular(satSource, u, v);
           const isMangrove = h < 3.2 && inlandM < 190;
           const baseR = isMangrove ? 36 : 42;
           const baseG = isMangrove ? 78 : 88;
           const baseB = isMangrove ? 38 : 42;
-          const keepNat = g > r * 1.06 && g > b * 1.10 ? 0.45 : 0.0;
-          rgba1550[idx] = Math.max(18, Math.min(140, Math.round(baseR * (1 - keepNat) + r * keepNat + mottle * 16)));
-          rgba1550[idx + 1] = Math.max(38, Math.min(175, Math.round(baseG * (1 - keepNat) + g * keepNat + mottle * 22)));
-          rgba1550[idx + 2] = Math.max(18, Math.min(125, Math.round(baseB * (1 - keepNat) + b * keepNat + mottle * 12)));
+          const isNaturalCanopyOrRock = !satSample?.isUrban;
+          const keepNat = isNaturalCanopyOrRock
+            ? (g > r * 1.04 && g > b * 1.08 ? 0.82 : 0.88)
+            : 0.0;
+          rgba1550[idx] = Math.max(18, Math.min(235, Math.round(baseR * (1 - keepNat) + r * keepNat + mottle * (1 - keepNat * 0.6) * 16)));
+          rgba1550[idx + 1] = Math.max(24, Math.min(235, Math.round(baseG * (1 - keepNat) + g * keepNat + mottle * (1 - keepNat * 0.6) * 22)));
+          rgba1550[idx + 2] = Math.max(18, Math.min(220, Math.round(baseB * (1 - keepNat) + b * keepNat + mottle * (1 - keepNat * 0.6) * 12)));
           rgba1550[idx + 3] = 255;
         }
       }
@@ -10386,16 +10601,25 @@ export function detectCoastalContinuationDirs(heights, n, shoreBearing = 112) {
   const inset3 = Math.min(36, Math.max(4, Math.floor(n * 0.105)));
   const inset4 = Math.min(72, Math.max(6, Math.floor(n * 0.135)));
   let westLand = 0, eastLand = 0, northLand = 0, southLand = 0;
+  let nearPerimeterLand = 0;
   for (let t = 0; t < n; t++) {
-    const hw = Math.max(heights[t * n], heights[t * n + inset1], heights[t * n + inset2], heights[t * n + inset3], heights[t * n + inset4]);
-    const he = Math.max(heights[t * n + (n - 1)], heights[t * n + (n - 1 - inset1)], heights[t * n + (n - 1 - inset2)], heights[t * n + (n - 1 - inset3)], heights[t * n + (n - 1 - inset4)]);
-    const hn = Math.max(heights[t], heights[inset1 * n + t], heights[inset2 * n + t], heights[inset3 * n + t], heights[inset4 * n + t]);
-    const hs = Math.max(heights[(n - 1) * n + t], heights[(n - 1 - inset1) * n + t], heights[(n - 1 - inset2) * n + t], heights[(n - 1 - inset3) * n + t], heights[(n - 1 - inset4) * n + t]);
+    const hwNear = Math.max(heights[t * n], heights[t * n + inset1], heights[t * n + inset2]);
+    const heNear = Math.max(heights[t * n + (n - 1)], heights[t * n + (n - 1 - inset1)], heights[t * n + (n - 1 - inset2)]);
+    const hnNear = Math.max(heights[t], heights[inset1 * n + t], heights[inset2 * n + t]);
+    const hsNear = Math.max(heights[(n - 1) * n + t], heights[(n - 1 - inset1) * n + t], heights[(n - 1 - inset2) * n + t]);
+    if (hwNear > 0.25 || heNear > 0.25 || hnNear > 0.25 || hsNear > 0.25) nearPerimeterLand++;
+    const hw = Math.max(hwNear, heights[t * n + inset3], heights[t * n + inset4]);
+    const he = Math.max(heNear, heights[t * n + (n - 1 - inset3)], heights[t * n + (n - 1 - inset4)]);
+    const hn = Math.max(hnNear, heights[inset3 * n + t], heights[inset4 * n + t]);
+    const hs = Math.max(hsNear, heights[(n - 1 - inset3) * n + t], heights[(n - 1 - inset4) * n + t]);
     if (hw > 0.25) westLand++;
     if (he > 0.25) eastLand++;
     if (hn > 0.25) northLand++;
     if (hs > 0.25) southLand++;
   }
+  // If the entire outer 7.5% perimeter belt around all 4 edges is 100% open ocean (e.g. a self-contained island like Saba),
+  // do not lift borders or stream artificial neighbor landmasses.
+  if (nearPerimeterLand === 0) return [];
   const rad = (shoreBearing ?? 112) * COASTAL_DEG_TO_RAD;
   const shoreDirX = Math.sin(rad);
   const shoreDirZ = -Math.cos(rad);

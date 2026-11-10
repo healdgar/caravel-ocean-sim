@@ -807,7 +807,7 @@ async function main() {
   const resolution = createAdaptiveResolution(fixedResolution ? 'fixed' : ['auto','native','0.75','0.5'].includes(requestedResolution) ? requestedResolution : 'auto',
     {initial:Math.sqrt(AUTO_START_PIXELS/Math.max(1,canvas.clientWidth*canvas.clientHeight*(window.devicePixelRatio||1)**2))});
   const fixedPolygons = fixedResolution && !qs.has('polygons');
-  const polygons = createAdaptivePolygons(fixedPolygons ? 'fixed' : qs.get('polygons') || 'auto');
+  const polygons = createAdaptivePolygons(fixedPolygons ? 'fixed' : qs.get('polygons') || 'auto', { minimum: 0.35 });
   terrain?.setPixelError?.(polygons.pixelError);
   let nativeWidth = 0, nativeHeight = 0;
   let colorMS, depthMS, hdrTex, bloomTex, waterCopy, hdrView;
@@ -1177,6 +1177,7 @@ async function main() {
       if(event.type==='shot')gunEffects.emitShot({...event,id:shotKey,chargeKg:event.mass*.3});
       else if(event.type==='impact'&&event.kind==='water'){
         gunEffects.emitImpact({...event,id:shotKey,position:event.surfacePosition,massKg:event.mass});
+        if(event.timberCrumble)gunEffects.emitImpact({...event,id:shotKey+'-debris',position:event.surfacePosition,massKg:event.mass,kind:'ship'});
         emitCannonWaterWaves(shotKey,event,Math.max(0,ownerBoat.gunnery.time-event.time));
       }else if(event.type==='impact'){
         const rep=event.damageReport;
@@ -1242,6 +1243,7 @@ async function main() {
     if(event.type==='shot')gunEffects.emitShot({...event,id:shotKey,chargeKg:event.mass*.3});
     else if(event.type==='impact'&&event.kind==='water'){
       gunEffects.emitImpact({...event,id:shotKey,position:event.surfacePosition,massKg:event.mass});
+      if(event.timberCrumble)gunEffects.emitImpact({...event,id:shotKey+'-debris',position:event.surfacePosition,massKg:event.mass,kind:'ship'});
       emitCannonWaterWaves(shotKey,event,0);
     }else if(event.type==='impact'){
       gunEffects.emitImpact({...event,id:shotKey,position:event.surfacePosition,massKg:event.mass,kind:event.kind});
@@ -3742,7 +3744,8 @@ async function main() {
   );
   const vesselHasActiveSurvivorsOrDebris = v => Boolean(
     vesselHasVisibleCrew(v) ||
-    (v?.boat?.damage?.fracture?.flying?.size ?? 0) > 0
+    (v?.boat?.damage?.fracture?.flying?.size ?? 0) > 0 ||
+    (v?.boat?.damage?.fracture?.dirty?.size ?? 0) > 0
   );
 
   // --------------------------------------------------------------------------------------
@@ -3831,11 +3834,14 @@ async function main() {
     requestAnimationFrame(frame);
     landfallUI.update(now);
     const elapsed = Math.max(0, (now - last) / 1000);
+    if(terrain?.streamBusy){resolution.reset();polygons.reset();}
+    const gpuHeadroom=profiler.totalMs>0&&profiler.totalMs<13.5&&frameWorkMs<8;
+    const adaptiveElapsed=gpuHeadroom?Math.min(elapsed,1/60):elapsed;
     // A polygon budget down to half is hard to see, so it goes along with sharpness. Further cuts
     // wait until the image is at half size, and come back before any sharpness does.
-    const resChanged = resolution.sample(elapsed,!document.hidden,frameWorkMs,{mayRaise:polygons.mode!=='auto'||polygons.scale>=POLYGON_COMFORT,mayLower:!polygons.trying});
-    if(resChanged&&elapsed<1/28)polygons.reset();
-    if(polygons.sample(elapsed,!document.hidden,frameWorkMs,{mayLower:!resolution.trying,mayLowerFurther:resolution.mode!=='auto'||resolution.scale<=POLYGONS_YIELD_AT}))terrain?.setPixelError?.(polygons.pixelError);
+    const resChanged = resolution.sample(adaptiveElapsed,!document.hidden,frameWorkMs,{mayRaise:polygons.mode!=='auto'||polygons.scale>=POLYGON_COMFORT,mayLower:!polygons.trying});
+    if(resChanged)polygons.reset();
+    if(polygons.sample(adaptiveElapsed,!document.hidden,frameWorkMs,{mayLower:!resolution.trying,mayLowerFurther:resolution.mode!=='auto'||resolution.scale<=POLYGONS_YIELD_AT}))terrain?.setPixelError?.(polygons.pixelError);
     resize();
     let camDt = Math.min(0.1, elapsed);
     last = now;
@@ -4061,8 +4067,9 @@ async function main() {
     selectAll();
     // A conservative band schedules the optional pass. Its shaders use the
     // current GPU eye-height probe, so crests switch the interface without a
-    // CPU readback delay. High aerial views pay no additional render pass.
-    const cameraMediumBand=cam.y<waterH+HB+2;
+    // CPU readback delay. High aerial and deck views pay no additional render pass.
+    const maxWaveCrest=1.35*P.swellHs+0.018*P.windSpeed*P.windSpeed+0.85;
+    const cameraMediumBand=cam.y<waterH+maxWaveCrest;
     if (nodeCount) device.queue.writeBuffer(instBuf, 0, instData, 0, nodeCount * 4);
 
     frameStages.mark('Effects');
@@ -4136,7 +4143,7 @@ async function main() {
     gunSea.encode(enc,shipGuns.state.projectiles,simTime);
     gunportSafety.encode(enc,boat,shipGuns.state.time);
     const drawProw=vessels.some(v=>v.boat.showProw);
-    const gunTransparent=gunEffects.transparentActive;
+    const gunVolumes=gunEffects.volumesActive;
     mainPass.colorAttachments[0].resolveTarget=hdrView;
     for(const [i,v] of vessels.entries())if((!v.bakedWreck||skyChanged)&&!v.dormantEncounter)v.shadows.encode(enc,profiler,vesselHasVisibleCrew(v)?v.crew?.drawShadow:null,i?v.id+' ':'');
     seaShadows.encode(enc,i=>{const v=vessels[i];return (!v.bakedWreck||skyChanged)&&!v.dormantEncounter&&v.shadows.data[19]>0;});
@@ -4147,7 +4154,7 @@ async function main() {
     if(terrain){
       const camGroundY=terrain.groundSample(terrainCamera.x,terrainCamera.z);
       const camGroundDist=Math.max(0,terrainCamera.y-Math.max(0,Number.isFinite(camGroundY)?camGroundY:0));
-      const landShadowRadius=Math.max(30,Math.min(180,26+camGroundDist*0.9));
+      const landShadowRadius=Math.max(185,Math.min(340,165+camGroundDist*0.9));
       const landShadowSun=frameF.subarray(frameF[115]>0.5?96:32,frameF[115]>0.5?99:35);
       landShadows.update(terrainCamera,camGroundY,landShadowSun,landShadowRadius,qs.get('shadows')!=='0');
       landShadows.encode(enc,profiler,pass=>{
@@ -4183,8 +4190,8 @@ async function main() {
       dolphins.drawSubmerged(aboveWater,true);marineLife.drawSubmerged(aboveWater,true);aboveWater.end();
     }
     mainPass.timestampWrites=profiler.writes('Scene');
-    mainPass.colorAttachments[0].storeOp = gunTransparent ? 'store' : 'discard';
-    mainPass.depthStencilAttachment.depthStoreOp = gunTransparent||cameraMediumBand ? 'store' : 'discard';
+    mainPass.colorAttachments[0].storeOp = 'discard';
+    mainPass.depthStencilAttachment.depthStoreOp = gunVolumes||cameraMediumBand ? 'store' : 'discard';
     // One pass for the whole scene keeps its multisampled attachments in tile memory. Whole hulls
     // come first: they neither discard nor blend, so what they hide is never shaded, sea included.
     if(drawProw){
@@ -4257,13 +4264,13 @@ async function main() {
       shipColorsRenderer?.draw(rp,vessels.length);
     }
     if(drawProw)for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter&&v.boat.showProw)v.interaction.draw(rp);
-    dolphins.draw(rp);marineLife.draw(rp);gunEffects.drawProjectiles(rp);spindrift.draw(rp);if(!gunTransparent)weatherRenderer.draw(rp);
+    dolphins.draw(rp);marineLife.draw(rp);gunEffects.drawProjectiles(rp);gunEffects.drawInPass(rp);spindrift.draw(rp);weatherRenderer.draw(rp);
     rp.end();
 
-    if(gunTransparent){
+    if(gunVolumes){
       gunEffects.resolveDepth(enc,depthMS.createView(),W,H);
-      const effects=enc.beginRenderPass({colorAttachments:[{view:mainPass.colorAttachments[0].view,resolveTarget:hdrView,loadOp:'load',storeOp:'discard'}],depthStencilAttachment:{view:depthMS.createView(),depthLoadOp:'load',depthStoreOp:cameraMediumBand?'store':'discard'}});
-      gunEffects.draw(effects);weatherRenderer.draw(effects);effects.end();
+      const effects=enc.beginRenderPass({colorAttachments:[{view:hdrView,loadOp:'load',storeOp:'store'}]});
+      gunEffects.drawVolumes(effects);effects.end();
     }
 
     underwaterMedium.encode(enc,cameraMediumBand,cameraMediumBand?profiler.writes('Underwater medium'):undefined);

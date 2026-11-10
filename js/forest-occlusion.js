@@ -87,28 +87,29 @@ fn forestTerrainSampleBounds(p:vec2f)->vec2f{
  return vec2f(-120.,-120.);
 }
 fn forestCoastalStandSteps(centre:vec3f,rootScale:vec4f,identity:vec4f)->u32{
- if(identity.z>-1.5){return 0u;}
+ if(identity.z>-1.1){return 0u;}
  let camera=F.camPos.xyz;let toCam=camera.xz-centre.xz;let distXZ=length(toCam);
- if(camera.y<=1.5||distXZ<=55.){return 0u;}
+ if(camera.y<=1.5||distXZ<=45.){return 0u;}
  let dirToCam=toCam/distXZ;
  let crownHalfH=max(4.5,(centre.y-rootScale.y)*1.18);let treeTop=centre.y+crownHalfH;
- let probeDists=array<f32,5>(28.,56.,88.,125.,168.);
+ let probeDists=array<f32,5>(24.,50.,82.,118.,160.);
  var standSteps=0u;
  for(var i=0u;i<5u;i++){
   let dFront=probeDists[i];
-  if(dFront>=distXZ-40.||dFront>=distXZ*0.65){break;}
+  if(dFront>=distXZ-32.||dFront>=distXZ*0.68){break;}
   let pXZ=centre.xz+dirToCam*dFront;
   let bounds=forestTerrainSampleBounds(pXZ);
   let t=1.-dFront/distXZ;
   let rayTopY=mix(camera.y,treeTop,t);
   if(bounds.r>max(1.6,rayTopY+.4)){return 99u;}
-  let flatStandGround=bounds.g>=max(0.35,rootScale.y-dFront*0.025);
-  if(flatStandGround&&bounds.r>-1.5&&rayTopY<max(bounds.g,0.5)+14.5){standSteps+=1u;}
+  let flatStandGround=bounds.r>-0.5&&bounds.g>=max(1.2,rootScale.y-dFront*0.06);
+  let standCanopyH=max(20.0,crownHalfH*1.65);
+  if(flatStandGround&&rayTopY<bounds.g+standCanopyH){standSteps+=1u;}
  }
  return standSteps;
 }
 fn forestCoastalStandHidden(centre:vec3f,rootScale:vec4f,identity:vec4f,rootId:u32,standSteps:u32,pixelError:f32)->bool{
- if(identity.z>-1.5){return false;}
+ if(identity.z>-1.1){return false;}
  if(standSteps>=99u){return true;}
  let camera=F.camPos.xyz;let distXZ=distance(camera.xz,centre.xz);
  // Thinning a stand is meant to go unseen, which a spyglass would undo.

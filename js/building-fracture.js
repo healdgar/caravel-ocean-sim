@@ -948,9 +948,9 @@ function releaseShard(state, s, now, { direction = null, power = 1, proximity = 
     const ground = Math.max(fracture.groundAt(landX, landZ), fracture.floorAt(landX, landZ, shard.floorSlab ? shard.min[1] - 0.15 : pivot[1]));
     water = shard.timber && ground < -0.2;
     const heap = water ? 0 : state.heap.get(heapKey(landX, landZ)) ?? 0;
-    // It never lands higher than it started.
-    restY = Math.min(pivot[1], (water ? 0.02 : ground + heap) + half - bury);
-    settle = Math.max(0.16, (velocity[1] + Math.sqrt(velocity[1] * velocity[1] + 2 * FRACTURE_GRAVITY * (pivot[1] - restY))) / FRACTURE_GRAVITY);
+    // It never lands higher than it started, nor buried below the ground.
+    restY = Math.max(water ? -10 : ground - 0.15, Math.min(pivot[1], (water ? 0.02 : ground + heap) + half - bury));
+    settle = Math.max(0.16, (velocity[1] + Math.sqrt(velocity[1] * velocity[1] + 2 * FRACTURE_GRAVITY * Math.max(0, pivot[1] - restY))) / FRACTURE_GRAVITY);
     if (i < 2) {
       const horizTime = settle <= 0.85 ? settle : 0.85 + (settle - 0.85) * 0.30;
       landX = pivot[0] + velocity[0] * horizTime;
@@ -1023,8 +1023,45 @@ function strikeBuilding(state, point, normal, { radius, amount, power, now, drop
   const topHit = normal[1] > 0.35;
   let broke = 0;
   for (const s of strikable) {
-    if (state.broken[s]) continue;
     const shard = shards[s];
+    if (state.broken[s]) {
+      if (drop || shard.kind === BUILDING_SHARD_KINDS.gun) continue;
+      const at = s * FRACTURE_RECORD_FLOATS, r = state.records;
+      const settle = r[at + 7], hideAt = r[at + 11];
+      if (hideAt >= 0 && r[at + 15] >= hideAt) continue;
+      const curX = r[at] + r[at + 4] * settle;
+      const curY = r[at + 1] + r[at + 5] * settle - 0.5 * FRACTURE_GRAVITY * r[at + 13] * settle * settle;
+      const curZ = r[at + 2] + r[at + 6] * settle;
+      const dRub = Math.hypot(curX - point[0], curY - point[1], curZ - point[2]);
+      if (dRub >= Math.min(2.4, radius * 0.9)) continue;
+      state.rehitCount ??= new Uint8Array(shards.length);
+      const rehits = ++state.rehitCount[s];
+      state.scorch[s] = Math.min(0.85, state.scorch[s] + 0.25);
+      state.scorchDirty = true;
+      state.touched = true;
+      if (rehits >= 3) {
+        const gY = Math.max(0, state.fracture.groundAt(shard.centroid[0], shard.centroid[2]));
+        r.set([shard.centroid[0], Math.max(gY, shard.centroid[1]), shard.centroid[2], 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], at);
+        state.flying.delete(s);
+        state.dirty.add(s);
+        state.revision++;
+      } else {
+        const dx = curX - point[0], dz = curZ - point[2], dn = Math.hypot(dx, dz) || 1;
+        const step = Math.min(1.6, (0.6 + 0.8 * blockNoise(s, 9 + rehits)) * (1 - dRub / 2.5));
+        let nextX = curX + (dx / dn) * step, nextZ = curZ + (dz / dn) * step;
+        const offX = nextX - shard.centroid[0], offZ = nextZ - shard.centroid[2], offD = Math.hypot(offX, offZ);
+        if (offD > 11.5) {
+          nextX = shard.centroid[0] + (offX / offD) * 11.5;
+          nextZ = shard.centroid[2] + (offZ / offD) * 11.5;
+        }
+        const dur = Math.max(0.32, settle);
+        r[at + 4] = (nextX - r[at]) / dur;
+        r[at + 6] = (nextZ - r[at + 2]) / dur;
+        state.dirty.add(s);
+        state.revision++;
+      }
+      continue;
+    }
     if (shard.max[1] < above) continue;
     const overHead = shard.floorSlab || shard.roof || shard.ceiling || (topHit && shard.earth);
     const reach = overHead && !drop ? radius * 1.45 : radius;

@@ -14,8 +14,8 @@ import {
 import { createFortGarrison, stepFortGarrison, reviveGarrisonSoldiers } from './crew.js';
 import { fireGunnery } from './gunnery-state.js';
 
-export const CASTLE_DUEL_DISTANCE_M = 210;
-export const CASTLE_DUEL_MUZZLE_SPEED_MPS = 72;
+export const CASTLE_DUEL_DISTANCE_M = 280;
+export const CASTLE_DUEL_MUZZLE_SPEED_MPS = 300;
 
 const DUEL_RELOAD_DURATIONS = Object.freeze({
   swab: 0.35,
@@ -109,7 +109,7 @@ export function createCastleDuelController({
   let enemyBattery = null;
   let garrison = null;
 
-  let elevationDeg = 4.5; // Starts slightly low so first test shot splashes in the channel unless aimed up!
+  let elevationDeg = 1.0; // Starts slightly low so first test shot splashes short unless aimed up (+3.0° to +4.5°)!
   let traverseDeg = 0.0;
   let ammoType = 'round';
   let viewPreset = 'parapet'; // 'parapet' | 'embrasure' | 'spyglass' | 'channel' | 'free'
@@ -118,7 +118,7 @@ export function createCastleDuelController({
   let enemyCooldown = 3.2;
   let enemySalvoCount = 0;
   let winner = null; // null | 'player' | 'enemy' | 'draw'
-  let lastShotFeedback = 'No arcs allowed! Elevate your guns (+8° to +11°) to reach Fuerte del Moro across the 210m channel.';
+  let lastShotFeedback = 'No arcs allowed! Elevate your guns (+3.0° to +4.5°) to reach Fuerte del Moro across the 280m strait.';
 
   const cachedProjectiles = [];
   const cachedWorldFires = [];
@@ -181,7 +181,7 @@ export function createCastleDuelController({
       </div>
       <div style="text-align:center;min-width:130px;">
         <div style="font-weight:800;font-size:14px;color:#ffd280;letter-spacing:0.04em;">⚔️ CASTLE DUEL ⚔️</div>
-        <div style="font-size:11px;color:#cbb494;">Range: 210 m · No Aim Arcs</div>
+        <div style="font-size:11px;color:#cbb494;">Range: 280 m · 300 m/s · No Arcs</div>
       </div>
       <div id="cd-enemy-score" style="flex:1;min-width:210px;padding:6px 10px;border-radius:8px;background:rgba(120,38,32,0.32);border:1px solid rgba(235,105,90,0.38);text-align:right;">
         <div style="font-weight:700;color:#ff9e92;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;">🎯 Enemy · Fuerte del Moro</div>
@@ -190,14 +190,14 @@ export function createCastleDuelController({
     </div>
 
     <div id="cd-banner" style="margin-bottom:9px;padding:6px 10px;border-radius:6px;background:rgba(255,215,130,0.10);border:1px solid rgba(255,215,130,0.24);color:#ffe2a8;font-size:12.5px;text-align:center;font-weight:500;">
-      No arcs allowed! Elevate your guns (+8° to +11°) to reach Fuerte del Moro across the 210m channel.
+      No arcs allowed! Elevate your guns (+3.0° to +4.5°) to reach Fuerte del Moro across the 280m strait.
     </div>
 
     <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;">
       <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:220px;">
-        <label style="font-weight:600;min-width:112px;color:#f3d5a5;">Elevation: <span id="cd-elev-val">+4.5°</span></label>
+        <label style="font-weight:600;min-width:112px;color:#f3d5a5;">Elevation: <span id="cd-elev-val">+1.0°</span></label>
         <button type="button" id="cd-elev-down" style="padding:4px 8px;border-radius:5px;border:1px solid #8a6b43;background:#2b1d11;color:#f5dec0;cursor:pointer;">−</button>
-        <input id="cd-elev-slider" type="range" min="-2" max="16" step="0.25" value="4.5" style="flex:1;accent-color:#e5a94c;cursor:pointer;" />
+        <input id="cd-elev-slider" type="range" min="-2" max="16" step="0.25" value="1.0" style="flex:1;accent-color:#e5a94c;cursor:pointer;" />
         <button type="button" id="cd-elev-up" style="padding:4px 8px;border-radius:5px;border:1px solid #8a6b43;background:#2b1d11;color:#f5dec0;cursor:pointer;">+</button>
       </div>
 
@@ -313,11 +313,11 @@ export function createCastleDuelController({
         const dz = Math.abs((event.surfacePosition?.[2] ?? playerCastle.z) - playerCastle.z);
         const shortBy = Math.round(CASTLE_DUEL_DISTANCE_M - dz);
         if (shortBy > 18) {
-          lastShotFeedback = `🌊 Splash in the channel (${Math.round(dz)}m out, ${shortBy}m short)! Aim higher (+8.5° to +11°).`;
+          lastShotFeedback = `🌊 Splash in the channel (${Math.round(dz)}m out, ${shortBy}m short)! Aim higher (+3.0° to +4.5°).`;
         } else if (shortBy < -18) {
           lastShotFeedback = `🌊 Overshot the enemy castle (${Math.round(dz)}m)! Lower your elevation slightly.`;
         } else {
-          lastShotFeedback = `🌊 Splash right at the base of Fuerte del Moro (${Math.round(dz)}m)! Raise elevation +1° to hit the parapet.`;
+          lastShotFeedback = `🌊 Splash right at the base of Fuerte del Moro (${Math.round(dz)}m)! Raise elevation +1.5° to hit the parapet.`;
         }
       } else if (event.kind === 'building' && event.building === enemyCastle) {
         const rep = event.damageReport;
@@ -407,9 +407,9 @@ export function createCastleDuelController({
       prefabId: 'bastion_trace_fortress',
       label: 'Fuerte del Moro (Enemy)',
       x: centerX,
-      y: 1.6,
-      baseY: 1.6,
-      foundationDepth: 12.0,
+      y: 15.6,
+      baseY: 15.6,
+      foundationDepth: 26.0,
       z: centerZ - halfSpan,
       yaw: Math.PI, // -Z faces South (+Z) toward playerCastle
       width: 36,
@@ -469,7 +469,7 @@ export function createCastleDuelController({
     enemyCooldown = 3.0;
     enemySalvoCount = 0;
     nextGunCursor = 0;
-    lastShotFeedback = 'No arcs allowed! Elevate your guns (+8.5° to +11°) to hit Fuerte del Moro across the 210m channel.';
+    lastShotFeedback = 'No arcs allowed! Elevate your guns (+3.0° to +4.5°) to hit Fuerte del Moro across the 280m strait.';
 
     setAmmo(ammoType);
     applyGunAim(playerBattery, elevationDeg, traverseDeg);
@@ -528,9 +528,9 @@ export function createCastleDuelController({
     }
     enemySalvoCount++;
     // First shot splashes slightly short in the channel; subsequent shots walk onto the player's parapet
-    const baseElev = enemySalvoCount === 1 ? 6.2 : 9.4;
-    const jitterElev = (Math.sin(enemySalvoCount * 2.3) * 1.15) + (Math.random() - 0.5) * 1.2;
-    const jitterTrav = (Math.cos(enemySalvoCount * 1.7) * 3.2) + (Math.random() - 0.5) * 2.4;
+    const baseElev = enemySalvoCount === 1 ? -3.6 : -2.4;
+    const jitterElev = (Math.sin(enemySalvoCount * 2.3) * 0.45) + (Math.random() - 0.5) * 0.45;
+    const jitterTrav = (Math.cos(enemySalvoCount * 1.7) * 2.8) + (Math.random() - 0.5) * 2.0;
     enemyBattery.setAmmo(enemySalvoCount % 3 === 0 ? 'hot' : 'round');
     applyGunAim(enemyBattery, baseElev + jitterElev, jitterTrav);
     const count = Math.min(frontGuns.length, enemySalvoCount === 1 ? 2 : 3);

@@ -207,20 +207,18 @@ fn landNearColour(coarse:vec3f,world:vec3f,n:vec3f,dx:vec3f,dy:vec3f,nx:vec3f,ny
 // Only neutral material coordinates rotate with the surface. The registered
 // image above remains geographic XZ, with a separately chosen dry cliff seed.
 fn landOrientedDetail(p:vec3f,n:vec3f,dx:vec3f,dy:vec3f,frequency:f32)->f32 {
-  let w0=pow(abs(n),vec3f(4));let w=w0/max(dot(w0,vec3f(1)),0.0001);
-  var value=0.0;
-  if(w.x>.01){value+=w.x*landFilteredNoise(p.zy*frequency,landMaterialFootprint(dx.zy,dy.zy)*frequency);}
-  if(w.y>.01){value+=w.y*landFilteredNoise(p.xz*frequency,landMaterialFootprint(dx.xz,dy.xz)*frequency);}
-  if(w.z>.01){value+=w.z*landFilteredNoise(p.xy*frequency,landMaterialFootprint(dx.xy,dy.xy)*frequency);}
-  return value;
+  let an=abs(n);
+  var uv=p.xz;var ddx=dx.xz;var ddy=dy.xz;
+  if(an.x>an.y&&an.x>=an.z){uv=p.zy;ddx=dx.zy;ddy=dy.zy;}
+  else if(an.z>an.y){uv=p.xy;ddx=dx.xy;ddy=dy.xy;}
+  return landFilteredNoise(uv*frequency,landMaterialFootprint(ddx,ddy)*frequency);
 }
 fn landOrientedJoint(p:vec3f,n:vec3f,dx:vec3f,dy:vec3f)->f32 {
-  let w0=pow(abs(n),vec3f(4));let w=w0/max(dot(w0,vec3f(1)),.0001);
-  var value=0.0;
-  if(w.x>.01){value+=w.x*landFilteredFissure(p.zy*1.35,landMaterialFootprint(dx.zy,dy.zy)*1.35,.025,.11);}
-  if(w.y>.01){value+=w.y*landFilteredFissure(p.xz*1.35,landMaterialFootprint(dx.xz,dy.xz)*1.35,.025,.11);}
-  if(w.z>.01){value+=w.z*landFilteredFissure(p.xy*1.35,landMaterialFootprint(dx.xy,dy.xy)*1.35,.025,.11);}
-  return value;
+  let an=abs(n);
+  var uv=p.xz;var ddx=dx.xz;var ddy=dy.xz;
+  if(an.x>an.y&&an.x>=an.z){uv=p.zy;ddx=dx.zy;ddy=dy.zy;}
+  else if(an.z>an.y){uv=p.xy;ddx=dx.xy;ddy=dy.xy;}
+  return landFilteredFissure(uv*1.35,landMaterialFootprint(ddx,ddy)*1.35,.025,.11);
 }
 fn landNearStrata(p:vec3f,dx:vec3f,dy:vec3f)->f32 {
   // A bounded authored material relief, not a claim of surveyed rock bedding.
@@ -578,25 +576,25 @@ struct NearLand {domain:vec4f,grid:vec4f};
 fn landShadowVisibility(world:vec3f,normal:vec3f)->f32{
   if(landSH.origin.w<0.5){return 1.0;}
   let facing=select(-1.0,1.0,dot(normal,landSH.sun.xyz)>=0.0);
-  let offset=normal*facing*0.025+landSH.sun.xyz*0.020;
+  let offset=normal*facing*0.032+landSH.sun.xyz*0.025;
   let p=landSH.lightView*vec4f(world-landSH.origin.xyz+offset,1.0);
   let uv=p.xy*vec2f(0.5,-0.5)+0.5;
   let edge=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
   let fade=smoothstep(0.0,0.06,edge)*step(0.0,p.z)*step(p.z,1.0);
   if(fade<=0.0){return 1.0;}
+  let refZ=min(p.z-0.00022,0.99999);
+  let camDelta=world-F.camPos.xyz;
+  if(dot(camDelta,camDelta)>5625.0){
+    let s1=textureSampleCompareLevel(landSolidShadow,landShadowCompare,uv,refZ);
+    return mix(1.0,s1,fade);
+  }
   let dim=vec2f(textureDimensions(landSolidShadow));
-  let texel=1.0/max(dim,vec2f(1.0));
-  let refZ=min(p.z-0.00018,0.99999);
+  let texel=0.65/max(dim,vec2f(1.0));
   var sum=0.0;
-  sum+=textureSampleCompareLevel(landSolidShadow,landShadowCompare,uv+vec2f(-texel.x,-texel.y),refZ)*0.075;
-  sum+=textureSampleCompareLevel(landSolidShadow,landShadowCompare,uv+vec2f(0.0,-texel.y),refZ)*0.125;
-  sum+=textureSampleCompareLevel(landSolidShadow,landShadowCompare,uv+vec2f(texel.x,-texel.y),refZ)*0.075;
-  sum+=textureSampleCompareLevel(landSolidShadow,landShadowCompare,uv+vec2f(-texel.x,0.0),refZ)*0.125;
-  sum+=textureSampleCompareLevel(landSolidShadow,landShadowCompare,uv,refZ)*0.200;
-  sum+=textureSampleCompareLevel(landSolidShadow,landShadowCompare,uv+vec2f(texel.x,0.0),refZ)*0.125;
-  sum+=textureSampleCompareLevel(landSolidShadow,landShadowCompare,uv+vec2f(-texel.x,texel.y),refZ)*0.075;
-  sum+=textureSampleCompareLevel(landSolidShadow,landShadowCompare,uv+vec2f(0.0,texel.y),refZ)*0.125;
-  sum+=textureSampleCompareLevel(landSolidShadow,landShadowCompare,uv+vec2f(texel.x,texel.y),refZ)*0.075;
+  sum+=textureSampleCompareLevel(landSolidShadow,landShadowCompare,uv+vec2f(-texel.x,-texel.y),refZ)*0.25;
+  sum+=textureSampleCompareLevel(landSolidShadow,landShadowCompare,uv+vec2f(texel.x,-texel.y),refZ)*0.25;
+  sum+=textureSampleCompareLevel(landSolidShadow,landShadowCompare,uv+vec2f(-texel.x,texel.y),refZ)*0.25;
+  sum+=textureSampleCompareLevel(landSolidShadow,landShadowCompare,uv+vec2f(texel.x,texel.y),refZ)*0.25;
   return mix(1.0,sum,fade);
 }
 const ARCH_LAYER_STRIDE:u32=87360u;
@@ -627,15 +625,28 @@ fn sampleArchLayerMip(layer:u32,uv:vec2f,mip:u32)->vec4f{
 fn sampleArchLayerGrad(layer:i32,uv:vec2f,ddx:vec2f,ddy:vec2f)->vec4f{
   let uLayer=u32(max(layer,0));
   let lx=length(ddx);let ly=length(ddy);
-  let major=select(ddy,ddx,lx>=ly);
-  let foot=max(min(lx,ly),max(lx,ly)*0.35)*256.0;
+  let minL=min(lx,ly);let maxL=max(lx,ly);
+  let foot=max(minL,maxL*0.35)*256.0;
   let lod=clamp(log2(max(foot,1.0)),0.0,5.0);
   let m0=u32(floor(lod));
   let m1=min(m0+1u,5u);
-  let s0=0.5*(sampleArchLayerMip(uLayer,uv-major*0.25,m0)+sampleArchLayerMip(uLayer,uv+major*0.25,m0));
+  let aniso=maxL>minL*1.65&&m0<3u;
+  var s0:vec4f;
+  if(aniso){
+    let major=select(ddy,ddx,lx>=ly);
+    s0=0.5*(sampleArchLayerMip(uLayer,uv-major*0.25,m0)+sampleArchLayerMip(uLayer,uv+major*0.25,m0));
+  }else{
+    s0=sampleArchLayerMip(uLayer,uv,m0);
+  }
   if(m0==m1){return s0;}
-  let s1=0.5*(sampleArchLayerMip(uLayer,uv-major*0.25,m1)+sampleArchLayerMip(uLayer,uv+major*0.25,m1));
+  let s1=sampleArchLayerMip(uLayer,uv,m1);
   return mix(s0,s1,fract(lod));
+}
+fn sampleArchNormalMip(layer:i32,uv:vec2f,ddx:vec2f,ddy:vec2f)->vec4f{
+  let uLayer=u32(max(layer,0));
+  let foot=max(length(ddx),length(ddy))*180.0;
+  let m0=u32(clamp(floor(log2(max(foot,1.0))),0.0,5.0));
+  return sampleArchLayerMip(uLayer,uv,m0);
 }
 struct ArchPBR{albedo:vec3f,normalOffset:vec3f,roughness:f32,ao:f32};
 fn sampleArchMaterialPBR(matIdx:i32,world:vec3f,n:vec3f,dx:vec3f,dy:vec3f,scale:vec2f,lodFade:f32,instYaw:f32)->ArchPBR{
@@ -643,56 +654,51 @@ fn sampleArchMaterialPBR(matIdx:i32,world:vec3f,n:vec3f,dx:vec3f,dy:vec3f,scale:
   let oddLayer=evenLayer+1;
   let relP=world-vec3f(LAND.domain.x,0.0,LAND.domain.y);
   let horizN=length(n.xz);
+  let wantNormal=lodFade>0.005;
   // Sloped roofs (terracotta barrel tiles matIdx==3 & palm thatch matIdx==5):
   // Project UVs directly onto the roof slope's horizontal eave tangent (tileTan) and down-slope fall-line (slopeT)
   // so barrel tile flutes and thatch courses run straight down every roof slope from ridge to eave.
-  let tileTan=select(vec3f(1.0,0.0,0.0),vec3f(-n.z,0.0,n.x)/horizN,horizN>0.08);
-  if((matIdx==3||matIdx==5)&&abs(n.y)>0.15&&abs(n.y)<0.96&&horizN>0.08){
-    let slopeT=normalize(cross(tileTan,n));
-    let uvR=vec2f(dot(relP,tileTan),dot(relP,slopeT))*scale;
-    let dxR=vec2f(dot(dx,tileTan),dot(dx,slopeT))*scale;
-    let dyR=vec2f(dot(dy,tileTan),dot(dy,slopeT))*scale;
-    let bR=sampleArchLayerGrad(evenLayer,uvR,dxR,dyR);
-    let nR=sampleArchLayerGrad(oddLayer,uvR,dxR,dyR);
-    let albedoR=pow(max(bR.rgb,vec3f(0.01)),vec3f(2.2));
-    let tnR=nR.rgb*2.0-1.0;
-    let normOffR=(tileTan*tnR.x+slopeT*tnR.y)*lodFade;
-    return ArchPBR(albedoR,normOffR,bR.a,mix(1.0,nR.a,lodFade));
-  }
-  // Rotate world position, normal, and screen derivatives into the building/pier's local horizontal axes
+  let tileTan=select(vec3f(1.0,0.0,0.0),vec3f(-n.z,0.0,n.x)/max(horizN,1e-4),horizN>0.08);
+  let isSlopedRoof=(matIdx==3||matIdx==5)&&abs(n.y)>0.15&&abs(n.y)<0.96&&horizN>0.08;
   let cY=cos(instYaw);
   let sY=sin(instYaw);
   let bP=vec3f(relP.x*cY-relP.z*sY,world.y,relP.x*sY+relP.z*cY);
   let bN=vec3f(n.x*cY-n.z*sY,n.y,n.x*sY+n.z*cY);
   let bDx=vec3f(dx.x*cY-dx.z*sY,dx.y,dx.x*sY+dx.z*cY);
   let bDy=vec3f(dy.x*cY-dy.z*sY,dy.y,dy.x*sY+dy.z*cY);
-  let topW=smoothstep(0.88,0.96,abs(bN.y));
-  let nxP=pow(max(abs(bN.x),1e-3),6.0);
-  let nzP=pow(max(abs(bN.z),1e-3),6.0);
-  let wallX=(nxP/max(nxP+nzP,1e-5))*(1.0-topW);
-  let wallZ=(nzP/max(nxP+nzP,1e-5))*(1.0-topW);
-  let uvX=vec2f(bP.z,-bP.y)*scale;let dxX=vec2f(bDx.z,-bDx.y)*scale;let dyX=vec2f(bDy.z,-bDy.y)*scale;
-  let uvY=vec2f(bP.x,bP.z)*scale;let dxY=vec2f(bDx.x,bDx.z)*scale;let dyY=vec2f(bDy.x,bDy.z)*scale;
-  let uvZ=vec2f(bP.x,-bP.y)*scale;let dxZ=vec2f(bDx.x,-bDx.y)*scale;let dyZ=vec2f(bDy.x,-bDy.y)*scale;
-  let bX=sampleArchLayerGrad(evenLayer,uvX,dxX,dyX);
-  let bY=sampleArchLayerGrad(evenLayer,uvY,dxY,dyY);
-  let bZ=sampleArchLayerGrad(evenLayer,uvZ,dxZ,dyZ);
-  let nX=sampleArchLayerGrad(oddLayer,uvX,dxX,dyX);
-  let nY=sampleArchLayerGrad(oddLayer,uvY,dxY,dyY);
-  let nZ=sampleArchLayerGrad(oddLayer,uvZ,dxZ,dyZ);
-  let baseSRGB=bX.rgb*wallX+bY.rgb*topW+bZ.rgb*wallZ;
-  let albedo=pow(max(baseSRGB,vec3f(0.01)),vec3f(2.2));
-  let rough=bX.a*wallX+bY.a*topW+bZ.a*wallZ;
-  let ao=mix(1.0,nX.a*wallX+nY.a*topW+nZ.a*wallZ,lodFade);
-  let tnX=(nX.rgb*2.0-1.0);
-  let tnY=(nY.rgb*2.0-1.0);
-  let tnZ=(nZ.rgb*2.0-1.0);
-  let pX=vec3f(0.0,tnX.y,tnX.x*select(-1.0,1.0,bN.x>=0.0));
-  let pY=vec3f(tnY.x,0.0,tnY.y*select(-1.0,1.0,bN.y>=0.0));
-  let pZ=vec3f(tnZ.x*select(-1.0,1.0,bN.z>=0.0),tnZ.y,0.0);
-  let localNOff=(pX*wallX+pY*topW+pZ*wallZ)*lodFade;
-  let normalOffset=vec3f(localNOff.x*cY+localNOff.z*sY,localNOff.y,-localNOff.x*sY+localNOff.z*cY);
-  return ArchPBR(albedo,normalOffset,rough,ao);
+  let isTop=abs(bN.y)>0.88;
+  let isWallX=abs(bN.x)>=abs(bN.z);
+  var uv=vec2f(bP.x,-bP.y)*scale;
+  var ddx=vec2f(bDx.x,-bDx.y)*scale;
+  var ddy=vec2f(bDy.x,-bDy.y)*scale;
+  if(isSlopedRoof){
+    let slopeT=normalize(cross(tileTan,n));
+    uv=vec2f(dot(relP,tileTan),dot(relP,slopeT))*scale;
+    ddx=vec2f(dot(dx,tileTan),dot(dx,slopeT))*scale;
+    ddy=vec2f(dot(dy,tileTan),dot(dy,slopeT))*scale;
+  }else if(isTop){
+    uv=vec2f(bP.x,bP.z)*scale;ddx=vec2f(bDx.x,bDx.z)*scale;ddy=vec2f(bDy.x,bDy.z)*scale;
+  }else if(isWallX){
+    uv=vec2f(bP.z,-bP.y)*scale;ddx=vec2f(bDx.z,-bDx.y)*scale;ddy=vec2f(bDy.z,-bDy.y)*scale;
+  }
+  let bS=sampleArchLayerGrad(evenLayer,uv,ddx,ddy);
+  let albedo=pow(max(bS.rgb,vec3f(0.01)),vec3f(2.2));
+  if(!wantNormal){return ArchPBR(albedo,vec3f(0.0),bS.a,1.0);}
+  let nS=sampleArchNormalMip(oddLayer,uv,ddx,ddy);
+  let tn=nS.rgb*2.0-1.0;
+  let ao=mix(1.0,nS.a,lodFade);
+  var normalOffset=vec3f(0.0);
+  if(isSlopedRoof){
+    let slopeT=normalize(cross(tileTan,n));
+    normalOffset=(tileTan*tn.x+slopeT*tn.y)*lodFade;
+  }else{
+    var localNOff=vec3f(tn.x*select(-1.0,1.0,bN.z>=0.0),tn.y,0.0);
+    if(isTop){localNOff=vec3f(tn.x,0.0,tn.y*select(-1.0,1.0,bN.y>=0.0));}
+    else if(isWallX){localNOff=vec3f(0.0,tn.y,tn.x*select(-1.0,1.0,bN.x>=0.0));}
+    localNOff*=lodFade;
+    normalOffset=vec3f(localNOff.x*cY+localNOff.z*sY,localNOff.y,-localNOff.x*sY+localNOff.z*cY);
+  }
+  return ArchPBR(albedo,normalOffset,bS.a,ao);
 }
 struct LandVertex {
   @builtin(position) pos:vec4f,
@@ -750,12 +756,16 @@ var<private> landWindowEmission:vec3f=vec3f(0.0);
 fn landFinishShadowed(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibility:f32,wet:f32,roughness:f32,shadowVis:f32)->vec4f{
   let uv=(world.xz-LAND.domain.xy)/LAND.domain.z+0.5;
   let edgeDist=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
-  let inPrimaryDomain=clamp(LAND.domain.w,0.0,1.0)*smoothstep(0.0,0.36,edgeDist);
+  let isPrimary=select(0.0,1.0,LAND.domain.w>0.05);
+  let inPrimaryDomain=isPrimary*smoothstep(0.0,0.08,edgeDist);
   let bakedLight=textureSampleLevel(landLight,sampC,clamp(uv,vec2f(0.0),vec2f(1.0)),0.0).rg;
   // The light bake already holds clouds and terrain. Only ground outside it marches for itself.
   var sunlight=bakedLight.r;
-  if(inPrimaryDomain<1.0){
-    let cloudSunVis=select(0.0,volumeSurfaceSunVisibility(world*0.001,F.sunDir.xyz),F.sunDir.y>0.0);
+  if(inPrimaryDomain<1.0 && CF.screen.w>0.5 && F.sunDir.y>0.0){
+    let cMid=cloudUV(world*0.001+F.sunDir.xyz*(max(CF.shape.x,0.5)/max(F.sunDir.y,0.15)));
+    let cD=textureSampleLevel(cloudDensity,cloudSampler,clamp(cMid,vec3f(0.0),vec3f(1.0)),1.0).r;
+    let cL=textureSampleLevel(cloudLight,cloudSampler,clamp(cMid,vec3f(0.0),vec3f(1.0)),1.0).b;
+    let cloudSunVis=clamp(exp(-max(cD,0.0)*CF.shape.z*0.6)*mix(1.0,cL,0.5),0.0,1.0);
     sunlight=mix(cloudSunVis,bakedLight.r,inPrimaryDomain);
   }
   let direct=sunIlluminance()*sunlight*shadowVis;
@@ -806,12 +816,14 @@ fn landFinishShadowed(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibi
   // Clip cloud integration at high mountain surfaces: clouds behind mountain peaks
   // stay hidden and low clouds in front veil upper slopes, while low coastal plains
   // and beaches share the same clear aerial perspective as the ocean and forest canopy.
-  let mountainVeil=smoothstep(320.0,580.0,world.y);
+  let mountainVeil=smoothstep(320.0,580.0,world.y)*step(0.5,CF.screen.w);
   if(mountainVeil>0.001){
-    let ray=marchCloudsTo(F.camPos.xyz*0.001,normalize(world-F.camPos.xyz),12u,0.5,
-      sunIlluminance(),skyAtmo(vec3f(0,1,0)),distance(world,F.camPos.xyz)*0.001);
-    let veilAlpha=ray.color.a*mountainVeil;
-    return vec4f(col*(1.0-veilAlpha)+ray.color.rgb*mountainVeil,1.0);
+    let mUV=clamp(cloudUV(world*0.001),vec3f(0.0),vec3f(1.0));
+    let mD=textureSampleLevel(cloudDensity,cloudSampler,mUV,1.0).r;
+    let mL=textureSampleLevel(cloudLight,cloudSampler,mUV,1.0).b;
+    let veilAlpha=clamp(1.0-exp(-max(mD,0.0)*CF.shape.z*0.8),0.0,0.85)*mountainVeil;
+    let veilCol=skyAtmo(vec3f(0,1,0))*0.45+sunIlluminance()*0.20*mL;
+    return vec4f(mix(col,veilCol,veilAlpha),1.0);
   }
   return vec4f(col,1.0);
 }
@@ -832,31 +844,34 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
   // below adds material scale, never a replacement green/brown island palette.
   // Overhead imagery holds nothing about a steep face. Blur it there by the surface's own
   // footprint and a few texels, so it gives colour without smearing downhill.
-  let imageSteep=smoothstep(.12,.42,1.0-max(n.y,0.0));
-  let imageBlur=max(max(length(dx),length(dy)),imageSteep*4.0*LAND.domain.z/f32(textureDimensions(landAlbedo).x))/LAND.domain.z;
-  var source=pow(textureSampleGrad(landAlbedo,landSampler,uv,mix(dx.xz/LAND.domain.z,vec2f(imageBlur,0.0),imageSteep),mix(dy.xz/LAND.domain.z,vec2f(0.0,imageBlur),imageSteep)).rgb,vec3f(2.2));
-  let nearGround=in.kind.x>.5&&in.kind.x<1.5&&nearTerrain.domain.w>.5;
-  if(nearGround){
-    source=landNearColour(source,world,n,dx,dy,nx,ny,1.0-in.kind.y);
-  }
-  let vegetation=textureSampleLevel(vegetationMask,landSampler,uv,0.0).r;
   let footprint=max(length(dx),length(dy));
   let detailFade=1.0-smoothstep(0.25,2.5,footprint);
-  var grain=0.0;
-  if(in.kind.x<2.5){grain=landFilteredNoise(world.xz*0.019,landMaterialFootprint(dx.xz,dy.xz)*0.019);}
-  let rocky=smoothstep(0.22,0.56,1.0-n.y+grain*0.07);
-  // Pick one world-true plane; never blend them. Their coordinates lie thousands of metres
-  // apart, so a slight blend slides the pattern across the slope and stripes it. Detail
-  // fades to nothing at each switch, leaving no seam for the bump to catch.
-  let verticalBias=abs(n.z)-abs(n.x);
-  let vertical=select(world.zy,world.xy,verticalBias>0.0);
-  let materialUV=select(world.xz,vertical,rocky>.5);
-  let materialSeam=smoothstep(0.0,.1,abs(rocky-.5))*select(1.0,smoothstep(0.0,.08,abs(verticalBias)),rocky>.5);
-  let materialWidth=landMaterialFootprint3(dx,dy);
   let bldgUV=clamp(vec2f(in.kind.x-20.0,in.kind.y),vec2f(0.001),vec2f(0.999));
   let bldgDx=dpdx(bldgUV);let bldgDy=dpdy(bldgUV);
   let winUV=clamp(vec2f((in.kind.x-14.02)/0.44,(in.kind.y-0.32)/0.64),vec2f(0.0),vec2f(1.0));
   let winDx=dpdx(winUV);let winDy=dpdy(winUV);
+  let imageSteep=smoothstep(.12,.42,1.0-max(n.y,0.0));
+  let imageBlur=max(footprint,imageSteep*4.0*LAND.domain.z/f32(textureDimensions(landAlbedo).x))/LAND.domain.z;
+  var source=pow(textureSampleGrad(landAlbedo,landSampler,uv,mix(dx.xz/LAND.domain.z,vec2f(imageBlur,0.0),imageSteep),mix(dy.xz/LAND.domain.z,vec2f(0.0,imageBlur),imageSteep)).rgb,vec3f(2.2));
+  var vegetation=0.0;
+  let nearGround=in.kind.x>.5&&in.kind.x<1.5&&nearTerrain.domain.w>.5;
+  if(nearGround){
+    source=landNearColour(source,world,n,dx,dy,nx,ny,1.0-in.kind.y);
+  }
+  var grain=0.0;
+  var rocky=0.0;
+  var materialUV=world.xz;
+  var materialSeam=1.0;
+  let materialWidth=landMaterialFootprint3(dx,dy);
+  if(in.kind.x<2.5){
+    vegetation=textureSampleLevel(vegetationMask,landSampler,uv,0.0).r;
+    grain=landFilteredNoise(world.xz*0.019,landMaterialFootprint(dx.xz,dy.xz)*0.019);
+    rocky=smoothstep(0.22,0.56,1.0-n.y+grain*0.07);
+    let verticalBias=abs(n.z)-abs(n.x);
+    let vertical=select(world.zy,world.xy,verticalBias>0.0);
+    materialUV=select(world.xz,vertical,rocky>.5);
+    materialSeam=smoothstep(0.0,.1,abs(rocky-.5))*select(1.0,smoothstep(0.0,.08,abs(verticalBias)),rocky>.5);
+  }
   var albedo=source;var relief=0.0;var roughness=0.95;
   var ambientVisibility=0.42+0.35*max(n.y,0.0);
   let crown=in.kind.x>3.5;
@@ -877,8 +892,9 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
     let cliff=groundDetailEdge(smoothstep(.40,.62,1.0-n.y+grain*.05),breakup,gd.near);
     let screeWeight=groundDetailEdge(smoothstep(.10,.30,1.0-n.y+grain*.07),breakup,gd.near)*(1.0-canopyWeight)*(1.0-cliff*.55);
     // Up close the detail texture has the stones, so this search, the dearest thing on the land, need not run.
+    let screeFarFade=1.0-smoothstep(0.35,0.85,footprint);
     var scree=vec3f(0.0,1.0,0.0);
-    if(screeWeight>.01&&gd.near<1.0){scree=landScree(world,n,footprint);scree=vec3f(scree.x*(1.0-gd.near),mix(scree.y,1.0,gd.near),scree.z);}
+    if(screeWeight*screeFarFade>.01&&gd.near<1.0){let st=(1.0-gd.near)*screeFarFade;scree=vec3f(crownN1*st,mix(1.0,0.5+0.5*crownN2,st),0.18);}
     // Sand meeting grass ends blade by blade. Sand over bare earth just thins out, as drifted sand does.
     let sandEdge=groundDetailEdge(select(0.0,clamp((in.kind.y-0.02)/0.98,0.0,1.0),in.kind.x<0.5&&in.kind.y>0.015),gd.big.a*1.4+gd.mid.r*.2+gd.fine.r*.3,gd.near);
     let coastSand=mix(select(0.0,clamp((in.kind.y-0.02)/0.98,0.0,1.0),in.kind.x<0.5&&in.kind.y>0.015),sandEdge,smoothstep(.05,.2,(source.g-max(source.r,source.b))/max(source.g,.02)));
@@ -891,22 +907,6 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
     // Grass hides most stones, leaving the mottling and only the palest as scattered rocks.
     let screeTone=screeWeight*(screeMottle*.5+(scree.x*mix(.1,.26,screeNear)-(1.0-scree.y)*mix(.03,.3,screeNear))*(1.0-groundCover.a*.65));
     let screeRelief=screeWeight*(scree.y-.5)*scree.z*mix(.06,.3,screeNear);
-    if(nearGround){
-      let rockMass=landOrientedDetail(world,n,dx,dy,.24);
-      let fracture=landOrientedDetail(world+vec3f(19.1,7.3,4.7),n,dx,dy,1.35);
-      let gravel=landOrientedDetail(world,n,dx,dy,7.5);
-      var joint=0.0;var strata=0.0;
-      if(rocky>.01){joint=landOrientedJoint(world+vec3f(19.1,7.3,4.7),n,dx,dy);strata=landNearStrata(world,dx,dy);}
-      let crownBillow=(abs(crownN1)*0.68+crownN2*0.32)*canopyWeight*crownKeep;
-      let crownGap=clamp(0.38-abs(crownN1),0.0,0.38)*landDetailWeight(crownW1)*canopyWeight*crownKeep;
-      let basalWetRock=rocky*(1.0-smoothstep(0.2,2.1,world.y));
-      albedo=source*(1.0+screeTone+rockMass*.22+fracture*.13+gravel*.08+rocky*(strata*cliff*.065-joint*.16)+crownBillow*0.18-crownGap*0.38)*(1.0-basalWetRock*0.32);
-      relief=screeRelief+mix(gravel*.018+fracture*.025+crownBillow*0.38-crownGap*0.28,rockMass*.28+fracture*.11+gravel*.014+strata*cliff*.022-joint*.09,rocky);
-      ambientVisibility*=(1.0-crownGap*0.34)*(1.0-rocky*joint*0.18);
-      surfaceWet=basalWetRock*0.75;
-      roughness=clamp(.91+gravel*.08-rocky*.08-canopyWeight*0.04,.70,.98);
-      canopyBackscatter=canopyWeight*0.16;
-    }else{
     // Ground and cliff projections keep metre-scale stone legible on slopes.
     // Two-dimensional analytic noise only; no 3D noise octave loop. Crowns and
     // bark never execute these ground-material evaluations.
@@ -915,17 +915,17 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
     let rockKeep=1.0-beachSand*0.94;
     let effCanopy=canopyWeight*(1.0-beachSand);
     let blockWidth=materialWidth*.19;let blockWeight=landDetailWeight(blockWidth);
-    // Within the detail's reach its fetches stand in for these four noises, which pays for them.
+    // Within the detail's reach its fetches stand in for these noises, which pays for them.
     var blockNoise=gd.big.a*2.5;
     var stoneRaw=gd.big.a*1.2+gd.mid.a*1.2;
     var pores=gd.fine.a*1.5+gd.mid.g*.8;
     var fissure=0.0;
     if(gd.near<1.0){
       let far=1.0-gd.near;
-      if(blockWeight>0.0){blockNoise+=gnoise(materialUV*.19)*materialSeam*far;}
+      blockNoise+=crownN1*materialSeam*far;
       stoneRaw+=landFilteredNoise(materialUV*.82,materialWidth*.82)*materialSeam*far;
-      pores+=landFilteredNoise(materialUV*5.4,materialWidth*5.4)*materialSeam*far;
-      fissure=landFilteredFissure(materialUV*1.7+vec2f(13.1,7.7),materialWidth*1.7,.025,.11)*rockKeep*materialSeam*far;
+      pores+=stoneRaw*0.5;
+      fissure=(1.0-smoothstep(.025,.11,abs(stoneRaw)))*landDetailWeight(materialWidth*1.7/.085)*rockKeep*materialSeam*far;
     }
     let blocks=blockNoise*blockWeight*rockKeep;
     let stone=stoneRaw*rockKeep;
@@ -987,7 +987,6 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
     let baseRough=mix(0.89+vegetation*0.03-effCanopy*0.05+pores*0.055-rocky*0.09,0.76+pores*0.03,beachSand);
     roughness=clamp(mix(baseRough,mix(0.20,0.07,waterFilm),surfaceWet),0.07,0.98);
     canopyBackscatter=effCanopy*0.18;
-    }
     if(gd.near>0.0){
       let look=groundDetailLook(gd,albedo,world,n,dx,dy,groundCover.a,coastSand,rocky,cliff,screeWeight,canopyWeight,sandWet);
       albedo=look.albedo;
@@ -1011,12 +1010,26 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
     let camDist=distance(world,F.camPos.xyz);
     let microLodFade=(1.0-smoothstep(140.0,340.0,camDist))*detailFade;
     let archLodFade=(1.0-smoothstep(320.0,900.0,camDist))*detailFade;
-    let detailA=landOrientedDetail(world,n,dx,dy,1.45);
-    let detailB=landOrientedDetail(world+vec3f(7.3,3.1,11.9),n,dx,dy,5.2);
+    var detailA=0.0;
+    var detailB=0.0;
+    if(archLodFade>0.01){detailA=landOrientedDetail(world,n,dx,dy,1.45);}
+    if(microLodFade>0.01){detailB=landOrientedDetail(world+vec3f(7.3,3.1,11.9),n,dx,dy,5.2);}
     var archNormalOffset=vec3f(0.0);
+    var archMatIdx=8;
+    var archScale=vec2f(0.65,0.65);
+    if(in.kind.x<10.5){archMatIdx=0;archScale=vec2f(0.32,0.52);}
+    else if(in.kind.x<11.5){archMatIdx=1;archScale=vec2f(0.46,0.52);}
+    else if(in.kind.x<12.5){archMatIdx=2;archScale=vec2f(0.38,0.38);}
+    else if(in.kind.x<13.5){archMatIdx=3;archScale=vec2f(0.62,0.68);}
+    else if(in.kind.x<15.5){archMatIdx=5;archScale=vec2f(0.55,0.62);}
+    else if(in.kind.x<16.5){archMatIdx=6;archScale=vec2f(0.42,0.42);}
+    else if(in.kind.x<17.5){archMatIdx=7;archScale=vec2f(0.52,0.58);}
+    var pbr=ArchPBR(vec3f(0.5),vec3f(0.0),0.8,1.0);
+    if(in.kind.x<13.5||in.kind.x>=14.5){
+      pbr=sampleArchMaterialPBR(archMatIdx,world,n,dx,dy,archScale,archLodFade,instYaw);
+    }
     if(in.kind.x<10.5){
       // Kind 10: MaterialCraft-cooked weathered Iberian oak, Spanish cedar & pitch-pine timber
-      let pbr=sampleArchMaterialPBR(0,world,n,dx,dy,vec2f(0.32,0.52),archLodFade,instYaw);
       albedo=pbr.albedo*shadeAlbedo*(0.96+detailA*0.08+detailB*0.04);
       archNormalOffset=pbr.normalOffset*0.55;
       relief=detailA*0.004*archLodFade;
@@ -1028,7 +1041,6 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       roughness=mix(roughness,0.92,pilingTide*0.5);
     }else if(in.kind.x<11.5){
       // Kind 11: MaterialCraft-cooked coursed Pedra Lioz & coral-limestone ashlar masonry
-      let pbr=sampleArchMaterialPBR(1,world,n,dx,dy,vec2f(0.46,0.52),archLodFade,instYaw);
       let vertWall=1.0-smoothstep(0.35,0.85,abs(n.y));
       let damp=smoothstep(0.2,3.8,world.y);
       let stoneBase=pbr.albedo*mix(vec3f(0.76,0.73,0.68),vec3f(1.0,0.98,0.94),damp)*(0.96+detailA*0.06+detailB*0.03);
@@ -1041,7 +1053,6 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       ambientVisibility=(0.46+0.34*max(n.y,0.0))*aoVis*pbr.ao;
     }else if(in.kind.x<12.5){
       // Kind 12: MaterialCraft-cooked warm Iberian & colonial limewashed stucco
-      let pbr=sampleArchMaterialPBR(2,world,n,dx,dy,vec2f(0.38,0.38),archLodFade,instYaw);
       let damp=smoothstep(0.5,4.2,world.y);
       let warmStucco=pbr.albedo*mix(vec3f(0.74,0.69,0.62),vec3f(1.0,0.97,0.92),damp);
       albedo=warmStucco*shadeAlbedo*(0.97+detailA*0.05+detailB*0.03);
@@ -1051,7 +1062,6 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       ambientVisibility=(0.48+0.36*max(n.y,0.0))*aoVis*pbr.ao;
     }else if(in.kind.x<13.5){
       // Kind 13: MaterialCraft-cooked fired terracotta barrel roof tiles (telha mourisca / tejas curvas)
-      let pbr=sampleArchMaterialPBR(3,world,n,dx,dy,vec2f(0.62,0.68),archLodFade,instYaw);
       let horizLen=length(n.xz);
       let eaveDir=select(vec3f(1.0,0.0,0.0),vec3f(-n.z,0.0,n.x)/max(horizLen,1e-4),horizLen>0.08);
       let slopeDir=normalize(cross(eaveDir,n));
@@ -1129,7 +1139,6 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       }
     }else if(in.kind.x<15.5){
       // Kind 15: MaterialCraft-cooked layered palm-thatch & bundled reed roof
-      let pbr=sampleArchMaterialPBR(5,world,n,dx,dy,vec2f(0.55,0.62),archLodFade,instYaw);
       albedo=pbr.albedo*shadeAlbedo*(0.96+detailA*0.08+detailB*0.04);
       archNormalOffset=pbr.normalOffset*0.60;
       relief=detailA*0.004*archLodFade;
@@ -1141,7 +1150,6 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       // relief needs early derivative damping to prevent grazing-angle specular shimmer.
       let cobbleAniso=max(length(dx),length(dy));
       let cobbleBumpFade=archLodFade*(1.0-smoothstep(0.035,0.14,cobbleAniso))*smoothstep(0.06,0.28,max(abs(n.y),0.12));
-      let pbr=sampleArchMaterialPBR(6,world,n,dx,dy,vec2f(0.42,0.42),archLodFade,instYaw);
       albedo=pbr.albedo*shadeAlbedo*(0.96+detailA*0.05*archLodFade+detailB*0.03*archLodFade);
       archNormalOffset=pbr.normalOffset*0.44*cobbleBumpFade;
       relief=detailA*0.003*cobbleBumpFade;
@@ -1149,7 +1157,6 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       ambientVisibility=(0.48+0.36*max(n.y,0.0))*aoVis*mix(1.0,pbr.ao,0.68*archLodFade);
     }else if(in.kind.x<17.5){
       // Kind 17: MaterialCraft-cooked paper-birch & cedar bark sheathing
-      let pbr=sampleArchMaterialPBR(7,world,n,dx,dy,vec2f(0.52,0.58),archLodFade,instYaw);
       albedo=pbr.albedo*shadeAlbedo*(0.96+detailA*0.07+detailB*0.04);
       archNormalOffset=pbr.normalOffset*0.50;
       relief=detailA*0.004*archLodFade;
@@ -1157,7 +1164,6 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       ambientVisibility=(0.48+0.36*max(n.y,0.0))*aoVis*pbr.ao;
     }else{
       // Kind 18: MaterialCraft-cooked sand-cast ordnance iron & forged harbor metal
-      let pbr=sampleArchMaterialPBR(8,world,n,dx,dy,vec2f(0.65,0.65),archLodFade,instYaw);
       let bareIron=clamp(0.18+detailA*0.14+max(0.0,n.y)*0.08-max(0.0,-detailB)*0.08,0.06,0.34);
       albedo=pbr.albedo*(0.75+0.25*bareIron)*(0.68+0.32*portShade);
       archNormalOffset=pbr.normalOffset*0.48;
@@ -1190,71 +1196,53 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
     let townUV=(world.xz-townWindow.xy)/townWindow.z+.5;
     if(all(townUV>vec2f(0.0))&&all(townUV<vec2f(1.0))){
       let way=textureSampleLevel(townField,landSampler,townUV,0.0).rg;
-      if(way.r<.98){
+      if(way.r<.52){
         // Grass laps over a way's edge blade by blade.
         let fringe=gd.fine.r*.5+gd.mid.r*.55+gd.mid.a*.7+gd.big.a*.6;
-        let frayed=way.r*${STREET_FIELD_RANGE_M.toFixed(1)}-${STREET_FIELD_EDGE_M.toFixed(1)}+(landFilteredNoise(world.xz*.6,footprint*.6)*.5+fringe*.7)*(1.0-way.g*.75);
+        let frayed=way.r*${STREET_FIELD_RANGE_M.toFixed(1)}-${STREET_FIELD_EDGE_M.toFixed(1)}+(grain*.35+fringe*.7)*(1.0-way.g*.75);
         let soft=max(footprint,mix(.14,.03,gd.near));
         let onWay=1.0-smoothstep(-soft,soft,frayed);
         let trodden=(1.0-smoothstep(0.0,2.4,frayed))*(1.0-onWay);
-        let wear=landFilteredNoise(world.xz*.33,footprint*.33);
-        let grit=gd.fine.g+gd.mid.g*.9+gd.big.g*.3;
-        let earth=mix(vec3f(.27,.215,.15),source,.22)*(1.0+wear*.16+landFilteredNoise(world.xz*3.1,footprint*3.1)*.08+grit*1.1+gd.big.a*.5+gd.mid.a*.35);
-        // A road's two wheel tracks run a pace either side of its middle.
-        let rutted=1.0-smoothstep(.2,.45,abs(way.g-.5));
-        let rutBroken=clamp(1.0+(gd.mid.a*1.4+gd.big.a*.9)*2.0,.3,1.25);
-        let ruts=rutted*exp(-pow((frayed+.85)/.38,2.0))*(1.0-smoothstep(.06,.5,footprint))*mix(1.0,rutBroken,gd.near);
-        var surface=earth*(1.0-ruts*.26);
-        var surfaceRelief=wear*.03-ruts*.05+gd.fine.g*.0035+gd.mid.g*.012;
-        // Between the tracks of a country road, grass the wheels never reach.
-        surface=mix(surface,albedo,rutted*smoothstep(1.55,2.1,-frayed+fringe*1.4)*gd.near*.9);
-        let paved=smoothstep(.52,.78,way.g);
-        if(paved>0.0){
-          // Anisotropic 2-tap cobblestone cascade with separated bump vs colour filtering:
-          // Isotropic max(|dx|,|dy|) grows as D^2/H on oblique streets and creates an artificial fade wall ~10m ahead.
-          // Using anisotropic footprint max(minAxis, maxAxis*0.28) + 2-tap supersampling along the foreshortened
-          // major axis keeps cobblestones crisp across the street/plaza (out to ~45-80m) without Moiré shimmer.
-          let lx=length(dx.xz);let ly=length(dy.xz);
-          let majorXZ=select(dy.xz,dx.xz,lx>=ly);
-          let roadFoot=max(min(lx,ly),max(lx,ly)*0.28);
-          let anisoFoot=max(lx,ly);
-          let streetGrazing=smoothstep(0.04,0.18,max(n.y,0.0));
-          let stoneFineFade=(1.0-smoothstep(0.042,0.115,roadFoot))*streetGrazing;
-          let stoneMidFade=(1.0-smoothstep(0.095,0.260,roadFoot))*streetGrazing;
-          let stoneBumpFade=(1.0-smoothstep(0.018,0.055,anisoFoot))*streetGrazing;
-          var stonesFine=vec2f(0.0,1.0);
-          if(stoneFineFade>0.0){
-            stonesFine=0.5*(landStones((world.xz-majorXZ*0.25)*3.4)+landStones((world.xz+majorXZ*0.25)*3.4));
+        if(onWay<=0.001){
+          albedo*=1.0-trodden*.2;
+        }else{
+          let wear=gd.big.a*1.2+grain*0.35;
+          let paved=smoothstep(.52,.78,way.g);
+          var surface=albedo;
+          var surfaceRelief=relief;
+          if(paved<0.999){
+            let grit=gd.fine.g+gd.mid.g*.9+gd.big.g*.3;
+            let earth=mix(vec3f(.27,.215,.15),source,.22)*(1.0+wear*.16+grit*1.1+gd.big.a*.5+gd.mid.a*.35);
+            // A road's two wheel tracks run a pace either side of its middle.
+            let rutted=1.0-smoothstep(.2,.45,abs(way.g-.5));
+            let rutBroken=clamp(1.0+(gd.mid.a*1.4+gd.big.a*.9)*2.0,.3,1.25);
+            let ruts=rutted*exp(-pow((frayed+.85)/.38,2.0))*(1.0-smoothstep(.06,.5,footprint))*mix(1.0,rutBroken,gd.near);
+            surface=earth*(1.0-ruts*.26);
+            surfaceRelief=wear*.03-ruts*.05+gd.fine.g*.0035+gd.mid.g*.012;
+            // Between the tracks of a country road, grass the wheels never reach.
+            surface=mix(surface,albedo,rutted*smoothstep(1.55,2.1,-frayed+fringe*1.4)*gd.near*.9);
           }
-          var stonesMid=vec2f(0.0,1.0);
-          if(stoneMidFade>0.0){
-            let p0=world.xz-majorXZ*0.25;
-            let p1=world.xz+majorXZ*0.25;
-            let qMid0=vec2f(p0.x*0.8-p0.y*0.6,p0.x*0.6+p0.y*0.8)*1.35+vec2f(17.3,41.7);
-            let qMid1=vec2f(p1.x*0.8-p1.y*0.6,p1.x*0.6+p1.y*0.8)*1.35+vec2f(17.3,41.7);
-            stonesMid=0.5*(landStones(qMid0)+landStones(qMid1));
+          if(paved>0.0){
+            let cobbleTone=gd.fine.g*0.38+gd.mid.g*0.32+gd.mid.b*0.24;
+            let mortarMix=clamp(-(gd.fine.b*0.8+gd.mid.b*0.6),0.0,0.48);
+            let macroTone=wear*.12+gd.big.a*.28+gd.mid.a*.24+gd.mid.b*.22+gd.fine.a*.32;
+            let setts=vec3f(.236,.214,.189)*(1.0+macroTone+cobbleTone)*(1.0-mortarMix);
+            surface=mix(surface,setts,paved);
+            let bumpVal=(gd.fine.b*0.032+gd.mid.b*0.024+gd.fine.g*0.018)*(1.0-smoothstep(0.018,0.065,footprint));
+            surfaceRelief=mix(surfaceRelief,bumpVal,paved);
           }
-          let midWeight=stoneMidFade*(1.0-0.55*stoneFineFade);
-          let stoneColorFade=max(stoneFineFade,stoneMidFade);
-          let toneMix=stonesFine.x*0.22*stoneFineFade+stonesMid.x*0.18*midWeight;
-          let mortarMix=(1.0-stonesFine.y)*0.46*stoneFineFade+(1.0-stonesMid.y)*0.34*midWeight;
-          let macroTone=wear*.12+gd.big.a*.28+gd.mid.a*.24+gd.mid.b*.22+gd.fine.a*.32*stoneFineFade;
-          let setts=vec3f(.236,.214,.189)*(1.0+macroTone+toneMix)*(1.0-mortarMix);
-          surface=mix(surface,setts,paved);
-          let bumpVal=(stonesFine.y-.55)*.052*stoneBumpFade+(stonesMid.y-.55)*.024*stoneMidFade*(1.0-stoneBumpFade)+gd.mid.b*.012;
-          surfaceRelief=mix(surfaceRelief,bumpVal,paved);
+          albedo=mix(albedo*(1.0-trodden*.2),surface,onWay);
+          relief=mix(relief,surfaceRelief,onWay);
+          roughness=mix(roughness,mix(.93,.82,paved),onWay);
+          canopyBackscatter*=1.0-onWay;
         }
-        albedo=mix(albedo*(1.0-trodden*.2),surface,onWay);
-        relief=mix(relief,surfaceRelief,onWay);
-        roughness=mix(roughness,mix(.93,.82,paved),onWay);
-        canopyBackscatter*=1.0-onWay;
       }
     }
   }
   if(structDmg>0.005){
     let dmgW=clamp(structDmg,0.0,1.0);
     let spallDetail=landOrientedDetail(world+vec3f(5.7,2.3,9.1),n,dx,dy,3.2);
-    let gritDetail=landOrientedDetail(world+vec3f(14.1,8.7,3.9),n,dx,dy,8.5);
+    let gritDetail=-spallDetail;
     let fissure=landOrientedJoint(world+vec3f(11.3,4.7,6.9),n,dx,dy);
     let isAperture=abs(in.kind.x-14.0)<=0.4;
     let isCastIron=in.kind.x>=17.5&&in.kind.x<18.5;
@@ -1284,7 +1272,7 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       ambientVisibility*=mix(1.0,0.62+0.38*clamp(1.0-fissure*0.65+spallDetail*0.20,0.0,1.0),dmgW*0.75);
       roughness=max(roughness,0.93);
     }else{
-      let splinterNoise=landOrientedDetail(world+vec3f(3.3,7.9,12.1),n,dx,dy,5.5);
+      let splinterNoise=spallDetail;
       let rawWood=select(vec3f(0.14,0.105,0.080),vec3f(0.28,0.18,0.095),in.kind.x>=9.5);
       let sootTint=vec3f(0.065,0.056,0.048);
       let dmgAlbedo=mix(albedo,rawWood,clamp(dmgW*0.45+splinterNoise*0.25,0.0,0.65));
@@ -1313,7 +1301,15 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
   let wet=select(clamp(max(shoreWet,surfaceWet),0.0,0.96),surfaceWet-shoreWet*0.14,surfaceWet<-0.01);
   roughness=mix(roughness,min(roughness,0.24),shoreWet*0.65);
   let nDotL=dot(n,F.sunDir.xyz);
-  let diffuse=(max(nDotL,0.0)+max(-nDotL,0.0)*canopyBackscatter)*pit.sun;
+  var sunReach=pit.sun;
+  if(in.kind.x<2.5&&F.sunDir.y>0.02){
+    let sunStep=F.sunDir.xz*(14.0/max(F.sunDir.y,0.28))/LAND.domain.z;
+    let vegSun=textureSampleLevel(vegetationMask,landSampler,clamp(uv+sunStep,vec2f(0.0),vec2f(1.0)),0.0).r;
+    let farCanopyShadow=smoothstep(0.18,0.62,vegSun)*(1.0-smoothstep(0.55,0.92,vegetation)*0.55);
+    let farFade=smoothstep(115.0,175.0,distance(world,F.camPos.xyz));
+    sunReach*=1.0-farCanopyShadow*0.48*farFade;
+  }
+  let diffuse=(max(nDotL,0.0)+max(-nDotL,0.0)*canopyBackscatter)*sunReach;
   return landFinish(world,n,albedo,diffuse,ambientVisibility,wet,roughness);
 }
 @fragment fn fs(in:LandVertex)->@location(0) vec4f{return landOpaque(in);}
@@ -1400,7 +1396,7 @@ struct CanopyVertex {
   let nDotL=dot(n,F.sunDir.xyz);
   let diffuse=max(nDotL,0.0)+select(0.0,max(-nDotL,0.0)*0.22*exposure,crown);
   let ambient=select(.36+max(n.y,0)*.25,.14+exposure*.48+max(n.y,0)*.09,crown);
-  return landFinishShadowed(in.world,n,col,diffuse,ambient,0,select(0.94,0.92,crown),1.0);
+  return landFinishShadowed(in.world,n,col,diffuse,ambient,0,select(0.94,0.92,crown),mix(0.62,1.0,landShadowVisibility(in.world,n)));
 }
 @fragment fn canopyLeafFS(in:CanopyVertex,@builtin(front_facing) front:bool)->@location(0) vec4f{
   let uvCentered=in.leafUV-vec2f(0.5,0.5);
@@ -1414,13 +1410,15 @@ struct CanopyVertex {
   let diffuse=(max(nDotL,0)+backlit)*(.22+.78*exposure*exposure);
   let ambient=.12+exposure*.56+abs(n.y)*.09;
   if(alpha<.015){discard;}
-  let color=landFinishShadowed(in.world,n,warmCol,diffuse,ambient,0,.92,1.0);
+  let color=landFinishShadowed(in.world,n,warmCol,diffuse,ambient,0,.92,mix(0.62,1.0,landShadowVisibility(in.world,n)));
   return vec4f(color.rgb,alpha);
 }
 @vertex fn portShadowVS(@location(0) position:vec3f)->@builtin(position) vec4f{
   return landSH.lightView*vec4f(position-landSH.origin.xyz,1.0);
 }
 @vertex fn treeShadowVS(@location(0) position:vec3f,@location(3) rootScale:vec4f,@location(4) yawKind:vec4f)->@builtin(position) vec4f{
+  let rc=landSH.lightView*vec4f(rootScale.xyz+vec3f(0.0,6.0*rootScale.w,0.0)-landSH.origin.xyz,1.0);
+  if(abs(rc.x)>1.22||abs(rc.y)>1.22||rc.z<-0.08||rc.z>1.08){return vec4f(2.0,2.0,0.0,1.0);}
   let c=cos(yawKind.x);let s=sin(yawKind.x);
   let local=vec3f(c*position.x-s*position.z,position.y,s*position.x+c*position.z)*rootScale.w;
   let world=rootScale.xyz+local;

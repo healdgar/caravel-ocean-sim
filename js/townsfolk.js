@@ -262,9 +262,10 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     drawShadow(pass) {
       if (!crowd) return;
       pass.setPipeline(shadowPipeline);
+      const shadowTiers = Math.min(2, TOWNSFOLK_TIERS);
       for (let m = 0; m < MODELS; m++) {
         pass.setVertexBuffer(0, crowd.geometries[m].vertex);
-        for (let t = 0; t < TOWNSFOLK_TIERS; t++) {
+        for (let t = 0; t < shadowTiers; t++) {
           const lod = crowd.geometries[m].lods[t] ?? crowd.geometries[m].lods.at(-1);
           const bucket = m * TOWNSFOLK_TIERS + t;
           pass.setBindGroup(0, crowd.shadowGroups[bucket]);

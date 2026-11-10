@@ -67,89 +67,123 @@ fn gunneryNoise3(p:vec3f)->f32{
         mix(gunneryHash3(i+vec3f(0,1,1)),gunneryHash3(i+vec3f(1,1,1)),u.x),u.y),
     u.z);
 }
+fn gunneryContrastNoise3(p:vec3f)->f32{
+  // Trilinear value noise concentrates around [0.22, 0.78]; stretching to [0, 1]
+  // restores full-amplitude turbulent crests and deep zero-density erosion troughs.
+  return smoothstep(.21,.79,gunneryNoise3(p));
+}
 fn gunneryCloudFbm(p:vec3f)->f32{
   var q=p;
-  let n0=gunneryNoise3(q);q=q*2.07+vec3f(13.7,-7.3,5.1);
-  let n1=gunneryNoise3(q);q=q*2.13+vec3f(-9.1,11.3,-17.9);
-  let n2=gunneryNoise3(q);
-  // Blend smooth value FBM with crisp inverted-ridge cumulus billows for cauliflower crowns.
+  let n0=gunneryContrastNoise3(q);q=q*2.07+vec3f(13.7,-7.3,5.1);
+  let n1=gunneryContrastNoise3(q);q=q*2.13+vec3f(-9.1,11.3,-17.9);
+  let n2=gunneryContrastNoise3(q);
+  // True 3D billow noise: |2n - 1| is 1.0 at 3D eddy centers (rounded puffs)
+  // and 0.0 along the narrow creases between eddies.
   let fbm=n0*.52+n1*.31+n2*.17;
-  let b0=1.0-abs(n0*2.0-1.0);
-  let b1=1.0-abs(n1*2.0-1.0);
-  let b2=1.0-abs(n2*2.0-1.0);
-  let billow=b0*b0*.52+b1*.33+b2*.15;
-  return mix(fbm,billow,.64);
+  let b0=smoothstep(.06,.86,abs(n0*2.0-1.0));
+  let b1=smoothstep(.06,.86,abs(n1*2.0-1.0));
+  let b2=smoothstep(.06,.86,abs(n2*2.0-1.0));
+  let billow=b0*.52+b1*.32+b2*.16;
+  return mix(fbm,billow,.62);
 }
-fn gunneryLobeKernel(d:vec3f,falloff:f32)->f32{
-  let w=max(0.0,1.0-dot(d,d)*(falloff*.34));
-  return w*w;
+fn gunneryCurlWarp(local:vec3f,age:f32,seed:f32)->vec3f{
+  // Full-amplitude 3D divergence-free curl warp + buoyant thermal roll-up.
+  let q=local*1.75+vec3f(seed*2.1,-age*.42,seed*3.3);
+  let nX=gunneryContrastNoise3(q)-.5;
+  let nY=gunneryContrastNoise3(q+vec3f(17.3,9.1,-11.7))-.5;
+  let nZ=gunneryContrastNoise3(q+vec3f(-13.1,21.7,7.9))-.5;
+  let q2=local*3.65+vec3f(-seed*3.1,-age*.88,seed*1.7);
+  let fineCurl=vec3f(sin(q2.y*1.7+q2.z*1.3),sin(q2.z*1.7-q2.x*1.3),cos(q2.x*1.7+q2.y*1.3))*.24;
+  let curl=vec3f(nY-nZ,nZ-nX,nX-nY)*.92+fineCurl;
+  // Buoyant thermal shear: upper plume billows outward, underside pinches & rolls inward
+  let roll=vec3f(local.x*local.y*.26,-dot(local.xz,local.xz)*.18,local.z*local.y*.22)*clamp(age*.42,0.0,1.0);
+  let amp=.34+.24*clamp(age*.45,0.0,1.0);
+  return curl*amp+roll;
 }
 fn gunneryMacroBillow(p:vec3f,age:f32,seed:f32)->f32{
-  // Morphs from a high-velocity nozzle jet + toroidal vortex ring at discharge
-  // into a multi-lobed buoyant cauliflower cumulus plume as it entrains air.
-  let jetStage=clamp(1.0-age*.85,0.0,1.0);
-  let turn=seed*.71+age*.14;
-  let s1=sin(turn);let c1=cos(turn);
-  let s2=sin(turn*1.63+2.1);let c2=cos(turn*1.63+2.1);
-  // 7 asymmetric rolling cumulus turret lobes using compact quadratic kernels
-  let l0=vec3f(c1*.34,.28,s1*.26+.08);
-  let l1=vec3f(-s1*.36,-.16,c1*.28-.06);
-  let l2=vec3f(s2*.33,.08,-c2*.32);
-  let l3=vec3f(-c2*.25,.38,-s2*.24+.12);
-  let l4=vec3f(c2*.28,-.26,s1*.31-.14);
-  let l5=vec3f(0.0,.42,.18*c1);
-  let l6=vec3f(-c1*.18,.12,-.38);
-  let lobes=gunneryLobeKernel(p-l0,5.2)
-           +gunneryLobeKernel(p-l1,5.6)
-           +gunneryLobeKernel(p-l2,5.8)
-           +gunneryLobeKernel(p-l3,6.2)
-           +gunneryLobeKernel(p-l4,6.4)
-           +gunneryLobeKernel(p-l5,5.9)
-           +gunneryLobeKernel(p-l6,5.4)*.85;
-  if(jetStage<=0.001){return lobes;}
-  // Conical muzzle stem (-z to +z) + expanding toroidal vortex head (+z)
-  let axial=clamp((p.z+.68)/1.36,0.0,1.0);
-  let coneRadius=mix(.22,.56,axial);
-  let radial2=dot(p.xy,p.xy);
-  let stemW=max(0.0,1.0-radial2/(coneRadius*coneRadius*2.2))*max(0.0,1.0-pow((p.z+.18)/.78,2.0));
-  let stem=stemW*stemW;
-  let ringMajor=.30+.14*(1.0-jetStage);
-  let ringDist=sqrt(radial2)-ringMajor;
-  let vortexW=max(0.0,1.0-(ringDist*ringDist+pow(p.z-.22,2.0)*1.35)*3.6);
-  let vortexHead=vortexW*vortexW;
-  let jet=stem*.85+vortexHead*1.15;
-  return mix(lobes,jet+lobes*.65,jetStage*jetStage);
+  // Asymmetric, multi-turret 3D plume scaffold with no concentric ring bands at mid/late age.
+  let jetStage=clamp(1.0-age*1.15,0.0,1.0);
+  let u=clamp((p.z+.86)/1.72,0.0,1.0);
+  // Subtle 3D spine meander breaks axial alignment when looking down the barrel
+  let spineX=sin(p.z*2.4+seed*5.7)*.14;
+  let spineY=.12*u*u*clamp(age*.48,0.0,1.2)+cos(p.z*2.1-seed*4.3)*.10;
+  let dx=p.x-spineX;
+  let dy=p.y-spineY;
+  // Asymmetric vertical shear: buoyant crown expands at +dy, undercut base pinches at -dy
+  let vertAsym=select(1.32,0.88,dy>0.0);
+  let anisoR=length(vec2f(dx*1.04,dy*vertAsym));
+  // Coarse 3D billow-turret modulation so cross-sections are irregular lobed clouds, never circles
+  let m0=gunneryContrastNoise3(p*1.35+vec3f(seed*3.7,-age*.32,seed*2.1));
+  let m1=gunneryContrastNoise3(p*2.65+vec3f(-seed*2.9,age*.44,-seed*1.7));
+  let bMacro0=smoothstep(.05,.88,abs(m0*2.0-1.0));
+  let bMacro1=smoothstep(.05,.88,abs(m1*2.0-1.0));
+  let turretMod=.42+.74*(bMacro0*.64+bMacro1*.36);
+  let baseSpan=mix(mix(.52,.26,jetStage),mix(.68,.54,jetStage),smoothstep(0.0,.72,u))*(1.0-smoothstep(.74,1.0,u)*.52);
+  let axialCap=smoothstep(0.0,.12,u)*(1.0-smoothstep(.86,1.0,u));
+  let irregularRadius=max(.16,baseSpan*turretMod);
+  let coreField=clamp(1.0-anisoR/irregularRadius,0.0,1.0)*axialCap;
+  // Transient muzzle vortex ring only during initial discharge (t < 0.6s)
+  let ringTube=length(vec2f(anisoR-.32,(p.z-.22)*1.35));
+  let vortexField=clamp(1.0-ringTube/(.26+.14*bMacro0),0.0,1.0)*jetStage*jetStage;
+  return clamp(coreField*1.08+vortexField*.55,0.0,1.0);
 }
-fn gunneryDensityAndFbm(local:vec3f,age:f32,seed:f32)->vec2f{
-  // Compact support guarantees no cube edge can appear. Multi-octave 3D cloud FBM
-  // and billowing cumulus turret lobes create crisp cauliflower cloud contours.
-  let r2Init=dot(local,local);
-  let support=1.0-smoothstep(.46,1.0,r2Init);if(support<=0.0){return vec2f(0.0,0.0);}
-  let drift=age*.38;
-  let warp=vec3f(
-    sin(local.y*3.6+local.z*2.7+seed+drift)+.45*cos(local.z*6.4-local.x*4.8+seed*1.7),
-    cos(local.x*3.3-local.z*3.1-seed*.7+drift*1.15)+.45*sin(local.x*5.9+local.y*5.2-seed),
-    sin(local.x*3.8+local.y*2.9-seed+drift*.85)+.45*cos(local.y*6.1-local.z*5.4+seed*2.3)
-  )*(.082+.035*clamp(age*.25,0.0,1.0));
-  let p=local+warp;
-  let r2=dot(p,p);if(r2>=1.0){return vec2f(0.0,0.0);}
-  let lobes=gunneryMacroBillow(p,age,seed);
-  let macroShape=smoothstep(.08,.76,lobes);
-  let fbm=gunneryCloudFbm(p*3.85+vec3f(seed*1.7,-age*.34,seed*2.3));
-  let edgeDisperse=mix(.24,.42,clamp(age/14.0,0.0,1.0));
-  let erode=smoothstep(.18,.74,macroShape*(.52+fbm*.94)-(1.0-support)*edgeDisperse);
-  let crisp=smoothstep(.05,.88,erode);
-  return vec2f(support*crisp*(.42+fbm*1.08),fbm);
+fn gunneryDensityAndFbm(local:vec3f,age:f32,seed:f32,subtype:f32)->vec2f{
+  // Soft cube-face boundary guard only near the outer [-1, 1]^3 walls
+  let boxMax=max(abs(local.x),max(abs(local.y),abs(local.z)));
+  let boxGuard=1.0-smoothstep(.74,1.0,boxMax);if(boxGuard<=0.0){return vec2f(0.0,0.0);}
+  let isFireSmoke=subtype>=1.8;
+  let firePhase=clamp((subtype-2.0)/0.8,0.0,1.0);
+  let effAge=select(age,0.65+firePhase*1.55,isFireSmoke);
+  let curl=gunneryCurlWarp(local,effAge,seed);
+  let p=local+curl*select(1.0,0.55,isFireSmoke);
+  var lobes=0.0;
+  var fireEllipR=0.0;
+  if(isFireSmoke){
+    let m0=gunneryContrastNoise3(p*1.35+vec3f(seed*3.7,-age*.38,seed*2.1));
+    fireEllipR=length(vec3f(p.x*1.12,p.y*1.12,p.z*1.14));
+    let outerR=0.62+0.22*m0;
+    lobes=smoothstep(outerR,0.16,fireEllipR);
+  }else{
+    lobes=gunneryMacroBillow(p,effAge,seed);
+  }
+  if(lobes<=0.001){return vec2f(0.0,0.0);}
+  let q=p*select(2.15,1.75,isFireSmoke)+vec3f(seed*1.7,-age*.42,seed*2.3);
+  let n0=gunneryContrastNoise3(q);
+  let n1=gunneryContrastNoise3(q*2.08+vec3f(13.7,-7.3+age*.52,5.1));
+  let n2=gunneryContrastNoise3(q*4.25+vec3f(-9.1,11.3-age*.88,-17.9));
+  let fbm=n0*.52+n1*.32+n2*.16;
+  // True 3D rounded billow puffs (|2n - 1| = 1 at eddy cores, 0 in deep creases between puffs)
+  let b0=smoothstep(.05,.88,abs(n0*2.0-1.0));
+  let b1=smoothstep(.05,.88,abs(n1*2.0-1.0));
+  let b2=smoothstep(.05,.88,abs(n2*2.0-1.0));
+  let billowPuffs=b0*.52+b1*.32+b2*.16;
+  let turbField=mix(fbm,billowPuffs,select(.64,.42,isFireSmoke));
+  // Subtractive turbulent erosion carves deep see-through rifts between 3D puffs
+  // and erodes the perimeter into irregular curling billows and wispy tendrils.
+  let ageNorm=clamp(age/2.9,0.0,1.0);
+  let fireErode=mix(0.05,mix(0.44,0.72,firePhase),smoothstep(0.18,0.68,fireEllipR));
+  let erodeStrength=select(mix(.54,.92,ageNorm),fireErode,isFireSmoke);
+  let rawSignal=lobes-erodeStrength*(1.0-turbField);
+  if(rawSignal<=0.0){return vec2f(0.0,turbField);}
+  let wispy=smoothstep(0.0,select(.42,.28,isFireSmoke),rawSignal);
+  let density=select(
+    boxGuard*wispy*sqrt(wispy)*(.49+turbField*1.20),
+    boxGuard*wispy*(1.45+turbField*2.35),
+    isFireSmoke
+  );
+  return vec2f(density,turbField);
 }
 fn gunneryDensity(local:vec3f,age:f32,seed:f32)->f32{
-  return gunneryDensityAndFbm(local,age,seed).x;
+  return gunneryDensityAndFbm(local,age,seed,0.0).x;
 }
 fn gunneryShadowDensity(local:vec3f,age:f32,seed:f32,localFbm:f32)->f32{
-  // Fast macro-envelope self-shadowing modulated by local billow FBM (zero extra 3D noise lookups).
-  let r2Init=dot(local,local);
-  let support=1.0-smoothstep(.46,1.0,r2Init);if(support<=0.0){return 0.0;}
-  let lobes=gunneryMacroBillow(local,age,seed);
-  return support*smoothstep(.08,.76,lobes)*(.62+.58*localFbm);
+  let boxMax=max(abs(local.x),max(abs(local.y),abs(local.z)));
+  let boxGuard=1.0-smoothstep(.74,1.0,boxMax);if(boxGuard<=0.0){return 0.0;}
+  let u=clamp((local.z+.86)/1.72,0.0,1.0);
+  let axialCap=smoothstep(0.0,.12,u)*(1.0-smoothstep(.86,1.0,u));
+  let r=length(vec2f(local.x,local.y*select(1.25,0.88,local.y>0.0)));
+  let core=clamp(1.0-r/(.56+.22*localFbm),0.0,1.0)*axialCap;
+  return boxGuard*core*(.48+.52*localFbm);
 }
 fn gunnerySceneDistance(pixel:vec2f,ray:vec3f)->f32{
   let size=textureDimensions(gunnerySceneDepth);let uv=clamp(vec2i(pixel),vec2i(0),vec2i(size)-1);
@@ -180,14 +214,14 @@ struct GunneryVolumeVertex{@builtin(position)position:vec4f,@location(0)world:ve
   let scene=gunnerySceneDistance(v.position.xy,ray);
   let centreDist=dot(volume.centre.xyz-F.camPos.xyz,ray);
   let minHorizR=min(volume.axisX.w,volume.axisZ.w);
-  // Prevent fires and smoke volumes centered inside or behind a building/hull wall from bleeding through the front face of that wall
+  // Prevent fires centered inside or behind a building/hull wall from bleeding through the front face of that wall
   if(volume.centre.w>.5 && scene<centreDist-min(0.35,minHorizR*0.28)){discard;}
-  if(volume.optical.w>=1.8 && scene<centreDist-minHorizR*0.32){discard;}
-  let wallFrontFade=select(1.0,smoothstep(centreDist-minHorizR*0.35,centreDist+0.15,scene),volume.centre.w>.5||volume.optical.w>=1.8);
+  let wallFrontFade=select(1.0,smoothstep(centreDist-minHorizR*0.35,centreDist+0.15,scene),volume.centre.w>.5);
   let exit=min(scene,min(high.x,min(high.y,high.z)));if(exit<=enter||wallFrontFade<=0.005){discard;}
-  let steps=select(8u,6u,enter>45.0);
+  let steps=select(12u,7u,enter>42.0);
   let stepSize=(exit-enter)/f32(steps);var transmittance=1.0;var radiance=vec3f(0);
-  let jitter=fract(sin(dot(v.position.xy,vec2f(12.9898,78.233))+volume.optical.z)*43758.5453);
+  // Smooth interleaved gradient offset (minimal 0.16 amplitude avoids salt-and-pepper stipple on thin wisps)
+  let jitter=fract(52.9829189*fract(dot(v.position.xy,vec2f(0.06711056,0.00583715))+volume.optical.z*.13));
   let skyZenith=skyAtmo(vec3f(0,1,0));
   let skyHorizon=skyAtmo(normalize(vec3f(F.sunDir.x,.12,F.sunDir.z)));
   let lightning=lightningLight()*.25;
@@ -199,103 +233,123 @@ struct GunneryVolumeVertex{@builtin(position)position:vec4f,@location(0)world:ve
   // Dual-lobe Henyey-Greenstein phase function (silver-lining forward scatter + cloud back-scatter).
   let phase=mix(gunneryHgPhase(cosTheta,.66),gunneryHgPhase(cosTheta,-.32),.34)*1.95+.09;
   let age=volume.optical.y;
-  let sootFactor=exp(-age*1.45);
+  let sootFactor=exp(-age*1.15);
   let emberFactor=exp(-age*5.5);
   let selfExposure=min(1.0,1.35/max(F.post.x,1e-3));
+  let subtype=volume.optical.w;
+  let isShipFlame=volume.centre.w>.5 && subtype>=0.9;
   for(var sample=0u;sample<steps;sample++){
-    let distance=enter+(f32(sample)+.15+.7*jitter)*stepSize;
+    let distance=enter+(f32(sample)+.42+.16*jitter)*stepSize;
     let local=origin+direction*distance;
-    let df=gunneryDensityAndFbm(local,age,volume.optical.z);
-    // Soft intersection margin removes hard slices at timber and sea.
-    var density=df.x*smoothstep(0.0,.28,scene-distance)*wallFrontFade;
-    if(density<.0015){continue;}
-    var emission=vec3f(0);var extinction=volume.optical.x*density;
-    let subtype=volume.optical.w;
-    if(volume.centre.w>.5){
-      if(subtype>=0.9){
-        // Shipboard & fort fire (direction=[0,1,0] -> local.z is vertical in [-1, 1])
-        let h=clamp(local.z*0.5+0.5,0.0,1.0);
-        let isSparkCrown=subtype>1.4;
-        let taper=select(mix(1.0,0.28,h*h),mix(0.65,1.15,h),isSparkCrown);
-        let swirl=vec2f(sin(h*5.2-age*7.4+volume.optical.z),cos(h*4.8-age*6.3-volume.optical.z))*0.14*h;
-        let rHoriz=length(local.xy-swirl)/max(0.20,taper);
-        let advectPos=vec3f(local.x*3.1,local.y*3.1,local.z*2.4-age*5.8)+vec3f(volume.optical.z);
-        let fTurb=gunneryCloudFbm(advectPos);
-        let fineLick=gunneryNoise3(advectPos*2.6+vec3f(0.0,0.0,-age*4.4));
-        let tongueMask=clamp(1.12-rHoriz+(fTurb-0.44)*(0.58+0.62*h)+(fineLick-0.5)*0.34,0.0,1.0);
-        let vertEnv=smoothstep(0.0,0.14,h)*(1.0-smoothstep(0.56,1.0,h));
-        let flameShape=select(tongueMask*vertEnv,clamp(1.0-rHoriz*0.88,0.0,1.0)*smoothstep(0.0,0.22,h)*(1.0-smoothstep(0.65,1.0,h)),isSparkCrown);
-        if(flameShape<0.008){continue;}
-        let temp=clamp(flameShape*(1.12-0.46*h)+0.26*fTurb+0.16*fineLick,0.0,1.0);
-        let colOuter=vec3f(0.68,0.042,0.004);
-        let colMid=vec3f(2.25,0.38,0.024);
-        let colInner=vec3f(4.45,1.48,0.18);
-        let colWhiteHot=vec3f(6.9,3.8,1.25);
-        let c1=mix(colOuter,colMid,smoothstep(0.08,0.52,temp));
-        let c2=mix(c1,colInner,smoothstep(0.48,0.84,temp));
-        let colCore=mix(c2,colWhiteHot,smoothstep(0.78,0.98,temp)*(1.0-smoothstep(0.0,0.45,h)));
-        // Buoyant glowing embers & flying sparks
-        let sparkPos=advectPos*4.8+vec3f(sin(age*3.7)*0.8,cos(age*4.1)*0.8,-age*7.2);
-        let sparkN1=gunneryNoise3(sparkPos);
-        let sparkN2=gunneryNoise3(sparkPos*2.1+vec3f(13.7,7.1,3.9));
-        let sparkMask=smoothstep(0.76,0.93,sparkN1)*smoothstep(0.52,0.82,sparkN2);
-        let sparks=select(sparkMask*h*1.6,sparkMask*(0.6+1.8*h),subtype>1.1);
-        let nightFlameBoost=1.0+0.65*(1.0-smoothstep(-0.08,0.14,F.sunDir.y));
-        let flameEmit=select(colCore*flameShape*(1.05-0.25*step(1.15,subtype)),colCore*flameShape*0.28,isSparkCrown);
-        emission=(flameEmit+vec3f(3.6,0.92,0.09)*sparks)*clamp(volume.optical.x,0.35,1.35)*selfExposure*nightFlameBoost;
-        extinction=density*select(flameShape*5.6,max(flameShape*1.8,sparks*3.2),isSparkCrown);
-      }else{
-        let flame=max(0.0,1.0-dot(local,local));
-        let coreNoise=.65+.35*df.y;
-        emission=mix(vec3f(2.2,0.32,.025),vec3f(5.2,1.45,0.22),flame*flame*coreNoise)*volume.optical.x*selfExposure;
-        extinction=density*4.2;
-      }
+    let softDepth=smoothstep(0.0,.28,scene-distance)*wallFrontFade;
+    if(softDepth<=.001){continue;}
+    var emission=vec3f(0);var extinction=0.0;
+    if(isShipFlame){
+      let boxMax=max(abs(local.x),max(abs(local.y),abs(local.z)));
+      let boxGuard=(1.0-smoothstep(.74,1.0,boxMax))*softDepth;
+      if(boxGuard<=.002){continue;}
+      // Shipboard & fort fire (direction=[0,1,0] -> local.z is vertical in [-1, 1])
+      let h=clamp(local.z*0.5+0.5,0.0,1.0);
+      let isSparkCrown=subtype>1.4;
+      let taper=select(mix(1.0,0.28,h*h),mix(0.65,1.15,h),isSparkCrown);
+      let swirl=vec2f(sin(h*5.2-age*7.4+volume.optical.z),cos(h*4.8-age*6.3-volume.optical.z))*0.14*h;
+      let rHoriz=length(local.xy-swirl)/max(0.20,taper);
+      let advectPos=vec3f(local.x*3.1,local.y*3.1,local.z*2.4-age*5.8)+vec3f(volume.optical.z);
+      let fTurb=gunneryCloudFbm(advectPos);
+      let fineLick=gunneryNoise3(advectPos*2.6+vec3f(0.0,0.0,-age*4.4));
+      let tongueMask=clamp(1.12-rHoriz+(fTurb-0.44)*(0.58+0.62*h)+(fineLick-0.5)*0.34,0.0,1.0);
+      let vertEnv=smoothstep(0.0,0.14,h)*(1.0-smoothstep(0.56,1.0,h));
+      let flameShape=select(tongueMask*vertEnv,clamp(1.0-rHoriz*0.88,0.0,1.0)*smoothstep(0.0,0.22,h)*(1.0-smoothstep(0.65,1.0,h)),isSparkCrown);
+      if(flameShape<0.008){continue;}
+      let temp=clamp(flameShape*(1.12-0.46*h)+0.26*fTurb+0.16*fineLick,0.0,1.0);
+      let colOuter=vec3f(0.68,0.042,0.004);
+      let colMid=vec3f(2.25,0.38,0.024);
+      let colInner=vec3f(4.45,1.48,0.18);
+      let colWhiteHot=vec3f(6.9,3.8,1.25);
+      let c1=mix(colOuter,colMid,smoothstep(0.08,0.52,temp));
+      let c2=mix(c1,colInner,smoothstep(0.48,0.84,temp));
+      let colCore=mix(c2,colWhiteHot,smoothstep(0.78,0.98,temp)*(1.0-smoothstep(0.0,0.45,h)));
+      // Buoyant glowing embers & flying sparks
+      let sparkPos=advectPos*4.8+vec3f(sin(age*3.7)*0.8,cos(age*4.1)*0.8,-age*7.2);
+      let sparkN1=gunneryNoise3(sparkPos);
+      let sparkN2=gunneryNoise3(sparkPos*2.1+vec3f(13.7,7.1,3.9));
+      let sparkMask=smoothstep(0.76,0.93,sparkN1)*smoothstep(0.52,0.82,sparkN2);
+      let sparks=select(sparkMask*h*1.6,sparkMask*(0.6+1.8*h),subtype>1.1);
+      let nightFlameBoost=1.0+0.65*(1.0-smoothstep(-0.08,0.14,F.sunDir.y));
+      let flameEmit=select(colCore*flameShape*(1.05-0.25*step(1.15,subtype)),colCore*flameShape*0.28,isSparkCrown);
+      emission=(flameEmit+vec3f(3.6,0.92,0.09)*sparks)*clamp(volume.optical.x,0.35,1.35)*selfExposure*nightFlameBoost;
+      extinction=boxGuard*select(flameShape*4.8,max(flameShape*1.6,sparks*2.8),isSparkCrown);
     }else{
-      // Two finite sunlight steps in normalized [-1, 1] local space + Beer-Powder
-      // multi-scattering create crisp cauliflower self-shadowing with minimal ALU cost.
-      let d1=gunneryShadowDensity(local+sunLocalDir*.24,age,volume.optical.z,df.y)*.28;
-      let d2=gunneryShadowDensity(local+sunLocalDir*.58,age,volume.optical.z,df.y)*.42;
-      let shadowDepth=(d1+d2)*volume.optical.x*opticalScale;
-      let beer=exp(-shadowDepth*.95);
-      let multiScatter=exp(-shadowDepth*.26)*.44;
-      let powder=1.0-.58*exp(-shadowDepth*2.6);
-      let directTransfer=(beer*powder+multiScatter)*phase;
-      let isFireSmoke=subtype>=1.8;
-      let heightGrad=clamp(select(local.y,local.z,isFireSmoke)*.5+.5,0.0,1.0);
-      let radialRim=clamp(length(local)*1.08,0.0,1.0);
-      let ambientOcclusion=mix(.42,1.0,clamp(heightGrad*.65+radialRim*.35,0.0,1.0));
-      let ambient=(mix(skyHorizon*.42,skyZenith*.78,heightGrad)+lightning)*ambientOcclusion;
-      // Black powder smoke transitions from warm charcoal soot at discharge to
-      // potassium-sulfate chalky white cumulus; shipboard pitch/tar fires emit
-      // dense dark charcoal/black smoke under-lit by roaring flames below.
-      let effSoot=select(sootFactor,0.94,isFireSmoke);
-      let shadowTint=select(
-        mix(vec3f(.62,.66,.72),vec3f(.34,.33,.32),effSoot*.75),
-        vec3f(.11,.10,.10),
-        isFireSmoke
-      );
-      let litTint=select(
-        mix(vec3f(.96,.94,.90),vec3f(.58,.54,.50),effSoot*.55),
-        vec3f(.24,.22,.20),
-        isFireSmoke
-      );
-      let cloudAlbedo=mix(shadowTint,litTint,clamp(beer+.22,0.0,1.0));
-      let throatCore=max(0.0,1.0-length(local-vec3f(0.0,-.05,-.28))*1.45);
-      let fireUnderGlow=select(
-        0.0,
-        (1.0-smoothstep(0.0,0.78,heightGrad))*max(0.0,1.0-length(local.xy)*0.98)*(0.58+0.42*df.y)*max(0.22,2.75-subtype)*(1.0+0.6*(1.0-smoothstep(-0.08,0.14,F.sunDir.y))),
-        isFireSmoke
-      );
-      let internalEmber=(vec3f(2.4,0.42,.03)*(emberFactor*throatCore*throatCore*density)+vec3f(1.15,0.22,0.018)*(fireUnderGlow*density))*selfExposure;
-      emission=cloudAlbedo*(ambient+sunlight*directTransfer)+internalEmber;
+      let df=gunneryDensityAndFbm(local,age,volume.optical.z,subtype);
+      // Soft intersection margin removes hard slices at timber and sea.
+      let density=df.x*softDepth;
+      if(density<.0015){continue;}
+      extinction=volume.optical.x*density;
+      if(volume.centre.w>.5){
+        let flame=max(0.0,1.0-dot(local,local));
+        let coreNoise=.68+.32*df.y;
+        emission=mix(vec3f(2.8,0.42,.035),vec3f(6.8,1.95,0.32),flame*flame*coreNoise)*volume.optical.x*selfExposure;
+        extinction=density*5.2;
+      }else{
+        // Intrinsic 3D billow self-shadowing (decoupled from translucent extinction so
+        // even airy, see-through smoke wisps retain rich 3D tonal relief and shaded folds).
+        let d1=gunneryShadowDensity(local+sunLocalDir*.24,age,volume.optical.z,df.y);
+        let d2=gunneryShadowDensity(local+sunLocalDir*.56,age,volume.optical.z,df.y);
+        let billowRelief=smoothstep(.40,.88,df.y);
+        let foldCrevice=1.0-billowRelief;
+        let shadowDepth=(d1*.85+d2*1.35+foldCrevice*.95)*1.75;
+        let beer=exp(-shadowDepth*1.18);
+        let multiScatter=exp(-shadowDepth*.34)*.34;
+        let powder=1.0-.64*exp(-shadowDepth*2.8);
+        let directTransfer=(beer*powder+multiScatter)*phase;
+        let isFireSmoke=subtype>=1.8;
+        let heightGrad=clamp(select(local.y,local.z,isFireSmoke)*.5+.5,0.0,1.0);
+        let radialRim=clamp(length(local)*1.08,0.0,1.0);
+        let creviceAO=mix(.34,1.0,billowRelief);
+        let ambientOcclusion=mix(.32,1.0,clamp(heightGrad*.64+radialRim*.36,0.0,1.0))*creviceAO;
+        let ambient=(mix(skyHorizon*.36,skyZenith*.72,heightGrad)+lightning)*ambientOcclusion;
+        // Black powder smoke transitions from warm charcoal-slate soot at discharge to
+        // sculpted silver-gray and warm sunlit cumulus wisps with deep slate-blue folds.
+        let effSoot=select(sootFactor,0.96,isFireSmoke);
+        let shadowTint=select(
+          mix(vec3f(.34,.39,.47),vec3f(.19,.18,.18),effSoot*.82),
+          vec3f(.055,.052,.054),
+          isFireSmoke
+        );
+        let litTint=select(
+          mix(vec3f(.95,.93,.89),vec3f(.54,.50,.46),effSoot*.65),
+          vec3f(.24,.22,.21),
+          isFireSmoke
+        );
+        let shadeMix=clamp(beer*.62+billowRelief*.46-.06,0.0,1.0);
+        let cloudAlbedo=mix(shadowTint,litTint,shadeMix);
+        let throatCore=max(0.0,1.0-length(local-vec3f(0.0,-.05,-.28))*1.45);
+        let fireUnderGlow=select(
+          0.0,
+          (1.0-smoothstep(0.0,0.34,heightGrad))*max(0.0,1.0-length(local.xy)*1.12)*max(0.0,2.28-subtype)*0.45,
+          isFireSmoke
+        );
+        let internalEmber=(vec3f(2.4,0.42,.03)*(emberFactor*throatCore*throatCore*density)+vec3f(0.95,0.18,0.015)*fireUnderGlow)*selfExposure;
+        emission=cloudAlbedo*(ambient+sunlight*directTransfer)+internalEmber;
+      }
     }
     let opacity=1.0-exp(-extinction*stepSize);
     radiance+=transmittance*opacity*emission;transmittance*=1.0-opacity;
-    if(transmittance<.035){break;}
+    if(transmittance<.06){break;}
   }
-  let alpha=1.0-transmittance;if(alpha<.002){discard;}
+  let rawAlpha=1.0-transmittance;if(rawAlpha<.002){discard;}
+  // Smooth translucent veil ceiling: gun smoke stays airy and see-through after initial
+  // muzzle discharge, while blazing fire smoke forms a much denser, towering soot column.
+  let isFlameVol=volume.centre.w>.5;
+  let isFireSmokeVol=!isFlameVol && subtype>=1.8;
+  let firePhaseVol=clamp((subtype-2.0)/0.8,0.0,1.0);
+  let gunVeilCap=mix(.84,.34,clamp(age*.44,0.0,1.0));
+  let fireVeilCap=mix(.97,.82,firePhaseVol);
+  let veilCap=select(select(gunVeilCap,fireVeilCap,isFireSmokeVol),.95,isFlameVol);
+  let veilGain=select(1.42,2.45,isFireSmokeVol);
+  let alpha=select(veilCap*(1.0-exp(-rawAlpha*veilGain/max(veilCap,.05))),rawAlpha,isFlameVol);
   let averageWorld=F.camPos.xyz+ray*(enter+exit)*.5;
-  return vec4f(surfaceAir(radiance/max(alpha,.0001),averageWorld)*alpha,alpha);
+  return vec4f(surfaceAir(radiance/max(rawAlpha,.0001),averageWorld)*alpha,alpha);
 }
 
 struct GunneryBallVertex{@builtin(position)position:vec4f,@location(0)world:vec3f,@location(1)normal:vec3f,@location(2)hot:f32};
@@ -452,7 +506,8 @@ struct GunneryWaterVertex{@builtin(position)position:vec4f,@location(0)world:vec
     mix(.038,.165,r4*r4)*sqrt(c.motion.w)*(1.0+0.35*sin(age/max(flight,0.1)*PI)),
     isWater
   );
-  let stretchY=select(1.0,1.45,isWater);
+  let isWood=c.extra.x>.5 && c.extra.x<1.5;
+  let stretchY=select(select(1.0,2.35,isWood),1.45,isWater);
   let world=centre+(normalize(F.camRight.xyz)*turned.x+normalize(F.camUp.xyz)*turned.y*stretchY)*size;
   o.position=F.viewProj*vec4f(world-F.camPos.xyz,1.0);
   o.world=world;
@@ -474,7 +529,11 @@ struct GunneryWaterVertex{@builtin(position)position:vec4f,@location(0)world:vec
     return vec4f(surfaceAir(vec3f(.94,.97,1.0)*wLit,v.world)*wAlpha,wAlpha);
   }
   let lit=skyAtmo(vec3f(0,1,0))*.6+direct*max(dot(n,F.sunDir.xyz),.0)/PI+lightningLight()*.25;
-  return vec4f(surfaceAir(gunneryEarthAlbedo(c)*lit,v.world),1.0);
+  let fragVar=fract(sin(v.world.x*19.3+v.world.z*31.7+c.detail.x*53.0)*437.5);
+  let woodAlbedo=mix(vec3f(.26,.17,.085),vec3f(.54,.39,.22),fragVar);
+  let stoneAlbedo=mix(vec3f(.56,.51,.43),vec3f(.62,.33,.21),step(.74,fragVar));
+  let solidAlbedo=select(select(woodAlbedo,gunneryEarthAlbedo(c),c.extra.x>1.5),stoneAlbedo,c.extra.x>2.5);
+  return vec4f(surfaceAir(solidAlbedo*lit,v.world),1.0);
 }
 // The dust that goes up with a ground strike OR rising sea-spray mist & churning whitewater boil on water impacts.
 struct GunneryDustVertex{@builtin(position)position:vec4f,@location(0)world:vec3f,@location(1)uv:vec2f,@location(2)@interpolate(flat)id:u32,@location(3)@interpolate(flat)alpha:f32,@location(4)@interpolate(flat)seed:f32};
@@ -489,8 +548,8 @@ struct GunneryDustVertex{@builtin(position)position:vec4f,@location(0)world:vec3
   let r2=fract(sin(n*47.2389+c.detail.x*23.91)*24634.6345);
   let r3=fract(sin(n*83.6127+c.detail.x*47.53)*17431.1953);
   let r4=fract(sin(n*29.8153+c.detail.x*91.27)*31158.8231);
-  let decayTau=select(.55+r4*1.1,.65+r4*.85,isWater);
-  let baseOp=select(.13,.15,isWater);
+  let decayTau=select(.65+r4*1.15,.65+r4*.85,isWater);
+  let baseOp=select(.21,.15,isWater);
   o.alpha=baseOp*smoothstep(0.0,.04,age)*exp(-age/decayTau);
   if(o.alpha<.003){return o;}
   let size=pit/1.2;
@@ -528,7 +587,9 @@ struct GunneryDustVertex{@builtin(position)position:vec4f,@location(0)world:vec3
   if(c.extra.x<.5){
     return vec4f(surfaceAir(vec3f(.92,.96,1.0)*lit*1.22,v.world)*alpha,alpha);
   }
-  return vec4f(surfaceAir(mix(vec3f(.3,.235,.17),vec3f(.62,.53,.4),c.extra.z)*lit,v.world)*alpha,alpha);
+  let earthDust=mix(vec3f(.3,.235,.17),vec3f(.62,.53,.4),c.extra.z);
+  let dustColor=select(select(vec3f(.46,.36,.24),earthDust,c.extra.x>1.5),vec3f(.66,.60,.52),c.extra.x>2.5);
+  return vec4f(surfaceAir(dustColor*lit,v.world)*alpha,alpha);
 }
 @vertex fn gunneryRingVS(@builtin(vertex_index)vertex:u32,@builtin(instance_index)id:u32)->GunneryWaterVertex{
   let c=gunneryContacts[id];let ring=vertex/(${GUNNERY_RING_SEGMENTS}u*6u);let uv=gunneryCorner(vertex);let segment=(vertex/6u)%${GUNNERY_RING_SEGMENTS}u;

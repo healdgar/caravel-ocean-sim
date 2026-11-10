@@ -134,7 +134,7 @@ export function fitLandShadow(out, camera, groundY, sun, resolution = 4096, radi
   const ux = sy * rz, uy = sz * rx - sx * rz, uz = -sy * rx;
   const fwdX = camera?.forward?.[0] ?? 0;
   const fwdZ = camera?.forward?.[2] ?? 0;
-  const lead = Math.min(22, radius * 0.28);
+  const lead = Math.min(115, radius * 0.45);
   const cxWorld = (camera?.x ?? 0) + fwdX * lead;
   const czWorld = (camera?.z ?? 0) + fwdZ * lead;
   const cyWorld = Number.isFinite(groundY) ? Math.max(0, groundY) : 0;

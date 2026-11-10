@@ -710,7 +710,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
         }
         b.runs=crewDrawRuns(b.people,s=>s.visible===false||s.cutShader?-1:s.lodTier);
         b.cutRuns=crewDrawRuns(b.people,s=>s.visible!==false&&s.cutShader?s.lodTier:-1);
-        b.shadowRuns=crewDrawRuns(b.people,s=>s.visible===false?-1:Math.min(CREW_LOD_TIERS.length-1,s.lodTier+1));
+        b.shadowRuns=crewDrawRuns(b.people,s=>s.visible===false||s.lodTier>=2?-1:Math.min(CREW_LOD_TIERS.length-1,s.lodTier+1));
         device.queue.writeBuffer(b.blend,0,b.blends);device.queue.writeBuffer(b.actor,0,b.actors);b.clip.upload();b.turn.update(b.people);
       }
       // After posing, so an arrow's bone is this frame's.
@@ -2125,7 +2125,7 @@ export async function createFortSoldiers({
       }
     },
     drawShadow(pass) {
-      if (!drawEnabled) return;
+      if (!drawEnabled || activeTier >= 2) return;
       pass.setPipeline(shadowPipeline);
       for (const b of batches) {
         if (!b.people.length) continue;

@@ -175,7 +175,7 @@ export async function createCanopyRenderer({device,module,resources,clouds,forma
       multisample:{count:samples,alphaToCoverageEnabled:fragment==='canopyLeafFS'&&samples>1}});
     const opaque=await make('canopyOpaqueFS'),leaf=await make('canopyLeafFS');
     const bind=(pipe,bindings)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.filter(([id])=>bindings.includes(id)).map(([binding,resource])=>({binding,resource}))});
-    const opaqueGroup=bind(opaque,[0,1,2,3,4,5,6]),leafGroup=bind(leaf,[0,1,2,3,4,5,6,8,10]);
+    const opaqueGroup=bind(opaque,[0,1,2,3,4,5,6,19,20,21]),leafGroup=bind(leaf,[0,1,2,3,4,5,6,8,10,19,20,21]);
     const opaqueCloud=clouds.bindVolume(opaque),leafCloud=clouds.bindVolume(leaf);
     let selected=[];const previous=new Map();
     const stats={loaded:true,mode,patches:pack.manifest.patches.length,near:0,far:0,triangles:0,

@@ -28,24 +28,27 @@ const woundClamp = (x, a, b) => Math.max(a, Math.min(b, x));
 
 export function crewBodyHeight(s) {
   const scale = s.scale?.[1] ?? 1;
-  if ((s.knockdownTimer ?? 0) > 0) return 0.5 * scale;
+  if (s.overboard?.inWater) return (s.overboard.alive ? 0.65 : 0.45) * scale;
+  if (s.casualtyState === 'fallen' || (s.knockdownTimer ?? 0) > 0) return 0.45 * scale;
   return (s.seatedPose ? 1.15 : 1.72) * scale;
 }
 
 // Bodies a segment passes through, nearest first, in the same frame as the sailors'
-// positions. A body is an upright capsule. Only those before `limit` count, since
-// whatever the shot strikes first shields anyone behind it.
+// positions. A body is an upright capsule (or a low prone/floating capsule once fallen or overboard).
+// Only those before `limit` count, since whatever the shot strikes first shields anyone behind it.
 export function sweepCrewBodies(from, to, radius, crew, limit = 1) {
   const hits = [];
   const dx = to[0] - from[0], dy = to[1] - from[1], dz = to[2] - from[2], flat = dx * dx + dz * dz;
   for (const s of crew ?? []) {
-    if (s.visible === false || s.casualtyState === 'fallen' || !s.position) continue;
+    if (s.visible === false || s.overboard?.gone || !s.position) continue;
     const wx = from[0] - s.position[0], wz = from[2] - s.position[2];
     const t = flat > 1e-9 ? woundClamp(-(wx * dx + wz * dz) / flat, 0, 1) : 0;
     if (t > limit) continue;
     const y = from[1] + dy * t, base = s.position[1];
-    const above = Math.max(base - y, 0, y - (base + crewBodyHeight(s)));
-    const reach = radius + 0.2 * (s.scale?.[0] ?? 1);
+    const isProneOrWater = s.casualtyState === 'fallen' || Boolean(s.overboard);
+    const lowY = isProneOrWater ? base - 0.35 : base;
+    const above = Math.max(lowY - y, 0, y - (base + crewBodyHeight(s)));
+    const reach = radius + (isProneOrWater ? 0.42 : 0.2) * (s.scale?.[0] ?? 1);
     if (Math.hypot(wx + dx * t, above, wz + dz * t) > reach) continue;
     hits.push({ sailor: s, fraction: t, point: [from[0] + dx * t, y, from[2] + dz * t] });
   }
@@ -80,11 +83,16 @@ export function clearCrewWounds(s) {
   s.stuckArrows = null;
   s.stuckArrowPoses = null;
   s.crewInjuries = null;
+  s.ballHits = 0;
 }
 
 // What a hit does to the bone it found. Pure, so the chances can be tested directly.
 export function crewWoundOutcome(kind, bone, roll) {
   const joint = CREW_LIMB_JOINTS[bone];
+  if (kind === 'ball-maim') {
+    if (joint) return { kind: 'severed', bone: joint };
+    return { kind: 'crushed', bone: 'spine_03' };
+  }
   if (kind === 'ball') {
     if (joint) {
       if (roll < CREW_BALL_SEVER_CHANCE) return { kind: 'severed', bone: joint };
@@ -131,6 +139,19 @@ function nearestWoundBone(a, point) {
   }
   return best;
 }
+function nearestIntactLimbJoint(a, point, injuries) {
+  let bestJoint = null, bestDistance = Infinity;
+  for (const [bone, joint] of Object.entries(CREW_LIMB_JOINTS)) {
+    if (injuries?.some((k) => k.bone === joint && k.kind === 'severed')) continue;
+    const node = a.nodeIndex(bone);
+    if (node < 0) continue;
+    const m = a.world[node];
+    if (Math.abs(m[0]) + Math.abs(m[1]) + Math.abs(m[2]) < 0.01) continue;
+    const distance = Math.hypot(m[12] - point[0], m[13] - point[1], m[14] - point[2]);
+    if (distance < bestDistance) { bestJoint = joint; bestDistance = distance; }
+  }
+  return bestJoint;
+}
 function poseCrewInjury(a, injury) {
   const node = a.nodeIndex(injury.bone);
   if (node < 0) return;
@@ -165,9 +186,25 @@ export function applyCrewWounds(a, s) {
         s.stuckArrows.push({ bone, offset, direction });
         continue;
       }
+      const injuries = (s.crewInjuries ??= []);
+      if (wound.kind === 'ball-maim') {
+        const limbJoint = nearestIntactLimbJoint(a, wound.point, injuries);
+        if (limbJoint) {
+          const idx = injuries.findIndex((k) => k.bone === limbJoint);
+          if (idx >= 0) injuries.splice(idx, 1);
+          const sev = { kind: 'severed', bone: limbJoint };
+          injuries.push(sev);
+          poseCrewInjury(a, sev);
+        }
+        if (!injuries.some((k) => k.bone === 'spine_03' && k.kind === 'crushed')) {
+          const crush = { kind: 'crushed', bone: 'spine_03' };
+          injuries.push(crush);
+          poseCrewInjury(a, crush);
+        }
+        continue;
+      }
       const injury = crewWoundOutcome(wound.kind, bone, wound.roll);
       if (!injury) continue;
-      const injuries = (s.crewInjuries ??= []);
       if (injuries.some((known) => known.bone === injury.bone && known.kind === injury.kind)) continue;
       injuries.push(injury);
       poseCrewInjury(a, injury);

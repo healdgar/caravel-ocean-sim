@@ -59,7 +59,7 @@ test('native cannon FX render dense volumetric smoke, brief flash, dark roundsho
     assert.equal(result.smokeCounts.volumes,3);assert.equal(result.occluded.count,0,JSON.stringify(result));
     assert.ok(result.night.mean<result.smoke.mean,JSON.stringify(result));
     assert.ok(result.billow.count>result.smoke.count*2,JSON.stringify(result));
-    assert.ok(result.peakOpacity>.8&&result.peakOpacity<=1,'a 3-second-old single discharge must retain a dense central powder cloud: '+JSON.stringify(result));
+    assert.ok(result.peakOpacity>.25&&result.peakOpacity<=.85,'a 3-second-old single discharge must retain a wispy translucent powder cloud: '+JSON.stringify(result));
     assert.ok(result.ball.count>5&&result.ball.min<.035,JSON.stringify(result));
     assert.ok(result.splash.count>20,JSON.stringify(result));assert.equal(result.splashOccluded.count,0,JSON.stringify(result));
     assert.deepEqual(result.birth,[0,0,0]);assert.equal(result.cleared.count,0,JSON.stringify(result));

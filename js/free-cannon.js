@@ -1,5 +1,5 @@
 import {createGunneryState,fireGunnery,stepGunnery} from './gunnery-state.js';
-import {createGunnerySolidSweep,resolveSolidGunneryImpact} from './gunnery-control.js';
+import {createGunnerySolidSweep,resolveSolidGunneryImpact,resolveWaterGunneryImpact} from './gunnery-control.js';
 
 // The free camera's cannon, for trying out destruction: one 24-pounder, laid where the camera looks. Its ball flies
 // as any other 24-pounder's does, so only a calibre is given here and gunnery-state.js fixes the rest.
@@ -12,7 +12,9 @@ export function createFreeCannon({onEvent=()=>{},getVessels=()=>[],getTerrain=()
   let wait=0,position=[0,0,0],direction=[0,0,-1];
   const muzzle=()=>({position,direction,velocity:[0,0,0]});
   const report=event=>{
-    if(event.type==='impact'&&event.kind!=='water'){
+    if(event.type==='impact'&&event.kind==='water'){
+      resolveWaterGunneryImpact(event,{getVessels});
+    }else if(event.type==='impact'&&event.kind!=='water'){
       const before=event.building?.damageState?.hits??0;
       const damage=resolveSolidGunneryImpact(event,{getTerrain});
       if(damage)event.damageReport=damage;

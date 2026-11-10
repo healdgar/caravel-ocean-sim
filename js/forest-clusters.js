@@ -192,12 +192,23 @@ export const FOREST_CLUSTER_SHADOW_WGSL = /* wgsl */ `
 @vertex fn forestClusterWoodShadowVS(@builtin(instance_index)instance:u32,@builtin(vertex_index)index:u32)->@builtin(position)vec4f{
  let item=forestClusterList[forestBin.x+instance];let cluster=forestClusters[item.y];
  if(index>=(cluster.shape>>1u)*3u){return vec4f(2.,2.,0.,1.);}
+ let r=forestRoots[item.x];
+ let dCam=r.rootScale.xyz-F.camPos.xyz;
+ if(dot(dCam,dCam)>24025.){return vec4f(2.,2.,0.,1.);}
+ let rc=landSH.lightView*vec4f(r.rootScale.xyz+vec3f(0.,8.*r.rootScale.w,0.)-landSH.origin.xyz,1.);
+ if(abs(rc.x)>1.12||abs(rc.y)>1.12||rc.z<-0.05||rc.z>1.05){return vec4f(2.,2.,0.,1.);}
  let v=forestClusterVertex(item.x,forestClusterIndices[cluster.first+index],3.);
  return landSH.lightView*vec4f(v.world-landSH.origin.xyz,1.);
 }
 @vertex fn forestClusterLeafShadowVS(@builtin(instance_index)instance:u32,@builtin(vertex_index)index:u32)->@builtin(position)vec4f{
  let item=forestClusterList[forestBin.x+instance];let cluster=forestClusters[item.y];
  if(index>=(cluster.shape>>1u)/4u*${FOREST_LEAF_VERTICES}u){return vec4f(2.,2.,0.,1.);}
+ let r=forestRoots[item.x];
+ let dCam=r.rootScale.xyz-F.camPos.xyz;
+ let dCam2=dot(dCam,dCam);
+ if(dCam2>24025.){return vec4f(2.,2.,0.,1.);}
+ let rc=landSH.lightView*vec4f(r.rootScale.xyz+vec3f(0.,8.*r.rootScale.w,0.)-landSH.origin.xyz,1.);
+ if(abs(rc.x)>1.12||abs(rc.y)>1.12||rc.z<-0.05||rc.z>1.05){return vec4f(2.,2.,0.,1.);}
  let v=forestClusterVertex(item.x,cluster.first+index,4.);
  return landSH.lightView*vec4f(v.world-landSH.origin.xyz,1.);
 }

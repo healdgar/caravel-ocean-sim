@@ -3,7 +3,7 @@
 export const GPU_PASS_NAMES = [
   'Waves + effects', 'Sky + clouds', 'Reflections', 'Solid shadows', 'Canvas shadows', 'Companion Solid shadows', 'Companion Canvas shadows',
   ...Array.from({length:8},(_,i)=>['escort-'+(i+1)+' Solid shadows','escort-'+(i+1)+' Canvas shadows']).flat(),
-  'Submerged geometry', 'Water reflection filter', 'Scene', 'Underwater medium',
+  'Land shadows', 'Submerged geometry', 'Water reflection filter', 'Scene', 'Underwater medium',
   ...Array.from({length:8},(_,i)=>`Bloom down ${i}`),
   ...Array.from({length:7},(_,i)=>`Bloom up ${i+1}`), 'Composite',
 ];

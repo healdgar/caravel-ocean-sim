@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { sweepCrewBodies, recordCrewWound, applyCrewWounds, clearCrewWounds, crewWoundOutcome, CREW_ARROWS_PER_BODY, CREW_BALL_SEVER_CHANCE, CREW_BALL_BREAK_CHANCE } from '../js/crew-wounds.js';
-import { applyArrowImpact, applyCrewCasualtiesAndMorale, createGunnerySolidSweep, createVesselDamageState, sweepShipSegment, vesselRailHeight } from '../js/gunnery-control.js';
+import { applyArrowImpact, applyCrewCasualtiesAndMorale, createGunnerySolidSweep, createVesselDamageState, resolveWaterGunneryImpact, sweepShipSegment, vesselRailHeight } from '../js/gunnery-control.js';
 import { bindVesselModel } from '../js/vessels.js';
 import { reviveCompany, createFortGarrison, stepFortGarrison, reviveGarrisonSoldiers } from '../js/crew.js';
 
@@ -192,4 +192,34 @@ test('people on land take cannonball and crater blast damage, with bodies thrown
   assert.equal(first.woundSeverity, 0);
   assert.equal(first.crewInjuries, null);
   assert.equal(first.lx, first.homeLxz?.[0] ?? first.lx);
+});
+
+test('repeated cannonball and water-blast impacts maim fallen bodies and overboard swimmers in the water', () => {
+  const deckCorpse = sailor(0, [0, 3.2, 0], { casualtyState: 'fallen', health: 0 });
+  const swimmer = sailor(1, [14, -0.1, 8], {
+    casualtyState: 'fallen',
+    health: 0.8,
+    overboard: { x: 14, y: -0.1, z: 8, vx: 0, vy: 0, vz: 0, age: 5, afloat: 5, inWater: true, alive: true, wounded: false, side: 1, cause: 'sinking', gone: false },
+  });
+  const boat = makeBoat('nina', [deckCorpse, swimmer]);
+  const sweep = createGunnerySolidSweep({ sourceBoat: null, getVessels: () => [boat] });
+
+  // 1. A low shot across the deck strikes an already-fallen corpse and severs an intact limb via ball-maim.
+  sweep([-5, 3.3, 0], [5, 3.3, 0], { id: 10, ammo: 'round', radius: 0.1, mass: 8, velocity: [260, 0, 0] });
+  assert.equal(deckCorpse.pendingWounds?.[0]?.kind, 'ball-maim');
+  const a0 = skeleton();
+  applyCrewWounds(a0, deckCorpse);
+  const severedAfterFirst = (deckCorpse.crewInjuries ?? []).filter((v) => v.kind === 'severed').length;
+  assert.ok(severedAfterFirst >= 1, 'fallen corpse loses a limb on re-hit');
+
+  // 2. A water splash right next to an overboard swimmer kills, maims, and launches them out of the water.
+  const waterRes = resolveWaterGunneryImpact(
+    { type: 'impact', kind: 'water', ammo: 'round', shotId: 11, surfacePosition: [14.8, 0, 8.4], velocity: [0, -45, 180] },
+    { getVessels: () => [boat] },
+  );
+  assert.equal(waterRes?.bodiesStruck, 1);
+  assert.equal(swimmer.overboard.alive, false);
+  assert.equal(swimmer.overboard.inWater, false);
+  assert.ok(swimmer.overboard.vy > 1.5, 'water blast launches overboard body into the air');
+  assert.equal(swimmer.pendingWounds?.[0]?.kind, 'ball-maim');
 });

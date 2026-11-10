@@ -153,7 +153,17 @@ export function selectCrewLOD(boat,camera=null){
   }
   const bx=Number.isFinite(boat?.x)?boat.x:0,by=Number.isFinite(boat?.heave)?boat.heave:0,bz=Number.isFinite(boat?.z)?boat.z:0;
   const cy=Number.isFinite(camera.y)?camera.y:0;
-  const distance=Math.hypot(camera.x-bx,cy-by,camera.z-bz);
+  let distance=Math.hypot(camera.x-bx,cy-by,camera.z-bz);
+  const crew=boat?.crewCompany?.crew;
+  if(Array.isArray(crew)){
+    for(let i=0;i<crew.length;i++){
+      const o=crew[i]?.overboard;
+      if(o&&!o.gone&&crew[i].visible!==false){
+        const d=Math.hypot(camera.x-o.x,cy-o.y,camera.z-o.z);
+        if(d<distance)distance=d;
+      }
+    }
+  }
   const apparent=distance/crewLensZoom(camera);
   const mainTier=apparent<CREW_LOD_TIERS[0].maxDistance?0:apparent<CREW_LOD_TIERS[1].maxDistance?1:2;
   const shadowTier=Math.min(CREW_LOD_TIERS.length-1,mainTier+1);

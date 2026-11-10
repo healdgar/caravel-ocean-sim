@@ -142,7 +142,7 @@ export function retargetForestPackToProcedural(
   const strandShadeCdf = buildSpeciesCdf(activeClimate.coastalStrandWeights, shadeMod, 'canopy');
   const lagoonShadeCdf = buildSpeciesCdf(activeClimate.lagoonMangroveWeights, shadeMod, 'canopy');
   const hasMangrove = forestPack.manifest.prototypes.some((p) => p.species === 'mangrove');
-  const rootIdentityZ = -2;
+  const rootIdentityZ = hasCohorts ? -1.25 : -2;
 
   const pickProtoFromCdf = (cdf, u01) => {
     for (let i = 0; i < protoCount - 1; i++) {
@@ -192,7 +192,8 @@ export function retargetForestPackToProcedural(
     const swash = beaches?.swashMask;
     const cellSpanM = span / maskSize;
     for (let idx = 0; idx < maskSize * maskSize; idx++) {
-      if (biome[idx] < 42) continue;
+      const bVal = biome[idx];
+      if (bVal < 42) continue;
       if ((drySand && drySand[idx] > 110) || (swash && swash[idx] > 64)) continue;
       validLandCells.push(idx);
       const bi = idx % maskSize;
@@ -200,15 +201,15 @@ export function retargetForestPackToProcedural(
       const cx = x0 + (bi + 0.5) * cellSpanM;
       const cz = z0 + (bj + 0.5) * cellSpanM;
       const dPort = Math.hypot(cx - portCx, cz - portCz);
-      if (dPort <= 950) nearLandCells.push(idx);
-      else if (dPort <= 1950) midLandCells.push(idx);
-      else farLandCells.push(idx);
+      const targetPool = dPort <= 950 ? nearLandCells : dPort <= 1950 ? midLandCells : farLandCells;
+      targetPool.push(idx);
+      if (bVal >= 135) targetPool.push(idx);
     }
 
     const secBuckets = Array.from({ length: protoCount }, () => []);
-    const veteranSpacingFactor = hasCohorts ? (isMobile ? 0.46 : 0.36) : (isMobile ? 0.56 : 0.46);
-    const canopySpacingFactor = hasCohorts ? (isMobile ? 0.23 : 0.16) : (isMobile ? 0.30 : 0.21);
-    const vetCanopySpacingFactor = hasCohorts ? (isMobile ? 0.21 : 0.15) : (isMobile ? 0.27 : 0.19);
+    const veteranSpacingFactor = hasCohorts ? (isMobile ? 0.52 : 0.42) : (isMobile ? 0.56 : 0.46);
+    const canopySpacingFactor = hasCohorts ? (isMobile ? 0.28 : 0.21) : (isMobile ? 0.30 : 0.21);
+    const vetCanopySpacingFactor = hasCohorts ? (isMobile ? 0.25 : 0.19) : (isMobile ? 0.27 : 0.19);
     const cellSize = 20;
     const hashW = Math.ceil(span / cellSize) + 1;
     const head = new Int32Array(hashW * hashW).fill(-1);
@@ -283,10 +284,10 @@ export function retargetForestPackToProcedural(
       const sx = (sampleSecGround(x + 2, z) - sampleSecGround(x - 2, z)) * 0.25;
       const sz = (sampleSecGround(x, z + 2) - sampleSecGround(x, z - 2)) * 0.25;
       const slope = Math.hypot(sx, sz);
-      if (!Number.isFinite(slope) || slope > 1.08) return -1;
+      if (!Number.isFinite(slope) || slope > 0.84 || (gy < 24 && slope > 0.36)) return -1;
 
       const isLagoonZone = hasMangrove && gy <= 2.35 && slope < 0.22;
-      const isStrandZone = !isLagoonZone && gy <= 4.8;
+      const isStrandZone = !isLagoonZone && gy <= 4.8 && slope <= 0.32;
       const zoneCdf = isLagoonZone
         ? isVeteran
           ? lagoonVetCdf
@@ -307,6 +308,14 @@ export function retargetForestPackToProcedural(
 
       const uSpecies = (hash32Forest(key + 1) & 0xffff) / 65536;
       let protoId = pickProtoFromCdf(zoneCdf, uSpecies);
+      if (
+        (gy > 115 || slope > 0.34) &&
+        (forestPack.manifest.prototypes[protoId]?.species === 'palm' ||
+          forestPack.manifest.prototypes[protoId]?.species === 'royal_palm')
+      ) {
+        const ceibaIdx = forestPack.manifest.prototypes.findIndex((p) => p.species === 'ceiba');
+        if (ceibaIdx >= 0) protoId = ceibaIdx;
+      }
 
       const gx = Math.max(0, Math.min(hashW - 1, Math.floor((x - x0) / cellSize)));
       const gz = Math.max(0, Math.min(hashW - 1, Math.floor((z - z0) / cellSize)));
@@ -473,13 +482,16 @@ export function retargetForestPackToProcedural(
       return placedIdx;
     };
 
+    const isVolcanicIsland = region.coastalArchetype === 'volcanic-island';
+    const nearBandCut = isVolcanicIsland ? 88 : 123;
+    const midBandCut = isVolcanicIsland ? 176 : 212;
     const drawCandidateXZ = (h1, h2) => {
       if (validLandCells.length > 0) {
         const bandSel = (h2 >>> 24) & 255;
         const pool =
-          bandSel < 123 && nearLandCells.length > 0
+          bandSel < nearBandCut && nearLandCells.length > 0
             ? nearLandCells
-            : bandSel < 212 && midLandCells.length > 0
+            : bandSel < midBandCut && midLandCells.length > 0
               ? midLandCells
               : farLandCells.length > 0
                 ? farLandCells
@@ -605,6 +617,9 @@ export function retargetForestPackToProcedural(
       const x = foreshore[i], z = foreshore[i + 2], shape = foreshore[i + 5], seaX = -foreshore[i + 6], seaZ = -foreshore[i + 7];
       const gy = groundSample(x, z);
       if (!Number.isFinite(gy) || gy < 1.2) continue;
+      const fsx = (groundSample(x + 2, z) - groundSample(x - 2, z)) * 0.25;
+      const fsz = (groundSample(x, z + 2) - groundSample(x, z - 2)) * 0.25;
+      if (Math.hypot(fsx, fsz) > 0.34) continue;
       const { scale, sink, yaw } = foreshorePalmPlacement(shape, seaX, seaZ, basal);
       const tint = 0.94 + shape * 0.12;
       buckets[coconutId].push(x, gy - sink, z, scale, yaw, tint, tint, tint, coconutId, sink, -2, 0);
@@ -673,8 +688,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     :null;
   const defaultLisbonDeparture=!ignoreSearchLocation&&!explicitId&&!explicitObj&&!search.has('region')&&!hasCustomCoords&&!search.has('landfall')&&search.get('ocean')!=='1';
   const regionParam=explicitId||(!ignoreSearchLocation?search.get('region'):null)||(coordPresetMatch?coordPresetMatch.id:null)||(defaultLisbonDeparture?'lisbon':null);
-  const spanishMainPreset=regionParam&&regionParam!=='saba'&&Object.hasOwn(SPANISH_MAIN_1550_REGIONS,regionParam)?SPANISH_MAIN_1550_REGIONS[regionParam]:null;
-  const colonialPortPreset=!spanishMainPreset&&regionParam&&regionParam!=='saba'?HISTORICAL_COLONIAL_PORTS.find(p=>p.id===regionParam)??null:null;
+  const forceProcedural=search.get('procedural')==='1'||Boolean(explicitObj?.procedural);
+  const spanishMainPreset=regionParam&&(regionParam!=='saba'||forceProcedural)&&Object.hasOwn(SPANISH_MAIN_1550_REGIONS,regionParam)?SPANISH_MAIN_1550_REGIONS[regionParam]:null;
+  const colonialPortPreset=!spanishMainPreset&&regionParam&&(regionParam!=='saba'||forceProcedural)?HISTORICAL_COLONIAL_PORTS.find(p=>p.id===regionParam)??null:null;
   const presetMatch=spanishMainPreset||colonialPortPreset;
   const resolvedYear=rawYearParam!=null
     ?resolveColonialEra(rawYearParam).year
@@ -683,8 +699,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       :(colonialPortPreset?.foundedYear>1550?Math.min(1685,colonialPortPreset.foundedYear+15):1550);
   const isKnownSpanishMain=Boolean(spanishMainPreset&&(!hasCustomCoords||(Math.abs(rawLat-spanishMainPreset.latitude)<0.05&&Math.abs(rawLon-spanishMainPreset.longitude)<0.05)));
   const isKnownColonialPreset=Boolean(presetMatch&&(!hasCustomCoords||(Math.abs(rawLat-presetMatch.latitude)<0.05&&Math.abs(rawLon-presetMatch.longitude)<0.05)));
-  const isCustomSabaOverride=hasCustomCoords&&regionParam==='saba'&&(Math.abs(rawLat-ISLAND.latitude)>0.05||Math.abs(rawLat-ISLAND.longitude)>0.05);
-  const useProcedural=isKnownColonialPreset||(hasCustomCoords&&(regionParam!=='saba'||isCustomSabaOverride));
+  const isCustomSabaOverride=forceProcedural||(hasCustomCoords&&regionParam==='saba'&&(Math.abs(rawLat-ISLAND.latitude)>0.05||Math.abs(rawLat-ISLAND.longitude)>0.05));
+  const useProcedural=forceProcedural||isKnownColonialPreset||(hasCustomCoords&&(regionParam!=='saba'||isCustomSabaOverride));
   const targetLat=presetMatch?presetMatch.latitude:(Number.isFinite(rawLat)?rawLat:ISLAND.latitude);
   const targetLon=presetMatch?presetMatch.longitude:(Number.isFinite(rawLon)?rawLon:ISLAND.longitude);
   let activeClimate=estimateLocalClimateProfile(targetLat,targetLon,presetMatch);
@@ -737,12 +753,15 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   let resolveForestManifest,resolveForestRoots;
   const forestManifestPromise=new Promise(r=>{resolveForestManifest=r;});
   const forestRootsPromise=new Promise(r=>{resolveForestRoots=r;});
+  const forceSubtropicalVolume=typeof location!=='undefined'&&search.get('forestVolume')==='force';
   const forestPromise=canopyMode==='off'?Promise.resolve(null):loadForestScenery({
     assets:useSubtropicalForest?SUBTROPICAL_FOREST_ASSETS:usePortugalForest?PORTUGAL_FOREST_ASSETS:FOREST_ASSETS,
+    loadAtlases:!useSubtropicalForest&&!usePortugalForest,
+    loadVolumes:(!useSubtropicalForest&&!usePortugalForest)||forceSubtropicalVolume,
     skipNative:skipNativeForest&&!useSubtropicalForest&&!usePortugalForest,
     deferNative:!skipNativeForest&&useProcedural&&!useSubtropicalForest&&!usePortugalForest,
     skipRoots:useProcedural,
-    deferSurfaces:Boolean(chooseForestSurfaceCodec(device,search.get('forestSurfaces')||'auto')),
+    deferSurfaces:!usePortugalForest&&Boolean(chooseForestSurfaceCodec(device,search.get('forestSurfaces')||'auto')),
     onManifest:resolveForestManifest,
     onRoots:resolveForestRoots,
   }).catch(error=>{forestFailure=error.message;resolveForestManifest(null);resolveForestRoots(null);return null;});
@@ -750,7 +769,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const forestMassMode=typeof location==='undefined'?canopyMode:search.get('forestMass')||canopyMode;
   if(!['auto','near','far','off'].includes(forestMassMode))throw Error('Unknown native forest mass mode');
   const forestAtlasDebug=typeof location!=='undefined'&&['auto','force'].includes(search.get('forestImpostor'));
-  const forceSubtropicalVolume=typeof location!=='undefined'&&search.get('forestVolume')==='force';
   let forestMassFailure=null,forestMiddleFailure=null,resolveMassManifest;
   const massManifestPromise=new Promise(r=>{resolveMassManifest=r;});
   const massOnly=skipNativeForest||useProcedural;
@@ -761,7 +779,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     return loadForestMass({forest:forestManifest,rootsPromise:massOnly?null:forestRootsPromise,manifestOnly:massOnly,onManifest:resolveMassManifest}).catch(error=>{forestMassFailure=error.message;resolveMassManifest(null);return null;});
   });
   const forestMiddlePromise=Promise.all([forestManifestPromise,massManifestPromise]).then(async([forestManifest,massManifest])=>{
-    if(!forestManifest||(!massManifest&&!usePortugalForest&&!(useSubtropicalForest&&forceSubtropicalVolume))||(useSubtropicalForest&&!forceSubtropicalVolume)||forestAtlasDebug)return null;
+    if(!forestManifest||(!massManifest&&!(useSubtropicalForest&&forceSubtropicalVolume))||usePortugalForest||(useSubtropicalForest&&!forceSubtropicalVolume)||forestAtlasDebug)return null;
     try{
       const middle=await loadForestMiddle({
         forest:forestManifest,
@@ -778,7 +796,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // Regional native trees replace the entire old population. The small legacy
   // example is a fallback, never a second stand mixed into the new forest.
   const canopyPromise=forestPromise.then(forest=>useProcedural||forest||canopyMode==='off'?null:loadCanopyScenery().catch(error=>{canopyFailure=error.message;return null;}));
-  const autoCurated1550=isKnownSpanishMain&&search.get('discover')!=='1'&&search.get('era')!=='2026';
+  const autoCurated1550=isKnownSpanishMain&&search.get('discover')!=='1'&&search.get('era')!=='2026'&&search.get('realDEM')!=='off';
   const useRealDEM=useProcedural&&search.get('realDEM')!=='off'&&!autoCurated1550;
   const proceduralGridOpts=isMobile
     ?{size:257,biomeSize:256,albedoSize:512,vegetationCandidates:12000,deferSynthesis:useRealDEM||autoCurated1550}
@@ -1749,7 +1767,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     }).catch(()=>{/* retain fallback climate */});
   }
 
-  if(proceduralPack&&!preloaded1550){
+  if(proceduralPack&&!preloaded1550&&search.get('realDEM')!=='off'){
     const forceFirstExplorer=search.get('discover')==='1';
     const autoApply1550=!forceFirstExplorer&&search.get('era')!=='2026';
     whenStartupSettled(()=>{
@@ -2015,6 +2033,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       return updated;
     },
     get streamedSectionCount(){return loadedSections.size;},
+    get streamBusy(){return sectionStreamBusy;},
     get craters(){return craters;},
     // How much of the ground at a point is loose sand, from none to all: what the beach survey says, or the low,
     // gentle strand with no green in this coast's imagery, which the land shader leaves bare (landGroundCover).
@@ -2127,19 +2146,19 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     },
     drawShadow(pass,camera={x:0,y:6,z:0},viewProjection=null){
       pass.setPipeline(portShadowPipe);pass.setBindGroup(0,portShadowGroup);
-      if(portMesh&&isSectionVisible(activeRegion,camera,viewProjection,4800)){
+      if(portMesh&&isSectionVisible(activeRegion,camera,null,750)){
         pass.setVertexBuffer(0,portMesh.vertices);pass.setIndexBuffer(portMesh.indices,'uint32');pass.drawIndexed(portMesh.count);
         portFractures?.draw(pass);
       }
       for(const sec of loadedSections.values()){
-        if(sec.portMesh&&isSectionVisible(sec.region,camera,viewProjection,3400)){
+        if(sec.portMesh&&isSectionVisible(sec.region,camera,null,650)){
           pass.setVertexBuffer(0,sec.portMesh.vertices);pass.setIndexBuffer(sec.portMesh.indices,'uint32');pass.drawIndexed(sec.portMesh.count);
           sec.portFractures?.draw(pass);
         }
       }
       if(treeCull){
         pass.setPipeline(treeShadowPipe);pass.setBindGroup(0,treeShadowGroup);
-        for(let lod=0;lod<3;lod++)for(let variant=0;variant<TREE_VARIANTS;variant++){
+        for(let lod=0;lod<2;lod++)for(let variant=0;variant<TREE_VARIANTS;variant++){
           treeCull.draw(pass,lod*TREE_VARIANTS+variant,0,treeMeshes[lod][variant].opaque.buffer);
           treeCull.draw(pass,lod*TREE_VARIANTS+variant,1,treeMeshes[lod][variant].leaves.buffer);
         }
