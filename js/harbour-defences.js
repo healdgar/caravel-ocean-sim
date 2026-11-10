@@ -14,6 +14,8 @@ const OFF_CHART_APPROACH_M = 20000;
 const APPROACH_ROLES = new Set(['mouth', 'narrows', 'river']);
 const FORTS_MOST = 6;
 const FORT_APART_M = 150;
+const CITADEL_FROM_WATER_M = 1500;
+const CITADEL_HIGHEST_M = 180;
 const SIDE_WAYS = Object.freeze({ north: [0, -1], south: [0, 1], east: [1, 0], west: [-1, 0], northeast: [0.7, -0.7], northwest: [-0.7, -0.7], southeast: [0.7, 0.7], southwest: [-0.7, 0.7] });
 const HEIGHT_OF_SHAPE = Object.freeze({ battery: 4.4, drum: 7.4, star: 8.4, headland: 9.8, islet: 6.6, fitted: 8.6 });
 const PREFAB_OF_SHAPE = Object.freeze({ battery: 'stone_sea_bastion', drum: 'stone_sea_bastion', star: 'bastion_trace_fortress', headland: 'bastion_trace_fortress', islet: 'bastion_trace_fortress', fitted: 'bastion_trace_fortress' });
@@ -149,9 +151,12 @@ function siteRecordedFort(harbour, record, region, coastIsReal, taken) {
     const inChart = off <= region.span * 0.5 - CHART_MARGIN_M;
     const citadel = record.role === 'citadel';
     if (inChart) {
+      // A citadel stands where the record puts it, however high or far inland: it holds the town, not the water. A
+      // record may hold its own fort lower and nearer the water than that, where the true ground is outside the game's town.
       const spot = bestGroundNear(harbour, at, {
-        ...options, reach: record.rough ? 480 : 300, furthestFromWater: citadel ? 480 : record.rough ? 170 : 300, highest: citadel ? 42 : 110,
-        commandWeight: citadel ? 0.45 : record.rough ? 0.8 : 0.35, nearWeight: record.rough ? 0.8 : 1.5, pointWeight: 0.15, mostRise: 16,
+        ...options, reach: record.rough ? 480 : 300,
+        furthestFromWater: record.waterWithinM ?? (citadel ? CITADEL_FROM_WATER_M : record.rough ? 170 : 300), highest: record.groundBelowM ?? (citadel ? CITADEL_HIGHEST_M : 110),
+        commandWeight: record.command ?? (citadel ? 0 : record.rough ? 0.8 : 0.35), nearWeight: record.rough ? 0.8 : 1.5, pointWeight: 0.15, mostRise: 16,
       });
       if (spot) return { ...spot, source: 'record' };
     } else {

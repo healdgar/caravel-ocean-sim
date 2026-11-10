@@ -47,6 +47,19 @@ than 20 km are left out (Fort Algernon, Bertioga).
 Havana's elevation data reads the harbour channel as low ground, which left the bay a lake. The record carries the
 channel's line and the coast is opened along it.
 
+## The town is smaller than the city
+
+A citadel stands at its true place however high that is and however far from the water, up to 180 m and 1500 m. The
+game's town reaches about 150 m from its centre, so most citadels stand well outside it, as São Filipe does on its
+plateau 800 m from the last house of Ribeira Grande.
+
+Lisbon's castle is the one exception. Its true place (38.71389, -9.13361) is a hill 85 m up and 750 m beyond the last
+house of the game's town. The record gives it a place 630 m nearer the river instead (38.7082, -9.1342), on the rise
+beside the town, and holds it there with limits of its own: `waterWithinM` (no further from the water), `groundBelowM`
+(no higher) and `command` (how strongly it is drawn to ground that sees the water). Any record may carry them, and no
+other does. With the true position and these limits no ground near it will do, and the castle goes by the rule for a
+citadel instead: among the houses, on ground 10 m up.
+
 ## What a record does on a coast that is not real
 
 If real elevation cannot be had, the coast is made up and a recorded position means nothing. The fort then keeps its
@@ -307,11 +320,12 @@ No record of a coastal fort was found. Saba has no harbour, only open anchorages
 
 The Tagus narrows between the Bugio sandbank/São Julião (north) and Caparica (south) at the bar, then runs about 14 km east past Belém to Lisbon; ships crossed the bar and were covered by crossfire from São Julião and Bugio, with Belém and Caparica as the last line.
 
+- **Baluarte da Ribeira (Forte do Terreiro do Paço)** (1511), 38.7058, -9.1412. Guards the anchorage off the town. Role waterfront. the bulwark of the Ribeira palace on the river, Diogo de Arruda's work from 1508, among Lisbon's new fortifications under Manuel I; low battery about 44 m by 32 m Position, size and the year it was finished are estimates: no plan was seen, and the sources say only that work began in 1508. Not marked rough, so that it keeps its place at the water. Sources: https://oajournals.fupress.net/index.php/oi/article/download/12360/11730/16731 https://en.wikipedia.org/wiki/Ribeira_Palace
 - **Torre de São Vicente de Belém** (1514), 38.69167, -9.21611. Guards Tagus below Lisbon. Role river. about 30 m high quadrangular tower on an irregular hexagonal bulwark base about 40 m long, with a casemated gun battery facing south onto the Tagus; built on a rock outcrop in the river off the old Belém beach Stands about 7 km west of the port point, outside a +/-4 km terrain window; en.wikipedia gives completion 1519, pt.wikipedia 1520; replaced an anchored armed nau. Sources: https://pt.wikipedia.org/wiki/Torre_de_Bel%C3%A9m https://en.wikipedia.org/wiki/Tower_of_Saint_Vincent
 - **Forte de São Julião da Barra** (1553), 38.6795, -9.325 *rough*. Guards north side of the Tagus bar. Role mouth. original design with five bastions, three towards the sea and two landward (modelled on the Fortezza da Basso); low sea-side bastions and terrace added under Spain, land bastions and moat enlarged after 1640; bastions added on east side 1582, more work from 1597 About 19 km west of the port point; the strongest fort of the Tagus, commanding the bar in crossfire with Bugio. Sources: https://en.wikipedia.org/wiki/Fort%20of%20S%C3%A3o%20Juli%C3%A3o%20da%20Barra https://hap.pt/en/content/fortaleza-de-sao-juliao-da-barra
 - **Forte de São Lourenço do Bugio (Torre da Cabeça Seca)** (1590), 38.66028, -9.29861. Guards Tagus bar, middle of the estuary mouth. Role island. perfectly circular: outer sloping wall 62 m diameter and 6 m high, inner wall 33 m diameter and 7 m high, central tower 3 m diameter and 16 m high; on the Cabeça Seca sandbank An earlier timber structure of 1570 failed on the shifting sand; Casale's circular design chosen over a star; foundations only done 1601, finished 1657. Sources: https://en.wikipedia.org/wiki/Fort_of_S%C3%A3o_Louren%C3%A7o_do_Bugio
 - **Torre Velha de São Sebastião da Caparica** (1481), 38.67618, -9.20969. Guards south shore of the Tagus narrows opposite Belém. Role narrows. U-shaped plan of three bodies, two oriented south, with a rounded block between serving as the battery esplanade; on a hill between the Porto Brandão and Paulina creeks Part of João II's three-tower plan (Caparica, Cascais, later Belém); a battery here dates back to João I; also called Torre Velha. Sources: https://pt.wikipedia.org/wiki/Forte_de_S%C3%A3o_Sebasti%C3%A3o_da_Caparica https://en.wikipedia.org/wiki/Forte_de_S%C3%A3o_Sebasti%C3%A3o_da_Caparica
-- **Castelo de São Jorge** (1492), 38.71389, -9.13361. Guards hilltop over the city; no direct water defence. Role citadel. medieval hill castle with eleven towers; royal palace (Alcáçova) abandoned for the Ribeira Palace in the early 16th century and damaged by earthquakes 1531, 1551, 1597, 1699 Pre-existing medieval castle, listed as asked; mainly a landward strongpoint and view post, not a harbour fort. 'from' is a placeholder for already standing in 1492. Sources: https://pt.wikipedia.org/wiki/Castelo_de_S%C3%A3o_Jorge https://en.wikipedia.org/wiki/Castelo_S%C3%A3o_Jorge
+- **Castelo de São Jorge** (1492), 38.71389, -9.13361; stands in the game at 38.7082, -9.1342, see "The town is smaller than the city". Guards hilltop over the city; no direct water defence. Role citadel. medieval hill castle with eleven towers; royal palace (Alcáçova) abandoned for the Ribeira Palace in the early 16th century and damaged by earthquakes 1531, 1551, 1597, 1699 Pre-existing medieval castle, listed as asked; mainly a landward strongpoint and view post, not a harbour fort. 'from' is a placeholder for already standing in 1492. Sources: https://pt.wikipedia.org/wiki/Castelo_de_S%C3%A3o_Jorge https://en.wikipedia.org/wiki/Castelo_S%C3%A3o_Jorge
 
 ### jamestown
 

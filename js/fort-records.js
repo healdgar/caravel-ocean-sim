@@ -5,6 +5,8 @@
 // Fields: name, from, until, lat, lon, role (mouth, narrows, headland, river, waterfront, island, citadel), side
 // (compass side of the water), shape (star, headland, battery, drum, islet, fitted), earth (earth and timber, not
 // stone), bastions, sizeM, rough, encloses (holds the settlement, as James Fort did), gate ("river" where the main gate opened to the water, as Strachey says James Fort's did), landmark, terraces.
+// waterWithinM, groundBelowM and command hold one fort nearer the water, lower and in sight of it than its kind is
+// held in general. Only Lisbon's castle carries them, with a place beside the game's town: see FORTS.md.
 export const FORT_RECORDS = Object.freeze({
   "havana": Object.freeze({
     seaward: 340,
@@ -218,7 +220,7 @@ export const FORT_RECORDS = Object.freeze({
       Object.freeze({ name: "Forte de São Julião da Barra", from: 1553, lat: 38.6795, lon: -9.325, role: "mouth", side: "north", shape: "star", bastions: 5, rough: true }),
       Object.freeze({ name: "Forte de São Lourenço do Bugio (Torre da Cabeça Seca)", from: 1590, lat: 38.66028, lon: -9.29861, role: "island", shape: "drum", sizeM: [62,62] }),
       Object.freeze({ name: "Torre Velha de São Sebastião da Caparica", from: 1481, lat: 38.67618, lon: -9.20969, role: "narrows", side: "south", shape: "battery" }),
-      Object.freeze({ name: "Castelo de São Jorge", from: 1492, lat: 38.7082, lon: -9.1342, role: "citadel", shape: "fitted" }),
+      Object.freeze({ name: "Castelo de São Jorge", from: 1492, lat: 38.7082, lon: -9.1342, role: "citadel", shape: "fitted", waterWithinM: 480, groundBelowM: 42, command: 0.45 }),
     ]),
   }),
   "jamestown": Object.freeze({
