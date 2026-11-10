@@ -460,14 +460,11 @@ export function createVoyageController(cfg) {
       return;
     }
 
-    // Inside battle range at 1× real time: in live 3D gameplay (where main.js steps boat.x/boat.z),
-    // never tractor-beam or drag the target; let the two hulls maneuver naturally into grappling reach.
-    // In headless tests where boat.x/boat.z are static mock coordinates, integrate relative closing motion.
-    const hullSteppedExternally =
-      pursuit.prevBoatX !== undefined &&
-      Math.hypot((boat.x ?? 0) - pursuit.prevBoatX, (boat.z ?? 0) - pursuit.prevBoatZ) > 1e-5;
-    pursuit.prevBoatX = boat.x ?? 0;
-    pursuit.prevBoatZ = boat.z ?? 0;
+    // Inside battle range at 1× real time the game sails both hulls, so the target is never dragged:
+    // the two manoeuvre into grappling reach by themselves. Only a caller that sails no hulls and says
+    // so (cfg.closeHullsInPursuit) has the range closed for it here. It is never guessed from whether
+    // the player moved: a ship aground or moored is still, and her chase must not be hauled alongside.
+    const closeHulls = Boolean(cfg.closeHullsInPursuit);
 
     if (pursuit.mode === 'fight') {
       if (dist <= 165) {
@@ -478,19 +475,19 @@ export function createVoyageController(cfg) {
       if (tb && Number.isFinite(tb.surgeVelocity) && tb.surgeVelocity > 2.2) {
         tb.surgeVelocity = Math.max(1.8, tb.surgeVelocity - 0.6 * dt);
       }
-      if (!hullSteppedExternally && dist > pursuit.boardRangeM) {
+      if (closeHulls && dist > pursuit.boardRangeM) {
         const closeStep = Math.min(dist - (pursuit.boardRangeM - 2), 14.5 * dt);
         tb.x -= dirX * closeStep;
         tb.z -= dirZ * closeStep;
         dist = Math.hypot((tb.x ?? 0) - (boat.x ?? 0), (tb.z ?? 0) - (boat.z ?? 0));
       }
-      if (dist <= Math.max(pursuit.boardRangeM, !hullSteppedExternally ? 46 : pursuit.boardRangeM) && !pursuit.actionTriggered) {
+      if (dist <= (closeHulls ? Math.max(pursuit.boardRangeM, 46) : pursuit.boardRangeM) && !pursuit.actionTriggered) {
         pursuit.actionTriggered = true;
         pursuit.active = false;
         cfg.onBoardVessel?.(pursuit.encounter, targetV);
       }
     } else if (pursuit.mode === 'hail') {
-      if (!hullSteppedExternally && dist > pursuit.hailRangeM) {
+      if (closeHulls && dist > pursuit.hailRangeM) {
         const closeStep = Math.min(dist - (pursuit.hailRangeM - 2), 12.0 * dt);
         tb.x -= dirX * closeStep;
         tb.z -= dirZ * closeStep;

@@ -517,6 +517,7 @@ test('sail encounter supports spyglass inspection, steers toward target ship, an
     boat,
     P,
     getVessels: () => [boat, targetBoat],
+    closeHullsInPursuit: true, // nothing sails these hulls, so the controller closes the range itself
     onSightVessel: (enc) => {
       const brgRad = (enc.bearingDeg * Math.PI) / 180;
       targetBoat.x = boat.x + Math.sin(brgRad) * 520;
