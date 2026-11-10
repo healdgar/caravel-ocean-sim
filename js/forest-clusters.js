@@ -97,7 +97,10 @@ struct ForestClusterShadowBox {lightView:mat4x4f,origin:vec4f,sun:vec4f,texel:ve
 @group(0)@binding(9)var<uniform>shadowBox:ForestClusterShadowBox;
 // Shares of the forest's pixel error each kind may use. A leaf's error is its size, which stays
 // visible as a card, so leaves need the tighter limit. Wood is thin and hides among them.
-const FOREST_CLUSTER_LEAF_LIMIT=.2;
+// Each halving of the leaf share draws four times the cards. At .2 the cards stayed about two pixels
+// across and Lisbon's town view drew 23 million leaf triangles; at .4 it draws 6 million and the canopy
+// looks the same.
+const FOREST_CLUSTER_LEAF_LIMIT=.4;
 const FOREST_CLUSTER_WOOD_LIMIT=.5;
 fn forestClusterTree(index:u32)->u32{
  let nearCount=commands[bucket.near.y*5u+1u];

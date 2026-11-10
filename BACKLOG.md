@@ -66,7 +66,9 @@ Image difference from the full tree at true on-screen size, in supersampled Blen
 | 19 px | 0.2% | 1.0% | 2.0% | **4.5%** | 7.9% | 481: 8.3% |
 | 9 px | 0.2% | 0.5% | 0.9% | 2.2% | **4.4%** | 233: 6.2% |
 
-The decimator only draws level at about 19 pixels and below, and there it also loses the trunk. The lever is the leaf limit: `FOREST_CLUSTER_LEAF_LIMIT` at `.2` keeps cards below about two pixels, and one step coarser means a quarter of the triangles for about twice the difference. Worth trying in the game before any new tree asset.
+The decimator only draws level at about 19 pixels and below, and there it also loses the trunk. The lever is the leaf limit: `FOREST_CLUSTER_LEAF_LIMIT` at `.2` kept cards below about two pixels, and one step coarser means a quarter of the triangles for about twice the difference.
+
+Tried in the game on November 10 and taken: the limit is `.4`, so the game now draws one cut coarser than the bold values above. Over Lisbon's town it draws 13.1 million triangles in place of 30.4 million, and the scene pass takes 23 ms in place of 32 ms on a GPU shared with other work. Pictures at `.2`, `.3` and `.4` from the deck and from above the town show no difference to the eye. The town view still costs about twice what it did when far trees were crown shells, because every layer of leaf cards is alpha-tested: the Portugal pack needs a far canopy that is one opaque surface.
 
 ## November 5: parts worth taking from the sand3d datasets
 

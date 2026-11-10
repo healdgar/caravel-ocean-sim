@@ -52,7 +52,7 @@ test('Lisbon\'s trees keep every leaf at the finest cut, and a town-wide view ne
       if(c.err===0&&c.leaf)finestLeaves+=c.triangles;
       if(c.err===0)finest+=c.triangles;
       // Two hundred metres off on a 1117-pixel-high screen, at the leaf limit the game cuts to.
-      if(forestClusterIsDrawn({error:c.err,parentError:c.parentErr,lodDistance:200,parentDistance:200},1117,.6))far+=c.triangles;
+      if(forestClusterIsDrawn({error:c.err,parentError:c.parentErr,lodDistance:200,parentDistance:200},1117,1.2))far+=c.triangles;
     }
     assert.equal(finestLeaves,source.leaf.indexCount/6*4,`${p.species} ${source.cohort} lost or gained leaves in the bake`);
     assert.ok(far>0&&far<finest*.6,`${p.species} ${source.cohort} draws ${far} of ${finest} triangles from 200 m`);
@@ -65,7 +65,7 @@ test('a tree has one cut at each distance, and it gets coarser with distance',()
     let triangles=0;
     for(let i=p.firstCluster;i<p.firstCluster+p.clusterCount;i++){
       const c=cluster(data,i);
-      if(forestClusterIsDrawn({error:c.err,parentError:c.parentErr,lodDistance:distance,parentDistance:distance},1000,.6))triangles+=c.triangles;
+      if(forestClusterIsDrawn({error:c.err,parentError:c.parentErr,lodDistance:distance,parentDistance:distance},1000,1.2))triangles+=c.triangles;
     }
     return triangles;
   });
