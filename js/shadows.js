@@ -160,7 +160,7 @@ const LAND_SHADOW_HEIGHT_STEP = 16;
 // disc looks from the sun, so a low sun spends its rows on ground and not on empty air, and as deep
 // as the relief needs, so no height inside the disc falls out of it. Its centre moves in whole texels
 // measured from the world's origin, so the texels stay on the same ground wherever the camera goes.
-export function fitLandShadow(out, camera, groundY, sun, resolution = 4096, radius = 72, enabled = true, low = groundY, high = groundY) {
+export function fitLandShadow(out, camera, groundY, sun, resolution = LAND_SHADOW_RESOLUTION, radius = 72, enabled = true, low = groundY, high = groundY) {
   const [sx, sy, sz] = sun;
   const horizontal = Math.hypot(sx, sz);
   const rx = horizontal > 1e-5 ? sz / horizontal : 1;
@@ -203,7 +203,8 @@ export function fitLandShadow(out, camera, groundY, sun, resolution = 4096, radi
 }
 
 export const LAND_SHADOW_FORMAT = 'depth32float';
-export function createLandShadows(device, resolution = 4096) {
+export const LAND_SHADOW_RESOLUTION = 2048;
+export function createLandShadows(device, resolution = LAND_SHADOW_RESOLUTION) {
   const B = GPUBufferUsage, T = GPUTextureUsage;
   const data = new Float32Array(28);
   let heldRadius = 0;

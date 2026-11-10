@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fitLandShadow, landShadowRadiusStep, landShadowRelief, LAND_SHADOW_RADII } from '../js/shadows.js';
+import fs from 'node:fs';
+import { fitLandShadow, landShadowRadiusStep, landShadowRelief, LAND_SHADOW_RADII, LAND_SHADOW_RESOLUTION } from '../js/shadows.js';
 import { SHADOW_SAMPLE } from '../js/wgsl/shadows.js';
 import { TERRAIN } from '../js/wgsl/terrain.js';
 import { FOREST_CLUSTER_SELECT, FOREST_CLUSTER_SHADOW_WGSL } from '../js/forest-clusters.js';
 
-const RESOLUTION = 4096;
+const RESOLUTION = LAND_SHADOW_RESOLUTION;
 const sunAt = (elevation, azimuth = 0.7) => {
   const e = elevation * Math.PI / 180;
   return [Math.cos(e) * Math.cos(azimuth), Math.sin(e), Math.cos(e) * Math.sin(azimuth)];
@@ -113,4 +114,11 @@ test('forest shadow casters are chosen from every tree against the light box, no
   assert.match(body, /bucket\.capacity\.y\+id\.x/, 'it walks every root of the species');
   assert.ok(!/dCam|24025/.test(FOREST_CLUSTER_SHADOW_WGSL), 'no caster is rejected one vertex at a time');
   assert.match(FOREST_CLUSTER_SHADOW_WGSL, /@fragment fn forestClusterLeafShadowFS[^}]*discard/, 'leaves cast through their outlines');
+});
+
+test('the land shadow map is 2048 square on every device: 16 MiB, not 64', () => {
+  assert.equal(LAND_SHADOW_RESOLUTION, 2048);
+  assert.equal(LAND_SHADOW_RESOLUTION ** 2 * 4 / 2 ** 20, 16);
+  const main = fs.readFileSync(new URL('../js/main.js', import.meta.url), 'utf8');
+  assert.match(main, /createLandShadows\(device\)/, 'the game asks for the default size, with no larger map for desktops');
 });

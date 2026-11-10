@@ -406,7 +406,8 @@ async function main() {
   const surfaceWavesPromise = createSurfaceWaves({ device, computePipe });
   const waterOpticsPromise = surfaceWavesPromise.then(sw => createWaterOptics({ device, shader, seaView: fullArr(dispTex), seaSampler: samplerSim, format: HDR, surfaceWaves: sw }));
   const cloudsPromise = createVolumetricClouds({ device, frameUBO, transView, skyView, sampler: sampClamp, computePipe });
-  const landShadows = createLandShadows(device, /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ? 2048 : 4096);
+  // 2048 square is 16 MiB. At 4096 it was 64 MiB for shadows that differ only in how sharp a walker's is.
+  const landShadows = createLandShadows(device);
   const terrainPromise = LAND_STAGE ? createTerrain({ waterOptics: waterOpticsPromise, device, frameUBO, transView, skyView, sampler: sampClamp, envCubeView, clouds: cloudsPromise, shader, computePipe, mipPipe: rgba8MipPipePromise, format: HDR, samples: MSAA, portDamage, landShadows }) : Promise.resolve(null);
   const prewarmPromises = [
     computePipe(SCENE_DECK_UPDATE, 'deck wash'),
