@@ -53,7 +53,12 @@ import {
   classifyKoppenClimateFromNormals,
   estimateLocalClimateProfile,
   fetchPublicClimateProfile,
+  createCoastalViews,
+  settleDockBerth,
+  drownDemCoastalRinging,
 } from '../js/coastal-world.js';
+import zlib from 'node:zlib';
+import { findNearestPier, MOORING_LINE_REACH_M } from '../js/boarding-docking.js';
 import {
   FOREST_SPECIES,
   FOREST_ROOT_FLOATS,
@@ -2061,4 +2066,167 @@ test('Portugal 5-tier multi-cohort forest pack loads 12 veteran+canopy prototype
   }
   assert.ok(near500 >= 2000, `Expected dense harbor-hill woodland within 500m of Lisboa port (>=2,000 trees, got ${near500})`);
   assert.ok(near1000 >= 10000, `Expected dense harbor-hill woodland within 1,000m of Lisboa port (>=10,000 trees, got ${near1000})`);
+});
+
+// A port call is "Moor and go ashore" only where the ship that starts at the dock can get a line to a pier. Both
+// halves have failed apart: a berth too shoal is moved off by safeLandfallStart, and then the pier is out of reach.
+const DOCK_CARAVEL = { length: 20, beam: 6, hydrodynamics: { draft: 2.1 } };
+function dockBerthFault(label, port, views, heights, region) {
+  if (!port.instances.some((inst) => /jetty|pier|wharf|dock|quay|mole|slip/i.test(inst.prefabId))) return null;
+  const dock = views.dock;
+  if (dock.moved) return `${label}: the dock start was moved off its berth (${port.dockBerth.x.toFixed(0)}, ${port.dockBerth.z.toFixed(0)})`;
+  if (dock.depth < 3.1) return `${label}: ${dock.depth.toFixed(1)} m of water at the berth`;
+  const again = safeLandfallStart(heights, { x: dock.x, z: dock.z, heading: dock.heading }, DOCK_CARAVEL, region);
+  if (again.moved) return `${label}: the caravel does not float at her berth`;
+  const pier = findNearestPier({ x: dock.x, z: dock.z, heading: dock.heading, beam: 6 }, { portInstances: port.instances });
+  if (!pier) return `${label}: no pier within ${MOORING_LINE_REACH_M} m of the berth`;
+  return null;
+}
+
+test('every shipped port berths the caravel afloat within a line of a pier, on its made-up coast', () => {
+  const ids = [...new Set([...Object.keys(SPANISH_MAIN_1550_REGIONS), ...HISTORICAL_COLONIAL_PORTS.map((p) => p.id)])];
+  const faults = [];
+  let berthed = 0;
+  for (const id of ids) {
+    const known = Object.hasOwn(SPANISH_MAIN_1550_REGIONS, id);
+    const preset = known ? SPANISH_MAIN_1550_REGIONS[id] : HISTORICAL_COLONIAL_PORTS.find((p) => p.id === id);
+    // The year the game opens each at, and the mobile grid; the desktop one is twice as fine.
+    const year = known ? 1550 : preset.foundedYear > 1550 ? Math.min(1685, preset.foundedYear + 15) : 1550;
+    const pack = generateProceduralCoastalPack(known ? id : { ...preset, id, year }, { size: 257, biomeSize: 64, albedoSize: 64, vegetationCandidates: 100 });
+    const fault = dockBerthFault(`${id} in ${year}`, pack.port, pack.views, pack.heights, pack.region);
+    if (fault) faults.push(fault);
+    if (pack.port.instances.some((inst) => inst.prefabId === 'timber_mole_pier')) berthed++;
+  }
+  assert.deepEqual(faults, []);
+  assert.ok(berthed >= 45, `only ${berthed} of ${ids.length} ports have a pier to berth at`);
+});
+
+test('the same holds on the real coasts kept for the forts, early and late', () => {
+  const folder = new URL('./data/harbours/', import.meta.url), faults = [];
+  for (const file of fs.readdirSync(folder)) {
+    const id = file.replace('.bin.gz', '');
+    const all = zlib.gunzipSync(fs.readFileSync(new URL(file, folder))), length = all.readUInt32LE(0), header = JSON.parse(all.subarray(4, 4 + length).toString());
+    const words = new Int16Array(all.buffer.slice(all.byteOffset + 4 + length, all.byteOffset + all.length));
+    for (const year of [1550, 1650]) {
+      const region = resolveGlobalCoastalRegion({ id, year, size: header.size, biomeSize: 64, albedoSize: 64, vegetationCandidates: 100, latitude: header.latitude, longitude: header.longitude, shoreBearing: header.shoreBearing });
+      const heights = new Float32Array(words.length);
+      for (let i = 0; i < words.length; i++) heights[i] = words[i] / 10;
+      // As finalizeProceduralCoastalPack does it.
+      smoothCoastlineAndForeshoreBeaches(heights, region, {});
+      const port = placeCoastalPort(region, heights, { preserveRealCoast: true, coastIsReal: true });
+      smoothCoastlineAndForeshoreBeaches(heights, region, { preservePortCore: port });
+      const fault = dockBerthFault(`${id} in ${year}`, port, createCoastalViews(region, heights, port), heights, region);
+      if (fault) faults.push(fault);
+    }
+  }
+  assert.deepEqual(faults, []);
+});
+
+// A straight shore with a pier, on the desktop grid's 16 m cells. `shape` raises or lowers the sea floor.
+function pierOnAShore(shape) {
+  const region = resolveGlobalCoastalRegion({ latitude: 20, longitude: -40, shoreBearing: 0, span: 2048, size: 129, biomeSize: 64, albedoSize: 64, vegetationCandidates: 10 });
+  const n = region.size, heights = new Float32Array(n * n);
+  // Bearing 0 looks north, so the land is to the north (z falling) and the sea to the south.
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+    const x = region.x + (i / (n - 1) - 0.5) * region.span, z = region.z + (j / (n - 1) - 0.5) * region.span, off = z - region.z;
+    heights[j * n + i] = shape(x - region.x, off, off <= 0 ? 2 : -Math.min(12, 1 + off * 0.2));
+  }
+  // The pier runs 68 m out from the shore; yaw 0 lays its length along z.
+  const pier = { prefabId: 'timber_mole_pier', x: region.x, z: region.z + 30, yaw: 0, width: 7.5, length: 68 };
+  return { region, heights, pier, wanted: { x: region.x - 6, z: region.z + 90 } };
+}
+const dockStart = (heights, region, at) => safeLandfallStart(heights, { x: at.x, z: at.z, heading: 270 }, DOCK_CARAVEL, region);
+
+test('a dock berth keeps its place in clear water, and leaves a spit or a shoal for water by the pier', () => {
+  const open = pierOnAShore((x, off, h) => h);
+  const kept = settleDockBerth(open.heights, open.region, [open.pier], open.wanted);
+  assert.deepEqual(kept, open.wanted, 'deep water in reach of the pier: the berth stays where the port was drawn');
+
+  // Havana's fault: a tongue of land beside the pier head, under the hull's swinging room but not under her keel.
+  const spit = pierOnAShore((x, off, h) => (off > 0 && x < -14 && x > -70 && off < 110 ? 1.4 : h));
+  assert.ok(terrainSample(spit.heights, spit.wanted.x, spit.wanted.z, spit.region) < -3.1, 'the keel itself has water');
+  assert.equal(dockStart(spit.heights, spit.region, spit.wanted).moved, true, 'and yet she cannot lie there');
+  const before = new Float32Array(spit.heights);
+  const moved = settleDockBerth(spit.heights, spit.region, [spit.pier], spit.wanted);
+  assert.notDeepEqual(moved, spit.wanted);
+  assert.equal(dockStart(spit.heights, spit.region, moved).moved, false, 'she floats where the berth went');
+  assert.ok(findNearestPier({ ...moved, heading: 270, beam: 6 }, { portInstances: [spit.pier] }), 'with a line to the pier');
+  assert.deepEqual(spit.heights, before, 'and no ground was moved to do it');
+
+  // A pier in the shallows: nowhere in reach floats her, so the mud is dredged and the land is left alone.
+  const shoal = pierOnAShore((x, off, h) => (off > 0 ? -1.5 : h));
+  const untouched = new Float32Array(shoal.heights);
+  const dredged = settleDockBerth(shoal.heights, shoal.region, [shoal.pier], shoal.wanted);
+  assert.equal(dockStart(shoal.heights, shoal.region, dredged).moved, false, 'she floats in the dredged berth');
+  assert.ok(findNearestPier({ ...dredged, heading: 270, beam: 6 }, { portInstances: [shoal.pier] }));
+  let deepened = 0;
+  for (let k = 0; k < untouched.length; k++) {
+    if (untouched[k] > 0.25) assert.equal(shoal.heights[k], untouched[k], 'land is never dredged');
+    else if (shoal.heights[k] < untouched[k]) deepened++;
+    else assert.equal(shoal.heights[k], untouched[k]);
+  }
+  assert.ok(deepened > 20 && deepened < 400, `a berth was dredged, not a harbour (${deepened} cells)`);
+
+  // No pier, no line: the place is left as it was.
+  assert.deepEqual(settleDockBerth(spit.heights, spit.region, [], spit.wanted), spit.wanted);
+});
+
+// Terrarium elevation tiles, as upgradeProceduralPackWithRealDEM decodes them: a low plain between the sea and a steep hill.
+function plainAndHillTile() {
+  const tile = new Uint8ClampedArray(256 * 256 * 4);
+  for (let y = 0; y < 256; y++) for (let x = 0; x < 256; x++) {
+    const band = (x + y) % 128;
+    const h = band < 56 ? 0 : band < 76 ? 1.8 : 1.8 + (band - 76) * 8;
+    const value = Math.round((h + 32768) * 256), at = (y * 256 + x) * 4;
+    tile[at] = (value >> 16) & 255; tile[at + 1] = (value >> 8) & 255; tile[at + 2] = value & 255; tile[at + 3] = 255;
+  }
+  return tile;
+}
+
+test('real elevation keeps its low coast and its own relief unless the region is a steep island', async () => {
+  // The cleanup itself: a cone in deep water with a skirt of false land round it and a needle offshore.
+  const n = 96, dem = new Float32Array(n * n).fill(-40);
+  let land = 0;
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+    const r = Math.hypot(i - 48, j - 48);
+    if (r < 20) dem[j * n + i] = 6 + (20 - r) * 30;
+    else if (r < 26) dem[j * n + i] = 1.5;
+    if (dem[j * n + i] > 0.25) land++;
+  }
+  dem[10 * n + 10] = 30; dem[10 * n + 11] = 30; land += 2;
+  const drowned = drownDemCoastalRinging(dem, n, 606, land);
+  assert.ok(drowned > 400, `the skirt and the needle go back to the sea (${drowned} cells)`);
+  assert.equal(dem[10 * n + 10], -1.5);
+  assert.equal(dem[48 * n + 48 + 24], -1.5, 'the skirt');
+  assert.ok(dem[48 * n + 48 + 19] > 5.2 && dem[48 * n + 48] > 500, 'the island stands');
+
+  // The same test drowns a real coastal plain, so relief alone no longer asks for it.
+  const tile = plainAndHillTile(), grid = { size: 129, biomeSize: 64, albedoSize: 64, vegetationCandidates: 100, deferSynthesis: true };
+  const built = async (extra) => {
+    const pack = generateProceduralCoastalPack({ latitude: 20, longitude: -40, shoreBearing: 135, ...extra }, grid);
+    await upgradeProceduralPackWithRealDEM(pack, { fetchTile: async () => tile });
+    assert.match(pack.elevationSource, /terrarium/);
+    const size = pack.region.size, inset = Math.ceil(size * 0.2);
+    let plain = 0, reshaped = 0, top = -Infinity;
+    for (let j = inset; j < size - inset; j++) for (let i = inset; i < size - inset; i++) {
+      const k = j * size + i;
+      if (pack.rawDem[k] > 0.25 && pack.rawDem[k] < 2.5) plain++;
+      if (pack.rawDem[k] > 0.25 && Math.abs(pack.rawHeights[k] - pack.rawDem[k]) > 0.5) reshaped++;
+      top = Math.max(top, pack.rawDem[k]);
+    }
+    return { pack, plain, reshaped, top };
+  };
+  const mainland = await built({});
+  assert.equal(mainland.pack.region.steepIslandDem, false);
+  assert.ok(mainland.top > 240, `relief that used to ask for the cleanup and the scarps (${mainland.top.toFixed(0)} m)`);
+  assert.ok(mainland.plain > 400, `the plain is land (${mainland.plain} cells)`);
+  assert.equal(mainland.reshaped, 0, 'and the ground is the elevation data, with no made-up cliffs');
+  const island = await built({ steepIslandDem: true });
+  assert.equal(island.pack.region.steepIslandDem, true);
+  assert.ok(island.plain < mainland.plain * 0.5, `asked for, the cleanup takes the low ground (${island.plain} of ${mainland.plain} cells left)`);
+  assert.ok(island.reshaped > 50, `and the scarps are cut (${island.reshaped} cells)`);
+  // Saba is the island it was written for, by name or by place.
+  assert.equal(resolveGlobalCoastalRegion('saba').steepIslandDem, true);
+  assert.equal(resolveGlobalCoastalRegion({ latitude: 17.63, longitude: -63.24 }).steepIslandDem, true);
+  for (const id of ['havana', 'lisbon', 'acapulco', 'rio-de-janeiro', 'st-kitts', 'tenerife']) assert.ok(!resolveGlobalCoastalRegion(id).steepIslandDem, id);
 });

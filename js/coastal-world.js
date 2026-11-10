@@ -256,6 +256,7 @@ export const SPANISH_MAIN_1550_REGIONS = Object.freeze({
     longitude: -63.238,
     climate: 'tropical',
     coastalArchetype: 'volcanic-island',
+    steepIslandDem: true,
     portType: 'careening-anchorage',
     settlementKind: 'colonial-port',
     hasColonialPort: true,
@@ -2595,6 +2596,9 @@ export function resolveGlobalCoastalRegion(spec = 'cartagena') {
     longitude,
     climate,
     coastalArchetype,
+    // Its real elevation data wants the steep-island treatment: ringing drowned, sea cliffs and guts restored.
+    // Written for Saba and right there; a record may ask for it, and relief alone never does.
+    steepIslandDem: Boolean(spec.steepIslandDem ?? isSabaIsland),
     portType,
     settlementKind,
     hasColonialPort,
@@ -3769,6 +3773,81 @@ function extractAndCarveHarborQuaysAndPiers(region, heights, orthoFootprints) {
     if (!tooClose) selected.push(p);
   }
   return selected;
+}
+
+// Where a ship lies to send her people ashore. A line reaches 36 m (MOORING_LINE_REACH_M in boarding-docking.js) to
+// whatever that file's findNearestPier will take one to, and createCoastalViews starts a 20 m caravel here, which
+// safeLandfallStart moves off, out of reach, if any of her swinging room is shoaler than 3.1 m. A pier slides along
+// its heading to find its shore and no coast is straight, so a berth measured off the shoreline can be neither. It is
+// found from the piers as they stand: the wanted place if she floats there with a line ashore, else the nearest water
+// by a pier where she does, and failing that the nearest that can be dredged for her. Mud is dredged; land never.
+const DOCK_BERTH_PIER = /jetty|pier|wharf|dock|quay|mole|slip/i;
+const DOCK_BERTH_SWING_M = 22;
+const DOCK_BERTH_WATER_M = 3.8;
+const DOCK_BERTH_DREDGED_M = 4.8;
+const DOCK_BERTH_NEAREST_M = 12;
+const DOCK_BERTH_FURTHEST_M = 30;
+export function settleDockBerth(heights, region, instances, wanted) {
+  const piers = instances.filter((inst) => DOCK_BERTH_PIER.test(inst.prefabId ?? ''));
+  if (!piers.length) return { x: wanted.x, z: wanted.z };
+  const n = region.size, span = region.span, cell = span / (n - 1), keep = span * 0.42;
+  const lineTo = (x, z) => {
+    let nearest = Infinity;
+    for (const pier of piers) {
+      const c = Math.cos(pier.yaw ?? 0), s = Math.sin(pier.yaw ?? 0), dx = x - pier.x, dz = z - pier.z;
+      const lx = dx * c - dz * s, lz = dx * s + dz * c, hw = (pier.width ?? 0) * 0.5, hl = (pier.length ?? 0) * 0.5;
+      nearest = Math.min(nearest, Math.hypot(lx - Math.max(-hw, Math.min(hw, lx)), lz - Math.max(-hl, Math.min(hl, lz))));
+    }
+    return nearest;
+  };
+  const shoalest = (x, z) => {
+    let top = terrainSample(heights, x, z, region);
+    for (const [radius, count] of [[DOCK_BERTH_SWING_M, 16], [DOCK_BERTH_SWING_M * 0.5, 8]]) {
+      for (let k = 0; k < count && top <= -DOCK_BERTH_WATER_M; k++) {
+        const turn = (k / count) * 2 * Math.PI;
+        top = Math.max(top, terrainSample(heights, x + Math.cos(turn) * radius, z + Math.sin(turn) * radius, region));
+      }
+    }
+    return top;
+  };
+  const inWaters = (x, z) => Math.abs(x - region.x) <= keep && Math.abs(z - region.z) <= keep;
+  if (inWaters(wanted.x, wanted.z) && lineTo(wanted.x, wanted.z) <= DOCK_BERTH_FURTHEST_M && shoalest(wanted.x, wanted.z) <= -DOCK_BERTH_WATER_M) {
+    return { x: wanted.x, z: wanted.z };
+  }
+  // Every height her swinging room is read from: none of it may be land if the berth is to be dredged.
+  const dredgeReach = DOCK_BERTH_SWING_M + cell * 1.5;
+  const cellsWithin = (x, z, radius, visit) => {
+    const i0 = Math.max(0, Math.floor(((x - radius - region.x) / span + 0.5) * (n - 1))), i1 = Math.min(n - 1, Math.ceil(((x + radius - region.x) / span + 0.5) * (n - 1)));
+    const j0 = Math.max(0, Math.floor(((z - radius - region.z) / span + 0.5) * (n - 1))), j1 = Math.min(n - 1, Math.ceil(((z + radius - region.z) / span + 0.5) * (n - 1)));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      const d = Math.hypot(region.x + (i / (n - 1) - 0.5) * span - x, region.z + (j / (n - 1) - 0.5) * span - z);
+      if (d <= radius && visit(j * n + i, d) === false) return false;
+    }
+    return true;
+  };
+  let afloat = null, inMud = null;
+  for (const pier of piers) {
+    const c = Math.cos(pier.yaw ?? 0), s = Math.sin(pier.yaw ?? 0);
+    const hw = (pier.width ?? 0) * 0.5 + DOCK_BERTH_FURTHEST_M, hl = (pier.length ?? 0) * 0.5 + DOCK_BERTH_FURTHEST_M;
+    for (let lz = -hl; lz <= hl; lz += 4) for (let lx = -hw; lx <= hw; lx += 4) {
+      const x = pier.x + lx * c + lz * s, z = pier.z - lx * s + lz * c;
+      if (!inWaters(x, z)) continue;
+      const off = Math.hypot(x - wanted.x, z - wanted.z);
+      if (afloat && off >= afloat.off) continue;
+      const line = lineTo(x, z);
+      if (line < DOCK_BERTH_NEAREST_M || line > DOCK_BERTH_FURTHEST_M) continue;
+      if (shoalest(x, z) <= -DOCK_BERTH_WATER_M) afloat = { x, z, off };
+      else if (!afloat && (!inMud || off < inMud.off) && cellsWithin(x, z, dredgeReach, (k) => heights[k] <= 0.25)) inMud = { x, z, off };
+    }
+  }
+  if (afloat) return { x: afloat.x, z: afloat.z };
+  if (!inMud) return { x: wanted.x, z: wanted.z };
+  cellsWithin(inMud.x, inMud.z, dredgeReach + cell * 3, (k, d) => {
+    if (heights[k] > 0.25) return;
+    const ease = coastalSmoothstep(dredgeReach + cell * 3, dredgeReach, d);
+    heights[k] = Math.min(heights[k], -DOCK_BERTH_DREDGED_M * ease);
+  });
+  return { x: inMud.x, z: inMud.z };
 }
 
 export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, satelliteData = null, shoreDist = null, coastIsReal = false } = {}) {
@@ -5042,7 +5121,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
   const berthDepth = -terrainSample(heights, berthPos.x, berthPos.z, region);
   const dockAlongOffset = isLisbonRoyalDock ? 22 : -6;
   const dockInlandOffset = isLisbonRoyalDock ? -84 : -62;
-  const dockPos = worldFromCoastalFrame(region, bestShoreAlong + dockAlongOffset, bestShoreInland + dockInlandOffset);
+  const dockPos = settleDockBerth(heights, region, instances, worldFromCoastalFrame(region, bestShoreAlong + dockAlongOffset, bestShoreInland + dockInlandOffset));
   const dockDepth = -terrainSample(heights, dockPos.x, dockPos.z, region);
   const dockHeading = (((region.shoreBearing ?? 112) - (isLisbonRoyalDock ? 100 : 108)) % 360 + 360) % 360;
 
@@ -9529,6 +9608,57 @@ function fetchCachedTerrariumTileRgba(demUrl, signal) {
 // satellite orthophoto tiles (https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x})
 // in parallel. Applies Saba's coastal bathymetry skirt model and spectral satellite
 // auto-placement of 3D forests, coconut palms, and sandy beaches.
+// Coarse radar elevation rings round a steep island that stands in deep water: a skirt of false land a few metres
+// high lies off the true shore, with needle patches too small to be ground. Here land counts only where it rises
+// above that ringing in a patch big enough to be real, or touches such a patch; the rest goes back to the sea.
+// A real low coast fails the same test (measured on the shipped ports: a fifth of the land at Acapulco and Rio, and
+// the islets of Fort-Royal's bay), so this runs only for a region that asks for it with steepIslandDem.
+// Returns how many cells it drowned.
+export function drownDemCoastalRinging(rawDem, n, maxDem, landCount) {
+  const coreThresh = maxDem > 240 ? 5.2 : 2.4;
+  const minComponentCells = Math.max(48, Math.min(180, Math.floor(landCount * 0.015)));
+  const visited = new Uint8Array(n * n);
+  const coreMask = new Uint8Array(n * n);
+  let keptCoreCells = 0;
+  for (let k = 0; k < n * n; k++) {
+    if (rawDem[k] <= coreThresh || visited[k]) continue;
+    const q = [k];
+    visited[k] = 1;
+    for (let head = 0; head < q.length; head++) {
+      const cur = q[head];
+      const cx = cur % n, cy = (cur / n) | 0;
+      if (cx > 0 && !visited[cur - 1] && rawDem[cur - 1] > coreThresh) { visited[cur - 1] = 1; q.push(cur - 1); }
+      if (cx + 1 < n && !visited[cur + 1] && rawDem[cur + 1] > coreThresh) { visited[cur + 1] = 1; q.push(cur + 1); }
+      if (cy > 0 && !visited[cur - n] && rawDem[cur - n] > coreThresh) { visited[cur - n] = 1; q.push(cur - n); }
+      if (cy + 1 < n && !visited[cur + n] && rawDem[cur + n] > coreThresh) { visited[cur + n] = 1; q.push(cur + n); }
+    }
+    if (q.length >= minComponentCells) {
+      for (let idx = 0; idx < q.length; idx++) coreMask[q[idx]] = 1;
+      keptCoreCells += q.length;
+    }
+  }
+  if (keptCoreCells < minComponentCells) return 0;
+  const validLand = new Uint8Array(coreMask);
+  const fringeThresh = maxDem > 240 ? 2.2 : 1.0;
+  for (let y = 1; y < n - 1; y++) {
+    for (let x = 1; x < n - 1; x++) {
+      const k = y * n + x;
+      if (validLand[k] || rawDem[k] <= fringeThresh) continue;
+      if (coreMask[k - 1] || coreMask[k + 1] || coreMask[k - n] || coreMask[k + n]) {
+        validLand[k] = 1;
+      }
+    }
+  }
+  let drowned = 0;
+  for (let k = 0; k < n * n; k++) {
+    if (!validLand[k] && rawDem[k] > 0.25) {
+      rawDem[k] = -1.5;
+      drowned++;
+    }
+  }
+  return drowned;
+}
+
 export async function upgradeProceduralPackWithRealDEM(
   pack,
   { fetchTile = null, fetchSatelliteTile = null, zoom = 13, demSpan = null, timeoutMs = 12000, _snapAttempted = false, isNeighborSection = false, snapToCoast = true } = {}
@@ -9821,57 +9951,17 @@ export async function upgradeProceduralPackWithRealDEM(
       for (const item of satLoaded) item?.bmp?.close?.();
     }
 
-    // Suppress coarse SRTM/GMTED coastal ringing (0.25..5m offshore radar sidelobes) and tiny disconnected
-    // offshore needle patches around steep mountainous/volcanic relief (matching scripts/prepare-land.py:61-79).
-    if (!isNeighborSection && maxDem > 120) {
-      const coreThresh = maxDem > 240 ? 5.2 : 2.4;
-      const minComponentCells = Math.max(48, Math.min(180, Math.floor(landCount * 0.015)));
-      const visited = new Uint8Array(n * n);
-      const coreMask = new Uint8Array(n * n);
-      let keptCoreCells = 0;
-      for (let k = 0; k < n * n; k++) {
-        if (rawDem[k] <= coreThresh || visited[k]) continue;
-        const q = [k];
-        visited[k] = 1;
-        for (let head = 0; head < q.length; head++) {
-          const cur = q[head];
-          const cx = cur % n, cy = (cur / n) | 0;
-          if (cx > 0 && !visited[cur - 1] && rawDem[cur - 1] > coreThresh) { visited[cur - 1] = 1; q.push(cur - 1); }
-          if (cx + 1 < n && !visited[cur + 1] && rawDem[cur + 1] > coreThresh) { visited[cur + 1] = 1; q.push(cur + 1); }
-          if (cy > 0 && !visited[cur - n] && rawDem[cur - n] > coreThresh) { visited[cur - n] = 1; q.push(cur - n); }
-          if (cy + 1 < n && !visited[cur + n] && rawDem[cur + n] > coreThresh) { visited[cur + n] = 1; q.push(cur + n); }
-        }
-        if (q.length >= minComponentCells) {
-          for (let idx = 0; idx < q.length; idx++) coreMask[q[idx]] = 1;
-          keptCoreCells += q.length;
-        }
-      }
-      if (keptCoreCells >= minComponentCells) {
-        const validLand = new Uint8Array(coreMask);
-        const fringeThresh = maxDem > 240 ? 2.2 : 1.0;
-        for (let y = 1; y < n - 1; y++) {
-          for (let x = 1; x < n - 1; x++) {
-            const k = y * n + x;
-            if (validLand[k] || rawDem[k] <= fringeThresh) continue;
-            if (coreMask[k - 1] || coreMask[k + 1] || coreMask[k - n] || coreMask[k + n]) {
-              validLand[k] = 1;
-            }
-          }
-        }
-        for (let k = 0; k < n * n; k++) {
-          if (!validLand[k] && rawDem[k] > 0.25) {
-            rawDem[k] = -1.5;
-          }
-        }
-      }
-    }
+    // Ringing round a steep island, where the region says its elevation data has it.
+    if (!isNeighborSection && region.steepIslandDem && maxDem > 120) drownDemCoastalRinging(rawDem, n, maxDem, landCount);
 
     // Apply Saba's exact coastal bathymetry model (scripts/prepare-land-imagery.py:76-83):
-    // Measured land elevations > 0.25m are retained; on steep volcanic/mountainous relief (maxDem > 240m),
-    // restore high-frequency sea-cliff scarps and radial ravines ("guts") attenuated by Z13 bilinear interpolation.
+    // Measured land elevations > 0.25m are retained. Where the region is a steep island (steepIslandDem) with relief
+    // over 240 m, restore the sea-cliff scarps and radial ravines ("guts") that Z13 bilinear interpolation flattens.
+    // Only there: the scarp is up to 62 m of made-up cliff within 165 m of the shore, which buries a harbour town's
+    // ground, and its sharpening throws 895 m needles beside a void in the elevation data (Acapulco, Portobelo).
     const { distLand, distWater, step } = computeCoastalShoreDistances(rawDem, n, span, 0.25);
     const heights = new Float32Array(n * n);
-    const sharpenSteepRelief = maxDem > 240;
+    const sharpenSteepRelief = Boolean(region.steepIslandDem) && maxDem > 240;
     const seed = (region.vegetationSeed ?? coastalHashCoords(region.latitude, region.longitude)) >>> 0;
     for (let j = 0; j < n; j++) {
       const z = region.z + (j / (n - 1) - 0.5) * span;
