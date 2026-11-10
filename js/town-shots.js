@@ -18,12 +18,21 @@ const RUBBLE_REACH_M = Object.freeze({ least: 28, perRootPiece: 3, most: 70 });
 const MAGAZINE_BLAST_M = 22;
 const MAGAZINE_REACH_M = 160;
 const PIECES_LOCATED = 32;
-// How long a building is watched for what comes down after it was last hit or last lost anything.
-const WATCH_FRAMES = 600;
+// How long a building is watched for what comes down after it was last hit or last lost anything, and how long a
+// town is under fire after a ball last landed in it. By the clock: a frame is no fixed length of time, and only the
+// town whose people are being drawn has its list collected at all.
+export const TOWN_WATCH_MS = 10000;
+const WATCH_FRAMES_A_SECOND = 60;
 
 const within = (range, scale) => Math.min(range.most, range.least + scale);
 
-export function createTownShots(streets) {
+export function createTownShots(streets, { now = () => performance.now() } = {}) {
+  // js/audio.js asks how many frames of being under fire are left. It is told the time left, as frames at sixty a
+  // second, so that the answer runs out whether or not anything here is called again.
+  Object.defineProperty(streets, 'underFireFrames', {
+    configurable: true, enumerable: true,
+    get: () => Math.max(0, Math.ceil(((streets.underFireUntilMs ?? -Infinity) - now()) * WATCH_FRAMES_A_SECOND / 1000)),
+  });
   const { x: townX, z: townZ, span } = streets.window;
   const townRadius = span * Math.SQRT1_2 + OUTSIDE_TOWN_M;
   const flights = new Map(), landings = [], watched = new Map();
@@ -47,19 +56,20 @@ export function createTownShots(streets) {
     burst(at[0], fracture.groundAt(at[0], at[2]), at[2], within(RUBBLE_BLAST_M, root * RUBBLE_BLAST_M.perRootPiece), within(RUBBLE_REACH_M, root * RUBBLE_REACH_M.perRootPiece));
   };
   const lookAtBuildings = () => {
+    const at = now();
     for (const [building, seen] of watched) {
       const damage = building.damageState, state = damage?.fracture, broken = state?.brokenCount ?? 0;
       if (broken > seen.broken) {
         // Nothing in the air means a saved ruin coming back, not anything falling now.
         if (state.flying?.size) comeDown(state, broken - seen.broken);
         seen.broken = broken;
-        seen.quiet = 0;
+        seen.since = at;
       }
       if (damage?.magazineExploded && !seen.blown) {
         seen.blown = true;
         burst(building.x ?? 0, building.y ?? 0, building.z ?? 0, MAGAZINE_BLAST_M, MAGAZINE_REACH_M);
       }
-      if (++seen.quiet > WATCH_FRAMES) watched.delete(building);
+      if (at - seen.since > TOWN_WATCH_MS) watched.delete(building);
     }
   };
   return {
@@ -78,21 +88,19 @@ export function createTownShots(streets) {
       }
       if (!hit) return;
       streets.underFireCount = (streets.underFireCount ?? 0) + 1;
-      streets.underFireFrames = WATCH_FRAMES;
-      streets.lastShotPoint = [...end];
+      streets.underFireUntilMs = now() + TOWN_WATCH_MS;
       const root = Math.sqrt(joules / 1e6);
       burst(end[0], end[1], end[2], within(LANDING_BLAST_M, root * LANDING_BLAST_M.perRootMegajoule), within(LANDING_REACH_M, root * LANDING_REACH_M.perRootMegajoule));
       const building = hit.building;
       if (building) {
         const seen = watched.get(building);
-        if (seen) seen.quiet = 0;
-        else watched.set(building, { broken: building.damageState?.fracture?.brokenCount ?? 0, blown: Boolean(building.damageState?.magazineExploded), quiet: 0 });
+        if (seen) seen.since = now();
+        else watched.set(building, { broken: building.damageState?.fracture?.brokenCount ?? 0, blown: Boolean(building.damageState?.magazineExploded), since: now() });
       }
     },
     // Writes the list as a uniform block and empties it, returning how many it holds. Landings first: when a great
     // many balls fly at once, a few of them are the ones not looked for.
     collect(words, floats) {
-      if (streets.underFireFrames > 0) streets.underFireFrames--;
       if (watched.size) lookAtBuildings();
       let count = 0;
       const put = ({ start, end, strike, blast, reach, seed }) => {

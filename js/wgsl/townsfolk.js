@@ -10,13 +10,19 @@ import { DRESS_MASK_SCALE } from '../indigenous-dress.js';
 import { ROUTE_STEP_M } from '../town-streets.js';
 import { CREW_WALK_CYCLE_METRES } from '../crew-motion.js';
 
+export const TOWNSFOLK_MODELS = 2;
 export const TOWNSFOLK_TIERS = 4;
+// Bodies are kept in one run for each model at each level of detail, and then one run for each model of everyone who
+// casts a shadow: all who are drawn, and those just out of sight whose shadow may fall into it.
+export const TOWNSFOLK_SHADOW_BUCKET = TOWNSFOLK_MODELS * TOWNSFOLK_TIERS;
+export const TOWNSFOLK_BUCKETS = TOWNSFOLK_SHADOW_BUCKET + TOWNSFOLK_MODELS;
 export const TOWNSFOLK_BODY_WORDS = 8;
 export const TOWNSFOLK_LOOKS = 48;
 export const TOWN_FATE_WORDS = 12;
 export const TOWN_SHOT_LIMIT = 64;
 export const TOWN_SHOT_WORDS = 12;
 export const [TOWN_ABOUT, TOWN_AFRAID, TOWN_FALLING, TOWN_DOWN] = [0, 1, 2, 3];
+// How long the fallen lie, by the game's calendar. The pass is told the date in hours and keeps each one's own.
 export const TOWN_CASUALTY_STAY_S = 86400;
 export const TOWN_COWER_FRAMES = 10;
 export const TOWN_FALL_FRAMES = 21;
@@ -40,10 +46,14 @@ const CLIP_FRAMES_PER_SECOND = 30;
 const BODY_HEIGHT_M = 1.75;
 const BODY_BOUND_M = 1.3;
 const LYING_BOUND_M = 2.4;
-// How tall someone appears on screen, in pixels, at each change of detail.
-const NEAR_PIXELS = 110;
-const MID_PIXELS = 48;
-const FAR_PIXELS = 20;
+// How tall someone appears on screen, in pixels, at each change of detail. Each body is kept until it has about
+// five pixels to a triangle facing the eye, which is where the next coarser one begins to show in its shading.
+const NEAR_PIXELS = 200;
+const MID_PIXELS = 100;
+const FAR_PIXELS = 32;
+// Out of sight, someone this near the eye and this near the edge of the view may still cast a shadow into it.
+const SHADOW_NEAR_M = 110;
+const SHADOW_MARGIN_M = 18;
 const SMALLEST_PIXELS = 2.5;
 
 const TOWN_BODY = /* wgsl */ `
@@ -52,7 +62,7 @@ struct TownBody {position:vec3f,heading:f32,frameA:u32,frameB:u32,blend:f32,look
 
 export const TOWNSFOLK_WALK = FRAME_WGSL + TOWN_BODY + /* wgsl */ `
 struct Walker {first:u32,count:u32,phase:f32,speed:f32,side:f32,pauseAt:f32,pauseFor:f32,indoors:f32,length:f32,abroad:f32,look:u32,flags:u32};
-struct TownCrowd {clips:array<vec4u,6>,bucketSpan:u32,looks:u32,padding:vec2u};
+struct TownCrowd {clips:array<vec4u,6>,bucketSpan:u32,looks:u32,hours:f32,padding:u32};
 struct TownShot {start:vec3f,strike:f32,end:vec3f,blast:f32,reach:f32,seed:f32,padding:vec2f};
 struct TownShots {count:u32,list:array<TownShot,${TOWN_SHOT_LIMIT}>};
 struct TownFate {mode:u32,since:f32,until:f32,runFor:f32,along:f32,going:f32,lane:f32,heading:f32,clock:f32,speed:f32,look:f32,how:u32};
@@ -117,8 +127,10 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
   }else if(fate.mode==FALLING&&age>=${(TOWN_FALL_FRAMES / TOWN_FALL_RATE).toFixed(3)}){
     fate.mode=DOWN;
     fates[id.x]=fate;
-  }else if(fate.mode==DOWN&&age>=${TOWN_CASUALTY_STAY_S.toFixed(1)}){
-    fate.mode=ABOUT;
+  }else if(fate.mode==DOWN&&abs(crowd.hours-fate.clock)>=${(TOWN_CASUALTY_STAY_S / 3600).toFixed(1)}){
+    // A day on by the calendar they are gone from where they lay, and the town has its number again. The frame
+    // clock cannot say so: it runs round every ${SIM_CLOCK_LOOP_S} seconds.
+    fate=TownFate(ABOUT,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0u);
     fates[id.x]=fate;
   }
   var metres=fate.along;var going=fate.going;var lane=fate.lane;var walked=0.0;var ran=0.0;var stopped=false;var hidden=false;
@@ -210,6 +222,8 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
       fate.speed=throwVy;
       fate.look=f32(dmgCode);
       fate.mode=FALLING;fate.since=time;fate.along=metres;fate.going=going;fate.lane=lane;fate.heading=atan2(toward.x,toward.y);
+      // Their day runs by its own clock only while they are about, so the hour they fell is kept in its place.
+      fate.clock=crowd.hours;
       heading=fate.heading;age=0.0;
       fates[id.x]=fate;
     }else if(fear>0.0&&townRoll(id.x,fearSeed+1.0)<min(1.0,fear*${TOWN_REACT_GAIN.toFixed(2)})){
@@ -290,11 +304,12 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
   }
   if(hidden){return;}
   let relative=position+vec3f(0.0,${(BODY_HEIGHT_M * 0.5).toFixed(3)},0.0)-F.camPos.xyz;
-  let cullR=select(select(${BODY_BOUND_M.toFixed(2)},${LYING_BOUND_M.toFixed(2)},fate.mode>=FALLING),18.0,length(relative)<110.0);
-  if(!inFrustum(relative,cullR)){return;}
+  // Those out of sight are kept only for the shadow they may cast into it, and are never drawn themselves.
+  let seen=inFrustum(relative,select(${BODY_BOUND_M.toFixed(2)},${LYING_BOUND_M.toFixed(2)},fate.mode>=FALLING));
+  if(!seen&&(length(relative)>=${SHADOW_NEAR_M.toFixed(1)}||!inFrustum(relative,${SHADOW_MARGIN_M.toFixed(1)}))){return;}
   let depth=max(dot(relative,normalize(F.camFwd.xyz)),1.2);
   let pixels=${BODY_HEIGHT_M.toFixed(3)}*F.screen.y/(2.0*length(F.camUp.xyz))/depth;
-  if(pixels<${SMALLEST_PIXELS.toFixed(1)}){return;}
+  if(seen&&pixels<${SMALLEST_PIXELS.toFixed(1)}){return;}
   let tier=select(select(select(3u,2u,pixels>${FAR_PIXELS.toFixed(1)}),1u,pixels>${MID_PIXELS.toFixed(1)}),0u,pixels>${NEAR_PIXELS.toFixed(1)});
   let model=w.flags&1u;
   let plain=crowd.clips[model*3u];let fright=crowd.clips[model*3u+1u];let fall=crowd.clips[model*3u+2u];
@@ -325,12 +340,17 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
   frame=clamp(frame,0.0,f32(frames)-select(1.0,.001,looped));
   let whole=min(u32(frame),frames-1u);
   let after=select(min(whole+1u,frames-1u),(whole+1u)%frames,looped);
-  let bucket=model*${TOWNSFOLK_TIERS}u+tier;
-  let slot=atomicAdd(&draws[bucket*5u+1u],1u);
   let dmgCode=select(select(0u,u32(max(0.0,fate.look)),fate.mode==AFRAID&&(fate.runFor>0.0||fate.how==1u)),fate.how>>1u,fate.mode>=FALLING);
   let rawBlend=select(fract(frame),0.0,tier>=3u||fate.mode==DOWN);
   let packedBlend=select(rawBlend,f32(dmgCode)+clamp(rawBlend,0.0,0.96875),dmgCode>0u);
-  bodies[bucket*crowd.bucketSpan+slot]=TownBody(position,heading,first+whole,first+after,packedBlend,model*crowd.looks+w.look%crowd.looks);
+  let body=TownBody(position,heading,first+whole,first+after,packedBlend,model*crowd.looks+w.look%crowd.looks);
+  if(seen){
+    let bucket=model*${TOWNSFOLK_TIERS}u+tier;
+    bodies[bucket*crowd.bucketSpan+atomicAdd(&draws[bucket*5u+1u],1u)]=body;
+  }
+  // Everyone kept casts a shadow, from the coarsest body: a shadow is a few texels tall however near they stand.
+  let shade=${TOWNSFOLK_SHADOW_BUCKET}u+model;
+  bodies[shade*crowd.bucketSpan+atomicAdd(&draws[shade*5u+1u],1u)]=body;
 }
 `;
 
@@ -409,7 +429,8 @@ fn townPoseBones(frame:u32,bones:vec4u,weights:vec4f)->mat4x4f {
   let shirtCol=mix(look.shirt.rgb,look.shirt.rgb*vec3f(0.55,0.32,0.32)+vec3f(0.20,0.0,0.0),smoothstep(0.15,0.85,woundAmt));
   let clothed=crewClothed(v.color,v.position,shirtCol,look.trousers.rgb,look.skin.rgb,look.hair.rgb,look.face.w>1.5,dress);
   out.color=clothed.rgb;out.skin=clothed.w;out.paint=dress>>16u;
-  let rainWet=clamp(F.windP[1].x,0.0,1.0);
+  // Rain and sleet wet them. Snow and hail do not, and neither does anything else the frame happens to carry.
+  let rainWet=clamp(F.reserved.x,0.0,1.0)*select(0.0,1.0,F.reserved.y<0.5||(F.reserved.y>1.5&&F.reserved.y<2.5));
   let seaWet=select(0.0,0.92,body.position.y<-0.02);
   out.helm=0.0;out.wet=max(vec2f(rainWet*0.65,rainWet*0.75),vec2f(seaWet,seaWet));
   out.bodyPos=v.position;out.damage=vec3f(woundAmt,scorchAmt,bSeed);
