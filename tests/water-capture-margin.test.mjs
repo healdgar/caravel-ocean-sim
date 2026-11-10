@@ -8,7 +8,7 @@ import {createSubmergedShader,WATER_CAPTURE_LAND_MARGIN,WATER_CAPTURE_MARGIN} fr
 import {TERRAIN} from '../js/wgsl/terrain.js';
 import {CARAVEL} from '../js/wgsl/caravel.js';
 
-const margin=source=>Number(/select\(captureWorld\.y>surfaceY\+([\d.]+),/.exec(source)?.[1]);
+const margin=source=>Number(/select\(captureWorld\.y-surfaceY-([\d.]+),/.exec(source)?.[1]);
 
 test('ground is captured to its shore margin only when the caller says it is ground',()=>{
   assert.equal(margin(createSubmergedShader(TERRAIN,'fs','in.world',false,true)),WATER_CAPTURE_LAND_MARGIN);

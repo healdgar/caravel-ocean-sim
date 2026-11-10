@@ -1,7 +1,5 @@
 {
- "building.pieces-air-turned/bastion_trace_fortress": 7.32,
- "building.pieces-air-turned/stone_quay_seawall": 7.5,
- "building.pieces-air-turned/stone_sea_bastion": 7.29,
+ "building.pieces-air-turned/stone_sea_bastion": 6.25,
  "collision.through-mast/nina": 6.7,
  "collision.through-mast/pinta": 1.1,
  "gun.blocked/victory": 2,
@@ -26,6 +24,7 @@
  "rope.loose/victory": 27,
  "surface.grain-across/flying-cloud/oak": 0.34,
  "surface.grain-across/lusoria/wale/post": 4.25,
+ "surface.grain-across/oseberg/spar": 1.88,
  "surface.grain-across/oseberg/wale/post": 4.25,
  "surface.grain-along/flying-cloud/wood-17": 22.79,
  "surface.wall-course/flying-cloud": 0.91,

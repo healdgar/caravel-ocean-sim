@@ -5,7 +5,8 @@ import {chromium} from 'playwright';
 import {createDevServer} from '../server.mjs';
 import {coastalRegionStageURL} from '../js/landfall.js';
 
-// A level field above the town, and a beach well away from it: a hand above the tideline, so a pit there goes below it.
+// A level field above the town, and a beach well away from it. The beach is a mark to search from: the shore moves
+// whenever the coast is cut again, so the test finds ground a hand above the tideline near it, where a pit goes below.
 const FIELD={region:'lisbon',x:110.5,z:-6118.1},BEACH={region:'lisbon',x:-2198.2,z:-5369.8};
 const SIZE=[960,540];
 
@@ -29,6 +30,24 @@ async function open(spot,params={}){
   }catch(error){await page.close();throw error;}
   await page.addStyleTag({content:'*{visibility:hidden!important}canvas{visibility:visible!important}'});
   return {page,errors};
+}
+// The nearest level ground to a mark that stands a hand above the tide.
+async function tidelineNear(spot,reach=120){
+  const {page}=await open(spot);
+  const found=await page.evaluate(([x,z,reach])=>{
+    const terrain=window.oceanFleet.terrain,ground=(px,pz)=>terrain.groundSample(px,pz);
+    let best=null;
+    for(let dz=-reach;dz<=reach;dz+=2)for(let dx=-reach;dx<=reach;dx+=2){
+      const d=Math.hypot(dx,dz),h=ground(x+dx,z+dz);
+      if(!(h>.15&&h<.35)||(best&&d>=best.d))continue;
+      // Level for three metres round, so the whole pit is on the beach.
+      if([[3,0],[-3,0],[0,3],[0,-3]].every(([ox,oz])=>Math.abs(ground(x+dx+ox,z+dz+oz)-h)<.2))best={x:x+dx,z:z+dz,d};
+    }
+    return best;
+  },[spot.x,spot.z,reach]);
+  await page.close();
+  assert.ok(found,`there is level beach a hand above the tide within ${reach} m of the mark`);
+  return {...spot,x:found.x,z:found.z};
 }
 async function aimedFrom(spot,offset){
   const {page}=await open(spot);
@@ -145,8 +164,8 @@ test('a ball on the ground leaves a pit with a rim, the land around it is as it 
 });
 
 test('on a beach the pit is sand, shallower and wider, and stands full where it goes below the tide',async()=>{
-  const cam=await aimedFrom(BEACH,[16,5.5,12]);
-  const {page,errors}=await open(BEACH,{cam});
+  const beach=await tidelineNear(BEACH),cam=await aimedFrom(beach,[16,5.5,12]);
+  const {page,errors}=await open(beach,{cam});
   try{
     await page.waitForTimeout(1500);
     await firedAndLanded(page,1);

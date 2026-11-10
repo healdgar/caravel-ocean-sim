@@ -440,7 +440,7 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
     let strandU = fract(layPhase * 0.15915494) - 0.5;
     let strandId = floor(layPhase * 0.15915494);
     let strandCrown = sqrt(max(0.06, 1.0 - 3.55 * strandU * strandU));
-    let strandValleyAO = smoothstep(0.48, 0.18, abs(strandU));
+    let strandValleyAO = (1.0 - smoothstep(0.18, 0.48, abs(strandU)));
 
     // Counter-twisted (S-twist) spun-yarn plies & individual hemp bast fibre hash
     let yarnCoord = ropeMeters * 240.0 - ropeAz * 9.0 + strandId * 2.1;
@@ -564,7 +564,7 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
   if(!vesselWaterCapture || F.screen.x < 0.0) { oceanY = oceanHeight(in.world.xz); }
   let waterSurfY = select(0.0, oceanY, !vesselWaterCapture && in.world.y < 2.2);
   let hullExterior = hullExteriorFace(p, in.normalLocal);
-  let waveMeniscus = select(0.0, smoothstep(0.28, 0.0, abs(in.world.y - waterSurfY)) * step(waterSurfY - 0.06, in.world.y), !vesselWaterCapture && in.world.y < 2.2 && hullExterior);
+  let waveMeniscus = select(0.0, (1.0 - smoothstep(0.0, 0.28, abs(in.world.y - waterSurfY))) * step(waterSurfY - 0.06, in.world.y), !vesselWaterCapture && in.world.y < 2.2 && hullExterior);
   wet = max(wet, vec2f(waveMeniscus * 0.65, waveMeniscus * 0.82));
   if(in.material==2u || in.material==12u || in.material==19u){
     albedo*=mix(1.0,.58,wet.x);rough=mix(rough,.65,wet.x);

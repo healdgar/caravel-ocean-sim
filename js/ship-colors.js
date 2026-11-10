@@ -573,7 +573,7 @@ fn evalEnsignColor(u: f32, v: f32, code: i32, isPennant: bool, weaveFade: f32) -
     let layFade = 1.0 - smoothstep(0.55, 2.5, ropeLayFoot);
     let strandU = fract(layPhase * 0.15915494) - 0.5;
     let strandCrown = sqrt(max(0.06, 1.0 - 3.55 * strandU * strandU));
-    let strandAO = smoothstep(0.48, 0.18, abs(strandU));
+    let strandAO = (1.0 - smoothstep(0.18, 0.48, abs(strandU)));
     let yarnTwist = sin(v.uvMode.y * 220.0 - ropeAz * 9.0) * (1.0 - smoothstep(0.18, 0.95, ropeLayFoot));
     let hempCrown = vec3f(0.44, 0.325, 0.18);
     let hempValley = vec3f(0.15, 0.098, 0.050);

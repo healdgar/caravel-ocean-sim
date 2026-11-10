@@ -45,7 +45,8 @@ export function createSubmergedShader(source,entry='fs',world='v.world',surfaceW
   const materialSignature=`fn waterCaptureMaterial(${plain})->vec4f `;
   source=source.slice(0,marker.index)+materialSignature+source.slice(bodyStart);
   const shoreMargin=land?WATER_CAPTURE_LAND_MARGIN:WATER_CAPTURE_MARGIN;
-  // Material derivatives past the early exit above are never read at a surface edge that matters.
+  // The early exit below is not uniform control flow. Fragments beside a surviving one stay alive as helpers, so the
+  // derivatives a surviving fragment reads are those of a whole quad.
   return 'diagnostic(off,derivative_uniformity);\n'+source+/* wgsl */ `
 @group(3) @binding(0) var captureSea:texture_2d_array<f32>;
 @group(3) @binding(1) var captureSeaSampler:sampler;
@@ -74,7 +75,14 @@ ${originalSignature}{
   let pxSpan=max(length(F.camRight.xyz)/max(F.screen.x,1.0),length(F.camUp.xyz)/max(F.screen.y,1.0));
   let footprint=2.0*eyeDist*pxSpan*4.0;
   let surfaceY=captureHeight(captureWorld.xz,footprint);
-  if(select(captureWorld.y>surfaceY+${shoreMargin},(captureWorld.y<surfaceY-0.015),captureMode.x>.5)){discard;return vec4f(0);}
+  // How far past the cut this fragment lies, and how far that changes across its pixel quad.
+  let past=select(captureWorld.y-surfaceY-${shoreMargin},surfaceY-0.015-captureWorld.y,captureMode.x>.5);
+  let quad=2.0*fwidth(past);
+  if(past>0.0){
+    // Discarded, but a neighbour in the quad may be kept and will difference against this one: shade on as a helper.
+    discard;
+    if(past>quad){return vec4f(0);}
+  }
   let eyeDepth=dot(captureWorld-F.camPos.xyz,F.camFwd.xyz);
   if(eyeDepth<=0.0){discard;return vec4f(0);}
   let material=waterCaptureMaterial(${argumentsList});

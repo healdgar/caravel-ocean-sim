@@ -415,13 +415,13 @@ fn coastalWaveState(p:vec2f)->CoastalWaveState{
     let kLocal=swellProp*k0+shoreDir*kShoal;
     let propDir=normalize(kLocal);
     // Shoaling & surf-zone 3D breaker envelope: rises sharply over the bar and rolls into the swash zone.
-    let shoalIn=smoothstep(18.0,5.0,h);
+    let shoalIn=(1.0-smoothstep(5.0,18.0,h));
     let boreSust=mix(0.24,1.0,smoothstep(0.06,breakDepth,h))*(1.0-smoothstep(-0.04,0.65,bedNear));
     let groupEnv=0.78+0.22*sin(psi*0.27-F.camPos.w*0.22+gnoise(p*0.0035)*1.4);
     let waveAmp=clamp(0.54*hsTotal,0.0,1.25)*seawardExposure*beachFactor*shoalIn*boreSust*groupEnv;
     // Bottom-drag asymmetry: trough slows on the seabed while the crest overtakes it and pitches forward (+propDir).
-    let skewAlpha=mix(0.22,0.78,smoothstep(11.0,1.4,h));
-    let cnoidalGamma=mix(0.10,0.38,smoothstep(11.0,1.4,h));
+    let skewAlpha=mix(0.22,0.78,(1.0-smoothstep(1.4,11.0,h)));
+    let cnoidalGamma=mix(0.10,0.38,(1.0-smoothstep(1.4,11.0,h)));
     let sinPsi=sin(psi);
     let cosPsi=cos(psi);
     let theta=psi-skewAlpha*cosPsi;
@@ -433,7 +433,7 @@ fn coastalWaveState(p:vec2f)->CoastalWaveState{
     let waveProfile=cosT+cnoidalGamma*(cos2T-0.28);
     let dWaveDpsi=-(sinT+2.0*cnoidalGamma*sin2T)*dThetaDpsi;
     let boreHeight=waveAmp*waveProfile;
-    let pitchFactor=smoothstep(10.0,1.2,h)*(1.0-smoothstep(-0.08,0.55,bedNear));
+    let pitchFactor=(1.0-smoothstep(1.2,10.0,h))*(1.0-smoothstep(-0.08,0.55,bedNear));
     let horizSurge=waveAmp*(0.75+0.65*pitchFactor)*(sin(theta+0.35)+0.30*cnoidalGamma*sin(2.0*theta+0.45));
     dispOffset+=vec3f(propDir.x*horizSurge,boreHeight,propDir.y*horizSurge);
     extraSlope+=kLocal*(waveAmp*dWaveDpsi*1.35);
@@ -966,7 +966,7 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
     if(isProceduralCoast){
       // The tide's marks wander with the sand's own grain up close.
       let coastY=world.y+gd.big.a*.35;
-      let gentle=smoothstep(0.32,0.08,1.0-n.y);
+      let gentle=(1.0-smoothstep(0.08,0.32,1.0-n.y));
       let cuspWave=sin(world.x*0.042-world.z*0.031+blockNoise*1.5)*0.22;
       let swashRunup=0.26+0.28*sin(F.camPos.w*1.12+world.x*0.038+world.z*0.032+stoneRaw*1.2)+cuspWave;
       let dryZone=smoothstep(-0.35,0.65,coastY)*(1.0-smoothstep(1.85,3.25+stoneRaw*0.45,coastY))*gentle*beachSand;
