@@ -3835,6 +3835,7 @@ async function main() {
   // This frame's wind as a velocity, written once and read by everything that flies or drifts.
   const frameWind=[0,0,0];
   const NO_AIM_ARCS=[];
+  let governedSections=0;
   function frame(now) {
     if (shooting) return;  // paused while a screenshot is read back
     if(bloomMeasureRequested&&bloomFrameReady){measureBloomAlone();return;}
@@ -3842,14 +3843,17 @@ async function main() {
     requestAnimationFrame(frame);
     landfallUI.update(now);
     const elapsed = Math.max(0, (now - last) / 1000);
-    if(terrain?.streamBusy){resolution.reset();polygons.reset();}
-    const gpuHeadroom=profiler.totalMs>0&&profiler.totalMs<13.5&&frameWorkMs<8;
-    const adaptiveElapsed=gpuHeadroom?Math.min(elapsed,1/60):elapsed;
+    // A coastal section landing stalls a frame for reasons no budget can cure, so the governors start their count
+    // again each time one does. They are not held for as long as the stream is busy: a long stream, or a busy flag
+    // left set by a section that failed, would switch them off. They judge the cadence delivered, the same whether
+    // or not the performance panel is open to time the GPU.
+    const sectionsStreamed=terrain?.streamedSectionCount??0;
+    if(sectionsStreamed!==governedSections){governedSections=sectionsStreamed;resolution.reset();polygons.reset();}
     // A polygon budget down to half is hard to see, so it goes along with sharpness. Further cuts
     // wait until the image is at half size, and come back before any sharpness does.
-    const resChanged = resolution.sample(adaptiveElapsed,!document.hidden,frameWorkMs,{mayRaise:polygons.mode!=='auto'||polygons.scale>=POLYGON_COMFORT,mayLower:!polygons.trying});
+    const resChanged = resolution.sample(elapsed,!document.hidden,frameWorkMs,{mayRaise:polygons.mode!=='auto'||polygons.scale>=POLYGON_COMFORT,mayLower:!polygons.trying});
     if(resChanged)polygons.reset();
-    if(polygons.sample(adaptiveElapsed,!document.hidden,frameWorkMs,{mayLower:!resolution.trying,mayLowerFurther:resolution.mode!=='auto'||resolution.scale<=POLYGONS_YIELD_AT}))terrain?.setPixelError?.(polygons.pixelError);
+    if(polygons.sample(elapsed,!document.hidden,frameWorkMs,{mayLower:!resolution.trying,mayLowerFurther:resolution.mode!=='auto'||resolution.scale<=POLYGONS_YIELD_AT}))terrain?.setPixelError?.(polygons.pixelError);
     resize();
     let camDt = Math.min(0.1, elapsed);
     last = now;
