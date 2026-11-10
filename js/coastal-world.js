@@ -1793,18 +1793,13 @@ export function syncPortInstancesToTerrain(portOrInstances, heights, region, { g
           region
         );
       const centerGroundY = sampleLocal(0, 0);
-      const probeX = Math.max(1.5, hw * 0.85);
-      const probeZ = Math.max(1.5, hl * 0.85);
-      const rawSlopeX = (sampleLocal(probeX, 0) - sampleLocal(-probeX, 0)) / (2 * probeX);
-      const rawSlopeZ = (sampleLocal(0, probeZ) - sampleLocal(0, -probeZ)) / (2 * probeZ);
       const isFort =
         inst.prefabId === 'stone_sea_bastion' ||
         inst.prefabId === 'bastion_trace_fortress' ||
         inst.prefabId === 'torreon_atalaya_farol' ||
         inst.prefabId === 'curtain_wall_and_gate' ||
         inst.prefabId === 'english_triangular_palisade_fort';
-      const padSlopeX = 0;
-      const padSlopeZ = 0;
+      // A pad is level.
       const padY = levelledLast(inst)
         ? inst.y ?? 2.8
         : inst.indigenous && !isFort
@@ -1812,6 +1807,7 @@ export function syncPortInstancesToTerrain(portOrInstances, heights, region, { g
           : isFort
             ? Math.max(inst.y ?? 2.8, centerGroundY)
             : Math.max(1.6, centerGroundY);
+      const targetH = Math.max(0.45, padY);
 
       const coreX = hw + step * 1.05;
       const coreZ = hl + step * 1.05;
@@ -1848,7 +1844,6 @@ export function syncPortInstancesToTerrain(portOrInstances, heights, region, { g
             const sz = tz * tz * (3 - 2 * tz);
             wBlend = sx * sz;
           }
-          const targetH = Math.max(0.45, padY + lxSigned * padSlopeX + lzSigned * padSlopeZ);
           heights[k] = heights[k] * (1 - wBlend) + targetH * wBlend;
         }
       }
@@ -1881,17 +1876,6 @@ export function syncPortInstancesToTerrain(portOrInstances, heights, region, { g
         region
       );
     const hCenter = sampleLocal(0, 0);
-    const probeX = Math.max(1.5, (inst.width ?? 8) * 0.42);
-    const probeZ = Math.max(1.5, (inst.length ?? 8) * 0.42);
-    const hPosX = sampleLocal(probeX, 0);
-    const hNegX = sampleLocal(-probeX, 0);
-    const hPosZ = sampleLocal(0, probeZ);
-    const hNegZ = sampleLocal(0, -probeZ);
-    const rawSlopeX = (hPosX - hNegX) / (2 * probeX);
-    const rawSlopeZ = (hPosZ - hNegZ) / (2 * probeZ);
-    inst.slopeX = Math.max(-0.20, Math.min(0.20, rawSlopeX));
-    inst.slopeZ = Math.max(-0.20, Math.min(0.20, rawSlopeZ));
-
     const isFort =
       inst.prefabId === 'stone_sea_bastion' ||
       inst.prefabId === 'bastion_trace_fortress' ||
@@ -1902,12 +1886,14 @@ export function syncPortInstancesToTerrain(portOrInstances, heights, region, { g
       inst.slopeX = 0;
       inst.slopeZ = 0;
       inst.y = isFort ? Math.max(inst.y ?? 3.2, hCenter) : Math.max(0.85, hCenter);
-    } else if (inst.prefabId === 'indigenous_canoe_landing') {
-      inst.slopeX = Math.max(-0.12, Math.min(0.12, inst.slopeX));
-      inst.slopeZ = Math.max(-0.12, Math.min(0.12, inst.slopeZ));
-      inst.y = Math.max(0.28, hCenter);
     } else {
-      inst.y = Math.max(0.38, hCenter);
+      // Only a native building follows the lie of its ground, a canoe landing less steeply than a house.
+      const landing = inst.prefabId === 'indigenous_canoe_landing', steepest = landing ? 0.12 : 0.20;
+      const probeX = Math.max(1.5, (inst.width ?? 8) * 0.42);
+      const probeZ = Math.max(1.5, (inst.length ?? 8) * 0.42);
+      inst.slopeX = Math.max(-steepest, Math.min(steepest, (sampleLocal(probeX, 0) - sampleLocal(-probeX, 0)) / (2 * probeX)));
+      inst.slopeZ = Math.max(-steepest, Math.min(steepest, (sampleLocal(0, probeZ) - sampleLocal(0, -probeZ)) / (2 * probeZ)));
+      inst.y = Math.max(landing ? 0.28 : 0.38, hCenter);
     }
     inst.baseY = inst.y;
   }
