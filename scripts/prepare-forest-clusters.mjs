@@ -40,7 +40,33 @@ function leafMask(file) {
 
 // Our leaves are two quads sharing an edge. The builder wants each leaf's quads in order, so the
 // shared edge is written twice here, and dropped again when the result is packed.
+// A pack whose leaves are single quads (a b c, c b d) gets each one cut across its middle into the same
+// two quads sharing an edge. The surface is unchanged; the two new corners take what lies halfway along
+// each side, and their colour and shade from the corner beside them.
+function singleQuadLeafSource(p) {
+  const leaves = p.leaf.indexCount / 6, map = new Uint32Array(leaves * 8);
+  const pos = new Float32Array(map.length * 3), nrm = new Float32Array(map.length * 3), uv = new Float32Array(map.length * 2);
+  const read = (v, offset, count) => source.subarray(v * SOURCE_STRIDE + offset, v * SOURCE_STRIDE + offset + count);
+  const mean = (u, v, offset, count) => Array.from({ length: count }, (_, k) => (read(u, offset, count)[k] + read(v, offset, count)[k]) / 2);
+  for (let leaf = 0; leaf < leaves; leaf++) {
+    const at = p.leaf.firstIndex + leaf * 6, a = indices[at], b = indices[at + 1], c = indices[at + 2], d = indices[at + 5];
+    if (indices[at + 3] !== c || indices[at + 4] !== b) throw Error(`${p.species}: leaf ${leaf} is not a single quad`);
+    // Corners in the order the paired form uses: a b, then the middle of b-d and of a-c, then d c.
+    const corners = [[a, a], [b, b], [b, d], [a, c], [a, c], [b, d], [d, d], [c, c]];
+    corners.forEach(([u, v], k) => {
+      const out = leaf * 8 + k;
+      map[out] = u;
+      pos.set(mean(u, v, 0, 3), out * 3);
+      const n = mean(u, v, 3, 3), length = Math.hypot(...n) || 1;
+      nrm.set(n.map((value) => value / length), out * 3);
+      uv.set(mean(u, v, 8, 2), out * 2);
+    });
+  }
+  return { map, leaves: { pos, nrm, uv, vpl: 8 } };
+}
 function leafSource(p) {
+  const first = p.leaf.firstIndex;
+  if (p.leaf.indexCount >= 6 && indices[first + 3] === indices[first + 2] && indices[first + 4] === indices[first + 1]) return singleQuadLeafSource(p);
   const leaves = p.leaf.indexCount / 12, map = new Uint32Array(leaves * 8);
   for (let leaf = 0; leaf < leaves; leaf++) {
     const at = p.leaf.firstIndex + leaf * 12, i = (k) => indices[at + k];

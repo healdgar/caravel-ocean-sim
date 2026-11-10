@@ -40,6 +40,13 @@ export const SUBTROPICAL_FOREST_CLUSTER_ASSETS = Object.freeze({
   'clusters.bin.gz': 'assets/forest-scenery/subtropical/clusters/clusters.bin.gz',
 });
 
+export const PORTUGAL_FOREST_CLUSTER_ASSETS = Object.freeze({
+  'manifest.json': 'assets/forest-scenery/portugal/clusters/manifest.json',
+  'vertices.bin.gz': 'assets/forest-scenery/portugal/clusters/vertices.bin.gz',
+  'indices.bin.gz': 'assets/forest-scenery/portugal/clusters/indices.bin.gz',
+  'clusters.bin.gz': 'assets/forest-scenery/portugal/clusters/clusters.bin.gz',
+});
+
 export async function loadForestClusters({ assets = FOREST_CLUSTER_ASSETS, fetchAsset = fetch, signal } = {}) {
   const get = async (name) => {
     const response = await fetchAsset(assets[name], signal ? { signal } : undefined);
@@ -86,6 +93,8 @@ struct ForestClusterBucket {
 @group(0)@binding(6)var<storage,read_write>draws:array<atomic<u32>>;
 @group(0)@binding(7)var<uniform>parameters:vec4f;
 @group(0)@binding(8)var<uniform>bucket:ForestClusterBucket;
+struct ForestClusterShadowBox {lightView:mat4x4f,origin:vec4f,sun:vec4f,texel:vec4f};
+@group(0)@binding(9)var<uniform>shadowBox:ForestClusterShadowBox;
 // Shares of the forest's pixel error each kind may use. A leaf's error is its size, which stays
 // visible as a card, so leaves need the tighter limit. Wood is thin and hides among them.
 const FOREST_CLUSTER_LEAF_LIMIT=.2;
@@ -134,8 +143,55 @@ fn forestClusterTree(index:u32)->u32{
   if(slot<bucket.capacity.x){list[select(bucket.listWood,bucket.listLeaf,isLeaf)+slot]=vec2u(tree,index);}
  }
 }
+// What casts into the land shadow map is chosen here, from every tree of the species and against the
+// light's box. The camera's own lists hold only what it can see, and a tree behind it or beside the
+// view still shades the ground in front. A shadow cannot show detail finer than a few of the map's
+// texels, nor finer than a few pixels where the camera sees it fall, so the cut is that coarse.
+const FOREST_CLUSTER_SHADOW_TEXELS=vec2f(1.5,2.5);
+const FOREST_CLUSTER_SHADOW_PIXELS=1.5;
+@compute @workgroup_size(64)fn forestClusterShadowSelect(@builtin(global_invocation_id)id:vec3u){
+ if(shadowBox.origin.w<.5||id.x>=bucket.capacity.z){return;}
+ let tree=bucket.capacity.y+id.x;
+ let r=roots[tree];let scale=r.rootScale.w;if(scale<=0.){return;}
+ let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
+ let rowX=vec3f(shadowBox.lightView[0].x,shadowBox.lightView[1].x,shadowBox.lightView[2].x);
+ let rowY=vec3f(shadowBox.lightView[0].y,shadowBox.lightView[1].y,shadowBox.lightView[2].y);
+ let rowZ=vec3f(shadowBox.lightView[0].z,shadowBox.lightView[1].z,shadowBox.lightView[2].z);
+ let scales=vec3f(length(rowX),length(rowY),length(rowZ));
+ let b=bucket.centre.xyz*scale;
+ let fromBox=r.rootScale.xyz-shadowBox.origin.xyz;
+ let lit=(shadowBox.lightView*vec4f(fromBox+vec3f(c*b.x-s*b.z,b.y,s*b.x+c*b.z),1.)).xyz;
+ // A felled tree lies as far as its own height from where it stood.
+ let whole=bucket.centre.w*scale*select(1.,2.,r.identity.w<0.)*scales;
+ if(abs(lit.x)>1.+whole.x||abs(lit.y)>1.+whole.y||lit.z<-whole.z||lit.z>1.+whole.z){return;}
+ let origin=r.rootScale.xyz-F.camPos.xyz;
+ let focal=F.screen.y/max(2.0*length(F.camUp.xyz),.0001);
+ let texel=max(shadowBox.texel.x,shadowBox.texel.y);
+ let floorWood=texel*FOREST_CLUSTER_SHADOW_TEXELS.x;let floorLeaf=texel*FOREST_CLUSTER_SHADOW_TEXELS.y;
+ let perMetre=parameters.z*FOREST_CLUSTER_SHADOW_PIXELS/focal;
+ let centre=origin+vec3f(c*b.x-s*b.z,b.y,s*b.x+c*b.z);
+ let nearest=max(length(centre)-bucket.centre.w*scale,.25);
+ let finest=max(floorWood,perMetre*nearest)/scale;
+ var low=0u;var high=bucket.clusterCount;
+ while(low<high){let middle=(low+high)/2u;if(clusters[bucket.firstCluster+middle].parentErr>finest){low=middle+1u;}else{high=middle;}}
+ let drawBase=u32(parameters.y)*2u;
+ for(var i=0u;i<low;i++){
+  let index=bucket.firstCluster+i;let k=clusters[index];
+  let isLeaf=(k.shape&1u)==1u;let least=select(floorWood,floorLeaf,isLeaf);
+  let parentAt=origin+vec3f(c*k.parentLod.x-s*k.parentLod.z,k.parentLod.y,s*k.parentLod.x+c*k.parentLod.z)*scale;
+  if(k.parentErr*scale<=max(least,perMetre*max(length(parentAt)-k.parentLod.w*scale,.001))){continue;}
+  let ownAt=origin+vec3f(c*k.lod.x-s*k.lod.z,k.lod.y,s*k.lod.x+c*k.lod.z)*scale;
+  if(k.err*scale>max(least,perMetre*max(length(ownAt)-k.lod.w*scale,.001))){continue;}
+  let at=(shadowBox.lightView*vec4f(fromBox+vec3f(c*k.cull.x-s*k.cull.z,k.cull.y,s*k.cull.x+c*k.cull.z)*scale,1.)).xyz;
+  let reach=(k.cull.w*scale+.2+F.windP[0].z*.07)*scales;
+  if(r.identity.w>=0.&&(abs(at.x)>1.+reach.x||abs(at.y)>1.+reach.y||at.z<-reach.z||at.z>1.+reach.z)){continue;}
+  let draw=drawBase+select(bucket.drawWood,bucket.drawLeaf,isLeaf);
+  let slot=atomicAdd(&draws[draw*5u+1u],1u);
+  if(slot<bucket.capacity.w){list[select(bucket.drawWood,bucket.drawLeaf,isLeaf)*bucket.capacity.w+slot]=vec2u(tree,index);}
+ }
+}
 @compute @workgroup_size(64)fn forestClusterReset(@builtin(global_invocation_id)id:vec3u){
- if(id.x<u32(parameters.y)*2u){atomicStore(&draws[id.x*5u+1u],0u);}
+ if(id.x<u32(parameters.y)*4u){atomicStore(&draws[id.x*5u+1u],0u);}
 }
 `;
 
@@ -166,7 +222,7 @@ fn forestClusterVertex(tree:u32,vertex:u32,kindValue:f32)->ForestVertex{
   if(midBlend>0.){
    let upRef=select(vec3f(0.,1.,0.),vec3f(1.,0.,0.),abs(normal.y)>.9);
    let t1=normalize(cross(normal,upRef));let t2=cross(normal,t1);
-   let isSubBroadleaf=(forestBin.z&256u)!=0u;
+   let isSubBroadleaf=(forestBin.z&768u)!=0u;
    let baseInflate=select(.18,.48,isSubBroadleaf)*midBlend/max(r.rootScale.w,.85);
    let uvOff=clamp(uv-vec2f(.5,.5),vec2f(-.65),vec2f(.65));
    position+=t1*(uvOff.x*baseInflate)+t2*(uvOff.y*baseInflate);
@@ -188,29 +244,33 @@ fn forestClusterVertex(tree:u32,vertex:u32,kindValue:f32)->ForestVertex{
  return forestClusterVertex(item.x,cluster.first+index,4.);
 }
 `;
+// How many clusters one species and kind may cast into the land shadow map, which is cut far coarser
+// than the camera's view: about 6 million triangles. A count past this draws nothing more.
+const SHADOW_CLUSTERS_PER_DRAW = 48000;
+// Casters arrive already chosen for the light's box by forestClusterShadowSelect. Leaves are tested
+// against their own outlines, so a crown lets through the light its gaps let through.
 export const FOREST_CLUSTER_SHADOW_WGSL = /* wgsl */ `
+struct ForestClusterShadowVertex {@builtin(position)pos:vec4f,@location(0)leafUV:vec2f,@location(1)@interpolate(flat)nativeMaterial:i32};
 @vertex fn forestClusterWoodShadowVS(@builtin(instance_index)instance:u32,@builtin(vertex_index)index:u32)->@builtin(position)vec4f{
  let item=forestClusterList[forestBin.x+instance];let cluster=forestClusters[item.y];
- if(index>=(cluster.shape>>1u)*3u){return vec4f(2.,2.,0.,1.);}
- let r=forestRoots[item.x];
- let dCam=r.rootScale.xyz-F.camPos.xyz;
- if(dot(dCam,dCam)>24025.){return vec4f(2.,2.,0.,1.);}
- let rc=landSH.lightView*vec4f(r.rootScale.xyz+vec3f(0.,8.*r.rootScale.w,0.)-landSH.origin.xyz,1.);
- if(abs(rc.x)>1.12||abs(rc.y)>1.12||rc.z<-0.05||rc.z>1.05){return vec4f(2.,2.,0.,1.);}
+ if(instance>=${SHADOW_CLUSTERS_PER_DRAW}u||index>=(cluster.shape>>1u)*3u){return vec4f(2.,2.,0.,1.);}
  let v=forestClusterVertex(item.x,forestClusterIndices[cluster.first+index],3.);
  return landSH.lightView*vec4f(v.world-landSH.origin.xyz,1.);
 }
-@vertex fn forestClusterLeafShadowVS(@builtin(instance_index)instance:u32,@builtin(vertex_index)index:u32)->@builtin(position)vec4f{
+@vertex fn forestClusterLeafShadowVS(@builtin(instance_index)instance:u32,@builtin(vertex_index)index:u32)->ForestClusterShadowVertex{
+ var o:ForestClusterShadowVertex;o.pos=vec4f(2.,2.,0.,1.);
  let item=forestClusterList[forestBin.x+instance];let cluster=forestClusters[item.y];
- if(index>=(cluster.shape>>1u)/4u*${FOREST_LEAF_VERTICES}u){return vec4f(2.,2.,0.,1.);}
- let r=forestRoots[item.x];
- let dCam=r.rootScale.xyz-F.camPos.xyz;
- let dCam2=dot(dCam,dCam);
- if(dCam2>24025.){return vec4f(2.,2.,0.,1.);}
- let rc=landSH.lightView*vec4f(r.rootScale.xyz+vec3f(0.,8.*r.rootScale.w,0.)-landSH.origin.xyz,1.);
- if(abs(rc.x)>1.12||abs(rc.y)>1.12||rc.z<-0.05||rc.z>1.05){return vec4f(2.,2.,0.,1.);}
+ if(instance>=${SHADOW_CLUSTERS_PER_DRAW}u||index>=(cluster.shape>>1u)/4u*${FOREST_LEAF_VERTICES}u){return o;}
  let v=forestClusterVertex(item.x,cluster.first+index,4.);
- return landSH.lightView*vec4f(v.world-landSH.origin.xyz,1.);
+ o.pos=landSH.lightView*vec4f(v.world-landSH.origin.xyz,1.);o.leafUV=v.leafUV;o.nativeMaterial=v.nativeMaterial;
+ return o;
+}
+// The threshold varies from texel to texel, so a card that is half leaf shades half of what it covers.
+// The map's texels are fixed to the ground, so the pattern does not crawl as the camera moves.
+@fragment fn forestClusterLeafShadowFS(in:ForestClusterShadowVertex){
+ let alpha=forestNativeAlpha(forestNativeMaterials[u32(in.nativeMaterial)],in.leafUV,dpdx(in.leafUV),dpdy(in.leafUV));
+ let threshold=fract(52.9829189*fract(dot(floor(in.pos.xy),vec2f(.06711056,.00583715))));
+ if(alpha<=mix(.12,.88,threshold)){discard;}
 }
 `;
 
@@ -221,7 +281,7 @@ const CLUSTER_LEAVES = CLUSTER_TRIANGLES / 4;
 const CLUSTERS_PER_DRAW = 200000;
 const LEAF_PATTERN = [0, 1, 2, 0, 2, 3, 3, 2, 4, 3, 4, 5];
 
-export async function createForestClusters({ device, shader, module, frame, source, prototypes, roots, visible, commands, parameters, format, samples, sceneEntries, cloudEntries, surfaceEntries, firstMaterials, bind, hasLandShadow = false }) {
+export async function createForestClusters({ device, shader, module, frame, source, prototypes, roots, visible, commands, parameters, format, samples, sceneEntries, cloudEntries, surfaceEntries, firstMaterials, bind, hasLandShadow = false, shadowUniform = null, shadowFormat = 'depth32float' }) {
   const B = GPUBufferUsage, owned = [], count = prototypes.length;
   const make = (data, usage, label) => {
     const buffer = device.createBuffer({ label, size: Math.max(4, data.byteLength), usage: usage | B.COPY_DST });
@@ -232,7 +292,10 @@ export async function createForestClusters({ device, shader, module, frame, sour
   const vertices = make(source.vertices, B.STORAGE, 'forest cluster vertices'), indices = make(source.indices, B.STORAGE, 'forest cluster indices'), clusters = make(source.clusters, B.STORAGE, 'forest clusters');
   const list = device.createBuffer({ label: 'forest clusters to draw', size: count * 2 * CLUSTERS_PER_DRAW * 8, usage: B.STORAGE });
   owned.push(list);
-  const draws = make(new Uint32Array(Array.from({ length: count * 2 }, () => [CLUSTER_INDICES, 0, 0, 0, 0]).flat()), B.STORAGE | B.INDIRECT, 'forest cluster indirect draws');
+  // Each species has four draws: wood and leaves for the camera, then wood and leaves for the shadow map.
+  const draws = make(new Uint32Array(Array.from({ length: count * 4 }, () => [CLUSTER_INDICES, 0, 0, 0, 0]).flat()), B.STORAGE | B.INDIRECT, 'forest cluster indirect draws');
+  const shadowList = hasLandShadow ? device.createBuffer({ label: 'forest clusters casting shadows', size: count * 2 * SHADOW_CLUSTERS_PER_DRAW * 8, usage: B.STORAGE }) : null;
+  if (shadowList) owned.push(shadowList);
   const leafIndices = make(Uint32Array.from({ length: CLUSTER_LEAVES * LEAF_PATTERN.length }, (_, i) => Math.floor(i / LEAF_PATTERN.length) * FOREST_LEAF_VERTICES + LEAF_PATTERN[i % LEAF_PATTERN.length]), B.INDEX, 'forest cluster leaf pattern');
 
   const compute = await shader(FOREST_CLUSTER_SELECT(frame), 'forest cluster cut');
@@ -241,20 +304,24 @@ export async function createForestClusters({ device, shader, module, frame, sour
     fragment: { module, entryPoint: fragment, targets: [target] }, primitive: { topology: 'triangle-list', cullMode: 'none' },
     depthStencil: { format: 'depth32float', ...depthStencil }, multisample: { count: samples, alphaToCoverageEnabled: false },
   });
-  const renderShadow = (entryPoint) => device.createRenderPipelineAsync({
+  // A constant bias is counted in steps of the depth format, and a float's are too fine to matter. The slope
+  // bias and the receiver's own offset along its normal keep a crown from shading itself.
+  const renderShadow = (entryPoint, fragment) => device.createRenderPipelineAsync({
     label: `forest clusters ${entryPoint}`, layout: 'auto', vertex: { module, entryPoint },
+    ...(fragment ? { fragment: { module, entryPoint: fragment, targets: [] } } : {}),
     primitive: { topology: 'triangle-list', cullMode: 'none' },
-    depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'less', depthBias: 2, depthBiasSlopeScale: 1.5 },
+    depthStencil: { format: shadowFormat, depthWriteEnabled: true, depthCompare: 'less', depthBiasSlopeScale: 1.5 },
   });
   const lay = { depthWriteEnabled: true, depthCompare: 'greater' };
-  const [select, reset, woodPipeline, leafDepthPipeline, leafPipeline, woodShadowPipeline, leafShadowPipeline] = await Promise.all([
+  const [select, reset, woodPipeline, leafDepthPipeline, leafPipeline, woodShadowPipeline, leafShadowPipeline, shadowSelect] = await Promise.all([
     device.createComputePipelineAsync({ label: 'forest cluster cut', layout: 'auto', compute: { module: compute, entryPoint: 'forestClusterSelect' } }),
     device.createComputePipelineAsync({ label: 'forest cluster reset', layout: 'auto', compute: { module: compute, entryPoint: 'forestClusterReset' } }),
     render('forestClusterWoodVS', 'forestNativeOpaqueFS', { format }, lay),
     render('forestClusterLeafVS', 'forestNativeLeafDepthFS', { format, writeMask: 0 }, lay),
     render('forestClusterLeafVS', 'forestNativeLeafFS', { format }, { depthWriteEnabled: false, depthCompare: 'equal' }),
     hasLandShadow ? renderShadow('forestClusterWoodShadowVS') : null,
-    hasLandShadow ? renderShadow('forestClusterLeafShadowVS') : null,
+    hasLandShadow ? renderShadow('forestClusterLeafShadowVS', 'forestClusterLeafShadowFS') : null,
+    hasLandShadow ? device.createComputePipelineAsync({ label: 'forest cluster shadow cut', layout: 'auto', compute: { module: compute, entryPoint: 'forestClusterShadowSelect' } }) : null,
   ]);
   const resetGroup = device.createBindGroup({ layout: reset.getBindGroupLayout(0), entries: [{ binding: 6, resource: { buffer: draws } }, { binding: 7, resource: { buffer: parameters } }] });
   const groups = {
@@ -270,12 +337,13 @@ export async function createForestClusters({ device, shader, module, frame, sour
     const words = new ArrayBuffer(80), bucket = make(words, B.UNIFORM, 'forest cluster bucket');
     const boundsData = new Float32Array([...info.low, info.posScale, ...info.uvLow, ...info.uvScale]);
     const bounds = make(boundsData, B.UNIFORM, 'forest cluster bounds');
-    const subRoot = (p.species === 'ceiba' || p.species === 'mangrove') ? 256 : 0;
-    const uniform = (listBase) => make(new Uint32Array([listBase, firstMaterials[id], subRoot | p.nativeMaterials.length, samples]), B.UNIFORM, 'forest cluster bin');
+    const subRoot = (p.species === 'ceiba' || p.species === 'mangrove') ? 256 : 0, closedCrown = p.cohort ? 512 : 0;
+    const uniform = (listBase) => make(new Uint32Array([listBase, firstMaterials[id], closedCrown | subRoot | p.nativeMaterials.length, samples]), B.UNIFORM, 'forest cluster bin');
     const wood = uniform(id * 2 * CLUSTERS_PER_DRAW), leaf = uniform((id * 2 + 1) * CLUSTERS_PER_DRAW);
-    const clusterGroup = (pipeline, hasIndices) => device.createBindGroup({
+    const woodShadow = uniform(id * 2 * SHADOW_CLUSTERS_PER_DRAW), leafShadow = uniform((id * 2 + 1) * SHADOW_CLUSTERS_PER_DRAW);
+    const clusterGroup = (pipeline, hasIndices, from = list) => device.createBindGroup({
       layout: pipeline.getBindGroupLayout(3),
-      entries: [{ binding: 0, resource: { buffer: list } }, { binding: 1, resource: { buffer: clusters } }, { binding: 2, resource: { buffer: vertices } }, ...(hasIndices ? [{ binding: 3, resource: { buffer: indices } }] : []), { binding: 4, resource: { buffer: bounds } }],
+      entries: [{ binding: 0, resource: { buffer: from } }, { binding: 1, resource: { buffer: clusters } }, { binding: 2, resource: { buffer: vertices } }, ...(hasIndices ? [{ binding: 3, resource: { buffer: indices } }] : []), { binding: 4, resource: { buffer: bounds } }],
     });
     const shadowSurface = (pipeline, offset) => device.createBindGroup({
       layout: pipeline.getBindGroupLayout(2),
@@ -287,8 +355,9 @@ export async function createForestClusters({ device, shader, module, frame, sour
       wood: { surface: surfaceEntries(woodPipeline, p.id, wood, true), cluster: clusterGroup(woodPipeline, true) },
       leafDepth: { surface: surfaceEntries(leafDepthPipeline, p.id, leaf, false), cluster: clusterGroup(leafDepthPipeline, false) },
       leaf: { surface: surfaceEntries(leafPipeline, p.id, leaf, true), cluster: clusterGroup(leafPipeline, false) },
-      woodShadow: woodShadowPipeline ? { surface: shadowSurface(woodShadowPipeline, wood), cluster: clusterGroup(woodShadowPipeline, true) } : null,
-      leafShadow: leafShadowPipeline ? { surface: shadowSurface(leafShadowPipeline, leaf), cluster: clusterGroup(leafShadowPipeline, false) } : null,
+      shadowSelect: shadowSelect ? device.createBindGroup({ layout: shadowSelect.getBindGroupLayout(0), entries: [frameEntry(0), ...[[1, roots], [4, clusters], [5, shadowList], [6, draws], [7, parameters], [8, bucket], [9, shadowUniform]].map(([binding, buffer]) => ({ binding, resource: { buffer } }))] }) : null,
+      woodShadow: woodShadowPipeline ? { surface: shadowSurface(woodShadowPipeline, woodShadow), cluster: clusterGroup(woodShadowPipeline, true, shadowList) } : null,
+      leafShadow: leafShadowPipeline ? { surface: surfaceEntries(leafShadowPipeline, p.id, leafShadow, false), cluster: clusterGroup(leafShadowPipeline, false, shadowList) } : null,
     };
   });
   function frameEntry(binding) { return { binding, resource: { buffer: bind.frameUBO } }; }
@@ -300,12 +369,12 @@ export async function createForestClusters({ device, shader, module, frame, sour
       u.set([s.info.firstCluster, s.info.clusterCount, id * 2 * CLUSTERS_PER_DRAW, (id * 2 + 1) * CLUSTERS_PER_DRAW,
         p.firstRoot * 4, id * 4, p.firstRoot * 4 + p.rootCount * 2, slots, p.firstRoot * 4 + p.rootCount * 3, slots + 2, id * 2, id * 2 + 1]);
       f.set([...p.centre, p.radius], 12);
-      u[16] = CLUSTERS_PER_DRAW;
+      u.set([CLUSTERS_PER_DRAW, p.firstRoot, p.rootCount, SHADOW_CLUSTERS_PER_DRAW], 16);
       device.queue.writeBuffer(s.bucket, 0, data);
     });
   }
   placeTrees();
-  const drawWith = (pass, pipeline, group, cloud, part, leafDraw) => {
+  const drawWith = (pass, pipeline, group, cloud, part, leafDraw, firstDraw = 0) => {
     pass.setPipeline(pipeline);
     pass.setBindGroup(0, group);
     if (cloud) pass.setBindGroup(1, cloud);
@@ -313,8 +382,8 @@ export async function createForestClusters({ device, shader, module, frame, sour
     species.forEach((s, id) => {
       pass.setBindGroup(2, s[part].surface);
       pass.setBindGroup(3, s[part].cluster);
-      if (leafDraw) pass.drawIndexedIndirect(draws, (id * 2 + 1) * 20);
-      else pass.drawIndirect(draws, id * 2 * 20);
+      if (leafDraw) pass.drawIndexedIndirect(draws, (firstDraw + id * 2 + 1) * 20);
+      else pass.drawIndirect(draws, (firstDraw + id * 2) * 20);
     });
   };
   return {
@@ -322,11 +391,18 @@ export async function createForestClusters({ device, shader, module, frame, sour
     encode(pass) {
       pass.setPipeline(reset);
       pass.setBindGroup(0, resetGroup);
-      pass.dispatchWorkgroups(1);
+      pass.dispatchWorkgroups(Math.ceil(count * 4 / 64));
       pass.setPipeline(select);
       species.forEach((s) => {
         if (!s.rootCount) return;
         pass.setBindGroup(0, s.select);
+        pass.dispatchWorkgroups(Math.ceil(s.rootCount / 64));
+      });
+      if (!shadowSelect) return;
+      pass.setPipeline(shadowSelect);
+      species.forEach((s) => {
+        if (!s.rootCount) return;
+        pass.setBindGroup(0, s.shadowSelect);
         pass.dispatchWorkgroups(Math.ceil(s.rootCount / 64));
       });
     },
@@ -335,10 +411,10 @@ export async function createForestClusters({ device, shader, module, frame, sour
     drawLeaves(pass) { drawWith(pass, leafPipeline, groups.leaf.zero, groups.leaf.cloud, 'leaf', true); },
     drawShadow(pass) {
       if (woodShadowPipeline && groups.woodShadow) {
-        drawWith(pass, woodShadowPipeline, groups.woodShadow.zero, groups.woodShadow.empty1, 'woodShadow', false);
+        drawWith(pass, woodShadowPipeline, groups.woodShadow.zero, groups.woodShadow.empty1, 'woodShadow', false, count * 2);
       }
       if (leafShadowPipeline && groups.leafShadow) {
-        drawWith(pass, leafShadowPipeline, groups.leafShadow.zero, groups.leafShadow.empty1, 'leafShadow', true);
+        drawWith(pass, leafShadowPipeline, groups.leafShadow.zero, groups.leafShadow.empty1, 'leafShadow', true, count * 2);
       }
     },
     destroy() { for (const buffer of owned) buffer.destroy(); },
