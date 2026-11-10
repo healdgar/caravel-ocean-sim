@@ -250,6 +250,10 @@ function releaseCrewRailAction(company, boat) {
 // synthesize a stone/timber quay alongside the ship when near land/harbor.
 // How far a heaving line can be got across. Lines go only to something really there.
 export const MOORING_LINE_REACH_M = 36;
+// A boarding party stands at the rail only while the chase is being gained on: this long with the
+// range no nearer and it stands down. The fight's log keeps as many lines as the panel shows.
+export const BOARDING_APPROACH_STALL_S = 60;
+const COMBAT_LOG_LINES = 12;
 export const MOORING_SHIP_REACH_M = 30;
 const MOORING_PIER_PREFAB = /jetty|pier|wharf|dock|quay|mole|slip/i;
 
@@ -391,6 +395,11 @@ export function createDockingBoardingState(boat, options = {}) {
     boardingPhase: 'none',
     boardingMode: null, // 'surrendered' | 'fight'
     boardingTimer: 0,
+    // While 'approaching': seconds since the range last closed, the nearest she has been, and which
+    // ship the order was given for (a pooled hull can come back as another).
+    approachStallS: 0,
+    approachBestM: Infinity,
+    approachEncounter: null,
     combatRoundTimer: 0,
     combatRounds: 0,
     capturedVessels: [],
@@ -403,6 +412,41 @@ export function createDockingBoardingState(boat, options = {}) {
     if (typeof state.onEvent === 'function') {
       state.onEvent({ type, state, ...detail });
     }
+  }
+
+  // Every line of the fight goes through here, so the log cannot grow past what the panel shows.
+  function logCombat(text) {
+    state.combatLog.unshift(text);
+    if (state.combatLog.length > COMBAT_LOG_LINES) state.combatLog.length = COMBAT_LOG_LINES;
+  }
+
+  // Why a boarding party waiting at the rail has nobody left to board, or null while the chase is still there.
+  function boardingApproachLost() {
+    const vessel = state.targetVessel;
+    const tb = vessel?.boat;
+    if (!tb) return 'the chase is gone';
+    const name = tb.shipName || tb.name || 'the chase';
+    if (tb.damage?.sunk) return `${name} has gone down`;
+    // A hull that left the sea, or came back as another ship, is not the one the order was given for.
+    if (tb.showProw === false || (vessel.currentEncounter ?? null) !== state.approachEncounter) return `${name} is lost to sight`;
+    return null;
+  }
+
+  function abandonBoardingApproach(reason) {
+    const vessel = state.targetVessel;
+    state.boardingPhase = 'none';
+    state.boardingMode = null;
+    state.approachStallS = 0;
+    state.approachBestM = Infinity;
+    state.approachEncounter = null;
+    // Lines already made fast to a pier or another hull stay as they are; only the boarders stand down.
+    const mooringActive = boat.mooringActive;
+    releaseCrewRailAction(state.company, boat);
+    if (state.mooringPhase === 'clear') state.targetVessel = null;
+    else boat.mooringActive = mooringActive;
+    state.statusText = `Boarding party stood down: ${reason}.`;
+    logCombat(state.statusText);
+    emit('boarding-abandoned', { vessel, reason });
   }
 
   function determineSideToward(tx, tz) {
@@ -631,7 +675,7 @@ export function createDockingBoardingState(boat, options = {}) {
     state.statusText = captureMethod === 'surrendered'
       ? `Boarded surrendered ${shipLabel} and took her as a prize! Hoisted ${playerColors} colors.`
       : `Boarding party victorious! Captured ${shipLabel} hand-to-hand and hoisted ${playerColors} colors!`;
-    state.combatLog.unshift(state.statusText);
+    logCombat(state.statusText);
     emit('vessel-captured', { vessel: targetVessel, captureMethod, plunder });
     return state.lastOutcome;
   }
@@ -689,7 +733,7 @@ export function createDockingBoardingState(boat, options = {}) {
       if (state.mooringPhase !== 'clear') castOff();
       const summary = `🏴 Prize crew placed aboard ${shipLabel}! She hoists ${playerColors} colors and joins our fleet as an allied consort (+8d water, +10d food).`;
       state.statusText = summary;
-      state.combatLog.unshift(summary);
+      logCombat(summary);
       const res = { ok: true, disposition: 'ally', vessel, summary };
       emit('prize-disposition', res);
       return res;
@@ -730,7 +774,7 @@ export function createDockingBoardingState(boat, options = {}) {
       if (state.mooringPhase !== 'clear') castOff();
       const summary = `🛡️ ${sovRes.summary}`;
       state.statusText = summary;
-      state.combatLog.unshift(summary);
+      logCombat(summary);
       const res = {
         ok: true,
         disposition: 'gift-indigenous',
@@ -808,7 +852,7 @@ export function createDockingBoardingState(boat, options = {}) {
 
       const summary = `⚓ ${pressedCount ? `Impressed ${pressedCount} able hands into our crew and` : 'Set her crew free and'} took ${plunderedGuns ? `${plunderedGuns} cannon (+25% broadside weight, +18d water, +24d food)` : 'her stores (+18d water, +24d food)'} from ${shipLabel}!`;
       state.statusText = summary;
-      state.combatLog.unshift(summary);
+      logCombat(summary);
       const res = {
         ok: true,
         disposition: 'impress-plunder',
@@ -871,7 +915,7 @@ export function createDockingBoardingState(boat, options = {}) {
       const newHullPct = Math.round((boat.damage?.hullIntegrity ?? 1) * 100);
       const summary = `🔨 Stripped ${shipLabel} of oak timber, spars, canvas & stores and scuttled her! Repaired our hull (${Math.round(prevHull * 100)}% → ${newHullPct}%) and rigging (${Math.round(prevRig * 100)}% → 100%), +14d water, +18d food.`;
       state.statusText = summary;
-      state.combatLog.unshift(summary);
+      logCombat(summary);
       const res = {
         ok: true,
         disposition: 'scuttle-repair',
@@ -906,6 +950,8 @@ export function createDockingBoardingState(boat, options = {}) {
       pullAlongside: !immediateResolve,
     });
     if (!grappleRes.ok) {
+      // The order repeated for the same chase keeps the watch already being kept on her.
+      const fresh = state.boardingPhase !== 'approaching' || state.targetVessel !== vessel;
       state.targetVessel = vessel;
       state.boardingPhase = 'approaching';
       state.boardingMode = isSurrendered ? 'surrendered' : 'fight';
@@ -914,7 +960,12 @@ export function createDockingBoardingState(boat, options = {}) {
       boat.boardingActive = true;
       assignCrewToRailAction(state.company, boat, 'boarding', side, { isAttacker: true });
       state.statusText = grappleRes.reason || `Stand by grappling irons! Close within ${MOORING_SHIP_REACH_M} m alongside ${tb.shipName || tb.name || 'target vessel'} to throw grappling hooks!`;
-      state.combatLog.unshift(state.statusText);
+      if (fresh) {
+        state.approachStallS = 0;
+        state.approachBestM = grappleRes.distance ?? Infinity;
+        state.approachEncounter = vessel.currentEncounter ?? null;
+        logCombat(state.statusText);
+      }
       return { ok: false, approaching: true, phase: 'approaching', reason: state.statusText, vessel };
     }
 
@@ -951,7 +1002,7 @@ export function createDockingBoardingState(boat, options = {}) {
     const atk = computeBoardingStrength({ boat, company: state.company });
     const def = computeBoardingStrength(vessel);
     state.statusText = `Grappling ${tb.shipName || tb.name || 'enemy vessel'} to board & fight! Crew strength ${atk.effectiveStrength.toFixed(1)} (morale ${Math.round(atk.morale * 100)}%) vs ${def.effectiveStrength.toFixed(1)} (morale ${Math.round(def.morale * 100)}%).`;
-    state.combatLog.unshift(state.statusText);
+    logCombat(state.statusText);
 
     if (immediateResolve) {
       state.mooringPhase = 'grappled';
@@ -1064,8 +1115,7 @@ export function createDockingBoardingState(boat, options = {}) {
     const defAfter = computeBoardingStrength(vessel, targetComp);
 
     state.statusText = `Boarding melee round ${state.combatRounds}: Our crew ${atkAfter.able} able (${Math.round(atkAfter.morale * 100)}% morale, str ${atkAfter.effectiveStrength.toFixed(1)}) vs ${tb.shipName || tb.name || 'Enemy'} ${defAfter.able} able (${Math.round(defAfter.morale * 100)}% morale, str ${defAfter.effectiveStrength.toFixed(1)})`;
-    state.combatLog.unshift(state.statusText);
-    if (state.combatLog.length > 12) state.combatLog.length = 12;
+    logCombat(state.statusText);
 
     // Check victory / defeat conditions based on morale and remaining strength
     const defenderBroken =
@@ -1094,7 +1144,7 @@ export function createDockingBoardingState(boat, options = {}) {
         defender: defAfter,
       };
       state.statusText = `Boarding party driven back from ${tb.name || 'enemy vessel'}! Regrouping on deck.`;
-      state.combatLog.unshift(state.statusText);
+      logCombat(state.statusText);
       emit('boarding-repulsed', state.lastOutcome);
     }
   }
@@ -1382,14 +1432,30 @@ export function createDockingBoardingState(boat, options = {}) {
     if (!(dt > 0)) return;
     state.phaseTimer += dt;
 
-    if (state.boardingPhase === 'approaching' && state.targetVessel?.boat) {
-      const tb = state.targetVessel.boat;
-      const dist = Math.hypot((tb.x ?? 0) - (boat.x ?? 0), (tb.z ?? 0) - (boat.z ?? 0));
-      const maxGrappleDist = MOORING_SHIP_REACH_M + ((boat.beam ?? 4.8) + (tb.beam ?? 4.8)) * 0.5;
-      if (dist <= maxGrappleDist) {
-        boardVessel(state.targetVessel);
+    if (state.boardingPhase === 'approaching') {
+      const lost = boardingApproachLost();
+      if (lost) {
+        abandonBoardingApproach(lost);
       } else {
-        state.statusText = `Closing to board ${tb.shipName || tb.name || 'target vessel'} — ${Math.round(dist)} m away (close within ${Math.round(MOORING_SHIP_REACH_M)} m alongside to throw grappling hooks)…`;
+        const tb = state.targetVessel.boat;
+        const dist = Math.hypot((tb.x ?? 0) - (boat.x ?? 0), (tb.z ?? 0) - (boat.z ?? 0));
+        const maxGrappleDist = MOORING_SHIP_REACH_M + ((boat.beam ?? 4.8) + (tb.beam ?? 4.8)) * 0.5;
+        if (dist <= maxGrappleDist) {
+          boardVessel(state.targetVessel);
+        } else {
+          // The party waits only while the range is still closing.
+          if (dist < state.approachBestM - 1) {
+            state.approachBestM = dist;
+            state.approachStallS = 0;
+          } else {
+            state.approachStallS += dt;
+          }
+          if (state.approachStallS >= BOARDING_APPROACH_STALL_S) {
+            abandonBoardingApproach(`${tb.shipName || tb.name || 'the chase'} is holding her distance`);
+          } else {
+            state.statusText = `Closing to board ${tb.shipName || tb.name || 'target vessel'} — ${Math.round(dist)} m away (close within ${Math.round(MOORING_SHIP_REACH_M)} m alongside to throw grappling hooks)…`;
+          }
+        }
       }
     }
 

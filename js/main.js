@@ -1321,7 +1321,7 @@ async function main() {
           voyageCtl.voyage.provisions.food=Math.min(120,(voyageCtl.voyage.provisions.food??40)+(p?.foodDays??14));
         }
         voyageCtl?.logExternal?.(`🏴 ${ev.state.statusText}`,'combat');
-      }else if(ev.type==='boarding-repulsed'){
+      }else if(ev.type==='boarding-repulsed'||ev.type==='boarding-abandoned'){
         voyageCtl?.logExternal?.(`⚔️ ${ev.state.statusText}`,'combat');
       }else if(ev.type==='dock-complete'||ev.type==='cast-off-complete'){
         voyageCtl?.logExternal?.(`🪢 ${ev.state.statusText}`,'order');
