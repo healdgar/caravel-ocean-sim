@@ -1,0 +1,972 @@
+{
+ "format": "waterworld.forest-surfaces",
+ "version": 1,
+ "materialContract": "gene-surfaces-v3",
+ "sharpen": 1.0,
+ "encoder": "builtin",
+ "reuses": "saba",
+ "families": [
+  {
+   "width": 512,
+   "height": 1024,
+   "levels": 11,
+   "layers": [
+    {
+     "material": 0,
+     "shares": [
+      30
+     ],
+     "name": "bark",
+     "sources": {
+      "albedo": "bec57a5718ce313435a1ddf513c52a6f6b5c8bfc02ceffd063fbe7b5a5176a3a",
+      "normal": "511b53d35405a19dacde3c9996e5487f14d47e20c0c45f54751532c866518528",
+      "roughnessMap": "99ea11ee38b47cb4df40af0987b4139d65b55f7ec936f8fdc4f94b732bba5b48"
+     },
+     "coverage": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "terminal": [
+      0.08096,
+      0.050066,
+      0.034336,
+      1.0
+     ]
+    },
+    {
+     "material": 5,
+     "shares": [
+      35
+     ],
+     "name": "bark",
+     "sources": {
+      "albedo": "e929ab50808b7e8907b46ddb517a14a2f65a2c4aad068a630a140380689005a4",
+      "normal": "03daec2499b7601ca0d7955e5858997831ee0c232189dd101fd2508d9bf3a6f6",
+      "roughnessMap": "7f9177f0501578e8cfd3cc3723db30851fab7688f0f496f87234d7711af7e945"
+     },
+     "coverage": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "terminal": [
+      0.192419,
+      0.083848,
+      0.043132,
+      1.0
+     ]
+    },
+    {
+     "material": 10,
+     "shares": [
+      40
+     ],
+     "name": "bark",
+     "sources": {
+      "albedo": "1a1400cdfae64c658c8afe9094bb55d5c47c63dcd69319194e0876ea0e379c2b",
+      "normal": "4f8fb2a6129936467a61080c4ebddc25bd681dd17372f816facbeb558ccff1e0",
+      "roughnessMap": "bfe9c30fba924bce4d65dcd1c5a310b9b903d4875f0d1c696cd2fdbc7f4db491"
+     },
+     "coverage": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "terminal": [
+      0.243795,
+      0.234573,
+      0.216697,
+      1.0
+     ]
+    },
+    {
+     "material": 15,
+     "shares": [
+      45
+     ],
+     "name": "bark",
+     "sources": {
+      "albedo": "e43f4db9ebef374a41d894efb60543eb4968dc3708e9b239aaac90745cd454db",
+      "normal": "a5a5cbadc52cb5b2df66d4b8945c0e3866386200e44df5d95699aef3aad5af05",
+      "roughnessMap": "a98a475c280123ca73b79394cf2648b6f80bb709dcf7871b0783278aaad1767c"
+     },
+     "coverage": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "terminal": [
+      0.125361,
+      0.116859,
+      0.104606,
+      1.0
+     ]
+    },
+    {
+     "material": 20,
+     "shares": [
+      50
+     ],
+     "name": "bark",
+     "sources": {
+      "albedo": "92dbb6d852d8c62620fe1f9d306de78b0bc65933be4153d8fbd8c81485828304",
+      "normal": "0e4b1b4fadecf78fdfff0bfb7be4d7109784ed6bd9e1a50e080e00c500333153",
+      "roughnessMap": "e1e19b5d64eba902341451d9fea33d666778b8179a1f187020f38fe26c62a457"
+     },
+     "coverage": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "terminal": [
+      0.599064,
+      0.586387,
+      0.563446,
+      1.0
+     ]
+    },
+    {
+     "material": 25,
+     "shares": [
+      55
+     ],
+     "name": "bark",
+     "sources": {
+      "albedo": "1b4076a207774424b259dafecb88dd19d03b17e6b7def32b67a5b994cd875a4c",
+      "normal": "1342a7ac1270f83baeb7077e41a191d99590b615dca103977a735f3fae71cd31",
+      "roughnessMap": "5f17cb858f7b1acb9255ea345c629d15ae89c5b48f5b1274fc4c6fa5937d94eb"
+     },
+     "coverage": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "terminal": [
+      0.251888,
+      0.126416,
+      0.078494,
+      1.0
+     ]
+    }
+   ],
+   "files": {
+    "bc7": {
+     "albedo": {
+      "bytes": 4194528,
+      "sha256": "e1a2a9ef3eddfff9a842762a123a5cdb7bff773c6edfb3d51b9781231d3c4c10",
+      "gzip": {
+       "file": "family-0-albedo.bc7.bin.gz",
+       "bytes": 3732046,
+       "sha256": "71ac3f9b18aa3529fe557be98fe6ef6b93f4c38e6f5eaa9709b431d873c356ce"
+      }
+     },
+     "detail": {
+      "bytes": 4194528,
+      "sha256": "05581b94c4f9fff2384099bcb74eaa6cbc4ea11ae398b5350bf37a5d5c54b1fc",
+      "gzip": {
+       "file": "family-0-detail.bc7.bin.gz",
+       "bytes": 3773250,
+       "sha256": "9c0aab7d7405ed57e80b948170b0ee2a17b53645664813d2e429d0729324fb2d"
+      }
+     }
+    },
+    "astc": {
+     "albedo": {
+      "bytes": 4194528,
+      "sha256": "6063deea297a0cac996011d9673f263b5aa8587a05eab259a2262cf8ca227128",
+      "gzip": {
+       "file": "family-0-albedo.astc.bin.gz",
+       "bytes": 3820618,
+       "sha256": "d6fe1c6558d2570b17f909f85b3d1f134623d42fdb5c5fac5954a910baf345c3"
+      }
+     },
+     "detail": {
+      "bytes": 4194528,
+      "sha256": "7f048c13224c268b6173ab6add3ddd6fdcf318936e7b81d473f272d0fd556538",
+      "gzip": {
+       "file": "family-0-detail.astc.bin.gz",
+       "bytes": 3546652,
+       "sha256": "12b02fbfbc53c99f212cabd74052f7d7997dbb4097036a0d9ead486ea8594bc4"
+      }
+     }
+    }
+   }
+  },
+  {
+   "width": 256,
+   "height": 256,
+   "levels": 9,
+   "layers": [
+    {
+     "material": 1,
+     "shares": [
+      31
+     ],
+     "name": "wounds",
+     "sources": {
+      "albedo": "afc6e47fec27ff045a02986deae43106e47802f958f3ae35826e3a4e48b0335d",
+      "normal": "8095960c672058b3f4ccdfb9d2481bb8c894163d58697174c5ac9cdcef8a59de",
+      "roughnessMap": "f1dab42bc4201fbe25d34ce3f031a790d55d9d206372c35aa7e241b0cbd03335"
+     },
+     "coverage": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "terminal": [
+      0.04413,
+      0.028879,
+      0.017618,
+      1.0
+     ]
+    },
+    {
+     "material": 2,
+     "shares": [
+      32
+     ],
+     "name": "foliage_0",
+     "sources": {
+      "albedo": "1866133bfb120c2262b4ac91760d068d717cc9c8f0acf08fbc3d73ce546af41f",
+      "normal": "98522c2c0155e06b8b4998a2cc2e040c23adfe1f411235d6c77feb5695c54d9a"
+     },
+     "coverage": [
+      0.356385,
+      0.356385,
+      0.356385,
+      0.356385,
+      0.356385,
+      0.356385,
+      0.356385,
+      0.356385,
+      0.356385
+     ],
+     "terminal": [
+      0.029305,
+      0.059699,
+      0.007358,
+      0.356385
+     ]
+    },
+    {
+     "material": 3,
+     "shares": [
+      33
+     ],
+     "name": "foliage_1",
+     "sources": {
+      "albedo": "0058b47d08ac8ae06ba4707202c3b23a449e2256fcdb289a3cb35c58297ebae7",
+      "normal": "69fe8a42a7bde8b0dbffd3f1476dd58dc2600d0e834e06c386c6fa7370479b96"
+     },
+     "coverage": [
+      0.356385,
+      0.356385,
+      0.356385,
+      0.356385,
+      0.356385,
+      0.356385,
+      0.356385,
+      0.356385,
+      0.356385
+     ],
+     "terminal": [
+      0.031806,
+      0.062143,
+      0.006589,
+      0.356385
+     ]
+    },
+    {
+     "material": 4,
+     "shares": [
+      34
+     ],
+     "name": "foliage_2",
+     "sources": {
+      "albedo": "2205249ea46646f4338bb4f73627ce5ef15dc72656a73a99a4e5eec81702930a",
+      "normal": "bb3c501a05cc8c7e874e1c174ba2e99e9660d5e770c36f5a98286624d9bc7001"
+     },
+     "coverage": [
+      0.356385,
+      0.356385,
+      0.356385,
+      0.356385,
+      0.356385,
+      0.356385,
+      0.356385,
+      0.356385,
+      0.356385
+     ],
+     "terminal": [
+      0.025813,
+      0.056035,
+      0.007783,
+      0.356385
+     ]
+    },
+    {
+     "material": 6,
+     "shares": [
+      36
+     ],
+     "name": "wounds",
+     "sources": {
+      "albedo": "7c2b4e605b1eca03699784a32fddb5237f541e846829718c311392365c6cdb80",
+      "normal": "68f1754bd5b436493524ca7827879d1fa0cae06728eb78cab041196836b7b6d0",
+      "roughnessMap": "7d3a1dab828754d61037fa251ab4d8934cec4d5f237165d1e859bf626c91f8db"
+     },
+     "coverage": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "terminal": [
+      0.052867,
+      0.032805,
+      0.018806,
+      1.0
+     ]
+    },
+    {
+     "material": 7,
+     "shares": [
+      37
+     ],
+     "name": "foliage_0",
+     "sources": {
+      "albedo": "c5c81ac225c55e106d0e2b8106f4f07fabb6072fab392eb5b384b56b143d56fb",
+      "normal": "63750516f1b376397a5731a91f493c6154f0d1ef3737122785ed472c67a5b001"
+     },
+     "coverage": [
+      0.528978,
+      0.528978,
+      0.528978,
+      0.528978,
+      0.528978,
+      0.528978,
+      0.528978,
+      0.528978,
+      0.528978
+     ],
+     "terminal": [
+      0.053854,
+      0.085919,
+      0.024886,
+      0.528978
+     ]
+    },
+    {
+     "material": 8,
+     "shares": [
+      38
+     ],
+     "name": "foliage_1",
+     "sources": {
+      "albedo": "0a72637974c904f2d3decd098bcdeeff71b00ac69c76d5c2254da54a5ec14af8",
+      "normal": "57e38f73ed810ac5b3aa46ca15919b01922260ed777d6f57580794b63100f348"
+     },
+     "coverage": [
+      0.528978,
+      0.528978,
+      0.528978,
+      0.528978,
+      0.528978,
+      0.528978,
+      0.528978,
+      0.528978,
+      0.528978
+     ],
+     "terminal": [
+      0.05847,
+      0.089754,
+      0.022014,
+      0.528978
+     ]
+    },
+    {
+     "material": 9,
+     "shares": [
+      39
+     ],
+     "name": "foliage_2",
+     "sources": {
+      "albedo": "cf33787428a63d8e8a42e6f3e37a1fb82bdb207ce185978a9fc0162fd3f6defa",
+      "normal": "3b6490e0cedddbd287feffbcc6b5d2e99d0df1fe636dcb95b84b188a45adf819"
+     },
+     "coverage": [
+      0.528978,
+      0.528978,
+      0.528978,
+      0.528978,
+      0.528978,
+      0.528978,
+      0.528978,
+      0.528978,
+      0.528978
+     ],
+     "terminal": [
+      0.047332,
+      0.080423,
+      0.026413,
+      0.528978
+     ]
+    },
+    {
+     "material": 11,
+     "shares": [
+      41
+     ],
+     "name": "wounds",
+     "sources": {
+      "albedo": "490ad92689896e07ef856a36e4285e874c176b25c3619e0d30ca10a8259bf55c",
+      "normal": "cccf45189d063016378e79c3e56c2ae16d16ff62cc74be3f387fb4c80487fa30",
+      "roughnessMap": "e3657cdcb15988362768fcb24f9aa10ef20f4aded5bfaf10ca49d4b8a506120e"
+     },
+     "coverage": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "terminal": [
+      0.085818,
+      0.064316,
+      0.042679,
+      1.0
+     ]
+    },
+    {
+     "material": 12,
+     "shares": [
+      42
+     ],
+     "name": "foliage_0",
+     "sources": {
+      "albedo": "afb4718aae43d488e7957cfa35d18187fe29f947cc50aac56f4d1b6e8838d51a",
+      "normal": "5bf41cf1832fbe8cdd82464b44f9be5e1cf69ab371728b396af6d9590664b29c"
+     },
+     "coverage": [
+      0.346187,
+      0.346187,
+      0.346187,
+      0.346187,
+      0.346187,
+      0.346187,
+      0.346187,
+      0.346187,
+      0.346187
+     ],
+     "terminal": [
+      0.053611,
+      0.082352,
+      0.009335,
+      0.346187
+     ]
+    },
+    {
+     "material": 13,
+     "shares": [
+      43
+     ],
+     "name": "foliage_1",
+     "sources": {
+      "albedo": "cfe97504caecd090e0a32df6446c52badf4896b146344f59d12f0a76e9e01641",
+      "normal": "e0e6e82e345697b85bcd09790ae50579da3a5f4a36d836a505d3fe664a927a75"
+     },
+     "coverage": [
+      0.346187,
+      0.346187,
+      0.346187,
+      0.346187,
+      0.346187,
+      0.346187,
+      0.346187,
+      0.346187,
+      0.346187
+     ],
+     "terminal": [
+      0.058264,
+      0.086174,
+      0.008327,
+      0.346187
+     ]
+    },
+    {
+     "material": 14,
+     "shares": [
+      44
+     ],
+     "name": "foliage_2",
+     "sources": {
+      "albedo": "07c4d229f73580f8c08a9cc5acd89fe0d704ce114489e769cb854c3c3c1b1774",
+      "normal": "5ed3700efc87761337694a17312bbfb2a598dd03dfba1d2562c5d520d4f7920a"
+     },
+     "coverage": [
+      0.346187,
+      0.346187,
+      0.346187,
+      0.346187,
+      0.346187,
+      0.346187,
+      0.346187,
+      0.346187,
+      0.346187
+     ],
+     "terminal": [
+      0.047019,
+      0.077134,
+      0.009827,
+      0.346187
+     ]
+    },
+    {
+     "material": 16,
+     "shares": [
+      46
+     ],
+     "name": "wounds",
+     "sources": {
+      "albedo": "838c79f10bf97de05f916fa02192b9ceb8298e91a2a4931fcc6c4577ec4315bb",
+      "normal": "9ef150fa01e8957e7aa8c74f5801225f3f9ce1d8ce9838f3c411832171f317be",
+      "roughnessMap": "224a3abb564252eb1067582758b06b6beddd87e19d1419a2b6a3694258d75a6a"
+     },
+     "coverage": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "terminal": [
+      0.04676,
+      0.032813,
+      0.021551,
+      1.0
+     ]
+    },
+    {
+     "material": 17,
+     "shares": [
+      47
+     ],
+     "name": "foliage_0",
+     "sources": {
+      "albedo": "c1ead0e12030b2b0c34d7e2c2f09d1c326e8310b0738e9f22dd33a616c944835",
+      "normal": "beeda6522072477d8e31c2e7ead2fddb172b8550e1bff1e6f6596fba5d526652"
+     },
+     "coverage": [
+      0.511599,
+      0.511599,
+      0.511599,
+      0.511599,
+      0.511599,
+      0.511599,
+      0.511599,
+      0.511599,
+      0.511599
+     ],
+     "terminal": [
+      0.045475,
+      0.072571,
+      0.021094,
+      0.511599
+     ]
+    },
+    {
+     "material": 18,
+     "shares": [
+      48
+     ],
+     "name": "foliage_1",
+     "sources": {
+      "albedo": "c9d780d574a7ecc762bb724e47d40c1e97b4aa860d68383924c60987bd208252",
+      "normal": "e17236c07b67908f6d70b103219ff103b72c9b7d3f5e772e489081d8b57a454a"
+     },
+     "coverage": [
+      0.511599,
+      0.511599,
+      0.511599,
+      0.511599,
+      0.511599,
+      0.511599,
+      0.511599,
+      0.511599,
+      0.511599
+     ],
+     "terminal": [
+      0.049339,
+      0.075678,
+      0.018707,
+      0.511599
+     ]
+    },
+    {
+     "material": 19,
+     "shares": [
+      49
+     ],
+     "name": "foliage_2",
+     "sources": {
+      "albedo": "436b5161a538c55a12e625e737f8018fb7a1899ee4c48b0b329410dc0ec7af0b",
+      "normal": "d3d5c35b31c58ed2b1f2f88a06f2757a874201b781077ff7882d0d88e0cf87f5"
+     },
+     "coverage": [
+      0.511599,
+      0.511599,
+      0.511599,
+      0.511599,
+      0.511599,
+      0.511599,
+      0.511599,
+      0.511599,
+      0.511599
+     ],
+     "terminal": [
+      0.04002,
+      0.068029,
+      0.022351,
+      0.511599
+     ]
+    },
+    {
+     "material": 21,
+     "shares": [
+      51
+     ],
+     "name": "wounds",
+     "sources": {
+      "albedo": "8a2b89c738ae121dfa84bfef646290d51b60542ff358f66961514c3f8c81b67c",
+      "normal": "16be2581c0b2cafbab8322df16d58e2582e2b68204add7e0cef1c95c210b4084",
+      "roughnessMap": "c2493bd814b8e51b776977575567174e7ae0588a062632a14a22df665d905b48"
+     },
+     "coverage": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "terminal": [
+      0.359847,
+      0.263134,
+      0.167496,
+      1.0
+     ]
+    },
+    {
+     "material": 22,
+     "shares": [
+      52
+     ],
+     "name": "foliage_0",
+     "sources": {
+      "albedo": "5391c40fe83acfbddf5997fcfc3ba1a5821bf724cea5a3498ba8a050d8895be3",
+      "normal": "5868e701876f56db74c645ae6df6fcd277ae7b29d03ec513f1be9eff10876667"
+     },
+     "coverage": [
+      0.381212,
+      0.381212,
+      0.381212,
+      0.381212,
+      0.381212,
+      0.381212,
+      0.381212,
+      0.381212,
+      0.381212
+     ],
+     "terminal": [
+      0.199931,
+      0.213112,
+      0.006001,
+      0.381212
+     ]
+    },
+    {
+     "material": 23,
+     "shares": [
+      53
+     ],
+     "name": "foliage_1",
+     "sources": {
+      "albedo": "b03a6fe49e65557296cce9d63cad13797f8f2fd770b4b3331e8e3b54afaaa4e3",
+      "normal": "ad70c1c5b5c2a9706a2a21cb8ca0a3edfaaaff822f693b460f1c0fd0ce80fe51"
+     },
+     "coverage": [
+      0.381212,
+      0.381212,
+      0.381212,
+      0.381212,
+      0.381212,
+      0.381212,
+      0.381212,
+      0.381212,
+      0.381212
+     ],
+     "terminal": [
+      0.21824,
+      0.222822,
+      0.005398,
+      0.381212
+     ]
+    },
+    {
+     "material": 24,
+     "shares": [
+      54
+     ],
+     "name": "foliage_2",
+     "sources": {
+      "albedo": "3fdb3be03b6aa2a529484ec5491c0866a6df330b0efeb115da1628564e0d453c",
+      "normal": "4d07735cadebc9e3a46095144e1e2eff7d59bc3598183e5ba21ed9a605473203"
+     },
+     "coverage": [
+      0.381212,
+      0.381212,
+      0.381212,
+      0.381212,
+      0.381212,
+      0.381212,
+      0.381212,
+      0.381212,
+      0.381212
+     ],
+     "terminal": [
+      0.174131,
+      0.199115,
+      0.006359,
+      0.381212
+     ]
+    },
+    {
+     "material": 26,
+     "shares": [
+      56
+     ],
+     "name": "wounds",
+     "sources": {
+      "albedo": "7210d79c3bec79dca23a33acda1039f4a4f8bca7ea326e989fb5aea71a5144e4",
+      "normal": "a53b786a4564f71d04516973747df6918ce144a6f195cfa4e50765e03a408f4f",
+      "roughnessMap": "992430197178d90cd3091bb5bb08d0a47f82668d2745b3791a48ff6d315d7cdb"
+     },
+     "coverage": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "terminal": [
+      0.094212,
+      0.034829,
+      0.017449,
+      1.0
+     ]
+    },
+    {
+     "material": 27,
+     "shares": [
+      57
+     ],
+     "name": "foliage_0",
+     "sources": {
+      "albedo": "e5e226fd3f02ee49b6313463b6800534adf3ccc694852ab9d3a9effd7a7067ea",
+      "normal": "616fcaf906dda1372ef1136dde30ef01683f346d93d8d66d0693305bd0c859f9"
+     },
+     "coverage": [
+      0.574276,
+      0.574276,
+      0.574276,
+      0.574276,
+      0.574276,
+      0.574276,
+      0.574276,
+      0.574276,
+      0.574276
+     ],
+     "terminal": [
+      0.050438,
+      0.079451,
+      0.027093,
+      0.574276
+     ]
+    },
+    {
+     "material": 28,
+     "shares": [
+      58
+     ],
+     "name": "foliage_1",
+     "sources": {
+      "albedo": "d920a8865e37851515ca93a00953c47c55e30eab7561599ac0921a562b8407d8",
+      "normal": "5bcb527643814eb962aca0b18d9b35f99d056805cf7c2767515d7ec71d683470"
+     },
+     "coverage": [
+      0.574276,
+      0.574276,
+      0.574276,
+      0.574276,
+      0.574276,
+      0.574276,
+      0.574276,
+      0.574276,
+      0.574276
+     ],
+     "terminal": [
+      0.054763,
+      0.082863,
+      0.02393,
+      0.574276
+     ]
+    },
+    {
+     "material": 29,
+     "shares": [
+      59
+     ],
+     "name": "foliage_2",
+     "sources": {
+      "albedo": "26536cc1d279ffe7d91745ed7f21f15c798f44cadda7f49a0f00c37162e1e9d9",
+      "normal": "99144cfe8e28e64f98390a7fa321f51456931e9bea0e6b134a82cd16a20fadbd"
+     },
+     "coverage": [
+      0.574276,
+      0.574276,
+      0.574276,
+      0.574276,
+      0.574276,
+      0.574276,
+      0.574276,
+      0.574276,
+      0.574276
+     ],
+     "terminal": [
+      0.044355,
+      0.074499,
+      0.028771,
+      0.574276
+     ]
+    }
+   ],
+   "files": {
+    "bc7": {
+     "albedo": {
+      "bytes": 2097792,
+      "sha256": "76d7e8079d870477276123de3a8c076dc35f2c0f858cb5e113add7f979484ae0",
+      "gzip": {
+       "file": "family-1-albedo.bc7.bin.gz",
+       "bytes": 1044027,
+       "sha256": "441e5907cec78f04231b4b38405d561f7b9c2f64295d49852b43e34e511e454b"
+      }
+     },
+     "detail": {
+      "bytes": 2097792,
+      "sha256": "17fdb27b22e88759b25e013aafd883c905c16ecbb8121839b8f564e0d2e6b7f8",
+      "gzip": {
+       "file": "family-1-detail.bc7.bin.gz",
+       "bytes": 1123869,
+       "sha256": "7ac2eb84d07012cb878c92a061230fbcd607da9027ceb612c8f2fd2408aa6af2"
+      }
+     }
+    },
+    "astc": {
+     "albedo": {
+      "bytes": 2097792,
+      "sha256": "d2034570749a8b80702ab7e1ee5a8c401b3cf8459157c5cf34b786c23d55ff46",
+      "gzip": {
+       "file": "family-1-albedo.astc.bin.gz",
+       "bytes": 1111641,
+       "sha256": "dc5c712f30e5f3951aa0f88d6b92d0529d20aff8c5ebd7a79d147406a30a2de7"
+      }
+     },
+     "detail": {
+      "bytes": 2097792,
+      "sha256": "9b2d50eefcd63422e8bec8e0f187c1f25d7fc4800d013deb32fbdbac9eba82bb",
+      "gzip": {
+       "file": "family-1-detail.astc.bin.gz",
+       "bytes": 1088938,
+       "sha256": "9c6893a4d79e52a89fc2676f6ccb208ba00362b46f8d948f0ce520435d830204"
+      }
+     }
+    }
+   }
+  }
+ ]
+}

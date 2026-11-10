@@ -14,6 +14,14 @@ Encoders are build tools and are not kept in this repository:
     bc7enc   github.com/richgel999/bc7enc_rdo (clang++ -O3 -std=c++14 -DSUPPORT_BC7E=0 -o bc7enc test.cpp
              bc7enc.cpp bc7decomp.cpp bc7decomp_ref.cpp lodepng.cpp rgbcx.cpp utils.cpp ert.cpp rdo_bc_encoder.cpp)
     astcenc  github.com/ARM-software/astc-encoder (cmake -DASTCENC_ISA_NEON=ON, gives astcenc-neon)
+
+Without them, on a Mac:
+    python3 scripts/prepare-forest-surfaces.py portugal --builtin --reuse saba
+--builtin encodes ASTC with the system's sips and BC7 with scripts/forest_bc7.py, which is plainer than
+bc7enc. --reuse copies the blocks another pack already holds for any surface baked from the same maps
+in the same way, so only what is new to this pack goes through the plainer encoder.
+
+Materials that share their maps and are baked alike share one layer, listed under its `shares`.
 """
 import argparse
 import concurrent.futures
@@ -28,6 +36,8 @@ import tempfile
 
 import numpy as np
 from PIL import Image
+
+from forest_bc7 import encode_bc7_blocks
 
 ROOT = Path(__file__).resolve().parent.parent
 BLOCK_BYTES = 16
@@ -159,13 +169,60 @@ def encode_astc(tool, png, srgb):
     return out.read_bytes()[ASTC_HEADER_BYTES:]
 
 
+def encode_bc7_builtin(pixels):
+    return encode_bc7_blocks(pixels)
+
+
+def encode_astc_sips(png, pixels):
+    # sips stores rows bottom to top, so it is given the picture upside down.
+    Image.fromarray(pixels[::-1]).save(png)
+    out = png.with_suffix('.astc')
+    subprocess.run(['sips', '-s', 'format', 'astc', str(png), '--out', str(out)], check=True, capture_output=True)
+    raw = out.read_bytes()
+    if raw[4:7] != bytes([4, 4, 1]):
+        raise SystemExit('sips did not write 4x4 ASTC blocks')
+    return raw[ASTC_HEADER_BYTES:]
+
+
+def bake_key(material):
+    """Everything about a material that decides its baked blocks."""
+    return (tuple(material[kind]['sha256'] if material.get(kind) else None for kind in ('albedo', 'normal', 'roughnessMap')),
+            material.get('wrap') == 'repeat', material['name'].startswith('foliage'),
+            None if material.get('roughnessMap') else round(float(material['roughness']), 6))
+
+
+def reusable_blocks(pack, sharpen):
+    """Blocks another pack has already baked, by bake key, codec, kind and level."""
+    folder = ROOT / 'assets/forest-scenery' / pack
+    forest = json.loads((folder / 'manifest.json').read_text())
+    materials = [material for prototype in forest['prototypes'] for material in prototype['nativeMaterials']]
+    manifest = json.loads((folder / 'surfaces/manifest.json').read_text())
+    if manifest.get('sharpen') != sharpen:
+        return {}
+    found = {}
+    for family in manifest['families']:
+        count = len(family['layers'])
+        for codec in family['files']:
+            for kind in ('albedo', 'detail'):
+                raw = gzip.decompress((folder / 'surfaces' / family['files'][codec][kind]['gzip']['file']).read_bytes())
+                offset = 0
+                for level in range(family['levels']):
+                    size = block_count(max(1, family['width'] >> level), max(1, family['height'] >> level)) * BLOCK_BYTES
+                    for row, layer in enumerate(family['layers']):
+                        found[(bake_key(materials[layer['material']]), codec, kind, level)] = raw[offset + row * size:offset + (row + 1) * size]
+                    offset += size * count
+    return found
+
+
 def receipt(raw):
     return {'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('pack', choices=['saba', 'subtropical'])
+    parser.add_argument('pack', choices=['saba', 'subtropical', 'portugal'])
+    parser.add_argument('--builtin', action='store_true', help='Encode with sips and scripts/forest_bc7.py in place of astcenc and bc7enc')
+    parser.add_argument('--reuse', help='A pack whose baked blocks are copied for surfaces baked from the same maps')
     parser.add_argument('--bc7enc', default=os.environ.get('FOREST_BC7ENC', 'bc7enc'))
     parser.add_argument('--astcenc', default=os.environ.get('FOREST_ASTCENC', 'astcenc-neon'))
     parser.add_argument('--sharpen', type=float, default=1., help='Contrast restored to each level; 0 is the plain average')
@@ -178,8 +235,17 @@ def main():
     forest = json.loads((folder / 'manifest.json').read_text())
     materials = [material for prototype in forest['prototypes'] for material in prototype['nativeMaterials']]
 
+    reuse = reusable_blocks(args.reuse, args.sharpen) if args.reuse else {}
     families = []
+    first_with = {}
+    shares = {}
     for index, material in enumerate(materials):
+        key = bake_key(material)
+        if key in first_with:
+            shares[first_with[key]].append(index)
+            continue
+        first_with[key] = index
+        shares[index] = []
         width, height = Image.open(folder / material['albedo']['file']).size
         family = next((f for f in families if f['width'] == width and f['height'] == height), None)
         if family is None:
@@ -190,7 +256,8 @@ def main():
         raise SystemExit('The renderer binds at most four texture families')
 
     manifest = {'format': 'waterworld.forest-surfaces', 'version': 1, 'materialContract': forest['materialContract'],
-                'sharpen': args.sharpen, 'families': []}
+                'sharpen': args.sharpen, **({'encoder': 'builtin'} if args.builtin else {}), **({'reuses': args.reuse} if reuse else {}), 'families': []}
+    reused = encoded = 0
     with tempfile.TemporaryDirectory() as temporary, concurrent.futures.ThreadPoolExecutor(os.cpu_count()) as pool:
         for family_index, family in enumerate(families):
             jobs = {}
@@ -200,16 +267,29 @@ def main():
                 chain, plain = surface_chain(folder, material, args.sharpen)
                 if len(chain) != family['levels']:
                     raise SystemExit('Mip count mismatch: ' + material['albedo']['file'])
-                layers.append({'material': material_index, 'name': material['name'],
+                key = bake_key(material)
+                layers.append({'material': material_index, **({'shares': shares[material_index]} if shares[material_index] else {}), 'name': material['name'],
                                'sources': {kind: material[kind]['sha256'] for kind in ('albedo', 'normal', 'roughnessMap') if material.get(kind)},
                                'coverage': [round(float(level[0][..., 3].mean()), 6) for level in plain],
                                'terminal': [round(float(v), 6) for v in plain[-1][0][0, 0]]})
                 for level, (pigment, detail) in enumerate(chain):
                     for kind, pixels in (('albedo', encode_pigment(pigment)), ('detail', encode_detail(detail))):
+                        if all((key, codec, kind, level) in reuse for codec in ('bc7', 'astc')):
+                            for codec in ('bc7', 'astc'):
+                                jobs[(codec, kind, level, layer)] = pool.submit(lambda blocks: blocks, reuse[(key, codec, kind, level)])
+                            reused += 1
+                            continue
                         png = Path(temporary) / f'{family_index}-{layer}-{level}-{kind}.png'
-                        Image.fromarray(pad_to_blocks(pixels)).save(png)
+                        padded = pad_to_blocks(pixels)
+                        if args.builtin:
+                            jobs[('bc7', kind, level, layer)] = pool.submit(encode_bc7_builtin, padded)
+                            jobs[('astc', kind, level, layer)] = pool.submit(encode_astc_sips, png, padded)
+                            encoded += 1
+                            continue
+                        Image.fromarray(padded).save(png)
                         jobs[('bc7', kind, level, layer)] = pool.submit(encode_bc7, args.bc7enc, png, level)
                         jobs[('astc', kind, level, layer)] = pool.submit(encode_astc, args.astcenc, png, kind == 'albedo')
+                        encoded += 1
             files = {}
             for codec in ('bc7', 'astc'):
                 files[codec] = {}
@@ -230,6 +310,7 @@ def main():
                     print(f'{name}: {len(raw) / 1048576:.2f} MiB in memory, {len(packed) / 1048576:.2f} MiB to download', flush=True)
             manifest['families'].append({'width': family['width'], 'height': family['height'], 'levels': family['levels'], 'layers': layers, 'files': files})
     (out_dir / 'manifest.json').write_text(json.dumps(manifest, indent=1) + '\n')
+    print(f'{reused} levels copied from {args.reuse}, {encoded} encoded' if args.reuse else f'{encoded} levels encoded')
     for codec in ('bc7', 'astc'):
         gpu = sum(f['files'][codec][k]['bytes'] for f in manifest['families'] for k in ('albedo', 'detail'))
         wire = sum(f['files'][codec][k]['gzip']['bytes'] for f in manifest['families'] for k in ('albedo', 'detail'))

@@ -7,9 +7,9 @@ import {readFile} from 'node:fs/promises';
 import {gunzipSync} from 'node:zlib';
 import {chromium} from 'playwright';
 import {createDevServer} from '../server.mjs';
-import {FOREST_SURFACE_ASSETS,FOREST_SURFACE_CODECS,SUBTROPICAL_FOREST_SURFACE_ASSETS,chooseForestSurfaceCodec,forestSurfaceFeatures,loadForestSurfaceSet} from '../js/forest-surfaces.js';
+import {FOREST_SURFACE_ASSETS,FOREST_SURFACE_CODECS,PORTUGAL_FOREST_SURFACE_ASSETS,SUBTROPICAL_FOREST_SURFACE_ASSETS,chooseForestSurfaceCodec,createForestSurfaceTextures,forestSurfaceFeatures,loadForestSurfaceSet} from '../js/forest-surfaces.js';
 
-const PACKS=[['saba',FOREST_SURFACE_ASSETS],['subtropical',SUBTROPICAL_FOREST_SURFACE_ASSETS]];
+const PACKS=[['saba',FOREST_SURFACE_ASSETS],['subtropical',SUBTROPICAL_FOREST_SURFACE_ASSETS],['portugal',PORTUGAL_FOREST_SURFACE_ASSETS]];
 const root=new URL('../',import.meta.url);
 const json=async file=>JSON.parse(await readFile(new URL(file,root),'utf8'));
 const sha256=bytes=>createHash('sha256').update(bytes).digest('hex');
@@ -20,12 +20,13 @@ test('each pack\'s compressed set describes its exact maps and holds a complete 
     const forest=await json(`assets/forest-scenery/${pack}/manifest.json`),set=await json(assets['manifest.json']),materials=packMaterials(forest);
     assert.equal(set.format,'waterworld.forest-surfaces');
     assert.ok(set.families.length<=4,'the renderer binds four texture families');
-    const placed=set.families.flatMap(f=>f.layers.map(l=>l.material)).sort((a,b)=>a-b);
+    // A layer serves the material it was baked from and any that share its maps.
+    const placed=set.families.flatMap(f=>f.layers.flatMap(l=>[l.material,...(l.shares??[])])).sort((a,b)=>a-b);
     assert.deepEqual(placed,materials.map((_,i)=>i),pack+' places every material once');
     for(const family of set.families){
       assert.equal(family.levels,1+Math.floor(Math.log2(Math.max(family.width,family.height))),'a full mip chain');
-      for(const layer of family.layers){
-        const material=materials[layer.material];
+      for(const layer of family.layers)for(const index of [layer.material,...(layer.shares??[])]){
+        const material=materials[index];
         for(const kind of ['albedo','normal','roughnessMap'])assert.equal(layer.sources[kind]??null,material[kind]?.sha256??null,
           `${pack} ${material.name} ${kind} changed since the bake; run: python3 scripts/prepare-forest-surfaces.py ${pack}`);
       }
@@ -39,6 +40,26 @@ test('each pack\'s compressed set describes its exact maps and holds a complete 
         assert.equal(raw.length,expected,'the bytes the runtime copies, level by level');
       }
     }
+  }
+});
+
+test('cohorts that wear the same maps share one layer, and each still gets its own row of optics',async()=>{
+  const forest=await json('assets/forest-scenery/portugal/manifest.json'),materials=packMaterials(forest);
+  const fetchAsset=async file=>new Response(await readFile(new URL(file,root)));
+  const set=await loadForestSurfaceSet({assets:PORTUGAL_FOREST_SURFACE_ASSETS,materials,codec:'bc7',fetchAsset});
+  assert.ok(set,'Lisbon\'s pack has a compressed set; without one its bark and leaves load as 96 MiB of half floats');
+  const layers=set.families.reduce((sum,family)=>sum+family.layers.length,0);
+  assert.equal(materials.length,60);assert.equal(layers,30,'veteran and canopy trees of a species share their layers');
+  let bytes=0;for(const family of set.families)bytes+=family.albedo.data.byteLength+family.detail.data.byteLength;
+  assert.ok(bytes<13*1048576,`the set holds ${(bytes/1048576).toFixed(1)} MiB`);
+  // The textures themselves need a GPU; the table of optics does not.
+  const writes=[],device={createTexture:d=>({destroy(){},d}),queue:{writeTexture:(...a)=>writes.push(a)}};
+  globalThis.GPUTextureUsage??={TEXTURE_BINDING:4,COPY_DST:2};
+  const surfaces=createForestSurfaceTextures({device,set,materials});
+  for(const [index,material]of materials.entries()){
+    const row=Array.from(surfaces.optics.subarray(index*12,index*12+12)),layer=set.families[row[8]]?.layers[row[9]];
+    assert.ok(layer&&[layer.material,...(layer.shares??[])].includes(index),`material ${index} points at a layer baked from other maps`);
+    assert.ok(Math.abs(row[0]-material.roughness)<1e-6);
   }
 });
 
@@ -74,9 +95,8 @@ test('decoded blocks keep each level\'s leaf coverage and linear pigment on a re
     const page=await browser.newPage();await page.route('**/__forest-surfaces',r=>r.fulfill({contentType:'text/html',body:'<!doctype html>'}));
     await page.goto('http://127.0.0.1:'+server.address().port+'/__forest-surfaces');
     const result=await page.evaluate(async()=>{
-      const {FOREST_SURFACE_ASSETS,FOREST_SURFACE_CODECS,createForestSurfaceTextures,forestSurfaceFeatures,loadForestSurfaceSet}=await import('/js/forest-surfaces.js');
-      const forest=await(await fetch('/assets/forest-scenery/saba/manifest.json')).json(),manifest=await(await fetch('/assets/forest-scenery/saba/surfaces/manifest.json')).json();
-      const materials=forest.prototypes.flatMap(p=>p.nativeMaterials),adapter=await navigator.gpu.requestAdapter();
+      const {FOREST_SURFACE_ASSETS,PORTUGAL_FOREST_SURFACE_ASSETS,FOREST_SURFACE_CODECS,createForestSurfaceTextures,forestSurfaceFeatures,loadForestSurfaceSet}=await import('/js/forest-surfaces.js');
+      const adapter=await navigator.gpu.requestAdapter();
       const device=await adapter.requestDevice({requiredFeatures:forestSurfaceFeatures(adapter)}),errors=[];device.onuncapturederror=e=>errors.push(e.error.message);
       const module=device.createShaderModule({code:`
         @group(0)@binding(0)var surface:texture_2d_array<f32>;
@@ -97,8 +117,12 @@ test('decoded blocks keep each level\'s leaf coverage and linear pigment on a re
         read.unmap();read.destroy();target.destroy();at.destroy();return totals.map(v=>v/(width*height));
       };
       const out=[];
+      // Portugal's set is the one baked with the plainer built-in encoders; its sample takes in rows of both kinds.
+      for(const [pack,assets]of [['saba',FOREST_SURFACE_ASSETS],['portugal',PORTUGAL_FOREST_SURFACE_ASSETS]])
       for(const codec of Object.keys(FOREST_SURFACE_CODECS).filter(c=>device.features.has(FOREST_SURFACE_CODECS[c].feature))){
-        const set=await loadForestSurfaceSet({assets:FOREST_SURFACE_ASSETS,materials,codec});
+        const forest=await(await fetch(`/assets/forest-scenery/${pack}/manifest.json`)).json(),manifest=await(await fetch(`/assets/forest-scenery/${pack}/surfaces/manifest.json`)).json();
+        const materials=forest.prototypes.flatMap(p=>p.nativeMaterials);
+        const set=await loadForestSurfaceSet({assets,materials,codec});
         const surfaces=createForestSurfaceTextures({device,set,materials});
         for(const [f,family]of manifest.families.entries())for(const [l,layer]of family.layers.entries()){
           if(l%5)continue; // A sample across species keeps this quick on a software GPU.
