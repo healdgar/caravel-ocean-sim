@@ -4277,7 +4277,7 @@ async function main() {
     rp.end();
 
     if(gunVolumes){
-      gunEffects.resolveDepth(enc,depthMS.createView(),W,H);
+      gunEffects.resolveDepth(enc,mainPass.depthStencilAttachment.view,W,H);
       const effects=enc.beginRenderPass({colorAttachments:[{view:hdrView,loadOp:'load',storeOp:'store'}]});
       gunEffects.drawVolumes(effects);effects.end();
     }

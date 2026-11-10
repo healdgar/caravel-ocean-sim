@@ -18,6 +18,7 @@
 import { sampleVoronoiBlockCell } from './part-assembly.js';
 import { classifyShipPartTaxonomy, expandShipPartGroups } from './ship-part-taxonomy.js';
 import { SHIP_FRACTURE_POSE_UPDATE } from './wgsl/ship-fracture.js';
+import { boatRotate } from './boat.js';
 
 // [mast, axis z, height of the topmast break, height of the full break], in design units.
 export function shipMastSpecs(modelId) {
@@ -538,6 +539,7 @@ export function createShipFractureState(fracture) {
     records,
     spawnRecords: new Float32Array(fracture.shardCount * 8),
     hasSpawnPose: new Uint8Array(fracture.shardCount),
+    landsFlat: new Uint8Array(fracture.shardCount),
     broken: new Uint8Array(fracture.shardCount),
     rehitCount: new Uint8Array(fracture.shardCount),
     wear: new Float32Array(fracture.shardCount),
@@ -550,13 +552,18 @@ export function createShipFractureState(fracture) {
     revision: 0,
     partsGone: null,
     sideTops: null,
+    floating: null,
   };
 }
 
-function computeShardFlatMode(fracture, s) {
-  const shard = fracture.shards[s];
+// How a piece comes to rest on the water, read by the shader: 0, 1 or 2 lay its own thinnest side (up, athwart
+// or fore-and-aft) on the sea, and 3 says its spin was written to land it flat, so everything that fell with
+// it keeps the one attitude.
+const FLAT_BY_SPIN = 3;
+function computeShardFlatMode(state, s) {
+  if (state.landsFlat[s]) return FLAT_BY_SPIN;
+  const fracture = state.fracture, shard = fracture.shards[s];
   if (!shard) return 0;
-  if (shard.kind === SHARD_KINDS.spar) return 2;
   const [sx, sy, sz] = fracture.scale;
   const dx = (shard.max[0] - shard.min[0]) * sx;
   const dy = (shard.max[1] - shard.min[1]) * sy;
@@ -580,23 +587,30 @@ function recordShardSpawnPose(state, s, boat) {
   state.spawnRecords[spAt + 3] = (boat.heading ?? 0) * d2r;
   state.spawnRecords[spAt + 4] = boat.pitch ?? 0;
   state.spawnRecords[spAt + 5] = boat.roll ?? 0;
-  state.spawnRecords[spAt + 6] = computeShardFlatMode(state.fracture, s);
+  state.spawnRecords[spAt + 6] = computeShardFlatMode(state, s);
   state.spawnRecords[spAt + 7] = activeFlag;
   state.hasSpawnPose[s] = 1;
   state.dirty.add(s);
   return true;
 }
 
-function writeBoatAxis(out, offset, x, y, z, heading, pitch, roll) {
-  const cr = Math.cos(roll), sr = Math.sin(roll);
-  const cp = Math.cos(pitch), sp = Math.sin(pitch);
-  const ch = Math.cos(heading), sh = Math.sin(heading);
-  const xx = cr * x - sr * y, yy = sr * x + cr * y;
-  const yp = cp * yy - sp * z, zp = sp * yy + cp * z;
-  out[offset] = ch * xx - sh * zp;
-  out[offset + 1] = yp;
-  out[offset + 2] = sh * xx + ch * zp;
+// Every piece broken since the last look that has no record yet of where the ship was when it left her.
+function recordMissingSpawnPoses(state, boat) {
+  if (!state || !boat) return;
+  for (const s of state.dirty) if (s > 0 && state.broken[s] && !state.hasSpawnPose[s]) recordShardSpawnPose(state, s, boat);
 }
+
+const boatAxis = [0, 0, 0];
+function writeBoatAxis(out, offset, x, y, z, heading, pitch, roll) {
+  boatRotate(boatAxis, x, y, z, heading, pitch, roll);
+  out[offset] = boatAxis[0];
+  out[offset + 1] = boatAxis[1];
+  out[offset + 2] = boatAxis[2];
+}
+
+// The height of the sea where she lies, in the world. Her own `heave` sits below it by however deep she has
+// settled, so the difference between the two is her waterline in her own frame and nothing else.
+export const shipSeaLevel = (boat) => boat?.target?.heave ?? 0;
 
 function fillHullFrameHeader(out, boat, shardCount) {
   const heading = ((boat?.heading ?? 0) * Math.PI) / 180;
@@ -608,7 +622,7 @@ function fillHullFrameHeader(out, boat, shardCount) {
   out[7] = boat?.heave ?? 0;
   writeBoatAxis(out, 8, 0, 0, -1, heading, pitch, roll);
   out[11] = boat?.z ?? 0;
-  out[12] = boat?.target?.heave ?? 0;
+  out[12] = shipSeaLevel(boat);
   out[13] = shardCount;
   out[14] = 0;
   out[15] = 2;
@@ -622,8 +636,12 @@ export function shipFractureStateOf(damage, fracture) {
 
 // Delay leaves the shard where it is for that long: a wall above a breach does not all let go at once.
 export function writeFlight(state, s, flight, now) {
-  const r = state.records, at = s * FRACTURE_RECORD_FLOATS, { pivot, velocity, spin, hinge = 0, gravity = 1, sink = 0, linger = 2, settle = null, keep = false, delay = 0 } = flight;
+  const r = state.records, at = s * FRACTURE_RECORD_FLOATS, { pivot, velocity, spin, hinge = 0, gravity = 1, sink = 0, linger = 2, settle = null, keep = false, delay = 0, landsFlat = false } = flight;
   const scaleY = state.fracture.scale[1];
+  if (state.landsFlat) {
+    state.landsFlat[s] = landsFlat ? 1 : 0;
+    if (state.hasSpawnPose[s]) state.spawnRecords[s * 8 + 6] = computeShardFlatMode(state, s);
+  }
   if (!state.flying.size) state.epoch = now;
   let settleAt = settle;
   if (settleAt === null) {
@@ -721,19 +739,31 @@ function fellMast(state, mastId, stage, side, now, { snap = false } = {}) {
   const length = (top - cut) * sy, drop = Math.max(0.5, cut * sy);
   const hinge = Math.max(0.5, 0.36 * Math.sqrt(length));
   const fall = Math.sqrt((2 * drop) / GRAVITY);
-  const rate = ((2 * Math.PI) / 3) / (0.5 * hinge + fall);
   const clear = fracture.beamMetres * 0.5 + length * 0.06;
   const pivot = [0, cut, (stage === 'topmast' ? mast.topZ : mast.fullZ) + (side > 0 ? 0.01 : -0.01)];
-  // It lands flat. A plain sideways topple would leave the yards standing up out of the sea, so one turn
-  // about a skew axis carries the mast down to the water and rolls its yards level on the way.
+  // It lands flat, and which way is flat depends on what it carries. Square yards reach across her, so a plain
+  // sideways topple would leave them standing up out of the sea: one turn of a third of a circle about a skew
+  // axis carries the mast down to the water and rolls its yards level on the way. A lateen yard or a gaff
+  // reaches along her instead, and the plain topple is the one that lays it down.
+  let across = 0, along = 0;
+  for (const s of fresh) {
+    const shard = fracture.shards[s];
+    if (shard.kind === SHARD_KINDS.line) continue;
+    across = Math.max(across, Math.abs(shard.min[0]) * sx, Math.abs(shard.max[0]) * sx);
+    along = Math.max(along, Math.abs(shard.min[2] - pivot[2]) * sz, Math.abs(shard.max[2] - pivot[2]) * sz);
+  }
+  const square = across >= along, turn = square ? (2 * Math.PI) / 3 : Math.PI / 2, rate = turn / (0.5 * hinge + fall);
   const roll = shardNoise(fresh[0], 5) >= 0.5 ? 1 : -1, third = 1 / Math.sqrt(3);
   const flight = {
     pivot,
     velocity: [(side * clear) / fall, 0, (shardNoise(fresh[0], 4) - 0.5) * 2],
-    spin: [-roll * side * third * rate, -roll * third * rate, -side * third * rate],
+    spin: square ? [-roll * side * third * rate, -roll * third * rate, -side * third * rate] : [0, 0, -side * rate],
+    // The fall is timed to the turn, so the two end together whatever the height of the break.
+    settle: hinge + fall,
     hinge,
     sink: 0.012,
     linger: Math.min(180, 75 + length),
+    landsFlat: true,
   };
   for (const s of fresh) {
     // Rope has no stiffness to fall with. It goes with the mast as it starts to lean, then is gone, parted.
@@ -832,13 +862,14 @@ function destroyWreckedParts(state, damage, now) {
 }
 
 /**
- * When a vessel founders and sinks, loose upper-works wooden timbers, hatches, rails, and planking
- * float free and continue to bob on the waves above the wreck.
+ * When a vessel founders and sinks, her masts go by the board and loose upper-works timbers, hatches,
+ * rails and planking float free above the wreck. It happens once in a sinking: `damage.wreckageReleased`
+ * is on her damage, not on the shards, so neither a later hit nor a reload sheds her a second time.
  */
 export function releaseSinkingWreckage(fracture, damage, now = 0) {
   const state = shipFractureStateOf(damage, fracture);
-  if (!state || state.sunkWreckageReleased) return 0;
-  state.sunkWreckageReleased = true;
+  if (!state || damage.wreckageReleased) return 0;
+  damage.wreckageReleased = true;
   let released = 0;
   const mastIds = Object.keys(fracture.masts ?? {});
   for (let i = 0; i < mastIds.length; i++) {
@@ -874,8 +905,10 @@ export function syncFractureWithDamage(fracture, damage) {
   if (!state) return false;
   let changed = false;
   const gone = new Set();
+  // A wreck that has shed her top-hamper has no mast standing, whatever her masts were when she went down.
+  const dismasted = Boolean(damage.sunk && damage.wreckageReleased);
   for (const [mastId, mast] of Object.entries(fracture.masts)) {
-    const stage = damage.mastState?.[mastId] ?? 0;
+    const stage = dismasted ? 2 : damage.mastState?.[mastId] ?? 0;
     if (stage >= 1) for (const s of mast.upper) gone.add(s);
     if (stage >= 2) for (const s of mast.lower) gone.add(s);
   }
@@ -902,6 +935,7 @@ function restoreShard(state, s) {
   state.wear[s] = 0;
   if (state.rehitCount) state.rehitCount[s] = 0;
   state.hasSpawnPose[s] = 0;
+  if (state.landsFlat) state.landsFlat[s] = 0;
   state.spawnRecords.fill(0, s * 8, (s + 1) * 8);
   state.flying.delete(s);
   state.records[s * FRACTURE_RECORD_FLOATS + 15] = INTACT;
@@ -1069,84 +1103,113 @@ export function evaluateBrokenShardWorldPivot(state, s, now = null, boat = null,
   return [(boat.x ?? 0) + worldOff[0], (boat.heave ?? 0) + worldOff[1], (boat.z ?? 0) + worldOff[2]];
 }
 
-// Sweep a shot segment against floating or sinking broken wreckage shards in world space.
-export function sweepFloatingWreckageSegment(from, to, radius, targetBoat, now = null) {
-  const state = targetBoat?.damage?.fracture;
-  if (!state || !state.brokenCount) return null;
-  const effNow = Number.isFinite(now) ? now : (state.lastNow || state.epoch || 0);
-  const clockNow = Math.max(0, effNow - (state.epoch || 0));
-  const waterY = Math.max(0, (targetBoat?.target?.heave ?? 0) - (targetBoat?.heave ?? 0));
-  const scale = state.fracture.scale;
-  const abx = to[0] - from[0], aby = to[1] - from[1], abz = to[2] - from[2];
-  const lenSq = abx * abx + aby * aby + abz * abz;
-  let best = null;
-  for (const s of state.fracture.strikable) {
+const shardSpanMetres = (fracture, s) => {
+  const shard = fracture.shards[s], scale = fracture.scale;
+  return shard ? Math.hypot((shard.max[0] - shard.min[0]) * scale[0], (shard.max[1] - shard.min[1]) * scale[1], (shard.max[2] - shard.min[2]) * scale[2]) : 1.2;
+};
+
+// How long a piece must have been off her before a shot can meet it in the water, and how far above the sea
+// it may still be. Planking still in the air from the last ball is neither struck nor blasted by this one.
+const WRECKAGE_SETTLED_SECONDS = 0.35, WRECKAGE_AWASH_METRES = 0.55;
+
+// The pieces of one wreck that lie in the water, worked out once a frame however many shot are in the air.
+// Each is four floats (world pivot and the reach of the piece) and they share one box, so a shot nowhere near
+// costs a comparison.
+function floatingWreckage(state, boat, now) {
+  const waterY = shipSeaLevel(boat);
+  let list = state.floating;
+  if (list && list.now === now && list.revision === state.revision && list.waterY === waterY) return list;
+  const strikable = state.fracture.strikable;
+  if (!list) list = state.floating = { now: NaN, revision: -1, waterY: 0, count: 0, shards: new Int32Array(strikable.length), points: new Float32Array(strikable.length * 4), min: [0, 0, 0], max: [0, 0, 0] };
+  const clockNow = Math.max(0, now - (state.epoch || 0)), r = state.records, sp = state.spawnRecords;
+  let count = 0;
+  list.min.fill(Infinity); list.max.fill(-Infinity);
+  for (const s of strikable) {
     if (!state.broken[s]) continue;
-    const at = s * FRACTURE_RECORD_FLOATS, r = state.records;
+    const at = s * FRACTURE_RECORD_FLOATS;
     const age = r[at + 15] >= 0 ? r[at + 15] : Math.max(0, clockNow - r[at + 3]);
-    if (age < 0.35) continue;
-    const wp = evaluateBrokenShardWorldPivot(state, s, effNow, targetBoat, waterY);
-    if (!wp || wp[1] > waterY + 0.55) continue;
-    const shard = state.fracture.shards[s];
-    const span = shard
-      ? Math.hypot((shard.max[0] - shard.min[0]) * scale[0], (shard.max[1] - shard.min[1]) * scale[1], (shard.max[2] - shard.min[2]) * scale[2])
-      : 1.2;
-    const hitR = radius + Math.min(2.6, Math.max(0.55, span * 0.55));
-    const t = lenSq > 1e-8
-      ? Math.max(0, Math.min(1, ((wp[0] - from[0]) * abx + (wp[1] - from[1]) * aby + (wp[2] - from[2]) * abz) / lenSq))
-      : 0;
-    if (best && t >= best.fraction) continue;
-    const px = from[0] + abx * t, py = from[1] + aby * t, pz = from[2] + abz * t;
-    if (Math.hypot(px - wp[0], pz - wp[2]) <= hitR && Math.abs(py - wp[1]) <= Math.max(0.75, radius + 0.65)) {
-      const hitPos = [px, wp[1], pz];
-      best = {
-        fraction: t,
-        kind: 'ship',
-        hitZone: 'debris',
-        shardIndex: s,
-        targetBoat,
-        position: hitPos,
-        surfacePosition: hitPos,
-        localPosition: [0, 0, 0],
-        normal: [0, 1, 0],
-      };
+    if (age < WRECKAGE_SETTLED_SECONDS) continue;
+    const wp = evaluateBrokenShardWorldPivot(state, s, now, boat, waterY);
+    // Only what has left her for the sea: a gun knocked off its carriage is still aboard, in her frame.
+    if (!wp || !state.hasSpawnPose[s] || !(sp[s * 8 + 7] > 0.5) || wp[1] > waterY + WRECKAGE_AWASH_METRES) continue;
+    const reach = Math.min(1.4, Math.max(0.12, shardSpanMetres(state.fracture, s) * 0.4));
+    list.shards[count] = s;
+    list.points.set([wp[0], wp[1], wp[2], reach], count * 4);
+    for (let c = 0; c < 3; c++) {
+      if (wp[c] - reach < list.min[c]) list.min[c] = wp[c] - reach;
+      if (wp[c] + reach > list.max[c]) list.max[c] = wp[c] + reach;
     }
+    count++;
   }
-  return best;
+  list.count = count; list.now = now; list.waterY = waterY; list.revision = state.revision;
+  return list;
 }
 
-// Blast, hurl into the air, and shatter floating or sinking broken wreckage shards hit by a shot or nearby water impact.
-export function blastFloatingWreckageAt(worldPos, blastRadius, targetBoat, { velocity = null, directShard = -1, now = null } = {}) {
+const wreckageNow = (state, now) => (Number.isFinite(now) ? now : (state.lastNow || state.epoch || 0));
+
+/**
+ * A shot through timber adrift smashes each piece on its line and flies on, as it does through canvas and
+ * men. `limit` is how far along the segment the shot gets before something solid stops it. Returns the
+ * number of pieces smashed.
+ */
+export function shatterFloatingWreckageOnSegment(from, to, radius, targetBoat, limit = 1, now = null) {
+  const state = targetBoat?.damage?.fracture;
+  if (!state || !state.brokenCount) return 0;
+  const list = floatingWreckage(state, targetBoat, wreckageNow(state, now));
+  if (!list.count) return 0;
+  for (let c = 0; c < 3; c++) {
+    if (Math.max(from[c], to[c]) + radius < list.min[c] || Math.min(from[c], to[c]) - radius > list.max[c]) return 0;
+  }
+  const abx = to[0] - from[0], aby = to[1] - from[1], abz = to[2] - from[2];
+  const lenSq = abx * abx + aby * aby + abz * abz, p = list.points;
+  let shattered = 0;
+  for (let i = 0; i < list.count; i++) {
+    const x = p[i * 4], y = p[i * 4 + 1], z = p[i * 4 + 2], reach = p[i * 4 + 3] + radius;
+    const t = lenSq > 1e-8 ? Math.max(0, Math.min(1, ((x - from[0]) * abx + (y - from[1]) * aby + (z - from[2]) * abz) / lenSq)) : 0;
+    if (t > limit) continue;
+    // A piece lies flat on the sea: as wide as it is long, and no thicker than a plank.
+    if (Math.abs(from[1] + aby * t - y) > radius + 0.3 || Math.hypot(from[0] + abx * t - x, from[2] + abz * t - z) > reach) continue;
+    writeFrozenGone(state, list.shards[i]);
+    shattered++;
+  }
+  return shattered;
+}
+
+/**
+ * A ball striking her side or the sea close by throws the timber floating there into the air again, and
+ * smashes what is small or has been thrown before. Only pieces already lying in the water are touched.
+ */
+export function blastFloatingWreckageAt(worldPos, blastRadius, targetBoat, { velocity = null, now = null } = {}) {
   const state = targetBoat?.damage?.fracture;
   if (!state || !state.brokenCount || !worldPos) return { shattered: 0, blasted: 0 };
-  const effNow = Number.isFinite(now) ? now : (state.lastNow || state.epoch || 0);
-  const waterY = Math.max(0, (targetBoat?.target?.heave ?? 0) - (targetBoat?.heave ?? 0));
-  const scale = state.fracture.scale;
-  let shattered = 0, blasted = 0;
-  for (const s of state.fracture.strikable) {
-    if (!state.broken[s]) continue;
-    const wp = evaluateBrokenShardWorldPivot(state, s, effNow, targetBoat, waterY);
-    if (!wp) continue;
-    const dx = wp[0] - worldPos[0], dy = wp[1] - worldPos[1], dz = wp[2] - worldPos[2];
+  const effNow = wreckageNow(state, now);
+  const list = floatingWreckage(state, targetBoat, effNow);
+  for (let c = 0; c < 3; c++) {
+    if (!list.count || worldPos[c] + blastRadius * 2 < list.min[c] || worldPos[c] - blastRadius * 2 > list.max[c]) return { shattered: 0, blasted: 0 };
+  }
+  const waterY = list.waterY, scale = state.fracture.scale, sp = state.spawnRecords;
+  // Smashing a piece changes the list, so decide who is caught before touching any of them.
+  const caught = [];
+  for (let i = 0; i < list.count; i++) {
+    const dx = list.points[i * 4] - worldPos[0], dy = list.points[i * 4 + 1] - worldPos[1], dz = list.points[i * 4 + 2] - worldPos[2];
     const dist = Math.hypot(dx, dy * 0.5, dz);
-    if (s !== directShard && dist > blastRadius) continue;
+    if (dist <= blastRadius) caught.push([list.shards[i], dx, dz, dist, list.points[i * 4], list.points[i * 4 + 1], list.points[i * 4 + 2]]);
+  }
+  let shattered = 0, blasted = 0;
+  for (const [s, dx, dz, dist, wx0, wy0, wz0] of caught) {
     const shard = state.fracture.shards[s];
-    const span = shard
-      ? Math.hypot((shard.max[0] - shard.min[0]) * scale[0], (shard.max[1] - shard.min[1]) * scale[1], (shard.max[2] - shard.min[2]) * scale[2])
-      : 1.2;
     const rehits = (state.rehitCount[s] = (state.rehitCount[s] ?? 0) + 1);
-    if (s === directShard || rehits >= 2 || span < 1.85) {
+    if (rehits >= 2 || shardSpanMetres(state.fracture, s) < 1.85) {
       writeFrozenGone(state, s);
       shattered++;
       continue;
     }
-    if (!state.hasSpawnPose[s] && targetBoat) recordShardSpawnPose(state, s, targetBoat);
-    const spAt = s * 8, sp = state.spawnRecords;
-    const rotOrigin = [0, 0, 0];
+    // Thrown from where it floats: move the pose it left her with, so its own centre starts there.
+    const spAt = s * 8, rotOrigin = [0, 0, 0];
     writeBoatAxis(rotOrigin, 0, shard.centroid[0] * scale[0], shard.centroid[1] * scale[1], shard.centroid[2] * scale[2], sp[spAt + 3], sp[spAt + 4], sp[spAt + 5]);
-    sp[spAt] = wp[0] - rotOrigin[0];
-    sp[spAt + 1] = Math.max(waterY + 0.18, wp[1] + 0.18) - rotOrigin[1];
-    sp[spAt + 2] = wp[2] - rotOrigin[2];
+    sp[spAt] = wx0 - rotOrigin[0];
+    sp[spAt + 1] = Math.max(waterY, wy0) + 0.18 - rotOrigin[1];
+    sp[spAt + 2] = wz0 - rotOrigin[2];
     sp[spAt + 7] = 1;
     const falloff = Math.max(0.35, 1 - dist / Math.max(0.5, blastRadius));
     const hDist = Math.hypot(dx, dz);
@@ -1205,22 +1268,38 @@ export async function createShipFractureGPU({ device, computePipe, posedBuffer, 
   });
   const workgroups = Math.ceil(fracture.vertexShards.length / 64);
   let current = null, active = false, destroyed = false, seenRevision = -1;
-  const ensureSpawnPoses = (boat) => {
-    if (!current || !boat) return;
-    for (const s of current.dirty) {
-      if (s > 0 && current.broken[s] && !current.hasSpawnPose[s]) {
-        recordShardSpawnPose(current, s, boat);
-      }
+  // Pieces adrift in the world, which alone need her frame each frame; counted afresh when records change.
+  let adrift = 0, recount = true;
+  const countAdrift = () => {
+    adrift = 0; recount = false;
+    if (!current) return;
+    const r = current.records, sp = current.spawnRecords;
+    for (let s = 1; s < fracture.shardCount; s++) {
+      if (!current.hasSpawnPose[s] || !(sp[s * 8 + 7] > 0.5)) continue;
+      const frozen = r[s * FRACTURE_RECORD_FLOATS + 15], hideAt = r[s * FRACTURE_RECORD_FLOATS + 11];
+      if (frozen === INTACT || (frozen >= 0 && hideAt >= 0 && frozen >= hideAt)) continue;
+      adrift++;
     }
   };
+  const writeHeader = (boat) => {
+    fillHullFrameHeader(hullHeader, boat, fracture.shardCount);
+    device.queue.writeBuffer(records, 0, hullHeader, 0, 16);
+  };
+  // Shards that changed together are usually neighbours, so each run of them goes up in one write.
   const flush = (boat = null) => {
     if (!current?.dirty.size) return false;
-    ensureSpawnPoses(boat);
-    for (const s of current.dirty) {
-      device.queue.writeBuffer(records, s * FRACTURE_RECORD_FLOATS * 4, current.records, s * FRACTURE_RECORD_FLOATS, FRACTURE_RECORD_FLOATS);
-      device.queue.writeBuffer(records, (spawnBaseFloats + s * 8) * 4, current.spawnRecords, s * 8, 8);
+    recordMissingSpawnPoses(current, boat);
+    const changed = [...current.dirty].filter((s) => s > 0).sort((a, b) => a - b);
+    for (let i = 0; i < changed.length;) {
+      let end = i + 1;
+      while (end < changed.length && changed[end] === changed[end - 1] + 1) end++;
+      const first = changed[i], count = end - i;
+      device.queue.writeBuffer(records, first * FRACTURE_RECORD_FLOATS * 4, current.records, first * FRACTURE_RECORD_FLOATS, count * FRACTURE_RECORD_FLOATS);
+      device.queue.writeBuffer(records, (spawnBaseFloats + first * 8) * 4, current.spawnRecords, first * 8, count * 8);
+      i = end;
     }
     current.dirty.clear();
+    recount = true;
     return true;
   };
   return {
@@ -1228,13 +1307,7 @@ export async function createShipFractureGPU({ device, computePipe, posedBuffer, 
     get active() { return active; },
     apply(damage, events, now, boat = null) {
       const count = applyFractureEvents(fracture, damage, events, now);
-      if (count && boat && damage?.fracture) {
-        for (const s of damage.fracture.dirty) {
-          if (s > 0 && damage.fracture.broken[s] && !damage.fracture.hasSpawnPose[s]) {
-            recordShardSpawnPose(damage.fracture, s, boat);
-          }
-        }
-      }
+      if (count) recordMissingSpawnPoses(damage?.fracture, boat);
       return count;
     },
     // Called every frame, but does nothing unless something changed.
@@ -1256,6 +1329,7 @@ export async function createShipFractureGPU({ device, computePipe, posedBuffer, 
         current = next;
         if (current) for (let s = 1; s < fracture.shardCount; s++) if (current.records[s * FRACTURE_RECORD_FLOATS + 15] !== INTACT) current.dirty.add(s);
         seenRevision = -1;
+        recount = true;
       }
       if (!current) { active = false; return false; }
       if (!damage.pendingBakes?.length && damage.revision !== seenRevision) {
@@ -1264,31 +1338,37 @@ export async function createShipFractureGPU({ device, computePipe, posedBuffer, 
       }
       const wrote = flush(boat);
       active = current.brokenCount > 0;
-      if (active && boat) {
-        fillHullFrameHeader(hullHeader, boat, fracture.shardCount);
-        device.queue.writeBuffer(records, 0, hullHeader, 0, 16);
+      // Pieces that went adrift this frame need her frame before they are first posed; after that the tick keeps it.
+      if (wrote && boat) {
+        countAdrift();
+        if (adrift) writeHeader(boat);
+      }
+      // A flight written since the last tick may have restarted the clock, so do not pose it on the old one.
+      if (wrote && current.flying.size) {
+        clockData[0] = current.lastNow - current.epoch;
+        device.queue.writeBuffer(clockBuffer, 0, clockData, 0, 8);
       }
       return wrote;
     },
-    // The clock runs while something is broken or in the air.
+    // The clock runs only while something is in the air or adrift. Pieces at rest are held at their last age,
+    // and pieces that have gone are a point, so neither needs the clock or her frame again.
     tick(damage, now, boat = null) {
       if (destroyed) return;
       if (current) current.lastNow = now;
-      if (damage?.sunk && current && !current.sunkWreckageReleased) {
+      if (damage?.sunk && current && damage.fracture === current && !damage.wreckageReleased) {
         if (releaseSinkingWreckage(fracture, damage, now)) active = true;
       }
-      if (!current || damage?.fracture !== current || (!current.flying.size && !current.brokenCount)) return;
-      if (current.flying.size) settleFinishedFlights(current, now);
-      if (boat) {
-        fillHullFrameHeader(hullHeader, boat, fracture.shardCount);
-        device.queue.writeBuffer(records, 0, hullHeader, 0, 16);
-      }
+      if (!current || damage?.fracture !== current) return;
+      if (current.flying.size && settleFinishedFlights(current, now)) recount = true;
+      flush(boat);
+      if (recount) countAdrift();
+      if (!current.flying.size && !adrift) return;
+      if (boat && adrift) writeHeader(boat);
       clockData[0] = now - current.epoch;
-      clockData[2] = boat ? Math.max(0, (boat.target?.heave ?? 0) - (boat.heave ?? 0)) : 0;
+      clockData[2] = boat ? Math.max(0, shipSeaLevel(boat) - (boat.heave ?? 0)) : 0;
       clockData[3] = boat?.roll ?? 0;
       clockData[7] = boat?.pitch ?? 0;
       device.queue.writeBuffer(clockBuffer, 0, clockData, 0, 8);
-      flush(boat);
     },
     reset() {
       if (destroyed) return;

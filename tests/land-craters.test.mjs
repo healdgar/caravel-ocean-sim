@@ -105,5 +105,7 @@ test('new per-frame work stays off the CPU: crater tiles are written only when s
   const follow=source.slice(source.indexOf('    follow(camera)'),source.indexOf('    draw(pass, section'));
   assert.match(follow,/if \(!overflow\) return;/,'and following the camera is nothing at all unless the tiles have run out');
   const effects=readFileSync(new URL('../js/gunnery-effects.js',import.meta.url),'utf8');
-  assert.match(effects,/if\(e\.pit>0\)continue;/,'thrown earth and dust add nothing to the JavaScript smoke list');
+  // The list of volumes is built between the start of `update` and its sort, and nothing in there reads an impact.
+  const smokeList=effects.slice(effects.indexOf('    update(dt,options={}){'),effects.indexOf('      ordered.sort('));
+  assert.ok(smokeList.length>500&&!/impacts/.test(smokeList),'thrown earth and dust add nothing to the JavaScript smoke list');
 });

@@ -237,3 +237,31 @@ test('a struck forest tree queues its mark for the GPU and lays no second damage
   assert.equal(terrain.pendingLandBakes, undefined, 'no bake for a tree the GPU owns');
   assert.equal(grid.roots[11], 0, 'JavaScript marks it as the next frame begins');
 });
+
+test('gunnery hands the trunk model the ball it fired: its own energy, and whether it met trunk or limb', () => {
+  const grid = gridOf(['chestnut'], root(0, 0, 0, 1.2, 0)), terrain = { forestTrunks: grid, ports: [] };
+  const strikeOf = (hit, mass, speed) => {
+    terrain.pendingForestStrikes = [];
+    applySceneryImpactDamage(terrain, { ...hit, position: hit.sceneryPos, velocity: [speed, 0, 0], mass, time: 4, ammo: 'round' });
+    return terrain.pendingForestStrikes[0];
+  };
+  const trunk = sweepScenerySegment([-5, 1, 0], [5, 1, 0], 0.07, terrain);
+  assert.equal(trunk.forestTree.onTrunk, true);
+  // A spent 4-pounder: far too little to fell a chestnut, and the model must be told so.
+  const spent = strikeOf(trunk, 1.8, 120);
+  assert.equal(spent.impact.energy, 0.5 * 1.8 * 120 * 120, 'the energy is the ball\'s, not a floor that fells anything');
+  assert.equal(spent.tree.onTrunk, true);
+  assert.equal(strikeOf(trunk, 11, 300).impact.energy, 0.5 * 11 * 300 * 300, 'and not a multiple of it');
+  // The same on the model: that spent ball wounds, and does not bring a hardwood down.
+  const roots = new Float32Array(root(0, 0, 0, 1.2, 0)), strikes = new Map();
+  const outcome = strikeForestTree(roots, 0, FOREST_TRUNK_SHAPES.chestnut, { ...spent.impact, height: spent.tree.height, onTrunk: spent.tree.onTrunk }, strikes);
+  assert.equal(outcome.felled, false, 'a chestnut stands after one spent ball');
+  // A limb is not the trunk: the sweep's word for it reaches the model unchanged.
+  let limb = null;
+  for (let y = 2; y < 16 && !limb; y += 0.25) for (let z = -4; z <= 4 && !limb; z += 0.25) {
+    const hit = sweepScenerySegment([-9, y, z], [9, y, z], 0.07, terrain);
+    if (hit?.forestTree && !hit.forestTree.onTrunk) limb = hit;
+  }
+  assert.ok(limb, 'a chestnut has limbs a ball can meet');
+  assert.equal(strikeOf(limb, 11, 300).tree.onTrunk, false, 'a limb hit is passed on as a limb hit');
+});

@@ -5,8 +5,8 @@ import {chromium} from 'playwright';
 import {createDevServer} from '../server.mjs';
 import {coastalRegionStageURL} from '../js/landfall.js';
 
-// A level field above the town, and a beach well away from it.
-const FIELD={region:'lisbon',x:110.5,z:-6118.1},BEACH={region:'lisbon',x:-2182.2,z:-5349.8};
+// A level field above the town, and a beach well away from it: a hand above the tideline, so a pit there goes below it.
+const FIELD={region:'lisbon',x:110.5,z:-6118.1},BEACH={region:'lisbon',x:-2198.2,z:-5369.8};
 const SIZE=[960,540];
 
 let browser,server,base;
@@ -157,6 +157,7 @@ test('on a beach the pit is sand, shallower and wider, and stands full where it 
       const c=craters.ledger.records[0],floor=await craters.probe(c.x,c.z);
       return {sand:c.sand,floor:floor.height,groundY:floor.groundY};
     });
+    assert.ok(info.groundY>.05&&info.groundY<.5,`the beach here is just above the tide: ${info.groundY}`);
     assert.ok(info.sand>.5,`this ground is sand: ${info.sand}`);
     assert.ok(info.floor<-.2&&info.floor>-.5,`shallower than in turf: ${info.floor}`);
     assert.ok(info.groundY+info.floor<0,'its floor is below the sea, on this low beach');

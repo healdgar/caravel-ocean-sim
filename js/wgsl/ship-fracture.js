@@ -77,6 +77,25 @@ fn fractureBoatRotate(v:vec3f,heading:f32,pitch:f32,roll:f32)->vec3f {
   let yp=cp*yy-sp*v.z;let zp=sp*yy+cp*v.z;
   return vec3f(ch*xx-sh*zp,yp,sh*xx+ch*zp);
 }
+// Attitudes are quaternions (xyz, w), so a piece can turn from how it flew to how it floats and stay rigid.
+fn fractureQuatMul(a:vec4f,b:vec4f)->vec4f {
+  return vec4f(a.w*b.xyz+b.w*a.xyz+cross(a.xyz,b.xyz),a.w*b.w-dot(a.xyz,b.xyz));
+}
+fn fractureQuatAxis(axis:vec3f,angle:f32)->vec4f {
+  return vec4f(axis*sin(angle*0.5),cos(angle*0.5));
+}
+fn fractureQuatTurn(v:vec3f,q:vec4f)->vec3f {
+  return v+2.0*cross(q.xyz,cross(q.xyz,v)+q.w*v);
+}
+// The same turn as fractureBoatRotate: roll, then pitch, then compass heading.
+fn fractureBoatQuat(heading:f32,pitch:f32,roll:f32)->vec4f {
+  return fractureQuatMul(fractureQuatAxis(vec3f(0.0,-1.0,0.0),heading),fractureQuatMul(fractureQuatAxis(vec3f(1.0,0.0,0.0),pitch),fractureQuatAxis(vec3f(0.0,0.0,1.0),roll)));
+}
+// A piece adrift in the world. It flies from where the ship was when it left her, meets the sea, and comes to
+// rest flat on it. spawn1.z says how: 0, 1 or 2 lay the piece's own thinnest side (up, athwart, fore-and-aft)
+// on the water, and 3 means its spin was written to land it flat, which is how everything that fell together
+// about one pivot (a mast with its yards and tops) keeps one attitude. Either way it is one turn of the whole
+// piece about its pivot, never a squeeze.
 fn shardFlightWorld(position:vec3f,restNormal:vec3f,origin:vec4f,flight:vec4f,spinHide:vec4f,motion:vec4f,spawn0:vec4f,spawn1:vec4f,right:vec3f,up:vec3f,fwd:vec3f,boatOrigin:vec3f,waterY:f32,clock:FractureClock)->ShardPose {
   let age=select(max(0.0,clock.now-origin.w),motion.w,motion.w>=0.0);
   if(spinHide.w>=0.0&&age>=spinHide.w){return ShardPose(origin.xyz,restNormal);}
@@ -105,36 +124,30 @@ fn shardFlightWorld(position:vec3f,restNormal:vec3f,origin:vec4f,flight:vec4f,sp
   let relative0=(position-origin.xyz)*scale;
   let scaleOfNormal=length(restNormal);
   let restUnitN=normalize(restNormal/max(scaleOfNormal,1e-5)/scale);
-  var spunLocal=relative0;
-  var spunN=restUnitN;
-  if(rate>1e-5){
-    let axis=spinHide.xyz/rate;
-    let c=cos(angle);let s=sin(angle);
-    spunLocal=fractureRotate(relative0,axis,c,s);
-    spunN=fractureRotate(restUnitN,axis,c,s);
-  }
-  let flightWorldRel=fractureBoatRotate(spunLocal,spawn0.w,spawn1.x,spawn1.y);
-  let flightWorldN=fractureBoatRotate(spunN,spawn0.w,spawn1.x,spawn1.y);
-  let sideSign=select(-1.0,1.0,origin.x>=0.0);
-  var flatLocal=relative0;
-  var flatUnitN=restUnitN;
-  if(spawn1.z>1.5){
-    flatLocal=vec3f(relative0.x,relative0.z,-relative0.y);
-    flatUnitN=vec3f(restUnitN.x,restUnitN.z,-restUnitN.y);
+  let spinAxis=select(vec3f(0.0,1.0,0.0),spinHide.xyz/max(rate,1e-5),rate>1e-5);
+  let flightTurn=fractureQuatMul(fractureBoatQuat(spawn0.w,spawn1.x,spawn1.y),fractureQuatAxis(spinAxis,angle));
+  // The sea rocks a plank about its middle. A whole mast turns about its foot, far from most of it, so the same
+  // angle would wave its head a metre clear of the water: it gets a fifth of it.
+  let rock=waterBlend*select(1.0,0.2,spawn1.z>2.5);
+  let waveRockX=sin(clock.now*1.65+seed*1.3)*0.08*rock;
+  let waveRockZ=cos(clock.now*1.42-seed*0.9)*0.10*rock;
+  var flatTurn=vec4f(0.0,0.0,0.0,1.0);
+  var flatYaw=spawn0.w+seed*0.45;
+  if(spawn1.z>2.5){
+    // The whole turn its spin was given to make, as the ship's own frame timed the fall.
+    flatTurn=fractureQuatAxis(spinAxis,rate*max(0.0,flight.w-0.5*hinge));
+    flatYaw=spawn0.w;
+  }else if(spawn1.z>1.5){
+    flatTurn=fractureQuatAxis(vec3f(1.0,0.0,0.0),-1.5707963);
   }else if(spawn1.z>0.5){
-    flatLocal=vec3f(relative0.y*sideSign,-relative0.x*sideSign,relative0.z);
-    flatUnitN=vec3f(restUnitN.y*sideSign,-restUnitN.x*sideSign,restUnitN.z);
+    flatTurn=fractureQuatAxis(vec3f(0.0,0.0,1.0),select(1.5707963,-1.5707963,origin.x>=0.0));
   }
-  flatLocal.y=clamp(flatLocal.y,-0.16,0.16);
-  if(flatUnitN.y<0.0){flatUnitN=-flatUnitN;}
-  let waveRockX=sin(clock.now*1.65+seed*1.3)*0.08*waterBlend;
-  let waveRockZ=cos(clock.now*1.42-seed*0.9)*0.10*waterBlend;
-  let flatYaw=spawn0.w+seed*0.45;
-  let flatWorldRel=fractureBoatRotate(flatLocal,flatYaw,waveRockX,waveRockZ);
-  let flatWorldN=fractureBoatRotate(flatUnitN,flatYaw,waveRockX,waveRockZ);
+  flatTurn=fractureQuatMul(fractureBoatQuat(flatYaw,waveRockX,waveRockZ),flatTurn);
+  if(dot(flightTurn,flatTurn)<0.0){flatTurn=-flatTurn;}
   let flatBlend=smoothstep(hinge*0.6,settle,age);
-  let worldRel=mix(flightWorldRel,flatWorldRel,flatBlend);
-  let worldN=normalize(mix(flightWorldN,flatWorldN,flatBlend));
+  let turn=normalize(mix(flightTurn,flatTurn,flatBlend));
+  let worldRel=fractureQuatTurn(relative0,turn);
+  let worldN=fractureQuatTurn(restUnitN,turn);
   let d=(worldPivot+worldRel)-boatOrigin;
   let localMetres=vec3f(dot(d,right),dot(d,up),-dot(d,fwd));
   let localN=vec3f(dot(worldN,right),dot(worldN,up),-dot(worldN,fwd));
