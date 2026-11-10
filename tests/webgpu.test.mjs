@@ -252,15 +252,16 @@ test('indexed ship matches the original pixels, including profiled rendering', {
   assert.ok(legacy.includes('rp.draw(v.mesh.length/9);'),'legacy fixture must use the unindexed ship instance draw');
   assert.ok(legacy.includes('vertices.set(asset.vertices.subarray('),'legacy fixture must replace the factory asset geometry with raw vertices');
   const captures=[];
-  for(const mode of ['legacy','authored','optimized','profiled']){
+  // The last two are drawn without bloom, to set the mesh as authored against the mesh as cut: see below.
+  for(const mode of ['legacy','optimized','profiled','authored unbloomed','optimized unbloomed']){
     const page=await browser.newPage({viewport:{width:96,height:72}});
     try{
       const initErrors=[];
       page.on('pageerror',e=>initErrors.push(e.message));
       page.on('console',msg=>{if(msg.text().includes('init failed'))initErrors.push(msg.text());});
       await page.addInitScript(instrumentRenderer);
-      await page.route('**/js/main.js',route=>route.fulfill({contentType:'text/javascript',body:mode==='legacy'?legacy:mode==='authored'?authored:source}));
-      await page.goto(`${origin}/?ship=nina&view=ship&sunElev=35&sunAzim=30&clouds=0&windSpeed=0&swellHs=0&choppy=0&shot=compare.png&frames=100000${mode==='profiled'?'&profile=1':''}`);
+      await page.route('**/js/main.js',route=>route.fulfill({contentType:'text/javascript',body:mode==='legacy'?legacy:mode.startsWith('authored')?authored:source}));
+      await page.goto(`${origin}/?ship=nina&view=ship&sunElev=35&sunAzim=30&clouds=0&windSpeed=0&swellHs=0&choppy=0&shot=compare.png&frames=100000${mode.endsWith('unbloomed')?'&bloom=0':''}${mode==='profiled'?'&profile=1':''}`);
       try{await page.waitForFunction(()=>check.callback,undefined,{polling:100,timeout:30000});}
       catch(e){throw new Error(`${mode} initialization: ${initErrors.join('\n')||e.message}`);}
       const frame=await step(page,1000);
@@ -277,14 +278,22 @@ test('indexed ship matches the original pixels, including profiled rendering', {
       captures.push(pixels);
     }finally{await page.close();}
   }
-  const [plain,uncut,optimized,profiled]=captures;
+  const [plain,optimized,profiled,uncut,cut]=captures;
   assert.deepEqual(optimized,plain,'indexing must preserve pixels');
   assert.deepEqual(profiled,optimized,'profiling must preserve pixels');
-  // Splitting a mast tube leaves its surface where it was, but moves a few samples on its thin silhouette by
-  // rounding. A seam or a showing cap would change far more of this 96 x 72 image.
-  const changed=new Set();
-  for(let i=0;i<uncut.length;i++)if(uncut[i]!==optimized[i])changed.add(i>>2);
-  assert.ok(changed.size<=16,`cutting her masts must not show on an intact ship (${changed.size} pixels changed)`);
+  assert.notDeepEqual(cut,optimized,'the comparison below is of pictures without bloom');
+  // Splitting a mast tube leaves its surface where it was, but moves a sample or two on its thin silhouette by
+  // rounding where it is cut: three masts, two cuts each. A seam or a showing cap would change far more of this
+  // 96 x 72 image. The two are set side by side without bloom, because bloom carries each such sample across
+  // the whole frame as changes of a single level in sky and sea: fourteen of those to these six when this was
+  // written, and a count that moves with everything else in the picture.
+  const row=Math.ceil(96*4/256)*256/4,changed=[];
+  for(let pixel=0;pixel<uncut.length/4;pixel++)if([0,1,2].some(c=>uncut[pixel*4+c]!==cut[pixel*4+c]))changed.push([pixel%row,Math.floor(pixel/row)]);
+  const where=changed.map(at=>at.join(',')).join(' ');
+  assert.ok(changed.length<=12,`cutting her masts must not show on an intact ship (${changed.length} pixels changed: ${where})`);
+  // And what does change is on a mast: no more columns of the picture than her three masts stand in.
+  const columns=[...new Set(changed.map(at=>at[0]))].sort((a,b)=>a-b),masts=columns.filter((x,i)=>i===0||x-columns[i-1]>1).length;
+  assert.ok(masts<=3,`the changed pixels stand in ${masts} separate columns: ${where}`);
 });
 
 test('early hull exclusion preserves water edges and the complete ship image', {timeout:180000}, async()=>{
