@@ -1979,6 +1979,11 @@
     "bytes": 45600,
     "sha256": "cbc788334b31f08405d3e1e0f81a149a71755830c5fe6e8e2c48a2b6765e8d50"
   },
+  "assets/audio/world/town-bustle.mp3": {
+    "url": "assets/audio/world/town-bustle.ca184a9bc942f5ea.mp3",
+    "bytes": 59097,
+    "sha256": "ca184a9bc942f5eaeea929eb9e988011b022301d3594f34b49004c710e923bd4"
+  },
   "assets/audio/world/footstep-deck.mp3": {
     "url": "assets/audio/world/footstep-deck.e304e81848d3960a.mp3",
     "bytes": 5436,
