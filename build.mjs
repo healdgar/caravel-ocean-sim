@@ -44,6 +44,7 @@ order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-native-lod.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-volume.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-middle.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-clusters.js');
+order.splice(order.indexOf('js/forest-clusters.js'),0,'js/forest-crowns.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-surfaces.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/task-yield.js','js/forest-occlusion.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-trunk-shapes.js','js/forest-trunks.js');
