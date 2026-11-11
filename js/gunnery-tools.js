@@ -52,7 +52,9 @@ export function createGunneryToolTemplate(){
   return {vertices:new Float32Array(values),ranges};
 }
 
-export function writeGunneryToolInstances(company,boat,target){
+// 'placed', if given, takes the arrows of bodies posed on the GPU: each is given two records here, a shaft and its
+// fletching, which the arrow pass fills from the body's joints (js/crew-solve.js).
+export function writeGunneryToolInstances(company,boat,target,placed=null){
   const buckets=[[],[],[]];let vertices=0;
   const tube=(a,b,radius,kind,sides=6)=>{
     if(Math.hypot(...b.map((v,i)=>v-a[i]))<1e-5)return;
@@ -62,10 +64,14 @@ export function writeGunneryToolInstances(company,boat,target){
   const spare=()=>vertices+60<=4096&&buckets.reduce((n,b)=>n+b.length,0)+8<=target.length;
   for(const sailor of company.crew){
     // Arrows that struck this body, fletched at the tail. They yield to a working crew's tools.
-    for(const arrow of sailor.stuckArrowPoses??[]){
+    if(sailor.stuckArrowPoses)for(const arrow of sailor.stuckArrowPoses){
       if(spare())tube(arrow.tip,arrow.tail,.011,1,5);
       const d=arrow.tail.map((v,i)=>v-arrow.tip[i]),n=Math.hypot(...d);
       if(n>1e-5&&spare())tube(arrow.tail.map((v,i)=>v-d[i]/n*.1),arrow.tail,.02,2,5);
+    }else if(placed)for(const arrow of sailor.stuckArrows??[]){
+      if(vertices+120>4096||buckets.reduce((n,b)=>n+b.length,0)+16>target.length)break;
+      vertices+=120;placed.push({sailor,arrow,record:buckets[0].length/8});
+      buckets[0].push(0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,2);
     }
     const tool=crewGunneryTool(sailor,boat);if(!tool?.a||!tool.b)continue;
     if(tool.kind==='blade'||tool.kind==='club'){
@@ -129,7 +135,7 @@ export function buildGunneryToolVertices(company,boat,vertices){
 }
 
 export async function createGunneryTools({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,shader,format,samples,waterOptics,shared=null}){
-  const B=GPUBufferUsage,template=createGunneryToolTemplate(),instances=new Float32Array(68*8),pose=new Float32Array(16),axis=[0,0,0];let count=0,ranges=[];
+  const B=GPUBufferUsage,template=createGunneryToolTemplate(),instances=new Float32Array(68*8),pose=new Float32Array(16),axis=[0,0,0],placed=[];let count=0,ranges=[];
   const vertex=device.createBuffer({label:'immutable crew gun tool tubes',size:template.vertices.byteLength,usage:B.VERTEX|B.COPY_DST});
   device.queue.writeBuffer(vertex,0,template.vertices);
   const shapeBuffer=device.createBuffer({label:'crew gun tool endpoints',size:instances.byteLength,usage:B.STORAGE|B.COPY_DST});
@@ -145,8 +151,11 @@ export async function createGunneryTools({device,frameUBO,transView,skyView,samp
   const submergedGroup=submerged?.bindGroup(resources),submergedLighting=submerged?shadows.bind(submerged.pipeline):null;
   return {
     assets:{pipeline,shadowPipeline},
+    // The tube records, and which of them are arrows still to be placed from their bodies' joints this frame.
+    tubes:shapeBuffer,placed,
     update(company,boat,enabled){
-      const state=enabled?writeGunneryToolInstances(company,boat,instances):{count:0,ranges:[]};count=state.count;ranges=state.ranges;if(!count)return;
+      placed.length=0;
+      const state=enabled?writeGunneryToolInstances(company,boat,instances,placed):{count:0,ranges:[]};count=state.count;ranges=state.ranges;if(!count)return;
       const h=(boat.heading??0)*Math.PI/180;
       for(const[i,vector]of[[0,[1,0,0]],[4,[0,1,0]],[8,[0,0,1]]]){boatRotate(axis,...vector,h,boat.pitch??0,boat.roll??0);pose.set(axis,i);}
       pose.set([boat.x??0,boat.heave??0,boat.z??0,1],12);

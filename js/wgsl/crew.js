@@ -6,6 +6,8 @@ import { DRESS_MASK_SCALE } from '../indigenous-dress.js';
 
 // The captain's painted texture is read a third of a mip level sharper than its footprint: 2^-0.35 of it.
 const CAPTAIN_TEXTURE_SHARPEN = (2 ** -0.35).toFixed(4);
+// How much of the light a shirt of some colour throws back, a captain's coat of that colour does.
+const CAPTAIN_COAT_DEPTH = 0.3;
 
 export const CREW_SKIN = /* wgsl */ `
 @group(0) @binding(1) var<uniform> hull:Hull;
@@ -38,10 +40,12 @@ fn crewPieceHidden(color:vec3f,dress:u32)->bool {
   return piece>0u&&((dress>>(piece-1u))&1u)==0u;
 }
 const CREW_PIECE_OUT=vec3f(0.0,1.62,0.0);
+// The whole part of skin.w says whose body this is: 0 a man's, 1 a woman's, 2 a woman captain in the captain's body,
+// which is built on the man's and so takes the man's face.
 fn crewSurface(v:CrewInput)->CrewSurface {
   let actor=actors[v.instance];
   if(crewPieceHidden(v.color,crewDressOf(actor.hair.w))){return CrewSurface(CREW_PIECE_OUT,v.normal);}
-  return crewMorph(v.position,v.normal,actor.face,actor.skin.w);
+  return crewMorph(v.position,v.normal,actor.face,select(0.0,1.0,actor.skin.w>.5&&actor.skin.w<1.5));
 }
 fn crewMorph(p:vec3f,normal:vec3f,f:vec4f,sex:f32)->CrewSurface {
   let headY=select(1.5998,1.5496,sex>.5);
@@ -76,6 +80,48 @@ fn crewMorph(p:vec3f,normal:vec3f,f:vec4f,sex:f32)->CrewSurface {
   return CrewSurface(vec3f(p.x*width,p.y+eyeShift*eye,p.z+f.z*nose),morphed);
 }
 `;
+export const CAPTAIN_OWN_COLOURS = /* wgsl */ `
+// One man sat for the captain's painting: his skin, his brown hair and beard, his navy coat. Every captain wears it,
+// so each one's own skin, hair and coat are laid over it wherever the paint is one of those, keeping the painting's
+// light and shade, and a woman's beard is painted out in her skin. Paint is told by its colour, since the painting's
+// islands follow no garment: flesh is far redder than green and lit, the coat is the only dark thing bluer than red,
+// and hair is whatever else is dark on the head, and everything on its crown. The cut of the body, the face and the
+// hair stay the sitter's.
+fn captainOwnColours(paint:vec3f,p:vec3f,flagged:f32,skin:vec4f,hair:vec3f,shirt:vec3f)->vec3f {
+  let luma=dot(paint,vec3f(.2126,.7152,.0722));
+  let red=paint.r/max(paint.g,1e-4);
+  let dark=1.0-smoothstep(.12,.2,luma);
+  // The head, less the wings of the collar that stand up beside the jaw, and with the beard that hangs below the chin
+  // between them, which is darker than any shade on the collar.
+  let wing=smoothstep(.08,.095,abs(p.x))*smoothstep(.03,.05,p.z)*(1.0-smoothstep(1.58,1.6,p.y));
+  let onHead=max(smoothstep(1.49,1.52,p.y)*(1.0-smoothstep(.15,.19,abs(p.x)))*(1.0-wing),
+    smoothstep(1.45,1.465,p.y)*(1.0-smoothstep(.06,.085,abs(p.x)))*smoothstep(.02,.04,p.z)*(1.0-smoothstep(.06,.1,luma)));
+  // The coat's own black shadows are coat too. The head has none of it but the collar behind the neck: a blue shade
+  // under the fringe is hair.
+  let blue=paint.b/max(max(paint.r,paint.g),1e-4);
+  let nape=1.0-onHead*max(smoothstep(-.08,-.05,p.z),smoothstep(1.58,1.6,p.y));
+  let coat=smoothstep(.82,.94,blue)*(1.0-smoothstep(.05,.09,luma))*nape;
+  // Nothing but hair is painted on the top of the head, the back of it, or its sides above the ears.
+  let crown=onHead*max(smoothstep(1.755,1.77,p.y),max((1.0-smoothstep(-.085,-.06,p.z))*smoothstep(1.575,1.595,p.y),
+    smoothstep(.085,.1,abs(p.x))*smoothstep(1.66,1.68,p.y)));
+  // Where the body says skin, its deepest shade is still skin; elsewhere a dark red is the waistcoat.
+  let flesh=smoothstep(2.2,2.7,red)*smoothstep(mix(.035,.012,flagged),mix(.07,.03,flagged),luma)*(1.0-crown);
+  // Below the crown hair is only the deepest of what is not flesh: the paint fades from a beard into the collar
+  // beside it, and bright hair laid over that fade would stain the collar.
+  let hairy=(1.0-coat)*mix(onHead*(1.0-flesh)*(1.0-smoothstep(.07,.13,luma)),1.0,crown);
+  // A woman's jaw: the front of the head below the nose. The beard, whiskers and moustache are whatever is dark on
+  // it, and the shade the painter put round them goes with them.
+  let jaw=onHead*(1.0-crown)*smoothstep(-.035,-.01,p.z)*(1.0-smoothstep(1.63,1.655,p.y))*step(1.5,skin.w);
+  let lit=paint/vec3f(.40,.125,.058);
+  var shade=mix(vec3f(clamp(dot(lit,vec3f(.299,.587,.114)),.4,1.3)),clamp(lit,vec3f(.4),vec3f(1.3)),.45);
+  shade=mix(shade,max(shade,vec3f(.8)),jaw);
+  // A coat is heavier and darker cloth than the shirt whose colour it takes.
+  var worn=mix(paint,shirt*(${CAPTAIN_COAT_DEPTH}*clamp(luma/.0141,.55,1.4)),coat);
+  worn=mix(worn,hair*clamp(luma/.032,.45,1.6),hairy);
+  worn=mix(worn,skin.rgb*.9,jaw*(1.0-flesh)*dark);
+  return mix(worn,skin.rgb*shade,flesh);
+}
+`;
 // Shading never discards, so the GPU shades only what shows. Anyone with something to cut away,
 // someone fading out of a first-person sightline or in torn clothes, lays depth with `surviving`
 // after the opaque scene, then shades what is left.
@@ -83,7 +129,7 @@ fn crewMorph(p:vec3f,normal:vec3f,f:vec4f,sex:f32)->CrewSurface {
 export const CREW_CLOTH_SHEEN = 0.045;
 // The crew's shading. The sheen is a parameter so that a test can take the cloth's own lobe away and hold everything
 // else to the vessel's lighting, term for term.
-export const crewRenderWGSL = (clothSheen = CREW_CLOTH_SHEEN) => FRAME_WGSL + ATMO_CORE_WGSL + VESSEL_RIG + VESSEL_LIGHTING + CREW_SKIN + SHADOW_SAMPLE + SKY_RENDER_FUNCS + /* wgsl */ `
+export const crewRenderWGSL = (clothSheen = CREW_CLOTH_SHEEN) => FRAME_WGSL + ATMO_CORE_WGSL + VESSEL_RIG + VESSEL_LIGHTING + CREW_SKIN + CAPTAIN_OWN_COLOURS + SHADOW_SAMPLE + SKY_RENDER_FUNCS + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F:Frame;
 @group(0) @binding(4) var transLUT:texture_2d<f32>;
 @group(0) @binding(5) var sampC:sampler;
@@ -101,7 +147,7 @@ struct CrewVertex {
   @location(1) @interpolate(perspective,centroid) normal:vec3f, @location(2) @interpolate(perspective,centroid) color:vec3f, @location(3) @interpolate(flat) helm:f32,
   @location(4) @interpolate(perspective,centroid) wet:vec2f, @location(5) @interpolate(perspective,centroid) skin:f32,
   @location(6) @interpolate(perspective,centroid) bodyPos:vec3f, @location(7) @interpolate(flat) damage:vec3f,
-  @location(8) @interpolate(flat) paint:u32
+  @location(8) @interpolate(flat) paint:u32, @location(9) @interpolate(flat) actor:u32
 };
 // The model's colours are placeholders for what this person wears: rgb, and whether it is skin.
 fn crewClothed(tagged:vec3f,p:vec3f,shirt:vec3f,trousers:vec3f,skin:vec3f,hair:vec3f,isIndigenous:bool,dress:u32)->vec4f {
@@ -150,7 +196,7 @@ fn crewClothed(tagged:vec3f,p:vec3f,shirt:vec3f,trousers:vec3f,skin:vec3f,hair:v
   out.wet=mix(lower,upper,smoothstep(.5,1.08,y));
   let dress=crewDressOf(actor.hair.w);
   let clothed=crewClothed(v.color,v.position,actor.shirt.rgb,actor.trousers.rgb,actor.skin.rgb,actor.hair.rgb,actor.face.w>1.5,dress);
-  out.color=clothed.rgb;out.skin=clothed.w;out.paint=dress>>16u;
+  out.color=clothed.rgb;out.skin=clothed.w;out.paint=dress>>16u;out.actor=v.instance;
   if(actor.shirt.w>0.5){out.position=vec4f(2,2,0,1);}
   return out;
 }
@@ -251,7 +297,7 @@ fn crewShade(v:CrewVertex,front:bool,baseIn:vec3f)->vec4f {
   // here, where every fragment runs, and is drawn in by the same third of a level the lookup was sharpened by.
   let footX=dpdx(v.color.rg)*${CAPTAIN_TEXTURE_SHARPEN};let footY=dpdy(v.color.rg)*${CAPTAIN_TEXTURE_SHARPEN};
   var base=v.color;
-  if(v.color.b<-1.0){base=textureSampleGrad(captainTex,captainSampler,v.color.rg,footX,footY).rgb;}
+  if(v.color.b<-1.0){base=textureSampleGrad(captainTex,captainSampler,v.color.rg,footX,footY).rgb;let own=actors[v.actor];base=captainOwnColours(base,v.bodyPos,v.skin,own.skin,own.hair.rgb,own.shirt.rgb);}
   return crewShade(v,front,base);
 }
 `;

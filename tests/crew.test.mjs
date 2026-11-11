@@ -436,6 +436,18 @@ test('only the captain\'s painted body looks its texture up, and only where it i
   assert.equal(crewRenderWGSL(CREW_CLOTH_SHEEN),CREW_RENDER);
 });
 
+test('a captain\'s body is told from a hand\'s, and a woman in it keeps its face and loses its beard',async()=>{
+  const {crewBodyKind}=await import('../js/crew.js');
+  const {CREW_SKIN,CREW_RENDER}=await import('../js/wgsl/crew.js');
+  // A body of its batch's own sex is a hand; the captain rides in the batch of his or her sex on another mesh.
+  assert.deepEqual([crewBodyKind({sex:'male'},true),crewBodyKind({sex:'female'},true),crewBodyKind({sex:'male'},false),crewBodyKind({sex:'female'},false)],[0,1,0,2]);
+  assert.match(CREW_SKIN,/crewMorph\(v\.position,v\.normal,actor\.face,select\(0\.0,1\.0,actor\.skin\.w>\.5&&actor\.skin\.w<1\.5\)\)/,'only a woman\'s own body takes the woman\'s face');
+  // The captain's own colours come from the actor the vertex stage already reads: nothing more is uploaded for them.
+  const entry=CREW_RENDER.slice(CREW_RENDER.indexOf('fn crewFS'));
+  assert.match(entry,/let own=actors\[v\.actor\];base=captainOwnColours\(base,v\.bodyPos,v\.skin,own\.skin,own\.hair\.rgb,own\.shirt\.rgb\);/);
+  assert.ok(entry.indexOf('captainOwnColours(')>entry.indexOf('if(v.color.b<-1.0)'),'and only the painted body pays for them');
+});
+
 test('baked clips store every frame in order and wrap time without a jump',async()=>{
   const {bakeCrewClips,crewClipFrame}=await import('../js/crew-clip-pose.js');
   const joints=65*16,sampled=[];

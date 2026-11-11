@@ -138,7 +138,7 @@ export function createSkinAnimator(asset) {
     for(const i of branchJoints[node])gltfMatMultiply(matrices[i],world[joints[i]],inverseMatrices[i]);
     return palette;
   }
-  const animator={rest,parent,order,world,pose:aPose,palette,clips,joints,names,nodeIndex:name=>nameIndices.get(name)??-1,update:updateMatrices,updateBranch,
+  const animator={rest,parent,order,world,pose:aPose,palette,inverseBinds:inverse,clips,joints,names,nodeIndex:name=>nameIndices.get(name)??-1,update:updateMatrices,updateBranch,
     sample(name,time,other=null,otherTime=0,blend=0){
       if(!Number.isFinite(time)||!Number.isFinite(otherTime)||!Number.isFinite(blend))throw Error('Invalid animation time');
       evaluate(aPose,name,time);

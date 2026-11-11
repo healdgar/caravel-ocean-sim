@@ -6,6 +6,7 @@ import { gltfQuatMultiply, gltfSlerp } from './gltf.js';
 import { vesselVerticalScale, modelDeckWidth } from './hull.js';
 import { crewDeckHeight } from './crew-work.js';
 import { crewNavigationObstacles } from './crew-navigation.js';
+import { CREW_SOLVE_OP } from './wgsl/crew-solve.js';
 
 const crewPhysMixerMaskCache = new WeakMap();
 
@@ -527,6 +528,13 @@ export function applyArticulatedRagdollPose(a, s, boat) {
   if (!rag) return false;
   const m = getCrewMixerMasks(a);
   if (m.pelvis < 0) return false;
+  // Given a recorder (js/crew-solve.js), the eleven points go to the GPU, which lays the body along them.
+  if (a.record) {
+    const points = [];
+    for (let i = 0; i < 11; i++) points.push(...crewPhysActorLocalPoint([rag.pos[i * 3], rag.pos[i * 3 + 1], rag.pos[i * 3 + 2]], s));
+    a.put(CREW_SOLVE_OP.ragdoll, ...points);
+    return true;
+  }
 
   for (const node of [m.pelvis, m.spine1, m.spine2, m.spine3, m.neck, m.head]) {
     if (node < 0) continue;
@@ -860,6 +868,7 @@ export function poseCrewFingers(a, s, leftGrip = null, rightGrip = null) {
   }
 
   const grips = { l: crewPhysClamp(leftGrip, -0.45, 1.0), r: crewPhysClamp(rightGrip, -0.45, 1.0) };
+  if (a.record) { a.put(CREW_SOLVE_OP.fingers, grips.l, grips.r); return; }
   for (const side of ['l', 'r']) {
     const g = grips[side];
     const chains = m.fingers[side];
@@ -896,6 +905,7 @@ export function poseCrewGaze(a, s) {
   const yaw = crewPhysClamp(phys.gazeYaw ?? 0, -0.95, 0.95);
   const pitch = crewPhysClamp(phys.gazePitch ?? 0, -0.52, 0.52);
   if (Math.abs(yaw) < 1e-3 && Math.abs(pitch) < 1e-3) return;
+  if (a.record) { a.put(CREW_SOLVE_OP.gaze, yaw, pitch); return; }
 
   for (const [node, wYaw, wPitch, wRoll] of [
     [m.neck, 0.35, 0.35, 0.05],
@@ -919,6 +929,29 @@ export function poseCrewGaze(a, s) {
   else a.update();
 }
 
+// How much higher or lower the deck is under each foot than under the sailor, in his own scale. The feet are given
+// in his own frame.
+function crewDeckRise(s, boat, footPosL, footPosR) {
+  let dhL = 0, dhR = 0;
+  const cYaw = Math.cos(s.yaw ?? 0), sYaw = Math.sin(s.yaw ?? 0);
+  const scaleX = s.scale?.[0] || 1, scaleY = s.scale?.[1] || 1, scaleZ = s.scale?.[2] || 1;
+  const sx = (boat.beam ?? 3.6) / 3.6;
+  const sz = (boat.length ?? 12) / 12;
+  const sy = vesselVerticalScale(boat);
+  const rootFloor = crewDeckHeight(boat, s.position[2] / sz, s.position[0] / sx) * sy;
+  if (Number.isFinite(rootFloor)) {
+    const wxL = s.position[0] + cYaw * (footPosL[0] * scaleX) + sYaw * (footPosL[2] * scaleZ);
+    const wzL = s.position[2] - sYaw * (footPosL[0] * scaleX) + cYaw * (footPosL[2] * scaleZ);
+    const wxR = s.position[0] + cYaw * (footPosR[0] * scaleX) + sYaw * (footPosR[2] * scaleZ);
+    const wzR = s.position[2] - sYaw * (footPosR[0] * scaleX) + cYaw * (footPosR[2] * scaleZ);
+    const fL = crewDeckHeight(boat, wzL / sz, wxL / sx) * sy;
+    const fR = crewDeckHeight(boat, wzR / sz, wxR / sx) * sy;
+    if (Number.isFinite(fL) && Math.abs(fL - rootFloor) < 0.34) dhL = (fL - rootFloor) / scaleY;
+    if (Number.isFinite(fR) && Math.abs(fR - rootFloor) < 0.34) dhR = (fR - rootFloor) / scaleY;
+  }
+  return [dhL, dhR];
+}
+
 export function applySeaLegsAndBreathing(a, s, boat = null) {
   const phys = s.phys;
   if (!phys) return;
@@ -934,6 +967,22 @@ export function applySeaLegsAndBreathing(a, s, boat = null) {
     (s.job?.rung ?? 0) > 0 ||
     s.job?.lookoutAtStation,
   );
+  // Given a recorder (js/crew-solve.js), what follows is done on the GPU from these numbers. The deck under each
+  // foot is read here, at where the clips put the feet, since the solved feet are not known here.
+  if (a.record) {
+    const legs = !hasExplicitFeet && (s.walk ?? 0) < 0.65, stance = crewPhysClamp(1 - (s.walk ?? 0) * 1.35, 0, 1);
+    const held = Boolean(s.grips?.hand_l || s.grips?.hand_r || s.seatedPose);
+    let flags = (legs ? 1 : 0) | (held ? 4 : 0), rise = [0, 0, 0, 0];
+    if (legs && boat && s.position) rise = [...crewDeckRise(s, boat, a.feet[0], a.feet[1]), 0, 0];
+    else if (legs && s.building) {
+      const turn = (s.yaw ?? 0) - (s.building.yaw ?? 0);
+      flags |= 2;
+      rise = [Math.cos(turn), Math.sin(turn), s.building.slopeX ?? 0, s.building.slopeZ ?? 0];
+    }
+    a.put(CREW_SOLVE_OP.seaLegs, flags, stance, (phys.comShiftX ?? 0) * stance, (phys.comShiftZ ?? 0) * stance, phys.comDropY ?? 0, ...rise,
+      phys.spineLeanX ?? 0, phys.spineLeanZ ?? 0, Math.sin(phys.breathPhase ?? 0), 0.012 + (phys.exertion ?? 0.2) * 0.028, held ? 0 : (phys.armSpread ?? 0) * 0.18);
+    return;
+  }
   if (!hasExplicitFeet && m.pelvis >= 0 && m.footL >= 0 && m.footR >= 0 && (s.walk ?? 0) < 0.65) {
     const stanceWeight = crewPhysClamp(1 - (s.walk ?? 0) * 1.35, 0, 1);
     const footPosL = crewPhysMatPos(a.world[m.footL]);
@@ -942,23 +991,8 @@ export function applySeaLegsAndBreathing(a, s, boat = null) {
     const rotFootR = crewPhysMatRotQuat(a.world[m.footR]);
 
     let dhL = 0, dhR = 0;
-    const cYaw = Math.cos(s.yaw ?? 0), sYaw = Math.sin(s.yaw ?? 0);
-    const scaleX = s.scale?.[0] || 1, scaleY = s.scale?.[1] || 1, scaleZ = s.scale?.[2] || 1;
     if (boat && s.position) {
-      const sx = (boat.beam ?? 3.6) / 3.6;
-      const sz = (boat.length ?? 12) / 12;
-      const sy = vesselVerticalScale(boat);
-      const rootFloor = crewDeckHeight(boat, s.position[2] / sz, s.position[0] / sx) * sy;
-      if (Number.isFinite(rootFloor)) {
-        const wxL = s.position[0] + cYaw * (footPosL[0] * scaleX) + sYaw * (footPosL[2] * scaleZ);
-        const wzL = s.position[2] - sYaw * (footPosL[0] * scaleX) + cYaw * (footPosL[2] * scaleZ);
-        const wxR = s.position[0] + cYaw * (footPosR[0] * scaleX) + sYaw * (footPosR[2] * scaleZ);
-        const wzR = s.position[2] - sYaw * (footPosR[0] * scaleX) + cYaw * (footPosR[2] * scaleZ);
-        const fL = crewDeckHeight(boat, wzL / sz, wxL / sx) * sy;
-        const fR = crewDeckHeight(boat, wzR / sz, wxR / sx) * sy;
-        if (Number.isFinite(fL) && Math.abs(fL - rootFloor) < 0.34) dhL = (fL - rootFloor) / scaleY;
-        if (Number.isFinite(fR) && Math.abs(fR - rootFloor) < 0.34) dhR = (fR - rootFloor) / scaleY;
-      }
+      [dhL, dhR] = crewDeckRise(s, boat, footPosL, footPosR);
     } else if (s.building) {
       const inst = s.building;
       const cB = Math.cos((s.yaw ?? 0) - (inst.yaw ?? 0));
@@ -1047,7 +1081,32 @@ export function applyPoseInertializer(a, s, dt) {
   let mixer = s._mixer;
   const actionKey = crewPhysResolveActionKey(s);
 
-  if (!mixer || mixer.nodeCount !== nodeCount) {
+  // Given a recorder (js/crew-solve.js), the GPU keeps the poses and eases between them, and only the clock is
+  // kept here. Easing that some other pass or skeleton was keeping starts afresh.
+  if (a.record) {
+    if (!mixer || mixer.keptBy !== a.owner || mixer.slot !== a.slotOf) {
+      s._mixer = { keptBy: a.owner, slot: a.slotOf, nodeCount, actionKey, transitionAge: 10, transitionDuration: 0.24 };
+      a.put(CREW_SOLVE_OP.inertia, 1, 0);
+      return;
+    }
+    let changed = 0;
+    if (mixer.actionKey !== actionKey) {
+      changed = 2;
+      mixer.actionKey = actionKey;
+      mixer.transitionAge = 0;
+      mixer.transitionDuration = actionKey.startsWith('ragdoll') ? 0.14 : 0.24;
+    }
+    mixer.transitionAge += crewPhysClamp(Number.isFinite(dt) ? dt : 1 / 60, 0, 0.1);
+    let outWeight = 0;
+    if (mixer.transitionAge < mixer.transitionDuration) {
+      const u = crewPhysClamp(mixer.transitionAge / mixer.transitionDuration, 0, 1);
+      outWeight = (1 + 3 * u) * (1 - u) * (1 - u) * (1 - u);
+    }
+    a.put(CREW_SOLVE_OP.inertia, changed, outWeight > 1e-3 ? outWeight : 0);
+    return;
+  }
+
+  if (!mixer || mixer.keptBy || mixer.nodeCount !== nodeCount) {
     const lastR = new Float32Array(nodeCount * 4);
     const fromR = new Float32Array(nodeCount * 4);
     for (let i = 0; i < nodeCount; i++) {
@@ -1110,24 +1169,26 @@ export function applyPoseInertializer(a, s, dt) {
   mixer.lastPelvisT.set(a.pose[pNode].t);
 }
 
-export function applyCrewRealism(a, s, boat = null, dt = 1 / 60) {
+// 'eased' is whether the pose is eased out of the sailor's last action. A pose solved only to find which bone a
+// shot struck is not, and leaves his easing as it was.
+export function applyCrewRealism(a, s, boat = null, dt = 1 / 60, eased = true) {
   if (!a || !s) return;
   if (!s.phys) stepCrewPhysicsState(s, boat, dt);
 
   if (s.overboard?.inWater) {
     poseCrewFingers(a, s, 0.22, 0.22);
-    applyPoseInertializer(a, s, dt);
+    if (eased) applyPoseInertializer(a, s, dt);
     return;
   }
   const isDown = s.casualtyState === 'fallen' || (s.knockdownTimer ?? 0) > 0;
   if (isDown) {
     applyArticulatedRagdollPose(a, s, boat);
-    applyPoseInertializer(a, s, dt);
+    if (eased) applyPoseInertializer(a, s, dt);
     return;
   }
 
   applySeaLegsAndBreathing(a, s, boat);
   poseCrewGaze(a, s);
   poseCrewFingers(a, s);
-  applyPoseInertializer(a, s, dt);
+  if (eased) applyPoseInertializer(a, s, dt);
 }
