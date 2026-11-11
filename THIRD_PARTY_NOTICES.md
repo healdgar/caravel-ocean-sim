@@ -252,3 +252,18 @@ SOFTWARE.
 ## Anchor model
 
 `js/anchor-iron.js` and `third_party/sand3d-parts/old-rusted-anchor.py` derive from "Old rusted anchor" by trivial.cat (https://sketchfab.com/3d-models/abb9321ad29243228b4ea6dabc325db9), licensed CC BY 4.0, as rewritten into a sand3d program by Sandflow in the dataset sand3d-objaverse (https://huggingface.co/datasets/Sandflow/sand3d-objaverse, id `objaverse-abb9321ad29243228b4ea6dabc325db9`), licensed CC BY 4.0. Modified: reduced to a low-polygon mesh and placed in the game's anchor frame.
+
+## Castle and Commons simulation
+
+`assets/board/game.js` is the whole game program of healdgar's **Castle and
+Commons** (the medieval kingdom simulator in the `furlong-kingdom-annals`
+repository), copyright (c) 2026 healdgar, under the MIT licence reproduced in
+`assets/board/LICENSE`. The commit it was taken from and the SHA-256 of the
+program as it stood there are recorded in `assets/board/SOURCE.json`.
+
+The program is **modified** only by the passages listed in
+`scripts/board-tuning.mjs`, applied by `scripts/vendor-castle-and-commons.mjs`;
+`tests/board-model.test.mjs` undoes that table and checks the result against
+the recorded hash. Its mathematical functions are fdlibm as ported in V8, which
+the program carries itself. `assets/board/runtime.js`, which drives the program
+for this game, is original project code under the project MIT licence.
