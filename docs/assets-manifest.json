@@ -1,4 +1,9 @@
 {
+  "assets/boards/lisbon-1550.json": {
+    "url": "assets/boards/lisbon-1550.fcbbe6b11dedba48.json",
+    "bytes": 1355068,
+    "sha256": "fcbbe6b11dedba48a55a9ca0ce75b815191999708e2ade0f668ec201618f62bf"
+  },
   "assets/forest-scenery/saba/clusters/vertices.bin.gz": {
     "url": "assets/forest-scenery/saba/clusters/vertices.bin.f0293e612db25c5c.gz",
     "bytes": 68743362,
