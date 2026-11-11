@@ -50,7 +50,7 @@ import {
 import { createEncounterDirector } from '../js/voyage/encounters.js';
 import { createVoyageController } from '../js/voyage/voyage-controller.js';
 import { constrainIslandMotion } from '../js/terrain-model.js';
-import { createAstronomyClock } from '../js/astronomy.js';
+import { createAstronomyClock, computeAstronomy } from '../js/astronomy.js';
 
 // The controller holds warp until the coastline it was promised has arrived: let that promise settle.
 const chartsAboard = () => new Promise((resolve) => setImmediate(resolve));
@@ -1023,4 +1023,74 @@ test('beating under warp, a board lasts long enough in real seconds to bring her
   orderCourse(slow, 270, { beat: true });
   for (let t = 0; t < MIN_BEAT_LEG_REAL_S * 2; t += 0.1) steerHelmsman(slow, boat, 0.1, { windSpeed: 8, windDirection: 0, variation: 0 });
   assert.ok(Math.abs(slow.tack) === 1 && slow.legGameSeconds > MIN_BEAT_LEG_REAL_S, 'in real time she stays on her board for the four hours');
+});
+
+test('the coast she leaves stays with her down its river, and is let go once she is clear of it', async () => {
+  // A river two kilometres wide running north from the port to the sea, twenty kilometres of it, between high banks.
+  const mouthZ = -20000;
+  let disposed = null;
+  const river = {
+    region: { x: 0, z: 0, span: 8192, latitude: 38.7, longitude: -9.14, name: 'Rio' },
+    worldOffset: { x: 0, z: 0 },
+    ports: [],
+    height(x, z) {
+      const lx = x - this.worldOffset.x, lz = z - this.worldOffset.z;
+      return lz > mouthZ && Math.abs(lx) > 1000 ? 120 : -40;
+    },
+    setWorldOffset(x, z) { this.worldOffset.x = x; this.worldOffset.z = z; },
+    commitWorldOffset({ boat: b }) {
+      b.x -= this.worldOffset.x; b.z -= this.worldOffset.z;
+      this.worldOffset.x = 0; this.worldOffset.z = 0;
+    },
+  };
+  let terrain = river;
+  const boat = { x: 0, z: -7000, heading: 0, length: 20, beam: 6, surgeVelocity: 3, leewayVelocity: 0, modelId: 'nina', hydrodynamics: { draft: 2 } };
+  const ctrl = createVoyageController({
+    boat,
+    P: { sunElev: 32, sunAzim: 135, windSpeed: 6, windDir: 180, swellHs: 0.6, swellDir: 215, swellLength: 80, clouds: 0.2, rain: 0, thunder: 0, haze: 0.8 },
+    getTerrain: () => terrain,
+    getVessels: () => [boat],
+    disposeTerrain: (t) => { disposed = { at: boat.z, bank: t.height(boat.x + 3000, boat.z) }; terrain = null; },
+    loadLandRings: () => Promise.resolve([]),
+    loadTile: () => Promise.resolve(null),
+  });
+  await chartsAboard();
+  ctrl.start({ lat: 38.76, lon: -9.14, compassCourse: 0 });
+  ctrl.setWarp('watch');
+  let frame = 0;
+  const sail = (frames) => { for (let i = 0; i < frames && terrain; i++) { boat.z -= boat.surgeVelocity * 0.05; ctrl.update(0.05, frame++ * 50); } };
+  // Two minutes of watch warp carries her some twenty kilometres: past where the coast used to be dropped (7.8 km).
+  sail(600);
+  assert.equal(disposed, null, 'eight kilometres down the river the banks are still there');
+  assert.ok(ctrl.voyage.distanceTrueNm > 2, `she has run on down it under warp (${ctrl.voyage.distanceTrueNm.toFixed(1)} nm)`);
+  sail(6000);
+  assert.ok(disposed, 'out past the mouth the coast is let go');
+  assert.ok(disposed.bank < 0, 'and by then there is no bank beside her');
+  // Thirteen kilometres of river lay ahead of her, and the coast is held until its land is nine kilometres off.
+  assert.ok(ctrl.voyage.distanceTrueNm * 1852 > 13000 + 8000, `she was well clear of the mouth when it went (${(ctrl.voyage.distanceTrueNm * 1.852).toFixed(1)} km run)`);
+});
+
+test('lay to until first light waits for the dawn where she lies, whatever the hour', async () => {
+  // The Channel on a December evening: dark by ten past five, when a fixed-hour rule still called it day.
+  const lat = 50, lon = 0, evening = Date.UTC(1550, 11, 20, 17, 10);
+  const boat = { x: 0, z: 0, heading: 0, length: 20, beam: 6, surgeVelocity: 2, leewayVelocity: 0, modelId: 'nina', hydrodynamics: { draft: 2 } };
+  const ctrl = createVoyageController({
+    boat,
+    P: { sunElev: -10, sunAzim: 250, windSpeed: 6, windDir: 180, swellHs: 0.6, swellDir: 215, swellLength: 80, clouds: 0.2, rain: 0, thunder: 0, haze: 0.8 },
+    getTerrain: () => null,
+    getVessels: () => [boat],
+    loadLandRings: () => Promise.resolve([]),
+    loadTile: () => Promise.resolve(null),
+  });
+  await chartsAboard();
+  ctrl.start({ lat, lon, dateMs: evening, compassCourse: 0 });
+  const observer = { latitude: lat, longitude: lon, height: 0 };
+  assert.ok(computeAstronomy(ctrl.voyage.dateMs, observer).sun.altitude < -6, 'it is night');
+  const before = ctrl.voyage.dateMs;
+  raiseInterrupt(ctrl.voyage, { type: 'lay-to', title: 'Night', text: '', choices: [{ id: 'lay-to', label: 'Lay to until first light' }] }, 'deck');
+  ctrl.resolveInterrupt('lay-to');
+  const waitedH = (ctrl.voyage.dateMs - before) / 3600000;
+  const sun = computeAstronomy(ctrl.voyage.dateMs, observer).sun.altitude;
+  assert.ok(waitedH > 10 && waitedH < 16, `she lay to through the long night (${waitedH.toFixed(1)} h)`);
+  assert.ok(sun > -6 && sun < 4, `and it is first light, the Sun ${sun.toFixed(1)}° from the horizon`);
 });

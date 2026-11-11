@@ -55,6 +55,7 @@ import { formatJulianDate, localSolarHours, greatCircleKm, initialBearing, windD
 import { createEncounterDirector, describeEncounterThroughSpyglass } from './encounters.js';
 import { controlIcon, keyIsForField } from '../controls.js';
 import { probeHullBottomContact } from '../terrain-model.js';
+import { computeAstronomy } from '../astronomy.js';
 
 // Wind in metres a second at which a passage starts to cost hands, and the chance per game hour.
 const GALE_LOSS_WIND = 24;
@@ -611,9 +612,24 @@ export function createVoyageController(cfg) {
     { id: 'chart', label: 'Open the chart' },
   ];
   // What a careful master did off a strange coast: stay put under little sail and wait for day.
+  // First light where she lies: twenty minutes after the Sun next climbs to within six degrees of the horizon.
+  // The hour that happens at runs from before five to after eight with the season and the latitude.
+  function firstLightMs(v) {
+    try {
+      const observer = { latitude: v.true.lat, longitude: v.true.lon, height: 0 };
+      let dark = false;
+      for (let ms = v.dateMs, end = ms + 26 * 3600000; ms <= end; ms += 600000) {
+        if (computeAstronomy(ms, observer).sun.altitude <= -6) dark = true;
+        else if (dark) return ms + 1200000;
+      }
+    } catch { /* no ephemeris: fall back on the hour */ }
+    return null;
+  }
   function layToUntilFirstLight() {
     if (voyage.canvas !== 'furl') orderCanvas('hove');
-    alignDateToDaylightIfNight(voyage, 7.2);
+    const dawn = firstLightMs(voyage);
+    if (dawn) voyage.dateMs = dawn;
+    else alignDateToDaylightIfNight(voyage, 7.2);
     addLog(voyage, 'Lay to until first light.', 'order');
   }
 
@@ -1039,12 +1055,26 @@ export function createVoyageController(cfg) {
         )
       : Infinity;
     const isDepartureTerrain = Boolean(terrain && terrain === approach.departureTerrain);
-    // When warping out of the departure port, once the ship clears the 3D harbor/gorge pack (~7.8 km),
+    // Past the middle of her departure coast she may still be in its river or under its headlands: while its land
+    // lies about her it stays, sliding by under warp like any coast, and is let go only once she is clear of it.
+    if (isDepartureTerrain && tDist >= span * 0.95) {
+      approach.coastHeldCheckIn = (approach.coastHeldCheckIn ?? 0) - dt;
+      if (voyage.rate > 1.05 || approach.coastHeldCheckIn <= 0) {
+        approach.coastHeldCheckIn = 0.5;
+        approach.departureCoastHeld = tDist < span * COAST_REACH_SPANS && coastLiesAlongside(terrain, DEPARTURE_COAST_HOLD_M);
+      }
+    } else {
+      approach.departureCoastHeld = false;
+      approach.coastHeldCheckIn = 0;
+    }
+    const departureCoastHeld = approach.departureCoastHeld;
+    // When warping out of the departure port, once the ship is clear of the 3D coast,
     // free the departure terrain so open-ocean waves run at normal 1x real time while time and distance warp.
-    if (isDepartureTerrain && voyage.rate > 1.05 && tDist >= span * 0.95 && cfg.disposeTerrain) {
+    if (isDepartureTerrain && voyage.rate > 1.05 && tDist >= span * 0.95 && !departureCoastHeld && cfg.disposeTerrain) {
       cfg.disposeTerrain(terrain);
       approach.spawnedTerrain = null;
       approach.departureTerrain = null;
+      approach.departureCoastHeld = false;
       if (voyage.distanceTrueNm >= 6) approach.suppressLandHo = false;
       approach.offset = { x: 0, z: 0 };
     }
@@ -1053,7 +1083,7 @@ export function createVoyageController(cfg) {
       activeTerrain &&
       approach.spawnedTerrain === activeTerrain &&
       typeof activeTerrain.setWorldOffset === 'function' &&
-      (isDepartureTerrain ? tDist < span * 0.95 : tDist < 250000)
+      (isDepartureTerrain ? tDist < span * 0.95 || departureCoastHeld : tDist < 250000)
     );
     const ignoreCurrent = Boolean(activeTerrain) && (voyage.rate <= 1.05 || (inCoastalPack && tDist < span * 2.5));
     const prevTrue = { lat: voyage.true.lat, lon: voyage.true.lon };
@@ -1130,7 +1160,7 @@ export function createVoyageController(cfg) {
     if (inCoastalPack) {
       let safeFrac = 1;
       const stepExtraX = warped ? extraX : 0, stepExtraZ = warped ? extraZ : 0;
-      if (warped && tDist < span * 2.5 && extraDist > 1e-4 && typeof activeTerrain.height === 'function') {
+      if (warped && tDist < span * COAST_REACH_SPANS && extraDist > 1e-4 && typeof activeTerrain.height === 'function') {
         const draft = boat.hydrodynamics?.draft ?? 2.0;
         const minSafeBed = -Math.max(3.2, draft * 1.35);
         const startBed = activeTerrain.height(boat.x, boat.z);
@@ -1237,7 +1267,7 @@ export function createVoyageController(cfg) {
         });
         approach.offset = { x: 0, z: 0 };
         approach.committed = true;
-        if (tDist < span * 2.5 && typeof activeTerrain.constrain === 'function') {
+        if (tDist < span * COAST_REACH_SPANS && typeof activeTerrain.constrain === 'function') {
           const postCommitX = boat.x, postCommitZ = boat.z;
           const constrained = activeTerrain.constrain(boat, preCommitX, preCommitZ, { warpStep: true });
           if (constrained || Math.hypot(boat.x - postCommitX, boat.z - postCommitZ) > 1e-3) {
@@ -1345,6 +1375,11 @@ export function createVoyageController(cfg) {
     return false;
   }
 
+  // A coast is built four spans either side of its middle (js/terrain.js coverageAt); the guards that read its bed
+  // stop a little short of that, so what they look ahead at is still inside it.
+  const COAST_REACH_SPANS = 3.9;
+  // Land this near is still the coast she is leaving.
+  const DEPARTURE_COAST_HOLD_M = 9000;
   function coastLiesAlongside(terrain, radiusM) {
     if (typeof terrain?.height !== 'function') return false;
     for (let a = 0; a < 16; a++) {
@@ -1404,7 +1439,7 @@ export function createVoyageController(cfg) {
     const distFromDepartureKm = approach.departureCoords
       ? greatCircleKm(lat, lon, approach.departureCoords.lat, approach.departureCoords.lon)
       : voyage.distanceTrueNm * 1.852;
-    if (approach.suppressLandHo && (distFromDepartureKm >= 14 || voyage.distanceTrueNm >= 12 || (!approach.departureTerrain && voyage.distanceTrueNm >= 5))) {
+    if (approach.suppressLandHo && !approach.departureCoastHeld && (distFromDepartureKm >= 14 || voyage.distanceTrueNm >= 12 || (!approach.departureTerrain && voyage.distanceTrueNm >= 5))) {
       approach.suppressLandHo = false;
     }
 
@@ -1451,7 +1486,7 @@ export function createVoyageController(cfg) {
       !approach.spawnedAt || greatCircleKm(lat, lon, approach.spawnedAt.lat, approach.spawnedAt.lon) > 15
     ) && !coastLiesAlongside(terrain, 8000);
     const shouldDispose = isDepartureTerrain
-      ? (geoDistKm >= 11.5 || terrainDistM >= (terrain?.region?.span ?? 8192) * 1.42)
+      ? !approach.departureCoastHeld && (geoDistKm >= 11.5 || terrainDistM >= (terrain?.region?.span ?? 8192) * 1.42)
       : (terrainDistM > 150000 || mismatchWorthAct);
     if (terrain && terrain.region && cfg.disposeTerrain && shouldDispose) {
       cfg.disposeTerrain(terrain);
@@ -1485,7 +1520,7 @@ export function createVoyageController(cfg) {
 
     // Direct local heightfield probe along the ship's course when terrain is resident.
     let localWarpCap = 3600, unbuiltWarpCap = 3600;
-    if (terrain && typeof terrain.height === 'function' && terrainDistM < (terrain.region?.span ?? 8192) * 2.5) {
+    if (terrain && typeof terrain.height === 'function' && terrainDistM < (terrain.region?.span ?? 8192) * COAST_REACH_SPANS) {
       const draft = boat.hydrodynamics?.draft ?? 2.0;
       const minBed = -Math.max(2.2, draft * 1.15);
       const startBed = terrain.height(boat.x, boat.z);
@@ -1518,7 +1553,7 @@ export function createVoyageController(cfg) {
     }
 
     let mapCoastStop = false;
-    if (isDepartureTerrain && terrainDistM < (terrain.region?.span ?? 8192) * 1.65) {
+    if (isDepartureTerrain && (terrainDistM < (terrain.region?.span ?? 8192) * 1.65 || approach.departureCoastHeld)) {
       // While departing inside a high-res 3D coastal pack (e.g. Tagus Gorge), trust the 3D heightfield probe
       // rather than the 2.4 km/px zoom-6 DEM which blurs river mouths.
       voyage.warpCap = localWarpCap;
