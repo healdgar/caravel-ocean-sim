@@ -97,6 +97,12 @@ test('a gun leaves a flash, a jet and a bank of dense smoke that the GPU carries
       run(2.75);const billowPixels=await render(),billow=changed(billowPixels),facing=await sorted();panel(billowPixels,'3 s: bank, calm');
       const opacityPixels=await render(0,0),alpha=[];for(let i=3;i<opacityPixels.length;i+=4)alpha.push(opacityPixels[i]);const peakOpacity=Math.max(...alpha);
       const calm=await bank();
+      // The eye stands in the bank with a wall close before it, as on a deck with smoke lying against the rail, so
+      // every walk is cut short at the wall. How unlike its neighbour each pixel of the veil is, as a share of the veil.
+      const bare=await render(1),uneven=pixels=>{let veil=0,jump=0;for(let y=0;y<256;y++)for(let x=0;x<255;x++){const i=(y*256+x)*4,a=pixels[i]-bare[i],b=pixels[i+4]-bare[i+4];veil+=a+b;jump+=Math.abs(a-b);}return {veil:veil/(2*256*255),uneven:2*jump/veil};};
+      const eye=[f[16],f[17],f[18]],walled=[];f.set([calm.centre[0],calm.centre[1],calm.centre[2]+Math.min(...calm.radii)*.5],16);sky();
+      for(const metres of [.6,1.2,2.4]){const pixels=await render(.1/metres);walled.push({metres,...uneven(pixels)});if(metres===1.2)panel(pixels,'3 s: in the bank, a wall 1.2 m off');}
+      f.set(eye,16);sky();
       // The eye stands off and turns its back on the smoke: none of it is drawn, and the scene's depth is not copied for it.
       f[18]=40;f[0]=-1;f[11]=1;sky();const behind=changed(await render()),away=await sorted();f[18]=10;f[0]=1;f[11]=-1;sky();
       // A breeze from the left of the picture, 5 m/s, on a new gun. The clock passes its turn-over on the way.
@@ -115,7 +121,7 @@ test('a gun leaves a flash, a jet and a bank of dense smoke that the GPU carries
       fx.clear();air(0,0);f[35]=2;sky();fx.setProjectiles([{position:[0,1,0],radius:.3}]);fx.update(0,{time:clock});const ball=changed(await render());
       fx.clear();fx.emitImpact({position:[0,0,0],velocity:[25,-35,-5],massKg:12});run(.3,.05);const splashPixels=await render(),splash=changed(splashPixels),splashOccluded=changed(await render(.03));panel(splashPixels,'300 ms: real water impact');
       const birth=Array.from(fx.state.impacts[0].position);fx.clear();run(.1);const cleared=changed(await render());
-      await finish();return {errors,idleWrites,idleWork,fired,flash,smoke,occluded,night,billow,peakOpacity,calm,facing,behind,away,sent,at4,at8,drifting,banksAt8,torn,gone,kept,stillWorking,groupsMadeLater,jets,ball,splash,splashOccluded,birth,cleared,smokeCounts};
+      await finish();return {errors,idleWrites,idleWork,fired,flash,smoke,occluded,night,billow,peakOpacity,calm,walled,facing,behind,away,sent,at4,at8,drifting,banksAt8,torn,gone,kept,stillWorking,groupsMadeLater,jets,ball,splash,splashOccluded,birth,cleared,smokeCounts};
     });
     if(process.env.GUNNERY_FX_SHOT)await page.screenshot({path:process.env.GUNNERY_FX_SHOT,fullPage:true});
     const told=JSON.stringify(result);
@@ -131,6 +137,9 @@ test('a gun leaves a flash, a jet and a bank of dense smoke that the GPU carries
     assert.ok(result.peakOpacity>.8&&result.peakOpacity<=1,'a 3-second-old single discharge must retain a dense central powder cloud: '+told);
     // In a calm the bank stays off the muzzle it left, and has risen a little.
     assert.ok(Math.abs(result.calm.centre[2])<1&&result.calm.centre[0]>0&&result.calm.centre[0]<6&&result.calm.centre[1]>1.5,told);
+    // Seen from within, against a wall close by, it is an even veil that thickens with the air before the wall: no
+    // pixel finds the smoke where its neighbour misses it. (A walk that trusted one sample gave .1 to .24 here.)
+    assert.ok(result.walled.every(wall=>wall.veil>.06&&wall.uneven<.05)&&result.walled[2].veil>result.walled[0].veil,'smoke cut short by near timber must not stipple: '+told);
     assert.equal(result.sent,2,told);assert.equal(result.drifting,0,'smoke on the wind sends nothing: '+told);
     // Caught up by the air, it goes at the wind's own pace and way: 5 m/s, less the second or so it took to be caught.
     const carried=t=>-5*(t-1.35*(1-Math.exp(-t/1.35)));

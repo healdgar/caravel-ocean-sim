@@ -617,8 +617,8 @@ struct GunneryVolumeVertex{@builtin(position)position:vec4f,@location(0)world:ve
   let exit=min(scene,leave);if(exit<=enter||wallFrontFade<=0.005){discard;}
   // Powder smoke is walked in steps of one length whichever way the ellipsoid is crossed: a tenth of the
   // way through its middle near to, a seventh far off. A ray that only clips it takes few.
-  let stride=select(.2,.28,enter>90.0)/length(direction);
-  let steps=select(select(12u,7u,enter>42.0),clamp(u32(ceil((exit-enter)/stride)),1u,10u),powder);
+  let stride=select(.2,.28,enter>90.0)/length(direction);let cut=scene<leave;
+  let steps=select(select(12u,7u,enter>42.0),clamp(u32(ceil((exit-enter)/stride))+u32(cut),1u,10u),powder);
   let stepSize=select((exit-enter)/f32(steps),stride,powder);var transmittance=1.0;var radiance=vec3f(0);
   // Each pixel starts its walk a different part of a step in, by an ordered scatter that shows little grain:
   // a small part for flame and its smoke, most of a step for powder smoke, whose first look is then set
@@ -648,23 +648,32 @@ struct GunneryVolumeVertex{@builtin(position)position:vec4f,@location(0)world:ve
   // Fresh from the gun it is a dirty grey-yellow; within a few seconds it is the white of the bank.
   let powderAlbedo=mix(vec3f(.9,.9,.91),vec3f(.68,.64,.58),exp(-age*.75)*.8);
   // Powder smoke is thick enough that one step into it can be all a pixel shows, and how deep that step fell
-  // would show as grain. So where a walk first meets smoke it goes back by halves to find the billow's face,
-  // and takes its first look a set short way inside that: found, and how far back it went.
-  var found=false;var back=0.0;
+  // would show as grain. So where a walk first meets smoke it goes back by halves, from the last place it found
+  // clear, to the billow's face, and takes its first look a set short way inside that: found, and how far back
+  // it went. An eye standing in the smoke looks from where it stands.
+  // Where timber or sea cuts the walk short (cut), its last step is kept for the cut itself, and a step counts
+  // for the part of it that lies before the cut. Smoke lying against what stands in it is then found by every
+  // pixel, not by those whose scatter fell in it, and thickens evenly toward it.
+  var found=false;var back=0.0;var clearTo=enter;
   for(var sample=0u;sample<steps;sample++){
     var distance=enter+(f32(sample)+jitter)*stepSize-back;
+    if(powder&&cut){
+      if(sample+1u==steps){if(found){break;}distance=exit-.01;}else{distance=min(distance,exit-.01);}
+    }
     var local=origin+direction*distance;
     if(powder){
       var world=F.camPos.xyz+ray*distance;
       var smoke=gunnerySmoke(world,local,erode,grain);
-      if(smoke.x<.002){continue;}
+      if(smoke.x<.002){clearTo=distance;continue;}
+      var share=select(1.0,clamp((exit-distance)/stepSize+.35,0.0,1.0),cut);
       if(!found){
-        found=true;var clear=distance-stepSize;var within=distance;
+        found=true;var clear=clearTo;var within=distance;
         for(var halving=0u;halving<4u;halving++){
           let middle=(clear+within)*.5;
           if(gunnerySmoke(F.camPos.xyz+ray*middle,origin+direction*middle,erode,grain).x<.002){clear=middle;}else{within=middle;}
         }
-        back=distance-(within+stepSize*.35);distance-=back;
+        let span=select(stepSize,min(stepSize,exit-within),cut);
+        back=distance-(within+stepSize*.35);distance=within+span*.35;share=span/stepSize;
         local=origin+direction*distance;world=F.camPos.xyz+ray*distance;smoke=gunnerySmoke(world,local,erode,grain);
       }
       if(distance>=exit){break;}
@@ -692,7 +701,7 @@ struct GunneryVolumeVertex{@builtin(position)position:vec4f,@location(0)world:ve
       let throat=max(0.0,1.0-length(local-vec3f(0.0,-.05,-.28))*1.45);
       let glow=vec3f(2.4,.42,.03)*(emberFactor*throat*throat*thickness)*selfExposure;
       let light=powderAlbedo*(ambient+sunlight*sunLit*phase*.66)+glow;
-      let opacity=1.0-exp(-volume.optical.x*thickness*stepSize);
+      let opacity=1.0-exp(-volume.optical.x*thickness*stepSize*share);
       radiance+=transmittance*opacity*light;transmittance*=1.0-opacity;
       if(transmittance<.03){break;}
       continue;

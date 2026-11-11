@@ -33,6 +33,9 @@ function instrumentGunneryRuntime(){
   const labels=new WeakMap(),setCompute=GPUComputePassEncoder.prototype.setPipeline,dispatch=GPUComputePassEncoder.prototype.dispatchWorkgroups;
   GPUComputePassEncoder.prototype.setPipeline=function(p){labels.set(this,p.label);return setCompute.call(this,p);};
   GPUComputePassEncoder.prototype.dispatchWorkgroups=function(...args){const label=labels.get(this);gunneryRuntime.compute[label]=(gunneryRuntime.compute[label]||0)+1;return dispatch.apply(this,args);};
+  // The smoke's depth copy is dispatched by a count the GPU wrote: none when no smoke is in view.
+  const indirect=GPUComputePassEncoder.prototype.dispatchWorkgroupsIndirect;
+  GPUComputePassEncoder.prototype.dispatchWorkgroupsIndirect=function(...args){const label=labels.get(this);gunneryRuntime.compute[label]=(gunneryRuntime.compute[label]||0)+1;return indirect.apply(this,args);};
 }
 
 async function gunneryRuntimePage(model){
