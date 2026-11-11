@@ -31,7 +31,7 @@ import {
   destinationPoint,
   lonLatToTile,
 } from '../js/voyage/landfall-approach.js';
-import { createHelmsman, steerHelmsman, orderCourse, applyCanvasOrder, canvasAdvice } from '../js/voyage/helmsman.js';
+import { createHelmsman, steerHelmsman, orderCourse, applyCanvasOrder, canvasAdvice, MIN_BEAT_LEG_REAL_S } from '../js/voyage/helmsman.js';
 import { compassPointName, compassPointWords, relativeBearingCall, formatLatitude } from '../js/voyage/compass.js';
 import {
   createVoyage,
@@ -50,8 +50,10 @@ import {
 import { createEncounterDirector } from '../js/voyage/encounters.js';
 import { createVoyageController } from '../js/voyage/voyage-controller.js';
 import { constrainIslandMotion } from '../js/terrain-model.js';
-import { createAstronomyClock } from '../js/astronomy.js';
+import { createAstronomyClock, computeAstronomy } from '../js/astronomy.js';
 
+// The controller holds warp until the coastline it was promised has arrived: let that promise settle.
+const chartsAboard = () => new Promise((resolve) => setImmediate(resolve));
 const MARCH_1550 = Date.UTC(1550, 2, 24, 12);
 const JULY_1550 = Date.UTC(1550, 6, 15, 12);
 const JAN_1550 = Date.UTC(1550, 0, 15, 12);
@@ -335,7 +337,7 @@ test('open-ocean encounter director triggers whale breaches and strange-sail loo
   assert.ok(voyage.lonUncNm < 25, 'hailing reduces longitude uncertainty');
 });
 
-test('high-warp ship heading into a continent stops offshore in navigable water and commits terrain offset', () => {
+test('high-warp ship heading into a continent stops offshore in navigable water and commits terrain offset', async () => {
   // 1. Coarse coastline index forwardCoast & overland guard when terrain is still generating
   const iberiaRing = [[-9.5, 37.0], [-7.0, 37.0], [-7.0, 42.0], [-9.5, 42.0], [-9.5, 37.0]];
   const coastIdx = createCoastlineIndex([iberiaRing]);
@@ -388,6 +390,7 @@ test('high-warp ship heading into a continent stops offshore in navigable water 
     loadLandRings: () => Promise.resolve([iberiaRing]),
     loadTile: () => Promise.resolve(null),
   });
+  await chartsAboard();
   ctrl.start({ lat: 38.70, lon: -9.14, compassCourse: 0 });
   ctrl.setWarp('crossing');
 
@@ -431,7 +434,7 @@ test('sighting and hailing a vessel invokes onSightVessel and onHailVessel with 
   assert.equal(hailedEnc, enc, 'onHailVessel fires so the 3D vessel is placed within speaking-trumpet range');
 });
 
-test('passive Lisbon departure engages helmsman on warp and keeps waves at 1x in open ocean', () => {
+test('passive Lisbon departure engages helmsman on warp and keeps waves at 1x in open ocean', async () => {
   let commits = 0;
   const mockTerrain = {
     region: { x: 0, z: 0, span: 8192, latitude: 38.707, longitude: -9.136, name: 'Lisboa' },
@@ -464,6 +467,7 @@ test('passive Lisbon departure engages helmsman on warp and keeps waves at 1x in
     loadLandRings: () => Promise.resolve([]),
     loadTile: () => Promise.resolve(null),
   });
+  await chartsAboard();
   ctrl.start({ passive: true, lat: 38.68, lon: -9.32 });
   assert.equal(ctrl.helmsman.engaged, false, 'passive start leaves helmsman disengaged');
 
@@ -484,7 +488,7 @@ test('passive Lisbon departure engages helmsman on warp and keeps waves at 1x in
   assert.ok(ctrl.voyage.distanceTrueNm > 0.1, 'geographic distance advances at warped rate');
 });
 
-test('sail encounter supports spyglass inspection, steers toward target ship, and stops time dilation at battle range', () => {
+test('sail encounter supports spyglass inspection, steers toward target ship, and stops time dilation at battle range', async () => {
   const boat = {
     x: 0,
     z: 0,
@@ -536,6 +540,7 @@ test('sail encounter supports spyglass inspection, steers toward target ship, an
     loadLandRings: () => Promise.resolve([]),
     loadTile: () => Promise.resolve(null),
   });
+  await chartsAboard();
 
   ctrl.start({ lat: 32.0, lon: -24.0, compassCourse: 270 });
   ctrl.setWarp('crossing');
@@ -830,7 +835,7 @@ test('warped approach from 80 km out preloads 3D terrain, slides it from >40 km 
 
 
 
-test('time warp is refused and dropped while an enemy is in range', () => {
+test('time warp is refused and dropped while an enemy is in range', async () => {
   const boat = { x: 0, z: 0, heading: 225, surgeVelocity: 2, leewayVelocity: 0 };
   const P = { windSpeed: 7, windDir: 180, swellHs: 1, swellDir: 0, swellLength: 80, clouds: 0.3, rain: 0, thunder: 0, haze: 1 };
   let engaged = false;
@@ -843,6 +848,7 @@ test('time warp is refused and dropped while an enemy is in range', () => {
     loadTile: () => Promise.resolve(null),
     isBattleActive: () => engaged,
   });
+  await chartsAboard();
   ctrl.start({ lat: 30, lon: -40, compassCourse: 0 });
   ctrl.setWarp('crossing');
   assert.ok(ctrl.voyage.rate > 1, 'warps freely in open water');
@@ -873,4 +879,232 @@ test('the glass only finds land that stands above the horizon', () => {
   const cay = (x, z) => (Math.hypot(x, z + 30000) < 1500 ? 4 : -100);
   assert.equal(visibleLandPoint(cay, 0, 0, 0, { eyeM: 20 }), null, 'a low cay beyond the horizon is not land in sight');
   assert.equal(visibleLandPoint(hill, 0, 0, 180, { eyeM: 20, searchDeg: 30 }), null, 'land astern is outside the search');
+});
+
+test('at deck watch in harbour shallows the clock runs, she keeps her way, and the land stays put', () => {
+  // A first-rate in nine metres over a bed that rises gently to the west: shoal by the warp guard's measure all round.
+  const worldOffset = { x: 0, z: 0 };
+  let slides = 0;
+  const harbour = {
+    region: { x: 0, z: -6000, span: 8192, latitude: 38.7, longitude: -9.14 },
+    ports: [],
+    height(x) { return Math.min(20, -9 - (x - worldOffset.x) * 0.01); },
+    setWorldOffset(dx, dz) { worldOffset.x = dx; worldOffset.z = dz; slides++; },
+    commitWorldOffset({ boat: b }) {
+      const dx = worldOffset.x, dz = worldOffset.z;
+      if (b) { b.x -= dx; b.z -= dz; }
+      worldOffset.x = 0; worldOffset.z = 0;
+      return { dx, dz };
+    },
+  };
+  const boat = { x: 0, z: -5000, heading: 0, length: 69, beam: 16, surgeVelocity: 3, leewayVelocity: 0.9, modelId: 'victory', hydrodynamics: { draft: 8.7 } };
+  const ctrl = createVoyageController({
+    boat,
+    P: { sunElev: 32, sunAzim: 225, windSpeed: 6, windDir: 251, swellHs: 0.4, swellDir: 215, swellLength: 60, clouds: 0.3, rain: 0, thunder: 0, haze: 0.8 },
+    getTerrain: () => harbour,
+    getVessels: () => [boat],
+    loadLandRings: () => Promise.resolve([]),
+    loadTile: () => Promise.resolve(null),
+  });
+  ctrl.start({ passive: true, lat: 38.7, lon: -9.14, compassCourse: 0 });
+  const startMs = ctrl.voyage.dateMs, startLat = ctrl.voyage.true.lat;
+  // Twenty seconds of real sailing: north at 3 m/s, sagging to leeward faster than the reckoning allows for.
+  for (let i = 0; i < 400; i++) {
+    boat.z -= boat.surgeVelocity * 0.05;
+    boat.x += boat.leewayVelocity * 0.05;
+    ctrl.update(0.05, i * 50);
+  }
+  assert.equal(ctrl.voyage.rate, 1, 'she is at deck watch throughout');
+  assert.ok(Math.abs((ctrl.voyage.dateMs - startMs) / 1000 - 20) < 0.5, `twenty seconds pass on the ship's clock (${((ctrl.voyage.dateMs - startMs) / 1000).toFixed(2)} s did)`);
+  assert.equal(boat.surgeVelocity, 3, 'nothing checks her way');
+  assert.equal(slides, 0, 'the land is not slid under a hull sailing in real time');
+  assert.ok(Math.abs(boat.z + 5060) < 1e-6 && Math.abs(boat.x - 18) < 1e-6, 'nor is she shifted');
+  assert.ok(ctrl.voyage.true.lat > startLat, 'and her latitude follows her northward');
+});
+
+test('warp tells the scene how far it carried her past what the hull sailed, and deck watch carries nothing', async () => {
+  const boat = { x: 0, z: 0, heading: 0, length: 20, beam: 6, surgeVelocity: 4, leewayVelocity: 0, modelId: 'nina', hydrodynamics: { draft: 2 } };
+  const carried = { x: 0, z: 0, calls: 0 };
+  const ctrl = createVoyageController({
+    boat,
+    P: { sunElev: 32, sunAzim: 135, windSpeed: 6, windDir: 180, swellHs: 0.6, swellDir: 215, swellLength: 80, clouds: 0.2, rain: 0, thunder: 0, haze: 0.8 },
+    getTerrain: () => null,
+    getVessels: () => [boat],
+    loadLandRings: () => Promise.resolve([]),
+    loadTile: () => Promise.resolve(null),
+    onWarpCarry: (dx, dz) => { carried.x += dx; carried.z += dz; carried.calls++; },
+  });
+  await chartsAboard();
+  ctrl.start({ lat: 30, lon: -30, compassCourse: 0 });
+  const sail = (frames, from) => { for (let i = 0; i < frames; i++) { boat.z -= boat.surgeVelocity * 0.05; ctrl.update(0.05, (from + i) * 50); } };
+  sail(100, 0);
+  assert.equal(carried.calls, 0, 'at deck watch the hull sails every metre herself');
+  ctrl.setWarp('watch');
+  const logged = ctrl.voyage.distanceTrueNm;
+  sail(200, 100);
+  assert.ok(ctrl.voyage.rate > 30, 'she is warping');
+  const warpedM = (ctrl.voyage.distanceTrueNm - logged) * 1852, sailedM = 200 * 0.05 * 4;
+  const carriedM = Math.hypot(carried.x, carried.z);
+  assert.ok(carried.z < 0 && Math.abs(carried.x) < carriedM * 0.2, 'she is carried the way she heads, give or take the set of the current');
+  assert.ok(Math.abs(carriedM - (warpedM - sailedM)) < warpedM * 0.02, `the carry is the warped run less the sailed one (${carriedM.toFixed(0)} m of ${warpedM.toFixed(0)} m)`);
+});
+
+test('warp waits for the coastline to arrive, then runs', async () => {
+  const boat = { x: 0, z: 0, heading: 0, length: 20, beam: 6, surgeVelocity: 4, leewayVelocity: 0, modelId: 'nina', hydrodynamics: { draft: 2 } };
+  let deliver;
+  const ctrl = createVoyageController({
+    boat,
+    P: { sunElev: 32, sunAzim: 135, windSpeed: 6, windDir: 180, swellHs: 0.6, swellDir: 215, swellLength: 80, clouds: 0.2, rain: 0, thunder: 0, haze: 0.8 },
+    getTerrain: () => null,
+    getVessels: () => [boat],
+    loadLandRings: () => new Promise((resolve) => { deliver = resolve; }),
+    loadTile: () => Promise.resolve(null),
+  });
+  await chartsAboard();
+  ctrl.start({ lat: 30, lon: -30, compassCourse: 0 });
+  // A reloaded voyage asks for its old warp at once, before anything is known of the land.
+  ctrl.setWarp('crossing');
+  const logged = ctrl.voyage.distanceTrueNm;
+  for (let i = 0; i < 60; i++) ctrl.update(0.05, i * 50);
+  assert.equal(ctrl.voyage.rate, 1, 'she does not run blind');
+  assert.ok((ctrl.voyage.distanceTrueNm - logged) * 1852 < 15, 'three seconds at four metres a second, no more');
+  deliver([]);
+  await chartsAboard();
+  for (let i = 60; i < 120; i++) ctrl.update(0.05, i * 50);
+  assert.ok(ctrl.voyage.rate > 60, `with the coastline aboard the warp she asked for answers (${ctrl.voyage.rate.toFixed(0)}×)`);
+});
+
+test('fire aboard or a gaining leak drops the warp and refuses it until she is safe', async () => {
+  const boat = { x: 0, z: 0, heading: 0, length: 20, beam: 6, surgeVelocity: 4, leewayVelocity: 0, modelId: 'nina', hydrodynamics: { draft: 2 }, damage: { fireIntensity: 0, floodingRate: 0 } };
+  const ctrl = createVoyageController({
+    boat,
+    P: { sunElev: 32, sunAzim: 135, windSpeed: 6, windDir: 180, swellHs: 0.6, swellDir: 215, swellLength: 80, clouds: 0.2, rain: 0, thunder: 0, haze: 0.8 },
+    getTerrain: () => null,
+    getVessels: () => [boat],
+    loadLandRings: () => Promise.resolve([]),
+    loadTile: () => Promise.resolve(null),
+  });
+  await chartsAboard();
+  ctrl.start({ lat: 30, lon: -30, compassCourse: 0 });
+  let frame = 0;
+  const run = (frames) => { for (let i = 0; i < frames; i++) ctrl.update(0.05, frame++ * 50); };
+  ctrl.setWarp('passage');
+  run(40);
+  assert.ok(ctrl.voyage.rate > 60, 'she warps while all is well');
+  for (const [peril, field] of [['fire', 'fireIntensity'], ['a gaining leak', 'floodingRate']]) {
+    boat.damage[field] = 0.4;
+    run(2);
+    assert.equal(ctrl.voyage.tier, 'deck', `${peril} brings her back to deck watch`);
+    assert.equal(ctrl.voyage.rate, 1);
+    ctrl.setWarp('passage');
+    assert.equal(ctrl.voyage.tier, 'deck', `and warp is refused while ${peril} lasts`);
+    boat.damage[field] = 0;
+    ctrl.setWarp('passage');
+    run(40);
+    assert.ok(ctrl.voyage.rate > 60, `with ${peril} dealt with she warps again`);
+  }
+});
+
+test('beating under warp, a board lasts long enough in real seconds to bring her about', () => {
+  const boat = { modelId: 'nina', heading: 315, yawRate: 0, surgeVelocity: 3, leewayVelocity: 0, length: 20 };
+  const helm = createHelmsman({ compassCourse: 270 });
+  orderCourse(helm, 270, { beat: true });
+  // Dead into a westerly at 3600×: four hours of the voyage pass every four real seconds.
+  const steer = (seconds) => { for (let t = 0; t < seconds; t += 0.1) steerHelmsman(helm, boat, 0.1, { windSpeed: 8, windDirection: 0, variation: 0, gameDt: 360 }); };
+  steer(1);
+  const first = helm.tack;
+  assert.notEqual(first, 0, 'she is put on a tack');
+  steer(MIN_BEAT_LEG_REAL_S - 5);
+  assert.equal(helm.tack, first, 'and holds it though many four-hour legs have passed on the clock');
+  steer(6);
+  assert.equal(helm.tack, -first, 'then goes about');
+  // At deck watch the four-hour leg still rules.
+  const slow = createHelmsman({ compassCourse: 270 });
+  orderCourse(slow, 270, { beat: true });
+  for (let t = 0; t < MIN_BEAT_LEG_REAL_S * 2; t += 0.1) steerHelmsman(slow, boat, 0.1, { windSpeed: 8, windDirection: 0, variation: 0 });
+  assert.ok(Math.abs(slow.tack) === 1 && slow.legGameSeconds > MIN_BEAT_LEG_REAL_S, 'in real time she stays on her board for the four hours');
+});
+
+test('the coast she leaves stays with her down its river, and is let go once she is clear of it', async () => {
+  // A river two kilometres wide running north from the port to the sea, twenty kilometres of it, between high banks.
+  const mouthZ = -20000;
+  let disposed = null;
+  const river = {
+    region: { x: 0, z: 0, span: 8192, latitude: 38.7, longitude: -9.14, name: 'Rio' },
+    worldOffset: { x: 0, z: 0 },
+    ports: [],
+    height(x, z) {
+      const lx = x - this.worldOffset.x, lz = z - this.worldOffset.z;
+      return lz > mouthZ && Math.abs(lx) > 1000 ? 120 : -40;
+    },
+    setWorldOffset(x, z) { this.worldOffset.x = x; this.worldOffset.z = z; },
+    commitWorldOffset({ boat: b }) {
+      b.x -= this.worldOffset.x; b.z -= this.worldOffset.z;
+      this.worldOffset.x = 0; this.worldOffset.z = 0;
+    },
+  };
+  let terrain = river;
+  const boat = { x: 0, z: -7000, heading: 0, length: 20, beam: 6, surgeVelocity: 3, leewayVelocity: 0, modelId: 'nina', hydrodynamics: { draft: 2 } };
+  const ctrl = createVoyageController({
+    boat,
+    P: { sunElev: 32, sunAzim: 135, windSpeed: 6, windDir: 180, swellHs: 0.6, swellDir: 215, swellLength: 80, clouds: 0.2, rain: 0, thunder: 0, haze: 0.8 },
+    getTerrain: () => terrain,
+    getVessels: () => [boat],
+    disposeTerrain: (t) => { disposed = { at: boat.z, bank: t.height(boat.x + 3000, boat.z) }; terrain = null; },
+    loadLandRings: () => Promise.resolve([]),
+    loadTile: () => Promise.resolve(null),
+  });
+  await chartsAboard();
+  ctrl.start({ lat: 38.76, lon: -9.14, compassCourse: 0 });
+  ctrl.setWarp('watch');
+  let frame = 0;
+  const sail = (frames) => { for (let i = 0; i < frames && terrain; i++) { boat.z -= boat.surgeVelocity * 0.05; ctrl.update(0.05, frame++ * 50); } };
+  // Two minutes of watch warp carries her some twenty kilometres: past where the coast used to be dropped (7.8 km).
+  sail(600);
+  assert.equal(disposed, null, 'eight kilometres down the river the banks are still there');
+  assert.ok(ctrl.voyage.distanceTrueNm > 2, `she has run on down it under warp (${ctrl.voyage.distanceTrueNm.toFixed(1)} nm)`);
+  sail(6000);
+  assert.ok(disposed, 'out past the mouth the coast is let go');
+  assert.ok(disposed.bank < 0, 'and by then there is no bank beside her');
+  // Thirteen kilometres of river lay ahead of her, and the coast is held until its land is nine kilometres off.
+  assert.ok(ctrl.voyage.distanceTrueNm * 1852 > 13000 + 8000, `she was well clear of the mouth when it went (${(ctrl.voyage.distanceTrueNm * 1.852).toFixed(1)} km run)`);
+});
+
+test('lay to until first light waits for the dawn where she lies, whatever the hour', async () => {
+  // The Channel on a December evening: dark by ten past five, when a fixed-hour rule still called it day.
+  const lat = 50, lon = 0, evening = Date.UTC(1550, 11, 20, 17, 10);
+  const boat = { x: 0, z: 0, heading: 0, length: 20, beam: 6, surgeVelocity: 2, leewayVelocity: 0, modelId: 'nina', hydrodynamics: { draft: 2 } };
+  const ctrl = createVoyageController({
+    boat,
+    P: { sunElev: -10, sunAzim: 250, windSpeed: 6, windDir: 180, swellHs: 0.6, swellDir: 215, swellLength: 80, clouds: 0.2, rain: 0, thunder: 0, haze: 0.8 },
+    getTerrain: () => null,
+    getVessels: () => [boat],
+    loadLandRings: () => Promise.resolve([]),
+    loadTile: () => Promise.resolve(null),
+  });
+  await chartsAboard();
+  ctrl.start({ lat, lon, dateMs: evening, compassCourse: 0 });
+  const observer = { latitude: lat, longitude: lon, height: 0 };
+  assert.ok(computeAstronomy(ctrl.voyage.dateMs, observer).sun.altitude < -6, 'it is night');
+  const before = ctrl.voyage.dateMs;
+  raiseInterrupt(ctrl.voyage, { type: 'lay-to', title: 'Night', text: '', choices: [{ id: 'lay-to', label: 'Lay to until first light' }] }, 'deck');
+  ctrl.resolveInterrupt('lay-to');
+  const waitedH = (ctrl.voyage.dateMs - before) / 3600000;
+  const sun = computeAstronomy(ctrl.voyage.dateMs, observer).sun.altitude;
+  assert.ok(waitedH > 10 && waitedH < 16, `she lay to through the long night (${waitedH.toFixed(1)} h)`);
+  assert.ok(sun > -6 && sun < 4, `and it is first light, the Sun ${sun.toFixed(1)}° from the horizon`);
+});
+
+test('a date set backward does not stop the track or the weather', () => {
+  const voyage = createVoyage({ lat: 30, lon: -30, dateMs: Date.UTC(1550, 5, 1, 12), seed: 7, compassCourse: 250 });
+  const boat = { heading: 250, surgeVelocity: 3.5, leewayVelocity: 0.1 };
+  stepVoyage(voyage, 0.1, { boat });
+  // The sky panel can set the calendar anywhere in her era: here, five days earlier.
+  voyage.dateMs -= 5 * 86400000;
+  voyage.tier = 'crossing';
+  voyage.rate = 3600;
+  const points = voyage.trueTrack.length;
+  for (let i = 0; i < 40; i++) stepVoyage(voyage, 0.25, { boat });
+  assert.ok(voyage.trueTrack.length > points + 5, `the track goes on being drawn (${voyage.trueTrack.length - points} new points in ten hours)`);
+  assert.ok(voyage.weatherSampleMs <= voyage.dateMs && voyage.dateMs - voyage.weatherSampleMs < 3600000, 'and the weather is sampled on her new calendar');
 });

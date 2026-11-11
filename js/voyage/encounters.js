@@ -352,6 +352,9 @@ export function createEncounterDirector({ seed = 0x1550cafe } = {}) {
 
   function step(voyage, boat, dtRealSec, env = {}) {
     if (!voyage || !Number.isFinite(dtRealSec) || dtRealSec <= 0) return null;
+    // A sighting stays active until the captain answers it. One whose call is no longer the open one
+    // (land, a gale or an arrival was raised over it) will never be answered, and no sail would be sighted again.
+    if (state.active && voyage.interrupt?.encounter !== state.active) state.active = null;
     if (state.active || voyage.interrupt || env.battleActive) return null;
     if (Number.isFinite(env.coastKm) && env.coastKm < 12) return null;
 

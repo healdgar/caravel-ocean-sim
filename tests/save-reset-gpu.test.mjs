@@ -63,6 +63,8 @@ test('reset=1 erases the save once, and a reload does not erase what was saved s
 // The Reset voyage button on the voyage panel, clicked as the player clicks it.
 const resetButton=page=>page.locator('.voyage-reset');
 const clickReset=page=>resetButton(page).evaluate(button=>button.click());
+// The second click of a double-click is not taken for an answer, so the confirming click waits as a reader would.
+const confirmReset=async page=>{await page.waitForTimeout(700);return clickReset(page);};
 
 test('Reset voyage asks once more, then erases the career this tab owns',{timeout:420000},async()=>{
   const {context,page,errors}=await pageWithForeignSave('/?continue=1');
@@ -70,7 +72,7 @@ test('Reset voyage asks once more, then erases the career this tab owns',{timeou
     await clickReset(page);
     assert.equal(await resetButton(page).textContent(),'Erase saved career?','the first click says what the second will erase');
     assert.match((await saved(page)).career??'',/"marker":"kept"/,'and erases nothing');
-    await Promise.all([page.waitForNavigation({timeout:60000}),clickReset(page)]);
+    await Promise.all([page.waitForNavigation({timeout:60000}),confirmReset(page)]);
     await ready(page);
     const after=await saved(page);
     assert.doesNotMatch(after.career??'',/"marker":"kept"/,'the second click erases the career');
@@ -85,7 +87,7 @@ test('Reset voyage in a tab that does not own the save starts afresh beside it',
   try{
     await clickReset(page);
     assert.equal(await resetButton(page).textContent(),'Abandon this voyage?','it does not claim it will erase a career that is not this tab\'s');
-    await Promise.all([page.waitForNavigation({timeout:60000}),clickReset(page)]);
+    await Promise.all([page.waitForNavigation({timeout:60000}),confirmReset(page)]);
     await ready(page);
     const after=await saved(page);
     assert.match(after.career??'',/"marker":"kept"/,'the career another tab saved is still there');

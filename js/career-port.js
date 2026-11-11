@@ -104,6 +104,9 @@ export function createCareerPort({ era, store, boat, getVoyage, getCompany, getP
       ledger.purse -= quote.cost;
       voyage.provisions.food = CAREER_FOOD_DAYS_LIMIT;
       voyage.provisions.water = CAREER_WATER_DAYS_LIMIT;
+      // Fresh food ashore is the cure for scurvy, and its clock starts again from here.
+      voyage.freshStoresMs = voyage.dateMs;
+      voyage.crewHealth = 1;
       save();
       return true;
     },

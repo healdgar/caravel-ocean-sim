@@ -14,6 +14,7 @@ import {
   stepVoyage,
   setWarpTier,
   raiseInterrupt,
+  interruptHoldsTheDeck,
   clearInterrupt,
   addLog,
   addMark,
@@ -52,8 +53,9 @@ import {
 import { compassPointName, relativeBearingCall, formatLatitude, formatLongitude } from './compass.js';
 import { formatJulianDate, localSolarHours, greatCircleKm, initialBearing, windDescription } from './ocean-climate.js';
 import { createEncounterDirector, describeEncounterThroughSpyglass } from './encounters.js';
-import { controlIcon } from '../controls.js';
+import { controlIcon, keyIsForField } from '../controls.js';
 import { probeHullBottomContact } from '../terrain-model.js';
+import { computeAstronomy } from '../astronomy.js';
 
 // Wind in metres a second at which a passage starts to cost hands, and the chance per game hour.
 const GALE_LOSS_WIND = 24;
@@ -81,11 +83,12 @@ export function shipWatch(solarHours) {
  */
 /**
  * A button that erases something takes a second, deliberate click. The first arms it and says
- * what will be lost; left alone it stands down by itself.
+ * what will be lost; left alone it stands down by itself. The second click of a double-click
+ * comes too soon to be a decision and is not taken for one.
  */
-export function armBeforeErasing(button, { prompt, onConfirm, standDownMs = 6000, schedule = setTimeout, cancel = clearTimeout }) {
+export function armBeforeErasing(button, { prompt, onConfirm, standDownMs = 6000, settleMs = 500, schedule = setTimeout, cancel = clearTimeout, now = () => performance.now() }) {
   const label = button.textContent;
-  let timer = null;
+  let timer = null, armedAt = 0;
   const standDown = () => {
     if (timer !== null) cancel(timer);
     timer = null;
@@ -97,8 +100,10 @@ export function armBeforeErasing(button, { prompt, onConfirm, standDownMs = 6000
       button.dataset.armed = '1';
       button.textContent = typeof prompt === 'function' ? prompt() : prompt;
       timer = schedule(standDown, standDownMs);
+      armedAt = now();
       return;
     }
+    if (now() - armedAt < settleMs) return;
     standDown();
     onConfirm();
   };
@@ -181,11 +186,14 @@ export function createVoyageController(cfg) {
     actionTriggered: false,
   };
 
+  // Until the coastline has arrived (or failed to), nobody aboard knows what lies ahead.
+  let coastIndexPending = Boolean(loadLandRings);
   if (loadLandRings) {
     Promise.resolve()
       .then(loadLandRings)
       .then((rings) => { if (Array.isArray(rings)) coastIndex = createCoastlineIndex(rings); })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => { coastIndexPending = false; scanTimer = 0; });
   }
 
   // ------------------------------------------------------------------ HUD
@@ -218,6 +226,9 @@ export function createVoyageController(cfg) {
       <div class="voyage-callout" role="alert" hidden></div>
       <div class="voyage-toast" role="status" aria-live="polite" hidden></div>`;
     parent.append(root);
+    // A choice is one press. Each new call takes the focus as it appears, so a key still held from
+    // answering the last one would otherwise answer it too.
+    root.querySelector('.voyage-callout').addEventListener('keydown', (e) => { if (e.repeat && (e.key === 'Enter' || e.key === ' ')) e.preventDefault(); });
     const hide = controlIcon(document.createElement('button'), 'close', 'Hide voyage');
     hide.classList.add('voyage-hide');
     hide.onclick = () => { setHudExpanded(false); toggle?.focus(); };
@@ -319,6 +330,8 @@ export function createVoyageController(cfg) {
       return;
     }
     setHudVisible(true);
+    // Whatever lies over the call (the chart, for one) is put away so that it can be seen and answered.
+    cfg.onCallout?.(interrupt);
     // A call that needs an answer opens the compact panel; answering closes it again.
     if (!hudExpanded) { setHudExpanded(true); hudAutoExpanded = true; }
     box.hidden = false;
@@ -569,6 +582,10 @@ export function createVoyageController(cfg) {
       showToast('The lookout has no eyes for strange sails while we are engaged.');
       return null;
     }
+    if (interruptHoldsTheDeck(voyage?.interrupt)) {
+      showToast('The lookout is not heard until the call before us is answered.');
+      return null;
+    }
     promoteActive();
     setHudVisible(true);
     return encounterDirector.spawnSailEncounter(voyage, boat, {
@@ -595,9 +612,24 @@ export function createVoyageController(cfg) {
     { id: 'chart', label: 'Open the chart' },
   ];
   // What a careful master did off a strange coast: stay put under little sail and wait for day.
+  // First light where she lies: twenty minutes after the Sun next climbs to within six degrees of the horizon.
+  // The hour that happens at runs from before five to after eight with the season and the latitude.
+  function firstLightMs(v) {
+    try {
+      const observer = { latitude: v.true.lat, longitude: v.true.lon, height: 0 };
+      let dark = false;
+      for (let ms = v.dateMs, end = ms + 26 * 3600000; ms <= end; ms += 600000) {
+        if (computeAstronomy(ms, observer).sun.altitude <= -6) dark = true;
+        else if (dark) return ms + 1200000;
+      }
+    } catch { /* no ephemeris: fall back on the hour */ }
+    return null;
+  }
   function layToUntilFirstLight() {
     if (voyage.canvas !== 'furl') orderCanvas('hove');
-    alignDateToDaylightIfNight(voyage, 7.2);
+    const dawn = firstLightMs(voyage);
+    if (dawn) voyage.dateMs = dawn;
+    else alignDateToDaylightIfNight(voyage, 7.2);
     addLog(voyage, 'Lay to until first light.', 'order');
   }
 
@@ -722,15 +754,26 @@ export function createVoyageController(cfg) {
     }
     updateHud();
   }
+  // Fire and a gaining leak run in real time, as a fight does: the clock cannot be run past them.
+  const shipInPeril = () => {
+    const damage = boat.damage;
+    if (!damage || damage.sunk) return null;
+    if ((damage.fireIntensity ?? 0) > 0.05) return 'fire';
+    return (damage.floodingRate ?? 0) > 0.002 ? 'flood' : null;
+  };
   // A fight is fought in real time. Closing on a distant enemy may run at watch speed, no faster.
   const warpLimitInAction = () => {
+    if (shipInPeril()) return 1;
     if (!cfg.isBattleActive?.()) return Infinity;
     return pursuit.active && !pursuit.battleRangeReached ? warpTier('watch').rate : 1;
   };
   function setWarp(requested) {
     const limit = warpLimitInAction();
     if (warpTier(requested).rate > limit && limit <= 1) {
-      showToast('Not with an enemy in range. Fight her or run clear.', 5);
+      const peril = shipInPeril();
+      showToast(peril === 'fire' ? 'Not with fire aboard. Put it out first.'
+        : peril === 'flood' ? 'Not while she is gaining water. Plug her and pump first.'
+        : 'Not with an enemy in range. Fight her or run clear.', 5);
       return;
     }
     const id = warpTier(requested).rate > limit ? 'watch' : requested;
@@ -743,7 +786,12 @@ export function createVoyageController(cfg) {
       if (astronomy) astronomy.mode = 'astronomy';
     }
     promoteActive();
+    // The wreck leaves one choice and a prize waits on the captain's word: neither is waved away by the clock.
     if (voyage.interrupt?.type === 'shipwreck') return;
+    if (voyage.interrupt?.type === 'prize-disposition') {
+      showToast('The prize waits on your word, Captain.', 5);
+      return;
+    }
     if (voyage.interrupt) {
       clearInterrupt(voyage);
       showCallout(null);
@@ -751,9 +799,13 @@ export function createVoyageController(cfg) {
     }
     setHudVisible(true);
     setWarpTier(voyage, id);
-    // Forcing warp past a sighting is allowed; the next scan decides how fast she may go.
-    if (tierRate > 1) scanTimer = 0;
-    voyage.rate = Math.min(tierRate, voyage.warpCap ?? 3600);
+    // Forcing warp past a sighting is allowed, but how fast she may go is settled before the clock moves, from where
+    // she lies now: the limit left by the last look may be a long way astern.
+    if (tierRate > 1) {
+      scanTimer = 0.5;
+      runApproach(getTerrain()).catch(() => {});
+    }
+    voyage.rate = Math.min(warpTier(voyage.tier).rate, voyage.warpCap ?? 3600);
     updateHud();
     emit('change');
   }
@@ -986,6 +1038,8 @@ export function createVoyageController(cfg) {
     }
     const actionLimit = warpLimitInAction();
     if (voyage.rate > actionLimit * 1.05 || warpTier(voyage.tier).rate > actionLimit) {
+      const peril = shipInPeril();
+      if (peril) showToast(peril === 'fire' ? 'Fire aboard! Time slowed to deck watch.' : 'She is gaining water! Time slowed to deck watch.', 7);
       setWarpTier(voyage, actionLimit <= 1 ? 'deck' : 'watch');
       voyage.rate = Math.min(voyage.rate, actionLimit);
       voyage.targetRate = voyage.rate;
@@ -1001,12 +1055,26 @@ export function createVoyageController(cfg) {
         )
       : Infinity;
     const isDepartureTerrain = Boolean(terrain && terrain === approach.departureTerrain);
-    // When warping out of the departure port, once the ship clears the 3D harbor/gorge pack (~7.8 km),
+    // Past the middle of her departure coast she may still be in its river or under its headlands: while its land
+    // lies about her it stays, sliding by under warp like any coast, and is let go only once she is clear of it.
+    if (isDepartureTerrain && tDist >= span * 0.95) {
+      approach.coastHeldCheckIn = (approach.coastHeldCheckIn ?? 0) - dt;
+      if (voyage.rate > 1.05 || approach.coastHeldCheckIn <= 0) {
+        approach.coastHeldCheckIn = 0.5;
+        approach.departureCoastHeld = tDist < span * COAST_REACH_SPANS && coastLiesAlongside(terrain, DEPARTURE_COAST_HOLD_M);
+      }
+    } else {
+      approach.departureCoastHeld = false;
+      approach.coastHeldCheckIn = 0;
+    }
+    const departureCoastHeld = approach.departureCoastHeld;
+    // When warping out of the departure port, once the ship is clear of the 3D coast,
     // free the departure terrain so open-ocean waves run at normal 1x real time while time and distance warp.
-    if (isDepartureTerrain && voyage.rate > 1.05 && tDist >= span * 0.95 && cfg.disposeTerrain) {
+    if (isDepartureTerrain && voyage.rate > 1.05 && tDist >= span * 0.95 && !departureCoastHeld && cfg.disposeTerrain) {
       cfg.disposeTerrain(terrain);
       approach.spawnedTerrain = null;
       approach.departureTerrain = null;
+      approach.departureCoastHeld = false;
       if (voyage.distanceTrueNm >= 6) approach.suppressLandHo = false;
       approach.offset = { x: 0, z: 0 };
     }
@@ -1015,7 +1083,7 @@ export function createVoyageController(cfg) {
       activeTerrain &&
       approach.spawnedTerrain === activeTerrain &&
       typeof activeTerrain.setWorldOffset === 'function' &&
-      (isDepartureTerrain ? tDist < span * 0.95 : tDist < 250000)
+      (isDepartureTerrain ? tDist < span * 0.95 || departureCoastHeld : tDist < 250000)
     );
     const ignoreCurrent = Boolean(activeTerrain) && (voyage.rate <= 1.05 || (inCoastalPack && tDist < span * 2.5));
     const prevTrue = { lat: voyage.true.lat, lon: voyage.true.lon };
@@ -1082,10 +1150,17 @@ export function createVoyageController(cfg) {
 
     // While a coastal pack is resident, slide/commit the 3D terrain onto the hull so land, trees, and harbour works
     // stay locked to lat/lon and cannot be warped through. Outside the coastal pack (open ocean), waves act normal at 1x.
+    // At deck watch the hull sails the land in real time and the land's own grounding rules stop her. What is left
+    // over here is only what the reckoning leaves out (leeway, a haul on a line, a shove from another hull): sliding
+    // the land by that, or reading it as a step toward a shoal, would hold the ship and her clock where they are.
+    const warped = prevRate > 1.05 || voyage.rate > 1.05;
+    // How far warp carried her this frame beyond what the hull sailed: whatever keeps its own place on the sea falls
+    // astern by this much.
+    let carryX = warped ? extraX : 0, carryZ = warped ? extraZ : 0;
     if (inCoastalPack) {
       let safeFrac = 1;
-      const stepExtraX = extraX, stepExtraZ = extraZ;
-      if (tDist < span * 2.5 && extraDist > 1e-4 && typeof activeTerrain.height === 'function') {
+      const stepExtraX = warped ? extraX : 0, stepExtraZ = warped ? extraZ : 0;
+      if (warped && tDist < span * COAST_REACH_SPANS && extraDist > 1e-4 && typeof activeTerrain.height === 'function') {
         const draft = boat.hydrodynamics?.draft ?? 2.0;
         const minSafeBed = -Math.max(3.2, draft * 1.35);
         const startBed = activeTerrain.height(boat.x, boat.z);
@@ -1157,6 +1232,8 @@ export function createVoyageController(cfg) {
         }
       }
       let sx = -stepExtraX * safeFrac, sz = -stepExtraZ * safeFrac;
+      carryX = stepExtraX * safeFrac;
+      carryZ = stepExtraZ * safeFrac;
       const baseReg = activeTerrain.baseRegion ?? activeTerrain.region;
       if (!isDepartureTerrain && tDist >= span * 1.5 && Number.isFinite(baseReg?.latitude) && Number.isFinite(baseReg?.longitude)) {
         const desired = regionLocalOrigin({
@@ -1190,7 +1267,7 @@ export function createVoyageController(cfg) {
         });
         approach.offset = { x: 0, z: 0 };
         approach.committed = true;
-        if (tDist < span * 2.5 && typeof activeTerrain.constrain === 'function') {
+        if (tDist < span * COAST_REACH_SPANS && typeof activeTerrain.constrain === 'function') {
           const postCommitX = boat.x, postCommitZ = boat.z;
           const constrained = activeTerrain.constrain(boat, preCommitX, preCommitZ, { warpStep: true });
           if (constrained || Math.hypot(boat.x - postCommitX, boat.z - postCommitZ) > 1e-3) {
@@ -1215,6 +1292,7 @@ export function createVoyageController(cfg) {
         }
       }
     }
+    if (Math.abs(carryX) > 1e-4 || Math.abs(carryZ) > 1e-4) cfg.onWarpCarry?.(carryX, carryZ);
     approach.lastBoat = { x: boat.x, z: boat.z };
 
     // Open-ocean encounters (whales & strange sails with lookout callouts).
@@ -1297,6 +1375,11 @@ export function createVoyageController(cfg) {
     return false;
   }
 
+  // A coast is built four spans either side of its middle (js/terrain.js coverageAt); the guards that read its bed
+  // stop a little short of that, so what they look ahead at is still inside it.
+  const COAST_REACH_SPANS = 3.9;
+  // Land this near is still the coast she is leaving.
+  const DEPARTURE_COAST_HOLD_M = 9000;
   function coastLiesAlongside(terrain, radiusM) {
     if (typeof terrain?.height !== 'function') return false;
     for (let a = 0; a < 16; a++) {
@@ -1356,7 +1439,7 @@ export function createVoyageController(cfg) {
     const distFromDepartureKm = approach.departureCoords
       ? greatCircleKm(lat, lon, approach.departureCoords.lat, approach.departureCoords.lon)
       : voyage.distanceTrueNm * 1.852;
-    if (approach.suppressLandHo && (distFromDepartureKm >= 14 || voyage.distanceTrueNm >= 12 || (!approach.departureTerrain && voyage.distanceTrueNm >= 5))) {
+    if (approach.suppressLandHo && !approach.departureCoastHeld && (distFromDepartureKm >= 14 || voyage.distanceTrueNm >= 12 || (!approach.departureTerrain && voyage.distanceTrueNm >= 5))) {
       approach.suppressLandHo = false;
     }
 
@@ -1403,7 +1486,7 @@ export function createVoyageController(cfg) {
       !approach.spawnedAt || greatCircleKm(lat, lon, approach.spawnedAt.lat, approach.spawnedAt.lon) > 15
     ) && !coastLiesAlongside(terrain, 8000);
     const shouldDispose = isDepartureTerrain
-      ? (geoDistKm >= 11.5 || terrainDistM >= (terrain?.region?.span ?? 8192) * 1.42)
+      ? !approach.departureCoastHeld && (geoDistKm >= 11.5 || terrainDistM >= (terrain?.region?.span ?? 8192) * 1.42)
       : (terrainDistM > 150000 || mismatchWorthAct);
     if (terrain && terrain.region && cfg.disposeTerrain && shouldDispose) {
       cfg.disposeTerrain(terrain);
@@ -1437,7 +1520,7 @@ export function createVoyageController(cfg) {
 
     // Direct local heightfield probe along the ship's course when terrain is resident.
     let localWarpCap = 3600, unbuiltWarpCap = 3600;
-    if (terrain && typeof terrain.height === 'function' && terrainDistM < (terrain.region?.span ?? 8192) * 2.5) {
+    if (terrain && typeof terrain.height === 'function' && terrainDistM < (terrain.region?.span ?? 8192) * COAST_REACH_SPANS) {
       const draft = boat.hydrodynamics?.draft ?? 2.0;
       const minBed = -Math.max(2.2, draft * 1.15);
       const startBed = terrain.height(boat.x, boat.z);
@@ -1470,7 +1553,7 @@ export function createVoyageController(cfg) {
     }
 
     let mapCoastStop = false;
-    if (isDepartureTerrain && terrainDistM < (terrain.region?.span ?? 8192) * 1.65) {
+    if (isDepartureTerrain && (terrainDistM < (terrain.region?.span ?? 8192) * 1.65 || approach.departureCoastHeld)) {
       // While departing inside a high-res 3D coastal pack (e.g. Tagus Gorge), trust the 3D heightfield probe
       // rather than the 2.4 km/px zoom-6 DEM which blurs river mouths.
       voyage.warpCap = localWarpCap;
@@ -1505,6 +1588,8 @@ export function createVoyageController(cfg) {
       voyage.warpCap = Math.min(voyage.warpCap, fwdCoastKm < 35 ? 1 : 30);
     }
     voyage.warpCap = Math.min(voyage.warpCap, localWarpCap, unbuiltWarpCap);
+    // Neither the coastline nor the soundings round her have arrived: she does not run blind.
+    if (coastIndexPending && !scan.complete) voyage.warpCap = 1;
     // Warp reached its stopping distance: end it, rather than leave it ready to run on.
     if (localWarpCap <= 1 && warpTier(voyage.tier).rate > 1) {
       stopWarpForDanger('Shoal water ahead.');
@@ -1650,6 +1735,13 @@ export function createVoyageController(cfg) {
       approach.landSighted = null;
     }
 
+    // A new passage begins once the land she made is well astern: the next landfall is judged on its own days and
+    // leagues, and the pilot's true position is his secret again.
+    if (voyage.arrived && approach.coastKm > 40) {
+      voyage.arrived = false;
+      voyage.legStartDay = voyage.dayAtSea;
+      voyage.legStartLoggedNm = voyage.distanceLoggedNm;
+    }
     // Arrival: inside a newly streamed coastal pack, at real time, after a real passage (and not overwriting a fresh Land Ho callout).
     const newCoast = terrain && terrain !== approach.departureTerrain;
     if (
@@ -1661,12 +1753,14 @@ export function createVoyageController(cfg) {
     ) {
       voyage.arrived = true;
       const { errorLeagues } = revealTruePosition(voyage, 'landfall');
-      const verdict = reckoningVerdict(errorLeagues, voyage.dayAtSea);
-      addLog(voyage, `Made our landfall after ${voyage.dayAtSea} days. By the land our reckoning was ${errorLeagues.toFixed(0)} leagues out. ${verdict.text}`, 'arrival');
+      const legDays = Math.max(0, voyage.dayAtSea - (voyage.legStartDay ?? 0));
+      const legLeagues = Math.max(0, voyage.distanceLoggedNm - (voyage.legStartLoggedNm ?? 0)) / NM_PER_LEAGUE;
+      const verdict = reckoningVerdict(errorLeagues, legDays);
+      addLog(voyage, `Made our landfall after ${legDays} days. By the land our reckoning was ${errorLeagues.toFixed(0)} leagues out. ${verdict.text}`, 'arrival');
       raiseInterrupt(voyage, {
         type: 'arrival',
         title: `Landfall · ${verdict.rank}`,
-        text: `${voyage.dayAtSea} days at sea, ${(voyage.distanceLoggedNm / NM_PER_LEAGUE).toFixed(0)} leagues logged. Your reckoning was ${errorLeagues.toFixed(0)} leagues from the truth. ${verdict.text}`,
+        text: `${legDays} days at sea, ${legLeagues.toFixed(0)} leagues logged. Your reckoning was ${errorLeagues.toFixed(0)} leagues from the truth. ${verdict.text}`,
         choices: [{ id: 'ok', label: 'Enter it in the log' }, { id: 'chart', label: 'Open the chart' }],
       }, 'deck');
       showCallout(voyage.interrupt);
@@ -1704,12 +1798,14 @@ export function createVoyageController(cfg) {
   }
 
   function onKey(e) {
-    if (!voyage || e.metaKey || e.ctrlKey || e.altKey || /INPUT|SELECT|TEXTAREA/.test(e.target?.tagName ?? '')) return false;
+    if (!voyage || e.metaKey || e.ctrlKey || e.altKey || keyIsForField(e)) return false;
     if (e.code === 'BracketLeft') { alterCourse(e.shiftKey ? -1 : -11.25); return true; }
     if (e.code === 'BracketRight') { alterCourse(e.shiftKey ? 1 : 11.25); return true; }
     if (e.code === 'KeyK' && !e.repeat) { keepHerSo(); return true; }
     if (e.code === 'KeyT' && !e.repeat) { tack(); return true; }
     if (e.code === 'Comma' || e.code === 'Period') {
+      // One tier a press: a held key would run straight up to a crossing.
+      if (e.repeat) return true;
       const i = WARP_TIERS.findIndex((t) => t.id === voyage.tier);
       const next = WARP_TIERS[Math.max(0, Math.min(WARP_TIERS.length - 1, i + (e.code === 'Period' ? 1 : -1)))];
       setWarp(next.id);
@@ -1717,6 +1813,10 @@ export function createVoyageController(cfg) {
     }
     if (e.code === 'Escape' && hudExpanded && matchMedia(HUD_COMPACT_QUERY).matches) { setHudExpanded(false); return true; }
     if (e.code === 'Enter' && voyage.interrupt) {
+      // A held key answers nothing, and a button that has the focus answers for itself: Enter on
+      // "Hold course" must not clear for action because that choice happens to stand first.
+      if (e.repeat) return true;
+      if (e.target?.tagName === 'BUTTON') return false;
       resolveInterrupt((voyage.interrupt.choices ?? [{ id: 'ok' }])[0].id);
       return true;
     }

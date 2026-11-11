@@ -39,6 +39,7 @@ export function createHelmsman({ compassCourse = 0, engaged = true } = {}) {
     beat: false, // tack automatically toward the ordered course when it lies upwind
     beatLegHours: 4,
     legGameSeconds: 0,
+    legRealSeconds: 0,
     helmTrim: 0,
     ironsTime: 0,
     recovering: false,
@@ -47,12 +48,16 @@ export function createHelmsman({ compassCourse = 0, engaged = true } = {}) {
   };
 }
 
+/** Real seconds a board lasts at the least, so the hull can come about and gather way before the next tack. */
+export const MIN_BEAT_LEG_REAL_S = 75;
+
 /** Order a new compass course (degrees magnetic). */
 export function orderCourse(state, compassCourse, { beat = state.beat } = {}) {
   state.compassCourse = helmsmanWrap360(compassCourse);
   state.beat = Boolean(beat);
   state.engaged = true;
   state.legGameSeconds = 0;
+  state.legRealSeconds = 0;
   state.recovering = false;
   return state;
 }
@@ -61,6 +66,7 @@ export function orderCourse(state, compassCourse, { beat = state.beat } = {}) {
 export function orderTack(state) {
   state.tack = state.tack ? -state.tack : 1;
   state.legGameSeconds = 0;
+  state.legRealSeconds = 0;
   return state;
 }
 
@@ -90,9 +96,13 @@ export function steerHelmsman(state, boat, dt, { windSpeed = 7, windDirection = 
     if (!state.tack) state.tack = Math.sign(helmsmanWrap(heading - windFrom)) || Math.sign(relative) || 1;
     if (state.beat) {
       state.legGameSeconds += gameDt;
-      if (state.legGameSeconds >= state.beatLegHours * 3600) {
+      state.legRealSeconds += dt;
+      // The hull comes about in real seconds however fast the clock runs: a board lasts long enough to tack her and
+      // gather way, or under warp she would spend the whole passage in stays.
+      if (state.legGameSeconds >= state.beatLegHours * 3600 && state.legRealSeconds >= MIN_BEAT_LEG_REAL_S) {
         state.tack = -state.tack;
         state.legGameSeconds = 0;
+        state.legRealSeconds = 0;
       }
     }
     course = windFrom + state.tack * noGo;
@@ -100,6 +110,7 @@ export function steerHelmsman(state, boat, dt, { windSpeed = 7, windDirection = 
   } else {
     state.tack = 0;
     state.legGameSeconds = 0;
+    state.legRealSeconds = 0;
     state.status = 'Steady as she goes';
   }
 

@@ -123,6 +123,9 @@ test('losing the ship takes you to the nearest port, and a saved voyage survives
     assert.equal(await erase.textContent(),'Erase saved voyage?');
     assert.notEqual(await third.page.evaluate(()=>localStorage.getItem('waterworld.career.v1')),null);
     await erase.click();
+    assert.notEqual(await third.page.evaluate(()=>localStorage.getItem('waterworld.career.v1')),null,'the second click of a double-click erases nothing');
+    await third.page.waitForTimeout(700);
+    await erase.click();
     assert.equal(await third.page.evaluate(()=>localStorage.getItem('waterworld.career.v1')),null);
     assert.equal(await third.page.locator('#career-prompt').count(),0);
     assert.deepEqual(third.errors,[]);
@@ -193,6 +196,9 @@ test('a trading voyage turns cloth into money across two real ports and ends in 
     // A life ends here, and the next one starts clean.
     await first.page.locator('[data-action="retire"]').click();
     assert.equal(await first.page.locator('#career-prompt').count(),0,'the first click only asks');
+    await first.page.locator('[data-action="retire"]').click();
+    assert.equal(await first.page.locator('#career-prompt').count(),0,'and the second click of a double-click is not an answer');
+    await first.page.waitForTimeout(700);
     await first.page.locator('[data-action="retire"]').click();
     await first.page.locator('#career-prompt.career-ending').waitFor({state:'visible'});
     const ending=await first.page.locator('#career-prompt.career-ending').textContent();

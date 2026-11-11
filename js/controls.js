@@ -38,7 +38,17 @@ function formatHelmTraverse(v){
 }
 
 // Small presentation surface; all commands use the existing helm, crew and gunnery models.
-export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battleContext=null){
+// A key belongs to the field it was pressed in, not to the ship: anything typed into a text box or a list, and the
+// keys that move a slider. A slider or tick box the player has just used does not keep the rest of the keyboard.
+export const keyIsForField=e=>{
+  const field=e.target,tag=field?.tagName??'';
+  if(tag==='SELECT'||tag==='TEXTAREA'||field?.isContentEditable)return true;
+  if(tag!=='INPUT')return false;
+  if(/^(checkbox|radio|button|submit|reset)$/.test(field.type))return false;
+  if(field.type==='range')return /^(Arrow|Home|End|Page)/.test(e.key??'');
+  return true;
+};
+export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battleContext=null,onHelm=()=>{}){
   const model=getShipModel(boat.modelId??'nina'),active=[...new Set(model.rig.sails.map(s=>['fore','main','mizzen'].indexOf(s.controlGroup)))].filter(i=>i>=0);
   const rowing=Object.hasOwn(ROWING_DESIGNS,model.id);
   const gunnery=battleContext?.gunnery??boat.gunnery??null;
@@ -63,7 +73,8 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
     for(const button of rowButtons)button.onclick=()=>{boat.propulsion='sail';boat.rowingEffort=Number(button.dataset.rowing);onPropulsionChange();update(performance.now(),true);};
   }
   const buttons=[...root.querySelectorAll('[data-sail]')];
-  const setRudder=value=>{boat.rudderTarget=Math.max(-35,Math.min(35,value));slider.value=boat.rudderTarget;update(performance.now(),true);};
+  // Putting the rudder over by hand takes the helm from the helmsman, who would otherwise put it straight back.
+  const setRudder=value=>{onHelm();boat.rudderTarget=Math.max(-35,Math.min(35,value));slider.value=boat.rudderTarget;update(performance.now(),true);};
   slider.oninput=()=>setRudder(Number(slider.value));
   for(const [id,icon,label,action] of [
     ['port','port','Rudder to port',()=>setRudder(boat.rudderTarget-5)],

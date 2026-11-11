@@ -137,8 +137,18 @@ export function createGunneryControls(parent,gunnery){
     }
     return '';
   }
+  let shownElevation=gunnery.elevation??0,shownTraverse=gunnery.traverse??0;
   function update(){
     standDown.disabled=!gunnery.selectedSide;
+    // The helm sets shot, elevation and traverse as well. A control here that is not being worked shows what the
+    // guns now have, or touching it would put the old order back.
+    const working=document.activeElement;
+    const ammo=gunnery.ammo??(bows?'arrow':'round');
+    if(working!==ammoSelect&&ammoSelect.value!==ammo)ammoSelect.value=ammo;
+    const elevation=gunnery.elevation??0;
+    if(working!==elevationInput&&elevation!==shownElevation){shownElevation=elevation;elevationInput.value=elevation;elevationOutput.textContent=formatElevation(elevation);}
+    const traverse=gunnery.traverse??0;
+    if(working!==traverseInput&&traverse!==shownTraverse){shownTraverse=traverse;traverseInput.value=traverse;traverseOutput.textContent=formatTraverse(traverse);}
     const mag=gunnery.magazine;
     if(mag){
       magazineStatus.hidden=false;
