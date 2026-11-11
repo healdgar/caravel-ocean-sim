@@ -6,7 +6,7 @@
 // A type's local frame is the plan's: x along the street, z away from it, the street front at
 // -z, the floor at y = 0. Its width, length and height are what an instance is scaled from.
 
-const STOREY_M = 2.9;
+export const CITY_STOREY_M = 2.9;
 const FOOTING_M = 6.5; // Walls run this far below the floor, so a house on a slope has no gap under it.
 const WALL_M = 0.42;
 
@@ -23,31 +23,31 @@ export const CITY_HOUSE_STOREYS = 5;
 // A town house: so many storeys, so many bays, its door in the middle bay, its ridge along the
 // street (eaves to the street) or along the plot (gable to the street).
 function houseSpec({ name, storeys, front, depth, ridge }) {
-  const hw = front / 2, hd = depth / 2, height = storeys * STOREY_M, bays = Math.max(2, Math.round(front / 2.4));
+  const hw = front / 2, hd = depth / 2, height = storeys * CITY_STOREY_M, bays = Math.max(2, Math.round(front / 2.4));
   const primitives = [
     { primitive: 'box', partGroup: 'foundation_plinth', from: [-hw, -FOOTING_M, -hd], to: [hw, 0, hd], material: 'stucco' },
     { primitive: 'box', name: 'party_wall_left', from: [-hw, 0, -hd + WALL_M], to: [-hw + WALL_M, height, hd - WALL_M], material: 'stucco' },
     { primitive: 'box', name: 'party_wall_right', from: [hw - WALL_M, 0, -hd + WALL_M], to: [hw, height, hd - WALL_M], material: 'stucco' },
   ];
   for (let storey = 0; storey < storeys; storey++) {
-    const y = storey * STOREY_M, openings = [];
+    const y = storey * CITY_STOREY_M, openings = [];
     for (let bay = 0; bay < bays; bay++) {
       const offset = (bay + 0.5) * front / bays;
       if (storey === 0) openings.push(bay === Math.floor(bays / 2) ? { offset, width: 1.15, height: 2.15, door: true } : { offset, width: 0.85, height: 1.0, sill: 1.15 });
       else openings.push({ offset, width: 0.9, height: 1.35, sill: 0.85 });
     }
-    primitives.push({ primitive: 'wall', name: `street_front_${storey}`, from: [-hw, y, -hd + WALL_M / 2], to: [hw, y, -hd + WALL_M / 2], height: STOREY_M, thickness: WALL_M, material: 'stucco', openings });
-    primitives.push({ primitive: 'wall', name: `yard_wall_${storey}`, from: [hw, y, hd - WALL_M / 2], to: [-hw, y, hd - WALL_M / 2], height: STOREY_M, thickness: WALL_M, material: 'stucco', openings: [{ offset: front / 2, width: 0.85, height: 1.1, sill: 1.0 }] });
+    primitives.push({ primitive: 'wall', name: `street_front_${storey}`, from: [-hw, y, -hd + WALL_M / 2], to: [hw, y, -hd + WALL_M / 2], height: CITY_STOREY_M, thickness: WALL_M, material: 'stucco', openings });
+    primitives.push({ primitive: 'wall', name: `yard_wall_${storey}`, from: [hw, y, hd - WALL_M / 2], to: [-hw, y, hd - WALL_M / 2], height: CITY_STOREY_M, thickness: WALL_M, material: 'stucco', openings: [{ offset: front / 2, width: 0.85, height: 1.1, sill: 1.0 }] });
   }
   // A balcony on the first floor of the taller houses, on stone corbels with an iron rail.
   if (storeys >= 3) {
-    primitives.push({ primitive: 'box', name: 'balcony', from: [-hw + 0.5, STOREY_M - 0.14, -hd - 0.6], to: [hw - 0.5, STOREY_M, -hd], material: 'limestone' });
-    primitives.push({ primitive: 'box', name: 'balcony_rail', from: [-hw + 0.5, STOREY_M + 0.86, -hd - 0.6], to: [hw - 0.5, STOREY_M + 0.92, -hd - 0.54], material: 'iron' });
+    primitives.push({ primitive: 'box', name: 'balcony', from: [-hw + 0.5, CITY_STOREY_M - 0.14, -hd - 0.6], to: [hw - 0.5, CITY_STOREY_M, -hd], material: 'limestone' });
+    primitives.push({ primitive: 'box', name: 'balcony_rail', from: [-hw + 0.5, CITY_STOREY_M + 0.86, -hd - 0.6], to: [hw - 0.5, CITY_STOREY_M + 0.92, -hd - 0.54], material: 'iron' });
     for (let k = 0, posts = Math.round((front - 1) / 0.62); k <= posts; k++) {
       const x = -hw + 0.5 + (front - 1 - 0.05) * k / posts;
-      primitives.push({ primitive: 'box', name: 'balcony_baluster', from: [x, STOREY_M, -hd - 0.59], to: [x + 0.05, STOREY_M + 0.86, -hd - 0.55], material: 'iron' });
+      primitives.push({ primitive: 'box', name: 'balcony_baluster', from: [x, CITY_STOREY_M, -hd - 0.59], to: [x + 0.05, CITY_STOREY_M + 0.86, -hd - 0.55], material: 'iron' });
     }
-    for (const x of [-hw + 0.5, hw - 0.56]) primitives.push({ primitive: 'box', name: 'balcony_return', from: [x, STOREY_M + 0.86, -hd - 0.6], to: [x + 0.06, STOREY_M + 0.92, -hd], material: 'iron' });
+    for (const x of [-hw + 0.5, hw - 0.56]) primitives.push({ primitive: 'box', name: 'balcony_return', from: [x, CITY_STOREY_M + 0.86, -hd - 0.6], to: [x + 0.06, CITY_STOREY_M + 0.92, -hd], material: 'iron' });
   }
   if (ridge === 'street') {
     primitives.push({ primitive: 'group', name: 'roof', rotation: [0, 90, 0], children: [

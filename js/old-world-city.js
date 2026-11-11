@@ -10,7 +10,7 @@
 // street, square, garden or yard, and whether a tree may stand there. Each house, church,
 // tower and gate is also given its type, a building written in Cairn
 // (js/old-world-buildings.js), which the renderer draws in place of the block close to.
-import { CITY_CHURCH, CITY_BUILDING_TYPES, CITY_GATE, CITY_TYPE, CITY_TYPED_ROOF, cityHouseType } from './old-world-buildings.js';
+import { CITY_CHURCH, CITY_BUILDING_TYPES, CITY_GATE, CITY_STOREY_M, CITY_TYPE, CITY_TYPED_ROOF, cityHouseType } from './old-world-buildings.js';
 
 export const CITY_BLOCK_FLOATS = 12;
 export const CITY_ROOF = Object.freeze({ GABLE: 0, HIP: 1, PYRAMID: 2, FLAT: 3 });
@@ -21,7 +21,6 @@ export const CITY_TREES = Object.freeze({ NONE: 0, SQUARE: 1, PARK: 2, YARD: 3 }
 
 const STRIDE_M = 8;
 const TURNS = [-0.3, -0.15, 0, 0.15, 0.3];
-const STOREY_M = 2.9;
 const PLACE_RAYS = 24;
 const WALL_RAYS = 144;
 const WALL_HEIGHT_M = 8.5;
@@ -94,7 +93,7 @@ function overlap(a, b, gap) {
 export const cityFootprintsOverlap = overlap;
 function local(f, lx, lz) { return [f.x + lx * f.c + lz * f.s, f.z - lx * f.s + lz * f.c]; }
 
-function resample(pts, step) {
+function resampleCityLine(pts, step) {
   const out = [pts[0]];
   let need = step;
   for (let i = 1; i < pts.length; i++) {
@@ -201,7 +200,7 @@ export function layOldWorldCity({ heightAt, urbanAt, earlyAt, inlandAt, seat, ro
     const starts = [];
     for (const st of parents) {
       if (st.kind === 'port' && st.hw < 2) continue;
-      const pts = st.starts ??= resample(st.pts, 20);
+      const pts = st.starts ??= resampleCityLine(st.pts, 20);
       const offer = (i, side, px, pz, tx, tz, ahead) => {
         const key = (st.id * 4096 + i) * 4 + side + 1 + (kind === 'lane' ? 0 : 2 ** 40);
         if (!tried.has(key)) starts.push({ px, pz, st, side, key, tx, tz, ahead, k: Math.hypot(px - seat.x, pz - seat.z) + rr() * 60 });
@@ -248,14 +247,14 @@ export function layOldWorldCity({ heightAt, urbanAt, earlyAt, inlandAt, seat, ro
   for (const way of ways) {
     const pts = way.points.map((p) => [p[0], p[1]]);
     if (pts.length < 2) continue;
-    addStreet(resample(pts, STRIDE_M), Math.max(1.5, (way.points[0][2] || 3) / 2), 'port', way.points[0][3] ?? 1);
+    addStreet(resampleCityLine(pts, STRIDE_M), Math.max(1.5, (way.points[0][2] || 3) / 2), 'port', way.points[0][3] ?? 1);
   }
   const mains = [];
   for (const road of roads) {
     let first = road.findIndex(([x, z]) => ground(x, z));
     if (first < 0) continue;
     first = Math.max(0, first - 1);
-    const st = addStreet(resample(road.slice(first), STRIDE_M), 3.4, 'road', 1);
+    const st = addStreet(resampleCityLine(road.slice(first), STRIDE_M), 3.4, 'road', 1);
     if (st) mains.push(st);
   }
   {
@@ -494,7 +493,7 @@ export function layOldWorldCity({ heightAt, urbanAt, earlyAt, inlandAt, seat, ro
     const want = Math.max(2, Math.min(34, Math.round(people / 3200)));
     const sites = [];
     for (const st of mains) {
-      const pts = resample(st.pts, 26);
+      const pts = resampleCityLine(st.pts, 26);
       for (let i = 1; i < pts.length - 1; i++) {
         const [mx, mz] = pts[i], L = Math.hypot(pts[i + 1][0] - pts[i - 1][0], pts[i + 1][1] - pts[i - 1][1]) || 1;
         const ux = (pts[i + 1][0] - pts[i - 1][0]) / L, uz = (pts[i + 1][1] - pts[i - 1][1]) / L;
@@ -573,7 +572,7 @@ export function layOldWorldCity({ heightAt, urbanAt, earlyAt, inlandAt, seat, ro
     if (!fits(f, gap)) return 0;
     occupy(f);
     const storeys = central ? 3 + (rr() < 0.45 ? 1 : 0) + (main && rr() < 0.4 ? 1 : 0) : late ? 1 + (rr() < 0.5 ? 1 : 0) + (main && rr() < 0.3 ? 1 : 0) : 2 + (rr() < 0.5 ? 1 : 0);
-    const wallH = storeys * STOREY_M + rr() * 0.5, base = seatBlock(f, heightAt(mx, mz));
+    const wallH = storeys * CITY_STOREY_M + rr() * 0.5, base = seatBlock(f, heightAt(mx, mz));
     const tone = TINTS[Math.floor(rr() * TINTS.length)] + 0.2 + 0.75 * rr();
     const eaves = rr() < 0.74, type = cityHouseType(storeys, eaves), T = CITY_BUILDING_TYPES[type], up = wallH / T.height;
     if (eaves) {

@@ -79,6 +79,9 @@ wgslModules.push('js/wgsl/land-craters.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/ground-detail.js');
 order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/wgsl/ground-detail.js');
 wgslModules.push('js/wgsl/ground-detail.js');
+// The Old World: building types ahead of the land shader, which reads their constants, then the town plan and its country.
+order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/old-world-buildings.js');
+order.splice(order.indexOf('js/coastal-world.js'),0,'js/old-world-city.js','js/old-world.js');
 order.splice(order.indexOf('js/main.js'),0,'js/port-damage.js');
 order.splice(order.indexOf('js/ship-mesh.js'),0,'js/rig-gpu-data.js');
 order.splice(order.indexOf('js/ship-mesh.js'),0,'js/ship-collider.js');

@@ -10,7 +10,7 @@
 import { CITY_GROUND, CITY_TREES, layOldWorldCity } from './old-world-city.js';
 
 const DEG = Math.PI / 180;
-const METRES_PER_DEGREE = 111195;
+const OLD_WORLD_METRES_PER_DEGREE = 111195;
 
 // Returned for ground where no tree may stand.
 export const OLD_WORLD_NO_TREES = Object.freeze({ none: true });
@@ -78,7 +78,7 @@ export function oldWorldCityNear(latitude, longitude, withinMetres = 16000) {
   let best = null, least = withinMetres;
   const cos = Math.cos(latitude * DEG);
   for (const city of OLD_WORLD_CITIES) {
-    const d = Math.hypot((city.longitude - longitude) * cos, city.latitude - latitude) * METRES_PER_DEGREE;
+    const d = Math.hypot((city.longitude - longitude) * cos, city.latitude - latitude) * OLD_WORLD_METRES_PER_DEGREE;
     if (d < least) { least = d; best = city; }
   }
   return best;
@@ -411,8 +411,8 @@ function makeCountry(region, heights, port) {
   const year = region.year ?? 1550;
   const people = city ? oldWorldPeople(city, year) : 0;
   const cityArea = city ? (people / cityDensityPerHectare(people)) * 10000 : 0;
-  const cityX = city ? region.x + (city.longitude - region.longitude) * METRES_PER_DEGREE * cos * scale : 0;
-  const cityZ = city ? region.z - (city.latitude - region.latitude) * METRES_PER_DEGREE * scale : 0;
+  const cityX = city ? region.x + (city.longitude - region.longitude) * OLD_WORLD_METRES_PER_DEGREE * cos * scale : 0;
+  const cityZ = city ? region.z - (city.latitude - region.latitude) * OLD_WORLD_METRES_PER_DEGREE * scale : 0;
   const cityRadius = Math.sqrt(cityArea / Math.PI) * 1.15;
   const half = region.span / 2;
   const holdsCity = Boolean(city && port && port.clearRadius > 0 && port.center &&
