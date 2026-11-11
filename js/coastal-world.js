@@ -4,7 +4,7 @@
 // vegetation, and modular 16th-century port prefabs within several kilometres
 // of shore for curated 1550s Caribbean ports or any global (lat, lon) landfall.
 
-import { layTownStreets, streetEdgeAt } from './town-streets.js';
+import { layTownStreets, paveCityStreets, streetEdgeAt } from './town-streets.js';
 import { layPortProps, pierBentStations, pierBrowStations, pierCraneStation } from './port-props.js';
 import { emitTripoHarborCrane, emitTripoDockCleat } from './tripo-pier-assets.js';
 import {
@@ -35,6 +35,7 @@ import {
   safeLandfallStart,
 } from './terrain-model.js';
 import { vegetationProbability } from './vegetation.js';
+import { OLD_WORLD_LAND, oldWorldCountry } from './old-world.js';
 import {
   BUILDING_SUB_ASSEMBLIES,
   PART_CUTAWAY_MODES,
@@ -8200,6 +8201,8 @@ export function synthesizeCoastalBiome(regionSpec, heights, beaches = null, port
 
   const is1550Ortho = Boolean(satelliteData?.is1550Orthophoto);
   const minTreeElev = is1550Ortho ? 1.1 : 1.15;
+  // Long-settled country bears what its people grow, not what a satellite sees there today.
+  const country = oldWorldCountry(region, heights, portPlacement);
 
   for (let j = 0; j < m; j++) {
     const v = (j + 0.5) / m;
@@ -8232,6 +8235,10 @@ export function synthesizeCoastalBiome(regionSpec, heights, beaches = null, port
       const maxVegSlope = 0.88 + cloudForestBoost;
       if (slope > maxVegSlope || (h < 28 && slope > 0.36)) {
         mask[idx] = 0;
+        continue;
+      }
+      if (country) {
+        mask[idx] = Math.round(255 * country.landAt(x, z, slope).vegetation * coastalSmoothstep(0.84, 0.32, slope));
         continue;
       }
       const patchNoise = coastalFbm2D(u * 6.5 + 1.9, v * 6.5 - 2.4, seed, 4);
@@ -8294,6 +8301,7 @@ export function synthesizeCoastalAlbedo(
   const beachData = beaches ?? synthesizeCoastalBeaches(region, heights, satelliteData, distInfo);
   const biomeMask = biome ?? synthesizeCoastalBiome(region, heights, beachData, portPlacement, satelliteData);
   const rgba = new Uint8Array(size * size * 4);
+  const country = oldWorldCountry(region, heights, portPlacement);
 
   for (let j = 0; j < size; j++) {
     const v = (j + 0.5) / size;
@@ -8349,9 +8357,16 @@ export function synthesizeCoastalAlbedo(
         lushG = (60 + canopyMottle * 11 + speciesHue * 14 + Math.max(0, crownSunSlope) * 18 + fineGrain * 0.36) * crownShade;
         lushB = (26 + canopyMottle * 5 + (1 - speciesHue) * 7 + fineGrain * 0.22) * crownShade;
       }
-      const forestR = soilR * (1 - canopyBlend) + lushR * canopyBlend;
-      const forestG = soilG * (1 - canopyBlend) + lushG * canopyBlend;
-      const forestB = soilB * (1 - canopyBlend) + lushB * canopyBlend;
+      let forestR = soilR * (1 - canopyBlend) + lushR * canopyBlend;
+      let forestG = soilG * (1 - canopyBlend) + lushG * canopyBlend;
+      let forestB = soilB * (1 - canopyBlend) + lushB * canopyBlend;
+      // Tilled and grazed country shows its own ground; only its woods keep the forest's colours.
+      const land = country && h > 0.6 ? country.landAt(x, z, slope) : null;
+      if (land && land.kind !== OLD_WORLD_LAND.WOOD) {
+        forestR = land.r;
+        forestG = land.g;
+        forestB = land.b;
+      }
       const cloudCliffShift =
         region.coastalArchetype === 'volcanic-island' ? coastalSmoothstep(130, 360, h) * 0.22 : 0;
       const cliffWeight = coastalSmoothstep(0.34 + cloudCliffShift, 0.70 + cloudCliffShift, slope) * (1 - canopyBlend * 0.55);
@@ -8375,7 +8390,7 @@ export function synthesizeCoastalAlbedo(
       let g = forestG * (1 - cliffWeight) + rockG * cliffWeight;
       let b = forestB * (1 - cliffWeight) + rockB * cliffWeight;
 
-      const sat = sampleSatelliteEquirectangular(satelliteData, u, v);
+      const sat = country ? null : sampleSatelliteEquirectangular(satelliteData, u, v);
       if (sat && h > 0.15) {
         // Bounded local shadow lifting matching scripts/prepare-land-imagery.py:153
         const lift =
@@ -9359,6 +9374,10 @@ function finalizeProceduralCoastalPack(
     port.streets = layTownStreets(port, (x, z) => terrainSurfaceSample(heights, x, z, region));
     port.props = layPortProps(port, (x, z) => terrainSurfaceSample(heights, x, z, region));
   }
+  // An Old World city round the port: its plan is laid here, its streets paved with the port's
+  // own, and its blocks handed to the renderer to draw as instances.
+  const cityPlan = pack.skipPortPlacement ? null : oldWorldCountry(region, heights, port)?.plan ?? null;
+  if (cityPlan && port.streets) paveCityStreets(port.streets, cityPlan.paving);
   const shoreDist = computeCoastalShoreDistances(heights, region.size, region.span, 0.25);
   const beaches = synthesizeCoastalBeaches(region, heights, satelliteData, shoreDist, {
     rawHeights: pack.rawHeights,
@@ -9380,6 +9399,7 @@ function finalizeProceduralCoastalPack(
     beaches,
     port,
     portGeometry,
+    city: cityPlan ? { blocks: cityPlan.blocks, count: cityPlan.count, typed: cityPlan.typed, typedTypes: cityPlan.typedTypes, typedCount: cityPlan.typedCount, stats: cityPlan.stats } : null,
     biome,
     albedo,
     vegetation,

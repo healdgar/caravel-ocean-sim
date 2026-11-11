@@ -312,6 +312,26 @@ function stampField(field, size, window, ways) {
 }
 
 // How far outside a way this point lies, in metres; negative is on it. Used to keep plants off.
+// Add a city's streets and squares to a port's paving field: the field is stamped again over
+// the ground both cover, as fine as its size allows. The port's own ways and routes stand.
+export function paveCityStreets(streets, cityWays, { mostFieldSize = MOST_FIELD_SIZE } = {}) {
+  if (!streets || !cityWays?.length) return streets;
+  const all = [...(streets.ways || []), ...cityWays];
+  let lowX = Infinity, highX = -Infinity, lowZ = Infinity, highZ = -Infinity;
+  for (const way of all) for (const [x, z, width] of way.points) {
+    const reach = width * 0.5;
+    lowX = Math.min(lowX, x - reach); highX = Math.max(highX, x + reach); lowZ = Math.min(lowZ, z - reach); highZ = Math.max(highZ, z + reach);
+  }
+  const span = Math.max(highX - lowX, highZ - lowZ) + 2 * (STREET_FIELD_RANGE_M + 8);
+  const size = Math.min(mostFieldSize, Math.ceil(span / FIELD_METRES_PER_TEXEL));
+  streets.window = { x: (lowX + highX) * 0.5, z: (lowZ + highZ) * 0.5, span };
+  streets.size = size;
+  streets.field = stampField(new Uint8Array(size * size * 2), size, streets.window, all);
+  streets.cityWays = cityWays;
+  if (streets.stats) streets.stats.fieldBytes = streets.field.byteLength;
+  return streets;
+}
+
 export function streetEdgeAt(streets, x, z) {
   if (!streets) return Infinity;
   const { window, field, size } = streets;

@@ -5,9 +5,9 @@ import {chromium} from 'playwright';
 import {createDevServer} from '../server.mjs';
 import {coastalRegionStageURL} from '../js/landfall.js';
 
-// A level field above the town, and a beach well away from it. The beach is a mark to search from: the shore moves
+// A level pasture a mile outside the town's walls, and a beach well away from it. The beach is a mark to search from: the shore moves
 // whenever the coast is cut again, so the test finds ground a hand above the tideline near it, where a pit goes below.
-const FIELD={region:'lisbon',x:110.5,z:-6118.1},BEACH={region:'lisbon',x:-2198.2,z:-5369.8};
+const FIELD={region:'lisbon',x:1570,z:-7379},BEACH={region:'lisbon',x:-2198.2,z:-5369.8};
 const SIZE=[960,540];
 
 let browser,server,base;

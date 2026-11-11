@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-// Lisbon's inland hills, where no tree is planted one by one: the groves must close them over, and must
-// do it on the GPU alone once the coast has loaded.
+// A wood in the farmed country behind Lisbon, some three kilometres inland, where no tree is planted
+// one by one: the groves must close it over, and must do it on the GPU alone once the coast has loaded.
+// (Before the city and its fields were laid out, every hill behind the town was such a wood.)
 import assert from 'node:assert/strict';
 import {once} from 'node:events';
 import {test} from 'node:test';
@@ -28,7 +29,7 @@ test('groves close the far woods on the actual GPU and cost the CPU no upload a 
         const texture=GPUCanvasContext.prototype.getCurrentTexture;GPUCanvasContext.prototype.getCurrentTexture=function(...args){r.frames++;return texture.apply(this,args);};
       });
       const url=coastalRegionStageURL('http://127.0.0.1:'+server.address().port+'/','lisbon','dock','clear',1650);
-      for(const [key,value] of Object.entries({w:640,h:360,view:'free',prow:'0',cam:'0,450,-7400,0,-30',realDEM:'off',clouds:'0',follower:'0',...(groves?{}:{forestGroves:'0'})}))url.searchParams.set(key,value);
+      for(const [key,value] of Object.entries({w:640,h:360,view:'free',prow:'0',cam:'832,250,-9100,0,-25',realDEM:'off',clouds:'0',follower:'0',...(groves?{}:{forestGroves:'0'})}))url.searchParams.set(key,value);
       await page.goto(url.toString());
       await page.waitForFunction(()=>oceanStartup.state==='ready'||oceanStartup.state==='failed',undefined,{timeout:150000,polling:200});
       const settled=await page.evaluate(()=>groveAudit.frames);

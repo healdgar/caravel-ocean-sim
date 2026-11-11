@@ -146,7 +146,7 @@ struct Probe{world:vec4f,step:vec4f,which:vec4f};
 // shows what the land would be without it, with everything else in the frame the same.
 test('in the game, ground is not a smooth wash up close, and past the cut the texture makes no difference at all',{timeout:420000},async t=>{
   const url=coastalRegionStageURL(base,'lisbon','dock','clear',1650);
-  for(const [k,v] of Object.entries({w:1024,h:576,polygons:'fixed',view:'free',sunElev:45,sunAzim:140,clouds:0,paused:1,t:100,crew:0,ship:'nina',cam:'110,60,-6118,0,-20'}))url.searchParams.set(k,String(v));
+  for(const [k,v] of Object.entries({w:1024,h:576,polygons:'fixed',view:'free',sunElev:45,sunAzim:140,clouds:0,paused:1,t:100,crew:0,ship:'nina',cam:'1560,55,-7400,0,-20'}))url.searchParams.set(k,String(v));
   const page=await browser.newPage({viewport:{width:1024,height:576}}),errors=[];
   page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error'&&!/404|favicon/.test(m.text()))errors.push(m.text());});
   await page.route('**/js/main.js',async route=>{
@@ -177,8 +177,10 @@ test('in the game, ground is not a smooth wash up close, and past the cut the te
         return {light:Array.from(light),width,height,contrast:step/count};
       },data);
     };
-    const GROUNDS={grass:{x:110.5,z:-6118.1,eye:1.7,yaw:40,pitch:-20},road:{x:373.8,z:-6142.7,eye:1.7,yaw:100,pitch:-22},shore:{x:-2182.2,z:-5349.8,eye:1.7,yaw:150,pitch:-30}};
-    const HIGH={x:110,z:-6118,eye:420,yaw:20,pitch:-50};
+    // Pasture and a fallow field a mile outside Lisbon's walls, and the beach to the west. (The town's streets are
+    // paved stone by stone by the town's own shader, not by this texture.)
+    const GROUNDS={grass:{x:1560,z:-7400,eye:1.7,yaw:40,pitch:-20},soil:{x:1040,z:-7500,eye:1.7,yaw:40,pitch:-20},shore:{x:-2182.2,z:-5349.8,eye:1.7,yaw:150,pitch:-30}};
+    const HIGH={x:1560,z:-7400,eye:420,yaw:20,pitch:-50};
     const with_={},flat={};
     for(const [name,spot] of Object.entries(GROUNDS))with_[name]=(await look(spot)).contrast;
     await look(HIGH);

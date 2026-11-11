@@ -4,7 +4,7 @@ import { TREE_VARIANTS, TREE_VERTEX_FLOATS, TREE_PIXEL_ERROR, treeRenderGeometry
 import { TERRAIN, TERRAIN_LIGHT } from './wgsl/terrain.js';
 import { createCoastalField } from './coastal-field.js';
 import { coastalClarity, coastalTurbidityScale } from './sea-colour.js';
-import { createSceneryCull, GROUND_COVER_CULL, TREE_CULL } from './scenery-cull.js';
+import { createSceneryCull, CITY_CULL, GROUND_COVER_CULL, TREE_CULL } from './scenery-cull.js';
 import { loadCanopyScenery, excludeCanopyRoots, createCanopyRenderer, canopyInspectionURL } from './canopy-scenery.js';
 import {loadTerrainNear,terrainNearGeometry,terrainNearContains,terrainNearSample,terrainNearPatchBounds,sampleTerrainNear} from './terrain-near.js';
 import {chooseForestSurfaceCodec} from './forest-surfaces.js';
@@ -17,11 +17,15 @@ import {loadForestMiddle,FOREST_MIDDLE_ASSETS,SUBTROPICAL_FOREST_MIDDLE_ASSETS,P
 import {bakeLandImpactDeformations} from './part-assembly.js';
 import {buildingFracturePipeline,createPortFractures} from './building-fracture.js';
 import {streetEdgeAt} from './town-streets.js';
+import {oldWorldCountry} from './old-world.js';
+import {CITY_BLOCK_FLOATS} from './old-world-city.js';
+import {CITY_DETAIL_M,compileCityBuildingTypes} from './old-world-buildings.js';
 import {createLandCraterLedger,createLandCraters,landCraterSize} from './land-craters.js';
 import {sharedGroundDetail} from './ground-detail.js';
 import {createLandShadows} from './shadows.js';
 
 import {
+  buildPortPrefabGeometry,
   portClearanceEnvelope,
   PLANT_STREET_GAP_M,
   runLandfallDiscoveryPipeline,
@@ -182,14 +186,30 @@ export function retargetForestPackToProcedural(
 
     const portCx = port ? port.center.x : proceduralPack.region.x;
     const portCz = port ? port.center.z : proceduralPack.region.z;
+    // Tended country: trees stand where a farmer set them, apart and kept small.
+    const country = oldWorldCountry(region, secPack.heights, port);
+    const tendedKinds = new Map();
+    const tendedPrototypes = (tended) => {
+      let ids = tendedKinds.get(tended);
+      if (!ids) {
+        ids = [];
+        forestPack.manifest.prototypes.forEach((p, id) => {
+          if (tended.species.includes(p.species) && (!hasCohorts || p.cohort === tended.cohort)) ids.push(id);
+        });
+        tendedKinds.set(tended, ids);
+      }
+      return ids;
+    };
 
     // Pre-index vegetated land cells and stratify into harbor-framing concentric bands
     // so that large 8192m coastal tiles concentrate dense forest stands on the visible
     // harbor hills (0–1,950 m) instead of losing 89% of the tree budget 2–5.5 km inland.
-    const validLandCells = [];
-    const nearLandCells = [];
-    const midLandCells = [];
-    const farLandCells = [];
+    let validLandCells = [];
+    let nearLandCells = [];
+    let midLandCells = [];
+    let farLandCells = [];
+    // Tended ground is planted first and from its own cells, or a few woods would take every tree.
+    const tendedCells = { all: [], near: [], mid: [], far: [] };
     const drySand = beaches?.drySandMask;
     const swash = beaches?.swashMask;
     const cellSpanM = span / maskSize;
@@ -197,12 +217,18 @@ export function retargetForestPackToProcedural(
       const bVal = biome[idx];
       if (bVal < 42) continue;
       if ((drySand && drySand[idx] > 110) || (swash && swash[idx] > 64)) continue;
-      validLandCells.push(idx);
       const bi = idx % maskSize;
       const bj = (idx / maskSize) | 0;
       const cx = x0 + (bi + 0.5) * cellSpanM;
       const cz = z0 + (bj + 0.5) * cellSpanM;
-      const dPort = Math.hypot(cx - portCx, cz - portCz);
+      // A city fills the ground round its port; the framing bands start at its edge.
+      const dPort = country?.town ? country.beyondTown(cx, cz) : Math.hypot(cx - portCx, cz - portCz);
+      if (country && bVal < 108) {
+        tendedCells.all.push(idx);
+        (dPort <= 950 ? tendedCells.near : dPort <= 1950 ? tendedCells.mid : tendedCells.far).push(idx);
+        continue;
+      }
+      validLandCells.push(idx);
       const targetPool = dPort <= 950 ? nearLandCells : dPort <= 1950 ? midLandCells : farLandCells;
       targetPool.push(idx);
       if (bVal >= 135) targetPool.push(idx);
@@ -221,6 +247,7 @@ export function retargetForestPackToProcedural(
     const rr = new Float32Array(effectiveSecMaxRoots);
     const rProto = new Uint8Array(effectiveSecMaxRoots);
     const rVet = new Uint8Array(effectiveSecMaxRoots);
+    const rGap = new Float32Array(effectiveSecMaxRoots);
     let totalPlaced = 0;
     let consecutiveCollisions = 0;
 
@@ -254,7 +281,7 @@ export function retargetForestPackToProcedural(
       return biome[idx];
     };
 
-    const tryPlaceTree = (x, z, key, isSatellite = false, isVeteran = false, isDripLine = false) => {
+    const tryPlaceTree = (x, z, key, isSatellite = false, isVeteran = false, isDripLine = false, planted = false) => {
       if (totalPlaced >= effectiveSecMaxRoots) return -1;
       if (
         x <= x0 + borderMargin ||
@@ -265,9 +292,13 @@ export function retargetForestPackToProcedural(
         return -1;
       }
 
-      const probByte = sampleBiomeByte(x, z);
+      // A tree a town set out by hand stands where it was put, whatever the land cover says.
+      const probByte = planted ? 255 : sampleBiomeByte(x, z);
       if (probByte < 42) return -1;
       if (probByte < 108 && (hash32Forest(key + 5) & 255) > probByte + 112) return -1;
+      const tended = country ? country.treesAt(x, z) : null;
+      // No forest giants and no nurse rings among a farmer's trees.
+      if (tended && (tended.none || isVeteran || isSatellite)) return -1;
 
       if (port && port.clearRadius > 0) {
         const envPad = port.hasOrthophotoFootprints ? 8 : port.hasIndigenousSettlement ? 8.5 : 10;
@@ -277,7 +308,7 @@ export function retargetForestPackToProcedural(
           !port.hasIndigenousSettlement &&
           Math.hypot(x - port.center.x, z - port.center.z) < port.clearRadius * 0.38;
         if (clearEnv || clearRad) return -1;
-        if (streetEdgeAt(port.streets, x, z) < PLANT_STREET_GAP_M) return -1;
+        if (!planted && streetEdgeAt(port.streets, x, z) < PLANT_STREET_GAP_M) return -1;
       }
 
       const gy = sampleSecGround(x, z);
@@ -310,6 +341,10 @@ export function retargetForestPackToProcedural(
 
       const uSpecies = (hash32Forest(key + 1) & 0xffff) / 65536;
       let protoId = pickProtoFromCdf(zoneCdf, uSpecies);
+      if (tended) {
+        const kinds = tendedPrototypes(tended);
+        if (kinds.length) protoId = kinds[(hash32Forest(key + 7) >>> 8) % kinds.length];
+      }
       if (
         (gy > 115 || slope > 0.34) &&
         (forestPack.manifest.prototypes[protoId]?.species === 'palm' ||
@@ -360,8 +395,12 @@ export function retargetForestPackToProcedural(
             sSpan = 0.28;
           }
         }
-        const sc = sMin + uScale * sSpan;
         const baseCrownR = pr.crownRadius ?? pr.crownRadiusMetres ?? 8.5;
+        if (tended) {
+          const kept = tended.scale[0] + uScale * tended.scale[1];
+          return { scale: kept, crownR: baseCrownR * kept, proto: pr };
+        }
+        const sc = sMin + uScale * sSpan;
         const spacingScale = hasCohorts ? (isVeteran || pr.cohort === 'veteran' ? 1.32 : 1.15) : Math.min(sc, 1.35);
         return { scale: sc, crownR: baseCrownR * spacingScale, proto: pr };
       };
@@ -370,6 +409,7 @@ export function retargetForestPackToProcedural(
       let collision = false;
       let nearestDistSq = Infinity;
       let nearestProto = -1;
+      const gap = tended ? tended.spacing : 0;
       for (let dz = -1; dz <= 1 && !collision; dz++) {
         const nz = gz + dz;
         if (nz < 0 || nz >= hashW) continue;
@@ -387,7 +427,7 @@ export function retargetForestPackToProcedural(
                 : isVeteran || otherIsVet
                   ? vetCanopySpacingFactor
                   : canopySpacingFactor;
-            const minD = spacingFactor * (crownR + rr[idx]);
+            const minD = Math.max(spacingFactor * (crownR + rr[idx]), gap, rGap[idx]);
             if (dSq < minD * minD) {
               collision = true;
               break;
@@ -408,6 +448,7 @@ export function retargetForestPackToProcedural(
       // Interspecies nearest-neighbor mixing: penalize conspecific adjacency so stands interleave species naturally
       if (
         !isVeteran &&
+        !tended &&
         protoCount > 1 &&
         nearestProto === protoId &&
         nearestDistSq < (crownR * 2.4) * (crownR * 2.4) &&
@@ -468,6 +509,7 @@ export function retargetForestPackToProcedural(
       rr[placedIdx] = crownR;
       rProto[placedIdx] = protoId;
       rVet[placedIdx] = isVeteran ? 1 : 0;
+      rGap[placedIdx] = gap;
       next[placedIdx] = head[cell];
       head[cell] = placedIdx;
       totalPlaced++;
@@ -477,9 +519,9 @@ export function retargetForestPackToProcedural(
       const yaw = (hash32Forest(key + 3) / 4294967296) * Math.PI * 2;
       const tint = 0.92 + (hash32Forest(key + 4) / 4294967296) * 0.16;
       const climateTint = activeClimate.foliageTint ?? (isTrop ? [0.78, 1.12, 0.68] : [1.0, 1.0, 1.0]);
-      const rTint = tint * climateTint[0];
-      const gTint = tint * climateTint[1];
-      const bTint = tint * climateTint[2];
+      const rTint = tint * climateTint[0] * (tended ? tended.tint[0] : 1);
+      const gTint = tint * climateTint[1] * (tended ? tended.tint[1] : 1);
+      const bTint = tint * climateTint[2] * (tended ? tended.tint[2] : 1);
       secBuckets[protoId].push(x, gy - sink, z, scale, yaw, rTint, gTint, bTint, protoId, sink, rootIdentityZ, 0);
       return placedIdx;
     };
@@ -509,6 +551,25 @@ export function retargetForestPackToProcedural(
       }
       return [x0 + (h1 / 4294967296) * span, z0 + (h2 / 4294967296) * span];
     };
+
+    // Tended ground first: orchards, pasture oaks and the lines along boundaries and roads take
+    // up to two trees in three, nearest the town first.
+    const standing = country?.plan?.standing ?? [];
+    for (let k = 0; k < standing.length; k++) tryPlaceTree(standing[k][0], standing[k][1], hash32Forest((seed ^ 0x1b873593) + Math.imul(k, 0x9e3779b1)), false, false, false, true);
+    if (tendedCells.all.length > 0) {
+      const wild = [validLandCells, nearLandCells, midLandCells, farLandCells];
+      [validLandCells, nearLandCells, midLandCells, farLandCells] = [tendedCells.all, tendedCells.near, tendedCells.mid, tendedCells.far];
+      const tendedBudget = Math.round(effectiveSecMaxRoots * (wild[0].length > 0 ? 0.68 : 1));
+      const tendedSeed = (seed ^ 0x3c6ef372) >>> 0;
+      for (let step = 0; step < tendedBudget * 7 && totalPlaced < tendedBudget; step++) {
+        const h1 = hash32Forest(tendedSeed + Math.imul(step, 0x9e3779b1));
+        const h2 = hash32Forest(h1 ^ Math.imul(step, 0x85ebca6b) ^ 0x27d4eb2f);
+        const [sx, sz] = drawCandidateXZ(h1, h2);
+        tryPlaceTree(sx, sz, h2, false, false, false);
+      }
+      [validLandCells, nearLandCells, midLandCells, farLandCells] = wild;
+      consecutiveCollisions = 0;
+    }
 
     // Stage 1: Veteran emergent cohort (~24% of stand) + drip-line nurse & gap satellites
     const veteranBudget = Math.max(16, Math.round(effectiveSecMaxRoots * 0.24));
@@ -723,12 +784,14 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const meshLayout={arrayStride:32,attributes:[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},{shaderLocation:2,offset:24,format:'float32x2'}]};
   const treeLayout={arrayStride:TREE_VERTEX_FLOATS*4,attributes:[...meshLayout.attributes,{shaderLocation:5,offset:32,format:'float32x2'}]};
   const treeBuffers=[treeLayout,{arrayStride:32,stepMode:'instance',attributes:[{shaderLocation:3,offset:0,format:'float32x4'},{shaderLocation:4,offset:16,format:'float32x4'}]}];
-  const makePipe=(module,entryPoint,buffers,fragmentEntry='fs')=>device.createRenderPipelineAsync({label:entryPoint==='vs'?'island':entryPoint==='groundVS'?'island ground cover':fragmentEntry==='leafFS'?'island trees':'island canopy and wood',layout:'auto',
+  // A city's blocks: one unit mesh (corner, face, part), drawn once per block from its twelve numbers.
+  const cityBuffers=[meshLayout,{arrayStride:CITY_BLOCK_FLOATS*4,stepMode:'instance',attributes:[{shaderLocation:3,offset:0,format:'float32x4'},{shaderLocation:4,offset:16,format:'float32x4'},{shaderLocation:5,offset:32,format:'float32x4'}]}];
+  const makePipe=(module,entryPoint,buffers,fragmentEntry='fs',cullMode='none')=>device.createRenderPipelineAsync({label:entryPoint==='vs'?'island':entryPoint==='cityVS'?'city blocks':entryPoint==='cityTypeVS'?'city buildings':entryPoint==='groundVS'?'island ground cover':fragmentEntry==='leafFS'?'island trees':'island canopy and wood',layout:'auto',
     vertex:{module,entryPoint,buffers},fragment:{module,entryPoint:fragmentEntry,targets:[{format}]},
-    primitive:{topology:'triangle-list',cullMode:'none'},
+    primitive:{topology:'triangle-list',cullMode},
     depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples,alphaToCoverageEnabled:fragmentEntry==='leafFS'&&samples>1}});
   const makeShadowPipe=(module,entryPoint,buffers)=>device.createRenderPipelineAsync({
-    label:entryPoint==='portShadowVS'?'port shadow':'tree shadow',layout:'auto',
+    label:entryPoint==='portShadowVS'?'port shadow':entryPoint==='cityShadowVS'?'city shadow':'tree shadow',layout:'auto',
     vertex:{module,entryPoint,buffers},
     primitive:{topology:'triangle-list',cullMode:'none'},
     // No constant bias: it counts in steps of the depth format, and a float's are too fine to matter.
@@ -743,6 +806,10 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     makeShadowPipe(module,'treeShadowVS',treeBuffers),
     computePipe(TERRAIN_LIGHT,'island sunlight'),
     module,
+    makePipe(module,'cityVS',cityBuffers,'fs','back'),
+    makeShadowPipe(module,'cityShadowVS',cityBuffers),
+    // A type's triangles are wound outward when it is compiled, so the far faces are left out.
+    makePipe(module,'cityTypeVS',[meshLayout,treeBuffers[1]],'fs','back'),
   ]));
   terrainPipesPromise.catch(()=>{});
   const submergedPipesPromise=waterOpticsResolvedPromise.then(wo=>wo?Promise.all([
@@ -938,11 +1005,13 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const regionalElevationData=regionalElevationSize?new Float32Array(regionalElevationSize*regionalElevationSize):null;
   const getRegionalOcclusionRegion=()=>regionalElevationSize?{x:activeRegion.x,z:activeRegion.z,span:activeRegion.span*5,size:regionalElevationSize}:activeRegion;
   const worldOffset={x:0,z:0};
+  // How near a city building is drawn as its Cairn type, not its block: none until a city has types.
+  let cityDetail=0;
   const nearDomainValues=()=>nearTile
-    ?[nearTile.manifest.domain.x,nearTile.manifest.domain.z,nearTile.manifest.domain.span,1,nearTile.manifest.domain.size,worldOffset.x,worldOffset.z,0]
+    ?[nearTile.manifest.domain.x,nearTile.manifest.domain.z,nearTile.manifest.domain.span,1,nearTile.manifest.domain.size,worldOffset.x,worldOffset.z,cityDetail]
     :regionalElevationSize
-    ?[activeRegion.x,activeRegion.z,activeRegion.span*5,-1,regionalElevationSize,worldOffset.x,worldOffset.z,0]
-    :[0,0,1,0,1,worldOffset.x,worldOffset.z,0];
+    ?[activeRegion.x,activeRegion.z,activeRegion.span*5,-1,regionalElevationSize,worldOffset.x,worldOffset.z,cityDetail]
+    :[0,0,1,0,1,worldOffset.x,worldOffset.z,cityDetail];
   const nearDomain=buffer(new Float32Array(nearDomainValues()),GPUBufferUsage.UNIFORM,'Wells Bay near domain');
   // Four exact height loads from immutable storage avoid consuming another
   // sampled-texture slot in the already texture-heavy ocean fragment stage.
@@ -1034,11 +1103,11 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const biomeTexture=device.createTexture({label:'regional vegetation probability',size:[activeRegion.biomeSize,activeRegion.biomeSize],format:'r8unorm',usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST});
   device.queue.writeTexture({texture:biomeTexture},biome,{bytesPerRow:activeRegion.biomeSize},[activeRegion.biomeSize,activeRegion.biomeSize]);
   const landSampler=device.createSampler({minFilter:'linear',magFilter:'linear',mipmapFilter:'linear',addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge',maxAnisotropy:4});
-  const [terrainPipe,opaqueTreePipe,treePipe,groundPipe,portShadowPipe,treeShadowPipe,lightPipe,module]=await terrainPipesPromise;
+  const [terrainPipe,opaqueTreePipe,treePipe,groundPipe,portShadowPipe,treeShadowPipe,lightPipe,module,cityPipe,cityShadowPipe,cityTypePipe]=await terrainPipesPromise;
   const groundMeshes=Array.from({length:GROUND_COVER.variants},(_,variant)=>{
     const geometry=groundCoverGeometry(variant);return{buffer:buffer(geometry,GPUBufferUsage.VERTEX,`ground cover ${variant}`),count:geometry.length/TREE_VERTEX_FLOATS};
   });
-  const [groundCullPipeline,treeCullPipeline]=await Promise.all([computePipe(GROUND_COVER_CULL,'ground cover cull'),computePipe(TREE_CULL,'tree cull')]);
+  const [groundCullPipeline,treeCullPipeline,cityCullPipeline]=await Promise.all([computePipe(GROUND_COVER_CULL,'ground cover cull'),computePipe(TREE_CULL,'tree cull'),computePipe(CITY_CULL,'city cull')]);
   const groundBlock=GROUND_COVER.grassPerPatch+GROUND_COVER.rocksPerPatch;
   const groundBlocks=Math.ceil(Math.PI*(GROUND_RESIDENT_M*GROUND_RESIDENT_RELEASE/GROUND_COVER.patchSpan+1)**2);
   const groundCull=createSceneryCull({device,pipeline:groundCullPipeline,frameUBO,label:'ground cover',capacity:groundBlocks*groundBlock,
@@ -1123,6 +1192,41 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const resources=[[0,{buffer:frameUBO}],[1,transView],[2,skyView],[3,sampler],[4,envCubeView],[5,lighting.createView()],[6,{buffer:uniform}],[7,albedo.createView()],[8,landSampler],[9,biomeTexture.createView()],[10,leafTexture.createView()],[11,{buffer:leafMean}],...activeLandShadows.terrainResources];
   const portShadowGroup=bind(portShadowPipe,[[19,{buffer:activeLandShadows.uniform}]]);
   const treeShadowGroup=bind(treeShadowPipe,[[0,{buffer:frameUBO}],[19,{buffer:activeLandShadows.uniform}]]);
+  const cityShadowGroup=bind(cityShadowPipe,[[19,{buffer:activeLandShadows.uniform}]]);
+  // The unit block: four walls and a roof of two slopes and two ends, fourteen triangles.
+  const cityUnit=(()=>{
+    // Each triangle is wound to face outward, so the pipeline may leave out the walls turned away.
+    const v=[],tri=(a,b,c,face)=>{
+      const u=[b[0]-a[0],b[1]-a[1],b[2]-a[2]],w=[c[0]-a[0],c[1]-a[1],c[2]-a[2]];
+      const out=(u[1]*w[2]-u[2]*w[1])*face[0]+(u[2]*w[0]-u[0]*w[2])*face[1]+(u[0]*w[1]-u[1]*w[0])*face[2];
+      for(const corner of out<0?[a,c,b]:[a,b,c])v.push(...corner,...face,0,0);
+    },quad=(a,b,c,d,face)=>{tri(a,b,c,face);tri(a,c,d,face);};
+    quad([1,0,-1],[1,0,1],[1,1,1],[1,1,-1],[1,0,0]);quad([-1,0,1],[-1,0,-1],[-1,1,-1],[-1,1,1],[-1,0,0]);
+    quad([1,0,1],[-1,0,1],[-1,1,1],[1,1,1],[0,0,1]);quad([-1,0,-1],[1,0,-1],[1,1,-1],[-1,1,-1],[0,0,-1]);
+    quad([1,1,-1],[1,1,1],[0,2,1],[0,2,-1],[1,1,0]);quad([-1,1,1],[-1,1,-1],[0,2,-1],[0,2,1],[-1,1,0]);
+    tri([1,1,1],[-1,1,1],[0,2,1],[0,1,1]);tri([-1,1,-1],[1,1,-1],[0,2,-1],[0,1,-1]);
+    return {buffer:buffer(new Float32Array(v),GPUBufferUsage.VERTEX,'city block unit mesh'),count:v.length/8};
+  })();
+  const cityBlocksFor=pack=>pack?.city?.count?{buffer:buffer(pack.city.blocks,GPUBufferUsage.VERTEX,'city blocks'),count:pack.city.count}:null;
+  let cityBlocks=cityBlocksFor(proceduralPack);
+  // Close to, each building is drawn as its type: a building written in Cairn, compiled once
+  // into a mesh and instanced wherever the plan stands one. The GPU picks which are near.
+  let cityTypes=null,cityCull=null;
+  const setCityBuildings=pack=>{
+    cityCull?.destroy();cityCull=null;cityDetail=0;
+    const city=pack?.city;
+    // ?cityBuildings=0 leaves every building as its block, to compare the two tiers.
+    if(city?.typedCount&&!isMobile&&search.get('cityBuildings')!=='0'){
+      cityTypes??=compileCityBuildingTypes(buildPortPrefabGeometry).map(type=>({count:type.count,buffer:buffer(type.vertices,GPUBufferUsage.VERTEX,`city type ${type.id}`)}));
+      const standing=new Array(cityTypes.length).fill(0);
+      for(const type of city.typedTypes)standing[type]++;
+      cityCull=createSceneryCull({device,pipeline:cityCullPipeline,frameUBO,label:'city buildings',capacity:city.typedCount,bucketCapacities:standing,vertexCounts:[cityTypes.map(type=>type.count)]});
+      cityCull.setInstances(0,city.typed,city.typedTypes);
+      cityDetail=CITY_DETAIL_M;cityCull.setPixelError(cityDetail);
+    }
+    writeNearDomainUniform();
+  };
+  setCityBuildings(proceduralPack);
   clouds=await cloudsResolvedPromise;waterOptics=await waterOpticsResolvedPromise;
   const [forestMassPack,forestMiddlePack]=await Promise.all([forestMassPromise,forestMiddlePromise]);
   let forestMass=null,proceduralMiddle=null;
@@ -1198,6 +1302,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   let nearResources=[...opaqueResources,[12,{buffer:nearDomain}],[13,nearAlbedo.createView()],...activeTownField.resources,...groundDetail.resources];
   const leafResources=resources.filter(([binding])=>binding!==9&&binding!==11);
   const groups=[bind(terrainPipe,nearResources),bind(opaqueTreePipe,nearResources),bind(treePipe,leafResources)];
+  let cityGroup=bind(cityPipe,nearResources);const cityClouds=clouds.bindVolume(cityPipe);
+  let cityTypeGroup=bind(cityTypePipe,nearResources);const cityTypeClouds=clouds.bindVolume(cityTypePipe);
   const groundGroup=bind(groundPipe,opaqueResources);
   const cloudGroups=[terrainPipe,opaqueTreePipe,treePipe].map(pipe=>clouds.bindVolume(pipe));
   const [submerged,submergedGround]=await submergedPipesPromise;
@@ -1691,7 +1797,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     const oldTownField=activeTownField;
     activeTownField=townField(upgradedPack.port?.streets);
     nearResources=[...opaqueResources,[12,{buffer:nearDomain}],[13,nearAlbedo.createView()],...activeTownField.resources,...groundDetail.resources];
-    groups[0]=bind(terrainPipe,nearResources);groups[1]=bind(opaqueTreePipe,nearResources);craterLand=null;
+    groups[0]=bind(terrainPipe,nearResources);groups[1]=bind(opaqueTreePipe,nearResources);craterLand=null;cityGroup=bind(cityPipe,nearResources);cityTypeGroup=bind(cityTypePipe,nearResources);
     submergedGroup=submerged?.bindGroup(nearResources.map(([binding,resource])=>({binding,resource})));
     oldTownField.texture.destroy();oldTownField.window.destroy();
     if(!heldPort){
@@ -1700,6 +1806,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       portFractures=portFracturesFor(upgradedPack.portGeometry,upgradedPack.port,portMesh?.indices);
       portFractures?.restoreNow().catch((error)=>console.error('Port damage restore failed',error));
     }
+    cityBlocks?.buffer.destroy();cityBlocks=cityBlocksFor(upgradedPack);setCityBuildings(upgradedPack);
 
     groundPatches=createGroundCoverPatches(activeRegion,groundSample,null);
     groundStats.patches=groundPatches.length;
@@ -2011,6 +2118,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       groundCull.destroy();
       for(const lod of treeMeshes)for(const v of lod){v.opaque?.buffer?.destroy?.();v.leaves?.buffer?.destroy?.();}
       treeCull?.destroy();
+      cityCull?.destroy();cityBlocks?.buffer.destroy();cityUnit.buffer.destroy();for(const type of cityTypes??[])type.buffer.destroy();
       importedCanopy?.destroy?.();
       forest?.destroy?.();
       groves?.destroy();
@@ -2134,6 +2242,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       for(const sec of loadedSections.values())sec.portFractures?.encode(pass);
       groundCull.encode(pass);
       treeCull?.encode(pass);
+      cityCull?.encode(pass);
       forestMass?.encode(pass);
       forest?.encode(pass);
       groves?.encode(pass);
@@ -2170,6 +2279,15 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       pass.setVertexBuffer(0,vertices);pass.setIndexBuffer(indices,'uint32');pass.drawIndexed(mesh.indices.length);
       if(fine&&fineMesh.indices.length){pass.setVertexBuffer(0,fine.vertices);pass.setIndexBuffer(fine.indices,'uint32');pass.drawIndexed(fineMesh.indices.length);}
       if(portMesh&&isSectionVisible(activeRegion,camera,viewProjection,4800)){pass.setVertexBuffer(0,portMesh.vertices);pass.setIndexBuffer(portMesh.indices,'uint32');pass.drawIndexed(portMesh.count);portFractures?.draw(pass);}
+      if(cityBlocks&&isSectionVisible(activeRegion,camera,viewProjection)){
+        pass.setPipeline(cityPipe);pass.setBindGroup(0,cityGroup);pass.setBindGroup(1,cityClouds);
+        pass.setVertexBuffer(0,cityUnit.buffer);pass.setVertexBuffer(1,cityBlocks.buffer);pass.draw(cityUnit.count,cityBlocks.count);
+        if(cityCull){
+          pass.setPipeline(cityTypePipe);pass.setBindGroup(0,cityTypeGroup);pass.setBindGroup(1,cityTypeClouds);
+          for(let type=0;type<cityTypes.length;type++)cityCull.draw(pass,type,0,cityTypes[type].buffer);
+        }
+        pass.setPipeline(terrainPipe);pass.setBindGroup(0,groups[0]);pass.setBindGroup(1,cloudGroups[0]);
+      }
       for(const sec of loadedSections.values()){
         if(!isSectionVisible(sec.region,camera,viewProjection))continue;
         pass.setBindGroup(0,sec.terrainGroup);
@@ -2215,6 +2333,10 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
           pass.setVertexBuffer(0,sec.portMesh.vertices);pass.setIndexBuffer(sec.portMesh.indices,'uint32');pass.drawIndexed(sec.portMesh.count);
           sec.portFractures?.draw(pass);
         }
+      }
+      if(cityBlocks&&isSectionVisible(activeRegion,camera,null,2600)){
+        pass.setPipeline(cityShadowPipe);pass.setBindGroup(0,cityShadowGroup);
+        pass.setVertexBuffer(0,cityUnit.buffer);pass.setVertexBuffer(1,cityBlocks.buffer);pass.draw(cityUnit.count,cityBlocks.count);
       }
       if(treeCull){
         pass.setPipeline(treeShadowPipe);pass.setBindGroup(0,treeShadowGroup);

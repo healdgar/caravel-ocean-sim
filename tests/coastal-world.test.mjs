@@ -57,6 +57,8 @@ import {
   settleDockBerth,
   drownDemCoastalRinging,
 } from '../js/coastal-world.js';
+import { OLD_WORLD_NO_TREES, oldWorldCountry } from '../js/old-world.js';
+import { CITY_GROUND, CITY_TREES } from '../js/old-world-city.js';
 import zlib from 'node:zlib';
 import { findNearestPier, MOORING_LINE_REACH_M } from '../js/boarding-docking.js';
 import {
@@ -1994,7 +1996,7 @@ test('Blender-audited architectural models feature per-vertex 3D AO gradients, s
   }
 });
 
-test('Portugal 5-tier multi-cohort forest pack loads 12 veteran+canopy prototypes and populates dense harbor-hill woodlands at Lisboa', async () => {
+test('Portugal 5-tier multi-cohort forest pack loads 12 veteran+canopy prototypes and plants Lisboa\'s groves, tree lines and woods, with none in the city', async () => {
   const fetchLocalAsset = async (url) => {
     const buf = fs.readFileSync(url);
     const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
@@ -2044,28 +2046,31 @@ test('Portugal 5-tier multi-cohort forest pack loads 12 veteran+canopy prototype
   const retargeted = retargetForestPackToProcedural(portugalPack, lisbonPack, groundFn);
 
   assert.ok(retargeted.manifest.rootCount >= 22000, `Expected Lisboa to place >=22,000 trees across the 5-tier Portugal woodland pack, got ${retargeted.manifest.rootCount}`);
+  // Lisbon stands in farmed country: its trees are olive groves, garden and pasture trees, lines along
+  // boundaries and roads, and the woods the country keeps. The city itself is houses, not forest.
+  const country = oldWorldCountry(lisbonPack.region, lisbonPack.heights, lisbonPack.port);
+  assert.ok(country?.town, 'Lisboa is an Old World city');
+  let inTown = 0, misplaced = 0, inWood = 0, tended = 0, forbidden = 0;
+  for (let i = 0; i < retargeted.manifest.rootCount; i++) {
+    const x = retargeted.roots[i * 12], z = retargeted.roots[i * 12 + 2];
+    if (country.beyondTown(x, z) <= 0) {
+      inTown++;
+      const ground = country.plan.groundAt(x, z);
+      if (country.plan.treesAt(x, z) === CITY_TREES.NONE || ground === CITY_GROUND.HOUSE || ground === CITY_GROUND.STREET) misplaced++;
+    }
+    const trees = country.treesAt(x, z);
+    if (trees === null) inWood++; else if (trees === OLD_WORLD_NO_TREES) forbidden++; else tended++;
+  }
+  // In the city a tree stands only where the town plants one: round a square, in a walled garden, in a yard.
+  assert.equal(misplaced, 0, 'no tree in a house or a street');
+  assert.ok(inTown > 100 && inTown < 5000, `the town's own trees: ${inTown}`);
+  assert.equal(forbidden, 0, 'no tree on a road, a cornfield or open pasture');
+  assert.ok(tended >= 15000, `groves, gardens and tree lines carry most of the planting: ${tended}`);
+  assert.ok(inWood >= 6000, `the woods are still woods: ${inWood}`);
   const veteranRoots = retargeted.manifest.prototypes
     .filter((p) => p.cohort === 'veteran' && p.species !== 'blueberry')
     .reduce((acc, p) => acc + p.rootCount, 0);
-  const canopyRoots = retargeted.manifest.prototypes
-    .filter((p) => p.cohort === 'canopy' || p.species === 'blueberry')
-    .reduce((acc, p) => acc + p.rootCount, 0);
-  assert.ok(veteranRoots >= 2800, `Expected >=2,800 emergent veteran trees on Lisboa hills, got ${veteranRoots}`);
-  assert.ok(canopyRoots >= 15000, `Expected >=15,000 interlocking canopy & understory trees on Lisboa hills, got ${canopyRoots}`);
-
-  const portCx = lisbonPack.port.center.x;
-  const portCz = lisbonPack.port.center.z;
-  let near500 = 0;
-  let near1000 = 0;
-  for (let i = 0; i < retargeted.manifest.rootCount; i++) {
-    const x = retargeted.roots[i * 12];
-    const z = retargeted.roots[i * 12 + 2];
-    const d = Math.hypot(x - portCx, z - portCz);
-    if (d <= 500) near500++;
-    if (d <= 1000) near1000++;
-  }
-  assert.ok(near500 >= 2000, `Expected dense harbor-hill woodland within 500m of Lisboa port (>=2,000 trees, got ${near500})`);
-  assert.ok(near1000 >= 10000, `Expected dense harbor-hill woodland within 1,000m of Lisboa port (>=10,000 trees, got ${near1000})`);
+  assert.ok(veteranRoots >= tended, `a farmer's tree is a grown tree, not a sapling: ${veteranRoots} of ${tended}`);
 });
 
 // A port call is "Moor and go ashore" only where the ship that starts at the dock can get a line to a pier. Both

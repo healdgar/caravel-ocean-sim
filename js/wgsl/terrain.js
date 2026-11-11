@@ -5,6 +5,7 @@ import { STREET_FIELD_RANGE_M, STREET_FIELD_EDGE_M } from '../town-streets.js';
 import { LAND_CRATER_RENDER } from './land-craters.js';
 import { GROUND_DETAIL_RENDER } from './ground-detail.js';
 import { SHADOW_FRAME } from './shadows.js';
+import { CITY_DETAIL_M, CITY_TYPED_ROOF } from '../old-world-buildings.js';
 
 // Procedurals need their sampling rate in material coordinates, just as image
 // textures need mip/anisotropic footprints. See pbr-book.org/4ed/Textures_and_Materials/Texture_Sampling_and_Antialiasing.
@@ -743,6 +744,96 @@ struct LandVertex {
   let shifted=position+vec3f(nearTerrain.grid.y,0.0,nearTerrain.grid.z);
   o.pos=F.viewProj*vec4f(earthCurve(shifted-F.camPos.xyz,F.camPos.y),1.0);return o;
 }
+// A city's blocks: houses, churches, towers and walls, each an instance of one unit mesh.
+// root is the block's place, floor height and turn; size its width, depth, wall height and
+// roof rise; style its roof form, wall material, tone and how far its walls run below the
+// floor. A vertex carries its corner (x and z of -1, 0 or 1; y of 0 at the footing, 1 at the
+// eaves, 2 on the ridge) and its face (a wall's outward axis, or that axis with y of 1 for the
+// roof above it).
+struct CityCorner{world:vec3f,normal:vec3f,kind:vec2f,wall:vec2f};
+// A roof's shade and its age, the same for a building's block and for its type.
+fn cityRoofShade(root:vec4f,tone:f32)->f32{return 0.62+0.38*fract(tone*7.31+root.x*0.137+root.z*0.071);}
+fn cityRoofAge(root:vec4f,tone:f32)->f32{return fract(tone*3.17+root.x*0.071+root.z*0.113);}
+fn cityCorner(corner:vec3f,face:vec3f,root:vec4f,size:vec4f,style:vec4f)->CityCorner{
+  let half=size.xy*0.5;
+  // A block that a Cairn type replaces close to carries its roof form plus ${CITY_TYPED_ROOF}.
+  let form=style.x-select(0.0,${CITY_TYPED_ROOF}.0,style.x>${CITY_TYPED_ROOF}.0-0.5);
+  let flat=form>2.5;
+  var ridge=half.y;
+  if(form>0.5&&form<1.5){ridge=max(0.0,half.y-half.x);}else if(form>1.5&&form<2.5){ridge=0.0;}
+  let rise=select(size.w,0.0,flat);
+  let run=half.y-ridge;
+  let roof=face.y>0.5;
+  let gable=roof&&abs(face.z)>0.5&&run<0.05&&!flat;
+  let eaves=select(0.0,0.32,roof&&!gable&&!flat);
+  var p=vec3f(corner.x*(half.x+eaves),0.0,corner.z*(half.y+select(0.0,eaves*0.6,run>0.05||abs(face.x)>0.5)));
+  if(corner.y<0.5){p.y=-style.w;}
+  else if(corner.y<1.5){p.y=size.z-eaves*rise/max(half.x,0.5);}
+  else{p=vec3f(0.0,size.z+rise,corner.z*ridge);}
+  var n=vec3f(face.x,0.0,face.z);
+  if(roof){
+    if(abs(face.x)>0.5){n=normalize(vec3f(face.x*rise,half.x,0.0));}
+    else if(run+rise<0.002){n=vec3f(0.0,1.0,0.0);}
+    else{n=normalize(vec3f(0.0,run,face.z*rise));}
+  }
+  let c=cos(root.w);let s=sin(root.w);
+  var o:CityCorner;
+  o.world=root.xyz+vec3f(p.x*c+p.z*s,p.y,-p.x*s+p.z*c);
+  o.normal=vec3f(n.x*c+n.z*s,n.y,-n.x*s+n.z*c);
+  let turn=0.02+0.46*fract(root.w/PI);
+  let tone=fract(style.z);
+  // Walls and gables wear the block's wall material; a roof its tiles, or the wall's stone where flat.
+  let plain=select(style.y,12.0,style.y>18.5);
+  if(roof&&!gable){
+    o.kind=vec2f(select(13.0,plain,flat)+turn,cityRoofShade(root,tone));
+    o.wall=vec2f(cityRoofAge(root,tone),-1.0);
+  }else{
+    o.kind=vec2f(style.y+turn,select(0.55+0.45*tone,style.z,style.y>18.5));
+    // Windows are counted along the wall and up it: so many bays, so many storeys.
+    let width=select(size.x,size.y,abs(face.x)>0.5);
+    let along=select(corner.x,corner.z,abs(face.x)>0.5)*0.5+0.5;
+    let bays=max(1.0,floor(width/2.3));
+    let storeys=max(1.0,round(size.z/2.9));
+    o.wall=vec2f(along*bays-floor(bays*0.5),select(p.y*storeys/size.z,-1.0,gable));
+  }
+  return o;
+}
+@vertex fn cityVS(@location(0) corner:vec3f,@location(1) face:vec3f,@location(2) part:vec2f,
+  @location(3) root:vec4f,@location(4) size:vec4f,@location(5) style:vec4f)->LandVertex{
+  let at=cityCorner(corner,face,root,size,style);
+  var o:LandVertex;o.world=at.world;o.normal=at.normal;o.kind=at.kind;o.leafUV=at.wall;
+  let shifted=at.world+vec3f(nearTerrain.grid.y,0.0,nearTerrain.grid.z);
+  o.pos=F.viewProj*vec4f(earthCurve(shifted-F.camPos.xyz,F.camPos.y),1.0);
+  // A merlon a mile off is less than a point: leave it out. So is a block whose building is
+  // near enough to be drawn as its type.
+  let away=distance(root.xyz,F.camPos.xyz);
+  if((size.x<1.0&&away>1500.0)||(style.x>${CITY_TYPED_ROOF}.0-0.5&&away<nearTerrain.grid.w)){o.pos=vec4f(2.0,2.0,0.0,1.0);}
+  return o;
+}
+// A building of a Cairn type: the type's mesh, stretched by shape.xyz, turned by root.w and
+// stood at root.xyz. Its limewash takes the house's own tint (shape.w), as its block does.
+@vertex fn cityTypeVS(@location(0) position:vec3f,@location(1) normal:vec3f,@location(2) kind:vec2f,
+  @location(3) root:vec4f,@location(4) shape:vec4f)->LandVertex{
+  let c=cos(root.w);let s=sin(root.w);
+  let p=position*shape.xyz;let n=normalize(normal/shape.xyz);
+  var o:LandVertex;
+  o.world=root.xyz+vec3f(p.x*c+p.z*s,p.y,-p.x*s+p.z*c);
+  o.normal=vec3f(n.x*c+n.z*s,n.y,-n.x*s+n.z*c);
+  let material=floor(kind.x+0.01);
+  let tone=fract(shape.w);
+  o.kind=kind;
+  // A window's kind carries where it is in its pane; every other material, how it is turned.
+  if(abs(material-14.0)>0.5){
+    let turn=0.02+0.46*fract((fract(kind.x)-0.02)/0.46+root.w/PI);
+    if(abs(material-12.0)<0.5){o.kind=vec2f(19.0+turn,floor(shape.w)+clamp(tone*kind.y,0.02,0.98));}
+    else if(abs(material-13.0)<0.5){o.kind=vec2f(13.0+turn,kind.y*cityRoofShade(root,tone));}
+    else{o.kind=vec2f(material+turn,kind.y);}
+  }
+  o.leafUV=vec2f(cityRoofAge(root,tone),-1.0);
+  let shifted=o.world+vec3f(nearTerrain.grid.y,0.0,nearTerrain.grid.z);
+  o.pos=F.viewProj*vec4f(earthCurve(shifted-F.camPos.xyz,F.camPos.y),1.0);
+  return o;
+}
 fn treeWindForce()->f32{return clamp(F.windP[0].z/12.0,0.0,2.2)*0.018;}
 fn treeWindDirection(phase:f32)->vec2f{
   let wind=F.windP[0].xy;let crosswind=vec2f(-wind.y,wind.x);
@@ -891,6 +982,7 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
   let bldgDx=dpdx(bldgUV);let bldgDy=dpdy(bldgUV);
   let winUV=clamp(vec2f((in.kind.x-14.02)/0.44,(in.kind.y-0.32)/0.64),vec2f(0.0),vec2f(1.0));
   let winDx=dpdx(winUV);let winDy=dpdy(winUV);
+  let cityWide=max(fwidth(in.leafUV.x),1e-4);let cityTall=max(fwidth(in.leafUV.y),1e-4);
   let imageSteep=smoothstep(.12,.42,1.0-max(n.y,0.0));
   let imageBlur=max(footprint,imageSteep*4.0*LAND.domain.z/f32(textureDimensions(landAlbedo).x))/LAND.domain.z;
   var source=pow(textureSampleGrad(landAlbedo,landSampler,uv,mix(dx.xz/LAND.domain.z,vec2f(imageBlur,0.0),imageSteep),mix(dy.xz/LAND.domain.z,vec2f(0.0,imageBlur),imageSteep)).rgb,vec3f(2.2));
@@ -1065,6 +1157,7 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
     else if(in.kind.x<15.5){archMatIdx=5;archScale=vec2f(0.55,0.62);}
     else if(in.kind.x<16.5){archMatIdx=6;archScale=vec2f(0.42,0.42);}
     else if(in.kind.x<17.5){archMatIdx=7;archScale=vec2f(0.52,0.58);}
+    else if(in.kind.x>=18.5){archMatIdx=2;archScale=vec2f(0.38,0.38);}
     var pbr=ArchPBR(vec3f(0.5),vec3f(0.0),0.8,1.0);
     if(in.kind.x<13.5||in.kind.x>=14.5){
       pbr=sampleArchMaterialPBR(archMatIdx,world,n,dx,dy,archScale,archLodFade,instYaw);
@@ -1113,6 +1206,16 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       let courseWave=landFilteredCourse(slopeCoord,slopeDx,slopeDy,1.8);
       let courseStep=max(0.0,courseWave-0.26)*archLodFade;
       albedo=pbr.albedo*shadeAlbedo*(0.96+detailA*0.07+flute*0.025-courseStep*0.04);
+      // A city's roofs are not of one firing: some new and orange, some bleached, some gone
+      // brown, some grey with lichen. in.leafUV.x is the building's own age, y its mark.
+      if(in.leafUV.y<-0.5){
+        let age=in.leafUV.x;
+        let grey=dot(albedo,vec3f(0.3,0.5,0.2));
+        // Old tile browns and loses its orange; lichen greys the oldest; a new roof is paler.
+        albedo=mix(albedo,grey*vec3f(1.20,0.86,0.60),smoothstep(0.3,0.95,age)*0.58);
+        albedo=mix(albedo,grey*vec3f(0.98,1.0,0.82),smoothstep(0.55,1.0,fract(age*5.3))*(0.22+0.18*detailA));
+        albedo=albedo*mix(1.08,0.84,fract(age*3.7));
+      }
       archNormalOffset=pbr.normalOffset*0.72;
       relief=detailA*0.003*archLodFade;
       roughness=clamp(pbr.roughness+detailB*0.03,0.52,0.82);
@@ -1203,7 +1306,7 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       relief=detailA*0.004*archLodFade;
       roughness=clamp(pbr.roughness,0.70,0.90);
       ambientVisibility=(0.48+0.36*max(n.y,0.0))*aoVis*pbr.ao;
-    }else{
+    }else if(in.kind.x<18.5){
       // Kind 18: MaterialCraft-cooked sand-cast ordnance iron & forged harbor metal
       let bareIron=clamp(0.18+detailA*0.14+max(0.0,n.y)*0.08-max(0.0,-detailB)*0.08,0.06,0.34);
       albedo=pbr.albedo*(0.75+0.25*bareIron)*(0.68+0.32*portShade);
@@ -1212,6 +1315,55 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       roughness=clamp(pbr.roughness-bareIron*0.12,0.44,0.74);
       surfaceWet=-0.08;
       ambientVisibility=(0.46+0.38*max(n.y,0.0))*aoVis*pbr.ao;
+    }else{
+      // Kind 19: a city house's wall. Limewash over rubble, tinted house by house, with its
+      // windows and door counted out along the wall: in.leafUV is bays across and storeys up.
+      let tint=floor(in.kind.y);
+      let tone=0.72+0.28*fract(in.kind.y);
+      var wash=vec3f(1.0,0.985,0.95);
+      if(tint>3.5){wash=vec3f(0.78,0.74,0.68);}
+      else if(tint>2.5){wash=vec3f(0.96,0.80,0.74);}
+      else if(tint>1.5){wash=vec3f(0.95,0.84,0.62);}
+      else if(tint>0.5){wash=vec3f(0.98,0.93,0.82);}
+      let damp=smoothstep(0.5,4.2,world.y);
+      let stucco=pbr.albedo*wash*mix(vec3f(0.74,0.69,0.62),vec3f(1.0,0.97,0.92),damp);
+      albedo=stucco*tone*(0.97+detailA*0.05+detailB*0.03);
+      archNormalOffset=pbr.normalOffset*0.42;
+      relief=detailA*0.005*archLodFade;
+      roughness=clamp(pbr.roughness+detailB*0.03,0.70,0.92);
+      ambientVisibility=(0.48+0.36*max(n.y,0.0))*select(0.62+0.38*smoothstep(-0.2,1.4,in.leafUV.y),aoVis,in.leafUV.y<-0.5)*pbr.ao;
+      if(in.leafUV.y>0.0){
+        let bay=fract(in.leafUV.x);
+        let storey=floor(in.leafUV.y);
+        let up=fract(in.leafUV.y);
+        let door=storey<0.5&&in.leafUV.x>=0.0&&in.leafUV.x<1.0;
+        let halfW=select(0.19,0.24,door);
+        let low=select(select(0.30,0.40,storey<0.5),0.0,door);
+        let high=select(0.74,0.76,door);
+        // Each edge softened by what a pixel covers, and the whole faded to its mean tone far off.
+        let wide=cityWide;
+        let tall=cityTall;
+        let across=1.0-smoothstep(halfW-wide,halfW+wide,abs(bay-0.5));
+        let upright=smoothstep(low-tall,low+tall,up)*(1.0-smoothstep(high-tall,high+tall,up));
+        let seen=1.0-smoothstep(0.22,0.7,max(wide,tall));
+        let opening=across*upright;
+        let cell=floor(in.leafUV.x)*17.0+storey*29.0+floor(world.x*0.11)*7.0+floor(world.z*0.11)*13.0;
+        let pick=fract(sin(cell*12.9898)*43758.5453);
+        // A shutter closed over some, the room's dark behind the rest; a door is planks.
+        let shut=select(step(0.62,pick),1.0,door);
+        let leaf=select(vec3f(0.115,0.150,0.105),vec3f(0.150,0.098,0.060),door||pick>0.84)*(0.8+0.3*fract(pick*7.0));
+        let within=mix(vec3f(0.030,0.027,0.026),leaf,shut);
+        let frame=clamp((1.0-smoothstep(halfW+0.035,halfW+0.035+wide*2.0,abs(bay-0.5)))*smoothstep(low-0.05-tall,low-0.05+tall,up)*(1.0-smoothstep(high+0.05-tall,high+0.05+tall,up))-opening,0.0,1.0);
+        albedo=mix(albedo,albedo*vec3f(0.80,0.78,0.74),frame*seen*0.7);
+        albedo=mix(albedo*mix(1.0,0.86,1.0-seen),within*shadeAlbedo,opening*seen);
+        roughness=mix(roughness,0.62,opening*seen*(1.0-shut));
+        relief=relief-opening*seen*0.004;
+        let candleSched=(1.0-smoothstep(-0.04,0.14,F.sunDir.y));
+        if(candleSched>0.001&&shut<0.5&&pick<0.3){
+          let flicker=0.86+0.09*sin(F.camPos.w*5.4+pick*19.0)+0.05*cos(F.camPos.w*13.1-pick*29.0);
+          landWindowEmission=vec3f(0.34,0.145,0.032)*(candleSched*flicker*opening*mix(0.35,1.0,seen)/max(F.post.x,1.0)*(0.5+pick));
+        }
+      }
     }
     n=normalize(n+archNormalOffset);
   }else if(crown){
@@ -1488,6 +1640,11 @@ struct CanopyVertex {
 }
 @vertex fn portShadowVS(@location(0) position:vec3f)->@builtin(position) vec4f{
   return landSH.lightView*vec4f(position-landSH.origin.xyz,1.0);
+}
+@vertex fn cityShadowVS(@location(0) corner:vec3f,@location(1) face:vec3f,@location(3) root:vec4f,@location(4) size:vec4f,@location(5) style:vec4f)->@builtin(position) vec4f{
+  let rc=landSH.lightView*vec4f(root.xyz+vec3f(0.0,0.5*size.z,0.0)-landSH.origin.xyz,1.0);
+  if(size.x<1.0||abs(rc.x)>1.1||abs(rc.y)>1.1||rc.z<-0.08||rc.z>1.08){return vec4f(2.0,2.0,0.0,1.0);}
+  return landSH.lightView*vec4f(cityCorner(corner,face,root,size,style).world-landSH.origin.xyz,1.0);
 }
 @vertex fn treeShadowVS(@location(0) position:vec3f,@location(3) root:vec4f,@location(4) shape:vec4f)->@builtin(position) vec4f{
   let rc=landSH.lightView*vec4f(root.xyz+vec3f(0.0,0.5*shape.x,0.0)-landSH.origin.xyz,1.0);

@@ -52,8 +52,10 @@ async function open(query,region='lisbon'){
 // Lisbon wears the Portugal pack since 224cd17. That pack has no crown shells: beyond its far crowns
 // (js/forest-crowns.js) its farthest trees are small models from the native streams, drawn by the native
 // wood pipeline, as the tropical pack's are.
+// The dock faces a city now, not a wood: its trees stand round the square, in walled gardens and back
+// yards, and in the country behind, so the view is taken from over the square, looking inland.
 test('Lisbon\'s trees draw as clusters, far ones keep their small models, and no map the compressed set replaces is fetched',{timeout:360000},async()=>{
-  const {page,errors,requested}=await open({});
+  const {page,errors,requested}=await open({view:'free',prow:0,cam:'-70,45,-6250,0,-12'});
   try{
     const totals=await drawn(page);
     assert.ok(totals['forest clusters forestNativeOpaqueFS']>1000,JSON.stringify(totals));

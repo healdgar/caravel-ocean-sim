@@ -607,8 +607,10 @@ export function emitCairnScene(sceneSpec, helpers) {
             if (y1 > topOpenY + 0.08) {
               emitBox(wallToWorld, s0, s1, topOpenY, y1, -th * 0.5, th * 0.5, kind, shade * 0.96);
             }
-            // Dark recessed interior opening & stone surround jambs
-            emitBox(wallToWorld, s0 + 0.06, s1 - 0.06, y0 + sill, topOpenY, -th * 0.36, th * 0.36, 14, 0.52);
+            // Dark recessed interior opening & stone surround jambs. An opening marked as a
+            // door is hung with a plank leaf rather than glazed.
+            if (op.door) emitBox(wallToWorld, s0 + 0.06, s1 - 0.06, y0 + sill, topOpenY, -th * 0.3, th * 0.3, 10, 0.5);
+            else emitBox(wallToWorld, s0 + 0.06, s1 - 0.06, y0 + sill, topOpenY, -th * 0.36, th * 0.36, 14, 0.52);
             emitBox(wallToWorld, s0 - 0.12, s0 + 0.08, y0 + sill, topOpenY, -th * 0.56, th * 0.56, 11, 0.88);
             emitBox(wallToWorld, s1 - 0.08, s1 + 0.12, y0 + sill, topOpenY, -th * 0.56, th * 0.56, 11, 0.88);
             emitBox(wallToWorld, s0 - 0.16, s1 + 0.16, topOpenY - 0.05, topOpenY + 0.22, -th * 0.58, th * 0.58, 11, 0.90);
