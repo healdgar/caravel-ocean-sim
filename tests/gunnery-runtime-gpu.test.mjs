@@ -181,11 +181,13 @@ test('explicit full Victory battery stress fixture bounds all 52 muzzle clouds i
       // attachments. The real drill, safety interlock and flight run above.
       const guns=f.shipGuns.state.guns.filter(g=>g.side==='starboard');
       for(const g of guns){const pose=gunMuzzlePose({...g,offset:0},f.boat);f.gunEffects.emitShot({id:g.id,position:pose.position,direction:pose.direction,chargeKg:g.mass*.3});}
-      f.gunEffects.setProjectiles([]);f.gunEffects.update(.05,{wind:[1,0,0],eye:[0,10,65]});
+      f.gunEffects.setProjectiles([]);f.gunEffects.update(.05);
       return {total:guns.length,counts:f.gunEffects.counts};
     });
-    assert.equal(stress.total,52);assert.equal(stress.counts.volumes,208);
-    const frame=await gunneryRuntimeStep(page,.001);assert.equal(frame.render.gunneryVolume,1);assert.equal(frame.compute['resolve cannon effects depth'],1);assert.ok(frame.counts.volumes<=208);
+    assert.equal(stress.total,52);assert.equal(stress.counts.shots,52);
+    // A whole side's guns share a few banks between them: each gun its jet and flash, and one volume a bank.
+    assert.ok(stress.counts.banks>=6&&stress.counts.banks<=26,JSON.stringify(stress.counts));assert.equal(stress.counts.volumes,104+stress.counts.banks);
+    const frame=await gunneryRuntimeStep(page,.001);assert.equal(frame.render.gunneryVolume,1);assert.equal(frame.compute['resolve cannon effects depth'],1);assert.ok(frame.counts.volumes<=stress.counts.volumes);
     assert.deepEqual(frame.errors,[]);assert.deepEqual(errors,[]);await gunneryRuntimeCapture(page,'gunnery-victory-52-gun-stress.png');
   }finally{await page.close();}
 });

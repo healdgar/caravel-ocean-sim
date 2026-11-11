@@ -5,6 +5,7 @@ import {createLandCraterLedger,landCraterReach,landCraterSize} from '../js/land-
 import {applyTerrainImpactDamage} from '../js/gunnery-control.js';
 import {createPortDamageStore} from '../js/port-damage.js';
 import {LAND_CRATER_TEXELS,LAND_CRATER_CELLS,LAND_CRATER_GUTTER} from '../js/wgsl/land-craters.js';
+import {GUNNERY_BUILD} from '../js/wgsl/gunnery.js';
 
 const STRIKE_J=.5*10.9*450*450;
 
@@ -105,7 +106,8 @@ test('new per-frame work stays off the CPU: crater tiles are written only when s
   const follow=source.slice(source.indexOf('    follow(camera)'),source.indexOf('    draw(pass, section'));
   assert.match(follow,/if \(!overflow\) return;/,'and following the camera is nothing at all unless the tiles have run out');
   const effects=readFileSync(new URL('../js/gunnery-effects.js',import.meta.url),'utf8');
-  // The list of volumes is built between the start of `update` and its sort, and nothing in there reads an impact.
-  const smokeList=effects.slice(effects.indexOf('    update(dt,options={}){'),effects.indexOf('      ordered.sort('));
-  assert.ok(smokeList.length>500&&!/impacts/.test(smokeList),'thrown earth and dust add nothing to the JavaScript smoke list');
+  // Smoke volumes are laid out on the GPU from guns and fires alone: the stages that build them are never handed a strike.
+  assert.doesNotMatch(effects,/writeBuffer\(volumeBuffer/,'no smoke volume is built or sent from JavaScript');
+  assert.doesNotMatch(GUNNERY_BUILD({shots:1,banks:1,fires:1}),/[cC]ontact/,'thrown earth and dust add no smoke volume');
+  assert.match(effects,/get smoke\(\)\{return !!\(shots\.length\|\|banks\.length\);\}/,'and a strike alone keeps no smoke pass running');
 });

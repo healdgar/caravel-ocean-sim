@@ -101,7 +101,7 @@ import { ORBIT_LIMIT, orbitElevation, orbitDistance, panOrbit, placeOrbitCamera 
 // FFT ocean (6 cascades) + CDLOD surface mesh + physically based sky + HDR post.
 // All per-frame data lives in preallocated typed arrays / descriptors (no per-frame garbage
 // apart from the unavoidable swap-chain view and command buffer objects).
-import { N, CASCADES, SKY_W, SKY_H, ENV_SIZE, ENV_MIPS, SIM_CLOCK_LOOP_S, FRAME_FIRE_PATCH_FIRST, FRAME_FIRE_PATCH_FLOATS, packFrameFireLights } from './wgsl/common.js';
+import { N, CASCADES, SKY_W, SKY_H, ENV_SIZE, ENV_MIPS, SIM_CLOCK_LOOP_S, FRAME_FIRE_SLOTS } from './wgsl/common.js';
 import { SIM_INIT, FFT_ROWS, FFT_COLS, SIM_MIPS, FOAM_TEX, RGBA8_MIPS, SCENE_FOAM_UPDATE, ARRAY16_MIPS, FOAM_RES } from './wgsl/sim.js';
 import { TRANS_LUT, MS_LUT, SKYVIEW_LUT, ENV_CUBE, CUBE_MIPS, SUN_VIS } from './wgsl/sky.js';
 import { SKY_BG, SCENE_HEIGHT_PROBE, createOpticalOcean,withFleetHullCount } from './wgsl/ocean.js';
@@ -576,7 +576,7 @@ async function main() {
   const shipAssets=createShipAssetCache(),renderAssets=new Map();
   const sceneShadows=createSceneShadows(device,fleetCount),wakePool=createFleetWakePool(device,fleetCount);
   const seaShadows=await createSeaShadows({device,computePipe,sceneShadows,count:fleetCount});
-  const fleetHullUBO=mkBuf(96*fleetCount,GU.UNIFORM|GU.COPY_DST,'scene hull masks'),fleetHullData=new Float32Array(24*fleetCount);
+  const fleetHullUBO=mkBuf(96*fleetCount,GU.UNIFORM|GU.STORAGE|GU.COPY_DST,'scene hull masks'),fleetHullData=new Float32Array(24*fleetCount);
   const oakSampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear',
     addressModeU: 'repeat', addressModeV: 'repeat', maxAnisotropy: 8 });
   async function shipRenderAsset(modelId){
@@ -615,7 +615,7 @@ async function main() {
     renderAssets.set(modelId,result);return result;
   }
   const dolphinsPromise=createDolphins({waterOptics,surfaceWaves,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA});
-  const gunEffectsPromise=createGunneryEffects({surfaceWaves,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA,depthSamples:MSAA});
+  const gunEffectsPromise=createGunneryEffects({surfaceWaves,hulls:fleetHullUBO,hullCount:fleetCount,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA,depthSamples:MSAA});
   const gunSeaPromise=createGunnerySeaProbe({surfaceWaves,device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,computePipe});
   const gunportSafetyPromise=createGunportSafety({surfaceWaves,device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,maxAge:1.5,maxTravel:6.0});
   const probePipePromise=computePipe(SCENE_HEIGHT_PROBE,'height probe');
@@ -1967,6 +1967,9 @@ async function main() {
     const voyageLatitude=voyageCtl?.voyage?.true?.lat;
     return Number.isFinite(voyageLatitude)?voyageLatitude:terrain?.region?.latitude??astronomy.state?.observer?.latitude??SEA_LATITUDE_UNKNOWN;
   }
+  // Two fire lights ride in spare slots of the frame. The GPU fills them from its own fire records after
+  // this upload (gunEffects.encodeLights), so all JavaScript sends is darkness.
+  function clearFireLights(f){for(const slot of FRAME_FIRE_SLOTS)f[slot]=0;}
   function writeFrame(time) {
     const aspect = W / H;
     const tanY = Math.tan(cam.fovY * 0.5), tanX = tanY * aspect;
@@ -1997,8 +2000,8 @@ async function main() {
     const f = frameF;
     f.set(viewProj, 0);
     f[16] = cam.x; f[17] = cam.y; f[18] = cam.z; f[19] = time;
-    // The fourth float of each camera vector, with 54, 55, 61, 62 and 87, is a fire-light slot: packFrameFireLights
-    // owns those, once the frame's fires are known. Until then they hold the last frame's lights.
+    // The fourth float of each camera vector, with 54, 55, 61, 62 and 87, is a fire-light slot: those go up dark
+    // (clearFireLights below) and the GPU fills them from its fire records before anything is lit.
     f[20] = rx * tanX; f[21] = ry * tanX; f[22] = rz * tanX;
     f[24] = ux * tanY; f[25] = uy * tanY; f[26] = uz * tanY;
     f[28] = fx; f[29] = fy; f[30] = fz;
@@ -2027,6 +2030,7 @@ async function main() {
     f[90] = (33.1e-3 + 4.40e-3 * P.haze) * 1e-3;
     f[91] = 1.1e-4;
     f[92]=weather.intensity;f[93]=weather.type;f[94]=weather.flash;f[95]=weather.time;
+    clearFireLights(f);
     device.queue.writeBuffer(frameUBO, 0, f);
     opticsData[0]=P.turbidity*(terrain?.turbidityScale??1);opticsData[1]=qs.get('waterOptics')==='0'?0:1;
     opticsData[2]=waterH;opticsData[3]=1;
@@ -3829,7 +3833,8 @@ async function main() {
   // --------------------------------------------------------------------------------------
   const submitList = [null];
   const allProjectiles = [];
-  const activeFires = [];
+  const activeFires = [], activeFireHulls = [];
+  const vesselHullUBO=index=>vessels[index]?.hullUBO??null;
   const shotName = qs.get('shot');
   const shotFrames = Number(qs.get('frames')) || 240;
   const shotSeq = Number(qs.get('seq')) || 1;
@@ -4061,10 +4066,8 @@ async function main() {
       data.set(sails.set,24);data[27]=ship.hatchesClosed??0;data[28]=sails.squareYaw;data[29]=sails.lateenYaw;
       data[30]=sails.squareFill;data[31]=sails.lateenFill;data[32]=sails.windSide;data[33]=-sails.windForward;data[34]=sails.apparentSpeed;data[35]=sails.canvasTack;
       writeLateenUniform(data,sails);
-      const fireInt=(settlingBake?0:Math.min(2.4,dmg?.fireIntensity??0))*flashExposure;
-      const primaryFire=dmg?.fires?.[0];
-      const fireZBin=primaryFire?Math.max(1,Math.min(12,Math.round((primaryFire.localPosition?.[2]??0)/Math.max(0.8,(ship.length??20)/12)+6.5))):6;
-      data[51]=fireInt>0.01?(fireZBin+Math.min(0.98,Math.max(0.01,fireInt/2.5))):0;
+      // Light from her own fires: the GPU writes it here from its fire records (gunEffects.encodeLights).
+      data[51]=0;
       device.queue.writeBuffer(v.hullUBO,0,data);
       v.flood?.update(ship);
       updateHullHoleEffects(v,ship,dt);
@@ -4135,16 +4138,17 @@ async function main() {
       gunEffects.setAimArcs?.(NO_AIM_ARCS);
     }
     hullContactProbe.update(boat,dt,{enabled:sceneAudio.enabled&&sceneAudio.ready&&boat.effects!==false,hidden:document.hidden,resetSea:needSpectrum||elapsed>.5});
-    activeFires.length=0;
-    for(let i=0;i<activeVesselCount;i++){const fires=vessels[i].boat.damage?.worldFires;if(fires)for(const f of fires)activeFires.push(f);}
+    // Every fire burning, and the hull each is aboard (-1 ashore) so the GPU can carry it with her.
+    activeFires.length=activeFireHulls.length=0;
+    for(let i=0;i<activeVesselCount;i++){const fires=vessels[i].boat.damage?.worldFires;if(fires)for(const f of fires){activeFires.push(f);activeFireHulls.push(i);}}
     if(castleDuel.active){
-      for(const f of castleDuel.worldFires)activeFires.push(f);
+      for(const f of castleDuel.worldFires){activeFires.push(f);activeFireHulls.push(-1);}
     }else if(portGunnery){
-      const portFires=portGunnery.worldFires;for(let i=0;i<portFires.length;i++)activeFires.push(portFires[i]);
+      const portFires=portGunnery.worldFires;for(let i=0;i<portFires.length;i++){activeFires.push(portFires[i]);activeFireHulls.push(-1);}
     }
-    // The frame block went up whole in writeFrame. Only its fire lights wait on this frame's fires, and only a change in them is sent.
-    if(packFrameFireLights(frameF,activeFires,cam.x,cam.y,cam.z))device.queue.writeBuffer(frameUBO,FRAME_FIRE_PATCH_FIRST*4,frameF,FRAME_FIRE_PATCH_FIRST,FRAME_FIRE_PATCH_FLOATS);
-    gunEffects.update(dt,{wind:windVec,eye:[cam.x,cam.y,cam.z],fires:activeFires});
+    // The frame block went up whole in writeFrame, its fire lights dark. The GPU chooses them from the fire records
+    // kept here (gunEffects.encodeLights), so nothing more is sent for them. The wind only says how long smoke lasts.
+    gunEffects.update(dt,{wind:windVec,time:simTime,fires:activeFires,fireHulls:activeFireHulls});
     wakePool.update(vessels);
     device.queue.writeBuffer(fleetHullUBO,0,fleetHullData);sceneShadows.update(vessels);
     spindrift.update(frameF, P.spindrift, dt, needSpectrum);
@@ -4164,6 +4168,7 @@ async function main() {
     frameStages.mark('Effects');
     const enc = device.createCommandEncoder();
     if(celestial.update())envFull=true;celestial.encode(enc);
+    gunEffects.encodeLights(enc,{frame:frameUBO,hull:vesselHullUBO});gunEffects.encode(enc);
     profiler.beginFrame(frameIndex);
     let cp = enc.beginComputePass({timestampWrites:profiler.writes('Waves + effects')});
     if (needSpectrum) {
@@ -4358,7 +4363,7 @@ async function main() {
 
     if(gunVolumes){
       gunEffects.resolveDepth(enc,mainPass.depthStencilAttachment.view,W,H);
-      const effects=enc.beginRenderPass({colorAttachments:[{view:hdrView,loadOp:'load',storeOp:'store'}]});
+      const effects=enc.beginRenderPass({colorAttachments:[{view:hdrView,loadOp:'load',storeOp:'store'}],timestampWrites:profiler.writes('Cannon smoke')});
       gunEffects.drawVolumes(effects);effects.end();
     }
 

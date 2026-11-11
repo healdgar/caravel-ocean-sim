@@ -7,6 +7,10 @@
 //   npm run perf -- '[["battle",{"battle":"1"}]]'    fires a broadside into her first, then measures
 //   rows with {"fort":...} look at Lisbon's bastion: "look" as it stands, "ruin" once shot down and settled,
 //   "siege" while shots keep landing all through the sample
+//   rows with {"guns":"port"} fire her own broadside and measure while the guns run and the smoke hangs;
+//   add "gunsWait":9000 to start measuring that many milliseconds after the order instead
+//   rows with {"ablaze":"1"} set two fires on her deck and measure while they burn
+//   rows with {"js":"folder"} load the game's scripts from that folder: an older copy of js/, to compare with
 //   npm run perf -- --tris                           also count triangles per pipeline
 //   npm run perf -- --uploads                        what the CPU sends the GPU each frame, by buffer
 //   npm run perf -- --profile                        JavaScript time per function
@@ -15,6 +19,8 @@
 // PERF_SHOTS=folder keeps a picture of each row.
 import {once} from 'node:events';
 import {execSync} from 'node:child_process';
+import {readFile} from 'node:fs/promises';
+import {join,normalize} from 'node:path';
 import {chromium} from 'playwright';
 import {createDevServer} from '../server.mjs';
 import {coastalRegionStageURL,landfallStageURL} from '../js/landfall.js';
@@ -115,10 +121,15 @@ console.log(`GPU busy before loading: ${mean(idle).toFixed(0)}% (other work on t
 console.log('scene'.padEnd(20),'frame p50/p95   fps  | JS ms mean/p95 | CPU cores main+gpu | GPU busy frag vert | limit');
 for(const [label,extra,edits] of rows){
   const region=process.env.PERF_REGION||'lisbon',url=region==='saba'?landfallStageURL(base,'coast','clear'):coastalRegionStageURL(base,region,'dock','clear',1650);
-  const {battle,fort,...parameters}=extra;
+  const {battle,fort,guns,gunsWait,ablaze,js,...parameters}=extra;
   for(const [key,value] of Object.entries({ship:'victory',w:1728,h:1117,polygons:'fixed',...parameters}))url.searchParams.set(key,String(value));
   const page=await browser.newPage({viewport:{width:1728,height:1117}}),errors=[];
   page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error'&&!/404|favicon/.test(m.text()))errors.push(m.text());});
+  if(js)await page.route('**/js/**',async route=>{
+    const file=normalize(decodeURIComponent(new URL(route.request().url()).pathname).replace(/^\/js\//,''));
+    if(file.startsWith('..'))return route.abort();
+    try{route.fulfill({contentType:'text/javascript',body:await readFile(join(js,file))});}catch{route.fulfill({status:404,body:'not found'});}
+  });
   const byFile=new Map();for(const [file,find,replace] of edits??[])byFile.set(file,[...(byFile.get(file)??[]),[find,replace]]);
   for(const [file,changes] of byFile)await page.route('**/js/'+file,async route=>{const response=await route.fetch();let text=await response.text();for(const [find,replace] of changes){if(!text.includes(find))console.log('EDIT NOT FOUND',find);text=text.split(find).join(replace);}route.fulfill({response,body:text});});
   await page.addInitScript(instrument);
@@ -142,6 +153,23 @@ for(const [label,extra,edits] of rows){
       const fire=(0,eval)('('+fireText+')');let round=0;
       window.perfSiege=setInterval(()=>fire({prefab,everyFrames:9,volleys:[{...shot,shots:2,minY:1,maxY:8,centre:(round++%18)-9,span:3}]}),500);
     },{prefab,shot,fireText:fireOnBuilding.toString()});
+  }
+  if(ablaze){
+    // Two fires amidships, with her powder struck below so the sample is of burning and not of a blast.
+    await page.evaluate(()=>{
+      const boat=oceanFleet.vessels[0].boat,d=boat.damage,magazine=boat.magazine??d.magazine;if(magazine)magazine.powderKg=0;
+      d.fires.push({localPosition:[-2.2,8.6,6],hitZone:'hull',mastGroup:'main',intensity:.7,age:0,seed:.37},{localPosition:[1.8,8.9,-9],hitZone:'hull',mastGroup:'fore',intensity:.66,age:0,seed:.61});
+    });
+    await page.waitForTimeout(3000);
+  }
+  if(guns){
+    // Her whole battery on one side, already loaded, through the game's own firing queue.
+    console.log(' '.repeat(20),'guns:',JSON.stringify(await page.evaluate(async side=>{
+      const {fireGunnery}=await import('/js/gunnery-state.js'),gunnery=oceanFleet.vessels[0].gunnery;
+      gunnery.setShowTrajectory?.(false);gunnery.readyAtQuarters(side);
+      return {side,queued:fireGunnery(gunnery.state,side,{interval:.14})};
+    },guns==='starboard'?'starboard':'port')));
+    await page.waitForTimeout(Number(gunsWait??0));
   }
   const session=wantProfile?await page.context().newCDPSession(page):null;
   if(session){await session.send('Profiler.enable');await session.send('Profiler.setSamplingInterval',{interval:500});await session.send('Profiler.start');}
@@ -168,7 +196,13 @@ for(const [label,extra,edits] of rows){
     const frames=result.fps*SAMPLE_SECONDS,uploads=await page.evaluate(()=>[...perfUploads].map(([label,row])=>[label,row.bytes,row.calls]));
     const total=uploads.reduce((sum,[,bytes])=>sum+bytes,0)/frames/1024;
     console.log(' '.repeat(20),`${total.toFixed(0)} KB uploaded per frame:`);
-    for(const [name,bytes,calls] of uploads.sort((a,b)=>b[1]-a[1]).slice(0,16))console.log(' '.repeat(20),`${(bytes/frames/1024).toFixed(1).padStart(8)} KB ${(calls/frames).toFixed(1).padStart(6)} writes  ${name}`);
+    // The sixteen largest, and whatever the cannon effects sent however little: a fire or a smoke bank is meant to cost nothing here.
+    const cannon=/smoke|fire|roundshot|cannon/i;
+    uploads.sort((a,b)=>b[1]-a[1]).forEach(([name,bytes,calls],rank)=>{
+      if(rank<16)console.log(' '.repeat(20),`${(bytes/frames/1024).toFixed(1).padStart(8)} KB ${(calls/frames).toFixed(1).padStart(6)} writes  ${name}`);
+      else if(cannon.test(name))console.log(' '.repeat(20),`${(bytes/frames).toFixed(1).padStart(8)} B  ${(calls/frames).toFixed(3).padStart(6)} writes  ${name}`);
+    });
+    if(!uploads.some(([name])=>cannon.test(name)))console.log(' '.repeat(20),'       nothing sent for cannon smoke, fire or shot');
   }
   if(session){
     const {profile}=await session.send('Profiler.stop'),nodes=new Map(profile.nodes.map(n=>[n.id,n])),self=new Map();
