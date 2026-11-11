@@ -8362,7 +8362,7 @@ export function synthesizeCoastalAlbedo(
       let forestB = soilB * (1 - canopyBlend) + lushB * canopyBlend;
       // Tilled and grazed country shows its own ground; only its woods keep the forest's colours.
       const land = country && h > 0.6 ? country.landAt(x, z, slope) : null;
-      if (land && land.kind !== OLD_WORLD_LAND.WOOD) {
+      if (land && land.r !== undefined && land.kind !== OLD_WORLD_LAND.WOOD) {
         forestR = land.r;
         forestG = land.g;
         forestB = land.b;
@@ -9391,7 +9391,8 @@ function dressProceduralCoastalPack(pack, heights, port, elevationSource, satell
   }
   // An Old World city round the port: its plan is laid here, its streets paved with the port's
   // own, and its blocks handed to the renderer to draw as instances.
-  const cityPlan = pack.skipPortPlacement ? null : oldWorldCountry(region, heights, port)?.plan ?? null;
+  const country = pack.skipPortPlacement ? null : oldWorldCountry(region, heights, port);
+  const cityPlan = country?.plan ?? null;
   if (cityPlan && port.streets) paveCityStreets(port.streets, cityPlan.paving);
   const shoreDist = computeCoastalShoreDistances(heights, region.size, region.span, 0.25);
   const beaches = synthesizeCoastalBeaches(region, heights, satelliteData, shoreDist, {
@@ -9413,6 +9414,8 @@ function dressProceduralCoastalPack(pack, heights, port, elevationSource, satell
     port,
     portGeometry,
     city: cityPlan ? { blocks: cityPlan.blocks, count: cityPlan.count, typed: cityPlan.typed, typedTypes: cityPlan.typedTypes, typedCount: cityPlan.typedCount, typedBlocks: cityPlan.typedBlocks, stats: cityPlan.stats } : null,
+    // Where Castle and Commons' model founded this coast: what the GPU stamps onto the ground's colours.
+    board: country?.board ?? null,
     biome,
     albedo,
     vegetation,

@@ -6,8 +6,12 @@
 // and the country is a lattice of holdings, each put to the use its own ground suits. The
 // procedures are those of Castle and Commons (a town grown by the cost of the ground, a lattice of
 // furlongs), re-hosted on this game's elevation and scaled to a city of a hundred thousand.
+// Where Castle and Commons' own model has founded a port's country ahead of time (a baked board:
+// js/board-model.js), that board is what stands, and the rules here only colour and plant it.
 
 import { CITY_GROUND, CITY_TREES, layOldWorldCity } from './old-world-city.js';
+import { layBoardCountry } from './old-world-board.js';
+import { boardGroundFits } from './board-model.js';
 
 const DEG = Math.PI / 180;
 const OLD_WORLD_METRES_PER_DEGREE = 111195;
@@ -39,6 +43,19 @@ export const OLD_WORLD_CITIES = Object.freeze([
   { id: 'la-coruna', name: 'La Coruña', latitude: 43.3709, longitude: -8.3959, people: [[1500, 3000], [1600, 5000], [1690, 7000]] },
   { id: 'setubal', name: 'Setúbal', latitude: 38.5244, longitude: -8.8926, people: [[1500, 6000], [1690, 12000]] },
 ].map((city) => Object.freeze({ ...city, people: Object.freeze(city.people.map(Object.freeze)) })));
+
+// The towns, villages and religious houses that stood round a city by the middle of the sixteenth century: name,
+// latitude, longitude, and weight (9 a town that must stand, 6 a hamlet that should). The board's founders favour
+// these spots over any other and its places take these names (js/board-model.js). Positions are to a few hundred
+// metres.
+export const OLD_WORLD_PLACES = Object.freeze({
+  lisbon: Object.freeze([
+    ['Alcântara', 38.7052, -9.1745, 8], ['Santos', 38.7068, -9.1552, 6], ['Xabregas', 38.7262, -9.1127, 7],
+    ['Almada', 38.6835, -9.1583, 8], ['Cacilhas', 38.6869, -9.1483, 7], ['Arroios', 38.7335, -9.1355, 6],
+    ['Campolide', 38.7307, -9.1668, 6], ['São Sebastião da Pedreira', 38.7345, -9.1525, 6], ['Beato', 38.7335, -9.1050, 6],
+    ['Marvila', 38.7415, -9.1040, 6],
+  ].map(Object.freeze)),
+});
 
 // How far a city shapes the use of the land around it, beyond its own edge.
 const CITY_INFLUENCE_METRES = 2400;
@@ -391,6 +408,15 @@ function indexRoads(roads, region) {
 
 const countries = new WeakMap();
 
+// Boards founded ahead of time, by port and year. One is handed in before its port's land is made.
+const bakedBoards = new Map();
+export function registerBakedBoard(baked) {
+  if (baked && baked.board && baked.port) bakedBoards.set(`${baked.port}:${baked.year}`, baked);
+}
+export function bakedBoardFor(region) {
+  return bakedBoards.get(`${region.id}:${region.year ?? 1550}`) || null;
+}
+
 // The country a region's ground belongs to, or null where the old rules of a wild shore hold.
 // One is made per elevation field and kept, since land cover, ground colour and planting all ask.
 export function oldWorldCountry(region, heights, port = null) {
@@ -417,14 +443,20 @@ function makeCountry(region, heights, port) {
   const half = region.span / 2;
   const holdsCity = Boolean(city && port && port.clearRadius > 0 && port.center &&
     Math.abs(cityX - region.x) < half && Math.abs(cityZ - region.z) < half);
-  const town = holdsCity ? growOldWorldTown(heights, region, port.center, cityArea) : null;
-  const wet = town ? null : (() => { const w = new Uint8Array(heights.length); for (let k = 0; k < w.length; k++) w[k] = heights[k] <= 0.25 ? 1 : 0; return w; })();
+  const marked = () => { const w = new Uint8Array(heights.length); for (let k = 0; k < w.length; k++) w[k] = heights[k] <= 0.25 ? 1 : 0; return w; };
+  // A board founded for this port on this ground stands in place of the town and country made here. One founded
+  // on other ground (the same port on a coast made by other rules) is left aside, and the rules here make it.
+  const baked = holdsCity ? bakedBoardFor(region) : null;
+  const stood = baked && baked.board.span === region.span && boardGroundFits(baked.survey, heights)
+    ? layBoardCountry({ baked, region, grid, heightAt, port, wet: marked(), LAND: OLD_WORLD_LAND, fieldAt, distanceTo }) : null;
+  const town = stood ? stood.town : holdsCity ? growOldWorldTown(heights, region, port.center, cityArea) : null;
+  const wet = town ? null : marked();
   const inland = town ? town.inland : distanceTo(wet, grid.n, grid.step);
   const beyondTown = (x, z) => town ? fieldAt(town.beyond, grid, x, z) : city ? Math.max(0, Math.hypot(x - cityX, z - cityZ) - cityRadius) : 1e9;
-  const roads = town ? layOldWorldRoads(heights, region, port.center) : [];
+  const roads = stood ? stood.roads : town ? layOldWorldRoads(heights, region, port.center) : [];
   const roadNear = roads.length ? indexRoads(roads, region) : null;
   // The city itself: streets, lots, wall, castle, churches and squares on the grown ground.
-  const plan = town ? layOldWorldCity({
+  const plan = stood ? stood.plan : town ? layOldWorldCity({
     heightAt,
     urbanAt: (x, z) => fieldAt(town.urban, grid, x, z),
     earlyAt: (x, z) => {
@@ -497,6 +529,13 @@ function makeCountry(region, heights, port) {
     return use;
   };
 
+  // The parcel a point lies in: what it is put to, how far inside its bounds the point is, and two numbers that
+  // name it. A board's furlongs where one stands; the lattice of holdings otherwise.
+  const parcelAt = stood ? stood.parcelAt : (x, z) => {
+    const hold = oldWorldHolding(x, z);
+    return { use: holdingUse(hold), edge: hold.edge, i: hold.i, j: hold.j };
+  };
+
   // Ground colours, in the 0-255 the baked albedo is written in, for the dry sailing season.
   const COLOUR = [
     [150, 134, 110], // trodden city ground
@@ -516,12 +555,23 @@ function makeCountry(region, heights, port) {
   // What stands at a point of dry ground: its use, how much of it bears trees (as the vegetation
   // mask counts it), and the colour of its ground.
   const landAt = (x, z, slope = 0) => {
-    const hold = oldWorldHolding(x, z), use = holdingUse(hold);
+    const hold = parcelAt(x, z), use = hold.use;
     const urban = town ? fieldAt(town.urban, grid, x, z) : 0;
     let kind = use.kind;
     // A holding cannot farm a cliff: its steep corners go back to scrub.
     if (slope > 0.44 && kind !== OLD_WORLD_LAND.WOOD) kind = OLD_WORLD_LAND.SCRUB;
     if (urban >= 0.5) kind = OLD_WORLD_LAND.CITY;
+    if (stood) {
+      // A board's country keeps the colours of its geography: its parcels, roads and town ground are stamped onto
+      // them by the GPU (js/board-stamp.js). Here only what bears trees is said, for the forest and the planting.
+      let vegetation = kind === OLD_WORLD_LAND.PASTURE && use.wooded ? SOME_TREES : VEGETATION[kind];
+      if (kind === OLD_WORLD_LAND.CITY) vegetation = plan.treesAt(x, z) !== CITY_TREES.NONE ? SOME_TREES : 0;
+      else if (use.hedged && hold.edge < 10) vegetation = Math.max(vegetation, SOME_TREES);
+      if (urban > 0 && urban < 0.5) vegetation *= 1 - urban * 2;
+      const way = kind !== OLD_WORLD_LAND.CITY && kind !== OLD_WORLD_LAND.WOOD && roadNear ? roadNear(x, z) : null;
+      if (way && way.distance < 14 && roadLined(way, x, z)) vegetation = Math.max(vegetation, SOME_TREES);
+      return { kind, vegetation };
+    }
     const base = COLOUR[kind], fine = drift(x, z, 22, 0x38d01377) - 0.5, broad = drift(x, z, 140, 0xbe5466cf) - 0.5;
     const tone = 1 + (use.shade - 0.5) * (kind === OLD_WORLD_LAND.CITY ? 0 : 0.22) + fine * 0.16 + broad * 0.12;
     let r = base[0] * tone, g = base[1] * tone, b = base[2] * tone;
@@ -604,12 +654,12 @@ function makeCountry(region, heights, port) {
     }
     const way = roadNear ? roadNear(x, z) : null;
     if (way && way.distance < 4) return NO_TREES;
-    const hold = oldWorldHolding(x, z), use = holdingUse(hold);
+    const hold = parcelAt(x, z), use = hold.use;
     if (use.kind === OLD_WORLD_LAND.WOOD) return null;
     if (way && way.distance < 8.5 && roadLined(way, x, z)) return ROADSIDE;
     if (use.hedged && hold.edge < 3.2) return HEDGEROW;
     return use.kind === OLD_WORLD_LAND.PASTURE && !use.wooded ? NO_TREES : TENDED[use.kind];
   };
 
-  return { city, people, year, cityX, cityZ, cityRadius, cityArea, town, roads, plan, grid, inland, landAt, treesAt, beyondTown };
+  return { city, people, year, cityX, cityZ, cityRadius, cityArea, town, roads, plan, grid, inland, landAt, treesAt, beyondTown, board: stood ? stood.stamp : null, places: stood ? stood.places : null };
 }

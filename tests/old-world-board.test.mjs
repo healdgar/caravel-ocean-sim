@@ -1,0 +1,141 @@
+// Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
+// A board Castle and Commons' model founded, stood up in this game: its buildings this game's Cairn types on dry
+// ground, its furlongs the land's uses, its woods the forest's, its ground the colour of its geography with the
+// board's parcels left to the GPU; and a board founded on other ground refused, so the rules here make the town.
+import assert from 'node:assert/strict';
+import { existsSync, readFileSync } from 'node:fs';
+import { test } from 'node:test';
+import { BAKED_BOARDS, BOARD_RIVERS, BOARD_SURVEY_SIZE, BOARD_VERSION, bakedBoardAsset, boardGroundFits, boardGroundSurvey, boardRequest } from '../js/board-model.js';
+import { BOARD_WAY_FLOATS, boardStampTables } from '../js/board-stamp.js';
+import { BOARD_INDEX_SIZE } from '../js/old-world-board.js';
+import { CITY_BLOCK_FLOATS, CITY_TREES } from '../js/old-world-city.js';
+import { CITY_BUILDING_TYPES, CITY_TYPED_FLOATS } from '../js/old-world-buildings.js';
+import { OLD_WORLD_LAND, OLD_WORLD_NO_TREES, OLD_WORLD_PLACES, bakedBoardFor, oldWorldCountry, registerBakedBoard } from '../js/old-world.js';
+import { openBoard } from '../scripts/board-host.mjs';
+
+// The bay of tests/board-model.test.mjs, set down where Lisbon is so that the country round it is Old World.
+const SPAN = 4096, SAMPLES = 129, SITE = { name: 'Porto Novo', culture: 'iberian', x: 150, z: 380 };
+function bayHeight(x, z) {
+  const shore = 600 + 260 * Math.cos(x / 700) - 0.00012 * x * x, inland = shore - z;
+  if (inland <= 0) return Math.max(-60, inland * 0.05);
+  return Math.min(180, inland * 0.07 + 18 * Math.sin(x / 310) * Math.sin(z / 270) * Math.min(1, inland / 400)
+    - 9 * Math.exp(-(x * x) / (2 * 120 * 120)) * Math.min(1, inland / 300));
+}
+function ground(samples = SAMPLES, height = bayHeight) {
+  const heights = new Float32Array(samples * samples);
+  for (let j = 0; j < samples; j++) for (let i = 0; i < samples; i++) heights[j * samples + i] = height((i / (samples - 1) - 0.5) * SPAN, (j / (samples - 1) - 0.5) * SPAN);
+  return heights;
+}
+const region = (more = {}) => ({ id: 'test-bay', latitude: 38.707, longitude: -9.136, x: 0, z: 0, span: SPAN, size: SAMPLES, biomeSize: 128, albedoSize: 256, year: 1550, ...more });
+const port = () => ({ center: { x: SITE.x, z: SITE.z }, clearRadius: 120, instances: [] });
+
+test('a ground is known again by its survey, whatever its lattice, and another ground is not', () => {
+  const heights = ground(), survey = boardGroundSurvey(heights);
+  assert.equal(survey.length, BOARD_SURVEY_SIZE * BOARD_SURVEY_SIZE);
+  assert.ok(boardGroundFits(survey, heights));
+  assert.ok(boardGroundFits(survey, ground(257)), 'the same bay made on a finer lattice');
+  assert.ok(boardGroundFits(JSON.parse(JSON.stringify(survey)), heights), 'a survey read back from a file');
+  assert.ok(!boardGroundFits(survey, ground(SAMPLES, (x, z) => bayHeight(-x, z) + (bayHeight(-x, z) > 0 ? 4 : 0))), 'the bay turned about and raised');
+  assert.ok(!boardGroundFits(survey, ground(SAMPLES, (x, z) => bayHeight(x, z - 400))), 'the shore moved 400 m');
+  assert.ok(!boardGroundFits(survey.slice(0, 100), heights) && !boardGroundFits(undefined, heights), 'no survey, no fit');
+});
+
+test('a founded board stands in the game as its own buildings, land and woods, and only on its own ground', { timeout: 900000 }, async (t) => {
+  const heights = ground();
+  const open = await openBoard(boardRequest({ heights, span: SPAN, site: SITE, seed: 1550, era: 1550, seat: 0.5 }));
+  const board = open.board; await open.close();
+  const baked = { port: 'test-bay', year: 1550, survey: boardGroundSurvey(heights), board };
+  registerBakedBoard(baked);
+  assert.equal(bakedBoardFor(region()), baked);
+  assert.equal(bakedBoardFor(region({ year: 1650 })), null, 'a board is for its year');
+
+  const country = oldWorldCountry(region(), heights, port()), plan = country.plan, stats = plan.stats;
+  t.diagnostic(JSON.stringify({ founded: board.buildings.count, stats }));
+  assert.ok(country.board, 'the board stands');
+  assert.equal(country.places.length, board.places.length);
+  assert.equal(country.places[0].name, SITE.name);
+
+  // Its buildings: this game's types, nearly all of those founded, each on dry ground and none in another.
+  assert.equal(plan.typed.length, plan.typedCount * CITY_TYPED_FLOATS);
+  assert.equal(plan.typedTypes.length, plan.typedCount);
+  assert.equal(plan.blocks.length % CITY_BLOCK_FLOATS, 0);
+  assert.ok(stats.houses > board.buildings.count * 0.8, `houses ${stats.houses} of ${board.buildings.count} founded`);
+  const dropped = stats.dropped.wet + stats.dropped.port + stats.dropped.steep + stats.dropped.edge;
+  assert.ok(dropped < board.buildings.count * 0.1, `dropped ${JSON.stringify(stats.dropped)}`);
+  assert.ok(stats.churches >= 1 && stats.streets >= 8, `churches ${stats.churches}, streets ${stats.streets}`);
+  for (let i = 0; i < plan.typedCount; i++) {
+    const at = plan.typed.subarray(i * CITY_TYPED_FLOATS, (i + 1) * CITY_TYPED_FLOATS);
+    assert.ok(at.every(Number.isFinite) && plan.typedTypes[i] < CITY_BUILDING_TYPES.length, `building ${i}`);
+    assert.ok(bayHeight(at[0], at[2]) > 0.5, `building ${i} stands in the water at ${at[0]}, ${at[2]}`);
+  }
+  assert.ok(stats.milliseconds < 2000, `laid in ${stats.milliseconds} ms`);
+
+  // Its land: uses only, no colour (the ground keeps its geography's; the GPU stamps the parcels on it).
+  const kinds = new Set(); let woods = 0, forest = 0, town = 0;
+  for (let z = -SPAN / 2 + 40; z < SPAN / 2; z += 37) for (let x = -SPAN / 2 + 40; x < SPAN / 2; x += 37) {
+    if (bayHeight(x, z) < 0.6) continue;
+    const land = country.landAt(x, z, 0), trees = country.treesAt(x, z);
+    assert.equal(land.r, undefined);
+    assert.ok(land.vegetation >= 0 && land.vegetation <= 1);
+    kinds.add(land.kind);
+    if (land.kind === OLD_WORLD_LAND.CITY) { town++; assert.ok(trees === OLD_WORLD_NO_TREES || trees.spacing >= 8, 'a town tree is a planted one'); }
+    if (land.kind === OLD_WORLD_LAND.WOOD) { woods++; assert.ok(trees === null || trees === OLD_WORLD_NO_TREES, 'a wood keeps the forest\'s rules'); if (trees === null) forest++; }
+  }
+  for (const kind of [OLD_WORLD_LAND.CITY, OLD_WORLD_LAND.WOOD, OLD_WORLD_LAND.CORN, OLD_WORLD_LAND.PASTURE]) assert.ok(kinds.has(kind), `land of kind ${kind}; seen ${[...kinds]}`);
+  assert.ok(woods > 20 && forest > woods * 0.8, `woodland handed to the forest: ${forest} of ${woods}`);
+  assert.ok(town > 20, `town ground: ${town}`);
+  assert.ok(plan.standing.every(([x, z]) => plan.treesAt(x, z) !== CITY_TREES.NONE), 'every planted tree stands where a tree may');
+
+  // What the GPU is handed: the furlong of every cell, a row for every furlong, a capsule for every way.
+  const stamp = country.board, tables = boardStampTables(stamp);
+  assert.equal(stamp.size, BOARD_INDEX_SIZE);
+  assert.ok(stamp.index instanceof Uint16Array && stamp.index.length === BOARD_INDEX_SIZE ** 2);
+  let most = 0, held = 0;
+  for (let k = 0; k < stamp.index.length; k++) { most = Math.max(most, stamp.index[k]); if (stamp.index[k]) held++; }
+  assert.equal(most, stamp.uses.length, 'the last furlong has its cells, and no cell names a furlong there is not');
+  assert.ok(held > stamp.index.length * 0.3, `cells in a furlong: ${held}`);
+  assert.equal(tables.parcels.length, (stamp.uses.length + 1) * 8);
+  assert.ok(tables.parcels.subarray(0, 8).every((v) => v === 0), 'ground in no furlong is left as it is');
+  assert.equal(tables.ways.length, tables.wayCount * BOARD_WAY_FLOATS);
+  assert.ok(tables.wayCount > plan.houses, `ways ${tables.wayCount}: a roof for every house, and the roads, lanes and streets`);
+  assert.ok(tables.parcels.every(Number.isFinite) && tables.ways.every(Number.isFinite));
+  let tinted = 0, wild = 0;
+  stamp.uses.forEach((use, k) => { if (tables.parcels[(k + 1) * 8 + 3] > 0) tinted++; else wild++; });
+  assert.ok(tinted > 50 && wild > 0, `furlongs tinted ${tinted}, left to the ground's own colour ${wild}`);
+
+  // The same port on other ground: the board is left aside and the rules here make the town.
+  const other = ground(SAMPLES, (x, z) => bayHeight(x, z - 400)), made = oldWorldCountry(region(), other, port());
+  assert.equal(made.board, null);
+  assert.ok(made.plan && made.plan.houses > 0, 'a town is made all the same');
+  let coloured = 0;
+  for (let x = -1500; x < 1500; x += 90) { const land = made.landAt(x, -900, 0); if (land.r !== undefined) coloured++; }
+  assert.ok(coloured > 20, 'and its land is coloured by the rules here');
+  // And in another year.
+  assert.equal(oldWorldCountry(region({ year: 1650 }), ground(), port()).board, null);
+});
+
+test('Lisbon\'s board of 1550 is baked from this model, fitted to its ground and its real places', () => {
+  assert.equal(bakedBoardAsset('lisbon', 1550), BAKED_BOARDS['lisbon:1550']);
+  assert.equal(bakedBoardAsset('lisbon', 1650), null);
+  const path = new URL('../' + BAKED_BOARDS['lisbon:1550'], import.meta.url);
+  assert.ok(existsSync(path));
+  const baked = JSON.parse(readFileSync(path, 'utf8')), board = baked.board;
+  assert.equal(baked.port, 'lisbon'); assert.equal(baked.year, 1550);
+  assert.equal(board.version, BOARD_VERSION);
+  assert.equal(board.span, 8192); assert.equal(baked.region.span, 8192);
+  assert.match(baked.key, /^[0-9a-f]{16}$/);
+  assert.equal(baked.survey.length, BOARD_SURVEY_SIZE ** 2);
+  assert.ok(baked.survey.some((h) => h < 0) && baked.survey.some((h) => h > 60), 'a survey of sea and hills');
+  assert.deepEqual(baked.request.rivers, { ...BOARD_RIVERS });
+  assert.equal(baked.request.lived, false);
+  // The valleys' streams, not a brook to every hectare.
+  assert.ok(board.rivers.length >= 2 && board.rivers.length <= 12, `rivers: ${board.rivers.length}`);
+  // Its places are the real ones.
+  const real = new Set(OLD_WORLD_PLACES.lisbon.map(([name]) => name)), named = board.places.filter((p) => real.has(p.name));
+  assert.equal(board.places[0].kind, 'capital'); assert.equal(board.places[0].name, 'Lisboa');
+  assert.ok(named.length >= 6, `real places: ${named.map((p) => p.name)}`);
+  assert.ok(board.places[0].people > 15000 && board.buildings.count > 4000, `${board.places[0].people} people, ${board.buildings.count} buildings`);
+  // And the page is given it.
+  const build = readFileSync(new URL('../build.mjs', import.meta.url), 'utf8');
+  assert.ok(build.includes(`'${BAKED_BOARDS['lisbon:1550']}'`), 'the build publishes the baked board');
+});

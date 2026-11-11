@@ -18,7 +18,9 @@ import {loadForestMiddle,FOREST_MIDDLE_ASSETS,SUBTROPICAL_FOREST_MIDDLE_ASSETS,P
 import {bakeLandImpactDeformations} from './part-assembly.js';
 import {buildingFracturePipeline,createPortFractures} from './building-fracture.js';
 import {streetEdgeAt} from './town-streets.js';
-import {oldWorldCountry} from './old-world.js';
+import {oldWorldCountry,registerBakedBoard} from './old-world.js';
+import {bakedBoardAsset} from './board-model.js';
+import {createBoardStamp,requestBoardStampPipelines} from './board-stamp.js';
 import {CITY_BLOCK_FLOATS} from './old-world-city.js';
 import {CITY_DETAIL_M,CITY_TYPED_FLOATS,compileCityBuildingTypes} from './old-world-buildings.js';
 import {createCityTargets} from './city-targets.js';
@@ -828,6 +830,11 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     computePipe(GROUND_COVER_CULL,'ground cover cull'),computePipe(TREE_CULL,'tree cull'),computePipe(CITY_CULL,'city cull'),
     canopyMode==='off'||!useProcedural||search.get('forestGroves')==='0'?null:requestForestGrovePipelines({device,shader,module:modulePromise,format,samples}),
     requestLandCraterPipelines({device,shader,computePipe,module:modulePromise,format,samples})])pending?.catch(()=>{});
+  // A port whose country Castle and Commons' model founded ahead of time: the board is fetched while the rest
+  // loads, and handed over before the land is made. Without it the country is made by this game's own rules.
+  const bakedBoardPath=useProcedural&&typeof regionParam==='string'&&search.get('board')!=='off'?bakedBoardAsset(regionParam,resolvedYear):null;
+  const bakedBoardPromise=bakedBoardPath?fetch(bakedBoardPath).then(response=>response.ok?response.json():null).catch(()=>null):null;
+  if(bakedBoardPath)requestBoardStampPipelines({device,shader}).catch(()=>{});
   const leafBitmapPromise=load('assets/tree-foliage.png').then(r=>r.blob()).then(b=>createImageBitmap(b));
   let canopyFailure=null;
   let forestFailure=null;
@@ -903,6 +910,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       ...(placedX!==undefined?{x:placedX}:{}),
       ...(placedZ!==undefined?{z:placedZ}:{}),
     };
+  if(bakedBoardPromise)registerBakedBoard(await bakedBoardPromise);
   const proceduralPack=useProcedural?generateProceduralCoastalPack(proceduralSpec,proceduralGridOpts):null;
   let preloaded1550=null;
   if(proceduralPack){
@@ -926,6 +934,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     }
   }
   let activeRegion=proceduralPack?proceduralPack.region:ISLAND;
+  // For tools and tests: the land as it was made. scripts/bake-board.mjs reads a port's ground from here.
+  if(typeof window!=='undefined')window.oceanLand={get region(){return activeRegion;},get pack(){return proceduralPack;}};
   const craterCoast=activeRegion.id??'saba',craterLedger=createLandCraterLedger(portDamage?.openGround(craterCoast),activeRegion);
   let craters=null,craterLand=null,craterClouds=null;
   let heights,biome,nearTile=null,nearFailure=null,albedoImage=null;
@@ -1103,6 +1113,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   }else{
     device.queue.copyExternalImageToTexture({source:albedoImage},{texture:albedo},[ISLAND.albedoSize,ISLAND.albedoSize]);albedoImage.close();
   }
+  // What a board's people have made of this ground, stamped over its own colours before they are filtered down.
+  let boardStamp=proceduralPack?.board?await createBoardStamp({device,shader,board:proceduralPack.board}):null;
+  boardStamp?.stamp(albedo,activeRegion.albedoSize);
   mipPipe=await mipPipePromise;
   const enc=device.createCommandEncoder(),cp=enc.beginComputePass();cp.setPipeline(mipPipe);
   for(let m=1;m<albedoMips;m++){
@@ -1825,6 +1838,12 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     if(upgradedPack.albedo){
       device.queue.writeTexture({texture:albedo},upgradedPack.albedo,{bytesPerRow:activeRegion.albedoSize*4},[activeRegion.albedoSize,activeRegion.albedoSize]);
       regenerateAlbedoMips();
+      // A board on the new ground is stamped as soon as its tables are on the GPU; the queue keeps the order.
+      boardStamp?.dispose();boardStamp=null;
+      if(upgradedPack.board)createBoardStamp({device,shader,board:upgradedPack.board}).then(stamp=>{
+        if(terrainDisposed){stamp.dispose();return;}
+        boardStamp=stamp;stamp.stamp(albedo,activeRegion.albedoSize);regenerateAlbedoMips();
+      }).catch(()=>{});
     }
     const oldVerts=vertices,oldIdx=indices,oldSubIdx=submergedIndices!==indices?submergedIndices:null,oldPort=heldPort?null:portMesh;
     mesh=upgradedPack.mesh;
@@ -2165,7 +2184,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       portMesh?.vertices?.destroy?.();portMesh?.indices?.destroy?.();portFractures?.destroy();
       fine?.vertices?.destroy?.();fine?.indices?.destroy?.();fine?.submerged?.destroy?.();
       uniform?.destroy?.();nearDomain?.destroy?.();nearElevation?.destroy?.();coastalField?.destroy();
-      elevation?.destroy?.();lighting?.destroy?.();albedo?.destroy?.();groundDetail.dispose();
+      elevation?.destroy?.();lighting?.destroy?.();albedo?.destroy?.();groundDetail.dispose();boardStamp?.dispose();
       activeTownField?.texture.destroy();activeTownField?.window.destroy();
       if(nearAlbedo&&nearAlbedo!==albedo)nearAlbedo?.destroy?.();
       biomeTexture?.destroy?.();leafTexture?.destroy?.();leafMean?.destroy?.();

@@ -26,7 +26,7 @@ const WALL_RAYS = 144;
 const WALL_HEIGHT_M = CITY_CURTAIN.height;
 const WALL_THICK_M = CITY_CURTAIN.thick;
 
-function mulberry(seed) {
+export function mulberry(seed) {
   let a = seed >>> 0;
   return () => {
     a = (a + 0x6d2b79f5) >>> 0;
@@ -38,7 +38,7 @@ function mulberry(seed) {
 }
 
 // A grid of lists: what lies near a point, without asking everything.
-function makeHash(cell) {
+export function makeHash(cell) {
   const cells = new Map(), key = (i, j) => (i + 32768) * 65536 + (j + 32768);
   return {
     add(item, x0, z0, x1, z1) {
@@ -57,7 +57,7 @@ function makeHash(cell) {
   };
 }
 
-function segDist(px, pz, ax, az, bx, bz) {
+export function segDist(px, pz, ax, az, bx, bz) {
   const dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz;
   const t = l2 > 1e-9 ? Math.max(0, Math.min(1, ((px - ax) * dx + (pz - az) * dz) / l2)) : 0;
   return Math.hypot(px - ax - dx * t, pz - az - dz * t);
@@ -73,12 +73,12 @@ function segsCross(ax, az, bx, bz, cx, cz, dx, dz) {
 // A footprint is a box on the ground: centre, width across its local x, depth along its local
 // z, and the cosine and sine of its turn. Local to world as the port's buildings have it:
 // x + lx*c + lz*s, z - lx*s + lz*c.
-function footprint(x, z, w, d, yaw) { return { x, z, w, d, yaw, c: Math.cos(yaw), s: Math.sin(yaw) }; }
-function rectDist(f, px, pz) {
+export function footprint(x, z, w, d, yaw) { return { x, z, w, d, yaw, c: Math.cos(yaw), s: Math.sin(yaw) }; }
+export function rectDist(f, px, pz) {
   const dx = px - f.x, dz = pz - f.z, lx = Math.abs(dx * f.c - dz * f.s) - f.w / 2, lz = Math.abs(dx * f.s + dz * f.c) - f.d / 2;
   return Math.hypot(Math.max(lx, 0), Math.max(lz, 0));
 }
-function segRectDist(f, ax, az, bx, bz) {
+export function segRectDist(f, ax, az, bx, bz) {
   const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 2));
   let best = Infinity;
   for (let i = 0; i <= n && best > 0; i++) best = Math.min(best, rectDist(f, ax + (bx - ax) * i / n, az + (bz - az) * i / n));
@@ -91,9 +91,9 @@ function overlap(a, b, gap) {
     Math.abs(dx * b.c - dz * b.s) > hb + ha * cc + da * ss || Math.abs(dx * b.s + dz * b.c) > db + ha * ss + da * cc);
 }
 export const cityFootprintsOverlap = overlap;
-function local(f, lx, lz) { return [f.x + lx * f.c + lz * f.s, f.z - lx * f.s + lz * f.c]; }
+export function local(f, lx, lz) { return [f.x + lx * f.c + lz * f.s, f.z - lx * f.s + lz * f.c]; }
 
-function resampleCityLine(pts, step) {
+export function resampleCityLine(pts, step) {
   const out = [pts[0]];
   let need = step;
   for (let i = 1; i < pts.length; i++) {
@@ -116,6 +116,73 @@ function placeRadius(p, x, z) {
 function placeHit(p, x, z, pad) {
   const d = Math.hypot(x - p.x, z - p.z);
   return d < p.R + pad && d < placeRadius(p, x, z) + pad;
+}
+
+/**
+ * The masons. How a plan's blocks and typed buildings are stood on ground that is not level, and how a wall, its
+ * towers and its gates are built of them. `gates` are the openings a curtain leaves ({x, z, half}); `keep` marks
+ * a footprint as taken; `rr` answers a number from 0 to 1.
+ */
+export function cityMasonry({ heightAt, blocks, typed, typedTypes, typedBlocks, gates, keep, rr }) {
+  /* ---- how a block stands on ground that is not level: its floor at the height of its
+     street side, its walls carried down to the lowest corner ---- */
+  const seatBlock = (f, front = null) => {
+    const hw = f.w / 2, hd = f.d / 2;
+    let lo = Infinity, hi = -Infinity, sum = 0;
+    for (const [lx, lz] of [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]]) { const [x, z] = local(f, lx, lz), h = heightAt(x, z); lo = Math.min(lo, h); hi = Math.max(hi, h); sum += h; }
+    const floor = front === null ? sum / 4 : Math.max(lo, Math.min(hi, front));
+    return { floor, plinth: floor - lo + 0.7, range: hi - lo };
+  };
+  const pushBlock = (f, wallH, roofH, roof, wallKind, tone, base = null) => {
+    const { floor, plinth } = base ?? seatBlock(f);
+    blocks.push(f.x, floor, f.z, f.yaw, f.w, f.d, wallH, roofH, roof, wallKind, tone, plinth);
+    return floor;
+  };
+  // A building of a Cairn type: where it stands and how it is turned, and how far its type is
+  // stretched across, up and along to fill the plan's footprint. The blocks pushed just before
+  // it are its own (`own` of them): they stand in for it far off, and go when it is shot down.
+  const pushTyped = (type, x, floor, z, yaw, across, up, along, tone, own = 1) => {
+    const T = CITY_BUILDING_TYPES[type];
+    typed.push(x, floor, z, yaw, across / T.width, up / T.height, along / T.length, tone);
+    typedTypes.push(type);
+    typedBlocks.push(blocks.length / CITY_BLOCK_FLOATS - own, own);
+  };
+
+  /* ---- the wall and the castle, built of blocks ---- */
+  const curtain = (ax, az, bx, bz, out, height, tone) => {
+    const L = Math.hypot(bx - ax, bz - az), n = Math.max(1, Math.ceil(L / 11)), ux = (bx - ax) / L, uz = (bz - az) / L, yaw = Math.atan2(ux, uz);
+    for (let i = 0; i < n; i++) {
+      const mx = ax + (bx - ax) * (i + 0.5) / n, mz = az + (bz - az) * (i + 0.5) / n, len = L / n;
+      if (gates.some((q) => Math.hypot(q.x - mx, q.z - mz) < q.half + len / 2)) continue;
+      const f = footprint(mx, mz, WALL_THICK_M, len + 0.5, yaw), base = seatBlock(f);
+      pushBlock(f, height, 0, CITY_ROOF.FLAT + CITY_TYPED_ROOF, CITY_WALL.ASHLAR, tone, base);
+      keep(f);
+      // Merlons along the outward edge.
+      const side = (-uz * out[0] + ux * out[1]) >= 0 ? 1 : -1, ox = -uz * side * 0.8, oz = ux * side * 0.8, count = Math.floor(len / (2 * CITY_CURTAIN.merlon));
+      for (let m = 0; m < count; m++) {
+        const t = (m + 0.5) / count - 0.5;
+        blocks.push(mx + ux * len * t + ox, base.floor + height, mz + uz * len * t + oz, yaw, CITY_CURTAIN.parapet, CITY_CURTAIN.merlon, CITY_CURTAIN.rise, 0, CITY_ROOF.FLAT + CITY_TYPED_ROOF, CITY_WALL.ASHLAR, tone, 0);
+      }
+      // Close to, a length of the wall's own type, its parapet turned outward.
+      const type = len + 0.5 < (CITY_CURTAIN.short + CITY_CURTAIN.long) / 2 ? CITY_TYPE.CURTAIN_SHORT : CITY_TYPE.CURTAIN_LONG;
+      pushTyped(type, mx, base.floor, mz, side > 0 ? yaw : yaw + Math.PI, WALL_THICK_M, height, len + 0.5, tone, 1 + count);
+    }
+  };
+  const tower = (x, z, side, height, tone, type = CITY_TYPE.WALL_TOWER) => {
+    const f = footprint(x, z, side, side, rr() * 0.3);
+    const floor = pushBlock(f, height, 0, CITY_ROOF.FLAT + CITY_TYPED_ROOF, CITY_WALL.ASHLAR, tone);
+    pushTyped(type, x, floor, z, f.yaw, side, height, side, tone);
+    keep(f);
+  };
+  // A gate in a wall running along (ux, uz): a tower to either side and an arched passage under a chamber between
+  // them. Far off, the chamber alone.
+  const gate = (q, ux, uz) => {
+    for (const s of [-1, 1]) tower(q.x + ux * s * (q.half + 3.2), q.z + uz * s * (q.half + 3.2), 5.6, 13.5, 0.92);
+    const span = 2 * q.half + 0.8, floor = heightAt(q.x, q.z);
+    blocks.push(q.x, floor + CITY_GATE.passage, q.z, Math.atan2(ux, uz), CITY_GATE.thick, span, CITY_GATE.chamber, 0, CITY_ROOF.FLAT + CITY_TYPED_ROOF, CITY_WALL.ASHLAR, 0.9, 0);
+    pushTyped(CITY_TYPE.GATE, q.x, floor, q.z, Math.atan2(-uz, ux), span, CITY_GATE.passage + CITY_GATE.chamber, CITY_GATE.thick, 0.9);
+  };
+  return { seatBlock, pushBlock, pushTyped, curtain, tower, gate };
 }
 
 /**
@@ -386,57 +453,9 @@ export function layOldWorldCity({ heightAt, urbanAt, earlyAt, inlandAt, seat, ro
     }
   }
 
-  /* ---- how a block stands on ground that is not level: its floor at the height of its
-     street side, its walls carried down to the lowest corner ---- */
-  const seatBlock = (f, front = null) => {
-    const hw = f.w / 2, hd = f.d / 2;
-    let lo = Infinity, hi = -Infinity, sum = 0;
-    for (const [lx, lz] of [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]]) { const [x, z] = local(f, lx, lz), h = heightAt(x, z); lo = Math.min(lo, h); hi = Math.max(hi, h); sum += h; }
-    const floor = front === null ? sum / 4 : Math.max(lo, Math.min(hi, front));
-    return { floor, plinth: floor - lo + 0.7, range: hi - lo };
-  };
-  const pushBlock = (f, wallH, roofH, roof, wallKind, tone, base = null) => {
-    const { floor, plinth } = base ?? seatBlock(f);
-    blocks.push(f.x, floor, f.z, f.yaw, f.w, f.d, wallH, roofH, roof, wallKind, tone, plinth);
-    return floor;
-  };
-  // A building of a Cairn type: where it stands and how it is turned, and how far its type is
-  // stretched across, up and along to fill the plan's footprint. The blocks pushed just before
-  // it are its own (`own` of them): they stand in for it far off, and go when it is shot down.
-  const pushTyped = (type, x, floor, z, yaw, across, up, along, tone, own = 1) => {
-    const T = CITY_BUILDING_TYPES[type];
-    typed.push(x, floor, z, yaw, across / T.width, up / T.height, along / T.length, tone);
-    typedTypes.push(type);
-    typedBlocks.push(blocks.length / CITY_BLOCK_FLOATS - own, own);
-  };
+  /* ---- the masons: blocks seated on the ground, the wall and the castle built of them ---- */
   const keep = (f, r = Math.hypot(f.w, f.d) / 2) => solids.add(f, f.x - r, f.z - r, f.x + r, f.z + r);
-
-  /* ---- the wall and the castle, built of blocks ---- */
-  const curtain = (ax, az, bx, bz, out, height, tone) => {
-    const L = Math.hypot(bx - ax, bz - az), n = Math.max(1, Math.ceil(L / 11)), ux = (bx - ax) / L, uz = (bz - az) / L, yaw = Math.atan2(ux, uz);
-    for (let i = 0; i < n; i++) {
-      const mx = ax + (bx - ax) * (i + 0.5) / n, mz = az + (bz - az) * (i + 0.5) / n, len = L / n;
-      if (gates.some((q) => Math.hypot(q.x - mx, q.z - mz) < q.half + len / 2)) continue;
-      const f = footprint(mx, mz, WALL_THICK_M, len + 0.5, yaw), base = seatBlock(f);
-      pushBlock(f, height, 0, CITY_ROOF.FLAT + CITY_TYPED_ROOF, CITY_WALL.ASHLAR, tone, base);
-      keep(f);
-      // Merlons along the outward edge.
-      const side = (-uz * out[0] + ux * out[1]) >= 0 ? 1 : -1, ox = -uz * side * 0.8, oz = ux * side * 0.8, count = Math.floor(len / (2 * CITY_CURTAIN.merlon));
-      for (let m = 0; m < count; m++) {
-        const t = (m + 0.5) / count - 0.5;
-        blocks.push(mx + ux * len * t + ox, base.floor + height, mz + uz * len * t + oz, yaw, CITY_CURTAIN.parapet, CITY_CURTAIN.merlon, CITY_CURTAIN.rise, 0, CITY_ROOF.FLAT + CITY_TYPED_ROOF, CITY_WALL.ASHLAR, tone, 0);
-      }
-      // Close to, a length of the wall's own type, its parapet turned outward.
-      const type = len + 0.5 < (CITY_CURTAIN.short + CITY_CURTAIN.long) / 2 ? CITY_TYPE.CURTAIN_SHORT : CITY_TYPE.CURTAIN_LONG;
-      pushTyped(type, mx, base.floor, mz, side > 0 ? yaw : yaw + Math.PI, WALL_THICK_M, height, len + 0.5, tone, 1 + count);
-    }
-  };
-  const tower = (x, z, side, height, tone, type = CITY_TYPE.WALL_TOWER) => {
-    const f = footprint(x, z, side, side, rr() * 0.3);
-    const floor = pushBlock(f, height, 0, CITY_ROOF.FLAT + CITY_TYPED_ROOF, CITY_WALL.ASHLAR, tone);
-    pushTyped(type, x, floor, z, f.yaw, side, height, side, tone);
-    keep(f);
-  };
+  const { seatBlock, pushBlock, pushTyped, curtain, tower, gate } = cityMasonry({ heightAt, blocks, typed, typedTypes, typedBlocks, gates, keep, rr });
   if (wall.centre) {
     let since = 40;
     for (let k = 0; k < WALL_RAYS; k++) {
@@ -449,12 +468,8 @@ export function layOldWorldCity({ heightAt, urbanAt, earlyAt, inlandAt, seat, ro
       since += Math.hypot(b.x - a.x, b.z - a.z);
     }
     for (const q of gates) {
-      const a = wall.pts[q.k], b = wall.pts[(q.k + 1) % WALL_RAYS], L = Math.hypot(b.x - a.x, b.z - a.z) || 1, ux = (b.x - a.x) / L, uz = (b.z - a.z) / L;
-      for (const s of [-1, 1]) tower(q.x + ux * s * (q.half + 3.2), q.z + uz * s * (q.half + 3.2), 5.6, 13.5, 0.92);
-      // The gate between them: an arched passage under a chamber. Far off, the chamber alone.
-      const span = 2 * q.half + 0.8, floor = heightAt(q.x, q.z);
-      blocks.push(q.x, floor + CITY_GATE.passage, q.z, Math.atan2(ux, uz), CITY_GATE.thick, span, CITY_GATE.chamber, 0, CITY_ROOF.FLAT + CITY_TYPED_ROOF, CITY_WALL.ASHLAR, 0.9, 0);
-      pushTyped(CITY_TYPE.GATE, q.x, floor, q.z, Math.atan2(-uz, ux), span, CITY_GATE.passage + CITY_GATE.chamber, CITY_GATE.thick, 0.9);
+      const a = wall.pts[q.k], b = wall.pts[(q.k + 1) % WALL_RAYS], L = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+      gate(q, (b.x - a.x) / L, (b.z - a.z) / L);
     }
   }
   if (castle) {
