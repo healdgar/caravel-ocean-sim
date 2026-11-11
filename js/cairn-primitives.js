@@ -425,13 +425,22 @@ export function emitCairnScene(sceneSpec, helpers) {
     const [tx, ty, tz] = resolvePosition(pos, [0, 0, 0]);
     const ry = ((Array.isArray(rotDeg) ? resolveNumeric(rotDeg[1], 0) : resolveNumeric(rotDeg, 0)) * Math.PI) / 180;
     const cy = Math.cos(ry), sy = Math.sin(ry);
+    // Tilt, where it is asked: about x, then about z, before the turn about the vertical. A brace, a lean-to.
+    const tiltX = Array.isArray(rotDeg) ? (resolveNumeric(rotDeg[0], 0) * Math.PI) / 180 : 0;
+    const tiltZ = Array.isArray(rotDeg) ? (resolveNumeric(rotDeg[2], 0) * Math.PI) / 180 : 0;
+    const tilted = tiltX !== 0 || tiltZ !== 0, cx = Math.cos(tiltX), sx_ = Math.sin(tiltX), cz = Math.cos(tiltZ), sz_ = Math.sin(tiltZ);
     const sx = Array.isArray(scale) ? resolveNumeric(scale[0], 1) : resolveNumeric(scale, 1);
     const syScale = Array.isArray(scale) ? resolveNumeric(scale[1], 1) : resolveNumeric(scale, 1);
     const sz = Array.isArray(scale) ? resolveNumeric(scale[2], 1) : resolveNumeric(scale, 1);
     return (lx, ly, lz) => {
-      const x1 = lx * sx;
-      const y1 = ly * syScale;
-      const z1 = lz * sz;
+      let x1 = lx * sx;
+      let y1 = ly * syScale;
+      let z1 = lz * sz;
+      if (tilted) {
+        const yx = y1 * cx - z1 * sx_, zx = y1 * sx_ + z1 * cx;
+        const xz = x1 * cz - yx * sz_, yz = x1 * sz_ + yx * cz;
+        x1 = xz; y1 = yz; z1 = zx;
+      }
       const rx = x1 * cy + z1 * sy + tx;
       const ryWorld = y1 + ty;
       const rz = -x1 * sy + z1 * cy + tz;
@@ -585,6 +594,8 @@ export function emitCairnScene(sceneSpec, helpers) {
         const wallToWorld = (sAlong, yLocal, nAcross) =>
           primToWorld(f[0] + ux * sAlong + nx * nAcross, yLocal, f[2] + uz * sAlong + nz * nAcross);
 
+        // What the openings are framed in: dressed stone, unless the wall says otherwise (a timber front's are oak).
+        const surround = prim.surround ? resolveCairnMaterial(prim.surround, 11, 0.88) : { kind: 11, shade: 0.88 };
         const openings = Array.isArray(prim.openings) ? [...prim.openings] : [];
         openings.sort((a, b) => resolveNumeric(a.offset ?? a.at, 0) - resolveNumeric(b.offset ?? b.at, 0));
 
@@ -611,9 +622,9 @@ export function emitCairnScene(sceneSpec, helpers) {
             // door is hung with a plank leaf rather than glazed.
             if (op.door) emitBox(wallToWorld, s0 + 0.06, s1 - 0.06, y0 + sill, topOpenY, -th * 0.3, th * 0.3, 10, 0.5);
             else emitBox(wallToWorld, s0 + 0.06, s1 - 0.06, y0 + sill, topOpenY, -th * 0.36, th * 0.36, 14, 0.52);
-            emitBox(wallToWorld, s0 - 0.12, s0 + 0.08, y0 + sill, topOpenY, -th * 0.56, th * 0.56, 11, 0.88);
-            emitBox(wallToWorld, s1 - 0.08, s1 + 0.12, y0 + sill, topOpenY, -th * 0.56, th * 0.56, 11, 0.88);
-            emitBox(wallToWorld, s0 - 0.16, s1 + 0.16, topOpenY - 0.05, topOpenY + 0.22, -th * 0.58, th * 0.58, 11, 0.90);
+            emitBox(wallToWorld, s0 - 0.12, s0 + 0.08, y0 + sill, topOpenY, -th * 0.56, th * 0.56, surround.kind, surround.shade);
+            emitBox(wallToWorld, s1 - 0.08, s1 + 0.12, y0 + sill, topOpenY, -th * 0.56, th * 0.56, surround.kind, surround.shade);
+            emitBox(wallToWorld, s0 - 0.16, s1 + 0.16, topOpenY - 0.05, topOpenY + 0.22, -th * 0.58, th * 0.58, surround.kind, Math.min(1, surround.shade * 0.9 / 0.88));
           }
           curS = Math.max(curS, s1);
         }

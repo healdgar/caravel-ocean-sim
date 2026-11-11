@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import {buildPortPrefabGeometry} from '../js/coastal-world.js';
 import {oldWorldCountry} from '../js/old-world.js';
 import {CITY_BLOCK_FLOATS} from '../js/old-world-city.js';
-import {CITY_BUILDING_TYPES,CITY_HOUSE_STOREYS,CITY_TYPE,CITY_TYPED_FLOATS,CITY_TYPED_ROOF,cityTypeTarget,compileCityBuildingTypes} from '../js/old-world-buildings.js';
+import {CITY_BUILDING_TYPES,CITY_HOUSE_TYPES,CITY_TYPE,CITY_TYPED_FLOATS,CITY_TYPED_ROOF,cityTypeTarget,compileCityBuildingTypes} from '../js/old-world-buildings.js';
 import {createCityTargets,standCityBuildingMesh} from '../js/city-targets.js';
 import {applyBuildingFractureEvents,buildingFractureStateOf,buildingKindWithYaw,buildingReach,prepareBuildingFracture} from '../js/building-fracture.js';
 import {applyBuildingImpactDamage,classifyBuildingMaterial,sweepBuildingSegment} from '../js/gunnery-control.js';
@@ -60,7 +60,7 @@ test('every block of the plan belongs to one typed building, and each type keeps
 });
 
 test('a type stood in the world is the mesh the land shader would draw of it',()=>{
-  const index=firstOf(type=>type<2*CITY_HOUSE_STOREYS),t=record(index),source=types[plan.typedTypes[index]].source;
+  const index=firstOf(type=>type<CITY_HOUSE_TYPES),t=record(index),source=types[plan.typedTypes[index]].source;
   const world=standCityBuildingMesh(source,t[0],t[1],t[2],t[3],t[4],t[5],t[6]),c=Math.cos(t[3]),s=Math.sin(t[3]);
   assert.equal(world.length,source.vertices.length);
   let stone=0,glass=0;
@@ -80,7 +80,7 @@ test('a type stood in the world is the mesh the land shader would draw of it',()
 test('shot meets a city building, which only then becomes a building of the port',()=>{
   const port=freshPort(),targets=createCityTargets({city:plan,types:()=>types,port});
   assert.equal(targets.count,plan.typedCount);
-  const house=firstOf(type=>type<2*CITY_HOUSE_STOREYS),[from,to]=plumb(house);
+  const house=firstOf(type=>type<CITY_HOUSE_TYPES),[from,to]=plumb(house);
   // Over the sea, and high over the town: nothing, and nothing made ready.
   assert.equal(targets.sweep([0,5,400],[60,5,460],.08,null,sweepBuildingSegment),null);
   assert.equal(targets.sweep([from[0]-80,900,from[2]],[from[0]+80,900,from[2]],.08,null,sweepBuildingSegment),null);
@@ -114,9 +114,12 @@ test('shot meets a city building, which only then becomes a building of the port
 
 test('a struck city building breaks up as a port building does, and is put back from its record',()=>{
   const port=freshPort(),targets=createCityTargets({city:plan,types:()=>types,port}),store=createPortDamageStore(null,{dateMs:Date.UTC(1580,5,1)});
-  const house=firstOf(type=>type===CITY_TYPE.HOUSE_EAVES+2),t=record(house),c=Math.cos(t[3]),s=Math.sin(t[3]);
+  // A plain house of three floors with nothing between it and a gun twenty metres up its street.
+  const shot=index=>{const t=record(index),c=Math.cos(t[3]),s=Math.sin(t[3]),y=t[1]+4.4;return{t,c,s,y,from:[t[0]-20*s,y,t[2]-20*c],to:[t[0]+20*s,y,t[2]+20*c],d:[s,0,c]};};
+  const house=plan.typedTypes.findIndex((type,index)=>type===CITY_TYPE.HOUSE_EAVES+2&&(q=>targets.sweep(q.from,q.to,.08,null,sweepBuildingSegment)?.building?.city?.index===index)(shot(index)));
+  assert.ok(house>=0,'a three-storey house with a clear street before it');
   // From the street, square on to its front, at its first floor.
-  const y=t[1]+4.4,from=[t[0]-20*s,y,t[2]-20*c],to=[t[0]+20*s,y,t[2]+20*c],d=[s,0,c];
+  const{t,c,s,y,from,to,d}=shot(house);
   const first=targets.sweep(from,to,.08,null,sweepBuildingSegment);
   assert.equal(first.building.city.index,house);
   const instance=first.building,source=instance.fractureSource();

@@ -143,13 +143,13 @@ export function layBoardCountry({ baked, region, grid, heightAt, port, wet, LAND
   /* ---- buildings: each one the model stood, as this game's type of that size, turned to its street ---- */
   const { count, stand, form, kinds } = board.buildings, arches = board.arches;
   let houses = 0;
-  const standHouse = (k, f, storeys, toStreet) => {
+  const standHouse = (k, f, storeys, toStreet, mannered = true) => {
     const wallH = storeys * CITY_STOREY_M + boardHashUnit(k, 11) * 0.5;
     const base = seatBlock(f, toStreet ? heightAt(f.x - Math.sin(f.yaw) * (f.d / 2 + 1.5), f.z - Math.cos(f.yaw) * (f.d / 2 + 1.5)) : null);
     if (base.range > 7.5) { dropped.steep++; return; }
     const hue = form[k * 3 + 2], tone = BOARD_HOUSE_TINTS[Math.floor(boardHashUnit(k, 23) * BOARD_HOUSE_TINTS.length)] + 0.2 + 0.75 * (hue > 0 && hue < 1 ? hue : boardHashUnit(k, 31));
     // A broad front keeps its eaves to the street; a narrow, deep plot more often turns its gable to it.
-    const eaves = boardHashUnit(k, 47) < (f.w >= f.d * 0.8 ? 0.85 : 0.5), type = cityHouseType(storeys, eaves), T = CITY_BUILDING_TYPES[type], up = wallH / T.height;
+    const eaves = boardHashUnit(k, 47) < (f.w >= f.d * 0.8 ? 0.85 : 0.5), type = cityHouseType(storeys, eaves, mannered ? boardHashUnit(k, 53) : 0), T = CITY_BUILDING_TYPES[type], up = wallH / T.height;
     if (eaves) pushBlock(footprint(f.x, f.z, f.d, f.w, f.yaw + Math.PI / 2), wallH, 0.36 * T.length / 2 * up, CITY_ROOF.GABLE + CITY_TYPED_ROOF, CITY_WALL.HOUSE, tone, base);
     else pushBlock(f, wallH, 0.5 * T.width / 2 * up, CITY_ROOF.GABLE + CITY_TYPED_ROOF, CITY_WALL.HOUSE, tone, base);
     pushTyped(type, f.x, base.floor, f.z, f.yaw, f.w, wallH, f.d, tone);
@@ -202,15 +202,18 @@ export function layBoardCountry({ baked, region, grid, heightAt, port, wet, LAND
       pushTyped(CITY_TYPE.HALL, long.x, floor, long.z, long.yaw, long.w, CITY_HALL.height, long.d, 0.9);
       keep(long); occupy(long);
     } else {
-      // The model builds low: a house of one or two floors. A port city of the sixteenth century stood tall and
-      // close toward its middle, so the seat's houses gain floors as they near it.
-      let storeys = Math.max(1, Math.min(CITY_HOUSE_STOREYS, Math.round(h / CITY_STOREY_M)));
-      if (arch === 'shed') storeys = 1;
+      // The model builds low: a house of one or two floors, and so stood most of an Iberian port of the sixteenth
+      // century. Toward the seat's middle they gain a floor; four were the merchants' houses of its middle streets,
+      // and five the tallest of those (the Rua Nova's "three, four and even five").
+      let storeys = Math.max(1, Math.min(2, Math.round(h / CITY_STOREY_M)));
+      const plain = arch === 'shed' || arch === 'longhouse';
+      if (plain) storeys = 1;
       else if (place === 0 && seat.reach > 0) {
-        const near = 1 - Math.hypot(x - seat.x, z - seat.z) / seat.reach;
-        storeys = Math.min(CITY_HOUSE_STOREYS, storeys + (near > 0.72 ? 2 : near > 0.4 ? 1 : 0) + (arch === 'burgher' && near > 0.55 ? 1 : 0));
+        const near = 1 - Math.hypot(x - seat.x, z - seat.z) / seat.reach, lot = boardHashUnit(k, 59), merchant = arch === 'burgher' || arch === 'shop';
+        if (near > 0.72) storeys = merchant ? (lot < 0.1 ? 5 : lot < 0.4 ? 4 : 3) : lot < 0.55 ? 3 : 2;
+        else if (near > 0.4) storeys = Math.min(3, storeys + (lot < (merchant ? 0.5 : 0.25) ? 1 : 0));
       }
-      standHouse(k, f, storeys, fx || fz);
+      standHouse(k, f, Math.min(CITY_HOUSE_STOREYS, storeys), fx || fz, !plain);
     }
   }
 

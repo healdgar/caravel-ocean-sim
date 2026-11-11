@@ -10,7 +10,7 @@
 // street, square, garden or yard, and whether a tree may stand there. Each house, church,
 // tower and gate is also given its type, a building written in Cairn
 // (js/old-world-buildings.js), which the renderer draws in place of the block close to.
-import { CITY_CHURCH, CITY_BUILDING_TYPES, CITY_CURTAIN, CITY_GATE, CITY_HALL, CITY_STOREY_M, CITY_TYPE, CITY_TYPED_ROOF, cityHouseType } from './old-world-buildings.js';
+import { CITY_CHURCH, CITY_BUILDING_TYPES, CITY_CURTAIN, CITY_GATE, CITY_HALL, CITY_STOREY_M, CITY_TYPE, CITY_TYPED_ROOF, cityHousePick, cityHouseType } from './old-world-buildings.js';
 
 export const CITY_BLOCK_FLOATS = 12;
 export const CITY_ROOF = Object.freeze({ GABLE: 0, HIP: 1, PYRAMID: 2, FLAT: 3 });
@@ -592,10 +592,14 @@ export function layOldWorldCity({ heightAt, urbanAt, earlyAt, inlandAt, seat, ro
     const f = footprint(mx + px * set, mz + pz * set, front, depth, Math.atan2(px, pz));
     if (!fits(f, gap)) return 0;
     occupy(f);
-    const storeys = central ? 3 + (rr() < 0.45 ? 1 : 0) + (main && rr() < 0.4 ? 1 : 0) : late ? 1 + (rr() < 0.5 ? 1 : 0) + (main && rr() < 0.3 ? 1 : 0) : 2 + (rr() < 0.5 ? 1 : 0);
+    // Most of an Iberian port of the sixteenth century stood one to three floors. Four were the merchants' houses
+    // on the main streets of its middle, and five the tallest of those (the Rua Nova's "three, four and even five").
+    const high = rr(), trade = (central || late) && main ? rr() : 1;
+    const storeys = central ? 2 + (high < 0.6 ? 1 : 0) + (trade < 0.3 ? 1 : 0) + (trade < 0.07 && high < 0.6 ? 1 : 0)
+      : late ? 1 + (high < 0.4 ? 1 : 0) + (trade < 0.12 ? 1 : 0) : 1 + (high < 0.8 ? 1 : 0) + (high < 0.22 ? 1 : 0);
     const wallH = storeys * CITY_STOREY_M + rr() * 0.5, base = seatBlock(f, heightAt(mx, mz));
     const tone = TINTS[Math.floor(rr() * TINTS.length)] + 0.2 + 0.75 * rr();
-    const eaves = rr() < 0.74, type = cityHouseType(storeys, eaves), T = CITY_BUILDING_TYPES[type], up = wallH / T.height;
+    const eaves = rr() < 0.74, type = cityHouseType(storeys, eaves, cityHousePick(f.x, f.z)), T = CITY_BUILDING_TYPES[type], up = wallH / T.height;
     if (eaves) {
       // Eaves to the street: the ridge runs along it, the gables are party walls.
       pushBlock(footprint(f.x, f.z, depth, front, f.yaw + Math.PI / 2), wallH, 0.36 * T.length / 2 * up, CITY_ROOF.GABLE + CITY_TYPED_ROOF, CITY_WALL.HOUSE, tone, base);

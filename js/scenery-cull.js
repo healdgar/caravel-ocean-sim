@@ -4,7 +4,7 @@
 // JavaScript only uploads an instance when it first comes into use. Used by ground cover and trees.
 import { FRAME_WGSL } from './wgsl/common.js';
 import { TREE_GEOMETRY_ERRORS, TREE_LOD, TREE_VARIANTS } from './vegetation.js';
-import { CITY_HOUSE_STOREYS, CITY_TYPE } from './old-world-buildings.js';
+import { CITY_HOUSE_TYPES, CITY_TYPE } from './old-world-buildings.js';
 
 const INSTANCE_BYTES = 32;
 const DRAW_WORDS = 4;
@@ -96,7 +96,7 @@ fn scenerySelect(index:u32,group:u32,instance:SceneryInstance)->i32 {
 // params.x is that distance, the one the land shader is given; previous marks who was shown.
 export const CITY_CULL = cullShell(1, /* wgsl */ `
 fn scenerySelect(index:u32,group:u32,instance:SceneryInstance)->i32 {
-  let house=group<${2 * CITY_HOUSE_STOREYS}u;
+  let house=group<${CITY_HOUSE_TYPES}u;
   let compound=(group>=${CITY_TYPE.CHURCH_LEFT}u&&group<=${CITY_TYPE.CHURCH_GREAT}u)||group==${CITY_TYPE.GATE}u||group==${CITY_TYPE.CURTAIN_SHORT}u||group==${CITY_TYPE.CURTAIN_LONG}u;
   let relative=instance.root.xyz+vec3f(0.0,6.0,0.0)-F.camPos.xyz;
   let near=distance(instance.root.xyz,F.camPos.xyz)<params.x+select(0.0,16.0,compound);

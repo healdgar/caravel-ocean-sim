@@ -5,7 +5,7 @@ import {OLD_WORLD_LAND,OLD_WORLD_CITIES,OLD_WORLD_NO_TREES,inIberia,oldWorldPeop
   oldWorldHoldingSeat,growOldWorldTown,layOldWorldRoads,oldWorldCountry} from '../js/old-world.js';
 import {CITY_BLOCK_FLOATS,CITY_GROUND,CITY_ROOF,CITY_TREES,CITY_WALL,cityFootprintsOverlap} from '../js/old-world-city.js';
 import {streetEdgeAt} from '../js/town-streets.js';
-import {CITY_BUILDING_TYPES,CITY_CHURCH,CITY_DETAIL_M,CITY_GATE,CITY_HOUSE_STOREYS,CITY_TYPE,CITY_TYPED_FLOATS,CITY_TYPED_ROOF,cityHouseType,compileCityBuildingTypes} from '../js/old-world-buildings.js';
+import {CITY_BUILDING_TYPES,CITY_CHURCH,CITY_DETAIL_M,CITY_GATE,CITY_HOUSE_STOREYS,CITY_HOUSE_TYPES,CITY_TYPE,CITY_TYPED_FLOATS,CITY_TYPED_ROOF,cityHouseType,compileCityBuildingTypes} from '../js/old-world-buildings.js';
 import {CITY_CULL} from '../js/scenery-cull.js';
 import {TERRAIN} from '../js/wgsl/terrain.js';
 
@@ -194,7 +194,7 @@ test('a city is laid out on its ground: streets that join, lots that touch nothi
 });
 
 test('every building type is written in Cairn and compiles to a mesh of the size it claims',()=>{
-  assert.equal(CITY_BUILDING_TYPES.length,2*CITY_HOUSE_STOREYS+9);
+  assert.equal(CITY_BUILDING_TYPES.length,CITY_HOUSE_TYPES+9);assert.ok(CITY_HOUSE_TYPES>2*CITY_HOUSE_STOREYS);
   for(const spec of CITY_BUILDING_TYPES){
     // Plain data: a spec survives a round trip through JSON unchanged.
     assert.deepEqual(JSON.parse(JSON.stringify(spec)),spec,spec.name);
@@ -218,10 +218,11 @@ test('every building type is written in Cairn and compiles to a mesh of the size
     assert.ok(lo[1]<-6&&lo[1]>-7,`${type.name} footing ${lo[1]}`);
     const church=id>=CITY_TYPE.CHURCH_LEFT&&id<=CITY_TYPE.CHURCH_GREAT,spread=church?(id===CITY_TYPE.CHURCH_GREAT?CITY_CHURCH.great:CITY_CHURCH.parish).tower:0;
     assert.ok(hi[0]<=type.width/2+spread+.7&&lo[0]>=-type.width/2-spread-.7,`${type.name} across ${lo[0]}..${hi[0]}`);
-    assert.ok(hi[2]<=type.length/2+.7&&lo[2]>=-type.length/2-.7,`${type.name} along ${lo[2]}..${hi[2]}`);
+    // A house may stand out over its street as far as a jetty, a balcony or a pentice, and its eaves over that.
+    assert.ok(hi[2]<=type.length/2+.7&&lo[2]>=-type.length/2-(id<CITY_HOUSE_TYPES?1.75:.7),`${type.name} along ${lo[2]}..${hi[2]}`);
     assert.ok(hi[1]>=type.height&&hi[1]<type.height+(church?CITY_CHURCH.towerRise+CITY_CHURCH.spire+.5:7.5),`${type.name} up ${hi[1]} of ${type.height}`);
     // A house has windows and a tiled roof, and so has the castle's hall; a tower, a gate and the wall are stone.
-    if(id<2*CITY_HOUSE_STOREYS||id===CITY_TYPE.HALL)assert.ok(kinds.has(14)&&kinds.has(13)&&kinds.has(12));
+    if(id<CITY_HOUSE_TYPES||id===CITY_TYPE.HALL)assert.ok(kinds.has(14)&&kinds.has(13)&&kinds.has(12));
     if(id>=CITY_TYPE.WALL_TOWER&&id<=CITY_TYPE.CURTAIN_LONG)assert.ok(kinds.has(11)&&!kinds.has(12)&&!kinds.has(13));
   });
   // Taller houses are taller types, and a ridge along the street is a different type from a gable to it.
@@ -247,12 +248,12 @@ test('each house, church, tower, gate and length of wall of the plan is a Cairn 
     assert.ok(t.every(Number.isFinite));
     // A type is stretched to its plot, never beyond recognition.
     assert.ok(t[4]>.65&&t[4]<1.6&&t[5]>.75&&t[5]<1.4&&t[6]>.6&&t[6]<1.6,`${CITY_BUILDING_TYPES[type].name} stretched ${t[4]}, ${t[5]}, ${t[6]}`);
-    if(type<2*CITY_HOUSE_STOREYS)houses++;
+    if(type<CITY_HOUSE_TYPES)houses++;
     // The gate's far block is its chamber, up over the passage; every other block stands at the type's root.
     let key=`${t[0]},${t[1]},${t[2]}`;
     if(type===CITY_TYPE.GATE)key=[...flagged.keys()].find(k=>{const [x,y,z]=k.split(',').map(Number);return x===t[0]&&z===t[2]&&Math.abs(y-t[1]-CITY_GATE.passage)<.01;})??'none';
     if(!flagged.has(key))missing++;
-    else if(type<2*CITY_HOUSE_STOREYS)assert.equal(plan.blocks[flagged.get(key)+10],t[7],'a house and its block share a tint');
+    else if(type<CITY_HOUSE_TYPES)assert.equal(plan.blocks[flagged.get(key)+10],t[7],'a house and its block share a tint');
   }
   assert.equal(missing,0,'every type has the block it replaces');
   assert.equal(houses,plan.houses);
