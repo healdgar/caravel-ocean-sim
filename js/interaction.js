@@ -1,8 +1,21 @@
 // GPU-owned bow contacts, a moving local wake grid, and fixed-capacity spray.
+import { requestOnce } from './gpu-program-cache.js';
 import { WAKE_SIZE, SPRAY_COUNT, SHEET_COUNT, CONTACT_COUNT, AUDIO_CONTACT_COUNT, SHEET_UPDATE, WATER_CONTACTS, WAKE_UPDATE, SPRAY_UPDATE, WATER_EFFECTS } from './wgsl/interaction.js';
 import { boatForwardSpeed } from './boat.js';
 import { createDeckWash } from './deck.js';
 
+// The bow sheets and the spray, asked for once a device and shared by the fleet.
+export function requestWaterEffectPipelines({ device, shader }) {
+  return requestOnce(device, 'water effects', () => shader(WATER_EFFECTS, 'water effects').then(module => Promise.all(['sheet', 'drop'].map(kind => device.createRenderPipelineAsync({
+    label: kind === 'sheet' ? 'bow sheets' : 'spray', layout: 'auto',
+    vertex: { module, entryPoint: kind + 'VS' },
+    fragment: { module, entryPoint: kind + 'FS', targets: [{ format: 'rgba16float', blend: {
+      color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' }, alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
+    } }] },
+    primitive: { topology: 'triangle-list', cullMode: 'none' },
+    depthStencil: { format: 'depth32float', depthWriteEnabled: false, depthCompare: 'greater' }, multisample: { count: 4 },
+  })))));
+}
 export async function createWaterInteraction({ device, frameUBO, hullUBO, seaView, seaSampler, envView, transView, skyView, sunVis, shader, computePipe, surfaceWaves=null,wakeTargets=null }) {
   const bu = GPUBufferUsage, tu = GPUTextureUsage;
   if(!sunVis){sunVis=device.createBuffer({size:16,usage:bu.STORAGE|bu.COPY_DST});device.queue.writeBuffer(sunVis,0,new Float32Array([1,1,1,1]));}
@@ -19,15 +32,7 @@ export async function createWaterInteraction({ device, frameUBO, hullUBO, seaVie
   const [deck, contactPipe, wakePipe, sprayPipe, sheetPipe, renderPipes] = await Promise.all([
     deckPromise,
     computePipe(WATER_CONTACTS, 'hull contact'), computePipe(WAKE_UPDATE, 'local wake'), computePipe(SPRAY_UPDATE, 'spray update'), computePipe(SHEET_UPDATE, 'impact sheets'),
-    shader(WATER_EFFECTS, 'water effects').then(module => Promise.all(['sheet', 'drop'].map(kind => device.createRenderPipelineAsync({
-      label: kind === 'sheet' ? 'bow sheets' : 'spray', layout: 'auto',
-      vertex: { module, entryPoint: kind + 'VS' },
-      fragment: { module, entryPoint: kind + 'FS', targets: [{ format: 'rgba16float', blend: {
-        color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' }, alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
-      } }] },
-      primitive: { topology: 'triangle-list', cullMode: 'none' },
-      depthStencil: { format: 'depth32float', depthWriteEnabled: false, depthCompare: 'greater' }, multisample: { count: 4 },
-    })))),
+    requestWaterEffectPipelines({ device, shader }),
   ]);
   const buffer = b => ({ buffer: b });
   const bind = (pipe, resources) => device.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries: resources.map((resource, binding) => ({ binding, resource })) });

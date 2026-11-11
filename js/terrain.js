@@ -1,7 +1,8 @@
 import { ISLAND, decodeIsland, decodeBiome, islandGeometry, islandVegetation, terrainSample, terrainSurfaceSample, constrainIslandMotion, safeLandfallStart, SPANISH_MAIN_1550_REGIONS, HISTORICAL_COLONIAL_PORTS, resolveColonialEra, generateProceduralCoastalPack, upgradeProceduralPackWithRealDEM } from './terrain-model.js';
 import { TREE_VARIANTS, TREE_VERTEX_FLOATS, TREE_PIXEL_ERROR, treeRenderGeometry,
   GROUND_COVER,createGroundCoverPatches,groundCoverInstances,groundCoverGeometry } from './vegetation.js';
-import { TERRAIN, TERRAIN_LIGHT } from './wgsl/terrain.js';
+import { TERRAIN, TERRAIN_LIGHT, COASTAL_FIELD_BAKE } from './wgsl/terrain.js';
+import { GROUND_DETAIL_BAKE } from './wgsl/ground-detail.js';
 import { createCoastalField } from './coastal-field.js';
 import { coastalClarity, coastalTurbidityScale } from './sea-colour.js';
 import { createSceneryCull, CITY_CULL, GROUND_COVER_CULL, TREE_CULL } from './scenery-cull.js';
@@ -10,7 +11,7 @@ import {loadTerrainNear,terrainNearGeometry,terrainNearContains,terrainNearSampl
 import {chooseForestSurfaceCodec} from './forest-surfaces.js';
 import {loadForestScenery,createForestRenderer,FOREST_VERTEX_WGSL,FOREST_SHADOW_WGSL,FOREST_ASSETS,SUBTROPICAL_FOREST_ASSETS,PORTUGAL_FOREST_ASSETS} from './forest-scenery.js';
 import {FOREST_CROWN_WGSL} from './forest-crowns.js';
-import {FOREST_GROVE_WGSL,loadForestGroves,createForestGroves,PORTUGAL_FOREST_GROVE_ASSETS,SUBTROPICAL_FOREST_GROVE_ASSETS} from './forest-groves.js';
+import {FOREST_GROVE_WGSL,loadForestGroves,createForestGroves,requestForestGrovePipelines,PORTUGAL_FOREST_GROVE_ASSETS,SUBTROPICAL_FOREST_GROVE_ASSETS} from './forest-groves.js';
 import {foreshorePalmPlacement} from './forest-trunks.js';
 import {loadForestMass,createForestMassRenderer,forestMiddleWoodPartition,FOREST_MASS_VERTEX_WGSL} from './forest-mass.js';
 import {loadForestMiddle,FOREST_MIDDLE_ASSETS,SUBTROPICAL_FOREST_MIDDLE_ASSETS,PORTUGAL_FOREST_MIDDLE_ASSETS} from './forest-middle.js';
@@ -21,7 +22,7 @@ import {oldWorldCountry} from './old-world.js';
 import {CITY_BLOCK_FLOATS} from './old-world-city.js';
 import {CITY_DETAIL_M,CITY_TYPED_FLOATS,compileCityBuildingTypes} from './old-world-buildings.js';
 import {createCityTargets} from './city-targets.js';
-import {createLandCraterLedger,createLandCraters,landCraterSize} from './land-craters.js';
+import {createLandCraterLedger,createLandCraters,requestLandCraterPipelines,landCraterSize} from './land-craters.js';
 import {sharedGroundDetail} from './ground-detail.js';
 import {createLandShadows} from './shadows.js';
 
@@ -30,6 +31,7 @@ import {
   portClearanceEnvelope,
   PLANT_STREET_GAP_M,
   runLandfallDiscoveryPipeline,
+  completeProceduralCoastalPack,
   build1550HistoricalTerritoryPack,
   detectCoastalContinuationDirs,
   prepareSectionConnectedBorders,
@@ -820,6 +822,12 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     wo.capture({source:TERRAIN,vertex:{entryPoint:'groundVS',buffers:treeBuffers},entry:'groundFS',world:'in.world',groups:1,land:true}),
   ]):[null,null]);
   submergedPipesPromise.catch(()=>{});
+  // The rest of the land's programs, asked for now so that they compile while the land itself is being made. Left
+  // until each is first needed, they compile one after another once it is.
+  for(const pending of [computePipe(COASTAL_FIELD_BAKE,'coastal field'),computePipe(GROUND_DETAIL_BAKE,'ground detail bake'),
+    computePipe(GROUND_COVER_CULL,'ground cover cull'),computePipe(TREE_CULL,'tree cull'),computePipe(CITY_CULL,'city cull'),
+    canopyMode==='off'||!useProcedural||search.get('forestGroves')==='0'?null:requestForestGrovePipelines({device,shader,module:modulePromise,format,samples}),
+    requestLandCraterPipelines({device,shader,computePipe,module:modulePromise,format,samples})])pending?.catch(()=>{});
   const leafBitmapPromise=load('assets/tree-foliage.png').then(r=>r.blob()).then(b=>createImageBitmap(b));
   let canopyFailure=null;
   let forestFailure=null;
@@ -906,6 +914,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
           Object.assign(proceduralPack,res.upgradedPack);
         }
       }catch{/* fallback below */}
+      // The pipeline leaves its base as ground and port alone. Had it failed past that, the land is dressed here.
+      if(proceduralPack.heights)completeProceduralCoastalPack(proceduralPack);
     }
     if(!proceduralPack.heights){
       if(useRealDEM){

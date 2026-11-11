@@ -4,6 +4,7 @@
 // sends a short list of where shot went, only while there is any, and never learns who that struck. What has
 // befallen people lives on the GPU, for the last few towns visited, and the fallen lie a day by the game's calendar.
 // It is not saved: after a reload the ruins are still there, and the people are all back on their feet.
+import { requestOnce } from './gpu-program-cache.js';
 import { createIndigenousCrewModels } from './crew.js';
 import { DRESS_MASK_SCALE, indigenousDress } from './indigenous-dress.js';
 import { createDistantCrewLOD } from './crew-lod.js';
@@ -71,6 +72,43 @@ function townLooks(random, indigenous, cultureId) {
   return data;
 }
 
+const TOWNSFOLK_VERTICES = [{
+  arrayStride: 60,
+  attributes: [
+    { shaderLocation: 0, offset: 0, format: 'float32x3' },
+    { shaderLocation: 1, offset: 12, format: 'float32x3' },
+    { shaderLocation: 2, offset: 24, format: 'float32x3' },
+    { shaderLocation: 3, offset: 36, format: 'uint16x4' },
+    { shaderLocation: 4, offset: 44, format: 'float32x4' },
+  ],
+}];
+// The people of a port, drawn, shadowed and walked: asked for once a device.
+export function requestTownsfolkPipelines({ device, shader, format = 'rgba16float', samples = 4 }) {
+  return requestOnce(device, `townsfolk ${format} ${samples}`, async () => {
+    const [renderModule, shadowModule, walkModule] = await Promise.all([
+      shader(TOWNSFOLK_RENDER, 'townsfolk'),
+      shader(TOWNSFOLK_SHADOW, 'townsfolk shadow'),
+      shader(TOWNSFOLK_WALK, 'townsfolk walk'),
+    ]);
+    return Promise.all([
+      device.createRenderPipelineAsync({
+        label: 'townsfolk', layout: 'auto',
+        vertex: { module: renderModule, entryPoint: 'townsfolkVS', buffers: TOWNSFOLK_VERTICES },
+        fragment: { module: renderModule, entryPoint: 'fs', targets: [{ format }] },
+        primitive: { topology: 'triangle-list', cullMode: 'none' },
+        depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
+        multisample: { count: samples },
+      }),
+      device.createRenderPipelineAsync({
+        label: 'townsfolk shadow', layout: 'auto',
+        vertex: { module: shadowModule, entryPoint: 'townsfolkShadowVS', buffers: TOWNSFOLK_VERTICES },
+        primitive: { topology: 'triangle-list', cullMode: 'none' },
+        depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'less', depthBias: 2, depthBiasSlopeScale: 1.5 },
+      }),
+      device.createComputePipelineAsync({ label: 'townsfolk walk', layout: 'auto', compute: { module: walkModule, entryPoint: 'main' } }),
+    ]);
+  });
+}
 export async function createTownsfolk({ device, frameUBO, transView, skyView, sampClamp, envCubeView, sunVisBuf, shadows, shader, format = 'rgba16float', samples = 4, shared = null, isMobile = false }) {
   const B = GPUBufferUsage;
   const buffer = (label, data, usage) => {
@@ -79,38 +117,8 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     return b;
   };
   const models = shared.models;
-  const layout = [{
-    arrayStride: 60,
-    attributes: [
-      { shaderLocation: 0, offset: 0, format: 'float32x3' },
-      { shaderLocation: 1, offset: 12, format: 'float32x3' },
-      { shaderLocation: 2, offset: 24, format: 'float32x3' },
-      { shaderLocation: 3, offset: 36, format: 'uint16x4' },
-      { shaderLocation: 4, offset: 44, format: 'float32x4' },
-    ],
-  }];
-  const [renderModule, shadowModule, walkModule] = await Promise.all([
-    shader(TOWNSFOLK_RENDER, 'townsfolk'),
-    shader(TOWNSFOLK_SHADOW, 'townsfolk shadow'),
-    shader(TOWNSFOLK_WALK, 'townsfolk walk'),
-  ]);
-  const [pipeline, shadowPipeline, walkPipeline] = await Promise.all([
-    device.createRenderPipelineAsync({
-      label: 'townsfolk', layout: 'auto',
-      vertex: { module: renderModule, entryPoint: 'townsfolkVS', buffers: layout },
-      fragment: { module: renderModule, entryPoint: 'fs', targets: [{ format }] },
-      primitive: { topology: 'triangle-list', cullMode: 'none' },
-      depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
-      multisample: { count: samples },
-    }),
-    device.createRenderPipelineAsync({
-      label: 'townsfolk shadow', layout: 'auto',
-      vertex: { module: shadowModule, entryPoint: 'townsfolkShadowVS', buffers: layout },
-      primitive: { topology: 'triangle-list', cullMode: 'none' },
-      depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'less', depthBias: 2, depthBiasSlopeScale: 1.5 },
-    }),
-    device.createComputePipelineAsync({ label: 'townsfolk walk', layout: 'auto', compute: { module: walkModule, entryPoint: 'main' } }),
-  ]);
+  const layout = TOWNSFOLK_VERTICES;
+  const [pipeline, shadowPipeline, walkPipeline] = await requestTownsfolkPipelines({ device, shader, format, samples });
   const lighting = shadows.bind(pipeline);
   // The shader they share with sailors looks up a ship for its gun flashes. There is none ashore.
   const hullData = new Float32Array(52);

@@ -11,7 +11,8 @@ import { stepCrewPhysicsState, applyCrewRealism } from './crew-physics.js';
 import { applyCrewWounds, clearCrewWounds, recordCrewWound } from './crew-wounds.js';
 import { crewClearsRail, crewOpenEdgeInset, crewFeetAwash, sendCrewOverboard, stepCrewOverboard, stepGaleKnockdowns, clearCrewOverboard } from './crew-overboard.js';
 import { crewLoseHandsAloft, stepCrewAloftFall } from './crew-aloft.js';
-import { createGunneryTools } from './gunnery-tools.js';
+import { createGunneryTools, requestGunneryToolPipelines } from './gunnery-tools.js';
+import { requestOnce } from './gpu-program-cache.js';
 import { CREW_RENDER, CREW_SHADOW, CREW_POSE_BLEND } from './wgsl/crew.js';
 import { NINA_DESIGN } from './models/nina.js';
 import { VICTORY_DESIGN } from './models/victory.js';
@@ -571,6 +572,39 @@ export function preloadCrewModels(){
   return preloadedCrewModels;
 }
 
+const CREW_BODY_VERTICES=[{arrayStride:60,attributes:[
+  {shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},
+  {shaderLocation:2,offset:24,format:'float32x3'},{shaderLocation:3,offset:36,format:'uint16x4'},
+  {shaderLocation:4,offset:44,format:'float32x4'},
+]}];
+// Every program a company is drawn and posed with, asked for once a device. Startup asks before it waits on
+// anything, so they compile beside the ocean's; the first company to be made finds them compiling or done.
+export function requestCrewPipelines({device,shader,format='rgba16float',samples=4,waterOptics=null}){
+  return requestOnce(device,`crew ${format} ${samples}`,async()=>{
+    const modules=Promise.all([shader(CREW_RENDER,'crew'),shader(CREW_SHADOW,'crew shadow')]);
+    const drawn=(label,entryPoint,target,depthStencil)=>modules.then(([module])=>device.createRenderPipelineAsync({label,layout:'auto',vertex:{module,entryPoint:'vs',buffers:CREW_BODY_VERTICES},
+      fragment:{module,entryPoint,targets:[target]},primitive:{topology:'triangle-list',cullMode:'none'},
+      depthStencil:{format:'depth32float',...depthStencil},multisample:{count:samples}}));
+    const layingDepth={depthWriteEnabled:true,depthCompare:'greater'};
+    const tools=requestGunneryToolPipelines({device,shader,format,samples,waterOptics});tools.catch(()=>{});
+    Promise.resolve(waterOptics).then(optics=>optics?.capture({source:CREW_RENDER,entry:'crewFS',vertex:{buffers:CREW_BODY_VERTICES},groups:2})).catch(()=>{});
+    const [pipeline,cutDepthPipeline,cutPipeline,shadowPipeline,poseBlendPipeline,clipPipeline,solver,arrowPipeline,turnPipeline]=await Promise.all([
+      drawn('crew','crewFS',{format},layingDepth),
+      drawn('crew surviving','surviving',{format,writeMask:0},layingDepth),
+      drawn('crew cut','crewFS',{format},{depthWriteEnabled:false,depthCompare:'equal'}),
+      modules.then(([,shadowModule])=>device.createRenderPipelineAsync({label:'crew shadow',layout:'auto',vertex:{module:shadowModule,entryPoint:'vs',buffers:CREW_BODY_VERTICES},primitive:{topology:'triangle-list',cullMode:'none'},
+        depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less',depthBias:2,depthBiasSlopeScale:1.5}})),
+      shader(CREW_POSE_BLEND,'crew pose blend').then(module=>device.createComputePipelineAsync({label:'crew pose blend',layout:'auto',compute:{module,entryPoint:'main'}})),
+      createCrewClipPipeline(device,shader),
+      // One solver for the device: every company and garrison on it is solved together.
+      createCrewSolver(device,shader),
+      createCrewArrowPipeline(device,shader),
+      createCrewTurnPipeline(device,shader),
+    ]);
+    return {pipeline,cutDepthPipeline,cutPipeline,shadowPipeline,poseBlendPipeline,clipPipeline,solver,arrowPipeline,turnPipeline};
+  });
+}
+
 export async function createCrew({device,frameUBO,hullUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,wetness,shader,format='rgba16float',samples=4,shared=null,modelId='nina',waterOptics=null}) {
   const modelsPromise=shared?.models?Promise.resolve(shared.models):(preloadedCrewModels??fetchCrewModels());
   modelsPromise.catch(()=>{});
@@ -578,35 +612,22 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
   // Built now, at loading, rather than the first time anyone has to step aside.
   crewDeckField({modelId,...requirePlayableShipModel(modelId).runtime});
   const buffer=(label,data,usage)=>{const b=device.createBuffer({label,size:data.byteLength,usage:usage|B.COPY_DST});device.queue.writeBuffer(b,0,data);return b;};
-  const layout=[{arrayStride:60,attributes:[
-    {shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},
-    {shaderLocation:2,offset:24,format:'float32x3'},{shaderLocation:3,offset:36,format:'uint16x4'},
-    {shaderLocation:4,offset:44,format:'float32x4'},
-  ]}];
-  const [models,[module,shadowModule]]=await Promise.all([
-    modelsPromise,
-    shared?Promise.resolve([null,null]):Promise.all([shader(CREW_RENDER,'crew'),shader(CREW_SHADOW,'crew shadow')]),
-  ]);
+  const layout=CREW_BODY_VERTICES;
+  const [models,requested]=await Promise.all([modelsPromise,requestCrewPipelines({device,shader,format,samples,waterOptics})]);
   if(models.some(m=>m.animator.joints.length!==65))throw Error('Crew expects the prepared 65-joint rigs');
-  const crewPipeline=(label,entryPoint,target,depthStencil)=>device.createRenderPipelineAsync({label,layout:'auto',vertex:{module,entryPoint:'vs',buffers:layout},
-    fragment:{module,entryPoint,targets:[target]},primitive:{topology:'triangle-list',cullMode:'none'},
-    depthStencil:{format:'depth32float',...depthStencil},multisample:{count:samples}});
-  const layingDepth={depthWriteEnabled:true,depthCompare:'greater'};
-  const [pipeline,cutDepthPipeline,cutPipeline,shadowPipeline,captainTexture]=await Promise.all([shared?.pipeline??crewPipeline('crew','crewFS',{format},layingDepth),
-    shared?.cutDepthPipeline??crewPipeline('crew surviving','surviving',{format,writeMask:0},layingDepth),
-    shared?.cutPipeline??crewPipeline('crew cut','crewFS',{format},{depthWriteEnabled:false,depthCompare:'equal'}),
-    shared?.shadowPipeline??device.createRenderPipelineAsync({label:'crew shadow',layout:'auto',vertex:{module:shadowModule,entryPoint:'vs',buffers:layout},primitive:{topology:'triangle-list',cullMode:'none'},
-    depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less',depthBias:2,depthBiasSlopeScale:1.5}}),
+  const [pipeline,cutDepthPipeline,cutPipeline,shadowPipeline,captainTexture]=await Promise.all([shared?.pipeline??requested.pipeline,
+    shared?.cutDepthPipeline??requested.cutDepthPipeline,
+    shared?.cutPipeline??requested.cutPipeline,
+    shared?.shadowPipeline??requested.shadowPipeline,
     shared?.captainTexture?Promise.resolve(shared.captainTexture):uploadCaptainTexture(device,models[2])]);
   const captainTexView=shared?.captainTexView??captainTexture.createView();
   const captainSampler=shared?.captainSampler??device.createSampler({label:'captain pigment',magFilter:'linear',minFilter:'linear',mipmapFilter:'linear',addressModeU:'repeat',addressModeV:'repeat',maxAnisotropy:8});
   const group=(pipe,resources)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((resource,binding)=>resource?.resource!==undefined?resource:{binding,resource})});
-  const poseBlendPipeline=shared?.poseBlendPipeline??await shader(CREW_POSE_BLEND,'crew pose blend').then(blendModule=>device.createComputePipelineAsync({label:'crew pose blend',layout:'auto',compute:{module:blendModule,entryPoint:'main'}}));
-  const clipPipeline=shared?.clipPipeline??await createCrewClipPipeline(device,shader);
-  // One solver for the device: every company and garrison on it is solved together.
-  const solver=await createCrewSolver(device,shader);
-  const arrowPipeline=shared?.arrowPipeline??await createCrewArrowPipeline(device,shader);
-  const turnPipeline=shared?.turnPipeline??await createCrewTurnPipeline(device,shader);
+  const poseBlendPipeline=shared?.poseBlendPipeline??requested.poseBlendPipeline;
+  const clipPipeline=shared?.clipPipeline??requested.clipPipeline;
+  const solver=requested.solver;
+  const arrowPipeline=shared?.arrowPipeline??requested.arrowPipeline;
+  const turnPipeline=shared?.turnPipeline??requested.turnPipeline;
   // Each body's mesh is uploaded once and shared by the fleet: the men's, the women's and the captain's.
   const geometry=models.map((model,i)=>{
     if(shared?.geometry?.[i])return shared.geometry[i];

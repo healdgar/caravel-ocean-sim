@@ -11,7 +11,7 @@ import {TOWN_ABOUT,TOWN_AFRAID,TOWN_DOWN,TOWN_FALLING,TOWN_RUN_SPEEDS,TOWN_SHOT_
 let browser,server,page;
 before(async()=>{
   server=createDevServer();server.listen(0,'127.0.0.1');await once(server,'listening');
-  browser=await chromium.launch({args:['--enable-unsafe-webgpu',`--use-angle=${process.env.WEBGPU_BACKEND||'metal'}`,'--disable-gpu-watchdog']});
+  browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||undefined,args:['--enable-unsafe-webgpu',`--use-angle=${process.env.WEBGPU_BACKEND||'metal'}`,'--disable-gpu-watchdog']});
   page=await browser.newPage();
   await page.route('**/__townsfolk',route=>route.fulfill({contentType:'text/html',body:'<!doctype html>'}));
   await page.goto(`http://127.0.0.1:${server.address().port}/__townsfolk`);

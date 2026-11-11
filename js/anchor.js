@@ -1,4 +1,5 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
+import { requestOnce } from './gpu-program-cache.js';
 import { ANCHOR_IRON } from './anchor-iron.js';
 import {ANCHOR_GPU_RENDER} from './wgsl/anchor.js';
 import {anchorFairlead,anchorRodePoints,anchorEquipment,anchorEyeOffset} from './anchor-state.js';
@@ -48,17 +49,25 @@ export function writeAnchorGPUState(state,boat,target){
   return active?(age<.75?192:144):0;
 }
 
+const ANCHOR_VERTICES=[{arrayStride:32,attributes:[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},{shaderLocation:2,offset:24,format:'float32x2'}]}];
+// The anchor, its rode and its splash, asked for once a device and shared by the fleet.
+export function requestAnchorPipelines({device,shader,format,samples,waterOptics=null}){
+  return requestOnce(device,`anchor ${format} ${samples}`,async()=>{
+    Promise.resolve(waterOptics).then(optics=>optics?.capture({source:ANCHOR_GPU_RENDER,vertex:{buffers:ANCHOR_VERTICES},groups:2})).catch(()=>{});
+    const module=await shader(ANCHOR_GPU_RENDER,'anchor and hemp rode');
+    return Promise.all([false,true].map(transparent=>device.createRenderPipelineAsync({label:transparent?'anchor splash':'anchor and rode',layout:'auto',
+    vertex:{module,entryPoint:'vs',buffers:ANCHOR_VERTICES},fragment:{module,entryPoint:'fs',targets:[{format,...(transparent?{blend:{color:{srcFactor:'one',dstFactor:'one-minus-src-alpha'},alpha:{srcFactor:'one',dstFactor:'one-minus-src-alpha'}}}:{})}]},
+    primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:!transparent,depthCompare:'greater'},multisample:{count:samples}})));
+  });
+}
 export async function createAnchorRenderer({device,frameUBO,transView,skyView,sampler,envCubeView,sunVisBuf,shadows,shader,format,samples,waterOptics=null}){
-  const module=await shader(ANCHOR_GPU_RENDER,'anchor and hemp rode'),template=createAnchorGPUTemplate();
+  const template=createAnchorGPUTemplate();
   const buffer=device.createBuffer({label:'anchor immutable templates',size:template.vertices.byteLength,usage:GPUBufferUsage.VERTEX|GPUBufferUsage.COPY_DST});
   device.queue.writeBuffer(buffer,0,template.vertices);
   const poseBuffer=device.createBuffer({label:'anchor pose',size:64,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
   const stateBuffer=device.createBuffer({label:'anchor compact physical state',size:ANCHOR_GPU_STATE_FLOATS*4,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
   const pose=new Float32Array(16),values=new Float32Array(ANCHOR_GPU_STATE_FLOATS),axis=[0,0,0];let solidCount=0,totalCount=0,stowedCache='';
-  const layout=[{arrayStride:32,attributes:[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},{shaderLocation:2,offset:24,format:'float32x2'}]}];
-  const pipes=await Promise.all([false,true].map(transparent=>device.createRenderPipelineAsync({label:transparent?'anchor splash':'anchor and rode',layout:'auto',
-    vertex:{module,entryPoint:'vs',buffers:layout},fragment:{module,entryPoint:'fs',targets:[{format,...(transparent?{blend:{color:{srcFactor:'one',dstFactor:'one-minus-src-alpha'},alpha:{srcFactor:'one',dstFactor:'one-minus-src-alpha'}}}:{})}]},
-    primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:!transparent,depthCompare:'greater'},multisample:{count:samples}})));
+  const layout=ANCHOR_VERTICES,pipes=await requestAnchorPipelines({device,shader,format,samples,waterOptics});
   const resources=[{buffer:frameUBO},transView,skyView,sampler,envCubeView,{buffer:sunVisBuf},{buffer:poseBuffer},{buffer:stateBuffer}];
   const groups=pipes.map(pipe=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({binding,resource}))}));
   const shadowGroups=pipes.map(pipe=>shadows.bind(pipe));

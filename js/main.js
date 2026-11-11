@@ -2,6 +2,9 @@ import {forestSurfaceFeatures} from './forest-surfaces.js';
 import {withSceneHullProfile} from './wgsl/hull.js';
 import {pruneWGSLFunctions} from './wgsl-prune.js';
 import {createGPUProgramCache} from './gpu-program-cache.js';
+import {HULL_CONTACT_QUERY} from './wgsl/hull-contact.js';
+import {PART_ASSEMBLY_POSE_UPDATE} from './wgsl/part-assembly.js';
+import {SHIP_FRACTURE_POSE_UPDATE} from './wgsl/ship-fracture.js';
 import {createAstronomyClock,writeAstronomyFrame} from './astronomy.js';
 import {createCelestialRenderer} from './celestial.js';
 import {withCelestialFrame,CELESTIAL_FRAME_BYTES,CELESTIAL_FRAME_FLOATS} from './wgsl/celestial.js';
@@ -30,13 +33,13 @@ import { createGunRecoilMap } from './gunnery-models.js';
 import { isArrowAmmo } from './gunnery-state.js';
 import { CREW_VOICES } from './voice-assets.js';
 import { createAnchorState } from './anchor-state.js';
-import { createAnchorRenderer } from './anchor.js';
+import { createAnchorRenderer, requestAnchorPipelines } from './anchor.js';
 import { createDolphins } from './dolphins.js';
 import { createDolphinControls } from './dolphin-ui.js';
 import { createDeferredMarineLife } from './marine-loader.js';
 import { createMarineControls } from './marine-ui.js';
 import { createWeatherState, createImpactDetector, STORM_WEATHER, WEATHER_TYPES } from './weather-state.js';
-import { createWeatherRenderer } from './weather.js';
+import { createWeatherRenderer, requestWeatherPipelines } from './weather.js';
 import { writeLateenUniform, yardTransferAvailable } from './lateen.js';
 import { packRopeChainUniform } from './rope-wave.js';
 import { createVolumetricClouds } from './clouds.js';
@@ -58,13 +61,14 @@ import {readyFleetModels,fleetFromSearch,fleetToSearch,fleetFormation,broadsideF
 import {withPooledFleetWakes} from './wgsl/fleet-wakes.js';
 import {SCENE_WAKE_SAMPLE} from './wgsl/surface-coupling.js';
 import {withSceneShadowCount, SHADOW_CAST} from './wgsl/shadows.js';
-import { createVesselShadows, createSceneShadows, createLandShadows } from './shadows.js';
+import { createVesselShadows, createSceneShadows, createLandShadows, requestVesselShadowPipelines } from './shadows.js';
 import { createSeaShadows } from './sea-shadows.js';
-import { createWaterInteraction } from './interaction.js';
+import { createWaterInteraction, requestWaterEffectPipelines } from './interaction.js';
+import { requestDeckWaterPipelines } from './deck.js';
 import { WATER_CONTACTS, WAKE_UPDATE, SPRAY_UPDATE, SHEET_UPDATE, WATER_EFFECTS } from './wgsl/interaction.js';
 import { SCENE_DECK_UPDATE, DECK_RENDER } from './wgsl/deck.js';
 import { createSurfaceWaves } from './surface-waves.js';
-import { createSpindrift } from './spindrift.js';
+import { createSpindrift, requestCrestSprayPipeline } from './spindrift.js';
 import { SPINDRIFT_UPDATE, SPINDRIFT_RENDER } from './wgsl/spindrift.js';
 import { createSurfaceWetness } from './wetness.js';
 import { WET_CLEAR, WET_DEPOSIT, WET_SEA, withPosedWetnessProbes } from './wgsl/wetness.js';
@@ -72,7 +76,7 @@ import {createRowingWaterProbe} from './rowing-water.js';
 import {createRowingSurfaceEvents} from './rowing-surface-events.js';
 import {ROWING_DESIGNS} from './models/rowing.js';
 import { createWaterOptics } from './water-optics.js';
-import { createUnderwater } from './underwater.js';
+import { createUnderwater, requestUnderwaterPipeline } from './underwater.js';
 import { createShipAssetCache } from './ship-mesh.js';
 import { createVesselPose, POSED_VERTEX_LAYOUT, withPosedVesselVertices } from './vessel-pose.js';
 import { VESSEL_POSE_UPDATE, VESSEL_SURFACE_POSE_UPDATE } from './wgsl/vessel-pose.js';
@@ -81,17 +85,17 @@ import {getShipParts} from './ship-parts.js';
 import {ARCHETYPE_SCALE_PRESETS, computeArchetypeScaleSpec} from './ship-part-taxonomy.js';
 import {vesselVerticalScale} from './hull.js';
 import { crewWorkLabel, manGunStationsImmediate } from './crew-work.js';
-import { createCrew, createFortSoldiers, preloadCrewModels, CAPTAIN_ORDERS, reviveCompany } from './crew.js';
-import { createTownsfolk } from './townsfolk.js';
+import { createCrew, createFortSoldiers, preloadCrewModels, requestCrewPipelines, CAPTAIN_ORDERS, reviveCompany } from './crew.js';
+import { createTownsfolk, requestTownsfolkPipelines } from './townsfolk.js';
 import { createProps } from './props.js';
 import { HELM_EYE_Z, HELM_EYE_HEIGHT, HULL_UNIFORM_BYTES, HULL_VERTICAL_SCALE, DEFAULT_BOAT_LENGTH, DEFAULT_BOAT_BEAM } from './hull.js';
 import { SAIL_KEYS, sailingState, pointOfSail } from './sailing.js';
 import { CARAVEL, CARAVEL_DAMAGED, WATER_FILTER } from './wgsl/caravel.js';
-import { createHullFlood, HULL_DAMAGE_UNIFORM_BYTES } from './hull-flood.js';
+import { createHullFlood, requestHullFloodPipelines, HULL_DAMAGE_UNIFORM_BYTES } from './hull-flood.js';
 import { hullHoleDepth } from './hull-holes.js';
 import { loseHandInGale } from './crew-overboard.js';
 import { boatTargets, boatSpring, boatRotate, stepBoatSteering, stepBoatView, stepDeckWalk, resetDeckWalk, boatEyePosition, boatForwardSpeed, boatWaveSlope, stepBoatSurge, boatWaveAttitude, boatHydrodynamics, setBoatViewStation, deckStationLabel, DEFAULT_PROVISION_DAYS, KNOT_TO_MPS } from './boat.js';
-import { SHIP_COLORS, DEFAULT_SHIP_COLORS, getShipColorsInfo, setVesselColors, strikeVesselColors, createShipColorsRenderer } from './ship-colors.js';
+import { SHIP_COLORS, DEFAULT_SHIP_COLORS, getShipColorsInfo, setVesselColors, strikeVesselColors, createShipColorsRenderer, requestShipColorsPipeline } from './ship-colors.js';
 import { createDockingBoardingState, computeBoardingStrength } from './boarding-docking.js';
 import { createFreeCannon } from './free-cannon.js';
 import { createCastleDuelController, CASTLE_DUEL_DISTANCE_M } from './castle-duel.js';
@@ -431,6 +435,54 @@ async function main() {
   ];
   for (const p of [rgba8MipPipePromise, waterFilterPipePromise, surfaceWavesPromise, waterOpticsPromise, cloudsPromise, terrainPromise, ...prewarmPromises]) p.catch(() => {});
 
+  // The ships, their crews, the port's people and the weather ask for their programs here as well, before anything
+  // is awaited. A subsystem that waits its turn to ask adds its whole compile to the load, and on Direct3D that is
+  // seconds: tests/startup-wave-gpu.test.mjs holds the line.
+  const sceneShadows=createSceneShadows(device,fleetCount),wakePool=createFleetWakePool(device,fleetCount);
+  const fleetHullUBO=mkBuf(96*fleetCount,GU.UNIFORM|GU.STORAGE|GU.COPY_DST,'scene hull masks'),fleetHullData=new Float32Array(24*fleetCount);
+  const seaShadowsPromise=createSeaShadows({device,computePipe,sceneShadows,count:fleetCount});
+  const dolphinsPromise=Promise.all([surfaceWavesPromise,waterOpticsPromise]).then(([surfaceWaves,waterOptics])=>createDolphins({waterOptics,surfaceWaves,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA}));
+  const gunEffectsPromise=surfaceWavesPromise.then(surfaceWaves=>createGunneryEffects({surfaceWaves,hulls:fleetHullUBO,hullCount:fleetCount,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA,depthSamples:MSAA}));
+  const gunSeaPromise=surfaceWavesPromise.then(surfaceWaves=>createGunnerySeaProbe({surfaceWaves,device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,computePipe}));
+  const gunportSafetyPromise=surfaceWavesPromise.then(surfaceWaves=>createGunportSafety({surfaceWaves,device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,maxAge:1.5,maxTravel:6.0}));
+  const probePipePromise=computePipe(SCENE_HEIGHT_PROBE,'height probe');
+  const vesselSource=withPosedVesselVertices(CARAVEL);
+  const vesselVertexLayouts=[{arrayStride:36,attributes:[
+    {shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},
+    {shaderLocation:2,offset:24,format:'float32'},{shaderLocation:3,offset:28,format:'float32x2'},
+  ]},POSED_VERTEX_LAYOUT];
+  const vesselPrograms=new Map();
+  const requestVesselPrograms=modelId=>{
+    if(!vesselPrograms.has(modelId)){
+      const pipeline=shader(vesselSource,modelId+' vessel').then(module=>device.createRenderPipelineAsync({label:modelId+' vessel',layout:'auto',
+        vertex:{module,entryPoint:'vs',buffers:vesselVertexLayouts},fragment:{module,entryPoint:'fs',targets:[{format:HDR}]},
+        primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:MSAA}}));
+      const submerged=waterOpticsPromise.then(optics=>optics.capture({source:vesselSource,vertex:{entryPoint:'vs',buffers:vesselVertexLayouts},world:'in.world',groups:2}));
+      pipeline.catch(()=>{});submerged.catch(()=>{});
+      vesselPrograms.set(modelId,{pipeline,submerged});
+    }
+    return vesselPrograms.get(modelId);
+  };
+  for(const modelId of new Set(fleetSpecs.map(spec=>spec.modelId)))requestVesselPrograms(modelId);
+  const startupPrograms=[
+    seaShadowsPromise,dolphinsPromise,gunEffectsPromise,gunSeaPromise,gunportSafetyPromise,probePipePromise,
+    requestCrewPipelines({device,shader,format:HDR,samples:MSAA,waterOptics:waterOpticsPromise}),
+    requestVesselShadowPipelines({device,shader,posed:true}),
+    requestWaterEffectPipelines({device,shader}),
+    requestDeckWaterPipelines({device,shader}),
+    requestCrestSprayPipeline({device,shader}),
+    requestWeatherPipelines({device,shader,format:HDR,samples:MSAA}),
+    requestTownsfolkPipelines({device,shader,format:HDR,samples:MSAA}),
+    requestShipColorsPipeline({device,shader,format:HDR,samples:MSAA}),
+    requestUnderwaterPipeline({device,shader,format:HDR,samples:MSAA,cameraProbe:true,surfaceWaves:true,shadows:true,skipAir:true}),
+    requestHullFloodPipelines({device,shader,format:HDR,samples:MSAA}),
+    computePipe(HULL_CONTACT_QUERY,'underside incident sea contact'),
+    computePipe(PART_ASSEMBLY_POSE_UPDATE,'shared part assembly deformation'),
+    computePipe(SHIP_FRACTURE_POSE_UPDATE,'ship fracture'),
+    ...(fleetSpecs.some(spec=>getShipParts(spec.modelId).equipment.anchor!==null)?[requestAnchorPipelines({device,shader,format:HDR,samples:MSAA,waterOptics:waterOpticsPromise})]:[]),
+  ];
+  for(const p of startupPrograms)p.catch(()=>{});
+
   // The open sea has no coastal wave code at all. Land brings its own pipeline with it.
   const oceanPipelines=coast=>{
     const label='ocean';
@@ -574,9 +626,7 @@ async function main() {
   ]);
   const rowingSurfaceEvents=createRowingSurfaceEvents(surfaceWaves);
   const shipAssets=createShipAssetCache(),renderAssets=new Map();
-  const sceneShadows=createSceneShadows(device,fleetCount),wakePool=createFleetWakePool(device,fleetCount);
-  const seaShadows=await createSeaShadows({device,computePipe,sceneShadows,count:fleetCount});
-  const fleetHullUBO=mkBuf(96*fleetCount,GU.UNIFORM|GU.STORAGE|GU.COPY_DST,'scene hull masks'),fleetHullData=new Float32Array(24*fleetCount);
+  const seaShadows=await seaShadowsPromise;
   const oakSampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear',
     addressModeU: 'repeat', addressModeV: 'repeat', maxAnisotropy: 8 });
   async function shipRenderAsset(modelId){
@@ -584,18 +634,8 @@ async function main() {
     const asset=shipAssets.get(modelId),gpuPose=asset.gpuPose;
     if(gpuPose!==true||typeof asset.pose==='function')throw Error('Ship rendering cannot bypass shared WebGPU deformation');
     fleetModelCode(asset.model); // A future model needs an explicit hull backend.
-    const source=gpuPose?withPosedVesselVertices(CARAVEL):CARAVEL;
-    const vertexLayouts=[{arrayStride:36,attributes:[
-      {shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},
-      {shaderLocation:2,offset:24,format:'float32'},{shaderLocation:3,offset:28,format:'float32x2'},
-    ]},...(gpuPose?[POSED_VERTEX_LAYOUT]:[])];
-    const submergedPromise=waterOptics.capture({source,vertex:{entryPoint:'vs',buffers:vertexLayouts},world:'in.world',groups:2});
-    submergedPromise.catch(()=>{});
-    const module=await shader(source,modelId+' vessel');
-    const pipeline=await device.createRenderPipelineAsync({label:modelId+' vessel',layout:'auto',
-      vertex:{module,entryPoint:'vs',buffers:vertexLayouts},fragment:{module,entryPoint:'fs',targets:[{format:HDR}]},
-      primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:MSAA}});
-    const submerged=await submergedPromise;
+    const vertexLayouts=vesselVertexLayouts,programs=requestVesselPrograms(modelId);
+    const [pipeline,submerged]=await Promise.all([programs.pipeline,programs.submerged]);
     const indexBuffer=mkBuf(asset.indices.byteLength,GU.INDEX|GU.COPY_DST,modelId+' shared indices');
     device.queue.writeBuffer(indexBuffer,0,asset.indices);
     const result={asset,gpuPose,pipeline,submerged,indexBuffer,poseAssets:null,damaged:null,
@@ -614,13 +654,8 @@ async function main() {
       }};
     renderAssets.set(modelId,result);return result;
   }
-  const dolphinsPromise=createDolphins({waterOptics,surfaceWaves,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA});
-  const gunEffectsPromise=createGunneryEffects({surfaceWaves,hulls:fleetHullUBO,hullCount:fleetCount,device,frameUBO,transView,skyView,sampler:sampClamp,envView:envCubeView,sunVis:sunVisBuf,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,format:HDR,samples:MSAA,depthSamples:MSAA});
-  const gunSeaPromise=createGunnerySeaProbe({surfaceWaves,device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,computePipe});
-  const gunportSafetyPromise=createGunportSafety({surfaceWaves,device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,maxAge:1.5,maxTravel:6.0});
-  const probePipePromise=computePipe(SCENE_HEIGHT_PROBE,'height probe');
   const uniqueShipAssetsPromise=Promise.all([...new Set(fleetSpecs.map(s=>s.modelId))].map(shipRenderAsset));
-  for(const p of [dolphinsPromise,gunEffectsPromise,gunSeaPromise,gunportSafetyPromise,probePipePromise,uniqueShipAssetsPromise])p.catch(()=>{});
+  uniqueShipAssetsPromise.catch(()=>{});
   const oakImage = await oakImagePromise;
   const oakMips = Math.floor(Math.log2(Math.max(oakImage.width, oakImage.height))) + 1;
   const oakTex = device.createTexture({ size: [oakImage.width, oakImage.height], format: 'rgba8unorm',

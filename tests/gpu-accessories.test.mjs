@@ -19,7 +19,7 @@ test('gunnery tools cannot restore a CPU triangle-animation backend',()=>{
 });
 
 function assertGPUAnchorRuntime(source){
-  const renderer=source.slice(source.indexOf('export async function createAnchorRenderer')),update=renderer.slice(renderer.indexOf('update(state,boat)'),renderer.indexOf('drawSubmerged(pass)'));
+  const renderer=source.slice(source.indexOf('export function requestAnchorPipelines')),update=renderer.slice(renderer.indexOf('update(state,boat)'),renderer.indexOf('drawSubmerged(pass)'));
   assert.ok(update.length>200);assert.match(renderer,/shader\(ANCHOR_GPU_RENDER/,'anchor draws must use the GPU expansion shader');assert.match(update,/writeAnchorGPUState\(/,'anchor updates contain physical commands');
   assert.doesNotMatch(update,/\b(?:triangle|tube)\s*\(|vertices\.set\s*\(/,'anchor updates must not tessellate geometry on CPU');assert.doesNotMatch(update,/writeBuffer\(\s*buffer\s*,/,'anchor updates must not upload animated vertices');
 }

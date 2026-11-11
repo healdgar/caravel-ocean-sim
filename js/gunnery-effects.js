@@ -207,9 +207,25 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
   // The billows all smoke is carved from: made once, here, on the GPU, then halved three times over.
   const noise=device.createTexture({label:'cannon smoke billows',size:[GUNNERY_NOISE_SIZE,GUNNERY_NOISE_SIZE,GUNNERY_NOISE_SIZE],dimension:'3d',format:'rgba8unorm',mipLevelCount:GUNNERY_NOISE_LEVELS,usage:T.STORAGE_BINDING|T.TEXTURE_BINDING});
   const noiseSampler=device.createSampler({label:'cannon smoke billows',minFilter:'linear',magFilter:'linear',mipmapFilter:'linear',addressModeU:'repeat',addressModeV:'repeat',addressModeW:'repeat'});
+  // Every program here is asked for before any is waited on: they compile together, not one after another.
+  const source=surfaceWaves?coupleSurfaceHeight(GUNNERY_RENDER,'gunnerySeaDisplacement(q).y','p',{group:1,uniformBinding:0,textureBinding:1,samplerName:'gunnerySeaSampler'}):GUNNERY_RENDER;
+  const transparent={color:{srcFactor:'one',dstFactor:'one-minus-src-alpha'},alpha:{srcFactor:'one',dstFactor:'one-minus-src-alpha'}};
+  const types=[['gunneryBall',false],['gunneryVolume',true],['gunneryCrown',true],['gunneryDrop',true],['gunneryRing',true],['gunneryArc',true],['gunneryEarth',true],['gunneryDust',true]];
+  const buildEntries=[['gunnerySmokeAdvance','cannon smoke wind carry',[0,8,9,11]],['gunneryBuildSmoke','cannon smoke volumes',[0,3,8,9,11]],['gunneryBuildFires','fire volumes',[0,1,2,3,4]],
+    ['gunnerySortVolumes','cannon smoke draw order',[0,3,4,5,6]],['gunneryFireLighting','fire lights',[0,1,2,4,7]]];
+  const noisePipesPromise=shader(GUNNERY_NOISE,'cannon smoke billows').then(noiseModule=>Promise.all(['gunneryMakeNoise','gunneryHalveNoise'].map(entryPoint=>device.createComputePipelineAsync({label:'cannon smoke billows',layout:'auto',compute:{module:noiseModule,entryPoint}}))));
+  // Everything but the volumes draws in the scene's multisampled pass. The volumes march against a resolved copy of
+  // its depth, so they draw afterwards, onto the resolved colour, in a pass with no depth and one sample.
+  const pipelinesPromise=shader(source,'black powder cannon effects').then(module=>Promise.all(types.map(([entry,blend],i)=>device.createRenderPipelineAsync({label:entry,layout:'auto',
+    vertex:{module,entryPoint:entry+'VS'},fragment:{module,entryPoint:entry+'FS',targets:[{format,...(blend?{blend:transparent}:{})}]},
+    primitive:{topology:'triangle-list',cullMode:i===1?'front':'none'},
+    ...(i===1?{multisample:{count:1}}:{depthStencil:{format:'depth32float',depthWriteEnabled:i===0,depthCompare:'greater'},multisample:{count:samples}})}))));
+  const depthPipelinePromise=shader(GUNNERY_DEPTH_RESOLVE(samples),'cannon effects depth snapshot').then(depthModule=>device.createComputePipelineAsync({label:'resolve cannon effects depth',layout:'auto',compute:{module:depthModule,entryPoint:'gunneryResolveDepth'}}));
+  const buildPipesPromise=shader(GUNNERY_BUILD(L),'cannon smoke and fire volumes').then(buildModule=>Promise.all(buildEntries.map(([entryPoint,label])=>device.createComputePipelineAsync({label,layout:'auto',compute:{module:buildModule,entryPoint}}))));
+  for(const pending of [pipelinesPromise,depthPipelinePromise,buildPipesPromise])pending.catch(()=>{});
   {
-    const noiseModule=await shader(GUNNERY_NOISE,'cannon smoke billows'),level=baseMipLevel=>noise.createView({baseMipLevel,mipLevelCount:1});
-    const [make,halve]=await Promise.all(['gunneryMakeNoise','gunneryHalveNoise'].map(entryPoint=>device.createComputePipelineAsync({label:'cannon smoke billows',layout:'auto',compute:{module:noiseModule,entryPoint}})));
+    const level=baseMipLevel=>noise.createView({baseMipLevel,mipLevelCount:1});
+    const [make,halve]=await noisePipesPromise;
     const encoder=device.createCommandEncoder();
     let pass=encoder.beginComputePass({label:'cannon smoke billows'});
     pass.setPipeline(make);pass.setBindGroup(0,device.createBindGroup({layout:make.getBindGroupLayout(0),entries:[{binding:0,resource:level(0)}]}));
@@ -222,16 +238,7 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
     }
     device.queue.submit([encoder.finish()]);
   }
-  const source=surfaceWaves?coupleSurfaceHeight(GUNNERY_RENDER,'gunnerySeaDisplacement(q).y','p',{group:1,uniformBinding:0,textureBinding:1,samplerName:'gunnerySeaSampler'}):GUNNERY_RENDER;
-  const module=await shader(source,'black powder cannon effects');
-  const transparent={color:{srcFactor:'one',dstFactor:'one-minus-src-alpha'},alpha:{srcFactor:'one',dstFactor:'one-minus-src-alpha'}};
-  const types=[['gunneryBall',false],['gunneryVolume',true],['gunneryCrown',true],['gunneryDrop',true],['gunneryRing',true],['gunneryArc',true],['gunneryEarth',true],['gunneryDust',true]];
-  // Everything but the volumes draws in the scene's multisampled pass. The volumes march against a resolved copy of
-  // its depth, so they draw afterwards, onto the resolved colour, in a pass with no depth and one sample.
-  const pipelines=await Promise.all(types.map(([entry,blend],i)=>device.createRenderPipelineAsync({label:entry,layout:'auto',
-    vertex:{module,entryPoint:entry+'VS'},fragment:{module,entryPoint:entry+'FS',targets:[{format,...(blend?{blend:transparent}:{})}]},
-    primitive:{topology:'triangle-list',cullMode:i===1?'front':'none'},
-    ...(i===1?{multisample:{count:1}}:{depthStencil:{format:'depth32float',depthWriteEnabled:i===0,depthCompare:'greater'},multisample:{count:samples}})})));
+  const pipelines=await pipelinesPromise;
   const resources=[{buffer:frameUBO},transView,skyView,sampler,envView,{buffer:sunVis},seaView,seaSampler,{buffer:volumeBuffer},{buffer:ballBuffer},{buffer:contactBuffer},null,{buffer:arcBuffer},{buffer:orderBuffer},
     {buffer:stateBuffer},noise.createView(),noiseSampler];
   // Auto layouts reflect each entry point. Keep this table explicit so resource
@@ -243,18 +250,13 @@ export async function createGunneryEffects({device,frameUBO,transView,skyView,sa
   // settle: smoke has just gone, and the GPU has one more pass to make to write that down.
   let volumeGroup=null,depthReady=false,sorted=false,settle=false;
   const groups=pipelines.map((pipe,i)=>i===1?null:device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:bindings[i].map(binding=>({binding,resource:resources[binding]}))}));
-  const depthModule=await shader(GUNNERY_DEPTH_RESOLVE(samples),'cannon effects depth snapshot');
-  const depthPipeline=await device.createComputePipelineAsync({label:'resolve cannon effects depth',layout:'auto',compute:{module:depthModule,entryPoint:'gunneryResolveDepth'}});
+  const depthPipeline=await depthPipelinePromise;
   // Smoke and fire volumes, the order they are drawn in and the light fires throw are all worked out on the GPU.
-  const buildModule=await shader(GUNNERY_BUILD(L),'cannon smoke and fire volumes');
+  const buildPipes=await buildPipesPromise;
   // The smoke stages read no contact: iron striking timber, stone, earth or water is never a volume.
   const buildResources=[{buffer:frameUBO},{buffer:fireBuffer},{buffer:hullBuffer},{buffer:volumeBuffer},{buffer:countBuffer},{buffer:orderBuffer},{buffer:drawBuffer},{buffer:lightBuffer},
     {buffer:shotBuffer},{buffer:bankBuffer},null,{buffer:stateBuffer}];
-  const buildStages=await Promise.all([['gunnerySmokeAdvance','cannon smoke wind carry',[0,8,9,11]],['gunneryBuildSmoke','cannon smoke volumes',[0,3,8,9,11]],['gunneryBuildFires','fire volumes',[0,1,2,3,4]],
-    ['gunnerySortVolumes','cannon smoke draw order',[0,3,4,5,6]],['gunneryFireLighting','fire lights',[0,1,2,4,7]]].map(async([entryPoint,label,used])=>{
-    const pipeline=await device.createComputePipelineAsync({label,layout:'auto',compute:{module:buildModule,entryPoint}});
-    return {pipeline,group:device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:used.map(binding=>({binding,resource:buildResources[binding]}))})};
-  }));
+  const buildStages=buildEntries.map(([,,used],i)=>({pipeline:buildPipes[i],group:device.createBindGroup({layout:buildPipes[i].getBindGroupLayout(0),entries:used.map(binding=>({binding,resource:buildResources[binding]}))})}));
   const [carryStage,smokeStage,fireStage,sortStage,lightStage]=buildStages;
   // Where the frame and each hull keep the fire light their shaders read: [bytes into the light buffer, bytes into the
   // target, length]. The frame's eight floats sit in its spare slots; neighbouring slots go in one copy.

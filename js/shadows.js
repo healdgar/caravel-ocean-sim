@@ -1,3 +1,4 @@
+import { requestOnce } from './gpu-program-cache.js';
 import { SHADOW_CAST } from './wgsl/shadows.js';
 import { HULL_VERTICAL_SCALE } from './hull.js';
 import {POSED_VERTEX_LAYOUT,withPosedVesselVertices} from './vessel-pose.js';
@@ -68,6 +69,23 @@ export function createSceneShadows(device,count=2,resolution=2048){
   };
 }
 
+// The two programs a vessel's shadow is cast with, asked for once a device and shared by the fleet.
+export function requestVesselShadowPipelines({device,shader,posed=true}){
+  return requestOnce(device,'vessel shadows '+(posed?'posed':'rigid'),async()=>{
+    const module=await shader(posed?withPosedVesselVertices(SHADOW_CAST):SHADOW_CAST,'vessel shadows');
+    const vertexBuffers=[{arrayStride:36,attributes:[
+      {shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},
+      {shaderLocation:2,offset:24,format:'float32'},{shaderLocation:3,offset:28,format:'float32x2'},
+    ]},...(posed?[POSED_VERTEX_LAYOUT]:[])];
+    return Promise.all([false,true].map(cloth=>device.createRenderPipelineAsync({
+      label:cloth?'canvas shadows':'solid shadows',layout:'auto',
+      vertex:{module,entryPoint:'vs',buffers:vertexBuffers},
+      fragment:{module,entryPoint:cloth?'canvasFS':'solidFS',targets:cloth?[{format:'rgba16float'}]:[]},
+      primitive:{topology:'triangle-list',cullMode:'none'},
+      depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less',depthBias:2,depthBiasSlopeScale:1.5},
+    })));
+  });
+}
 export async function createVesselShadows({device,hullUBO,mesh,meshIndices=null,vertexBuffer,shader,resolution=2048,wetness=null,targets=null,posed=null}) {
   const B=GPUBufferUsage,T=GPUTextureUsage;
   const data=new Float32Array(28),parts=shadowMeshData(mesh,meshIndices);
@@ -80,18 +98,7 @@ export async function createVesselShadows({device,hullUBO,mesh,meshIndices=null,
   const linear=device.createSampler({minFilter:'linear',magFilter:'linear'});
   const fallback=wetness?[]:[device.createBuffer({size:8,usage:B.STORAGE}),device.createBuffer({size:mesh.length/9*4,usage:B.STORAGE})];
   const moisture=wetness?.state??fallback[0],lookup=wetness?.lookup??fallback[1];
-  const module=await shader(posed?withPosedVesselVertices(SHADOW_CAST):SHADOW_CAST,'vessel shadows');
-  const vertexBuffers=[{arrayStride:36,attributes:[
-    {shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},
-    {shaderLocation:2,offset:24,format:'float32'},{shaderLocation:3,offset:28,format:'float32x2'},
-  ]},...(posed?[POSED_VERTEX_LAYOUT]:[])];
-  const pipes=await Promise.all([false,true].map(cloth=>device.createRenderPipelineAsync({
-    label:cloth?'canvas shadows':'solid shadows',layout:'auto',
-    vertex:{module,entryPoint:'vs',buffers:vertexBuffers},
-    fragment:{module,entryPoint:cloth?'canvasFS':'solidFS',targets:cloth?[{format:'rgba16float'}]:[]},
-    primitive:{topology:'triangle-list',cullMode:'none'},
-    depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less',depthBias:2,depthBiasSlopeScale:1.5},
-  })));
+  const pipes=await requestVesselShadowPipelines({device,shader,posed:!!posed});
   const groups=pipes.map(pipe=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:[
     {binding:0,resource:{buffer:hullUBO}},{binding:1,resource:{buffer:uniform}},
     {binding:2,resource:{buffer:moisture}},{binding:3,resource:{buffer:lookup}},

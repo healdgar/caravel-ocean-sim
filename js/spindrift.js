@@ -1,20 +1,25 @@
+import { requestOnce } from './gpu-program-cache.js';
 import { SPINDRIFT_COUNT, SPINDRIFT_STRIDE, SPINDRIFT_UPDATE, SPINDRIFT_RENDER } from './wgsl/spindrift.js';
 
 // Bounded, crest-attached spray bursts; independent of ship effects.
+// The spray blown off the crests, asked for once a device.
+export function requestCrestSprayPipeline({ device, shader }) {
+  return requestOnce(device, 'crest spray', () => shader(SPINDRIFT_RENDER, 'crest spray').then(module => device.createRenderPipelineAsync({
+    label: 'crest spray', layout: 'auto', vertex: { module, entryPoint: 'crestVS' },
+    fragment: { module, entryPoint: 'crestFS', targets: [{ format: 'rgba16float', blend: {
+      color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' }, alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
+    } }] },
+    primitive: { topology: 'triangle-list', cullMode: 'none' },
+    depthStencil: { format: 'depth32float', depthWriteEnabled: false, depthCompare: 'greater' }, multisample: { count: 4 },
+  })));
+}
 export async function createSpindrift({ device, frameUBO, hullUBO, seaView, derivView, seaSampler, envView, transView, sunVis, shader, computePipe, shadows }) {
   const usage = GPUBufferUsage;
   const control = device.createBuffer({ label: 'crest spray control', size: 16, usage: usage.UNIFORM | usage.COPY_DST });
   const plumes = device.createBuffer({ label: 'crest spray plumes', size: SPINDRIFT_COUNT * SPINDRIFT_STRIDE, usage: usage.STORAGE | usage.COPY_SRC });
   const [updatePipe, renderPipe] = await Promise.all([
     computePipe(SPINDRIFT_UPDATE, 'crest spray update'),
-    shader(SPINDRIFT_RENDER, 'crest spray').then(module => device.createRenderPipelineAsync({
-      label: 'crest spray', layout: 'auto', vertex: { module, entryPoint: 'crestVS' },
-      fragment: { module, entryPoint: 'crestFS', targets: [{ format: 'rgba16float', blend: {
-        color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' }, alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
-      } }] },
-      primitive: { topology: 'triangle-list', cullMode: 'none' },
-      depthStencil: { format: 'depth32float', depthWriteEnabled: false, depthCompare: 'greater' }, multisample: { count: 4 },
-    })),
+    requestCrestSprayPipeline({ device, shader }),
   ]);
   const buffer = buffer => ({ buffer });
   const bind = (pipe, resources) => device.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries: resources.map((resource, binding) => ({ binding, resource })) });

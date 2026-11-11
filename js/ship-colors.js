@@ -1,4 +1,5 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
+import { requestOnce } from './gpu-program-cache.js';
 import { FRAME_WGSL, ATMO_CORE_WGSL } from './wgsl/common.js';
 import { SKY_RENDER_FUNCS } from './wgsl/sky.js';
 import { VESSEL_LIGHTING } from './wgsl/vessel.js';
@@ -1119,6 +1120,29 @@ export function buildVesselRigConnectors(boat, time = 0, windSpeed = 8) {
   return expandRigConnectors(topology, anchors, sway[0], sway[1], time, windSpeed);
 }
 
+const SHIP_COLORS_VERTICES = [{
+  arrayStride: 40,
+  attributes: [
+    { shaderLocation: 0, offset: 0, format: 'float32x3' },
+    { shaderLocation: 1, offset: 12, format: 'float32x3' },
+    { shaderLocation: 2, offset: 24, format: 'float32x4' },
+  ],
+}];
+// The flags and the crow's nest, asked for once a device.
+export function requestShipColorsPipeline({ device, shader, format, samples }) {
+  return requestOnce(device, `ship colors ${format} ${samples}`, async () => {
+    const module = await shader(SHIP_COLORS_RENDER, 'ship colors & crows nest');
+    return device.createRenderPipelineAsync({
+      label: 'ship colors pipeline',
+      layout: 'auto',
+      vertex: { module, entryPoint: 'vs', buffers: SHIP_COLORS_VERTICES },
+      fragment: { module, entryPoint: 'fs', targets: [{ format }] },
+      primitive: { topology: 'triangle-list', cullMode: 'none' },
+      depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
+      multisample: { count: samples },
+    });
+  });
+}
 export async function createShipColorsRenderer({
   device,
   frameUBO,
@@ -1152,25 +1176,9 @@ export async function createShipColorsRenderer({
   let mooringVertexCount = 0;
 
 
-  const layout = [{
-    arrayStride: 40,
-    attributes: [
-      { shaderLocation: 0, offset: 0, format: 'float32x3' },
-      { shaderLocation: 1, offset: 12, format: 'float32x3' },
-      { shaderLocation: 2, offset: 24, format: 'float32x4' },
-    ],
-  }];
+  const layout = SHIP_COLORS_VERTICES;
 
-  const module = await shader(SHIP_COLORS_RENDER, 'ship colors & crows nest');
-  const pipeline = await device.createRenderPipelineAsync({
-    label: 'ship colors pipeline',
-    layout: 'auto',
-    vertex: { module, entryPoint: 'vs', buffers: layout },
-    fragment: { module, entryPoint: 'fs', targets: [{ format }] },
-    primitive: { topology: 'triangle-list', cullMode: 'none' },
-    depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
-    multisample: { count: samples },
-  });
+  const pipeline = await requestShipColorsPipeline({ device, shader, format, samples });
 
   const lighting = shadows.bind(pipeline);
   const slots = [];

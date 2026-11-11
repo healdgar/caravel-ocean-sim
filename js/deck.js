@@ -1,6 +1,17 @@
+import { requestOnce } from './gpu-program-cache.js';
 import { DECK_COLS, DECK_ROWS, DECK_UPDATE, SCENE_DECK_UPDATE, DECK_RENDER } from './wgsl/deck.js';
 import {surfaceWaveGroups} from './surface-bindings.js';
 
+// The water on a deck and running off it, asked for once a device and shared by the fleet.
+export function requestDeckWaterPipelines({device,shader}){
+  return requestOnce(device,'deck water',()=>shader(DECK_RENDER,'deck water').then(module=>Promise.all(['washVS','runoffVS'].map(entryPoint=>device.createRenderPipelineAsync({
+    label:entryPoint,layout:'auto',vertex:{module,entryPoint},
+    fragment:{module,entryPoint:'washFS',targets:[{format:'rgba16float',blend:{
+      color:{srcFactor:'one',dstFactor:'one-minus-src-alpha'},alpha:{srcFactor:'one',dstFactor:'one-minus-src-alpha'},
+    }}]},primitive:{topology:'triangle-list',cullMode:'none'},
+    depthStencil:{format:'depth32float',depthWriteEnabled:false,depthCompare:'greater'},multisample:{count:4},
+  })))));
+}
 export async function createDeckWash({device,frameUBO,hullUBO,uniform,seaView,seaSampler,envView,transView,skyView=transView,sunVis,shader,computePipe,surfaceWaves=null}) {
   const textures=[0,1].map(i=>device.createTexture({label:'deck water '+i,size:[DECK_COLS,DECK_ROWS],format:'rgba32float',
     usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.STORAGE_BINDING|GPUTextureUsage.COPY_SRC}));
@@ -14,13 +25,7 @@ export async function createDeckWash({device,frameUBO,hullUBO,uniform,seaView,se
   const bind=(pipe,resources)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((resource,binding)=>({resource,binding}))});
   const [update,pipes]=await Promise.all([
     computePipe(surfaceWaves?SCENE_DECK_UPDATE:DECK_UPDATE,'deck wash'),
-    shader(DECK_RENDER,'deck water').then(module=>Promise.all(['washVS','runoffVS'].map(entryPoint=>device.createRenderPipelineAsync({
-      label:entryPoint,layout:'auto',vertex:{module,entryPoint},
-      fragment:{module,entryPoint:'washFS',targets:[{format:'rgba16float',blend:{
-        color:{srcFactor:'one',dstFactor:'one-minus-src-alpha'},alpha:{srcFactor:'one',dstFactor:'one-minus-src-alpha'},
-      }}]},primitive:{topology:'triangle-list',cullMode:'none'},
-      depthStencil:{format:'depth32float',depthWriteEnabled:false,depthCompare:'greater'},multisample:{count:4},
-    })))),
+    requestDeckWaterPipelines({device,shader}),
   ]);
   const groups=views.map((v,i)=>bind(update,[b(frameUBO),b(uniform),b(hullUBO),seaView,seaSampler,views[1-i],v]));
   const waveGroups=surfaceWaveGroups(device,update,surfaceWaves);

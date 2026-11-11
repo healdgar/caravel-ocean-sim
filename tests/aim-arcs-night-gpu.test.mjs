@@ -8,7 +8,7 @@ let browser,server,base;
 before(async()=>{
   server=createDevServer();server.listen(0,'127.0.0.1');await once(server,'listening');
   base=`http://127.0.0.1:${server.address().port}/`;
-  browser=await chromium.launch({args:['--enable-unsafe-webgpu',`--use-angle=${process.env.WEBGPU_BACKEND||'metal'}`,'--disable-gpu-watchdog']});
+  browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||undefined,args:['--enable-unsafe-webgpu',`--use-angle=${process.env.WEBGPU_BACKEND||'metal'}`,'--disable-gpu-watchdog']});
 });
 after(async()=>{await browser?.close();server?.closeAllConnections?.();server?.close();});
 

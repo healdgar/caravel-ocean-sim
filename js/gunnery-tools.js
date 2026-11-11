@@ -1,4 +1,5 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
+import { requestOnce } from './gpu-program-cache.js';
 import { ANCHOR_RENDER } from './wgsl/anchor.js';
 import { SHADOW_FRAME, SHADOW_SAMPLE, SCENE_SHADOW_SAMPLE } from './wgsl/shadows.js';
 import { crewGunneryTool } from './crew-work.js';
@@ -134,16 +135,26 @@ export function buildGunneryToolVertices(company,boat,vertices){
   return cursor/8;
 }
 
+const GUNNERY_TOOL_VERTICES=[{arrayStride:32,attributes:[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},{shaderLocation:2,offset:24,format:'float32x2'}]}];
+// The programs the gun crews' tools are drawn with, asked for once a device (js/gpu-program-cache.js requestOnce).
+export function requestGunneryToolPipelines({device,shader,format,samples,waterOptics=null}){
+  return requestOnce(device,`gun tools ${format} ${samples}`,async()=>{
+    Promise.resolve(waterOptics).then(optics=>optics?.capture({source:GUNNERY_TOOL_RENDER,vertex:{buffers:GUNNERY_TOOL_VERTICES},groups:2})).catch(()=>{});
+    const [pipeline,shadowPipeline]=await Promise.all([
+      shader(GUNNERY_TOOL_RENDER,'gun tools material').then(module=>device.createRenderPipelineAsync({label:'crew gun tools',layout:'auto',vertex:{module,entryPoint:'vs',buffers:GUNNERY_TOOL_VERTICES},fragment:{module,entryPoint:'fs',targets:[{format}]},primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples}})),
+      shader(GUNNERY_TOOL_SHADOW,'gun tool shadows').then(module=>device.createRenderPipelineAsync({label:'crew gun tool shadows',layout:'auto',vertex:{module,entryPoint:'vs',buffers:GUNNERY_TOOL_VERTICES},primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less',depthBias:2,depthBiasSlopeScale:1.5}})),
+    ]);
+    return {pipeline,shadowPipeline};
+  });
+}
 export async function createGunneryTools({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows,shader,format,samples,waterOptics,shared=null}){
   const B=GPUBufferUsage,template=createGunneryToolTemplate(),instances=new Float32Array(68*8),pose=new Float32Array(16),axis=[0,0,0],placed=[];let count=0,ranges=[];
   const vertex=device.createBuffer({label:'immutable crew gun tool tubes',size:template.vertices.byteLength,usage:B.VERTEX|B.COPY_DST});
   device.queue.writeBuffer(vertex,0,template.vertices);
   const shapeBuffer=device.createBuffer({label:'crew gun tool endpoints',size:instances.byteLength,usage:B.STORAGE|B.COPY_DST});
   const poseBuffer=device.createBuffer({label:'crew gun tool pose',size:64,usage:B.UNIFORM|B.COPY_DST});
-  const layout=[{arrayStride:32,attributes:[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},{shaderLocation:2,offset:24,format:'float32x2'}]}];
-  const module=shared?null:await shader(GUNNERY_TOOL_RENDER,'gun tools material'),shadowModule=shared?null:await shader(GUNNERY_TOOL_SHADOW,'gun tool shadows');
-  const pipeline=shared?.pipeline??await device.createRenderPipelineAsync({label:'crew gun tools',layout:'auto',vertex:{module,entryPoint:'vs',buffers:layout},fragment:{module,entryPoint:'fs',targets:[{format}]},primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples}});
-  const shadowPipeline=shared?.shadowPipeline??await device.createRenderPipelineAsync({label:'crew gun tool shadows',layout:'auto',vertex:{module:shadowModule,entryPoint:'vs',buffers:layout},primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less',depthBias:2,depthBiasSlopeScale:1.5}});
+  const layout=GUNNERY_TOOL_VERTICES,requested=await requestGunneryToolPipelines({device,shader,format,samples,waterOptics});
+  const pipeline=shared?.pipeline??requested.pipeline,shadowPipeline=shared?.shadowPipeline??requested.shadowPipeline;
   const resources=[{buffer:frameUBO},transView,skyView,sampClamp,envCubeView,{buffer:sunVisBuf},{buffer:poseBuffer},{buffer:shapeBuffer}];
   const bind=(pipe,items)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:items.map((resource,binding)=>({binding,resource}))});
   const group=bind(pipeline,resources),lighting=shadows.bind(pipeline),shadow=bind(shadowPipeline,[{buffer:shadows.uniform},{buffer:poseBuffer},{buffer:shapeBuffer}]);

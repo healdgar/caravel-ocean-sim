@@ -4,6 +4,7 @@
 // (scripts/prepare-forest-groves.mjs) that the GPU lays over all the rest: one canopy that follows the
 // ground, parts round each planted tree, slopes down at the wood's edge, and is drawn coarser with
 // distance until a grove is a few lumps on a far hill.
+import { requestOnce } from './gpu-program-cache.js';
 import { FRAME_WGSL } from './wgsl/common.js';
 import { terrainSurfaceSample } from './terrain-model.js';
 import { portClearanceEnvelope, PLANT_STREET_GAP_M } from './coastal-world.js';
@@ -357,6 +358,22 @@ function forestGroveGrids() {
 // what trees are planted, after either has changed, and bakes in JavaScript what a section's cover and
 // groves are; nothing is computed there again until the next change. Each frame the GPU alone chooses
 // the groves in view and their levels (encode) and draws them (drawOpaque).
+// The groves' choice of tiles and their sheet over the ground, asked for once a device. `module` is the land's own,
+// or the promise of it: the land asks for these while it is still being made.
+export function requestForestGrovePipelines({ device, shader, module, format, samples }) {
+  return requestOnce(device, `forest groves ${format} ${samples}`, () => Promise.all([
+    shader(FOREST_GROVE_CULL_WGSL, 'forest grove choice').then((code) => Promise.all([
+      device.createComputePipelineAsync({ label: 'forest grove reset', layout: 'auto', compute: { module: code, entryPoint: 'forestGroveReset' } }),
+      device.createComputePipelineAsync({ label: 'forest grove choice', layout: 'auto', compute: { module: code, entryPoint: 'forestGroveCull' } }),
+    ])),
+    // A grove is a sheet over the ground, seen from above and from its edge, so neither face is culled.
+    Promise.resolve(module).then((land) => device.createRenderPipelineAsync({
+      label: 'forest groves', layout: 'auto', vertex: { module: land, entryPoint: 'forestGroveVS' },
+      fragment: { module: land, entryPoint: 'forestGroveFS', targets: [{ format }] }, primitive: { topology: 'triangle-list', cullMode: 'none' },
+      depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' }, multisample: { count: samples, alphaToCoverageEnabled: false },
+    })),
+  ]));
+}
 export async function createForestGroves({ device, shader, module, frameUBO, pack, format, samples, bind, cloudEntries, tint = [1, 1, 1], pixelsPerSquare = 6, baseCoverSize = 1024, sectionCoverSize = 512 }) {
   const B = GPUBufferUsage, T = GPUTextureUsage, m = pack.manifest, owned = [];
   const make = (data, usage, label) => {
@@ -366,18 +383,7 @@ export async function createForestGroves({ device, shader, module, frameUBO, pac
   };
   const keep = (resource) => { owned.push(resource); return resource; };
   try {
-    const pipelines = Promise.all([
-      shader(FOREST_GROVE_CULL_WGSL, 'forest grove choice').then((code) => Promise.all([
-        device.createComputePipelineAsync({ label: 'forest grove reset', layout: 'auto', compute: { module: code, entryPoint: 'forestGroveReset' } }),
-        device.createComputePipelineAsync({ label: 'forest grove choice', layout: 'auto', compute: { module: code, entryPoint: 'forestGroveCull' } }),
-      ])),
-      // A grove is a sheet over the ground, seen from above and from its edge, so neither face is culled.
-      device.createRenderPipelineAsync({
-        label: 'forest groves', layout: 'auto', vertex: { module, entryPoint: 'forestGroveVS' },
-        fragment: { module, entryPoint: 'forestGroveFS', targets: [{ format }] }, primitive: { topology: 'triangle-list', cullMode: 'none' },
-        depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' }, multisample: { count: samples, alphaToCoverageEnabled: false },
-      }),
-    ]);
+    const pipelines = requestForestGrovePipelines({ device, shader, module, format, samples });
     pipelines.catch(() => {});
     const maps = Array.from({ length: FOREST_GROVE_MAPS }, (_, map) => keep(device.createTexture({
       label: `forest grove map ${map}`, size: [FOREST_GROVE_TEXELS, FOREST_GROVE_TEXELS, FOREST_GROVE_VARIANTS], format: 'rgba8unorm', mipLevelCount: FOREST_GROVE_LEVELS, usage: T.TEXTURE_BINDING | T.COPY_DST,

@@ -5,6 +5,7 @@
 //
 // Height queries do not see any of this. A pit is a metre or two across on ground the mesh holds at 16 m, and
 // shot, walkers and hulls keep the land they always had (js/terrain.js height and groundSample).
+import { requestOnce } from './gpu-program-cache.js';
 import { LAND_CRATER_BAKE, LAND_CRATER_CAPTURE, LAND_CRATER_CELL_M, LAND_CRATER_DRAWN_CELLS, LAND_CRATER_GUTTER, LAND_CRATER_PER_TILE, LAND_CRATER_REACH, LAND_CRATER_TEXELS, LAND_CRATER_TILE_M } from './wgsl/land-craters.js';
 
 const CRATER_REFERENCE_J = 1.1e6;
@@ -101,6 +102,30 @@ export function createLandCraterLedger(saved = null, origin = { x: 0, z: 0 }) {
  *   sectionAt(x,z)   which draw a point belongs to, or null where no land is loaded
  *   groundAt(x,z)    a rough height, as the tile's zero
  */
+// The pits shot leaves in the land, their tiles and the land caught under a tile: asked for once a device.
+// `module` is the land's own, or the promise of it.
+export function requestLandCraterPipelines({ device, shader, computePipe, module, format, samples }) {
+  return requestOnce(device, `land craters ${format} ${samples}`, async () => {
+    const land = await module;
+    const captureModule = await shader(LAND_CRATER_CAPTURE, 'land under a crater tile');
+    const tileLayout = { arrayStride: CRATER_INSTANCE_FLOATS * 4, stepMode: 'instance', attributes: [{ shaderLocation: 3, offset: 0, format: 'float32x4' }] };
+    const landLayout = { arrayStride: 32, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }, { shaderLocation: 1, offset: 12, format: 'float32x3' }, { shaderLocation: 2, offset: 24, format: 'float32x2' }] };
+    return Promise.all([
+      device.createRenderPipelineAsync({ label: 'land craters', layout: 'auto',
+        vertex: { module: land, entryPoint: 'landCraterVS', buffers: [{ arrayStride: CRATER_INSTANCE_FLOATS * 4, stepMode: 'instance', attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x4' }] }] },
+        fragment: { module: land, entryPoint: 'landCraterFS', targets: [{ format }] },
+        // No culling. The pit lies below the land's triangles, so a tiny facet turned away and left out would
+        // show the land through the wall behind it. The nearest ground wins by depth, as it should.
+        primitive: { topology: 'triangle-list', cullMode: 'none' },
+        depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' }, multisample: { count: samples } }),
+      computePipe(LAND_CRATER_BAKE, 'land crater tiles'),
+      device.createRenderPipelineAsync({ label: 'land under a crater tile', layout: 'auto',
+        vertex: { module: captureModule, entryPoint: 'landCraterCaptureVS', buffers: [landLayout, tileLayout] },
+        fragment: { module: captureModule, entryPoint: 'landCraterCaptureFS', targets: [{ format: 'rgba16float' }] },
+        primitive: { topology: 'triangle-list', cullMode: 'none' } }),
+    ]);
+  });
+}
 export function createLandCraters({ device, module, shader, computePipe, format, samples, ledger, surfaces, sectionAt, groundAt, maxLayers = 384 }) {
   const tiles = new Map();
   const quadIndices = new Uint16Array(LAND_CRATER_DRAWN_CELLS * LAND_CRATER_DRAWN_CELLS * 6);
@@ -293,23 +318,7 @@ export function createLandCraters({ device, module, shader, computePipe, format,
     sampler = device.createSampler({ label: 'crater tiles', minFilter: 'linear', magFilter: 'linear', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge' });
     indexBuffer = device.createBuffer({ label: 'crater tile cells', size: quadIndices.byteLength, usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST });
     device.queue.writeBuffer(indexBuffer, 0, quadIndices);
-    const captureModule = await shader(LAND_CRATER_CAPTURE, 'land under a crater tile');
-    const tileLayout = { arrayStride: CRATER_INSTANCE_FLOATS * 4, stepMode: 'instance', attributes: [{ shaderLocation: 3, offset: 0, format: 'float32x4' }] };
-    const landLayout = { arrayStride: 32, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }, { shaderLocation: 1, offset: 12, format: 'float32x3' }, { shaderLocation: 2, offset: 24, format: 'float32x2' }] };
-    const [render, compute, grab] = await Promise.all([
-      device.createRenderPipelineAsync({ label: 'land craters', layout: 'auto',
-        vertex: { module, entryPoint: 'landCraterVS', buffers: [{ arrayStride: CRATER_INSTANCE_FLOATS * 4, stepMode: 'instance', attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x4' }] }] },
-        fragment: { module, entryPoint: 'landCraterFS', targets: [{ format }] },
-        // No culling. The pit lies below the land's triangles, so a tiny facet turned away and left out would
-        // show the land through the wall behind it. The nearest ground wins by depth, as it should.
-        primitive: { topology: 'triangle-list', cullMode: 'none' },
-        depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' }, multisample: { count: samples } }),
-      computePipe(LAND_CRATER_BAKE, 'land crater tiles'),
-      device.createRenderPipelineAsync({ label: 'land under a crater tile', layout: 'auto',
-        vertex: { module: captureModule, entryPoint: 'landCraterCaptureVS', buffers: [landLayout, tileLayout] },
-        fragment: { module: captureModule, entryPoint: 'landCraterCaptureFS', targets: [{ format: 'rgba16float' }] },
-        primitive: { topology: 'triangle-list', cullMode: 'none' } }),
-    ]);
+    const [render, compute, grab] = await requestLandCraterPipelines({ device, shader, computePipe, module, format, samples });
     if (disposed) return;
     renderPipeline = render; bakePipeline = compute; capturePipeline = grab;
     if (wanting || ledger.records.length) refresh();

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // Keeps a ship's battle damage on the GPU in one uniform buffer, and draws the water in her hold.
 // Holes and hold water change while she floods. Craters change only when she is hit.
+import { requestOnce } from './gpu-program-cache.js';
 import { HULL_FLOOD_RENDER, HULL_FLOOD_JET_SEGMENTS } from './wgsl/hull-flood.js';
 import { HULL_HOLE_LIMIT, HULL_CRATER_LIMIT } from './wgsl/common.js';
 import { hullFloodLevel } from './hull-holes.js';
@@ -69,27 +70,33 @@ export function hullFloodOutline(boat) {
   return out;
 }
 
+// The water inside a holed hull and the jets through the holes, asked for once a device.
+export function requestHullFloodPipelines({ device, shader, format, samples }) {
+  return requestOnce(device, `hull flood ${format} ${samples}`, async () => {
+    const module = await shader(HULL_FLOOD_RENDER, 'hull flood');
+    const base = {
+      layout: 'auto',
+      fragment: { module, targets: [{ format }] },
+      primitive: { topology: 'triangle-list', cullMode: 'none' },
+      depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
+      multisample: { count: samples },
+    };
+    return Promise.all([
+      device.createRenderPipelineAsync({
+        ...base, label: 'hull flood water',
+        vertex: { module, entryPoint: 'planeVS', buffers: [{ arrayStride: 8, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x2' }] }] },
+        fragment: { ...base.fragment, entryPoint: 'planeFS' },
+      }),
+      device.createRenderPipelineAsync({
+        ...base, label: 'hull flood jets',
+        vertex: { module, entryPoint: 'jetVS' },
+        fragment: { ...base.fragment, entryPoint: 'jetFS' },
+      }),
+    ]);
+  });
+}
 export async function createHullFlood({ device, frameUBO, envCubeView, sampler, shader, format, samples }) {
-  const module = await shader(HULL_FLOOD_RENDER, 'hull flood');
-  const base = {
-    layout: 'auto',
-    fragment: { module, targets: [{ format }] },
-    primitive: { topology: 'triangle-list', cullMode: 'none' },
-    depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
-    multisample: { count: samples },
-  };
-  const [plane, jet] = await Promise.all([
-    device.createRenderPipelineAsync({
-      ...base, label: 'hull flood water',
-      vertex: { module, entryPoint: 'planeVS', buffers: [{ arrayStride: 8, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x2' }] }] },
-      fragment: { ...base.fragment, entryPoint: 'planeFS' },
-    }),
-    device.createRenderPipelineAsync({
-      ...base, label: 'hull flood jets',
-      vertex: { module, entryPoint: 'jetVS' },
-      fragment: { ...base.fragment, entryPoint: 'jetFS' },
-    }),
-  ]);
+  const [plane, jet] = await requestHullFloodPipelines({ device, shader, format, samples });
   const indexData = new Uint16Array((HULL_FLOOD_STATIONS - 1) * 6);
   for (let i = 0; i < HULL_FLOOD_STATIONS - 1; i++) {
     const a = i * 2;

@@ -1,13 +1,20 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
+import { requestOnce } from './gpu-program-cache.js';
 import {createUnderwaterMedium} from './wgsl/underwater.js';
 
 // One optional HDR pass before bloom. It owns no simulation/readback and skips
 // command encoding entirely outside the camera's near-surface inspection band.
+// The water seen from within it, asked for once a device for each form of it.
+export function requestUnderwaterPipeline({device,shader,format='rgba16float',samples=4,cameraProbe=false,surfaceWaves=false,shadows=false,skipAir=false}){
+  return requestOnce(device,`underwater ${format} ${samples} ${cameraProbe} ${surfaceWaves} ${shadows} ${skipAir}`,async()=>{
+    const module=await shader(createUnderwaterMedium({samples,cameraProbe,surfaceWaves,shadows,skipAir}),'underwater medium');
+    return device.createRenderPipelineAsync({label:'underwater medium',layout:'auto',
+      vertex:{module,entryPoint:'vs'},fragment:{module,entryPoint:'fs',targets:[{format}]},primitive:{topology:'triangle-list'}});
+  });
+}
 export async function createUnderwater({device,shader,frameUBO,opticsUBO,transView,skyView,sampler,sunVis,
   derivView,seaSampler,cameraProbe=null,surfaceWaves=null,sceneShadows=null,format='rgba16float',samples=4,skipAir=false}){
-  const module=await shader(createUnderwaterMedium({samples,cameraProbe:!!cameraProbe,surfaceWaves:!!surfaceWaves,shadows:!!sceneShadows,skipAir}),'underwater medium');
-  const pipeline=await device.createRenderPipelineAsync({label:'underwater medium',layout:'auto',
-    vertex:{module,entryPoint:'vs'},fragment:{module,entryPoint:'fs',targets:[{format}]},primitive:{topology:'triangle-list'}});
+  const pipeline=await requestUnderwaterPipeline({device,shader,format,samples,cameraProbe:!!cameraProbe,surfaceWaves:!!surfaceWaves,shadows:!!sceneShadows,skipAir});
   const shadowGroup=sceneShadows?.bind(pipeline);
   const emptyGroup=surfaceWaves&&!shadowGroup?device.createBindGroup({layout:pipeline.getBindGroupLayout(1),entries:[]}):null;
   const waveGroups=surfaceWaves?.views.map(view=>device.createBindGroup({layout:pipeline.getBindGroupLayout(2),entries:[

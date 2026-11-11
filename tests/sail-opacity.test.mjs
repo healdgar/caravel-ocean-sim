@@ -20,10 +20,11 @@ test('posed Niña and Victory canvas occludes sky and ocean backgrounds while tr
   try{
     await page.route('**/__sail-opacity',r=>r.fulfill({contentType:'text/html',body:'<!doctype html>'}));await page.goto(`${origin}/__sail-opacity`);
     const source=await readFile(new URL('../js/main.js',import.meta.url),'utf8');
-    const factory=source.match(/async function shipRenderAsset\(modelId\)\{([\s\S]*?)\n  \}/)?.[1];
-    const descriptorSource=factory?.match(/const pipeline=await device\.createRenderPipelineAsync\((\{[\s\S]*?)\);\n/)?.[1];
-    const layoutSource=factory?.match(/const vertexLayouts=([\s\S]*?);\n/)?.[1];
-    const shaderSource=factory?.match(/const source=([^\n]+);\n/)?.[1];
+    // The vessel's programs are asked for once, as the device comes up: its source, layouts and descriptor stand there.
+    const factory=source.match(/const requestVesselPrograms=modelId=>\{([\s\S]*?)\n  \};/)?.[1];
+    const descriptorSource=factory?.match(/device\.createRenderPipelineAsync\((\{[\s\S]*?\})\)\);\n/)?.[1].replaceAll('vesselVertexLayouts','vertexLayouts');
+    const layoutSource=source.match(/const vesselVertexLayouts=([\s\S]*?);\n/)?.[1];
+    const shaderSource=source.match(/const vesselSource=([^\n]+);\n/)?.[1];
     assert.ok(descriptorSource&&layoutSource&&shaderSource,'use the real vessel factory pipeline descriptor, layouts and shader specialization');
     const result=await page.evaluate(async ({descriptorSource,layoutSource,shaderSource})=>{
       const {CARAVEL}=await import('/js/wgsl/caravel.js'),{createShipAssetCache}=await import('/js/ship-mesh.js');

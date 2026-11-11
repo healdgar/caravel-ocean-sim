@@ -1,6 +1,20 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 // Immutable programs are device-local. Buffers and bind groups stay with their
 // original owners. Keys include the final WGSL, after fleet/frame rewriting.
+// One request to a device under a name: whoever asks first starts it, and everyone after is handed the same
+// answer. A subsystem's pipelines are asked for this way, so that startup can ask for all of them at once,
+// before anything waits on anything, and each subsystem later finds its own already compiling or compiled.
+const deviceRequests=new WeakMap();
+export function requestOnce(device,key,start){
+  let kept=deviceRequests.get(device);
+  if(!kept)deviceRequests.set(device,kept=new Map());
+  if(!kept.has(key)){
+    const pending=Promise.resolve().then(start);
+    pending.catch(()=>{if(kept.get(key)===pending)kept.delete(key);});
+    kept.set(key,pending);
+  }
+  return kept.get(key);
+}
 export function createGPUProgramCache({device,prepare=code=>code,report=()=>{}}){
   const modules=new Map(),computes=new Map();
   function remember(cache,key,create){

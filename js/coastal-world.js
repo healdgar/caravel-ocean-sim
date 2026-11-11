@@ -9331,7 +9331,8 @@ function finalizeProceduralCoastalPack(
   heights,
   elevationSource = 'procedural-geomorphology',
   satelliteData = null,
-  preserveRealCoast = false
+  preserveRealCoast = false,
+  groundOnly = false
 ) {
   const { region } = pack;
   if (!pack.skipPortPlacement && !pack.taperOuterBorders) {
@@ -9371,6 +9372,20 @@ function finalizeProceduralCoastalPack(
       taperOuterBorders: Boolean(pack.taperOuterBorders),
     });
     syncPortInstancesToTerrain(port, heights, region, { gradePads: !port?.hasOrthoFootprints });
+  }
+  const climateProfile = pack.climateProfile ?? estimateLocalClimateProfile(region.latitude, region.longitude, region);
+  // The ground and its port alone, for a caller that is about to carve another land out of this one
+  // (build1550HistoricalTerritoryPack): the city, the paint and the planting would be made here only to be
+  // made again over the carved heights. completeProceduralCoastalPack dresses it after all if that falls through.
+  if (groundOnly) {
+    return Object.assign(pack, { region, heights, port, elevationSource, climateProfile, groundOnly: { elevationSource, satelliteData } });
+  }
+  return dressProceduralCoastalPack(pack, heights, port, elevationSource, satelliteData, climateProfile);
+}
+
+function dressProceduralCoastalPack(pack, heights, port, elevationSource, satelliteData, climateProfile) {
+  const { region } = pack;
+  if (!pack.skipPortPlacement) {
     port.streets = layTownStreets(port, (x, z) => terrainSurfaceSample(heights, x, z, region));
     port.props = layPortProps(port, (x, z) => terrainSurfaceSample(heights, x, z, region));
   }
@@ -9390,8 +9405,6 @@ function finalizeProceduralCoastalPack(
   const portGeometry = buildPortPrefabGeometry(port, vegetation.palms);
   const views = pack.skipPortPlacement ? null : createCoastalViews(region, heights, port);
 
-  const climateProfile = pack.climateProfile ?? estimateLocalClimateProfile(region.latitude, region.longitude, region);
-
   return Object.assign(pack, {
     region,
     heights,
@@ -9406,7 +9419,15 @@ function finalizeProceduralCoastalPack(
     views,
     elevationSource,
     climateProfile,
+    groundOnly: null,
   });
+}
+
+// A pack left as ground and port only is dressed here: its city laid, its ground painted and planted.
+export function completeProceduralCoastalPack(pack) {
+  const pending = pack?.groundOnly;
+  if (!pending) return pack;
+  return dressProceduralCoastalPack(pack, pack.heights, pack.port, pending.elevationSource, pending.satelliteData, pack.climateProfile);
 }
 
 export function generateProceduralCoastalPack(regionSpec = 'cartagena', overrides = {}) {
@@ -9672,13 +9693,13 @@ export function drownDemCoastalRinging(rawDem, n, maxDem, landCount) {
 
 export async function upgradeProceduralPackWithRealDEM(
   pack,
-  { fetchTile = null, fetchSatelliteTile = null, zoom = 13, demSpan = null, timeoutMs = 12000, _snapAttempted = false, isNeighborSection = false, snapToCoast = true } = {}
+  { fetchTile = null, fetchSatelliteTile = null, zoom = 13, demSpan = null, timeoutMs = 12000, _snapAttempted = false, isNeighborSection = false, snapToCoast = true, groundOnly = false } = {}
 ) {
   // snapToCoast:false pins region.latitude/longitude (and x/z) exactly: used when
   // the caller has already placed the region in the world frame (late spawn), so
   // the land can never jump to a different geographic spot than the ship's track.
   if (snapToCoast === false) _snapAttempted = true;
-  const ensureFallback = (p) => (p?.heights ? p : p?.region ? finalizeProceduralCoastalPack(p, synthesizeCoastalTerrain(p.region)) : p);
+  const ensureFallback = (p) => (p?.heights ? p : p?.region ? finalizeProceduralCoastalPack(p, synthesizeCoastalTerrain(p.region), undefined, undefined, undefined, groundOnly) : p);
   const effectiveFetch = fetchTile || (typeof fetch === 'function' && typeof createImageBitmap === 'function' ? fetch : null);
   if (!pack?.region || !effectiveFetch) return ensureFallback(pack);
   let { region } = pack;
@@ -9859,7 +9880,7 @@ export async function upgradeProceduralPackWithRealDEM(
           portType: undefined,
           ...(snapped.shoreBearing !== undefined ? { shoreBearing: snapped.shoreBearing } : {}),
         });
-        return upgradeProceduralPackWithRealDEM(pack, { fetchTile, fetchSatelliteTile, zoom, demSpan, timeoutMs, _snapAttempted: true });
+        return upgradeProceduralPackWithRealDEM(pack, { fetchTile, fetchSatelliteTile, zoom, demSpan, timeoutMs, _snapAttempted: true, groundOnly });
       }
     }
     // Require real land and real water in the primary coastal window (neighbor sections preserve any real DEM land/water ratio!)
@@ -10029,7 +10050,8 @@ export async function upgradeProceduralPackWithRealDEM(
       heights,
       `aws-terrarium-srtm-z${nearPixels ? nearZoom : zoom}`,
       satelliteData,
-      true
+      true,
+      groundOnly
     );
     pack.satelliteData = satelliteData;
     pack.rawDem = rawDem;
@@ -10492,10 +10514,11 @@ export async function runLandfallDiscoveryPipeline(basePack, {
       fetchImpl &&
       typeof createImageBitmap === 'function'
     ) {
-      await upgradeProceduralPackWithRealDEM(basePack, { timeoutMs: 10000, snapToCoast });
+      // Ground and port only: the 1550 territory is carved from these and dressed once, below.
+      await upgradeProceduralPackWithRealDEM(basePack, { timeoutMs: 10000, snapToCoast, groundOnly: true });
     }
     if (!basePack.heights && basePack.region) {
-      finalizeProceduralCoastalPack(basePack, synthesizeCoastalTerrain(basePack.region));
+      finalizeProceduralCoastalPack(basePack, synthesizeCoastalTerrain(basePack.region), undefined, undefined, undefined, true);
     }
   };
   const cellInfo = canonicalCoastalCellId(basePack.region);

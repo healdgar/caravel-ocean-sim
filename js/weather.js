@@ -1,14 +1,18 @@
+import { requestOnce } from './gpu-program-cache.js';
 import { WEATHER_RENDER } from './wgsl/weather.js';
 import {CELESTIAL_FRAME_BYTES} from './wgsl/celestial.js';
 
-export async function createWeatherRenderer({device,frameUBO,hullUBO,transView,skyView,sampler,shader,format,samples}){
-  const module=await shader(WEATHER_RENDER,'precipitation and lightning');
-  const uniform=device.createBuffer({label:'weather motion',size:48,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
-  const values=new Float32Array(12);let count=0,flash=0;
-  const pipes=await Promise.all(['rain','bolt'].map(kind=>device.createRenderPipelineAsync({label:kind==='rain'?'precipitation':'lightning',layout:'auto',
+// The rain and the lightning, asked for once a device.
+export function requestWeatherPipelines({device,shader,format,samples}){
+  return requestOnce(device,`weather ${format} ${samples}`,()=>shader(WEATHER_RENDER,'precipitation and lightning').then(module=>Promise.all(['rain','bolt'].map(kind=>device.createRenderPipelineAsync({label:kind==='rain'?'precipitation':'lightning',layout:'auto',
     vertex:{module,entryPoint:kind+'VS'},fragment:{module,entryPoint:kind+'FS',targets:[{format,blend:{
       color:{srcFactor:'one',dstFactor:'one-minus-src-alpha'},alpha:{srcFactor:'one',dstFactor:'one-minus-src-alpha'}}}]},
-    primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:false,depthCompare:'greater'},multisample:{count:samples}})));
+    primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:false,depthCompare:'greater'},multisample:{count:samples}})))));
+}
+export async function createWeatherRenderer({device,frameUBO,hullUBO,transView,skyView,sampler,shader,format,samples}){
+  const uniform=device.createBuffer({label:'weather motion',size:48,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
+  const values=new Float32Array(12);let count=0,flash=0;
+  const pipes=await requestWeatherPipelines({device,shader,format,samples});
   const resources=[{buffer:frameUBO},transView,skyView,sampler,{buffer:uniform},{buffer:hullUBO}];
   // Lunar precipitation samples atmospheric transmittance. The isolated legacy
   // Frame keeps a zero-Moon stub, so binding1 is absent from its auto layout.
