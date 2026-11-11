@@ -1664,6 +1664,36 @@
     "bytes": 138805,
     "sha256": "9c4734cc9442118670d58edc11f2eae0ef641c6ffbaf582717487e78b917b174"
   },
+  "assets/forest-scenery/portugal/groves/manifest.json": {
+    "url": "assets/forest-scenery/portugal/groves/manifest.6d16ebc9cc5a628c.json",
+    "bytes": 1467,
+    "sha256": "6d16ebc9cc5a628cbc6d73c58ce2d96050c65d845d0d8c5a2a246982b97db3e2"
+  },
+  "assets/forest-scenery/portugal/groves/maps.bin.gz": {
+    "url": "assets/forest-scenery/portugal/groves/maps.bin.229ecd0e25ebb7f8.gz",
+    "bytes": 854469,
+    "sha256": "229ecd0e25ebb7f8431a215b58aefa6f901b83b03c5df813931b33d4da92ed11"
+  },
+  "assets/forest-scenery/portugal/groves/trees.bin.gz": {
+    "url": "assets/forest-scenery/portugal/groves/trees.bin.db33fc120fefab56.gz",
+    "bytes": 23872,
+    "sha256": "db33fc120fefab56e47b7deb0ac7f5698877cd3c0084e72d177dafe25d3ce27b"
+  },
+  "assets/forest-scenery/subtropical/groves/manifest.json": {
+    "url": "assets/forest-scenery/subtropical/groves/manifest.57a1bc12bde044ef.json",
+    "bytes": 1462,
+    "sha256": "57a1bc12bde044ef97c32bd028847aef6c61d7654cf9e08b64cf8191ff25619d"
+  },
+  "assets/forest-scenery/subtropical/groves/maps.bin.gz": {
+    "url": "assets/forest-scenery/subtropical/groves/maps.bin.a19bf28ee42c6560.gz",
+    "bytes": 827113,
+    "sha256": "a19bf28ee42c6560cf687c0256fc754999b89fc1f4b5414b74c7cb9ee4bef92f"
+  },
+  "assets/forest-scenery/subtropical/groves/trees.bin.gz": {
+    "url": "assets/forest-scenery/subtropical/groves/trees.bin.40250fb88f9c43af.gz",
+    "bytes": 68550,
+    "sha256": "40250fb88f9c43af3049ff419bbf636ab5f088afc3126de2d675b93fdd4f7313"
+  },
   "assets/ports/1550/land-materials-pbr.png": {
     "url": "assets/ports/1550/land-materials-pbr.1d2651bbbcdd39c4.png",
     "bytes": 1673220,
