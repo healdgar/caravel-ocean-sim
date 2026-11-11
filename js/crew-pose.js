@@ -3,6 +3,7 @@ import { vesselVerticalScale, hullDeck, HULL_VERTICAL_SCALE } from './hull.js';
 import { resolveShipNode, requirePlayableShipModel } from './ship-models.js';
 import { crewRunnerMetrics, crewGunneryTool, crewBoardingHands, crewMastName, hasExtendedCrewModel, crewRowingWalkContacts, crewDeckHeight, crewHelmHands } from './crew-work.js';
 import { applyArticulatedRagdollPose } from './crew-physics.js';
+import { CREW_SOLVE_OP } from './wgsl/crew-solve.js';
 import {ADDITIONAL_DESIGNS} from './models/additional.js';
 import {proceduralDesign} from './models/procedural.js';
 import {VICTORY_DESIGN} from './models/victory.js';
@@ -21,7 +22,11 @@ export function poseRotation(m){
     const s=Math.sqrt(1+r[i*3+i]-r[j*3+j]-r[k*3+k])*2;q=[0,0,0,0];q[i]=s/4;q[j]=(r[i*3+j]+r[j*3+i])/s;q[k]=(r[i*3+k]+r[k*3+i])/s;q[3]=(r[k*3+j]-r[j*3+k])/s;}
   return q;
 }
+// Each step below either poses a skeleton in hand, or, given a recorder in its place (js/crew-solve.js), writes
+// the step down for the GPU to do. A recorder has no joints to read, so a step that needs to know where a joint
+// has got to is one whole entry, done there.
 export function turnBone(a,node,from,to){
+  if(a.record){a.put(CREW_SOLVE_OP.turn,a.slot(node),from[0],from[1],from[2],to[0],to[1],to[2]);return;}
   const u=poseUnit(from),v=poseUnit(to),dot=poseDot(u,v);
   let delta=dot<-.9999?[...poseUnit(poseCross(u,Math.abs(u[0])<.8?[1,0,0]:[0,1,0])),0]:[...poseCross(u,v),1+dot];
   const n=Math.hypot(...delta);delta=delta.map(x=>x/Math.max(n,1e-9));
@@ -31,6 +36,7 @@ export function turnBone(a,node,from,to){
   if(a.updateBranch)a.updateBranch(node);else a.update();
 }
 export function solveCrewLimb(a,names,target,pole){
+  if(a.record){a.limb(CREW_SOLVE_OP.limb,names[0],target,pole);return;}
   const upper=poseNodeIndex(a,names[0]),lower=poseNodeIndex(a,names[1]),end=poseNodeIndex(a,names[2]);if(upper<0||lower<0||end<0)return;
   const A=posePosition(a.world[upper]),B=posePosition(a.world[lower]),C=posePosition(a.world[end]);
   const l1=Math.hypot(...poseSub(B,A)),l2=Math.hypot(...poseSub(C,B)),ray=poseSub(target,A),dir=poseUnit(ray);
@@ -48,6 +54,7 @@ function actorLocal(p,s){
   return [x/s.scale[0],(cp*dy+sp*z)/s.scale[1],(-sp*dy+cp*z)/s.scale[2]];
 }
 export function poseMoveBone(a,node,target){
+  if(a.record){a.put(CREW_SOLVE_OP.move,a.slot(node),target[0],target[1],target[2]);return;}
   const at=posePosition(a.world[node]),delta=poseSub(target,at),parent=a.parent[node];
   if(parent<0)a.pose[node].t.set(a.pose[node].t.map((v,i)=>v+delta[i]));
   else{
@@ -55,6 +62,23 @@ export function poseMoveBone(a,node,target){
     for(let k=0;k<3;k++){const axis=Array.from(matrix.subarray(k*4,k*4+3));a.pose[node].t[k]+=poseDot(axis,delta)/Math.max(1e-12,poseDot(axis,axis));}
   }
   if(a.updateBranch)a.updateBranch(node);else a.update();
+}
+// Move a bone by so much from wherever the pose has it.
+function poseShiftBone(a,node,by){
+  if(a.record){a.put(CREW_SOLVE_OP.shift,a.slot(node),by[0],by[1],by[2]);a.shifted(by);return;}
+  const p=posePosition(a.world[node]);poseMoveBone(a,node,[p[0]+by[0],p[1]+by[1],p[2]+by[2]]);
+}
+// A reach measured from the head, wherever the pose has put it: the target's height and depth, and the pole's
+// height, are given from the head's.
+function solveCrewLimbFromHead(a,names,target,pole,headless){
+  if(a.record){a.limb(CREW_SOLVE_OP.limbHead,names[0],target,pole);return;}
+  const node=poseNodeIndex(a,'Head'),head=node>=0?posePosition(a.world[node]):headless;
+  solveCrewLimb(a,names,[target[0],head[1]+target[1],head[2]+target[2]],[pole[0],head[1]+pole[1],pole[2]]);
+}
+// Where a hand's reach left it, to be held there. A recorder marks the hold for the GPU to read off the hand.
+function poseHandReached(a,name){
+  if(a.record){const p=[0,0,0];p.reached=true;return p;}
+  return posePosition(a.world[poseNodeIndex(a,name)]);
 }
 function poseHullPoint(p,s){
   const x=p[0]*s.scale[0],y=p[1]*s.scale[1],z=p[2]*s.scale[2],c=Math.cos(s.yaw),sn=Math.sin(s.yaw),pitch=s.climbPitch??0,cp=Math.cos(pitch),sp=Math.sin(pitch),Y=cp*y-sp*z,Z=sp*y+cp*z;
@@ -64,6 +88,7 @@ function poseNeutralSeatedBody(a){
   // Idle's hip sway and torso twist are inappropriate under a constrained
   // seated stroke: they place one shoulder behind the other. Keep authored
   // neutral transforms and actual limb lengths, then apply the shared lean.
+  if(a.record){a.put(CREW_SOLVE_OP.neutral);return;}
   let branch=-1;
   for(const name of ['root','pelvis','spine_01','spine_02','spine_03','clavicle_l','clavicle_r']){
     const node=poseNodeIndex(a,name);if(node<0)continue;
@@ -89,6 +114,15 @@ export function poseSeatedCrew(a,s,targets=s.seatedPose){
   const pelvis=poseNodeIndex(a,'pelvis');if(pelvis<0)throw Error('Seated crew requires a pelvis joint');
   poseNeutralSeatedBody(a);
   const lean=targets.body?.lean??0;
+  if(a.record){
+    // The seat, the hands and the ankles, each in his own frame. His wetness is still sampled about the seat, as
+    // his last step left it: where his spine and head have got to is not known here.
+    const hips=actorLocal(targets.seat,s),hands=[0,1].map(i=>actorLocal(targets.hands[i],s));hips[1]+=a.seatContact.pelvisAboveSeat;
+    const feet=['l','r'].map((side,i)=>{const foot=actorLocal(targets.feet[i],s);foot[1]+=a.footContacts[side].ankleAboveSole;return foot;});
+    a.put(CREW_SOLVE_OP.seated,lean,hips[0],hips[1],hips[2],0,0,0,...hands[0],0,...hands[1],0,...feet[0],0,...feet[1],0);
+    s.grips={foot_l:feet[0],hand_l:hands[0],foot_r:feet[1],hand_r:hands[1]};
+    return true;
+  }
   turnBone(a,pelvis,[0,1,0],[0,Math.cos(lean),Math.sin(lean)]);
   const hips=actorLocal(targets.seat,s);hips[1]+=a.seatContact?.pelvisAboveSeat??0;
   poseMoveBone(a,pelvis,hips);
@@ -131,6 +165,15 @@ export function poseSeatedCrew(a,s,targets=s.seatedPose){
 }
 function poseRowingWalkingFeet(a,s,boat){
   const contacts=crewRowingWalkContacts(s,boat,a.footContacts??{});if(!contacts)return false;
+  if(a.record){
+    const targets=['l','r'].map((side,i)=>{const p=contacts.feet[i].sole.slice();p[1]+=a.footContacts[side].ankleAboveSole*s.scale[1];return actorLocal(p,s);});
+    const raised=(targets[0][1]+targets[1][1])*.5-(a.footContacts.l.ankle[1]+a.footContacts.r.ankle[1])*.5,lean=(s.climbPitch??0)/2,level=[-Math.sin(lean),0,0,Math.cos(lean)];
+    const turned=contacts.feet.map(foot=>{const yaw=foot.yaw-s.yaw;return gltfQuatMultiply([0,0,0,0],level,[0,Math.sin(yaw/2),0,Math.cos(yaw/2)]);});
+    a.put(CREW_SOLVE_OP.rowFeet,raised,...targets[0],...targets[1],...turned[0],...turned[1]);
+    (s.grips??={}).foot_l=targets[0];s.grips.foot_r=targets[1];s.walkContacts=contacts;
+    s.moisturePoints=[poseHullPoint(targets[0].map((v,i)=>(v+targets[1][i])*.5),s),...a.bodyPoints(raised-.035).map(p=>poseHullPoint(p,s))];
+    return true;
+  }
   // Keep the imported upper-body gait, but place an untwisted pelvis over the
   // two real sole targets. Leg lengths and every authored bone scale survive.
   for(const name of ['root','pelvis']){
@@ -194,6 +237,20 @@ function poseGroundedGunBody(a,s,boat,requestedLean,hands=null,{floorAt=null,sto
     const step=.05,n=poseUnit([-(floor(X+step,Z)-floor(X-step,Z))/(2*step),1,-(floor(X,Z+step)-floor(X,Z-step))/(2*step)]);
     const sole=[X,floor(X,Z)+.002,Z],ankle=sole.map((v,i)=>v+n[i]*f.ankleAboveSole*s.scale[1]);
     feet.push({side,sole,ankle,normal:n,target:actorLocal(ankle,s)});
+  }
+  if(a.record){
+    // What the stance is told: which of the cases below applies, the boots, the deck under each, the hands, and
+    // the two limits that come from what gun this is. How far he bends for it is found where his joints are.
+    const lift=feet.reduce((sum,p)=>sum+p.target[1]-a.footContacts[p.side].ankle[1],0)/2,victoryGun=boat.modelId==='victory'?s.job?.gun:null;
+    const mode=hands&&stoop?1:hands&&requestedLean>0?2:requestedLean>0?3:0,held=hands?hands.map(p=>actorLocal(p,s)):[[0,0,0],[0,0,0]];
+    const dropLimit=victoryGun?.stage==='prime'?.12:victoryGun?.kind==='carronade'?.18:.36,forwardLimit=boat.modelId==='victory'&&hands&&requestedLean>0?(s.job?.gun?.stage==='prime'?.30:.46):0;
+    const normals=feet.map(p=>poseUnit([c*p.normal[0]-sn*p.normal[2],p.normal[1],sn*p.normal[0]+c*p.normal[2]]));
+    a.put(CREW_SOLVE_OP.gunBody,mode,requestedLean,lift,dropLimit,forwardLimit,0,0,...held[0],0,...held[1],0,...feet[0].target,0,...feet[1].target,0,...normals[0],0,...normals[1],0);
+    for(const p of feet)(s.grips??={})['foot_'+p.side]=p.target;
+    s.gunContacts={feet,requestedLean};
+    // His wetness is sampled at his boots and, above them, where he would stand: how far he has bent is not known here.
+    s.moisturePoints=[feet[0].sole.map((v,i)=>(v+feet[1].sole[i])*.5),...a.bodyPoints(lift).map(p=>poseHullPoint(p,s))];
+    return;
   }
   const base=posePosition(a.world[pelvis]);let lean=requestedLean,drop=0,reachExcess=0;
   if(hands&&stoop){
@@ -278,10 +335,7 @@ export function poseCrewAfloat(a,alive,seconds){
   const pelvis=poseNodeIndex(a,'pelvis'),head=poseNodeIndex(a,'Head'),neck=poseNodeIndex(a,'neck_01'),t=seconds*CREW_AFLOAT_RATE;
   if(alive){
     // Active breaststroke / treading-water pose: body submerged to the shoulders with head held clear of the sea.
-    if(pelvis>=0){
-      const p=posePosition(a.world[pelvis]);
-      poseMoveBone(a,pelvis,[p[0],p[1]-1.08+0.04*Math.sin(t),p[2]]);
-    }
+    if(pelvis>=0)poseShiftBone(a,pelvis,[0,-1.08+0.04*Math.sin(t),0]);
     if(neck>=0)turnBone(a,neck,[0,1,0],[0,0.92,-0.38]);
     if(head>=0)turnBone(a,head,[0,1,0],[0.16*Math.sin(t*0.5),0.86,-0.48]);
     const scull=Math.sin(t),reach=Math.cos(t);
@@ -295,10 +349,7 @@ export function poseCrewAfloat(a,alive,seconds){
     return;
   }
   // Dead sailor floating awash on the waves: limbs buoyantly splayed and rocking with the swell.
-  if(pelvis>=0){
-    const p=posePosition(a.world[pelvis]);
-    poseMoveBone(a,pelvis,[p[0],p[1]-0.82,p[2]]);
-  }
+  if(pelvis>=0)poseShiftBone(a,pelvis,[0,-0.82,0]);
   const sway=Math.sin(t*0.35);
   if(head>=0)turnBone(a,head,[0,1,0],[0.25*sway,0.94,0.22]);
   solveCrewLimb(a,['upperarm_l','lowerarm_l','hand_l'],[0.46,0.24+0.05*sway,0.08],[0.7,0.3,0.1]);
@@ -329,10 +380,7 @@ export function poseCrewWork(a,s,boat){
     // holding the brass spyglass up to the eye (or shading the brow) toward sightings/hazards.
     poseNeutralSeatedBody(a);
     const pelvis=poseNodeIndex(a,'pelvis');
-    if(pelvis>=0){
-      const p=posePosition(a.world[pelvis]);
-      poseMoveBone(a,pelvis,[p[0],p[1]-0.21,p[2]-0.03]);
-    }
+    if(pelvis>=0)poseShiftBone(a,pelvis,[0,-0.21,-0.03]);
     for(const [name,angle] of [['pelvis',0.10],['spine_01',0.14],['spine_02',0.12]]){
       const node=poseNodeIndex(a,name);
       if(node>=0)turnBone(a,node,[0,1,0],[0,Math.cos(angle),Math.sin(angle)]);
@@ -343,16 +391,15 @@ export function poseCrewWork(a,s,boat){
     // Left hand grips the circular crow's nest basket rim (+0.30m above platform floor)
     const rimHand=[0.17,0.58,0.28];
     solveCrewLimb(a,['upperarm_l','lowerarm_l','hand_l'],rimHand,[0.55,0.78,0.18]);
-    const headNode=poseNodeIndex(a,'Head');
-    const headPos=headNode>=0?posePosition(a.world[headNode]):[0,1.32,0.12];
     const gazeYaw=s.phys?.gazeYaw??0,gazePitch=s.phys?.gazePitch??-0.05;
     const useGlass=s.phys?.usingSpyglass??true;
+    // The glass is held to the eye, so it goes where the head has gone.
     const spyglassHand=useGlass
-      ?[-0.05+gazeYaw*0.12,headPos[1]-0.02+gazePitch*0.10,headPos[2]+0.19]
-      :[-0.08+gazeYaw*0.08,headPos[1]+0.06,headPos[2]+0.14];
-    solveCrewLimb(a,['upperarm_r','lowerarm_r','hand_r'],spyglassHand,[-0.58,headPos[1]-0.18,0.26]);
-    const actualHandR=posePosition(a.world[poseNodeIndex(a,'hand_r')]);
-    const actualHandL=posePosition(a.world[poseNodeIndex(a,'hand_l')]);
+      ?[-0.05+gazeYaw*0.12,-0.02+gazePitch*0.10,0.19]
+      :[-0.08+gazeYaw*0.08,0.06,0.14];
+    solveCrewLimbFromHead(a,['upperarm_r','lowerarm_r','hand_r'],spyglassHand,[-0.58,-0.18,0.26],[0,1.32,0.12]);
+    const actualHandR=poseHandReached(a,'hand_r');
+    const actualHandL=poseHandReached(a,'hand_l');
     s.grips={foot_l:footL,foot_r:footR,hand_l:actualHandL,hand_r:actualHandR};
     return;
   }
@@ -370,10 +417,7 @@ export function poseCrewWork(a,s,boat){
     const isLookoutWatch=j.kind==='lookout'&&j.stage==='working';
     const crunch=isLookoutWatch?0.65:Math.sin(Math.PI*smooth(.42,.96));
     const pelvis=poseNodeIndex(a,'pelvis');
-    if(pelvis>=0){
-      const p=posePosition(a.world[pelvis]);
-      poseMoveBone(a,pelvis,[p[0],p[1]+(isLookoutWatch?-0.08:.04*crunch),p[2]+.03+.03*crunch]);
-    }
+    if(pelvis>=0)poseShiftBone(a,pelvis,[0,isLookoutWatch?-0.08:.04*crunch,.03+.03*crunch]);
     for(const [name,weight] of [['spine_01',.06],['spine_02',.05]]){
       const node=poseNodeIndex(a,name);
       if(node>=0){const angle=crunch*weight;turnBone(a,node,[0,1,0],[0,Math.cos(angle),Math.sin(angle)]);}
@@ -388,11 +432,8 @@ export function poseCrewWork(a,s,boat){
       solveCrewLimb(a,[`thigh_${side}`,`calf_${side}`,`foot_${side}`],ft,[sign*.12,.55,.78]);
       targets[`foot_${side}`]=ft;
       if(isLookoutWatch&&side==='r'){
-        const headNode=poseNodeIndex(a,'Head');
-        const headPos=headNode>=0?posePosition(a.world[headNode]):[0,1.45,0.10];
-        const spyglassTarget=[-0.06,headPos[1]-0.02,headPos[2]+0.18];
-        solveCrewLimb(a,['upperarm_r','lowerarm_r','hand_r'],spyglassTarget,[-0.55,headPos[1]-0.15,0.24]);
-        targets.hand_r=posePosition(a.world[poseNodeIndex(a,'hand_r')]);
+        solveCrewLimbFromHead(a,['upperarm_r','lowerarm_r','hand_r'],[-0.06,-0.02,0.18],[-0.55,-0.15,0.24],[0,1.45,0.10]);
+        targets.hand_r=poseHandReached(a,'hand_r');
       }else{
         const ht=point(handSteps[side],.018);
         solveCrewLimb(a,[`upperarm_${side}`,`lowerarm_${side}`,`hand_${side}`],ht,[sign*.55,.95,.18]);
@@ -417,10 +458,7 @@ export function poseCrewWork(a,s,boat){
     a.blend('Brace',s.time,j.crossingGangplank?0.22:0.58);
     const {right:handR,left:handL,lunge=0,torsoTwist=0}=crewBoardingHands(s);
     const pelvis=poseNodeIndex(a,'pelvis');
-    if(pelvis>=0&&!j.crossingGangplank){
-      const p=posePosition(a.world[pelvis]);
-      poseMoveBone(a,pelvis,[p[0],p[1]-0.05-Math.abs(lunge)*0.18,p[2]+lunge]);
-    }
+    if(pelvis>=0&&!j.crossingGangplank)poseShiftBone(a,pelvis,[0,-0.05-Math.abs(lunge)*0.18,lunge]);
     for(const [name,weight] of [['spine_01',0.45],['spine_02',0.55]]){
       const node=poseNodeIndex(a,name);
       if(node>=0){
@@ -485,10 +523,7 @@ export function poseCrewWork(a,s,boat){
   }else if(s.casualtyState==='wounded'){
     a.blend('Brace',s.time,0.48);
     const pelvis=poseNodeIndex(a,'pelvis');
-    if(pelvis>=0){
-      const p=posePosition(a.world[pelvis]);
-      poseMoveBone(a,pelvis,[p[0],p[1]-0.055,p[2]-0.02]);
-    }
+    if(pelvis>=0)poseShiftBone(a,pelvis,[0,-0.055,-0.02]);
     const spine=poseNodeIndex(a,'spine_02');
     if(spine>=0)turnBone(a,spine,[0,1,0],[0.08,0.96,0.26]);
     const breathe=Math.sin(s.time*2.6+(s.crewIndex??0))*0.02;

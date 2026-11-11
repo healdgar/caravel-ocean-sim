@@ -4,6 +4,7 @@
 // pending hit in actor space. The first pose after it finds the nearest bone there and
 // bakes the wound onto that bone, so it follows the body from then on.
 import { gltfQuatMultiply } from './gltf.js';
+import { CREW_SOLVE_OP, CREW_INJURY_KINDS } from './wgsl/crew-solve.js';
 
 const CREW_WOUND_BONES = Object.freeze(['pelvis', 'spine_01', 'spine_02', 'spine_03', 'Head', 'upperarm_l', 'lowerarm_l', 'hand_l', 'upperarm_r', 'lowerarm_r', 'hand_r', 'thigh_l', 'calf_l', 'foot_l', 'thigh_r', 'calf_r', 'foot_r']);
 // The joint a limb parts at when a ball strikes that bone.
@@ -13,9 +14,9 @@ const CREW_LIMB_JOINTS = Object.freeze({
   thigh_l: 'thigh_l', calf_l: 'calf_l', foot_l: 'calf_l',
   thigh_r: 'thigh_r', calf_r: 'calf_r', foot_r: 'calf_r',
 });
-const CREW_CRUSHED_SCALE = Object.freeze([1.18, 0.62, 0.7]);
-const CREW_BROKEN_ANGLE = 1.15;
-const CREW_ARROW_LENGTH = 0.66;
+export const CREW_CRUSHED_SCALE = Object.freeze([1.18, 0.62, 0.7]);
+export const CREW_BROKEN_ANGLE = 1.15;
+export const CREW_ARROW_LENGTH = 0.66;
 export const CREW_ARROWS_PER_BODY = 3;
 // Chances that a direct hit from a ball takes or wrecks what it strikes.
 export const CREW_BALL_SEVER_CHANCE = 0.55;
@@ -176,6 +177,17 @@ function poseCrewInjury(a, injury) {
 // Runs once per posed sailor, after every other pose step and before the palette is
 // copied. The next sailor's animation sample restores the shared skeleton.
 export function applyCrewWounds(a, s) {
+  // Given a recorder (js/crew-solve.js), his injuries go to the GPU to pose. A shot not yet matched to a bone is
+  // matched on a posed skeleton before this, once, when it lands.
+  if (a.record) {
+    for (const injury of s.crewInjuries ?? []) {
+      const node = a.nodeIndex(injury.bone);
+      if (node >= 0) a.put(CREW_SOLVE_OP.injury, a.slot(node), CREW_INJURY_KINDS[injury.kind]);
+    }
+    // His arrows are placed on the GPU too, from the joints he is drawn with.
+    s.stuckArrowPoses = null;
+    return;
+  }
   for (const injury of s.crewInjuries ?? []) poseCrewInjury(a, injury);
   if (s.pendingWounds?.length) {
     for (const wound of s.pendingWounds) {
