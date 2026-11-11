@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { BOARD_TUNING, tuneBoardSource } from '../scripts/board-tuning.mjs';
-import { boardKey, boardPrefix, boardRequest, boardSeat } from '../js/board-model.js';
+import { BOARD_RIVERS, boardKey, boardPrefix, boardRequest, boardSeat } from '../js/board-model.js';
 import { openBoard } from '../scripts/board-host.mjs';
 
 const asset = (name) => readFileSync(new URL(`../assets/board/${name}`, import.meta.url), 'utf8');
@@ -57,6 +57,15 @@ test('a seat is sized by its people, and a request is named by everything it ask
   assert.equal(a.heights.length, (SAMPLES - 1) ** 2);
   assert.equal(boardKey(a), boardKey(b));
   for (const other of [wider, moved, lifted]) assert.notEqual(boardKey(a), boardKey(other));
+  // What is asked of the rivers, the real places round the seat, and a lived history are part of the name too.
+  const placed = ask({ places: [{ name: 'Vila Franca', x: 900, z: -400, weight: 7 }, { name: 'Far Away', x: 2000, z: 0, weight: 3 }, { name: 'Heavy', x: -300, z: -900, weight: 40 }, { name: 'Light', x: 300, z: -900 }] });
+  assert.deepEqual(placed.places, [{ name: 'Vila Franca', x: 900, z: -400, weight: 7 }, { name: 'Heavy', x: -300, z: -900, weight: 9 }, { name: 'Light', x: 300, z: -900, weight: 1 }],
+    'a place off the ground is left out, and a weight kept between 1 and 9');
+  assert.deepEqual(a.rivers, { ...BOARD_RIVERS }); assert.equal(a.lived, false); assert.deepEqual(a.places, []);
+  for (const other of [placed, ask({ rivers: { ...BOARD_RIVERS, catchment: 2e6 } }), ask({ rivers: { ...BOARD_RIVERS, carve: 1 } }), ask({ lived: true })]) assert.notEqual(boardKey(a), boardKey(other));
+  assert.match(boardPrefix(placed), /"n":"Porto Novo","u":[-\d.e]+,"v":[-\d.e]+,"c":"iberian","w":300\},\{"n":"Vila Franca"/, 'the seat first and heaviest, then the places');
+  assert.match(boardPrefix(a), /"rivers":\{"catchment":1000000,"width":2\.2,"least":1\.2,"carve":0\.3\},"lived":false/);
+  assert.match(boardPrefix(ask({ lived: true })), /"lived":true/);
   const prefix = boardPrefix(a);
   assert.match(prefix, /^globalThis\.FURLONG_HEADLESS=true;/);
   assert.match(prefix, /"spanMetres":4096/);

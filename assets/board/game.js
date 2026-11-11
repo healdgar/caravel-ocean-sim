@@ -1067,7 +1067,7 @@ function slopeAt(cx,cz){
    WORLD GENERATION — runs once per seed, deterministic from the gen stream
    ========================================================================= */
 async function generateWorld(seed,progress){
-  const directEra=START_AD>FOUNDING_AD;
+  const directEra=START_AD>FOUNDING_AD&&!globalThis.FURLONG_OPTIONS?.board?.lived;
   SEED=seed>>>0; RS=seedStreams(SEED,FATE);
   const n1=makeNoise(SEED^0xA53), n2=makeNoise(SEED^0x5EED), n3=makeNoise(SEED^0xF00D), nMoist=makeNoise(SEED^0xB0A);
   W={startAD:directEra?START_AD:FOUNDING_AD,seed:SEED,fate:FATE,h:new Float32Array(GRID*GRID),water:new Uint8Array(GRID*GRID),flow:new Float32Array(GRID*GRID),
@@ -1164,7 +1164,7 @@ async function generateWorld(seed,progress){
   // mark sea
   for(let i=0;i<GRID*GRID;i++)if(W.h[i]<=SEA)W.water[i]=1;
   // major river: highest-accumulation land cell, trace to sea/edge; plus tributaries via threshold
-  const RIVT=140;
+  const RIVT=Math.max(140,(globalThis.FURLONG_OPTIONS?.board?.rivers?.catchment??0)/(CELL*CELL));
   for(let i=0;i<GRID*GRID;i++)if(W.flow[i]>RIVT&&!W.water[i])W.water[i]=2;
   // guarantee one major river: from best mountain source follow down
   let srcBest=-1,srcScore=-1;
@@ -1175,7 +1175,7 @@ async function generateWorld(seed,progress){
   { // carve a soft valley, not a one-cell trench (the trench read as blocky diamonds)
     const carve=new Float32Array(GRID*GRID);
     for(let i=0;i<GRID*GRID;i++)if(isRiv(i)){
-      const dep=Math.min(7,2+W.flow[i]*0.004),cx=i%GRID,cz=(i/GRID)|0;
+      const dep=Math.min(7,2+W.flow[i]*0.004)*(globalThis.FURLONG_OPTIONS?.board?.rivers?.carve??1),cx=i%GRID,cz=(i/GRID)|0;
       for(let dz=-2;dz<=2;dz++)for(let dx=-2;dx<=2;dx++){
         if(!inB(cx+dx,cz+dz))continue;const j=cIdx(cx+dx,cz+dz);
         const f=Math.pow(clamp(1-Math.hypot(dx,dz)/2.3,0,1),1.4);
@@ -1191,7 +1191,7 @@ async function generateWorld(seed,progress){
     const all=[];
     for(let i=0;i<GRID*GRID;i++)if(isRiv(i)&&!hasUp[i]){
       const path=[];let c=i,guard=0;
-      while(c>=0&&guard++<2500){path.push({x:cellX(c%GRID),z:cellZ((c/GRID)|0),w:Math.min(40,0.6*Math.sqrt(W.flow[c])),h:W.h[c],c}); /* width ~ √discharge: where two like streams meet, the river swells */if(!isRiv(c))break;c=down[c];}
+      while(c>=0&&guard++<2500){path.push({x:cellX(c%GRID),z:cellZ((c/GRID)|0),w:Math.min(40,(globalThis.FURLONG_OPTIONS?.board?.rivers?.width>0?globalThis.FURLONG_OPTIONS?.board.rivers.width*CELL/1000:0.6)*Math.sqrt(W.flow[c])),h:W.h[c],c}); /* width ~ √discharge: where two like streams meet, the river swells */if(!isRiv(c))break;c=down[c];}
       all.push(path);}
     all.sort((a,b)=>b.length-a.length);
     const claimed=new Uint8Array(GRID*GRID);
@@ -12773,7 +12773,7 @@ function riverStrips(){
 }
 } // the river leaves the known world at its edge, into the haze
     if(pts.length<2)continue;
-    const hw0=pts.map((p,k)=>Math.max(4,(p.w||10)/2)*Math.min(1,0.35+k/14)), // springs start as a trickle
+    const hw0=pts.map((p,k)=>Math.max(globalThis.FURLONG_OPTIONS?.board?.rivers?.least??4,(p.w||10)/2)*Math.min(1,0.35+k/14)), // springs start as a trickle
       ph=hash01(SEED%997+pts[0].x*0.013+pts[0].z*0.007)*6.28;
     const hw=hw0.map((_,k)=>{let t=0,n=0;for(let d=-5;d<=5;d++){const v=hw0[k+d];if(v!==undefined){t+=v;n++;}} // widening eases in below a confluence
       return t/n*(0.88+0.24*(0.5+0.5*Math.sin(k*0.045+ph)*Math.sin(k*0.017+ph*2)));}); // and reaches run broad or narrow

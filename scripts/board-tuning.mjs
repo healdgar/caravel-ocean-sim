@@ -8,6 +8,14 @@
 //   spanMetres  the side of the ground, in metres (the source offers whole kilometres from 4 to 15)
 //   seat        how many times the source's capital the seat of this coast is, in people and houses
 //   walls       the walls a place of each kind starts with: {capital, town, village} of 0 none, 1 palisade, 2 stone
+//   lived       true to found the realm in its early age (850) and let it live every day to the year asked, as the
+//               source's own prehistory does, instead of drawing the year asked in one stroke
+//   rivers      water fitted to true ground: {catchment, width, least, carve}. The source counts a river's water in
+//               cells, each standing for a square kilometre or so of a kingdom; here a cell is some 27 metres of a
+//               surveyed coast, and counted so, every gully ran a river. `catchment` is the ground (square metres)
+//               that must drain to a point before a watercourse runs there; `width` the metres across it for each
+//               root square kilometre drained; `least` its least half-width; `carve` how much of the source's bed
+//               is cut into ground whose valleys are already real.
 const BOARD = 'globalThis.FURLONG_OPTIONS?.board';
 
 export const BOARD_TUNING = Object.freeze([
@@ -40,6 +48,31 @@ export const BOARD_TUNING = Object.freeze([
     why: 'A place may start walled, so the circuits its past would have raised are laid out with it.',
     find: 'prosperity:50,unrest:8,walls:0,',
     replace: `prosperity:50,unrest:8,walls:(${BOARD}?.walls?.[w.kind]??0),`,
+  },
+  {
+    why: 'A watercourse runs where enough true ground drains to it, not where 140 cells of any size do.',
+    find: 'const RIVT=140;',
+    replace: `const RIVT=Math.max(140,(${BOARD}?.rivers?.catchment??0)/(CELL*CELL));`,
+  },
+  {
+    why: 'Its bed is cut only as deep as ground that already has its valleys needs.',
+    find: 'const dep=Math.min(7,2+W.flow[i]*0.004),cx=i%GRID,cz=(i/GRID)|0;',
+    replace: `const dep=Math.min(7,2+W.flow[i]*0.004)*(${BOARD}?.rivers?.carve??1),cx=i%GRID,cz=(i/GRID)|0;`,
+  },
+  {
+    why: 'It is as wide as the ground it drains makes it: metres for each root square kilometre.',
+    find: 'w:Math.min(40,0.6*Math.sqrt(W.flow[c])),h:W.h[c],c});',
+    replace: `w:Math.min(40,(${BOARD}?.rivers?.width>0?${BOARD}.rivers.width*CELL/1000:0.6)*Math.sqrt(W.flow[c])),h:W.h[c],c});`,
+  },
+  {
+    why: 'And a brook may be narrower than the eight metres the source gives its least river.',
+    find: 'const hw0=pts.map((p,k)=>Math.max(4,(p.w||10)/2)*Math.min(1,0.35+k/14)),',
+    replace: `const hw0=pts.map((p,k)=>Math.max(${BOARD}?.rivers?.least??4,(p.w||10)/2)*Math.min(1,0.35+k/14)),`,
+  },
+  {
+    why: 'A realm may be founded early and lived forward to the year asked, where the source starts any later age direct.',
+    find: 'directEra=START_AD>FOUNDING_AD;',
+    replace: `directEra=START_AD>FOUNDING_AD&&!${BOARD}?.lived;`,
   },
 ]);
 

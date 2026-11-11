@@ -4,7 +4,7 @@
 // functions with its own. It founds the world on the ground the host gave, and reports the board in plain numbers:
 // metres east (x) and south (z) of the middle of the ground, turns in radians, heights in metres.
 globalThis.BOARD_MODEL = (() => {
-  const VERSION = 1;
+  const VERSION = 2;
   const r1 = (v) => Math.round(v * 10) / 10, r3 = (v) => Math.round(v * 1000) / 1000;
   const line = (points) => { const out = []; for (const p of points) out.push(r1(p.x), r1(p.z)); return out; };
   const list = (values, round = r1) => Array.from(values, round);
@@ -18,6 +18,11 @@ globalThis.BOARD_MODEL = (() => {
     FATE = fate >>> 0; COAST_PREF = 'sea'; START_AD = era;
     await generateWorld(seed >>> 0, (text, fraction) => { progress?.(text, fraction); return Promise.resolve(); });
     initializeSimulation();
+    // A realm asked to have lived its history was founded in its early age: its centuries pass now, a day at a time.
+    if (globalThis.FURLONG_OPTIONS?.board?.lived) {
+      let said = 0;
+      await advancePrehistory((text, fraction) => { if (AD() !== said) { said = AD(); progress?.(text, fraction); } return Promise.resolve(); });
+    }
     beginChronicle();
     // The model first gives each household its roof at the turn of a year. Here they are wanted from the first day.
     for (const s of W.settlements) if (!(s.folk || []).some((p) => p.bh)) houseFolk(s);
