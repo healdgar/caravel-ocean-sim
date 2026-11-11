@@ -32,7 +32,7 @@ test('the pose pass puts every joint where the JavaScript skeleton has it, for c
   {
     const result = await inPage(async () => {
       const { loadCrewGLB } = await import('/js/gltf.js');
-      const { createCrewSolvePipeline, createCrewSolveBatch } = await import('/js/crew-solve.js');
+      const { createCrewSolver, createCrewSolveBatch } = await import('/js/crew-solve.js');
       const { createCompany, stepCompany } = await import('/js/crew.js');
       const { stepCrewWork, crewGunStation } = await import('/js/crew-work.js');
       const { poseCrewWork } = await import('/js/crew-pose.js');
@@ -107,10 +107,11 @@ test('the pose pass puts every joint where the JavaScript skeleton has it, for c
       const companies = cast.filter((c) => c.company), people = cast.filter((c) => c.s);
       people.forEach((c, i) => { c.index = i; c.rig = i % models.length; });
 
-      const J = 65, pose = J * 16, bytes = people.length * pose * 4;
+      // Two poses a sailor, as he is drawn: each frame the older is replaced, or both when a change must show at once.
+      const J = 65, pose = J * 16, bytes = people.length * 2 * pose * 4;
       const poses = device.createBuffer({ size: bytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
       const shader = async (code, label) => { const module = device.createShaderModule({ code, label }), bad = (await module.getCompilationInfo()).messages.filter((m) => m.type === 'error'); if (bad.length) throw Error(bad.map((m) => m.lineNum + ': ' + m.message).join('\n')); return module; };
-      const pipeline = await createCrewSolvePipeline(device, shader), batches = models.map((model) => createCrewSolveBatch(device, pipeline, model, poses, people.length));
+      const pipeline = await createCrewSolver(device, shader), batches = models.map((model) => createCrewSolveBatch(device, pipeline, model, poses, people.length));
       // Where a palette puts points fixed to each joint: the joint itself and three a hand's breadth from it, so
       // a joint turned wrongly shows as well as one misplaced.
       const marks = models.map((model) => {
@@ -126,18 +127,20 @@ test('the pose pass puts every joint where the JavaScript skeleton has it, for c
         }
         return worst;
       };
-      const rows = [], kinds = new Set(), dt = 0.05, frames = 5;
-      let lists = 0, longest = 0;
+      const rows = [], kinds = new Set(), dt = 0.05, frames = 5, snapped = (c, frame) => (c.index + frame) % 7 === 0;
+      let lists = 0, longest = 0, beside = 0, latecomer = null, before = [];
       for (let frame = 0; frame < frames; frame++) {
         if (frame) for (const { company, boat } of companies) stepCompany(company, boat, dt, 8);
         const expected = [];
+        // Another company joins part way through, and room is made for it: nothing remembered of the others is lost.
+        if (frame === 3) latecomer = createCrewSolveBatch(device, pipeline, models[0], poses, 900);
         for (const batch of batches) batch.begin();
         for (const c of people) {
           const { s, boat, work, index, rig } = c, a = models[rig].animator;
           if (frame && !companies.some((k) => k.company.crew.includes(s))) { s.time += dt; s.walkTime = (s.walkTime ?? 0) + dt * (s.walk ?? 0); }
           c.each?.(frame);
           const before = batches[rig].recorder.used;
-          if (!batches[rig].add(index, s, boat, dt, index, { work })) throw Error('No room to write down ' + c.label);
+          if (!batches[rig].add(index, s, boat, dt, index * 2 + frame % 2, { work, snap: snapped(c, frame) })) throw Error('No room to write down ' + c.label);
           lists++; longest = Math.max(longest, batches[rig].recorder.used - before);
           kinds.add(s._mixer.actionKey.split(':').slice(0, 2).join(':'));
           // The same sailor on the JavaScript skeleton, which keeps its own memory of his last pose.
@@ -151,7 +154,10 @@ test('the pose pass puts every joint where the JavaScript skeleton has it, for c
           expected.push(a.palette.slice());
         }
         const encoder = device.createCommandEncoder(), pass = encoder.beginComputePass();
-        for (const batch of batches) { batch.upload(); batch.encode(pass); }
+        // Three rigs' sailors, solved together as a fleet's companies are. On the odd frames each is sent for
+        // solving before the next has finished writing, which the solver must also get right.
+        if (frame % 2) for (const batch of batches) { batch.upload(); batch.encode(pass); }
+        else { for (const batch of batches) batch.upload(); for (const batch of batches) batch.encode(pass); }
         pass.end();
         const read = device.createBuffer({ size: bytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
         encoder.copyBufferToBuffer(poses, 0, read, 0, bytes);
@@ -163,17 +169,22 @@ test('the pose pass puts every joint where the JavaScript skeleton has it, for c
           const names = models[c.rig].animator.names, joints = models[c.rig].animator.joints;
           let worst = 0, where = '', finite = true;
           for (let joint = 0; joint < J; joint++) {
-            const d = apart(c.rig, joint, expected[c.index], out, c.index * pose);
+            const d = apart(c.rig, joint, expected[c.index], out, (c.index * 2 + frame % 2) * pose);
+            // The pose beside it is this one too if it was to show at once, and otherwise still the frame before's.
+            const other = snapped(c, frame) ? expected[c.index] : before[c.index];
+            if (other) beside = Math.max(beside, apart(c.rig, joint, other, out, (c.index * 2 + 1 - frame % 2) * pose));
             if (!Number.isFinite(d)) finite = false;
             if (d > worst) { worst = d; where = names[joints[joint]]; }
           }
           rows.push({ label: c.label, frame, worst, where, finite, key: c.s._mixer.actionKey });
         }
+        before = expected;
       }
+      latecomer.destroy();
       for (const batch of batches) batch.destroy();
       poses.destroy();
       rows.sort((a, b) => b.worst - a.worst);
-      return { errors, people: people.length, lists, longest, kinds: [...kinds].sort(), worst: rows.slice(0, 12), broken: rows.filter((r) => !r.finite).slice(0, 8), over: rows.filter((r) => r.worst > 0.004).length, rows: rows.length };
+      return { errors, people: people.length, lists, longest, beside, kinds: [...kinds].sort(), worst: rows.slice(0, 12), broken: rows.filter((r) => !r.finite).slice(0, 8), over: rows.filter((r) => r.worst > 0.004).length, rows: rows.length };
     });
     if (process.env.CREW_SOLVE_REPORT) console.log(JSON.stringify({ ...result, worst: result.worst.slice(0, 3) }));
     assert.deepEqual(result.errors, []);
@@ -185,13 +196,14 @@ test('the pose pass puts every joint where the JavaScript skeleton has it, for c
     }
     // Single precision on the GPU against double in JavaScript, through a chain of reaches: a millimetre or two.
     assert.equal(result.over, 0, 'no joint is more than four millimetres from where the JavaScript skeleton has it: ' + JSON.stringify(result.worst.slice(0, 4)));
+    assert.ok(result.beside < 0.004, 'the pose beside the one written is the same pose when it must show at once, and otherwise the last one: ' + result.beside);
   }
 });
 
 test('an arrow stays in the bone it struck, placed from the joints the pose pass wrote', { timeout: 300000 }, async () => {
   const result = await inPage(async () => {
     const { loadCrewGLB } = await import('/js/gltf.js');
-    const { createCrewSolvePipeline, createCrewSolveBatch, createCrewArrowPipeline, createCrewArrowBatch, resolveCrewWoundsOnSkeleton } = await import('/js/crew-solve.js');
+    const { createCrewSolver, createCrewSolveBatch, createCrewArrowPipeline, createCrewArrowBatch, resolveCrewWoundsOnSkeleton } = await import('/js/crew-solve.js');
     const { createCompany, stepCompany, CREW_ACTOR_FLOATS } = await import('/js/crew.js');
     const { poseCrewWork } = await import('/js/crew-pose.js');
     const { applyCrewRealism } = await import('/js/crew-physics.js');
@@ -222,7 +234,7 @@ test('an arrow stays in the bone it struck, placed from the joints the pose pass
     const J = 65, B = GPUBufferUsage, shader = async (code, label) => { const module = device.createShaderModule({ code, label }), bad = (await module.getCompilationInfo()).messages.filter((m) => m.type === 'error'); if (bad.length) throw Error(bad.map((m) => m.lineNum + ': ' + m.message).join('\n')); return module; };
     const joints = device.createBuffer({ size: people.length * J * 64, usage: B.STORAGE }), actors = new Float32Array(people.length * CREW_ACTOR_FLOATS), instances = new Float32Array(68 * 8);
     const actorBuffer = device.createBuffer({ size: actors.byteLength, usage: B.STORAGE | B.COPY_DST }), tubes = device.createBuffer({ size: instances.byteLength, usage: B.STORAGE | B.COPY_DST | B.COPY_SRC });
-    const batch = createCrewSolveBatch(device, await createCrewSolvePipeline(device, shader), model, joints, people.length);
+    const batch = createCrewSolveBatch(device, await createCrewSolver(device, shader), model, joints, people.length);
     const arrows = createCrewArrowBatch(device, await createCrewArrowPipeline(device, shader), joints, actorBuffer, tubes, 34);
     const mixers = new Map(), bones = new Set(), far = (p, q, at) => Math.hypot(p[0] - q[at], p[1] - q[at + 1], p[2] - q[at + 2]);
     let compared = 0, lost = 0, tip = 0, tail = 0, fletch = 0, sized = true, down = 0;

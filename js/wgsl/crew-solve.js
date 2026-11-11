@@ -17,7 +17,6 @@ export const CREW_SOLVE_JOINTS = 65;
 export const CREW_SOLVE_MEMORY = CREW_SOLVE_JOINTS * 2 + 2;
 export const CREW_INJURY_KINDS = Object.freeze({ severed: 1, crushed: 2, broken: 3 });
 
-const O = CREW_SOLVE_OP;
 export const crewSolveWGSL = ({ brokenAngle, crushedScale }) => /* wgsl */`
 // A joint at rest, how its finger curls if it is one, and its place in the tree: its parent, where its descendants
 // end, which hand it curls with, and whether it hangs from a hand at all.
@@ -36,13 +35,18 @@ struct Rig {
   joints: array<Joint, 65>,
   binds: array<mat4x4f, 65>,
 }
+// Where a sailor is in his clips, whether he is there at all, and where his steps start, how many they are, which
+// rig he is built on and where the pass keeps what it remembers of him.
 struct Sailor { clip: vec4f, more: vec4f, at: vec4u }
 struct Op { a: vec4f, b: vec4f }
-@group(0) @binding(0) var<storage, read> rig: Rig;
+// Every rig, every rig's clip keys, and everybody due a pose this frame, whatever vessel or fort they are in: the
+// GPU is as long over one sailor as over a hundred, and as long again for each further dispatch.
+@group(0) @binding(0) var<storage, read> rigs: array<Rig>;
 @group(0) @binding(1) var<storage, read> clips: array<vec4f>;
 @group(0) @binding(2) var<storage, read> sailors: array<Sailor>;
 @group(0) @binding(3) var<storage, read> ops: array<Op>;
 @group(0) @binding(4) var<storage, read_write> memory: array<vec4f>;
+// The poses just solved, one a sailor in the order they were asked for. A second pass puts each where it is drawn from.
 @group(0) @binding(5) var<storage, read_write> poses: array<mat4x4f>;
 
 const ROOT = 0u; const PELVIS = 1u; const SPINE1 = 2u; const SPINE2 = 3u; const SPINE3 = 4u; const NECK = 5u; const HEAD = 6u;
@@ -50,6 +54,7 @@ const CLAVICLE_L = 7u; const UPPERARM_L = 8u; const LOWERARM_L = 9u; const HAND_
 const CLAVICLE_R = 11u; const UPPERARM_R = 12u; const HAND_R = 14u;
 const THIGH_L = 15u; const FOOT_L = 17u; const UP = vec3f(0.0, 1.0, 0.0);
 
+var<private> RIG: u32;
 var<private> R: array<vec4f, 65>;
 var<private> T: array<vec3f, 65>;
 var<private> S: array<vec3f, 65>;
@@ -59,7 +64,7 @@ var<private> P: array<vec3f, 65>;
 var<private> grip: array<vec3f, 2>;
 var<private> gripped: array<u32, 2>;
 
-fn bone(i: u32) -> u32 { return rig.bones[i]; }
+fn bone(i: u32) -> u32 { return rigs[RIG].bones[i]; }
 fn qmul(a: vec4f, b: vec4f) -> vec4f {
   return vec4f(a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y, a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
     a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w, a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z);
@@ -98,32 +103,32 @@ fn mquat(m: mat3x3f) -> vec4f {
 fn unit(v: vec3f) -> vec3f { return v / max(length(v), 1e-9); }
 fn at(n: u32) -> vec3f { return P[n]; }
 fn place(i: u32) {
-  let p = rig.joints[i].link.x;
+  let p = rigs[RIG].joints[i].link.x;
   let local = turned(R[i], S[i]);
   if (p >= 0) { let over = W[u32(p)]; W[i] = over * local; P[i] = over * T[i] + P[u32(p)]; }
-  else { let over = linear(rig.rootParent); W[i] = over * local; P[i] = over * T[i] + rig.rootParent[3].xyz; }
+  else { let over = linear(rigs[RIG].rootParent); W[i] = over * local; P[i] = over * T[i] + rigs[RIG].rootParent[3].xyz; }
 }
 // A joint and everything hanging from it. Joints are stored parent first with each one's descendants straight
 // after it, so that is one run of the table. Fingers are most of the joints and nothing is solved from where
 // they are, so they are left until the pose is done.
 fn fkFrom(n: u32) {
-  let end = u32(rig.joints[n].link.y);
-  for (var i = n; i < end; i++) { if (rig.joints[i].link.w == 0) { place(i); } }
+  let end = u32(rigs[RIG].joints[n].link.y);
+  for (var i = n; i < end; i++) { if (rigs[RIG].joints[i].link.w == 0) { place(i); } }
 }
 fn placeFingers() {
-  for (var i = 0u; i < 65u; i++) { if (rig.joints[i].link.w != 0) { place(i); } }
+  for (var i = 0u; i < 65u; i++) { if (rigs[RIG].joints[i].link.w != 0) { place(i); } }
 }
 fn parentMatrix(n: u32) -> mat3x3f {
-  let p = rig.joints[n].link.x;
-  if (p < 0) { return linear(rig.rootParent); }
+  let p = rigs[RIG].joints[n].link.x;
+  if (p < 0) { return linear(rigs[RIG].rootParent); }
   return W[u32(p)];
 }
 // What carries a point of the body at rest to where this pose has it.
 fn palette(j: u32) -> mat4x4f {
-  let bind = rig.binds[j]; let m = W[j] * linear(bind);
+  let bind = rigs[RIG].binds[j]; let m = W[j] * linear(bind);
   return mat4x4f(vec4f(m[0], 0.0), vec4f(m[1], 0.0), vec4f(m[2], 0.0), vec4f(W[j] * bind[3].xyz + P[j], 1.0));
 }
-fn rest(n: u32) { R[n] = rig.joints[n].r; T[n] = rig.joints[n].t.xyz; S[n] = rig.joints[n].s.xyz; }
+fn rest(n: u32) { R[n] = rigs[RIG].joints[n].r; T[n] = rigs[RIG].joints[n].t.xyz; S[n] = rigs[RIG].joints[n].s.xyz; }
 // Turn a bone so that what pointed along 'was' points along 'to', both in the sailor's own frame.
 fn turn(n: u32, was: vec3f, to: vec3f) {
   let u = unit(was); let v = unit(to); let d = dot(u, v);
@@ -157,12 +162,12 @@ fn limb(c: u32, goal: vec3f, pole: vec3f) {
 fn footTurn(side: u32, desired: vec4f) {
   let foot = bone(FOOT_L + 4u * side); let toe = bone(FOOT_L + 1u + 4u * side);
   let q = mquat(parentMatrix(foot));
-  R[foot] = qmul(vec4f(-q.xyz, q.w), desired); R[toe] = rig.joints[toe].r;
+  R[foot] = qmul(vec4f(-q.xyz, q.w), desired); R[toe] = rigs[RIG].joints[toe].r;
   fkFrom(foot);
 }
 fn bootFlat(side: u32, normal: vec3f) {
   let delta = vec4f(normal.z, 0.0, -normal.x, 1.0 + normal.y);
-  footTurn(side, qmul(delta / length(delta), rig.footRest[side]));
+  footTurn(side, qmul(delta / length(delta), rigs[RIG].footRest[side]));
 }
 fn neutral() {
   rest(bone(ROOT)); rest(bone(PELVIS)); rest(bone(SPINE1)); rest(bone(SPINE2)); rest(bone(SPINE3)); rest(bone(CLAVICLE_L)); rest(bone(CLAVICLE_R));
@@ -170,17 +175,17 @@ fn neutral() {
 }
 fn fingers(left: f32, right: f32) {
   for (var j = 0u; j < 65u; j++) {
-    let side = rig.joints[j].link.z;
+    let side = rigs[RIG].joints[j].link.z;
     if (side == 0) { continue; }
-    let f = rig.joints[j].finger; let half = select(right, left, side == 1) * f.w * 0.5;
-    R[j] = qmul(rig.joints[j].r, vec4f(sin(half) * f.xyz, cos(half)));
+    let f = rigs[RIG].joints[j].finger; let half = select(right, left, side == 1) * f.w * 0.5;
+    R[j] = qmul(rigs[RIG].joints[j].r, vec4f(sin(half) * f.xyz, cos(half)));
   }
 }
 // Where a clip is at some second of it: the key before, the key after, and how far between.
 fn clipKey(c: u32, seconds: f32) -> vec3f {
-  let keys = rig.clipKeys[c]; let u = max(seconds, 0.0) * f32(rig.misc.z);
+  let keys = rigs[RIG].clipKeys[c]; let u = max(seconds, 0.0) * f32(rigs[RIG].misc.z);
   let lo = min(u32(u), keys - 1u); let hi = min(lo + 1u, keys - 1u);
-  return vec3f(f32(rig.clipFirst[c] + lo), f32(rig.clipFirst[c] + hi), select(clamp(u - f32(lo), 0.0, 1.0), 0.0, lo == hi));
+  return vec3f(f32(rigs[RIG].clipFirst[c] + lo), f32(rigs[RIG].clipFirst[c] + hi), select(clamp(u - f32(lo), 0.0, 1.0), 0.0, lo == hi));
 }
 // Mix a clip into the pose, or with 'first' start the pose from it.
 fn blendClip(c: u32, seconds: f32, weight: f32, first: bool) {
@@ -189,9 +194,9 @@ fn blendClip(c: u32, seconds: f32, weight: f32, first: bool) {
     let q = slerp(clips[lo * 65u + j], clips[hi * 65u + j], key.z);
     if (first) { R[j] = q; } else { R[j] = slerp(R[j], q, w); }
   }
-  let moved = rig.misc.x;
+  let moved = rigs[RIG].misc.x;
   if (moved < 65u) {
-    let t = mix(clips[rig.misc.y + lo].xyz, clips[rig.misc.y + hi].xyz, key.z);
+    let t = mix(clips[rigs[RIG].misc.y + lo].xyz, clips[rigs[RIG].misc.y + hi].xyz, key.z);
     if (first) { T[moved] = t; } else { T[moved] = mix(T[moved], t, w); }
   }
 }
@@ -281,7 +286,7 @@ fn seated(k: u32) {
     limb(2u + side, foot, pole);
     let knee = at(bone(base + 1u)); let ankle = at(bone(base + 2u));
     let back = max(0.0, atan2(ankle.z - knee.z, knee.y - ankle.y));
-    let raise = rig.contact.z * cos(back) + rig.contact.w * sin(back) - rig.contact[side];
+    let raise = rigs[RIG].contact.z * cos(back) + rigs[RIG].contact.w * sin(back) - rigs[RIG].contact[side];
     if (raise > 0.002) { foot.y += raise; limb(2u + side, foot, pole); }
     bootFlat(side, vec3f(0.0, cos(back * 0.5), -sin(back * 0.5)));
     limb(side, hands[side], vec3f(sgn * 0.6, 0.6, 0.15));
@@ -300,7 +305,7 @@ fn rowFeet(k: u32) {
   settleOnLegs(feet[0], feet[1]);
   for (var side = 0u; side < 2u; side++) {
     limb(2u + side, feet[side], vec3f(select(-0.25, 0.25, side == 0u), 0.35, 0.85));
-    footTurn(side, qmul(turned[side], rig.footRest[side]));
+    footTurn(side, qmul(turned[side], rigs[RIG].footRest[side]));
   }
 }
 // A fallen body laid along the eleven points its physics holds. js/crew-physics.js, applyArticulatedRagdollPose.
@@ -404,7 +409,8 @@ fn inertia(sailor: u32, flags: u32, weight: f32) {
   if (id.x >= arrayLength(&sailors)) { return; }
   let sailor = sailors[id.x]; let flags = u32(sailor.more.y);
   if ((flags & 1u) == 0u) { return; }
-  for (var j = 0u; j < 65u; j++) { T[j] = rig.joints[j].t.xyz; S[j] = rig.joints[j].s.xyz; }
+  RIG = sailor.at.z;
+  for (var j = 0u; j < 65u; j++) { T[j] = rigs[RIG].joints[j].t.xyz; S[j] = rigs[RIG].joints[j].s.xyz; }
   blendClip(0u, sailor.clip.x, 1.0, true);
   if (sailor.clip.z > 0.0) { blendClip(1u, sailor.clip.y, sailor.clip.z, false); }
   if (sailor.clip.w > 0.0) { blendClip(2u, sailor.more.x, sailor.clip.w, false); }
@@ -413,25 +419,25 @@ fn inertia(sailor: u32, flags: u32, weight: f32) {
   while (k < last) {
     let op = ops[k]; let a = op.a; let b = op.b;
     switch u32(a.x) {
-      case ${O.blend}u { blendClip(u32(a.y), a.z, a.w, false); fkFrom(bone(ROOT)); k += 1u; }
-      case ${O.neutral}u { neutral(); k += 1u; }
-      case ${O.turn}u { turn(u32(a.y), vec3f(a.z, a.w, b.x), b.yzw); k += 1u; }
-      case ${O.shift}u { let n = u32(a.y); moveTo(n, at(n) + vec3f(a.z, a.w, b.x)); k += 1u; }
-      case ${O.move}u { moveTo(u32(a.y), vec3f(a.z, a.w, b.x)); k += 1u; }
-      case ${O.limb}u { limb(u32(a.y), vec3f(a.z, a.w, b.x), b.yzw); k += 1u; }
+      case ${CREW_SOLVE_OP.blend}u { blendClip(u32(a.y), a.z, a.w, false); fkFrom(bone(ROOT)); k += 1u; }
+      case ${CREW_SOLVE_OP.neutral}u { neutral(); k += 1u; }
+      case ${CREW_SOLVE_OP.turn}u { turn(u32(a.y), vec3f(a.z, a.w, b.x), b.yzw); k += 1u; }
+      case ${CREW_SOLVE_OP.shift}u { let n = u32(a.y); moveTo(n, at(n) + vec3f(a.z, a.w, b.x)); k += 1u; }
+      case ${CREW_SOLVE_OP.move}u { moveTo(u32(a.y), vec3f(a.z, a.w, b.x)); k += 1u; }
+      case ${CREW_SOLVE_OP.limb}u { limb(u32(a.y), vec3f(a.z, a.w, b.x), b.yzw); k += 1u; }
       // A reach measured from the head: the goal's height and depth, and the pole's height, are from where the head is.
-      case ${O.limbHead}u { let h = at(bone(HEAD)); limb(u32(a.y), vec3f(a.z, h.y + a.w, h.z + b.x), vec3f(b.y, h.y + b.z, b.w)); k += 1u; }
-      case ${O.gunBody}u { gunBody(k); k += 4u; }
-      case ${O.seated}u { seated(k); k += 3u; }
-      case ${O.rowFeet}u { rowFeet(k); k += 2u; }
-      case ${O.ragdoll}u { ragdoll(k); k += 5u; }
+      case ${CREW_SOLVE_OP.limbHead}u { let h = at(bone(HEAD)); limb(u32(a.y), vec3f(a.z, h.y + a.w, h.z + b.x), vec3f(b.y, h.y + b.z, b.w)); k += 1u; }
+      case ${CREW_SOLVE_OP.gunBody}u { gunBody(k); k += 4u; }
+      case ${CREW_SOLVE_OP.seated}u { seated(k); k += 3u; }
+      case ${CREW_SOLVE_OP.rowFeet}u { rowFeet(k); k += 2u; }
+      case ${CREW_SOLVE_OP.ragdoll}u { ragdoll(k); k += 5u; }
       // What a hand holds: a place it was sent to, or wherever its reach left it.
-      case ${O.grip}u { let side = u32(a.y); gripped[side] = 1u; grip[side] = select(vec3f(a.w, b.x, b.y), at(bone(HAND_L + 4u * side)), a.z > 0.5); k += 1u; }
-      case ${O.seaLegs}u { seaLegs(k); k += 2u; }
-      case ${O.gaze}u { gaze(a.y, a.z); k += 1u; }
-      case ${O.fingers}u { fingers(a.y, a.z); k += 1u; }
-      case ${O.inertia}u { inertia(sailor.at.w, u32(a.y), a.z); k += 1u; }
-      case ${O.injury}u {
+      case ${CREW_SOLVE_OP.grip}u { let side = u32(a.y); gripped[side] = 1u; grip[side] = select(vec3f(a.w, b.x, b.y), at(bone(HAND_L + 4u * side)), a.z > 0.5); k += 1u; }
+      case ${CREW_SOLVE_OP.seaLegs}u { seaLegs(k); k += 2u; }
+      case ${CREW_SOLVE_OP.gaze}u { gaze(a.y, a.z); k += 1u; }
+      case ${CREW_SOLVE_OP.fingers}u { fingers(a.y, a.z); k += 1u; }
+      case ${CREW_SOLVE_OP.inertia}u { inertia(sailor.at.w, u32(a.y), a.z); k += 1u; }
+      case ${CREW_SOLVE_OP.injury}u {
         let n = u32(a.y); let kind = u32(a.z);
         if (kind == 1u) { S[n] = vec3f(0.001); }
         else if (kind == 2u) { S[n] = vec3f(${crushedScale.map(v => v.toFixed(4)).join(', ')}); }
@@ -442,10 +448,26 @@ fn inertia(sailor: u32, flags: u32, weight: f32) {
     }
   }
   placeFingers();
-  let slot = sailor.at.z * 65u;
+  let slot = id.x * 65u;
   for (var j = 0u; j < 65u; j++) { poses[slot + j] = palette(j); }
-  // A change that has to show at once takes both of the poses he is shown between.
-  if ((flags & 2u) != 0u) { let other = (sailor.at.z ^ 1u) * 65u; for (var j = 0u; j < 65u; j++) { poses[other + j] = poses[slot + j]; } }
+}
+`;
+
+// Each pose just solved goes to where its body is drawn from: one of the two poses a sailor is shown between, or
+// both when a change has to show at once.
+export const crewPlaceWGSL = /* wgsl */`
+struct Placing { solved: u32, slot: u32, beside: u32, spare: u32 }
+@group(0) @binding(0) var<storage, read> placings: array<Placing>;
+@group(0) @binding(1) var<storage, read> solved: array<mat4x4f>;
+@group(0) @binding(2) var<storage, read_write> poses: array<mat4x4f>;
+@compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id: vec3u) {
+  let n = id.x / 65u; let j = id.x % 65u;
+  if (n >= arrayLength(&placings)) { return; }
+  let placing = placings[n];
+  if (placing.solved == 0xffffffffu) { return; }
+  let pose = solved[placing.solved * 65u + j];
+  poses[placing.slot * 65u + j] = pose;
+  if (placing.beside != 0xffffffffu) { poses[placing.beside * 65u + j] = pose; }
 }
 `;
 

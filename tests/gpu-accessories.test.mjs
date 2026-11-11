@@ -15,7 +15,7 @@ function assertGPUToolRuntime(source){
 
 test('gunnery tools cannot restore a CPU triangle-animation backend',()=>{
   const source=readFileSync(new URL('../js/gunnery-tools.js',import.meta.url),'utf8');assertGPUToolRuntime(source);
-  assert.throws(()=>assertGPUToolRuntime(source.replace('writeGunneryToolInstances(company,boat,instances)','buildGunneryToolVertices(company,boat,vertices)')),/CPU tessellator|compact tool/);
+  assert.throws(()=>assertGPUToolRuntime(source.replace('writeGunneryToolInstances(company,boat,instances,placed)','buildGunneryToolVertices(company,boat,vertices)')),/CPU tessellator|compact tool/);
 });
 
 function assertGPUAnchorRuntime(source){

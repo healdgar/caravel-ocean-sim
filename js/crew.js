@@ -25,7 +25,7 @@ import { crewTrafficStep, crewTrafficAfterStep } from './crew-traffic.js';
 import { crewDeckField, crewDeckRoom } from './crew-deck.js';
 import { selectCrewLOD, CREW_LOD_TIERS, createCrewLODs, crewPoseInterval, crewApparentDistance, crewLensZoom, crewSailorTier, crewDrawRuns, crewNeedsCutShader, crewClipOnly, crewBakedPose, crewPoseDue, crewPoseSolved, fortPoseDue } from './crew-lod.js';
 import { createCrewClipPipeline, createCrewClipBatch, createCrewTurnPipeline, createCrewTurnBatch } from './crew-clip-pose.js';
-import { createCrewSolvePipeline, createCrewSolveBatch, createCrewArrowPipeline, createCrewArrowBatch, resolveCrewWoundsOnSkeleton } from './crew-solve.js';
+import { createCrewSolver, createCrewSolveBatch, createCrewArrowPipeline, createCrewArrowBatch, resolveCrewWoundsOnSkeleton } from './crew-solve.js';
 
 // Authored, disjoint stations keep a full company clear of stairs and masts.
 // Policies choose intent. The executor alone changes position and animation.
@@ -603,7 +603,8 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
   const group=(pipe,resources)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:resources.map((resource,binding)=>resource?.resource!==undefined?resource:{binding,resource})});
   const poseBlendPipeline=shared?.poseBlendPipeline??await shader(CREW_POSE_BLEND,'crew pose blend').then(blendModule=>device.createComputePipelineAsync({label:'crew pose blend',layout:'auto',compute:{module:blendModule,entryPoint:'main'}}));
   const clipPipeline=shared?.clipPipeline??await createCrewClipPipeline(device,shader);
-  const solvePipeline=shared?.solvePipeline??await createCrewSolvePipeline(device,shader);
+  // One solver for the device: every company and garrison on it is solved together.
+  const solver=await createCrewSolver(device,shader);
   const arrowPipeline=shared?.arrowPipeline??await createCrewArrowPipeline(device,shader);
   const turnPipeline=shared?.turnPipeline??await createCrewTurnPipeline(device,shader);
   // Each body's mesh is uploaded once and shared by the fleet: the men's, the women's and the captain's.
@@ -635,7 +636,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
     const captainClip=captains.length?createCrewClipBatch(device,clipPipeline,captainModel,bones,people.length):null;
     const turn=createCrewTurnBatch(device,turnPipeline,model,bones,people.length);
     // Anyone near enough to see what their hands are at is solved on the GPU, into the two poses they are shown between.
-    const solve=createCrewSolveBatch(device,solvePipeline,model,solved,people.length),captainSolve=captains.length?createCrewSolveBatch(device,solvePipeline,captainModel,solved,people.length):null;
+    const solve=createCrewSolveBatch(device,solver,model,solved,people.length),captainSolve=captains.length?createCrewSolveBatch(device,solver,captainModel,solved,people.length):null;
     const common=[{buffer:hullUBO},{buffer:bones},{buffer:actor}];
     const mainResources=[{buffer:frameUBO},...common,transView,sampClamp,envCubeView,{buffer:sunVisBuf},{buffer:wetness.state},skyView,{binding:13,resource:captainTexView},{binding:14,resource:captainSampler}];
     const main=group(pipeline,mainResources),mainCut=group(cutPipeline,mainResources);
@@ -678,7 +679,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
       }
     }
   };
-  return {state,assets:{models,pipeline,cutDepthPipeline,cutPipeline,shadowPipeline,poseBlendPipeline,clipPipeline,turnPipeline,solvePipeline,arrowPipeline,captainTexture,captainTexView,captainSampler,gunTools:gunTools.assets,geometry},triangles:everyPart.reduce((n,part)=>n+partTriangles(part,null),0),lods:CREW_LOD_TIERS,
+  return {state,assets:{models,pipeline,cutDepthPipeline,cutPipeline,shadowPipeline,poseBlendPipeline,clipPipeline,turnPipeline,arrowPipeline,captainTexture,captainTexView,captainSampler,gunTools:gunTools.assets,geometry},triangles:everyPart.reduce((n,part)=>n+partTriangles(part,null),0),lods:CREW_LOD_TIERS,
     get lodLevel(){return activeTier;},
     get posed(){return posed;},
     get activeTriangles(){return everyPart.reduce((n,part)=>n+partTriangles(part,activeTier),0);},
@@ -697,7 +698,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
         for(const b of batches){b.arrows.begin();b.arrows.upload();}
         // Hidden rendering does not turn a seated body's moisture samples back
         // into standing-height probes or change its physical rowing attendance.
-        if(Object.hasOwn(ROWING_DESIGNS,modelId))for(const b of batches)for(const part of b.parts)for(const s of part.people)if(s.seatedPose)poseCrewWork((part.model===captainModel?b.captainSolve:b.solve).recorder,s,boat);
+        if(Object.hasOwn(ROWING_DESIGNS,modelId))for(const b of batches){b.solve.begin();b.captainSolve?.begin();for(const part of b.parts)for(const s of part.people)if(s.seatedPose)poseCrewWork((part.model===captainModel?b.captainSolve:b.solve).recorder,s,boat);}
         return;
       }
       posed=true;poseFrame++;
@@ -2082,7 +2083,7 @@ export async function createFortSoldiers({
   const indigenousModels = createIndigenousCrewModels(models);
   const allModels = [models[0], models[1], indigenousModels[0], indigenousModels[1]];
   const clipPipeline = shared?.clipPipeline ?? await createCrewClipPipeline(device, shader);
-  const solvePipeline = shared?.solvePipeline ?? await createCrewSolvePipeline(device, shader);
+  const solver = await createCrewSolver(device, shader);
   const fortGeometry = (model, given) => {
     if (given) return { ...given, model, owned: false };
     const vertex = buffer('fort crew vertices', model.vertices, B.VERTEX);
@@ -2106,8 +2107,8 @@ export async function createFortSoldiers({
     const clip = createCrewClipBatch(device, clipPipeline, model, bones, MAX_FORT_SOLDIERS_PER_BATCH, !isIndigenousBatch);
     const captainClip = captainModel && !isIndigenousBatch ? createCrewClipBatch(device, clipPipeline, captainModel, bones, MAX_FORT_SOLDIERS_PER_BATCH) : null;
     // A soldier near enough to see his hands is solved on the GPU, straight into the joints he is drawn from.
-    const solve = createCrewSolveBatch(device, solvePipeline, model, bones, MAX_FORT_SOLDIERS_PER_BATCH);
-    const captainSolve = captainClip ? createCrewSolveBatch(device, solvePipeline, captainModel, bones, MAX_FORT_SOLDIERS_PER_BATCH) : null;
+    const solve = createCrewSolveBatch(device, solver, model, bones, MAX_FORT_SOLDIERS_PER_BATCH);
+    const captainSolve = captainClip ? createCrewSolveBatch(device, solver, captainModel, bones, MAX_FORT_SOLDIERS_PER_BATCH) : null;
     const actor = buffer('fort crew transforms', actors, B.STORAGE);
     const common = [{ buffer: fortHullUBO }, { buffer: bones }, { buffer: actor }];
     const mainResources = [{ buffer: frameUBO }, ...common, transView, sampClamp, envCubeView, { buffer: sunVisBuf }, { buffer: dryMoistureBuf }, skyView, { binding: 13, resource: captainTexView }, { binding: 14, resource: captainSampler }];
