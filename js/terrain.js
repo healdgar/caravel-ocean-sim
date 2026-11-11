@@ -10,6 +10,7 @@ import {loadTerrainNear,terrainNearGeometry,terrainNearContains,terrainNearSampl
 import {chooseForestSurfaceCodec} from './forest-surfaces.js';
 import {loadForestScenery,createForestRenderer,FOREST_VERTEX_WGSL,FOREST_SHADOW_WGSL,FOREST_ASSETS,SUBTROPICAL_FOREST_ASSETS,PORTUGAL_FOREST_ASSETS} from './forest-scenery.js';
 import {FOREST_CROWN_WGSL} from './forest-crowns.js';
+import {FOREST_GROVE_WGSL,loadForestGroves,createForestGroves,PORTUGAL_FOREST_GROVE_ASSETS,SUBTROPICAL_FOREST_GROVE_ASSETS} from './forest-groves.js';
 import {foreshorePalmPlacement} from './forest-trunks.js';
 import {loadForestMass,createForestMassRenderer,forestMiddleWoodPartition,FOREST_MASS_VERTEX_WGSL} from './forest-mass.js';
 import {loadForestMiddle,FOREST_MIDDLE_ASSETS,SUBTROPICAL_FOREST_MIDDLE_ASSETS,PORTUGAL_FOREST_MIDDLE_ASSETS} from './forest-middle.js';
@@ -718,7 +719,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // Start shader compilation, foliage fetch, and forest downloads immediately in parallel with DEM/terrain loading
   const mipPipePromise=Promise.resolve(mipPipe),cloudsResolvedPromise=Promise.resolve(clouds),waterOpticsResolvedPromise=Promise.resolve(waterOptics);
   mipPipePromise.catch(()=>{});cloudsResolvedPromise.catch(()=>{});waterOpticsResolvedPromise.catch(()=>{});
-  const modulePromise=shader(TERRAIN+FOREST_VERTEX_WGSL+FOREST_CROWN_WGSL+FOREST_SHADOW_WGSL+FOREST_MASS_VERTEX_WGSL,'island terrain');
+  const modulePromise=shader(TERRAIN+FOREST_VERTEX_WGSL+FOREST_CROWN_WGSL+FOREST_GROVE_WGSL+FOREST_SHADOW_WGSL+FOREST_MASS_VERTEX_WGSL,'island terrain');
   const meshLayout={arrayStride:32,attributes:[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},{shaderLocation:2,offset:24,format:'float32x2'}]};
   const treeLayout={arrayStride:TREE_VERTEX_FLOATS*4,attributes:[...meshLayout.attributes,{shaderLocation:5,offset:32,format:'float32x2'}]};
   const treeBuffers=[treeLayout,{arrayStride:32,stepMode:'instance',attributes:[{shaderLocation:3,offset:0,format:'float32x4'},{shaderLocation:4,offset:16,format:'float32x4'}]}];
@@ -768,6 +769,11 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     onRoots:resolveForestRoots,
   }).catch(error=>{forestFailure=error.message;resolveForestManifest(null);resolveForestRoots(null);return null;});
   if(canopyMode==='off'){resolveForestManifest(null);resolveForestRoots(null);}
+  // Groves stand for the woods of a generated coast beyond its planted trees (js/forest-groves.js). A coast
+  // that cannot load them keeps its planted trees alone.
+  let groveFailure=null;
+  const groveAssets=useSubtropicalForest?SUBTROPICAL_FOREST_GROVE_ASSETS:usePortugalForest?PORTUGAL_FOREST_GROVE_ASSETS:null;
+  const grovePromise=canopyMode==='off'||!useProcedural||!groveAssets||search.get('forestGroves')==='0'?Promise.resolve(null):loadForestGroves({assets:groveAssets}).catch(error=>{groveFailure=error.message;return null;});
   const forestMassMode=typeof location==='undefined'?canopyMode:search.get('forestMass')||canopyMode;
   if(!['auto','near','far','off'].includes(forestMassMode))throw Error('Unknown native forest mass mode');
   const forestAtlasDebug=typeof location!=='undefined'&&['auto','force'].includes(search.get('forestImpostor'));
@@ -1147,6 +1153,28 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const forestStrikeKey=activeRegion.id??`${activeRegion.latitude},${activeRegion.longitude}`;
   const forest=activeForestPack?await createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack:activeForestPack,groundSample:proceduralPack?null:groundSample,forestMass,forestMiddle:activeForestMiddle,mode:canopyMode,savedStrikes:portDamage?.forestStrikes?.(forestStrikeKey)??null,strikeOrigin:{x:activeRegion.x??0,z:activeRegion.z??0},onStrikesChanged:trees=>portDamage?.setForestStrikes?.(forestStrikeKey,trees),terrainOcclusion:typeof location!=='undefined'&&new URLSearchParams(location.search).get('forestOcclusion')==='off'?null:{heights:regionalElevationData??heights,region:getRegionalOcclusionRegion(),near:nearTile??(regionalElevationSize?{heights,manifest:{domain:{x:activeRegion.x,z:activeRegion.z,span:activeRegion.span,size:activeRegion.size}}}:null)}}):null;
   const forestStats=forest?.stats??{loaded:false,mode:canopyMode,error:forestFailure};
+  // The cast a climate gives its leaves, as planted trees carry it in their roots.
+  const groveTint=()=>activeClimate?.foliageTint??(['tropical','subtropical'].includes(activeClimate?.climate)||['tropical','subtropical'].includes(activeRegion.climate)?[0.78,1.12,0.68]:[1,1,1]);
+  let groves=null;
+  const grovePack=await grovePromise;
+  if(grovePack&&proceduralPack&&forest&&forestPack)try{
+    const sceneIds=[0,1,2,3,4,5,6,19,20,21];
+    groves=await createForestGroves({device,shader,module,frameUBO,pack:grovePack,format,samples,
+      bind:pipe=>bind(pipe,resources.filter(([id])=>sceneIds.includes(id))),cloudEntries:pipe=>clouds.bindVolume(pipe),
+      tint:groveTint(),pixelsPerSquare:isMobile?10:6,baseCoverSize:isMobile?512:1024,sectionCoverSize:isMobile?256:512});
+  }catch(error){groveFailure=error.message;}
+  forestStats.groves=groves?.stats??{loaded:false,error:groveFailure};
+  // A planted tree keeps the ground under its crown; a grove's trees stand everywhere else that is wood.
+  const groveReach=(kind,scale)=>{const p=forestPack.manifest.prototypes[kind];return Math.max(2.5,Math.min(16,(p?.crownRadius??p?.crownRadiusMetres??6)*scale*.9));};
+  function syncGroves(roots){
+    if(!groves||terrainDisposed)return;
+    const sources=[{key:'0,0',region:activeRegion,heights,biome,beaches:proceduralPack.beaches,port:proceduralPack.port,ground:elevation}];
+    for(const sec of loadedSections.values())sources.push({key:sec.key,region:sec.region,heights:sec.heights,biome:sec.biome,beaches:sec.beaches,port:sec.port});
+    groves.setTint(groveTint());
+    // From far off the trees standing in closed wood give way to the canopy the groves draw there.
+    forest.leaveToCanopy(groves.sync(sources,roots,groveReach,forestPack.manifest.prototypes.some(p=>p.species==='mangrove')));
+  }
+  syncGroves(activeForestPack?.roots);
   forestStats.mass=forestMass?.stats??{loaded:false,error:forestMassFailure,appearanceErrorSupported:false};
   if(forestStats.mass.middle)forestStats.mass.middle.error=forestMiddleFailure;
   forestStats.replacedProceduralTrees=(canopyTrees.length-trees.length)/8;forestStats.coverage=forestPack?.manifest.coverage??null;
@@ -1410,6 +1438,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         {isMobile,extraSections,maxRootCapacity:streamMaxRoots,climateProfile:activeClimate}
       );
       forest.updatePack(nextForestPack,regionalElevationData??heights,getRegionalOcclusionRegion());
+      syncGroves(nextForestPack.roots);
       lastCamera=null;
       return;
     }
@@ -1984,6 +2013,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       treeCull?.destroy();
       importedCanopy?.destroy?.();
       forest?.destroy?.();
+      groves?.destroy();
       forestMass?.destroy?.();
       if(ownsLandShadows)activeLandShadows.destroy();
       proceduralMiddle?.vertices?.destroy?.();proceduralMiddle?.indices?.destroy?.();proceduralMiddle?.woodIndices?.destroy?.();
@@ -2106,6 +2136,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       treeCull?.encode(pass);
       forestMass?.encode(pass);
       forest?.encode(pass);
+      groves?.encode(pass);
       if((tick++%8)!==0&&!changed)return;
       pass.setPipeline(lightPipe);pass.setBindGroup(0,lightGroup);pass.setBindGroup(1,cloudLight);pass.dispatchWorkgroups(8,8);
     },
@@ -2164,7 +2195,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       for(const[pipe,groupIndex,part]of[[opaqueTreePipe,1,'opaque'],[treePipe,2,'leaves']]){
         // All imported wood/crowns draw before either family's cutout leaves.
         // Opaque terrain and both solid forest paths retain mobile HSR.
-        if(part==='opaque'){forestMass?.drawOpaque(pass);importedCanopy?.drawOpaque(pass);forest?.drawOpaque(pass);}
+        if(part==='opaque'){forestMass?.drawOpaque(pass);importedCanopy?.drawOpaque(pass);forest?.drawOpaque(pass);groves?.drawOpaque(pass);}
         pass.setPipeline(pipe);pass.setBindGroup(0,groups[groupIndex]);pass.setBindGroup(1,cloudGroups[groupIndex]);
         for(let lod=0;lod<3;lod++)for(let variant=0;variant<TREE_VARIANTS;variant++){
           treeCull?.draw(pass,lod*TREE_VARIANTS+variant,part==='opaque'?0:1,treeMeshes[lod][variant][part].buffer);

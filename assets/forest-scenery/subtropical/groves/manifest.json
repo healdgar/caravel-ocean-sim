@@ -1,0 +1,76 @@
+{
+ "format": "waterworld.forest-groves",
+ "version": 1,
+ "tileMetres": 256,
+ "texels": 128,
+ "levels": 7,
+ "variants": 4,
+ "maps": 3,
+ "heightMetres": 52,
+ "maxTrees": 906,
+ "treeFloats": 8,
+ "look": {
+  "alike": 0.7778,
+  "transmission": 0.111,
+  "roughness": 0.7831,
+  "undersideGain": [
+   2.034,
+   1.5539,
+   3.7319
+  ]
+ },
+ "files": {
+  "maps.bin": {
+   "bytes": 1048512,
+   "sha256": "0ab297354b1ceb1238772fbde0c4264b1cba3c21b4e2e839bc0a0e711b8b13d1",
+   "gzip": {
+    "file": "maps.bin.gz",
+    "bytes": 827113,
+    "sha256": "a19bf28ee42c6560cf687c0256fc754999b89fc1f4b5414b74c7cb9ee4bef92f"
+   }
+  },
+  "trees.bin": {
+   "bytes": 115968,
+   "sha256": "27a81e7a07ea15ffdbffcc31dcc9efc7d5a171e30a43a86854db08e80f0ced86",
+   "gzip": {
+    "file": "trees.bin.gz",
+    "bytes": 68550,
+    "sha256": "40250fb88f9c43af3049ff419bbf636ab5f088afc3126de2d675b93fdd4f7313"
+   }
+  }
+ },
+ "groves": [
+  {
+   "trees": 869,
+   "tall": 79,
+   "shared": 179,
+   "standingShare": 0.9999,
+   "meanHeightMetres": 26.49,
+   "highestMetres": 36.93
+  },
+  {
+   "trees": 905,
+   "tall": 81,
+   "shared": 179,
+   "standingShare": 1,
+   "meanHeightMetres": 26.43,
+   "highestMetres": 36.93
+  },
+  {
+   "trees": 858,
+   "tall": 83,
+   "shared": 179,
+   "standingShare": 1,
+   "meanHeightMetres": 26.62,
+   "highestMetres": 37.03
+  },
+  {
+   "trees": 841,
+   "tall": 84,
+   "shared": 179,
+   "standingShare": 0.9999,
+   "meanHeightMetres": 26.83,
+   "highestMetres": 36.98
+  }
+ ]
+}

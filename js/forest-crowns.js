@@ -102,6 +102,45 @@ struct ForestCrownLook {bounds:vec4f,optics:vec4f,underside:vec4f};
 // their mean). Eight leaves around that mean, each counted by how much of it the viewer sees, give the
 // light and colour a pixel full of them would average to. It is the arithmetic of forestNativeLeafFS.
 const FOREST_CROWN_RING=8;
+struct ForestCrownLight {colour:vec3f,kind:vec2f,leafUV:vec2f,normal:vec3f};
+// The light and colour of a patch of crown at world: leaves is the way its leaves face in the mean,
+// outward the way the body they make up faces there, and optics and underside are a ForestCrownLook's.
+// A grove's canopy (js/forest-groves.js) is lit by it too, since it stands for the same leaves.
+fn forestCrownLight(world:vec3f,leaves:vec3f,outward:vec3f,colour:vec3f,exposure:f32,escape:f32,optics:vec4f,underside:vec3f)->ForestCrownLight{
+ let view=normalize(F.camPos.xyz-world);let middle=normalize(leaves);
+ let side=normalize(cross(middle,select(vec3f(1.,0.,0.),vec3f(0.,0.,1.),abs(middle.x)>.9)));let other=cross(middle,side);
+ let alike=clamp(optics.x,0.,1.);let spread=sqrt(1.-alike*alike);
+ let moonDir=lunarDirection();
+ var weight=0.;var gain=vec3f(0.);var lit=vec3f(0.);var mean=vec3f(0.);var level=0.;var moon=0.;
+ for(var k=0;k<FOREST_CROWN_RING;k++){
+  let a=(f32(k)+.5)*(6.2831853/f32(FOREST_CROWN_RING));
+  var n=middle*alike+(side*cos(a)+other*sin(a))*spread;
+  let facing=dot(n,view);let seen=abs(facing);
+  if(facing<0.){n=-n;}
+  let nDotL=dot(n,F.sunDir.xyz);let backlit=max(-nDotL,0.)*optics.y;
+  let tint=select(underside,vec3f(1.),facing>=0.)*mix(vec3f(1.),vec3f(1.12,1.16,.78),backlit*exposure);
+  gain+=tint*seen;lit+=tint*(seen*(max(nDotL,0.)+backlit));mean+=n*seen;level+=abs(n.y)*seen;moon+=max(dot(n,moonDir),0.)*seen;weight+=seen;
+ }
+ weight=max(weight,1e-4);mean/=weight;
+ let luma=vec3f(.2126,.7152,.0722);
+ var o:ForestCrownLight;
+ o.colour=colour*gain/weight;
+ o.kind=vec2f(dot(lit,luma)/max(dot(gain,luma),1e-4)*(.22+.78*exposure*exposure)*(.35+.65*escape),(.12+exposure*.56+level/weight*.09)*escape);
+ let roughness=clamp(optics.z,.24,.92);
+ // Leaves this small show no highlight of their own, so the surface is given none; a wet leaf's darker colour stays.
+ o.leafUV=vec2f(clamp((1.-roughness)*.42*(.35+.65*exposure),0.,.36),max(roughness,.8));
+ // The sky, the ground's bounce and the moon read the normal directly. The leaves' mean, left short of
+ // unit length, is what their separate answers average to. By night the moon is the light that matters,
+ // and the normal is turned so that it gives the leaves' own share of moonlight.
+ var night=mean;let low=length(moonDir.xz);
+ if(low>.05){let along=clamp((moon/weight-mean.y*moonDir.y)/low,-1.,1.);night=vec3f(moonDir.x/low*along,mean.y,moonDir.z/low*along);}
+ o.normal=mix(mean,night,1.-smoothstep(-.12,.02,F.sunDir.y));
+ // A crown is a rounded body as well as a mass of leaves. The side it turns from the sun is darker than
+ // its leaves alone would say and the side it turns to the sun brighter, and its underside sees less sky
+ // than its top. Over a whole crown the two factors average to one, so a wood is no lighter or darker.
+ o.kind*=vec2f(mix(.68,1.36,smoothstep(-.45,.75,dot(outward,F.sunDir.xyz))),mix(.8,1.2,outward.y*.5+.5));
+ return o;
+}
 @vertex fn forestCrownVS(@builtin(instance_index)instance:u32,@builtin(vertex_index)vertex:u32)->ForestVertex{
  let item=forestClusterList[forestBin.x+instance];
  let at=vertex*${CROWN_VERTEX_WORDS}u;
@@ -120,40 +159,11 @@ const FOREST_CROWN_RING=8;
   o.kind=vec2f(max(dot(n,F.sunDir.xyz),0.)*(.35+.65*escape),(.36+max(n.y,0.)*.25)*escape);o.leafUV=vec2f(0.,.95);o.canopyAO=0.;
   return o;
  }
- let view=normalize(F.camPos.xyz-o.world);let middle=normalize(o.normal);
- let side=normalize(cross(middle,select(vec3f(1.,0.,0.),vec3f(0.,0.,1.),abs(middle.x)>.9)));let other=cross(middle,side);
- let alike=clamp(forestCrown.optics.x,0.,1.);let spread=sqrt(1.-alike*alike);
- let moonDir=lunarDirection();
- var weight=0.;var gain=vec3f(0.);var lit=vec3f(0.);var mean=vec3f(0.);var level=0.;var moon=0.;
- for(var k=0;k<FOREST_CROWN_RING;k++){
-  let a=(f32(k)+.5)*(6.2831853/f32(FOREST_CROWN_RING));
-  var n=middle*alike+(side*cos(a)+other*sin(a))*spread;
-  let facing=dot(n,view);let seen=abs(facing);
-  if(facing<0.){n=-n;}
-  let nDotL=dot(n,F.sunDir.xyz);let backlit=max(-nDotL,0.)*forestCrown.optics.y;
-  let tint=select(forestCrown.underside.rgb,vec3f(1.),facing>=0.)*mix(vec3f(1.),vec3f(1.12,1.16,.78),backlit*exposure);
-  gain+=tint*seen;lit+=tint*(seen*(max(nDotL,0.)+backlit));mean+=n*seen;level+=abs(n.y)*seen;moon+=max(dot(n,moonDir),0.)*seen;weight+=seen;
- }
- weight=max(weight,1e-4);mean/=weight;
- let luma=vec3f(.2126,.7152,.0722);
- o.colour=o.colour*gain/weight;
- o.kind=vec2f(dot(lit,luma)/max(dot(gain,luma),1e-4)*(.22+.78*exposure*exposure)*(.35+.65*escape),(.12+exposure*.56+level/weight*.09)*escape);
- let roughness=clamp(forestCrown.optics.z,.24,.92);
- // Leaves this small show no highlight of their own, so the surface is given none; a wet leaf's darker colour stays.
- o.leafUV=vec2f(clamp((1.-roughness)*.42*(.35+.65*exposure),0.,.36),max(roughness,.8));
- // The sky, the ground's bounce and the moon read the normal directly. The leaves' mean, left short of
- // unit length, is what their separate answers average to. By night the moon is the light that matters,
- // and the normal is turned so that it gives the leaves' own share of moonlight.
- var night=mean;let low=length(moonDir.xz);
- if(low>.05){let along=clamp((moon/weight-mean.y*moonDir.y)/low,-1.,1.);night=vec3f(moonDir.x/low*along,mean.y,moonDir.z/low*along);}
- o.normal=mix(mean,night,1.-smoothstep(-.12,.02,F.sunDir.y));
- // A crown is a rounded body as well as a mass of leaves. The side it turns from the sun is darker than
- // its leaves alone would say and the side it turns to the sun brighter, and its underside sees less sky
- // than its top. Over a whole crown the two factors average to one, so a wood is no lighter or darker.
  let shape=forestClusterOctahedral(vec2f(f32(w3&65535u),f32(w3>>16u))/65535.*2.-1.);
  let turn=vec2f(cos(r.yawColour.x),sin(r.yawColour.x));
  let outward=vec3f(turn.x*shape.x-turn.y*shape.z,shape.y,turn.y*shape.x+turn.x*shape.z);
- o.kind*=vec2f(mix(.68,1.36,smoothstep(-.45,.75,dot(outward,F.sunDir.xyz))),mix(.8,1.2,outward.y*.5+.5));
+ let lit=forestCrownLight(o.world,o.normal,outward,o.colour,exposure,escape,forestCrown.optics,forestCrown.underside.rgb);
+ o.colour=lit.colour;o.kind=lit.kind;o.leafUV=lit.leafUV;o.normal=lit.normal;
  o.canopyAO=1.;
  return o;
 }
@@ -187,8 +197,15 @@ fn forestCrownShade(in:ForestVertex)->vec4f{
  let outward=normalize(across*select(-1.,1.,dot(across,toEye)>=0.)+toEye*1e-9);
  let shadow=landShadowVisibility(in.world+outward*FOREST_CROWN_SHADOW_LIFT,outward);
  // The trunk (canopyAO 0) is bare wood.
- let mottle=mix(1.,forestCrownMottle(in.world),in.canopyAO);
- return landFinishShadowed(in.world,in.normal,in.colour,in.kind.x*mottle,in.kind.y*mix(1.,mottle,.6),in.leafUV.x,in.leafUV.y,shadow);
+ let mottle=mix(1.,forestCrownMottle(in.world),clamp(in.canopyAO,0.,1.));
+ // A pixel whose centre lies off a triangle seen edge on reads what the triangle carries from beyond its
+ // corners, where it overshoots without limit: a normal of any length, a wetness below nothing, which
+ // the land's finish takes for metal. Each is held to what a leaf can be, so no pixel blazes for a frame.
+ let span=dot(in.normal,in.normal);
+ let normal=select(outward,in.normal*inverseSqrt(max(span,1e-12)),span>1e-6&&span<1e6);
+ let colour=clamp(in.colour,vec3f(0.),vec3f(4.));let light=clamp(in.kind,vec2f(0.),vec2f(4.,1.));
+ let finish=clamp(in.leafUV,vec2f(0.,.05),vec2f(1.));
+ return landFinishShadowed(in.world,normal,colour,light.x*mottle,light.y*mix(1.,mottle,.6),finish.x,finish.y,shadow);
 }
 @fragment fn forestCrownFS(in:ForestVertex)->@location(0)vec4f{return forestCrownShade(in);}
 // A crown coming in over its own leaves takes some of each pixel's samples and the leaves keep the rest

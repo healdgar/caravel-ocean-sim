@@ -1052,6 +1052,17 @@ export const FOREST_MASS_NEIGHBOR_ROOT_CULL_WGSL=forestWithMassNeighbors(FOREST_
 export const FOREST_MASS_MIDDLE_NEIGHBOR_ROOT_CULL_WGSL=forestWithMassNeighbors(FOREST_MASS_MIDDLE_ROOT_CULL_WGSL);
 // Volume foliage and native-derived wood share the exact same compacted root
 // IDs. Slot3 has a static36-index box instead of the debug atlas's6-index quad.
+// Closed wood far off is the groves' canopy alone (js/forest-groves.js), never a scatter of small
+// models. A tree the groves mark as standing in closed wood is left to that canopy beyond the range at
+// which a crown FOREST_CANOPY_CROWN_METRES across spans FOREST_CANOPY_CROWN_PIXELS pixels; by then
+// the canopy has closed over the hollow it stood in. A spyglass lengthens the range with the view.
+export const FOREST_CANOPY_CROWN_METRES=20,FOREST_CANOPY_CROWN_PIXELS=12;
+export const FOREST_CANOPY_RANGE_WGSL=`fn forestCanopyRange()->f32{return F.screen.y/max(2.0*length(F.camUp.xyz),.0001)*${(FOREST_CANOPY_CROWN_METRES/FOREST_CANOPY_CROWN_PIXELS).toFixed(4)};}`;
+export const forestWithGroveCanopy=source=>forestCullReplace(forestCullReplace(source,
+ '@group(0)@binding(7)var<uniform>forestResidency:vec4u;',
+ '@group(0)@binding(7)var<uniform>forestResidency:vec4u;\n@group(0)@binding(13)var<storage,read>forestCanopyRoots:array<u32>;\n'+FOREST_CANOPY_RANGE_WGSL),
+ 'let clip=F.viewProj*vec4f(relative,1);',
+ 'if(((forestCanopyRoots[id.x>>5u]>>(id.x&31u))&1u)==1u&&length(relative)>forestCanopyRange()){return;}\n let clip=F.viewProj*vec4f(relative,1);');
 const forestWithVolumeCommands=source=>forestCullReplace(source,
  'if(nearLod){atomicAdd(&commands[(pi*4u+1u)*5u+1u],1u);}',
  'if(farLod){atomicAdd(&commands[(pi*4u+3u)*5u+1u],1u);}\n if(nearLod){atomicAdd(&commands[(pi*4u+1u)*5u+1u],1u);}');
@@ -1223,10 +1234,13 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     let currentNearPixels=nearPixels;
     const parameters=make(new Float32Array([activeRootCount,m.prototypes.length,nearPixels,effectiveModeIndex]),B.UNIFORM,'forest projected size policy');
     const residency=forestMass?.nativeResidency??make(new Uint32Array([0,0,0,0]),B.UNIFORM,'forest native residency');
+    // A bit a root: set by leaveToCanopy for the trees the groves' canopy stands in for when far.
+    const canopyRoots=make(new Uint32Array(Math.ceil(maxRootCapacity/32)),B.STORAGE,'forest roots left to grove canopy');
     let cullSource=forestMass?.neighbors?((middle||nativeMid)?FOREST_MASS_MIDDLE_NEIGHBOR_ROOT_CULL_WGSL:FOREST_MASS_NEIGHBOR_ROOT_CULL_WGSL):(middle||nativeMid)?(forestMass?FOREST_MASS_MIDDLE_ROOT_CULL_WGSL:FOREST_MIDDLE_ROOT_CULL_WGSL):(forestMass?FOREST_MASS_ROOT_CULL_WGSL:FOREST_CULL_WGSL);
     if(nativeMid)cullSource=forestWithNativeLod(cullSource);
     if(terrainOcclusion){terrainVisibility=createForestTerrainOcclusion({device,...terrainOcclusion});cullSource=withForestTerrainOcclusion(cullSource);}
     if(volume)cullSource=forestWithVolumeCommands(cullSource);
+    cullSource=forestWithGroveCanopy(cullSource);
     const computePromise=shader(cullSource,'forest GPU cull and compact');
     const hasLandShadow=resources.some(([id])=>id===19);
     const pipe=(fragment,target={format},depthStencil={depthWriteEnabled:true,depthCompare:'greater'})=>device.createRenderPipelineAsync({label:'instanced forest '+fragment,layout:'auto',vertex:{module,entryPoint:'forestCanopyVS',buffers:[FOREST_VERTEX_LAYOUT]},
@@ -1247,7 +1261,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     ]);
     const resetGroup=device.createBindGroup({layout:reset.getBindGroupLayout(0),entries:[{binding:4,resource:{buffer:commands}},{binding:6,resource:{buffer:parameters}}]});
     const cullBuffers=[frameUBO,roots,prototypes,visible,commands,previous,parameters,residency,...(forestMass?[forestMass.state]:[]),...(forestMass?.neighbors?[forestMass.neighbors]:[])];
-    const cullGroup=device.createBindGroup({layout:cull.getBindGroupLayout(0),entries:[...cullBuffers.map((buffer,binding)=>({binding,resource:{buffer}})),...(terrainVisibility?.entries??[])]});
+    const cullGroup=device.createBindGroup({layout:cull.getBindGroupLayout(0),entries:[...cullBuffers.map((buffer,binding)=>({binding,resource:{buffer}})),{binding:13,resource:{buffer:canopyRoots}},...(terrainVisibility?.entries??[])]});
     const sceneIds=[0,1,2,3,4,5,6,19,20,21];
     const bind=(p,ids)=>device.createBindGroup({layout:p.getBindGroupLayout(0),entries:resources.filter(([i])=>ids.includes(i)).map(([binding,resource])=>({binding,resource}))});
     const opaqueGroup=opaque?bind(opaque,sceneIds):null,leafGroup=leaf?bind(leaf,sceneIds):null,leafDepthGroup=leafDepth?bind(leafDepth,[0]):null;
@@ -1416,6 +1430,8 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     };
     const saveStrikes=()=>{onStrikesChanged?.(forestStrikesToSave(strikes,strikeOrigin));};
     return {stats,nativeReady,prepare(){},trunksReady,
+      // stands: a bit for each root, in the roots' order, set where the tree stands in closed wood.
+      leaveToCanopy(stands){if(destroyed)return;const words=new Uint32Array(Math.ceil(maxRootCapacity/32));if(stands)words.set(stands.subarray(0,words.length));device.queue.writeBuffer(canopyRoots,0,words);},
       get trunks(){return trunkGrid;},
       updatePack(nextPack,nextHeights=null,nextRegion=null){
         if(destroyed||!nextPack?.roots||!nextPack?.manifest)return;
