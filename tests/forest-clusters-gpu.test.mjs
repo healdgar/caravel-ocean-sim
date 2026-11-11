@@ -49,8 +49,9 @@ async function open(query,region='lisbon'){
   return {page,errors,requested};
 }
 
-// Lisbon wears the Portugal pack since 224cd17. That pack has no crown shells: its far trees are small models
-// from the native streams, drawn by the native wood pipeline, as the tropical pack's are.
+// Lisbon wears the Portugal pack since 224cd17. That pack has no crown shells: beyond its far crowns
+// (js/forest-crowns.js) its farthest trees are small models from the native streams, drawn by the native
+// wood pipeline, as the tropical pack's are.
 test('Lisbon\'s trees draw as clusters, far ones keep their small models, and no map the compressed set replaces is fetched',{timeout:360000},async()=>{
   const {page,errors,requested}=await open({});
   try{
@@ -68,11 +69,38 @@ test('Lisbon\'s trees draw as clusters, far ones keep their small models, and no
   }finally{await page.close();}
 });
 
+// Far trees are one opaque surface each, not layers of leaf cards: on every pack that draws leaves as
+// cards, from the same place with far crowns and without.
+for(const [region,pack,query] of [['lisbon','portugal',{view:'free',prow:0,cam:'5,70,-5760,0,-14'}],['san-juan','subtropical',{view:'free',prow:0,cam:'3274.9,8.4,-2425.1,40,12'}]]){
+  test(`far trees of the ${pack} pack draw through the opaque crown path`,{timeout:480000},async()=>{
+    const read=async extra=>{
+      const {page,errors,requested}=await open({...query,paused:1,...extra},region);
+      try{return {totals:await drawn(page),errors,requested};}finally{await page.close();}
+    };
+    const crowned=await read({}),cards=await read({forestCrowns:0});
+    const solid=crowned.totals['forest crowns forestCrownFS']??0,fading=crowned.totals['forest crowns forestCrownFadeFS']??0;
+    assert.ok(crowned.requested.some(path=>path.includes(`/${pack}/crowns/vertices.bin`)),'the pack\'s crowns were never requested');
+    assert.ok(solid>0,`far trees draw as opaque crowns: ${JSON.stringify(crowned.totals)}`);
+    assert.ok(fading<solid,`only the trees at the change wear crown and leaves together: ${JSON.stringify(crowned.totals)}`);
+    // A tree in its crown draws no cluster, so both kinds fall, and every leaf still lays depth before it shades.
+    for(const label of ['forest clusters forestNativeLeafFS','forest clusters forestNativeOpaqueFS'])assert.ok(crowned.totals[label]<cards.totals[label],`${label}: ${crowned.totals[label]} with crowns, ${cards.totals[label]} without`);
+    assert.equal(crowned.totals['forest clusters forestNativeLeafDepthFS'],crowned.totals['forest clusters forestNativeLeafFS']);
+    assert.ok(solid+fading<cards.totals['forest clusters forestNativeLeafFS']*2-crowned.totals['forest clusters forestNativeLeafFS']*2,'crowns draw fewer triangles than the leaf layers they replace');
+    // Far trees cast into the land shadow map exactly as they did: the shadow cut never asks about crowns.
+    for(const label of ['forest clusters forestClusterLeafShadowVS','forest clusters forestClusterWoodShadowVS'])assert.equal(crowned.totals[label]??0,cards.totals[label]??0,label);
+    for(const label of ['forest crowns forestCrownFS','forest crowns forestCrownFadeFS'])assert.equal(cards.totals[label]??0,0,`${label} draws with crowns switched off`);
+    assert.deepEqual(crowned.errors,[]);assert.deepEqual(cards.errors,[]);
+  });
+}
+
 test('the surveyed island keeps crown shells on its far canopy',{timeout:360000},async()=>{
-  const {page,errors}=await open({},'saba');
+  const {page,errors,requested}=await open({},'saba');
   try{
     const totals=await drawn(page);
     assert.ok(totals['instanced forest shaded native crown shell']>0,`the far canopy keeps its look: ${JSON.stringify(totals)}`);
+    // Its far canopy is opaque already, so it is given no far crowns.
+    assert.ok(!requested.some(path=>path.includes('/crowns/')),'Saba asked for far crowns');
+    for(const label of ['forest crowns forestCrownFS','forest crowns forestCrownFadeFS'])assert.equal(totals[label]??0,0,label);
     for(const label of ['forestNativeOpaqueFS','forestNativeLeafFS','forestNativeLeafDepthFS'])assert.equal(totals[`instanced forest ${label}`]??0,0,`${label} must not draw beside clusters`);
     assert.deepEqual(errors,[]);
   }finally{await page.close();}

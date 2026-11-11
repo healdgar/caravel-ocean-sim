@@ -9,6 +9,7 @@ import { loadCanopyScenery, excludeCanopyRoots, createCanopyRenderer, canopyInsp
 import {loadTerrainNear,terrainNearGeometry,terrainNearContains,terrainNearSample,terrainNearPatchBounds,sampleTerrainNear} from './terrain-near.js';
 import {chooseForestSurfaceCodec} from './forest-surfaces.js';
 import {loadForestScenery,createForestRenderer,FOREST_VERTEX_WGSL,FOREST_SHADOW_WGSL,FOREST_ASSETS,SUBTROPICAL_FOREST_ASSETS,PORTUGAL_FOREST_ASSETS} from './forest-scenery.js';
+import {FOREST_CROWN_WGSL} from './forest-crowns.js';
 import {foreshorePalmPlacement} from './forest-trunks.js';
 import {loadForestMass,createForestMassRenderer,forestMiddleWoodPartition,FOREST_MASS_VERTEX_WGSL} from './forest-mass.js';
 import {loadForestMiddle,FOREST_MIDDLE_ASSETS,SUBTROPICAL_FOREST_MIDDLE_ASSETS,PORTUGAL_FOREST_MIDDLE_ASSETS} from './forest-middle.js';
@@ -717,7 +718,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // Start shader compilation, foliage fetch, and forest downloads immediately in parallel with DEM/terrain loading
   const mipPipePromise=Promise.resolve(mipPipe),cloudsResolvedPromise=Promise.resolve(clouds),waterOpticsResolvedPromise=Promise.resolve(waterOptics);
   mipPipePromise.catch(()=>{});cloudsResolvedPromise.catch(()=>{});waterOpticsResolvedPromise.catch(()=>{});
-  const modulePromise=shader(TERRAIN+FOREST_VERTEX_WGSL+FOREST_SHADOW_WGSL+FOREST_MASS_VERTEX_WGSL,'island terrain');
+  const modulePromise=shader(TERRAIN+FOREST_VERTEX_WGSL+FOREST_CROWN_WGSL+FOREST_SHADOW_WGSL+FOREST_MASS_VERTEX_WGSL,'island terrain');
   const meshLayout={arrayStride:32,attributes:[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},{shaderLocation:2,offset:24,format:'float32x2'}]};
   const treeLayout={arrayStride:TREE_VERTEX_FLOATS*4,attributes:[...meshLayout.attributes,{shaderLocation:5,offset:32,format:'float32x2'}]};
   const treeBuffers=[treeLayout,{arrayStride:32,stepMode:'instance',attributes:[{shaderLocation:3,offset:0,format:'float32x4'},{shaderLocation:4,offset:16,format:'float32x4'}]}];
