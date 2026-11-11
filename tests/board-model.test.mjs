@@ -69,6 +69,10 @@ test('a seat is sized by its people, and a request is named by everything it ask
   const prefix = boardPrefix(a);
   assert.match(prefix, /^globalThis\.FURLONG_HEADLESS=true;/);
   assert.match(prefix, /"spanMetres":4096/);
+  // A host that freezes or takes up a world names its program, and a world taken up brings its own ground.
+  assert.match(prefix, /"lived":false,"program":null/);
+  assert.match(boardPrefix(a, 'abc123'), /"lived":false,"program":"abc123"/);
+  assert.ok(boardPrefix({ ...a, heights: null }).includes(`hgt:new Float32Array(${a.size * a.size}),`));
   assert.throws(() => boardRequest({ heights: new Float32Array(10), span: SPAN, site: SITE, seed: 1 }), /square/);
 });
 
@@ -135,4 +139,59 @@ test('the model founds a walled Iberian port where it is asked, houses its peopl
   // Any hook of the runtime can be asked for by name.
   assert.equal((await open.hook('board')).day, later.day);
   await open.close();
+});
+
+test('the whole world is frozen at its founding, taken up again without its survey, lives the same days, and answers as the source\'s own worker does', { timeout: 900000 }, async (t) => {
+  const request = ask(), open = await openBoard(request);
+  assert.equal(open.program, createHash('sha256').update(asset('game.js')).digest('hex'), 'a program is named by the model\'s own text');
+  const frozen = await open.freeze();
+  assert.ok(frozen instanceof Uint8Array && frozen.length > 200000 && frozen[0] === 0x1f && frozen[1] === 0x8b, `the model's own save, zipped: ${frozen.length} bytes`);
+  const kept = Uint8Array.from(frozen), thawed = await openBoard(request, { world: frozen });
+  assert.equal(thawed.program, open.program);
+  assert.equal(JSON.stringify(thawed.board), JSON.stringify(open.board), 'the same board to the last number');
+
+  // The model's whole display record: everything it would draw, whether or not this game draws it yet.
+  const record = await thawed.request('view', { kind: 'bootstrap' });
+  for (const key of ['world', 'houses', 'monarch', 'settlements', 'armies', 'caravans', 'envoys', 'travellers', 'ships', 'banditCamps', 'dragon', 'memorials', 'petitions', 'buildings', 'roads', 'bridges', 'projects', 'fields', 'tracks', 'fences', 'static']) assert.ok(key in record, `the record holds ${key}`);
+  for (const key of ['h', 'water', 'biome', 'dom', 'roadCells', 'rivStrips', 'treeSpots']) assert.ok(key in record.static, `and of its ground, ${key}`);
+  assert.ok('abbeys' in record.world && 'churchBodies' in record.world, 'and the church');
+  assert.equal(record.settlements.length, open.board.places.length);
+  assert.ok(record.houses.length >= 2 && record.monarch, 'great houses and a crown');
+  t.diagnostic(JSON.stringify({ frozen: frozen.length, houses: record.houses.length, buildings: record.buildings.length, fields: record.fields.length }));
+
+  // Days lived by the keeper after the thaw are the days the unbroken realm lives.
+  const unbroken = await open.live(6), reply = await thawed.request('advance', { days: 6 });
+  assert.deepEqual(reply, { day: open.board.day + 6, complete: true });
+  assert.equal(JSON.stringify(await thawed.hook('board')), JSON.stringify(unbroken));
+  await assert.rejects(thawed.request('advance', { days: 0 }));
+
+  // The realm's own account of itself, its annals, and anything in it found and read by name.
+  const state = await thawed.request('view', { kind: 'ui', panel: 'advisor-state' });
+  assert.match(state.date, /AD 1550/); assert.ok(state.people > 1500 && state.monarch, JSON.stringify(state).slice(0, 300));
+  const annals = await thawed.request('view', { kind: 'ui', panel: 'advisor-annals', n: 50 });
+  assert.ok(Array.isArray(annals));
+  for (const line of annals) assert.ok(Number.isInteger(line.day) && line.date && line.cat && line.text);
+  const found = await thawed.request('view', { kind: 'ui', panel: 'advisor-find', name: SITE.name, n: 10 });
+  assert.ok(found.some((hit) => hit.code === 's0'), JSON.stringify(found).slice(0, 300));
+  const seat = await thawed.request('view', { kind: 'ui', panel: 'advisor-inspect', code: 's0', full: true });
+  assert.equal(seat.code, 's0', JSON.stringify(seat).slice(0, 400)); assert.equal(seat.kind, 'settlement'); assert.ok(seat.card.startsWith(SITE.name), seat.card.slice(0, 80));
+  const summary = await thawed.request('view', { kind: 'summary' });
+  assert.equal(summary.day, open.board.day + 6); assert.equal(summary.settlements[0].name, SITE.name);
+
+  // Its people, as they walk the seat today: each a name, a calling, an age and a way to go.
+  const { citizens } = await thawed.request('view', { kind: 'actors', si: 0, fraction: 0.5 });
+  assert.equal(citizens.si, 0);
+  assert.ok(citizens.people.length > 20, `citizens abroad: ${citizens.people.length}`);
+  for (const one of citizens.people) {
+    assert.ok(one.name && Number.isFinite(one.x) && Number.isFinite(one.z) && Number.isFinite(one.age), JSON.stringify(one).slice(0, 200));
+    assert.ok(one.track instanceof Float32Array);
+  }
+  // Any of them can be read whole: their household, kin, living and holdings, as the model keeps them.
+  const someone = citizens.people[0], card = await thawed.request('view', { kind: 'ui', panel: 'advisor-inspect', code: 'p' + someone.id, full: true });
+  assert.equal(card.kind, 'person'); assert.ok(card.card.startsWith(someone.name), card.card.slice(0, 80));
+  assert.match(card.card, /Household/);
+  t.diagnostic(card.card.split('\n').slice(0, 6).join(' | '));
+  // A world is not taken up from bytes that are not one.
+  await assert.rejects(openBoard(request, { world: kept.slice(0, 5000) }));
+  await open.close(); await thawed.close();
 });

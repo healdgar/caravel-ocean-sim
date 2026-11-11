@@ -3,9 +3,10 @@
 // ground, its furlongs the land's uses, its woods the forest's, its ground the colour of its geography with the
 // board's parcels left to the GPU; and a board founded on other ground refused, so the rules here make the town.
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { BAKED_BOARDS, BOARD_RIVERS, BOARD_SURVEY_SIZE, BOARD_VERSION, bakedBoardAsset, boardGroundFits, boardGroundSurvey, boardRequest } from '../js/board-model.js';
+import { BAKED_BOARDS, BAKED_WORLDS, BOARD_RIVERS, BOARD_SURVEY_SIZE, BOARD_VERSION, bakedBoardAsset, bakedWorldAsset, boardGroundFits, boardGroundSurvey, boardRequest } from '../js/board-model.js';
 import { BOARD_WAY_FLOATS, boardStampTables } from '../js/board-stamp.js';
 import { BOARD_INDEX_SIZE } from '../js/old-world-board.js';
 import { CITY_BLOCK_FLOATS, CITY_TREES } from '../js/old-world-city.js';
@@ -138,4 +139,26 @@ test('Lisbon\'s board of 1550 is baked from this model, fitted to its ground and
   // And the page is given it.
   const build = readFileSync(new URL('../build.mjs', import.meta.url), 'utf8');
   assert.ok(build.includes(`'${BAKED_BOARDS['lisbon:1550']}'`), 'the build publishes the baked board');
+});
+
+test('Lisbon\'s whole founded world is frozen beside its board, by the program that is here', () => {
+  assert.equal(bakedWorldAsset('lisbon', 1550), BAKED_WORLDS['lisbon:1550']);
+  assert.equal(bakedWorldAsset('lisbon', 1650), null);
+  const baked = JSON.parse(readFileSync(new URL('../' + BAKED_BOARDS['lisbon:1550'], import.meta.url), 'utf8')), world = baked.world;
+  const bytes = readFileSync(new URL('../' + BAKED_WORLDS['lisbon:1550'], import.meta.url));
+  assert.equal(bytes.length, world.bytes);
+  assert.equal(createHash('sha256').update(bytes).digest('hex'), world.sha256);
+  assert.ok(bytes[0] === 0x1f && bytes[1] === 0x8b, 'the model\'s own save, zipped');
+  // A world is taken up only by the program that froze it: the model's text as it stands here.
+  assert.equal(world.program, createHash('sha256').update(readFileSync(new URL('../assets/board/game.js', import.meta.url), 'utf8')).digest('hex'));
+  assert.equal(world.day, baked.board.day); assert.equal(world.year, 1550);
+  // Everything is kept, whether or not the game draws it yet.
+  const holds = world.holds;
+  assert.equal(holds.settlements, baked.board.places.length);
+  assert.equal(holds.buildings, baked.board.buildings.count);
+  assert.ok(holds.houses >= 4 && holds.fields > 1500 && holds.roads >= 4 && holds.trees > 1000, JSON.stringify(holds));
+  for (const key of ['armies', 'ships', 'caravans', 'abbeys', 'churchBodies', 'projects', 'tracks', 'fences']) assert.ok(Number.isInteger(holds[key]), `it counts its ${key}`);
+  // And the page is given the world and the program that lives it, fetched when wanted and never embedded.
+  const build = readFileSync(new URL('../build.mjs', import.meta.url), 'utf8');
+  for (const path of [BAKED_WORLDS['lisbon:1550'], 'assets/board/game.js', 'assets/board/runtime.js']) assert.ok(build.split(`'${path}'`).length >= 3, `the build publishes ${path} and leaves it outside a downloaded page`);
 });

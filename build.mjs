@@ -82,7 +82,7 @@ wgslModules.push('js/wgsl/ground-detail.js');
 // The Old World: building types ahead of the land shader, which reads their constants, then the town plan and its country.
 order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/old-world-buildings.js');
 // A port's country as Castle and Commons' model founded it: what is asked of the model, how it stands here, and the GPU's stamp of it.
-order.splice(order.indexOf('js/coastal-world.js'),0,'js/board-model.js','js/old-world-city.js','js/old-world-board.js','js/old-world.js');
+order.splice(order.indexOf('js/coastal-world.js'),0,'js/board-model.js','js/board-worker.js','js/board-life.js','js/old-world-city.js','js/old-world-board.js','js/old-world.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/board-stamp.js');
 // A city's buildings as the guns meet them: after the fracture code it hands them to, ahead of the land it is drawn with.
 order.splice(order.indexOf('js/terrain.js'),0,'js/city-targets.js');
@@ -110,6 +110,10 @@ order.splice(
 // the initial HTML. Only these explicit runtime files and manifest MP3s qualify.
 const runtimeAssetTypes = new Map([
   ['assets/boards/lisbon-1550.json','application/json'],
+  // The founded world whole (the model's own save) and the model's program: fetched once the game is on the screen.
+  ['assets/boards/lisbon-1550.world','application/octet-stream'],
+  ['assets/board/game.js','text/javascript'],
+  ['assets/board/runtime.js','text/javascript'],
   ['assets/caravel-oak-albedo.webp','image/webp'],
   ['assets/wildlife/whale.glb','model/gltf-binary'],
   ['assets/crew/sailor.glb','model/gltf-binary'],
@@ -165,7 +169,7 @@ const runtimeAssetBytes = new Map(), pagesAssets = new Map();
 // Keep core sailing and the native forest atlases embedded in downloads. The
 // lossless mature close-up buffers alone exceed 100 MB after base64 encoding;
 // load those optional buffers from the same versioned public asset instead.
-const externalDownloadGeometry=new Set(['assets/forest-scenery/saba/clusters/vertices.bin.gz','assets/forest-scenery/saba/clusters/indices.bin.gz','assets/forest-scenery/portugal/clusters/vertices.bin.gz','assets/forest-scenery/portugal/clusters/indices.bin.gz','assets/forest-scenery/saba/vertices.bin.gz','assets/forest-scenery/saba/indices.bin.gz','assets/forest-scenery/saba/mass/vertices.bin.gz','assets/forest-scenery/saba/mass/indices.bin.gz','assets/forest-scenery/subtropical/vertices.bin.gz','assets/forest-scenery/subtropical/indices.bin.gz','assets/forest-scenery/portugal/vertices.bin.gz','assets/forest-scenery/portugal/indices.bin.gz']);
+const externalDownloadGeometry=new Set(['assets/boards/lisbon-1550.world','assets/board/game.js','assets/board/runtime.js','assets/forest-scenery/saba/clusters/vertices.bin.gz','assets/forest-scenery/saba/clusters/indices.bin.gz','assets/forest-scenery/portugal/clusters/vertices.bin.gz','assets/forest-scenery/portugal/clusters/indices.bin.gz','assets/forest-scenery/saba/vertices.bin.gz','assets/forest-scenery/saba/indices.bin.gz','assets/forest-scenery/saba/mass/vertices.bin.gz','assets/forest-scenery/saba/mass/indices.bin.gz','assets/forest-scenery/subtropical/vertices.bin.gz','assets/forest-scenery/subtropical/indices.bin.gz','assets/forest-scenery/portugal/vertices.bin.gz','assets/forest-scenery/portugal/indices.bin.gz']);
 // Both block-compressed sets are a saving for online play. Offline, the embedded maps serve instead.
 for(const file of [...Object.values(FOREST_SURFACE_ASSETS),...Object.values(SUBTROPICAL_FOREST_SURFACE_ASSETS),...Object.values(PORTUGAL_FOREST_SURFACE_ASSETS)])if(file.endsWith('.gz'))externalDownloadGeometry.add(file);
 function runtimeAssetURL(file,mime,inlineAssets){

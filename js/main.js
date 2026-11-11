@@ -87,6 +87,8 @@ import {vesselVerticalScale} from './hull.js';
 import { crewWorkLabel, manGunStationsImmediate } from './crew-work.js';
 import { createCrew, createFortSoldiers, preloadCrewModels, requestCrewPipelines, CAPTAIN_ORDERS, reviveCompany } from './crew.js';
 import { createTownsfolk, requestTownsfolkPipelines } from './townsfolk.js';
+import { createBoardLife } from './board-life.js';
+import { bakedBoardFor } from './old-world.js';
 import { createProps } from './props.js';
 import { HELM_EYE_Z, HELM_EYE_HEIGHT, HULL_UNIFORM_BYTES, HULL_VERTICAL_SCALE, DEFAULT_BOAT_LENGTH, DEFAULT_BOAT_BEAM } from './hull.js';
 import { SAIL_KEYS, sailingState, pointOfSail } from './sailing.js';
@@ -3923,7 +3925,7 @@ async function main() {
     for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter)v.pose?.encode(cp,v.boat.showProw);
     for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter&&vesselHasVisibleCrew(v))v.crew?.encodePose(cp);
     fortSoldiers?.encodePose(cp);
-    townsfolk?.encode(cp,gameDateMs());
+    townsfolk?.encode(cp,gameDateMs());boardLife?.tick(gameDateMs());
     props?.encode(cp,simF[53],simTime);
     for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter)v.interaction.encode(cp,wakePool.next);
     wakePool.commit();
@@ -3975,6 +3977,22 @@ async function main() {
   // The game's date: the voyage's calendar, or the sky's where no voyage keeps one. Repairs ashore, the fallen's
   // day on the ground and the townsfolk's all count by it.
   function gameDateMs(){return voyageCtl?.voyage?.dateMs??Date.parse(astronomy.state?.date);}
+  // A port whose country Castle and Commons' model founded: the whole world it was founded as is taken up once the
+  // game is on the screen (in a worker; the frame never waits on it) and lives a day for each day of the game's
+  // calendar. window.oceanBoard is the door to all of it: its annals, people, great houses and every view and
+  // command the model has. Its news is told as it happens, not more often than a reader can take in.
+  let boardLife=null,boardToldAt=-Infinity;
+  function wakeBoard(){
+    if(boardLife||qs.get('boardLife')==='off')return;
+    const region=terrain?.region,baked=region&&window.oceanLand?.pack?.board?bakedBoardFor(region):null;
+    if(!baked?.world)return;
+    boardLife=createBoardLife({baked,onNews:lines=>{
+      const now=performance.now();if(now-boardToldAt<45000)return;
+      const line=lines.findLast(entry=>entry.cat!=='trade')??lines[lines.length-1];
+      if(line){boardToldAt=now;voyageCtl?.showToast?.(line.date+'. '+line.text,8);}
+    }});
+    window.oceanBoard=boardLife;boardLife.start();
+  }
   function frame(now) {
     if (shooting) return;  // paused while a screenshot is read back
     if(bloomMeasureRequested&&bloomFrameReady){measureBloomAlone();return;}
@@ -4466,7 +4484,7 @@ async function main() {
       // Setup uploads submit earlier too. Only this submission contains the
       // first canvas composite, and its completion must precede revealing it.
       device.queue.onSubmittedWorkDone().then(()=>{
-        if(!firstGpuError&&!oceanStartupDeviceLost)window.oceanStartup?.ready();
+        if(!firstGpuError&&!oceanStartupDeviceLost){window.oceanStartup?.ready();wakeBoard();}
       },error=>window.oceanStartup?.fail(error));
     }
     gunSea.read(contact=>{

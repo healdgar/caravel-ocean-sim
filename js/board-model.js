@@ -4,7 +4,7 @@
 // driven by assets/board/runtime.js; it takes a minute or more to found a country, so it never runs on the page's own thread.
 // This module is what both sides share: what to ask of the model, and the words that set it up before it runs.
 
-export const BOARD_VERSION = 2;
+export const BOARD_VERSION = 3;
 // The source houses four people to a building and stops a capital at 620 buildings. A town house of this game's
 // port cities stands several storeys and holds some twenty.
 export const BOARD_PEOPLE_PER_BUILDING = 20;
@@ -92,6 +92,10 @@ export function boardGroundFits(survey, heights, withinMetres = 1.5) {
 // The boards founded ahead of time (scripts/bake-board.mjs), by port and year, and where each is kept.
 export const BAKED_BOARDS = Object.freeze({ 'lisbon:1550': 'assets/boards/lisbon-1550.json' });
 export function bakedBoardAsset(port, year) { return BAKED_BOARDS[`${port}:${year}`] ?? null; }
+// And the whole world each was founded as: the model's own save of everything it holds, frozen on its first day.
+// The game takes it up in a worker and lets it live; nothing of it was chosen or left out.
+export const BAKED_WORLDS = Object.freeze({ 'lisbon:1550': 'assets/boards/lisbon-1550.world' });
+export function bakedWorldAsset(port, year) { return BAKED_WORLDS[`${port}:${year}`] ?? null; }
 
 function boardBase64(bytes) {
   let text = '';
@@ -99,16 +103,20 @@ function boardBase64(bytes) {
   return btoa(text);
 }
 
-// The words that go before the model's program: what it is to found, read by it as it loads.
-export function boardPrefix(request) {
+// The words that go before the model's program: what it is to found, read by it as it loads. `program` is the
+// hash of the program's own text, under which a world is frozen and taken up again. A request with no heights is
+// for a world to be taken up frozen: its ground comes with it.
+export function boardPrefix(request, program = null) {
   const options = {
     hash: `#s=${request.seed}&f=${request.fate}&c=sea&y=${request.era}&map=board&worker=off`,
-    board: { spanMetres: request.span, seat: request.seat, walls: request.walls, rivers: request.rivers, lived: request.lived },
+    board: { spanMetres: request.span, seat: request.seat, walls: request.walls, rivers: request.rivers, lived: request.lived, program },
   };
   const at = (name, x, z, weight) => ({ n: name, u: x / request.span, v: z / request.span, c: request.site.culture, w: weight });
   const sites = [at(request.site.name, request.site.x, request.site.z, 300), ...request.places.map((p) => at(p.name, p.x, p.z, p.weight))];
-  const survey = boardBase64(new Uint8Array(request.heights.buffer, request.heights.byteOffset, request.heights.byteLength));
+  const heights = request.heights
+    ? `new Float32Array(Uint8Array.from(atob('${boardBase64(new Uint8Array(request.heights.buffer, request.heights.byteOffset, request.heights.byteLength))}'),c=>c.charCodeAt(0)).buffer)`
+    : `new Float32Array(${request.size * request.size})`;
   return 'globalThis.FURLONG_HEADLESS=true;globalThis.FURLONG_OPTIONS=' + JSON.stringify(options) + ';' +
-    `globalThis.KA_MAPS={board:{w:${request.size},h:${request.size},hgt:new Float32Array(Uint8Array.from(atob('${survey}'),c=>c.charCodeAt(0)).buffer),` +
+    `globalThis.KA_MAPS={board:{w:${request.size},h:${request.size},hgt:${heights},` +
     `vscale:1,crown:${JSON.stringify(request.site.culture)},sites:${JSON.stringify(sites)},title:${JSON.stringify(request.site.name)}}};\n`;
 }

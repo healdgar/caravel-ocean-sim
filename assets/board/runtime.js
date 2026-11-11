@@ -4,7 +4,7 @@
 // functions with its own. It founds the world on the ground the host gave, and reports the board in plain numbers:
 // metres east (x) and south (z) of the middle of the ground, turns in radians, heights in metres.
 globalThis.BOARD_MODEL = (() => {
-  const VERSION = 2;
+  const VERSION = 3;
   const r1 = (v) => Math.round(v * 10) / 10, r3 = (v) => Math.round(v * 1000) / 1000;
   const line = (points) => { const out = []; for (const p of points) out.push(r1(p.x), r1(p.z)); return out; };
   const list = (values, round = r1) => Array.from(values, round);
@@ -12,6 +12,9 @@ globalThis.BOARD_MODEL = (() => {
 
   // The model's storage journal, kept in memory: there is nothing here to save.
   const journal = () => new OutcomeJournal(async (entry) => ({ chunk: entry.chunk, first: entry.first, last: entry.last }), { maxPendingBytes: 64 * 1024 * 1024 });
+  // Which program this is, by the hash of its text: the host says, since a program cannot read itself. A world is
+  // frozen under that name and taken up again only by the same program.
+  const program = () => globalThis.FURLONG_OPTIONS?.board?.program || null;
 
   async function found({ seed, fate = 1, era }, progress = null) {
     STORAGE_OUTCOMES.journal = journal();
@@ -38,6 +41,47 @@ globalThis.BOARD_MODEL = (() => {
     }
     await STORAGE_OUTCOMES.journal.flush(); await STORAGE_OUTCOMES.wait();
     return board();
+  }
+
+  // The whole world, frozen: the model's own save of every thing it holds (ground, places, people, great houses,
+  // armies, ships, abbeys, ledgers, the dice and the annals), zipped. Nothing is chosen from it: what this game
+  // has no use for today is kept with the rest.
+  async function freeze() {
+    if (!program()) throw new Error('A world is frozen only by a host that names its program');
+    await STORAGE_OUTCOMES.journal.flush(); await STORAGE_OUTCOMES.wait();
+    return worldSaveZip(await worldSave({ sourceSHA256: program() }));
+  }
+  // A frozen world taken up in a fresh realm, in place of a founding: its days go on from the day it was frozen.
+  async function thaw(bytes) {
+    if (!program()) throw new Error('A world is taken up only by a host that names its program');
+    STORAGE_OUTCOMES.journal = journal();
+    await worldLoad(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes), { sourceSHA256: program(), outcomeJournal: STORAGE_OUTCOMES.journal });
+    return board();
+  }
+
+  // The model's own keeper: its SimulationWorkerHost over its own simulationWorkerModel, as the source's page is
+  // served by its worker. Every request that page can make is answered here the same way (init, view, command,
+  // watch, advance, speed, pause, save, flush, close), so every view and every command the source has is this
+  // game's: the display record of the whole world, the inspector of any thing in it, its panels, its people as
+  // they walk, its overlays, and all a player may order. Only the first step differs: a realm is founded on this
+  // game's ground, or a frozen world is taken up ({world: bytes}).
+  let keeper = null;
+  function serve(send) {
+    if (keeper) return keeper;
+    const channel = new MessageChannel(), tasks = new Map();
+    let next = 0;
+    channel.port1.onmessage = ({ data }) => { const task = tasks.get(data); if (!task) return; tasks.delete(data); task.fn(); };
+    const schedule = (fn, ms) => { const id = ++next, task = { fn, timer: null }; tasks.set(id, task); if (ms) task.timer = setTimeout(() => channel.port2.postMessage(id), ms); else channel.port2.postMessage(id); return id; };
+    const cancel = (id) => { const task = tasks.get(id); if (task && task.timer !== null) clearTimeout(task.timer); tasks.delete(id); };
+    const model = simulationWorkerModel();
+    model.init = async (payload, progress) => {
+      if (payload.world) await thaw(payload.world);
+      else if (!W) await found(payload, progress);
+      WORKER_PRESENTATION.started = true;
+    };
+    keeper = new SimulationWorkerHost(model, (message) => send(message, presentationTransfers(message)), { schedule, cancel });
+    JOURNAL_WATCH = () => keeper.journal();
+    return keeper;
   }
 
   const castle = (s) => {
@@ -110,5 +154,5 @@ globalThis.BOARD_MODEL = (() => {
     };
   }
 
-  return { VERSION, found, live, board };
+  return { VERSION, found, live, board, freeze, thaw, serve };
 })();

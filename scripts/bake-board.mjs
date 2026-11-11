@@ -2,6 +2,8 @@
 // Founds a home port's board ahead of time, so the port is there the moment its land is. The ground is the game's
 // own: the page is run headless (no window is opened), its land read as made, and Castle and Commons' model founded
 // on it here. The same request founded in play gives the same board; a baked one only saves the wait.
+// With the board goes the whole world as founded (the .world file beside it): the model's own save of everything it
+// holds, which the game takes up and lets live. Nothing of it is chosen or left out.
 //   node scripts/bake-board.mjs lisbon [--year 1550] [--seat n] [--seed n] [--out assets/boards/lisbon-1550.json] [--ground file]
 // --lived founds the realm in 850 and lets it live every day to the year: its cities are then grown by their own
 // history. That is hours or days of one core for a great city; the progress is written as the years pass.
@@ -10,12 +12,13 @@
 // tuning without loading the game each time.
 // CHROMIUM_PATH names a browser other than Playwright's; WEBGPU_BACKEND=metal a real GPU on a Mac.
 import { once } from 'node:events';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { createDevServer } from '../server.mjs';
-import { BOARD_RIVERS, boardGroundDigest, boardGroundSurvey, boardKey, boardRequest, boardSeat, bakedBoardAsset } from '../js/board-model.js';
+import { BOARD_RIVERS, boardGroundDigest, boardGroundSurvey, boardKey, boardRequest, boardSeat, bakedBoardAsset, bakedWorldAsset } from '../js/board-model.js';
 import { coastalRegionStageURL } from '../js/landfall.js';
 import { OLD_WORLD_PLACES, oldWorldCityNear, oldWorldPeople } from '../js/old-world.js';
 import { openBoard } from './board-host.mjs';
@@ -80,14 +83,25 @@ say(`real places on this ground: ${request.places.map((p) => `${p.name} (${p.x},
 say(`founding ${city.name} of ${people} people in ${year}: seat ${request.seat}, request ${boardKey(request)}`);
 const began = performance.now();
 const open = await openBoard(request, { onProgress: (text) => { if (!/\(\d+ of \d+\)/.test(text)) say(`  ${((performance.now() - began) / 1000).toFixed(1)} s  ${text}`); } });
-const board = open.board; await open.close();
+const board = open.board;
+// Everything, as founded: the model's own save, and a count of what its own display record holds of it.
+const world = Buffer.from(await open.freeze()), record = await open.request('view', { kind: 'bootstrap' });
+await open.close();
 say(`founded in ${((performance.now() - began) / 1000).toFixed(1)} s: ${board.places.map((p) => `${p.kind} ${p.name} (${p.people})`).join(', ')}; ${board.buildings.count} buildings, ${board.fields.length} furlongs, ${board.people} people`);
 
 const out = resolve(root, option('out', bakedBoardAsset(port, year) ?? `assets/boards/${port}-${year}.json`));
+const worldOut = option('out', null) ? out.replace(/\.json$/, '') + '.world' : resolve(root, bakedWorldAsset(port, year) ?? `assets/boards/${port}-${year}.world`);
 mkdirSync(dirname(out), { recursive: true });
+writeFileSync(worldOut, world);
+const held = Object.fromEntries(['settlements', 'houses', 'buildings', 'fields', 'roads', 'bridges', 'armies', 'ships', 'caravans', 'envoys', 'travellers', 'banditCamps', 'memorials', 'projects', 'tracks', 'fences', 'trees', 'petitions']
+  .map((name) => [name, Array.isArray(record[name]) ? record[name].length : 0]));
+held.abbeys = record.world?.abbeys?.length ?? 0; held.churchBodies = record.world?.churchBodies?.length ?? 0;
+say(`froze the whole world: ${world.length} bytes; it holds ${Object.entries(held).map(([name, count]) => `${count} ${name}`).join(', ')}`);
 writeFileSync(out, JSON.stringify({
   port, year, key: boardKey(request), ground: boardGroundDigest(land.heights), groundSource: land.source, survey: boardGroundSurvey(land.heights),
   region: { id: region.id, x: region.x, z: region.z, span: region.span, size: region.size, latitude: region.latitude, longitude: region.longitude },
+  // The whole world as founded, kept beside this board: the model's own save, taken up only by the same program.
+  world: { bytes: world.length, sha256: createHash('sha256').update(world).digest('hex'), program: open.program, day: board.day, year: board.year, holds: held },
   request: { span: request.span, size: request.size, seed: request.seed, fate: request.fate, era: request.era, seat: request.seat, walls: request.walls, site: request.site, places: request.places, rivers: request.rivers, lived: request.lived },
   board,
 }) + '\n');
