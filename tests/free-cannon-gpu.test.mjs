@@ -43,7 +43,8 @@ test('in the free camera, holding F shells what the sight is on',async()=>{
     await page.keyboard.down('f');
     await page.waitForFunction(()=>window.oceanFreeCannon.state.guns[0].roundsFired>=2,null,{timeout:60000,polling:100});
     await page.keyboard.up('f');
-    await page.waitForFunction(()=>window.oceanProps.port.instances.some(b=>(b.damageState?.hits??0)>0),null,{timeout:60000,polling:200});
+    // The port may still be loading when the second round goes: wait for it, as the first page does.
+    await page.waitForFunction(()=>window.oceanProps?.port?.instances?.some(b=>(b.damageState?.hits??0)>0),null,{timeout:60000,polling:200});
     assert.deepEqual(errors,[]);
   }finally{await page.close();}
 });

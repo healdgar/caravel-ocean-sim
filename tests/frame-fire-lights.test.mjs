@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
-// The frame block carries two fire lights in eight spare floats. They are chosen once a frame, after
-// the frame's fires are known, and sent to the GPU only when they change.
+// The frame block carries two fire lights in eight spare floats. In the game a compute pass chooses them
+// from the fire records the GPU keeps (js/gunnery-effects.js, encodeLights); packFrameFireLights is the
+// same choice in JavaScript, kept as the measure of it and for callers with no such pass.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
@@ -122,13 +123,24 @@ test('more fires than the packer has met before are still packed', () => {
   assert.deepEqual(frame, packedTheOldWay(frameAt(), fires, [0, 0, 0]));
 });
 
-test('the frame loop packs the fire lights once, after the fires are gathered, and uploads the block whole once', () => {
+test('in the game the GPU chooses the fire lights: JavaScript uploads the block whole once, its lights dark, and packs nothing', () => {
   const main = readFileSync(new URL('../js/main.js', import.meta.url), 'utf8');
-  assert.equal(main.match(/packFrameFireLights\(/g)?.length, 1, 'one packing a frame');
+  assert.doesNotMatch(main, /packFrameFireLights\(/, 'the packer stays the measure of the lights, not work the frame loop does');
   assert.equal(main.match(/writeBuffer\(frameUBO, ?0, ?f(rameF)?\)/g)?.length, 1, 'one whole upload a frame');
-  assert.ok(main.indexOf('packFrameFireLights(frameF,activeFires') > main.indexOf('activeFires.length=0;'), 'and the packing follows the gathering');
-  assert.match(main, /if\(packFrameFireLights\(frameF,activeFires,cam\.x,cam\.y,cam\.z\)\)device\.queue\.writeBuffer\(frameUBO,FRAME_FIRE_PATCH_FIRST\*4,frameF,FRAME_FIRE_PATCH_FIRST,FRAME_FIRE_PATCH_FLOATS\);/);
-  // writeFrame no longer writes the fire slots with values the packer then overwrote.
+  assert.doesNotMatch(main, /writeBuffer\(frameUBO,\s*FRAME_FIRE_PATCH_FIRST/, 'and no second upload for the lights');
+  // writeFrame gives the fire slots no value of its own: it sends them dark, as the last thing before the upload.
   const writeFrame = main.slice(main.indexOf('function writeFrame(time)'), main.indexOf('device.queue.writeBuffer(frameUBO, 0, f);'));
-  for (const slot of FRAME_FIRE_SLOTS) assert.doesNotMatch(writeFrame, new RegExp(`f\\[${slot}\\]\\s*=`), `writeFrame leaves float ${slot} to the packer`);
+  for (const slot of FRAME_FIRE_SLOTS) assert.doesNotMatch(writeFrame, new RegExp(`f\\[${slot}\\]\\s*=`), `writeFrame leaves float ${slot} to the GPU`);
+  assert.match(writeFrame, /clearFireLights\(f\);\s*$/);
+  assert.match(main, /function clearFireLights\(f\)\{for\(const slot of FRAME_FIRE_SLOTS\)f\[slot\]=0;\}/);
+  // The fires are gathered, their records kept on the GPU, and a compute pass there writes the lights into the block.
+  const gathered = main.indexOf('activeFires.length=activeFireHulls.length=0;'), kept = main.indexOf('gunEffects.update(dt,{wind:windVec,time:simTime,fires:activeFires,fireHulls:activeFireHulls});');
+  const chosen = main.indexOf('gunEffects.encodeLights(enc,{frame:frameUBO,hull:vesselHullUBO});');
+  assert.ok(gathered > 0 && kept > gathered && chosen > kept, 'gathered, then kept, then chosen');
+  const effects = readFileSync(new URL('../js/gunnery-effects.js', import.meta.url), 'utf8');
+  const lights = effects.slice(effects.indexOf('    encodeLights(encoder,'), effects.indexOf('    encode(encoder){'));
+  assert.match(lights, /if\(!fires\.count\)return false;/, 'with nothing burning there is no pass at all');
+  assert.match(lights, /for\(const \[from,to,bytes\] of FRAME_FIRE_LIGHT_SPANS\)encoder\.copyBufferToBuffer\(lightBuffer,from,frame,to,bytes\);/);
+  assert.doesNotMatch(lights, /writeBuffer/, 'and nothing is sent from JavaScript for them');
+  assert.match(effects, /const FRAME_FIRE_LIGHT_SPANS=FRAME_FIRE_SLOTS\.reduce\(/, 'into these same slots');
 });

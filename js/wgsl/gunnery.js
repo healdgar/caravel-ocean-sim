@@ -11,6 +11,334 @@ export const GUNNERY_RING_COUNT=6;
 export const GUNNERY_EARTH_COUNT=420;
 export const GUNNERY_DUST_COUNT=36;
 
+// Each fire is drawn as two flame volumes and six parcels of its smoke.
+const GUNNERY_FIRE_FLAMES=2,GUNNERY_FIRE_PARCELS=6;
+export const GUNNERY_FIRE_VOLUMES=GUNNERY_FIRE_FLAMES+GUNNERY_FIRE_PARCELS;
+export const GUNNERY_FIRE_RECORD_FLOATS=12;
+// The volumes a bank of powder smoke is drawn as. One: every volume more is drawn over the others, and the
+// billows it is carved from give a bank its form, not the count of its volumes.
+export const GUNNERY_BANK_LOBES=1;
+export const GUNNERY_SMOKE_RECORD_FLOATS=12;
+// Seconds: a muzzle flash, the jet a gun throws, the longest a bank hangs (in a dead calm).
+export const GUNNERY_SMOKE_SECONDS=Object.freeze({flash:.085,jet:2.8,bank:52});
+// A bank hangs that long in still air and half as long in this much wind, metres a second: the wind tears it up.
+const GUNNERY_BANK_WIND=9;
+// How long a bank can be seen in a wind of this speed. The GPU draws it no longer, and its record is kept no longer.
+export const gunneryBankSeconds=windSpeed=>GUNNERY_SMOKE_SECONDS.bank/(1+Math.max(0,windSpeed)/GUNNERY_BANK_WIND);
+// The frame's clock starts again at this many seconds (SIM_CLOCK_LOOP_S); ages allow for it.
+const GUNNERY_CLOCK_LOOP=600;
+// Where each kind of volume lives in the one list that is sorted and drawn. Iron striking timber, stone, earth or
+// water makes no volume: its splinters, dust and spray are drawn from the contacts.
+export function gunneryVolumeSlots({shots,banks,fires}){
+  const flashes=shots,bankLobes=flashes+shots,fireVolumes=bankLobes+banks*GUNNERY_BANK_LOBES;
+  return {jets:0,flashes,banks:bankLobes,fires:fireVolumes,total:fireVolumes+fires*GUNNERY_FIRE_VOLUMES};
+}
+
+// Everything drawn as a volume is laid out here, on the GPU, from small records and the frame's clock and wind.
+//
+// Fires: one record each, rewritten only when the fire changes.
+//   anchor: xyz metres, in the hull's own frame when w names a hull, else in the world (w < 0)
+//   burn:   x clock when intensity was y, y that intensity, z its change per second, w clock at ignition
+//   state:  x seed, y 1 while the fire lives
+// Powder smoke: one record a shot and one a bank (the guns that fired together from one stretch of her side),
+// written when the gun fires and never again. The wind's carry is kept here too: gunnerySmokeAdvance adds up
+// how far the air has moved, and notes that sum against each record the first time it sees it, so smoke goes
+// where the wind has blown since its own gun fired, whatever the wind has done meanwhile.
+//   shot: muzzle xyz + clock at firing; aim xyz + size (cube root of the charge); seed, generation
+//   bank: middle xyz + clock at its first gun; aim xyz + strength (sum of size cubed); seed, generation, guns, half its length along her side
+export function GUNNERY_BUILD({shots,banks,fires}){
+  const slot=gunneryVolumeSlots({shots,banks,fires}),T=GUNNERY_SMOKE_SECONDS;
+  return FRAME_WGSL+/* wgsl */ `
+const GUNNERY_PI:f32=3.14159265358979;
+const GUNNERY_SHOTS:u32=${shots}u;
+const GUNNERY_BANKS:u32=${banks}u;
+const GUNNERY_FIRES:u32=${fires}u;
+const GUNNERY_FIRE0:u32=${slot.fires}u;
+const GUNNERY_VOLUMES:u32=${slot.total}u;
+const GUNNERY_CLOCK_LOOP:f32=${GUNNERY_CLOCK_LOOP}.0;
+// The air's carry is kept within a span the noise repeats in exactly, so it never grows too large to add to.
+const GUNNERY_DRIFT_LOOP:f32=4096.0;
+struct GunneryVolume{centre:vec4f,axisX:vec4f,axisY:vec4f,axisZ:vec4f,optical:vec4f};
+struct GunneryFire{anchor:vec4f,burn:vec4f,state:vec4f};
+struct GunneryHull{right:vec4f,up:vec4f,forward:vec4f,size:vec4f,origin:vec4f,rig:vec4f};
+// depthGroups: the workgroups that cover the scene's depth, eight pixels square each.
+struct GunneryCounts{fires:u32,drawLimit:u32,depthGroups:vec2u};
+struct GunneryFireLights{lights:array<vec4f,2>,hulls:array<f32>};
+struct GunneryShot{muzzle:vec4f,aim:vec4f,mark:vec4f};
+struct GunneryBank{centre:vec4f,aim:vec4f,mark:vec4f};
+// What the sort leaves for the passes that follow: the volumes' indirect draw, then the workgroups the snapshot
+// of the scene's depth is dispatched with (none when no volume is in view).
+struct GunneryDraw{vertices:u32,instances:u32,firstVertex:u32,firstInstance:u32,depthGroups:vec3u,pad:u32};
+// drift: how far the air has gone, xyz, and the clock it was last added to. roll: how far the billows have
+// turned over, coarse and fine. born: for each shot, then each bank, the drift when it fired and its generation
+// (negative once it has blown away).
+struct GunnerySmokeState{drift:vec4f,roll:vec4f,born:array<vec4f>};
+@group(0)@binding(0)var<uniform>F:Frame;
+@group(0)@binding(1)var<storage,read>gunneryFires:array<GunneryFire>;
+@group(0)@binding(2)var<storage,read>gunneryHulls:array<GunneryHull>;
+@group(0)@binding(3)var<storage,read_write>gunneryVolumes:array<GunneryVolume>;
+@group(0)@binding(4)var<uniform>gunneryCounts:GunneryCounts;
+@group(0)@binding(5)var<storage,read_write>gunneryOrder:array<u32>;
+@group(0)@binding(6)var<storage,read_write>gunneryDraw:GunneryDraw;
+@group(0)@binding(7)var<storage,read_write>gunneryFireLights:GunneryFireLights;
+@group(0)@binding(8)var<storage,read>gunneryShots:array<GunneryShot>;
+@group(0)@binding(9)var<storage,read>gunneryBanks:array<GunneryBank>;
+@group(0)@binding(11)var<storage,read_write>gunnerySmokeState:GunnerySmokeState;
+// How long a bank lasts in the wind there is: gunneryBankSeconds, for the frame's wind.
+fn gunneryBankLife()->f32{return ${T.bank}.0/(1.0+F.windP[0].z/${GUNNERY_BANK_WIND}.0);}
+fn gunneryAge(birth:f32)->f32{let age=F.camPos.w-birth;return select(age,age+GUNNERY_CLOCK_LOOP,age<-1.0);}
+fn gunneryWind()->vec3f{return vec3f(F.windP[0].x,0.0,F.windP[0].y)*F.windP[0].z;}
+fn gunneryDriftWrap(d:vec3f)->vec3f{return d-GUNNERY_DRIFT_LOOP*floor(d/GUNNERY_DRIFT_LOOP+.5);}
+// A volume whose long axis lies along a direction, as a gun's smoke lies along its shot.
+fn gunneryAligned(centre:vec3f,direction:vec3f,radii:vec3f,kind:f32,optical:vec4f)->GunneryVolume{
+  var right=vec3f(direction.z,0.0,-direction.x);let span=length(right);
+  if(span<1e-6){right=vec3f(1.0,0.0,0.0);}else{right/=span;}
+  return GunneryVolume(vec4f(centre,kind),vec4f(right,radii.x),vec4f(cross(direction,right),radii.y),vec4f(direction,radii.z),optical);
+}
+// The air moves on, and each new shot and bank is given the place the air had reached when it fired.
+@compute @workgroup_size(1)fn gunnerySmokeAdvance(){
+  var dt=F.camPos.w-gunnerySmokeState.drift.w;if(dt<-1.0){dt+=GUNNERY_CLOCK_LOOP;}dt=clamp(dt,0.0,.25);
+  let wind=gunneryWind();
+  let drift=gunneryDriftWrap(gunnerySmokeState.drift.xyz+wind*dt);
+  gunnerySmokeState.drift=vec4f(drift,F.camPos.w);
+  // Billows turn over as they rise: the coarse field climbs slowly, the fine one faster, and the bank's edge is never still.
+  gunnerySmokeState.roll=vec4f(fract((gunnerySmokeState.roll.xy+vec2f(.21,.62)*dt)/GUNNERY_DRIFT_LOOP)*GUNNERY_DRIFT_LOOP,0.0,0.0);
+  for(var i=0u;i<GUNNERY_SHOTS+GUNNERY_BANKS;i++){
+    var generation=0.0;var age=0.0;var life=${T.jet};
+    if(i<GUNNERY_SHOTS){generation=gunneryShots[i].mark.y;age=gunneryAge(gunneryShots[i].muzzle.w);}
+    else{generation=gunneryBanks[i-GUNNERY_SHOTS].mark.y;age=gunneryAge(gunneryBanks[i-GUNNERY_SHOTS].centre.w);life=gunneryBankLife();}
+    let seen=gunnerySmokeState.born[i];
+    if(generation!=abs(seen.w)){gunnerySmokeState.born[i]=vec4f(gunneryDriftWrap(drift-wind*max(age,0.0)),generation);}
+    // Blown away is for good: a lull afterwards does not bring it back, and its record can be dropped.
+    else if(seen.w>0.0&&age>=life){gunnerySmokeState.born[i].w=-seen.w;}
+  }
+}
+// How far the wind has carried record k. Smoke leaves the muzzle with the gun's blast, not the wind's speed,
+// and is caught up by the air over a second or so; after that it goes exactly as the wind goes.
+fn gunnerySmokeDrift(k:u32,age:f32)->vec3f{
+  let carried=gunneryDriftWrap(gunnerySmokeState.drift.xyz-gunnerySmokeState.born[k].xyz);
+  return carried-gunneryWind()*1.35*(1.0-exp(-age/1.35));
+}
+@compute @workgroup_size(64)fn gunneryBuildSmoke(@builtin(global_invocation_id)id:vec3u){
+  let index=id.x;let speed=F.windP[0].z;
+  if(index<GUNNERY_SHOTS){
+    // The jet a gun throws: fast out of the muzzle, slowing, swelling, and handing its smoke to the bank.
+    let shot=gunneryShots[index];let age=gunneryAge(shot.muzzle.w);let size=shot.aim.w;let aim=shot.aim.xyz;
+    let live=shot.mark.y>0.0&&gunnerySmokeState.born[index].w==shot.mark.y&&age>=0.0;
+    var jet=GunneryVolume();var flash=GunneryVolume();
+    if(live&&age<${T.jet}){
+      // No two guns throw alike. Each jet has its own quickness, girth, length and lean, so a broadside's jets
+      // do not stand along her side like a row of beads.
+      let own=fract(sin(vec3f(shot.mark.x)*vec3f(127.1,311.7,74.7))*43758.5453);
+      let side=normalize(vec3f(aim.z,0.0,-aim.x)+vec3f(1e-5,0.0,0.0));
+      let lean=normalize(aim+side*(own.y-.5)*.36+vec3f(0.0,(own.z-.4)*.32,0.0));
+      let t=age*(.72+.56*own.x);
+      let reach=(.42+10.4*(1.0-exp(-t/.26)))*size*(.8+.4*own.z);
+      let across=(.5+2.5*pow(t,.62))*size*(.78+.44*own.y);let along=(.9+min(t,.48)*7.6+t*.9)*size*(.82+.4*own.x);
+      let phase=shot.mark.x*37.0;let eddy=across*min(1.0,t*.85)*.22;
+      let centre=shot.muzzle.xyz+lean*reach+gunnerySmokeDrift(index,age)+side*sin(phase)*eddy+vec3f(0.0,(.5*t+.5*(1.0-exp(-t/.8)))*size+cos(phase)*eddy*.6,0.0);
+      let extinction=118.0*size*size*size/(across*across*along)*(1.0-smoothstep(1.3,${T.jet},age));
+      if(extinction>.01){jet=gunneryAligned(centre,lean,vec3f(across,across*(.96+.24*own.z),along),0.0,vec4f(extinction,age,shot.mark.x*79.0,mix(.72,.86,age/${T.jet})));}
+    }
+    if(live&&age<${T.flash}){
+      let t=age/${T.flash};let swell=sin(t*GUNNERY_PI);
+      flash=gunneryAligned(shot.muzzle.xyz+aim*(.55+1.1*t)*size,aim,vec3f(.12+.35*swell,.12+.28*swell,.6+1.1*swell)*size,1.0,vec4f(1.0-t,age,shot.mark.x*79.0,0.0));
+    }
+    gunneryVolumes[index]=jet;gunneryVolumes[${slot.flashes}u+index]=flash;return;
+  }
+  if(index<GUNNERY_SHOTS+GUNNERY_BANKS){
+    // The bank: what the guns of one stretch of her side leave between them. It swells as it thins, rises a
+    // little, and the wind carries it off, spreading and tearing it faster the harder it blows.
+    let k=index-GUNNERY_SHOTS;let bank=gunneryBanks[k];let age=gunneryAge(bank.centre.w);
+    let live=bank.mark.y>0.0&&gunnerySmokeState.born[index].w==bank.mark.y&&age>=0.0;
+    let guns=max(1.0,bank.mark.z);let size=pow(max(bank.aim.w,.01)/guns,1.0/3.0);
+    let life=gunneryBankLife();
+    for(var lobe=0u;lobe<${GUNNERY_BANK_LOBES}u;lobe++){
+      // n places a lobe between the bank's foot (0) and its head (1): one lobe stands midway and is the whole bank.
+      var volume=GunneryVolume();let n=(f32(lobe)+.5)*${2/GUNNERY_BANK_LOBES}-.5;let t=age-n*.35;
+      if(live&&t>0.0&&age<life){
+        let reach=(4.6+3.2*n)*size*(1.0-exp(-t/.55));
+        let rise=((1.1+2.3*n)*(1.0-exp(-t/2.5))+(.18+.2*n)*t)*size/(1.0+speed*.08);
+        let puff=(.95+1.5*pow(t,.55)*(1.0+speed*.035))*size*(1.0+.22*log2(guns))*${GUNNERY_BANK_LOBES===1?1.1:1};
+        let phase=bank.mark.x*41.0+n*2.4;
+        // A higher lobe rides faster air.
+        let centre=bank.centre.xyz+bank.aim.xyz*reach+gunnerySmokeDrift(index,age)*(1.0+(n*2.0-1.0)*.06)
+          +vec3f(sin(phase)*.12*puff,rise,cos(phase)*.12*puff);
+        let radii=vec3f(bank.mark.w+puff,puff*(1.0+.3*n),puff*1.1)/.72;
+        let fade=smoothstep(.15,1.6,t)*exp(-age/(life*.55))*(1.0-smoothstep(life*.72,life,age));
+        let extinction=440.0*bank.aim.w/f32(${GUNNERY_BANK_LOBES})/(radii.x*radii.y*radii.z)*fade;
+        if(extinction>.003){volume=gunneryAligned(centre,bank.aim.xyz,radii,0.0,vec4f(extinction,age,bank.mark.x*79.0+n*11.0,mix(.56,.94,smoothstep(0.0,1.0,age/life))));}
+      }
+      gunneryVolumes[${slot.banks}u+k*${GUNNERY_BANK_LOBES}u+lobe]=volume;
+    }
+  }
+}
+fn gunneryFireIntensity(f:GunneryFire)->f32{
+  if(f.state.y<.5){return 0.0;}
+  return clamp(f.burn.y+f.burn.z*(F.camPos.w-f.burn.x),0.0,1.65);
+}
+// A fire aboard goes where her hull goes, by the same transform her timbers are drawn with.
+fn gunneryFirePosition(f:GunneryFire)->vec3f{
+  if(f.anchor.w<0.0){return f.anchor.xyz;}
+  let hull=gunneryHulls[min(u32(f.anchor.w),arrayLength(&gunneryHulls)-1u)];
+  return hull.origin.xyz+hull.right.xyz*f.anchor.x+hull.up.xyz*f.anchor.y-hull.forward.xyz*f.anchor.z;
+}
+// An upright volume: its long axis is the world's up, as flame and its smoke rise.
+fn gunneryUpright(centre:vec3f,across:f32,tall:f32,kind:f32,extinction:f32,age:f32,seed:f32,subtype:f32)->GunneryVolume{
+  return GunneryVolume(vec4f(centre,kind),vec4f(1.0,0.0,0.0,across),vec4f(0.0,0.0,-1.0,across),vec4f(0.0,1.0,0.0,tall),vec4f(extinction,age,seed,subtype));
+}
+@compute @workgroup_size(64)fn gunneryBuildFires(@builtin(global_invocation_id)id:vec3u){
+  let index=id.x;if(index>=min(gunneryCounts.fires,GUNNERY_FIRES)){return;}
+  let slot=GUNNERY_FIRE0+index*${GUNNERY_FIRE_VOLUMES}u;
+  let fire=gunneryFires[index];let raw=gunneryFireIntensity(fire);
+  if(raw<=.02){for(var k=0u;k<${GUNNERY_FIRE_VOLUMES}u;k++){gunneryVolumes[slot+k].optical=vec4f(0.0);}return;}
+  let pos=gunneryFirePosition(fire);let heat=clamp(raw,.05,1.6);let seed=fire.state.x;
+  let age=max(0.0,F.camPos.w-fire.burn.w);
+  let wind=gunneryWind();
+  let pulse=.88+.14*sin(age*11.3+seed*19.0)+.08*cos(age*19.7-seed*7.3);
+  let across=(.56+.60*heat)*pulse;let tall=(.98+1.18*heat)*pulse;
+  // The roaring body of the flame.
+  gunneryVolumes[slot]=gunneryUpright(vec3f(pos.x+wind.x*.03,pos.y+.38*tall,pos.z+wind.z*.03),across,tall*1.05,1.0,.92+.74*heat,age,seed*53.0,1.0);
+  // Tongues flickering above it, and the embers they throw up.
+  let tongue=.84+.24*sin(age*15.4+seed*31.0);
+  gunneryVolumes[slot+1u]=gunneryUpright(vec3f(pos.x+wind.x*.12+sin(age*6.3+seed*13.0)*.24*heat,pos.y+.96*tall,pos.z+wind.z*.12+cos(age*5.7+seed*17.0)*.24*heat),
+    across*.84*tongue,tall*.96*tongue,1.0,(.76+.62*heat)*tongue,age*1.35+1.7,seed*71.0+13.0,1.30);
+  // A column of pitch smoke: parcels that rise, lean downwind, swell and thin in turn.
+  let period=6.4;let grow=1.05+.88*heat;
+  for(var parcel=0u;parcel<${GUNNERY_FIRE_PARCELS}u;parcel++){
+    let n=f32(parcel);let phase=fract((age+n*(period/${GUNNERY_FIRE_PARCELS}.0)+seed*2.1)/period);let swell=pow(max(sin(phase*GUNNERY_PI),0.0),.62);
+    if(swell<.04){gunneryVolumes[slot+${GUNNERY_FIRE_FLAMES}u+parcel].optical=vec4f(0.0);continue;}
+    let lean=phase*(1.1+phase*3.4);let wide=(1.48+phase*4.15)*grow;
+    gunneryVolumes[slot+${GUNNERY_FIRE_FLAMES}u+parcel]=gunneryUpright(
+      vec3f(pos.x+wind.x*lean+sin(phase*6.28+seed*11.0+n)*.55*grow,pos.y+(1.35+phase*18.8)*grow,pos.z+wind.z*lean+cos(phase*6.28+seed*17.0+n)*.55*grow),
+      wide,(1.85+phase*4.75)*grow,0.0,(26.0+22.0*heat)*swell,age*.45+n*3.1,seed*97.0+n*29.0,2.0+phase*.8);
+  }
+}
+// The four sides of what the eye sees, each a plane through the eye: xyz points inward, measured from the eye.
+fn gunneryViewSides()->array<vec3f,4>{
+  let m=F.viewProj;let x=vec3f(m[0].x,m[1].x,m[2].x);let y=vec3f(m[0].y,m[1].y,m[2].y);let w=vec3f(m[0].w,m[1].w,m[2].w);
+  return array<vec3f,4>(normalize(w+x),normalize(w-x),normalize(w+y),normalize(w-y));
+}
+// A volume is drawn if there is anything in it (smoke that has blown away and fires that are out are left as
+// volumes of nothing) and any of it can be in view.
+fn gunneryVolumeDrawn(index:u32,sides:array<vec3f,4>)->bool{
+  let v=gunneryVolumes[index];if(!(v.optical.x>0.0)){return false;}
+  let d=v.centre.xyz-F.camPos.xyz;let reach=-length(vec3f(v.axisX.w,v.axisY.w,v.axisZ.w));
+  return dot(d,sides[0])>=reach&&dot(d,sides[1])>=reach&&dot(d,sides[2])>=reach&&dot(d,sides[3])>=reach;
+}
+fn gunneryVolumeRange(index:u32)->f32{let d=gunneryVolumes[index].centre.xyz-F.camPos.xyz;return dot(d,d);}
+// Volumes blend over one another, so they are drawn farthest first. Each counts how many volumes to be drawn
+// are nearer than itself and takes that place from the back of the list; only the nearest are kept. With
+// none in view nothing is drawn, and the snapshot of the scene's depth they are drawn against is not taken.
+@compute @workgroup_size(64)fn gunnerySortVolumes(@builtin(global_invocation_id)id:vec3u){
+  let index=id.x;let sides=gunneryViewSides();
+  // Fire volumes past the last fire burning are whatever an older fire left there.
+  let end=GUNNERY_FIRE0+min(gunneryCounts.fires,GUNNERY_FIRES)*${GUNNERY_FIRE_VOLUMES}u;
+  let mine=index<end&&gunneryVolumeDrawn(index,sides);var range=0.0;if(mine){range=gunneryVolumeRange(index);}
+  var live=0u;var nearer=0u;
+  for(var other=0u;other<end;other++){
+    if(!gunneryVolumeDrawn(other,sides)){continue;}
+    live++;
+    let theirs=gunneryVolumeRange(other);
+    if(theirs<range||(theirs==range&&other<index)){nearer++;}
+  }
+  let drawn=min(live,gunneryCounts.drawLimit);
+  if(index==0u){gunneryDraw=GunneryDraw(36u,drawn,0u,0u,select(vec3u(0u),vec3u(gunneryCounts.depthGroups,1u),drawn>0u),0u);}
+  if(mine&&nearer<drawn){gunneryOrder[drawn-1u-nearer]=index;}
+}
+// The light fires throw on timber, crew, land and sea. Fires within twelve metres burn as one light, and
+// the two that matter most to this eye are handed to the frame. A burning ship also lights her own decks.
+@compute @workgroup_size(1)fn gunneryFireLighting(){
+  var clusters:array<vec4f,${fires}>;var count=0u;
+  let fires=min(gunneryCounts.fires,GUNNERY_FIRES);
+  for(var i=0u;i<fires;i++){
+    let fire=gunneryFires[i];let raw=gunneryFireIntensity(fire);if(raw<=.01){continue;}
+    let pos=gunneryFirePosition(fire);var merged=false;
+    for(var c=0u;c<count;c++){
+      let d=clusters[c].xyz-pos;
+      if(dot(d,d)<144.0){let sum=clusters[c].w+raw;clusters[c]=vec4f((clusters[c].xyz*clusters[c].w+pos*raw)/sum,min(3.6,sum));merged=true;break;}
+    }
+    if(!merged){clusters[count]=vec4f(pos,min(3.2,raw));count++;}
+  }
+  var first=vec4f(0.0);var second=vec4f(0.0);var firstScore=-1.0;var secondScore=-1.0;
+  for(var c=0u;c<count;c++){
+    let score=clusters[c].w/(1.0+distance(clusters[c].xyz,F.camPos.xyz)*.02);
+    if(score>firstScore){second=first;secondScore=firstScore;first=clusters[c];firstScore=score;}
+    else if(score>secondScore){second=clusters[c];secondScore=score;}
+  }
+  let night=1.0-clamp((F.sunDir.y+.06)/.24,0.0,1.0);
+  let flash=min(1.0,1.35/max(F.post.x,1e-3));let exposure=flash*(1.0+2.8*night);
+  gunneryFireLights.lights[0]=vec4f(first.xyz,first.w*exposure);
+  gunneryFireLights.lights[1]=vec4f(second.xyz,second.w*exposure);
+  let hulls=min(arrayLength(&gunneryHulls),arrayLength(&gunneryFireLights.hulls));
+  for(var h=0u;h<hulls;h++){
+    // Her fires are listed newest first; the light sits at the oldest.
+    var sum=0.0;var along=0.0;
+    for(var i=0u;i<fires;i++){
+      let fire=gunneryFires[i];if(fire.anchor.w<0.0||u32(fire.anchor.w)!=h){continue;}
+      let raw=gunneryFireIntensity(fire);if(raw<=0.0){continue;}
+      sum+=raw;along=fire.anchor.z;
+    }
+    // Packed as her hull shader reads it: the station along her in twelfths, and the strength in the fraction.
+    let strength=min(2.4,sum)*flash;
+    let station=clamp(floor(along/max(.8,gunneryHulls[h].size.y/12.0)+7.0),1.0,12.0);
+    gunneryFireLights.hulls[h]=select(0.0,station+clamp(strength/2.5,.01,.98),strength>.01);
+  }
+}`;
+}
+
+// The field every bank of smoke is carved from, made once: a block that repeats in every direction.
+//   r, a: billows, broad and less broad (cell noise turned inside out, so each cell is a bulge)
+//   g: the small billows that ravel a bank's edge    b: a smooth field that bends the others
+// It is kept at four sizes, each half the last, so a walk through smoke in long steps reads billows no
+// finer than its steps and shows no grain.
+export const GUNNERY_NOISE_SIZE=64;
+export const GUNNERY_NOISE_LEVELS=4;
+export const GUNNERY_NOISE=/* wgsl */ `
+@group(0)@binding(0)var gunneryNoiseTarget:texture_storage_3d<rgba8unorm,write>;
+@group(0)@binding(1)var gunneryNoiseFiner:texture_3d<f32>;
+@group(0)@binding(2)var gunneryNoiseCoarser:texture_storage_3d<rgba8unorm,write>;
+@compute @workgroup_size(4,4,4)fn gunneryHalveNoise(@builtin(global_invocation_id)id:vec3u){
+  if(any(id>=textureDimensions(gunneryNoiseCoarser))){return;}
+  var sum=vec4f(0.0);
+  for(var corner=0u;corner<8u;corner++){sum+=textureLoad(gunneryNoiseFiner,vec3i(id*2u+vec3u(corner&1u,(corner>>1u)&1u,(corner>>2u)&1u)),0);}
+  textureStore(gunneryNoiseCoarser,id,sum*.125);
+}
+fn gunneryNoiseHash(cell:vec3u,salt:u32)->vec3f{
+  var v=cell*vec3u(1664525u,1013904223u,22695477u)+vec3u(salt*747796405u+2891336453u);
+  v.x+=v.y*v.z;v.y+=v.z*v.x;v.z+=v.x*v.y;v^=v>>vec3u(16u);v.x+=v.y*v.z;v.y+=v.z*v.x;v.z+=v.x*v.y;
+  return vec3f(v>>vec3u(8u))*(1.0/16777216.0);
+}
+fn gunneryNoiseWrap(cell:vec3i,cells:i32)->vec3u{return vec3u((cell%cells+cells)%cells);}
+fn gunneryNoiseCells(p:vec3f,cells:i32,salt:u32)->f32{
+  let q=p*f32(cells);let base=vec3i(floor(q));let f=fract(q);var nearest=8.0;
+  for(var z=-1;z<=1;z++){for(var y=-1;y<=1;y++){for(var x=-1;x<=1;x++){
+    let o=vec3i(x,y,z);let d=vec3f(o)+gunneryNoiseHash(gunneryNoiseWrap(base+o,cells),salt)-f;nearest=min(nearest,dot(d,d));
+  }}}
+  return 1.0-min(1.0,sqrt(nearest));
+}
+fn gunneryNoiseLattice(p:vec3f,cells:i32,salt:u32)->f32{
+  let q=p*f32(cells);let base=vec3i(floor(q));let f=fract(q);let u=f*f*(3.0-2.0*f);var sum=0.0;
+  for(var corner=0;corner<8;corner++){
+    let o=vec3i(corner&1,(corner>>1)&1,(corner>>2)&1);let w=mix(1.0-u,u,vec3f(o));
+    sum+=gunneryNoiseHash(gunneryNoiseWrap(base+o,cells),salt).x*w.x*w.y*w.z;
+  }
+  return sum;
+}
+fn gunneryNoiseBillows(p:vec3f,cells:i32,salt:u32)->f32{
+  let n=gunneryNoiseCells(p,cells,salt)*.6+gunneryNoiseCells(p,cells*2,salt+7u)*.27+gunneryNoiseCells(p,cells*4,salt+13u)*.13;
+  return clamp((n-.2)/.62,0.0,1.0);
+}
+fn gunneryNoiseSmooth(p:vec3f,cells:i32,salt:u32)->f32{
+  return gunneryNoiseLattice(p,cells,salt)*.5+gunneryNoiseLattice(p,cells*2,salt+5u)*.3+gunneryNoiseLattice(p,cells*4,salt+9u)*.2;
+}
+@compute @workgroup_size(4,4,4)fn gunneryMakeNoise(@builtin(global_invocation_id)id:vec3u){
+  let p=(vec3f(id)+.5)/${GUNNERY_NOISE_SIZE}.0;
+  let broad=clamp(gunneryNoiseBillows(p,4,1u)*(.62+.76*gunneryNoiseSmooth(p,3,31u)),0.0,1.0);
+  let less=clamp(gunneryNoiseBillows(p,5,2u)*(.62+.76*gunneryNoiseSmooth(p,4,37u)),0.0,1.0);
+  textureStore(gunneryNoiseTarget,id,vec4f(broad,gunneryNoiseBillows(p,8,3u),gunneryNoiseSmooth(p,6,41u),less));
+}`;
+
 export function GUNNERY_DEPTH_RESOLVE(samples=4){
   const count=Math.max(1,Math.floor(samples));
   return /* wgsl */ `
@@ -42,7 +370,15 @@ struct GunneryArcSegment{p0:vec4f,p1:vec4f,style:vec4f};
 @group(0)@binding(10)var<storage,read>gunneryContacts:array<GunneryContact>;
 @group(0)@binding(11)var gunnerySceneDepth:texture_2d<f32>;
 @group(0)@binding(12)var<storage,read>gunneryArcs:array<GunneryArcSegment>;
+@group(0)@binding(13)var<storage,read>gunneryOrder:array<u32>;
+struct GunnerySmokeState{drift:vec4f,roll:vec4f,born:array<vec4f>};
+@group(0)@binding(14)var<storage,read>gunnerySmokeState:GunnerySmokeState;
+@group(0)@binding(15)var gunneryNoise:texture_3d<f32>;
+@group(0)@binding(16)var gunneryNoiseSampler:sampler;
 `+SKY_RENDER_FUNCS+/* wgsl */ `
+// Records carry the clock at which a thing happened; the frame's clock starts again every ${GUNNERY_CLOCK_LOOP} s.
+fn gunneryAge(birth:f32)->f32{let age=F.camPos.w-birth;return select(age,age+${GUNNERY_CLOCK_LOOP}.0,age<-1.0);}
+fn gunneryWind()->vec3f{return vec3f(F.windP[0].x,0.0,F.windP[0].y)*F.windP[0].z;}
 fn gunneryCorner(vertex:u32)->vec2f{return array<vec2f,6>(vec2f(0,0),vec2f(1,0),vec2f(0,1),vec2f(0,1),vec2f(1,0),vec2f(1,1))[vertex%6u];}
 fn gunneryCube(vertex:u32)->vec3f{
   let points=array<vec3f,8>(vec3f(-1,-1,-1),vec3f(1,-1,-1),vec3f(-1,1,-1),vec3f(1,1,-1),vec3f(-1,-1,1),vec3f(1,-1,1),vec3f(-1,1,1),vec3f(1,1,1));
@@ -173,9 +509,6 @@ fn gunneryDensityAndFbm(local:vec3f,age:f32,seed:f32,subtype:f32)->vec2f{
   );
   return vec2f(density,turbField);
 }
-fn gunneryDensity(local:vec3f,age:f32,seed:f32)->f32{
-  return gunneryDensityAndFbm(local,age,seed,0.0).x;
-}
 fn gunneryShadowDensity(local:vec3f,age:f32,seed:f32,localFbm:f32)->f32{
   let boxMax=max(abs(local.x),max(abs(local.y),abs(local.z)));
   let boxGuard=1.0-smoothstep(.74,1.0,boxMax);if(boxGuard<=0.0){return 0.0;}
@@ -184,6 +517,62 @@ fn gunneryShadowDensity(local:vec3f,age:f32,seed:f32,localFbm:f32)->f32{
   let r=length(vec2f(local.x,local.y*select(1.25,0.88,local.y>0.0)));
   let core=clamp(1.0-r/(.56+.22*localFbm),0.0,1.0)*axialCap;
   return boxGuard*core*(.48+.52*localFbm);
+}
+// Powder smoke. A bank is not a shape of its own: it is a swelling, and what gives it form is one field of
+// billows that fills the world and goes with the wind. Where the billows are full the smoke stands out to the
+// swelling's edge; between them it is eaten back toward the middle, and late in its life right through, so an
+// old bank tears into separate clouds. Banks that overlap are carved from the same billows, so they join as
+// one cloud, and the cloud blows downwind whole. world is where; local is the same place in the volume's own
+// measure, 1 at its edge. erode runs from about a half (fresh) to nearly one (about to go).
+fn gunnerySmokeField(world:vec3f)->vec3f{return world-gunnerySmokeState.drift.xyz-vec3f(0.0,gunnerySmokeState.roll.x,0.0);}
+fn gunnerySmokeCarve(billow:f32,erode:f32)->f32{return .04+(1.0-billow)*(.14+erode*.6+smoothstep(.74,.95,erode)*.55);}
+// An edge is hard on fresh smoke and softens as it thins.
+fn gunnerySmokeSoft(erode:f32)->f32{return mix(.1,.5,smoothstep(.5,.95,erode));}
+// The billows a volume is carved from suit its size: grain.x is 1 for a puff a few metres through, grain.y 1
+// for a bank tens of metres through. grain.z is how coarsely the walk through it steps, as a level of the
+// broadest billows' field: each level up is billows twice the size, and a finer field is that many levels on.
+fn gunnerySmokeSmall(q:vec3f)->vec3f{return (q-vec3f(0.0,gunnerySmokeState.roll.y-gunnerySmokeState.roll.x,0.0))/8.0;}
+// How far inside its swelling a place is: 1 at the middle, 0 at the edge. The underside is the blunter half,
+// so a bank that has risen clear of the sea has a broad base and does not stand on a narrowing stem.
+fn gunnerySmokeBody(local:vec3f)->f32{return 1.0-length(vec3f(local.x,local.y*select(1.0,1.5,local.y<0.0),local.z));}
+// The billows alone, without the ravelled edge: enough to know how much smoke stands toward the sun.
+fn gunnerySmokeMass(world:vec3f,local:vec3f,erode:f32,grain:vec4f)->f32{
+  let body=gunnerySmokeBody(local);if(body<=0.0){return 0.0;}
+  let q=gunnerySmokeField(world);var billow=0.0;
+  if(grain.x>.5){billow=textureSampleLevel(gunneryNoise,gunneryNoiseSampler,gunnerySmokeSmall(q),clamp(grain.z+2.5,0.0,3.0)).g;}
+  else if(grain.y>.5){billow=textureSampleLevel(gunneryNoise,gunneryNoiseSampler,q/32.0,clamp(grain.z+.5,0.0,3.0)).r;}
+  else{billow=textureSampleLevel(gunneryNoise,gunneryNoiseSampler,q/16.0+vec3f(.37,.11,.73),clamp(grain.z+1.5,0.0,3.0)).a;}
+  return smoothstep(0.0,gunnerySmokeSoft(erode),body-gunnerySmokeCarve(billow,erode)-.05*(1.0-grain.x));
+}
+// x: how much smoke is here, 0 to 1. y: how full the billow it stands in. Only the billows a volume of this
+// size is carved from are looked up, and the small ones not at all where the large have left nothing.
+fn gunnerySmoke(world:vec3f,local:vec3f,erode:f32,grain:vec4f)->vec2f{
+  let body=gunnerySmokeBody(local);if(body<=0.0){return vec2f(0.0);}
+  let q=gunnerySmokeField(world);var billow=1.0;var bend=vec3f(0.0);
+  if(grain.x<.999){
+    let broad=textureSampleLevel(gunneryNoise,gunneryNoiseSampler,q/32.0,clamp(grain.z,0.0,3.0));billow=broad.r;bend=broad.bbb;
+    if(grain.y<.999){
+      let less=textureSampleLevel(gunneryNoise,gunneryNoiseSampler,q/16.0+vec3f(.37,.11,.73),clamp(grain.z+1.0,0.0,3.0));
+      billow=mix(less.a,broad.r,grain.y);bend.y=less.b;
+    }
+    // The small billows can only take smoke away from here.
+    if(grain.x<=0.0&&body<=gunnerySmokeCarve(billow,erode)){return vec2f(0.0);}
+  }
+  // The small billows climb past the large ones, bent by the smooth field, so an edge never holds its shape.
+  let fine=textureSampleLevel(gunneryNoise,gunneryNoiseSampler,gunnerySmokeSmall(q)+bend*.3*(1.0-grain.x),clamp(grain.z+2.0,0.0,3.0)).g;
+  billow=mix(billow,fine,grain.x);
+  // A jet fresh from the muzzle is smaller than those billows: it is torn by ones half their size again.
+  if(grain.w>0.0){
+    let tiny=textureSampleLevel(gunneryNoise,gunneryNoiseSampler,gunnerySmokeSmall(q)*2.3+vec3f(.61,.29,.83),clamp(grain.z+3.2,0.0,3.0)).g;
+    billow=mix(billow,billow*.4+tiny*.6,grain.w);
+  }
+  let stand=body-gunnerySmokeCarve(billow,erode)-(1.0-fine)*(.05+.13*erode)*(1.0-grain.x);
+  return vec2f(smoothstep(0.0,gunnerySmokeSoft(erode),stand),billow);
+}
+// Metres from a place inside a volume to its edge, along a world direction given in the volume's measure.
+fn gunneryChord(local:vec3f,along:vec3f)->f32{
+  let a=max(dot(along,along),1e-8);let b=dot(local,along);let c=dot(local,local)-1.0;
+  return max(0.0,(-b+sqrt(max(b*b-a*c,0.0)))/a);
 }
 fn gunnerySceneDistance(pixel:vec2f,ray:vec3f)->f32{
   let size=textureDimensions(gunnerySceneDepth);let uv=clamp(vec2i(pixel),vec2i(0),vec2i(size)-1);
@@ -199,9 +588,10 @@ fn gunneryHgPhase(cosTheta:f32,g:f32)->f32{
 }
 struct GunneryVolumeVertex{@builtin(position)position:vec4f,@location(0)world:vec3f,@location(1)@interpolate(flat)id:u32};
 @vertex fn gunneryVolumeVS(@builtin(vertex_index)vertex:u32,@builtin(instance_index)id:u32)->GunneryVolumeVertex{
-  let v=gunneryVolumes[id];let c=gunneryCube(vertex);
+  // Drawn farthest first, in the order the sort pass left.
+  let slot=gunneryOrder[id];let v=gunneryVolumes[slot];let c=gunneryCube(vertex);
   let world=v.centre.xyz+v.axisX.xyz*c.x*v.axisX.w+v.axisY.xyz*c.y*v.axisY.w+v.axisZ.xyz*c.z*v.axisZ.w;
-  return GunneryVolumeVertex(F.viewProj*vec4f(world-F.camPos.xyz,1),world,id);
+  return GunneryVolumeVertex(F.viewProj*vec4f(world-F.camPos.xyz,1),world,slot);
 }
 @fragment fn gunneryVolumeFS(v:GunneryVolumeVertex)->@location(0)vec4f{
   let volume=gunneryVolumes[v.id];let ray=normalize(v.world-F.camPos.xyz);
@@ -210,22 +600,35 @@ struct GunneryVolumeVertex{@builtin(position)position:vec4f,@location(0)world:ve
   let safe=select(direction,vec3f(.000001),abs(direction)<vec3f(.000001));
   let t0=(-vec3f(1)-origin)/safe;let t1=(vec3f(1)-origin)/safe;
   let low=min(t0,t1);let high=max(t0,t1);
-  let enter=max(0.0,max(low.x,max(low.y,low.z)));
+  var enter=max(0.0,max(low.x,max(low.y,low.z)));var leave=min(high.x,min(high.y,high.z));
+  // Powder smoke lies wholly within the ellipsoid, so only the chord through that is walked.
+  let powder=volume.centre.w<.5&&volume.optical.w<1.0;
+  if(powder){
+    let a=dot(direction,direction);let b=dot(origin,direction);let h=b*b-a*(dot(origin,origin)-1.0);
+    if(h<=0.0){discard;}
+    enter=max(enter,(-b-sqrt(h))/a);leave=min(leave,(-b+sqrt(h))/a);
+  }
   let scene=gunnerySceneDistance(v.position.xy,ray);
   let centreDist=dot(volume.centre.xyz-F.camPos.xyz,ray);
   let minHorizR=min(volume.axisX.w,volume.axisZ.w);
   // Prevent fires centered inside or behind a building/hull wall from bleeding through the front face of that wall
   if(volume.centre.w>.5 && scene<centreDist-min(0.35,minHorizR*0.28)){discard;}
   let wallFrontFade=select(1.0,smoothstep(centreDist-minHorizR*0.35,centreDist+0.15,scene),volume.centre.w>.5);
-  let exit=min(scene,min(high.x,min(high.y,high.z)));if(exit<=enter||wallFrontFade<=0.005){discard;}
-  let steps=select(12u,7u,enter>42.0);
-  let stepSize=(exit-enter)/f32(steps);var transmittance=1.0;var radiance=vec3f(0);
-  // Smooth interleaved gradient offset (minimal 0.16 amplitude avoids salt-and-pepper stipple on thin wisps)
-  let jitter=fract(52.9829189*fract(dot(v.position.xy,vec2f(0.06711056,0.00583715))+volume.optical.z*.13));
+  let exit=min(scene,leave);if(exit<=enter||wallFrontFade<=0.005){discard;}
+  // Powder smoke is walked in steps of one length whichever way the ellipsoid is crossed: a tenth of the
+  // way through its middle near to, a seventh far off. A ray that only clips it takes few.
+  let stride=select(.2,.28,enter>90.0)/length(direction);let cut=scene<leave;
+  let steps=select(select(12u,7u,enter>42.0),clamp(u32(ceil((exit-enter)/stride))+u32(cut),1u,10u),powder);
+  let stepSize=select((exit-enter)/f32(steps),stride,powder);var transmittance=1.0;var radiance=vec3f(0);
+  // Each pixel starts its walk a different part of a step in, by an ordered scatter that shows little grain:
+  // a small part for flame and its smoke, most of a step for powder smoke, whose first look is then set
+  // back to the billow's face (below).
+  let jitter=select(.42+.16*fract(52.9829189*fract(dot(v.position.xy,vec2f(0.06711056,0.00583715))+volume.optical.z*.13)),
+    .15+.7*fract(52.9829189*fract(dot(v.position.xy,vec2f(.06711056,.00583715)))+volume.optical.z*.618),powder);
   let skyZenith=skyAtmo(vec3f(0,1,0));
   let skyHorizon=skyAtmo(normalize(vec3f(F.sunDir.x,.12,F.sunDir.z)));
   let lightning=lightningLight()*.25;
-  let sunlight=sunIlluminance()*sunVis[0]*step(0.0,F.sunDir.y);
+  let sunlight=sunIlluminance()*sunVis[0]*step(0.0,F.sunDir.y);let sunUp=sunlight.x+sunlight.y+sunlight.z>1e-5;
   let sunLocal=gunneryVolumeRay(volume,F.sunDir.xyz);
   let sunLocalDir=normalize(sunLocal+vec3f(0.0,1e-5,0.0));
   let opticalScale=clamp(min(volume.axisX.w,volume.axisY.w)*.35,.32,1.25);
@@ -238,9 +641,71 @@ struct GunneryVolumeVertex{@builtin(position)position:vec4f,@location(0)world:ve
   let selfExposure=min(1.0,1.35/max(F.post.x,1e-3));
   let subtype=volume.optical.w;
   let isShipFlame=volume.centre.w>.5 && subtype>=0.9;
+  // Powder smoke: how hard its billows are carved, how broad they are for its size, and where the sky is.
+  let erode=fract(volume.optical.w);let smallest=min(volume.axisX.w,min(volume.axisY.w,volume.axisZ.w));
+  let grain=vec4f(1.0-smoothstep(2.6,5.6,smallest),smoothstep(5.0,12.0,smallest),log2(max(stepSize,.01))-.2,1.0-smoothstep(1.3,2.6,smallest));let skyLocal=gunneryVolumeRay(volume,vec3f(0.0,1.0,0.0));
+  let nearLook=clamp(smallest*.11,.45,1.7);let seaSoft=.28+smallest*.05;
+  // Fresh from the gun it is a dirty grey-yellow; within a few seconds it is the white of the bank.
+  let powderAlbedo=mix(vec3f(.9,.9,.91),vec3f(.68,.64,.58),exp(-age*.75)*.8);
+  // Powder smoke is thick enough that one step into it can be all a pixel shows, and how deep that step fell
+  // would show as grain. So where a walk first meets smoke it goes back by halves, from the last place it found
+  // clear, to the billow's face, and takes its first look a set short way inside that: found, and how far back
+  // it went. An eye standing in the smoke looks from where it stands.
+  // Where timber or sea cuts the walk short (cut), its last step is kept for the cut itself, and a step counts
+  // for the part of it that lies before the cut. Smoke lying against what stands in it is then found by every
+  // pixel, not by those whose scatter fell in it, and thickens evenly toward it.
+  var found=false;var back=0.0;var clearTo=enter;
   for(var sample=0u;sample<steps;sample++){
-    let distance=enter+(f32(sample)+.42+.16*jitter)*stepSize;
-    let local=origin+direction*distance;
+    var distance=enter+(f32(sample)+jitter)*stepSize-back;
+    if(powder&&cut){
+      if(sample+1u==steps){if(found){break;}distance=exit-.01;}else{distance=min(distance,exit-.01);}
+    }
+    var local=origin+direction*distance;
+    if(powder){
+      var world=F.camPos.xyz+ray*distance;
+      var smoke=gunnerySmoke(world,local,erode,grain);
+      if(smoke.x<.002){clearTo=distance;continue;}
+      var share=select(1.0,clamp((exit-distance)/stepSize+.35,0.0,1.0),cut);
+      if(!found){
+        found=true;var clear=clearTo;var within=distance;
+        for(var halving=0u;halving<4u;halving++){
+          let middle=(clear+within)*.5;
+          if(gunnerySmoke(F.camPos.xyz+ray*middle,origin+direction*middle,erode,grain).x<.002){clear=middle;}else{within=middle;}
+        }
+        let span=select(stepSize,min(stepSize,exit-within),cut);
+        back=distance-(within+stepSize*.35);distance=within+span*.35;share=span/stepSize;
+        local=origin+direction*distance;world=F.camPos.xyz+ray*distance;smoke=gunnerySmoke(world,local,erode,grain);
+      }
+      if(distance>=exit){break;}
+      let thickness=smoke.x*smoothstep(0.0,seaSoft,scene-distance);
+      if(thickness<.002){continue;}
+      // Sunlight has come through the billows just sunward of here, then through the rest of the bank. The
+      // billows shade one another even in thin smoke, or an old bank would lose its form before its substance.
+      var sunLit=0.0;
+      if(sunUp){
+        let far=nearLook*3.2;
+        let sunward=gunnerySmokeMass(world+F.sunDir.xyz*nearLook,local+sunLocal*nearLook,erode,grain);
+        // Where the billow next the sun already shades this place, what lies beyond it is taken to be as full.
+        var sunwardFar=sunward;
+        if(sunward*max(volume.optical.x,.16)*nearLook<1.7){sunwardFar=gunnerySmokeMass(world+F.sunDir.xyz*far,local+sunLocal*far,erode,grain);}
+        let beyond=max(0.0,gunneryChord(local,sunLocal)-far);
+        let sunDepth=max(volume.optical.x,.16)*(sunward*nearLook*1.5+sunwardFar*(far-nearLook))+volume.optical.x*beyond*max(0.0,1.0-length(local+sunLocal*(far+beyond*.5)))*.5;
+        // Thick smoke scatters light many times over: it dims with depth far more slowly than a single pass would.
+        sunLit=exp(-sunDepth)*.74+exp(-sunDepth*.18)*.26;
+      }
+      // The sky lights what is open to it. Deep in the bank, between billows and on its underside there is little.
+      let above=gunneryChord(local,skyLocal);
+      let skyDepth=volume.optical.x*above*.34*max(0.0,1.0-length(local+skyLocal*above*.5));
+      let open=(exp(-skyDepth)*.6+exp(-skyDepth*.2)*.4)*(.5+.5*smoothstep(.1,.75,smoke.y));
+      let ambient=(mix(skyHorizon*.4,skyZenith*.84,open)+lightning)*(.22+.78*open);
+      let throat=max(0.0,1.0-length(local-vec3f(0.0,-.05,-.28))*1.45);
+      let glow=vec3f(2.4,.42,.03)*(emberFactor*throat*throat*thickness)*selfExposure;
+      let light=powderAlbedo*(ambient+sunlight*sunLit*phase*.66)+glow;
+      let opacity=1.0-exp(-volume.optical.x*thickness*stepSize*share);
+      radiance+=transmittance*opacity*light;transmittance*=1.0-opacity;
+      if(transmittance<.03){break;}
+      continue;
+    }
     let softDepth=smoothstep(0.0,.28,scene-distance)*wallFrontFade;
     if(softDepth<=.001){continue;}
     var emission=vec3f(0);var extinction=0.0;
@@ -338,16 +803,11 @@ struct GunneryVolumeVertex{@builtin(position)position:vec4f,@location(0)world:ve
     if(transmittance<.06){break;}
   }
   let rawAlpha=1.0-transmittance;if(rawAlpha<.002){discard;}
-  // Smooth translucent veil ceiling: gun smoke stays airy and see-through after initial
-  // muzzle discharge, while blazing fire smoke forms a much denser, towering soot column.
-  let isFlameVol=volume.centre.w>.5;
-  let isFireSmokeVol=!isFlameVol && subtype>=1.8;
-  let firePhaseVol=clamp((subtype-2.0)/0.8,0.0,1.0);
-  let gunVeilCap=mix(.84,.34,clamp(age*.44,0.0,1.0));
-  let fireVeilCap=mix(.97,.82,firePhaseVol);
-  let veilCap=select(select(gunVeilCap,fireVeilCap,isFireSmokeVol),.95,isFlameVol);
-  let veilGain=select(1.42,2.45,isFireSmokeVol);
-  let alpha=select(veilCap*(1.0-exp(-rawAlpha*veilGain/max(veilCap,.05))),rawAlpha,isFlameVol);
+  // Flame and powder smoke are as opaque as the walk found them. A fire's smoke is a dense, towering soot
+  // column under a smooth ceiling that lets a little through, more the higher the parcel has risen.
+  let isFireSmokeVol=volume.centre.w<.5 && subtype>=1.8;
+  let fireVeilCap=mix(.97,.82,clamp((subtype-2.0)/0.8,0.0,1.0));
+  let alpha=select(rawAlpha,fireVeilCap*(1.0-exp(-rawAlpha*2.45/fireVeilCap)),isFireSmokeVol);
   let averageWorld=F.camPos.xyz+ray*(enter+exit)*.5;
   return vec4f(surfaceAir(radiance/max(rawAlpha,.0001),averageWorld)*alpha,alpha);
 }
@@ -400,7 +860,7 @@ struct GunneryWaterVertex{@builtin(position)position:vec4f,@location(0)world:vec
 // The initial crown combines an outer tulip splash rim and a tall central Worthington
 // water column launched from the impact cavity.
 @vertex fn gunneryCrownVS(@builtin(vertex_index)vertex:u32,@builtin(instance_index)id:u32)->GunneryWaterVertex{
-  let c=gunneryContacts[id];let age=c.root.w;let uv=gunneryCorner(vertex);let cell=vertex/6u;
+  let c=gunneryContacts[id];let age=gunneryAge(c.root.w);let uv=gunneryCorner(vertex);let cell=vertex/6u;
   // Ground goes up in pieces, not in a sheet.
   if(c.extra.y>0.0){return GunneryWaterVertex(vec4f(0.0,0.0,-1.0,1.0),vec3f(0.0),vec2f(0.0),id);}
   let angle=(f32(cell%${GUNNERY_CROWN_SEGMENTS}u)+uv.x)*(2.0*PI)/${GUNNERY_CROWN_SEGMENTS}.0;
@@ -416,7 +876,7 @@ struct GunneryWaterVertex{@builtin(position)position:vec4f,@location(0)world:vec
   return GunneryWaterVertex(F.viewProj*vec4f(world-F.camPos.xyz,1),world,vec2f(angle,row),id);
 }
 @fragment fn gunneryCrownFS(v:GunneryWaterVertex)->@location(0)vec4f{
-  let c=gunneryContacts[v.id];let age=c.root.w;let life=min(1.45,gunneryImpactLift(c)/4.905);
+  let c=gunneryContacts[v.id];let age=gunneryAge(c.root.w);let life=min(1.45,gunneryImpactLift(c)/4.905);
   if(age>=life||age<=0.0){discard;}
   let kind=c.extra.x;
   let nVal=gunneryCloudFbm(v.world*1.65+vec3f(c.detail.x*13.0,-age*4.2,c.detail.x*29.0));
@@ -437,13 +897,13 @@ struct GunneryWaterVertex{@builtin(position)position:vec4f,@location(0)world:vec
   return vec4f(surfaceAir(rad,v.world)*alpha,alpha);
 }
 @vertex fn gunneryDropVS(@builtin(vertex_index)vertex:u32,@builtin(instance_index)instance:u32)->GunneryWaterVertex{
-  let id=instance/${GUNNERY_DROP_COUNT}u;let c=gunneryContacts[id];let drop=f32(instance%${GUNNERY_DROP_COUNT}u);let age=c.root.w;
+  let id=instance/${GUNNERY_DROP_COUNT}u;let c=gunneryContacts[id];let drop=f32(instance%${GUNNERY_DROP_COUNT}u);let age=gunneryAge(c.root.w);
   let random=fract(sin(drop*17.137+c.detail.x*73.0)*437.1);let angle=drop*2.399963+c.detail.x*63.0;
   let heading=gunneryContactHeading(c);let side=vec2f(heading.y,-heading.x);let radial=gunneryImpactRadial(c)*(.6+random*.55);
   let across=side*cos(angle)*radial+heading*sin(angle)*radial+heading*min(12.0,length(c.motion.xz)*.025);
   let launch=vec3f(across.x,gunneryImpactLift(c)*(.65+random*.4),across.y);
   // Analytic aerodynamic drift grows gradually; gravity remains 9.81 m/s².
-  let wind=c.detail.yzw*(age-.7*(1.0-exp(-age/.7)))*.16;
+  let wind=gunneryWind()*(age-.7*(1.0-exp(-age/.7)))*.16;
   let world=c.root.xyz+launch*age+vec3f(0,.04-4.905*age*age,0)+wind;
   let corner=gunneryCorner(vertex)*2.0-1.0;
   let kindBoost=select(1.45,2.15,c.extra.x>.5);
@@ -456,7 +916,7 @@ struct GunneryWaterVertex{@builtin(position)position:vec4f,@location(0)world:vec
 @fragment fn gunneryDropFS(v:GunneryWaterVertex)->@location(0)vec4f{
   let c=gunneryContacts[v.id];let radius=dot(v.uv,v.uv);
   let minHeight=c.root.y-select(0.0,6.5,c.extra.x>.5);
-  if(radius>=1.0||c.root.w>3.4||v.world.y<minHeight){discard;}
+  if(radius>=1.0||gunneryAge(c.root.w)>3.4||v.world.y<minHeight){discard;}
   let eye=normalize(F.camPos.xyz-v.world);let n=normalize(normalize(F.camRight.xyz)*v.uv.x+normalize(F.camUp.xyz)*v.uv.y+eye*sqrt(max(.001,1.0-radius)));
   let alpha=(1.0-smoothstep(.3,1.0,radius))*.78;
   let kind=c.extra.x;
@@ -469,7 +929,7 @@ struct GunneryWaterVertex{@builtin(position)position:vec4f,@location(0)world:vec
 }
 // Earth thrown by a strike on the ground OR 420 ballistic whitewater spray jets & droplets on water impacts.
 @vertex fn gunneryEarthVS(@builtin(vertex_index)vertex:u32,@builtin(instance_index)instance:u32)->GunneryWaterVertex{
-  let id=instance/${GUNNERY_EARTH_COUNT}u;let c=gunneryContacts[id];let age=c.root.w;
+  let id=instance/${GUNNERY_EARTH_COUNT}u;let c=gunneryContacts[id];let age=gunneryAge(c.root.w);
   var o=GunneryWaterVertex(vec4f(0.0,0.0,-1.0,1.0),vec3f(0.0),vec2f(0.0),id);
   let isWater=c.extra.x<.5;
   let pit=select(c.extra.y,max(0.85,c.motion.w*1.55),isWater);
@@ -495,7 +955,7 @@ struct GunneryWaterVertex{@builtin(position)position:vec4f,@location(0)world:vec
   let flight=2.0*up/9.81;
   if(age<=0.0||age>=flight+.08){return o;}
   let rise=up*age-4.905*age*age;
-  let wind=c.detail.yzw*(age-.7*(1.0-exp(-age/.7)))*select(.05,.14,isWater);
+  let wind=gunneryWind()*(age-.7*(1.0-exp(-age/.7)))*select(.05,.14,isWater);
   let radStart=select(start*pit*.55,start*0.35*c.motion.w,isWater);
   let centre=c.root.xyz+vec3f(outward.x*(radStart+along*age),rise,outward.y*(radStart+along*age))+wind;
   let corner=gunneryCorner(vertex)*2.0-1.0;
@@ -538,7 +998,7 @@ struct GunneryWaterVertex{@builtin(position)position:vec4f,@location(0)world:vec
 // The dust that goes up with a ground strike OR rising sea-spray mist & churning whitewater boil on water impacts.
 struct GunneryDustVertex{@builtin(position)position:vec4f,@location(0)world:vec3f,@location(1)uv:vec2f,@location(2)@interpolate(flat)id:u32,@location(3)@interpolate(flat)alpha:f32,@location(4)@interpolate(flat)seed:f32};
 @vertex fn gunneryDustVS(@builtin(vertex_index)vertex:u32,@builtin(instance_index)instance:u32)->GunneryDustVertex{
-  let id=instance/${GUNNERY_DUST_COUNT}u;let c=gunneryContacts[id];let age=c.root.w;
+  let id=instance/${GUNNERY_DUST_COUNT}u;let c=gunneryContacts[id];let age=gunneryAge(c.root.w);
   var o=GunneryDustVertex(vec4f(0.0,0.0,-1.0,1.0),vec3f(0.0),vec2f(0.0),id,0.0,0.0);
   let isWater=c.extra.x<.5;
   let pit=select(c.extra.y,max(1.0,c.motion.w*1.65),isWater);
@@ -565,7 +1025,7 @@ struct GunneryDustVertex{@builtin(position)position:vec4f,@location(0)world:vec3
     select((0.4+3.6*pow(r2,1.6))*size*flung*(1.0-0.35*smoothstep(0.7,2.0,age)),0.06+0.20*r2,isSurfaceBoil),
     isWater
   );
-  let wind=c.detail.yzw*(age-.7*(1.0-exp(-age/.7)))*.22;
+  let wind=gunneryWind()*(age-.7*(1.0-exp(-age/.7)))*.22;
   let radius=select((.22+.95*sqrt(age)*(.55+r3*.8))*size,(.28+.85*sqrt(age)*(.55+r3*.65))*size,isWater);
   let centre=vec3f(c.root.x+outward.x*far,c.root.y+high+radius*select(.35,.18,isSurfaceBoil),c.root.z+outward.y*far)+wind;
   let corner=gunneryCorner(vertex)*2.0-1.0;
@@ -593,7 +1053,7 @@ struct GunneryDustVertex{@builtin(position)position:vec4f,@location(0)world:vec3
 }
 @vertex fn gunneryRingVS(@builtin(vertex_index)vertex:u32,@builtin(instance_index)id:u32)->GunneryWaterVertex{
   let c=gunneryContacts[id];let ring=vertex/(${GUNNERY_RING_SEGMENTS}u*6u);let uv=gunneryCorner(vertex);let segment=(vertex/6u)%${GUNNERY_RING_SEGMENTS}u;
-  let age=c.root.w-f32(ring)*.24;let angle=(f32(segment)+uv.x)*(2.0*PI)/${GUNNERY_RING_SEGMENTS}.0;
+  let age=gunneryAge(c.root.w)-f32(ring)*.24;let angle=(f32(segment)+uv.x)*(2.0*PI)/${GUNNERY_RING_SEGMENTS}.0;
   let crossSection=uv.y*2.0-1.0;
   let waveSpeed=(3.2-f32(ring)*.22)*sqrt(max(0.5,c.motion.w));
   let bandHalfWidth=.44+max(0.0,age)*.16;
@@ -607,7 +1067,7 @@ struct GunneryDustVertex{@builtin(position)position:vec4f,@location(0)world:vec3
 }
 @fragment fn gunneryRingFS(v:GunneryWaterVertex)->@location(0)vec4f{
   let c=gunneryContacts[v.id/${GUNNERY_RING_COUNT}u];if(c.extra.x>.5){discard;}
-  let ring=v.id%${GUNNERY_RING_COUNT}u;let age=c.root.w-f32(ring)*.24;if(age<=0.0||age>=6.5){discard;}
+  let ring=v.id%${GUNNERY_RING_COUNT}u;let age=gunneryAge(c.root.w)-f32(ring)*.24;if(age<=0.0||age>=6.5){discard;}
   let edge=pow(max(0.0,1.0-abs(v.uv.x)),1.65);
   let nVal=gunneryCloudFbm(vec3f(cos(v.uv.y)*2.4+v.world.x*.35,sin(v.uv.y)*2.4+v.world.z*.35,age*.85+f32(ring)*1.7+c.detail.x*19.0));
   let ringFade=exp(-f32(ring)*.52);
