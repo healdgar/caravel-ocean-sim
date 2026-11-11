@@ -70,6 +70,47 @@ The decimator only draws level at about 19 pixels and below, and there it also l
 
 Tried in the game on November 10 and taken: the limit is `.4`, so the game now draws one cut coarser than the bold values above. Over Lisbon's town it draws 13.1 million triangles in place of 30.4 million, and the scene pass takes 23 ms in place of 32 ms on a GPU shared with other work. Pictures at `.2`, `.3` and `.4` from the deck and from above the town show no difference to the eye. The town view still costs about twice what it did when far trees were crown shells, because every layer of leaf cards is alpha-tested: the Portugal pack needs a far canopy that is one opaque surface.
 
+### Far crowns for Portugal and the tropics
+
+Done on November 10. Past 330 m in the default view, a Portugal tree is one closed, opaque crown on a trunk column, and none of its clusters are listed. Between 330 m and 430 m it wears both: the crown takes a growing share of each pixel's samples and the leaves give up exactly those, so nothing blends and nothing pops. A sharper view or a spyglass carries the change further out, because it follows the leaf limit. Saba already had crown shells and keeps them.
+
+`scripts/prepare-forest-crowns.mjs` bakes the crowns from each tree's own leaves, all of them, not from the coarse cards: a density field, closed and rounded into one body whose outline covers what the tree's silhouette covers from 60 directions, at three levels of about 300, 112 and 48 triangles. Leaf lean and exposure come from the leaves each vertex stands for, and the shader lights the crown as those leaves and shapes it by the surface. The far trees still cast into the land shadow map through their clusters.
+
+Two rules keep the woods from changing tone or bulk at the changeover:
+
+- Colour. Cards at the changeover cover only 29% to 79% of a tree's closed shape, and the rest of each pixel shows shaded leaves behind. So each crown vertex is its own leaves' colour in that share, and the pack's middle leaf colour at half brightness in the rest. Without this a birch became a solid chartreuse body and Lisbon's hill read up to 37% brighter. With it the hill reads 3% to 13% brighter than cards, and the birches 14% to 19%.
+- Breadth. A pack whose trees stand in open ground names `widestLeafErrors` in its crown manifest, and a tree keeps its leaves until it is narrower than that many leaf errors on screen. The subtropical pack names 25, which is 30 pixels in the default view, so a large ceiba stays leafy well past 330 m. Portugal names none: its woods are closed, and holding broad trees back cost 2 million triangles over the town for nothing seen.
+
+Switches for trying it: `forestCrowns=0`, `forestCrownNearest=<metres>`, `forestCrownLimit=<share>`, `forestCrownWidest=<leaf errors>`.
+
+Minimum of back-to-back rounds on a machine other work kept loaded (load average 19 to 49, GPU 40% to 100% busy before the game loaded), so read the times as bounds. `139e6be` and cards have eleven rounds at Lisbon; crowns have the four rounds since the last change, and Lisbon's town a further four with crowns switched off and on in one browser.
+
+| View | Version | Scene pass | Main thread | Triangles | Tiler memory |
+|---|---|---|---|---|---|
+| Lisbon deck | `139e6be` | 13.2 ms | 4.5 ms | 9.9 M | 183 MB |
+| Lisbon deck | cards | 18.9 ms | 4.6 ms | 8.5 M | 143 MB |
+| Lisbon deck | crowns | 19.6 ms | 4.6 ms | 7.6 M | 102 MB |
+| Lisbon town | `139e6be` | 9.0 ms | 2.0 ms | 9.2 M | 211 MB |
+| Lisbon town | cards | 23.8 ms | 2.3 ms | 13.1 M | 353 MB |
+| Lisbon town | crowns | 19.0 ms | 2.3 ms | 9.3 M | 175 MB |
+| San Juan, 60 m up | cards | 9.6 ms | 3.3 ms | 4.6 M | 67 MB |
+| San Juan, 60 m up | crowns | 9.8 ms | 3.7 ms | 4.4 M | 59 MB |
+| San Juan shore | cards | 6.4 ms | 3.3 ms | 4.7 M | 39 MB |
+| San Juan shore | crowns | 7.7 ms | 3.5 ms | 4.7 M | 38 MB |
+| Saba deck | before | 27.4 ms | 6.8 ms | 33.7 M | 582 MB |
+| Saba deck | after | 24.3 ms | 5.8 ms | 33.5 M | 582 MB |
+
+The minima understate the town, because cards had eleven chances at a quiet moment and crowns four. Measured in the same sitting, cards then crowns: 28.9 and 19.8 ms, 34.2 and 23.1, 30.6 and 21.9, and in one browser 37.7 and 32.6, 34.3 and 26.9, 33.3 and 24.8, 39.0 and 19.0. The deck by the same pairs: 23.1 and 19.6, 28.8 and 24.5, 30.2 and 21.9. Before the colour and breadth rules, with the same Lisbon triangles, seven rounds reached 16.0 ms over the town and 17.9 ms from the deck.
+
+Over Lisbon's town the forest's leaf triangles fall from 6.2 million to 1.3 million and its wood from 1.8 million to 0.3 million, for 2.5 million of crown. San Juan has few trees past 330 m, so it gains little and its times are within load. Saba runs the same code before and after, so its two times show how far load alone moves a reading.
+
+Still open:
+
+- The town still costs twice what it did at `139e6be` with the same triangle count, and that has not been traced. Forests did not cast into a land shadow map then.
+- The subtropical pack bakes one exposure for the whole tree, so its far crowns are shaded by form alone. A per-leaf exposure bake for that pack would fix it.
+- Narrow trees make thin upright bodies that show as pillars when a still is enlarged three times.
+- The change at 330 m has been judged in stills, not under way, by moonlight, in wind or through the spyglass.
+
 ## November 5: parts worth taking from the sand3d datasets
 
 The sand3d repository itself holds no ship parts, but its Hugging Face datasets hold about 104,000 programs (CC BY 4.0, each with its source credit), found by searching `Sandflow/sand3d-*`. Bake them with sand3d at build time and credit each one in `THIRD_PARTY_NOTICES.md`. Nothing here is in the game yet.

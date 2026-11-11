@@ -11,13 +11,13 @@
 //   npm run perf -- --uploads                        what the CPU sends the GPU each frame, by buffer
 //   npm run perf -- --profile                        JavaScript time per function
 //   npm run perf -- --textures                       live GPU texture memory by format, forest download
-// PANEL=1 adds the game's own GPU pass spans. HEADED=1 shows the window. PERF_REGION=san-juan changes the coast.
+// PANEL=1 adds the game's own GPU pass spans. HEADED=1 shows the window. PERF_REGION=san-juan changes the coast; saba opens the landfall coast.
 // PERF_SHOTS=folder keeps a picture of each row.
 import {once} from 'node:events';
 import {execSync} from 'node:child_process';
 import {chromium} from 'playwright';
 import {createDevServer} from '../server.mjs';
-import {coastalRegionStageURL} from '../js/landfall.js';
+import {coastalRegionStageURL,landfallStageURL} from '../js/landfall.js';
 import {fireBroadside} from './damage-battle.mjs';
 import {aimAtBuilding,fireOnBuilding} from './fort-battle.mjs';
 
@@ -114,7 +114,7 @@ const idle=[];for(let i=0;i<4;i++){idle.push(gpuCounters().device);await new Pro
 console.log(`GPU busy before loading: ${mean(idle).toFixed(0)}% (other work on this machine)`);
 console.log('scene'.padEnd(20),'frame p50/p95   fps  | JS ms mean/p95 | CPU cores main+gpu | GPU busy frag vert | limit');
 for(const [label,extra,edits] of rows){
-  const url=coastalRegionStageURL(base,process.env.PERF_REGION||'lisbon','dock','clear',1650);
+  const region=process.env.PERF_REGION||'lisbon',url=region==='saba'?landfallStageURL(base,'coast','clear'):coastalRegionStageURL(base,region,'dock','clear',1650);
   const {battle,fort,...parameters}=extra;
   for(const [key,value] of Object.entries({ship:'victory',w:1728,h:1117,polygons:'fixed',...parameters}))url.searchParams.set(key,String(value));
   const page=await browser.newPage({viewport:{width:1728,height:1117}}),errors=[];

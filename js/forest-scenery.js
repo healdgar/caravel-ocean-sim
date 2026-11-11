@@ -7,6 +7,7 @@ import {loadForestImpostors,createForestImpostorResources,FOREST_IMPOSTOR_WGSL} 
 import {loadForestLight,forestLightGPUBytes,FOREST_LIGHT_WGSL} from './forest-light.js';
 import {loadForestNativeLOD} from './forest-native-lod.js';
 import {loadForestClusters,createForestClusters,FOREST_CLUSTER_ASSETS,SUBTROPICAL_FOREST_CLUSTER_ASSETS,PORTUGAL_FOREST_CLUSTER_ASSETS,FOREST_CLUSTER_VERTEX_WGSL,FOREST_CLUSTER_SHADOW_WGSL} from './forest-clusters.js';
+import {loadForestCrowns,SUBTROPICAL_FOREST_CROWN_ASSETS,PORTUGAL_FOREST_CROWN_ASSETS} from './forest-crowns.js';
 import {FOREST_FALL_BEARINGS,FOREST_FALL_HEIGHT_STEPS,FOREST_FALL_REST_MIN_DEG,FOREST_FALL_SECONDS,FOREST_LONG_FALLEN,FOREST_WOUND_BEARINGS,buildForestTrunkGridAsync,forestStrikesFromSave,forestStrikesToSave,forestTrunkShape,reapplyForestStrikes,strikeForestRoot,strikeForestTree} from './forest-trunks.js';
 import {FOREST_SURFACE_ASSETS,SUBTROPICAL_FOREST_SURFACE_ASSETS,PORTUGAL_FOREST_SURFACE_ASSETS,chooseForestSurfaceCodec,createForestSurfaceTextures,forestMaterialOptics,loadForestSurfaceSet} from './forest-surfaces.js';
 import {loadForestVolumes,createForestVolumeResources,FOREST_VOLUME_ASSETS,SUBTROPICAL_FOREST_VOLUME_ASSETS,PORTUGAL_FOREST_VOLUME_ASSETS,FOREST_VOLUME_WGSL,FOREST_VOLUME_SHELL_WGSL} from './forest-volume.js';
@@ -644,6 +645,8 @@ struct ForestVertex {
  @invariant @builtin(position)pos:vec4f,@location(0)world:vec3f,@location(1)normal:vec3f,
  @location(2)kind:vec2f,@location(3)leafUV:vec2f,@location(4)colour:vec3f,
  @location(5)@interpolate(flat)nativeMaterial:i32,
+ // The share of each pixel that the tree's far crown has taken from its leaves (js/forest-crowns.js).
+ @location(6)@interpolate(flat)crownFade:f32,
  @location(7)canopyAO:f32,
  @location(8)@interpolate(flat)coverageSeed:u32,
 };
@@ -655,6 +658,17 @@ fn forestLeafSampleMask(alpha:f32,seed:u32,pixel:vec2f)->u32{
  let coverageScale=select(1.,select(1.62,3.2,tierId==3u),tierId>=2u);
  let coverage=clamp(alpha*coverageScale,0.,1.)*f32(samples);let whole=u32(floor(coverage));
  let count=min(samples,whole+select(0u,1u,fract(coverage)>f32(random&65535u)/65536.));
+ let bits=(1u<<count)-1u;let rotation=(random>>16u)%samples;
+ return ((bits<<rotation)|(bits>>(samples-rotation)))&((1u<<samples)-1u);
+}
+// The samples of a pixel that a tree's far crown takes while it comes in over its own leaves. The crown
+// draws these and the leaves give exactly these up, so between them each sample is drawn once and the
+// change needs no blending. Every pixel rounds the share its own way, which spreads the change evenly.
+fn forestCrownSamples(share:f32,pixel:vec2f)->u32{
+ if(share<=0.){return 0u;}
+ let samples=select(4u,forestBin.w,forestBin.w>0u);let p=vec2u(pixel);
+ let random=forestCoverageHash(p.x^forestCoverageHash(p.y*0x9e3779b9u+0x51ed270bu));
+ let count=min(samples,u32(floor(share*f32(samples)+f32(random&65535u)/65536.)));
  let bits=(1u<<count)-1u;let rotation=(random>>16u)%samples;
  return ((bits<<rotation)|(bits>>(samples-rotation)))&((1u<<samples)-1u);
 }
@@ -899,7 +913,7 @@ struct ForestLeafCoverage {@location(0)colour:vec4f,@builtin(sample_mask)mask:u3
  // sample bits at small projected sizes. Stable per-primitive/root masks keep
  // expected filtered source coverage, including sub-sample fractions. This is
  // independent-footprint integration, not recovery of correlated source masks.
- var o:ForestLeafCoverage;o.colour=vec4f(0);o.mask=forestLeafSampleMask(alpha,in.coverageSeed,in.pos.xy);return o;
+ var o:ForestLeafCoverage;o.colour=vec4f(0);o.mask=forestLeafSampleMask(alpha,in.coverageSeed,in.pos.xy)&~forestCrownSamples(in.crownFade,in.pos.xy);return o;
 }
 @fragment fn forestNativeLeafFS(in:ForestVertex,@builtin(front_facing)front:bool)->@location(0)vec4f{
  let material=forestNativeMaterials[u32(in.nativeMaterial)];
@@ -1132,6 +1146,12 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
   const abort=new AbortController(),nativeStatus={status:pack.skipNative?'skipped':'deferred',resident:false,error:null,uploadedBytes:0,totalBytes:m.files['vertices.bin'].bytes+(nativeLod?nativeLod.manifest.files['lod-indices.bin'].bytes:m.files['indices.bin'].bytes)};
   let atlas,native=null,destroyed=false,terrainVisibility=null;
   let clusters=null;const clustersWanted=typeof location==='undefined'||new URLSearchParams(location.search).get('forestClusters')!=='0';
+  // Far crowns (js/forest-crowns.js). forestCrowns=0 draws every tree's leaves as far as they go; the
+  // others move the change for inspection: the nearest it may fall, in metres, the pixel share, and how
+  // broad a tree may stand on screen as a crown, in leaf errors.
+  const crownQuery=typeof location==='undefined'?new URLSearchParams():new URLSearchParams(location.search);
+  const crownsWanted=crownQuery.get('forestCrowns')!=='0',crownChange={};
+  for(const [key,name]of [['nearest','forestCrownNearest'],['limit','forestCrownLimit'],['widest','forestCrownWidest']]){const value=Number(crownQuery.get(name));if(crownQuery.has(name)&&value>0)crownChange[key]=value;}
   try{
     const volumeOff=typeof location!=='undefined'&&new URLSearchParams(location.search).get('forestVolume')==='off';
     const volumeForce=typeof location!=='undefined'&&new URLSearchParams(location.search).get('forestVolume')==='force';
@@ -1326,9 +1346,13 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
           }
         }
         if(clusterSource){
+          // Saba's far trees wear the crown shells of its volumes; the other packs' wear crowns baked from
+          // their own leaves. Without them the leaves draw as far as they did before, so a failure only costs speed.
+          const crownAssets=volumeShell?null:isSubtropicalPack?SUBTROPICAL_FOREST_CROWN_ASSETS:isCohortPack?PORTUGAL_FOREST_CROWN_ASSETS:null;
+          const crownSource=crownAssets&&crownsWanted?await loadForestCrowns({assets:crownAssets,signal:abort.signal}).catch(error=>{if(abort.signal.aborted)throw error;stats.crowns={loaded:false,error:error.message};return null;}):null;forestLoadAbort(abort.signal);
           const firstMaterials=[];let materialCursor=0;for(const p of m.prototypes){firstMaterials.push(materialCursor);materialCursor+=p.nativeMaterials.length;}
           const clusterBind=(p,ids=sceneIds)=>bind(p,ids);clusterBind.frameUBO=frameUBO;
-          clusters=await createForestClusters({device,shader,module,frame:FRAME_WGSL,source:clusterSource,prototypes:m.prototypes,roots,visible,commands,parameters,format,samples,bind:clusterBind,hasLandShadow,shadowUniform:resources.find(([id])=>id===19)?.[1].buffer??null,
+          clusters=await createForestClusters({device,shader,module,frame:FRAME_WGSL,source:clusterSource,crowns:crownSource,crownChange,prototypes:m.prototypes,roots,visible,commands,parameters,format,samples,bind:clusterBind,hasLandShadow,shadowUniform:resources.find(([id])=>id===19)?.[1].buffer??null,
             cloudEntries:p=>clouds.bindVolume(p),
             surfaceEntries:(pipeline,id,offset,normals)=>{
               const entries=[{binding:0,resource:{buffer:roots}},{binding:2,resource:{buffer:offset}},{binding:5,resource:nativeSampler},{binding:6,resource:{buffer:materials}},{binding:13,resource:nativeRepeatSampler}];
@@ -1337,6 +1361,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
               return device.createBindGroup({layout:pipeline.getBindGroupLayout(2),entries});
             },firstMaterials});
           stats.clusters={loaded:true,count:clusterSource.manifest.clusterCount,bytes:clusterSource.vertices.byteLength+clusterSource.indices.byteLength+clusterSource.clusters.byteLength};
+          if(crownSource)stats.crowns={loaded:true,levels:crownSource.manifest.levels,triangles:crownSource.manifest.indexCount/3,bytes:crownSource.vertices.byteLength+crownSource.indices.byteLength,error:null};
         }
         forestLoadAbort(abort.signal);native={vertices,indices,surfaces};
         stats.nativeMaterialLayers=surfaces.layers;stats.nativeTextureFamilies=surfaces.families.map(f=>({width:f.width,height:f.height,layers:f.rows.length,mipLevels:f.levels}));

@@ -17,6 +17,7 @@ import { FOREST_NATIVE_LOD_ASSETS } from './js/forest-native-lod.js';
 import { FOREST_VOLUME_ASSETS, SUBTROPICAL_FOREST_VOLUME_ASSETS, PORTUGAL_FOREST_VOLUME_ASSETS } from './js/forest-volume.js';
 import { FOREST_MIDDLE_ASSETS, SUBTROPICAL_FOREST_MIDDLE_ASSETS, PORTUGAL_FOREST_MIDDLE_ASSETS } from './js/forest-middle.js';
 import { FOREST_CLUSTER_ASSETS, SUBTROPICAL_FOREST_CLUSTER_ASSETS, PORTUGAL_FOREST_CLUSTER_ASSETS } from './js/forest-clusters.js';
+import { SUBTROPICAL_FOREST_CROWN_ASSETS, PORTUGAL_FOREST_CROWN_ASSETS } from './js/forest-crowns.js';
 import { FOREST_MASS_ASSETS } from './js/forest-mass.js';
 import { FOREST_SURFACE_ASSETS, SUBTROPICAL_FOREST_SURFACE_ASSETS, PORTUGAL_FOREST_SURFACE_ASSETS } from './js/forest-surfaces.js';
 
@@ -139,12 +140,12 @@ if(fs.existsSync(path.join(root,'assets/forest-scenery/saba/mass/manifest.json')
     runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':'application/octet-stream');
 }
 if(fs.existsSync(path.join(root,'assets/forest-scenery/subtropical/manifest.json'))){
-  for(const file of [...Object.values(SUBTROPICAL_FOREST_SURFACE_ASSETS),...Object.values(SUBTROPICAL_FOREST_CLUSTER_ASSETS),...Object.values(SUBTROPICAL_FOREST_ASSETS),...Object.values(SUBTROPICAL_FOREST_VOLUME_ASSETS),...Object.values(SUBTROPICAL_FOREST_MIDDLE_ASSETS)]){
+  for(const file of [...Object.values(SUBTROPICAL_FOREST_SURFACE_ASSETS),...Object.values(SUBTROPICAL_FOREST_CLUSTER_ASSETS),...Object.values(SUBTROPICAL_FOREST_CROWN_ASSETS),...Object.values(SUBTROPICAL_FOREST_ASSETS),...Object.values(SUBTROPICAL_FOREST_VOLUME_ASSETS),...Object.values(SUBTROPICAL_FOREST_MIDDLE_ASSETS)]){
     if(fs.existsSync(path.join(root,file)))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':file.endsWith('.png')?'image/png':'application/octet-stream');
   }
 }
 if(fs.existsSync(path.join(root,'assets/forest-scenery/portugal/manifest.json'))){
-  for(const file of [...Object.values(PORTUGAL_FOREST_SURFACE_ASSETS),...Object.values(PORTUGAL_FOREST_CLUSTER_ASSETS),...Object.values(PORTUGAL_FOREST_ASSETS),...Object.values(PORTUGAL_FOREST_VOLUME_ASSETS),...Object.values(PORTUGAL_FOREST_MIDDLE_ASSETS)]){
+  for(const file of [...Object.values(PORTUGAL_FOREST_SURFACE_ASSETS),...Object.values(PORTUGAL_FOREST_CLUSTER_ASSETS),...Object.values(PORTUGAL_FOREST_CROWN_ASSETS),...Object.values(PORTUGAL_FOREST_ASSETS),...Object.values(PORTUGAL_FOREST_VOLUME_ASSETS),...Object.values(PORTUGAL_FOREST_MIDDLE_ASSETS)]){
     if(fs.existsSync(path.join(root,file)))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':file.endsWith('.png')?'image/png':'application/octet-stream');
   }
 }
