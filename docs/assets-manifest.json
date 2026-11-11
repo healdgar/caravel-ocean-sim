@@ -1,9 +1,4 @@
 {
-  "assets/boards/lisbon-1550.json": {
-    "url": "assets/boards/lisbon-1550.fcbbe6b11dedba48.json",
-    "bytes": 1355068,
-    "sha256": "fcbbe6b11dedba48a55a9ca0ce75b815191999708e2ade0f668ec201618f62bf"
-  },
   "assets/forest-scenery/saba/clusters/vertices.bin.gz": {
     "url": "assets/forest-scenery/saba/clusters/vertices.bin.f0293e612db25c5c.gz",
     "bytes": 68743362,
@@ -243,6 +238,11 @@
     "url": "assets/props/jetty-planked.c8015f5c74ddbd43.glb",
     "bytes": 181268,
     "sha256": "c8015f5c74ddbd435cae3b08157e35cbcc79aac46bdc2d30c28f9f5ad984fb28"
+  },
+  "assets/boards/lisbon-1550.json": {
+    "url": "assets/boards/lisbon-1550.fcbbe6b11dedba48.json",
+    "bytes": 1355068,
+    "sha256": "fcbbe6b11dedba48a55a9ca0ce75b815191999708e2ade0f668ec201618f62bf"
   },
   "assets/ports/1550/buildings-1550-lrm.bin": {
     "url": "assets/ports/1550/buildings-1550-lrm.070f343b9c5ba729.bin",
