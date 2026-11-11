@@ -9399,7 +9399,7 @@ function finalizeProceduralCoastalPack(
     beaches,
     port,
     portGeometry,
-    city: cityPlan ? { blocks: cityPlan.blocks, count: cityPlan.count, typed: cityPlan.typed, typedTypes: cityPlan.typedTypes, typedCount: cityPlan.typedCount, stats: cityPlan.stats } : null,
+    city: cityPlan ? { blocks: cityPlan.blocks, count: cityPlan.count, typed: cityPlan.typed, typedTypes: cityPlan.typedTypes, typedCount: cityPlan.typedCount, typedBlocks: cityPlan.typedBlocks, stats: cityPlan.stats } : null,
     biome,
     albedo,
     vegetation,

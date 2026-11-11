@@ -834,6 +834,22 @@ fn cityCorner(corner:vec3f,face:vec3f,root:vec4f,size:vec4f,style:vec4f)->CityCo
   o.pos=F.viewProj*vec4f(earthCurve(shifted-F.camPos.xyz,F.camPos.y),1.0);
   return o;
 }
+// The same building once shot has struck it: its pieces, already stood in the world and posed by
+// js/building-fracture.js, with its own record of where it stands for its limewash and its tiles.
+// A piece's normal is left as long as it was written: its length says how raw the stone is.
+@vertex fn cityStruckVS(@location(0) position:vec3f,@location(1) normal:vec3f,@location(2) kind:vec2f,
+  @location(3) root:vec4f,@location(4) shape:vec4f)->LandVertex{
+  var o:LandVertex;
+  o.world=position;o.normal=normal;o.kind=kind;
+  let material=floor(kind.x+0.01);
+  let tone=fract(shape.w);
+  if(abs(material-12.0)<0.5){o.kind=vec2f(kind.x+7.0,floor(shape.w)+clamp(tone*kind.y,0.02,0.98));}
+  else if(abs(material-13.0)<0.5){o.kind=vec2f(kind.x,kind.y*cityRoofShade(root,tone));}
+  o.leafUV=vec2f(cityRoofAge(root,tone),-1.0);
+  let shifted=o.world+vec3f(nearTerrain.grid.y,0.0,nearTerrain.grid.z);
+  o.pos=F.viewProj*vec4f(earthCurve(shifted-F.camPos.xyz,F.camPos.y),1.0);
+  return o;
+}
 fn treeWindForce()->f32{return clamp(F.windP[0].z/12.0,0.0,2.2)*0.018;}
 fn treeWindDirection(phase:f32)->vec2f{
   let wind=F.windP[0].xy;let crosswind=vec2f(-wind.y,wind.x);

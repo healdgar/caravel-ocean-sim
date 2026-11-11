@@ -91,13 +91,13 @@ fn scenerySelect(index:u32,group:u32,instance:SceneryInstance)->i32 {
 
 // A city's buildings near the camera, each drawn as its Cairn type: one bucket to a type. Farther
 // off the building's plain block stands in, and the land shader drops that block inside the same
-// distance. A church's towers and a gate's chamber are blocks of their own, a little way from
-// the building's root, so those types are shown that much farther and neither is ever missing.
+// distance. A church's towers, a gate's chamber and a wall's merlons are blocks of their own, a
+// little way from the building's root, so those types are shown that much farther and none is ever missing.
 // params.x is that distance, the one the land shader is given; previous marks who was shown.
 export const CITY_CULL = cullShell(1, /* wgsl */ `
 fn scenerySelect(index:u32,group:u32,instance:SceneryInstance)->i32 {
   let house=group<${2 * CITY_HOUSE_STOREYS}u;
-  let compound=(group>=${CITY_TYPE.CHURCH_LEFT}u&&group<=${CITY_TYPE.CHURCH_GREAT}u)||group==${CITY_TYPE.GATE}u;
+  let compound=(group>=${CITY_TYPE.CHURCH_LEFT}u&&group<=${CITY_TYPE.CHURCH_GREAT}u)||group==${CITY_TYPE.GATE}u||group==${CITY_TYPE.CURTAIN_SHORT}u||group==${CITY_TYPE.CURTAIN_LONG}u;
   let relative=instance.root.xyz+vec3f(0.0,6.0,0.0)-F.camPos.xyz;
   let near=distance(instance.root.xyz,F.camPos.xyz)<params.x+select(0.0,16.0,compound);
   if(!near||!sceneryInFrustum(relative,select(42.0,18.0,house))){previous[index]=0u;return -1;}

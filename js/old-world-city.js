@@ -10,7 +10,7 @@
 // street, square, garden or yard, and whether a tree may stand there. Each house, church,
 // tower and gate is also given its type, a building written in Cairn
 // (js/old-world-buildings.js), which the renderer draws in place of the block close to.
-import { CITY_CHURCH, CITY_BUILDING_TYPES, CITY_GATE, CITY_STOREY_M, CITY_TYPE, CITY_TYPED_ROOF, cityHouseType } from './old-world-buildings.js';
+import { CITY_CHURCH, CITY_BUILDING_TYPES, CITY_CURTAIN, CITY_GATE, CITY_HALL, CITY_STOREY_M, CITY_TYPE, CITY_TYPED_ROOF, cityHouseType } from './old-world-buildings.js';
 
 export const CITY_BLOCK_FLOATS = 12;
 export const CITY_ROOF = Object.freeze({ GABLE: 0, HIP: 1, PYRAMID: 2, FLAT: 3 });
@@ -23,8 +23,8 @@ const STRIDE_M = 8;
 const TURNS = [-0.3, -0.15, 0, 0.15, 0.3];
 const PLACE_RAYS = 24;
 const WALL_RAYS = 144;
-const WALL_HEIGHT_M = 8.5;
-const WALL_THICK_M = 2.4;
+const WALL_HEIGHT_M = CITY_CURTAIN.height;
+const WALL_THICK_M = CITY_CURTAIN.thick;
 
 function mulberry(seed) {
   let a = seed >>> 0;
@@ -127,7 +127,7 @@ function placeHit(p, x, z, pad) {
 export function layOldWorldCity({ heightAt, urbanAt, earlyAt, inlandAt, seat, roads = [], obstacles = [], ways = [], people = 0, bounds, lattice = 16 }) {
   const started = typeof performance === 'object' ? performance.now() : 0;
   const rr = mulberry((Math.round(seat.x * 7.3) * 73856093) ^ (Math.round(seat.z * 5.1) * 19349663) ^ 0x51ed270b);
-  const streets = [], places = [], gates = [], blocks = [], lots = [], typed = [], typedTypes = [];
+  const streets = [], places = [], gates = [], blocks = [], lots = [], typed = [], typedTypes = [], typedBlocks = [];
   const segs = makeHash(24), solids = makeHash(32), placed = makeHash(16), wallSegs = makeHash(32), laneEnds = makeHash(40), spurEnds = makeHash(160);
   const churches = [];
 
@@ -401,11 +401,13 @@ export function layOldWorldCity({ heightAt, urbanAt, earlyAt, inlandAt, seat, ro
     return floor;
   };
   // A building of a Cairn type: where it stands and how it is turned, and how far its type is
-  // stretched across, up and along to fill the plan's footprint.
-  const pushTyped = (type, x, floor, z, yaw, across, up, along, tone) => {
+  // stretched across, up and along to fill the plan's footprint. The blocks pushed just before
+  // it are its own (`own` of them): they stand in for it far off, and go when it is shot down.
+  const pushTyped = (type, x, floor, z, yaw, across, up, along, tone, own = 1) => {
     const T = CITY_BUILDING_TYPES[type];
     typed.push(x, floor, z, yaw, across / T.width, up / T.height, along / T.length, tone);
     typedTypes.push(type);
+    typedBlocks.push(blocks.length / CITY_BLOCK_FLOATS - own, own);
   };
   const keep = (f, r = Math.hypot(f.w, f.d) / 2) => solids.add(f, f.x - r, f.z - r, f.x + r, f.z + r);
 
@@ -416,14 +418,17 @@ export function layOldWorldCity({ heightAt, urbanAt, earlyAt, inlandAt, seat, ro
       const mx = ax + (bx - ax) * (i + 0.5) / n, mz = az + (bz - az) * (i + 0.5) / n, len = L / n;
       if (gates.some((q) => Math.hypot(q.x - mx, q.z - mz) < q.half + len / 2)) continue;
       const f = footprint(mx, mz, WALL_THICK_M, len + 0.5, yaw), base = seatBlock(f);
-      pushBlock(f, height, 0, CITY_ROOF.FLAT, CITY_WALL.ASHLAR, tone, base);
+      pushBlock(f, height, 0, CITY_ROOF.FLAT + CITY_TYPED_ROOF, CITY_WALL.ASHLAR, tone, base);
       keep(f);
       // Merlons along the outward edge.
-      const side = (-uz * out[0] + ux * out[1]) >= 0 ? 1 : -1, ox = -uz * side * 0.8, oz = ux * side * 0.8;
-      for (let m = 0, count = Math.floor(len / 2.6); m < count; m++) {
+      const side = (-uz * out[0] + ux * out[1]) >= 0 ? 1 : -1, ox = -uz * side * 0.8, oz = ux * side * 0.8, count = Math.floor(len / (2 * CITY_CURTAIN.merlon));
+      for (let m = 0; m < count; m++) {
         const t = (m + 0.5) / count - 0.5;
-        blocks.push(mx + ux * len * t + ox, base.floor + height, mz + uz * len * t + oz, yaw, 0.8, 1.3, 1.15, 0, CITY_ROOF.FLAT, CITY_WALL.ASHLAR, tone, 0);
+        blocks.push(mx + ux * len * t + ox, base.floor + height, mz + uz * len * t + oz, yaw, CITY_CURTAIN.parapet, CITY_CURTAIN.merlon, CITY_CURTAIN.rise, 0, CITY_ROOF.FLAT + CITY_TYPED_ROOF, CITY_WALL.ASHLAR, tone, 0);
       }
+      // Close to, a length of the wall's own type, its parapet turned outward.
+      const type = len + 0.5 < (CITY_CURTAIN.short + CITY_CURTAIN.long) / 2 ? CITY_TYPE.CURTAIN_SHORT : CITY_TYPE.CURTAIN_LONG;
+      pushTyped(type, mx, base.floor, mz, side > 0 ? yaw : yaw + Math.PI, WALL_THICK_M, height, len + 0.5, tone, 1 + count);
     }
   };
   const tower = (x, z, side, height, tone, type = CITY_TYPE.WALL_TOWER) => {
@@ -465,8 +470,9 @@ export function layOldWorldCity({ heightAt, urbanAt, earlyAt, inlandAt, seat, ro
     }
     const turn = rr() * Math.PI;
     tower(castle.x + Math.cos(turn) * 14, castle.z + Math.sin(turn) * 14, 13, 21, 0.95, CITY_TYPE.KEEP);
-    const hall = footprint(castle.x - Math.cos(turn) * 13, castle.z - Math.sin(turn) * 13, 12, 30, turn + 0.4);
-    pushBlock(hall, 10.5, 3.2, CITY_ROOF.HIP, CITY_WALL.HOUSE, 0.9); keep(hall);
+    const hall = footprint(castle.x - Math.cos(turn) * 13, castle.z - Math.sin(turn) * 13, CITY_HALL.width, CITY_HALL.depth, turn + 0.4);
+    const hallFloor = pushBlock(hall, CITY_HALL.height, CITY_HALL.roof, CITY_ROOF.HIP + CITY_TYPED_ROOF, CITY_WALL.HOUSE, 0.9); keep(hall);
+    pushTyped(CITY_TYPE.HALL, hall.x, hallFloor, hall.z, hall.yaw, CITY_HALL.width, CITY_HALL.height, CITY_HALL.depth, 0.9);
   }
 
   /* ---- whether a footprint may be built: on dry town ground, off every street and open
@@ -521,7 +527,7 @@ export function layOldWorldCity({ heightAt, urbanAt, earlyAt, inlandAt, seat, ro
         const t = footprint(tx, tz, tw, td, yaw), top = seatBlock(t);
         blocks.push(tx, base.floor, tz, yaw, tw, td, (C.height + CITY_CHURCH.towerRise) * up, CITY_CHURCH.spire * up, CITY_ROOF.PYRAMID + CITY_TYPED_ROOF, CITY_WALL.ASHLAR, 0.93, Math.max(top.plinth, base.floor - top.floor + top.plinth));
       }
-      pushTyped(great ? CITY_TYPE.CHURCH_GREAT : sides[0] < 0 ? CITY_TYPE.CHURCH_LEFT : CITY_TYPE.CHURCH_RIGHT, nave.x, base.floor, nave.z, yaw, w, h, d, tone);
+      pushTyped(great ? CITY_TYPE.CHURCH_GREAT : sides[0] < 0 ? CITY_TYPE.CHURCH_LEFT : CITY_TYPE.CHURCH_RIGHT, nave.x, base.floor, nave.z, yaw, w, h, d, tone, 1 + sides.length);
       const whole = footprint(nave.x, nave.z, w + 2 * tw, d, yaw);
       keep(whole); occupy(whole);
       churches.push({ x: nave.x, z: nave.z, great });
@@ -659,6 +665,8 @@ export function layOldWorldCity({ heightAt, urbanAt, earlyAt, inlandAt, seat, ro
   return {
     blocks: new Float32Array(blocks), count, houses, streets, places, wall, gates, castle, churches, lots, paving, standing,
     typed: new Float32Array(typed), typedTypes: new Uint32Array(typedTypes), typedCount: typedTypes.length,
+    // For each typed building, its first block and how many blocks are its own.
+    typedBlocks: new Uint32Array(typedBlocks),
     groundAt, treesAt,
     stats: {
       blocks: count, typed: typedTypes.length, houses, streets: streets.length, churches: churches.length, gates: gates.length,

@@ -162,6 +162,9 @@ export function createPortDamageStore(saved = null, { dateMs = null } = {}) {
       if (!Object.keys(records).length) delete ports[key];
       return restored;
     },
+    // The names a port's saved damage is kept under. A city's houses are not buildings of the port until they
+    // are struck (js/city-targets.js), so whoever stands them must know which to stand before `restore`.
+    recorded(port) { return Object.keys(ports[portKeyOf(port)] ?? {}); },
     // The craters a coast has when it comes into being. Nothing fills them in: no one in the game mends a field.
     openGround(coast) { groundInView = coast; return ports[GROUND_KEY]?.[coast] ?? null; },
     setGround(coast, craters) { if (craters?.length) (ports[GROUND_KEY] ??= {})[coast] = craters; },

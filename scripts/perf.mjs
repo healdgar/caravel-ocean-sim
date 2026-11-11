@@ -7,6 +7,8 @@
 //   npm run perf -- '[["battle",{"battle":"1"}]]'    fires a broadside into her first, then measures
 //   rows with {"fort":...} look at Lisbon's bastion: "look" as it stands, "ruin" once shot down and settled,
 //   "siege" while shots keep landing all through the sample
+//   rows with {"city":...} look down a street of the town from over its roofs: "look" as it stands, "ruin" once
+//   some sixty balls have been put into its houses and the pieces have settled, "cold" the same with its fires out
 //   rows with {"guns":"port"} fire her own broadside and measure while the guns run and the smoke hangs;
 //   add "gunsWait":9000 to start measuring that many milliseconds after the order instead
 //   rows with {"ablaze":"1"} set two fires on her deck and measure while they burn
@@ -34,6 +36,27 @@ const server=createDevServer();server.listen(0,'127.0.0.1');await once(server,'l
 const base=`http://127.0.0.1:${server.address().port}/`,tag=`perf${process.pid}`;
 const browser=await chromium.launch({headless:!process.env.HEADED,args:['--enable-unsafe-webgpu','--use-angle=metal','--disable-gpu-watchdog',`--perf-tag=${tag}`]});
 const mean=values=>values.reduce((sum,v)=>sum+v,0)/Math.max(1,values.length);
+// Over the roofs a little north of Lisbon's quay, looking down into the town.
+const CITY_EYE=[-70,34,-6250],CITY_PITCH=-24;
+// In the page: a fan of balls from the eye into the town, each applied where the game's own sweep says it struck.
+async function bombardCity({eye,pitch,shots,cold}){
+  const {applyBuildingImpactDamage,sweepBuildingSegment}=await import('/js/gunnery-control.js'),terrain=oceanFleet.terrain,struck=new Set();
+  let hits=0,tried=0;
+  // Some lines end on the paving of a square: keep on until the shots asked for have all struck something.
+  for(let n=0;hits<shots&&n<shots*6;n++){
+    tried++;
+    const yaw=((n*7)%41-20)*1.6*Math.PI/180,down=(pitch*.5+((n*5)%13-6)*1.7)*Math.PI/180;
+    const d=[Math.sin(yaw)*Math.cos(down),Math.sin(down),-Math.cos(yaw)*Math.cos(down)],to=eye.map((v,a)=>v+d[a]*500);
+    const hit=terrain.sweepCity?.(eye,to,.08,null,sweepBuildingSegment);
+    if(!hit)continue;
+    applyBuildingImpactDamage(hit.building,{...hit,mass:10.9,ammo:'round',velocity:d.map(v=>v*420),energy:961000});hits++;struck.add(hit.building);
+    for(let i=0;i<6;i++)await new Promise(requestAnimationFrame);
+  }
+  // The ruins alone, without the fires that houses twice breached have caught.
+  if(cold)for(const port of terrain.ports)for(const b of port.instances??[])if(b.damageState?.fires?.length){b.damageState.fires.length=0;b.damageState.worldFires.length=0;b.damageState.fireIntensity=0;}
+  const pieces=[...struck].map(b=>b.damageState?.fracture);
+  return {tried,hits,buildings:struck.size,ruined:[...struck].filter(b=>b.damageState?.state==='ruined').length,broken:pieces.reduce((sum,f)=>sum+(f?.brokenCount??0),0),shards:pieces.reduce((sum,f)=>sum+(f?.fracture.shards.length??0),0)};
+}
 
 // The GPU's own counters, for the whole machine: device busy, fragment (renderer), vertex (tiler).
 function gpuCounters(){
@@ -121,8 +144,8 @@ console.log(`GPU busy before loading: ${mean(idle).toFixed(0)}% (other work on t
 console.log('scene'.padEnd(20),'frame p50/p95   fps  | JS ms mean/p95 | CPU cores main+gpu | GPU busy frag vert | limit');
 for(const [label,extra,edits] of rows){
   const region=process.env.PERF_REGION||'lisbon',url=region==='saba'?landfallStageURL(base,'coast','clear'):coastalRegionStageURL(base,region,'dock','clear',1650);
-  const {battle,fort,guns,gunsWait,ablaze,js,...parameters}=extra;
-  for(const [key,value] of Object.entries({ship:'victory',w:1728,h:1117,polygons:'fixed',...parameters}))url.searchParams.set(key,String(value));
+  const {battle,fort,city,guns,gunsWait,ablaze,js,...parameters}=extra;
+  for(const [key,value] of Object.entries({ship:'victory',w:1728,h:1117,polygons:'fixed',...(city?{view:'free',cam:`${CITY_EYE.join(',')},0,${CITY_PITCH}`}:{}),...parameters}))url.searchParams.set(key,String(value));
   const page=await browser.newPage({viewport:{width:1728,height:1117}}),errors=[];
   page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error'&&!/404|favicon/.test(m.text()))errors.push(m.text());});
   if(js)await page.route('**/js/**',async route=>{
@@ -153,6 +176,10 @@ for(const [label,extra,edits] of rows){
       const fire=(0,eval)('('+fireText+')');let round=0;
       window.perfSiege=setInterval(()=>fire({prefab,everyFrames:9,volleys:[{...shot,shots:2,minY:1,maxY:8,centre:(round++%18)-9,span:3}]}),500);
     },{prefab,shot,fireText:fireOnBuilding.toString()});
+  }
+  if(city==='ruin'||city==='cold'){
+    console.log(' '.repeat(20),'city:',JSON.stringify(await page.evaluate(bombardCity,{eye:CITY_EYE,pitch:CITY_PITCH,shots:60,cold:city==='cold'})));
+    await page.waitForTimeout(Number(process.env.BATTLE_SETTLE_MS??8000));
   }
   if(ablaze){
     // Two fires amidships, with her powder struck below so the sample is of burning and not of a blast.

@@ -108,6 +108,41 @@ function towerSpec({ name, side, height, slits }) {
   return { schemaVersion: '0.4', name, width: side, length: side, height, foundationDepth: FOOTING_M, materialKind: 11, roofPitch: 0, waterfront: false, primitives };
 }
 
+// A length of the town's wall or the castle's: a thick ashlar curtain, its wall-walk behind a
+// parapet of merlons. The parapet stands along the type's -x side; the plan turns that outward.
+export const CITY_CURTAIN = Object.freeze({ thick: 2.4, height: 8.5, short: 7, long: 10, parapet: 0.8, merlon: 1.3, rise: 1.15 });
+function curtainSpec({ name, length }) {
+  const t = CITY_CURTAIN.thick / 2, h = length / 2, top = CITY_CURTAIN.height, sill = 0.3;
+  return {
+    schemaVersion: '0.4', name, width: CITY_CURTAIN.thick, length, height: top, foundationDepth: FOOTING_M, materialKind: 11, roofPitch: 0, waterfront: false,
+    primitives: [
+      { primitive: 'box', partGroup: 'foundation_plinth', from: [-t, -FOOTING_M, -h], to: [t, 0, h], material: 'dark_stone' },
+      { primitive: 'box', name: 'curtain', from: [-t, 0, -h], to: [t, top, h], material: 'ashlar' },
+      { primitive: 'wall', name: 'curtain_parapet', from: [-t + CITY_CURTAIN.parapet / 2, top, -h], to: [-t + CITY_CURTAIN.parapet / 2, top, h], height: sill, thickness: CITY_CURTAIN.parapet, material: 'ashlar', crenellated: true, merlonWidth: CITY_CURTAIN.merlon, merlonGap: CITY_CURTAIN.merlon, merlonHeight: CITY_CURTAIN.rise - sill },
+    ],
+  };
+}
+
+// The castle's hall: two tall storeys of limewashed wall under a hipped roof, its door in the long front.
+export const CITY_HALL = Object.freeze({ width: 12, depth: 30, height: 10.5, roof: 3.2 });
+function hallSpec({ name }) {
+  const { width, depth, height, roof } = CITY_HALL, hw = width / 2, hd = depth / 2, th = 0.7, storey = height / 2;
+  const primitives = [{ primitive: 'box', partGroup: 'foundation_plinth', from: [-hw, -FOOTING_M, -hd], to: [hw, 0, hd], material: 'ashlar' }];
+  const sides = [[-hw, -hd + th / 2, hw, -hd + th / 2], [hw - th / 2, -hd, hw - th / 2, hd], [hw, hd - th / 2, -hw, hd - th / 2], [-hw + th / 2, hd, -hw + th / 2, -hd]];
+  for (let level = 0; level < 2; level++) {
+    sides.forEach(([ax, az, bx, bz], side) => {
+      const run = Math.hypot(bx - ax, bz - az), bays = Math.max(2, Math.round(run / 4.2)), openings = [];
+      for (let bay = 0; bay < bays; bay++) {
+        const offset = (bay + 0.5) * run / bays;
+        openings.push(level === 0 && side === 1 && bay === Math.floor(bays / 2) ? { offset, width: 1.8, height: 3.1, door: true } : { offset, width: 1, height: storey * 0.42, sill: storey * 0.3 });
+      }
+      primitives.push({ primitive: 'wall', name: `hall_wall_${level}_${side}`, from: [ax, level * storey, az], to: [bx, level * storey, bz], height: storey, thickness: th, material: 'stucco', openings });
+    });
+  }
+  primitives.push({ primitive: 'roof', from: [-hw, height, -hd], to: [hw, height, hd], height: roof, style: 'hip', overhang: 0.4, material: 'roof_tile', wallMaterial: 'stucco' });
+  return { schemaVersion: '0.4', name, width, length: depth, height, foundationDepth: FOOTING_M, materialKind: 12, roofPitch: 3, waterfront: false, primitives };
+}
+
 // The city's types, in the order their numbers are used by the plan and the renderer.
 const HOUSES = [
   ['Casa térrea', 'single-storey house', 6.6, 9.5],
@@ -139,10 +174,25 @@ export const CITY_BUILDING_TYPES = Object.freeze([
       ],
     };
   })(),
+  curtainSpec({ name: 'Pano de muralha (short length of wall)', length: CITY_CURTAIN.short }),
+  curtainSpec({ name: 'Pano de muralha (long length of wall)', length: CITY_CURTAIN.long }),
+  hallSpec({ name: 'Paço (castle hall)' }),
 ]);
 
 const H = CITY_HOUSE_STOREYS;
-export const CITY_TYPE = Object.freeze({ HOUSE_EAVES: 0, HOUSE_GABLE: H, CHURCH_LEFT: 2 * H, CHURCH_RIGHT: 2 * H + 1, CHURCH_GREAT: 2 * H + 2, WALL_TOWER: 2 * H + 3, KEEP: 2 * H + 4, GATE: 2 * H + 5 });
+export const CITY_TYPE = Object.freeze({ HOUSE_EAVES: 0, HOUSE_GABLE: H, CHURCH_LEFT: 2 * H, CHURCH_RIGHT: 2 * H + 1, CHURCH_GREAT: 2 * H + 2, WALL_TOWER: 2 * H + 3, KEEP: 2 * H + 4, GATE: 2 * H + 5, CURTAIN_SHORT: 2 * H + 6, CURTAIN_LONG: 2 * H + 7, HALL: 2 * H + 8 });
+// What a type is to the guns: the name its damage is kept under and reported by. The wall and
+// its towers, the keep and the gate are fortified stone (js/gunnery-control.js); the rest is masonry.
+export function cityTypeTarget(type) {
+  if (type < 2 * H) return { prefabId: 'city_house', label: 'Town house' };
+  if (type === CITY_TYPE.CHURCH_GREAT) return { prefabId: 'city_church', label: 'Cathedral' };
+  if (type < CITY_TYPE.WALL_TOWER) return { prefabId: 'city_church', label: 'Parish church' };
+  if (type === CITY_TYPE.WALL_TOWER) return { prefabId: 'city_wall_tower', label: 'Wall tower' };
+  if (type === CITY_TYPE.KEEP) return { prefabId: 'city_keep', label: 'Castle keep' };
+  if (type === CITY_TYPE.GATE) return { prefabId: 'city_gate', label: 'City gate' };
+  if (type === CITY_TYPE.HALL) return { prefabId: 'city_castle_hall', label: 'Castle hall' };
+  return { prefabId: 'city_wall', label: 'City wall' };
+}
 // Eight numbers to an instance of a type: x, floor height, z, turn; scale across, up and along; tone.
 export const CITY_TYPED_FLOATS = 8;
 // How near a building must be to be drawn as its type rather than its block.
@@ -162,6 +212,8 @@ export function cityHouseType(storeys, eavesToStreet) {
 // A roof is a sheet, seen from under its eaves too, so its tiles are given both faces. The
 // triangles are then put in order from the outside in, so that whatever the camera sees is
 // drawn first and the walls behind it fail the depth test before they are shaded.
+// Each type also keeps its `source`, the builder's own mesh and part catalogue with its bounds,
+// which js/city-targets.js stands in the world when shot comes near a building.
 export function compileCityBuildingTypes(buildGeometry) {
   return CITY_BUILDING_TYPES.map((spec, id) => {
     const built = buildGeometry({
@@ -192,6 +244,13 @@ export function compileCityBuildingTypes(buildGeometry) {
     const vertices = new Float32Array(faces.reduce((sum, face) => sum + face.out.length, 0));
     let filled = 0;
     for (const face of faces) { vertices.set(face.out, filled); filled += face.out.length; }
-    return { id, name: spec.name, width: spec.width, length: spec.length, height: spec.height, vertices, count: vertices.length / 8, triangles: vertices.length / 24 };
+    // What the builder made, as it made it: shot is traced against this, and the first hit cuts it into pieces.
+    const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+    for (let at = 0; at < from.length; at += 8) for (let axis = 0; axis < 3; axis++) {
+      if (from[at + axis] < min[axis]) min[axis] = from[at + axis];
+      if (from[at + axis] > max[axis]) max[axis] = from[at + axis];
+    }
+    const source = { vertices: from, indices: built.indices, partAssembly: built.partAssembly, min, max };
+    return { id, name: spec.name, width: spec.width, length: spec.length, height: spec.height, vertices, count: vertices.length / 8, triangles: vertices.length / 24, source };
   });
 }

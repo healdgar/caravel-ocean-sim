@@ -194,7 +194,7 @@ test('a city is laid out on its ground: streets that join, lots that touch nothi
 });
 
 test('every building type is written in Cairn and compiles to a mesh of the size it claims',()=>{
-  assert.equal(CITY_BUILDING_TYPES.length,2*CITY_HOUSE_STOREYS+6);
+  assert.equal(CITY_BUILDING_TYPES.length,2*CITY_HOUSE_STOREYS+9);
   for(const spec of CITY_BUILDING_TYPES){
     // Plain data: a spec survives a round trip through JSON unchanged.
     assert.deepEqual(JSON.parse(JSON.stringify(spec)),spec,spec.name);
@@ -204,7 +204,9 @@ test('every building type is written in Cairn and compiles to a mesh of the size
   assert.equal(types.length,CITY_BUILDING_TYPES.length);
   types.forEach((type,id)=>{
     assert.equal(type.vertices.length,type.count*8);assert.equal(type.count%3,0);
-    assert.ok(type.triangles>300&&type.triangles<12000,`${type.name}: ${type.triangles} triangles`);
+    // A length of wall is a slab and its merlons; everything else has doors, windows or arrow slits to show.
+    const curtain=id===CITY_TYPE.CURTAIN_SHORT||id===CITY_TYPE.CURTAIN_LONG;
+    assert.ok(type.triangles>(curtain?40:300)&&type.triangles<12000,`${type.name}: ${type.triangles} triangles`);
     const lo=[Infinity,Infinity,Infinity],hi=[-Infinity,-Infinity,-Infinity],kinds=new Set();
     for(let k=0;k<type.vertices.length;k+=8){
       for(let a=0;a<3;a++){const v=type.vertices[k+a];assert.ok(Number.isFinite(v));lo[a]=Math.min(lo[a],v);hi[a]=Math.max(hi[a],v);}
@@ -218,9 +220,9 @@ test('every building type is written in Cairn and compiles to a mesh of the size
     assert.ok(hi[0]<=type.width/2+spread+.7&&lo[0]>=-type.width/2-spread-.7,`${type.name} across ${lo[0]}..${hi[0]}`);
     assert.ok(hi[2]<=type.length/2+.7&&lo[2]>=-type.length/2-.7,`${type.name} along ${lo[2]}..${hi[2]}`);
     assert.ok(hi[1]>=type.height&&hi[1]<type.height+(church?CITY_CHURCH.towerRise+CITY_CHURCH.spire+.5:7.5),`${type.name} up ${hi[1]} of ${type.height}`);
-    // A house has windows and a tiled roof; a tower and a gate are stone.
-    if(id<2*CITY_HOUSE_STOREYS)assert.ok(kinds.has(14)&&kinds.has(13)&&kinds.has(12));
-    if(id>=CITY_TYPE.WALL_TOWER)assert.ok(kinds.has(11)&&!kinds.has(12)&&!kinds.has(13));
+    // A house has windows and a tiled roof, and so has the castle's hall; a tower, a gate and the wall are stone.
+    if(id<2*CITY_HOUSE_STOREYS||id===CITY_TYPE.HALL)assert.ok(kinds.has(14)&&kinds.has(13)&&kinds.has(12));
+    if(id>=CITY_TYPE.WALL_TOWER&&id<=CITY_TYPE.CURTAIN_LONG)assert.ok(kinds.has(11)&&!kinds.has(12)&&!kinds.has(13));
   });
   // Taller houses are taller types, and a ridge along the street is a different type from a gable to it.
   for(let storeys=1;storeys<CITY_HOUSE_STOREYS;storeys++)assert.ok(types[cityHouseType(storeys+1,true)].height>types[cityHouseType(storeys,true)].height);
@@ -228,7 +230,7 @@ test('every building type is written in Cairn and compiles to a mesh of the size
   assert.equal(cityHouseType(9,true),cityHouseType(CITY_HOUSE_STOREYS,true));
 });
 
-test('each house, church, tower and gate of the plan is a Cairn type standing where its block stands',()=>{
+test('each house, church, tower, gate and length of wall of the plan is a Cairn type standing where its block stands',()=>{
   const {region,heights,port}=shore(38.7,-9.14,70),plan=oldWorldCountry(region,heights,port).plan;
   assert.equal(plan.typed.length,plan.typedCount*CITY_TYPED_FLOATS);
   assert.equal(plan.typedTypes.length,plan.typedCount);
@@ -259,9 +261,11 @@ test('each house, church, tower and gate of the plan is a Cairn type standing wh
   assert.equal(of[CITY_TYPE.CHURCH_LEFT]+of[CITY_TYPE.CHURCH_RIGHT]+1,plan.churches.length);
   assert.equal(of[CITY_TYPE.KEEP],plan.castle?1:0);
   assert.ok(of[CITY_TYPE.WALL_TOWER]>=2*plan.gates.length,`towers: ${of[CITY_TYPE.WALL_TOWER]}`);
-  // Curtain walls, merlons and the castle's hall stay plain blocks, and so are never dropped.
+  // The wall is typed too, length by length, and the castle's hall: no block is left that is only a block.
+  assert.ok(of[CITY_TYPE.CURTAIN_SHORT]+of[CITY_TYPE.CURTAIN_LONG]>20,`lengths of wall: ${of[CITY_TYPE.CURTAIN_SHORT]}+${of[CITY_TYPE.CURTAIN_LONG]}`);
+  assert.equal(of[CITY_TYPE.HALL],plan.castle?1:0);
   let plain=0;for(let k=0;k<plan.blocks.length;k+=CITY_BLOCK_FLOATS)if(plan.blocks[k+8]<CITY_TYPED_ROOF)plain++;
-  assert.ok(plain>50,`plain blocks: ${plain}`);
+  assert.equal(plain,0,`plain blocks: ${plain}`);
   // The shader that drops a block and the cull that shows its type agree on the distance.
   assert.ok(CITY_CULL.includes('<params.x+')&&CITY_DETAIL_M>100&&CITY_DETAIL_M<600);
   assert.ok(TERRAIN.includes('fn cityTypeVS')&&TERRAIN.includes('away<nearTerrain.grid.w'));

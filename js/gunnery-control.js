@@ -2622,6 +2622,11 @@ const FORTIFIED_STONE_PREFABS = new Set([
   'stone_sea_bastion',
   'bastion_trace_fortress',
   'stone_quay_seawall',
+  // A walled city's defences (js/old-world-buildings.js cityTypeTarget).
+  'city_wall',
+  'city_wall_tower',
+  'city_keep',
+  'city_gate',
 ]);
 
 const TIMBER_BUILDING_PREFABS = new Set([
@@ -4158,6 +4163,9 @@ export function createGunnerySolidSweep({ sourceBoat, sourceBuilding = null, get
           if (bHit && (!best || bHit.fraction < best.fraction)) best = bHit;
         }
       }
+      // A city's houses, churches and walls: buildings of the port from the moment one is struck.
+      const cHit = terrain.sweepCity?.(from, to, radius, opts, sweepBuildingSegment);
+      if (cHit && (!best || cHit.fraction < best.fraction)) best = cHit;
       const sHit = sweepScenerySegment(from, to, radius, terrain, opts);
       if (sHit && (!best || sHit.fraction < best.fraction)) best = sHit;
       const tHit = sweepTerrainSegment(from, to, radius, terrain, opts);
