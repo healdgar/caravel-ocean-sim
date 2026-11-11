@@ -179,6 +179,8 @@ Palms were three things, all poor: a pole under an 11,000-needle puffball in the
 - **Ceiba:** a broad flat crown on plank buttresses, with leaflets in hands.
 - **Red mangrove:** a low dense dome on arching prop roots. It now keeps to the strand and lagoons, and stays off the uplands.
 
+Since 7 November (`86873b3`) the ceiba and the mangrove are forestmodeler's trees, not the two grown here, and on 10 November the owner chose to keep them. The ceiba has a clear trunk to two metres, boughs from there up and a crown 22 m across, with its leaves through the middle half of its height and no buttresses above ground. The mangrove is a dome 11 m across and 7 m tall, in leaf nearly to the ground, on a plain stem with its roots under the ground. `tests/forest-clusters.test.mjs` describes them as they are.
+
 Palms take about a quarter of their old triangles at full detail. Ceiba and mangrove take more, because their old crowns were far too thin, and clusters cut them back with distance. Each species' far model is refitted to its real crown, so it holds its size when the tree hands over.
 
 The port's palms are gone; the forest seeds real coconuts at the same places, leaning out to sea. Gunnery still reads those positions. Palms used to bend and char under fire by editing port vertices in JavaScript; now each hit darkens the nearest tree and the third fells it, by rewriting that one tree's 48-byte record. Bending is gone. Only foreshore palms, which gunnery knows about, take marks.

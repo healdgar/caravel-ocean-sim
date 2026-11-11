@@ -150,31 +150,42 @@ function grownTree(species){
   const rawIndices=zlib.gunzipSync(fs.readFileSync(`${dir}/indices.bin.gz`)),indices=new Uint32Array(rawIndices.buffer,rawIndices.byteOffset,rawIndices.length/4);
   const p=manifest.prototypes.find(q=>q.species===species);
   const positions=range=>{const out=[];for(let k=0;k<range.indexCount;k+=3){const v=indices[range.firstIndex+k]*14;out.push([vertices[v],vertices[v+1],vertices[v+2]]);}return out;};
-  return {p,wood:positions(p.wood),leaves:positions(p.leaf)};
+  return {p,wood:positions(p.wood),leaves:positions(p.leaf),pack:manifest.prototypes};
 }
 const reachOf=([x,,z])=>Math.hypot(x,z);
 const furthest=points=>points.reduce((most,point)=>Math.max(most,reachOf(point)),0);
 
-test('a ceiba is a broad emergent on plank buttresses, with its leaves high and wide',()=>{
-  const {p,wood,leaves}=grownTree('ceiba');
-  assert.ok(p.crownRadius>=7,'its crown spreads far wider than the old column');
-  const low=leaves.filter(([,y])=>y<p.heightMetres*.5).length;
-  assert.ok(low<leaves.length*.02,`leaves belong in the crown, ${low} of ${leaves.length} hang low`);
+// The ceiba and the mangrove are forestmodeler's (commit 86873b3), which the owner kept over the two grown here
+// before them. These say how those trees are built, so that a new bake which changes their build is noticed.
+test('a ceiba is the tallest and broadest tree of its pack: a clear trunk, boughs from a few metres up, a crown wider than it is tall',()=>{
+  const {p,wood,leaves,pack}=grownTree('ceiba');
+  assert.ok(pack.every(other=>other.heightMetres<=p.heightMetres&&other.crownRadius<=p.crownRadius),'no tree of the pack is taller or broader');
+  assert.ok(p.crownRadius>=7&&p.crownRadius*2>p.heightMetres,'its crown is wider than the tree is tall');
   assert.ok(furthest(leaves)>p.crownRadius*.8,'the crown reaches its stated radius');
-  const buttress=wood.filter(([,y])=>y<.6);
-  assert.ok(furthest(buttress)>1.5,'buttresses run out from the foot of the trunk');
-  const bole=wood.filter(([,y])=>y>6&&y<8);
-  assert.ok(furthest(bole)<.8,'and are gone a few metres up');
+  const trunk=wood.filter(([,y])=>y>=0&&y<2);
+  assert.ok(furthest(trunk)<.6,'the trunk rises clear for its first two metres');
+  const onTrunk=leaves.filter(([,y])=>y<2).length;
+  assert.ok(onTrunk<leaves.length*.03,`with next to no leaf on it: ${onTrunk} of ${leaves.length} hang under two metres`);
+  const boughs=wood.filter(([,y])=>y>6&&y<8);
+  assert.ok(furthest(boughs)>p.crownRadius*.7,'boughs carry the crown out to its edge');
+  // Its foliage starts low for so tall a tree: the body of the crown is the middle half of its height.
+  const body=leaves.filter(([,y])=>y>=p.heightMetres*.25&&y<p.heightMetres*.75).length;
+  assert.ok(body>leaves.length*.75,`most of its leaves lie in the middle half of its height: ${body} of ${leaves.length}`);
+  const roots=wood.filter(([,y])=>y<0);
+  assert.ok(furthest(roots)>1.5,'roots run out from the foot of the trunk, under the ground');
 });
 
-test('a mangrove is a low dome on prop roots that reach the ground',()=>{
+test('a mangrove is a low dome wider than it is tall, in leaf nearly to the ground, over roots that spread beneath it',()=>{
   const {p,wood,leaves}=grownTree('mangrove');
   assert.ok(p.heightMetres<10,'mangroves stay low');
-  assert.ok(p.crownRadius>=3.5,'with a broad crown');
+  assert.ok(p.crownRadius>=3.5&&p.crownRadius*2>p.heightMetres,'under a crown wider than the tree is tall');
   const feet=wood.filter(([,y])=>y<0);
-  assert.ok(feet.length>20,'prop roots reach the ground');
+  assert.ok(feet.length>20,'roots reach into the ground');
   const out=feet.filter(point=>reachOf(point)>1.2);
   assert.ok(out.length>10,'well out from the stems');
-  const low=leaves.filter(([,y])=>y<1.5).length;
-  assert.ok(low<leaves.length*.02,`the roots stand clear of the leaves: ${low} of ${leaves.length} hang low`);
+  const dome=leaves.filter(([,y])=>y>=1.5&&y<5).length;
+  assert.ok(dome>leaves.length*.8,`the dome is the bulk of it: ${dome} of ${leaves.length} leaves lie between 1.5 and 5 metres`);
+  const fringe=leaves.filter(([,y])=>y<1.5).length;
+  assert.ok(fringe>0&&fringe<leaves.length*.1,`a fringe of leaf hangs under the dome, and no more than a fringe: ${fringe} of ${leaves.length}`);
+  assert.ok(leaves.every(([,y])=>y>=0),'and no leaf lies under the ground');
 });
