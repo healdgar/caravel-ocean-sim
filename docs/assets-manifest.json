@@ -1,4 +1,19 @@
 {
+  "assets/boards/lisbon-1550.world": {
+    "url": "assets/boards/lisbon-1550.0d480273ec6c9b88.world",
+    "bytes": 11849116,
+    "sha256": "0d480273ec6c9b881fcfc59c550b8f2f57d43c6e99fb9caeffdf157f61bdc8fa"
+  },
+  "assets/board/game.js": {
+    "url": "assets/board/game.8406adea4b6de403.js",
+    "bytes": 2947540,
+    "sha256": "8406adea4b6de4036002cf9ebf8ef49bce728601c519d915227d57f0df6d520f"
+  },
+  "assets/board/runtime.js": {
+    "url": "assets/board/runtime.af76a9d76482b903.js",
+    "bytes": 10533,
+    "sha256": "af76a9d76482b903b21967c9cd08a23cc017d3723f8f3c0a2d768dc3520c064a"
+  },
   "assets/forest-scenery/saba/clusters/vertices.bin.gz": {
     "url": "assets/forest-scenery/saba/clusters/vertices.bin.f0293e612db25c5c.gz",
     "bytes": 68743362,
@@ -240,9 +255,9 @@
     "sha256": "c8015f5c74ddbd435cae3b08157e35cbcc79aac46bdc2d30c28f9f5ad984fb28"
   },
   "assets/boards/lisbon-1550.json": {
-    "url": "assets/boards/lisbon-1550.fcbbe6b11dedba48.json",
-    "bytes": 1355068,
-    "sha256": "fcbbe6b11dedba48a55a9ca0ce75b815191999708e2ade0f668ec201618f62bf"
+    "url": "assets/boards/lisbon-1550.c6a8cdfcdf205a25.json",
+    "bytes": 1355543,
+    "sha256": "c6a8cdfcdf205a254aa6f10a682ff044fe59d11035a2dfe695123b0e3b462768"
   },
   "assets/ports/1550/buildings-1550-lrm.bin": {
     "url": "assets/ports/1550/buildings-1550-lrm.070f343b9c5ba729.bin",
