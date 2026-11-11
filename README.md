@@ -322,18 +322,30 @@ performance are unqualified.
 | Input | Action |
 |---|---|
 | Drag the canvas with a mouse or finger | Look around; orbit in View ship. The mouse remains free after release; no pointer lock. |
-| Rudder arrows / slider | Set port or starboard rudder; arrows change the target by 5° |
+| Rudder arrows / slider | Set port or starboard rudder; arrows change the target by 5°. Taking the rudder takes the helm from the helmsman |
 | Centre rudder icon | Set the rudder target to zero |
 | Furl / Reef / Full | Order all sails to 0%, 50%, or 100%; the crew handles the canvas |
-| W A S D | Move in Free camera; A / D steer in Boat camera |
-| Left / right arrows | Steer in Boat camera |
-| X | Centre the rudder |
+| A / D | Steer in Boat camera, taking the helm; move sideways in Free camera |
+| X | Centre the rudder, taking the helm |
+| K | Give the helm back: the helmsman keeps her as she goes |
+| T | Tack |
+| [ / ] | Alter the ordered course one point to larboard / starboard; with Shift, one degree |
+| , / . | Time warp down / up one tier |
+| Enter | Give the first answer to the lookout's call; on a focused button, that button's answer |
+| M | Open or close the chart |
+| F | Guns: prepare the chosen broadside, then fire it |
+| W / S and Q / E | Walk the deck in Boat camera; W / S move ahead and back in Free camera |
+| Arrow keys | Turn the view |
 | B | Switch between Boat camera and Free camera; board from View ship |
+| V | Crow's nest and back to the deck |
+| Z | Spyglass |
+| P | Pause |
 | Space or E / Q or C | Up / down in Free camera |
 | Shift | 5x Free camera speed |
 | Mouse wheel | Change Free camera speed or View ship zoom |
 | Drag in View ship | Orbit the vessel |
 | Touch-drag the canvas | Look around or orbit in View ship |
+| Esc | Close the open panel |
 | H | Settings panel: wind, swell, choppiness, turbidity, foam, sun, haze, clouds, exposure, bloom |
 
 Free and exterior cameras can cross the waterline. In **View ship**, drag to orbit,

@@ -2120,6 +2120,8 @@ export function stepVesselDamage(boat, dt, terrain = null) {
   const reserveBuoyancyTonnes = Math.max(1.5, (wpArea * baseFreeboard * 1025) / 1000);
   const maxFloodTonnes = Math.max(reserveBuoyancyTonnes * 1.65, wpArea >= 18 ? 200 : reserveBuoyancyTonnes * 1.65);
   const holeFlows = damage.holes?.length ? stepHullHoles(boat, damage, clampedDt) : null;
+  // Tonnes a second she is gaining over her pumps: what the sound of the leak and the watch on deck go by.
+  damage.floodingRate = 0;
   if ((damage.waterlineBreachArea > 0 || holeFlows?.area > 0) && damage.floodingTonnes < maxFloodTonnes) {
     const comps = damage.compartments ?? (damage.compartments = {
       forePort: { breachArea: 0, waterTonnes: 0 },
@@ -2198,6 +2200,7 @@ export function stepVesselDamage(boat, dt, terrain = null) {
     const sumCompWater = foreWater + midWater + aftWater;
 
     damage.floodingTonnes = +Math.max(damage.floodingTonnes + totalNetAdd, sumCompWater).toFixed(3);
+    if (clampedDt > 0) damage.floodingRate = totalNetAdd / clampedDt;
     boat.cargoTonnes = Math.min(100, (boat.cargoTonnes ?? 0) + totalNetAdd);
     damage.floodingSinkage = +((damage.floodingTonnes * 1000) / (1025 * wpArea)).toFixed(4);
 

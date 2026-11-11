@@ -145,8 +145,20 @@ export function setWarpTier(voyage, id) {
   return voyage;
 }
 
+/**
+ * Two calls wait on the captain's word and are not talked over: the ship going down, and a prize
+ * taken. A sighting, a gale or a landfall raised over either would replace the only way forward
+ * (the boats) or forfeit the prize. Only the wreck outranks the prize.
+ */
+export const interruptHoldsTheDeck = (interrupt) => interrupt?.type === 'shipwreck' || interrupt?.type === 'prize-disposition';
+
 /** Drop the warp and raise a decision for the player (lookout call, storm, land ho…). */
 export function raiseInterrupt(voyage, interrupt, dropTo = 'watch') {
+  const open = voyage.interrupt;
+  if (interruptHoldsTheDeck(open) && !(interrupt.type === 'shipwreck' && open.type !== 'shipwreck')) {
+    if (interrupt.log) addLog(voyage, interrupt.log);
+    return open;
+  }
   voyage.interrupt = { ...interrupt, dateMs: voyage.dateMs };
   const target = warpTier(dropTo);
   if (warpTier(voyage.tier).rate > target.rate) voyage.tier = target.id;
@@ -263,7 +275,8 @@ export function stepVoyage(voyage, realDt, { boat, weatherIntervalMs = 15 * 6000
   const days = gameDt / 86400;
   voyage.provisions.food = Math.max(0, voyage.provisions.food - days);
   voyage.provisions.water = Math.max(0, voyage.provisions.water - days);
-  const elapsedDays = (voyage.dateMs - voyage.startMs) / DAY_MS;
+  // Scurvy comes of weeks without fresh food: it is counted from the last port that filled the stores.
+  const elapsedDays = (voyage.dateMs - (voyage.freshStoresMs ?? voyage.startMs)) / DAY_MS;
   const scurvy = elapsedDays > 56 ? (elapsedDays - 56) * 0.004 : 0;
   const thirst = voyage.provisions.water <= 0 ? 0.06 : 0;
   const hunger = voyage.provisions.food <= 0 ? 0.03 : 0;
@@ -276,6 +289,9 @@ export function stepVoyage(voyage, realDt, { boat, weatherIntervalMs = 15 * 6000
       if (voyage.provisions[key] <= threshold && !voyage[flag]) {
         voyage[flag] = true;
         events.push({ type: 'provisions', key, days: threshold, text: `The steward reports ${threshold} days of ${label} remaining.` });
+      } else if (voyage[flag] && voyage.provisions[key] > threshold + 1) {
+        // Stores taken aboard since: the steward will speak again the next time they run this low.
+        voyage[flag] = false;
       }
     }
   }
@@ -380,8 +396,9 @@ export function voyageSnapshot(voyage) {
 }
 
 export function serializeVoyage(voyage) {
-  const { weather, ...rest } = voyage;
-  void weather;
+  // The open call is never restored, and a prize's holds the live vessel, which cannot be written.
+  const { weather, interrupt, ...rest } = voyage;
+  void weather; void interrupt;
   return JSON.stringify(rest);
 }
 export function restoreVoyage(json) {

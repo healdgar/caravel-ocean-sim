@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // The start-of-session choice: carry on the saved voyage or begin another.
 import { formatJulianDate } from './voyage/ocean-climate.js';
+import { armBeforeErasing } from './voyage/voyage-controller.js';
 
 export function careerSaveSummary(save) {
   const voyage = save?.voyage;
@@ -34,15 +35,7 @@ export function showCareerPrompt(parent, { save, onContinue, onNewVoyage }) {
     onContinue?.();
   };
   // Erasing a voyage takes a second, deliberate click.
-  newButton.onclick = () => {
-    if (newButton.dataset.armed !== '1') {
-      newButton.dataset.armed = '1';
-      newButton.textContent = 'Erase saved voyage?';
-      return;
-    }
-    close();
-    onNewVoyage?.();
-  };
+  armBeforeErasing(newButton, { prompt: 'Erase saved voyage?', onConfirm: () => { close(); onNewVoyage?.(); } });
   parent.append(backdrop);
   continueButton.focus();
   return backdrop;
@@ -73,15 +66,20 @@ export function showPortPanel(parent, port, { getDateLabel = () => '', onClose =
   const backdrop = careerEl('div', { id: 'port-panel' });
   const card = careerEl('div', { class: 'port-card', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'port-panel-title' });
   backdrop.append(card);
-  let retireArmed = false;
+  // Retiring erases the career, so it asks once more: not within the half second of a double-click, and
+  // the question lapses if it is left alone or the captain turns to other business.
+  const RETIRE_SETTLE_MS = 500, RETIRE_STAND_DOWN_MS = 6000;
+  let retireArmed = false, retireArmedAt = 0, retireTimer = null;
+  const standDownRetire = () => { clearTimeout(retireTimer); retireTimer = null; retireArmed = false; };
   const close = () => {
+    standDownRetire();
     document.removeEventListener('keydown', onKey);
     backdrop.remove();
     onClose();
   };
   const onKey = (event) => { if (event.key === 'Escape') close(); };
   document.addEventListener('keydown', onKey);
-  const act = (fn) => () => { fn(); render(); };
+  const act = (fn) => () => { standDownRetire(); fn(); render(); };
 
   function marketSection(view) {
     const money = (n) => careerMoney(view.currency, n);
@@ -147,7 +145,14 @@ export function showPortPanel(parent, port, { getDateLabel = () => '', onClose =
     return careerEl('section', { class: 'port-section' }, careerEl('h3', { text: 'Retire ashore' }),
       careerEl('p', { class: 'port-note', text: `All you own comes to ${careerMoney(view.currency, view.worth)}. Retiring ends this life at sea.` }),
       careerButton(retireArmed ? 'Leave the sea for good?' : 'Retire ashore', 'retire', false, () => {
-        if (!retireArmed) { retireArmed = true; render(); return; }
+        if (!retireArmed) {
+          retireArmed = true; retireArmedAt = performance.now();
+          retireTimer = setTimeout(() => { standDownRetire(); render(); }, RETIRE_STAND_DOWN_MS);
+          render();
+          return;
+        }
+        if (performance.now() - retireArmedAt < RETIRE_SETTLE_MS) return;
+        standDownRetire();
         document.removeEventListener('keydown', onKey);
         backdrop.remove();
         port.retire();

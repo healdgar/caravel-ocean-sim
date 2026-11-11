@@ -1025,8 +1025,19 @@ export function createDockingBoardingState(boat, options = {}) {
     return { ok: true, mode: 'fight', phase: state.boardingPhase, vessel };
   }
 
+  // The hands a company shows on deck, by how they stand: fit, hurt, or down.
+  const musterRoster = (sailors) => {
+    let able = 0, wounded = 0, fallen = 0;
+    for (const s of sailors) {
+      if (s.casualtyState === 'fallen' || s.wounded === 'incapacitated' || (s.health ?? 1) <= 0.18) fallen++;
+      else if (s.casualtyState === 'wounded' || s.wounded === 'wounded' || (s.health ?? 1) < 0.72) wounded++;
+      else able++;
+    }
+    return { able, wounded, fallen };
+  };
   function stepCrewCasualtiesAndMorale(boatObj, companyObj, casualtyPoints, moraleDrop) {
     const sailors = companyObj?.crew ?? companyObj?.sailors ?? [];
+    const before = musterRoster(sailors);
     let remaining = casualtyPoints;
     for (const s of sailors) {
       if (remaining <= 0.01) break;
@@ -1058,17 +1069,16 @@ export function createDockingBoardingState(boat, options = {}) {
       dmg.battleMorale = bdClamp((dmg.battleMorale ?? 0.9) - moraleDrop, 0.05, 1.0);
       const cas = dmg.crewCasualties ?? dmg.crew;
       if (cas) {
+        let fitOnDeck = null;
         if (sailors.length > 0) {
-          let able = 0, wounded = 0, incap = 0;
-          for (const s of sailors) {
-            if (s.casualtyState === 'fallen' || s.wounded === 'incapacitated' || (s.health ?? 1) <= 0.18) incap++;
-            else if (s.casualtyState === 'wounded' || s.wounded === 'wounded' || (s.health ?? 1) < 0.72) wounded++;
-            else able++;
-          }
-          cas.able = able;
-          cas.wounded = wounded;
-          cas.incapacitated = incap;
-          cas.killed = incap;
+          // The muster book counts every hand aboard: those lost to the guns before this fight, pressed men and
+          // new hires as well as the company on deck. So this round's losses come off it; the deck does not replace it.
+          const after = musterRoster(sailors), fell = Math.max(0, after.fallen - before.fallen);
+          cas.able = Math.max(0, (cas.able ?? after.able) - Math.max(0, before.able - after.able));
+          cas.wounded = Math.max(0, (cas.wounded ?? 0) + after.wounded - before.wounded);
+          cas.incapacitated = (cas.incapacitated ?? 0) + fell;
+          cas.killed = (cas.killed ?? 0) + fell;
+          fitOnDeck = after.able;
         } else {
           const woundCount = Math.min(cas.able ?? 0, Math.max(0, Math.round(casualtyPoints * 0.85)));
           cas.able = Math.max(0, (cas.able ?? 10) - woundCount);
@@ -1078,7 +1088,9 @@ export function createDockingBoardingState(boat, options = {}) {
           cas.killed = (cas.killed ?? 0) + fallenDelta;
         }
         cas.battleMorale = dmg.battleMorale;
-        if (dmg.battleMorale <= 0.18 || cas.able <= 1) {
+        // A beaten crew strikes. Our own colors come down only by the captain's order: a lost melee drives the
+        // boarders back to their own deck, it does not surrender the ship behind the player's back.
+        if (!boatObj.isPlayerVessel && (dmg.battleMorale <= 0.18 || (fitOnDeck ?? cas.able) <= 1)) {
           cas.surrendered = true;
           dmg.surrendered = true;
         }
@@ -1143,9 +1155,11 @@ export function createDockingBoardingState(boat, options = {}) {
         attacker: atkAfter,
         defender: defAfter,
       };
-      state.statusText = `Boarding party driven back from ${tb.name || 'enemy vessel'}! Regrouping on deck.`;
+      state.statusText = `Boarding party driven back from ${tb.shipName || tb.name || 'enemy vessel'}! Lines cut; regrouping on deck.`;
       logCombat(state.statusText);
       emit('boarding-repulsed', state.lastOutcome);
+      // Driven back, the boarders cut the grapples: the hulls must not stay lashed with the fight lost.
+      castOff();
     }
   }
 

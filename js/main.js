@@ -6,7 +6,7 @@ import {createAstronomyClock,writeAstronomyFrame} from './astronomy.js';
 import {createCelestialRenderer} from './celestial.js';
 import {withCelestialFrame,CELESTIAL_FRAME_BYTES,CELESTIAL_FRAME_FLOATS} from './wgsl/celestial.js';
 import { createSailingInstruments } from './instruments.js';
-import { controlIcon, createHelmControls } from './controls.js';
+import { controlIcon, createHelmControls, keyIsForField } from './controls.js';
 import { createSceneAudio } from './audio.js';
 import { createShipGunnery, createPortGunnery, resolveVesselCollisions, resetVesselDamageState } from './gunnery-control.js';
 import { setVesselHullIntegrity, vesselDamageSnapshot, restoreVesselDamageSnapshot } from './vessel-damage.js';
@@ -138,7 +138,9 @@ if(qs.has('reset')||qs.has('newVoyage')){
     history.replaceState(history.state,'',stripped);
   }catch{/* a sandboxed page may refuse */}
 }
-// A tab owns the save if it asked to continue, or if there is nothing yet to protect.
+// A tab owns the save if it asked to continue, or if there is nothing yet to protect. One that asks for a new voyage
+// beside a save gives the save up: it would otherwise trade on the old purse and write its voyage over the old one.
+if(qs.get('newVoyage')==='1'&&careerStore.has())careerStore.release();
 if(qs.get('continue')==='1'||!careerStore.has())careerStore.claim();
 const BROADSIDE_SCENARIO=qs.get('broadside')==='1'||qs.get('scenario')==='broadside'||qs.get('situation')==='broadside';
 const BROADSIDE_SIDE=qs.get('broadsideSide')==='port'?'port':'starboard';
@@ -1577,17 +1579,30 @@ async function main() {
   }
   spyglassCloseBtn?.addEventListener('click', () => setSpyglassActive(false));
   const keys = Object.create(null);
+  // A list chosen with the pointer hands the keyboard back to the ship; one worked from the keyboard keeps it.
+  let lastInputWasKey = false;
+  addEventListener('pointerdown', () => { lastInputWasKey = false; }, true);
+  addEventListener('change', (e) => { if (!lastInputWasKey && e.target instanceof HTMLSelectElement) e.target.blur(); });
   addEventListener('keydown', (e) => {
-    if (/INPUT|SELECT/.test(e.target.tagName)) return;
+    lastInputWasKey = true;
+    if (keyIsForField(e)) return;
+    // The port and the choice of career stop the game for an answer: no order reaches the ship from under them.
+    if (document.getElementById('port-panel') || document.getElementById('career-prompt')) return;
+    // Command, Control or Option with a key is the browser's or the system's, never an order. macOS sends no keyup for
+    // a key let go while Command is down, so pressing Command lets go of everything held.
+    if (e.code.startsWith('Meta') || e.code.startsWith('OS')) for (const k in keys) keys[k] = false;
+    if ((e.metaKey || e.ctrlKey || e.altKey) && !/^(Shift|Control|Alt|Meta|OS)/.test(e.code)) return;
     // The castle duel has the keyboard: none of the ship's or the voyage's keys act while it runs.
     if (castleDuel.active) { if (castleDuel.freeView && DUEL_FLY_KEYS.has(e.code)) keys[e.code] = true; return; }
+    // Space lifts the free camera; it must not also press whichever button was clicked last.
+    if (e.code === 'Space' && cameraMode === 'free') e.preventDefault();
     if (voyageCtl?.onKey(e)) { e.preventDefault(); return; }
     if (e.code === 'KeyM' && !e.repeat && chartDrawer) { chartDrawer.toggle(); e.preventDefault(); return; }
     if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.code) || (boat.enabled && ['KeyA','KeyD','KeyW','KeyS','KeyQ','KeyE','KeyX'].includes(e.code))) e.preventDefault();
     keys[e.code] = true;
     if (e.code === 'KeyH' && !e.repeat) togglePanel();
     if (e.code === 'KeyP' && !e.repeat) setSimPaused(!simPaused);
-    if (e.code === 'KeyX') boat.rudderTarget = 0;
+    if (e.code === 'KeyX') { voyageCtl?.manualSteering(true); boat.rudderTarget = 0; }
     if (e.code === 'KeyB' && !e.repeat) {
       if (spyglassActive) {
         spyglassPrevCameraMode = null;
@@ -1617,7 +1632,8 @@ async function main() {
     }
     if (e.code === 'KeyF' && !e.repeat && cameraMode !== 'free' && shipGuns.state.guns.length > 0) {
       const side = shipGuns.selectedSide || BROADSIDE_SIDE;
-      if (e.shiftKey) {
+      // Shift+F skips the loading drill and G fires the other ship: rehearsal keys for the broadside scenario only.
+      if (e.shiftKey && BROADSIDE_SCENARIO) {
         shipGuns.readyAtQuarters(side);
         if (crew) manGunStationsImmediate(crew.state, boat);
         shipGuns.fire(side);
@@ -1630,7 +1646,7 @@ async function main() {
       }
       gunControls?.update?.();helm?.update?.(performance.now(),true);
     }
-    if (e.code === 'KeyG' && !e.repeat && followerEnabled && vessels[1]?.gunnery?.state.guns.length > 0) {
+    if (e.code === 'KeyG' && !e.repeat && BROADSIDE_SCENARIO && followerEnabled && vessels[1]?.gunnery?.state.guns.length > 0) {
       const oppSide = BROADSIDE_SIDE === 'port' ? 'starboard' : 'port';
       vessels[1].gunnery.readyAtQuarters(oppSide);
       if (vessels[1].crew) manGunStationsImmediate(vessels[1].crew.state, vessels[1].boat);
@@ -2234,6 +2250,8 @@ async function main() {
   const moraleStatus=document.createElement('p');moraleStatus.id='crew-morale-status';moraleStatus.setAttribute('role','status');
   moraleStatus.style.cssText='margin:0;font-size:.9em;opacity:.92';
   colorsSelect.onchange=()=>{
+    // The white flag is a surrender however it is hoisted: the list does what the button does.
+    if(getShipColorsInfo(colorsSelect.value).isSurrender&&!boat.damage?.surrendered){strikeBtn.onclick();return;}
     setVesselColors(boat,colorsSelect.value);
     updateCrewUI();helm?.update?.(performance.now(),true);
   };
@@ -2278,17 +2296,12 @@ async function main() {
     dockingBoarding.castOff();
     updateCrewUI();helm?.update?.(performance.now(),true);
   };
+  // There must be a ship in sight to board: the pooled hull lying dormant over the horizon is not one.
+  const boardable=()=>followerEnabled&&vessels[1]&&!vessels[1].dormantEncounter&&vessels[1].boat?.showProw?vessels[1]:null;
   boardShipBtn.onclick=()=>{
-    if(vessels.length>1&&(!followerEnabled||!vessels[1].boat?.showProw)){
-      vessels[1].dormantEncounter=false;
-      followerEnabled=true;
-      boat.followingShip=true;
-      vessels[1].boat.showProw=true;
-      vessels[1].faction=vessels[1].faction||'enemy';
-      vessels[1].boat.faction=vessels[1].faction;
-      vessels[1].boat.colors=vessels[1].faction==='enemy'?'jolly-roger':'castile';
-    }
-    dockingBoarding.boardVessel(vessels[1]);
+    const target=boardable();
+    if(!target){voyageCtl?.showToast?.('No vessel in sight to board.',4);return;}
+    dockingBoarding.boardVessel(target);
     updateCrewUI();helm?.update?.(performance.now(),true);
   };
   sightSailBtn.onclick=()=>{
@@ -2350,7 +2363,7 @@ async function main() {
       const isCap=Boolean(tBoat?.captured);
       if(boardShipBtn){
         boardShipBtn.textContent=isCap?'🏴 Prize Captured':isSurr?'⚔️ Board & take surrendered prize':'⚔️ Grapple, board & fight';
-        boardShipBtn.disabled=isCap||dbState.boardingPhase==='boarding-melee';
+        boardShipBtn.disabled=!boardable()||isCap||dbState.boardingPhase==='boarding-melee';
       }
       if(castOffBtn){
         castOffBtn.disabled=dbState.mooringPhase==='clear'||dbState.mooringPhase==='casting-off';
@@ -2623,6 +2636,32 @@ async function main() {
       target.bakedWreck=false;target.bakingWreck=false;target.entirelySubmerged=false;
       target.pose?.updateDamage?.(target.boat);
     };
+    // A sail left to go her own way keeps her place on the sea: warp carries us on and she falls astern, and once she
+    // is hull-down the pooled hull is laid up for the next sail.
+    const PARTED_SAIL_M=6000;
+    const layUpEncounterVessel=()=>{
+      const target=vessels[1];
+      if(!target||target.dormantEncounter)return;
+      target.gunnery?.standDown?.();
+      target.dormantEncounter=true;target.currentEncounter=null;
+      if(target.follower)target.follower.encounterMode=null;
+      target.boat.showProw=false;target.boat.x=boat.x+50000;target.boat.z=boat.z+50000;
+      followerEnabled=vessels.slice(1).some(v=>!v.dormantEncounter);
+      boat.followingShip=followerEnabled;
+      if(!followerEnabled&&shipOrbit.fleet)shipOrbit.fleet=false;
+      if(fleetViewButton)fleetViewButton.disabled=!followerEnabled;
+    };
+    const passingSail=()=>{
+      const target=vessels[1];
+      return target&&!target.dormantEncounter&&target.follower?.encounterMode==='sighted'&&target.faction!=='enemy'
+        &&!voyageCtl?.pursuit?.active&&voyageCtl?.voyage?.interrupt?.type!=='sail'?target:null;
+    };
+    const carrySailAstern=(dx,dz)=>{
+      const target=passingSail();
+      if(!target)return;
+      target.boat.x-=dx;target.boat.z-=dz;
+      if(Math.hypot(target.boat.x-boat.x,target.boat.z-boat.z)>PARTED_SAIL_M)layUpEncounterVessel();
+    };
     const activateEncounterVessel=(enc,{mode='sight',keepPosition=false}={})=>{
       if(vessels.length<=1)return;
       const target=vessels[1];
@@ -2639,7 +2678,9 @@ async function main() {
       followerEnabled=true;
       boat.followingShip=true;
       if(fleetViewButton)fleetViewButton.disabled=false;
-      const isHostile=mode==='engage'?true:mode==='sight'?Boolean(enc?.apparentHostile):Boolean(enc?.actuallyHostile);
+      // A sail only sighted is nobody's enemy yet, whatever she looks like: the fight begins with the captain's answer
+      // or with hers to it, not while the lookout is still waiting for one.
+      const isHostile=mode==='engage'?true:mode==='sight'?false:Boolean(enc?.actuallyHostile);
       target.faction=isHostile?'enemy':'friendly';
       target.isPirate=Boolean(enc?.actuallyHostile);
       if(target.follower){
@@ -2721,6 +2762,7 @@ async function main() {
     voyageCtl=createVoyageController({
       boat,P,astronomy,hudParent:document.body,dock:cameraDock,storage:careerStore.voyageStorage,
       onHudOpen:()=>{setPerformanceOpen(false);setPanelOpen(false);setCaptainOpen(false);landfallUI.close();setBoatOpen(false);setCameraOpen(false);setShareOpen(false);},
+      onCallout:()=>{if(chartDrawer?.isOpen)chartDrawer.close();},
       getTerrain:()=>terrain,
       getCamera:()=>cam,
       getVessels:()=>vessels.map(v=>v.boat),
@@ -2739,6 +2781,7 @@ async function main() {
         location.href=url.href;
       },
       onSightVessel:enc=>activateEncounterVessel(enc,{mode:'sight'}),
+      onWarpCarry:carrySailAstern,
       onInspectLand:()=>setSpyglassActive(true,null,{land:true}),
       onHandLostInGale:()=>{const lost=loseHandInGale(boat,crew?.state);if(lost)refreshCrewRosterDOM();return lost;},
       onInspectEncounter:enc=>{
@@ -2791,8 +2834,12 @@ async function main() {
         const year=new Date(v.dateMs).getUTCFullYear();
         const port=nearestFoundedPort(HISTORICAL_COLONIAL_PORTS,v.true.lat,v.true.lon,year);
         if(!port)return;
+        // A scene opened beside a saved career is not that career: its wreck costs the career nothing. It starts over.
+        if(!careerStore.owned()&&careerStore.has()){location.reload();return;}
         careerStore.claim();
         careerStore.write(applyShipwreckRecovery(careerStore.read()??{},{voyage:JSON.parse(serializeVoyage(v)),damage:boat.damage,shipName:v.shipName,port}));
+        // Nothing may be saved over the recovery while the page unloads, or she would come back sunk and be wrecked twice.
+        careerStore.seal();
         const url=coastalRegionStageURL(new URL(location.pathname,location.href).href,port.id,'dock','clear',year);
         url.searchParams.set('continue','1');
         if(qs.has('ship'))url.searchParams.set('ship',qs.get('ship'));
@@ -2873,7 +2920,8 @@ async function main() {
     careerStore.setSnapshotProvider(careerSnapshot);
     const savedCareer=careerStore.read();
     const continuing=careerStore.owned()&&Boolean(savedCareer?.voyage)&&qs.get('newVoyage')!=='1';
-    if(continuing&&voyageCtl.resume()){
+    const resumedCareer=continuing&&Boolean(voyageCtl.resume());
+    if(resumedCareer){
       if(savedCareer.sovereignty)setActiveIndigenousSovereigntyState(restoreIndigenousSovereignty(savedCareer.sovereignty));
     }else if(qs.get('voyage')==='resume'||(qs.get('voyage')==='1'&&voyageCtl.hasSavedVoyage()&&qs.get('newVoyage')!=='1'))voyageCtl.resume()||voyageCtl.start();
     else if(qs.get('voyage')==='1')voyageCtl.start({difficulty:qs.get('voyageMode')==='easy'?'easy':'pilot'});
@@ -2889,7 +2937,9 @@ async function main() {
       }
       if(voyageCtl.voyage){
         const v=voyageCtl.voyage;
-        if(terrain?.region?.year&&terrain.region.year!==1550&&!qs.has('astroDate')&&!urlGameState?.voyage?.dateMs){
+        // A scene opened on another year starts in its spring. A career come into port keeps the day it has reached:
+        // the year in its address only chooses which towns stand yet.
+        if(!resumedCareer&&terrain?.region?.year&&terrain.region.year!==1550&&!qs.has('astroDate')&&!urlGameState?.voyage?.dateMs){
           v.dateMs=Date.UTC(terrain.region.year,2,24,12,0,0);
         }
         const qLat=Number(qs.get('lat')),qLon=Number(qs.get('lon'));
@@ -2979,6 +3029,10 @@ async function main() {
           eraseSavedCareer();careerStore.claim();careerPort?.reset();portDamage.clear();
         },
       });
+    }
+    // A link opened beside a saved voyage is a scene of its own. Say so, or the voyage looks lost.
+    if(location.search&&!careerStore.owned()&&savedCareer?.voyage&&qs.get('newVoyage')!=='1'){
+      voyageCtl.note('This link opens a scene of its own: nothing here is saved, and your saved voyage is untouched. Open the game without a link to continue her.',14);
     }
     updateCrewUI();
     window.oceanVoyage=voyageCtl;
@@ -3417,7 +3471,7 @@ async function main() {
         shipOrbit.panX=shipOrbit.panY=shipOrbit.panZ=0;
       }
     },
-  });
+  },()=>voyageCtl?.manualSteering(true));
   const helmReadout=document.createElement('p'); helmReadout.id='helm-readout'; boatBody.append(helmReadout);
   const centerView = document.createElement('button'); centerView.textContent = 'Look ahead';
   centerView.onclick = () => { resetDeckWalk(boat); setCameraMode('boat'); cam.yaw = 0; cam.pitch = -5.5 * D2R; setCameraOpen(false); };

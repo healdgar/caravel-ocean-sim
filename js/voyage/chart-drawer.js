@@ -1080,9 +1080,17 @@ export function createChartDrawer({ dock, landRingsUrl = 'assets/world/land.json
           if (Number.isFinite(t.rate)) b.title = `${t.rate.toLocaleString('en-US')}× time`;
           b.onclick = () => {
             onWarp?.(t.id);
-            if (getSnapshot) update(getSnapshot());
+            const now = getSnapshot?.();
+            if (now) update(now);
             if (Number(t.rate) > 1) {
-              readoutText.textContent = `Time warp: ${t.label} (${Number(t.rate).toLocaleString('en-US')}×) — press M or Esc to watch from the deck`;
+              // Say what she is doing, not what was asked: the order may be refused, or held to a slower clock.
+              const took = !now?.tier || String(now.tier) === String(t.id);
+              const running = Number.isFinite(now?.warp) ? Math.round(now.warp) : Number(t.rate);
+              readoutText.textContent = !took
+                ? `Time warp refused: ${t.label} is not safe here. The deck has the reason.`
+                : running < Number(t.rate) - 1
+                ? `Time warp: ${t.label}, held to ${running.toLocaleString('en-US')}× for now — press M or Esc to watch from the deck`
+                : `Time warp: ${t.label} (${Number(t.rate).toLocaleString('en-US')}×) — press M or Esc to watch from the deck`;
             }
           };
           return b;
@@ -1321,6 +1329,11 @@ export function createChartDrawer({ dock, landRingsUrl = 'assets/world/land.json
       e.preventDefault();
       if (drag || pinch) { drag = pinch = null; pointers.clear(); requestDraw(); }
       else { setOpen(false); button.focus({ preventScroll: true }); }
+    }
+    // M opened the chart from the deck and closes it from here: the window's own shortcut never hears this key.
+    if (e.code === 'KeyM' && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !/INPUT|SELECT|TEXTAREA/.test(e.target?.tagName ?? '')) {
+      e.preventDefault();
+      setOpen(false); button.focus({ preventScroll: true });
     }
     e.stopPropagation();
   });

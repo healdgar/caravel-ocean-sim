@@ -29,7 +29,7 @@ export function parseCareerSave(raw) {
 
 // Reads survive private windows and blocked storage: no store simply means no save.
 export function createCareerStore({ storage = null, session = null, getSnapshot = null, now = () => Date.now() } = {}) {
-  let snapshotProvider = getSnapshot;
+  let snapshotProvider = getSnapshot, sealed = false;
   const read = () => {
     try { return parseCareerSave(storage?.getItem?.(CAREER_SAVE_KEY)); } catch { return null; }
   };
@@ -44,8 +44,15 @@ export function createCareerStore({ storage = null, session = null, getSnapshot 
       try { session?.setItem?.(CAREER_SESSION_KEY, '1'); } catch { /* private window */ }
     },
     setSnapshotProvider(provider) { snapshotProvider = provider; },
+    // What was just written is final for this page: the periodic save of a ship already lost must not replace it
+    // while the next page loads.
+    seal() { sealed = true; },
+    // A tab that begins a scene of its own beside the save gives the save up, and can no longer write it.
+    release() {
+      try { session?.removeItem?.(CAREER_SESSION_KEY); } catch { /* private window */ }
+    },
     write(partial) {
-      if (!owned()) return false;
+      if (sealed || !owned()) return false;
       const merged = { ...(read() ?? createCareerSave()), ...partial, savedAtMs: now() };
       try {
         storage?.setItem?.(CAREER_SAVE_KEY, JSON.stringify(merged));

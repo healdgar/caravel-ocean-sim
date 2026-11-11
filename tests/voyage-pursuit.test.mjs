@@ -5,7 +5,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createVoyageController } from '../js/voyage/voyage-controller.js';
 
-function chase({ closeHullsInPursuit, mode }) {
+// The controller holds warp until the coastline it was promised has arrived: let that promise settle.
+const chartsAboard = () => new Promise((resolve) => setImmediate(resolve));
+
+async function chase({ closeHullsInPursuit, mode }) {
   const boat = { x: 0, z: 0, heading: 270, length: 20, surgeVelocity: 0, leewayVelocity: 0, modelId: 'nina' };
   const target = { x: 0, z: 0, heading: 180, length: 20, surgeVelocity: 0, leewayVelocity: 0, showProw: true, damage: { hullIntegrity: 1 } };
   const P = { windSpeed: 8, windDir: 135, swellHs: 1, swellDir: 0, swellLength: 80, clouds: 0.3, rain: 0, thunder: 0, haze: 1 };
@@ -26,6 +29,7 @@ function chase({ closeHullsInPursuit, mode }) {
     loadLandRings: () => Promise.resolve([]),
     loadTile: () => Promise.resolve(null),
   });
+  await chartsAboard();
   ctrl.start({ lat: 32, lon: -24 });
   assert.ok(ctrl.triggerSailEncounter(), 'a strange sail is sighted');
   ctrl.resolveInterrupt(mode);
@@ -40,8 +44,8 @@ function chase({ closeHullsInPursuit, mode }) {
   return { boat, target, ctrl, events, range, run, setRange };
 }
 
-test('a still player does not have her chase hauled alongside and boarded', () => {
-  const { events, range, run, setRange } = chase({ mode: 'board' });
+test('a still player does not have her chase hauled alongside and boarded', async () => {
+  const { events, range, run, setRange } = await chase({ mode: 'board' });
   const held = range();
   run(200); // twenty seconds with the player not moving a metre
   assert.ok(Math.abs(range() - held) < 0.01, `the chase lies where her own sailing left her (${held.toFixed(1)} m, now ${range().toFixed(1)} m)`);
@@ -58,15 +62,15 @@ test('a still player does not have her chase hauled alongside and boarded', () =
   assert.equal(events.boarded, 1, 'she boards once the hulls have truly closed inside grappling reach');
 });
 
-test('a still player does not have a ship she hails dragged into speaking range', () => {
-  const { range, run } = chase({ mode: 'hail' });
+test('a still player does not have a ship she hails dragged into speaking range', async () => {
+  const { range, run } = await chase({ mode: 'hail' });
   const held = range();
   run(200);
   assert.ok(Math.abs(range() - held) < 0.01, `the stranger keeps her distance (${held.toFixed(1)} m, now ${range().toFixed(1)} m)`);
 });
 
-test('a caller that sails no hulls and says so has the range closed for it', () => {
-  const { events, range, run } = chase({ mode: 'board', closeHullsInPursuit: true });
+test('a caller that sails no hulls and says so has the range closed for it', async () => {
+  const { events, range, run } = await chase({ mode: 'board', closeHullsInPursuit: true });
   run(200);
   assert.equal(events.boarded, 1);
   assert.ok(range() <= 46.5, `closed to ${range().toFixed(1)} m`);
