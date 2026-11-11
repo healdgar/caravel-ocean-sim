@@ -52,6 +52,22 @@ fn landStones(p:vec2f)->vec2f{
   }}
   return vec2f(tone,clamp((second-nearest)*2.6,0.0,1.0));
 }
+// A paving stone: its tone, and how well inside it this point lies, from 0 in a joint to 1 on its
+// flat top. The stones are those of landStones, but every neighbour is searched, so a street shows no
+// seam where two cells of the lattice disagree about the nearest stone, and a stone's edge is a narrow
+// rounded arris and not a slope that runs to its middle.
+fn landSetts(p:vec2f)->vec2f{
+  let base=vec2i(floor(p));
+  var nearest=9.0;var second=9.0;var tone=0.0;
+  for(var j=-1;j<2;j++){for(var i=-1;i<2;i++){
+    let cell=base+vec2i(i,j);
+    let h=pcgHash(u32(cell.x)*1664525u+pcgHash(u32(cell.y)+1013904223u));
+    let offset=vec2f(cell)+.5+(vec2f(f32(h&255u),f32((h>>8u)&255u))/255.0-.5)*.8-p;
+    let r=sqrt(dot(offset,offset))*(.72+f32(h>>24u)/255.0*.56);
+    if(r<nearest){second=nearest;nearest=r;tone=f32((h>>16u)&255u)/127.5-1.0;}else if(r<second){second=r;}
+  }}
+  return vec2f(tone,smoothstep(0.0,0.62,(second-nearest)*2.6));
+}
 // Three stone sizes, turned against each other so no lattice shows. The two finer sizes
 // track the pixel footprint: grit up close, talus far away. Anchored to the world so
 // nothing swims; the crossfade hides each change of size.
@@ -1248,12 +1264,39 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
             surface=mix(surface,albedo,rutted*smoothstep(1.55,2.1,-frayed+fringe*1.4)*gd.near*.9);
           }
           if(paved>0.0){
-            let cobbleTone=gd.fine.g*0.38+gd.mid.g*0.32+gd.mid.b*0.24;
-            let mortarMix=clamp(-(gd.fine.b*0.8+gd.mid.b*0.6),0.0,0.48);
-            let macroTone=wear*.12+gd.big.a*.28+gd.mid.a*.24+gd.mid.b*.22+gd.fine.a*.32;
-            let setts=vec3f(.236,.214,.189)*(1.0+macroTone+cobbleTone)*(1.0-mortarMix);
+            // Setts, stone by stone, a foot across. Where a pixel is too coarse to hold them, stones two
+            // and a half times the size stand in, turned so the two lattices never line up; the two are
+            // never laid over each other. A pixel on a street seen along its length is far longer than
+            // it is wide, so a size is read twice along that length and fades by the pixel's narrow
+            // side: the stones stay sharp down the street and never shimmer. Their relief, which also
+            // feeds the highlight, fades by the long side.
+            let lx=length(dx.xz);let ly=length(dy.xz);
+            let majorXZ=select(dy.xz,dx.xz,lx>=ly);
+            let roadFoot=max(min(lx,ly),max(lx,ly)*0.28);
+            let anisoFoot=max(lx,ly);
+            let streetGrazing=smoothstep(0.04,0.18,max(n.y,0.0));
+            let stoneFineFade=(1.0-smoothstep(0.042,0.115,roadFoot))*streetGrazing;
+            let stoneMidFade=(1.0-smoothstep(0.095,0.260,roadFoot))*streetGrazing;
+            let stoneBumpFade=(1.0-smoothstep(0.018,0.055,anisoFoot))*streetGrazing;
+            let midWeight=stoneMidFade*(1.0-stoneFineFade);
+            var stonesFine=vec2f(0.0,1.0);
+            if(stoneFineFade>0.0){
+              stonesFine=0.5*(landSetts((world.xz-majorXZ*0.25)*3.4)+landSetts((world.xz+majorXZ*0.25)*3.4));
+            }
+            var stonesMid=vec2f(0.0,1.0);
+            if(midWeight>0.0){
+              let p0=world.xz-majorXZ*0.25;
+              let p1=world.xz+majorXZ*0.25;
+              let qMid0=vec2f(p0.x*0.8-p0.y*0.6,p0.x*0.6+p0.y*0.8)*1.35+vec2f(17.3,41.7);
+              let qMid1=vec2f(p1.x*0.8-p1.y*0.6,p1.x*0.6+p1.y*0.8)*1.35+vec2f(17.3,41.7);
+              stonesMid=0.5*(landSetts(qMid0)+landSetts(qMid1));
+            }
+            let toneMix=stonesFine.x*0.22*stoneFineFade+stonesMid.x*0.18*midWeight;
+            let mortarMix=(1.0-stonesFine.y)*0.46*stoneFineFade+(1.0-stonesMid.y)*0.34*midWeight;
+            let macroTone=wear*.12+gd.big.a*.28+gd.mid.a*.24+gd.mid.b*.22+gd.fine.a*.32*stoneFineFade;
+            let setts=vec3f(.236,.214,.189)*(1.0+macroTone+toneMix)*(1.0-mortarMix);
             surface=mix(surface,setts,paved);
-            let bumpVal=(gd.fine.b*0.032+gd.mid.b*0.024+gd.fine.g*0.018)*(1.0-smoothstep(0.018,0.065,footprint));
+            let bumpVal=(stonesFine.y-.6)*.016*stoneBumpFade+(stonesMid.y-.6)*.02*midWeight*(1.0-stoneBumpFade)+gd.mid.b*.012;
             surfaceRelief=mix(surfaceRelief,bumpVal,paved);
           }
           albedo=mix(albedo*(1.0-trodden*.2),surface,onWay);
