@@ -13,6 +13,8 @@ const CONTROL_ICONS = {
   ship:'<path d="M12 2v14M10 4 4 13h6M14 6l5 7h-5M3 17h18l-3 4H6Z"/>',
   share:'<path d="M12 16V3m-4 4 4-4 4 4M6 11H4v10h16V11h-2"/>',
   close:'<path d="m6 6 12 12M18 6 6 18"/>',
+  fold:'<path d="m6 15 6-6 6 6"/>',
+  unfold:'<path d="m6 9 6 6 6-6"/>',
   port:'<path d="m14 5-7 7 7 7"/>',
   starboard:'<path d="m10 5 7 7-7 7"/>',
   centre:'<circle cx="12" cy="12" r="6"/><path d="M12 3v4m0 10v4M3 12h4m10 0h4"/>',

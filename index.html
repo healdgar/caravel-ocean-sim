@@ -211,6 +211,13 @@
   #voyage-hud .voyage-beat,#voyage-hud .voyage-canvas-label { display:flex; align-items:center; gap:4px; font:12px system-ui,sans-serif; color:#d9c39b; }
   #voyage-hud select { min-height:30px; font-size:12px; }
   #voyage-hud .voyage-status { font:12px system-ui,sans-serif; color:#cdbb98; justify-content:space-between; }
+  #scene-notice { position:fixed; z-index:45; top:calc(max(var(--controls-bottom),var(--voyage-hud-bottom,0px)) + 8px); left:50%; transform:translateX(-50%); box-sizing:border-box; width:440px; max-width:calc(100vw - 24px); padding:14px 16px; border:1.5px solid var(--ww-hud-brass,#e9cf9a); border-radius:var(--ww-hud-radius,12px); background:var(--ww-hud-bg,#2a2115); box-shadow:0 12px 36px rgba(0,0,0,.6); color:var(--ww-hud-parchment,#f0e4ca); font:14px/1.4 Georgia,serif; }
+  #scene-notice h2 { margin:0 0 6px; font-size:17px; font-weight:normal; text-wrap:var(--ww-title-wrap,balance); }
+  #scene-notice p { margin:0 0 8px; color:var(--ww-hud-body,#cdbb98); text-wrap:var(--ww-body-wrap,pretty); }
+  #scene-notice .scene-saved { color:var(--ww-hud-parchment,#f0e4ca); }
+  #scene-notice .scene-actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:12px; }
+  #scene-notice button { min-height:44px; padding:6px 16px; border:1px solid #c9a46a; border-radius:7px; background:#1c1a14; color:#f0e4ca; font:14px Georgia,serif; cursor:pointer; }
+  #scene-notice .scene-continue { background:#c9a46a; color:#1c1a14; }
   #career-prompt { position:fixed; inset:0; z-index:60; display:flex; align-items:center; justify-content:center; padding:16px; background:rgba(8,12,18,.62); }
   #career-prompt .career-card { max-width:440px; padding:20px 22px; border:1.5px solid var(--ww-hud-brass,#e9cf9a); border-radius:var(--ww-hud-radius,12px); background:var(--ww-hud-bg,#2a2115); backdrop-filter:blur(var(--ww-hud-glass-blur,12px)); box-shadow:0 18px 48px rgba(0,0,0,.65),inset 0 0 0 1px var(--ww-hud-brass-subtle,rgba(200,155,60,.32)); color:var(--ww-hud-parchment,#f0e4ca); font:15px Georgia,serif; }
   #career-prompt h2 { margin:0 0 8px; font-size:21px; font-weight:normal; text-wrap:var(--ww-title-wrap,balance); }
@@ -253,6 +260,17 @@
   #voyage-hud .voyage-toast { margin:0; font-size:13px; font-style:italic; color:#f1e3c4; }
   /* Wide windows: the free run between the instruments (ends at 356px) and the icon dock, centred when it fits. */
   @media (min-width:1160px) and (min-height:581px) and (not (pointer:coarse)) { #voyage-hud { top:calc(var(--view-top,0px) + 10px); left:max(364px,calc(50vw - 270px)); transform:none; width:min(540px,calc(100vw - var(--dock-width,392px) - 20px - max(364px,calc(50vw - 270px)))); max-height:calc(var(--view-height) - 20px); } }
+  /* Roomy screens: the HUD is a drawer at the head of the screen. Folded, it is a bar with the date and the handle that
+     opens it; a lookout's call opens it and its answer folds it again. The query is the compact one below, negated. */
+  @media (min-width:721px) and (min-height:581px) and (not (pointer:coarse)) {
+    #voyage-hud .voyage-clock { padding-right:34px; }
+    #voyage-hud .voyage-hide { display:inline-flex; position:absolute; top:5px; right:6px; width:26px; height:26px; min-height:26px; padding:4px; }
+    #voyage-hud:not([data-expanded=true]) { width:max-content; max-width:min(540px,calc(100vw - 24px)); }
+    #voyage-hud:not([data-expanded=true]) > :not(.voyage-clock):not(.voyage-toast) { display:none; }
+    #voyage-hud:not([data-expanded=true]) .voyage-clock { cursor:pointer; gap:2px 14px; }
+    #voyage-hud:not([data-expanded=true])[data-alert=true] { border-color:var(--gold); }
+  }
+  @media (min-width:1160px) and (min-height:581px) and (not (pointer:coarse)) { #voyage-hud:not([data-expanded=true]) { right:calc(var(--dock-width,392px) + 20px); margin-inline:auto; max-width:min(540px,calc(100vw - var(--dock-width,392px) - 20px - max(364px,calc(50vw - 270px)))); } }
   /* Compact screens have no room beside the helm, so the HUD is a panel opened from the dock like the others.
      Keep this query in step with HUD_COMPACT_QUERY in js/voyage/voyage-controller.js. */
   @media (max-width:720px), (pointer:coarse), (max-height:580px) {

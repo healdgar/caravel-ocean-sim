@@ -41,6 +41,26 @@ export function showCareerPrompt(parent, { save, onContinue, onNewVoyage }) {
   return backdrop;
 }
 
+// A scene opened beside a saved voyage. The player sees a ship that is not theirs and may think the voyage lost:
+// say what this is, that it saves nothing and harms nothing, and offer the way back.
+export function showSceneNotice(parent, { save, onContinue, onStay }) {
+  const notice = document.createElement('section');
+  notice.id = 'scene-notice';
+  notice.setAttribute('aria-labelledby', 'scene-notice-title');
+  notice.innerHTML = `<h2 id="scene-notice-title">This is a separate scene, not your saved voyage</h2>
+    <p class="scene-what">The address you opened starts the game at a set ship, place or weather. Nothing you do here is saved, and your saved voyage stays exactly as you left it.</p>
+    <p class="scene-saved"></p>
+    <div class="scene-actions">
+      <button type="button" class="scene-continue">Continue saved voyage</button>
+      <button type="button" class="scene-stay">Stay in this scene</button>
+    </div>`;
+  notice.querySelector('.scene-saved').textContent = `Saved voyage: ${careerSaveSummary(save)}`;
+  notice.querySelector('.scene-continue').onclick = () => { notice.remove(); onContinue?.(); };
+  notice.querySelector('.scene-stay').onclick = () => { notice.remove(); onStay?.(); };
+  parent.append(notice);
+  return notice;
+}
+
 const careerEl = (tag, props = {}, ...children) => {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(props)) {

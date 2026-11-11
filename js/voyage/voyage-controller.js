@@ -131,6 +131,14 @@ export function createVoyageController(cfg) {
   // Keep in step with the compact HUD media query in index.html.
   const HUD_COMPACT_QUERY = '(max-width:720px),(pointer:coarse),(max-height:580px)';
   const HUD_RIVAL_PANELS = ['sea-settings-open', 'ship-settings-open', 'captain-open', 'landfall-open', 'camera-open', 'performance-open', 'share-open'];
+  // On roomier screens the panel is a drawer at the head of the screen. It stays as the player left it, and a folded
+  // one comes down by itself only for a call that needs an answer.
+  const HUD_FOLDED_KEY = 'waterworld.voyageHud.folded';
+  const hudCompact = () => matchMedia(HUD_COMPACT_QUERY).matches;
+  // Not `storage`: that one holds the voyage alone, whatever key it is handed.
+  const hudPrefs = () => { try { return globalThis.localStorage ?? null; } catch { return null; } };
+  const hudFolded = () => { try { return hudPrefs()?.getItem(HUD_FOLDED_KEY) === '1'; } catch { return false; } };
+  const hudRestsOpen = () => !hudCompact() && !hudFolded();
   let hudExpanded = false, hudAutoExpanded = false;
 
   let voyage = null;
@@ -229,10 +237,21 @@ export function createVoyageController(cfg) {
     // A choice is one press. Each new call takes the focus as it appears, so a key still held from
     // answering the last one would otherwise answer it too.
     root.querySelector('.voyage-callout').addEventListener('keydown', (e) => { if (e.repeat && (e.key === 'Enter' || e.key === ' ')) e.preventDefault(); });
+    // One handle shuts the panel and, where it folds to a bar rather than away, opens it again.
     const hide = controlIcon(document.createElement('button'), 'close', 'Hide voyage');
     hide.classList.add('voyage-hide');
-    hide.onclick = () => { setHudExpanded(false); toggle?.focus(); };
+    hide.setAttribute('aria-controls', 'voyage-hud');
+    const foldByHand = (open) => {
+      setHudExpanded(open);
+      if (hudCompact()) { if (!open) toggle?.focus(); return; }
+      try { hudPrefs()?.setItem(HUD_FOLDED_KEY, open ? '0' : '1'); } catch { /* storage may be blocked */ }
+    };
+    hide.onclick = () => foldByHand(!hudExpanded);
     root.querySelector('.voyage-clock').append(hide);
+    // The folded bar opens from anywhere on it.
+    root.addEventListener('click', (e) => { if (!hudExpanded && !hudCompact() && e.target.closest('.voyage-clock') && !e.target.closest('button')) foldByHand(true); });
+    // A screen that changes kind (a turned tablet, a resized window) takes that kind's resting state, and keeps a call in view.
+    matchMedia(HUD_COMPACT_QUERY).addEventListener?.('change', () => { if (!root.hidden) restHud(); });
     // Compact screens open this panel from the dock, as they do every other panel.
     const toggle = dock ? controlIcon(document.createElement('button'), 'voyage', 'Voyage') : null;
     if (toggle) {
@@ -249,7 +268,7 @@ export function createVoyageController(cfg) {
     hudBounds.observe(root);
     hudBounds.observe(document.documentElement);
     new MutationObserver(() => {
-      if (hudExpanded && HUD_RIVAL_PANELS.some((c) => document.body.classList.contains(c))) setHudExpanded(false);
+      if (hudExpanded && hudCompact() && HUD_RIVAL_PANELS.some((c) => document.body.classList.contains(c))) setHudExpanded(false);
     }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
     const warpBox = root.querySelector('.voyage-warp');
     const warpButtons = new Map();
@@ -291,23 +310,37 @@ export function createVoyageController(cfg) {
         },
       });
     }
-    return { root, toggle, warpButtons, canvasSel, beat, resetBtn };
+    return { root, toggle, hide, warpButtons, canvasSel, beat, resetBtn };
   }
 
   function setHudVisible(visible) {
     if (!hud) return;
+    const shown = !hud.root.hidden;
     hud.root.hidden = !visible;
     if (hud.toggle) hud.toggle.hidden = !visible;
     if (!visible) setHudExpanded(false);
+    else if (!shown) restHud();
+  }
+
+  // The panel as it stands when nothing calls for it: open on a roomy screen unless the player folded it, shut on a
+  // compact one. A call still waiting for its answer keeps it open, and lets it fold again once answered.
+  function restHud() {
+    if (!hud) return;
+    const calling = !hud.root.querySelector('.voyage-callout').hidden;
+    const open = hudRestsOpen();
+    setHudExpanded(open || calling);
+    hudAutoExpanded = calling && !open;
   }
 
   function setHudExpanded(open) {
     if (!hud) return;
     hudAutoExpanded = false;
-    if (open && !hudExpanded && matchMedia(HUD_COMPACT_QUERY).matches) cfg.onHudOpen?.();
+    const compact = hudCompact();
+    if (open && !hudExpanded && compact) cfg.onHudOpen?.();
     hudExpanded = open;
     hud.root.dataset.expanded = String(open);
     hud.toggle?.setAttribute('aria-expanded', String(open));
+    controlIcon(hud.hide, open ? (compact ? 'close' : 'fold') : 'unfold', open ? 'Hide voyage' : 'Show voyage');
     document.body.classList.toggle('voyage-open', open);
     if (open) hud.root.scrollTop = 0;
   }
@@ -1791,10 +1824,10 @@ export function createVoyageController(cfg) {
     const purse = cfg.purseLabel?.();
     r.querySelector('.voyage-stores').textContent = `Water ${Math.ceil(voyage.provisions.water)} d · Food ${Math.ceil(voyage.provisions.food)} d${purse ? ` · ${purse}` : ''}`;
     if (hud.beat.checked !== helmsman.beat) hud.beat.checked = helmsman.beat;
-    if (hud.toggle) {
-      const alert = String(Boolean(voyage.interrupt) || voyage.rate > 1);
-      if (hud.toggle.dataset.alert !== alert) hud.toggle.dataset.alert = alert;
-    }
+    // Shut, the panel still says that time is running fast or that a call waits.
+    const alert = String(Boolean(voyage.interrupt) || voyage.rate > 1);
+    if (hud.toggle && hud.toggle.dataset.alert !== alert) hud.toggle.dataset.alert = alert;
+    if (hud.root.dataset.alert !== alert) hud.root.dataset.alert = alert;
   }
 
   function onKey(e) {

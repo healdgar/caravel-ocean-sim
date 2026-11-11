@@ -16,7 +16,7 @@ import {lookoutEyeHeight} from './voyage/landfall-approach.js';
 import { serializeVoyage, normaliseVoyageEra } from './voyage/passage.js';
 import { resetActiveIndigenousSovereigntyState } from './indigenous-sovereignty.js';
 import { coastalRegionStageURL } from './landfall.js';
-import { showCareerPrompt, showPortPanel, showCareerEnding, careerMoney } from './career-ui.js';
+import { showCareerPrompt, showSceneNotice, showPortPanel, showCareerEnding, careerMoney } from './career-ui.js';
 import { NEW_WORLD_ERA } from './career-era.js';
 import { createCareerPort } from './career-port.js';
 import { cargoCapacityTonnes } from './career-trade.js';
@@ -1439,6 +1439,7 @@ async function main() {
     body.spyglass-active #voyage-hud {
       left: 14px !important;
       transform: none !important;
+      right: auto !important;
       max-width: 390px !important;
       z-index: 25 !important;
     }
@@ -3021,23 +3022,31 @@ async function main() {
       try{history.replaceState(null,'',cleaned);}catch{/* standalone file */}
     }
     // A fresh visit with a saved voyage chooses before anything can overwrite it.
+    const continueSavedVoyage=()=>{
+      careerStore.claim();
+      const url=new URL(savedCareer.url??location.pathname,location.href);
+      url.searchParams.set('continue','1');
+      location.href=url.href;
+    };
     if(!location.search&&!careerStore.owned()&&savedCareer?.voyage){
       showCareerPrompt(document.body,{
         save:savedCareer,
-        onContinue:()=>{
-          careerStore.claim();
-          const url=new URL(savedCareer.url??location.href,location.href);
-          url.searchParams.set('continue','1');
-          location.href=url.href;
-        },
+        onContinue:continueSavedVoyage,
         onNewVoyage:()=>{
           eraseSavedCareer();careerStore.claim();careerPort?.reset();portDamage.clear();
         },
       });
     }
-    // A link opened beside a saved voyage is a scene of its own. Say so, or the voyage looks lost.
-    if(location.search&&!careerStore.owned()&&savedCareer?.voyage&&qs.get('newVoyage')!=='1'){
-      voyageCtl.note('This link opens a scene of its own: nothing here is saved, and your saved voyage is untouched. Open the game without a link to continue her.',14);
+    // An address that names its own scene, opened beside a saved voyage, is not that voyage. Say so and offer the way
+    // back, or the voyage looks lost. Once the player chooses to stay, this tab is not told again.
+    const SCENE_NOTICE_KEY='waterworld.sceneNotice.stayed';
+    const stayedInScene=()=>{try{return sessionStorage.getItem(SCENE_NOTICE_KEY)==='1';}catch{return false;}};
+    if(location.search&&!careerStore.owned()&&savedCareer?.voyage&&qs.get('newVoyage')!=='1'&&!stayedInScene()){
+      showSceneNotice(document.body,{
+        save:savedCareer,
+        onContinue:continueSavedVoyage,
+        onStay:()=>{try{sessionStorage.setItem(SCENE_NOTICE_KEY,'1');}catch{/* private browsing may refuse */}},
+      });
     }
     updateCrewUI();
     window.oceanVoyage=voyageCtl;
@@ -3188,6 +3197,7 @@ async function main() {
   addEventListener('keydown',e=>{
     if(e.key!=='Escape')return;
     keyList.hidden=true;
+    document.querySelector('#scene-notice .scene-stay')?.click();
     if(!boatPanel.hidden)collapseBoat.click();
     if(!cameraPanel.hidden)cameraClose.click();
     if(!panel.classList.contains('hidden'))hideSea.click();

@@ -107,15 +107,42 @@ test('losing the ship takes you to the nearest port, and a saved voyage survives
     assert.equal(await second.page.locator('#career-prompt').count(),0);
     const resumed=await second.page.evaluate(()=>{const b=window.oceanFleet.vessels[0].boat,v=window.oceanVoyage.voyage;return {hull:b.damage.hullIntegrity,able:b.damage.crewCasualties.able,log:v.log.map(l=>l.text)};});
     assert.equal(resumed.hull,.7);assert.equal(resumed.able,12);assert.ok(resumed.log.some(t=>/survivors reached/.test(t)));
+    // Folding the voyage panel away is remembered, and costs the saved voyage nothing.
+    await second.page.getByRole('button',{name:'Hide voyage',exact:true}).click();
+    assert.equal(await second.page.locator('#voyage-hud .voyage-orders').isVisible(),false);
+    assert.deepEqual(await second.page.evaluate(()=>[localStorage.getItem('waterworld.voyageHud.folded'),JSON.parse(localStorage.getItem('waterworld.career.v1')).voyage.shipName]),['1','Niña']);
+    await second.page.reload();await ready(second.page);
+    assert.equal(await second.page.locator('#voyage-hud .voyage-orders').isVisible(),false,'she comes back folded');
+    await second.page.locator('#voyage-hud .voyage-date').click();
+    assert.equal(await second.page.locator('#voyage-hud .voyage-orders').isVisible(),true,'and the bar opens her');
+    assert.deepEqual(await second.page.evaluate(()=>[localStorage.getItem('waterworld.voyageHud.folded'),JSON.parse(localStorage.getItem('waterworld.career.v1')).voyage.shipName]),['0','Niña']);
     assert.deepEqual(second.errors,[]);
     await second.page.close();
     // A scenario link in another tab cannot touch it.
     const scenario=await open(context,'/?region=havana&landfall=coast&boat=1');
     assert.equal(await scenario.page.locator('#career-prompt').count(),0);
+    // It says what the scene is and that the saved voyage is safe, and names that voyage.
+    const notice=scenario.page.locator('#scene-notice');
+    assert.match(await notice.textContent(),/not your saved voyage[\s\S]*Nothing you do here is saved[\s\S]*stays exactly as you left it/);
+    assert.match(await notice.locator('.scene-saved').textContent(),/Saved voyage: Niña.*1 ship lost/);
+    await notice.locator('.scene-stay').click();
+    assert.equal(await notice.count(),0);
     await sightSail(scenario.page);await scenario.page.waitForTimeout(6500);
     assert.equal(await scenario.page.evaluate(()=>JSON.parse(localStorage.getItem('waterworld.career.v1')).career.shipsLost),1);
     assert.ok(await scenario.page.evaluate(()=>JSON.parse(localStorage.getItem('waterworld.career.v1')).voyage.log.some(l=>/survivors reached/.test(l.text))));
+    await scenario.page.reload();await ready(scenario.page);
+    assert.equal(await notice.count(),0,'a tab that chose to stay is not told again');
     await scenario.page.close();
+    // Its other button goes back to the saved voyage.
+    const back=await open(context,'/?region=havana&landfall=coast&boat=1');
+    await back.page.locator('#scene-notice .scene-continue').click();
+    await back.page.waitForURL(url=>url.searchParams.get('continue')==='1',{timeout:60000});await ready(back.page);
+    assert.equal(await back.page.locator('#scene-notice').count(),0);
+    assert.equal(await back.page.locator('#career-prompt').count(),0);
+    const returned=await back.page.evaluate(()=>{const b=window.oceanFleet.vessels[0].boat,v=window.oceanVoyage.voyage;return {hull:b.damage.hullIntegrity,able:b.damage.crewCasualties.able,log:v.log.map(l=>l.text)};});
+    assert.equal(returned.hull,.7);assert.equal(returned.able,12);assert.ok(returned.log.some(t=>/survivors reached/.test(t)));
+    assert.deepEqual(back.errors,[]);
+    await back.page.close();
     // Only an explicit second click erases it.
     const third=await open(context);
     const erase=third.page.locator('.career-new');

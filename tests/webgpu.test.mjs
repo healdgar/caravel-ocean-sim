@@ -1807,7 +1807,7 @@ test('compact helm and icon panels remain reachable across phone, tablet and des
   }finally{await page.close();}
 });
 
-test('voyage panel leaves the helm alone: a dock panel on compact screens, clear of the icons on desktop', {timeout:120000}, async()=>{
+test('voyage panel leaves the helm alone: a dock panel on compact screens, a folding drawer clear of the icons on desktop', {timeout:120000}, async()=>{
   const page=await browser.newPage({viewport:{width:320,height:360}});
   try{
     await page.addInitScript(instrumentRenderer);
@@ -1860,6 +1860,21 @@ test('voyage panel leaves the helm alone: a dock panel on compact screens, clear
         return {dock:overlap(hud,dock),instruments:overlap(hud,instruments),helm:overlap(hud,helm),watch:rect('#voyage-hud .voyage-watch').right<=dock.left||rect('#voyage-hud .voyage-watch').top>=dock.bottom,scene:document.elementsFromPoint(innerWidth/2,innerHeight/2).filter(el=>!el.closest('#landfall-discovery-banner')).map(el=>el.id||`${el.tagName}.${el.className}:${(el.textContent||'').trim().slice(0,40)}`)[0]};
       });
       assert.deepEqual(box,{dock:false,instruments:false,helm:false,watch:true,scene:'c'},JSON.stringify({width,height}));
+      // Folded, the panel is a bar holding the date and its handle, clear of the icons and the instruments.
+      await page.getByRole('button',{name:'Hide voyage',exact:true}).click();
+      const folded=await page.evaluate(()=>{
+        const rect=s=>document.querySelector(s).getBoundingClientRect(),hud=rect('#voyage-hud'),dock=rect('#camera-dock'),instruments=rect('#sailing-instruments');
+        const overlap=(a,b)=>a.left<b.right&&b.left<a.right&&a.top<b.bottom&&b.top<a.bottom;
+        return {shown:[...document.getElementById('voyage-hud').children].filter(child=>getComputedStyle(child).display!=='none'&&!child.classList.contains('voyage-toast')).map(child=>child.className),dock:overlap(hud,dock),instruments:overlap(hud,instruments),inView:hud.left>=0&&hud.right<=innerWidth};
+      });
+      assert.deepEqual(folded,{shown:['voyage-row voyage-clock'],dock:false,instruments:false,inView:true},JSON.stringify({width,height}));
+      // A lookout call brings it down, its answer folds it again, and the handle opens it by hand.
+      await page.evaluate(()=>{oceanVoyage.triggerSailEncounter();});
+      assert.equal(await page.locator('.voyage-callout').isVisible(),true,'a call opens the folded panel');
+      await page.locator('.voyage-callout button').last().click();
+      assert.equal(await page.locator('#voyage-hud .voyage-orders').isVisible(),false,'and its answer folds it again');
+      await page.getByRole('button',{name:'Show voyage',exact:true}).click();
+      assert.equal(await page.locator('#voyage-hud .voyage-orders').isVisible(),true);
     }
     assert.deepEqual(await page.evaluate(()=>check.errors),[]);
   }finally{await page.close();}
