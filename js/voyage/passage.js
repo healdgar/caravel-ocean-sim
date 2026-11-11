@@ -244,6 +244,11 @@ export function stepVoyage(voyage, realDt, { boat, weatherIntervalMs = 15 * 6000
   voyage.latUncNm += loggedNm * 0.05 + hours * 0.12;
   voyage.lonUncNm += loggedNm * 0.07 + hours * 0.18;
 
+  // A date set backward (the sky panel can do it) leaves both sampling clocks in her future, where neither would
+  // fire again until the calendar caught them up: bring them back, so the track and the weather keep running.
+  if (voyage.trackSampleMs > voyage.dateMs) voyage.trackSampleMs = voyage.dateMs - 30 * 60000;
+  if (voyage.weatherSampleMs > voyage.dateMs) voyage.weatherSampleMs = -Infinity;
+
   // --- Track sampling (every 30 voyage-minutes, and always on the first sample).
   if (voyage.dateMs - voyage.trackSampleMs >= 30 * 60000) {
     voyage.trackSampleMs = voyage.dateMs;

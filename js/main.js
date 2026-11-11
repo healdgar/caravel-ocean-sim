@@ -3112,7 +3112,20 @@ async function main() {
       return false;
     };
     const mooredAtPier=()=>dockingBoarding.state.mooringPhase==='moored'&&dockingBoarding.state.mooringTargetKind==='pier';
+    // The button keeps its place above the helm panel and the look hint, and rises with the panel when battle quarters
+    // or a narrow screen make it taller than that place allows for.
+    const PORT_CALL_BOTTOM=206,PORT_CALL_CLEARANCE=51;
+    let portCallLifted=false;
+    const liftPortCall=()=>{
+      const helmBox=document.getElementById('helm-controls')?.getBoundingClientRect();
+      const lift=helmBox?.height?Math.max(PORT_CALL_BOTTOM,Math.round(innerHeight-helmBox.top+PORT_CALL_CLEARANCE)):PORT_CALL_BOTTOM;
+      portCallButton.style.setProperty('--port-call-bottom',lift+'px');
+    };
     const updatePortCall=()=>{
+      if(!portCallLifted){
+        const helmPanel=document.getElementById('helm-controls');
+        if(helmPanel){portCallLifted=true;new ResizeObserver(liftPortCall).observe(helmPanel);addEventListener('resize',liftPortCall);}
+      }
       const able=!portPanel&&!portDeparting&&careerStore.owned()&&!voyageCtl?.isBattleActive?.()&&!boat.damage?.sunk&&!boat.damage?.surrendered;
       const atQuay=able&&nearPortBuildings()?careerPort.here:null,offPort=able&&!atQuay?pilotablePort():null;
       const port=atQuay??offPort;

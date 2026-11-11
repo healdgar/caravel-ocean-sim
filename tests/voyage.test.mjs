@@ -1094,3 +1094,17 @@ test('lay to until first light waits for the dawn where she lies, whatever the h
   assert.ok(waitedH > 10 && waitedH < 16, `she lay to through the long night (${waitedH.toFixed(1)} h)`);
   assert.ok(sun > -6 && sun < 4, `and it is first light, the Sun ${sun.toFixed(1)}° from the horizon`);
 });
+
+test('a date set backward does not stop the track or the weather', () => {
+  const voyage = createVoyage({ lat: 30, lon: -30, dateMs: Date.UTC(1550, 5, 1, 12), seed: 7, compassCourse: 250 });
+  const boat = { heading: 250, surgeVelocity: 3.5, leewayVelocity: 0.1 };
+  stepVoyage(voyage, 0.1, { boat });
+  // The sky panel can set the calendar anywhere in her era: here, five days earlier.
+  voyage.dateMs -= 5 * 86400000;
+  voyage.tier = 'crossing';
+  voyage.rate = 3600;
+  const points = voyage.trueTrack.length;
+  for (let i = 0; i < 40; i++) stepVoyage(voyage, 0.25, { boat });
+  assert.ok(voyage.trueTrack.length > points + 5, `the track goes on being drawn (${voyage.trueTrack.length - points} new points in ten hours)`);
+  assert.ok(voyage.weatherSampleMs <= voyage.dateMs && voyage.dateMs - voyage.weatherSampleMs < 3600000, 'and the weather is sampled on her new calendar');
+});
