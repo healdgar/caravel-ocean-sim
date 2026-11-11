@@ -128,5 +128,10 @@ for(const path of ['/', '/docs/index.html'])for(const viewport of [{width:1140,h
     await stats.click();for(let i=0;i<12;i++)await statsStep(page,.025);const faster=await statsLayout(page);assert.notEqual(faster.summary,first.summary,'FPS and frame-work text update from live frames');assertStatsLayout(faster);
     await page.setViewportSize(mobile?{width:360,height:640}:{width:980,height:720});for(let i=0;i<8;i++)await statsStep(page,.05);const resized=await statsLayout(page);assertStatsLayout(resized);assert.notDeepEqual(resized.canvas,first.canvas,'actual render dimensions follow viewport resizing');assert.ok(resized.summary.includes(`${resized.canvas.width} × ${resized.canvas.height} pixels`),'Stats reports actual resized GPU output');
     await page.keyboard.press('Escape');assert.equal(await page.locator('#performance-panel').isVisible(),false);assert.equal(await stats.getAttribute('aria-expanded'),'false');assert.equal(await stats.evaluate(element=>document.activeElement===element),true,'closing restores keyboard focus');assert.deepEqual(errors,[]);
+    // The ? key shows every key on a card and puts it away again, and Escape puts it away too.
+    const keyList=page.locator('#key-list');assert.equal(await keyList.isVisible(),false,'the key list starts shut');
+    await page.keyboard.press('?');assert.equal(await keyList.isVisible(),true,'? shows the key list');assert.match(await keyList.textContent(),/Keep her so/);
+    await page.keyboard.press('?');assert.equal(await keyList.isVisible(),false,'? puts it away');
+    await page.keyboard.press('?');await page.keyboard.press('Escape');assert.equal(await keyList.isVisible(),false,'Escape puts it away');
   }finally{await page.close();}
 });

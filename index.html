@@ -34,7 +34,14 @@
   .icon-button svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.65; stroke-linecap:round; stroke-linejoin:round; }
   #hud { display:none; position:fixed; bottom:124px; left:14px; max-width:calc(100vw - 28px); font:10px/1.4 ui-monospace,monospace; color:var(--muted); pointer-events:none; text-shadow:0 1px 2px #000; }
   .show-performance #hud { display:block; }
-  #hud .help { display:none; }
+  /* Every key, on a card the ? key shows and hides. Shut until asked for. */
+  #key-list { position:fixed; z-index:40; top:var(--controls-bottom); left:max(12px,env(safe-area-inset-left)); box-sizing:border-box; width:max-content; max-width:min(356px,calc(100vw - 24px)); max-height:calc(var(--view-top) + var(--view-height) - var(--controls-bottom) - 262px); overflow:auto; padding:10px 12px; border-radius:10px; background:var(--glass); border:1px solid #ffffff30; box-shadow:0 8px 24px #0006; color:var(--ink); font:12px/1.45 system-ui,sans-serif; }
+  #key-list[hidden] { display:none; }
+  #key-list h2 { margin:0 0 6px; font:600 11px/1.2 system-ui,sans-serif; letter-spacing:.08em; text-transform:uppercase; color:var(--gold); }
+  #key-list dl { display:grid; grid-template-columns:auto 1fr; gap:2px 12px; margin:0; }
+  #key-list dt { font:11px/1.6 ui-monospace,monospace; color:var(--gold); white-space:nowrap; }
+  #key-list dd { margin:0; }
+  @media (max-width:760px) { #look-hint .keys-tip { display:none; } }
   #camera-dock { position:fixed; top:calc(var(--view-top) + max(12px,env(safe-area-inset-top))); right:max(12px,env(safe-area-inset-right)); display:flex; flex-wrap:wrap; justify-content:flex-end; gap:4px; max-width:calc(100vw - 24px); z-index:8; }
   #camera-dock > button { background:var(--glass); border-color:#ffffff30; box-shadow:0 2px 12px #0002; }
   #camera-dock > button[aria-expanded=true] { color:var(--gold); border-color:var(--gold); }
@@ -444,7 +451,6 @@
 <canvas id="c" tabindex="-1" aria-label="Ocean sailing scene"></canvas>
 <div id="hud">
   <div id="fps">starting…</div>
-  <div class="help">click: mouse look · WASD move · Space/E up · Q/C down · Shift fast · wheel speed · H panel</div>
 </div>
 <div id="panel" class="hidden"></div>
 <div id="err"></div>

@@ -1596,6 +1596,7 @@ async function main() {
     if (castleDuel.active) { if (castleDuel.freeView && DUEL_FLY_KEYS.has(e.code)) keys[e.code] = true; return; }
     // Space lifts the free camera; it must not also press whichever button was clicked last.
     if (e.code === 'Space' && cameraMode === 'free') e.preventDefault();
+    if (e.key === '?' && !e.repeat) { keyList.hidden = !keyList.hidden; e.preventDefault(); return; }
     if (voyageCtl?.onKey(e)) { e.preventDefault(); return; }
     if (e.code === 'KeyM' && !e.repeat && chartDrawer) { chartDrawer.toggle(); e.preventDefault(); return; }
     if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.code) || (boat.enabled && ['KeyA','KeyD','KeyW','KeyS','KeyQ','KeyE','KeyX'].includes(e.code))) e.preventDefault();
@@ -3186,6 +3187,7 @@ async function main() {
   panel.before(cameraDock);
   addEventListener('keydown',e=>{
     if(e.key!=='Escape')return;
+    keyList.hidden=true;
     if(!boatPanel.hidden)collapseBoat.click();
     if(!cameraPanel.hidden)cameraClose.click();
     if(!panel.classList.contains('hidden'))hideSea.click();
@@ -3213,18 +3215,31 @@ async function main() {
     requestAnimationFrame(()=>gunControls?.element?.scrollIntoView?.({block:'end'}));
   }
   const lookHint=document.createElement('div');lookHint.id='look-hint';
+  // Every key, for the view she is in. The ? key shows and hides it; it starts shut.
+  const keyList=document.createElement('section');keyList.id='key-list';keyList.hidden=true;keyList.setAttribute('aria-label','Keyboard controls');
+  const keysTip=document.createElement('span');keysTip.className='keys-tip';keysTip.textContent=' · ? lists every key';
+  const VIEW_KEYS={
+    boat:[['Drag  ↑ ↓ ← →','Turn the view'],['W S Q E','Walk the deck'],['A  D','Rudder to port, to starboard'],['X','Centre the rudder'],['V','Deck or crow\u2019s nest'],['Z','Spyglass'],['B','Leave her for the free camera']],
+    ship:[['Drag  ↑ ↓ ← →','Orbit the ship'],['Shift-drag','Pan'],['Wheel','Zoom'],['B','Go aboard']],
+    free:[['Drag  ↑ ↓ ← →','Look about'],['W A S D','Fly'],['Space  E','Up'],['Q  C','Down'],['Wheel','Flying speed'],['Hold F','Fire the cannon'],['B','Go aboard']],
+  };
+  const SHIP_KEYS=[['[  ]','Alter course a point (with Shift, a degree)'],['K','Keep her so: the helmsman holds this heading'],['T','Tack'],[',  .','Slower, faster time'],['P','Pause'],['M','Chart'],['H','Sea settings'],['Enter','Answer a hail with its first choice'],['Esc','Close a panel'],['?','This list']];
+  const GUN_KEYS=[['F','Ready the battery, then fire it']];
+  const REHEARSAL_KEYS=[['Shift+F','Fire at once, skipping the drill'],['G','The other ship fires back']];
   const updateHelp = (flashHint=false) => {
-    const gunHint = BROADSIDE_SCENARIO && cameraMode !== 'free' ? ' · F: fire broadside · G: enemy return fire' : '';
     document.body.classList.toggle('free-cannon',cameraMode==='free');
-    document.querySelector('#hud .help').textContent = (boat.enabled
-      ? 'Drag / ↑↓←→: turn view · W/S/Q/E: walk deck · A/D: rudder · X: centre · B: change camera · H: sea settings'
-      : cameraMode === 'ship' ? 'Drag / ↑↓←→: orbit ship | Shift-drag: pan | wheel: zoom | B: board ship | H: sea settings'
-      : 'WASD: fly | Space/E: up | Q/C: down | wheel: speed | F: cannon | B: board ship | H: sea settings') + gunHint;
+    const view=boat.enabled?'boat':cameraMode==='ship'?'ship':'free';
+    const rows=[...VIEW_KEYS[view],...(view!=='free'&&shipGuns.state.guns.length?GUN_KEYS:[]),...(view!=='free'&&BROADSIDE_SCENARIO?REHEARSAL_KEYS:[]),...SHIP_KEYS];
+    const heading=document.createElement('h2'),list=document.createElement('dl');
+    heading.textContent=view==='boat'?'Keys aboard':view==='ship'?'Keys, ship view':'Keys, free camera';
+    for(const [key,does] of rows){const dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=key;dd.textContent=does;list.append(dt,dd);}
+    keyList.replaceChildren(heading,list);
     lookHint.textContent = boat.enabled
       ? 'Drag mouse or ↑↓←→ keys to turn view · W S Q E walk deck'
       : cameraMode === 'ship'
       ? 'Drag mouse or ↑↓←→ keys to orbit · Scroll zoom · Shift-drag pan'
       : 'Drag mouse or ↑↓←→ keys to look · WASD fly · E/Q up/down · Hold F to fire the cannon';
+    lookHint.append(keysTip);
     if(flashHint&&lookHint.isConnected){
       document.body.classList.remove('has-looked');
       lookHint.style.animation='none';
@@ -3801,7 +3816,7 @@ async function main() {
     if(qs.get('marineView')==='1'){shipOrbit.wildlife=true;shipOrbit.marine=true;}
   }
   if(qs.get('dolphins')==='1'){dolphins.state.trigger(boat,{terrain,vessels:followerEnabled?dolphinVessels:dolphinPlayer});dolphinControls.notice(dolphins.state.event);}
-  document.body.append(lookHint);
+  document.body.append(lookHint,keyList);
   if (qs.get('ui') === '0') { document.getElementById('hud').style.display = 'none'; panel.classList.add('hidden'); boatPanel.hidden = true;performancePanel.hidden=true; cameraDock.hidden=true;helm.root.hidden=true;lookHint.hidden=true; }
   if(qs.get('ui')==='0')dolphinControls.toast.style.display='none';
   if(qs.get('profile')==='1')document.body.classList.add('show-performance');

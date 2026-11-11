@@ -225,6 +225,7 @@ export function createCastleDuelController({
       body.castle-duel-active #sailing-instruments,
       body.castle-duel-active #port-call,
       body.castle-duel-active #look-hint,
+      body.castle-duel-active #key-list,
       body.castle-duel-active #landfall-discovery-banner,
       body.castle-duel-active #voyage-hud,
       body.castle-duel-active #camera-dock,
