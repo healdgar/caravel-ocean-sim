@@ -42,21 +42,33 @@ export function showCareerPrompt(parent, { save, onContinue, onNewVoyage }) {
 }
 
 // A scene opened beside a saved voyage. The player sees a ship that is not theirs and may think the voyage lost:
-// say what this is, that it saves nothing and harms nothing, and offer the way back.
-export function showSceneNotice(parent, { save, onContinue, onStay }) {
+// say what this is, that it saves nothing and harms nothing, and offer the way back. `port` names the port whose
+// business was asked for in such a scene: the notice then says why there is none here. `onNewCareer` adds the third
+// way, a new career in place of the saved one, which takes a second, deliberate click.
+export function showSceneNotice(parent, { save, onContinue, onStay, onNewCareer = null, port = '' }) {
+  parent.querySelector?.('#scene-notice')?.remove();
   const notice = document.createElement('section');
   notice.id = 'scene-notice';
   notice.setAttribute('aria-labelledby', 'scene-notice-title');
   notice.innerHTML = `<h2 id="scene-notice-title">This is a separate scene, not your saved voyage</h2>
-    <p class="scene-what">The address you opened starts the game at a set ship, place or weather. Nothing you do here is saved, and your saved voyage stays exactly as you left it.</p>
+    <p class="scene-what"></p>
     <p class="scene-saved"></p>
     <div class="scene-actions">
       <button type="button" class="scene-continue">Continue saved voyage</button>
+      <button type="button" class="scene-new" hidden>Begin a new career</button>
       <button type="button" class="scene-stay">Stay in this scene</button>
     </div>`;
+  notice.querySelector('.scene-what').textContent = port
+    ? `${port} keeps its accounts with a career: its market, its yard and its hands. This scene has none, so nothing done here is saved, and your saved voyage stays exactly as you left it. You may still walk the town.`
+    : 'The address you opened starts the game at a set ship, place or weather. Nothing you do here is saved, and your saved voyage stays exactly as you left it.';
   notice.querySelector('.scene-saved').textContent = `Saved voyage: ${careerSaveSummary(save)}`;
   notice.querySelector('.scene-continue').onclick = () => { notice.remove(); onContinue?.(); };
   notice.querySelector('.scene-stay').onclick = () => { notice.remove(); onStay?.(); };
+  if (onNewCareer) {
+    const fresh = notice.querySelector('.scene-new');
+    fresh.hidden = false;
+    armBeforeErasing(fresh, { prompt: 'Erase saved voyage?', onConfirm: () => { notice.remove(); onNewCareer(); } });
+  }
   parent.append(notice);
   return notice;
 }

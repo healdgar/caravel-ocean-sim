@@ -17,8 +17,9 @@ after(async()=>{await browser?.close();if(server)await new Promise(resolve=>serv
 const CAREER_KEY='waterworld.career.v1',VOYAGE_KEY='waterworld.voyage.v1';
 const ready=page=>page.waitForFunction(()=>window.oceanStartup?.state==='ready',null,{timeout:180000});
 // A save left by another tab: this page neither owns it nor asked to continue it.
-async function pageWithForeignSave(path){
+async function pageWithForeignSave(path,prepare=null){
   const context=await browser.newContext({viewport:{width:640,height:400}});
+  await prepare?.(context);
   await context.addInitScript(([career,voyage])=>{
     if(sessionStorage.getItem('seeded'))return;
     sessionStorage.setItem('seeded','1');
@@ -92,6 +93,66 @@ test('Reset voyage in a tab that does not own the save starts afresh beside it',
     const after=await saved(page);
     assert.match(after.career??'',/"marker":"kept"/,'the career another tab saved is still there');
     assert.match(after.voyage??'',/"marker":"kept"/,'so is its voyage');
+    assert.deepEqual(errors,[]);
+  }finally{await context.close();}
+});
+
+// The way ashore in a tab that is not the saved voyage: the helm's own Dock pill moors her there, so the port call
+// must be offered too, or the captain lies alongside with nothing to press.
+test('a scene beside a saved voyage moors, walks the town, and says why the port keeps no account there',{timeout:420000},async()=>{
+  const {context,page,errors}=await pageWithForeignSave('/?newVoyage=1');
+  try{
+    assert.equal(await page.evaluate(()=>sessionStorage.getItem('waterworld.career.session')),null,'this tab does not keep the save');
+    const call=page.locator('#port-call'),walk=page.locator('#shore-walk'),notice=page.locator('#scene-notice');
+    await call.waitFor({state:'visible',timeout:30000});
+    assert.equal(await call.textContent(),'Moor and go ashore');
+    assert.match((await page.evaluate(()=>window.oceanStoryteller.knows().landing.way)),/^moor$/,'and the mate is asked of the same way');
+    await call.evaluate(button=>button.click());
+    await page.waitForFunction(()=>document.getElementById('port-call').textContent==='Go ashore',null,{timeout:60000,polling:200});
+    await walk.waitFor({state:'visible',timeout:5000});
+    assert.equal(await walk.textContent(),'Walk the town');
+    assert.deepEqual(await page.evaluate(()=>{const {way,keeps}=window.oceanStoryteller.knows().landing;return {way,keeps};}),{way:'alongside',keeps:false});
+    // The port's business belongs to a career: it says so, names the saved voyage and offers the three ways on.
+    await call.evaluate(button=>button.click());
+    await notice.waitFor({state:'visible',timeout:5000});
+    assert.equal(await page.locator('#port-panel').count(),0,'no account is opened on the purse of a voyage that is not this tab\'s');
+    assert.match(await notice.textContent(),/not your saved voyage[\s\S]*keeps its accounts with a career[\s\S]*stays exactly as you left it[\s\S]*walk the town/);
+    assert.deepEqual(await notice.locator('button:not([hidden])').allTextContents(),['Continue saved voyage','Begin a new career','Stay in this scene']);
+    await notice.locator('.scene-new').evaluate(button=>button.click());
+    assert.equal(await notice.locator('.scene-new').textContent(),'Erase saved voyage?','a new career says what it costs before it is begun');
+    assert.match((await saved(page)).career??'',/"marker":"kept"/,'and the first click erases nothing');
+    await notice.locator('.scene-stay').evaluate(button=>button.click());
+    assert.equal(await notice.count(),0);
+    // The town is walked from the same quay, and she is boarded again by the same button.
+    await walk.evaluate(button=>button.click());
+    assert.equal(await page.evaluate(()=>window.oceanCaptain.ashore),true);
+    assert.equal(await walk.textContent(),'Back aboard');
+    await walk.evaluate(button=>button.click());
+    assert.equal(await page.evaluate(()=>window.oceanCaptain.ashore),false);
+    assert.match((await saved(page)).career??'',/"marker":"kept"/,'the saved voyage is as it was left');
+    assert.deepEqual(errors,[]);
+  }finally{await context.close();}
+});
+
+// On the site the page has written its own state into the address bar before startup is done; a page served from this
+// machine is ready too soon for that. So the address is written here at a stage of startup that falls between the
+// page reading its address and its asking, which is where the site's own writing falls.
+const writesItsAddressDuringStartup=context=>context.addInitScript(()=>{
+  let held;
+  Object.defineProperty(window,'oceanStartup',{configurable:true,get:()=>held,set(boot){
+    held=new Proxy({}, {get:(_,key)=>key==='stage'
+      ?(id,...rest)=>{if(id==='ship-crew')history.replaceState(null,'',location.pathname+'?written=1');return boot.stage(id,...rest);}
+      :typeof boot[key]==='function'?boot[key].bind(boot):boot[key]});
+  }});
+});
+
+test('a bare address beside a saved voyage asks whether to continue it, though the page has since written its own address',{timeout:420000},async()=>{
+  const {context,page,errors}=await pageWithForeignSave('/',writesItsAddressDuringStartup);
+  try{
+    assert.match(await page.evaluate(()=>location.search),/./,'the address bar is no longer bare by the time the page asks');
+    assert.equal(await page.locator('#career-prompt').count(),1,'the choice to continue or begin again');
+    assert.equal(await page.locator('#scene-notice').count(),0,'and not the notice of a scene the player never asked for');
+    assert.deepEqual(await page.locator('#career-prompt button').allTextContents(),['Continue voyage','New voyage']);
     assert.deepEqual(errors,[]);
   }finally{await context.close();}
 });

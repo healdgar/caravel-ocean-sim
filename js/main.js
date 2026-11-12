@@ -1053,7 +1053,7 @@ async function main() {
   const LOOP = SIM_CLOCK_LOOP_S;  // s, spectrum time loop (frequencies quantised to it)
   let needSpectrum = true, envFull = true;
   // Chart Course voyage (covert time warp); created once the dock/UI exists.
-  let careerPort = null, voyageCtl = null, chartDrawer = null, propulsionInput = null, sailInputs = [], speedRow = null, sailControls = null, note = null, helm = null;
+  let careerPort = null, shoreWay = null, voyageCtl = null, chartDrawer = null, propulsionInput = null, sailInputs = [], speedRow = null, sailControls = null, note = null, helm = null;
   let skySun = NaN, skyHaze = NaN, skyHeight = NaN;
 
   function writeSimStatic() {
@@ -3107,13 +3107,15 @@ async function main() {
       try{history.replaceState(null,'',cleaned);}catch{/* standalone file */}
     }
     // A fresh visit with a saved voyage chooses before anything can overwrite it.
-    const continueSavedVoyage=()=>{
+    const continueSavedVoyage=(save=savedCareer)=>{
       careerStore.claim();
-      const url=new URL(savedCareer.url??location.pathname,location.href);
+      const url=new URL(save?.url??location.pathname,location.href);
       url.searchParams.set('continue','1');
       location.href=url.href;
     };
-    if(!location.search&&!careerStore.owned()&&savedCareer?.voyage){
+    // The address as it was opened: the page writes its own state into the address bar as it runs.
+    const openedBare=![...qs.keys()].length;
+    if(openedBare&&!careerStore.owned()&&savedCareer?.voyage){
       showCareerPrompt(document.body,{
         save:savedCareer,
         onContinue:continueSavedVoyage,
@@ -3126,7 +3128,7 @@ async function main() {
     // back, or the voyage looks lost. Once the player chooses to stay, this tab is not told again.
     const SCENE_NOTICE_KEY='waterworld.sceneNotice.stayed';
     const stayedInScene=()=>{try{return sessionStorage.getItem(SCENE_NOTICE_KEY)==='1';}catch{return false;}};
-    if(location.search&&!careerStore.owned()&&savedCareer?.voyage&&qs.get('newVoyage')!=='1'&&!stayedInScene()){
+    if(!openedBare&&!careerStore.owned()&&savedCareer?.voyage&&qs.get('newVoyage')!=='1'&&!stayedInScene()){
       showSceneNotice(document.body,{
         save:savedCareer,
         onContinue:continueSavedVoyage,
@@ -3136,7 +3138,8 @@ async function main() {
     updateCrewUI();
     window.oceanVoyage=voyageCtl;
     portDamage.setClock(gameDateMs);
-    // A port call: at a port with buildings, with no fight on, in a tab that owns the save.
+    // A port call: at a port with buildings, with no fight on. Mooring and walking the town are offered in any tab;
+    // the port's business, and a pilot hired from the career's purse, only where this tab keeps the save.
     const hullMassKg=id=>{const rt=getShipModel(id).runtime;return boatHydrodynamics(rt.length,rt.beam,getShipParts(id).loading.provisionDays,0,id).mass;};
     careerPort=createCareerPort({
       era:NEW_WORLD_ERA,store:careerStore,boat,
@@ -3249,15 +3252,17 @@ async function main() {
       const lift=helmBox?.height?Math.max(PORT_CALL_BOTTOM,Math.round(innerHeight-helmBox.top+PORT_CALL_CLEARANCE)):PORT_CALL_BOTTOM;
       portCallButton.style.setProperty('--port-call-bottom',lift+'px');
     };
+    const SHORE_WAYS={'Take a pilot in':'pilot','Moor and go ashore':'moor','Making fast…':'making-fast','Go ashore':'alongside','Row ashore':'boat','Stop her to row ashore':'under-way'};
     const updatePortCall=()=>{
       if(!portCallLifted){
         const helmPanel=document.getElementById('helm-controls');
         if(helmPanel){portCallLifted=true;new ResizeObserver(liftPortCall).observe(helmPanel);addEventListener('resize',liftPortCall);}
       }
-      const able=!portPanel&&!portDeparting&&careerStore.owned()&&!voyageCtl?.isBattleActive?.()&&!boat.damage?.sunk&&!boat.damage?.surrendered;
-      const atQuay=able&&nearPortBuildings()?careerPort.here:null,offPort=able&&!atQuay?pilotablePort():null;
+      const free=!portPanel&&!portDeparting&&!voyageCtl?.isBattleActive?.()&&!boat.damage?.sunk&&!boat.damage?.surrendered,keeps=careerStore.owned();
+      const atQuay=free&&nearPortBuildings()?careerPort.here:null,offPort=free&&keeps&&!atQuay?pilotablePort():null;
       const port=atQuay??offPort;
       portCallButton.hidden=!port;
+      if(!port)shoreWay=null;
       if(!port||ashore.on){
         shoreWalkButton.hidden=!ashore.on;
         if(ashore.on&&shoreWalkButton.textContent!=='Back aboard')shoreWalkButton.textContent='Back aboard';
@@ -3269,6 +3274,8 @@ async function main() {
       const label=offPort?'Take a pilot in':mooredAtPier()?'Go ashore':phase!=='clear'?'Making fast…':dockingBoarding.lineTarget()==='pier'?'Moor and go ashore':stopped?'Row ashore':'Stop her to row ashore';
       if(portCallButton.textContent!==label){portCallButton.textContent=label;portCallButton.setAttribute('aria-label',`${label}, ${port.name}`);}
       portCallButton.disabled=label==='Making fast…'||label==='Stop her to row ashore';
+      // What the mate is asked of the way ashore (js/mate-counsel.js).
+      shoreWay={way:SHORE_WAYS[label],port:String(port.name).split(' · ')[0],keeps};
       if(!ashore.on){
         shoreWalkButton.hidden=!(atQuay&&(label==='Go ashore'||label==='Row ashore'));
         if(shoreWalkButton.textContent!=='Walk the town')shoreWalkButton.textContent='Walk the town';
@@ -3287,8 +3294,20 @@ async function main() {
         updatePortCall();updateCrewUI();
         return;
       }
+      if(portPanel)return;
+      if(!careerStore.owned()){
+        // A scene beside a saved voyage keeps no account with a port: say so, and offer the ways to a career. With
+        // nothing saved to protect, this tab takes the career up.
+        const save=careerStore.read(),here=careerPort.here;
+        if(save?.voyage){
+          if(here)showSceneNotice(document.body,{save,port:String(here.name).split(' · ')[0],onContinue:()=>continueSavedVoyage(save),onStay:()=>{},
+            onNewCareer:()=>{const url=new URL(location.pathname,location.href);url.searchParams.set('reset','1');location.href=url.href;}});
+          return;
+        }
+        careerStore.claim();careerPort.reset();
+      }
       const port=careerPort.view()?.port;
-      if(portPanel||!port)return;
+      if(!port)return;
       careerPort.recordVisit(port);
       portPanel=showPortPanel(document.body,careerPort,{
         getDateLabel:()=>formatJulianDate(voyageCtl.voyage.dateMs),
@@ -4326,7 +4345,7 @@ async function main() {
       return port?goodsInSeason(era,year).map(good=>({...marketQuote(era,ledger,port,good,v.dateMs),usual:good.price})):null;
     }catch{return null;}
   }
-  const mateKnows=()=>({mate:firstMate?{...firstMate,model:true}:{name:shipMate(),model:false},now:storySituation(),near:ashore.on?storyNearby():null,news:boardLife?.state==='alive'?boardLife.news:[],town:mateTownRecord(),market:mateMarket()});
+  const mateKnows=()=>({mate:firstMate?{...firstMate,model:true}:{name:shipMate(),model:false},now:storySituation(),near:ashore.on?storyNearby():null,news:boardLife?.state==='alive'?boardLife.news:[],town:mateTownRecord(),market:mateMarket(),landing:shoreWay});
   let mateOffered=[];
   async function mateAnswer(id){
     if(id==='sign'){
@@ -4357,7 +4376,7 @@ async function main() {
   setInterval(()=>{
     // The mate's questions follow the moment: where the ship is, whether the captain is ashore, who was last pointed at.
     let someone=false;if(ashore.on){const near=storyNearby();someone=Boolean(near.inSight.length||near.atPosts.length);}
-    const port=storyPort(),moment=[port,ashore.on,someone,firstMate?.id,storyAsked?.id,boardLife?.state,Boolean(mateTown.data),Boolean(voyageCtl?.voyage)].join('|');
+    const port=storyPort(),moment=[port,ashore.on,someone,firstMate?.id,storyAsked?.id,boardLife?.state,Boolean(mateTown.data),Boolean(voyageCtl?.voyage),shoreWay?.way].join('|');
     if(moment!==mateMoment){mateMoment=moment;storyteller.refresh();}
     if(storyteller.state!=='paired'){storySeen.ashore=ashore.on;storySeen.port=port;return;}
     if(ashore.on!==storySeen.ashore){storySeen.ashore=ashore.on;storyteller.tell({kind:ashore.on?'ashore':'aboard',place:port});}

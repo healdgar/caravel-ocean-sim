@@ -10,6 +10,9 @@
 //   news     the realm's annals as they are told ({date, text, cat})
 //   town     the model's own record of the port in sight, or null
 //   market   what the port's merchants quote today ({name, buy, sell, offered, held, usual}), or null
+//   landing  how the captain may get ashore just now ({way, port, keeps}), or null where no port is in reach. `way`
+//            is 'pilot', 'moor', 'making-fast', 'alongside', 'boat' or 'under-way'; `keeps` is false in a scene
+//            that is not the saved voyage, where a port keeps no account
 import { compassPointName, formatLatitude, formatLongitude } from './voyage/compass.js';
 
 const counselList = (names) => names.length < 2 ? names.join('') : names.slice(0, -1).join(', ') + ' and ' + names.at(-1);
@@ -32,10 +35,11 @@ export function counselPointOfSail(windFrom, heading) {
 
 // The questions that fit the moment, most pressing first: no more than `most` of them.
 export function mateTopics(about, most = 6) {
-  const { mate = null, now = null, near = null, news = [], town = null, market = null } = about ?? {};
+  const { mate = null, now = null, near = null, news = [], town = null, market = null, landing = null } = about ?? {};
   const where = now?.where ?? {}, port = where.kind === 'port', topics = [];
   const add = (id, label) => topics.push({ id, label });
   const someone = near?.lastAskedAfter ?? near?.inSight?.[0] ?? near?.atPosts?.[0] ?? null;
+  if (landing?.way && !where.ashore) add('ashore', 'How do we get ashore?');
   if (where.ashore && someone) add('who', near.lastAskedAfter ? `Who is ${counselFirst(someone.name)}?` : 'Who is that?');
   if (port) add('port', 'What is this place?');
   if (!port && now?.voyage) { add('where', 'Where are we?'); add('sail', 'How does she sail?'); }
@@ -46,11 +50,25 @@ export function mateTopics(about, most = 6) {
   if (mate?.model && mate.about) { add('self', 'Tell me of yourself'); if (mate.about.spouse || mate.about.children || mate.about.head) add('home', 'Who waits for you at home?'); }
   if (port && where.living && !mate?.model) add('sign', 'Who here would sign on as mate?');
   // The mate's own life gives way first when there is much to ask about the day.
-  const order = ['who', 'port', 'where', 'sail', 'trade', 'news', 'sign', 'stores', 'realm', 'self', 'home'];
+  const order = ['ashore', 'who', 'port', 'where', 'sail', 'trade', 'news', 'sign', 'stores', 'realm', 'self', 'home'];
   return topics.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id)).slice(0, Math.max(1, most));
 }
 
 const SAY = {
+  // The way ashore as it stands this moment, in the words of the order the captain would give.
+  ashore({ landing }) {
+    const at = landing?.port ? ` at ${landing.port}` : '';
+    const way = {
+      pilot: `${landing?.port ?? 'The port'} lies within a pilot's reach, captain. Take a pilot in, and he will lay her alongside.`,
+      moor: `There is a berth in reach${at}, captain. Give the word to moor and go ashore, and we will pass her lines.`,
+      'making-fast': 'Her lines are going across now, captain. A moment more.',
+      alongside: `She is fast alongside${at}, captain. Go ashore for the port's business: its market, its yard, hands to sign. Or walk the town and see who is about.`,
+      boat: `There is no berth in reach${at}, captain, but she lies still enough for the boat. Row ashore for the port's business, or walk the town.`,
+      'under-way': 'No berth is in reach, captain, and she has too much way on for the boat. Take the way off her and we will row you in, or lay her close by a pier and we will moor.',
+    }[landing?.way];
+    if (!way) return 'There is no landing in reach, captain.';
+    return landing.keeps === false && landing.way !== 'pilot' ? `${way} Mind, this is not your saved voyage: the port will keep no account with us here, though the town is yours to walk.` : way;
+  },
   where({ now }) {
     const v = now.voyage, at = now.where?.reckoned ?? now.where, said = [];
     if (Number.isFinite(at?.lat) && Number.isFinite(at?.lon)) said.push(`By my reckoning we are in ${formatLatitude(at.lat)}, ${formatLongitude(at.lon)}, captain.`);
@@ -160,7 +178,7 @@ const SAY = {
 // The mate's answer to one of the questions, in their own words. null for a question that is not one of these.
 export function mateCounsel(id, about) {
   if (!Object.hasOwn(SAY, id)) return null;
-  const whole = { mate: null, now: {}, near: null, news: [], town: null, market: null, ...about };
+  const whole = { mate: null, now: {}, near: null, news: [], town: null, market: null, landing: null, ...about };
   whole.now ??= {};
   return SAY[id](whole);
 }

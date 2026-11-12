@@ -91,3 +91,24 @@ test('a mate of the model tells their own life from their card, and who would si
   assert.equal(mateCandidateAccount({ name: 'Gil Peón', age: 26 }), 'Gil Peón: 26, of no trade.');
   assert.deepEqual([0, 42, 778, 19448].map(counselSouls), ['no one', '42', 'some 800', 'some 19,000']);
 });
+
+test('with a port in reach the mate tells the way ashore as it stands, and says so where the port keeps no account', () => {
+  const aboard = { ...inPort, where: { ...inPort.where, ashore: false } };
+  const alongside = { mate: tomas, now: aboard, landing: { way: 'alongside', port: 'Lisbon', keeps: true } };
+  // It is the first thing to ask with a landing in reach, and not asked at all at sea or once ashore.
+  assert.equal(ids(alongside)[0], 'ashore');
+  assert.equal(mateTopics(alongside)[0].label, 'How do we get ashore?');
+  assert.ok(!ids({ mate: tomas, now: atSea, landing: null }).includes('ashore'));
+  assert.ok(!ids({ mate: tomas, now: inPort, landing: { way: 'alongside', port: 'Lisbon', keeps: true } }).includes('ashore'), 'the captain is ashore already');
+  const say = (way, keeps = true) => mateCounsel('ashore', { mate: tomas, now: aboard, landing: { way, port: 'Lisbon', keeps } });
+  assert.equal(say('moor'), 'There is a berth in reach at Lisbon, captain. Give the word to moor and go ashore, and we will pass her lines.');
+  assert.equal(say('making-fast'), 'Her lines are going across now, captain. A moment more.');
+  assert.match(say('alongside'), /^She is fast alongside at Lisbon, captain\. Go ashore for the port's business.*Or walk the town/);
+  assert.match(say('boat'), /no berth in reach at Lisbon.*Row ashore.*or walk the town\.$/);
+  assert.match(say('under-way'), /too much way on for the boat\. Take the way off her/);
+  assert.equal(say('pilot'), 'Lisbon lies within a pilot\'s reach, captain. Take a pilot in, and he will lay her alongside.');
+  // A scene that is not the saved voyage: the town may be walked, and the mate says why the port will not trade.
+  assert.match(say('alongside', false), /Or walk the town and see who is about\. Mind, this is not your saved voyage: the port will keep no account with us here, though the town is yours to walk\.$/);
+  assert.doesNotMatch(say('alongside'), /not your saved voyage/);
+  assert.equal(mateCounsel('ashore', { mate: tomas, now: atSea }), 'There is no landing in reach, captain.');
+});
