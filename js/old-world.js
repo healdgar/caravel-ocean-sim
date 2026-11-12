@@ -632,21 +632,25 @@ function makeCountry(region, heights, port) {
   // How trees stand on tended ground: far apart, kept to size, of the kinds a farmer plants, and
   // in lines along a boundary or a road. Null on wild ground, where the forest's own rules hold;
   // NO_TREES where none may stand.
+  // `height` is how tall the tree is kept, in metres: the least, and how much more the tallest stands. A
+  // forest pack of full-grown trees is drawn to it (js/terrain.js), so an olive or a yard tree is a grown
+  // tree's shape at an orchard tree's size. `scale` is the same for a pack of young trees: a share of the
+  // prototype, least and range.
   const NO_TREES = OLD_WORLD_NO_TREES;
   const TENDED = [
     NO_TREES,
-    { spacing: 12, scale: [0.42, 0.2], species: ['maple', 'birch', 'elm'], cohort: 'veteran', tint: [1, 1, 0.94] },
-    { spacing: 10.5, scale: [0.55, 0.2], species: ['oak'], cohort: 'veteran', tint: [0.86, 0.94, 0.9] },
+    { spacing: 12, height: [5, 3.5], scale: [0.42, 0.2], species: ['maple', 'birch', 'elm'], cohort: 'veteran', tint: [1, 1, 0.94] },
+    { spacing: 10.5, height: [5.5, 2.5], scale: [0.55, 0.2], species: ['oak'], cohort: 'veteran', tint: [0.86, 0.94, 0.9] },
     NO_TREES, NO_TREES, NO_TREES,
-    { spacing: 28, scale: [0.85, 0.45], species: ['oak'], cohort: 'veteran', tint: [0.94, 0.98, 0.9] },
+    { spacing: 28, height: [11, 7], scale: [0.85, 0.45], species: ['oak'], cohort: 'veteran', tint: [0.94, 0.98, 0.9] },
     NO_TREES, null,
   ];
-  const HEDGEROW = { spacing: 10, scale: [0.7, 0.4], species: ['elm', 'chestnut', 'maple'], cohort: 'veteran', tint: [0.96, 1, 0.92] };
-  const ROADSIDE = { spacing: 11, scale: [0.85, 0.4], species: ['elm', 'maple', 'oak'], cohort: 'veteran', tint: [0.96, 1, 0.92] };
+  const HEDGEROW = { spacing: 10, height: [9, 7], scale: [0.7, 0.4], species: ['elm', 'chestnut', 'maple'], cohort: 'veteran', tint: [0.96, 1, 0.92] };
+  const ROADSIDE = { spacing: 11, height: [11, 8], scale: [0.85, 0.4], species: ['elm', 'maple', 'oak'], cohort: 'veteran', tint: [0.96, 1, 0.92] };
   // In the town: a ring of shade trees round a square, a walled garden's orchard, a tree in a yard.
-  const SQUARE_TREES = { spacing: 9, scale: [0.6, 0.25], species: ['elm', 'maple'], cohort: 'veteran', tint: [0.96, 1, 0.92] };
-  const PARK_TREES = { spacing: 8, scale: [0.5, 0.3], species: ['maple', 'birch', 'elm', 'oak'], cohort: 'veteran', tint: [0.94, 1, 0.9] };
-  const YARD_TREES = { spacing: 13, scale: [0.36, 0.2], species: ['maple', 'birch'], cohort: 'veteran', tint: [1, 1, 0.94] };
+  const SQUARE_TREES = { spacing: 9, height: [9, 5], scale: [0.6, 0.25], species: ['elm', 'maple'], cohort: 'veteran', tint: [0.96, 1, 0.92] };
+  const PARK_TREES = { spacing: 8, height: [7, 6], scale: [0.5, 0.3], species: ['maple', 'birch', 'elm', 'oak'], cohort: 'veteran', tint: [0.94, 1, 0.9] };
+  const YARD_TREES = { spacing: 13, height: [4.5, 3], scale: [0.36, 0.2], species: ['maple', 'birch'], cohort: 'veteran', tint: [1, 1, 0.94] };
   const treesAt = (x, z) => {
     if (town && fieldAt(town.urban, grid, x, z) >= 0.5) {
       const where = plan ? plan.treesAt(x, z) : CITY_TREES.NONE;

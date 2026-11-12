@@ -34,7 +34,8 @@ const FOREST_GROVE_SUNK_METRES = 3, FOREST_GROVE_FLAT_METRES = 16, FOREST_GROVE_
 const FOREST_GROVE_EDGE = 0.45, FOREST_GROVE_FULL = 0.95, FOREST_GROVE_TAKEN = 0.9;
 // Trees by a harbour are planted smaller than those inland (retargetForestPackToProcedural, js/terrain.js),
 // and a grove's canopy is as much lower there: this share of its height at the port, all of it from
-// FOREST_GROVE_INLAND_METRES[1] away.
+// FOREST_GROVE_INLAND_METRES[1] away. A grove of full-grown trees, which are planted at nearly one size
+// everywhere, names a share of its own (harbourHeight in its manifest).
 const FOREST_GROVE_HARBOUR_HEIGHT = 0.78, FOREST_GROVE_INLAND_METRES = [100, 580];
 // Over these shares of the forest's canopy range (FOREST_CANOPY_RANGE_WGSL) the canopy closes over the
 // hollows planted trees stand in, so it is whole before the trees are no longer drawn.
@@ -64,6 +65,7 @@ export function validateForestGroves(manifest) {
   if (manifest?.format !== 'waterworld.forest-groves' || manifest.version !== 1 || manifest.texels !== FOREST_GROVE_TEXELS || manifest.levels !== FOREST_GROVE_LEVELS ||
     manifest.variants !== FOREST_GROVE_VARIANTS || manifest.maps !== FOREST_GROVE_MAPS || manifest.treeFloats !== FOREST_GROVE_TREE_FLOATS) throw Error('Invalid forest grove manifest');
   if (!(manifest.tileMetres > 0) || !(manifest.heightMetres > 0)) throw Error('Forest groves name no size');
+  if (manifest.harbourHeight !== undefined && !(manifest.harbourHeight > 0 && manifest.harbourHeight <= 1)) throw Error('Forest groves name no height by the harbour');
   // A tree's number shares a word of the canopy map with its height, and has twelve bits of it.
   if (!Number.isInteger(manifest.maxTrees) || manifest.maxTrees < 2 || manifest.maxTrees > 4096) throw Error('Forest groves hold too many trees to name');
   const look = manifest.look;
@@ -247,7 +249,8 @@ export const FOREST_GROVE_WGSL = /* wgsl */`
 // top, and how many trees a grove may hold. tint: the climate's cast, and a grove's breadth in metres.
 struct ForestGroveLook {optics:vec4f,underside:vec4f,tint:vec4f};
 // domain: the section's corner, its breadth, and how many heights it has to a side. counts: how many
-// groves it draws, and where the harbour is that its trees are planted about.
+// groves it draws, where the harbour is that its trees are planted about, and the share of its height the
+// canopy keeps there.
 struct ForestGroveSection {domain:vec4f,counts:vec4f};
 @group(2)@binding(20)var<uniform>forestGrove:ForestGroveLook;
 @group(2)@binding(21)var forestGroveCanopy:texture_2d_array<f32>;
@@ -300,7 +303,7 @@ fn forestGroveStanding(p:vec2f,parted:f32)->f32{
  let bytes=vec3u(round(canopy.rgb*255.));
  let owner=((bytes.y&15u)<<8u)|bytes.z;
  let inland=smoothstep(${FOREST_GROVE_INLAND_METRES[0].toFixed(1)},${FOREST_GROVE_INLAND_METRES[1].toFixed(1)},distance(at,forestGroveSection.counts.yz));
- let tall=f32((bytes.x<<4u)|(bytes.y>>4u))/4095.*forestGrove.optics.w*mix(${FOREST_GROVE_HARBOUR_HEIGHT},1.,inland);
+ let tall=f32((bytes.x<<4u)|(bytes.y>>4u))/4095.*forestGrove.optics.w*mix(forestGroveSection.counts.w,1.,inland);
  // The tree this part of the canopy belongs to, which may be rooted in the next grove: each tree is
  // its own shade of the pack's green, wherever it is drawn from.
  let tree=forestGroveTrees[(variant*u32(forestGrove.underside.w)+owner)*2u];
@@ -457,7 +460,7 @@ export async function createForestGroves({ device, shader, module, frameUBO, pac
           section.count = tiles.length / 4;
           if (section.count) device.queue.writeBuffer(section.tiles, 0, tiles);
           const harbour = source.port?.center ?? sources[0].port?.center ?? sources[0].region;
-          device.queue.writeBuffer(section.uniform, 0, new Float32Array([region.x - region.span / 2, region.z - region.span / 2, region.span, region.size, section.count, harbour.x, harbour.z, 0]));
+          device.queue.writeBuffer(section.uniform, 0, new Float32Array([region.x - region.span / 2, region.z - region.span / 2, region.span, region.size, section.count, harbour.x, harbour.z, m.harbourHeight ?? FOREST_GROVE_HARBOUR_HEIGHT]));
           groves += section.count;
         }
         for (const [key, section] of sections) if (!seen.has(key)) { release(section); sections.delete(key); }

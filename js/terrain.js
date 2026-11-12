@@ -96,6 +96,10 @@ export function retargetForestPackToProcedural(
 ) {
   const protoCount = forestPack.manifest.prototypes.length;
   const hasCohorts = forestPack.manifest.prototypes.some((p) => Boolean(p.cohort));
+  // A pack whose manifest says its trees are full grown holds each at the size it stands
+  // (scripts/bake-forest-mature-pack.py), and they are drawn at about that size and spaced by the crowns
+  // they have. Any other pack holds young trees, enlarged below to stand for a wood's.
+  const fullGrown = forestPack.manifest.stature === 'full-grown';
   const buckets = Array.from({ length: protoCount }, () => []);
   const activeClimate =
     climateProfile ??
@@ -241,9 +245,11 @@ export function retargetForestPackToProcedural(
     }
 
     const secBuckets = Array.from({ length: protoCount }, () => []);
-    const veteranSpacingFactor = hasCohorts ? (isMobile ? 0.52 : 0.42) : (isMobile ? 0.56 : 0.46);
-    const canopySpacingFactor = hasCohorts ? (isMobile ? 0.28 : 0.21) : (isMobile ? 0.30 : 0.21);
-    const vetCanopySpacingFactor = hasCohorts ? (isMobile ? 0.25 : 0.19) : (isMobile ? 0.27 : 0.19);
+    // Two trees stand no nearer than this share of the sum of their crown radii. Full-grown crowns are
+    // twenty to thirty metres across, so their trunks stand eight to twenty metres apart and the crowns lock.
+    const veteranSpacingFactor = fullGrown ? (isMobile ? 0.66 : 0.56) : hasCohorts ? (isMobile ? 0.52 : 0.42) : (isMobile ? 0.56 : 0.46);
+    const canopySpacingFactor = fullGrown ? (isMobile ? 0.44 : 0.36) : hasCohorts ? (isMobile ? 0.28 : 0.21) : (isMobile ? 0.30 : 0.21);
+    const vetCanopySpacingFactor = fullGrown ? (isMobile ? 0.48 : 0.40) : hasCohorts ? (isMobile ? 0.25 : 0.19) : (isMobile ? 0.27 : 0.19);
     const cellSize = 20;
     const hashW = Math.ceil(span / cellSize) + 1;
     const head = new Int32Array(hashW * hashW).fill(-1);
@@ -371,7 +377,11 @@ export function retargetForestPackToProcedural(
         const pr = forestPack.manifest.prototypes[pid];
         let sMin;
         let sSpan;
-        if (pr.species === 'blueberry') {
+        if (fullGrown) {
+          // A full-grown tree stands at its own size: a tenth under to a fifth over, the larger inland.
+          sMin = (isVeteran || pr.cohort === 'veteran' ? 0.94 : 0.88) + inlandBlend * 0.06;
+          sSpan = 0.2;
+        } else if (pr.species === 'blueberry') {
           sMin = 1.45 + inlandBlend * 0.40;
           sSpan = 0.52;
         } else if (isVeteran || pr.cohort === 'veteran') {
@@ -403,11 +413,15 @@ export function retargetForestPackToProcedural(
         }
         const baseCrownR = pr.crownRadius ?? pr.crownRadiusMetres ?? 8.5;
         if (tended) {
-          const kept = tended.scale[0] + uScale * tended.scale[1];
+          // A farmer's tree is kept to a height. Of a full-grown tree that is a share of its own height;
+          // of a young one, the share the country names for it.
+          const kept = fullGrown && tended.height && pr.heightMetres > 0
+            ? (tended.height[0] + uScale * tended.height[1]) / pr.heightMetres
+            : tended.scale[0] + uScale * tended.scale[1];
           return { scale: kept, crownR: baseCrownR * kept, proto: pr };
         }
         const sc = sMin + uScale * sSpan;
-        const spacingScale = hasCohorts ? (isVeteran || pr.cohort === 'veteran' ? 1.32 : 1.15) : Math.min(sc, 1.35);
+        const spacingScale = fullGrown ? sc : hasCohorts ? (isVeteran || pr.cohort === 'veteran' ? 1.32 : 1.15) : Math.min(sc, 1.35);
         return { scale: sc, crownR: baseCrownR * spacingScale, proto: pr };
       };
 

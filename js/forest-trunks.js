@@ -54,12 +54,12 @@ function trunkBoxOf(capsules, order, first, count) {
 }
 
 // A tree's sections in a flat box tree, each node eight floats: six bounds, then the first section and how many, or if it
-// holds other nodes, the node after them and 0.
-function compileTrunkShape(species, trunks, limbs) {
+// holds other nodes, the node after them and 0. `size` is how many times the size of the tree measured the wood is made.
+function compileTrunkShape(species, trunks, limbs, size = 1) {
   const sections = [], onTrunk = [];
   const add = (chains, trunk) => {
     for (const chain of chains) for (let i = 0; i + 7 < chain.length; i += 4) {
-      sections.push(chain[i], chain[i + 1], chain[i + 2], chain[i + 3], chain[i + 4], chain[i + 5], chain[i + 6], chain[i + 7]);
+      for (let k = 0; k < 8; k++) sections.push(chain[i + k] * size);
       onTrunk.push(trunk ? 1 : 0);
     }
   };
@@ -104,15 +104,24 @@ function compileTrunkShape(species, trunks, limbs) {
     species, capsules, onTrunk: trunkFlags, nodes: Float32Array.from(nodes), count, reach, top, bottom, trunkTop,
     // What a ball must break through to fell it: the trunk's own mean radius, measured along its length.
     trunkRadius: trunkLength > 0 ? trunkArea / trunkLength : 0,
-    collarRadius: trunks[0]?.[3] ?? 0,
+    collarRadius: (trunks[0]?.[3] ?? 0) * size,
   };
 }
 
+// A species' wood as it was measured or, given `stands`, as it stands for a tree of that species drawn at another size:
+// made as tall as that tree (height, in metres to the top of its leaves), with the trunk a ball must break through as
+// stout as that tree's own (trunkRadius, in metres).
 const compiledTrunkShapes = new Map();
-export function forestTrunkShape(species) {
-  if (compiledTrunkShapes.has(species)) return compiledTrunkShapes.get(species);
-  const table = FOREST_TRUNK_SHAPES[species], shape = table && (table.trunks.length || table.limbs.length) ? compileTrunkShape(species, table.trunks, table.limbs) : null;
-  compiledTrunkShapes.set(species, shape);
+export function forestTrunkShape(species, stands = null) {
+  const key = stands ? `${species} ${stands.height} ${stands.trunkRadius}` : species;
+  if (compiledTrunkShapes.has(key)) return compiledTrunkShapes.get(key);
+  const table = FOREST_TRUNK_SHAPES[species];
+  let shape = null;
+  if (table && (table.trunks.length || table.limbs.length)) {
+    shape = compileTrunkShape(species, table.trunks, table.limbs, stands ? stands.height / table.height : 1);
+    if (stands) shape.trunkRadius = stands.trunkRadius;
+  }
+  compiledTrunkShapes.set(key, shape);
   return shape;
 }
 
@@ -121,9 +130,10 @@ export function forestTrunkShape(species) {
 const trunkCellHash = (cx, cz, mask) => (Math.imul(cx, 73856093) ^ Math.imul(cz, 19349663)) & mask;
 
 // Builds a grid over these roots, yielding between batches. The roots stay the grid's own: when the forest streams it
-// gets a new array, and shot strikes the array this names until the next grid is ready.
+// gets a new array, and shot strikes the array this names until the next grid is ready. speciesOf names, for each kind of
+// tree the roots hold, its species, or is the wood that stands for it (forestTrunkShape).
 export function* prepareForestTrunkGridSteps(roots, count, speciesOf) {
-  const shapes = speciesOf.map((species) => forestTrunkShape(species));
+  const shapes = speciesOf.map((species) => (typeof species === 'string' ? forestTrunkShape(species) : species));
   const tree = new Float32Array(count * TRUNK_TREE_FLOATS), rootOf = new Uint32Array(count), shapeOf = new Uint8Array(count), cells = new Int32Array(count * 2);
   let n = 0, minY = Infinity, maxY = -Infinity, minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, widest = 0;
   for (let i = 0; i < count; i++) {

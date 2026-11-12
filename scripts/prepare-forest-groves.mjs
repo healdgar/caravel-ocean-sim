@@ -31,13 +31,19 @@ const crowns = JSON.parse(fs.readFileSync(path.join(dir, 'crowns/manifest.json')
 const { leafSamples } = openForestLeaves(dir);
 
 // The stand each pack grows. Scales are the ones retargetForestPackToProcedural (js/terrain.js) gives a
-// tree well inland. The tall trees stand apart from each other by `apart` times the sum of their crown
-// radii; the rest stand FILL_APART from each other and TALL_APART from a tall one.
+// tree well inland: about its own size where the pack's manifest says its trees are full grown, and the
+// enlargement a pack of young trees is drawn at where it does not. The tall trees stand apart from each
+// other by `apart` times the sum of their crown radii; the rest stand FILL_APART from each other and
+// TALL_APART from a tall one.
+const fullGrown = manifest.stature === 'full-grown';
 const STANDS = {
   portugal: {
     tileMetres: 128,
-    tall: { cohort: 'veteran', mix: { oak: 0.3, chestnut: 0.2, maple: 0.18, elm: 0.17, birch: 0.15 }, scale: () => [2.5, 3.19], apart: 1.05 },
-    fill: { cohort: 'canopy', mix: { oak: 0.3, chestnut: 0.2, maple: 0.18, elm: 0.17, birch: 0.15 }, scale: () => [2.0, 2.64] },
+    // Full-grown trees by a harbour are planted at this share of their size inland, and the canopy stands as
+    // much lower there (js/forest-groves.js). A stand that names none keeps that module's own share.
+    harbourHeight: fullGrown ? 0.94 : undefined,
+    tall: { cohort: 'veteran', mix: { oak: 0.3, chestnut: 0.2, maple: 0.18, elm: 0.17, birch: 0.15 }, scale: () => (fullGrown ? [1.0, 1.2] : [2.5, 3.19]), apart: 1.05 },
+    fill: { cohort: 'canopy', mix: { oak: 0.3, chestnut: 0.2, maple: 0.18, elm: 0.17, birch: 0.15 }, scale: () => (fullGrown ? [0.94, 1.14] : [2.0, 2.64]) },
   },
   // A ceiba's crown is sixty metres across, so its grove is twice the size and its map half as fine.
   subtropical: {
@@ -115,14 +121,38 @@ const choose = (group, random) => {
 };
 // Trees are tried at random places until none more will fit. A tree keeps the place it is given only if
 // it is of the wanted kind there: shared, or not.
+// Full-grown crowns run from three metres across to thirty, and kinds tried at random until none fits
+// would fill every gap between the oaks with birch. A stand of full-grown trees keeps to its mix by count
+// instead: the kind furthest behind its share goes in next, and planting ends when that kind finds no place.
+// A hollow is then left wherever no crown comes within FILL_METRES, too broad for the canopy to close over
+// by itself. plantBare stands whichever kind fits in each, which is mostly birch, as in the gaps of a grown wood.
+function plantBare(trees, group, shared, random) {
+  for (let misses = 0, tries = 0; misses < 4000 && tries < 4e6; tries++) {
+    const x = random() * TILE, z = random() * TILE;
+    if (trees.some((t) => Math.hypot(wrapped(t.x - x), wrapped(t.z - z)) < t.radius + FILL_METRES)) continue;
+    const kind = choose(group, random), [low, high] = group.scale(kind.p.species);
+    const scale = low + random() * (high - low), radius = kind.radius * scale, yaw = random() * Math.PI * 2;
+    if ((edgeDistance(x, z) < radius + SHARED_MARGIN) !== shared) continue;
+    const clear = trees.every((t) => Math.hypot(wrapped(t.x - x), wrapped(t.z - z)) >= (t.tall ? TALL_APART : FILL_APART) * (radius + t.radius));
+    if (clear) { trees.push({ x, z, yaw, scale, radius, kind, tall: false, shared }); misses = 0; } else misses++;
+  }
+}
 function plant(trees, group, tall, shared, random) {
+  const behind = () => {
+    const named = kinds.filter((q) => group.mix[q.p.species] > 0 && (!group.cohort || q.p.cohort === group.cohort));
+    if (!named.length) throw Error(`The stand names no tree the pack has: ${Object.keys(group.mix)}`);
+    const standing = (q) => trees.filter((t) => t.tall === tall && t.kind === q).length / group.mix[q.p.species];
+    return named.reduce((least, q) => (standing(q) < standing(least) ? q : least));
+  };
+  let next = fullGrown ? behind() : null;
   for (let misses = 0; misses < 4000;) {
-    const x = random() * TILE, z = random() * TILE, kind = choose(group, random), [low, high] = group.scale(kind.p.species);
+    const x = random() * TILE, z = random() * TILE, kind = next ?? choose(group, random), [low, high] = group.scale(kind.p.species);
     const scale = low + random() * (high - low), radius = kind.radius * scale, yaw = random() * Math.PI * 2;
     if ((edgeDistance(x, z) < radius + SHARED_MARGIN) !== shared) continue;
     const clear = trees.every((t) => Math.hypot(wrapped(t.x - x), wrapped(t.z - z)) >= (tall && t.tall ? group.apart : tall || t.tall ? TALL_APART : FILL_APART) * (radius + t.radius));
-    if (clear) { trees.push({ x, z, yaw, scale, radius, kind, tall, shared }); misses = 0; } else misses++;
+    if (clear) { trees.push({ x, z, yaw, scale, radius, kind, tall, shared }); misses = 0; if (next) next = behind(); } else misses++;
   }
+  if (fullGrown && !tall) plantBare(trees, group, shared, random);
 }
 const random = seeded(packName === 'portugal' ? 0x9e3779b1 : 0x85ebca6b);
 const sharedTrees = [];
@@ -346,7 +376,7 @@ for (const [name, bytes] of Object.entries(outputs)) {
 }
 fs.writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify({
   format: 'waterworld.forest-groves', version: 1, tileMetres: TILE, texels, levels: FOREST_GROVE_LEVELS, variants: FOREST_GROVE_VARIANTS, maps: FOREST_GROVE_MAPS,
-  heightMetres, maxTrees, treeFloats: FOREST_GROVE_TREE_FLOATS,
+  heightMetres, maxTrees, treeFloats: FOREST_GROVE_TREE_FLOATS, ...(stand.harbourHeight ? { harbourHeight: stand.harbourHeight } : {}),
   look: { alike: +Math.max(0.05, alike).toFixed(4), transmission: +(optics[0] / ground).toFixed(4), roughness: +(optics[1] / ground).toFixed(4), undersideGain: optics.slice(2).map((v) => +(v / ground).toFixed(4)) },
   files, groves: stats,
 }, null, 1));

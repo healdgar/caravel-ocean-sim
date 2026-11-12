@@ -32,8 +32,8 @@ test('the table is what the meshes measure', { timeout: 300000 }, () => {
   for (const set of FOREST_PACK_SETS) {
     const { manifest, vertices, indices } = readForestPack(set);
     for (const prototype of manifest.prototypes) {
-      const { species, trunks, limbs } = measureTrunkShape(prototype, vertices, indices);
-      assert.deepEqual({ trunks, limbs }, FOREST_TRUNK_SHAPES[species], `${species}: rerun scripts/prepare-forest-trunks.mjs`);
+      const { species, height, trunks, limbs } = measureTrunkShape(prototype, vertices, indices);
+      assert.deepEqual({ height, trunks, limbs }, FOREST_TRUNK_SHAPES[species], `${species}: rerun scripts/prepare-forest-trunks.mjs`);
       assert.ok(trunks.length > 0, `${species} has a trunk`);
     }
   }
@@ -163,6 +163,26 @@ test('what a ball does is real: the energy it carries against the wood it strike
   assert.ok([...limb.values()][0].damage < [...trunk.values()][0].damage);
   // A wound is not a stump: it writes its height, and leaves sink and scale for the shader.
   assert.equal(limbRoots[9], 0);
+});
+
+test('a species\' wood stands for a full-grown tree at that tree\'s size', () => {
+  // A chestnut drawn 26 m tall with a trunk 1.2 m through, and the same tree kept to half that by a farmer.
+  const measured = forestTrunkShape('chestnut'), grown = forestTrunkShape('chestnut', { height: 26.4, trunkRadius: 0.6 }), size = 26.4 / FOREST_TRUNK_SHAPES.chestnut.height;
+  assert.equal(forestTrunkShape('chestnut', { height: 26.4, trunkRadius: 0.6 }), grown, 'compiled once');
+  assert.equal(forestTrunkShape('chestnut'), measured, 'and the wood as measured is left as it was');
+  assert.equal(grown.species, 'chestnut');
+  for (const key of ['top', 'trunkTop', 'reach', 'collarRadius']) assert.ok(Math.abs(grown[key] - measured[key] * size) < 1e-4, key);
+  assert.equal(grown.trunkRadius, 0.6);
+  assert.equal(forestTrunkShape('blueberry', { height: 2, trunkRadius: 0.01 }), null, 'a shrub has no wood a ball meets');
+  // The grid takes the wood itself where a species' name would not say its size.
+  const grid = gridOf([grown], root(0, 0, 0, 1, 0)), high = measured.trunkTop * (size + 1) / 2;
+  assert.ok(sweepForestTrunks(grid, [-3, high, 0], [3, high, 0], 0.07), 'the trunk stands above where the measured tree ends');
+  assert.equal(sweepForestTrunks(gridOf(['chestnut'], root(0, 0, 0, 1, 0)), [-3, high, 0], [3, high, 0], 0.07)?.forestTree.onTrunk ?? false, false);
+  // Full grown it takes several balls, and kept small in an orchard it takes one.
+  const ball = { energy: 1200000, bearing: 0, height: 1.5, now: 5 }, strikes = new Map();
+  const roots = new Float32Array([...root(0, 0, 0, 1, 0), ...root(50, 0, 0, 0.25, 0)]);
+  assert.equal(strikeForestTree(roots, 0, grown, ball, strikes).felled, false);
+  assert.equal(strikeForestTree(roots, 1, grown, ball, strikes).felled, true);
 });
 
 test('a felled tree is no trunk above its stump, and the stump still stops a ball', () => {

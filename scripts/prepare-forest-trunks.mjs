@@ -223,16 +223,17 @@ export function measureTrunkShape(prototype, vertices, indices, { minRadius = TR
   const limbs = trunkChains(rings.filter((ring) => !onStem.has(ring.id) && ring.centre[1] >= SOIL_CLEARANCE_M), minRadius);
   // Adding zero turns the minus zero a small negative rounds to into plain zero, as it reads back from the table.
   const flat = (chain) => simplify(chain).flatMap((r) => [...r.centre.map((v) => +v.toFixed(2) + 0), +r.radius.toFixed(3)]);
-  return { species: prototype.species, trunks: stems.sort((a, b) => rise(b) - rise(a)).map(flat), limbs: limbs.map(flat) };
+  return { species: prototype.species, height: +prototype.high[1].toFixed(2), trunks: stems.sort((a, b) => rise(b) - rise(a)).map(flat), limbs: limbs.map(flat) };
 }
 
 export function writeForestTrunkShapes(shapes) {
   const lines = ['// Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.',
     '// Generated from the wood each forest pack draws by scripts/prepare-forest-trunks.mjs. Do not edit.',
     '// Metres in a tree\'s own frame, before its yaw and scale. Each chain is x, y, z, radius at each ring, along one tube.',
+    '// height is how tall the tree that was measured stands, to the top of its leaves.',
     'export const FOREST_TRUNK_SHAPES = Object.freeze({'];
   for (const shape of shapes) {
-    lines.push(`  ${shape.species}: { trunks: ${JSON.stringify(shape.trunks)}, limbs: ${JSON.stringify(shape.limbs)} },`);
+    lines.push(`  ${shape.species}: { height: ${shape.height}, trunks: ${JSON.stringify(shape.trunks)}, limbs: ${JSON.stringify(shape.limbs)} },`);
   }
   lines.push('});', '');
   writeFileSync(new URL('js/forest-trunk-shapes.js', root), lines.join('\n'));

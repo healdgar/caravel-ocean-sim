@@ -412,17 +412,17 @@ const CERTIFIED_FOREST_STREAM_SHAS=Object.freeze({
   'vertices.bin':new Set([
     '8d70fb89316d5d842ba5d224aca99878b866c70addb578848a47783af08251d0',
     'e9df13166329797db6ddf89839778aa126c82fedc3070a47630e69ee85f6d007',
-    '96296b66eb43b8d1a81e72e55d75443bb950b324b99da4804d9da94f4895e5b9',
+    'ec379ef084df4e5d283b3f4e9dc1fe206c81a932d6e49b1447eaa1d7e2caac39',
   ]),
   'indices.bin':new Set([
     '2cd8ffe90fd2e0300db51caf0decd9da6b5f50cbaa2e6dd5462d8c6f8d8ce389',
     'eb385ff490bdbc2b44d370facaf73de6516ef1b4084bb725ad9312580f059e9f',
-    '69f75971b59f9881249e095b040abba74f89c6408fee70f01a782b55fa49caea',
+    'a12e6f8ed4fcb76bd80f02603b4f2ce59a7a0aea3b1cdc11711157e2f1af2ad6',
   ]),
   'roots.bin':new Set([
     '69bc2f787873f09944683f49e88c9bc09d8b068a33aee85453b626150050de9b',
     '5e26e551af5855219ef1ac84ef97fafeef1a4826cd94da7ff6fcda78dfed6963',
-    '7171a1d02ea10ae83e33bb21cf87538c62034cf692a9a363adf852d549eedfb2',
+    '2c700a58140e7dcb2772fc999e6d52b487621ad168ebe70f4b7447210ee1af40',
   ]),
 });
 export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,volumeAssets=assets===SUBTROPICAL_FOREST_ASSETS?SUBTROPICAL_FOREST_VOLUME_ASSETS:assets===PORTUGAL_FOREST_ASSETS?PORTUGAL_FOREST_VOLUME_ASSETS:FOREST_VOLUME_ASSETS,impostorAssets,loadAtlases=true,loadVolumes=true,skipNative=false,deferNative=false,skipRoots=false,deferSurfaces=false,onManifest,onRoots}={}){
@@ -1415,10 +1415,13 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       for(const p of m.prototypes){pass.setBindGroup(2,bins[p.id][2].impostor);pass.drawIndexedIndirect(commands,(p.id*4+3)*20);}
     };
     // A ball finds its trees through this. A new one builds off the frame; the old one serves until it is ready.
-    const speciesOf=m.prototypes.map(p=>p.species);let trunkGrid=null,trunkBuild=0;
+    // A pack's trees are struck as the wood measured for their species (js/forest-trunk-shapes.js). Full-grown trees are
+    // not the size of the trees measured, so for them that wood is made as tall as each kind of tree and as stout in the trunk.
+    const trunkShapes=m.prototypes.map(p=>forestTrunkShape(p.species,m.stature==='full-grown'?{height:p.high[1],trunkRadius:p.dbhCentimetres/200}:null));
+    let trunkGrid=null,trunkBuild=0;
     const rebuildTrunks=()=>{
       const build=++trunkBuild,forRoots=liveRoots,forCount=activeRootCount;
-      return buildForestTrunkGridAsync(forRoots,forCount,speciesOf,{isCancelled:()=>destroyed||build!==trunkBuild}).then(grid=>{if(grid&&build===trunkBuild)trunkGrid=grid;}).catch(error=>{console.error('Forest trunk grid failed',error);});
+      return buildForestTrunkGridAsync(forRoots,forCount,trunkShapes,{isCancelled:()=>destroyed||build!==trunkBuild}).then(grid=>{if(grid&&build===trunkBuild)trunkGrid=grid;}).catch(error=>{console.error('Forest trunk grid failed',error);});
     };
     const trunksReady=rebuildTrunks();
     const writeRoot=index=>device.queue.writeBuffer(roots,index*48,liveRoots.subarray(index*12,index*12+12));
@@ -1463,7 +1466,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       // A blast close by, with no ball in the tree: the nearest takes it.
       strike(x,z,now=0,groundAt=null){
         if(destroyed)return;
-        const index=strikeForestRoot(liveRoots,activeRootCount,x,z,strikes,{now,groundAt,shapeOf:id=>forestTrunkShape(speciesOf[id])});
+        const index=strikeForestRoot(liveRoots,activeRootCount,x,z,strikes,{now,groundAt,shapeOf:id=>trunkShapes[id]});
         if(index<0)return;
         writeRoot(index);saveStrikes();
         if(liveRoots[index*12+11]<0)noteFall(index,now);
@@ -1472,7 +1475,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       strikeTree(hit,impact,now=0,groundAt=null){
         if(destroyed)return null;
         const index=liveIndex(hit);if(index<0)return null;
-        const result=strikeForestTree(liveRoots,index,forestTrunkShape(hit.species),{...impact,height:hit.height,onTrunk:hit.onTrunk,now,groundAt},strikes);
+        const result=strikeForestTree(liveRoots,index,trunkShapes[liveRoots[index*12+8]|0],{...impact,height:hit.height,onTrunk:hit.onTrunk,now,groundAt},strikes);
         if(!result)return null;
         writeRoot(index);saveStrikes();
         if(result.felled)noteFall(index,now);
