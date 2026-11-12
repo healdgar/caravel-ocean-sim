@@ -4203,8 +4203,8 @@ async function main() {
   };
   const folkCard=createFolkCard({person:folkCardOf,whereabouts:folkWhereabouts,extra:(soul,el)=>storyteller?.card(soul,el)});
   const folkName=document.createElement('div');folkName.id='folk-name';folkName.hidden=true;document.body.append(folkName);
-  let folkPress=null,folkHoverAt=0;
-  canvas.addEventListener('pointerdown',e=>{folkPress=e.button===0&&!e.shiftKey?{id:e.pointerId,x:e.clientX,y:e.clientY,at:performance.now()}:null;folkName.hidden=true;},true);
+  let folkPress=null,folkHoverAt=0,folkHoverLate=0;
+  canvas.addEventListener('pointerdown',e=>{folkPress=e.button===0&&!e.shiftKey?{id:e.pointerId,x:e.clientX,y:e.clientY,at:performance.now()}:null;clearTimeout(folkHoverLate);folkName.hidden=true;},true);
   canvas.addEventListener('pointerup',e=>{
     const press=folkPress;folkPress=null;
     if(!press||press.id!==e.pointerId||Math.hypot(e.clientX-press.x,e.clientY-press.y)>6||performance.now()-press.at>600)return;
@@ -4213,12 +4213,19 @@ async function main() {
   });
   canvas.addEventListener('pointermove',e=>{
     if(e.pointerType!=='mouse'||e.buttons||!(folkSeen()||watchSeen()||mateAshore?.figure.visible)){if(!folkName.hidden){folkName.hidden=true;canvas.style.cursor='';}return;}
-    const now=performance.now();if(now-folkHoverAt<90)return;folkHoverAt=now;
-    const found=folkUnder(e.clientX,e.clientY);
-    folkName.hidden=!found;canvas.style.cursor=found?'pointer':'';
-    if(found){folkName.textContent=found.soul.name+(found.soul.role?', '+found.soul.role:'')+(found.post?' · '+found.post.role:found.mate?' · first mate':'');folkName.style.left=e.clientX+'px';folkName.style.top=e.clientY+'px';}
+    // Asked at most every 90 ms while the pointer moves, and once more where it comes to rest: else whoever it
+    // passed over on the way stays named under it.
+    clearTimeout(folkHoverLate);
+    const wait=90-(performance.now()-folkHoverAt),x=e.clientX,y=e.clientY;
+    if(wait>0)folkHoverLate=setTimeout(()=>folkHover(x,y),wait);else folkHover(x,y);
   });
-  canvas.addEventListener('pointerleave',()=>{folkName.hidden=true;canvas.style.cursor='';});
+  function folkHover(x,y){
+    folkHoverAt=performance.now();
+    const found=folkSeen()||watchSeen()||mateAshore?.figure.visible?folkUnder(x,y):null;
+    folkName.hidden=!found;canvas.style.cursor=found?'pointer':'';
+    if(found){folkName.textContent=found.soul.name+(found.soul.role?', '+found.soul.role:'')+(found.post?' · '+found.post.role:found.mate?' · first mate':'');folkName.style.left=x+'px';folkName.style.top=y+'px';}
+  }
+  canvas.addEventListener('pointerleave',()=>{clearTimeout(folkHoverLate);folkName.hidden=true;canvas.style.cursor='';});
   window.oceanFolk={
     card:folkCard,under:folkUnder,whereabouts:folkWhereabouts,
     // The plan in force: the model's day it is of, where the eye was, how often it has been laid and how long the last laying took.
@@ -4371,6 +4378,22 @@ async function main() {
     chronicle:args=>storyLife().annals({n:20,...args}),panel:({kind,town,house})=>storyLife().panel('advisor-panel',{of:kind,town,house}),
   }});
   if(qs.get('storyteller')!=='off'){storyteller.mount(captainBody);storyteller.resume();}
+  // The mate's bar keeps to the lower left with its foot just above the helm, wherever the helm then lies. Where a
+  // window leaves no band clear between the controls above and the helm, a closed bar would cover one of them, and
+  // there it gives way.
+  const MATE_BAR_GAP=8,MATE_BAR_CLOSED=44;
+  const placeMateBar=()=>{
+    const bar=document.getElementById('storyteller-says');if(!bar)return;
+    const helmBox=document.getElementById('helm-controls')?.getBoundingClientRect(),foot=helmBox?.height?helmBox.top-MATE_BAR_GAP:innerHeight-12;
+    const above=parseFloat(document.documentElement.style.getPropertyValue('--controls-bottom'))||0;
+    bar.style.setProperty('--mate-bottom',Math.round(innerHeight-foot)+'px');
+    bar.dataset.crowded=foot-MATE_BAR_CLOSED<above?'1':'0';
+  };
+  {
+    const watched=new ResizeObserver(placeMateBar);
+    for(const id of ['helm-controls','camera-dock'])if(document.getElementById(id))watched.observe(document.getElementById(id));
+    addEventListener('resize',placeMateBar);window.visualViewport?.addEventListener('resize',placeMateBar);placeMateBar();
+  }
   // What the player does, as the storyteller hears of it: coming ashore and going back aboard, raising a port and leaving it.
   const storySeen={ashore:ashore.on,port:storyPort()};
   let mateMoment='';

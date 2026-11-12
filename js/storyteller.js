@@ -56,8 +56,9 @@ const STORYTELLER_STYLE = `
 #storyteller input, #storyteller-says input, #folk-card .folk-talk input { flex:1; min-width:0; min-height:32px; padding:3px 8px; border:1px solid #c9a46a; border-radius:7px; background:#14120d; color:#f0e4ca; font:14px Georgia,serif; }
 #storyteller-code { max-width:8.5em; letter-spacing:.18em; text-transform:uppercase; font-family:ui-monospace,monospace !important; }
 #storyteller button, #storyteller-says button, #folk-card .folk-talk button { min-height:32px; padding:3px 12px; border:1px solid #c9a46a; border-radius:7px; background:#1c1a14; color:#f0e4ca; font:13px Georgia,serif; cursor:pointer; }
-#storyteller-says { position:fixed; z-index:30; left:max(12px,env(safe-area-inset-left)); bottom:calc(var(--instruments-bottom,92px) + 14px); max-width:calc(100vw - 24px); box-sizing:border-box; padding:6px 10px; border:1px solid #c9a46a88; border-radius:9px; background:#17140fe6; color:#f1e3c4; font:15px/1.35 'IM Fell English','Palatino Linotype',Palatino,Georgia,serif; }
+#storyteller-says { position:fixed; z-index:30; left:max(12px,env(safe-area-inset-left)); bottom:var(--mate-bottom,106px); max-width:calc(100vw - 24px); box-sizing:border-box; padding:6px 10px; border:1px solid #c9a46a88; border-radius:9px; background:#17140fe6; color:#f1e3c4; font:15px/1.35 'IM Fell English','Palatino Linotype',Palatino,Georgia,serif; }
 #storyteller-says[data-open="1"] { width:min(430px,calc(100vw - 24px)); padding:8px 12px 10px; }
+#storyteller-says[data-crowded="1"][data-open="0"] { display:none; }
 #storyteller-says .mate-bar { display:block; width:100%; min-height:30px; padding:2px 0; border:0; background:none; color:#edb86b; font:inherit; text-align:left; cursor:pointer; }
 #storyteller-says .mate-bar::before { content:'▸ '; }
 #storyteller-says[data-open="1"] .mate-bar::before { content:'▾ '; }
