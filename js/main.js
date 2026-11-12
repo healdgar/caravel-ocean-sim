@@ -88,6 +88,7 @@ import { crewWorkLabel, manGunStationsImmediate } from './crew-work.js';
 import { createCrew, createFortSoldiers, preloadCrewModels, requestCrewPipelines, CAPTAIN_ORDERS, reviveCompany } from './crew.js';
 import { createTownsfolk, requestTownsfolkPipelines } from './townsfolk.js';
 import { createBoardLife } from './board-life.js';
+import { BOARD_KEEP_CAREER, forgetKeptBoards, keepBoard, keptBoard } from './board-keep.js';
 import { boardFolkStreets, folkDoing } from './board-folk.js';
 import { createFolkCard } from './folk-card.js';
 import { WALKER_WORDS, townSolids } from './town-streets.js';
@@ -135,6 +136,8 @@ function eraseSavedCareer(){
     careerStore.clear();
     careerBrowserStorage('localStorage')?.removeItem?.('waterworld.voyage.v1');
     resetActiveIndigenousSovereigntyState({persist:true});
+    // The founded worlds as that career left them go with it: the next begins from each port's founding.
+    forgetKeptBoards();
   }catch{/* storage may be blocked */}
 }
 // Only reset=1 erases the save. newVoyage=1 starts afresh beside it and never erases anything.
@@ -157,6 +160,10 @@ const READY_SHIPS=readyFleetModels();
 const urlGameState = qs.has('state') ? decodeGameStateParam(qs.get('state')) : null;
 // What ports have suffered: the career's own record when continuing it, otherwise what a shared link carries.
 const continuedCareer = careerStore.owned() && qs.get('newVoyage') !== '1' ? careerStore.read() : null;
+// Whose calendar a founded world is kept by (js/board-keep.js): the career's where this tab keeps the save, else
+// this visit's alone. boardKept=off keeps and takes up nothing.
+const BOARD_KEEP_WAIT_MS=8000,BOARD_KEPT=qs.get('boardKept')!=='off',BOARD_VISIT_CLOCK='visit-'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+const boardKeepClock=()=>careerStore.owned()?BOARD_KEEP_CAREER:BOARD_VISIT_CLOCK;
 const portDamage = createPortDamageStore(continuedCareer?.portDamage ?? urlGameState?.portDamage, { dateMs: continuedCareer?.voyage?.dateMs ?? urlGameState?.voyage?.dateMs ?? null });
 if (urlGameState) {
   if (urlGameState.sovereignty) {
@@ -419,7 +426,8 @@ async function main() {
   const cloudsPromise = createVolumetricClouds({ device, frameUBO, transView, skyView, sampler: sampClamp, computePipe });
   // 2048 square is 16 MiB. At 4096 it was 64 MiB for shadows that differ only in how sharp a walker's is.
   const landShadows = createLandShadows(device);
-  const terrainPromise = LAND_STAGE ? createTerrain({ waterOptics: waterOpticsPromise, device, frameUBO, transView, skyView, sampler: sampClamp, envCubeView, clouds: cloudsPromise, shader, computePipe, mipPipe: rgba8MipPipePromise, format: HDR, samples: MSAA, portDamage, landShadows }) : Promise.resolve(null);
+  const terrainPromise = LAND_STAGE ? createTerrain({ waterOptics: waterOpticsPromise, device, frameUBO, transView, skyView, sampler: sampClamp, envCubeView, clouds: cloudsPromise, shader, computePipe, mipPipe: rgba8MipPipePromise, format: HDR, samples: MSAA, portDamage, landShadows,
+    boardKept: BOARD_KEPT ? { clock: boardKeepClock(), dateMs: continuedCareer?.voyage?.dateMs ?? null } : null }) : Promise.resolve(null);
   const prewarmPromises = [
     computePipe(SCENE_DECK_UPDATE, 'deck wash'),
     shader(DECK_RENDER, 'deck water'),
@@ -774,6 +782,10 @@ async function main() {
           ?new Date(voyageCtl.voyage.dateMs).getUTCFullYear()
           :(terrain?.region?.year??1550);
     portDamage.snapshot(terrain?.ports);
+    // Land is about to be made. If it is the living board's own port, the world is kept first, so that the port come
+    // back to is laid as the model has it now; a keeping that is slow in coming is not waited for (the last stands).
+    const living=window.oceanBoard;
+    if(BOARD_KEPT&&living?.state==='alive'&&living.port===region?.id)await Promise.race([living.keep(),new Promise(resolve=>setTimeout(resolve,BOARD_KEEP_WAIT_MS))]);
     const nextTerrain=await createTerrain({
       waterOptics,device,frameUBO,transView,skyView,sampler:sampClamp,envCubeView,clouds,shader,computePipe,mipPipe:rgba8MipPipe,format:HDR,samples:MSAA,
       region:{...(typeof region==='object'?region:{}),id:region?.id,name:name??region?.name,latitude:lat??region?.latitude,longitude:lon??region?.longitude,year:liveYear},
@@ -781,10 +793,13 @@ async function main() {
       options:{lateSpawn:true},
       portDamage,
       landShadows,
+      boardKept:BOARD_KEPT?{clock:boardKeepClock(),dateMs:gameDateMs()}:null,
     });
     if(!nextTerrain)return null;
     coastalOcean??=oceanVariant(await coastalOceanPromise);
     terrain=nextTerrain;
+    // A founded port made landfall at wakes its model, if none is awake yet.
+    try{wakeBoard();}catch{/* not yet at the game's own start */}
     coastalGroup=terrain.waterGroup(coastalOcean.pipe);
     coastalDepthGroup=OCEAN_DEPTH?terrain.waterGroup(coastalOcean.depthPipe):null;
     if(typeof anchorEnvironment==='object'&&anchorEnvironment)anchorEnvironment.terrain=terrain;
@@ -4051,7 +4066,11 @@ async function main() {
     if(boardLife||qs.get('boardLife')==='off')return;
     const region=terrain?.region,baked=region&&window.oceanLand?.pack?.board?bakedBoardFor(region):null;
     if(!baked?.world)return;
-    boardLife=createBoardLife({baked,onNews:lines=>{
+    // The model is taken up from the kept world the land was laid from, and from no other; it is kept as it lives.
+    boardLife=createBoardLife({baked,
+      kept:()=>BOARD_KEPT&&baked.lived?keptBoard(baked.port,baked.year,{clock:boardKeepClock()}).then(left=>left?.day===baked.lived.day?left:null):null,
+      keep:record=>BOARD_KEPT?keepBoard({...record,clock:boardKeepClock()}):false,
+      onNews:lines=>{
       const now=performance.now();if(now-boardToldAt<45000)return;
       const line=lines.findLast(entry=>entry.cat!=='trade')??lines[lines.length-1];
       if(line){boardToldAt=now;voyageCtl?.showToast?.(line.date+'. '+line.text,8);}

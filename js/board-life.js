@@ -20,23 +20,29 @@ export function boardDayOf(dateMs, epochYear) {
 export function boardEpochYear(world) { return world.year - Math.floor(world.day / BOARD_YEAR_DAYS); }
 
 const BOARD_NEWS_KEPT = 2000;
+// A living world is kept again (js/board-keep.js) once it has lived this many more days.
+export const BOARD_KEEP_DAYS = 10;
 
 // `baked` is a port's baked record (its board, the request that founded it, and what its frozen world is).
 // `start()` takes the world up; `tick(dateMs)` is called as the game's date moves and lives the days it is behind,
 // `stride` at a time, so a command or a question is never kept waiting long; `onNews(lines)` hears the annals as
 // they are written ({day, date, cat, text}); `onState(state)` each change of state. Asleep until started, waking
 // while the program and world are fetched and taken up, then alive; failed (with `error`) if they cannot be, in
-// which case the board stands as it was founded and nothing else is lost.
-export function createBoardLife({ baked, fetchImpl = fetch, open = openBoardWorker, onNews = null, onState = null, stride = 6 }) {
+// which case the board stands as it was founded and nothing else is lost. `kept()` answers the world as it was last
+// kept for this port (js/board-keep.js), which is then taken up in place of the founding one; `keep(record)` keeps
+// it, and is given the world as it stands every BOARD_KEEP_DAYS days it lives and whenever `life.keep()` is asked.
+export function createBoardLife({ baked, fetchImpl = fetch, open = openBoardWorker, onNews = null, onState = null, stride = 6, kept = null, keep = null, keepEvery = BOARD_KEEP_DAYS }) {
   const world = baked?.world ?? null, asset = world ? bakedWorldAsset(baked.port, baked.year) : null;
-  let model = null, busy = false, told = world?.day ?? 0;
+  let model = null, busy = false, told = world?.day ?? 0, keeping = null;
   const life = {
     state: 'asleep', error: null, port: baked?.port ?? null, year: baked?.year ?? null,
     // The model's day now, the day the game's calendar asks for, and how many days it has lived here.
     day: world?.day ?? 0, wanted: world?.day ?? 0, lived: 0,
+    // The day of the kept world it was taken up from (null if from its founding), and the day it was last kept at.
+    resumed: null, keptDay: world?.day ?? 0,
     // The model's own word on the realm: date, monarch, treasury, people, war, feuds, plague, weather.
     status: null, news: [],
-    start, tick, close,
+    start, tick, close, keep: keepNow,
     // Anything the model's keeper answers: 'view' {kind: bootstrap | landscape | summary | inspect | ui | overlay |
     // actors | household | plan-quote | storage-preview}, 'command', 'watch', 'advance', 'speed', 'pause', 'save'.
     request: (type, payload) => need().then(() => model.request(type, payload)),
@@ -70,15 +76,21 @@ export function createBoardLife({ baked, fetchImpl = fetch, open = openBoardWork
     if (!world || !asset) { state('failed', 'This port has no frozen world'); return life; }
     state('waking');
     try {
-      const response = await fetchImpl(asset);
-      if (!response.ok) throw new Error(`The frozen world could not be fetched: ${response.status}`);
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      if (bytes.length !== world.bytes) throw new Error(`The frozen world is ${bytes.length} bytes, not the ${world.bytes} its board was founded with`);
+      // The world as the traveller left it, if this program kept one; else the world as it was founded.
+      const left = kept ? await Promise.resolve().then(kept).catch(() => null) : null;
+      let bytes = left?.world && left.program === world.program && left.port === baked.port && left.year === baked.year ? new Uint8Array(left.world) : null;
+      if (bytes) life.resumed = left.day;
+      else {
+        const response = await fetchImpl(asset);
+        if (!response.ok) throw new Error(`The frozen world could not be fetched: ${response.status}`);
+        bytes = new Uint8Array(await response.arrayBuffer());
+        if (bytes.length !== world.bytes) throw new Error(`The frozen world is ${bytes.length} bytes, not the ${world.bytes} its board was founded with`);
+      }
       model = await open(baked.request, { world: bytes, fetchImpl });
       if (model.program !== world.program) throw new Error('The frozen world was saved by another program than the one here');
       model.on.fault = (fault) => state('failed', String(fault?.error || fault));
       const summary = await model.ready;
-      life.day = summary.day; told = summary.day;
+      life.day = summary.day; told = summary.day; life.keptDay = summary.day; life.wanted = Math.max(life.wanted, summary.day);
       life.status = await model.request('view', { kind: 'ui', panel: 'advisor-state' });
       state('alive');
     } catch (error) { model?.close(); model = null; state('failed', String(error?.message || error)); }
@@ -101,7 +113,23 @@ export function createBoardLife({ baked, fetchImpl = fetch, open = openBoardWork
         if (life.news.length > BOARD_NEWS_KEPT) life.news.splice(0, life.news.length - BOARD_NEWS_KEPT);
         try { onNews?.(lines); } catch (fault) { console.error(fault); }
       }
+      if (keep && life.day - life.keptDay >= keepEvery) keepNow();
     }).catch((error) => { if (life.state === 'alive') state('failed', String(error?.message || error)); }).finally(() => { busy = false; });
+  }
+
+  // Keep the world as it stands: its board as this game lays it, and the model's own save of everything, both of
+  // the one day (asked for together, so that no day is lived between them). One keeping at a time; resolves true
+  // when kept.
+  function keepNow() {
+    if (keeping) return keeping;
+    if (life.state !== 'alive' || !keep) return Promise.resolve(false);
+    keeping = (async () => {
+      const [board, frozen] = await Promise.all([model.hook('board'), model.hook('freeze')]);
+      const done = await keep({ port: baked.port, year: baked.year, program: world.program, day: board.day, board, world: frozen });
+      if (done) life.keptDay = board.day;
+      return Boolean(done);
+    })().catch((fault) => { console.warn('The board was not kept:', fault); return false; }).finally(() => { keeping = null; });
+    return keeping;
   }
 
   function close() { model?.close(); model = null; if (life.state !== 'failed') state('asleep'); }

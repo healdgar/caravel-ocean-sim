@@ -19,6 +19,7 @@ import {bakeLandImpactDeformations} from './part-assembly.js';
 import {buildingFracturePipeline,createPortFractures} from './building-fracture.js';
 import {streetEdgeAt} from './town-streets.js';
 import {oldWorldCountry,registerBakedBoard} from './old-world.js';
+import {boardAsKept,keptBoard} from './board-keep.js';
 import {bakedBoardAsset} from './board-model.js';
 import {createBoardStamp,requestBoardStampPipelines} from './board-stamp.js';
 import {CITY_BLOCK_FLOATS} from './old-world-city.js';
@@ -731,7 +732,7 @@ const GROUND_PATCHES_PER_FRAME = 8;
 
 export async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeView,clouds,shader,computePipe,mipPipe,format,samples,waterOptics=null,
   region:explicitRegion=null,placement=null,options={},
-  canopyMode=typeof location==='undefined'?'auto':new URLSearchParams(location.search).get('canopy')||'auto',portDamage=null,landShadows=null}){
+  canopyMode=typeof location==='undefined'?'auto':new URLSearchParams(location.search).get('canopy')||'auto',portDamage=null,landShadows=null,boardKept=null}){
   if(!['auto','near','far','off'].includes(canopyMode))throw Error('Unknown canopy scenery mode');
   const activeLandShadows=landShadows??createLandShadows(device,64);
   const ownsLandShadows=!landShadows;
@@ -833,7 +834,11 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // A port whose country Castle and Commons' model founded ahead of time: the board is fetched while the rest
   // loads, and handed over before the land is made. Without it the country is made by this game's own rules.
   const bakedBoardPath=useProcedural&&typeof regionParam==='string'&&search.get('board')!=='off'?bakedBoardAsset(regionParam,resolvedYear):null;
-  const bakedBoardPromise=bakedBoardPath?fetch(bakedBoardPath).then(response=>response.ok?response.json():null).catch(()=>null):null;
+  // If the model has lived here since (js/board-keep.js), the land is laid from the board as the traveller left it:
+  // whatever was built, burnt or thrown down while they were away is there on their return, never changed in sight.
+  // `boardKept` is {clock, dateMs}: whose calendar the kept world must be of, and the game's date now.
+  const bakedBoardPromise=bakedBoardPath?Promise.all([fetch(bakedBoardPath).then(response=>response.ok?response.json():null).catch(()=>null),
+    boardKept&&Number.isFinite(boardKept.dateMs)?keptBoard(regionParam,resolvedYear,{clock:boardKept.clock}):null]).then(([baked,kept])=>boardAsKept(baked,kept,boardKept?.dateMs)):null;
   if(bakedBoardPath)requestBoardStampPipelines({device,shader}).catch(()=>{});
   const leafBitmapPromise=load('assets/tree-foliage.png').then(r=>r.blob()).then(b=>createImageBitmap(b));
   let canopyFailure=null;

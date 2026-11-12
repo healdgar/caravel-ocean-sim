@@ -397,7 +397,25 @@ export function layBoardCountry({ baked, region, grid, heightAt, port, wet, LAND
     slight(CITY_TYPE.STANDARD, x, heightAt(x, z), z, boardHashUnit(at, 109) * Math.PI, BOARD_CLOTHS[(host.house | 0) % BOARD_CLOTHS.length] + 0.6); built.standards++;
     camp(x, z, Math.max(4, Math.min(24, Math.round(host.men / 25))), CITY_PAINT.LINEN, 113 + at);
   });
-  for (const site of works.sites ?? []) { const x = ox + site.x, z = oz + site.z; if (dry(x, z) && !placed.some(x, z, 5, (o) => rectDist(o, x, z) <= 1)) { slight(CITY_TYPE.SCAFFOLD, x, heightAt(x, z), z, boardHashUnit(Math.round(x), Math.round(z)) * Math.PI); built.scaffolds++; } }
+  // A work in hand. On a building that stands (its fabric being mended, raised or rebuilt): a scaffold against its
+  // back, a side or its front, whichever is clear, its frame to the wall. On open ground (something new): scaffold
+  // and stacks where it will stand.
+  const clearAt = (x, z, but) => dry(x, z) && streetEdge(x, z, 3) > 0.6 && !placed.some(x, z, 6, (o) => o !== but && rectDist(o, x, z) <= 2.6);
+  for (const site of works.sites ?? []) {
+    const x = ox + site.x, z = oz + site.z;
+    let on = null;
+    placed.some(x, z, 1, (o) => { if (rectDist(o, x, z) > 0.5) return false; on = o; return true; });
+    if (!on) {
+      if (site.kind !== 'fabric' && clearAt(x, z, null)) { slight(CITY_TYPE.SCAFFOLD, x, heightAt(x, z), z, boardHashUnit(Math.round(x), Math.round(z)) * Math.PI); built.scaffolds++; }
+      continue;
+    }
+    for (const [ux, uz, half, turn] of [[0, 1, on.d / 2, Math.PI], [1, 0, on.w / 2, -Math.PI / 2], [-1, 0, on.w / 2, Math.PI / 2], [0, -1, on.d / 2, 0]]) {
+      const [px, pz] = local(on, ux * (half + 2.8), uz * (half + 2.8));
+      if (!clearAt(px, pz, on)) continue;
+      slight(CITY_TYPE.SCAFFOLD, px, heightAt(px, pz), pz, on.yaw + turn); built.scaffolds++;
+      break;
+    }
+  }
 
   /* ---- what any point of a town's ground is, and where a tree may stand in it ---- */
   const houseNear = (x, z, reach) => placed.some(x, z, reach, (o) => rectDist(o, x, z) <= reach);
@@ -512,7 +530,7 @@ export function layBoardCountry({ baked, region, grid, heightAt, port, wet, LAND
     stats: {
       blocks: blockCount, typed: typedTypes.length, houses, streets: streets.length, churches: churches.length, gates: gates.length,
       lanes: streets.filter((s) => s.kind === 'lane' || s.kind === 'alley').length, squares: squares.length, places: places.length,
-      furlongs: fields.length, people: board.people, fronts, stalls, built, dropped,
+      furlongs: fields.length, people: board.people, day: board.day ?? 0, fronts, stalls, built, dropped,
       milliseconds: typeof performance === 'object' ? performance.now() - started : 0,
     },
   };
