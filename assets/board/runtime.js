@@ -294,5 +294,46 @@ globalThis.BOARD_MODEL = (() => {
     };
   }
 
-  return { VERSION, found, live, board, freeze, thaw, serve, folk, watch };
+  // Someone of a place who goes to sea in the traveller's ship: the first mate (js/first-mate.js). They leave the
+  // place's roll as the model's own travellers do: one of its travellers, bound for home, who does not arrive until
+  // they are put ashore again. So the town neither counts them at their work nor buries them while they are gone, the
+  // model's own card still knows them, and their place at home is held for them. Their household stays theirs, under
+  // whoever of it is left (the model's own rule for one who leaves: the wife of a husband gone, else the eldest).
+  // Unlike every other hook here this is an act: it is the player's, and the world goes another way from that day.
+  const AT_SEA = 'at sea', SEA_DAYS = 360 * 100;
+  const atSea = (p) => (W.travellers || []).find((t) => t.p === p && t.why === AT_SEA && !t.errand) || null;
+  function embark(id) {
+    const found = findPerson(id), p = found?.p;
+    if (!p) throw new Error('The model knows no one of that number');
+    if (p.dead) throw new Error(`${folkName(p)} is dead`);
+    const gone = atSea(p);
+    if (gone) return { id: p.id, name: folkName(p), home: gone.to, since: gone.depart, already: true };
+    const si = p.si, s = W.settlements?.[si], index = Array.isArray(s?.folk) ? s.folk.indexOf(p) : -1;
+    if (index < 0) throw new Error(`${folkName(p)} is not at home to be asked`);
+    if (awayNow(p) || p.abbey != null || p.churchBody || p.outlawCampId || ageYrs(p) < 14) throw new Error(`${folkName(p)} is not free to go`);
+    removeAt(s, index);
+    const h = householdAccount(p);
+    if (h && h.head === p) {
+      const left = [...(h.members || [])].filter((q) => q !== p && !q.dead && q.si === si);
+      if (left.length) h.head = left.find((q) => q.sx === 'f' && q.sp === p) || left.sort((a, b) => ageYrs(b) - ageYrs(a))[0];
+    }
+    p.si = -1;
+    (W.travellers || (W.travellers = [])).push({ p, from: si, to: si, why: AT_SEA, poly: [{ x: s.pos.x, z: s.pos.z }, { x: s.pos.x, z: s.pos.z }], len: 0, depart: day(), arrive: day() + SEA_DAYS });
+    householdHeadsChanged(s);
+    life(p, `Went to sea from ${s.name} as a ship's mate`);
+    return { id: p.id, name: folkName(p), home: si, since: day(), already: false };
+  }
+  // Put ashore at home again: back on its roll, in their own household.
+  function disembark(id) {
+    const T = W.travellers || [], index = T.findIndex((t) => t.p?.id === id && t.why === AT_SEA && !t.errand);
+    if (index < 0) return { id, ashore: false };
+    const t = T[index], p = t.p, s = W.settlements?.[t.to];
+    if (!s) throw new Error('Their home is no more');
+    T.splice(index, 1);
+    p.si = t.to; (s.folk || (s.folk = [])).push(p); invalidateFolkIndex(); householdHeadsChanged(s);
+    if (!p.dead) life(p, `Came home to ${s.name} from the sea`);
+    return { id: p.id, name: folkName(p), home: t.to, ashore: true };
+  }
+
+  return { VERSION, found, live, board, freeze, thaw, serve, folk, watch, embark, disembark };
 })();

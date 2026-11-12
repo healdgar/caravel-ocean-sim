@@ -51,6 +51,8 @@ test('Lisbon\'s fort posts are manned by the model\'s watch: each named, each an
     .filter((p) => p.kind === 'crown' && p.tall >= 14 && p.x > 60 && p.x < 1220 && p.y > 60 && p.y < 800).sort((a, b) => b.tall - a.tall);
   assert.ok(inSight.length >= 1, 'a lookout on the turret\'s crown is in sight');
   const one = inSight[0];
+  // Whoever passes between the eye and the turret is the one pointed at while they pass: wait for a clear sight of him.
+  await page.waitForFunction(([x, y, id]) => oceanFolk.under(x, y)?.soul?.id === id, [one.x, one.y, one.id], { timeout: 60000, polling: 250 });
   await page.mouse.move(one.x + 40, one.y + 40); await page.mouse.move(one.x, one.y, { steps: 4 }); await page.waitForTimeout(400);
   const label = await page.evaluate(() => { const el = document.getElementById('folk-name'); return el && !el.hidden ? el.textContent : null; });
   assert.ok(label && label.startsWith(one.name) && label.endsWith(' · ' + one.post), `${label} for ${one.name}`);

@@ -84,8 +84,9 @@ export function folkSoulOfTitle(id, title) {
 /**
  * The panel. `person(id)` answers the model's card of someone ({card, links}); `whereabouts(id)` what they are at if
  * they are in sight, or ''. `show(soul, doing)` opens it on them; kin named on the card can be asked after in turn.
+ * `extra(soul, el)` may add to an opened card (the storyteller's place to speak to them, js/storyteller.js).
  */
-export function createFolkCard({ person, whereabouts = () => '', documentRef = document }) {
+export function createFolkCard({ person, whereabouts = () => '', documentRef = document, extra = null }) {
   const el = documentRef.createElement('aside');
   el.id = 'folk-card'; el.hidden = true; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', 'Townsperson');
   documentRef.body.append(el);
@@ -100,8 +101,10 @@ export function createFolkCard({ person, whereabouts = () => '', documentRef = d
     const said = make('p', 'folk-said', '…');
     el.append(close, make('h2', '', soul.name), make('p', 'folk-what', [age, soul.role, doing].filter(Boolean).join(' · ')), said);
     el.hidden = false;
+    const more = () => { try { extra?.(soul, el); } catch (fault) { console.error(fault); } };
     let answer;
-    try { answer = await person(soul.id); } catch (error) { if (mine === asked) said.textContent = 'They have nothing to say just now.'; return; }
+    // Someone the model cannot answer for here (the mate, far from the port they were born in) can still be spoken to.
+    try { answer = await person(soul.id); } catch (error) { if (mine === asked) { said.textContent = 'They have nothing to say just now.'; more(); } return; }
     if (mine !== asked) return;
     if (!answer?.card) { said.textContent = 'No one here knows them.'; return; }
     const card = folkCardFacts(answer.card);
@@ -132,6 +135,7 @@ export function createFolkCard({ person, whereabouts = () => '', documentRef = d
       }
       el.append(row);
     }
+    more();
   }
   documentRef.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !el.hidden) hide(); });
   return { element: el, show, hide, get open() { return !el.hidden; } };

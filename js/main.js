@@ -22,8 +22,8 @@ import { coastalRegionStageURL } from './landfall.js';
 import { showCareerPrompt, showSceneNotice, showPortPanel, showCareerEnding, careerMoney } from './career-ui.js';
 import { NEW_WORLD_ERA } from './career-era.js';
 import { createCareerPort } from './career-port.js';
-import { cargoCapacityTonnes } from './career-trade.js';
-import { formatJulianDate } from './voyage/ocean-climate.js';
+import { cargoCapacityTonnes, careerTitle, careerWorth, goodsInSeason, marketQuote } from './career-trade.js';
+import { formatJulianDate, compassFromRendererDir, initialBearing, windDescription } from './voyage/ocean-climate.js';
 import { createGunneryControls } from './gunnery-ui.js';
 import { createGunneryEffects } from './gunnery-effects.js';
 import { createGunnerySeaProbe } from './gunnery-sea-probe.js';
@@ -90,7 +90,10 @@ import { createTownsfolk, requestTownsfolkPipelines } from './townsfolk.js';
 import { createBoardLife } from './board-life.js';
 import { BOARD_KEEP_CAREER, forgetKeptBoards, keepBoard, keptBoard } from './board-keep.js';
 import { boardFolkStreets, folkDoing, watchDoing } from './board-folk.js';
-import { createFolkCard } from './folk-card.js';
+import { createFolkCard, folkCardFacts, folkSoulOfTitle } from './folk-card.js';
+import { createStoryteller, mateShortlist, storytellerScene } from './storyteller.js';
+import { createMateFigure, mateDoing, stepMateFigure } from './first-mate.js';
+import { mateAbout, mateCandidateAccount, mateCandidateLine, mateCounsel, mateTopics } from './mate-counsel.js';
 import { WALKER_WORDS, townSolids } from './town-streets.js';
 import { bakedBoardFor } from './old-world.js';
 import { createProps } from './props.js';
@@ -722,6 +725,9 @@ async function main() {
   const playerVessel=vessels[0],shipAsset=playerVessel.asset,hullUBO=playerVessel.hullUBO,crew=playerVessel.crew,interaction=playerVessel.interaction,shadows=playerVessel.shadows;
   let fortSoldiers=null;
   try{if(sharedCrew)fortSoldiers=await createFortSoldiers({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,shared:sharedCrew});}catch(error){console.warn('Fort garrison initialization:',error);}
+  // The first mate ashore is one more such body, in a renderer with room for no one else.
+  let mateSoldiers=null;
+  try{if(sharedCrew)mateSoldiers=await createFortSoldiers({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,shared:sharedCrew,most:1});}catch(error){console.warn('The first mate\'s figure:',error);}
   const props=createProps({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA});
   window.oceanProps=props;
   let townsfolk=null;
@@ -3216,7 +3222,9 @@ async function main() {
       ashore.on=true;updateHelp(true);updatePortCall();
     };
     // Where the captain is: aboard or ashore, and where the eye stands.
-    window.oceanCaptain={get ashore(){return ashore.on;},get eye(){return {x:cam.x,y:cam.y,z:cam.z,yaw:cam.yaw};},walk:()=>shoreWalkButton.onclick()};
+    window.oceanCaptain={get ashore(){return ashore.on;},get eye(){return {x:cam.x,y:cam.y,z:cam.z,yaw:cam.yaw};},walk:()=>shoreWalkButton.onclick(),
+      // Turn the eye ashore to a bearing (radians, 0 north, clockwise) and a pitch.
+      look:(yaw,pitch=0)=>{if(ashore.on){cam.yaw=yaw;cam.pitch=pitch;}}};
     const PILOT_RANGE_KM=25;
     const ROW_ASHORE_SPEED=.8;
     const pilotablePort=()=>{
@@ -4004,7 +4012,7 @@ async function main() {
     surfaceWaves.encode(cp);
     for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter)v.pose?.encode(cp,v.boat.showProw);
     for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter&&vesselHasVisibleCrew(v))v.crew?.encodePose(cp);
-    fortSoldiers?.encodePose(cp);
+    fortSoldiers?.encodePose(cp);mateSoldiers?.encodePose(cp);
     townsfolk?.encode(cp,gameDateMs());boardLife?.tick(gameDateMs());
     props?.encode(cp,simF[53],simTime);
     for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter)v.interaction.encode(cp,wakePool.next);
@@ -4074,7 +4082,7 @@ async function main() {
       const now=performance.now();if(now-boardToldAt<45000)return;
       const line=lines.findLast(entry=>entry.cat!=='trade')??lines[lines.length-1];
       if(line){boardToldAt=now;voyageCtl?.showToast?.(line.date+'. '+line.text,8);}
-    }});
+    },onNewsAll:lines=>storyteller?.tell({kind:'news',lines:lines.slice(-6).map(entry=>entry.date+': '+entry.text)}),onState:state=>{if(state==='alive')mateEmbark();}});
     window.oceanBoard=boardLife;boardLife.start();
   }
   // Whoever is about a founded port is one of its model's people. The model plans the day of those who live
@@ -4101,7 +4109,7 @@ async function main() {
       const began=performance.now();
       if(folkPlan.keptFor!==base){folkPlan.keptFor=base;folkPlan.kept.clear();folkPlan.solids=townSolids(port);}
       // Whoever stands a post of the port's forts today walks no street.
-      const garrison=port.garrison,away=garrison?.watch?garrison.posted??=new Set(garrison.soldiers.map(s=>s.soul?.id).filter(id=>id!=null)):null;
+      const garrison=port.garrison,posted=garrison?.watch?garrison.posted??=new Set(garrison.soldiers.map(s=>s.soul?.id).filter(id=>id!=null)):null,away=firstMate?new Set([...(posted??[]),firstMate.id]):posted;
       port.streets=boardFolkStreets({plan,origin:region,heightAt:(px,pz)=>terrain.groundSample(px+offset.x,pz+offset.z),base,kept:folkPlan.kept,blocked:folkPlan.solids,away});
       townsfolk.refresh(port);
       Object.assign(folkPlan,{day:plan.day,x,z,at:performance.now(),laidMs:performance.now()-began,laid:folkPlan.laid+1});
@@ -4141,7 +4149,7 @@ async function main() {
   // hides those behind (a wall between is not known here).
   function folkUnder(clientX,clientY){
     const streets=folkSeen(),posts=watchSeen();
-    if(!streets&&!posts)return null;
+    if(!streets&&!posts&&!mateAshore?.figure.visible)return null;
     const rect=canvas.getBoundingClientRect(),px=clientX-rect.left,py=clientY-rect.top,count=streets?Math.min(streets.souls.length,townsfolk.people):0;
     let best=-1,post=null,least=Infinity;
     const nearer=seen=>{
@@ -4152,6 +4160,8 @@ async function main() {
     };
     for(let i=0;i<count;i++)if(nearer(folkOnScreen(streets,i,rect))){best=i;post=null;}
     for(const s of posts??[])if(nearer(watchOnScreen(s,rect)))post=s;
+    const mate=mateAshore?.figure;
+    if(mate?.visible&&nearer(folkStandsAt(mate.position[0],mate.position[1],mate.position[2],rect)))return {mate:true,soul:mate.soul,doing:mateDoing(mateAshore)};
     if(post)return {post,soul:post.soul,doing:watchDoing(post)};
     if(best<0)return null;
     return {index:best,soul:streets.souls[best],doing:folkAbout(streets,best,folkWalker(streets,best))};
@@ -4160,9 +4170,18 @@ async function main() {
     const streets=folkSeen(),index=streets?streets.souls.findIndex(soul=>soul?.id===id):-1;
     if(index>=0&&index<townsfolk.people)return folkAbout(streets,index,folkWalker(streets,index));
     const post=watchSeen()?.find(s=>s.soul?.id===id);
-    return post?watchDoing(post):'';
+    return post?watchDoing(post):firstMate?.id===id?mateDoing(mateAshore):'';
   }
-  const folkCard=createFolkCard({person:id=>boardLife?boardLife.person(id):Promise.reject(new Error('No board is alive')),whereabouts:folkWhereabouts});
+  let storyteller=null;
+  // The model's card of someone. Of the mate it says they are on the road (they left its roll to go to sea, as one
+  // of its travellers): here that line says where they truly are.
+  const folkCardOf=async id=>{
+    if(!boardLife)throw new Error('No board is alive');
+    const answer=await boardLife.person(id);
+    if(answer?.card&&mateOfThisBoard()&&firstMate.id===id)return {...answer,card:answer.card.replace(/^Now .*$/m,'Now at sea as first mate'+(voyageCtl?.voyage?.shipName?' of the '+voyageCtl.voyage.shipName:''))};
+    return answer;
+  };
+  const folkCard=createFolkCard({person:folkCardOf,whereabouts:folkWhereabouts,extra:(soul,el)=>storyteller?.card(soul,el)});
   const folkName=document.createElement('div');folkName.id='folk-name';folkName.hidden=true;document.body.append(folkName);
   let folkPress=null,folkHoverAt=0;
   canvas.addEventListener('pointerdown',e=>{folkPress=e.button===0&&!e.shiftKey?{id:e.pointerId,x:e.clientX,y:e.clientY,at:performance.now()}:null;folkName.hidden=true;},true);
@@ -4170,14 +4189,14 @@ async function main() {
     const press=folkPress;folkPress=null;
     if(!press||press.id!==e.pointerId||Math.hypot(e.clientX-press.x,e.clientY-press.y)>6||performance.now()-press.at>600)return;
     const found=folkUnder(e.clientX,e.clientY);
-    if(found)folkCard.show(found.soul,found.doing);
+    if(found){storyAsked={id:found.soul.id,name:found.soul.name};folkCard.show(found.soul,found.doing);}
   });
   canvas.addEventListener('pointermove',e=>{
-    if(e.pointerType!=='mouse'||e.buttons||!(folkSeen()||watchSeen())){if(!folkName.hidden){folkName.hidden=true;canvas.style.cursor='';}return;}
+    if(e.pointerType!=='mouse'||e.buttons||!(folkSeen()||watchSeen()||mateAshore?.figure.visible)){if(!folkName.hidden){folkName.hidden=true;canvas.style.cursor='';}return;}
     const now=performance.now();if(now-folkHoverAt<90)return;folkHoverAt=now;
     const found=folkUnder(e.clientX,e.clientY);
     folkName.hidden=!found;canvas.style.cursor=found?'pointer':'';
-    if(found){folkName.textContent=found.soul.name+(found.soul.role?', '+found.soul.role:'')+(found.post?' · '+found.post.role:'');folkName.style.left=e.clientX+'px';folkName.style.top=e.clientY+'px';}
+    if(found){folkName.textContent=found.soul.name+(found.soul.role?', '+found.soul.role:'')+(found.post?' · '+found.post.role:found.mate?' · first mate':'');folkName.style.left=e.clientX+'px';folkName.style.top=e.clientY+'px';}
   });
   canvas.addEventListener('pointerleave',()=>{folkName.hidden=true;canvas.style.cursor='';});
   window.oceanFolk={
@@ -4201,6 +4220,166 @@ async function main() {
       const rect=canvas.getBoundingClientRect();
       return (watchSeen()??[]).map(s=>{const seen=watchOnScreen(s,rect);return {soul:s.soul,post:s.role,kind:s.stationKind,work:s.buildingPrefabId,doing:watchDoing(s),at:{x:s.position[0],y:s.position[1],z:s.position[2]},seen:seen&&{x:rect.left+seen.x,y:rect.top+seen.y,tall:seen.tall,depth:seen.depth}};});
     },
+  };
+  // The storyteller (js/storyteller.js): a dungeon master in the player's agent app, and in the story the captain's
+  // first mate. What it asks of the game is answered here, from the model and the game's own state; what the player
+  // does it is told. The mate is one of the model's people, chosen in the port the captain starts from: kept with
+  // the career, walking a step behind the captain ashore (js/first-mate.js), and no longer about the streets.
+  const MATE_KEPT='waterworld.mate';
+  const mateOfRecord=()=>{const kept=careerStore.read()?.mate;if(kept)return kept;try{return JSON.parse(sessionStorage.getItem(MATE_KEPT)??'null');}catch{return null;}};
+  let firstMate=mateOfRecord(),mateAshore=null,storyAsked=null;
+  // Whether the living model is the one the mate was born in: only there is their number theirs.
+  function mateOfThisBoard(){return Boolean(firstMate&&boardLife?.state==='alive'&&firstMate.board===boardLife.port+':'+boardLife.year);}
+  // The mate has gone to sea: the model is told so whenever it wakes with them still on its roll (a world taken up
+  // from before they signed on). Asked of one already at sea it changes nothing.
+  function mateEmbark(){if(mateOfThisBoard())boardLife.embark(firstMate.id).then(()=>{folkPlan.at=-Infinity;folkPlan.day=-1;},error=>console.warn('The mate and the model:',error));}
+  mateEmbark();
+  const storyLife=()=>{if(boardLife?.state==='alive')return boardLife;throw new Error(boardLife?`The country's model is ${boardLife.state} here`:'This place has no living model: only the sea, the ship and the captain are known here');};
+  // The port in sight by the name its own people call it (the model's, where it has one), or null at sea.
+  const storyPort=()=>{if(!terrain?.port)return null;const garrison=fortSoldiers?.state;return (garrison?.watch&&garrison.port===terrain.port?garrison.watch.place:null)??terrain.region?.name??'a port';};
+  const storyPlace=()=>({name:storyPort()??'',kind:terrain?.port?'port':'sea',ruler:boardLife?.status?.monarch??undefined});
+  function storySituation(){
+    const v=voyageCtl?.voyage??null,port=terrain?.port??null,era=careerPort?.era??null,dateMs=gameDateMs(),s=boardLife?.status??null,alive=boardLife?.state==='alive';
+    let ledger=null;try{ledger=careerPort?.ledger??null;}catch{ledger=null;}
+    const worth=ledger&&era?careerWorth(era,ledger,{}):undefined;
+    // The wind and the heading as the helm's own panel gives them: by the compass, the wind by where it blows from.
+    const weather=v?.weather??null,windFrom=Number.isFinite(weather?.windFrom)?weather.windFrom:compassFromRendererDir(P.windDir),turn=deg=>Math.round(((deg%360)+360)%360);
+    const bound=v?.destination&&v?.dr&&Number.isFinite(v.destination.lat)?{leagues:greatCircleKm(v.dr.lat,v.dr.lon,v.destination.lat,v.destination.lon)/5.556,bearing:turn(initialBearing(v.dr.lat,v.dr.lon,v.destination.lat,v.destination.lon)-(v.variation??0))}:undefined;
+    return {
+      date:{text:s?.date??(Number.isFinite(dateMs)?formatJulianDate(dateMs):''),day:alive?boardLife.day:undefined,year:Number.isFinite(dateMs)?new Date(dateMs).getUTCFullYear():undefined,season:s?.season},
+      realm:s?{name:window.oceanLand?.pack?.board?.realm??undefined,monarch:s.monarch,treasury:s.treasury,people:s.people,places:s.places,war:Boolean(s.war),plague:Boolean(s.plague),feuds:s.feuds,legitimacy:s.legitimacy,weather:s.weather,priceLevel:s.priceLevel}:null,
+      where:{name:storyPort()??(v?'at sea':''),kind:port?'port':'sea',ashore:ashore.on,living:alive,lat:v?.true?.lat,lon:v?.true?.lon,reckoned:v?.dr?{lat:v.dr.lat,lon:v.dr.lon}:undefined},
+      ship:{name:v?.shipName,class:boat.modelId,hands:v?.crew,headingDeg:Number.isFinite(boat.heading)?turn(boat.heading-(v?.variation??0)):undefined,compassCourse:v?.compassCourse,knots:Number.isFinite(boat.surgeVelocity)?Math.round(Math.abs(boat.surgeVelocity)/KNOT_TO_MPS*10)/10:undefined,windFrom:turn(windFrom),windWords:weather?.description??windDescription(P.windSpeed),windKnots:Math.round(P.windSpeed*19.44)/10,foodDays:v?.provisions?.food,waterDays:v?.provisions?.water},
+      captain:{title:worth!==undefined?careerTitle(era,worth):undefined,worth,coin:ledger?.purse,currency:era?.currency?.plural,cargo:Object.entries(ledger?.cargo??{}).filter(([,tonnes])=>tonnes>0).map(([good,tonnes])=>({good,name:era?.goods?.find(one=>one.id===good)?.name??good,units:Math.round(tonnes*10)/10})),prizes:ledger?.prizesTaken,shipsLost:ledger?.shipsLost,portsVisited:ledger?.portsVisited?.length},
+      voyage:v?{from:v.departure?.name,to:v.destination?.name??null,toGo:bound,daysOut:v.dayAtSea,leagues:Math.round((v.distanceLoggedNm??0)/3),log:(v.log??[]).slice(-6).map(line=>line.text)}:null,
+      mate:firstMate,
+    };
+  }
+  // Someone of the model as whoever plays them is to be told: their card, where they are, the day and the talk.
+  async function storyPerson(id){
+    const life=storyLife(),answer=await folkCardOf(id);
+    if(!answer?.card)throw new Error('The game knows no one of that number');
+    const soul=folkSeen()?.souls.find(one=>one?.id===id)??watchSeen()?.find(s=>s.soul?.id===id)?.soul??folkSoulOfTitle(id,answer.card.split('\n')[0]);
+    return storytellerScene({soul:firstMate?.id===id?{...soul,name:firstMate.name,role:'first mate'+(firstMate.role?', once '+firstMate.role:'')}:soul,answer,doing:folkWhereabouts(id),place:storyPlace(),status:life.status,news:life.news});
+  }
+  // Who is about the captain now, nearest first.
+  function storyNearby(){
+    const streets=folkSeen(),rect=canvas.getBoundingClientRect(),about=[];
+    for(let i=0,n=streets?Math.min(streets.souls.length,townsfolk.people):0;i<n;i++){
+      const soul=streets.souls[i],seen=soul?folkOnScreen(streets,i,rect):null;
+      if(seen&&seen.tall>=FOLK_LEAST_PX)about.push({id:soul.id,name:soul.name,age:Math.floor(soul.age),sex:soul.sex,role:soul.role,doing:folkAbout(streets,i,seen.stride),metres:Math.round(seen.depth)});
+    }
+    const posts=(watchSeen()??[]).map(s=>({s,seen:watchOnScreen(s,rect)})).filter(one=>one.seen&&one.seen.tall>=FOLK_LEAST_PX).map(({s,seen})=>({id:s.soul.id,name:s.soul.name,role:s.soul.role,doing:watchDoing(s),metres:Math.round(seen.depth)}));
+    const near=(a,b)=>a.metres-b.metres;
+    return {place:storyPort(),ashore:ashore.on,living:boardLife?.state==='alive',inSight:about.sort(near).slice(0,24),atPosts:posts.sort(near).slice(0,12),aboutTheTown:streets?Math.min(streets.souls.length,townsfolk.people):0,lastAskedAfter:storyAsked};
+  }
+  // Who of the port's people might sign on as mate, each with what the model keeps of them.
+  async function storyMateCandidates(n){
+    if(boardLife?.state!=='alive')return {none:'This port is not one of the living ones, so there is no one of the model to choose: the ship\'s own mate stands. Write mate.md from what the player tells you of them.'};
+    const plan=await boardLife.folk(0,{most:1,others:900}),posted=fortSoldiers?.state?.watch?new Set(fortSoldiers.state.soldiers.map(s=>s.soul?.id)):null;
+    return Promise.all(mateShortlist(plan.others,{n,away:posted}).map(async soul=>{
+      const card=folkCardFacts((await boardLife.person(soul.id))?.card??''),kin=['Wife','Husband','Children','Widow of','Widower of','Father','Mother'].filter(key=>card.facts[key]).map(key=>key+': '+card.facts[key]);
+      return {id:soul.id,name:soul.name,age:Math.floor(soul.age),sex:soul.sex,role:soul.role,home:card.facts.Home,kin,household:card.household.length,nature:card.nature,learning:card.learning,born:card.life[0]};
+    }));
+  }
+  async function storyMateChoose(id){
+    const life=storyLife(),board=life.port+':'+life.year,was=firstMate,same=was?.id===id&&was.board===board;
+    // They leave the town's roll for the ship's (and whoever was mate before them goes home to theirs).
+    if(!same){
+      await life.embark(id);
+      if(was?.board===board)await life.disembark(was.id).catch(error=>console.warn('The old mate and the model:',error));
+    }
+    const scene=await storyPerson(id);
+    firstMate={id,name:scene.person.name,sex:scene.person.sex,age:Math.floor(scene.person.age),role:same?was.role:scene.person.role,port:storyPort(),board,since:same?was.since:life.status?.date??'',about:mateAbout(scene.card)};
+    if(!careerStore.write({mate:firstMate}))try{sessionStorage.setItem(MATE_KEPT,JSON.stringify(firstMate));}catch{/* a private window: the mate is kept while the page is */}
+    // Their figure is made afresh, and the streets are laid again without them.
+    mateAshore=null;folkPlan.at=-Infinity;folkPlan.day=-1;
+    return {person:{...scene.person,role:firstMate.role},card:scene.card,place:scene.place,date:scene.date};
+  }
+  const storyName=async person=>{
+    if(person==null||person===firstMate?.id)return firstMate?.name??'The mate';
+    const seen=folkSeen()?.souls.find(one=>one?.id===person)??watchSeen()?.find(s=>s.soul?.id===person)?.soul;
+    if(seen)return seen.name;
+    const answer=await boardLife?.person(person).catch(()=>null);
+    return answer?.card?folkSoulOfTitle(person,answer.card.split('\n')[0]).name:'Someone';
+  };
+  // What the mate can tell the captain with no storyteller by (js/mate-counsel.js): the questions that fit the
+  // moment, each answered from what is gathered here of the game and the model. Until someone of a port is signed
+  // on the ship's own mate answers, and can say who would come.
+  const shipMate=()=>vessels[0]?.crew?.state?.crew?.find(s=>s.role==='Mate')?.name??'The mate';
+  const mateTown={name:null,at:-Infinity,data:null,asking:false};
+  function mateTownRecord(){
+    const name=boardLife?.state==='alive'?storyPort():null,now=performance.now();
+    if(!name){mateTown.name=null;mateTown.data=null;return null;}
+    if((name!==mateTown.name||now-mateTown.at>60000)&&!mateTown.asking){
+      mateTown.asking=true;if(name!==mateTown.name)mateTown.data=null;mateTown.name=name;
+      boardLife.panel('advisor-state',{path:'settlement:'+name}).then(data=>{if(mateTown.name===name&&data?.name){mateTown.data=data;storyteller?.refresh();}},()=>{}).finally(()=>{mateTown.asking=false;mateTown.at=performance.now();});
+    }
+    return mateTown.data;
+  }
+  // What this port's merchants quote today, each beside the good's usual price.
+  function mateMarket(){
+    const v=voyageCtl?.voyage,region=terrain?.region,era=careerPort?.era;
+    if(!v||!region||!era||!terrain?.port)return null;
+    try{
+      const ledger=careerPort.ledger,year=new Date(v.dateMs).getUTCFullYear(),port=ledger?.cargo?findHistoricalColonialPort(region.latitude,region.longitude,region.id,year):null;
+      return port?goodsInSeason(era,year).map(good=>({...marketQuote(era,ledger,port,good,v.dateMs),usual:good.price})):null;
+    }catch{return null;}
+  }
+  const mateKnows=()=>({mate:firstMate?{...firstMate,model:true}:{name:shipMate(),model:false},now:storySituation(),near:ashore.on?storyNearby():null,news:boardLife?.state==='alive'?boardLife.news:[],town:mateTownRecord(),market:mateMarket()});
+  let mateOffered=[];
+  async function mateAnswer(id){
+    if(id==='sign'){
+      const list=await storyMateCandidates(6);
+      if(!Array.isArray(list)||!list.length)return {text:'No one here would come, captain.'};
+      mateOffered=list;
+      return {text:`These would come if you asked them, captain: ${list.map(mateCandidateLine).join('; ')}.`,topics:[...list.map(one=>({id:'sign:'+one.id,label:mateCandidateLine(one)})),{id:'back',label:'Not now'}]};
+    }
+    const [what,number]=String(id).split(':'),one=number?mateOffered.find(offered=>offered.id===Number(number)):null;
+    if(what==='sign'&&one)return {text:mateCandidateAccount(one),topics:[{id:'take:'+one.id,label:`Sign ${one.name.split(' ')[0]} on`},{id:'sign',label:'Someone else'},{id:'back',label:'Not now'}]};
+    if(what==='take'&&one){
+      await storyMateChoose(one.id);
+      storyteller.tell({kind:'mate',person:firstMate.id,name:firstMate.name});
+      return {text:`Aye, captain. ${firstMate.name}, at your word. I will fetch my chest and come aboard.`};
+    }
+    return {text:mateCounsel(id,mateKnows())};
+  }
+  storyteller=createStoryteller({storage:careerBrowserStorage('sessionStorage'),counsel:{who:()=>({name:firstMate?.name??shipMate()}),topics:()=>mateTopics(mateKnows(),8),answer:mateAnswer},game:{
+    situation:storySituation,nearby:storyNearby,person:storyPerson,mateCandidates:storyMateCandidates,mateChoose:storyMateChoose,nameOf:storyName,mate:()=>firstMate,
+    world:path=>storyLife().panel('advisor-state',path?{path}:{}),find:(name,n=60)=>storyLife().find(String(name??''),n),
+    inspect:(code,name)=>code?storyLife().inspect(String(code),true):storyLife().panel('advisor-inspect',{name:String(name??''),full:true}),
+    chronicle:args=>storyLife().annals({n:20,...args}),panel:({kind,town,house})=>storyLife().panel('advisor-panel',{of:kind,town,house}),
+  }});
+  if(qs.get('storyteller')!=='off'){storyteller.mount(captainBody);storyteller.resume();}
+  // What the player does, as the storyteller hears of it: coming ashore and going back aboard, raising a port and leaving it.
+  const storySeen={ashore:ashore.on,port:storyPort()};
+  let mateMoment='';
+  setInterval(()=>{
+    // The mate's questions follow the moment: where the ship is, whether the captain is ashore, who was last pointed at.
+    let someone=false;if(ashore.on){const near=storyNearby();someone=Boolean(near.inSight.length||near.atPosts.length);}
+    const port=storyPort(),moment=[port,ashore.on,someone,firstMate?.id,storyAsked?.id,boardLife?.state,Boolean(mateTown.data),Boolean(voyageCtl?.voyage)].join('|');
+    if(moment!==mateMoment){mateMoment=moment;storyteller.refresh();}
+    if(storyteller.state!=='paired'){storySeen.ashore=ashore.on;storySeen.port=port;return;}
+    if(ashore.on!==storySeen.ashore){storySeen.ashore=ashore.on;storyteller.tell({kind:ashore.on?'ashore':'aboard',place:port});}
+    if(port!==storySeen.port){storyteller.tell(port?{kind:'landfall',place:port}:{kind:'sailed',from:storySeen.port});storySeen.port=port;}
+  },1500);
+  // The mate ashore: their figure is made when first wanted, and walked after the captain each frame.
+  function tendMate(dt){
+    if(!mateSoldiers||!firstMate){if(mateAshore){mateAshore=null;mateSoldiers?.setPort(null);}return;}
+    const on=ashore.on&&Boolean(terrain);
+    if(!mateAshore){if(!on)return;mateAshore=createMateFigure(firstMate);mateSoldiers.setPort(mateAshore.port);}
+    if(stepMateFigure(mateAshore,dt,{ashore:on,captain:on?{x:cam.x,z:cam.z,yaw:cam.yaw}:null,ground:(x,z)=>terrain.groundSample(x,z),open:ashoreOpen}))mateSoldiers.setPort(mateAshore.port);
+    mateSoldiers.update(mateAshore.port,dt,P.windSpeed,cam,false,gameDateMs());
+  }
+  window.oceanStoryteller={
+    door:storyteller,get mate(){return firstMate;},
+    // The mate's figure ashore: where it stands in the world and on the screen, or null while the captain is aboard.
+    get figure(){
+      const s=mateAshore?.figure;if(!s?.visible)return null;
+      const rect=canvas.getBoundingClientRect(),seen=folkStandsAt(s.position[0],s.position[1],s.position[2],rect);
+      return {name:s.name,sex:s.sex,at:{x:s.position[0],y:s.position[1],z:s.position[2]},going:Boolean(s.going),fromCaptain:Math.hypot(s.position[0]-cam.x,s.position[2]-cam.z),drawn:mateSoldiers?.state?.soldiers?.[0]===s,seen:seen&&{x:rect.left+seen.x,y:rect.top+seen.y,tall:seen.tall}};
+    },
+    situation:storySituation,nearby:storyNearby,candidates:storyMateCandidates,choose:storyMateChoose,knows:mateKnows,
   };
   function frame(now) {
     if (shooting) return;  // paused while a screenshot is read back
@@ -4403,6 +4582,7 @@ async function main() {
     }else{
       fortSoldiers?.update(castleDuel.port,dt,P.windSpeed,cam,false);
     }
+    tendMate(dt);
     townsfolk?.follow(terrain?.ports,cam);tendFolk(now);
     props?.follow(terrain?.ports,cam);
     terrain?.updatePortDamage?.(simTime);
@@ -4542,7 +4722,7 @@ async function main() {
         terrain.drawShadow(pass,terrainCamera,frameF);
         props?.drawShadow?.(pass);
         townsfolk?.drawShadow?.(pass);
-        fortSoldiers?.drawShadow?.(pass);
+        fortSoldiers?.drawShadow?.(pass);mateSoldiers?.drawShadow?.(pass);
       });
     }
     frameStages.mark('Scenery');
@@ -4591,7 +4771,7 @@ async function main() {
     };
     for(const v of hulls)if(!hullBelongsDamaged(v))drawHull(v,v.render.pipeline,v.bindGroup,v.lighting);
     for(const v of hulls)if(vesselHasVisibleCrew(v))v.crew?.drawOpaque(rp);
-    fortSoldiers?.draw(rp);
+    fortSoldiers?.draw(rp);mateSoldiers?.draw(rp);
     townsfolk?.draw(rp);
     props?.draw(rp);
     frameStages.mark('GPU commands');

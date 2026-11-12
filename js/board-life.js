@@ -31,7 +31,7 @@ export const BOARD_KEEP_DAYS = 10;
 // which case the board stands as it was founded and nothing else is lost. `kept()` answers the world as it was last
 // kept for this port (js/board-keep.js), which is then taken up in place of the founding one; `keep(record)` keeps
 // it, and is given the world as it stands every BOARD_KEEP_DAYS days it lives and whenever `life.keep()` is asked.
-export function createBoardLife({ baked, fetchImpl = fetch, open = openBoardWorker, onNews = null, onState = null, stride = 6, kept = null, keep = null, keepEvery = BOARD_KEEP_DAYS }) {
+export function createBoardLife({ baked, fetchImpl = fetch, open = openBoardWorker, onNews = null, onNewsAll = null, onState = null, stride = 6, kept = null, keep = null, keepEvery = BOARD_KEEP_DAYS }) {
   const world = baked?.world ?? null, asset = world ? bakedWorldAsset(baked.port, baked.year) : null;
   let model = null, busy = false, told = world?.day ?? 0, keeping = null;
   const life = {
@@ -65,6 +65,10 @@ export function createBoardLife({ baked, fetchImpl = fetch, open = openBoardWork
     // The soldiers of a place by the model's own rolls: whoever holds it, the hosts sheltering in it and the first
     // `most` of its watch, by name.
     watch: (place, options = {}) => need().then(() => model.hook('watch', place, options)),
+    // Someone of a place goes to sea in the traveller's ship (the first mate), and is put ashore at home again. These
+    // two are acts, not views: the model's world goes another way from the day of them.
+    embark: (id) => need().then(() => model.hook('embark', id)),
+    disembark: (id) => need().then(() => model.hook('disembark', id)),
     // Anyone, by their number: the model's whole card of them, and what it links to.
     person: (id, full = true) => life.inspect('p' + id, full),
     // This game's own report of the board (js/old-world-board.js stands it), and the whole world frozen as it is now.
@@ -114,7 +118,7 @@ export function createBoardLife({ baked, fetchImpl = fetch, open = openBoardWork
       if (lines.length) {
         life.news.push(...lines);
         if (life.news.length > BOARD_NEWS_KEPT) life.news.splice(0, life.news.length - BOARD_NEWS_KEPT);
-        try { onNews?.(lines); } catch (fault) { console.error(fault); }
+        try { onNews?.(lines); onNewsAll?.(lines); } catch (fault) { console.error(fault); }
       }
       if (keep && life.day - life.keptDay >= keepEvery) keepNow();
     }).catch((error) => { if (life.state === 'alive') state('failed', String(error?.message || error)); }).finally(() => { busy = false; });

@@ -9,9 +9,9 @@ test('Pages uses versioned, byte-identical runtime assets and excludes inline me
   const html=await readFile(new URL('docs/index.html',root),'utf8');
   const manifest=JSON.parse(await readFile(new URL('docs/assets-manifest.json',root),'utf8'));
   assert.ok(Object.keys(manifest).length>40,'all runtime sound/model/terrain assets are represented');
-  // Code and shaders alone reached about 3.0 MiB. This trips well before the
+  // Code and shaders alone reached about 3.5 MiB. This trips before the
   // smallest crew or wildlife model (over 1.3 MiB as base64) could fit inline.
-  assert.ok(Buffer.byteLength(html)<3.5*1024*1024,'optional media must not return to the initial HTML');
+  assert.ok(Buffer.byteLength(html)<4*1024*1024,'optional media must not return to the initial HTML');
   assert.ok(!/data:(audio\/mpeg|model\/gltf-binary|image\/png|image\/webp);base64,/.test(html));
   for(const [source,record]of Object.entries(manifest)){
     assert.match(source,/^assets\/[a-z0-9/.-]+$/);

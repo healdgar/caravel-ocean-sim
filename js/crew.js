@@ -2069,6 +2069,8 @@ export async function createFortSoldiers({
   samples = 4,
   shared = null,
   port = null,
+  // How many bodies each of its batches has room for: a fort's many by default, or one for a lone figure.
+  most = MAX_FORT_SOLDIERS_PER_BATCH,
 }) {
   const modelsPromise = shared?.models
     ? Promise.resolve(shared.models)
@@ -2147,14 +2149,14 @@ export async function createFortSoldiers({
   const batches = allModels.map((model, i) => {
     const isIndigenousBatch = i === 2 || i === 3;
     const geometry = fortGeometry(model, isIndigenousBatch ? shared?.indigenousGeometry?.[i - 2] : shared?.geometry?.[i]);
-    const poses = new Float32Array(MAX_FORT_SOLDIERS_PER_BATCH * 65 * 16);
-    const actors = new Float32Array(MAX_FORT_SOLDIERS_PER_BATCH * CREW_ACTOR_FLOATS);
+    const poses = new Float32Array(most * 65 * 16);
+    const actors = new Float32Array(most * CREW_ACTOR_FLOATS);
     const bones = buffer('fort crew joints', poses, B.STORAGE);
-    const clip = createCrewClipBatch(device, clipPipeline, model, bones, MAX_FORT_SOLDIERS_PER_BATCH, !isIndigenousBatch);
-    const captainClip = captainModel && !isIndigenousBatch ? createCrewClipBatch(device, clipPipeline, captainModel, bones, MAX_FORT_SOLDIERS_PER_BATCH) : null;
+    const clip = createCrewClipBatch(device, clipPipeline, model, bones, most, !isIndigenousBatch);
+    const captainClip = captainModel && !isIndigenousBatch ? createCrewClipBatch(device, clipPipeline, captainModel, bones, most) : null;
     // A soldier near enough to see his hands is solved on the GPU, straight into the joints he is drawn from.
-    const solve = createCrewSolveBatch(device, solver, model, bones, MAX_FORT_SOLDIERS_PER_BATCH);
-    const captainSolve = captainClip ? createCrewSolveBatch(device, solver, captainModel, bones, MAX_FORT_SOLDIERS_PER_BATCH) : null;
+    const solve = createCrewSolveBatch(device, solver, model, bones, most);
+    const captainSolve = captainClip ? createCrewSolveBatch(device, solver, captainModel, bones, most) : null;
     const actor = buffer('fort crew transforms', actors, B.STORAGE);
     const common = [{ buffer: fortHullUBO }, { buffer: bones }, { buffer: actor }];
     const mainResources = [{ buffer: frameUBO }, ...common, transView, sampClamp, envCubeView, { buffer: sunVisBuf }, { buffer: dryMoistureBuf }, skyView, { binding: 13, resource: captainTexView }, { binding: 14, resource: captainSampler }];
@@ -2205,8 +2207,8 @@ export async function createFortSoldiers({
       const ofSex = garrison.soldiers.filter(s => Boolean(s.indigenous) === b.isIndigenousBatch && s.sex === sex);
       // Without the captain's mesh a captain is drawn as any other soldier.
       const captains = captainGeometry ? ofSex.filter(isCaptainActor) : [];
-      const soldiers = ofSex.filter(s => !captains.includes(s)).slice(0, MAX_FORT_SOLDIERS_PER_BATCH - Math.min(captains.length, MAX_FORT_CAPTAINS_PER_BATCH));
-      b.people = [...soldiers, ...captains.slice(0, MAX_FORT_CAPTAINS_PER_BATCH)];
+      const soldiers = ofSex.filter(s => !captains.includes(s)).slice(0, most - Math.min(captains.length, MAX_FORT_CAPTAINS_PER_BATCH, most));
+      b.people = [...soldiers, ...captains.slice(0, Math.min(MAX_FORT_CAPTAINS_PER_BATCH, most))];
       b.soldiers = soldiers.length;
     });
     for (const b of batches) {
