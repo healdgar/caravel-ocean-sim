@@ -10,7 +10,7 @@ import {createCelestialRenderer} from './celestial.js';
 import {withCelestialFrame,CELESTIAL_FRAME_BYTES,CELESTIAL_FRAME_FLOATS} from './wgsl/celestial.js';
 import { createSailingInstruments } from './instruments.js';
 import { controlIcon, createHelmControls, keyIsForField } from './controls.js';
-import { createSceneAudio } from './audio.js';
+import { createSceneAudio, townWalkerStride } from './audio.js';
 import { createShipGunnery, createPortGunnery, resolveVesselCollisions, resetVesselDamageState } from './gunnery-control.js';
 import { setVesselHullIntegrity, vesselDamageSnapshot, restoreVesselDamageSnapshot } from './vessel-damage.js';
 import { createPortDamageStore } from './port-damage.js';
@@ -88,6 +88,9 @@ import { crewWorkLabel, manGunStationsImmediate } from './crew-work.js';
 import { createCrew, createFortSoldiers, preloadCrewModels, requestCrewPipelines, CAPTAIN_ORDERS, reviveCompany } from './crew.js';
 import { createTownsfolk, requestTownsfolkPipelines } from './townsfolk.js';
 import { createBoardLife } from './board-life.js';
+import { boardFolkStreets, folkDoing } from './board-folk.js';
+import { createFolkCard } from './folk-card.js';
+import { WALKER_WORDS, townSolids } from './town-streets.js';
 import { bakedBoardFor } from './old-world.js';
 import { createProps } from './props.js';
 import { HELM_EYE_Z, HELM_EYE_HEIGHT, HULL_UNIFORM_BYTES, HULL_VERTICAL_SCALE, DEFAULT_BOAT_LENGTH, DEFAULT_BOAT_BEAM } from './hull.js';
@@ -3993,6 +3996,106 @@ async function main() {
     }});
     window.oceanBoard=boardLife;boardLife.start();
   }
+  // Whoever is about a founded port is one of its model's people. The model plans the day of those who live
+  // nearest the eye: who they are, where each is bound and the way they take along its streets. js/board-folk.js
+  // makes that plan the walkers the GPU already walks, laid once when a plan arrives and never by the frame. It is
+  // asked again when the model's day has turned or the eye has moved on. Anyone in sight can be asked after: the
+  // pointer over them names them, a click opens what the model keeps of them, and window.oceanFolk is the same door.
+  const FOLK_MOST=/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)?200:480,FOLK_EYE_MOVED_M=120,FOLK_DAY_WAIT_MS=30000,FOLK_EYE_WAIT_MS=8000,FOLK_CHECK_FRAMES=30;
+  const folkPlan={asking:false,day:-1,x:NaN,z:NaN,at:-Infinity,frames:0,laidMs:0,laid:0,kept:new Map(),keptFor:null,solids:null};
+  function tendFolk(now){
+    if(folkPlan.frames++%FOLK_CHECK_FRAMES||folkPlan.asking||boardLife?.state!=='alive')return;
+    const port=townsfolk?.port;
+    if(!port||port!==terrain?.port)return;
+    const base=port.streetsOwn??=port.streets;
+    if(!base?.window)return;
+    const region=terrain.baseRegion,offset=terrain.getWorldOffset(),x=frameF[16]-offset.x-region.x,z=frameF[18]-offset.z-region.z,since=now-folkPlan.at;
+    if(port.streets?.folk){
+      const turned=boardLife.day!==folkPlan.day&&since>FOLK_DAY_WAIT_MS,moved=Math.hypot(x-folkPlan.x,z-folkPlan.z)>FOLK_EYE_MOVED_M&&since>FOLK_EYE_WAIT_MS;
+      if(!turned&&!moved)return;
+    }else if(since<FOLK_EYE_WAIT_MS)return;
+    folkPlan.asking=true;
+    boardLife.folk(0,{focus:{x,z},most:FOLK_MOST,others:base.people}).then(plan=>{
+      if(terrain?.port!==port||townsfolk.port!==port)return;
+      const began=performance.now();
+      if(folkPlan.keptFor!==base){folkPlan.keptFor=base;folkPlan.kept.clear();folkPlan.solids=townSolids(port);}
+      port.streets=boardFolkStreets({plan,origin:region,heightAt:(px,pz)=>terrain.groundSample(px+offset.x,pz+offset.z),base,kept:folkPlan.kept,blocked:folkPlan.solids});
+      townsfolk.refresh(port);
+      Object.assign(folkPlan,{day:plan.day,x,z,at:performance.now(),laidMs:performance.now()-began,laid:folkPlan.laid+1});
+    }).catch(error=>{console.warn('The board\'s townsfolk:',error);folkPlan.at=performance.now();}).finally(()=>{folkPlan.asking=false;});
+  }
+  // Where walker `index` of the town in sight is now, as the GPU walks them (the same clock and sun), or null.
+  const folkStride={position:{x:0,y:0,z:0},walked:0,stopped:false,cycle:0,back:false};
+  let folkWords=null,folkWordsOf=null;
+  function folkWalker(streets,index){
+    if(folkWordsOf!==streets.walkers){folkWordsOf=streets.walkers;folkWords=new Uint32Array(streets.walkers.buffer,streets.walkers.byteOffset,streets.walkers.length);}
+    return townWalkerStride(streets,index,frameF[19],frameF[33],folkStride,folkWords);
+  }
+  const folkSeen=()=>{const streets=townsfolk?.port?.streets;return streets?.souls?streets:null;};
+  // Where they stand on the screen, in the canvas's own pixels, and how tall they stand there; null if out of sight.
+  const FOLK_HEIGHT_M=1.75,FOLK_LEAST_PX=9,FOLK_REACH_PX=12;
+  function folkOnScreen(streets,index,rect){
+    const stride=folkWalker(streets,index);
+    if(!stride)return null;
+    const f=frameF,x=stride.position.x-f[16],y=stride.position.y+FOLK_HEIGHT_M*.5-f[17],z=stride.position.z-f[18],w=f[3]*x+f[7]*y+f[11]*z+f[15];
+    if(!(w>.2))return null;
+    const nx=(f[0]*x+f[4]*y+f[8]*z+f[12])/w,ny=(f[1]*x+f[5]*y+f[9]*z+f[13])/w;
+    if(Math.abs(nx)>1||Math.abs(ny)>1)return null;
+    return {x:(nx*.5+.5)*rect.width,y:(.5-ny*.5)*rect.height,tall:FOLK_HEIGHT_M*rect.height/(2*Math.hypot(f[24],f[25],f[26])*w),depth:w,stride};
+  }
+  const folkAbout=(streets,index,stride)=>folkDoing(streets.souls[index],stride,streets.walkers[index*WALKER_WORDS+8]);
+  // Whoever is under a point of the window: the nearest to it of those who stand tall enough there to be made out.
+  function folkUnder(clientX,clientY){
+    const streets=folkSeen();
+    if(!streets)return null;
+    const rect=canvas.getBoundingClientRect(),px=clientX-rect.left,py=clientY-rect.top,count=Math.min(streets.souls.length,townsfolk.people);
+    let best=-1,least=Infinity;
+    for(let i=0;i<count;i++){
+      const seen=folkOnScreen(streets,i,rect);
+      if(!seen||seen.tall<FOLK_LEAST_PX)continue;
+      const reach=Math.max(FOLK_REACH_PX,seen.tall*.6),score=Math.hypot(seen.x-px,seen.y-py)/reach;
+      if(score<1&&score+seen.depth*1e-4<least){least=score+seen.depth*1e-4;best=i;}
+    }
+    if(best<0)return null;
+    return {index:best,soul:streets.souls[best],doing:folkAbout(streets,best,folkWalker(streets,best))};
+  }
+  function folkWhereabouts(id){
+    const streets=folkSeen(),index=streets?streets.souls.findIndex(soul=>soul?.id===id):-1;
+    return index<0||index>=townsfolk.people?'':folkAbout(streets,index,folkWalker(streets,index));
+  }
+  const folkCard=createFolkCard({person:id=>boardLife?boardLife.person(id):Promise.reject(new Error('No board is alive')),whereabouts:folkWhereabouts});
+  const folkName=document.createElement('div');folkName.id='folk-name';folkName.hidden=true;document.body.append(folkName);
+  let folkPress=null,folkHoverAt=0;
+  canvas.addEventListener('pointerdown',e=>{folkPress=e.button===0&&!e.shiftKey?{id:e.pointerId,x:e.clientX,y:e.clientY,at:performance.now()}:null;folkName.hidden=true;},true);
+  canvas.addEventListener('pointerup',e=>{
+    const press=folkPress;folkPress=null;
+    if(!press||press.id!==e.pointerId||Math.hypot(e.clientX-press.x,e.clientY-press.y)>6||performance.now()-press.at>600)return;
+    const found=folkUnder(e.clientX,e.clientY);
+    if(found)folkCard.show(found.soul,found.doing);
+  });
+  canvas.addEventListener('pointermove',e=>{
+    if(e.pointerType!=='mouse'||e.buttons||!folkSeen()){if(!folkName.hidden){folkName.hidden=true;canvas.style.cursor='';}return;}
+    const now=performance.now();if(now-folkHoverAt<90)return;folkHoverAt=now;
+    const found=folkUnder(e.clientX,e.clientY);
+    folkName.hidden=!found;canvas.style.cursor=found?'pointer':'';
+    if(found){folkName.textContent=found.soul.name+(found.soul.role?', '+found.soul.role:'');folkName.style.left=e.clientX+'px';folkName.style.top=e.clientY+'px';}
+  });
+  canvas.addEventListener('pointerleave',()=>{folkName.hidden=true;canvas.style.cursor='';});
+  window.oceanFolk={
+    card:folkCard,under:folkUnder,whereabouts:folkWhereabouts,
+    // The plan in force: the model's day it is of, where the eye was, how often it has been laid and how long the last laying took.
+    get plan(){const {kept,keptFor,solids,...plan}=folkPlan;return {...plan,...(folkSeen()?.folk??{})};},
+    get souls(){return folkSeen()?.souls??[];},
+    // Walker `index` as seen now: {x, y, tall} on the screen in CSS pixels of the window, its soul and what it is at; null out of sight.
+    seen(index){
+      const streets=folkSeen();if(!streets||!(index<townsfolk.people))return null;
+      const rect=canvas.getBoundingClientRect(),seen=folkOnScreen(streets,index,rect);
+      return seen&&{x:rect.left+seen.x,y:rect.top+seen.y,tall:seen.tall,depth:seen.depth,soul:streets.souls[index],doing:folkAbout(streets,index,seen.stride)};
+    },
+    // Where walker `index` stands in the world now, or null while they are indoors.
+    where(index){const streets=folkSeen(),stride=streets&&index<townsfolk.people?folkWalker(streets,index):null;return stride&&{x:stride.position.x,y:stride.position.y,z:stride.position.z};},
+    ask(id){const streets=folkSeen(),soul=streets?.souls.find(one=>one?.id===id);return soul?folkCard.show(soul,folkWhereabouts(id)):boardLife.person(id);},
+  };
   function frame(now) {
     if (shooting) return;  // paused while a screenshot is read back
     if(bloomMeasureRequested&&bloomFrameReady){measureBloomAlone();return;}
@@ -4194,7 +4297,7 @@ async function main() {
     }else{
       fortSoldiers?.update(castleDuel.port,dt,P.windSpeed,cam,false);
     }
-    townsfolk?.follow(terrain?.ports,cam);
+    townsfolk?.follow(terrain?.ports,cam);tendFolk(now);
     props?.follow(terrain?.ports,cam);
     terrain?.updatePortDamage?.(simTime);
     const activeVesselCount=followerEnabled?vessels.length:1;

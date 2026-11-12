@@ -53,6 +53,11 @@ export function createBoardLife({ baked, fetchImpl = fetch, open = openBoardWork
     record: () => life.view('bootstrap'),
     // The people of a place as they walk it now.
     people: (place, payload = {}) => life.view('actors', { si: place, ...payload }),
+    // Who is about in a place today and the way each takes, by the model's own plan of its townsfolk: the `most`
+    // who live nearest `focus` (metres on the board), and `others` more of its grown people by name.
+    folk: (place, options = {}) => need().then(() => model.hook('folk', place, options)),
+    // Anyone, by their number: the model's whole card of them, and what it links to.
+    person: (id, full = true) => life.inspect('p' + id, full),
     // This game's own report of the board (js/old-world-board.js stands it), and the whole world frozen as it is now.
     board: () => need().then(() => model.hook('board')),
     freeze: () => need().then(() => model.hook('freeze')),

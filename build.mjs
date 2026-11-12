@@ -82,7 +82,7 @@ wgslModules.push('js/wgsl/ground-detail.js');
 // The Old World: building types ahead of the land shader, which reads their constants, then the town plan and its country.
 order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/old-world-buildings.js');
 // A port's country as Castle and Commons' model founded it: what is asked of the model, how it stands here, and the GPU's stamp of it.
-order.splice(order.indexOf('js/coastal-world.js'),0,'js/board-model.js','js/board-worker.js','js/board-life.js','js/old-world-city.js','js/old-world-board.js','js/old-world.js');
+order.splice(order.indexOf('js/coastal-world.js'),0,'js/board-model.js','js/board-worker.js','js/board-life.js','js/board-folk.js','js/folk-card.js','js/old-world-city.js','js/old-world-board.js','js/old-world.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/board-stamp.js');
 // A city's buildings as the guns meet them: after the fracture code it hands them to, ahead of the land it is drawn with.
 order.splice(order.indexOf('js/terrain.js'),0,'js/city-targets.js');

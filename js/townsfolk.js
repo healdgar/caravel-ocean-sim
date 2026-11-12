@@ -230,6 +230,10 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
 
   return {
     get people() { return crowd?.people ?? 0; },
+    // The town whose people are drawn, and its people laid again when its streets are given new walkers (a board's
+    // people as its model plans their day, js/board-folk.js).
+    get port() { return activePort; },
+    refresh(port) { if (port && port === activePort) buildCrowd(port); },
     // Whichever town with ways is nearest the eye, once in a while.
     // The share of each town's people that is drawn, for whoever must agree with the picture: their footsteps.
     share: isMobile ? MOBILE_SHARE : 1,

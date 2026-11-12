@@ -5885,7 +5885,7 @@ function townsfolkFor(s){ // who is about in this town, and where each goes: rea
   const fx=cam.cur.focus.x,fz=cam.cur.focus.z,cand=s.folk.filter(p=>ageYrs(p)>=6&&!awayNow(p)&&detailHead(p).bh&&!detailHead(p).bh.removed);
   cand.sort((a,b)=>(b.id===G.followPid)-(a.id===G.followPid)||dist2d(detailHead(a).bh.x,detailHead(a).bh.z,fx,fz)-dist2d(detailHead(b).bh.x,detailHead(b).bh.z,fx,fz));
   const out=[],season=seasonIdx(),privateGraphs=new Map();
-  for(const p of cand.slice(0,160)){const h=detailHead(p).bh,a=ageYrs(p),H=(p.id*2654435761>>>0)/4294967296;
+  for(const p of cand.slice(0,globalThis.FURLONG_OPTIONS?.board?.abroad??160)){const h=detailHead(p).bh,a=ageYrs(p),H=(p.id*2654435761>>>0)/4294967296;
     let work=null,what='about the town',inside=false,fw=null;const wa=TRADE_ARCH[p.tr];
     if(a>=14&&wa&&byArch[wa]){let bd=1e18;for(const b of byArch[wa]){const d=dist2d(b.x,b.z,h.x,h.z);if(d<bd){bd=d;work=b;}}what=`at work in the ${ARCH[wa][4]}`;inside=true;}
     else if(a>=14&&(p.tr==='quarryman'||p.tr==='miner')){const q=p.tr==='quarryman'&&s.quarry&&!s.quarry.removed?s.quarry:rockNear(s,h);

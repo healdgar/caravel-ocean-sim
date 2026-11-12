@@ -89,6 +89,11 @@ export const BOARD_TUNING = Object.freeze([
     find: "function estateDetailsHTML(s){let out='';",
     replace: "function estateDetailsHTML(s){const row=(k,v)=>`<div class=\"row${String(v).replace(/<[^>]*>/g,'').length>26?' long':''}\"><span>${k}</span><b>${v}</b></div>`;let out='';",
   },
+  {
+    why: 'The source plans the day of the 160 people who live nearest the eye. A host may ask for more: a port city seen from the water shows more than a street of them.',
+    find: 'for(const p of cand.slice(0,160)){const h=detailHead(p).bh,',
+    replace: `for(const p of cand.slice(0,${BOARD}?.abroad??160)){const h=detailHead(p).bh,`,
+  },
 ]);
 
 // The source's program with the table applied.

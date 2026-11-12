@@ -160,6 +160,36 @@ function worldToLocal(inst, x, z) {
   const c = Math.cos(inst.yaw ?? 0), s = Math.sin(inst.yaw ?? 0), dx = x - inst.x, dz = z - inst.z;
   return { lx: dx * c - dz * s, lz: dx * s + dz * c };
 }
+// Whether a point stands inside one of a port's own solid buildings: `townSolids(port)` answers a test of it.
+// A pier, quay or bridge is walked on, a loggia or an aqueduct walked under, and of a fort only the wall is solid.
+// The buildings are sorted into squares once, since every point of every way the people of a founded board take
+// is asked (js/board-folk.js).
+const SOLIDS_SQUARE_M = 24;
+export function townSolids(port, margin = 0.8) {
+  const squares = new Map(), square = (i, j) => (i + 32768) * 65536 + (j + 32768);
+  for (const inst of port?.instances ?? []) {
+    if (deckOf(inst) || OPEN_AIR.has(inst.prefabId) || inst.prefabId === 'acueducto_de_piedra' || inst.prefabId === 'stone_arch_bridge') continue;
+    if (!Number.isFinite(inst.x) || !Number.isFinite(inst.z) || !(inst.width > 0) || !(inst.length > 0)) continue;
+    const walled = enclosurePlan(inst), reach = Math.hypot(inst.width, inst.length) * 0.5 + margin + WALL_SOLID_HALF_WIDTH_M;
+    const entry = { inst, walled, c: Math.cos(inst.yaw ?? 0), s: Math.sin(inst.yaw ?? 0), hw: inst.width * 0.5 + margin, hl: inst.length * 0.5 + margin };
+    for (let i = Math.floor((inst.x - reach) / SOLIDS_SQUARE_M); i <= Math.floor((inst.x + reach) / SOLIDS_SQUARE_M); i++) {
+      for (let j = Math.floor((inst.z - reach) / SOLIDS_SQUARE_M); j <= Math.floor((inst.z + reach) / SOLIDS_SQUARE_M); j++) {
+        const at = square(i, j), list = squares.get(at);
+        if (list) list.push(entry); else squares.set(at, [entry]);
+      }
+    }
+  }
+  return (x, z) => {
+    const list = squares.get(square(Math.floor(x / SOLIDS_SQUARE_M), Math.floor(z / SOLIDS_SQUARE_M)));
+    if (!list) return false;
+    for (const { inst, walled, c, s, hw, hl } of list) {
+      if (walled) { if (pointOnEnclosureWall(inst, walled, x, z)) return true; continue; }
+      const dx = x - inst.x, dz = z - inst.z;
+      if (Math.abs(dx * c - dz * s) <= hw && Math.abs(dx * s + dz * c) <= hl) return true;
+    }
+    return false;
+  };
+}
 // The walkable top of a pier, quay or bridge, and how far either side of its middle one may walk.
 function deckOf(inst) {
   const top = inst.y + inst.height;

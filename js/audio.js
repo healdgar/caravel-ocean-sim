@@ -275,7 +275,7 @@ function footfallIndex(walkTime,clipSeconds){
 // Townsfolk are drawn on the GPU from one rule of the clock (the ABOUT branch of TOWNSFOLK_WALK in
 // js/wgsl/townsfolk.js). This is that rule for one walker: where they stand and how far they have walked
 // this leg of their day, or null while they are indoors or at home after dark.
-export function townWalkerStride(streets,index,clock,sunY=1,out={position:{x:0,y:0,z:0},walked:0,stopped:false,cycle:0},
+export function townWalkerStride(streets,index,clock,sunY=1,out={position:{x:0,y:0,z:0},walked:0,stopped:false,cycle:0,back:false},
   words=new Uint32Array(streets.walkers.buffer,streets.walkers.byteOffset,streets.walkers.length)){
   const w=streets.walkers,at=index*WALKER_WORDS,route=streets.samples;
   const first=words[at],count=words[at+1],phase=w[at+2],speed=w[at+3],side=w[at+4],pauseAt=w[at+5],pauseFor=w[at+6],indoors=w[at+7],length=w[at+8],abroad=w[at+9],flags=words[at+11];
@@ -297,7 +297,7 @@ export function townWalkerStride(streets,index,clock,sunY=1,out={position:{x:0,y
   out.position.x=route[a]+(route[b]-route[a])*t+fz/fl*aside;
   out.position.y=route[a+1]+(route[b+1]-route[a+1])*t;
   out.position.z=route[a+2]+(route[b+2]-route[a+2])*t-fx/fl*aside;
-  out.walked=walked;
+  out.walked=walked;out.back=back;
   out.stopped=arrived||(pauseFor>0&&inLeg>=stopAt&&inLeg<stopAt+pauseFor);
   // The walk clip's frame follows the ground covered, as the shader draws it.
   out.cycle=walked/CREW_WALK_CYCLE_METRES+phase*7;

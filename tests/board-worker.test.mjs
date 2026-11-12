@@ -40,10 +40,12 @@ test('a worker founds the board Node founds, lives the days Node lives, and leav
       let ticks = 0, worst = 0, last = performance.now();
       const watch = setInterval(() => { const now = performance.now(); worst = Math.max(worst, now - last); last = now; ticks++; }, 50);
       const began = performance.now(), heard = [];
-      const model = await openBoardWorker(request, { onProgress: (text) => heard.push(text) });
-      const board = await model.founded, founded = performance.now() - began;
+      const model = await openBoardWorker(request);
+      model.on.progress = (told) => heard.push(told);
+      await model.ready;
+      const board = await model.hook('board'), founded = performance.now() - began;
       clearInterval(watch);
-      const later = await model.call('live', 5), again = await model.call('board');
+      const later = await model.hook('live', 5), again = await model.hook('board');
       model.close();
       return { key: boardKey(request), board: JSON.stringify(board), later: JSON.stringify(later), again: JSON.stringify(again), founded, ticks, worst, heard: heard.length };
     }, { SPAN, SAMPLES, SITE, BAY });

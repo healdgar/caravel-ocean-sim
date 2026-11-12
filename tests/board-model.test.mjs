@@ -191,6 +191,37 @@ test('the whole world is frozen at its founding, taken up again without its surv
   assert.equal(card.kind, 'person'); assert.ok(card.card.startsWith(someone.name), card.card.slice(0, 80));
   assert.match(card.card, /Household/);
   t.diagnostic(card.card.split('\n').slice(0, 6).join(' | '));
+
+  // Its townsfolk by the model's own plan of their day: who lives nearest the eye, where each is bound and the way
+  // they take; more of them when more are asked for, and others of the place by name. Looking changes nothing.
+  const before = JSON.stringify(await thawed.hook('board')), whole = Buffer.from(await thawed.freeze()).toString('base64');
+  const folk = await thawed.hook('folk', 0, { most: 60, others: 25 });
+  assert.equal(folk.si, 0); assert.equal(folk.day, reply.day); assert.equal(folk.sunday, reply.day % 7 === 0);
+  assert.equal(folk.people.length, 60); assert.equal(folk.others.length, 25);
+  const ids = new Set([...folk.people, ...folk.others].map((one) => one.id));
+  assert.equal(ids.size, 85, 'no one twice');
+  const half = thawed.board.span / 2;
+  for (const one of folk.people) {
+    assert.ok(one.name && one.surname && Number.isFinite(one.age) && ['m', 'f'].includes(one.sex), JSON.stringify({ ...one, route: 0 }));
+    assert.ok(['work', 'errand', 'church', 'play'].includes(one.goal) && typeof one.there === 'string' && one.there, `${one.goal}: ${one.there}`);
+    assert.ok(one.pace > 0.3 && one.pace < 3, `pace ${one.pace}`);
+    assert.ok(Array.isArray(one.route) && one.route.length >= 4 && one.route.length % 2 === 0, `a way of ${one.route.length / 2} points`);
+    assert.ok(one.route.every((v) => Number.isFinite(v) && Math.abs(v) <= half), 'on the board');
+    assert.ok(Math.hypot(one.route[0] - one.home[0], one.route[1] - one.home[1]) < 40, 'from their own door');
+    if (one.age < 14) assert.equal(one.role, null, 'a child has no calling of their own');
+  }
+  assert.equal(folk.others.every((one) => one.name && one.age >= 16 && one.age < 66), true);
+  // The eye elsewhere, other people: those who live nearest it.
+  const middle = thawed.board.places[0], near = (list) => list.reduce((sum, one) => sum + Math.hypot(one.home[0] - middle.x - 150, one.home[1] - middle.z), 0) / list.length;
+  const aside = await thawed.hook('folk', 0, { focus: { x: middle.x + 150, z: middle.z }, most: 60 });
+  assert.ok(near(aside.people) < near(folk.people), `${near(aside.people).toFixed(0)} m against ${near(folk.people).toFixed(0)} m`);
+  assert.deepEqual(aside.others, []);
+  assert.equal((await thawed.hook('folk', 0, { most: 5 })).people.length, 5);
+  assert.deepEqual((await thawed.hook('folk', 99)).people, [], 'no such place, no one');
+  assert.equal(JSON.stringify(await thawed.hook('board')), before);
+  assert.equal(Buffer.from(await thawed.freeze()).toString('base64') === whole, true, 'the whole world, frozen, is byte for byte what it was');
+  assert.equal(JSON.stringify(await thawed.hook('folk', 0, { most: 60, others: 25 })), JSON.stringify(folk), 'and asked again, the same plan');
+  t.diagnostic(`folk: ${folk.people.map((one) => one.goal).reduce((count, goal) => ({ ...count, [goal]: (count[goal] || 0) + 1 }), {}) && JSON.stringify(folk.people.slice(0, 2).map((one) => [one.name, one.age, one.role, one.goal, one.there, one.via, one.route.length / 2]))}`);
   // A world is not taken up from bytes that are not one.
   await assert.rejects(openBoard(request, { world: kept.slice(0, 5000) }));
   await open.close(); await thawed.close();
