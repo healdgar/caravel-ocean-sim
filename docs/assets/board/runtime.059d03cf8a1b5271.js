@@ -153,6 +153,9 @@ globalThis.BOARD_MODEL = (() => {
     return Object.keys(out).length ? out : null;
   };
 
+  // The quarters of a town the model sets a building in; anything else (a farm, a castle's own) is the first.
+  const QUARTERS = ['', 'residential', 'artisan', 'market'];
+
   function board() {
     const places = W.settlements.map((s) => ({
       name: s.name, kind: s.kind, role: s.role, culture: s.cult, people: Math.round(s.pop), x: r1(s.pos.x), z: r1(s.pos.z),
@@ -165,7 +168,7 @@ globalThis.BOARD_MODEL = (() => {
       squares: (s.places || []).map((p) => ({ kind: p.kind || 'market', x: r1(p.x), z: r1(p.z), rad: list(p.r) })),
       past: (s.history || []).filter((h) => h.ad !== undefined).map((h) => [h.ad, h.t]),
     }));
-    const stand = [], form = [], kinds = [], standing = new Map();
+    const stand = [], form = [], kinds = [], quarter = [], standing = new Map();
     W.settlements.forEach((s, at) => {
       for (const b of s.buildings) {
         if (b.removed || b.state === 'gone') continue;
@@ -174,6 +177,7 @@ globalThis.BOARD_MODEL = (() => {
         // To its street, as a unit vector; and whether a church has a tower or a spire.
         form.push(r3(b.fx ?? 0), r3(b.fz ?? 0), r3(b.hue ?? 0));
         kinds.push(at, ARCHES.indexOf(b.arch), b.tier | 0, b.roof | 0, b.ch ? (b.cathedral ? 3 : b.ch.spire ? 2 : b.ch.tower ? 1 : 0) + (b.ch.stone ? 4 : 0) : 0, b.shed ? 1 : 0);
+        quarter.push(Math.max(0, QUARTERS.indexOf(b.district)));
       }
     });
     // Every furlong of the ground, held or not: whose it is (-1 no one's), what it is held as, what stands on it.
@@ -200,8 +204,10 @@ globalThis.BOARD_MODEL = (() => {
       places,
       arches: ARCHES,
       // Six numbers to a building for where it stands (x, z, turn, across, deep, to the eaves), three for its
-      // face (the way to its street and its hue) and six for what it is (place, arch, tier, roof, church, shed).
-      buildings: { count: kinds.length / 6, stand, form, kinds },
+      // face (the way to its street and its hue), six for what it is (place, arch, tier, roof, church, shed) and
+      // one for its quarter of the town (`quarters`).
+      quarters: QUARTERS,
+      buildings: { count: kinds.length / 6, stand, form, kinds, quarter },
       roads: W.roads.map((q) => ({ from: q.a, to: q.b, points: line(q.drawn || q.path) })),
       rivers: (W.rivStrips || []).map((q) => ({ canal: Boolean(q.canal), points: q.pts.flatMap((p, i) => [r1(p.x), r1(p.z), r1(q.hw[i])]) })),
       lanes: workerTrackSegments().flatMap((t) => [r1(t.a.x), r1(t.a.z), r1(t.b.x), r1(t.b.z)]),
