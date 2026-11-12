@@ -87,7 +87,15 @@ test('a house of the city takes shot, breaks up, comes back a ruin from a save, 
     assert.ok(struck.hits>=1&&struck.inPort&&struck.buildings>struck.untouched,'it is a building of the port now');
     assert.ok(struck.broken>5&&struck.broken<struck.shards,`${struck.broken} of ${struck.shards} pieces left it`);
     assert.equal(struck.flying,0);
-    // Its pieces are drawn every frame by their own pipeline, and nothing is uploaded once they have settled.
+    // Its pieces are drawn every frame by their own pipeline, and nothing is uploaded once they have settled. In a
+    // close-built town the shot that went on through its breach struck the houses behind, each of which is left out
+    // of the city's own drawing in its turn: wait until the last of them has been.
+    await page.evaluate(async()=>{
+      for(let quiet=0,seen=cityAudit.writes.length,i=0;quiet<90&&i<2400;i++){
+        await new Promise(requestAnimationFrame);
+        if(cityAudit.writes.length===seen)quiet++;else{quiet=0;seen=cityAudit.writes.length;}
+      }
+    });
     await frames(page,10);
     const settled=await page.evaluate(()=>({ruins:cityAudit.ruins,frames:cityAudit.frames,writes:cityAudit.writes.slice()}));
     await frames(page,30);

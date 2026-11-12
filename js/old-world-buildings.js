@@ -304,6 +304,57 @@ function hallSpec({ name }) {
   return { schemaVersion: '0.4', name, width, length: depth, height, foundationDepth: FOOTING_M, materialKind: 12, roofPitch: 3, waterfront: false, primitives };
 }
 
+// What stands and hangs in a street, as Castle and Commons' own towns have it: a pentice over a shop's open front,
+// a sign board on its bracket, the ale-stake's bush, and on the market place a cross and stalls; on a green, a well.
+// Each is a type like any building: drawn, lit, struck and broken with the rest. A front's things are written from
+// where they are fixed to the wall (y = 0, the wall at z = 0) and hang out over the street (-z); what is 'stucco'
+// in them is painted cloth or board, and takes its colour from the instance's tint (js/wgsl/terrain.js). The builder
+// lays a plinth of its own under any type that names none: each names what it stands on or is fixed by.
+const cityFurnitureSpec = (name, width, length, height, primitives) => ({ schemaVersion: '0.4', name, width, length, height, foundationDepth: 0, materialKind: 10, roofPitch: 0, waterfront: false, primitives });
+const CITY_STREET_FURNITURE = [
+  cityFurnitureSpec('Alpendre (pentice over a shop front)', 4, 1.4, 0.4, [
+    { primitive: 'box', name: 'pentice_cloth', from: [-2, 0, -1.4], to: [2, 0.1, 0], material: 'stucco' },
+    { primitive: 'box', name: 'pentice_valance', from: [-2, -0.24, -1.4], to: [2, 0, -1.35], material: 'stucco' },
+    { primitive: 'box', name: 'pentice_bracket_left', partGroup: 'foundation_plinth', from: [-1.96, -0.12, -1.38], to: [-1.86, 0, 0], material: 'oak' },
+    { primitive: 'box', name: 'pentice_bracket_right', from: [1.86, -0.12, -1.38], to: [1.96, 0, 0], material: 'oak' },
+  ]),
+  cityFurnitureSpec('Tabuleta (sign board on its bracket)', 0.2, 1.7, 1, [
+    { primitive: 'box', name: 'sign_bracket', partGroup: 'foundation_plinth', from: [-0.07, 0, -1.6], to: [0.07, 0.14, 0], material: 'oak' },
+    { primitive: 'box', name: 'sign_hanger_inner', from: [-0.02, -0.14, -0.88], to: [0.02, 0, -0.84], material: 'iron' },
+    { primitive: 'box', name: 'sign_hanger_outer', from: [-0.02, -0.14, -1.56], to: [0.02, 0, -1.52], material: 'iron' },
+    { primitive: 'box', name: 'sign_board', from: [-0.05, -0.86, -1.65], to: [0.05, -0.14, -0.75], material: 'stucco' },
+    { primitive: 'box', name: 'sign_frame', from: [-0.065, -0.9, -1.68], to: [0.065, -0.86, -0.72], material: 'oak' },
+  ]),
+  cityFurnitureSpec('Ramo (the ale-stake and its bush)', 1.2, 2.6, 1.2, [
+    { primitive: 'box', name: 'ale_stake', partGroup: 'foundation_plinth', from: [-0.06, 0, -2.1], to: [0.06, 0.12, 0], material: 'oak' },
+    { primitive: 'cylinder', name: 'ale_bush', base: [0, -0.58, -2.02], height: 0.6, radius: 0.16, radiusTop: 0.34, segments: 7, material: 'stucco' },
+    { primitive: 'cone', name: 'ale_bush_crown', base: [0, 0.02, -2.02], height: 0.3, radius: 0.34, radiusTop: 0.08, segments: 7, material: 'stucco' },
+  ]),
+  cityFurnitureSpec('Banca de mercado (market stall)', 2.8, 3.6, 2.5, [
+    { primitive: 'box', name: 'stall_board', from: [-1.1, 0.84, -1.5], to: [1.1, 0.94, 1.5], material: 'oak' },
+    { primitive: 'box', name: 'stall_chest', partGroup: 'foundation_plinth', from: [-0.95, 0, -1.3], to: [0.95, 0.84, 1.3], material: 'wood' },
+    ...[[-1.3, -1.7], [1.3, -1.7], [1.3, 1.7], [-1.3, 1.7]].map(([x, z], k) => ({ primitive: 'box', name: `stall_post_${k}`, from: [x - 0.05, -0.6, z - 0.05], to: [x + 0.05, 2.3, z + 0.05], material: 'timber' })),
+    { primitive: 'box', name: 'stall_cloth', from: [-1.4, 2.3, -1.8], to: [1.4, 2.38, 1.8], material: 'stucco' },
+    { primitive: 'box', name: 'stall_valance', from: [-1.4, 2.08, -1.8], to: [1.4, 2.3, -1.76], material: 'stucco' },
+  ]),
+  cityFurnitureSpec('Cruzeiro do mercado (market cross)', 3.2, 3.2, 5.2, [
+    { primitive: 'box', name: 'cross_step_low', partGroup: 'foundation_plinth', from: [-1.6, -1.2, -1.6], to: [1.6, 0.28, 1.6], material: 'ashlar' },
+    { primitive: 'box', name: 'cross_step_high', from: [-1.05, 0.28, -1.05], to: [1.05, 0.58, 1.05], material: 'ashlar' },
+    { primitive: 'box', name: 'cross_plinth', from: [-0.5, 0.58, -0.5], to: [0.5, 1.3, 0.5], material: 'limestone' },
+    { primitive: 'cylinder', name: 'cross_shaft', base: [0, 1.3, 0], height: 3, radius: 0.22, radiusTop: 0.17, segments: 8, material: 'limestone' },
+    { primitive: 'box', name: 'cross_head', from: [-0.1, 4.3, -0.09], to: [0.1, 5.2, 0.09], material: 'limestone' },
+    { primitive: 'box', name: 'cross_arms', from: [-0.42, 4.66, -0.09], to: [0.42, 4.84, 0.09], material: 'limestone' },
+  ]),
+  cityFurnitureSpec('Poço (well under its roof)', 4.2, 4.2, 4.6, [
+    { primitive: 'cylinder', name: 'well_ring', partGroup: 'foundation_plinth', base: [0, -1.4, 0], height: 2.3, radius: 1.5, segments: 12, material: 'ashlar' },
+    { primitive: 'cylinder', name: 'well_mouth', base: [0, 0.72, 0], height: 0.2, radius: 1.12, segments: 12, material: 'recess' },
+    { primitive: 'box', name: 'well_post_left', from: [-1.38, 0.9, -0.08], to: [-1.22, 3, 0.08], material: 'oak' },
+    { primitive: 'box', name: 'well_post_right', from: [1.22, 0.9, -0.08], to: [1.38, 3, 0.08], material: 'oak' },
+    { primitive: 'box', name: 'well_windlass', from: [-1.3, 2.12, -0.07], to: [1.3, 2.26, 0.07], material: 'oak' },
+    { primitive: 'cone', name: 'well_roof', base: [0, 3, 0], height: 1.6, radius: 2.1, radiusTop: 0.08, segments: 8, material: 'timber' },
+  ]),
+];
+
 // The city's types, in the order their numbers are used by the plan and the renderer: the plain houses by their
 // storeys, eaves to the street and then gable to it; then every other manner of house; then the rest.
 const HOUSES = [
@@ -359,10 +410,16 @@ export const CITY_BUILDING_TYPES = Object.freeze([
   curtainSpec({ name: 'Pano de muralha (short length of wall)', length: CITY_CURTAIN.short }),
   curtainSpec({ name: 'Pano de muralha (long length of wall)', length: CITY_CURTAIN.long }),
   hallSpec({ name: 'Paço (castle hall)' }),
+  ...CITY_STREET_FURNITURE,
 ]);
 
 const H = CITY_HOUSE_STOREYS, AFTER_HOUSES = CITY_HOUSE_TYPES;
-export const CITY_TYPE = Object.freeze({ HOUSE_EAVES: 0, HOUSE_GABLE: H, CHURCH_LEFT: AFTER_HOUSES, CHURCH_RIGHT: AFTER_HOUSES + 1, CHURCH_GREAT: AFTER_HOUSES + 2, WALL_TOWER: AFTER_HOUSES + 3, KEEP: AFTER_HOUSES + 4, GATE: AFTER_HOUSES + 5, CURTAIN_SHORT: AFTER_HOUSES + 6, CURTAIN_LONG: AFTER_HOUSES + 7, HALL: AFTER_HOUSES + 8 });
+export const CITY_TYPE = Object.freeze({ HOUSE_EAVES: 0, HOUSE_GABLE: H, CHURCH_LEFT: AFTER_HOUSES, CHURCH_RIGHT: AFTER_HOUSES + 1, CHURCH_GREAT: AFTER_HOUSES + 2, WALL_TOWER: AFTER_HOUSES + 3, KEEP: AFTER_HOUSES + 4, GATE: AFTER_HOUSES + 5, CURTAIN_SHORT: AFTER_HOUSES + 6, CURTAIN_LONG: AFTER_HOUSES + 7, HALL: AFTER_HOUSES + 8,
+  PENTICE: AFTER_HOUSES + 9, SIGN: AFTER_HOUSES + 10, ALE_STAKE: AFTER_HOUSES + 11, STALL: AFTER_HOUSES + 12, MARKET_CROSS: AFTER_HOUSES + 13, WELL: AFTER_HOUSES + 14 });
+// What hangs over a street from a front: whoever walks there passes under it.
+export const CITY_TYPES_OVERHEAD = Object.freeze(new Set([CITY_TYPE.PENTICE, CITY_TYPE.SIGN, CITY_TYPE.ALE_STAKE]));
+// The paints a front's cloth and boards take, as tints of the land shader's limewash: after its five washes.
+export const CITY_PAINT = Object.freeze({ LINEN: 1, RED: 5, BLUE: 6, GOLD: 7, GREEN: 8, BROWN: 9, DARK: 10 });
 // What a type is to the guns: the name its damage is kept under and reported by. The wall and
 // its towers, the keep and the gate are fortified stone (js/gunnery-control.js); the rest is masonry.
 export function cityTypeTarget(type) {
@@ -373,6 +430,10 @@ export function cityTypeTarget(type) {
   if (type === CITY_TYPE.KEEP) return { prefabId: 'city_keep', label: 'Castle keep' };
   if (type === CITY_TYPE.GATE) return { prefabId: 'city_gate', label: 'City gate' };
   if (type === CITY_TYPE.HALL) return { prefabId: 'city_castle_hall', label: 'Castle hall' };
+  if (CITY_TYPES_OVERHEAD.has(type)) return { prefabId: 'city_shop_front', label: 'Shop front' };
+  if (type === CITY_TYPE.STALL) return { prefabId: 'city_market_stall', label: 'Market stall' };
+  if (type === CITY_TYPE.MARKET_CROSS) return { prefabId: 'city_market_cross', label: 'Market cross' };
+  if (type === CITY_TYPE.WELL) return { prefabId: 'city_well', label: 'Well' };
   return { prefabId: 'city_wall', label: 'City wall' };
 }
 // Eight numbers to an instance of a type: x, floor height, z, turn; scale across, up and along; tone.

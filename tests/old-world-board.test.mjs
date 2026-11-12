@@ -8,9 +8,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { BAKED_BOARDS, BAKED_WORLDS, BOARD_RIVERS, BOARD_SURVEY_SIZE, BOARD_VERSION, bakedBoardAsset, bakedWorldAsset, boardGroundFits, boardGroundSurvey, boardRequest } from '../js/board-model.js';
 import { BOARD_WAY_FLOATS, boardStampTables } from '../js/board-stamp.js';
-import { BOARD_INDEX_SIZE } from '../js/old-world-board.js';
+import { BOARD_INDEX_SIZE, BOARD_STREETFRONT } from '../js/old-world-board.js';
 import { CITY_BLOCK_FLOATS, CITY_TREES } from '../js/old-world-city.js';
-import { CITY_BUILDING_TYPES, CITY_TYPED_FLOATS } from '../js/old-world-buildings.js';
+import { CITY_BUILDING_TYPES, CITY_TYPE, CITY_TYPED_FLOATS, CITY_TYPES_OVERHEAD } from '../js/old-world-buildings.js';
 import { OLD_WORLD_LAND, OLD_WORLD_NO_TREES, OLD_WORLD_PLACES, bakedBoardFor, oldWorldCountry, registerBakedBoard } from '../js/old-world.js';
 import { openBoard } from '../scripts/board-host.mjs';
 
@@ -70,6 +70,44 @@ test('a founded board stands in the game as its own buildings, land and woods, a
     assert.ok(bayHeight(at[0], at[2]) > 0.5, `building ${i} stands in the water at ${at[0]}, ${at[2]}`);
   }
   assert.ok(stats.milliseconds < 2000, `laid in ${stats.milliseconds} ms`);
+
+  // Its streets are furnished as the model's own towns are: a trade's front carries its pentice, sign or ale-stake,
+  // fixed to the wall that faces its street; the market place has its cross and stalls; none has a block of its own.
+  const trades = new Set(Object.keys(BOARD_STREETFRONT)), marketAt = board.quarters.indexOf('market');
+  let tradeHouses = 0;
+  for (let k = 0; k < board.buildings.count; k++) {
+    const arch = board.arches[board.buildings.kinds[k * 6 + 1]];
+    if (trades.has(arch) || (arch === 'burgher' && board.buildings.quarter[k] === marketAt)) tradeHouses++;
+  }
+  assert.equal(board.buildings.quarter.length, board.buildings.count);
+  assert.ok(tradeHouses > 0 && stats.fronts > tradeHouses * 0.6 && stats.fronts <= tradeHouses, `fronts ${stats.fronts} of ${tradeHouses} houses of trade`);
+  const furnished = { [CITY_TYPE.PENTICE]: 0, [CITY_TYPE.SIGN]: 0, [CITY_TYPE.ALE_STAKE]: 0, [CITY_TYPE.STALL]: 0, [CITY_TYPE.MARKET_CROSS]: 0, [CITY_TYPE.WELL]: 0 };
+  for (let i = 0; i < plan.typedCount; i++) {
+    const type = plan.typedTypes[i];
+    if (!(type in furnished)) { assert.ok(plan.typedBlocks[i * 2 + 1] >= 1, `building ${i} has its block`); continue; }
+    furnished[type]++;
+    assert.equal(plan.typedBlocks[i * 2 + 1], 0, 'a thing of the street has no block');
+    const at = plan.typed.subarray(i * CITY_TYPED_FLOATS, (i + 1) * CITY_TYPED_FLOATS), paint = Math.floor(at[7]);
+    assert.ok(paint >= 0 && paint <= 10 && at[5] === 1 && at[6] === 1, `painted ${paint}, unstretched but across`);
+    if (CITY_TYPES_OVERHEAD.has(type)) {
+      // Fixed above a head, on the front of a house that stands there.
+      const ground = bayHeight(at[0], at[2]);
+      assert.ok(at[1] - ground > 1.6 && at[1] - ground < 12, `hung ${at[1] - ground} m up`);
+      assert.ok(plan.lots.some((f) => Math.hypot(f.x - at[0], f.z - at[2]) < Math.hypot(f.w, f.d) / 2 + 0.5), 'on a house');
+    }
+  }
+  // What hangs on a house follows it in the plan and is counted as its own.
+  let hung = 0;
+  for (let i = 0; i < plan.typedCount; i++) {
+    const own = plan.typedAttached[i];
+    hung += own;
+    for (let k = 1; k <= own; k++) assert.ok(CITY_TYPES_OVERHEAD.has(plan.typedTypes[i + k]) && !CITY_TYPES_OVERHEAD.has(plan.typedTypes[i]), 'a house and what hangs on it');
+  }
+  assert.equal(hung, furnished[CITY_TYPE.PENTICE] + furnished[CITY_TYPE.SIGN] + furnished[CITY_TYPE.ALE_STAKE]);
+  t.diagnostic(JSON.stringify({ tradeHouses, furnished }));
+  assert.ok(furnished[CITY_TYPE.SIGN] > 0 && furnished[CITY_TYPE.PENTICE] > 0, 'signs and pentices');
+  assert.equal(furnished[CITY_TYPE.STALL], stats.stalls);
+  assert.ok(stats.stalls >= 4 && furnished[CITY_TYPE.MARKET_CROSS] >= 1, `stalls ${stats.stalls}`);
 
   // Its land: uses only, no colour (the ground keeps its geography's; the GPU stamps the parcels on it).
   const kinds = new Set(); let woods = 0, forest = 0, town = 0;

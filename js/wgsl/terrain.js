@@ -1337,11 +1337,18 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       let tint=floor(in.kind.y);
       let tone=0.72+0.28*fract(in.kind.y);
       var wash=vec3f(1.0,0.985,0.95);
-      if(tint>3.5){wash=vec3f(0.78,0.74,0.68);}
+      // Past the washes, the paints of a street's cloth and boards (js/old-world-buildings.js CITY_PAINT).
+      if(tint>9.5){wash=vec3f(0.085,0.075,0.068);}
+      else if(tint>8.5){wash=vec3f(0.30,0.165,0.085);}
+      else if(tint>7.5){wash=vec3f(0.095,0.185,0.045);}
+      else if(tint>6.5){wash=vec3f(0.62,0.40,0.075);}
+      else if(tint>5.5){wash=vec3f(0.060,0.135,0.300);}
+      else if(tint>4.5){wash=vec3f(0.44,0.070,0.036);}
+      else if(tint>3.5){wash=vec3f(0.78,0.74,0.68);}
       else if(tint>2.5){wash=vec3f(0.96,0.80,0.74);}
       else if(tint>1.5){wash=vec3f(0.95,0.84,0.62);}
       else if(tint>0.5){wash=vec3f(0.98,0.93,0.82);}
-      let damp=smoothstep(0.5,4.2,world.y);
+      let damp=max(smoothstep(0.5,4.2,world.y),step(4.5,tint));
       let stucco=pbr.albedo*wash*mix(vec3f(0.74,0.69,0.62),vec3f(1.0,0.97,0.92),damp);
       albedo=stucco*tone*(0.97+detailA*0.05+detailB*0.03);
       archNormalOffset=pbr.normalOffset*0.42;

@@ -50,7 +50,9 @@ test('every block of the plan belongs to one typed building, and each type keeps
     const {vertices,indices,partAssembly,min,max}=type.source;
     assert.equal(vertices.length%8,0);assert.equal(indices.length%3,0);
     assert.equal(partAssembly.trianglePartIds.length,indices.length/3);
-    assert.ok(min[1]<-6&&max[1]>=type.height&&min[0]<0&&max[0]>0&&min[2]<0&&max[2]>0);
+    // A building stands on its footing; a thing of the street (a pentice, a sign, a stall, a well) has none.
+    if(type.id<CITY_TYPE.PENTICE)assert.ok(min[1]<-6&&max[1]>=type.height&&min[0]<0&&max[0]>0&&min[2]<0&&max[2]>0);
+    else assert.ok(min.every(Number.isFinite)&&max.every(Number.isFinite)&&max[1]>min[1]);
   }
   // The wall and its towers are fortified stone to the guns; houses and churches are masonry.
   assert.equal(classifyBuildingMaterial(cityTypeTarget(CITY_TYPE.CURTAIN_LONG)),'fortified-stone');

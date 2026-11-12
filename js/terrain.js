@@ -1027,7 +1027,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     if(!(index>=0)||!city)return;
     cityTargets?.fractured(instance);
     cityStruckIndices.add(index);
-    cityCull?.clearSlots(index,1);
+    // Its pentice, sign and ale-stake go with it.
+    cityCull?.clearSlots(index,1+(city.typedAttached?.[index]??0));
     if(cityBlocks)for(let block=city.typedBlocks[index*2],end=block+city.typedBlocks[index*2+1];block<end;block++){
       device.queue.writeBuffer(cityBlocks.buffer,(block*CITY_BLOCK_FLOATS+4)*4,cityNoSize);
     }
@@ -1037,7 +1038,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const cityBuildingRebuilt=instance=>{
     const index=instance.city?.index,city=activeCity;
     if(!cityStruckIndices.delete(index)||!city)return;
-    cityCull?.setInstances(index,city.typed.subarray(index*CITY_TYPED_FLOATS,(index+1)*CITY_TYPED_FLOATS),city.typedTypes.subarray(index,index+1));
+    const withIt=1+(city.typedAttached?.[index]??0);
+    cityCull?.setInstances(index,city.typed.subarray(index*CITY_TYPED_FLOATS,(index+withIt)*CITY_TYPED_FLOATS),city.typedTypes.subarray(index,index+withIt));
     if(cityBlocks)for(let block=city.typedBlocks[index*2],end=block+city.typedBlocks[index*2+1];block<end;block++){
       device.queue.writeBuffer(cityBlocks.buffer,(block*CITY_BLOCK_FLOATS+4)*4,city.blocks,block*CITY_BLOCK_FLOATS+4,2);
     }

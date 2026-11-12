@@ -194,7 +194,8 @@ test('a city is laid out on its ground: streets that join, lots that touch nothi
 });
 
 test('every building type is written in Cairn and compiles to a mesh of the size it claims',()=>{
-  assert.equal(CITY_BUILDING_TYPES.length,CITY_HOUSE_TYPES+9);assert.ok(CITY_HOUSE_TYPES>2*CITY_HOUSE_STOREYS);
+  // Nine kinds of building after the houses, then the six things of the street.
+  assert.equal(CITY_TYPE.PENTICE,CITY_HOUSE_TYPES+9);assert.equal(CITY_BUILDING_TYPES.length,CITY_TYPE.WELL+1);assert.ok(CITY_HOUSE_TYPES>2*CITY_HOUSE_STOREYS);
   for(const spec of CITY_BUILDING_TYPES){
     // Plain data: a spec survives a round trip through JSON unchanged.
     assert.deepEqual(JSON.parse(JSON.stringify(spec)),spec,spec.name);
@@ -205,8 +206,8 @@ test('every building type is written in Cairn and compiles to a mesh of the size
   types.forEach((type,id)=>{
     assert.equal(type.vertices.length,type.count*8);assert.equal(type.count%3,0);
     // A length of wall is a slab and its merlons; everything else has doors, windows or arrow slits to show.
-    const curtain=id===CITY_TYPE.CURTAIN_SHORT||id===CITY_TYPE.CURTAIN_LONG;
-    assert.ok(type.triangles>(curtain?40:300)&&type.triangles<12000,`${type.name}: ${type.triangles} triangles`);
+    const curtain=id===CITY_TYPE.CURTAIN_SHORT||id===CITY_TYPE.CURTAIN_LONG,street=id>=CITY_TYPE.PENTICE;
+    assert.ok(type.triangles>(curtain||street?40:300)&&type.triangles<(street?400:12000),`${type.name}: ${type.triangles} triangles`);
     const lo=[Infinity,Infinity,Infinity],hi=[-Infinity,-Infinity,-Infinity],kinds=new Set();
     for(let k=0;k<type.vertices.length;k+=8){
       for(let a=0;a<3;a++){const v=type.vertices[k+a];assert.ok(Number.isFinite(v));lo[a]=Math.min(lo[a],v);hi[a]=Math.max(hi[a],v);}
@@ -214,6 +215,8 @@ test('every building type is written in Cairn and compiles to a mesh of the size
       kinds.add(Math.floor(type.vertices[k+6]+.01));
     }
     for(const kind of kinds)assert.ok([10,11,12,13,14,18].includes(kind),`${type.name} is built of known materials: ${kind}`);
+    // A thing of the street is written from where it stands or hangs, and is as large as it is written: no more is asked of it.
+    if(street){assert.ok(hi[0]-lo[0]<=type.width+.01&&hi[2]-lo[2]<=type.length+.01&&hi[1]-lo[1]<=type.height+1.5,`${type.name} is ${hi[0]-lo[0]} by ${hi[2]-lo[2]} by ${hi[1]-lo[1]}`);return;}
     // Its footing runs below the floor, its walls stand on the plot it claims, give or take eaves and towers.
     assert.ok(lo[1]<-6&&lo[1]>-7,`${type.name} footing ${lo[1]}`);
     const church=id>=CITY_TYPE.CHURCH_LEFT&&id<=CITY_TYPE.CHURCH_GREAT,spread=church?(id===CITY_TYPE.CHURCH_GREAT?CITY_CHURCH.great:CITY_CHURCH.parish).tower:0;

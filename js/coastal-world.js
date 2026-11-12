@@ -9413,7 +9413,7 @@ function dressProceduralCoastalPack(pack, heights, port, elevationSource, satell
     beaches,
     port,
     portGeometry,
-    city: cityPlan ? { blocks: cityPlan.blocks, count: cityPlan.count, typed: cityPlan.typed, typedTypes: cityPlan.typedTypes, typedCount: cityPlan.typedCount, typedBlocks: cityPlan.typedBlocks, stats: cityPlan.stats } : null,
+    city: cityPlan ? { blocks: cityPlan.blocks, count: cityPlan.count, typed: cityPlan.typed, typedTypes: cityPlan.typedTypes, typedCount: cityPlan.typedCount, typedBlocks: cityPlan.typedBlocks, typedAttached: cityPlan.typedAttached ?? null, stats: cityPlan.stats } : null,
     // Where Castle and Commons' model founded this coast: what the GPU stamps onto the ground's colours.
     board: country?.board ?? null,
     biome,

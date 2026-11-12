@@ -6,7 +6,7 @@
 // game has it. Ground keeps the look of its geography: what the board adds to it is drawn by the GPU
 // (js/board-stamp.js) from the compact tables made here once.
 import { CITY_BLOCK_FLOATS, CITY_GROUND, CITY_ROOF, CITY_TREES, CITY_WALL, cityFootprintsOverlap, cityMasonry, footprint, local, makeHash, mulberry, rectDist, segDist } from './old-world-city.js';
-import { CITY_BUILDING_TYPES, CITY_CHURCH, CITY_CURTAIN, CITY_HALL, CITY_HOUSE_STOREYS, CITY_STOREY_M, CITY_TYPE, CITY_TYPED_ROOF, cityHouseType } from './old-world-buildings.js';
+import { CITY_BUILDING_TYPES, CITY_CHURCH, CITY_CURTAIN, CITY_HALL, CITY_HOUSE_STOREYS, CITY_PAINT, CITY_STOREY_M, CITY_TYPE, CITY_TYPED_ROOF, cityHouseType } from './old-world-buildings.js';
 
 // The board's furlongs are drawn into a square of cells this many to a side, each cell holding the furlong it
 // lies in (plus one; none is 0). The same square answers the land's questions here and is the GPU's to stamp from.
@@ -16,6 +16,17 @@ const BOARD_HELD = Object.freeze({ NONE: 0, FIELD: 1, HUFE: 2, MEADOW: 3, GARDEN
 const BOARD_STANDS = Object.freeze({ WILD: 0, WOOD: 1, TILLED: 2, PASTURE: 3, SCRUB: 4, BURNT: 5 });
 // The chance a furlong of each land use (OLD_WORLD_LAND) is bounded by a line of trees.
 const BOARD_HEDGED_SHARE = [0, 0.6, 0.3, 0.3, 0.25, 0.25, 0.22, 0, 0];
+// What hangs on a trade's front, by the model's own rule (its STREETFRONT): a pentice over the open shop (`true`, a
+// cloth of the house's own colour), a sign board on its bracket, the ale-stake's bush. A burgher's house in the
+// market quarter is a shop.
+export const BOARD_STREETFRONT = Object.freeze({
+  shop: { awn: true, sign: CITY_PAINT.BLUE }, bakery: { awn: CITY_PAINT.BROWN, sign: CITY_PAINT.GOLD }, tavern: { sign: CITY_PAINT.GREEN, bush: true }, inn: { sign: CITY_PAINT.RED, bush: true, awn: CITY_PAINT.BROWN },
+  smithy: { awn: CITY_PAINT.DARK, sign: CITY_PAINT.DARK }, tannery: { awn: CITY_PAINT.BROWN }, warehouse: { sign: CITY_PAINT.BROWN }, bath: { sign: CITY_PAINT.BLUE, awn: CITY_PAINT.BROWN }, hospital: { sign: CITY_PAINT.LINEN },
+  dyer: { awn: true }, toll: { sign: CITY_PAINT.RED }, guildhall: { sign: CITY_PAINT.GOLD, awn: CITY_PAINT.BLUE },
+});
+const BOARD_CLOTHS = [CITY_PAINT.RED, CITY_PAINT.BLUE, CITY_PAINT.GOLD, CITY_PAINT.GREEN, CITY_PAINT.BROWN], BOARD_STALL_CLOTHS = [CITY_PAINT.RED, CITY_PAINT.BLUE, CITY_PAINT.GOLD, CITY_PAINT.GREEN, CITY_PAINT.LINEN];
+// How high on a front its pentice is fixed, and the bracket its sign hangs from; a low house carries them lower.
+const BOARD_PENTICE_M = 2.75, BOARD_SIGN_M = 3.7, BOARD_STAKE_M = 3.4;
 // A stone curtain stands CITY_CURTAIN.height; a palisade this high.
 const BOARD_PALISADE_M = 5.5;
 const BOARD_HOUSE_TINTS = [0, 0, 0, 0, 0, 0, 1, 1, 2, 3, 4];
@@ -60,6 +71,9 @@ export function layBoardCountry({ baked, region, grid, heightAt, port, wet, LAND
   const inside = (x, z, pad) => x > bounds.x0 + pad && x < bounds.x1 - pad && z > bounds.z0 + pad && z < bounds.z1 - pad;
   const rr = mulberry((Math.round(port.center.x * 7.3) * 73856093) ^ (Math.round(port.center.z * 5.1) * 19349663) ^ (board.seed | 0) ^ 0x2b0a4d17);
   const blocks = [], typed = [], typedTypes = [], typedBlocks = [], gates = [], lots = [], churches = [];
+  // How many of the types stood just after a building are fixed to it (its pentice, sign, ale-stake): they are
+  // no targets of their own, and go when it is shot down.
+  const attached = new Map();
   const solids = makeHash(32), placed = makeHash(16), segs = makeHash(24);
   const keep = (f, r = Math.hypot(f.w, f.d) / 2) => solids.add(f, f.x - r, f.z - r, f.x + r, f.z + r);
   const { seatBlock, pushBlock, pushTyped, curtain, tower, gate } = cityMasonry({ heightAt, blocks, typed, typedTypes, typedBlocks, gates, keep, rr });
@@ -142,7 +156,25 @@ export function layBoardCountry({ baked, region, grid, heightAt, port, wet, LAND
 
   /* ---- buildings: each one the model stood, as this game's type of that size, turned to its street ---- */
   const { count, stand, form, kinds } = board.buildings, arches = board.arches;
-  let houses = 0;
+  const market = board.quarters?.indexOf('market') ?? -1, quarter = board.buildings.quarter ?? null;
+  let houses = 0, fronts = 0, stalls = 0;
+  // A thing of the street: a type stood as it is written, unstretched unless told, with no block of its own.
+  const furnish = (type, x, y, z, yaw, paint, tone, across = CITY_BUILDING_TYPES[type].width) => {
+    const T = CITY_BUILDING_TYPES[type];
+    pushTyped(type, x, y, z, yaw, across, T.height, T.length, paint + 0.3 + 0.65 * tone, 0);
+  };
+  // The street front of a house of trade: fixed to its front wall, hung out over the street.
+  const standFront = (k, f, floor, wallH) => {
+    const arch = arches[kinds[k * 6 + 1]], look = BOARD_STREETFRONT[arch === 'burgher' && quarter && quarter[k] === market ? 'shop' : arch];
+    if (!look) return;
+    const hue = form[k * 3 + 2], hu = hue > 0 && hue < 1 ? hue : boardHashUnit(k, 31), side = hu > 0.5 ? 1 : -1;
+    // Under the eaves of a house of one floor; never so near the ground that a head meets them.
+    const penticeY = Math.min(BOARD_PENTICE_M, Math.max(2.25, wallH - 0.7)), signY = Math.min(BOARD_SIGN_M, Math.max(2.7, wallH - 0.3)), stakeY = Math.min(BOARD_STAKE_M, Math.max(2.9, wallH - 0.3));
+    if (look.awn) { const [x, z] = local(f, 0, -f.d / 2); furnish(CITY_TYPE.PENTICE, x, floor + penticeY, z, f.yaw, look.awn === true ? BOARD_CLOTHS[Math.floor(hu * 5)] : look.awn, boardHashUnit(k, 67), f.w * 0.82); }
+    if (look.sign) { const [x, z] = local(f, f.w * 0.36 * side, -f.d / 2); furnish(CITY_TYPE.SIGN, x, floor + signY, z, f.yaw, look.sign, boardHashUnit(k, 71)); }
+    if (look.bush) { const [x, z] = local(f, -f.w * 0.36 * side, -f.d / 2); furnish(CITY_TYPE.ALE_STAKE, x, floor + stakeY, z, f.yaw, CITY_PAINT.GREEN, boardHashUnit(k, 73)); }
+    fronts++;
+  };
   const standHouse = (k, f, storeys, toStreet, mannered = true) => {
     const wallH = storeys * CITY_STOREY_M + boardHashUnit(k, 11) * 0.5;
     const base = seatBlock(f, toStreet ? heightAt(f.x - Math.sin(f.yaw) * (f.d / 2 + 1.5), f.z - Math.cos(f.yaw) * (f.d / 2 + 1.5)) : null);
@@ -154,6 +186,9 @@ export function layBoardCountry({ baked, region, grid, heightAt, port, wet, LAND
     else pushBlock(f, wallH, 0.5 * T.width / 2 * up, CITY_ROOF.GABLE + CITY_TYPED_ROOF, CITY_WALL.HOUSE, tone, base);
     pushTyped(type, f.x, base.floor, f.z, f.yaw, f.w, wallH, f.d, tone);
     occupy(f); houses++;
+    const house = typedTypes.length - 1;
+    if (toStreet) standFront(k, f, base.floor, wallH);
+    if (typedTypes.length - 1 > house) attached.set(house, typedTypes.length - 1 - house);
   };
   const standChurch = (k, f, great, tall) => {
     const C = great ? CITY_CHURCH.great : CITY_CHURCH.parish;
@@ -216,6 +251,20 @@ export function layBoardCountry({ baked, region, grid, heightAt, port, wet, LAND
       standHouse(k, f, Math.min(CITY_HOUSE_STOREYS, storeys), fx || fz, !plain);
     }
   }
+
+  /* ---- the open places: a well on a green; on a market place its cross, and stalls round it ---- */
+  const open = (x, z, reach) => inside(x, z, 8) && heightAt(x, z) > BOARD_DRY_M && !taken(footprint(x, z, reach, reach, 0), 0.5) && !placed.some(x, z, reach, (o) => rectDist(o, x, z) <= reach * 0.5);
+  squares.forEach((p, at) => {
+    if (p.kind === 'park') { if (open(p.x, p.z, 4.2)) furnish(CITY_TYPE.WELL, p.x, heightAt(p.x, p.z), p.z, boardHashUnit(at, 79) * Math.PI, 0, 0.5); return; }
+    if (open(p.x, p.z, 3.2)) furnish(CITY_TYPE.MARKET_CROSS, p.x, heightAt(p.x, p.z), p.z, 0, 0, 0.5);
+    const place = places[p.place], n = place.kind === 'capital' ? 12 : 7;
+    for (let k = 0; k < n; k++) {
+      const a = k / n * 2 * Math.PI + 0.3, far = squareRadius(p, p.x + Math.cos(a), p.z + Math.sin(a)) * 0.62, x = p.x + Math.cos(a) * far, z = p.z + Math.sin(a) * far;
+      if (!open(x, z, 3.6)) continue;
+      furnish(CITY_TYPE.STALL, x, heightAt(x, z), z, -a, BOARD_STALL_CLOTHS[(k * 3 + place.name.length) % BOARD_STALL_CLOTHS.length], boardHashUnit(at * 31 + k, 83));
+      stalls++;
+    }
+  });
 
   /* ---- what any point of a town's ground is, and where a tree may stand in it ---- */
   const houseNear = (x, z, reach) => placed.some(x, z, reach, (o) => rectDist(o, x, z) <= reach);
@@ -325,11 +374,12 @@ export function layBoardCountry({ baked, region, grid, heightAt, port, wet, LAND
   const plan = {
     blocks: new Float32Array(blocks), count: blockCount, houses, streets, places: squares, gates, churches, lots, paving, standing,
     typed: new Float32Array(typed), typedTypes: new Uint32Array(typedTypes), typedCount: typedTypes.length, typedBlocks: new Uint32Array(typedBlocks),
+    typedAttached: Uint8Array.from({ length: typedTypes.length }, (_, i) => attached.get(i) ?? 0),
     groundAt, treesAt: cityTreesAt,
     stats: {
       blocks: blockCount, typed: typedTypes.length, houses, streets: streets.length, churches: churches.length, gates: gates.length,
       lanes: streets.filter((s) => s.kind === 'lane' || s.kind === 'alley').length, squares: squares.length, places: places.length,
-      furlongs: fields.length, people: board.people, dropped,
+      furlongs: fields.length, people: board.people, fronts, stalls, dropped,
       milliseconds: typeof performance === 'object' ? performance.now() - started : 0,
     },
   };
