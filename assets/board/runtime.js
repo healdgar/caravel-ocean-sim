@@ -155,6 +155,8 @@ globalThis.BOARD_MODEL = (() => {
 
   // The quarters of a town the model sets a building in; anything else (a farm, a castle's own) is the first.
   const QUARTERS = ['', 'residential', 'artisan', 'market'];
+  // How a building stands: whole, a roofless ruin, alight, or a heap.
+  const STANDINGS = ['sound', 'ruin', 'burning', 'rubble'];
 
   function board() {
     const places = W.settlements.map((s) => ({
@@ -168,7 +170,7 @@ globalThis.BOARD_MODEL = (() => {
       squares: (s.places || []).map((p) => ({ kind: p.kind || 'market', x: r1(p.x), z: r1(p.z), rad: list(p.r) })),
       past: (s.history || []).filter((h) => h.ad !== undefined).map((h) => [h.ad, h.t]),
     }));
-    const stand = [], form = [], kinds = [], quarter = [], standing = new Map();
+    const stand = [], form = [], kinds = [], quarter = [], standing = new Map(), state = [], wheels = [], yards = [];
     W.settlements.forEach((s, at) => {
       for (const b of s.buildings) {
         if (b.removed || b.state === 'gone') continue;
@@ -178,6 +180,11 @@ globalThis.BOARD_MODEL = (() => {
         form.push(r3(b.fx ?? 0), r3(b.fz ?? 0), r3(b.hue ?? 0));
         kinds.push(at, ARCHES.indexOf(b.arch), b.tier | 0, b.roof | 0, b.ch ? (b.cathedral ? 3 : b.ch.spire ? 2 : b.ch.tower ? 1 : 0) + (b.ch.stone ? 4 : 0) : 0, b.shed ? 1 : 0);
         quarter.push(Math.max(0, QUARTERS.indexOf(b.district)));
+        state.push(Math.max(0, STANDINGS.indexOf(b.state)));
+        // A mill's wheel stands in its water; a church's yard lies beside it with its graves.
+        if (b.millWater) wheels.push(kinds.length / 6 - 1, r1(b.millWater.x), r1(b.millWater.z));
+        const yard = b._graveyard;
+        if (yard && !yard.removed && yard.poly?.length > 2) yards.push({ church: kinds.length / 6 - 1, graves: typeof graveyardBurials === 'function' ? graveyardBurials(s, b).length : 0, points: line(yard.poly) });
       }
     });
     // Every furlong of the ground, held or not: whose it is (-1 no one's), what it is held as, what stands on it.
@@ -207,7 +214,30 @@ globalThis.BOARD_MODEL = (() => {
       // face (the way to its street and its hue), six for what it is (place, arch, tier, roof, church, shed) and
       // one for its quarter of the town (`quarters`).
       quarters: QUARTERS,
-      buildings: { count: kinds.length / 6, stand, form, kinds, quarter },
+      standings: STANDINGS,
+      buildings: { count: kinds.length / 6, stand, form, kinds, quarter, state },
+      // Whatever else the model has built or has standing on the ground, as its own scene would draw it: the fences
+      // of worked furlongs (five numbers: from, to, and 1 for dry stone plus 2 along a lane), the bridges its tracks
+      // cross water by (middle, heading, span, 1 for stone), mill wheels (building, where the wheel turns), churchyards,
+      // memorial cairns, robbers' camps, hosts in the field and works in hand.
+      works: {
+        // A fence along a track stands two paces back from it, on its own furlong's side (as the model's own scene sets it).
+        fences: workerFenceSegments().flatMap((f) => {
+          let ax = f.a.x, az = f.a.z, bx = f.b.x, bz = f.b.z;
+          if (f.lane) {
+            const L = Math.hypot(bx - ax, bz - az) || 1, nx = -(bz - az) / L, nz = (bx - ax) / L, side = (f.x - ax) * nx + (f.z - az) * nz > 0 ? 2 : -2;
+            ax += nx * side; az += nz * side; bx += nx * side; bz += nz * side;
+          }
+          return [r1(ax), r1(az), r1(bx), r1(bz), (f.stone ? 1 : 0) + (f.lane ? 2 : 0)];
+        }),
+        trackBridges: (W.trackBridgePlan || []).flatMap((q) => [r1(q.mx), r1(q.mz), r3(q.ux), r3(q.uz), r1(q.span), q.isStone ? 1 : 0]),
+        wheels, yards,
+        memorials: (W.memorials || []).flatMap((m) => [r1(m.x), r1(m.z)]),
+        camps: (W.banditCamps || []).flatMap((c) => [r1(c.x), r1(c.z), c.men?.length | 0]),
+        armies: (W.armies || []).filter((a) => !a.gone).map((a) => { const at = armySimPos(a); return { name: a.name, house: a.house, men: a.men?.length || Math.round(a.strength) || 0, state: a.state, x: r1(at.x), z: r1(at.z) }; }),
+        sites: (W.projects || []).filter((q) => !q.dead).map((q) => ({ kind: q.kind || q.type || '', title: q.title || '', place: q.si ?? -1, x: q.x ?? q.f?.x ?? q.site?.f?.x ?? q.site?.x ?? null, z: q.z ?? q.f?.z ?? q.site?.f?.z ?? q.site?.z ?? null }))
+          .filter((q) => Number.isFinite(q.x) && Number.isFinite(q.z)).map((q) => ({ ...q, x: r1(q.x), z: r1(q.z) })),
+      },
       roads: W.roads.map((q) => ({ from: q.a, to: q.b, points: line(q.drawn || q.path) })),
       rivers: (W.rivStrips || []).map((q) => ({ canal: Boolean(q.canal), points: q.pts.flatMap((p, i) => [r1(p.x), r1(p.z), r1(q.hw[i])]) })),
       lanes: workerTrackSegments().flatMap((t) => [r1(t.a.x), r1(t.a.z), r1(t.b.x), r1(t.b.z)]),

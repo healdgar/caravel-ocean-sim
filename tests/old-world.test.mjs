@@ -5,7 +5,7 @@ import {OLD_WORLD_LAND,OLD_WORLD_CITIES,OLD_WORLD_NO_TREES,inIberia,oldWorldPeop
   oldWorldHoldingSeat,growOldWorldTown,layOldWorldRoads,oldWorldCountry} from '../js/old-world.js';
 import {CITY_BLOCK_FLOATS,CITY_GROUND,CITY_ROOF,CITY_TREES,CITY_WALL,cityFootprintsOverlap} from '../js/old-world-city.js';
 import {streetEdgeAt} from '../js/town-streets.js';
-import {CITY_BUILDING_TYPES,CITY_CHURCH,CITY_DETAIL_M,CITY_GATE,CITY_HOUSE_STOREYS,CITY_HOUSE_TYPES,CITY_TYPE,CITY_TYPED_FLOATS,CITY_TYPED_ROOF,cityHouseType,compileCityBuildingTypes} from '../js/old-world-buildings.js';
+import {CITY_BUILDING_TYPES,CITY_CHURCH,CITY_DETAIL_M,CITY_GATE,CITY_HOUSE_STOREYS,CITY_HOUSE_TYPES,CITY_TYPE,CITY_TYPE_SLIGHT_FROM,CITY_TYPED_FLOATS,CITY_TYPED_ROOF,cityHouseType,compileCityBuildingTypes} from '../js/old-world-buildings.js';
 import {CITY_CULL} from '../js/scenery-cull.js';
 import {TERRAIN} from '../js/wgsl/terrain.js';
 
@@ -194,8 +194,11 @@ test('a city is laid out on its ground: streets that join, lots that touch nothi
 });
 
 test('every building type is written in Cairn and compiles to a mesh of the size it claims',()=>{
-  // Nine kinds of building after the houses, then the six things of the street.
-  assert.equal(CITY_TYPE.PENTICE,CITY_HOUSE_TYPES+9);assert.equal(CITY_BUILDING_TYPES.length,CITY_TYPE.WELL+1);assert.ok(CITY_HOUSE_TYPES>2*CITY_HOUSE_STOREYS);
+  // Nine kinds of building after the houses, then the six things of the street, then whatever else the model
+  // builds: seventeen that stand on footings as a house does and nine slighter works.
+  assert.equal(CITY_TYPE.PENTICE,CITY_HOUSE_TYPES+9);assert.equal(CITY_TYPE.WINDMILL,CITY_TYPE.WELL+1);assert.equal(CITY_TYPE_SLIGHT_FROM,CITY_TYPE.FENCE_RAIL);
+  assert.equal(CITY_BUILDING_TYPES.length,CITY_TYPE.SCAFFOLD+1);assert.ok(CITY_HOUSE_TYPES>2*CITY_HOUSE_STOREYS);
+  assert.equal(new Set(Object.values(CITY_TYPE)).size,Object.keys(CITY_TYPE).length,'every type has its own number');
   for(const spec of CITY_BUILDING_TYPES){
     // Plain data: a spec survives a round trip through JSON unchanged.
     assert.deepEqual(JSON.parse(JSON.stringify(spec)),spec,spec.name);
@@ -206,23 +209,25 @@ test('every building type is written in Cairn and compiles to a mesh of the size
   types.forEach((type,id)=>{
     assert.equal(type.vertices.length,type.count*8);assert.equal(type.count%3,0);
     // A length of wall is a slab and its merlons; everything else has doors, windows or arrow slits to show.
-    const curtain=id===CITY_TYPE.CURTAIN_SHORT||id===CITY_TYPE.CURTAIN_LONG,street=id>=CITY_TYPE.PENTICE;
-    assert.ok(type.triangles>(curtain||street?40:300)&&type.triangles<(street?400:12000),`${type.name}: ${type.triangles} triangles`);
+    const curtain=id===CITY_TYPE.CURTAIN_SHORT||id===CITY_TYPE.CURTAIN_LONG,street=id>=CITY_TYPE.PENTICE&&id<=CITY_TYPE.WELL||id>=CITY_TYPE_SLIGHT_FROM;
+    assert.ok(type.triangles>(curtain||street?40:300)&&type.triangles<(street?600:12000),`${type.name}: ${type.triangles} triangles`);
     const lo=[Infinity,Infinity,Infinity],hi=[-Infinity,-Infinity,-Infinity],kinds=new Set();
     for(let k=0;k<type.vertices.length;k+=8){
       for(let a=0;a<3;a++){const v=type.vertices[k+a];assert.ok(Number.isFinite(v));lo[a]=Math.min(lo[a],v);hi[a]=Math.max(hi[a],v);}
       assert.ok(Math.abs(Math.hypot(type.vertices[k+3],type.vertices[k+4],type.vertices[k+5])-1)<.02,'a unit normal');
       kinds.add(Math.floor(type.vertices[k+6]+.01));
     }
-    for(const kind of kinds)assert.ok([10,11,12,13,14,18].includes(kind),`${type.name} is built of known materials: ${kind}`);
+    for(const kind of kinds)assert.ok([10,11,12,13,14,15,16,18].includes(kind),`${type.name} is built of known materials: ${kind}`);
     // A thing of the street is written from where it stands or hangs, and is as large as it is written: no more is asked of it.
     if(street){assert.ok(hi[0]-lo[0]<=type.width+.01&&hi[2]-lo[2]<=type.length+.01&&hi[1]-lo[1]<=type.height+1.5,`${type.name} is ${hi[0]-lo[0]} by ${hi[2]-lo[2]} by ${hi[1]-lo[1]}`);return;}
     // Its footing runs below the floor, its walls stand on the plot it claims, give or take eaves and towers.
     assert.ok(lo[1]<-6&&lo[1]>-7,`${type.name} footing ${lo[1]}`);
     const church=id>=CITY_TYPE.CHURCH_LEFT&&id<=CITY_TYPE.CHURCH_GREAT,spread=church?(id===CITY_TYPE.CHURCH_GREAT?CITY_CHURCH.great:CITY_CHURCH.parish).tower:0;
-    assert.ok(hi[0]<=type.width/2+spread+.7&&lo[0]>=-type.width/2-spread-.7,`${type.name} across ${lo[0]}..${hi[0]}`);
+    // A watermill's wheel turns outside its wall, under the launder that comes from behind it; a windmill's sails sweep wider than its tower.
+    const mill=id===CITY_TYPE.WATERMILL,sails=id===CITY_TYPE.WINDMILL?.1:0;
+    assert.ok(hi[0]<=type.width/2+spread+.7+(mill?1.2:0)&&lo[0]>=-type.width/2-spread-.7-sails,`${type.name} across ${lo[0]}..${hi[0]}`);
     // A house may stand out over its street as far as a jetty, a balcony or a pentice, and its eaves over that.
-    assert.ok(hi[2]<=type.length/2+.7&&lo[2]>=-type.length/2-(id<CITY_HOUSE_TYPES?1.75:.7),`${type.name} along ${lo[2]}..${hi[2]}`);
+    assert.ok(hi[2]<=type.length/2+.7+(mill?3:0)&&lo[2]>=-type.length/2-(id<CITY_HOUSE_TYPES?1.75:.7),`${type.name} along ${lo[2]}..${hi[2]}`);
     assert.ok(hi[1]>=type.height&&hi[1]<type.height+(church?CITY_CHURCH.towerRise+CITY_CHURCH.spire+.5:7.5),`${type.name} up ${hi[1]} of ${type.height}`);
     // A house has windows and a tiled roof, and so has the castle's hall; a tower, a gate and the wall are stone.
     if(id<CITY_HOUSE_TYPES||id===CITY_TYPE.HALL)assert.ok(kinds.has(14)&&kinds.has(13)&&kinds.has(12));

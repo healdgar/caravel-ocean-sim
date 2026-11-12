@@ -8,7 +8,7 @@
 //
 // Nothing here runs unless a shot is in the air or being aimed, and then only for the buildings on its line.
 import { noteBuildingMesh } from './building-fracture.js';
-import { CITY_TYPED_FLOATS, CITY_TYPES_OVERHEAD, cityTypeTarget } from './old-world-buildings.js';
+import { CITY_TYPED_FLOATS, CITY_TYPES_SLIGHT, cityTypeTarget } from './old-world-buildings.js';
 
 const CITY_TARGET_CELL_M = 32;
 // How many buildings a shot has passed near, and not struck, are kept standing ready.
@@ -54,7 +54,7 @@ export function createCityTargets({ city, types, port }) {
     grid = new Map(); turns = new Float32Array(count * 2); seen = new Uint32Array(count);
     for (let index = 0; index < count; index++) {
       // What hangs from a house's front is no building: shot and whoever walks pass it by, and it goes with its house.
-      if (CITY_TYPES_OVERHEAD.has(kinds[index])) continue;
+      if (CITY_TYPES_SLIGHT.has(kinds[index])) continue;
       const o = index * F, source = typeOf(index).source, c = Math.cos(typed[o + 3]), s = Math.sin(typed[o + 3]);
       turns[index * 2] = c; turns[index * 2 + 1] = s;
       const across = typed[o + 4], along = typed[o + 6];

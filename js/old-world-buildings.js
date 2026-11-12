@@ -5,6 +5,7 @@
 //
 // A type's local frame is the plan's: x along the street, z away from it, the street front at
 // -z, the floor at y = 0. Its width, length and height are what an instance is scaled from.
+import { CITY_WORKS, CITY_WORKS_BUILT } from './old-world-works.js';
 
 export const CITY_STOREY_M = 2.9;
 const FOOTING_M = 6.5; // Walls run this far below the floor, so a house on a slope has no gap under it.
@@ -411,17 +412,36 @@ export const CITY_BUILDING_TYPES = Object.freeze([
   curtainSpec({ name: 'Pano de muralha (long length of wall)', length: CITY_CURTAIN.long }),
   hallSpec({ name: 'Paço (castle hall)' }),
   ...CITY_STREET_FURNITURE,
+  // Whatever else Castle and Commons' model builds (js/old-world-works.js).
+  ...CITY_WORKS.map(([, spec]) => spec),
 ]);
 
 const H = CITY_HOUSE_STOREYS, AFTER_HOUSES = CITY_HOUSE_TYPES;
 export const CITY_TYPE = Object.freeze({ HOUSE_EAVES: 0, HOUSE_GABLE: H, CHURCH_LEFT: AFTER_HOUSES, CHURCH_RIGHT: AFTER_HOUSES + 1, CHURCH_GREAT: AFTER_HOUSES + 2, WALL_TOWER: AFTER_HOUSES + 3, KEEP: AFTER_HOUSES + 4, GATE: AFTER_HOUSES + 5, CURTAIN_SHORT: AFTER_HOUSES + 6, CURTAIN_LONG: AFTER_HOUSES + 7, HALL: AFTER_HOUSES + 8,
-  PENTICE: AFTER_HOUSES + 9, SIGN: AFTER_HOUSES + 10, ALE_STAKE: AFTER_HOUSES + 11, STALL: AFTER_HOUSES + 12, MARKET_CROSS: AFTER_HOUSES + 13, WELL: AFTER_HOUSES + 14 });
+  PENTICE: AFTER_HOUSES + 9, SIGN: AFTER_HOUSES + 10, ALE_STAKE: AFTER_HOUSES + 11, STALL: AFTER_HOUSES + 12, MARKET_CROSS: AFTER_HOUSES + 13, WELL: AFTER_HOUSES + 14,
+  // The model's other works, by their names there: WINDMILL to RUBBLE stand on footings; FENCE_RAIL and after are the slighter things.
+  ...Object.fromEntries(CITY_WORKS.map(([key], k) => [key, AFTER_HOUSES + 15 + k])) });
+// The first of the slighter works: from here on a type is written as large as it is, and asked for no footing.
+export const CITY_TYPE_SLIGHT_FROM = AFTER_HOUSES + 15 + CITY_WORKS_BUILT;
 // What hangs over a street from a front: whoever walks there passes under it.
 export const CITY_TYPES_OVERHEAD = Object.freeze(new Set([CITY_TYPE.PENTICE, CITY_TYPE.SIGN, CITY_TYPE.ALE_STAKE]));
+// What is too slight to be laid as a gun's target or to stop anyone walking: what hangs overhead, a fence, a track's
+// bridge (which is walked over), graves, a cairn, a standard.
+export const CITY_TYPES_SLIGHT = Object.freeze(new Set([...CITY_TYPES_OVERHEAD, CITY_TYPE.FENCE_RAIL, CITY_TYPE.FENCE_STONE, CITY_TYPE.FOOTBRIDGE, CITY_TYPE.STONE_BRIDGE, CITY_TYPE.GRAVES, CITY_TYPE.CAIRN, CITY_TYPE.STANDARD]));
 // The paints a front's cloth and boards take, as tints of the land shader's limewash: after its five washes.
 export const CITY_PAINT = Object.freeze({ LINEN: 1, RED: 5, BLUE: 6, GOLD: 7, GREEN: 8, BROWN: 9, DARK: 10 });
 // What a type is to the guns: the name its damage is kept under and reported by. The wall and
 // its towers, the keep and the gate are fortified stone (js/gunnery-control.js); the rest is masonry.
+const CITY_WORKS_TARGETS = Object.freeze({
+  WINDMILL: { prefabId: 'city_windmill', label: 'Windmill' }, WATERMILL: { prefabId: 'city_watermill', label: 'Watermill' }, GRANARY: { prefabId: 'city_granary', label: 'Granary' },
+  SHED: { prefabId: 'city_outbuilding', label: 'Outbuilding' }, BARN: { prefabId: 'city_barn', label: 'Barn' }, DOVECOTE: { prefabId: 'city_dovecote', label: 'Dovecote' },
+  TOLL: { prefabId: 'city_toll_house', label: 'Toll house' }, COT: { prefabId: 'city_hovel', label: 'Hovel' }, WINEPRESS: { prefabId: 'city_winepress', label: 'Winepress' },
+  VATS: { prefabId: 'city_works', label: 'Tannery or dye works' }, STONE_HALL: { prefabId: 'city_stone_hall', label: 'Stone hall' }, CLOISTER: { prefabId: 'city_cloister', label: 'Cloister' },
+  COURT: { prefabId: 'city_courtyard_house', label: 'Courtyard house' }, WHARF: { prefabId: 'city_wharf', label: 'Wharf' }, QUARRY: { prefabId: 'city_quarry', label: 'Quarry' },
+  RUIN: { prefabId: 'city_ruin', label: 'Ruin' }, RUBBLE: { prefabId: 'city_rubble', label: 'Rubble' }, FENCE_RAIL: { prefabId: 'city_fence', label: 'Fence' }, FENCE_STONE: { prefabId: 'city_fence', label: 'Dry-stone wall' },
+  FOOTBRIDGE: { prefabId: 'city_bridge', label: 'Timber bridge' }, STONE_BRIDGE: { prefabId: 'city_bridge', label: 'Stone bridge' }, GRAVES: { prefabId: 'city_graves', label: 'Graves' },
+  CAIRN: { prefabId: 'city_cairn', label: 'Cairn' }, TENT: { prefabId: 'city_tent', label: 'Tent' }, STANDARD: { prefabId: 'city_standard', label: 'Standard' }, SCAFFOLD: { prefabId: 'city_scaffold', label: 'Scaffold' },
+});
 export function cityTypeTarget(type) {
   if (type < AFTER_HOUSES) return { prefabId: 'city_house', label: 'Town house' };
   if (type === CITY_TYPE.CHURCH_GREAT) return { prefabId: 'city_church', label: 'Cathedral' };
@@ -434,6 +454,8 @@ export function cityTypeTarget(type) {
   if (type === CITY_TYPE.STALL) return { prefabId: 'city_market_stall', label: 'Market stall' };
   if (type === CITY_TYPE.MARKET_CROSS) return { prefabId: 'city_market_cross', label: 'Market cross' };
   if (type === CITY_TYPE.WELL) return { prefabId: 'city_well', label: 'Well' };
+  const works = CITY_WORKS[type - CITY_TYPE.WINDMILL];
+  if (works) return CITY_WORKS_TARGETS[works[0]];
   return { prefabId: 'city_wall', label: 'City wall' };
 }
 // Eight numbers to an instance of a type: x, floor height, z, turn; scale across, up and along; tone.

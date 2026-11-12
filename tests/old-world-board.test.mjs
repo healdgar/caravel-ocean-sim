@@ -8,9 +8,10 @@ import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { BAKED_BOARDS, BAKED_WORLDS, BOARD_RIVERS, BOARD_SURVEY_SIZE, BOARD_VERSION, bakedBoardAsset, bakedWorldAsset, boardGroundFits, boardGroundSurvey, boardRequest } from '../js/board-model.js';
 import { BOARD_WAY_FLOATS, boardStampTables } from '../js/board-stamp.js';
-import { BOARD_INDEX_SIZE, BOARD_STREETFRONT } from '../js/old-world-board.js';
+import { BOARD_INDEX_SIZE, BOARD_STREETFRONT, BOARD_WORKS } from '../js/old-world-board.js';
 import { CITY_BLOCK_FLOATS, CITY_TREES } from '../js/old-world-city.js';
-import { CITY_BUILDING_TYPES, CITY_TYPE, CITY_TYPED_FLOATS, CITY_TYPES_OVERHEAD } from '../js/old-world-buildings.js';
+import { CITY_BUILDING_TYPES, CITY_TYPE, CITY_TYPE_SLIGHT_FROM, CITY_TYPED_FLOATS, CITY_TYPES_OVERHEAD, CITY_TYPES_SLIGHT } from '../js/old-world-buildings.js';
+import { WORKS_FENCE_M, WORKS_WHEEL } from '../js/old-world-works.js';
 import { OLD_WORLD_LAND, OLD_WORLD_NO_TREES, OLD_WORLD_PLACES, bakedBoardFor, oldWorldCountry, registerBakedBoard } from '../js/old-world.js';
 import { openBoard } from '../scripts/board-host.mjs';
 
@@ -60,14 +61,16 @@ test('a founded board stands in the game as its own buildings, land and woods, a
   assert.equal(plan.typed.length, plan.typedCount * CITY_TYPED_FLOATS);
   assert.equal(plan.typedTypes.length, plan.typedCount);
   assert.equal(plan.blocks.length % CITY_BLOCK_FLOATS, 0);
-  assert.ok(stats.houses > board.buildings.count * 0.8, `houses ${stats.houses} of ${board.buildings.count} founded`);
+  // Every building the model founded stands as a house or as its own kind of work.
+  const B = stats.built, stood = stats.houses + stats.churches + B.windmills + B.watermills + B.stores + B.sheds + B.halls + B.others + B.ruins;
+  assert.ok(stood > board.buildings.count * 0.8, `${stood} stand of ${board.buildings.count} founded`);
   const dropped = stats.dropped.wet + stats.dropped.port + stats.dropped.steep + stats.dropped.edge;
   assert.ok(dropped < board.buildings.count * 0.1, `dropped ${JSON.stringify(stats.dropped)}`);
   assert.ok(stats.churches >= 1 && stats.streets >= 8, `churches ${stats.churches}, streets ${stats.streets}`);
   for (let i = 0; i < plan.typedCount; i++) {
     const at = plan.typed.subarray(i * CITY_TYPED_FLOATS, (i + 1) * CITY_TYPED_FLOATS);
     assert.ok(at.every(Number.isFinite) && plan.typedTypes[i] < CITY_BUILDING_TYPES.length, `building ${i}`);
-    assert.ok(bayHeight(at[0], at[2]) > 0.5, `building ${i} stands in the water at ${at[0]}, ${at[2]}`);
+    if (![CITY_TYPE.WHARF, CITY_TYPE.FOOTBRIDGE, CITY_TYPE.STONE_BRIDGE].includes(plan.typedTypes[i])) assert.ok(bayHeight(at[0], at[2]) > 0.5, `building ${i} stands in the water at ${at[0]}, ${at[2]}`);
   }
   assert.ok(stats.milliseconds < 2000, `laid in ${stats.milliseconds} ms`);
 
@@ -84,6 +87,8 @@ test('a founded board stands in the game as its own buildings, land and woods, a
   const furnished = { [CITY_TYPE.PENTICE]: 0, [CITY_TYPE.SIGN]: 0, [CITY_TYPE.ALE_STAKE]: 0, [CITY_TYPE.STALL]: 0, [CITY_TYPE.MARKET_CROSS]: 0, [CITY_TYPE.WELL]: 0 };
   for (let i = 0; i < plan.typedCount; i++) {
     const type = plan.typedTypes[i];
+    // A slighter work (a length of fence, a bridge, graves, a tent) has no block either; whatever else stands has.
+    if (type >= CITY_TYPE_SLIGHT_FROM) { assert.equal(plan.typedBlocks[i * 2 + 1], 0, 'a slight work has no block'); continue; }
     if (!(type in furnished)) { assert.ok(plan.typedBlocks[i * 2 + 1] >= 1, `building ${i} has its block`); continue; }
     furnished[type]++;
     assert.equal(plan.typedBlocks[i * 2 + 1], 0, 'a thing of the street has no block');
@@ -108,6 +113,47 @@ test('a founded board stands in the game as its own buildings, land and woods, a
   assert.ok(furnished[CITY_TYPE.SIGN] > 0 && furnished[CITY_TYPE.PENTICE] > 0, 'signs and pentices');
   assert.equal(furnished[CITY_TYPE.STALL], stats.stalls);
   assert.ok(stats.stalls >= 4 && furnished[CITY_TYPE.MARKET_CROSS] >= 1, `stalls ${stats.stalls}`);
+
+  // Whatever else the model built is stood as what it is: a mill is a mill, a granary a granary, an outbuilding
+  // an outbuilding. Each kind is counted where the model has it and stood as its type nearly every time.
+  const founded = {}, of = new Array(CITY_BUILDING_TYPES.length).fill(0);
+  for (let k = 0; k < board.buildings.count; k++) { const arch = board.arches[board.buildings.kinds[k * 6 + 1]]; if (BOARD_WORKS[arch]) founded[BOARD_WORKS[arch][0]] = (founded[BOARD_WORKS[arch][0]] ?? 0) + 1; }
+  for (let i = 0; i < plan.typedCount; i++) of[plan.typedTypes[i]]++;
+  t.diagnostic(JSON.stringify({ founded, built: B }));
+  assert.ok(Object.keys(founded).length >= 2, `the model founded ${Object.keys(founded)}`);
+  for (const [key, n] of Object.entries(founded)) assert.ok(of[CITY_TYPE[key]] <= n && of[CITY_TYPE[key]] >= Math.floor(n * 0.7), `${key}: ${of[CITY_TYPE[key]]} stand of ${n} founded`);
+  // A type is fitted to its plot, never beyond recognition; a ruin alone is as large as what fell.
+  for (let i = 0; i < plan.typedCount; i++) {
+    const type = plan.typedTypes[i], at = plan.typed.subarray(i * CITY_TYPED_FLOATS, (i + 1) * CITY_TYPED_FLOATS);
+    if (type >= CITY_TYPE.WINDMILL && type < CITY_TYPE.RUIN) assert.ok(at[4] > 0.79 && at[4] < 1.36 && at[6] > 0.79 && at[6] < 1.36 && at[5] > 0.9 && at[5] < 1.1, `${CITY_BUILDING_TYPES[type].name} stretched ${at[4]}, ${at[5]}, ${at[6]}`);
+  }
+  // A watermill's wheel is on the side of it where the model's wheel turns.
+  const wheels = board.works.wheels;
+  for (let w = 0; w < wheels.length; w += 3) {
+    const k = wheels[w], x = board.buildings.stand[k * 6], z = board.buildings.stand[k * 6 + 1];
+    for (let i = 0; i < plan.typedCount; i++) {
+      const at = plan.typed.subarray(i * CITY_TYPED_FLOATS, (i + 1) * CITY_TYPED_FLOATS);
+      if (plan.typedTypes[i] !== CITY_TYPE.WATERMILL || Math.hypot(at[0] - x, at[2] - z) > 0.2) continue;
+      const out = (CITY_BUILDING_TYPES[CITY_TYPE.WATERMILL].width / 2 + WORKS_WHEEL.out) * at[4], wx = at[0] + out * Math.cos(at[3]), wz = at[2] - out * Math.sin(at[3]);
+      assert.ok(Math.hypot(wx - wheels[w + 1], wz - wheels[w + 2]) < 4.5, `a wheel ${Math.hypot(wx - wheels[w + 1], wz - wheels[w + 2])} m from its water`);
+    }
+  }
+  // Its worked furlongs are fenced a length at a time, of rail or of dry stone as the model has them, each length on
+  // dry ground and near its own measure; a churchyard is walled; none of these is a gun's target or stops a walker.
+  const fenced = board.works.fences.length / 5;
+  let lengths = 0;
+  for (let i = 0; i < plan.typedCount; i++) {
+    const type = plan.typedTypes[i];
+    if (type !== CITY_TYPE.FENCE_RAIL && type !== CITY_TYPE.FENCE_STONE) continue;
+    const at = plan.typed.subarray(i * CITY_TYPED_FLOATS, (i + 1) * CITY_TYPED_FLOATS);
+    lengths++;
+    assert.ok(at[4] === 1 && at[5] === 1 && at[6] > 0.3 && at[6] < 1.5, `a length of fence stretched ${at[6]}`);
+    assert.ok(CITY_TYPES_SLIGHT.has(type));
+  }
+  assert.equal(lengths, B.fences);
+  assert.ok(fenced > 0 && lengths > fenced, `${lengths} lengths of fence on ${fenced} runs`);
+  assert.ok(WORKS_FENCE_M > 2 && board.works.yards.length === B.yards);
+  assert.equal(of[CITY_TYPE.FOOTBRIDGE] + of[CITY_TYPE.STONE_BRIDGE], B.bridges);
 
   // Its land: uses only, no colour (the ground keeps its geography's; the GPU stamps the parcels on it).
   const kinds = new Set(); let woods = 0, forest = 0, town = 0;
