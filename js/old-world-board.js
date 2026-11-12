@@ -536,6 +536,8 @@ export function layBoardCountry({ baked, region, grid, heightAt, port, wet, LAND
   };
   return {
     plan, town, roads, parcelAt, places, seat,
+    // Who mans the seat, by the model's own roll on the board's day: its port's posts are manned from it (js/crew.js).
+    watch: seat.watch ? { ...seat.watch, place: seat.name, day: board.day ?? 0 } : null,
     // For the GPU, which stamps the country onto the ground's own colours: the furlong of every cell, each
     // furlong's use, and every way that runs across it.
     stamp: {

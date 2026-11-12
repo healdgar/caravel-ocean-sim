@@ -143,6 +143,49 @@ globalThis.BOARD_MODEL = (() => {
     return { si, day: day(), date: dateStr(day()), sunday, people, others: rest.slice(0, others).map(soul) };
   }
 
+  // The soldiers of a place, by the model's own rolls: whoever holds the place for its lord, then the men of any host
+  // sheltering within it (the model's own rule: a host of the place's lord, or of his friends, lying idle there; each
+  // host keeps its roll by name: the sworn men of a household, those called to arms, and sell-swords), then its watch.
+  // The model keeps a watch as a number and pays it by the month: its posts are taken by the householders under fifty
+  // whose own work earns them less than a watchman's wage, the poorest first, and the rest by the other young
+  // householders of the place (the model's payWatch), who are named here as their turn comes round by the month. The
+  // first `most` are named. Asking makes nothing but the roll of households the model's own next day makes, and its
+  // days go on as they would have.
+  const HOLDS = ['sheriff', 'warden', 'bailiff', 'steward'];
+  const turnOf = (id, month) => { let h = (Math.imul(id | 0, 2654435761) ^ Math.imul((month | 0) + 1, 40503)) >>> 0; h = Math.imul(h ^ (h >>> 15), 2246822519) >>> 0; return (h ^ (h >>> 13)) >>> 0; };
+  function watch(si, { most = 60 } = {}) {
+    const s = W.settlements?.[si], today = day(), men = [], seen = new Set(), hosts = [];
+    const answer = (more = {}) => ({ si, day: today, date: dateStr(today), garrison: Math.max(0, Math.round(s?.garrison || 0)), militia: Math.max(0, Math.round(s?.militia || 0)), captain: null, hosts, men, ...more });
+    if (!s) return answer();
+    const soul = (p, more) => ({ id: p.id, name: folkName(p), surname: famName(p), sex: p.sx || null, age: r1(ageYrs(p)), role: p.tr || null, ...more });
+    const take = (p, more) => { if (!p || p.dead || seen.has(p.id) || men.length >= most) return false; seen.add(p.id); men.push(soul(p, more)); return true; };
+    const holder = (s.folk || []).filter((p) => !p.dead && HOLDS.includes(officeHeld(p))).sort((a, b) => HOLDS.indexOf(a.office) - HOLDS.indexOf(b.office) || a.id - b.id)[0] || null;
+    const captain = holder ? soul(holder, { of: 'office', office: officeTitle(holder) }) : null;
+    if (holder) seen.add(holder.id);
+    for (const a of W.armies || []) {
+      if (a.gone || a.field || a.at !== si || (a.state !== 'idle' && a.state !== 'arrived') || !friendlyTown(a, s)) continue;
+      const lead = a.commander != null ? notableById(a.commander) : null;
+      hosts.push({ name: a.name || '', house: a.house ?? -1, men: a.men?.length || Math.round(a.strength) || 0, standing: Boolean(a.standing), commander: lead ? lead.name || '' : '' });
+      for (const p of a.men || []) take(p, { of: 'host', host: a.name || '', hired: Boolean(p.merc) });
+    }
+    const posts = Math.max(0, Math.round(s.garrison || 0));
+    if (posts && Array.isArray(s.folk) && men.length < most) {
+      const young = heads_(s, (q) => ageYrs(q) < 50), wage = watchPay(s) / posts, takers = [];
+      for (const h of young) { const A = householdAccount(h), earn = (A && A.assets._incY != null ? A.assets._incY : tradeIncome(s, h.tr)) / 12; if (earn < wage) takers.push([earn, h]); }
+      takers.sort((a, b) => a[0] - b[0] || a[1].id - b[1].id);
+      const first = takers.slice(0, posts).map((t) => t[1]), month = Math.floor(today / 30);
+      for (const h of first) take(h, { of: 'watch' });
+      if (first.length < posts && men.length < most) {
+        const others = young.filter((h) => !first.includes(h)).map((h) => [turnOf(h.id, month), h]).sort((a, b) => a[0] - b[0] || a[1].id - b[1].id);
+        for (const [, h] of others.slice(0, posts - first.length)) if (!take(h, { of: 'watch' }) && men.length >= most) break;
+      }
+    }
+    return answer({ captain });
+  }
+  // A place's roll as its record keeps it: the men a port's own posts are manned from when its land is laid.
+  const WATCH_KEPT = 96;
+  const watchKept = (si) => { const { garrison, militia, captain, hosts, men } = watch(si, { most: WATCH_KEPT }); return garrison || hosts.length || captain ? { garrison, militia, captain, hosts, men } : null; };
+
   const castle = (s) => {
     const out = {};
     if (s.hillCastle) { const c = s.hillCastle; out.hill = { x: r1(c.x), z: r1(c.z), r: r1(c.r), walls: c.walls, height: r1(c.wallHeight ?? 0), rad: list(c.wallRad), kind: list(c.wallKind, Number), gate: r3(c.gateA ?? 0), timber: Boolean(c.timber) }; }
@@ -159,7 +202,7 @@ globalThis.BOARD_MODEL = (() => {
   const STANDINGS = ['sound', 'ruin', 'burning', 'rubble'];
 
   function board() {
-    const places = W.settlements.map((s) => ({
+    const places = W.settlements.map((s, at) => ({
       name: s.name, kind: s.kind, role: s.role, culture: s.cult, people: Math.round(s.pop), x: r1(s.pos.x), z: r1(s.pos.z),
       radius: r1(s.radius || 0), reach: r1(s.extentR || 0), paved: r1(s.paveR || 0), harbour: Boolean(s.harbor), river: Boolean(s.river),
       founded: s.origin ? { kind: s.origin.kind, year: s.origin.foundedAD, layout: s.origin.layout } : null, layout: s.mode || null,
@@ -169,6 +212,8 @@ globalThis.BOARD_MODEL = (() => {
       streets: s.streets.filter((t) => !t.hidden && !t.gone && t.kind !== 'edge' && t.pts.length > 1).map((t) => ({ kind: t.kind, half: r1(t.hw), points: line(t.pts) })),
       squares: (s.places || []).map((p) => ({ kind: p.kind || 'market', x: r1(p.x), z: r1(p.z), rad: list(p.r) })),
       past: (s.history || []).filter((h) => h.ad !== undefined).map((h) => [h.ad, h.t]),
+      // Who mans it: whoever holds it, the hosts within it and the first of its watch, by name (`watch`).
+      watch: watchKept(at),
     }));
     const stand = [], form = [], kinds = [], quarter = [], standing = new Map(), state = [], wheels = [], yards = [];
     W.settlements.forEach((s, at) => {
@@ -249,5 +294,5 @@ globalThis.BOARD_MODEL = (() => {
     };
   }
 
-  return { VERSION, found, live, board, freeze, thaw, serve, folk };
+  return { VERSION, found, live, board, freeze, thaw, serve, folk, watch };
 })();

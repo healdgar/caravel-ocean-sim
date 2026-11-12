@@ -665,5 +665,5 @@ function makeCountry(region, heights, port) {
     return use.kind === OLD_WORLD_LAND.PASTURE && !use.wooded ? NO_TREES : TENDED[use.kind];
   };
 
-  return { city, people, year, cityX, cityZ, cityRadius, cityArea, town, roads, plan, grid, inland, landAt, treesAt, beyondTown, board: stood ? stood.stamp : null, places: stood ? stood.places : null };
+  return { city, people, year, cityX, cityZ, cityRadius, cityArea, town, roads, plan, grid, inland, landAt, treesAt, beyondTown, board: stood ? stood.stamp : null, places: stood ? stood.places : null, watch: stood ? stood.watch : null };
 }

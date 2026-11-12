@@ -89,7 +89,7 @@ import { createCrew, createFortSoldiers, preloadCrewModels, requestCrewPipelines
 import { createTownsfolk, requestTownsfolkPipelines } from './townsfolk.js';
 import { createBoardLife } from './board-life.js';
 import { BOARD_KEEP_CAREER, forgetKeptBoards, keepBoard, keptBoard } from './board-keep.js';
-import { boardFolkStreets, folkDoing } from './board-folk.js';
+import { boardFolkStreets, folkDoing, watchDoing } from './board-folk.js';
 import { createFolkCard } from './folk-card.js';
 import { WALKER_WORDS, townSolids } from './town-streets.js';
 import { bakedBoardFor } from './old-world.js';
@@ -4100,7 +4100,9 @@ async function main() {
       if(terrain?.port!==port||townsfolk.port!==port)return;
       const began=performance.now();
       if(folkPlan.keptFor!==base){folkPlan.keptFor=base;folkPlan.kept.clear();folkPlan.solids=townSolids(port);}
-      port.streets=boardFolkStreets({plan,origin:region,heightAt:(px,pz)=>terrain.groundSample(px+offset.x,pz+offset.z),base,kept:folkPlan.kept,blocked:folkPlan.solids});
+      // Whoever stands a post of the port's forts today walks no street.
+      const garrison=port.garrison,away=garrison?.watch?garrison.posted??=new Set(garrison.soldiers.map(s=>s.soul?.id).filter(id=>id!=null)):null;
+      port.streets=boardFolkStreets({plan,origin:region,heightAt:(px,pz)=>terrain.groundSample(px+offset.x,pz+offset.z),base,kept:folkPlan.kept,blocked:folkPlan.solids,away});
       townsfolk.refresh(port);
       Object.assign(folkPlan,{day:plan.day,x,z,at:performance.now(),laidMs:performance.now()-began,laid:folkPlan.laid+1});
     }).catch(error=>{console.warn('The board\'s townsfolk:',error);folkPlan.at=performance.now();}).finally(()=>{folkPlan.asking=false;});
@@ -4115,34 +4117,50 @@ async function main() {
   const folkSeen=()=>{const streets=townsfolk?.port?.streets;return streets?.souls?streets:null;};
   // Where they stand on the screen, in the canvas's own pixels, and how tall they stand there; null if out of sight.
   const FOLK_HEIGHT_M=1.75,FOLK_LEAST_PX=9,FOLK_REACH_PX=12;
-  function folkOnScreen(streets,index,rect){
-    const stride=folkWalker(streets,index);
-    if(!stride)return null;
-    const f=frameF,x=stride.position.x-f[16],y=stride.position.y+FOLK_HEIGHT_M*.5-f[17],z=stride.position.z-f[18],w=f[3]*x+f[7]*y+f[11]*z+f[15];
+  function folkStandsAt(px,py,pz,rect){
+    const f=frameF,x=px-f[16],y=py+FOLK_HEIGHT_M*.5-f[17],z=pz-f[18],w=f[3]*x+f[7]*y+f[11]*z+f[15];
     if(!(w>.2))return null;
     const nx=(f[0]*x+f[4]*y+f[8]*z+f[12])/w,ny=(f[1]*x+f[5]*y+f[9]*z+f[13])/w;
     if(Math.abs(nx)>1||Math.abs(ny)>1)return null;
-    return {x:(nx*.5+.5)*rect.width,y:(.5-ny*.5)*rect.height,tall:FOLK_HEIGHT_M*rect.height/(2*Math.hypot(f[24],f[25],f[26])*w),depth:w,stride};
+    return {x:(nx*.5+.5)*rect.width,y:(.5-ny*.5)*rect.height,tall:FOLK_HEIGHT_M*rect.height/(2*Math.hypot(f[24],f[25],f[26])*w),depth:w};
   }
+  function folkOnScreen(streets,index,rect){
+    const stride=folkWalker(streets,index);
+    if(!stride)return null;
+    const seen=folkStandsAt(stride.position.x,stride.position.y,stride.position.z,rect);
+    if(seen)seen.stride=stride;
+    return seen;
+  }
+  // Those at the port's posts are the model's people too: its forts are manned from the model's own roll of the
+  // place (js/crew.js), each figure one of its soldiers or of its watch, named and asked after as the townsfolk are.
+  const watchSeen=()=>{const garrison=fortSoldiers?.state;return garrison?.watch&&garrison.port===terrain?.port?garrison.soldiers:null;};
+  const watchOnScreen=(s,rect)=>s.soul&&s.visible!==false&&s.casualtyState!=='fallen'?folkStandsAt(s.position[0],s.position[1],s.position[2],rect):null;
   const folkAbout=(streets,index,stride)=>folkDoing(streets.souls[index],stride,streets.walkers[index*WALKER_WORDS+8]);
-  // Whoever is under a point of the window: the nearest to it of those who stand tall enough there to be made out.
+  // Whoever is under a point of the window, of those who stand tall enough there to be made out. Of several within
+  // reach of it, the one nearer the eye is meant unless another is much nearer the point: whoever stands in front
+  // hides those behind (a wall between is not known here).
   function folkUnder(clientX,clientY){
-    const streets=folkSeen();
-    if(!streets)return null;
-    const rect=canvas.getBoundingClientRect(),px=clientX-rect.left,py=clientY-rect.top,count=Math.min(streets.souls.length,townsfolk.people);
-    let best=-1,least=Infinity;
-    for(let i=0;i<count;i++){
-      const seen=folkOnScreen(streets,i,rect);
-      if(!seen||seen.tall<FOLK_LEAST_PX)continue;
-      const reach=Math.max(FOLK_REACH_PX,seen.tall*.6),score=Math.hypot(seen.x-px,seen.y-py)/reach;
-      if(score<1&&score+seen.depth*1e-4<least){least=score+seen.depth*1e-4;best=i;}
-    }
+    const streets=folkSeen(),posts=watchSeen();
+    if(!streets&&!posts)return null;
+    const rect=canvas.getBoundingClientRect(),px=clientX-rect.left,py=clientY-rect.top,count=streets?Math.min(streets.souls.length,townsfolk.people):0;
+    let best=-1,post=null,least=Infinity;
+    const nearer=seen=>{
+      if(!seen||seen.tall<FOLK_LEAST_PX)return false;
+      const reach=Math.max(FOLK_REACH_PX,seen.tall*.6),off=Math.hypot(seen.x-px,seen.y-py)/reach,score=seen.depth*(.5+off);
+      if(!(off<1&&score<least))return false;
+      least=score;return true;
+    };
+    for(let i=0;i<count;i++)if(nearer(folkOnScreen(streets,i,rect))){best=i;post=null;}
+    for(const s of posts??[])if(nearer(watchOnScreen(s,rect)))post=s;
+    if(post)return {post,soul:post.soul,doing:watchDoing(post)};
     if(best<0)return null;
     return {index:best,soul:streets.souls[best],doing:folkAbout(streets,best,folkWalker(streets,best))};
   }
   function folkWhereabouts(id){
     const streets=folkSeen(),index=streets?streets.souls.findIndex(soul=>soul?.id===id):-1;
-    return index<0||index>=townsfolk.people?'':folkAbout(streets,index,folkWalker(streets,index));
+    if(index>=0&&index<townsfolk.people)return folkAbout(streets,index,folkWalker(streets,index));
+    const post=watchSeen()?.find(s=>s.soul?.id===id);
+    return post?watchDoing(post):'';
   }
   const folkCard=createFolkCard({person:id=>boardLife?boardLife.person(id):Promise.reject(new Error('No board is alive')),whereabouts:folkWhereabouts});
   const folkName=document.createElement('div');folkName.id='folk-name';folkName.hidden=true;document.body.append(folkName);
@@ -4155,11 +4173,11 @@ async function main() {
     if(found)folkCard.show(found.soul,found.doing);
   });
   canvas.addEventListener('pointermove',e=>{
-    if(e.pointerType!=='mouse'||e.buttons||!folkSeen()){if(!folkName.hidden){folkName.hidden=true;canvas.style.cursor='';}return;}
+    if(e.pointerType!=='mouse'||e.buttons||!(folkSeen()||watchSeen())){if(!folkName.hidden){folkName.hidden=true;canvas.style.cursor='';}return;}
     const now=performance.now();if(now-folkHoverAt<90)return;folkHoverAt=now;
     const found=folkUnder(e.clientX,e.clientY);
     folkName.hidden=!found;canvas.style.cursor=found?'pointer':'';
-    if(found){folkName.textContent=found.soul.name+(found.soul.role?', '+found.soul.role:'');folkName.style.left=e.clientX+'px';folkName.style.top=e.clientY+'px';}
+    if(found){folkName.textContent=found.soul.name+(found.soul.role?', '+found.soul.role:'')+(found.post?' · '+found.post.role:'');folkName.style.left=e.clientX+'px';folkName.style.top=e.clientY+'px';}
   });
   canvas.addEventListener('pointerleave',()=>{folkName.hidden=true;canvas.style.cursor='';});
   window.oceanFolk={
@@ -4175,7 +4193,14 @@ async function main() {
     },
     // Where walker `index` stands in the world now, or null while they are indoors.
     where(index){const streets=folkSeen(),stride=streets&&index<townsfolk.people?folkWalker(streets,index):null;return stride&&{x:stride.position.x,y:stride.position.y,z:stride.position.z};},
-    ask(id){const streets=folkSeen(),soul=streets?.souls.find(one=>one?.id===id);return soul?folkCard.show(soul,folkWhereabouts(id)):boardLife.person(id);},
+    ask(id){const streets=folkSeen(),soul=streets?.souls.find(one=>one?.id===id)??watchSeen()?.find(s=>s.soul?.id===id)?.soul;return soul?folkCard.show(soul,folkWhereabouts(id)):boardLife.person(id);},
+    // The port's posts and who stands each: the model's roll the forts were manned from, and every figure of them as
+    // seen now ({x, y, tall} on the screen, null out of sight), with their soul, their post and what they are at.
+    get watch(){return fortSoldiers?.state?.watch??null;},
+    get posts(){
+      const rect=canvas.getBoundingClientRect();
+      return (watchSeen()??[]).map(s=>{const seen=watchOnScreen(s,rect);return {soul:s.soul,post:s.role,kind:s.stationKind,work:s.buildingPrefabId,doing:watchDoing(s),at:{x:s.position[0],y:s.position[1],z:s.position[2]},seen:seen&&{x:rect.left+seen.x,y:rect.top+seen.y,tall:seen.tall,depth:seen.depth}};});
+    },
   };
   function frame(now) {
     if (shooting) return;  // paused while a screenshot is read back

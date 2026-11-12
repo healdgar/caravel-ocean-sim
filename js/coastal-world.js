@@ -9393,6 +9393,8 @@ function dressProceduralCoastalPack(pack, heights, port, elevationSource, satell
   // own, and its blocks handed to the renderer to draw as instances.
   const country = pack.skipPortPlacement ? null : oldWorldCountry(region, heights, port);
   const cityPlan = country?.plan ?? null;
+  // A founded country names who mans its seat; the port's forts are manned from that roll.
+  if (country?.watch) port.watch = country.watch;
   if (cityPlan && port.streets) paveCityStreets(port.streets, cityPlan.paving);
   const shoreDist = computeCoastalShoreDistances(heights, region.size, region.span, 0.25);
   const beaches = synthesizeCoastalBeaches(region, heights, satelliteData, shoreDist, {

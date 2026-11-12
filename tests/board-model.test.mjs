@@ -222,6 +222,25 @@ test('the whole world is frozen at its founding, taken up again without its surv
   assert.equal(Buffer.from(await thawed.freeze()).toString('base64') === whole, true, 'the whole world, frozen, is byte for byte what it was');
   assert.equal(JSON.stringify(await thawed.hook('folk', 0, { most: 60, others: 25 })), JSON.stringify(folk), 'and asked again, the same plan');
   t.diagnostic(`folk: ${folk.people.map((one) => one.goal).reduce((count, goal) => ({ ...count, [goal]: (count[goal] || 0) + 1 }), {}) && JSON.stringify(folk.people.slice(0, 2).map((one) => [one.name, one.age, one.role, one.goal, one.there, one.via, one.route.length / 2]))}`);
+  // Its soldiers, by the model's own rolls: the watch it keeps and pays is named man by man, the poorest householders
+  // first; the same roll is in the place's record, from which a port's posts are manned. Asking changes nothing.
+  const roll = await thawed.hook('watch', 0, { most: 40 });
+  assert.equal(roll.si, 0); assert.ok(roll.garrison > 0, `a watch of ${roll.garrison}`);
+  assert.equal(roll.men.length, Math.min(40, roll.garrison)); assert.equal(new Set(roll.men.map((one) => one.id)).size, roll.men.length, 'no one twice');
+  for (const one of roll.men) {
+    assert.ok(one.name && one.surname && ['m', 'f'].includes(one.sex) && ['watch', 'host'].includes(one.of), JSON.stringify(one));
+    if (one.of === 'watch') assert.ok(one.age >= 14 && one.age < 50, `${one.name} is ${one.age}`);
+  }
+  assert.ok(Array.isArray(roll.hosts)); assert.ok(roll.captain === null || roll.captain.of === 'office');
+  const watchman = roll.men[0], theirs = await thawed.request('view', { kind: 'ui', panel: 'advisor-inspect', code: 'p' + watchman.id, full: true });
+  assert.equal(theirs.kind, 'person'); assert.ok(theirs.card.startsWith(watchman.name), theirs.card.slice(0, 80));
+  assert.equal(JSON.stringify(await thawed.hook('watch', 0, { most: 40 })), JSON.stringify(roll), 'asked again, the same roll');
+  const seatWatch = (await thawed.hook('board')).places[0].watch;
+  assert.equal(seatWatch.garrison, roll.garrison); assert.deepEqual(seatWatch.men.slice(0, roll.men.length), roll.men, 'the record keeps the same roll');
+  assert.deepEqual((await thawed.hook('watch', 99)).men, [], 'no such place, no watch');
+  assert.equal(JSON.stringify(await thawed.hook('board')), before);
+  assert.equal(Buffer.from(await thawed.freeze()).toString('base64') === whole, true, 'and the whole world is still what it was');
+  t.diagnostic(`watch: ${roll.garrison} posts; ${roll.men.slice(0, 3).map((one) => `${one.name}, ${one.role}, ${one.age}`).join('; ')}`);
   // A world is not taken up from bytes that are not one.
   await assert.rejects(openBoard(request, { world: kept.slice(0, 5000) }));
   await open.close(); await thawed.close();

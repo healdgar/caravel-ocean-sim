@@ -56,9 +56,12 @@ const sameWay = (a, b) => a.length === b.length && a.every((v, k) => v === b[k])
  * only so many walk. Returns streets as js/townsfolk.js and js/audio.js read them, with `souls[i]` the soul of
  * walker i. `kept`, a Map the caller holds from one plan to the next, spares the ground being asked again for a way
  * someone took in the last plan too: when the eye moves on, most of those about are who they were. `blocked(x, z)`
- * says where a point stands inside a building of the port's own (js/town-streets.js townSolids).
+ * says where a point stands inside a building of the port's own (js/town-streets.js townSolids). `away` is a Set of
+ * the numbers of those who stand elsewhere today (at the port's posts: js/crew.js), and so walk no street.
  */
-export function boardFolkStreets({ plan, origin, heightAt, base = null, kept = null, blocked = null }) {
+export function boardFolkStreets({ plan: asked, origin, heightAt, base = null, kept = null, blocked = null, away = null }) {
+  const about = (list) => away?.size ? list.filter((person) => !away.has(person.id)) : list;
+  const plan = { ...asked, people: about(asked.people), others: about(asked.others) };
   const own = base?.people > 0 && base.walkers && base.samples ? Math.min(base.people, Math.floor(base.walkers.length / WALKER_WORDS), plan.others.length) : 0;
   const ownSamples = own ? base.samples.length / 4 : 0;
   const samples = [], ways = [], taken = kept ? new Map() : null;
@@ -122,4 +125,18 @@ export function folkDoing(soul, stride, length) {
   if (soul.goal === 'play') return soul.there;
   const by = soul.via ? ` by ${/^(the|a) /i.test(soul.via) ? '' : 'the '}${soul.via.toLowerCase()}` : '';
   return (stride.back ? 'walking home' : soul.goal === 'church' ? 'walking to mass' : soul.goal === 'errand' ? 'out on an errand' : 'walking to work') + by;
+}
+
+// What one of the model's people at a port's post is at, in words that may follow "You find me". The post is this
+// game's (js/crew.js); the one who stands it is the model's: a townsman serving his turn on the watch, a man of a
+// host that lies in the place, or whoever holds the place for its lord.
+const WATCH_WORKS = Object.freeze({ stone_sea_bastion: 'the sea bastion', torreon_atalaya_farol: 'the watchtower', bastion_trace_fortress: 'the fortress', curtain_wall_and_gate: 'the town wall' });
+const WATCH_POSTS = Object.freeze({ embrasure: 'at a gun of', crown: 'on the crown of', 'gate-roof': 'over the gate of', 'gate-portal': 'at the gate of', plinth: 'at the foot of', parade: 'before the gate of', citadel: 'in the yard of' });
+export function watchDoing(soldier) {
+  const soul = soldier?.soul ?? {}, work = soldier?.building ?? {};
+  // A work's own name is its first words ("Torre de Belém Watchtower & River Beacon" is the Torre de Belém).
+  const named = String(work.label || work.cairnSpec?.name || '').split(/\s+(?:[(·&]|Watchtower\b)/)[0].trim();
+  const where = named ? `the ${named}` : WATCH_WORKS[soldier?.buildingPrefabId] || 'the fort';
+  const duty = soul.of === 'host' ? `on guard with ${soul.host || 'the host'}` : soul.of === 'office' ? 'holding the place' : 'on watch';
+  return `${duty} ${WATCH_POSTS[soldier?.stationKind] ?? 'on the walls of'} ${where}`;
 }

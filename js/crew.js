@@ -1616,6 +1616,28 @@ export function createIndigenousVillagersForInstance(inst, startIndex = 0, cultu
   });
 }
 
+// A port whose country Castle and Commons' model founded mans its posts from that model's own roll of the place
+// (`port.watch`, from the board its land was laid from: js/old-world-board.js): whoever holds the place for its lord
+// has a captain's post, and the men of the hosts within it and of its watch take the others in the roll's order.
+// Each figure is then that person: their name, their sex, and one face of their own wherever they stand. A post the
+// roll has no one for stands empty. A port with no such roll keeps the company this game gives it.
+function garrisonMuster(watch) {
+  if (!watch || !Array.isArray(watch.men)) return null;
+  const men = [...watch.men];
+  let holder = watch.captain ?? null;
+  return (s) => {
+    if (holder && isCaptainActor(s)) { const person = holder; holder = null; return person; }
+    return men.shift() ?? null;
+  };
+}
+export function garrisonEnlist(s, person) {
+  const sex = person.sex === 'f' ? 'female' : 'male', faces = CREW_IDENTITIES.filter((one) => one.sex === sex);
+  const identity = faces[Math.abs(person.id | 0) % faces.length], look = CREW_APPEARANCES[identity.id];
+  Object.assign(s, { soul: person, name: person.name, sex, identityId: identity.id, skin: crewLinearColour(look.skin), hair: crewLinearColour(look.hair), face: [...look.face] });
+  s.scale.fill((sex === 'female' ? 1.04 : 1.02) * (1 + (((s.crewIndex ?? 0) % 3) - 1) * 0.02));
+  return s;
+}
+
 export function createFortGarrison(port) {
   const instances = port?.instances ?? [];
   const origin = [port?.center?.x ?? 0, 0, port?.center?.z ?? 0];
@@ -1623,10 +1645,12 @@ export function createFortGarrison(port) {
   // `units` is every building's men. `byBuilding` is by name, and two buildings of one plan may share a name.
   const byBuilding = new Map(), units = [];
   const cultureId = port?.indigenousSettlement?.cultureId ?? null;
+  const muster = garrisonMuster(port?.watch);
   for (const inst of instances) {
     let unit = null;
     if (FORTIFICATION_PREFAB_IDS.includes(inst.prefabId)) {
       unit = createFortificationSoldiersForInstance(inst, soldiers.length);
+      if (muster && !inst.indigenous) unit = unit.filter((s) => { const person = muster(s); return person ? garrisonEnlist(s, person) : false; });
     } else if (INDIGENOUS_VILLAGE_PREFAB_IDS.includes(inst.prefabId)) {
       unit = createIndigenousVillagersForInstance(inst, soldiers.length, cultureId);
     }
@@ -1641,7 +1665,8 @@ export function createFortGarrison(port) {
     units.push(unit);
     byBuilding.set(inst.id ?? inst.prefabId, unit);
   }
-  const garrison = { port, origin, soldiers, byBuilding, units, time: 0, dateMs: null };
+  // `watch` is the model's roll the posts were manned from, or null where the company is this game's own.
+  const garrison = { port, origin, soldiers, byBuilding, units, time: 0, dateMs: null, watch: muster ? port.watch : null };
   if (port && typeof port === 'object') port.garrison = garrison;
   return garrison;
 }

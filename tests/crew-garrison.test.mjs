@@ -2,7 +2,7 @@
 // What a bombardment does to the men on a fort's walls, and how long it goes on doing it.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createFortGarrison, stepFortGarrison, reviveGarrisonSoldiers, garrisonReach, garrisonWithinSight, GARRISON_SIGHT_M, GARRISON_CASUALTY_STAY_S } from '../js/crew.js';
+import { createFortGarrison, isCaptainActor, stepFortGarrison, reviveGarrisonSoldiers, garrisonReach, garrisonWithinSight, GARRISON_SIGHT_M, GARRISON_CASUALTY_STAY_S } from '../js/crew.js';
 import { clearCrewWounds } from '../js/crew-wounds.js';
 import { initArticulatedRagdoll } from '../js/crew-physics.js';
 import { createGunnerySolidSweep } from '../js/gunnery-control.js';
@@ -224,4 +224,44 @@ test('a fort far from the middle of its port is in sight of a camera standing in
   assert.ok(garrisonWithinSight(garrison, { x: 0, z: 0 }), 'and so does one in the town, which further tests then cull by the nearest man');
   assert.ok(!garrisonWithinSight(garrison, { x: reach + GARRISON_SIGHT_M + 500, z: 0 }), 'one beyond every man of it does not');
   assert.ok(!garrisonWithinSight(garrisonOf(tower()), { x: GARRISON_SIGHT_M + 200, z: 0 }), 'nor one far from a fort in the town');
+});
+
+// A port of a founded country: its posts are the model's people.
+const man = (id, more = {}) => ({ id, name: `Soul ${id}`, surname: 'Soul', sex: 'm', age: 30, role: 'baker', of: 'watch', ...more });
+const rollOf = (count, more = {}) => ({ place: 'Lisboa', day: 0, garrison: count, militia: 0, captain: null, hosts: [], men: Array.from({ length: count }, (_, k) => man(100 + k, k === 2 ? { sex: 'f', name: 'Aldonça Soul' } : {})), ...more });
+
+test('the posts of a founded port are manned from the model\'s own roll, each figure one of its people', () => {
+  const own = garrisonOf(tower()), posts = own.soldiers.length;
+  assert.ok(posts >= 6, `${posts} posts`); assert.equal(own.watch, null); assert.ok(own.soldiers.every((s) => !s.soul), 'a port with no roll keeps its own company');
+  const watch = rollOf(posts + 5), garrison = createFortGarrison({ center: { x: 0, z: 0 }, reach: 200, instances: [tower()], watch });
+  assert.equal(garrison.watch, watch); assert.equal(garrison.soldiers.length, posts);
+  garrison.soldiers.forEach((s, k) => {
+    const person = watch.men[k];
+    assert.equal(s.soul, person, 'in the roll\'s order'); assert.equal(s.name, person.name); assert.equal(s.sex, person.sex === 'f' ? 'female' : 'male');
+    assert.equal(s.role, own.soldiers[k].role, 'the post is the port\'s'); assert.equal(s.stationKind, own.soldiers[k].stationKind);
+    assert.deepEqual([...s.position], [...own.soldiers[k].position], 'and stands where it stood');
+    assert.ok(s.skin.length === 3 && s.hair.length === 3 && s.face.length === 4);
+  });
+  assert.equal(garrison.soldiers[2].sex, 'female'); assert.equal(garrison.soldiers[2].name, 'Aldonça Soul');
+  // One person, one face, wherever they are posted.
+  const again = createFortGarrison({ center: { x: 0, z: 0 }, reach: 200, instances: [tower()], watch: { ...watch, men: watch.men.slice(0, posts).reverse() } });
+  const of = (g, id) => g.soldiers.find((s) => s.soul.id === id);
+  assert.notEqual(again.soldiers.indexOf(of(again, 100)), garrison.soldiers.indexOf(of(garrison, 100)), 'at another post');
+  assert.deepEqual(of(again, 100).skin, of(garrison, 100).skin); assert.deepEqual(of(again, 100).face, of(garrison, 100).face);
+});
+
+test('a post the roll has no one for stands empty, and whoever holds the place has a captain\'s post', () => {
+  const few = createFortGarrison({ center: { x: 0, z: 0 }, reach: 200, instances: [tower()], watch: rollOf(3) });
+  assert.equal(few.soldiers.length, 3); assert.deepEqual(few.soldiers.map((s) => s.soul.id), [100, 101, 102]);
+  assert.equal(few.units[0].length, 3, 'the building\'s own men are those three');
+  const none = createFortGarrison({ center: { x: 0, z: 0 }, reach: 200, instances: [tower()], watch: rollOf(0) });
+  assert.equal(none.soldiers.length, 0);
+  // A work with a captain's post: the place's holder stands it, and no one else's post is his.
+  const bastion = () => ({ id: 'fort_2', prefabId: 'stone_sea_bastion', x: 0, y: 0, z: 0, width: 30, length: 34, height: 7, yaw: 0, damageState: { state: 'intact', craters: [], fires: [] } });
+  const plain = createFortGarrison({ center: { x: 0, z: 0 }, reach: 200, instances: [bastion()] }), captains = plain.soldiers.filter(isCaptainActor).length;
+  const holder = man(7, { of: 'office', office: 'warden of Lisboa', role: null });
+  const held = createFortGarrison({ center: { x: 0, z: 0 }, reach: 200, instances: [bastion()], watch: rollOf(plain.soldiers.length, { captain: holder }) });
+  const his = held.soldiers.filter((s) => s.soul === holder);
+  if (captains) { assert.equal(his.length, 1); assert.ok(isCaptainActor(his[0])); } else assert.equal(his.length, 0, 'no captain\'s post, and he stands none');
+  assert.equal(new Set(held.soldiers.map((s) => s.soul.id)).size, held.soldiers.length);
 });

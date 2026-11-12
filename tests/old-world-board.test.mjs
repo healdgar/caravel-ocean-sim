@@ -56,6 +56,10 @@ test('a founded board stands in the game as its own buildings, land and woods, a
   assert.ok(country.board, 'the board stands');
   assert.equal(country.places.length, board.places.length);
   assert.equal(country.places[0].name, SITE.name);
+  // Who mans the seat goes with the country, for the port's posts.
+  assert.ok(country.watch && country.watch.place === SITE.name && country.watch.day === board.day, JSON.stringify(country.watch).slice(0, 200));
+  assert.equal(country.watch.garrison, board.places[0].watch.garrison); assert.deepEqual(country.watch.men, board.places[0].watch.men);
+  assert.ok(country.watch.men.length > 0 && country.watch.men.length <= 96 && country.watch.men.every((one) => one.id > 0 && one.name));
 
   // Its buildings: this game's types, nearly all of those founded, each on dry ground and none in another.
   assert.equal(plan.typed.length, plan.typedCount * CITY_TYPED_FLOATS);
@@ -239,6 +243,9 @@ test('Lisbon\'s whole founded world is frozen beside its board, by the program t
   // Everything is kept, whether or not the game draws it yet.
   const holds = world.holds;
   assert.equal(holds.settlements, baked.board.places.length);
+  // Its seat's watch is in the record by name: more men than the port has posts.
+  const kept = baked.board.places[0].watch;
+  assert.ok(kept.garrison > 500 && kept.men.length === 96 && new Set(kept.men.map((one) => one.id)).size === 96, `a watch of ${kept.garrison}, ${kept.men.length} named`);
   assert.equal(holds.buildings, baked.board.buildings.count);
   assert.ok(holds.houses >= 4 && holds.fields > 1500 && holds.roads >= 4 && holds.trees > 1000, JSON.stringify(holds));
   for (const key of ['armies', 'ships', 'caravans', 'abbeys', 'churchBodies', 'projects', 'tracks', 'fences']) assert.ok(Number.isInteger(holds[key]), `it counts its ${key}`);

@@ -2,7 +2,7 @@
 // The model's people as the walkers the GPU walks, and what each says of themselves when asked.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { FOLK_WAY_MOST_M, boardFolkStreets, folkDoing, folkRoll } from '../js/board-folk.js';
+import { FOLK_WAY_MOST_M, boardFolkStreets, folkDoing, folkRoll, watchDoing } from '../js/board-folk.js';
 import { folkCardFacts, folkSoulOfTitle, folkSpeech } from '../js/folk-card.js';
 import { ROUTE_STEP_M, WALKER_WORDS, townSolids } from '../js/town-streets.js';
 import { townWalkerStride } from '../js/audio.js';
@@ -268,4 +268,25 @@ test('asked, they say who they are from the model\'s record of them and nothing 
     'Sibila Cervecero, brewer. I live at Mesón de la Luna de Bronce, in the market quarter. I am the widow of Juan Cervecero. I have Ana.');
   // With no card at all they still give their name.
   assert.equal(folkSpeech({ id: 1, name: 'Ana Barqueiro', age: 40, role: null }, null, 'about the waterside'), 'Ana Barqueiro. You find me about the waterside.');
+});
+
+test('whoever stands a post of the port walks no street, and says where they stand', () => {
+  const asked = plan([person(1), person(2), person(3)], [person(11), person(12), person(13)]), origin = { x: 0, z: 0 }, heightAt = () => 3;
+  const all = boardFolkStreets({ plan: asked, origin, heightAt, base: ownStreets() });
+  assert.deepEqual(all.souls.map((soul) => soul.id), [1, 2, 3, 11, 12]);
+  const some = boardFolkStreets({ plan: asked, origin, heightAt, base: ownStreets(), away: new Set([2, 11]) });
+  assert.deepEqual(some.souls.map((soul) => soul.id), [1, 3, 12, 13], 'the posted are not about; others of the place walk in their stead');
+  assert.equal(some.people, 4); assert.equal(some.walkers.length, 4 * WALKER_WORDS);
+  assert.deepEqual(asked.people.map((one) => one.id), [1, 2, 3], 'the plan is left as it was asked');
+  assert.deepEqual(boardFolkStreets({ plan: asked, origin, heightAt, base: ownStreets(), away: new Set() }).souls.map((soul) => soul.id), [1, 2, 3, 11, 12]);
+
+  const post = (more) => ({ soul: { id: 5, name: 'Aparicio Llano', of: 'watch' }, role: 'Artillero', stationKind: 'embrasure', buildingPrefabId: 'stone_sea_bastion', building: { label: 'Baluarte da Ribeira (Forte do Terreiro do Paço)' }, ...more });
+  assert.equal(watchDoing(post()), 'on watch at a gun of the Baluarte da Ribeira');
+  assert.equal(watchDoing(post({ stationKind: 'crown', building: { label: 'Torre de Belém Watchtower & River Beacon' } })), 'on watch on the crown of the Torre de Belém');
+  assert.equal(watchDoing(post({ stationKind: 'gate-roof', building: { label: 'Arco da Ribeira · Muralha Fernandina' } })), 'on watch over the gate of the Arco da Ribeira');
+  assert.equal(watchDoing(post({ stationKind: 'rampart', building: {} })), 'on watch on the walls of the sea bastion');
+  assert.equal(watchDoing(post({ soul: { id: 6, of: 'host', host: 'Host of Aviz' }, stationKind: 'gate-portal', building: {}, buildingPrefabId: 'curtain_wall_and_gate' })), 'on guard with Host of Aviz at the gate of the town wall');
+  assert.equal(watchDoing(post({ soul: { id: 7, of: 'office' }, stationKind: 'citadel', building: {}, buildingPrefabId: 'bastion_trace_fortress' })), 'holding the place in the yard of the fortress');
+  // And it reads as their own words.
+  assert.match(folkSpeech({ id: 5, name: 'Aparicio Llano', age: 21, role: 'baker' }, null, watchDoing(post())), /You find me on watch at a gun of the Baluarte da Ribeira\.$/);
 });
