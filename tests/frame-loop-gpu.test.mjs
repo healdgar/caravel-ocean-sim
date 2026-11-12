@@ -81,7 +81,7 @@ async function meanColour(page){
 }
 const resolutionPercent=page=>page.evaluate(()=>Number(/(\d+)%/.exec(document.querySelector('#resolution-status').textContent)?.[1]??NaN));
 
-test('the frame block goes up whole once a frame, its fire lights only when they change, and a sunk hull is asked once for her crew',{timeout:900000},async()=>{
+test('the frame block goes up whole once a frame, its fire lights are written by the GPU alone, and a sunk hull is asked once for her crew',{timeout:900000},async()=>{
   const {context,page,errors,frames}=await open('/?ocean=1&view=ship&ship=nina&follower=1&clouds=0&w=320&h=240&skyMode=astronomy&astroDate=2026-06-15T02:00:00Z');
   try{
     await frames(20);
@@ -98,17 +98,19 @@ test('the frame block goes up whole once a frame, its fire lights only when they
     await frames(3);
     const dark=await meanColour(page);
 
-    // A fire is one patch from the first fire float (23) to the last (87), 92 bytes into the block, sent when it changes.
+    // The block's fire lights (floats 23 to 87) go up dark with the rest. The GPU chooses them from its own fire
+    // records and copies them in, buffer to buffer (gunEffects.encodeLights), so the page sends no part of the block
+    // a second time: not when a fire is lit, not when it changes, not when it goes out.
     const lit=await uploadsOver(page,30,'light');
     assert.ok(lit.whole>=29&&lit.whole<=31,`${lit.whole} whole uploads in 30 frames with a fire burning`);
-    assert.deepEqual(lit.patches,[[92,23,65]],'a steady fire is sent once, not every frame');
+    assert.deepEqual(lit.patches,[],'a fire burning sends no part of the block from the page');
     const fire=await meanColour(page);
     assert.ok(fire[0]>dark[0]+1.5&&fire[0]-dark[0]>fire[2]-dark[2],`the fire lights the ship and the sea warm: red ${dark[0].toFixed(1)} to ${fire[0].toFixed(1)}, blue ${dark[2].toFixed(1)} to ${fire[2].toFixed(1)}`);
 
     const flared=await uploadsOver(page,10,'flare');
-    assert.deepEqual(flared.patches,[[92,23,65]],'a change in the fire is one more');
+    assert.deepEqual(flared.patches,[],'nor does a change in the fire');
     const out=await uploadsOver(page,10,'out');
-    assert.deepEqual(out.patches,[[92,23,65]],'and so is its going out');
+    assert.deepEqual(out.patches,[],'nor its going out');
     const after=await meanColour(page);
     assert.ok(Math.abs(after[0]-dark[0])<0.5,`with the fire out the picture is as dark as before (${dark[0].toFixed(2)}, ${after[0].toFixed(2)})`);
 
