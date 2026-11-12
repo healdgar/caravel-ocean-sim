@@ -173,15 +173,37 @@ def encode_bc7_builtin(pixels):
     return encode_bc7_blocks(pixels)
 
 
-def encode_astc_sips(png, pixels):
-    # sips stores rows bottom to top, so it is given the picture upside down.
-    Image.fromarray(pixels[::-1]).save(png)
-    out = png.with_suffix('.astc')
-    subprocess.run(['sips', '-s', 'format', 'astc', str(png), '--out', str(out)], check=True, capture_output=True)
-    raw = out.read_bytes()
-    if raw[4:7] != bytes([4, 4, 1]):
-        raise SystemExit('sips did not write 4x4 ASTC blocks')
-    return raw[ASTC_HEADER_BYTES:]
+def encode_astc_sips(png, pixels, coverage=False):
+    """`coverage` says the picture's fourth plane is a leaf's coverage, which the blocks must keep.
+
+    sips draws a block that holds both leaf and gap more opaque than it is, and a coarse level of a spray of
+    small leaves is all such blocks. Such a level is given to sips fainter, its pigment and coverage alike so
+    that the leaf's own colour is unchanged, until what the blocks decode to has the coverage asked for.
+    """
+    out, back = png.with_suffix('.astc'), png.with_suffix('.decoded.png')
+    wanted = float(pixels[..., 3].mean())
+    faint, best = 1.0, None
+    for _ in range(6):
+        given = pixels if faint == 1.0 else np.dstack((
+            np.round(np.clip(srgb_from_linear(linear_from_srgb(pixels[..., :3] / 255) * faint), 0, 1) * 255),
+            np.round(pixels[..., 3] * faint))).astype(np.uint8)
+        # sips stores rows bottom to top, so it is given the picture upside down.
+        Image.fromarray(given[::-1]).save(png)
+        subprocess.run(['sips', '-s', 'format', 'astc', str(png), '--out', str(out)], check=True, capture_output=True)
+        raw = out.read_bytes()
+        if raw[4:7] != bytes([4, 4, 1]):
+            raise SystemExit('sips did not write 4x4 ASTC blocks')
+        if not coverage or wanted <= 0:
+            return raw[ASTC_HEADER_BYTES:]
+        subprocess.run(['sips', '-s', 'format', 'png', str(out), '--out', str(back)], check=True, capture_output=True)
+        decoded = float(np.asarray(Image.open(back).convert('RGBA'))[..., 3].mean())
+        if best is None or abs(decoded - wanted) < best[0]:
+            best = (abs(decoded - wanted), raw[ASTC_HEADER_BYTES:])
+        # Within half a step of a byte is as near as the blocks can be told to come.
+        if best[0] <= 0.5 or decoded <= 0:
+            break
+        faint *= wanted / decoded
+    return best[1]
 
 
 def bake_key(material):
@@ -283,7 +305,7 @@ def main():
                         padded = pad_to_blocks(pixels)
                         if args.builtin:
                             jobs[('bc7', kind, level, layer)] = pool.submit(encode_bc7_builtin, padded)
-                            jobs[('astc', kind, level, layer)] = pool.submit(encode_astc_sips, png, padded)
+                            jobs[('astc', kind, level, layer)] = pool.submit(encode_astc_sips, png, padded, kind == 'albedo' and material['name'].startswith('foliage'))
                             encoded += 1
                             continue
                         Image.fromarray(padded).save(png)
