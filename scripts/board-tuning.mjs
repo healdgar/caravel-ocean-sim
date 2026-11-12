@@ -94,6 +94,16 @@ export const BOARD_TUNING = Object.freeze([
     find: 'for(const p of cand.slice(0,160)){const h=detailHead(p).bh,',
     replace: `for(const p of cand.slice(0,${BOARD}?.abroad??160)){const h=detailHead(p).bh,`,
   },
+  {
+    why: 'A household that leaves to break new ground took with it a man who was away with a host: he was sent on the road to the new village and stood on its roll while still on the host\'s. When he fell he was laid to rest but stayed on that roll, a dead man without skills, and the month\'s count of the herdsmen failed on him (AD 852 of a lived Lisbon). A man who is away stays with his host; his home is now where his household went.',
+    find: "for(const p of mem){const i=s.folk.indexOf(p);if(i>=0)removeAt(s,i);journey(p,si,di,'migrant');",
+    replace: "for(const p of mem){const i=s.folk.indexOf(p);if(i<0){if(p.home===si)p.home=di;continue;}removeAt(s,i);journey(p,si,di,'migrant');",
+  },
+  {
+    why: 'And whoever of a host falls is struck off any roll of the living he stands on, by whatever road he came to be on two.',
+    find: "a.men.splice(a.men.indexOf(p),1);dropPerson(p,`Fell fighting with ${a.name}`);",
+    replace: "a.men.splice(a.men.indexOf(p),1);{const hs=W.settlements[p.si],fi=hs&&hs.folk?hs.folk.indexOf(p):-1;if(fi>=0)removeAt(hs,fi);}dropPerson(p,`Fell fighting with ${a.name}`);",
+  },
 ]);
 
 // The source's program with the table applied.

@@ -8,6 +8,7 @@
 // --lived founds the realm in 850 and lets it live every day to the year: its cities are then grown by their own
 // history. That is hours or days of one core for a great city; the progress is written as the years pass.
 // The model founds another country for every seed; a home port is baked with the one whose seat best matches the record.
+// Baked again, a port keeps the seed of the record it has, unless --seed asks for another.
 // --ground keeps the land read from the game in a file and reads it from there the next time, for trying the
 // tuning without loading the game each time.
 // CHROMIUM_PATH names a browser other than Playwright's; WEBGPU_BACKEND=metal a real GPU on a Mac.
@@ -72,8 +73,10 @@ const people = oldWorldPeople(city, year), seat = Number(option('seat', boardSea
 const east = (longitude) => (longitude - region.longitude) * Math.cos(region.latitude * Math.PI / 180) * 111195;
 const south = (latitude) => (region.latitude - latitude) * 111195;
 const number = (name, fallback) => Number(option(name, fallback));
+// A port already baked for this year keeps the country it was given: its seed, unless another is asked for.
+const keptRecord = bakedBoardAsset(port, year) && existsSync(resolve(root, bakedBoardAsset(port, year))) ? JSON.parse(readFileSync(resolve(root, bakedBoardAsset(port, year)), 'utf8')).request : null;
 const request = boardRequest({
-  heights: land.heights, span: region.span, seed: number('seed', region.seed ?? 1550), era: year, seat,
+  heights: land.heights, span: region.span, seed: number('seed', keptRecord?.seed ?? region.seed ?? 1550), era: year, seat,
   site: { name: city.name, culture: 'iberian', x: land.centre.x - region.x, z: land.centre.z - region.z },
   places: (OLD_WORLD_PLACES[city.id] || []).map(([name, latitude, longitude, weight]) => ({ name, x: east(longitude), z: south(latitude), weight })),
   lived: args.includes('--lived'),
