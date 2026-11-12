@@ -155,6 +155,20 @@ export function createCityTargets({ city, types, port }) {
 
   return {
     count,
+    // Whether a point of the ground stands within one of the city's buildings, or within `margin` (a metre at most)
+    // of its walls: for whoever walks its streets.
+    inside(x, z, margin = 0.35) {
+      if (!count) return false;
+      if (!grid) layOut();
+      const list = grid.get(cellKey(Math.floor(x / CITY_TARGET_CELL_M), Math.floor(z / CITY_TARGET_CELL_M)));
+      if (!list) return false;
+      for (const index of list) {
+        const o = index * F, source = typeOf(index).source, c = turns[index * 2], s = turns[index * 2 + 1], dx = x - typed[o], dz = z - typed[o + 2];
+        const lx = dx * c - dz * s, lz = dx * s + dz * c, across = typed[o + 4], along = typed[o + 6];
+        if (lx >= source.min[0] * across - margin && lx <= source.max[0] * across + margin && lz >= source.min[2] * along - margin && lz <= source.max[2] * along + margin) return true;
+      }
+      return false;
+    },
     // What a shot on the line from-to meets among the city's buildings, as `sweepBuilding` (js/gunnery-control.js
     // sweepBuildingSegment) reports any building: the nearest, or null. A real shot's building joins the port.
     sweep(from, to, radius, options, sweepBuilding) {

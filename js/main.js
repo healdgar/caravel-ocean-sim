@@ -1054,6 +1054,17 @@ async function main() {
   // Camera & input
   // --------------------------------------------------------------------------------------
   const cam = { x: 0, y: 2.4, z: 0, yaw: 0, pitch: -5.5 * D2R, fovY: 58 * D2R, speed: 6 };
+  // The captain ashore: the free camera on foot. It keeps to dry ground at the height of an eye, at a walk or a run,
+  // and walks through no building of the port or its city. A pier is not walked yet: the ground under one is the
+  // river's bed.
+  const ASHORE_EYE_M=1.68,ASHORE_WALK_MS=1.5,ASHORE_RUN_MS=4.2,ASHORE_DRY_M=0.35,ASHORE_BODY_M=0.35;
+  const ashore={on:false,solids:null,solidsOf:null};
+  function ashoreOpen(x,z){
+    if(!terrain||!(terrain.groundSample(x,z)>=ASHORE_DRY_M))return false;
+    const port=terrain.port,offset=terrain.getWorldOffset(),lx=x-offset.x,lz=z-offset.z;
+    if(ashore.solidsOf!==port){ashore.solidsOf=port;ashore.solids=townSolids(port,ASHORE_BODY_M);}
+    return !ashore.solids(lx,lz)&&!terrain.cityTargets?.inside(lx,lz,ASHORE_BODY_M);
+  }
   const activeLandViews=terrain?.views??LANDFALL_VIEWS;
   if(LAND_STAGE){const view=activeLandViews[LAND_STAGE]??LANDFALL_VIEWS[LAND_STAGE];Object.assign(cam,view);cam.yaw=view.yaw*D2R;cam.pitch=view.pitch*D2R;cam.speed=45;}
   if (qs.get('cam')) {
@@ -1891,6 +1902,19 @@ async function main() {
     let mx = 0, my = 0, mz = 0;
     const fwd = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0);
     const str = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
+    if(ashore.on&&terrain){
+      // On foot: the way the eye faces, over the ground. A step that a wall or the water stops is tried along
+      // each of its two directions alone, so a wall is walked along and not stuck to.
+      const reach=Math.hypot(fwd,str),pace=reach?(keys.ShiftLeft||keys.ShiftRight?ASHORE_RUN_MS:ASHORE_WALK_MS)*dt/reach:0;
+      const dx=(fwd*sy+str*cy)*pace,dz=(-fwd*cy+str*sy)*pace;
+      if(pace){
+        if(ashoreOpen(cam.x+dx,cam.z+dz)){cam.x+=dx;cam.z+=dz;}
+        else if(dx&&ashoreOpen(cam.x+dx,cam.z))cam.x+=dx;
+        else if(dz&&ashoreOpen(cam.x,cam.z+dz))cam.z+=dz;
+      }
+      cam.y+=(terrain.groundSample(cam.x,cam.z)+ASHORE_EYE_M-cam.y)*Math.min(1,dt*12);
+      return;
+    }
     const up = (keys.KeyE || keys.Space ? 1 : 0) - (keys.KeyQ || keys.KeyC ? 1 : 0);
     mx += fwd * cp * sy + str * cy;
     my += fwd * sp + up;
@@ -3151,6 +3175,33 @@ async function main() {
     portCallButton.id='port-call';portCallButton.type='button';portCallButton.hidden=true;
     document.body.append(portCallButton);
     let portPanel=null,portDeparting=false;
+    // With her alongside or her boat at the shore, the captain may walk the town: set down at the nearest door of
+    // the port that stands on open ground, facing the town, and back aboard by the same button.
+    const shoreWalkButton=document.createElement('button');
+    shoreWalkButton.id='shore-walk';shoreWalkButton.type='button';shoreWalkButton.hidden=true;
+    document.body.append(shoreWalkButton);
+    const shoreLanding=()=>{
+      const port=terrain?.port,doors=(port?.streetsOwn??port?.streets)?.doors;
+      if(!doors?.length)return null;
+      const offset=terrain.getWorldOffset();
+      let best=null,least=Infinity;
+      for(const door of doors){
+        const x=door.x+offset.x,z=door.z+offset.z,d=Math.hypot(x-boat.x,z-boat.z);
+        if(d<least&&ashoreOpen(x,z)){least=d;best={x,z};}
+      }
+      return best&&{...best,towards:{x:port.center.x+offset.x,z:port.center.z+offset.z}};
+    };
+    shoreWalkButton.onclick=()=>{
+      if(ashore.on){setCameraMode('boat');updatePortCall();return;}
+      const landing=shoreLanding();
+      if(!landing){voyageCtl?.showToast?.('There is no landing here to walk from.',5);return;}
+      setCameraMode('free');
+      cam.x=landing.x;cam.z=landing.z;cam.y=terrain.groundSample(cam.x,cam.z)+ASHORE_EYE_M;
+      cam.yaw=Math.atan2(landing.towards.x-cam.x,-(landing.towards.z-cam.z));cam.pitch=0;
+      ashore.on=true;updateHelp(true);updatePortCall();
+    };
+    // Where the captain is: aboard or ashore, and where the eye stands.
+    window.oceanCaptain={get ashore(){return ashore.on;},get eye(){return {x:cam.x,y:cam.y,z:cam.z,yaw:cam.yaw};},walk:()=>shoreWalkButton.onclick()};
     const PILOT_RANGE_KM=25;
     const ROW_ASHORE_SPEED=.8;
     const pilotablePort=()=>{
@@ -3184,13 +3235,21 @@ async function main() {
       const atQuay=able&&nearPortBuildings()?careerPort.here:null,offPort=able&&!atQuay?pilotablePort():null;
       const port=atQuay??offPort;
       portCallButton.hidden=!port;
-      if(!port)return;
+      if(!port||ashore.on){
+        shoreWalkButton.hidden=!ashore.on;
+        if(ashore.on&&shoreWalkButton.textContent!=='Back aboard')shoreWalkButton.textContent='Back aboard';
+        if(!port)return;
+      }
       const phase=dockingBoarding.state.mooringPhase;
       // With no pier in reach it is the ship's boat, once she has stopped.
       const stopped=Math.hypot(boat.surgeVelocity??0,boat.leewayVelocity??0)<ROW_ASHORE_SPEED;
       const label=offPort?'Take a pilot in':mooredAtPier()?'Go ashore':phase!=='clear'?'Making fast…':dockingBoarding.lineTarget()==='pier'?'Moor and go ashore':stopped?'Row ashore':'Stop her to row ashore';
       if(portCallButton.textContent!==label){portCallButton.textContent=label;portCallButton.setAttribute('aria-label',`${label}, ${port.name}`);}
       portCallButton.disabled=label==='Making fast…'||label==='Stop her to row ashore';
+      if(!ashore.on){
+        shoreWalkButton.hidden=!(atQuay&&(label==='Go ashore'||label==='Row ashore'));
+        if(shoreWalkButton.textContent!=='Walk the town')shoreWalkButton.textContent='Walk the town';
+      }
     };
     portCallButton.onclick=()=>{
       if(portCallButton.textContent==='Take a pilot in'){
@@ -3288,6 +3347,8 @@ async function main() {
       ? 'Drag mouse or ↑↓←→ keys to turn view · W S Q E walk deck'
       : cameraMode === 'ship'
       ? 'Drag mouse or ↑↓←→ keys to orbit · Scroll zoom · Shift-drag pan'
+      : ashore.on
+      ? 'Drag mouse or ↑↓←→ keys to look · W A S D walk · Shift run · Click someone to ask who they are'
       : 'Drag mouse or ↑↓←→ keys to look · WASD fly · E/Q up/down · Hold F to fire the cannon';
     lookHint.append(keysTip);
     if(flashHint&&lookHint.isConnected){
@@ -3306,6 +3367,7 @@ async function main() {
     }
   };
   function setCameraMode(mode) {
+    if(mode!=='free')ashore.on=false;
     if(mode===cameraMode) return;
     if(mode!=='boat'&&spyglassActive) {
       spyglassPrevCameraMode=null;
@@ -4291,7 +4353,7 @@ async function main() {
     const windVec=frameWind;
     if(!castleDuel.active){
       portGunnery?.update(dt,windVec,gameDateMs());
-      freeCannon.update(dt,{firing:cameraMode==='free'&&keys.KeyF===true,eye:[cam.x,cam.y,cam.z],
+      freeCannon.update(dt,{firing:cameraMode==='free'&&!ashore.on&&keys.KeyF===true,eye:[cam.x,cam.y,cam.z],
         forward:[Math.cos(cam.pitch)*Math.sin(cam.yaw),Math.sin(cam.pitch),-Math.cos(cam.pitch)*Math.cos(cam.yaw)],wind:windVec});
       fortSoldiers?.update(terrain?.port??null,dt,P.windSpeed,cam,!portGunnery,gameDateMs());
     }else{

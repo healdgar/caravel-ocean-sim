@@ -157,3 +157,19 @@ test('a struck city building breaks up as a port building does, and is put back 
   assert.deepEqual(store.recorded(again),[]);
   assert.equal(back.damageState.hits,0);
 });
+
+test('whoever walks the city is told where its buildings stand: within their walls, not in the street beside',()=>{
+  const targets=createCityTargets({city:plan,types:()=>types,port:freshPort()});
+  let asked=0,streets=0;
+  for(let i=0;i<plan.typedCount&&asked<40;i+=Math.max(1,Math.floor(plan.typedCount/40))){
+    const t=record(i),source=types[plan.typedTypes[i]].source;asked++;
+    // The middle of its floor is within it, however it is turned.
+    const c=Math.cos(t[3]),s=Math.sin(t[3]),mx=(source.min[0]+source.max[0])*.5*t[4],mz=(source.min[2]+source.max[2])*.5*t[6];
+    assert.ok(targets.inside(t[0]+mx*c+mz*s,t[2]-mx*s+mz*c),`the middle of building ${i} is within it`);
+    // Well beyond its farthest corner in one direction is either open ground or another building, never this one's doing.
+    const reach=Math.hypot(Math.max(-source.min[0],source.max[0])*t[4],Math.max(-source.min[2],source.max[2])*t[6])+60;
+    if(!targets.inside(t[0]+reach,t[2]))streets++;
+  }
+  assert.ok(asked>=20&&streets>=asked*.5,`${streets} of ${asked} points beyond a building are open ground`);
+  assert.equal(targets.inside(1e6,1e6),false);
+});
