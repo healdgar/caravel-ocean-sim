@@ -84,6 +84,65 @@ globalThis.BOARD_MODEL = (() => {
     return keeper;
   }
 
+  // Who is about in a place today and where each goes, by the model's own plan of its townsfolk (the plan its own
+  // screen walks): the `most` people who live nearest `focus`, each with the way they take along the model's
+  // streets, out of their door and in at the other end. On the Lord's day they go to mass; those who work at home
+  // go out on an errand; the rest go to their work, in a shop, a field, the wood or at the water. `others` more of
+  // the place's grown people are named besides, those of the waterside first, for whoever else is seen about.
+  // Nothing is changed by looking.
+  // The model keeps the graph of a place's streets on the place, made anew whenever it is asked for and the streets
+  // have changed: its own scratch, which its save writes. The one made for this asking is kept here instead and lent
+  // back for the next, and the place is left with whatever it had, so the world is to the byte what it was.
+  const STREET_GRAPHS = new WeakMap();
+  const WATERSIDE = new Set(['boatman', 'fisher', 'merchant', 'carter', 'shipwright', 'roper', 'salter', 'cooper', 'spicer', 'chandler']);
+  function folk(si, options = {}) {
+    const s = W.settlements?.[si];
+    if (!s || !Array.isArray(s.folk)) return { si, day: day(), date: dateStr(day()), sunday: false, people: [], others: [] };
+    const graphed = Object.hasOwn(s, '_sg'), theirs = s._sg;
+    if (STREET_GRAPHS.has(s)) s._sg = STREET_GRAPHS.get(s);
+    try { return folkOf(s, si, options); } finally {
+      if (Object.hasOwn(s, '_sg')) STREET_GRAPHS.set(s, s._sg);
+      if (graphed) s._sg = theirs; else delete s._sg;
+    }
+  }
+  function folkOf(s, si, { focus = null, most = 160, others = 0 }) {
+    const options = globalThis.FURLONG_OPTIONS.board, eye = cam.cur.focus, colour = Object.getOwnPropertyDescriptor(globalThis, 'THREE');
+    class PlanColour { constructor(hex = 0xffffff) { this.hex = hex >>> 0; this.gain = 1; } multiplyScalar(v) { this.gain *= Number.isFinite(v) ? v : 1; return this; } }
+    let plan;
+    try {
+      cam.cur.focus = focus && Number.isFinite(focus.x) && Number.isFinite(focus.z) ? { x: focus.x, z: focus.z } : { x: s.pos.x, z: s.pos.z };
+      options.abroad = Math.max(1, Math.min(4000, most | 0));
+      if (!colour) globalThis.THREE = { Color: PlanColour };
+      plan = townsfolkFor(s);
+    } finally {
+      cam.cur.focus = eye; delete options.abroad;
+      if (!colour) delete globalThis.THREE;
+    }
+    const sunday = day() % 7 === 0, planned = new Set(), people = [];
+    // A child's calling on the model's record is the household's; they have none of their own yet.
+    const soul = (p) => ({ id: p.id, name: folkName(p), surname: famName(p), sex: p.sx || null, age: r1(ageYrs(p)), role: ageYrs(p) >= 14 ? p.tr || null : null });
+    for (const c of plan) {
+      const p = c.p, walker = { ...c };
+      let to = c.work, goal = 'work', there = c.what, open = !c.workIn;
+      if (sunday && c.church && ageYrs(p) >= 6) { to = c.church; goal = 'church'; there = 'at mass'; open = false; }
+      else if (c.chores) {
+        const shop = c.shops?.length ? c.shops[p.id % c.shops.length] : null;
+        to = shop ? { x: shop.x, z: shop.z } : c.mk; goal = 'errand'; open = !shop;
+        there = shop ? `at the ${ARCH[shop.arch]?.[4] ?? shop.arch}` : 'at the market';
+      } else if (ageYrs(p) < 14) goal = 'play';
+      planWalk(walker, to, goal);
+      const route = [];
+      for (const q of walker.route) route.push(r1(q.x), r1(q.z));
+      // Out of doors the work is a beat: up the furrow and back, from tree to tree, about the lane at play.
+      if (goal !== 'church' && goal !== 'errand' && c.fw) route.push(r1(c.fw.B.x), r1(c.fw.B.z));
+      planned.add(p.id);
+      people.push({ ...soul(p), goal, there, via: walker.via || '', open, run: Boolean(c.fw?.run), pace: r3(c.pace / 2), home: [r1(c.home.x), r1(c.home.z)], route });
+    }
+    const rest = others > 0 ? s.folk.filter((p) => !p.dead && !planned.has(p.id) && ageYrs(p) >= 16 && ageYrs(p) < 66 && !awayNow(p)) : [];
+    rest.sort((a, b) => WATERSIDE.has(b.tr) - WATERSIDE.has(a.tr) || a.id - b.id);
+    return { si, day: day(), date: dateStr(day()), sunday, people, others: rest.slice(0, others).map(soul) };
+  }
+
   const castle = (s) => {
     const out = {};
     if (s.hillCastle) { const c = s.hillCastle; out.hill = { x: r1(c.x), z: r1(c.z), r: r1(c.r), walls: c.walls, height: r1(c.wallHeight ?? 0), rad: list(c.wallRad), kind: list(c.wallKind, Number), gate: r3(c.gateA ?? 0), timber: Boolean(c.timber) }; }
@@ -154,5 +213,5 @@ globalThis.BOARD_MODEL = (() => {
     };
   }
 
-  return { VERSION, found, live, board, freeze, thaw, serve };
+  return { VERSION, found, live, board, freeze, thaw, serve, folk };
 })();
