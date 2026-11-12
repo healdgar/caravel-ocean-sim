@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { BAKED_BOARDS, BAKED_WORLDS, BOARD_RIVERS, BOARD_SURVEY_SIZE, BOARD_VERSION, bakedBoardAsset, bakedWorldAsset, boardGroundFits, boardGroundSurvey, boardRequest } from '../js/board-model.js';
 import { BOARD_WAY_FLOATS, boardStampTables } from '../js/board-stamp.js';
-import { BOARD_INDEX_SIZE, BOARD_STREETFRONT, BOARD_THATCHED, BOARD_TILED_PLACES, BOARD_WORKS } from '../js/old-world-board.js';
+import { BOARD_INDEX_SIZE, BOARD_STREETFRONT, BOARD_THATCHED, BOARD_TILED_PLACES, BOARD_WORKS, boardRoadCrossings } from '../js/old-world-board.js';
 import { CITY_BLOCK_FLOATS, CITY_TREES } from '../js/old-world-city.js';
 import { CITY_BUILDING_TYPES, CITY_THATCH_ROOF, CITY_TYPE, CITY_TYPE_SLIGHT_FROM, CITY_TYPED_FLOATS, CITY_TYPES_OVERHEAD, CITY_TYPES_SLIGHT } from '../js/old-world-buildings.js';
 import { WORKS_FENCE_M, WORKS_WHEEL } from '../js/old-world-works.js';
@@ -40,6 +40,22 @@ test('a ground is known again by its survey, whatever its lattice, and another g
   assert.ok(!boardGroundFits(survey, ground(SAMPLES, (x, z) => bayHeight(-x, z) + (bayHeight(-x, z) > 0 ? 4 : 0))), 'the bay turned about and raised');
   assert.ok(!boardGroundFits(survey, ground(SAMPLES, (x, z) => bayHeight(x, z - 400))), 'the shore moved 400 m');
   assert.ok(!boardGroundFits(survey.slice(0, 100), heights) && !boardGroundFits(undefined, heights), 'no survey, no fit');
+});
+
+test('a road is bridged where it crosses a river: once, along the road, as wide as the water lies across its way', () => {
+  // A river running north and south, 4 m to a side, widening to 6; a road straight across it, one askew, and one beside.
+  const river = { points: [100, -200, 4, 100, 0, 4, 100, 200, 6] };
+  const square = boardRoadCrossings([{ points: [0, 50, 60, 50, 200, 50] }], [river]);
+  assert.equal(square.length, 1);
+  assert.ok(Math.abs(square[0].x - 100) < 1e-6 && Math.abs(square[0].z - 50) < 1e-6 && Math.abs(square[0].ux - 1) < 1e-9 && Math.abs(square[0].uz) < 1e-9, JSON.stringify(square));
+  assert.ok(Math.abs(square[0].span - 9) < 1e-6, `the water is 2 × 4.5 m across there: ${square[0].span}`);
+  const askew = boardRoadCrossings([{ points: [0, -150, 200, 50] }], [river]);
+  assert.equal(askew.length, 1);
+  assert.ok(Math.abs(askew[0].span - 8 * Math.SQRT2) < 1e-6, `across at 45°: ${askew[0].span}`);
+  assert.deepEqual(boardRoadCrossings([{ points: [0, -200, 0, 200] }, { points: [150, -100, 150, 100] }], [river]), [], 'a road beside a river needs none');
+  // Two roads over the same crossing share its bridge; a river with no road, or none at all, has none.
+  assert.equal(boardRoadCrossings([{ points: [0, 50, 200, 50] }, { points: [0, 53, 200, 51] }], [river]).length, 1);
+  assert.deepEqual(boardRoadCrossings([], [river]), []); assert.deepEqual(boardRoadCrossings([{ points: [0, 0, 9, 9] }], undefined), []);
 });
 
 test('a founded board stands in the game as its own buildings, land and woods, and only on its own ground', { timeout: 900000 }, async (t) => {

@@ -45,6 +45,38 @@ export const BOARD_THATCHED = Object.freeze({
   house: ['THATCH_HOUSE', CITY_ROOF.GABLE, CITY_WALL.HOUSE, 3.6, true, false], longhouse: ['THATCH_LONGHOUSE', CITY_ROOF.GABLE, CITY_WALL.HOUSE, 3.3, true, false],
 });
 export const BOARD_TILED_PLACES = Object.freeze(new Set(['capital', 'city', 'town']));
+// Where a road of the model crosses one of its rivers: the middle of the crossing, the way the road runs there, and
+// the water's width along the road. The model keeps no list of these (its own page finds them as it draws its
+// roads), so they are found here from its record of both. `roads` are {points: [x, z, …]}, `rivers` {points: [x, z,
+// half-width, …]}; a second road at a crossing uses the bridge already there.
+export const BOARD_ROAD_BRIDGE = Object.freeze({ width: 6, arch: 11, rise: 0.5 });
+export function boardRoadCrossings(roads, rivers) {
+  const out = [];
+  for (const river of rivers ?? []) {
+    const R = river.points;
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (let j = 0; j + 2 < R.length; j += 3) { const pad = R[j + 2] + 1; x0 = Math.min(x0, R[j] - pad); x1 = Math.max(x1, R[j] + pad); z0 = Math.min(z0, R[j + 1] - pad); z1 = Math.max(z1, R[j + 1] + pad); }
+    for (const road of roads ?? []) {
+      const P = road.points;
+      for (let i = 0; i + 3 < P.length; i += 2) {
+        const ax = P[i], az = P[i + 1], bx = P[i + 2], bz = P[i + 3];
+        if (Math.max(ax, bx) < x0 || Math.min(ax, bx) > x1 || Math.max(az, bz) < z0 || Math.min(az, bz) > z1) continue;
+        for (let j = 0; j + 5 < R.length; j += 3) {
+          const cx = R[j], cz = R[j + 1], dx = R[j + 3], dz = R[j + 4], den = (bx - ax) * (dz - cz) - (bz - az) * (dx - cx);
+          if (Math.abs(den) < 1e-9) continue;
+          const t = ((cx - ax) * (dz - cz) - (cz - az) * (dx - cx)) / den, u = ((cx - ax) * (bz - az) - (cz - az) * (bx - ax)) / den;
+          if (t < 0 || t >= 1 || u < 0 || u >= 1) continue;
+          const L = Math.hypot(bx - ax, bz - az), x = ax + (bx - ax) * t, z = az + (bz - az) * t;
+          if (out.some((o) => Math.hypot(o.x - x, o.z - z) < 12)) continue;
+          // Across a river met askew the water is wider along the road; a road is brought to no shallower a crossing than this.
+          const sine = Math.abs(den) / (L * Math.hypot(dx - cx, dz - cz)), half = R[j + 2] + (R[j + 5] - R[j + 2]) * u;
+          out.push({ x, z, ux: (bx - ax) / L, uz: (bz - az) / L, span: 2 * half / Math.max(0.35, sine) });
+        }
+      }
+    }
+  }
+  return out;
+}
 // The model's kind of a stretch of wall where a cliff is itself the wall.
 const BOARD_WALL_CLIFF = 1;
 // A type is fitted to the plot the model gave its building, never beyond recognition.
@@ -190,7 +222,7 @@ export function layBoardCountry({ baked, region, grid, heightAt, port, wet, LAND
   let houses = 0, fronts = 0, stalls = 0;
   const works = board.works ?? {}, stateOf = board.buildings.state ?? null, wheelOf = new Map();
   for (let w = 0; w + 2 < (works.wheels?.length ?? 0); w += 3) wheelOf.set(works.wheels[w], [ox + works.wheels[w + 1], oz + works.wheels[w + 2]]);
-  const built = { thatched: 0, windmills: 0, watermills: 0, wheels: 0, stores: 0, sheds: 0, halls: 0, others: 0, ruins: 0, fences: 0, bridges: 0, yards: 0, graves: 0, cairns: 0, tents: 0, standards: 0, scaffolds: 0 };
+  const built = { thatched: 0, roadBridges: 0, windmills: 0, watermills: 0, wheels: 0, stores: 0, sheds: 0, halls: 0, others: 0, ruins: 0, fences: 0, bridges: 0, yards: 0, graves: 0, cairns: 0, tents: 0, standards: 0, scaffolds: 0 };
   // The wash of a house, its own from where it stands in the model's list.
   const washOf = (k) => { const hue = form[k * 3 + 2]; return BOARD_HOUSE_TINTS[Math.floor(boardHashUnit(k, 23) * BOARD_HOUSE_TINTS.length)] + 0.2 + 0.75 * (hue > 0 && hue < 1 ? hue : boardHashUnit(k, 31)); };
   const fit = (v, of) => Math.max(BOARD_FIT[0] * of, Math.min(BOARD_FIT[1] * of, v));
@@ -381,6 +413,19 @@ export function layBoardCountry({ baked, region, grid, heightAt, port, wet, LAND
     const deck = Math.max(heightAt(x - ux * half, z - uz * half), heightAt(x + ux * half, z + uz * half), BOARD_DRY_M) + 0.35;
     slight(spans[k + 5] ? CITY_TYPE.STONE_BRIDGE : CITY_TYPE.FOOTBRIDGE, x, deck, z, Math.atan2(ux, uz), 0.5, span + 1);
     built.bridges++;
+  }
+  // A road's bridge where it crosses a river: stone, the road's width, bank to bank in a run of arches no wider than
+  // a mason of the time could turn.
+  for (const q of boardRoadCrossings(board.roads, board.rivers)) {
+    const x = ox + q.x, z = oz + q.z, reach = q.span / 2 + 1, T = CITY_BUILDING_TYPES[CITY_TYPE.STONE_BRIDGE];
+    if (!inside(x, z, 12)) continue;
+    const deck = Math.max(heightAt(x - q.ux * reach, z - q.uz * reach), heightAt(x + q.ux * reach, z + q.uz * reach), BOARD_DRY_M) + BOARD_ROAD_BRIDGE.rise;
+    const arches = Math.max(1, Math.ceil(reach * 2 / BOARD_ROAD_BRIDGE.arch)), each = reach * 2 / arches;
+    for (let a = 0; a < arches; a++) {
+      const along = (a + 0.5) * each - reach;
+      pushTyped(CITY_TYPE.STONE_BRIDGE, x + q.ux * along, deck, z + q.uz * along, Math.atan2(q.ux, q.uz), BOARD_ROAD_BRIDGE.width, T.height, each, 0.5, 0);
+    }
+    built.roadBridges++;
   }
   // A churchyard: a dry-stone wall about it, and its graves as they are dug.
   for (const yard of works.yards ?? []) {
