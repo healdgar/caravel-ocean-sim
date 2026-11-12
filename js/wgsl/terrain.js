@@ -5,7 +5,7 @@ import { STREET_FIELD_RANGE_M, STREET_FIELD_EDGE_M } from '../town-streets.js';
 import { LAND_CRATER_RENDER } from './land-craters.js';
 import { GROUND_DETAIL_RENDER } from './ground-detail.js';
 import { SHADOW_FRAME } from './shadows.js';
-import { CITY_DETAIL_M, CITY_TYPED_ROOF } from '../old-world-buildings.js';
+import { CITY_DETAIL_M, CITY_THATCH_ROOF, CITY_TYPED_ROOF } from '../old-world-buildings.js';
 
 // Procedurals need their sampling rate in material coordinates, just as image
 // textures need mip/anisotropic footprints. See pbr-book.org/4ed/Textures_and_Materials/Texture_Sampling_and_Antialiasing.
@@ -762,8 +762,11 @@ fn cityRoofShade(root:vec4f,tone:f32)->f32{return 0.62+0.38*fract(tone*7.31+root
 fn cityRoofAge(root:vec4f,tone:f32)->f32{return fract(tone*3.17+root.x*0.071+root.z*0.113);}
 fn cityCorner(corner:vec3f,face:vec3f,root:vec4f,size:vec4f,style:vec4f)->CityCorner{
   let half=size.xy*0.5;
-  // A block that a Cairn type replaces close to carries its roof form plus ${CITY_TYPED_ROOF}.
-  let form=style.x-select(0.0,${CITY_TYPED_ROOF}.0,style.x>${CITY_TYPED_ROOF}.0-0.5);
+  // A block that a Cairn type replaces close to carries its roof form plus ${CITY_TYPED_ROOF}; one under thatch,
+  // ${CITY_THATCH_ROOF} more.
+  let thatched=style.x>${CITY_THATCH_ROOF}.0-0.5;
+  let typedForm=style.x-select(0.0,${CITY_THATCH_ROOF}.0,thatched);
+  let form=typedForm-select(0.0,${CITY_TYPED_ROOF}.0,typedForm>${CITY_TYPED_ROOF}.0-0.5);
   let flat=form>2.5;
   var ridge=half.y;
   if(form>0.5&&form<1.5){ridge=max(0.0,half.y-half.x);}else if(form>1.5&&form<2.5){ridge=0.0;}
@@ -791,7 +794,7 @@ fn cityCorner(corner:vec3f,face:vec3f,root:vec4f,size:vec4f,style:vec4f)->CityCo
   // Walls and gables wear the block's wall material; a roof its tiles, or the wall's stone where flat.
   let plain=select(style.y,12.0,style.y>18.5);
   if(roof&&!gable){
-    o.kind=vec2f(select(13.0,plain,flat)+turn,cityRoofShade(root,tone));
+    o.kind=vec2f(select(select(13.0,15.0,thatched),plain,flat)+turn,cityRoofShade(root,tone));
     o.wall=vec2f(cityRoofAge(root,tone),-1.0);
   }else{
     o.kind=vec2f(style.y+turn,select(0.55+0.45*tone,style.z,style.y>18.5));
@@ -813,7 +816,8 @@ fn cityCorner(corner:vec3f,face:vec3f,root:vec4f,size:vec4f,style:vec4f)->CityCo
   // A merlon a mile off is less than a point: leave it out. So is a block whose building is
   // near enough to be drawn as its type.
   let away=distance(root.xyz,F.camPos.xyz);
-  if((size.x<1.0&&away>1500.0)||(style.x>${CITY_TYPED_ROOF}.0-0.5&&away<nearTerrain.grid.w)){o.pos=vec4f(2.0,2.0,0.0,1.0);}
+  let typed=(style.x-select(0.0,${CITY_THATCH_ROOF}.0,style.x>${CITY_THATCH_ROOF}.0-0.5))>${CITY_TYPED_ROOF}.0-0.5;
+  if((size.x<1.0&&away>1500.0)||(typed&&away<nearTerrain.grid.w)){o.pos=vec4f(2.0,2.0,0.0,1.0);}
   return o;
 }
 // A building of a Cairn type: the type's mesh, stretched by shape.xyz, turned by root.w and

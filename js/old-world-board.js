@@ -6,7 +6,7 @@
 // game has it. Ground keeps the look of its geography: what the board adds to it is drawn by the GPU
 // (js/board-stamp.js) from the compact tables made here once.
 import { CITY_BLOCK_FLOATS, CITY_GROUND, CITY_ROOF, CITY_TREES, CITY_WALL, cityFootprintsOverlap, cityMasonry, footprint, local, makeHash, mulberry, rectDist, segDist } from './old-world-city.js';
-import { CITY_BUILDING_TYPES, CITY_CHURCH, CITY_CURTAIN, CITY_HALL, CITY_HOUSE_STOREYS, CITY_PAINT, CITY_STOREY_M, CITY_TYPE, CITY_TYPED_ROOF, cityHouseType } from './old-world-buildings.js';
+import { CITY_BUILDING_TYPES, CITY_CHURCH, CITY_CURTAIN, CITY_HALL, CITY_HOUSE_STOREYS, CITY_PAINT, CITY_STOREY_M, CITY_THATCH_ROOF, CITY_TYPE, CITY_TYPED_ROOF, cityHouseType } from './old-world-buildings.js';
 import { WORKS_FENCE_M, WORKS_WHEEL } from './old-world-works.js';
 
 // The board's furlongs are drawn into a square of cells this many to a side, each cell holding the furlong it
@@ -38,6 +38,15 @@ export const BOARD_WORKS = Object.freeze({
   hospital: ['STONE_HALL', CITY_ROOF.GABLE, 11, 3.2, true, true], guildhall: ['STONE_HALL', CITY_ROOF.GABLE, 11, 3.2, true, true],
   cloister: ['CLOISTER', CITY_ROOF.FLAT, 11, 0, false, false], court: ['COURT', CITY_ROOF.GABLE, 19, 1.5, true, false], wharf: ['WHARF', CITY_ROOF.FLAT, 10, 0, false, false], quarry: ['QUARRY', CITY_ROOF.FLAT, 11, 0, false, false],
 });
+// The model roofs its poorest building (its tier 0) in thatch. In this country a town roofs even its poor in tile,
+// as the views of 1572 show Lisbon; so a house of that tier stands under thatch only where the place is no town:
+// by the model's kind of house, what it is stood as there, in the terms of BOARD_WORKS.
+export const BOARD_THATCHED = Object.freeze({
+  house: ['THATCH_HOUSE', CITY_ROOF.GABLE, CITY_WALL.HOUSE, 3.6, true, false], longhouse: ['THATCH_LONGHOUSE', CITY_ROOF.GABLE, CITY_WALL.HOUSE, 3.3, true, false],
+});
+export const BOARD_TILED_PLACES = Object.freeze(new Set(['capital', 'city', 'town']));
+// The model's kind of a stretch of wall where a cliff is itself the wall.
+const BOARD_WALL_CLIFF = 1;
 // A type is fitted to the plot the model gave its building, never beyond recognition.
 const BOARD_FIT = [0.8, 1.35];
 // A wharf's deck stands this far above the sea at the least.
@@ -136,12 +145,16 @@ export function layBoardCountry({ baked, region, grid, heightAt, port, wet, LAND
   const streetEdge = (x, z, reach) => { let bd = reach; segs.some(x, z, reach + 6, (g) => { const d = segDist(x, z, g.ax, g.az, g.bx, g.bz) - g.hw; if (d < bd) bd = d; }); return bd; };
 
   /* ---- walls: a ring of radii about a centre, one to each bearing, with gates where the model has them ---- */
-  const ring = (cx, cz, rad, kind, gateAngles, stoneHeight, towerEvery = 56) => {
+  // The model says of each stretch how its line was chosen, not what it is built of: 0 a wall on open ground, 1 a
+  // cliff that is itself the wall (nothing is built there), 2 a wall along a bank, 3 one on the crest of a slope.
+  // What it is built of is the circuit's own: stone, or a palisade. `built` is given while a circuit is still
+  // going up: which stretches stand so far.
+  const ring = (cx, cz, rad, kind, gateAngles, stoneHeight, towerEvery = 56, stone = true, built = null) => {
     const n = rad.length, pts = [], first = gates.length;
     for (let k = 0; k < n; k++) {
       const a = k / n * 2 * Math.PI, x = cx + Math.cos(a) * rad[k], z = cz + Math.sin(a) * rad[k];
       const dry = inside(x, z, 20) && heightAt(x, z) > 1.4;
-      pts.push({ x, z, stone: !kind || kind[k] >= 2, open: (kind && !kind[k]) || !dry || taken(footprint(x, z, 6, 6, 0), 2) });
+      pts.push({ x, z, stone, open: (kind && kind[k] === BOARD_WALL_CLIFF) || (built && !built[k]) || !dry || taken(footprint(x, z, 6, 6, 0), 2) });
     }
     for (const angle of gateAngles) {
       const at = ((angle / (2 * Math.PI) * n) % n + n) % n, k = Math.floor(at), f = at - k, a = pts[k], b = pts[(k + 1) % n];
@@ -165,9 +178,9 @@ export function layBoardCountry({ baked, region, grid, heightAt, port, wet, LAND
     }
   };
   for (const place of places) {
-    if (place.wall) ring(place.x, place.z, place.wall.rad, place.wall.kind, place.wall.gates, CITY_CURTAIN.height);
+    if (place.wall) ring(place.x, place.z, place.wall.rad, place.wall.kind, place.wall.gates, CITY_CURTAIN.height, 56, place.walls >= 2 || place.wall.bastions, place.wall.built ?? null);
     const hill = place.castle?.hill, citadel = place.castle?.citadel;
-    if (hill?.rad?.length) ring(ox + hill.x, oz + hill.z, hill.rad, hill.kind, [hill.gate], Math.max(7.5, hill.height || 0) + 2, 40);
+    if (hill?.rad?.length) ring(ox + hill.x, oz + hill.z, hill.rad, hill.kind, [hill.gate], Math.max(7.5, hill.height || 0) + 2, 40, hill.walls >= 2 && !hill.timber);
     if (citadel?.rad?.length) ring(ox + citadel.x, oz + citadel.z, citadel.rad, null, [citadel.gate], 9.5, 48);
   }
 
@@ -177,7 +190,7 @@ export function layBoardCountry({ baked, region, grid, heightAt, port, wet, LAND
   let houses = 0, fronts = 0, stalls = 0;
   const works = board.works ?? {}, stateOf = board.buildings.state ?? null, wheelOf = new Map();
   for (let w = 0; w + 2 < (works.wheels?.length ?? 0); w += 3) wheelOf.set(works.wheels[w], [ox + works.wheels[w + 1], oz + works.wheels[w + 2]]);
-  const built = { windmills: 0, watermills: 0, wheels: 0, stores: 0, sheds: 0, halls: 0, others: 0, ruins: 0, fences: 0, bridges: 0, yards: 0, graves: 0, cairns: 0, tents: 0, standards: 0, scaffolds: 0 };
+  const built = { thatched: 0, windmills: 0, watermills: 0, wheels: 0, stores: 0, sheds: 0, halls: 0, others: 0, ruins: 0, fences: 0, bridges: 0, yards: 0, graves: 0, cairns: 0, tents: 0, standards: 0, scaffolds: 0 };
   // The wash of a house, its own from where it stands in the model's list.
   const washOf = (k) => { const hue = form[k * 3 + 2]; return BOARD_HOUSE_TINTS[Math.floor(boardHashUnit(k, 23) * BOARD_HOUSE_TINTS.length)] + 0.2 + 0.75 * (hue > 0 && hue < 1 ? hue : boardHashUnit(k, 31)); };
   const fit = (v, of) => Math.max(BOARD_FIT[0] * of, Math.min(BOARD_FIT[1] * of, v));
@@ -231,8 +244,9 @@ export function layBoardCountry({ baked, region, grid, heightAt, port, wet, LAND
     churches.push({ x: nave.x, z: nave.z, great });
   };
   // One of the model's works that is no house: its own type, fitted to the plot the model gave it.
-  const standWork = (k, f, arch, toStreet) => {
-    const [key, roof, wall, rise, ridgeAlong, fronted] = BOARD_WORKS[arch], type = CITY_TYPE[key], T = CITY_BUILDING_TYPES[type];
+  const standWork = (k, f, arch, toStreet, as = BOARD_WORKS[arch]) => {
+    const [key, roof, wall, rise, ridgeAlong, fronted] = as, type = CITY_TYPE[key], T = CITY_BUILDING_TYPES[type];
+    const thatch = key === 'COT' || as === BOARD_THATCHED[arch] ? CITY_THATCH_ROOF : 0;
     const g = footprint(f.x, f.z, fit(f.w, T.width), fit(f.d, T.length), f.yaw), up = T.height * (0.95 + 0.1 * boardHashUnit(k, 11));
     const base = key === 'WHARF' ? { floor: Math.max(BOARD_WHARF_M, heightAt(g.x, g.z)), plinth: 0.3, range: 0 }
       : seatBlock(g, toStreet ? heightAt(g.x - Math.sin(g.yaw) * (g.d / 2 + 1.5), g.z - Math.cos(g.yaw) * (g.d / 2 + 1.5)) : null);
@@ -241,13 +255,13 @@ export function layBoardCountry({ baked, region, grid, heightAt, port, wet, LAND
     const tone = paint >= 0 ? paint + 0.3 + 0.65 * hu : key === 'WINDMILL' || key === 'DOVECOTE' || key === 'WHARF' ? 0.2 + 0.75 * hu : washOf(k);
     // Far off, a plain block of its size: the quarry's is its face, a wharf's its deck.
     const far = key === 'QUARRY' ? footprint(...local(g, 0, g.d * 0.3), g.w, g.d * 0.4, g.yaw) : ridgeAlong ? footprint(g.x, g.z, g.d, g.w, g.yaw + Math.PI / 2) : g;
-    pushBlock(far, key === 'WHARF' ? 0.05 : key === 'QUARRY' ? 1.3 : up, rise * (ridgeAlong ? g.d / T.length : g.w / T.width), roof + CITY_TYPED_ROOF, wall, wall === 19 || paint < 0 && wall === 12 ? tone : 0.86 + 0.1 * hu, base);
+    pushBlock(far, key === 'WHARF' ? 0.05 : key === 'QUARRY' ? 1.3 : up, rise * (ridgeAlong ? g.d / T.length : g.w / T.width), roof + CITY_TYPED_ROOF + thatch, wall, wall === 19 || paint < 0 && wall === 12 ? tone : 0.86 + 0.1 * hu, base);
     pushTyped(type, g.x, base.floor, g.z, g.yaw, g.w, up, g.d, tone);
     keep(g); occupy(g);
     const stood = typedTypes.length - 1;
     if (fronted && toStreet) standFront(k, g, base.floor, up);
     if (typedTypes.length - 1 > stood) attached.set(stood, typedTypes.length - 1 - stood);
-    if (key === 'WINDMILL') built.windmills++; else if (key === 'WATERMILL') built.watermills++; else if (key === 'GRANARY' || key === 'BARN') built.stores++; else if (key === 'SHED') built.sheds++; else if (key === 'STONE_HALL') built.halls++; else built.others++;
+    if (key === 'WINDMILL') built.windmills++; else if (key === 'WATERMILL') built.watermills++; else if (key === 'GRANARY' || key === 'BARN') built.stores++; else if (key === 'SHED') built.sheds++; else if (key === 'STONE_HALL') built.halls++; else if (thatch && key !== 'COT') { built.thatched++; houses++; } else built.others++;
   };
   // What is left of a building the model has burnt to its walls (a ruin) or thrown down (a heap).
   const standLeft = (k, f, heap) => {
@@ -307,6 +321,8 @@ export function layBoardCountry({ baked, region, grid, heightAt, port, wet, LAND
       const floor = pushBlock(long, CITY_HALL.height, CITY_HALL.roof, CITY_ROOF.HIP + CITY_TYPED_ROOF, CITY_WALL.HOUSE, 0.9);
       pushTyped(CITY_TYPE.HALL, long.x, floor, long.z, long.yaw, long.w, CITY_HALL.height, long.d, 0.9);
       keep(long); occupy(long);
+    } else if (kinds[k * 6 + 2] === 0 && BOARD_THATCHED[arch] && !BOARD_TILED_PLACES.has(places[place]?.kind)) {
+      standWork(k, f, arch, Boolean(fx || fz), BOARD_THATCHED[arch]);
     } else {
       // The model builds low: a house of one or two floors, and so stood most of an Iberian port of the sixteenth
       // century. Toward the seat's middle they gain a floor; four were the merchants' houses of its middle streets,

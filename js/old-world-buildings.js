@@ -435,7 +435,7 @@ export const CITY_PAINT = Object.freeze({ LINEN: 1, RED: 5, BLUE: 6, GOLD: 7, GR
 const CITY_WORKS_TARGETS = Object.freeze({
   WINDMILL: { prefabId: 'city_windmill', label: 'Windmill' }, WATERMILL: { prefabId: 'city_watermill', label: 'Watermill' }, GRANARY: { prefabId: 'city_granary', label: 'Granary' },
   SHED: { prefabId: 'city_outbuilding', label: 'Outbuilding' }, BARN: { prefabId: 'city_barn', label: 'Barn' }, DOVECOTE: { prefabId: 'city_dovecote', label: 'Dovecote' },
-  TOLL: { prefabId: 'city_toll_house', label: 'Toll house' }, COT: { prefabId: 'city_hovel', label: 'Hovel' }, WINEPRESS: { prefabId: 'city_winepress', label: 'Winepress' },
+  TOLL: { prefabId: 'city_toll_house', label: 'Toll house' }, COT: { prefabId: 'city_hovel', label: 'Hovel' }, THATCH_HOUSE: { prefabId: 'city_hovel', label: 'Thatched house' }, THATCH_LONGHOUSE: { prefabId: 'city_hovel', label: 'Thatched longhouse' }, WINEPRESS: { prefabId: 'city_winepress', label: 'Winepress' },
   VATS: { prefabId: 'city_works', label: 'Tannery or dye works' }, STONE_HALL: { prefabId: 'city_stone_hall', label: 'Stone hall' }, CLOISTER: { prefabId: 'city_cloister', label: 'Cloister' },
   COURT: { prefabId: 'city_courtyard_house', label: 'Courtyard house' }, WHARF: { prefabId: 'city_wharf', label: 'Wharf' }, QUARRY: { prefabId: 'city_quarry', label: 'Quarry' },
   RUIN: { prefabId: 'city_ruin', label: 'Ruin' }, RUBBLE: { prefabId: 'city_rubble', label: 'Rubble' }, FENCE_RAIL: { prefabId: 'city_fence', label: 'Fence' }, FENCE_STONE: { prefabId: 'city_fence', label: 'Dry-stone wall' },
@@ -464,6 +464,8 @@ export const CITY_TYPED_FLOATS = 8;
 export const CITY_DETAIL_M = 240;
 // A plan's block that a type replaces near the camera carries its roof form plus this.
 export const CITY_TYPED_ROOF = 4;
+// And this besides where its roof is thatch: far off, its block is roofed in straw and not in tile.
+export const CITY_THATCH_ROOF = 8;
 
 // The type of a house of so many storeys, and its ridge. `pick` (0 to 1, the house's own throw) chooses its manner
 // among those a house of that height is built in; none asked, it is the plain house.

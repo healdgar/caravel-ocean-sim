@@ -8,9 +8,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { BAKED_BOARDS, BAKED_WORLDS, BOARD_RIVERS, BOARD_SURVEY_SIZE, BOARD_VERSION, bakedBoardAsset, bakedWorldAsset, boardGroundFits, boardGroundSurvey, boardRequest } from '../js/board-model.js';
 import { BOARD_WAY_FLOATS, boardStampTables } from '../js/board-stamp.js';
-import { BOARD_INDEX_SIZE, BOARD_STREETFRONT, BOARD_WORKS } from '../js/old-world-board.js';
+import { BOARD_INDEX_SIZE, BOARD_STREETFRONT, BOARD_THATCHED, BOARD_TILED_PLACES, BOARD_WORKS } from '../js/old-world-board.js';
 import { CITY_BLOCK_FLOATS, CITY_TREES } from '../js/old-world-city.js';
-import { CITY_BUILDING_TYPES, CITY_TYPE, CITY_TYPE_SLIGHT_FROM, CITY_TYPED_FLOATS, CITY_TYPES_OVERHEAD, CITY_TYPES_SLIGHT } from '../js/old-world-buildings.js';
+import { CITY_BUILDING_TYPES, CITY_THATCH_ROOF, CITY_TYPE, CITY_TYPE_SLIGHT_FROM, CITY_TYPED_FLOATS, CITY_TYPES_OVERHEAD, CITY_TYPES_SLIGHT } from '../js/old-world-buildings.js';
 import { WORKS_FENCE_M, WORKS_WHEEL } from '../js/old-world-works.js';
 import { OLD_WORLD_LAND, OLD_WORLD_NO_TREES, OLD_WORLD_PLACES, bakedBoardFor, oldWorldCountry, registerBakedBoard } from '../js/old-world.js';
 import { openBoard } from '../scripts/board-host.mjs';
@@ -60,6 +60,34 @@ test('a founded board stands in the game as its own buildings, land and woods, a
   assert.ok(country.watch && country.watch.place === SITE.name && country.watch.day === board.day, JSON.stringify(country.watch).slice(0, 200));
   assert.equal(country.watch.garrison, board.places[0].watch.garrison); assert.deepEqual(country.watch.men, board.places[0].watch.men);
   assert.ok(country.watch.men.length > 0 && country.watch.men.length <= 96 && country.watch.men.every((one) => one.id > 0 && one.name));
+
+  // Its wall: the model says of each stretch how its line was chosen (0 open ground, 1 a cliff that is itself the
+  // wall, 2 along a bank, 3 a crest), and every stretch but a cliff is built. So the circuit stands here in stone,
+  // with towers along it and a gate where the model has one, and is not taken for open where its kind is 0.
+  const wall = board.places[0].wall, towers = plan.typedTypes.reduce((n, type) => n + (type === CITY_TYPE.WALL_TOWER ? 1 : 0), 0);
+  t.diagnostic(JSON.stringify({ walls: board.places[0].walls, kinds: wall && [0, 1, 2, 3].map((kind) => wall.kind.filter((k) => k === kind).length), gates: stats.gates, towers }));
+  assert.ok(wall && board.places[0].walls >= 2, 'the seat is walled in stone');
+  assert.ok(wall.kind.filter((k) => k === 0).length > wall.kind.length / 2, 'and most of its circuit runs over open ground');
+  const round = wall.rad.reduce((sum, r) => sum + r, 0) / wall.rad.length * 2 * Math.PI;
+  assert.ok(stats.gates >= 1 && towers >= round / 56 * 0.5, `${towers} towers and ${stats.gates} gates on a circuit of ${Math.round(round)} m`);
+
+  // Its poorest houses: the model roofs its tier 0 in thatch. A town of this country tiles even its poor, so only
+  // those of a village stand under thatch, each as a type of its own; its far block is roofed in straw as it is, and
+  // no other block is.
+  let hovels = 0, townHovels = 0, thatched = 0;
+  for (let k = 0; k < board.buildings.count; k++) {
+    if (board.buildings.kinds[k * 6 + 2] !== 0 || !BOARD_THATCHED[board.arches[board.buildings.kinds[k * 6 + 1]]]) continue;
+    if (BOARD_TILED_PLACES.has(board.places[board.buildings.kinds[k * 6]]?.kind)) townHovels++; else hovels++;
+  }
+  for (let i = 0; i < plan.typedCount; i++) {
+    const type = plan.typedTypes[i], own = plan.typedBlocks[i * 2 + 1], straw = type === CITY_TYPE.THATCH_HOUSE || type === CITY_TYPE.THATCH_LONGHOUSE;
+    if (straw) thatched++;
+    for (let b = 0; b < own; b++) assert.equal(plan.blocks[(plan.typedBlocks[i * 2] + b) * CITY_BLOCK_FLOATS + 8] >= CITY_THATCH_ROOF, straw || type === CITY_TYPE.COT, `the far roof of building ${i}`);
+  }
+  t.diagnostic(JSON.stringify({ hovels, townHovels, thatched }));
+  assert.equal(thatched, stats.built.thatched);
+  assert.ok(hovels > 0 && townHovels > 0, 'the model has its poor in the villages and in the seat');
+  assert.ok(thatched > hovels * 0.8 && thatched <= hovels, `${thatched} under thatch of ${hovels} village hovels; none of the ${townHovels} in a town`);
 
   // Its buildings: this game's types, nearly all of those founded, each on dry ground and none in another.
   assert.equal(plan.typed.length, plan.typedCount * CITY_TYPED_FLOATS);

@@ -142,6 +142,26 @@ const WORKS_COT = (() => {
     worksBox('cot_smoke_hole', [-0.3, eaves + 1.72, -0.2], [0.3, eaves + 2.06, 0.2], 'timber'),
   ]);
 })();
+// The house of the model's poorest building as it stands in a village: the model roofs it in thatch, steep and low
+// at the eaves. A town of this country roofs even its poor in tile, so these stand only outside one.
+const WORKS_THATCH_HOUSE = (() => {
+  const hw = 3.5, hd = 4, eaves = 2.3, rise = 3.6;
+  return worksSpec('Casa de colmo (villager\'s house under thatch)', 7, 8, eaves, 12, [
+    worksFoot(hw, hd, 'stone'),
+    ...worksWalls('colmo', hw, hd, 0, eaves, 0.4, 'stucco', { front: [worksDoor(2.2, 0.95, 1.85), worksWindow(5, 0.6, 0.6, 1.05)], back: [worksWindow(3.5, 0.5, 0.5, 1.1)], right: [worksWindow(4, 0.5, 0.5, 1.1)] }),
+    worksRoof('colmo_thatch', hw, hd, eaves, rise, 'x', 'thatch', 'stucco', 'gable', 0.55),
+    worksBox('colmo_smoke_hole', [-0.35, eaves + rise - 0.42, -0.25], [0.35, eaves + rise + 0.02, 0.25], 'timber'),
+  ]);
+})();
+const WORKS_THATCH_LONGHOUSE = (() => {
+  const hw = 7, hd = 3.5, eaves = 2.3, rise = 3.3;
+  return worksSpec('Casal comprido de colmo (longhouse under thatch, its byre at one end)', 14, 7, eaves, 12, [
+    worksFoot(hw, hd, 'stone'),
+    ...worksWalls('casal', hw, hd, 0, eaves, 0.4, 'stucco', { front: [worksDoor(4, 0.95, 1.85), worksWindow(7, 0.6, 0.6, 1.05), worksDoor(11.2, 1.5, 1.9)], back: [worksWindow(3.5, 0.5, 0.5, 1.1), worksWindow(9, 0.5, 0.5, 1.1)] }),
+    worksRoof('casal_thatch', hw, hd, eaves, rise, 'x', 'thatch', 'stucco', 'gable', 0.55),
+    worksBox('casal_smoke_hole', [-3.35, eaves + rise - 0.42, -0.25], [-2.65, eaves + rise + 0.02, 0.25], 'timber'),
+  ]);
+})();
 const WORKS_WINEPRESS = (() => {
   const hw = 4.5, hd = 4, eaves = 3.4;
   return worksSpec('Lagar (winepress under its roof, open to the yard)', 9, 8, eaves, 11, [
@@ -356,9 +376,9 @@ const WORKS_SCAFFOLD = worksSpec('Andaime (a work in hand: scaffold, stone and t
 // The works in the order their numbers follow the street's: what stands on a footing as a house does, then the
 // slighter things. `key` is each one's name in CITY_TYPE.
 export const CITY_WORKS = Object.freeze([
-  ['WINDMILL', WORKS_WINDMILL], ['WATERMILL', WORKS_WATERMILL], ['GRANARY', WORKS_GRANARY], ['SHED', WORKS_SHED], ['BARN', WORKS_BARN], ['DOVECOTE', WORKS_DOVECOTE], ['TOLL', WORKS_TOLL], ['COT', WORKS_COT],
+  ['WINDMILL', WORKS_WINDMILL], ['WATERMILL', WORKS_WATERMILL], ['GRANARY', WORKS_GRANARY], ['SHED', WORKS_SHED], ['BARN', WORKS_BARN], ['DOVECOTE', WORKS_DOVECOTE], ['TOLL', WORKS_TOLL], ['COT', WORKS_COT], ['THATCH_HOUSE', WORKS_THATCH_HOUSE], ['THATCH_LONGHOUSE', WORKS_THATCH_LONGHOUSE],
   ['WINEPRESS', WORKS_WINEPRESS], ['VATS', WORKS_VATS], ['STONE_HALL', WORKS_STONE_HALL], ['CLOISTER', WORKS_CLOISTER], ['COURT', WORKS_COURT], ['WHARF', WORKS_WHARF], ['QUARRY', WORKS_QUARRY], ['RUIN', WORKS_RUIN], ['RUBBLE', WORKS_RUBBLE],
   ['FENCE_RAIL', WORKS_FENCE_RAIL], ['FENCE_STONE', WORKS_FENCE_STONE], ['FOOTBRIDGE', WORKS_FOOTBRIDGE], ['STONE_BRIDGE', WORKS_STONE_BRIDGE], ['GRAVES', WORKS_GRAVES], ['CAIRN', WORKS_CAIRN], ['TENT', WORKS_TENT], ['STANDARD', WORKS_STANDARD], ['SCAFFOLD', WORKS_SCAFFOLD],
 ]);
 // How many of them stand on a footing as a house does; the rest are the slighter works.
-export const CITY_WORKS_BUILT = 17;
+export const CITY_WORKS_BUILT = 19;
