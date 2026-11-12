@@ -499,7 +499,23 @@ export function compileCityBuildingTypes(buildGeometry) {
     }, null);
     const from = built.vertices, faces = [];
     let out = null;
-    const corner = (index, flip) => { const o = index * 8; out.push(from[o], from[o + 1], from[o + 2], flip * from[o + 3], flip * from[o + 4], flip * from[o + 5], from[o + 6], from[o + 7]); };
+    // A timber's grain runs its length. Which way that is (1 upright, 2 across the plot, 3 along it; 0 where it has
+    // none to speak of) is the long axis of the part it belongs to, and rides in twos on the vertex's shade, where
+    // the renderer takes it off again (cityTypeVS): a post is then not shaded as a stack of plank ends.
+    const assembly = built.partAssembly, grains = new Map();
+    const grainOf = (triangle) => {
+      const number = assembly?.trianglePartIds?.[triangle];
+      if (number === undefined) return 0;
+      if (!grains.has(number)) {
+        const bounds = (assembly.partsById?.get?.(number) ?? assembly.parts?.find((part) => part.partNumber === number))?.bounds;
+        const size = bounds ? [bounds.max[0] - bounds.min[0], bounds.max[1] - bounds.min[1], bounds.max[2] - bounds.min[2]] : [0, 0, 0];
+        const long = size.indexOf(Math.max(...size)), next = Math.max(...size.filter((_, axis) => axis !== long));
+        grains.set(number, size[long] > next * 1.3 ? [2, 1, 3][long] : 0);
+      }
+      return grains.get(number);
+    };
+    let grain = 0;
+    const corner = (index, flip) => { const o = index * 8; out.push(from[o], from[o + 1], from[o + 2], flip * from[o + 3], flip * from[o + 4], flip * from[o + 5], from[o + 6], Math.floor(from[o + 6] + 0.01) === 10 ? Math.min(0.99, Math.max(0, from[o + 7])) + 2 * grain : from[o + 7]); };
     // How far out a point lies: 1 on the plot's own walls and roof, more beyond them, less within.
     const outward = (a, b, c) => {
       const x = (from[a * 8] + from[b * 8] + from[c * 8]) / 3, y = (from[a * 8 + 1] + from[b * 8 + 1] + from[c * 8 + 1]) / 3, z = (from[a * 8 + 2] + from[b * 8 + 2] + from[c * 8 + 2]) / 3;
@@ -513,7 +529,7 @@ export function compileCityBuildingTypes(buildGeometry) {
       if (nx * nx + ny * ny + nz * nz < 1e-12) continue; // A sliver with no face.
       const facing = nx * (from[a * 8 + 3] + from[b * 8 + 3] + from[c * 8 + 3]) + ny * (from[a * 8 + 4] + from[b * 8 + 4] + from[c * 8 + 4]) + nz * (from[a * 8 + 5] + from[b * 8 + 5] + from[c * 8 + 5]);
       if (facing < 0) [b, c] = [c, b];
-      out = []; corner(a, 1); corner(b, 1); corner(c, 1);
+      out = []; grain = grainOf(k / 3); corner(a, 1); corner(b, 1); corner(c, 1);
       if (Math.floor(from[a * 8 + 6] + 0.01) === 13) { corner(a, -1); corner(c, -1); corner(b, -1); }
       faces.push({ out, rank: outward(a, b, c), order: faces.length });
     }

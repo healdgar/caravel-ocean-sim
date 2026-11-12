@@ -681,7 +681,7 @@ fn sampleArchNormalMip(layer:i32,uv:vec2f,ddx:vec2f,ddy:vec2f)->vec4f{
   return sampleArchLayerMip(uLayer,uv,m0);
 }
 struct ArchPBR{albedo:vec3f,normalOffset:vec3f,roughness:f32,ao:f32};
-fn sampleArchMaterialPBR(matIdx:i32,world:vec3f,n:vec3f,dx:vec3f,dy:vec3f,scale:vec2f,lodFade:f32,instYaw:f32)->ArchPBR{
+fn sampleArchMaterialPBR(matIdx:i32,world:vec3f,n:vec3f,dx:vec3f,dy:vec3f,scale:vec2f,lodFade:f32,instYaw:f32,grain:f32)->ArchPBR{
   let evenLayer=matIdx*2;
   let oddLayer=evenLayer+1;
   let relP=world-vec3f(LAND.domain.x,0.0,LAND.domain.y);
@@ -713,11 +713,17 @@ fn sampleArchMaterialPBR(matIdx:i32,world:vec3f,n:vec3f,dx:vec3f,dy:vec3f,scale:
   }else if(isWallX){
     uv=vec2f(bP.z,-bP.y)*scale;ddx=vec2f(bDx.z,-bDx.y)*scale;ddy=vec2f(bDy.z,-bDy.y)*scale;
   }
+  // The planks of the timber texture lie along u. A post's grain is upright, and a beam's runs its length: where
+  // the member is known to run the other way of this face (grain: 1 upright, 2 across the plot, 3 along it), the
+  // texture is laid the other way.
+  let turned=!isSlopedRoof&&((grain>0.5&&grain<1.5&&!isTop)||(grain>2.5&&isTop));
+  if(turned){uv=uv.yx;ddx=ddx.yx;ddy=ddy.yx;}
   let bS=sampleArchLayerGrad(evenLayer,uv,ddx,ddy);
   let albedo=pow(max(bS.rgb,vec3f(0.01)),vec3f(2.2));
   if(!wantNormal){return ArchPBR(albedo,vec3f(0.0),bS.a,1.0);}
   let nS=sampleArchNormalMip(oddLayer,uv,ddx,ddy);
-  let tn=nS.rgb*2.0-1.0;
+  var tn=nS.rgb*2.0-1.0;
+  if(turned){tn=tn.yxz;}
   let ao=mix(1.0,nS.a,lodFade);
   var normalOffset=vec3f(0.0);
   if(isSlopedRoof){
@@ -829,7 +835,12 @@ fn cityCorner(corner:vec3f,face:vec3f,root:vec4f,size:vec4f,style:vec4f)->CityCo
     else if(abs(material-13.0)<0.5){o.kind=vec2f(13.0+turn,kind.y*cityRoofShade(root,tone));}
     else{o.kind=vec2f(material+turn,kind.y);}
   }
-  o.leafUV=vec2f(cityRoofAge(root,tone),-1.0);
+  // A timber's shade carries, in twos, which way its grain runs (js/old-world-buildings.js): 1 upright, 2 across
+  // the plot, 3 along it. It goes to the fragment in place of the roof's age, which only a tile reads.
+  var grain=0.0;
+  if(abs(material-10.0)<0.5){grain=floor(kind.y*0.5);o.kind=vec2f(o.kind.x,kind.y-2.0*grain);}
+  // Below -1, how high this point stands above the building's own floor: its walls weather by it.
+  o.leafUV=vec2f(select(cityRoofAge(root,tone),grain,grain>0.5),-1.0-max(p.y,0.0));
   let shifted=o.world+vec3f(nearTerrain.grid.y,0.0,nearTerrain.grid.z);
   o.pos=F.viewProj*vec4f(earthCurve(shifted-F.camPos.xyz,F.camPos.y),1.0);
   return o;
@@ -845,7 +856,7 @@ fn cityCorner(corner:vec3f,face:vec3f,root:vec4f,size:vec4f,style:vec4f)->CityCo
   let tone=fract(shape.w);
   if(abs(material-12.0)<0.5){o.kind=vec2f(kind.x+7.0,floor(shape.w)+clamp(tone*kind.y,0.02,0.98));}
   else if(abs(material-13.0)<0.5){o.kind=vec2f(kind.x,kind.y*cityRoofShade(root,tone));}
-  o.leafUV=vec2f(cityRoofAge(root,tone),-1.0);
+  o.leafUV=vec2f(cityRoofAge(root,tone),-1.0-max(position.y-root.y,0.0));
   let shifted=o.world+vec3f(nearTerrain.grid.y,0.0,nearTerrain.grid.z);
   o.pos=F.viewProj*vec4f(earthCurve(shifted-F.camPos.xyz,F.camPos.y),1.0);
   return o;
@@ -1174,9 +1185,13 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
     else if(in.kind.x<16.5){archMatIdx=6;archScale=vec2f(0.42,0.42);}
     else if(in.kind.x<17.5){archMatIdx=7;archScale=vec2f(0.52,0.58);}
     else if(in.kind.x>=18.5){archMatIdx=2;archScale=vec2f(0.38,0.38);}
+    // A building of a type (in.leafUV.y below -0.5): its ashlar in the courses of a house, not a fortress's.
+    let typedBuilding=in.leafUV.y<-0.5;
+    if(typedBuilding&&archMatIdx==1){archScale=vec2f(0.70,0.80);}
+    let timberGrain=select(0.0,floor(in.leafUV.x+0.001),typedBuilding&&archMatIdx==0);
     var pbr=ArchPBR(vec3f(0.5),vec3f(0.0),0.8,1.0);
     if(in.kind.x<13.5||in.kind.x>=14.5){
-      pbr=sampleArchMaterialPBR(archMatIdx,world,n,dx,dy,archScale,archLodFade,instYaw);
+      pbr=sampleArchMaterialPBR(archMatIdx,world,n,dx,dy,archScale,archLodFade,instYaw,timberGrain);
     }
     if(in.kind.x<10.5){
       // Kind 10: MaterialCraft-cooked weathered Iberian oak, Spanish cedar & pitch-pine timber
@@ -1385,6 +1400,32 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
         if(candleSched>0.001&&shut<0.5&&pick<0.3){
           let flicker=0.86+0.09*sin(F.camPos.w*5.4+pick*19.0)+0.05*cos(F.camPos.w*13.1-pick*29.0);
           landWindowEmission=vec3f(0.34,0.145,0.032)*(candleSched*flicker*opening*mix(0.35,1.0,seen)/max(F.post.x,1.0)*(0.5+pick));
+        }
+      }
+    }
+    // A building of a type says how high each point of it stands above its own floor (in.leafUV.y, from
+    // cityTypeVS), and so weathers as a building does: splashed and damp at its foot, its limewash laid on in
+    // patches and run with rain, its timber and stone never of one tone from end to end. A flat face stops
+    // reading as the side of a block.
+    if(in.leafUV.y<-0.5&&(in.kind.x<12.5||in.kind.x>=18.5)&&!(in.kind.x>=18.5&&floor(in.kind.y)>4.5)){
+      let above=-in.leafUV.y-1.0;
+      let upright=1.0-smoothstep(0.35,0.8,abs(n.y));
+      let runDown=vec3f(1.0,0.11,1.0);
+      let blotch=landOrientedDetail(world,n,dx,dy,0.36)*archLodFade;
+      let streak=landOrientedDetail(world*runDown+vec3f(3.7,0.0,9.1),n,dx*runDown,dy*runDown,2.3)*microLodFade;
+      if(in.kind.x<10.5){
+        albedo*=1.0+blotch*0.22+streak*0.07;
+      }else{
+        let foot=(1.0-smoothstep(0.0,0.5+0.45*(blotch+0.5)+0.2*detailA,above))*upright*archLodFade;
+        let wet=foot*(0.55+0.45*clamp(0.5+streak,0.0,1.0));
+        albedo=mix(albedo,albedo*vec3f(0.56,0.55,0.50)+vec3f(0.010,0.013,0.006),wet*0.62);
+        roughness=mix(roughness,0.94,wet*0.5);
+        ambientVisibility*=1.0-foot*0.25;
+        if(in.kind.x>=18.5){
+          albedo*=1.0+blotch*0.15;
+          albedo=mix(albedo,albedo*vec3f(0.80,0.78,0.72),clamp(streak-0.06,0.0,1.0)*upright*0.6);
+        }else{
+          albedo*=1.0+blotch*0.09;
         }
       }
     }
