@@ -247,7 +247,9 @@ test('all five later vessels retain unobstructed 44px helm and sticky settings o
         assert.ok(metrics.scrollHeight>metrics.height,context+' fixture exercises a real overflowing settings body');
         // Wheel input exercises real overflow scrolling; no scrollTop, hidden,
         // style, open-state or production command properties are forced.
-        await page.bringToFront();await page.mouse.move(box.x+4,box.y+box.height/2);
+        // The pointer rests just inside the body's top edge: full Chrome's headless window is shorter than the
+        // viewport it emulates by the height of its toolbar, and a wheel below that line scrolls nothing.
+        await page.bringToFront();await page.mouse.move(box.x+4,box.y+Math.min(8,box.height/2));
         if(await body.evaluate(el=>el.scrollTop>0)){
           await page.mouse.wheel(0,-metrics.scrollHeight-size.height);
           await page.waitForFunction(()=>document.querySelector('#boat-panel .panel-body').scrollTop===0,undefined,{polling:20,timeout:5000});

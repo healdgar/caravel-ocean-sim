@@ -18,7 +18,7 @@
 //   npm run perf -- --profile                        JavaScript time per function
 //   npm run perf -- --textures                       live GPU texture memory by format, forest download
 // PANEL=1 adds the game's own GPU pass spans. HEADED=1 shows the window. PERF_REGION=san-juan changes the coast; saba opens the landfall coast.
-// PERF_SHOTS=folder keeps a picture of each row.
+// PERF_SHOTS=folder keeps a picture of each row. CHROMIUM_PATH=browser runs in that browser, as the tests do.
 import {once} from 'node:events';
 import {execSync} from 'node:child_process';
 import {readFile} from 'node:fs/promises';
@@ -34,7 +34,7 @@ const rows=JSON.parse(args.find(a=>a.startsWith('['))??'[["base",{}]]');
 const SAMPLE_SECONDS=6,SETTLE_MS=5000,CPU_LIMITED_MS=14,GPU_BUSY_PERCENT=85;
 const server=createDevServer();server.listen(0,'127.0.0.1');await once(server,'listening');
 const base=`http://127.0.0.1:${server.address().port}/`,tag=`perf${process.pid}`;
-const browser=await chromium.launch({headless:!process.env.HEADED,args:['--enable-unsafe-webgpu','--use-angle=metal','--disable-gpu-watchdog',`--perf-tag=${tag}`]});
+const browser=await chromium.launch({headless:!process.env.HEADED,executablePath:process.env.CHROMIUM_PATH||undefined,args:['--enable-unsafe-webgpu','--use-angle=metal','--disable-gpu-watchdog',`--perf-tag=${tag}`]});
 const mean=values=>values.reduce((sum,v)=>sum+v,0)/Math.max(1,values.length);
 // Over the roofs a little north of Lisbon's quay, looking down into the town.
 const CITY_EYE=[-70,34,-6250],CITY_PITCH=-24;
