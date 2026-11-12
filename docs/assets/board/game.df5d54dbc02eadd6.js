@@ -5761,7 +5761,7 @@ function musterSync(a){ // the roll follows the host's numbers: the released go 
   if(!a.men)return [];rollLiving(a);const want=Math.max(0,Math.round(a.strength)),dead=[];let k=a.men.length-want;
   if(k>0){const rel=Math.min(k,Math.round(a._rel||0));a._rel=0;
     if(rel>0){for(const p of pickK(a.men,rel,p=>p.merc?0.3:1)){a.men.splice(a.men.indexOf(p),1);sendHome(p);}k-=rel;}
-    if(k>0)for(const p of pickK(a.men,k,p=>Math.exp(-1.2*p.sk[KA]-0.5*trait(p,GV)-0.3*p.sk[KRi]))){a.men.splice(a.men.indexOf(p),1);dropPerson(p,`Fell fighting with ${a.name}`);
+    if(k>0)for(const p of pickK(a.men,k,p=>Math.exp(-1.2*p.sk[KA]-0.5*trait(p,GV)-0.3*p.sk[KRi]))){a.men.splice(a.men.indexOf(p),1);{const hs=W.settlements[p.si],fi=hs&&hs.folk?hs.folk.indexOf(p):-1;if(fi>=0)removeAt(hs,fi);}dropPerson(p,`Fell fighting with ${a.name}`);
       dead.push({n:folkName(p),h:p.home,m:p.merc||null});}}
   else if(k<0){const n0=a.men.length;levyMen(a,W.settlements[a.home],a.home,Math.round(-k*0.7));takeHorses(a,W.settlements[a.home],a.men.slice(n0));hireMen(a,Math.max(0,want-a.men.length));}
   if(dead.length&&a.horses){let r=0;for(const p of a.men)if(p.sk[KRi]>=0.45)r++;a.horses=Math.min(a.horses,r);} // horses fall with their riders
@@ -13287,7 +13287,7 @@ function foundDaughter(s,press,pioneers){
     if(s.folk&&s.folk.length&&typeof householdsOf==='function'&&typeof removeAt==='function'&&typeof journey==='function'){
       const si=W.settlements.indexOf(s),di=W.settlements.length-1,d=W.settlements[di],ll=householdsOf(s).filter(a=>a.head&&!a.head.dead&&tills(a.head,s)&&!(a.head._strips>0));
       let left=d.pop;for(const A of ll){if(!(left>0)||s.folk.length<=8)break;const mem=[...A.members].filter(p=>!p.dead&&p.si===si);if(!mem.length)continue;A.movingTo=di;
-        for(const p of mem){const i=s.folk.indexOf(p);if(i>=0)removeAt(s,i);journey(p,si,di,'migrant');if(typeof life==='function')life(p,`Settled at ${d.name} from ${s.name}`);}left-=mem.length;}
+        for(const p of mem){const i=s.folk.indexOf(p);if(i<0){if(p.home===si)p.home=di;continue;}removeAt(s,i);journey(p,si,di,'migrant');if(typeof life==='function')life(p,`Settled at ${d.name} from ${s.name}`);}left-=mem.length;}
     }
   }
 }
