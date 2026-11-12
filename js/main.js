@@ -3113,8 +3113,9 @@ async function main() {
       url.searchParams.set('continue','1');
       location.href=url.href;
     };
-    // The address as it was opened: the page writes its own state into the address bar as it runs.
-    const openedBare=![...qs.keys()].length;
+    // The address as it was opened. The page writes its own state into the address bar as it runs, and the published
+    // page writes boat=1 into a bare one before this module reads it (build.mjs), keeping word of what it found.
+    const openedBare=window.oceanOpenedBare??![...qs.keys()].length;
     if(openedBare&&!careerStore.owned()&&savedCareer?.voyage){
       showCareerPrompt(document.body,{
         save:savedCareer,

@@ -277,8 +277,10 @@ const minifyPage = js => page
   .replace(/>\s+</g, '><');
 write('ocean.min.html', minifyPage(minJs));
 
-// Pages serves cached assets; the two ocean downloads remain self-contained.
-const pagesBootstrap = '<script>const siteURL=new URL(location.href);if(!siteURL.searchParams.has("boat")){siteURL.searchParams.set("boat","1");history.replaceState(null,"",siteURL);}</script>';
+// Pages serves cached assets; the two ocean downloads remain self-contained. The published page opens on deck, so
+// it writes boat=1 into a bare address; whether the address was bare is kept first, for the game to ask a returning
+// captain about a saved voyage (js/main.js) instead of taking the visit for a scene of its own.
+const pagesBootstrap = '<script>const siteURL=new URL(location.href);window.oceanOpenedBare=!siteURL.search;if(!siteURL.searchParams.has("boat")){siteURL.searchParams.set("boat","1");history.replaceState(null,"",siteURL);}</script>';
 fs.mkdirSync(path.join(root, 'docs'), { recursive: true });
 for(const [file,record]of pagesAssets){
   const destination=path.join(root,'docs',record.url);

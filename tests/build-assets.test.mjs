@@ -46,3 +46,13 @@ test('downloads embed sailing and native forest atlases; optional mature buffers
     }
   }
 });
+
+// The published page opens on deck by writing boat=1 into a bare address. The game must still know the address was
+// bare, or a captain returning to a saved voyage is told the visit is a scene of its own and never asked to continue.
+test('the published page keeps word of a bare address before it writes into it, and the game asks by that word',async()=>{
+  const html=await readFile(new URL('docs/index.html',root),'utf8');
+  const kept=html.indexOf('window.oceanOpenedBare=!siteURL.search'),written=html.indexOf('siteURL.searchParams.set("boat","1")'),game=html.indexOf('<script type="module">');
+  assert.ok(kept>0&&kept<written,'what the address was is kept before it is written to');
+  assert.ok(written<game,'and both come before the game reads the address');
+  assert.match(html.slice(game),/window\.oceanOpenedBare\?\?/,'the game asks by it, and by the address itself where the page was not published');
+});
