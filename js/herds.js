@@ -2,11 +2,12 @@
 // GPU pasture herds manager: uploads static herd seeds once per coast, dispatches
 // closed-form pasture grazing compute, and draws all 4 species via indirect instancing.
 import { requestOnce } from './gpu-program-cache.js';
-import { getLivestockMeshes, LIVESTOCK_VERTEX_FLOATS } from './models/livestock-meshes.js';
+import { getLivestockMeshes, getWagonMesh, LIVESTOCK_VERTEX_FLOATS } from './models/livestock-meshes.js';
 import {
   HERD_BODY_FLOATS,
   HERD_BUCKETS,
   HERD_DRAW_WORDS,
+  HERD_ROUTE_HEADER,
   HERD_SEED_FLOATS,
   HERD_SPECIES,
   HERDS_RENDER_WGSL,
@@ -25,8 +26,52 @@ const HERDS_VERTEX_LAYOUT = [{
 
 const HERD_BODY_BYTES = HERD_BODY_FLOATS * 4;
 const HERD_ALIGN_BODIES = 16;
-// Max downward neck-and-head grazing rotation (radians) per species: sheep, cattle, swine, horse.
-const HERD_GRAZE_PITCH = [0.78, 0.62, 0.34, 0.74];
+// Max downward neck-and-head grazing rotation (radians) per species: sheep, cattle, swine, horse, (wagon).
+const HERD_GRAZE_PITCH = [0.78, 0.62, 0.34, 0.74, 0];
+// A caravan on the road: how far apart its wagons go, how far ahead of its wagon a yoke of oxen walks and how far
+// apart the pair, and how many head of a drove are drawn (the rest are there, and the model counts them).
+const CARAVAN_CART_GAP_M = 15, CARAVAN_YOKE_AHEAD_M = 4.6, CARAVAN_YOKE_SPREAD_M = 0.62, CARAVAN_DROVE_MOST = 16;
+const CARAVAN_DROVE_SPECIES = Object.freeze({ sheep: 0, cattle: 1, swine: 2, horses: 3 });
+const CARAVAN_CARGO_TINT = Object.freeze({ grain: 0, wheat: 0, flour: 0, wine: 1, wool: 2, ore: 3, iron: 3, stone: 3, salt: 4, cloth: 5, timber: 6, wood: 6, hay: 7 });
+const caravanHash = (a, b) => { let h = Math.imul(a ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(b + 0x7f4a7c15, 0xc2b2ae35); h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d); h ^= h >>> 12; return (h >>> 0) / 4294967296; };
+
+// The herds' travelling seeds and route buffer for the country model's caravans (BOARD_MODEL.caravans, board metres
+// about the ground's middle): `origin` is that middle in world metres. Each cart is a wagon behind a yoke of oxen; a
+// drove of beasts is driven loose along the road. Sea and river loads are the ships' and barges' to show.
+export function caravanHerdSeeds(list, origin) {
+  const routes = [], seeds = [];
+  for (const c of list ?? []) {
+    if (c.mode !== 'cart' || !(c.points?.length >= 4) || !(c.arrive > c.depart)) continue;
+    const header = routes.length / 4, n = c.points.length / 2;
+    let along = 0;
+    const pts = [];
+    for (let k = 0; k < n; k++) {
+      const x = origin.x + c.points[k * 2], z = origin.z + c.points[k * 2 + 1];
+      if (pts.length) { const p = pts[pts.length - 1]; const step = Math.hypot(x - p[0], z - p[1]); if (step < 0.05) continue; along += step; }
+      pts.push([x, z, along]);
+    }
+    if (pts.length < 2 || along < 1) continue;
+    routes.push(c.depart, c.arrive, pts.length, along);
+    for (const p of pts) routes.push(p[0], p[1], p[2], 0);
+    const key = [...String(c.key)].reduce((h, ch) => (Math.imul(h, 31) + ch.charCodeAt(0)) | 0, 7);
+    const drove = CARAVAN_DROVE_SPECIES[c.good];
+    if (drove !== undefined) {
+      const head = Math.max(1, Math.min(CARAVAN_DROVE_MOST, Math.round(c.qty || 1)));
+      for (let k = 0; k < head; k++) {
+        const u = caravanHash(key, k * 3 + 1), w = caravanHash(key, k * 3 + 2);
+        seeds.push(header, 1.2 + k * 1.5 + u * 1.2, -1, caravanHash(key, k * 3 + 3), 1 + w, 0.9 + u * 0.2, drove, (w - 0.5) * 4.2);
+      }
+      continue;
+    }
+    const tint = ((CARAVAN_CARGO_TINT[c.good] ?? Math.floor(caravanHash(key, 99) * 8)) + 0.5) / 8;
+    for (let k = 0; k < Math.max(1, c.carts | 0); k++) {
+      const behind = k * CARAVAN_CART_GAP_M + caravanHash(key, k) * 3;
+      seeds.push(header, behind, -1, caravanHash(key, k + 40), tint, 1, 4, 0);
+      for (const side of [-1, 1]) seeds.push(header, behind - CARAVAN_YOKE_AHEAD_M, -1, caravanHash(key, k * 2 + (side > 0 ? 61 : 60)), caravanHash(key, k + 80) * 0.99, 0.96, 1, side * CARAVAN_YOKE_SPREAD_M);
+    }
+  }
+  return { routes: new Float32Array(routes.length ? routes : [0, 1, 0, 0]), seeds: new Float32Array(seeds), header: HERD_ROUTE_HEADER };
+}
 
 export function requestHerdsPipelines({ device, shader, format = 'rgba16float', samples = 4 }) {
   return requestOnce(device, `livestock herds ${format} ${samples}`, async () => {
@@ -84,7 +129,7 @@ export async function createLivestockHerds({
   };
   const [pipeline, shadowPipeline, stepPipeline] = await requestHerdsPipelines({ device, shader, format, samples });
   const cloudGroup = clouds.bindVolume(pipeline);
-  const speciesMeshes = getLivestockMeshes().map((sp, idx) => {
+  const speciesMeshes = [...getLivestockMeshes(), getWagonMesh()].map((sp, idx) => {
     const rigData = new Float32Array([
       sp.neckPivot[0], sp.neckPivot[1], sp.neckPivot[2], HERD_GRAZE_PITCH[idx] ?? 0.65,
       sp.legY, sp.frontZ, sp.backZ, sp.height,
@@ -100,10 +145,15 @@ export async function createLivestockHerds({
   const wantedBindings = new Set([0, 1, 2, 3, 4, 12, 19, 20, 21]);
   let activeResources = resources;
   let state = null;
+  // The pastures' own herds, and the caravans on the roads: both are seeds of one pass.
+  let pastureHerds = initialHerds, travellers = { routes: new Float32Array([0, 1, 0, 0]), seeds: new Float32Array(0) };
+  // The model's day now and how fast its days pass, written once a frame (16 bytes) for the travellers' closed form.
+  const clock = new ArrayBuffer(16), clockU = new Uint32Array(clock), clockF = new Float32Array(clock);
 
   function releaseState() {
     if (!state) return;
     state.seeds.destroy();
+    state.routes.destroy();
     state.bodies.destroy();
     state.draws.destroy();
     state.cfg.destroy();
@@ -140,11 +190,24 @@ export async function createLivestockHerds({
   }
 
   function setHerds(herdData) {
+    pastureHerds = herdData;
+    install();
+  }
+  function setCaravans(list, origin) {
+    travellers = caravanHerdSeeds(list, origin);
+    install();
+  }
+  function install() {
     releaseState();
+    const herdData = pastureHerds;
     const rawCount = herdData?.length ? Math.floor(herdData.length / HERD_SEED_FLOATS) : 0;
-    if (!rawCount) return;
-    const count = isMobile ? Math.max(1, Math.round(rawCount * 0.55)) : rawCount;
-    const sliceData = count < rawCount ? herdData.subarray(0, count * HERD_SEED_FLOATS) : herdData;
+    const pastureCount = isMobile ? Math.round(rawCount * 0.55) : rawCount;
+    const travelCount = travellers.seeds.length / HERD_SEED_FLOATS;
+    const count = pastureCount + travelCount;
+    if (!count) return;
+    const sliceData = new Float32Array(count * HERD_SEED_FLOATS);
+    if (pastureCount) sliceData.set(herdData.subarray(0, pastureCount * HERD_SEED_FLOATS));
+    sliceData.set(travellers.seeds, pastureCount * HERD_SEED_FLOATS);
     const bucketSpan = Math.ceil(count / HERD_ALIGN_BODIES) * HERD_ALIGN_BODIES;
 
     const drawTemplate = new Uint32Array(HERD_BUCKETS * HERD_DRAW_WORDS);
@@ -154,13 +217,15 @@ export async function createLivestockHerds({
     }
 
     const seeds = mkBuf('livestock seeds', sliceData, B.STORAGE);
+    const routes = mkBuf('caravan routes', travellers.routes, B.STORAGE);
     const bodies = device.createBuffer({
       label: 'livestock bodies',
       size: HERD_BUCKETS * bucketSpan * HERD_BODY_BYTES,
       usage: B.STORAGE,
     });
     const draws = mkBuf('livestock indirect draws', drawTemplate, B.STORAGE | B.INDIRECT);
-    const cfg = mkBuf('livestock config', new Uint32Array([count, bucketSpan, 0, 0]), B.UNIFORM);
+    clockU[0] = count; clockU[1] = bucketSpan;
+    const cfg = mkBuf('livestock config', clock, B.UNIFORM);
 
     const stepGroup = device.createBindGroup({
       label: 'livestock step',
@@ -175,10 +240,11 @@ export async function createLivestockHerds({
         { binding: 6, resource: { buffer: bodies } },
         { binding: 7, resource: { buffer: draws } },
         { binding: 8, resource: { buffer: landShadowUniform } },
+        { binding: 9, resource: { buffer: routes } },
       ],
     });
 
-    state = { count, bucketSpan, seeds, bodies, draws, cfg, drawTemplate, stepGroup, renderGroups: [], shadowGroups: [] };
+    state = { count, bucketSpan, seeds, routes, bodies, draws, cfg, drawTemplate, stepGroup, renderGroups: [], shadowGroups: [] };
     rebuildGroups();
   }
 
@@ -186,7 +252,14 @@ export async function createLivestockHerds({
 
   return {
     get count() { return state?.count ?? 0; },
+    get travellers() { return travellers.seeds.length / HERD_SEED_FLOATS; },
     setHerds,
+    setCaravans,
+    // The country model's day now (with its fraction) and how many of its days pass in a second of play.
+    setBoardClock(day, daysPerSecond) {
+      clockF[2] = Number.isFinite(day) ? day : 0;
+      clockF[3] = Number.isFinite(daysPerSecond) ? Math.max(0, daysPerSecond) : 0;
+    },
     rebind(nextResources) {
       activeResources = nextResources;
       rebuildGroups();
@@ -194,6 +267,7 @@ export async function createLivestockHerds({
     encode(pass) {
       if (!state) return;
       device.queue.writeBuffer(state.draws, 0, state.drawTemplate);
+      if (travellers.seeds.length) device.queue.writeBuffer(state.cfg, 8, clock, 8, 8);
       pass.setPipeline(stepPipeline);
       pass.setBindGroup(0, state.stepGroup);
       pass.dispatchWorkgroups(Math.ceil(state.count / 64));

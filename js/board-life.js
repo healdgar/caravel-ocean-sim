@@ -12,9 +12,13 @@ export const BOARD_YEAR_DAYS = 360;
 // The model's day for a date of this game's calendar. Its year begins with spring, on the first of March, and its
 // 360 days are spread over that year's true length; `epochYear` is the year its day 0 began.
 export function boardDayOf(dateMs, epochYear) {
+  return Math.floor(boardDayAt(dateMs, epochYear));
+}
+// The same, with the day's fraction: how far into the model's day a date of this game's calendar falls.
+export function boardDayAt(dateMs, epochYear) {
   const year = new Date(dateMs).getUTCFullYear(), march = Date.UTC(year, 2, 1), spring = dateMs >= march ? year : year - 1;
   const from = Date.UTC(spring, 2, 1), to = Date.UTC(spring + 1, 2, 1);
-  return Math.max(0, Math.floor((spring - epochYear + (dateMs - from) / (to - from)) * BOARD_YEAR_DAYS));
+  return Math.max(0, (spring - epochYear + (dateMs - from) / (to - from)) * BOARD_YEAR_DAYS);
 }
 // The year a frozen world's day 0 began, from the day and year it was frozen at.
 export function boardEpochYear(world) { return world.year - Math.floor(world.day / BOARD_YEAR_DAYS); }
@@ -69,6 +73,11 @@ export function createBoardLife({ baked, fetchImpl = fetch, open = openBoardWork
     // two are acts, not views: the model's world goes another way from the day of them.
     embark: (id) => need().then(() => model.hook('embark', id)),
     disembark: (id) => need().then(() => model.hook('disembark', id)),
+    // The model's caravans on the road: each load's route (board metres), the days it left and is due, its mode, good
+    // and wagons. Where one stands is that share of its route by the day (js/caravans.js works it out on the GPU).
+    caravans: () => need().then(() => model.hook('caravans')),
+    // The model's day for a date of the game's calendar, with its fraction (null with no frozen world to count from).
+    dayAt: (dateMs) => world && Number.isFinite(dateMs) ? boardDayAt(dateMs, boardEpochYear(world)) : null,
     // Anyone, by their number: the model's whole card of them, and what it links to.
     person: (id, full = true) => life.inspect('p' + id, full),
     // This game's own report of the board (js/old-world-board.js stands it), and the whole world frozen as it is now.

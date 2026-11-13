@@ -4033,7 +4033,7 @@ async function main() {
     for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter)v.pose?.encode(cp,v.boat.showProw);
     for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter&&vesselHasVisibleCrew(v))v.crew?.encodePose(cp);
     fortSoldiers?.encodePose(cp);mateSoldiers?.encodePose(cp);
-    townsfolk?.encode(cp,gameDateMs());boardLife?.tick(gameDateMs());
+    townsfolk?.encode(cp,gameDateMs());boardLife?.tick(gameDateMs());caravanClock(gameDateMs());
     props?.encode(cp,simF[53],simTime);
     for(const v of vessels)if(!v.bakedWreck&&!v.dormantEncounter)v.interaction.encode(cp,wakePool.next);
     wakePool.commit();
@@ -4135,6 +4135,38 @@ async function main() {
       Object.assign(folkPlan,{day:plan.day,x,z,at:performance.now(),laidMs:performance.now()-began,laid:folkPlan.laid+1});
     }).catch(error=>{console.warn('The board\'s townsfolk:',error);folkPlan.at=performance.now();}).finally(()=>{folkPlan.asking=false;});
   }
+  // The model's caravans on its roads: carts behind their oxen, and droves of beasts, each where the model's own closed
+  // form puts it (the share of its road its days have run). They are asked again when the model's day turns and laid as
+  // seeds of the herds' GPU pass; the frame only tells that pass the day, with its fraction, and how fast days pass.
+  const CARAVAN_CHECK_FRAMES=45,CARAVAN_WAIT_MS=4000;
+  const caravanPlan={asking:false,day:-1,at:-Infinity,frames:0,count:0,seen:null,lastMs:NaN,lastDay:NaN,rate:0};
+  function tendCaravans(now){
+    if(caravanPlan.frames++%CARAVAN_CHECK_FRAMES||caravanPlan.asking||boardLife?.state!=='alive')return;
+    const herds=terrain?.herds;
+    if(!herds||(boardLife.day===caravanPlan.day&&caravanPlan.seen===herds)||now-caravanPlan.at<CARAVAN_WAIT_MS)return;
+    caravanPlan.asking=true;
+    boardLife.caravans().then(answer=>{
+      if(terrain?.herds!==herds)return;
+      const region=terrain.baseRegion;
+      herds.setCaravans(answer?.list??[],{x:region.x,z:region.z});
+      Object.assign(caravanPlan,{day:answer?.day??boardLife.day,count:answer?.list?.length??0,seen:herds,at:performance.now()});
+    }).catch(error=>{console.warn('The board\'s caravans:',error);caravanPlan.at=performance.now();}).finally(()=>{caravanPlan.asking=false;});
+  }
+  function caravanClock(dateMs){
+    const herds=terrain?.herds,day=boardLife?.dayAt?.(dateMs);
+    if(!herds||!Number.isFinite(day))return;
+    const now=performance.now();
+    if(Number.isFinite(caravanPlan.lastMs)&&now>caravanPlan.lastMs){
+      // How many of the model's days pass in a second of play, smoothed over a few seconds so warp eases in and out.
+      const seen=Math.max(0,(day-caravanPlan.lastDay)/((now-caravanPlan.lastMs)/1000)),k=Math.min(1,(now-caravanPlan.lastMs)/2500);
+      caravanPlan.rate+=(seen-caravanPlan.rate)*k;
+    }
+    caravanPlan.lastMs=now;caravanPlan.lastDay=day;
+    // While the model is still living the days it is behind the calendar, its caravans are where its own day puts them.
+    const lived=boardLife.day,shown=day>=lived+1?lived+(day-Math.floor(day)):day;
+    herds.setBoardClock(shown,caravanPlan.rate);
+  }
+  window.oceanCaravans={get plan(){return {...caravanPlan,seen:undefined};},get travellers(){return terrain?.herds?.travellers??0;},ground:(x,z)=>terrain?.groundSample(x,z)??null};
   // Where walker `index` of the town in sight is now, as the GPU walks them (the same clock and sun), or null.
   const folkStride={position:{x:0,y:0,z:0},walked:0,stopped:false,cycle:0,back:false};
   let folkWords=null,folkWordsOf=null;
@@ -4626,7 +4658,7 @@ async function main() {
       fortSoldiers?.update(castleDuel.port,dt,P.windSpeed,cam,false);
     }
     tendMate(dt);
-    townsfolk?.follow(terrain?.ports,cam);tendFolk(now);
+    townsfolk?.follow(terrain?.ports,cam);tendFolk(now);tendCaravans(now);
     props?.follow(terrain?.ports,cam);
     terrain?.updatePortDamage?.(simTime);
     const activeVesselCount=followerEnabled?vessels.length:1;

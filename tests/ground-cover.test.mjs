@@ -58,7 +58,7 @@ test('ground meshes are finite opaque 3D surfaces with valid winding and conserv
   for(let variant=0;variant<GROUND_COVER.variants;variant++){
     const mesh=groundCoverGeometry(variant),rock=variant<2;
     assert.equal(mesh.length%(TREE_VERTEX_FLOATS*3),0);
-    assert.equal(mesh.length/(TREE_VERTEX_FLOATS*3),rock?48:90,'canonical prop geometry stays bounded');
+    assert.equal(mesh.length/(TREE_VERTEX_FLOATS*3),rock?320:90,'canonical prop geometry stays bounded (a broken field stone, a tussock of blades)');
     assert.equal(groundCoverGeometry(variant),mesh,'canonical meshes are shared across instances');
     const edges=new Map();let volume=0,grounded=false,below=false,above=false;
     for(let i=0;i<mesh.length;i+=TREE_VERTEX_FLOATS*3){
@@ -74,7 +74,9 @@ test('ground meshes are finite opaque 3D surfaces with valid winding and conserv
       }
       const face=cross(sub(points[1],points[0]),sub(points[2],points[0])),area=Math.hypot(...face);
       assert.ok(area>1e-9,'no degenerate triangles');
-      for(const p of v)assert.ok(dot(face,p.slice(3,6))/area>.99999,'normal agrees with triangle winding');
+      // Blades are flat-shaded ribbons. A stone is smooth-shaded where it is rounded and keeps its face normal only
+      // where it broke, so its normals need only lie well on the outward side of each face.
+      for(const p of v)assert.ok(dot(face,p.slice(3,6))/area>(rock?.5:.99999),'normal agrees with triangle winding');
       if(rock){
         const outward=points[0].map((_,k)=>(points[0][k]+points[1][k]+points[2][k])/3-(k===1?.3:0));
         assert.ok(dot(face,outward)>0,'rock normals face away from its enclosed interior');

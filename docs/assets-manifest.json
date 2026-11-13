@@ -10,9 +10,9 @@
     "sha256": "4666394ccfdb046710bc69a6ab7ddb5a78c73bde665936fa3c667b8abf87286e"
   },
   "assets/board/runtime.js": {
-    "url": "assets/board/runtime.47c183a315c80bd3.js",
-    "bytes": 28823,
-    "sha256": "47c183a315c80bd33f6bd0e80e5e3ce42498defd22a447ea38349b82e2a31354"
+    "url": "assets/board/runtime.fc22533f5bc6566c.js",
+    "bytes": 30015,
+    "sha256": "fc22533f5bc6566c4afde50f0a78b59448e4744fe3e943fc38fc71d9cf8d7dc4"
   },
   "assets/forest-scenery/saba/clusters/vertices.bin.gz": {
     "url": "assets/forest-scenery/saba/clusters/vertices.bin.f0293e612db25c5c.gz",

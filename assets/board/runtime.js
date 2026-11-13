@@ -400,5 +400,25 @@ globalThis.BOARD_MODEL = (() => {
     return { id: p.id, name: folkName(p), home: t.to, ashore: true };
   }
 
-  return { VERSION, found, live, board, freeze, thaw, serve, folk, watch, embark, disembark };
+  // The model's caravans on the road today: each load as it goes, by the route it takes and the days it left and is due.
+  // Where one is on its way is no field of the model's: it is that share of its route, by the day (the model's polyPos).
+  // `carts` is the model's own count of wagons for a load of that size (its display's spawnCarts).
+  function caravans() {
+    const out = [];
+    (W.caravans || []).forEach((c, index) => {
+      if (!c || c.gone || c.robbed || !Array.isArray(c.poly) || c.poly.length < 2) return;
+      const mode = c.sea ? 'sea' : c.river ? 'river' : 'cart';
+      let key = null;
+      try { key = typeof caravanInspectionKey === 'function' ? String(caravanInspectionKey(c)) : null; } catch { key = null; }
+      out.push({
+        key: key ?? `${c.origin}>${c.dest}:${c.departDay}:${c.good}`, index, mode, good: String(c.good ?? ''), qty: Math.round(c.qty || 0),
+        origin: c.origin, dest: c.dest, depart: c.departDay, arrive: c.arriveDay, halted: !!c.halted,
+        carts: mode === 'cart' ? Math.max(1, Math.min(4, Math.round((c.qty || 0) / 18))) : 1,
+        points: line(c.poly),
+      });
+    });
+    return { day: day(), list: out };
+  }
+
+  return { VERSION, found, live, board, freeze, thaw, serve, folk, watch, embark, disembark, caravans };
 })();

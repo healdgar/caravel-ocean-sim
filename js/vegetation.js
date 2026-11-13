@@ -94,15 +94,42 @@ export function groundCoverGeometry(variant=0){
     for(const p of[a,b,c])out.push(...p,...n,kind,shade,0,0);
   };
   if(key<2){
-    const sides=8,phase=rand()*Math.PI*2,rings=[-.18,.26,.74].map((y,j)=>Array.from({length:sides},(_,i)=>{
-      const a=phase+i*Math.PI*2/sides,r=(j===0?.62:j===1?1:.62)*(.84+rand()*.16);
-      return[Math.cos(a)*r,y+(rand()-.5)*.16,Math.sin(a)*r];
-    })),top=[(rand()-.5)*.18,1,(rand()-.5)*.18],bottom=[0,-.2,0];
-    for(let i=0;i<sides;i++){const next=(i+1)%sides,shade=.5+rand()*.4;
-      triangle(bottom,rings[0][next],rings[0][i],6,shade);
-      for(let j=0;j<2;j++){triangle(rings[j][i],rings[j][next],rings[j+1][i],6,shade);triangle(rings[j][next],rings[j+1][next],rings[j+1][i],6,shade);}
-      triangle(rings[2][i],rings[2][next],top,6,shade);
+    // A field stone: an icosphere roughened by two octaves of noise, flattened along its bedding, and broken across two
+    // or three fracture planes so it has the flat faces and sharp arrises of real rock. Smooth-shaded except where it
+    // broke. About 320 triangles, sunk a fifth of its height into the ground.
+    const verts=[],faces=[];
+    const t=(1+Math.sqrt(5))/2;
+    for(const p of[[-1,t,0],[1,t,0],[-1,-t,0],[1,-t,0],[0,-1,t],[0,1,t],[0,-1,-t],[0,1,-t],[t,0,-1],[t,0,1],[-t,0,-1],[-t,0,1]])verts.push(treeNormal(p));
+    let tris=[[0,11,5],[0,5,1],[0,1,7],[0,7,10],[0,10,11],[1,5,9],[5,11,4],[11,10,2],[10,7,6],[7,1,8],[3,9,4],[3,4,2],[3,2,6],[3,6,8],[3,8,9],[4,9,5],[2,4,11],[6,2,10],[8,6,7],[9,8,1]];
+    for(let level=0;level<2;level++){
+      const mid=new Map(),half=(a,b)=>{const k=a<b?a*4096+b:b*4096+a;if(!mid.has(k)){verts.push(treeNormal(treeAdd(verts[a],verts[b])));mid.set(k,verts.length-1);}return mid.get(k);};
+      tris=tris.flatMap(([a,b,c])=>{const ab=half(a,b),bc=half(b,c),ca=half(c,a);return[[a,ab,ca],[b,bc,ab],[c,ca,bc],[ab,bc,ca]];});
     }
+    const lattice=Array.from({length:64},()=>rand());
+    const noise=(x,y,z)=>{const i=Math.floor(x),j=Math.floor(y),k=Math.floor(z),fx=x-i,fy=y-j,fz=z-k,s=v=>v*v*(3-2*v);
+      const h=(a,b,c)=>lattice[((a*7+b*13+c*29)%64+64)%64];let r=0;
+      for(let dz=0;dz<2;dz++)for(let dy=0;dy<2;dy++)for(let dx=0;dx<2;dx++)r+=h(i+dx,j+dy,k+dz)*(dx?s(fx):1-s(fx))*(dy?s(fy):1-s(fy))*(dz?s(fz):1-s(fz));
+      return r-.5;};
+    const flat=.52+rand()*.26,stretch=.85+rand()*.35,cuts=Array.from({length:2+(rand()>.5?1:0)},()=>{
+      const a=rand()*Math.PI*2,e=(rand()-.25)*1.1;return{n:treeNormal([Math.cos(a)*Math.cos(e),Math.sin(e),Math.sin(a)*Math.cos(e)]),d:.55+rand()*.25};});
+    const pos=verts.map(v=>{
+      const r=1+.22*noise(v[0]*1.7+3,v[1]*1.7,v[2]*1.7)+.08*noise(v[0]*4.3,v[1]*4.3+5,v[2]*4.3);
+      let p=[v[0]*r*stretch,v[1]*r*flat,v[2]*r];
+      for(const c of cuts){const over=p[0]*c.n[0]+p[1]*c.n[1]+p[2]*c.n[2]-c.d;if(over>0)p=treeAdd(p,c.n,-over);}
+      return p;
+    });
+    // Seat it: the lowest fifth below ground, the widest reach about one unit as the old stone's was.
+    let low=Infinity,high=-Infinity,reach=0;for(const p of pos){low=Math.min(low,p[1]);high=Math.max(high,p[1]);reach=Math.max(reach,Math.hypot(p[0],p[2]));}
+    const lift=-low-(high-low)*.2,ys=1.2/Math.max(1e-3,high-low);
+    for(const p of pos){p[0]/=reach;p[2]/=reach;p[1]=(p[1]+lift)*ys;}
+    const normals=pos.map(()=>[0,0,0]);
+    const faceN=tris.map(([a,b,c])=>treeNormal(treeCross(pos[b].map((v,k)=>v-pos[a][k]),pos[c].map((v,k)=>v-pos[a][k]))));
+    tris.forEach((f,i)=>{for(const v of f)normals[v]=treeAdd(normals[v],faceN[i]);});
+    const shade=v=>.5+.45*Math.max(0,Math.min(1,(pos[v][1]+.25)/1.2));
+    tris.forEach(([a,b,c],i)=>{
+      // A fractured face keeps its own flat normal, so the break reads as an arris; elsewhere the stone is smooth.
+      for(const v of[a,b,c]){const n=treeNormal(normals[v]),sharp=n[0]*faceN[i][0]+n[1]*faceN[i][1]+n[2]*faceN[i][2]<.86;out.push(...pos[v],...(sharp?faceN[i]:n),6,shade(v),0,0);}
+    });
   }else{
     // Bent opaque ribbons have real geometry and no alpha-card overdraw.
     for(let blade=0;blade<18;blade++){

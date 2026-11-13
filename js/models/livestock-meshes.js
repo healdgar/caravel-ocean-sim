@@ -43,3 +43,85 @@ let cachedLivestockMeshes = null;
 export function getLivestockMeshes() {
   return cachedLivestockMeshes ??= Object.freeze(RAW_LIVESTOCK.map(unpackLivestockSpecies));
 }
+
+// A carter's covered wagon of the sixteenth century, in the livestock layout so the herds' own pass draws it behind its
+// oxen: +Z is the pole end, Y up from the ground. Parts: 0 bed, sides, pole and hoops; 7 a wheel, turned about its axle
+// by the distance the wagon has rolled (js/wgsl/herds.js). Zones: 0 weathered timber, 1 iron tyre and fittings, 2 the
+// canvas tilt, tinted by what it carries. The fraction of the coat word is its ambient occlusion.
+export const WAGON_FRONT_AXLE = Object.freeze({ z: 1.05, r: 0.5 });
+export const WAGON_REAR_AXLE = Object.freeze({ z: -1.1, r: 0.6 });
+function buildWagonMesh() {
+  const v = [], idx = [];
+  const vert = (p, n, part, zone, ao) => { v.push(p[0], p[1], p[2], n[0], n[1], n[2], part, zone + Math.min(0.98, Math.max(0.08, ao))); return v.length / 8 - 1; };
+  const quad = (a, b, c, d, n, part, zone, ao) => {
+    const i = [a, b, c, d].map((p) => vert(p, n, part, zone, ao));
+    // Wound so (b - a) x (c - a) faces n.
+    const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], w = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    const out = (u[1] * w[2] - u[2] * w[1]) * n[0] + (u[2] * w[0] - u[0] * w[2]) * n[1] + (u[0] * w[1] - u[1] * w[0]) * n[2];
+    if (out >= 0) idx.push(i[0], i[1], i[2], i[0], i[2], i[3]); else idx.push(i[0], i[2], i[1], i[0], i[3], i[2]);
+  };
+  const box = (x0, y0, z0, x1, y1, z1, zone, ao = 0.82, part = 0) => {
+    quad([x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1], [1, 0, 0], part, zone, ao);
+    quad([x0, y0, z1], [x0, y1, z1], [x0, y1, z0], [x0, y0, z0], [-1, 0, 0], part, zone, ao);
+    quad([x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [0, 1, 0], part, zone, Math.min(0.98, ao + 0.1));
+    quad([x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1], [0, -1, 0], part, zone, ao * 0.45);
+    quad([x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1], [0, 0, 1], part, zone, ao);
+    quad([x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0], [0, 0, -1], part, zone, ao);
+  };
+  // A spoked wheel as a solid disc with an iron tyre: 14 sides, its hub standing proud.
+  const wheel = (x, axle, side) => {
+    const n = 14, t = 0.09, { z: zc, r } = axle;
+    for (let k = 0; k < n; k++) {
+      const a0 = (k / n) * Math.PI * 2, a1 = ((k + 1) / n) * Math.PI * 2;
+      const p = (a, rr, dx) => [x + dx, r + Math.cos(a) * rr, zc + Math.sin(a) * rr];
+      const nr0 = [0, Math.cos(a0), Math.sin(a0)], nr1 = [0, Math.cos(a1), Math.sin(a1)];
+      // Tyre tread.
+      const i0 = vert(p(a0, r, -t), nr0, 7, 1, 0.7), i1 = vert(p(a1, r, -t), nr1, 7, 1, 0.7), i2 = vert(p(a1, r, t), nr1, 7, 1, 0.7), i3 = vert(p(a0, r, t), nr0, 7, 1, 0.7);
+      idx.push(i0, i2, i1, i0, i3, i2);
+      // Faces of the wheel, felloes and spokes read as one disc of timber at a distance.
+      for (const s of [-1, 1]) {
+        const c = vert([x + s * t, r, zc], [s, 0, 0], 7, 0, 0.75), e0 = vert(p(a0, r * 0.94, s * t), [s, 0, 0], 7, 0, 0.75), e1 = vert(p(a1, r * 0.94, s * t), [s, 0, 0], 7, 0, 0.75);
+        if (s > 0) idx.push(c, e1, e0); else idx.push(c, e0, e1);
+      }
+    }
+    box(x - side * 0.02 - 0.06, r - 0.08, zc - 0.08, x - side * 0.02 + 0.06 + side * 0.12, r + 0.08, zc + 0.08, 1, 0.6, 7);
+  };
+  // Bed and its rails, axle trees, the pole to the oxen's yoke.
+  box(-0.62, 0.72, -1.55, 0.62, 0.84, 1.45, 0, 0.7);
+  box(-0.66, 0.84, -1.6, -0.58, 1.28, 1.5, 0, 0.82); box(0.58, 0.84, -1.6, 0.66, 1.28, 1.5, 0, 0.82);
+  box(-0.62, 0.84, 1.42, 0.62, 1.2, 1.5, 0, 0.8); box(-0.62, 0.84, -1.6, 0.62, 1.22, -1.52, 0, 0.8);
+  box(-0.86, WAGON_FRONT_AXLE.r - 0.06, WAGON_FRONT_AXLE.z - 0.07, 0.86, WAGON_FRONT_AXLE.r + 0.06, WAGON_FRONT_AXLE.z + 0.07, 0, 0.5);
+  box(-0.86, WAGON_REAR_AXLE.r - 0.06, WAGON_REAR_AXLE.z - 0.07, 0.86, WAGON_REAR_AXLE.r + 0.06, WAGON_REAR_AXLE.z + 0.07, 0, 0.5);
+  box(-0.06, 0.52, 1.45, 0.06, 0.62, 3.35, 0, 0.72);
+  box(-0.5, 0.56, 3.25, 0.5, 0.64, 3.33, 0, 0.72);
+  // The tilt: canvas over six hoops, a half barrel from rail to rail, open at the ends.
+  const hoopN = 10, R = 0.7, cy = 1.28, z0 = -1.48, z1 = 1.38;
+  for (let k = 0; k < hoopN; k++) {
+    const a0 = (k / hoopN) * Math.PI, a1 = ((k + 1) / hoopN) * Math.PI;
+    const ring = (a) => [Math.cos(a) * R * 0.94, cy + Math.sin(a) * R * 0.86];
+    const [x0, y0] = ring(a0), [x1, y1] = ring(a1);
+    const n0 = [Math.cos(a0), Math.sin(a0), 0], n1 = [Math.cos(a1), Math.sin(a1), 0];
+    const ao0 = 0.62 + 0.36 * Math.sin(a0), ao1 = 0.62 + 0.36 * Math.sin(a1);
+    // Outside and inside of the cloth, so it reads from either end.
+    const o = [vert([x0, y0, z0], n0, 0, 2, ao0), vert([x1, y1, z0], n1, 0, 2, ao1), vert([x1, y1, z1], n1, 0, 2, ao1), vert([x0, y0, z1], n0, 0, 2, ao0)];
+    idx.push(o[0], o[2], o[1], o[0], o[3], o[2]);
+    const m0 = n0.map((c) => -c), m1 = n1.map((c) => -c);
+    const ii = [vert([x0, y0, z0], m0, 0, 2, 0.3), vert([x1, y1, z0], m1, 0, 2, 0.3), vert([x1, y1, z1], m1, 0, 2, 0.3), vert([x0, y0, z1], m0, 0, 2, 0.3)];
+    idx.push(ii[0], ii[1], ii[2], ii[0], ii[2], ii[3]);
+  }
+  // The gathered drawstring ends of the tilt, a little darker.
+  for (const zEnd of [z0, z1]) for (let k = 0; k < hoopN; k++) {
+    const a0 = (k / hoopN) * Math.PI, a1 = ((k + 1) / hoopN) * Math.PI;
+    const inner = 0.72, s = zEnd > 0 ? 1 : -1;
+    const p = (a, f) => [Math.cos(a) * R * 0.94 * f, cy + Math.sin(a) * R * 0.86 * f, zEnd];
+    quad(p(a0, 1), p(a1, 1), p(a1, inner), p(a0, inner), [0, 0, s], 0, 2, 0.5);
+  }
+  for (const [x, side] of [[-0.84, -1], [0.84, 1]]) { wheel(x, WAGON_FRONT_AXLE, side); wheel(x, WAGON_REAR_AXLE, side); }
+  return Object.freeze({
+    name: 'wagon', neckPivot: Object.freeze([0, 1, 2]), legY: WAGON_REAR_AXLE.r, frontZ: WAGON_FRONT_AXLE.z, backZ: WAGON_REAR_AXLE.z, height: cy + R * 0.86,
+    vertices: new Float32Array(v), indices: new Uint32Array(idx), indexCount: idx.length,
+  });
+}
+let cachedWagonMesh = null;
+// The wagon, after the four kinds of beast: the herds' species 4.
+export function getWagonMesh() { return cachedWagonMesh ??= buildWagonMesh(); }

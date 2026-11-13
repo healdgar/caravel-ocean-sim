@@ -11,8 +11,12 @@ import { SHADOW_FRAME } from './shadows.js';
 export const HERD_SEED_FLOATS = 8;
 export const HERD_BODY_FLOATS = 12;
 export const HERD_DRAW_WORDS = 5;
-export const HERD_SPECIES = 4;
-export const HERD_BUCKETS = HERD_SPECIES * 2; // 0..3 main pass, 4..7 shadow pass
+// Sheep, cattle, swine, horse, and the carter's wagon (species 4) that its oxen draw along a caravan's road.
+export const HERD_SPECIES = 5;
+export const HERD_BUCKETS = HERD_SPECIES * 2; // 0..4 main pass, 5..9 shadow pass
+// A caravan's route in the herds' route buffer: a header (departDay, arriveDay, points, length in metres), then each
+// point as (x, z, metres along, 0) in world metres.
+export const HERD_ROUTE_HEADER = 1;
 
 const HERD_RIG_FN = /* wgsl */ `
 struct HerdBody {
@@ -76,6 +80,15 @@ fn poseLivestockVertex(pos: vec3f, nrm: vec3f, part: f32, body: HerdBody, rig: H
     let piv = vec3f(p.x, rig.legs.x, pivZ);
     p = piv + rotX3(p - piv, swing) + vec3f(0.0, lift, 0.0);
     n = rotX3(n, swing);
+  } else if (part >= 6.5) {
+    // A wagon's wheel, turned about its axle by the distance rolled (walkPhase is metres for a wagon).
+    let front = p.z > 0.0;
+    let r = select(0.6, 0.5, front);
+    let az = select(-1.1, 1.05, front);
+    let piv = vec3f(p.x, r, az);
+    let turn = walkPhase / r;
+    p = piv + rotX3(p - piv, turn);
+    n = rotX3(n, turn);
   } else if (part >= 5.5) {
     // Gentle fly-whisking tail sway.
     let sway = 0.18 * sin(tailPhase * 2.1);
@@ -87,7 +100,8 @@ fn poseLivestockVertex(pos: vec3f, nrm: vec3f, part: f32, body: HerdBody, rig: H
   }
 
   // Subtle breathing & gait bounce on torso/head.
-  let bob = 0.014 * abs(sin(walkPhase)) * walkAmp;
+  let isWagon = body.slopeScale.w > 3.5;
+  let bob = select(0.014 * abs(sin(walkPhase)), 0.006 * abs(sin(walkPhase * 2.7)), isWagon) * walkAmp;
   p = p * body.slopeScale.y + vec3f(0.0, bob * body.slopeScale.y, 0.0);
 
   // Align to terrain slope along facing direction, then turn to world yaw.
@@ -105,8 +119,9 @@ struct HerdNearDomain { domain: vec4f, grid: vec4f };
 struct HerdConfig {
   count: u32,
   bucketSpan: u32,
-  pad0: u32,
-  pad1: u32,
+  // The country's model's day now, with its fraction, and how many of its days pass in a second of play.
+  boardDay: f32,
+  daysPerSecond: f32,
 };
 struct HerdSeed {
   anchor: vec4f, // anchorX, anchorZ, roamRadius, phase
@@ -127,6 +142,27 @@ struct HerdBody {
 @group(0) @binding(6) var<storage, read_write> bodies: array<HerdBody>;
 @group(0) @binding(7) var<storage, read_write> draws: array<atomic<u32>>;
 @group(0) @binding(8) var<uniform> landSH: ShadowFrame;
+@group(0) @binding(9) var<storage, read> routes: array<vec4f>;
+
+// Where along a caravan's route a beast or wagon is s metres from the start: its place, and the way the road runs.
+fn herdRouteAt(header: u32, s: f32) -> vec4f {
+  let count = u32(routes[header].z);
+  let total = routes[header].w;
+  let d = clamp(s, 0.0, total);
+  var lo = 0u;
+  var hi = max(count, 2u) - 1u;
+  loop {
+    if (hi - lo <= 1u) { break; }
+    let mid = (lo + hi) / 2u;
+    if (routes[header + 1u + mid].z <= d) { lo = mid; } else { hi = mid; }
+  }
+  let a = routes[header + 1u + lo];
+  let b = routes[header + 1u + hi];
+  let span = max(b.z - a.z, 1e-3);
+  let t = clamp((d - a.z) / span, 0.0, 1.0);
+  let dir = b.xy - a.xy;
+  return vec4f(mix(a.xy, b.xy, t), select(vec2f(0.0, 1.0), dir / max(length(dir), 1e-4), length(dir) > 1e-4));
+}
 
 fn herdGroundY(p: vec2f) -> f32 {
   let dim = vec2i(textureDimensions(elevation));
@@ -180,30 +216,58 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   let idx = gid.x;
   if (idx >= cfg.count) { return; }
   let seed = seeds[idx];
-  let species = min(3u, u32(round(seed.traits.z)));
+  let species = min(4u, u32(round(seed.traits.z)));
   let roamR = seed.anchor.z;
   let phase = seed.anchor.w;
   let flockHeading = seed.traits.w;
   let t = F.camPos.w;
+  let travelling = roamR < 0.0;
 
-  let clock = pastureWalkTime(t, phase);
-  let tau = clock.x;
-  let moveAmt = clock.y;
+  var tau = 0.0;
+  var moveAmt = 0.0;
+  var worldXZ = seed.anchor.xy;
+  var walkYaw = flockHeading;
+  // How far a travelling beast or wagon has gone along its road, in metres: its gait is paced by it, so no hoof slides.
+  var rolled = 0.0;
+  if (travelling) {
+    // A caravan of the country's model: where it is, is the share of its road its days have run (the model's own
+    // closed form), less how far behind the head of the train this one walks. A drove wanders a little about it.
+    let header = u32(seed.anchor.x);
+    let head = routes[header];
+    let days = max(head.y - head.x, 1e-3);
+    let share = clamp((cfg.boardDay - head.x) / days, 0.0, 1.0);
+    // A driven beast's coat word is lifted by one; a yoked ox's and a wagon's are not.
+    let wander = select(0.0, 1.0, species != 4u && seed.traits.x >= 1.0);
+    let behind = seed.anchor.y + wander * 0.9 * sin(t * 0.11 + phase * 3.0);
+    rolled = share * head.w - behind;
+    let at = herdRouteAt(header, rolled);
+    let lateral = seed.traits.w + wander * 1.1 * sin(t * 0.13 + phase * 7.0);
+    worldXZ = at.xy + vec2f(at.w, -at.z) * lateral;
+    walkYaw = atan2(at.z, at.w) + wander * 0.25 * sin(t * 0.21 + phase * 5.0);
+    let onRoad = cfg.boardDay >= head.x && cfg.boardDay < head.y && rolled > 0.0 && rolled < head.w;
+    let speed = head.w / days * cfg.daysPerSecond;
+    moveAmt = select(0.0, clamp(speed / 0.9, 0.0, 1.0), onRoad);
+    tau = rolled;
+  } else {
+    let clock = pastureWalkTime(t, phase);
+    tau = clock.x;
+    moveAmt = clock.y;
 
-  let offset0 = herdLissajous(tau, phase, flockHeading) * roamR;
-  let offset1 = herdLissajous(tau + 0.12, phase, flockHeading) * roamR;
-  let worldXZ = seed.anchor.xy + offset0;
+    let offset0 = herdLissajous(tau, phase, flockHeading) * roamR;
+    let offset1 = herdLissajous(tau + 0.12, phase, flockHeading) * roamR;
+    worldXZ = seed.anchor.xy + offset0;
 
-  let vel = offset1 - offset0;
-  let velLen = length(vel);
-  let walkYaw = select(flockHeading + 0.55 * sin(phase * 3.1 + floor((t + phase * 4.456) / 28.0)), atan2(vel.x, vel.y), velLen > 1e-4);
+    let vel = offset1 - offset0;
+    let velLen = length(vel);
+    walkYaw = select(flockHeading + 0.55 * sin(phase * 3.1 + floor((t + phase * 4.456) / 28.0)), atan2(vel.x, vel.y), velLen > 1e-4);
+  }
 
   let wy = herdGroundY(worldXZ);
   if (wy < 0.32) { return; }
 
   let shiftXZ = vec2f(nearTerrain.grid.y, nearTerrain.grid.z);
   let scale = seed.traits.y;
-  let bodyRadius = select(select(0.75, 1.35, species == 1u), select(0.68, 1.45, species == 3u), species >= 2u) * scale;
+  let bodyRadius = select(select(select(0.75, 1.35, species == 1u), select(0.68, 1.45, species == 3u), species >= 2u), 2.1, species == 4u) * scale;
   let center = vec3f(worldXZ.x + shiftXZ.x, wy + bodyRadius * 0.65, worldXZ.y + shiftXZ.y);
   let curved = earthCurve(center - F.camPos.xyz, F.camPos.y);
   let dist = length(curved);
@@ -215,16 +279,21 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   if (clip.w <= 0.05 || abs(clip.x) > clip.w * 1.18 || abs(clip.y) > clip.w * 1.18) { return; }
 
   let fwd = vec2f(sin(walkYaw), cos(walkYaw));
-  let hFront = herdGroundY(worldXZ + fwd * 0.55);
-  let hBack = herdGroundY(worldXZ - fwd * 0.55);
-  let slopePitch = clamp(-atan2(hFront - hBack, 1.1), -0.45, 0.45);
+  let reach = select(0.55, 1.1, species == 4u);
+  let hFront = herdGroundY(worldXZ + fwd * reach);
+  let hBack = herdGroundY(worldXZ - fwd * reach);
+  let slopePitch = clamp(-atan2(hFront - hBack, reach * 2.0), -0.45, 0.45);
 
   // Swine root, sheep & cattle crop grass deeply, horses graze ~65% of pauses and look alert ~35%.
   let alertCycle = sin(t * 0.31 + phase * 5.7);
   let wantGraze = select(1.0, smoothstep(-0.15, 0.25, alertCycle), species == 3u);
-  let grazeAmt = (1.0 - smoothstep(0.05, 0.45, moveAmt)) * wantGraze;
+  // Yoked oxen and a wagon never stoop to graze; a drove halted on the road may.
+  let yoked = travelling && seed.traits.x < 1.0;
+  let grazeAmt = select((1.0 - smoothstep(0.05, 0.45, moveAmt)) * wantGraze, 0.0, yoked);
   let walkFreq = select(select(4.6, 3.1, species == 1u), select(5.2, 3.3, species == 3u), species >= 2u);
-  let walkPhase = tau * walkFreq + phase * 6.2831853;
+  // On the road a stride is paced by the ground covered (about 1.6 m a cycle); a wagon's phase is the metres rolled.
+  let roadPhase = select(rolled * 6.2831853 / 1.6 + phase * 6.2831853, rolled, species == 4u);
+  let walkPhase = select(tau * walkFreq + phase * 6.2831853, roadPhase, travelling);
   let tailPhase = t * (1.2 + 0.35 * fract(phase * 7.13)) + phase * 9.1;
 
   let body = HerdBody(
@@ -242,7 +311,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   if (landSH.origin.w > 0.5 && dist < 420.0) {
     let sp = landSH.lightView * vec4f(center - landSH.origin.xyz, 1.0);
     if (abs(sp.x) <= 1.08 && abs(sp.y) <= 1.08 && sp.z >= -0.08 && sp.z <= 1.08) {
-      let shBucket = species + 4u;
+      let shBucket = species + ${HERD_SPECIES}u;
       let shSlot = atomicAdd(&draws[shBucket * 5u + 1u], 1u);
       if (shSlot < cfg.bucketSpan) {
         bodies[shBucket * cfg.bucketSpan + shSlot] = body;
@@ -338,6 +407,26 @@ fn livestockCoatAlbedo(species: u32, zone: u32, seed: f32, localXZ: vec2f) -> ve
     if (zone == 2u) { return bristle * 1.15 + vec3f(0.025, 0.018, 0.014); }
     return bristle;
   }
+  if (species == 4u) {
+    // A carter's wagon: weathered oak and chestnut boards, black iron, and a tilt of linen or oiled canvas dyed or
+    // stained by what it carries (C&C's own cargo colours: grain, wine, wool, ore, salt, cloth, timber, hay).
+    let grain = 0.88 + 0.12 * gnoise(localXZ * vec2f(1.4, 22.0) + vec2f(seed * 9.0, 0.0));
+    if (zone == 1u) { return vec3f(0.045, 0.043, 0.042); }
+    if (zone == 2u) {
+      let cargo = u32(floor(fract(seed) * 8.0));
+      var cloth = vec3f(0.62, 0.58, 0.48);
+      if (cargo == 1u) { cloth = vec3f(0.42, 0.18, 0.16); }
+      else if (cargo == 2u) { cloth = vec3f(0.70, 0.67, 0.60); }
+      else if (cargo == 3u) { cloth = vec3f(0.36, 0.33, 0.30); }
+      else if (cargo == 4u) { cloth = vec3f(0.74, 0.73, 0.70); }
+      else if (cargo == 5u) { cloth = vec3f(0.30, 0.34, 0.46); }
+      else if (cargo == 6u) { cloth = vec3f(0.46, 0.38, 0.26); }
+      else if (cargo == 7u) { cloth = vec3f(0.60, 0.55, 0.34); }
+      let weave = 0.94 + 0.06 * gnoise(localXZ * 9.0 + vec2f(seed * 17.0));
+      return cloth * weave;
+    }
+    return mix(vec3f(0.20, 0.15, 0.10), vec3f(0.30, 0.24, 0.17), h1) * grain;
+  }
   // Horse (3): bay, Lusitano grey/white, chestnut, dark brown.
   var coat = vec3f(0.22, 0.095, 0.048); // bay
   var mane = vec3f(0.035, 0.032, 0.030);
@@ -381,7 +470,7 @@ fn livestockCoatAlbedo(species: u32, zone: u32, seed: f32, localXZ: vec2f) -> ve
 
 @fragment fn herdsFS(in: HerdVertexOut) -> @location(0) vec4f {
   let n = normalize(in.normal);
-  let species = min(3u, u32(round(in.coatInfo.w)));
+  let species = min(4u, u32(round(in.coatInfo.w)));
   let zone = u32(round(in.coatInfo.x));
   let ao = in.coatInfo.y;
   let albedo = livestockCoatAlbedo(species, zone, in.coatInfo.z, in.localXZ);
