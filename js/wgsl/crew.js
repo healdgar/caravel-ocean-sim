@@ -39,6 +39,29 @@ fn crewPieceHidden(color:vec3f,dress:u32)->bool {
   let piece=u32(color.r*.5);
   return piece>0u&&((dress>>(piece-1u))&1u)==0u;
 }
+fn crewCompMask(faceW:f32)->u32 {return select(0u,u32((-faceW)*.5),faceW<0.0);}
+fn crewEyeOpen(faceW:f32)->f32 {
+  if(faceW<0.0){let raw=-faceW;return raw-f32(u32(raw*.5))*2.0;}
+  return select(faceW,faceW-2.0,faceW>1.5);
+}
+fn crewCompHidden(color:vec3f,compMask:u32)->bool {
+  let comp=u32(color.g*.5);
+  if(comp==0u){return false;}
+  let hair=compMask&7u;
+  let hat=(compMask>>3u)&7u;
+  let beard=(compMask>>6u)&3u;
+  let gar=(compMask>>8u)&7u;
+  if(comp<=5u){
+    if(comp!=hair){return true;}
+    if(hat==3u){return true;}
+    if(hat==1u){return comp!=3u;}
+    if(hat==2u||hat==4u){return comp==1u||comp==5u;}
+    return false;
+  }
+  if(comp<=9u){return hat==0u||comp!=5u+hat;}
+  if(comp<=12u){return beard==0u||comp!=9u+beard;}
+  return gar==0u||comp!=12u+gar;
+}
 const CREW_PIECE_OUT=vec3f(0.0,1.62,0.0);
 // The whole part of skin.w says whose body this is: 0 a man's, 1 a woman's, 2 a woman captain in the captain's body,
 // which is built on the man's and so takes the man's face.
@@ -49,7 +72,18 @@ fn crewSurface(v:CrewInput)->CrewSurface {
 }
 fn crewMorph(p:vec3f,normal:vec3f,f:vec4f,sex:f32)->CrewSurface {
   let headY=select(1.5998,1.5496,sex>.5);
-  if(p.y<=headY+.015){return CrewSurface(p,normal);}
+  let build=(crewCompMask(f.w)>>11u)&3u;
+  if(p.y<=headY+.015){
+    if(build==0u||p.y<=.72||p.y>=1.38||abs(p.x)>=.25){return CrewSurface(p,normal);}
+    let env=crewRamp(.72,.90,p.y).x*(1.0-crewRamp(1.26,1.38,p.y).x)*(1.0-crewRamp(.20,.25,abs(p.x)).x);
+    let sx=select(select(.11,-.085,build==1u),.095*crewRamp(.88,1.24,p.y).x,build==2u);
+    let sz=select(select(.10,-.095,build==1u),.075,build==2u);
+    let belly=select(0.0,.030*smoothstep(-.02,.08,p.z)*(1.0-crewRamp(1.12,1.30,p.y).x),build==3u);
+    let qx=p.x*(1.0+sx*env);
+    let qz=-0.025+(p.z+0.025)*(1.0+sz*env)+belly*env;
+    let nrm=normalize(vec3f(normal.x/(1.0+sx*env),normal.y,normal.z/(1.0+sz*env)));
+    return CrewSurface(vec3f(qx,p.y,qz),nrm);
+  }
   let eyeY=select(1.699,1.656,sex>.5);
   let head=crewRamp(headY+.015,headY+.065,p.y);
   let jaw=vec2f(1,0)-crewRamp(headY+.06,headY+.13,p.y);
@@ -69,7 +103,7 @@ fn crewMorph(p:vec3f,normal:vec3f,f:vec4f,sex:f32)->CrewSurface {
   let eye=ex0.x*ex1.x*ey.x*ez.x;
   let eyeD=vec3f((ex0.y*ex1.x+ex0.x*ex1.y)*sign(p.x)*ey.x*ez.x,
     ex0.x*ex1.x*ey.y*sign(p.y-eyeY)*ez.x,ex0.x*ex1.x*ey.x*ez.y);
-  let eyeOpen=select(f.w,f.w-2.0,f.w>1.5);
+  let eyeOpen=crewEyeOpen(f.w);
   let eyeShift=(p.y-eyeY)*(eyeOpen-1.0);
   let eyeGradient=eyeShift*eyeD+vec3f(0,(eyeOpen-1.0)*eye,0);
   // Columns of the deformation Jacobian; cofactor columns transform normals.
@@ -150,7 +184,7 @@ struct CrewVertex {
   @location(8) @interpolate(flat) paint:u32, @location(9) @interpolate(flat) actor:u32
 };
 // The model's colours are placeholders for what this person wears: rgb, and whether it is skin.
-fn crewClothed(tagged:vec3f,p:vec3f,shirt:vec3f,trousers:vec3f,skin:vec3f,hair:vec3f,isIndigenous:bool,dress:u32)->vec4f {
+fn crewClothed(tagged:vec3f,p:vec3f,shirt:vec3f,trousers:vec3f,skin:vec3f,hair:vec3f,isIndigenous:bool,dress:u32,compMask:u32)->vec4f {
   if(tagged.b<-1.0){
     return vec4f(tagged,select(0.0,1.0,tagged.b<-10.5));
   }
@@ -158,10 +192,22 @@ fn crewClothed(tagged:vec3f,p:vec3f,shirt:vec3f,trousers:vec3f,skin:vec3f,hair:v
   // point departs from that garment's typical colour, so folds and faces survive any cloth or skin.
   let garment=u32(tagged.b*.5);
   if(garment>0u){
-    let rawShade=vec3f(tagged.rg,tagged.b-2.0*f32(garment));
+    let comp=u32(tagged.g*.5);
+    let rawShade=vec3f(tagged.r,tagged.g-2.0*f32(comp),tagged.b-2.0*f32(garment));
     let shadeLuma=clamp(dot(rawShade,vec3f(0.299,0.587,0.114)),0.64,1.16);
     let shade=mix(vec3f(shadeLuma),clamp(rawShade,vec3f(0.62),vec3f(1.18)),select(0.20,0.45,garment==3u));
-    let worn=select(select(select(hair,skin,garment==3u),trousers,garment==2u),shirt,garment==1u);
+    var worn=select(select(select(hair,skin,garment==3u),trousers,garment==2u),shirt,garment==1u);
+    if(garment==5u){
+      let acc=(compMask>>13u)&3u;
+      var pal=select(select(select(vec3f(0.24,0.13,0.065),vec3f(0.38,0.065,0.048),acc==1u),vec3f(0.085,0.125,0.20),acc==2u),vec3f(0.46,0.35,0.19),acc==3u);
+      if(comp==9u){pal=select(vec3f(0.14,0.145,0.155),pal*0.65,acc==1u||acc==2u);}
+      worn=pal;
+    }else if(garment==6u){
+      let acc=(compMask>>13u)&3u;
+      let rawLinen=vec3f(0.46,0.41,0.33);
+      let kerchiefPal=select(select(rawLinen,vec3f(0.36,0.085,0.062),acc==1u),vec3f(0.11,0.16,0.26),acc==2u);
+      worn=select(rawLinen,kerchiefPal,comp==8u);
+    }
     return vec4f(worn*shade,select(0.0,1.0,garment==3u));
   }
   let color=vec3f(tagged.r-2.0*f32(u32(tagged.r*.5)),tagged.gb);
@@ -195,9 +241,10 @@ fn crewClothed(tagged:vec3f,p:vec3f,shirt:vec3f,trousers:vec3f,skin:vec3f,hair:v
   let upper=mix(moisture[base+2u],moisture[base+3u],smoothstep(1.08,1.55,y));
   out.wet=mix(lower,upper,smoothstep(.5,1.08,y));
   let dress=crewDressOf(actor.hair.w);
-  let clothed=crewClothed(v.color,v.position,actor.shirt.rgb,actor.trousers.rgb,actor.skin.rgb,actor.hair.rgb,actor.face.w>1.5,dress);
+  let compMask=crewCompMask(actor.face.w);
+  let clothed=crewClothed(v.color,v.position,actor.shirt.rgb,actor.trousers.rgb,actor.skin.rgb,actor.hair.rgb,actor.face.w>1.5,dress,compMask);
   out.color=clothed.rgb;out.skin=clothed.w;out.paint=dress>>16u;out.actor=v.instance;
-  if(actor.shirt.w>0.5){out.position=vec4f(2,2,0,1);}
+  if(actor.shirt.w>0.5||crewCompHidden(v.color,compMask)){out.position=vec4f(2,2,0,1);}
   return out;
 }
 @fragment fn surviving(v:CrewVertex)->@location(0) vec4f {
@@ -305,7 +352,8 @@ export const CREW_RENDER = crewRenderWGSL();
 export const CREW_SHADOW = VESSEL_RIG + CREW_SKIN + SHADOW_FRAME + /* wgsl */ `
 @group(0) @binding(0) var<uniform> SH:ShadowFrame;
 @vertex fn vs(v:CrewInput)->@builtin(position) vec4f {
-  if(actors[v.instance].shirt.w>0.5){return vec4f(2,2,0,1);}
+  let actor=actors[v.instance];
+  if(actor.shirt.w>0.5||crewCompHidden(v.color,crewCompMask(actor.face.w))){return vec4f(2,2,0,1);}
   return SH.lightView*vec4f(rotateHull((crewSkin(v)*vec4f(crewSurface(v).position,1)).xyz)+hull.origin.xyz-SH.origin.xyz,1);
 }
 `;

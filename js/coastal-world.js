@@ -9391,6 +9391,7 @@ function dressProceduralCoastalPack(pack, heights, port, elevationSource, satell
   }
   // An Old World city round the port: its plan is laid here, its streets paved with the port's
   // own, and its blocks handed to the renderer to draw as instances.
+  const surveyHeights = pack.skipPortPlacement ? null : new Float32Array(heights);
   const country = pack.skipPortPlacement ? null : oldWorldCountry(region, heights, port);
   const cityPlan = country?.plan ?? null;
   // A founded country names who mans its seat; the port's forts are manned from that roll.
@@ -9418,6 +9419,9 @@ function dressProceduralCoastalPack(pack, heights, port, elevationSource, satell
     city: cityPlan ? { blocks: cityPlan.blocks, count: cityPlan.count, typed: cityPlan.typed, typedTypes: cityPlan.typedTypes, typedCount: cityPlan.typedCount, typedBlocks: cityPlan.typedBlocks, typedAttached: cityPlan.typedAttached ?? null, stats: cityPlan.stats } : null,
     // Where Castle and Commons' model founded this coast: what the GPU stamps onto the ground's colours.
     board: country?.board ?? null,
+    inlandWater: country?.inlandWater ?? null,
+    herds: country?.herds ?? null,
+    surveyHeights: country?.board ? surveyHeights : null,
     biome,
     albedo,
     vegetation,

@@ -9,7 +9,7 @@
 //   seat        how many times the source's capital the seat of this coast is, in people and houses
 //   walls       the walls a place of each kind starts with: {capital, town, village} of 0 none, 1 palisade, 2 stone
 //   lived       true to found the realm in its early age (850) and let it live every day to the year asked, as the
-//               source's own prehistory does, instead of drawing the year asked in one stroke
+//               source's own prehistory does, or a number of years to found with the era's technologies and live that span
 //   rivers      water fitted to true ground: {catchment, width, least, carve}. The source counts a river's water in
 //               cells, each standing for a square kilometre or so of a kingdom; here a cell is some 27 metres of a
 //               surveyed coast, and counted so, every gully ran a river. `catchment` is the ground (square metres)
@@ -70,9 +70,19 @@ export const BOARD_TUNING = Object.freeze([
     replace: `const hw0=pts.map((p,k)=>Math.max(${BOARD}?.rivers?.least??4,(p.w||10)/2)*Math.min(1,0.35+k/14)),`,
   },
   {
-    why: 'A realm may be founded early and lived forward to the year asked, where the source starts any later age direct.',
+    why: 'A realm may be founded early and lived forward to the year asked, or founded near the year asked and lived a shorter span with that age\'s technologies.',
     find: 'directEra=START_AD>FOUNDING_AD;',
-    replace: `directEra=START_AD>FOUNDING_AD&&!${BOARD}?.lived;`,
+    replace: `directEra=START_AD>FOUNDING_AD&&${BOARD}?.lived!==true;`,
+  },
+  {
+    why: 'When lived is a span of years rather than the whole age from 850, the clock opens that many years before START_AD so advancePrehistory lives just that span.',
+    find: 'W={startAD:directEra?START_AD:FOUNDING_AD,',
+    replace: `W={startAD:directEra?Math.max(FOUNDING_AD,START_AD-(typeof ${BOARD}?.lived==='number'&&${BOARD}.lived>0?Math.round(${BOARD}.lived):0)):FOUNDING_AD,`,
+  },
+  {
+    why: 'A short lived span at a later era opens with all technologies of START_AD already known and adopted, rather than holding back the last thirty years.',
+    find: 'if((r.year<=850||r.year<=ad-30)&&r.needs.every(k=>T.known[k]))',
+    replace: `if((r.year<=850||r.year<=(typeof ${BOARD}?.lived==='number'&&${BOARD}.lived>0?Math.max(ad-30,START_AD):ad-30))&&r.needs.every(k=>T.known[k]))`,
   },
   {
     why: 'Each day every household that might buy a plough, a shoe or a rudder is quoted for it, and each quote counted the heads of every household in the place afresh: nothing in a capital of two thousand, most of the day in a port of twenty. The heads are counted once for a place in a round of quotes, and again after any commission, so every quote is the figure it was.',
@@ -103,6 +113,26 @@ export const BOARD_TUNING = Object.freeze([
     why: 'And whoever of a host falls is struck off any roll of the living he stands on, by whatever road he came to be on two.',
     find: "a.men.splice(a.men.indexOf(p),1);dropPerson(p,`Fell fighting with ${a.name}`);",
     replace: "a.men.splice(a.men.indexOf(p),1);{const hs=W.settlements[p.si],fi=hs&&hs.folk?hs.folk.indexOf(p):-1;if(fi>=0)removeAt(hs,fi);}dropPerson(p,`Fell fighting with ${a.name}`);",
+  },
+  {
+    why: 'A daughter village founded in tickLand (such as Torre de Pedro on day 9045) enters tickEconomy the same day before its household pantries are opened; opening ownership after made() swept that day\'s fresh harvest into held pantries and left shareOutput unbacked.',
+    find: 'storageInit(s);const phaseK=commodityActive(s)?s.storage:undefined;',
+    replace: 'storageInit(s);initOwnership(s);const phaseK=commodityActive(s)?s.storage:undefined;',
+  },
+  {
+    why: 'And opening a settlement\'s pantry never claims grain or fish already booked in _made as pending daily output.',
+    find: "for(const g of ['grain','fish'])giveFood(s,g,old?old[g]||0:Math.min(s.stores[g]||0,s.pop*NEED[g]*30));",
+    replace: "for(const g of ['grain','fish'])giveFood(s,g,old?old[g]||0:Math.min(Math.max(0,(s.stores[g]||0)-(s._made?.[g]||0)),s.pop*NEED[g]*30));",
+  },
+  {
+    why: 'Lordly estates looked for river dam sites in W.rivers, which does not exist; the river reaches live in W.rivStrips as abbeyPondPlan reads them.',
+    find: 'for(const r of W.rivers||[])',
+    replace: 'for(const r of (W.rivStrips||[]).filter(q=>!q.canal))',
+  },
+  {
+    why: 'An extinct household estate (A.household with A.head === null) still reaches creditKeep and royalBudget before creditLive screens it out; an estate with no living head has zero monthly subsistence keep.',
+    find: 'function courtKeep(s,p){const A=householdAccount(p),h=A?.head||p,home=W.settlements[h.si]||s;let n=0;for(const q of A?.members||[p])if(!q.dead)n++;return Math.max(1,n)*foodYr()/12+rentDue(home,h)/12;}',
+    replace: 'function courtKeep(s,p){const A=householdAccount(p),h=A?.head||p;if(!h||h.gn===undefined)return 0;const home=W.settlements[h.si]||s;let n=0;for(const q of A?.members||[h])if(q&&!q.dead)n++;return Math.max(1,n)*foodYr()/12+rentDue(home,h)/12;}',
   },
 ]);
 

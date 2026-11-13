@@ -137,7 +137,7 @@ const BOARD_USE_TINT = [
 ];
 const BOARD_STRIP_M = [0, 9, 0, 7, 14, 14, 0, 0, 0];
 const BOARD_ROAD_TINT = [176, 160, 130, 0.9], BOARD_LANE_TINT = [170, 156, 128, 0.7], BOARD_STREET_TINT = [134, 124, 108, 0.95], BOARD_SQUARE_TINT = [170, 160, 140, 0.95];
-const BOARD_WATER_TINT = [52, 78, 88, 0.95], BOARD_BANK_TINT = [70, 84, 58, 0.5], BOARD_ROOF_TINT = [158, 94, 66, 0.9];
+const BOARD_WATER_TINT = [46, 54, 48, 0.82], BOARD_BANK_TINT = [70, 84, 58, 0.5], BOARD_ROOF_TINT = [158, 94, 66, 0.9], BOARD_THATCH_TINT = [164, 142, 92, 0.88];
 export const BOARD_WAY_FLOATS = 12;
 
 // The tables the passes read, set out once from what the adapter made (its `stamp`).
@@ -175,7 +175,8 @@ export function boardStampTables(board) {
     const long = Math.max(lot.w, lot.d), short = Math.min(lot.w, lot.d), run = (long - short) / 2 + 0.01;
     const ux = lot.w >= lot.d ? lot.c : lot.s, uz = lot.w >= lot.d ? -lot.s : lot.c;
     const lit = 0.84 + 0.3 * ((Math.imul(Math.round(lot.x * 7) ^ 0x9e3779b9, Math.round(lot.z * 5) | 1) >>> 8) & 255) / 255;
-    way(lot.x - ux * run, lot.z - uz * run, lot.x + ux * run, lot.z + uz * run, short / 2, [BOARD_ROOF_TINT[0] * lit, BOARD_ROOF_TINT[1] * lit, BOARD_ROOF_TINT[2] * lit, BOARD_ROOF_TINT[3]]);
+    const roofTint = lot.thatch ? BOARD_THATCH_TINT : BOARD_ROOF_TINT;
+    way(lot.x - ux * run, lot.z - uz * run, lot.x + ux * run, lot.z + uz * run, short / 2, [roofTint[0] * lit, roofTint[1] * lit, roofTint[2] * lit, roofTint[3]]);
   }
   return { parcels, ways: new Float32Array(ways), wayCount: ways.length / BOARD_WAY_FLOATS };
 }

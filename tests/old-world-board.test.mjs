@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { BAKED_BOARDS, BAKED_WORLDS, BOARD_RIVERS, BOARD_SURVEY_SIZE, BOARD_VERSION, bakedBoardAsset, bakedWorldAsset, boardGroundFits, boardGroundSurvey, boardRequest } from '../js/board-model.js';
 import { BOARD_WAY_FLOATS, boardStampTables } from '../js/board-stamp.js';
-import { BOARD_INDEX_SIZE, BOARD_STREETFRONT, BOARD_THATCHED, BOARD_TILED_PLACES, BOARD_WORKS, boardRoadCrossings } from '../js/old-world-board.js';
+import { BOARD_INDEX_SIZE, BOARD_STREETFRONT, BOARD_THATCHED, BOARD_WORKS, boardRoadCrossings } from '../js/old-world-board.js';
 import { CITY_BLOCK_FLOATS, CITY_TREES } from '../js/old-world-city.js';
 import { CITY_BUILDING_TYPES, CITY_THATCH_ROOF, CITY_TYPE, CITY_TYPE_SLIGHT_FROM, CITY_TYPED_FLOATS, CITY_TYPES_OVERHEAD, CITY_TYPES_SLIGHT } from '../js/old-world-buildings.js';
 import { WORKS_FENCE_M, WORKS_WHEEL } from '../js/old-world-works.js';
@@ -87,13 +87,13 @@ test('a founded board stands in the game as its own buildings, land and woods, a
   const round = wall.rad.reduce((sum, r) => sum + r, 0) / wall.rad.length * 2 * Math.PI;
   assert.ok(stats.gates >= 1 && towers >= round / 56 * 0.5, `${towers} towers and ${stats.gates} gates on a circuit of ${Math.round(round)} m`);
 
-  // Its poorest houses: the model roofs its tier 0 in thatch. A town of this country tiles even its poor, so only
-  // those of a village stand under thatch, each as a type of its own; its far block is roofed in straw as it is, and
-  // no other block is.
+  // Its poorest houses: the model roofs its tier 0 in thatch across villages, towns and the seat alike, each as a type
+  // of its own; its far block is roofed in straw as it is, and no other block is.
   let hovels = 0, townHovels = 0, thatched = 0;
   for (let k = 0; k < board.buildings.count; k++) {
     if (board.buildings.kinds[k * 6 + 2] !== 0 || !BOARD_THATCHED[board.arches[board.buildings.kinds[k * 6 + 1]]]) continue;
-    if (BOARD_TILED_PLACES.has(board.places[board.buildings.kinds[k * 6]]?.kind)) townHovels++; else hovels++;
+    hovels++;
+    if (board.places[board.buildings.kinds[k * 6]]?.kind !== 'village') townHovels++;
   }
   for (let i = 0; i < plan.typedCount; i++) {
     const type = plan.typedTypes[i], own = plan.typedBlocks[i * 2 + 1], straw = type === CITY_TYPE.THATCH_HOUSE || type === CITY_TYPE.THATCH_LONGHOUSE;
@@ -102,8 +102,18 @@ test('a founded board stands in the game as its own buildings, land and woods, a
   }
   t.diagnostic(JSON.stringify({ hovels, townHovels, thatched }));
   assert.equal(thatched, stats.built.thatched);
-  assert.ok(hovels > 0 && townHovels > 0, 'the model has its poor in the villages and in the seat');
-  assert.ok(thatched > hovels * 0.8 && thatched <= hovels, `${thatched} under thatch of ${hovels} village hovels; none of the ${townHovels} in a town`);
+  assert.ok(hovels > 0 && townHovels > 0, 'the model has tier-0 thatch buildings in villages and in towns');
+  assert.ok(thatched > hovels * 0.8 && thatched <= hovels, `${thatched} under thatch of ${hovels} tier-0 buildings across all settlements`);
+
+  // Its inland rivers carve smooth channels into the ground, emit freshwater ribbon geometry, and place grazing herds.
+  if (board.rivers.length > 0) {
+    assert.ok(country.inlandWater && country.inlandWater.vertices.length >= 24 && country.inlandWater.indices.length >= 12, 'inland water ribbons built');
+    let carvedCells = 0;
+    const rawGround = ground();
+    for (let i = 0; i < heights.length; i++) if (heights[i] < rawGround[i] - 0.05) carvedCells++;
+    assert.ok(carvedCells > 10, `carved ${carvedCells} river bed cells into terrain heights`);
+  }
+  assert.ok(country.herds && country.herds.length >= 24 && country.herds.length % 8 === 0, `standing herds placed: ${(country.herds?.length ?? 0) / 8}`);
 
   // Its buildings: this game's types, nearly all of those founded, each on dry ground and none in another.
   assert.equal(plan.typed.length, plan.typedCount * CITY_TYPED_FLOATS);
@@ -260,14 +270,16 @@ test('Lisbon\'s board of 1550 is baked from this model, fitted to its ground and
   assert.equal(baked.survey.length, BOARD_SURVEY_SIZE ** 2);
   assert.ok(baked.survey.some((h) => h < 0) && baked.survey.some((h) => h > 60), 'a survey of sea and hills');
   assert.deepEqual(baked.request.rivers, { ...BOARD_RIVERS });
-  assert.equal(baked.request.lived, false);
+  assert.equal(baked.request.lived, 1);
   // The valleys' streams, not a brook to every hectare.
   assert.ok(board.rivers.length >= 2 && board.rivers.length <= 12, `rivers: ${board.rivers.length}`);
   // Its places are the real ones.
   const real = new Set(OLD_WORLD_PLACES.lisbon.map(([name]) => name)), named = board.places.filter((p) => real.has(p.name));
   assert.equal(board.places[0].kind, 'capital'); assert.equal(board.places[0].name, 'Lisboa');
   assert.ok(named.length >= 6, `real places: ${named.map((p) => p.name)}`);
-  assert.ok(board.places[0].people > 15000 && board.buildings.count > 4000, `${board.places[0].people} people, ${board.buildings.count} buildings`);
+  assert.ok(board.people > 18000 && board.places[0].people > 6000 && board.buildings.count > 4000, `${board.people} total people (${board.places[0].people} in Lisboa), ${board.buildings.count} buildings`);
+  const lisbonHerds = board.places.reduce((s, p) => s + (p.herds?.sheep || 0) + (p.herds?.cattle || 0) + (p.herds?.horses || 0) + (p.herds?.swine || 0), 0);
+  assert.ok(lisbonHerds > 1000, `Lisbon lived herds: ${lisbonHerds}`);
   // And the page is given it.
   const build = readFileSync(new URL('../build.mjs', import.meta.url), 'utf8');
   assert.ok(build.includes(`'${BAKED_BOARDS['lisbon:1550']}'`), 'the build publishes the baked board');

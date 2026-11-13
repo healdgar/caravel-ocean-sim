@@ -42,7 +42,7 @@ async function groundOf(portId) {
     await page.goto(url.toString());
     await page.waitForFunction(() => window.oceanStartup?.state === 'ready' || window.oceanStartup?.state === 'failed', undefined, { timeout: 300000, polling: 250 });
     const land = await page.evaluate(() => {
-      const { region, pack } = window.oceanLand, bytes = new Uint8Array(pack.heights.buffer, pack.heights.byteOffset, pack.heights.byteLength);
+      const { region, pack } = window.oceanLand, src = pack.surveyHeights || pack.heights, bytes = new Uint8Array(src.buffer, src.byteOffset, src.byteLength);
       let text = ''; for (let k = 0; k < bytes.length; k += 0x8000) text += String.fromCharCode.apply(null, bytes.subarray(k, k + 0x8000));
       return {
         state: window.oceanStartup.state, source: pack.elevationSource,
@@ -75,11 +75,13 @@ const south = (latitude) => (region.latitude - latitude) * 111195;
 const number = (name, fallback) => Number(option(name, fallback));
 // A port already baked for this year keeps the country it was given: its seed, unless another is asked for.
 const keptRecord = bakedBoardAsset(port, year) && existsSync(resolve(root, bakedBoardAsset(port, year))) ? JSON.parse(readFileSync(resolve(root, bakedBoardAsset(port, year)), 'utf8')).request : null;
+const livedIndex = args.indexOf('--lived');
+const livedArg = livedIndex >= 0 ? (args[livedIndex + 1] && !args[livedIndex + 1].startsWith('--') && Number.isFinite(Number(args[livedIndex + 1])) ? Number(args[livedIndex + 1]) : true) : false;
 const request = boardRequest({
   heights: land.heights, span: region.span, seed: number('seed', keptRecord?.seed ?? region.seed ?? 1550), era: year, seat,
   site: { name: city.name, culture: 'iberian', x: land.centre.x - region.x, z: land.centre.z - region.z },
   places: (OLD_WORLD_PLACES[city.id] || []).map(([name, latitude, longitude, weight]) => ({ name, x: east(longitude), z: south(latitude), weight })),
-  lived: args.includes('--lived'),
+  lived: livedArg,
   rivers: { catchment: number('catchment', BOARD_RIVERS.catchment), width: number('width', BOARD_RIVERS.width), least: number('least', BOARD_RIVERS.least), carve: number('carve', BOARD_RIVERS.carve) },
 });
 say(`real places on this ground: ${request.places.map((p) => `${p.name} (${p.x}, ${p.z})`).join(', ') || 'none'}`);

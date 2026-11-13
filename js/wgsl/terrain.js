@@ -836,7 +836,7 @@ fn cityCorner(corner:vec3f,face:vec3f,root:vec4f,size:vec4f,style:vec4f)->CityCo
   if(abs(material-14.0)>0.5){
     let turn=0.02+0.46*fract((fract(kind.x)-0.02)/0.46+root.w/PI);
     if(abs(material-12.0)<0.5){o.kind=vec2f(19.0+turn,floor(shape.w)+clamp(tone*kind.y,0.02,0.98));}
-    else if(abs(material-13.0)<0.5){o.kind=vec2f(13.0+turn,kind.y*cityRoofShade(root,tone));}
+    else if(abs(material-13.0)<0.5||abs(material-15.0)<0.5){o.kind=vec2f(material+turn,kind.y*cityRoofShade(root,tone));}
     else{o.kind=vec2f(material+turn,kind.y);}
   }
   // A timber's shade carries, in twos, which way its grain runs (js/old-world-buildings.js): 1 upright, 2 across
@@ -859,7 +859,7 @@ fn cityCorner(corner:vec3f,face:vec3f,root:vec4f,size:vec4f,style:vec4f)->CityCo
   let material=floor(kind.x+0.01);
   let tone=fract(shape.w);
   if(abs(material-12.0)<0.5){o.kind=vec2f(kind.x+7.0,floor(shape.w)+clamp(tone*kind.y,0.02,0.98));}
-  else if(abs(material-13.0)<0.5){o.kind=vec2f(kind.x,kind.y*cityRoofShade(root,tone));}
+  else if(abs(material-13.0)<0.5||abs(material-15.0)<0.5){o.kind=vec2f(kind.x,kind.y*cityRoofShade(root,tone));}
   o.leafUV=vec2f(cityRoofAge(root,tone),-1.0-max(position.y-root.y,0.0));
   let shifted=o.world+vec3f(nearTerrain.grid.y,0.0,nearTerrain.grid.z);
   o.pos=F.viewProj*vec4f(earthCurve(shifted-F.camPos.xyz,F.camPos.y),1.0);
@@ -1317,8 +1317,15 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
         ambientVisibility=0.14+0.12*portShade;
       }
     }else if(in.kind.x<15.5){
-      // Kind 15: MaterialCraft-cooked layered palm-thatch & bundled reed roof
+      // Kind 15: MaterialCraft-cooked layered palm-thatch & bundled reed/straw roof
       albedo=pbr.albedo*shadeAlbedo*(0.96+detailA*0.08+detailB*0.04);
+      if(in.leafUV.y<-0.5){
+        let age=in.leafUV.x;
+        let grey=dot(albedo,vec3f(0.3,0.5,0.2));
+        // Fresh straw is warm gold; weathered thatch darkens to peat-brown and silvers with moss.
+        albedo=mix(albedo*vec3f(1.10,1.03,0.84),grey*vec3f(0.92,0.86,0.74),smoothstep(0.22,0.92,age)*0.64);
+        albedo=albedo*mix(1.06,0.82,fract(age*4.1));
+      }
       archNormalOffset=pbr.normalOffset*0.60;
       relief=detailA*0.004*archLodFade;
       roughness=clamp(pbr.roughness,0.82,0.95);

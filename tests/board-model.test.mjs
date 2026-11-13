@@ -62,10 +62,13 @@ test('a seat is sized by its people, and a request is named by everything it ask
   assert.deepEqual(placed.places, [{ name: 'Vila Franca', x: 900, z: -400, weight: 7 }, { name: 'Heavy', x: -300, z: -900, weight: 9 }, { name: 'Light', x: 300, z: -900, weight: 1 }],
     'a place off the ground is left out, and a weight kept between 1 and 9');
   assert.deepEqual(a.rivers, { ...BOARD_RIVERS }); assert.equal(a.lived, false); assert.deepEqual(a.places, []);
-  for (const other of [placed, ask({ rivers: { ...BOARD_RIVERS, catchment: 2e6 } }), ask({ rivers: { ...BOARD_RIVERS, carve: 1 } }), ask({ lived: true })]) assert.notEqual(boardKey(a), boardKey(other));
+  assert.equal(ask({ lived: 1 }).lived, 1);
+  for (const other of [placed, ask({ rivers: { ...BOARD_RIVERS, catchment: 2e6 } }), ask({ rivers: { ...BOARD_RIVERS, carve: 1 } }), ask({ lived: true }), ask({ lived: 1 })]) assert.notEqual(boardKey(a), boardKey(other));
+  assert.notEqual(boardKey(ask({ lived: true })), boardKey(ask({ lived: 1 })));
   assert.match(boardPrefix(placed), /"n":"Porto Novo","u":[-\d.e]+,"v":[-\d.e]+,"c":"iberian","w":300\},\{"n":"Vila Franca"/, 'the seat first and heaviest, then the places');
   assert.match(boardPrefix(a), /"rivers":\{"catchment":1000000,"width":2\.2,"least":1\.2,"carve":0\.3\},"lived":false/);
   assert.match(boardPrefix(ask({ lived: true })), /"lived":true/);
+  assert.match(boardPrefix(ask({ lived: 1 })), /"lived":1/);
   const prefix = boardPrefix(a);
   assert.match(prefix, /^globalThis\.FURLONG_HEADLESS=true;/);
   assert.match(prefix, /"spanMetres":4096/);
@@ -89,7 +92,14 @@ test('the model founds a walled Iberian port where it is asked, houses its peopl
   assert.ok(seat.wall && seat.wall.rad.length === 144 && seat.wall.gates.length >= 1, 'the seat is walled, with a gate');
   assert.ok(seat.streets.length >= 8, `streets: ${seat.streets.length}`);
   assert.ok(board.places.length >= 2, 'the seat has neighbours');
-  for (const place of board.places) assert.ok(place.name && place.people > 0);
+  for (const place of board.places) {
+    assert.ok(place.name && place.people > 0);
+    assert.ok(place.herds && Number.isInteger(place.herds.sheep) && Number.isInteger(place.herds.cattle) && Number.isInteger(place.herds.horses) && Number.isInteger(place.herds.swine), 'standing herd counts exported');
+    assert.ok('pond' in place, 'pond slot exported');
+  }
+  for (const river of board.rivers) {
+    assert.equal(river.levels.length, river.points.length / 3, 'river profile levels exported');
+  }
 
   // Buildings: six numbers each for where they stand, on dry ground inside the survey.
   const { count, stand, form, kinds } = board.buildings;
@@ -244,4 +254,14 @@ test('the whole world is frozen at its founding, taken up again without its surv
   // A world is not taken up from bytes that are not one.
   await assert.rejects(openBoard(request, { world: kept.slice(0, 5000) }));
   await open.close(); await thawed.close();
+});
+
+test('a short lived span unlocks all era technologies, keeps household grain ledgers balanced, and breeds standing herds', { timeout: 900000 }, async () => {
+  const open = await openBoard(ask({ seat: 0.25, lived: 1 }));
+  const board = open.board;
+  assert.equal(board.year, 1550);
+  assert.equal(board.day, 360);
+  const totalAnimals = board.places.reduce((sum, p) => sum + p.herds.sheep + p.herds.cattle + p.herds.horses + p.herds.swine, 0);
+  assert.ok(totalAnimals > 0, `standing livestock after 1 lived year: ${totalAnimals}`);
+  await open.close();
 });

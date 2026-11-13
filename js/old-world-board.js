@@ -38,13 +38,15 @@ export const BOARD_WORKS = Object.freeze({
   hospital: ['STONE_HALL', CITY_ROOF.GABLE, 11, 3.2, true, true], guildhall: ['STONE_HALL', CITY_ROOF.GABLE, 11, 3.2, true, true],
   cloister: ['CLOISTER', CITY_ROOF.FLAT, 11, 0, false, false], court: ['COURT', CITY_ROOF.GABLE, 19, 1.5, true, false], wharf: ['WHARF', CITY_ROOF.FLAT, 10, 0, false, false], quarry: ['QUARRY', CITY_ROOF.FLAT, 11, 0, false, false],
 });
-// The model roofs its poorest building (its tier 0) in thatch. In this country a town roofs even its poor in tile,
-// as the views of 1572 show Lisbon; so a house of that tier stands under thatch only where the place is no town:
-// by the model's kind of house, what it is stood as there, in the terms of BOARD_WORKS.
+// The model roofs its poorest building (its tier 0) in thatch across villages, suburbs and poorer town quarters alike:
+// by the model's kind of house or trade-house, what it is stood as at tier 0, in the terms of BOARD_WORKS.
 export const BOARD_THATCHED = Object.freeze({
-  house: ['THATCH_HOUSE', CITY_ROOF.GABLE, CITY_WALL.HOUSE, 3.6, true, false], longhouse: ['THATCH_LONGHOUSE', CITY_ROOF.GABLE, CITY_WALL.HOUSE, 3.3, true, false],
+  house: ['THATCH_HOUSE', CITY_ROOF.GABLE, CITY_WALL.HOUSE, 3.6, true, false],
+  longhouse: ['THATCH_LONGHOUSE', CITY_ROOF.GABLE, CITY_WALL.HOUSE, 3.3, true, false],
+  shop: ['THATCH_HOUSE', CITY_ROOF.GABLE, CITY_WALL.HOUSE, 3.6, true, true],
+  bakery: ['THATCH_HOUSE', CITY_ROOF.GABLE, CITY_WALL.HOUSE, 3.6, true, true],
+  tavern: ['THATCH_HOUSE', CITY_ROOF.GABLE, CITY_WALL.HOUSE, 3.6, true, true],
 });
-export const BOARD_TILED_PLACES = Object.freeze(new Set(['capital', 'city', 'town']));
 // Where a road of the model crosses one of its rivers: the middle of the crossing, the way the road runs there, and
 // the water's width along the road. The model keeps no list of these (its own page finds them as it draws its
 // roads), so they are found here from its record of both. `roads` are {points: [x, z, …]}, `rivers` {points: [x, z,
@@ -122,7 +124,7 @@ function fillBoardFigure(index, size, points, value) {
  * placed there, whose own buildings and streets the board gives way to. `LAND` is OLD_WORLD_LAND, `fieldAt` and
  * `distanceTo` the lattice's own readers (js/old-world.js).
  */
-export function layBoardCountry({ baked, region, grid, heightAt, port, wet, LAND, fieldAt, distanceTo }) {
+export function layBoardCountry({ baked, region, grid, heights = null, heightAt, port, wet, LAND, fieldAt, distanceTo }) {
   const started = typeof performance === 'object' ? performance.now() : 0;
   const board = baked.board, ox = region.x, oz = region.z, half = region.span / 2;
   const bounds = { x0: ox - half, z0: oz - half, x1: ox + half, z1: oz + half };
@@ -222,7 +224,7 @@ export function layBoardCountry({ baked, region, grid, heightAt, port, wet, LAND
   let houses = 0, fronts = 0, stalls = 0;
   const works = board.works ?? {}, stateOf = board.buildings.state ?? null, wheelOf = new Map();
   for (let w = 0; w + 2 < (works.wheels?.length ?? 0); w += 3) wheelOf.set(works.wheels[w], [ox + works.wheels[w + 1], oz + works.wheels[w + 2]]);
-  const built = { thatched: 0, roadBridges: 0, windmills: 0, watermills: 0, wheels: 0, stores: 0, sheds: 0, halls: 0, others: 0, ruins: 0, fences: 0, bridges: 0, yards: 0, graves: 0, cairns: 0, tents: 0, standards: 0, scaffolds: 0 };
+  const built = { thatched: 0, roadBridges: 0, dams: 0, windmills: 0, watermills: 0, wheels: 0, stores: 0, sheds: 0, halls: 0, others: 0, ruins: 0, fences: 0, bridges: 0, yards: 0, graves: 0, cairns: 0, tents: 0, standards: 0, scaffolds: 0 };
   // The wash of a house, its own from where it stands in the model's list.
   const washOf = (k) => { const hue = form[k * 3 + 2]; return BOARD_HOUSE_TINTS[Math.floor(boardHashUnit(k, 23) * BOARD_HOUSE_TINTS.length)] + 0.2 + 0.75 * (hue > 0 && hue < 1 ? hue : boardHashUnit(k, 31)); };
   const fit = (v, of) => Math.max(BOARD_FIT[0] * of, Math.min(BOARD_FIT[1] * of, v));
@@ -286,9 +288,10 @@ export function layBoardCountry({ baked, region, grid, heightAt, port, wet, LAND
     const hu = boardHashUnit(k, 31), paint = arch === 'tannery' ? CITY_PAINT.BROWN : arch === 'dyer' ? BOARD_CLOTHS[Math.floor(hu * 5)] : arch === 'toll' ? CITY_PAINT.RED : -1;
     const tone = paint >= 0 ? paint + 0.3 + 0.65 * hu : key === 'WINDMILL' || key === 'DOVECOTE' || key === 'WHARF' ? 0.2 + 0.75 * hu : washOf(k);
     // Far off, a plain block of its size: the quarry's is its face, a wharf's its deck.
-    const far = key === 'QUARRY' ? footprint(...local(g, 0, g.d * 0.3), g.w, g.d * 0.4, g.yaw) : ridgeAlong ? footprint(g.x, g.z, g.d, g.w, g.yaw + Math.PI / 2) : g;
-    pushBlock(far, key === 'WHARF' ? 0.05 : key === 'QUARRY' ? 1.3 : up, rise * (ridgeAlong ? g.d / T.length : g.w / T.width), roof + CITY_TYPED_ROOF + thatch, wall, wall === 19 || paint < 0 && wall === 12 ? tone : 0.86 + 0.1 * hu, base);
+    const Far = key === 'QUARRY' ? footprint(...local(g, 0, g.d * 0.3), g.w, g.d * 0.4, g.yaw) : ridgeAlong ? footprint(g.x, g.z, g.d, g.w, g.yaw + Math.PI / 2) : g;
+    pushBlock(Far, key === 'WHARF' ? 0.05 : key === 'QUARRY' ? 1.3 : up, rise * (ridgeAlong ? g.d / T.length : g.w / T.width), roof + CITY_TYPED_ROOF + thatch, wall, wall === 19 || paint < 0 && wall === 12 ? tone : 0.86 + 0.1 * hu, base);
     pushTyped(type, g.x, base.floor, g.z, g.yaw, g.w, up, g.d, tone);
+    if (thatch) g.thatch = true;
     keep(g); occupy(g);
     const stood = typedTypes.length - 1;
     if (fronted && toStreet) standFront(k, g, base.floor, up);
@@ -353,7 +356,7 @@ export function layBoardCountry({ baked, region, grid, heightAt, port, wet, LAND
       const floor = pushBlock(long, CITY_HALL.height, CITY_HALL.roof, CITY_ROOF.HIP + CITY_TYPED_ROOF, CITY_WALL.HOUSE, 0.9);
       pushTyped(CITY_TYPE.HALL, long.x, floor, long.z, long.yaw, long.w, CITY_HALL.height, long.d, 0.9);
       keep(long); occupy(long);
-    } else if (kinds[k * 6 + 2] === 0 && BOARD_THATCHED[arch] && !BOARD_TILED_PLACES.has(places[place]?.kind)) {
+    } else if (kinds[k * 6 + 2] === 0 && BOARD_THATCHED[arch]) {
       standWork(k, f, arch, Boolean(fx || fz), BOARD_THATCHED[arch]);
     } else {
       // The model builds low: a house of one or two floors, and so stood most of an Iberian port of the sixteenth
@@ -508,8 +511,209 @@ export function layBoardCountry({ baked, region, grid, heightAt, port, wet, LAND
     }
   }
 
+  /* ---- inland water: carve river/canal troughs and dammed ponds into heights, stand masonry weirs, and build water ribbons ---- */
+  const n = grid.n;
+  const uncarved = heights ? heights.slice() : null;
+  const origAt = uncarved ? ((x, z) => fieldAt(uncarved, grid, x, z)) : heightAt;
+  const waterVerts = [], waterIdx = [];
+  const pushWaterVert = (wx, wy, wz, fx, fz, depth, bankT, kind) => {
+    const id = waterVerts.length / 8;
+    waterVerts.push(wx, wy, wz, fx, fz, depth, bankT, kind);
+    return id;
+  };
+  const nearPad = (gx, gz) => placed.some(gx, gz, 9, (o) => rectDist(o, gx, gz) < 3.2) || solids.some(gx, gz, 14, (o) => rectDist(o, gx, gz) < 3.2);
+
+  // Stand masonry weirs across estate pond dams before carving basins behind them.
+  for (const place of places) {
+    const dam = place.pond?.dam;
+    if (!dam || !Number.isFinite(dam.x) || !Number.isFinite(dam.z)) continue;
+    const dx = ox + dam.x, dz = oz + dam.z;
+    if (!inside(dx, dz, 14)) continue;
+    const tx = -Math.sin(dam.angle || 0), tz = Math.cos(dam.angle || 0);
+    const lo = Number.isFinite(dam.lo) ? dam.lo : -8, hi = Number.isFinite(dam.hi) ? dam.hi : 8;
+    const ax = dx + tx * lo, az = dz + tz * lo, bx = dx + tx * hi, bz = dz + tz * hi;
+    const weirH = Math.max(2.6, Math.min(7.5, (place.pond.level ?? origAt(dx, dz)) - (dam.bed ?? origAt(dx, dz) - 2.2) + 0.9));
+    curtain(ax, az, bx, bz, [Math.cos(dam.angle || 0), Math.sin(dam.angle || 0)], weirH, 0.88);
+    built.dams++;
+  }
+
+  for (const river of board.rivers ?? []) {
+    const pts = river.points;
+    const m = Math.floor((pts?.length ?? 0) / 3);
+    if (m < 2) continue;
+    const isCanal = Boolean(river.canal);
+    const rawProf = new Float32Array(m);
+    for (let s = 0; s < m; s++) rawProf[s] = origAt(ox + pts[s * 3], oz + pts[s * 3 + 1]);
+    const prof = new Float32Array(m);
+    for (let s = 0; s < m; s++) {
+      let sum = 0, cnt = 0;
+      for (let d = -4; d <= 4; d++) {
+        const idx = Math.max(0, Math.min(m - 1, s + d));
+        sum += rawProf[idx]; cnt++;
+      }
+      const sm = sum / cnt;
+      const hint = Number.isFinite(river.levels?.[s]) ? Math.min(sm, 0.25 * river.levels[s] + 0.75 * sm) : sm;
+      prof[s] = s === 0 ? hint : Math.min(prof[s - 1], hint);
+    }
+
+    // Carve smooth valley channel into heights and mark wet cells so trees stay clear of watercourses.
+    const carveStride = Math.max(1, Math.min(3, Math.floor(grid.step / 6)));
+    for (let s = 0; s < m - 1; s += carveStride) {
+      const s1 = Math.min(m - 1, s + carveStride);
+      const ax = ox + pts[s * 3], az = oz + pts[s * 3 + 1], ahw = Math.max(0.6, pts[s * 3 + 2]);
+      const bx = ox + pts[s1 * 3], bz = oz + pts[s1 * 3 + 1], bhw = Math.max(0.6, pts[s1 * 3 + 2]);
+      const maxHw = Math.max(ahw, bhw);
+      const baseFlatR = Math.max(maxHw, grid.step * 0.74);
+      const outer = baseFlatR + grid.step * 1.1;
+      const i0 = Math.max(1, Math.floor((Math.min(ax, bx) - outer - grid.x0) / grid.step));
+      const i1 = Math.min(n - 2, Math.ceil((Math.max(ax, bx) + outer - grid.x0) / grid.step));
+      const j0 = Math.max(1, Math.floor((Math.min(az, bz) - outer - grid.z0) / grid.step));
+      const j1 = Math.min(n - 2, Math.ceil((Math.max(az, bz) + outer - grid.z0) / grid.step));
+      const abx = bx - ax, abz = bz - az, ab2 = abx * abx + abz * abz || 1;
+      for (let j = j0; j <= j1; j++) {
+        const gz = grid.z0 + j * grid.step;
+        for (let i = i0; i <= i1; i++) {
+          const gx = grid.x0 + i * grid.step;
+          const t = Math.max(0, Math.min(1, ((gx - ax) * abx + (gz - az) * abz) / ab2));
+          const dist = Math.hypot(gx - (ax + abx * t), gz - (az + abz * t));
+          if (dist >= outer) continue;
+          const k = j * n + i;
+          const hw = ahw + (bhw - ahw) * t;
+          if (dist <= hw + grid.step * 0.45) wet[k] = 1;
+          if (!heights) continue;
+          const origH = uncarved[k];
+          const padHit = nearPad(gx, gz);
+          if (padHit && dist > hw + 1.2) continue;
+          const flatR = padHit ? hw + 0.6 : baseFlatR;
+          const wy = Math.max(origH > 0.45 ? 0.45 : -2.0, prof[s] + (prof[s1] - prof[s]) * t - 0.24);
+          const depth = isCanal ? 1.35 : Math.min(2.2, 0.85 + 0.22 * hw);
+          const bed = wy - depth;
+          const u = dist <= flatR ? 0 : Math.min(1, (dist - flatR) / Math.max(1, outer - flatR));
+          const sm = u * u * (3 - 2 * u);
+          let target = dist <= flatR ? bed : bed * (1 - sm) + origH * sm;
+          if (origH > 0.45) target = Math.max(0.30, target);
+          if (target < heights[k]) heights[k] = target;
+        }
+      }
+    }
+
+    // Build continuous freshwater ribbon segments down to sea level.
+    const stations = [];
+    let accDist = 999;
+    for (let s = 0; s < m; s++) {
+      const wx = ox + pts[s * 3], wz = oz + pts[s * 3 + 1], hw = Math.max(0.65, pts[s * 3 + 2]);
+      if (!inside(wx, wz, 6)) {
+        if (stations.length >= 2) emitRiverRibbon(stations, isCanal);
+        stations.length = 0; accDist = 999;
+        continue;
+      }
+      const oh = origAt(wx, wz);
+      if (oh <= 0.12) {
+        if (stations.length >= 1) {
+          stations.push({ wx, wz, hw, wy: 0.04, depth: Math.min(2.2, 0.85 + 0.22 * hw) });
+          if (stations.length >= 2) emitRiverRibbon(stations, isCanal);
+        }
+        stations.length = 0; accDist = 999;
+        continue;
+      }
+      if (stations.length > 0) {
+        const prev = stations[stations.length - 1];
+        const segD = Math.hypot(wx - prev.wx, wz - prev.wz);
+        accDist += segD;
+        if (accDist < 4.5 && s < m - 1) continue;
+      }
+      accDist = 0;
+      const carvedBed = heights ? heightAt(wx, wz) : prof[s] - 1.1;
+      const wy = Math.max(0.14, Math.max(prof[s] - 0.24, carvedBed + 0.16));
+      const depth = Math.max(0.35, wy - carvedBed);
+      stations.push({ wx, wz, hw, wy, depth });
+    }
+    if (stations.length >= 2) emitRiverRibbon(stations, isCanal);
+  }
+
+  function emitRiverRibbon(st, isCanal) {
+    // Keep water surface monotonically non-increasing along each continuous reach.
+    for (let i = 1; i < st.length; i++) st[i].wy = Math.min(st[i].wy, st[i - 1].wy);
+    const kind = isCanal ? 1.0 : 0.0;
+    let prevRow = null;
+    for (let i = 0; i < st.length; i++) {
+      const cur = st[i];
+      const p0 = st[Math.max(0, i - 1)], p1 = st[Math.min(st.length - 1, i + 1)];
+      const dx = p1.wx - p0.wx, dz = p1.wz - p0.wz, dLen = Math.hypot(dx, dz) || 1;
+      const tx = dx / dLen, tz = dz / dLen;
+      const nx = -tz, nz = tx;
+      const slope = Math.max(0, (p0.wy - p1.wy) / dLen);
+      const speed = isCanal ? 0.35 : Math.max(0.55, Math.min(3.0, 0.58 + Math.sqrt(slope) * 6.8));
+      const fx = tx * speed, fz = tz * speed;
+      const ribHw = cur.hw + Math.min(2.6, grid.step * 0.34);
+      const vL = pushWaterVert(cur.wx - nx * ribHw, cur.wy - 0.025, cur.wz - nz * ribHw, fx, fz, cur.depth, -1.0, kind);
+      const vC = pushWaterVert(cur.wx, cur.wy, cur.wz, fx, fz, cur.depth, 0.0, kind);
+      const vR = pushWaterVert(cur.wx + nx * ribHw, cur.wy - 0.025, cur.wz + nz * ribHw, fx, fz, cur.depth, 1.0, kind);
+      if (prevRow) {
+        waterIdx.push(prevRow[0], vL, vC, prevRow[0], vC, prevRow[1]);
+        waterIdx.push(prevRow[1], vC, vR, prevRow[1], vR, prevRow[2]);
+      }
+      prevRow = [vL, vC, vR];
+    }
+  }
+
+  // Carve & fill any dammed estate ponds.
+  for (const place of places) {
+    const pond = place.pond, p = pond?.points;
+    if (!p || p.length < 6) continue;
+    const pm = Math.floor(p.length / 2);
+    let cx = 0, cz = 0, rimMin = Infinity, px0 = Infinity, px1 = -Infinity, pz0 = Infinity, pz1 = -Infinity;
+    const poly = new Float64Array(pm * 2);
+    for (let k = 0; k < pm; k++) {
+      const wx = ox + p[k * 2], wz = oz + p[k * 2 + 1];
+      poly[k * 2] = wx; poly[k * 2 + 1] = wz;
+      cx += wx; cz += wz;
+      px0 = Math.min(px0, wx); px1 = Math.max(px1, wx);
+      pz0 = Math.min(pz0, wz); pz1 = Math.max(pz1, wz);
+      rimMin = Math.min(rimMin, origAt(wx, wz));
+    }
+    cx /= pm; cz /= pm;
+    if (!inside(cx, cz, 16) || rimMin <= 0.4) continue;
+    const pondY = Math.max(0.55, rimMin - 0.22);
+    const inPoly = (x, z) => {
+      let insideFlag = false;
+      for (let a = 0, b = pm - 1; a < pm; b = a++) {
+        const ax = poly[a * 2], az = poly[a * 2 + 1], bx = poly[b * 2], bz = poly[b * 2 + 1];
+        if ((az > z) !== (bz > z) && x < (bx - ax) * (z - az) / (bz - az) + ax) insideFlag = !insideFlag;
+      }
+      return insideFlag;
+    };
+    const i0 = Math.max(1, Math.floor((px0 - grid.step - grid.x0) / grid.step));
+    const i1 = Math.min(n - 2, Math.ceil((px1 + grid.step - grid.x0) / grid.step));
+    const j0 = Math.max(1, Math.floor((pz0 - grid.step - grid.z0) / grid.step));
+    const j1 = Math.min(n - 2, Math.ceil((pz1 + grid.step - grid.z0) / grid.step));
+    for (let j = j0; j <= j1; j++) {
+      const gz = grid.z0 + j * grid.step;
+      for (let i = i0; i <= i1; i++) {
+        const gx = grid.x0 + i * grid.step;
+        if (!inPoly(gx, gz)) continue;
+        const k = j * n + i;
+        wet[k] = 1;
+        if (heights && !nearPad(gx, gz)) heights[k] = Math.min(heights[k], Math.max(0.32, pondY - 1.75));
+      }
+    }
+    const centerV = pushWaterVert(cx, pondY, cz, 0.08, 0.04, 1.75, 0.0, 2.0);
+    const ringV = [];
+    for (let k = 0; k < pm; k++) {
+      const wx = poly[k * 2], wz = poly[k * 2 + 1];
+      const ex = wx + (wx - cx) * 0.08, ez = wz + (wz - cz) * 0.08;
+      ringV.push(pushWaterVert(ex, pondY - 0.02, ez, 0.08, 0.04, 0.45, 1.0, 2.0));
+    }
+    for (let k = 0; k < pm; k++) waterIdx.push(centerV, ringV[k], ringV[(k + 1) % pm]);
+  }
+
+  const inlandWater = waterIdx.length ? {
+    vertices: new Float32Array(waterVerts),
+    indices: new Uint32Array(waterIdx),
+  } : null;
+
   /* ---- the town on the lattice: where it stands, how far beyond it each point lies, how near its middle ---- */
-  const n = grid.n, urbanMark = new Uint8Array(n * n), early = new Float32Array(n * n).fill(-1);
+  const urbanMark = new Uint8Array(n * n), early = new Float32Array(n * n).fill(-1);
   const mark = (x, z, reach, place) => {
     const i0 = Math.max(0, Math.floor((x - reach - grid.x0) / grid.step)), i1 = Math.min(n - 1, Math.ceil((x + reach - grid.x0) / grid.step));
     const j0 = Math.max(0, Math.floor((z - reach - grid.z0) / grid.step)), j1 = Math.min(n - 1, Math.ceil((z + reach - grid.z0) / grid.step));
@@ -582,6 +786,81 @@ export function layBoardCountry({ baked, region, grid, heightAt, port, wet, LAND
   /* ---- roads between the places, for the trees that line them and for the stamp ---- */
   const roads = board.roads.map((road) => { const line = []; for (let k = 0; k < road.points.length; k += 2) line.push([ox + road.points[k], oz + road.points[k + 1]]); return line; }).filter((line) => line.length > 1);
 
+  /* ---- standing livestock herds on pastures, rough commons and oak woods ---- */
+  const pastureByPlace = Array.from({ length: places.length }, () => []);
+  const woodByPlace = Array.from({ length: places.length }, () => []);
+  const wildPastures = [];
+  fields.forEach((field, id) => {
+    const fx = ox + field.x, fz = oz + field.z;
+    if (!inside(fx, fz, 28) || heightAt(fx, fz) < 1.35) return;
+    if (fieldAt(town.urban, grid, fx, fz) > 0.2 || fieldAt(town.inland, grid, fx, fz) < 6) return;
+    const clearEdge = edgeOf(id, fx, fz);
+    if (clearEdge < 7) return;
+    const rec = { id, x: fx, z: fz, r: Math.min(28, Math.max(5.5, clearEdge - 2.5)), heading: field.heading || 0 };
+    const useKind = uses[id].kind;
+    if (field.place >= 0 && field.place < places.length) {
+      if (useKind === LAND.PASTURE || useKind === LAND.OLIVES || useKind === LAND.FALLOW) pastureByPlace[field.place].push(rec);
+      else if (useKind === LAND.WOOD || useKind === LAND.SCRUB) woodByPlace[field.place].push(rec);
+    } else if (useKind === LAND.PASTURE || useKind === LAND.SCRUB) {
+      wildPastures.push(rec);
+    }
+  });
+  let totalRawHerds = 0;
+  for (const p of places) {
+    const h = p.herds;
+    if (h) totalRawHerds += (h.sheep || 0) + (h.cattle || 0) + (h.swine || 0) + (h.horses || 0);
+  }
+  const MAX_HERD_HEAD = 1440;
+  const herdScale = totalRawHerds > MAX_HERD_HEAD ? MAX_HERD_HEAD / totalRawHerds : 1;
+  const herdFloats = [];
+  const speciesScale = [[0.90, 0.22], [0.92, 0.18], [0.88, 0.24], [0.94, 0.14]];
+  const placeFlock = (pool, fallbackPool, countWanted, species, seedSalt) => {
+    const list = pool.length ? pool : fallbackPool.length ? fallbackPool : wildPastures;
+    if (!list.length || countWanted <= 0) return;
+    const flockSize = species === 0 ? 12 : species === 2 ? 9 : 7;
+    let left = countWanted, fIdx = 0;
+    while (left > 0 && herdFloats.length < MAX_HERD_HEAD * 8) {
+      const take = Math.min(left, flockSize);
+      left -= take;
+      const pick = list[Math.floor(boardHashUnit(seedSalt + fIdx * 17, species + 11) * list.length) % list.length];
+      fIdx++;
+      const flockYaw = (pick.heading || 0) + (boardHashUnit(seedSalt + fIdx, 41) - 0.5) * 1.2;
+      for (let m = 0; m < take; m++) {
+        const hSeed = seedSalt * 131 + fIdx * 37 + m;
+        const ang = boardHashUnit(hSeed, 3) * 2 * Math.PI;
+        const rad = Math.sqrt(boardHashUnit(hSeed, 7)) * pick.r * 0.62;
+        const ax = pick.x + Math.cos(ang) * rad, az = pick.z + Math.sin(ang) * rad;
+        if (!inside(ax, az, 16) || heightAt(ax, az) < 1.1 || nearPad(ax, az) || streetEdge(ax, az, 4) < 1.8) continue;
+        const roamR = Math.max(2.2, Math.min(11.5, pick.r * 0.34));
+        const phase = boardHashUnit(hSeed, 13) * 2 * Math.PI;
+        const coatSeed = boardHashUnit(hSeed, 19);
+        const [sBase, sSpan] = speciesScale[species];
+        const sc = sBase + boardHashUnit(hSeed, 23) * sSpan;
+        herdFloats.push(ax, az, roamR, phase, coatSeed, sc, species, flockYaw);
+      }
+    }
+  };
+  if (totalRawHerds > 0) {
+    places.forEach((place, pi) => {
+      const h = place.herds;
+      if (!h) return;
+      const scaleCnt = (nHead) => nHead > 0 ? Math.max(Math.min(nHead, 4), Math.round(nHead * herdScale)) : 0;
+      placeFlock(pastureByPlace[pi], wildPastures, scaleCnt(h.sheep || 0), 0, pi * 97 + 1);
+      placeFlock(pastureByPlace[pi], wildPastures, scaleCnt(h.cattle || 0), 1, pi * 97 + 2);
+      placeFlock(woodByPlace[pi], pastureByPlace[pi], scaleCnt(h.swine || 0), 2, pi * 97 + 3);
+      placeFlock(pastureByPlace[pi], wildPastures, scaleCnt(h.horses || 0), 3, pi * 97 + 4);
+    });
+  } else {
+    // Un-lived day-0 boards without exported herd counts still carry modest starter flocks on their pastures.
+    places.forEach((_, pi) => {
+      placeFlock(pastureByPlace[pi], wildPastures, Math.min(18, pastureByPlace[pi].length * 3), 0, pi * 97 + 1);
+      placeFlock(pastureByPlace[pi], wildPastures, Math.min(8, pastureByPlace[pi].length * 2), 1, pi * 97 + 2);
+      placeFlock(woodByPlace[pi], pastureByPlace[pi], Math.min(6, woodByPlace[pi].length * 2), 2, pi * 97 + 3);
+    });
+  }
+  const herds = herdFloats.length ? new Float32Array(herdFloats) : null;
+  built.herds = herdFloats.length / 8;
+
   const blockCount = blocks.length / CITY_BLOCK_FLOATS;
   const plan = {
     blocks: new Float32Array(blocks), count: blockCount, houses, streets, places: squares, gates, churches, lots, paving, standing,
@@ -596,7 +875,7 @@ export function layBoardCountry({ baked, region, grid, heightAt, port, wet, LAND
     },
   };
   return {
-    plan, town, roads, parcelAt, places, seat,
+    plan, town, roads, parcelAt, places, seat, inlandWater, herds,
     // Who mans the seat, by the model's own roll on the board's day: its port's posts are manned from it (js/crew.js).
     watch: seat.watch ? { ...seat.watch, place: seat.name, day: board.day ?? 0 } : null,
     // For the GPU, which stamps the country onto the ground's own colours: the furlong of every cell, each

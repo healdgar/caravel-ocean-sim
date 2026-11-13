@@ -62,7 +62,9 @@ def rotation_between(a, b):
 
 args = [a for a in sys.argv[1:] if not a.startswith('--')]
 textured = '--textured' in sys.argv
+bald = (not textured) and ('--keep-hair' not in sys.argv)
 source_path, target_path, out_path = args[:3]
+is_female = 'female' in target_path.lower() or 'woman' in source_path.lower()
 src, src_bin = read(source_path); dst, dst_bin = read(target_path)
 print('source nodes with mesh:', sum('mesh' in n for n in src['nodes']), 'skins', len(src.get('skins', [])))
 skin = src['skins'][0]; src_names = [src['nodes'][j].get('name', f'j{j}') for j in skin['joints']]
@@ -188,11 +190,14 @@ bones = {}
 for n in sname:
     t = bone_transform(n)
     if t: bones[n] = t
-# Leaves of a chain (hand, head, finger tips, toes) turn with the bone before them, so they stay attached.
+# Leaves of a chain (hand, head, finger tips, toes) turn with the bone before them, so they stay attached,
+# except 'head', which stays upright so neck forward slant never pitches the skull/face toward the deck.
 before = {b: a for a, b in BONE_NEXT.items()}
 for n in list(bones):
     if n not in BONE_NEXT and n in before and before[n] in bones:
-        a, t, _, _, axis = bones[n]; bones[n] = (a, t, bones[before[n]][2], 1.0, axis)
+        a, t, _, _, axis = bones[n]
+        leaf_R = np.eye(3) if n == 'head' else bones[before[n]][2]
+        bones[n] = (a, t, leaf_R, 1.0, axis)
 hand_of = lambda n: n.replace('metacarpal', 'hand')
 for side in ('_l', '_r'):
     for n in [k for k in sname if k.endswith(side) and 'metacarpal' in k]:
@@ -287,6 +292,35 @@ for bone, nxt in LIMBS.items():
     influence = (out_w * (out_j == index)).sum(axis=1, keepdims=True)
     out_p += radial * (allowed / mine - 1) * influence
     print(f'{bone}: {mine:.3f} drawn in to {allowed:.3f}')
+
+# Scale radial hand & finger thickness to match the mended classic finger lengths (0.78x male, 0.84x female),
+# tapering smoothly across the distal wrist so forearms blend cleanly into natural human-proportioned hands.
+hand_radial_scale = 0.84 if is_female else 0.78
+for side in ('_l', '_r'):
+    hand_slot = dst_index['hand' + side]
+    low_slot = dst_index['lowerarm' + side]
+    elbow_p = d_pos('lowerarm' + side); wrist_p = d_pos('hand' + side)
+    arm_d = wrist_p - elbow_p; arm_len = np.linalg.norm(arm_d); arm_u = arm_d / max(arm_len, 1e-9)
+    t_arm = np.clip(((out_p - elbow_p) @ arm_u) / max(arm_len, 1e-9), 0.0, 1.2)
+    tw = np.clip((t_arm - 0.76) / 0.24, 0.0, 1.0); wrist_ramp = tw * tw * (3.0 - 2.0 * tw)
+    palm_d = d_pos('middle_01' + side) - wrist_p; palm_u = palm_d / max(np.linalg.norm(palm_d), 1e-9)
+    rel_palm = out_p - wrist_p
+    rad_palm = rel_palm - np.outer(rel_palm @ palm_u, palm_u)
+    w_palm = (out_w * (out_j == hand_slot)).sum(axis=1) + (out_w * (out_j == low_slot)).sum(axis=1) * wrist_ramp
+    out_p += rad_palm * ((hand_radial_scale - 1.0) * w_palm)[:, None]
+    for finger in ('thumb', 'index', 'middle', 'ring', 'pinky'):
+        for k in (1, 2, 3):
+            fn = f'{finger}_0{k}{side}'
+            if fn not in dst_index: continue
+            fslot = dst_index[fn]
+            w_f = (out_w * (out_j == fslot)).sum(axis=1)
+            if not np.any(w_f > 1e-4): continue
+            fa = d_pos(fn)
+            fd = (d_pos(f'{finger}_0{k+1}{side}') - fa) if k < 3 else (fa - d_pos(f'{finger}_02{side}'))
+            fu = fd / max(np.linalg.norm(fd), 1e-9)
+            rel_f = out_p - fa
+            rad_f = rel_f - np.outer(rel_f @ fu, fu)
+            out_p += rad_f * ((hand_radial_scale - 1.0) * w_f)[:, None]
 # Soles rest where the classic ones do, so clips that plant feet stay on the deck.
 SOLE_REACH = .12
 # A longer foot rocks lower through a stride than the classic one did.
@@ -331,6 +365,112 @@ regions[thighs & pale & (lum > .1)] = SHIRT
 regions[shins & skin_hue & (lum > BARE)] = SKIN
 regions[shins & ~skin_hue & (y > .15)] = TROUSERS
 print('regions', {name: int((regions == k).sum()) for name, k in (('paint', 0), ('shirt', SHIRT), ('trousers', TROUSERS), ('skin', SKIN), ('hair', HAIR))})
+
+# ---- bald base scalp projection ---------------------------------------------------------------
+# Base male & female models are authored bald so modular 3D hair and headwear components fit cleanly
+# without Tripo's wide tricorn side-wings or hanging ponytail clipping through caps or collars.
+# Front brow-ridge eyebrows stay HAIR (garment=4) so bald characters keep natural eyebrows.
+if bald:
+    head_p = d_pos('Head')
+    head_slot = dst_index['Head']
+    cran_c = np.array([0.0, head_p[1] + (0.068 if is_female else 0.064), head_p[2] + (0.006 if is_female else 0.008)], dtype=np.float64)
+    cran_r = np.array([0.071, 0.091, 0.089] if is_female else [0.075, 0.096, 0.093], dtype=np.float64)
+    eye_y = head_p[1] + (0.078 if is_female else 0.070)
+    is_eyebrow = (
+        (regions == HAIR)
+        & (out_p[:, 2] > head_p[2] + 0.068)
+        & (np.abs(out_p[:, 0]) < 0.056)
+        & (out_p[:, 1] > eye_y - 0.020)
+        & (out_p[:, 1] < eye_y + 0.028)
+    )
+    if int(is_eyebrow.sum()) < 6:
+        hair_idx = np.nonzero(regions == HAIR)[0]
+        if len(hair_idx):
+            brow_score = (out_p[hair_idx, 2] - (head_p[2] + 0.085)) * 2.0 - np.abs(out_p[hair_idx, 1] - (eye_y + 0.008)) - np.abs(np.abs(out_p[hair_idx, 0]) - 0.026)
+            is_eyebrow[hair_idx[np.argsort(-brow_score)[:16]]] = True
+
+    rel_c = (out_p - cran_c) / cran_r
+    rho = np.linalg.norm(rel_c, axis=1)
+    in_lower_front_face = (out_p[:, 2] > head_p[2] + 0.032) & (out_p[:, 1] < cran_c[1] + 0.042) & (np.abs(out_p[:, 0]) < 0.068)
+    protruding_head = (out_p[:, 1] > head_p[1] - 0.015) & (regions != 0) & (~in_lower_front_face) & (~is_eyebrow) & (rho > 1.015)
+    hair_scalp = (regions == HAIR) & (~is_eyebrow)
+
+    # Weld 3D positions BEFORE scalp projection so coincident UV-seam corners at the hairline never tear apart!
+    tris0 = I.reshape(-1, 3)
+    pos_keys0 = np.round(out_p * 1e4).astype(np.int64)
+    _, weld_first, weld_inv = np.unique(pos_keys0, axis=0, return_index=True, return_inverse=True)
+    weld_inv = weld_inv.ravel()
+    weld_p = out_p[weld_first].copy()
+    hair_w_mask = np.zeros(len(weld_p), dtype=bool)
+    hair_w_mask[weld_inv[hair_scalp]] = True
+    sc_w_mask = hair_w_mask.copy()
+    sc_w_mask[weld_inv[protruding_head]] = True
+    # Keep eyebrow 3D positions strictly excluded from scalp projection.
+    sc_w_mask[weld_inv[is_eyebrow]] = False
+    is_scalp = sc_w_mask[weld_inv]
+    sc_idx = np.nonzero(is_scalp)[0]
+    sc_w_idx = np.nonzero(sc_w_mask)[0]
+
+    # Tuck any low-hanging ponytail / nape locks smoothly up onto the occipital skull base before ellipsoid projection.
+    nape_floor = cran_c[1] - 0.072
+    low_w = sc_w_mask & (weld_p[:, 1] < nape_floor)
+    if np.any(low_w):
+        weld_p[low_w, 1] = nape_floor - 0.010 * np.tanh((nape_floor - weld_p[low_w, 1]) / 0.045)
+        weld_p[low_w, 0] *= 0.72
+
+    # Project scalp vertices onto the smooth symmetric cranial dome.
+    rho_w = np.linalg.norm((weld_p[sc_w_idx] - cran_c) / cran_r, axis=1)
+    u_sc = (weld_p[sc_w_idx] - cran_c) / cran_r
+    u_len = np.maximum(np.linalg.norm(u_sc, axis=1, keepdims=True), 1e-6)
+    dome_pts = cran_c + (u_sc / u_len) * cran_r
+    snap_w = np.where(hair_w_mask[sc_w_idx], 1.0, np.clip((rho_w - 1.0) / 0.12, 0.0, 1.0))[:, None]
+    weld_p[sc_w_idx] = weld_p[sc_w_idx] * (1.0 - snap_w) + dome_pts * snap_w
+
+    # Smooth across welded 3D positions so coincident UV-seam corners stay 100% locked together.
+    tris_w = weld_inv[tris0]
+    adj_sum = np.zeros_like(weld_p)
+    adj_cnt = np.zeros((len(weld_p), 1), dtype=np.float64)
+    for _pass in range(2):
+        adj_sum.fill(0.0); adj_cnt.fill(0.0)
+        for a_c, b_c in ((0, 1), (1, 2), (2, 0)):
+            va, vb = tris_w[:, a_c], tris_w[:, b_c]
+            np.add.at(adj_sum, va, weld_p[vb]); np.add.at(adj_cnt, va, 1.0)
+            np.add.at(adj_sum, vb, weld_p[va]); np.add.at(adj_cnt, vb, 1.0)
+        avg_p = adj_sum / np.maximum(adj_cnt, 1.0)
+        weld_p[sc_w_idx] = 0.65 * weld_p[sc_w_idx] + 0.35 * avg_p[sc_w_idx]
+        u_sc2 = (weld_p[sc_w_idx] - cran_c) / cran_r
+        u_len2 = np.maximum(np.linalg.norm(u_sc2, axis=1, keepdims=True), 1e-6)
+        dome2 = cran_c + (u_sc2 / u_len2) * cran_r
+        crown_mask = (weld_p[sc_w_idx, 1] > cran_c[1] - 0.035) | (u_len2[:, 0] > 1.0)
+        weld_p[sc_w_idx[crown_mask]] = dome2[crown_mask]
+    out_p[sc_idx] = weld_p[weld_inv[sc_idx]]
+
+    # Bind scalp vertices above neck cleanly to Head so former ponytail vertices never stretch toward the back/shoulders.
+    bind_head_w = sc_w_mask & (weld_p[:, 1] > head_p[1] - 0.015)
+    bind_head = np.nonzero(bind_head_w[weld_inv])[0]
+    out_j[bind_head] = [head_slot, 0, 0, 0]
+    out_w[bind_head] = [1.0, 0.0, 0.0, 0.0]
+
+    # Recompute smooth vertex normals across scalp + 1-ring welded boundary so the bald dome lights evenly.
+    touch_tris = sc_w_mask[tris_w].any(axis=1)
+    touch_w = np.zeros(len(weld_p), dtype=bool)
+    touch_w[np.unique(tris_w[touch_tris])] = True
+    fn = np.cross(out_p[tris0[:, 1]] - out_p[tris0[:, 0]], out_p[tris0[:, 2]] - out_p[tris0[:, 0]])
+    welded_n = np.zeros_like(weld_p)
+    for k_c in range(3):
+        np.add.at(welded_n, tris_w[:, k_c], fn)
+    wn_len = np.maximum(np.linalg.norm(welded_n, axis=1, keepdims=True), 1e-9)
+    welded_n /= wn_len
+    touch_verts = np.nonzero(touch_w[weld_inv])[0]
+    out_n[touch_verts] = welded_n[weld_inv[touch_verts]]
+
+    # Re-tag bald scalp vertices as SKIN with clean cranial skin shading matching the face's median skin tone.
+    face_skin = (regions == SKIN) & (out_p[:, 1] > head_p[1]) & (~is_scalp)
+    typical_face = np.median(colors[face_skin if np.any(face_skin) else (regions == SKIN)], axis=0)
+    dome_shade = (0.96 + 0.06 * np.clip(out_n[sc_idx, 1], -0.4, 1.0)).astype(np.float32)[:, None]
+    colors[sc_idx] = typical_face[None, :] * dome_shade
+    regions[sc_idx] = SKIN
+    print(f'bald scalp projected: {len(sc_idx)} verts -> SKIN, {int(is_eyebrow.sum())} brow verts kept as HAIR')
 shaded = colors.copy()
 if textured:
     uv_mod = (UV % 1.0).astype(np.float32)
@@ -372,11 +512,14 @@ def add(arr, target, kind, comp, extra=None):
     count = len(arr) if kind != 'SCALAR' else arr.size
     accessors.append({'bufferView': add_bytes(arr.tobytes(), target), 'componentType': comp, 'count': count, 'type': kind, **(extra or {})})
     return len(accessors) - 1
+carried = {}
 def carry(index):
+    if index in carried: return carried[index]
     a = dict(dst['accessors'][index]); v = dst['bufferViews'][a['bufferView']]
     start = v.get('byteOffset', 0)
     a['bufferView'] = add_bytes(dst_bin[start:start + v['byteLength']]); accessors.append(a)
-    return len(accessors) - 1
+    carried[index] = len(accessors) - 1
+    return carried[index]
 dst_skin['inverseBindMatrices'] = carry(dst_skin['inverseBindMatrices'])
 for animation in dst['animations']:
     for sampler in animation['samplers']:

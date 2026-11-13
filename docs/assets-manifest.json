@@ -1,18 +1,18 @@
 {
   "assets/boards/lisbon-1550.world": {
-    "url": "assets/boards/lisbon-1550.5d4f6e9d416b88d2.world",
-    "bytes": 11913587,
-    "sha256": "5d4f6e9d416b88d2af98129843db509398e19be9d1b59565eb8503a02589d539"
+    "url": "assets/boards/lisbon-1550.7106ee2f3f3af9be.world",
+    "bytes": 14695139,
+    "sha256": "7106ee2f3f3af9be38823ffa1dee923fd590508f8c991a5665838f007f770b3e"
   },
   "assets/board/game.js": {
-    "url": "assets/board/game.df5d54dbc02eadd6.js",
-    "bytes": 2947711,
-    "sha256": "df5d54dbc02eadd677adcfc7878006c6aac7f073682083d0c16288e31e5caa39"
+    "url": "assets/board/game.4666394ccfdb0467.js",
+    "bytes": 2948142,
+    "sha256": "4666394ccfdb046710bc69a6ab7ddb5a78c73bde665936fa3c667b8abf87286e"
   },
   "assets/board/runtime.js": {
-    "url": "assets/board/runtime.795e54f5692876c4.js",
-    "bytes": 25059,
-    "sha256": "795e54f5692876c470545aaf5f74544ae111f0ff3780a82c53ea441299028772"
+    "url": "assets/board/runtime.1f752f1f0bd2d6b5.js",
+    "bytes": 25884,
+    "sha256": "1f752f1f0bd2d6b5c398f6aedd50441c5fba533a0487b035b9e3eb65cc28f13c"
   },
   "assets/forest-scenery/saba/clusters/vertices.bin.gz": {
     "url": "assets/forest-scenery/saba/clusters/vertices.bin.f0293e612db25c5c.gz",
@@ -200,29 +200,29 @@
     "sha256": "af1b3d2448efbc0f67673f46494c890aa901a4728ac627c3d2d55e3b00fe43f3"
   },
   "assets/crew/sailor.glb": {
-    "url": "assets/crew/sailor.177fbbb8a5bc7681.glb",
-    "bytes": 1051488,
-    "sha256": "177fbbb8a5bc7681e27b433918ad331be403c76f7b4f955d2b3810de2d7a3ab4"
+    "url": "assets/crew/sailor.662e881a6f03ec03.glb",
+    "bytes": 986316,
+    "sha256": "662e881a6f03ec0385a307892a19d70a2afdb1dbed044f1af34372b75d36eae7"
   },
   "assets/crew/sailor-female.glb": {
-    "url": "assets/crew/sailor-female.63615c55233de33a.glb",
-    "bytes": 1011220,
-    "sha256": "63615c55233de33a9446433b59d148040e4d5efc46b3af7fc5506e8887ce3ab1"
+    "url": "assets/crew/sailor-female.2d3cb047a741e883.glb",
+    "bytes": 945376,
+    "sha256": "2d3cb047a741e8836fd6a5a296a5a094d3e033eddbeaaf3502c6d353a04fe045"
   },
   "assets/crew/captain.glb": {
-    "url": "assets/crew/captain.2744724b19b2c40c.glb",
-    "bytes": 996700,
-    "sha256": "2744724b19b2c40c8bd4cf9c93c546fa83d8f3951997fff816f4ab29effd5afe"
+    "url": "assets/crew/captain.025647eacdbbbadd.glb",
+    "bytes": 932784,
+    "sha256": "025647eacdbbbadd063b76f88eeadf723c4723acf31b43f6f107be8c003d7bd9"
   },
   "assets/crew/sailor-classic.glb": {
-    "url": "assets/crew/sailor-classic.771be23ecc0c7f5a.glb",
-    "bytes": 995276,
-    "sha256": "771be23ecc0c7f5a8cf3262c69786bb7b4586051aaf1c41a409ae21b4efc78be"
+    "url": "assets/crew/sailor-classic.ddb2d0c6143f2b94.glb",
+    "bytes": 995388,
+    "sha256": "ddb2d0c6143f2b949c8793ba558c7c6fba38d8fbf27c260665aa031047e42ca7"
   },
   "assets/crew/sailor-female-classic.glb": {
-    "url": "assets/crew/sailor-female-classic.95749d1a19b0d47a.glb",
-    "bytes": 1214392,
-    "sha256": "95749d1a19b0d47a7498edada12d3bb6a8d2e8b7e165ed882e3730b2122fe2f4"
+    "url": "assets/crew/sailor-female-classic.f44baeb79dead97b.glb",
+    "bytes": 1214480,
+    "sha256": "f44baeb79dead97b27eef619301c39f8c9f0746d56f14a1244848a7990f1a6f6"
   },
   "assets/world/saba/height.bin": {
     "url": "assets/world/saba/height.44a7a266ceebe8c9.bin",
@@ -255,9 +255,9 @@
     "sha256": "c8015f5c74ddbd435cae3b08157e35cbcc79aac46bdc2d30c28f9f5ad984fb28"
   },
   "assets/boards/lisbon-1550.json": {
-    "url": "assets/boards/lisbon-1550.9a029affba5edb7e.json",
-    "bytes": 1428331,
-    "sha256": "9a029affba5edb7e5ca61dd43587acc84121d1fa2710dc305aa2ff0c9814b86a"
+    "url": "assets/boards/lisbon-1550.d795767e325ec665.json",
+    "bytes": 1489977,
+    "sha256": "d795767e325ec6657fdd82c99011a36290ac5e5060637b94f9ef5b74aa8f97dc"
   },
   "assets/ports/1550/buildings-1550-lrm.bin": {
     "url": "assets/ports/1550/buildings-1550-lrm.070f343b9c5ba729.bin",

@@ -532,7 +532,8 @@ export function compileCityBuildingTypes(buildGeometry) {
       const facing = nx * (from[a * 8 + 3] + from[b * 8 + 3] + from[c * 8 + 3]) + ny * (from[a * 8 + 4] + from[b * 8 + 4] + from[c * 8 + 4]) + nz * (from[a * 8 + 5] + from[b * 8 + 5] + from[c * 8 + 5]);
       if (facing < 0) [b, c] = [c, b];
       out = []; grain = grainOf(k / 3); corner(a, 1); corner(b, 1); corner(c, 1);
-      if (Math.floor(from[a * 8 + 6] + 0.01) === 13) { corner(a, -1); corner(c, -1); corner(b, -1); }
+      const roofKind = Math.floor(from[a * 8 + 6] + 0.01);
+      if (roofKind === 13 || roofKind === 15) { corner(a, -1); corner(c, -1); corner(b, -1); }
       faces.push({ out, rank: outward(a, b, c), order: faces.length });
     }
     faces.sort((p, q) => q.rank - p.rank || p.order - q.order);

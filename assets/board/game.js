@@ -430,7 +430,7 @@ function technologyKey(key){return TECH_ALIASES[key]||key;}
 function initTechnology(){
   if(W.technology)return W.technology;
   const ad=W.startAD||850,T=W.technology={version:1,openingAD:ad,known:{},pending:[],day:-1,sources:{},learning:0,learningTotal:0};
-  for(const key of TECH_KEYS){const r=TECH_RULES[key];if((r.year<=850||r.year<=ad-30)&&r.needs.every(k=>T.known[k]))T.known[key]={day:0,at:-1,opening:true};else T.pending.push(key);}
+  for(const key of TECH_KEYS){const r=TECH_RULES[key];if((r.year<=850||r.year<=(typeof globalThis.FURLONG_OPTIONS?.board?.lived==='number'&&globalThis.FURLONG_OPTIONS?.board.lived>0?Math.max(ad-30,START_AD):ad-30))&&r.needs.every(k=>T.known[k]))T.known[key]={day:0,at:-1,opening:true};else T.pending.push(key);}
   return T;
 }
 function technologyPlace(s){
@@ -1067,10 +1067,10 @@ function slopeAt(cx,cz){
    WORLD GENERATION — runs once per seed, deterministic from the gen stream
    ========================================================================= */
 async function generateWorld(seed,progress){
-  const directEra=START_AD>FOUNDING_AD&&!globalThis.FURLONG_OPTIONS?.board?.lived;
+  const directEra=START_AD>FOUNDING_AD&&globalThis.FURLONG_OPTIONS?.board?.lived!==true;
   SEED=seed>>>0; RS=seedStreams(SEED,FATE);
   const n1=makeNoise(SEED^0xA53), n2=makeNoise(SEED^0x5EED), n3=makeNoise(SEED^0xF00D), nMoist=makeNoise(SEED^0xB0A);
-  W={startAD:directEra?START_AD:FOUNDING_AD,seed:SEED,fate:FATE,h:new Float32Array(GRID*GRID),water:new Uint8Array(GRID*GRID),flow:new Float32Array(GRID*GRID),
+  W={startAD:directEra?Math.max(FOUNDING_AD,START_AD-(typeof globalThis.FURLONG_OPTIONS?.board?.lived==='number'&&globalThis.FURLONG_OPTIONS?.board.lived>0?Math.round(globalThis.FURLONG_OPTIONS?.board.lived):0)):FOUNDING_AD,seed:SEED,fate:FATE,h:new Float32Array(GRID*GRID),water:new Uint8Array(GRID*GRID),flow:new Float32Array(GRID*GRID),
      biome:new Uint8Array(GRID*GRID),moist:new Float32Array(GRID*GRID),
      settlements:[],roads:[],routes:{},houses:[],notables:[],armies:[],caravans:[],banditCamps:[],
      riverPaths:[],bridges:[],roadCells:new Uint8Array(GRID*GRID),treasury:2200,legitimacy:70,
@@ -5621,7 +5621,7 @@ function heldTotal(s,g){let n=0;for(const x of (s._owners||new Map()).values())n
 function storageGiftTitle(s,from,to,g,qty){if(commodityActive(s)){commodityTransfer(s,from,to,g,qty,'held','held');return;}if(!s.storage||BEASTS.includes(g))return;const K=s.storage,owner=accountOwner(from);let left=qty;for(const id of [...storageOwnerGoodIds(K,owner,g)]){const l=K.lots.get(id);if(!l||l.owner!==owner||l.good!==g||l.availability!=='held'||!l.pendingPurchase)continue;const q=Math.min(left,l.qty);if(!(q>0))continue;const p=K.transfer(l,accountOwner(to),q,'held');K.annotate(p,{},['pendingPurchase']);left-=q;if(!(left>0))break;}if(left>(K.roundoff.get(g)?.budget||0)+Number.EPSILON*Math.abs(qty)*8){K.event('unbacked-gift',null,left,{good:g,owner:storageOwnerId(owner),destinationOwner:storageOwnerId(accountOwner(to))});storageInvariantFault('Unbacked purchased gift '+g+': '+left);}}
 function giveFood(s,g,q,source){if(commodityActive(s))return commodityGiveFood(s,g,q,source);if(!(q>0))return;const H=householdsOf(s),weights=H.map(h=>Math.max(0,h.population.get(s)||0)*(0.1+h.hunger)),total=weights.reduce((a,b)=>a+b,0);if(!H.length){if(source!==undefined)addHeld(s,source,g,q);return;}let left=q;H.forEach((h,i)=>{const v=i===H.length-1?left:Math.min(left,q*(total>0?weights[i]/total:1/H.length));if(v>0){if(source!==undefined)storageGiftTitle(s,source,h,g,v);addHeld(s,h,g,v,source!==undefined);left-=v;}});}
 function initOwnership(s){if(s._ownershipReady)return;s._ownershipReady=true;const old=s._lard;householdsOf(s);
-  for(const g of ['grain','fish'])giveFood(s,g,old?old[g]||0:Math.min(s.stores[g]||0,s.pop*NEED[g]*30));
+  for(const g of ['grain','fish'])giveFood(s,g,old?old[g]||0:Math.min(Math.max(0,(s.stores[g]||0)-(s._made?.[g]||0)),s.pop*NEED[g]*30));
   if(old)for(const g of Object.keys(old))if(g!=='grain'&&g!=='fish')addHeld(s,lordAcct(s),g,old[g]||0);
   s._lard=ownershipLard(s);}
 // The old larder, read and written through the owners' pantries. The world holds the Proxy; OWNERSHIP_LARDS names its place (worldSave).
@@ -13900,7 +13900,7 @@ function estateCaptureSeed(s,q,C){if(q.key!=='dovecote'||q.stocked)return true;c
 function estateCompoundComplete(q,s,C){if(!estateCompoundValidate(q,s,C).ok)return false;if(q.site.hydraulic)return estatePondComplete(q,s,C);if(!estateCaptureSeed(s,q,C))return false;const b=s._lay.live.compoundSite(q.site,'complete','lord',q);if(!b)return false;b.ownerId='lord';b.inst=true;b.compoundKey=q.key;b.nm=(s.owner>0?W.houses[s.owner].name:'The Crown')+' '+q.title.slice(2);b.storagePublic=false;bindPropertyRights(s);markOccupiedGround(s,compoundPolys(q.site));syncLive(s);compoundBindBuilding(C,b,q.purposes);updateBuildingInstance(b);C.condition=1;
   if(q.boundary){const f=W.land.F[q.field];f.estateWild={key:q.key,compound:C.id,ownerId:C.ownerId,boundary:q.boundary,opened:day()};C.components.push({id:C.id+':field:'+f.k,key:q.key,kind:'field',ref:f.k,purposes:['productive']});furlongPoly(f);writeFurlong(f);G.fenceDirty=true;}
   emit('trade',3,b,`${b.nm} is completed with actual materials and paid labour.`);return true;}
-function estatePondPlan(s,C){if(!institutionalCapability(s,'estateFishpond').available||s.lake||!s.river)return null;const p=estateWorker(s,'fishpond');if(!p)return null;const wage=estateKeeperQuote(s,p),owner=houseAcct(s.owner);if(means(owner)<=foodYr()*4+chestReserve(s.owner)||FOOD*2*360*price(s,'fish')<=wage)return null;const R=[];for(const r of W.rivers||[])for(let k=3;k<r.pts.length-2;k++)if(dist2d(r.pts[k].x,r.pts[k].z,s.pos.x,s.pos.z)<domReach(s))R.push({r,k});R.sort((a,b)=>dist2d(a.r.pts[a.k].x,a.r.pts[a.k].z,s.pos.x,s.pos.z)-dist2d(b.r.pts[b.k].x,b.r.pts[b.k].z,s.pos.x,s.pos.z)||a.k-b.k);
+function estatePondPlan(s,C){if(!institutionalCapability(s,'estateFishpond').available||s.lake||!s.river)return null;const p=estateWorker(s,'fishpond');if(!p)return null;const wage=estateKeeperQuote(s,p),owner=houseAcct(s.owner);if(means(owner)<=foodYr()*4+chestReserve(s.owner)||FOOD*2*360*price(s,'fish')<=wage)return null;const R=[];for(const r of (W.rivStrips||[]).filter(q=>!q.canal))for(let k=3;k<r.pts.length-2;k++)if(dist2d(r.pts[k].x,r.pts[k].z,s.pos.x,s.pos.z)<domReach(s))R.push({r,k});R.sort((a,b)=>dist2d(a.r.pts[a.k].x,a.r.pts[a.k].z,s.pos.x,s.pos.z)-dist2d(b.r.pts[b.k].x,b.r.pts[b.k].z,s.pos.x,s.pos.z)||a.k-b.k);
   for(const {r,k}of R.slice(0,12)){const D=r.pts[k],U=r.pts[k-3],a=Math.atan2(U.z-D.z,U.x-D.x),level=r.ys[k]+1.2,span=millDamSpan(D.x,D.z,-Math.sin(a),Math.cos(a),level);if(!span||span.width>80)continue;const rad=[];let closed=true;for(let j=0;j<=24;j++){const th=a+(j/24*2-1)*1.65;let radius=4;for(;radius<100;radius+=4)if(hAt(D.x+Math.cos(th)*radius,D.z+Math.sin(th)*radius)>level)break;if(radius>=100){closed=false;break;}rad.push(radius);}if(!closed)continue;
     const poly=[{x:D.x,z:D.z},...rad.map((radius,j)=>{const th=a+(j/24*2-1)*1.65;return{x:D.x+Math.cos(th)*radius,z:D.z+Math.sin(th)*radius};})],area=polyArea(poly),f=furlongAt(D.x,D.z);if(!(area>=200&&area<12000)||!estateFieldHeld(s,f))continue;const labour=foodYr()*4+area/1e4*foodYr(),timber=Math.ceil(span.width/2),stone=Math.ceil(span.width/3),benefit=Math.min(area/1e4*60,FOOD*2*360)*price(s,'fish')-wage,capital=labour+timber*price(s,'timber')+stone*price(s,'stone');if(!(benefit>0&&capital<benefit*20&&means(owner)>capital+chestReserve(s.owner)))continue;
     const lake={poly,y:level-.15,dam:{x:D.x,z:D.z,a,w:span.width,lo:span.min,hi:span.max,bed:Math.min(hAt(D.x,D.z)-1.5,r.ys[k]-1.5)},ownerId:C.ownerId,compoundKey:'fishpond',area},site={key:'fishpond',hydraulic:true,poly,lake,f:{x:D.x,z:D.z,w:span.width,d:4,rot:-(a+Math.PI/2)}};if(estateGroundHeld(s,site)&&abbeyPondClear(s,site))return{adapter:'estate',key:'fishpond',ownerId:C.ownerId,payerId:s.owner,title:'a fishpond',site,field:f.k,labour,days:180,timber,stone,requires:[],purposes:['productive'],worker:p.id,annualWage:wage};}return null;}
@@ -14552,7 +14552,7 @@ function tickEconomy(){
   if(typeof tickTechnologyEquipment==='function')tickTechnologyEquipment();
   const si=seasonIdx(),seasonF=[0.7,1.1,1.6,0.08][si];
   for(const s of W.settlements){
-    storageInit(s);const phaseK=commodityActive(s)?s.storage:undefined;
+    storageInit(s);initOwnership(s);const phaseK=commodityActive(s)?s.storage:undefined;
     const grainBefore=s.stores.grain,workF=clamp(s.pop/(s.pop+s.plagueDead+1),0.4,1)*(s.siegeBy?0.15:1),P0=['grain','fish','timber','ore'].map(g=>phaseK?phaseK.quantity(null,g,'unassigned'):s.stores[g]);
     if(W.land&&s._bearA==null)landYield(s);s.stores.grain+=(s._gYield&&s._bearA!=null?s._gYield*Math.max(0,s._bearA-(s._abbeyArea||0)):s.res.farm*0.92)*(typeof technologyFarmYield==='function'?technologyFarmYield(s):1)*technologyFarmEquipmentYield(s)*seasonF*MOD.harvest*(W.drought?0.35:1)*workF*(s.ploughF??1); // too little land under the plough, crops burned, or too few beasts to draw the plough
     technologyGrindingDay(s,Math.max(0,s.stores.grain-grainBefore));
@@ -16823,7 +16823,7 @@ function courtOwed(p){
   if(p.kind==='farm')return p.ref?.who===p.who?p.ref.arr||0:0;
   if(p.kind==='loan')return p.ref?.[0]===p.lord?(typeof creditAccrue==='function'?creditAccrue(p.ref):p.ref[1]||0):0;
   return p.kind==='entry'||courtOffence(p)?p.v||0:0;}
-function courtKeep(s,p){const A=householdAccount(p),h=A?.head||p,home=W.settlements[h.si]||s;let n=0;for(const q of A?.members||[p])if(!q.dead)n++;return Math.max(1,n)*foodYr()/12+rentDue(home,h)/12;}
+function courtKeep(s,p){const A=householdAccount(p),h=A?.head||p;if(!h||h.gn===undefined)return 0;const home=W.settlements[h.si]||s;let n=0;for(const q of A?.members||[h])if(q&&!q.dead)n++;return Math.max(1,n)*foodYr()/12+rentDue(home,h)/12;}
 function courtSpare(s,p){return Math.max(0,means(p)-courtKeep(s,p));} // the next month's subsistence is not an amercement or a debt recovery
 function courtQuote(s,p,h,spare=courtSpare(s,h)){const owed=courtOwed(p),paid=courtOffence(p)?0:Math.min(owed,spare),cap=W.houses[s.owner]?.justice?.cap??JUSTICE_CUSTOM.cap;
   return{owed,paid,fine:p.heard||p.kind==='loan'&&p.ref[3]?0:Math.min(p.kind==='riot'?owed:owed*JUSTICE_CUSTOM.rate,Math.max(0,spare-paid)*cap)};}

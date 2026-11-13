@@ -58,7 +58,7 @@ order.splice(order.indexOf('js/main.js'),0,'js/wgsl/hull-flood.js','js/hull-floo
 order.splice(order.indexOf('js/main.js'),0,'js/sea-shadows.js');
 order.splice(order.indexOf('js/crew.js'),0,'js/crew-wounds.js');
 order.splice(order.indexOf('js/crew.js'),0,'js/crew-overboard.js');
-order.splice(order.indexOf('js/crew.js'),0,'js/crew-aloft.js');
+order.splice(order.indexOf('js/crew.js'),0,'js/crew-aloft.js','js/models/crew-components.js','js/crew-components.js');
 order.splice(order.indexOf('js/wgsl/vessel-pose.js'),0,'js/wgsl/rig-surfaces.js');
 order.splice(order.indexOf('js/wgsl/vessel-pose.js'),0,'js/wgsl/vessel-recoil.js');
 wgslModules.push('js/wgsl/part-assembly.js');
@@ -84,6 +84,9 @@ order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/old-world-works.js','js/o
 // A port's country as Castle and Commons' model founded it: what is asked of the model, how it stands here, and the GPU's stamp of it.
 order.splice(order.indexOf('js/coastal-world.js'),0,'js/board-model.js','js/board-worker.js','js/board-life.js','js/board-keep.js','js/board-folk.js','js/folk-card.js','js/mate-counsel.js','js/storyteller.js','js/first-mate.js','js/old-world-city.js','js/old-world-board.js','js/old-world.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/board-stamp.js');
+order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/wgsl/inland-water.js','js/wgsl/herds.js');
+wgslModules.push('js/wgsl/inland-water.js','js/wgsl/herds.js');
+order.splice(order.indexOf('js/terrain.js'),0,'js/models/livestock-meshes.js','js/inland-water.js','js/herds.js');
 // A city's buildings as the guns meet them: after the fracture code it hands them to, ahead of the land it is drawn with.
 order.splice(order.indexOf('js/terrain.js'),0,'js/city-targets.js');
 order.splice(order.indexOf('js/main.js'),0,'js/port-damage.js');

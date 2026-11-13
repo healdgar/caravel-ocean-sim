@@ -410,6 +410,7 @@ const countries = new WeakMap();
 
 // Boards founded ahead of time, by port and year. One is handed in before its port's land is made.
 const bakedBoards = new Map();
+const uncarvedSurveys = new WeakMap();
 export function registerBakedBoard(baked) {
   if (baked && baked.board && baked.port) bakedBoards.set(`${baked.port}:${baked.year}`, baked);
 }
@@ -447,8 +448,11 @@ function makeCountry(region, heights, port) {
   // A board founded for this port on this ground stands in place of the town and country made here. One founded
   // on other ground (the same port on a coast made by other rules) is left aside, and the rules here make it.
   const baked = holdsCity ? bakedBoardFor(region) : null;
-  const stood = baked && baked.board.span === region.span && boardGroundFits(baked.survey, heights)
-    ? layBoardCountry({ baked, region, grid, heightAt, port, wet: marked(), LAND: OLD_WORLD_LAND, fieldAt, distanceTo }) : null;
+  if (uncarvedSurveys.has(heights)) heights.set(uncarvedSurveys.get(heights));
+  const fitsBoard = Boolean(baked && baked.board.span === region.span && boardGroundFits(baked.survey, heights));
+  if (fitsBoard && !uncarvedSurveys.has(heights)) uncarvedSurveys.set(heights, heights.slice());
+  const stood = fitsBoard
+    ? layBoardCountry({ baked, region, grid, heights, heightAt, port, wet: marked(), LAND: OLD_WORLD_LAND, fieldAt, distanceTo }) : null;
   const town = stood ? stood.town : holdsCity ? growOldWorldTown(heights, region, port.center, cityArea) : null;
   const wet = town ? null : marked();
   const inland = town ? town.inland : distanceTo(wet, grid.n, grid.step);
@@ -652,6 +656,7 @@ function makeCountry(region, heights, port) {
   const PARK_TREES = { spacing: 8, height: [7, 6], scale: [0.5, 0.3], species: ['maple', 'birch', 'elm', 'oak'], cohort: 'veteran', tint: [0.94, 1, 0.9] };
   const YARD_TREES = { spacing: 13, height: [4.5, 3], scale: [0.36, 0.2], species: ['maple', 'birch'], cohort: 'veteran', tint: [1, 1, 0.94] };
   const treesAt = (x, z) => {
+    if (stood && fieldAt(inland, grid, x, z) < 4) return NO_TREES;
     if (town && fieldAt(town.urban, grid, x, z) >= 0.5) {
       const where = plan ? plan.treesAt(x, z) : CITY_TREES.NONE;
       return where === CITY_TREES.SQUARE ? SQUARE_TREES : where === CITY_TREES.PARK ? PARK_TREES : where === CITY_TREES.YARD ? YARD_TREES : NO_TREES;
@@ -665,5 +670,5 @@ function makeCountry(region, heights, port) {
     return use.kind === OLD_WORLD_LAND.PASTURE && !use.wooded ? NO_TREES : TENDED[use.kind];
   };
 
-  return { city, people, year, cityX, cityZ, cityRadius, cityArea, town, roads, plan, grid, inland, landAt, treesAt, beyondTown, board: stood ? stood.stamp : null, places: stood ? stood.places : null, watch: stood ? stood.watch : null };
+  return { city, people, year, cityX, cityZ, cityRadius, cityArea, town, roads, plan, grid, inland, landAt, treesAt, beyondTown, board: stood ? stood.stamp : null, places: stood ? stood.places : null, watch: stood ? stood.watch : null, inlandWater: stood ? stood.inlandWater : null, herds: stood ? stood.herds : null };
 }

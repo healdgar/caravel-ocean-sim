@@ -27,6 +27,7 @@ import { crewDeckField, crewDeckRoom } from './crew-deck.js';
 import { selectCrewLOD, CREW_LOD_TIERS, createCrewLODs, crewPoseInterval, crewApparentDistance, crewLensZoom, crewSailorTier, crewDrawRuns, crewNeedsCutShader, crewClipOnly, crewBakedPose, crewPoseDue, crewPoseSolved, fortPoseDue } from './crew-lod.js';
 import { createCrewClipPipeline, createCrewClipBatch, createCrewTurnPipeline, createCrewTurnBatch } from './crew-clip-pose.js';
 import { createCrewSolver, createCrewSolveBatch, createCrewArrowPipeline, createCrewArrowBatch, resolveCrewWoundsOnSkeleton } from './crew-solve.js';
+import { attachCrewComponents, crewComponentMaskForActor, packCrewFaceW } from './crew-components.js';
 
 // Authored, disjoint stations keep a full company clear of stairs and masts.
 // Policies choose intent. The executor alone changes position and animation.
@@ -133,6 +134,7 @@ export function applyPirateCrewAttire(company,pirate=true){
       s.trousers=i%3?[.095,.12,.15]:[.16,.10,.065];
       s.attireTheme='standard';
     }
+    if(!s.indigenous)s.compMask=crewComponentMaskForActor(s,i,{pirate});
   }
   return company;
 }
@@ -216,6 +218,7 @@ export function createCompany(policy=deckhandDecision,modelId='nina',options={})
     s.attireTheme=initialIndigenous?'indigenous':pirate?'pirate-brown-black':'standard';
     s.hair=crewLinearColour(look.hair);
     s.face=[look.face[0],look.face[1],look.face[2],look.face[3]+(initialIndigenous?2.0:0)];
+    s.compMask=initialIndigenous?0:crewComponentMaskForActor(s,i,{pirate});
     return s;
   })};
 }
@@ -562,6 +565,7 @@ async function fetchCrewModels(){
   const [male,female,captain,classicMale,classicFemale]=await Promise.all(['assets/crew/sailor.glb','assets/crew/sailor-female.glb','assets/crew/captain.glb','assets/crew/sailor-classic.glb','assets/crew/sailor-female-classic.glb'].map(async path=>{
     const response=await fetch(path);if(!response.ok)throw Error('Crew asset unavailable');return loadCrewGLB(await response.arrayBuffer());
   }));
+  attachCrewComponents(male,'male');attachCrewComponents(female,'female');
   male.indigenousBase=classicMale;female.indigenousBase=classicFemale;
   return [male,female,captain];
 }
@@ -778,7 +782,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
               ?[s.shirt[0]*0.78+0.12,s.shirt[1]*0.62,s.shirt[2]*0.62]
               :s.shirt;
           b.actors.set(shirt,offset+16);b.actors.set(s.trousers,offset+20);b.actors.set(s.skin,offset+24);b.actors.set(s.hair,offset+28);
-          b.actors.set(s.face,offset+32);b.actors[offset+27]=crewBodyKind(s,own)+bandageSeed;
+          b.actors.set(s.face,offset+32);b.actors[offset+35]=packCrewFaceW(s.face[3],own?(s.compMask??0):0,Boolean(s.indigenous));b.actors[offset+27]=crewBodyKind(s,own)+bandageSeed;
           // The tiller station is below the camera; all crew remain visible.
           // Fractional part of shirt.w (< 0.5) carries wound severity to the crew shader.
           b.actors[offset+19]=!s.visible?1.0:(woundAmt*0.45);
@@ -1510,6 +1514,7 @@ export function createFortificationSoldiersForInstance(inst, startIndex = 0) {
       face: isIndigenousFort ? dress.face : [...look.face],
       dress: isIndigenousFort ? dress.mask : 0,
     });
+    s.compMask = isIndigenousFort ? 0 : crewComponentMaskForActor(s, globalIdx, { garrison: true });
     s.scale.fill((s.sex === 'female' ? 1.04 : 1.02) * (1 + ((globalIdx % 3) - 1) * 0.02));
     s.position.set([wx, wy, wz]);
     const half = s.yaw * 0.5;
@@ -1634,6 +1639,7 @@ export function garrisonEnlist(s, person) {
   const sex = person.sex === 'f' ? 'female' : 'male', faces = CREW_IDENTITIES.filter((one) => one.sex === sex);
   const identity = faces[Math.abs(person.id | 0) % faces.length], look = CREW_APPEARANCES[identity.id];
   Object.assign(s, { soul: person, name: person.name, sex, identityId: identity.id, skin: crewLinearColour(look.skin), hair: crewLinearColour(look.hair), face: [...look.face] });
+  s.compMask = crewComponentMaskForActor(s, s.crewIndex ?? 0, { garrison: true });
   s.scale.fill((sex === 'female' ? 1.04 : 1.02) * (1 + (((s.crewIndex ?? 0) % 3) - 1) * 0.02));
   return s;
 }
@@ -2222,6 +2228,7 @@ export async function createFortSoldiers({
         b.actors.set(s.skin, offset + 24);
         b.actors.set(s.hair, offset + 28);
         b.actors.set(s.face, offset + 32);
+        b.actors[offset + 35] = packCrewFaceW(s.face[3], own ? (s.compMask ?? 0) : 0, Boolean(s.indigenous));
         b.actors[offset + 19] = Number(!s.visible);
         b.actors[offset + 23] = 1;
         b.actors[offset + 27] = crewBodyKind(s, own);

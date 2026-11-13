@@ -6,6 +6,7 @@
 // It is not saved: after a reload the ruins are still there, and the people are all back on their feet.
 import { requestOnce } from './gpu-program-cache.js';
 import { createIndigenousCrewModels } from './crew.js';
+import { packCrewFaceW, townComponentMaskForLook } from './crew-components.js';
 import { DRESS_MASK_SCALE, indigenousDress } from './indigenous-dress.js';
 import { createDistantCrewLOD } from './crew-lod.js';
 import { bakeTownClips } from './town-clips.js';
@@ -68,6 +69,7 @@ function townLooks(random, indigenous, cultureId) {
     data[at + 11] = model;
     data.set(linearRGB(person.hair), at + 12);
     data.set(person.face, at + 16);
+    data[at + 19] = packCrewFaceW(person.face[3], townComponentMaskForLook(model, i, null, i % ELITE_LOOK_EVERY === 0), false);
   }
   return data;
 }

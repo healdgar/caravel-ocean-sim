@@ -43,7 +43,7 @@ export function boardRequest({ heights, span, site, seed, era = 1550, seat = 1, 
     places: places.filter((p) => Math.abs(p.x) < span * 0.47 && Math.abs(p.z) < span * 0.47)
       .map((p) => ({ name: String(p.name), x: Math.round(p.x), z: Math.round(p.z), weight: Math.max(1, Math.min(9, p.weight | 0 || 1)) })),
     rivers: { catchment: Math.round(rivers.catchment), width: +rivers.width, least: +rivers.least, carve: +rivers.carve },
-    lived: Boolean(lived),
+    lived: typeof lived === 'number' && Number.isFinite(lived) && lived > 0 ? Math.round(lived) : Boolean(lived),
   };
 }
 

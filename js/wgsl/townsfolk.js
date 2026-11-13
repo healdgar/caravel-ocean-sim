@@ -384,10 +384,10 @@ fn townPoseBones(frame:u32,bones:vec4u,weights:vec4f)->mat4x4f {
       stumpPos=select(vec3f(-0.239,1.212,-0.254),vec3f(-0.186,1.180,-0.224),isFemale);
     }else if(injury==3u){
       loSlot=56u;hiSlot=59u;stumpSlot=55u;
-      stumpPos=select(vec3f(0.175,0.537,0.109),vec3f(0.167,0.533,0.104),isFemale);
+      stumpPos=select(vec3f(0.175,0.501,0.109),vec3f(0.167,0.489,0.104),isFemale);
     }else if(injury==4u){
       loSlot=61u;hiSlot=64u;stumpSlot=60u;
-      stumpPos=select(vec3f(-0.189,0.517,-0.178),vec3f(-0.185,0.505,-0.170),isFemale);
+      stumpPos=select(vec3f(-0.189,0.481,-0.178),vec3f(-0.185,0.461,-0.170),isFemale);
     }else if(injury==5u){
       loSlot=5u;hiSlot=6u;stumpSlot=4u;
       stumpPos=select(vec3f(-0.007,1.380,-0.031),vec3f(-0.006,1.350,-0.035),isFemale);
@@ -426,14 +426,16 @@ fn townPoseBones(frame:u32,bones:vec4u,weights:vec4f)->mat4x4f {
   out.world=vec3f(local.x*c+local.z*s,local.y,local.z*c-local.x*s)+body.position;
   out.position=F.viewProj*vec4f(out.world-F.camPos.xyz,1);
   out.normal=normalize(vec3f(turned.x*c+turned.z*s,turned.y,turned.z*c-turned.x*s));
+  let compMask=crewCompMask(look.face.w);
   let shirtCol=mix(look.shirt.rgb,look.shirt.rgb*vec3f(0.55,0.32,0.32)+vec3f(0.20,0.0,0.0),smoothstep(0.15,0.85,woundAmt));
-  let clothed=crewClothed(v.color,v.position,shirtCol,look.trousers.rgb,look.skin.rgb,look.hair.rgb,look.face.w>1.5,dress);
+  let clothed=crewClothed(v.color,v.position,shirtCol,look.trousers.rgb,look.skin.rgb,look.hair.rgb,look.face.w>1.5,dress,compMask);
   out.color=clothed.rgb;out.skin=clothed.w;out.paint=dress>>16u;
   // Rain and sleet wet them. Snow and hail do not, and neither does anything else the frame happens to carry.
   let rainWet=clamp(F.reserved.x,0.0,1.0)*select(0.0,1.0,F.reserved.y<0.5||(F.reserved.y>1.5&&F.reserved.y<2.5));
   let seaWet=select(0.0,0.92,body.position.y<-0.02);
   out.helm=0.0;out.wet=max(vec2f(rainWet*0.65,rainWet*0.75),vec2f(seaWet,seaWet));
   out.bodyPos=v.position;out.damage=vec3f(woundAmt,scorchAmt,bSeed);
+  if(crewCompHidden(v.color,compMask)){out.position=vec4f(2,2,0,1);}
   return out;
 }
 `;
@@ -454,12 +456,32 @@ fn crewPieceHidden(color:vec3f,dress:u32)->bool {
   let piece=u32(color.r*.5);
   return piece>0u&&((dress>>(piece-1u))&1u)==0u;
 }
+fn crewCompMask(faceW:f32)->u32 {return select(0u,u32((-faceW)*.5),faceW<0.0);}
+fn crewCompHidden(color:vec3f,compMask:u32)->bool {
+  let comp=u32(color.g*.5);
+  if(comp==0u){return false;}
+  let hair=compMask&7u;
+  let hat=(compMask>>3u)&7u;
+  let beard=(compMask>>6u)&3u;
+  let gar=(compMask>>8u)&7u;
+  if(comp<=5u){
+    if(comp!=hair){return true;}
+    if(hat==3u){return true;}
+    if(hat==1u){return comp!=3u;}
+    if(hat==2u||hat==4u){return comp==1u||comp==5u;}
+    return false;
+  }
+  if(comp<=9u){return hat==0u||comp!=5u+hat;}
+  if(comp<=12u){return beard==0u||comp!=9u+beard;}
+  return gar==0u||comp!=12u+gar;
+}
 fn townPoseBones(frame:u32,bones:vec4u,weights:vec4f)->mat4x4f {
   let at=frame*65u;
   return poses[at+bones.x]*weights.x+poses[at+bones.y]*weights.y+poses[at+bones.z]*weights.z+poses[at+bones.w]*weights.w;
 }
 @vertex fn townsfolkShadowVS(v:CrewInput)->@builtin(position) vec4f {
   let body=bodies[v.instance];let look=looks[body.look];
+  if(crewCompHidden(v.color,crewCompMask(look.face.w))){return vec4f(2,2,0,1);}
   let dress=crewDressOf(look.hair.w);
   let surfacePos=select(v.position,vec3f(0.0,1.62,0.0),crewPieceHidden(v.color,dress));
   let blend=fract(body.blend);

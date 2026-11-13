@@ -216,6 +216,20 @@ globalThis.BOARD_MODEL = (() => {
       past: (s.history || []).filter((h) => h.ad !== undefined).map((h) => [h.ad, h.t]),
       // Who mans it: whoever holds it, the hosts within it and the first of its watch, by name (`watch`).
       watch: watchKept(at),
+      // Its standing herds on the pastures and mast-woods, and any dammed pond raised on its stream.
+      herds: {
+        sheep: Math.max(0, Math.round(s.stores?.sheep || 0)),
+        cattle: Math.max(0, Math.round(s.stores?.cattle || 0)),
+        horses: Math.max(0, Math.round(s.stores?.horses || 0)),
+        swine: Math.max(0, Math.round(s.stores?.swine || 0)),
+      },
+      pond: s.lake && s.lake.poly?.length > 2 && s.lake.dam ? {
+        level: r1(s.lake.y), area: Math.round(s.lake.area || 0), points: line(s.lake.poly),
+        dam: {
+          x: r1(s.lake.dam.x), z: r1(s.lake.dam.z), angle: r3(s.lake.dam.a), width: r1(s.lake.dam.w),
+          lo: r1(s.lake.dam.lo ?? -s.lake.dam.w / 2), hi: r1(s.lake.dam.hi ?? s.lake.dam.w / 2), bed: r1(s.lake.dam.bed ?? 0),
+        },
+      } : null,
     }));
     const stand = [], form = [], kinds = [], quarter = [], standing = new Map(), state = [], wheels = [], yards = [];
     W.settlements.forEach((s, at) => {
@@ -286,7 +300,7 @@ globalThis.BOARD_MODEL = (() => {
           .filter((q) => Number.isFinite(q.x) && Number.isFinite(q.z)).map((q) => ({ ...q, x: r1(q.x), z: r1(q.z) })),
       },
       roads: W.roads.map((q) => ({ from: q.a, to: q.b, points: line(q.drawn || q.path) })),
-      rivers: (W.rivStrips || []).map((q) => ({ canal: Boolean(q.canal), points: q.pts.flatMap((p, i) => [r1(p.x), r1(p.z), r1(q.hw[i])]) })),
+      rivers: (W.rivStrips || []).map((q) => ({ canal: Boolean(q.canal), points: q.pts.flatMap((p, i) => [r1(p.x), r1(p.z), r1(q.hw[i])]), levels: list(q.ys) })),
       lanes: workerTrackSegments().flatMap((t) => [r1(t.a.x), r1(t.a.z), r1(t.b.x), r1(t.b.z)]),
       // What a furlong is held as and what stands on it, in the model's own codes.
       fieldKinds: LK, fieldStates: LS,

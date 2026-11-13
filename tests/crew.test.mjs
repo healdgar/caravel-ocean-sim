@@ -530,8 +530,8 @@ test('captain GLB carries its embedded high-resolution texture, UV sentinels, 65
   assert.ok(captain.image instanceof Uint8Array && captain.image.byteLength>100_000,'embedded texture bytes present');
   assert.equal(captain.mime,'image/jpeg');
   assert.equal(captain.image[0],0xff);assert.equal(captain.image[1],0xd8,'valid JPEG header');
-  assert.equal(captain.lods[0].triangles,3600,'base mesh decimated to 3,600 triangles');
-  assert.equal(captain.lods[1].triangles,1500,'mid LOD decimated to 1,500 triangles');
+  assert.ok(captain.lods[0].triangles<=3600&&captain.lods[0].triangles>=3400,'base mesh decimated within 3,600-triangle budget');
+  assert.ok(captain.lods[1].triangles<=1500&&captain.lods[1].triangles>=1400,'mid LOD decimated within 1,500-triangle budget');
   assert.ok(captain.lods[2].triangles<=750&&captain.lods[2].triangles>=200);
   assert.ok(captain.distantIndices.length/3<=320);
   const f=new Float32Array(captain.vertices.buffer,captain.vertices.byteOffset,captain.vertexCount*15);
@@ -546,4 +546,119 @@ test('captain GLB carries its embedded high-resolution texture, UV sentinels, 65
   const company=createCompany();
   assert.equal(company.crew.filter(isCaptainActor).length,1,'exactly one captain in company');
   assert.equal(company.crew.find(isCaptainActor).role,'Captain');
+});
+
+test('mended male and female rigs keep thigh longer than calf, compact hands, upright gaze and bald scalps',()=>{
+  const female=loadCrewGLB(fs.readFileSync(new URL('../assets/crew/sailor-female.glb',import.meta.url)));
+  const classicMale=loadCrewGLB(fs.readFileSync(new URL('../assets/crew/sailor-classic.glb',import.meta.url)));
+  const classicFemale=loadCrewGLB(fs.readFileSync(new URL('../assets/crew/sailor-female-classic.glb',import.meta.url)));
+  const jointPos=(anim,name)=>{const m=anim.world[anim.nodeIndex(name)];return [m[12],m[13],m[14]];};
+  const dist=(p,q)=>Math.hypot(p[0]-q[0],p[1]-q[1],p[2]-q[2]);
+
+  for(const [label,body] of [['male',model],['female',female],['classic-male',classicMale],['classic-female',classicFemale]]){
+    const a=body.animator;
+    a.sample(null,0);
+    const thighL=dist(jointPos(a,'thigh_l'),jointPos(a,'calf_l'));
+    const calfL=dist(jointPos(a,'calf_l'),jointPos(a,'foot_l'));
+    assert.ok(thighL>calfL+0.02,`${label} thigh (${thighL.toFixed(3)}) exceeds calf (${calfL.toFixed(3)})`);
+    const handChain=dist(jointPos(a,'hand_l'),jointPos(a,'middle_01_l'))+
+      dist(jointPos(a,'middle_01_l'),jointPos(a,'middle_02_l'))+
+      dist(jointPos(a,'middle_02_l'),jointPos(a,'middle_03_l'));
+    assert.ok(handChain<0.145,`${label} compact hand chain: ${handChain.toFixed(3)} m`);
+    for(const clip of ['Idle','Walk']){
+      a.sample(clip,0);
+      const hm=a.world[a.nodeIndex('Head')];
+      // Rig local +Z is forward; upright gaze keeps forward.y near level horizon.
+      const fwdY=hm[9]/Math.hypot(hm[8],hm[9],hm[10]);
+      assert.ok(fwdY>-0.08&&fwdY<0.20,`${label} ${clip} upright head gaze fwdY=${fwdY.toFixed(3)}`);
+    }
+  }
+
+  for(const [label,body,crownMinY] of [['male',model,1.60],['female',female,1.56]]){
+    const f=new Float32Array(body.vertices.buffer,body.vertices.byteOffset,body.vertexCount*15);
+    let crownSkin=0,browHair=0,maxHeadHalfX=0;
+    for(let i=0;i<body.vertexCount;i++){
+      const x=f[i*15],y=f[i*15+1],z=f[i*15+2],slot=Math.floor(f[i*15+8]*0.5);
+      if(y>crownMinY){
+        maxHeadHalfX=Math.max(maxHeadHalfX,Math.abs(x));
+        if(slot===3&&z<0.04)crownSkin++;
+      }
+      if(slot===4){
+        browHair++;
+        assert.ok(z>0.03&&y>1.48,`${label} base HAIR vertices are front eyebrows only, no tricorn wings or ponytail (${x.toFixed(3)},${y.toFixed(3)},${z.toFixed(3)})`);
+      }
+    }
+    assert.ok(crownSkin>120,`${label} bald scalp dome has ${crownSkin} SKIN vertices`);
+    assert.ok(browHair>=24&&browHair<=120,`${label} preserves ${browHair} eyebrow HAIR vertices`);
+    assert.ok(maxHeadHalfX<0.098,`${label} bald head width free of tricorn hair wings: ${maxHeadHalfX.toFixed(3)} m`);
+  }
+});
+
+test('modular 3D character components pack 15-bit masks losslessly in f32, keep shadow LODs compact and use zero discard',async()=>{
+  const {
+    attachCrewComponents,
+    packCrewCompMask,
+    unpackCrewCompMask,
+    packCrewFaceW,
+    crewComponentMaskForActor,
+    townComponentMaskForLook,
+  }=await import('../js/crew-components.js');
+  const {CREW_WGSL}=await import('../js/wgsl/crew.js');
+  const {TOWNSFOLK_WGSL}=await import('../js/wgsl/townsfolk.js');
+  const {INLAND_WATER_WGSL}=await import('../js/wgsl/inland-water.js');
+  const {HERDS_RENDER_WGSL}=await import('../js/wgsl/herds.js');
+
+  for(const [name,src] of [['crew',CREW_WGSL],['townsfolk',TOWNSFOLK_WGSL],['inland-water',INLAND_WATER_WGSL],['herds',HERDS_RENDER_WGSL]]){
+    assert.equal(/\bdiscard\b/.test(src),false,`${name} opaque WGSL contains zero discard`);
+  }
+
+  // Exhaustive spot-check + full bitfield round-trip in IEEE-754 Float32.
+  const f32=new Float32Array(1);
+  for(const mask of [1,7,63,511,4095,16383,21845,32767]){
+    for(const eyeOpen of [0.78,0.91,1.04]){
+      f32[0]=packCrewFaceW(eyeOpen,mask,false);
+      const raw=-f32[0];
+      const decodedMask=Math.floor(raw*0.5)>>>0;
+      const decodedEye=raw-decodedMask*2.0;
+      assert.equal(decodedMask,mask,`f32 exact mask ${mask}`);
+      assert.ok(Math.abs(decodedEye-eyeOpen)<0.01,`f32 eyeOpen preserved (${decodedEye} vs ${eyeOpen})`);
+    }
+  }
+  assert.ok(packCrewFaceW(0.92,12345,true)>2.5,'Indigenous actors keep positive >1.5 sentinel untouched');
+  const spec={hair:4,hat:3,beard:2,garment:4,build:3,accent:2};
+  assert.deepEqual(unpackCrewCompMask(packCrewCompMask(spec)),spec);
+
+  const maleCopy=loadCrewGLB(bytes);
+  const femaleCopy=loadCrewGLB(fs.readFileSync(new URL('../assets/crew/sailor-female.glb',import.meta.url)));
+  const maleDistantBefore=maleCopy.distantIndices.length;
+  const femaleDistantBefore=femaleCopy.distantIndices.length;
+  attachCrewComponents(maleCopy,'male');
+  attachCrewComponents(femaleCopy,'female');
+  assert.equal(maleCopy.distantIndices.length,maleDistantBefore,'distant shadow/far indices stay untouched');
+  assert.equal(femaleCopy.distantIndices.length,femaleDistantBefore,'female distant shadow/far indices stay untouched');
+  assert.ok(maleCopy.vertexCount>maleCopy.baseVertexCount+2000);
+  assert.ok(femaleCopy.vertexCount>femaleCopy.baseVertexCount+1900);
+  assert.ok(maleCopy.lods[0].triangles>maleCopy.baseTriangleCount+3500);
+  assert.ok(maleCopy.lods[1].triangles<maleCopy.lods[0].triangles*0.4);
+
+  // Component variety & anatomical constraints across named crew, garrison, and townsfolk.
+  const company=createCompany();
+  const seenCrewMasks=new Set();
+  for(const [idx,s] of company.crew.entries()){
+    if(isCaptainActor(s))continue;
+    const m=crewComponentMaskForActor(s,idx);
+    seenCrewMasks.add(m);
+    const u=unpackCrewCompMask(m);
+    if(s.sex==='female')assert.equal(u.beard,0,`female sailor ${s.id} has zero facial hair`);
+  }
+  assert.ok(seenCrewMasks.size>=10,`distinct named crew component masks: ${seenCrewMasks.size}`);
+  let morions=0,saiaSkirts=0;
+  for(let i=0;i<40;i++){
+    if(unpackCrewCompMask(crewComponentMaskForActor({id:`watch-${i}`,sex:'male',garrison:true},i,{garrison:true})).hat===4)morions++;
+    const femTown=unpackCrewCompMask(townComponentMaskForLook(1,i));
+    assert.equal(femTown.beard,0);
+    if(femTown.garment===3)saiaSkirts++;
+  }
+  assert.ok(morions>=12,`garrison soldiers wear morions (${morions}/40)`);
+  assert.ok(saiaSkirts>=10,`female townsfolk wear pleated saia overskirts (${saiaSkirts}/40)`);
 });

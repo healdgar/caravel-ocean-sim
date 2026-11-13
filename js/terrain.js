@@ -22,6 +22,8 @@ import {oldWorldCountry,registerBakedBoard} from './old-world.js';
 import {boardAsKept,keptBoard} from './board-keep.js';
 import {bakedBoardAsset} from './board-model.js';
 import {createBoardStamp,requestBoardStampPipelines} from './board-stamp.js';
+import {createInlandWater} from './inland-water.js';
+import {createLivestockHerds} from './herds.js';
 import {CITY_BLOCK_FLOATS} from './old-world-city.js';
 import {CITY_DETAIL_M,CITY_TYPED_FLOATS,compileCityBuildingTypes} from './old-world-buildings.js';
 import {createCityTargets} from './city-targets.js';
@@ -1395,6 +1397,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const submergedGroundGroup=submergedGround?.bindGroup(opaqueResources.map(([binding,resource])=>({binding,resource})));
   const lightGroup=bind(lightPipe,[[0,{buffer:frameUBO}],[4,elevation.createView()],[5,lighting.createView()],[6,{buffer:uniform}],[7,{buffer:nearDomain}],[8,{buffer:nearElevation}]]);
   const cloudLight=clouds.bindVolume(lightPipe,true);
+  let inlandWater=proceduralPack?await createInlandWater({device,shader,format,samples,resources:nearResources,clouds,initialGeometry:proceduralPack.inlandWater??null}):null;
+  let herds=proceduralPack?await createLivestockHerds({device,shader,format,samples,frameUBO,landUniform:uniform,nearDomain,elevation,landShadowUniform:activeLandShadows.uniform,resources:nearResources,clouds,initialHerds:proceduralPack.herds??null,isMobile}):null;
   let tick=0;
 
   function regenerateTextureMips(tex,texSize){
@@ -1888,6 +1892,13 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     nearResources=[...opaqueResources,[12,{buffer:nearDomain}],[13,nearAlbedo.createView()],...activeTownField.resources,...groundDetail.resources];
     groups[0]=bind(terrainPipe,nearResources);groups[1]=bind(opaqueTreePipe,nearResources);craterLand=null;cityGroup=bind(cityPipe,nearResources);cityTypeGroup=bind(cityTypePipe,nearResources);cityStruckGroup=bind(cityStruckPipe,nearResources);
     submergedGroup=submerged?.bindGroup(nearResources.map(([binding,resource])=>({binding,resource})));
+    inlandWater?.rebind(nearResources);
+    inlandWater?.setGeometry(upgradedPack.inlandWater??null);
+    herds?.rebind(nearResources);
+    herds?.setHerds(upgradedPack.herds??null);
+    if(upgradedPack.surveyHeights)proceduralPack.surveyHeights=upgradedPack.surveyHeights;
+    proceduralPack.inlandWater=upgradedPack.inlandWater??null;
+    proceduralPack.herds=upgradedPack.herds??null;
     oldTownField.texture.destroy();oldTownField.window.destroy();
     // The city is laid out again on the new ground, whole; what was shot down is put back from the record.
     if(!heldPort)portDamage?.capture(proceduralPack?.port);
@@ -2165,6 +2176,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     // What a shot meets among the city's buildings, for js/gunnery-control.js. Not while another port stands in.
     sweepCity(from,to,radius,options,sweepBuilding){return cityTargets&&!savedPortOverride?cityTargets.sweep(from,to,radius,options,sweepBuilding):null;},
     get cityTargets(){return cityTargets;},
+    get inlandWater(){return inlandWater;},
+    get herds(){return herds;},
     setWorldOffset(dx=0,dz=0){
       const nx=Number.isFinite(dx)?dx:0,nz=Number.isFinite(dz)?dz:0;
       if(Math.abs(nx-worldOffset.x)<0.05&&Math.abs(nz-worldOffset.z)<0.05)return;
@@ -2214,6 +2227,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       for(const lod of treeMeshes)for(const v of lod){v.opaque?.buffer?.destroy?.();v.leaves?.buffer?.destroy?.();}
       treeCull?.destroy();
       cityCull?.destroy();cityBlocks?.buffer.destroy();cityStruck?.destroy();cityUnit.buffer.destroy();for(const type of cityTypes??[])type.buffer.destroy();
+      inlandWater?.destroy?.();
+      herds?.destroy?.();
       importedCanopy?.destroy?.();
       forest?.destroy?.();
       groves?.destroy();
@@ -2341,6 +2356,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       forestMass?.encode(pass);
       forest?.encode(pass);
       groves?.encode(pass);
+      herds?.encode(pass);
       if((tick++%8)!==0&&!changed)return;
       pass.setPipeline(lightPipe);pass.setBindGroup(0,lightGroup);pass.setBindGroup(1,cloudLight);pass.dispatchWorkgroups(8,8);
     },
@@ -2407,6 +2423,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       // ray march per blade. They remain in Apple's opaque visibility path.
       pass.setPipeline(groundPipe);pass.setBindGroup(0,groundGroup);
       for(let i=0;i<groundMeshes.length;i++)groundCull.draw(pass,i,0,groundMeshes[i].buffer);
+      if(herds&&isSectionVisible(activeRegion,camera,viewProjection,2600))herds.draw(pass);
+      if(inlandWater&&isSectionVisible(activeRegion,camera,viewProjection,5200))inlandWater.draw(pass);
       // Draw solid crowns/wood before cutout leaves for Apple hidden-surface
       // removal. The far tier has no alpha foliage or expensive bark fallback.
       for(const[pipe,groupIndex,part]of[[opaqueTreePipe,1,'opaque'],[treePipe,2,'leaves']]){
@@ -2447,6 +2465,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         }
       }
       forest?.drawShadow?.(pass);
+      herds?.drawShadow?.(pass);
     },
   };
 }

@@ -2,6 +2,8 @@
 // node scripts/prepare-crew.mjs /tmp/waterworld-crew [--download]
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {execFileSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {readGLB,gltfAccessor,createSkinAnimator,gltfQuatMultiply,gltfSlerp,gltfTRS} from '../js/gltf.js';
 const source=process.argv[2]??'/tmp/waterworld-crew';
@@ -314,3 +316,4 @@ const out=new URL('../assets/crew/'+(female?'sailor-female-classic.glb':'sailor-
 const output=Buffer.concat([header,json,bh,bin]);await fs.writeFile(out,output);
 console.log(female?'Female sailor GLB:':'Male sailor GLB:',output.length,'bytes;',g.animations.map(a=>a.name).join(', '));
 }
+execFileSync('python3',[fileURLToPath(new URL('./mend-classic-crew-rig.py',import.meta.url))],{stdio:'inherit'});
