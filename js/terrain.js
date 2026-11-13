@@ -113,10 +113,10 @@ export function retargetForestPackToProcedural(
     );
   const densityMul = Math.max(0.65, Math.min(1.38, activeClimate.canopyDensityMultiplier ?? 1.0));
   const effectiveMaxCapacity =
-    maxRootCapacity ?? (extraSections.length > 0 ? (isMobile ? 24000 : 72000) : (isMobile ? 16000 : 44000));
+    maxRootCapacity ?? (extraSections.length > 0 ? (isMobile ? 24000 : 112000) : (isMobile ? 16000 : 64000));
   const reservedExtra =
     extraSections.length > 0
-      ? Math.min(Math.round(effectiveMaxCapacity * 0.35), extraSections.length * (isMobile ? 2400 : 8500))
+      ? Math.min(Math.round(effectiveMaxCapacity * 0.34), extraSections.length * (isMobile ? 2400 : 11000))
       : 0;
   const baseMaxRoots = Math.max(64, effectiveMaxCapacity - reservedExtra);
 
@@ -132,7 +132,8 @@ export function retargetForestPackToProcedural(
         }
       }
       const w = weightMap?.[p.species];
-      const baseW = Number.isFinite(w) && w > 0 ? w : 0;
+      const shrubTrim = fullGrown && p.species === 'blueberry' ? 0.25 : 1;
+      const baseW = Number.isFinite(w) && w > 0 ? w * shrubTrim : 0;
       return affinityFn ? baseW * affinityFn(p.species) : baseW;
     });
     let total = weights.reduce((a, b) => a + b, 0);
@@ -149,7 +150,7 @@ export function retargetForestPackToProcedural(
     return cdf;
   };
   const vetMod = (sp) => SPECIES_VETERAN_AFFINITY[sp] ?? 1.0;
-  const shadeMod = (sp) => (sp === 'blueberry' ? 1.85 : 0.72 + 0.56 * (SPECIES_SHADE_TOLERANCE[sp] ?? 0.45));
+  const shadeMod = (sp) => (sp === 'blueberry' ? (fullGrown ? 0.45 : 1.85) : 0.72 + 0.56 * (SPECIES_SHADE_TOLERANCE[sp] ?? 0.45));
   const uplandCdf = buildSpeciesCdf(activeClimate.uplandForestWeights, null, 'canopy');
   const strandCdf = buildSpeciesCdf(activeClimate.coastalStrandWeights, null, 'canopy');
   const lagoonCdf = buildSpeciesCdf(activeClimate.lagoonMangroveWeights, null, 'canopy');
@@ -225,6 +226,7 @@ export function retargetForestPackToProcedural(
     const drySand = beaches?.drySandMask;
     const swash = beaches?.swashMask;
     const cellSpanM = span / maskSize;
+    const baseHalf = (proceduralPack.region.span ?? 8192) * 0.5;
     for (let idx = 0; idx < maskSize * maskSize; idx++) {
       const bVal = biome[idx];
       if (bVal < 42) continue;
@@ -233,8 +235,17 @@ export function retargetForestPackToProcedural(
       const bj = (idx / maskSize) | 0;
       const cx = x0 + (bi + 0.5) * cellSpanM;
       const cz = z0 + (bj + 0.5) * cellSpanM;
-      // A city fills the ground round its port; the framing bands start at its edge.
-      const dPort = country?.town ? country.beyondTown(cx, cz) : Math.hypot(cx - portCx, cz - portCz);
+      // A city fills the ground round its port; the framing bands start at its edge (or at the main section's
+      // border for streamed neighbour tiles whose port lies outside them).
+      const dPort =
+        secPack !== proceduralPack && (!port || !(country?.town?.area > 0))
+          ? Math.hypot(
+              Math.max(0, Math.abs(cx - proceduralPack.region.x) - baseHalf),
+              Math.max(0, Math.abs(cz - proceduralPack.region.z) - baseHalf)
+            )
+          : country?.town?.area > 0
+            ? country.beyondTown(cx, cz)
+            : Math.hypot(cx - portCx, cz - portCz);
       if (country && bVal < 108) {
         tendedCells.all.push(idx);
         (dPort <= 950 ? tendedCells.near : dPort <= 1950 ? tendedCells.mid : tendedCells.far).push(idx);
@@ -248,10 +259,10 @@ export function retargetForestPackToProcedural(
 
     const secBuckets = Array.from({ length: protoCount }, () => []);
     // Two trees stand no nearer than this share of the sum of their crown radii. Full-grown crowns are
-    // twenty to thirty metres across, so their trunks stand eight to twenty metres apart and the crowns lock.
-    const veteranSpacingFactor = fullGrown ? (isMobile ? 0.66 : 0.56) : hasCohorts ? (isMobile ? 0.52 : 0.42) : (isMobile ? 0.56 : 0.46);
-    const canopySpacingFactor = fullGrown ? (isMobile ? 0.44 : 0.36) : hasCohorts ? (isMobile ? 0.28 : 0.21) : (isMobile ? 0.30 : 0.21);
-    const vetCanopySpacingFactor = fullGrown ? (isMobile ? 0.48 : 0.40) : hasCohorts ? (isMobile ? 0.25 : 0.19) : (isMobile ? 0.27 : 0.19);
+    // twenty to thirty metres across, so their trunks stand six to ten metres apart and the crowns lock.
+    const veteranSpacingFactor = fullGrown ? (isMobile ? 0.50 : 0.44) : hasCohorts ? (isMobile ? 0.52 : 0.42) : (isMobile ? 0.56 : 0.46);
+    const canopySpacingFactor = fullGrown ? (isMobile ? 0.36 : 0.30) : hasCohorts ? (isMobile ? 0.28 : 0.21) : (isMobile ? 0.30 : 0.21);
+    const vetCanopySpacingFactor = fullGrown ? (isMobile ? 0.40 : 0.34) : hasCohorts ? (isMobile ? 0.25 : 0.19) : (isMobile ? 0.27 : 0.19);
     const cellSize = 20;
     const hashW = Math.ceil(span / cellSize) + 1;
     const head = new Int32Array(hashW * hashW).fill(-1);
@@ -295,7 +306,7 @@ export function retargetForestPackToProcedural(
       return biome[idx];
     };
 
-    const tryPlaceTree = (x, z, key, isSatellite = false, isVeteran = false, isDripLine = false, planted = false) => {
+    const tryPlaceTree = (x, z, key, isSatellite = false, isVeteran = false, isDripLine = false, planted = false, explicitTended = null) => {
       if (totalPlaced >= effectiveSecMaxRoots) return -1;
       if (
         x <= x0 + borderMargin ||
@@ -306,11 +317,11 @@ export function retargetForestPackToProcedural(
         return -1;
       }
 
-      // A tree a town set out by hand stands where it was put, whatever the land cover says.
+      // A tree a town or board set out by hand stands where it was put, whatever the land cover says.
       const probByte = planted ? 255 : sampleBiomeByte(x, z);
       if (probByte < 42) return -1;
       if (probByte < 108 && (hash32Forest(key + 5) & 255) > probByte + 112) return -1;
-      const tended = country ? country.treesAt(x, z) : null;
+      const tended = explicitTended ?? (country ? country.treesAt(x, z) : null);
       // No forest giants and no nurse rings among a farmer's trees.
       if (tended && (tended.none || isVeteran || isSatellite)) return -1;
 
@@ -331,7 +342,7 @@ export function retargetForestPackToProcedural(
       const sx = (sampleSecGround(x + 2, z) - sampleSecGround(x - 2, z)) * 0.25;
       const sz = (sampleSecGround(x, z + 2) - sampleSecGround(x, z - 2)) * 0.25;
       const slope = Math.hypot(sx, sz);
-      if (!Number.isFinite(slope) || slope > 0.84 || (gy < 24 && slope > 0.36)) return -1;
+      if (!Number.isFinite(slope) || slope > 0.84 || (gy < 6 && slope > 0.48)) return -1;
 
       const isLagoonZone = hasMangrove && gy <= 2.35 && slope < 0.22;
       const isStrandZone = !isLagoonZone && gy <= 4.8 && slope <= 0.32;
@@ -549,8 +560,22 @@ export function retargetForestPackToProcedural(
     };
 
     const isVolcanicIsland = region.coastalArchetype === 'volcanic-island';
-    const nearBandCut = isVolcanicIsland ? 88 : 123;
-    const midBandCut = isVolcanicIsland ? 176 : 212;
+    let nearBandCut = isVolcanicIsland ? 88 : 123;
+    let midBandCut = isVolcanicIsland ? 176 : 212;
+    const setBandCuts = () => {
+      if (country?.board && validLandCells.length > 0) {
+        const wNear = nearLandCells.length * 1.5;
+        const wMid = midLandCells.length * 1.2;
+        const wFar = farLandCells.length * 1.0;
+        const wTot = Math.max(1, wNear + wMid + wFar);
+        nearBandCut = Math.round((wNear / wTot) * 256);
+        midBandCut = Math.round(((wNear + wMid) / wTot) * 256);
+      } else {
+        nearBandCut = isVolcanicIsland ? 88 : 123;
+        midBandCut = isVolcanicIsland ? 176 : 212;
+      }
+    };
+    setBandCuts();
     const drawCandidateXZ = (h1, h2) => {
       if (validLandCells.length > 0) {
         const bandSel = (h2 >>> 24) & 255;
@@ -574,27 +599,52 @@ export function retargetForestPackToProcedural(
       return [x0 + (h1 / 4294967296) * span, z0 + (h2 / 4294967296) * span];
     };
 
-    // Tended ground first: orchards, pasture oaks and the lines along boundaries and roads take
-    // up to two trees in three, nearest the town first.
+    // Tended ground first: town squares, the board's open-country lone/copse trees, orchards, feathered wood
+    // margins, and hedgerow/roadside lines take a modest share, leaving the bulk of the root budget for closed forests.
     const standing = country?.plan?.standing ?? [];
     for (let k = 0; k < standing.length; k++) tryPlaceTree(standing[k][0], standing[k][1], hash32Forest((seed ^ 0x1b873593) + Math.imul(k, 0x9e3779b1)), false, false, false, true);
+    const loneTrees = country?.loneTrees ?? null;
+    if (loneTrees) {
+      const LONE_KINDS = [
+        { spacing: 5.5, height: [10.5, 7.5], scale: [0.82, 0.42], species: ['oak', 'elm', 'chestnut'], cohort: 'veteran', tint: [0.94, 0.98, 0.9] },
+        { spacing: 5.5, height: [9.5, 6.5], scale: [0.76, 0.38], species: ['oak', 'birch', 'chestnut'], cohort: 'canopy', tint: [0.88, 0.96, 0.88] },
+        { spacing: 4.5, height: [5.0, 4.2], scale: [0.44, 0.28], species: ['birch', 'maple', 'oak'], cohort: 'canopy', tint: [0.93, 0.98, 0.9] },
+      ];
+      for (let k = 0; k + 3 < loneTrees.length; k += 4) {
+        const baseSpec = LONE_KINDS[loneTrees[k + 3] | 0] ?? LONE_KINDS[2];
+        const sizeMul = Math.max(0.65, Math.min(1.45, loneTrees[k + 2] || 1));
+        const loneSpec = {
+          ...baseSpec,
+          height: [baseSpec.height[0] * sizeMul, baseSpec.height[1] * sizeMul],
+          scale: [baseSpec.scale[0] * sizeMul, baseSpec.scale[1] * sizeMul],
+        };
+        tryPlaceTree(loneTrees[k], loneTrees[k + 1], hash32Forest((seed ^ 0x517cc1b7) + Math.imul(k, 0x9e3779b1)), false, false, false, true, loneSpec);
+      }
+    }
     if (tendedCells.all.length > 0) {
       const wild = [validLandCells, nearLandCells, midLandCells, farLandCells];
       [validLandCells, nearLandCells, midLandCells, farLandCells] = [tendedCells.all, tendedCells.near, tendedCells.mid, tendedCells.far];
-      const tendedBudget = Math.round(effectiveSecMaxRoots * (wild[0].length > 0 ? 0.68 : 1));
+      setBandCuts();
+      const tendedShare = wild[0].length > 0
+        ? Math.min(0.24, Math.max(0.10, tendedCells.all.length / Math.max(1, tendedCells.all.length + wild[0].length * 4.5)))
+        : 1;
+      const tendedBudget = Math.min(effectiveSecMaxRoots, totalPlaced + Math.round(Math.max(0, effectiveSecMaxRoots - totalPlaced) * tendedShare));
       const tendedSeed = (seed ^ 0x3c6ef372) >>> 0;
-      for (let step = 0; step < tendedBudget * 7 && totalPlaced < tendedBudget; step++) {
+      for (let step = 0; step < (tendedBudget - totalPlaced) * 7 && totalPlaced < tendedBudget; step++) {
         const h1 = hash32Forest(tendedSeed + Math.imul(step, 0x9e3779b1));
         const h2 = hash32Forest(h1 ^ Math.imul(step, 0x85ebca6b) ^ 0x27d4eb2f);
         const [sx, sz] = drawCandidateXZ(h1, h2);
         tryPlaceTree(sx, sz, h2, false, false, false);
       }
       [validLandCells, nearLandCells, midLandCells, farLandCells] = wild;
+      setBandCuts();
       consecutiveCollisions = 0;
     }
 
-    // Stage 1: Veteran emergent cohort (~24% of stand) + drip-line nurse & gap satellites
-    const veteranBudget = Math.max(16, Math.round(effectiveSecMaxRoots * 0.24));
+    // Stage 1: Veteran emergent cohort (~24% of forest stand) + drip-line nurse & gap satellites
+    const forestStart = totalPlaced;
+    const forestBudget = Math.max(0, effectiveSecMaxRoots - forestStart);
+    const veteranBudget = Math.max(16, Math.round(forestBudget * 0.24));
     const maxVetCandidates = veteranBudget * 6;
     const baseSeed = (seed ^ 0x9e3779b9) >>> 0;
     for (
@@ -622,7 +672,7 @@ export function retargetForestPackToProcedural(
         const nz = sz + Math.sin(angle) * dist;
         tryPlaceTree(nx, nz, cKey, true, false, isDrip);
       }
-      if (totalPlaced >= Math.round(effectiveSecMaxRoots * 0.68)) break;
+      if (totalPlaced - forestStart >= Math.round(forestBudget * 0.64)) break;
     }
 
     // Stage 2: Dense canopy & understory matrix cohort filling remaining stand capacity
@@ -660,7 +710,7 @@ export function retargetForestPackToProcedural(
 
   seedSectionCanopy(proceduralPack, baseMaxRoots);
   if (Array.isArray(extraSections) && extraSections.length > 0) {
-    const perSecBudget = isMobile ? 1800 : 6500;
+    const perSecBudget = isMobile ? 2600 : 15000;
     for (const sec of extraSections) {
       const currentTotal = buckets.reduce((acc, b) => acc + b.length / 12, 0);
       const remaining = effectiveMaxCapacity - currentTotal;
@@ -1334,7 +1384,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   trees=forestPack?new Float32Array(0):canopyTrees;
   installTrees(trees);
   if(canopyPack)importedCanopy=await createCanopyRenderer({device,module,resources,clouds,format,samples,pack:canopyPack,mode:canopyMode});
-  const streamMaxRoots=isMobile?16000:56000;
+  const streamMaxRoots=isMobile?22000:112000;
   const activeForestPack=proceduralPack&&forestPack?retargetForestPackToProcedural(forestPack,proceduralPack,groundSample,{isMobile,maxRootCapacity:streamMaxRoots,climateProfile:activeClimate}):forestPack;
   const activeForestMiddle=forestAtlasDebug?null:(proceduralMiddle??forestMass?.middle??null);
   // What has been shot down on this coast comes back with it, and is kept with the port damage.

@@ -1,12 +1,16 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-// Far crowns: where a tree's leaf cards can no longer be told apart, one closed surface stands for all
-// of them, and one column for the trunk beneath. scripts/prepare-forest-crowns.mjs bakes both from the
-// clusters the pack already has, and js/forest-clusters.js chooses, tree by tree on the GPU, which trees
-// wear them. A tree wholly in its crown draws no cluster of leaf or wood.
+// Far crowns: where a tree's leaf cards can no longer be told apart, one closed progressive surface stands
+// for all of them, and one column for the trunk beneath. scripts/prepare-forest-crowns.mjs bakes a single
+// genus-0 base mesh per species plus its continuous half-edge collapse sequence down to a 4-triangle core
+// and 1-triangle horizon splat; js/forest-clusters.js decimates each tree smoothly on the GPU by eye-angle
+// pixel span down to 1 pixel. A tree wholly in its crown draws no cluster of leaf or wood.
 
-// Levels of detail every crown is baked at, finest first.
-export const FOREST_CROWN_LEVELS = 3;
-// A crown's vertices are packed as cluster vertices are (packForestClusterVertex in js/forest-clusters.js).
+export const FOREST_CROWN_VERSION = 3;
+export const FOREST_CROWN_STEP_WORDS = 4;
+export const FOREST_CROWN_SPLAT_PIXELS = 3.5;
+export const FOREST_CROWN_MIN_PIXELS = 1.0;
+// A crown's single base mesh packs vertices as cluster vertices (packForestClusterVertex in js/forest-clusters.js),
+// while morph.bin stores 4-word progressive collapse step headers and u8 cumulative vertex ancestor maps.
 const CROWN_VERTEX_WORDS = 5;
 
 // Literal paths: build.mjs finds what to publish by reading them from the source.
@@ -15,27 +19,27 @@ export const PORTUGAL_FOREST_CROWN_ASSETS = Object.freeze({
   'manifest.json': 'assets/forest-scenery/portugal/crowns/manifest.json',
   'vertices.bin.gz': 'assets/forest-scenery/portugal/crowns/vertices.bin.gz',
   'indices.bin.gz': 'assets/forest-scenery/portugal/crowns/indices.bin.gz',
+  'morph.bin.gz': 'assets/forest-scenery/portugal/crowns/morph.bin.gz',
 });
 export const SUBTROPICAL_FOREST_CROWN_ASSETS = Object.freeze({
   'manifest.json': 'assets/forest-scenery/subtropical/crowns/manifest.json',
   'vertices.bin.gz': 'assets/forest-scenery/subtropical/crowns/vertices.bin.gz',
   'indices.bin.gz': 'assets/forest-scenery/subtropical/crowns/indices.bin.gz',
+  'morph.bin.gz': 'assets/forest-scenery/subtropical/crowns/morph.bin.gz',
 });
 
 export function validateForestCrowns(manifest) {
-  if (manifest?.format !== 'waterworld.forest-crowns' || manifest.version !== 1 || manifest.vertexWords !== CROWN_VERTEX_WORDS || manifest.levels !== FOREST_CROWN_LEVELS) throw Error('Invalid forest crown manifest');
+  if (manifest?.format !== 'waterworld.forest-crowns' || manifest.version !== FOREST_CROWN_VERSION || manifest.vertexWords !== CROWN_VERTEX_WORDS || manifest.stepHeaderWords !== FOREST_CROWN_STEP_WORDS || !(manifest.morphWordCount > 0)) throw Error('Invalid forest crown manifest');
   if (!Array.isArray(manifest.prototypes) || !manifest.prototypes.length) throw Error('Forest crowns hold no trees');
   if (manifest.widestLeafErrors !== undefined && !(manifest.widestLeafErrors > 0)) throw Error('Forest crowns name no breadth to change at');
   for (const p of manifest.prototypes) {
-    if (!Array.isArray(p.levels) || p.levels.length !== FOREST_CROWN_LEVELS) throw Error(`Forest crown lacks a level: ${p.species}`);
-    let last = 0;
-    for (const level of p.levels) {
-      if (!(level.indexCount > 0) || level.indexCount % 3 || level.firstIndex + level.indexCount > manifest.indexCount || !(level.errorMetres >= last)) throw Error(`Forest crown level is malformed: ${p.species}`);
-      last = level.errorMetres;
-    }
+    if (!(p.vertexCount > 0) || p.vertexCount >= 250 || p.firstVertex + p.vertexCount > manifest.vertexCount) throw Error(`Forest crown vertices are malformed: ${p.species}`);
+    if (!(p.baseIndexCount >= 12) || p.baseIndexCount % 3 || p.firstIndex + p.baseIndexCount > manifest.indexCount) throw Error(`Forest crown indices are malformed: ${p.species}`);
+    if (!(p.stepCount >= 1) || p.morphOffset + (p.stepCount + 1) * FOREST_CROWN_STEP_WORDS > manifest.morphWordCount) throw Error(`Forest crown continuum is malformed: ${p.species}`);
     if (!(p.leafErrorMetres > 0)) throw Error(`Forest crown names no leaf cut: ${p.species}`);
     if (!(p.breadthMetres > 0)) throw Error(`Forest crown names no breadth: ${p.species}`);
     if (!(p.posScale > 0) || !(p.look?.alike > 0) || p.look.alike > 1 || p.look.undersideGain?.length !== 3) throw Error(`Forest crown look is malformed: ${p.species}`);
+    if (!p.splat || p.splat.centre?.length !== 3 || !(p.splat.rx > 0) || !(p.splat.ry > 0) || p.splat.colour?.length !== 3) throw Error(`Forest crown splat is malformed: ${p.species}`);
   }
   return manifest;
 }
@@ -55,15 +59,28 @@ export async function loadForestCrowns({ assets, fetchAsset = fetch, signal } = 
     if (Array.from(digest, (v) => v.toString(16).padStart(2, '0')).join('') !== receipt.sha256) throw Error(`Forest crown stream failed verification: ${name}`);
     return bytes;
   };
-  const [vertices, indices] = await Promise.all(['vertices.bin', 'indices.bin'].map(stream));
-  if (vertices.byteLength !== manifest.vertexCount * CROWN_VERTEX_WORDS * 4 || indices.byteLength !== manifest.indexCount * 4) throw Error('Forest crown streams do not match their manifest');
-  return { manifest, vertices, indices };
+  const [vertices, indices, morph] = await Promise.all(['vertices.bin', 'indices.bin', 'morph.bin'].map(stream));
+  if (vertices.byteLength !== manifest.vertexCount * CROWN_VERTEX_WORDS * 4 || indices.byteLength !== manifest.indexCount * 4 || morph.byteLength !== manifest.morphWordCount * 4) throw Error('Forest crown streams do not match their manifest');
+  return { manifest, vertices, indices, morph };
 }
 
-// What one species' crown shader reads: where its vertices lie, and how its leaves take light.
+// What one species' crown shader reads: where its single base mesh and continuum table lie, and how its leaves take light.
 export function forestCrownLook(info) {
   const { alike, transmission, roughness, undersideGain } = info.look;
-  return new Float32Array([...info.low, info.posScale, alike, transmission, roughness, 0, ...undersideGain, 0]);
+  const buf = new ArrayBuffer(64);
+  const f = new Float32Array(buf);
+  const u = new Uint32Array(buf);
+  f.set([...info.low, info.posScale, alike, transmission, roughness, 0, ...undersideGain, 0], 0);
+  u.set([info.firstVertex >>> 0, info.firstIndex >>> 0, info.morphOffset >>> 0, info.stepCount >>> 0], 12);
+  return f;
+}
+
+// What one species' 1-triangle horizon splat reads: local foliage centre, silhouette half-extents, mean look, and trunk axis XZ.
+export function forestCrownSplatLook(info) {
+  const { centre, rx, ry, colour, exposure, escape, trunkAxisXZ } = info.splat;
+  const tx = trunkAxisXZ ? trunkAxisXZ[0] : centre[0];
+  const tz = trunkAxisXZ ? trunkAxisXZ[1] : centre[2];
+  return new Float32Array([...centre, rx, ...colour, ry, exposure, escape, tx, tz]);
 }
 
 // A tree starts to wear its crown at the range where a leaf cut of error leafErrorMetres is drawn, which
@@ -80,8 +97,8 @@ export const FOREST_CROWN_BAND = 0.3;
 // a broader tree keeps its leaves until it is that small. An open ceiba 20 m across is plainly boughs and
 // sky at 330 m, and a closed body that size is plainly not. In closed woods a crown is seen against other
 // crowns, the manifest names none, and every tree changes at the one range.
-// The share of the forest's pixel error a crown level may stray by before a finer one is drawn. At the
-// whole of it the coarsest level came in by 500 m, and trees on a skyline stood as blocks.
+// The share of the forest's pixel error each progressive triangle facet may span on screen before finer
+// collapse steps remain active.
 export const FOREST_CROWN_LIMIT = 0.7;
 export function forestCrownChange({ leafErrorMetres, breadthMetres = 0, widestLeafErrors = 0, scale = 1, pixelsPerMetre, leafPixels }) {
   const broad = widestLeafErrors > 0 ? (breadthMetres * scale * pixelsPerMetre) / (leafPixels * widestLeafErrors) : 0;
@@ -94,8 +111,27 @@ export function forestCrownChange({ leafErrorMetres, breadthMetres = 0, widestLe
 // stays out of FOREST_VERTEX_WGSL itself because it asks the land for its shadow map and the moon by name,
 // which the forest's own shaders never do.
 export const FOREST_CROWN_WGSL = /* wgsl */`
-struct ForestCrownLook {bounds:vec4f,optics:vec4f,underside:vec4f};
+struct ForestCrownLook {bounds:vec4f,optics:vec4f,underside:vec4f,mesh:vec4u};
+struct ForestCrownSplat {centre:vec4f,colour:vec4f,shade:vec4f};
+struct ForestCrownUnpacked {pos:vec3f,lean:vec3f,shape:vec3f,col:vec3f,exposure:f32,escape:f32,wood:bool};
 @group(3)@binding(5)var<uniform>forestCrown:ForestCrownLook;
+@group(3)@binding(6)var<storage,read>forestCrownMorph:array<u32>;
+@group(3)@binding(7)var<uniform>forestCrownSplat:ForestCrownSplat;
+fn forestCrownSafeNorm(v:vec3f,fallback:vec3f)->vec3f{
+ let d=dot(v,v);return select(fallback,v*inverseSqrt(max(d,1e-12)),d>1e-8);
+}
+fn forestCrownUnpack(gv:u32)->ForestCrownUnpacked{
+ let at=gv*${CROWN_VERTEX_WORDS}u;
+ let w0=forestClusterVertices[at];let w1=forestClusterVertices[at+1u];let w2=forestClusterVertices[at+2u];let w3=forestClusterVertices[at+3u];let w4=forestClusterVertices[at+4u];
+ let pos=forestCrown.bounds.xyz+vec3f(f32(w0&65535u),f32(w0>>16u),f32(w1&65535u))/65535.*forestCrown.bounds.w;
+ let lean=forestClusterOctahedral(vec2f(f32(w2&65535u),f32(w2>>16u))/65535.*2.-1.);
+ let shape=forestClusterOctahedral(vec2f(f32(w3&65535u),f32(w3>>16u))/65535.*2.-1.);
+ let root=vec3f(f32(w4&255u),f32((w4>>8u)&255u),f32((w4>>16u)&255u))/255.;
+ let wood=((w1>>16u)&255u)==1u;
+ var u:ForestCrownUnpacked;
+ u.pos=pos;u.lean=lean;u.shape=shape;u.col=root*root;u.exposure=f32(w1>>24u)/255.;u.escape=f32(w4>>24u)/255.;u.wood=wood;
+ return u;
+}
 // A crown is lit as the leaves it stands for, not as the surface it is. Each leaf card is lit by its
 // own normal, turned to face the viewer, and shows its underside from below; the leaves of one bough
 // face much the same way (the vertex's normal) and differ by a known spread (optics.x, the length of
@@ -143,23 +179,101 @@ fn forestCrownLight(world:vec3f,leaves:vec3f,outward:vec3f,colour:vec3f,exposure
 }
 @vertex fn forestCrownVS(@builtin(instance_index)instance:u32,@builtin(vertex_index)vertex:u32)->ForestVertex{
  let item=forestClusterList[forestBin.x+instance];
- let at=vertex*${CROWN_VERTEX_WORDS}u;
- let w0=forestClusterVertices[at];let w1=forestClusterVertices[at+1u];let w2=forestClusterVertices[at+2u];let w3=forestClusterVertices[at+3u];let w4=forestClusterVertices[at+4u];
- let position=forestCrown.bounds.xyz+vec3f(f32(w0&65535u),f32(w0>>16u),f32(w1&65535u))/65535.*forestCrown.bounds.w;
- let lean=forestClusterOctahedral(vec2f(f32(w2&65535u),f32(w2>>16u))/65535.*2.-1.);
- let exposure=f32(w1>>24u)/255.;let escape=f32(w4>>24u)/255.;
- let root=vec3f(f32(w4&255u),f32((w4>>8u)&255u),f32((w4>>16u)&255u))/255.;
  let r=forestRoots[item.x];
+ if((forestBin.z&1024u)!=0u){
+  let fade=f32(item.y>>24u)/255.;
+  let corner=vertex%3u;
+  let inflate=max(1.,f32((item.y>>8u)&65535u)/4096.);
+  let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);let scale=r.rootScale.w;
+  let localMid=forestCrownSplat.centre.xyz;
+  var centreLocal=vec3f(c*localMid.x-s*localMid.z,localMid.y,s*localMid.x+c*localMid.z)*scale;
+  centreLocal+=forestWind(r,centreLocal,localMid,true);
+  var tint=forestCrownSplat.colour.rgb*r.yawColour.yzw;var fallen=false;
+  if(r.identity.w!=0.){
+   let struck=forestStruckPlace(r,localMid,centreLocal,vec3f(0.,1.,0.),tint,false);
+   centreLocal=struck.local;tint=struck.colour;fallen=struck.fallen;
+  }
+  let centreWorld=r.rootScale.xyz+centreLocal;
+  let toEye=normalize(F.camPos.xyz-centreWorld);
+  let right=normalize(cross(select(vec3f(0.,1.,0.),vec3f(1.,0.,0.),abs(toEye.y)>.98),toEye));
+  let up=cross(toEye,right);
+  let rx=forestCrownSplat.centre.w*scale*inflate;let ry=forestCrownSplat.colour.w*scale*inflate;
+  let uvCorner=select(select(vec2f(0.,1.58),vec2f(-1.325,-.79),corner==1u),vec2f(1.325,-.79),corner==2u);
+  var world=centreWorld+right*(uvCorner.x*rx)+up*(uvCorner.y*ry);
+  if(!fallen){world.y=max(world.y,r.rootScale.y);}
+  let dome=normalize(toEye*.68+right*(uvCorner.x*.52)+up*(uvCorner.y*.56));
+  let leaves=normalize(dome+vec3f(0.,.35,0.));
+  let lit=forestCrownLight(world,leaves,dome,tint,forestCrownSplat.shade.x,forestCrownSplat.shade.y,forestCrown.optics,forestCrown.underside.rgb);
+  var o:ForestVertex;
+  o.world=world;o.normal=lit.normal;o.kind=lit.kind;o.leafUV=lit.leafUV;o.colour=lit.colour;
+  o.nativeMaterial=-1;o.crownFade=fade;o.canopyAO=1.;
+  o.coverageSeed=forestCoverageHash(vertex^(item.x*0x9e3779b9u));
+  o.pos=F.viewProj*vec4f(earthCurve(world-F.camPos.xyz,F.camPos.y),1.);
+  return o;
+ }
+ var gv0=vertex;
+ var pos:vec3f;var lean:vec3f;var shape:vec3f;var col:vec3f;var exposure:f32;var escape:f32;var wood:bool;var fade=1.;
+ if((forestBin.z&2048u)!=0u){
+  fade=f32(item.y>>24u)/255.;
+  let u0=forestCrownUnpack(gv0);
+  pos=u0.pos;lean=u0.lean;shape=u0.shape;col=u0.col;exposure=u0.exposure;escape=u0.escape;wood=u0.wood;
+ }else{
+  let localTri=item.y&4095u;
+  let stepIdx=min((item.y>>12u)&4095u,forestCrown.mesh.w);
+  let morphT=f32(item.y>>24u)/255.;
+  let baseGlobalV=forestClusterIndices[forestCrown.mesh.y+localTri*3u+(vertex%3u)];
+  let localCorner=baseGlobalV-forestCrown.mesh.x;
+  let hdr=forestCrown.mesh.z+stepIdx*4u;
+  let h0=forestCrownMorph[hdr];
+  let collapseV=(h0>>16u)&255u;
+  let targetV=h0>>24u;
+  let grow0=bitcast<f32>(forestCrownMorph[hdr+2u]);
+  let mapOff=forestCrownMorph[hdr+3u];
+  let mapWord=forestCrownMorph[mapOff+(localCorner>>2u)];
+  let vMapped=(mapWord>>((localCorner&3u)*8u))&255u;
+  gv0=forestCrown.mesh.x+vMapped;
+  let u0=forestCrownUnpack(gv0);
+  pos=u0.pos;lean=u0.lean;shape=u0.shape;col=u0.col;exposure=u0.exposure;escape=u0.escape;wood=u0.wood;
+  if(wood){
+   if(collapseV<250u&&vMapped==collapseV){
+    let u1=forestCrownUnpack(forestCrown.mesh.x+targetV);
+    pos=mix(pos,u1.pos,morphT);lean=forestCrownSafeNorm(mix(lean,u1.lean,morphT),lean);col=mix(col,u1.col,morphT);exposure=mix(exposure,u1.exposure,morphT);escape=mix(escape,u1.escape,morphT);
+   }else if(collapseV==253u){
+    pos=mix(pos,vec3f(forestCrownSplat.shade.z,pos.y,forestCrownSplat.shade.w),morphT);
+   }
+  }else{
+   let grow1=select(grow0,bitcast<f32>(forestCrownMorph[hdr+6u]),stepIdx<forestCrown.mesh.w);
+   let mid=forestCrownSplat.centre.xyz;
+   if(collapseV<250u&&vMapped==collapseV){
+    let u1=forestCrownUnpack(forestCrown.mesh.x+targetV);
+    let p01=mix(pos,u1.pos,morphT);
+    pos=mid+(p01-mid)*mix(grow0,grow1,morphT);
+    lean=forestCrownSafeNorm(mix(lean,u1.lean,morphT),lean);shape=forestCrownSafeNorm(mix(shape,u1.shape,morphT),shape);col=mix(col,u1.col,morphT);exposure=mix(exposure,u1.exposure,morphT);escape=mix(escape,u1.escape,morphT);
+   }else if(collapseV==255u){
+    let scaled0=mid+(pos-mid)*grow0;
+    let rx=max(forestCrownSplat.centre.w,1e-3);let ry=max(forestCrownSplat.colour.w,1e-3);
+    let rel=(scaled0-mid)/vec3f(rx,ry,rx);
+    let dir=forestCrownSafeNorm(rel,shape);
+    let ellip=mid+dir*vec3f(rx,ry,rx)*.94;
+    pos=mix(scaled0,ellip,morphT);
+    shape=forestCrownSafeNorm(mix(shape,dir,morphT),dir);
+    lean=forestCrownSafeNorm(mix(lean,forestCrownSafeNorm(dir+vec3f(0.,.35,0.),vec3f(0.,1.,0.)),morphT),lean);
+    col=mix(col,forestCrownSplat.colour.rgb,morphT);
+    exposure=mix(exposure,forestCrownSplat.shade.x,morphT);
+    escape=mix(escape,forestCrownSplat.shade.y,morphT);
+   }else{
+    pos=mid+(pos-mid)*mix(grow0,grow1,morphT);
+   }
+  }
+ }
  // Material 1 is the trunk below the crown, which moves and is lit as the wood it stands for (forestNativeOpaqueFS).
- let wood=((w1>>16u)&255u)==1u;
- var o=forestPlace(r,item.x,position,lean,vec2f(select(4.,3.,wood),exposure),vec2f(0.),root*root,-1.,vertex,escape);
- o.crownFade=f32(item.y>>24u)/255.;
+ var o=forestPlace(r,item.x,pos,lean,vec2f(select(4.,3.,wood),exposure),vec2f(0.),col,-1.,gv0,escape);
+ o.crownFade=fade;
  if(wood){
   let n=normalize(o.normal);o.normal=n;
   o.kind=vec2f(max(dot(n,F.sunDir.xyz),0.)*(.35+.65*escape),(.36+max(n.y,0.)*.25)*escape);o.leafUV=vec2f(0.,.95);o.canopyAO=0.;
   return o;
  }
- let shape=forestClusterOctahedral(vec2f(f32(w3&65535u),f32(w3>>16u))/65535.*2.-1.);
  let turn=vec2f(cos(r.yawColour.x),sin(r.yawColour.x));
  let outward=vec3f(turn.x*shape.x-turn.y*shape.z,shape.y,turn.y*shape.x+turn.x*shape.z);
  let lit=forestCrownLight(o.world,o.normal,outward,o.colour,exposure,escape,forestCrown.optics,forestCrown.underside.rgb);

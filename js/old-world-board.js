@@ -736,6 +736,47 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
   for (let k = 0; k < urban.length; k++) if (urbanMark[k]) { urban[k] = 1; cells++; }
   const town = { grid: urban, urban, beyond: distanceTo(urbanMark, n, grid.step), early, area: cells * grid.step * grid.step, inland: distanceTo(wet, n, grid.step) };
 
+  /* ---- the model's standing wood mask (2 bits/cell: 0 open, 1 broadleaf forest, 2 pine forest, 3 scrub wood) ---- */
+  const woodGrid = Number.isInteger(board.grid) && board.grid > 0 ? board.grid : 0;
+  const woodCellM = woodGrid > 0 ? region.span / woodGrid : 0;
+  let woodBytes = null;
+  if (typeof board.woods === 'string' && board.woods.length > 0 && woodGrid > 0) {
+    const raw = atob(board.woods);
+    woodBytes = new Uint8Array(raw.length);
+    for (let k = 0; k < raw.length; k++) woodBytes[k] = raw.charCodeAt(k);
+  }
+  const cellWoodCode = (cx, cz) => {
+    if (cx < 0 || cz < 0 || cx >= woodGrid || cz >= woodGrid) return 0;
+    const c = cz * woodGrid + cx;
+    return (woodBytes[c >> 2] >> ((c & 3) * 2)) & 3;
+  };
+  const woodCodeAt = (x, z) => {
+    if (!woodBytes) return -1;
+    return cellWoodCode(Math.floor((x - ox + half) / woodCellM), Math.floor((z - oz + half) / woodCellM));
+  };
+  const woodNoise2 = (ux, uz, salt) => {
+    const i = Math.floor(ux), j = Math.floor(uz), a = ux - i, b = uz - j;
+    const su = a * a * (3 - 2 * a), sv = b * b * (3 - 2 * b);
+    const p00 = boardHashUnit(i * 73856093 ^ j * 19349663, salt);
+    const p10 = boardHashUnit((i + 1) * 73856093 ^ j * 19349663, salt);
+    const p01 = boardHashUnit(i * 73856093 ^ (j + 1) * 19349663, salt);
+    const p11 = boardHashUnit((i + 1) * 73856093 ^ (j + 1) * 19349663, salt);
+    return (p00 * (1 - su) + p10 * su) * (1 - sv) + (p01 * (1 - su) + p11 * su) * sv;
+  };
+  // Smooth organic wood density (0..1) across cell edges so forest borders curve and feather naturally.
+  const woodShareAt = (x, z) => {
+    if (!woodBytes) return -1;
+    const wx = x + (woodNoise2(x / 38, z / 38, 0x31a7) - 0.5) * woodCellM * 0.62;
+    const wz = z + (woodNoise2(x / 38, z / 38, 0x7b9d) - 0.5) * woodCellM * 0.62;
+    const u = (wx - ox + half) / woodCellM - 0.5, v = (wz - oz + half) / woodCellM - 0.5;
+    const i = Math.floor(u), j = Math.floor(v), fx = u - i, fz = v - j;
+    const d00 = (cellWoodCode(i, j) === 1 || cellWoodCode(i, j) === 2) ? 1 : 0;
+    const d10 = (cellWoodCode(i + 1, j) === 1 || cellWoodCode(i + 1, j) === 2) ? 1 : 0;
+    const d01 = (cellWoodCode(i, j + 1) === 1 || cellWoodCode(i, j + 1) === 2) ? 1 : 0;
+    const d11 = (cellWoodCode(i + 1, j + 1) === 1 || cellWoodCode(i + 1, j + 1) === 2) ? 1 : 0;
+    return (d00 * (1 - fx) + d10 * fx) * (1 - fz) + (d01 * (1 - fx) + d11 * fx) * fz;
+  };
+
   /* ---- the furlongs: every cell of the index square knows its furlong; every furlong its use ---- */
   const size = BOARD_INDEX_SIZE, cell = region.span / size, index = new Uint16Array(size * size);
   const fields = board.fields, uses = new Array(fields.length), figures = new Array(fields.length);
@@ -748,8 +789,10 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     }
     fillBoardFigure(index, size, cells, id + 1);
     figures[id] = figure;
+    const wild = field.state === BOARD_STANDS.WILD;
     let kind;
     if (field.state === BOARD_STANDS.WOOD) kind = LAND.WOOD;
+    else if (wild && (field.wood ?? 0) >= 0.5) kind = LAND.WOOD;
     else if (field.state === BOARD_STANDS.TILLED) {
       kind = field.kind === BOARD_HELD.GARDEN ? LAND.GARDEN : field.kind === BOARD_HELD.VINE ? LAND.VINES : field.kind === BOARD_HELD.CLOSE ? LAND.OLIVES : field.kind === BOARD_HELD.MEADOW ? LAND.PASTURE
         // Corn stands one year in two.
@@ -757,16 +800,30 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     } else if (field.state === BOARD_STANDS.PASTURE) kind = LAND.PASTURE;
     else if (field.state === BOARD_STANDS.SCRUB) kind = LAND.SCRUB;
     else if (field.state === BOARD_STANDS.BURNT) kind = LAND.FALLOW;
-    // No one's ground: rough grazing with a tree here and there, as the country round a city was.
+    // Open waste and unclaimed non-forest ground: open grassland (lone trees come from the model's treeSpots).
     else kind = LAND.PASTURE;
-    const wild = field.state === BOARD_STANDS.WILD;
     uses[id] = {
       kind, wild, place: field.place, heading: field.heading, strip: field.strip,
       shade: boardHashUnit(id, 17), turn: boardHashUnit(id, 29),
-      wooded: kind === LAND.PASTURE && boardHashUnit(id, 41) < (wild ? 0.62 : 0.4),
+      wooded: false,
       hedged: !wild && boardHashUnit(id, 53) < BOARD_HEDGED_SHARE[kind],
     };
   });
+  // Unploughed steep/wet corners inside worked furlongs keep their dense forest in Castle and Commons; clear
+  // the cultivated parcel tint on those wooded texels (keeping at least the last furlong represented in index).
+  if (woodBytes) {
+    for (let j = 0; j < size; j++) {
+      const wz = bounds.z0 + (j + 0.5) * cell;
+      for (let i = 0; i < size; i++) {
+        const slot = index[j * size + i];
+        if (!slot || slot === fields.length) continue;
+        const u = uses[slot - 1];
+        if (u.wild || u.kind === LAND.WOOD) continue;
+        const wx = bounds.x0 + (i + 0.5) * cell;
+        if (woodShareAt(wx, wz) >= 0.45) index[j * size + i] = 0;
+      }
+    }
+  }
   // How far a point lies inside its furlong: to the nearest side of the figure.
   const edgeOf = (id, x, z) => {
     const p = figures[id], m = p.length / 2;
@@ -774,13 +831,27 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     for (let k = 0; k < m; k++) best = Math.min(best, segDist(x, z, p[k * 2], p[k * 2 + 1], p[((k + 1) % m) * 2], p[((k + 1) % m) * 2 + 1]));
     return best;
   };
-  const NO_PARCEL = { use: { kind: LAND.SCRUB, wild: true, shade: 0.5, turn: 0.5, wooded: false, hedged: false }, edge: 1e9, i: 0, j: 0 };
+  const DENSE_WOOD_USE = { kind: LAND.WOOD, wild: true, shade: 0.5, turn: 0.5, wooded: true, hedged: false };
+  const SCRUB_WOOD_USE = { kind: LAND.SCRUB, wild: true, shade: 0.5, turn: 0.5, wooded: false, hedged: false };
+  const OPEN_WASTE_USE = { kind: LAND.PASTURE, wild: true, shade: 0.5, turn: 0.5, wooded: false, hedged: false };
+  const NO_PARCEL = { use: OPEN_WASTE_USE, edge: 1e9, woodEdge: 0, i: 0, j: 0 };
   const parcelAt = (x, z) => {
+    const wShare = woodShareAt(x, z);
+    const wCode = woodCodeAt(x, z);
     const i = Math.floor((x - bounds.x0) / cell), j = Math.floor((z - bounds.z0) / cell);
     const id = i < 0 || j < 0 || i >= size || j >= size ? -1 : index[j * size + i] - 1;
-    if (id < 0) return NO_PARCEL;
+    if (wShare >= 0.45) {
+      return { use: id >= 0 && uses[id].kind === LAND.WOOD ? uses[id] : DENSE_WOOD_USE, edge: 1e9, woodEdge: 1, i: Math.max(0, id), j: 0 };
+    }
+    const woodEdge = wShare > 0.06 ? (wShare - 0.06) / 0.39 : 0;
+    if (wCode === 3) {
+      return { use: id >= 0 && uses[id].kind === LAND.SCRUB ? uses[id] : SCRUB_WOOD_USE, edge: 1e9, woodEdge, i: Math.max(0, id), j: 0 };
+    }
+    if (id < 0) return woodEdge > 0 ? { use: OPEN_WASTE_USE, edge: 1e9, woodEdge, i: 0, j: 0 } : NO_PARCEL;
     const use = uses[id];
-    return { use, edge: use.hedged ? edgeOf(id, x, z) : 1e9, i: id, j: 0 };
+    // Inside a mostly-wooded WILD furlong, non-forested cells stay open rough waste beyond the wood's feathered margin.
+    if (wShare >= 0 && use.wild && use.kind === LAND.WOOD) return { use: OPEN_WASTE_USE, edge: 1e9, woodEdge, i: id, j: 0 };
+    return { use, edge: use.hedged ? edgeOf(id, x, z) : 1e9, woodEdge, i: id, j: 0 };
   };
 
   /* ---- roads between the places, for the trees that line them and for the stamp ---- */
@@ -861,6 +932,20 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
   const herds = herdFloats.length ? new Float32Array(herdFloats) : null;
   built.herds = herdFloats.length / 8;
 
+  /* ---- lone trees and copses of the model's open country, marshes and scrub outside dense woods ---- */
+  const rawLone = board.loneTrees ?? [];
+  const loneFloats = [];
+  for (let k = 0; k + 3 < rawLone.length; k += 4) {
+    const wx = ox + rawLone[k], wz = oz + rawLone[k + 1];
+    if (!inside(wx, wz, 8) || heightAt(wx, wz) <= BOARD_DRY_M || fieldAt(town.inland, grid, wx, wz) < 4) continue;
+    if (fieldAt(town.urban, grid, wx, wz) >= 0.45 || streetEdge(wx, wz, 4) < 3.5 || houseNear(wx, wz, 3.5)) continue;
+    if (solids.some(wx, wz, 6, (o) => rectDist(o, wx, wz) < 4)) continue;
+    if (woodShareAt(wx, wz) >= 0.45) continue;
+    loneFloats.push(wx, wz, rawLone[k + 2], rawLone[k + 3]);
+  }
+  const loneTrees = loneFloats.length ? new Float32Array(loneFloats) : null;
+  built.loneTrees = loneFloats.length / 4;
+
   const blockCount = blocks.length / CITY_BLOCK_FLOATS;
   const plan = {
     blocks: new Float32Array(blocks), count: blockCount, houses, streets, places: squares, gates, churches, lots, paving, standing,
@@ -875,7 +960,7 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     },
   };
   return {
-    plan, town, roads, parcelAt, places, seat, inlandWater, herds,
+    plan, town, roads, parcelAt, places, seat, inlandWater, herds, loneTrees,
     // Who mans the seat, by the model's own roll on the board's day: its port's posts are manned from it (js/crew.js).
     watch: seat.watch ? { ...seat.watch, place: seat.name, day: board.day ?? 0 } : null,
     // For the GPU, which stamps the country onto the ground's own colours: the furlong of every cell, each

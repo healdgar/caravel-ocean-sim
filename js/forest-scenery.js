@@ -7,7 +7,7 @@ import {loadForestImpostors,createForestImpostorResources,FOREST_IMPOSTOR_WGSL} 
 import {loadForestLight,forestLightGPUBytes,FOREST_LIGHT_WGSL} from './forest-light.js';
 import {loadForestNativeLOD} from './forest-native-lod.js';
 import {loadForestClusters,createForestClusters,FOREST_CLUSTER_ASSETS,SUBTROPICAL_FOREST_CLUSTER_ASSETS,PORTUGAL_FOREST_CLUSTER_ASSETS,FOREST_CLUSTER_VERTEX_WGSL,FOREST_CLUSTER_SHADOW_WGSL} from './forest-clusters.js';
-import {loadForestCrowns,SUBTROPICAL_FOREST_CROWN_ASSETS,PORTUGAL_FOREST_CROWN_ASSETS} from './forest-crowns.js';
+import {loadForestCrowns,SUBTROPICAL_FOREST_CROWN_ASSETS,PORTUGAL_FOREST_CROWN_ASSETS,FOREST_CROWN_SPLAT_PIXELS,FOREST_CROWN_MIN_PIXELS} from './forest-crowns.js';
 import {FOREST_FALL_BEARINGS,FOREST_FALL_HEIGHT_STEPS,FOREST_FALL_REST_MIN_DEG,FOREST_FALL_SECONDS,FOREST_LONG_FALLEN,FOREST_WOUND_BEARINGS,buildForestTrunkGridAsync,forestStrikesFromSave,forestStrikesToSave,forestTrunkShape,reapplyForestStrikes,strikeForestRoot,strikeForestTree} from './forest-trunks.js';
 import {FOREST_SURFACE_ASSETS,SUBTROPICAL_FOREST_SURFACE_ASSETS,PORTUGAL_FOREST_SURFACE_ASSETS,chooseForestSurfaceCodec,createForestSurfaceTextures,forestMaterialOptics,loadForestSurfaceSet} from './forest-surfaces.js';
 import {loadForestVolumes,createForestVolumeResources,FOREST_VOLUME_ASSETS,SUBTROPICAL_FOREST_VOLUME_ASSETS,PORTUGAL_FOREST_VOLUME_ASSETS,FOREST_VOLUME_WGSL,FOREST_VOLUME_SHELL_WGSL} from './forest-volume.js';
@@ -1162,7 +1162,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
   // broad a tree may stand on screen as a crown, in leaf errors.
   const crownQuery=typeof location==='undefined'?new URLSearchParams():new URLSearchParams(location.search);
   const crownsWanted=crownQuery.get('forestCrowns')!=='0',crownChange={};
-  for(const [key,name]of [['nearest','forestCrownNearest'],['limit','forestCrownLimit'],['widest','forestCrownWidest']]){const value=Number(crownQuery.get(name));if(crownQuery.has(name)&&value>0)crownChange[key]=value;}
+  for(const [key,name]of [['nearest','forestCrownNearest'],['limit','forestCrownLimit'],['widest','forestCrownWidest'],['splatPixels','forestCrownSplat'],['minPixels','forestCrownMin']]){const value=Number(crownQuery.get(name));if(crownQuery.has(name)&&value>=0)crownChange[key]=value;}
   try{
     const volumeOff=typeof location!=='undefined'&&new URLSearchParams(location.search).get('forestVolume')==='off';
     const volumeForce=typeof location!=='undefined'&&new URLSearchParams(location.search).get('forestVolume')==='force';
@@ -1375,7 +1375,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
               return device.createBindGroup({layout:pipeline.getBindGroupLayout(2),entries});
             },firstMaterials});
           stats.clusters={loaded:true,count:clusterSource.manifest.clusterCount,bytes:clusterSource.vertices.byteLength+clusterSource.indices.byteLength+clusterSource.clusters.byteLength};
-          if(crownSource)stats.crowns={loaded:true,levels:crownSource.manifest.levels,triangles:crownSource.manifest.indexCount/3,bytes:crownSource.vertices.byteLength+crownSource.indices.byteLength,error:null};
+          if(crownSource)stats.crowns={loaded:true,mode:'progressive-continuum',steps:crownSource.manifest.prototypes.reduce((sum,q)=>sum+q.stepCount,0),splatPixels:FOREST_CROWN_SPLAT_PIXELS,minPixels:FOREST_CROWN_MIN_PIXELS,triangles:crownSource.manifest.indexCount/3,bytes:crownSource.vertices.byteLength+crownSource.indices.byteLength+crownSource.morph.byteLength,error:null};
         }
         forestLoadAbort(abort.signal);native={vertices,indices,surfaces};
         stats.nativeMaterialLayers=surfaces.layers;stats.nativeTextureFamilies=surfaces.families.map(f=>({width:f.width,height:f.height,layers:f.rows.length,mipLevels:f.levels}));
@@ -1390,7 +1390,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     }
     const nativeReady=pack.skipNative?Promise.resolve(false):deferred?new Promise(resolve=>setTimeout(resolve,pack.deferNative?80:0)).then(installNative):Promise.resolve(await installNative());
     const draw=(pass,pipeline,group,cloud,cutout,binKey=cutout?'leaf':'opaque')=>{
-      if(!native||(clusters&&(cutout||middle)))return;pass.setPipeline(pipeline);pass.setBindGroup(0,group);if(cloud)pass.setBindGroup(1,cloud);pass.setVertexBuffer(0,native.vertices);pass.setIndexBuffer(native.indices,'uint32');
+      if(!native||(clusters&&(cutout||middle||clusters.crowns)))return;pass.setPipeline(pipeline);pass.setBindGroup(0,group);if(cloud)pass.setBindGroup(1,cloud);pass.setVertexBuffer(0,native.vertices);pass.setIndexBuffer(native.indices,'uint32');
       for(const p of m.prototypes){
         for(const slot of clusters?[2]:cutout?[1]:middle?[0]:[0,2]){
           if(!p[['wood','leaf','far'][slot]].indexCount)continue;

@@ -1,11 +1,16 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // Trees as cluster hierarchies, cut per tree on the GPU so each stays within a pixel error at any
 // distance. Built offline by scripts/prepare-forest-clusters.mjs with the builder from threejs-nanites.
-import { FOREST_CROWN_LEVELS, FOREST_CROWN_LIMIT, FOREST_CROWN_NEAREST, FOREST_CROWN_BAND, forestCrownLook } from './forest-crowns.js';
+import { FOREST_CROWN_SPLAT_PIXELS, FOREST_CROWN_MIN_PIXELS, FOREST_CROWN_LIMIT, FOREST_CROWN_NEAREST, FOREST_CROWN_BAND, forestCrownLook, forestCrownSplatLook } from './forest-crowns.js';
 
 export const FOREST_CLUSTER_VERTEX_WORDS = 5;
 export const FOREST_CLUSTER_WORDS = 16;
 export const FOREST_LEAF_VERTICES = 6;
+const CROWN_CONT_REGION = 0;
+const CROWN_SPLAT_REGION = 1;
+const CROWN_FADE_REGION = 2;
+const CROWN_LISTS = 3;
+const CROWN_CONT_TRIS_PER_SPECIES = 262144;
 
 const unit16 = (v) => Math.max(0, Math.min(65535, Math.round(v * 65535)));
 const unit8 = (v) => Math.max(0, Math.min(255, Math.round(v * 255)));
@@ -85,12 +90,14 @@ struct ForestClusterBucket {
  firstCluster:u32,clusterCount:u32,listWood:u32,listLeaf:u32,
  near:vec2u,mid:vec2u,far:vec2u,drawWood:u32,drawLeaf:u32,
  centre:vec4f,capacity:vec4u,
- // Far crowns (js/forest-crowns.js): where the species' lists begin, its first draw, how many levels it
- // has (none when the pack has no crowns) and the room each list has; then each level's error in metres.
- crown:vec4u,crownErr:vec4f,
- // The breadth of the species' shape before a tree's own scale, in metres for each leaf error it may span
- // on screen as a crown; nothing where the pack's woods are closed.
+ // Far crowns (js/forest-crowns.js): continuum triangle list base, first crown indirect draw, stepStates
+ // (stepCount + 1, or 0 when disabled), continuum triangle capacity; then splat/fade list bases, rootCount,
+ // and morphOffset in crownMorph.
+ crown:vec4u,crownLists:vec4u,
+ // crownSize.x = breadthMetres / widestLeafErrors (0 in closed woods), crownSize.y = breadthMetres,
+ // crownSize.z = leafErrorMetres.
  crownSize:vec4f,
+ horizon:vec4u,
 };
 @group(0)@binding(0)var<uniform>F:Frame;
 @group(0)@binding(1)var<storage,read>roots:array<ForestRoot>;
@@ -103,6 +110,7 @@ struct ForestClusterBucket {
 @group(0)@binding(8)var<uniform>bucket:ForestClusterBucket;
 struct ForestClusterShadowBox {lightView:mat4x4f,origin:vec4f,sun:vec4f,texel:vec4f};
 @group(0)@binding(9)var<uniform>shadowBox:ForestClusterShadowBox;
+@group(0)@binding(10)var<storage,read>crownMorph:array<u32>;
 // Shares of the forest's pixel error each kind may use. A leaf's error is its size, which stays
 // visible as a card, so leaves need the tighter limit. Wood is thin and hides among them.
 // Each halving of the leaf share draws four times the cards. At .2 the cards stayed about two pixels
@@ -111,17 +119,17 @@ struct ForestClusterShadowBox {lightView:mat4x4f,origin:vec4f,sun:vec4f,texel:ve
 const FOREST_CLUSTER_LEAF_LIMIT=.4;
 const FOREST_CLUSTER_WOOD_LIMIT=.5;
 // A crown takes over from a tree's leaves at the range where a leaf cut of the error its manifest names
-// (crownErr.w) is drawn, so a sharper view or a spyglass carries the change further out; never nearer
+// (crownSize.z) is drawn, so a sharper view or a spyglass carries the change further out; never nearer
 // than the range at which leaf cards have reached their far shape and coverage (forestClusterVertex,
-// forestNativeLeafDepthFS). In closed woods trees of every size change at that one range, so the change
-// is a line across a hillside and not a scatter. Where a pack's trees stand apart on open ground
-// (crownSize.x) a broad one keeps its leaves until it is small on screen, because a closed body that
-// large shows it is not leaves. Over a further share of that distance a tree wears both, sample by
-// sample (forestCrownSamples). Of a crown's levels, the coarsest is drawn whose own error stays within
-// FOREST_CROWN_LIMIT of the forest's pixel error.
+// forestNativeLeafDepthFS). Over a further share of that distance a tree wears both, sample by sample
+// (forestCrownSamples). Beyond that, its single genus-0 base mesh decimates smoothly one half-edge collapse
+// at a time by angular pixel span down to a 4-triangle core and 1-triangle horizon splat at 1 pixel.
 const FOREST_CROWN_LIMIT=${(crown.limit ?? FOREST_CROWN_LIMIT).toFixed(4)};
 const FOREST_CROWN_NEAREST=${(crown.nearest ?? FOREST_CROWN_NEAREST).toFixed(2)};
 const FOREST_CROWN_BAND=${(crown.band ?? FOREST_CROWN_BAND).toFixed(4)};
+const FOREST_CROWN_SPLAT_PIXELS=${(crown.splatPixels ?? FOREST_CROWN_SPLAT_PIXELS).toFixed(4)};
+const FOREST_CROWN_MIN_PIXELS=${(crown.minPixels ?? FOREST_CROWN_MIN_PIXELS).toFixed(4)};
+fn forestClusterHash(value:u32)->u32{var x=value;x=(x^(x>>16u))*0x7feb352du;x=(x^(x>>15u))*0x846ca68bu;return x^(x>>16u);}
 fn forestClusterTree(index:u32)->u32{
  let nearCount=commands[bucket.near.y*5u+1u];
  if(index<nearCount){return visible[bucket.near.x+index];}
@@ -129,6 +137,11 @@ fn forestClusterTree(index:u32)->u32{
  if(index-nearCount<midCount){return visible[bucket.mid.x+index-nearCount];}
  let farCount=commands[bucket.far.y*5u+1u];
  if(index-nearCount-midCount<farCount){return visible[bucket.far.x+index-nearCount-midCount];}
+ if(bucket.horizon.z!=0u){
+  let horizonCount=commands[bucket.horizon.y*5u+1u];
+  let rem=index-nearCount-midCount-farCount;
+  if(rem<horizonCount){return visible[bucket.horizon.x+rem];}
+ }
  return 0xffffffffu;
 }
 @compute @workgroup_size(64)fn forestClusterSelect(@builtin(global_invocation_id)id:vec3u){
@@ -140,31 +153,71 @@ fn forestClusterTree(index:u32)->u32{
  let b=bucket.centre.xyz*scale;
  let centre=origin+vec3f(c*b.x-s*b.z,b.y,s*b.x+c*b.z);
  let nearest=max(length(centre)-bucket.centre.w*scale,.25);
- // Clusters run from coarsest parent to finest, so only a prefix can be drawn at this distance.
- let finest=limit*nearest/(scale*focal);
- var low=0u;var high=bucket.clusterCount;
- while(low<high){let middle=(low+high)/2u;if(clusters[bucket.firstCluster+middle].parentErr>finest){low=middle+1u;}else{high=middle;}}
- // The share of each pixel's samples the tree's crown takes, of 255. At 255 the crown and its trunk are
- // the whole tree: no cluster is listed, and the crown is the coarsest of its levels whose error stays
- // within the limit.
- var crownShare=0u;
- if(bucket.crown.z>0u){
-  let away=length(origin);let pixels=parameters.z*FOREST_CROWN_LIMIT;
-  let start=max(max(FOREST_CROWN_NEAREST,bucket.crownErr.w*focal/limitLeaf),bucket.crownSize.x*scale*focal/limitLeaf);
-  let share=clamp((away-start)/(start*FOREST_CROWN_BAND),0.,1.);
-  if(share>0.){
-   crownShare=max(u32(share*255.),1u);var region=${FOREST_CROWN_LEVELS}u;
-   if(crownShare==255u){region=0u;for(var l=1u;l<bucket.crown.z;l++){if(bucket.crownErr[l]*scale*focal<=pixels*away){region=l;}}}
-   let slot=atomicAdd(&draws[(bucket.crown.y+region)*5u+1u],1u);
-   if(slot<bucket.crown.w){list[bucket.crown.x+region*bucket.crown.w+slot]=vec2u(tree,crownShare<<24u);}
-   if(crownShare==255u){return;}
-  }
- }
  let rowW=vec3f(F.viewProj[0].w,F.viewProj[1].w,F.viewProj[2].w);
  let rowX=vec3f(F.viewProj[0].x,F.viewProj[1].x,F.viewProj[2].x);
  let rowY=vec3f(F.viewProj[0].y,F.viewProj[1].y,F.viewProj[2].y);
  let planeL=rowW+rowX;let planeR=rowW-rowX;let planeB=rowW+rowY;let planeT=rowW-rowY;
  let lengthL=length(planeL);let lengthR=length(planeR);let lengthB=length(planeB);let lengthT=length(planeT);
+ // The share of each pixel's samples the tree's crown takes, of 255. At 255 the progressive crown and its
+ // trunk are the whole tree: no cluster is listed.
+ var crownShare=0u;
+ if(bucket.crown.z>0u){
+  let stepCount=bucket.crown.z-1u;
+  let away=length(origin);let pixels=parameters.z*FOREST_CROWN_LIMIT;
+  let start=max(max(FOREST_CROWN_NEAREST,bucket.crownSize.z*focal/limitLeaf),bucket.crownSize.x*scale*focal/limitLeaf);
+  let share=clamp((away-start)/(start*FOREST_CROWN_BAND),0.,1.);
+  if(share>0.){
+   crownShare=max(u32(share*255.),1u);
+   if(crownShare<255u){
+    let slot=atomicAdd(&draws[(bucket.crown.y+${CROWN_FADE_REGION}u)*5u+1u],1u);
+    if(slot<bucket.crownLists.z){list[bucket.crownLists.y+slot]=vec2u(tree,crownShare<<24u);}
+   }else{
+    let crownReach=bucket.centre.w*scale+.35+F.windP[0].z*.08;
+    if(r.identity.w>=0.&&(dot(planeL,centre)<-crownReach*lengthL||dot(planeR,centre)<-crownReach*lengthR||dot(planeB,centre)<-crownReach*lengthB||dot(planeT,centre)<-crownReach*lengthT||dot(rowW,centre)<-crownReach*length(rowW))){return;}
+    let crownPixels=bucket.crownSize.y*scale*focal/max(away,.25);
+    var inflateQ=4096u;
+    if(crownPixels<FOREST_CROWN_MIN_PIXELS){
+     let h=forestClusterHash(tree^0x9e3779b9u);
+     if(crownPixels<.16||f32(h&65535u)/65535.>crownPixels*crownPixels){return;}
+     inflateQ=u32(clamp(FOREST_CROWN_MIN_PIXELS/max(crownPixels,.16)*4096.,4096.,65535.));
+    }
+    if(crownPixels<=FOREST_CROWN_SPLAT_PIXELS){
+     let slot=atomicAdd(&draws[(bucket.crown.y+${CROWN_SPLAT_REGION}u)*5u+1u],1u);
+     if(slot<bucket.crownLists.z){list[bucket.crownLists.x+slot]=vec2u(tree,(255u<<24u)|(inflateQ<<8u));}
+     return;
+    }
+    let allowedErr=pixels*away/max(scale*focal,1e-4);
+    let mBase=bucket.crownLists.w;
+    var sLo=0u;var sHi=stepCount;
+    while(sLo<sHi){
+     let sMid=(sLo+sHi+1u)/2u;
+     if(bitcast<f32>(crownMorph[mBase+sMid*4u+1u])<=allowedErr){sLo=sMid;}else{sHi=sMid-1u;}
+    }
+    var stepIdx=sLo;
+    if(crownPixels<5.2){stepIdx=stepCount;}
+    let hdr=mBase+stepIdx*4u;
+    let aliveTris=crownMorph[hdr]&65535u;
+    var morphT=0.;
+    if(stepIdx<stepCount){
+     let e0=bitcast<f32>(crownMorph[hdr+1u]);let e1=bitcast<f32>(crownMorph[hdr+5u]);
+     morphT=clamp((allowedErr-e0)/max(e1-e0,1e-5),0.,1.);
+    }else{
+     morphT=1.-smoothstep(FOREST_CROWN_SPLAT_PIXELS,5.2,crownPixels);
+    }
+    let morphByte=u32(clamp(morphT,0.,1.)*255.);
+    let baseSlot=atomicAdd(&draws[(bucket.crown.y+${CROWN_CONT_REGION}u)*5u+1u],aliveTris);
+    if(baseSlot+aliveTris<=bucket.crown.w){
+     let packedHi=(morphByte<<24u)|((stepIdx&4095u)<<12u);
+     for(var t=0u;t<aliveTris;t++){list[bucket.crown.x+baseSlot+t]=vec2u(tree,packedHi|t);}
+    }
+    return;
+   }
+  }
+ }
+ // Clusters run from coarsest parent to finest, so only a prefix can be drawn at this distance.
+ let finest=limit*nearest/(scale*focal);
+ var low=0u;var high=bucket.clusterCount;
+ while(low<high){let middle=(low+high)/2u;if(clusters[bucket.firstCluster+middle].parentErr>finest){low=middle+1u;}else{high=middle;}}
  for(var i=0u;i<low;i++){
   let index=bucket.firstCluster+i;let k=clusters[index];
   let isLeaf=(k.shape&1u)==1u;let allowed=select(limitWood,limitLeaf,isLeaf);
@@ -231,7 +284,7 @@ const FOREST_CLUSTER_SHADOW_PIXELS=1.5;
  }
 }
 @compute @workgroup_size(64)fn forestClusterReset(@builtin(global_invocation_id)id:vec3u){
- if(id.x<u32(parameters.y)*${4 + FOREST_CROWN_LEVELS + 1}u){atomicStore(&draws[id.x*5u+1u],0u);}
+ if(id.x<u32(parameters.y)*${4 + CROWN_LISTS}u){atomicStore(&draws[id.x*5u+1u],0u);}
 }
 `;
 
@@ -318,7 +371,7 @@ struct ForestClusterShadowVertex {@builtin(position)pos:vec4f,@location(0)leafUV
 `;
 
 // ForestClusterBucket, as FOREST_CLUSTER_SELECT lays it out.
-const BUCKET_BYTES = 128;
+const BUCKET_BYTES = 144;
 const CLUSTER_TRIANGLES = 128;
 const CLUSTER_INDICES = CLUSTER_TRIANGLES * 3;
 const CLUSTER_LEAVES = CLUSTER_TRIANGLES / 4;
@@ -326,9 +379,8 @@ const CLUSTER_LEAVES = CLUSTER_TRIANGLES / 4;
 const CLUSTERS_PER_DRAW = 200000;
 const LEAF_PATTERN = [0, 1, 2, 0, 2, 3, 3, 2, 4, 3, 4, 5];
 
-// The far crowns' lists follow the clusters' in one buffer: a list for each level and one for trees still
-// changing over, each with room for every root the forest can hold.
-const CROWN_LISTS = FOREST_CROWN_LEVELS + 1;
+// The far crowns' lists follow the clusters' in one buffer: one progressive continuum triangle list per species,
+// one 1-triangle horizon splat list, and one crossfade list for trees still changing over.
 const ROOT_BYTES = 48;
 
 export async function createForestClusters({ device, shader, module, frame, source, crowns = null, crownChange = {}, prototypes, roots, visible, commands, parameters, format, samples, sceneEntries, cloudEntries, surfaceEntries, firstMaterials, bind, hasLandShadow = false, shadowUniform = null, shadowFormat = 'depth32float' }) {
@@ -341,6 +393,7 @@ export async function createForestClusters({ device, shader, module, frame, sour
     return info;
   }) : null;
   const maxRoots = Math.floor(roots.size / ROOT_BYTES), crownListBase = count * 2 * CLUSTERS_PER_DRAW;
+  const crownTotalSlots = crownInfo ? count * CROWN_CONT_TRIS_PER_SPECIES + 2 * maxRoots : 0;
   const make = (data, usage, label) => {
     const buffer = device.createBuffer({ label, size: Math.max(4, data.byteLength), usage: usage | B.COPY_DST });
     owned.push(buffer);
@@ -348,16 +401,23 @@ export async function createForestClusters({ device, shader, module, frame, sour
     return buffer;
   };
   const vertices = make(source.vertices, B.STORAGE, 'forest cluster vertices'), indices = make(source.indices, B.STORAGE, 'forest cluster indices'), clusters = make(source.clusters, B.STORAGE, 'forest clusters');
-  const list = device.createBuffer({ label: 'forest clusters to draw', size: (crownListBase + (crownInfo ? CROWN_LISTS * maxRoots : 0)) * 8, usage: B.STORAGE });
+  const list = device.createBuffer({ label: 'forest clusters to draw', size: (crownListBase + crownTotalSlots) * 8, usage: B.STORAGE });
   owned.push(list);
   // Each species has four draws: wood and leaves for the camera, then wood and leaves for the shadow map.
-  // After every species' four come four more each for its far crowns: one a level, and one for trees changing over.
-  const crownDraw = (id, region) => { const level = crownInfo?.[id].levels[region % FOREST_CROWN_LEVELS]; return [level?.indexCount ?? 3, 0, level?.firstIndex ?? 0, 0, 0]; };
+  // After every species' four come CROWN_LISTS draws: progressive continuum triangles, 1-triangle splat, and crossfade.
+  const crownDraw = (id, region) => {
+    if (!crownInfo) return [3, 0, 0, 0, 0];
+    if (region === CROWN_CONT_REGION) return [3, 0, 0, 0, 0];
+    if (region === CROWN_SPLAT_REGION) return [3, 0, crowns.manifest.splatFirstIndex ?? 0, 0, 0];
+    return [crownInfo[id].baseIndexCount, 0, crownInfo[id].firstIndex, 0, 0];
+  };
   const draws = make(new Uint32Array([
     ...Array.from({ length: count * 4 }, () => [CLUSTER_INDICES, 0, 0, 0, 0]).flat(),
     ...Array.from({ length: count * CROWN_LISTS }, (_, i) => crownDraw(Math.floor(i / CROWN_LISTS), i % CROWN_LISTS)).flat(),
   ]), B.STORAGE | B.INDIRECT, 'forest cluster indirect draws');
-  const crownVertices = crownInfo ? make(crowns.vertices, B.STORAGE, 'forest crown vertices') : null, crownIndices = crownInfo ? make(crowns.indices, B.INDEX, 'forest crown indices') : null;
+  const crownVertices = crownInfo ? make(crowns.vertices, B.STORAGE, 'forest crown vertices') : null;
+  const crownIndices = crownInfo ? make(crowns.indices, B.INDEX | B.STORAGE, 'forest crown indices') : null;
+  const crownMorph = make(crownInfo ? crowns.morph : new Uint32Array(4), B.STORAGE, 'forest crown morph');
   const shadowList = hasLandShadow ? device.createBuffer({ label: 'forest clusters casting shadows', size: count * 2 * SHADOW_CLUSTERS_PER_DRAW * 8, usage: B.STORAGE }) : null;
   if (shadowList) owned.push(shadowList);
   const leafIndices = make(Uint32Array.from({ length: CLUSTER_LEAVES * LEAF_PATTERN.length }, (_, i) => Math.floor(i / LEAF_PATTERN.length) * FOREST_LEAF_VERTICES + LEAF_PATTERN[i % LEAF_PATTERN.length]), B.INDEX, 'forest cluster leaf pattern');
@@ -413,7 +473,7 @@ export async function createForestClusters({ device, shader, module, frame, sour
     const boundsData = new Float32Array([...info.low, info.posScale, ...info.uvLow, ...info.uvScale]);
     const bounds = make(boundsData, B.UNIFORM, 'forest cluster bounds');
     const subRoot = (p.species === 'ceiba' || p.species === 'mangrove') ? 256 : 0, closedCrown = p.cohort ? 512 : 0;
-    const uniform = (listBase) => make(new Uint32Array([listBase, firstMaterials[id], closedCrown | subRoot | p.nativeMaterials.length, samples]), B.UNIFORM, 'forest cluster bin');
+    const uniform = (listBase, extraFlags = 0) => make(new Uint32Array([listBase, firstMaterials[id], extraFlags | closedCrown | subRoot | p.nativeMaterials.length, samples]), B.UNIFORM, 'forest cluster bin');
     const wood = uniform(id * 2 * CLUSTERS_PER_DRAW), leaf = uniform((id * 2 + 1) * CLUSTERS_PER_DRAW);
     const woodShadow = uniform(id * 2 * SHADOW_CLUSTERS_PER_DRAW), leafShadow = uniform((id * 2 + 1) * SHADOW_CLUSTERS_PER_DRAW);
     const clusterGroup = (pipeline, hasIndices, from = list) => device.createBindGroup({
@@ -424,19 +484,20 @@ export async function createForestClusters({ device, shader, module, frame, sour
       layout: pipeline.getBindGroupLayout(2),
       entries: [{ binding: 0, resource: { buffer: roots } }, { binding: 2, resource: { buffer: offset } }],
     });
-    // One list a level and one for trees changing over, each read through its own place in the buffer.
+    // Progressive continuum triangles, 1-triangle splat (bit 1024), and crossfade list (bit 2048).
     const crown = crownInfo ? (() => {
       const look = make(forestCrownLook(crownInfo[id]), B.UNIFORM, 'forest crown look');
-      const bins = Array.from({ length: CROWN_LISTS }, () => uniform(0));
+      const splat = make(forestCrownSplatLook(crownInfo[id]), B.UNIFORM, 'forest crown splat');
+      const bins = [uniform(0, 0), uniform(0, 1024), uniform(0, 2048)];
       const groups = (pipeline) => ({
-        cluster: device.createBindGroup({ layout: pipeline.getBindGroupLayout(3), entries: [{ binding: 0, resource: { buffer: list } }, { binding: 2, resource: { buffer: crownVertices } }, { binding: 5, resource: { buffer: look } }] }),
+        cluster: device.createBindGroup({ layout: pipeline.getBindGroupLayout(3), entries: [{ binding: 0, resource: { buffer: list } }, { binding: 2, resource: { buffer: crownVertices } }, { binding: 3, resource: { buffer: crownIndices } }, { binding: 5, resource: { buffer: look } }, { binding: 6, resource: { buffer: crownMorph } }, { binding: 7, resource: { buffer: splat } }] }),
         surface: bins.map((bin) => device.createBindGroup({ layout: pipeline.getBindGroupLayout(2), entries: [{ binding: 0, resource: { buffer: roots } }, { binding: 2, resource: { buffer: bin } }] })),
       });
       return { info: crownInfo[id], bins, solid: groups(crownPipeline), fade: groups(crownFadePipeline) };
     })() : null;
     return {
       info, bucket, crown, rootCount: p.rootCount,
-      select: device.createBindGroup({ layout: select.getBindGroupLayout(0), entries: [frameEntry(0), ...[roots, visible, commands, clusters, list, draws, parameters, bucket].map((buffer, k) => ({ binding: k + 1, resource: { buffer } }))] }),
+      select: device.createBindGroup({ layout: select.getBindGroupLayout(0), entries: [frameEntry(0), ...[roots, visible, commands, clusters, list, draws, parameters, bucket].map((buffer, k) => ({ binding: k + 1, resource: { buffer } })), { binding: 10, resource: { buffer: crownMorph } }] }),
       wood: { surface: surfaceEntries(woodPipeline, p.id, wood, true), cluster: clusterGroup(woodPipeline, true) },
       leafDepth: { surface: surfaceEntries(leafDepthPipeline, p.id, leaf, false), cluster: clusterGroup(leafDepthPipeline, false) },
       leaf: { surface: surfaceEntries(leafPipeline, p.id, leaf, true), cluster: clusterGroup(leafPipeline, false) },
@@ -447,6 +508,8 @@ export async function createForestClusters({ device, shader, module, frame, sour
   });
   function frameEntry(binding) { return { binding, resource: { buffer: bind.frameUBO } }; }
   function placeTrees() {
+    const crownSplatBase = crownListBase + count * CROWN_CONT_TRIS_PER_SPECIES;
+    const crownFadeBase = crownSplatBase + maxRoots;
     prototypes.forEach((p, id) => {
       const s = species[id], slots = count * 4 + id * 4;
       s.rootCount = p.rootCount;
@@ -455,12 +518,19 @@ export async function createForestClusters({ device, shader, module, frame, sour
         p.firstRoot * 4, id * 4, p.firstRoot * 4 + p.rootCount * 2, slots, p.firstRoot * 4 + p.rootCount * 3, slots + 2, id * 2, id * 2 + 1]);
       f.set([...p.centre, p.radius], 12);
       u.set([CLUSTERS_PER_DRAW, p.firstRoot, p.rootCount, SHADOW_CLUSTERS_PER_DRAW], 16);
-      // Each species keeps the stretch of every crown list that its own roots span, so no two can meet.
+      // Each species keeps its own progressive continuum triangle slice plus root-indexed splat and fade stretches.
       if (s.crown) {
-        u.set([crownListBase + p.firstRoot, count * 4 + id * CROWN_LISTS, FOREST_CROWN_LEVELS, maxRoots], 20);
+        const contBase = crownListBase + id * CROWN_CONT_TRIS_PER_SPECIES;
+        const splatBase = crownSplatBase + p.firstRoot;
+        const fadeBase = crownFadeBase + p.firstRoot;
+        u.set([contBase, count * 4 + id * CROWN_LISTS, s.crown.info.stepCount + 1, CROWN_CONT_TRIS_PER_SPECIES], 20);
+        u.set([splatBase, fadeBase, p.rootCount, s.crown.info.morphOffset], 24);
         const widest = crownChange.widest ?? crowns.manifest.widestLeafErrors ?? 0;
-        f.set([...s.crown.info.levels.map((level) => level.errorMetres), s.crown.info.leafErrorMetres, widest > 0 ? s.crown.info.breadthMetres / widest : 0], 24);
-        s.crown.bins.forEach((bin, region) => device.queue.writeBuffer(bin, 0, new Uint32Array([crownListBase + region * maxRoots + p.firstRoot])));
+        f.set([widest > 0 ? s.crown.info.breadthMetres / widest : 0, s.crown.info.breadthMetres, s.crown.info.leafErrorMetres, 0], 28);
+        u.set([p.firstRoot * 4 + p.rootCount, id * 4 + 2, 1, 0], 32);
+        device.queue.writeBuffer(s.crown.bins[CROWN_CONT_REGION], 0, new Uint32Array([contBase]));
+        device.queue.writeBuffer(s.crown.bins[CROWN_SPLAT_REGION], 0, new Uint32Array([splatBase]));
+        device.queue.writeBuffer(s.crown.bins[CROWN_FADE_REGION], 0, new Uint32Array([fadeBase]));
       }
       device.queue.writeBuffer(s.bucket, 0, data);
     });
@@ -487,11 +557,13 @@ export async function createForestClusters({ device, shader, module, frame, sour
       pass.setBindGroup(3, s.crown[part].cluster);
       for (const region of regions) {
         pass.setBindGroup(2, s.crown[part].surface[region]);
-        pass.drawIndexedIndirect(draws, (count * 4 + id * CROWN_LISTS + region) * 20);
+        const offset = (count * 4 + id * CROWN_LISTS + region) * 20;
+        if (region === CROWN_CONT_REGION) pass.drawIndirect(draws, offset);
+        else pass.drawIndexedIndirect(draws, offset);
       }
     });
   };
-  const crownLevels = Array.from({ length: FOREST_CROWN_LEVELS }, (_, level) => level);
+  const crownSolidRegions = [CROWN_CONT_REGION, CROWN_SPLAT_REGION];
   return {
     placeTrees,
     crowns: Boolean(crownInfo),
@@ -516,8 +588,8 @@ export async function createForestClusters({ device, shader, module, frame, sour
     drawOpaque(pass) {
       drawWith(pass, woodPipeline, groups.wood.zero, groups.wood.cloud, 'wood', false);
       if (!crownInfo) return;
-      drawCrowns(pass, crownPipeline, groups.crown, 'solid', crownLevels);
-      drawCrowns(pass, crownFadePipeline, groups.crownFade, 'fade', [FOREST_CROWN_LEVELS]);
+      drawCrowns(pass, crownPipeline, groups.crown, 'solid', crownSolidRegions);
+      drawCrowns(pass, crownFadePipeline, groups.crownFade, 'fade', [CROWN_FADE_REGION]);
     },
     drawLeafDepth(pass) { drawWith(pass, leafDepthPipeline, groups.leafDepth.zero, null, 'leafDepth', true); },
     drawLeaves(pass) { drawWith(pass, leafPipeline, groups.leaf.zero, groups.leaf.cloud, 'leaf', true); },

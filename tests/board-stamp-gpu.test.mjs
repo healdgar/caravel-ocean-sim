@@ -106,7 +106,7 @@ test('a board is stamped on its ground: furlongs, ways, roofs, water and town, t
     near(at(64, 74), over([176, 160, 130], 0.9), 4, 'road');
     const bank = over([70, 84, 58], 0.5);
     near(at(81, 40), bank, 4, 'stream bank');
-    near(at(79, 40), over([52, 78, 88], 0.95, bank), 4, 'stream');
+    near(at(79, 40), over([46, 54, 48], 0.82, bank), 4, 'stream bed');
     near(at(64, 101), over([170, 160, 140], 0.95), 4, 'square');
     const roof = at(56, 26);
     assert.ok(roof[0] > roof[1] + 20 && roof[1] < BASE[1], `a tiled roof: ${roof}`);

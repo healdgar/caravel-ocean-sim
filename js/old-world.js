@@ -553,7 +553,8 @@ function makeCountry(region, heights, port) {
     [40, 70, 34], // wood
   ];
   const BOUNDARY = [null, [62, 72, 44, 0.8], [146, 136, 114, 0.5], [150, 140, 118, 0.55], [128, 120, 80, 0.4], [118, 108, 76, 0.4], [134, 126, 98, 0.3], null, null];
-  const VEGETATION = [0, 0.18, 0.235, 0, 0, 0, 0, 0, 0.92];
+  const VEGETATION = [0, 0.18, 0.235, 0, 0, 0, 0, 0.19, 0.96];
+  const STOOD_VEGETATION = [0, 0.18, 0.235, 0, 0, 0, 0, 0, 0.96];
   const SOME_TREES = 0.18;
 
   // What stands at a point of dry ground: its use, how much of it bears trees (as the vegetation
@@ -568,9 +569,14 @@ function makeCountry(region, heights, port) {
     if (stood) {
       // A board's country keeps the colours of its geography: its parcels, roads and town ground are stamped onto
       // them by the GPU (js/board-stamp.js). Here only what bears trees is said, for the forest and the planting.
-      let vegetation = kind === OLD_WORLD_LAND.PASTURE && use.wooded ? SOME_TREES : VEGETATION[kind];
+      let vegetation = STOOD_VEGETATION[kind];
       if (kind === OLD_WORLD_LAND.CITY) vegetation = plan.treesAt(x, z) !== CITY_TREES.NONE ? SOME_TREES : 0;
-      else if (use.hedged && hold.edge < 10) vegetation = Math.max(vegetation, SOME_TREES);
+      else {
+        if (hold.woodEdge > 0 && (kind === OLD_WORLD_LAND.PASTURE || kind === OLD_WORLD_LAND.SCRUB || kind === OLD_WORLD_LAND.FALLOW)) {
+          vegetation = Math.max(vegetation, 0.18 + hold.woodEdge * 0.08);
+        }
+        if (use.hedged && hold.edge < 10) vegetation = Math.max(vegetation, SOME_TREES);
+      }
       if (urban > 0 && urban < 0.5) vegetation *= 1 - urban * 2;
       const way = kind !== OLD_WORLD_LAND.CITY && kind !== OLD_WORLD_LAND.WOOD && roadNear ? roadNear(x, z) : null;
       if (way && way.distance < 14 && roadLined(way, x, z)) vegetation = Math.max(vegetation, SOME_TREES);
@@ -646,9 +652,11 @@ function makeCountry(region, heights, port) {
     { spacing: 12, height: [5, 3.5], scale: [0.42, 0.2], species: ['maple', 'birch', 'elm'], cohort: 'veteran', tint: [1, 1, 0.94] },
     { spacing: 10.5, height: [5.5, 2.5], scale: [0.55, 0.2], species: ['oak'], cohort: 'veteran', tint: [0.86, 0.94, 0.9] },
     NO_TREES, NO_TREES, NO_TREES,
-    { spacing: 28, height: [11, 7], scale: [0.85, 0.45], species: ['oak'], cohort: 'veteran', tint: [0.94, 0.98, 0.9] },
-    NO_TREES, null,
+    { spacing: 48, height: [10, 7], scale: [0.82, 0.42], species: ['oak', 'elm'], cohort: 'veteran', tint: [0.94, 0.98, 0.9] },
+    { spacing: 36, height: [5.5, 4.5], scale: [0.48, 0.3], species: ['oak', 'birch', 'chestnut'], cohort: 'canopy', tint: [0.92, 0.96, 0.88] },
+    null,
   ];
+  const WOOD_EDGE = { spacing: 6.2, height: [5.5, 6.0], scale: [0.46, 0.34], species: ['birch', 'oak', 'maple', 'chestnut'], cohort: 'canopy', tint: [0.94, 0.99, 0.9] };
   const HEDGEROW = { spacing: 10, height: [9, 7], scale: [0.7, 0.4], species: ['elm', 'chestnut', 'maple'], cohort: 'veteran', tint: [0.96, 1, 0.92] };
   const ROADSIDE = { spacing: 11, height: [11, 8], scale: [0.85, 0.4], species: ['elm', 'maple', 'oak'], cohort: 'veteran', tint: [0.96, 1, 0.92] };
   // In the town: a ring of shade trees round a square, a walled garden's orchard, a tree in a yard.
@@ -667,8 +675,12 @@ function makeCountry(region, heights, port) {
     if (use.kind === OLD_WORLD_LAND.WOOD) return null;
     if (way && way.distance < 8.5 && roadLined(way, x, z)) return ROADSIDE;
     if (use.hedged && hold.edge < 3.2) return HEDGEROW;
+    if (stood) {
+      if (hold.woodEdge > 0 && (use.kind === OLD_WORLD_LAND.PASTURE || use.kind === OLD_WORLD_LAND.SCRUB || use.kind === OLD_WORLD_LAND.FALLOW)) return WOOD_EDGE;
+      if (use.kind === OLD_WORLD_LAND.PASTURE || use.kind === OLD_WORLD_LAND.SCRUB) return NO_TREES;
+    }
     return use.kind === OLD_WORLD_LAND.PASTURE && !use.wooded ? NO_TREES : TENDED[use.kind];
   };
 
-  return { city, people, year, cityX, cityZ, cityRadius, cityArea, town, roads, plan, grid, inland, landAt, treesAt, beyondTown, board: stood ? stood.stamp : null, places: stood ? stood.places : null, watch: stood ? stood.watch : null, inlandWater: stood ? stood.inlandWater : null, herds: stood ? stood.herds : null };
+  return { city, people, year, cityX, cityZ, cityRadius, cityArea, town, roads, plan, grid, inland, landAt, treesAt, beyondTown, board: stood ? stood.stamp : null, places: stood ? stood.places : null, watch: stood ? stood.watch : null, inlandWater: stood ? stood.inlandWater : null, herds: stood ? stood.herds : null, loneTrees: stood ? stood.loneTrees : null };
 }

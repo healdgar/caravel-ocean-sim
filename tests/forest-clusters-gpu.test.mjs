@@ -23,13 +23,13 @@ const instrument=()=>{
 };
 const drawn=page=>page.evaluate(async()=>{
   forestDraws.length=0;forestCapture=true;await new Promise(requestAnimationFrame);await new Promise(requestAnimationFrame);forestCapture=false;
-  const totals={},contents=new Map();
+  const totals={__instances:{}},contents=new Map();
   for(const buffer of new Set(forestDraws.map(d=>d.buffer))){
     const read=forestDevice.createBuffer({size:buffer.size,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),encoder=forestDevice.createCommandEncoder();
     encoder.copyBufferToBuffer(buffer,0,read,0,buffer.size);forestDevice.queue.submit([encoder.finish()]);await read.mapAsync(GPUMapMode.READ);
     contents.set(buffer,new Uint32Array(read.getMappedRange().slice(0)));read.unmap();read.destroy();
   }
-  for(const d of forestDraws){const words=contents.get(d.buffer),n=words[d.offset/4]*words[d.offset/4+1]/3/2;totals[d.label]=(totals[d.label]??0)+n;}
+  for(const d of forestDraws){const words=contents.get(d.buffer),inst=words[d.offset/4+1]/2,n=words[d.offset/4]*inst/3;totals[d.label]=(totals[d.label]??0)+n;totals.__instances[d.label]=(totals.__instances[d.label]??0)+inst;}
   return totals;
 });
 async function open(query,region='lisbon'){
@@ -49,22 +49,21 @@ async function open(query,region='lisbon'){
   return {page,errors,requested};
 }
 
-// Lisbon wears the Portugal pack since 224cd17. That pack has no crown shells: beyond its far crowns
-// (js/forest-crowns.js) its farthest trees are small models from the native streams, drawn by the native
-// wood pipeline, as the tropical pack's are.
-// The dock faces a city now, not a wood: its trees stand round the square, in walled gardens and back
-// yards, and in the country behind, so the view is taken from over the square, looking inland.
-test('Lisbon\'s trees draw as clusters, far ones keep their small models, and no map the compressed set replaces is fetched',{timeout:360000},async()=>{
+// Lisbon wears the Portugal pack since 224cd17. With hybrid continuum crowns active, near trees draw as
+// per-tree cluster cuts and mid-to-far trees decimate smoothly through 8 geomorphing crown levels down to a
+// 1-triangle horizon splat at 1 pixel, replacing the 44-triangle native far models completely.
+test('Lisbon\'s trees draw as clusters near and hybrid continuum crowns to the horizon, and no map the compressed set replaces is fetched',{timeout:360000},async()=>{
   const {page,errors,requested}=await open({view:'free',prow:0,cam:'-70,45,-6250,0,-12'});
   try{
     const totals=await drawn(page);
     assert.ok(totals['forest clusters forestNativeOpaqueFS']>1000,JSON.stringify(totals));
     assert.ok(totals['forest clusters forestNativeLeafFS']>1000,JSON.stringify(totals));
     assert.equal(totals['forest clusters forestNativeLeafDepthFS'],totals['forest clusters forestNativeLeafFS'],'every leaf lays depth and then shades');
-    assert.ok((totals['instanced forest forestNativeOpaqueFS']??0)>0,`far trees still draw their small models: ${JSON.stringify(totals)}`);
-    assert.ok(totals['instanced forest forestNativeOpaqueFS']<totals['forest clusters forestNativeOpaqueFS'],'the native pipeline draws far models only, a small part of the wood');
+    assert.ok((totals['forest crowns forestCrownFS']??0)>0,`far trees draw through hybrid continuum crowns: ${JSON.stringify(totals)}`);
+    assert.equal(totals['instanced forest forestNativeOpaqueFS']??0,0,`continuum crowns replace the 44-tri native far models: ${JSON.stringify(totals)}`);
     for(const label of ['forestNativeLeafFS','forestNativeLeafDepthFS'])assert.equal(totals[`instanced forest ${label}`]??0,0,`${label} must not draw beside clusters`);
     assert.ok(requested.some(path=>path.includes('/portugal/clusters/vertices.bin')),'Lisbon draws the Portugal pack\'s own clusters');
+    assert.ok(requested.some(path=>path.includes('/portugal/crowns/morph.bin')),'Lisbon loads 3D geomorph targets for continuum crowns');
     assert.ok(requested.some(path=>/\/portugal\/surfaces\/family-\d+-albedo\.(bc7|astc)\.bin/.test(path)),'bark and leaves arrive block-compressed');
     assert.deepEqual(requested.filter(path=>path.includes('/forest-scenery/')&&path.endsWith('.png')),[],'the maps the compressed set replaces are never downloaded');
     assert.deepEqual(errors,[]);
@@ -81,9 +80,10 @@ for(const [region,pack,query] of [['lisbon','portugal',{view:'free',prow:0,cam:'
     };
     const crowned=await read({}),cards=await read({forestCrowns:0});
     const solid=crowned.totals['forest crowns forestCrownFS']??0,fading=crowned.totals['forest crowns forestCrownFadeFS']??0;
+    const solidTrees=crowned.totals.__instances['forest crowns forestCrownFS']??0,fadingTrees=crowned.totals.__instances['forest crowns forestCrownFadeFS']??0;
     assert.ok(crowned.requested.some(path=>path.includes(`/${pack}/crowns/vertices.bin`)),'the pack\'s crowns were never requested');
     assert.ok(solid>0,`far trees draw as opaque crowns: ${JSON.stringify(crowned.totals)}`);
-    assert.ok(fading<solid,`only the trees at the change wear crown and leaves together: ${JSON.stringify(crowned.totals)}`);
+    assert.ok(fadingTrees<solidTrees,`only the trees at the change wear crown and leaves together (${fadingTrees} fading vs ${solidTrees} solid trees): ${JSON.stringify(crowned.totals)}`);
     // A tree in its crown draws no cluster, so both kinds fall, and every leaf still lays depth before it shades.
     for(const label of ['forest clusters forestNativeLeafFS','forest clusters forestNativeOpaqueFS'])assert.ok(crowned.totals[label]<cards.totals[label],`${label}: ${crowned.totals[label]} with crowns, ${cards.totals[label]} without`);
     assert.equal(crowned.totals['forest clusters forestNativeLeafDepthFS'],crowned.totals['forest clusters forestNativeLeafFS']);
@@ -91,6 +91,8 @@ for(const [region,pack,query] of [['lisbon','portugal',{view:'free',prow:0,cam:'
     // Far trees cast into the land shadow map exactly as they did: the shadow cut never asks about crowns.
     for(const label of ['forest clusters forestClusterLeafShadowVS','forest clusters forestClusterWoodShadowVS'])assert.equal(crowned.totals[label]??0,cards.totals[label]??0,label);
     for(const label of ['forest crowns forestCrownFS','forest crowns forestCrownFadeFS'])assert.equal(cards.totals[label]??0,0,`${label} draws with crowns switched off`);
+    assert.equal(crowned.totals['instanced forest forestNativeOpaqueFS']??0,0,'continuum crowns replace native far models when enabled');
+    assert.ok((cards.totals['instanced forest forestNativeOpaqueFS']??0)>0,'native far models remain as fallback when forestCrowns=0');
     assert.deepEqual(crowned.errors,[]);assert.deepEqual(cards.errors,[]);
   });
 }
@@ -108,13 +110,29 @@ test('the surveyed island keeps crown shells on its far canopy',{timeout:360000}
   }finally{await page.close();}
 });
 
-test('tropical coasts draw palms as clusters, with far models still present',{timeout:360000},async()=>{
+test('tropical coasts draw palms as clusters near and continuum crowns far, down to 1-triangle horizon splats',{timeout:360000},async()=>{
   // Among the palms of the San Juan shore, looking inland.
   const {page,errors}=await open({view:'free',prow:0,cam:'3274.9,8.4,-2425.1,40,12'},'san-juan');
   try{
     const totals=await drawn(page);
     assert.ok(totals['forest clusters forestNativeLeafFS']>0,JSON.stringify(totals));
-    assert.ok((totals['instanced forest forestNativeOpaqueFS']??0)>0,`far tropical trees still draw their small models: ${JSON.stringify(totals)}`);
+    assert.ok((totals['forest crowns forestCrownFS']??0)>0,`far tropical trees draw through continuum crowns: ${JSON.stringify(totals)}`);
+    assert.equal(totals['instanced forest forestNativeOpaqueFS']??0,0,`continuum crowns replace 44-tri far models: ${JSON.stringify(totals)}`);
+    // Verify both progressive continuum triangles (firstVertex === 0) and 1-triangle horizon splats (firstIndex > 0) are actively drawn.
+    const crownRegions=await page.evaluate(async()=>{
+      forestDraws.length=0;forestCapture=true;await new Promise(requestAnimationFrame);forestCapture=false;
+      const crownDraws=forestDraws.filter(d=>d.label==='forest crowns forestCrownFS');
+      if(!crownDraws.length)return {continuumTris:0,splatTrees:0};
+      const buf=crownDraws[0].buffer;
+      const read=forestDevice.createBuffer({size:buf.size,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),enc=forestDevice.createCommandEncoder();
+      enc.copyBufferToBuffer(buf,0,read,0,buf.size);forestDevice.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);
+      const words=new Uint32Array(read.getMappedRange().slice(0));read.unmap();read.destroy();
+      let continuumTris=0,splatTrees=0;
+      for(const d of crownDraws){const at=d.offset/4;if(words[at]===3){if(words[at+2]>0)splatTrees+=words[at+1];else continuumTris+=words[at+1];}}
+      return {continuumTris,splatTrees};
+    });
+    assert.ok(crownRegions.continuumTris>0,`mid-to-far trees decimate through progressive continuum triangles: ${JSON.stringify(crownRegions)}`);
+    assert.ok(crownRegions.splatTrees>0,`distant horizon trees collapse to 1-triangle splats: ${JSON.stringify(crownRegions)}`);
     assert.deepEqual(errors,[]);
   }finally{await page.close();}
 });

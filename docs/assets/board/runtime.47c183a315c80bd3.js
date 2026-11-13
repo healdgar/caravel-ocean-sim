@@ -248,12 +248,59 @@ globalThis.BOARD_MODEL = (() => {
         if (yard && !yard.removed && yard.poly?.length > 2) yards.push({ church: kinds.length / 6 - 1, graves: typeof graveyardBurials === 'function' ? graveyardBurials(s, b).length : 0, points: line(yard.poly) });
       }
     });
+    // Every cell of the model's ground where wood still stands (2 bits/cell: 0 open, 1 forest, 2 upland pine, 3 scrub).
+    // In Castle and Commons, unclaimed B.FOREST/B.PINE wilderness, steep LK.NONE woods, LS.WOOD timber furlongs, and
+    // steep/wet corners (mask[c*4] === 0) keep their dense trees; plough and pasture clear only workable ground.
+    const cellCount = GRID * GRID, woodBytes = new Uint8Array(Math.ceil(cellCount / 4));
+    const fDry = new Uint32Array(W.land?.F?.length || 0), fWood = new Uint32Array(W.land?.F?.length || 0);
+    const mask = W.land?.mask;
+    for (let cz = 0; cz < GRID; cz++) for (let cx = 0; cx < GRID; cx++) {
+      const c = cIdx(cx, cz), bio = W.biome[c];
+      if (bio === B.WATER || W.water[c]) continue;
+      const mx = cellX(cx), mz = cellZ(cz), f = W.land?.F ? furlongAt(mx, mz) : null;
+      if (f) fDry[f.k]++;
+      if (W.roadCells[c] || W.settlements.some((s) => dist2d(mx, mz, s.pos.x, s.pos.z) < (s.wallR || s.extentR || s.radius || 60) * 1.12)) continue;
+      const wooded = bio === B.FOREST || bio === B.PINE || f?.state === LS.WOOD;
+      if (!wooded) continue;
+      const arable = Boolean(mask && mask[c * 4] > 0 && f && f.kind !== LK.NONE);
+      let code = 0;
+      if (arable && (f.state === LS.TILLED || f.state === LS.PASTURE || f.state === LS.BURNT)) code = 0;
+      else if (arable && f.state === LS.SCRUB) code = 3;
+      else code = bio === B.PINE ? 2 : 1;
+      if (!code) continue;
+      woodBytes[c >> 2] |= (code & 3) << ((c & 3) * 2);
+      if (f && (code === 1 || code === 2)) fWood[f.k]++;
+    }
+    let woodText = '';
+    for (let k = 0; k < woodBytes.length; k += 0x8000) woodText += String.fromCharCode.apply(null, woodBytes.subarray(k, k + 0x8000));
+    const woods = btoa(woodText);
+    // Every tree of the model's open country and scrub that still stands outside dense wood: four numbers each
+    // (x, z, size, and 0 broadleaf, 1 pine, 2 small tree of hedge, marsh or regenerating scrub).
+    const loneTrees = [];
+    if (W.treeSpots) {
+      const KINDS = ['dec', 'pine', 'small'];
+      for (let kindCode = 0; kindCode < KINDS.length; kindCode++) {
+        for (const t of W.treeSpots[KINDS[kindCode]] || []) {
+          if (t.cut) continue;
+          const f = W.land?.F ? furlongAt(t.x, t.z) : null;
+          if (f && treeGone(f, t)) continue;
+          const cx = toCell(t.x), cz = toCell(t.z);
+          if (cx < 0 || cz < 0 || cx >= GRID || cz >= GRID) continue;
+          const c = cIdx(cx, cz);
+          if (W.biome[c] === B.WATER || W.water[c] || W.roadCells[c]) continue;
+          const code = (woodBytes[c >> 2] >> ((c & 3) * 2)) & 3;
+          if (code === 1 || code === 2) continue;
+          loneTrees.push(r1(t.x), r1(t.z), Math.round((t.s || 1) * 100) / 100, kindCode);
+        }
+      }
+    }
     // Every furlong of the ground, held or not: whose it is (-1 no one's), what it is held as, what stands on it.
     const fields = [];
     for (const f of W.land.F) {
       const poly = f.poly || computeFurlongPoly(f);
       if (!poly || poly.length < 3) continue;
-      fields.push({ place: f.dom, kind: f.kind, state: f.state, heading: r3(f.th ?? 0), strip: r1(f.w ?? 0), x: r1(f.x), z: r1(f.z), points: line(poly) });
+      const wood = f.state === LS.WOOD ? 1 : fDry[f.k] > 0 ? fWood[f.k] / fDry[f.k] : 0;
+      fields.push({ place: f.dom, kind: f.kind, state: f.state, wood: r3(wood), heading: r3(f.th ?? 0), strip: r1(f.w ?? 0), x: r1(f.x), z: r1(f.z), points: line(poly) });
     }
     // The people, six to a soul: place, given name, family, sex and age in years, trade, and the house they keep
     // (an index into the buildings, -1 if none stands). Names and trades are told once and pointed to.
@@ -304,6 +351,8 @@ globalThis.BOARD_MODEL = (() => {
       lanes: workerTrackSegments().flatMap((t) => [r1(t.a.x), r1(t.a.z), r1(t.b.x), r1(t.b.z)]),
       // What a furlong is held as and what stands on it, in the model's own codes.
       fieldKinds: LK, fieldStates: LS,
+      woods,
+      loneTrees,
       fields,
       people: souls.length / 6,
       souls: { given, families, trades, each: souls },

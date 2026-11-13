@@ -214,7 +214,7 @@ test('a founded board stands in the game as its own buildings, land and woods, a
   assert.equal(of[CITY_TYPE.FOOTBRIDGE] + of[CITY_TYPE.STONE_BRIDGE], B.bridges);
 
   // Its land: uses only, no colour (the ground keeps its geography's; the GPU stamps the parcels on it).
-  const kinds = new Set(); let woods = 0, forest = 0, town = 0;
+  const kinds = new Set(); let woods = 0, forest = 0, town = 0, openPasture = 0, woodMargin = 0, openTilled = 0;
   for (let z = -SPAN / 2 + 40; z < SPAN / 2; z += 37) for (let x = -SPAN / 2 + 40; x < SPAN / 2; x += 37) {
     if (bayHeight(x, z) < 0.6) continue;
     const land = country.landAt(x, z, 0), trees = country.treesAt(x, z);
@@ -222,10 +222,27 @@ test('a founded board stands in the game as its own buildings, land and woods, a
     assert.ok(land.vegetation >= 0 && land.vegetation <= 1);
     kinds.add(land.kind);
     if (land.kind === OLD_WORLD_LAND.CITY) { town++; assert.ok(trees === OLD_WORLD_NO_TREES || trees.spacing >= 8, 'a town tree is a planted one'); }
-    if (land.kind === OLD_WORLD_LAND.WOOD) { woods++; assert.ok(trees === null || trees === OLD_WORLD_NO_TREES, 'a wood keeps the forest\'s rules'); if (trees === null) forest++; }
+    if (land.kind === OLD_WORLD_LAND.WOOD) {
+      woods++;
+      assert.ok(land.vegetation > 0.9, `standing wood is dense forest: ${land.vegetation}`);
+      assert.ok(trees === null || trees === OLD_WORLD_NO_TREES, 'a wood keeps the forest\'s rules');
+      if (trees === null) forest++;
+    }
+    if (land.kind === OLD_WORLD_LAND.PASTURE || land.kind === OLD_WORLD_LAND.SCRUB) {
+      assert.ok(land.vegetation >= 0 && land.vegetation <= 0.27, `pasture and waste stay open except feathered wood/hedge/road margins: ${land.vegetation}`);
+      if (land.vegetation === 0 && trees === OLD_WORLD_NO_TREES) openPasture++;
+      else if (trees !== OLD_WORLD_NO_TREES && trees.spacing < 8) woodMargin++;
+    }
+    if (land.kind === OLD_WORLD_LAND.CORN || land.kind === OLD_WORLD_LAND.FALLOW || land.kind === OLD_WORLD_LAND.VINES) {
+      assert.ok(land.vegetation <= 0.27, `tilled field stays open except hedge/road/wood margin: ${land.vegetation}`);
+      if (land.vegetation === 0 && trees === OLD_WORLD_NO_TREES) openTilled++;
+    }
   }
   for (const kind of [OLD_WORLD_LAND.CITY, OLD_WORLD_LAND.WOOD, OLD_WORLD_LAND.CORN, OLD_WORLD_LAND.PASTURE]) assert.ok(kinds.has(kind), `land of kind ${kind}; seen ${[...kinds]}`);
   assert.ok(woods > 20 && forest > woods * 0.8, `woodland handed to the forest: ${forest} of ${woods}`);
+  assert.ok(openPasture > 80 && openTilled > 10 && woodMargin > 0, `open pastures/wastes (${openPasture}), feathered wood margins (${woodMargin}), open tilled fields (${openTilled})`);
+  assert.ok(Array.isArray(board.loneTrees) && board.loneTrees.length >= 16 && board.loneTrees.length % 4 === 0, `model lone/copse trees exported: ${board.loneTrees?.length / 4}`);
+  assert.ok(country.loneTrees instanceof Float32Array && country.loneTrees.length >= 12 && country.loneTrees.length % 4 === 0, `country lone trees placed: ${country.loneTrees?.length / 4}`);
   assert.ok(town > 20, `town ground: ${town}`);
   assert.ok(plan.standing.every(([x, z]) => plan.treesAt(x, z) !== CITY_TREES.NONE), 'every planted tree stands where a tree may');
 
@@ -280,6 +297,19 @@ test('Lisbon\'s board of 1550 is baked from this model, fitted to its ground and
   assert.ok(board.people > 18000 && board.places[0].people > 6000 && board.buildings.count > 4000, `${board.people} total people (${board.places[0].people} in Lisboa), ${board.buildings.count} buildings`);
   const lisbonHerds = board.places.reduce((s, p) => s + (p.herds?.sheep || 0) + (p.herds?.cattle || 0) + (p.herds?.horses || 0) + (p.herds?.swine || 0), 0);
   assert.ok(lisbonHerds > 1000, `Lisbon lived herds: ${lisbonHerds}`);
+  // Castle & Commons standing forests (B.FOREST, B.PINE, LS.WOOD, forested LS.WILD) are exported cell-by-cell.
+  assert.equal(typeof board.woods, 'string');
+  const woodBytes = Buffer.from(board.woods, 'base64');
+  assert.equal(woodBytes.length, (board.grid * board.grid) / 4);
+  let standingCells = 0, scrubCells = 0;
+  for (let i = 0; i < board.grid * board.grid; i++) {
+    const code = (woodBytes[i >> 2] >> ((i & 3) * 2)) & 3;
+    if (code === 1 || code === 2) standingCells++;
+    else if (code === 3) scrubCells++;
+  }
+  assert.ok(standingCells > 6000 && scrubCells >= 0, `Lisbon standing forest cells: ${standingCells}, scrub: ${scrubCells}`);
+  assert.ok(Array.isArray(board.loneTrees) && board.loneTrees.length >= 400 && board.loneTrees.length <= 20000 && board.loneTrees.length % 4 === 0, `Lisbon sparse lone/copse trees: ${board.loneTrees?.length / 4}`);
+  assert.ok(board.fields.filter((f) => (f.wood ?? 0) >= 0.5).length > 100, 'heavily wooded furlongs recorded');
   // And the page is given it.
   const build = readFileSync(new URL('../build.mjs', import.meta.url), 'utf8');
   assert.ok(build.includes(`'${BAKED_BOARDS['lisbon:1550']}'`), 'the build publishes the baked board');
