@@ -38,6 +38,7 @@ export const BOARD_KEEP_DAYS = 10;
 export function createBoardLife({ baked, fetchImpl = fetch, open = openBoardWorker, onNews = null, onNewsAll = null, onState = null, stride = 6, kept = null, keep = null, keepEvery = BOARD_KEEP_DAYS }) {
   const world = baked?.world ?? null, asset = world ? bakedWorldAsset(baked.port, baked.year) : null;
   let model = null, busy = false, told = world?.day ?? 0, keeping = null;
+  let pendingMaritime = null;
   const life = {
     state: 'asleep', error: null, port: baked?.port ?? null, year: baked?.year ?? null,
     // The model's day now, the day the game's calendar asks for, and how many days it has lived here.
@@ -82,6 +83,9 @@ export function createBoardLife({ baked, fetchImpl = fetch, open = openBoardWork
     market: (place = 0) => need().then(() => model.hook('market', [place])),
     // Execute a trade against the settlement's live market ledger and return the updated market snapshot.
     trade: (order) => need().then(() => model.hook('trade', [order])),
+    // Autonomous vessel telemetry: actual wind/weather progress, waits, arrivals, departures, and sinkings fed back into simTick.
+    setMaritimeReport: (report) => { pendingMaritime = report; },
+    pilotMaritime: (report) => need().then(() => model.hook('pilotMaritime', [report])),
     // The model's day for a date of the game's calendar, with its fraction (null with no frozen world to count from).
     dayAt: (dateMs) => world && Number.isFinite(dateMs) ? boardDayAt(dateMs, boardEpochYear(world)) : null,
     // Anyone, by their number: the model's whole card of them, and what it links to.
@@ -125,6 +129,11 @@ export function createBoardLife({ baked, fetchImpl = fetch, open = openBoardWork
     life.wanted = Math.max(life.wanted, boardDayOf(dateMs, boardEpochYear(world)));
     if (busy || life.wanted <= life.day) return;
     busy = true;
+    if (pendingMaritime && model) {
+      const report = pendingMaritime;
+      pendingMaritime = null;
+      model.hook('pilotMaritime', [report]).catch(() => {});
+    }
     model.request('advance', { days: Math.min(stride, life.wanted - life.day) }).then(async (reply) => {
       life.lived += reply.day - life.day; life.day = reply.day;
       const lines = await model.request('view', { kind: 'ui', panel: 'advisor-annals', from: told + 1, n: 400 });

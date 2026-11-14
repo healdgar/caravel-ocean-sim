@@ -2531,7 +2531,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       pass.setPipeline(groundPipe);pass.setBindGroup(0,groundGroup);
       for(let i=0;i<groundMeshes.length;i++)groundCull.draw(pass,i,0,groundMeshes[i].buffer);
       if(herds&&isSectionVisible(activeRegion,camera,viewProjection,2600))herds.draw(pass);
-      if(tradeVessels&&isSectionVisible(activeRegion,camera,viewProjection,5200))tradeVessels.draw(pass);
+      if(tradeVessels&&isSectionVisible(activeRegion,camera,viewProjection,12000))tradeVessels.draw(pass);
       // Draw solid crowns/wood before cutout leaves for Apple hidden-surface
       // removal. The far tier has no alpha foliage or expensive bark fallback.
       for(const[pipe,groupIndex,part]of[[opaqueTreePipe,1,'opaque'],[treePipe,2,'leaves']]){
@@ -2545,7 +2545,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       }
       importedCanopy?.drawCutout(pass);
       forest?.drawCutout(pass);
-      if(tradeVessels&&isSectionVisible(activeRegion,camera,viewProjection,5200))tradeVessels.drawDamaged?.(pass);
+      if(tradeVessels&&isSectionVisible(activeRegion,camera,viewProjection,12000))tradeVessels.drawDamaged?.(pass);
     },
     drawWater(pass,camera={x:0,y:6,z:0},viewProjection=null){
       if(inlandWater&&isSectionVisible(activeRegion,camera,viewProjection,5200))inlandWater.draw(pass);

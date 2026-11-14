@@ -1,9 +1,11 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import vm from 'node:vm';
 
-import { BAKED_BOARDS, boardGroundFits } from '../js/board-model.js';
+import { BAKED_BOARDS, BAKED_WORLDS, boardGroundFits, boardPrefix } from '../js/board-model.js';
 import { oldWorldCountry, registerBakedBoard } from '../js/old-world.js';
 import { buildPortPrefabGeometry } from '../js/coastal-world.js';
 import { layTownStreets } from '../js/town-streets.js';
@@ -30,10 +32,16 @@ import {
 import {
   TRADE_VESSELS_WGSL,
   TRADE_VESSEL_ARCHETYPES,
+  TRADE_VESSEL_CONTINUUM_WGSL,
+  TRADE_VESSEL_SPLAT_WGSL,
+  computeSailingPolar,
   createTradeVessels,
+  createVesselAutopilotState,
   getTradeVesselArchetype,
   inspectTradeVesselArchetypes,
   sampleTradeVesselState,
+  stepTradeVesselAutopilot,
+  tradeVesselsSource,
 } from '../js/trade-vessels.js';
 
 function upsampleSurvey(survey, targetN = 257) {
@@ -443,10 +451,10 @@ test('revamped meandered rivers, 12-float hydraulics, estuary convergence shader
   assert.ok(Math.abs(cannonSplash.waterSurfaceY - hitWater.wy) < 0.25, 'splash occurs at upland river water surface elevation');
 });
 
-test('trade vessels preserve damaged hulls, GPU state, and consistent yaw across setTraffic refreshes', async (t) => {
+function createMockTradeEnv(t) {
   const prevBuf = globalThis.GPUBufferUsage;
   const prevTex = globalThis.GPUTextureUsage;
-  globalThis.GPUBufferUsage = { VERTEX: 1, INDEX: 2, UNIFORM: 4, STORAGE: 8, COPY_DST: 16 };
+  globalThis.GPUBufferUsage = { VERTEX: 1, INDEX: 2, UNIFORM: 4, STORAGE: 8, COPY_DST: 16, INDIRECT: 256 };
   globalThis.GPUTextureUsage = { TEXTURE_BINDING: 1, COPY_DST: 2 };
   t.after(() => {
     if (prevBuf === undefined) delete globalThis.GPUBufferUsage; else globalThis.GPUBufferUsage = prevBuf;
@@ -472,6 +480,16 @@ test('trade vessels preserve damaged hulls, GPU state, and consistent yaw across
     queue: { writeBuffer() {}, writeTexture() {} },
   };
   const mockResources = [0, 1, 2, 3, 4, 12, 19, 20, 21].map((b) => [b, {}]);
+  return {
+    mockDevice,
+    mockResources,
+    get destroyedDamagedBuffers() { return destroyedDamagedBuffers; },
+  };
+}
+
+test('trade vessels preserve damaged hulls, GPU state, and consistent yaw across setTraffic refreshes', async (t) => {
+  const env = createMockTradeEnv(t);
+  const { mockDevice, mockResources } = env;
 
   const tv = await createTradeVessels({
     device: mockDevice,
@@ -527,5 +545,294 @@ test('trade vessels preserve damaged hulls, GPU state, and consistent yaw across
   const after = tv.getTargetVessels().find((b) => b.id === 'ship:27');
   assert.equal(after, b27, 'damaged boat instance is preserved across setTraffic refreshes');
   assert.ok(after.damage.hits > 0 && after.damage.holes.length > 0, 'hull damage persists after setTraffic refreshes');
-  assert.equal(destroyedDamagedBuffers, 0, 'promoted damaged GPU buffers are not torn down during board refreshes');
+  assert.equal(env.destroyedDamagedBuffers, 0, 'promoted damaged GPU buffers are not torn down during board refreshes');
+});
+
+test('windward sailing polars, storm reefing, and autonomous headwind tacking', () => {
+  const windVec = [0, 9]; // Blowing southward (+Z), so upwind is due North (yaw = 0)
+  const deadHead = computeSailingPolar(0, windVec, 0);
+  const broadReach = computeSailingPolar(Math.PI * 0.65, windVec, 0);
+  const downwind = computeSailingPolar(Math.PI, windVec, 0);
+  assert.ok(broadReach.targetSpeed > deadHead.targetSpeed * 3, 'broad reach speed vastly exceeds direct headwind speed');
+  assert.ok(downwind.targetSpeed > deadHead.targetSpeed * 2.5, 'downwind speed exceeds direct headwind speed');
+
+  const cogPolar = computeSailingPolar(0, windVec, 0);
+  const lateenPolar = computeSailingPolar(0, windVec, 5);
+  assert.ok(lateenPolar.beta < cogPolar.beta, 'lateen caravel points closer to the wind than square-rigged cog');
+
+  const stormPolar = computeSailingPolar(Math.PI * 0.5, [0, 18], 0, { storm: true });
+  assert.ok(stormPolar.targetSailSet < 0.6, `storm gale reefs sailSet (${stormPolar.targetSailSet})`);
+
+  // Inbound cog trying to sail due North into a southward headwind must tack cleanly without yaw snaps
+  const route = {
+    id: 'ship:tack',
+    shipId: 101,
+    mode: 'sea',
+    phase: 'in',
+    archetype: 0,
+    scale: 1,
+    pts: [
+      { x: 0, y: 0, z: 400, acc: 0 },
+      { x: 0, y: 0, z: -400, acc: 800 },
+    ],
+    totalLen: 800,
+    phaseOffset: 0.2,
+  };
+  const ai = createVesselAutopilotState(route, 0, { x: 0, y: 0, z: 400, yaw: 0, dist: 0 }, 0);
+  let sawTack = false;
+  let maxYawStep = 0;
+  for (let i = 1; i <= 120; i++) {
+    const prevYaw = ai.yaw;
+    stepTradeVesselAutopilot(ai, route, 0, { dt: 0.25, elapsedSec: i * 0.25, windVec });
+    let dy = ai.yaw - prevYaw;
+    while (dy > Math.PI) dy -= Math.PI * 2;
+    while (dy < -Math.PI) dy += Math.PI * 2;
+    maxYawStep = Math.max(maxYawStep, Math.abs(dy));
+    if (ai.tacking) sawTack = true;
+  }
+  assert.ok(sawTack, 'cog enters autonomous tacking when course lies inside the no-go zone');
+  assert.ok(maxYawStep < 0.15, `turn rate remains physically bounded per 0.25s step (maxYawStep=${maxYawStep})`);
+  assert.ok(Math.abs(ai.yaw) >= 0.70, `ship steers outside headwind irons onto close-hauled tack (${ai.yaw} rad)`);
+  assert.ok(ai.z < 390, `ship makes genuine northward progress while tacking (z=${ai.z})`);
+});
+
+test('zero-warp port lifecycle and smooth GPU sail brailing across setTraffic transitions', async (t) => {
+  const { mockDevice, mockResources } = createMockTradeEnv(t);
+  const tv = await createTradeVessels({
+    device: mockDevice,
+    shader: async () => ({}),
+    computePipe: async () => ({ getBindGroupLayout: () => ({}) }),
+    resources: mockResources,
+  });
+  t.after(() => tv.destroy());
+
+  const origin = { x: 0, z: 0 };
+  const pts = [0, 260, 0, 90, 0, 25];
+  const berth = { x: 0, z: 0, rot: 0.85 };
+  tv.setTraffic({
+    day: 1,
+    ships: [{ id: 41, kind: 'carrack', phase: 'in', t0: 0, t1: 2, points: pts, portBerths: [berth] }],
+    list: [],
+  }, origin, [], [], {});
+
+  // Favoring tailwind (southward wind doesn't push North; push North with northward windVec = [0, -8])
+  let simTime = 0;
+  for (let i = 0; i < 60; i++) {
+    simTime += 0.25;
+    tv.stepSimulation(0.25, simTime, { windVec: [0, -8], storm: false }, null);
+  }
+  const beforeDock = tv.locate().find((v) => v.id === 'ship:41');
+  assert.ok(beforeDock, 'ship:41 active before dock transition');
+
+  // Board switches phase to dock while vessel physically completes approach/docking without warping
+  tv.setTraffic({
+    day: 2,
+    ships: [{ id: 41, kind: 'carrack', phase: 'dock', t0: 0, t1: 2, until: 6, berth, points: pts, portBerths: [berth] }],
+    list: [],
+  }, origin, [], [], {});
+  const rightAfterDock = tv.locate().find((v) => v.id === 'ship:41');
+  const jumpIn = Math.hypot(rightAfterDock.x - beforeDock.x, rightAfterDock.z - beforeDock.z);
+  assert.ok(jumpIn < 1.0, `in -> dock transition causes zero teleport jump (${jumpIn}m)`);
+
+  for (let i = 0; i < 400; i++) {
+    simTime += 0.25;
+    tv.stepSimulation(0.25, simTime, { windVec: [0, -8], storm: false }, null);
+    if (tv.locate().find((v) => v.id === 'ship:41')?.aiState === 'docked') break;
+  }
+  const docked = tv.locate().find((v) => v.id === 'ship:41');
+  assert.equal(docked.aiState, 'docked', 'ship autonomously maneuvers all the way into docked state');
+  assert.ok(Math.hypot(docked.x - berth.x, docked.z - berth.z) <= 2.5, 'docked hull rests cleanly alongside berth');
+  assert.ok(docked.sailSet < 0.20, `docked carrack smoothly brails sails (sailSet=${docked.sailSet})`);
+
+  // Board switches phase to out: ship unfurls canvas and departs without warping
+  tv.setTraffic({
+    day: 6,
+    ships: [{ id: 41, kind: 'carrack', phase: 'out', t0: 6, t1: 10, points: pts, portBerths: [berth] }],
+    list: [],
+  }, origin, [], [], {});
+  const rightAfterOut = tv.locate().find((v) => v.id === 'ship:41');
+  const jumpOut = Math.hypot(rightAfterOut.x - docked.x, rightAfterOut.z - docked.z);
+  assert.ok(jumpOut < 1.0, `dock -> out transition causes zero teleport jump (${jumpOut}m)`);
+
+  for (let i = 0; i < 80; i++) {
+    simTime += 0.25;
+    tv.stepSimulation(0.25, simTime, { windVec: [0, 8], storm: false }, null);
+  }
+  const departed = tv.locate().find((v) => v.id === 'ship:41');
+  assert.ok(departed.aiState === 'departing' || departed.aiState === 'outbound', `departed state active (${departed.aiState})`);
+  assert.ok(departed.sailSet > 0.50, `departing carrack smoothly unfurls sails (sailSet=${departed.sailSet})`);
+});
+
+test('river current drift and upstream vs downstream oar cadence', () => {
+  const routeDown = {
+    id: 'river:test',
+    mode: 'river',
+    phase: 'shuttle',
+    archetype: 4,
+    scale: 0.85,
+    pts: [
+      { x: 0, y: 4, z: 0, vx: 1.5, vz: 0, acc: 0 },
+      { x: 500, y: 3, z: 0, vx: 1.5, vz: 0, acc: 500 },
+    ],
+    totalLen: 500,
+    phaseOffset: 0.5,
+  };
+  const riverFlowAt = () => ({ wy: 3.5, vx: 1.5, vz: 0, depth: 2.2 });
+
+  const aiDown = createVesselAutopilotState(routeDown, 4, { x: 250, y: 3.5, z: 0, yaw: Math.PI * 0.5, dist: 250 }, 0);
+  aiDown.dirSign = 1;
+  aiDown.wpIndex = 1;
+
+  const aiUp = createVesselAutopilotState(routeDown, 4, { x: 250, y: 3.5, z: 0, yaw: -Math.PI * 0.5, dist: 250 }, 0);
+  aiUp.dirSign = -1;
+  aiUp.wpIndex = 0;
+
+  for (let i = 1; i <= 16; i++) {
+    stepTradeVesselAutopilot(aiDown, routeDown, 4, { dt: 0.25, elapsedSec: i * 0.25, riverFlowAt });
+    stepTradeVesselAutopilot(aiUp, routeDown, 4, { dt: 0.25, elapsedSec: i * 0.25, riverFlowAt });
+  }
+  assert.ok(aiDown.speed > aiUp.speed + 0.4, `downstream speed (${aiDown.speed}) exceeds upstream speed (${aiUp.speed})`);
+  assert.ok(aiUp.motion > aiDown.motion + 0.2, `upstream oar cadence (${aiUp.motion}) exceeds downstream drifting cadence (${aiDown.motion})`);
+});
+
+test('two-way simTick coupling delays headwind arrivals, docks physically, holds in storms, and loses sunk vessels', async () => {
+  const gameSrc = readFileSync(new URL('../assets/board/game.js', import.meta.url), 'utf8');
+  const runtimeSrc = readFileSync(new URL('../assets/board/runtime.js', import.meta.url), 'utf8');
+  const sha = createHash('sha256').update(gameSrc).digest('hex');
+  const baked = JSON.parse(readFileSync(new URL('../' + BAKED_BOARDS['lisbon:1550'], import.meta.url), 'utf8'));
+  const prefix = boardPrefix({ ...baked.request, heights: null }, sha);
+
+  const ctx = vm.createContext({
+    setTimeout,
+    clearTimeout,
+    console,
+    TextEncoder,
+    TextDecoder,
+    CompressionStream,
+    DecompressionStream,
+    Blob,
+    Response,
+    atob,
+    btoa,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    requestAnimationFrame: () => 0,
+    postMessage: () => {},
+  });
+  vm.runInContext(
+    `${prefix}${gameSrc}\n${runtimeSrc}\nglobalThis.__TEST = { get W() { return W; }, day, berthsOf, lordAcct, purse, fastMaritimeMode() { simTick = () => { W.clock.day++; tickShips(); tickShipDepartures(); return true; }; } };`,
+    ctx,
+  );
+  await ctx.BOARD_MODEL.thaw(readFileSync(new URL('../' + BAKED_WORLDS['lisbon:1550'], import.meta.url)));
+  ctx.__TEST.fastMaritimeMode();
+
+  const W = ctx.__TEST.W;
+  const harborSi = W.settlements.findIndex((s) => s.harbor && ctx.__TEST.berthsOf(s).length > 0);
+  assert.ok(harborSi >= 0, 'thawed Lisbon board has a harbor settlement with berths');
+  const s = W.settlements[harborSi];
+  const curDay = ctx.__TEST.day();
+  for (const o of W.ships) {
+    o.phase = 'out';
+    o.t1 = curDay + 100;
+  }
+
+  // 1. Headwind / slow ETA delays ship past original t1 instead of warping into berth
+  const shipDelay = {
+    id: 501,
+    kind: 'cog',
+    from: 'Bruges',
+    port: harborSi,
+    cargo: { spice: 30 },
+    load: {},
+    phase: 'in',
+    t0: curDay - 5,
+    t1: curDay,
+    poly: [{ x: 0, z: 300 }, { x: 0, z: 20 }],
+    len: 280,
+    berth: null,
+  };
+  W.ships.push(shipDelay);
+  const spiceAtStart = s.stores.spice || 0;
+  ctx.BOARD_MODEL.pilotMaritime({
+    day: curDay,
+    ships: [{ id: 501, state: 'inbound', etaDays: 4.0, progress: 0.4 }],
+  });
+  await ctx.BOARD_MODEL.live(1);
+  assert.equal(shipDelay.phase, 'in', 'headwind etaDays keeps ship inbound instead of forcing arrival on schedule');
+  assert.equal(s.stores.spice || 0, spiceAtStart, 'delayed ship cargo has not unloaded before physical arrival');
+
+  // 2. Physical arrival triggers docking, unloads cargo into stores, and credits customs silver
+  const goldBeforeDock = ctx.__TEST.purse(ctx.__TEST.lordAcct(s));
+  ctx.BOARD_MODEL.pilotMaritime({
+    day: ctx.__TEST.day(),
+    ships: [{ id: 501, state: 'docked', etaDays: 0, progress: 1.0 }],
+  });
+  await ctx.BOARD_MODEL.live(1);
+  assert.equal(shipDelay.phase, 'dock', 'docked maritime report transitions ship to dock phase');
+  assert.ok((s.stores.spice || 0) >= spiceAtStart + 30, 'physical arrival delivers cargo to port stores');
+  assert.ok(ctx.__TEST.purse(ctx.__TEST.lordAcct(s)) > goldBeforeDock, 'physical arrival credits customs revenue to lord purse');
+
+  // 3. Storm weather holds docked ship at quay past original until day
+  shipDelay.until = ctx.__TEST.day();
+  ctx.BOARD_MODEL.pilotMaritime({
+    day: ctx.__TEST.day(),
+    storm: true,
+    ships: [{ id: 501, state: 'docked', heldByWeather: true, progress: 1.0 }],
+  });
+  await ctx.BOARD_MODEL.live(1);
+  assert.equal(shipDelay.phase, 'dock', 'storm report holds docked ship in harbor past scheduled until day');
+
+  // 4. Sinking removes vessel from W.ships without delivering its cargo
+  const silkBefore = s.stores.silk || 0;
+  const shipSunk = {
+    id: 502,
+    kind: 'caravel',
+    from: 'Venice',
+    port: harborSi,
+    cargo: { silk: 25 },
+    load: {},
+    phase: 'in',
+    t0: ctx.__TEST.day() - 4,
+    t1: ctx.__TEST.day(),
+    poly: [{ x: 0, z: 300 }, { x: 0, z: 20 }],
+    len: 280,
+    berth: null,
+  };
+  W.ships.push(shipSunk);
+  ctx.BOARD_MODEL.pilotMaritime({
+    day: ctx.__TEST.day(),
+    ships: [
+      { id: 501, state: 'docked', heldByWeather: false, progress: 1.0 },
+      { id: 502, state: 'sunk', sunk: true },
+    ],
+  });
+  await ctx.BOARD_MODEL.live(1);
+  assert.equal(W.ships.find((x) => x.id === 502), undefined, 'sunk ship is removed from board fleet');
+  assert.equal(s.stores.silk || 0, silkBefore, 'sunk ship cargo is never credited to harbor stores');
+});
+
+test('GPU continuum half-edge collapse manifold, horizon splat, and zero-discard sample_mask shaders', () => {
+  const archs = inspectTradeVesselArchetypes();
+  assert.equal(archs.length, TRADE_VESSEL_ARCHETYPES);
+  for (const arch of archs) {
+    const c = arch.continuum;
+    assert.ok(c, `${arch.label} exposes baked half-edge collapse continuum`);
+    assert.equal(c.genusZeroEuler, 2, `${arch.label} continuum is watertight genus-0 manifold (V-E+F=2)`);
+    assert.ok(c.coreTriCount <= 6 && c.coreTriCount >= 4, `${arch.label} reduces to <=6 core triangles (${c.coreTriCount})`);
+    assert.ok(c.stepCount >= 20, `${arch.label} records smooth multi-step edge collapse ladder`);
+    for (let s = 1; s < c.stepErrors.length; s++) {
+      assert.ok(c.stepErrors[s] > c.stepErrors[s - 1], `${arch.label} stepErrors strictly increase at step ${s}`);
+    }
+    assert.ok(c.splat.radius > 0 && c.splat.rx > 0 && c.splat.ry > 0 && c.splat.rz > 0, `${arch.label} splat extents are positive`);
+    assert.ok(c.splat.colour.every((ch) => Number.isFinite(ch) && ch >= 0), `${arch.label} splat mean colour finite`);
+  }
+
+  for (const [name, src] of [
+    ['tradeVesselsSource(false, 4)', tradeVesselsSource(false, 4)],
+    ['TRADE_VESSEL_CONTINUUM_WGSL', TRADE_VESSEL_CONTINUUM_WGSL],
+    ['TRADE_VESSEL_SPLAT_WGSL', TRADE_VESSEL_SPLAT_WGSL],
+  ]) {
+    assert.ok(!/\bdiscard\b/.test(src), `${name} contains zero discard statements (TBDR clean)`);
+    assert.match(src, /@builtin\(sample_mask\)/, `${name} outputs @builtin(sample_mask)`);
+  }
 });

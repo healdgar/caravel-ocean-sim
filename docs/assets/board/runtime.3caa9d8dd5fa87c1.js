@@ -345,9 +345,159 @@ globalThis.BOARD_MODEL = (() => {
   }
 
   // So many days of the model's own life: its politics, trade, building and war.
+  const MARITIME_PILOT = {
+    reportDay: -1,
+    storm: false,
+    windSpeed: 8,
+    windDir: 0,
+    ships: new Map(),
+    caravans: new Map(),
+  };
+
+  function maritimeCaravanKey(c) {
+    let key = null;
+    try { key = typeof caravanInspectionKey === 'function' ? String(caravanInspectionKey(c)) : null; } catch { key = null; }
+    return key ?? `${c.origin}>${c.dest}:${c.departDay}:${c.good}`;
+  }
+
+  function pilotMaritime(report) {
+    if (!report || typeof report !== 'object') {
+      return { ok: false, day: day(), trackedShips: MARITIME_PILOT.ships.size, trackedCaravans: MARITIME_PILOT.caravans.size };
+    }
+    MARITIME_PILOT.reportDay = Number.isFinite(report.day) ? report.day : day();
+    MARITIME_PILOT.storm = Boolean(report.storm);
+    if (Number.isFinite(report.windSpeed)) MARITIME_PILOT.windSpeed = report.windSpeed;
+    if (Number.isFinite(report.windDir)) MARITIME_PILOT.windDir = report.windDir;
+    if (Array.isArray(report.ships)) {
+      const seen = new Set();
+      for (const entry of report.ships) {
+        if (!entry || entry.id == null) continue;
+        const idKey = String(entry.id);
+        seen.add(idKey);
+        const prev = MARITIME_PILOT.ships.get(idKey);
+        MARITIME_PILOT.ships.set(idKey, {
+          id: idKey,
+          state: String(entry.state || 'inbound'),
+          etaDays: Number.isFinite(entry.etaDays) ? Math.max(0, entry.etaDays) : (prev?.etaDays ?? 0),
+          berthIndex: Number.isFinite(entry.berthIndex) ? entry.berthIndex : -1,
+          progress: Number.isFinite(entry.progress) ? Math.max(0, Math.min(1, entry.progress)) : 0,
+          heldByWeather: Boolean(entry.heldByWeather),
+          sunk: Boolean(entry.sunk || prev?.sunk),
+        });
+      }
+      for (const existingKey of Array.from(MARITIME_PILOT.ships.keys())) {
+        if (!seen.has(existingKey)) MARITIME_PILOT.ships.delete(existingKey);
+      }
+    }
+    if (Array.isArray(report.caravans)) {
+      const seenC = new Set();
+      for (const entry of report.caravans) {
+        if (!entry || entry.key == null) continue;
+        const cKey = String(entry.key);
+        seenC.add(cKey);
+        const prev = MARITIME_PILOT.caravans.get(cKey);
+        MARITIME_PILOT.caravans.set(cKey, {
+          key: cKey,
+          etaDays: Number.isFinite(entry.etaDays) ? Math.max(0, entry.etaDays) : (prev?.etaDays ?? 0),
+          progress: Number.isFinite(entry.progress) ? Math.max(0, Math.min(1, entry.progress)) : 0,
+          heldByWeather: Boolean(entry.heldByWeather),
+          sunk: Boolean(entry.sunk || prev?.sunk),
+        });
+      }
+      for (const existingKey of Array.from(MARITIME_PILOT.caravans.keys())) {
+        if (!seenC.has(existingKey)) MARITIME_PILOT.caravans.delete(existingKey);
+      }
+    }
+    return {
+      ok: true,
+      day: day(),
+      trackedShips: MARITIME_PILOT.ships.size,
+      trackedCaravans: MARITIME_PILOT.caravans.size,
+    };
+  }
+
+  function applyMaritimePilotBeforeTick() {
+    if (typeof W === 'undefined' || !W) return;
+    const curDay = day();
+    const nextDay = curDay + 1;
+    const recentReport = MARITIME_PILOT.reportDay >= curDay - 1;
+    const storm = Boolean((MARITIME_PILOT.storm && recentReport) || W.weather?.state === 'storm');
+
+    const shipsArr = W.ships || [];
+    for (let i = shipsArr.length - 1; i >= 0; i--) {
+      const sh = shipsArr[i];
+      if (!sh || sh.expedition) continue;
+      const idKey = String(sh.id ?? i);
+      const rep = MARITIME_PILOT.ships.get(idKey) || null;
+      const s = W.settlements?.[sh.port] || null;
+      if (rep?.sunk) {
+        shipsArr.splice(i, 1);
+        MARITIME_PILOT.ships.delete(idKey);
+        if (!W.prehistory && typeof emit === 'function') {
+          const where = sh.berth || s?.pos || null;
+          emit('trade', 4, where, `The ${sh.kind || 'vessel'} out of ${sh.from || 'afar'} foundered off ${s?.name || 'the coast'}; her cargo is lost to the sea.`);
+        }
+        continue;
+      }
+      if (sh.phase === 'in') {
+        if (rep) {
+          if (rep.state === 'docking' || rep.state === 'docked' || rep.state === 'waiting_berth') {
+            sh.t1 = Math.min(sh.t1 ?? nextDay, nextDay);
+          } else if (Number.isFinite(rep.etaDays) && rep.etaDays > 0.35) {
+            sh.t1 = Math.max(nextDay + 0.25, curDay + rep.etaDays);
+            rep.etaDays = Math.max(0, rep.etaDays - 1);
+          }
+        } else if (storm) {
+          sh.t1 = (sh.t1 ?? nextDay) + 1;
+        }
+      } else if (sh.phase === 'dock') {
+        if (storm || (rep?.heldByWeather && recentReport)) {
+          sh.until = Math.max(sh.until ?? nextDay, nextDay + 1);
+        }
+      } else if (sh.phase === 'out') {
+        if (rep) {
+          if (rep.state === 'departing') {
+            sh.t1 = Math.max(sh.t1 ?? nextDay, nextDay + 1);
+          } else if (rep.progress >= 0.98 || (Number.isFinite(rep.etaDays) && rep.etaDays <= 0.2)) {
+            sh.t1 = Math.min(sh.t1 ?? nextDay, nextDay);
+          } else if (Number.isFinite(rep.etaDays) && rep.etaDays > 0.35) {
+            sh.t1 = Math.max(nextDay + 0.25, curDay + rep.etaDays);
+            rep.etaDays = Math.max(0, rep.etaDays - 1);
+          }
+        } else if (storm) {
+          sh.t1 = (sh.t1 ?? nextDay) + 1;
+        }
+      }
+    }
+
+    const caravansArr = W.caravans || [];
+    for (let i = 0; i < caravansArr.length; i++) {
+      const c = caravansArr[i];
+      if (!c || c.gone || c.robbed || (!c.sea && !c.river)) continue;
+      const cKey = maritimeCaravanKey(c);
+      const rep = MARITIME_PILOT.caravans.get(cKey) || null;
+      if (rep?.sunk) {
+        c.gone = true;
+        MARITIME_PILOT.caravans.delete(cKey);
+        continue;
+      }
+      if (rep) {
+        if (rep.progress >= 0.98 || (Number.isFinite(rep.etaDays) && rep.etaDays <= 0.2)) {
+          c.arriveDay = Math.min(c.arriveDay ?? nextDay, nextDay);
+        } else if (Number.isFinite(rep.etaDays) && rep.etaDays > 0.35) {
+          c.arriveDay = Math.max(nextDay + 0.25, curDay + rep.etaDays);
+          rep.etaDays = Math.max(0, rep.etaDays - 1);
+        }
+      } else if (storm && c.sea) {
+        c.arriveDay = (c.arriveDay ?? nextDay) + 1;
+      }
+    }
+  }
+
   async function live(days) {
     for (let i = 0; i < days; i++) {
       await STORAGE_OUTCOMES.wait();
+      applyMaritimePilotBeforeTick();
       if (simTick() === false) throw new Error('The model would not take a day');
       ensureMaritimeWorldRoutes();
       if ((i + 1) % 8 === 0) await STORAGE_OUTCOMES.journal.flush();
@@ -390,6 +540,7 @@ globalThis.BOARD_MODEL = (() => {
     const model = simulationWorkerModel();
     const baseTick = model.tick;
     model.tick = () => {
+      applyMaritimePilotBeforeTick();
       const res = baseTick();
       if (res !== false) ensureMaritimeWorldRoutes();
       return res;
@@ -725,6 +876,13 @@ globalThis.BOARD_MODEL = (() => {
     const out = [];
     (W.ships || []).forEach((sh, index) => {
       if (!sh || !Array.isArray(sh.poly) || sh.poly.length < 2) return;
+      const settlement = W.settlements?.[sh.port] || null;
+      let portBerths = [];
+      try {
+        if (settlement && typeof berthsOf === 'function') {
+          portBerths = berthsOf(settlement).map((b) => ({ x: r1(b.x), z: r1(b.z), rot: r3(b.rot || 0), shore: Boolean(b.shore) }));
+        }
+      } catch { portBerths = []; }
       out.push({
         id: sh.id ?? index,
         kind: String(sh.kind || 'cog'),
@@ -736,7 +894,11 @@ globalThis.BOARD_MODEL = (() => {
         place: sh.port ?? 0,
         t0: sh.t0 ?? 0,
         t1: sh.t1 ?? 0,
+        until: sh.until ?? 0,
+        waited: sh.waited ?? 0,
+        bi: sh.bi ?? -1,
         berth: sh.berth ? { x: r1(sh.berth.x), z: r1(sh.berth.z), rot: r3(sh.berth.rot || 0), shore: Boolean(sh.berth.shore) } : null,
+        portBerths,
         cargo: { ...(sh.cargo || {}) },
         load: { ...(sh.load || {}) },
         points: line(sh.poly),
@@ -852,8 +1014,13 @@ globalThis.BOARD_MODEL = (() => {
         points: line(c.poly),
       });
     });
-    return { day: day(), list: out, ships: ships() };
+    return {
+      day: day(),
+      weather: { state: String(W.weather?.state ?? 'clear'), wind: r3(W.weather?.wind ?? 0) },
+      list: out,
+      ships: ships(),
+    };
   }
 
-  return { VERSION, found, live, board, freeze, thaw, serve, folk, watch, embark, disembark, caravans, ships, market, trade };
+  return { VERSION, found, live, board, freeze, thaw, serve, folk, watch, embark, disembark, caravans, ships, market, trade, pilotMaritime };
 })();

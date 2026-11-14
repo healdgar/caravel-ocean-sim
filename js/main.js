@@ -4186,9 +4186,12 @@ async function main() {
   const CARAVAN_CHECK_FRAMES=45,CARAVAN_WAIT_MS=4000;
   const caravanPlan={asking:false,day:-1,at:-Infinity,frames:0,count:0,seen:null,lastMs:NaN,lastDay:NaN,rate:0,lastList:[],origin:{x:0,z:0}};
   function tendCaravans(now){
-    if(caravanPlan.frames++%CARAVAN_CHECK_FRAMES||caravanPlan.asking||boardLife?.state!=='alive')return;
+    const urgentMaritime=Boolean(terrain?.tradeVessels?.consumeDirtySync?.());
+    if((!urgentMaritime&&caravanPlan.frames++%CARAVAN_CHECK_FRAMES)||caravanPlan.asking||boardLife?.state!=='alive')return;
     const herds=terrain?.herds;
-    if(!herds||(boardLife.day===caravanPlan.day&&caravanPlan.seen===herds)||now-caravanPlan.at<CARAVAN_WAIT_MS)return;
+    if(!herds)return;
+    if(!urgentMaritime&&(boardLife.day===caravanPlan.day&&caravanPlan.seen===herds||now-caravanPlan.at<CARAVAN_WAIT_MS))return;
+    if(urgentMaritime&&now-caravanPlan.at<750)return;
     caravanPlan.asking=true;
     boardLife.caravans().then(answer=>{
       if(terrain?.herds!==herds)return;
@@ -4252,7 +4255,7 @@ async function main() {
     return out;
   }
   window.oceanCaravans={get plan(){return {...caravanPlan,seen:undefined};},get travellers(){return terrain?.herds?.travellers??0;},ground:(x,z)=>terrain?.groundSample(x,z)??null,locate:locateActiveCaravans,vessels:()=>terrain?.tradeVessels?.locate?.()??[]};
-  window.oceanTradeVessels={get count(){return terrain?.tradeVessels?.count??0;},locate:()=>terrain?.tradeVessels?.locate?.()??[]};
+  window.oceanTradeVessels={get count(){return terrain?.tradeVessels?.count??0;},locate:()=>terrain?.tradeVessels?.locate?.()??[],report:()=>terrain?.tradeVessels?.getMaritimeReport?.()??null};
   // Where walker `index` of the town in sight is now, as the GPU walks them (the same clock and sun), or null.
   const folkStride={position:{x:0,y:0,z:0},walked:0,stopped:false,cycle:0,back:false};
   let folkWords=null,folkWordsOf=null;
@@ -4747,7 +4750,16 @@ async function main() {
     townsfolk?.follow(terrain?.ports,cam);tendFolk(now);tendCaravans(now);
     props?.follow(terrain?.ports,cam);
     terrain?.updatePortDamage?.(simTime);
-    terrain?.tradeVessels?.stepSimulation?.(dt,simTime,P.windSpeed,terrain);
+    const tvStorm=Boolean((weather?.intensity??0)>0.55||P.windSpeed>=15);
+    terrain?.tradeVessels?.stepSimulation?.(dt,simTime,{
+      windVec:[windVec[0],windVec[2]],
+      windSpeed:P.windSpeed,
+      storm:tvStorm,
+      avoidVessels:vessels.slice(0,followerEnabled?vessels.length:1).map(v=>v.boat).filter(Boolean),
+    },terrain);
+    if(boardLife?.state==='alive'&&terrain?.tradeVessels&&(frameIndex%30)===0){
+      boardLife.setMaritimeReport?.(terrain.tradeVessels.getMaritimeReport());
+    }
     const activeVesselCount=followerEnabled?vessels.length:1;
     allProjectiles.length=0;
     for(let i=0;i<activeVesselCount;i++)for(const p of vessels[i].gunnery.state.projectiles)allProjectiles.push(p);
