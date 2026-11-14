@@ -1,4 +1,5 @@
 import {forestSurfaceFeatures} from './forest-surfaces.js';
+import {requestWebGPUAdapter,requestWebGPUDevice,describeMissingWebGPUAdapter} from './webgpu-adapter.js';
 import {withSceneHullProfile} from './wgsl/hull.js';
 import {pruneWGSLFunctions} from './wgsl-prune.js';
 import {createGPUProgramCache} from './gpu-program-cache.js';
@@ -305,12 +306,17 @@ async function main() {
   const sceneModelCodes=fleetSpecs.map(spec=>fleetModelCode(getShipModel(spec.modelId)));
   window.oceanStartup?.stage('adapter','Starting the graphics device…');
   if (!navigator.gpu) fail('WebGPU is not available in this browser.');
-  const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
-  if (!adapter) fail('No WebGPU adapter found.');
-  const hasTS = adapter.features.has('timestamp-query');
-  const device = await adapter.requestDevice({
-    requiredFeatures: [...(hasTS ? ['timestamp-query'] : []), ...forestSurfaceFeatures(adapter)],
-  });
+  const adapterResult = await requestWebGPUAdapter(navigator.gpu);
+  if (!adapterResult) fail(describeMissingWebGPUAdapter({ secureContext: typeof isSecureContext === 'boolean' ? isSecureContext : true, userAgent: navigator.userAgent || '' }));
+  if (adapterResult.attempt > 0 || adapterResult.option?.powerPreference !== 'high-performance') {
+    log('WebGPU adapter acquired via fallback: ' + JSON.stringify({ option: adapterResult.option, attempt: adapterResult.attempt }));
+  }
+  const adapter = adapterResult.adapter;
+  const device = await requestWebGPUDevice(adapter, [
+    ...(adapter.features.has('timestamp-query') ? ['timestamp-query'] : []),
+    ...forestSurfaceFeatures(adapter),
+  ]);
+  const hasTS = device.features.has('timestamp-query');
   validateFleetDevice(device.limits,fleetCount);
   let firstGpuError = false,oceanStartupDeviceLost=false,oceanStartupFirstFrameSubmitted=false;
   device.lost.then((i) => {oceanStartupDeviceLost=true;log('device lost: ' + i.message);window.oceanStartup?.fail('The graphics device was lost during startup. '+i.message);});
@@ -3181,6 +3187,12 @@ async function main() {
         reloadAtPort(port,modelId);
       },
       onRetired:ending=>showCareerEnding(document.body,ending,{onNewLife:()=>{location.href=location.pathname;}}),
+      onBoardTrade:({port,act,boardGood,qty})=>{
+        if(boardLife?.state!=='alive'||port?.id!==terrain?.region?.id)return;
+        boardLife.trade({place:0,act,good:boardGood,qty}).then(res=>{
+          if(res?.market&&careerPort){careerPort.setBoardMarket(port.id,res.market);portPanel?.refresh?.();}
+        }).catch(()=>{});
+      },
     });
     window.oceanCareerPort=careerPort;
     // Saves where she now lies and comes back at that port's quay.
@@ -4102,8 +4114,19 @@ async function main() {
       const now=performance.now();if(now-boardToldAt<45000)return;
       const line=lines.findLast(entry=>entry.cat!=='trade')??lines[lines.length-1];
       if(line){boardToldAt=now;voyageCtl?.showToast?.(line.date+'. '+line.text,8);}
-    },onNewsAll:lines=>storyteller?.tell({kind:'news',lines:lines.slice(-6).map(entry=>entry.date+': '+entry.text)}),onState:state=>{if(state==='alive')mateEmbark();}});
+    },onNewsAll:lines=>storyteller?.tell({kind:'news',lines:lines.slice(-6).map(entry=>entry.date+': '+entry.text)}),onState:state=>{if(state==='alive'){mateEmbark();syncBoardMarket();caravanPlan.frames=0;caravanPlan.at=-Infinity;tendCaravans(performance.now());}}});
     window.oceanBoard=boardLife;boardLife.start();
+  }
+  function syncBoardMarket(){
+    if(boardLife?.state!=='alive'||!careerPort)return;
+    const regionId=terrain?.region?.id;
+    if(!regionId)return;
+    boardLife.market(0).then(market=>{
+      if(market&&terrain?.region?.id===regionId){
+        careerPort.setBoardMarket(regionId,market);
+        portPanel?.refresh?.();
+      }
+    }).catch(()=>{});
   }
   // Whoever is about a founded port is one of its model's people. The model plans the day of those who live
   // nearest the eye: who they are, where each is bound and the way they take along its streets. js/board-folk.js
@@ -4139,7 +4162,7 @@ async function main() {
   // form puts it (the share of its road its days have run). They are asked again when the model's day turns and laid as
   // seeds of the herds' GPU pass; the frame only tells that pass the day, with its fraction, and how fast days pass.
   const CARAVAN_CHECK_FRAMES=45,CARAVAN_WAIT_MS=4000;
-  const caravanPlan={asking:false,day:-1,at:-Infinity,frames:0,count:0,seen:null,lastMs:NaN,lastDay:NaN,rate:0};
+  const caravanPlan={asking:false,day:-1,at:-Infinity,frames:0,count:0,seen:null,lastMs:NaN,lastDay:NaN,rate:0,lastList:[],origin:{x:0,z:0}};
   function tendCaravans(now){
     if(caravanPlan.frames++%CARAVAN_CHECK_FRAMES||caravanPlan.asking||boardLife?.state!=='alive')return;
     const herds=terrain?.herds;
@@ -4148,8 +4171,12 @@ async function main() {
     boardLife.caravans().then(answer=>{
       if(terrain?.herds!==herds)return;
       const region=terrain.baseRegion;
-      herds.setCaravans(answer?.list??[],{x:region.x,z:region.z});
-      Object.assign(caravanPlan,{day:answer?.day??boardLife.day,count:answer?.list?.length??0,seen:herds,at:performance.now()});
+      const list=answer?.list??[];
+      const origin={x:region.x,z:region.z};
+      herds.setCaravans(list,origin);
+      terrain?.tradeVessels?.setTraffic(answer,origin,terrain?.port?.country?.riverReaches??[],terrain?.port?.country?.places??[]);
+      Object.assign(caravanPlan,{day:answer?.day??boardLife.day,count:list.length,seen:herds,at:performance.now(),lastList:list,origin});
+      syncBoardMarket();
     }).catch(error=>{console.warn('The board\'s caravans:',error);caravanPlan.at=performance.now();}).finally(()=>{caravanPlan.asking=false;});
   }
   function caravanClock(dateMs){
@@ -4165,8 +4192,45 @@ async function main() {
     // While the model is still living the days it is behind the calendar, its caravans are where its own day puts them.
     const lived=boardLife.day,shown=day>=lived+1?lived+(day-Math.floor(day)):day;
     herds.setBoardClock(shown,caravanPlan.rate);
+    terrain?.tradeVessels?.setBoardClock(shown,caravanPlan.rate,frameF[3]);
   }
-  window.oceanCaravans={get plan(){return {...caravanPlan,seen:undefined};},get travellers(){return terrain?.herds?.travellers??0;},ground:(x,z)=>terrain?.groundSample(x,z)??null};
+  function locateActiveCaravans(){
+    const origin=caravanPlan.origin||{x:0,z:0};
+    const lived=boardLife?.day??caravanPlan.day;
+    const curDay=Number.isFinite(caravanPlan.lastDay)?(caravanPlan.lastDay>=lived+1?lived+(caravanPlan.lastDay-Math.floor(caravanPlan.lastDay)):caravanPlan.lastDay):lived;
+    const t=frameF[3]||0;
+    const out=[];
+    for(const c of caravanPlan.lastList??[]){
+      if(!c||!Array.isArray(c.points)||c.points.length<4||!(c.arrive>c.depart))continue;
+      const pts=[];let totalLen=0;
+      for(let i=0;i+1<c.points.length;i+=2){
+        const wx=origin.x+c.points[i],wz=origin.z+c.points[i+1];
+        if(pts.length)totalLen+=Math.hypot(wx-pts[pts.length-1].x,wz-pts[pts.length-1].z);
+        pts.push({x:wx,z:wz,acc:totalLen});
+      }
+      if(pts.length<2||totalLen<1)continue;
+      const days=Math.max(c.arrive-c.depart,1e-3);
+      const share=Math.max(0,Math.min(1,(curDay-c.depart)/days));
+      const calSpeed=totalLen/days*(caravanPlan.rate||0);
+      const paceFloor=Math.max(0,0.92-calSpeed);
+      const cycle=Math.max(totalLen+48,1);
+      const dist=calSpeed<0.92?((share*totalLen+paceFloor*t)%cycle+cycle)%cycle:share*totalLen;
+      const clamped=Math.max(0,Math.min(totalLen,dist));
+      let px=pts[0].x,pz=pts[0].z;
+      for(let i=1;i<pts.length;i++){
+        if(pts[i].acc>=clamped){
+          const a=pts[i-1],b=pts[i],u=Math.max(0,Math.min(1,(clamped-a.acc)/Math.max(1e-4,b.acc-a.acc)));
+          px=a.x+(b.x-a.x)*u;pz=a.z+(b.z-a.z)*u;break;
+        }
+      }
+      const groundY=terrain?.groundSample?.(px,pz)??0;
+      out.push({key:c.key,mode:c.mode,good:c.good,qty:c.qty,carts:c.carts??1,x:px,y:groundY,z:pz,progress:clamped/totalLen});
+    }
+    out.sort((a,b)=>(a.mode==='cart'?0:1)-(b.mode==='cart'?0:1));
+    return out;
+  }
+  window.oceanCaravans={get plan(){return {...caravanPlan,seen:undefined};},get travellers(){return terrain?.herds?.travellers??0;},ground:(x,z)=>terrain?.groundSample(x,z)??null,locate:locateActiveCaravans,vessels:()=>terrain?.tradeVessels?.locate?.()??[]};
+  window.oceanTradeVessels={get count(){return terrain?.tradeVessels?.count??0;},locate:()=>terrain?.tradeVessels?.locate?.()??[]};
   // Where walker `index` of the town in sight is now, as the GPU walks them (the same clock and sun), or null.
   const folkStride={position:{x:0,y:0,z:0},walked:0,stopped:false,cycle:0,back:false};
   let folkWords=null,folkWordsOf=null;

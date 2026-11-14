@@ -74,6 +74,32 @@ test('a missing graphics API shows a sticky failure and a usable retry',{timeout
   }finally{await page.close();}
 });
 
+test('adapter acquisition falls back past rejected high-performance and reports actionable guidance when unavailable',{timeout:120000},async()=>{
+  const fallbackPage=await browser.newPage();
+  try{
+    await fallbackPage.addInitScript(()=>{
+      const orig=navigator.gpu.requestAdapter.bind(navigator.gpu);
+      navigator.gpu.requestAdapter=options=>options?.powerPreference==='high-performance'?Promise.resolve(null):orig(options);
+    });
+    await fallbackPage.goto(origin+'/?follower=0');
+    await fallbackPage.waitForFunction(()=>window.oceanStartup.state==='ready'||window.oceanStartup.state==='failed');
+    assert.equal(await fallbackPage.evaluate(()=>window.oceanStartup.state),'ready');
+    assert.equal(await fallbackPage.locator('#err').textContent(),'');
+  }finally{await fallbackPage.close();}
+
+  const emptyPage=await browser.newPage();
+  try{
+    await emptyPage.addInitScript(()=>{
+      navigator.gpu.requestAdapter=()=>Promise.resolve(null);
+    });
+    await emptyPage.goto(origin+'/?follower=0');
+    await emptyPage.waitForFunction(()=>window.oceanStartup.state==='failed');
+    const stageText=await emptyPage.locator('#ocean-startup-stage').innerText();
+    assert.match(stageText,/No WebGPU adapter found\./);
+    assert.match(stageText,/hardware graphics acceleration/i);
+  }finally{await emptyPage.close();}
+});
+
 test('module and required asset failures remain visible instead of leaving a black canvas',{timeout:120000},async()=>{
   for(const broken of ['**/js/main.js','**/assets/caravel-oak-albedo.webp']){
     const page=await browser.newPage();

@@ -33,6 +33,11 @@ export function seedVegetation(region,sampleHeight,mask){
 // Authored local ground cover. Region-resident patch bounds are cheap; exact
 // roots are expanded lazily only after frustum and projected-extent culling.
 export const GROUND_COVER=Object.freeze({patchSpan:64,grassPerPatch:32,rocksPerPatch:3,variants:4,maxExtent:5.1});
+export const ROCK_ARCHETYPES=6;
+export const ROCK_LODS=3;
+export const GRASS_VARIANTS=2;
+export const GRASS_LODS=2;
+export const GROUND_COVER_BUCKETS=ROCK_ARCHETYPES*ROCK_LODS+GRASS_VARIANTS*GRASS_LODS;
 export function createGroundCoverPatches(region,sampleHeight,extraHeightBounds=null){
   const span=GROUND_COVER.patchSpan,count=Math.ceil(region.span/span),patches=[];
   for(let j=0;j<count;j++)for(let i=0;i<count;i++){
@@ -61,7 +66,7 @@ export function groundCoverInstances(patch,region,sampleHeight,mask,mayGrowAt=nu
     const sx=(sampleHeight(x+.5,z)-sampleHeight(x-.5,z)),sz=(sampleHeight(x,z+.5)-sampleHeight(x,z-.5)),slope=Math.hypot(sx,sz);
     const probability=vegetationProbability(mask,region.biomeSize??512,(x-region.x)/region.span+.5,(z-region.z)/region.span+.5);
     if(grass?(probability<=0||slope>.9||density>probability*.9):(slope>1.8||density>.35+slope*.3))continue;
-    const variant=(grass?2:0)+(seed>.5?1:0),radius=grass?.7+size*1.1:.55+size*1.9,height=grass?.28+tall*.52:.4+tall*1.7;
+    const variant=(grass?2:0)+(seed>.5?1:0),radius=grass?.7+size*1.1:.62+size*1.78,height=grass?.28+tall*.52:Math.min(2.05,Math.max(.36,radius*(.38+tall*.28)));
     groups[variant].push(x,h,z,radius,height,seed,sx,sz);
   }
   patch.instances=groups.map(data=>new Float32Array(data));return patch.instances;
@@ -85,62 +90,124 @@ export function groundCoverVisible(error,wasVisible=false,pixelError=TREE_PIXEL_
   return !Number.isFinite(error)||error>=pixelError*(wasVisible?.88:1);
 }
 const groundGeometryCache=new Map();
-export function groundCoverGeometry(variant=0){
-  const key=variant%GROUND_COVER.variants;if(groundGeometryCache.has(key))return groundGeometryCache.get(key);
-  const rand=random(18491+key*7919),out=[];
-  const triangle=(a,b,c,kind,shade)=>{
-    let n=treeNormal(treeCross(b.map((v,k)=>v-a[k]),c.map((v,k)=>v-a[k])));
-    if(kind===6&&n.reduce((sum,v,k)=>sum+v*((a[k]+b[k]+c[k])/3-(k===1?.3:0)),0)<0){[b,c]=[c,b];n=n.map(v=>-v);}
-    for(const p of[a,b,c])out.push(...p,...n,kind,shade,0,0);
-  };
-  if(key<2){
-    // A field stone: an icosphere roughened by two octaves of noise, flattened along its bedding, and broken across two
-    // or three fracture planes so it has the flat faces and sharp arrises of real rock. Smooth-shaded except where it
-    // broke. About 320 triangles, sunk a fifth of its height into the ground.
-    const verts=[],faces=[];
-    const t=(1+Math.sqrt(5))/2;
-    for(const p of[[-1,t,0],[1,t,0],[-1,-t,0],[1,-t,0],[0,-1,t],[0,1,t],[0,-1,-t],[0,1,-t],[t,0,-1],[t,0,1],[-t,0,-1],[-t,0,1]])verts.push(treeNormal(p));
-    let tris=[[0,11,5],[0,5,1],[0,1,7],[0,7,10],[0,10,11],[1,5,9],[5,11,4],[11,10,2],[10,7,6],[7,1,8],[3,9,4],[3,4,2],[3,2,6],[3,6,8],[3,8,9],[4,9,5],[2,4,11],[6,2,10],[8,6,7],[9,8,1]];
-    for(let level=0;level<2;level++){
-      const mid=new Map(),half=(a,b)=>{const k=a<b?a*4096+b:b*4096+a;if(!mid.has(k)){verts.push(treeNormal(treeAdd(verts[a],verts[b])));mid.set(k,verts.length-1);}return mid.get(k);};
-      tris=tris.flatMap(([a,b,c])=>{const ab=half(a,b),bc=half(b,c),ca=half(c,a);return[[a,ab,ca],[b,bc,ab],[c,ca,bc],[ab,bc,ca]];});
+function buildBoulderGeometry(archetype=0,lod=0){
+  const cacheKey=`boulder:${archetype}:${lod}`;
+  if(groundGeometryCache.has(cacheKey))return groundGeometryCache.get(cacheKey);
+  const rand=random(29173+archetype*13007);
+  const out=[];
+  const verts=[];
+  const t=(1+Math.sqrt(5))/2;
+  for(const p of[[-1,t,0],[1,t,0],[-1,-t,0],[1,-t,0],[0,-1,t],[0,1,t],[0,-1,-t],[0,1,-t],[t,0,-1],[t,0,1],[-t,0,-1],[-t,0,1]])verts.push(treeNormal(p));
+  let tris=[[0,11,5],[0,5,1],[0,1,7],[0,7,10],[0,10,11],[1,5,9],[5,11,4],[11,10,2],[10,7,6],[7,1,8],[3,9,4],[3,4,2],[3,2,6],[3,6,8],[3,8,9],[4,9,5],[2,4,11],[6,2,10],[8,6,7],[9,8,1]];
+  const subdiv=Math.max(0,2-lod);
+  for(let level=0;level<subdiv;level++){
+    const mid=new Map(),half=(a,b)=>{const k=a<b?a*4096+b:b*4096+a;if(!mid.has(k)){verts.push(treeNormal(treeAdd(verts[a],verts[b])));mid.set(k,verts.length-1);}return mid.get(k);};
+    tris=tris.flatMap(([a,b,c])=>{const ab=half(a,b),bc=half(b,c),ca=half(c,a);return[[a,ab,ca],[b,bc,ab],[c,ca,bc],[ab,bc,ca]];});
+  }
+  // Six fractured polyhedral archetypes built by intersecting geological cleavage half-spaces around [0, 0.3, 0].
+  const cuts=[];
+  // Broad basal root plane (-0.20 m below ground) keeps every boulder grounded and star-convex around y = 0.3.
+  cuts.push({n:[0,-1,0],d:.50});
+  const topTilt=archetype===0?[.22,.96,.12]:archetype===2?[.48,.82,-.28]:archetype===5?[.08,.99,-.06]:[.18+rand()*.24,.92,.14-rand()*.28];
+  const topD=archetype===0?.38:archetype===2?.46:archetype===4?.40:.44+rand()*.10;
+  cuts.push({n:treeNormal(topTilt),d:topD});
+  const sideCount=archetype===5?6:8+Math.floor(rand()*5);
+  const phase=rand()*Math.PI*2;
+  for(let i=0;i<sideCount;i++){
+    const az=phase+(i/sideCount)*Math.PI*2+(rand()-.5)*(archetype===5?.12:.42);
+    const el=(archetype===3&&i%2===0)?.52:archetype===5?.06:(rand()-.18)*.75;
+    const dist=(archetype===1||archetype===2?(.58+rand()*.32):(.64+rand()*.28));
+    cuts.push({n:treeNormal([Math.cos(az)*Math.cos(el),Math.sin(el),Math.sin(az)*Math.cos(el)]),d:dist});
+  }
+  if(archetype===2||archetype===3){
+    // Secondary shoulder shear plane for wedged talus / stepped outcrop profiles.
+    const a=phase+1.15;
+    cuts.push({n:treeNormal([Math.cos(a)*.62,.76,Math.sin(a)*.62]),d:.48+rand()*.08});
+  }
+  const starY=0.3;
+  const stretchX=archetype===0?1.14:archetype===4?1.08:.86+rand()*.26;
+  const stretchZ=archetype===0?.84:archetype===4?.92:.82+rand()*.26;
+  const pos=verts.map(u=>{
+    let best=1.18;
+    for(const c of cuts){
+      const dDot=u[0]*c.n[0]+u[1]*c.n[1]+u[2]*c.n[2];
+      if(dDot>1e-3)best=Math.min(best,c.d/dDot);
     }
-    const lattice=Array.from({length:64},()=>rand());
-    const noise=(x,y,z)=>{const i=Math.floor(x),j=Math.floor(y),k=Math.floor(z),fx=x-i,fy=y-j,fz=z-k,s=v=>v*v*(3-2*v);
-      const h=(a,b,c)=>lattice[((a*7+b*13+c*29)%64+64)%64];let r=0;
-      for(let dz=0;dz<2;dz++)for(let dy=0;dy<2;dy++)for(let dx=0;dx<2;dx++)r+=h(i+dx,j+dy,k+dz)*(dx?s(fx):1-s(fx))*(dy?s(fy):1-s(fy))*(dz?s(fz):1-s(fz));
-      return r-.5;};
-    const flat=.52+rand()*.26,stretch=.85+rand()*.35,cuts=Array.from({length:2+(rand()>.5?1:0)},()=>{
-      const a=rand()*Math.PI*2,e=(rand()-.25)*1.1;return{n:treeNormal([Math.cos(a)*Math.cos(e),Math.sin(e),Math.sin(a)*Math.cos(e)]),d:.55+rand()*.25};});
-    const pos=verts.map(v=>{
-      const r=1+.22*noise(v[0]*1.7+3,v[1]*1.7,v[2]*1.7)+.08*noise(v[0]*4.3,v[1]*4.3+5,v[2]*4.3);
-      let p=[v[0]*r*stretch,v[1]*r*flat,v[2]*r];
-      for(const c of cuts){const over=p[0]*c.n[0]+p[1]*c.n[1]+p[2]*c.n[2]-c.d;if(over>0)p=treeAdd(p,c.n,-over);}
-      return p;
-    });
-    // Seat it: the lowest fifth below ground, the widest reach about one unit as the old stone's was.
-    let low=Infinity,high=-Infinity,reach=0;for(const p of pos){low=Math.min(low,p[1]);high=Math.max(high,p[1]);reach=Math.max(reach,Math.hypot(p[0],p[2]));}
-    const lift=-low-(high-low)*.2,ys=1.2/Math.max(1e-3,high-low);
-    for(const p of pos){p[0]/=reach;p[2]/=reach;p[1]=(p[1]+lift)*ys;}
-    const normals=pos.map(()=>[0,0,0]);
-    const faceN=tris.map(([a,b,c])=>treeNormal(treeCross(pos[b].map((v,k)=>v-pos[a][k]),pos[c].map((v,k)=>v-pos[a][k]))));
-    tris.forEach((f,i)=>{for(const v of f)normals[v]=treeAdd(normals[v],faceN[i]);});
-    const shade=v=>.5+.45*Math.max(0,Math.min(1,(pos[v][1]+.25)/1.2));
-    tris.forEach(([a,b,c],i)=>{
-      // A fractured face keeps its own flat normal, so the break reads as an arris; elsewhere the stone is smooth.
-      for(const v of[a,b,c]){const n=treeNormal(normals[v]),sharp=n[0]*faceN[i][0]+n[1]*faceN[i][1]+n[2]*faceN[i][2]<.86;out.push(...pos[v],...(sharp?faceN[i]:n),6,shade(v),0,0);}
-    });
-  }else{
-    // Bent opaque ribbons have real geometry and no alpha-card overdraw.
-    for(let blade=0;blade<18;blade++){
-      const angle=rand()*Math.PI*2,r=Math.sqrt(rand())*.76,x=Math.cos(angle)*r,z=Math.sin(angle)*r,turn=rand()*Math.PI*2,h=.4+rand()*.6,width=.025+rand()*.025;
-      const right=[Math.cos(turn)*width,0,Math.sin(turn)*width],bend=[-Math.sin(turn)*.22,0,Math.cos(turn)*.22],rows=[0,.48,.82].map(t=>[-1,1].map(side=>[x+right[0]*side*(1-t*.7)+bend[0]*t*t,h*t,z+right[2]*side*(1-t*.7)+bend[2]*t*t]));
-      const tip=[x+bend[0],h,z+bend[2]],shade=.45+rand()*.5;
-      for(let j=0;j<2;j++){triangle(rows[j][0],rows[j][1],rows[j+1][0],7,shade);triangle(rows[j][1],rows[j+1][1],rows[j+1][0],7,shade);}
-      triangle(rows[2][0],rows[2][1],tip,7,shade);
+    const ripple=1+.025*Math.sin(u[0]*6.7+u[2]*5.3+archetype)+.015*Math.cos(u[1]*9.1-u[0]*4.1);
+    const r=best*ripple;
+    return [u[0]*r*stretchX,starY+u[1]*r,u[2]*r*stretchZ];
+  });
+  let minY=Infinity,maxY=-Infinity,maxXZ=0;
+  for(const p of pos){minY=Math.min(minY,p[1]);maxY=Math.max(maxY,p[1]);maxXZ=Math.max(maxXZ,Math.hypot(p[0],p[2]));}
+  const xzScale=.92/Math.max(1e-3,maxXZ);
+  const negScale=minY<starY?(.48/(starY-minY)):1;
+  const posScale=maxY>starY?(Math.min(.58,maxY-starY)/(maxY-starY)):1;
+  for(const p of pos){
+    p[0]*=xzScale;p[2]*=xzScale;
+    if(p[1]<starY)p[1]=starY+(p[1]-starY)*Math.max(.85,Math.min(1.06,negScale));
+    else p[1]=starY+(p[1]-starY)*Math.min(1.0,posScale);
+  }
+  const faceN=tris.map(([a,b,c])=>{
+    const ab=[pos[b][0]-pos[a][0],pos[b][1]-pos[a][1],pos[b][2]-pos[a][2]];
+    const ac=[pos[c][0]-pos[a][0],pos[c][1]-pos[a][1],pos[c][2]-pos[a][2]];
+    return treeNormal(treeCross(ab,ac));
+  });
+  const adj=Array.from({length:pos.length},()=>[]);
+  tris.forEach((f,fi)=>{for(const v of f)adj[v].push(fi);});
+  // Encode per-archetype stone hash in leafUV.x so groundFS varies granite, limestone, ironstone, and basalt tinting.
+  const archTag=(archetype+.5)/ROCK_ARCHETYPES;
+  for(let fi=0;fi<tris.length;fi++){
+    const f=tris[fi],fn=faceN[fi];
+    for(const v of f){
+      let sx=0,sy=0,sz=0;
+      for(const nfi of adj[v]){
+        const nf=faceN[nfi];
+        if(nf[0]*fn[0]+nf[1]*fn[1]+nf[2]*fn[2]>=.985){sx+=nf[0];sy+=nf[1];sz+=nf[2];}
+      }
+      const vn=sx||sy||sz?treeNormal([sx,sy,sz]):fn;
+      const heightTerm=Math.max(0,Math.min(1,(pos[v][1]+.20)/1.05));
+      const upLight=.65+.35*Math.max(0,fn[1]);
+      const shade=.42+.56*(heightTerm*.6+upLight*.4);
+      out.push(pos[v][0],pos[v][1],pos[v][2],vn[0],vn[1],vn[2],6,shade,archTag,heightTerm);
     }
   }
-  const geometry=new Float32Array(out);groundGeometryCache.set(key,geometry);return geometry;
+  const geom=new Float32Array(out);groundGeometryCache.set(cacheKey,geom);return geom;
+}
+function buildGrassGeometry(variant=0,lod=0){
+  const cacheKey=`grass:${variant}:${lod}`;
+  if(groundGeometryCache.has(cacheKey))return groundGeometryCache.get(cacheKey);
+  const rand=random(18491+(variant+2)*7919),out=[];
+  const triangle=(a,b,c,kind,shade)=>{
+    const n=treeNormal(treeCross(b.map((v,k)=>v-a[k]),c.map((v,k)=>v-a[k])));
+    for(const p of[a,b,c])out.push(...p,...n,kind,shade,0,0);
+  };
+  const blades=lod===0?18:12;
+  const rowsAt=lod===0?[0,.48,.82]:[0,.55];
+  for(let blade=0;blade<blades;blade++){
+    const angle=rand()*Math.PI*2,r=Math.sqrt(rand())*.76,x=Math.cos(angle)*r,z=Math.sin(angle)*r,turn=rand()*Math.PI*2,h=.4+rand()*.6,width=(lod===0?.025:.034)+rand()*.025;
+    const right=[Math.cos(turn)*width,0,Math.sin(turn)*width],bend=[-Math.sin(turn)*.22,0,Math.cos(turn)*.22];
+    const rows=rowsAt.map(t=>[-1,1].map(side=>[x+right[0]*side*(1-t*.7)+bend[0]*t*t,h*t,z+right[2]*side*(1-t*.7)+bend[2]*t*t]));
+    const tip=[x+bend[0],h,z+bend[2]],shade=.45+rand()*.5;
+    for(let j=0;j<rows.length-1;j++){triangle(rows[j][0],rows[j][1],rows[j+1][0],7,shade);triangle(rows[j][1],rows[j+1][1],rows[j+1][0],7,shade);}
+    const top=rows[rows.length-1];
+    triangle(top[0],top[1],tip,7,shade);
+  }
+  const geom=new Float32Array(out);groundGeometryCache.set(cacheKey,geom);return geom;
+}
+export function groundCoverGeometry(variant=0,lod=0){
+  const key=variant%GROUND_COVER.variants;
+  if(key<2)return buildBoulderGeometry(key,Math.max(0,Math.min(ROCK_LODS-1,lod)));
+  return buildGrassGeometry(key-2,Math.max(0,Math.min(GRASS_LODS-1,lod)));
+}
+export function groundCoverBucketGeometry(bucket=0){
+  const b=((bucket%GROUND_COVER_BUCKETS)+GROUND_COVER_BUCKETS)%GROUND_COVER_BUCKETS;
+  if(b<ROCK_ARCHETYPES*ROCK_LODS){
+    const lod=Math.floor(b/ROCK_ARCHETYPES),arch=b%ROCK_ARCHETYPES;
+    return buildBoulderGeometry(arch,lod);
+  }
+  const gi=b-ROCK_ARCHETYPES*ROCK_LODS;
+  const lod=Math.floor(gi/GRASS_VARIANTS),gVar=gi%GRASS_VARIANTS;
+  return buildGrassGeometry(gVar,lod);
 }
 const treeNormal=p=>{const l=Math.hypot(...p)||1;return p.map(x=>x/l);};
 const treeCross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];

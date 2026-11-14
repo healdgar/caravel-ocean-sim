@@ -29,6 +29,8 @@ const ROAD_WANDER = 1.1;
 export const STREET_FIELD_RANGE_M = 16;
 export const STREET_FIELD_EDGE_M = 4;
 const MOST_FIELD_SIZE = 2048;
+export const ROAMING_FIELD_SPAN_M = 1600;
+export const ROAMING_FIELD_SIZE = 1024;
 const FIELD_METRES_PER_TEXEL = 1;
 export const ROUTE_STEP_M = 1.25;
 export const WALKER_WORDS = 12;
@@ -341,22 +343,107 @@ function stampField(field, size, window, ways) {
   return field;
 }
 
+export function buildWayGrid(ways, cellM = 64) {
+  const cells = new Map();
+  const key = (i, j) => `${i},${j}`;
+  const range = STREET_FIELD_RANGE_M;
+  for (const way of ways || []) {
+    const pts = way.points;
+    if (!pts || pts.length < 2) continue;
+    for (let p = 1; p < pts.length; p++) {
+      const [ax, az, aw] = pts[p - 1], [bx, bz, bw] = pts[p];
+      const dx = bx - ax, dz = bz - az, lengthSq = Math.max(1e-6, dx * dx + dz * dz);
+      const seg = { way, ax, az, bx, bz, dx, dz, lengthSq, aw, bw };
+      const reach = Math.max(aw, bw) * 0.5 + range;
+      const i0 = Math.floor((Math.min(ax, bx) - reach) / cellM), i1 = Math.floor((Math.max(ax, bx) + reach) / cellM);
+      const j0 = Math.floor((Math.min(az, bz) - reach) / cellM), j1 = Math.floor((Math.max(az, bz) + reach) / cellM);
+      for (let j = j0; j <= j1; j++) {
+        for (let i = i0; i <= i1; i++) {
+          const k = key(i, j);
+          let list = cells.get(k);
+          if (!list) cells.set(k, list = []);
+          list.push(seg);
+        }
+      }
+    }
+  }
+  return {
+    cellM,
+    edgeAt(x, z) {
+      const list = cells.get(key(Math.floor(x / cellM), Math.floor(z / cellM)));
+      if (!list) return STREET_FIELD_RANGE_M - STREET_FIELD_EDGE_M;
+      let best = STREET_FIELD_RANGE_M - STREET_FIELD_EDGE_M;
+      for (let idx = 0; idx < list.length; idx++) {
+        const s = list[idx];
+        const t = Math.max(0, Math.min(1, ((x - s.ax) * s.dx + (z - s.az) * s.dz) / s.lengthSq));
+        const d = Math.hypot(x - (s.ax + s.dx * t), z - (s.az + s.dz * t));
+        const edge = d - (s.aw + (s.bw - s.aw) * t) * 0.5;
+        if (edge < best) best = edge;
+      }
+      return best;
+    },
+    waysInBox(x0, z0, x1, z1) {
+      const out = new Set();
+      const i0 = Math.floor(x0 / cellM), i1 = Math.floor(x1 / cellM);
+      const j0 = Math.floor(z0 / cellM), j1 = Math.floor(z1 / cellM);
+      for (let j = j0; j <= j1; j++) {
+        for (let i = i0; i <= i1; i++) {
+          const list = cells.get(key(i, j));
+          if (list) for (let idx = 0; idx < list.length; idx++) out.add(list[idx].way);
+        }
+      }
+      return [...out];
+    },
+  };
+}
+
 // How far outside a way this point lies, in metres; negative is on it. Used to keep plants off.
-// Add a city's streets and squares to a port's paving field: the field is stamped again over
-// the ground both cover, as fine as its size allows. The port's own ways and routes stand.
+// Add a city's streets and squares to a port's paving field: when the network fits inside a single
+// high-resolution window it is stamped once; across a multi-settlement board a 1600 m window roams at ~1.56 m/texel.
 export function paveCityStreets(streets, cityWays, { mostFieldSize = MOST_FIELD_SIZE } = {}) {
-  if (!streets || !cityWays?.length) return streets;
+  if (!cityWays?.length) return streets;
+  if (!streets) {
+    streets = {
+      window: { x: 0, z: 0, span: ROAMING_FIELD_SPAN_M },
+      field: null, size: Math.min(mostFieldSize, ROAMING_FIELD_SIZE),
+      ways: [], doors: [], samples: new Float32Array(0), walkers: new Float32Array(0), people: 0,
+      stats: { fieldBytes: 0 },
+    };
+  }
   const all = [...(streets.ways || []), ...cityWays];
   let lowX = Infinity, highX = -Infinity, lowZ = Infinity, highZ = -Infinity;
   for (const way of all) for (const [x, z, width] of way.points) {
     const reach = width * 0.5;
     lowX = Math.min(lowX, x - reach); highX = Math.max(highX, x + reach); lowZ = Math.min(lowZ, z - reach); highZ = Math.max(highZ, z + reach);
   }
-  const span = Math.max(highX - lowX, highZ - lowZ) + 2 * (STREET_FIELD_RANGE_M + 8);
-  const size = Math.min(mostFieldSize, Math.ceil(span / FIELD_METRES_PER_TEXEL));
-  streets.window = { x: (lowX + highX) * 0.5, z: (lowZ + highZ) * 0.5, span };
-  streets.size = size;
-  streets.field = stampField(new Uint8Array(size * size * 2), size, streets.window, all);
+  const fullSpan = Math.max(highX - lowX, highZ - lowZ) + 2 * (STREET_FIELD_RANGE_M + 8);
+  streets.allWays = all;
+  streets.wayGrid = buildWayGrid(all, 64);
+  if (fullSpan <= ROAMING_FIELD_SPAN_M) {
+    const size = Math.min(mostFieldSize, Math.ceil(fullSpan / FIELD_METRES_PER_TEXEL));
+    streets.roaming = false;
+    streets.stampAt = null;
+    streets.window = { x: (lowX + highX) * 0.5, z: (lowZ + highZ) * 0.5, span: fullSpan };
+    streets.size = size;
+    streets.field = stampField(new Uint8Array(size * size * 2), size, streets.window, all);
+  } else {
+    const size = Math.min(mostFieldSize, ROAMING_FIELD_SIZE);
+    const seedPt = cityWays[0]?.points?.[0];
+    const initX = Number.isFinite(streets.window?.x) && (streets.ways?.length ?? 0) > 0 ? streets.window.x : (seedPt?.[0] ?? (lowX + highX) * 0.5);
+    const initZ = Number.isFinite(streets.window?.z) && (streets.ways?.length ?? 0) > 0 ? streets.window.z : (seedPt?.[1] ?? (lowZ + highZ) * 0.5);
+    streets.roaming = true;
+    streets.size = size;
+    streets.field = new Uint8Array(size * size * 2);
+    streets.stampAt = (cx, cz) => {
+      if (!Number.isFinite(cx) || !Number.isFinite(cz)) return false;
+      const half = ROAMING_FIELD_SPAN_M * 0.5 + STREET_FIELD_RANGE_M + 8;
+      streets.window = { x: cx, z: cz, span: ROAMING_FIELD_SPAN_M };
+      streets.field.fill(0);
+      stampField(streets.field, size, streets.window, streets.wayGrid.waysInBox(cx - half, cz - half, cx + half, cz + half));
+      return true;
+    };
+    streets.stampAt(initX, initZ);
+  }
   streets.cityWays = cityWays;
   if (streets.stats) streets.stats.fieldBytes = streets.field.byteLength;
   return streets;
@@ -364,14 +451,21 @@ export function paveCityStreets(streets, cityWays, { mostFieldSize = MOST_FIELD_
 
 export function streetEdgeAt(streets, x, z) {
   if (!streets) return Infinity;
+  if (streets.wayGrid) {
+    if (streets.roaming) return streets.wayGrid.edgeAt(x, z);
+    const { window } = streets;
+    const u = (x - window.x) / window.span + 0.5, v = (z - window.z) / window.span + 0.5;
+    if (u <= 0 || v <= 0 || u >= 1 || v >= 1) return streets.wayGrid.edgeAt(x, z);
+  }
   const { window, field, size } = streets;
+  if (!field || !size) return Infinity;
   const u = (x - window.x) / window.span + 0.5, v = (z - window.z) / window.span + 0.5;
   if (u <= 0 || v <= 0 || u >= 1 || v >= 1) return Infinity;
   const k = Math.floor(v * size) * size + Math.floor(u * size);
   return (field[k * 2] / 255) * STREET_FIELD_RANGE_M - STREET_FIELD_EDGE_M;
 }
 
-export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSize = MOST_FIELD_SIZE } = {}) {
+export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSize = MOST_FIELD_SIZE, suppressSyntheticCountryRoads = false } = {}) {
   const all = port?.instances ?? [];
   if (all.length < 2 || !port.center) return null;
   const started = typeof performance === 'object' ? performance.now() : 0;
@@ -577,9 +671,10 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
     return { points };
   });
 
-  // A road or two leaves town by the easiest ground and fades out in the country.
+  // A road or two leaves town by the easiest ground and fades out in the country, unless a founded
+  // board provides the regional road network.
   const roads = [];
-  {
+  if (!suppressSyntheticCountryRoads) {
     const reach = ROAD_REACH_M + ROAD_CELL_M * 4;
     const roadGrid = createGrid(centre.x - reach, centre.z - reach, centre.x + reach, centre.z + reach, ROAD_CELL_M);
     const heights = new Float32Array(roadGrid.count);

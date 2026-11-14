@@ -5,7 +5,7 @@
 // the same masons as the city generator's (js/old-world-city.js); woodland handed to the forest; water left as the
 // game has it. Ground keeps the look of its geography: what the board adds to it is drawn by the GPU
 // (js/board-stamp.js) from the compact tables made here once.
-import { CITY_BLOCK_FLOATS, CITY_GROUND, CITY_ROOF, CITY_TREES, CITY_WALL, cityFootprintsOverlap, cityMasonry, footprint, local, makeHash, mulberry, rectDist, segDist } from './old-world-city.js';
+import { CITY_BLOCK_FLOATS, CITY_GROUND, CITY_ROOF, CITY_TREES, CITY_WALL, cityFootprintsOverlap, cityMasonry, footprint, local, makeHash, mulberry, rectDist, segDist, segRectDist } from './old-world-city.js';
 import { CITY_BUILDING_TYPES, CITY_CHURCH, CITY_CURTAIN, CITY_HALL, CITY_HOUSE_STOREYS, CITY_PAINT, CITY_STOREY_M, CITY_THATCH_ROOF, CITY_TYPE, CITY_TYPED_ROOF, cityHouseType } from './old-world-buildings.js';
 import { WORKS_FENCE_M, WORKS_WHEEL } from './old-world-works.js';
 
@@ -51,14 +51,26 @@ export const BOARD_THATCHED = Object.freeze({
 // the water's width along the road. The model keeps no list of these (its own page finds them as it draws its
 // roads), so they are found here from its record of both. `roads` are {points: [x, z, …]}, `rivers` {points: [x, z,
 // half-width, …]}; a second road at a crossing uses the bridge already there.
-export const BOARD_ROAD_BRIDGE = Object.freeze({ width: 6, arch: 11, rise: 0.5 });
-export function boardRoadCrossings(roads, rivers) {
+export const BOARD_ROAD_BRIDGE = Object.freeze({ width: 6, arch: 11, rise: 0.65 });
+export function boardRoadCrossings(roads, rivers, places = null) {
   const out = [];
+  const candidates = [];
+  for (const road of roads ?? []) {
+    if (road?.points?.length >= 4) candidates.push({ points: road.points, stone: true, rank: 0 });
+  }
+  for (const place of places ?? []) {
+    for (const st of place?.streets ?? []) {
+      if (!st?.points || st.points.length < 4) continue;
+      if (st.kind !== 'road' && st.kind !== 'street' && st.kind !== 'lane') continue;
+      candidates.push({ points: st.points, stone: st.kind !== 'lane', rank: st.kind === 'road' ? 1 : st.kind === 'street' ? 2 : 3 });
+    }
+  }
+  candidates.sort((a, b) => a.rank - b.rank);
   for (const river of rivers ?? []) {
     const R = river.points;
     let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
     for (let j = 0; j + 2 < R.length; j += 3) { const pad = R[j + 2] + 1; x0 = Math.min(x0, R[j] - pad); x1 = Math.max(x1, R[j] + pad); z0 = Math.min(z0, R[j + 1] - pad); z1 = Math.max(z1, R[j + 1] + pad); }
-    for (const road of roads ?? []) {
+    for (const road of candidates) {
       const P = road.points;
       for (let i = 0; i + 3 < P.length; i += 2) {
         const ax = P[i], az = P[i + 1], bx = P[i + 2], bz = P[i + 3];
@@ -69,10 +81,10 @@ export function boardRoadCrossings(roads, rivers) {
           const t = ((cx - ax) * (dz - cz) - (cz - az) * (dx - cx)) / den, u = ((cx - ax) * (bz - az) - (cz - az) * (bx - ax)) / den;
           if (t < 0 || t >= 1 || u < 0 || u >= 1) continue;
           const L = Math.hypot(bx - ax, bz - az), x = ax + (bx - ax) * t, z = az + (bz - az) * t;
-          if (out.some((o) => Math.hypot(o.x - x, o.z - z) < 12)) continue;
+          if (out.some((o) => Math.hypot(o.x - x, o.z - z) < 14)) continue;
           // Across a river met askew the water is wider along the road; a road is brought to no shallower a crossing than this.
           const sine = Math.abs(den) / (L * Math.hypot(dx - cx, dz - cz)), half = R[j + 2] + (R[j + 5] - R[j + 2]) * u;
-          out.push({ x, z, ux: (bx - ax) / L, uz: (bz - az) / L, span: 2 * half / Math.max(0.35, sine) });
+          out.push({ x, z, ux: (bx - ax) / L, uz: (bz - az) / L, span: 2 * half / Math.max(0.35, sine), stone: road.stone });
         }
       }
     }
@@ -149,27 +161,125 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
   const seat = places[0];
   const dropped = { wet: 0, port: 0, steep: 0, edge: 0 };
 
-  /* ---- streets and squares: where they run, for the ground's answers; the seat's own to the paving field ---- */
+  /* ---- streets and squares: every settlement stamps its own ways; trimmed roads and lanes feed the paving field too ---- */
   const streets = [], squares = [], paving = [];
+  const placeSegs = places.map(() => []);
+  const placeStreetR = new Float32Array(places.length);
   places.forEach((place, at) => {
+    let maxR = 0;
     for (const street of place.streets) {
       const pts = [];
-      for (let k = 0; k < street.points.length; k += 2) pts.push([ox + street.points[k], oz + street.points[k + 1]]);
+      for (let k = 0; k < street.points.length; k += 2) {
+        const sx = ox + street.points[k], sz = oz + street.points[k + 1];
+        pts.push([sx, sz]);
+        maxR = Math.max(maxR, Math.hypot(sx - place.x, sz - place.z) + Math.max(1.2, street.half));
+      }
       const lane = street.kind === 'lane' || street.kind === 'alley', st = { pts, hw: Math.max(1.2, street.half), kind: street.kind, place: at, paved: lane ? 0.5 : 1 };
       streets.push(st);
       for (let i = 1; i < pts.length; i++) {
         const [ax, az] = pts[i - 1], [bx, bz] = pts[i];
-        segs.add({ ax, az, bx, bz, hw: st.hw }, Math.min(ax, bx) - st.hw, Math.min(az, bz) - st.hw, Math.max(ax, bx) + st.hw, Math.max(az, bz) + st.hw);
+        const seg = { ax, az, bx, bz, hw: st.hw, place: at };
+        segs.add(seg, Math.min(ax, bx) - st.hw, Math.min(az, bz) - st.hw, Math.max(ax, bx) + st.hw, Math.max(az, bz) + st.hw);
+        placeSegs[at].push(seg);
       }
-      if (at === 0 && pts.length > 1) paving.push({ points: pts.filter(([x, z]) => inside(x, z, 4)).map(([x, z]) => [x, z, st.hw * 2, st.paved]) });
+      if (pts.length > 1) paving.push({ points: pts.filter(([x, z]) => inside(x, z, 4)).map(([x, z]) => [x, z, st.hw * 2, st.paved]) });
     }
+    placeStreetR[at] = maxR > 0 ? Math.max(18, maxR) : 0;
     for (const sq of place.squares) {
       const rad = sq.rad, mean = rad.reduce((a, b) => a + b, 0) / rad.length, R = Math.max(...rad);
       const square = { x: ox + sq.x, z: oz + sq.z, rad, R, mean, kind: sq.kind === 'green' ? 'park' : 'square', place: at };
       squares.push(square);
-      if (at === 0 && square.kind === 'square') paving.push({ points: [[square.x - 0.5, square.z, mean * 2, 1], [square.x + 0.5, square.z, mean * 2, 1]] });
+      if (square.kind === 'square' && inside(square.x, square.z, 4)) paving.push({ points: [[square.x - 0.5, square.z, mean * 2, 1], [square.x + 0.5, square.z, mean * 2, 1]] });
     }
   });
+  const snapToPlaceStreet = (at, px, pz, maxDist = 32) => {
+    let bestD = maxDist, bestPt = null;
+    for (const g of placeSegs[at]) {
+      const dx = g.bx - g.ax, dz = g.bz - g.az, l2 = dx * dx + dz * dz;
+      const t = l2 > 1e-9 ? Math.max(0, Math.min(1, ((px - g.ax) * dx + (pz - g.az) * dz) / l2)) : 0;
+      const cx = g.ax + dx * t, cz = g.az + dz * t, d = Math.hypot(px - cx, pz - cz);
+      if (d < bestD) { bestD = d; bestPt = [cx, cz]; }
+    }
+    return bestPt;
+  };
+  const insidePlaceCore = (px, pz) => {
+    for (let at = 0; at < places.length; at++) {
+      const sr = placeStreetR[at];
+      if (sr <= 0 || Math.hypot(px - places[at].x, pz - places[at].z) >= sr - 4) continue;
+      if (placeSegs[at].some((g) => segDist(px, pz, g.ax, g.az, g.bx, g.bz) < g.hw + 22)) return at;
+    }
+    return -1;
+  };
+  const trimRoadThroughPlaces = (rawLine) => {
+    const dense = [];
+    for (let i = 0; i < rawLine.length; i++) {
+      const p = rawLine[i];
+      if (i > 0) {
+        const q = rawLine[i - 1], segL = Math.hypot(p[0] - q[0], p[1] - q[1]);
+        let nearPlace = false;
+        if (segL > 12) {
+          const mx = (p[0] + q[0]) * 0.5, mz = (p[1] + q[1]) * 0.5, halfL = segL * 0.5 + 32;
+          for (let at = 0; at < places.length; at++) {
+            if (placeStreetR[at] > 0 && Math.hypot(mx - places[at].x, mz - places[at].z) < placeStreetR[at] + halfL) { nearPlace = true; break; }
+          }
+        }
+        if (nearPlace) {
+          const steps = Math.ceil(segL / 10);
+          for (let s = 1; s < steps; s++) dense.push([q[0] + (p[0] - q[0]) * s / steps, q[1] + (p[1] - q[1]) * s / steps]);
+        }
+      }
+      dense.push(p);
+    }
+    const out = [];
+    let cur = [], prevCore = -1;
+    for (let i = 0; i < dense.length; i++) {
+      const p = dense[i], core = insidePlaceCore(p[0], p[1]);
+      if (core >= 0) {
+        if (cur.length > 0) {
+          const junction = snapToPlaceStreet(core, cur[cur.length - 1][0], cur[cur.length - 1][1]);
+          if (junction) cur.push(junction);
+          if (cur.length >= 2) out.push(cur);
+          cur = [];
+        }
+        prevCore = core;
+      } else {
+        if (cur.length === 0 && prevCore >= 0) {
+          const junction = snapToPlaceStreet(prevCore, p[0], p[1]);
+          if (junction) cur.push(junction);
+        }
+        cur.push(p);
+        prevCore = -1;
+      }
+    }
+    if (cur.length >= 2) out.push(cur);
+    return out;
+  };
+  const roads = [];
+  for (const road of board.roads ?? []) {
+    const rawLine = [];
+    for (let k = 0; k < road.points.length; k += 2) rawLine.push([ox + road.points[k], oz + road.points[k + 1]]);
+    if (rawLine.length < 2) continue;
+    const pieces = trimRoadThroughPlaces(rawLine);
+    const keepList = pieces.length ? pieces : [rawLine];
+    for (const line of keepList) {
+      let arc = 0;
+      for (let i = 1; i < line.length; i++) arc += Math.hypot(line[i][0] - line[i - 1][0], line[i][1] - line[i - 1][1]);
+      if (arc < 4) continue;
+      roads.push(line);
+      for (let i = 1; i < line.length; i++) {
+        const [ax, az] = line[i - 1], [bx, bz] = line[i], hw = 2.6;
+        segs.add({ ax, az, bx, bz, hw, road: true }, Math.min(ax, bx) - hw, Math.min(az, bz) - hw, Math.max(ax, bx) + hw, Math.max(az, bz) + hw);
+      }
+      const bounded = line.filter(([x, z]) => inside(x, z, 4));
+      if (bounded.length > 1) paving.push({ points: bounded.map(([x, z]) => [x, z, 5.2, 0.48]) });
+    }
+  }
+  const rawLanes = board.lanes ?? [];
+  for (let k = 0; k + 3 < rawLanes.length; k += 4) {
+    const ax = ox + rawLanes[k], az = oz + rawLanes[k + 1], bx = ox + rawLanes[k + 2], bz = oz + rawLanes[k + 3], hw = 1.5;
+    segs.add({ ax, az, bx, bz, hw, lane: true }, Math.min(ax, bx) - hw, Math.min(az, bz) - hw, Math.max(ax, bx) + hw, Math.max(az, bz) + hw);
+    if (inside(ax, az, 4) || inside(bx, bz, 4)) paving.push({ points: [[ax, az, 3.0, 0.35], [bx, bz, 3.0, 0.35]] });
+  }
   for (let k = paving.length - 1; k >= 0; k--) if (paving[k].points.length < 2) paving.splice(k, 1);
   const squareRadius = (p, x, z) => {
     const n = p.rad.length, a = Math.atan2(z - p.z, x - p.x) / (2 * Math.PI) * n, i = Math.floor(a), f = a - i;
@@ -307,6 +417,24 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     pushTyped(type, f.x, base.floor, f.z, f.yaw, f.w, up, f.d, tone);
     occupy(f); built.ruins++;
   };
+  const wayClearance = (fp) => {
+    let minC = Infinity, pushX = 0, pushZ = 0, roadHit = false;
+    const Reach = Math.hypot(fp.w, fp.d) * 0.5 + 8;
+    segs.some(fp.x, fp.z, Reach, (g) => {
+      const c = segRectDist(fp, g.ax, g.az, g.bx, g.bz) - g.hw;
+      if (c < minC) {
+        minC = c;
+        roadHit = Boolean(g.road);
+        const dx = g.bx - g.ax, dz = g.bz - g.az, l2 = dx * dx + dz * dz;
+        const t = l2 > 1e-9 ? Math.max(0, Math.min(1, ((fp.x - g.ax) * dx + (fp.z - g.az) * dz) / l2)) : 0;
+        const px = g.ax + dx * t, pz = g.az + dz * t, ox0 = fp.x - px, oz0 = fp.z - pz, L = Math.hypot(ox0, oz0);
+        if (L > 1e-4) { pushX = ox0 / L; pushZ = oz0 / L; }
+        else if (l2 > 1e-4) { const inv = 1 / Math.sqrt(l2); pushX = -dz * inv; pushZ = dx * inv; }
+      }
+      return false;
+    });
+    return { clearance: minC, pushX, pushZ, roadHit };
+  };
   for (let k = 0; k < count; k++) {
     const place = kinds[k * 6], arch = arches[kinds[k * 6 + 1]], church = kinds[k * 6 + 4];
     const x = ox + stand[k * 6], z = oz + stand[k * 6 + 1], rot = stand[k * 6 + 2], w = stand[k * 6 + 3], d = stand[k * 6 + 4], h = stand[k * 6 + 5];
@@ -332,27 +460,45 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
       front = Math.max(front, 2 * (most - WORKS_WHEEL.out));
       built.wheels++;
     }
-    const f = footprint(x, z, front, depth, yaw);
+    let bx = x, bz = z;
+    let f = footprint(bx, bz, front, depth, yaw);
+    if (arch !== 'mill' && arch !== 'wharf' && arch !== 'wall' && arch !== 'tower' && arch !== 'keep' && arch !== 'bridge') {
+      let wc = wayClearance(f);
+      if (wc.clearance < -0.35) {
+        for (const step of [0.8, 1.6, 2.4, 3.2]) {
+          const cx = x + wc.pushX * step, cz = z + wc.pushZ * step;
+          if (!inside(cx, cz, 12) || heightAt(cx, cz) < BOARD_DRY_M) continue;
+          const cand = footprint(cx, cz, front, depth, yaw);
+          if (taken(cand, 0.8)) continue;
+          const nextWc = wayClearance(cand);
+          if (nextWc.clearance > wc.clearance + 0.25) {
+            bx = cx; bz = cz; f = cand; wc = nextWc;
+            if (wc.clearance >= -0.35) break;
+          }
+        }
+        if (wc.clearance < -0.95 || (wc.roadHit && wc.clearance < -0.45)) { dropped.port++; continue; }
+      }
+    }
     if (taken(f, 0.8)) { dropped.port++; continue; }
     const left = stateOf ? stateOf[k] : 0;
     if (left) standLeft(k, f, left === 3);
     else if (arch === 'tower') {
-      tower(x, z, 6.2, Math.max(10, Math.min(15, h)), 0.9);
-      occupy(footprint(x, z, 7, 7, yaw));
+      tower(bx, bz, 6.2, Math.max(10, Math.min(15, h)), 0.9);
+      occupy(footprint(bx, bz, 7, 7, yaw));
     } else if (arch === 'wall') {
       // A length of wall the model stood by itself: its parapet toward the street it faces, or outward from the place.
       const long = Math.max(w, d) / 2, a = rot + (w >= d ? 0 : Math.PI / 2), ux = Math.cos(a), uz = -Math.sin(a), p = places[place] ?? seat;
-      curtain(x - ux * long, z - uz * long, x + ux * long, z + uz * long, fx || fz ? [fx, fz] : [x - p.x, z - p.z], CITY_CURTAIN.height, 0.86);
+      curtain(bx - ux * long, bz - uz * long, bx + ux * long, bz + uz * long, fx || fz ? [fx, fz] : [bx - p.x, bz - p.z], CITY_CURTAIN.height, 0.86);
     } else if (BOARD_WORKS[arch]) standWork(k, f, arch, Boolean(fx || fz));
     else if (arch === 'temple') {
       // A church's length runs back from its door.
-      const long = front > depth ? footprint(x, z, depth, front, yaw + Math.PI / 2) : f;
+      const long = front > depth ? footprint(bx, bz, depth, front, yaw + Math.PI / 2) : f;
       standChurch(k, long, (church & 3) === 3, h);
     } else if (arch === 'keep') {
-      tower(x, z, Math.max(9, Math.min(14, Math.max(w, d))), Math.max(18, h), 0.95, CITY_TYPE.KEEP);
-      occupy(footprint(x, z, Math.max(w, d), Math.max(w, d), yaw));
+      tower(bx, bz, Math.max(9, Math.min(14, Math.max(w, d))), Math.max(18, h), 0.95, CITY_TYPE.KEEP);
+      occupy(footprint(bx, bz, Math.max(w, d), Math.max(w, d), yaw));
     } else if (arch === 'hall') {
-      const long = front > depth ? footprint(x, z, depth, front, yaw + Math.PI / 2) : f;
+      const long = front > depth ? footprint(bx, bz, depth, front, yaw + Math.PI / 2) : f;
       const floor = pushBlock(long, CITY_HALL.height, CITY_HALL.roof, CITY_ROOF.HIP + CITY_TYPED_ROOF, CITY_WALL.HOUSE, 0.9);
       pushTyped(CITY_TYPE.HALL, long.x, floor, long.z, long.yaw, long.w, CITY_HALL.height, long.d, 0.9);
       keep(long); occupy(long);
@@ -366,7 +512,7 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
       const plain = arch === 'shed' || arch === 'longhouse';
       if (plain) storeys = 1;
       else if (place === 0 && seat.reach > 0) {
-        const near = 1 - Math.hypot(x - seat.x, z - seat.z) / seat.reach, lot = boardHashUnit(k, 59), merchant = arch === 'burgher' || arch === 'shop';
+        const near = 1 - Math.hypot(bx - seat.x, bz - seat.z) / seat.reach, lot = boardHashUnit(k, 59), merchant = arch === 'burgher' || arch === 'shop';
         if (near > 0.72) storeys = merchant ? (lot < 0.1 ? 5 : lot < 0.4 ? 4 : 3) : lot < 0.55 ? 3 : 2;
         else if (near > 0.4) storeys = Math.min(3, storeys + (lot < (merchant ? 0.5 : 0.25) ? 1 : 0));
       }
@@ -409,25 +555,41 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
   };
   const fences = works.fences ?? [];
   for (let k = 0; k + 4 < fences.length; k += 5) fence(ox + fences[k], oz + fences[k + 1], ox + fences[k + 2], oz + fences[k + 3], fences[k + 4] & 1);
-  // A track's bridge: its deck a little over the higher bank.
+  // A track's bridge and road/street crossings: seated above channel flood levels with masonry or timber piers.
+  const bridges = [];
   for (let k = 0; k + 5 < spans.length; k += 6) {
-    const x = ox + spans[k], z = oz + spans[k + 1], ux = spans[k + 2], uz = spans[k + 3], span = Math.max(4, spans[k + 4]), half = span / 2;
+    const x = ox + spans[k], z = oz + spans[k + 1], ux = spans[k + 2], uz = spans[k + 3], span = Math.max(6, spans[k + 4]), half = span / 2;
     if (!inside(x, z, 12)) continue;
-    const deck = Math.max(heightAt(x - ux * half, z - uz * half), heightAt(x + ux * half, z + uz * half), BOARD_DRY_M) + 0.35;
-    slight(spans[k + 5] ? CITY_TYPE.STONE_BRIDGE : CITY_TYPE.FOOTBRIDGE, x, deck, z, Math.atan2(ux, uz), 0.5, span + 1);
+    const hA = heightAt(x - ux * (half + 2.5), z - uz * (half + 2.5));
+    const hB = heightAt(x + ux * (half + 2.5), z + uz * (half + 2.5));
+    if (Math.max(hA, hB) <= 0.12) continue;
+    const deck = Math.max(hA, hB, BOARD_DRY_M) + 0.55;
+    const isStone = Boolean(spans[k + 5]);
+    const totalLen = span + 3.0;
+    slight(isStone ? CITY_TYPE.STONE_BRIDGE : CITY_TYPE.FOOTBRIDGE, x, deck, z, Math.atan2(ux, uz), 0.5, totalLen);
+    const width = CITY_BUILDING_TYPES[isStone ? CITY_TYPE.STONE_BRIDGE : CITY_TYPE.FOOTBRIDGE].width;
+    bridges.push({ x, z, ux, uz, length: totalLen, halfWidth: width * 0.5, deckY: deck, span, isStone });
     built.bridges++;
   }
-  // A road's bridge where it crosses a river: stone, the road's width, bank to bank in a run of arches no wider than
-  // a mason of the time could turn.
-  for (const q of boardRoadCrossings(board.roads, board.rivers)) {
-    const x = ox + q.x, z = oz + q.z, reach = q.span / 2 + 1, T = CITY_BUILDING_TYPES[CITY_TYPE.STONE_BRIDGE];
+  // A road's or arterial street's bridge where it crosses a river: stone, the road's width, bank to bank in arches.
+  for (const q of boardRoadCrossings(board.roads, board.rivers, board.places)) {
+    const x = ox + q.x, z = oz + q.z, reach = Math.max(4.5, q.span / 2 + 2.4), T = CITY_BUILDING_TYPES[q.stone === false ? CITY_TYPE.FOOTBRIDGE : CITY_TYPE.STONE_BRIDGE];
     if (!inside(x, z, 12)) continue;
-    const deck = Math.max(heightAt(x - q.ux * reach, z - q.uz * reach), heightAt(x + q.ux * reach, z + q.uz * reach), BOARD_DRY_M) + BOARD_ROAD_BRIDGE.rise;
-    const arches = Math.max(1, Math.ceil(reach * 2 / BOARD_ROAD_BRIDGE.arch)), each = reach * 2 / arches;
+    if (bridges.some((b) => Math.hypot(b.x - x, b.z - z) < 14)) continue;
+    const hA = heightAt(x - q.ux * (reach + 1.5), z - q.uz * (reach + 1.5));
+    const hB = heightAt(x + q.ux * (reach + 1.5), z + q.uz * (reach + 1.5));
+    if (Math.max(hA, hB) <= 0.12) continue;
+    const deck = Math.max(hA, hB, BOARD_DRY_M) + BOARD_ROAD_BRIDGE.rise;
+    const isStone = q.stone !== false;
+    const bridgeType = isStone ? CITY_TYPE.STONE_BRIDGE : CITY_TYPE.FOOTBRIDGE;
+    const bridgeWidth = isStone ? BOARD_ROAD_BRIDGE.width : T.width;
+    const arches = isStone ? Math.max(1, Math.ceil(reach * 2 / BOARD_ROAD_BRIDGE.arch)) : 1, each = reach * 2 / arches;
     for (let a = 0; a < arches; a++) {
       const along = (a + 0.5) * each - reach;
-      pushTyped(CITY_TYPE.STONE_BRIDGE, x + q.ux * along, deck, z + q.uz * along, Math.atan2(q.ux, q.uz), BOARD_ROAD_BRIDGE.width, T.height, each, 0.5, 0);
+      pushTyped(bridgeType, x + q.ux * along, deck, z + q.uz * along, Math.atan2(q.ux, q.uz), bridgeWidth, T.height, each, 0.5, 0);
+      built.bridges++;
     }
+    bridges.push({ x, z, ux: q.ux, uz: q.uz, length: reach * 2, halfWidth: bridgeWidth * 0.5, deckY: deck, span: q.span, isStone });
     built.roadBridges++;
   }
   // A churchyard: a dry-stone wall about it, and its graves as they are dug.
@@ -537,38 +699,67 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     built.dams++;
   }
 
-  for (const river of board.rivers ?? []) {
-    const pts = river.points;
-    const m = Math.floor((pts?.length ?? 0) / 3);
+  // Pool-Adjacent-Violators descending isotonic smoother + confluence leveling + sub-grid river cuts.
+  const triHeightAt = heights ? ((x, z) => {
+    const fx = Math.max(0, Math.min(n - 1.0001, (x - grid.x0) / grid.step));
+    const fz = Math.max(0, Math.min(n - 1.0001, (z - grid.z0) / grid.step));
+    const i = Math.floor(fx), j = Math.floor(fz), u = fx - i, v = fz - j;
+    const k = j * n + i;
+    const h00 = heights[k], h10 = heights[k + 1], h01 = heights[k + n], h11 = heights[k + n + 1];
+    const mainDiag = Math.abs(h00 - h11) < Math.abs(h10 - h01) - 0.01;
+    if (mainDiag) return u <= v ? h00 + (h01 - h00) * v + (h11 - h01) * u : h00 + (h10 - h00) * u + (h11 - h10) * v;
+    return u + v <= 1 ? h00 + (h10 - h00) * u + (h01 - h00) * v : h10 * (1 - v) + h01 * (1 - u) + h11 * (u + v - 1);
+  }) : heightAt;
+  const pavMonotoneDesc = (vals) => {
+    const blocks = [];
+    for (let i = 0; i < vals.length; i++) {
+      blocks.push({ sum: vals[i], count: 1, lo: i, hi: i });
+      while (blocks.length >= 2) {
+        const b = blocks[blocks.length - 1], a = blocks[blocks.length - 2];
+        if (a.sum / a.count < b.sum / b.count) {
+          a.sum += b.sum; a.count += b.count; a.hi = b.hi;
+          blocks.pop();
+        } else break;
+      }
+    }
+    const out = new Float32Array(vals.length);
+    for (const b of blocks) {
+      const avg = b.sum / b.count;
+      for (let i = b.lo; i <= b.hi; i++) out[i] = avg;
+    }
+    return out;
+  };
+  const riverRuns = [];
+  for (let rIdx = 0; rIdx < (board.rivers?.length ?? 0); rIdx++) {
+    const river = board.rivers[rIdx], pts = river.points, m = Math.floor((pts?.length ?? 0) / 3);
     if (m < 2) continue;
     const isCanal = Boolean(river.canal);
     const rawProf = new Float32Array(m);
-    for (let s = 0; s < m; s++) rawProf[s] = origAt(ox + pts[s * 3], oz + pts[s * 3 + 1]);
-    const prof = new Float32Array(m);
     for (let s = 0; s < m; s++) {
-      let sum = 0, cnt = 0;
-      for (let d = -4; d <= 4; d++) {
-        const idx = Math.max(0, Math.min(m - 1, s + d));
-        sum += rawProf[idx]; cnt++;
-      }
-      const sm = sum / cnt;
-      const hint = Number.isFinite(river.levels?.[s]) ? Math.min(sm, 0.25 * river.levels[s] + 0.75 * sm) : sm;
-      prof[s] = s === 0 ? hint : Math.min(prof[s - 1], hint);
+      const wx = ox + pts[s * 3], wz = oz + pts[s * 3 + 1], oh = origAt(wx, wz);
+      const lvl = Number.isFinite(river.levels?.[s]) ? river.levels[s] : oh - 0.55;
+      rawProf[s] = Math.min(oh - 0.35, 0.72 * lvl + 0.28 * (oh - 0.35));
     }
+    const prof = pavMonotoneDesc(rawProf);
+    for (let s = 1; s < m; s++) prof[s] = Math.min(prof[s - 1], prof[s]);
+    riverRuns.push({ rIdx, pts, m, isCanal, prof });
 
-    // Carve smooth valley channel into heights and mark wet cells so trees stay clear of watercourses.
-    const carveStride = Math.max(1, Math.min(3, Math.floor(grid.step / 6)));
+    // Tight sub-grid carving into heights strictly along the channel interior so 16 m bank shoulders retain
+    // full natural valley relief while coarse distant LODs stay safely below water.
+    const carveStride = Math.max(1, Math.min(2, Math.floor(grid.step / 8)));
     for (let s = 0; s < m - 1; s += carveStride) {
       const s1 = Math.min(m - 1, s + carveStride);
       const ax = ox + pts[s * 3], az = oz + pts[s * 3 + 1], ahw = Math.max(0.6, pts[s * 3 + 2]);
       const bx = ox + pts[s1 * 3], bz = oz + pts[s1 * 3 + 1], bhw = Math.max(0.6, pts[s1 * 3 + 2]);
       const maxHw = Math.max(ahw, bhw);
-      const baseFlatR = Math.max(maxHw, grid.step * 0.74);
-      const outer = baseFlatR + grid.step * 1.1;
-      const i0 = Math.max(1, Math.floor((Math.min(ax, bx) - outer - grid.x0) / grid.step));
-      const i1 = Math.min(n - 2, Math.ceil((Math.max(ax, bx) + outer - grid.x0) / grid.step));
-      const j0 = Math.max(1, Math.floor((Math.min(az, bz) - outer - grid.z0) / grid.step));
-      const j1 = Math.min(n - 2, Math.ceil((Math.max(az, bz) + outer - grid.z0) / grid.step));
+      const baseFlatR = grid.step > 20 ? maxHw + 0.5 : maxHw * 0.72;
+      const outer = grid.step > 20 ? baseFlatR + Math.min(grid.step * 0.55, 8.0) : maxHw + 4.2;
+      const wetOuter = maxHw + grid.step * 0.45;
+      const scanR = Math.max(outer, wetOuter);
+      const i0 = Math.max(1, Math.floor((Math.min(ax, bx) - scanR - grid.x0) / grid.step));
+      const i1 = Math.min(n - 2, Math.ceil((Math.max(ax, bx) + scanR - grid.x0) / grid.step));
+      const j0 = Math.max(1, Math.floor((Math.min(az, bz) - scanR - grid.z0) / grid.step));
+      const j1 = Math.min(n - 2, Math.ceil((Math.max(az, bz) + scanR - grid.z0) / grid.step));
       const abx = bx - ax, abz = bz - az, ab2 = abx * abx + abz * abz || 1;
       for (let j = j0; j <= j1; j++) {
         const gz = grid.z0 + j * grid.step;
@@ -576,19 +767,19 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
           const gx = grid.x0 + i * grid.step;
           const t = Math.max(0, Math.min(1, ((gx - ax) * abx + (gz - az) * abz) / ab2));
           const dist = Math.hypot(gx - (ax + abx * t), gz - (az + abz * t));
-          if (dist >= outer) continue;
+          if (dist >= scanR) continue;
           const k = j * n + i;
           const hw = ahw + (bhw - ahw) * t;
           if (dist <= hw + grid.step * 0.45) wet[k] = 1;
-          if (!heights) continue;
+          if (!heights || dist >= outer) continue;
           const origH = uncarved[k];
           const padHit = nearPad(gx, gz);
-          if (padHit && dist > hw + 1.2) continue;
-          const flatR = padHit ? hw + 0.6 : baseFlatR;
+          if (padHit && dist > hw + 1.0) continue;
+          const flatR = padHit ? hw + 0.4 : baseFlatR;
           const wy = Math.max(origH > 0.45 ? 0.45 : -2.0, prof[s] + (prof[s1] - prof[s]) * t - 0.24);
           const depth = isCanal ? 1.35 : Math.min(2.2, 0.85 + 0.22 * hw);
           const bed = wy - depth;
-          const u = dist <= flatR ? 0 : Math.min(1, (dist - flatR) / Math.max(1, outer - flatR));
+          const u = dist <= flatR ? 0 : Math.min(1, (dist - flatR) / Math.max(0.75, outer - flatR));
           const sm = u * u * (3 - 2 * u);
           let target = dist <= flatR ? bed : bed * (1 - sm) + origH * sm;
           if (origH > 0.45) target = Math.max(0.30, target);
@@ -596,64 +787,274 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
         }
       }
     }
+  }
 
-    // Build continuous freshwater ribbon segments down to sea level.
-    const stations = [];
-    let accDist = 999;
-    for (let s = 0; s < m; s++) {
-      const wx = ox + pts[s * 3], wz = oz + pts[s * 3 + 1], hw = Math.max(0.65, pts[s * 3 + 2]);
-      if (!inside(wx, wz, 6)) {
-        if (stations.length >= 2) emitRiverRibbon(stations, isCanal);
-        stations.length = 0; accDist = 999;
-        continue;
+  // Build smoothed river reaches with shared embankment crests and confluence join leveling.
+  const reachChains = [], riverReaches = [], riverCuts = [], bankVerts = [], bankIndices = [];
+  const pushBankVert = (x, y, z, nx, ny, nz, wetAmt) => {
+    const id = bankVerts.length / 8;
+    bankVerts.push(x, y, z, nx, ny, nz, 2.0, Math.max(0, Math.min(1, wetAmt)));
+    return id;
+  };
+  const pushBankTri = (ia, ib, ic) => {
+    const ax = bankVerts[ia * 8], az = bankVerts[ia * 8 + 2];
+    const bx = bankVerts[ib * 8], bz = bankVerts[ib * 8 + 2];
+    const cx = bankVerts[ic * 8], cz = bankVerts[ic * 8 + 2];
+    const crossY = (bz - az) * (cx - ax) - (bx - ax) * (cz - az);
+    if (Math.abs(crossY) < 1e-6) return;
+    if (crossY > 0) bankIndices.push(ia, ib, ic);
+    else bankIndices.push(ia, ic, ib);
+  };
+  // Protect bridge abutment approaches from being carved below road deck.
+  const bridgePad = (gx, gz) => bridges.some((b) => Math.hypot(gx - b.x, gz - b.z) < b.span * 0.65 + 4);
+  const inChannel = (chainIdx, wx, wz, hw) => {
+    for (let o = 0; o < reachChains.length; o++) {
+      if (o === chainIdx || reachChains[o].isCanal) continue;
+      const ost = reachChains[o].stations;
+      for (let k = 0; k < ost.length - 1; k++) {
+        const ohw = ost[k].hw;
+        if (!(ohw > hw + 0.4 || (Math.abs(ohw - hw) <= 0.4 && o < chainIdx))) continue;
+        if (segDist(wx, wz, ost[k].wx, ost[k].wz, ost[k + 1].wx, ost[k + 1].wz) < ohw * 0.7) {
+          return { o, k, ost };
+        }
       }
+    }
+    return null;
+  };
+
+  for (const run of riverRuns) {
+    const { pts, m, isCanal, prof } = run;
+    let stations = [], accDist = 999;
+    const flushReach = () => {
+      if (stations.length >= 2) reachChains.push({ run, isCanal, stations: stations.slice() });
+      stations.length = 0; accDist = 999;
+    };
+    for (let s = 0; s < m; s++) {
+      const wx = ox + pts[s * 3], wz = oz + pts[s * 3 + 1], hw = Math.max(0.75, pts[s * 3 + 2]);
+      if (!inside(wx, wz, 6)) { flushReach(); continue; }
       const oh = origAt(wx, wz);
       if (oh <= 0.12) {
         if (stations.length >= 1) {
-          stations.push({ wx, wz, hw, wy: 0.04, depth: Math.min(2.2, 0.85 + 0.22 * hw) });
-          if (stations.length >= 2) emitRiverRibbon(stations, isCanal);
+          stations.push({ wx, wz, hw, wy: 0.02, bankMaxY: 0.18, depth: Math.min(2.4, 1.05 + 0.25 * hw), seaMouth: true });
+          flushReach();
+        } else {
+          stations.length = 0; accDist = 999;
         }
-        stations.length = 0; accDist = 999;
         continue;
       }
       if (stations.length > 0) {
         const prev = stations[stations.length - 1];
-        const segD = Math.hypot(wx - prev.wx, wz - prev.wz);
-        accDist += segD;
+        accDist += Math.hypot(wx - prev.wx, wz - prev.wz);
         if (accDist < 4.5 && s < m - 1) continue;
       }
       accDist = 0;
-      const carvedBed = heights ? heightAt(wx, wz) : prof[s] - 1.1;
-      const wy = Math.max(0.14, Math.max(prof[s] - 0.24, carvedBed + 0.16));
-      const depth = Math.max(0.35, wy - carvedBed);
-      stations.push({ wx, wz, hw, wy, depth });
+      stations.push({ wx, wz, hw, wy: prof[s], bankMaxY: origAt(wx, wz), depth: isCanal ? 1.45 : Math.min(2.4, 1.05 + 0.25 * hw), seaMouth: false });
     }
-    if (stations.length >= 2) emitRiverRibbon(stations, isCanal);
+    flushReach();
+  }
+
+  // Trim tributary tongues overlapping main stems and extend sea mouths softly below tidewater (`drawnPart`).
+  for (let c = 0; c < reachChains.length; c++) {
+    const chain = reachChains[c], st = chain.stations;
+    if (!chain.isCanal && st.length > 2) {
+      let cutAt = st.length - 1;
+      let joinTarget = null;
+      while (cutAt > 1) {
+        const hit = inChannel(c, st[cutAt - 1].wx, st[cutAt - 1].wz, st[cutAt - 1].hw);
+        if (!hit) break;
+        joinTarget = hit;
+        cutAt--;
+      }
+      if (cutAt < st.length - 1) {
+        st.length = cutAt + 1;
+      } else {
+        const endHit = inChannel(c, st[st.length - 1].wx, st[st.length - 1].wz, st[st.length - 1].hw);
+        if (endHit) joinTarget = endHit;
+      }
+      if (joinTarget) {
+        const { ost, k } = joinTarget;
+        const p0 = ost[k], p1 = ost[k + 1];
+        const dx = p1.wx - p0.wx, dz = p1.wz - p0.wz, d2 = dx * dx + dz * dz || 1;
+        const end = st[st.length - 1];
+        const t = Math.max(0, Math.min(1, ((end.wx - p0.wx) * dx + (end.wz - p0.wz) * dz) / d2));
+        end.wx = p0.wx + dx * t;
+        end.wz = p0.wz + dz * t;
+        end.hw = Math.min(p0.hw * 0.92, end.hw * 1.6);
+        if (st.length > 2) st[st.length - 2].hw *= 1.22;
+        chain.mouthJoin = { otherIdx: joinTarget.o, k };
+      }
+    }
+    const last = st[st.length - 1];
+    if (last?.seaMouth && !chain.mouthJoin && st.length >= 2) {
+      const prev = st[st.length - 2];
+      const dx = last.wx - prev.wx, dz = last.wz - prev.wz, L = Math.hypot(dx, dz) || 1;
+      const ux = dx / L, uz = dz / L, baseW = last.hw * 1.12;
+      last.hw = baseW;
+      last.wy = -0.02;
+      for (const distOut of [10, 22]) {
+        const qx = last.wx + ux * distOut, qz = last.wz + uz * distOut;
+        if (!inside(qx, qz, 6) || origAt(qx, qz) > 0.12) break;
+        st.push({ wx: qx, wz: qz, hw: baseW * (1 + distOut / 64), wy: -0.08 - distOut * 0.015, bankMaxY: origAt(qx, qz), depth: last.depth, seaMouth: true });
+      }
+    }
+  }
+
+  // Compute left/right normals & exact watertight bank crest elevations per reach, then PAV level + confluence joins.
+  for (const chain of reachChains) {
+    const st = chain.stations;
+    for (let i = 0; i < st.length; i++) {
+      const p0 = st[Math.max(0, i - 1)], p1 = st[Math.min(st.length - 1, i + 1)];
+      const dx = p1.wx - p0.wx, dz = p1.wz - p0.wz, dLen = Math.hypot(dx, dz) || 1;
+      const tx = dx / dLen, tz = dz / dLen, nx = -tz, nz = tx;
+      const bankW = Math.max(1.85, Math.min(4.8, 1.45 + st[i].hw * 0.45));
+      const crestHw = st[i].hw + bankW;
+      const lx = st[i].wx - nx * crestHw, lz = st[i].wz - nz * crestHw;
+      const rx = st[i].wx + nx * crestHw, rz = st[i].wz + nz * crestHw;
+      const ly = inside(lx, lz, 2) ? triHeightAt(lx, lz) : origAt(lx, lz);
+      const ry = inside(rx, rz, 2) ? triHeightAt(rx, rz) : origAt(rx, rz);
+      st[i].tx = tx; st[i].tz = tz; st[i].nx = nx; st[i].nz = nz; st[i].dLen = dLen;
+      st[i].crestHw = crestHw; st[i].lx = lx; st[i].lz = lz; st[i].ly = ly; st[i].rx = rx; st[i].rz = rz; st[i].ry = ry;
+      if (!st[i].seaMouth) {
+        const natMin = Math.min(origAt(lx, lz), origAt(rx, rz));
+        const cap = Math.min(st[i].wy, Math.min(ly, ry) - 0.16, natMin - 0.30);
+        st[i].wy = Math.max(0.06, cap);
+      }
+    }
+    const leveled = pavMonotoneDesc(st.map((s) => s.wy));
+    for (let i = 0; i < st.length; i++) {
+      if (!st[i].seaMouth) st[i].wy = Math.max(0.06, Math.min(st[i].wy, leveled[i]));
+      if (i > 0) st[i].wy = Math.min(st[i].wy, st[i - 1].wy);
+    }
+  }
+  // Confluence join leveling (`levelRiverJoins` + upstream backwater leveling `levelRiverRuns`): match tributary ends cleanly.
+  const confluenceJoins = [];
+  for (let a = 0; a < reachChains.length; a++) {
+    const chainA = reachChains[a], trib = chainA.stations, end = trib[trib.length - 1];
+    if (end.seaMouth && !chainA.mouthJoin) continue;
+    let bestB = chainA.mouthJoin?.otherIdx ?? -1, bestJ = chainA.mouthJoin?.k ?? -1, bestD = Infinity;
+    if (bestB < 0) {
+      for (let b = 0; b < reachChains.length; b++) {
+        if (a === b) continue;
+        const main = reachChains[b].stations;
+        for (let j = 0; j < main.length; j++) {
+          const reach = main[j].hw + end.hw + 8;
+          const d = Math.hypot(end.wx - main[j].wx, end.wz - main[j].wz);
+          if (d < reach && d < bestD) { bestD = d; bestB = b; bestJ = j; }
+        }
+      }
+    }
+    if (bestB >= 0) {
+      const targetWy = reachChains[bestB].stations[bestJ].wy;
+      end.wy = Math.min(end.wy, targetWy);
+      for (let i = trib.length - 2; i >= 0; i--) trib[i].wy = Math.max(trib[i].wy, trib[i + 1].wy);
+      confluenceJoins.push({ trib, end, main: reachChains[bestB].stations[bestJ] });
+    }
+  }
+  // Ensure backwater propagates cleanly upstream with no local water humps.
+  for (const chain of reachChains) {
+    if (chain.isCanal) continue;
+    let y = -Infinity;
+    for (let i = chain.stations.length - 1; i >= 0; i--) {
+      y = Math.max(y, chain.stations[i].wy);
+      chain.stations[i].wy = y;
+    }
+  }
+
+  function riverJoinPolygon(end, main) {
+    const pts = [
+      [end.lx, end.lz], [end.rx, end.rz],
+      [main.lx, main.lz], [main.rx, main.rz],
+    ];
+    const cx = pts.reduce((s, p) => s + p[0], 0) / 4, cz = pts.reduce((s, p) => s + p[1], 0) / 4;
+    pts.sort((a, b) => Math.atan2(a[1] - cz, a[0] - cx) - Math.atan2(b[1] - cz, b[0] - cx));
+    return pts;
+  }
+  for (const jn of confluenceJoins) {
+    const poly = riverJoinPolygon(jn.end, jn.main);
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+    for (const [px, pz] of poly) { x0 = Math.min(x0, px); z0 = Math.min(z0, pz); x1 = Math.max(x1, px); z1 = Math.max(z1, pz); }
+    riverCuts.push({ x0, z0, x1, z1, poly });
+    const bedY = Math.min(jn.end.wy - jn.end.depth * 0.75, jn.main.wy - jn.main.depth * 0.75);
+    const vc = pushBankVert(jn.main.wx, bedY, jn.main.wz, 0, 1, 0, 1.0);
+    const rim = poly.map(([px, pz]) => pushBankVert(px, triHeightAt(px, pz), pz, 0, 1, 0, 0.05));
+    for (let k = 0; k < rim.length; k++) pushBankTri(vc, rim[k], rim[(k + 1) % rim.length]);
+  }
+
+  for (let cIdx = 0; cIdx < reachChains.length; cIdx++) {
+    const chain = reachChains[cIdx], st = chain.stations, isCanal = chain.isCanal;
+    emitRiverRibbon(st, isCanal);
+    let length = 0, minHalfWidth = Infinity;
+    const reachPts = [];
+    for (let i = 0; i < st.length; i++) {
+      minHalfWidth = Math.min(minHalfWidth, st[i].hw);
+      if (i > 0) length += Math.hypot(st[i].wx - st[i - 1].wx, st[i].wz - st[i - 1].wz);
+      reachPts.push([st[i].wx, st[i].wz, st[i].hw, st[i].wy]);
+    }
+    riverReaches.push({ id: cIdx, isCanal, minHalfWidth, length, seaConnected: Boolean(st[st.length - 1].seaMouth), points: reachPts });
+    // Emit shared-crest embankment + bed strips and matching 2D cut quads for sub-grid terrain clipping.
+    let prevRow = null;
+    for (let i = 0; i < st.length; i++) {
+      const cur = st[i], nx = cur.nx, nz = cur.nz;
+      const bedHw = Math.max(0.35, cur.hw * 0.62), bedY = cur.wy - cur.depth;
+      const shoreHw = cur.hw;
+      const slY = Math.min(cur.ly, Math.max(cur.wy + 0.02, cur.wy * 0.72 + bedY * 0.28));
+      const srY = Math.min(cur.ry, Math.max(cur.wy + 0.02, cur.wy * 0.72 + bedY * 0.28));
+      const bankDx = Math.max(0.6, cur.crestHw - shoreHw);
+      const lSlopeLen = Math.hypot(bankDx, Math.max(0, cur.ly - slY));
+      const rSlopeLen = Math.hypot(bankDx, Math.max(0, cur.ry - srY));
+      const lnx = (cur.ly - slY) / lSlopeLen, lny = bankDx / lSlopeLen;
+      const rnx = (cur.ry - srY) / rSlopeLen, rny = bankDx / rSlopeLen;
+      const vCL = pushBankVert(cur.lx, cur.ly, cur.lz, 0, 1, 0, 0.0);
+      const vSL = pushBankVert(cur.wx - nx * shoreHw, slY, cur.wz - nz * shoreHw, nx * lnx, lny, nz * lnx, 0.76);
+      const vBL = pushBankVert(cur.wx - nx * bedHw, bedY, cur.wz - nz * bedHw, nx * 0.28, 0.96, nz * 0.28, 1.0);
+      const vBR = pushBankVert(cur.wx + nx * bedHw, bedY, cur.wz + nz * bedHw, -nx * 0.28, 0.96, -nz * 0.28, 1.0);
+      const vSR = pushBankVert(cur.wx + nx * shoreHw, srY, cur.wz + nz * shoreHw, -nx * rnx, rny, -nz * rnx, 0.76);
+      const vCR = pushBankVert(cur.rx, cur.ry, cur.rz, 0, 1, 0, 0.0);
+      const row = [vCL, vSL, vBL, vBR, vSR, vCR];
+      if (prevRow) {
+        const pSt = st[i - 1];
+        const poly = [[pSt.lx, pSt.lz], [cur.lx, cur.lz], [cur.rx, cur.rz], [pSt.rx, pSt.rz]];
+        riverCuts.push({
+          x0: Math.min(poly[0][0], poly[1][0], poly[2][0], poly[3][0]),
+          z0: Math.min(poly[0][1], poly[1][1], poly[2][1], poly[3][1]),
+          x1: Math.max(poly[0][0], poly[1][0], poly[2][0], poly[3][0]),
+          z1: Math.max(poly[0][1], poly[1][1], poly[2][1], poly[3][1]),
+          poly,
+        });
+        for (let b = 0; b < 5; b++) {
+          pushBankTri(prevRow[b], row[b], row[b + 1]);
+          pushBankTri(prevRow[b], row[b + 1], prevRow[b + 1]);
+        }
+      }
+      prevRow = row;
+    }
   }
 
   function emitRiverRibbon(st, isCanal) {
-    // Keep water surface monotonically non-increasing along each continuous reach.
+    // 5-across water strip tucked under the sloped wet banks so edges never float or Z-fight.
     for (let i = 1; i < st.length; i++) st[i].wy = Math.min(st[i].wy, st[i - 1].wy);
     const kind = isCanal ? 1.0 : 0.0;
+    const lanes = [-1.0, -0.55, 0.0, 0.55, 1.0];
     let prevRow = null;
     for (let i = 0; i < st.length; i++) {
-      const cur = st[i];
-      const p0 = st[Math.max(0, i - 1)], p1 = st[Math.min(st.length - 1, i + 1)];
+      const cur = st[i], p0 = st[Math.max(0, i - 1)], p1 = st[Math.min(st.length - 1, i + 1)];
       const dx = p1.wx - p0.wx, dz = p1.wz - p0.wz, dLen = Math.hypot(dx, dz) || 1;
-      const tx = dx / dLen, tz = dz / dLen;
-      const nx = -tz, nz = tx;
+      const tx = dx / dLen, tz = dz / dLen, nx = -tz, nz = tx;
       const slope = Math.max(0, (p0.wy - p1.wy) / dLen);
       const speed = isCanal ? 0.35 : Math.max(0.55, Math.min(3.0, 0.58 + Math.sqrt(slope) * 6.8));
-      const fx = tx * speed, fz = tz * speed;
-      const ribHw = cur.hw + Math.min(2.6, grid.step * 0.34);
-      const vL = pushWaterVert(cur.wx - nx * ribHw, cur.wy - 0.025, cur.wz - nz * ribHw, fx, fz, cur.depth, -1.0, kind);
-      const vC = pushWaterVert(cur.wx, cur.wy, cur.wz, fx, fz, cur.depth, 0.0, kind);
-      const vR = pushWaterVert(cur.wx + nx * ribHw, cur.wy - 0.025, cur.wz + nz * ribHw, fx, fz, cur.depth, 1.0, kind);
+      const ribHw = cur.hw + 0.45;
+      const row = lanes.map((bt) => {
+        const edge = Math.abs(bt);
+        const yOff = edge > 0.9 ? -0.035 : edge > 0.4 ? -0.008 : 0.0;
+        const speedMul = 1.0 - edge * 0.25;
+        return pushWaterVert(cur.wx + nx * ribHw * bt, cur.wy + yOff, cur.wz + nz * ribHw * bt, tx * speed * speedMul, tz * speed * speedMul, cur.depth * (1.0 - edge * 0.42), bt, kind);
+      });
       if (prevRow) {
-        waterIdx.push(prevRow[0], vL, vC, prevRow[0], vC, prevRow[1]);
-        waterIdx.push(prevRow[1], vC, vR, prevRow[1], vR, prevRow[2]);
+        for (let b = 0; b < 4; b++) {
+          waterIdx.push(prevRow[b], row[b], row[b + 1], prevRow[b], row[b + 1], prevRow[b + 1]);
+        }
       }
-      prevRow = [vL, vC, vR];
+      prevRow = row;
     }
   }
 
@@ -854,8 +1255,7 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     return { use, edge: use.hedged ? edgeOf(id, x, z) : 1e9, woodEdge, i: id, j: 0 };
   };
 
-  /* ---- roads between the places, for the trees that line them and for the stamp ---- */
-  const roads = board.roads.map((road) => { const line = []; for (let k = 0; k < road.points.length; k += 2) line.push([ox + road.points[k], oz + road.points[k + 1]]); return line; }).filter((line) => line.length > 1);
+  /* ---- roads between places are already trimmed and registered before building placement above ---- */
 
   /* ---- standing livestock herds on pastures, rough commons and oak woods ---- */
   const pastureByPlace = Array.from({ length: places.length }, () => []);
@@ -960,13 +1360,15 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     },
   };
   return {
-    plan, town, roads, parcelAt, places, seat, inlandWater, herds, loneTrees,
+    plan, town, roads, parcelAt, places, seat, inlandWater, herds, loneTrees, bridges,
+    riverCut: riverCuts.length ? { cuts: riverCuts, bankVerts: new Float32Array(bankVerts), bankIndices: new Uint32Array(bankIndices) } : null,
+    riverReaches,
     // Who mans the seat, by the model's own roll on the board's day: its port's posts are manned from it (js/crew.js).
     watch: seat.watch ? { ...seat.watch, place: seat.name, day: board.day ?? 0 } : null,
     // For the GPU, which stamps the country onto the ground's own colours: the furlong of every cell, each
     // furlong's use, and every way that runs across it.
     stamp: {
-      size, index, uses, roads, streets, squares, lots, town: urban, lanes: board.lanes, rivers: board.rivers.map((river) => river.points),
+      size, index, uses, roads, streets, squares, lots, town: urban, lanes: board.lanes, rivers: board.rivers.map((river) => river.points), bridges,
       origin: { x: ox, z: oz }, span: region.span,
     },
   };

@@ -16,6 +16,317 @@ globalThis.BOARD_MODEL = (() => {
   // frozen under that name and taken up again only by the same program.
   const program = () => globalThis.FURLONG_OPTIONS?.board?.program || null;
 
+  const EXTRA_FARPORTS = [
+    { n: 'Seville', from: 1250, g: { wine: 0.8, silk: 0.3, spice: 0.3 } },
+    { n: 'Antwerp', from: 1450, g: { cloth: 1.1, ore: 0.4, timber: 0.3 } },
+    { n: 'Venice', from: 1050, g: { spice: 1.0, silk: 0.6, wine: 0.2 } },
+    { n: 'Genoa', from: 1080, g: { spice: 0.8, silk: 0.5, wine: 0.3 } },
+    { n: 'Bordeaux', from: 1150, g: { wine: 1.4, salt: 0.3 } },
+    { n: 'Bristol', from: 1350, g: { cloth: 0.9, wool: 0.8, ore: 0.3 } },
+    { n: 'Goa', from: 1510, g: { spice: 1.5, silk: 0.8 } },
+    { n: 'Malacca', from: 1511, g: { spice: 1.7, silk: 0.5 } },
+    { n: 'Bruges', from: 1100, g: { cloth: 1.0, spice: 0.3, wine: 0.2 } },
+    { n: 'Lübeck', from: 1160, g: { fish: 0.7, timber: 0.6, ore: 0.4 } },
+  ];
+  const SHIP_MASTERS = [
+    'Bartolomeu Dias', 'Diogo Cão', 'Fernão Gomes', 'Gonçalo Velho',
+    'António Tenreiro', 'Duarte Pacheco', 'Vasco da Gama', 'Henrique de Meneses',
+    'Nuno Tristão', 'Afonso de Albuquerque', 'Lopo Soares', 'Tristão da Cunha',
+  ];
+  let maritimeMasterSeq = 0;
+  function nextShipMaster() {
+    return SHIP_MASTERS[(maritimeMasterSeq++) % SHIP_MASTERS.length];
+  }
+  function anchorageBerths(s) {
+    const out = typeof berthsOf === 'function' ? berthsOf(s).map((b) => ({ ...b })) : [];
+    const L = typeof landingOf === 'function' ? landingOf(s) : null;
+    if (!L || typeof toCell !== 'function' || typeof inB !== 'function' || typeof cIdx !== 'function') return out;
+    const cx0 = toCell(L.x), cz0 = toCell(L.z);
+    for (let r = 3; r <= 8 && out.length < 6; r++) {
+      for (let a = 0; a < 12 && out.length < 6; a++) {
+        const ang = (a / 12) * Math.PI * 2 + r * 0.35;
+        const cx = Math.round(cx0 + Math.cos(ang) * r);
+        const cz = Math.round(cz0 + Math.sin(ang) * r);
+        if (!inB(cx, cz) || W.water?.[cIdx(cx, cz)] !== 1) continue;
+        const wx = cellX(cx), wz = cellZ(cz);
+        if (out.some((b) => Math.hypot(b.x - wx, b.z - wz) < 52)) continue;
+        out.push({ x: wx, z: wz, rot: ang + Math.PI * 0.5, shore: true, anchorage: true });
+      }
+    }
+    return out;
+  }
+  function ensureMaritimeWorldRoutes(opts = {}) {
+    if (!W || !Array.isArray(W.settlements) || !W.settlements.length) return;
+    const force = Boolean(opts.force);
+    const S = W.settlements;
+    const now = day();
+    const ad = typeof AD === 'function' ? AD() : 1550;
+    const cw = W.coinWeight || 1;
+    const localNames = new Set(S.map((s) => String(s?.name || '').trim().toLowerCase()));
+    const baseFar = typeof FARPORTS !== 'undefined' && Array.isArray(FARPORTS) ? FARPORTS : [];
+    const mergedFar = [...baseFar, ...EXTRA_FARPORTS].filter((f, idx, arr) => {
+      if (!f || !f.n) return false;
+      const low = f.n.toLowerCase();
+      if (localNames.has(low)) return false;
+      if (ad < (f.from || 0) || ad >= (f.to || 9999)) return false;
+      return arr.findIndex((o) => o && o.n.toLowerCase() === low) === idx;
+    });
+    const farPool = mergedFar.length ? mergedFar : EXTRA_FARPORTS.filter((f) => !localNames.has(f.n.toLowerCase()));
+
+    // 1. Keep ocean merchantmen (W.ships) active across approaching, anchored/docked, and outbound phases.
+    W.ships = W.ships || [];
+    const harborPorts = [];
+    for (let si = 0; si < S.length; si++) {
+      const s = S[si];
+      if (!s || (typeof closedToTrade === 'function' && closedToTrade(s))) continue;
+      if (!s.harbor && !s.riverside) continue;
+      if (typeof offRoute === 'function' && offRoute(si)) harborPorts.push(si);
+    }
+    if (harborPorts.length && farPool.length) {
+      const targetShips = Math.min(7, Math.max(4, harborPorts.length + 3));
+      const existingActive = W.ships.filter((sh) => sh && Array.isArray(sh.poly) && sh.poly.length >= 2 && (sh.phase === 'in' || sh.phase === 'dock' || (sh.phase === 'out' && sh.t1 > now)));
+      let needed = Math.max(0, targetShips - existingActive.length);
+      for (let k = 0; k < needed; k++) {
+        const si = harborPorts[k % harborPorts.length];
+        const s = S[si];
+        const R = offRoute(si);
+        if (!R || !Array.isArray(R.poly) || R.poly.length < 2) continue;
+        const rankedFar = farPool.slice().sort((a, b) => {
+          const score = (fp) => {
+            let v = 0, base = 0;
+            for (const g in fp.g) {
+              if (!GOODBASE[g]) continue;
+              v += price(s, g) * fp.g[g];
+              base += GOODBASE[g] * fp.g[g];
+            }
+            return v / Math.max(1e-6, base);
+          };
+          return score(b) - score(a);
+        });
+        const F = rankedFar[(W.ships.length + k) % rankedFar.length];
+        const cargo = {};
+        for (const g in F.g) {
+          if (GOODBASE[g]) cargo[g] = Math.max(6, Math.round(F.g[g] * (18 + (typeof frand === 'function' ? frand() : Math.random()) * 26)));
+        }
+        const phases = force ? ['dock', 'in', 'out', 'dock', 'in', 'out'] : ['in', 'dock', 'in'];
+        const phase = phases[k % phases.length];
+        const span = Math.max(2.6, R.len / (typeof SHIP_MPD === 'number' ? SHIP_MPD : 3500));
+        const berths = anchorageBerths(s);
+        const usedBi = new Set(W.ships.filter((o) => o && o.port === si && o.phase === 'dock' && Number.isInteger(o.bi)).map((o) => o.bi));
+        let bi = berths.findIndex((_, bIdx) => !usedBi.has(bIdx));
+        if (bi < 0 && berths.length) bi = k % berths.length;
+        const berth = bi >= 0 ? berths[bi] : null;
+        W.shipN = (W.shipN || 0) + 1;
+        const kind = typeof shipKind === 'function' ? shipKind() : (ad >= 1400 ? 'carrack' : 'great cog');
+        const tonnage = kind === 'carrack' ? 280 + ((W.shipN * 37) % 180) : 160 + ((W.shipN * 29) % 110);
+        const sh = {
+          id: W.shipN,
+          kind,
+          from: F.n,
+          to: phase === 'out' ? F.n : String(s.name || ''),
+          master: nextShipMaster(),
+          tonnage,
+          port: si,
+          cargo,
+          load: {},
+          phase,
+          t0: now - span * (phase === 'out' ? 0.28 : 0.42),
+          t1: now + span * (phase === 'out' ? 0.85 : 0.72),
+          poly: R.poly,
+          len: R.len,
+          berth: phase === 'dock' ? berth : null,
+          bi: phase === 'dock' ? bi : undefined,
+          until: phase === 'dock' ? now + 5 + (k % 5) : undefined,
+        };
+        if (phase === 'dock' && berth && s.stores) {
+          let val = 0;
+          for (const g in cargo) {
+            if (typeof storageBindGood === 'function' && s.storage && (typeof BEASTS === 'undefined' || !BEASTS.includes(g))) {
+              storageBindGood(s, g);
+            }
+            s.stores[g] = (s.stores[g] || 0) + cargo[g];
+            if (typeof offer === 'function') offer(s, g, 'out', cargo[g], GOODBASE[g] / cw);
+            val += cargo[g] * GOODBASE[g] / cw;
+          }
+          if (typeof transfer === 'function' && typeof lordAcct === 'function' && val > 0) {
+            transfer('out', lordAcct(s), val * 0.08, 'customs', s);
+          }
+          s.tradeV = (s.tradeV || 0) + val;
+          if (typeof emit === 'function' && !W.prehistory && k < 2) {
+            const gList = Object.keys(cargo).slice(0, 2).join(' and ') || 'spice';
+            emit('trade', 3, berth, `${sh.kind} out of ${sh.from} (Master ${sh.master}) anchors off ${s.name} with ${gList}.`);
+          }
+        } else if (phase === 'out' && typeof EXPORTS !== 'undefined' && typeof purchase === 'function') {
+          let paid = 0;
+          for (const g of EXPORTS) {
+            const availQ = typeof spareOf === 'function' ? Math.max(0, spareOf(s, g)) : 0;
+            const wantQ = Math.min(availQ, 24);
+            if (wantQ >= 2 && price(s, g) < (GOODBASE[g] || 1) * 1.35 / cw) {
+              const v = purchase(s, g, 'out', wantQ);
+              const got = Number(purchase.got) || 0;
+              if (got >= 1) {
+                if (s.storage && (typeof BEASTS === 'undefined' || !BEASTS.includes(g))) storageConsumePurchased(s, 'out', g, got, 'foreign-export');
+                else s.stores[g] = Math.max(0, (s.stores[g] || 0) - got);
+                sh.load[g] = got;
+                paid += v;
+              }
+            }
+          }
+          if (paid > 0 && typeof transfer === 'function' && typeof lordAcct === 'function') transfer('out', lordAcct(s), paid * 0.05, 'customs', s);
+          s.tradeV = (s.tradeV || 0) + paid;
+          if (typeof emit === 'function' && !W.prehistory && k < 2) {
+            emit('trade', 2, R.poly[R.poly.length - 1], `${sh.kind} (${sh.master}) puts out from ${s.name} bound for ${F.n}.`);
+          }
+        } else if (typeof emit === 'function' && !W.prehistory && k < 2) {
+          emit('trade', 2, R.poly[0], `Sails from ${F.n} sighted standing in toward ${s.name}.`);
+        }
+        W.ships.push(sh);
+      }
+    }
+
+    // 2. Keep coastal bay boats (sea), river barges (river), and arterial wagon caravans (cart) moving through C&C routes.
+    W.caravans = W.caravans || [];
+    const activeByMode = (mode) => W.caravans.filter((c) => c && !c.gone && !c.robbed && Array.isArray(c.poly) && c.poly.length >= 2 && (c.sea ? 'sea' : c.river ? 'river' : 'cart') === mode && now >= c.departDay && now < c.arriveDay);
+    const activeSea = activeByMode('sea');
+    const activeRiver = activeByMode('river');
+    const activeCart = activeByMode('cart');
+
+    const rankGoodsForPair = (oi, di, isBoat) => {
+      const o = S[oi], d = S[di];
+      const list = [];
+      for (const g of GOODS) {
+        if (isBoat && typeof BEASTS !== 'undefined' && BEASTS.includes(g)) continue;
+        const pO = price(o, g);
+        const onSale = typeof avail === 'function' ? Math.max(0, Number(avail(o, g, pO * 1.4)) || 0) : Math.max(0, Number(o.stores?.[g]) || 0);
+        if (onSale < 6) continue;
+        const margin = price(d, g) - pO;
+        list.push({ g, onSale, score: margin * 4 + Math.min(30, onSale) * 0.02 });
+      }
+      list.sort((a, b) => b.score - a.score);
+      return list;
+    };
+    const tryDispatchRoute = (mode, oi, di, poly, len, frac) => {
+      if (!Array.isArray(poly) || poly.length < 2 || !(len > 20)) return false;
+      const o = S[oi], d = S[di];
+      if (!o || !d) return false;
+      const baseSpeed = mode === 'sea' ? (typeof COG_MPD === 'number' ? COG_MPD : 2400) : mode === 'river' ? (typeof BARGE_MPD === 'number' ? BARGE_MPD : 1100) : (typeof CART_MPD === 'number' ? CART_MPD : 520);
+      const goods = rankGoodsForPair(oi, di, mode !== 'cart');
+      for (const item of goods) {
+        const g = item.g;
+        const qty = Math.min(mode === 'cart' ? 24 : 36, Math.max(6, Math.round(item.onSale * 0.25)));
+        const span = Math.max(4.5, len / Math.max(240, baseSpeed));
+        const departDay = now - frac * span;
+        const arriveDay = Math.max(now + 2.8, departDay + span);
+        const c = {
+          origin: oi,
+          dest: di,
+          good: g,
+          qty,
+          value: qty * price(d, g),
+          poly: poly.map((p) => ({ x: p.x, z: p.z })),
+          len,
+          departDay,
+          arriveDay,
+          robbed: false,
+          sea: mode === 'sea',
+          river: mode === 'river',
+          unit: Math.max(0.08, price(d, g) - price(o, g)),
+          master: nextShipMaster(),
+        };
+        const needsRawDecrement = !o.storage || (typeof BEASTS !== 'undefined' && BEASTS.includes(g));
+        if (needsRawDecrement) o.stores[g] = Math.max(0, (o.stores[g] || 0) - qty);
+        if (typeof ladeOut === 'function' && ladeOut(c, o, true)) {
+          if (c.arriveDay < now + 2.8) c.arriveDay = now + 2.8;
+          W.caravans.push(c);
+          if (typeof emit === 'function' && !W.prehistory && force) {
+            const label = mode === 'sea' ? 'coastal caravel' : mode === 'river' ? 'river barge' : 'merchant wain train';
+            emit('trade', 2, poly[Math.floor(poly.length / 2)], `A ${label} laden with ${g} runs between ${o.name} and ${d.name}.`);
+          }
+          return true;
+        }
+        if (needsRawDecrement) o.stores[g] = (o.stores[g] || 0) + qty;
+      }
+      if (!(typeof commodityActive === 'function' && (commodityActive(o) || commodityActive(d)))) {
+        const g = GOODS.find((cand) => mode === 'cart' || typeof BEASTS === 'undefined' || !BEASTS.includes(cand)) || 'grain';
+        const span = Math.max(4.5, len / Math.max(240, baseSpeed));
+        const departDay = now - frac * span;
+        const arriveDay = Math.max(now + 2.8, departDay + span);
+        const qty = mode === 'cart' ? 16 : 24;
+        const c = {
+          origin: oi,
+          dest: di,
+          good: g,
+          qty,
+          value: qty * price(d, g),
+          poly: poly.map((p) => ({ x: p.x, z: p.z })),
+          len,
+          departDay,
+          arriveDay,
+          robbed: false,
+          sea: mode === 'sea',
+          river: mode === 'river',
+          unit: Math.max(0.08, price(d, g) - price(o, g)),
+          master: nextShipMaster(),
+        };
+        if (typeof crewFor === 'function' && !W.prehistory) {
+          c._staffed = true;
+          try { crewFor(c); } catch { /* settlement fallback */ }
+        }
+        W.caravans.push(c);
+        return true;
+      }
+      return false;
+    };
+
+    if (activeSea.length < 4 && harborPorts.length >= 2 && typeof seaRoute === 'function') {
+      const seaPairs = [];
+      for (let a = 0; a < harborPorts.length; a++) {
+        for (let b = a + 1; b < harborPorts.length; b++) {
+          const oi = harborPorts[a], di = harborPorts[b];
+          const sr = seaRoute(oi, di);
+          if (sr && sr.poly?.length >= 2) seaPairs.push({ oi, di, poly: sr.poly, len: sr.len });
+        }
+      }
+      let needSea = Math.min(6, Math.max(4, seaPairs.length)) - activeSea.length;
+      for (let i = 0; i < seaPairs.length * 2 && needSea > 0; i++) {
+        const pair = seaPairs[i % seaPairs.length];
+        const forward = (i % 2) === 0;
+        const poly = forward ? pair.poly : [...pair.poly].reverse();
+        if (tryDispatchRoute('sea', forward ? pair.oi : pair.di, forward ? pair.di : pair.oi, poly, pair.len, 0.16 + ((i * 0.21) % 0.62))) needSea--;
+      }
+    }
+
+    if (activeRiver.length < 2 && Array.isArray(W.riverPairs) && W.riverPairs.length) {
+      let needRiv = Math.min(3, W.riverPairs.length * 2) - activeRiver.length;
+      for (let i = 0; i < W.riverPairs.length * 2 && needRiv > 0; i++) {
+        const pr = W.riverPairs[i % W.riverPairs.length];
+        if (!pr?.route?.poly || pr.route.poly.length < 2) continue;
+        const forward = (i % 2) === 0;
+        const poly = forward ? pr.route.poly : [...pr.route.poly].reverse();
+        if (tryDispatchRoute('river', forward ? pr.a : pr.b, forward ? pr.b : pr.a, poly, pr.route.len || 400, 0.20 + ((i * 0.27) % 0.56))) needRiv--;
+      }
+    }
+
+    if (activeCart.length < 4 && S.length >= 2) {
+      const roadPairs = [];
+      for (let oi = 0; oi < S.length; oi++) {
+        for (let di = oi + 1; di < S.length; di++) {
+          const r = typeof route === 'function' ? route(oi, di) : null;
+          if (r && Array.isArray(r.poly) && r.poly.length >= 2 && r.len > 60) {
+            roadPairs.push({ oi, di, poly: r.poly, len: r.len });
+          }
+        }
+      }
+      let needCart = Math.max(0, Math.min(6, Math.max(4, roadPairs.length)) - activeCart.length);
+      for (let i = 0; i < roadPairs.length * 2 && needCart > 0; i++) {
+        const pair = roadPairs[i % roadPairs.length];
+        const forward = (i % 2) === 0;
+        const poly = forward ? pair.poly : [...pair.poly].reverse();
+        if (tryDispatchRoute('cart', forward ? pair.oi : pair.di, forward ? pair.di : pair.oi, poly, pair.len, 0.18 + ((i * 0.19) % 0.58))) needCart--;
+      }
+    }
+  }
+
   async function found({ seed, fate = 1, era }, progress = null) {
     STORAGE_OUTCOMES.journal = journal();
     FATE = fate >>> 0; COAST_PREF = 'sea'; START_AD = era;
@@ -29,6 +340,7 @@ globalThis.BOARD_MODEL = (() => {
     beginChronicle();
     // The model first gives each household its roof at the turn of a year. Here they are wanted from the first day.
     for (const s of W.settlements) if (!(s.folk || []).some((p) => p.bh)) houseFolk(s);
+    ensureMaritimeWorldRoutes({ force: true });
     return board();
   }
 
@@ -37,6 +349,7 @@ globalThis.BOARD_MODEL = (() => {
     for (let i = 0; i < days; i++) {
       await STORAGE_OUTCOMES.wait();
       if (simTick() === false) throw new Error('The model would not take a day');
+      ensureMaritimeWorldRoutes();
       if ((i + 1) % 8 === 0) await STORAGE_OUTCOMES.journal.flush();
     }
     await STORAGE_OUTCOMES.journal.flush(); await STORAGE_OUTCOMES.wait();
@@ -56,6 +369,7 @@ globalThis.BOARD_MODEL = (() => {
     if (!program()) throw new Error('A world is taken up only by a host that names its program');
     STORAGE_OUTCOMES.journal = journal();
     await worldLoad(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes), { sourceSHA256: program(), outcomeJournal: STORAGE_OUTCOMES.journal });
+    ensureMaritimeWorldRoutes({ force: true });
     return board();
   }
 
@@ -74,6 +388,12 @@ globalThis.BOARD_MODEL = (() => {
     const schedule = (fn, ms) => { const id = ++next, task = { fn, timer: null }; tasks.set(id, task); if (ms) task.timer = setTimeout(() => channel.port2.postMessage(id), ms); else channel.port2.postMessage(id); return id; };
     const cancel = (id) => { const task = tasks.get(id); if (task && task.timer !== null) clearTimeout(task.timer); tasks.delete(id); };
     const model = simulationWorkerModel();
+    const baseTick = model.tick;
+    model.tick = () => {
+      const res = baseTick();
+      if (res !== false) ensureMaritimeWorldRoutes();
+      return res;
+    };
     model.init = async (payload, progress) => {
       if (payload.world) await thaw(payload.world);
       else if (!W) await found(payload, progress);
@@ -400,6 +720,121 @@ globalThis.BOARD_MODEL = (() => {
     return { id: p.id, name: folkName(p), home: t.to, ashore: true };
   }
 
+  // Ocean-going foreign traders (cogs, hulks, carracks) currently approaching, docked at wharf/shore, or putting to sea.
+  function ships() {
+    const out = [];
+    (W.ships || []).forEach((sh, index) => {
+      if (!sh || !Array.isArray(sh.poly) || sh.poly.length < 2) return;
+      out.push({
+        id: sh.id ?? index,
+        kind: String(sh.kind || 'cog'),
+        phase: String(sh.phase || 'in'),
+        from: String(sh.from || ''),
+        to: String(sh.to || ''),
+        master: String(sh.master || ''),
+        tonnage: Number(sh.tonnage || 0),
+        place: sh.port ?? 0,
+        t0: sh.t0 ?? 0,
+        t1: sh.t1 ?? 0,
+        berth: sh.berth ? { x: r1(sh.berth.x), z: r1(sh.berth.z), rot: r3(sh.berth.rot || 0), shore: Boolean(sh.berth.shore) } : null,
+        cargo: { ...(sh.cargo || {}) },
+        load: { ...(sh.load || {}) },
+        points: line(sh.poly),
+      });
+    });
+    return out;
+  }
+
+  function resolvePlace(place = 0) {
+    const ss = W.settlements || [];
+    if (typeof place === 'number' && Number.isInteger(place) && ss[place]) return { s: ss[place], index: place };
+    if (typeof place === 'string') {
+      const needle = place.trim().toLowerCase();
+      const idx = ss.findIndex((s) => String(s?.name || '').toLowerCase() === needle);
+      if (idx >= 0) return { s: ss[idx], index: idx };
+    }
+    return ss[0] ? { s: ss[0], index: 0 } : { s: null, index: -1 };
+  }
+
+  // Live settlement commodity prices, stores, and offered supply from Castle & Commons' market model.
+  function market(place = 0) {
+    const { s, index } = resolvePlace(place);
+    if (!s) return null;
+    const cw = W.coinWeight || 1;
+    const closed = typeof closedToTrade === 'function' ? Boolean(closedToTrade(s)) : false;
+    const goods = {};
+    for (const g of GOODS) {
+      const p = price(s, g);
+      const base = GOODBASE[g] || 1;
+      const store = Math.max(0, Number(s.stores?.[g]) || 0);
+      const onMarket = typeof avail === 'function' ? Math.max(0, Number(avail(s, g, p * 4)) || 0) : store;
+      const atPrice = typeof avail === 'function' ? Math.max(0, Number(avail(s, g, p)) || 0) : store;
+      const needMonth = Math.max(0, (s.pop || 0) * (NEED[g] || 0) * 30);
+      goods[g] = {
+        price: +p.toFixed(4),
+        base: +base.toFixed(4),
+        store: +store.toFixed(2),
+        avail: +atPrice.toFixed(2),
+        onMarket: +onMarket.toFixed(2),
+        needMonth: +needMonth.toFixed(2),
+      };
+    }
+    return {
+      day: day(),
+      place: index,
+      name: String(s.name || ''),
+      kind: String(s.kind || ''),
+      pop: Math.round(s.pop || 0),
+      prosperity: +(s.prosperity || 0).toFixed(2),
+      coinWeight: +cw.toFixed(4),
+      closed,
+      goods,
+    };
+  }
+
+  // Execute a foreign-trader buy/sell against the live settlement ledger (matching tickShips / tickShipDepartures).
+  function trade(order = {}) {
+    const { s, index } = resolvePlace(order.place ?? 0);
+    const good = String(order.good || '');
+    const qty = Number(order.qty);
+    const act = order.act === 'sell' ? 'sell' : 'buy';
+    if (!s || !GOODS.includes(good) || !(qty > 0)) {
+      return { ok: false, reason: 'Invalid settlement, good, or quantity', market: s ? market(index) : null };
+    }
+    if (typeof closedToTrade === 'function' && closedToTrade(s)) {
+      return { ok: false, reason: `${s.name} is closed to trade`, market: market(index) };
+    }
+    const base = GOODBASE[good] || 1;
+    const curPrice = price(s, good);
+    const depth = Math.max(12, (Number(s.stores?.[good]) || 0) + (s.pop || 0) * (NEED[good] || 0) * 3 + 18);
+    if (act === 'buy') {
+      const capPrice = Number.isFinite(order.maxPrice) ? order.maxPrice : curPrice * 1.5;
+      const paid = purchase(s, good, 'out', qty, capPrice);
+      const got = Number(purchase.got) || 0;
+      if (got <= 0) {
+        return { ok: false, qty: 0, paid: 0, unitPrice: curPrice, reason: 'None offered at that price', market: market(index) };
+      }
+      if (s.storage && (typeof BEASTS === 'undefined' || !BEASTS.includes(good))) {
+        storageConsumePurchased(s, 'out', good, got, 'foreign-export');
+      } else {
+        s.stores[good] = Math.max(0, (s.stores[good] || 0) - got);
+      }
+      if (typeof lordAcct === 'function' && paid > 0) transfer('out', lordAcct(s), paid * 0.05, 'customs', s);
+      const nextPrice = Math.min(base * 4.5, Math.max(base * 0.25, curPrice * Math.exp(0.22 * Math.tanh(got / depth))));
+      (s.px || (s.px = {}))[good] = nextPrice;
+      return { ok: true, act, good, qty: +got.toFixed(3), paid: +paid.toFixed(2), unitPrice: +(paid / got).toFixed(4), market: market(index) };
+    }
+    const minRes = Number.isFinite(order.minPrice) && order.minPrice > 0 ? order.minPrice : base / (W.coinWeight || 1) * 0.7;
+    s.stores[good] = (s.stores[good] || 0) + qty;
+    offer(s, good, 'out', qty, minRes);
+    const gross = qty * curPrice;
+    if (typeof lordAcct === 'function' && gross > 0) transfer('out', lordAcct(s), gross * 0.08, 'customs', s);
+    s.tradeV = (s.tradeV || 0) + gross;
+    const nextPrice = Math.min(base * 4.5, Math.max(base * 0.25, curPrice * Math.exp(-0.20 * Math.tanh(qty / depth))));
+    (s.px || (s.px = {}))[good] = nextPrice;
+    return { ok: true, act, good, qty: +qty.toFixed(3), paid: +gross.toFixed(2), unitPrice: +curPrice.toFixed(4), market: market(index) };
+  }
+
   // The model's caravans on the road today: each load as it goes, by the route it takes and the days it left and is due.
   // Where one is on its way is no field of the model's: it is that share of its route, by the day (the model's polyPos).
   // `carts` is the model's own count of wagons for a load of that size (its display's spawnCarts).
@@ -417,8 +852,8 @@ globalThis.BOARD_MODEL = (() => {
         points: line(c.poly),
       });
     });
-    return { day: day(), list: out };
+    return { day: day(), list: out, ships: ships() };
   }
 
-  return { VERSION, found, live, board, freeze, thaw, serve, folk, watch, embark, disembark, caravans };
+  return { VERSION, found, live, board, freeze, thaw, serve, folk, watch, embark, disembark, caravans, ships, market, trade };
 })();

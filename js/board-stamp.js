@@ -114,9 +114,9 @@ struct Way {
   let along = in.ends.zw - in.ends.xy;
   let t = clamp(dot(in.world - in.ends.xy, along) / max(dot(along, along), 1e-6), 0.0, 1.0);
   let d = distance(in.world, in.ends.xy + along * t);
-  // Narrower than a texel, it still shows, as faintly as it is narrow.
+  // Narrower than a texel, keep road and lane contrast visible across distant settlements.
   let reach = max(in.half, 0.5 * stamp.texel);
-  let thin = min(1.0, in.half / (0.5 * stamp.texel));
+  let thin = clamp(in.half / (0.38 * stamp.texel), 0.38, 1.0);
   let alpha = in.colour.a * thin * clamp((reach + 0.5 * stamp.texel - d) / stamp.texel, 0.0, 1.0);
   return vec4f(in.colour.rgb * alpha, alpha);
 }
@@ -136,7 +136,7 @@ const BOARD_USE_TINT = [
   [40, 70, 34, 0], // wood
 ];
 const BOARD_STRIP_M = [0, 9, 0, 7, 14, 14, 0, 0, 0];
-const BOARD_ROAD_TINT = [176, 160, 130, 0.9], BOARD_LANE_TINT = [170, 156, 128, 0.7], BOARD_STREET_TINT = [134, 124, 108, 0.95], BOARD_SQUARE_TINT = [170, 160, 140, 0.95];
+const BOARD_ROAD_TINT = [182, 166, 134, 0.94], BOARD_LANE_TINT = [162, 148, 122, 0.78], BOARD_STREET_TINT = [164, 152, 130, 0.95], BOARD_QUAY_TINT = [174, 164, 148, 0.96], BOARD_SQUARE_TINT = [174, 164, 142, 0.96], BOARD_BRIDGE_TINT = [178, 168, 150, 0.98];
 const BOARD_WATER_TINT = [46, 54, 48, 0.82], BOARD_BANK_TINT = [70, 84, 58, 0.5], BOARD_ROOF_TINT = [158, 94, 66, 0.9], BOARD_THATCH_TINT = [164, 142, 92, 0.88];
 export const BOARD_WAY_FLOATS = 12;
 
@@ -157,7 +157,7 @@ export function boardStampTables(board) {
     if (rest) { const a = points[points.length - 1 - rest], b = points[points.length - 1]; way(a[0], a[1], b[0], b[1], half, c); }
   };
   const { x: ox, z: oz } = board.origin;
-  // Water first and its green banks, then the ways over it, then the towns' own streets, squares and roofs.
+  // Water first and its green banks, then the ways over it, then bridges, squares and roofs.
   for (const river of board.rivers) {
     for (const [colour, widen] of [[BOARD_BANK_TINT, 3.2], [BOARD_WATER_TINT, 1]]) {
       for (let k = 12; k < river.length; k += 12) {
@@ -166,9 +166,18 @@ export function boardStampTables(board) {
       }
     }
   }
-  for (const road of board.roads) line(road, 3.2, BOARD_ROAD_TINT, 2);
+  for (const road of board.roads) line(road, 3.4, BOARD_ROAD_TINT, 1);
   for (let k = 0; k < board.lanes.length; k += 4) way(ox + board.lanes[k], oz + board.lanes[k + 1], ox + board.lanes[k + 2], oz + board.lanes[k + 3], 1.6, BOARD_LANE_TINT);
-  for (const street of board.streets) line(street.pts, street.hw, BOARD_STREET_TINT);
+  for (const street of board.streets) {
+    const isRoad = street.kind === 'road', isQuay = street.kind === 'quay';
+    const colour = isRoad ? BOARD_ROAD_TINT : isQuay ? BOARD_QUAY_TINT : BOARD_STREET_TINT;
+    const half = isRoad ? Math.max(street.hw, 3.2) : isQuay ? Math.max(street.hw, 3.4) : street.hw;
+    line(street.pts, half, colour);
+  }
+  for (const br of board.bridges ?? []) {
+    const hl = Math.max(3, (br.length || 9) * 0.5);
+    way(br.x - br.ux * hl, br.z - br.uz * hl, br.x + br.ux * hl, br.z + br.uz * hl, Math.max(br.halfWidth || 2.5, 2.5), BOARD_BRIDGE_TINT);
+  }
   for (const square of board.squares) way(square.x - 0.5, square.z, square.x + 0.5, square.z, square.mean, BOARD_SQUARE_TINT);
   for (const lot of board.lots) {
     // A roof is a line along its ridge, as wide as the house is deep.

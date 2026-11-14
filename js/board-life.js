@@ -76,6 +76,12 @@ export function createBoardLife({ baked, fetchImpl = fetch, open = openBoardWork
     // The model's caravans on the road: each load's route (board metres), the days it left and is due, its mode, good
     // and wagons. Where one stands is that share of its route by the day (js/caravans.js works it out on the GPU).
     caravans: () => need().then(() => model.hook('caravans')),
+    // Foreign merchant ships calling at the board's harbours (`W.ships`).
+    ships: () => need().then(() => model.hook('ships')),
+    // Live commodity prices, available stock, and monthly demand at any settlement on the board.
+    market: (place = 0) => need().then(() => model.hook('market', [place])),
+    // Execute a trade against the settlement's live market ledger and return the updated market snapshot.
+    trade: (order) => need().then(() => model.hook('trade', [order])),
     // The model's day for a date of the game's calendar, with its fraction (null with no frozen world to count from).
     dayAt: (dateMs) => world && Number.isFinite(dateMs) ? boardDayAt(dateMs, boardEpochYear(world)) : null,
     // Anyone, by their number: the model's whole card of them, and what it links to.

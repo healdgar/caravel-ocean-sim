@@ -6,6 +6,19 @@ export const MARKET_SPREAD = 0.05;
 export const CAREER_FOOD_DAYS_LIMIT = 120;
 export const CAREER_WATER_DAYS_LIMIT = 90;
 export const YARD_MIN_TIER = 2;
+
+const BOARD_MARKETS = new WeakMap();
+export function setBoardMarket(ledger, portId, snapshot) {
+  if (!ledger || typeof ledger !== 'object' || !portId) return;
+  let map = BOARD_MARKETS.get(ledger);
+  if (!map) BOARD_MARKETS.set(ledger, map = Object.create(null));
+  if (snapshot) map[portId] = snapshot;
+  else delete map[portId];
+}
+export function getBoardMarket(ledger, portId) {
+  if (!ledger || !portId) return null;
+  return ledger.boardMarkets?.[portId] ?? BOARD_MARKETS.get(ledger)?.[portId] ?? null;
+}
 const TRADE_DAY_MS = 86400000;
 const MARKET_PRESSURE_LIMIT = 0.6;
 const MARKET_PRESSURE_HALF_LIFE_DAYS = 45;
@@ -61,6 +74,23 @@ function marketMidPrice(era, port, good, dateMs, pressure) {
   return good.price * goodRegionFactor(good, marketRegion(era, port)) * (0.92 + 0.16 * h) * season * (1 + pressure);
 }
 export function marketQuote(era, ledger, port, good, dateMs) {
+  const bm = getBoardMarket(ledger, port?.id), bEntry = good?.boardGood ? bm?.goods?.[good.boardGood] : null;
+  if (bEntry && bEntry.price > 0) {
+    const perTonne = good.boardPerTonne || 10;
+    const mid = bEntry.price * perTonne;
+    const units = bEntry.onMarket ?? bEntry.store ?? 0;
+    const offered = !bm.closed && units >= perTonne * 0.5;
+    return {
+      id: good.id,
+      name: good.name,
+      buy: tradeWhole(mid * (1 + MARKET_SPREAD)),
+      sell: Math.max(1, tradeWhole(mid * (1 - MARKET_SPREAD))),
+      offered,
+      held: ledger.cargo[good.id] ?? 0,
+      live: true,
+      availTonnes: +(units / perTonne).toFixed(1),
+    };
+  }
   const mid = marketMidPrice(era, port, good, dateMs, marketPressure(ledger, port, good.id, dateMs));
   return {
     id: good.id,
@@ -71,7 +101,24 @@ export function marketQuote(era, ledger, port, good, dateMs) {
     held: ledger.cargo[good.id] ?? 0,
   };
 }
-function moveMarket(ledger, port, goodId, dateMs, direction) {
+function moveMarket(ledger, port, good, dateMs, direction) {
+  const goodId = typeof good === 'string' ? good : good.id;
+  const bm = getBoardMarket(ledger, port?.id), bEntry = typeof good === 'object' && good?.boardGood ? bm?.goods?.[good.boardGood] : null;
+  if (bEntry && bEntry.price > 0) {
+    const perTonne = good.boardPerTonne || 10;
+    const base = Math.max(0.1, bEntry.base || bEntry.price);
+    const depth = Math.max(12, (bEntry.store || 0) + (bEntry.needMonth || 0) * 0.1 + 18);
+    if (direction > 0) {
+      bEntry.onMarket = Math.max(0, (bEntry.onMarket ?? bEntry.store ?? 0) - perTonne);
+      bEntry.store = Math.max(0, (bEntry.store ?? 0) - perTonne);
+      bEntry.price = Math.min(base * 4.5, Math.max(base * 0.25, bEntry.price * Math.exp(0.22 * Math.tanh(perTonne / depth))));
+    } else {
+      bEntry.onMarket = (bEntry.onMarket ?? bEntry.store ?? 0) + perTonne;
+      bEntry.store = (bEntry.store ?? 0) + perTonne;
+      bEntry.price = Math.min(base * 4.5, Math.max(base * 0.25, bEntry.price * Math.exp(-0.20 * Math.tanh(perTonne / depth))));
+    }
+    return;
+  }
   const settled = marketPressure(ledger, port, goodId, dateMs);
   const record = (ledger.market[port.id] ??= { lastMs: dateMs, pressure: {} });
   // Bring every price up to date before moving the clock.
@@ -98,7 +145,7 @@ export function buyGood(ledger, era, port, good, tonnes, { dateMs, capacity }) {
     ledger.purse -= quote.buy;
     ledger.cargo[good.id] = (ledger.cargo[good.id] ?? 0) + 1;
     ledger.tonnesTraded += 1;
-    moveMarket(ledger, port, good.id, dateMs, 1);
+    moveMarket(ledger, port, good, dateMs, 1);
     bought++; cost += quote.buy;
   }
   return { tonnes: bought, cost };
@@ -111,7 +158,7 @@ export function sellGood(ledger, era, port, good, tonnes, { dateMs }) {
     ledger.cargo[good.id] -= 1;
     if (ledger.cargo[good.id] <= 0) delete ledger.cargo[good.id];
     ledger.tonnesTraded += 1;
-    moveMarket(ledger, port, good.id, dateMs, -1);
+    moveMarket(ledger, port, good, dateMs, -1);
     sold++; income += quote.sell;
   }
   return { tonnes: sold, income };

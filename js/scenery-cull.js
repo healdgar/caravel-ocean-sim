@@ -3,7 +3,7 @@
 // written straight into the vertex buffer the draws read, so their shaders do not change, and
 // JavaScript only uploads an instance when it first comes into use. Used by ground cover and trees.
 import { FRAME_WGSL } from './wgsl/common.js';
-import { TREE_GEOMETRY_ERRORS, TREE_LOD, TREE_VARIANTS } from './vegetation.js';
+import { GRASS_VARIANTS, ROCK_ARCHETYPES, TREE_GEOMETRY_ERRORS, TREE_LOD, TREE_VARIANTS } from './vegetation.js';
 import { CITY_HOUSE_TYPES, CITY_TYPE } from './old-world-buildings.js';
 
 const INSTANCE_BYTES = 32;
@@ -53,17 +53,32 @@ ${select}
 }
 `;
 
-// A prop may vanish only when its whole extent is smaller than the pixel target. Hysteresis keeps
-// small visible props a little longer. Mirrors groundCoverError and groundCoverVisible.
+// Multi-LOD ground cover selection across 6 fractured boulder archetypes x 3 LODs (0..17) and 2 grass variants x 2 LODs (18..21).
 export const GROUND_COVER_CULL = cullShell(1, /* wgsl */ `
 fn scenerySelect(index:u32,group:u32,instance:SceneryInstance)->i32 {
   let relative=instance.root.xyz-F.camPos.xyz;
   let extent=length(vec2f(instance.root.w*1.41421356,instance.shape.x))*1.2;
   if(!sceneryInFrustum(relative,extent)){previous[index]=0u;return -1;}
-  let threshold=params.x*params.y*select(1.0,0.88,previous[index]==1u);
-  if(sceneryProjected(relative,extent,extent)<threshold){previous[index]=0u;return -1;}
-  previous[index]=1u;
-  return i32(group);
+  let wasVisible=previous[index]>0u;
+  let oldLod=select(2u,previous[index]-1u,wasVisible);
+  let threshold=params.x*params.y*select(1.0,0.88,wasVisible);
+  let px=sceneryProjected(relative,extent,extent);
+  if(px<threshold){previous[index]=0u;return -1;}
+  if(group<2u){
+    let arch=u32(clamp(floor(fract(instance.shape.y*17.31+f32(group)*0.5)*f32(${ROCK_ARCHETYPES})),0.0,f32(${ROCK_ARCHETYPES-1})));
+    let h0=select(1.0,0.85,oldLod==0u);
+    let h1=select(1.0,0.85,oldLod<=1u);
+    var lod=2u;
+    if(px>=threshold*9.5*h0){lod=0u;}
+    else if(px>=threshold*3.4*h1){lod=1u;}
+    previous[index]=lod+1u;
+    return i32(lod*${ROCK_ARCHETYPES}u+arch);
+  }
+  let gVar=min(group-2u,${GRASS_VARIANTS-1}u);
+  let gHold=select(1.0,0.85,oldLod==0u);
+  let lod=select(1u,0u,px>=threshold*4.2*gHold);
+  previous[index]=lod+1u;
+  return i32(${ROCK_ARCHETYPES*3}u+lod*${GRASS_VARIANTS}u+gVar);
 }
 `);
 
@@ -98,9 +113,12 @@ export const CITY_CULL = cullShell(1, /* wgsl */ `
 fn scenerySelect(index:u32,group:u32,instance:SceneryInstance)->i32 {
   let house=group<${CITY_HOUSE_TYPES}u;
   let compound=(group>=${CITY_TYPE.CHURCH_LEFT}u&&group<=${CITY_TYPE.CHURCH_GREAT}u)||group==${CITY_TYPE.GATE}u||group==${CITY_TYPE.CURTAIN_SHORT}u||group==${CITY_TYPE.CURTAIN_LONG}u;
-  let relative=instance.root.xyz+vec3f(0.0,6.0,0.0)-F.camPos.xyz;
-  let near=distance(instance.root.xyz,F.camPos.xyz)<params.x+select(0.0,16.0,compound);
-  if(!near||!sceneryInFrustum(relative,select(42.0,18.0,house))){previous[index]=0u;return -1;}
+  let bridge=group==${CITY_TYPE.STONE_BRIDGE}u||group==${CITY_TYPE.FOOTBRIDGE}u;
+  let worldRoot=instance.root.xyz+vec3f(params.z,0.0,params.w);
+  let relative=worldRoot+vec3f(0.0,6.0,0.0)-F.camPos.xyz;
+  let maxDist=select(params.x+select(36.0,52.0,compound),max(params.x+120.0,2800.0),bridge);
+  let near=distance(worldRoot,F.camPos.xyz)<maxDist+select(0.0,10.0,previous[index]==1u);
+  if(!near||!sceneryInFrustum(relative,select(select(42.0,18.0,house),36.0,bridge))){previous[index]=0u;return -1;}
   previous[index]=1u;
   return i32(group);
 }
@@ -125,6 +143,7 @@ export function createSceneryCull({ device, pipeline, frameUBO, label, capacity,
   for (let bucket = 0; bucket < buckets; bucket++) for (let part = 0; part < parts; part++) drawArguments[(bucket * parts + part) * DRAW_WORDS] = vertexCounts[part][bucket];
   const draws = storage('draws', drawArguments.byteLength, GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_DST);
   const params = device.createBuffer({ label: `${label} params`, size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  const paramValues = new Float32Array(4);
   const emptied = new Uint32Array(capacity).fill(EMPTY_SLOT);
   device.queue.writeBuffer(groups, 0, emptied);
   const group = device.createBindGroup({ label: `${label} cull`, layout: pipeline.getBindGroupLayout(0), entries: [frameUBO, params, instances, groups, shown, draws, previous, firstBuffer].map((buffer, binding) => ({ binding, resource: { buffer } })) });
@@ -136,7 +155,14 @@ export function createSceneryCull({ device, pipeline, frameUBO, label, capacity,
       device.queue.writeBuffer(groups, slot * 4, slotGroups);
     },
     clearSlots(slot, count) { device.queue.writeBuffer(groups, slot * 4, emptied, 0, count); },
-    setPixelError(pixelError, scale = 1) { device.queue.writeBuffer(params, 0, new Float32Array([pixelError, scale, 0, 0])); },
+    setPixelError(pixelError, scale = 1) {
+      paramValues[0] = pixelError; paramValues[1] = scale;
+      device.queue.writeBuffer(params, 0, paramValues);
+    },
+    setWorldOffset(dx = 0, dz = 0) {
+      paramValues[2] = dx; paramValues[3] = dz;
+      device.queue.writeBuffer(params, 0, paramValues);
+    },
     encode(pass) {
       device.queue.writeBuffer(draws, 0, drawArguments);
       pass.setPipeline(pipeline); pass.setBindGroup(0, group); pass.dispatchWorkgroups(Math.ceil(capacity / 64));

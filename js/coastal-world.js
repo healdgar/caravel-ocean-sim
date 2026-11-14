@@ -35,7 +35,7 @@ import {
   safeLandfallStart,
 } from './terrain-model.js';
 import { vegetationProbability } from './vegetation.js';
-import { OLD_WORLD_LAND, oldWorldCountry } from './old-world.js';
+import { OLD_WORLD_LAND, bakedBoardFor, oldWorldCountry } from './old-world.js';
 import {
   BUILDING_SUB_ASSEMBLIES,
   PART_CUTAWAY_MODES,
@@ -8202,7 +8202,7 @@ export function synthesizeCoastalBiome(regionSpec, heights, beaches = null, port
   const is1550Ortho = Boolean(satelliteData?.is1550Orthophoto);
   const minTreeElev = is1550Ortho ? 1.1 : 1.15;
   // Long-settled country bears what its people grow, not what a satellite sees there today.
-  const country = oldWorldCountry(region, heights, portPlacement);
+  const country = portPlacement?._resolvedCountry ?? oldWorldCountry(region, heights, portPlacement);
 
   for (let j = 0; j < m; j++) {
     const v = (j + 0.5) / m;
@@ -8301,7 +8301,7 @@ export function synthesizeCoastalAlbedo(
   const beachData = beaches ?? synthesizeCoastalBeaches(region, heights, satelliteData, distInfo);
   const biomeMask = biome ?? synthesizeCoastalBiome(region, heights, beachData, portPlacement, satelliteData);
   const rgba = new Uint8Array(size * size * 4);
-  const country = oldWorldCountry(region, heights, portPlacement);
+  const country = portPlacement?._resolvedCountry ?? oldWorldCountry(region, heights, portPlacement);
 
   for (let j = 0; j < size; j++) {
     const v = (j + 0.5) / size;
@@ -8761,6 +8761,44 @@ export function seedCoastalVegetation(
   };
 }
 
+export function riverPolygonDifference(tri, poly) {
+  const area2 = (pts) => {
+    let s = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i], b = pts[(i + 1) % pts.length];
+      s += a[0] * b[1] - b[0] * a[1];
+    }
+    return s;
+  };
+  const clip = area2(poly) >= 0 ? poly : [...poly].reverse();
+  const cross = (ax, az, bx, bz, px, pz) => (bx - ax) * (pz - az) - (bz - az) * (px - ax);
+  const splitHalfPlane = (pts, ax, az, bx, bz, keepPositive) => {
+    const out = [], n = pts.length;
+    if (n < 3) return out;
+    const sign = keepPositive ? 1 : -1;
+    for (let i = 0; i < n; i++) {
+      const p = pts[i], q = pts[(i + 1) % n];
+      const dp = sign * cross(ax, az, bx, bz, p[0], p[1]);
+      const dq = sign * cross(ax, az, bx, bz, q[0], q[1]);
+      if (dp >= -1e-6) out.push(p);
+      if ((dp > 1e-6 && dq < -1e-6) || (dp < -1e-6 && dq > 1e-6)) {
+        const t = dp / (dp - dq);
+        out.push([p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t]);
+      }
+    }
+    return out.length >= 3 && Math.abs(area2(out)) > 1e-4 ? out : [];
+  };
+  const out = [];
+  let rem = tri;
+  for (let i = 0; i < clip.length && rem.length >= 3; i++) {
+    const [ax, az] = clip[i], [bx, bz] = clip[(i + 1) % clip.length];
+    const outside = splitHalfPlane(rem, ax, az, bx, bz, false);
+    if (outside.length >= 3) out.push(outside);
+    rem = splitHalfPlane(rem, ax, az, bx, bz, true);
+  }
+  return out;
+}
+
 export function buildCoastalMesh(
   regionSpec,
   heights,
@@ -8890,19 +8928,92 @@ export function buildCoastalMesh(
     return idx;
   };
 
+  const riverCut = portPlacement?.riverCut ?? null;
+  const riverBin = riverCut?.cuts?.length ? new Map() : null;
+  if (riverBin) {
+    for (const c of riverCut.cuts) {
+      const i0 = Math.max(0, Math.floor((c.x0 - (region.x - region.span * 0.5)) / step));
+      const i1 = Math.min(n - 2, Math.floor((c.x1 - (region.x - region.span * 0.5)) / step));
+      const j0 = Math.max(0, Math.floor((c.z0 - (region.z - region.span * 0.5)) / step));
+      const j1 = Math.min(n - 2, Math.floor((c.z1 - (region.z - region.span * 0.5)) / step));
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+        const ck = j * (n - 1) + i;
+        let list = riverBin.get(ck);
+        if (!list) riverBin.set(ck, list = []);
+        list.push(c);
+      }
+    }
+  }
+  const readVert = (idx) => {
+    const baseLen = n * n;
+    const src = idx < baseLen ? baseVertices : extraVerts;
+    const off = idx < baseLen ? idx * 8 : (idx - baseLen) * 8;
+    return [src[off], src[off + 1], src[off + 2], src[off + 3], src[off + 4], src[off + 5], src[off + 6], src[off + 7]];
+  };
+  const emitLandTri = (iA, iB, iC, cutsHere) => {
+    if (!cutsHere?.length) { indices.push(iA, iB, iC); return; }
+    const va = readVert(iA), vb = readVert(iB), vc = readVert(iC);
+    const triX0 = Math.min(va[0], vb[0], vc[0]), triX1 = Math.max(va[0], vb[0], vc[0]);
+    const triZ0 = Math.min(va[2], vb[2], vc[2]), triZ1 = Math.max(va[2], vb[2], vc[2]);
+    let hits = null;
+    for (const c of cutsHere) {
+      if (c.x1 < triX0 || c.x0 > triX1 || c.z1 < triZ0 || c.z0 > triZ1) continue;
+      if (!hits) hits = [];
+      hits.push(c.poly);
+    }
+    if (!hits) { indices.push(iA, iB, iC); return; }
+    let pieces = [[[va[0], va[2]], [vb[0], vb[2]], [vc[0], vc[2]]]];
+    for (const poly of hits) {
+      const next = [];
+      for (const p of pieces) {
+        const diff = riverPolygonDifference(p, poly);
+        for (const d of diff) next.push(d);
+      }
+      pieces = next;
+      if (!pieces.length) return;
+    }
+    const den = (vb[2] - vc[2]) * (va[0] - vc[0]) + (vc[0] - vb[0]) * (va[2] - vc[2]);
+    if (Math.abs(den) < 1e-8) return;
+    const clipVert = (px, pz) => {
+      if (Math.hypot(px - va[0], pz - va[2]) < 1e-4) return iA;
+      if (Math.hypot(px - vb[0], pz - vb[2]) < 1e-4) return iB;
+      if (Math.hypot(px - vc[0], pz - vc[2]) < 1e-4) return iC;
+      const w0 = ((vb[2] - vc[2]) * (px - vc[0]) + (vc[0] - vb[0]) * (pz - vc[2])) / den;
+      const w1 = ((vc[2] - va[2]) * (px - vc[0]) + (va[0] - vc[0]) * (pz - vc[2])) / den;
+      const w2 = 1 - w0 - w1;
+      const idx = n * n + extraVerts.length / 8;
+      for (let f = 0; f < 8; f++) extraVerts.push(va[f] * w0 + vb[f] * w1 + vc[f] * w2);
+      return idx;
+    };
+    for (const poly of pieces) {
+      const pIdx = poly.map(([px, pz]) => clipVert(px, pz));
+      for (let t = 1; t + 1 < pIdx.length; t++) {
+        const a = pIdx[0], b = pIdx[t], c = pIdx[t + 1];
+        const pa = readVert(a), pb = readVert(b), pc = readVert(c);
+        const crossY = (pb[2] - pa[2]) * (pc[0] - pa[0]) - (pb[0] - pa[0]) * (pc[2] - pa[2]);
+        if (Math.abs(crossY) < 1e-6) continue;
+        if (crossY > 0) indices.push(a, b, c);
+        else indices.push(a, c, b);
+      }
+    }
+  };
+
   for (let j = 0; j < n - 1; j++) {
     for (let i = 0; i < n - 1; i++) {
       const k = j * n + i;
       const h00 = heights[k], h10 = heights[k + 1], h01 = heights[k + n], h11 = heights[k + n + 1];
       const lo = Math.min(h00, h10, h01, h11);
       const hi = Math.max(h00, h10, h01, h11);
+      const cutsHere = riverBin ? riverBin.get(j * (n - 1) + i) : null;
       if (!cellSub[j * (n - 1) + i]) {
         const useMainDiag = Math.abs(h00 - h11) < Math.abs(h10 - h01) - 0.01;
         if (hi > -0.5) {
           if (useMainDiag) {
-            indices.push(k, k + n, k + n + 1, k, k + n + 1, k + 1);
+            emitLandTri(k, k + n, k + n + 1, cutsHere);
+            emitLandTri(k, k + n + 1, k + 1, cutsHere);
           } else {
-            indices.push(k, k + n, k + 1, k + 1, k + n, k + n + 1);
+            emitLandTri(k, k + n, k + 1, cutsHere);
+            emitLandTri(k + 1, k + n, k + n + 1, cutsHere);
           }
         }
         if (lo < 0 && hi > (n === 257 ? -24 : -42)) {
@@ -8947,9 +9058,11 @@ export function buildCoastalMesh(
           const v11 = gridIdx(si + 1, sj + 1);
           if (hi > -0.5) {
             if (useSubMainDiag) {
-              indices.push(v00, v01, v11, v00, v11, v10);
+              emitLandTri(v00, v01, v11, cutsHere);
+              emitLandTri(v00, v11, v10, cutsHere);
             } else {
-              indices.push(v00, v01, v10, v10, v01, v11);
+              emitLandTri(v00, v01, v10, cutsHere);
+              emitLandTri(v10, v01, v11, cutsHere);
             }
           }
           if (lo < 0 && hi > (n === 257 ? -24 : -42)) {
@@ -8960,6 +9073,18 @@ export function buildCoastalMesh(
             }
           }
         }
+      }
+    }
+  }
+
+  if (riverCut?.bankVerts?.length && riverCut?.bankIndices?.length) {
+    const bankBase = n * n + extraVerts.length / 8;
+    for (let k = 0; k < riverCut.bankVerts.length; k++) extraVerts.push(riverCut.bankVerts[k]);
+    for (let k = 0; k + 2 < riverCut.bankIndices.length; k += 3) {
+      const a = bankBase + riverCut.bankIndices[k], b = bankBase + riverCut.bankIndices[k + 1], c = bankBase + riverCut.bankIndices[k + 2];
+      indices.push(a, b, c);
+      if (Math.min(riverCut.bankVerts[riverCut.bankIndices[k] * 8 + 1], riverCut.bankVerts[riverCut.bankIndices[k + 1] * 8 + 1], riverCut.bankVerts[riverCut.bankIndices[k + 2] * 8 + 1]) < 0.0) {
+        submergedIndices.push(a, b, c);
       }
     }
   }
@@ -9386,17 +9511,30 @@ function finalizeProceduralCoastalPack(
 function dressProceduralCoastalPack(pack, heights, port, elevationSource, satelliteData, climateProfile) {
   const { region } = pack;
   if (!pack.skipPortPlacement) {
-    port.streets = layTownStreets(port, (x, z) => terrainSurfaceSample(heights, x, z, region));
+    const suppressSyntheticCountryRoads = Boolean(bakedBoardFor(region));
+    port.streets = layTownStreets(port, (x, z) => terrainSurfaceSample(heights, x, z, region), {
+      suppressSyntheticCountryRoads,
+    });
     port.props = layPortProps(port, (x, z) => terrainSurfaceSample(heights, x, z, region));
   }
   // An Old World city round the port: its plan is laid here, its streets paved with the port's
   // own, and its blocks handed to the renderer to draw as instances.
   const surveyHeights = pack.skipPortPlacement ? null : new Float32Array(heights);
   const country = pack.skipPortPlacement ? null : oldWorldCountry(region, heights, port);
+  if (port) port._resolvedCountry = country;
+  if (country) {
+    port.country = {
+      board: country.board ?? null,
+      places: country.places ?? null,
+      riverReaches: country.riverReaches ?? null,
+      bridges: country.bridges ?? null,
+    };
+    port.riverCut = country.riverCut ?? null;
+  }
   const cityPlan = country?.plan ?? null;
   // A founded country names who mans its seat; the port's forts are manned from that roll.
   if (country?.watch) port.watch = country.watch;
-  if (cityPlan && port.streets) paveCityStreets(port.streets, cityPlan.paving);
+  if (cityPlan?.paving?.length) port.streets = paveCityStreets(port.streets, cityPlan.paving);
   const shoreDist = computeCoastalShoreDistances(heights, region.size, region.span, 0.25);
   const beaches = synthesizeCoastalBeaches(region, heights, satelliteData, shoreDist, {
     rawHeights: pack.rawHeights,

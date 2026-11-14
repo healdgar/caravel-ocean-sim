@@ -35,11 +35,43 @@ const CARAVAN_DROVE_SPECIES = Object.freeze({ sheep: 0, cattle: 1, swine: 2, hor
 const CARAVAN_CARGO_TINT = Object.freeze({ grain: 0, wheat: 0, flour: 0, wine: 1, wool: 2, ore: 3, iron: 3, stone: 3, salt: 4, cloth: 5, timber: 6, wood: 6, hay: 7 });
 const caravanHash = (a, b) => { let h = Math.imul(a ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(b + 0x7f4a7c15, 0xc2b2ae35); h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d); h ^= h >>> 12; return (h >>> 0) / 4294967296; };
 
+function bridgeDeckYAt(wx, wz, bridges) {
+  if (!bridges || !bridges.length) return 0;
+  let best = 0;
+  for (const b of bridges) {
+    if (!b || !Number.isFinite(b.deckY)) continue;
+    const dx = wx - b.x, dz = wz - b.z;
+    const halfLen = (b.length || 12) * 0.52;
+    const halfW = (b.halfWidth || 3) + 4.5;
+    if (Math.abs(dx) > halfLen + 14 && Math.abs(dz) > halfLen + 14) continue;
+    const along = Math.abs(dx * (b.ux || 0) + dz * (b.uz || 1));
+    const across = Math.abs(-dx * (b.uz || 1) + dz * (b.ux || 0));
+    if (along <= halfLen + 5.5 && across <= halfW) {
+      const ramp = along <= halfLen ? 1 : Math.max(0, 1 - (along - halfLen) / 5.5);
+      const y = b.deckY * ramp;
+      if (y > best) best = y;
+    }
+  }
+  return best;
+}
+
+function segmentNearBridge(ax, az, bx, bz, bridges) {
+  if (!bridges || !bridges.length) return false;
+  const minX = Math.min(ax, bx), maxX = Math.max(ax, bx);
+  const minZ = Math.min(az, bz), maxZ = Math.max(az, bz);
+  for (const b of bridges) {
+    const reach = (b.length || 12) * 0.65 + 12;
+    if (b.x >= minX - reach && b.x <= maxX + reach && b.z >= minZ - reach && b.z <= maxZ + reach) return true;
+  }
+  return false;
+}
+
 // The herds' travelling seeds and route buffer for the country model's caravans (BOARD_MODEL.caravans, board metres
 // about the ground's middle): `origin` is that middle in world metres. Each cart is a wagon behind a yoke of oxen; a
 // drove of beasts is driven loose along the road. Sea and river loads are the ships' and barges' to show.
-export function caravanHerdSeeds(list, origin) {
+export function caravanHerdSeeds(list, origin, bridges = null) {
   const routes = [], seeds = [];
+  const hasBridges = Boolean(bridges && bridges.length);
   for (const c of list ?? []) {
     if (c.mode !== 'cart' || !(c.points?.length >= 4) || !(c.arrive > c.depart)) continue;
     const header = routes.length / 4, n = c.points.length / 2;
@@ -47,12 +79,26 @@ export function caravanHerdSeeds(list, origin) {
     const pts = [];
     for (let k = 0; k < n; k++) {
       const x = origin.x + c.points[k * 2], z = origin.z + c.points[k * 2 + 1];
-      if (pts.length) { const p = pts[pts.length - 1]; const step = Math.hypot(x - p[0], z - p[1]); if (step < 0.05) continue; along += step; }
-      pts.push([x, z, along]);
+      if (pts.length) {
+        const p = pts[pts.length - 1];
+        const step = Math.hypot(x - p[0], z - p[1]);
+        if (step < 0.05) continue;
+        if (hasBridges && step > 4.5 && segmentNearBridge(p[0], p[1], x, z, bridges)) {
+          const steps = Math.ceil(step / 4.0);
+          for (let s = 1; s < steps; s++) {
+            const u = s / steps;
+            const ix = p[0] + (x - p[0]) * u;
+            const iz = p[1] + (z - p[1]) * u;
+            pts.push([ix, iz, along + step * u, bridgeDeckYAt(ix, iz, bridges)]);
+          }
+        }
+        along += step;
+      }
+      pts.push([x, z, along, hasBridges ? bridgeDeckYAt(x, z, bridges) : 0]);
     }
     if (pts.length < 2 || along < 1) continue;
     routes.push(c.depart, c.arrive, pts.length, along);
-    for (const p of pts) routes.push(p[0], p[1], p[2], 0);
+    for (const p of pts) routes.push(p[0], p[1], p[2], p[3]);
     const key = [...String(c.key)].reduce((h, ch) => (Math.imul(h, 31) + ch.charCodeAt(0)) | 0, 7);
     const drove = CARAVAN_DROVE_SPECIES[c.good];
     if (drove !== undefined) {
@@ -119,6 +165,7 @@ export async function createLivestockHerds({
   resources,
   clouds,
   initialHerds = null,
+  initialBridges = null,
   isMobile = false,
 }) {
   const B = GPUBufferUsage;
@@ -146,7 +193,7 @@ export async function createLivestockHerds({
   let activeResources = resources;
   let state = null;
   // The pastures' own herds, and the caravans on the roads: both are seeds of one pass.
-  let pastureHerds = initialHerds, travellers = { routes: new Float32Array([0, 1, 0, 0]), seeds: new Float32Array(0) };
+  let pastureHerds = initialHerds, activeBridges = initialBridges, lastCaravans = null, travellers = { routes: new Float32Array([0, 1, 0, 0]), seeds: new Float32Array(0) };
   // The model's day now and how fast its days pass, written once a frame (16 bytes) for the travellers' closed form.
   const clock = new ArrayBuffer(16), clockU = new Uint32Array(clock), clockF = new Float32Array(clock);
 
@@ -193,9 +240,18 @@ export async function createLivestockHerds({
     pastureHerds = herdData;
     install();
   }
-  function setCaravans(list, origin) {
-    travellers = caravanHerdSeeds(list, origin);
+  function setCaravans(list, origin, bridges = activeBridges) {
+    lastCaravans = list ? { list, origin } : null;
+    if (bridges !== undefined && bridges !== null) activeBridges = bridges;
+    travellers = caravanHerdSeeds(list, origin, activeBridges);
     install();
+  }
+  function setBridges(bridges) {
+    activeBridges = bridges || null;
+    if (lastCaravans) {
+      travellers = caravanHerdSeeds(lastCaravans.list, lastCaravans.origin, activeBridges);
+      install();
+    }
   }
   function install() {
     releaseState();
@@ -255,6 +311,7 @@ export async function createLivestockHerds({
     get travellers() { return travellers.seeds.length / HERD_SEED_FLOATS; },
     setHerds,
     setCaravans,
+    setBridges,
     // The country model's day now (with its fraction) and how many of its days pass in a second of play.
     setBoardClock(day, daysPerSecond) {
       clockF[2] = Number.isFinite(day) ? day : 0;

@@ -332,19 +332,37 @@ const WORKS_FENCE_STONE = worksSpec('Muro de pedra solta (dry-stone wall, a leng
 ], 1.3);
 // A bridge is written this long and stretched to its span; its deck is the floor.
 export const WORKS_BRIDGE_M = 9;
-const WORKS_FOOTBRIDGE = worksSpec('Pontão (timber bridge of a track)', 3, WORKS_BRIDGE_M, 6, 10, [
-  worksBox('bridge_deck', [-1.4, -0.24, -4.5], [1.4, 0, 4.5], 'wood', { partGroup: 'foundation_plinth' }),
-  worksBox('bridge_beam', [-1.25, -0.5, -4.5], [-0.95, -0.24, 4.5], 'oak'), worksBox('bridge_beam', [0.95, -0.5, -4.5], [1.25, -0.24, 4.5], 'oak'),
-  ...[-2.4, 2.4].flatMap((z) => [-1.1, 1.1].map((x) => ({ primitive: 'cylinder', name: 'bridge_piles', base: [x, -5, z], height: 4.5, radius: 0.16, segments: 6, material: 'timber' }))),
-  ...[-1.34, 1.34].flatMap((x) => [...worksEvenly(4, -4.3, 4.3).map((z) => worksPost('bridge_rail_post', x, z, 0, 1.0, 0.06)), worksBox('bridge_rail', [x - 0.04, 0.92, -4.4], [x + 0.04, 1.0, 4.4], 'oak')]),
-], 5);
-const WORKS_STONE_BRIDGE = worksSpec('Ponte de pedra (stone bridge of a track, one arch)', 3.9, WORKS_BRIDGE_M, 6, 11, [
-  worksBox('bridge_deck', [-1.8, -0.4, -4.5], [1.8, 0, 4.5], 'cobble', { partGroup: 'foundation_plinth' }),
+const WORKS_FOOTBRIDGE = worksSpec('Pontão (timber bridge of a track)', 3.2, WORKS_BRIDGE_M, 6.2, 10, [
+  worksBox('bridge_deck', [-1.5, -0.26, -3.4], [1.5, 0.06, 3.4], 'wood', { partGroup: 'foundation_plinth' }),
+  worksBox('bridge_ramp_n', [-1.5, -0.35, -4.5], [1.5, -0.02, -3.35], 'wood'),
+  worksBox('bridge_ramp_s', [-1.5, -0.35, 3.35], [1.5, -0.02, 4.5], 'wood'),
+  worksBox('bridge_beam', [-1.32, -0.56, -4.45], [-0.98, -0.24, 4.45], 'oak'),
+  worksBox('bridge_beam', [0.98, -0.56, -4.45], [1.32, -0.24, 4.45], 'oak'),
+  ...[-2.8, 0, 2.8].flatMap((z) => [-1.15, 1.15].map((x) => ({ primitive: 'cylinder', name: 'bridge_piles', base: [x, -5.8, z], height: 5.3, radius: 0.18, segments: 6, material: 'timber' }))),
+  ...[-2.8, 2.8].map((z) => worksBox('bridge_bent_cap', [-1.45, -0.78, z - 0.16], [1.45, -0.52, z + 0.16], 'oak')),
+  ...[-1.42, 1.42].flatMap((x) => [...worksEvenly(5, -4.3, 4.3).map((z) => worksPost('bridge_rail_post', x, z, 0, 1.02, 0.07)), worksBox('bridge_rail', [x - 0.05, 0.94, -4.45], [x + 0.05, 1.04, 4.45], 'oak')]),
+], 5.2);
+const WORKS_STONE_BRIDGE = worksSpec('Ponte de pedra (stone bridge of a track, arched with cutwaters)', 4.2, WORKS_BRIDGE_M, 6.5, 11, [
+  worksBox('bridge_deck', [-1.9, -0.4, -3.4], [1.9, 0.12, 3.4], 'cobble', { partGroup: 'foundation_plinth' }),
+  worksBox('bridge_ramp_n', [-1.9, -0.55, -4.5], [1.9, -0.04, -3.35], 'cobble'),
+  worksBox('bridge_ramp_s', [-1.9, -0.55, 3.35], [1.9, -0.04, 4.5], 'cobble'),
   { primitive: 'group', name: 'bridge_arch', rotation: [0, 90, 0], children: [
-    { primitive: 'arch', name: 'bridge_arch', from: [-3.1, -3.8, 0], to: [3.1, -3.8, 0], height: 3.4, thickness: 3.6, voussoirs: 9, pierWidth: 0.9, openThrough: true, material: 'ashlar' }] },
-  worksBox('bridge_abutment', [-1.8, -5, -4.5], [1.8, -0.4, -3.1], 'ashlar'), worksBox('bridge_abutment', [-1.8, -5, 3.1], [1.8, -0.4, 4.5], 'ashlar'),
-  worksBox('bridge_parapet', [-1.8, 0, -4.5], [-1.5, 0.85, 4.5], 'ashlar'), worksBox('bridge_parapet', [1.5, 0, -4.5], [1.8, 0.85, 4.5], 'ashlar'),
-], 5);
+    { primitive: 'arch', name: 'bridge_arch', from: [-3.15, -3.85, 0], to: [3.15, -3.85, 0], height: 3.55, thickness: 3.85, voussoirs: 11, pierWidth: 0.95, openThrough: true, material: 'ashlar' }] },
+  worksBox('bridge_abutment', [-2.05, -6.2, -4.5], [2.05, -0.35, -3.05], 'ashlar'),
+  worksBox('bridge_abutment', [-2.05, -6.2, 3.05], [2.05, -0.35, 4.5], 'ashlar'),
+  ...[-3.2, 3.2].flatMap((z) => [
+    worksBox('bridge_cutwater', [-2.35, -6.2, z - 0.5], [-1.85, -0.15, z + 0.5], 'stone', { topInset: 0.18 }),
+    worksBox('bridge_cutwater', [1.85, -6.2, z - 0.5], [2.35, -0.15, z + 0.5], 'stone', { topInset: 0.18 }),
+  ]),
+  worksBox('bridge_parapet', [-2.02, 0.02, -4.5], [-1.68, 0.92, 4.5], 'ashlar'),
+  worksBox('bridge_parapet', [1.68, 0.02, -4.5], [2.02, 0.92, 4.5], 'ashlar'),
+  worksBox('bridge_coping', [-2.06, 0.92, -4.52], [-1.64, 1.04, 4.52], 'dark_stone'),
+  worksBox('bridge_coping', [1.64, 0.92, -4.52], [2.06, 1.04, 4.52], 'dark_stone'),
+  ...worksEvenly(5, -4.1, 4.1).flatMap((z) => [
+    worksBox('bridge_bollard', [-2.08, 0.02, z - 0.18], [-1.62, 1.14, z + 0.18], 'limestone'),
+    worksBox('bridge_bollard', [1.62, 0.02, z - 0.18], [2.08, 1.14, z + 0.18], 'limestone'),
+  ]),
+], 5.5);
 const WORKS_GRAVES = worksSpec('Campas (graves of a churchyard)', 6, 6, 1.2, 11, [
   worksBox('grave_slab', [-2.6, -0.4, -2.4], [-1.7, 0.14, -0.5], 'stone', { partGroup: 'foundation_plinth' }),
   ...[[-0.4, -2.2], [1.6, -1.9], [2.3, 0.4], [0.3, 0.2], [-1.9, 1.0], [1.1, 1.4]].flatMap(([x, z], k) => k % 3 === 2

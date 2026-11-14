@@ -144,8 +144,10 @@ struct HerdBody {
 @group(0) @binding(8) var<uniform> landSH: ShadowFrame;
 @group(0) @binding(9) var<storage, read> routes: array<vec4f>;
 
-// Where along a caravan's route a beast or wagon is s metres from the start: its place, and the way the road runs.
-fn herdRouteAt(header: u32, s: f32) -> vec4f {
+struct HerdRouteSample { pos: vec2f, dir: vec2f, deckY: f32 };
+
+// Where along a caravan's route a beast or wagon is s metres from the start: its place, the way the road runs, and any bridge deck height.
+fn herdRouteAt(header: u32, s: f32) -> HerdRouteSample {
   let count = u32(routes[header].z);
   let total = routes[header].w;
   let d = clamp(s, 0.0, total);
@@ -161,7 +163,8 @@ fn herdRouteAt(header: u32, s: f32) -> vec4f {
   let span = max(b.z - a.z, 1e-3);
   let t = clamp((d - a.z) / span, 0.0, 1.0);
   let dir = b.xy - a.xy;
-  return vec4f(mix(a.xy, b.xy, t), select(vec2f(0.0, 1.0), dir / max(length(dir), 1e-4), length(dir) > 1e-4));
+  let nDir = select(vec2f(0.0, 1.0), dir / max(length(dir), 1e-4), length(dir) > 1e-4);
+  return HerdRouteSample(mix(a.xy, b.xy, t), nDir, mix(a.w, b.w, t));
 }
 
 fn herdGroundY(p: vec2f) -> f32 {
@@ -229,24 +232,36 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   var walkYaw = flockHeading;
   // How far a travelling beast or wagon has gone along its road, in metres: its gait is paced by it, so no hoof slides.
   var rolled = 0.0;
+  var routeDeckY = 0.0;
+  var routeHeader = 0u;
   if (travelling) {
     // A caravan of the country's model: where it is, is the share of its road its days have run (the model's own
     // closed form), less how far behind the head of the train this one walks. A drove wanders a little about it.
-    let header = u32(seed.anchor.x);
-    let head = routes[header];
+    routeHeader = u32(seed.anchor.x);
+    let head = routes[routeHeader];
     let days = max(head.y - head.x, 1e-3);
     let share = clamp((cfg.boardDay - head.x) / days, 0.0, 1.0);
+    let calSpeed = head.w / days * cfg.daysPerSecond;
+    // In 1x real-time play calendar motion is ~6 mm/s; give active trains a 0.92 m/s visual pace driven by t
+    // that yields cleanly back to exact calendar speed once Chart Course time-warp reaches walking speed.
+    let paceFloor = max(0.0, 0.92 - calSpeed);
+    let cycle = max(head.w + 48.0, 1.0);
+    let rawDist = share * head.w + paceFloor * t;
+    let wrappedDist = rawDist - cycle * floor(rawDist / cycle);
+    let headDist = select(share * head.w, wrappedDist, calSpeed < 0.92 && head.w > 1.0);
     // A driven beast's coat word is lifted by one; a yoked ox's and a wagon's are not.
     let wander = select(0.0, 1.0, species != 4u && seed.traits.x >= 1.0);
     let behind = seed.anchor.y + wander * 0.9 * sin(t * 0.11 + phase * 3.0);
-    rolled = share * head.w - behind;
-    let at = herdRouteAt(header, rolled);
+    rolled = headDist - behind;
+    let at = herdRouteAt(routeHeader, rolled);
+    routeDeckY = at.deckY;
     let lateral = seed.traits.w + wander * 1.1 * sin(t * 0.13 + phase * 7.0);
-    worldXZ = at.xy + vec2f(at.w, -at.z) * lateral;
-    walkYaw = atan2(at.z, at.w) + wander * 0.25 * sin(t * 0.21 + phase * 5.0);
-    let onRoad = cfg.boardDay >= head.x && cfg.boardDay < head.y && rolled > 0.0 && rolled < head.w;
-    let speed = head.w / days * cfg.daysPerSecond;
-    moveAmt = select(0.0, clamp(speed / 0.9, 0.0, 1.0), onRoad);
+    worldXZ = at.pos + vec2f(at.dir.y, -at.dir.x) * lateral;
+    walkYaw = atan2(at.dir.x, at.dir.y) + wander * 0.25 * sin(t * 0.21 + phase * 5.0);
+    let onRoad = cfg.boardDay >= head.x && cfg.boardDay <= head.y + 0.05 && rolled > 0.0 && rolled < head.w;
+    if (!onRoad) { return; }
+    let visSpeed = max(calSpeed, 0.92);
+    moveAmt = clamp(visSpeed / 0.9, 0.0, 1.0);
     tau = rolled;
   } else {
     let clock = pastureWalkTime(t, phase);
@@ -262,8 +277,10 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     walkYaw = select(flockHeading + 0.55 * sin(phase * 3.1 + floor((t + phase * 4.456) / 28.0)), atan2(vel.x, vel.y), velLen > 1e-4);
   }
 
-  let wy = herdGroundY(worldXZ);
-  if (wy < 0.32) { return; }
+  let groundY = herdGroundY(worldXZ);
+  let onBridge = travelling && routeDeckY > 0.25;
+  let wy = select(groundY, max(groundY, routeDeckY), onBridge);
+  if (wy < 0.32 && !onBridge) { return; }
 
   let shiftXZ = vec2f(nearTerrain.grid.y, nearTerrain.grid.z);
   let scale = seed.traits.y;
@@ -280,8 +297,14 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
 
   let fwd = vec2f(sin(walkYaw), cos(walkYaw));
   let reach = select(0.55, 1.1, species == 4u);
-  let hFront = herdGroundY(worldXZ + fwd * reach);
-  let hBack = herdGroundY(worldXZ - fwd * reach);
+  var hFront = herdGroundY(worldXZ + fwd * reach);
+  var hBack = herdGroundY(worldXZ - fwd * reach);
+  if (travelling) {
+    let atF = herdRouteAt(routeHeader, rolled + reach);
+    let atB = herdRouteAt(routeHeader, rolled - reach);
+    if (atF.deckY > 0.25) { hFront = max(hFront, atF.deckY); }
+    if (atB.deckY > 0.25) { hBack = max(hBack, atB.deckY); }
+  }
   let slopePitch = clamp(-atan2(hFront - hBack, reach * 2.0), -0.45, 0.45);
 
   // Swine root, sheep & cattle crop grass deeply, horses graze ~65% of pauses and look alert ~35%.

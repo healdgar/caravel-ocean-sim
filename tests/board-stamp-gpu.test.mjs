@@ -77,8 +77,8 @@ test('a board is stamped on its ground: furlongs, ways, roofs, water and town, t
     assert.equal(seen.invalid, null);
     assert.ok(seen.same, 'stamped again on the ground painted afresh, it is the same country');
     assert.equal(seen.parcels, 3);
-    // Bank and water of the stream, the road, the lane, the street, the square and the roof.
-    assert.equal(seen.ways, 7);
+    // Bank and water of the stream, both segments of the 3-point road, the lane, the street, the square and the roof.
+    assert.equal(seen.ways, 8);
 
     const { first, IMAGE, BASE } = seen, at = (x, y) => first.slice((y * IMAGE + x) * 4, (y * IMAGE + x) * 4 + 4);
     const near = (got, want, by, what) => { for (let c = 0; c < 3; c++) assert.ok(Math.abs(got[c] - want[c]) <= by, `${what}: ${got} for ${want.map(Math.round)}`); };
@@ -103,16 +103,16 @@ test('a board is stamped on its ground: furlongs, ways, roofs, water and town, t
     assert.ok(inner[0] > BASE[0] + 20 && inner[0] < corn[0] - 10, `the corn's edge is thinned: ${inner}`);
     assert.ok(outer[0] > BASE[0] && outer[0] < inner[0], `and reaches a little past it: ${outer}`);
     // Ways at their own widths and colours.
-    near(at(64, 74), over([176, 160, 130], 0.9), 4, 'road');
+    near(at(58, 74), over([182, 166, 134], 0.94), 4, 'road');
     const bank = over([70, 84, 58], 0.5);
     near(at(81, 40), bank, 4, 'stream bank');
     near(at(79, 40), over([46, 54, 48], 0.82, bank), 4, 'stream bed');
-    near(at(64, 101), over([170, 160, 140], 0.95), 4, 'square');
+    near(at(64, 101), over([174, 164, 142], 0.96), 4, 'square');
     const roof = at(56, 26);
     assert.ok(roof[0] > roof[1] + 20 && roof[1] < BASE[1], `a tiled roof: ${roof}`);
     const lane = at(54, 89), street = at(54, 109);
-    near(lane, over([170, 156, 128], 0.7 * 0.8), 4, 'a lane narrower than a texel, as faint as it is narrow');
-    near(street, over([134, 124, 108], 0.95), 4, 'street');
+    near(lane, over([162, 148, 122], 0.78), 4, 'a lane narrower than a texel, kept crisp');
+    near(street, over([164, 152, 130], 0.95), 4, 'street');
     // The town's trodden ground lies over the corn it stands in.
     near(at(16, 16), over([0.588 * 255, 0.525 * 255, 0.431 * 255], 0.82), 4, 'town ground');
   } finally { await page.close(); }

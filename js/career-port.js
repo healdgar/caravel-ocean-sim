@@ -3,6 +3,7 @@
 // saves the ledger after every change. The game passes in whatever touches rendering.
 import {
   ensureCareerLedger, goodsInSeason, marketQuote, buyGood, sellGood, cargoLoad, wagesQuote, payWages, payPilot, provisionQuote, crewQuote,
+  setBoardMarket, getBoardMarket,
   hullValue, repairQuote, shipOffers, careerWorth, careerEnding, CAREER_FOOD_DAYS_LIMIT, CAREER_WATER_DAYS_LIMIT,
 } from './career-trade.js';
 import { repairVessel } from './vessel-damage.js';
@@ -10,14 +11,19 @@ import { DEFAULT_DEPARTURE, voyageDateInEra } from './voyage/passage.js';
 
 const WAGES_MORALE_GAIN = 0.1;
 
-export function createCareerPort({ era, store, boat, getVoyage, getCompany, getPort, capacityOf, hullMassOf, saveVoyage = () => {}, passDays = () => {}, onPutToSea = () => {}, onRepaired = () => {}, onCrewRestored = () => {}, onShipBought = () => {}, onRetired = () => {} }) {
+export function createCareerPort({ era, store, boat, getVoyage, getCompany, getPort, capacityOf, hullMassOf, saveVoyage = () => {}, passDays = () => {}, onPutToSea = () => {}, onRepaired = () => {}, onCrewRestored = () => {}, onShipBought = () => {}, onRetired = () => {}, onBoardTrade = () => {} }) {
   let ledger = null;
+  const boardMarkets = Object.create(null);
   // The voyage keeps its own date inside the era (normaliseVoyageEra); only a ship with no voyage needs a date lent to her.
   const dateMs = () => {
     const raw = getVoyage()?.dateMs;
     return voyageDateInEra(raw) ? raw : DEFAULT_DEPARTURE.dateMs;
   };
-  const load = () => (ledger ??= ensureCareerLedger(store.read()?.career ?? {}, era, dateMs()));
+  const load = () => {
+    ledger ??= ensureCareerLedger(store.read()?.career ?? {}, era, dateMs());
+    for (const [portId, snapshot] of Object.entries(boardMarkets)) setBoardMarket(ledger, portId, snapshot);
+    return ledger;
+  };
   const save = () => {
     const voyage = getVoyage();
     // Business done in port is worth keeping, even before a course has been laid.
@@ -73,18 +79,38 @@ export function createCareerPort({ era, store, boat, getVoyage, getCompany, getP
         worth: careerWorth(era, ledger, { value: value(), hullIntegrity: damage?.hullIntegrity ?? 1 }),
       };
     },
+    setBoardMarket(portId, snapshot) {
+      if (!portId) return;
+      if (snapshot) boardMarkets[portId] = snapshot;
+      else delete boardMarkets[portId];
+      if (ledger) setBoardMarket(ledger, portId, snapshot);
+    },
     buy(goodId, tonnes) {
       const good = goodById(goodId), port = getPort();
       if (!good || !port) return { tonnes: 0, cost: 0 };
-      const result = buyGood(load(), era, port, good, tonnes, { dateMs: dateMs(), capacity: capacity() });
-      if (result.tonnes) { stowCargo(result.tonnes); save(); }
+      const current = load();
+      const result = buyGood(current, era, port, good, tonnes, { dateMs: dateMs(), capacity: capacity() });
+      if (result.tonnes) {
+        stowCargo(result.tonnes);
+        save();
+        if (good.boardGood && getBoardMarket(current, port.id)) {
+          onBoardTrade({ port, good, act: 'buy', tonnes: result.tonnes, boardGood: good.boardGood, qty: result.tonnes * (good.boardPerTonne || 10) });
+        }
+      }
       return result;
     },
     sell(goodId, tonnes = Infinity) {
       const good = goodById(goodId) ?? era.goods.find((g) => g.id === goodId), port = getPort();
       if (!good || !port) return { tonnes: 0, income: 0 };
-      const result = sellGood(load(), era, port, good, tonnes, { dateMs: dateMs() });
-      if (result.tonnes) { stowCargo(-result.tonnes); save(); }
+      const current = load();
+      const result = sellGood(current, era, port, good, tonnes, { dateMs: dateMs() });
+      if (result.tonnes) {
+        stowCargo(-result.tonnes);
+        save();
+        if (good.boardGood && getBoardMarket(current, port.id)) {
+          onBoardTrade({ port, good, act: 'sell', tonnes: result.tonnes, boardGood: good.boardGood, qty: result.tonnes * (good.boardPerTonne || 10) });
+        }
+      }
       return result;
     },
     payWages() {

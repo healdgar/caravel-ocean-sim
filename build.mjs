@@ -86,10 +86,11 @@ order.splice(order.indexOf('js/coastal-world.js'),0,'js/board-model.js','js/boar
 order.splice(order.indexOf('js/terrain.js'),0,'js/board-stamp.js');
 order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/wgsl/inland-water.js','js/wgsl/herds.js');
 wgslModules.push('js/wgsl/inland-water.js','js/wgsl/herds.js');
-order.splice(order.indexOf('js/terrain.js'),0,'js/models/livestock-meshes.js','js/inland-water.js','js/herds.js');
+order.splice(order.indexOf('js/terrain.js'),0,'js/models/livestock-meshes.js','js/inland-water.js','js/herds.js','js/trade-vessels.js');
 // A city's buildings as the guns meet them: after the fracture code it hands them to, ahead of the land it is drawn with.
 order.splice(order.indexOf('js/terrain.js'),0,'js/city-targets.js');
 order.splice(order.indexOf('js/main.js'),0,'js/port-damage.js');
+order.splice(order.indexOf('js/main.js'),0,'js/webgpu-adapter.js');
 order.splice(order.indexOf('js/ship-mesh.js'),0,'js/rig-gpu-data.js');
 order.splice(order.indexOf('js/ship-mesh.js'),0,'js/ship-collider.js');
 order.splice(order.indexOf('js/vessel-pose.js'),0,'js/vessel-recoil.js');

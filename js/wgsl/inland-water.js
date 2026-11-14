@@ -116,13 +116,14 @@ fn inlandCloudShadow(world: vec3f) -> f32 {
   let shadow = inlandShadowVis(in.world) * inlandCloudShadow(in.world);
   let sunVis = solarShadowVisibility(vec3f(shadow));
   let directIrr = sunIlluminance() * sunVis * max(dot(vec3f(0.0, 1.0, 0.0), F.sunDir.xyz), 0.0);
-  let skyAmb = skyAtmo(vec3f(0.0, 1.0, 0.0)) * 0.42;
-  let bedLit = bedAlbedo * (directIrr / PI + skyAmb);
+  let bankAO = mix(1.0, 0.68, smoothstep(0.55, 0.96, bankAbs));
+  let skyAmb = skyAtmo(vec3f(0.0, 1.0, 0.0)) * 0.42 * bankAO;
+  let bedLit = bedAlbedo * (directIrr * bankAO / PI + skyAmb);
 
   // Beer-Lambert freshwater absorption (tannin/chlorophyll tint) + body scatter.
-  let absorb = exp(-depth * vec3f(0.72, 0.34, 0.24));
-  let bodyTint = select(vec3f(0.018, 0.052, 0.050), vec3f(0.015, 0.045, 0.046), isPond);
-  let bodyScatter = bodyTint * (directIrr * 0.22 + skyAmb * 0.85) * (1.0 - absorb);
+  let absorb = exp(-depth * vec3f(0.84, 0.38, 0.30));
+  let bodyTint = select(vec3f(0.015, 0.048, 0.042), vec3f(0.014, 0.044, 0.045), isPond);
+  let bodyScatter = bodyTint * (directIrr * bankAO * 0.20 + skyAmb * 0.88) * (1.0 - absorb);
   var waterBody = bedLit * absorb + bodyScatter;
 
   // Riffle foam on steeper mountain brooks and mill-tailraces.
@@ -133,12 +134,12 @@ fn inlandCloudShadow(world: vec3f) -> f32 {
 
   let v = normalize(F.camPos.xyz - in.world);
   let nDotV = max(dot(n, v), 1e-4);
-  let f0 = 0.021;
+  let f0 = 0.022;
   let fresnel = clamp(f0 + (0.92 - f0) * pow(1.0 - nDotV, 5.0), 0.02, 0.92) * (1.0 - foamAmt * 0.72);
 
   var reflDir = reflect(-v, n);
   reflDir.y = max(reflDir.y, 0.015);
-  let rough = clamp(mix(0.065, 0.22, clamp(speed * 0.18 + footprint * 0.06, 0.0, 1.0)), 0.06, 0.35);
+  let rough = clamp(mix(0.045, 0.19, clamp(speed * 0.16 + footprint * 0.05, 0.0, 1.0)), 0.045, 0.32);
   let skyRefl = textureSampleLevel(envCube, sampC, normalize(reflDir), rough * 5.2).rgb;
 
   // Sun GGX glint on flowing ripples.

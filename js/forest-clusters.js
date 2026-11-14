@@ -232,8 +232,16 @@ fn forestClusterTree(index:u32)->u32{
   if(r.identity.w>=0.&&(dot(planeL,at)<-reach*lengthL||dot(planeR,at)<-reach*lengthR||dot(planeB,at)<-reach*lengthB||dot(planeT,at)<-reach*lengthT||dot(rowW,at)<-reach*length(rowW))){continue;}
   let draw=select(bucket.drawWood,bucket.drawLeaf,isLeaf);
   let slot=atomicAdd(&draws[draw*5u+1u],1u);
-  // A leaf cluster carries its tree's crown share above its own number, which never needs those bits.
+  // A leaf cluster carries its tree's crown share above its own number, and close cross-shoots pack layer bits into upper item.x.
   if(slot<bucket.capacity.x){list[select(bucket.listWood,bucket.listLeaf,isLeaf)+slot]=vec2u(tree,index|select(0u,crownShare<<24u,isLeaf));}
+  if(isLeaf&&crownShare==0u&&nearest<32.0){
+   let slotCrossA=atomicAdd(&draws[draw*5u+1u],1u);
+   if(slotCrossA<bucket.capacity.x){list[bucket.listLeaf+slotCrossA]=vec2u(tree|(1u<<28u),index);}
+   if(nearest<20.0){
+    let slotCrossB=atomicAdd(&draws[draw*5u+1u],1u);
+    if(slotCrossB<bucket.capacity.x){list[bucket.listLeaf+slotCrossB]=vec2u(tree|(2u<<28u),index);}
+   }
+  }
  }
 }
 // What casts into the land shadow map is chosen here, from every tree of the species and against the
@@ -301,7 +309,7 @@ fn forestClusterOctahedral(e:vec2f)->vec3f{
  if(n.z<0.){let x=n.x;n.x=(1.-abs(n.y))*select(-1.,1.,x>=0.);n.y=(1.-abs(x))*select(-1.,1.,n.y>=0.);}
  return normalize(n);
 }
-fn forestClusterVertex(tree:u32,vertex:u32,kindValue:f32)->ForestVertex{
+fn forestClusterVertexCross(tree:u32,vertex:u32,kindValue:f32,crossLayer:u32)->ForestVertex{
  let at=vertex*${FOREST_CLUSTER_VERTEX_WORDS}u;
  let w0=forestClusterVertices[at];let w1=forestClusterVertices[at+1u];let w2=forestClusterVertices[at+2u];let w3=forestClusterVertices[at+3u];let w4=forestClusterVertices[at+4u];
  let unit=vec3f(f32(w0&65535u),f32(w0>>16u),f32(w1&65535u))/65535.;
@@ -311,19 +319,38 @@ fn forestClusterVertex(tree:u32,vertex:u32,kindValue:f32)->ForestVertex{
  let uv=forestClusterBounds[1].xy+vec2f(f32(w3&65535u),f32(w3>>16u))/65535.*forestClusterBounds[1].zw;
  if(kindValue>=3.5){
   let dist=length(r.rootScale.xyz-F.camPos.xyz);
+  let invScale=1./max(r.rootScale.w,.85);
+  let upRef=select(vec3f(0.,1.,0.),vec3f(1.,0.,0.),abs(normal.y)>.9);
+  let t1=normalize(cross(normal,upRef));let t2=cross(normal,t1);
+  let uvOff=clamp(uv-vec2f(.5,.5),vec2f(-.65),vec2f(.65));
+  // Close-range 3D bough relief: cup base cards out of the plane and angle cross-shoots in 3D space so edge-on trees show real twig-and-leaf depth instead of flat billboards.
+  let nearRelief=1.-smoothstep(14.,52.,dist);
+  if(nearRelief>0.&&crossLayer==0u){
+   let cup=(dot(uvOff,uvOff)*2.2-0.28)*0.22*nearRelief*invScale;
+   position+=normal*cup;
+   normal=normalize(normal+(t1*uvOff.x+t2*uvOff.y)*(.36*nearRelief));
+  }else if(crossLayer>0u){
+   let layerFade=select(1.-smoothstep(13.,20.,dist),1.-smoothstep(22.,32.,dist),crossLayer==1u);
+   let tiltSpan=0.46*layerFade*invScale;
+   let sSign=select(-1.,1.,crossLayer==1u);
+   let tiltOut=normal*((uvOff.x*0.72*sSign+uvOff.y*0.44+0.05*sSign)*tiltSpan);
+   let tiltIn=-t1*(uvOff.x*0.20*tiltSpan)+t2*(uvOff.y*0.14*sSign*tiltSpan);
+   position+=tiltOut+tiltIn;
+   normal=normalize(normal+t1*(0.65*sSign*layerFade)+t2*(0.38*layerFade));
+  }
   let midBlend=smoothstep(55.,320.,dist);
   if(midBlend>0.){
-   let upRef=select(vec3f(0.,1.,0.),vec3f(1.,0.,0.),abs(normal.y)>.9);
-   let t1=normalize(cross(normal,upRef));let t2=cross(normal,t1);
    let isSubBroadleaf=(forestBin.z&768u)!=0u;
-   let baseInflate=select(.18,.48,isSubBroadleaf)*midBlend/max(r.rootScale.w,.85);
-   let uvOff=clamp(uv-vec2f(.5,.5),vec2f(-.65),vec2f(.65));
+   let baseInflate=select(.18,.48,isSubBroadleaf)*midBlend*invScale;
    position+=t1*(uvOff.x*baseInflate)+t2*(uvOff.y*baseInflate);
    normal=normalize(normal+(t1*uvOff.x+t2*uvOff.y)*(.10*midBlend));
   }
  }
  let root=vec3f(f32(w4&255u),f32((w4>>8u)&255u),f32((w4>>16u)&255u))/255.;
  return forestPlace(r,tree,position,normal,vec2f(kindValue,f32(w1>>24u)/255.),uv,root*root,f32((w1>>16u)&255u),vertex,f32(w4>>24u)/255.);
+}
+fn forestClusterVertex(tree:u32,vertex:u32,kindValue:f32)->ForestVertex{
+ return forestClusterVertexCross(tree,vertex,kindValue,0u);
 }
 // A cluster with fewer triangles than the draw's fixed count collapses the rest to a point.
 @vertex fn forestClusterWoodVS(@builtin(instance_index)instance:u32,@builtin(vertex_index)index:u32)->ForestVertex{
@@ -334,7 +361,9 @@ fn forestClusterVertex(tree:u32,vertex:u32,kindValue:f32)->ForestVertex{
 @vertex fn forestClusterLeafVS(@builtin(instance_index)instance:u32,@builtin(vertex_index)index:u32)->ForestVertex{
  let item=forestClusterList[forestBin.x+instance];let cluster=forestClusters[item.y&0xffffffu];
  if(index>=(cluster.shape>>1u)/4u*${FOREST_LEAF_VERTICES}u){var o:ForestVertex;return o;}
- var o=forestClusterVertex(item.x,cluster.first+index,4.);
+ let treeId=item.x&0x0fffffffu;
+ let crossLayer=(item.x>>28u)&3u;
+ var o=forestClusterVertexCross(treeId,cluster.first+index,4.,crossLayer);
  // The share of each pixel this tree's far crown has taken from its leaves (forestClusterSelect).
  o.crownFade=f32(item.y>>24u)/255.;
  return o;
