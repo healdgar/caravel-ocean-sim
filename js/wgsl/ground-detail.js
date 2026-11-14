@@ -182,6 +182,20 @@ fn groundDetailStrata(world:vec3f,n:vec3f,dx:vec3f,dy:vec3f)->f32{
   let s=textureSampleGrad(groundDetailTexture,groundDetailSampler,at,vec2f(alongX,dx.y)*stretch,vec2f(alongY,dy.y)*stretch).b-${GROUND_DETAIL_MEAN[2]};
   return s*smoothstep(0.0,.08,abs(bias));
 }
+// Synchronized 2D advected wind wave shared identically by 3D Nanite meadow grasses and distant hillside terrain.
+fn grassWindWave(worldXZ:vec2f,time:f32,windParam:vec4f)->vec2f{
+  let rawDir=windParam.xy;
+  let windDir=select(vec2f(0.82,0.57),normalize(rawDir),dot(rawDir,rawDir)>0.0004);
+  let acrossDir=vec2f(-windDir.y,windDir.x);
+  let speed=max(windParam.z,3.8);
+  let u=dot(worldXZ,windDir);
+  let v=dot(worldXZ,acrossDir);
+  let p1=u*0.24-time*speed*0.48+sin(v*0.095+time*0.25)*1.45;
+  let p2=u*0.62-time*speed*0.84+cos(v*0.27-time*0.41)*1.15;
+  let p3=u*1.35-time*speed*1.38+sin(v*0.72)*0.85;
+  let swell=sin(p1)*0.55+sin(p2)*0.30+sin(p3)*0.15;
+  return vec2f(clamp(0.42+0.58*swell,0.0,1.0),swell);
+}
 // Grass, soil, sand and rock from the same few fetches. Colour is scaled about its own value by a signal that is
 // zero on average, so from further off, as the mips flatten, each ground is just the colour it already was.
 fn groundDetailLook(d:GroundDetail,base:vec3f,world:vec3f,n:vec3f,dx:vec3f,dy:vec3f,grass:f32,sand:f32,rock:f32,cliff:f32,scree:f32,canopy:f32,wetSand:f32)->GroundLook{

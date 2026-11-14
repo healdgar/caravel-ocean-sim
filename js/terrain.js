@@ -24,6 +24,7 @@ import {bakedBoardAsset} from './board-model.js';
 import {createBoardStamp,requestBoardStampPipelines} from './board-stamp.js';
 import {createInlandWater,requestInlandWaterPipeline,createInlandWaterSampler} from './inland-water.js';
 import {bridgeDeckYAt,createLivestockHerds} from './herds.js';
+import {PORTUGAL_MEADOW_GRASS_ASSETS,loadMeadowGrass,createMeadowGrass} from './meadow-grass.js';
 import {createTradeVessels,requestTradeVesselsPipelines} from './trade-vessels.js';
 import {CITY_BLOCK_FLOATS} from './old-world-city.js';
 import {CITY_DETAIL_M,CITY_TYPED_FLOATS,compileCityBuildingTypes} from './old-world-buildings.js';
@@ -935,6 +936,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   let groveFailure=null;
   const groveAssets=useSubtropicalForest?SUBTROPICAL_FOREST_GROVE_ASSETS:usePortugalForest?PORTUGAL_FOREST_GROVE_ASSETS:null;
   const grovePromise=canopyMode==='off'||!useProcedural||!groveAssets||search.get('forestGroves')==='0'?Promise.resolve(null):loadForestGroves({assets:groveAssets}).catch(error=>{groveFailure=error.message;return null;});
+  let meadowFailure=null;
+  const meadowPromise=!useProcedural||!usePortugalForest||search.get('meadowGrass')==='0'?Promise.resolve(null):loadMeadowGrass({assets:PORTUGAL_MEADOW_GRASS_ASSETS}).catch(error=>{meadowFailure=error.message;return null;});
   const forestMassMode=typeof location==='undefined'?canopyMode:search.get('forestMass')||canopyMode;
   if(!['auto','near','far','off'].includes(forestMassMode))throw Error('Unknown native forest mass mode');
   const forestAtlasDebug=typeof location!=='undefined'&&['auto','force'].includes(search.get('forestImpostor'));
@@ -1489,6 +1492,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const cloudLight=clouds.bindVolume(lightPipe,true);
   let inlandWater=proceduralPack?await createInlandWater({device,shader,format,samples,resources:nearResources,clouds,coastalField,oceanBridge,initialGeometry:proceduralPack.inlandWater??null}):null;
   let herds=proceduralPack?await createLivestockHerds({device,shader,format,samples,frameUBO,landUniform:uniform,nearDomain,elevation,landShadowUniform:activeLandShadows.uniform,resources:nearResources,clouds,initialHerds:proceduralPack.herds??null,initialBridges:proceduralPack.port?.country?.bridges??null,isMobile}):null;
+  const meadowPack=await meadowPromise;
+  let meadowGrass=proceduralPack&&meadowPack?await createMeadowGrass({device,shader,pack:meadowPack,region:activeRegion,heights,biome,beaches:proceduralPack.beaches??null,port:proceduralPack.port??null,city:proceduralPack.city??null,elevation,nearDomain,resources:nearResources,clouds,format,samples,isMobile}):null;
+  const meadowGrassStats=meadowGrass?.stats??{loaded:false,error:meadowFailure};
   let tradeVessels=proceduralPack?await createTradeVessels({device,format,samples,shader,computePipe,oceanBridge,resources:nearResources,shadowFormat:activeLandShadows.format}):null;
   if(tradeVessels&&proceduralPack?.port?.country?.board){
     tradeVessels.setTraffic(null,activeRegion,proceduralPack.port.country.riverReaches??[],proceduralPack.port.country.places??[],{heights,region:activeRegion,port:proceduralPack.port,bridges:proceduralPack.port.country.bridges??[]});
@@ -1992,6 +1998,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     herds?.rebind(nearResources);
     herds?.setBridges?.(upgradedPack.port?.country?.bridges??null);
     herds?.setHerds(upgradedPack.herds??null);
+    meadowGrass?.rebind(nearResources);
+    meadowGrass?.sync({region:activeRegion,heights,biome,beaches:proceduralPack.beaches??null,port:portOwner.port??null,city:upgradedPack.city??proceduralPack.city??null});
     tradeVessels?.rebind(nearResources);
     if(upgradedPack.port?.country?.board){
       tradeVessels?.setTraffic(null,activeRegion,upgradedPack.port.country.riverReaches??[],upgradedPack.port.country.places??[],{heights,region:activeRegion,port:upgradedPack.port,bridges:upgradedPack.port.country.bridges??[]});
@@ -2280,6 +2288,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     get inlandWater(){return inlandWater;},
     inlandWaterAt(x,z){return inlandWaterSampler?inlandWaterSampler(x-worldOffset.x,z-worldOffset.z):null;},
     get herds(){return herds;},
+    get meadowGrass(){return meadowGrass;},
+    meadowGrassStats,
     get tradeVessels(){return tradeVessels;},
     setWorldOffset(dx=0,dz=0){
       const nx=Number.isFinite(dx)?dx:0,nz=Number.isFinite(dz)?dz:0;
@@ -2334,6 +2344,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       cityCull?.destroy();cityBlocks?.buffer.destroy();cityStruck?.destroy();cityUnit.buffer.destroy();for(const type of cityTypes??[])type.buffer.destroy();
       inlandWater?.destroy?.();
       herds?.destroy?.();
+      meadowGrass?.destroy?.();
       tradeVessels?.destroy?.();
       importedCanopy?.destroy?.();
       forest?.destroy?.();
@@ -2463,6 +2474,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       forest?.encode(pass);
       groves?.encode(pass);
       herds?.encode(pass);
+      meadowGrass?.encode(pass);
       tradeVessels?.encode?.(pass);
       if((tick++%8)!==0&&!changed)return;
       pass.setPipeline(lightPipe);pass.setBindGroup(0,lightGroup);pass.setBindGroup(1,cloudLight);pass.dispatchWorkgroups(8,8);
@@ -2531,6 +2543,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       pass.setPipeline(groundPipe);pass.setBindGroup(0,groundGroup);
       for(let i=0;i<groundMeshes.length;i++)groundCull.draw(pass,i,0,groundMeshes[i].buffer);
       if(herds&&isSectionVisible(activeRegion,camera,viewProjection,2600))herds.draw(pass);
+      if(meadowGrass&&isSectionVisible(activeRegion,camera,viewProjection,2400))meadowGrass.draw(pass);
       if(tradeVessels&&isSectionVisible(activeRegion,camera,viewProjection,12000))tradeVessels.draw(pass);
       // Draw solid crowns/wood before cutout leaves for Apple hidden-surface
       // removal. The far tier has no alpha foliage or expensive bark fallback.

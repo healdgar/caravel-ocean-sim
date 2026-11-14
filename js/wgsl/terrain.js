@@ -1188,6 +1188,15 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       // Wet ground is glossy, and a bumped normal on it is exactly what makes sun glints flash. It stays smooth.
       relief+=look.relief*(1.0-smoothstep(.12,.45,max(surfaceWet,(1.0-smoothstep(.35,2.2,world.y))*.45)));
     }
+    let windMask=clamp(groundCover.a,0.0,1.0)*(1.0-effCanopy)*(1.0-rocky)*(1.0-beachSand)*select(1.0,0.0,isRiverBank);
+    let waveWeight=windMask*landDetailWeight(footprint/26.0)*(1.0-smoothstep(1400.0,2350.0,distance(world,F.camPos.xyz)));
+    if(waveWeight>0.01){
+      let wv=grassWindWave(world.xz,F.camPos.w,F.windP[0]);
+      let crest=smoothstep(-0.35,0.75,wv.y);
+      albedo*=mix(vec3f(1.0),mix(vec3f(0.88,0.91,0.86),vec3f(1.24,1.16,0.84),crest),waveWeight*0.72);
+      relief+=wv.y*0.018*waveWeight;
+      roughness=clamp(mix(roughness,0.58,max(0.0,wv.y)*waveWeight*0.35),0.07,0.98);
+    }
   }else if(in.kind.x>=19.5){
     // Camera-projected photorealistic 1550 building texture atlas (u = in.kind.x - 20.0, v = in.kind.y)
     let photo=pow(textureSampleGrad(nearAlbedo,landSampler,bldgUV,bldgDx,bldgDy).rgb,vec3f(2.2));
@@ -1243,18 +1252,21 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       // Kind 11: MaterialCraft-cooked coursed Pedra Lioz & coral-limestone ashlar masonry
       let vertWall=1.0-smoothstep(0.35,0.85,abs(n.y));
       let damp=smoothstep(0.2,3.8,world.y);
-      let stoneBase=pbr.albedo*mix(vec3f(0.76,0.73,0.68),vec3f(1.0,0.98,0.94),damp)*(0.96+detailA*0.06+detailB*0.03);
-      let tidalMoss=(1.0-smoothstep(0.25,1.65,world.y))*vertWall*clamp(0.5+0.5*detailA,0.0,1.0);
-      let fouledStone=mix(stoneBase,vec3f(0.09,0.13,0.065),tidalMoss*0.58);
+      let liozWarmth=vec3f(1.03,0.99,0.92);
+      let stoneBase=pbr.albedo*mix(vec3f(0.75,0.72,0.66),liozWarmth,damp)*(0.96+detailA*0.06+detailB*0.03);
+      let tidalMoss=(1.0-smoothstep(0.18,1.55,world.y))*vertWall*clamp(0.55+0.45*detailA,0.0,1.0);
+      let fouledStone=mix(stoneBase,vec3f(0.085,0.135,0.056),tidalMoss*0.62);
       albedo=fouledStone*shadeAlbedo;
       archNormalOffset=pbr.normalOffset*0.65;
       relief=detailA*0.004*archLodFade;
       roughness=clamp(pbr.roughness+(1.0-damp)*0.05+tidalMoss*0.12,0.62,0.92);
       ambientVisibility=(0.46+0.34*max(n.y,0.0))*aoVis*pbr.ao;
     }else if(in.kind.x<12.5){
-      // Kind 12: MaterialCraft-cooked warm Iberian & colonial limewashed stucco
+      // Kind 12: MaterialCraft-cooked warm Iberian limewashed stucco & golden ochre / pale almagre plaster
       let damp=smoothstep(0.5,4.2,world.y);
-      let warmStucco=pbr.albedo*mix(vec3f(0.74,0.69,0.62),vec3f(1.0,0.97,0.92),damp);
+      let wallVar=fract(instYaw*2.37+in.leafUV.x*1.73);
+      let ochreTint=mix(vec3f(1.02,0.99,0.94),vec3f(1.05,0.90,0.72),smoothstep(0.42,0.92,wallVar)*0.48);
+      let warmStucco=pbr.albedo*mix(vec3f(0.73,0.68,0.60),ochreTint,damp);
       albedo=warmStucco*shadeAlbedo*(0.97+detailA*0.05+detailB*0.03);
       archNormalOffset=pbr.normalOffset*0.42;
       relief=detailA*0.005*archLodFade;

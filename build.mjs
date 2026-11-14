@@ -20,6 +20,7 @@ import { FOREST_MIDDLE_ASSETS, SUBTROPICAL_FOREST_MIDDLE_ASSETS, PORTUGAL_FOREST
 import { FOREST_CLUSTER_ASSETS, SUBTROPICAL_FOREST_CLUSTER_ASSETS, PORTUGAL_FOREST_CLUSTER_ASSETS } from './js/forest-clusters.js';
 import { SUBTROPICAL_FOREST_CROWN_ASSETS, PORTUGAL_FOREST_CROWN_ASSETS } from './js/forest-crowns.js';
 import { SUBTROPICAL_FOREST_GROVE_ASSETS, PORTUGAL_FOREST_GROVE_ASSETS } from './js/forest-groves.js';
+import { PORTUGAL_MEADOW_GRASS_ASSETS } from './js/meadow-grass.js';
 import { FOREST_MASS_ASSETS } from './js/forest-mass.js';
 import { FOREST_SURFACE_ASSETS, SUBTROPICAL_FOREST_SURFACE_ASSETS, PORTUGAL_FOREST_SURFACE_ASSETS } from './js/forest-surfaces.js';
 
@@ -86,7 +87,7 @@ order.splice(order.indexOf('js/coastal-world.js'),0,'js/board-model.js','js/boar
 order.splice(order.indexOf('js/terrain.js'),0,'js/board-stamp.js');
 order.splice(order.indexOf('js/wgsl/terrain.js')+1,0,'js/wgsl/inland-water.js','js/wgsl/herds.js');
 wgslModules.push('js/wgsl/inland-water.js','js/wgsl/herds.js');
-order.splice(order.indexOf('js/terrain.js'),0,'js/models/livestock-meshes.js','js/inland-water.js','js/herds.js','js/trade-vessels.js');
+order.splice(order.indexOf('js/terrain.js'),0,'js/models/livestock-meshes.js','js/inland-water.js','js/herds.js','js/meadow-grass.js','js/trade-vessels.js');
 order.splice(order.indexOf('js/trade-vessels.js'),0,'js/wgsl/hull-flood.js','js/hull-flood.js');
 // A city's buildings as the guns meet them: after the fracture code it hands them to, ahead of the land it is drawn with.
 order.splice(order.indexOf('js/terrain.js'),0,'js/city-targets.js');
@@ -170,11 +171,16 @@ if(fs.existsSync(path.join(root,'assets/forest-scenery/portugal/manifest.json'))
     if(fs.existsSync(path.join(root,file)))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':file.endsWith('.png')?'image/png':'application/octet-stream');
   }
 }
+if(fs.existsSync(path.join(root,'assets/ground-cover/portugal/meadows-gpu/manifest.json'))){
+  for(const file of Object.values(PORTUGAL_MEADOW_GRASS_ASSETS)){
+    if(fs.existsSync(path.join(root,file)))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':'application/octet-stream');
+  }
+}
 const runtimeAssetBytes = new Map(), pagesAssets = new Map();
 // Keep core sailing and the native forest atlases embedded in downloads. The
 // lossless mature close-up buffers alone exceed 100 MB after base64 encoding;
 // load those optional buffers from the same versioned public asset instead.
-const externalDownloadGeometry=new Set(['assets/boards/lisbon-1550.world','assets/board/game.js','assets/board/runtime.js','assets/forest-scenery/saba/clusters/vertices.bin.gz','assets/forest-scenery/saba/clusters/indices.bin.gz','assets/forest-scenery/portugal/clusters/vertices.bin.gz','assets/forest-scenery/portugal/clusters/indices.bin.gz','assets/forest-scenery/saba/vertices.bin.gz','assets/forest-scenery/saba/indices.bin.gz','assets/forest-scenery/saba/mass/vertices.bin.gz','assets/forest-scenery/saba/mass/indices.bin.gz','assets/forest-scenery/subtropical/vertices.bin.gz','assets/forest-scenery/subtropical/indices.bin.gz','assets/forest-scenery/portugal/vertices.bin.gz','assets/forest-scenery/portugal/indices.bin.gz']);
+const externalDownloadGeometry=new Set(['assets/boards/lisbon-1550.world','assets/board/game.js','assets/board/runtime.js','assets/forest-scenery/saba/clusters/vertices.bin.gz','assets/forest-scenery/saba/clusters/indices.bin.gz','assets/forest-scenery/portugal/clusters/vertices.bin.gz','assets/forest-scenery/portugal/clusters/indices.bin.gz','assets/forest-scenery/saba/vertices.bin.gz','assets/forest-scenery/saba/indices.bin.gz','assets/forest-scenery/saba/mass/vertices.bin.gz','assets/forest-scenery/saba/mass/indices.bin.gz','assets/forest-scenery/subtropical/vertices.bin.gz','assets/forest-scenery/subtropical/indices.bin.gz','assets/forest-scenery/portugal/vertices.bin.gz','assets/forest-scenery/portugal/indices.bin.gz', ...Object.values(PORTUGAL_MEADOW_GRASS_ASSETS).filter(f=>f.endsWith('.gz'))]);
 // Both block-compressed sets are a saving for online play. Offline, the embedded maps serve instead.
 for(const file of [...Object.values(FOREST_SURFACE_ASSETS),...Object.values(SUBTROPICAL_FOREST_SURFACE_ASSETS),...Object.values(PORTUGAL_FOREST_SURFACE_ASSETS)])if(file.endsWith('.gz'))externalDownloadGeometry.add(file);
 function runtimeAssetURL(file,mime,inlineAssets){

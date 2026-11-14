@@ -146,8 +146,14 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
   // How many of the types stood just after a building are fixed to it (its pentice, sign, ale-stake): they are
   // no targets of their own, and go when it is shot down.
   const attached = new Map();
-  const solids = makeHash(32), placed = makeHash(16), segs = makeHash(24);
+  const solids = makeHash(32), placed = makeHash(16), segs = makeHash(24), riverSegs = makeHash(32);
   const keep = (f, r = Math.hypot(f.w, f.d) / 2) => solids.add(f, f.x - r, f.z - r, f.x + r, f.z + r);
+  const hitsRiverCorridor = (fp, pad = 0) => riverSegs.some(
+    fp.x,
+    fp.z,
+    Math.hypot(fp.w, fp.d) * 0.5 + 16 + pad,
+    (g) => segRectDist(fp, g.ax, g.az, g.bx, g.bz) < g.hw + pad
+  );
   const { seatBlock, pushBlock, pushTyped, curtain, tower, gate } = cityMasonry({ heightAt, blocks, typed, typedTypes, typedBlocks, gates, keep, rr });
   // The port's own buildings stand where they stand; the board builds round them.
   for (const inst of port.instances || []) {
@@ -281,6 +287,17 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     if (inside(ax, az, 4) || inside(bx, bz, 4)) paving.push({ points: [[ax, az, 3.0, 0.35], [bx, bz, 3.0, 0.35]] });
   }
   for (let k = paving.length - 1; k >= 0; k--) if (paving[k].points.length < 2) paving.splice(k, 1);
+  // Register every river channel corridor with bank safety clearance so streets, plots, and blocks never stand in flowing water.
+  for (const river of board.rivers ?? []) {
+    const pts = river?.points;
+    if (!pts || pts.length < 6) continue;
+    for (let k = 0; k + 5 < pts.length; k += 3) {
+      const ax = ox + pts[k], az = oz + pts[k + 1], bx = ox + pts[k + 3], bz = oz + pts[k + 4];
+      const hw = Math.max(2.5, (pts[k + 2] + pts[k + 5]) * 0.5) + 6.5;
+      const g = { ax, az, bx, bz, hw, river: true };
+      riverSegs.add(g, Math.min(ax, bx) - hw, Math.min(az, bz) - hw, Math.max(ax, bx) + hw, Math.max(az, bz) + hw);
+    }
+  }
   const squareRadius = (p, x, z) => {
     const n = p.rad.length, a = Math.atan2(z - p.z, x - p.x) / (2 * Math.PI) * n, i = Math.floor(a), f = a - i;
     return p.rad[((i % n) + n) % n] * (1 - f) + p.rad[(((i + 1) % n) + n) % n] * f;
@@ -297,8 +314,8 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     const n = rad.length, pts = [], first = gates.length;
     for (let k = 0; k < n; k++) {
       const a = k / n * 2 * Math.PI, x = cx + Math.cos(a) * rad[k], z = cz + Math.sin(a) * rad[k];
-      const dry = inside(x, z, 20) && heightAt(x, z) > 1.4;
-      pts.push({ x, z, stone, open: (kind && kind[k] === BOARD_WALL_CLIFF) || (built && !built[k]) || !dry || taken(footprint(x, z, 6, 6, 0), 2) });
+      const dryPt = inside(x, z, 20) && heightAt(x, z) > 1.4 && !hitsRiverCorridor(footprint(x, z, 8, 8, 0), 0);
+      pts.push({ x, z, stone, open: (kind && kind[k] === BOARD_WALL_CLIFF) || (built && !built[k]) || !dryPt || taken(footprint(x, z, 6, 6, 0), 2) });
     }
     for (const angle of gateAngles) {
       const at = ((angle / (2 * Math.PI) * n) % n + n) % n, k = Math.floor(at), f = at - k, a = pts[k], b = pts[(k + 1) % n];
@@ -313,6 +330,11 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
       const nearGate = gates.some((q) => Math.hypot(q.x - a.x, q.z - a.z) < q.half + 9);
       if (a.stone && !nearGate && (since >= towerEvery || prev.open || b.open)) { tower(a.x, a.z, 6.2, height + 3.5 + rr() * 1.5, 0.86 + rr() * 0.12); since = 0; }
       if (b.open) continue;
+      const mx = (a.x + b.x) * 0.5, mz = (a.z + b.z) * 0.5;
+      if (hitsRiverCorridor(footprint(mx, mz, Math.hypot(b.x - a.x, b.z - a.z), 4, Math.atan2(b.x - a.x, b.z - a.z)), 0)) {
+        since = towerEvery;
+        continue;
+      }
       curtain(a.x, a.z, b.x, b.z, [a.x - cx, a.z - cz], height, a.stone ? 0.84 + rr() * 0.1 : 0.62 + rr() * 0.08);
       since += Math.hypot(b.x - a.x, b.z - a.z);
     }
@@ -419,8 +441,8 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
   };
   const wayClearance = (fp) => {
     let minC = Infinity, pushX = 0, pushZ = 0, roadHit = false;
-    const Reach = Math.hypot(fp.w, fp.d) * 0.5 + 8;
-    segs.some(fp.x, fp.z, Reach, (g) => {
+    const Reach = Math.hypot(fp.w, fp.d) * 0.5 + 14;
+    const visit = (g) => {
       const c = segRectDist(fp, g.ax, g.az, g.bx, g.bz) - g.hw;
       if (c < minC) {
         minC = c;
@@ -432,7 +454,9 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
         else if (l2 > 1e-4) { const inv = 1 / Math.sqrt(l2); pushX = -dz * inv; pushZ = dx * inv; }
       }
       return false;
-    });
+    };
+    segs.some(fp.x, fp.z, Reach, visit);
+    riverSegs.some(fp.x, fp.z, Reach, visit);
     return { clearance: minC, pushX, pushZ, roadHit };
   };
   for (let k = 0; k < count; k++) {
@@ -462,22 +486,27 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     }
     let bx = x, bz = z;
     let f = footprint(bx, bz, front, depth, yaw);
-    if (arch !== 'mill' && arch !== 'wharf' && arch !== 'wall' && arch !== 'tower' && arch !== 'keep' && arch !== 'bridge') {
+    const keepClearOfWater = arch !== 'mill' && arch !== 'wharf' && arch !== 'bridge';
+    if (keepClearOfWater && arch !== 'wall' && arch !== 'tower' && arch !== 'keep') {
       let wc = wayClearance(f);
-      if (wc.clearance < -0.35) {
-        for (const step of [0.8, 1.6, 2.4, 3.2]) {
+      if (wc.clearance < -0.35 || hitsRiverCorridor(f, 0)) {
+        for (const step of [0.8, 1.6, 2.8, 4.2, 6.0, 8.0]) {
           const cx = x + wc.pushX * step, cz = z + wc.pushZ * step;
           if (!inside(cx, cz, 12) || heightAt(cx, cz) < BOARD_DRY_M) continue;
           const cand = footprint(cx, cz, front, depth, yaw);
-          if (taken(cand, 0.8)) continue;
+          if (taken(cand, 0.8) || hitsRiverCorridor(cand, 0)) continue;
           const nextWc = wayClearance(cand);
-          if (nextWc.clearance > wc.clearance + 0.25) {
+          if (hitsRiverCorridor(f, 0) || nextWc.clearance > wc.clearance + 0.25) {
             bx = cx; bz = cz; f = cand; wc = nextWc;
-            if (wc.clearance >= -0.35) break;
+            if (!hitsRiverCorridor(f, 0) && wc.clearance >= -0.35) break;
           }
         }
+        if (hitsRiverCorridor(f, 0)) { dropped.wet++; continue; }
         if (wc.clearance < -0.95 || (wc.roadHit && wc.clearance < -0.45)) { dropped.port++; continue; }
       }
+    } else if (keepClearOfWater && hitsRiverCorridor(f, -1.0)) {
+      dropped.wet++;
+      continue;
     }
     if (taken(f, 0.8)) { dropped.port++; continue; }
     const left = stateOf ? stateOf[k] : 0;
@@ -521,7 +550,7 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
   }
 
   /* ---- the open places: a well on a green; on a market place its cross, and stalls round it ---- */
-  const open = (x, z, reach) => inside(x, z, 8) && heightAt(x, z) > BOARD_DRY_M && !taken(footprint(x, z, reach, reach, 0), 0.5) && !placed.some(x, z, reach, (o) => rectDist(o, x, z) <= reach * 0.5);
+  const open = (x, z, reach) => inside(x, z, 8) && heightAt(x, z) > BOARD_DRY_M && !hitsRiverCorridor(footprint(x, z, reach, reach, 0), -1.0) && !taken(footprint(x, z, reach, reach, 0), 0.5) && !placed.some(x, z, reach, (o) => rectDist(o, x, z) <= reach * 0.5);
   squares.forEach((p, at) => {
     if (p.kind === 'park') { if (open(p.x, p.z, 4.2)) furnish(CITY_TYPE.WELL, p.x, heightAt(p.x, p.z), p.z, boardHashUnit(at, 79) * Math.PI, 0, 0.5); return; }
     if (open(p.x, p.z, 3.2)) furnish(CITY_TYPE.MARKET_CROSS, p.x, heightAt(p.x, p.z), p.z, 0, 0, 0.5);
@@ -536,7 +565,7 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
 
   /* ---- the slighter works of the model: fences, the bridges of its tracks, churchyards, cairns, camps, hosts, works in hand ---- */
   const slight = (type, x, y, z, yaw, tone = 0.5, along = CITY_BUILDING_TYPES[type].length) => { const T = CITY_BUILDING_TYPES[type]; pushTyped(type, x, y, z, yaw, T.width, T.height, along, tone, 0); };
-  const dry = (x, z, pad = 6) => inside(x, z, pad) && heightAt(x, z) > BOARD_DRY_M;
+  const dry = (x, z, pad = 6) => inside(x, z, pad) && heightAt(x, z) > BOARD_DRY_M && !hitsRiverCorridor(footprint(x, z, 6, 6, 0), 1.0);
   // A run of fence from one point to another, a length at a time, each on its own ground; none where a building
   // stands or a street runs through.
   const spans = works.trackBridges ?? [];

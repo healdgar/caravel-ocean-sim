@@ -77,6 +77,8 @@ export function createBoardLife({ baked, fetchImpl = fetch, open = openBoardWork
     // The model's caravans on the road: each load's route (board metres), the days it left and is due, its mode, good
     // and wagons. Where one stands is that share of its route by the day (js/caravans.js works it out on the GPU).
     caravans: () => need().then(() => model.hook('caravans')),
+    // Persistent manned river barges & boatman pilots from the canonical simulation (`W.riverBoats`).
+    riverBoats: () => need().then(() => model.hook('riverBoats')),
     // Foreign merchant ships calling at the board's harbours (`W.ships`).
     ships: () => need().then(() => model.hook('ships')),
     // Live commodity prices, available stock, and monthly demand at any settlement on the board.

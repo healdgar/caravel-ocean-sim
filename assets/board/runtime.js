@@ -205,6 +205,97 @@ globalThis.BOARD_MODEL = (() => {
       list.sort((a, b) => b.score - a.score);
       return list;
     };
+    const safeAgeYrs = (p) => (typeof ageYrs === 'function' ? ageYrs(p) : (Number.isFinite(p?.age) ? p.age : 26));
+    const safeFolkName = (p) => {
+      if (!p) return 'Barqueiro';
+      if (typeof folkName === 'function') {
+        try { return folkName(p); } catch { /* fallback */ }
+      }
+      return p.name || p.gn || `Pilot #${p.id ?? 0}`;
+    };
+    const isAwayNow = (p) => {
+      if (!p) return true;
+      if (typeof awayNow === 'function') {
+        try { return Boolean(awayNow(p)); } catch { /* fallback */ }
+      }
+      return Boolean(p.away && now < (p.away.until ?? 0));
+    };
+    const pickOrPromoteBoatman = (prefSi, role = 'pilot', usedIds = new Set()) => {
+      const order = [];
+      if (prefSi >= 0 && prefSi < S.length) order.push(prefSi);
+      for (let i = 0; i < S.length; i++) if (i !== prefSi && (S[i]?.harbor || S[i]?.riverside)) order.push(i);
+      for (let i = 0; i < S.length; i++) if (!order.includes(i)) order.push(i);
+      for (const pass of [0, 1]) {
+        for (const si of order) {
+          const s = S[si];
+          const folkList = s?.folk;
+          if (!Array.isArray(folkList) || !folkList.length) continue;
+          for (const p of folkList) {
+            if (!p || p.dead || p.sx !== 'm' || usedIds.has(p.id) || isAwayNow(p)) continue;
+            const age = safeAgeYrs(p);
+            if (age < 16 || age > 62) continue;
+            if (pass === 0 && p.tr !== 'boatman') continue;
+            if (pass === 1 && (p.office || p.estateOffice || p.schoolMaster || p.abbey != null || p.churchBody || p.outlawCampId)) continue;
+            if (pass === 1 && role === 'pilot') p.tr = 'boatman';
+            if (p.si == null) p.si = si;
+            usedIds.add(p.id);
+            return p;
+          }
+        }
+      }
+      const fallbackSi = order[0] ?? 0;
+      const fallbackS = S[fallbackSi];
+      if (fallbackS) {
+        fallbackS.folk = fallbackS.folk || [];
+        const id = 900000 + Math.floor(Math.random() * 90000) + fallbackS.folk.length;
+        const p = { id, gn: role === 'pilot' ? 'Diogo' : 'Mateus', fam: 0, sx: 'm', age: 28, tr: 'boatman', si: fallbackSi, w: 3, sk: {} };
+        fallbackS.folk.push(p);
+        usedIds.add(id);
+        return p;
+      }
+      return null;
+    };
+    const staffRiverVessel = (c, oi, di, mode) => {
+      if (mode !== 'river') return;
+      const used = new Set();
+      if (c.pilot?.id != null) used.add(c.pilot.id);
+      const destName = S[di]?.name || 'up-river';
+      const tripDays = Math.max(0.5, (c.arriveDay || now + 2) - (c.departDay || now));
+      const until = (c.arriveDay || now + 2) + tripDays;
+      if (!c.pilot || c.pilot.id == null) {
+        const pilot = pickOrPromoteBoatman(oi, 'pilot', used);
+        if (pilot) {
+          pilot.tr = pilot.tr || 'boatman';
+          pilot.away = { until, what: `piloting river barge with ${c.good || 'cargo'} to ${destName}` };
+          c.crew = pilot;
+          c.pilot = {
+            id: pilot.id,
+            name: safeFolkName(pilot),
+            settlementId: pilot.si ?? oi,
+            trade: pilot.tr,
+            wage: +(0.4 + (c.len || 350) / 1600).toFixed(2),
+          };
+        }
+      }
+      if (!Array.isArray(c.oarsmen) || c.oarsmen.length < 2) {
+        const oarsmen = [];
+        for (let oi2 = 0; oi2 < 4; oi2++) {
+          const oar = pickOrPromoteBoatman(oi, 'oarsman', used);
+          if (!oar) break;
+          oar.away = { until, what: `rowing river barge toward ${destName}` };
+          oarsmen.push({ id: oar.id, name: safeFolkName(oar), settlementId: oar.si ?? oi, trade: oar.tr || 'boatman' });
+        }
+        c.oarsmen = oarsmen;
+      }
+    };
+    const findFolkById = (pid) => {
+      if (pid == null) return null;
+      for (const s of S) {
+        for (const p of s?.folk || []) if (p && p.id === pid && !p.dead) return p;
+      }
+      return null;
+    };
+
     const tryDispatchRoute = (mode, oi, di, poly, len, frac) => {
       if (!Array.isArray(poly) || poly.length < 2 || !(len > 20)) return false;
       const o = S[oi], d = S[di];
@@ -237,6 +328,7 @@ globalThis.BOARD_MODEL = (() => {
         if (needsRawDecrement) o.stores[g] = Math.max(0, (o.stores[g] || 0) - qty);
         if (typeof ladeOut === 'function' && ladeOut(c, o, true)) {
           if (c.arriveDay < now + 2.8) c.arriveDay = now + 2.8;
+          staffRiverVessel(c, oi, di, mode);
           W.caravans.push(c);
           if (typeof emit === 'function' && !W.prehistory && force) {
             const label = mode === 'sea' ? 'coastal caravel' : mode === 'river' ? 'river barge' : 'merchant wain train';
@@ -272,11 +364,19 @@ globalThis.BOARD_MODEL = (() => {
           c._staffed = true;
           try { crewFor(c); } catch { /* settlement fallback */ }
         }
+        staffRiverVessel(c, oi, di, mode);
         W.caravans.push(c);
         return true;
       }
       return false;
     };
+
+    // Ensure every active river caravan already in W.caravans also carries a sim boatman pilot.
+    for (const c of W.caravans) {
+      if (c && !c.gone && !c.robbed && c.river && (!c.pilot || c.pilot.id == null)) {
+        staffRiverVessel(c, c.origin ?? 0, c.dest ?? 0, 'river');
+      }
+    }
 
     if (activeSea.length < 4 && harborPorts.length >= 2 && typeof seaRoute === 'function') {
       const seaPairs = [];
@@ -325,6 +425,133 @@ globalThis.BOARD_MODEL = (() => {
         if (tryDispatchRoute('cart', forward ? pair.oi : pair.di, forward ? pair.di : pair.oi, poly, pair.len, 0.18 + ((i * 0.19) % 0.58))) needCart--;
       }
     }
+
+    // Persistent canonical manned river boats on navigable river reaches (`W.riverBoats`).
+    if (!Array.isArray(W.riverBoats)) W.riverBoats = [];
+    const distPt = (a, b) => Math.hypot((b.x || 0) - (a.x || 0), (b.z || 0) - (a.z || 0));
+    const nearestSettlement = (pt) => {
+      let best = 0, bestD = Infinity;
+      for (let si = 0; si < S.length; si++) {
+        const sp = S[si]?.pos;
+        if (!sp) continue;
+        const d = distPt(pt, sp);
+        if (d < bestD) { bestD = d; best = si; }
+      }
+      return best;
+    };
+    if (W.riverBoats.length === 0 && Array.isArray(W.rivStrips) && W.rivStrips.length > 0 && S.length > 0) {
+      const reaches = [];
+      for (let ri = 0; ri < W.rivStrips.length; ri++) {
+        const q = W.rivStrips[ri];
+        if (!q || q.canal || !Array.isArray(q.pts) || q.pts.length < 4) continue;
+        let totalLen = 0, hwSum = 0;
+        for (let k = 0; k < q.pts.length; k++) {
+          hwSum += q.hw?.[k] ?? 2;
+          if (k > 0) totalLen += distPt(q.pts[k - 1], q.pts[k]);
+        }
+        const avgHw = hwSum / q.pts.length;
+        if (totalLen >= 160 && avgHw >= 2.05) {
+          reaches.push({ ri, pts: q.pts, totalLen });
+        }
+      }
+      let nextId = 1;
+      for (let idx = 0; idx < reaches.length && W.riverBoats.length < 4; idx++) {
+        const r = reaches[idx];
+        const copies = r.totalLen >= 460 && W.riverBoats.length < 3 ? 2 : 1;
+        for (let copy = 0; copy < copies && W.riverBoats.length < 4; copy++) {
+          const forward = ((idx + copy) % 2) === 0;
+          const pts = (forward ? r.pts : [...r.pts].reverse()).map((p) => ({ x: p.x, z: p.z }));
+          const si = nearestSettlement(pts[0]);
+          const destSi = nearestSettlement(pts[pts.length - 1]);
+          const tripSpan = Math.max(2.4, +(r.totalLen / 380).toFixed(2));
+          const phaseFrac = ((idx * 0.37 + copy * 0.43 + 0.14) % 0.82);
+          const departDay = now - phaseFrac * tripSpan;
+          const id = nextId++;
+          W.riverBoats.push({
+            id,
+            key: `rb:${id}`,
+            riverIdx: r.ri,
+            si,
+            destSi,
+            phase: 'shuttle',
+            scale: +(0.74 + ((id * 0.04) % 0.14)).toFixed(2),
+            tripSpan,
+            departDay,
+            arriveDay: departDay + tripSpan,
+            points: pts,
+            forward,
+            pilotId: null,
+            pilot: null,
+            oarsmen: [],
+            sunk: false,
+          });
+        }
+      }
+    }
+    const usedRiverFolk = new Set();
+    for (const b of W.riverBoats) {
+      if (!b || b.sunk) continue;
+      if (now >= (b.arriveDay ?? -Infinity)) {
+        const prevPilot = findFolkById(b.pilotId);
+        if (prevPilot) {
+          const acct = typeof accountOwner === 'function' ? accountOwner(prevPilot) : null;
+          if (acct && Number.isFinite(acct.w)) acct.w += 0.55;
+          else if (Number.isFinite(prevPilot.w)) prevPilot.w += 0.55;
+        }
+        b.points = [...(b.points || [])].reverse();
+        const prevSi = b.si;
+        b.si = b.destSi ?? prevSi;
+        b.destSi = prevSi ?? b.si;
+        b.forward = !b.forward;
+        const span = Math.max(2.0, b.tripSpan || 3.5);
+        b.departDay = now;
+        b.arriveDay = now + span;
+      }
+      const until = (b.arriveDay || now + 3) + Math.max(0.5, b.tripSpan || 2);
+      const destName = S[b.destSi]?.name || S[b.si]?.name || 'harbor';
+      let pilotFolk = findFolkById(b.pilotId);
+      if (!pilotFolk || usedRiverFolk.has(pilotFolk.id)) {
+        pilotFolk = pickOrPromoteBoatman(b.si ?? 0, 'pilot', usedRiverFolk);
+      } else {
+        usedRiverFolk.add(pilotFolk.id);
+      }
+      if (pilotFolk) {
+        pilotFolk.tr = pilotFolk.tr || 'boatman';
+        pilotFolk.away = { until, what: `piloting river barge toward ${destName}` };
+        b.pilotId = pilotFolk.id;
+        b.pilot = {
+          id: pilotFolk.id,
+          name: safeFolkName(pilotFolk),
+          settlementId: pilotFolk.si ?? b.si ?? 0,
+          trade: pilotFolk.tr,
+        };
+      }
+      const nextOars = [];
+      for (const existing of Array.isArray(b.oarsmen) ? b.oarsmen : []) {
+        const oarFolk = findFolkById(existing?.id);
+        if (!oarFolk || usedRiverFolk.has(oarFolk.id)) continue;
+        usedRiverFolk.add(oarFolk.id);
+        oarFolk.away = { until, what: `rowing river barge toward ${destName}` };
+        nextOars.push({
+          id: oarFolk.id,
+          name: safeFolkName(oarFolk),
+          settlementId: oarFolk.si ?? b.si ?? 0,
+          trade: oarFolk.tr || 'boatman',
+        });
+      }
+      while (nextOars.length < 4) {
+        const oarFolk = pickOrPromoteBoatman(b.si ?? 0, 'oarsman', usedRiverFolk);
+        if (!oarFolk) break;
+        oarFolk.away = { until, what: `rowing river barge toward ${destName}` };
+        nextOars.push({
+          id: oarFolk.id,
+          name: safeFolkName(oarFolk),
+          settlementId: oarFolk.si ?? b.si ?? 0,
+          trade: oarFolk.tr || 'boatman',
+        });
+      }
+      b.oarsmen = nextOars;
+    }
   }
 
   async function found({ seed, fate = 1, era }, progress = null) {
@@ -352,6 +579,7 @@ globalThis.BOARD_MODEL = (() => {
     windDir: 0,
     ships: new Map(),
     caravans: new Map(),
+    riverBoats: new Map(),
   };
 
   function maritimeCaravanKey(c) {
@@ -408,11 +636,32 @@ globalThis.BOARD_MODEL = (() => {
         if (!seenC.has(existingKey)) MARITIME_PILOT.caravans.delete(existingKey);
       }
     }
+    if (Array.isArray(report.riverBoats)) {
+      const seenRb = new Set();
+      for (const entry of report.riverBoats) {
+        if (!entry || entry.id == null) continue;
+        const idKey = String(entry.id);
+        seenRb.add(idKey);
+        const prev = MARITIME_PILOT.riverBoats.get(idKey);
+        MARITIME_PILOT.riverBoats.set(idKey, {
+          id: idKey,
+          state: String(entry.state || 'shuttle'),
+          etaDays: Number.isFinite(entry.etaDays) ? Math.max(0, entry.etaDays) : (prev?.etaDays ?? 0),
+          progress: Number.isFinite(entry.progress) ? Math.max(0, Math.min(1, entry.progress)) : 0,
+          heldByWeather: Boolean(entry.heldByWeather),
+          sunk: Boolean(entry.sunk || prev?.sunk),
+        });
+      }
+      for (const existingKey of Array.from(MARITIME_PILOT.riverBoats.keys())) {
+        if (!seenRb.has(existingKey)) MARITIME_PILOT.riverBoats.delete(existingKey);
+      }
+    }
     return {
       ok: true,
       day: day(),
       trackedShips: MARITIME_PILOT.ships.size,
       trackedCaravans: MARITIME_PILOT.caravans.size,
+      trackedRiverBoats: MARITIME_PILOT.riverBoats.size,
     };
   }
 
@@ -492,6 +741,28 @@ globalThis.BOARD_MODEL = (() => {
         c.arriveDay = (c.arriveDay ?? nextDay) + 1;
       }
     }
+
+    const rbArr = W.riverBoats || [];
+    for (let i = rbArr.length - 1; i >= 0; i--) {
+      const b = rbArr[i];
+      if (!b) continue;
+      const rep = MARITIME_PILOT.riverBoats.get(String(b.id)) || null;
+      if (rep?.sunk || b.sunk) {
+        rbArr.splice(i, 1);
+        MARITIME_PILOT.riverBoats.delete(String(b.id));
+        continue;
+      }
+      if (rep) {
+        if (rep.progress >= 0.98 || (Number.isFinite(rep.etaDays) && rep.etaDays <= 0.15)) {
+          b.arriveDay = Math.min(b.arriveDay ?? nextDay, nextDay);
+        } else if (Number.isFinite(rep.etaDays) && rep.etaDays > 0.35) {
+          b.arriveDay = Math.max(nextDay + 0.25, curDay + rep.etaDays);
+          rep.etaDays = Math.max(0, rep.etaDays - 1);
+        }
+      } else if (storm) {
+        b.arriveDay = (b.arriveDay ?? nextDay) + 0.35;
+      }
+    }
   }
 
   async function live(days) {
@@ -549,6 +820,33 @@ globalThis.BOARD_MODEL = (() => {
       if (payload.world) await thaw(payload.world);
       else if (!W) await found(payload, progress);
       WORKER_PRESENTATION.started = true;
+    };
+    const baseView = model.view;
+    model.view = (kind, payload = {}) => {
+      if (kind === 'inspect' && String(payload?.code || '').startsWith('rb')) {
+        const rbKey = String(payload.code);
+        const rbId = Number(rbKey.slice(2));
+        const b = (W?.riverBoats || []).find((q) => q && !q.sunk && (q.id === rbId || String(q.key) === rbKey));
+        if (b) {
+          const home = W.settlements?.[b.si]?.name || 'Harbor';
+          const dest = W.settlements?.[b.destSi]?.name || home;
+          const mid = b.points?.[Math.floor((b.points.length - 1) / 2)] || b.points?.[0] || { x: 0, z: 0 };
+          const oarNames = Array.isArray(b.oarsmen) && b.oarsmen.length ? b.oarsmen.map((o) => o.name).join(', ') : '4 hired oarsmen';
+          return {
+            targetType: 'riverBoat',
+            title: `River Barge #${b.id}`,
+            sub: `Pilot: ${b.pilot?.name || 'Barqueiro'} (${b.pilot?.trade || 'boatman'}) · ${home} ↔ ${dest}`,
+            body: `<p>Manned river barge plying reach ${b.riverIdx + 1} between ${home} and ${dest}. Crew: ${oarNames}.</p>`,
+            actions: '',
+            anchor: { x: r1(mid.x), z: r1(mid.z) },
+          };
+        }
+      }
+      const res = baseView(kind, payload);
+      if ((kind === 'bootstrap' || kind === 'landscape') && res && res.world) {
+        res.world = { ...res.world, riverBoats: riverBoats() };
+      }
+      return res;
     };
     keeper = new SimulationWorkerHost(model, (message) => send(message, presentationTransfers(message)), { schedule, cancel });
     JOURNAL_WATCH = () => keeper.journal();
@@ -825,6 +1123,7 @@ globalThis.BOARD_MODEL = (() => {
       woods,
       loneTrees,
       fields,
+      riverBoats: riverBoats(),
       people: souls.length / 6,
       souls: { given, families, trades, each: souls },
     };
@@ -1000,6 +1299,36 @@ globalThis.BOARD_MODEL = (() => {
   // The model's caravans on the road today: each load as it goes, by the route it takes and the days it left and is due.
   // Where one is on its way is no field of the model's: it is that share of its route, by the day (the model's polyPos).
   // `carts` is the model's own count of wagons for a load of that size (its display's spawnCarts).
+  function riverBoats() {
+    ensureMaritimeWorldRoutes();
+    const out = [];
+    for (let i = 0; i < (W?.riverBoats || []).length; i++) {
+      const b = W.riverBoats[i];
+      if (!b || b.sunk || !Array.isArray(b.points) || b.points.length < 2) continue;
+      const oarsCount = Array.isArray(b.oarsmen) ? b.oarsmen.length : (Number.isFinite(b.oarsmen) ? b.oarsmen : 4);
+      out.push({
+        id: b.id,
+        key: b.key || `rb:${b.id}`,
+        si: b.si ?? 0,
+        destSi: b.destSi ?? b.si ?? 0,
+        riverIdx: b.riverIdx ?? 0,
+        phase: b.phase || 'shuttle',
+        scale: Number.isFinite(b.scale) ? b.scale : 0.78,
+        depart: b.departDay ?? day(),
+        arrive: b.arriveDay ?? (day() + 3),
+        oarsmen: Math.max(2, oarsCount),
+        pilot: b.pilot ? {
+          id: b.pilot.id,
+          name: String(b.pilot.name || 'Barqueiro'),
+          settlementId: b.pilot.settlementId ?? b.si ?? 0,
+          trade: String(b.pilot.trade || 'boatman'),
+        } : null,
+        points: line(b.points),
+      });
+    }
+    return out;
+  }
+
   function caravans() {
     const out = [];
     (W.caravans || []).forEach((c, index) => {
@@ -1007,20 +1336,31 @@ globalThis.BOARD_MODEL = (() => {
       const mode = c.sea ? 'sea' : c.river ? 'river' : 'cart';
       let key = null;
       try { key = typeof caravanInspectionKey === 'function' ? String(caravanInspectionKey(c)) : null; } catch { key = null; }
-      out.push({
+      const entry = {
         key: key ?? `${c.origin}>${c.dest}:${c.departDay}:${c.good}`, index, mode, good: String(c.good ?? ''), qty: Math.round(c.qty || 0),
         origin: c.origin, dest: c.dest, depart: c.departDay, arrive: c.arriveDay, halted: !!c.halted,
         carts: mode === 'cart' ? Math.max(1, Math.min(4, Math.round((c.qty || 0) / 18))) : 1,
         points: line(c.poly),
-      });
+      };
+      if (mode === 'river') {
+        entry.pilot = c.pilot ? {
+          id: c.pilot.id,
+          name: String(c.pilot.name || 'Barqueiro'),
+          settlementId: c.pilot.settlementId ?? c.origin ?? 0,
+          trade: String(c.pilot.trade || 'boatman'),
+        } : null;
+        entry.oarsmen = Math.max(2, Array.isArray(c.oarsmen) ? c.oarsmen.length : 4);
+      }
+      out.push(entry);
     });
     return {
       day: day(),
       weather: { state: String(W.weather?.state ?? 'clear'), wind: r3(W.weather?.wind ?? 0) },
       list: out,
+      riverBoats: riverBoats(),
       ships: ships(),
     };
   }
 
-  return { VERSION, found, live, board, freeze, thaw, serve, folk, watch, embark, disembark, caravans, ships, market, trade, pilotMaritime };
+  return { VERSION, found, live, board, freeze, thaw, serve, folk, watch, embark, disembark, caravans, riverBoats, ships, market, trade, pilotMaritime };
 })();

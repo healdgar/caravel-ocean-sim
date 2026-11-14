@@ -35,7 +35,8 @@ import {
   safeLandfallStart,
 } from './terrain-model.js';
 import { vegetationProbability } from './vegetation.js';
-import { OLD_WORLD_LAND, bakedBoardFor, oldWorldCountry } from './old-world.js';
+import { OLD_WORLD_LAND, bakedBoardFor, oldWorldCountry, oldWorldCityNear, oldWorldPeople } from './old-world.js';
+import { createInlandWaterSampler } from './inland-water.js';
 import {
   BUILDING_SUB_ASSEMBLIES,
   PART_CUTAWAY_MODES,
@@ -3837,18 +3838,77 @@ export function settleDockBerth(heights, region, instances, wanted) {
   return { x: inMud.x, z: inMud.z };
 }
 
+function buildPortRiverCorridor(region) {
+  const rivers = bakedBoardFor(region)?.board?.rivers ?? [];
+  const ox = region?.x ?? 0;
+  const oz = region?.z ?? 0;
+  const segments = [];
+  const reaches = [];
+  for (let ri = 0; ri < rivers.length; ri++) {
+    const pts = rivers[ri]?.points;
+    if (!pts || pts.length < 6) continue;
+    const reachSegs = [];
+    let arc = 0;
+    for (let k = 0; k + 5 < pts.length; k += 3) {
+      const ax = ox + pts[k], az = oz + pts[k + 1], hwA = Math.max(2.0, pts[k + 2] || 2.0);
+      const bx = ox + pts[k + 3], bz = oz + pts[k + 4], hwB = Math.max(2.0, pts[k + 5] || 2.0);
+      const dx = bx - ax, dz = bz - az, len = Math.hypot(dx, dz);
+      if (len < 0.5) continue;
+      const tx = dx / len, tz = dz / len;
+      const seg = {
+        ax, az, bx, bz,
+        cx: (ax + bx) * 0.5, cz: (az + bz) * 0.5,
+        tx, tz, nx: -tz, nz: tx,
+        hw: (hwA + hwB) * 0.5,
+        len, arcStart: arc, reachIdx: ri,
+      };
+      arc += len;
+      segments.push(seg);
+      reachSegs.push(seg);
+    }
+    if (reachSegs.length) reaches.push({ reachIdx: ri, totalLen: arc, segs: reachSegs });
+  }
+  const segDistSq = (px, pz, s) => {
+    const dx = s.bx - s.ax, dz = s.bz - s.az, l2 = dx * dx + dz * dz;
+    const t = l2 > 1e-6 ? Math.max(0, Math.min(1, ((px - s.ax) * dx + (pz - s.az) * dz) / l2)) : 0;
+    return (px - (s.ax + dx * t)) ** 2 + (pz - (s.az + dz * t)) ** 2;
+  };
+  const pointHits = (px, pz, margin = 4.5) => {
+    for (let i = 0; i < segments.length; i++) {
+      const s = segments[i], r = s.hw + margin;
+      if (segDistSq(px, pz, s) <= r * r) return true;
+    }
+    return false;
+  };
+  const hits = (x, z, yaw = 0, width = 8, length = 8, margin = 4.5) => {
+    if (!segments.length) return false;
+    if (pointHits(x, z, margin)) return true;
+    const c = Math.cos(yaw), s = Math.sin(yaw), hw = width * 0.5, hl = length * 0.5;
+    for (const [lx, lz] of [[-hw, -hl], [hw, -hl], [hw, hl], [-hw, hl], [0, -hl], [0, hl], [-hw, 0], [hw, 0]]) {
+      if (pointHits(x + lx * c + lz * s, z - lx * s + lz * c, margin)) return true;
+    }
+    return false;
+  };
+  return { segments, reaches, pointHits, hits };
+}
+
 export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = false, satelliteData = null, shoreDist = null, coastIsReal = false } = {}) {
   const region = resolveGlobalCoastalRegion(regionSpec);
   const recordedPortId = region.colonyGrowth?.portId ?? region.id;
   const allowColonialPort = region.hasColonialPort !== false;
-  const isLisbonRoyalDock = region.id === 'lisbon' || region.portType === 'royal-arsenal-dock';
+  const simYear = region.year ?? region.era ?? 1550;
+  const nearOldWorldCity = oldWorldCityNear(region.latitude, region.longitude);
+  const oldWorldPop = nearOldWorldCity ? oldWorldPeople(nearOldWorldCity, simYear) : 0;
+  const isDerivedMetropolePort = Boolean(allowColonialPort && (oldWorldPop >= 18000 || (region.colonyGrowth?.population ?? 0) >= 18000));
+  const metropoleScale = isDerivedMetropolePort ? Math.min(1, Math.max(0.5, (oldWorldPop || region.colonyGrowth?.population || 30000) / 85000)) : 0;
+  const portRiverCorridor = buildPortRiverCorridor(region);
   const orthoFootprints =
-    allowColonialPort && !isLisbonRoyalDock
+    allowColonialPort && !isDerivedMetropolePort
       ? extractOrthophotoBuildingFootprints(region, heights, satelliteData, shoreDist)
       : null;
   const hasOrthoFootprints = Boolean(orthoFootprints?.footprints?.length >= 4);
   const extractedHarborPiers =
-    allowColonialPort && !isLisbonRoyalDock && (hasOrthoFootprints || satelliteData?.is1550Orthophoto)
+    allowColonialPort && !isDerivedMetropolePort && (hasOrthoFootprints || satelliteData?.is1550Orthophoto)
       ? extractAndCarveHarborQuaysAndPiers(region, heights, orthoFootprints)
       : [];
   const clusterFrame = orthoFootprints
@@ -3984,10 +4044,10 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
   // so every port building sits flush on level ground and the pier reaches deep water.
   const n = region.size;
   const span = region.span;
-  const plazaRadiusAlong = preserveRealCoast && !isLisbonRoyalDock ? 72 : isLisbonRoyalDock ? 168 : 105;
-  const plazaRadiusInland = preserveRealCoast && !isLisbonRoyalDock ? 105 : isLisbonRoyalDock ? 175 : 145;
-  const berthHalfW = Math.max(18, (isLisbonRoyalDock ? 68 : 36) * scaleFactor);
-  const berthMaxOffshore = Math.max(80, (isLisbonRoyalDock ? 235 : 190) * scaleFactor);
+  const plazaRadiusAlong = preserveRealCoast && !isDerivedMetropolePort ? 72 : isDerivedMetropolePort ? Math.round(115 + 53 * metropoleScale) : 105;
+  const plazaRadiusInland = preserveRealCoast && !isDerivedMetropolePort ? 105 : isDerivedMetropolePort ? Math.round(125 + 50 * metropoleScale) : 145;
+  const berthHalfW = Math.max(18, (isDerivedMetropolePort ? 44 + 24 * metropoleScale : 36) * scaleFactor);
+  const berthMaxOffshore = Math.max(80, (isDerivedMetropolePort ? 195 + 40 * metropoleScale : 190) * scaleFactor);
   const preIndigenousVillage = !allowColonialPort
     ? Boolean(
         (region.indigenousSettlement ?? computeIndigenousSettlementProfile(region, region.year ?? region.era ?? 1550))
@@ -4011,15 +4071,15 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
         const berthW =
           coastalSmoothstep(-4, -Math.max(16, 32 * scaleFactor), relInland) *
           coastalSmoothstep(-berthMaxOffshore, -berthMaxOffshore * 0.58, relInland);
-        const targetDepth = -Math.min(12.0, (isLisbonRoyalDock ? 6.8 : 4.2) + (-relInland) * 0.085);
+        const targetDepth = -Math.min(12.0, (isDerivedMetropolePort ? 4.8 + 2.0 * metropoleScale : 4.2) + (-relInland) * 0.085);
         h = Math.min(h, h * (1 - acrossW * berthW) + targetDepth * (acrossW * berthW));
       }
-      if (isLisbonRoyalDock && relInland <= -8 && relInland >= -165 && Math.abs(relAlong) <= 88 && h <= 2.4) {
-        // Dredged Ribeira das Naus / Cais da Índia royal embarkation basin around the departure pier & L-head mole
+      if (isDerivedMetropolePort && metropoleScale >= 0.7 && relInland <= -8 && relInland >= -165 && Math.abs(relAlong) <= 88 && h <= 2.4) {
+        // Procedurally dredge an outer embarkation basin proportional to heavy metropole deep-draft shipping demand
         const slipAcross = coastalSmoothstep(88, 42, Math.abs(relAlong));
         const slipInland = coastalSmoothstep(-8, -22, relInland) * coastalSmoothstep(-165, -118, relInland);
         const slipW = slipAcross * slipInland;
-        const slipDepth = -Math.min(11.8, 7.2 + Math.max(0, -relInland - 8) * 0.065);
+        const slipDepth = -Math.min(11.8, (5.8 + 1.4 * metropoleScale) + Math.max(0, -relInland - 8) * 0.065);
         h = h * (1 - slipW) + Math.min(h, slipDepth) * slipW;
       }
 
@@ -4180,6 +4240,9 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     return high - low;
   };
   const siteSuits = (need, x, z, yaw, width, length) => {
+    if (need !== 'bridge' && need !== 'pier' && need !== 'quay' && portRiverCorridor.hits(x, z, yaw, width, length, 4.5)) {
+      return false;
+    }
     if (need === 'quay') {
       const h = terrainSurfaceSample(heights, x, z, region);
       return h >= SHORE_WORKS_LOWEST_M - 1 && h <= SHORE_WORKS_HIGHEST_M;
@@ -4225,6 +4288,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
   };
   const prefabSiteNeed = (prefabId) => PREFAB_SITE_NEEDS[prefabId] ?? 'land';
   const enclosureSuits = (candidate) => {
+    if (portRiverCorridor.hits(candidate.x, candidate.z, candidate.yaw, candidate.width, candidate.length, 4.0)) return false;
     let low = Infinity, high = -Infinity;
     for (const { x, z } of enclosureGroundPoints(candidate)) {
       const h = terrainSurfaceSample(heights, x, z, region);
@@ -4271,11 +4335,14 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     const wanted = overrides?.at ?? (homeFort
       ? fortLocalToWorld(homeFort, overrides.fortSlot[0], overrides.fortSlot[1])
       : worldFromCoastalFrame(region, bestShoreAlong + alongOffset, bestShoreInland + inlandOffset));
-    // Hand-set works, such as Lisbon's dredged basin and its quays, keep the place they were given. So does a fort drawn to its ground.
-    const site = overrides?.exactY !== undefined || overrides?.trace
+    const isWaterfrontStructure = prefabId === 'stone_arch_bridge' || prefabId === 'timber_mole_pier' || prefabId === 'stone_quay_seawall';
+    const fixedPositionRequested = overrides?.exactY !== undefined || overrides?.trace;
+    const collidesRiver = !isWaterfrontStructure && portRiverCorridor.hits(wanted.x, wanted.z, yaw, instWidth, instLength, 4.0);
+    const site = fixedPositionRequested && !collidesRiver
       ? wanted
       : findPrefabSite(prefabId, wanted, yaw, instWidth, instLength, homeFort, overrides);
     if (!site) return null;
+    if (!isWaterfrontStructure && portRiverCorridor.hits(site.x, site.z, yaw, instWidth, instLength, 4.0)) return null;
     const pos = site;
     const groundY = terrainSurfaceSample(heights, pos.x, pos.z, region);
     const y = overrides?.exactY !== undefined
@@ -4315,7 +4382,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
   // that the town builds round them. See FORTS.md.
   // The town's own waterfront is spoken for, whether or not its quays are down yet.
   const onTownWaterfront = (x, z, width, length) => {
-    const frame = coastalFrame(region, x, z), margin = Math.hypot(width, length) * 0.5, reach = isLisbonRoyalDock ? 150 : 70;
+    const frame = coastalFrame(region, x, z), margin = Math.hypot(width, length) * 0.5, reach = isDerivedMetropolePort ? 150 : 70;
     return Math.abs(frame.along - bestShoreAlong - 10) < reach + margin && frame.inland - bestShoreInland > -80 - margin && frame.inland - bestShoreInland < 16 + margin;
   };
   const footprintIsFree = (x, z, yaw, width, length, prefabId) =>
@@ -4410,36 +4477,71 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     return plan;
   };
 
-  // 1. Timber mole piers & stone quays derived from harbor boat/pier outlines (or fallback shoreline pier)
-  if (isLisbonRoyalDock && allowColonialPort) {
-    // 1550 Lisboa · Ribeira das Naus & Terreiro do Paço Royal Embarkation Dock:
-    // - Main Royal Departure Pier (Ponte da Casa da Índia, 74m × 8.5m) projecting into the dredged Tagus channel
-    addPrefab('timber_mole_pier', 0, -30, 180, null, {
-      label: 'Ponte da Casa da Índia (Royal Embarkation Pier)',
-      length: 74,
-      width: 8.5,
+  // 1. Timber mole piers & stone quays derived procedurally from bathymetry, river mouths & population (or orthophoto outlines)
+  if (isDerivedMetropolePort && allowColonialPort) {
+    // Score along-shore stations by deep offshore water clear of tributary mouths
+    const pierCandidates = [];
+    for (let alongProbe = -108; alongProbe <= 108; alongProbe += 18) {
+      const pShore = worldFromCoastalFrame(region, bestShoreAlong + alongProbe, bestShoreInland);
+      const pDeep = worldFromCoastalFrame(region, bestShoreAlong + alongProbe, bestShoreInland - 62);
+      const pTip = worldFromCoastalFrame(region, bestShoreAlong + alongProbe, bestShoreInland - 74);
+      const hShore = terrainSample(heights, pShore.x, pShore.z, region);
+      const hDeep = terrainSample(heights, pDeep.x, pDeep.z, region);
+      const hTip = terrainSample(heights, pTip.x, pTip.z, region);
+      if (hDeep > -2.2 || hTip > -3.0) continue;
+      if (portRiverCorridor.pointHits(pShore.x, pShore.z, 10) || portRiverCorridor.pointHits(pDeep.x, pDeep.z, 10)) continue;
+      let reachLen = 52;
+      for (let off = 36; off <= 74; off += 6) {
+        const probe = worldFromCoastalFrame(region, bestShoreAlong + alongProbe, bestShoreInland - off);
+        if (terrainSample(heights, probe.x, probe.z, region) <= -4.4) {
+          reachLen = Math.max(48, off + 8);
+          break;
+        }
+      }
+      const centerPref = -Math.abs(alongProbe) * 0.04;
+      const score = -hDeep - hTip * 0.6 - Math.max(0, Math.abs(hShore - 0.5)) * 0.8 + centerPref;
+      pierCandidates.push({ alongProbe, reachLen, score });
+    }
+    pierCandidates.sort((a, b) => b.score - a.score);
+    const chosenPiers = [];
+    for (const c of pierCandidates) {
+      if (chosenPiers.some((p) => Math.abs(p.alongProbe - c.alongProbe) < 48)) continue;
+      chosenPiers.push(c);
+      if (chosenPiers.length >= (metropoleScale >= 0.7 ? 2 : 1)) break;
+    }
+    if (!chosenPiers.length) chosenPiers.push({ alongProbe: 0, reachLen: 68, score: 0 });
+    const mainPier = chosenPiers[0];
+    const mainInlandOffset = -(mainPier.reachLen * 0.42);
+    addPrefab('timber_mole_pier', mainPier.alongProbe, mainInlandOffset, 180, null, {
+      label: `${nearOldWorldCity?.name || region.name} Main Royal Embarkation Pier`,
+      length: mainPier.reachLen,
+      width: 8.4,
       height: 1.75,
       foundationDepth: 14.0,
       exactY: 0.45,
     });
-    // - Seaward L-Head Embarkation Mole & Crane Wharf (Cais da Ribeira, 38m × 8.2m) with Manueline Padrão beacon & twin-wheel crane
-    addPrefab('timber_mole_pier', -15, -71.1, 90, null, {
-      label: 'Cais da Ribeira (Royal Departure Mole & Crane Wharf)',
-      length: 38,
-      width: 8.2,
-      height: 1.75,
-      foundationDepth: 15.0,
-      exactY: 0.45,
-    });
-    // - Secondary Ribeira das Naus Fitting-Out & Careening Pier (52m × 7.2m) serving the royal shipways
-    addPrefab('timber_mole_pier', -68, -22, 180, null, {
-      label: 'Ponte da Ribeira das Naus (Shipyard Fitting-Out Pier)',
-      length: 52,
-      width: 7.2,
-      height: 1.65,
-      foundationDepth: 13.5,
-      exactY: 0.40,
-    });
+    const lHeadTip = worldFromCoastalFrame(region, bestShoreAlong + mainPier.alongProbe - 14, bestShoreInland - (mainPier.reachLen - 6));
+    if (terrainSample(heights, lHeadTip.x, lHeadTip.z, region) <= -1.6) {
+      addPrefab('timber_mole_pier', mainPier.alongProbe - 14, -(mainPier.reachLen - 3), 90, null, {
+        label: 'Harbor Crane Wharf & Fitting Mole',
+        length: 36,
+        width: 8.0,
+        height: 1.75,
+        foundationDepth: 15.0,
+        exactY: 0.45,
+      });
+    }
+    if (chosenPiers[1]) {
+      const alt = chosenPiers[1];
+      addPrefab('timber_mole_pier', alt.alongProbe, -(alt.reachLen * 0.36), 180, null, {
+        label: 'Shipyard Fitting-Out & Careening Pier',
+        length: Math.min(58, alt.reachLen),
+        width: 7.2,
+        height: 1.65,
+        foundationDepth: 13.5,
+        exactY: 0.40,
+      });
+    }
   } else if (extractedHarborPiers.length > 0) {
     const pierPrefab = PORT_PREFABS.timber_mole_pier;
     const quayPrefab = PORT_PREFABS.stone_quay_seawall;
@@ -4496,7 +4598,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     region.colonyGrowth ??
     computeColonyGrowthProfile(region, region.year ?? region.era ?? 1550);
 
-  const inTimberManner = allowColonialPort && !hasOrthoFootprints && !isLisbonRoyalDock && (
+  const inTimberManner = allowColonialPort && !hasOrthoFootprints && !isDerivedMetropolePort && (
     region.id === 'jamestown' || region.id === 'plymouth-colony' || region.id === 'boston' || region.id === 'new-amsterdam' || region.id === 'quebec' ||
     region.id === 'charleston' || region.id === 'philadelphia' ||
     ((colonyGrowth.crown === 'england' || colonyGrowth.crown === 'netherlands' || colonyGrowth.crown === 'france') && Math.abs(region.latitude ?? 0) >= 31.5)
@@ -4680,102 +4782,182 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
         label: 'Acueducto Real de Sillería (Royal Stone Aqueduct)',
       });
     }
-  } else if (allowColonialPort && isLisbonRoyalDock) {
-    // 2. Continuous Stone Seawall & Royal Quays (Cais de Pedra do Terreiro do Paço & Muralha da Ribeira das Naus)
-    addPrefab('stone_quay_seawall', 4, 2, 0, 2.3, {
-      label: 'Cais de Pedra do Terreiro do Paço',
-      width: 50,
-      length: 12,
-      height: 1.95,
-      exactY: 0.35,
-    });
-    addPrefab('stone_quay_seawall', -92, 2, 0, 2.2, {
-      label: 'Muralha da Ribeira das Naus',
-      width: 32,
-      length: 12,
-      height: 1.85,
-      exactY: 0.35,
-    });
-    // 3. Paço da Ribeira, Casa da Índia, Torreão do Paço & Arcaded Merchant Loggia on the Terreiro do Paço
-    addPrefab('torreon_atalaya_farol', 42, 4, 0, 2.8, {
-      label: 'Torreão do Paço da Ribeira (Waterfront Palace Turret)',
+  } else if (allowColonialPort && isDerivedMetropolePort) {
+    // Procedural metropole harbor derivation from terrain contour, bathymetry, slope, hill relief, river corridors, and population:
+    // (a) Continuous stone seawall segments along shoreline stretches free of river mouths
+    for (const quayAlong of [-92, -46, 4, 52]) {
+      const qp = worldFromCoastalFrame(region, bestShoreAlong + quayAlong, bestShoreInland + 2);
+      const qh = terrainSurfaceSample(heights, qp.x, qp.z, region);
+      const qOff = worldFromCoastalFrame(region, bestShoreAlong + quayAlong, bestShoreInland - 18);
+      if (qh >= -0.6 && qh <= 4.2 && terrainSample(heights, qOff.x, qOff.z, region) <= -0.4 && !portRiverCorridor.hits(qp.x, qp.z, bearingRad, 44, 12, 3.5)) {
+        addPrefab('stone_quay_seawall', quayAlong, 2, 0, 2.25, {
+          label: `${nearOldWorldCity?.name || region.name} Stone Quay Wall`,
+          width: 44,
+          length: 12,
+          height: 1.9,
+          exactY: 0.35,
+        });
+      }
+    }
+
+    // (b) Find flattest river-clear waterfront bench for civic Terreiro plaza & royal customhouse / palace complex
+    let benchAlong = 10, benchInland = 40, bestBenchScore = -Infinity;
+    for (let a = -36; a <= 48; a += 14) {
+      for (let d = 28; d <= 52; d += 12) {
+        const bp = worldFromCoastalFrame(region, bestShoreAlong + a, bestShoreInland + d);
+        if (portRiverCorridor.pointHits(bp.x, bp.z, 18)) continue;
+        const bh = terrainSurfaceSample(heights, bp.x, bp.z, region);
+        if (bh < 1.6 || bh > 6.5) continue;
+        const rise = footprintRise(bp.x, bp.z, bearingRad, 32, 32);
+        const score = -rise * 3.5 - Math.abs(bh - 3.0) * 0.6 - Math.abs(a - 12) * 0.03;
+        if (score > bestBenchScore) {
+          bestBenchScore = score;
+          benchAlong = a;
+          benchInland = d;
+        }
+      }
+    }
+    const isIberianMetropole = colonyGrowth.crown === 'portugal' || colonyGrowth.crown === 'spain';
+    addPrefab('torreon_atalaya_farol', benchAlong + 28, Math.max(4, benchInland - 34), 0, 2.8, {
+      label: isIberianMetropole ? 'Waterfront Royal Palace Turret' : 'Harbor Citadel Watchtower',
       width: 18,
       length: 22,
       height: 20.5,
       foundationDepth: 9.5,
-      cairnSpec: CAIRN_ARCHITECTURAL_TEMPLATES.paco_da_ribeira_torreao,
+      cairnSpec: isIberianMetropole ? CAIRN_ARCHITECTURAL_TEMPLATES.paco_da_ribeira_torreao : undefined,
     });
-    addPrefab('casa_de_contratacion', 16, 42, 0, 3.0, {
-      label: 'Paço da Ribeira & Casa da Índia (Royal Customhouse)',
+    addPrefab('casa_de_contratacion', benchAlong, benchInland, 0, 3.0, {
+      label: isIberianMetropole ? 'Royal Customhouse & Chamber of Commerce' : 'Customhouse & Staple Hall',
     });
-    addPrefab('modular_patio_cloister', 52, 44, 0, 3.2, {
-      label: 'Paços Reais da Ribeira (Royal Palace Cloister)',
+    addPrefab('open_lonja_loggia', benchAlong - 24, Math.max(22, benchInland - 12), 0, 2.8, {
+      label: 'Merchant Guild Arcaded Loggia',
     });
-    addPrefab('open_lonja_loggia', -12, 30, 0, 2.8, {
-      label: 'Varanda da Casa da Índia (Spice & Charter Loggia)',
+    addPrefab('modular_patio_cloister', benchAlong + 38, benchInland + 2, 0, 3.2, {
+      label: 'Waterfront Palace & Exchange Cloister',
     });
-    // 4. Ribeira das Naus Royal Shipyard, Multi-Gable Arsenal, Armazéns da Guiné e Índia & Caravels on the Ways
-    addPrefab('royal_atarazanas_arsenal', -48, 48, 0, 2.9, {
-      label: 'Ribeira das Naus ·Tercenas Reais (Royal Shipyard Halls)',
+    addPrefab('curtain_wall_and_gate', benchAlong + 6, benchInland + 74, 0, 4.0, {
+      label: 'Triumphal River Gate & City Curtain Wall',
+    });
+
+    // (c) Pick gentler foreshore flank without river mouth blocking for royal shipyards & slipways
+    const flankScore = (sign) => {
+      const fIn = worldFromCoastalFrame(region, bestShoreAlong + sign * 62, bestShoreInland + 32);
+      const fOut = worldFromCoastalFrame(region, bestShoreAlong + sign * 62, bestShoreInland - 14);
+      const hIn = terrainSample(heights, fIn.x, fIn.z, region);
+      const hOut = terrainSample(heights, fOut.x, fOut.z, region);
+      const riverPenalty = portRiverCorridor.pointHits(fIn.x, fIn.z, 18) ? 25 : 0;
+      const shelfScore = (hIn >= 1.2 && hIn <= 5.5 && hOut <= 0.4 && hOut >= -4.0) ? 10 - Math.abs(hIn - hOut - 3.2) : -10;
+      return shelfScore - riverPenalty;
+    };
+    const shipSide = flankScore(-1) >= flankScore(1) ? -1 : 1;
+    addPrefab('royal_atarazanas_arsenal', shipSide * 52, 48, 0, 2.9, {
+      label: 'Tercenas & Naval Arsenal Halls',
       width: 34,
       length: 36,
       height: 9.2,
     });
-    addPrefab('royal_warehouse', -90, 46, 0, 2.9, {
-      label: 'Armazéns da Guiné e Índia (Royal Naval Storehouses)',
+    addPrefab('royal_warehouse', shipSide * 92, 46, 0, 2.9, {
+      label: 'Royal Naval & Spice Storehouses',
       length: 34,
       width: 15,
     });
-    addPrefab('astillero_and_moored_hull', -36, 15, 0, 1.5, {
-      label: 'Carreira da Índia Nau on the Stocks (Ribeira das Naus)',
+    addPrefab('astillero_and_moored_hull', shipSide * 38, 15, 0, 1.5, {
+      label: 'Shipwright Launch Ways & Hull on Blocks',
     });
-    addPrefab('astillero_and_moored_hull', -54, 15, 0, 1.5, {
-      label: 'Royal Caravel on the Slipway (Ribeira das Naus)',
+    addPrefab('astillero_and_moored_hull', shipSide * 58, 15, 0, 1.5, {
+      label: 'Caravel Fitting Slipway',
     });
-    addPrefab('careening_shed', -114, 20, 6, 2.2, {
-      label: 'Casa do Breu (Careening & Pitch Works)',
+    addPrefab('careening_shed', shipSide * 116, 20, shipSide * -6, 2.2, {
+      label: 'Pitch Works & Careening Shed',
     });
-    // 5. Mosteiro dos Jerónimos on the Tagus approach. The Tagus forts are sited with the rest, from the record.
-    addPrefab('mosteiro_dos_jeronimos', -126, 88, 0, 3.8, {
-      label: 'Mosteiro dos Jerónimos · Santa Maria de Belém',
-    });
-    // 6. Sé Patriarcal de Lisboa Cathedral, Castelo de São Jorge, Muralha Fernandina Gate & Alfama / Baixa Terraces
-    addPrefab('mission_chapel', 64, 88, 0, 4.2, {
-      label: 'Sé Patriarcal de Lisboa (Cathedral)',
+    if (oldWorldPop >= 50000) {
+      addPrefab('mosteiro_dos_jeronimos', shipSide * 124, 88, 0, 3.8, {
+        label: 'Great Estuary Cloister & Abbey',
+      });
+    }
+
+    // (d) Site the cathedral & upper town on prominent dry hillside shoulders clear of river beds
+    let hillAlong = 64, hillInland = 88, bestHillScore = -Infinity;
+    for (let a = -64; a <= 84; a += 18) {
+      for (let d = 72; d <= 122; d += 16) {
+        if (Math.abs(a - benchAlong) < 30 && d < benchInland + 32) continue;
+        const hp = worldFromCoastalFrame(region, bestShoreAlong + a, bestShoreInland + d);
+        if (portRiverCorridor.hits(hp.x, hp.z, bearingRad, 26, 36, 6.0)) continue;
+        const hh = terrainSurfaceSample(heights, hp.x, hp.z, region);
+        const rise = footprintRise(hp.x, hp.z, bearingRad, 24, 34);
+        if (hh < 3.6 || hh > 24 || rise > 4.2) continue;
+        const score = hh * 0.9 - rise * 2.5 + Math.abs(a) * 0.04;
+        if (score > bestHillScore) {
+          bestHillScore = score;
+          hillAlong = a;
+          hillInland = d;
+        }
+      }
+    }
+    addPrefab('mission_chapel', hillAlong, hillInland, 0, 4.2, {
+      label: isIberianMetropole && oldWorldPop >= 40000 ? 'Metropolitan Twin-Tower Cathedral' : 'Principal Harbor Church',
       width: 24,
       length: 34,
       height: 19.0,
       foundationDepth: 5.5,
-      cairnSpec: CAIRN_ARCHITECTURAL_TEMPLATES.se_patriarcal_de_lisboa,
+      cairnSpec: isIberianMetropole && oldWorldPop >= 40000 ? CAIRN_ARCHITECTURAL_TEMPLATES.se_patriarcal_de_lisboa : undefined,
     });
-    addPrefab('curtain_wall_and_gate', 22, 118, 0, 4.0, {
-      label: 'Arco da Ribeira · Muralha Fernandina',
+    addPrefab('acueducto_de_piedra', -shipSide * 48, 124, 8, 4.2, {
+      label: 'Arched Royal Water Aqueduct',
     });
-    addPrefab('acueducto_de_piedra', -56, 126, 8, 4.2, {
-      label: 'Aqueduto Real & Arcos da Água Livre',
-    });
-    addPrefab('colonial_town_block', -16, 82, 0, 3.6, {
-      label: 'Rua Nova dos Mercadores (Merchant Quarter)',
-    });
-    addPrefab('colonial_town_block', 24, 82, 0, 3.6, {
-      label: 'Bairro da Ribeira Velha',
-    });
-    addPrefab('l_wing_u_wing_solar', -58, 86, 90, 3.5, {
-      label: 'Paço dos Estaus & Noble Solar',
-    });
-    addPrefab('single_nave_solar', 88, 56, 0, 3.6, {
-      label: 'Casario de Alfama',
-    });
-    addPrefab('walled_mule_corral', -22, 118, 0, 4.0, {
-      label: 'Pátio das tercenas & Pack Train Yard',
-    });
-    addPrefab('stone_arch_bridge', -144, 42, 16, 2.2, {
-      label: 'Ponte de Alcântara (Stone Cutwater Bridge)',
-    });
-    if (colonyGrowth.year >= 1585) {
-      addPrefab('colonial_town_block', 64, 118, 0, 4.2, {
-        label: 'Bairro Alto (17th-Century Expansion)',
-      });
+
+    // (e) Derive merchant quarters & pack yards procedurally across river-clear upland lots
+    const quarterDefs = [
+      { id: 'colonial_town_block', along: -18, inland: 84, yaw: 0, minY: 3.6, label: 'Upper Merchant Cloister Block' },
+      { id: 'colonial_town_block', along: 24, inland: 84, yaw: 0, minY: 3.6, label: 'Waterfront Guild Quarter' },
+      { id: 'l_wing_u_wing_solar', along: -56, inland: 86, yaw: 90, minY: 3.5, label: 'Noble Courtyard Solar' },
+      { id: 'single_nave_solar', along: 88, inland: 56, yaw: 0, minY: 3.6, label: 'Hillside Merchant Terrace' },
+      { id: 'walled_mule_corral', along: -22, inland: 118, yaw: 0, minY: 4.0, label: 'Caravan & Pack-Train Courtyard' },
+    ];
+    if (metropoleScale >= 0.75) {
+      quarterDefs.push({ id: 'colonial_town_block', along: 64, inland: 116, yaw: 0, minY: 4.2, label: 'Upper Hillside Quarter' });
+    }
+    for (const qd of quarterDefs) {
+      addPrefab(qd.id, qd.along, qd.inland, qd.yaw, qd.minY, { label: qd.label });
+    }
+
+    // (f) Derive perpendicular multi-arch stone bridges centered across navigable port river reaches
+    let bridgesBuilt = 0;
+    for (const reach of portRiverCorridor.reaches) {
+      if (bridgesBuilt >= 2) break;
+      let chosenSeg = null;
+      let bestCrossScore = -Infinity;
+      for (const seg of reach.segs) {
+        const distAnchor = Math.hypot(seg.cx - shoreAnchor.x, seg.cz - shoreAnchor.z);
+        if (distAnchor < 56 || distAnchor > 340 || seg.hw < 1.8) continue;
+        const cf = coastalFrame(region, seg.cx, seg.cz);
+        if (cf.inland - bestShoreInland < 26 || cf.inland - bestShoreInland > 185) continue;
+        const spanHalf = Math.max(11, seg.hw + 7);
+        const hL = terrainSurfaceSample(heights, seg.cx + seg.nx * spanHalf, seg.cz + seg.nz * spanHalf, region);
+        const hR = terrainSurfaceSample(heights, seg.cx - seg.nx * spanHalf, seg.cz - seg.nz * spanHalf, region);
+        if (hL < PREFAB_DRY_GROUND_M || hR < PREFAB_DRY_GROUND_M) continue;
+        const score = 10 - Math.abs(hL - hR) * 1.4 - Math.abs((cf.inland - bestShoreInland) - 68) * 0.05;
+        if (score > bestCrossScore) {
+          bestCrossScore = score;
+          chosenSeg = seg;
+        }
+      }
+      if (chosenSeg) {
+        const spanLen = Math.max(24, Math.min(48, Math.round(chosenSeg.hw * 2 + 16)));
+        const bankH = Math.max(
+          terrainSurfaceSample(heights, chosenSeg.cx + chosenSeg.nx * (spanLen * 0.45), chosenSeg.cz + chosenSeg.nz * (spanLen * 0.45), region),
+          terrainSurfaceSample(heights, chosenSeg.cx - chosenSeg.nx * (spanLen * 0.45), chosenSeg.cz - chosenSeg.nz * (spanLen * 0.45), region),
+        );
+        const placedBridge = addPrefab('stone_arch_bridge', 0, 0, 0, Math.max(2.2, bankH + 0.4), {
+          at: { x: chosenSeg.cx, z: chosenSeg.cz },
+          yaw: Math.atan2(chosenSeg.nx, chosenSeg.nz),
+          length: spanLen,
+          width: 9.6,
+          exactY: Math.max(2.2, bankH - 0.15),
+          label: `River Cutwater Bridge #${bridgesBuilt + 1}`,
+        });
+        if (placedBridge) bridgesBuilt++;
+      }
     }
   } else if (
     inTimberManner
@@ -5106,15 +5288,15 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     : worldFromCoastalFrame(region, bestShoreAlong, bestShoreInland + 32);
   const berthPos = worldFromCoastalFrame(region, bestShoreAlong, bestShoreInland - 76);
   const berthDepth = -terrainSample(heights, berthPos.x, berthPos.z, region);
-  const dockAlongOffset = isLisbonRoyalDock ? 22 : -6;
-  const dockInlandOffset = isLisbonRoyalDock ? -84 : -62;
+  const dockAlongOffset = isDerivedMetropolePort ? 22 : -6;
+  const dockInlandOffset = isDerivedMetropolePort ? -84 : -62;
   const dockPos = settleDockBerth(heights, region, instances, worldFromCoastalFrame(region, bestShoreAlong + dockAlongOffset, bestShoreInland + dockInlandOffset));
   const dockDepth = -terrainSample(heights, dockPos.x, dockPos.z, region);
-  const dockHeading = (((region.shoreBearing ?? 112) - (isLisbonRoyalDock ? 100 : 108)) % 360 + 360) % 360;
+  const dockHeading = (((region.shoreBearing ?? 112) - (isDerivedMetropolePort ? 100 : 108)) % 360 + 360) % 360;
 
   const clearRadius = !allowColonialPort
     ? 0
-    : isLisbonRoyalDock
+    : isDerivedMetropolePort
       ? 185
       : colonyGrowth.stage === 'outpost'
         ? 96
@@ -9545,6 +9727,25 @@ function dressProceduralCoastalPack(pack, heights, port, elevationSource, satell
   const biome = synthesizeCoastalBiome(region, heights, beaches, port, satelliteData);
   const albedo = synthesizeCoastalAlbedo(region, heights, beaches, port, biome, satelliteData, shoreDist);
   const vegetation = seedCoastalVegetation(region, heights, biome, beaches, port, 5, shoreDist);
+  const waterCheck = !pack.skipPortPlacement && country ? createInlandWaterSampler(country, { margin: 4.5 }) : null;
+  if (waterCheck && Array.isArray(port?.instances) && port.instances.length) {
+    const WATER_EXEMPT_PREFABS = new Set(['stone_arch_bridge', 'timber_mole_pier', 'stone_quay_seawall']);
+    const hitsWaterFootprint = (inst) => {
+      if (!inst || WATER_EXEMPT_PREFABS.has(inst.prefabId)) return false;
+      if (waterCheck(inst.x, inst.z)) return true;
+      const c = Math.cos(inst.yaw ?? 0), s = Math.sin(inst.yaw ?? 0);
+      const hw = (inst.width ?? 10) * 0.5, hl = (inst.length ?? 10) * 0.5;
+      for (const [lx, lz] of [[-hw, -hl], [hw, -hl], [hw, hl], [-hw, hl]]) {
+        if (waterCheck(inst.x + lx * c + lz * s, inst.z - lx * s + lz * c)) return true;
+      }
+      return false;
+    };
+    const before = port.instances.length;
+    port.instances = port.instances.filter((inst) => !hitsWaterFootprint(inst));
+    if (port.instances.length !== before) {
+      port.instanceCount = port.instances.length;
+    }
+  }
   const portGeometry = buildPortPrefabGeometry(port, vegetation.palms);
   const views = pack.skipPortPlacement ? null : createCoastalViews(region, heights, port);
 
@@ -9578,7 +9779,7 @@ export function completeProceduralCoastalPack(pack) {
   return dressProceduralCoastalPack(pack, pack.heights, pack.port, pending.elevationSource, pending.satelliteData, pack.climateProfile);
 }
 
-export function generateProceduralCoastalPack(regionSpec = 'cartagena', overrides = {}) {
+export function generateProceduralCoastalPack(regionSpec = 'cartagena', overrides = {}, precomputedHeights = null) {
   const mergedSpec =
     overrides && Object.keys(overrides).length > 0
       ? typeof regionSpec === 'string'
@@ -9589,7 +9790,14 @@ export function generateProceduralCoastalPack(regionSpec = 'cartagena', override
   if (overrides?.deferSynthesis) {
     return { region, elevationSource: 'pending-dem' };
   }
-  return finalizeProceduralCoastalPack({ region }, synthesizeCoastalTerrain(region));
+  const srcHeights = precomputedHeights instanceof Float32Array ? new Float32Array(precomputedHeights) : synthesizeCoastalTerrain(region);
+  return finalizeProceduralCoastalPack(
+    { region },
+    srcHeights,
+    precomputedHeights ? 'survey-dem' : 'procedural-geomorphology',
+    null,
+    Boolean(overrides?.preserveRealCoast || precomputedHeights),
+  );
 }
 
 function rasterizeTileGrid(loaded, tx0, ty0, w, h) {

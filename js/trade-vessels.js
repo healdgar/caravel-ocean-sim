@@ -247,6 +247,235 @@ function appendLusoriaCargo(verts, inds, groups, modelId = 'lusoria') {
   });
 }
 
+// Appends a watertight articulated 16th-century mariner in design space scaled inversely by designScale to true metres.
+// Anatomy zone in uv.x: <0.22 skin, 0.22..0.48 breeches/boots, 0.48..0.78 tunic (tinted via uv.y), >=0.78 barrete cap.
+// Motion flexibility in uv.y: 0.0 fixed seated lower body/feet, >0.1 upper torso/head/arms sway factor.
+function appendHumanFigure9(verts, inds, origin, facingYaw, designScale, matId, options = {}) {
+  const {
+    seated = false,
+    toneSeed = 0.35,
+    leanZ = 0,
+    leftHand = null,
+    rightHand = null,
+  } = options;
+  const invX = 1 / (designScale[0] || 1);
+  const invY = 1 / (designScale[1] || 1);
+  const invZ = 1 / (designScale[2] || 1);
+  const cf = Math.cos(facingYaw), sf = Math.sin(facingYaw);
+  const toDesign = (lx, ly, lz) => [
+    origin[0] + (lx * cf - lz * sf) * invX,
+    origin[1] + ly * invY,
+    origin[2] + (lx * sf + lz * cf) * invZ,
+  ];
+  const pushLimb = (p0L, p1L, r0, r1, sides, uvX, uvY0, uvY1) => {
+    const p0 = toDesign(p0L[0], p0L[1], p0L[2]);
+    const p1 = toDesign(p1L[0], p1L[1], p1L[2]);
+    const dx = p1[0] - p0[0], dy = p1[1] - p0[1], dz = p1[2] - p0[2];
+    const len = Math.hypot(dx, dy, dz);
+    if (len < 1e-4) return;
+    const ax = [dx / len, dy / len, dz / len];
+    const ref = Math.abs(ax[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+    let ux = ax[1] * ref[2] - ax[2] * ref[1];
+    let uy = ax[2] * ref[0] - ax[0] * ref[2];
+    let uz = ax[0] * ref[1] - ax[1] * ref[0];
+    const ul = Math.hypot(ux, uy, uz) || 1;
+    ux /= ul; uy /= ul; uz /= ul;
+    const vx = ax[1] * uz - ax[2] * uy;
+    const vy = ax[2] * ux - ax[0] * uz;
+    const vz = ax[0] * uy - ax[1] * ux;
+    const rx0 = r0 * invX, ry0 = r0 * invY, rz0 = r0 * invZ;
+    const rx1 = r1 * invX, ry1 = r1 * invY, rz1 = r1 * invZ;
+    const r0Vec = (c, s) => [
+      p0[0] + (ux * c + vx * s) * (r0 / Math.hypot((ux * c + vx * s) * designScale[0], (uy * c + vy * s) * designScale[1], (uz * c + vz * s) * designScale[2]) || rx0),
+      p0[1] + (uy * c + vy * s) * (r0 / Math.hypot((ux * c + vx * s) * designScale[0], (uy * c + vy * s) * designScale[1], (uz * c + vz * s) * designScale[2]) || ry0),
+      p0[2] + (uz * c + vz * s) * (r0 / Math.hypot((ux * c + vx * s) * designScale[0], (uy * c + vy * s) * designScale[1], (uz * c + vz * s) * designScale[2]) || rz0),
+    ];
+    const r1Vec = (c, s) => [
+      p1[0] + (ux * c + vx * s) * (r1 / Math.hypot((ux * c + vx * s) * designScale[0], (uy * c + vy * s) * designScale[1], (uz * c + vz * s) * designScale[2]) || rx1),
+      p1[1] + (uy * c + vy * s) * (r1 / Math.hypot((ux * c + vx * s) * designScale[0], (uy * c + vy * s) * designScale[1], (uz * c + vz * s) * designScale[2]) || ry1),
+      p1[2] + (uz * c + vz * s) * (r1 / Math.hypot((ux * c + vx * s) * designScale[0], (uy * c + vy * s) * designScale[1], (uz * c + vz * s) * designScale[2]) || rz1),
+    ];
+    for (let s = 0; s < sides; s++) {
+      const a0 = (s / sides) * Math.PI * 2;
+      const a1 = ((s + 1) / sides) * Math.PI * 2;
+      const c0 = Math.cos(a0), s0 = Math.sin(a0);
+      const c1 = Math.cos(a1), s1 = Math.sin(a1);
+      const q00 = r0Vec(c0, s0), q10 = r0Vec(c1, s1);
+      const q01 = r1Vec(c0, s0), q11 = r1Vec(c1, s1);
+      pushTri9(verts, inds, p0, q10, q00, matId, [[uvX, uvY0], [uvX, uvY0], [uvX, uvY0]]);
+      pushQuad9(verts, inds, q00, q10, q11, q01, matId, [[uvX, uvY0], [uvX, uvY0], [uvX, uvY1], [uvX, uvY1]]);
+      pushTri9(verts, inds, p1, q01, q11, matId, [[uvX, uvY1], [uvX, uvY1], [uvX, uvY1]]);
+    }
+  };
+
+  // Encode anatomy + tunic tint + flexion weight in UV so animated stations bend naturally at waist.
+  const hipY = seated ? 0.06 : 0.84;
+  const shoulderY = seated ? 0.56 : 1.38;
+  const headBaseY = shoulderY + 0.08;
+  const tunicUvY = Math.max(0.18, Math.min(0.95, 0.20 + toneSeed * 0.72));
+
+  if (seated) {
+    // Seated thighs forward (+Z) + calves down to deck floorboards (uv.y = 0 -> locked on bench)
+    for (const sx of [-0.11, 0.11]) {
+      pushLimb([sx, 0.05, 0.0], [sx * 1.15, 0.02, 0.34], 0.078, 0.065, 6, 0.35, 0.0, 0.0);
+      pushLimb([sx * 1.15, 0.02, 0.34], [sx * 1.1, -0.34, 0.42], 0.060, 0.048, 6, 0.35, 0.0, 0.0);
+    }
+  } else {
+    // Standing boots & breeches planted firmly on deck (origin.y == sole)
+    for (const sx of [-0.10, 0.10]) {
+      pushLimb([sx, 0.0, 0.02], [sx, 0.42, 0.01], 0.065, 0.062, 6, 0.35, 0.0, 0.05);
+      pushLimb([sx, 0.42, 0.01], [sx * 0.9, hipY, 0.0], 0.068, 0.082, 6, 0.35, 0.05, 0.12);
+    }
+  }
+
+  // Torso (waist -> broad shoulders) + tunic skirt
+  pushLimb([0, hipY - 0.03, 0], [0, shoulderY, leanZ], 0.145, 0.185, 8, 0.62, tunicUvY * 0.45, tunicUvY);
+  // Head (skin) & mariner's barrete wool cap
+  const headTopY = headBaseY + 0.19;
+  pushLimb([0, headBaseY - 0.02, leanZ], [0, headTopY, leanZ * 1.05], 0.095, 0.092, 8, 0.10, 0.85, 0.95);
+  pushLimb([0, headTopY - 0.02, leanZ * 1.05], [0, headTopY + 0.09, leanZ * 1.02 - 0.02], 0.105, 0.072, 8, 0.88, 0.95, 1.0);
+
+  // Arms from shoulders to target hands (if provided in design coords, convert to local offsets)
+  const worldToLocal = (target) => {
+    if (!target) return null;
+    const dx = (target[0] - origin[0]) * (designScale[0] || 1);
+    const dy = (target[1] - origin[1]) * (designScale[1] || 1);
+    const dz = (target[2] - origin[2]) * (designScale[2] || 1);
+    return [dx * cf + dz * sf, dy, -dx * sf + dz * cf];
+  };
+  const lHand = worldToLocal(leftHand) ?? [-0.22, shoulderY - 0.12, 0.28];
+  const rHand = worldToLocal(rightHand) ?? [0.22, shoulderY - 0.12, 0.28];
+  for (const [sx, hand] of [[-0.18, lHand], [0.18, rHand]]) {
+    const sh = [sx, shoulderY - 0.04, leanZ];
+    const elbow = [(sh[0] + hand[0]) * 0.55 + sx * 0.18, (sh[1] + hand[1]) * 0.5 - 0.05, (sh[2] + hand[2]) * 0.5];
+    pushLimb(sh, elbow, 0.055, 0.046, 6, 0.62, 0.82, 0.88);
+    pushLimb(elbow, hand, 0.044, 0.036, 6, 0.12, 0.88, 0.96);
+  }
+}
+
+function appendTradeCrew(verts, inds, groups, spec, scaleSpec, model) {
+  const frame = model?.designFrame ?? { length: 12, beam: 3.6, verticalScale: 1 };
+  const designScale = [
+    spec.beam / (frame.beam || 3.6),
+    frame.verticalScale || 1,
+    spec.length / (frame.length || 12),
+  ];
+  const addGroup = (id, nodeId, fn) => {
+    const startIdx = inds.length;
+    fn();
+    if (inds.length > startIdx) {
+      groups.push({ id, nodeId, firstVertex: startIdx, vertexCount: inds.length - startIdx });
+    }
+  };
+
+  if (spec.index === 4 && spec.modelId === 'lusoria') {
+    const d = rowingDesign('lusoria');
+    const pivots = bargeOarPivotsForWGSL();
+    const helmZ = warpSectionZ(d.crewStations.helm.z, scaleSpec.waistWarpK);
+    const helmY = rowingDeck('lusoria', helmZ) + BARGE_Y_LIFT;
+    const helmX = Math.max(-0.35, Math.min(0.18, d.crewStations.helm.x - 0.18));
+    const swPiv = [
+      d.steering.pivot[0],
+      d.steering.pivot[1] + BARGE_Y_LIFT,
+      warpSectionZ(d.steering.pivot[2], scaleSpec.waistWarpK),
+    ];
+    const swHandle = [
+      d.steering.handle[0] - 0.08,
+      helmY + 0.92 / designScale[1],
+      swPiv[2] - 0.72 / designScale[2],
+    ];
+    const swBlade = [
+      d.steering.blade[0] + 0.12,
+      Math.min(-0.18, d.steering.blade[1]) + BARGE_Y_LIFT,
+      swPiv[2] + 1.55 / designScale[2],
+    ];
+
+    // 1. Stern steering sweep + loom (matId 28)
+    addGroup('crew.sweep', 'hull', () => {
+      appendTaperedCylinder(verts, inds, swHandle, swPiv, 0.036, 0.044, 8, 28, 0);
+      appendTaperedCylinder(verts, inds, swPiv, swBlade, 0.044, 0.032, 8, 28, 0);
+      appendRoundedBox9(verts, inds, swBlade[0], swBlade[1], swBlade[2], 0.02, 0.13, 0.34, 28, 0);
+    });
+
+    // 2. Standing stern river pilot holding steering sweep (matId 27)
+    addGroup('crew.pilot', 'hull', () => {
+      appendHumanFigure9(verts, inds, [helmX, helmY, helmZ], -0.25, designScale, 27, {
+        seated: false,
+        toneSeed: 0.42,
+        leanZ: 0.04,
+        leftHand: [swHandle[0] - 0.06, swHandle[1] + 0.04, swHandle[2] - 0.08],
+        rightHand: swHandle,
+      });
+    });
+
+    // 3. Seated oarsmen synchronized with active oarlock stations (matId 29 + stationIdx/64)
+    addGroup('crew.oarsmen', 'deck.main', () => {
+      const ACTIVE_PAIRS = new Set([1, 3, 4, 7, 8, 10, 11]);
+      for (const st of d.stations) {
+        const pairIdx = st.index >> 1;
+        if (!ACTIVE_PAIRS.has(pairIdx)) continue;
+        const pivX = pivots[st.index * 4 + 0];
+        const pivY = pivots[st.index * 4 + 1];
+        const pivZ = pivots[st.index * 4 + 2];
+        const sz = warpSectionZ(st.seat[2], scaleSpec.waistWarpK);
+        const sy = rowingDeck('lusoria', sz) + BARGE_Y_LIFT + 0.34 / designScale[1];
+        const sx = st.seat[0] * 0.72;
+        const gripX = pivX * 0.32;
+        const gripY = Math.max(sy + 0.32 / designScale[1], pivY + 0.18 / designScale[1]);
+        const gripZ = pivZ + 0.20 / designScale[2];
+        appendHumanFigure9(verts, inds, [sx, sy, sz], 0, designScale, 29 + st.index / 64, {
+          seated: true,
+          toneSeed: ((st.index * 37) % 100) / 100,
+          leanZ: 0.08,
+          leftHand: [gripX - 0.14 / designScale[0], gripY, gripZ],
+          rightHand: [gripX + 0.14 / designScale[0], gripY, gripZ],
+        });
+      }
+    });
+  } else if (spec.index === 6 && spec.modelId === 'nina') {
+    // Harbor barque stern pilot on real deck + tiller sweep + fore deckhand
+    let deckMaxZ = 2.6;
+    let sternDeckY = 1.15;
+    let bestSternY = -Infinity;
+    let foreDeckY = 0.95;
+    let bestForeY = -Infinity;
+    for (let i = 0; i < verts.length; i += 9) {
+      const mat = Math.floor(verts[i + 6]);
+      if (mat !== 0) continue;
+      const x = verts[i], y = verts[i + 1], z = verts[i + 2];
+      if (Math.abs(x) < 0.7 && z > 1.8 && z < 4.5 && y > bestSternY) {
+        bestSternY = y;
+        sternDeckY = y;
+        deckMaxZ = z;
+      }
+      if (Math.abs(x) < 0.6 && z < -1.0 && z > -3.5 && y > bestForeY) {
+        bestForeY = y;
+        foreDeckY = y;
+      }
+    }
+    const helmZ = Math.min(3.5, Math.max(2.3, deckMaxZ - 0.35));
+    const helmX = -0.22;
+    const tillerPivot = [0, sternDeckY + 0.85 / designScale[1], helmZ + 0.95 / designScale[2]];
+    const tillerGrip = [0.02, sternDeckY + 0.92 / designScale[1], helmZ - 0.18 / designScale[2]];
+    addGroup('crew.sweep', 'hull', () => {
+      appendTaperedCylinder(verts, inds, tillerPivot, tillerGrip, 0.045, 0.032, 8, 28, 0);
+    });
+    addGroup('crew.pilot', 'hull', () => {
+      appendHumanFigure9(verts, inds, [helmX, sternDeckY, helmZ], 0.15, designScale, 27, {
+        seated: false,
+        toneSeed: 0.72,
+        leanZ: 0.03,
+        leftHand: [-0.28 / designScale[0], sternDeckY + 0.96 / designScale[1], helmZ - 0.16 / designScale[2]],
+        rightHand: tillerGrip,
+      });
+      appendHumanFigure9(verts, inds, [0.18, foreDeckY, -2.1], 0.1, designScale, 27, {
+        seated: false,
+        toneSeed: 0.18,
+      });
+    });
+  }
+}
+
 // Resolves each triangle to its innermost leaf group index, drops unwanted groups, compacts
 // vertices/indices, and emits non-overlapping contiguous group ranges for fracture/collider/assembly.
 function filterAndCompactMesh(vertices, indices, groups, dropRegex = null) {
@@ -374,23 +603,24 @@ function tradeMaterialLinearColor(matId) {
 function buildVesselContinuum(spec, vertices, indices, designScale, beam, length, maxAirDraftMetres) {
   const sx = designScale[0], sy = designScale[1], sz = designScale[2];
   const vertCountAll = Math.floor(vertices.length / 9);
-  const sampleStep = Math.max(1, Math.floor(vertCountAll / 240));
-  const pts = [];
-  const cols = [];
   let sumArea = 0;
   let meanR = 0, meanG = 0, meanB = 0;
   let minY = Infinity, maxY = -Infinity;
-  for (let i = 0; i < vertCountAll; i += sampleStep) {
+  let minZHull = Infinity, maxZHull = -Infinity;
+  for (let i = 0; i < vertCountAll; i++) {
     const o = i * 9;
     const x = vertices[o] * sx;
     const y = vertices[o + 1] * sy;
     const z = vertices[o + 2] * sz;
+    const mat = Math.floor(vertices[o + 6]);
     const col = tradeMaterialLinearColor(vertices[o + 6]);
-    pts.push([x, y, z]);
-    cols.push(col);
     if (y < minY) minY = y;
     if (y > maxY) maxY = y;
-    const w = vertices[o + 6] === 9 || vertices[o + 6] === 13 ? 1.8 : 1.0;
+    if (mat !== 9 && mat !== 13 && mat !== 10 && y <= beam * 0.9 + 2.2) {
+      if (z < minZHull) minZHull = z;
+      if (z > maxZHull) maxZHull = z;
+    }
+    const w = (mat === 9 || mat === 13) ? 1.8 : 1.0;
     sumArea += w;
     meanR += col[0] * w;
     meanG += col[1] * w;
@@ -398,88 +628,158 @@ function buildVesselContinuum(spec, vertices, indices, designScale, beam, length
   }
   if (!Number.isFinite(minY)) minY = -beam * 0.25;
   if (!Number.isFinite(maxY)) maxY = maxAirDraftMetres;
+  if (!Number.isFinite(minZHull) || maxZHull - minZHull < 1.0) {
+    minZHull = -length * 0.5;
+    maxZHull = length * 0.5;
+  }
   const invW = 1 / Math.max(1e-4, sumArea);
   const meanColour = [meanR * invW, meanG * invW, meanB * invW];
+
+  // Sample longitudinal profile slabs [0..N_RINGS-1] from real scaled geometry so every ship
+  // keeps pointed bow, tapered transom, sheer/castles, and crisp sail-fin / mast silhouettes.
+  const N_RINGS = 6;
+  const zSpan = Math.max(2.0, maxZHull - minZHull);
+  const hullBins = Array.from({ length: N_RINGS }, () => ({
+    maxX: 0, minY: 0, maxDeckY: 0.4, hullColR: 0, hullColG: 0, hullColB: 0, hullN: 0,
+    deckColR: 0, deckColG: 0, deckColB: 0, deckN: 0,
+    sailMaxX: 0, sailMaxY: -Infinity, sailMinY: Infinity, sailN: 0,
+    sailColR: 0, sailColG: 0, sailColB: 0,
+    mastMaxY: -Infinity, mastN: 0,
+  }));
+  const hullTopCut = Math.max(1.8, beam * 0.85);
+  for (let i = 0; i < vertCountAll; i++) {
+    const o = i * 9;
+    const x = vertices[o] * sx;
+    const y = vertices[o + 1] * sy;
+    const z = vertices[o + 2] * sz;
+    const mat = Math.floor(vertices[o + 6]);
+    const col = tradeMaterialLinearColor(vertices[o + 6]);
+    const bin = Math.max(0, Math.min(N_RINGS - 1, Math.floor(((z - minZHull) / zSpan) * N_RINGS)));
+    const b = hullBins[bin];
+    if (mat === 9 || mat === 13) {
+      b.sailMaxX = Math.max(b.sailMaxX, Math.abs(x));
+      if (y > b.sailMaxY) b.sailMaxY = y;
+      if (y < b.sailMinY) b.sailMinY = y;
+      b.sailColR += col[0]; b.sailColG += col[1]; b.sailColB += col[2];
+      b.sailN++;
+    } else if (mat === 10) {
+      if (y > b.mastMaxY) b.mastMaxY = y;
+      b.mastN++;
+    } else {
+      if (Math.abs(x) > b.maxX && y <= hullTopCut) b.maxX = Math.abs(x);
+      if (y < b.minY) b.minY = y;
+      if (y <= hullTopCut && y > b.maxDeckY) b.maxDeckY = y;
+      if (y < 0.9) {
+        b.hullColR += col[0]; b.hullColG += col[1]; b.hullColB += col[2]; b.hullN++;
+      } else {
+        b.deckColR += col[0]; b.deckColG += col[1]; b.deckColB += col[2]; b.deckN++;
+      }
+    }
+  }
+
+  // Single connected closed genus-0 articulated ship cross-section:
+  // Bow apex -> N_RINGS x K=6 contour rings [keel, stbd sheer, stbd upper/sail, ridge/peak, port upper/sail, port sheer] -> Stern apex.
+  // V = 2 + 6*6 = 38 vertices, F = 6 + 5*12 + 6 = 72 tris, E = 108 edges -> V - E + F = 2.
+  const K = 6;
+  const initPos = [];
+  const vertColors = new Float32Array((2 + N_RINGS * K) * 3);
+  const vertSailMask = new Float32Array(2 + N_RINGS * K);
+  const setVertColor = (vi, col, isSail = 0) => {
+    vertColors[vi * 3 + 0] = Math.min(1, col[0]);
+    vertColors[vi * 3 + 1] = Math.min(1, col[1]);
+    vertColors[vi * 3 + 2] = Math.min(1, col[2]);
+    vertSailMask[vi] = isSail;
+  };
+
+  const bFirst = hullBins[0];
+  const bLast = hullBins[N_RINGS - 1];
+  const bowY = Math.max(0.15, (bFirst.minY + bFirst.maxDeckY) * 0.55);
+  const sternY = Math.max(0.35, (bLast.minY + bLast.maxDeckY) * 0.55);
+  initPos.push([0, bowY, minZHull - 0.12]);
+  setVertColor(0, [0.24, 0.16, 0.10], 0);
+
+  for (let r = 0; r < N_RINGS; r++) {
+    const b = hullBins[r];
+    const u = (r + 0.5) / N_RINGS;
+    const zR = minZHull + u * zSpan;
+    const taper = Math.sin(Math.pow(u, 0.85) * Math.PI);
+    const halfB = Math.max(0.28, b.maxX > 0.1 ? b.maxX : beam * 0.48 * Math.max(0.35, taper));
+    const keelY = Math.min(-0.22, b.minY < -0.1 ? b.minY * 0.85 : -Math.max(0.32, beam * 0.22));
+    const deckY = Math.max(0.45, b.maxDeckY);
+    const sheerY = Math.max(0.18, deckY * 0.82);
+
+    const hCol = b.hullN > 0 ? [b.hullColR / b.hullN, b.hullColG / b.hullN, b.hullColB / b.hullN] : [0.25, 0.17, 0.11];
+    const dCol = b.deckN > 0 ? [b.deckColR / b.deckN, b.deckColG / b.deckN, b.deckColB / b.deckN] : [0.33, 0.24, 0.15];
+    const sCol = b.sailN > 0 ? [b.sailColR / b.sailN, b.sailColG / b.sailN, b.sailColB / b.sailN] : [0.80, 0.74, 0.61];
+
+    const hasSail = !spec.furlSails && !spec.unmasted && b.sailN > 0 && b.sailMaxY > deckY + 1.0;
+    const hasBareMast = spec.furlSails && !spec.unmasted && b.mastN > 0 && b.mastMaxY > deckY + 1.2;
+
+    let shX, shY, peakY, topCol, topMask;
+    if (hasSail) {
+      shX = Math.max(0.32, Math.min(beam * 1.45, b.sailMaxX > 0.2 ? b.sailMaxX * 0.92 : beam * 0.55));
+      const sailMid = Number.isFinite(b.sailMinY) ? (b.sailMinY * 0.45 + b.sailMaxY * 0.55) : (deckY + (b.sailMaxY - deckY) * 0.5);
+      shY = Math.max(sheerY + 0.35, sailMid);
+      peakY = Math.max(shY + 0.45, b.sailMaxY * 0.96);
+      topCol = sCol;
+      topMask = 1.0;
+    } else if (hasBareMast) {
+      shX = Math.max(0.22, halfB * 0.32);
+      shY = deckY + 0.30;
+      peakY = Math.max(deckY + 0.85, b.mastMaxY * 0.92);
+      topCol = [0.40, 0.30, 0.20];
+      topMask = 0.0;
+    } else {
+      shX = Math.max(0.20, halfB * 0.45);
+      shY = deckY + 0.12;
+      peakY = deckY + 0.28;
+      topCol = dCol;
+      topMask = 0.0;
+    }
+
+    const baseV = initPos.length;
+    initPos.push([0, keelY, zR]);        // 0: keel bottom
+    initPos.push([+halfB, sheerY, zR]);  // 1: starboard sheer
+    initPos.push([+shX, shY, zR]);       // 2: starboard yard/shoulder
+    initPos.push([0, peakY, zR]);        // 3: dorsal sail/castle/mast apex
+    initPos.push([-shX, shY, zR]);       // 4: port yard/shoulder
+    initPos.push([-halfB, sheerY, zR]);  // 5: port sheer
+
+    setVertColor(baseV + 0, [0.06, 0.05, 0.04], 0);
+    setVertColor(baseV + 1, hCol, 0);
+    setVertColor(baseV + 2, topCol, topMask);
+    setVertColor(baseV + 3, topCol, topMask);
+    setVertColor(baseV + 4, topCol, topMask);
+    setVertColor(baseV + 5, hCol, 0);
+  }
+
+  const topIdx = initPos.length;
+  initPos.push([0, sternY, maxZHull + 0.05]);
+  setVertColor(topIdx, [0.26, 0.18, 0.11], 0);
+  const V = initPos.length;
 
   const cx = 0;
   const cy = Math.max(0.25, (minY + maxY) * 0.42);
   const cz = 0;
-  const rxEll = Math.max(0.9, beam * 0.54);
-  const ryEll = Math.max(0.7, (maxY - minY) * 0.46);
-  const rzEll = Math.max(1.8, length * 0.52);
 
-  // Genus-0 watertight manifold sphere topology: R=5 rings x K=10 sectors (V=52, E=150, F=100; V - E + F = 2)
-  const RINGS = 5, SEGS = 10;
-  const dirs = [[0, -1, 0]];
-  for (let r = 1; r <= RINGS; r++) {
-    const theta = (r / (RINGS + 1)) * Math.PI - Math.PI * 0.5;
-    const ct = Math.cos(theta), st = Math.sin(theta);
-    for (let s = 0; s < SEGS; s++) {
-      const phi = (s / SEGS) * Math.PI * 2;
-      dirs.push([Math.sin(phi) * ct, st, -Math.cos(phi) * ct]);
-    }
-  }
-  dirs.push([0, 1, 0]);
-  const V = dirs.length;
-  const topIdx = V - 1;
-
-  const initPos = new Array(V);
-  const vertColors = new Float32Array(V * 3);
-  for (let i = 0; i < V; i++) {
-    const d = dirs[i];
-    let wSum = 0.05, rAccum = Math.hypot(d[0] * rxEll, d[1] * ryEll, d[2] * rzEll) * 0.05;
-    let cR = meanColour[0] * 0.05, cG = meanColour[1] * 0.05, cB = meanColour[2] * 0.05;
-    for (let k = 0; k < pts.length; k++) {
-      const qx = pts[k][0] - cx, qy = pts[k][1] - cy, qz = pts[k][2] - cz;
-      const qLen = Math.hypot(qx, qy, qz);
-      if (qLen < 1e-4) continue;
-      const dot = (qx * d[0] + qy * d[1] + qz * d[2]) / qLen;
-      if (dot > 0.08) {
-        const w = Math.pow(dot, 6);
-        wSum += w;
-        rAccum += w * (qx * d[0] + qy * d[1] + qz * d[2]);
-        cR += w * cols[k][0];
-        cG += w * cols[k][1];
-        cB += w * cols[k][2];
-      }
-    }
-    const rEnv = rAccum / wSum;
-    const rEll = 1 / Math.hypot(d[0] / rxEll, d[1] / ryEll, d[2] / rzEll);
-    const rFinal = 0.62 * Math.max(rEll * 0.65, rEnv) + 0.38 * rEll;
-    initPos[i] = [cx + d[0] * rFinal, cy + d[1] * rFinal, cz + d[2] * rFinal];
-    vertColors[i * 3] = Math.min(1, cR / wSum);
-    vertColors[i * 3 + 1] = Math.min(1, cG / wSum);
-    vertColors[i * 3 + 2] = Math.min(1, cB / wSum);
-  }
-
-  // CCW outward winding verified against center
+  // CCW outward closed winding (Euler characteristic V - E + F = 2)
   const rawTris = [];
-  for (let s = 0; s < SEGS; s++) {
-    const n = (s + 1) % SEGS;
+  for (let s = 0; s < K; s++) {
+    const n = (s + 1) % K;
     rawTris.push([0, 1 + n, 1 + s]);
   }
-  for (let r = 0; r < RINGS - 1; r++) {
-    const r0 = 1 + r * SEGS, r1 = 1 + (r + 1) * SEGS;
-    for (let s = 0; s < SEGS; s++) {
-      const n = (s + 1) % SEGS;
+  for (let r = 0; r < N_RINGS - 1; r++) {
+    const r0 = 1 + r * K, r1 = 1 + (r + 1) * K;
+    for (let s = 0; s < K; s++) {
+      const n = (s + 1) % K;
       rawTris.push([r0 + s, r0 + n, r1 + n]);
       rawTris.push([r0 + s, r1 + n, r1 + s]);
     }
   }
-  const topRing = 1 + (RINGS - 1) * SEGS;
-  for (let s = 0; s < SEGS; s++) {
-    const n = (s + 1) % SEGS;
-    rawTris.push([topRing + s, topRing + n, topIdx]);
-  }
-  for (const t of rawTris) {
-    const a = initPos[t[0]], b = initPos[t[1]], c = initPos[t[2]];
-    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
-    const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
-    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
-    const mx = (a[0] + b[0] + c[0]) / 3 - cx, my = (a[1] + b[1] + c[1]) / 3 - cy, mz = (a[2] + b[2] + c[2]) / 3 - cz;
-    if (nx * mx + ny * my + nz * mz < 0) {
-      const tmp = t[1]; t[1] = t[2]; t[2] = tmp;
-    }
+  const sternRing = 1 + (N_RINGS - 1) * K;
+  for (let s = 0; s < K; s++) {
+    const n = (s + 1) % K;
+    rawTris.push([sternRing + s, sternRing + n, topIdx]);
   }
 
   const F = rawTris.length;
@@ -538,9 +838,9 @@ function buildVesselContinuum(spec, vertices, indices, designScale, beam, length
   stateNormals.push(initialStats.outNorm);
 
   let aliveTris = F;
-  let prevErr = 0.02;
+  let prevErr = 0.05;
   let stepIdx = 0;
-  const MAX_COLLAPSE_STEPS = 48;
+  const MAX_COLLAPSE_STEPS = 56;
 
   while (aliveTris > 6 && stepIdx < MAX_COLLAPSE_STEPS) {
     const adjVerts = Array.from({ length: V }, () => new Set());
@@ -562,13 +862,13 @@ function buildVesselContinuum(spec, vertices, indices, designScale, beam, length
 
     let bestEdge = null;
     let bestCost = Infinity;
+    const minDot = aliveTris > 18 ? 0.05 : -0.35;
     for (const [key, shared] of edgeTris.entries()) {
       if (shared.length !== 2) continue;
       const sep = key.indexOf(':');
       const u = Number(key.slice(0, sep));
       const v = Number(key.slice(sep + 1));
       if (!vertAlive[u] || !vertAlive[v]) continue;
-      // Strict link condition keeps genus-0 closed 2-manifold intact
       let commonCount = 0;
       for (const n of adjVerts[u]) {
         if (adjVerts[v].has(n)) commonCount++;
@@ -578,6 +878,8 @@ function buildVesselContinuum(spec, vertices, indices, designScale, beam, length
       const pu = curPos[u], pv = curPos[v];
       const mid = [(pu[0] + pv[0]) * 0.5, (pu[1] + pv[1]) * 0.5, (pu[2] + pv[2]) * 0.5];
       const edgeLen = Math.hypot(pu[0] - pv[0], pu[1] - pv[1], pu[2] - pv[2]);
+      const seamPenalty = vertSailMask[u] !== vertSailMask[v] ? 1.85 : 1.0;
+      const cost = edgeLen * seamPenalty;
       let valid = true;
       for (let t = 0; t < F; t++) {
         if (!triAlive[t] || t === shared[0] || t === shared[1]) continue;
@@ -594,20 +896,20 @@ function buildVesselContinuum(spec, vertices, indices, designScale, beam, length
         const v1x = c1[0] - a1[0], v1y = c1[1] - a1[1], v1z = c1[2] - a1[2];
         const n1x = u1y * v1z - u1z * v1y, n1y = u1z * v1x - u1x * v1z, n1z = u1x * v1y - u1y * v1x;
         const l0 = Math.hypot(n0x, n0y, n0z), l1 = Math.hypot(n1x, n1y, n1z);
-        if (l1 < 1e-5 || (n0x * n1x + n0y * n1y + n0z * n1z) / (l0 * l1 + 1e-8) < 0.05) {
+        if (l1 < 1e-5 || (n0x * n1x + n0y * n1y + n0z * n1z) / (l0 * l1 + 1e-8) < minDot) {
           valid = false;
           break;
         }
       }
       if (!valid) continue;
-      if (edgeLen < bestCost) {
-        bestCost = edgeLen;
-        bestEdge = { u, v, mid, shared };
+      if (cost < bestCost) {
+        bestCost = cost;
+        bestEdge = { u, v, mid, shared, edgeLen };
       }
     }
 
     if (!bestEdge) break;
-    const { u, v, mid, shared } = bestEdge;
+    const { u, v, mid, shared, edgeLen } = bestEdge;
     curPos[v] = mid;
     vertAlive[u] = 0;
     ancestor[u] = v;
@@ -624,8 +926,8 @@ function buildVesselContinuum(spec, vertices, indices, designScale, beam, length
     }
 
     const stats = computeMeshVolumeAndNormals();
-    const scale = Math.max(1.0, Math.min(1.18, Math.cbrt(vol0 / Math.max(stats.vol, 1e-4))));
-    const nextErr = Math.max(prevErr + 0.012, bestCost * 0.45);
+    const scale = Math.max(1.0, Math.min(1.12, Math.cbrt(vol0 / Math.max(stats.vol, 1e-4))));
+    const nextErr = Math.max(prevErr + 0.035, edgeLen * 0.45);
     prevErr = nextErr;
     stepErrorsList.push(nextErr);
     stepScalesList.push(scale);
@@ -634,29 +936,7 @@ function buildVesselContinuum(spec, vertices, indices, designScale, beam, length
     stepIdx++;
   }
 
-  // Final morph state projects surviving <=6-triangle core onto analytical silhouette ellipsoid
-  const ellPos = new Float32Array(V * 3);
-  const ellNorm = new Float32Array(V * 3);
-  const prevPos = statePositions[statePositions.length - 1];
-  for (let i = 0; i < V; i++) {
-    const px = prevPos[i * 3] - cx, py = prevPos[i * 3 + 1] - cy, pz = prevPos[i * 3 + 2] - cz;
-    const s = 1 / Math.max(1e-4, Math.hypot(px / rxEll, py / ryEll, pz / rzEll));
-    ellPos[i * 3] = cx + px * s;
-    ellPos[i * 3 + 1] = cy + py * s;
-    ellPos[i * 3 + 2] = cz + pz * s;
-    const nx = (px * s) / (rxEll * rxEll);
-    const ny = (py * s) / (ryEll * ryEll);
-    const nz = (pz * s) / (rzEll * rzEll);
-    const nl = Math.hypot(nx, ny, nz) || 1;
-    ellNorm[i * 3] = nx / nl; ellNorm[i * 3 + 1] = ny / nl; ellNorm[i * 3 + 2] = nz / nl;
-  }
-  const endErr = Math.max(prevErr + 0.08, 0.24 * Math.max(rxEll, ryEll, rzEll));
-  stepErrorsList.push(endErr);
-  stepScalesList.push(1.0);
-  statePositions.push(ellPos);
-  stateNormals.push(ellNorm);
-
-  // Order triangles by descending retireStep so core <=6 triangles lead and collapsing tris retire cleanly at the tail
+  // Keep true angular <=6-triangle ship core (zero spherical balloon projection).
   const order = Array.from({ length: F }, (_, t) => t).sort((a, b) => retireStep[b] - retireStep[a]);
   const baseIndices = new Uint32Array(F * 3);
   const sortedRetire = new Int32Array(F);
@@ -669,7 +949,7 @@ function buildVesselContinuum(spec, vertices, indices, designScale, beam, length
     sortedRetire[i] = retireStep[t];
   }
 
-  const totalStates = statePositions.length; // stepCount + 1
+  const totalStates = statePositions.length;
   const stepCount = totalStates - 1;
   const activeTriCounts = new Uint32Array(totalStates);
   for (let s = 0; s < totalStates; s++) {
@@ -695,12 +975,15 @@ function buildVesselContinuum(spec, vertices, indices, designScale, beam, length
     }
   }
 
-  const radius = Math.hypot(rxEll, ryEll, rzEll);
-  // Finest continuum geometric error ~ 0.08 * max(beam, airDraft) ensures crisp full-rig near ship transitioning cleanly past ~150-300 m
-  const startError = Math.max(0.08, Math.min(0.45, beam * 0.05));
+  const rxSplat = Math.max(0.9, beam * 0.54);
+  const rySplat = Math.max(0.7, (maxY - minY) * 0.46);
+  const rzSplat = Math.max(1.8, length * 0.52);
+  const radius = Math.max(length * 0.54, maxAirDraftMetres * 0.54, Math.hypot(beam * 0.5, length * 0.5));
+  // Start continuum only beyond full-rig silhouette span (~38 px -> 27 px MSAA handoff, never bubbling near harbor vessels).
+  const startError = Math.max(0.65, Math.min(2.4, Math.max(length, maxAirDraftMetres) * 0.045));
   stepErrorsList[0] = startError;
   for (let s = 1; s < totalStates; s++) {
-    if (stepErrorsList[s] <= stepErrorsList[s - 1]) stepErrorsList[s] = stepErrorsList[s - 1] + 0.015;
+    if (stepErrorsList[s] <= stepErrorsList[s - 1]) stepErrorsList[s] = stepErrorsList[s - 1] + 0.06;
   }
 
   return Object.freeze({
@@ -717,11 +1000,12 @@ function buildVesselContinuum(spec, vertices, indices, designScale, beam, length
     morphPositions,
     morphNormals,
     vertColors,
+    vertSailMask,
     splat: Object.freeze({
       centre: [cx, cy, cz],
-      rx: rxEll,
-      ry: ryEll,
-      rz: rzEll,
+      rx: rxSplat,
+      ry: rySplat,
+      rz: rzSplat,
       radius,
       colour: meanColour,
     }),
@@ -828,8 +1112,21 @@ function buildArchetypeData(index) {
     }
   }
 
+  let preCompactVerts = warpedVerts;
+  let preCompactInds = stripped.indices;
+  let preCompactGroups = stripped.groups;
+  if (spec.index === 4 || spec.index === 6) {
+    const crewVerts = Array.from(warpedVerts);
+    const crewInds = Array.from(stripped.indices);
+    const crewGroups = stripped.groups.map((g) => ({ ...g }));
+    appendTradeCrew(crewVerts, crewInds, crewGroups, spec, scaleSpec, model);
+    preCompactVerts = new Float32Array(crewVerts);
+    preCompactInds = new Uint32Array(crewInds);
+    preCompactGroups = crewGroups;
+  }
+
   // Second compaction eliminates triangles collapsed by discrete pruning (e.g., Harbor Barque pruned masts or reduced oar pairs).
-  const finalMesh = filterAndCompactMesh(warpedVerts, stripped.indices, stripped.groups, null);
+  const finalMesh = filterAndCompactMesh(preCompactVerts, preCompactInds, preCompactGroups, null);
 
   const preFracture = prepareShipFracture({
     modelId: spec.modelId,
@@ -1155,69 +1452,100 @@ export function buildTradeVesselRoutes(snapshot, origin = { x: 0, z: 0 }, { rive
       scale: isRiver ? 0.78 : seaArchetype === 5 ? 0.92 : 0.94,
       depart: c.depart ?? 0, arrive: Math.max((c.depart ?? 0) + 0.1, c.arrive ?? 1),
       berth: null,
+      pilot: c.pilot ?? null,
+      oarsmen: Number.isFinite(c.oarsmen) ? c.oarsmen : 0,
       pts: poly.pts, totalLen: poly.totalLen,
       phaseOffset: (hashU32(c.index | 0, 53) % 1000) / 1000,
     });
   }
 
-  // Navigable-reach river trade barges steered into the deep thalweg channel clear of low bridges and banks.
-  const navigable = [];
-  for (const r of riverReaches) {
-    const stations = reachStations(r);
-    let seg = [];
-    const flush = () => {
-      if (seg.length >= 3) {
-        let len = 0, minHw = Infinity;
-        for (let i = 0; i < seg.length; i++) {
-          minHw = Math.min(minHw, seg[i].hw || 2.2);
-          if (i > 0) len += Math.hypot(seg[i].wx - seg[i - 1].wx, seg[i].wz - seg[i - 1].wz);
-        }
-        if (len >= 160) navigable.push({ stations: seg.slice(), length: len, minHw });
-      }
-      seg = [];
-    };
-    for (const s of stations) {
-      if ((s.hw ?? r.minHalfWidth ?? 0) >= 2.05 && !blockedByLowBridge(s.wx, s.wz, s.wy)) seg.push(s);
-      else flush();
-    }
-    flush();
+  // Canonical sim-driven manned river boats (`snapshot.riverBoats` from BOARD_MODEL) take authority over synthetic shuttles.
+  const simRiverBoats = Array.isArray(snapshot?.riverBoats) ? snapshot.riverBoats : [];
+  for (let ri = 0; ri < simRiverBoats.length && routes.length < MAX_TRADE_VESSELS; ri++) {
+    const rb = simRiverBoats[ri];
+    if (!rb || !Array.isArray(rb.points) || rb.points.length < 4) continue;
+    const poly = buildPolylineRoute(parseFlatPairs(rb.points), { x: ox, z: oz }, riverYAt);
+    if (!poly) continue;
+    routes.push({
+      id: `riverBoat:${rb.id ?? ri}`,
+      riverBoatId: rb.id ?? ri,
+      caravanKey: rb.key ?? null,
+      mode: 'river',
+      phase: rb.phase || 'shuttle',
+      archetype: 4,
+      scale: Number.isFinite(rb.scale) ? rb.scale : 0.82,
+      depart: rb.depart ?? 0,
+      arrive: Math.max((rb.depart ?? 0) + 0.25, rb.arrive ?? 1),
+      berth: null,
+      pilot: rb.pilot ?? null,
+      oarsmen: Number.isFinite(rb.oarsmen) ? rb.oarsmen : 4,
+      pts: poly.pts,
+      totalLen: poly.totalLen,
+      phaseOffset: (hashU32((rb.id ?? ri) + 3, 61) % 1000) / 1000,
+    });
   }
-  navigable.sort((a, b) => b.length - a.length);
-  for (let ri = 0; ri < navigable.length && routes.length < MAX_TRADE_VESSELS; ri++) {
-    const reach = navigable[ri];
-    const sts = reach.stations;
-    const bargeScale = Math.max(0.60, Math.min(0.92, (reach.minHw - 0.35) / 2.15));
-    const halfSpan = 2.10 * bargeScale;
-    const pts = sts.map((s, idx) => {
-      const prev = sts[Math.max(0, idx - 1)];
-      const next = sts[Math.min(sts.length - 1, idx + 1)];
-      const dx = next.wx - prev.wx, dz = next.wz - prev.wz;
-      const len = Math.hypot(dx, dz) || 1;
-      const nx = -dz / len, nz = dx / len;
-      const maxLat = Math.max(0, (s.hw || 2.2) - halfSpan - 0.25);
-      const lat = Number.isFinite(s.thalweg) ? s.thalweg * Math.min(1.0, maxLat * 0.65) : 0;
-      return {
-        x: s.wx + nx * lat,
-        z: s.wz + nz * lat,
-        wy: s.wy,
-        vx: Number.isFinite(s.vx) ? s.vx : NaN,
-        vz: Number.isFinite(s.vz) ? s.vz : NaN,
+
+  // Navigable-reach fallback shuttles ONLY when sim `riverBoats` have not yet been populated (never double-spawn).
+  if (simRiverBoats.length === 0) {
+    const navigable = [];
+    for (const r of riverReaches) {
+      const stations = reachStations(r);
+      let seg = [];
+      const flush = () => {
+        if (seg.length >= 3) {
+          let len = 0, minHw = Infinity;
+          for (let i = 0; i < seg.length; i++) {
+            minHw = Math.min(minHw, seg[i].hw || 2.2);
+            if (i > 0) len += Math.hypot(seg[i].wx - seg[i - 1].wx, seg[i].wz - seg[i - 1].wz);
+          }
+          if (len >= 160) navigable.push({ stations: seg.slice(), length: len, minHw });
+        }
+        seg = [];
       };
-    });
-    let acc = 0;
-    const linePts = pts.map((p, idx) => {
-      if (idx > 0) acc += Math.hypot(p.x - pts[idx - 1].x, p.z - pts[idx - 1].z);
-      return { x: p.x, y: p.wy, z: p.z, vx: p.vx, vz: p.vz, acc };
-    });
-    const boats = reach.length > 900 ? 2 : 1;
-    for (let b = 0; b < boats && routes.length < MAX_TRADE_VESSELS; b++) {
-      routes.push({
-        id: `reach:${ri}:${b}`, mode: 'river', phase: 'shuttle',
-        archetype: 4, scale: bargeScale * (b === 0 ? 1.0 : 0.94),
-        depart: 0, arrive: 1, berth: null,
-        pts: linePts, totalLen: acc,
-        phaseOffset: ((hashU32(ri + 1, b + 7) % 1000) / 1000),
+      for (const s of stations) {
+        if ((s.hw ?? r.minHalfWidth ?? 0) >= 2.05 && !blockedByLowBridge(s.wx, s.wz, s.wy)) seg.push(s);
+        else flush();
+      }
+      flush();
+    }
+    navigable.sort((a, b) => b.length - a.length);
+    for (let ri = 0; ri < navigable.length && routes.length < MAX_TRADE_VESSELS; ri++) {
+      const reach = navigable[ri];
+      const sts = reach.stations;
+      const bargeScale = Math.max(0.60, Math.min(0.92, (reach.minHw - 0.35) / 2.15));
+      const halfSpan = 2.10 * bargeScale;
+      const pts = sts.map((s, idx) => {
+        const prev = sts[Math.max(0, idx - 1)];
+        const next = sts[Math.min(sts.length - 1, idx + 1)];
+        const dx = next.wx - prev.wx, dz = next.wz - prev.wz;
+        const len = Math.hypot(dx, dz) || 1;
+        const nx = -dz / len, nz = dx / len;
+        const maxLat = Math.max(0, (s.hw || 2.2) - halfSpan - 0.25);
+        const lat = Number.isFinite(s.thalweg) ? s.thalweg * Math.min(1.0, maxLat * 0.65) : 0;
+        return {
+          x: s.wx + nx * lat,
+          z: s.wz + nz * lat,
+          wy: s.wy,
+          vx: Number.isFinite(s.vx) ? s.vx : NaN,
+          vz: Number.isFinite(s.vz) ? s.vz : NaN,
+        };
       });
+      let acc = 0;
+      const linePts = pts.map((p, idx) => {
+        if (idx > 0) acc += Math.hypot(p.x - pts[idx - 1].x, p.z - pts[idx - 1].z);
+        return { x: p.x, y: p.wy, z: p.z, vx: p.vx, vz: p.vz, acc };
+      });
+      const boats = reach.length > 900 ? 2 : 1;
+      for (let b = 0; b < boats && routes.length < MAX_TRADE_VESSELS; b++) {
+        routes.push({
+          id: `reach:${ri}:${b}`, mode: 'river', phase: 'shuttle',
+          archetype: 4, scale: bargeScale * (b === 0 ? 1.0 : 0.94),
+          depart: 0, arrive: 1, berth: null,
+          pilot: null, oarsmen: 4,
+          pts: linePts, totalLen: acc,
+          phaseOffset: ((hashU32(ri + 1, b + 7) % 1000) / 1000),
+        });
+      }
     }
   }
 
@@ -2035,7 +2363,8 @@ ${SAIL_BRAIL_WGSL}
   var p = vec3f(sv.px, sv.py, sv.pz);
   var n = vec3f(sv.nx, sv.ny, sv.nz);
   let matTone = vec2f(sv.mat, sv.u);
-  if (matTone.x > 5.5 && u32(floor(matTone.x)) == 16u && abs(P.archetype - 4.0) < 0.5 && P.motion > 0.05) {
+  let mInt = u32(max(0.0, floor(matTone.x)));
+  if (matTone.x > 5.5 && mInt == 16u && abs(P.archetype - 4.0) < 0.5 && P.motion > 0.05) {
     let stationIdx = min(23u, u32(max(0.0, round((matTone.x - 16.0) * 64.0))));
     let piv = BARGE_OAR_PIVOTS[stationIdx];
     let side = piv.w;
@@ -2049,6 +2378,16 @@ ${SAIL_BRAIL_WGSL}
     p = piv.xyz + vec3f(dYaw.x * cr - dYaw.y * sr, dYaw.x * sr + dYaw.y * cr, dYaw.z);
     let nYaw = vec3f(n.x * cy - n.z * sy, n.y, n.x * sy + n.z * cy);
     n = vec3f(nYaw.x * cr - nYaw.y * sr, nYaw.x * sr + nYaw.y * cr, nYaw.z);
+  } else if (mInt == 29u && abs(P.archetype - 4.0) < 0.5 && P.motion > 0.05 && sv.v > 0.08) {
+    let stationIdx = min(23u, u32(max(0.0, round((matTone.x - 29.0) * 64.0))));
+    let cyc = P.phase * 1.15 + f32(stationIdx >> 1u) * 0.16;
+    let lean = sin(cyc) * 0.24 * clamp(sv.v, 0.0, 1.0) * min(P.motion, 1.5);
+    p.z -= lean;
+    p.y -= abs(lean) * 0.16;
+  } else if ((mInt == 27u || mInt == 28u) && P.motion > 0.05 && (abs(P.archetype - 4.0) < 0.5 || abs(P.archetype - 6.0) < 0.5)) {
+    let helmSwing = sin(P.phase * 0.72) * 0.08 * min(P.motion, 1.4);
+    let weight = select(1.0, clamp(sv.v, 0.0, 1.0), mInt == 27u);
+    p.x += helmSwing * weight;
   }
   p = animateTradeSailBrail(p, sv.mat, vec2f(sv.u, sv.v), P.furl, u32(max(0.0, round(P.archetype))));
   dstPosed[idx].position = vec4f(p, 0.0);
@@ -2164,7 +2503,8 @@ fn animateTradeOar(pos: vec3f, norm: vec3f, material: f32, uv: vec2f, instAnim: 
   let phase = instAnim.x;
   let motion = instAnim.y;
   let aIdx = min(u32(${TRADE_VESSEL_ARCHETYPES - 1}), u32(max(0.0, round(archF))));
-  if (matTone.x > 5.5 && u32(floor(matTone.x)) == 16u && abs(archF - 4.0) < 0.5 && motion > 0.05) {
+  let mInt = u32(max(0.0, floor(matTone.x)));
+  if (matTone.x > 5.5 && mInt == 16u && abs(archF - 4.0) < 0.5 && motion > 0.05) {
     let stationIdx = min(23u, u32(max(0.0, round((matTone.x - 16.0) * 64.0))));
     let piv = BARGE_OAR_PIVOTS[stationIdx];
     let side = piv.w;
@@ -2178,6 +2518,16 @@ fn animateTradeOar(pos: vec3f, norm: vec3f, material: f32, uv: vec2f, instAnim: 
     p = piv.xyz + vec3f(dYaw.x * cr - dYaw.y * sr, dYaw.x * sr + dYaw.y * cr, dYaw.z);
     let nYaw = vec3f(n.x * cy - n.z * sy, n.y, n.x * sy + n.z * cy);
     n = vec3f(nYaw.x * cr - nYaw.y * sr, nYaw.x * sr + nYaw.y * cr, nYaw.z);
+  } else if (mInt == 29u && abs(archF - 4.0) < 0.5 && motion > 0.05 && uv.y > 0.08) {
+    let stationIdx = min(23u, u32(max(0.0, round((matTone.x - 29.0) * 64.0))));
+    let cyc = F.camPos.w * 2.15 + phase + f32(stationIdx >> 1u) * 0.16;
+    let lean = sin(cyc) * 0.24 * clamp(uv.y, 0.0, 1.0) * min(motion, 1.5);
+    p.z -= lean;
+    p.y -= abs(lean) * 0.16;
+  } else if ((mInt == 27u || mInt == 28u) && motion > 0.05 && (abs(archF - 4.0) < 0.5 || abs(archF - 6.0) < 0.5)) {
+    let helmSwing = sin(F.camPos.w * 1.45 + phase) * 0.075 * min(motion, 1.4);
+    let weight = select(1.0, clamp(uv.y, 0.0, 1.0), mInt == 27u);
+    p.x += helmSwing * weight;
   }
   p = animateTradeSailBrail(p, material, uv, instAnim.w, aIdx);
   return array<vec3f, 2>(p, n);
@@ -2247,7 +2597,7 @@ fn tradeShadowVis(world: vec3f, normal: vec3f) -> f32 {
 }
 
 fn isWoodMat(m: u32) -> bool {
-  return m == 0u || m == 1u || m == 5u || m == 6u || m == 7u || m == 10u || m == 14u || m == 15u || m == 16u || m == 17u || m == 18u;
+  return m == 0u || m == 1u || m == 5u || m == 6u || m == 7u || m == 10u || m == 14u || m == 15u || m == 16u || m == 17u || m == 18u || m == 28u;
 }
 fn isRopeMat(m: u32) -> bool { return m == 2u || m == 12u || m == 19u; }
 fn isSailMat(m: u32) -> bool { return m == 9u || m == 13u; }
@@ -2333,9 +2683,9 @@ ${damaged ? '' : 'struct TVFragmentOut { @location(0) color: vec4f, @builtin(sam
     albedo = mix(timber * vec3f(1.10, 0.94, 0.72), vec3f(0.032, 0.030, 0.028), band * 0.65);
     metal = mix(0.0, 0.45, band * 0.65);
     rough = mix(0.76, 0.58, band);
-  } else if (m == 1u || m == 5u || m == 6u || m == 7u || m == 14u || m == 16u || m == 17u || m == 18u) {
-    // Oak frames, oars, casks, benches & bulwark timber
-    albedo = timber * select(vec3f(0.90, 0.82, 0.70), vec3f(0.82, 0.74, 0.62), m == 16u || m == 17u) * (1.0 - seam * 0.35);
+  } else if (m == 1u || m == 5u || m == 6u || m == 7u || m == 14u || m == 16u || m == 17u || m == 18u || m == 28u) {
+    // Oak frames, oars, steering sweeps/tillers, casks, benches & bulwark timber
+    albedo = timber * select(vec3f(0.90, 0.82, 0.70), vec3f(0.82, 0.74, 0.62), m == 16u || m == 17u || m == 28u) * (1.0 - seam * 0.35);
     rough = 0.84;
   } else if (m == 3u || m == 8u) {
     // Forged wrought iron anchors, ordnance & barrel hoops
@@ -2378,6 +2728,27 @@ ${damaged ? '' : 'struct TVFragmentOut { @location(0) color: vec4f, @builtin(sam
     albedo = vec3f(0.28, 0.032, 0.020);
   } else if (m == 26u) {
     albedo = vec3f(0.020, 0.042, 0.10);
+  } else if (m == 27u || m == 29u) {
+    // River pilots, helmsmen & seated oarsmen (uv.x: skin <0.22, breeches/boots <0.48, tunic <0.78, cap >=0.78)
+    let u = in.uv.x;
+    let clothTex = 0.92 + 0.08 * gnoise(in.local.xy * 26.0);
+    if (u < 0.22) {
+      albedo = vec3f(0.42, 0.25, 0.17);
+      rough = 0.76;
+    } else if (u < 0.48) {
+      albedo = vec3f(0.055, 0.048, 0.042) * clothTex;
+      rough = 0.90;
+    } else if (u < 0.78) {
+      let varT = fract(in.uv.y * 3.7);
+      var tunic = vec3f(0.44, 0.36, 0.25);
+      if (varT > 0.66) { tunic = vec3f(0.11, 0.16, 0.24); }
+      else if (varT > 0.33) { tunic = vec3f(0.36, 0.13, 0.09); }
+      albedo = tunic * clothTex;
+      rough = 0.92;
+    } else {
+      albedo = select(vec3f(0.05, 0.042, 0.038), vec3f(0.28, 0.06, 0.04), m == 27u) * clothTex;
+      rough = 0.95;
+    }
   }
 
   ${damaged ? `
@@ -2548,18 +2919,20 @@ fn rotateVesselSel(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
 
   let focal = 0.5 * F.screen.y / tanY;
   let startErrM = max(arch.splatExtentCol.z, 0.04) * scaleMul;
-  let projStartErr = (startErrM * focal) / dist;
   let errPx = selP.params.x;
   let splatPx = selP.params.y;
   let minPx = selP.params.z;
-  let band = selP.params.w;
-  let bandHi = errPx * (1.0 + band);
+  let spanPx = (2.0 * boundRad * focal) / dist;
+  let nearHiPx = 38.0;
+  let nearLoPx = 27.0;
 
-  if (projStartErr >= errPx) {
+  // Keep full articulated part-built ships crisp across harbor/combat distances until ~38 px total screen span,
+  // then MSAA sample_mask crossfade cleanly into the ship-profile continuum over 38 -> 27 px.
+  if (spanPx > nearLoPx) {
     let nearSlot = atomicAdd(&indirect[aIdx * 5u + 1u], 1u);
     if (nearSlot < ${MAX_TRADE_VESSELS}u) {
       var outInst = inst;
-      let share = select(clamp(smoothstep(bandHi, errPx, projStartErr), 0.0, 0.999), 0.0, projStartErr >= bandHi);
+      let share = select(clamp(smoothstep(nearHiPx, nearLoPx, spanPx), 0.0, 0.999), 0.0, spanPx >= nearHiPx);
       outInst.animSink.z = share;
       nearOut[aIdx * ${MAX_TRADE_VESSELS}u + nearSlot] = outInst;
       if (share > 0.002) {
@@ -2577,7 +2950,6 @@ fn rotateVesselSel(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
     return;
   }
 
-  let spanPx = (2.0 * boundRad * focal) / dist;
   if (spanPx <= splatPx) {
     let keepProb = clamp(spanPx / max(minPx, 1e-3), 0.06, 1.0);
     let h = vesselCovHash(i ^ u32(abs(inst.animSink.x) * 131.0));
@@ -2598,9 +2970,14 @@ fn rotateVesselSel(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
     return;
   }
 
-  let allowedErr = (errPx * dist) / max(focal * scaleMul, 1.0);
   let stepBase = arch.counts.x;
   let stepCount = arch.counts.y;
+  let distAtLo = (2.0 * boundRad * focal) / nearLoPx;
+  let rawErr = (errPx * dist) / max(focal * scaleMul, 1.0);
+  let errAtLo = (errPx * distAtLo) / max(focal * scaleMul, 1.0);
+  let stepMaxErr = stepMeta[stepBase + stepCount].x;
+  let contT = clamp((rawErr - errAtLo) / max(errAtLo * 6.7, 1e-3), 0.0, 1.0);
+  let allowedErr = mix(startErrM, stepMaxErr, contT);
   var lo = 0u;
   var hi = select(0u, stepCount - 1u, stepCount > 0u);
   while (lo < hi) {
@@ -2678,7 +3055,15 @@ struct TVContOut {
   let stepVerts = u32(max(1.0, round(arch.splatCol.w)));
   let v0 = contStates[arch.counts.w + stepIdx * stepVerts + vi];
   let v1 = contStates[arch.counts.w + min(stepIdx + 1u, arch.counts.y) * stepVerts + vi];
-  let localP = mix(vec3f(v0.px, v0.py, v0.pz), vec3f(v1.px, v1.py, v1.pz), morphT) * vec3f(inst.attScaleArch.z, 1.0, inst.attScaleArch.z);
+  let colEntry = contVertCols[stepVerts * aIdx + vi];
+  var rawLocalP = mix(vec3f(v0.px, v0.py, v0.pz), vec3f(v1.px, v1.py, v1.pz), morphT);
+  if (colEntry.a > 0.5) {
+    let sailFrac = clamp(1.0 - inst.animSink.w, 0.0, 1.0);
+    let anchorY = max(1.4, arch.splatExtentCol.y * 0.42);
+    rawLocalP.x *= mix(0.08, 1.0, sailFrac);
+    rawLocalP.y = mix(anchorY, rawLocalP.y, mix(0.28, 1.0, sailFrac));
+  }
+  let localP = rawLocalP * vec3f(inst.attScaleArch.z, 1.0, inst.attScaleArch.z);
   let n0 = unpack4x8unorm(v0.normPacked).xyz * 2.0 - 1.0;
   let n1 = unpack4x8unorm(v1.normPacked).xyz * 2.0 - 1.0;
   let localN = normalize(mix(n0, n1, morphT) + vec3f(0.0, 1e-4, 0.0));
@@ -2690,7 +3075,7 @@ struct TVContOut {
   o.pos = F.viewProj * vec4f(earthCurve(worldP - F.camPos.xyz, F.camPos.y), 1.0);
   o.world = worldP;
   o.normal = worldN;
-  o.color = contVertCols[stepVerts * aIdx + vi].rgb;
+  o.color = colEntry.rgb;
   o.fadeShare = share;
   return o;
 }
@@ -3013,7 +3398,7 @@ export async function createTradeVessels({
       contVertColsArray[cOff + 0] = c.vertColors[i * 3];
       contVertColsArray[cOff + 1] = c.vertColors[i * 3 + 1];
       contVertColsArray[cOff + 2] = c.vertColors[i * 3 + 2];
-      contVertColsArray[cOff + 3] = 1.0;
+      contVertColsArray[cOff + 3] = c.vertSailMask ? c.vertSailMask[i] : 0.0;
       colVertCursor++;
     }
   }
@@ -3747,6 +4132,8 @@ export async function createTradeVessels({
         mode: v.route.mode,
         phase: v.route.phase,
         phaseRad: v.ai.phaseRad,
+        pilot: v.route.pilot ?? null,
+        oarsmen: v.route.oarsmen ?? 0,
       }));
     },
     consumeDirtySync() {
@@ -3757,6 +4144,7 @@ export async function createTradeVessels({
     getMaritimeReport() {
       const ships = [];
       const caravans = [];
+      const riverBoats = [];
       for (const v of vessels) {
         const entry = {
           state: v.ai.state,
@@ -3764,9 +4152,12 @@ export async function createTradeVessels({
           etaDays: v.ai.etaDays,
           heldByWeather: v.ai.heldByWeather,
           sunk: Boolean(v.boat.damage?.sunk),
+          ...(v.route.pilot ? { pilot: v.route.pilot } : {}),
         };
         if (v.route.shipId != null) {
           ships.push({ ...entry, id: v.route.shipId, berthIndex: v.route.bi ?? -1 });
+        } else if (v.route.riverBoatId != null) {
+          riverBoats.push({ ...entry, id: v.route.riverBoatId });
         } else if (v.route.caravanKey != null) {
           caravans.push({ ...entry, key: v.route.caravanKey });
         }
@@ -3778,6 +4169,7 @@ export async function createTradeVessels({
         windSpeed: Math.hypot(wv[0] ?? 0, wv[1] ?? 0),
         ships,
         caravans,
+        riverBoats,
       };
     },
     getTargetVessels() {
