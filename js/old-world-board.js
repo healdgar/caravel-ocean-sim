@@ -568,7 +568,7 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     const totalLen = span + 3.0;
     slight(isStone ? CITY_TYPE.STONE_BRIDGE : CITY_TYPE.FOOTBRIDGE, x, deck, z, Math.atan2(ux, uz), 0.5, totalLen);
     const width = CITY_BUILDING_TYPES[isStone ? CITY_TYPE.STONE_BRIDGE : CITY_TYPE.FOOTBRIDGE].width;
-    bridges.push({ x, z, ux, uz, length: totalLen, halfWidth: width * 0.5, deckY: deck, span, isStone });
+    bridges.push({ x, z, ux, uz, length: totalLen, halfWidth: width * 0.5, deckY: deck, span, isStone, cityIndices: [typedTypes.length - 1], collapsed: false });
     built.bridges++;
   }
   // A road's or arterial street's bridge where it crosses a river: stone, the road's width, bank to bank in arches.
@@ -584,12 +584,14 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     const bridgeType = isStone ? CITY_TYPE.STONE_BRIDGE : CITY_TYPE.FOOTBRIDGE;
     const bridgeWidth = isStone ? BOARD_ROAD_BRIDGE.width : T.width;
     const arches = isStone ? Math.max(1, Math.ceil(reach * 2 / BOARD_ROAD_BRIDGE.arch)) : 1, each = reach * 2 / arches;
+    const cityIndices = [];
     for (let a = 0; a < arches; a++) {
       const along = (a + 0.5) * each - reach;
       pushTyped(bridgeType, x + q.ux * along, deck, z + q.uz * along, Math.atan2(q.ux, q.uz), bridgeWidth, T.height, each, 0.5, 0);
+      cityIndices.push(typedTypes.length - 1);
       built.bridges++;
     }
-    bridges.push({ x, z, ux: q.ux, uz: q.uz, length: reach * 2, halfWidth: bridgeWidth * 0.5, deckY: deck, span: q.span, isStone });
+    bridges.push({ x, z, ux: q.ux, uz: q.uz, length: reach * 2, halfWidth: bridgeWidth * 0.5, deckY: deck, span: q.span, isStone, cityIndices, collapsed: false });
     built.roadBridges++;
   }
   // A churchyard: a dry-stone wall about it, and its graves as they are dug.
@@ -673,14 +675,20 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     }
   }
 
-  /* ---- inland water: carve river/canal troughs and dammed ponds into heights, stand masonry weirs, and build water ribbons ---- */
+  /* ---- inland water: carve fluvial river/canal troughs and ponds, stand masonry weirs, and build hydraulic water ribbons ---- */
   const n = grid.n;
   const uncarved = heights ? heights.slice() : null;
   const origAt = uncarved ? ((x, z) => fieldAt(uncarved, grid, x, z)) : heightAt;
   const waterVerts = [], waterIdx = [];
-  const pushWaterVert = (wx, wy, wz, fx, fz, depth, bankT, kind) => {
-    const id = waterVerts.length / 8;
-    waterVerts.push(wx, wy, wz, fx, fz, depth, bankT, kind);
+  const pushWaterVert = (wx, wy, wz, kind, vx, vz, alongS, halfWidth, localDepth, bankB, thalwegB, eddy, riffle) => {
+    const id = waterVerts.length / 12;
+    const eddyIdx = Math.round(Math.max(0, Math.min(1, eddy)) * 255);
+    const riffleFrac = Math.max(0, Math.min(0.996, riffle / 1.5));
+    waterVerts.push(
+      wx, wy, wz, kind,
+      vx, vz, alongS, halfWidth,
+      localDepth, bankB, thalwegB, eddyIdx + riffleFrac,
+    );
     return id;
   };
   const nearPad = (gx, gz) => placed.some(gx, gz, 9, (o) => rectDist(o, gx, gz) < 3.2) || solids.some(gx, gz, 14, (o) => rectDist(o, gx, gz) < 3.2);
@@ -729,67 +737,68 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     }
     return out;
   };
-  const riverRuns = [];
-  for (let rIdx = 0; rIdx < (board.rivers?.length ?? 0); rIdx++) {
-    const river = board.rivers[rIdx], pts = river.points, m = Math.floor((pts?.length ?? 0) / 3);
-    if (m < 2) continue;
-    const isCanal = Boolean(river.canal);
-    const rawProf = new Float32Array(m);
-    for (let s = 0; s < m; s++) {
-      const wx = ox + pts[s * 3], wz = oz + pts[s * 3 + 1], oh = origAt(wx, wz);
-      const lvl = Number.isFinite(river.levels?.[s]) ? river.levels[s] : oh - 0.55;
-      rawProf[s] = Math.min(oh - 0.35, 0.72 * lvl + 0.28 * (oh - 0.35));
+  const bridgePad = (gx, gz) => bridges.some((b) => Math.hypot(gx - b.x, gz - b.z) < b.span * 0.65 + 4);
+  const bridgeClearance = (gx, gz) => {
+    let minD = Infinity;
+    for (const b of bridges) {
+      const d = Math.hypot(gx - b.x, gz - b.z) - (b.span * 0.55 + 4);
+      if (d < minD) minD = d;
     }
-    const prof = pavMonotoneDesc(rawProf);
-    for (let s = 1; s < m; s++) prof[s] = Math.min(prof[s - 1], prof[s]);
-    riverRuns.push({ rIdx, pts, m, isCanal, prof });
-
-    // Tight sub-grid carving into heights strictly along the channel interior so 16 m bank shoulders retain
-    // full natural valley relief while coarse distant LODs stay safely below water.
-    const carveStride = Math.max(1, Math.min(2, Math.floor(grid.step / 8)));
-    for (let s = 0; s < m - 1; s += carveStride) {
-      const s1 = Math.min(m - 1, s + carveStride);
-      const ax = ox + pts[s * 3], az = oz + pts[s * 3 + 1], ahw = Math.max(0.6, pts[s * 3 + 2]);
-      const bx = ox + pts[s1 * 3], bz = oz + pts[s1 * 3 + 1], bhw = Math.max(0.6, pts[s1 * 3 + 2]);
-      const maxHw = Math.max(ahw, bhw);
-      const baseFlatR = grid.step > 20 ? maxHw + 0.5 : maxHw * 0.72;
-      const outer = grid.step > 20 ? baseFlatR + Math.min(grid.step * 0.55, 8.0) : maxHw + 4.2;
-      const wetOuter = maxHw + grid.step * 0.45;
-      const scanR = Math.max(outer, wetOuter);
-      const i0 = Math.max(1, Math.floor((Math.min(ax, bx) - scanR - grid.x0) / grid.step));
-      const i1 = Math.min(n - 2, Math.ceil((Math.max(ax, bx) + scanR - grid.x0) / grid.step));
-      const j0 = Math.max(1, Math.floor((Math.min(az, bz) - scanR - grid.z0) / grid.step));
-      const j1 = Math.min(n - 2, Math.ceil((Math.max(az, bz) + scanR - grid.z0) / grid.step));
-      const abx = bx - ax, abz = bz - az, ab2 = abx * abx + abz * abz || 1;
-      for (let j = j0; j <= j1; j++) {
-        const gz = grid.z0 + j * grid.step;
-        for (let i = i0; i <= i1; i++) {
-          const gx = grid.x0 + i * grid.step;
-          const t = Math.max(0, Math.min(1, ((gx - ax) * abx + (gz - az) * abz) / ab2));
-          const dist = Math.hypot(gx - (ax + abx * t), gz - (az + abz * t));
-          if (dist >= scanR) continue;
-          const k = j * n + i;
-          const hw = ahw + (bhw - ahw) * t;
-          if (dist <= hw + grid.step * 0.45) wet[k] = 1;
-          if (!heights || dist >= outer) continue;
-          const origH = uncarved[k];
-          const padHit = nearPad(gx, gz);
-          if (padHit && dist > hw + 1.0) continue;
-          const flatR = padHit ? hw + 0.4 : baseFlatR;
-          const wy = Math.max(origH > 0.45 ? 0.45 : -2.0, prof[s] + (prof[s1] - prof[s]) * t - 0.24);
-          const depth = isCanal ? 1.35 : Math.min(2.2, 0.85 + 0.22 * hw);
-          const bed = wy - depth;
-          const u = dist <= flatR ? 0 : Math.min(1, (dist - flatR) / Math.max(0.75, outer - flatR));
-          const sm = u * u * (3 - 2 * u);
-          let target = dist <= flatR ? bed : bed * (1 - sm) + origH * sm;
-          if (origH > 0.45) target = Math.max(0.30, target);
-          if (target < heights[k]) heights[k] = target;
+    return minD <= 0 ? 0 : Math.min(1, minD / 14);
+  };
+  // Centripetal Catmull-Rom resampling of the sim's coarse course so bends sweep naturally while
+  // preserving exact bridge crossings and confluences.
+  const smoothFluvialCourse = (rawPts, isCanal) => {
+    const dedup = [];
+    for (const p of rawPts) {
+      const prev = dedup[dedup.length - 1];
+      if (!prev || Math.hypot(p.wx - prev.wx, p.wz - prev.wz) >= 0.75) dedup.push(p);
+    }
+    if (dedup.length < 2) return dedup;
+    const out = [];
+    const cr = (p0, p1, p2, p3, t, field) => {
+      const t2 = t * t, t3 = t2 * t;
+      return 0.5 * (
+        (2 * p1[field])
+        + (-p0[field] + p2[field]) * t
+        + (2 * p0[field] - 5 * p1[field] + 4 * p2[field] - p3[field]) * t2
+        + (-p0[field] + 3 * p1[field] - 3 * p2[field] + p3[field]) * t3
+      );
+    };
+    const m = dedup.length;
+    for (let i = 0; i < m - 1; i++) {
+      const p0 = dedup[Math.max(0, i - 1)], p1 = dedup[i], p2 = dedup[i + 1], p3 = dedup[Math.min(m - 1, i + 2)];
+      const segL = Math.hypot(p2.wx - p1.wx, p2.wz - p1.wz);
+      const subSteps = isCanal ? Math.max(1, Math.min(8, Math.ceil(segL / 4.0))) : Math.max(1, Math.min(12, Math.ceil(segL / 2.4)));
+      for (let s = 0; s < subSteps; s++) {
+        const t = s / subSteps;
+        if (s === 0) {
+          out.push({ ...p1 });
+          continue;
         }
+        const linearX = p1.wx + (p2.wx - p1.wx) * t;
+        const linearZ = p1.wz + (p2.wz - p1.wz) * t;
+        const splineX = isCanal ? linearX : cr(p0, p1, p2, p3, t, 'wx');
+        const splineZ = isCanal ? linearZ : cr(p0, p1, p2, p3, t, 'wz');
+        const pin = bridgeClearance(linearX, linearZ);
+        const wx = linearX + (splineX - linearX) * (0.22 + 0.78 * pin);
+        const wz = linearZ + (splineZ - linearZ) * (0.22 + 0.78 * pin);
+        const hw = Math.max(0.75, p1.hw + (p2.hw - p1.hw) * t);
+        const wy = p1.wy + (p2.wy - p1.wy) * t;
+        const oh = origAt(wx, wz);
+        out.push({
+          wx, wz, hw, wy,
+          bankMaxY: oh,
+          depth: isCanal ? 1.45 : Math.min(2.6, 1.05 + 0.25 * hw),
+          seaMouth: Boolean(p1.seaMouth && p2.seaMouth),
+          hwL: hw, hwR: hw, thalwegB: 0, curvature: 0, alongS: 0,
+        });
       }
     }
-  }
+    out.push({ ...dedup[m - 1], hwL: dedup[m - 1].hw, hwR: dedup[m - 1].hw, thalwegB: 0, curvature: 0, alongS: 0 });
+    return out;
+  };
 
-  // Build smoothed river reaches with shared embankment crests and confluence join leveling.
   const reachChains = [], riverReaches = [], riverCuts = [], bankVerts = [], bankIndices = [];
   const pushBankVert = (x, y, z, nx, ny, nz, wetAmt) => {
     const id = bankVerts.length / 8;
@@ -805,8 +814,6 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     if (crossY > 0) bankIndices.push(ia, ib, ic);
     else bankIndices.push(ia, ic, ib);
   };
-  // Protect bridge abutment approaches from being carved below road deck.
-  const bridgePad = (gx, gz) => bridges.some((b) => Math.hypot(gx - b.x, gz - b.z) < b.span * 0.65 + 4);
   const inChannel = (chainIdx, wx, wz, hw) => {
     for (let o = 0; o < reachChains.length; o++) {
       if (o === chainIdx || reachChains[o].isCanal) continue;
@@ -822,12 +829,26 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     return null;
   };
 
-  for (const run of riverRuns) {
-    const { pts, m, isCanal, prof } = run;
-    let stations = [], accDist = 999;
+  for (let rIdx = 0; rIdx < (board.rivers?.length ?? 0); rIdx++) {
+    const river = board.rivers[rIdx], pts = river.points, m = Math.floor((pts?.length ?? 0) / 3);
+    if (m < 2) continue;
+    const isCanal = Boolean(river.canal);
+    const rawProf = new Float32Array(m);
+    for (let s = 0; s < m; s++) {
+      const wx = ox + pts[s * 3], wz = oz + pts[s * 3 + 1], oh = origAt(wx, wz);
+      const lvl = Number.isFinite(river.levels?.[s]) ? river.levels[s] : oh - 0.55;
+      rawProf[s] = Math.min(oh - 0.35, 0.72 * lvl + 0.28 * (oh - 0.35));
+    }
+    const prof = pavMonotoneDesc(rawProf);
+    for (let s = 1; s < m; s++) prof[s] = Math.min(prof[s - 1], prof[s]);
+
+    let stations = [];
     const flushReach = () => {
-      if (stations.length >= 2) reachChains.push({ run, isCanal, stations: stations.slice() });
-      stations.length = 0; accDist = 999;
+      if (stations.length >= 2 && (isCanal || stations.length >= 5 || stations[0].bankMaxY >= 1.5)) {
+        const dense = smoothFluvialCourse(stations, isCanal);
+        if (dense.length >= 2) reachChains.push({ rIdx, isCanal, stations: dense });
+      }
+      stations.length = 0;
     };
     for (let s = 0; s < m; s++) {
       const wx = ox + pts[s * 3], wz = oz + pts[s * 3 + 1], hw = Math.max(0.75, pts[s * 3 + 2]);
@@ -835,25 +856,114 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
       const oh = origAt(wx, wz);
       if (oh <= 0.12) {
         if (stations.length >= 1) {
-          stations.push({ wx, wz, hw, wy: 0.02, bankMaxY: 0.18, depth: Math.min(2.4, 1.05 + 0.25 * hw), seaMouth: true });
+          const reachedSea = !isCanal && stations.length >= 4;
+          stations.push({ wx, wz, hw, wy: 0.02, bankMaxY: 0.18, depth: Math.min(2.6, 1.05 + 0.25 * hw), seaMouth: true, hwL: hw, hwR: hw, thalwegB: 0, curvature: 0, alongS: 0 });
           flushReach();
+          if (reachedSea) break;
         } else {
-          stations.length = 0; accDist = 999;
+          stations.length = 0;
         }
         continue;
       }
-      if (stations.length > 0) {
-        const prev = stations[stations.length - 1];
-        accDist += Math.hypot(wx - prev.wx, wz - prev.wz);
-        if (accDist < 4.5 && s < m - 1) continue;
-      }
-      accDist = 0;
-      stations.push({ wx, wz, hw, wy: prof[s], bankMaxY: origAt(wx, wz), depth: isCanal ? 1.45 : Math.min(2.4, 1.05 + 0.25 * hw), seaMouth: false });
+      stations.push({ wx, wz, hw, wy: prof[s], bankMaxY: oh, depth: isCanal ? 1.45 : Math.min(2.6, 1.05 + 0.25 * hw), seaMouth: false, hwL: hw, hwR: hw, thalwegB: 0, curvature: 0, alongS: 0 });
     }
     flushReach();
   }
 
-  // Trim tributary tongues overlapping main stems and extend sea mouths softly below tidewater (`drawnPart`).
+  // Compute fluvial bend curvature, outer-bend cut-bank thalweg shift, pool-riffle modulation, and carve asymmetric beds.
+  for (let cIdx = 0; cIdx < reachChains.length; cIdx++) {
+    const chain = reachChains[cIdx], st = chain.stations, isCanal = chain.isCanal;
+    let accumS = 0;
+    for (let i = 0; i < st.length; i++) {
+      if (i > 0) accumS += Math.hypot(st[i].wx - st[i - 1].wx, st[i].wz - st[i - 1].wz);
+      st[i].alongS = accumS;
+      const p0 = st[Math.max(0, i - 1)], p1 = st[Math.min(st.length - 1, i + 1)];
+      const dx = p1.wx - p0.wx, dz = p1.wz - p0.wz, dLen = Math.hypot(dx, dz) || 1;
+      st[i].tx = dx / dLen;
+      st[i].tz = dz / dLen;
+      st[i].nx = -st[i].tz;
+      st[i].nz = st[i].tx;
+    }
+    // Box-filtered curvature over ~18 m to capture smooth bend centrifuges without jitter.
+    const rawCurv = new Float32Array(st.length);
+    for (let i = 1; i < st.length - 1; i++) {
+      const prev = st[Math.max(0, i - 3)], next = st[Math.min(st.length - 1, i + 3)];
+      const ds = Math.max(2.0, next.alongS - prev.alongS);
+      // Center-of-curvature vector dT/ds points INWARD; centrifugal outer cut-bank points OUTWARD (-dT/ds).
+      const ax = (next.tx - prev.tx) / ds, az = (next.tz - prev.tz) / ds;
+      rawCurv[i] = -(ax * st[i].nx + az * st[i].nz);
+    }
+    for (let i = 0; i < st.length; i++) {
+      let sumK = 0, cnt = 0;
+      for (let k = Math.max(0, i - 2); k <= Math.min(st.length - 1, i + 2); k++) { sumK += rawCurv[k]; cnt++; }
+      const curv = isCanal || st[i].seaMouth ? 0 : (sumK / Math.max(1, cnt));
+      st[i].curvature = curv;
+      const free = (1 - Math.exp(-st[i].alongS * 0.08)) * (1 - Math.exp(-Math.max(0, accumS - st[i].alongS) * 0.08));
+      const bClear = bridgeClearance(st[i].wx, st[i].wz);
+      const thalweg = Math.max(-0.56, Math.min(0.56, curv * st[i].hw * 3.4 * free * bClear));
+      st[i].thalwegB = thalweg;
+      // Organic fluvial width undulation + outer-bend widening, pinned cleanly under bridges.
+      const riffleWave = Math.sin(st[i].alongS * 0.075 + cIdx * 1.9);
+      const widenOuter = 1 + (0.14 * Math.sin(st[i].alongS * 0.052 + cIdx * 2.7) + 0.18 * Math.max(0, thalweg)) * free * bClear;
+      const widenInner = 1 + (0.14 * Math.sin(st[i].alongS * 0.052 + cIdx * 2.7 + 0.9) + 0.18 * Math.max(0, -thalweg)) * free * bClear;
+      st[i].hwL = isCanal || st[i].seaMouth ? st[i].hw : Math.max(0.7, st[i].hw * widenInner);
+      st[i].hwR = isCanal || st[i].seaMouth ? st[i].hw : Math.max(0.7, st[i].hw * widenOuter);
+      st[i].hw = 0.5 * (st[i].hwL + st[i].hwR);
+      const poolBoost = 1 + 0.34 * Math.min(1, Math.abs(thalweg) * 1.8) - 0.12 * riffleWave * free * bClear;
+      if (!isCanal && !st[i].seaMouth) st[i].depth = Math.max(0.65, Math.min(3.1, st[i].depth * poolBoost));
+    }
+
+    // Carve asymmetric riverbed trough into heights & wet mask so sub-grid banks and refracted bed match the sinuous channel.
+    const carveStride = grid.step > 20 ? 2 : 1;
+    for (let s = 0; s < st.length - 1; s += carveStride) {
+      const s1 = Math.min(st.length - 1, s + carveStride);
+      const a = st[s], b = st[s1];
+      const maxHw = Math.max(a.hw, b.hw);
+      const baseFlatR = grid.step > 20 ? maxHw + 0.5 : maxHw * 0.68;
+      const outer = grid.step > 20 ? baseFlatR + Math.min(grid.step * 0.55, 8.0) : maxHw + 4.4;
+      const scanR = Math.max(outer, maxHw + grid.step * 0.45);
+      const i0 = Math.max(1, Math.floor((Math.min(a.wx, b.wx) - scanR - grid.x0) / grid.step));
+      const i1 = Math.min(n - 2, Math.ceil((Math.max(a.wx, b.wx) + scanR - grid.x0) / grid.step));
+      const j0 = Math.max(1, Math.floor((Math.min(a.wz, b.wz) - scanR - grid.z0) / grid.step));
+      const j1 = Math.min(n - 2, Math.ceil((Math.max(a.wz, b.wz) + scanR - grid.z0) / grid.step));
+      const abx = b.wx - a.wx, abz = b.wz - a.wz, ab2 = abx * abx + abz * abz || 1;
+      for (let j = j0; j <= j1; j++) {
+        const gz = grid.z0 + j * grid.step;
+        for (let i = i0; i <= i1; i++) {
+          const gx = grid.x0 + i * grid.step;
+          const t = Math.max(0, Math.min(1, ((gx - a.wx) * abx + (gz - a.wz) * abz) / ab2));
+          const cx = a.wx + abx * t, cz = a.wz + abz * t;
+          const nx = a.nx + (b.nx - a.nx) * t, nz = a.nz + (b.nz - a.nz) * t;
+          const signedCross = (gx - cx) * nx + (gz - cz) * nz;
+          const dist = Math.hypot(gx - cx, gz - cz);
+          if (dist >= scanR) continue;
+          const k = j * n + i;
+          const hw = a.hw + (b.hw - a.hw) * t;
+          const thal = a.thalwegB + (b.thalwegB - a.thalwegB) * t;
+          if (dist <= hw + grid.step * 0.45) wet[k] = 1;
+          if (!heights || dist >= outer) continue;
+          const origH = uncarved[k];
+          const padHit = nearPad(gx, gz);
+          if (padHit && dist > hw + 1.0) continue;
+          const flatR = padHit ? hw + 0.4 : baseFlatR;
+          const wy = Math.max(origH > 0.45 ? 0.45 : -2.0, a.wy + (b.wy - a.wy) * t - 0.24);
+          const baseDepth = a.depth + (b.depth - a.depth) * t;
+          const normCross = Math.max(-1, Math.min(1, signedCross / Math.max(hw, 0.5)));
+          // Asymmetric bed depth: deepest near thalwegB, shoaling across the opposite inner point bar.
+          const symShape = Math.max(0, 1 - normCross * normCross);
+          const skewFocus = 0.65 + 0.48 * Math.exp(-1.8 * (normCross - thal) ** 2);
+          const bed = wy - baseDepth * Math.max(0.25, symShape * skewFocus + 0.25);
+          const u = dist <= flatR ? 0 : Math.min(1, (dist - flatR) / Math.max(0.75, outer - flatR));
+          const sm = u * u * (3 - 2 * u);
+          let target = dist <= flatR ? bed : bed * (1 - sm) + origH * sm;
+          if (origH > 0.45) target = Math.max(0.30, target);
+          if (target < heights[k]) heights[k] = target;
+        }
+      }
+    }
+  }
+
+  // Trim tributary tongues overlapping main stems and extend sea mouths softly below tidewater.
   for (let c = 0; c < reachChains.length; c++) {
     const chain = reachChains[c], st = chain.stations;
     if (!chain.isCanal && st.length > 2) {
@@ -879,22 +989,83 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
         const t = Math.max(0, Math.min(1, ((end.wx - p0.wx) * dx + (end.wz - p0.wz) * dz) / d2));
         end.wx = p0.wx + dx * t;
         end.wz = p0.wz + dz * t;
-        end.hw = Math.min(p0.hw * 0.92, end.hw * 1.6);
-        if (st.length > 2) st[st.length - 2].hw *= 1.22;
+        end.hw = Math.min(p0.hw * 0.92, end.hw * 1.45);
+        end.hwL = end.hw; end.hwR = end.hw;
         chain.mouthJoin = { otherIdx: joinTarget.o, k };
       }
     }
     const last = st[st.length - 1];
     if (last?.seaMouth && !chain.mouthJoin && st.length >= 2) {
-      const prev = st[st.length - 2];
+      const prev = st[Math.max(0, st.length - 4)];
       const dx = last.wx - prev.wx, dz = last.wz - prev.wz, L = Math.hypot(dx, dz) || 1;
-      const ux = dx / L, uz = dz / L, baseW = last.hw * 1.12;
-      last.hw = baseW;
-      last.wy = -0.02;
-      for (const distOut of [10, 22]) {
-        const qx = last.wx + ux * distOut, qz = last.wz + uz * distOut;
-        if (!inside(qx, qz, 6) || origAt(qx, qz) > 0.12) break;
-        st.push({ wx: qx, wz: qz, hw: baseW * (1 + distOut / 64), wy: -0.08 - distOut * 0.015, bankMaxY: origAt(qx, qz), depth: last.depth, seaMouth: true });
+      const ux = dx / L, uz = dz / L;
+      const shoreX = last.wx, shoreZ = last.wz, shoreAlong = last.alongS;
+      for (let k = Math.max(1, st.length - 12); k < st.length; k++) {
+        const s = st[k];
+        const ds = Math.max(0, shoreAlong - s.alongS);
+        if (ds >= 18) continue;
+        const flare = Math.pow(1 - ds / 18, 1.5);
+        const wMul = 1 + 0.35 * flare;
+        s.hw *= wMul;
+        s.hwL = (s.hwL ?? s.hw) * wMul;
+        s.hwR = (s.hwR ?? s.hw) * wMul;
+      }
+      const baseW = last.hw;
+      last.wy = 0.03;
+      chain.shoreIdx = st.length - 1;
+      chain.shoreS = shoreAlong;
+      const distSteps = [3, 6, 10, 14, 19, 25, 31, 38, 46, 54];
+      let maxOut = 0;
+      for (const distOut of distSteps) {
+        const qx = shoreX + ux * distOut, qz = shoreZ + uz * distOut;
+        if (!inside(qx, qz, 6) || origAt(qx, qz) > 0.22) break;
+        maxOut = distOut;
+        const mw = baseW * (1 + distOut / 32);
+        const taper = 1 - 0.18 * (distOut / 54);
+        st.push({
+          wx: qx,
+          wz: qz,
+          hw: mw,
+          hwL: mw,
+          hwR: mw,
+          wy: Math.max(0.0, 0.028 * Math.exp(-distOut / 9)),
+          bankMaxY: origAt(qx, qz),
+          depth: Math.max(1.15, last.depth * taper),
+          seaMouth: true,
+          seaPlume: distOut > 6,
+          distOut,
+          thalwegB: 0,
+          curvature: 0,
+          alongS: shoreAlong + distOut,
+        });
+      }
+      // Carve a submerged estuary outlet channel and outer sandbar so wave shoaling and refraction align with the mouth.
+      if (heights && maxOut > 0) {
+        const endX = shoreX + ux * Math.min(maxOut, 48), endZ = shoreZ + uz * Math.min(maxOut, 48);
+        const padW = baseW * 2.6 + grid.step;
+        const i0 = Math.max(1, Math.floor((Math.min(shoreX, endX) - padW - grid.x0) / grid.step));
+        const i1 = Math.min(n - 2, Math.ceil((Math.max(shoreX, endX) + padW - grid.x0) / grid.step));
+        const j0 = Math.max(1, Math.floor((Math.min(shoreZ, endZ) - padW - grid.z0) / grid.step));
+        const j1 = Math.min(n - 2, Math.ceil((Math.max(shoreZ, endZ) + padW - grid.z0) / grid.step));
+        const maxCarve = Math.min(maxOut, 46);
+        for (let j = j0; j <= j1; j++) {
+          const gz = grid.z0 + j * grid.step;
+          for (let i = i0; i <= i1; i++) {
+            const gx = grid.x0 + i * grid.step;
+            if (nearPad(gx, gz)) continue;
+            const along = (gx - shoreX) * ux + (gz - shoreZ) * uz;
+            if (along < -2 || along > maxCarve + grid.step * 0.5) continue;
+            const across = Math.abs(-(gx - shoreX) * uz + (gz - shoreZ) * ux);
+            const mw = baseW * (1 + Math.max(0, along) / 32) * 1.25;
+            if (across > mw) continue;
+            const uAcross = across / Math.max(1, mw);
+            const fade = (1 - uAcross * uAcross) * Math.max(0, 1 - Math.max(0, along - maxCarve + 8) / 8);
+            const barBed = -0.95 - 0.018 * Math.max(0, along) + 0.22 * Math.exp(-(((along - 30) / 11) ** 2));
+            const k = j * n + i;
+            const carved = heights[k] + (barBed - heights[k]) * fade;
+            if (carved < heights[k]) heights[k] = carved;
+          }
+        }
       }
     }
   }
@@ -907,13 +1078,15 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
       const dx = p1.wx - p0.wx, dz = p1.wz - p0.wz, dLen = Math.hypot(dx, dz) || 1;
       const tx = dx / dLen, tz = dz / dLen, nx = -tz, nz = tx;
       const bankW = Math.max(1.85, Math.min(4.8, 1.45 + st[i].hw * 0.45));
-      const crestHw = st[i].hw + bankW;
-      const lx = st[i].wx - nx * crestHw, lz = st[i].wz - nz * crestHw;
-      const rx = st[i].wx + nx * crestHw, rz = st[i].wz + nz * crestHw;
+      const crestHwL = (st[i].hwL ?? st[i].hw) + bankW;
+      const crestHwR = (st[i].hwR ?? st[i].hw) + bankW;
+      const lx = st[i].wx - nx * crestHwL, lz = st[i].wz - nz * crestHwL;
+      const rx = st[i].wx + nx * crestHwR, rz = st[i].wz + nz * crestHwR;
       const ly = inside(lx, lz, 2) ? triHeightAt(lx, lz) : origAt(lx, lz);
       const ry = inside(rx, rz, 2) ? triHeightAt(rx, rz) : origAt(rx, rz);
       st[i].tx = tx; st[i].tz = tz; st[i].nx = nx; st[i].nz = nz; st[i].dLen = dLen;
-      st[i].crestHw = crestHw; st[i].lx = lx; st[i].lz = lz; st[i].ly = ly; st[i].rx = rx; st[i].rz = rz; st[i].ry = ry;
+      st[i].crestHwL = crestHwL; st[i].crestHwR = crestHwR; st[i].crestHw = 0.5 * (crestHwL + crestHwR);
+      st[i].lx = lx; st[i].lz = lz; st[i].ly = ly; st[i].rx = rx; st[i].rz = rz; st[i].ry = ry;
       if (!st[i].seaMouth) {
         const natMin = Math.min(origAt(lx, lz), origAt(rx, rz));
         const cap = Math.min(st[i].wy, Math.min(ly, ry) - 0.16, natMin - 0.30);
@@ -923,10 +1096,10 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     const leveled = pavMonotoneDesc(st.map((s) => s.wy));
     for (let i = 0; i < st.length; i++) {
       if (!st[i].seaMouth) st[i].wy = Math.max(0.06, Math.min(st[i].wy, leveled[i]));
+      else st[i].wy = Math.max(0.0, st[i].wy);
       if (i > 0) st[i].wy = Math.min(st[i].wy, st[i - 1].wy);
     }
   }
-  // Confluence join leveling (`levelRiverJoins` + upstream backwater leveling `levelRiverRuns`): match tributary ends cleanly.
   const confluenceJoins = [];
   for (let a = 0; a < reachChains.length; a++) {
     const chainA = reachChains[a], trib = chainA.stations, end = trib[trib.length - 1];
@@ -950,7 +1123,6 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
       confluenceJoins.push({ trib, end, main: reachChains[bestB].stations[bestJ] });
     }
   }
-  // Ensure backwater propagates cleanly upstream with no local water humps.
   for (const chain of reachChains) {
     if (chain.isCanal) continue;
     let y = -Infinity;
@@ -982,33 +1154,40 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
 
   for (let cIdx = 0; cIdx < reachChains.length; cIdx++) {
     const chain = reachChains[cIdx], st = chain.stations, isCanal = chain.isCanal;
-    emitRiverRibbon(st, isCanal);
+    emitRiverRibbon(st, isCanal, cIdx, chain);
     let length = 0, minHalfWidth = Infinity;
     const reachPts = [];
     for (let i = 0; i < st.length; i++) {
-      minHalfWidth = Math.min(minHalfWidth, st[i].hw);
-      if (i > 0) length += Math.hypot(st[i].wx - st[i - 1].wx, st[i].wz - st[i - 1].wz);
-      reachPts.push([st[i].wx, st[i].wz, st[i].hw, st[i].wy]);
+      const cur = st[i];
+      minHalfWidth = Math.min(minHalfWidth, cur.hw);
+      if (i > 0) length += Math.hypot(cur.wx - st[i - 1].wx, cur.wz - st[i - 1].wz);
+      const speed = cur.speedCenter ?? (isCanal ? 0.35 : 0.9);
+      reachPts.push([cur.wx, cur.wz, cur.hw, cur.wy, cur.depth, cur.tx * speed, cur.tz * speed, cur.thalwegB, cur.estuaryT ?? 0]);
     }
     riverReaches.push({ id: cIdx, isCanal, minHalfWidth, length, seaConnected: Boolean(st[st.length - 1].seaMouth), points: reachPts });
-    // Emit shared-crest embankment + bed strips and matching 2D cut quads for sub-grid terrain clipping.
+    // Emit shared-crest embankment + asymmetric thalweg bed strips and matching 2D cut quads for sub-grid terrain clipping.
     let prevRow = null;
     for (let i = 0; i < st.length; i++) {
       const cur = st[i], nx = cur.nx, nz = cur.nz;
-      const bedHw = Math.max(0.35, cur.hw * 0.62), bedY = cur.wy - cur.depth;
-      const shoreHw = cur.hw;
+      if (cur.seaPlume) { prevRow = null; continue; }
+      const hwL = cur.hwL ?? cur.hw, hwR = cur.hwR ?? cur.hw, thal = cur.thalwegB ?? 0;
+      const bedOff = thal * cur.hw * 0.45;
+      const bedHwL = Math.max(0.32, hwL * (0.58 - thal * 0.25));
+      const bedHwR = Math.max(0.32, hwR * (0.58 + thal * 0.25));
+      const bedY = cur.wy - cur.depth;
       const slY = Math.min(cur.ly, Math.max(cur.wy + 0.02, cur.wy * 0.72 + bedY * 0.28));
       const srY = Math.min(cur.ry, Math.max(cur.wy + 0.02, cur.wy * 0.72 + bedY * 0.28));
-      const bankDx = Math.max(0.6, cur.crestHw - shoreHw);
-      const lSlopeLen = Math.hypot(bankDx, Math.max(0, cur.ly - slY));
-      const rSlopeLen = Math.hypot(bankDx, Math.max(0, cur.ry - srY));
-      const lnx = (cur.ly - slY) / lSlopeLen, lny = bankDx / lSlopeLen;
-      const rnx = (cur.ry - srY) / rSlopeLen, rny = bankDx / rSlopeLen;
+      const bankDxL = Math.max(0.6, (cur.crestHwL ?? cur.crestHw) - hwL);
+      const bankDxR = Math.max(0.6, (cur.crestHwR ?? cur.crestHw) - hwR);
+      const lSlopeLen = Math.hypot(bankDxL, Math.max(0, cur.ly - slY));
+      const rSlopeLen = Math.hypot(bankDxR, Math.max(0, cur.ry - srY));
+      const lnx = (cur.ly - slY) / lSlopeLen, lny = bankDxL / lSlopeLen;
+      const rnx = (cur.ry - srY) / rSlopeLen, rny = bankDxR / rSlopeLen;
       const vCL = pushBankVert(cur.lx, cur.ly, cur.lz, 0, 1, 0, 0.0);
-      const vSL = pushBankVert(cur.wx - nx * shoreHw, slY, cur.wz - nz * shoreHw, nx * lnx, lny, nz * lnx, 0.76);
-      const vBL = pushBankVert(cur.wx - nx * bedHw, bedY, cur.wz - nz * bedHw, nx * 0.28, 0.96, nz * 0.28, 1.0);
-      const vBR = pushBankVert(cur.wx + nx * bedHw, bedY, cur.wz + nz * bedHw, -nx * 0.28, 0.96, -nz * 0.28, 1.0);
-      const vSR = pushBankVert(cur.wx + nx * shoreHw, srY, cur.wz + nz * shoreHw, -nx * rnx, rny, -nz * rnx, 0.76);
+      const vSL = pushBankVert(cur.wx - nx * hwL, slY, cur.wz - nz * hwL, nx * lnx, lny, nz * lnx, 0.76);
+      const vBL = pushBankVert(cur.wx + nx * (bedOff - bedHwL), bedY * (1 - 0.12 * Math.max(0, thal)), cur.wz + nz * (bedOff - bedHwL), nx * 0.28, 0.96, nz * 0.28, 1.0);
+      const vBR = pushBankVert(cur.wx + nx * (bedOff + bedHwR), bedY * (1 - 0.12 * Math.max(0, -thal)), cur.wz + nz * (bedOff + bedHwR), -nx * 0.28, 0.96, -nz * 0.28, 1.0);
+      const vSR = pushBankVert(cur.wx + nx * hwR, srY, cur.wz + nz * hwR, -nx * rnx, rny, -nz * rnx, 0.76);
       const vCR = pushBankVert(cur.rx, cur.ry, cur.rz, 0, 1, 0, 0.0);
       const row = [vCL, vSL, vBL, vBR, vSR, vCR];
       if (prevRow) {
@@ -1030,27 +1209,103 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     }
   }
 
-  function emitRiverRibbon(st, isCanal) {
-    // 5-across water strip tucked under the sloped wet banks so edges never float or Z-fight.
+  function emitRiverRibbon(st, isCanal, cIdx, chain) {
+    // 11-across hydraulic mesh with local flow vectors, shifted thalweg depth, bend separation eddies, bridge pier wakes & estuary sea-mouth blend.
     for (let i = 1; i < st.length; i++) st[i].wy = Math.min(st[i].wy, st[i - 1].wy);
-    const kind = isCanal ? 1.0 : 0.0;
-    const lanes = [-1.0, -0.55, 0.0, 0.55, 1.0];
+    const hasSeaMouth = Boolean(!isCanal && st[st.length - 1]?.seaMouth && !chain?.mouthJoin);
+    const shoreS = chain?.shoreS ?? st[st.length - 1].alongS ?? 0;
+    const totalS = Math.max(1, st[st.length - 1].alongS ?? 1);
+    const shoreHw = st[Math.min(st.length - 1, chain?.shoreIdx ?? st.length - 1)]?.hw ?? 3;
+    const tidalSpan = Math.min(80, Math.max(26, shoreHw * 10));
+    const tidalStartS = Math.max(0, shoreS - tidalSpan);
+    let maxEstT = 0;
+    const lanes = [-1.0, -0.84, -0.66, -0.46, -0.24, 0.0, 0.24, 0.46, 0.66, 0.84, 1.0];
     let prevRow = null;
     for (let i = 0; i < st.length; i++) {
       const cur = st[i], p0 = st[Math.max(0, i - 1)], p1 = st[Math.min(st.length - 1, i + 1)];
       const dx = p1.wx - p0.wx, dz = p1.wz - p0.wz, dLen = Math.hypot(dx, dz) || 1;
       const tx = dx / dLen, tz = dz / dLen, nx = -tz, nz = tx;
       const slope = Math.max(0, (p0.wy - p1.wy) / dLen);
-      const speed = isCanal ? 0.35 : Math.max(0.55, Math.min(3.0, 0.58 + Math.sqrt(slope) * 6.8));
-      const ribHw = cur.hw + 0.45;
+      const speed = isCanal ? 0.36 : Math.max(0.58, Math.min(3.35, 0.65 + Math.sqrt(slope) * 7.6));
+      cur.speedCenter = speed;
+      let estuaryT = 0;
+      if (hasSeaMouth) {
+        const sPos = cur.alongS ?? 0;
+        if (sPos <= tidalStartS || cur.wy > 0.68) estuaryT = 0;
+        else if (sPos <= shoreS) {
+          estuaryT = 0.38 * ((sPos - tidalStartS) / Math.max(1, shoreS - tidalStartS)) * Math.min(1, Math.max(0, (0.68 - cur.wy) / 0.55));
+        } else {
+          estuaryT = 0.38 + 0.62 * ((sPos - shoreS) / Math.max(1, totalS - shoreS));
+        }
+        maxEstT = Math.max(maxEstT, Math.min(1, estuaryT));
+        estuaryT = maxEstT;
+      }
+      cur.estuaryT = estuaryT;
+      const vertKind = isCanal ? 1.0 : Math.min(0.95, estuaryT * 0.95);
+      const seaOpen = Math.max(0, Math.min(1, (estuaryT - 0.36) / 0.18));
+      const jetDecay = hasSeaMouth ? (1 - 0.68 * Math.max(0, (estuaryT - 0.28) / 0.72)) : 1;
+      const hwL = (cur.hwL ?? cur.hw) + 0.45, hwR = (cur.hwR ?? cur.hw) + 0.45, hwMean = 0.5 * (hwL + hwR);
+      const thal = cur.thalwegB ?? 0;
+      // Check proximity just downstream of bridges to excite cutwater eddies.
+      let pierWake = 0;
+      for (const b of bridges) {
+        const bx = cur.wx - b.x, bz = cur.wz - b.z;
+        const down = bx * tx + bz * tz;
+        if (down > -3.5 && down < 16.0 && Math.hypot(bx, bz) < hwMean + 10.0) {
+          const w = (1 - Math.max(0, down) / 16.0) * (down < 0 ? Math.max(0, 1 + down / 3.5) : 1);
+          if (w > pierWake) pierWake = w;
+        }
+      }
       const row = lanes.map((bt) => {
         const edge = Math.abs(bt);
-        const yOff = edge > 0.9 ? -0.035 : edge > 0.4 ? -0.008 : 0.0;
-        const speedMul = 1.0 - edge * 0.25;
-        return pushWaterVert(cur.wx + nx * ribHw * bt, cur.wy + yOff, cur.wz + nz * ribHw * bt, tx * speed * speedMul, tz * speed * speedMul, cur.depth * (1.0 - edge * 0.42), bt, kind);
+        const span = bt < 0 ? hwL * bt : hwR * bt;
+        // Asymmetric depth: deepest near thalwegB (cut bank), shoaling gently across inner point bar, feathered at edge.
+        const edgeTaper = Math.max(0, 1 - edge * edge);
+        const thalFactor = Math.exp(-1.55 * (bt - thal) * (bt - thal));
+        const asymMul = isCanal ? (1 - 0.55 * edge * edge) : (0.16 + 0.92 * edgeTaper * (0.52 + 0.62 * thalFactor));
+        const flankMinDepth = seaOpen * cur.depth * 0.65;
+        const localDepth = Math.max(flankMinDepth, bt === -1.0 || bt === 1.0 ? 0.0 : cur.depth * asymMul);
+        const yOff = (edge > 0.95 ? -0.04 : edge > 0.65 ? -0.012 : 0.0) * (1 - seaOpen);
+
+        // Lateral velocity shear profile + bend separation counter-current on steep inner point bars + sea-mouth outflow fan.
+        const distFromThal = bt - thal;
+        const coreVel = Math.max(0.16, 1.08 * Math.exp(-0.92 * distFromThal * distFromThal));
+        const bendSep = (!isCanal && !seaOpen && Math.abs(thal) > 0.16 && bt * thal < -0.10)
+          ? Math.min(1, (Math.abs(thal) - 0.16) * 2.4 * Math.min(1, (-bt * Math.sign(thal) - 0.10) * 1.8))
+          : 0;
+        const alongScale = coreVel * (1 - 1.28 * bendSep);
+        // Subtle helicoidal cross-current on bends; outward radial fan where outflow spreads into the bay.
+        const crossScale = (!isCanal && !cur.seaMouth) ? thal * 0.11 * edgeTaper : 0;
+        const baseVx = (tx * alongScale + nx * crossScale) * speed * jetDecay;
+        const baseVz = (tz * alongScale + nz * crossScale) * speed * jetDecay;
+        const fanAngle = bt * 0.40 * seaOpen;
+        const cf = Math.cos(fanAngle), sf = Math.sin(fanAngle);
+        const vx = baseVx * cf - baseVz * sf;
+        const vz = baseVx * sf + baseVz * cf;
+        const localSpeed = Math.hypot(vx, vz);
+
+        const shearEddy = Math.min(1, (edge > 0.4 ? (edge - 0.4) * 0.95 : 0.12) * Math.min(1.2, speed / 1.1));
+        const eddy = Math.min(1, Math.max(shearEddy, bendSep * 0.95, pierWake * (1 - 0.5 * Math.abs(bt)) * 0.92));
+        const froude = localSpeed / Math.sqrt(9.81 * Math.max(0.18, localDepth));
+        const riffle = isCanal ? 0 : Math.min(1.48, Math.max(0, (froude - 0.16) * 1.35 + Math.max(0, slope - 0.008) * 18.0)) * (1 - seaOpen);
+
+        return pushWaterVert(
+          cur.wx + nx * span,
+          cur.wy + yOff,
+          cur.wz + nz * span,
+          vertKind,
+          vx, vz,
+          cur.alongS ?? i * 2.5,
+          hwMean,
+          localDepth,
+          bt,
+          thal,
+          eddy,
+          riffle,
+        );
       });
       if (prevRow) {
-        for (let b = 0; b < 4; b++) {
+        for (let b = 0; b < lanes.length - 1; b++) {
           waterIdx.push(prevRow[b], row[b], row[b + 1], prevRow[b], row[b + 1], prevRow[b + 1]);
         }
       }
@@ -1058,7 +1313,8 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     }
   }
 
-  // Carve & fill any dammed estate ponds.
+  // Carve & fill any dammed estate ponds with concentric rings & circulation eddies.
+  const ponds = [];
   for (const place of places) {
     const pond = place.pond, p = pond?.points;
     if (!p || p.length < 6) continue;
@@ -1075,6 +1331,8 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     }
     cx /= pm; cz /= pm;
     if (!inside(cx, cz, 16) || rimMin <= 0.4) continue;
+    let maxR = 4;
+    for (let k = 0; k < pm; k++) maxR = Math.max(maxR, Math.hypot(poly[k * 2] - cx, poly[k * 2 + 1] - cz));
     const pondY = Math.max(0.55, rimMin - 0.22);
     const inPoly = (x, z) => {
       let insideFlag = false;
@@ -1098,14 +1356,45 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
         if (heights && !nearPad(gx, gz)) heights[k] = Math.min(heights[k], Math.max(0.32, pondY - 1.75));
       }
     }
-    const centerV = pushWaterVert(cx, pondY, cz, 0.08, 0.04, 1.75, 0.0, 2.0);
-    const ringV = [];
-    for (let k = 0; k < pm; k++) {
-      const wx = poly[k * 2], wz = poly[k * 2 + 1];
-      const ex = wx + (wx - cx) * 0.08, ez = wz + (wz - cz) * 0.08;
-      ringV.push(pushWaterVert(ex, pondY - 0.02, ez, 0.08, 0.04, 0.45, 1.0, 2.0));
+    ponds.push({ cx, cz, wy: pondY, depth: 1.75, radius: maxR, poly, x0: px0, z0: pz0, x1: px1, z1: pz1 });
+    const centerV = pushWaterVert(cx, pondY, cz, 2.0, 0.04, 0.02, 0, maxR, 1.75, 0.0, 0.0, 0.18, 0.0);
+    const ringFracs = [0.24, 0.52, 0.78, 1.0];
+    let prevRing = null;
+    for (let rf = 0; rf < ringFracs.length; rf++) {
+      const frac = ringFracs[rf], ringV = [];
+      for (let k = 0; k < pm; k++) {
+        const wx = poly[k * 2], wz = poly[k * 2 + 1];
+        const rx = cx + (wx - cx) * frac * (rf === ringFracs.length - 1 ? 1.06 : 1.0);
+        const rz = cz + (wz - cz) * frac * (rf === ringFracs.length - 1 ? 1.06 : 1.0);
+        const dx = rx - cx, dz = rz - cz, rLen = Math.hypot(dx, dz) || 1;
+        // Slow wind/weir circulation swirl around pond rim.
+        const swirl = 0.09 * frac;
+        ringV.push(pushWaterVert(
+          rx,
+          rf === ringFracs.length - 1 ? pondY - 0.025 : pondY,
+          rz,
+          2.0,
+          0.03 - (dz / rLen) * swirl,
+          0.02 + (dx / rLen) * swirl,
+          frac * maxR,
+          maxR,
+          rf === ringFracs.length - 1 ? 0.0 : 1.75 * (1 - 0.82 * frac * frac),
+          frac,
+          0.0,
+          0.22 * frac,
+          0.0,
+        ));
+      }
+      if (!prevRing) {
+        for (let k = 0; k < pm; k++) waterIdx.push(centerV, ringV[k], ringV[(k + 1) % pm]);
+      } else {
+        for (let k = 0; k < pm; k++) {
+          const kn = (k + 1) % pm;
+          waterIdx.push(prevRing[k], ringV[k], ringV[kn], prevRing[k], ringV[kn], prevRing[kn]);
+        }
+      }
+      prevRing = ringV;
     }
-    for (let k = 0; k < pm; k++) waterIdx.push(centerV, ringV[k], ringV[(k + 1) % pm]);
   }
 
   const inlandWater = waterIdx.length ? {
@@ -1360,7 +1649,7 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     },
   };
   return {
-    plan, town, roads, parcelAt, places, seat, inlandWater, herds, loneTrees, bridges,
+    plan, town, roads, parcelAt, places, seat, inlandWater, ponds, herds, loneTrees, bridges,
     riverCut: riverCuts.length ? { cuts: riverCuts, bankVerts: new Float32Array(bankVerts), bankIndices: new Uint32Array(bankIndices) } : null,
     riverReaches,
     // Who mans the seat, by the model's own roll on the board's day: its port's posts are manned from it (js/crew.js).

@@ -333,26 +333,33 @@ const WORKS_FENCE_STONE = worksSpec('Muro de pedra solta (dry-stone wall, a leng
 // A bridge is written this long and stretched to its span; its deck is the floor.
 export const WORKS_BRIDGE_M = 9;
 const WORKS_FOOTBRIDGE = worksSpec('Pontão (timber bridge of a track)', 3.2, WORKS_BRIDGE_M, 6.2, 10, [
-  worksBox('bridge_deck', [-1.5, -0.26, -3.4], [1.5, 0.06, 3.4], 'wood', { partGroup: 'foundation_plinth' }),
+  worksBox('bridge_deck', [-1.5, -0.26, -3.4], [1.5, 0.06, 3.4], 'wood'),
   worksBox('bridge_ramp_n', [-1.5, -0.35, -4.5], [1.5, -0.02, -3.35], 'wood'),
   worksBox('bridge_ramp_s', [-1.5, -0.35, 3.35], [1.5, -0.02, 4.5], 'wood'),
   worksBox('bridge_beam', [-1.32, -0.56, -4.45], [-0.98, -0.24, 4.45], 'oak'),
   worksBox('bridge_beam', [0.98, -0.56, -4.45], [1.32, -0.24, 4.45], 'oak'),
-  ...[-2.8, 0, 2.8].flatMap((z) => [-1.15, 1.15].map((x) => ({ primitive: 'cylinder', name: 'bridge_piles', base: [x, -5.8, z], height: 5.3, radius: 0.18, segments: 6, material: 'timber' }))),
+  ...[-2.8, 0, 2.8].flatMap((z) => [-1.15, 1.15].flatMap((x) => [
+    { primitive: 'cylinder', name: 'bridge_footing', base: [x, -5.8, z], height: 3.6, radius: 0.19, segments: 6, material: 'timber', partGroup: 'foundation_plinth' },
+    { primitive: 'cylinder', name: 'bridge_piles', base: [x, -2.2, z], height: 1.7, radius: 0.18, segments: 6, material: 'timber' },
+  ])),
   ...[-2.8, 2.8].map((z) => worksBox('bridge_bent_cap', [-1.45, -0.78, z - 0.16], [1.45, -0.52, z + 0.16], 'oak')),
   ...[-1.42, 1.42].flatMap((x) => [...worksEvenly(5, -4.3, 4.3).map((z) => worksPost('bridge_rail_post', x, z, 0, 1.02, 0.07)), worksBox('bridge_rail', [x - 0.05, 0.94, -4.45], [x + 0.05, 1.04, 4.45], 'oak')]),
 ], 5.2);
 const WORKS_STONE_BRIDGE = worksSpec('Ponte de pedra (stone bridge of a track, arched with cutwaters)', 4.2, WORKS_BRIDGE_M, 6.5, 11, [
-  worksBox('bridge_deck', [-1.9, -0.4, -3.4], [1.9, 0.12, 3.4], 'cobble', { partGroup: 'foundation_plinth' }),
-  worksBox('bridge_ramp_n', [-1.9, -0.55, -4.5], [1.9, -0.04, -3.35], 'cobble'),
-  worksBox('bridge_ramp_s', [-1.9, -0.55, 3.35], [1.9, -0.04, 4.5], 'cobble'),
+  worksBox('bridge_deck', [-1.9, -0.4, -3.4], [1.9, 0.12, 3.4], 'limestone'),
+  worksBox('bridge_ramp_n', [-1.9, -0.55, -4.5], [1.9, -0.04, -3.35], 'dark_stone'),
+  worksBox('bridge_ramp_s', [-1.9, -0.55, 3.35], [1.9, -0.04, 4.5], 'dark_stone'),
   { primitive: 'group', name: 'bridge_arch', rotation: [0, 90, 0], children: [
     { primitive: 'arch', name: 'bridge_arch', from: [-3.15, -3.85, 0], to: [3.15, -3.85, 0], height: 3.55, thickness: 3.85, voussoirs: 11, pierWidth: 0.95, openThrough: true, material: 'ashlar' }] },
-  worksBox('bridge_abutment', [-2.05, -6.2, -4.5], [2.05, -0.35, -3.05], 'ashlar'),
-  worksBox('bridge_abutment', [-2.05, -6.2, 3.05], [2.05, -0.35, 4.5], 'ashlar'),
+  worksBox('bridge_footing', [-2.05, -6.2, -4.5], [2.05, -2.2, -3.05], 'ashlar', { partGroup: 'foundation_plinth' }),
+  worksBox('bridge_abutment', [-2.05, -2.2, -4.5], [2.05, -0.35, -3.05], 'ashlar'),
+  worksBox('bridge_footing', [-2.05, -6.2, 3.05], [2.05, -2.2, 4.5], 'ashlar', { partGroup: 'foundation_plinth' }),
+  worksBox('bridge_abutment', [-2.05, -2.2, 3.05], [2.05, -0.35, 4.5], 'ashlar'),
   ...[-3.2, 3.2].flatMap((z) => [
-    worksBox('bridge_cutwater', [-2.35, -6.2, z - 0.5], [-1.85, -0.15, z + 0.5], 'stone', { topInset: 0.18 }),
-    worksBox('bridge_cutwater', [1.85, -6.2, z - 0.5], [2.35, -0.15, z + 0.5], 'stone', { topInset: 0.18 }),
+    worksBox('bridge_footing', [-2.35, -6.2, z - 0.5], [-1.85, -2.2, z + 0.5], 'stone', { partGroup: 'foundation_plinth' }),
+    worksBox('bridge_cutwater', [-2.35, -2.2, z - 0.5], [-1.85, -0.15, z + 0.5], 'stone', { topInset: 0.18 }),
+    worksBox('bridge_footing', [1.85, -6.2, z - 0.5], [2.35, -2.2, z + 0.5], 'stone', { partGroup: 'foundation_plinth' }),
+    worksBox('bridge_cutwater', [1.85, -2.2, z - 0.5], [2.35, -0.15, z + 0.5], 'stone', { topInset: 0.18 }),
   ]),
   worksBox('bridge_parapet', [-2.02, 0.02, -4.5], [-1.68, 0.92, 4.5], 'ashlar'),
   worksBox('bridge_parapet', [1.68, 0.02, -4.5], [2.02, 0.92, 4.5], 'ashlar'),

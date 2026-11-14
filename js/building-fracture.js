@@ -141,7 +141,8 @@ export function prepareBuildingFracture(options) {
 }
 
 // The same work in pieces, so a game frame can stop between them. It yields often and cheaply.
-export function* prepareBuildingFractureSteps({ vertices, indices, catalog, instanceIndex, instance, materialClass = 'masonry', groundAt = () => 0 }) {
+export function* prepareBuildingFractureSteps({ vertices, indices, catalog, instanceIndex, instance, materialClass = 'masonry', groundAt = () => 0, waterAt = null }) {
+  const BRIDGE_PART = /bridge_(deck|ramp|arch|beam|bent|rail|parapet|coping|bollard|pile|pier|abutment|cutwater)/i;
   const parts = catalog.parts, ownParts = parts.filter((p) => p.instanceIndex === instanceIndex && p.indexCount > 0);
   let firstIndex = Infinity, endIndex = 0;
   for (const part of ownParts) {
@@ -185,7 +186,10 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
     return s;
   };
 
-  const staysBecauseLow = (min, max) => max[1] < Math.max(groundAt((min[0] + max[0]) * 0.5, (min[2] + max[2]) * 0.5), -0.6) + 0.02;
+  const staysBecauseLow = (min, max, allowBridge = false) => {
+    const g = groundAt((min[0] + max[0]) * 0.5, (min[2] + max[2]) * 0.5);
+    return allowBridge ? max[1] < g - 0.15 : max[1] < Math.max(g, -0.6) + 0.02;
+  };
   const faceNormal = (face) => {
     const at = face.v[0] * STRIDE;
     return unitOf([vertices[at + 3], vertices[at + 4], vertices[at + 5]]);
@@ -409,7 +413,7 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
 
   // Cut one wall quad into blocks. Courses are level on an upright wall, and each course breaks where the
   // Voronoi cell of the masonry changes, so joints do not line up from one course to the next.
-  const cutQuad = (face, part, surface, thickness) => {
+  const cutQuad = (face, part, surface, thickness, allowBridge = false) => {
     const [a, b, c, d] = face.v, A = a * STRIDE, B = b * STRIDE, C = c * STRIDE, D = d * STRIDE;
     const ux = vertices[B] - vertices[A], uy = vertices[B + 1] - vertices[A + 1], uz = vertices[B + 2] - vertices[A + 2];
     const vx = vertices[D] - vertices[A], vy = vertices[D + 1] - vertices[A + 1], vz = vertices[D + 2] - vertices[A + 2];
@@ -452,7 +456,7 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
         const corners = coursesOnV ? [q00, q10, q11, q01] : [q00, q01, q11, q10];
         const top = Math.max(q00[1], q10[1], q11[1], q01[1]), low = Math.min(q00[1], q10[1], q11[1], q01[1]);
         const midX = (q00[0] + q11[0]) * 0.5, midZ = (q00[2] + q11[2]) * 0.5;
-        if (staysBecauseLow([midX, low, midZ], [midX, top, midZ])) {
+        if (staysBecauseLow([midX, low, midZ], [midX, top, midZ], allowBridge)) {
           geometry[0].blocks.push({ corners, depth: 0 });
           continue;
         }
@@ -490,8 +494,11 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
     const part = parts[partIndex];
     const partBounds = localBounds(partFaces), partMin = partBounds.min, partMax = partBounds.max;
     const middle = toWorld((partMin[0] + partMax[0]) * 0.5, 0, (partMin[2] + partMax[2]) * 0.5);
-    const lowest = Math.max(groundAt(middle[0], middle[2]), -0.6);
-    const partRooted = partMin[1] < lowest - 0.5, partKey = String(part.partKey ?? '');
+    const partKey = String(part.partKey ?? '');
+    const isBridgePart = BRIDGE_PART.test(partKey);
+    const rawPartGround = groundAt(middle[0], middle[2]);
+    const lowest = isBridgePart ? rawPartGround : Math.max(rawPartGround, -0.6);
+    const partRooted = !isBridgePart && partMin[1] < lowest - 0.5;
     const partSpan = spanOf(partMin, partMax), mostly = surfaceOf(partFaces[0].kind, fortified);
     if (GUN.test(partKey)) {
       const s = keyed(`gun:${partIndex}`, BUILDING_SHARD_KINDS.gun, part, { ...mostly, timber: false, span: 1 });
@@ -504,7 +511,8 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
       continue;
     }
     for (const [islandIndex, island] of islandsOf(partFaces, vertices, originX, originZ).entries()) {
-      const islandGround = Math.max(groundAt((island.min[0] + island.max[0]) * 0.5, (island.min[2] + island.max[2]) * 0.5), -0.6);
+      const rawIslandGround = groundAt((island.min[0] + island.max[0]) * 0.5, (island.min[2] + island.max[2]) * 0.5);
+      const islandGround = isBridgePart ? rawIslandGround : Math.max(rawIslandGround, -0.6);
       // A box set at an angle in the building is measured along its own sides.
       const frame = islandFrame(island.faces), bounds = frame ? boundsAlong(island.faces, frame) : localBounds(island.faces);
       if (island.min[1] >= islandGround - 0.5 && spanOf(bounds.min, bounds.max) <= ISLAND_SMALL) {
@@ -513,21 +521,21 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
         continue;
       }
       const spanX = bounds.max[0] - bounds.min[0], spanY = bounds.max[1] - bounds.min[1], spanZ = bounds.max[2] - bounds.min[2];
-      const platform = Math.min(spanX, spanZ) > 4;
+      const platform = Math.min(spanX, spanZ) > 4 || /^bridge_(deck|ramp)/i.test(partKey);
       // A post or a beam has no wall to cut. It breaks into lengths by cell.
       const spar = spanX + spanY + spanZ - Math.max(spanX, spanY, spanZ) - Math.min(spanX, spanY, spanZ) < 0.9;
       for (const face of island.faces) {
         const surface = surfaceOf(face.kind, fortified);
-        if (staysBecauseLow(face.min, face.max)) { stay(face); continue; }
+        if (staysBecauseLow(face.min, face.max, isBridgePart)) { stay(face); continue; }
         const n = faceNormal(face), horizontal = Math.abs(n[1]) > 0.7;
         if (horizontal && instance.trace && WALK_EDGE.test(partKey) && face.v.length === 4) {
-          cutQuad(face, part, { ...surface, scale: Math.max(surface.scale, 1.6) }, 0.5);
+          cutQuad(face, part, { ...surface, scale: Math.max(surface.scale, 1.6) }, 0.5, isBridgePart);
           continue;
         }
         if (fortified && !horizontal && platform && face.v.length === 4 && SCARP_WALL.test(partKey)) geometry[0].cores.push({ face, part });
         const longest = Math.max(face.max[0] - face.min[0], face.max[1] - face.min[1], face.max[2] - face.min[2]);
         // A paved floor at ground level stays, and the flat of a fort's rampart is cut into heavy slabs.
-        if (horizontal && !ROOF_KINDS.has(face.kind) && !surface.timber
+        if (horizontal && !ROOF_KINDS.has(face.kind) && !surface.timber && !isBridgePart
           && (fortified ? (RAMPART_BODY.test(partKey) || face.kind === 16) && face.max[1] <= rampartTop : (face.kind === 16 || STAYING_PLATE.test(partKey) || platform) && face.max[1] <= islandGround + 1.6)) {
           if (fortified && platform && face.v.length === 4) rampartPlate(face, bounds, part, surface, islandGround);
           else if (fortified && n[1] > 0.7) rampartPolygon(face, part, surface);
@@ -538,12 +546,12 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
         if (horizontal && platform && !ROOF_KINDS.has(face.kind)) {
           const slab = { ...surface, ceiling: true, scale: Math.max(surface.scale, 3.2), span: 4 };
           // One broad quad has no cells to fall into, so it is cut like a wall, or it would come down whole.
-          if (face.v.length === 4 && longest > 1.45 * slab.scale * blockScale) cutQuad(face, part, slab, spanY);
+          if (face.v.length === 4 && longest > 1.45 * slab.scale * blockScale) cutQuad(face, part, slab, spanY, isBridgePart);
           else geometry[cellShard(face, partIndex, part, slab)].faces.push(face);
           continue;
         }
         // A post driven into the ground stays in it, whatever goes from on top of it.
-        if (face.min[1] < islandGround - 0.5 && (spar || face.v.length !== 4)) { stay(face); continue; }
+        if (!isBridgePart && face.min[1] < islandGround - 0.5 && (spar || face.v.length !== 4)) { stay(face); continue; }
         if (spar) {
           geometry[cellShard(face, partIndex, part, surface)].faces.push(face);
           continue;
@@ -554,10 +562,10 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
           const buildingNormal = [n[0] * cosY - n[2] * sinY, n[1], n[0] * sinY + n[2] * cosY];
           const localNormal = frame ? [buildingNormal[0] * frame.cos - buildingNormal[2] * frame.sin, buildingNormal[1], buildingNormal[0] * frame.sin + buildingNormal[2] * frame.cos] : buildingNormal;
           const thickness = Math.abs(localNormal[0]) * spanX + Math.abs(localNormal[1]) * spanY + Math.abs(localNormal[2]) * spanZ;
-          cutQuad(face, part, surface, thickness);
+          cutQuad(face, part, surface, thickness, isBridgePart);
           continue;
         }
-        if (face.min[1] < islandGround - 0.5) { stay(face); continue; }
+        if (!isBridgePart && face.min[1] < islandGround - 0.5) { stay(face); continue; }
         const s = cellShard(face, partIndex, part, surface);
         geometry[s].faces.push(face);
       }
@@ -755,7 +763,7 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
     shards: Object.freeze(shards),
     strikable: Object.freeze(shards.filter(Boolean).map((s) => s.index)),
     guns: Object.freeze(shards.filter((s) => s?.kind === BUILDING_SHARD_KINDS.gun).map((s) => s.index)),
-    toLocal, toWorld, groundAt, floorAt, originX, originZ,
+    toLocal, toWorld, groundAt, waterAt, floorAt, originX, originZ,
   });
   return { vertices: rest, initial, indices: finalIndices, fracture };
 }
@@ -986,10 +994,12 @@ function releaseShard(state, s, now, { direction = null, power = 1, proximity = 
   for (let i = 0; i < 3; i++) {
     if (i === 2) [landX, landZ] = rollDownHeap(state, landX, landZ);
     const ground = Math.max(fracture.groundAt(landX, landZ), fracture.floorAt(landX, landZ, shard.floorSlab ? shard.min[1] - 0.15 : pivot[1], state.broken));
-    water = shard.timber && ground < -0.2;
+    const surfW = typeof fracture.waterAt === 'function' ? fracture.waterAt(landX, landZ) : null;
+    const waterLevel = Number.isFinite(surfW) ? surfW : (ground < -0.2 ? 0.02 : -Infinity);
+    water = shard.timber && waterLevel > ground + 0.12;
     const heap = water ? 0 : state.heap.get(heapKey(landX, landZ)) ?? 0;
     // It never lands higher than it started, nor buried below the ground.
-    restY = Math.max(water ? -10 : ground - 0.15, Math.min(pivot[1], (water ? 0.02 : ground + heap) + half - bury));
+    restY = Math.max(water ? -10 : ground - 0.15, Math.min(pivot[1], (water ? waterLevel + 0.02 : ground + heap) + half - bury));
     settle = Math.max(0.16, (velocity[1] + Math.sqrt(velocity[1] * velocity[1] + 2 * FRACTURE_GRAVITY * Math.max(0, pivot[1] - restY))) / FRACTURE_GRAVITY);
     if (i < 2) {
       const horizTime = settle <= 0.85 ? settle : 0.85 + (settle - 0.85) * 0.30;
@@ -1483,7 +1493,7 @@ export function createBuildingFractureGPU({ device, pipeline, prepared, state })
  * until now as an instance of its type). It is cut from that, `onFractured` is told so that whoever drew it
  * whole stops, and `drawSourced` draws its pieces, since they want their own pipeline.
  */
-export function createPortFractures({ device, port, geometry, portIndices, groundAt, damageStore = null, buildMillisecondsPerFrame = 3, onFractured = null, onRebuilt = null }) {
+export function createPortFractures({ device, port, geometry, portIndices, groundAt, waterAt = null, damageStore = null, buildMillisecondsPerFrame = 3, onFractured = null, onRebuilt = null }) {
   const live = new Map(), building = new Map();
   let pipeline = null, starting = null, frame = 0, lastNow = 0;
   noteBuildingMeshes(port, geometry);
@@ -1506,7 +1516,7 @@ export function createPortFractures({ device, port, geometry, portIndices, groun
     if (!source && !geometry?.partAssembly) return [][Symbol.iterator]();
     return prepareBuildingFractureSteps({
       vertices: source?.vertices ?? geometry.vertices, indices: source?.indices ?? geometry.indices, catalog: source?.partAssembly ?? geometry.partAssembly,
-      instanceIndex: source ? 0 : instanceIndex, instance, materialClass: instance.damageState.materialClass ?? 'masonry', groundAt,
+      instanceIndex: source ? 0 : instanceIndex, instance, materialClass: instance.damageState.materialClass ?? 'masonry', groundAt, waterAt,
     });
   };
   // A first hit waits a few frames in the queue while its building is cut, so nothing stalls a frame.

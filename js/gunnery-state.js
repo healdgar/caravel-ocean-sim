@@ -316,7 +316,7 @@ function gunneryAdvanceProjectiles(state,environment,end){
     if(Number.isFinite(solid?.fraction)&&solid.fraction>=0&&solid.fraction<=1&&(!hit||solid.fraction<hit.fraction))hit={...solid,kind:solid.kind??'solid'};
     if(hit){
       const fraction=gunneryClamp(hit.fraction,0,1),time=p.time+h*fraction,position=gunneryMix(from,to,fraction),velocity=gunneryMix(p.velocity,next.velocity,fraction);
-      const water=hit.kind==='water',height=water?gunneryWaterHeight(environment,position[0],position[2],time):position[1];
+      const water=hit.kind==='water',height=water?(Number.isFinite(hit.waterSurfaceY)?hit.waterSurfaceY:gunneryWaterHeight(environment,position[0],position[2],time)):position[1];
       const surfacePosition=water?[position[0],height,position[2]]:[...position];
       gunneryEmit(state,environment,{...hit,type:'impact',shotId:p.id,gunId:p.gunId,ammo:p.ammo??'round',time,position,surfacePosition,velocity,
         mass:p.mass,radius:p.radius,energy:.5*p.mass*gunneryLength(velocity)**2});

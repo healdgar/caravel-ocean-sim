@@ -9527,6 +9527,7 @@ function dressProceduralCoastalPack(pack, heights, port, elevationSource, satell
       board: country.board ?? null,
       places: country.places ?? null,
       riverReaches: country.riverReaches ?? null,
+      ponds: country.ponds ?? null,
       bridges: country.bridges ?? null,
     };
     port.riverCut = country.riverCut ?? null;

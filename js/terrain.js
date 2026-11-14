@@ -22,9 +22,9 @@ import {oldWorldCountry,registerBakedBoard} from './old-world.js';
 import {boardAsKept,keptBoard} from './board-keep.js';
 import {bakedBoardAsset} from './board-model.js';
 import {createBoardStamp,requestBoardStampPipelines} from './board-stamp.js';
-import {createInlandWater} from './inland-water.js';
-import {createLivestockHerds} from './herds.js';
-import {createTradeVessels} from './trade-vessels.js';
+import {createInlandWater,requestInlandWaterPipeline,createInlandWaterSampler} from './inland-water.js';
+import {bridgeDeckYAt,createLivestockHerds} from './herds.js';
+import {createTradeVessels,requestTradeVesselsPipelines} from './trade-vessels.js';
 import {CITY_BLOCK_FLOATS} from './old-world-city.js';
 import {CITY_DETAIL_M,CITY_TYPED_FLOATS,compileCityBuildingTypes} from './old-world-buildings.js';
 import {createCityTargets} from './city-targets.js';
@@ -202,6 +202,7 @@ export function retargetForestPackToProcedural(
     const portCz = port ? port.center.z : proceduralPack.region.z;
     // Tended country: trees stand where a farmer set them, apart and kept small.
     const country = oldWorldCountry(region, secPack.heights, port);
+    const secWaterAt = createInlandWaterSampler(port?.country ?? country, { margin: 3.8 });
     const tendedKinds = new Map();
     const tendedPrototypes = (tended) => {
       let ids = tendedKinds.get(tended);
@@ -336,6 +337,7 @@ export function retargetForestPackToProcedural(
         if (clearEnv || clearRad) return -1;
         if (!planted && streetEdgeAt(port.streets, x, z) < PLANT_STREET_GAP_M) return -1;
       }
+      if (secWaterAt?.(x, z)) return -1;
 
       const gy = sampleSecGround(x, z);
       const minGy = hasMangrove ? 0.32 : 0.75;
@@ -797,7 +799,7 @@ const GROUND_RESIDENT_RELEASE = 1.15;
 const GROUND_RESIDENCY_MOVE_M = 16;
 const GROUND_PATCHES_PER_FRAME = 8;
 
-export async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeView,clouds,shader,computePipe,mipPipe,format,samples,waterOptics=null,
+export async function createTerrain({device,frameUBO,transView,skyView,sampler,envCubeView,clouds,shader,computePipe,mipPipe,format,samples,waterOptics=null,oceanBridge=null,
   region:explicitRegion=null,placement=null,options={},
   canopyMode=typeof location==='undefined'?'auto':new URLSearchParams(location.search).get('canopy')||'auto',portDamage=null,landShadows=null,boardKept=null}){
   if(!['auto','near','far','off'].includes(canopyMode))throw Error('Unknown canopy scenery mode');
@@ -897,7 +899,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   for(const pending of [computePipe(COASTAL_FIELD_BAKE,'coastal field'),computePipe(GROUND_DETAIL_BAKE,'ground detail bake'),
     computePipe(GROUND_COVER_CULL,'ground cover cull'),computePipe(TREE_CULL,'tree cull'),computePipe(CITY_CULL,'city cull'),
     canopyMode==='off'||!useProcedural||search.get('forestGroves')==='0'?null:requestForestGrovePipelines({device,shader,module:modulePromise,format,samples}),
-    requestLandCraterPipelines({device,shader,computePipe,module:modulePromise,format,samples})])pending?.catch(()=>{});
+    requestLandCraterPipelines({device,shader,computePipe,module:modulePromise,format,samples}),
+    useProcedural?requestInlandWaterPipeline({device,shader,format,samples}):null,
+    useProcedural?requestTradeVesselsPipelines({device,shader,format,samples,shadowFormat:activeLandShadows.format}):null])pending?.catch(()=>{});
   // A port whose country Castle and Commons' model founded ahead of time: the board is fetched while the rest
   // loads, and handed over before the land is made. Without it the country is made by this game's own rules.
   const bakedBoardPath=useProcedural&&typeof regionParam==='string'&&search.get('board')!=='off'?bakedBoardAsset(regionParam,resolvedYear):null;
@@ -1045,13 +1049,18 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     const edgeH=sampleFn(heights,cx,cz,activeRegion);
     return edgeH>-1.5?edgeH:h;
   };
-  const groundSample=(x,z)=>{
+  let inlandWaterSampler=createInlandWaterSampler(proceduralPack?.port?.country??null);
+  const baseGroundSample=(x,z)=>{
     if(proceduralPack){
       const sec=findNeighborSection(x,z);
-      if(sec)return terrainSurfaceSample(sec.heights,x,z,sec.region);
-      return clampToLoadedLandBorder(x,z,terrainSurfaceSample);
+      return sec?terrainSurfaceSample(sec.heights,x,z,sec.region):clampToLoadedLandBorder(x,z,terrainSurfaceSample);
     }
     return sampleTerrainNear(nearTile,heights,x,z);
+  };
+  const groundSample=(x,z)=>{
+    const base=baseGroundSample(x,z);
+    const deck=bridgeDeckYAt(x,z,proceduralPack?.port?.country?.bridges);
+    return deck>0?Math.max(base,deck):base;
   };
   const heightSample=(x,z)=>{
     if(proceduralPack){
@@ -1066,7 +1075,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // Root positions change once at asset preparation, never as an animation.
   if(nearTile)for(let i=0;i<originalTrees.length;i+=8)if(terrainNearContains(nearTile,originalTrees[i],originalTrees[i+2]))originalTrees[i+1]=groundSample(originalTrees[i],originalTrees[i+2]);
   let canopyTrees=originalTrees,trees=originalTrees;
-  let groundPatches=createGroundCoverPatches(activeRegion,groundSample,nearTile?(x,z,span)=>terrainNearPatchBounds(nearTile,x,z,span):null);
+  let groundPatches=createGroundCoverPatches(activeRegion,baseGroundSample,nearTile?(x,z,span)=>terrainNearPatchBounds(nearTile,x,z,span):null);
   const nearBitmapPromise=nearTile?createImageBitmap(new Blob([nearTile.albedo],{type:'image/png'})):null;
   nearBitmapPromise?.catch(()=>{});
   const buffer=(data,usage,label)=>{
@@ -1094,11 +1103,26 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   let activeCity=proceduralPack?.city??null,cityTargets=cityTargetsFor(activeCity,proceduralPack?.port);
   let cityStruck=null;
   const cityStruckIndices=new Set(),cityNoSize=new Float32Array(2);
+  const syncCollapsedBridges=(index,city,struck)=>{
+    const bridges=proceduralPack?.port?.country?.bridges;
+    if(!bridges?.length)return;
+    const bx=city?.typed?.[index*CITY_TYPED_FLOATS],bz=city?.typed?.[index*CITY_TYPED_FLOATS+2];
+    let changed=false;
+    for(const b of bridges){
+      if(!b)continue;
+      const hit=b.cityIndices?.includes(index)||(Number.isFinite(bx)&&Number.isFinite(bz)&&Math.hypot(bx-b.x,bz-b.z)<=Math.max(10,(b.length||12)*0.65));
+      if(!hit)continue;
+      const collapsed=b.cityIndices?.length?b.cityIndices.some(i=>cityStruckIndices.has(i)):struck;
+      if(b.collapsed!==collapsed){b.collapsed=collapsed;changed=true;}
+    }
+    if(changed)herds?.setBridges?.(bridges);
+  };
   const cityBuildingStruck=instance=>{
     const index=instance.city?.index,city=activeCity;
     if(!(index>=0)||!city)return;
     cityTargets?.fractured(instance);
     cityStruckIndices.add(index);
+    syncCollapsedBridges(index,city,true);
     // Its pentice, sign and ale-stake go with it.
     cityCull?.clearSlots(index,1+(city.typedAttached?.[index]??0));
     if(cityBlocks)for(let block=city.typedBlocks[index*2],end=block+city.typedBlocks[index*2+1];block<end;block++){
@@ -1110,6 +1134,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const cityBuildingRebuilt=instance=>{
     const index=instance.city?.index,city=activeCity;
     if(!cityStruckIndices.delete(index)||!city)return;
+    syncCollapsedBridges(index,city,false);
     const withIt=1+(city.typedAttached?.[index]??0);
     cityCull?.setInstances(index,city.typed.subarray(index*CITY_TYPED_FLOATS,(index+withIt)*CITY_TYPED_FLOATS),city.typedTypes.subarray(index,index+withIt));
     if(cityBlocks)for(let block=city.typedBlocks[index*2],end=block+city.typedBlocks[index*2+1];block<end;block++){
@@ -1125,7 +1150,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     // A save names the city's struck buildings; they are stood first, so that their records find them.
     if(targets&&damageStore)targets.revive(damageStore.recorded(port));
     damageStore?.restore(port);
-    return createPortFractures({device,port,geometry:own?geometry:null,portIndices:own?indexBuffer:null,groundAt:(x,z)=>heightSample(x,z),damageStore,
+    return createPortFractures({device,port,geometry:own?geometry:null,portIndices:own?indexBuffer:null,groundAt:(x,z)=>heightSample(x,z),waterAt:(x,z)=>inlandWaterSampler?.(x,z)?.wy??null,damageStore,
       onFractured:targets?cityBuildingStruck:null,onRebuilt:targets?cityBuildingRebuilt:null});
   };
   let portFractures=portFracturesFor(proceduralPack?.portGeometry,proceduralPack?.port,portMesh?.indices,cityTargets);
@@ -1268,7 +1293,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       groundWanted=groundPatches.filter(patch=>!groundResident.has(patch)&&distanceOf(patch)<GROUND_RESIDENT_M).sort((a,b)=>distanceOf(b)-distanceOf(a));
     }
     for(let i=0;i<GROUND_PATCHES_PER_FRAME&&groundWanted.length&&groundFreeBlocks.length;i++){
-      const patch=groundWanted.pop(),block=groundFreeBlocks.pop(),perVariant=groundCoverInstances(patch,activeRegion,groundSample,biome,(x,z)=>streetEdgeAt(proceduralPack?.port?.streets,x,z)>=GROUND_COVER_STREET_GAP_M&&!craterLedger.covers(x,z));
+      const patch=groundWanted.pop(),block=groundFreeBlocks.pop(),perVariant=groundCoverInstances(patch,activeRegion,baseGroundSample,biome,(x,z)=>streetEdgeAt(proceduralPack?.port?.streets,x,z)>=GROUND_COVER_STREET_GAP_M&&!craterLedger.covers(x,z)&&!inlandWaterSampler?.(x,z));
       const floats=new Float32Array(groundBlock*8),slotGroups=new Uint32Array(groundBlock).fill(0xffffffff);let slot=0;
       perVariant.forEach((data,variant)=>{for(let k=0;k<data.length;k+=8){floats.set(data.subarray(k,k+8),slot*8);slotGroups[slot++]=variant;}});
       groundCull.setInstances(block*groundBlock,floats,slotGroups);groundResident.set(patch,block);
@@ -1390,7 +1415,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   installTrees(trees);
   if(canopyPack)importedCanopy=await createCanopyRenderer({device,module,resources,clouds,format,samples,pack:canopyPack,mode:canopyMode});
   const streamMaxRoots=isMobile?22000:112000;
-  const activeForestPack=proceduralPack&&forestPack?retargetForestPackToProcedural(forestPack,proceduralPack,groundSample,{isMobile,maxRootCapacity:streamMaxRoots,climateProfile:activeClimate}):forestPack;
+  const activeForestPack=proceduralPack&&forestPack?retargetForestPackToProcedural(forestPack,proceduralPack,baseGroundSample,{isMobile,maxRootCapacity:streamMaxRoots,climateProfile:activeClimate}):forestPack;
   const activeForestMiddle=forestAtlasDebug?null:(proceduralMiddle??forestMass?.middle??null);
   // What has been shot down on this coast comes back with it, and is kept with the port damage.
   const forestStrikeKey=activeRegion.id??`${activeRegion.latitude},${activeRegion.longitude}`;
@@ -1462,9 +1487,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const submergedGroundGroup=submergedGround?.bindGroup(opaqueResources.map(([binding,resource])=>({binding,resource})));
   const lightGroup=bind(lightPipe,[[0,{buffer:frameUBO}],[4,elevation.createView()],[5,lighting.createView()],[6,{buffer:uniform}],[7,{buffer:nearDomain}],[8,{buffer:nearElevation}]]);
   const cloudLight=clouds.bindVolume(lightPipe,true);
-  let inlandWater=proceduralPack?await createInlandWater({device,shader,format,samples,resources:nearResources,clouds,initialGeometry:proceduralPack.inlandWater??null}):null;
+  let inlandWater=proceduralPack?await createInlandWater({device,shader,format,samples,resources:nearResources,clouds,coastalField,oceanBridge,initialGeometry:proceduralPack.inlandWater??null}):null;
   let herds=proceduralPack?await createLivestockHerds({device,shader,format,samples,frameUBO,landUniform:uniform,nearDomain,elevation,landShadowUniform:activeLandShadows.uniform,resources:nearResources,clouds,initialHerds:proceduralPack.herds??null,initialBridges:proceduralPack.port?.country?.bridges??null,isMobile}):null;
-  let tradeVessels=proceduralPack?createTradeVessels({device,format,samples,shader,resources:nearResources,shadowFormat:activeLandShadows.format}):null;
+  let tradeVessels=proceduralPack?await createTradeVessels({device,format,samples,shader,computePipe,oceanBridge,resources:nearResources,shadowFormat:activeLandShadows.format}):null;
   if(tradeVessels&&proceduralPack?.port?.country?.board){
     tradeVessels.setTraffic(null,activeRegion,proceduralPack.port.country.riverReaches??[],proceduralPack.port.country.places??[],{heights,region:activeRegion,port:proceduralPack.port,bridges:proceduralPack.port.country.bridges??[]});
   }
@@ -1696,7 +1721,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       const nextForestPack=retargetForestPackToProcedural(
         forestPack,
         proceduralPack,
-        groundSample,
+        baseGroundSample,
         {isMobile,extraSections,maxRootCapacity:streamMaxRoots,climateProfile:activeClimate}
       );
       forest.updatePack(nextForestPack,regionalElevationData??heights,getRegionalOcclusionRegion());
@@ -1961,6 +1986,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     nearResources=[...opaqueResources,[12,{buffer:nearDomain}],[13,nearAlbedo.createView()],...activeTownField.resources,...groundDetail.resources];
     groups[0]=bind(terrainPipe,nearResources);groups[1]=bind(opaqueTreePipe,nearResources);craterLand=null;cityGroup=bind(cityPipe,nearResources);cityTypeGroup=bind(cityTypePipe,nearResources);cityStruckGroup=bind(cityStruckPipe,nearResources);
     submergedGroup=submerged?.bindGroup(nearResources.map(([binding,resource])=>({binding,resource})));
+    inlandWaterSampler=createInlandWaterSampler(upgradedPack.port?.country??null);
     inlandWater?.rebind(nearResources);
     inlandWater?.setGeometry(upgradedPack.inlandWater??null);
     herds?.rebind(nearResources);
@@ -1985,7 +2011,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       portFractures?.restoreNow().catch((error)=>console.error('Port damage restore failed',error));
     }
 
-    groundPatches=createGroundCoverPatches(activeRegion,groundSample,null);
+    groundPatches=createGroundCoverPatches(activeRegion,baseGroundSample,null);
     groundStats.patches=groundPatches.length;
     clearGroundResidency();
     lastCamera=null;
@@ -2215,6 +2241,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     setPixelError(next){if(Number.isFinite(next)&&next>0){currentPixelError=next;forestMass?.setPixelError?.(next);forest?.setPixelError?.(next);groundCull.setPixelError(next,isMobile&&next>3.8?1.35:1);treeCull?.setPixelError(next);}},
     nearStats:{loaded:!!nearTile,error:nearFailure,domain:nearTile?.manifest.domain??null,triangles:(fineMesh?.indices.length??0)/3},
     height:(x,z)=>heightSample(x-worldOffset.x,z-worldOffset.z),
+    surfaceHeight:(x,z)=>baseGroundSample(x-worldOffset.x,z-worldOffset.z),
     groundSample:(x,z)=>groundSample(x-worldOffset.x,z-worldOffset.z),
     hasLoadedHeightAt(x,z){
       const lx=x-worldOffset.x,lz=z-worldOffset.z;
@@ -2251,6 +2278,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     sweepCity(from,to,radius,options,sweepBuilding){return cityTargets&&!savedPortOverride?cityTargets.sweep(from,to,radius,options,sweepBuilding):null;},
     get cityTargets(){return cityTargets;},
     get inlandWater(){return inlandWater;},
+    inlandWaterAt(x,z){return inlandWaterSampler?inlandWaterSampler(x-worldOffset.x,z-worldOffset.z):null;},
     get herds(){return herds;},
     get tradeVessels(){return tradeVessels;},
     setWorldOffset(dx=0,dz=0){
@@ -2435,6 +2463,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       forest?.encode(pass);
       groves?.encode(pass);
       herds?.encode(pass);
+      tradeVessels?.encode?.(pass);
       if((tick++%8)!==0&&!changed)return;
       pass.setPipeline(lightPipe);pass.setBindGroup(0,lightGroup);pass.setBindGroup(1,cloudLight);pass.dispatchWorkgroups(8,8);
     },
@@ -2502,7 +2531,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       pass.setPipeline(groundPipe);pass.setBindGroup(0,groundGroup);
       for(let i=0;i<groundMeshes.length;i++)groundCull.draw(pass,i,0,groundMeshes[i].buffer);
       if(herds&&isSectionVisible(activeRegion,camera,viewProjection,2600))herds.draw(pass);
-      if(inlandWater&&isSectionVisible(activeRegion,camera,viewProjection,5200))inlandWater.draw(pass);
       if(tradeVessels&&isSectionVisible(activeRegion,camera,viewProjection,5200))tradeVessels.draw(pass);
       // Draw solid crowns/wood before cutout leaves for Apple hidden-surface
       // removal. The far tier has no alpha foliage or expensive bark fallback.
@@ -2517,6 +2545,10 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       }
       importedCanopy?.drawCutout(pass);
       forest?.drawCutout(pass);
+      if(tradeVessels&&isSectionVisible(activeRegion,camera,viewProjection,5200))tradeVessels.drawDamaged?.(pass);
+    },
+    drawWater(pass,camera={x:0,y:6,z:0},viewProjection=null){
+      if(inlandWater&&isSectionVisible(activeRegion,camera,viewProjection,5200))inlandWater.draw(pass);
     },
     drawShadow(pass,camera={x:0,y:6,z:0},viewProjection=null){
       pass.setPipeline(portShadowPipe);pass.setBindGroup(0,portShadowGroup);

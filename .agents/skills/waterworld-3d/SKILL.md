@@ -64,7 +64,17 @@ Defined in `js/ship-part-taxonomy.js`:
 
 ---
 
-## 4. Build, Test & Cloudflare Deploy Workflow
+## 4. Mandatory Model Rule: Physical + GPU + Continuous Splat Decimation
+
+Per [AGENTS.md](../../../AGENTS.md) and [GPU_ARCHITECTURE.md](../../../GPU_ARCHITECTURE.md), every 3D model family (ships, harbor/river boats, buildings, bridges, crew, livestock, wagons, trees, boulders, props) must satisfy:
+
+1. **Physical geometry + parity**: Real metric 3D manifolds/part assemblies (`FIXED`, `DISCRETE_COUNT`, `SECTION_INSERT`, `PROPORTIONAL`) matching collision sweeps, hydrostatics, and physical fracture shards — no flat impostor cards or proxy hitboxes.
+2. **GPU execution**: WebGPU `@compute` culling, placement, posing, LOD selection, and shard kinematics feeding indirect draws, with zero per-frame CPU mesh/instance loops and strict TBDR discipline (no `discard` in opaque/main shading passes; fragment sampled textures `<= 16`, storage buffers `<= 8`).
+3. **Continuous splat decimation**: GPU error-bounded cluster/part cuts feeding an MSAA `@builtin(sample_mask)` crossfade into a continuous half-edge collapse progressive continuum (`morph.bin`) and a 1-triangle horizon splat with sub-pixel stochastic thinning (modeled on `scripts/prepare-forest-crowns.mjs`, `js/forest-clusters.js`, and `js/forest-crowns.js`).
+
+---
+
+## 5. Build, Test & Cloudflare Deploy Workflow
 
 - **Bundle**: `npm run build` runs `build.mjs`, which inlines `js/*` into `ocean.html`, `ocean.min.html`, and `docs/index.html`. Always run `npm run build` after editing any file in `js/`.
 - **Deploy**: Always deploy using `node scripts/deploy-cloudflare.mjs --skip-build` (after `npm run build`), which stages `.cloudflare/public` and deploys the `sixcailloux-waterworld` Cloudflare Worker.

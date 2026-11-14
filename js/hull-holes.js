@@ -50,17 +50,19 @@ export function addHullHole(damage, { design, local, radius, side, compartment }
   return hole;
 }
 
-// Metres below the mean sea right now. Negative is above it.
+// Metres below the mean surface right now (sea level 0, or river/pond level). Negative is above it.
 export function hullHoleDepth(boat, hole) {
   boatRotate(holeDepthRotation, hole.local[0], hole.local[1], hole.local[2], 0, boat.pitch ?? 0, boat.roll ?? 0);
-  return -((boat.heave ?? 0) + holeDepthRotation[1]);
+  const waterY = boat?.target?.heave ?? 0;
+  return waterY - ((boat.heave ?? 0) + holeDepthRotation[1]);
 }
 
 // Height of the water standing in the hold, in her own frame, and whether there is any.
 export function hullFloodLevel(boat, damage) {
   const tonnes = damage?.floodingTonnes ?? 0;
   const area = Math.max(1, (boat.length ?? 20) * (boat.beam ?? 6) * HULL_HOLD_AREA_SHARE);
-  const keel = -(boat.hydrodynamics?.draft ?? 2) - (boat.heave ?? 0);
+  const waterY = boat?.target?.heave ?? 0;
+  const keel = -(boat.hydrodynamics?.draft ?? 2) + (waterY - (boat.heave ?? 0));
   return keel + tonnes / (SEA_TONNES_PER_CUBIC_METRE * area);
 }
 

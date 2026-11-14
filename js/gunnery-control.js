@@ -1039,6 +1039,7 @@ export function vesselRailHeight(boat, localZ = 0) {
 // nothing drawn has nothing to strike.
 const SHIP_COLLIDERS = new Map();
 function shipColliderOf(boat) {
+  if (boat?.collider) return boat.collider;
   const modelId = boat.model?.id ?? boat.modelId ?? 'nina';
   let collider = SHIP_COLLIDERS.get(modelId);
   if (collider === undefined) {
@@ -1539,7 +1540,7 @@ export function applyShipImpactDamage(targetBoat, event) {
     if (bustsThrough) {
       // A shot recorded as striking at the waterline holes her there, wherever its contact point was taken.
       const holeLocal = [...localPos];
-      if (event.waterline) holeLocal[1] = Math.min(holeLocal[1], -(targetBoat.heave ?? 0) - holeRadius * 0.5);
+      if (event.waterline) holeLocal[1] = Math.min(holeLocal[1], ((targetBoat.target?.heave ?? 0) - (targetBoat.heave ?? 0)) - holeRadius * 0.5);
       addHullHole(damage, { design: [surfaceX, designPt[1], designPt[2]], local: holeLocal, radius: holeRadius, side, compartment: hullHoleCompartment(targetBoat, localPos[2], side) });
       // The real hole now governs the water, in place of the leak estimated from the hit alone.
       if (estimatedLeak) {
@@ -2641,6 +2642,7 @@ const TIMBER_BUILDING_PREFABS = new Set([
   'english_triangular_palisade_fort',
   'english_half_timber_hall',
   'english_timber_cottage',
+  'city_timber_bridge',
 ]);
 
 export function classifyBuildingMaterial(building) {
@@ -3996,7 +3998,7 @@ export function applySceneryImpactDamage(terrain, event) {
 }
 
 export function sweepTerrainSegment(from, to, radius = 0.08, terrain, options = null) {
-  const sampleFn = terrain?.groundSample ?? terrain?.height;
+  const sampleFn = terrain?.surfaceHeight ?? terrain?.groundSample ?? terrain?.height;
   if (typeof sampleFn !== 'function') return null;
   const maxTerrainPeak = (terrain?.region?.peakElevationMetres ?? 900) + 12;
   if (Math.min(from[1], to[1]) - radius > maxTerrainPeak) return null;
@@ -4023,6 +4025,7 @@ export function sweepTerrainSegment(from, to, radius = 0.08, terrain, options = 
   const stepSize = previewOnly ? 2.5 : 0.75;
   const maxStepCount = previewOnly ? 24 : 64;
   const steps = Math.min(maxStepCount, Math.max(1, Math.ceil(segLen / stepSize)));
+  const iwFn = typeof terrain?.inlandWaterAt === 'function' ? terrain.inlandWaterAt : null;
   let prevT = 0;
   for (let i = 0; i <= steps; i++) {
     const t = i / steps;
@@ -4030,7 +4033,10 @@ export function sweepTerrainSegment(from, to, radius = 0.08, terrain, options = 
     const y = from[1] + (to[1] - from[1]) * t;
     const z = from[2] + (to[2] - from[2]) * t;
     const h = sampleFn(x, z);
-    if (h > 0.05 && y - radius <= h) {
+    const iw = iwFn ? iwFn(x, z) : null;
+    const hitWaterHere = Boolean(iw && iw.wy > h + 0.02);
+    const surfY = hitWaterHere ? iw.wy : h;
+    if ((hitWaterHere || h > 0.05) && y - radius <= surfY) {
       let low = prevT, high = t;
       if (i > 0) {
         const bisectIters = previewOnly ? 6 : 12;
@@ -4040,12 +4046,25 @@ export function sweepTerrainSegment(from, to, radius = 0.08, terrain, options = 
           const my = from[1] + (to[1] - from[1]) * mid;
           const mz = from[2] + (to[2] - from[2]) * mid;
           const mh = sampleFn(mx, mz);
-          if (mh > 0.05 && my - radius <= mh) high = mid; else low = mid;
+          const miw = iwFn ? iwFn(mx, mz) : null;
+          const mWater = Boolean(miw && miw.wy > mh + 0.02);
+          const mSurf = mWater ? miw.wy : mh;
+          if ((mWater || mh > 0.05) && my - radius <= mSurf) high = mid; else low = mid;
         }
       }
       const hx = from[0] + (to[0] - from[0]) * high;
       const hz = from[2] + (to[2] - from[2]) * high;
       const elevation = sampleFn(hx, hz);
+      const hitWater = iwFn ? iwFn(hx, hz) : null;
+      if (hitWater && hitWater.wy > elevation + 0.02) {
+        return {
+          fraction: high,
+          kind: 'water',
+          hitZone: 'water',
+          waterSurfaceY: hitWater.wy,
+          normal: [0, 1, 0],
+        };
+      }
       const dx = (sampleFn(hx - 1, hz) - sampleFn(hx + 1, hz)) * 0.5;
       const dz = (sampleFn(hx, hz - 1) - sampleFn(hx, hz + 1)) * 0.5;
       const nLen = Math.hypot(dx, 1, dz) || 1;
@@ -4146,14 +4165,28 @@ export function createGunnerySolidSweep({ sourceBoat, sourceBuilding = null, get
     const previewOnly = projectile?.previewOnly === true;
     const opts = previewOnly || sourceBuilding ? { previewOnly, ignore: sourceBuilding } : null;
     let best = null;
-    const vessels = getVessels() ?? [];
+    const baseVessels = getVessels() ?? [];
+    const terrain = getTerrain();
+    const tradeTargets = terrain?.tradeVessels?.getTargetVessels?.() ?? [];
+    let vessels = baseVessels;
+    if (tradeTargets.length) {
+      const seen = new Set();
+      vessels = [];
+      for (const entry of baseVessels) {
+        const tb = entry?.boat ?? entry;
+        if (tb && !seen.has(tb)) { seen.add(tb); vessels.push(entry); }
+      }
+      for (const entry of tradeTargets) {
+        const tb = entry?.boat ?? entry;
+        if (tb && !seen.has(tb)) { seen.add(tb); vessels.push(entry); }
+      }
+    }
     const arrow = isArrowAmmo(projectile?.ammo);
     for (const entry of vessels) {
       const targetBoat = entry?.boat ?? entry;
       const hit = sweepShipSegment(from, to, radius, targetBoat, sourceBoat, opts);
       if (hit && (!best || hit.fraction < best.fraction)) best = hit;
     }
-    const terrain = getTerrain();
     if (terrain) {
       const ports = terrain.ports ?? (terrain.port ? [terrain.port] : null);
       if (ports) {
@@ -4384,12 +4417,19 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
         const hitPos=pos.map((v,i)=>v+(nextPos[i]-v)*solidFrac);
         points.push(hitPos);
         flightSeconds+=dtStep*solidFrac;
-        hitInfo={
-          kind:solid.kind??'solid',
-          hitZone:solid.hitZone??(solid.kind==='ship'?'hull':'solid'),
-          position:hitPos,
-          normal:solid.normal??[0,1,0],
-        };
+        hitInfo=solid.kind==='water'
+          ?{
+            kind:'water',
+            hitZone:'water',
+            position:[hitPos[0],Number.isFinite(solid.waterSurfaceY)?solid.waterSurfaceY:hitPos[1],hitPos[2]],
+            normal:[0,1,0],
+          }
+          :{
+            kind:solid.kind??'solid',
+            hitZone:solid.hitZone??(solid.kind==='ship'?'hull':'solid'),
+            position:hitPos,
+            normal:solid.normal??[0,1,0],
+          };
         break;
       }
       if(waterFrac!==null){

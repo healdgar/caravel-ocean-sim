@@ -429,13 +429,48 @@ async function main() {
   oakImagePromise.catch(() => {});
   preloadCrewModels()?.catch(() => {});
   const rgba8MipPipePromise = computePipe(RGBA8_MIPS, 'rgba8 mips');
+  const oakSampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear',
+    addressModeU: 'repeat', addressModeV: 'repeat', maxAnisotropy: 8 });
+  const oakTexPromise = Promise.all([oakImagePromise, rgba8MipPipePromise]).then(([oakImage, rgba8MipPipe]) => {
+    const oakMips = Math.floor(Math.log2(Math.max(oakImage.width, oakImage.height))) + 1;
+    const oakTex = device.createTexture({ size: [oakImage.width, oakImage.height], format: 'rgba8unorm',
+      mipLevelCount: oakMips, usage: TU.COPY_DST | TU.TEXTURE_BINDING | TU.STORAGE_BINDING | TU.RENDER_ATTACHMENT });
+    device.queue.copyExternalImageToTexture({ source: oakImage }, { texture: oakTex }, [oakImage.width, oakImage.height]);
+    const oakEnc = device.createCommandEncoder(); const oakPass = oakEnc.beginComputePass();
+    oakPass.setPipeline(rgba8MipPipe);
+    for (let m = 1; m < oakMips; m++) {
+      oakPass.setBindGroup(0, device.createBindGroup({
+        layout: rgba8MipPipe.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: lvl(oakTex, m - 1, '2d') },
+          { binding: 1, resource: lvl(oakTex, m, '2d') },
+        ],
+      }));
+      oakPass.dispatchWorkgroups(Math.ceil(Math.max(1, oakImage.width >> m) / 8), Math.ceil(Math.max(1, oakImage.height >> m) / 8));
+    }
+    oakPass.end(); device.queue.submit([oakEnc.finish()]); oakImage.close();
+    return oakTex;
+  });
+  oakTexPromise.catch(() => {});
   const waterFilterPipePromise = computePipe(WATER_FILTER, 'water reflections filter');
   const surfaceWavesPromise = createSurfaceWaves({ device, computePipe });
   const waterOpticsPromise = surfaceWavesPromise.then(sw => createWaterOptics({ device, shader, seaView: fullArr(dispTex), seaSampler: samplerSim, format: HDR, surfaceWaves: sw }));
   const cloudsPromise = createVolumetricClouds({ device, frameUBO, transView, skyView, sampler: sampClamp, computePipe });
+  const oceanBridge = {
+    dispView: fullArr(dispTex),
+    derivView: fullArr(derivTex),
+    momView: fullArr(momTex),
+    foamDetailView: foamTex.createView(),
+    repeatSampler: sampRepeat,
+    simSampler: samplerSim,
+    sunVisBuf,
+    surfaceWaves: surfaceWavesPromise,
+    oakTex: oakTexPromise,
+    oakSampler,
+  };
   // 2048 square is 16 MiB. At 4096 it was 64 MiB for shadows that differ only in how sharp a walker's is.
   const landShadows = createLandShadows(device);
-  const terrainPromise = LAND_STAGE ? createTerrain({ waterOptics: waterOpticsPromise, device, frameUBO, transView, skyView, sampler: sampClamp, envCubeView, clouds: cloudsPromise, shader, computePipe, mipPipe: rgba8MipPipePromise, format: HDR, samples: MSAA, portDamage, landShadows,
+  const terrainPromise = LAND_STAGE ? createTerrain({ waterOptics: waterOpticsPromise, oceanBridge, device, frameUBO, transView, skyView, sampler: sampClamp, envCubeView, clouds: cloudsPromise, shader, computePipe, mipPipe: rgba8MipPipePromise, format: HDR, samples: MSAA, portDamage, landShadows,
     boardKept: BOARD_KEPT ? { clock: boardKeepClock(), dateMs: continuedCareer?.voyage?.dateMs ?? null } : null }) : Promise.resolve(null);
   const prewarmPromises = [
     computePipe(SCENE_DECK_UPDATE, 'deck wash'),
@@ -649,8 +684,6 @@ async function main() {
   const rowingSurfaceEvents=createRowingSurfaceEvents(surfaceWaves);
   const shipAssets=createShipAssetCache(),renderAssets=new Map();
   const seaShadows=await seaShadowsPromise;
-  const oakSampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear',
-    addressModeU: 'repeat', addressModeV: 'repeat', maxAnisotropy: 8 });
   async function shipRenderAsset(modelId){
     if(renderAssets.has(modelId))return renderAssets.get(modelId);
     const asset=shipAssets.get(modelId),gpuPose=asset.gpuPose;
@@ -678,18 +711,7 @@ async function main() {
   }
   const uniqueShipAssetsPromise=Promise.all([...new Set(fleetSpecs.map(s=>s.modelId))].map(shipRenderAsset));
   uniqueShipAssetsPromise.catch(()=>{});
-  const oakImage = await oakImagePromise;
-  const oakMips = Math.floor(Math.log2(Math.max(oakImage.width, oakImage.height))) + 1;
-  const oakTex = device.createTexture({ size: [oakImage.width, oakImage.height], format: 'rgba8unorm',
-    mipLevelCount: oakMips, usage: TU.COPY_DST | TU.TEXTURE_BINDING | TU.STORAGE_BINDING | TU.RENDER_ATTACHMENT });
-  device.queue.copyExternalImageToTexture({ source: oakImage }, { texture: oakTex }, [oakImage.width, oakImage.height]);
-  const oakEnc = device.createCommandEncoder(); const oakPass = oakEnc.beginComputePass();
-  oakPass.setPipeline(rgba8MipPipe);
-  for (let m = 1; m < oakMips; m++) {
-    oakPass.setBindGroup(0, bg(rgba8MipPipe, [lvl(oakTex, m - 1, '2d'), lvl(oakTex, m, '2d')]));
-    oakPass.dispatchWorkgroups(Math.ceil(Math.max(1, oakImage.width >> m) / 8), Math.ceil(Math.max(1, oakImage.height >> m) / 8));
-  }
-  oakPass.end(); device.queue.submit([oakEnc.finish()]); oakImage.close();
+  const oakTex = await oakTexPromise;
   await uniqueShipAssetsPromise;
   const vessels=[];let sharedCrew=null,crewError='';
   for(const [index,spec]of fleetSpecs.entries()){
@@ -799,7 +821,7 @@ async function main() {
     const living=window.oceanBoard;
     if(BOARD_KEPT&&living?.state==='alive'&&living.port===region?.id)await Promise.race([living.keep(),new Promise(resolve=>setTimeout(resolve,BOARD_KEEP_WAIT_MS))]);
     const nextTerrain=await createTerrain({
-      waterOptics,device,frameUBO,transView,skyView,sampler:sampClamp,envCubeView,clouds,shader,computePipe,mipPipe:rgba8MipPipe,format:HDR,samples:MSAA,
+      waterOptics,oceanBridge,device,frameUBO,transView,skyView,sampler:sampClamp,envCubeView,clouds,shader,computePipe,mipPipe:rgba8MipPipe,format:HDR,samples:MSAA,
       region:{...(typeof region==='object'?region:{}),id:region?.id,name:name??region?.name,latitude:lat??region?.latitude,longitude:lon??region?.longitude,year:liveYear},
       placement,
       options:{lateSpawn:true},
@@ -1348,7 +1370,7 @@ async function main() {
     onEvent:event=>showShoreShot('port-',event),
   }):null;
   const freeCannon=createFreeCannon({
-    getVessels:()=>followerEnabled?vessels:[vessels[0]],
+    getVessels:()=>[...(followerEnabled?vessels:[vessels[0]]),...(terrain?.tradeVessels?.getTargetVessels?.()??[])],
     getTerrain:()=>terrain,
     // No muzzle smoke or flash: at the camera they would hide what is being shot at.
     onEvent:event=>{if(event.type==='shot')sceneAudio.gunneryEvent(event);else showShoreShot('free-',event);},
@@ -4725,6 +4747,7 @@ async function main() {
     townsfolk?.follow(terrain?.ports,cam);tendFolk(now);tendCaravans(now);
     props?.follow(terrain?.ports,cam);
     terrain?.updatePortDamage?.(simTime);
+    terrain?.tradeVessels?.stepSimulation?.(dt,simTime,P.windSpeed,terrain);
     const activeVesselCount=followerEnabled?vessels.length:1;
     allProjectiles.length=0;
     for(let i=0;i<activeVesselCount;i++)for(const p of vessels[i].gunnery.state.projectiles)allProjectiles.push(p);
@@ -4752,6 +4775,8 @@ async function main() {
     }else if(portGunnery){
       const portFires=portGunnery.worldFires;for(let i=0;i<portFires.length;i++){activeFires.push(portFires[i]);activeFireHulls.push(-1);}
     }
+    const tradeFires=terrain?.tradeVessels?.getWorldFires?.();
+    if(tradeFires?.length)for(let i=0;i<tradeFires.length;i++){activeFires.push(tradeFires[i]);activeFireHulls.push(-1);}
     // The frame block went up whole in writeFrame, its fire lights dark. The GPU chooses them from the fire records
     // kept here (gunEffects.encodeLights), so nothing more is sent for them. The wind only says how long smoke lasts.
     gunEffects.update(dt,{wind:windVec,time:simTime,fires:activeFires,fireHulls:activeFireHulls});
@@ -4938,6 +4963,7 @@ async function main() {
       rp.setBindGroup(3,ocean.optics??=oceanOpticsGroup(ocean));
       rp.drawIndexed(GRID * GRID * 6, nodeCount);
     }
+    terrain?.drawWater?.(rp,terrainCamera,frameF);
     rp.setPipeline(skyPipe);
     rp.setBindGroup(0, bgSky);
     clouds.drawSky(rp);

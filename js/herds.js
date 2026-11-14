@@ -35,14 +35,14 @@ const CARAVAN_DROVE_SPECIES = Object.freeze({ sheep: 0, cattle: 1, swine: 2, hor
 const CARAVAN_CARGO_TINT = Object.freeze({ grain: 0, wheat: 0, flour: 0, wine: 1, wool: 2, ore: 3, iron: 3, stone: 3, salt: 4, cloth: 5, timber: 6, wood: 6, hay: 7 });
 const caravanHash = (a, b) => { let h = Math.imul(a ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(b + 0x7f4a7c15, 0xc2b2ae35); h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d); h ^= h >>> 12; return (h >>> 0) / 4294967296; };
 
-function bridgeDeckYAt(wx, wz, bridges) {
+export function bridgeDeckYAt(wx, wz, bridges) {
   if (!bridges || !bridges.length) return 0;
   let best = 0;
   for (const b of bridges) {
-    if (!b || !Number.isFinite(b.deckY)) continue;
+    if (!b || b.collapsed || !Number.isFinite(b.deckY)) continue;
     const dx = wx - b.x, dz = wz - b.z;
     const halfLen = (b.length || 12) * 0.52;
-    const halfW = (b.halfWidth || 3) + 4.5;
+    const halfW = (b.halfWidth || 2.1) + 0.65;
     if (Math.abs(dx) > halfLen + 14 && Math.abs(dz) > halfLen + 14) continue;
     const along = Math.abs(dx * (b.ux || 0) + dz * (b.uz || 1));
     const across = Math.abs(-dx * (b.uz || 1) + dz * (b.ux || 0));
@@ -60,8 +60,19 @@ function segmentNearBridge(ax, az, bx, bz, bridges) {
   const minX = Math.min(ax, bx), maxX = Math.max(ax, bx);
   const minZ = Math.min(az, bz), maxZ = Math.max(az, bz);
   for (const b of bridges) {
+    if (!b || b.collapsed) continue;
     const reach = (b.length || 12) * 0.65 + 12;
     if (b.x >= minX - reach && b.x <= maxX + reach && b.z >= minZ - reach && b.z <= maxZ + reach) return true;
+  }
+  return false;
+}
+
+function pointOnCollapsedBridge(wx, wz, bridges) {
+  if (!bridges || !bridges.length) return false;
+  for (const b of bridges) {
+    if (!b?.collapsed) continue;
+    const reach = Math.max(7, (b.length || 12) * 0.48);
+    if (Math.hypot(wx - b.x, wz - b.z) <= reach) return true;
   }
   return false;
 }
@@ -79,18 +90,22 @@ export function caravanHerdSeeds(list, origin, bridges = null) {
     const pts = [];
     for (let k = 0; k < n; k++) {
       const x = origin.x + c.points[k * 2], z = origin.z + c.points[k * 2 + 1];
+      if (hasBridges && pointOnCollapsedBridge(x, z, bridges)) break;
       if (pts.length) {
         const p = pts[pts.length - 1];
         const step = Math.hypot(x - p[0], z - p[1]);
         if (step < 0.05) continue;
         if (hasBridges && step > 4.5 && segmentNearBridge(p[0], p[1], x, z, bridges)) {
           const steps = Math.ceil(step / 4.0);
+          let truncated = false;
           for (let s = 1; s < steps; s++) {
             const u = s / steps;
             const ix = p[0] + (x - p[0]) * u;
             const iz = p[1] + (z - p[1]) * u;
+            if (pointOnCollapsedBridge(ix, iz, bridges)) { truncated = true; break; }
             pts.push([ix, iz, along + step * u, bridgeDeckYAt(ix, iz, bridges)]);
           }
+          if (truncated) break;
         }
         along += step;
       }

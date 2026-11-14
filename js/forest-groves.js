@@ -10,6 +10,7 @@ import { terrainSurfaceSample } from './terrain-model.js';
 import { portClearanceEnvelope, PLANT_STREET_GAP_M } from './coastal-world.js';
 import { streetEdgeAt } from './town-streets.js';
 import { FOREST_CANOPY_RANGE_WGSL } from './forest-scenery.js';
+import { createInlandWaterSampler } from './inland-water.js';
 
 // A grove's maps are this many texels square, kept at this many levels each half as fine as the last,
 // and a pack bakes this many groves that stand beside each other in any order.
@@ -109,6 +110,7 @@ export function forestGroveCover({ region, heights, biome, beaches = null, port 
   const town = port?.clearRadius > 0 ? port : null;
   const pad = town ? (town.hasOrthophotoFootprints ? 8 : town.hasIndigenousSettlement ? 8.5 : 10) : 0;
   const cleared = town && !town.hasOrthophotoFootprints && !town.hasIndigenousSettlement ? (town.clearRadius * 0.38) ** 2 : 0;
+  const waterWide = port?.country ? createInlandWaterSampler(port.country, { margin: 8.0 }) : null;
   for (let j = 0; j < size; j++) {
     const z = z0 + (j + 0.5) * step, row = Math.min(mask - 1, Math.floor((j + 0.5) * mask / size)) * mask;
     for (let i = 0; i < size; i++) {
@@ -116,6 +118,7 @@ export function forestGroveCover({ region, heights, biome, beaches = null, port 
       if (marked < 42 || (dry && dry[cell] > 110) || (swash && swash[cell] > 64)) continue;
       const x = x0 + (i + 0.5) * step, y = ground(x, z);
       if (!(y >= lowest) || y > 845) continue;
+      if (waterWide?.(x, z)) continue;
       const slope = Math.hypot(ground(x + 2, z) - ground(x - 2, z), ground(x, z + 2) - ground(x, z - 2)) * 0.25;
       if (!(slope <= 0.84) || (y < 24 && slope > 0.36)) continue;
       if (town && (!portClearanceEnvelope(town, x, z, pad) || (x - town.center.x) ** 2 + (z - town.center.z) ** 2 < cleared || streetEdgeAt(town.streets, x, z) < PLANT_STREET_GAP_M)) continue;
@@ -129,6 +132,17 @@ export function forestGroveCover({ region, heights, biome, beaches = null, port 
     const first = stride === 2 ? row * size * 2 : row * 2;
     for (let k = 0; k < size; k++) line[k] = cover[first + k * stride];
     for (let k = 0; k < size; k++) cover[first + k * stride] = Math.round((line[Math.max(0, k - 1)] + line[k] + line[Math.min(size - 1, k + 1)]) / 3);
+  }
+  if (port?.country) {
+    const waterChannel = createInlandWaterSampler(port.country, { margin: 3.5 });
+    if (waterChannel) {
+      for (let j = 0; j < size; j++) {
+        const z = z0 + (j + 0.5) * step;
+        for (let i = 0; i < size; i++) {
+          if (waterChannel(x0 + (i + 0.5) * step, z)) cover[(j * size + i) * 2] = 0;
+        }
+      }
+    }
   }
   return cover;
 }
@@ -202,7 +216,7 @@ function forestGroveStamp(section) {
   let ground = 0, marked = 0;
   for (let i = 0; i < heights.length; i += 7) ground = (ground * 31 + Math.round(heights[i] * 64)) | 0;
   for (let i = 0; i < biome.length; i += 5) marked = (marked * 33 + biome[i]) | 0;
-  return [region.x, region.z, region.span, region.size, region.biomeSize, ground, marked, section.port?.instances?.length ?? 0, section.port?.streets?.size ?? 0, section.beaches?.drySandMask ? 1 : 0].join(',');
+  return [region.x, region.z, region.span, region.size, region.biomeSize, ground, marked, section.port?.instances?.length ?? 0, section.port?.streets?.size ?? 0, section.beaches?.drySandMask ? 1 : 0, section.port?.country?.riverReaches?.length ?? 0].join(',');
 }
 
 // Chooses, for one section, which of its groves the camera sees and how coarse each is drawn. A grove is
@@ -316,6 +330,7 @@ fn forestGroveStanding(p:vec2f,parted:f32)->f32{
  let sunk=${FOREST_GROVE_SUNK_METRES.toFixed(1)}+max(square-${FOREST_GROVE_FLAT_METRES.toFixed(1)},0.)*${FOREST_GROVE_SUNK_SHARE};
  var y=ground+(tall+sunk)*standing-sunk;
  if(skirt){y-=min((tall+sunk)*standing,3.+1.5*square);}
+ if(standing<=0.001){y-=24.0;}
  var o:ForestVertex;
  o.nativeMaterial=-1;o.crownFade=1.;o.canopyAO=1.;o.coverageSeed=seed;
  o.world=vec3f(at.x,y,at.y);

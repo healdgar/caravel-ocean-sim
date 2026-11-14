@@ -8,7 +8,7 @@
 //
 // Nothing here runs unless a shot is in the air or being aimed, and then only for the buildings on its line.
 import { noteBuildingMesh } from './building-fracture.js';
-import { CITY_TYPED_FLOATS, CITY_TYPES_SLIGHT, cityTypeTarget } from './old-world-buildings.js';
+import { CITY_TYPED_FLOATS, CITY_TYPES_BRIDGES, CITY_TYPES_SLIGHT, cityTypeTarget } from './old-world-buildings.js';
 
 const CITY_TARGET_CELL_M = 32;
 // How many buildings a shot has passed near, and not struck, are kept standing ready.
@@ -165,6 +165,7 @@ export function createCityTargets({ city, types, port }) {
       const list = grid.get(cellKey(Math.floor(x / CITY_TARGET_CELL_M), Math.floor(z / CITY_TARGET_CELL_M)));
       if (!list) return false;
       for (const index of list) {
+        if (CITY_TYPES_BRIDGES.has(kinds[index])) continue;
         const o = index * F, source = typeOf(index).source, c = turns[index * 2], s = turns[index * 2 + 1], dx = x - typed[o], dz = z - typed[o + 2];
         const lx = dx * c - dz * s, lz = dx * s + dz * c, across = typed[o + 4], along = typed[o + 6];
         if (lx >= source.min[0] * across - margin && lx <= source.max[0] * across + margin && lz >= source.min[2] * along - margin && lz <= source.max[2] * along + margin) return true;
