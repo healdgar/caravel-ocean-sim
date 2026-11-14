@@ -129,6 +129,19 @@ test('Pages fetches exact versioned assets, defers audio until enabled and remai
   }finally{await page.close();}
 });
 
+test('bundled Pages harbor view reaches ready without top-level TDZ or initialization errors',{timeout:120000},async()=>{
+  const page=await browser.newPage(),errors=[];
+  page.on('pageerror',e=>errors.push(e.message));
+  try{
+    await page.goto(origin+'/docs/index.html?region=lisbon&landfall=harbor&follower=0');
+    await page.waitForFunction(()=>window.oceanStartup?.state==='ready'||window.oceanStartup?.state==='failed'||!!document.querySelector('#err')?.textContent);
+    const state=await page.evaluate(()=>({state:window.oceanStartup?.state,err:document.querySelector('#err')?.textContent||''}));
+    assert.deepEqual(errors,[],'bundled Lisbon harbor has no pageerror');
+    assert.equal(state.err,'','bundled Lisbon harbor has no #err banner');
+    assert.equal(state.state,'ready','bundled Lisbon harbor reaches ready');
+  }finally{await page.close();}
+});
+
 test('a delayed or failed whale download leaves sailing playable and encounter controls can retry',{timeout:120000},async()=>{
   const page=await browser.newPage(),errors=[];let attempts=0,release;
   const gate=new Promise(resolve=>release=resolve);

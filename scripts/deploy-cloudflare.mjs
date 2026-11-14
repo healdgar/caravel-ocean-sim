@@ -293,7 +293,7 @@ export default {
       headers.set('Access-Control-Allow-Origin', '*');
       headers.set('Cache-Control', IMMUTABLE_CACHE);
     } else if (url.pathname === '/waterworld/' || url.pathname === '/waterworld/index.html') {
-      headers.set('Cache-Control', 'public, max-age=60');
+      headers.set('Cache-Control', 'public, max-age=0, must-revalidate');
     }
     return new Response(res.body, { status: res.status, headers });
   },

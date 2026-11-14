@@ -7,6 +7,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import vm from 'node:vm';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
@@ -54,9 +55,8 @@ order.splice(order.indexOf('js/profiler.js')+1,0,'js/gpu-benchmark.js');
 order.splice(order.indexOf('js/main.js'),0,'js/wgsl-prune.js','js/gpu-program-cache.js');
 order.splice(order.indexOf('js/main.js'),0,'js/career-save.js','js/career-ui.js','js/career-era.js','js/career-trade.js','js/career-port.js');
 order.splice(order.indexOf('js/gunnery-control.js'),0,'js/hull-holes.js','js/vessel-damage.js');
-order.splice(order.indexOf('js/main.js'),0,'js/wgsl/hull-flood.js','js/hull-flood.js');
 order.splice(order.indexOf('js/main.js'),0,'js/sea-shadows.js');
-order.splice(order.indexOf('js/crew.js'),0,'js/crew-wounds.js');
+order.splice(order.indexOf('js/crew-solve.js'),0,'js/crew-wounds.js');
 order.splice(order.indexOf('js/crew.js'),0,'js/crew-overboard.js');
 order.splice(order.indexOf('js/crew.js'),0,'js/crew-aloft.js','js/models/crew-components.js','js/crew-components.js');
 order.splice(order.indexOf('js/wgsl/vessel-pose.js'),0,'js/wgsl/rig-surfaces.js');
@@ -84,9 +84,10 @@ order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/old-world-works.js','js/o
 // A port's country as Castle and Commons' model founded it: what is asked of the model, how it stands here, and the GPU's stamp of it.
 order.splice(order.indexOf('js/coastal-world.js'),0,'js/board-model.js','js/board-worker.js','js/board-life.js','js/board-keep.js','js/board-folk.js','js/folk-card.js','js/mate-counsel.js','js/storyteller.js','js/first-mate.js','js/old-world-city.js','js/old-world-board.js','js/old-world.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/board-stamp.js');
-order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/wgsl/inland-water.js','js/wgsl/herds.js');
+order.splice(order.indexOf('js/wgsl/terrain.js')+1,0,'js/wgsl/inland-water.js','js/wgsl/herds.js');
 wgslModules.push('js/wgsl/inland-water.js','js/wgsl/herds.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/models/livestock-meshes.js','js/inland-water.js','js/herds.js','js/trade-vessels.js');
+order.splice(order.indexOf('js/trade-vessels.js'),0,'js/wgsl/hull-flood.js','js/hull-flood.js');
 // A city's buildings as the guns meet them: after the fracture code it hands them to, ahead of the land it is drawn with.
 order.splice(order.indexOf('js/terrain.js'),0,'js/city-targets.js');
 order.splice(order.indexOf('js/main.js'),0,'js/port-damage.js');
@@ -267,6 +268,25 @@ function findEsbuild() {
 
 const esbuild = findEsbuild();
 if (esbuild) {
+  // Verify every bundled module before js/main.js initializes without top-level TDZ ReferenceErrors.
+  const mainMarker = '// ---- js/main.js ----';
+  const beforeMain = code.includes(mainMarker) ? code.slice(0, code.indexOf(mainMarker)) : code;
+  const stubEl = () => ({ getContext: () => null, style: {}, addEventListener() {}, appendChild() {}, remove() {}, setAttribute() {}, querySelector: () => null, querySelectorAll: () => [] });
+  const vmBase = {
+    console, Math, Object, Array, Float32Array, Float64Array, Int32Array, Uint32Array, Uint16Array, Uint8Array, Int16Array, Int8Array,
+    DataView, ArrayBuffer, Map, Set, WeakMap, WeakSet, Promise, Symbol, Number, String, Boolean, RegExp, Error, TypeError, RangeError, JSON,
+    Date, BigInt, Infinity, NaN, isFinite, isNaN, parseFloat, parseInt, encodeURIComponent, decodeURIComponent, atob, btoa, URL, URLSearchParams,
+    TextEncoder, TextDecoder, performance, structuredClone, setTimeout, clearTimeout, requestAnimationFrame: () => 0, cancelAnimationFrame: () => {},
+    navigator: {}, location: { search: '', href: 'http://localhost/' }, addEventListener() {}, removeEventListener() {},
+    matchMedia: () => ({ matches: false, addEventListener() {} }),
+    document: { getElementById: () => null, querySelector: () => null, querySelectorAll: () => [], createElement: stubEl, addEventListener() {}, body: { appendChild() {} }, documentElement: { style: {} } },
+    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    AudioContext: class {}, Worker: class {}, GPUBufferUsage: {}, GPUTextureUsage: {}, GPUShaderStage: {}, GPUMapMode: {},
+  };
+  vmBase.window = vmBase; vmBase.self = vmBase; vmBase.globalThis = vmBase;
+  const initCheckJs = esbuild.transformSync(beforeMain, { format: 'iife', target: 'es2022' }).code;
+  vm.runInContext(initCheckJs, vm.createContext(vmBase));
+
   minJs = esbuild.transformSync(minJs, { minify: true, format: 'esm', target: 'es2022', legalComments: 'none' }).code;
   pagesJs = esbuild.transformSync(pagesJs, { minify: true, format: 'esm', target: 'es2022', legalComments: 'none' }).code;
 } else {
