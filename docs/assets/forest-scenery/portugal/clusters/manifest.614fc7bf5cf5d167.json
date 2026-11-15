@@ -1,0 +1,574 @@
+{
+ "format": "waterworld.forest-clusters",
+ "version": 1,
+ "vertexWords": 5,
+ "clusterWords": 16,
+ "vertexCount": 2192809,
+ "indexCount": 1567248,
+ "clusterCount": 14827,
+ "files": {
+  "vertices.bin": {
+   "bytes": 43856180,
+   "sha256": "2e4044a3eff5da3bfaad0aadf2633e39f37bf225a6ea1f4a92b624d7ab8aa777",
+   "gzip": {
+    "file": "vertices.bin.gz",
+    "bytes": 28444653,
+    "sha256": "4b27fc06fd1204eae2c738203cb1f07fe0d796cf91a49e874dece11ccab25f0c"
+   }
+  },
+  "indices.bin": {
+   "bytes": 6268992,
+   "sha256": "ce826240949217556858f0bf9dc27c5c86595ea69aa676fc0013fb945ace5377",
+   "gzip": {
+    "file": "indices.bin.gz",
+    "bytes": 1919168,
+    "sha256": "ddd3c5b0d86edd2e2e76f3f1e5b3cae7a438a790265ab0b6d9682c78ce6c9cbb"
+   }
+  },
+  "clusters.bin": {
+   "bytes": 948928,
+   "sha256": "83e732de4b9dfeb0eee84c03577145c255677ddf2d1e6c6424bafe09a8aec1e7",
+   "gzip": {
+    "file": "clusters.bin.gz",
+    "bytes": 415405,
+    "sha256": "de6344ee96d744068087d210c4d78001e14fa7ead9b1ea652457a71f83cb58bb"
+   }
+  }
+ },
+ "prototypes": [
+  {
+   "id": 0,
+   "species": "oak",
+   "firstCluster": 0,
+   "clusterCount": 2064,
+   "firstVertex": 0,
+   "low": [
+    -28.555889129638672,
+    -2.967902421951294,
+    -30.445215225219727
+   ],
+   "posScale": 59.19450378417969,
+   "uvLow": [
+    0,
+    0
+   ],
+   "uvScale": [
+    4,
+    7.0121235847473145
+   ],
+   "stats": {
+    "barkTris": 35618,
+    "leafTris": 96000,
+    "barkClusters": 562,
+    "leafClusters": 1502,
+    "barkLevels": 9,
+    "leafLevels": 10,
+    "barkRoots": 2,
+    "leafRoots": 1,
+    "leafGrowth": [
+     null,
+     1.325,
+     1.331,
+     1.339,
+     1.352,
+     1.395,
+     1.362,
+     1.34,
+     1.38,
+     1.367,
+     1.307
+    ],
+    "ms": 1737,
+    "tinyClusters": 0
+   }
+  },
+  {
+   "id": 1,
+   "species": "chestnut",
+   "firstCluster": 2064,
+   "clusterCount": 1947,
+   "firstVertex": 309932,
+   "low": [
+    -32.304359436035156,
+    -1.2064964771270752,
+    -34.44167709350586
+   ],
+   "posScale": 66.96354675292969,
+   "uvLow": [
+    0,
+    0
+   ],
+   "uvScale": [
+    6,
+    7.932084083557129
+   ],
+   "stats": {
+    "barkTris": 35731,
+    "leafTris": 88000,
+    "barkClusters": 569,
+    "leafClusters": 1378,
+    "barkLevels": 9,
+    "leafLevels": 10,
+    "barkRoots": 1,
+    "leafRoots": 1,
+    "leafGrowth": [
+     null,
+     1.321,
+     1.325,
+     1.33,
+     1.343,
+     1.357,
+     1.367,
+     1.358,
+     1.393,
+     1.419,
+     1.332
+    ],
+    "ms": 1551,
+    "tinyClusters": 3
+   }
+  },
+  {
+   "id": 2,
+   "species": "maple",
+   "firstCluster": 4011,
+   "clusterCount": 2101,
+   "firstVertex": 595839,
+   "low": [
+    -36.098167419433594,
+    -2.933537006378174,
+    -36.322845458984375
+   ],
+   "posScale": 72.178955078125,
+   "uvLow": [
+    0,
+    0
+   ],
+   "uvScale": [
+    4,
+    8.357110023498535
+   ],
+   "stats": {
+    "barkTris": 35934,
+    "leafTris": 97996,
+    "barkClusters": 568,
+    "leafClusters": 1533,
+    "barkLevels": 8,
+    "leafLevels": 10,
+    "barkRoots": 1,
+    "leafRoots": 1,
+    "leafGrowth": [
+     null,
+     1.281,
+     1.31,
+     1.332,
+     1.365,
+     1.382,
+     1.397,
+     1.375,
+     1.367,
+     1.341,
+     1.472
+    ],
+    "ms": 1627,
+    "tinyClusters": 4
+   }
+  },
+  {
+   "id": 3,
+   "species": "elm",
+   "firstCluster": 6112,
+   "clusterCount": 2345,
+   "firstVertex": 910827,
+   "low": [
+    -34.570152282714844,
+    -0.7879195213317871,
+    -38.13127899169922
+   ],
+   "posScale": 79.06981658935547,
+   "uvLow": [
+    0,
+    0
+   ],
+   "uvScale": [
+    6,
+    9.130838394165039
+   ],
+   "stats": {
+    "barkTris": 35503,
+    "leafTris": 114000,
+    "barkClusters": 561,
+    "leafClusters": 1784,
+    "barkLevels": 9,
+    "leafLevels": 10,
+    "barkRoots": 1,
+    "leafRoots": 1,
+    "leafGrowth": [
+     null,
+     1.351,
+     1.356,
+     1.35,
+     1.37,
+     1.371,
+     1.351,
+     1.393,
+     1.378,
+     1.367,
+     1.367
+    ],
+    "ms": 1969,
+    "tinyClusters": 1
+   }
+  },
+  {
+   "id": 4,
+   "species": "birch",
+   "firstCluster": 8457,
+   "clusterCount": 609,
+   "firstVertex": 1273956,
+   "low": [
+    -13.449666976928711,
+    -0.3472285270690918,
+    -12.506030082702637
+   ],
+   "posScale": 26.955214500427246,
+   "uvLow": [
+    0,
+    0
+   ],
+   "uvScale": [
+    1,
+    3.06636381149292
+   ],
+   "stats": {
+    "barkTris": 11346,
+    "leafTris": 27200,
+    "barkClusters": 181,
+    "leafClusters": 428,
+    "barkLevels": 7,
+    "leafLevels": 8,
+    "barkRoots": 1,
+    "leafRoots": 1,
+    "leafGrowth": [
+     null,
+     1.348,
+     1.344,
+     1.329,
+     1.363,
+     1.354,
+     1.354,
+     1.363,
+     1.445
+    ],
+    "ms": 496,
+    "tinyClusters": 0
+   }
+  },
+  {
+   "id": 5,
+   "species": "blueberry",
+   "firstCluster": 9066,
+   "clusterCount": 181,
+   "firstVertex": 1362219,
+   "low": [
+    -1.0641686916351318,
+    -0.290235698223114,
+    -1.1896685361862183
+   ],
+   "posScale": 2.598698318004608,
+   "uvLow": [
+    0,
+    0
+   ],
+   "uvScale": [
+    1,
+    1
+   ],
+   "stats": {
+    "barkTris": 6625,
+    "leafTris": 4756,
+    "barkClusters": 104,
+    "leafClusters": 77,
+    "barkLevels": 6,
+    "leafLevels": 6,
+    "barkRoots": 1,
+    "leafRoots": 1,
+    "leafGrowth": [
+     null,
+     1.369,
+     1.355,
+     1.358,
+     1.341,
+     1.336,
+     1.435
+    ],
+    "ms": 131,
+    "tinyClusters": 0
+   }
+  },
+  {
+   "id": 6,
+   "species": "oak",
+   "firstCluster": 9247,
+   "clusterCount": 1247,
+   "firstVertex": 1380446,
+   "low": [
+    -22.767351150512695,
+    -1.0240734815597534,
+    -15.64834976196289
+   ],
+   "posScale": 46.32877731323242,
+   "uvLow": [
+    0,
+    0
+   ],
+   "uvScale": [
+    3,
+    5.347327709197998
+   ],
+   "stats": {
+    "barkTris": 23461,
+    "leafTris": 56000,
+    "barkClusters": 369,
+    "leafClusters": 878,
+    "barkLevels": 8,
+    "leafLevels": 9,
+    "barkRoots": 1,
+    "leafRoots": 1,
+    "leafGrowth": [
+     null,
+     1.32,
+     1.338,
+     1.346,
+     1.361,
+     1.374,
+     1.36,
+     1.339,
+     1.367,
+     1.231
+    ],
+    "ms": 1020,
+    "tinyClusters": 0
+   }
+  },
+  {
+   "id": 7,
+   "species": "chestnut",
+   "firstCluster": 10494,
+   "clusterCount": 1220,
+   "firstVertex": 1562552,
+   "low": [
+    -25.75094985961914,
+    -1.2241969108581543,
+    -17.699748992919922
+   ],
+   "posScale": 52.39902687072754,
+   "uvLow": [
+    0,
+    0
+   ],
+   "uvScale": [
+    3,
+    6.047738075256348
+   ],
+   "stats": {
+    "barkTris": 23705,
+    "leafTris": 54004,
+    "barkClusters": 374,
+    "leafClusters": 846,
+    "barkLevels": 8,
+    "leafLevels": 9,
+    "barkRoots": 1,
+    "leafRoots": 1,
+    "leafGrowth": [
+     null,
+     1.332,
+     1.326,
+     1.34,
+     1.363,
+     1.337,
+     1.367,
+     1.364,
+     1.341,
+     1.367
+    ],
+    "ms": 958,
+    "tinyClusters": 1
+   }
+  },
+  {
+   "id": 8,
+   "species": "maple",
+   "firstCluster": 11714,
+   "clusterCount": 1313,
+   "firstVertex": 1738191,
+   "low": [
+    -26.859102249145508,
+    -0.7596583962440491,
+    -28.318925857543945
+   ],
+   "posScale": 55.1835880279541,
+   "uvLow": [
+    0,
+    0
+   ],
+   "uvScale": [
+    2,
+    6.4296159744262695
+   ],
+   "stats": {
+    "barkTris": 23659,
+    "leafTris": 59996,
+    "barkClusters": 373,
+    "leafClusters": 940,
+    "barkLevels": 8,
+    "leafLevels": 9,
+    "barkRoots": 1,
+    "leafRoots": 1,
+    "leafGrowth": [
+     null,
+     1.287,
+     1.323,
+     1.35,
+     1.353,
+     1.36,
+     1.367,
+     1.391,
+     1.393,
+     1.386
+    ],
+    "ms": 1050,
+    "tinyClusters": 0
+   }
+  },
+  {
+   "id": 9,
+   "species": "elm",
+   "firstCluster": 13027,
+   "clusterCount": 1315,
+   "firstVertex": 1932031,
+   "low": [
+    -25.944198608398438,
+    -0.7892794609069824,
+    -17.832761764526367
+   ],
+   "posScale": 52.79220962524414,
+   "uvLow": [
+    0,
+    0
+   ],
+   "uvScale": [
+    4,
+    6.093095779418945
+   ],
+   "stats": {
+    "barkTris": 23648,
+    "leafTris": 60000,
+    "barkClusters": 375,
+    "leafClusters": 940,
+    "barkLevels": 8,
+    "leafLevels": 9,
+    "barkRoots": 1,
+    "leafRoots": 1,
+    "leafGrowth": [
+     null,
+     1.356,
+     1.356,
+     1.347,
+     1.36,
+     1.373,
+     1.334,
+     1.352,
+     1.288,
+     1.309
+    ],
+    "ms": 1053,
+    "tinyClusters": 2
+   }
+  },
+  {
+   "id": 10,
+   "species": "birch",
+   "firstCluster": 14342,
+   "clusterCount": 417,
+   "firstVertex": 2125809,
+   "low": [
+    -7.149272918701172,
+    -0.4259132742881775,
+    -6.937100410461426
+   ],
+   "posScale": 14.435192584991455,
+   "uvLow": [
+    0,
+    0
+   ],
+   "uvScale": [
+    1,
+    1.862686038017273
+   ],
+   "stats": {
+    "barkTris": 7257,
+    "leafTris": 19200,
+    "barkClusters": 115,
+    "leafClusters": 302,
+    "barkLevels": 6,
+    "leafLevels": 8,
+    "barkRoots": 1,
+    "leafRoots": 1,
+    "leafGrowth": [
+     null,
+     1.348,
+     1.352,
+     1.335,
+     1.356,
+     1.349,
+     1.341,
+     1.341,
+     1.332
+    ],
+    "ms": 350,
+    "tinyClusters": 0
+   }
+  },
+  {
+   "id": 11,
+   "species": "blueberry",
+   "firstCluster": 14759,
+   "clusterCount": 68,
+   "firstVertex": 2187645,
+   "low": [
+    -0.5925496816635132,
+    -0.2293139398097992,
+    -0.38534581661224365
+   ],
+   "posScale": 1.7020682990550995,
+   "uvLow": [
+    0,
+    0
+   ],
+   "uvScale": [
+    1,
+    1
+   ],
+   "stats": {
+    "barkTris": 3125,
+    "leafTris": 1136,
+    "barkClusters": 50,
+    "leafClusters": 18,
+    "barkLevels": 5,
+    "leafLevels": 4,
+    "barkRoots": 1,
+    "leafRoots": 1,
+    "leafGrowth": [
+     null,
+     1.377,
+     1.39,
+     1.288,
+     1.341
+    ],
+    "ms": 35,
+    "tinyClusters": 0
+   }
+  }
+ ]
+}

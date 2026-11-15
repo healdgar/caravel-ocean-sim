@@ -1605,15 +1605,154 @@ globalThis.BOARD_MODEL = (() => {
       // cross water by (middle, heading, span, 1 for stone), mill wheels (building, where the wheel turns), churchyards,
       // memorial cairns, robbers' camps, hosts in the field and works in hand.
       works: {
-        // A fence along a track stands two paces back from it, on its own furlong's side (as the model's own scene sets it).
-        fences: workerFenceSegments().flatMap((f) => {
-          let ax = f.a.x, az = f.a.z, bx = f.b.x, bz = f.b.z;
-          if (f.lane) {
-            const L = Math.hypot(bx - ax, bz - az) || 1, nx = -(bz - az) / L, nz = (bx - ax) / L, side = (f.x - ax) * nx + (f.z - az) * nz > 0 ? 2 : -2;
-            ax += nx * side; az += nz * side; bx += nx * side; bz += nz * side;
+        // Chain furlong/croft boundary edges into contiguous mitered polylines along lane & road verges.
+        fences: (() => {
+          const rawSegs = workerFenceSegments();
+          if (!rawSegs.length) return [];
+          const roadSegs = [];
+          for (const rd of W.roads || []) {
+            const pts = rd?.drawn || rd?.path;
+            if (!Array.isArray(pts)) continue;
+            for (let i = 1; i < pts.length; i++) {
+              const ax = pts[i - 1].x, az = pts[i - 1].z, bx = pts[i].x, bz = pts[i].z;
+              const rl = Math.hypot(bx - ax, bz - az);
+              if (rl < 0.5) continue;
+              roadSegs.push([
+                ax, az, bx, bz, (bx - ax) / rl, (bz - az) / rl, rl,
+                Math.min(ax, bx) - 4.5, Math.max(ax, bx) + 4.5,
+                Math.min(az, bz) - 4.5, Math.max(az, bz) + 4.5,
+              ]);
+            }
           }
-          return [r1(ax), r1(az), r1(bx), r1(bz), (f.stone ? 1 : 0) + (f.lane ? 2 : 0)];
-        }),
+          const nearPrimaryRoad = (mx, mz, ux, uz) => {
+            for (let i = 0; i < roadSegs.length; i++) {
+              const s = roadSegs[i];
+              if (mx < s[7] || mx > s[8] || mz < s[9] || mz > s[10]) continue;
+              if (Math.abs(ux * s[4] + uz * s[5]) < 0.7) continue;
+              const t = Math.max(0, Math.min(s[6], (mx - s[0]) * s[4] + (mz - s[1]) * s[5]));
+              const dx = mx - (s[0] + s[4] * t), dz = mz - (s[1] + s[5] * t);
+              if (dx * dx + dz * dz <= 14.5) return true;
+            }
+            return false;
+          };
+          const vKey = (x, z) => `${Math.round(x * 5)},${Math.round(z * 5)}`;
+          const edges = [];
+          const vertMap = new Map();
+          const addInc = (k, x, z, ref) => {
+            let bucket = vertMap.get(k);
+            if (!bucket) { bucket = { x, z, inc: [] }; vertMap.set(k, bucket); }
+            bucket.inc.push(ref);
+          };
+          for (const f of rawSegs) {
+            const ax = f.a.x, az = f.a.z, bx = f.b.x, bz = f.b.z;
+            const L = Math.hypot(bx - ax, bz - az);
+            if (L < 0.5) continue;
+            const ux = (bx - ax) / L, uz = (bz - az) / L;
+            let nx = -uz, nz = ux;
+            const mx = 0.5 * (ax + bx), mz = 0.5 * (az + bz);
+            if ((f.x - mx) * nx + (f.z - mz) * nz < 0) { nx = -nx; nz = -nz; }
+            const onRoad = nearPrimaryRoad(mx, mz, ux, uz);
+            const d = onRoad ? 3.35 : f.lane ? 2.35 : 0;
+            const e = {
+              ax, az, bx, bz, outAx: ax, outAz: az, outBx: bx, outBz: bz,
+              nx, nz, d, stone: !!f.stone, onWay: !!(f.lane || onRoad),
+              fKey: `${Math.round(f.x * 2)}:${Math.round(f.z * 2)}`,
+            };
+            edges.push(e);
+            addInc(vKey(ax, az), ax, az, { e, end: 0 });
+            addInc(vKey(bx, bz), bx, bz, { e, end: 1 });
+          }
+          const solveMiter = (vx, vz, n0x, n0z, d0, n1x, n1z, d1) => {
+            const maxD = Math.max(d0, d1);
+            if (maxD <= 0) return [vx, vz];
+            const det = n0x * n1z - n0z * n1x;
+            if (Math.abs(det) > 0.18) {
+              let dx = (d0 * n1z - d1 * n0z) / det;
+              let dz = (n0x * d1 - n1x * d0) / det;
+              const ml = Math.hypot(dx, dz), cap = 1.8 * maxD;
+              if (ml > cap) { dx *= cap / ml; dz *= cap / ml; }
+              return [vx + dx, vz + dz];
+            }
+            const sx = n0x + n1x, sz = n0z + n1z, sl = Math.hypot(sx, sz) || 1;
+            const dAvg = 0.5 * (d0 + d1);
+            return [vx + (sx / sl) * dAvg, vz + (sz / sl) * dAvg];
+          };
+          for (const { x: vx, z: vz, inc } of vertMap.values()) {
+            const wayInc = inc.filter((r) => r.e.d > 0);
+            const inlandInc = inc.filter((r) => r.e.d === 0);
+            if (!wayInc.length) continue;
+            // Cluster offset edges on the same side of the lane/road (`dot(nA, nB) > 0.2` or same furlong).
+            const clusters = [];
+            for (const r of wayInc) {
+              let placed = null;
+              for (const c of clusters) {
+                const sameFurlong = c.some((q) => q.e.fKey === r.e.fKey);
+                const sameSide = c.some((q) => q.e.nx * r.e.nx + q.e.nz * r.e.nz > 0.2);
+                if (sameFurlong || sameSide) { placed = c; break; }
+              }
+              if (placed) placed.push(r);
+              else clusters.push([r]);
+            }
+            const clusterJoints = clusters.map((c) => {
+              let pt, nAvgX = 0, nAvgZ = 0, dMax = 0;
+              for (const r of c) { nAvgX += r.e.nx; nAvgZ += r.e.nz; dMax = Math.max(dMax, r.e.d); }
+              const nl = Math.hypot(nAvgX, nAvgZ) || 1;
+              nAvgX /= nl; nAvgZ /= nl;
+              if (c.length >= 2) {
+                pt = solveMiter(vx, vz, c[0].e.nx, c[0].e.nz, c[0].e.d, c[1].e.nx, c[1].e.nz, c[1].e.d);
+              } else {
+                const r0 = c[0];
+                // Check if this furlong turns inland here along an un-offset edge (`d === 0`).
+                const mate = inlandInc.find((q) => q.e.fKey === r0.e.fKey);
+                if (mate) {
+                  pt = solveMiter(vx, vz, r0.e.nx, r0.e.nz, r0.e.d, mate.e.nx, mate.e.nz, 0);
+                } else {
+                  pt = [vx + r0.e.nx * r0.e.d, vz + r0.e.nz * r0.e.d];
+                }
+              }
+              for (const r of c) {
+                if (r.end === 0) { r.e.outAx = pt[0]; r.e.outAz = pt[1]; }
+                else { r.e.outBx = pt[0]; r.e.outBz = pt[1]; }
+              }
+              return { c, pt, nx: nAvgX, nz: nAvgZ, d: dMax };
+            });
+            // Snap/trim any un-offset interior fence meeting this roadside vertex onto the matching verge line/corner.
+            for (const q of inlandInc) {
+              const ox = q.end === 0 ? q.e.bx : q.e.ax, oz = q.end === 0 ? q.e.bz : q.e.az;
+              const dl = Math.hypot(ox - vx, oz - vz) || 1;
+              const ix = (ox - vx) / dl, iz = (oz - vz) / dl;
+              let best = null, bestDot = 0.18;
+              for (const cj of clusterJoints) {
+                const sameF = cj.c.some((r) => r.e.fKey === q.e.fKey);
+                const align = ix * cj.nx + iz * cj.nz;
+                if (sameF || align > bestDot) { best = cj; bestDot = Math.max(bestDot, align); if (sameF) break; }
+              }
+              if (!best) continue;
+              let tx = best.pt[0], tz = best.pt[1];
+              if (best.c.length >= 2) {
+                // T-junction into a continuous roadside fence: land right on the mitered corner/verge point.
+                tx = best.pt[0]; tz = best.pt[1];
+              } else if (!best.c.some((r) => r.e.fKey === q.e.fKey)) {
+                const r0 = best.c[0].e;
+                const s = solveMiter(vx, vz, r0.nx, r0.nz, r0.d, q.e.nx, q.e.nz, 0);
+                tx = s[0]; tz = s[1];
+                if (best.c[0].end === 0) { r0.outAx = tx; r0.outAz = tz; }
+                else { r0.outBx = tx; r0.outBz = tz; }
+              }
+              if (q.end === 0) { q.e.outAx = tx; q.e.outAz = tz; }
+              else { q.e.outBx = tx; q.e.outBz = tz; }
+            }
+          }
+          const outFences = [];
+          for (const e of edges) {
+            if (Math.hypot(e.outBx - e.outAx, e.outBz - e.outAz) < 1.2) continue;
+            outFences.push(
+              r1(e.outAx), r1(e.outAz), r1(e.outBx), r1(e.outBz),
+              (e.stone ? 1 : 0) + (e.onWay ? 2 : 0) + 4,
+            );
+          }
+          return outFences;
+        })(),
         trackBridges: (W.trackBridgePlan || []).flatMap((q) => [r1(q.mx), r1(q.mz), r3(q.ux), r3(q.uz), r1(q.span), q.isStone ? 1 : 0]),
         wheels, yards,
         memorials: (W.memorials || []).flatMap((m) => [r1(m.x), r1(m.z)]),
@@ -2078,7 +2217,39 @@ globalThis.BOARD_MODEL = (() => {
       const pts = line(c.poly);
 
       if (mode === 'cart') {
-        const totalQty = Math.max(2, Math.round(c.qty || 4));
+        const goodStr = String(c.good ?? 'grain');
+        const isLivestockGood = goodStr === 'sheep' || goodStr === 'cattle' || goodStr === 'swine' || goodStr === 'horses';
+        const rawQty = Math.round(c.qty || 0);
+        if (isLivestockGood && rawQty >= 6) {
+          const droveCount = Math.max(1, Math.min(4, Math.floor(rawQty / 9)));
+          let remaining = rawQty;
+          for (let p = 0; p < droveCount; p++) {
+            const left = droveCount - p;
+            const droveQty = left === 1 ? Math.max(6, remaining) : Math.max(6, Math.min(12, Math.round(remaining / left)));
+            remaining = Math.max(6, remaining - droveQty);
+            const phaseOffset = +(0.04 + ((((p + 0.5) / droveCount) + index * 0.173) % 1) * 0.92).toFixed(4);
+            out.push({
+              key: droveCount > 1 ? `${baseKey}#d${p}` : baseKey,
+              consignmentKey: baseKey,
+              index,
+              mode: 'cart',
+              drove: true,
+              good: goodStr,
+              qty: droveQty,
+              origin: c.origin,
+              dest: c.dest,
+              depart: c.departDay,
+              arrive: Math.max((c.departDay || now) + 0.5, c.arriveDay || (now + 4)),
+              halted: !!c.halted,
+              carts: 1,
+              phaseOffset,
+              points: pts,
+            });
+            roadParcelCount++;
+          }
+          return;
+        }
+        const totalQty = Math.max(2, rawQty || 4);
         const parcelCount = Math.max(1, Math.min(12, Math.ceil(totalQty / 5)));
         let remaining = totalQty;
         for (let p = 0; p < parcelCount; p++) {
@@ -2093,7 +2264,8 @@ globalThis.BOARD_MODEL = (() => {
             consignmentKey: baseKey,
             index,
             mode: 'cart',
-            good: String(c.good ?? 'grain'),
+            drove: false,
+            good: goodStr,
             qty: parcelQty,
             origin: c.origin,
             dest: c.dest,
@@ -2203,7 +2375,7 @@ globalThis.BOARD_MODEL = (() => {
           }
         }
       }
-      const ROAD_PARCEL_GOODS = ['grain', 'timber', 'wine', 'wool', 'ore', 'salt', 'char', 'cloth', 'sheep', 'cattle'];
+      const ROAD_PARCEL_GOODS = ['grain', 'timber', 'wine', 'wool', 'ore', 'salt', 'oil', 'cloth', 'pottery', 'merchants', 'passenger'];
       const needed = Math.min(TARGET_MAX_ROAD_PARCELS, Math.max(TARGET_MIN_ROAD_PARCELS, roadCorridors.length * 3)) - roadParcelCount;
       for (let k = 0; k < needed && roadCorridors.length > 0 && roadParcelCount < TARGET_MAX_ROAD_PARCELS; k++) {
         const corr = roadCorridors[k % roadCorridors.length];

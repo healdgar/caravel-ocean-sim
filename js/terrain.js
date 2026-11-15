@@ -1536,9 +1536,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     meadowGrass=await createMeadowGrass({device,shader,pack:meadowPack,region:activeRegion,heights,biome,beaches:proceduralPack.beaches??null,port:proceduralPack.port??null,city:proceduralPack.city??null,board:proceduralPack.board??null,inlandWater:proceduralPack.inlandWater??null,elevation,nearDomain,resources:nearResources,clouds,format,samples,isMobile});
   }catch(error){meadowFailure=error.message;}
   const meadowGrassStats=meadowGrass?.stats??{loaded:false,error:meadowFailure};
-  let tradeVessels=proceduralPack?await createTradeVessels({device,format,samples,shader,computePipe,oceanBridge,resources:nearResources,shadowFormat:activeLandShadows.format,sharedCrew:options?.sharedCrew??null}):null;
+  let tradeVessels=proceduralPack?await createTradeVessels({device,format,samples,shader,computePipe,oceanBridge,resources:nearResources,shadowFormat:activeLandShadows.format,sharedCrew:options?.sharedCrew??null,submerged:submerged??null}):null;
   if(tradeVessels&&proceduralPack?.port?.country?.board){
-    tradeVessels.setTraffic(null,activeRegion,proceduralPack.port.country.riverReaches??[],proceduralPack.port.country.places??[],{heights,region:activeRegion,port:proceduralPack.port,bridges:proceduralPack.port.country.bridges??[]});
+    tradeVessels.setTraffic(null,activeRegion,proceduralPack.port.country.riverReaches??[],proceduralPack.port.country.places??[],{heights,region:activeRegion,port:proceduralPack.port,bridges:proceduralPack.port.country.bridges??[],inlandWaterAt:(wx,wz)=>inlandWaterSampler?inlandWaterSampler(wx,wz):null});
   }
   let tick=0;
 
@@ -1869,9 +1869,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       secZ,
       getSectionAt,
       {
-        size:33,
+        size:proceduralPack.regionalDem?49:33,
         biomeSize:64,
-        albedoSize:64,
+        albedoSize:proceduralPack.regionalDem?128:64,
         vegetationCandidates:isMobile?180:320,
         taperUnconnectedOuter:true,
         skipStaticPalms:Boolean(forest&&forestPack),
@@ -1978,11 +1978,24 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
 
   function seedInitialCoastalSections(){
     if(terrainDisposed||!proceduralPack)return;
-    const dirs=detectCoastalContinuationDirs(
-      proceduralPack.rawHeights||heights,
-      activeRegion.size,
-      activeRegion.shoreBearing
-    );
+    let dirs;
+    if(proceduralPack.regionalDem?.heights?.length){
+      dirs=[];
+      for(let dz=-2;dz<=2;dz++){
+        for(let dx=-2;dx<=2;dx++){
+          if(dx===0&&dz===0)continue;
+          dirs.push({dx,dz});
+        }
+      }
+      dirs.sort((a,b)=>(Math.abs(a.dx)+Math.abs(a.dz))-(Math.abs(b.dx)+Math.abs(b.dz)));
+    }else{
+      dirs=detectCoastalContinuationDirs(
+        proceduralPack.rawHeights||heights,
+        activeRegion.size,
+        activeRegion.shoreBearing,
+        {seawardBearing:activeRegion.seawardBearing}
+      );
+    }
     const connectedCenter={
       west:loadedSections.has('-1,0')||dirs.some(d=>d.dx===-1&&d.dz===0),
       east:loadedSections.has('1,0')||dirs.some(d=>d.dx===1&&d.dz===0),
@@ -2072,8 +2085,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         if(sx!==0||sz!==0){
           const key=`${sx},${sz}`;
           const existing=loadedSections.get(key);
+          const inMosaicEnvelope=Boolean(proceduralPack.regionalDem)||(Math.abs(sx)<=2&&Math.abs(sz)<=2);
           if((!existing||existing.isMock)&&!queuedSections.has(key)){
-            if(existing?.isMock||isCurrentSection||doesNeighborBorderHaveLand(sx,sz)){
+            if(existing?.isMock||isCurrentSection||inMosaicEnvelope||doesNeighborBorderHaveLand(sx,sz)){
               if(enqueueCoastalSection(sx,sz,{priority:isCurrentSection,wantRealDEM:true,deferProcess})){
                 sectionsQueued++;
               }
@@ -2084,7 +2098,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
           const nx=sx+cx,nz=sz+cz;
           if((nx===0&&nz===0)||Math.abs(nx)>4||Math.abs(nz)>4)continue;
           const nKey=`${nx},${nz}`;
-          if(!loadedSections.has(nKey)&&!queuedSections.has(nKey)&&doesNeighborBorderHaveLand(nx,nz)){
+          const adjInMosaic=Boolean(proceduralPack.regionalDem)||(Math.abs(nx)<=2&&Math.abs(nz)<=2);
+          if(!loadedSections.has(nKey)&&!queuedSections.has(nKey)&&(adjInMosaic||doesNeighborBorderHaveLand(nx,nz))){
             ensureMockSection(nx,nz,{rebuildTrees:false});
             addedMocks++;
           }
@@ -2123,6 +2138,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     region:activeRegion,
     heights:new Float32Array(heights),
     rawHeights:proceduralPack.rawHeights?new Float32Array(proceduralPack.rawHeights):new Float32Array(heights),
+    regionalDem:proceduralPack.regionalDem??null,
     biome:new Uint8Array(biome),
     albedo:proceduralPack.albedo?new Uint8Array(proceduralPack.albedo):null,
     mesh:proceduralPack.mesh,
@@ -2137,12 +2153,14 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     if(terrainDisposed||!proceduralPack||!upgradedPack?.heights||!upgradedPack?.mesh)return false;
     proceduralPack._cachedForestBuckets=null;
     upgradedPack._cachedForestBuckets=null;
+    if(upgradedPack.regionalDem)proceduralPack.regionalDem=upgradedPack.regionalDem;
     portsDirty=true;
     if(upgradedPack.region){
       const nextSpan=upgradedPack.region.span||activeRegion.span;
       const nextBearing=Number.isFinite(upgradedPack.region.shoreBearing)?upgradedPack.region.shoreBearing:activeRegion.shoreBearing;
-      if(nextSpan!==activeRegion.span||nextBearing!==activeRegion.shoreBearing){
-        activeRegion=Object.freeze({...activeRegion,span:nextSpan,shoreBearing:nextBearing});
+      const nextSeaward=Number.isFinite(upgradedPack.region.seawardBearing)?upgradedPack.region.seawardBearing:activeRegion.seawardBearing;
+      if(nextSpan!==activeRegion.span||nextBearing!==activeRegion.shoreBearing||nextSeaward!==activeRegion.seawardBearing){
+        activeRegion=Object.freeze({...activeRegion,span:nextSpan,shoreBearing:nextBearing,seawardBearing:nextSeaward});
         proceduralPack.region=activeRegion;
         device.queue.writeBuffer(uniform,0,new Float32Array([activeRegion.x,activeRegion.z,activeRegion.span,0.22]));
         coastalField?.invalidate();
@@ -2205,7 +2223,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     herds?.setHerds(upgradedPack.herds??null);
     meadowGrass?.sync({region:activeRegion,heights,biome,beaches:proceduralPack.beaches??null,port:portOwner.port??null,city:upgradedPack.city??proceduralPack.city??null,board:upgradedPack.board??proceduralPack.board??null,inlandWater:upgradedPack.inlandWater??proceduralPack.inlandWater??null});
     if(upgradedPack.port?.country?.board){
-      tradeVessels?.setTraffic(null,activeRegion,upgradedPack.port.country.riverReaches??[],upgradedPack.port.country.places??[],{heights,region:activeRegion,port:upgradedPack.port,bridges:upgradedPack.port.country.bridges??[]});
+      tradeVessels?.setTraffic(null,activeRegion,upgradedPack.port.country.riverReaches??[],upgradedPack.port.country.places??[],{heights,region:activeRegion,port:upgradedPack.port,bridges:upgradedPack.port.country.bridges??[],inlandWaterAt:(wx,wz)=>inlandWaterSampler?inlandWaterSampler(wx,wz):null});
     }
     if(upgradedPack.surveyHeights)proceduralPack.surveyHeights=upgradedPack.surveyHeights;
     if(upgradedPack.board)proceduralPack.board=upgradedPack.board;
@@ -2889,19 +2907,21 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
           pass.setBindGroup(0,sec.submergedGroup);pass.setVertexBuffer(0,sec.vertices);pass.setIndexBuffer(sec.indices,'uint32');pass.drawIndexed(sec.indexCount);
         }
       }else{
-        if(!submergedCount&&!fineMesh?.submergedIndices.length&&!loadedSections.size)return;
-        submerged.bind(pass,false);pass.setBindGroup(0,submergedGroup);pass.setBindGroup(1,submergedClouds);
-        if(submergedCount){pass.setVertexBuffer(0,vertices);pass.setIndexBuffer(submergedIndices,'uint32');pass.drawIndexed(submergedCount);}
-        if(fine&&fineMesh.submergedIndices.length){pass.setVertexBuffer(0,fine.vertices);pass.setIndexBuffer(fine.submerged,'uint32');pass.drawIndexed(fineMesh.submergedIndices.length);}
-        for(const sec of loadedSections.values()){
-          if(!sec.submergedGroup||!sec.submergedCount||!isSectionVisible(sec.region,lastCamera,lastView,4500))continue;
-          pass.setBindGroup(0,sec.submergedGroup);pass.setVertexBuffer(0,sec.vertices);pass.setIndexBuffer(sec.submergedIndices,'uint32');pass.drawIndexed(sec.submergedCount);
+        if(submergedCount||fineMesh?.submergedIndices.length||loadedSections.size){
+          submerged.bind(pass,false);pass.setBindGroup(0,submergedGroup);pass.setBindGroup(1,submergedClouds);
+          if(submergedCount){pass.setVertexBuffer(0,vertices);pass.setIndexBuffer(submergedIndices,'uint32');pass.drawIndexed(submergedCount);}
+          if(fine&&fineMesh.submergedIndices.length){pass.setVertexBuffer(0,fine.vertices);pass.setIndexBuffer(fine.submerged,'uint32');pass.drawIndexed(fineMesh.submergedIndices.length);}
+          for(const sec of loadedSections.values()){
+            if(!sec.submergedGroup||!sec.submergedCount||!isSectionVisible(sec.region,lastCamera,lastView,4500))continue;
+            pass.setBindGroup(0,sec.submergedGroup);pass.setVertexBuffer(0,sec.vertices);pass.setIndexBuffer(sec.submergedIndices,'uint32');pass.drawIndexed(sec.submergedCount);
+          }
         }
       }
       if(submergedGround&&!meadowGrass){
         submergedGround.bind(pass,above);pass.setBindGroup(0,submergedGroundGroup);
         for(let i=0;i<groundMeshes.length;i++)groundCull.draw(pass,i,0,groundMeshes[i].buffer);
       }
+      tradeVessels?.drawSubmerged?.(pass,above);
     },
     draw(pass,camera={x:0,y:6,z:0},viewProjection=null){
       if(!lastCamera)updateTrees(camera,viewProjection);

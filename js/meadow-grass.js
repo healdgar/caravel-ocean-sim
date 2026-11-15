@@ -1,11 +1,13 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-// 100% GPU Botanical Meadow Grass Continuum on seamless 4.0 m x 4.0 m tiles:
-//   - Near / Mid (L0..L3): real Portuguese meadow organs (Dactylis glomerata tussocks, Plantago lanceolata rosettes,
-//     Avena sterilis & Bromus diandrus culms & golden seed panicles) + arched 3D turf-grass micro-tufts with
-//     anti-flicker width compensation and zero synthetic opaque floor sheet.
-//   - Far Continuum: tight MSAA @builtin(sample_mask) handoff into a non-overlapping 4.0 m x 4.0 m closed genus-0
-//     (Euler = 2) sculpted tussock-canopy morph.bin (cullMode: 'back', O(1) u8x4 ancestor lookup, zero Z-fighting),
-//     morphing into 1-triangle horizon splats with stochastic sub-pixel thinning.
+// 100% GPU Lush Botanical Meadow Grass Continuum on seamless 1.75 m x 1.75 m tiles (3.0625 m^2):
+//   - Near / Mid (L0..L3, ~4,420 -> 2,140 -> 960 -> 384 tris/tile = ~1,444 tris/m^2 at LOD0, 100% full density inside ~20 m):
+//     1. Arched 3-segment (5-tri, 7-vert) ryegrass, cocksfoot & fescue tussock sheaves (70%)
+//     2. Dense broad low-arching clover, ribwort & basal turf ground-huggers (20%, >80% oblique turf fullness)
+//     3. Tall sunlit golden oat/barley panicles & subtle 3D Mediterranean coastal wildflowers (10%)
+//   - Anti-grid variety: toroidal-Poisson tussocks + per-cell deterministic 90-deg quadrant rotation + world-space moisture/height modulation.
+//   - Far Continuum (out to ~780 m): MSAA @builtin(sample_mask) handoff into a closed genus-0 (Euler = 2) D4-symmetric
+//     sculpted tussock-canopy morph.bin (cullMode: 'back', O(1) u8x4 ancestor lookup), morphing into 1-triangle horizon
+//     splats (< 3.5 px) with stochastic sub-pixel thinning (< 1.0 px) and area-preserving inverseSqrt(keepProb) inflation.
 //   - Ballistics: GPU cannonball crater burial, radial blast parting, soot scorching & thrown-soil dusting,
 //     live low-flying cannonball V-wake furrows + hot-shot tip singeing, and 26 m/s impact shockwave rings.
 import { requestOnce } from './gpu-program-cache.js';
@@ -19,9 +21,9 @@ import { INLAND_WATER_FLOATS } from './wgsl/inland-water.js';
 import { LAND_CRATER_SAMPLE_WGSL, LAND_CRATER_TEXELS, LAND_CRATER_CELL_M, LAND_CRATER_TILE_M } from './wgsl/land-craters.js';
 import { streetEdgeAt } from './town-streets.js';
 
-export const MEADOW_TILE_METRES = 4.0;
-export const MEADOW_FADE_IN_PX = 26.0;
-export const MEADOW_FADE_OUT_PX = 20.0;
+export const MEADOW_TILE_METRES = 1.75;
+export const MEADOW_FADE_IN_PX = 22.0;
+export const MEADOW_FADE_OUT_PX = 16.5;
 export const MEADOW_SPLAT_PX = 3.5;
 export const MEADOW_MIN_PX = 1.0;
 export const MEADOW_BUCKETS = 8;
@@ -30,6 +32,7 @@ export const MEADOW_MAX_SHOT_WAKES = 16;
 export const MEADOW_MAX_BLAST_RINGS = 16;
 export const MEADOW_WAKE_BUFFER_BYTES = 1040; // 16B counts + 16 * 32B ShotWake + 16 * 32B BlastRing = 1040B
 
+const MEADOW_MACRO_MUL = 6; // 6 x 1.75 m = 10.50 m outer continuum/splat ring reaching ~782 m radius
 const MEADOW_INST_FLOATS = 8;
 const MEADOW_VERT_WORDS = 8;
 const MEADOW_CLUSTER_WORDS = 12;
@@ -39,9 +42,9 @@ const MEADOW_MORPH_STEPS = 21;
 const MEADOW_MORPH_REMAP_OFFSET = MEADOW_MORPH_VERTS * MEADOW_VERT_WORDS + MEADOW_MORPH_FACES * 3; // 352
 const MEADOW_MORPH_REMAP_WORDS = 276;
 const MEADOW_MORPH_VAR_WORDS = MEADOW_MORPH_REMAP_OFFSET + MEADOW_MORPH_REMAP_WORDS; // 628 words = 2512 bytes
-const MEADOW_GRID_SIDE_DESKTOP = 112; // 112 x 112 = 12,544 cells covering 224 m radius
-const MEADOW_GRID_SIDE_MOBILE = 64;   // 64 x 64 = 4,096 cells covering 128 m radius
-const MEADOW_BUCKET_SPAN = 16384;
+const MEADOW_GRID_SIDE_DESKTOP = 152; // 152 x 152 (~266 m near span) + 6x outer continuum ring (~782 m radius)
+const MEADOW_GRID_SIDE_MOBILE = 96;   // 96 x 96 (~168 m near span) + 6x outer continuum ring (~488 m radius)
+const MEADOW_BUCKET_SPAN = 32768;
 const MEADOW_COVER_DESKTOP = 2048; // 4.0 m/texel across 8192 m region with bilinear SDF filtering
 const MEADOW_COVER_MOBILE = 1024;
 
@@ -171,7 +174,7 @@ function pointInTri2D(px, pz, ax, az, bx, bz, cx, cz) {
 }
 
 // Bake static high-resolution (2048x2048 = 4 m/texel) anti-aliased SDF meadow coverage map:
-// R = cover (0..255), G = mix (0 pasture, 128 waste, 255 field-margin), B = height modulation (0..255), A = 255.
+// R = cover (0..255), G = mix (0 pasture, 128 waste, 255 field-margin), B = height/lushness modulation (0..255), A = 255.
 export function buildMeadowCoverMap({
   region,
   heights,
@@ -263,24 +266,24 @@ export function buildMeadowCoverMap({
 
       const n1 = valueNoise2D(wx * 0.018, wz * 0.018);
       const n2 = valueNoise2D(wx * 0.062 + 17.3, wz * 0.062 - 9.1);
-      const patch = 0.82 + 0.18 * (n1 * 0.65 + n2 * 0.35);
+      const patch = 0.84 + 0.16 * (n1 * 0.65 + n2 * 0.35);
 
-      let dens = (0.84 + 0.16 * n1) * patch * slopeFade * forestFade * dryFade * swashFade * urbanFade;
+      let dens = (0.86 + 0.14 * n1) * patch * slopeFade * forestFade * dryFade * swashFade * urbanFade;
       let mixVal = 0;
-      let hScale = 172;
+      let hScale = 176;
       if (parkBonus) {
-        dens = Math.max(dens, 0.92 * dryFade * swashFade);
+        dens = Math.max(dens, 0.94 * dryFade * swashFade);
         mixVal = 210;
-        hScale = 182;
+        hScale = 186;
       } else if (slope > 0.24 || y > 185) {
         mixVal = 128;
-        hScale = 142;
+        hScale = 148;
       } else if (marked >= 68) {
         mixVal = 255;
-        hScale = 192;
+        hScale = 196;
       } else {
         mixVal = n2 > 0.58 ? 255 : 0;
-        hScale = 176;
+        hScale = 180;
       }
 
       baseR[idx] = Math.max(0, Math.min(255, dens * 255));
@@ -536,8 +539,6 @@ export function buildMeadowCoverMap({
       carveOBB(lot.x, lot.z, lot.c ?? 1, lot.s ?? 0, (lot.w || 6) * 0.5 + 1.3, (lot.d || 6) * 0.5 + 1.3, 3.4);
     }
   }
-  // Always carve port.streets (1m signed distance field + ways + walker route samples) even when activeBoard is present,
-  // matching the exact cobblestone footpaths and streets painted by the terrain shader.
   if (port?.streets) {
     const stObj = port.streets;
     for (const way of stObj.ways ?? []) {
@@ -652,9 +653,10 @@ fn meadowGroundY(p: vec2f, domain: vec4f, elevTex: texture_2d<f32>) -> f32 {
 }
 `;
 
-// Straight-line D3D12-safe compute shader on 4.0 m seamless botanical tiles:
-// 112 x 112 = 12,544 threads, unrotated 4.0 m lattice so shared edge plants interlock seamlessly,
-// center + 4-corner (±1.95 m) cover test, and per-tile slopeNormal.xz packed into posRot.w via pack2x16snorm.
+// 100% loop-free D3D12-safe compute shader on 1.75 m dense near lattice (gid.z == 0)
+// seamlessly partitioned into a 6x (10.50 m) outer continuum + horizon-splat ring out to ~782 m (gid.z == 1):
+//   - Holds 100% full LOD0 density (cut = 0, retireT = 0) inside ~20 m, then smoothly retires across [0 -> 1 -> 2 -> 3].
+//   - Zero loops, zero 90-deg float constants, per-tile slope normal packed into posRot.w via pack2x16snorm.
 export const MEADOW_STEP_WGSL = FRAME_WGSL + MEADOW_HASH_GROUND_WGSL + /* wgsl */ `
 struct MeadowStepCfg {
   domain: vec4f, // region.x, region.z, region.span, minElev
@@ -691,34 +693,52 @@ fn meadowPush(bucket: u32, posRot: vec4f, attrs: vec4f) {
   }
 }
 
-@compute @workgroup_size(8, 8) fn meadowSelect(@builtin(global_invocation_id) gid: vec3u) {
+@compute @workgroup_size(8, 8, 1) fn meadowSelect(@builtin(global_invocation_id) gid: vec3u) {
   let gridSide = cfg.params.x;
-  if (gid.x >= gridSide || gid.y >= gridSide) { return; }
+  if (gid.x >= gridSide || gid.y >= gridSide || gid.z >= 2u) { return; }
   let halfGrid = i32(gridSide / 2u);
+  let innerMacroR = halfGrid / ${MEADOW_MACRO_MUL};
+  let innerCellR = innerMacroR * ${MEADOW_MACRO_MUL};
+  let offIJ = vec2i(i32(gid.x) - halfGrid, i32(gid.y) - halfGrid);
+
+  let isMacro = gid.z == 1u;
+  if (!isMacro) {
+    if (offIJ.x < -innerCellR || offIJ.x >= innerCellR || offIJ.y < -innerCellR || offIJ.y >= innerCellR) { return; }
+  } else {
+    if (offIJ.x >= -innerMacroR && offIJ.x < innerMacroR && offIJ.y >= -innerMacroR && offIJ.y < innerMacroR) { return; }
+  }
+
   let shiftXZ = nearTerrain.grid.yz;
   let camUnshifted = F.camPos.xz - shiftXZ;
-  let camCell = vec2i(floor(camUnshifted / ${MEADOW_TILE_METRES.toFixed(1)}));
-  let cellIJ = camCell + vec2i(i32(gid.x) - halfGrid, i32(gid.y) - halfGrid);
+  let unitTileM = ${MEADOW_TILE_METRES.toFixed(4)};
+  let macroTileM = ${(MEADOW_TILE_METRES * MEADOW_MACRO_MUL).toFixed(4)};
+  let macroCam = vec2i(floor(camUnshifted / macroTileM));
 
-  let seed = meadowHash2(cellIJ);
-  let originXZ = vec2f(cellIJ) * ${MEADOW_TILE_METRES.toFixed(1)};
-  let centerXZ = originXZ + vec2f(${(MEADOW_TILE_METRES * 0.5).toFixed(1)});
+  let tileScale = select(1.0, ${MEADOW_MACRO_MUL}.0, isMacro);
+  let tileM = unitTileM * tileScale;
+  let cellIJ = select(macroCam * ${MEADOW_MACRO_MUL} + offIJ, macroCam + offIJ, isMacro);
+  let seed = meadowHash2(cellIJ ^ select(vec2i(0), vec2i(0x27d4eb2f, 0x165667b1), isMacro));
+  let originXZ = vec2f(cellIJ) * tileM;
+  let centerXZ = originXZ + vec2f(tileM * 0.5);
 
-  let maxRadius = f32(gridSide) * ${(0.5 * MEADOW_TILE_METRES).toFixed(1)} - 8.0;
+  let outerMaxR = f32(halfGrid) * macroTileM - 16.0;
   let horizDist = distance(centerXZ, camUnshifted);
-  if (horizDist > maxRadius + 2.5) { return; }
+  if (horizDist > outerMaxR) { return; }
 
   let uv = (centerXZ - cfg.domain.xy) / cfg.domain.z + 0.5;
   if (uv.x <= 0.002 || uv.x >= 0.998 || uv.y <= 0.002 || uv.y >= 0.998) { return; }
 
   let cDim = i32(cfg.params.w);
   let cov = meadowCoverBilinear(uv, cDim);
-  let cOff = 1.95 / cfg.domain.z;
-  let maxCorner = max(
-    max(meadowCoverBilinear(uv + vec2f(cOff, cOff), cDim).r, meadowCoverBilinear(uv + vec2f(-cOff, cOff), cDim).r),
-    max(meadowCoverBilinear(uv + vec2f(cOff, -cOff), cDim).r, meadowCoverBilinear(uv + vec2f(-cOff, -cOff), cDim).r),
-  );
-  if (max(cov.r, maxCorner) < 0.015) { return; }
+  let cOff = (tileM * 0.48) / cfg.domain.z;
+  let cPP = meadowCoverBilinear(uv + vec2f(cOff, cOff), cDim).r;
+  let cNP = meadowCoverBilinear(uv + vec2f(-cOff, cOff), cDim).r;
+  let cPN = meadowCoverBilinear(uv + vec2f(cOff, -cOff), cDim).r;
+  let cNN = meadowCoverBilinear(uv + vec2f(-cOff, -cOff), cDim).r;
+  let maxCorner = max(max(cPP, cNP), max(cPN, cNN));
+  let minCorner = min(min(cov.r, min(cPP, cNP)), min(cPN, cNN));
+  let minReq = select(0.020, 0.14, isMacro);
+  if (max(cov.r, maxCorner) < minReq) { return; }
 
   let groundY = meadowGroundY(centerXZ, cfg.domain, elevation);
   if (groundY < cfg.domain.w) { return; }
@@ -728,13 +748,14 @@ fn meadowPush(bucket: u32, posRot: vec4f, attrs: vec4f) {
   let dist = length(rel);
 
   let clip = F.viewProj * vec4f(rel, 1.0);
-  let margin = 3.35;
+  let margin = tileM * 0.95 + 1.8;
   if (clip.w < -margin) { return; }
   let wGuard = max(clip.w, 0.25) * 1.24 + margin;
   if (abs(clip.x) > wGuard || abs(clip.y) > wGuard) { return; }
 
-  let hx = (meadowGroundY(centerXZ + vec2f(2.0, 0.0), cfg.domain, elevation) - meadowGroundY(centerXZ - vec2f(2.0, 0.0), cfg.domain, elevation)) * 0.25;
-  let hz = (meadowGroundY(centerXZ + vec2f(0.0, 2.0), cfg.domain, elevation) - meadowGroundY(centerXZ - vec2f(0.0, 2.0), cfg.domain, elevation)) * 0.25;
+  let epsH = max(1.5, tileM * 0.35);
+  let hx = (meadowGroundY(centerXZ + vec2f(epsH, 0.0), cfg.domain, elevation) - meadowGroundY(centerXZ - vec2f(epsH, 0.0), cfg.domain, elevation)) / (2.0 * epsH);
+  let hz = (meadowGroundY(centerXZ + vec2f(0.0, epsH), cfg.domain, elevation) - meadowGroundY(centerXZ - vec2f(0.0, epsH), cfg.domain, elevation)) / (2.0 * epsH);
   let slopeN = normalize(vec3f(-hx, 1.0, -hz));
   let packedSlope = bitcast<f32>(pack2x16snorm(slopeN.xz));
 
@@ -747,16 +768,24 @@ fn meadowPush(bucket: u32, posRot: vec4f, attrs: vec4f) {
   }
   let variantId = mixIdx * 4u + (seed & 3u);
 
-  let scaleY = 1.0;
   let posRot = vec4f(originXZ.x, groundY, originXZ.y, packedSlope);
   let seedF = bitcast<f32>(seed);
 
   let focal = F.screen.y / max(2.0 * length(F.camUp.xyz), 0.0001);
-  let spanPx = (${MEADOW_TILE_METRES.toFixed(1)} * focal) / max(dist, 0.45);
-  let allowedErr = (1.15 * dist) / max(focal, 0.001);
+  let rawUnitSpanPx = (unitTileM * focal) / max(dist, 0.45);
+  let innerOrigin = vec2f(macroCam * ${MEADOW_MACRO_MUL}) * unitTileM;
+  let boxDist = max(abs(centerXZ.x - innerOrigin.x), abs(centerXZ.y - innerOrigin.y));
+  let innerBoxR = f32(innerCellR) * unitTileM;
+  let boxFade = smoothstep(innerBoxR - 18.0, innerBoxR - 2.5, boxDist);
+  let spanPx = select(
+    mix(rawUnitSpanPx, min(rawUnitSpanPx, ${MEADOW_FADE_OUT_PX.toFixed(1)} - 0.25), boxFade),
+    min(rawUnitSpanPx, ${MEADOW_FADE_OUT_PX.toFixed(1)} - 0.25),
+    isMacro,
+  );
+  let allowedErr = dist / max(focal, 1.0);
   let vFirst = variantId * 4u;
 
-  if (spanPx >= ${MEADOW_FADE_IN_PX.toFixed(1)}) {
+  if (!isMacro && spanPx >= ${MEADOW_FADE_IN_PX.toFixed(1)}) {
     let e1 = bitcast<f32>(meadowClusters[(vFirst + 1u) * ${MEADOW_CLUSTER_WORDS}u + 4u]);
     let e2 = bitcast<f32>(meadowClusters[(vFirst + 2u) * ${MEADOW_CLUSTER_WORDS}u + 4u]);
     let e3 = bitcast<f32>(meadowClusters[(vFirst + 3u) * ${MEADOW_CLUSTER_WORDS}u + 4u]);
@@ -765,35 +794,40 @@ fn meadowPush(bucket: u32, posRot: vec4f, attrs: vec4f) {
     let cb = chosen * ${MEADOW_CLUSTER_WORDS}u;
     let parentErr = bitcast<f32>(meadowClusters[cb + 3u]);
     let selfErr = bitcast<f32>(meadowClusters[cb + 4u]);
-    let levelT = clamp((allowedErr - selfErr) / max(parentErr - selfErr, 0.001), 0.0, 1.0);
-    meadowPush(lvl, posRot, vec4f(bitcast<f32>(chosen), scaleY, levelT, seedF));
+    // Hold 100% full LOD0 density inside ~20 m (70% of L0 error band), then smoothly retire sub-blades with zero pop!
+    let bandStart = mix(selfErr, parentErr, select(0.28, 0.70, lvl == 0u));
+    let levelT = clamp((allowedErr - bandStart) / max(parentErr - bandStart, 0.0005), 0.0, 1.0);
+    meadowPush(lvl, posRot, vec4f(bitcast<f32>(chosen), tileScale, levelT, seedF));
     return;
   }
 
-  if (spanPx > ${MEADOW_FADE_OUT_PX.toFixed(1)}) {
+  if (!isMacro && spanPx > ${MEADOW_FADE_OUT_PX.toFixed(1)}) {
     let fade = smoothstep(${MEADOW_FADE_IN_PX.toFixed(1)}, ${MEADOW_FADE_OUT_PX.toFixed(1)}, spanPx);
     let cIdx = vFirst + 3u;
-    meadowPush(4u, posRot, vec4f(bitcast<f32>(cIdx), scaleY, fade, seedF));
-    meadowPush(5u, posRot, vec4f(bitcast<f32>(variantId), scaleY, fade, seedF));
+    meadowPush(4u, posRot, vec4f(bitcast<f32>(cIdx), tileScale, fade, seedF));
+    meadowPush(5u, posRot, vec4f(bitcast<f32>(variantId), tileScale, fade, seedF));
     return;
   }
 
-  if (spanPx >= ${MEADOW_SPLAT_PX.toFixed(1)}) {
-    let u = clamp((${MEADOW_FADE_OUT_PX.toFixed(1)} - spanPx) / ${(MEADOW_FADE_OUT_PX - MEADOW_SPLAT_PX).toFixed(1)}, 0.0, 1.0) * ${MEADOW_MORPH_STEPS}.0;
+  let tileSpanPx = (tileM * focal) / max(dist, 0.45);
+  if (tileSpanPx >= ${MEADOW_SPLAT_PX.toFixed(1)}) {
+    let uRaw = clamp((${MEADOW_FADE_OUT_PX.toFixed(1)} - spanPx) / ${(MEADOW_FADE_OUT_PX - MEADOW_SPLAT_PX).toFixed(1)}, 0.0, 1.0) * ${MEADOW_MORPH_STEPS}.0;
+    // Keep full 5x5 terrain-draped vertex grid on macro-tiles bordering roads, rivers, or steep ridges
+    let u = select(uRaw, 0.0, isMacro && minCorner < 0.42);
     let stepIdx = min(${MEADOW_MORPH_STEPS - 1}u, u32(floor(u)));
     let morphT = clamp(u - f32(stepIdx), 0.0, 0.999);
-    meadowPush(6u, posRot, vec4f(bitcast<f32>(variantId), scaleY, f32(stepIdx) + morphT, seedF));
+    meadowPush(6u, posRot, vec4f(bitcast<f32>(variantId), tileScale, f32(stepIdx) + morphT, seedF));
     return;
   }
 
   var inflate = 1.0;
-  if (spanPx < ${MEADOW_MIN_PX.toFixed(1)}) {
-    let keepProb = clamp(spanPx * spanPx, 0.04, 1.0);
+  if (tileSpanPx < ${MEADOW_MIN_PX.toFixed(1)}) {
+    let keepProb = clamp(tileSpanPx * tileSpanPx, 0.04, 1.0);
     let uRand = f32(seed & 65535u) / 65536.0;
     if (uRand > keepProb) { return; }
     inflate = min(4.0, inverseSqrt(keepProb));
   }
-  meadowPush(7u, posRot, vec4f(bitcast<f32>(variantId), scaleY, inflate, seedF));
+  meadowPush(7u, posRot, vec4f(bitcast<f32>(variantId), tileScale, inflate, seedF));
 }
 `;
 
@@ -807,7 +841,7 @@ struct MeadowCfg {
 
 struct MeadowInst {
   posRot: vec4f,    // tileOriginX, groundY_center, tileOriginZ, bitcast<f32>(pack2x16snorm(slopeNormal.xz))
-  attrs: vec4f,     // bitcast<f32>(clusterOrVariant), scaleY, morphParam, bitcast<f32>(seed)
+  attrs: vec4f,     // bitcast<f32>(clusterOrVariant), tileScale, morphParam, bitcast<f32>(seed)
 };
 
 struct ShotWake {
@@ -827,37 +861,60 @@ struct MeadowWakeFrame {
   rings: array<BlastRing, ${MEADOW_MAX_BLAST_RINGS}>,
 };
 
+// Travelling multi-octave wind-gust wave advecting downwind at windSpeed * 1.15:
+//   - 14.0 m primary gust rollers (k1 = 2*pi / 14.0 = 0.4488)
+//   -  4.5 m secondary wind ripples (k2 = 2*pi / 4.5 = 1.3963)
+//   - Curved across-wind wavefronts + travelling gust-cell packets
 fn grassWindWave(worldXZ: vec2f, time: f32, windParam: vec4f) -> vec2f {
   let rawDir = windParam.xy;
   let windDir = select(vec2f(0.82, 0.57), normalize(rawDir), dot(rawDir, rawDir) > 0.0004);
   let acrossDir = vec2f(-windDir.y, windDir.x);
-  let speed = max(windParam.z, 4.8);
+  let speed = max(windParam.z, 5.2);
+  let advect = time * speed * 1.15;
   let u = dot(worldXZ, windDir);
   let v = dot(worldXZ, acrossDir);
-  let curve = sin(v * 0.065 + time * 0.20) * 3.10 + cos(v * 0.14 - time * 0.31) * 1.75;
-  let p1 = u * 0.26 - time * speed * 0.54 + curve;
-  let p2 = u * 0.62 - time * speed * 0.96 + cos(v * 0.23 - time * 0.43) * 2.10;
-  let p3 = u * 1.28 - time * speed * 1.52 + sin(v * 0.51 + time * 0.58) * 1.85;
-  let spanBreak = 0.55 + 0.45 * cos(v * 0.19 + sin(u * 0.11) * 1.4 - time * 0.25);
-  let catsPaw = (0.54 + 0.46 * sin(u * 0.085 - time * speed * 0.22 + sin(v * 0.055) * 2.1) * cos(v * 0.078 + time * 0.18)) * spanBreak;
-  let swell = (sin(p1) * 0.58 + sin(p2) * 0.28 + sin(p3) * 0.14) * catsPaw;
-  return vec2f(clamp(0.46 + 0.60 * swell, 0.0, 1.0), swell);
+
+  let frontWarp = sin(v * 0.085 + time * 0.24) * 2.35 + cos(v * 0.19 - time * 0.31) * 1.15;
+  let roller14 = sin((u - advect) * 0.4488 + frontWarp);
+  let ripple45 = sin((u - advect * 1.06) * 1.3963 + cos(v * 0.48 - time * 0.52) * 1.40);
+  let fineWave = sin((u - advect * 1.14) * 2.35 + sin(v * 0.92 + time * 0.72) * 1.05);
+
+  let gustPacket = 0.56 + 0.44 * sin((u - advect * 0.82) * 0.165 + sin(v * 0.072) * 1.8) * cos(v * 0.095 + time * 0.21);
+  let swell = (roller14 * 0.60 + ripple45 * 0.28 + fineWave * 0.12) * gustPacket;
+  let gust01 = smoothstep(-0.50, 0.76, swell);
+  return vec2f(gust01, swell);
 }
 
 fn meadowWindField(worldXZ: vec2f, time: f32, windParam: vec4f) -> vec2f {
   return grassWindWave(worldXZ, time, windParam);
 }
 
+fn meadowWindCurl(worldXZ: vec2f, time: f32, windDir: vec2f, speed: f32) -> f32 {
+  let acrossDir = vec2f(-windDir.y, windDir.x);
+  let advect = time * max(speed, 5.2) * 1.15;
+  let u = dot(worldXZ, windDir) - advect;
+  let v = dot(worldXZ, acrossDir);
+  return sin(v * 1.38 + u * 0.42) * cos(u * 1.12 - v * 0.54 + time * 0.9);
+}
+
 fn meadowWorldBillow(p: vec2f) -> vec3f {
-  let warp = vec2f(sin(p.y * 0.16 + 1.3), cos(p.x * 0.14 - 0.8)) * 1.9;
+  let warp = vec2f(sin(p.y * 0.13 + 1.3), cos(p.x * 0.11 - 0.8)) * 2.4;
   let q = p + warp;
-  let a1 = q.x * 0.58 + q.y * 0.43;
-  let a2 = -q.x * 0.37 + q.y * 0.51 + 2.1;
-  let a3 = q.x * 0.19 - q.y * 0.24 + 0.7;
-  let h = 1.0 + 0.12 * sin(a1) * cos(a2 * 0.85) + 0.09 * sin(a2) + 0.07 * cos(a3);
-  let gx = 0.07 * cos(a1) * cos(a2 * 0.85) * 0.58 - 0.06 * cos(a2) * 0.37 - 0.04 * sin(a3) * 0.19;
-  let gz = 0.07 * cos(a1) * cos(a2 * 0.85) * 0.43 + 0.06 * cos(a2) * 0.51 + 0.04 * sin(a3) * 0.24;
+  let a1 = q.x * 0.44 + q.y * 0.35;
+  let a2 = -q.x * 0.29 + q.y * 0.41 + 2.1;
+  let a3 = q.x * 0.14 - q.y * 0.18 + 0.7;
+  let h = 1.0 + 0.14 * sin(a1) * cos(a2 * 0.85) + 0.10 * sin(a2) + 0.08 * cos(a3);
+  let gx = 0.06 * cos(a1) * cos(a2 * 0.85) * 0.44 - 0.05 * cos(a2) * 0.29 - 0.03 * sin(a3) * 0.14;
+  let gz = 0.06 * cos(a1) * cos(a2 * 0.85) * 0.35 + 0.05 * cos(a2) * 0.41 + 0.03 * sin(a3) * 0.18;
   return vec3f(h, gx * 0.10, gz * 0.10);
+}
+
+// Lossless right-handed (det = +1) 90-deg quadrant rotation in XZ: preserves CCW triangle winding & D4 border welds!
+fn meadowRotQuadXZ(v: vec2f, q: u32) -> vec2f {
+  if (q == 1u) { return vec2f(-v.y, v.x); }
+  if (q == 2u) { return vec2f(-v.x, -v.y); }
+  if (q == 3u) { return vec2f(v.y, -v.x); }
+  return v;
 }
 `;
 
@@ -894,7 +951,7 @@ struct MeadowVertexOut {
   @location(2) colour: vec3f,
   @location(3) windInfo: vec4f,    // along, gust, swell, fade
   @location(4) tendrilFlow: vec4f, // bentUnshiftedXZ.xy, camDist, distFade
-  @location(5) damageInfo: vec2f,  // hotSinge, blastPress
+  @location(5) damageInfo: vec2f,  // hotSinge, bendSlope
 };
 
 struct MeadowVertexData {
@@ -932,11 +989,21 @@ fn meadowReadClusterVert(vi: u32) -> MeadowVertexData {
   );
 }
 
-fn meadowReadMorphVert(vBase: u32, vi: u32) -> MeadowVertexData {
+fn meadowMorphRawXZ(vBase: u32, vi: u32) -> vec2f {
+  let b = vBase + vi * ${MEADOW_VERT_WORDS}u;
+  return vec2f(bitcast<f32>(meadowMorph[b]), bitcast<f32>(meadowMorph[b + 2u]));
+}
+
+fn meadowReadMorphVert(vBase: u32, vi: u32, tileScale: f32) -> MeadowVertexData {
   let b = vBase + vi * ${MEADOW_VERT_WORDS}u;
   let rgba = unpack4x8unorm(meadowMorph[b + 4u]);
+  let halfTile = ${(MEADOW_TILE_METRES * 0.5).toFixed(4)} * tileScale;
   return MeadowVertexData(
-    vec3f(bitcast<f32>(meadowMorph[b]), bitcast<f32>(meadowMorph[b + 1u]), bitcast<f32>(meadowMorph[b + 2u])) + vec3f(${(MEADOW_TILE_METRES * 0.5).toFixed(1)}, 0.0, ${(MEADOW_TILE_METRES * 0.5).toFixed(1)}),
+    vec3f(
+      bitcast<f32>(meadowMorph[b]) * tileScale + halfTile,
+      bitcast<f32>(meadowMorph[b + 1u]),
+      bitcast<f32>(meadowMorph[b + 2u]) * tileScale + halfTile,
+    ),
     normalize(unpack4x8snorm(meadowMorph[b + 3u]).xyz),
     pow(rgba.rgb, vec3f(2.2)),
     bitcast<f32>(meadowMorph[b + 5u]),
@@ -1073,8 +1140,14 @@ fn meadowEvalBallistics(unshiftedXZ: vec2f, groundY: f32, seed: u32) -> MeadowBa
 }
 
 fn meadowShadePlace(inst: MeadowInst, vd: MeadowVertexData, fadeVal: f32) -> MeadowVertexOut {
-  // Exact unrotated 4.0 m lattice placement: shared edge plants interlock 100% seamlessly across variants.
-  let unshiftedXZ = inst.posRot.xz + vd.pos.xz;
+  let seed = bitcast<u32>(inst.attrs.w);
+  let rotQ = (seed >> 2u) & 3u;
+  let tileScale = max(inst.attrs.y, 1.0);
+  let halfTile = ${(MEADOW_TILE_METRES * 0.5).toFixed(4)} * tileScale;
+
+  // Per-cell deterministic 90-deg (0/90/180/270) rotation around cell center -> zero grid stripes or seams!
+  let rotLocalXZ = meadowRotQuadXZ(vd.pos.xz - vec2f(halfTile), rotQ) + vec2f(halfTile);
+  let unshiftedXZ = inst.posRot.xz + rotLocalXZ;
   let groundY = meadowGroundY(unshiftedXZ, cfg.domain, elevation);
   let shiftXZ = nearTerrain.grid.yz;
   let camUnshifted = F.camPos.xz - shiftXZ;
@@ -1082,65 +1155,84 @@ fn meadowShadePlace(inst: MeadowInst, vd: MeadowVertexData, fadeVal: f32) -> Mea
   let camDist = distance(vec3f(unshiftedXZ.x + shiftXZ.x, groundY, unshiftedXZ.y + shiftXZ.y), F.camPos.xyz);
 
   let vCov = meadowCoverAt(unshiftedXZ);
-  let coverFade = smoothstep(0.06, 0.62, vCov.r);
-  let maxRadius = f32(cfg.params.x) * ${(0.5 * MEADOW_TILE_METRES).toFixed(1)} - 8.0;
-  let distFade = 1.0 - smoothstep(maxRadius * 0.45, maxRadius, horizDist);
+  let maxOuterR = f32(cfg.params.x / 2u) * ${(MEADOW_TILE_METRES * MEADOW_MACRO_MUL).toFixed(4)} - 16.0;
+  let distFade = 1.0 - smoothstep(maxOuterR * 0.80, maxOuterR, horizDist);
 
-  // Stochastic per-tuft margin retirement on cluster blades (vd.tuftRand < 0.995) so sparse borders thin organically
-  // into individual scattered grass tufts on the real groundDetail soil instead of a uniform sheet!
-  var tuftAlive = 1.0;
-  if (vd.tuftRand < 0.995) {
-    let keepFrac = smoothstep(0.05, 0.52, vCov.r);
-    tuftAlive = smoothstep(vd.tuftRand - 0.07, vd.tuftRand + 0.07, keepFrac);
+  // Strict waterline & submerged terrain exclusion (zero blades on sea, estuaries, or carved inlandWater!)
+  let dryLand = step(cfg.domain.w, groundY);
+
+  // Organic ecotone blending along paths, beaches & riverbanks (cover 0.55 -> 0.06):
+  // per-clump deterministic hash breaks borders into scattered tussocks & short grazed tufts (scaleY 0.40..1.0)
+  // rather than uniform sparse needles!
+  let isClusterBlade = vd.tuftRand < 0.995;
+  var tuftAlive = smoothstep(0.06, 0.55, vCov.r);
+  var ecotoneScaleY = 1.0;
+  if (isClusterBlade) {
+    let keepFrac = smoothstep(0.06, 0.55, vCov.r);
+    let clumpHash = clamp(fract(vd.tuftRand * 1.07 + f32((seed >> 8u) & 255u) / 256.0), 0.04, 0.96);
+    tuftAlive = smoothstep(clumpHash - 0.06, clumpHash + 0.06, keepFrac);
+    ecotoneScaleY = mix(0.40, 1.0, keepFrac);
   }
-  let swardWeight = coverFade * distFade * tuftAlive;
+  let bladeAlive = tuftAlive * distFade * dryLand;
+  let heightWeight = ecotoneScaleY * bladeAlive;
 
   let wind = meadowWindField(unshiftedXZ, F.camPos.w, F.windP[0]);
   let rawDir = F.windP[0].xy;
   let windDir = select(vec2f(0.82, 0.57), normalize(rawDir), dot(rawDir, rawDir) > 0.0004);
   let acrossDir = vec2f(-windDir.y, windDir.x);
+  let windSpeed = max(F.windP[0].z, 5.2);
+  let curl = meadowWindCurl(unshiftedXZ, F.camPos.w, windDir, windSpeed);
 
   let billow = meadowWorldBillow(unshiftedXZ);
-  let hBoost = (0.80 + 0.42 * vCov.b) * billow.x;
+  let cellVigor = 0.92 + 0.16 * (f32((seed >> 16u) & 255u) / 255.0);
+  let hBoost = (0.82 + 0.44 * vCov.b) * billow.x * cellVigor;
 
-  let seed = bitcast<u32>(inst.attrs.w);
   let ballistics = meadowEvalBallistics(unshiftedXZ, groundY, seed);
 
-  // Strictly tuck roots -3.5 cm underground below vCov.r < 0.05 or when stochastically retired / crater-buried.
-  let marginRetired = max(1.0 - smoothstep(0.015, 0.05, vCov.r * distFade), 1.0 - smoothstep(0.02, 0.18, tuftAlive));
-  let edgeTuck = -0.035 * marginRetired - 0.085 * ballistics.buryDepth;
+  // Tuck retired / submerged / crater-buried roots cleanly beneath terrain surface.
+  let marginRetired = max(1.0 - smoothstep(0.03, 0.06, vCov.r * distFade * dryLand), 1.0 - smoothstep(0.02, 0.16, bladeAlive));
+  let edgeTuck = -0.045 * marginRetired - 0.090 * ballistics.buryDepth;
 
-  let alongFlex = pow(clamp(vd.along, 0.0, 1.0), 1.45) * swardWeight * (1.0 - ballistics.buryDepth);
-  let wavePress = (1.0 - 0.16 * wind.x * smoothstep(0.12, 0.72, vd.along)) * (1.0 - ballistics.pressDown * smoothstep(0.05, 0.55, vd.along));
+  let flexAlong = clamp(vd.along * 1.26, 0.0, 1.12);
+  let wavePress = (1.0 - 0.14 * wind.x * smoothstep(0.15, 0.80, flexAlong))
+                * (1.0 - ballistics.pressDown * smoothstep(0.05, 0.55, vd.along));
 
   var heightM = vd.pos.y + edgeTuck;
   if (vd.pos.y >= 0.0) {
-    heightM = vd.pos.y * hBoost * swardWeight * (1.0 - ballistics.buryDepth) * wavePress + edgeTuck;
+    heightM = vd.pos.y * hBoost * heightWeight * (1.0 - ballistics.buryDepth) * wavePress + edgeTuck;
   }
   let posH = max(0.0, heightM);
 
-  let bladeFlex = smoothstep(0.08, 0.88, vd.along);
-  let stiffNorm = clamp(vd.stiff, 2.0, 24.0);
-  let waveSweep = (0.10 + 0.30 * wind.x + 0.07 * wind.y) * alongFlex * (10.5 / (stiffNorm + 6.5));
-  let phaseLag = sin(dot(unshiftedXZ, windDir) * 0.85 - F.camPos.w * 4.1 - vd.along * 2.0 + f32(seed & 15u) * 0.4) * bladeFlex;
-  let crossEddy = sin(dot(unshiftedXZ, acrossDir) * 1.35 + F.camPos.w * 2.6 + f32((seed >> 4u) & 15u)) * 0.032 * alongFlex;
-  let bendMain = min(waveSweep + phaseLag * 0.038 * alongFlex, max(0.02, posH * 0.90 + 0.05 * alongFlex));
+  // Rolling multi-octave wind-gust bend along^1.65 deflecting flexible upper blades by up to ~40 deg (sin 40 deg = 0.643)!
+  let bendProfile = pow(flexAlong, 1.65) * bladeAlive * (1.0 - ballistics.buryDepth);
+  let speedNorm = clamp(windSpeed / 9.2, 0.58, 1.42);
+  let stiffFactor = 9.5 / (clamp(vd.stiff, 3.0, 22.0) + 4.5);
+  let tipFlutter = sin(dot(unshiftedXZ, windDir) * 2.35 - F.camPos.w * 5.8 + f32(seed & 31u) * 0.35) * 0.045 * wind.x;
+  let bendSin = clamp((0.08 + 0.62 * wind.x * speedNorm + tipFlutter) * stiffFactor, 0.0, 0.66);
+  let bendDir = normalize(windDir + acrossDir * (curl * (0.12 + 0.22 * wind.x)));
+  let dispWind = posH * bendSin * bendProfile;
   let blastFlex = smoothstep(0.04, 0.75, vd.along) * (1.0 - ballistics.buryDepth);
-  let dispXZ = windDir * bendMain + acrossDir * crossEddy + ballistics.pushXZ * blastFlex;
-  let totalDisp = length(dispXZ);
-  let arcDrop = min(posH * 0.65, (totalDisp * totalDisp) * 0.32 / max(posH + 0.09, 0.14));
+  let dispXZ = bendDir * dispWind + ballistics.pushXZ * blastFlex;
+
+  // Arc-length preserving vertical drop so 40-deg gust bends never stretch blade geometry
+  let sinTheta = clamp(length(dispXZ) / max(posH, 0.055), 0.0, 0.78);
+  let arcDrop = posH * (1.0 - sqrt(max(0.25, 1.0 - sinTheta * sinTheta))) * smoothstep(0.08, 0.65, flexAlong);
 
   let world = vec3f(unshiftedXZ.x + dispXZ.x + shiftXZ.x, groundY + heightM - arcDrop, unshiftedXZ.y + dispXZ.y + shiftXZ.y);
 
-  // Unpack tile slope normal computed once per tile in MEADOW_STEP_WGSL (zero extra elevation textureLoads!)
+  // Rotate vertex normals with the 90-deg cell quadrant AND tilt dynamically with the wind bend:
+  //   nBent = normalize(nRest - bendDir * bendSlope * 0.85)
   let terrainN = meadowUnpackSlopeNormal(inst.posRot.w);
-  let waveTilt = (0.22 + 0.34 * wind.x) * (0.25 + 0.75 * vd.along);
-  let swardN = normalize(vec3f(
-    terrainN.x - billow.y + vd.nrm.x * 0.38 + windDir.x * waveTilt + ballistics.pushXZ.x * 1.15,
-    max(0.35, terrainN.y + vd.nrm.y * 0.32),
-    terrainN.z - billow.z + vd.nrm.z * 0.38 + windDir.y * waveTilt + ballistics.pushXZ.y * 1.15,
+  let rotNrmXZ = meadowRotQuadXZ(vd.nrm.xz, rotQ);
+  let nRest = normalize(vec3f(
+    terrainN.x * 0.55 + rotNrmXZ.x * 0.72 - billow.y,
+    max(0.32, terrainN.y * 0.65 + vd.nrm.y * 0.68),
+    terrainN.z * 0.55 + rotNrmXZ.y * 0.72 - billow.z,
   ));
-  let bentN = normalize(mix(terrainN, swardN, swardWeight));
+  let bendSlope = clamp(1.65 * bendSin * pow(max(flexAlong, 0.02), 0.65), 0.0, 0.96) * bladeAlive;
+  let bendDir3 = vec3f(bendDir.x, 0.0, bendDir.y);
+  let swardN = normalize(nRest - bendDir3 * (bendSlope * 0.85) + vec3f(ballistics.pushXZ.x, 0.0, ballistics.pushXZ.y) * 1.15);
+  let bentN = normalize(mix(terrainN, swardN, bladeAlive));
 
   var o: MeadowVertexOut;
   o.world = world;
@@ -1148,7 +1240,7 @@ fn meadowShadePlace(inst: MeadowInst, vd: MeadowVertexData, fadeVal: f32) -> Mea
   o.colour = vd.col;
   o.windInfo = vec4f(vd.along, wind.x, wind.y, fadeVal);
   o.tendrilFlow = vec4f(unshiftedXZ - dispXZ * 0.65, camDist, distFade);
-  o.damageInfo = vec2f(ballistics.hotSinge, ballistics.pressDown);
+  o.damageInfo = vec2f(ballistics.hotSinge, bendSlope);
   o.pos = F.viewProj * vec4f(earthCurve(world - F.camPos.xyz, F.camPos.y), 1.0);
   return o;
 }
@@ -1191,9 +1283,16 @@ fn meadowMorphStepRemap(vBase: u32, vi: u32, stepIdx: u32) -> vec2u {
   return vec2u(pair & 0xffu, (pair >> 8u) & 0xffu);
 }
 
+fn meadowMorphCornerWorldXZ(originXZ: vec2f, vBase: u32, pair: vec2u, morphT: f32, tileScale: f32, rotQ: u32) -> vec2f {
+  let rawXZ = mix(meadowMorphRawXZ(vBase, pair.x), meadowMorphRawXZ(vBase, pair.y), morphT) * tileScale;
+  let halfTile = ${(MEADOW_TILE_METRES * 0.5).toFixed(4)} * tileScale;
+  return originXZ + meadowRotQuadXZ(rawXZ, rotQ) + vec2f(halfTile);
+}
+
 @vertex fn meadowContVS(@builtin(instance_index) ii: u32, @builtin(vertex_index) vid: u32) -> MeadowVertexOut {
   let inst = meadowInstances[meadowDraw.x + ii];
   let variantId = bitcast<u32>(inst.attrs.x);
+  let tileScale = max(inst.attrs.y, 1.0);
   let vBase = variantId * ${MEADOW_MORPH_VAR_WORDS}u;
   let face = vid / 3u;
   let corner = vid % 3u;
@@ -1208,9 +1307,24 @@ fn meadowMorphStepRemap(vBase: u32, vi: u32, stepIdx: u32) -> vec2u {
   let rC = meadowMorphStepRemap(vBase, meadowMorph[faceBase + 2u], stepIdx);
   if (rA.x == rB.x || rB.x == rC.x || rC.x == rA.x) { return meadowDegenerateOut(); }
 
+  // Prevent outer macro-continuum triangles from ever spanning onto roads, beaches, or rivers.
+  if (tileScale > 1.5) {
+    let seed = bitcast<u32>(inst.attrs.w);
+    let rotQ = (seed >> 2u) & 3u;
+    let wA = meadowMorphCornerWorldXZ(inst.posRot.xz, vBase, rA, morphT, tileScale, rotQ);
+    let wB = meadowMorphCornerWorldXZ(inst.posRot.xz, vBase, rB, morphT, tileScale, rotQ);
+    let wC = meadowMorphCornerWorldXZ(inst.posRot.xz, vBase, rC, morphT, tileScale, rotQ);
+    let minCov = min(meadowCoverAt(wA).r, min(meadowCoverAt(wB).r, meadowCoverAt(wC).r));
+    let minGnd = min(
+      meadowGroundY(wA, cfg.domain, elevation),
+      min(meadowGroundY(wB, cfg.domain, elevation), meadowGroundY(wC, cfg.domain, elevation)),
+    );
+    if (minCov < 0.14 || minGnd < cfg.domain.w) { return meadowDegenerateOut(); }
+  }
+
   let pair = select(select(rC, rB, corner == 1u), rA, corner == 0u);
-  let a = meadowReadMorphVert(vBase, pair.x);
-  let b = meadowReadMorphVert(vBase, pair.y);
+  let a = meadowReadMorphVert(vBase, pair.x, tileScale);
+  let b = meadowReadMorphVert(vBase, pair.y, tileScale);
   let vd = MeadowVertexData(
     mix(a.pos, b.pos, morphT),
     normalize(mix(a.nrm, b.nrm, morphT)),
@@ -1227,49 +1341,60 @@ fn meadowMorphStepRemap(vBase: u32, vi: u32, stepIdx: u32) -> vec2u {
 @vertex fn meadowSplatVS(@builtin(instance_index) ii: u32, @builtin(vertex_index) vid: u32) -> MeadowVertexOut {
   let inst = meadowInstances[meadowDraw.x + ii];
   let variantId = min(11u, bitcast<u32>(inst.attrs.x));
+  let tileScale = max(inst.attrs.y, 1.0);
   let sA = cfg.splats[variantId * 2u];
   let sB = cfg.splats[variantId * 2u + 1u];
   let inflate = clamp(inst.attrs.z, 1.0, 4.0);
-  let unshiftedCenter = inst.posRot.xz + vec2f(${(MEADOW_TILE_METRES * 0.5).toFixed(1)});
+  let unshiftedCenter = inst.posRot.xz + vec2f(${(MEADOW_TILE_METRES * 0.5).toFixed(4)} * tileScale);
   let shiftXZ = nearTerrain.grid.yz;
   let camUnshifted = F.camPos.xz - shiftXZ;
   let horizDist = distance(unshiftedCenter, camUnshifted);
-  let maxRadius = f32(cfg.params.x) * ${(0.5 * MEADOW_TILE_METRES).toFixed(1)} - 8.0;
-  let distFade = 1.0 - smoothstep(maxRadius * 0.45, maxRadius, horizDist);
+  let maxOuterR = f32(cfg.params.x / 2u) * ${(MEADOW_TILE_METRES * MEADOW_MACRO_MUL).toFixed(4)} - 16.0;
+  let distFade = 1.0 - smoothstep(maxOuterR * 0.80, maxOuterR, horizDist);
 
-  let rx = sA.y * inflate;
+  let rx = sA.y * tileScale * inflate;
   let ry = sA.z * inflate;
   let camRightXZ = normalize(select(vec2f(1.0, 0.0), F.camRight.xz, length(F.camRight.xz) > 0.01));
   let camFwdXZ = vec2f(-camRightXZ.y, camRightXZ.x);
-  var offXZ = camFwdXZ * (rx * 1.35);
+
+  let p0XZ = unshiftedCenter + camFwdXZ * (rx * 1.35);
+  let p1XZ = unshiftedCenter - camFwdXZ * (rx * 0.85) - camRightXZ * (rx * 1.45);
+  let p2XZ = unshiftedCenter - camFwdXZ * (rx * 0.85) + camRightXZ * (rx * 1.45);
+  if (tileScale > 1.5) {
+    let minCov = min(meadowCoverAt(p0XZ).r, min(meadowCoverAt(p1XZ).r, meadowCoverAt(p2XZ).r));
+    if (minCov < 0.14) { return meadowDegenerateOut(); }
+  }
+
+  var sampleXZ = p0XZ;
   var oyBase = ry * 1.75;
   if (vid == 1u) {
-    offXZ = -camFwdXZ * (rx * 0.85) - camRightXZ * (rx * 1.45);
+    sampleXZ = p1XZ;
     oyBase = 0.0;
   } else if (vid == 2u) {
-    offXZ = -camFwdXZ * (rx * 0.85) + camRightXZ * (rx * 1.45);
+    sampleXZ = p2XZ;
     oyBase = 0.0;
   }
 
-  let sampleXZ = unshiftedCenter + offXZ;
   let vCov = meadowCoverAt(sampleXZ);
-  let coverFade = smoothstep(0.06, 0.62, vCov.r);
-  let swardWeight = coverFade * distFade;
   let groundY0 = meadowGroundY(sampleXZ, cfg.domain, elevation);
+  if (groundY0 < cfg.domain.w) { return meadowDegenerateOut(); }
+  let coverFade = smoothstep(0.06, 0.55, vCov.r);
+  let swardWeight = coverFade * distFade;
   let seed = bitcast<u32>(inst.attrs.w);
   let ballistics = meadowEvalBallistics(sampleXZ, groundY0, seed);
-  let edgeTuck = -0.035 * (1.0 - smoothstep(0.015, 0.05, vCov.r * distFade)) - 0.085 * ballistics.buryDepth;
+  let edgeTuck = -0.045 * (1.0 - smoothstep(0.03, 0.06, vCov.r * distFade)) - 0.090 * ballistics.buryDepth;
 
   let wind = meadowWindField(sampleXZ, F.camPos.w, F.windP[0]);
   let rawDir = F.windP[0].xy;
   let windDir = select(vec2f(0.82, 0.57), normalize(rawDir), dot(rawDir, rawDir) > 0.0004);
   let oy = oyBase * swardWeight * (1.0 - ballistics.buryDepth) * (1.0 - ballistics.pressDown * 0.7) + edgeTuck;
-  let worldXZ = sampleXZ + windDir * (wind.x * max(0.0, oy) * 0.35) + ballistics.pushXZ * 0.5;
+  let worldXZ = sampleXZ + windDir * (wind.x * max(0.0, oy) * 0.45) + ballistics.pushXZ * 0.5;
   let groundY = select(groundY0, meadowGroundY(worldXZ, cfg.domain, elevation), length(worldXZ - sampleXZ) > 0.08);
   let camDist = distance(vec3f(worldXZ.x + shiftXZ.x, groundY, worldXZ.y + shiftXZ.y), F.camPos.xyz);
 
   let terrainN = meadowUnpackSlopeNormal(inst.posRot.w);
-  let swardN = normalize(vec3f(terrainN.x + windDir.x * wind.x * 0.26, terrainN.y + 0.12, terrainN.z + windDir.y * wind.x * 0.26));
+  let bendSlope = 0.55 * wind.x * swardWeight;
+  let swardN = normalize(terrainN - vec3f(windDir.x, 0.0, windDir.y) * (bendSlope * 0.70) + vec3f(0.0, 0.14, 0.0));
 
   let world = vec3f(worldXZ.x + shiftXZ.x, groundY + oy, worldXZ.y + shiftXZ.y);
   var o: MeadowVertexOut;
@@ -1278,7 +1403,7 @@ fn meadowMorphStepRemap(vBase: u32, vi: u32, stepIdx: u32) -> vec2u {
   o.colour = sB.rgb;
   o.windInfo = vec4f(0.48, wind.x, wind.y, 1.0);
   o.tendrilFlow = vec4f(worldXZ, camDist, distFade);
-  o.damageInfo = vec2f(ballistics.hotSinge, ballistics.pressDown);
+  o.damageInfo = vec2f(ballistics.hotSinge, bendSlope);
   o.pos = F.viewProj * vec4f(earthCurve(world - F.camPos.xyz, F.camPos.y), 1.0);
   return o;
 }
@@ -1297,7 +1422,7 @@ fn meadowShadowVis(world: vec3f, normal: vec3f) -> f32 {
 
 fn meadowTendrilCloud(bentXZ: vec2f, camDist: f32, windDir: vec2f, gust: f32) -> vec2f {
   let pixel = camDist * 2.0 * length(F.camUp.xyz) / max(F.screen.y, 1.0);
-  let wTuft = 1.0 - smoothstep(0.030, 0.085, pixel);
+  let wTuft = 1.0 - smoothstep(0.035, 0.110, pixel);
   if (wTuft <= 0.001) { return vec2f(0.5, 0.0); }
 
   let acrossDir = vec2f(-windDir.y, windDir.x);
@@ -1319,7 +1444,7 @@ fn meadowTendrilCloud(bentXZ: vec2f, camDist: f32, windDir: vec2f, gust: f32) ->
   let slopeB = cos(vB * 16.8 - cos(uB * 2.85) * 1.15) * envB;
 
   let signal = (wispA * 0.54 + wispB * 0.46) * wTuft;
-  let density = clamp(0.5 + signal * 0.26 + (gust - 0.5) * 0.04 * wTuft, 0.0, 1.0);
+  let density = clamp(0.5 + signal * 0.26 + (gust - 0.5) * 0.05 * wTuft, 0.0, 1.0);
   let crossTilt = (slopeA * 0.42 + slopeB * 0.36) * wTuft;
   return vec2f(density, crossTilt);
 }
@@ -1330,25 +1455,65 @@ fn meadowShade(in: MeadowVertexOut, frontFacing: bool) -> vec4f {
   let acrossDir = vec2f(-windDir.y, windDir.x);
 
   let along = clamp(in.windInfo.x, 0.0, 1.0);
-  let gust = in.windInfo.y;
+  let gust = clamp(in.windInfo.y, 0.0, 1.0);
   let swell = in.windInfo.z;
   let distFade = clamp(in.tendrilFlow.w, 0.0, 1.0);
+  let bendSlope = clamp(in.damageInfo.y, 0.0, 1.0);
   let isContinuum = meadowDraw.y >= 5u;
 
   let unshiftedWorldXZ = in.world.xz - nearTerrain.grid.yz;
   let fCov = meadowCoverAt(unshiftedWorldXZ);
-  let marginFade = smoothstep(0.06, 0.62, fCov.r) * distFade;
-  let swardWeight = select(clamp((0.35 + 0.65 * smoothstep(0.06, 0.62, fCov.r)) * distFade, 0.0, 1.0), marginFade, isContinuum);
+  let marginFade = smoothstep(0.06, 0.55, fCov.r) * distFade;
+  let swardWeight = select(clamp((0.55 + 0.45 * smoothstep(0.06, 0.55, fCov.r)) * distFade, 0.0, 1.0), marginFade, isContinuum);
 
-  // Seamless radiometric anchoring to Lisbon's warm olive-ochre-straw groundCol:
-  //   blade tint = mix(groundCol * vec3f(0.92, 1.06, 0.82), botCol * (0.55 + 2.1 * gLum), 0.38 * along),
-  //   with roots (along < 0.18) matching groundCol * 0.82 for natural soil root shadow!
+  // Natural Iberian Meadow Albedo (ZERO 62% brown dirt washout!):
+  //   - World-space moisture & lushness patches blend smoothly between lush emerald pasture,
+  //     Mediterranean olive-sage fescue, and sun-warmed straw.
+  //   - Root base (along < 0.18) grounds gently with 20% warm soil/thatch tint + physical root AO (0.42 -> 1.0).
+  //   - Tall culm seed-heads (along > 0.78) warm toward sunlit golden oat!
   let groundCol = meadowGroundColour(unshiftedWorldXZ);
-  let gLum = clamp(dot(groundCol, vec3f(0.2126, 0.7152, 0.0722)), 0.02, 0.30);
-  let botCol = in.colour * 1.38;
-  let bladeBody = mix(groundCol * vec3f(0.92, 1.06, 0.82), botCol * (0.55 + 2.1 * gLum), 0.38 * along);
-  let bladeCol = mix(groundCol * 0.82, bladeBody, smoothstep(0.02, 0.18, along));
-  var baseCol = select(mix(groundCol * 0.90, bladeCol, distFade), mix(groundCol, bladeCol, swardWeight), isContinuum);
+  let mWarp = vec2f(sin(unshiftedWorldXZ.y * 0.042 + 1.7), cos(unshiftedWorldXZ.x * 0.038 - 0.9)) * 4.5;
+  let mp = unshiftedWorldXZ + mWarp;
+  let moistLow = 0.5 + 0.5 * sin(mp.x * 0.072 + mp.y * 0.056) * cos(mp.x * 0.046 - mp.y * 0.078 + 1.1);
+  let moistMid = 0.5 + 0.5 * sin(mp.x * 0.21 - mp.y * 0.17 + 2.4);
+  let moisture = clamp(moistLow * 0.68 + moistMid * 0.32 + (fCov.b - 0.55) * 0.45, 0.0, 1.0);
+
+  let emeraldPasture = vec3f(0.046, 0.150, 0.030);
+  let oliveSageFescue = vec3f(0.078, 0.134, 0.040);
+  let sunWarmedStraw = vec3f(0.148, 0.136, 0.052);
+  let goldenOatTip = vec3f(0.206, 0.170, 0.060);
+
+  let patchGreen = mix(
+    mix(sunWarmedStraw, oliveSageFescue, smoothstep(0.10, 0.48, moisture)),
+    emeraldPasture,
+    smoothstep(0.45, 0.88, moisture),
+  );
+
+  // Preserve distinct wildflower corolla pigments (chamomile ivory, rose mallow, scarlet field poppy)
+  let isFlower = select(
+    clamp(max(in.colour.b - in.colour.g * 0.58, in.colour.r - in.colour.g * 1.32) * 10.0, 0.0, 1.0),
+    0.0,
+    isContinuum,
+  );
+  let tussockLum = clamp(in.colour.g / 0.142, 0.72, 1.28);
+  var grassPigment = mix(in.colour * 1.06, patchGreen * tussockLum, 0.44);
+  // Warm tall culm seed-heads (along > 0.78) toward sunlit golden oat
+  let oatHeadT = smoothstep(0.76, 0.94, along);
+  grassPigment = mix(grassPigment, goldenOatTip, oatHeadT * 0.82);
+  // Gentle 20% warm soil/thatch root grounding on along < 0.18
+  let warmSoil = mix(groundCol, vec3f(0.072, 0.066, 0.034), 0.45);
+  grassPigment = mix(grassPigment, warmSoil, 0.20 * (1.0 - smoothstep(0.0, 0.18, along)));
+
+  let organCol = mix(grassPigment, in.colour * 1.06, isFlower);
+  let ao = mix(0.42, 1.0, smoothstep(0.0, 0.55, along));
+  let shadedBladeCol = organCol * mix(1.0, ao, swardWeight * 0.75);
+
+  let horizonGround = mix(groundCol, patchGreen * 0.78, 0.36 * marginFade);
+  var baseCol = select(
+    mix(horizonGround, shadedBladeCol, distFade),
+    mix(groundCol, shadedBladeCol, swardWeight),
+    isContinuum,
+  );
 
   // Per-pixel crater soot/ash scorching around inner rim + thrown-soil dusting across outer apron
   let cCellF = landCraterLookupCell(unshiftedWorldXZ, cfg.crater.xy);
@@ -1375,13 +1540,18 @@ fn meadowShade(in: MeadowVertexOut, frontFacing: bool) -> vec4f {
   }
 
   let tf = meadowTendrilCloud(in.tendrilFlow.xy, in.tendrilFlow.z, windDir, gust);
-  var n = normalize(in.normal + vec3f(acrossDir.x * tf.y * 0.18, 0.04, acrossDir.y * tf.y * 0.18) * swardWeight);
-  if (!frontFacing) { n = normalize(vec3f(-n.x * 0.45, abs(n.y), -n.z * 0.45)); }
+  var n = normalize(in.normal + vec3f(acrossDir.x * tf.y * 0.18, 0.03, acrossDir.y * tf.y * 0.18) * swardWeight);
+  if (!frontFacing) { n = normalize(vec3f(-n.x * 0.55, abs(n.y), -n.z * 0.55)); }
 
-  let crest = smoothstep(-0.36, 0.68, swell);
-  let tendrilHighlight = mix(1.0, mix(0.93, 1.08, tf.x), swardWeight);
-  let windTone = mix(vec3f(1.0), mix(vec3f(0.95, 0.97, 0.93), vec3f(1.08, 1.09, 0.98), crest), swardWeight * (0.35 + 0.65 * along));
-  let albedo = clamp(baseCol * tendrilHighlight * windTone, vec3f(0.0), vec3f(0.34));
+  // Shimmering wind-ripple contrast across gust crests & upright lulls
+  let crest = smoothstep(-0.38, 0.65, swell);
+  let tendrilHighlight = mix(1.0, mix(0.92, 1.09, tf.x), swardWeight);
+  let windTone = mix(
+    vec3f(1.0),
+    mix(vec3f(0.90, 0.94, 0.88), vec3f(1.14, 1.15, 1.02), crest),
+    swardWeight * (0.30 + 0.70 * along),
+  );
+  let albedo = clamp(baseCol * tendrilHighlight * windTone, vec3f(0.0), vec3f(0.36));
 
   let landUV = (unshiftedWorldXZ - cfg.domain.xy) / cfg.domain.z + 0.5;
   let edgeDist = min(min(landUV.x, 1.0 - landUV.x), min(landUV.y, 1.0 - landUV.y));
@@ -1399,28 +1569,45 @@ fn meadowShade(in: MeadowVertexOut, frontFacing: bool) -> vec4f {
   let direct = sunIlluminance() * sunlight * solarShadowVisibility(vec3f(shadowVis)).x;
 
   let nDotL = max(dot(n, F.sunDir.xyz), 0.0);
-  let wrap = max(0.0, dot(n, F.sunDir.xyz) * 0.50 + 0.50) * (0.12 + 0.12 * along) * swardWeight;
+  let wrap = max(0.0, dot(n, F.sunDir.xyz) * 0.50 + 0.50) * (0.14 + 0.14 * along) * swardWeight;
   let v = normalize(F.camPos.xyz - in.world);
-  let backLit = pow(max(dot(-v, F.sunDir.xyz), 0.0), 2.5) * smoothstep(0.40, 0.95, along) * (0.65 + 0.35 * tf.x) * swardWeight;
+
+  // Forward subsurface sunlight translucency (backscatter through bent golden-green upper blades & panicles)
+  let sunFwd = pow(max(dot(-v, F.sunDir.xyz), 0.0), 2.1);
+  let backTransmission = max(0.0, -dot(n, F.sunDir.xyz)) * 0.50 + 0.50;
+  let backscatter = (0.28 * backTransmission + 0.92 * sunFwd)
+                  * smoothstep(0.24, 0.88, along)
+                  * (0.65 + 0.55 * gust)
+                  * (0.70 + 0.30 * tf.x)
+                  * swardWeight;
 
   let skyDir = normalize(vec3f(n.x * 0.65, max(n.y, 0.12), n.z * 0.65));
   let skyIrr = textureSampleLevel(envCube, sampC, skyDir, 6.0).rgb;
   let bounceDir = normalize(vec3f(n.x * 0.5, -0.55, n.z * 0.5));
-  let groundIrr = textureSampleLevel(envCube, sampC, bounceDir, 6.5).rgb * vec3f(0.88, 0.80, 0.68);
-  let ambient = mix(groundIrr * 0.54, skyIrr, clamp(n.y * 0.5 + 0.5, 0.0, 1.0)) * mix(1.0, mix(0.84, 1.0, along), swardWeight);
+  let groundIrr = textureSampleLevel(envCube, sampC, bounceDir, 6.5).rgb * vec3f(0.84, 0.86, 0.68);
+  let ambient = mix(groundIrr * 0.50, skyIrr, clamp(n.y * 0.5 + 0.5, 0.0, 1.0)) * mix(1.0, ao, swardWeight);
 
-  let fiberTan = normalize(vec3f(windDir.x * (0.48 + 0.44 * gust), 0.52 - 0.24 * gust, windDir.y * (0.48 + 0.44 * gust)));
+  // Silky grazing-angle + Kajiya-Kay specular sheen across wind-flattened wave troughs!
   let h = normalize(v + F.sunDir.xyz);
+  let nDotH = max(dot(n, h), 0.0);
+  let graze = pow(1.0 - max(dot(n, v), 0.0), 2.3);
+  let flatGust = clamp(gust * 0.65 + bendSlope * 0.45, 0.0, 1.0);
+  let fiberTan = normalize(vec3f(windDir.x * (0.36 + 0.56 * flatGust), max(0.18, 0.78 - 0.50 * flatGust), windDir.y * (0.36 + 0.56 * flatGust)));
   let tDotH = clamp(dot(fiberTan, h), -1.0, 1.0);
   let sinTH = sqrt(max(0.0, 1.0 - tDotH * tDotH));
-  let waveSheen = pow(sinTH, 16.0) * (0.005 + 0.016 * crest * gust) * (0.28 + 0.72 * along) * max(F.sunDir.y, 0.0) * swardWeight;
+  let troughFlatten = smoothstep(0.28, 0.86, flatGust) * (0.25 + 0.75 * along);
+  let waveSheen = (pow(sinTH, 14.0) * (0.010 + 0.036 * crest * troughFlatten)
+                + pow(nDotH, 16.0) * 0.028 * troughFlatten * (0.35 + 0.65 * graze))
+                * max(F.sunDir.y, 0.03) * swardWeight;
+  let skyWaveSheen = skyIrr * (0.016 + 0.048 * troughFlatten * graze) * ao * swardWeight;
 
-  let diffuseWeight = mix(1.0, 0.88, swardWeight);
-  let transAlbedo = albedo * vec3f(1.14, 1.22, 0.72);
+  let diffuseWeight = mix(1.0, 0.90, swardWeight);
+  let transAlbedo = mix(albedo * vec3f(1.22, 1.38, 0.58), goldenOatTip * 1.15, oatHeadT * 0.65);
   var col = albedo * (direct * (nDotL * diffuseWeight + wrap) / PI + ambient)
-          + transAlbedo * (direct * backLit * 0.42 / PI)
-          + (direct / PI) * waveSheen * vec3f(0.90, 0.95, 0.68);
-  col += lunarSurface(n, v, albedo, 0.78, vec3f(0.032), vec3f(mix(1.0, bakedLight.g, inDomain)) * lunarShadowVisibility(vec3f(shadowVis)));
+          + transAlbedo * (direct * backscatter * 0.52 / PI)
+          + (direct / PI) * waveSheen * vec3f(0.94, 0.98, 0.72)
+          + skyWaveSheen;
+  col += lunarSurface(n, v, albedo, 0.76, vec3f(0.034), vec3f(mix(1.0, bakedLight.g, inDomain)) * lunarShadowVisibility(vec3f(shadowVis)));
   col = surfaceAir(col, in.world);
   return vec4f(col, 1.0);
 }
@@ -1467,7 +1654,7 @@ struct MeadowCoverageOut {
 
 export function requestMeadowPipelines({ device, shader, format = 'rgba16float', samples = 4 }) {
   return requestOnce(device, `meadow grass ${format} ${samples}`, async () => {
-    // Compile sequentially rather than 6-way Promise.all so Windows D3D12 DXC never spikes PSO heap memory.
+    // Compile sequentially across all 6 pipelines so Windows D3D12 DXC never spikes PSO heap memory.
     const stepMod = await shader(MEADOW_STEP_WGSL, 'meadow grass step');
     const stepPipe = await device.createComputePipelineAsync({
       label: 'meadow select',
@@ -1546,7 +1733,7 @@ export async function createMeadowGrass({
   });
 
   const clU32 = new Uint32Array(pack.clusters.buffer, pack.clusters.byteOffset, Math.floor(pack.clusters.byteLength / 4));
-  const lvlMaxIdx = [720, 360, 180, 120];
+  const lvlMaxIdx = [13500, 6600, 3000, 1200];
   for (let i = 0; i + MEADOW_CLUSTER_WORDS <= clU32.length; i += MEADOW_CLUSTER_WORDS) {
     const idxCnt = clU32[i + 1];
     const lvl = Math.min(3, clU32[i + 2]);
@@ -1913,7 +2100,7 @@ export async function createMeadowGrass({
       pass.setPipeline(stepPipe);
       pass.setBindGroup(0, stepGroup);
       const groups = Math.ceil(gridSide / 8);
-      pass.dispatchWorkgroups(groups, groups);
+      pass.dispatchWorkgroups(groups, groups, 2);
     },
     draw(pass) {
       if (!coverTexels) return;

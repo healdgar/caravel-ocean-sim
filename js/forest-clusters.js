@@ -215,16 +215,17 @@ fn forestClusterTree(index:u32)->u32{
   }
  }
  // Clusters run from coarsest parent to finest, so only a prefix can be drawn at this distance.
- let finest=limit*nearest/(scale*focal);
+ let lodScale=select(scale,max(scale,0.78),nearest<48.0);
+ let finest=limit*nearest/(lodScale*focal);
  var low=0u;var high=bucket.clusterCount;
  while(low<high){let middle=(low+high)/2u;if(clusters[bucket.firstCluster+middle].parentErr>finest){low=middle+1u;}else{high=middle;}}
  for(var i=0u;i<low;i++){
   let index=bucket.firstCluster+i;let k=clusters[index];
   let isLeaf=(k.shape&1u)==1u;let allowed=select(limitWood,limitLeaf,isLeaf);
   let parentAt=origin+vec3f(c*k.parentLod.x-s*k.parentLod.z,k.parentLod.y,s*k.parentLod.x+c*k.parentLod.z)*scale;
-  if(k.parentErr*scale*focal/max(length(parentAt)-k.parentLod.w*scale,.001)<=allowed){continue;}
+  if(k.parentErr*lodScale*focal/max(length(parentAt)-k.parentLod.w*scale,.001)<=allowed){continue;}
   let ownAt=origin+vec3f(c*k.lod.x-s*k.lod.z,k.lod.y,s*k.lod.x+c*k.lod.z)*scale;
-  if(k.err*scale*focal/max(length(ownAt)-k.lod.w*scale,.001)>allowed){continue;}
+  if(k.err*lodScale*focal/max(length(ownAt)-k.lod.w*scale,.001)>allowed){continue;}
   let at=origin+vec3f(c*k.cull.x-s*k.cull.z,k.cull.y,s*k.cull.x+c*k.cull.z)*scale;
   // Wind carries leaves past the shapes they were baked from.
   let reach=k.cull.w*scale+.2+F.windP[0].z*.07;
@@ -232,15 +233,11 @@ fn forestClusterTree(index:u32)->u32{
   if(r.identity.w>=0.&&(dot(planeL,at)<-reach*lengthL||dot(planeR,at)<-reach*lengthR||dot(planeB,at)<-reach*lengthB||dot(planeT,at)<-reach*lengthT||dot(rowW,at)<-reach*length(rowW))){continue;}
   let draw=select(bucket.drawWood,bucket.drawLeaf,isLeaf);
   let slot=atomicAdd(&draws[draw*5u+1u],1u);
-  // A leaf cluster carries its tree's crown share above its own number, and close cross-shoots pack layer bits into upper item.x.
+  // A leaf cluster carries its tree's crown share above its own number, and close axillary sub-shoots pack layer bits into upper item.x.
   if(slot<bucket.capacity.x){list[select(bucket.listWood,bucket.listLeaf,isLeaf)+slot]=vec2u(tree,index|select(0u,crownShare<<24u,isLeaf));}
-  if(isLeaf&&crownShare==0u&&nearest<32.0){
-   let slotCrossA=atomicAdd(&draws[draw*5u+1u],1u);
-   if(slotCrossA<bucket.capacity.x){list[bucket.listLeaf+slotCrossA]=vec2u(tree|(1u<<28u),index);}
-   if(nearest<20.0){
-    let slotCrossB=atomicAdd(&draws[draw*5u+1u],1u);
-    if(slotCrossB<bucket.capacity.x){list[bucket.listLeaf+slotCrossB]=vec2u(tree|(2u<<28u),index);}
-   }
+  if(isLeaf&&crownShare==0u&&nearest<22.0){
+   let slotAxil=atomicAdd(&draws[draw*5u+1u],1u);
+   if(slotAxil<bucket.capacity.x){list[bucket.listLeaf+slotAxil]=vec2u(tree|(1u<<28u),index);}
   }
  }
 }
@@ -323,20 +320,22 @@ fn forestClusterVertexCross(tree:u32,vertex:u32,kindValue:f32,crossLayer:u32)->F
   let upRef=select(vec3f(0.,1.,0.),vec3f(1.,0.,0.),abs(normal.y)>.9);
   let t1=normalize(cross(normal,upRef));let t2=cross(normal,t1);
   let uvOff=clamp(uv-vec2f(.5,.5),vec2f(-.65),vec2f(.65));
-  // Close-range 3D bough relief: cup base cards out of the plane and angle cross-shoots in 3D space so edge-on trees show real twig-and-leaf depth instead of flat billboards.
-  let nearRelief=1.-smoothstep(14.,52.,dist);
+  // Close-range 3D botanical camber: curve shoots gently along midrib droop and lateral V-arch, and pitch axillary sub-shoots from the twig node without flat X-cross intersections.
+  let nearRelief=1.-smoothstep(12.,44.,dist);
   if(nearRelief>0.&&crossLayer==0u){
-   let cup=(dot(uvOff,uvOff)*2.2-0.28)*0.22*nearRelief*invScale;
-   position+=normal*cup;
-   normal=normalize(normal+(t1*uvOff.x+t2*uvOff.y)*(.36*nearRelief));
+   let alongU=clamp(uv.x,0.,1.);
+   let camber=(-0.055*alongU*alongU+0.070*(abs(uvOff.y)*2.0-0.32))*nearRelief*invScale;
+   position+=normal*camber;
+   normal=normalize(normal+(t1*uvOff.x*0.18+t2*uvOff.y*0.28)*nearRelief);
   }else if(crossLayer>0u){
-   let layerFade=select(1.-smoothstep(13.,20.,dist),1.-smoothstep(22.,32.,dist),crossLayer==1u);
-   let tiltSpan=0.46*layerFade*invScale;
-   let sSign=select(-1.,1.,crossLayer==1u);
-   let tiltOut=normal*((uvOff.x*0.72*sSign+uvOff.y*0.44+0.05*sSign)*tiltSpan);
-   let tiltIn=-t1*(uvOff.x*0.20*tiltSpan)+t2*(uvOff.y*0.14*sSign*tiltSpan);
-   position+=tiltOut+tiltIn;
-   normal=normalize(normal+t1*(0.65*sSign*layerFade)+t2*(0.38*layerFade));
+   let layerFade=1.-smoothstep(14.,22.,dist);
+   let alongU=clamp(uv.x,0.,1.);
+   let sSign=select(-1.,1.,(crossLayer&2u)==0u);
+   let pitchLift=(0.030+alongU*0.155+abs(uvOff.y)*0.055)*layerFade*invScale;
+   let fanSide=(alongU*0.115*sSign+uvOff.y*0.05)*layerFade*invScale;
+   let stepAlong=(0.025+alongU*0.04)*layerFade*invScale;
+   position+=normal*pitchLift+t1*fanSide+t2*stepAlong;
+   normal=normalize(normal+t1*(0.28*sSign+uvOff.y*0.24)*layerFade+t2*(0.22*layerFade));
   }
   let midBlend=smoothstep(55.,320.,dist);
   if(midBlend>0.){
@@ -362,7 +361,8 @@ fn forestClusterVertex(tree:u32,vertex:u32,kindValue:f32)->ForestVertex{
  let item=forestClusterList[forestBin.x+instance];let cluster=forestClusters[item.y&0xffffffu];
  if(index>=(cluster.shape>>1u)/4u*${FOREST_LEAF_VERTICES}u){var o:ForestVertex;return o;}
  let treeId=item.x&0x0fffffffu;
- let crossLayer=(item.x>>28u)&3u;
+ let rawCross=(item.x>>28u)&3u;
+ let crossLayer=select(0u,1u|(((index/${FOREST_LEAF_VERTICES}u)&1u)<<1u),rawCross>0u);
  var o=forestClusterVertexCross(treeId,cluster.first+index,4.,crossLayer);
  // The share of each pixel this tree's far crown has taken from its leaves (forestClusterSelect).
  o.crownFade=f32(item.y>>24u)/255.;

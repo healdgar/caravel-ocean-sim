@@ -131,6 +131,195 @@ const BOARD_WALL_CLIFF = 1;
 const BOARD_FIT = [0.8, 1.35];
 // A wharf's deck stands this far above the sea at the least.
 const BOARD_WHARF_M = 1.2;
+
+/**
+ * Chain adjacent waterfront wharf lots continuously along the local shoreline contour (`∇inland` tangent),
+ * snapping endpoints corner-to-corner and unifying deck elevations without staggered gaps.
+ */
+export function alignWaterfrontWharves(wharfItems, { inlandAt, heightAt = null, minDeckY = BOARD_WHARF_M } = {}) {
+  const result = new Map();
+  if (!Array.isArray(wharfItems) || wharfItems.length === 0 || typeof inlandAt !== 'function') return result;
+
+  const shoreBasis = (px, pz, fallbackRot = 0) => {
+    const e = 8;
+    let gx = (inlandAt(px + e, pz) - inlandAt(px - e, pz)) / (2 * e);
+    let gz = (inlandAt(px, pz + e) - inlandAt(px, pz - e)) / (2 * e);
+    let gl = Math.hypot(gx, gz);
+    if (gl < 1e-3 && typeof heightAt === 'function') {
+      gx = (heightAt(px + e, pz) - heightAt(px - e, pz)) / (2 * e);
+      gz = (heightAt(px, pz + e) - heightAt(px, pz - e)) / (2 * e);
+      gl = Math.hypot(gx, gz);
+    }
+    const wx = gl > 1e-4 ? -gx / gl : Math.sin(fallbackRot);
+    const wz = gl > 1e-4 ? -gz / gl : Math.cos(fallbackRot);
+    return { wx, wz, tx: -wz, tz: wx, gl };
+  };
+
+  const nodes = wharfItems.map((item, idx) => {
+    const id = item.index ?? idx;
+    const b = shoreBasis(item.x, item.z, item.rot ?? 0);
+    return {
+      id,
+      place: item.place ?? 0,
+      x: item.x,
+      z: item.z,
+      rot: item.rot ?? 0,
+      w: Number.isFinite(item.w) ? item.w : 7,
+      d: Number.isFinite(item.d) ? item.d : 30,
+      inland: inlandAt(item.x, item.z),
+      ...b,
+    };
+  });
+
+  // Connected components of adjacent wharves along the same shoreline contour (<= 52 m, aligned waterward normal).
+  const visited = new Uint8Array(nodes.length);
+  for (let s = 0; s < nodes.length; s++) {
+    if (visited[s]) continue;
+    const cluster = [];
+    const queue = [s];
+    visited[s] = 1;
+    while (queue.length > 0) {
+      const u = queue.pop();
+      cluster.push(nodes[u]);
+      for (let v = 0; v < nodes.length; v++) {
+        if (visited[v] || nodes[v].place !== nodes[u].place) continue;
+        if (Math.hypot(nodes[v].x - nodes[u].x, nodes[v].z - nodes[u].z) > 52) continue;
+        if (nodes[u].wx * nodes[v].wx + nodes[u].wz * nodes[v].wz <= 0.35) continue;
+        visited[v] = 1;
+        queue.push(v);
+      }
+    }
+
+    if (cluster.length === 1) {
+      const u = cluster[0];
+      const rx = Math.sin(u.rot), rz = Math.cos(u.rot);
+      const alongDot = rx * u.tx + rz * u.tz;
+      const waterDot = rx * u.wx + rz * u.wz;
+      let yaw;
+      if (Math.abs(alongDot) >= Math.abs(waterDot)) {
+        const sgn = alongDot >= 0 ? 1 : -1;
+        yaw = Math.atan2(u.tx * sgn, u.tz * sgn);
+      } else {
+        const sgn = waterDot >= -0.25 ? 1 : -1;
+        yaw = Math.atan2(u.wx * sgn, u.wz * sgn);
+      }
+      const w = Math.max(5.65, Math.min(9.4, u.w));
+      const d = Math.max(24.2, Math.min(40.2, u.d));
+      const groundY = typeof heightAt === 'function' ? heightAt(u.x, u.z) : minDeckY;
+      const floor = Math.max(minDeckY, Math.min(minDeckY + 1.8, groundY));
+      result.set(u.id, { x: u.x, z: u.z, yaw, w, d, floor, chained: false });
+      continue;
+    }
+
+    // Multi-wharf waterfront run: sort along shoreline contour tangent and chain joints corner-to-corner.
+    let mwx = 0, mwz = 0, cx = 0, cz = 0;
+    for (const u of cluster) { mwx += u.wx; mwz += u.wz; cx += u.x; cz += u.z; }
+    cx /= cluster.length; cz /= cluster.length;
+    const ml = Math.hypot(mwx, mwz) || 1;
+    mwx /= ml; mwz /= ml;
+    const mtx = -mwz, mtz = mwx;
+    cluster.sort((a, b) => ((a.x - cx) * mtx + (a.z - cz) * mtz) - ((b.x - cx) * mtx + (b.z - cz) * mtz));
+
+    const sortedInlands = cluster.map((u) => u.inland).sort((a, b) => a - b);
+    const targetInland = sortedInlands[Math.floor(sortedInlands.length / 2)];
+    const m = cluster.length;
+    const segLens = new Float64Array(m);
+    for (let i = 0; i < m; i++) {
+      let rawSpan;
+      if (i === 0) rawSpan = Math.hypot(cluster[1].x - cluster[0].x, cluster[1].z - cluster[0].z);
+      else if (i === m - 1) rawSpan = Math.hypot(cluster[m - 1].x - cluster[m - 2].x, cluster[m - 1].z - cluster[m - 2].z);
+      else rawSpan = 0.5 * Math.hypot(cluster[i + 1].x - cluster[i - 1].x, cluster[i + 1].z - cluster[i - 1].z);
+      const baseLen = rawSpan >= 14 ? rawSpan : (cluster[i].d || 30);
+      segLens[i] = Math.max(24.2, Math.min(40.0, baseLen));
+    }
+
+    const nudgeToContour = (px, pz, refTx, refTz) => {
+      const b = shoreBasis(px, pz);
+      if (b.gl < 1e-4) return { x: px, z: pz, tx: refTx, tz: refTz };
+      const orient = (b.tx * refTx + b.tz * refTz) >= 0 ? 1 : -1;
+      const err = Math.max(-5.5, Math.min(5.5, inlandAt(px, pz) - targetInland));
+      return {
+        x: px + b.wx * err * 0.72,
+        z: pz + b.wz * err * 0.72,
+        tx: b.tx * orient,
+        tz: b.tz * orient,
+      };
+    };
+
+    const mid = Math.floor(m / 2);
+    const anchor = nudgeToContour(cluster[mid].x, cluster[mid].z, mtx, mtz);
+    const joints = new Array(m + 1);
+    const jMid0 = nudgeToContour(anchor.x - 0.5 * segLens[mid] * anchor.tx, anchor.z - 0.5 * segLens[mid] * anchor.tz, anchor.tx, anchor.tz);
+    joints[mid] = [jMid0.x, jMid0.z];
+    let fwdTx = jMid0.tx, fwdTz = jMid0.tz;
+    for (let i = mid; i < m; i++) {
+      const j0 = joints[i], L = segLens[i];
+      const probe = shoreBasis(j0[0] + 0.5 * L * fwdTx, j0[1] + 0.5 * L * fwdTz);
+      if (probe.gl > 1e-4) {
+        const sgn = (probe.tx * fwdTx + probe.tz * fwdTz) >= 0 ? 1 : -1;
+        fwdTx = probe.tx * sgn; fwdTz = probe.tz * sgn;
+      }
+      const cand = nudgeToContour(j0[0] + L * fwdTx, j0[1] + L * fwdTz, fwdTx, fwdTz);
+      const dx = cand.x - j0[0], dz = cand.z - j0[1], dL = Math.hypot(dx, dz) || L;
+      const clampedL = Math.max(24.2, Math.min(40.0, dL));
+      joints[i + 1] = [j0[0] + (dx / dL) * clampedL, j0[1] + (dz / dL) * clampedL];
+      fwdTx = cand.tx; fwdTz = cand.tz;
+    }
+    let backTx = jMid0.tx, backTz = jMid0.tz;
+    for (let i = mid - 1; i >= 0; i--) {
+      const j1 = joints[i + 1], L = segLens[i];
+      const probe = shoreBasis(j1[0] - 0.5 * L * backTx, j1[1] - 0.5 * L * backTz);
+      if (probe.gl > 1e-4) {
+        const sgn = (probe.tx * backTx + probe.tz * backTz) >= 0 ? 1 : -1;
+        backTx = probe.tx * sgn; backTz = probe.tz * sgn;
+      }
+      const cand = nudgeToContour(j1[0] - L * backTx, j1[1] - L * backTz, backTx, backTz);
+      const dx = j1[0] - cand.x, dz = j1[1] - cand.z, dL = Math.hypot(dx, dz) || L;
+      const clampedL = Math.max(24.2, Math.min(40.0, dL));
+      joints[i] = [j1[0] - (dx / dL) * clampedL, j1[1] - (dz / dL) * clampedL];
+      backTx = cand.tx; backTz = cand.tz;
+    }
+
+    // Unified deck height across the continuous waterfront wharf run so adjacent boards meet level.
+    const bankSamples = [];
+    for (let i = 0; i < m; i++) {
+      const mx = 0.5 * (joints[i][0] + joints[i + 1][0]), mz = 0.5 * (joints[i][1] + joints[i + 1][1]);
+      if (typeof heightAt === 'function') bankSamples.push(heightAt(mx, mz));
+    }
+    bankSamples.sort((a, b) => a - b);
+    const medBankY = bankSamples.length ? bankSamples[Math.floor(bankSamples.length / 2)] : minDeckY;
+    const unifiedFloor = Math.max(minDeckY, Math.min(minDeckY + 1.6, medBankY));
+
+    const segDirs = [];
+    for (let i = 0; i < m; i++) {
+      const dx = joints[i + 1][0] - joints[i][0], dz = joints[i + 1][1] - joints[i][1], L = Math.hypot(dx, dz) || 1;
+      segDirs.push([dx / L, dz / L, L]);
+    }
+    for (let i = 0; i < m; i++) {
+      const u = cluster[i];
+      const [ux, uz, chordL] = segDirs[i];
+      const w = Math.max(5.65, Math.min(9.4, u.w));
+      const bendA = i > 0 ? Math.acos(Math.max(-1, Math.min(1, segDirs[i - 1][0] * ux + segDirs[i - 1][1] * uz))) : 0;
+      const bendB = i + 1 < m ? Math.acos(Math.max(-1, Math.min(1, ux * segDirs[i + 1][0] + uz * segDirs[i + 1][1]))) : 0;
+      const miterPad = 0.5 * w * (Math.tan(0.5 * Math.min(0.35, bendA)) + Math.tan(0.5 * Math.min(0.35, bendB)));
+      const d = Math.max(24.2, Math.min(40.35, chordL + miterPad));
+      const mx = 0.5 * (joints[i][0] + joints[i + 1][0]);
+      const mz = 0.5 * (joints[i][1] + joints[i + 1][1]);
+      result.set(u.id, {
+        x: mx,
+        z: mz,
+        yaw: Math.atan2(ux, uz),
+        w,
+        d,
+        floor: unifiedFloor,
+        jointStart: joints[i],
+        jointEnd: joints[i + 1],
+        chained: true,
+      });
+    }
+  }
+  return result;
+}
 // How high on a front its pentice is fixed, and the bracket its sign hangs from; a low house carries them lower.
 const BOARD_PENTICE_M = 2.75, BOARD_SIGN_M = 3.7, BOARD_STAKE_M = 3.4;
 // A stone curtain stands CITY_CURTAIN.height; a palisade this high.
@@ -444,11 +633,12 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     churches.push({ x: nave.x, z: nave.z, great });
   };
   // One of the model's works that is no house: its own type, fitted to the plot the model gave it.
-  const standWork = (k, f, arch, toStreet, as = BOARD_WORKS[arch]) => {
+  const standWork = (k, f, arch, toStreet, as = BOARD_WORKS[arch], wharfOverride = null) => {
     const [key, roof, wall, rise, ridgeAlong, fronted] = as, type = CITY_TYPE[key], T = CITY_BUILDING_TYPES[type];
     const thatch = key === 'COT' || as === BOARD_THATCHED[arch] ? CITY_THATCH_ROOF : 0;
     const g = footprint(f.x, f.z, fit(f.w, T.width), fit(f.d, T.length), f.yaw), up = T.height * (0.95 + 0.1 * boardHashUnit(k, 11));
-    const base = key === 'WHARF' ? { floor: Math.max(BOARD_WHARF_M, heightAt(g.x, g.z)), plinth: 0.3, range: 0 }
+    if (key === 'WHARF') g.isWharf = true;
+    const base = key === 'WHARF' ? { floor: wharfOverride?.floor ?? Math.max(BOARD_WHARF_M, heightAt(g.x, g.z)), plinth: 0.3, range: 0 }
       : seatBlock(g, toStreet ? heightAt(g.x - Math.sin(g.yaw) * (g.d / 2 + 1.5), g.z - Math.cos(g.yaw) * (g.d / 2 + 1.5)) : null);
     if (base.range > 9) { dropped.steep++; return; }
     const hu = boardHashUnit(k, 31), paint = arch === 'tannery' ? CITY_PAINT.BROWN : arch === 'dyer' ? BOARD_CLOTHS[Math.floor(hu * 5)] : arch === 'toll' ? CITY_PAINT.RED : -1;
@@ -493,13 +683,72 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     riverSegs.some(fp.x, fp.z, Reach, visit);
     return { clearance: minC, pushX, pushZ, roadHit };
   };
+
+  // Pre-align waterfront wharves along local sea/river shoreline contours (`∇inland` tangent) so adjacent
+  // wharf lots chain corner-to-corner with level decks instead of scattering as staggered boxes.
+  const rawWharves = [];
+  for (let k = 0; k < count; k++) {
+    if (arches[kinds[k * 6 + 1]] !== 'wharf' || (stateOf && stateOf[k])) continue;
+    const wx = ox + stand[k * 6], wz = oz + stand[k * 6 + 1];
+    if (!inside(wx, wz, 12)) continue;
+    rawWharves.push({
+      index: k,
+      place: kinds[k * 6],
+      x: wx,
+      z: wz,
+      rot: stand[k * 6 + 2],
+      w: stand[k * 6 + 3],
+      d: stand[k * 6 + 4],
+    });
+  }
+  let wharfOverrides = null;
+  if (rawWharves.length > 0) {
+    const wharfWet = new Uint8Array(wet);
+    for (const river of board.rivers ?? []) {
+      const pts = river?.points;
+      if (!pts || pts.length < 6) continue;
+      for (let k = 0; k + 5 < pts.length; k += 3) {
+        const ax = ox + pts[k], az = oz + pts[k + 1], bx = ox + pts[k + 3], bz = oz + pts[k + 4];
+        const hw = Math.max(2.0, (pts[k + 2] + pts[k + 5]) * 0.5);
+        const i0 = Math.max(0, Math.floor((Math.min(ax, bx) - hw - grid.x0) / grid.step));
+        const i1 = Math.min(grid.n - 1, Math.ceil((Math.max(ax, bx) + hw - grid.x0) / grid.step));
+        const j0 = Math.max(0, Math.floor((Math.min(az, bz) - hw - grid.z0) / grid.step));
+        const j1 = Math.min(grid.n - 1, Math.ceil((Math.max(az, bz) + hw - grid.z0) / grid.step));
+        for (let j = j0; j <= j1; j++) {
+          const gz = grid.z0 + j * grid.step;
+          for (let i = i0; i <= i1; i++) {
+            if (segDist(grid.x0 + i * grid.step, gz, ax, az, bx, bz) <= hw) wharfWet[j * grid.n + i] = 1;
+          }
+        }
+      }
+    }
+    const wharfInland = distanceTo(wharfWet, grid.n, grid.step);
+    wharfOverrides = alignWaterfrontWharves(rawWharves, {
+      inlandAt: (px, pz) => fieldAt(wharfInland, grid, px, pz),
+      heightAt,
+      minDeckY: BOARD_WHARF_M,
+    });
+  }
+  const wharfTaken = (fp) => solids.some(
+    fp.x,
+    fp.z,
+    Math.hypot(fp.w, fp.d) / 2 + 34,
+    (o) => cityFootprintsOverlap(fp, o, o.isWharf ? -1.5 : 0.8),
+  );
+
   for (let k = 0; k < count; k++) {
     const place = kinds[k * 6], arch = arches[kinds[k * 6 + 1]], church = kinds[k * 6 + 4];
-    const x = ox + stand[k * 6], z = oz + stand[k * 6 + 1], rot = stand[k * 6 + 2], w = stand[k * 6 + 3], d = stand[k * 6 + 4], h = stand[k * 6 + 5];
+    const wharfAlign = arch === 'wharf' && wharfOverrides ? wharfOverrides.get(k) : null;
+    const x = wharfAlign ? wharfAlign.x : ox + stand[k * 6];
+    const z = wharfAlign ? wharfAlign.z : oz + stand[k * 6 + 1];
+    const rot = wharfAlign ? wharfAlign.yaw : stand[k * 6 + 2];
+    const w = wharfAlign ? wharfAlign.w : stand[k * 6 + 3];
+    const d = wharfAlign ? wharfAlign.d : stand[k * 6 + 4];
+    const h = stand[k * 6 + 5];
     if (!inside(x, z, 12)) { dropped.edge++; continue; }
     if (heightAt(x, z) < BOARD_DRY_M && arch !== 'wharf') { dropped.wet++; continue; }
     // Turned so that its own back (+z) is away from its street; a quarter turn swaps its front and depth.
-    const fx = form[k * 3], fz = form[k * 3 + 1];
+    const fx = wharfAlign ? 0 : form[k * 3], fz = wharfAlign ? 0 : form[k * 3 + 1];
     let yaw = rot, front = w, depth = d;
     if (fx || fz) {
       const want = Math.atan2(-fx, -fz);
@@ -542,7 +791,7 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
       dropped.wet++;
       continue;
     }
-    if (taken(f, 0.8)) { dropped.port++; continue; }
+    if (arch === 'wharf' ? wharfTaken(f) : taken(f, 0.8)) { dropped.port++; continue; }
     const left = stateOf ? stateOf[k] : 0;
     if (left) standLeft(k, f, left === 3);
     else if (arch === 'tower') {
@@ -552,7 +801,7 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
       // A length of wall the model stood by itself: its parapet toward the street it faces, or outward from the place.
       const long = Math.max(w, d) / 2, a = rot + (w >= d ? 0 : Math.PI / 2), ux = Math.cos(a), uz = -Math.sin(a), p = places[place] ?? seat;
       curtain(bx - ux * long, bz - uz * long, bx + ux * long, bz + uz * long, fx || fz ? [fx, fz] : [bx - p.x, bz - p.z], CITY_CURTAIN.height, 0.86);
-    } else if (BOARD_WORKS[arch]) standWork(k, f, arch, Boolean(fx || fz));
+    } else if (BOARD_WORKS[arch]) standWork(k, f, arch, Boolean(fx || fz), BOARD_WORKS[arch], wharfAlign);
     else if (arch === 'temple') {
       // A church's length runs back from its door.
       const long = front > depth ? footprint(bx, bz, depth, front, yaw + Math.PI / 2) : f;
@@ -653,19 +902,169 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
       if (rawPts.length >= 2) paving.push({ points: rawPts });
     }
   };
-  const fence = (ax, az, bx, bz, stone) => {
-    const L = Math.hypot(bx - ax, bz - az);
-    if (L < 1.5) return;
-    const n = Math.max(1, Math.round(L / WORKS_FENCE_M)), yaw = Math.atan2(bx - ax, bz - az), type = stone ? CITY_TYPE.FENCE_STONE : CITY_TYPE.FENCE_RAIL;
+  // Weld/miter torn roadside corners on legacy unmitered baked boards (`(flag & 4) === 0`), split any fence
+  // crossing *across* a road/lane carriageway into clean `>= 4.2 m` gateways flanked by terminal posts,
+  // preserve 100% of roadside verge fences (`streetEdge >= -0.15`), and pack terrain slope shear (`-100 + dzSlope`).
+  const prepareFenceRuns = (raw) => {
+    const segList = [];
+    for (let k = 0; k + 4 < raw.length; k += 5) {
+      const ax = ox + raw[k], az = oz + raw[k + 1], bx = ox + raw[k + 2], bz = oz + raw[k + 3], flag = raw[k + 4] | 0;
+      if (Math.hypot(bx - ax, bz - az) < 1.2) continue;
+      segList.push({ ax, az, bx, bz, stone: (flag & 1) !== 0, onWay: (flag & 2) !== 0, mitered: (flag & 4) !== 0 });
+    }
+    if (segList.length === 0 || segList.every((s) => s.mitered)) return segList;
+
+    const epHash = makeHash(8);
+    const eps = [];
+    for (let i = 0; i < segList.length; i++) {
+      const s = segList[i];
+      const a = { seg: i, end: 0, x: s.ax, z: s.az };
+      const b = { seg: i, end: 1, x: s.bx, z: s.bz };
+      eps.push(a, b);
+      epHash.add(a, a.x - 3.2, a.z - 3.2, a.x + 3.2, a.z + 3.2);
+      epHash.add(b, b.x - 3.2, b.z - 3.2, b.x + 3.2, b.z + 3.2);
+    }
+    const exactConnected = (ep) => {
+      let deg = 0;
+      epHash.some(ep.x, ep.z, 0.3, (o) => { if (o.seg !== ep.seg && Math.hypot(o.x - ep.x, o.z - ep.z) < 0.2) deg++; return deg > 0; });
+      return deg > 0;
+    };
+    const snapped = new Uint8Array(eps.length);
+    for (let ei = 0; ei < eps.length; ei++) {
+      if (snapped[ei]) continue;
+      const eA = eps[ei], sA = segList[eA.seg];
+      if (sA.mitered || exactConnected(eA)) continue;
+      let bestIdx = -1, bestDist = 3.05;
+      epHash.some(eA.x, eA.z, 3.1, (eB) => {
+        if (eB.seg === eA.seg) return false;
+        const j = eB.seg * 2 + eB.end;
+        if (snapped[j] || exactConnected(eB)) return false;
+        const sB = segList[eB.seg];
+        if (!sA.onWay && !sB.onWay) return false;
+        const d = Math.hypot(eB.x - eA.x, eB.z - eA.z);
+        if (d < bestDist && d > 0.08) {
+          // Do not weld opposite verges across a lane carriageway!
+          const mx = 0.5 * (eA.x + eB.x), mz = 0.5 * (eA.z + eB.z);
+          if (streetEdge(mx, mz, 2.5) >= -0.15) {
+            bestDist = d;
+            bestIdx = j;
+          }
+        }
+        return false;
+      });
+      if (bestIdx >= 0) {
+        const eB = eps[bestIdx], sB = segList[eB.seg];
+        const oAx = eA.end === 0 ? sA.bx : sA.ax, oAz = eA.end === 0 ? sA.bz : sA.az;
+        const oBx = eB.end === 0 ? sB.bx : sB.ax, oBz = eB.end === 0 ? sB.bz : sB.az;
+        const lA = Math.hypot(eA.x - oAx, eA.z - oAz) || 1, lB = Math.hypot(eB.x - oBx, eB.z - oBz) || 1;
+        const uAx = (eA.x - oAx) / lA, uAz = (eA.z - oAz) / lA;
+        const uBx = (eB.x - oBx) / lB, uBz = (eB.z - oBz) / lB;
+        const det = uAx * uBz - uAz * uBx;
+        let jx = 0.5 * (eA.x + eB.x), jz = 0.5 * (eA.z + eB.z);
+        if (Math.abs(det) > 0.2) {
+          const dx = eB.x - eA.x, dz = eB.z - eA.z;
+          const tA = (dx * uBz - dz * uBx) / det;
+          const tB = (dx * uAz - dz * uAx) / det;
+          if (Math.abs(tA) <= 3.2 && Math.abs(tB) <= 3.2) {
+            const cx = eA.x + uAx * tA, cz = eA.z + uAz * tA;
+            if (streetEdge(cx, cz, 2.5) >= -0.15) { jx = cx; jz = cz; }
+          }
+        }
+        if (eA.end === 0) { sA.ax = jx; sA.az = jz; } else { sA.bx = jx; sA.bz = jz; }
+        if (eB.end === 0) { sB.ax = jx; sB.az = jz; } else { sB.bx = jx; sB.bz = jz; }
+        eA.x = jx; eA.z = jz; eB.x = jx; eB.z = jz;
+        snapped[ei] = 1;
+        snapped[bestIdx] = 1;
+      }
+    }
+    // Also snap dangling inland field-divider endpoints onto shifted roadside fences at T-junctions.
+    const onWayHash = makeHash(16);
+    for (const s of segList) {
+      if (s.onWay) onWayHash.add(s, Math.min(s.ax, s.bx) - 3.0, Math.min(s.az, s.bz) - 3.0, Math.max(s.ax, s.bx) + 3.0, Math.max(s.az, s.bz) + 3.0);
+    }
+    for (let ei = 0; ei < eps.length; ei++) {
+      if (snapped[ei]) continue;
+      const ep = eps[ei], s = segList[ep.seg];
+      if (s.onWay || s.mitered || exactConnected(ep)) continue;
+      let bestD = 2.65, bestX = ep.x, bestZ = ep.z, hit = false;
+      onWayHash.some(ep.x, ep.z, 2.8, (w) => {
+        const dx = w.bx - w.ax, dz = w.bz - w.az, l2 = dx * dx + dz * dz;
+        if (l2 < 1e-6) return false;
+        const t = Math.max(0, Math.min(1, ((ep.x - w.ax) * dx + (ep.z - w.az) * dz) / l2));
+        const px = w.ax + dx * t, pz = w.az + dz * t, d = Math.hypot(px - ep.x, pz - ep.z);
+        if (d < bestD && d > 0.05 && streetEdge(0.5 * (ep.x + px), 0.5 * (ep.z + pz), 2.5) >= -0.15) {
+          bestD = d; bestX = px; bestZ = pz; hit = true;
+        }
+        return false;
+      });
+      if (hit) {
+        if (ep.end === 0) { s.ax = bestX; s.az = bestZ; } else { s.bx = bestX; s.bz = bestZ; }
+        ep.x = bestX; ep.z = bestZ;
+      }
+    }
+    return segList;
+  };
+
+  const layFenceSubRun = (ax, az, bx, bz, stone) => {
+    const subL = Math.hypot(bx - ax, bz - az);
+    if (subL < 1.65) return;
+    const n = Math.max(1, Math.ceil(subL / (WORKS_FENCE_M * 1.46)), Math.round(subL / WORKS_FENCE_M));
+    const bayLen = subL / n, yaw = Math.atan2(bx - ax, bz - az), type = stone ? CITY_TYPE.FENCE_STONE : CITY_TYPE.FENCE_RAIL;
     for (let i = 0; i < n; i++) {
-      const x = ax + (bx - ax) * (i + 0.5) / n, z = az + (bz - az) * (i + 0.5) / n;
-      if (!dry(x, z) || bridged(x, z) || streetEdge(x, z, 3) < 0.6 || placed.some(x, z, 4, (o) => rectDist(o, x, z) <= 1.2) || solids.some(x, z, 4, (o) => rectDist(o, x, z) <= 1.2)) continue;
-      slight(type, x, heightAt(x, z), z, yaw, 0.5, L / n);
+      const t0 = i / n, t1 = (i + 1) / n;
+      const x0 = ax + (bx - ax) * t0, z0 = az + (bz - az) * t0;
+      const x1 = ax + (bx - ax) * t1, z1 = az + (bz - az) * t1;
+      const x = 0.5 * (x0 + x1), z = 0.5 * (z0 + z1);
+      if (!dry(x, z) || bridged(x, z) || streetEdge(x, z, 2.5) < -0.15 || placed.some(x, z, 4, (o) => rectDist(o, x, z) <= 1.2) || solids.some(x, z, 4, (o) => rectDist(o, x, z) <= 1.2)) continue;
+      const h0 = heightAt(x0, z0), h1 = heightAt(x1, z1), hm = heightAt(x, z);
+      const seatY = Math.max(0.5 * (h0 + h1), hm - 0.22);
+      const dzSlope = Math.max(-0.85, Math.min(0.85, (h1 - h0) / Math.max(0.5, bayLen)));
+      slight(type, x, seatY, z, yaw, -100.0 + dzSlope, bayLen);
       built.fences++;
     }
   };
-  const fences = works.fences ?? [];
-  for (let k = 0; k + 4 < fences.length; k += 5) fence(ox + fences[k], oz + fences[k + 1], ox + fences[k + 2], oz + fences[k + 3], fences[k + 4] & 1);
+
+  const fence = (ax, az, bx, bz, stone) => {
+    const L = Math.hypot(bx - ax, bz - az);
+    if (L < 1.65) return;
+    const ux = (bx - ax) / L, uz = (bz - az) / L;
+    const samples = Math.max(2, Math.ceil(L / 0.85));
+    const gaps = [];
+    let gapStart = -1;
+    for (let s = 0; s <= samples; s++) {
+      const d = (s / samples) * L;
+      const inWay = streetEdge(ax + ux * d, az + uz * d, 2.5) < -0.15;
+      if (inWay && gapStart < 0) gapStart = d;
+      else if (!inWay && gapStart >= 0) {
+        const prevD = ((s - 1) / samples) * L;
+        const mid = 0.5 * (gapStart + prevD), half = Math.max(2.1, 0.5 * (prevD - gapStart) + 0.35);
+        gaps.push([Math.max(0, mid - half), Math.min(L, mid + half)]);
+        gapStart = -1;
+      }
+    }
+    if (gapStart >= 0) {
+      const mid = 0.5 * (gapStart + L), half = Math.max(2.1, 0.5 * (L - gapStart) + 0.35);
+      gaps.push([Math.max(0, mid - half), L]);
+    }
+    if (gaps.length === 0) {
+      layFenceSubRun(ax, az, bx, bz, stone);
+      return;
+    }
+    // Merge overlapping `>= 4.2 m` carriageway gateway openings and emit flanked sub-runs.
+    const merged = [gaps[0]];
+    for (let g = 1; g < gaps.length; g++) {
+      const prev = merged[merged.length - 1];
+      if (gaps[g][0] <= prev[1] + 1.4) prev[1] = Math.max(prev[1], gaps[g][1]);
+      else merged.push(gaps[g]);
+    }
+    let cur = 0;
+    for (const [g0, g1] of merged) {
+      if (g0 - cur >= 1.65) layFenceSubRun(ax + ux * cur, az + uz * cur, ax + ux * g0, az + uz * g0, stone);
+      cur = Math.max(cur, g1);
+    }
+    if (L - cur >= 1.65) layFenceSubRun(ax + ux * cur, az + uz * cur, bx, bz, stone);
+  };
+  for (const run of prepareFenceRuns(works.fences ?? [])) fence(run.ax, run.az, run.bx, run.bz, run.stone);
   // A track's bridge and road/street crossings: seated above channel flood levels with masonry or timber piers.
   const bridges = [];
   for (let k = 0; k + 5 < spans.length; k += 6) {

@@ -870,12 +870,31 @@ fn cityFrustumOutside(shiftedRoot:vec3f,size:vec4f)->bool{
 @vertex fn cityTypeVS(@location(0) position:vec3f,@location(1) normal:vec3f,@location(2) kind:vec2f,
   @location(3) root:vec4f,@location(4) shape:vec4f)->CityVertex{
   let c=cos(root.w);let s=sin(root.w);
-  let p=position*shape.xyz;let n=normalize(normal/shape.xyz);
+  let isFence=shape.w<-50.0;
+  let dzSlope=select(0.0,clamp(shape.w+100.0,-0.95,0.95),isFence);
+  let shiftedRoot=root.xyz+vec3f(nearTerrain.grid.y,0.0,nearTerrain.grid.z);
+  let away=distance(shiftedRoot,F.camPos.xyz);
+  var fenceInflate=1.0;
+  if(isFence){
+    let pxSpan=shape.y*1.2*F.screen.y/(2.0*max(length(F.camUp.xyz),1e-3)*max(away,1.0));
+    if(pxSpan<2.2){
+      let keepProb=clamp((pxSpan/2.2)*(pxSpan/2.2),0.08,1.0);
+      let h=fract(sin(dot(root.xz,vec2f(12.9898,78.233)))*43758.5453);
+      if(h>keepProb){
+        var culled:CityVertex;culled.pos=vec4f(2.0,2.0,0.0,1.0);culled.lodBlend=0.0;return culled;
+      }
+      fenceInflate=min(3.0,inverseSqrt(keepProb));
+    }
+  }
+  let p=vec3f(position.x*shape.x*fenceInflate,position.y*shape.y,position.z*shape.z);
+  let py=p.y+p.z*dzSlope;
+  let nBase=normal/vec3f(max(shape.x*fenceInflate,1e-3),max(shape.y,1e-3),max(shape.z,1e-3));
+  let n=normalize(vec3f(nBase.x,nBase.y,nBase.z-dzSlope*nBase.y));
   var o:CityVertex;
-  o.world=root.xyz+vec3f(p.x*c+p.z*s,p.y,-p.x*s+p.z*c);
+  o.world=root.xyz+vec3f(p.x*c+p.z*s,py,-p.x*s+p.z*c);
   o.normal=vec3f(n.x*c+n.z*s,n.y,-n.x*s+n.z*c);
   let material=floor(kind.x+0.01);
-  let tone=fract(shape.w);
+  let tone=select(fract(shape.w),0.5,isFence);
   o.kind=kind;
   // A window's kind carries where it is in its pane; every other material, how it is turned.
   if(abs(material-14.0)>0.5){
@@ -890,11 +909,11 @@ fn cityFrustumOutside(shiftedRoot:vec3f,size:vec4f)->bool{
   if(abs(material-10.0)<0.5){grain=floor(kind.y*0.5);o.kind=vec2f(o.kind.x,kind.y-2.0*grain);}
   // Below -1, how high this point stands above the building's own floor: its walls weather by it.
   o.leafUV=vec2f(select(cityRoofAge(root,tone),grain,grain>0.5),-1.0-max(p.y,0.0));
-  let shiftedRoot=root.xyz+vec3f(nearTerrain.grid.y,0.0,nearTerrain.grid.z);
-  let away=distance(shiftedRoot,F.camPos.xyz);
   let compound=shape.x>16.0||shape.z>16.0;
   let cutoff=nearTerrain.grid.w+select(0.0,16.0,compound);
-  o.lodBlend=1.0-clamp((away-max(0.0,cutoff-36.0))/72.0,0.0,1.0);
+  let fadeStart=select(max(0.0,cutoff-36.0),max(0.0,cutoff-72.0),isFence);
+  let fadeSpan=select(72.0,108.0,isFence);
+  o.lodBlend=1.0-clamp((away-fadeStart)/fadeSpan,0.0,1.0);
   if(o.lodBlend<=0.001){o.pos=vec4f(2.0,2.0,0.0,1.0);return o;}
   let shifted=o.world+vec3f(nearTerrain.grid.y,0.0,nearTerrain.grid.z);
   o.pos=F.viewProj*vec4f(earthCurve(shifted-F.camPos.xyz,F.camPos.y),1.0);

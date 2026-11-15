@@ -272,10 +272,10 @@ const WORKS_COURT = (() => {
 const WORKS_WHARF = (() => {
   const hw = 3.5, hd = 15, rows = worksEvenly(7, -hd + 0.6, hd - 0.6);
   return worksSpec('Cais de madeira (timber wharf on its piles)', 7, 30, 1, 10, [
-    worksBox('wharf_deck', [-hw, -0.28, -hd], [hw, 0, hd], 'wood', { partGroup: 'foundation_plinth' }),
+    worksBox('wharf_deck', [-hw, -0.28, -hd - 0.04], [hw, 0, hd + 0.04], 'wood', { partGroup: 'foundation_plinth' }),
     ...rows.flatMap((z) => [-hw + 0.3, 0, hw - 0.3].map((x) => ({ primitive: 'cylinder', name: 'wharf_piles', base: [x, -WORKS_FOOT_M, z], height: WORKS_FOOT_M - 0.28, radius: 0.19, segments: 6, material: 'timber' }))),
     ...rows.filter((_, k) => k % 2 === 0).flatMap((z) => [-hw + 0.3, hw - 0.3].map((x) => ({ primitive: 'cylinder', name: 'wharf_bollards', base: [x, 0, z], height: 0.85, radius: 0.17, segments: 6, material: 'timber' }))),
-    worksBox('wharf_kerb', [-hw, 0, -hd], [-hw + 0.2, 0.18, hd], 'oak'), worksBox('wharf_kerb', [hw - 0.2, 0, -hd], [hw, 0.18, hd], 'oak'),
+    worksBox('wharf_kerb', [-hw, 0, -hd - 0.04], [-hw + 0.2, 0.18, hd + 0.04], 'oak'), worksBox('wharf_kerb', [hw - 0.2, 0, -hd - 0.04], [hw, 0.18, hd + 0.04], 'oak'),
     worksBox('wharf_bales', [-1.4, 0, 6.2], [0.2, 0.9, 8.4], 'stucco'), worksBox('wharf_casks', [0.6, 0, 9.2], [2.2, 1.0, 10.4], 'wood'),
   ]);
 })();
@@ -321,14 +321,23 @@ const WORKS_RUBBLE = worksSpec('Entulho (the heap where a building stood)', 8, 8
 /* ---- the slighter works: a length of fence, a track's bridge, graves, a cairn, a tent, a standard, a scaffold ---- */
 // A fence is stood a length at a time; each length is this long before it is fitted to its run.
 export const WORKS_FENCE_M = 5;
-const WORKS_FENCE_RAIL = worksSpec('Cerca (post-and-rail fence, a length)', 0.3, WORKS_FENCE_M, 1.2, 10, [
-  worksPost('fence_post', 0, -2.5 + 0.09, -1.3, 1.2, 0.09, 'timber'),
-  worksBox('fence_post', [-0.09, -1.3, -0.09], [0.09, 1.2, 0.09], 'timber', { partGroup: 'foundation_plinth' }),
-  worksBox('fence_rail', [-0.04, 0.42, -2.5], [0.04, 0.56, 2.5], 'wood'), worksBox('fence_rail', [-0.04, 0.9, -2.5], [0.04, 1.04, 2.5], 'wood'),
+export const WORKS_FENCE_POST = worksSpec('Moirão de cerca (terminal gate/corner fence post)', 0.3, 0.3, 1.26, 10, [
+  worksBox('fence_post_shaft', [-0.10, -1.3, -0.10], [0.10, 1.22, 0.10], 'timber', { partGroup: 'foundation_plinth' }),
+  worksBox('fence_post_cap', [-0.12, 1.22, -0.12], [0.12, 1.28, 0.12], 'dark_wood'),
 ], 1.3);
-const WORKS_FENCE_STONE = worksSpec('Muro de pedra solta (dry-stone wall, a length)', 0.7, WORKS_FENCE_M, 1.15, 11, [
-  worksBox('drystone_wall', [-0.32, -1.3, -2.5], [0.32, 1.0, 2.5], 'stone', { partGroup: 'foundation_plinth', topInset: 0.06 }),
-  ...worksEvenly(7, -2.2, 2.2).map((z, k) => worksBox('drystone_cope', [-0.3, 1.0, z - 0.3], [0.3, 1.1 + 0.05 * (k % 2), z + 0.3], 'dark_stone')),
+export const WORKS_FENCE_RAIL = worksSpec('Cerca (post-and-rail fence, a length)', 0.3, WORKS_FENCE_M, 1.2, 10, [
+  worksBox('fence_post', [-0.09, -1.3, -2.50], [0.09, 1.20, -2.35], 'timber', { partGroup: 'foundation_plinth' }),
+  worksBox('fence_post_cap', [-0.105, 1.20, -2.515], [0.105, 1.25, -2.335], 'dark_wood'),
+  worksBox('fence_post', [-0.085, -1.3, -0.085], [0.085, 1.18, 0.085], 'timber', { partGroup: 'foundation_plinth' }),
+  worksBox('fence_post', [-0.09, -1.3, 2.35], [0.09, 1.20, 2.50], 'timber', { partGroup: 'foundation_plinth' }),
+  worksBox('fence_post_cap', [-0.105, 1.20, 2.335], [0.105, 1.25, 2.515], 'dark_wood'),
+  worksBox('fence_rail', [-0.04, 0.42, -2.48], [0.04, 0.56, 2.48], 'wood'),
+  worksBox('fence_rail', [-0.04, 0.90, -2.48], [0.04, 1.04, 2.48], 'wood'),
+], 1.3);
+export const WORKS_FENCE_STONE = worksSpec('Muro de pedra solta (dry-stone wall, a length)', 0.7, WORKS_FENCE_M, 1.15, 11, [
+  worksBox('drystone_base', [-0.35, -1.3, -2.54], [0.35, 0.46, 2.54], 'stone', { partGroup: 'foundation_plinth' }),
+  worksBox('drystone_upper', [-0.30, 0.46, -2.54], [0.30, 1.00, 2.54], 'stone'),
+  ...worksEvenly(8, -2.205, 2.205).map((z, k) => worksBox('drystone_cope', [-0.31, 1.00, z - 0.32], [0.31, 1.11 + 0.04 * (k % 2), z + 0.32], 'dark_stone')),
 ], 1.3);
 // A bridge is written this long and stretched to its span; its deck is the floor.
 export const WORKS_BRIDGE_M = 9;

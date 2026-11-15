@@ -466,6 +466,7 @@ async function main() {
     simSampler: samplerSim,
     sunVisBuf,
     surfaceWaves: surfaceWavesPromise,
+    waterOptics: waterOpticsPromise,
     oakTex: oakTexPromise,
     oakSampler,
   };
@@ -4238,34 +4239,57 @@ async function main() {
     const lived=boardLife?.day??caravanPlan.day;
     const curDay=Number.isFinite(caravanPlan.lastDay)?(caravanPlan.lastDay>=lived+1?lived+(caravanPlan.lastDay-Math.floor(caravanPlan.lastDay)):caravanPlan.lastDay):lived;
     const t=frameF[19]||0;
+    const cHash=(a,b)=>{
+      let h=Math.imul(a^0x9e3779b9,0x85ebca6b)^Math.imul(b+0x7f4a7c15,0xc2b2ae35);
+      h=Math.imul(h^(h>>>15),0x2c1b3c6d);h^=h>>>12;
+      return (h>>>0)/4294967296;
+    };
+    const coachGoods=new Set(['cloth','silk','spice','spices','silver','gold','jewels','luxury','tools','books','glass','merchants','passenger','passengers','envoys']);
+    const oxCartGoods=new Set(['timber','wood','ore','iron','stone','wine','oil','pottery','char','hay']);
+    const droveGoods=new Set(['sheep','cattle','swine','horses']);
     const out=[];
     for(const c of caravanPlan.lastList??[]){
       if(!c||!Array.isArray(c.points)||c.points.length<4||!(c.arrive>c.depart))continue;
       const pts=[];let totalLen=0;
       for(let i=0;i+1<c.points.length;i+=2){
         const wx=origin.x+c.points[i],wz=origin.z+c.points[i+1];
-        if(pts.length)totalLen+=Math.hypot(wx-pts[pts.length-1].x,wz-pts[pts.length-1].z);
+        if(pts.length){
+          const step=Math.hypot(wx-pts[pts.length-1].x,wz-pts[pts.length-1].z);
+          if(step<0.05)continue;
+          totalLen+=step;
+        }
         pts.push({x:wx,z:wz,acc:totalLen});
       }
       if(pts.length<2||totalLen<1)continue;
+      const key=[...String(c.key)].reduce((h,ch)=>(Math.imul(h,31)+ch.charCodeAt(0))|0,7);
+      const rawPhase=Number(c.phaseOffset);
+      const phaseWrap=Number.isFinite(rawPhase)?(((rawPhase%1)+1)%1):0;
+      const phaseOffset=Math.max(0,Math.min(0.9999,phaseWrap*0.9999));
       const days=Math.max(c.arrive-c.depart,1e-3);
       const share=Math.max(0,Math.min(1,(curDay-c.depart)/days));
-      const phaseOffset=Math.max(0,Math.min(0.9999,Number(c.phaseOffset)||0));
       const phaseShare=((share+phaseOffset)%1+1)%1;
       const calSpeed=totalLen/days*(caravanPlan.rate||0);
       const paceFloor=Math.max(0,0.92-calSpeed);
       const cycle=Math.max(totalLen+48,1);
-      const dist=calSpeed<0.92?((phaseShare*totalLen+paceFloor*t)%cycle+cycle)%cycle:phaseShare*totalLen;
-      const clamped=Math.max(0,Math.min(totalLen,dist));
-      let px=pts[0].x,pz=pts[0].z;
+      const headDist=calSpeed<0.92&&totalLen>1?((phaseShare*totalLen+paceFloor*t)%cycle+cycle)%cycle:phaseShare*totalLen;
+      const good=String(c.good??'');
+      const isDrove=droveGoods.has(good)&&(c.drove===true||(c.drove!==false&&(c.qty??0)>=6&&!c.carts));
+      const behind0=isDrove?1.2+cHash(key,1)*1.2:cHash(key,0)*3;
+      const anchorRolled=headDist-behind0;
+      const clamped=Math.max(0,Math.min(totalLen,anchorRolled));
+      let px=pts[0].x,pz=pts[0].z,dx=0,dz=1;
       for(let i=1;i<pts.length;i++){
-        if(pts[i].acc>=clamped){
-          const a=pts[i-1],b=pts[i],u=Math.max(0,Math.min(1,(clamped-a.acc)/Math.max(1e-4,b.acc-a.acc)));
-          px=a.x+(b.x-a.x)*u;pz=a.z+(b.z-a.z)*u;break;
+        if(pts[i].acc>=clamped||i===pts.length-1){
+          const a=pts[i-1],b=pts[i],seg=Math.max(1e-4,b.acc-a.acc),u=Math.max(0,Math.min(1,(clamped-a.acc)/seg));
+          px=a.x+(b.x-a.x)*u;pz=a.z+(b.z-a.z)*u;
+          dx=(b.x-a.x)/seg;dz=(b.z-a.z)/seg;break;
         }
       }
+      const roll=cHash(key,5);
+      const vehicleKind=isDrove?'drove':((coachGoods.has(good)&&roll<0.88)||(!oxCartGoods.has(good)&&roll<0.16))?'coach':(oxCartGoods.has(good)?roll<0.52:roll<0.44)?'ox-cart':'wagon';
       const groundY=terrain?.groundSample?.(px,pz)??0;
-      out.push({key:c.key,mode:c.mode,good:c.good,qty:c.qty,carts:c.carts??1,x:px,y:groundY,z:pz,progress:clamped/totalLen});
+      const visible=c.mode==='cart'&&anchorRolled>0.5&&anchorRolled+4.05<totalLen-0.5&&groundY>=0.32;
+      out.push({key:c.key,mode:c.mode,good:c.good,qty:c.qty,carts:c.carts??1,vehicleKind,visible,dx,dz,x:px,y:groundY,z:pz,progress:clamped/totalLen});
     }
     out.sort((a,b)=>(a.mode==='cart'?0:1)-(b.mode==='cart'?0:1));
     return out;
@@ -4664,7 +4688,6 @@ async function main() {
           pendingSplashWaves.splice(wi,1);
         }
       }
-      surfaceWaves.update(boat,dt);
     }
     if(voyageCtl?.active&&shipDt>0)voyageCtl.update(shipDt,now);
     instruments.update(now);
@@ -4790,6 +4813,11 @@ async function main() {
       storm:tvStorm,
       avoidVessels:vessels.slice(0,followerEnabled?vessels.length:1).map(v=>v.boat).filter(Boolean),
     },terrain);
+    if(dt>0||needSpectrum||frameIndex===0){
+      const waveCenter=ashore.on||cameraMode==='free'?cam:boat;
+      surfaceWaves.setWakeHulls?.(terrain?.tradeVessels?.getWakeSources?.(waveCenter)??[]);
+      surfaceWaves.update(waveCenter,dt);
+    }
     if(boardLife?.state==='alive'&&terrain?.tradeVessels&&(frameIndex%30)===0){
       boardLife.setMaritimeReport?.(terrain.tradeVessels.getMaritimeReport());
     }

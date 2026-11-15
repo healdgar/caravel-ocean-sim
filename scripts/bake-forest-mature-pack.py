@@ -17,25 +17,23 @@ and this script replaces them:
   growth   Asked for a veteran of sixty years or more, the baker grows a tree for at most 48 or 94 years at a
            coarse resolution and thickens its trunk to stand for the rest. Here each tree is grown for every
            year of its age.
-  wood     The baker's game tier keeps every limb to 150,000 triangles. Here each tree has a budget of its
-           own (PROTOTYPES) and rings of fewer sides, so that the triangles go to the length of its limbs.
-  leaves   The baker keeps up to 12,000 cards for each of a tree's three kinds of leaf and sizes them to
-           carry all of the leaf area the grower counts, which on a crown 26 m across is cards two and three
-           metres long. Here each tree has a number of cards (PROTOTYPES) spread over its leaves, sized so
-           that their area is a set multiple of the ground its crown covers, as the pack before this one had.
-           A card of the species in SPRAYED is shaped to hold a spray of leaves and not one leaf: draw the
-           sprays with scripts/prepare-forest-sprays.py before this bake.
+  wood     Each tree receives cylindrical multi-sided bark rings (radial_base 10-12, radial_min 5,
+           radial_error 0.010) and organic curve preservation (WOOD_STRAIGHTEN = 0.20 rad) with generous
+           level-0 triangle budgets (PROTOTYPES) so close-up trunks, forks, and 3rd/4th-order branchlets
+           render round and gnarled while distant trees select coarser GPU cluster cuts.
+  leaves   Each tree distributes compact (~0.38-0.46 m), 3D V-cambered and gravitationally drooped 4-triangle
+           (6-vertex) botanical shoots across its branchlet tips, sized so their combined spray coverage
+           conserves physical crown Leaf Area Index. Draw the 512x512 sprays with
+           scripts/prepare-forest-sprays.py before this bake.
   middle   The baker thins a tree's wood for its middle tier by merging the vertices that share a cell of
-           0.15 m. That keeps a quarter of the triangles of a tree twelve metres tall, and two thirds of
-           those of a tree of twenty-five, whose limbs are thicker than the cell. Here the cells grow with
-           the tree (MIDDLE_CELLS_IN_HEIGHT).
+           0.15 m. Here the cells grow with the tree (MIDDLE_CELLS_IN_HEIGHT).
   bark     The baker's cooked bark maps come with texture coordinates scaled for a square tile. The pack
            keeps the bark and leaf pictures it already has, which are drawn with the unscaled coordinates.
 
 The pack keeps its layout: the same twelve prototypes in the same order, the same pictures and materials,
-single-quad leaves, `middle/` and `volumes/` beside it. Its manifest gains `stature: "full-grown"`, which
-tells the game to draw these trees at about the size they are (js/terrain.js), and `bake`, which records
-what was grown. After this, bake the derived sets in order:
+6-vertex 4-triangle V-cambered leaf shoots, `middle/` and `volumes/` beside it. Its manifest gains
+`stature: "full-grown"`, which tells the game to draw these trees at about the size they are (js/terrain.js),
+and `bake`, which records what was grown. After this, bake the derived sets in order:
 
     python3 scripts/prepare-forest-surfaces.py portugal --builtin --reuse saba
     node scripts/prepare-forest-clusters.mjs portugal
@@ -57,33 +55,31 @@ import subprocess
 import sys
 import time
 
-# species, cohort, age in years, seed, grower resolution, wood triangles, leaf cards, card area over crown footprint.
-# The four tall species grow at resolution 3.0: their limbs come out as a spreading open-grown tree's do and a
-# century takes one to three minutes. Birch and blueberry are small and grow at the baker's own 1.8.
+# species, cohort, age in years, seed, grower resolution, wood triangles, leaf shoots, shoot area over crown footprint.
+# Only close-up trees (~8-35 m) draw level-0 clusters; mid/far trees select coarser GPU DAG cuts, morph crowns, and splats.
 PROTOTYPES = (
-    ('oak', 'veteran', 110, 101, 3.0, 16000, 12500, 14.0),
-    ('chestnut', 'veteran', 110, 101, 3.0, 16000, 9500, 12.0),
-    ('maple', 'veteran', 100, 101, 3.0, 16000, 10500, 14.0),
-    ('elm', 'veteran', 110, 303, 3.0, 16000, 13000, 11.0),
-    ('birch', 'veteran', 40, 202, 1.8, 5000, 4000, 9.0),
-    ('blueberry', 'veteran', 25, 303, 1.8, 2600, 900, 10.0),
-    ('oak', 'canopy', 70, 202, 3.0, 11000, 7000, 14.0),
-    ('chestnut', 'canopy', 70, 202, 3.0, 11000, 6000, 12.0),
-    ('maple', 'canopy', 60, 202, 3.0, 11000, 7000, 14.0),
-    ('elm', 'canopy', 70, 202, 3.0, 11000, 7000, 11.0),
-    ('birch', 'canopy', 25, 101, 1.8, 4000, 3000, 9.0),
-    ('blueberry', 'canopy', 12, 202, 1.8, 1300, 300, 10.0),
+    ('oak', 'veteran', 110, 101, 3.0, 34000, 24000, 9.2),
+    ('chestnut', 'veteran', 110, 101, 3.0, 34000, 22000, 8.6),
+    ('maple', 'veteran', 100, 101, 3.0, 34000, 24500, 9.0),
+    ('elm', 'veteran', 110, 303, 3.0, 34000, 28500, 7.8),
+    ('birch', 'veteran', 40, 202, 1.8, 10000, 6800, 8.5),
+    ('blueberry', 'veteran', 25, 303, 1.8, 4800, 1500, 10.0),
+    ('oak', 'canopy', 70, 202, 3.0, 22000, 14000, 9.2),
+    ('chestnut', 'canopy', 70, 202, 3.0, 22000, 13500, 8.6),
+    ('maple', 'canopy', 60, 202, 3.0, 22000, 15000, 9.0),
+    ('elm', 'canopy', 70, 202, 3.0, 22000, 15000, 7.8),
+    ('birch', 'canopy', 25, 101, 1.8, 7500, 4800, 8.5),
+    ('blueberry', 'canopy', 12, 202, 1.8, 2400, 500, 10.0),
 )
-# The species whose cards show a spray of leaves, and how many times as long as it is broad such a card is:
-# the shape scripts/prepare-forest-sprays.py draws for. Blueberry's cards are the size of its leaf and show one.
+# The species whose shoots show a botanical spray of leaves, and the aspect ratio (length / breadth) matching prepare-forest-sprays.py.
 SPRAYED = frozenset(('oak', 'chestnut', 'maple', 'elm', 'birch'))
 SPRAY_ASPECT = 1.25
 LATITUDE = 39.0
 # A crown's foliage field and far shell are kept at this cell: a crown 26 m across then takes about as many
 # cells as the 10 m crowns of the pack before took at 0.3 m.
 FIELD_CELL_METRES = 0.6
-# Limbs straighter than this many radians between rings share one ring; see gardenplans/lod.py.
-WOOD_STRAIGHTEN = 0.6
+# Limbs straighter than this many radians (~11.5 deg) between rings share one ring; preserves organic bough curves.
+WOOD_STRAIGHTEN = 0.20
 # The middle tier's wood is merged by cells of which this many stand in the height the tree's wood reaches,
 # where that is coarser than the baker's own cell.
 MIDDLE_CELLS_IN_HEIGHT = 40
@@ -132,8 +128,9 @@ def main():
     work.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
 
-    # Grow every tree alone, for every year of its age.
-    rings = Tessellation(radial_base=5, radial_falloff=0.62, radial_min=3, radial_error=0.03, radial_max=12)
+    # Grow every tree alone, for every year of its age, with round cylindrical bark rings and fine branchlets.
+    rings_veteran = Tessellation(radial_base=12, radial_falloff=0.72, radial_min=5, radial_error=0.010, radial_max=16)
+    rings_canopy = Tessellation(radial_base=10, radial_falloff=0.72, radial_min=5, radial_error=0.010, radial_max=14)
     grown, tier_of, spec_of, record = [], {}, {}, []
     for index, (species, cohort, age, seed, resolution, wood, cards, cover) in enumerate(PROTOTYPES):
         clock = time.perf_counter()
@@ -143,6 +140,7 @@ def main():
         grower.grow()
         height, crown, dbh, basal = _measure_grown(grower, float(age))
         grown.append((index, species, cohort, float(age), plan, grower))
+        rings = rings_veteran if cohort == 'veteran' else rings_canopy
         tier_of[id(grower)] = dataclasses.replace(TIERS['game'], tess=rings, straighten=WOOD_STRAIGHTEN, budget=wood)
         spec_of[id(plan)] = {'cards': cards, 'cover': cover, 'index': index}
         record.append({'id': index, 'species': species, 'cohort': cohort, 'age': age, 'seed': seed, 'resolution': resolution,
@@ -168,8 +166,7 @@ def main():
         record[[g[5] for g in grown].index(grower)]['woodStraighten'] = round(float(getattr(shoot, 'straighten', 0.0)), 3)
         return shoot, roots, foliage, wounds
 
-    # Leaves: the wanted number of cards, shared among a tree's kinds of leaf by how many of each it bears,
-    # each grown or shrunk about the foot of its midrib until together they cover the wanted area.
+    # Leaves: compact 3D V-cambered and gravitationally drooped botanical shoots anchored on branchlet tips.
     blade_meshes = tf._build_tier0_blade_meshes
 
     def carded_blades(organs, plan, cluster, **_):
@@ -190,22 +187,52 @@ def main():
         blades = {name: np.asarray(mesh.vertices, dtype=np.float64).reshape(-1, 6, 3) for name, mesh in meshes.items()}
         area = sum(float(np.linalg.norm(np.cross(b[:, 3] - b[:, 0], b[:, 2] - b[:, 0]), axis=1).sum()) for b in blades.values())
         grow = (spec['cover'] * footprint / area) ** 0.5
+        fold_tris = np.array([[0, 3, 4], [0, 4, 1], [1, 4, 5], [1, 5, 2]], dtype=np.int64)
         sizes = []
         for name, b in blades.items():
             foot = b[:, 1:2]
             b = foot + (b - foot) * grow
             if PROTOTYPES[spec['index']][0] in SPRAYED:
-                # The same area as a flat card of the spray's shape, along the midrib from the same foot.
+                # 3D V-cambered & drooped botanical spray shoot anchored at the branchlet attachment foot (v1).
                 along = b[:, 4] - b[:, 1]
-                along /= np.linalg.norm(along, axis=1, keepdims=True)
+                along /= np.maximum(np.linalg.norm(along, axis=1, keepdims=True), 1e-9)
                 across = b[:, 2] - b[:, 0]
                 across -= along * (across * along).sum(axis=1, keepdims=True)
-                across /= np.linalg.norm(across, axis=1, keepdims=True)
+                across /= np.maximum(np.linalg.norm(across, axis=1, keepdims=True), 1e-9)
+                up_shoot = np.cross(along, across)
+                up_shoot /= np.maximum(np.linalg.norm(up_shoot, axis=1, keepdims=True), 1e-9)
+                flip_up = np.where(up_shoot[:, 2:3] < -0.15, -1.0, 1.0)
+                camber_dir = up_shoot * flip_up
                 broad = (np.linalg.norm(np.cross(b[:, 3] - b[:, 0], b[:, 2] - b[:, 0]), axis=1) / SPRAY_ASPECT) ** 0.5
-                near = np.stack([b[:, 1] - across * broad[:, None] / 2, b[:, 1], b[:, 1] + across * broad[:, None] / 2], axis=1)
-                b = np.concatenate([near, near + (along * broad[:, None] * SPRAY_ASPECT)[:, None, :]], axis=1)
-            sizes.append(np.stack([np.linalg.norm(b[:, 3] - b[:, 0], axis=1), np.linalg.norm(b[:, 2] - b[:, 0], axis=1)], axis=1))
-            meshes[name] = dataclasses.replace(meshes[name], vertices=b.reshape(-1, 3).astype(np.float32))
+                long_m = broad * SPRAY_ASPECT
+                half_w = 0.5 * broad[:, None]
+                v1 = b[:, 1]
+                wing_near = 0.14 * broad[:, None] * camber_dir
+                v0 = v1 - half_w * across + wing_near
+                v2 = v1 + half_w * across + wing_near
+                gravity_droop = np.zeros_like(v1)
+                gravity_droop[:, 2] = -0.10 * long_m
+                v4 = v1 + long_m[:, None] * along - (0.05 * long_m[:, None]) * camber_dir + gravity_droop
+                wing_far = 0.17 * broad[:, None] * camber_dir
+                v3 = v4 - half_w * across + wing_far
+                v5 = v4 + half_w * across + wing_far
+                b = np.stack([v0, v1, v2, v3, v4, v5], axis=1)
+            # Recompute smooth area-weighted unit normals across the 4 non-coplanar shoot triangles.
+            p0 = b[:, fold_tris[:, 0]]
+            p1 = b[:, fold_tris[:, 1]]
+            p2 = b[:, fold_tris[:, 2]]
+            fn = np.cross(p1 - p0, p2 - p0)
+            vn = np.zeros_like(b)
+            for corner in range(3):
+                for t_idx in range(4):
+                    vn[:, fold_tris[t_idx, corner]] += fn[:, t_idx]
+            vn /= np.maximum(np.linalg.norm(vn, axis=2, keepdims=True), 1e-12)
+            sizes.append(np.stack([np.linalg.norm(b[:, 4] - b[:, 1], axis=1), np.linalg.norm(b[:, 2] - b[:, 0], axis=1)], axis=1))
+            meshes[name] = dataclasses.replace(
+                meshes[name],
+                vertices=b.reshape(-1, 3).astype(np.float32),
+                normals=vn.reshape(-1, 3).astype(np.float32),
+            )
         sizes = np.concatenate(sizes)
         record[spec['index']].update({'crownFootprintSquareMetres': round(footprint, 1), 'cardMetres': [round(float(v), 3) for v in np.median(sizes, axis=0)],
                                       'cardsKept': int(len(sizes)), 'leavesGrown': int(counts.sum())})
@@ -233,18 +260,17 @@ def main():
         field_cell_m=FIELD_CELL_METRES, latitude=LATITUDE)
     print(f'baked in {time.perf_counter() - clock:.0f} s', flush=True)
 
-    # The pack's own streams: wood as baked, every folded leaf as the one quad through its four corners
-    # (the corners keep their own normals, shade and texture coordinates), and the far crown as baked.
+    # The pack's own streams: cylindrical multi-order wood, 6-vertex 4-triangle 3D V-cambered leaf shoots, and far crown.
     baked = result['forest_instances_manifest']
-    corners, quad, fold = [0, 3, 2, 5], np.array([0, 1, 2, 2, 1, 3], dtype=np.uint32), np.array([0, 3, 4, 0, 4, 1, 1, 4, 5, 1, 5, 2], dtype=np.uint32)
+    fold = np.array([0, 3, 4, 0, 4, 1, 1, 4, 5, 1, 5, 2], dtype=np.uint32)
     vertices, indices, prototypes, vertex_at, index_at = [], [], [], 0, 0
     for entry, made, was, spec in zip(baked['prototypes'], result['prototypes'], before['prototypes'], record):
         leaves = made['leaf_verts_56'].reshape(-1, 6, 14)
         folded = made['leaf_indices_local'].reshape(-1, 12)
         if not np.array_equal(folded, fold[None, :] + (np.arange(len(leaves), dtype=np.uint32) * 6)[:, None]):
-            raise SystemExit(f'{entry["species"]}: a leaf is not the folded blade this script flattens')
+            raise SystemExit(f'{entry["species"]}: leaf indices do not match expected 6-vertex V-folded layout')
         parts = [(made['wood_verts_56'], made['wood_indices_local']),
-                 (leaves[:, corners].reshape(-1, 14), (quad[None, :] + (np.arange(len(leaves), dtype=np.uint32) * 4)[:, None]).ravel()),
+                 (made['leaf_verts_56'], made['leaf_indices_local']),
                  (made['far_verts_56'], made['far_indices_local'])]
         ranges = {}
         for key, (part_vertices, part_indices) in zip(('wood', 'leaf', 'far'), parts):

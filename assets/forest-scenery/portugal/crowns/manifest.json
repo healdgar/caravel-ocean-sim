@@ -10,29 +10,29 @@
  "files": {
   "vertices.bin": {
    "bytes": 41280,
-   "sha256": "fce7e925ccaebcacf4bcf806ea0233bf96832b459650d51f1dd3d718edd598a4",
+   "sha256": "11cebc3568651a3833f70923999ab2292a0a1097aa709ff4b7905a4b74cca217",
    "gzip": {
     "file": "vertices.bin.gz",
-    "bytes": 34823,
-    "sha256": "ca3e0a6a01b5d85819246de668bad07af7062a102e6cd2ba7b3f2e4299afacb8"
+    "bytes": 34845,
+    "sha256": "aa133707bad3d7704bb2cdb02d5abd335efc8dcd52c484d5d4f71c55e019f21b"
    }
   },
   "indices.bin": {
    "bytes": 48396,
-   "sha256": "50b10bfedb6913f02bf643b283f88898e3f3448865fc3ddaa5a22d7b7bee8b93",
+   "sha256": "ff0425292d898763920916892a14e4444773752ab28ecafd7a1ca0ab8019fb61",
    "gzip": {
     "file": "indices.bin.gz",
-    "bytes": 16680,
-    "sha256": "35dfba5fea3cfb4e2392fd2e82f6974f810b57d84358b8475489d1f76cced7d5"
+    "bytes": 16636,
+    "sha256": "2a77b72edf5402a25c5ff19e15e3d9ea7f2eed1014ca7017ed3a2c9d0e05363b"
    }
   },
   "morph.bin": {
    "bytes": 358704,
-   "sha256": "67a1e3610d0c9bd177764afbcb7657e426e0a6d04fa60eca919e37d74af7e023",
+   "sha256": "e4e6b7c2fc8fc7def1bf58681162e41750867ac70920d8f171a0a28122173794",
    "gzip": {
     "file": "morph.bin.gz",
-    "bytes": 33881,
-    "sha256": "f3753ce9a764557ae44cccbfc06ed1b17de764d61c8cf3fdba60d8c052cf12d7"
+    "bytes": 33976,
+    "sha256": "fb42f98d2f56690ab272a251952439dcd6cf6b75f955eab8a973c057960d9e58"
    }
   }
  },
@@ -51,63 +51,63 @@
    "stepCount": 158,
    "morphOffset": 0,
    "low": [
-    -11.568988800048828,
+    -10.9725923538208,
     0.029999999329447746,
-    -11.905797004699707
+    -11.563784900730443
    ],
-   "posScale": 25.03038284368813,
+   "posScale": 25.36684867925942,
    "errorRangeMetres": [
-    1.0994,
-    8.9736
+    0.5786,
+    8.6211
    ],
    "outlineShareRange": [
-    0.9951,
-    1.0048
+    0.995,
+    1.0002
    ],
    "splat": {
     "centre": [
-     0.1723,
-     12.2181,
-     -0.1058
+     0.501,
+     13.1294,
+     -0.2703
     ],
-    "rx": 11.4951,
-    "ry": 11.5391,
+    "rx": 11.2935,
+    "ry": 11.5507,
     "colour": [
-     0.0136,
-     0.0438,
-     0.0032
+     0.0118,
+     0.04,
+     0.0024
     ],
-    "exposure": 0.4607,
+    "exposure": 0.6075,
     "escape": 1,
     "trunkAxisXZ": [
-     0.0444,
-     0.2278
+     0.1367,
+     0.1979
     ]
    },
    "leafErrorMetres": 0.3929,
-   "leaves": 12500,
-   "breadthMetres": 20.409,
+   "leaves": 24000,
+   "breadthMetres": 20.24,
    "look": {
-    "alike": 0.7753,
+    "alike": 0.7812,
     "transmission": 0.13296535767236065,
     "roughness": 0.94,
     "undersideGain": [
-     1.9967,
-     1.5265,
-     5.2526
+     1.9376,
+     1.5099,
+     5.1047
     ]
    },
    "stats": {
-    "undersideSeenLevel": 0.463,
-    "undersideSeenAbove": 0.063,
+    "undersideSeenLevel": 0.467,
+    "undersideSeenAbove": 0.077,
     "cellMetres": 0.3,
-    "level": 0.3581,
-    "fineTriangles": 61004,
-    "leafAreaSquareMetres": 7941.8,
-    "meanOutlineSquareMetres": 416.53,
+    "level": 0.2028,
+    "fineTriangles": 61384,
+    "leafAreaSquareMetres": 8828.4,
+    "meanOutlineSquareMetres": 409.64,
     "leavesCoverShare": 0.846,
-    "cardsCoverShareAtChange": 0.738,
-    "ms": 33252
+    "cardsCoverShareAtChange": 0.637,
+    "ms": 31917
    }
   },
   {
@@ -124,63 +124,63 @@
    "stepCount": 158,
    "morphOffset": 7473,
    "low": [
-    -11.2900245304894,
+    -11.503171369635321,
     0.029999999329447746,
-    -16.169557571411133
+    -15.873029708862305
    ],
-   "posScale": 27.515344619750977,
+   "posScale": 27.687661170959473,
    "errorRangeMetres": [
-    1.0863,
-    8.4952
+    0.9417,
+    8.3921
    ],
    "outlineShareRange": [
-    0.9951,
-    1.0047
+    0.9959,
+    1.0049
    ],
    "splat": {
     "centre": [
-     0.4958,
-     11.4488,
-     -0.6242
+     0.0342,
+     11.5689,
+     -0.5064
     ],
-    "rx": 11.7858,
-    "ry": 11.03,
+    "rx": 11.5374,
+    "ry": 11.2244,
     "colour": [
-     0.0179,
-     0.0453,
-     0.0051
+     0.0139,
+     0.0377,
+     0.0032
     ],
-    "exposure": 0.5039,
+    "exposure": 0.5367,
     "escape": 1,
     "trunkAxisXZ": [
-     0.0831,
-     0.032
+     0.2709,
+     0.0326
     ]
    },
    "leafErrorMetres": 0.3929,
-   "leaves": 9501,
-   "breadthMetres": 20.205,
+   "leaves": 22000,
+   "breadthMetres": 20.166,
    "look": {
-    "alike": 0.7917,
+    "alike": 0.7644,
     "transmission": 0.13296535767236065,
     "roughness": 0.796,
     "undersideGain": [
-     2.0744,
-     1.7928,
-     3.4342
+     2.1083,
+     1.8511,
+     3.536
     ]
    },
    "stats": {
-    "undersideSeenLevel": 0.454,
-    "undersideSeenAbove": 0.055,
+    "undersideSeenLevel": 0.481,
+    "undersideSeenAbove": 0.075,
     "cellMetres": 0.3,
-    "level": 0.3163,
-    "fineTriangles": 60884,
-    "leafAreaSquareMetres": 6941.1,
-    "meanOutlineSquareMetres": 408.23,
-    "leavesCoverShare": 0.813,
-    "cardsCoverShareAtChange": 0.692,
-    "ms": 30181
+    "level": 0.4535,
+    "fineTriangles": 60952,
+    "leafAreaSquareMetres": 8356.3,
+    "meanOutlineSquareMetres": 406.66,
+    "leavesCoverShare": 0.855,
+    "cardsCoverShareAtChange": 0.629,
+    "ms": 29223
    }
   },
   {
@@ -197,63 +197,63 @@
    "stepCount": 158,
    "morphOffset": 14946,
    "low": [
-    -12.545412063598633,
-    -2.339667606999262,
-    -12.540185928344727
+    -12.455808639526367,
+    -2.333919304284816,
+    -12.039445877075195
    ],
-   "posScale": 29.604018498112545,
+   "posScale": 29.202867287072902,
    "errorRangeMetres": [
-    0.7942,
-    9.3768
+    0.8396,
+    9.0599
    ],
    "outlineShareRange": [
-    0.9955,
-    1.005
+    0.995,
+    1.0045
    ],
    "splat": {
     "centre": [
-     0.1171,
-     10.4119,
-     0.2105
+     -0.1458,
+     10.3872,
+     0.1259
     ],
-    "rx": 11.485,
-    "ry": 12.7516,
+    "rx": 11.3986,
+    "ry": 12.7212,
     "colour": [
-     0.0266,
-     0.0703,
-     0.0038
+     0.0257,
+     0.0618,
+     0.0035
     ],
-    "exposure": 0.4542,
+    "exposure": 0.4965,
     "escape": 1,
     "trunkAxisXZ": [
-     -0.1778,
-     -0.0902
+     -0.1911,
+     -0.0589
     ]
    },
    "leafErrorMetres": 0.3929,
-   "leaves": 10501,
-   "breadthMetres": 21.445,
+   "leaves": 24499,
+   "breadthMetres": 21.339,
    "look": {
-    "alike": 0.7533,
+    "alike": 0.737,
     "transmission": 0.153201690575191,
     "roughness": 0.85,
     "undersideGain": [
-     1.6888,
-     1.5143,
-     6.561
+     1.6908,
+     1.5396,
+     6.785
     ]
    },
    "stats": {
-    "undersideSeenLevel": 0.452,
-    "undersideSeenAbove": 0.074,
+    "undersideSeenLevel": 0.451,
+    "undersideSeenAbove": 0.084,
     "cellMetres": 0.3,
-    "level": 0.1974,
-    "fineTriangles": 61140,
-    "leafAreaSquareMetres": 7821.6,
-    "meanOutlineSquareMetres": 459.89,
-    "leavesCoverShare": 0.823,
-    "cardsCoverShareAtChange": 0.733,
-    "ms": 29944
+    "level": 0.2846,
+    "fineTriangles": 60668,
+    "leafAreaSquareMetres": 7052.9,
+    "meanOutlineSquareMetres": 455.35,
+    "leavesCoverShare": 0.842,
+    "cardsCoverShareAtChange": 0.575,
+    "ms": 26918
    }
   },
   {
@@ -270,63 +270,63 @@
    "stepCount": 158,
    "morphOffset": 22419,
    "low": [
-    -15.40926624724183,
+    -15.036498498188276,
     0.029999999329447746,
-    -14.063187568080194
+    -13.860866963028412
    ],
-   "posScale": 28.935566677539683,
+   "posScale": 28.637286614643354,
    "errorRangeMetres": [
-    0.5716,
-    9.7592
+    0.5718,
+    9.5202
    ],
    "outlineShareRange": [
     0.995,
-    1.0003
+    1.0013
    ],
    "splat": {
     "centre": [
-     -1.1596,
-     13.7806,
-     0.1865
+     -0.8916,
+     13.8596,
+     0.2841
     ],
-    "rx": 14.2497,
-    "ry": 12.4136,
+    "rx": 14.1449,
+    "ry": 12.3309,
     "colour": [
-     0.0144,
-     0.039,
-     0.0044
+     0.0136,
+     0.0381,
+     0.0042
     ],
-    "exposure": 0.5034,
+    "exposure": 0.5232,
     "escape": 1,
     "trunkAxisXZ": [
-     -0.6822,
-     0.2493
+     -0.5943,
+     0.3113
     ]
    },
    "leafErrorMetres": 0.3929,
-   "leaves": 13000,
-   "breadthMetres": 23.569,
+   "leaves": 28500,
+   "breadthMetres": 23.403,
    "look": {
-    "alike": 0.8441,
+    "alike": 0.8237,
     "transmission": 0.13296535767236065,
     "roughness": 0.868,
     "undersideGain": [
-     2.466,
-     2.0887,
-     4.1841
+     2.4818,
+     2.1337,
+     4.2365
     ]
    },
    "stats": {
-    "undersideSeenLevel": 0.459,
-    "undersideSeenAbove": 0.048,
+    "undersideSeenLevel": 0.46,
+    "undersideSeenAbove": 0.06,
     "cellMetres": 0.3,
-    "level": 0.13,
-    "fineTriangles": 83232,
-    "leafAreaSquareMetres": 8858.3,
-    "meanOutlineSquareMetres": 555.48,
-    "leavesCoverShare": 0.844,
-    "cardsCoverShareAtChange": 0.733,
-    "ms": 40698
+    "level": 0.1887,
+    "fineTriangles": 85060,
+    "leafAreaSquareMetres": 10820.8,
+    "meanOutlineSquareMetres": 547.72,
+    "leavesCoverShare": 0.869,
+    "cardsCoverShareAtChange": 0.693,
+    "ms": 41705
    }
   },
   {
@@ -343,63 +343,63 @@
    "stepCount": 158,
    "morphOffset": 29892,
    "low": [
-    -4.749241828918457,
-    -0.08739297837018967,
-    -3.7998344898223877
+    -4.849359035491943,
+    -0.11810965836048126,
+    -3.7823197841644287
    ],
-   "posScale": 11.236070804297924,
+   "posScale": 11.255954697728157,
    "errorRangeMetres": [
-    0.5025,
-    2.5369
+    0.5083,
+    2.5378
    ],
    "outlineShareRange": [
-    0.995,
-    1.0046
+    0.9952,
+    1.005
    ],
    "splat": {
     "centre": [
-     -0.933,
-     5.4721,
-     -0.7195
+     -1.0316,
+     5.5043,
+     -0.7697
     ],
-    "rx": 2.7817,
-    "ry": 4.5096,
+    "rx": 2.7946,
+    "ry": 4.5809,
     "colour": [
-     0.0609,
-     0.1147,
-     0.0025
+     0.0703,
+     0.1303,
+     0.0024
     ],
-    "exposure": 0.5449,
+    "exposure": 0.5523,
     "escape": 1,
     "trunkAxisXZ": [
-     -0.1092,
-     -0.3333
+     -0.0828,
+     -0.3817
     ]
    },
    "leafErrorMetres": 0.3929,
-   "leaves": 4000,
-   "breadthMetres": 6.276,
+   "leaves": 6800,
+   "breadthMetres": 6.34,
    "look": {
-    "alike": 0.7377,
+    "alike": 0.7389,
     "transmission": 0.16105650921764147,
     "roughness": 0.748,
     "undersideGain": [
-     0.8886,
-     0.9483,
-     8.7051
+     0.8833,
+     0.9434,
+     8.2704
     ]
    },
    "stats": {
-    "undersideSeenLevel": 0.459,
-    "undersideSeenAbove": 0.078,
-    "cellMetres": 0.2639,
-    "level": 0.3446,
-    "fineTriangles": 4248,
-    "leafAreaSquareMetres": 1134.3,
-    "meanOutlineSquareMetres": 39.39,
-    "leavesCoverShare": 0.821,
-    "cardsCoverShareAtChange": 0.451,
-    "ms": 11227
+    "undersideSeenLevel": 0.464,
+    "undersideSeenAbove": 0.093,
+    "cellMetres": 0.2668,
+    "level": 0.6372,
+    "fineTriangles": 4228,
+    "leafAreaSquareMetres": 1609.2,
+    "meanOutlineSquareMetres": 40.2,
+    "leavesCoverShare": 0.862,
+    "cardsCoverShareAtChange": 0.484,
+    "ms": 11519
    }
   },
   {
@@ -416,63 +416,63 @@
    "stepCount": 158,
    "morphOffset": 37365,
    "low": [
-    -0.770624577999115,
-    -0.23637676239013672,
-    -0.6320579648017883
+    -0.7964307069778442,
+    -0.2415478378534317,
+    -0.6379334609135741
    ],
-   "posScale": 2.6189751625061035,
+   "posScale": 2.6067004352808,
    "errorRangeMetres": [
-    0.1192,
-    0.5601
+    0.1184,
+    0.5584
    ],
    "outlineShareRange": [
-    0.9951,
-    1.003
+    0.995,
+    1.0008
    ],
    "splat": {
     "centre": [
-     -0.081,
-     1.1303,
-     -0.0279
+     -0.0806,
+     1.097,
+     -0.0327
     ],
-    "rx": 0.6025,
-    "ry": 1.1716,
+    "rx": 0.6053,
+    "ry": 1.1725,
     "colour": [
-     0.0152,
-     0.0428,
-     0.0065
+     0.0144,
+     0.0413,
+     0.0062
     ],
-    "exposure": 0.8865,
+    "exposure": 0.8809,
     "escape": 1,
     "trunkAxisXZ": [
-     -0.0208,
-     0.0097
+     -0.026,
+     -0.0084
     ]
    },
    "leafErrorMetres": 0.3929,
-   "leaves": 899,
-   "breadthMetres": 1.489,
+   "leaves": 1189,
+   "breadthMetres": 1.493,
    "look": {
-    "alike": 0.819,
+    "alike": 0.8271,
     "transmission": 0.11931359658782183,
     "roughness": 0.6699999999999999,
     "undersideGain": [
-     2.4132,
-     2.0844,
-     3.5845
+     2.4303,
+     2.0929,
+     3.6236
     ]
    },
    "stats": {
-    "undersideSeenLevel": 0.436,
-    "undersideSeenAbove": 0.049,
-    "cellMetres": 0.0628,
-    "level": 0.7626,
-    "fineTriangles": 3496,
-    "leafAreaSquareMetres": 204.2,
-    "meanOutlineSquareMetres": 2.22,
-    "leavesCoverShare": 0.918,
-    "cardsCoverShareAtChange": 0.508,
-    "ms": 16439
+    "undersideSeenLevel": 0.435,
+    "undersideSeenAbove": 0.05,
+    "cellMetres": 0.0624,
+    "level": 0.8873,
+    "fineTriangles": 3560,
+    "leafAreaSquareMetres": 268.9,
+    "meanOutlineSquareMetres": 2.23,
+    "leavesCoverShare": 0.925,
+    "cardsCoverShareAtChange": 0.473,
+    "ms": 18696
    }
   },
   {
@@ -489,63 +489,63 @@
    "stepCount": 158,
    "morphOffset": 44838,
    "low": [
-    -7.2883630557247105,
+    -7.177340265709713,
     0.029999999329447746,
-    -7.358567714691162
+    -7.118897438049316
    ],
-   "posScale": 21.534327240660787,
+   "posScale": 21.15624496527016,
    "errorRangeMetres": [
-    0.6865,
-    6.2495
+    0.6918,
+    6.2679
    ],
    "outlineShareRange": [
     0.9951,
-    1.0042
+    1.005
    ],
    "splat": {
     "centre": [
-     0.244,
-     9.501,
-     0.539
+     0.3293,
+     9.4518,
+     0.6328
     ],
-    "rx": 7.5324,
-    "ry": 9.131,
+    "rx": 7.5066,
+    "ry": 9.0719,
     "colour": [
-     0.0138,
-     0.0443,
-     0.0033
+     0.0119,
+     0.0403,
+     0.0025
     ],
-    "exposure": 0.5062,
+    "exposure": 0.5658,
     "escape": 1,
     "trunkAxisXZ": [
-     -0.0135,
-     -0.0364
+     -0.0387,
+     -0.0778
     ]
    },
    "leafErrorMetres": 0.3929,
-   "leaves": 7000,
-   "breadthMetres": 14.696,
+   "leaves": 14000,
+   "breadthMetres": 14.624,
    "look": {
-    "alike": 0.7873,
+    "alike": 0.7623,
     "transmission": 0.13296535767236065,
     "roughness": 0.94,
     "undersideGain": [
-     1.9967,
-     1.5265,
-     5.2526
+     1.9376,
+     1.5099,
+     5.1047
     ]
    },
    "stats": {
     "undersideSeenLevel": 0.467,
-    "undersideSeenAbove": 0.065,
+    "undersideSeenAbove": 0.078,
     "cellMetres": 0.3,
-    "level": 0.2667,
-    "fineTriangles": 23656,
-    "leafAreaSquareMetres": 4108.9,
-    "meanOutlineSquareMetres": 215.98,
-    "leavesCoverShare": 0.854,
-    "cardsCoverShareAtChange": 0.736,
-    "ms": 18091
+    "level": 0.319,
+    "fineTriangles": 23896,
+    "leafAreaSquareMetres": 4811.7,
+    "meanOutlineSquareMetres": 213.85,
+    "leavesCoverShare": 0.86,
+    "cardsCoverShareAtChange": 0.621,
+    "ms": 17745
    }
   },
   {
@@ -562,63 +562,63 @@
    "stepCount": 158,
    "morphOffset": 52311,
    "low": [
-    -10.285587310791016,
+    -10.819150924682617,
     0.029999999329447746,
-    -7.921130657196045
+    -7.992543697357178
    ],
-   "posScale": 20.589476585388184,
+   "posScale": 21.19229221343994,
    "errorRangeMetres": [
-    0.7049,
-    6.7391
+    0.7051,
+    6.612
    ],
    "outlineShareRange": [
-    0.9951,
+    0.9957,
     1.0049
    ],
    "splat": {
     "centre": [
-     -0.6092,
-     9.9457,
-     0.8863
+     -0.3197,
+     9.7024,
+     0.7671
     ],
-    "rx": 8.497,
-    "ry": 8.8084,
+    "rx": 8.6685,
+    "ry": 8.5432,
     "colour": [
-     0.0175,
-     0.0445,
-     0.005
+     0.0136,
+     0.0371,
+     0.0032
     ],
-    "exposure": 0.4799,
+    "exposure": 0.5184,
     "escape": 1,
     "trunkAxisXZ": [
-     -0.1216,
-     0.0601
+     -0.1381,
+     0.1188
     ]
    },
    "leafErrorMetres": 0.3929,
-   "leaves": 6000,
-   "breadthMetres": 15.331,
+   "leaves": 13501,
+   "breadthMetres": 15.25,
    "look": {
-    "alike": 0.7789,
+    "alike": 0.7534,
     "transmission": 0.13296535767236065,
     "roughness": 0.796,
     "undersideGain": [
-     2.0744,
-     1.7928,
-     3.4342
+     2.1083,
+     1.8511,
+     3.536
     ]
    },
    "stats": {
-    "undersideSeenLevel": 0.45,
-    "undersideSeenAbove": 0.054,
+    "undersideSeenLevel": 0.474,
+    "undersideSeenAbove": 0.074,
     "cellMetres": 0.3,
-    "level": 0.2063,
-    "fineTriangles": 26416,
-    "leafAreaSquareMetres": 4097.9,
-    "meanOutlineSquareMetres": 235.03,
-    "leavesCoverShare": 0.808,
-    "cardsCoverShareAtChange": 0.687,
-    "ms": 17872
+    "level": 0.3261,
+    "fineTriangles": 27340,
+    "leafAreaSquareMetres": 4987,
+    "meanOutlineSquareMetres": 232.56,
+    "leavesCoverShare": 0.846,
+    "cardsCoverShareAtChange": 0.626,
+    "ms": 18446
    }
   },
   {
@@ -635,63 +635,63 @@
    "stepCount": 158,
    "morphOffset": 59784,
    "low": [
-    -9.905257225036621,
-    -1.1893981584856492,
-    -8.990981101989746
+    -9.413605690002441,
+    -1.0271734720328318,
+    -9.053085162746388
    ],
-   "posScale": 20.00621830313897,
+   "posScale": 19.495099497423457,
    "errorRangeMetres": [
-    0.696,
-    6.8421
+    0.6983,
+    6.8728
    ],
    "outlineShareRange": [
-    0.9952,
-    1.0049
+    0.995,
+    1.005
    ],
    "splat": {
     "centre": [
-     0.2616,
-     7.6169,
-     0.1753
+     0.2811,
+     7.6553,
+     -0.0373
     ],
-    "rx": 9.0057,
-    "ry": 8.8063,
+    "rx": 9.0158,
+    "ry": 8.6824,
     "colour": [
-     0.0272,
-     0.0723,
-     0.0039
+     0.0271,
+     0.065,
+     0.0036
     ],
-    "exposure": 0.4249,
+    "exposure": 0.4711,
     "escape": 1,
     "trunkAxisXZ": [
-     0.1201,
-     -0.0423
+     0.0566,
+     -0.0516
     ]
    },
    "leafErrorMetres": 0.3929,
-   "leaves": 7000,
-   "breadthMetres": 15.781,
+   "leaves": 14999,
+   "breadthMetres": 15.679,
    "look": {
-    "alike": 0.7643,
+    "alike": 0.7525,
     "transmission": 0.153201690575191,
     "roughness": 0.85,
     "undersideGain": [
-     1.6888,
-     1.5143,
-     6.561
+     1.6908,
+     1.5396,
+     6.785
     ]
    },
    "stats": {
-    "undersideSeenLevel": 0.444,
-    "undersideSeenAbove": 0.067,
+    "undersideSeenLevel": 0.44,
+    "undersideSeenAbove": 0.077,
     "cellMetres": 0.3,
-    "level": 0.1985,
-    "fineTriangles": 28516,
-    "leafAreaSquareMetres": 4691.1,
-    "meanOutlineSquareMetres": 249.04,
-    "leavesCoverShare": 0.841,
-    "cardsCoverShareAtChange": 0.746,
-    "ms": 20237
+    "level": 0.2657,
+    "fineTriangles": 28528,
+    "leafAreaSquareMetres": 4134.8,
+    "meanOutlineSquareMetres": 245.82,
+    "leavesCoverShare": 0.855,
+    "cardsCoverShareAtChange": 0.61,
+    "ms": 17918
    }
   },
   {
@@ -708,63 +708,63 @@
    "stepCount": 158,
    "morphOffset": 67257,
    "low": [
-    -9.835258483886719,
+    -9.508827209472656,
     0.029999999329447746,
-    -9.58457824772538
+    -9.483282929961941
    ],
-   "posScale": 23.164980622008443,
+   "posScale": 22.92451355047524,
    "errorRangeMetres": [
-    1.0745,
-    7.186
+    0.9267,
+    7.265
    ],
    "outlineShareRange": [
-    0.9956,
-    1.005
+    0.9953,
+    1.0046
    ],
    "splat": {
     "centre": [
-     0.5683,
-     10.9392,
-     0.068
+     0.176,
+     10.7571,
+     -0.0391
     ],
-    "rx": 9.6526,
-    "ry": 10.0044,
+    "rx": 9.4442,
+    "ry": 10.0686,
     "colour": [
-     0.0143,
-     0.0387,
-     0.0043
+     0.013,
+     0.0366,
+     0.004
     ],
-    "exposure": 0.4432,
+    "exposure": 0.47,
     "escape": 1,
     "trunkAxisXZ": [
-     -0.2048,
-     -0.2359
+     -0.101,
+     -0.1709
     ]
    },
    "leafErrorMetres": 0.3929,
-   "leaves": 7000,
-   "breadthMetres": 17.414,
+   "leaves": 15000,
+   "breadthMetres": 17.28,
    "look": {
-    "alike": 0.8102,
+    "alike": 0.7807,
     "transmission": 0.13296535767236065,
     "roughness": 0.868,
     "undersideGain": [
-     2.466,
-     2.0887,
-     4.1841
+     2.4818,
+     2.1337,
+     4.2365
     ]
    },
    "stats": {
-    "undersideSeenLevel": 0.462,
-    "undersideSeenAbove": 0.046,
+    "undersideSeenLevel": 0.457,
+    "undersideSeenAbove": 0.059,
     "cellMetres": 0.3,
-    "level": 0.2408,
-    "fineTriangles": 35720,
-    "leafAreaSquareMetres": 4328.7,
-    "meanOutlineSquareMetres": 303.25,
-    "leavesCoverShare": 0.81,
-    "cardsCoverShareAtChange": 0.678,
-    "ms": 21806
+    "level": 0.3387,
+    "fineTriangles": 35116,
+    "leafAreaSquareMetres": 5435.6,
+    "meanOutlineSquareMetres": 298.6,
+    "leavesCoverShare": 0.84,
+    "cardsCoverShareAtChange": 0.617,
+    "ms": 20762
    }
   },
   {
@@ -781,63 +781,63 @@
    "stepCount": 158,
    "morphOffset": 74730,
    "low": [
-    -2.2136642932891846,
-    -0.0862383171916008,
-    -2.8333139419555664
+    -2.133307695388794,
+    -0.033462412655353546,
+    -2.896258592605591
    ],
-   "posScale": 8.8074297234416,
+   "posScale": 9.034920580685139,
    "errorRangeMetres": [
-    0.4001,
-    1.9176
+    0.4029,
+    1.8534
    ],
    "outlineShareRange": [
-    0.9951,
-    1.0049
+    0.995,
+    1.0041
    ],
    "splat": {
     "centre": [
-     0.1724,
-     4.5974,
-     -0.115
+     0.2298,
+     4.6579,
+     -0.0886
     ],
-    "rx": 2.0258,
-    "ry": 3.3599,
+    "rx": 2.0496,
+    "ry": 3.4037,
     "colour": [
-     0.0502,
-     0.0963,
+     0.0626,
+     0.1173,
      0.0025
     ],
-    "exposure": 0.6015,
+    "exposure": 0.5978,
     "escape": 1,
     "trunkAxisXZ": [
-     0.2155,
-     0.2199
+     0.3506,
+     0.5053
     ]
    },
    "leafErrorMetres": 0.3929,
-   "leaves": 3001,
-   "breadthMetres": 4.623,
+   "leaves": 4800,
+   "breadthMetres": 4.681,
    "look": {
-    "alike": 0.7542,
+    "alike": 0.7638,
     "transmission": 0.16105650921764147,
     "roughness": 0.748,
     "undersideGain": [
-     0.8886,
-     0.9483,
-     8.7051
+     0.8833,
+     0.9434,
+     8.2704
     ]
    },
    "stats": {
-    "undersideSeenLevel": 0.435,
-    "undersideSeenAbove": 0.065,
-    "cellMetres": 0.2103,
-    "level": 0.4572,
-    "fineTriangles": 3668,
-    "leafAreaSquareMetres": 789.1,
-    "meanOutlineSquareMetres": 21.37,
-    "leavesCoverShare": 0.832,
-    "cardsCoverShareAtChange": 0.352,
-    "ms": 10575
+    "undersideSeenLevel": 0.481,
+    "undersideSeenAbove": 0.09,
+    "cellMetres": 0.212,
+    "level": 0.8298,
+    "fineTriangles": 3664,
+    "leafAreaSquareMetres": 1116.7,
+    "meanOutlineSquareMetres": 21.91,
+    "leavesCoverShare": 0.872,
+    "cardsCoverShareAtChange": 0.417,
+    "ms": 11715
    }
   },
   {
@@ -854,63 +854,63 @@
    "stepCount": 158,
    "morphOffset": 82203,
    "low": [
-    -0.3810209333896637,
-    -0.1351528912782669,
-    -0.47261338484102444
+    -0.3809663653373718,
+    -0.14179201424121857,
+    -0.47910928565884414
    ],
-   "posScale": 1.607272818684578,
+   "posScale": 1.6116810590028763,
    "errorRangeMetres": [
     0.0797,
     0.4747
    ],
    "outlineShareRange": [
     0.9951,
-    1.0039
+    1.0032
    ],
    "splat": {
     "centre": [
-     0.1177,
-     0.6533,
-     -0.0466
+     0.1143,
+     0.6747,
+     -0.0527
     ],
-    "rx": 0.426,
-    "ry": 0.7493,
+    "rx": 0.4264,
+    "ry": 0.75,
     "colour": [
-     0.0178,
-     0.0502,
-     0.0084
+     0.018,
+     0.0515,
+     0.0088
     ],
-    "exposure": 0.9757,
+    "exposure": 0.9759,
     "escape": 1,
     "trunkAxisXZ": [
-     0.0312,
-     -0.0154
+     0.0655,
+     -0.0087
     ]
    },
    "leafErrorMetres": 0.3929,
    "leaves": 284,
-   "breadthMetres": 1.001,
+   "breadthMetres": 1.002,
    "look": {
-    "alike": 0.8587,
+    "alike": 0.8562,
     "transmission": 0.11931359658782183,
     "roughness": 0.6699999999999999,
     "undersideGain": [
-     2.4132,
-     2.0844,
-     3.5845
+     2.4303,
+     2.0929,
+     3.6236
     ]
    },
    "stats": {
-    "undersideSeenLevel": 0.424,
-    "undersideSeenAbove": 0.032,
+    "undersideSeenLevel": 0.435,
+    "undersideSeenAbove": 0.036,
     "cellMetres": 0.042,
-    "level": 1.013,
-    "fineTriangles": 3492,
-    "leafAreaSquareMetres": 65.3,
+    "level": 0.9959,
+    "fineTriangles": 3528,
+    "leafAreaSquareMetres": 64.2,
     "meanOutlineSquareMetres": 1,
-    "leavesCoverShare": 0.972,
-    "cardsCoverShareAtChange": 0.654,
-    "ms": 13628
+    "leavesCoverShare": 0.973,
+    "cardsCoverShareAtChange": 0.703,
+    "ms": 12753
    }
   }
  ]

@@ -325,12 +325,16 @@ fn forestGroveStanding(p:vec2f,parted:f32)->f32{
  let seed=forestCoverageHash(owner^forestCoverageHash((bitcast<u32>(home.x)*0x9e3779b9u)^forestCoverageHash(bitcast<u32>(home.y)+0x51ed270bu)));
  // The canopy lies over the ground as the wood does, so it follows every rise and hollow.
  let ground=forestGroveGroundAt(at);
+ let camDist=distance(vec3f(at.x,ground,at.y),F.camPos.xyz);
+ let nearFade=smoothstep(95.0,165.0,camDist);
  let parted=1.-smoothstep(${FOREST_GROVE_CLOSING[0]},${FOREST_GROVE_CLOSING[1]},distance(vec3f(at.x,ground,at.y),F.camPos.xyz)/forestCanopyRange());
  let standing=forestGroveStanding(at,parted);
  let sunk=${FOREST_GROVE_SUNK_METRES.toFixed(1)}+max(square-${FOREST_GROVE_FLAT_METRES.toFixed(1)},0.)*${FOREST_GROVE_SUNK_SHARE};
  var y=ground+(tall+sunk)*standing-sunk;
- if(skirt){y-=min((tall+sunk)*standing,3.+1.5*square);}
- if(standing<=0.001){y-=24.0;}
+ let standEff=standing*nearFade;
+ y=ground+(tall+sunk)*standEff-sunk-(1.-nearFade)*8.0;
+ if(skirt){y-=min((tall+sunk)*standEff,3.+1.5*square);}
+ if(standEff<=0.001){y-=24.0;}
  var o:ForestVertex;
  o.nativeMaterial=-1;o.crownFade=1.;o.canopyAO=1.;o.coverageSeed=seed;
  o.world=vec3f(at.x,y,at.y);
@@ -343,8 +347,8 @@ fn forestGroveStanding(p:vec2f,parted:f32)->f32{
  let reach=max(square,4.);
  let east=at+vec2f(reach,0.);let south=at+vec2f(0.,reach);
  let rise=vec2f(forestGroveGroundAt(east)-ground,forestGroveGroundAt(south)-ground)/reach
-  +(tall+sunk)*vec2f(forestGroveStanding(east,parted)-standing,forestGroveStanding(south,parted)-standing)/reach
-  -lump/up*standing;
+  +(tall+sunk)*nearFade*vec2f(forestGroveStanding(east,parted)-standing,forestGroveStanding(south,parted)-standing)/reach
+  -lump/up*standEff;
  let outward=normalize(vec3f(-rise.x,1.,-rise.y));
  let colour=look.rgb*look.rgb*forestGrove.tint.rgb*mix(.92,1.08,f32((seed>>24u)&255u)/255.);
  let lit=forestCrownLight(o.world,leaves,outward,colour,look.a,canopy.a,forestGrove.optics,forestGrove.underside.rgb);

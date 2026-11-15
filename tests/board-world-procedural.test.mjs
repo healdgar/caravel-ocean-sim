@@ -309,14 +309,14 @@ test('fractured polyhedral boulders (18 buckets) + 4 grass buckets + progressive
   assert.match(GROUND_COVER_CULL, /\*f32\(6\)|ROCK_ARCHETYPES|lod\*6u/);
   assert.match(CITY_CULL, /params\.z\s*,\s*0\.0\s*,\s*params\.w/);
 
-  // Zero-discard invariant for terrain passes while isolated cityFS performs 4x4 Bayer dither crossfade.
+  // Zero-discard invariant across terrain and city passes (cityFS crossfades via MSAA @builtin(sample_mask)).
   assert.doesNotMatch(GROUND_DETAIL_RENDER, /\bdiscard\b/);
   assert.doesNotMatch(wgslBody('landSurface'), /\bdiscard\b/);
   assert.doesNotMatch(wgslBody('landOpaque'), /\bdiscard\b/);
   assert.doesNotMatch(wgslBody('landFinish'), /\bdiscard\b/);
   const cityFsBody = wgslBody('cityFS');
-  assert.match(cityFsBody, /\bdiscard\b/);
-  assert.match(TERRAIN, /cityBayer4/);
+  assert.doesNotMatch(cityFsBody, /\bdiscard\b/);
+  assert.match(cityFsBody, /cityNearSampleMask/);
 });
 
 test('harbor fleet archetypes, bathymetry & berth safety, caravan bridge decks, and Lisbon street bridges', async () => {

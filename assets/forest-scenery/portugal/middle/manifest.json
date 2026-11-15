@@ -12,24 +12,24 @@
   },
   "files": {
     "middle-vertices.bin": {
-      "bytes": 975728,
-      "sha256": "5f9c90f6acf5f83f7462b8ae0850fd77302e26bbb36e267ced59cc24746e2554",
+      "bytes": 993408,
+      "sha256": "6851826ec5f580717ba51b44f7a3a9a8da980d4c0a469bec08a8803630c85511",
       "gzip": {
         "file": "middle-vertices.bin.gz",
-        "bytes": 603200,
-        "sha256": "9ae92d36fe036e21ab159c773efa9403be3f8b448961693ddedf425d57b672af"
+        "bytes": 631153,
+        "sha256": "8f7dca8c5139e7c7a00c0a1fabd4fda808e9c6ad83f6846fe0f2076afbed5b0c"
       },
-      "vertexCount": 18764
+      "vertexCount": 19104
     },
     "middle-indices.bin": {
-      "bytes": 374136,
-      "sha256": "878ee712005fac76228ef5b53e1e84d4930cf1d5c844c94281190de339bd32c2",
+      "bytes": 392856,
+      "sha256": "613868000c1bdcbf925837e9d2036d542b9b4815367d31d4b1818193cbd92041",
       "gzip": {
         "file": "middle-indices.bin.gz",
-        "bytes": 111658,
-        "sha256": "07feff7453f8c8849420ad36b7d4ca7a268349a1eea032e89a13ce64c038718a"
+        "bytes": 116568,
+        "sha256": "001d9e687da69eaae43117367b7077544ba5afe8346be0a2714fc5181b3f1391"
       },
-      "indexCount": 93534
+      "indexCount": 98214
     }
   },
   "prototypes": [
@@ -43,17 +43,17 @@
       "crownBaseMetres": 7.639,
       "wood": {
         "firstIndex": 0,
-        "indexCount": 7839,
-        "triangles": 2613,
-        "sourceTriangles": 16801
+        "indexCount": 4518,
+        "triangles": 1506,
+        "sourceTriangles": 35618
       },
       "shell": {
-        "firstIndex": 7839,
-        "indexCount": 5820,
-        "triangles": 1940,
-        "sourceProxyAreaSquareMetres": 2148.26
+        "firstIndex": 4518,
+        "indexCount": 4728,
+        "triangles": 1576,
+        "sourceProxyAreaSquareMetres": 1498.83
       },
-      "geometryErrorMetres": 21.6522
+      "geometryErrorMetres": 24.0248
     },
     {
       "id": 1,
@@ -64,18 +64,18 @@
       "crownRadiusMetres": 16.178,
       "crownBaseMetres": 5.65,
       "wood": {
-        "firstIndex": 13659,
-        "indexCount": 8343,
-        "triangles": 2781,
-        "sourceTriangles": 17052
+        "firstIndex": 9246,
+        "indexCount": 5934,
+        "triangles": 1978,
+        "sourceTriangles": 35731
       },
       "shell": {
-        "firstIndex": 22002,
-        "indexCount": 5430,
-        "triangles": 1810,
-        "sourceProxyAreaSquareMetres": 2261.79
+        "firstIndex": 15180,
+        "indexCount": 7002,
+        "triangles": 2334,
+        "sourceProxyAreaSquareMetres": 1701.18
       },
-      "geometryErrorMetres": 24.4918
+      "geometryErrorMetres": 27.1743
     },
     {
       "id": 2,
@@ -86,18 +86,18 @@
       "crownRadiusMetres": 12.784,
       "crownBaseMetres": 4.176,
       "wood": {
-        "firstIndex": 27432,
-        "indexCount": 5886,
-        "triangles": 1962,
-        "sourceTriangles": 17062
+        "firstIndex": 22182,
+        "indexCount": 7668,
+        "triangles": 2556,
+        "sourceTriangles": 35934
       },
       "shell": {
-        "firstIndex": 33318,
-        "indexCount": 4758,
-        "triangles": 1586,
-        "sourceProxyAreaSquareMetres": 3367.21
+        "firstIndex": 29850,
+        "indexCount": 2232,
+        "triangles": 744,
+        "sourceProxyAreaSquareMetres": 2269.67
       },
-      "geometryErrorMetres": 25.7877
+      "geometryErrorMetres": 31.2709
     },
     {
       "id": 3,
@@ -108,18 +108,18 @@
       "crownRadiusMetres": 17.191,
       "crownBaseMetres": 6.237,
       "wood": {
-        "firstIndex": 38076,
-        "indexCount": 7224,
-        "triangles": 2408,
-        "sourceTriangles": 16948
+        "firstIndex": 32082,
+        "indexCount": 7791,
+        "triangles": 2597,
+        "sourceTriangles": 35503
       },
       "shell": {
-        "firstIndex": 45300,
-        "indexCount": 9240,
-        "triangles": 3080,
-        "sourceProxyAreaSquareMetres": 4313.52
+        "firstIndex": 39873,
+        "indexCount": 11652,
+        "triangles": 3884,
+        "sourceProxyAreaSquareMetres": 3248.16
       },
-      "geometryErrorMetres": 28.2332
+      "geometryErrorMetres": 30.3434
     },
     {
       "id": 4,
@@ -130,18 +130,18 @@
       "crownRadiusMetres": 5.003,
       "crownBaseMetres": 3.707,
       "wood": {
-        "firstIndex": 54540,
-        "indexCount": 576,
-        "triangles": 192,
-        "sourceTriangles": 2902
+        "firstIndex": 51525,
+        "indexCount": 975,
+        "triangles": 325,
+        "sourceTriangles": 11346
       },
       "shell": {
-        "firstIndex": 55116,
-        "indexCount": 804,
-        "triangles": 268,
-        "sourceProxyAreaSquareMetres": 142.79
+        "firstIndex": 52500,
+        "indexCount": 834,
+        "triangles": 278,
+        "sourceProxyAreaSquareMetres": 147.97
       },
-      "geometryErrorMetres": 13.2731
+      "geometryErrorMetres": 12.909
     },
     {
       "id": 5,
@@ -152,18 +152,18 @@
       "crownRadiusMetres": 0.585,
       "crownBaseMetres": 0.236,
       "wood": {
-        "firstIndex": 55920,
-        "indexCount": 228,
-        "triangles": 76,
-        "sourceTriangles": 2070
+        "firstIndex": 53334,
+        "indexCount": 297,
+        "triangles": 99,
+        "sourceTriangles": 6625
       },
       "shell": {
-        "firstIndex": 56148,
+        "firstIndex": 53631,
         "indexCount": 300,
         "triangles": 100,
-        "sourceProxyAreaSquareMetres": 2.37
+        "sourceProxyAreaSquareMetres": 2.48
       },
-      "geometryErrorMetres": 1.4974
+      "geometryErrorMetres": 1.557
     },
     {
       "id": 6,
@@ -174,18 +174,18 @@
       "crownRadiusMetres": 10.068,
       "crownBaseMetres": 5.489,
       "wood": {
-        "firstIndex": 56448,
-        "indexCount": 4929,
-        "triangles": 1643,
-        "sourceTriangles": 11636
+        "firstIndex": 53931,
+        "indexCount": 5376,
+        "triangles": 1792,
+        "sourceTriangles": 23461
       },
       "shell": {
-        "firstIndex": 61377,
-        "indexCount": 5328,
-        "triangles": 1776,
-        "sourceProxyAreaSquareMetres": 1050.34
+        "firstIndex": 59307,
+        "indexCount": 2976,
+        "triangles": 992,
+        "sourceProxyAreaSquareMetres": 733.55
       },
-      "geometryErrorMetres": 14.8967
+      "geometryErrorMetres": 18.2825
     },
     {
       "id": 7,
@@ -196,18 +196,18 @@
       "crownRadiusMetres": 12.335,
       "crownBaseMetres": 4.946,
       "wood": {
-        "firstIndex": 66705,
-        "indexCount": 5505,
-        "triangles": 1835,
-        "sourceTriangles": 11849
+        "firstIndex": 62283,
+        "indexCount": 6477,
+        "triangles": 2159,
+        "sourceTriangles": 23705
       },
       "shell": {
-        "firstIndex": 72210,
-        "indexCount": 2940,
-        "triangles": 980,
-        "sourceProxyAreaSquareMetres": 1323.65
+        "firstIndex": 68760,
+        "indexCount": 3336,
+        "triangles": 1112,
+        "sourceProxyAreaSquareMetres": 997.33
       },
-      "geometryErrorMetres": 18.6629
+      "geometryErrorMetres": 20.6791
     },
     {
       "id": 8,
@@ -218,18 +218,18 @@
       "crownRadiusMetres": 9.836,
       "crownBaseMetres": 4.085,
       "wood": {
-        "firstIndex": 75150,
-        "indexCount": 4557,
-        "triangles": 1519,
-        "sourceTriangles": 11784
+        "firstIndex": 72096,
+        "indexCount": 7428,
+        "triangles": 2476,
+        "sourceTriangles": 23659
       },
       "shell": {
-        "firstIndex": 79707,
-        "indexCount": 5286,
-        "triangles": 1762,
-        "sourceProxyAreaSquareMetres": 2008.84
+        "firstIndex": 79524,
+        "indexCount": 6156,
+        "triangles": 2052,
+        "sourceProxyAreaSquareMetres": 1350.83
       },
-      "geometryErrorMetres": 19.769
+      "geometryErrorMetres": 20.2846
     },
     {
       "id": 9,
@@ -240,18 +240,18 @@
       "crownRadiusMetres": 11.472,
       "crownBaseMetres": 7.318,
       "wood": {
-        "firstIndex": 84993,
-        "indexCount": 4335,
-        "triangles": 1445,
-        "sourceTriangles": 11651
+        "firstIndex": 85680,
+        "indexCount": 5541,
+        "triangles": 1847,
+        "sourceTriangles": 23648
       },
       "shell": {
-        "firstIndex": 89328,
-        "indexCount": 3048,
-        "triangles": 1016,
-        "sourceProxyAreaSquareMetres": 2055.64
+        "firstIndex": 91221,
+        "indexCount": 5568,
+        "triangles": 1856,
+        "sourceProxyAreaSquareMetres": 1548.48
       },
-      "geometryErrorMetres": 19.6331
+      "geometryErrorMetres": 20.824
     },
     {
       "id": 10,
@@ -262,18 +262,18 @@
       "crownRadiusMetres": 2.772,
       "crownBaseMetres": 3.108,
       "wood": {
-        "firstIndex": 92376,
-        "indexCount": 441,
-        "triangles": 147,
-        "sourceTriangles": 2932
+        "firstIndex": 96789,
+        "indexCount": 741,
+        "triangles": 247,
+        "sourceTriangles": 7257
       },
       "shell": {
-        "firstIndex": 92817,
-        "indexCount": 372,
-        "triangles": 124,
-        "sourceProxyAreaSquareMetres": 60.0
+        "firstIndex": 97530,
+        "indexCount": 336,
+        "triangles": 112,
+        "sourceProxyAreaSquareMetres": 63.72
       },
-      "geometryErrorMetres": 5.8644
+      "geometryErrorMetres": 5.8039
     },
     {
       "id": 11,
@@ -284,13 +284,13 @@
       "crownRadiusMetres": 0.288,
       "crownBaseMetres": 0.175,
       "wood": {
-        "firstIndex": 93189,
-        "indexCount": 129,
-        "triangles": 43,
-        "sourceTriangles": 972
+        "firstIndex": 97866,
+        "indexCount": 132,
+        "triangles": 44,
+        "sourceTriangles": 3125
       },
       "shell": {
-        "firstIndex": 93318,
+        "firstIndex": 97998,
         "indexCount": 216,
         "triangles": 72,
         "sourceProxyAreaSquareMetres": 0.81

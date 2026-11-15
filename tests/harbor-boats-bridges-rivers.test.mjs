@@ -34,6 +34,7 @@ import {
   TRADE_VESSEL_ARCHETYPES,
   TRADE_VESSEL_CONTINUUM_WGSL,
   TRADE_VESSEL_SPLAT_WGSL,
+  TRADE_VESSEL_WAVE_WGSL,
   computeSailingPolar,
   createTradeVessels,
   createVesselAutopilotState,
@@ -42,7 +43,9 @@ import {
   sampleTradeVesselState,
   stepTradeVesselAutopilot,
   tradeVesselsSource,
+  tradeVesselsSubmergedSource,
 } from '../js/trade-vessels.js';
+import { openBoard } from '../scripts/board-host.mjs';
 
 function upsampleSurvey(survey, targetN = 257) {
   const sN = Math.round(Math.sqrt(survey.length));
@@ -834,5 +837,173 @@ test('GPU continuum half-edge collapse manifold, horizon splat, and zero-discard
   ]) {
     assert.ok(!/\bdiscard\b/.test(src), `${name} contains zero discard statements (TBDR clean)`);
     assert.match(src, /@builtin\(sample_mask\)/, `${name} outputs @builtin(sample_mask)`);
+  }
+});
+
+test('Lisbon 1550 riverboats lock strictly inside rendered riverReaches at exact water elevation, with loaded draft, proportional Y scale, GPU wave compute, drawSubmerged & wake sources', async (t) => {
+  const { baked, region, heights, port, country } = buildLisbonCountry();
+  const inlandWaterAt = createInlandWaterSampler(country);
+  assert.ok(country.riverReaches.length > 0, 'Lisbon country builds rendered riverReaches');
+
+  // Verify WGSL TBDR & storage-buffer discipline
+  const waveStorageCount = (TRADE_VESSEL_WAVE_WGSL.match(/var<storage\b/g) || []).length;
+  assert.ok(waveStorageCount <= 8, `TRADE_VESSEL_WAVE_WGSL storage buffers (${waveStorageCount}) must stay <= 8`);
+  const submergedSrc = tradeVesselsSubmergedSource();
+  assert.ok(!/\bdiscard\b/.test(submergedSrc), 'tradeVesselsSubmergedSource contains zero discard statements');
+  assert.match(TRADE_VESSELS_WGSL, /scaleMetres\s*=\s*sc4\.xyz\s*\*\s*att\.z/, 'hull shader scales X/Y/Z proportionally by scaleMul');
+
+  const { mockDevice, mockResources } = createMockTradeEnv(t);
+  const computeOrder = [];
+  let capturedSubmergedBound = 0;
+  let submergedDraws = 0;
+  const mockWaterOptics = {
+    async capture(spec) {
+      assert.equal(spec.entry, 'tvSubmergedFS');
+      assert.ok(spec.source.includes('fn tvSubmergedFS'));
+      return {
+        pipeline: { getBindGroupLayout: () => ({}) },
+        bind(pass, above) {
+          assert.equal(typeof above, 'boolean');
+          capturedSubmergedBound++;
+        },
+      };
+    },
+  };
+
+  const tv = await createTradeVessels({
+    device: mockDevice,
+    shader: async (_src, label) => ({ label, getBindGroupLayout: () => ({}) }),
+    computePipe: async (_src, label) => ({ label, getBindGroupLayout: () => ({}) }),
+    resources: mockResources,
+    oceanBridge: {
+      dispTex: { createView: () => ({}) },
+      waterOptics: mockWaterOptics,
+    },
+  });
+  t.after(() => tv.destroy());
+
+  const world = new Uint8Array(readFileSync(new URL('../' + BAKED_WORLDS['lisbon:1550'], import.meta.url)));
+  const board = await openBoard(baked.request, { world });
+  let snap;
+  try {
+    snap = await board.hook('caravans');
+  } finally {
+    await board.close();
+  }
+
+  const portWithCountry = { ...port, country };
+  const mockTerrain = {
+    region,
+    bridges: country.bridges,
+    inlandWaterAt,
+    height: (wx, wz) => terrainSurfaceSample(heights, wx, wz, region),
+    waveShelter: () => 0.85,
+  };
+
+  tv.setTraffic(snap, region, country.riverReaches, [], {
+    port: portWithCountry,
+    bridges: country.bridges,
+    inlandWaterAt,
+    region,
+    heights,
+  });
+
+  let maxRiverLatRatio = 0;
+  let maxWaterElevErr = 0;
+  let riverStepSamples = 0;
+
+  for (let step = 0; step < 180; step++) {
+    tv.stepSimulation(0.25, step * 0.25, { windSpeed: 8.5, windDir: 0.4 }, mockTerrain);
+    if (step % 15 === 0) {
+      const located = tv.locate();
+      const riverBoats = located.filter((v) => v.mode === 'river');
+      assert.ok(riverBoats.length >= 1, `expected >= 1 active riverboat at step ${step}`);
+      for (const rb of riverBoats) {
+        const arch = getTradeVesselArchetype(rb.archetype);
+        const halfBeam = arch.beam * rb.scale * 0.5;
+        assert.ok(rb.channelHw > halfBeam, `riverboat ${rb.id} sits in navigable reach (hw=${rb.channelHw}, halfBeam=${halfBeam})`);
+        const latOuter = Math.abs(rb.crossTrackM) + halfBeam;
+        assert.ok(
+          latOuter <= rb.channelHw + 1e-3,
+          `riverboat ${rb.id} stays strictly inside channel ribbon (|dLat|+halfBeam=${latOuter.toFixed(3)} <= hw=${rb.channelHw})`,
+        );
+        maxRiverLatRatio = Math.max(maxRiverLatRatio, latOuter / rb.channelHw);
+
+        const iw = inlandWaterAt(rb.worldX, rb.worldZ);
+        if (iw) {
+          const wyErr = Math.abs(rb.waterY - iw.wy);
+          maxWaterElevErr = Math.max(maxWaterElevErr, wyErr);
+          assert.ok(wyErr < 0.08, `riverboat ${rb.id} waterY=${rb.waterY.toFixed(3)} matches rendered inlandWater wy=${iw.wy.toFixed(3)} (no levitation ratchet)`);
+        } else {
+          // Only sea-mouth transition station can touch y=0 coastal water
+          assert.ok(Math.abs(rb.waterY) < 0.08, `sea-mouth riverboat ${rb.id} transitions smoothly to sea level (waterY=${rb.waterY})`);
+        }
+        assert.ok(rb.draft >= 0.24 && rb.draft <= 0.35, `riverboat ${rb.id} loaded draft ${rb.draft.toFixed(3)}m sits 0.24-0.34m deep`);
+        const keelImmersion = rb.waterY - (rb.y - rb.lightDraft);
+        if (rb.waterY > 0.40) {
+          assert.ok(rb.y < rb.waterY - 0.01 && keelImmersion >= 0.24 && keelImmersion <= 0.35, `upland riverboat ${rb.id} hull sits ${keelImmersion.toFixed(3)}m immersed below river surface (y=${rb.y.toFixed(3)} < waterY=${rb.waterY.toFixed(3)})`);
+        } else {
+          assert.ok(rb.sinkage >= 0.014 && keelImmersion >= 0.16, `estuary-mouth riverboat ${rb.id} rides swell while staying ${keelImmersion.toFixed(3)}m immersed`);
+        }
+        riverStepSamples++;
+      }
+    }
+  }
+  assert.ok(riverStepSamples >= 12, `sampled >= 12 riverboat trajectory frames (${riverStepSamples})`);
+  assert.ok(maxRiverLatRatio < 0.96, `riverboat outer beam never breaches bank (max ratio ${maxRiverLatRatio.toFixed(3)})`);
+
+  // Verify sea ship loaded hydrostatic sinkage & proportional crew foot deck height
+  const finalLocated = tv.locate();
+  const seaShips = finalLocated.filter((v) => v.mode === 'sea');
+  assert.ok(seaShips.length >= 4, `expected >= 4 sea vessels, got ${seaShips.length}`);
+  for (const sh of seaShips) {
+    assert.ok(sh.sinkage >= 0.14 && sh.sinkage <= 0.50, `sea vessel ${sh.id} (${sh.archLabel}) has realistic loaded sinkage=${sh.sinkage}m`);
+    if (sh.deckPeople?.length) {
+      const arch = getTradeVesselArchetype(sh.archetype);
+      const st0 = arch.deckStations.find((s) => s.station === sh.deckPeople[0].station);
+      if (st0 && Math.abs(sh.pitch) < 1e-4 && Math.abs(sh.roll) < 1e-4) {
+        const expectedFootY = sh.y + st0.localMetres[1] * sh.scale;
+        assert.ok(Math.abs(sh.deckPeople[0].y - expectedFootY) < 1e-3, 'crew feet sit flush on proportionally Y-scaled deck');
+      }
+    }
+  }
+
+  // Verify GPU wave buoyancy compute pass runs BEFORE part-selection & crew-selection, and drawSubmerged executes cleanly
+  const computePass = {
+    setPipeline(p) { computeOrder.push(p?.label || 'unknown'); },
+    setBindGroup() {},
+    dispatchWorkgroups() {},
+  };
+  tv.encode(computePass);
+  const waveIdx = computeOrder.indexOf('trade vessel wave hydro');
+  const selectIdx = computeOrder.indexOf('trade vessel select');
+  assert.ok(waveIdx === 0, `GPU wave buoyancy pass runs first in encode() (order=${computeOrder.join(' -> ')})`);
+  assert.ok(selectIdx > waveIdx, 'GPU wave buoyancy writes pose before trade vessel select runs');
+
+  const subPass = {
+    setPipeline() {},
+    setBindGroup() {},
+    setVertexBuffer() {},
+    setIndexBuffer() {},
+    drawIndexedIndirect() { submergedDraws++; },
+    drawIndexed() { submergedDraws++; },
+  };
+  tv.drawSubmerged(subPass, false);
+  assert.equal(capturedSubmergedBound, 1, 'drawSubmerged binds waterOptics submerged capture pipeline');
+  assert.equal(submergedDraws, TRADE_VESSEL_ARCHETYPES, 'drawSubmerged issues indirect draws across all vessel archetypes');
+
+  // Verify getWakeSources() returns compact moving-vessel descriptors sorted by distance
+  const wakes = tv.getWakeSources({ x: region.x, z: region.z }, 24);
+  assert.ok(wakes.length >= 2 && wakes.length <= 24, `expected 2..24 moving wake hulls, got ${wakes.length}`);
+  for (let i = 0; i < wakes.length; i++) {
+    const w = wakes[i];
+    const spd = Math.hypot(w.vx, w.vz);
+    assert.ok(spd > 0.20, `wake source ${i} speed ${spd.toFixed(3)} > 0.20 m/s`);
+    assert.ok(w.length > 4 && w.beam > 1 && w.draft >= 0.20 && w.displacement > 0.5 && typeof w.isRiver === 'boolean');
+    if (i > 0) {
+      const dPrev = Math.hypot(wakes[i - 1].x - region.x, wakes[i - 1].z - region.z);
+      const dCur = Math.hypot(w.x - region.x, w.z - region.z);
+      assert.ok(dCur + 1e-6 >= dPrev, 'getWakeSources sorts nearest vessels first');
+    }
   }
 });

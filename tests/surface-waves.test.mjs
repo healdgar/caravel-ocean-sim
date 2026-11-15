@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {createSurfaceWaves,surfaceWaveEmission,SURFACE_WAVE_LIMITS} from '../js/surface-waves.js';
-import {SURFACE_WAVE_SPEED} from '../js/wgsl/surface-waves.js';
+import {SURFACE_WAVE_SPEED,SURFACE_WAVE_UPDATE} from '../js/wgsl/surface-waves.js';
 import {createDolphinEncounter} from '../js/dolphin-state.js';
 import {createMarineLifeState} from '../js/marine-life-state.js';
 import {createAnchorState} from '../js/anchor-state.js';
@@ -92,4 +92,40 @@ test('anchor callbacks freeze impact mass and velocity before later substeps set
   assert.equal(events.length,1);assert.equal(events[0].source,'anchor/player');assert.equal(events[0].massKg,240);
   assert.ok(events[0].closingSpeed>0&&events[0].velocity[1]<0&&events[0].radiusMetres>0);assert.ok(surfaceWaveEmission(events[0]));
   assert.equal(state.velocity.y,0);const frozen=events[0].velocity.slice();state.reset(boat);assert.deepEqual(events[0].velocity,frozen);
+});
+
+test('continuous hull wakes pack moving ships & riverboats across every CFL substep within WebGPU storage limits',async t=>{
+  const {field,writes,dispatches,pass}=await mockSurface(t);
+  const storageDecls=(SURFACE_WAVE_UPDATE.match(/var<storage\b/g)||[]).length;
+  assert.ok(storageDecls<=8,`SURFACE_WAVE_UPDATE storage buffers (${storageDecls}) must stay <= 8`);
+  assert.equal(SURFACE_WAVE_LIMITS.hulls,24);
+
+  const hulls=[
+    {x:12,z:-18,vx:0,vz:-3.4,length:24,beam:7.2,draft:2.55,displacement:220,isRiver:false},
+    {x:-30,z:22,vx:1.4,vz:0.6,length:11.6,beam:2.5,draft:0.31,displacement:6.8,isRiver:true},
+    {x:5,z:5,vx:0.08,vz:0.05,length:14,beam:4,draft:1.2,displacement:30,isRiver:false}, // sub-0.20 m/s -> culled
+    {x:9000,z:0,vx:3,vz:0,length:18,beam:5,draft:1.8,displacement:85,isRiver:false},     // outside far domain -> culled
+  ];
+  field.setWakeHulls(hulls);
+  field.emit(contact(1));
+  field.update({x:0,z:0},.1);
+  field.encode(pass);
+
+  assert.equal(field.stats.active,true);
+  assert.equal(field.stats.hulls,2,'only moving in-domain ocean and river hulls are uploaded');
+  assert.equal(dispatches.length,2);
+  const first=writes.get('scene wave substep 0'),second=writes.get('scene wave substep 1');
+  assert.equal(first[14],2*256+1,'substep 0 packs 2 wake hulls in high byte and 1 splash impulse in low byte');
+  assert.equal(second[14],2*256,'later CFL substeps keep forcing continuous hull wakes without reinjecting impulse');
+  const uploadedHulls=writes.get('scene wake hulls');
+  assert.equal(uploadedHulls.length,16);
+  assert.ok(uploadedHulls[7]>0,'ocean ship wake carries positive displacement');
+  assert.ok(uploadedHulls[15]<0,'riverboat wake encodes negative signed displacement for mild channel scaling');
+
+  // Verify 24-hull cap when >24 moving hulls are supplied
+  const crowd=Array.from({length:30},(_,i)=>({x:i*2,z:0,vx:2.2,vz:0,length:15,beam:4.4,draft:1.4,displacement:45,isRiver:i%2===1}));
+  field.setWakeHulls(crowd);
+  field.update({x:0,z:0},.1);
+  field.encode(pass);
+  assert.equal(field.stats.hulls,SURFACE_WAVE_LIMITS.hulls);
 });

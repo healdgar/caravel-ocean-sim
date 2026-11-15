@@ -2,16 +2,19 @@
 // Ocean-going merchant ships (cogs, carracks, caravels, harbor barques) and inland river trade barges
 // built from the canonical boat-part system (ship-mesh, ship-part-taxonomy, part-assembly, ship-fracture,
 // ship-collider) with real oak/canvas PBR optics and full cannon destructibility.
-import { FRAME_WGSL, ATMO_CORE_WGSL, HULL_HOLE_LIMIT, HULL_CRATER_LIMIT } from './wgsl/common.js';
+import { FRAME_WGSL, ATMO_CORE_WGSL, CASCADES, HULL_HOLE_LIMIT, HULL_CRATER_LIMIT } from './wgsl/common.js';
 import { SKY_RENDER_FUNCS } from './wgsl/sky.js';
 import { SHADOW_FRAME } from './wgsl/shadows.js';
 import { VESSEL_LIGHTING, CANVAS_OPTICS } from './wgsl/vessel.js';
+import { SURFACE_WAVE_SAMPLE } from './wgsl/surface-waves.js';
 import { SHIP_FRACTURE_POSE_UPDATE } from './wgsl/ship-fracture.js';
 import { CREW_JOINT_BLEND_WGSL } from './wgsl/crew.js';
 import { terrainSurfaceSample } from './terrain-model.js';
 import { createShipAssetCache } from './ship-mesh.js';
 import { getShipModel } from './ship-models.js';
-import { rowingDesign, rowingDeck } from './models/rowing.js';
+import { rowingDesign, rowingDeck, rowingHullDeck, rowingHullWidth } from './models/rowing.js';
+import { boatHydrodynamics } from './boat.js';
+import { createWaterOptics } from './water-optics.js';
 import { computeArchetypeScaleSpec, expandShipPartGroups } from './ship-part-taxonomy.js';
 import { createPartAssemblyCatalog, bakeVesselImpactMarks } from './part-assembly.js';
 import { prepareShipFracture, createShipFractureGPU } from './ship-fracture.js';
@@ -41,7 +44,7 @@ export const VESSEL_SPLAT_PIXELS = 3.5;
 export const VESSEL_MIN_PIXELS = 1.0;
 
 const TV_HULL_FLOOD_WORDS = 4 * (2 + 2 * HULL_HOLE_LIMIT);
-const BARGE_Y_LIFT = 0.12;
+const BARGE_Y_LIFT = 0.0;
 
 const ARCHETYPE_SPECS = Object.freeze([
   Object.freeze({ index: 0, label: 'Underway Cog', modelId: 'pinta', length: 17.5, beam: 5.5, furlSails: false, unmasted: false, addCargo: false }),
@@ -55,6 +58,18 @@ const ARCHETYPE_SPECS = Object.freeze([
 
 let sharedAssetCache = null;
 const archetypeCache = new Array(TRADE_VESSEL_ARCHETYPES).fill(null);
+
+function archetypeDesignScale(spec, model) {
+  const frame = model?.designFrame ?? { length: 12, beam: 3.6, verticalScale: 1 };
+  const rtLen = model?.runtime?.length || spec.length || 12;
+  const rtBeam = model?.runtime?.beam || spec.beam || 3.6;
+  const hullYRatio = Math.max(0.56, Math.min(1.08, Math.sqrt((spec.length / rtLen) * (spec.beam / rtBeam))));
+  return [
+    spec.beam / (frame.beam || 3.6),
+    (frame.verticalScale || 1) * hullYRatio,
+    spec.length / (frame.length || 12),
+  ];
+}
 
 function warpSectionZ(z, kWaist) {
   const uZ = Math.max(-1, Math.min(1, z / 6.0));
@@ -206,26 +221,66 @@ function appendRoundedBox9(verts, inds, cx, cy, cz, hx, hy, hz, matId, bulge = 0
 }
 
 function appendLusoriaCargo(verts, inds, groups, modelId = 'lusoria') {
-  const nextGroup = (id, fn) => {
+  const nextGroup = (id, nodeId, fn) => {
     const startIdx = inds.length;
     fn();
     if (inds.length > startIdx) {
-      groups.push({ id, nodeId: 'deck.main', firstVertex: startIdx, vertexCount: inds.length - startIdx });
+      groups.push({ id, nodeId, firstVertex: startIdx, vertexCount: inds.length - startIdx });
     }
   };
+  // Structural oak coamings, fender rub-strakes, mooring bitts & hold dunnage (real physical boat-part carpentry)
+  for (const [side, tag] of [[-1, 'port'], [1, 'starboard']]) {
+    nextGroup(`hull.coaming.${tag}`, 'hull', () => {
+      for (let k = 0; k < 6; k++) {
+        const z0 = -2.95 + k * 0.98;
+        const z1 = z0 + 0.98;
+        const w0 = Math.max(0.32, rowingHullWidth(modelId, z0, rowingHullDeck(modelId, z0)) - 0.16);
+        const w1 = Math.max(0.32, rowingHullWidth(modelId, z1, rowingHullDeck(modelId, z1)) - 0.16);
+        const y0 = rowingHullDeck(modelId, z0) + 0.032;
+        const y1 = rowingHullDeck(modelId, z1) + 0.032;
+        appendTaperedCylinder(verts, inds, [side * w0, y0, z0], [side * w1, y1, z1], 0.026, 0.024, 6, 17, 0);
+      }
+    });
+    nextGroup(`hull.rubrail.${tag}`, 'hull', () => {
+      for (let k = 0; k < 8; k++) {
+        const z0 = -4.2 + k * 1.05;
+        const z1 = z0 + 1.05;
+        const y0 = rowingHullDeck(modelId, z0) - 0.065;
+        const y1 = rowingHullDeck(modelId, z1) - 0.065;
+        const w0 = Math.max(0.18, rowingHullWidth(modelId, z0, y0) + 0.014);
+        const w1 = Math.max(0.18, rowingHullWidth(modelId, z1, y1) + 0.014);
+        appendTaperedCylinder(verts, inds, [side * w0, y0, z0], [side * w1, y1, z1], 0.022, 0.020, 6, 16, 0);
+      }
+    });
+    for (const [zBitt, endTag] of [[-4.35, 'fore'], [4.25, 'aft']]) {
+      nextGroup(`hull.bitt.${endTag}.${tag}`, 'hull', () => {
+        const yb = rowingDeck(modelId, zBitt);
+        const xb = side * Math.max(0.16, rowingHullWidth(modelId, zBitt, yb) * 0.52);
+        appendRoundedBox9(verts, inds, xb, yb + 0.14, zBitt, 0.034, 0.14, 0.034, 1, 0.02);
+        appendTaperedCylinder(verts, inds, [xb - 0.065, yb + 0.22, zBitt], [xb + 0.065, yb + 0.22, zBitt], 0.018, 0.018, 6, 3, 0);
+      });
+    }
+  }
+  for (const [dTag, z0, z1] of [['fore', -2.85, -1.05], ['mid', 0.05, 1.30], ['aft', 1.80, 2.85]]) {
+    nextGroup(`deck.dunnage.${dTag}`, 'deck.main', () => {
+      const ym = rowingDeck(modelId, (z0 + z1) * 0.5) + 0.018;
+      for (const bx of [-0.28, 0.0, 0.28]) {
+        appendRoundedBox9(verts, inds, bx, ym, (z0 + z1) * 0.5, 0.032, 0.018, (z1 - z0) * 0.5, 1, 0);
+      }
+    });
+  }
   // 1. Staved oak wine & olive oil casks with iron hoops (aboard hold floorboards)
-  nextGroup('cargo.casks', () => {
+  nextGroup('cargo.casks', 'deck.main', () => {
     const caskSpots = [
-      [-0.24, -2.55, 0], [0.24, -2.55, 0],
-      [-0.24, -1.75, 0.02], [0.24, -1.75, -0.02],
-      [0.0, -2.15, 0.25], [0.0, -1.25, 0.0],
+      [-0.24, -2.55, 0.03], [0.24, -2.55, 0.03],
+      [-0.24, -1.75, 0.04], [0.24, -1.75, 0.02],
+      [0.0, -2.15, 0.26], [0.0, -1.25, 0.03],
     ];
     for (const [cx, cz, liftY] of caskSpots) {
       const yDeck = rowingDeck(modelId, cz);
       const halfL = 0.28, rMid = 0.145, rEnd = 0.112;
       const yc = yDeck + rMid + liftY;
       appendTaperedCylinder(verts, inds, [cx, yc, cz - halfL], [cx, yc, cz + halfL], rMid, rEnd, 10, 1, 1);
-      // Fore & aft forged iron hoops
       for (const hOff of [-0.18, 0.18]) {
         appendTaperedCylinder(
           verts, inds,
@@ -236,37 +291,60 @@ function appendLusoriaCargo(verts, inds, groups, modelId = 'lusoria') {
     }
   });
   // 2. Corded cloth & raw-wool merchant bales with hemp lashings
-  nextGroup('cargo.bales', () => {
+  nextGroup('cargo.bales', 'deck.main', () => {
     const baleSpots = [
-      [-0.26, 0.35, 0.24, 0.18, 0.30, 0],
-      [0.25, 0.40, 0.24, 0.18, 0.30, 0],
-      [-0.02, 0.95, 0.28, 0.18, 0.32, 0],
-      [0.02, 0.62, 0.22, 0.15, 0.24, 0.35],
+      [-0.26, 0.35, 0.24, 0.18, 0.30, 0.03],
+      [0.25, 0.40, 0.24, 0.18, 0.30, 0.03],
+      [-0.02, 0.95, 0.28, 0.18, 0.32, 0.03],
+      [0.02, 0.62, 0.22, 0.15, 0.24, 0.36],
     ];
     for (const [bx, bz, hx, hy, hz, liftY] of baleSpots) {
       const yDeck = rowingDeck(modelId, bz);
       const cy = yDeck + hy + liftY;
       appendRoundedBox9(verts, inds, bx, cy, bz, hx, hy, hz, 9, 0.08);
-      // Crossing hemp cord lashings (matId 12)
       for (const lOff of [-hz * 0.45, hz * 0.45]) {
         appendTaperedCylinder(verts, inds, [bx - hx * 1.03, cy, bz + lOff], [bx + hx * 1.03, cy, bz + lOff], 0.02, 0.02, 6, 12, 0, [1, hy / hx]);
       }
     }
   });
   // 3. Stacked plump grain sacks aft
-  nextGroup('cargo.sacks', () => {
+  nextGroup('cargo.sacks', 'deck.main', () => {
     const sackSpots = [
-      [-0.25, 2.05, 0], [0.02, 2.08, 0], [0.27, 2.05, 0],
-      [-0.14, 2.55, 0.20], [0.16, 2.52, 0.20], [0.0, 2.28, 0.38],
+      [-0.25, 2.05, 0.03], [0.02, 2.08, 0.03], [0.27, 2.05, 0.03],
+      [-0.14, 2.55, 0.21], [0.16, 2.52, 0.21], [0.0, 2.28, 0.38],
     ];
     for (const [sx, sz, liftY] of sackSpots) {
       const yDeck = rowingDeck(modelId, sz);
       const cy = yDeck + 0.11 + liftY;
       appendTaperedCylinder(verts, inds, [sx, cy, sz - 0.22], [sx, cy, sz + 0.22], 0.14, 0.075, 8, 13, 1, [1.15, 0.85]);
-      // Tied sack neck collar (matId 12)
       appendTaperedCylinder(verts, inds, [sx, cy, sz + 0.18], [sx, cy, sz + 0.23], 0.055, 0.055, 6, 12, 0);
     }
   });
+  // 4. Pine merchant crates, olive-oil amphorae & coiled hemp mooring hawsers
+  nextGroup('cargo.crates.fore', 'deck.main', () => {
+    for (const [cx, cz] of [[-0.22, -3.28], [0.22, -3.24]]) {
+      const yd = rowingDeck(modelId, cz) + 0.13;
+      appendRoundedBox9(verts, inds, cx, yd, cz, 0.16, 0.11, 0.20, 1, 0.02);
+    }
+  });
+  nextGroup('cargo.crates.aft', 'deck.main', () => {
+    for (const [cx, cz] of [[-0.21, 3.08], [0.21, 3.12]]) {
+      const yd = rowingDeck(modelId, cz) + 0.12;
+      appendRoundedBox9(verts, inds, cx, yd, cz, 0.15, 0.10, 0.19, 1, 0.02);
+    }
+  });
+  nextGroup('cargo.amphorae', 'deck.main', () => {
+    for (const [ax, az] of [[-0.16, -0.76], [0.0, -0.78], [0.16, -0.74]]) {
+      const yd = rowingDeck(modelId, az);
+      appendTaperedCylinder(verts, inds, [ax, yd + 0.03, az], [ax, yd + 0.30, az], 0.085, 0.038, 8, 22, 1);
+    }
+  });
+  for (const [cTag, cz] of [['fore', -4.05], ['aft', 3.95]]) {
+    nextGroup(`cargo.coil.${cTag}`, 'deck.main', () => {
+      const yd = rowingDeck(modelId, cz) + 0.035;
+      appendTaperedCylinder(verts, inds, [0, yd - 0.02, cz], [0, yd + 0.03, cz], 0.14, 0.12, 10, 12, 0);
+    });
+  }
 }
 
 function probeDeckPlankY(verts, targetX, targetZ, radX, radZ, fallbackY, maxY = Infinity) {
@@ -326,12 +404,7 @@ const ACTIVE_BARGE_OAR_PAIRS = new Set([1, 4, 7, 10]);
 
 // Appends only physical wooden sweeps/tillers and stowed waist casks/bales (zero human geometry in hull meshes).
 function appendDeckFixtures(verts, inds, groups, spec, scaleSpec, model) {
-  const frame = model?.designFrame ?? { length: 12, beam: 3.6, verticalScale: 1 };
-  const designScale = [
-    spec.beam / (frame.beam || 3.6),
-    frame.verticalScale || 1,
-    spec.length / (frame.length || 12),
-  ];
+  const designScale = archetypeDesignScale(spec, model);
   const addGroup = (id, nodeId, fn) => {
     const startIdx = inds.length;
     fn();
@@ -359,6 +432,9 @@ function appendDeckFixtures(verts, inds, groups, spec, scaleSpec, model) {
       Math.min(-0.18, d.steering.blade[1]) + BARGE_Y_LIFT,
       swPiv[2] + 1.55 / designScale[2],
     ];
+    addGroup('hull.crutch.sweep', 'hull', () => {
+      appendRoundedBox9(verts, inds, swPiv[0] - 0.03, swPiv[1] - 0.04, swPiv[2], 0.04, 0.06, 0.05, 1, 0.02);
+    });
     addGroup('crew.sweep', 'hull', () => {
       appendTaperedCylinder(verts, inds, swHandle, swPiv, 0.036, 0.044, 8, 28, 0);
       appendTaperedCylinder(verts, inds, swPiv, swBlade, 0.044, 0.032, 8, 28, 0);
@@ -407,12 +483,7 @@ function appendDeckFixtures(verts, inds, groups, spec, scaleSpec, model) {
 
 // Pure deck-crew station metadata (zero mesh triangles) driving both GPU 65-joint rigged humans and locate() inspection.
 export function buildTradeDeckStations(verts, spec, scaleSpec, model) {
-  const frame = model?.designFrame ?? { length: 12, beam: 3.6, verticalScale: 1 };
-  const designScale = [
-    spec.beam / (frame.beam || 3.6),
-    frame.verticalScale || 1,
-    spec.length / (frame.length || 12),
-  ];
+  const designScale = archetypeDesignScale(spec, model);
   const deckStations = [];
   const recordStation = (station, role, poseKind, originDesign, yaw, oarPhaseOffset = 0) => {
     const x = originDesign[0] * designScale[0];
@@ -1206,18 +1277,15 @@ function buildArchetypeData(index) {
   });
 
   const frame = model.designFrame;
-  const designScale = [
-    spec.beam / (frame.beam || 3.6),
-    frame.verticalScale || 1,
-    spec.length / (frame.length || 12),
-  ];
+  const designScale = archetypeDesignScale(spec, model);
+  const yRatio0 = designScale[1] / (frame.verticalScale || 1);
 
   let maxYDesign = -Infinity;
   for (let i = 1; i < preFracture.vertices.length; i += 9) {
     if (preFracture.vertices[i] > maxYDesign) maxYDesign = preFracture.vertices[i];
   }
   const maxAirDraftMetres = spec.modelId === 'lusoria'
-    ? Math.max(2.15, maxYDesign * designScale[1])
+    ? Math.max(1.95, Math.min(2.25, maxYDesign * designScale[1] + 1.05))
     : Math.max(0.5, maxYDesign * designScale[1]);
 
   const partAssembly = createPartAssemblyCatalog({
@@ -1229,20 +1297,31 @@ function buildArchetypeData(index) {
     groups: preFracture.groups,
   });
 
-  const collider = createShipCollider({
+  const rawCollider = createShipCollider({
     model,
     vertices: preFracture.vertices,
     indices: preFracture.indices,
     groups: preFracture.groups,
     fracture: preFracture.fracture,
   });
+  const collider = {
+    ...rawCollider,
+    frame: {
+      ...rawCollider.frame,
+      verticalScale: designScale[1],
+    },
+  };
 
   const baseHydro = spec.modelId === 'lusoria'
     ? rowingDesign('lusoria')
-    : { draft: Math.max(0.9, spec.beam * 0.34), freeboard: Math.max(0.8, spec.beam * 0.28) };
+    : boatHydrodynamics(spec.length, spec.beam, 14, 0, spec.modelId);
 
-  const draft = spec.modelId === 'lusoria' ? 0.68 : Math.max(1.1, spec.beam * 0.34);
-  const freeboard = spec.modelId === 'lusoria' ? 0.55 : Math.max(1.0, spec.beam * 0.28);
+  const draft = spec.modelId === 'lusoria'
+    ? 0.38 * yRatio0
+    : Math.max(0.85, (baseHydro.draft - baseHydro.sinkage) * yRatio0);
+  const freeboard = spec.modelId === 'lusoria'
+    ? 0.55 * yRatio0
+    : Math.max(0.55, (baseHydro.freeboard + baseHydro.sinkage) * yRatio0);
   const continuum = buildVesselContinuum(
     spec,
     preFracture.vertices,
@@ -1471,6 +1550,7 @@ export function buildTradeVesselRoutes(
     bridges = [],
     terrain = null,
     worldOffset = null,
+    inlandWaterAt = null,
   } = {},
 ) {
   const routes = [];
@@ -1478,6 +1558,12 @@ export function buildTradeVesselRoutes(
   const wOff = worldOffset || terrain?.getWorldOffset?.() || { x: 0, z: 0 };
   const offX = Number.isFinite(wOff?.x) ? wOff.x : 0;
   const offZ = Number.isFinite(wOff?.z) ? wOff.z : 0;
+  const effInlandWaterAt = typeof inlandWaterAt === 'function'
+    ? inlandWaterAt
+    : (typeof terrain?.inlandWaterAt === 'function' ? (wx, wz) => terrain.inlandWaterAt(wx, wz) : null);
+  const effectiveReaches = (Array.isArray(riverReaches) && riverReaches.length > 0)
+    ? riverReaches
+    : (Array.isArray(port?.country?.riverReaches) ? port.country.riverReaches : []);
 
   const hasHeightGrid = Boolean(heights && region && Number.isFinite(region.span) && region.span > 0);
   const bedRegion = hasHeightGrid
@@ -1538,37 +1624,85 @@ export function buildTradeVesselRoutes(
     return out;
   };
   const reachStations = (r) => {
-    if (Array.isArray(r?.stations)) return r.stations;
-    if (Array.isArray(r?.points)) {
-      return r.points.map(([wx, wz, hw, wy, p4, vx, vz, thalwegB]) => ({
-        wx, wz, hw, wy,
-        thalweg: Number.isFinite(thalwegB) ? thalwegB : p4,
+    const seaConn = Boolean(r?.seaConnected);
+    const normStation = (wxRaw, wzRaw, hwRaw, wyRaw, depthRaw, vx, vz, thalwegB, estuaryTRaw, seaMouthRaw) => {
+      let wx = wxRaw, wz = wzRaw;
+      if ((Math.abs(offX) > 1e-3 || Math.abs(offZ) > 1e-3)
+          && Math.hypot((wx - offX) - ox, (wz - offZ) - oz) + 50 < Math.hypot(wx - ox, wz - oz)) {
+        wx -= offX;
+        wz -= offZ;
+      }
+      const hw = Number.isFinite(hwRaw) ? hwRaw : (r?.minHalfWidth ?? 2.5);
+      const wy = Number.isFinite(wyRaw) ? wyRaw : seaLevel;
+      const depth = Number.isFinite(depthRaw) ? depthRaw : Math.max(0.85, hw * 0.42);
+      const estuaryT = Number.isFinite(estuaryTRaw)
+        ? estuaryTRaw
+        : (seaConn && wy <= seaLevel + 0.35 ? Math.max(0, 1 - Math.max(0, wy - seaLevel) / 0.35) : 0);
+      const seaMouth = Boolean(seaMouthRaw ?? (seaConn && (estuaryT > 0.45 || wy <= seaLevel + 0.08)));
+      return {
+        wx,
+        wz,
+        hw,
+        wy: seaMouth && estuaryT > 0.72 ? seaLevel + (wy - seaLevel) * Math.max(0, (1 - estuaryT) / 0.28) : wy,
+        depth,
+        thalweg: Number.isFinite(thalwegB) ? thalwegB : 0,
         vx: Number.isFinite(vx) ? vx : NaN,
         vz: Number.isFinite(vz) ? vz : NaN,
-      }));
+        estuaryT,
+        seaMouth,
+      };
+    };
+    if (Array.isArray(r?.stations)) {
+      return r.stations.map((s) => normStation(
+        s.wx ?? s.x, s.wz ?? s.z, s.hw, s.wy ?? s.y, s.depth, s.vx, s.vz, s.thalweg, s.estuaryT, s.seaMouth,
+      ));
+    }
+    if (Array.isArray(r?.points)) {
+      return r.points.map(([wx, wz, hw, wy, p4, vx, vz, thalwegB, estuaryT]) =>
+        normStation(wx, wz, hw, wy, p4, vx, vz, thalwegB, estuaryT, undefined));
     }
     return [];
   };
+  const parsedReachChains = effectiveReaches.map((r) => reachStations(r)).filter((sts) => sts.length >= 2);
   const riverSampleAt = (lx, lz) => {
-    if (terrain?.inlandWaterAt) {
-      const iw = terrain.inlandWaterAt(lx + offX, lz + offZ);
-      if (iw && Number.isFinite(iw.wy)) return iw;
-    }
-    let bestD = Infinity, bestSt = null;
-    for (const reach of riverReaches) {
-      for (const st of reachStations(reach)) {
-        const d = (st.wx - lx) ** 2 + (st.wz - lz) ** 2;
-        if (d < bestD) { bestD = d; bestSt = st; }
+    if (effInlandWaterAt) {
+      const iw = effInlandWaterAt(lx + offX, lz + offZ);
+      if (iw && Number.isFinite(iw.wy)) {
+        if (!Number.isFinite(iw.hw) || !Number.isFinite(iw.dist) || iw.dist <= iw.hw * 0.92) {
+          return iw;
+        }
       }
     }
-    if (bestSt && bestD < 3600) {
-      return { wy: bestSt.wy, hw: bestSt.hw ?? 2.2, vx: bestSt.vx, vz: bestSt.vz };
+    let bestFrac = Infinity, bestSample = null;
+    for (let ci = 0; ci < parsedReachChains.length; ci++) {
+      const sts = parsedReachChains[ci];
+      for (let i = 1; i < sts.length; i++) {
+        const a = sts[i - 1], b = sts[i];
+        const dx = b.wx - a.wx, dz = b.wz - a.wz;
+        const lenSq = dx * dx + dz * dz;
+        const u = lenSq > 1e-6 ? Math.max(0, Math.min(1, ((lx - a.wx) * dx + (lz - a.wz) * dz) / lenSq)) : 0;
+        const px = a.wx + dx * u, pz = a.wz + dz * u;
+        const dist = Math.hypot(lx - px, lz - pz);
+        const hw = Math.max(0.5, a.hw + (b.hw - a.hw) * u);
+        if (dist <= hw * 0.92) {
+          const frac = dist / hw;
+          if (frac < bestFrac) {
+            bestFrac = frac;
+            const wy = a.wy + (b.wy - a.wy) * u;
+            const depth = a.depth + (b.depth - a.depth) * u;
+            const vx = (Number.isFinite(a.vx) && Number.isFinite(b.vx)) ? a.vx + (b.vx - a.vx) * u : (Number.isFinite(a.vx) ? a.vx : b.vx);
+            const vz = (Number.isFinite(a.vz) && Number.isFinite(b.vz)) ? a.vz + (b.vz - a.vz) * u : (Number.isFinite(a.vz) ? a.vz : b.vz);
+            const estuaryT = a.estuaryT + (b.estuaryT - a.estuaryT) * u;
+            bestSample = { wy, hw, depth, vx, vz, estuaryT, dist, seaMouth: Boolean(a.seaMouth || b.seaMouth) };
+          }
+        }
+      }
     }
-    return null;
+    return bestSample;
   };
   const riverYAt = (lx, lz) => {
     const rs = riverSampleAt(lx, lz);
-    return rs && Number.isFinite(rs.wy) ? rs.wy : seaLevel + 0.04;
+    return rs && Number.isFinite(rs.wy) ? rs.wy : seaLevel;
   };
 
   // True when `(lx, lz)` has deep open/estuary water (`bed <= minDepth`, not perched above sea level in a narrow upland river).
@@ -1723,8 +1857,8 @@ export function buildTradeVesselRoutes(
   };
 
   /**
-   * Enforces bridge air-draft, horizontal span clearance, and wet river bed across river routes (`lusoria` barges).
-   * Splits around impassably low/collapsed bridges and retains the longest clear navigable reach (`>= 70 m`).
+   * Enforces bridge air-draft, horizontal span clearance, and wet river bed across fallback river routes
+   * (used only in synthetic tests when `effectiveReaches` is empty).
    */
   const clampRiverPolyToSafeChannel = (poly, airDraft = 2.15, halfBeam = 1.5) => {
     if (!poly || !Array.isArray(poly.pts) || poly.pts.length < 2) return null;
@@ -1737,7 +1871,7 @@ export function buildTradeVesselRoutes(
           if (idx > 0) len += Math.hypot(p.x - cur[idx - 1].x, p.z - cur[idx - 1].z);
           return { ...p, acc: len };
         });
-        if (len >= 70) runs.push({ pts: built, totalLen: len });
+        if (len >= 65) runs.push({ pts: built, totalLen: len });
       }
       cur = [];
     };
@@ -1765,6 +1899,303 @@ export function buildTradeVesselRoutes(
     if (!runs.length) return null;
     runs.sort((a, b) => b.totalLen - a.totalLen);
     return runs[0];
+  };
+
+  // Build topological graph of rendered `riverReaches` stations (pruning reaches narrower than `hw < 2.2 m`
+  // or shallower than `depth < 0.55 m`, and subdividing to dense `<= 3.2 m` station spacing).
+  const MIN_RIVER_HW = 2.2;
+  const MIN_RIVER_DEPTH = 0.55;
+  const DENSE_RIVER_STEP = 3.2;
+  const minNavScale = 0.62;
+  const minNavAir = archAirDraft(4, minNavScale);
+  const minNavHalfBeam = archHalfBeam(4, minNavScale);
+  const navSubChains = [];
+  const riverGraphNodes = [];
+
+  const interpReachStation = (a, b, u) => {
+    const estuaryT = a.estuaryT + (b.estuaryT - a.estuaryT) * u;
+    const seaMouth = Boolean(a.seaMouth || b.seaMouth || estuaryT > 0.72);
+    const rawWy = a.wy + (b.wy - a.wy) * u;
+    const wy = seaMouth && estuaryT > 0.72
+      ? seaLevel + (rawWy - seaLevel) * Math.max(0, (1 - estuaryT) / 0.28)
+      : rawWy;
+    return {
+      wx: a.wx + (b.wx - a.wx) * u,
+      wz: a.wz + (b.wz - a.wz) * u,
+      hw: a.hw + (b.hw - a.hw) * u,
+      wy,
+      depth: a.depth + (b.depth - a.depth) * u,
+      thalweg: a.thalweg + (b.thalweg - a.thalweg) * u,
+      vx: (Number.isFinite(a.vx) && Number.isFinite(b.vx)) ? a.vx + (b.vx - a.vx) * u : (Number.isFinite(a.vx) ? a.vx : b.vx),
+      vz: (Number.isFinite(a.vz) && Number.isFinite(b.vz)) ? a.vz + (b.vz - a.vz) * u : (Number.isFinite(a.vz) ? a.vz : b.vz),
+      estuaryT,
+      seaMouth,
+    };
+  };
+
+  for (let ci = 0; ci < parsedReachChains.length; ci++) {
+    const rawSts = parsedReachChains[ci];
+    const dense = [];
+    for (let i = 0; i < rawSts.length; i++) {
+      if (i === 0) {
+        dense.push(rawSts[0]);
+        continue;
+      }
+      const a = rawSts[i - 1], b = rawSts[i];
+      const segD = Math.hypot(b.wx - a.wx, b.wz - a.wz);
+      const nSteps = Math.max(1, Math.ceil(segD / DENSE_RIVER_STEP));
+      for (let k = 1; k <= nSteps; k++) {
+        dense.push(k === nSteps ? b : interpReachStation(a, b, k / nSteps));
+      }
+    }
+    let curSeg = [];
+    const flushSub = () => {
+      if (curSeg.length >= 3) {
+        let len = 0, minHw = Infinity;
+        for (let i = 0; i < curSeg.length; i++) {
+          minHw = Math.min(minHw, curSeg[i].hw);
+          if (i > 0) len += Math.hypot(curSeg[i].wx - curSeg[i - 1].wx, curSeg[i].wz - curSeg[i - 1].wz);
+        }
+        if (len >= 65) {
+          const subIdx = navSubChains.length;
+          const nodeIds = [];
+          for (let i = 0; i < curSeg.length; i++) {
+            const nid = riverGraphNodes.length;
+            riverGraphNodes.push({
+              id: nid,
+              subIdx,
+              ...curSeg[i],
+              adj: [],
+              comp: -1,
+            });
+            nodeIds.push(nid);
+            if (i > 0) {
+              const prevId = nodeIds[i - 1];
+              const w = Math.hypot(curSeg[i].wx - curSeg[i - 1].wx, curSeg[i].wz - curSeg[i - 1].wz);
+              riverGraphNodes[prevId].adj.push({ to: nid, w });
+              riverGraphNodes[nid].adj.push({ to: prevId, w });
+            }
+          }
+          navSubChains.push({ stations: curSeg.slice(), nodeIds, length: len, minHw });
+        }
+      }
+      curSeg = [];
+    };
+    for (let i = 0; i < dense.length; i++) {
+      const s = dense[i];
+      const prev = curSeg.length > 0 ? curSeg[curSeg.length - 1] : s;
+      const midWy = Math.max(prev.wy, s.wy);
+      const navOk = s.hw >= MIN_RIVER_HW
+        && s.depth >= MIN_RIVER_DEPTH
+        && !blockedByLowBridge(prev.wx, prev.wz, s.wx, s.wz, midWy, minNavAir, minNavHalfBeam, normBridges);
+      if (navOk) curSeg.push(s);
+      else flushSub();
+    }
+    flushSub();
+  }
+
+  // Link river confluences & junctions strictly where water ribbons overlap without crossing dry banks.
+  for (let si = 0; si < navSubChains.length; si++) {
+    const cA = navSubChains[si];
+    const endCandidates = [cA.nodeIds[0], cA.nodeIds[cA.nodeIds.length - 1]];
+    for (const aId of endCandidates) {
+      const a = riverGraphNodes[aId];
+      let bestId = -1, bestD = Infinity;
+      for (let sj = 0; sj < navSubChains.length; sj++) {
+        if (sj === si) continue;
+        const cB = navSubChains[sj];
+        for (let k = 0; k < cB.nodeIds.length; k++) {
+          const bId = cB.nodeIds[k];
+          const b = riverGraphNodes[bId];
+          const d = Math.hypot(b.wx - a.wx, b.wz - a.wz);
+          const maxJoin = Math.min(18, (a.hw + b.hw) * 0.95);
+          if (d < bestD && d <= maxJoin && Math.abs(b.wy - a.wy) <= 1.2) {
+            const mx = (a.wx + b.wx) * 0.5, mz = (a.wz + b.wz) * 0.5;
+            if ((d <= 3.6 || riverSampleAt(mx, mz))
+                && !blockedByLowBridge(a.wx, a.wz, b.wx, b.wz, Math.max(a.wy, b.wy), minNavAir, minNavHalfBeam, normBridges)) {
+              bestD = d;
+              bestId = bId;
+            }
+          }
+        }
+      }
+      if (bestId >= 0) {
+        a.adj.push({ to: bestId, w: Math.max(0.1, bestD) });
+        riverGraphNodes[bestId].adj.push({ to: aId, w: Math.max(0.1, bestD) });
+      }
+    }
+  }
+
+  const riverGraphComponents = [];
+  for (let i = 0; i < riverGraphNodes.length; i++) {
+    if (riverGraphNodes[i].comp >= 0) continue;
+    const compId = riverGraphComponents.length;
+    const queue = [i];
+    riverGraphNodes[i].comp = compId;
+    const members = [];
+    let edgeSum = 0;
+    for (let q = 0; q < queue.length; q++) {
+      const u = queue[q];
+      members.push(u);
+      for (const e of riverGraphNodes[u].adj) {
+        edgeSum += e.w;
+        if (riverGraphNodes[e.to].comp < 0) {
+          riverGraphNodes[e.to].comp = compId;
+          queue.push(e.to);
+        }
+      }
+    }
+    riverGraphComponents.push({ id: compId, nodes: members, approxLen: edgeSum * 0.5 });
+  }
+
+  const dijkstraRiverFrom = (startId) => {
+    const N = riverGraphNodes.length;
+    const dist = new Float64Array(N).fill(Infinity);
+    const prev = new Int32Array(N).fill(-1);
+    const visited = new Uint8Array(N);
+    dist[startId] = 0;
+    const compId = riverGraphNodes[startId].comp;
+    const compNodes = riverGraphComponents[compId]?.nodes ?? [];
+    for (let step = 0; step < compNodes.length; step++) {
+      let u = -1, best = Infinity;
+      for (let k = 0; k < compNodes.length; k++) {
+        const cand = compNodes[k];
+        if (!visited[cand] && dist[cand] < best) {
+          best = dist[cand];
+          u = cand;
+        }
+      }
+      if (u < 0) break;
+      visited[u] = 1;
+      for (const e of riverGraphNodes[u].adj) {
+        const nd = best + e.w;
+        if (nd < dist[e.to]) {
+          dist[e.to] = nd;
+          prev[e.to] = u;
+        }
+      }
+    }
+    return { dist, prev };
+  };
+
+  const buildDenseRouteFromNodePath = (nodePath, desiredScale) => {
+    if (!nodePath || nodePath.length < 2) return null;
+    const expanded = [];
+    let minHw = Infinity;
+    for (let i = 0; i < nodePath.length; i++) {
+      const cur = riverGraphNodes[nodePath[i]];
+      minHw = Math.min(minHw, cur.hw);
+      if (i === 0) {
+        expanded.push(cur);
+        continue;
+      }
+      const prev = riverGraphNodes[nodePath[i - 1]];
+      const segD = Math.hypot(cur.wx - prev.wx, cur.wz - prev.wz);
+      const steps = Math.max(1, Math.ceil(segD / DENSE_RIVER_STEP));
+      for (let k = 1; k <= steps; k++) {
+        expanded.push(k === steps ? cur : interpReachStation(prev, cur, k / steps));
+      }
+    }
+    const bargeBaseBeam = getTradeVesselArchetype(4).beam || 3.0;
+    const maxBeamScale = Math.max(0.58, (minHw - 0.55) / (bargeBaseBeam * 0.5));
+    const effScale = Math.max(0.58, Math.min(desiredScale, maxBeamScale));
+    const reqAir = archAirDraft(4, effScale);
+    const reqHalfBeam = archHalfBeam(4, effScale);
+
+    const runs = [];
+    let curRun = [];
+    const flush = () => {
+      if (curRun.length >= 2) {
+        let acc = 0;
+        const pts = curRun.map((s, idx) => {
+          if (idx > 0) acc += Math.hypot(s.wx - curRun[idx - 1].wx, s.wz - curRun[idx - 1].wz);
+          return {
+            x: s.wx,
+            y: s.wy,
+            z: s.wz,
+            hw: s.hw,
+            depth: s.depth,
+            vx: s.vx,
+            vz: s.vz,
+            estuaryT: s.estuaryT,
+            seaMouth: Boolean(s.seaMouth),
+            acc,
+          };
+        });
+        if (acc >= 65) runs.push({ pts, totalLen: acc, scale: effScale });
+      }
+      curRun = [];
+    };
+    for (let i = 0; i < expanded.length; i++) {
+      const s = expanded[i];
+      const prev = curRun.length > 0 ? curRun[curRun.length - 1] : s;
+      const surfY = Math.max(prev.wy, s.wy);
+      if (blockedByLowBridge(prev.wx, prev.wz, s.wx, s.wz, surfY, reqAir, reqHalfBeam, normBridges)) {
+        flush();
+        if (!blockedByLowBridge(s.wx, s.wz, s.wx, s.wz, s.wy, reqAir, reqHalfBeam, normBridges)) {
+          curRun.push(s);
+        }
+      } else {
+        curRun.push(s);
+      }
+    }
+    flush();
+    if (!runs.length) return null;
+    runs.sort((a, b) => b.totalLen - a.totalLen);
+    return runs[0];
+  };
+
+  const routeOnRiverGraph = (rawPairs, desiredScale = 0.80) => {
+    if (!riverGraphNodes.length || !Array.isArray(rawPairs) || rawPairs.length < 2) return null;
+    const sx = ox + rawPairs[0].x, sz = oz + rawPairs[0].z;
+    const ex = ox + rawPairs[rawPairs.length - 1].x, ez = oz + rawPairs[rawPairs.length - 1].z;
+    const mx = ox + rawPairs[rawPairs.length >> 1].x, mz = oz + rawPairs[rawPairs.length >> 1].z;
+
+    let bestComp = null;
+    let bestScore = Infinity;
+    for (const comp of riverGraphComponents) {
+      if (comp.approxLen < 65) continue;
+      let sNode = -1, sD = Infinity;
+      let eNode = -1, eD = Infinity;
+      let mD = Infinity;
+      for (const nid of comp.nodes) {
+        const n = riverGraphNodes[nid];
+        const ds = Math.hypot(n.wx - sx, n.wz - sz);
+        const de = Math.hypot(n.wx - ex, n.wz - ez);
+        const dm = Math.hypot(n.wx - mx, n.wz - mz);
+        if (ds < sD) { sD = ds; sNode = nid; }
+        if (de < eD) { eD = de; eNode = nid; }
+        if (dm < mD) mD = dm;
+      }
+      const score = Math.min(sD + eD, mD * 2 + Math.min(sD, eD));
+      if (score < bestScore) {
+        bestScore = score;
+        bestComp = { comp, sNode, eNode, sD, eD };
+      }
+    }
+    if (!bestComp || Math.min(bestComp.sD, bestComp.eD) > 900) return null;
+
+    const { dist, prev } = dijkstraRiverFrom(bestComp.sNode);
+    let targetNode = bestComp.eNode;
+    if (!Number.isFinite(dist[targetNode]) || dist[targetNode] < 65) {
+      let farNode = -1, farDist = 0;
+      for (const nid of bestComp.comp.nodes) {
+        if (Number.isFinite(dist[nid]) && dist[nid] > farDist) {
+          farDist = dist[nid];
+          farNode = nid;
+        }
+      }
+      if (farDist < 65 || farNode < 0) return null;
+      targetNode = farNode;
+    }
+
+    const nodePath = [];
+    for (let cur = targetNode; cur >= 0; cur = prev[cur]) {
+      nodePath.push(cur);
+      if (cur === bestComp.sNode) break;
+    }
+    nodePath.reverse();
+    return buildDenseRouteFromNodePath(nodePath, desiredScale);
   };
 
   const harborBySlot = new Map();
@@ -1845,15 +2276,22 @@ export function buildTradeVesselRoutes(
     const isRiver = c.mode === 'river';
     const seaArchetype = [5, 0, 2, 5][(hashU32(c.index | 0, 41)) & 3];
     const archIdx = isRiver ? 4 : seaArchetype;
-    const scale = isRiver ? 0.78 : seaArchetype === 5 ? 0.92 : 0.94;
-    const reqAir = archAirDraft(archIdx, scale);
-    const reqHalfBeam = archHalfBeam(archIdx, scale);
-    const rawPoly = buildPolylineRoute(parseFlatPairs(c.points), { x: ox, z: oz }, isRiver ? riverYAt : () => seaLevel);
-    const poly = rawPoly
-      ? (isRiver
-          ? clampRiverPolyToSafeChannel(rawPoly, reqAir, reqHalfBeam)
-          : clampSeaPolyToSafeWater(rawPoly, -2.2, 14, reqAir, reqHalfBeam))
-      : null;
+    let scale = isRiver ? 0.78 : seaArchetype === 5 ? 0.92 : 0.94;
+    const pairs = parseFlatPairs(c.points);
+    let poly = null;
+    if (isRiver && parsedReachChains.length > 0) {
+      poly = routeOnRiverGraph(pairs, scale);
+      if (poly?.scale) scale = poly.scale;
+    } else {
+      const reqAir = archAirDraft(archIdx, scale);
+      const reqHalfBeam = archHalfBeam(archIdx, scale);
+      const rawPoly = buildPolylineRoute(pairs, { x: ox, z: oz }, isRiver ? riverYAt : () => seaLevel);
+      poly = rawPoly
+        ? (isRiver
+            ? clampRiverPolyToSafeChannel(rawPoly, reqAir, reqHalfBeam)
+            : clampSeaPolyToSafeWater(rawPoly, -2.2, 14, reqAir, reqHalfBeam))
+        : null;
+    }
     if (!poly) continue;
     routes.push({
       id: `caravan:${c.key ?? c.index}`, caravanKey: c.key ?? null, mode: c.mode, phase: 'caravan',
@@ -1875,16 +2313,24 @@ export function buildTradeVesselRoutes(
     });
   }
 
-  // Canonical sim-driven manned river boats (`snapshot.riverBoats` from BOARD_MODEL), parcelized with staggered `phaseOffset`.
+  // Canonical sim-driven manned river boats (`snapshot.riverBoats` from BOARD_MODEL), snapped & routed strictly
+  // along rendered `riverReaches` centerlines (`<= 3.2 m` spacing) whenever `parsedReachChains` is present.
   const simRiverBoats = Array.isArray(snapshot?.riverBoats) ? snapshot.riverBoats : [];
   for (let ri = 0; ri < simRiverBoats.length && routes.length < MAX_TRADE_VESSELS; ri++) {
     const rb = simRiverBoats[ri];
     if (!rb || !Array.isArray(rb.points) || rb.points.length < 4) continue;
-    const rbScale = Number.isFinite(rb.scale) ? rb.scale : 0.80;
-    const reqAir = archAirDraft(4, rbScale);
-    const reqHalfBeam = archHalfBeam(4, rbScale);
-    const rawPoly = buildPolylineRoute(parseFlatPairs(rb.points), { x: ox, z: oz }, riverYAt);
-    const poly = rawPoly ? clampRiverPolyToSafeChannel(rawPoly, reqAir, reqHalfBeam) : null;
+    let rbScale = Number.isFinite(rb.scale) ? rb.scale : 0.80;
+    const pairs = parseFlatPairs(rb.points);
+    let poly = null;
+    if (parsedReachChains.length > 0) {
+      poly = routeOnRiverGraph(pairs, rbScale);
+      if (poly?.scale) rbScale = poly.scale;
+    } else {
+      const reqAir = archAirDraft(4, rbScale);
+      const reqHalfBeam = archHalfBeam(4, rbScale);
+      const rawPoly = buildPolylineRoute(pairs, { x: ox, z: oz }, riverYAt);
+      poly = rawPoly ? clampRiverPolyToSafeChannel(rawPoly, reqAir, reqHalfBeam) : null;
+    }
     if (!poly) continue;
     const rbCargo = rb.cargo && typeof rb.cargo === 'object'
       ? { ...rb.cargo }
@@ -1919,40 +2365,10 @@ export function buildTradeVesselRoutes(
     });
   }
 
-  // Supplement any navigable river reaches (`hw >= 1.35 m`, bridge-clear) not yet covered by an active river route
-  // with local ferry/fisher shuttles (no all-or-nothing `simRiverBoats.length === 0` gate).
-  {
-    const navigable = [];
-    for (const r of riverReaches) {
-      const stations = reachStations(r);
-      let seg = [];
-      const flush = () => {
-        if (seg.length >= 3) {
-          let len = 0, minHw = Infinity;
-          for (let i = 0; i < seg.length; i++) {
-            minHw = Math.min(minHw, seg[i].hw || 1.8);
-            if (i > 0) len += Math.hypot(seg[i].wx - seg[i - 1].wx, seg[i].wz - seg[i - 1].wz);
-          }
-          if (len >= 150) navigable.push({ stations: seg.slice(), length: len, minHw });
-        }
-        seg = [];
-      };
-      for (let si = 0; si < stations.length; si++) {
-        const s = stations[si];
-        const hw = s.hw ?? r.minHalfWidth ?? 0;
-        const estScale = Math.max(0.58, Math.min(0.90, (hw - 0.25) / 2.05));
-        const reqAir = archAirDraft(4, estScale);
-        const reqHalfBeam = archHalfBeam(4, estScale);
-        const prevS = seg.length > 0 ? seg[seg.length - 1] : s;
-        if (hw >= 1.35 && !blockedByLowBridge(prevS.wx, prevS.wz, s.wx, s.wz, s.wy, reqAir, reqHalfBeam, normBridges)) {
-          seg.push(s);
-        } else {
-          flush();
-        }
-      }
-      flush();
-    }
-    navigable.sort((a, b) => b.length - a.length);
+  // Supplement any navigable rendered river reaches (`hw >= 2.2 m`, `depth >= 0.55 m`, bridge-clear)
+  // not yet covered by an active river route with dense centerline local shuttles.
+  if (navSubChains.length > 0) {
+    const navigable = navSubChains.filter((sc) => sc.length >= 150).slice().sort((a, b) => b.length - a.length);
     for (let ri = 0; ri < navigable.length && routes.length < MAX_TRADE_VESSELS - 6; ri++) {
       const reach = navigable[ri];
       const sts = reach.stations;
@@ -1963,39 +2379,20 @@ export function buildTradeVesselRoutes(
         && rt.pts.some((q) => Math.hypot(q.x - midS.wx, q.z - midS.wz) < 185),
       );
       if (alreadyCovered) continue;
-      const bargeScale = Math.max(0.58, Math.min(0.90, (reach.minHw - 0.28) / 2.05));
-      const halfSpan = 2.10 * bargeScale;
-      const pts = sts.map((s, idx) => {
-        const prev = sts[Math.max(0, idx - 1)];
-        const next = sts[Math.min(sts.length - 1, idx + 1)];
-        const dx = next.wx - prev.wx, dz = next.wz - prev.wz;
-        const len = Math.hypot(dx, dz) || 1;
-        const nx = -dz / len, nz = dx / len;
-        const maxLat = Math.max(0, (s.hw || 1.8) - halfSpan - 0.20);
-        const lat = Number.isFinite(s.thalweg) ? s.thalweg * Math.min(1.0, maxLat * 0.65) : 0;
-        return {
-          x: s.wx + nx * lat,
-          z: s.wz + nz * lat,
-          wy: s.wy,
-          vx: Number.isFinite(s.vx) ? s.vx : NaN,
-          vz: Number.isFinite(s.vz) ? s.vz : NaN,
-        };
-      });
-      let acc = 0;
-      const linePts = pts.map((p, idx) => {
-        if (idx > 0) acc += Math.hypot(p.x - pts[idx - 1].x, p.z - pts[idx - 1].z);
-        return { x: p.x, y: p.wy, z: p.z, vx: p.vx, vz: p.vz, acc };
-      });
-      const boats = reach.length > 760 ? 2 : 1;
+      const bargeBaseBeam = getTradeVesselArchetype(4).beam || 3.0;
+      const bargeScale = Math.max(0.58, Math.min(0.88, (reach.minHw - 0.55) / (bargeBaseBeam * 0.5)));
+      const built = buildDenseRouteFromNodePath(reach.nodeIds, bargeScale);
+      if (!built || built.totalLen < 120) continue;
+      const boats = built.totalLen > 760 ? 2 : 1;
       for (let b = 0; b < boats && routes.length < MAX_TRADE_VESSELS - 6; b++) {
         routes.push({
           id: `reach:${ri}:${b}`, mode: 'river', phase: 'shuttle',
-          archetype: 4, scale: bargeScale * (b === 0 ? 1.0 : 0.94),
+          archetype: 4, scale: built.scale * (b === 0 ? 1.0 : 0.94),
           depart: 0, arrive: 1, berth: null,
           kind: 'river barge',
           cargo: { fish: 2 + (b & 1) },
           pilot: null, oarsmen: 4,
-          pts: linePts, totalLen: acc,
+          pts: built.pts, totalLen: built.totalLen,
           phaseOffset: ((hashU32(ri + 1, b + 7) % 1000) / 1000),
         });
       }
@@ -2143,17 +2540,17 @@ export function buildTradeVesselRoutes(
 export function sampleTradeVesselState(route, boardDay, daysPerSecond, elapsedSec, overrideDist = null) {
   const phaseRad = (route.phaseOffset || 0) * Math.PI * 2;
   if (route.phase === 'dock' && route.berth) {
-    const bob = Math.sin(elapsedSec * 1.15 + phaseRad) * 0.14;
-    const roll = Math.sin(elapsedSec * 0.9 + phaseRad * 1.7) * 0.024;
     const yaw = route.berth.rot || 0;
     return {
       x: route.berth.x,
-      y: route.berth.y + bob,
+      y: route.berth.y ?? 0,
       z: route.berth.z,
+      vx: 0,
+      vz: 0,
       yaw,
       heading: (yaw * 180) / Math.PI,
-      pitch: Math.sin(elapsedSec * 0.72 + phaseRad) * 0.012,
-      roll,
+      pitch: 0,
+      roll: 0,
       bowDir: [Math.sin(yaw), -Math.cos(yaw)],
       scale: route.scale,
       phase: phaseRad,
@@ -2199,19 +2596,18 @@ export function sampleTradeVesselState(route, boardDay, daysPerSecond, elapsedSe
   const ty = Math.max(-0.22, Math.min(0.22, (at.ty || 0) * forwardSign));
   // Bow is -Z: boatRotate(0, 0, -1, yaw, 0, 0) = (+sin(yaw), 0, -cos(yaw)).
   const yaw = Math.atan2(tx, -tz);
-  const swellBob = route.mode === 'sea' ? Math.sin(elapsedSec * 1.1 + phaseRad) * 0.16 : Math.sin(elapsedSec * 1.8 + phaseRad) * 0.03;
-  const roll = Math.sin(elapsedSec * 0.9 + phaseRad * 1.7) * (route.mode === 'river' ? 0.014 : 0.030);
   const slopePitch = Math.asin(ty);
-  const pitch = slopePitch + Math.sin(elapsedSec * 0.8 + phaseRad) * (route.mode === 'river' ? 0.008 : 0.018);
 
   return {
     x: at.x,
-    y: at.y + swellBob,
+    y: at.y,
     z: at.z,
+    vx: tx * speed,
+    vz: tz * speed,
     yaw,
     heading: (yaw * 180) / Math.PI,
-    pitch,
-    roll,
+    pitch: slopePitch,
+    roll: 0,
     bowDir: [Math.sin(yaw), -Math.cos(yaw)],
     scale: route.scale,
     phase: phaseRad,
@@ -2389,6 +2785,11 @@ export function createVesselAutopilotState(route, archIndex, seedState, simTime 
     x: seedState?.x ?? (route.berth?.x ?? 0),
     y: seedState?.y ?? (route.berth?.y ?? 0),
     z: seedState?.z ?? (route.berth?.z ?? 0),
+    vx: state === 'docked' || state === 'anchored' ? 0 : (seedState?.vx ?? 0),
+    vz: state === 'docked' || state === 'anchored' ? 0 : (seedState?.vz ?? 0),
+    waterY: seedState?.y ?? (route.berth?.y ?? 0),
+    channelHw: 0,
+    crossTrackM: 0,
     yaw: seedState?.yaw ?? (route.berth?.rot ?? 0),
     speed: state === 'docked' || state === 'anchored' ? 0 : (seedState?.speed ?? 2.5),
     motion: state === 'docked' || state === 'anchored' ? 0 : (seedState?.motion ?? 1.0),
@@ -2412,7 +2813,7 @@ export function createVesselAutopilotState(route, archIndex, seedState, simTime 
 
 /**
  * Advances one autonomous vessel step using wind polars, tacking in headwinds, leeway/heel,
- * shoal & collision avoidance, harbor approach/docking/departure kinematics, or river flow.
+ * shoal & collision avoidance, harbor approach/docking/departure kinematics, or channel-locked river flow.
  */
 export function stepTradeVesselAutopilot(ai, route, archIndex, {
   dt = 0.016,
@@ -2426,6 +2827,7 @@ export function stepTradeVesselAutopilot(ai, route, archIndex, {
   riverFlowAt = null,
   avoidTargets = null,
   length = 17.5,
+  beam = archIndex === 4 ? 2.4 : 4.8,
   draft = 1.6,
 } = {}) {
   const safeDt = Math.max(0, Math.min(8, dt));
@@ -2437,6 +2839,8 @@ export function stepTradeVesselAutopilot(ai, route, archIndex, {
 
     if (ai.state === 'sunk') {
       ai.speed = 0;
+      ai.vx = 0;
+      ai.vz = 0;
       ai.motion = 0;
       ai.heldByWeather = false;
       ai.etaDays = 0;
@@ -2448,10 +2852,12 @@ export function stepTradeVesselAutopilot(ai, route, archIndex, {
       ai.yaw = wrapAnglePi(ai.yaw + Math.max(-0.08 * h, Math.min(0.08 * h, wrapAnglePi(targetYaw - ai.yaw))));
       ai.x += ((route.berth?.x ?? ai.x) - ai.x) * Math.min(1, h * 1.2);
       ai.z += ((route.berth?.z ?? ai.z) - ai.z) * Math.min(1, h * 1.2);
-      ai.y = (route.berth?.y ?? 0) + Math.sin(elapsedSec * 1.15 + ai.phaseRad) * 0.14;
-      ai.pitch = Math.sin(elapsedSec * 0.72 + ai.phaseRad) * 0.012;
-      ai.roll = Math.sin(elapsedSec * 0.9 + ai.phaseRad * 1.7) * 0.024;
+      ai.y = route.berth?.y ?? 0;
+      ai.pitch = 0;
+      ai.roll = 0;
       ai.speed = 0;
+      ai.vx = 0;
+      ai.vz = 0;
       ai.motion = 0;
       ai.sailSet += (0.04 - ai.sailSet) * (1 - Math.exp(-h * 1.6));
       ai.heldByWeather = false;
@@ -2467,10 +2873,12 @@ export function stepTradeVesselAutopilot(ai, route, archIndex, {
       ai.x += (bx - ai.x) * Math.min(1, h * 1.8);
       ai.z += (bz - ai.z) * Math.min(1, h * 1.8);
       ai.yaw = wrapAnglePi(ai.yaw + Math.max(-0.25 * h, Math.min(0.25 * h, wrapAnglePi(brot - ai.yaw))));
-      ai.y = (berth?.y ?? 0) + Math.sin(elapsedSec * 1.15 + ai.phaseRad) * 0.12;
-      ai.pitch = Math.sin(elapsedSec * 0.72 + ai.phaseRad) * 0.012;
-      ai.roll = Math.sin(elapsedSec * 0.9 + ai.phaseRad * 1.7) * (activeStorm ? 0.045 : 0.020);
+      ai.y = berth?.y ?? 0;
+      ai.pitch = 0;
+      ai.roll = 0;
       ai.speed = Math.max(0, ai.speed * Math.exp(-h * 3.0));
+      ai.vx = 0;
+      ai.vz = 0;
       ai.motion = 0;
       ai.sailSet += (0.04 - ai.sailSet) * (1 - Math.exp(-h * 1.6));
       ai.tacking = false;
@@ -2480,11 +2888,23 @@ export function stepTradeVesselAutopilot(ai, route, archIndex, {
       return;
     }
 
-    // River barges: true flow drift + upstream/downstream oar speed and cadence
+    // River barges: strict rendered-river centerline guidance, cross-track clamping, and exact station water elevation
     if (isBarge && pts && pts.length >= 2) {
       let target = pts[Math.max(0, Math.min(pts.length - 1, ai.wpIndex))];
+      let probeIw = null;
+      if (riverFlowAt) {
+        const candIw = riverFlowAt(ai.x + worldOffsetX, ai.z + worldOffsetZ);
+        if (candIw && (!Number.isFinite(candIw.dist) || !Number.isFinite(candIw.hw) || candIw.dist <= candIw.hw * 0.92)) {
+          probeIw = candIw;
+        }
+      }
+      const localHalfWidth = Number.isFinite(target.hw)
+        ? target.hw
+        : (Number.isFinite(probeIw?.hw) ? probeIw.hw : 3.5);
+      const arriveR = Math.max(2.8, Math.min(5.5, localHalfWidth * 0.75));
       let distToWp = Math.hypot(target.x - ai.x, target.z - ai.z);
-      if (distToWp < 22) {
+      let wpGuard = 0;
+      while (distToWp < arriveR && wpGuard++ < 16) {
         if (ai.dirSign > 0) {
           if (ai.wpIndex < pts.length - 1) ai.wpIndex++;
           else { ai.dirSign = -1; ai.wpIndex = Math.max(0, pts.length - 2); }
@@ -2498,16 +2918,9 @@ export function stepTradeVesselAutopilot(ai, route, archIndex, {
 
       let cvx = Number.isFinite(target.vx) ? target.vx : 0;
       let cvz = Number.isFinite(target.vz) ? target.vz : 0;
-      let liveWaterY = target.y;
-      if (riverFlowAt) {
-        const iw = riverFlowAt(ai.x + worldOffsetX, ai.z + worldOffsetZ);
-        if (iw) {
-          if (Number.isFinite(iw.vx) && Number.isFinite(iw.vz)) {
-            cvx = iw.vx;
-            cvz = iw.vz;
-          }
-          if (Number.isFinite(iw.wy)) liveWaterY = iw.wy;
-        }
+      if (probeIw && Number.isFinite(probeIw.vx) && Number.isFinite(probeIw.vz)) {
+        cvx = probeIw.vx;
+        cvz = probeIw.vz;
       } else {
         const prevIdx = Math.max(0, Math.min(pts.length - 1, ai.wpIndex - ai.dirSign));
         const a = pts[prevIdx], b = target;
@@ -2531,12 +2944,14 @@ export function stepTradeVesselAutopilot(ai, route, archIndex, {
       const oarWaterSpeed = upstream
         ? Math.max(1.55, Math.min(2.65, Math.abs(flowTrackAlong) + 0.95))
         : 1.05;
-      // Steersman crabs into cross-current so vector sum `bow * oarWaterSpeed + riverCurrent` tracks thalweg.
-      const crabVx = tx * oarWaterSpeed - cvx * 0.72;
-      const crabVz = tz * oarWaterSpeed - cvz * 0.72;
+      // Steersman crabs only into cross-track current so downstream hulls ride river flow cleanly.
+      const crossVx = cvx - flowTrackAlong * tx;
+      const crossVz = cvz - flowTrackAlong * tz;
+      const crabVx = tx * oarWaterSpeed - crossVx * 0.78;
+      const crabVz = tz * oarWaterSpeed - crossVz * 0.78;
       const desiredYaw = (Math.abs(crabVx) + Math.abs(crabVz) > 1e-3) ? Math.atan2(crabVx, -crabVz) : Math.atan2(tx, -tz);
       const dYaw = wrapAnglePi(desiredYaw - ai.yaw);
-      const maxTurn = 0.52 * h;
+      const maxTurn = 0.85 * h;
       ai.yaw = wrapAnglePi(ai.yaw + Math.max(-maxTurn, Math.min(maxTurn, dYaw)));
 
       const bowX = Math.sin(ai.yaw), bowZ = -Math.cos(ai.yaw);
@@ -2546,21 +2961,88 @@ export function stepTradeVesselAutopilot(ai, route, archIndex, {
       ai.speed += (groundSpd - ai.speed) * (1 - Math.exp(-h * 2.4));
       ai.x += gvx * h;
       ai.z += gvz * h;
+      ai.vx = gvx;
+      ai.vz = gvz;
       ai.motion = upstream ? Math.min(1.5, 1.15 + Math.abs(flowTrackAlong) * 0.35) : Math.max(0.5, 0.78 - flowTrackAlong * 0.18);
       ai.sailSet = 0;
       ai.tacking = false;
       ai.heldByWeather = false;
 
-      const atSlope = target.y - (pts[Math.max(0, ai.wpIndex - ai.dirSign)]?.y ?? target.y);
-      const segD = Math.max(1, Math.hypot(target.x - (pts[Math.max(0, ai.wpIndex - ai.dirSign)]?.x ?? target.x), target.z - (pts[Math.max(0, ai.wpIndex - ai.dirSign)]?.z ?? target.z)));
-      ai.y = liveWaterY + Math.sin(elapsedSec * 1.8 + ai.phaseRad) * 0.025;
-      ai.pitch = Math.max(-0.18, Math.min(0.18, Math.asin(Math.max(-0.2, Math.min(0.2, atSlope / segD))))) + Math.sin(elapsedSec * 0.8 + ai.phaseRad) * 0.008;
-      ai.roll = Math.sin(elapsedSec * 0.9 + ai.phaseRad * 1.7) * 0.014;
+      // Project `(ai.x, ai.z)` onto active `riverReaches` centerline segment & clamp cross-track strictly inside ribbon
+      let bestSegIdx = Math.max(1, Math.min(pts.length - 1, ai.wpIndex));
+      let bestU = 0;
+      let bestDistSq = Infinity;
+      const searchWindow = (lo, hi) => {
+        for (let i = lo; i <= hi; i++) {
+          const a = pts[i - 1], b = pts[i];
+          const dx = b.x - a.x, dz = b.z - a.z;
+          const lenSq = dx * dx + dz * dz;
+          const u = lenSq > 1e-6 ? Math.max(0, Math.min(1, ((ai.x - a.x) * dx + (ai.z - a.z) * dz) / lenSq)) : 0;
+          const px = a.x + dx * u, pz = a.z + dz * u;
+          const dSq = (ai.x - px) * (ai.x - px) + (ai.z - pz) * (ai.z - pz);
+          if (dSq < bestDistSq) {
+            bestDistSq = dSq;
+            bestSegIdx = i;
+            bestU = u;
+          }
+        }
+      };
+      searchWindow(Math.max(1, ai.wpIndex - 10), Math.min(pts.length - 1, ai.wpIndex + 10));
+      if (bestDistSq > 144) searchWindow(1, pts.length - 1);
+
+      const segA = pts[bestSegIdx - 1];
+      const segB = pts[bestSegIdx];
+      const sdx = segB.x - segA.x, sdz = segB.z - segA.z;
+      const slen = Math.hypot(sdx, sdz) || 1;
+      const cx = segA.x + sdx * bestU;
+      const cz = segA.z + sdz * bestU;
+      const snx = -sdz / slen, snz = sdx / slen;
+      const dLat = (ai.x - cx) * snx + (ai.z - cz) * snz;
+
+      let stHw = (Number.isFinite(segA.hw) && Number.isFinite(segB.hw))
+        ? (segA.hw + (segB.hw - segA.hw) * bestU)
+        : (Number.isFinite(segB.hw) ? segB.hw : segA.hw);
+      let stWy = (Number.isFinite(segA.y) && Number.isFinite(segB.y))
+        ? (segA.y + (segB.y - segA.y) * bestU)
+        : (Number.isFinite(segB.y) ? segB.y : (segA.y ?? 0));
+      const stSeaMouth = Boolean(segA.seaMouth || segB.seaMouth);
+      const stEstuaryT = (Number.isFinite(segA.estuaryT) && Number.isFinite(segB.estuaryT))
+        ? (segA.estuaryT + (segB.estuaryT - segA.estuaryT) * bestU)
+        : (stSeaMouth ? 1 : 0);
+
+      if (riverFlowAt) {
+        const iwCenter = riverFlowAt(cx + worldOffsetX, cz + worldOffsetZ);
+        if (iwCenter && (!Number.isFinite(iwCenter.dist) || !Number.isFinite(iwCenter.hw) || iwCenter.dist <= iwCenter.hw * 0.92)) {
+          if (!Number.isFinite(stHw) && Number.isFinite(iwCenter.hw)) stHw = iwCenter.hw;
+          if (Number.isFinite(iwCenter.wy)) stWy = iwCenter.wy;
+        }
+      }
+      if (stSeaMouth && stEstuaryT > 0.72) {
+        stWy *= Math.max(0, (1 - stEstuaryT) / 0.28);
+      }
+
+      const hullHalfBeam = Math.max(0.85, beam * 0.5);
+      const effHw = Number.isFinite(stHw) ? stHw : 3.5;
+      const maxLat = Math.min(
+        Math.max(0.0, effHw - hullHalfBeam - 0.12),
+        Math.max(0.4, effHw - hullHalfBeam - 0.35),
+      );
+      const clampedLat = Math.max(-maxLat, Math.min(maxLat, dLat));
+      ai.x = cx + snx * clampedLat;
+      ai.z = cz + snz * clampedLat;
+      ai.y = stWy;
+      ai.waterY = stWy;
+      ai.channelHw = effHw;
+      ai.crossTrackM = Math.abs(clampedLat);
+
+      const slopeSign = ai.dirSign >= 0 ? 1 : -1;
+      const dyAlong = ((segB.y ?? stWy) - (segA.y ?? stWy)) * slopeSign;
+      ai.pitch = Math.max(-0.14, Math.min(0.14, Math.asin(Math.max(-0.18, Math.min(0.18, dyAlong / slen)))));
+      ai.roll = 0;
 
       const L = Math.max(1, route.totalLen || 1);
-      const remSegs = ai.dirSign > 0
-        ? Math.max(0, L - (pts[Math.max(0, ai.wpIndex - 1)]?.acc ?? 0))
-        : (pts[ai.wpIndex]?.acc ?? 0);
+      const projAcc = (segA.acc ?? 0) + slen * bestU;
+      const remSegs = ai.dirSign > 0 ? Math.max(0, L - projAcc) : Math.max(0, projAcc);
       ai.progress = Math.max(0, Math.min(1, 1 - remSegs / L));
       const dPerSec = Math.max(daysPerSecond || 0, 1 / 180);
       ai.etaDays = (remSegs / Math.max(0.35, ai.speed)) * dPerSec;
@@ -2611,15 +3093,19 @@ export function stepTradeVesselAutopilot(ai, route, archIndex, {
         const desiredDockYaw = distBerth < 2.2 ? brot : Math.atan2(targetX - ai.x, -(targetZ - ai.z));
         const dYaw = wrapAnglePi(desiredDockYaw - ai.yaw);
         ai.yaw = wrapAnglePi(ai.yaw + Math.max(-0.45 * h, Math.min(0.45 * h, dYaw)));
-        ai.x += (targetX - ai.x) * Math.min(1, h * 1.4);
-        ai.z += (targetZ - ai.z) * Math.min(1, h * 1.4);
+        const stepX = (targetX - ai.x) * Math.min(1, h * 1.4);
+        const stepZ = (targetZ - ai.z) * Math.min(1, h * 1.4);
+        ai.x += stepX;
+        ai.z += stepZ;
+        ai.vx = h > 1e-4 ? stepX / h : 0;
+        ai.vz = h > 1e-4 ? stepZ / h : 0;
         ai.speed = Math.min(ai.speed, distBerth * 0.5);
         if (distBerth <= 2.0 && Math.abs(wrapAnglePi(brot - ai.yaw)) < 0.22) {
           ai.state = 'docked';
           ai.dirtySync = true;
         }
         ai.sailSet += (sailTarget - ai.sailSet) * (1 - Math.exp(-h * 1.8));
-        ai.y = Math.sin(elapsedSec * 1.15 + ai.phaseRad) * 0.12;
+        ai.y = dest.y ?? 0;
         return;
       }
     } else if (ai.state === 'departing') {
@@ -2788,13 +3274,15 @@ export function stepTradeVesselAutopilot(ai, route, archIndex, {
     const bowX = Math.sin(ai.yaw), bowZ = -Math.cos(ai.yaw);
     const windTo = actualPolar.windTo || [0, 0];
     const leeMag = ai.speed * actualPolar.leewayRad;
-    ai.x += (bowX * ai.speed + windTo[0] * leeMag) * h;
-    ai.z += (bowZ * ai.speed + windTo[1] * leeMag) * h;
-    ai.y = Math.sin(elapsedSec * 1.1 + ai.phaseRad) * 0.16;
-    const wavePitch = Math.sin(elapsedSec * 0.8 + ai.phaseRad) * 0.018;
-    const waveRoll = Math.sin(elapsedSec * 0.9 + ai.phaseRad * 1.7) * 0.030;
-    ai.pitch += (wavePitch - ai.pitch) * Math.min(1, h * 3);
-    ai.roll += (actualPolar.heel + waveRoll - ai.roll) * Math.min(1, h * 2.2);
+    const gvx = bowX * ai.speed + windTo[0] * leeMag;
+    const gvz = bowZ * ai.speed + windTo[1] * leeMag;
+    ai.x += gvx * h;
+    ai.z += gvz * h;
+    ai.vx = gvx;
+    ai.vz = gvz;
+    ai.y = 0;
+    ai.pitch += (0 - ai.pitch) * Math.min(1, h * 3);
+    ai.roll += (actualPolar.heel - ai.roll) * Math.min(1, h * 2.2);
     ai.motion = Math.min(1.6, ai.speed / 2.25);
     ai.heldByWeather = Boolean(activeStorm && (ai.tacking || actualPolar.targetSpeed < 1.8));
 
@@ -2942,9 +3430,10 @@ fn vesselCrownSamples(share: f32, pixel: vec2f, samples: u32) -> u32 {
 }
 `;
 
-export function tradeVesselsSource(damaged = false, samples = 4) {
+export function tradeVesselsSource(damaged = false, samples = 4, { submergedCapture = false } = {}) {
   const safeSamples = Math.max(1, Math.min(4, samples | 0));
   const sampleMaskAll = (1 << safeSamples) - 1;
+  const useSubmergedEntry = Boolean(submergedCapture && !damaged);
   return FRAME_WGSL + ATMO_CORE_WGSL + SKY_RENDER_FUNCS + SHADOW_FRAME + VESSEL_LIGHTING + CANVAS_OPTICS + VESSEL_SAMPLE_MASK_WGSL + /* wgsl */ `
 struct TradeNearDomain { domain: vec4f, grid: vec4f };
 const TV_SAMPLES: u32 = ${safeSamples}u;
@@ -3052,7 +3541,7 @@ fn animateTradeOar(pos: vec3f, norm: vec3f, material: f32, uv: vec2f, instAnim: 
 fn vesselWorldTransform(srcPos: vec3f, srcNorm: vec3f, material: f32, uv: vec2f, posYaw: vec4f, att: vec4f, anim: vec4f) -> array<vec3f, 3> {
   let aIdx = min(u32(${TRADE_VESSEL_ARCHETYPES - 1}), u32(max(0.0, round(att.w))));
   let sc4 = ARCHETYPE_SCALES[aIdx];
-  let scaleMetres = vec3f(sc4.x * att.z, sc4.y, sc4.z * att.z);
+  let scaleMetres = sc4.xyz * att.z;
   let animated = animateTradeOar(srcPos, srcNorm, material, uv, anim, att.w);
   let unitLocalN = normalize(animated[1] / max(length(animated[1]), 1e-5));
   let wpLocal = rotateVessel(animated[0] * scaleMetres, posYaw.w, att.x, att.y);
@@ -3159,8 +3648,8 @@ fn canvasTearMask(uv: vec2f, p: vec3f, mat: u32, dmg: f32) -> f32 {
 }
 ` : ''}
 
-${damaged ? '' : 'struct TVFragmentOut { @location(0) color: vec4f, @builtin(sample_mask) mask: u32 };'}
-@fragment fn tvFS(in: TVVertexOut, @builtin(front_facing) front: bool) -> ${damaged ? '@location(0) vec4f' : 'TVFragmentOut'} {
+${damaged || useSubmergedEntry ? '' : 'struct TVFragmentOut { @location(0) color: vec4f, @builtin(sample_mask) mask: u32 };'}
+@fragment fn ${useSubmergedEntry ? 'tvSubmergedFS' : 'tvFS'}(in: TVVertexOut, @builtin(front_facing) front: bool) -> ${damaged || useSubmergedEntry ? '@location(0) vec4f' : 'TVFragmentOut'} {
   // Uniform control flow: sample oak albedo and evaluate derivatives before any branches.
   let timberRaw = pow(textureSample(oakAlbedo, oakSampler, in.uv * vec2f(1.2, 1.2)).rgb, vec3f(2.2));
   let course = select(in.local.y * 9.0, in.uv.x * 18.0, in.matId == 15u);
@@ -3344,7 +3833,7 @@ ${damaged ? '' : 'struct TVFragmentOut { @location(0) color: vec4f, @builtin(sam
   let envSpec = envCol * vesselEnvironment(n, viewDir, rough, f0) * select(0.28, 0.85, metal > 0.1 || rough < 0.25);
 
   let lit = diffTint * amb * 0.82 + direct + spec + envSpec + emitGlow;
-  ${damaged ? `
+  ${damaged || useSubmergedEntry ? `
   return vec4f(surfaceAir(lit, in.world), 1.0);
 }
   ` : `
@@ -3360,6 +3849,10 @@ ${damaged ? '' : 'struct TVFragmentOut { @location(0) color: vec4f, @builtin(sam
 }
 
 export const TRADE_VESSELS_WGSL = tradeVesselsSource(false);
+
+export function tradeVesselsSubmergedSource() {
+  return tradeVesselsSource(false, 1, { submergedCapture: true });
+}
 
 const TRADE_SHARED_TYPES_WGSL = /* wgsl */ `
 struct TradeNearDomain { domain: vec4f, grid: vec4f };
@@ -3448,11 +3941,10 @@ fn rotateVesselSel(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
   }
 
   // 2. Camera frustum & screen-space continuum error selection
-  let scaleXZ = vec3f(scaleMul, 1.0, scaleMul);
-  let worldCenter = shipWorld + rotateVesselSel(arch.splatCenterRad.xyz * scaleXZ, yaw, pitch, roll);
+  let worldCenter = shipWorld + rotateVesselSel(arch.splatCenterRad.xyz * scaleMul, yaw, pitch, roll);
   let toCenter = worldCenter - F.camPos.xyz;
   let dist = max(length(toCenter), 1.0);
-  let boundRad = arch.splatCenterRad.w * max(scaleMul, 1.0);
+  let boundRad = arch.splatCenterRad.w * scaleMul;
   let clip = F.viewProj * vec4f(earthCurve(toCenter, F.camPos.y), 1.0);
   if (clip.w < -boundRad * 1.4) { return; }
   let tanX = max(length(F.camRight.xyz), 0.15);
@@ -3503,7 +3995,7 @@ fn rotateVesselSel(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
     let viewXZ = normalize(vec2f(toCenter.x, toCenter.z) + vec2f(1e-5, 0.0));
     let broadFactor = abs(bow.x * viewXZ.y - bow.y * viewXZ.x);
     let worldHalfW = mix(arch.splatExtentCol.x, arch.splatExtentCol.w, broadFactor) * scaleMul * inflate;
-    let worldHalfH = arch.splatExtentCol.y * inflate;
+    let worldHalfH = arch.splatExtentCol.y * scaleMul * inflate;
     let sVert = atomicAdd(&indirect[74u], 3u);
     let sIdx = sVert / 3u;
     if (sIdx < selP.ctrl.w) {
@@ -3606,13 +4098,14 @@ struct TVContOut {
     rawLocalP.x *= mix(0.08, 1.0, sailFrac);
     rawLocalP.y = mix(anchorY, rawLocalP.y, mix(0.28, 1.0, sailFrac));
   }
-  let localP = rawLocalP * vec3f(inst.attScaleArch.z, 1.0, inst.attScaleArch.z);
+  let scaleMul = max(inst.attScaleArch.z, 0.25);
+  let localP = rawLocalP * scaleMul;
   let n0 = unpack4x8unorm(v0.normPacked).xyz * 2.0 - 1.0;
   let n1 = unpack4x8unorm(v1.normPacked).xyz * 2.0 - 1.0;
   let localN = normalize(mix(n0, n1, morphT) + vec3f(0.0, 1e-4, 0.0));
   let shipWorld = inst.posYaw.xyz + vec3f(nearTerrain.grid.y, 0.0, nearTerrain.grid.z);
   let worldP = shipWorld + rotateVesselCont(localP, inst.posYaw.w, inst.attScaleArch.x, inst.attScaleArch.y);
-  let worldN = normalize(rotateVesselCont(localN / vec3f(max(inst.attScaleArch.z, 0.25), 1.0, max(inst.attScaleArch.z, 0.25)), inst.posYaw.w, inst.attScaleArch.x, inst.attScaleArch.y));
+  let worldN = normalize(rotateVesselCont(localN, inst.posYaw.w, inst.attScaleArch.x, inst.attScaleArch.y));
 
   var o: TVContOut;
   o.pos = F.viewProj * vec4f(earthCurve(worldP - F.camPos.xyz, F.camPos.y), 1.0);
@@ -3714,6 +4207,174 @@ struct TVSplatFragOut { @location(0) color: vec4f, @builtin(sample_mask) mask: u
 
 export const TRADE_VESSEL_CONTINUUM_WGSL = buildTradeVesselContinuumWGSL(4);
 export const TRADE_VESSEL_SPLAT_WGSL = buildTradeVesselSplatWGSL(4);
+
+// ============================================================================
+// GPU Multi-Point Ocean & River Wave Buoyancy Compute Pass (Zero CPU Readbacks)
+// ============================================================================
+export const TRADE_VESSEL_WAVE_WGSL = FRAME_WGSL + SURFACE_WAVE_SAMPLE + TRADE_SHARED_TYPES_WGSL + /* wgsl */ `
+struct TradeWaveParams {
+  ctrl: vec4u,   // x: activeCount, y: maxSlots, z: hasSeaDisp, w: pad
+  timing: vec4f, // x: dt, y: elapsedSec, z: windSpeed, w: storm
+};
+struct VesselWaveInput {
+  posYaw: vec4f,  // x: localX, y: baseWaterY, z: localZ, w: yaw
+  spans: vec4f,   // x: zSpan, y: xSpan, z: totalSinkage, w: minKeelY
+  weights: vec4f, // x: swellWeight, y: wakeWeight, z: basePitch, w: baseRoll
+  slots: vec4u,   // x: stateSlot, y: intactSlot, z: crewSlot, w: flags (bit0: groundedOrSunk, bit1: isRiver, bit2: reset)
+};
+struct VesselHydroState {
+  pose: vec4f,    // x: heaveY, y: pitch, z: roll, w: initialized
+  vel: vec4f,     // x: heaveVel, y: pitchVel, z: rollVel, w: pad
+};
+
+@group(0) @binding(0) var<uniform> waveP: TradeWaveParams;
+@group(0) @binding(1) var<uniform> F: Frame;
+@group(0) @binding(2) var<uniform> nearTerrain: TradeNearDomain;
+@group(0) @binding(3) var<storage, read> waveIn: array<VesselWaveInput>;
+@group(0) @binding(4) var<storage, read_write> hydroState: array<VesselHydroState>;
+@group(0) @binding(5) var<storage, read_write> srcInstances: array<TradeInstance>;
+@group(0) @binding(6) var<storage, read_write> crewInstances: array<TradeInstance>;
+@group(0) @binding(7) var seaDispTex: texture_2d_array<f32>;
+@group(0) @binding(8) var seaSamp: sampler;
+@group(0) @binding(9) var wakeSamp: sampler;
+@group(0) @binding(10) var<uniform> SW: SurfaceWaveUniform;
+@group(0) @binding(11) var surfaceWaveTex: texture_2d_array<f32>;
+
+fn tvSeaDisplacement(p: vec2f, footprint: f32) -> vec3f {
+  var d = vec3f(0.0);
+  let seaSize = f32(textureDimensions(seaDispTex).x);
+  for (var c = 0u; c < ${CASCADES}u; c++) {
+    let invL = F.cascInvL[c >> 2u][c & 3u];
+    let texel = max(1.0 / (max(invL, 1e-4) * max(seaSize, 1.0)), 1e-4);
+    let lod = select(0.0, clamp(log2(max(footprint / texel, 1.0)) + 0.75, 0.0, 8.0), seaSize > 1.5);
+    let w = select(1.0, clamp(1.0 - smoothstep(1.5, 4.0, footprint * invL), 0.0, 1.0), seaSize > 1.5);
+    d += textureSampleLevel(seaDispTex, seaSamp, p * invL, i32(c), lod).xyz * w;
+  }
+  return d;
+}
+
+fn tvSampleWaterOffset(p: vec2f, footprint: f32, swellWeight: f32, wakeWeight: f32, isRiver: bool, elapsedSec: f32) -> f32 {
+  var seaY = 0.0;
+  if (swellWeight > 0.001) {
+    if (waveP.ctrl.z > 0u) {
+      var q = p;
+      for (var it = 0; it < 3; it++) {
+        q = p - tvSeaDisplacement(q, footprint).xz;
+      }
+      seaY = tvSeaDisplacement(q, footprint).y * swellWeight;
+    } else {
+      let wv = waveP.timing.zw;
+      let wSpd = length(wv);
+      let wDir = select(vec2f(1.0, 0.0), wv / max(wSpd, 1e-3), wSpd > 1e-3);
+      let hs = min(1.45, 0.07 + wSpd * wSpd * 0.0046);
+      seaY = hs * (
+        0.64 * sin(dot(p, wDir) * 0.055 - elapsedSec * 0.735)
+        + 0.36 * sin(dot(p, vec2f(wDir.x * 0.82 - wDir.y * 0.57, wDir.y * 0.82 + wDir.x * 0.57)) * 0.098 - elapsedSec * 0.98)
+      ) * swellWeight;
+    }
+  }
+  let wakeCap = select(0.42, 0.12, isRiver);
+  let rawWake = surfaceWaveAt(p).x * wakeWeight;
+  let wakeY = clamp(rawWake, -wakeCap, wakeCap);
+  var chopY = 0.0;
+  if (isRiver && wakeWeight > 0.001) {
+    chopY = (
+      sin(dot(p, vec2f(0.41, 0.29)) - elapsedSec * 2.15) * 0.013
+      + sin(dot(p, vec2f(-0.27, 0.53)) + elapsedSec * 1.65) * 0.009
+    ) * wakeWeight;
+  }
+  return seaY + wakeY + chopY;
+}
+
+fn tvStepDampedSpring(x: f32, v: f32, goal: f32, omega: f32, zeta: f32, dt: f32) -> vec2f {
+  let k = omega * omega;
+  let c = 2.0 * zeta * omega;
+  let denom = 1.0 + c * dt + k * dt * dt;
+  let nv = (v + dt * k * (goal - x)) / denom;
+  let nx = x + dt * nv;
+  return vec2f(nx, nv);
+}
+
+@compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id: vec3u) {
+  let i = id.x;
+  if (i >= waveP.ctrl.x) { return; }
+  let inp = waveIn[i];
+  let maxSlots = waveP.ctrl.y;
+  let stateSlot = min(inp.slots.x, max(1u, maxSlots) - 1u);
+  let intactSlot = inp.slots.y;
+  let crewSlot = inp.slots.z;
+  let flags = inp.slots.w;
+  let groundedOrSunk = (flags & 1u) != 0u;
+  let isRiver = (flags & 2u) != 0u;
+  let forceReset = (flags & 4u) != 0u;
+
+  let yaw = inp.posYaw.w;
+  let bow = vec2f(sin(yaw), -cos(yaw));
+  let stbd = vec2f(cos(yaw), sin(yaw));
+  let zSpan = max(1.8, inp.spans.x);
+  let xSpan = max(0.75, inp.spans.y);
+  let totalSinkage = inp.spans.z;
+  let minKeelY = inp.spans.w;
+  let swellWeight = inp.weights.x;
+  let wakeWeight = inp.weights.y;
+  let basePitch = inp.weights.z;
+  let baseRoll = inp.weights.w;
+  let elapsedSec = select(F.camPos.w, waveP.timing.y, abs(waveP.timing.y) > 1e-5);
+  let footprint = max(1.35, xSpan * 1.15);
+
+  let pMid = inp.posYaw.xz + nearTerrain.grid.yz;
+  let hMid = tvSampleWaterOffset(pMid, footprint, swellWeight, wakeWeight, isRiver, elapsedSec);
+  let hBow = tvSampleWaterOffset(pMid + bow * zSpan, footprint, swellWeight, wakeWeight, isRiver, elapsedSec);
+  let hStern = tvSampleWaterOffset(pMid - bow * zSpan, footprint, swellWeight, wakeWeight, isRiver, elapsedSec);
+  let hPort = tvSampleWaterOffset(pMid - stbd * xSpan, footprint, swellWeight, wakeWeight, isRiver, elapsedSec);
+  let hStbd = tvSampleWaterOffset(pMid + stbd * xSpan, footprint, swellWeight, wakeWeight, isRiver, elapsedSec);
+
+  var targetY = max(minKeelY, inp.posYaw.y - totalSinkage);
+  var targetPitch = basePitch;
+  var targetRoll = baseRoll;
+  if (!groundedOrSunk) {
+    let waveMean = (hBow + hStern + hPort + hStbd + 2.0 * hMid) / 6.0;
+    let pitchGain = select(0.78, 0.58, isRiver);
+    let rollGain = select(0.74, 0.52, isRiver);
+    let wavePitch = atan2(hBow - hStern, 2.0 * zSpan) * pitchGain;
+    let waveRoll = atan2(hStbd - hPort, 2.0 * xSpan) * rollGain;
+    targetY = max(minKeelY, inp.posYaw.y + waveMean - totalSinkage);
+    targetPitch = basePitch + clamp(wavePitch, -0.32, 0.32);
+    targetRoll = baseRoll + clamp(waveRoll, -0.38, 0.38);
+  }
+
+  var st = hydroState[stateSlot];
+  let dt = clamp(waveP.timing.x, 0.0, 0.05);
+  if (forceReset || st.pose.w < 0.5 || groundedOrSunk) {
+    st.pose = vec4f(targetY, targetPitch, targetRoll, 1.0);
+    st.vel = vec4f(0.0);
+  } else if (dt > 1e-5) {
+    let omegaH = clamp(3.8 / sqrt(max(zSpan * 0.22, 0.55)), 2.1, 4.6);
+    let omegaP = clamp(3.2 / sqrt(max(zSpan * 0.25, 0.55)), 1.8, 4.0);
+    let omegaR = clamp(2.8 / sqrt(max(xSpan * 0.55, 0.45)), 1.5, 3.6);
+    let zeta = select(0.86, 0.94, isRiver);
+    let hs = tvStepDampedSpring(st.pose.x, st.vel.x, targetY, omegaH, zeta, dt);
+    let ps = tvStepDampedSpring(st.pose.y, st.vel.y, targetPitch, omegaP, zeta, dt);
+    let rs = tvStepDampedSpring(st.pose.z, st.vel.z, targetRoll, omegaR, zeta, dt);
+    st.pose = vec4f(max(minKeelY, hs.x), ps.x, rs.x, 1.0);
+    st.vel = vec4f(hs.y, ps.y, rs.y, 0.0);
+  } else {
+    st.pose.x = max(minKeelY, st.pose.x);
+  }
+  hydroState[stateSlot] = st;
+
+  if (intactSlot < maxSlots && intactSlot < arrayLength(&srcInstances)) {
+    srcInstances[intactSlot].posYaw.y = st.pose.x;
+    srcInstances[intactSlot].attScaleArch.x = st.pose.y;
+    srcInstances[intactSlot].attScaleArch.y = st.pose.z;
+  }
+  if (crewSlot < maxSlots && crewSlot < arrayLength(&crewInstances)) {
+    crewInstances[crewSlot].posYaw.y = st.pose.x;
+    crewInstances[crewSlot].attScaleArch.x = st.pose.y;
+    crewInstances[crewSlot].attScaleArch.y = st.pose.z;
+  }
+}
+`;
 
 // ============================================================================
 // 100% GPU 65-Joint Rigged Deck-Crew Assets, 3D Merchant Codex & Shaders
@@ -4176,7 +4837,7 @@ fn rotateDeckShip(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
   let bodyHeightM = select(1.74, 1.24, isSeated);
   let halfHeightM = bodyHeightM * 0.5;
 
-  let stDeck = vec3f(st.localPosYaw.x * scaleMul, st.localPosYaw.y, st.localPosYaw.z * scaleMul);
+  let stDeck = st.localPosYaw.xyz * scaleMul;
   let worldCenter = shipWorld + rotateDeckShip(stDeck + vec3f(0.0, halfHeightM, 0.0), yaw, pitch, roll);
   let shipUpWorld = normalize(rotateDeckShip(vec3f(0.0, 1.0, 0.0), yaw, pitch, roll));
 
@@ -4552,7 +5213,7 @@ struct DeckCrewVSOut {
 
   let inst = srcInstances[body.vesselSlot];
   let scaleMul = max(inst.attScaleArch.z, 0.25);
-  let shipLocalP = vec3f(body.localPosYaw.x * scaleMul, body.localPosYaw.y, body.localPosYaw.z * scaleMul) + turnedP;
+  let shipLocalP = body.localPosYaw.xyz * scaleMul + turnedP;
   let shipWorld = inst.posYaw.xyz + vec3f(nearTerrain.grid.y, 0.0, nearTerrain.grid.z);
   let worldP = shipWorld + rotateVesselCrew(shipLocalP, inst.posYaw.w, inst.attScaleArch.x, inst.attScaleArch.y);
   let worldN = normalize(rotateVesselCrew(turnedN, inst.posYaw.w, inst.attScaleArch.x, inst.attScaleArch.y));
@@ -4650,7 +5311,7 @@ fn deckSkinPoseSh(frameA: u32, frameB: u32, blend: f32, braceFrame: u32, braceW:
   let turnedP = vec3f(localP.x * cY + localP.z * sY, localP.y, localP.z * cY - localP.x * sY);
   let inst = srcInstances[body.vesselSlot];
   let scaleMul = max(inst.attScaleArch.z, 0.25);
-  let shipLocalP = vec3f(body.localPosYaw.x * scaleMul, body.localPosYaw.y, body.localPosYaw.z * scaleMul) + turnedP;
+  let shipLocalP = body.localPosYaw.xyz * scaleMul + turnedP;
   let shipWorld = inst.posYaw.xyz + vec3f(nearTerrain.grid.y, 0.0, nearTerrain.grid.z);
   let worldP = shipWorld + rotateVesselCrew(shipLocalP, inst.posYaw.w, inst.attScaleArch.x, inst.attScaleArch.y);
   let _keep = F_unused.x * 0.0;
@@ -4883,11 +5544,14 @@ export async function createTradeVessels({
   resources,
   shadowFormat = 'depth32float',
   sharedCrew = null,
+  waterOptics = null,
+  submerged = null,
 } = {}) {
   if (!device || !shader || !resources) return null;
 
   let destroyed = false;
   let lastContext = null;
+  let contextRiverAt = null;
 
   const archGPUs = inspectTradeVesselArchetypes().map((arch) => {
     const vertexBuffer = device.createBuffer({
@@ -5024,6 +5688,40 @@ export async function createTradeVessels({
   const splatListBuffer = device.createBuffer({ label: 'trade vessel splat list', size: MAX_TRADE_VESSELS * 2 * 16, usage: U_STORAGE });
   const indirectBuffer = device.createBuffer({ label: 'trade vessel indirect', size: 80 * 4, usage: U_STORAGE | U_INDIRECT | U_COPY_DST });
 
+  const waveParamsBuf = new ArrayBuffer(32);
+  const waveParamsU32 = new Uint32Array(waveParamsBuf, 0, 4);
+  const waveParamsF32 = new Float32Array(waveParamsBuf, 16, 4);
+  waveParamsU32[0] = 0;
+  waveParamsU32[1] = MAX_TRADE_VESSELS;
+  waveParamsU32[2] = oceanBridge?.dispView ? 1 : 0;
+  waveParamsU32[3] = 0;
+  const waveInputBuf = new ArrayBuffer(MAX_TRADE_VESSELS * 64);
+  const waveInputF32 = new Float32Array(waveInputBuf);
+  const waveInputU32 = new Uint32Array(waveInputBuf);
+  const waveParamsBuffer = device.createBuffer({ label: 'trade vessel wave params', size: 32, usage: U_UNIFORM | U_COPY_DST });
+  device.queue.writeBuffer(waveParamsBuffer, 0, waveParamsBuf);
+  const vesselWaveInputBuffer = device.createBuffer({ label: 'trade vessel wave inputs', size: waveInputBuf.byteLength, usage: U_STORAGE | U_COPY_DST });
+  const vesselHydroStateBuffer = device.createBuffer({ label: 'trade vessel hydro state', size: MAX_TRADE_VESSELS * 32, usage: U_STORAGE | U_COPY_DST });
+
+  const T_BINDING = globalThis.GPUTextureUsage?.TEXTURE_BINDING ?? 4;
+  const seaDispFallbackTex = device.createTexture({
+    label: 'trade vessel sea disp fallback',
+    size: [1, 1, CASCADES],
+    format: 'rgba16float',
+    usage: T_BINDING,
+  });
+  const seaDispFallbackView = seaDispFallbackTex.createView({ dimension: '2d-array' });
+  const swFallbackTex = device.createTexture({
+    label: 'trade vessel surface wave fallback',
+    size: [1, 1, 2],
+    format: 'rgba16float',
+    usage: T_BINDING,
+  });
+  const swFallbackView = swFallbackTex.createView({ dimension: '2d-array' });
+  const swUniformFallbackBuffer = device.createBuffer({ label: 'trade vessel sw uniform fallback', size: 64, usage: U_UNIFORM | U_COPY_DST });
+  const waveRepeatSampler = oceanBridge?.simSampler ?? device.createSampler({ addressModeU: 'repeat', addressModeV: 'repeat', magFilter: 'linear', minFilter: 'linear' });
+  const waveClampSampler = device.createSampler({ addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge', magFilter: 'linear', minFilter: 'linear' });
+
   const oakFallback = createPlaceholderOak(device);
   let oakView = oakFallback.view;
   const oakSampler = oceanBridge?.oakSampler ?? oakFallback.sampler;
@@ -5039,7 +5737,8 @@ export async function createTradeVessels({
 
   const continuumPromise = canCompute
     ? getPipelineEntry(device, `continuum:${format}:${samples}:${Boolean(computePipe)}`, async () => {
-        const [clearPipe, selectPipe, contModule, splatModule] = await Promise.all([
+        const [wavePipe, clearPipe, selectPipe, contModule, splatModule] = await Promise.all([
+          makeCompute(TRADE_VESSEL_WAVE_WGSL, 'trade vessel wave hydro'),
           makeCompute(buildTradeVesselClearWGSL(), 'trade vessel clear'),
           makeCompute(TRADE_VESSEL_SELECT_WGSL, 'trade vessel select'),
           shader(buildTradeVesselContinuumWGSL(samples), 'trade vessel continuum'),
@@ -5065,21 +5764,59 @@ export async function createTradeVessels({
             multisample: { count: samples },
           }),
         ]);
-        return { clearPipe, selectPipe, continuumPipe, splatPipe };
+        return { wavePipe, clearPipe, selectPipe, continuumPipe, splatPipe };
       })
     : Promise.resolve(null);
 
-  const [{ pipe, shadowPipe }, continuumPipes] = await Promise.all([
+  const surfaceWavesPromise = oceanBridge?.surfaceWaves
+    ? Promise.resolve(oceanBridge.surfaceWaves).catch(() => null)
+    : Promise.resolve(null);
+  const waterOpticsPromise = waterOptics?.capture
+    ? Promise.resolve(waterOptics)
+    : submerged?.capture
+      ? Promise.resolve(submerged)
+      : oceanBridge?.waterOptics
+        ? Promise.resolve(oceanBridge.waterOptics).catch(() => null)
+        : (oceanBridge?.dispView && oceanBridge?.simSampler)
+          ? surfaceWavesPromise.then((sw) => createWaterOptics({
+              device,
+              shader,
+              seaView: oceanBridge.dispView,
+              seaSampler: oceanBridge.simSampler,
+              format,
+              surfaceWaves: sw,
+            })).catch(() => null)
+          : Promise.resolve(null);
+
+  const [{ pipe, shadowPipe }, continuumPipes, resolvedSurfaceWaves, resolvedWaterOptics] = await Promise.all([
     requestTradeVesselsPipelines({ device, shader, format, samples, shadowFormat }),
     continuumPromise,
+    surfaceWavesPromise,
+    waterOpticsPromise,
   ]);
+  const submergedCapture = resolvedWaterOptics?.capture
+    ? await resolvedWaterOptics.capture({
+        source: tradeVesselsSubmergedSource(),
+        vertex: { entryPoint: 'tvVS', buffers: INTACT_VERTEX_BUFFERS },
+        entry: 'tvSubmergedFS',
+        world: 'in.world',
+        groups: 2,
+        land: false,
+      }).catch((err) => {
+        console.warn('[trade-vessels submerged]', err);
+        return null;
+      })
+    : null;
   if (destroyed) {
     for (const g of archGPUs) { g.vertexBuffer.destroy(); g.indexBuffer.destroy(); }
     for (const b of instanceBuffers) b.destroy();
     for (const b of [
       selectUniformBuffer, stepMetaBuffer, contBaseIndicesBuffer, contStatesBuffer,
       contVertColsBuffer, srcInstancesBuffer, nearOutBuffer, contListBuffer, splatListBuffer, indirectBuffer,
+      waveParamsBuffer, vesselWaveInputBuffer, vesselHydroStateBuffer, swUniformFallbackBuffer,
     ]) b.destroy();
+    seaDispFallbackTex.destroy();
+    swFallbackTex.destroy();
     oakFallback.tex.destroy();
     return null;
   }
@@ -5092,6 +5829,7 @@ export async function createTradeVessels({
     });
   };
 
+  const wavePipe = continuumPipes?.wavePipe ?? null;
   const clearPipe = continuumPipes?.clearPipe ?? null;
   const selectPipe = continuumPipes?.selectPipe ?? null;
   const continuumPipe = continuumPipes?.continuumPipe ?? null;
@@ -5157,6 +5895,8 @@ export async function createTradeVessels({
     ],
   });
   let intactGroup1 = makeGroup1(pipe);
+  let submergedGroup0 = submergedCapture?.pipeline ? pickEntries(submergedCapture.pipeline, [0, 1, 2, 3, 4, 12, 19, 20, 21]) : null;
+  let submergedGroup1 = submergedCapture?.pipeline ? makeGroup1(submergedCapture.pipeline) : null;
 
   // ==========================================================================
   // 100% GPU 65-Joint Rigged Deck-Crew Renderer State & Buffers
@@ -5193,6 +5933,40 @@ export async function createTradeVessels({
   const crewBodiesBuffer = device.createBuffer({ label: 'trade deck crew bodies', size: DECK_CREW_BUCKETS * CREW_BODY_SLICE_BYTES, usage: U_STORAGE });
   const crewSplatListBuffer = device.createBuffer({ label: 'trade deck crew splats', size: DECK_CREW_MAX_TOTAL * 3 * 16, usage: U_STORAGE });
   const crewIndirectBuffer = device.createBuffer({ label: 'trade deck crew indirect', size: DECK_CREW_DRAW_WORDS * 4, usage: U_STORAGE | U_INDIRECT | U_COPY_DST });
+
+  const makeWaveBindGroups = (curResources = resources) => {
+    if (!wavePipe) return null;
+    const byBinding = new Map(curResources.map(([b, r]) => [b, r]));
+    const frameRes = byBinding.get(0);
+    const nearRes = byBinding.get(12);
+    if (!frameRes || !nearRes) return null;
+    const swUniformRes = resolvedSurfaceWaves?.uniform
+      ? { buffer: resolvedSurfaceWaves.uniform }
+      : { buffer: swUniformFallbackBuffer };
+    const mk = (swView) => device.createBindGroup({
+      layout: wavePipe.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: waveParamsBuffer } },
+        { binding: 1, resource: frameRes },
+        { binding: 2, resource: nearRes },
+        { binding: 3, resource: { buffer: vesselWaveInputBuffer } },
+        { binding: 4, resource: { buffer: vesselHydroStateBuffer } },
+        { binding: 5, resource: { buffer: srcInstancesBuffer } },
+        { binding: 6, resource: { buffer: crewSrcInstancesBuffer } },
+        { binding: 7, resource: oceanBridge?.dispView ?? seaDispFallbackView },
+        { binding: 8, resource: waveRepeatSampler },
+        { binding: 9, resource: waveClampSampler },
+        { binding: 10, resource: swUniformRes },
+        { binding: 11, resource: swView },
+      ],
+    });
+    if (resolvedSurfaceWaves?.views?.length >= 2) {
+      return [mk(resolvedSurfaceWaves.views[0]), mk(resolvedSurfaceWaves.views[1])];
+    }
+    return [mk(swFallbackView)];
+  };
+  let waveBindGroups = makeWaveBindGroups(resources);
+  let activeWaveVesselCount = 0;
 
   let deckCrewGPU = null;
   let activeCrewVessels = 0;
@@ -5750,6 +6524,7 @@ export async function createTradeVessels({
       if (!tex || destroyed) return;
       oakView = tex.createView();
       intactGroup1 = makeGroup1(pipe);
+      if (submergedCapture?.pipeline) submergedGroup1 = makeGroup1(submergedCapture.pipeline);
       for (const v of vessels) {
         if (v.damaged && damagedAssets) rebindDamagedVessel(v);
       }
@@ -5775,6 +6550,105 @@ export async function createTradeVessels({
 
   const compatibleArch = (a, b) => a === b || (a <= 1 && b <= 1) || ((a === 2 || a === 3) && (b === 2 || b === 3));
 
+  const freeHydroSlots = Array.from({ length: MAX_TRADE_VESSELS }, (_, i) => MAX_TRADE_VESSELS - 1 - i);
+  const allocHydroSlot = () => (freeHydroSlots.length > 0 ? freeHydroSlots.pop() : 0);
+  const freeHydroSlot = (slot) => {
+    if (Number.isInteger(slot) && slot >= 0 && slot < MAX_TRADE_VESSELS && !freeHydroSlots.includes(slot)) {
+      freeHydroSlots.push(slot);
+    }
+  };
+
+  function sumCargoUnits(bag) {
+    if (!bag || typeof bag !== 'object') return 0;
+    let s = 0;
+    for (const val of Object.values(bag)) {
+      const n = Number(val);
+      if (Number.isFinite(n) && n > 0) s += n;
+    }
+    return s;
+  }
+
+  function computeVesselHydrostatics(arch, scaleMul, route) {
+    const cargoUnits = sumCargoUnits(route?.cargo) + sumCargoUnits(route?.load) + (Number(route?.qty) > 0 ? Number(route.qty) : 0);
+    const capUnits = Math.max(8, Number(route?.tonnage) > 0 ? Number(route.tonnage) * 0.75 : (arch.unmasted ? 10 : 36));
+    const phaseDefaultFill = route?.phase === 'dock' ? 0.52 : (route?.phase === 'in' ? 0.82 : 0.68);
+    const fill = cargoUnits > 0 ? Math.max(0.22, Math.min(1.0, cargoUnits / capUnits)) : phaseDefaultFill;
+
+    let refL = arch.length;
+    let refB = arch.beam;
+    let provDays = 16;
+    let cargoTonnes = 12;
+    if (arch.index === 0 || arch.index === 1) {
+      provDays = 18 + 14 * fill;
+      cargoTonnes = 14 + 20 * fill;
+    } else if (arch.index === 2 || arch.index === 3) {
+      provDays = 22 + 16 * fill;
+      cargoTonnes = 40 + 34 * fill;
+    } else if (arch.index === 4) {
+      provDays = 2 + 2 * fill;
+      cargoTonnes = 0.35 + 0.55 * fill;
+    } else if (arch.index === 5) {
+      provDays = 12 + 12 * fill;
+      cargoTonnes = 5 + 15 * fill;
+    } else {
+      refL = 16.2;
+      refB = 4.9;
+      provDays = 10 + 10 * fill;
+      cargoTonnes = 5 + 12 * fill;
+    }
+
+    const baseH = boatHydrodynamics(refL, refB, provDays, cargoTonnes, arch.modelId);
+    const refToArch = arch.length / Math.max(1, refL);
+    const yRatio = arch.designScale[1] / Math.max(0.1, arch.model?.designFrame?.verticalScale || 1);
+    const effScale = refToArch * scaleMul;
+    const lightDraft = arch.draft * scaleMul;
+    let hydroSinkage = Math.max(0, (baseH.sinkage || 0) * yRatio * effScale);
+    if (arch.index === 4) {
+      // Loaded river barges sit 0.24-0.34 m deep in the river while keeping sole-boards dry
+      hydroSinkage = Math.max(0.022 * scaleMul, Math.min(0.048 * scaleMul, hydroSinkage));
+      hydroSinkage = Math.min(hydroSinkage, Math.max(0.016 * scaleMul, 0.338 - lightDraft));
+      hydroSinkage = Math.max(hydroSinkage, Math.max(0, 0.242 - lightDraft));
+    } else {
+      // Loaded ocean ships & harbor barques immerse 0.14-0.46 m deeper at their true waterline
+      hydroSinkage = Math.max(0.14, Math.min(0.46, hydroSinkage));
+    }
+    const loadedDraft = lightDraft + hydroSinkage;
+    const loadedFreeboard = Math.max(0.05, arch.freeboard * scaleMul - hydroSinkage);
+    const volScale3 = Math.pow(effScale, 3);
+    const massKg = Math.max(650, (baseH.mass || 8000) * volScale3);
+    const wpArea = Math.max(2.5, (baseH.waterplaneArea || refL * refB * 0.72) * effScale * effScale);
+    return {
+      fill,
+      lightDraft,
+      hydroSinkage,
+      draft: loadedDraft,
+      freeboard: loadedFreeboard,
+      massKg,
+      hydrodynamics: {
+        mass: massKg,
+        addedMass: Math.max(80, (baseH.addedMass || massKg * 0.12) * volScale3),
+        centreOfGravity: (baseH.centreOfGravity ?? -lightDraft * 0.4) * effScale,
+        sinkage: hydroSinkage,
+        pitchInertia: Math.max(400, (baseH.pitchInertia || massKg * (refL * refL) / 14) * Math.pow(effScale, 5)),
+        rollInertia: Math.max(150, (baseH.rollInertia || massKg * (refB * refB) / 10) * Math.pow(effScale, 5)),
+        draft: loadedDraft,
+        freeboard: loadedFreeboard,
+        waterplaneArea: wpArea,
+      },
+    };
+  }
+
+  function scaledColliderFor(arch, scaleMul) {
+    if (Math.abs(scaleMul - 1) < 1e-5) return arch.collider;
+    return Object.freeze({
+      ...arch.collider,
+      frame: Object.freeze({
+        ...arch.collider.frame,
+        verticalScale: arch.designScale[1] * scaleMul,
+      }),
+    });
+  }
+
   function destroyVesselDamaged(v) {
     const d = v.damaged;
     if (!d) return;
@@ -5793,36 +6667,23 @@ export async function createTradeVessels({
     const scaleMul = route.scale || 1;
     const length = arch.length * scaleMul;
     const beam = arch.beam * scaleMul;
-    const draft = arch.draft * (arch.unmasted ? Math.max(0.82, scaleMul) : scaleMul);
-    const freeboard = arch.freeboard * (arch.unmasted ? Math.max(0.85, scaleMul) : scaleMul);
-    const massTonnes = arch.modelId === 'lusoria' ? 7 : Math.max(25, length * beam * draft * 0.42);
-    const massKg = massTonnes * 1000;
-    const wpArea = Math.max(4, length * beam * 0.72);
+    const hydro = computeVesselHydrostatics(arch, scaleMul, route);
     const boat = {
       id: route.id,
       archetype: aIdx,
       modelId: arch.modelId,
       model: arch.model,
-      collider: arch.collider,
+      collider: scaledColliderFor(arch, scaleMul),
       partAssembly: arch.partAssembly,
       fracture: arch.fracture,
       length,
       beam,
-      draft,
-      freeboard,
-      maxAirDraft: (arch.maxAirDraftMetres ?? 2.15) * (arch.unmasted ? 1 : scaleMul),
-      mass: massKg,
-      hydrodynamics: {
-        mass: massKg,
-        addedMass: massKg * 0.12,
-        centreOfGravity: draft * 0.48,
-        sinkage: 0,
-        pitchInertia: Math.max(1000, massKg * (length * length) / 14),
-        rollInertia: Math.max(400, massKg * (beam * beam) / 10),
-        draft,
-        freeboard,
-        waterplaneArea: wpArea,
-      },
+      draft: hydro.draft,
+      lightDraft: hydro.lightDraft,
+      freeboard: hydro.freeboard,
+      maxAirDraft: Math.max(0.35, (arch.maxAirDraftMetres ?? 2.15) * scaleMul - hydro.hydroSinkage),
+      mass: hydro.massKg,
+      hydrodynamics: hydro.hydrodynamics,
       x: 0,
       z: 0,
       heave: 0,
@@ -5850,9 +6711,9 @@ export async function createTradeVessels({
     const ai = createVesselAutopilotState(route, aIdx, s0, simElapsedSec);
     boat.x = ai.x;
     boat.z = ai.z;
-    boat.heave = ai.y;
+    boat.heave = ai.y - hydro.hydroSinkage;
     boat.waterY = ai.y;
-    boat.target.heave = Math.max(0, ai.y);
+    boat.target.heave = ai.y;
     boat.yaw = ai.yaw;
     boat.heading = (ai.yaw * 180) / Math.PI;
     return {
@@ -5860,6 +6721,11 @@ export async function createTradeVessels({
       arch,
       archIndex: aIdx,
       scaleMul,
+      hydroSinkage: hydro.hydroSinkage,
+      lightDraft: hydro.lightDraft,
+      hydroSlot: allocHydroSlot(),
+      hydroInitialized: false,
+      intactSlot: 0xFFFFFFFF >>> 0,
       boat,
       ai,
       crewSlot: -1,
@@ -5900,7 +6766,6 @@ export async function createTradeVessels({
             prev.arch = nextArch;
             prev.boat.archetype = upIdx;
             prev.boat.model = nextArch.model;
-            prev.boat.collider = nextArch.collider;
             prev.boat.partAssembly = nextArch.partAssembly;
             prev.boat.fracture = nextArch.fracture;
           }
@@ -5928,7 +6793,16 @@ export async function createTradeVessels({
           prev.scaleMul = route.scale || 1;
           prev.boat.length = prev.arch.length * prev.scaleMul;
           prev.boat.beam = prev.arch.beam * prev.scaleMul;
-          prev.boat.maxAirDraft = (prev.arch.maxAirDraftMetres ?? 2.15) * (prev.arch.unmasted ? 1 : prev.scaleMul);
+          prev.boat.collider = scaledColliderFor(prev.arch, prev.scaleMul);
+          const hydro = computeVesselHydrostatics(prev.arch, prev.scaleMul, route);
+          prev.hydroSinkage = hydro.hydroSinkage;
+          prev.lightDraft = hydro.lightDraft;
+          prev.boat.draft = hydro.draft;
+          prev.boat.lightDraft = hydro.lightDraft;
+          prev.boat.freeboard = hydro.freeboard;
+          prev.boat.mass = hydro.massKg;
+          prev.boat.hydrodynamics = hydro.hydrodynamics;
+          prev.boat.maxAirDraft = Math.max(0.35, (prev.arch.maxAirDraftMetres ?? 2.15) * prev.scaleMul - hydro.hydroSinkage);
         }
         return prev;
       }
@@ -5941,7 +6815,10 @@ export async function createTradeVessels({
       }
     }
     for (const oldV of vessels) {
-      if (!kept.has(oldV)) destroyVesselDamaged(oldV);
+      if (!kept.has(oldV)) {
+        freeHydroSlot(oldV.hydroSlot);
+        destroyVesselDamaged(oldV);
+      }
     }
     vessels = nextVessels;
     crewStationsDirty = true;
@@ -5994,10 +6871,13 @@ export async function createTradeVessels({
       counts.fill(0);
       totalIntact = 0;
       activeCrewVessels = 0;
+      activeWaveVesselCount = 0;
       selectParamsCtrl[0] = 0;
       device.queue.writeBuffer(selectUniformBuffer, 0, selectParamsCtrl);
       crewConfigU32[0] = 0;
       device.queue.writeBuffer(crewConfigBuffer, 0, crewConfigU32, 0, 16);
+      waveParamsU32[0] = 0;
+      device.queue.writeBuffer(waveParamsBuffer, 0, waveParamsU32, 0, 16);
       gpuSelectionEncoded = false;
       crewEncoded = false;
       return;
@@ -6009,8 +6889,12 @@ export async function createTradeVessels({
     }
 
     const bedAt = makeBedSampler(terrain);
-    const hasTerrainProbe = Boolean(bedAt || terrain?.inlandWaterAt);
-    const riverFlowAt = typeof terrain?.inlandWaterAt === 'function' ? (wx, wz) => terrain.inlandWaterAt(wx, wz) : null;
+    const riverFlowAt = typeof terrain?.inlandWaterAt === 'function'
+      ? (wx, wz) => terrain.inlandWaterAt(wx, wz)
+      : (typeof lastContext?.inlandWaterAt === 'function'
+          ? (wx, wz) => lastContext.inlandWaterAt(wx, wz)
+          : contextRiverAt);
+    const hasTerrainProbe = Boolean(bedAt || riverFlowAt);
     const waveProbeFn = terrain?.waveProbe ?? oceanBridge?.waveProbe ?? terrain?.sampleWave ?? null;
     const waveShelterFn = typeof terrain?.waveShelter === 'function' ? terrain.waveShelter.bind(terrain) : null;
     const activeBridges = terrain?.bridges ?? lastContext?.bridges ?? null;
@@ -6028,10 +6912,17 @@ export async function createTradeVessels({
       const bY = Number.isFinite(rawBed) ? rawBed : -12;
       const inNear = isPointInNearWaterDomain(qx, qz);
       const iw = (inNear && riverFlowAt) ? riverFlowAt(qx, qz) : null;
-      const hasInland = Boolean(iw && Number.isFinite(iw.wy) && iw.wy > bY + 0.05);
+      const iwDepth = Number.isFinite(iw?.depth) ? iw.depth : 0;
+      const hasInland = Boolean(
+        iw
+        && Number.isFinite(iw.wy)
+        && (!Number.isFinite(iw.dist) || !Number.isFinite(iw.hw) || iw.dist <= iw.hw * 0.92)
+        && (iwDepth > 0.04 || iw.wy > bY + 0.02)
+      );
       if (riverFallbackY !== null) {
         if (hasInland) {
-          const effBed = Math.min(bY, iw.wy - Math.max(0.45, minRiverDepth * 0.55));
+          const carvedBed = iwDepth > 0.04 ? (iw.wy - iwDepth) : (iw.wy - Math.max(0.45, minRiverDepth * 0.55));
+          const effBed = Math.min(bY, carvedBed);
           return {
             bedY: effBed,
             iw,
@@ -6040,23 +6931,43 @@ export async function createTradeVessels({
             waterDepth: iw.wy - effBed,
           };
         }
-        const baseY = Number.isFinite(riverFallbackY) ? Math.max(riverFallbackY, bY + 0.35) : Math.max(0, bY + minRiverDepth);
-        const effBed = Math.min(bY, baseY - minRiverDepth);
+        if (bY < 0.25) {
+          const effBed = Math.min(bY, -Math.max(0.55, minRiverDepth * 0.6));
+          return {
+            bedY: effBed,
+            iw: null,
+            hasInland: false,
+            waterY: 0,
+            waterDepth: -effBed,
+          };
+        }
+        if (!riverFlowAt) {
+          const wY = Number.isFinite(riverFallbackY) ? riverFallbackY : 0;
+          const effBed = bedAt ? bY : (wY - Math.max(0.8, minRiverDepth));
+          return {
+            bedY: effBed,
+            iw: null,
+            hasInland: true,
+            waterY: wY,
+            waterDepth: wY - effBed,
+          };
+        }
         return {
-          bedY: effBed,
+          bedY: bY,
           iw: null,
-          hasInland: true,
-          waterY: baseY,
-          waterDepth: baseY - effBed,
+          hasInland: false,
+          waterY: -999,
+          waterDepth: -999 - bY,
         };
       }
       const wY = hasInland ? iw.wy : (bY < 0.2 ? 0 : -999);
+      const effBed = hasInland ? Math.min(bY, iw.wy - Math.max(0.05, iwDepth)) : bY;
       return {
-        bedY: bY,
+        bedY: effBed,
         iw,
         hasInland,
         waterY: wY,
-        waterDepth: wY - bY,
+        waterDepth: wY - effBed,
       };
     };
 
@@ -6070,10 +6981,12 @@ export async function createTradeVessels({
     totalIntact = 0;
     const windVec = env?.windVec ?? [8, 0];
     const stormFlag = Boolean(env?.storm);
+    const swellDirRad = Math.atan2(windVec?.[1] ?? 0, windVec?.[0] ?? 8);
 
     for (const v of vessels) {
       const dmg = v.boat.damage;
       const ai = v.ai;
+      v.intactSlot = 0xFFFFFFFF >>> 0;
       if (dmg.sunk && ai.state !== 'sunk') {
         ai.state = 'sunk';
         dirtySyncFlag = true;
@@ -6099,6 +7012,7 @@ export async function createTradeVessels({
         riverFlowAt,
         avoidTargets: peerTargets,
         length: v.boat.length,
+        beam: v.boat.beam,
         draft: v.boat.draft,
       });
       if (dmg.hits > 0 || (dmg.floodingTonnes ?? 0) > 0) {
@@ -6116,7 +7030,7 @@ export async function createTradeVessels({
 
       const isRiverRoute = v.route?.mode === 'river';
       const riverFallbackY = isRiverRoute ? ai.y : null;
-      const minRiverChannelDepth = isRiverRoute ? Math.max(v.boat.draft * 2.4, 1.45) : 0;
+      const minRiverChannelDepth = isRiverRoute ? Math.max(v.boat.draft * 1.8, 0.55) : 0;
       const probeHalfL = isRiverRoute ? v.boat.length * 0.18 : halfL;
       const sampleVesselCol = (qx, qz) => sampleColumn(qx, qz, riverFallbackY, minRiverChannelDepth);
 
@@ -6126,38 +7040,15 @@ export async function createTradeVessels({
       let colMid = hasTerrainProbe ? sampleVesselCol(wx, wz) : { bedY: -12, iw: null, hasInland: false, waterY: ai.y, waterDepth: ai.y + 12 };
       let colBow = hasTerrainProbe ? sampleVesselCol(wx + bowX * probeHalfL, wz + bowZ * probeHalfL) : colMid;
       let colStern = hasTerrainProbe ? sampleVesselCol(wx - bowX * probeHalfL, wz - bowZ * probeHalfL) : colMid;
-      // Flat-bottomed river barges follow derived polyline reaches; if midships brushes a shallow landing or bend,
-      // nudge into the adjacent river thalweg rather than stranding on bank discretisation.
-      if (isRiverRoute && colMid.waterDepth < v.boat.draft * 1.05 && riverFlowAt && isPointInNearWaterDomain(wx, wz)) {
-        let bestCol = colMid, bestOffX = 0, bestOffZ = 0;
-        for (let r = 2.5; r <= 15.0; r += 2.5) {
-          for (let k = 0; k < 12; k++) {
-            const ang = (k / 12) * Math.PI * 2;
-            const cx = wx + Math.cos(ang) * r, cz = wz + Math.sin(ang) * r;
-            const c = sampleVesselCol(cx, cz);
-            if (c.waterDepth > bestCol.waterDepth) {
-              bestCol = c;
-              bestOffX = cx - wx;
-              bestOffZ = cz - wz;
-            }
-          }
-          if (bestCol.waterDepth >= v.boat.draft * 1.25) break;
-        }
-        if (bestCol.waterDepth > colMid.waterDepth + 0.05) {
-          ai.x += bestOffX;
-          ai.z += bestOffZ;
-          wx = ai.x + worldOffsetX;
-          wz = ai.z + worldOffsetZ;
-          colMid = bestCol;
-          colBow = sampleVesselCol(wx + bowX * probeHalfL, wz + bowZ * probeHalfL);
-          colStern = sampleVesselCol(wx - bowX * probeHalfL, wz - bowZ * probeHalfL);
-        }
+      if (isRiverRoute && colMid.waterY > -500) {
+        ai.y = colMid.waterY;
+        ai.waterY = colMid.waterY;
       }
 
       // 1. Physical Bridge Collision (mast dismasting when deckY < waterY + maxAirDraft, pier/soffit hull halt & breach)
       if (!dmg.sunk && Array.isArray(activeBridges) && activeBridges.length > 0) {
         const surfForBridge = colMid.waterY > -500 ? colMid.waterY : 0;
-        const maxAirDraft = (v.arch.maxAirDraftMetres ?? 2.15) * (v.arch.unmasted ? 1.0 : v.scaleMul);
+        const maxAirDraft = v.boat.maxAirDraft ?? ((v.arch.maxAirDraftMetres ?? 2.15) * v.scaleMul);
         for (const br of activeBridges) {
           if (!br || br.collapsed || !Number.isFinite(br.deckY)) continue;
           const ux = Number.isFinite(br.ux) ? br.ux : 0;
@@ -6204,8 +7095,9 @@ export async function createTradeVessels({
             dirtySyncFlag = true;
           }
 
-          const hitsAbutmentPier = Math.abs(alongSpan) >= Math.max(1.6, halfSpan - halfB - 1.15);
-          const hitsCenterPier = (br.length || 0) >= 28 && Math.abs(alongSpan) <= halfB + 1.25;
+          const bridgeSpans = Array.isArray(br.cityIndices) && br.cityIndices.length > 0 ? br.cityIndices.length : ((br.length || 0) >= 28 ? 2 : 1);
+          const hitsAbutmentPier = !isRiverRoute && Math.abs(alongSpan) >= Math.max(1.6, halfSpan - halfB - 1.15);
+          const hitsCenterPier = !isRiverRoute && bridgeSpans >= 2 && (bridgeSpans % 2) === 0 && Math.abs(alongSpan) <= halfB + 1.15;
           const hitsLowSoffit = br.deckY < surfForBridge + Math.max(1.05, v.boat.freeboard * 0.92);
           if ((hitsAbutmentPier || hitsCenterPier || hitsLowSoffit) && Math.abs(acrossChan) <= bridgeHalfW + halfL * 0.30) {
             const impactSpeed = Math.max(prevSpeed, ai.speed || 0);
@@ -6223,14 +7115,17 @@ export async function createTradeVessels({
               wz = ai.z + worldOffsetZ;
             }
             ai.speed = 0;
+            ai.vx = 0;
+            ai.vz = 0;
             ai.motion = 0;
             if (impactSpeed > 0.55) {
               ensureDamagedSlot(v);
               dmg.hits = (dmg.hits ?? 0) + 1;
               const holeY = -Math.max(0.22, v.boat.draft * 0.45);
               const holeZ = -halfL * 0.82;
+              const scInv = 1 / Math.max(0.35, v.scaleMul);
               addHullHole(dmg, {
-                design: [0, holeY, holeZ / Math.max(0.35, v.scaleMul)],
+                design: [0, holeY / Math.max(0.2, v.arch.designScale[1] * v.scaleMul), holeZ * scInv],
                 local: [0, holeY, holeZ],
                 radius: Math.max(0.11, Math.min(0.34, 0.08 + impactSpeed * 0.065)),
                 side: 1,
@@ -6246,8 +7141,8 @@ export async function createTradeVessels({
       }
 
       // 2. Real Grounding & Bottom Hull Breaches (`waterDepth < draft * 0.92`)
-      // Sea-going ships check full bow/mid/stern keel span; flat-bottomed river skiffs may kiss mud landings without holing.
-      const groundThreshold = v.boat.draft * (isRiverRoute ? 0.35 : 0.92);
+      // Sea-going ships check full bow/mid/stern keel span; flat-bottomed river skiffs check in-channel midships depth.
+      const groundThreshold = v.boat.draft * (isRiverRoute ? 0.45 : 0.92);
       const minHullDepth = isRiverRoute
         ? colMid.waterDepth
         : Math.min(colMid.waterDepth, colBow.waterDepth, colStern.waterDepth);
@@ -6285,9 +7180,9 @@ export async function createTradeVessels({
           }
         }
 
-        // If placed on dry land (`waterY <= -500` or `waterDepth <= 0.05`), push outward down bed gradient to wet shoreline edge
+        // If placed on dry land (`waterY <= -500` or `waterDepth <= 0.05`), push sea ships outward down bed gradient to wet shoreline edge
         colMid = sampleVesselCol(wx, wz);
-        if (colMid.waterDepth <= 0.05) {
+        if (!isRiverRoute && colMid.waterDepth <= 0.05) {
           for (let step = 0; step < 6 && colMid.waterDepth <= 0.08; step++) {
             const bE = sampleVesselCol(wx + 4, wz).bedY;
             const bW = sampleVesselCol(wx - 4, wz).bedY;
@@ -6307,6 +7202,8 @@ export async function createTradeVessels({
         colStern = sampleVesselCol(wx - bowX * probeHalfL, wz - bowZ * probeHalfL);
 
         ai.speed = 0;
+        ai.vx = 0;
+        ai.vz = 0;
         ai.motion = 0;
         v.boat.aground = true;
         if (!v.boat.groundingContact) v.boat.groundingContact = { substrate: 'shoal' };
@@ -6314,7 +7211,7 @@ export async function createTradeVessels({
         const colPort = sampleVesselCol(wx - stbdX * halfB, wz - stbdZ * halfB);
         const colStbd = sampleVesselCol(wx + stbdX * halfB, wz + stbdZ * halfB);
         const shoalSeverity = Math.max(0.18, Math.min(1.0, (v.boat.draft - Math.max(0, colMid.waterDepth)) / Math.max(0.35, v.boat.draft)));
-        const rawSlopeRoll = Math.atan2(colPort.bedY - colStbd.bedY, Math.max(1.8, halfB * 2));
+        const rawSlopeRoll = Math.atan2(colStbd.bedY - colPort.bedY, Math.max(1.8, halfB * 2));
         const bilgeHeel = Math.abs(rawSlopeRoll) < 0.05 ? (ai.tackSide || 1) * 0.16 * shoalSeverity : 0;
         const targetGroundRoll = Math.max(-0.42, Math.min(0.42, rawSlopeRoll * 0.85 + bilgeHeel));
         const targetGroundPitch = Math.max(-0.24, Math.min(0.24, Math.atan2(colBow.bedY - colStern.bedY, Math.max(3.5, halfL * 2)) * 0.78));
@@ -6329,10 +7226,13 @@ export async function createTradeVessels({
           const holeZ = foreStrike ? -halfL * 0.72 : halfL * 0.65;
           const holeX = (colStbd.bedY >= colPort.bedY ? 1 : -1) * halfB * 0.26;
           const comp = `${foreStrike ? 'fore' : 'aft'}${holeX >= 0 ? 'Starboard' : 'Port'}`;
-          const holeY = -Math.max(0.24, v.boat.draft * 0.82);
+          const holeY = -Math.max(0.24, (v.lightDraft ?? v.boat.draft) * 0.82);
           const holeRadius = Math.max(0.11, Math.min(0.38, 0.085 + (impactSpeed - 1.15) * 0.075));
+          const sxInv = 1 / Math.max(0.25, v.arch.designScale[0] * v.scaleMul);
+          const syInv = 1 / Math.max(0.25, v.arch.designScale[1] * v.scaleMul);
+          const szInv = 1 / Math.max(0.25, v.arch.designScale[2] * v.scaleMul);
           addHullHole(dmg, {
-            design: [holeX / Math.max(0.35, v.scaleMul), holeY, holeZ / Math.max(0.35, v.scaleMul)],
+            design: [holeX * sxInv, holeY * syInv, holeZ * szInv],
             local: [holeX, holeY, holeZ],
             radius: holeRadius,
             side: holeX >= 0 ? 1 : -1,
@@ -6340,7 +7240,7 @@ export async function createTradeVessels({
           });
           if (impactSpeed > 2.15) {
             addHullHole(dmg, {
-              design: [-holeX * 0.6 / Math.max(0.35, v.scaleMul), holeY * 0.94, 0],
+              design: [-holeX * 0.6 * sxInv, holeY * 0.94 * syInv, 0],
               local: [-holeX * 0.6, holeY * 0.94, 0],
               radius: holeRadius * 0.78,
               side: holeX >= 0 ? -1 : 1,
@@ -6363,7 +7263,7 @@ export async function createTradeVessels({
         if (Math.abs(v.boat.groundingPitch) < 1e-4) v.boat.groundingPitch = 0;
       }
 
-      // 3. Real Water Surface Elevation & Ocean Multi-Swell Wave Attitude (`estuaryT > 0.25` or open sea)
+      // 3. Real Water Surface Elevation, Loaded Hydrostatic Sinkage & Wave Attitude
       const meanWaterY = colMid.waterY;
       const estuaryT = colMid.hasInland
         ? (Number.isFinite(colMid.iw?.estuaryT)
@@ -6371,45 +7271,54 @@ export async function createTradeVessels({
             : (colMid.waterY < 0.35 && colMid.waterDepth > 2.0 ? Math.max(0, 1 - colMid.waterY / 0.35) : 0))
         : (colMid.waterY > -500 ? 1.0 : 0.0);
 
+      const rawShelter = waveShelterFn ? waveShelterFn(wx, wz, swellDirRad) : 1.0;
+      const shelterMod = Number.isFinite(rawShelter) ? Math.max(0.18, Math.min(1.0, rawShelter)) : 1.0;
+      const swellWeight = (estuaryT > 0.20 && meanWaterY > -500 && !v.boat.aground && !dmg.sunk)
+        ? Math.max(0, Math.min(1, (estuaryT - 0.20) / 0.80)) * shelterMod
+        : 0.0;
+      const wakeWeight = (meanWaterY > -500 && !v.boat.aground && !dmg.sunk)
+        ? (isRiverRoute ? 0.85 : Math.max(0.35, shelterMod))
+        : 0.0;
+      const zSpan = Math.max(1.8, v.boat.length * 0.42);
+      const xSpan = Math.max(0.75, v.boat.beam * 0.44);
+
       let waveHeave = 0;
       let wavePitch = 0;
       let waveRoll = 0;
-      if (estuaryT > 0.25 && meanWaterY > -500 && !v.boat.aground) {
-        const rawShelter = waveShelterFn ? waveShelterFn(wx, wz) : 0;
-        const shelterMod = Number.isFinite(rawShelter) ? Math.max(0.18, Math.min(1.0, 1.0 - 0.78 * Math.max(0, Math.min(1, rawShelter)))) : 1.0;
-        const swellWeight = Math.max(0, Math.min(1, (estuaryT - 0.25) / 0.75)) * shelterMod;
-        const zSpan = Math.max(4.0, v.boat.length * 0.42);
-        const xSpan = Math.max(1.4, v.boat.beam * 0.44);
+      if (swellWeight > 0.001) {
         const hMid = sampleOceanSwellElevation(wx, wz, elapsedSec, windVec, stormFlag, waveProbeFn);
         const hBow = sampleOceanSwellElevation(wx + bowX * zSpan, wz + bowZ * zSpan, elapsedSec, windVec, stormFlag, waveProbeFn);
         const hStern = sampleOceanSwellElevation(wx - bowX * zSpan, wz - bowZ * zSpan, elapsedSec, windVec, stormFlag, waveProbeFn);
         const hPort = sampleOceanSwellElevation(wx - stbdX * xSpan, wz - stbdZ * xSpan, elapsedSec, windVec, stormFlag, waveProbeFn);
         const hStbd = sampleOceanSwellElevation(wx + stbdX * xSpan, wz + stbdZ * xSpan, elapsedSec, windVec, stormFlag, waveProbeFn);
-        waveHeave = (hBow + 2 * hMid + hStern) * 0.25 * swellWeight;
-        wavePitch = Math.atan2(hBow - hStern, zSpan * 2) * 0.72 * swellWeight;
-        waveRoll = Math.atan2(hPort - hStbd, xSpan * 2) * 0.68 * swellWeight;
-      } else if (colMid.hasInland && !v.boat.aground) {
-        waveHeave = Math.sin(elapsedSec * 1.8 + ai.phaseRad) * 0.024;
+        waveHeave = ((hBow + hStern + hPort + hStbd + 2 * hMid) / 6) * swellWeight;
+        wavePitch = Math.atan2(hBow - hStern, zSpan * 2) * 0.78 * swellWeight;
+        waveRoll = Math.atan2(hStbd - hPort, xSpan * 2) * 0.74 * swellWeight;
       }
 
-      const surfY = meanWaterY > -500 ? (meanWaterY + waveHeave) : (colMid.bedY + v.boat.draft * 0.15);
-      // Exact hydrostatic reference level: `v.boat.target.heave = Math.max(0, waterY)` when afloat/grounded on water
-      v.boat.target.heave = meanWaterY > -500 ? Math.max(0, meanWaterY) : -999;
+      const baseWaterY = meanWaterY > -500 ? meanWaterY : (colMid.bedY + v.boat.draft * 0.15);
+      const surfY = baseWaterY + waveHeave;
+      v.boat.target.heave = meanWaterY > -500 ? meanWaterY : -999;
       v.boat.target.pitch = wavePitch;
       v.boat.target.roll = waveRoll;
       v.boat.waterY = meanWaterY;
       v.boat.bedY = colMid.bedY;
       v.boat.waterDepth = colMid.waterDepth;
 
+      const hydroSinkage = v.hydroSinkage ?? 0;
+      const lightDraft = v.lightDraft ?? (v.arch.draft * v.scaleMul);
+      const minKeelHeave = hasTerrainProbe ? (colMid.bedY + lightDraft * 0.88) : -Infinity;
+      const basePitchNoWave = (estuaryT > 0.20 ? ai.pitch * 0.35 : ai.pitch) + (v.boat.groundingPitch ?? 0);
+      const baseRollNoWave = ai.roll + (v.boat.groundingRoll ?? 0);
+
       // Pre-populate current hull pose before stepping hydrostatic hole inflow & damage
-      const preSinkage = dmg.floodingSinkage ?? 0;
-      const minKeelHeave = hasTerrainProbe ? (colMid.bedY + v.boat.draft * 0.86) : -Infinity;
+      const preSinkage = hydroSinkage + (dmg.floodingSinkage ?? 0);
       v.boat.x = wx;
       v.boat.z = wz;
       v.boat.yaw = ai.yaw;
       v.boat.heave = Math.max(minKeelHeave, surfY - preSinkage);
-      v.boat.pitch = (estuaryT > 0.25 ? ai.pitch * 0.35 + wavePitch : ai.pitch) + (v.boat.groundingPitch ?? 0) + (dmg.floodingPitch ?? 0);
-      v.boat.roll = ai.roll + waveRoll + (v.boat.groundingRoll ?? 0) + (dmg.floodingRoll ?? 0);
+      v.boat.pitch = basePitchNoWave + wavePitch + (dmg.floodingPitch ?? 0);
+      v.boat.roll = baseRollNoWave + waveRoll + (dmg.floodingRoll ?? 0);
 
       // 4. Step Hydrostatic Flooding, Hull Holes & Sinking every frame when holed, flooding, hit, grounded, or sunk
       const needsDamageStep = (dmg.hits ?? 0) > 0
@@ -6463,10 +7372,13 @@ export async function createTradeVessels({
         }
       }
 
-      const sinkage = dmg.floodingSinkage ?? 0;
-      const effY = Math.max(minKeelHeave, surfY - sinkage);
-      const effPitch = (estuaryT > 0.25 ? ai.pitch * 0.35 + wavePitch : ai.pitch) + (v.boat.groundingPitch ?? 0) + (dmg.floodingPitch ?? 0);
-      const effRoll = ai.roll + waveRoll + (v.boat.groundingRoll ?? 0) + (dmg.floodingRoll ?? 0);
+      const floodSinkage = dmg.floodingSinkage ?? 0;
+      const totalSinkage = hydroSinkage + floodSinkage;
+      const effY = Math.max(minKeelHeave, surfY - totalSinkage);
+      const basePitch = basePitchNoWave + (dmg.floodingPitch ?? 0);
+      const baseRoll = baseRollNoWave + (dmg.floodingRoll ?? 0);
+      const effPitch = basePitch + wavePitch;
+      const effRoll = baseRoll + waveRoll;
       const headingDeg = (ai.yaw * 180) / Math.PI;
       v.boat.x = wx;
       v.boat.z = wz;
@@ -6475,6 +7387,21 @@ export async function createTradeVessels({
       v.boat.heading = headingDeg;
       v.boat.pitch = effPitch;
       v.boat.roll = effRoll;
+
+      v._waveMeta = {
+        baseWaterY,
+        zSpan,
+        xSpan,
+        totalSinkage,
+        minKeelY: Number.isFinite(minKeelHeave) ? minKeelHeave : -1e6,
+        swellWeight,
+        wakeWeight,
+        basePitch,
+        baseRoll,
+        flags: ((v.boat.aground || dmg.sunk || meanWaterY <= -500) ? 1 : 0)
+          | (isRiverRoute ? 2 : 0)
+          | (!v.hydroInitialized ? 4 : 0),
+      };
 
       const fixedFurledOrBarge = v.archIndex === 1 || v.archIndex === 3 || v.archIndex === 4;
       const mastIntScalar = typeof dmg.mastIntegrity === 'number'
@@ -6526,6 +7453,7 @@ export async function createTradeVessels({
         }
 
         writeHullFloodUniform(d.hullData, v.boat);
+        d.hullData[1] = v.arch.designScale[1] * v.scaleMul;
         device.queue.writeBuffer(d.hullUniform, 0, d.hullData);
         const rev = dmg.cratersRevision ?? dmg.revision ?? 0;
         if (rev !== d.craterRevision) {
@@ -6543,7 +7471,7 @@ export async function createTradeVessels({
         const inst = d.instData;
         inst[0] = ai.x; inst[1] = effY; inst[2] = ai.z; inst[3] = ai.yaw;
         inst[4] = effPitch; inst[5] = effRoll; inst[6] = v.scaleMul; inst[7] = v.archIndex;
-        inst[8] = phaseAnim; inst[9] = motion; inst[10] = sinkage; inst[11] = furl;
+        inst[8] = phaseAnim; inst[9] = motion; inst[10] = floodSinkage; inst[11] = furl;
         device.queue.writeBuffer(d.instBuffer, 0, inst);
         continue;
       }
@@ -6556,14 +7484,15 @@ export async function createTradeVessels({
         const offI = idx * TRADE_VESSEL_INSTANCE_FLOATS;
         dst[offI] = ai.x; dst[offI + 1] = effY; dst[offI + 2] = ai.z; dst[offI + 3] = ai.yaw;
         dst[offI + 4] = effPitch; dst[offI + 5] = effRoll; dst[offI + 6] = v.scaleMul; dst[offI + 7] = a;
-        dst[offI + 8] = phaseAnim; dst[offI + 9] = motion; dst[offI + 10] = sinkage; dst[offI + 11] = furl;
+        dst[offI + 8] = phaseAnim; dst[offI + 9] = motion; dst[offI + 10] = floodSinkage; dst[offI + 11] = furl;
         counts[a] = idx + 1;
       }
       if (totalIntact < MAX_TRADE_VESSELS) {
+        v.intactSlot = totalIntact >>> 0;
         const flatOff = totalIntact * TRADE_VESSEL_INSTANCE_FLOATS;
         allIntactScratch[flatOff] = ai.x; allIntactScratch[flatOff + 1] = effY; allIntactScratch[flatOff + 2] = ai.z; allIntactScratch[flatOff + 3] = ai.yaw;
         allIntactScratch[flatOff + 4] = effPitch; allIntactScratch[flatOff + 5] = effRoll; allIntactScratch[flatOff + 6] = v.scaleMul; allIntactScratch[flatOff + 7] = a;
-        allIntactScratch[flatOff + 8] = phaseAnim; allIntactScratch[flatOff + 9] = motion; allIntactScratch[flatOff + 10] = sinkage; allIntactScratch[flatOff + 11] = furl;
+        allIntactScratch[flatOff + 8] = phaseAnim; allIntactScratch[flatOff + 9] = motion; allIntactScratch[flatOff + 10] = floodSinkage; allIntactScratch[flatOff + 11] = furl;
         totalIntact++;
       }
     }
@@ -6572,9 +7501,13 @@ export async function createTradeVessels({
       syncDeckCrewStationTables();
     }
     let crewSlotCursor = 0;
-    for (let vi = 0; vi < vessels.length && crewSlotCursor < MAX_TRADE_VESSELS; vi++) {
+    for (let vi = 0; vi < vessels.length; vi++) {
       const v = vessels[vi];
-      if (v.boat?.damage?.sunk) continue;
+      if (v.boat?.damage?.sunk || crewSlotCursor >= MAX_TRADE_VESSELS) {
+        v.crewSlot = -1;
+        continue;
+      }
+      v.crewSlot = crewSlotCursor;
       const ls = v.lastState;
       const dmg = v.boat.damage;
       const fixedFurledOrBarge = v.archIndex === 1 || v.archIndex === 3 || v.archIndex === 4;
@@ -6596,6 +7529,33 @@ export async function createTradeVessels({
       crewSlotCursor++;
     }
 
+    let waveCount = 0;
+    for (let vi = 0; vi < vessels.length && waveCount < MAX_TRADE_VESSELS; vi++) {
+      const v = vessels[vi];
+      const wm = v._waveMeta;
+      if (!wm) continue;
+      const wOff = waveCount * 16;
+      waveInputF32[wOff + 0] = v.ai.x;
+      waveInputF32[wOff + 1] = wm.baseWaterY;
+      waveInputF32[wOff + 2] = v.ai.z;
+      waveInputF32[wOff + 3] = v.ai.yaw;
+      waveInputF32[wOff + 4] = wm.zSpan;
+      waveInputF32[wOff + 5] = wm.xSpan;
+      waveInputF32[wOff + 6] = wm.totalSinkage;
+      waveInputF32[wOff + 7] = wm.minKeelY;
+      waveInputF32[wOff + 8] = wm.swellWeight;
+      waveInputF32[wOff + 9] = wm.wakeWeight;
+      waveInputF32[wOff + 10] = wm.basePitch;
+      waveInputF32[wOff + 11] = wm.baseRoll;
+      waveInputU32[wOff + 12] = (v.hydroSlot ?? waveCount) >>> 0;
+      waveInputU32[wOff + 13] = (v.intactSlot ?? 0xFFFFFFFF) >>> 0;
+      waveInputU32[wOff + 14] = (v.crewSlot >= 0 ? v.crewSlot : 0xFFFFFFFF) >>> 0;
+      waveInputU32[wOff + 15] = wm.flags >>> 0;
+      v.hydroInitialized = true;
+      waveCount++;
+    }
+    activeWaveVesselCount = waveCount;
+
     if (forceUpload || Math.abs(elapsedSec - lastUploadTime) >= 1 / 65) {
       lastUploadTime = elapsedSec;
       selectParamsCtrl[0] = totalIntact;
@@ -6603,6 +7563,18 @@ export async function createTradeVessels({
       selectParamsCtrl[2] = samples;
       selectParamsCtrl[3] = MAX_TRADE_VESSELS;
       device.queue.writeBuffer(selectUniformBuffer, 0, selectParamsCtrl);
+      waveParamsU32[0] = activeWaveVesselCount;
+      waveParamsU32[1] = MAX_TRADE_VESSELS;
+      waveParamsU32[2] = oceanBridge?.dispView ? 1 : 0;
+      waveParamsU32[3] = 0;
+      waveParamsF32[0] = Math.max(0, Math.min(0.05, Number.isFinite(dt) ? dt : 0));
+      waveParamsF32[1] = Number.isFinite(elapsedSec) ? elapsedSec : 0;
+      waveParamsF32[2] = (windVec?.[0] ?? 8) * (stormFlag ? 1.25 : 1.0);
+      waveParamsF32[3] = (windVec?.[1] ?? 0) * (stormFlag ? 1.25 : 1.0);
+      device.queue.writeBuffer(waveParamsBuffer, 0, waveParamsBuf);
+      if (activeWaveVesselCount > 0) {
+        device.queue.writeBuffer(vesselWaveInputBuffer, 0, waveInputBuf, 0, activeWaveVesselCount * 64);
+      }
       if (totalIntact > 0) {
         device.queue.writeBuffer(srcInstancesBuffer, 0, allIntactScratch, 0, totalIntact * TRADE_VESSEL_INSTANCE_FLOATS);
       }
@@ -6619,15 +7591,57 @@ export async function createTradeVessels({
     }
   }
 
+  function buildReachChannelSampler(reaches) {
+    const valid = Array.isArray(reaches)
+      ? reaches.filter((r) => Array.isArray(r?.points) && r.points.length >= 2)
+      : [];
+    if (!valid.length) return null;
+    return (wx, wz) => {
+      let bestRatio = Infinity;
+      let bestHit = null;
+      for (let ri = 0; ri < valid.length; ri++) {
+        const pts = valid[ri].points;
+        for (let i = 1; i < pts.length; i++) {
+          const a = pts[i - 1], b = pts[i];
+          const dx = b[0] - a[0], dz = b[1] - a[1];
+          const lenSq = dx * dx + dz * dz;
+          const u = lenSq > 1e-6 ? Math.max(0, Math.min(1, ((wx - a[0]) * dx + (wz - a[1]) * dz) / lenSq)) : 0;
+          const px = a[0] + dx * u, pz = a[1] + dz * u;
+          const dist = Math.hypot(wx - px, wz - pz);
+          const hw = Math.max(0.5, (a[2] ?? 3.5) + ((b[2] ?? 3.5) - (a[2] ?? 3.5)) * u);
+          if (dist > hw * 0.92) continue;
+          const ratio = dist / hw;
+          if (ratio < bestRatio) {
+            bestRatio = ratio;
+            const wy = (a[3] ?? 0) + ((b[3] ?? 0) - (a[3] ?? 0)) * u;
+            const depth = Math.max(0.45, (a[4] ?? 1.2) + ((b[4] ?? 1.2) - (a[4] ?? 1.2)) * u);
+            const vx = (a[5] ?? 0) + ((b[5] ?? 0) - (a[5] ?? 0)) * u;
+            const vz = (a[6] ?? 0) + ((b[6] ?? 0) - (a[6] ?? 0)) * u;
+            const estuaryT = (Number.isFinite(a[8]) && Number.isFinite(b[8]))
+              ? (a[8] + (b[8] - a[8]) * u)
+              : 0;
+            bestHit = { wy, hw, depth, vx, vz, estuaryT, dist };
+          }
+        }
+      }
+      return bestHit;
+    };
+  }
+
   return {
     get count() { return routes.length; },
     get deckCrewCount() { return activeDeckSoulCount; },
+    get activeWaveCount() { return activeWaveVesselCount; },
     setSharedCrew(nextSharedCrew) {
       return installSharedCrew(nextSharedCrew);
     },
     setTraffic(snapshot, origin, riverReaches = [], places = [], context = null) {
       if (context) lastContext = context;
-      routes = buildTradeVesselRoutes(snapshot, origin, { riverReaches, places, ...(lastContext || {}) });
+      const effReaches = (Array.isArray(riverReaches) && riverReaches.length > 0)
+        ? riverReaches
+        : (Array.isArray(lastContext?.port?.country?.riverReaches) ? lastContext.port.country.riverReaches : []);
+      contextRiverAt = buildReachChannelSampler(effReaches);
+      routes = buildTradeVesselRoutes(snapshot, origin, { riverReaches: effReaches, places, ...(lastContext || {}) });
       lastUploadTime = -Infinity;
       if (Number.isFinite(snapshot?.day)) boardDay = snapshot.day;
       rebuildVesselsFromRoutes();
@@ -6684,7 +7698,7 @@ export async function createTradeVessels({
             if (!soul || soul.id == null) continue;
             const [wx, wy, wz] = rotLocal(
               st.localMetres[0] * v.scaleMul,
-              st.localMetres[1],
+              st.localMetres[1] * v.scaleMul,
               st.localMetres[2] * v.scaleMul,
               v.ai.yaw,
               effPitch,
@@ -6737,10 +7751,14 @@ export async function createTradeVessels({
           kind: r.kind || v.arch.label,
           tonnage: r.tonnage || 0,
           draft: v.boat?.draft ?? v.arch.draft,
+          lightDraft: +(v.lightDraft ?? v.arch.draft).toFixed(3),
+          sinkage: +(v.hydroSinkage ?? 0).toFixed(3),
           maxAirDraft: v.boat?.maxAirDraft ?? v.arch.maxAirDraftMetres,
           waterY: v.boat?.waterY ?? effY,
           bedY: v.boat?.bedY ?? -12,
           waterDepth: v.boat?.waterDepth ?? 12,
+          channelHw: Number.isFinite(v.ai.channelHw) ? +v.ai.channelHw.toFixed(3) : null,
+          crossTrackM: Number.isFinite(v.ai.crossTrackM) ? +v.ai.crossTrackM.toFixed(3) : 0,
           aground: Boolean(v.boat?.aground),
           dismastedByBridge: Boolean(v.boat?.dismastedByBridge),
           mastIntegrity: typeof dmg?.mastIntegrity === 'number'
@@ -6759,6 +7777,52 @@ export async function createTradeVessels({
           deckPeople,
         };
       });
+    },
+    getWakeSources(center = null, maxCount = 24) {
+      const cap = Math.max(0, Math.min(24, maxCount | 0));
+      if (!cap || !vessels.length) return [];
+      const cx = Number(center?.x ?? center?.[0]);
+      const cz = Number(center?.z ?? center?.[2] ?? center?.[1]);
+      const hasCenter = Number.isFinite(cx) && Number.isFinite(cz);
+      const cands = [];
+      for (let i = 0; i < vessels.length; i++) {
+        const v = vessels[i];
+        const dmg = v.boat?.damage;
+        if (dmg?.sunk || v.boat?.aground || (v.boat?.waterY ?? 0) <= -500) continue;
+        let vx = Number.isFinite(v.ai.vx) ? v.ai.vx : Math.sin(v.ai.yaw) * (v.ai.speed || 0);
+        let vz = Number.isFinite(v.ai.vz) ? v.ai.vz : -Math.cos(v.ai.yaw) * (v.ai.speed || 0);
+        let speed = Math.hypot(vx, vz);
+        if (speed < 1e-4 && (v.ai.speed || 0) > 0.20) {
+          vx = Math.sin(v.ai.yaw) * v.ai.speed;
+          vz = -Math.cos(v.ai.yaw) * v.ai.speed;
+          speed = v.ai.speed;
+        }
+        if (speed <= 0.20) continue;
+        const wx = v.boat?.x ?? (v.ai.x + worldOffsetX);
+        const wz = v.boat?.z ?? (v.ai.z + worldOffsetZ);
+        if (!Number.isFinite(wx) || !Number.isFinite(wz)) continue;
+        const dSq = hasCenter ? ((wx - cx) * (wx - cx) + (wz - cz) * (wz - cz)) : i;
+        cands.push({
+          dSq,
+          desc: {
+            x: wx,
+            z: wz,
+            vx,
+            vz,
+            length: v.boat.length,
+            beam: v.boat.beam,
+            draft: v.boat.draft,
+            displacement: +((v.boat.mass || 12000) / 1000).toFixed(2),
+            isRiver: v.route?.mode === 'river',
+          },
+        });
+      }
+      if (hasCenter && cands.length > 1) {
+        cands.sort((a, b) => a.dSq - b.dSq);
+      }
+      const out = [];
+      for (let i = 0; i < cands.length && i < cap; i++) out.push(cands[i].desc);
+      return out;
     },
     consumeDirtySync() {
       const dirty = dirtySyncFlag;
@@ -6841,6 +7905,10 @@ export async function createTradeVessels({
       resources = nextResources;
       bindGroup = pickEntries(pipe, [0, 1, 2, 3, 4, 12, 19, 20, 21]);
       shadowBindGroup = pickEntries(shadowPipe, [0, 12, 19]);
+      waveBindGroups = makeWaveBindGroups(resources);
+      if (submergedCapture?.pipeline) {
+        submergedGroup0 = pickEntries(submergedCapture.pipeline, [0, 1, 2, 3, 4, 12, 19, 20, 21]);
+      }
       if (selectPipe) selectBindGroup = makeSelectBindGroup(resources);
       if (continuumPipe) contGroup0 = pickEntries(continuumPipe, [0, 1, 2, 3, 4, 12]);
       if (splatPipe) splatGroup0 = pickEntries(splatPipe, [0, 1, 2, 3, 4]);
@@ -6850,6 +7918,15 @@ export async function createTradeVessels({
       }
     },
     encode(pass) {
+      if (wavePipe && waveBindGroups && activeWaveVesselCount > 0) {
+        const swIdx = resolvedSurfaceWaves?.views?.length >= 2 ? (resolvedSurfaceWaves.current & 1) : 0;
+        const wbg = waveBindGroups[swIdx] ?? waveBindGroups[0];
+        if (wbg) {
+          pass.setPipeline(wavePipe);
+          pass.setBindGroup(0, wbg);
+          pass.dispatchWorkgroups(Math.ceil(activeWaveVesselCount / 64));
+        }
+      }
       if (clearPipe && clearBindGroup) {
         pass.setPipeline(clearPipe);
         pass.setBindGroup(0, clearBindGroup);
@@ -6883,6 +7960,30 @@ export async function createTradeVessels({
         pass.setBindGroup(0, d.poseBindGroup);
         pass.dispatchWorkgroups(Math.ceil(v.arch.vertexCount / 64));
         d.fractureGPU.encode(pass);
+      }
+    },
+    drawSubmerged(pass, above = false) {
+      if (!submergedCapture || !submergedGroup0 || !submergedGroup1 || !vessels.length) return;
+      submergedCapture.bind(pass, above);
+      pass.setBindGroup(0, submergedGroup0);
+      pass.setBindGroup(1, submergedGroup1);
+      if (gpuSelectionEncoded && typeof pass.drawIndexedIndirect === 'function') {
+        for (let a = 0; a < TRADE_VESSEL_ARCHETYPES; a++) {
+          const { vertexBuffer, indexBuffer } = archGPUs[a];
+          pass.setVertexBuffer(0, vertexBuffer);
+          pass.setVertexBuffer(1, nearOutBuffer, a * NEAR_SLICE_BYTES, NEAR_SLICE_BYTES);
+          pass.setIndexBuffer(indexBuffer, 'uint32');
+          pass.drawIndexedIndirect(indirectBuffer, a * 20);
+        }
+      } else {
+        for (let a = 0; a < TRADE_VESSEL_ARCHETYPES; a++) {
+          if (!counts[a]) continue;
+          const { arch, vertexBuffer, indexBuffer } = archGPUs[a];
+          pass.setVertexBuffer(0, vertexBuffer);
+          pass.setVertexBuffer(1, instanceBuffers[a]);
+          pass.setIndexBuffer(indexBuffer, 'uint32');
+          pass.drawIndexed(arch.indexCount, counts[a]);
+        }
       }
     },
     draw(pass, elapsedSec = NaN) {
@@ -7032,9 +8133,12 @@ export async function createTradeVessels({
       for (const b of [
         selectUniformBuffer, stepMetaBuffer, contBaseIndicesBuffer, contStatesBuffer,
         contVertColsBuffer, srcInstancesBuffer, nearOutBuffer, contListBuffer, splatListBuffer, indirectBuffer,
+        waveParamsBuffer, vesselWaveInputBuffer, vesselHydroStateBuffer, swUniformFallbackBuffer,
         crewConfigBuffer, crewSrcInstancesBuffer, crewStationsBuffer, crewLooksBuffer,
         crewBodiesBuffer, crewSplatListBuffer, crewIndirectBuffer,
       ]) b?.destroy?.();
+      seaDispFallbackTex?.destroy?.();
+      swFallbackTex?.destroy?.();
       oakFallback.tex?.destroy?.();
       routes = [];
       vessels = [];

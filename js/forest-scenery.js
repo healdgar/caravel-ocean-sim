@@ -412,12 +412,12 @@ const CERTIFIED_FOREST_STREAM_SHAS=Object.freeze({
   'vertices.bin':new Set([
     '8d70fb89316d5d842ba5d224aca99878b866c70addb578848a47783af08251d0',
     'e9df13166329797db6ddf89839778aa126c82fedc3070a47630e69ee85f6d007',
-    'ec379ef084df4e5d283b3f4e9dc1fe206c81a932d6e49b1447eaa1d7e2caac39',
+    'a4c6f4623d3380e00e415f9a859c5ed163996846db57d3c850c3646837e9d24e',
   ]),
   'indices.bin':new Set([
     '2cd8ffe90fd2e0300db51caf0decd9da6b5f50cbaa2e6dd5462d8c6f8d8ce389',
     'eb385ff490bdbc2b44d370facaf73de6516ef1b4084bb725ad9312580f059e9f',
-    'a12e6f8ed4fcb76bd80f02603b4f2ce59a7a0aea3b1cdc11711157e2f1af2ad6',
+    '0d0ff64d15ab34aa7ac6c3638eb8ae054796202a60a81fed4cf945d7be650853',
   ]),
   'roots.bin':new Set([
     '69bc2f787873f09944683f49e88c9bc09d8b068a33aee85453b626150050de9b',
@@ -782,11 +782,11 @@ fn forestCanopyVertex(position:vec3f,normal:vec3f,kind:vec2f,leafUV:vec2f,colour
    let domeCurve=select(0.08,0.14,tierId==3u);
    normAdj=normalize(normAdj+(t1*uvOff.x+t2*uvOff.y)*domeCurve);
   }else{
-   let nearRelief=1.-smoothstep(14.,52.,length(r.rootScale.xyz-F.camPos.xyz));
+   let nearRelief=1.-smoothstep(12.,46.,length(r.rootScale.xyz-F.camPos.xyz));
    if(nearRelief>0.){
-    let cup=(dot(uvOff,uvOff)*2.1-0.25)*0.20*nearRelief*invScale;
-    posLocal+=normal*cup;
-    normAdj=normalize(normAdj+(t1*uvOff.x+t2*uvOff.y)*(.34*nearRelief));
+    let camber=(-0.055*leafUV.x*leafUV.x+0.075*(abs(uvOff.y)*2.0-0.32))*nearRelief*invScale;
+    posLocal+=normal*camber;
+    normAdj=normalize(normAdj+(t1*uvOff.x*0.18+t2*uvOff.y*0.30)*nearRelief);
    }
   }
  }
@@ -898,8 +898,20 @@ fn forestMappedNormal(geometric:vec3f,detail:vec3f,dx:vec3f,dy:vec3f,ux:vec2f,uy
  }
  let material=forestNativeMaterials[u32(in.nativeMaterial)];
  let surface=forestReadNative(material,in.leafUV,ux,uy);
- let colour=forestOwnColour(surface.pigment)*in.colour;
- let n=forestMappedNormal(geometric,surface.detail.xyz*vec3f(1.25,1.25,1.0),dx,dy,ux,uy)*select(-1.,1.,front);
+ var colour=forestOwnColour(surface.pigment)*in.colour;
+ let barkViewDist=1./max(in.pos.w,1e-6);
+ let barkClose=1.-smoothstep(8.,32.,barkViewDist);
+ var detailVec=surface.detail.xyz*vec3f(1.25+0.35*barkClose,1.25+0.35*barkClose,1.0);
+ if(barkClose>0.001){
+  let grainU=in.leafUV.x*46.0+sin(in.leafUV.y*9.5)*1.4;
+  let grainV=in.leafUV.y*18.0;
+  let fissure=sin(grainU)*0.65+sin(grainU*2.3+grainV*0.7)*0.35;
+  let plate=cos(grainU)*0.65+cos(grainU*2.3+grainV*0.7)*0.35;
+  detailVec.x+=plate*0.18*barkClose;
+  detailVec.y+=sin(grainV*2.1+grainU*0.4)*0.08*barkClose;
+  colour*=1.0+fissure*0.055*barkClose;
+ }
+ let n=forestMappedNormal(geometric,detailVec,dx,dy,ux,uy)*select(-1.,1.,front);
  let roughness=clamp(surface.detail.a/max(surface.pigment.a,FOREST_THINNEST_COVERAGE),0.22,0.98);
  let barkWet=clamp(material.coordinates.w*(1.0-roughness),0.0,0.28);
  // Static escape through this specimen's original leaf-area field. Terrain
@@ -910,65 +922,21 @@ fn forestNativeAlpha(material:ForestLeafMaterial,uv:vec2f,ux:vec2f,uy:vec2f)->f3
  return forestNativeAlbedoOnly(material,uv,ux,uy).a;
 }
 fn forestBotanicalDetail(uv:vec2f,viewDist:f32,rawAlpha:f32)->vec4f{
- let detailW=1.-smoothstep(10.,34.,viewDist);
+ let detailW=1.-smoothstep(10.,38.,viewDist);
  if(detailW<=.001||rawAlpha<=.04){return vec4f(rawAlpha,0.,0.,0.);}
- // Break baked cluster sprays into individual woody twigs and serrated botanical leaflets at close range.
- let closeGapW=1.-smoothstep(6.,24.,viewDist);
- let gridUv=uv*9.0;
- let cell=floor(gridUv);
- let f=fract(gridUv)-vec2f(.5,.5);
- let h0=fract(sin(dot(cell,vec2f(127.1,311.7)))*43758.5453);
- let h1=fract(sin(dot(cell,vec2f(269.5,183.3)))*29147.2187);
- let ang=(h0-.5)*1.55;
- let ca=cos(ang);let sa=sin(ang);
- let rp=vec2f(ca*f.x-sa*f.y,sa*f.x+ca*f.y);
- let stemBend=.048*sin(rp.y*6.2+h1*6.2831);
- let stemDist=abs(rp.x-stemBend);
- let woodMask=(1.-smoothstep(.014,.034,stemDist))*step(-.45,rp.y)*step(rp.y,.42)*smoothstep(.12,.38,rawAlpha);
- var bestLeaf=0.;var bestVeinX=0.;var bestVeinY=0.;var leafTone=0.;
- for(var k=0;k<4;k++){
-  let side=select(-1.,1.,(k&1)==1);
-  let rowOff=-.31+f32(k)*.20+(h1-.5)*.06;
-  let rel=vec2f(rp.x-stemBend-side*.026,rp.y-rowOff);
-  let lAng=side*(.70+.18*h0)+.18*(f32(k)-1.5);
-  let lc=cos(lAng);let ls=sin(lAng);
-  let lPos=vec2f(lc*rel.x-ls*rel.y,ls*rel.x+lc*rel.y);
-  let t=lPos.y/.34;
-  if(t>.02&&t<1.){
-   let serrate=1.+.11*sin(t*28.);
-   let profile=max(sin(pow(t,.72)*3.14159),0.)*(1.-.15*t)*serrate*.16;
-   let edge=profile-abs(lPos.x);
-   let cov=smoothstep(-.020,.018,edge);
-   if(cov>bestLeaf){
-    bestLeaf=cov;
-    let midrib=exp(-abs(lPos.x)*46.)*.36;
-    let latVein=exp(-abs(fract((t-abs(lPos.x)*2.4)*5.5)-.5)*11.)*.18;
-    bestVeinX=(lPos.x/max(profile,.02))*lc-midrib*side*.25;
-    bestVeinY=(t-.5)*ls+(latVein-midrib)*.35;
-    leafTone=fract(h0*7.13+f32(k)*.37)-.5;
-   }
-  }
- }
- // Add an overlapping terminal leaflet along the twig apex for natural cluster closure.
- {
-  let t=(rp.y-.18)/.32;
-  if(t>.02&&t<1.){
-   let serrate=1.+.10*sin(t*26.);
-   let profile=max(sin(pow(t,.72)*3.14159),0.)*(1.-.12*t)*serrate*.165;
-   let cov=smoothstep(-.020,.018,profile-abs(rp.x-stemBend));
-   if(cov>bestLeaf){
-    bestLeaf=cov;
-    bestVeinX=(rp.x-stemBend)/max(profile,.02);
-    bestVeinY=t-.5;
-    leafTone=h1-.5;
-   }
-  }
- }
- let gapFloor=mix(.46,.08,closeGapW);
- let cutAlpha=clamp(rawAlpha*(gapFloor+(1.15-gapFloor)*max(bestLeaf,woodMask)),0.,1.);
- let crispAlpha=mix(rawAlpha,smoothstep(.14,.48,cutAlpha),detailW*.88);
- let metaW=select(-(1.+leafTone*detailW),woodMask*detailW,woodMask>.08);
- return vec4f(crispAlpha,bestVeinX*detailW,bestVeinY*detailW,metaW);
+ // Preserve the true high-res botanical spray alpha silhouette cleanly without cookie-cutter perforation,
+ // adding only subtle pinnate venation normal relief and cuticle/chlorophyll micro-variation inside leaves.
+ let edgeSharp=smoothstep(.24,.76,rawAlpha);
+ let crispAlpha=mix(rawAlpha,edgeSharp,detailW*.24);
+ let interior=smoothstep(.20,.65,rawAlpha)*detailW;
+ let chevronU=uv.x*22.0-abs(uv.y-.5)*14.0;
+ let secVein=sin(chevronU)*exp(-abs(fract(chevronU*.1591549)-.5)*3.2);
+ let fineNet=sin(uv.x*68.0+uv.y*44.0)*cos(uv.x*41.0-uv.y*63.0);
+ let sideSign=select(-1.,1.,uv.y>=.5);
+ let veinX=(secVein*.16+fineNet*.045)*interior;
+ let veinY=(cos(chevronU)*sideSign*.14+fineNet*.045)*interior;
+ let dapple=(sin(uv.x*11.3+uv.y*7.9)*.55+cos(uv.x*19.7-uv.y*15.1)*.45)*interior;
+ return vec4f(crispAlpha,veinX,veinY,dapple);
 }
 // Leaf coverage lays depth first, through every layer of a crown. Shading then lights only
 // the leaves in front, and each sample's depth test decides which of them it shows.
@@ -1017,12 +985,10 @@ struct ForestLeafCoverage {@location(0)colour:vec4f,@builtin(sample_mask)mask:u3
  if(viewDist<38.){
   let bot=forestBotanicalDetail(in.leafUV,viewDist,pigment.a);
   let tDir=normalize(dx+vec3f(1e-5,0.,0.));let bDir=normalize(dy+vec3f(0.,0.,1e-5));
-  n=normalize(n+(tDir*bot.y+bDir*bot.z)*0.34);
-  let woodW=clamp(bot.w,0.,1.);
-  let leafVar=select(0.,-(bot.w+1.),bot.w<0.);
-  colour*=mix(vec3f(1.),vec3f(1.+leafVar*.22,1.+leafVar*.30,1.-leafVar*.14),clamp(1.-woodW,0.,1.));
-  colour=mix(colour,vec3f(.15,.10,.068),woodW*.82);
-  rawRough=mix(rawRough,.88,woodW*.75);
+  n=normalize(n+(tDir*bot.y+bDir*bot.z)*0.28);
+  let leafVar=bot.w;
+  colour*=vec3f(1.+leafVar*.07,1.+leafVar*.10,1.-leafVar*.05);
+  rawRough=clamp(rawRough-leafVar*.08,0.22,0.92);
  }
  if(!front){colour=mix(colour,forestNativeLinear(material.underside.rgb)*in.colour,material.optics.y);}
  let exposure=clamp(in.kind.y,0.,1.);let nDotL=dot(n,F.sunDir.xyz);

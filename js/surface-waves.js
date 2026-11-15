@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 import {SURFACE_WAVE_UPDATE,SURFACE_WAVE_SPEED} from './wgsl/surface-waves.js';
 
-export const SURFACE_WAVE_LIMITS=Object.freeze({emitters:64,nearExtent:256,farExtent:1024,maxDt:.1,restSeconds:45,maxEventAge:.5,dedupe:4096});
+export const SURFACE_WAVE_LIMITS=Object.freeze({emitters:64,hulls:24,nearExtent:256,farExtent:1024,maxDt:.1,restSeconds:45,maxEventAge:.5,dedupe:4096});
 const surfaceWaveFinite=(v,fallback=0)=>Number.isFinite(v)?v:fallback;
 const surfaceWaveClamp=(v,min,max)=>Math.max(min,Math.min(max,v));
 
@@ -43,18 +43,24 @@ export async function createSurfaceWaves({device,computePipe,size=512}){
   const uniform=device.createBuffer({label:'scene surface wave domains',size:64,usage:B.UNIFORM|B.COPY_DST});
   const uniforms=Array.from({length:3},(_,i)=>device.createBuffer({label:'scene wave substep '+i,size:64,usage:B.UNIFORM|B.COPY_DST}));
   const sources=device.createBuffer({label:'scene wave impulses',size:SURFACE_WAVE_LIMITS.emitters*48,usage:B.STORAGE|B.COPY_DST});
+  const hulls=device.createBuffer({label:'scene wake hulls',size:SURFACE_WAVE_LIMITS.hulls*32,usage:B.STORAGE|B.COPY_DST});
   const textures=[0,1].map(i=>device.createTexture({label:'scene surface waves '+i,size:[size,size,2],format:'rgba16float',usage:T.TEXTURE_BINDING|T.STORAGE_BINDING|T.COPY_SRC}));
   const views=textures.map(t=>t.createView({dimension:'2d-array'})),pipeline=await computePipe(SURFACE_WAVE_UPDATE,'scene surface gravity waves');
   const groups=uniforms.map(u=>views.map((view,i)=>device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[
-    {binding:0,resource:{buffer:u}},{binding:1,resource:view},{binding:2,resource:views[1-i]},{binding:3,resource:{buffer:sources}},
+    {binding:0,resource:{buffer:u}},{binding:1,resource:view},{binding:2,resource:views[1-i]},{binding:3,resource:{buffer:sources}},{binding:4,resource:{buffer:hulls}},
   ]})));
-  const values=new Float32Array(16),sourceValues=new Float32Array(SURFACE_WAVE_LIMITS.emitters*12),pending=[],seen=new Set();
-  const stats={active:false,queued:0,culled:0,dropped:0,duplicates:0,invalid:0,resets:0,dispatches:0,accepted:0};
+  const values=new Float32Array(16),sourceValues=new Float32Array(SURFACE_WAVE_LIMITS.emitters*12),hullValues=new Float32Array(SURFACE_WAVE_LIMITS.hulls*8),pending=[],seen=new Set();
+  let pendingHulls=[];
+  const stats={active:false,queued:0,culled:0,dropped:0,duplicates:0,invalid:0,resets:0,dispatches:0,accepted:0,hulls:0};
   let current=0,time=0,lastEmission=-Infinity,needsClear=true,steps=0,destroyed=false,epoch=0,hasDomain=false;
   const writeDomain=(active,dt=0,count=0)=>{values.set(domains,0);values[12]=dt;values[13]=needsClear?1:0;values[14]=count;values[15]=active?1:0;device.queue.writeBuffer(uniform,0,values);};
-  function reset(){epoch++;stats.resets++;stats.active=false;pending.length=0;stats.queued=0;seen.clear();steps=0;lastEmission=-Infinity;needsClear=true;hasDomain=false;writeDomain(false);}
+  function reset(){epoch++;stats.resets++;stats.active=false;pending.length=0;stats.queued=0;stats.hulls=0;seen.clear();steps=0;lastEmission=-Infinity;needsClear=true;hasDomain=false;writeDomain(false);}
   writeDomain(false);
   return {uniform,views,textures,stats,get current(){return current;},get view(){return views[current];},get epoch(){return epoch;},
+    setWakeHulls(list){
+      if(destroyed)return;
+      pendingHulls=Array.isArray(list)?list:[];
+    },
     emit(event){
       if(destroyed)return false;
       const source=surfaceWaveEmission(event);if(!source){stats.invalid++;return false;}
@@ -68,8 +74,9 @@ export async function createSurfaceWaves({device,computePipe,size=512}){
       seen.add(key);if(seen.size>SURFACE_WAVE_LIMITS.dedupe)seen.delete(seen.values().next().value);
       pending.push(source);stats.queued=pending.length;return true;
     },
-    update(center,dt,resetField=false){
+    update(center,dt,resetField=false,wakeHulls=undefined){
       if(destroyed)return;
+      if(wakeHulls!==undefined)pendingHulls=Array.isArray(wakeHulls)?wakeHulls:[];
       dt=surfaceWaveClamp(surfaceWaveFinite(dt),0,SURFACE_WAVE_LIMITS.maxDt);time+=dt;steps=0;
       const x=surfaceWaveFinite(center?.x),z=surfaceWaveFinite(center?.z);
       const teleport=hasDomain&&Math.hypot(x-committed[0],z-committed[1])>SURFACE_WAVE_LIMITS.farExtent*.25;
@@ -88,15 +95,34 @@ export async function createSurfaceWaves({device,computePipe,size=512}){
       }
       pending.length=0;stats.queued=0;
       if(count){lastEmission=time;stats.accepted+=count;device.queue.writeBuffer(sources,0,sourceValues,0,count*12);}
+      let hullCount=0;
+      for(let i=0;i<pendingHulls.length&&hullCount<SURFACE_WAVE_LIMITS.hulls;i++){
+        const h=pendingHulls[i];
+        if(!h)continue;
+        const hx=Number(h.x),hz=Number(h.z),hvx=Number(h.vx),hvz=Number(h.vz);
+        if(![hx,hz,hvx,hvz].every(Number.isFinite))continue;
+        const speed=Math.hypot(hvx,hvz);
+        if(speed<=0.20)continue;
+        const len=surfaceWaveClamp(surfaceWaveFinite(h.length,14),4,60);
+        const beam=surfaceWaveClamp(surfaceWaveFinite(h.beam,len*0.28),1.4,18);
+        const draft=surfaceWaveClamp(surfaceWaveFinite(h.draft,0.9),0.20,5.0);
+        const disp=surfaceWaveClamp(surfaceWaveFinite(h.displacement,18),0.5,800);
+        const reach=Math.min(len*2.2+speed*4.5,44)+len*0.5+domains[7]*3;
+        if(Math.max(Math.abs(hx-domains[4]),Math.abs(hz-domains[5]))-reach>=SURFACE_WAVE_LIMITS.farExtent*.495)continue;
+        const signedDisp=h.isRiver?-disp:disp;
+        hullValues.set([hx,hz,hvx,hvz,len,beam,draft,signedDisp],hullCount++*8);
+      }
+      stats.hulls=hullCount;
+      if(hullCount){lastEmission=time;device.queue.writeBuffer(hulls,0,hullValues,0,hullCount*8);}
       if(time-lastEmission>SURFACE_WAVE_LIMITS.restSeconds){stats.active=false;needsClear=true;hasDomain=false;writeDomain(false);return;}
       stats.active=true;
       const maxStep=.45*domains[3]/SURFACE_WAVE_SPEED;steps=Math.ceil(dt/maxStep);
       const substep=dt/steps;
       for(let i=0;i<steps;i++){
         values.set(domains,0);values.set(i?[domains[0],domains[1],domains[4],domains[5]]:committed,8);
-        values.set([substep,i===0&&needsClear?1:0,i===0?count:0,1],12);device.queue.writeBuffer(uniforms[i],0,values);
+        values.set([substep,i===0&&needsClear?1:0,(i===0?count:0)+hullCount*256,1],12);device.queue.writeBuffer(uniforms[i],0,values);
       }
-      writeDomain(true,dt,count);
+      writeDomain(true,dt,count+hullCount*256);
     },
     encode(pass){
       if(destroyed||!steps||!stats.active)return;
@@ -104,6 +130,6 @@ export async function createSurfaceWaves({device,computePipe,size=512}){
       for(let i=0;i<steps;i++){pass.setBindGroup(0,groups[i][current]);pass.dispatchWorkgroups(Math.ceil(size/8),Math.ceil(size/8),2);current=1-current;stats.dispatches++;}
       committed.set([domains[0],domains[1],domains[4],domains[5]]);hasDomain=true;needsClear=false;steps=0;
     },reset,
-    destroy(){if(destroyed)return;destroyed=true;for(const b of [uniform,...uniforms,sources])b.destroy();for(const t of textures)t.destroy();},
+    destroy(){if(destroyed)return;destroyed=true;for(const b of [uniform,...uniforms,sources,hulls])b.destroy();for(const t of textures)t.destroy();},
   };
 }

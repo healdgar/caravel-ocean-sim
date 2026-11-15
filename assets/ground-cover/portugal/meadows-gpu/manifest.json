@@ -2,7 +2,7 @@
   "format": "waterworld.meadow-grass-gpu",
   "version": 2,
   "style": "botanical-tussock-continuum",
-  "tileMetres": 4,
+  "tileMetres": 1.75,
   "mixes": [
     "pasture",
     "waste",
@@ -13,15 +13,15 @@
   "levels": 4,
   "levelErrors": [
     0,
-    0.04,
-    0.078,
-    0.124
+    0.03,
+    0.052,
+    0.076
   ],
   "levelParentErrors": [
-    0.04,
-    0.078,
-    0.124,
-    0.18
+    0.03,
+    0.052,
+    0.076,
+    0.104
   ],
   "strideBytes": 32,
   "clusterRecordWords": 12,
@@ -35,8 +35,8 @@
     "ancestorEncoding": "u8x4-v0v1-pairs",
     "bytesPerVariant": 2512
   },
-  "vertexCount": 34417,
-  "triangleCount": 56106,
+  "vertexCount": 77180,
+  "triangleCount": 94836,
   "clusterCount": 48,
   "variantRecords": [
     {
@@ -48,18 +48,18 @@
       "genusZeroEuler": 2,
       "coreTriCount": 6,
       "meanColour": [
-        0.1352,
-        0.1398,
-        0.0671
+        0.0626,
+        0.1289,
+        0.0333
       ],
       "splat": {
-        "centreY": 0.0743,
-        "rx": 1.9796,
-        "ry": 0.0972,
+        "centreY": 0.087,
+        "rx": 0.8786,
+        "ry": 0.114,
         "meanCol": [
-          0.1352,
-          0.1398,
-          0.0671
+          0.0626,
+          0.1289,
+          0.0333
         ]
       }
     },
@@ -72,18 +72,18 @@
       "genusZeroEuler": 2,
       "coreTriCount": 6,
       "meanColour": [
-        0.1361,
-        0.1405,
-        0.067
+        0.0634,
+        0.1285,
+        0.0335
       ],
       "splat": {
-        "centreY": 0.0743,
-        "rx": 1.9796,
-        "ry": 0.0972,
+        "centreY": 0.087,
+        "rx": 0.8786,
+        "ry": 0.114,
         "meanCol": [
-          0.1361,
-          0.1405,
-          0.067
+          0.0634,
+          0.1285,
+          0.0335
         ]
       }
     },
@@ -96,18 +96,18 @@
       "genusZeroEuler": 2,
       "coreTriCount": 6,
       "meanColour": [
-        0.1376,
-        0.1415,
-        0.0674
+        0.0629,
+        0.129,
+        0.0334
       ],
       "splat": {
-        "centreY": 0.0743,
-        "rx": 1.9796,
-        "ry": 0.0972,
+        "centreY": 0.087,
+        "rx": 0.8786,
+        "ry": 0.114,
         "meanCol": [
-          0.1376,
-          0.1415,
-          0.0674
+          0.0629,
+          0.129,
+          0.0334
         ]
       }
     },
@@ -120,18 +120,18 @@
       "genusZeroEuler": 2,
       "coreTriCount": 6,
       "meanColour": [
-        0.1396,
-        0.1432,
-        0.0678
+        0.0633,
+        0.1285,
+        0.0335
       ],
       "splat": {
-        "centreY": 0.0743,
-        "rx": 1.9796,
-        "ry": 0.0972,
+        "centreY": 0.087,
+        "rx": 0.8786,
+        "ry": 0.114,
         "meanCol": [
-          0.1396,
-          0.1432,
-          0.0678
+          0.0633,
+          0.1285,
+          0.0335
         ]
       }
     },
@@ -144,18 +144,18 @@
       "genusZeroEuler": 2,
       "coreTriCount": 6,
       "meanColour": [
-        0.144,
-        0.1429,
-        0.0642
+        0.0806,
+        0.124,
+        0.0383
       ],
       "splat": {
-        "centreY": 0.0825,
-        "rx": 1.9796,
-        "ry": 0.108,
+        "centreY": 0.0928,
+        "rx": 0.8786,
+        "ry": 0.1216,
         "meanCol": [
-          0.144,
-          0.1429,
-          0.0642
+          0.0806,
+          0.124,
+          0.0383
         ]
       }
     },
@@ -168,18 +168,18 @@
       "genusZeroEuler": 2,
       "coreTriCount": 6,
       "meanColour": [
-        0.1455,
-        0.1441,
-        0.0647
+        0.0804,
+        0.1235,
+        0.0383
       ],
       "splat": {
-        "centreY": 0.0825,
-        "rx": 1.9796,
-        "ry": 0.108,
+        "centreY": 0.0928,
+        "rx": 0.8786,
+        "ry": 0.1216,
         "meanCol": [
-          0.1455,
-          0.1441,
-          0.0647
+          0.0804,
+          0.1235,
+          0.0383
         ]
       }
     },
@@ -192,18 +192,18 @@
       "genusZeroEuler": 2,
       "coreTriCount": 6,
       "meanColour": [
-        0.1435,
-        0.1427,
-        0.0642
+        0.0805,
+        0.124,
+        0.0383
       ],
       "splat": {
-        "centreY": 0.0825,
-        "rx": 1.9796,
-        "ry": 0.108,
+        "centreY": 0.0928,
+        "rx": 0.8786,
+        "ry": 0.1216,
         "meanCol": [
-          0.1435,
-          0.1427,
-          0.0642
+          0.0805,
+          0.124,
+          0.0383
         ]
       }
     },
@@ -216,18 +216,18 @@
       "genusZeroEuler": 2,
       "coreTriCount": 6,
       "meanColour": [
-        0.1457,
-        0.1441,
-        0.0646
+        0.0803,
+        0.1235,
+        0.0383
       ],
       "splat": {
-        "centreY": 0.0825,
-        "rx": 1.9796,
-        "ry": 0.108,
+        "centreY": 0.0928,
+        "rx": 0.8786,
+        "ry": 0.1216,
         "meanCol": [
-          0.1457,
-          0.1441,
-          0.0646
+          0.0803,
+          0.1235,
+          0.0383
         ]
       }
     },
@@ -240,18 +240,18 @@
       "genusZeroEuler": 2,
       "coreTriCount": 6,
       "meanColour": [
-        0.1439,
-        0.1467,
-        0.0663
+        0.0678,
+        0.133,
+        0.0351
       ],
       "splat": {
-        "centreY": 0.0891,
-        "rx": 1.9796,
-        "ry": 0.1166,
+        "centreY": 0.0998,
+        "rx": 0.8786,
+        "ry": 0.1307,
         "meanCol": [
-          0.1439,
-          0.1467,
-          0.0663
+          0.0678,
+          0.133,
+          0.0351
         ]
       }
     },
@@ -264,18 +264,18 @@
       "genusZeroEuler": 2,
       "coreTriCount": 6,
       "meanColour": [
-        0.1453,
-        0.1475,
-        0.0665
+        0.0676,
+        0.1325,
+        0.0351
       ],
       "splat": {
-        "centreY": 0.0891,
-        "rx": 1.9796,
-        "ry": 0.1166,
+        "centreY": 0.0998,
+        "rx": 0.8786,
+        "ry": 0.1307,
         "meanCol": [
-          0.1453,
-          0.1475,
-          0.0665
+          0.0676,
+          0.1325,
+          0.0351
         ]
       }
     },
@@ -288,18 +288,18 @@
       "genusZeroEuler": 2,
       "coreTriCount": 6,
       "meanColour": [
-        0.1443,
-        0.1468,
-        0.0665
+        0.068,
+        0.1331,
+        0.0352
       ],
       "splat": {
-        "centreY": 0.0891,
-        "rx": 1.9796,
-        "ry": 0.1166,
+        "centreY": 0.0998,
+        "rx": 0.8786,
+        "ry": 0.1307,
         "meanCol": [
-          0.1443,
-          0.1468,
-          0.0665
+          0.068,
+          0.1331,
+          0.0352
         ]
       }
     },
@@ -312,42 +312,42 @@
       "genusZeroEuler": 2,
       "coreTriCount": 6,
       "meanColour": [
-        0.145,
-        0.1472,
-        0.0665
+        0.0674,
+        0.1325,
+        0.0351
       ],
       "splat": {
-        "centreY": 0.0891,
-        "rx": 1.9796,
-        "ry": 0.1166,
+        "centreY": 0.0998,
+        "rx": 0.8786,
+        "ry": 0.1307,
         "meanCol": [
-          0.145,
-          0.1472,
-          0.0665
+          0.0674,
+          0.1325,
+          0.0351
         ]
       }
     }
   ],
   "files": {
     "vertices.bin": {
-      "bytes": 1101344,
-      "gzipBytes": 514961,
-      "sha256": "6cc2319cfa78cc1acc1f1cd1bb02c181ef2da477458fa826ee481b69d211c889"
+      "bytes": 2469760,
+      "gzipBytes": 1240597,
+      "sha256": "c6d98b69237c891a8b6c9d59255de6469919b6f3376da621b5e790b5feadaf32"
     },
     "indices.bin": {
-      "bytes": 673272,
-      "gzipBytes": 214709,
-      "sha256": "e4f5f89b115449242c8122c2fc59215df9a44528884cea28031dcb8abc43fa35"
+      "bytes": 1138032,
+      "gzipBytes": 298305,
+      "sha256": "5d653c4fd567560ed25262d363e68bab7e167448a2468e75c9f861ff4deddfc6"
     },
     "clusters.bin": {
       "bytes": 2304,
-      "gzipBytes": 622,
-      "sha256": "084fbd0c6980da094a2563ede5fce17aa971c01f9e68a7e6b102d5e95b406402"
+      "gzipBytes": 641,
+      "sha256": "ab16334cf567db1cd8e88b3e31909c53b134c0cccf6d1d8ff11ae4966d964567"
     },
     "morph.bin": {
       "bytes": 30144,
-      "gzipBytes": 1796,
-      "sha256": "1902d08bb7038693e535283838e9a4cea99f92dbd38428659d07fa791e7fa2ea"
+      "gzipBytes": 1374,
+      "sha256": "9f9cbec4e209e6378a9d7e5cacfbfed7f957b22d9e6c2e7035dda88a7bdfcca7"
     }
   }
 }

@@ -43,7 +43,7 @@ for(const pack of ['saba','subtropical','portugal'])test(`${pack} clusters are v
 });
 
 test('Lisbon\'s trees keep every leaf at the finest cut, and a town-wide view needs a fraction of their triangles',()=>{
-  // The pack stores a leaf as one quad where the others store two; the baker cuts each in half to match.
+  // Each 3D V-cambered leaf shoot is stored as two shared-midrib quads (4 triangles, 12 indices).
   const data=loadPack('portugal'),forest=JSON.parse(fs.readFileSync('assets/forest-scenery/portugal/manifest.json','utf8'));
   for(const p of data.manifest.prototypes){
     const source=forest.prototypes[p.id];let finestLeaves=0,finest=0,far=0;
@@ -54,7 +54,7 @@ test('Lisbon\'s trees keep every leaf at the finest cut, and a town-wide view ne
       // Two hundred metres off on a 1117-pixel-high screen, at the leaf limit the game cuts to.
       if(forestClusterIsDrawn({error:c.err,parentError:c.parentErr,lodDistance:200,parentDistance:200},1117,1.2))far+=c.triangles;
     }
-    assert.equal(finestLeaves,source.leaf.indexCount/6*4,`${p.species} ${source.cohort} lost or gained leaves in the bake`);
+    assert.equal(finestLeaves,source.leaf.indexCount/3,`${p.species} ${source.cohort} lost or gained leaves in the bake`);
     assert.ok(far>0&&far<finest*.6,`${p.species} ${source.cohort} draws ${far} of ${finest} triangles from 200 m`);
   }
 });

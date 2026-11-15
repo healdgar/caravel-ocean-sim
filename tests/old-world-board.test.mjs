@@ -8,10 +8,11 @@ import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { BAKED_BOARDS, BAKED_WORLDS, BOARD_RIVERS, BOARD_SURVEY_SIZE, BOARD_VERSION, bakedBoardAsset, bakedWorldAsset, boardGroundFits, boardGroundSurvey, boardRequest } from '../js/board-model.js';
 import { BOARD_WAY_FLOATS, boardStampTables } from '../js/board-stamp.js';
-import { BOARD_INDEX_SIZE, BOARD_STREETFRONT, BOARD_THATCHED, BOARD_WORKS, boardRoadCrossings } from '../js/old-world-board.js';
+import { BOARD_INDEX_SIZE, BOARD_STREETFRONT, BOARD_THATCHED, BOARD_WORKS, alignWaterfrontWharves, boardRoadCrossings } from '../js/old-world-board.js';
 import { CITY_BLOCK_FLOATS, CITY_TREES } from '../js/old-world-city.js';
 import { CITY_BUILDING_TYPES, CITY_THATCH_ROOF, CITY_TYPE, CITY_TYPE_SLIGHT_FROM, CITY_TYPED_FLOATS, CITY_TYPES_OVERHEAD, CITY_TYPES_SLIGHT } from '../js/old-world-buildings.js';
-import { WORKS_FENCE_M, WORKS_WHEEL } from '../js/old-world-works.js';
+import { WORKS_FENCE_M, WORKS_FENCE_POST, WORKS_FENCE_RAIL, WORKS_FENCE_STONE, WORKS_WHEEL } from '../js/old-world-works.js';
+import { TERRAIN } from '../js/wgsl/terrain.js';
 import { OLD_WORLD_LAND, OLD_WORLD_NO_TREES, OLD_WORLD_PLACES, bakedBoardFor, oldWorldCountry, registerBakedBoard } from '../js/old-world.js';
 import { openBoard } from '../scripts/board-host.mjs';
 
@@ -210,6 +211,9 @@ test('a founded board stands in the game as its own buildings, land and woods, a
   }
   assert.equal(lengths, B.fences);
   assert.ok(fenced > 0 && lengths > fenced, `${lengths} lengths of fence on ${fenced} runs`);
+  let miteredRuns = 0;
+  for (let k = 4; k < board.works.fences.length; k += 5) if (board.works.fences[k] & 4) miteredRuns++;
+  assert.equal(miteredRuns, fenced, 'every founded fence run is polyline-chained & miter-bisected in runtime.js');
   assert.ok(WORKS_FENCE_M > 2 && board.works.yards.length === B.yards);
   assert.equal(of[CITY_TYPE.FOOTBRIDGE] + of[CITY_TYPE.STONE_BRIDGE] + of[CITY_TYPE.STONE_BRIDGE_SPAN], B.bridges);
 
@@ -338,4 +342,80 @@ test('Lisbon\'s whole founded world is frozen beside its board, by the program t
   // And the page is given the world and the program that lives it, fetched when wanted and never embedded.
   const build = readFileSync(new URL('../build.mjs', import.meta.url), 'utf8');
   for (const path of [BAKED_WORLDS['lisbon:1550'], 'assets/board/game.js', 'assets/board/runtime.js']) assert.ok(build.split(`'${path}'`).length >= 3, `the build publishes ${path} and leaves it outside a downloaded page`);
+});
+
+test('waterfront wharves chain continuously along shoreline contours and roadside/hillside fences stay watertight & terrain-sheared', () => {
+  // 1. Fence & dry-stone wall architectural geometry: terminal posts on both ends (zero cantilever) & plumb stone end-caps.
+  assert.ok(WORKS_FENCE_POST && WORKS_FENCE_POST.primitives.length >= 2, 'dedicated WORKS_FENCE_POST exported');
+  const railParts = WORKS_FENCE_RAIL.primitives;
+  const railPosts = railParts.filter((p) => p.name === 'fence_post');
+  assert.ok(railPosts.some((p) => p.from[2] <= -2.48 && p.to[2] >= -2.36), 'rail fence has stout left terminal post');
+  assert.ok(railPosts.some((p) => p.from[2] <= 2.36 && p.to[2] >= 2.48), 'rail fence has stout right terminal post');
+  for (const r of railParts.filter((p) => p.name === 'fence_rail')) {
+    assert.ok(r.from[2] >= -2.50 && r.to[2] <= 2.50, 'rails mortised cleanly inside terminal posts without cantilever');
+  }
+  const stoneParts = WORKS_FENCE_STONE.primitives;
+  for (const sp of stoneParts.filter((p) => p.name.startsWith('drystone_') && p.name !== 'drystone_cope')) {
+    assert.equal(sp.topInset, undefined, 'dry-stone wall avoids 4-sided batter V-notches along Z');
+    assert.ok(sp.from[2] <= -2.53 && sp.to[2] >= 2.53, 'plumb end-caps overlap +0.08 m across joints');
+  }
+  assert.ok(stoneParts.some((p) => p.from[1] <= -0.30), 'dry-stone wall base embeds >= 0.30 m into ground');
+
+  // 2. Curved harbor/river shoreline wharf chaining (`alignWaterfrontWharves`): corner-to-corner joints & unified deck height.
+  const curvedInlandAt = (x, z) => z - 40 * Math.sin(x / 180);
+  const curvedHeightAt = (x, z) => {
+    const inl = curvedInlandAt(x, z);
+    return inl <= 0 ? inl * 0.12 : 1.35 + inl * 0.04;
+  };
+  const wharfCluster = [
+    { index: 10, place: 0, x: -28, z: 3 + 40 * Math.sin(-28 / 180), rot: 0.4, w: 7.2, d: 30 },
+    { index: 11, place: 0, x: 2, z: 4 + 40 * Math.sin(2 / 180), rot: -0.2, w: 7.2, d: 30 },
+    { index: 12, place: 0, x: 31, z: 2 + 40 * Math.sin(31 / 180), rot: 0.9, w: 7.2, d: 30 },
+  ];
+  const aligned = alignWaterfrontWharves(wharfCluster, { inlandAt: curvedInlandAt, heightAt: curvedHeightAt });
+  assert.equal(aligned.size, 3);
+  const ordered = [aligned.get(10), aligned.get(11), aligned.get(12)];
+  for (let i = 0; i < ordered.length; i++) {
+    const w = ordered[i];
+    assert.equal(w.chained, true);
+    assert.ok(w.w / 7 > 0.79 && w.w / 7 < 1.36 && w.d / 30 > 0.79 && w.d / 30 < 1.36, `wharf ${i} fits BOARD_FIT`);
+    assert.ok(Math.abs(curvedInlandAt(w.x, w.z) - curvedInlandAt(ordered[0].x, ordered[0].z)) < 2.2, 'follows shoreline contour');
+    if (i > 0) {
+      const prev = ordered[i - 1];
+      const jointGap = Math.hypot(prev.jointEnd[0] - w.jointStart[0], prev.jointEnd[1] - w.jointStart[1]);
+      assert.ok(jointGap < 1e-6, `adjacent wharves chain corner-to-corner (gap=${jointGap})`);
+      assert.equal(w.floor, prev.floor, 'chained wharves share unified level deck height');
+    }
+  }
+
+  // 3. Lisbon 1550 roadside verge preservation + hillside slope shear + cityTypeVS WGSL verification.
+  const baked = JSON.parse(readFileSync(new URL('../' + BAKED_BOARDS['lisbon:1550'], import.meta.url), 'utf8'));
+  const sN = BOARD_SURVEY_SIZE, tN = 257, heights = new Float32Array(tN * tN);
+  for (let j = 0; j < tN; j++) {
+    const sy = (j / (tN - 1)) * (sN - 1), y0 = Math.min(sN - 2, Math.floor(sy)), ty = sy - y0;
+    for (let i = 0; i < tN; i++) {
+      const sx = (i / (tN - 1)) * (sN - 1), x0 = Math.min(sN - 2, Math.floor(sx)), tx = sx - x0;
+      heights[j * tN + i] = (baked.survey[y0 * sN + x0] * (1 - tx) + baked.survey[y0 * sN + x0 + 1] * tx) * (1 - ty)
+        + (baked.survey[(y0 + 1) * sN + x0] * (1 - tx) + baked.survey[(y0 + 1) * sN + x0 + 1] * tx) * ty;
+    }
+  }
+  registerBakedBoard(baked);
+  const lisbonReg = { ...baked.region, size: tN, biomeSize: 128, albedoSize: 256, year: 1550 };
+  const lisbonCountry = oldWorldCountry(lisbonReg, heights, { center: { x: lisbonReg.x, z: lisbonReg.z }, clearRadius: 120, instances: [] });
+  const lPlan = lisbonCountry.plan;
+  // Previously 99.38% of Lisbon's 5,185 roadside fences were killed; now contiguous roadside & field runs stand intact.
+  assert.ok(lPlan.stats.built.fences > 8000, `Lisbon roadside + field fence bays preserved: ${lPlan.stats.built.fences}`);
+  let shearedHillsideBays = 0;
+  for (let i = 0; i < lPlan.typedCount; i++) {
+    const t = lPlan.typedTypes[i];
+    if (t !== CITY_TYPE.FENCE_RAIL && t !== CITY_TYPE.FENCE_STONE) continue;
+    const at = lPlan.typed.subarray(i * CITY_TYPED_FLOATS, (i + 1) * CITY_TYPED_FLOATS);
+    assert.ok(at[7] < -50, `fence bay ${i} encodes slope shear in shape.w (${at[7]})`);
+    const dzSlope = at[7] + 100;
+    assert.ok(Math.abs(dzSlope) <= 0.85 + 1e-5);
+    if (Math.abs(dzSlope) > 0.04) shearedHillsideBays++;
+  }
+  assert.ok(shearedHillsideBays > 500, `hillside fence bays sheared to local ground slope: ${shearedHillsideBays}`);
+  assert.match(TERRAIN, /let\s+py\s*=\s*p\.y\s*\+\s*p\.z\s*\*\s*dzSlope/);
+  assert.match(TERRAIN, /inverseSqrt\(keepProb\)/);
 });

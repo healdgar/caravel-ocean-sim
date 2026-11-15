@@ -649,20 +649,20 @@ function makeCountry(region, heights, port) {
   const NO_TREES = OLD_WORLD_NO_TREES;
   const TENDED = [
     NO_TREES,
-    { spacing: 12, height: [5, 3.5], scale: [0.42, 0.2], species: ['maple', 'birch', 'elm'], cohort: 'veteran', tint: [1, 1, 0.94] },
-    { spacing: 10.5, height: [5.5, 2.5], scale: [0.55, 0.2], species: ['oak'], cohort: 'veteran', tint: [0.86, 0.94, 0.9] },
+    { spacing: 12, height: [5.2, 3.4], scale: [0.55, 0.25], species: ['birch'], cohort: 'canopy', tint: [1, 1, 0.94] },
+    { spacing: 10.5, height: [10.0, 3.8], scale: [0.58, 0.22], species: ['oak'], cohort: 'canopy', tint: [0.86, 0.94, 0.9] },
     NO_TREES, NO_TREES, NO_TREES,
-    { spacing: 48, height: [10, 7], scale: [0.82, 0.42], species: ['oak', 'elm'], cohort: 'veteran', tint: [0.94, 0.98, 0.9] },
-    { spacing: 36, height: [5.5, 4.5], scale: [0.48, 0.3], species: ['oak', 'birch', 'chestnut'], cohort: 'canopy', tint: [0.92, 0.96, 0.88] },
+    { spacing: 48, height: [13.5, 7.5], scale: [0.82, 0.42], species: ['oak', 'elm'], cohort: 'veteran', tint: [0.94, 0.98, 0.9] },
+    { spacing: 36, height: [5.2, 3.6], scale: [0.55, 0.28], species: ['birch'], cohort: 'canopy', tint: [0.92, 0.96, 0.88] },
     null,
   ];
-  const WOOD_EDGE = { spacing: 6.2, height: [5.5, 6.0], scale: [0.46, 0.34], species: ['birch', 'oak', 'maple', 'chestnut'], cohort: 'canopy', tint: [0.94, 0.99, 0.9] };
-  const HEDGEROW = { spacing: 10, height: [9, 7], scale: [0.7, 0.4], species: ['elm', 'chestnut', 'maple'], cohort: 'veteran', tint: [0.96, 1, 0.92] };
-  const ROADSIDE = { spacing: 11, height: [11, 8], scale: [0.85, 0.4], species: ['elm', 'maple', 'oak'], cohort: 'veteran', tint: [0.96, 1, 0.92] };
+  const WOOD_EDGE = { spacing: 6.2, height: [10.2, 6.0], scale: [0.56, 0.32], species: ['birch', 'oak', 'maple', 'chestnut'], cohort: 'canopy', tint: [0.94, 0.99, 0.9] };
+  const HEDGEROW = { spacing: 10, height: [11.5, 6.0], scale: [0.7, 0.35], species: ['elm', 'chestnut', 'maple'], cohort: 'canopy', tint: [0.96, 1, 0.92] };
+  const ROADSIDE = { spacing: 11, height: [14.0, 8.0], scale: [0.85, 0.38], species: ['elm', 'maple', 'oak'], cohort: 'veteran', tint: [0.96, 1, 0.92] };
   // In the town: a ring of shade trees round a square, a walled garden's orchard, a tree in a yard.
-  const SQUARE_TREES = { spacing: 9, height: [9, 5], scale: [0.6, 0.25], species: ['elm', 'maple'], cohort: 'veteran', tint: [0.96, 1, 0.92] };
-  const PARK_TREES = { spacing: 8, height: [7, 6], scale: [0.5, 0.3], species: ['maple', 'birch', 'elm', 'oak'], cohort: 'veteran', tint: [0.94, 1, 0.9] };
-  const YARD_TREES = { spacing: 13, height: [4.5, 3], scale: [0.36, 0.2], species: ['maple', 'birch'], cohort: 'veteran', tint: [1, 1, 0.94] };
+  const SQUARE_TREES = { spacing: 9, height: [11.5, 5.0], scale: [0.64, 0.25], species: ['maple', 'oak', 'elm'], cohort: 'canopy', tint: [0.96, 1, 0.92] };
+  const PARK_TREES = { spacing: 8, height: [10.5, 5.5], scale: [0.58, 0.28], species: ['maple', 'birch', 'oak', 'chestnut'], cohort: 'canopy', tint: [0.94, 1, 0.9] };
+  const YARD_TREES = { spacing: 13, height: [5.0, 3.2], scale: [0.55, 0.25], species: ['birch'], cohort: 'canopy', tint: [1, 1, 0.94] };
   const treesAt = (x, z) => {
     if (stood && fieldAt(inland, grid, x, z) < 4) return NO_TREES;
     if (town && fieldAt(town.urban, grid, x, z) >= 0.5) {

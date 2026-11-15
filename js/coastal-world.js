@@ -266,6 +266,7 @@ export const SPANISH_MAIN_1550_REGIONS = Object.freeze({
     settlementKind: 'colonial-port',
     hasColonialPort: true,
     shoreBearing: 112,
+    seawardBearing: 292,
     peakElevationMetres: 870,
     span: 8192,
     size: 129,
@@ -291,6 +292,7 @@ export const SPANISH_MAIN_1550_REGIONS = Object.freeze({
     settlementKind: 'colonial-port',
     hasColonialPort: true,
     shoreBearing: 82,
+    seawardBearing: 255,
     peakElevationMetres: 165,
     span: 8192,
     size: 129,
@@ -316,6 +318,7 @@ export const SPANISH_MAIN_1550_REGIONS = Object.freeze({
     settlementKind: 'colonial-port',
     hasColonialPort: true,
     shoreBearing: 168,
+    seawardBearing: 350,
     peakElevationMetres: 310,
     span: 8192,
     size: 129,
@@ -341,6 +344,7 @@ export const SPANISH_MAIN_1550_REGIONS = Object.freeze({
     settlementKind: 'colonial-port',
     hasColonialPort: true,
     shoreBearing: 15,
+    seawardBearing: 175,
     peakElevationMetres: 210,
     span: 8192,
     size: 129,
@@ -366,6 +370,7 @@ export const SPANISH_MAIN_1550_REGIONS = Object.freeze({
     settlementKind: 'colonial-port',
     hasColonialPort: true,
     shoreBearing: 145,
+    seawardBearing: 345,
     peakElevationMetres: 140,
     span: 8192,
     size: 129,
@@ -391,6 +396,7 @@ export const SPANISH_MAIN_1550_REGIONS = Object.freeze({
     settlementKind: 'colonial-port',
     hasColonialPort: true,
     shoreBearing: 132,
+    seawardBearing: 15,
     peakElevationMetres: 260,
     span: 8192,
     size: 129,
@@ -416,6 +422,7 @@ export const SPANISH_MAIN_1550_REGIONS = Object.freeze({
     settlementKind: 'colonial-port',
     hasColonialPort: true,
     shoreBearing: 355,
+    seawardBearing: 245,
     peakElevationMetres: 195,
     span: 8192,
     size: 129,
@@ -498,40 +505,80 @@ export function resolveColonialEra(yearOrId = 1550) {
   return Object.freeze({ ...fallback, year: y });
 }
 
+export const OLD_WORLD_SEA_BEARINGS = Object.freeze({
+  lisbon: 245,
+  lisboa: 245,
+  seville: 215,
+  sevilla: 215,
+  'cadiz-sanlucar': 265,
+  'palos-huelva': 215,
+  porto: 265,
+  'la-coruna': 25,
+  antwerp: 295,
+  antwerpen: 295,
+  azores: 195,
+  angra: 195,
+  madeira: 185,
+  funchal: 185,
+  'las-palmas': 80,
+  tenerife: 120,
+  'ribeira-grande': 215,
+  ceuta: 45,
+  saojorge: 165,
+  'sao-jorge': 165,
+  'sao-jorge-da-mina': 165,
+  elmina: 165,
+  goa: 255,
+  malacca: 225,
+  nagasaki: 225,
+  cartagena: 255,
+  havana: 345,
+  veracruz: 65,
+  'santo-domingo': 175,
+  santodomingo: 175,
+  'san-juan': 15,
+  sanjuan: 15,
+  'nombre-de-dios': 350,
+  nombre: 350,
+  saba: 292,
+});
+
 // Gazetteer of c. 1550 colonial and Old World maritime ports.
 // Landfalls outside colonized ports at a given simulation year generate wilderness anchorages.
+// Note: `shoreBearing` is the landward harbor-approach compass bearing (water -> shore) used by `coastalFrame`;
+// `seawardBearing` is the regional open-ocean / estuary-mouth bearing (degrees clockwise from North).
 export const HISTORICAL_1550_PORTS = Object.freeze([
-  Object.freeze({ id: 'saba', name: 'Saba · Wells Bay', latitude: 17.635, longitude: -63.238, foundedYear: 1540, crown: 'spain', baseTier: 1 }),
-  Object.freeze({ id: 'cartagena', name: 'Cartagena de Indias', latitude: 10.423, longitude: -75.548, foundedYear: 1533, fortProgramYear: 1586, crown: 'spain', baseTier: 3 }),
-  Object.freeze({ id: 'nombre-de-dios', name: 'Nombre de Dios', latitude: 9.579, longitude: -79.476, foundedYear: 1510, declinedYear: 1597, supersededBy: 'portobelo', crown: 'spain', baseTier: 2 }),
-  Object.freeze({ id: 'santo-domingo', name: 'Santo Domingo', latitude: 18.472, longitude: -69.883, foundedYear: 1496, fortProgramYear: 1540, crown: 'spain', baseTier: 3 }),
-  Object.freeze({ id: 'havana', name: 'San Cristóbal de La Habana', latitude: 23.141, longitude: -82.352, foundedYear: 1519, fortProgramYear: 1589, crown: 'spain', baseTier: 3 }),
-  Object.freeze({ id: 'san-juan', name: 'San Juan de Puerto Rico', latitude: 18.468, longitude: -66.118, foundedYear: 1521, fortProgramYear: 1539, crown: 'spain', baseTier: 3 }),
-  Object.freeze({ id: 'veracruz', name: 'San Juan de Ulúa · Veracruz', latitude: 19.209, longitude: -96.131, foundedYear: 1519, fortProgramYear: 1590, crown: 'spain', baseTier: 3 }),
-  Object.freeze({ id: 'campeche', name: 'San Francisco de Campeche', latitude: 19.845, longitude: -90.537, foundedYear: 1540, fortProgramYear: 1656, crown: 'spain', baseTier: 2 }),
-  Object.freeze({ id: 'santa-marta', name: 'Santa Marta', latitude: 11.241, longitude: -74.211, foundedYear: 1525, crown: 'spain', baseTier: 2 }),
-  Object.freeze({ id: 'cumana', name: 'Cumaná · Nueva Cádiz', latitude: 10.464, longitude: -64.177, foundedYear: 1515, crown: 'spain', baseTier: 2 }),
-  Object.freeze({ id: 'coro', name: 'Santa Ana de Coro · La Vela', latitude: 11.456, longitude: -69.569, foundedYear: 1527, crown: 'spain', baseTier: 2 }),
-  Object.freeze({ id: 'panama-viejo', name: 'Nuestra Señora de la Asunción de Panamá', latitude: 9.006, longitude: -79.485, foundedYear: 1519, sackedYear: 1671, rebuiltYear: 1673, crown: 'spain', baseTier: 3 }),
-  Object.freeze({ id: 'acapulco', name: 'Acapulco', latitude: 16.849, longitude: -99.908, foundedYear: 1550, fortProgramYear: 1615, crown: 'spain', baseTier: 2 }),
-  Object.freeze({ id: 'santiago-de-cuba', name: 'Santiago de Cuba', latitude: 20.021, longitude: -75.829, foundedYear: 1515, fortProgramYear: 1638, crown: 'spain', baseTier: 2 }),
-  Object.freeze({ id: 'trujillo', name: 'Trujillo', latitude: 15.918, longitude: -85.954, foundedYear: 1524, crown: 'spain', baseTier: 2 }),
-  Object.freeze({ id: 'callao', name: 'El Callao · Ciudad de los Reyes', latitude: -12.056, longitude: -77.148, foundedYear: 1537, fortProgramYear: 1640, crown: 'spain', baseTier: 3 }),
-  Object.freeze({ id: 'salvador-da-bahia', name: 'São Salvador da Bahia de Todos os Santos', latitude: -12.971, longitude: -38.511, foundedYear: 1549, fortProgramYear: 1598, crown: 'portugal', baseTier: 3 }),
-  Object.freeze({ id: 'sao-vicente', name: 'São Vicente · Santos', latitude: -23.961, longitude: -46.388, foundedYear: 1532, crown: 'portugal', baseTier: 2 }),
-  Object.freeze({ id: 'olinda', name: 'Olinda · Recife', latitude: -8.012, longitude: -34.851, foundedYear: 1535, fortProgramYear: 1630, crown: 'portugal', baseTier: 3 }),
-  Object.freeze({ id: 'cadiz-sanlucar', name: 'Cádiz · Sanlúcar de Barrameda', latitude: 36.65, longitude: -6.32, foundedYear: 1264, fortProgramYear: 1596, crown: 'spain', baseTier: 3 }),
-  Object.freeze({ id: 'palos-huelva', name: 'Palos de la Frontera · Huelva', latitude: 37.228, longitude: -6.893, foundedYear: 1322, crown: 'spain', baseTier: 2 }),
-  Object.freeze({ id: 'lisbon', name: 'Lisbon · Tagus Estuary', latitude: 38.707, longitude: -9.136, foundedYear: 1147, fortProgramYear: 1515, crown: 'portugal', baseTier: 4 }),
-  Object.freeze({ id: 'la-coruna', name: 'La Coruña', latitude: 43.371, longitude: -8.396, foundedYear: 1208, fortProgramYear: 1589, crown: 'spain', baseTier: 3 }),
-  Object.freeze({ id: 'las-palmas', name: 'Las Palmas de Gran Canaria', latitude: 28.124, longitude: -15.43, foundedYear: 1478, crown: 'spain', baseTier: 2 }),
-  Object.freeze({ id: 'tenerife', name: 'Santa Cruz de Tenerife', latitude: 28.463, longitude: -16.251, foundedYear: 1494, crown: 'spain', baseTier: 2 }),
-  Object.freeze({ id: 'funchal', name: 'Funchal · Madeira', latitude: 32.647, longitude: -16.908, foundedYear: 1424, crown: 'portugal', baseTier: 2 }),
-  Object.freeze({ id: 'angra', name: 'Angra do Heroísmo · Terceira', latitude: 38.655, longitude: -27.218, foundedYear: 1450, fortProgramYear: 1582, crown: 'portugal', baseTier: 3 }),
-  Object.freeze({ id: 'ribeira-grande', name: 'Ribeira Grande · Santiago', latitude: 14.916, longitude: -23.605, foundedYear: 1462, fortProgramYear: 1587, crown: 'portugal', baseTier: 2 }),
-  Object.freeze({ id: 'goa', name: 'Velha Goa', latitude: 15.498, longitude: 73.828, foundedYear: 1510, fortProgramYear: 1595, crown: 'portugal', baseTier: 3 }),
-  Object.freeze({ id: 'malacca', name: 'Malacca', latitude: 2.193, longitude: 102.249, foundedYear: 1511, fortProgramYear: 1641, crown: 'portugal', baseTier: 3 }),
-  Object.freeze({ id: 'nagasaki', name: 'Nagasaki Bay', latitude: 32.75, longitude: 129.867, foundedYear: 1543, fortProgramYear: 1571, crown: 'portugal', baseTier: 2 }),
+  Object.freeze({ id: 'saba', name: 'Saba · Wells Bay', latitude: 17.635, longitude: -63.238, shoreBearing: 112, seawardBearing: 292, coastalArchetype: 'volcanic-island', foundedYear: 1540, crown: 'spain', baseTier: 1 }),
+  Object.freeze({ id: 'cartagena', name: 'Cartagena de Indias', latitude: 10.423, longitude: -75.548, shoreBearing: 82, seawardBearing: 255, coastalArchetype: 'sheltered-bay', foundedYear: 1533, fortProgramYear: 1586, crown: 'spain', baseTier: 3 }),
+  Object.freeze({ id: 'nombre-de-dios', name: 'Nombre de Dios', latitude: 9.579, longitude: -79.476, shoreBearing: 168, seawardBearing: 350, coastalArchetype: 'estuary-bay', foundedYear: 1510, declinedYear: 1597, supersededBy: 'portobelo', crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'santo-domingo', name: 'Santo Domingo', latitude: 18.472, longitude: -69.883, shoreBearing: 15, seawardBearing: 175, coastalArchetype: 'river-mouth', foundedYear: 1496, fortProgramYear: 1540, crown: 'spain', baseTier: 3 }),
+  Object.freeze({ id: 'havana', name: 'San Cristóbal de La Habana', latitude: 23.141, longitude: -82.352, shoreBearing: 145, seawardBearing: 345, coastalArchetype: 'harbor-channel', foundedYear: 1519, fortProgramYear: 1589, crown: 'spain', baseTier: 3 }),
+  Object.freeze({ id: 'san-juan', name: 'San Juan de Puerto Rico', latitude: 18.468, longitude: -66.118, shoreBearing: 132, seawardBearing: 15, coastalArchetype: 'headland-bay', foundedYear: 1521, fortProgramYear: 1539, crown: 'spain', baseTier: 3 }),
+  Object.freeze({ id: 'veracruz', name: 'San Juan de Ulúa · Veracruz', latitude: 19.209, longitude: -96.131, shoreBearing: 245, seawardBearing: 65, coastalArchetype: 'sheltered-bay', foundedYear: 1519, fortProgramYear: 1590, crown: 'spain', baseTier: 3 }),
+  Object.freeze({ id: 'campeche', name: 'San Francisco de Campeche', latitude: 19.845, longitude: -90.537, shoreBearing: 125, seawardBearing: 305, coastalArchetype: 'sheltered-bay', foundedYear: 1540, fortProgramYear: 1656, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'santa-marta', name: 'Santa Marta', latitude: 11.241, longitude: -74.211, shoreBearing: 95, seawardBearing: 275, coastalArchetype: 'headland-bay', foundedYear: 1525, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'cumana', name: 'Cumaná · Nueva Cádiz', latitude: 10.464, longitude: -64.177, shoreBearing: 135, seawardBearing: 315, coastalArchetype: 'estuary-bay', foundedYear: 1515, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'coro', name: 'Santa Ana de Coro · La Vela', latitude: 11.456, longitude: -69.569, shoreBearing: 200, seawardBearing: 20, coastalArchetype: 'sheltered-bay', foundedYear: 1527, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'panama-viejo', name: 'Nuestra Señora de la Asunción de Panamá', latitude: 9.006, longitude: -79.485, shoreBearing: 335, seawardBearing: 155, coastalArchetype: 'estuary-bay', foundedYear: 1519, sackedYear: 1671, rebuiltYear: 1673, crown: 'spain', baseTier: 3 }),
+  Object.freeze({ id: 'acapulco', name: 'Acapulco', latitude: 16.849, longitude: -99.908, shoreBearing: 350, seawardBearing: 195, coastalArchetype: 'sheltered-bay', foundedYear: 1550, fortProgramYear: 1615, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'santiago-de-cuba', name: 'Santiago de Cuba', latitude: 20.021, longitude: -75.829, shoreBearing: 10, seawardBearing: 190, coastalArchetype: 'harbor-channel', foundedYear: 1515, fortProgramYear: 1638, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'trujillo', name: 'Trujillo', latitude: 15.918, longitude: -85.954, shoreBearing: 155, seawardBearing: 335, coastalArchetype: 'sheltered-bay', foundedYear: 1524, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'callao', name: 'El Callao · Ciudad de los Reyes', latitude: -12.056, longitude: -77.148, shoreBearing: 80, seawardBearing: 260, coastalArchetype: 'headland-bay', foundedYear: 1537, fortProgramYear: 1640, crown: 'spain', baseTier: 3 }),
+  Object.freeze({ id: 'salvador-da-bahia', name: 'São Salvador da Bahia de Todos os Santos', latitude: -12.971, longitude: -38.511, shoreBearing: 95, seawardBearing: 245, coastalArchetype: 'sheltered-bay', foundedYear: 1549, fortProgramYear: 1598, crown: 'portugal', baseTier: 3 }),
+  Object.freeze({ id: 'sao-vicente', name: 'São Vicente · Santos', latitude: -23.961, longitude: -46.388, shoreBearing: 340, seawardBearing: 160, coastalArchetype: 'estuary-bay', foundedYear: 1532, crown: 'portugal', baseTier: 2 }),
+  Object.freeze({ id: 'olinda', name: 'Olinda · Recife', latitude: -8.012, longitude: -34.851, shoreBearing: 280, seawardBearing: 100, coastalArchetype: 'headland-bay', foundedYear: 1535, fortProgramYear: 1630, crown: 'portugal', baseTier: 3 }),
+  Object.freeze({ id: 'cadiz-sanlucar', name: 'Cádiz · Sanlúcar de Barrameda', latitude: 36.65, longitude: -6.32, shoreBearing: 115, seawardBearing: 265, coastalArchetype: 'estuary-bay', foundedYear: 1264, fortProgramYear: 1596, crown: 'spain', baseTier: 3 }),
+  Object.freeze({ id: 'palos-huelva', name: 'Palos de la Frontera · Huelva', latitude: 37.228, longitude: -6.893, shoreBearing: 35, seawardBearing: 215, coastalArchetype: 'river-mouth', foundedYear: 1322, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'lisbon', name: 'Lisbon · Tagus Estuary', latitude: 38.707, longitude: -9.136, shoreBearing: 355, seawardBearing: 245, coastalArchetype: 'estuary-bay', foundedYear: 1147, fortProgramYear: 1515, crown: 'portugal', baseTier: 4 }),
+  Object.freeze({ id: 'la-coruna', name: 'La Coruña', latitude: 43.371, longitude: -8.396, shoreBearing: 220, seawardBearing: 25, coastalArchetype: 'headland-bay', foundedYear: 1208, fortProgramYear: 1589, crown: 'spain', baseTier: 3 }),
+  Object.freeze({ id: 'las-palmas', name: 'Las Palmas de Gran Canaria', latitude: 28.124, longitude: -15.43, shoreBearing: 260, seawardBearing: 80, coastalArchetype: 'headland-bay', foundedYear: 1478, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'tenerife', name: 'Santa Cruz de Tenerife', latitude: 28.463, longitude: -16.251, shoreBearing: 300, seawardBearing: 120, coastalArchetype: 'volcanic-island', foundedYear: 1494, crown: 'spain', baseTier: 2 }),
+  Object.freeze({ id: 'funchal', name: 'Funchal · Madeira', latitude: 32.647, longitude: -16.908, shoreBearing: 5, seawardBearing: 185, coastalArchetype: 'volcanic-island', foundedYear: 1424, crown: 'portugal', baseTier: 2 }),
+  Object.freeze({ id: 'angra', name: 'Angra do Heroísmo · Terceira', latitude: 38.655, longitude: -27.218, shoreBearing: 15, seawardBearing: 195, coastalArchetype: 'volcanic-island', foundedYear: 1450, fortProgramYear: 1582, crown: 'portugal', baseTier: 3 }),
+  Object.freeze({ id: 'ribeira-grande', name: 'Ribeira Grande · Santiago', latitude: 14.916, longitude: -23.605, shoreBearing: 35, seawardBearing: 215, coastalArchetype: 'volcanic-island', foundedYear: 1462, fortProgramYear: 1587, crown: 'portugal', baseTier: 2 }),
+  Object.freeze({ id: 'goa', name: 'Velha Goa', latitude: 15.498, longitude: 73.828, shoreBearing: 75, seawardBearing: 255, coastalArchetype: 'river-mouth', foundedYear: 1510, fortProgramYear: 1595, crown: 'portugal', baseTier: 3 }),
+  Object.freeze({ id: 'malacca', name: 'Malacca', latitude: 2.193, longitude: 102.249, shoreBearing: 45, seawardBearing: 225, coastalArchetype: 'river-mouth', foundedYear: 1511, fortProgramYear: 1641, crown: 'portugal', baseTier: 3 }),
+  Object.freeze({ id: 'nagasaki', name: 'Nagasaki Bay', latitude: 32.75, longitude: 129.867, shoreBearing: 45, seawardBearing: 225, coastalArchetype: 'harbor-channel', foundedYear: 1543, fortProgramYear: 1571, crown: 'portugal', baseTier: 2 }),
 ]);
 
 // Complete chronological gazetteer of colonial ports from 1492 through the 1680s (1550–1689).
@@ -1776,6 +1823,67 @@ export function syncPortInstancesToTerrain(portOrInstances, heights, region, { g
   const step = span / Math.max(1, n - 1);
 
   if (gradePads) {
+    // Grade continuous seawall landward aprons ([0..+18 m] inland >= 2.12 m so zero water lagoons get trapped behind quays)
+    // and dredge seaward berth faces ([-8..-0.6 m] in front <= -3.2 m so ships moor cleanly against the vertical ashlar wall).
+    const portObj = Array.isArray(portOrInstances) ? null : portOrInstances;
+    const berthGuards = [portObj?.dockBerth, portObj?.berth].filter((b) => b && Number.isFinite(b.x) && Number.isFinite(b.z));
+    for (const inst of instances) {
+      if (inst.prefabId !== 'stone_quay_seawall') continue;
+      const cosY = Math.cos(inst.yaw ?? 0);
+      const sinY = Math.sin(inst.yaw ?? 0);
+      const hw = (inst.width ?? 24) * 0.5;
+      const hl = (inst.length ?? 12) * 0.5;
+      const latPad = Math.max(5.0, step * 0.55);
+      const apronCore = Math.max(18.0, step * 1.02);
+      const apronEnd = apronCore + Math.max(10.0, step * 0.5);
+      const dredgeCore = Math.max(10.0, step * 1.05);
+      const dredgeEnd = dredgeCore + Math.max(4.0, step * 0.4);
+      const maxReach = Math.hypot(hw + latPad + 2.0, hl + Math.max(apronEnd, dredgeEnd) + 2.0);
+      const i0 = Math.max(0, Math.floor(((inst.x - maxReach - region.x) / span + 0.5) * (n - 1)));
+      const i1 = Math.min(n - 1, Math.ceil(((inst.x + maxReach - region.x) / span + 0.5) * (n - 1)));
+      const j0 = Math.max(0, Math.floor(((inst.z - maxReach - region.z) / span + 0.5) * (n - 1)));
+      const j1 = Math.min(n - 1, Math.ceil(((inst.z + maxReach - region.z) / span + 0.5) * (n - 1)));
+      for (let j = j0; j <= j1; j++) {
+        const wz = region.z + (j / (n - 1) - 0.5) * span;
+        for (let i = i0; i <= i1; i++) {
+          const wx = region.x + (i / (n - 1) - 0.5) * span;
+          const dx = wx - inst.x;
+          const dz = wz - inst.z;
+          const lxSigned = dx * cosY - dz * sinY;
+          const lzSigned = dx * sinY + dz * cosY;
+          const lxAbs = Math.abs(lxSigned);
+          if (lxAbs > hw + latPad) continue;
+          const sFromFace = lzSigned + hl; // 0 at seaward ashlar wall face, +inland behind wall, -seaward in front
+          const k = j * n + i;
+          const tx = Math.max(0, Math.min(1, 1 - Math.max(0, lxAbs - (hw + 0.5)) / Math.max(4.5, latPad - 0.5)));
+          const sx = tx * tx * (3 - 2 * tx);
+          const apronCoreEnd = 2 * hl + apronCore;
+          const apronFullEnd = 2 * hl + apronEnd;
+          if (sFromFace >= hl && sFromFace <= apronFullEnd) {
+            if (berthGuards.some((b) => Math.hypot(wx - b.x, wz - b.z) < 25) && heights[k] < -0.5) continue;
+            const tz = sFromFace <= apronCoreEnd ? 1.0 : Math.max(0, Math.min(1, 1 - (sFromFace - apronCoreEnd) / (apronFullEnd - apronCoreEnd)));
+            const wApron = sx * (tz * tz * (3 - 2 * tz));
+            const targetApron = 2.16;
+            if (heights[k] < targetApron) {
+              heights[k] = heights[k] * (1 - wApron) + targetApron * wApron;
+            }
+          } else if (sFromFace > -0.5 && sFromFace < hl) {
+            const rampT = (sFromFace + 0.5) / Math.max(1.0, hl + 0.5);
+            const targetCaisson = -1.8 + (2.16 - -1.8) * rampT;
+            heights[k] = heights[k] * (1 - sx) + targetCaisson * sx;
+          } else if (sFromFace >= -dredgeEnd && sFromFace <= -0.5) {
+            if (heights[k] > 1.25) continue;
+            const tz = sFromFace >= -dredgeCore ? 1.0 : Math.max(0, Math.min(1, 1 - (-dredgeCore - sFromFace) / (dredgeEnd - dredgeCore)));
+            const wDredge = sx * (tz * tz * (3 - 2 * tz));
+            const targetDepth = -3.65;
+            if (heights[k] > targetDepth) {
+              heights[k] = heights[k] * (1 - wDredge) + targetDepth * wDredge;
+            }
+          }
+        }
+      }
+    }
+
     // A palisade fort keeps the level it was sited at. Its yard goes last, so its houses' pads cannot lift it.
     const levelledLast = (inst) => inst.prefabId === 'english_triangular_palisade_fort';
     for (const inst of [...instances.filter((i) => !levelledLast(i)), ...instances.filter(levelledLast)]) {
@@ -1838,7 +1946,7 @@ export function syncPortInstancesToTerrain(portOrInstances, heights, region, { g
           const lz = Math.abs(lzSigned);
           if (lx > outerX || lz > outerZ) continue;
           let wBlend;
-          if (inst.trace) {
+          if (inst.trace?.outline) {
             // A fort drawn to the ground levels only what is under it, and the land beyond keeps its shape.
             const t = Math.max(0, Math.min(1, 1 + (depthInOutline(inst.trace.outline, lxSigned, lzSigned) - step) / feather));
             wBlend = t * t * (3 - 2 * t);
@@ -1866,9 +1974,9 @@ export function syncPortInstancesToTerrain(portOrInstances, heights, region, { g
       inst.slopeX = 0;
       inst.slopeZ = 0;
       if (inst.prefabId === 'stone_quay_seawall') {
-        inst.y = Math.min(0.45, inst.y ?? 0.40);
+        inst.y = inst.isQuayRibbon ? 0 : Math.min(0.45, inst.y ?? 0.40);
       }
-      inst.baseY = inst.y ?? 0;
+      inst.baseY = inst.baseY ?? inst.y ?? 0;
       continue;
     }
     const cosY = inst._cosNegYaw;
@@ -2533,10 +2641,34 @@ export function resolveGlobalCoastalRegion(spec = 'cartagena') {
         : 'wilderness-anchorage'
   );
   const ringBearing = coastalInferBearingFromRings(latitude, longitude, spec.coastlineRings);
-  const presetBearing = colPortById?.shoreBearing ?? matchedHistoricalPort?.shoreBearing ?? (isSabaIsland ? 315 : null);
+  const candidateId = spec.id ?? colPortById?.id ?? matchedHistoricalPort?.id ?? null;
+  const nearOldCity = oldWorldCityNear(latitude, longitude, 28);
+  const oldCityKey = nearOldCity?.name
+    ? nearOldCity.name
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '')
+    : null;
+  const recordedSeaward =
+    (candidateId ? fortRecordsFor(candidateId, 1800).seaward : null) ??
+    (candidateId && OLD_WORLD_SEA_BEARINGS[candidateId] !== undefined ? OLD_WORLD_SEA_BEARINGS[candidateId] : null) ??
+    (oldCityKey && OLD_WORLD_SEA_BEARINGS[oldCityKey] !== undefined ? OLD_WORLD_SEA_BEARINGS[oldCityKey] : null);
+  const presetBearing =
+    colPortById?.shoreBearing ??
+    matchedHistoricalPort?.shoreBearing ??
+    (recordedSeaward !== null ? (recordedSeaward + 180) % 360 : null) ??
+    (isSabaIsland ? 315 : null);
   const shoreBearing = Number.isFinite(spec.shoreBearing)
     ? ((spec.shoreBearing % 360) + 360) % 360
     : ringBearing ?? presetBearing ?? Math.round(rand() * 359);
+  const seawardBearing = Number.isFinite(spec.seawardBearing)
+    ? ((spec.seawardBearing % 360) + 360) % 360
+    : colPortById?.seawardBearing ??
+      matchedHistoricalPort?.seawardBearing ??
+      recordedSeaward ??
+      ((shoreBearing + 180) % 360);
   const peakElevationMetres = Number.isFinite(spec.peakElevationMetres)
     ? Math.max(40, Math.min(900, spec.peakElevationMetres))
     : isSabaIsland
@@ -2594,6 +2726,7 @@ export function resolveGlobalCoastalRegion(spec = 'cartagena') {
     settlementKind,
     hasColonialPort,
     shoreBearing,
+    seawardBearing,
     peakElevationMetres,
     span,
     size,
@@ -4217,9 +4350,10 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
   };
   // Nobody builds in front of a fort's guns: the town keeps out of the ground between it and the water.
   const inFieldOfFire = (x, z, yaw, width, length) => instances.some((fort) => {
-    if (!fort.trace && !enclosurePlan(fort)?.gate) return false;
-    const field = fort.trace ? FIELD_OF_FIRE_M : FIELD_OF_FIRE_M * 0.5, reach = fort.length * 0.5 + field * 0.5;
-    return obbsMeet(x, z, yaw, width, length, { x: fort.x - Math.sin(fort.yaw) * reach, z: fort.z - Math.cos(fort.yaw) * reach, yaw: fort.yaw, width: fort.trace ? fort.width + 12 : fort.width * 0.8, length: field });
+    const hasFortTrace = Boolean(fort.trace?.outline);
+    if (!hasFortTrace && !enclosurePlan(fort)?.gate) return false;
+    const field = hasFortTrace ? FIELD_OF_FIRE_M : FIELD_OF_FIRE_M * 0.5, reach = fort.length * 0.5 + field * 0.5;
+    return obbsMeet(x, z, yaw, width, length, { x: fort.x - Math.sin(fort.yaw) * reach, z: fort.z - Math.cos(fort.yaw) * reach, yaw: fort.yaw, width: hasFortTrace ? fort.width + 12 : fort.width * 0.8, length: field });
   });
   // The layout below is written against a straight shore, and real coasts curve. So each prefab says
   // what it must stand on, and takes the nearest place that gives it that. One with no such place
@@ -4276,7 +4410,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
         if (root >= PIER_ROOT_LOWEST_M && root <= PIER_ROOT_HIGHEST_M && head <= PIER_HEAD_HIGHEST_M) {
           const x = wanted.x + axisX * slide, z = wanted.z + axisZ * slide;
           // Two piers never share water: a ship could lie at neither.
-          if (footprintFitsEnclosures(instances, x, z, yaw, width, length) && !instances.some((other) => (other.prefabId === 'timber_mole_pier' || other.trace) && obbsMeet(x, z, yaw, width, length, other, PIER_APART_M))) return { x, z };
+          if (footprintFitsEnclosures(instances, x, z, yaw, width, length) && !instances.some((other) => (other.prefabId === 'timber_mole_pier' || other.trace?.outline) && obbsMeet(x, z, yaw, width, length, other, PIER_APART_M))) return { x, z };
         }
       }
     }
@@ -4339,7 +4473,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       ? fortLocalToWorld(homeFort, overrides.fortSlot[0], overrides.fortSlot[1])
       : worldFromCoastalFrame(region, bestShoreAlong + alongOffset, bestShoreInland + inlandOffset));
     const isWaterfrontStructure = prefabId === 'stone_arch_bridge' || prefabId === 'timber_mole_pier' || prefabId === 'stone_quay_seawall';
-    const fixedPositionRequested = overrides?.exactY !== undefined || overrides?.trace;
+    const fixedPositionRequested = Boolean(overrides?.lockSite || overrides?.exactY !== undefined || overrides?.trace);
     const collidesRiver = !isWaterfrontStructure && portRiverCorridor.hits(wanted.x, wanted.z, yaw, instWidth, instLength, 4.0);
     const site = fixedPositionRequested && !collidesRiver
       ? wanted
@@ -4349,12 +4483,13 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     const pos = site;
     const groundY = terrainSurfaceSample(heights, pos.x, pos.z, region);
     const y = overrides?.exactY !== undefined
-      ? overrides.exactY
+      ? (typeof overrides.exactY === 'boolean' ? (overrides.baseY ?? 0) : overrides.exactY)
       : prefabId === 'stone_quay_seawall'
-        ? 0.35
+        ? 0
         : minElevation !== null
           ? Math.max(minElevation, groundY)
           : Math.max(1.2, groundY);
+    const tracePayload = overrides?.trace && typeof overrides.trace === 'object' ? overrides.trace : null;
     instances.push({
       prefabId,
       label: overrides?.label ?? prefab?.label ?? prefab?.name ?? prefabId,
@@ -4373,7 +4508,9 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       indigenous: overrides?.indigenous ?? Boolean(prefab?.indigenous),
       cultureId: overrides?.cultureId ?? region.indigenousSettlement?.cultureId ?? null,
       cairnSpec,
-      ...(overrides?.trace ? { trace: overrides.trace } : {}),
+      ...(overrides?.baseY !== undefined ? { baseY: overrides.baseY } : {}),
+      ...(overrides?.isQuayRibbon ? { isQuayRibbon: true } : {}),
+      ...(tracePayload ? { trace: tracePayload } : {}),
       ...(overrides?.guards ? { guards: overrides.guards } : {}),
       ...(overrides?.enclosureShape ? { enclosureShape: overrides.enclosureShape } : {}),
       ...(overrides?.gateSide !== undefined ? { gateSide: overrides.gateSide } : {}),
@@ -4381,6 +4518,152 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       ...(overrides?.bankYPos !== undefined ? { bankYPos: overrides.bankYPos } : {}),
     });
     return instances[instances.length - 1];
+  };
+
+  // Trace the actual harbor shoreline contour (h ~ -0.6 m..-0.2 m, smoothed via 3-pass moving average)
+  // and emit contiguous, corner-to-corner joined `stone_quay_seawall` chords with seaward-facing vertical ashlar walls.
+  const placeContinuousQuayRibbon = (alongStart, alongEnd, label = PORT_PREFABS.stone_quay_seawall.label, quayDepth = 12) => {
+    const seaHintX = -Math.sin(bearingRad);
+    const seaHintZ = Math.cos(bearingRad);
+    const stepAlong = 6;
+    const rawSamples = [];
+    for (let along = alongStart; along <= alongEnd + 1e-3; along += stepAlong) {
+      let bestCross = null;
+      let prevP = worldFromCoastalFrame(region, bestShoreAlong + along, bestShoreInland - 38);
+      let prevH = terrainSample(heights, prevP.x, prevP.z, region);
+      for (let d = -36; d <= 38; d += 2) {
+        const curP = worldFromCoastalFrame(region, bestShoreAlong + along, bestShoreInland + d);
+        const curH = terrainSample(heights, curP.x, curP.z, region);
+        if (prevH <= -0.35 && curH > -0.35) {
+          const frac = Math.max(0, Math.min(1, (-0.35 - prevH) / Math.max(1e-3, curH - prevH)));
+          bestCross = d - 2 + frac * 2;
+          break;
+        }
+        prevH = curH;
+      }
+      if (bestCross !== null) {
+        const pSea = worldFromCoastalFrame(region, bestShoreAlong + along, bestShoreInland + bestCross - 18);
+        const pLand = worldFromCoastalFrame(region, bestShoreAlong + along, bestShoreInland + bestCross + 18);
+        if (terrainSample(heights, pSea.x, pSea.z, region) > -0.4 || terrainSample(heights, pLand.x, pLand.z, region) < 0.25) {
+          bestCross = null;
+        }
+      }
+      rawSamples.push({ along, inland: bestCross });
+    }
+
+    // 3-pass moving average over valid contour inland offsets so chords bend smoothly with the bay/riverbank
+    let smoothedInland = rawSamples.map((s) => s.inland);
+    for (let pass = 0; pass < 3; pass++) {
+      const next = smoothedInland.slice();
+      for (let i = 0; i < smoothedInland.length; i++) {
+        if (smoothedInland[i] === null) continue;
+        let sum = smoothedInland[i] * 2;
+        let w = 2;
+        if (i > 0 && smoothedInland[i - 1] !== null) { sum += smoothedInland[i - 1]; w += 1; }
+        if (i + 1 < smoothedInland.length && smoothedInland[i + 1] !== null) { sum += smoothedInland[i + 1]; w += 1; }
+        next[i] = sum / w;
+      }
+      smoothedInland = next;
+    }
+
+    const runs = [];
+    let curRun = [];
+    for (let i = 0; i < rawSamples.length; i++) {
+      const d = smoothedInland[i];
+      if (d === null) {
+        if (curRun.length >= 3) runs.push(curRun);
+        curRun = [];
+        continue;
+      }
+      const wp = worldFromCoastalFrame(region, bestShoreAlong + rawSamples[i].along, bestShoreInland + d);
+      if (portRiverCorridor.pointHits(wp.x, wp.z, 9.5)) {
+        if (curRun.length >= 3) runs.push(curRun);
+        curRun = [];
+        continue;
+      }
+      curRun.push({ along: rawSamples[i].along, inland: d, x: wp.x, z: wp.z });
+    }
+    if (curRun.length >= 3) runs.push(curRun);
+
+    // Fallback to clean straight shoreline chord run if synthetic test heightfield had no -0.35m contour in window
+    if (!runs.length) {
+      const fallbackPts = [];
+      for (let along = alongStart; along <= alongEnd + 1e-3; along += 26) {
+        const wp = worldFromCoastalFrame(region, bestShoreAlong + along, bestShoreInland);
+        if (!portRiverCorridor.pointHits(wp.x, wp.z, 9.5)) {
+          fallbackPts.push({ along, inland: 0, x: wp.x, z: wp.z });
+        }
+      }
+      if (fallbackPts.length >= 2) runs.push(fallbackPts);
+    }
+
+    const emitted = [];
+    const hl = quayDepth * 0.5;
+    for (const run of runs) {
+      let arcLen = 0;
+      for (let i = 1; i < run.length; i++) arcLen += Math.hypot(run[i].x - run[i - 1].x, run[i].z - run[i - 1].z);
+      if (arcLen < 14) continue;
+      const segCount = Math.max(1, Math.round(arcLen / 28));
+      const vertices = [run[0]];
+      for (let s = 1; s < segCount; s++) {
+        const targetDist = (arcLen * s) / segCount;
+        let acc = 0;
+        let picked = run[run.length - 1];
+        for (let i = 1; i < run.length; i++) {
+          const segD = Math.hypot(run[i].x - run[i - 1].x, run[i].z - run[i - 1].z);
+          if (acc + segD >= targetDist) {
+            const t = segD > 1e-4 ? (targetDist - acc) / segD : 0;
+            picked = {
+              x: run[i - 1].x + (run[i].x - run[i - 1].x) * t,
+              z: run[i - 1].z + (run[i].z - run[i - 1].z) * t,
+            };
+            break;
+          }
+          acc += segD;
+        }
+        vertices.push(picked);
+      }
+      vertices.push(run[run.length - 1]);
+
+      for (let k = 0; k < vertices.length - 1; k++) {
+        let a = vertices[k];
+        let b = vertices[k + 1];
+        const rawDx = b.x - a.x;
+        const rawDz = b.z - a.z;
+        const chordLen = Math.hypot(rawDx, rawDz);
+        if (chordLen < 6) continue;
+        // Orient A -> B so -lz = (+uz, -ux) always faces seaward into harbor water and +lz = (-uz, +ux) faces inland
+        if (rawDz * seaHintX - rawDx * seaHintZ < 0) {
+          const tmp = a;
+          a = b;
+          b = tmp;
+        }
+        const ux = (b.x - a.x) / chordLen;
+        const uz = (b.z - a.z) / chordLen;
+        const yaw = Math.atan2(-uz, ux);
+        const sinY = Math.sin(yaw);
+        const cosY = Math.cos(yaw);
+        // Shift center inland by hl so the seaward face (lz = -hl) lies directly on chord AB (exact shared vertices!)
+        const cx = 0.5 * (a.x + b.x) + hl * sinY;
+        const cz = 0.5 * (a.z + b.z) + hl * cosY;
+        if (portRiverCorridor.hits(cx, cz, yaw, chordLen + 0.65, quayDepth, 4.5)) continue;
+        const seg = addPrefab('stone_quay_seawall', 0, 0, 0, null, {
+          at: { x: cx, z: cz },
+          yaw,
+          width: chordLen + 0.65,
+          length: quayDepth,
+          height: 2.15,
+          foundationDepth: 6.5,
+          exactY: 0,
+          baseY: 0,
+          lockSite: true,
+          isQuayRibbon: true,
+          label,
+        });
+        if (seg) emitted.push(seg);
+      }
+    }
+    return emitted;
   };
 
   // The forts, where the harbour needs them and shaped to the ground there. They go down before the town does, so
@@ -4556,23 +4839,25 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       const pierX = hp.rootX + hp.ux * (pierLen * 0.5 - 5.5);
       const pierZ = hp.rootZ + hp.uz * (pierLen * 0.5 - 5.5);
       const quayW = Math.min(38, Math.max(20, hp.reach * 0.55));
-      const quayX = hp.rootX - hp.ux * 2.5;
-      const quayZ = hp.rootZ - hp.uz * 2.5;
+      const quayX = hp.rootX - hp.ux * 5.5;
+      const quayZ = hp.rootZ - hp.uz * 5.5;
       const rootGroundY = Math.max(1.2, Math.min(2.8, terrainSurfaceSample(heights, hp.rootX, hp.rootZ, region)));
       instances.push({
         prefabId: 'stone_quay_seawall',
         label: quayPrefab.label,
         x: quayX,
-        y: rootGroundY,
+        y: 0,
+        baseY: 0,
         z: quayZ,
         yaw: pierYaw,
         length: 11,
         width: quayW,
-        height: 1.4,
-        foundationDepth: 5.5,
+        height: 2.15,
+        foundationDepth: 6.5,
         materialKind: quayPrefab.materialKind,
         roofPitch: 0,
         waterfront: true,
+        isQuayRibbon: true,
         fromOrthophotoFootprint: true,
       });
       instances.push({
@@ -4789,21 +5074,8 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     }
   } else if (allowColonialPort && isDerivedMetropolePort) {
     // Procedural metropole harbor derivation from terrain contour, bathymetry, slope, hill relief, river corridors, and population:
-    // (a) Continuous stone seawall segments along shoreline stretches free of river mouths
-    for (const quayAlong of [-92, -46, 4, 52]) {
-      const qp = worldFromCoastalFrame(region, bestShoreAlong + quayAlong, bestShoreInland + 2);
-      const qh = terrainSurfaceSample(heights, qp.x, qp.z, region);
-      const qOff = worldFromCoastalFrame(region, bestShoreAlong + quayAlong, bestShoreInland - 18);
-      if (qh >= -0.6 && qh <= 4.2 && terrainSample(heights, qOff.x, qOff.z, region) <= -0.4 && !portRiverCorridor.hits(qp.x, qp.z, bearingRad, 44, 12, 3.5)) {
-        addPrefab('stone_quay_seawall', quayAlong, 2, 0, 2.25, {
-          label: `${nearOldWorldCity?.name || region.name} Stone Quay Wall`,
-          width: 44,
-          length: 12,
-          height: 1.9,
-          exactY: 0.35,
-        });
-      }
-    }
+    // (a) Continuous contour-following stone seawall ribbon along shoreline stretches free of river mouths
+    placeContinuousQuayRibbon(-112, 88, `${nearOldWorldCity?.name || region.name} Stone Quay Wall`, 12);
 
     // (b) Find flattest river-clear waterfront bench for civic Terreiro plaza & royal customhouse / palace complex
     let benchAlong = 10, benchInland = 40, bestBenchScore = -Infinity;
@@ -5160,13 +5432,8 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       }
     } else if (colonyGrowth.stage === 'settlement') {
       // Growing Colonial Settlement (14..31 yrs old):
-      // Stone quay, sea bastion, customhouse, lonja, royal warehouse, parish church, and early town blocks.
-      addPrefab('stone_quay_seawall', 10, 2, 0, 2.2, {
-        width: 80,
-        length: 12,
-        height: 1.9,
-        exactY: 0.35,
-      });
+      // Continuous contour-following stone quay ribbon, sea bastion, customhouse, lonja, royal warehouse, parish church, and early town blocks.
+      placeContinuousQuayRibbon(-32, 52, PORT_PREFABS.stone_quay_seawall.label, 12);
       addPrefab('careening_shed', -76, 18, 12, 2.2);
       addPrefab('astillero_and_moored_hull', -50, 15, 4, 1.6);
       addPrefab('torreon_atalaya_farol', 132, -8, 0, 4.8);
@@ -5184,13 +5451,8 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       }
     } else {
       // Mature Fortified Port & 17th-Century Citadel Metropolis (1550 baseline + progressive 1565–1689 expansions):
-      // 2. Continuous Stone Seawall & Wharf (Malecón) along the harbor edge
-      addPrefab('stone_quay_seawall', 10, 2, 0, 2.2, {
-        width: 80,
-        length: 12,
-        height: 1.9,
-        exactY: 0.35,
-      });
+      // 2. Continuous contour-following Stone Seawall & Wharf (Malecón) along the harbor edge
+      placeContinuousQuayRibbon(-36, 60, PORT_PREFABS.stone_quay_seawall.label, 12);
       // 3. Careening shed & Astillero slipway with skeletal caravel hull on the sheltered foreshore
       addPrefab('careening_shed', -76, 18, 12, 2.2);
       addPrefab('astillero_and_moored_hull', -50, 15, 4, 1.6);
@@ -6828,34 +7090,45 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       emitCylinder(toWorld, hw + 1.30, craneZ - 0.12, yTop + 1.15, yTop + 1.95, 0.42, 0.38, 10, 10, 0.76, true);
       emitCylinder(toWorld, hw + 1.30, craneZ - 0.12, yTop + 1.35, yTop + 1.42, 0.43, 0.43, 10, 18, 0.62, false);
     } else if (inst.prefabId === 'stone_quay_seawall') {
-      // Continuous Colonial Stone Seawall & Wharf (Malecón y Muelle de Piedra)
-      const yCoping = yTop - 0.35;
+      // Continuous Colonial Stone Seawall & Wharf (Malecón y Muelle de Piedra):
+      // Vertical dressed ashlar wall down below y = -4.2 m, level paved stone quay deck at y = +2.15 m,
+      // octagonal dressed-stone miter joint piers at chord vertices, landing stairs, and mooring bollards.
+      const quayBaseY = Math.min(yBase, -4.5);
+      const quayDeckY = inst.isQuayRibbon ? 2.15 : Math.max(2.15, yTop);
+      const yCoping = quayDeckY - 0.32;
       beginSection('foundation_seawall_scarp');
-      emitBox(toWorld, -hw - 0.8, hw + 0.8, yBase, yCoping, -hl - 0.8, hl + 0.4, 11, 0.84, false, 0.6);
+      emitBox(toWorld, -hw, hw, quayBaseY, yCoping, -hl, hl, 11, 0.84, false, 0.0);
+      // Dressed-stone octagonal joint piers at both chord ends so angled segments meet in watertight masonry joints
+      emitCylinder(toWorld, -hw, -hl + 0.62, quayBaseY, quayDeckY + 0.52, 0.78, 0.74, 8, 11, 0.88, true);
+      emitCylinder(toWorld, hw, -hl + 0.62, quayBaseY, quayDeckY + 0.52, 0.78, 0.74, 8, 11, 0.88, true);
       beginSection('quay_coping_deck_slab');
-      emitBox(toWorld, -hw, hw, yCoping, yTop, -hl, hl, 11, 0.92, true);
-      const qs = Math.min(1, hw / 26);
+      emitBox(toWorld, -hw - 0.12, hw + 0.12, yCoping, quayDeckY, -hl - 0.16, hl + 0.08, 11, 0.93, true);
+      const qs = Math.min(1, hw / 22);
       beginSection('quay_parapet_walls');
-      emitBox(toWorld, -hw, -22 * qs, yTop, yTop + 0.65, -hl, -hl + 1.1, 11, 0.88);
-      emitBox(toWorld, -15 * qs, -5.5 * qs, yTop, yTop + 0.65, -hl, -hl + 1.1, 11, 0.88);
-      emitBox(toWorld, 5.5 * qs, 15 * qs, yTop, yTop + 0.65, -hl, -hl + 1.1, 11, 0.88);
-      emitBox(toWorld, 22 * qs, hw, yTop, yTop + 0.65, -hl, -hl + 1.1, 11, 0.88);
+      if (hw >= 9) {
+        emitBox(toWorld, -hw + 0.75, -hw * 0.48, quayDeckY, quayDeckY + 0.52, -hl, -hl + 0.95, 11, 0.89);
+        emitBox(toWorld, -hw * 0.18, hw * 0.18, quayDeckY, quayDeckY + 0.52, -hl, -hl + 0.95, 11, 0.89);
+        emitBox(toWorld, hw * 0.48, hw - 0.75, quayDeckY, quayDeckY + 0.52, -hl, -hl + 0.95, 11, 0.89);
+      }
       beginSection('quay_landing_steps');
-      for (const stairX of [-18.5 * qs, 18.5 * qs]) {
+      const stairPositions = hw >= 14 ? [-hw * 0.33, hw * 0.33] : [0];
+      for (const stairX of stairPositions) {
+        const stairHalfW = Math.min(2.4, Math.max(1.2, 2.2 * qs));
         for (let stepIdx = 0; stepIdx < 5; stepIdx++) {
-          const sy1 = yTop - stepIdx * 0.42;
-          const sy0 = sy1 - 0.45;
-          const sz0 = -hl - 0.4 - stepIdx * 0.45;
-          emitBox(toWorld, stairX - 3.2 * qs, stairX + 3.2 * qs, sy0, sy1, sz0, -hl + 1.2, 11, 0.78 - stepIdx * 0.04);
+          const sy1 = quayDeckY - stepIdx * 0.40;
+          const sy0 = sy1 - 0.44;
+          const sz0 = -hl - 0.36 - stepIdx * 0.42;
+          emitBox(toWorld, stairX - stairHalfW, stairX + stairHalfW, sy0, sy1, sz0, -hl + 1.05, 11, 0.78 - stepIdx * 0.04);
         }
       }
       beginSection('mooring_bollards');
-      const bStep = Math.max(6, 14 * qs);
-      for (let bx = -hw + 4 * qs; bx <= hw - 4 * qs; bx += bStep) {
-        if (Math.abs(bx) < 5 * qs || (Math.abs(bx) > 14 * qs && Math.abs(bx) < 23 * qs)) continue;
-        emitTripoDockCleat(pushTri, toWorld, bx, yTop + 0.65, -hl + 0.55, 0.76, 0);
+      const bStep = Math.max(6.5, 11.5 * qs);
+      for (let bx = -hw + 3.2; bx <= hw - 3.2; bx += bStep) {
+        if (stairPositions.some((sx) => Math.abs(bx - sx) < 2.8)) continue;
+        emitCylinder(toWorld, bx, -hl + 0.52, quayDeckY, quayDeckY + 0.64, 0.24, 0.20, 8, 11, 0.76, true);
+        emitTripoDockCleat(pushTri, toWorld, bx, quayDeckY + 0.64, -hl + 0.52, 0.72, 0);
       }
-    } else if ((inst.prefabId === 'stone_sea_bastion' || inst.prefabId === 'bastion_trace_fortress') && inst.trace) {
+    } else if ((inst.prefabId === 'stone_sea_bastion' || inst.prefabId === 'bastion_trace_fortress') && inst.trace?.outline) {
       emitTracedFort(inst, toWorld, yBase, yTop);
     } else if (inst.prefabId === 'stone_sea_bastion' || inst.prefabId === 'bastion_trace_fortress') {
       // 16th-Century Spanish Bastion & Star-Bastioned Trace-Italienne Fortress (Baluarte / Fuerte Abaluartado con Foso y Polvorín):
@@ -9949,6 +10222,7 @@ export function smoothCoastlineAndForeshoreBeaches(
         if (dEdge >= 0.11) continue;
         const k = j * n + i;
         if (heights[k] <= -14) continue;
+        if (span >= 4096 && heights[k] > 0.5) continue;
         const capeNoise = coastalFbm2D(x * 0.0022, z * 0.0022, seed + 941, 2);
         const margin = 0.055 + 0.045 * capeNoise;
         if (dEdge >= margin) continue;
@@ -9971,7 +10245,9 @@ function finalizeProceduralCoastalPack(
 ) {
   const { region } = pack;
   if (!pack.skipPortPlacement && !pack.taperOuterBorders) {
-    const dirs = detectCoastalContinuationDirs(heights, region.size, region.shoreBearing);
+    const dirs = detectCoastalContinuationDirs(heights, region.size, region.shoreBearing, {
+      seawardBearing: region.seawardBearing,
+    });
     const dirSet = new Set(dirs.map((d) => `${d.dx},${d.dz}`));
     const autoConnected = pack.connectedEdges || {
       west: dirSet.has('-1,0'),
@@ -10057,9 +10333,12 @@ function dressProceduralCoastalPack(pack, heights, port, elevationSource, satell
   const vegetation = seedCoastalVegetation(region, heights, biome, beaches, port, 5, shoreDist);
   const waterCheck = !pack.skipPortPlacement && country ? createInlandWaterSampler(country, { margin: 4.5 }) : null;
   if (waterCheck && Array.isArray(port?.instances) && port.instances.length) {
-    const WATER_EXEMPT_PREFABS = new Set(['stone_arch_bridge', 'timber_mole_pier', 'stone_quay_seawall']);
+    const WATER_EXEMPT_PREFABS = new Set(['stone_arch_bridge']);
     const hitsWaterFootprint = (inst) => {
       if (!inst || WATER_EXEMPT_PREFABS.has(inst.prefabId)) return false;
+      if (inst.prefabId === 'timber_mole_pier' || inst.prefabId === 'stone_quay_seawall') {
+        return Boolean(waterCheck(inst.x, inst.z));
+      }
       if (waterCheck(inst.x, inst.z)) return true;
       const c = Math.cos(inst.yaw ?? 0), s = Math.sin(inst.yaw ?? 0);
       const hw = (inst.width ?? 10) * 0.5, hl = (inst.length ?? 10) * 0.5;
@@ -10379,6 +10658,141 @@ export function drownDemCoastalRinging(rawDem, n, maxDem, landCount) {
   return drowned;
 }
 
+export function sampleRegionalCoastalDem(regionalDem, lat, lon) {
+  if (!regionalDem?.heights || !(regionalDem.cols > 1) || !(regionalDem.rows > 1)) return NaN;
+  const latSpan = regionalDem.maxLat - regionalDem.minLat;
+  const lonSpan = regionalDem.maxLon - regionalDem.minLon;
+  if (!(latSpan > 1e-9) || !(lonSpan > 1e-9)) return NaN;
+  const u = Math.max(0, Math.min(1, (lon - regionalDem.minLon) / lonSpan)) * (regionalDem.cols - 1);
+  const vNorm = Math.max(0, Math.min(1, (regionalDem.maxLat - lat) / latSpan));
+  const v = (regionalDem.northFirst === false ? 1 - vNorm : vNorm) * (regionalDem.rows - 1);
+  const i0 = Math.min(regionalDem.cols - 1, Math.floor(u));
+  const j0 = Math.min(regionalDem.rows - 1, Math.floor(v));
+  const i1 = Math.min(regionalDem.cols - 1, i0 + 1);
+  const j1 = Math.min(regionalDem.rows - 1, j0 + 1);
+  const fu = u - i0;
+  const fv = v - j0;
+  const src = regionalDem.heights;
+  const cols = regionalDem.cols;
+  return (
+    (src[j0 * cols + i0] * (1 - fu) + src[j0 * cols + i1] * fu) * (1 - fv) +
+    (src[j1 * cols + i0] * (1 - fu) + src[j1 * cols + i1] * fu) * fv
+  );
+}
+
+// Fetch a compact Z10/Z11 AWS Terrarium SRTM envelope (4..9 256x256 PNG tiles) covering the full 5x5
+// (~41 km x 41 km) coastal mosaic around (region.latitude, region.longitude) so surrounding mock sections
+// (Almada, Belém, Caparica, Mar da Palha, Montijo, Alcochete, Barreiro, Atlantic Ocean) carry real geography immediately.
+export async function fetchRegionalCoastalDemEnvelope(
+  region,
+  { ringCount = 2, zoom = 10, fetchTile = null, timeoutMs = 9000 } = {}
+) {
+  if (!region || !Number.isFinite(region.latitude) || !Number.isFinite(region.longitude)) return null;
+  const canBrowserFetch = !fetchTile && typeof fetch === 'function' && typeof createImageBitmap === 'function';
+  if (!fetchTile && !canBrowserFetch) return null;
+  const geoSpan = region.demGeoSpan || (region.span < 4000 ? 6800 : region.span || 8192);
+  const halfExtentM = (Math.max(1, ringCount) + 0.56) * geoSpan;
+  const cosLat = Math.max(0.1, Math.cos(region.latitude * COASTAL_DEG_TO_RAD));
+  const halfLat = halfExtentM / 111195;
+  const halfLon = halfExtentM / (111195 * cosLat);
+  const minLat = Math.max(-84.5, region.latitude - halfLat);
+  const maxLat = Math.min(84.5, region.latitude + halfLat);
+  const minLon = region.longitude - halfLon;
+  const maxLon = region.longitude + halfLon;
+  const numTiles = 2 ** zoom;
+  const lonToTileX = (lon) => Math.floor(((lon + 180) / 360) * numTiles);
+  const latToTileY = (lat) => {
+    const r = Math.max(-85, Math.min(85, lat)) * COASTAL_DEG_TO_RAD;
+    return Math.floor(((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * numTiles);
+  };
+  const tx0 = lonToTileX(minLon);
+  const tx1 = lonToTileX(maxLon);
+  const ty0 = latToTileY(maxLat);
+  const ty1 = latToTileY(minLat);
+  const tileCols = tx1 - tx0 + 1;
+  const tileRows = ty1 - ty0 + 1;
+  if (tileCols < 1 || tileCols > 6 || tileRows < 1 || tileRows > 6) return null;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const reqs = [];
+    for (let ty = ty0; ty <= ty1; ty++) {
+      for (let tx = tx0; tx <= tx1; tx++) {
+        const wrappedX = ((tx % numTiles) + numTiles) % numTiles;
+        const demUrl = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${zoom}/${wrappedX}/${ty}.png`;
+        reqs.push(
+          fetchTile
+            ? Promise.resolve(fetchTile(demUrl, { tx: wrappedX, ty, zoom, signal: controller.signal })).then(async (res) => {
+                if (res instanceof Uint8Array || res instanceof Uint8ClampedArray) {
+                  return { tx, ty, rgba: res };
+                }
+                if (!res?.ok) throw new Error(`Terrarium HTTP ${res?.status}`);
+                const bmp = await createImageBitmap(await res.blob(), {
+                  premultiplyAlpha: 'none',
+                  colorSpaceConversion: 'none',
+                });
+                return { tx, ty, bmp };
+              })
+            : fetchCachedTerrariumTileRgba(demUrl, controller.signal).then((rgba) => ({ tx, ty, rgba }))
+        );
+      }
+    }
+    const loaded = await Promise.all(reqs);
+    const gw = tileCols * 256;
+    const gh = tileRows * 256;
+    const pixels = rasterizeTileGrid(loaded, tx0, ty0, gw, gh);
+    const decodePx = (px, py) => {
+      const ix = Math.max(0, Math.min(gw - 1, px));
+      const iy = Math.max(0, Math.min(gh - 1, py));
+      const k = (iy * gw + ix) * 4;
+      return pixels[k] * 256 + pixels[k + 1] + pixels[k + 2] / 256 - 32768;
+    };
+    const sampleMerc = (lat, lon) => {
+      const fx = ((lon + 180) / 360) * numTiles - tx0;
+      const r = Math.max(-85, Math.min(85, lat)) * COASTAL_DEG_TO_RAD;
+      const fy = ((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * numTiles - ty0;
+      const px = fx * 256 - 0.5;
+      const py = fy * 256 - 0.5;
+      const x0 = Math.floor(px), y0 = Math.floor(py);
+      const ax = px - x0, ay = py - y0;
+      const h00 = decodePx(x0, y0), h10 = decodePx(x0 + 1, y0);
+      const h01 = decodePx(x0, y0 + 1), h11 = decodePx(x0 + 1, y0 + 1);
+      return (h00 * (1 - ax) + h10 * ax) * (1 - ay) + (h01 * (1 - ax) + h11 * ax) * ay;
+    };
+    const cols = Math.min(641, Math.max(257, tileCols * 192 + 1));
+    const rows = Math.min(641, Math.max(257, tileRows * 192 + 1));
+    const heights = new Float32Array(cols * rows);
+    for (let j = 0; j < rows; j++) {
+      const lat = maxLat - (j / (rows - 1)) * (maxLat - minLat);
+      const rowOff = j * cols;
+      for (let i = 0; i < cols; i++) {
+        const lon = minLon + (i / (cols - 1)) * (maxLon - minLon);
+        heights[rowOff + i] = sampleMerc(lat, lon);
+      }
+    }
+    const envelope = {
+      heights,
+      cols,
+      rows,
+      minLat,
+      maxLat,
+      minLon,
+      maxLon,
+      zoom,
+      ringCount,
+      tiles: loaded.length,
+      northFirst: true,
+    };
+    envelope.sample = (lat, lon) => sampleRegionalCoastalDem(envelope, lat, lon);
+    return envelope;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function upgradeProceduralPackWithRealDEM(
   pack,
   { fetchTile = null, fetchSatelliteTile = null, zoom = 13, demSpan = null, timeoutMs = 12000, _snapAttempted = false, isNeighborSection = false, snapToCoast = true, groundOnly = false } = {}
@@ -10470,11 +10884,21 @@ export async function upgradeProceduralPackWithRealDEM(
     // Single uniform tile grid across the entire territory (no inner 2x2 Z14 square composite seam)
     const nearZoom = zoom + 1;
     const nearDemPromises = [];
+    const regionalDemPromise =
+      !isNeighborSection && !pack.regionalDem
+        ? fetchRegionalCoastalDemEnvelope(region, {
+            ringCount: 2,
+            zoom: 10,
+            fetchTile,
+            timeoutMs: Math.min(timeoutMs, 9000),
+          }).catch(() => null)
+        : Promise.resolve(pack.regionalDem ?? null);
 
-    const [loaded, satLoaded, nearDemLoaded] = await Promise.all([
+    const [loaded, satLoaded, nearDemLoaded, regionalDemLoaded] = await Promise.all([
       Promise.all(tilePromises),
       satPromises.length ? Promise.all(satPromises) : Promise.resolve([]),
       nearDemPromises.length ? Promise.all(nearDemPromises) : Promise.resolve([]),
+      regionalDemPromise,
     ]);
     clearTimeout(timer);
     await lrmPromise;
@@ -10743,6 +11167,7 @@ export async function upgradeProceduralPackWithRealDEM(
     );
     pack.satelliteData = satelliteData;
     pack.rawDem = rawDem;
+    if (regionalDemLoaded) pack.regionalDem = regionalDemLoaded;
     pack.demSource = {
       provider: 'aws-terrarium-srtm-etopo1',
       zoom,
@@ -11211,6 +11636,10 @@ export async function runLandfallDiscoveryPipeline(basePack, {
   };
   const cellInfo = canonicalCoastalCellId(basePack.region);
   const lrmPromise = load1550BuildingLRMTemplates(fetchImpl);
+  const regionalDemPromise =
+    !basePack.regionalDem && fetchImpl && typeof createImageBitmap === 'function'
+      ? fetchRegionalCoastalDemEnvelope(basePack.region, { ringCount: 2, zoom: 10, timeoutMs: 9000 }).catch(() => null)
+      : Promise.resolve(basePack.regionalDem ?? null);
   const localKey = `waterworld.discovery.v2.${cellInfo.cellId}`;
   let status = 'first_explorer';
   let visits = 1;
@@ -11312,6 +11741,11 @@ export async function runLandfallDiscoveryPipeline(basePack, {
       await ensureBaseDem();
       upgradedPack = build1550HistoricalTerritoryPack(basePack, { orthophoto1550, discoveredAt });
     }
+    const cachedRegionalDem = basePack.regionalDem || (await regionalDemPromise);
+    if (cachedRegionalDem) {
+      basePack.regionalDem = cachedRegionalDem;
+      upgradedPack.regionalDem = cachedRegionalDem;
+    }
     upgradedPack.territory1550.visits = visits;
     upgradedPack.territory1550.isFirstExplorer = false;
     onCachedReady?.({
@@ -11355,6 +11789,11 @@ export async function runLandfallDiscoveryPipeline(basePack, {
 
   await new Promise((resolve) => setTimeout(resolve, 16));
   const upgradedPack = build1550HistoricalTerritoryPack(basePack, { orthophoto1550, discoveredAt });
+  const liveRegionalDem = basePack.regionalDem || (await regionalDemPromise);
+  if (liveRegionalDem) {
+    basePack.regionalDem = liveRegionalDem;
+    upgradedPack.regionalDem = liveRegionalDem;
+  }
   upgradedPack.territory1550.visits = 1;
   upgradedPack.territory1550.isFirstExplorer = true;
 
@@ -11406,7 +11845,7 @@ export async function runLandfallDiscoveryPipeline(basePack, {
 
 // Inspect a section's border elevations to determine which neighboring sections (secX + dx, secZ + dz)
 // continue the coastline or landmass across the section boundary (including diagonal corners and 2nd-ring coastal horizon).
-export function detectCoastalContinuationDirs(heights, n, shoreBearing = 112) {
+export function detectCoastalContinuationDirs(heights, n, shoreBearing = 112, options = null) {
   if (!heights || heights.length < n * n) return [];
   const inset1 = Math.min(4, Math.max(1, Math.floor(n * 0.03)));
   const inset2 = Math.min(12, Math.max(2, Math.floor(n * 0.075)));
@@ -11445,8 +11884,19 @@ export function detectCoastalContinuationDirs(heights, n, shoreBearing = 112) {
     { dx: 0, dz: -1, edge: 'north', land: northLand },
     { dx: 0, dz: 1, edge: 'south', land: southLand },
   ];
-  // Only stream sections across borders that actually carry land or coastline (never spawn islands in open ocean!)
   const active = candidates.filter((c) => c.land >= minLandCells);
+  // Include inner estuary / bay seams (such as Lisbon's East Mar da Palha seam) when a pure-water border
+  // faces strongly into the inland / up-estuary hemisphere opposite seawardBearing.
+  if (active.length >= 2 && Number.isFinite(options?.seawardBearing)) {
+    const seaRad = options.seawardBearing * COASTAL_DEG_TO_RAD;
+    const inlandX = -Math.sin(seaRad);
+    const inlandZ = Math.cos(seaRad);
+    for (const c of candidates) {
+      if (c.land < minLandCells && c.dx * inlandX + c.dz * inlandZ > 0.45) {
+        active.push({ ...c, isEstuaryBasin: true });
+      }
+    }
+  }
   active.sort((a, b) => {
     const aCoastMix = a.land > 0 && a.land < n * 0.92 ? 1000 : 0;
     const bCoastMix = b.land > 0 && b.land < n * 0.92 ? 1000 : 0;
@@ -11722,6 +12172,9 @@ export function stitchCoastalSectionBorders(
     const westHasS = connW && hasSec(secX - 1, secZ + 1);
     const eastHasS = connE && hasSec(secX + 1, secZ + 1);
 
+    const preserveContinentalRim = Boolean(
+      isRealDemSection || isMock || Math.abs(secX) >= 2 || Math.abs(secZ) >= 2
+    );
     const maxOuterEdge = isRealDemSection ? 0.11 : 0.39;
     for (let j = 0; j < n; j++) {
       const v = j / (n - 1);
@@ -11740,14 +12193,14 @@ export function stitchCoastalSectionBorders(
         const k = j * n + i;
         const hOrig = heights[k];
         if (hOrig <= -16) continue;
+        // Never carve -16..-26 m ocean trenches into positive continental land on mosaic rims or SRTM sections!
+        if (preserveContinentalRim && hOrig > 0.5) continue;
         const capeMajor = coastalFbm2D(x * 0.00048, z * 0.00048, seed + 947, 3);
         const capeMinor = coastalFbm2D(x * 0.0016, z * 0.0016, seed + 1319, 2);
         const baseMargin = isRealDemSection
           ? Math.max(0.035, Math.min(0.10, 0.035 + 0.045 * capeMajor + 0.02 * capeMinor))
           : Math.max(0.055, Math.min(0.38, 0.06 + 0.24 * capeMajor + 0.08 * capeMinor));
-        // Protect inland continental highlands (> 25 m) so continental interiors remain land rather than square islands.
-        const highland = coastalSmoothstep(12.0, 28.0, hOrig);
-        const margin = baseMargin * (1 - 0.65 * highland);
+        const margin = baseMargin;
         let oX = 0;
         if (!connW && dW < margin) {
           let lockX = 1.0;
@@ -11778,9 +12231,7 @@ export function stitchCoastalSectionBorders(
         if (pen <= 0) continue;
         const t = 1 - coastalSmoothstep(0.0, Math.max(1e-4, margin), Math.min(margin, pen));
         const oceanShelf = -16 - (1 - t) * 10;
-        const highlandRim = Math.max(6.0, hOrig * (0.48 + 0.36 * t));
-        const targetOuter = oceanShelf * (1 - highland) + highlandRim * highland;
-        heights[k] = targetOuter * (1 - t) + hOrig * t;
+        heights[k] = oceanShelf * (1 - t) + hOrig * t;
       }
     }
   }
@@ -11909,6 +12360,8 @@ function createNeighborSectionFrame(basePack, secX, secZ, getNeighborSection, { 
     latitude: secLat,
     longitude: secLon,
     shoreBearing: baseRegion.shoreBearing,
+    seawardBearing: baseRegion.seawardBearing,
+    coastalArchetype: baseRegion.coastalArchetype,
     harborShelter: baseRegion.harborShelter,
     peakElevationMetres: baseRegion.peakElevationMetres,
     climate: baseRegion.climate,
@@ -11924,6 +12377,9 @@ function createNeighborSectionFrame(basePack, secX, secZ, getNeighborSection, { 
   const lookupNeighbor = (nx, nz, includePlanned = false) => {
     if (typeof getNeighborSection === 'function') {
       const found = getNeighborSection(nx, nz, includePlanned);
+      if (found) return found;
+    } else if (getNeighborSection && typeof getNeighborSection.get === 'function') {
+      const found = getNeighborSection.get(`${nx},${nz}`);
       if (found) return found;
     }
     if (nx === 0 && nz === 0) return basePack;
@@ -12000,6 +12456,17 @@ function synthContinuousCoastalHeights({ baseRegion, secX, secZ, secWorldX, secW
     }
   }
 
+  const seaBearing = Number.isFinite(baseRegion.seawardBearing)
+    ? baseRegion.seawardBearing
+    : (((baseRegion.shoreBearing ?? 112) + 180) % 360);
+  const seaRad = seaBearing * COASTAL_DEG_TO_RAD;
+  const seaDirX = Math.sin(seaRad);
+  const seaDirZ = -Math.cos(seaRad);
+  const inlandDirX = -seaDirX;
+  const inlandDirZ = -seaDirZ;
+  const estLatX = -inlandDirZ;
+  const estLatZ = inlandDirX;
+
   const calcLandFrac = (prof) => {
     if (!prof) return 0;
     let c = 0;
@@ -12008,8 +12475,10 @@ function synthContinuousCoastalHeights({ baseRegion, secX, secZ, secWorldX, secW
     }
     return c / size;
   };
-  const buildEnclosedWaterMask = (prof) => {
+  const buildEnclosedWaterMask = (prof, edgeSeawardDot = 0) => {
     if (!prof) return null;
+    // Any edge propagating toward the seaward hemisphere opens to the ocean/estuary mouth — never dam it!
+    if (edgeSeawardDot > 0.05) return new Float32Array(size);
     const mask = new Float32Array(size);
     const maxLeft = new Float32Array(size);
     const maxRight = new Float32Array(size);
@@ -12023,8 +12492,26 @@ function synthContinuousCoastalHeights({ baseRegion, secX, secZ, secWorldX, secW
       if (prof[i] > mr) mr = prof[i];
       maxRight[i] = mr;
     }
-    for (let i = 0; i < size; i++) {
-      mask[i] = maxLeft[i] > 0.65 && maxRight[i] > 0.65 ? 1.0 : 0.0;
+    // Measure each contiguous water channel in metres: any strait / estuary mouth / navigable river (>420 m or deep <= -5.2 m) stays open.
+    let idx = 0;
+    while (idx < size) {
+      if (prof[idx] > 0.25) {
+        idx++;
+        continue;
+      }
+      let end = idx;
+      let minGapH = prof[idx];
+      while (end + 1 < size && prof[end + 1] <= 0.25) {
+        end++;
+        if (prof[end] < minGapH) minGapH = prof[end];
+      }
+      const gapCells = end - idx + 1;
+      const gapWidthM = (gapCells / Math.max(1, size - 1)) * span;
+      const flankedByLand = maxLeft[idx] > 0.65 && maxRight[end] > 0.65;
+      const isDeepRiverOrStrait = gapWidthM > 420 || (gapWidthM > 280 && minGapH <= -5.2);
+      const enclosedVal = flankedByLand && !isDeepRiverOrStrait ? 1.0 : 0.0;
+      for (let k = idx; k <= end; k++) mask[k] = enclosedVal;
+      idx = end + 1;
     }
     const smoothed = new Float32Array(size);
     for (let i = 0; i < size; i++) {
@@ -12041,10 +12528,15 @@ function synthContinuousCoastalHeights({ baseRegion, secX, secZ, secWorldX, secW
   const eastLandFrac = calcLandFrac(eastProfile);
   const northLandFrac = calcLandFrac(northProfile);
   const southLandFrac = calcLandFrac(southProfile);
-  const westEnclosed = buildEnclosedWaterMask(westProfile);
-  const eastEnclosed = buildEnclosedWaterMask(eastProfile);
-  const northEnclosed = buildEnclosedWaterMask(northProfile);
-  const southEnclosed = buildEnclosedWaterMask(southProfile);
+  // Propagation direction from westProfile is +X (1,0); from eastProfile is -X (-1,0); northProfile is +Z (0,1); southProfile is -Z (0,-1).
+  const westSeaDot = 1 * seaDirX;
+  const eastSeaDot = -1 * seaDirX;
+  const northSeaDot = 1 * seaDirZ;
+  const southSeaDot = -1 * seaDirZ;
+  const westEnclosed = buildEnclosedWaterMask(westProfile, westSeaDot);
+  const eastEnclosed = buildEnclosedWaterMask(eastProfile, eastSeaDot);
+  const northEnclosed = buildEnclosedWaterMask(northProfile, northSeaDot);
+  const southEnclosed = buildEnclosedWaterMask(southProfile, southSeaDot);
 
   const sample1D = (prof, t) => {
     const clamped = Math.max(0, Math.min(1, t));
@@ -12055,10 +12547,40 @@ function synthContinuousCoastalHeights({ baseRegion, secX, secZ, secWorldX, secW
     return prof[i0] * (1 - a) + prof[i1] * a;
   };
 
+  const evalInlandEstuaryBasin = (hBase, dRamp, x, z) => {
+    const relX = x - baseRegion.x;
+    const relZ = z - baseRegion.z;
+    const inlandDistM = relX * inlandDirX + relZ * inlandDirZ;
+    const latDistM = relX * estLatX + relZ * estLatZ;
+    const bayNoise = coastalFbm2D(x * 0.00028, z * 0.00028, seed + 521, 3);
+    const bayCurveM = Math.min(2800, (latDistM * latDistM) / Math.max(2400, span * 2.2));
+    const shoreStartM = span * (0.94 + 0.28 * bayNoise) - bayCurveM;
+    const shoalT = coastalSmoothstep(shoreStartM - 3200, shoreStartM, inlandDistM);
+    const plainT = coastalSmoothstep(shoreStartM, shoreStartM + 5200, inlandDistM);
+    const plainNoise = coastalUberNoise2D(x * 0.00055, z * 0.00055, seed + 557, 3, 0.36);
+    const plainElev = 6.2 + 31.5 * plainT * (0.28 + 0.72 * plainNoise);
+    const basinBed = Math.max(-18, hBase * (1 - shoalT * 0.85) + (-1.2) * (shoalT * 0.85));
+    const landBlend = coastalSmoothstep(shoreStartM - 420, shoreStartM + 520, inlandDistM);
+    let h = basinBed * (1 - landBlend) + plainElev * landBlend;
+
+    // Navigable 450..900 m wide inflowing upper estuary / river channel cutting through the eastern alluvial plain
+    const riverMeander = 820 * (coastalFbm2D(inlandDistM * 0.00021, 3.7, seed + 617, 3) - 0.5);
+    const riverCenterLat = span * 0.12 + 0.28 * Math.max(0, inlandDistM - span * 0.5) + riverMeander;
+    const riverHalfWidthM = 300 + 150 * coastalFbm2D(inlandDistM * 0.00031, 9.1, seed + 641, 2);
+    const dRiver = Math.abs(latDistM - riverCenterLat);
+    if (dRiver < riverHalfWidthM + 220) {
+      const riverMask = 1 - coastalSmoothstep(riverHalfWidthM * 0.65, riverHalfWidthM + 220, dRiver);
+      const riverBed = -7.6 + 1.2 * (coastalFbm2D(x * 0.0009, z * 0.0009, seed + 673, 2) - 0.5);
+      h = h * (1 - riverMask) + Math.min(h, riverBed) * riverMask;
+    }
+    return hBase * (1 - dRamp) + h * dRamp;
+  };
+
   const evalEdgePropagation = (
     prof,
     enclosedMask,
     profLandFrac,
+    edgeSeawardDot,
     tCoord,
     dNorm,
     x,
@@ -12088,6 +12610,15 @@ function synthContinuousCoastalHeights({ baseRegion, secX, secZ, secWorldX, secW
     const ridge = coastalUberNoise2D(x * 0.00065, z * 0.00065, seed + 43, 4, 0.42);
     const micro = (coastalFbm2D(x * 0.0024, z * 0.0024, seed + 109, 3) - 0.48) * 5.2;
 
+    // Inland-hemisphere water border (e.g. Lisbon's East Mar da Palha inner estuary): shoal into alluvial bay shore + river!
+    const edgeInlandDot = -edgeSeawardDot;
+    const secInlandDot =
+      ((secWorldX - baseRegion.x) * inlandDirX + (secWorldZ - baseRegion.z) * inlandDirZ) /
+      Math.max(1, Math.hypot(secWorldX - baseRegion.x, secWorldZ - baseRegion.z));
+    if (hBase <= 0.25 && profLandFrac < 0.35 && (edgeInlandDot > 0.25 || secInlandDot > 0.35)) {
+      return evalInlandEstuaryBasin(hBase, dRamp, x, z);
+    }
+
     if (enclosed > 0.05 && hBase <= 0.25) {
       const bayReach = 0.26 + 0.34 * coastalFbm2D(x * 0.00042, z * 0.00042, seed + dirSeed + 313, 3);
       const inlandClose = coastalSmoothstep(bayReach * 0.42, bayReach, dNorm) * enclosed;
@@ -12101,10 +12632,23 @@ function synthContinuousCoastalHeights({ baseRegion, secX, secZ, secWorldX, secW
     }
 
     if (hBase > 0.25) {
+      // On seaward-propagating edges (e.g. West of Belém toward Cascais/Caparica & open Atlantic), taper coastal capes into open sea
+      if (edgeSeawardDot > 0.45) {
+        const seaDistM = (x - baseRegion.x) * seaDirX + (z - baseRegion.z) * seaDirZ;
+        const capeNoise = coastalFbm2D(x * 0.00034, z * 0.00034, seed + 787, 3);
+        const capeEndM = span * (1.06 + 0.24 * capeNoise);
+        const seaDrop = coastalSmoothstep(capeEndM - 2200, capeEndM + 1600, seaDistM);
+        const capeH = hBase * (1 - 0.35 * dRamp) + micro * 0.45;
+        const openAtlantic = -18 - 36 * coastalSmoothstep(capeEndM, capeEndM + span * 0.85, seaDistM);
+        return capeH * (1 - seaDrop) + openAtlantic * seaDrop;
+      }
       const inlandRise = profLandFrac >= 0.35 ? coastalSmoothstep(0.06, 0.22, dNorm) * 3.8 : 0;
       const hillGain =
         inlandRise + dRamp * Math.min(peak * 0.52, (7.5 + hBase * 0.58) * (0.34 + 0.66 * ridge) + micro);
       return Math.max(0.55, Math.min(895, hBase + hillGain));
+    }
+    if (edgeInlandDot > 0.25) {
+      return Math.max(-11.5, hBase - dRamp * 2.4);
     }
     return Math.max(-120, hBase - dRamp * (5.0 + 18.0 * dNorm));
   };
@@ -12129,22 +12673,22 @@ function synthContinuousCoastalHeights({ baseRegion, secX, secZ, secWorldX, secW
         if (westProfile) {
           const w = 1 / Math.pow(Math.max(1e-4, u), 2.35);
           wSum += w;
-          hSum += w * evalEdgePropagation(westProfile, westEnclosed, westLandFrac, v, u, x, z, 31, Boolean(northProfile), Boolean(southProfile));
+          hSum += w * evalEdgePropagation(westProfile, westEnclosed, westLandFrac, westSeaDot, v, u, x, z, 31, Boolean(northProfile), Boolean(southProfile));
         }
         if (eastProfile) {
           const w = 1 / Math.pow(Math.max(1e-4, 1 - u), 2.35);
           wSum += w;
-          hSum += w * evalEdgePropagation(eastProfile, eastEnclosed, eastLandFrac, v, 1 - u, x, z, 47, Boolean(northProfile), Boolean(southProfile));
+          hSum += w * evalEdgePropagation(eastProfile, eastEnclosed, eastLandFrac, eastSeaDot, v, 1 - u, x, z, 47, Boolean(northProfile), Boolean(southProfile));
         }
         if (northProfile) {
           const w = 1 / Math.pow(Math.max(1e-4, v), 2.35);
           wSum += w;
-          hSum += w * evalEdgePropagation(northProfile, northEnclosed, northLandFrac, u, v, x, z, 61, Boolean(westProfile), Boolean(eastProfile));
+          hSum += w * evalEdgePropagation(northProfile, northEnclosed, northLandFrac, northSeaDot, u, v, x, z, 61, Boolean(westProfile), Boolean(eastProfile));
         }
         if (southProfile) {
           const w = 1 / Math.pow(Math.max(1e-4, 1 - v), 2.35);
           wSum += w;
-          hSum += w * evalEdgePropagation(southProfile, southEnclosed, southLandFrac, u, 1 - v, x, z, 79, Boolean(westProfile), Boolean(eastProfile));
+          hSum += w * evalEdgePropagation(southProfile, southEnclosed, southLandFrac, southSeaDot, u, 1 - v, x, z, 79, Boolean(westProfile), Boolean(eastProfile));
         }
         heights[j * size + i] = hSum / wSum;
         continue;
@@ -12171,21 +12715,90 @@ function synthContinuousCoastalHeights({ baseRegion, secX, secZ, secWorldX, secW
   return heights;
 }
 
+function sampleRegionalDemForSection(regionalDem, basePack, baseRegion, sectionRegion, geoSpan, span, size) {
+  if (!regionalDem?.heights?.length) return null;
+  const cosLat = Math.max(0.1, Math.cos(sectionRegion.latitude * COASTAL_DEG_TO_RAD));
+  const elevScale = span < geoSpan ? Math.max(0.45, Math.sqrt(span / geoSpan)) : 1.0;
+  const baseSrc = basePack.heights || basePack.rawHeights;
+  const half0 = span * 0.5;
+  const blendDist = span * 0.22;
+  const blendedDem = new Float32Array(size * size);
+  for (let j = 0; j < size; j++) {
+    const vNorm = j / (size - 1) - 0.5;
+    const z = sectionRegion.z + vNorm * span;
+    const lat = sectionRegion.latitude - (vNorm * geoSpan) / 111195;
+    for (let i = 0; i < size; i++) {
+      const uNorm = i / (size - 1) - 0.5;
+      const x = sectionRegion.x + uNorm * span;
+      const lon = sectionRegion.longitude + (uNorm * geoSpan) / (111195 * cosLat);
+      const rawH = sampleRegionalCoastalDem(regionalDem, lat, lon);
+      if (!Number.isFinite(rawH)) return null;
+      let h = rawH > 0.25 ? Math.min(895, 0.25 + (rawH - 0.25) * elevScale) : Math.min(-4.5, Math.max(-120, rawH));
+      if (baseSrc) {
+        const cx = Math.max(baseRegion.x - half0, Math.min(baseRegion.x + half0, x));
+        const cz = Math.max(baseRegion.z - half0, Math.min(baseRegion.z + half0, z));
+        const d0 = Math.hypot(x - cx, z - cz);
+        if (d0 < blendDist) {
+          const w0 = 1 - coastalSmoothstep(0, blendDist, d0);
+          const hBaseEdge = coastalSampleClamped(baseSrc, cx, cz, baseRegion);
+          h = hBaseEdge * w0 + h * (1 - w0);
+        }
+      }
+      blendedDem[j * size + i] = h;
+    }
+  }
+  const { distLand, step } = computeCoastalShoreDistances(blendedDem, size, span, 0.25);
+  const out = new Float32Array(size * size);
+  for (let k = 0; k < size * size; k++) {
+    const bh = blendedDem[k];
+    if (bh >= 0.0) {
+      out[k] = bh;
+    } else {
+      const shoreDistance = Math.max(0, distLand[k] - step * 0.5);
+      const deepDrop = Math.max(0, shoreDistance - 2200) * 0.022;
+      const authoredDepth = Math.min(120, 2.2 + 0.014 * shoreDistance + deepDrop);
+      const sub = coastalSmoothstep(0.0, -2.0, bh);
+      const targetSub = bh < -2 ? Math.min(bh, -authoredDepth) : -authoredDepth;
+      out[k] = Math.max(-120, bh * (1 - sub) + targetSub * sub);
+    }
+  }
+  return out;
+}
+
 export function buildMockCoastalSection(
   basePack,
   secX,
   secZ,
   getNeighborSection = null,
-  { size = 33, biomeSize = 64, albedoSize = 64, vegetationCandidates = 320, taperUnconnectedOuter = true, skipStaticPalms = true } = {}
+  { size = undefined, biomeSize = 64, albedoSize = 64, vegetationCandidates = 320, taperUnconnectedOuter = true, skipStaticPalms = true } = {}
 ) {
-  const { baseRegion, span, secWorldX, secWorldZ, sectionRegion, lookupNeighbor } = createNeighborSectionFrame(
+  const hasRegionalDem = Boolean(basePack?.regionalDem?.heights?.length);
+  const effSize = size ?? (hasRegionalDem ? 49 : 33);
+  const effAlbedoSize = hasRegionalDem ? Math.max(128, albedoSize) : albedoSize;
+  const { baseRegion, span, geoSpan, secWorldX, secWorldZ, sectionRegion, lookupNeighbor } = createNeighborSectionFrame(
     basePack,
     secX,
     secZ,
     getNeighborSection,
-    { size, biomeSize, albedoSize, vegetationCandidates }
+    { size: effSize, biomeSize, albedoSize: effAlbedoSize, vegetationCandidates }
   );
-  const rawHeights = synthContinuousCoastalHeights({ baseRegion, secX, secZ, secWorldX, secWorldZ, span, size, lookupNeighbor, isMock: true });
+  const sampledRegional = hasRegionalDem
+    ? sampleRegionalDemForSection(basePack.regionalDem, basePack, baseRegion, sectionRegion, geoSpan, span, effSize)
+    : null;
+  const isRealDemSection = Boolean(sampledRegional);
+  const rawHeights =
+    sampledRegional ||
+    synthContinuousCoastalHeights({
+      baseRegion,
+      secX,
+      secZ,
+      secWorldX,
+      secWorldZ,
+      span,
+      size: effSize,
+      lookupNeighbor,
+      isMock: true,
+    });
   const connectedEdges = {
     west: Boolean(lookupNeighbor(secX - 1, secZ, true)),
     east: Boolean(lookupNeighbor(secX + 1, secZ, true)),
@@ -12193,9 +12806,15 @@ export function buildMockCoastalSection(
     south: Boolean(lookupNeighbor(secX, secZ + 1, true)),
   };
   const stitched = new Float32Array(rawHeights);
+  if (isRealDemSection) {
+    smoothCoastlineAndForeshoreBeaches(stitched, sectionRegion, {
+      connectedEdges,
+      taperOuterBorders: false,
+    });
+  }
   stitchCoastalSectionBorders(stitched, sectionRegion, secX, secZ, lookupNeighbor, {
     taperUnconnectedOuter,
-    isRealDemSection: false,
+    isRealDemSection,
     isMock: true,
   });
   const port = {
@@ -12207,7 +12826,7 @@ export function buildMockCoastalSection(
     clearRadius: 0,
     instances: [],
   };
-  const shoreDist = computeCoastalShoreDistances(stitched, size, span, 0.25);
+  const shoreDist = computeCoastalShoreDistances(stitched, effSize, span, 0.25);
   const beaches = synthesizeCoastalBeaches(sectionRegion, stitched, null, shoreDist);
   const mesh = buildCoastalMesh(sectionRegion, stitched, beaches, shoreDist, null, rawHeights, {
     lookupNeighbor,
@@ -12226,9 +12845,10 @@ export function buildMockCoastalSection(
     secZ,
     skipPortPlacement: true,
     isMock: true,
+    isRealDemSection,
     state: 'mocked',
     generationCount: 0,
-    elevationSource: 'procedural-mock',
+    elevationSource: isRealDemSection ? 'regional-dem-mock' : 'procedural-mock',
     connectedEdges,
     rawHeights,
     heights: stitched,
@@ -12343,6 +12963,92 @@ export function rebuildPackFrontierCity(pack) {
   return pack.city;
 }
 
+// Emit a contiguous closed polygonal farmyard / crofthold perimeter enclosure whose wall/fence bays
+// meet corner-to-corner around (cx, cz), leaving a single clean ~4.5 m entrance gateway facing baseYaw.
+function emitContiguousParcelEnclosure({
+  cx,
+  cz,
+  rx,
+  rz,
+  sides = 8,
+  baseYaw = 0,
+  gateWidth = 4.5,
+  maxBayLen = 7.2,
+  wobble = 0,
+  stoneOnly = false,
+  heightAt,
+  waterSampler,
+  pushTyped,
+  rr,
+}) {
+  const verts = [];
+  for (let k = 0; k < sides; k++) {
+    const ang = baseYaw + ((k + 0.5) / sides) * Math.PI * 2;
+    const sAng = Math.sin(ang);
+    const cAng = Math.cos(ang);
+    const radJitter = wobble > 0 ? 1 + (rr() - 0.5) * wobble : 1;
+    let chosen = null;
+    for (const scale of [1.0, 0.86, 0.72, 0.58]) {
+      const vx = cx + sAng * rx * radJitter * scale;
+      const vz = cz + cAng * rz * radJitter * scale;
+      const vh = heightAt(vx, vz);
+      if (vh >= 1.2 && vh <= 175 && !waterSampler?.(vx, vz)) {
+        chosen = { x: vx, z: vz };
+        break;
+      }
+    }
+    if (!chosen) return 0;
+    verts.push(chosen);
+  }
+
+  let emittedBays = 0;
+  const emitChordSpan = (ax, az, bx, bz, fType, tone) => {
+    const sdx = bx - ax;
+    const sdz = bz - az;
+    const sLen = Math.hypot(sdx, sdz);
+    if (sLen < 1.2) return;
+    const yaw = Math.atan2(sdx, sdz);
+    const nBays = Math.max(1, Math.round(sLen / maxBayLen));
+    const T = CITY_BUILDING_TYPES[fType];
+    for (let b = 0; b < nBays; b++) {
+      const tm = (b + 0.5) / nBays;
+      const mx = ax + sdx * tm;
+      const mz = az + sdz * tm;
+      const mh = heightAt(mx, mz);
+      if (mh < 1.1 || waterSampler?.(mx, mz)) continue;
+      // 0.34 m miter overlap joins consecutive bays and polygon corners watertight with zero daylight gap
+      const bayLen = sLen / nBays + 0.34;
+      pushTyped(fType, mx, mh, mz, yaw, T.width, T.height, bayLen, tone, 0);
+      emittedBays++;
+    }
+  };
+
+  for (let k = 0; k < sides; k++) {
+    const a = verts[k];
+    const b = verts[(k + 1) % sides];
+    const dx = b.x - a.x;
+    const dz = b.z - a.z;
+    const edgeLen = Math.hypot(dx, dz);
+    if (edgeLen < 1.4) continue;
+    const isGateSide = k === sides - 1;
+    const tone = 0.42 + (k % 3) * 0.08;
+    if (isGateSide) {
+      if (edgeLen > gateWidth + 1.8) {
+        const leaf = (edgeLen - gateWidth) * 0.5;
+        const ux = dx / edgeLen;
+        const uz = dz / edgeLen;
+        emitChordSpan(a.x, a.z, a.x + ux * leaf, a.z + uz * leaf, CITY_TYPE.FENCE_STONE, tone);
+        emitChordSpan(b.x - ux * leaf, b.z - uz * leaf, b.x, b.z, CITY_TYPE.FENCE_STONE, tone);
+      }
+    } else {
+      const fType =
+        stoneOnly || k === 0 || k === sides - 2 ? CITY_TYPE.FENCE_STONE : CITY_TYPE.FENCE_RAIL;
+      emitChordSpan(a.x, a.z, b.x, b.z, fType, tone);
+    }
+  }
+  return emittedBays;
+}
+
 function buildMockParcelCity(parcel, heights, region, waterSampler) {
   const blocks = [];
   const typed = [];
@@ -12370,14 +13076,33 @@ function buildMockParcelCity(parcel, heights, region, waterSampler) {
   }
   for (let i = 0; i < spots.length; i++) {
     const sp = spots[i];
-    if (i === 0 && parcel.dryShare >= 0.45) {
-      const T = CITY_BUILDING_TYPES[CITY_TYPE.SHED];
-      const f = footprint(sp.x, sp.z, T.width, T.length, sp.yaw);
-      const Far = footprint(sp.x, sp.z, f.d, f.w, sp.yaw + Math.PI / 2);
-      const floor = pushBlock(Far, T.height, 0.95, CITY_ROOF.GABLE + CITY_TYPED_ROOF + CITY_THATCH_ROOF, 10, 0.5);
-      pushTyped(CITY_TYPE.SHED, sp.x, floor, sp.z, sp.yaw, f.w, T.height, f.d, 0.5, 1);
-    } else if (i === 1) {
-      pushSlight(CITY_TYPE.FENCE_STONE, sp.x, sp.z, sp.yaw, 7.5, 0.5);
+    if (i === 0) {
+      if (parcel.dryShare >= 0.45) {
+        const T = CITY_BUILDING_TYPES[CITY_TYPE.SHED];
+        const f = footprint(sp.x, sp.z, T.width, T.length, sp.yaw);
+        const Far = footprint(sp.x, sp.z, f.d, f.w, sp.yaw + Math.PI / 2);
+        const floor = pushBlock(Far, T.height, 0.95, CITY_ROOF.GABLE + CITY_TYPED_ROOF + CITY_THATCH_ROOF, 10, 0.5);
+        pushTyped(CITY_TYPE.SHED, sp.x, floor, sp.z, sp.yaw, f.w, T.height, f.d, 0.5, 1);
+      }
+      const enclosed = emitContiguousParcelEnclosure({
+        cx: sp.x,
+        cz: sp.z,
+        rx: 11.2,
+        rz: 10.2,
+        sides: 6,
+        baseYaw: sp.yaw,
+        gateWidth: 4.5,
+        maxBayLen: 12.0,
+        wobble: 0.06,
+        stoneOnly: true,
+        heightAt,
+        waterSampler,
+        pushTyped,
+        rr,
+      });
+      if (!enclosed) {
+        pushSlight(CITY_TYPE.CAIRN, sp.x, sp.z, sp.yaw, CITY_BUILDING_TYPES[CITY_TYPE.CAIRN].length, 0.5);
+      }
     } else {
       pushSlight(CITY_TYPE.CAIRN, sp.x, sp.z, sp.yaw, CITY_BUILDING_TYPES[CITY_TYPE.CAIRN].length, 0.5);
     }
@@ -12573,15 +13298,22 @@ export function growFrontierParcel(pack, parcel, heights) {
     const floor = pushBlock(f, T.height, 1.8, CITY_ROOF.PYRAMID + CITY_TYPED_ROOF, CITY_WALL.STUCCO, 0.25);
     pushTyped(CITY_TYPE.WINDMILL, crestX, floor, crestZ, baseYaw, f.w, T.height, f.d, 0.25, 1);
   }
-  for (let fi = 0; fi < 4; fi++) {
-    const ang = (fi / 4) * Math.PI * 2 + 0.35;
-    const fx = hubX + Math.cos(ang) * 34;
-    const fz = hubZ + Math.sin(ang) * 34;
-    if (heightAt(fx, fz) < 1.2 || waterSampler?.(fx, fz)) continue;
-    const fType = fi & 1 ? CITY_TYPE.FENCE_STONE : CITY_TYPE.FENCE_RAIL;
-    const T = CITY_BUILDING_TYPES[fType];
-    pushTyped(fType, fx, heightAt(fx, fz), fz, ang + Math.PI * 0.5, T.width, T.height, 8.5, 0.5, 0);
-  }
+  emitContiguousParcelEnclosure({
+    cx: hubX,
+    cz: hubZ,
+    rx: 36.5,
+    rz: 32.5,
+    sides: 8,
+    baseYaw,
+    gateWidth: 4.5,
+    maxBayLen: 6.8,
+    wobble: 0.1,
+    stoneOnly: false,
+    heightAt,
+    waterSampler,
+    pushTyped,
+    rr,
+  });
 
   const herdFloats = [];
   for (let fl = 0; fl < 2; fl++) {
@@ -12731,6 +13463,22 @@ export async function generateCoastalNeighborSection(
     } catch { /* fallback to boundary-propagated continuous coast */ }
   }
 
+  if (!contHeights && useRealDEM && basePack?.regionalDem?.heights?.length) {
+    contHeights = sampleRegionalDemForSection(
+      basePack.regionalDem,
+      basePack,
+      baseRegion,
+      sectionRegion,
+      geoSpan,
+      span,
+      size
+    );
+    if (contHeights) {
+      isRealDemSection = true;
+      sectionPack.elevationSource = 'regional-dem-envelope';
+    }
+  }
+
   if (!contHeights) {
     contHeights = synthContinuousCoastalHeights({ baseRegion, secX, secZ, secWorldX, secWorldZ, span, size, lookupNeighbor, isMock: false });
   }
@@ -12822,6 +13570,9 @@ export function restitchCoastalSection(
   const lookupNeighbor = (nx, nz, includePlanned = false) => {
     if (typeof getNeighborSection === 'function') {
       const found = getNeighborSection(nx, nz, includePlanned);
+      if (found) return found;
+    } else if (getNeighborSection && typeof getNeighborSection.get === 'function') {
+      const found = getNeighborSection.get(`${nx},${nz}`);
       if (found) return found;
     }
     if (nx === 0 && nz === 0) return basePack;

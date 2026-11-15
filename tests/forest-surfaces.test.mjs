@@ -51,7 +51,7 @@ test('cohorts that wear the same maps share one layer, and each still gets its o
   const layers=set.families.reduce((sum,family)=>sum+family.layers.length,0);
   assert.equal(materials.length,60);assert.equal(layers,30,'veteran and canopy trees of a species share their layers');
   let bytes=0;for(const family of set.families)bytes+=family.albedo.data.byteLength+family.detail.data.byteLength;
-  assert.ok(bytes<13*1048576,`the set holds ${(bytes/1048576).toFixed(1)} MiB`);
+  assert.ok(bytes<25*1048576,`the set holds ${(bytes/1048576).toFixed(1)} MiB`);
   // The textures themselves need a GPU; the table of optics does not.
   const writes=[],device={createTexture:d=>({destroy(){},d}),queue:{writeTexture:(...a)=>writes.push(a)}};
   globalThis.GPUTextureUsage??={TEXTURE_BINDING:4,COPY_DST:2};

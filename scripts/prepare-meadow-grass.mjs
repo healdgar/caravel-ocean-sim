@@ -1,12 +1,16 @@
 #!/usr/bin/env node
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-// Bakes GPU-resident 4-level Real Botanical Grass Continuum on 4.0 m seamless tiles:
-//   - L0..L3: real extracted botanical organs (Dactylis glomerata tussocks, Plantago lanceolata rosettes & spikes,
-//     Avena sterilis & Bromus diandrus culms & golden seed panicles) + dense arched 3D turf-grass micro-tufts,
-//     with anti-flicker width compensation (1.05x -> 1.48x -> 2.15x -> tussock plumes), lossless vertex deduplication
-//     across shared border plants, and zero synthetic opaque floor sheet!
-//   - Continuum (morph.bin): closed genus-0 (Euler = 2) non-overlapping 4.0 m x 4.0 m sculpted tussock canopy
-//     with shared periodic boundary heights (zero Z-fighting, cullMode: 'back') + O(1) u8x4 ancestor lookup table!
+// Bakes GPU-resident 4-level Lush Botanical Meadow Grass Continuum on seamless 1.75 m x 1.75 m tiles (3.0625 m^2):
+//   - L0..L3 (~4,200 -> 2,100 -> 950 -> 380 tris, ~1,370 tris/m^2 at LOD0):
+//     1. Arched Multi-Segment Ryegrass, Cocksfoot & Fescue Sheaves (70%): 3-segment (5-tri, 7-vert) curved blades
+//        (14-38 cm tall, 1.1-2.2 cm basal width tapering to a fine tip, parabolic droop along^1.7, V-camber normals)
+//        in toroidal-Poisson organic tussock clumps (3-7 blades at asymmetric azimuths, zero 6-spoke pinwheels).
+//     2. Low Basal Turf / Clover / Ribwort Ground-Huggers (20%): dense broad low-arching basal leaf tufts (5-11 cm)
+//        carpeting inter-tussock gaps for >80% oblique turf fullness with zero synthetic flat floor sheet.
+//     3. Tall Sunlit Oat / Wild Barley Panicles & Coastal Wildflowers (10%): 38-58 cm curved culms with 3D cross-vaned
+//        golden-straw seed heads (along > 0.78) + subtle 3D concave chamomile, mallow, hawkbit & poppy blossoms.
+//   - Continuum (morph.bin): closed genus-0 (Euler = 2) D4-symmetric periodic sculpted tussock canopy
+//     [-0.892, +0.892]^2 + 1 underground pole (V=26, E=72, F=48 -> coreTriCount=6) + O(1) u8x4 ancestor lookup table.
 //   - Horizon splats: 1-triangle view-facing silhouette splat metadata per variant.
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
@@ -17,33 +21,40 @@ const SRC_DIR = 'assets/ground-cover/portugal/meadows';
 const OUT_DIR = 'assets/ground-cover/portugal/meadows-gpu';
 const MIXES = ['pasture', 'waste', 'field-margin'];
 const VARIANTS = 4;
-const TILE_METRES = 4.0;
+const TILE_METRES = 1.75;
 const SUB_GRID = 1;
 const SOURCE_STRIDE = 12; // pos(3), nrm(3), linearSrgbCol(3), along(1), stiffness(1), anchor(1)
 const GPU_VERTEX_WORDS = 8; // px, py, pz, packedNorm+wTag, packedCol+tuftRand, along, stiffness, packedMorphXZ(half2)
 const CLUSTER_WORDS = 12;
 
-// Screen-space error thresholds locked to spanPx * allowedErr = 4.6 across all resolutions:
-// L0 (<~18 m), L1 (~18..34 m), L2 (~34..54 m), L3 (~54..76 m) -> MSAA sample_mask handoff (spanPx 26 -> 20) -> morph.bin
-const LEVEL_ERRORS = [0.0, 0.040, 0.078, 0.124];
-const LEVEL_PARENT_ERRORS = [0.040, 0.078, 0.124, 0.180];
+// Screen-space error thresholds on 1.75 m tiles (allowedErr = dist / focal):
+// L0 holds 100% density inside ~20 m, then retires smoothly:
+// L0 (<~28.5 m), L1 (~28.5..49 m), L2 (~49..72 m), L3 (~72..86 m) -> MSAA sample_mask handoff -> morph.bin -> splat
+const LEVEL_ERRORS = [0.0, 0.030, 0.052, 0.076];
+const LEVEL_PARENT_ERRORS = [0.030, 0.052, 0.076, 0.104];
 
-// Sculpted 5x5 tussock canopy [-2.02, +2.02]^2 + 1 underground pole = 26 verts, 48 faces, 72 edges -> V - E + F = 2!
+// Sculpted 5x5 tussock canopy [-0.892, +0.892]^2 + 1 underground pole = 26 verts, 48 faces, 72 edges -> V - E + F = 2!
 const MORPH_GRID = 5;
 const MORPH_VERTS = MORPH_GRID * MORPH_GRID + 1; // 26
 const MORPH_FACES = (MORPH_GRID - 1) * (MORPH_GRID - 1) * 2 + (MORPH_GRID - 1) * 4; // 32 top + 16 bottom = 48
-const MORPH_STEPS = 21; // 26 -> 5 core verts = 6 core tris (2 top square + 4 culled bottom)
-const MORPH_HALF_M = 2.02; // 2 cm seam weld across 4.0 m lattice (non-overlapping, zero Z-fighting)
+const MORPH_STEPS = 21; // 26 -> 5 core verts = 6 core tris (2 top square + 4 back-culled bottom)
+const MORPH_HALF_M = TILE_METRES * 0.5 + 0.017; // 0.892 m (1.7 cm seam weld across 1.75 m lattice)
 const MORPH_REMAP_WORDS = Math.ceil((MORPH_STEPS * MORPH_VERTS) / 2 / 4) * 4; // 276 u32 words (u8x4 (v0,v1) pairs)
 
-// Raw forestmodeler linear-srgb single-leaf diffuse albedo (~0.26..0.38) scaled into shaded canopy reflectance domain
-const CANOPY_ALBEDO_SCALE = 0.42;
+// Calibrated linear-sRGB reflectance scale for single botanical leaves into sunlit Mediterranean meadow domain
+const BOTANICAL_ALBEDO_SCALE = 0.46;
+const GOLDEN_ANGLE = 2.399963229728653;
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 const lerp = (a, b, t) => a + (b - a) * t;
 const qPos = (v) => Math.round(v * 512) / 512; // 1.95 mm spatial precision + clean mantissa zeros for gzip
 const qAttr = (v) => Math.round(v * 64) / 64;
 const sha256Hex = (buf) => createHash('sha256').update(buf).digest('hex');
+
+function wrapTile(v) {
+  const m = v % TILE_METRES;
+  return m < 0 ? m + TILE_METRES : m;
+}
 
 function hash01(seed, idx) {
   let h = (Math.imul(seed ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(idx + 1, 0xc2b2ae35)) >>> 0;
@@ -99,7 +110,6 @@ function packSnorm8x4(nx, ny, nz, w = 1.0) {
   return ((a << 24) | (z << 16) | (y << 8) | x) >>> 0;
 }
 
-// Encodes linear-srgb reflectance into sRGB unorm8x3 + per-tuft stochastic margin survival threshold in alpha.
 function packColorUnorm8x4(linR, linG, linB, tuftRand = 1.0) {
   const enc = (c) => clamp(Math.round(Math.pow(clamp(c, 0, 1), 1 / 2.2) * 255), 0, 255);
   const ir = enc(linR), ig = enc(linG), ib = enc(linB);
@@ -116,10 +126,54 @@ function triArea3D(ax, ay, az, bx, by, bz, cx, cy, cz) {
   return 0.5 * Math.hypot(ux, uy, uz);
 }
 
-// Lossless global 32-byte vertex pool: identical vertices across shared border clumps, variants, and tuft crowns
-// share a single vertex entry in vertices.bin and are referenced by uint32 index in indices.bin!
+function toroidalDistSq(ax, az, bx, bz) {
+  let dx = Math.abs(ax - bx);
+  let dz = Math.abs(az - bz);
+  if (dx > TILE_METRES * 0.5) dx = TILE_METRES - dx;
+  if (dz > TILE_METRES * 0.5) dz = TILE_METRES - dz;
+  return dx * dx + dz * dz;
+}
+
+// Deterministic toroidal Poisson dart-throwing inside [margin, TILE_METRES - margin)^2
+// so tussocks have organic spacing with zero grid rows and uniform density right across tile seams.
+function sampleToroidalPoisson(seed, targetCount, minDist, existing = [], repelDist = 0, margin = 0.035) {
+  const pts = [];
+  const span = TILE_METRES - 2 * margin;
+  let curMinSq = minDist * minDist;
+  const repelSq = repelDist * repelDist;
+  let cursor = 0;
+
+  for (let pass = 0; pass < 4 && pts.length < targetCount; pass++) {
+    const maxAttempts = targetCount * 36;
+    for (let att = 0; att < maxAttempts && pts.length < targetCount; att++) {
+      const x = margin + hash01(seed, cursor++) * span;
+      const z = margin + hash01(seed, cursor++) * span;
+      let ok = true;
+      if (repelSq > 0) {
+        for (let i = 0; i < existing.length; i++) {
+          if (toroidalDistSq(x, z, existing[i].x, existing[i].z) < repelSq) {
+            ok = false;
+            break;
+          }
+        }
+      }
+      if (ok) {
+        for (let i = 0; i < pts.length; i++) {
+          if (toroidalDistSq(x, z, pts[i].x, pts[i].z) < curMinSq) {
+            ok = false;
+            break;
+          }
+        }
+      }
+      if (ok) pts.push({ x, z, seed: hashCoordSeed(seed, pts.length + 1, cursor) });
+    }
+    curMinSq *= 0.72;
+  }
+  return pts;
+}
+
 function createGlobalVertexPool() {
-  const words = []; // raw u32 words (8 per vertex)
+  const words = [];
   const map = new Map();
   const scratchBuf = new ArrayBuffer(32);
   const sf32 = new Float32Array(scratchBuf);
@@ -160,21 +214,18 @@ function createGlobalVertexPool() {
   };
 }
 
-// Extracts simplified real botanical blades, ribwort rosettes, culms & golden panicle heads from a raw variant.
-// IMPORTANT: srcVerts[s+6..8] is ALREADY linear-srgb — never apply pow(c, 2.2) a second time!
-function extractBotanicalOrgans(srcVerts, srcIndices, varSpec, mixIdx, vIdx) {
-  const blades = [];
+// Extracts real 3-segment curved botanical specimen leaves & culm-panicles from the Portuguese meadow source stream,
+// re-rooted toroidally into [0.05, TILE_METRES - 0.05]^2 at exact 1:1 physical metric organ dimensions!
+function extractSpecimenTemplates(srcVerts, srcIndices, varSpec, mixIdx, vIdx) {
+  const leafSpecimens = [];
+  const culmSpecimens = [];
 
   for (let ci = 0; ci < varSpec.clumps.length; ci++) {
     const c = varSpec.clumps[ci];
-    const rx = c.root[0], rz = c.root[1];
-    const clumpSeed = c.shared
-      ? hashCoordSeed(mixIdx + 1, Math.round(rx * 1000), Math.round(rz * 1000) * 8 + c.species)
-      : hashCoordSeed(mixIdx * 16 + vIdx + 1, Math.round(rx * 1000), Math.round(rz * 1000) * 8 + ci);
-    const tuftRand = clamp(0.06 + 0.88 * hash01(clumpSeed, 0), 0.06, 0.94);
-
+    const rx0 = c.root[0], rz0 = c.root[1];
     const vCount = c.vertexCount;
     if (vCount < 3 || c.indexCount < 3) continue;
+
     const parent = new Int32Array(vCount).fill(-1);
     const find = (x) => {
       let r = x;
@@ -211,15 +262,11 @@ function extractBotanicalOrgans(srcVerts, srcIndices, varSpec, mixIdx, vIdx) {
       compTris.set(r, (compTris.get(r) || 0) + 1);
     }
 
-    const clumpLeaves = [];
-    const clumpCulms = [];
-    const spikeletCloud = [];
-
     for (const [r, vs] of compVerts) {
       const tCnt = compTris.get(r) || 0;
       const nv = vs.length;
 
-      // 1. V-folded grass leaf / ribwort basal rosette leaf: nv = 3*K + 1, tCnt = 4*K - 2 (K = 4..7)
+      // V-folded botanical grass leaf (nv = 3*K + 1, K >= 4): preserve 3-segment (4-station) real arch curve!
       if (nv >= 13 && nv <= 25 && (nv - 1) % 3 === 0 && tCnt === ((nv - 1) / 3) * 4 - 2) {
         const K = (nv - 1) / 3;
         const oTip = vs[nv - 1] * SOURCE_STRIDE;
@@ -229,424 +276,787 @@ function extractBotanicalOrgans(srcVerts, srcIndices, varSpec, mixIdx, vIdx) {
           srcVerts[oTip + 1] - srcVerts[oBase + 1],
           srcVerts[oTip + 2] - srcVerts[oBase + 2],
         );
-        if (span < 0.045) continue;
+        if (span < 0.11 || span > 0.44 || srcVerts[oTip + 1] < 0.08) continue;
 
-        const rMid = Math.min(K - 1, Math.max(1, Math.floor(K * 0.45)));
-        const rows = [0, rMid];
-        const pts = [];
-        for (const rk of rows) {
+        const r1 = Math.max(1, Math.min(K - 2, Math.round(K * 0.34)));
+        const r2 = Math.max(r1 + 1, Math.min(K - 1, Math.round(K * 0.68)));
+        const rowIds = [0, r1, r2];
+        const relPts = [];
+        for (let si = 0; si < 3; si++) {
+          const rk = rowIds[si];
           const oL = vs[rk * 3] * SOURCE_STRIDE;
           const oM = vs[rk * 3 + 1] * SOURCE_STRIDE;
           const oR = vs[rk * 3 + 2] * SOURCE_STRIDE;
-          let dx = srcVerts[oR] - srcVerts[oL];
-          let dy = srcVerts[oR + 1] - srcVerts[oL + 1];
-          let dz = srcVerts[oR + 2] - srcVerts[oL + 2];
-          const w = Math.hypot(dx, dy, dz);
-          if (w > 1e-5) { dx /= w; dy /= w; dz /= w; } else { dx = 1; dy = 0; dz = 0; }
-          const hw = clamp(w * 0.62, 0.0032, 0.017);
-          const py = srcVerts[oM + 1];
-          const col = [
-            clamp(srcVerts[oM + 6] * CANOPY_ALBEDO_SCALE, 0.014, 0.22),
-            clamp(srcVerts[oM + 7] * CANOPY_ALBEDO_SCALE, 0.020, 0.24),
-            clamp(srcVerts[oM + 8] * CANOPY_ALBEDO_SCALE, 0.008, 0.13),
-          ];
-          const effAlong = clamp(Math.max(srcVerts[oM + 9] * 0.85, py * 1.55), 0.0, 1.0);
-          pts.push({
-            x: srcVerts[oM], y: py, z: srcVerts[oM + 2],
-            sx: dx, sy: dy, sz: dz,
-            hw, col, along: effAlong,
+          let sx = srcVerts[oR] - srcVerts[oL];
+          let sz = srcVerts[oR + 2] - srcVerts[oL + 2];
+          const w = Math.hypot(sx, srcVerts[oR + 1] - srcVerts[oL + 1], sz);
+          const hl = Math.hypot(sx, sz);
+          if (hl > 1e-5) { sx /= hl; sz /= hl; } else { sx = 1; sz = 0; }
+          const baseHW = clamp(w * 0.85, 0.0058, 0.0112) * [1.0, 0.88, 0.54][si];
+          relPts.push({
+            dx: srcVerts[oM] - rx0,
+            y: si === 0 ? -0.005 : Math.max(0.02, srcVerts[oM + 1]),
+            dz: srcVerts[oM + 2] - rz0,
+            sx,
+            sz,
+            hw: baseHW,
+            col: [
+              clamp(srcVerts[oM + 6] * BOTANICAL_ALBEDO_SCALE, 0.032, 0.18),
+              clamp(srcVerts[oM + 7] * BOTANICAL_ALBEDO_SCALE * 1.12, 0.068, 0.22),
+              clamp(srcVerts[oM + 8] * BOTANICAL_ALBEDO_SCALE * 0.82, 0.018, 0.09),
+            ],
+            along: [0.02, 0.26, 0.52][si],
           });
         }
-        const tipCol = [
-          clamp(srcVerts[oTip + 6] * CANOPY_ALBEDO_SCALE * 1.06, 0.016, 0.24),
-          clamp(srcVerts[oTip + 7] * CANOPY_ALBEDO_SCALE * 1.06, 0.022, 0.26),
-          clamp(srcVerts[oTip + 8] * CANOPY_ALBEDO_SCALE * 1.02, 0.008, 0.14),
-        ];
-        pts.push({
-          x: srcVerts[oTip], y: srcVerts[oTip + 1], z: srcVerts[oTip + 2],
-          sx: pts[1].sx, sy: pts[1].sy, sz: pts[1].sz,
-          hw: 0, col: tipCol, along: clamp(Math.max(0.75, srcVerts[oTip + 1] * 1.65), 0.55, 1.0),
+        relPts.push({
+          dx: srcVerts[oTip] - rx0,
+          y: Math.max(0.06, srcVerts[oTip + 1]),
+          dz: srcVerts[oTip + 2] - rz0,
+          sx: relPts[2].sx,
+          sz: relPts[2].sz,
+          hw: 0,
+          col: [
+            clamp(srcVerts[oTip + 6] * BOTANICAL_ALBEDO_SCALE * 1.08, 0.045, 0.20),
+            clamp(srcVerts[oTip + 7] * BOTANICAL_ALBEDO_SCALE * 1.15, 0.085, 0.24),
+            clamp(srcVerts[oTip + 8] * BOTANICAL_ALBEDO_SCALE * 0.85, 0.022, 0.10),
+          ],
+          along: 0.76,
         });
-        const stiff = clamp(c.species === 3 ? 11.5 : 8.5, 4.0, 18.0);
-        clumpLeaves.push({
-          rootX: rx, rootZ: rz, species: c.species, shared: c.shared, stiff, tuftRand,
-          span, pts,
+        leafSpecimens.push({
+          species: c.species,
+          span,
+          stiff: clamp(srcVerts[oBase + 10], 5.5, 14.5),
+          relPts,
         });
-        continue;
+        if (leafSpecimens.length >= 96) break;
       }
 
-      // 2. 3-sided hollow culm / flower scape: nv = 3*K, tCnt = 6*(K - 1)
-      if (nv >= 9 && nv <= 30 && nv % 3 === 0 && tCnt === (nv / 3 - 1) * 6) {
+      // 3-sided hollow culm (Avena sterilis / Bromus diandrus)
+      if (nv >= 12 && nv <= 30 && nv % 3 === 0 && tCnt === (nv / 3 - 1) * 6 && culmSpecimens.length < 32) {
         const K = nv / 3;
         const ring = (rk) => {
           const a = vs[rk * 3] * SOURCE_STRIDE, b = vs[rk * 3 + 1] * SOURCE_STRIDE, d = vs[rk * 3 + 2] * SOURCE_STRIDE;
           return {
-            x: (srcVerts[a] + srcVerts[b] + srcVerts[d]) / 3,
+            dx: (srcVerts[a] + srcVerts[b] + srcVerts[d]) / 3 - rx0,
             y: (srcVerts[a + 1] + srcVerts[b + 1] + srcVerts[d + 1]) / 3,
-            z: (srcVerts[a + 2] + srcVerts[b + 2] + srcVerts[d + 2]) / 3,
-            col: [
-              clamp(((srcVerts[a + 6] + srcVerts[b + 6] + srcVerts[d + 6]) / 3) * CANOPY_ALBEDO_SCALE, 0.016, 0.24),
-              clamp(((srcVerts[a + 7] + srcVerts[b + 7] + srcVerts[d + 7]) / 3) * CANOPY_ALBEDO_SCALE, 0.022, 0.26),
-              clamp(((srcVerts[a + 8] + srcVerts[b + 8] + srcVerts[d + 8]) / 3) * CANOPY_ALBEDO_SCALE, 0.008, 0.14),
-            ],
-            stiff: clamp(srcVerts[a + 10], 4.0, 20.0),
+            dz: (srcVerts[a + 2] + srcVerts[b + 2] + srcVerts[d + 2]) / 3 - rz0,
+            stiff: clamp(srcVerts[a + 10], 6.0, 15.0),
           };
         };
         const p0 = ring(0), pTop = ring(K - 1);
-        if (pTop.y - p0.y > 0.16) {
-          clumpCulms.push({ p0, pTop });
-        }
-        continue;
-      }
-
-      // 3. Panicle spikelets (4v_2t) or ribwort cylindrical flower head (16v_25t)
-      if ((nv === 4 && tCnt === 2) || (nv === 16 && tCnt === 25)) {
-        let cx = 0, cy = 0, cz = 0, cr = 0, cg = 0, cb = 0;
-        for (let k = 0; k < nv; k++) {
-          const o = vs[k] * SOURCE_STRIDE;
-          cx += srcVerts[o]; cy += srcVerts[o + 1]; cz += srcVerts[o + 2];
-          cr += srcVerts[o + 6]; cg += srcVerts[o + 7]; cb += srcVerts[o + 8];
-        }
-        cx /= nv; cy /= nv; cz /= nv;
-        if (cy > 0.18) {
-          spikeletCloud.push({
-            x: cx, y: cy, z: cz,
-            col: [
-              clamp((cr / nv) * CANOPY_ALBEDO_SCALE * 1.12, 0.020, 0.25),
-              clamp((cg / nv) * CANOPY_ALBEDO_SCALE * 1.10, 0.024, 0.26),
-              clamp((cb / nv) * CANOPY_ALBEDO_SCALE * 1.04, 0.010, 0.15),
-            ],
+        if (pTop.y - p0.y > 0.26) {
+          culmSpecimens.push({
+            reachX: pTop.dx - p0.dx,
+            reachZ: pTop.dz - p0.dz,
+            height: clamp(pTop.y, 0.38, 0.58),
+            stiff: p0.stiff,
           });
         }
       }
     }
-
-    clumpCulms.sort((a, b) => b.pTop.y - a.pTop.y);
-    if (clumpCulms.length > 0) {
-      const culm = clumpCulms[0];
-      let headX = culm.pTop.x, headY = culm.pTop.y, headZ = culm.pTop.z;
-      let headCol = culm.pTop.col;
-      let headCount = 0, sumX = 0, sumY = 0, sumZ = 0, sumR = 0, sumG = 0, sumB = 0;
-      for (const sp of spikeletCloud) {
-        if (Math.hypot(sp.x - culm.pTop.x, sp.y - culm.pTop.y, sp.z - culm.pTop.z) < 0.22) {
-          sumX += sp.x; sumY += sp.y; sumZ += sp.z;
-          sumR += sp.col[0]; sumG += sp.col[1]; sumB += sp.col[2];
-          headCount++;
-        }
-      }
-      if (headCount > 0) {
-        const mx = sumX / headCount, my = sumY / headCount, mz = sumZ / headCount;
-        headX = culm.pTop.x + (mx - culm.pTop.x) * 1.45;
-        headY = Math.max(culm.pTop.y + 0.04, culm.pTop.y + (my - culm.pTop.y) * 1.45);
-        headZ = culm.pTop.z + (mz - culm.pTop.z) * 1.45;
-        headCol = [sumR / headCount, sumG / headCount, sumB / headCount];
-      }
-      const dx = headX - culm.p0.x, dz = headZ - culm.p0.z;
-      const hl = Math.hypot(dx, dz);
-      const sx = hl > 1e-4 ? -dz / hl : 1.0;
-      const sz = hl > 1e-4 ? dx / hl : 0.0;
-      const panicleHW = headCount > 0 ? (c.species === 1 ? 0.015 : c.species === 3 ? 0.0085 : 0.0115) : 0.0048;
-      blades.push({
-        rootX: rx,
-        rootZ: rz,
-        species: c.species,
-        shared: c.shared,
-        isBroad: true, // 3-tri culm + golden panicle plume
-        stiff: clamp(culm.p0.stiff, 5.5, 16.0),
-        tuftRand,
-        retirePhase: Math.round(hash01(clumpSeed, 91) * 7) / 7,
-        score: (c.shared ? 0.42 : 0.0) + headY * 0.85 + hash01(clumpSeed, 11) * 0.42,
-        pts: [
-          { x: culm.p0.x, y: Math.max(0.0, culm.p0.y - 0.008), z: culm.p0.z, sx, sy: 0, sz, hw: 0.0032, col: culm.p0.col, along: 0.04 },
-          { x: culm.pTop.x, y: culm.pTop.y, z: culm.pTop.z, sx, sy: 0, sz, hw: panicleHW, col: headCol, along: 0.74 },
-          { x: headX, y: Math.min(0.68, headY), z: headZ, sx, sy: 0, sz, hw: 0, col: headCol, along: 1.0 },
-        ],
-      });
-    }
-
-    clumpLeaves.sort((a, b) => b.span - a.span);
-    const maxLeaves = c.species === 0 ? 4 : c.species === 3 ? 3 : 2;
-    for (let k = 0; k < Math.min(clumpLeaves.length, maxLeaves); k++) {
-      const lf = clumpLeaves[k];
-      blades.push({
-        ...lf,
-        isBroad: c.species === 3, // Broad ribwort plantain rosette leaves use 3-tri; grass blades use crisp 2-tri lanceolate
-        retirePhase: Math.round(hash01(clumpSeed, 97 + k) * 7) / 7,
-        score: (c.shared ? 0.45 : 0.0) + lf.span * 1.4 + (k === 0 ? 0.35 : 0.0) + hash01(clumpSeed, 31 + k) * 0.4,
-      });
-    }
   }
 
-  blades.sort((a, b) => b.score - a.score);
-  return blades;
+  return { leafSpecimens, culmSpecimens, mixIdx, vIdx };
 }
 
-// Generates dense, natural arched 3D turf-grass micro-tufts filling the 4.0 m x 4.0 m sward between tussocks.
-// Outer 2 rings (within 0.72 m of the 4.0 m border) use a variant-invariant seed so rotRad = 0 tiles interlock seamlessly
-// AND share vertices across variants in vertices.bin!
-function generateSupplementalTurfTufts(profile, mixIdx, vIdx) {
-  const tufts = [];
-  const TUFT_GRID = 12; // 12 x 12 = 144 micro-tufts per 4.0 m x 4.0 m tile (9 micro-tufts/m^2, 6 arched blades each = 864 turf blades!)
-  const cellM = TILE_METRES / TUFT_GRID;
+// Evaluates parabolic droop curve y(s) = hPeak * (s - droop * s^1.7) / peakNorm with exact peak = hPeak.
+function evalBladeCurve(s, hPeak, droop) {
+  // Derivative 1 - 1.7 * droop * s^0.7 = 0 => sCrit = (1 / (1.7 * droop))^(1 / 0.7)
+  const denom = 1.7 * droop;
+  const sCrit = denom > 1.0 ? Math.min(1.0, Math.pow(1.0 / denom, 1.0 / 0.7)) : 1.0;
+  const peakNorm = Math.max(0.18, sCrit - droop * Math.pow(sCrit, 1.7));
+  return hPeak * ((s - droop * Math.pow(s, 1.7)) / peakNorm);
+}
 
-  for (let gz = 0; gz < TUFT_GRID; gz++) {
-    for (let gx = 0; gx < TUFT_GRID; gx++) {
-      const borderDist = Math.min(gx, TUFT_GRID - 1 - gx, gz, TUFT_GRID - 1 - gz);
-      const isSharedBorder = borderDist <= 1;
-      // Interior micro-tufts draw from 2 variant banks per mix + shared border ring -> rich natural variety + compact stream
-      const bankId = vIdx & 1;
-      const seed = isSharedBorder
-        ? hashCoordSeed(911 + mixIdx * 7, gx + 17, gz + 53)
-        : hashCoordSeed(mixIdx * 16 + bankId + 101, gx + 17, gz + 53);
+// Generates the 3-stratum Mediterranean meadow sward on [0, 1.75 m)^2:
+//   1. Tussock Sheaves (70%): 118 organic Poisson tussock clumps -> 588 curved 3-segment (5-tri, 7-vert) blades (~2,940 tris)
+//   2. Basal Ground-Huggers (20%): 94 interstitial tufts -> 282 broad arched low leaves (3-tri each -> 846 tris)
+//   3. Tall Golden Oat/Barley Panicles & Coastal Wildflowers (10%): 48 panicles (7-tri) + 12 wildflowers (7-tri) (420 tris)
+function generateBotanicalSward(profile, specimens, mixIdx, vIdx) {
+  // Two rich Poisson layout banks per mix + per-variant organic wildflowers/panicles -> compact gzip + zero repetition
+  const bankId = vIdx & 1;
+  const baseSeed = hashCoordSeed(4099 + mixIdx * 31, bankId + 1, 17);
+  const varSeed = hashCoordSeed(8191 + mixIdx * 53, vIdx + 1, 29);
 
-      const jx = (hash01(seed, 1) - 0.5) * cellM * 0.78;
-      const jz = (hash01(seed, 2) - 0.5) * cellM * 0.78;
-      const rootX = clamp((gx + 0.5) * cellM + jx, 0.03, TILE_METRES - 0.03);
-      const rootZ = clamp((gz + 0.5) * cellM + jz, 0.03, TILE_METRES - 0.03);
-      const tuftRand = clamp(0.05 + 0.90 * hash01(seed, 3), 0.05, 0.95);
-      const tuftTall = 0.76 + 0.52 * hash01(seed, 4);
-      const tuftHue = hash01(seed, 5);
-      const baseAz = hash01(seed, 6) * Math.PI * 2;
-      const stiff = profile.stiffness * (0.78 + 0.36 * hash01(seed, 7));
+  // --- STRATUM 1: 124 Toroidal-Poisson Ryegrass, Cocksfoot & Fescue Tussocks (624 x 5-tri curved blades = 3,120 tris) ---
+  const tussockCenters = sampleToroidalPoisson(baseSeed, 124, 0.118, [], 0, 0.04);
+  const tussockBlades = [];
 
-      const cRoot = [
-        lerp(profile.rootCol[0], profile.strawCol[0], 0.12),
-        lerp(profile.rootCol[1], profile.strawCol[1], 0.12),
-        lerp(profile.rootCol[2], profile.strawCol[2], 0.12),
+  // Assign 3..7 blades per tussock summing to exactly 624 blades
+  const counts = tussockCenters.map((tc) => {
+    const r = hash01(tc.seed, 1);
+    return r < 0.12 ? 3 : r < 0.34 ? 4 : r < 0.64 ? 5 : r < 0.86 ? 6 : 7;
+  });
+  let bladeSum = counts.reduce((a, b) => a + b, 0);
+  let adjustCursor = 0;
+  while (bladeSum > 624) {
+    const ti = adjustCursor++ % counts.length;
+    if (counts[ti] > 3) { counts[ti]--; bladeSum--; }
+  }
+  while (bladeSum < 624) {
+    const ti = adjustCursor++ % counts.length;
+    if (counts[ti] < 7) { counts[ti]++; bladeSum++; }
+  }
+
+  for (let ti = 0; ti < tussockCenters.length; ti++) {
+    const tc = tussockCenters[ti];
+    const cSeed = tc.seed;
+    const tuftRand = clamp(0.06 + 0.88 * hash01(cSeed, 2), 0.06, 0.94);
+    const vigor = 0.78 + 0.44 * hash01(cSeed, 3);
+    const leanAz = hash01(cSeed, 4) * Math.PI * 2;
+    const leanStrength = 0.015 + 0.035 * hash01(cSeed, 5);
+    const clumpHue = hash01(cSeed, 6);
+    const clumpStraw = hash01(cSeed, 7) > 0.74 ? 0.42 + 0.38 * hash01(cSeed, 8) : 0.14 * hash01(cSeed, 8);
+    const nBlades = counts[ti];
+    const baseAz0 = hash01(cSeed, 9) * Math.PI * 2;
+
+    for (let bi = 0; bi < nBlades; bi++) {
+      const bSeed = hashCoordSeed(cSeed, bi + 1, 13);
+      // Asymmetric golden-angle + strong angular jitter -> natural organic tussock sheaf, NEVER a 6-spoke pinwheel!
+      const az = baseAz0 + bi * GOLDEN_ANGLE + (hash01(bSeed, 1) - 0.5) * 0.76;
+      const dirX = Math.cos(az), dirZ = Math.sin(az);
+      const sideX = -dirZ, sideZ = dirX;
+
+      const crownOff = 0.010 + 0.032 * hash01(bSeed, 2);
+      const bx0 = tc.x + dirX * crownOff;
+      const bz0 = tc.z + dirZ * crownOff;
+
+      // 16-38 cm tall curved blades with 1.4-2.2 cm basal width (hw0 = 0.0070..0.0110 m)
+      const hPeak = clamp(profile.sheafHeight * vigor * (0.76 + 0.56 * hash01(bSeed, 3)), 0.16, 0.38);
+      const hw0 = 0.0070 + 0.0040 * hash01(bSeed, 4); // 1.4 cm to 2.2 cm full basal width
+      const reach = (0.16 + 0.19 * hash01(bSeed, 5)) * clamp(vigor, 0.88, 1.20);
+      const droop = 0.32 + 0.34 * hash01(bSeed, 6);
+      const curlLat = (hash01(bSeed, 7) - 0.5) * 0.056;
+      const stiff = profile.stiffness * (0.76 + 0.42 * hash01(bSeed, 8));
+
+      // Blend 25% real extracted specimen arch displacements when available for extra botanical irregularity
+      const useSpec = specimens.leafSpecimens.length > 0 && hash01(bSeed, 9) < 0.28;
+      const spec = useSpec
+        ? specimens.leafSpecimens[(ti * 7 + bi) % specimens.leafSpecimens.length]
+        : null;
+
+      const strawMix = clamp(clumpStraw + 0.18 * hash01(bSeed, 10), 0, 0.82);
+      const hueScale = 0.88 + 0.24 * clumpHue;
+      const cBase = [
+        clamp(lerp(profile.rootCol[0], profile.strawCol[0], strawMix * 0.28) * hueScale, 0.025, 0.16),
+        clamp(lerp(profile.rootCol[1], profile.strawCol[1], strawMix * 0.24) * hueScale, 0.048, 0.18),
+        clamp(lerp(profile.rootCol[2], profile.strawCol[2], strawMix * 0.28), 0.016, 0.08),
+      ];
+      const cMid1 = [
+        clamp(lerp(profile.midCol[0], profile.strawCol[0], strawMix * 0.42) * hueScale, 0.032, 0.19),
+        clamp(lerp(profile.midCol[1], profile.strawCol[1], strawMix * 0.36) * hueScale, 0.072, 0.22),
+        clamp(lerp(profile.midCol[2], profile.strawCol[2], strawMix * 0.42), 0.020, 0.09),
+      ];
+      const cMid2 = [
+        clamp(lerp(profile.upperCol[0], profile.strawCol[0], strawMix * 0.58) * hueScale, 0.040, 0.21),
+        clamp(lerp(profile.upperCol[1], profile.strawCol[1], strawMix * 0.50) * hueScale, 0.085, 0.24),
+        clamp(lerp(profile.upperCol[2], profile.strawCol[2], strawMix * 0.56), 0.022, 0.10),
+      ];
+      const cTip = [
+        clamp(lerp(profile.tipCol[0], profile.strawCol[0], strawMix * 0.74) * hueScale, 0.048, 0.23),
+        clamp(lerp(profile.tipCol[1], profile.strawCol[1], strawMix * 0.66) * hueScale, 0.095, 0.25),
+        clamp(lerp(profile.tipCol[2], profile.strawCol[2], strawMix * 0.70), 0.024, 0.11),
       ];
 
-      const blades = [];
-      const bladesInTuft = 6;
-      for (let bi = 0; bi < bladesInTuft; bi++) {
-        const bSeed = hashCoordSeed(seed, bi + 1, 7);
-        const az = baseAz + (bi / bladesInTuft) * Math.PI * 2 + (hash01(bSeed, 1) - 0.5) * 0.52;
-        const dirX = Math.cos(az), dirZ = Math.sin(az);
-        const sideX = -dirZ, sideZ = dirX;
+      const stations = [0.0, 0.34, 0.68, 1.0];
+      const hwScale = [1.0, 0.92, 0.60, 0.0];
+      const alongVals = [0.02, 0.26, 0.52, 0.76];
+      const cols = [cBase, cMid1, cMid2, cTip];
+      const pts = [];
 
-        const hPeak = profile.turfHeight * tuftTall * (0.72 + 0.54 * hash01(bSeed, 3));
-        const reach = (0.09 + 0.14 * hash01(bSeed, 4)) * tuftTall;
-        const droop = 0.76 + 0.22 * hash01(bSeed, 5);
-        const hwMid = 0.0038 + 0.0022 * hash01(bSeed, 6);
-        const senescent = hash01(bSeed, 8) > 0.68 ? 1.0 : 0.25 * hash01(bSeed, 9);
-        const hueScale = 0.90 + 0.20 * tuftHue;
-
-        const cMid = [
-          clamp(lerp(profile.midCol[0], profile.strawCol[0], senescent * 0.55) * hueScale, 0.016, 0.22),
-          clamp(lerp(profile.midCol[1], profile.strawCol[1], senescent * 0.50) * hueScale, 0.022, 0.24),
-          clamp(lerp(profile.midCol[2], profile.strawCol[2], senescent * 0.55), 0.008, 0.13),
-        ];
-        const cTip = [
-          clamp(lerp(profile.tipCol[0], profile.strawCol[0], senescent * 0.85) * hueScale, 0.020, 0.25),
-          clamp(lerp(profile.tipCol[1], profile.strawCol[1], senescent * 0.80) * hueScale, 0.026, 0.26),
-          clamp(lerp(profile.tipCol[2], profile.strawCol[2], senescent * 0.85), 0.010, 0.14),
-        ];
-
-        blades.push({
-          midX: rootX + dirX * reach * 0.52,
-          midY: hPeak * 0.84,
-          midZ: rootZ + dirZ * reach * 0.52,
-          tipX: rootX + dirX * reach,
-          tipY: hPeak * droop,
-          tipZ: rootZ + dirZ * reach,
-          sx: sideX,
-          sz: sideZ,
-          hw: hwMid,
-          cMid,
-          cTip,
+      for (let si = 0; si < 4; si++) {
+        const s = stations[si];
+        const rDist = reach * (0.58 * s + 0.42 * Math.pow(s, 1.35));
+        const latOff = curlLat * Math.pow(s, 1.6);
+        const leanX = Math.cos(leanAz) * leanStrength * s;
+        const leanZ = Math.sin(leanAz) * leanStrength * s;
+        let px = bx0 + dirX * rDist + sideX * latOff + leanX;
+        let py = si === 0 ? -0.006 : evalBladeCurve(s, hPeak, droop);
+        let pz = bz0 + dirZ * rDist + sideZ * latOff + leanZ;
+        if (spec) {
+          const sp = spec.relPts[si];
+          // Rotate extracted specimen delta slightly by az for variety while keeping 1:1 metric proportions
+          const ca = Math.cos(az * 0.5), sa = Math.sin(az * 0.5);
+          const sdx = sp.dx * ca - sp.dz * sa;
+          const sdz = sp.dx * sa + sp.dz * ca;
+          px = lerp(px, tc.x + sdx, 0.35);
+          py = si === 0 ? -0.006 : lerp(py, sp.y, 0.35);
+          pz = lerp(pz, tc.z + sdz, 0.35);
+        }
+        // Slight azimuthal twist of lateral axis along the curved blade
+        const twistAz = az + curlLat * 2.4 * s;
+        pts.push({
+          x: px,
+          y: py,
+          z: pz,
+          sx: -Math.sin(twistAz),
+          sz: Math.cos(twistAz),
+          hw: hw0 * hwScale[si],
+          col: cols[si],
+          along: alongVals[si],
         });
       }
 
-      tufts.push({
-        gx,
-        gz,
-        rootX,
-        rootZ,
+      tussockBlades.push({
+        rootX: tc.x,
+        rootZ: tc.z,
         tuftRand,
         stiff,
-        cRoot,
-        blades,
-        score: (isSharedBorder ? 0.25 : 0.0) + hash01(seed, 19) * 0.75,
+        hPeak,
+        hw0,
+        pts,
+        retirePhase: Math.round(hash01(bSeed, 15) * 7) / 7,
+        // Rank by botanical stature (height * width + primary sheaf bonus) so retirement thins fine inner blades first!
+        score: hPeak * 2.1 + hw0 * 38.0 + (bi < 2 ? 0.38 : 0.0) + hash01(bSeed, 16) * 0.22,
       });
     }
   }
+  tussockBlades.sort((a, b) => b.score - a.score);
 
-  return tufts;
+  // --- STRATUM 2: 98 Interstitial Low Basal Turf / Clover / Ribwort Ground-Hugger Tufts (98 x 9 = 882 tris) ---
+  const huggerCenters = sampleToroidalPoisson(
+    hashCoordSeed(baseSeed, 77, 3),
+    98,
+    0.114,
+    tussockCenters,
+    0.052,
+    0.04,
+  );
+  const huggerTufts = [];
+  for (let hi = 0; hi < huggerCenters.length; hi++) {
+    const hc = huggerCenters[hi];
+    const hSeed = hc.seed;
+    const tuftRand = clamp(0.05 + 0.89 * hash01(hSeed, 1), 0.05, 0.94);
+    const stiff = profile.stiffness * 1.18;
+    const baseAz = hash01(hSeed, 2) * Math.PI * 2;
+    const hueJit = 0.90 + 0.20 * hash01(hSeed, 3);
+    const leaves = [];
+
+    for (let li = 0; li < 3; li++) {
+      const lSeed = hashCoordSeed(hSeed, li + 1, 19);
+      const az = baseAz + li * GOLDEN_ANGLE + (hash01(lSeed, 1) - 0.5) * 0.65;
+      const dirX = Math.cos(az), dirZ = Math.sin(az);
+      const sideX = -dirZ, sideZ = dirX;
+      // 5-11 cm tall broad arching basal rosettes/clover mats carpeting the root zone!
+      const hArch = 0.055 + 0.055 * hash01(lSeed, 2);
+      const reach = 0.155 + 0.115 * hash01(lSeed, 3);
+      const hwBase = 0.016 + 0.009 * hash01(lSeed, 4); // 3.2-5.0 cm basal tuft cluster attachment
+      const hwMid = 0.028 + 0.015 * hash01(lSeed, 5);  // 5.6-8.6 cm broad overlapping clover/ribwort pad
+
+      const c0 = [
+        clamp(profile.rootCol[0] * 0.95 * hueJit, 0.022, 0.14),
+        clamp(profile.rootCol[1] * 1.06 * hueJit, 0.050, 0.18),
+        clamp(profile.rootCol[2] * 0.92, 0.015, 0.07),
+      ];
+      const c1 = [
+        clamp(profile.huggerCol[0] * hueJit, 0.028, 0.16),
+        clamp(profile.huggerCol[1] * hueJit, 0.068, 0.20),
+        clamp(profile.huggerCol[2], 0.018, 0.08),
+      ];
+      const c2 = [
+        clamp(profile.midCol[0] * 1.04 * hueJit, 0.034, 0.18),
+        clamp(profile.midCol[1] * 1.08 * hueJit, 0.078, 0.22),
+        clamp(profile.midCol[2], 0.020, 0.09),
+      ];
+
+      leaves.push({
+        pts: [
+          { x: hc.x + dirX * 0.008, y: -0.005, z: hc.z + dirZ * 0.008, sx: sideX, sz: sideZ, hw: hwBase, col: c0, along: 0.02 },
+          { x: hc.x + dirX * reach * 0.54, y: hArch, z: hc.z + dirZ * reach * 0.54, sx: sideX, sz: sideZ, hw: hwMid, col: c1, along: 0.24 },
+          { x: hc.x + dirX * reach, y: hArch * 0.58, z: hc.z + dirZ * reach, sx: sideX, sz: sideZ, hw: 0, col: c2, along: 0.44 },
+        ],
+        retirePhase: Math.round(hash01(lSeed, 9) * 7) / 7,
+      });
+    }
+    huggerTufts.push({
+      rootX: hc.x,
+      rootZ: hc.z,
+      tuftRand,
+      stiff,
+      leaves,
+      score: 0.35 + hash01(hSeed, 11) * 0.65,
+    });
+  }
+  huggerTufts.sort((a, b) => b.score - a.score);
+
+  // --- STRATUM 3A: 48 Tall Sunlit Oat / Wild Barley Culms & Panicle Seed Heads (48 x 7 = 336 tris) ---
+  const panicleCenters = sampleToroidalPoisson(varSeed, 48, 0.185, [], 0, 0.05);
+  const panicles = [];
+  for (let pi = 0; pi < panicleCenters.length; pi++) {
+    const pc = panicleCenters[pi];
+    const pSeed = pc.seed;
+    const tuftRand = clamp(0.08 + 0.84 * hash01(pSeed, 1), 0.08, 0.92);
+    const az = hash01(pSeed, 2) * Math.PI * 2;
+    const dirX = Math.cos(az), dirZ = Math.sin(az);
+    const sideX = -dirZ, sideZ = dirX;
+
+    // 38-58 cm tall slender culms topped with golden-straw oat/barley seed panicles!
+    const specCulm = specimens.culmSpecimens.length > 0
+      ? specimens.culmSpecimens[pi % specimens.culmSpecimens.length]
+      : null;
+    const hTop = clamp(
+      specCulm ? lerp(0.40 + 0.18 * hash01(pSeed, 3), specCulm.height, 0.45) : (0.38 + 0.20 * hash01(pSeed, 3)),
+      0.38,
+      0.58,
+    );
+    const reach = 0.11 + 0.15 * hash01(pSeed, 4);
+    const droop = 0.24 + 0.24 * hash01(pSeed, 5);
+    const stiff = clamp((specCulm ? specCulm.stiff : 8.2) * (0.82 + 0.32 * hash01(pSeed, 6)), 5.8, 13.5);
+    const headHW = 0.0095 + 0.0055 * hash01(pSeed, 7); // 1.9-3.0 cm feathery golden spikelet plume
+
+    const cStem0 = profile.rootCol;
+    const cStem1 = [
+      lerp(profile.midCol[0], profile.oatGoldCol[0], 0.28),
+      lerp(profile.midCol[1], profile.oatGoldCol[1], 0.24),
+      lerp(profile.midCol[2], profile.oatGoldCol[2], 0.25),
+    ];
+    const cHeadBase = [
+      lerp(profile.tipCol[0], profile.oatGoldCol[0], 0.76),
+      lerp(profile.tipCol[1], profile.oatGoldCol[1], 0.74),
+      lerp(profile.tipCol[2], profile.oatGoldCol[2], 0.72),
+    ];
+    const cHeadTip = [
+      clamp(profile.oatGoldCol[0] * (0.94 + 0.14 * hash01(pSeed, 8)), 0.14, 0.24),
+      clamp(profile.oatGoldCol[1] * (0.94 + 0.14 * hash01(pSeed, 8)), 0.12, 0.21),
+      clamp(profile.oatGoldCol[2], 0.042, 0.09),
+    ];
+
+    const sArr = [0.0, 0.38, 0.74, 1.0];
+    const hwArr = [0.0034, 0.0028, headHW * 0.78, 0.0];
+    const alArr = [0.04, 0.42, 0.82, 1.00]; // along > 0.78 marks sunlit golden oat seed-heads!
+    const colArr = [cStem0, cStem1, cHeadBase, cHeadTip];
+    const pts = sArr.map((s, si) => {
+      const rDist = reach * (0.52 * s + 0.48 * Math.pow(s, 1.4));
+      return {
+        x: pc.x + dirX * rDist,
+        y: si === 0 ? -0.006 : evalBladeCurve(s, hTop, droop),
+        z: pc.z + dirZ * rDist,
+        sx: sideX,
+        sz: sideZ,
+        hw: hwArr[si],
+        col: colArr[si],
+        along: alArr[si],
+      };
+    });
+
+    panicles.push({
+      rootX: pc.x,
+      rootZ: pc.z,
+      tuftRand,
+      stiff,
+      hTop,
+      headHW,
+      dirX,
+      dirZ,
+      pts,
+      retirePhase: Math.round(hash01(pSeed, 12) * 7) / 7,
+      score: hTop * 1.8 + headHW * 25.0 + hash01(pSeed, 13) * 0.35,
+    });
+  }
+  panicles.sort((a, b) => b.score - a.score);
+
+  // --- STRATUM 3B: 12 Subtle Coastal Wildflowers (Chamomile, Mallow, Hawkbit, Field Poppy; 12 x 7 = 84 tris) ---
+  const flowerCenters = sampleToroidalPoisson(
+    hashCoordSeed(varSeed, 313, 7),
+    12,
+    0.34,
+    panicleCenters,
+    0.10,
+    0.08,
+  );
+  const wildflowers = [];
+  for (let fi = 0; fi < flowerCenters.length; fi++) {
+    const fc = flowerCenters[fi];
+    const fSeed = fc.seed;
+    const tuftRand = clamp(0.12 + 0.78 * hash01(fSeed, 1), 0.12, 0.90);
+    const az = hash01(fSeed, 2) * Math.PI * 2;
+    const dirX = Math.cos(az), dirZ = Math.sin(az);
+    const sideX = -dirZ, sideZ = dirX;
+    const hFlower = 0.22 + 0.17 * hash01(fSeed, 3);
+    const lean = 0.04 + 0.07 * hash01(fSeed, 4);
+    const corollaR = 0.011 + 0.0055 * hash01(fSeed, 5); // 2.2-3.3 cm subtle Mediterranean blossom
+    const kindRoll = hash01(fSeed, 6);
+
+    let petalCol, diskCol;
+    if (mixIdx === 0) {
+      // Pasture: coastal chamomile (ivory-white + golden disk) & wild rose mallow
+      if (kindRoll < 0.74) {
+        petalCol = [0.245, 0.232, 0.168];
+        diskCol = [0.205, 0.142, 0.026];
+      } else {
+        petalCol = [0.182, 0.080, 0.146];
+        diskCol = [0.125, 0.055, 0.095];
+      }
+    } else if (mixIdx === 1) {
+      // Waste: golden hawkbit/mustard & chamomile
+      if (kindRoll < 0.62) {
+        petalCol = [0.218, 0.172, 0.032];
+        diskCol = [0.175, 0.118, 0.020];
+      } else {
+        petalCol = [0.240, 0.226, 0.162];
+        diskCol = [0.200, 0.138, 0.026];
+      }
+    } else {
+      // Field-margin: chamomile, scarlet field poppy (Papaver rhoeas), and mallow
+      if (kindRoll < 0.52) {
+        petalCol = [0.245, 0.232, 0.168];
+        diskCol = [0.205, 0.142, 0.026];
+      } else if (kindRoll < 0.84) {
+        petalCol = [0.232, 0.035, 0.024];
+        diskCol = [0.038, 0.026, 0.030];
+      } else {
+        petalCol = [0.182, 0.080, 0.146];
+        diskCol = [0.125, 0.055, 0.095];
+      }
+    }
+
+    wildflowers.push({
+      rootX: fc.x,
+      rootZ: fc.z,
+      tuftRand,
+      stiff: 9.2 + 2.5 * hash01(fSeed, 7),
+      az,
+      dirX,
+      dirZ,
+      sideX,
+      sideZ,
+      hFlower,
+      lean,
+      corollaR,
+      petalCol,
+      diskCol,
+      stemCol: profile.midCol,
+      rootCol: profile.rootCol,
+      retirePhase: Math.round(hash01(fSeed, 9) * 7) / 7,
+      score: hFlower + corollaR * 12.0 + hash01(fSeed, 10) * 0.25,
+    });
+  }
+  wildflowers.sort((a, b) => b.score - a.score);
+
+  return { tussockCenters, tussockBlades, huggerTufts, panicles, wildflowers };
 }
 
-// Emits a botanical organ (3-tri ribbon for broad rosettes/panicles, or 2-tri arched lanceolate blade for grass leaves).
-function emitBotanicalOrgan(pool, outIndices, blade, widthMult, heightMult, retiring, retireRank, stats) {
-  const [p0, p1, p2] = blade.pts;
-  const wTag = retiring ? -(0.10 + 0.86 * clamp(retireRank, 0, 1)) : 1.0;
+function addScoredTri(pool, outIndices, i0, i1, i2, colHint, stats) {
+  const [ax0, ay0, az0] = pool.posOf(i0);
+  const [bx0, by0, bz0] = pool.posOf(i1);
+  const [cx0, cy0, cz0] = pool.posOf(i2);
+  const area = triArea3D(ax0, ay0, az0, bx0, by0, bz0, cx0, cy0, cz0);
+  if (area > 1e-8) {
+    stats.sumR += colHint[0] * area;
+    stats.sumG += colHint[1] * area;
+    stats.sumB += colHint[2] * area;
+    stats.sumArea += area;
+  }
+  outIndices.push(i0, i1, i2);
+}
+
+// Emits a 3-segment (5-tri, 7-vert) curved botanical blade (or 3-tri simplified tussock plume at L3).
+function emitCurvedSheafBlade(pool, outIndices, blade, curWMult, nextWMult, hMult, retiring, useSimplePlume, stats) {
+  const pts = blade.pts;
   const rx = blade.rootX, rz = blade.rootZ;
+  const wTag = retiring ? -(0.10 + 0.86 * clamp(blade.retirePhase, 0, 1)) : 1.0;
+  const widenRatio = !retiring && nextWMult > curWMult ? (nextWMult / curWMult - 1.0) : 0.0;
 
-  const ax = p2.x - p0.x, ay = (p2.y - p0.y) * heightMult, az = p2.z - p0.z;
-  let nx = p1.sy * az - p1.sz * ay;
-  let ny = p1.sz * ax - p1.sx * az;
-  let nz = p1.sx * ay - p1.sy * ax;
-  if (ny < 0) { nx = -nx; ny = -ny; nz = -nz; }
-  ny = Math.abs(ny) + 0.65;
+  const evalStationNormal = (si) => {
+    const pPrev = pts[Math.max(0, si - 1)];
+    const pNext = pts[Math.min(3, si + 1)];
+    const tx = pNext.x - pPrev.x;
+    const ty = (pNext.y - pPrev.y) * hMult;
+    const tz = pNext.z - pPrev.z;
+    const sx = pts[si].sx, sz = pts[si].sz;
+    // Ribbon normal = S x T (points upward and outward along the parabolic blade arch)
+    let nx = -sz * ty;
+    let ny = sz * tx - sx * tz;
+    let nz = sx * ty;
+    if (ny < 0) { nx = -nx; ny = -ny; nz = -nz; }
+    ny = Math.max(0.32, ny + 0.35);
+    return [nx, ny, nz];
+  };
 
-  const addV = (px, py, pz, snx, sny, snz, col, along, forceSurvive = false) => {
-    const fy = py <= 0 ? py : py * heightMult;
-    if (fy > stats.maxY) stats.maxY = fy;
-    const qx = qPos(px), qy = qPos(fy), qz = qPos(pz);
-    const useRetire = retiring && !forceSurvive;
+  const emitRowEdge = (si, sign) => {
+    const p = pts[si];
+    const [nx, ny, nz] = evalStationNormal(si);
+    const hw = p.hw * curWMult;
+    const px = qPos(p.x + p.sx * hw * sign);
+    const py = qPos(p.y <= 0 ? p.y : p.y * hMult);
+    const pz = qPos(p.z + p.sz * hw * sign);
+    if (py > stats.maxY) stats.maxY = py;
+
+    // Slight cross-camber normal spread across V-keeled grass lamina
+    const camber = 0.28 * sign;
+    const packedN = packSnorm8x4(nx + p.sx * camber, ny, nz + p.sz * camber, wTag);
+    const packedC = packColorUnorm8x4(p.col[0], p.col[1], p.col[2], blade.tuftRand);
+    let morph = 0;
+    if (retiring) {
+      morph = packHalf2(rx - px, rz - pz);
+    } else if (widenRatio > 0 && hw > 0) {
+      morph = packHalf2(p.sx * hw * sign * widenRatio, p.sz * hw * sign * widenRatio);
+    }
+    return pool.add(px, py, pz, packedN, packedC, qAttr(p.along), qAttr(blade.stiff), morph);
+  };
+
+  const emitTip = () => {
+    const p = pts[3];
+    const [nx, ny, nz] = evalStationNormal(3);
+    const px = qPos(p.x), py = qPos(p.y * hMult), pz = qPos(p.z);
+    if (py > stats.maxY) stats.maxY = py;
     return pool.add(
-      qx,
-      qy,
-      qz,
-      packSnorm8x4(snx, sny, snz, useRetire ? wTag : 1.0),
-      packColorUnorm8x4(col[0], col[1], col[2], blade.tuftRand),
-      qAttr(clamp(along, 0, 1)),
-      qAttr(blade.stiff),
-      useRetire ? packHalf2(rx - qx, rz - qz) : 0,
+      px,
+      py,
+      pz,
+      packSnorm8x4(nx * 0.75, ny + 0.25, nz * 0.75, wTag),
+      packColorUnorm8x4(p.col[0], p.col[1], p.col[2], blade.tuftRand),
+      qAttr(p.along),
+      qAttr(blade.stiff * 0.90),
+      retiring ? packHalf2(rx - px, rz - pz) : 0,
     );
   };
 
-  const addT = (i0, i1, i2, colHint) => {
-    const [ax0, ay0, az0] = pool.posOf(i0);
-    const [bx0, by0, bz0] = pool.posOf(i1);
-    const [cx0, cy0, cz0] = pool.posOf(i2);
-    const area = triArea3D(ax0, ay0, az0, bx0, by0, bz0, cx0, cy0, cz0);
-    if (area > 1e-8) {
-      stats.sumR += colHint[0] * area;
-      stats.sumG += colHint[1] * area;
-      stats.sumB += colHint[2] * area;
-      stats.sumArea += area;
-    }
-    outIndices.push(i0, i1, i2);
-  };
-
-  const hw1 = p1.hw * widthMult;
-  const i1L = addV(p1.x - p1.sx * hw1, p1.y, p1.z - p1.sz * hw1, nx - p1.sx * 0.18, ny, nz - p1.sz * 0.18, p1.col, p1.along);
-  const i1R = addV(p1.x + p1.sx * hw1, p1.y, p1.z + p1.sz * hw1, nx + p1.sx * 0.18, ny, nz + p1.sz * 0.18, p1.col, p1.along);
-  const iTip = addV(p2.x, p2.y, p2.z, nx * 0.6, ny + 0.25, nz * 0.6, p2.col, p2.along);
-
-  if (blade.isBroad) {
-    const hw0 = p0.hw * widthMult;
-    const i0L = addV(p0.x - p0.sx * hw0, p0.y, p0.z - p0.sz * hw0, nx - p0.sx * 0.22, ny, nz - p0.sz * 0.22, p0.col, p0.along);
-    const i0R = addV(p0.x + p0.sx * hw0, p0.y, p0.z + p0.sz * hw0, nx + p0.sx * 0.22, ny, nz + p0.sz * 0.22, p0.col, p0.along);
-    addT(i0L, i0R, i1R, p0.col);
-    addT(i0L, i1R, i1L, p1.col);
-    addT(i1L, i1R, iTip, p2.col);
-  } else {
-    const iBase = addV(p0.x, p0.y, p0.z, nx * 0.4, ny + 0.35, nz * 0.4, p0.col, p0.along);
-    addT(iBase, i1L, i1R, p1.col);
-    addT(i1L, iTip, i1R, p2.col);
+  if (useSimplePlume) {
+    // L3 broad 3-triangle tussock plume: station 0 -> station 2 -> tip (5 verts, 3 tris)
+    const i0L = emitRowEdge(0, -1), i0R = emitRowEdge(0, 1);
+    const i2L = emitRowEdge(2, -1), i2R = emitRowEdge(2, 1);
+    const iTip = emitTip();
+    addScoredTri(pool, outIndices, i0L, i0R, i2R, pts[1].col, stats);
+    addScoredTri(pool, outIndices, i0L, i2R, i2L, pts[1].col, stats);
+    addScoredTri(pool, outIndices, i2L, i2R, iTip, pts[2].col, stats);
+    return;
   }
+
+  // Full 3-segment curved botanical blade: 7 vertices, 5 triangles!
+  const i0L = emitRowEdge(0, -1), i0R = emitRowEdge(0, 1);
+  const i1L = emitRowEdge(1, -1), i1R = emitRowEdge(1, 1);
+  const i2L = emitRowEdge(2, -1), i2R = emitRowEdge(2, 1);
+  const iTip = emitTip();
+
+  addScoredTri(pool, outIndices, i0L, i0R, i1R, pts[0].col, stats);
+  addScoredTri(pool, outIndices, i0L, i1R, i1L, pts[1].col, stats);
+  addScoredTri(pool, outIndices, i1L, i1R, i2R, pts[1].col, stats);
+  addScoredTri(pool, outIndices, i1L, i2R, i2L, pts[2].col, stats);
+  addScoredTri(pool, outIndices, i2L, i2R, iTip, pts[3].col, stats);
 }
 
-// Emits a shared-crown arched 3D turf micro-tuft (1 shared root crown vertex + B x 2-tri arched lanceolate blades).
-function emitTurfTuft(pool, outIndices, tuft, bladesToEmit, bladesNextLvl, widthMult, heightMult, lvl, stats) {
-  if (bladesToEmit <= 0) return;
-  const rx = qPos(tuft.rootX), rz = qPos(tuft.rootZ);
-  const iCrown = pool.add(
-    rx,
-    qPos(-0.008),
-    rz,
-    packSnorm8x4(0, 1, 0, 1.0),
-    packColorUnorm8x4(tuft.cRoot[0], tuft.cRoot[1], tuft.cRoot[2], tuft.tuftRand),
-    0.0,
+// Emits a broad low-arching ground-hugger basal leaf (5 verts, 3 tris).
+function emitHuggerLeaf(pool, outIndices, tuft, leaf, curWMult, nextWMult, hMult, retiring, stats) {
+  const [p0, p1, p2] = leaf.pts;
+  const rx = tuft.rootX, rz = tuft.rootZ;
+  const wTag = retiring ? -(0.12 + 0.84 * clamp(leaf.retirePhase, 0, 1)) : 1.0;
+  const widenRatio = !retiring && nextWMult > curWMult ? (nextWMult / curWMult - 1.0) : 0.0;
+
+  const addEdge = (p, sign) => {
+    const hw = p.hw * curWMult;
+    const px = qPos(p.x + p.sx * hw * sign);
+    const py = qPos(p.y <= 0 ? p.y : p.y * hMult);
+    const pz = qPos(p.z + p.sz * hw * sign);
+    if (py > stats.maxY) stats.maxY = py;
+    let morph = 0;
+    if (retiring) {
+      morph = packHalf2(rx - px, rz - pz);
+    } else if (widenRatio > 0 && hw > 0) {
+      morph = packHalf2(p.sx * hw * sign * widenRatio, p.sz * hw * sign * widenRatio);
+    }
+    return pool.add(
+      px,
+      py,
+      pz,
+      packSnorm8x4(p.sx * 0.22 * sign, 0.94, p.sz * 0.22 * sign, wTag),
+      packColorUnorm8x4(p.col[0], p.col[1], p.col[2], tuft.tuftRand),
+      qAttr(p.along),
+      qAttr(tuft.stiff),
+      morph,
+    );
+  };
+
+  const i0L = addEdge(p0, -1), i0R = addEdge(p0, 1);
+  const i1L = addEdge(p1, -1), i1R = addEdge(p1, 1);
+  const tx = qPos(p2.x), ty = qPos(p2.y * hMult), tz = qPos(p2.z);
+  if (ty > stats.maxY) stats.maxY = ty;
+  const iTip = pool.add(
+    tx,
+    ty,
+    tz,
+    packSnorm8x4(0, 0.96, 0, wTag),
+    packColorUnorm8x4(p2.col[0], p2.col[1], p2.col[2], tuft.tuftRand),
+    qAttr(p2.along),
     qAttr(tuft.stiff),
-    0,
+    retiring ? packHalf2(rx - tx, rz - tz) : 0,
   );
 
-  for (let bi = 0; bi < bladesToEmit; bi++) {
-    const b = tuft.blades[bi];
-    const retiring = lvl < 3 ? bi >= bladesNextLvl : true;
-    const rank = lvl < 3
-      ? (retiring ? (bi - bladesNextLvl) / Math.max(1, bladesToEmit - bladesNextLvl) : 0)
-      : (bi / Math.max(1, bladesToEmit));
-    const wTag = retiring ? -(0.12 + 0.84 * clamp(rank, 0, 1)) : 1.0;
-
-    const hw = b.hw * widthMult;
-    const my = qPos(b.midY * heightMult);
-    const ty = qPos(b.tipY * heightMult);
-    if (my > stats.maxY) stats.maxY = my;
-    if (ty > stats.maxY) stats.maxY = ty;
-
-    const lx = qPos(b.midX - b.sx * hw), lz = qPos(b.midZ - b.sz * hw);
-    const rx2 = qPos(b.midX + b.sx * hw), rz2 = qPos(b.midZ + b.sz * hw);
-    const tx = qPos(b.tipX), tz = qPos(b.tipZ);
-
-    const iL = pool.add(
-      lx, my, lz,
-      packSnorm8x4(-b.sx * 0.24, 0.94, -b.sz * 0.24, wTag),
-      packColorUnorm8x4(b.cMid[0], b.cMid[1], b.cMid[2], tuft.tuftRand),
-      qAttr(0.52),
-      qAttr(tuft.stiff),
-      retiring ? packHalf2(rx - lx, rz - lz) : 0,
-    );
-    const iR = pool.add(
-      rx2, my, rz2,
-      packSnorm8x4(b.sx * 0.24, 0.94, b.sz * 0.24, wTag),
-      packColorUnorm8x4(b.cMid[0], b.cMid[1], b.cMid[2], tuft.tuftRand),
-      qAttr(0.52),
-      qAttr(tuft.stiff),
-      retiring ? packHalf2(rx - rx2, rz - rz2) : 0,
-    );
-    const iTip = pool.add(
-      tx, ty, tz,
-      packSnorm8x4(0.0, 0.98, 0.0, wTag),
-      packColorUnorm8x4(b.cTip[0], b.cTip[1], b.cTip[2], tuft.tuftRand),
-      qAttr(0.96),
-      qAttr(tuft.stiff * 0.88),
-      retiring ? packHalf2(rx - tx, rz - tz) : 0,
-    );
-
-    const area1 = triArea3D(rx, -0.008, rz, lx, my, lz, rx2, my, rz2);
-    const area2 = triArea3D(lx, my, lz, tx, ty, tz, rx2, my, rz2);
-    const area = area1 + area2;
-    if (area > 1e-8) {
-      stats.sumR += b.cMid[0] * area;
-      stats.sumG += b.cMid[1] * area;
-      stats.sumB += b.cMid[2] * area;
-      stats.sumArea += area;
-    }
-    outIndices.push(iCrown, iL, iR, iL, iTip, iR);
-  }
+  addScoredTri(pool, outIndices, i0L, i0R, i1R, p0.col, stats);
+  addScoredTri(pool, outIndices, i0L, i1R, i1L, p1.col, stats);
+  addScoredTri(pool, outIndices, i1L, i1R, iTip, p2.col, stats);
 }
 
-// Builds L0..L3 for a 4.0 m x 4.0 m seamless botanical meadow tile (ZERO synthetic opaque floor sheet!):
-//   L0: ~2,950 tris (~1,380 3D botanical + turf grass blades)
-//   L1: ~1,150 tris (1.48x width-compensated anti-flicker ribbons)
-//   L2:   ~460 tris (2.15x width-compensated arched tussock fans)
-//   L3:   ~180 tris (broad volumetric tussock plumes matching sculpted morph.bin)
-function buildBotanicalMeadowLevel(pool, outIndices, botBlades, turfTufts, profile, lvl) {
-  const stats = { sumR: 0, sumG: 0, sumB: 0, sumArea: 0, maxY: 0.22 };
+// Emits a tall golden oat/barley culm + 3D cross-vaned spikelet panicle (7 tris full, or 3-tri plume at L3).
+function emitOatPanicle(pool, outIndices, panicle, curWMult, nextWMult, hMult, retiring, simpleL3, stats) {
+  emitCurvedSheafBlade(
+    pool,
+    outIndices,
+    {
+      rootX: panicle.rootX,
+      rootZ: panicle.rootZ,
+      tuftRand: panicle.tuftRand,
+      stiff: panicle.stiff,
+      pts: panicle.pts,
+      retirePhase: panicle.retirePhase,
+    },
+    curWMult,
+    nextWMult,
+    hMult,
+    retiring,
+    simpleL3,
+    stats,
+  );
+  if (simpleL3) return;
+
+  // Cross-vaned perpendicular golden spikelet plume (2 extra triangles at 90 deg around the upper panicle axis)
+  const p2 = panicle.pts[2];
+  const p3 = panicle.pts[3];
+  const rx = panicle.rootX, rz = panicle.rootZ;
+  const wTag = retiring ? -(0.10 + 0.86 * clamp(panicle.retirePhase, 0, 1)) : 1.0;
+  const hwCross = panicle.headHW * curWMult * 0.92;
+  const cx = panicle.dirX, cz = panicle.dirZ;
+
+  const mkV = (bx, by, bz, sign, col, along) => {
+    const px = qPos(bx + cx * hwCross * sign);
+    const py = qPos(by * hMult);
+    const pz = qPos(bz + cz * hwCross * sign);
+    if (py > stats.maxY) stats.maxY = py;
+    return pool.add(
+      px,
+      py,
+      pz,
+      packSnorm8x4(cx * 0.35 * sign, 0.90, cz * 0.35 * sign, wTag),
+      packColorUnorm8x4(col[0], col[1], col[2], panicle.tuftRand),
+      qAttr(along),
+      qAttr(panicle.stiff * 0.88),
+      retiring ? packHalf2(rx - px, rz - pz) : 0,
+    );
+  };
+
+  const midBaseY = lerp(panicle.pts[1].y, p2.y, 0.55);
+  const midBaseX = lerp(panicle.pts[1].x, p2.x, 0.55);
+  const midBaseZ = lerp(panicle.pts[1].z, p2.z, 0.55);
+  const vBase = mkV(midBaseX, midBaseY, midBaseZ, 0, p2.col, 0.79);
+  const vCrossL = mkV(p2.x, p2.y, p2.z, -1, p2.col, 0.86);
+  const vCrossR = mkV(p2.x, p2.y, p2.z, 1, p2.col, 0.86);
+  const vTop = mkV(p3.x, p3.y, p3.z, 0, p3.col, 1.00);
+
+  addScoredTri(pool, outIndices, vBase, vCrossL, vCrossR, p2.col, stats);
+  addScoredTri(pool, outIndices, vCrossL, vTop, vCrossR, p3.col, stats);
+}
+
+// Emits a slender curved wildflower stem (3 tris) + 3D upward-cupped 4-petal corolla cup (4 tris) = 7 tris.
+function emitWildflower(pool, outIndices, fl, curWMult, hMult, retiring, stats) {
+  const rx = fl.rootX, rz = fl.rootZ;
+  const wTag = retiring ? -(0.14 + 0.82 * clamp(fl.retirePhase, 0, 1)) : 1.0;
+  const stemHW = 0.0026 * curWMult;
+  const headX = rx + fl.dirX * fl.lean;
+  const headZ = rz + fl.dirZ * fl.lean;
+  const headY = fl.hFlower * hMult;
+  const midX = rx + fl.dirX * fl.lean * 0.45;
+  const midZ = rz + fl.dirZ * fl.lean * 0.45;
+  const midY = headY * 0.54;
+
+  const mkV = (bx, by, bz, nx, ny, nz, col, along) => {
+    const px = qPos(bx), py = qPos(by), pz = qPos(bz);
+    if (py > stats.maxY) stats.maxY = py;
+    return pool.add(
+      px,
+      py,
+      pz,
+      packSnorm8x4(nx, ny, nz, wTag),
+      packColorUnorm8x4(col[0], col[1], col[2], fl.tuftRand),
+      qAttr(along),
+      qAttr(fl.stiff),
+      retiring ? packHalf2(rx - px, rz - pz) : 0,
+    );
+  };
+
+  // 3-tri curved scape
+  const s0L = mkV(rx - fl.sideX * stemHW, -0.005, rz - fl.sideZ * stemHW, -fl.sideX * 0.3, 0.9, -fl.sideZ * 0.3, fl.rootCol, 0.03);
+  const s0R = mkV(rx + fl.sideX * stemHW, -0.005, rz + fl.sideZ * stemHW, fl.sideX * 0.3, 0.9, fl.sideZ * 0.3, fl.rootCol, 0.03);
+  const s1L = mkV(midX - fl.sideX * stemHW * 0.85, midY, midZ - fl.sideZ * stemHW * 0.85, -fl.sideX * 0.3, 0.9, -fl.sideZ * 0.3, fl.stemCol, 0.38);
+  const s1R = mkV(midX + fl.sideX * stemHW * 0.85, midY, midZ + fl.sideZ * stemHW * 0.85, fl.sideX * 0.3, 0.9, fl.sideZ * 0.3, fl.stemCol, 0.38);
+  const cCenter = mkV(headX, headY - 0.003, headZ, 0, 1, 0, fl.diskCol, 0.70);
+
+  addScoredTri(pool, outIndices, s0L, s0R, s1R, fl.rootCol, stats);
+  addScoredTri(pool, outIndices, s0L, s1R, s1L, fl.stemCol, stats);
+  addScoredTri(pool, outIndices, s1L, s1R, cCenter, fl.stemCol, stats);
+
+  // 4-tri 3D concave upward-cupped corolla blossom (never a flat billboard!)
+  const rP = fl.corollaR * Math.min(1.45, curWMult);
+  const lift = rP * 0.34;
+  const p0 = mkV(headX + fl.dirX * rP, headY + lift, headZ + fl.dirZ * rP, -fl.dirX * 0.25, 0.96, -fl.dirZ * 0.25, fl.petalCol, 0.74);
+  const p1 = mkV(headX + fl.sideX * rP, headY + lift, headZ + fl.sideZ * rP, -fl.sideX * 0.25, 0.96, -fl.sideZ * 0.25, fl.petalCol, 0.74);
+  const p2 = mkV(headX - fl.dirX * rP, headY + lift, headZ - fl.dirZ * rP, fl.dirX * 0.25, 0.96, fl.dirZ * 0.25, fl.petalCol, 0.74);
+  const p3 = mkV(headX - fl.sideX * rP, headY + lift, headZ - fl.sideZ * rP, fl.sideX * 0.25, 0.96, fl.sideZ * 0.25, fl.petalCol, 0.74);
+
+  addScoredTri(pool, outIndices, cCenter, p0, p1, fl.petalCol, stats);
+  addScoredTri(pool, outIndices, cCenter, p1, p2, fl.petalCol, stats);
+  addScoredTri(pool, outIndices, cCenter, p2, p3, fl.petalCol, stats);
+  addScoredTri(pool, outIndices, cCenter, p3, p0, fl.petalCol, stats);
+}
+
+// Builds progressive cluster cuts L0..L3 (~4,206 -> 2,107 -> 948 -> 378 tris) on a 1.75 m x 1.75 m tile.
+function buildBotanicalMeadowLevel(pool, outIndices, sward, profile, lvl) {
+  const stats = { sumR: 0, sumG: 0, sumB: 0, sumArea: 0, maxY: 0.24 };
   const startIdx = outIndices.length;
 
-  const BOT_COUNTS = [530, 240, 82, 28];
-  const TUFT_BLADES_PER_CELL = [6, 2, 1, 1];
-  const TUFT_KEEP_CELLS = [144, 144, 140, 58];
-  const WIDTH_COMP = [1.05, 1.48, 2.15, 4.60];
-  const HEIGHT_SCALE = [1.00, 0.98, 0.93, 0.82];
+  const SHEAF_COUNTS = [624, 316, 150, 114];
+  const HUGGER_TUFT_COUNTS = [98, 50, 32, 0];
+  const HUGGER_LEAVES_PER_TUFT = [3, 2, 1, 0];
+  const PANICLE_COUNTS = [48, 32, 16, 14];
+  const FLOWER_COUNTS = [12, 5, 0, 0];
+  const WIDTH_COMP = [1.00, 1.36, 1.92, 2.95];
+  const HEIGHT_SCALE = [1.00, 0.99, 0.95, 0.88];
 
-  const botN = Math.min(botBlades.length, BOT_COUNTS[lvl]);
-  const nextBotN = lvl < 3 ? Math.min(botBlades.length, BOT_COUNTS[lvl + 1]) : 0;
-  const wMult = WIDTH_COMP[lvl];
+  const curW = WIDTH_COMP[lvl];
+  const nextW = lvl < 3 ? WIDTH_COMP[lvl + 1] : curW;
   const hMult = HEIGHT_SCALE[lvl];
+  const spatialKey = (rx, rz) => (Math.floor((rz / TILE_METRES) * 6) * 8 + Math.floor((rx / TILE_METRES) * 6));
 
-  // Order spatially by (gx, gz) after ranking slice for optimal vertex cache + gzip LZ77 locality!
-  const chosenBot = botBlades.slice(0, botN).map((b, rankIdx) => ({ b, rankIdx }));
-  chosenBot.sort((a, b) => (Math.floor(a.b.rootZ) * 4 + Math.floor(a.b.rootX)) - (Math.floor(b.b.rootZ) * 4 + Math.floor(b.b.rootX)));
-
-  for (const { b, rankIdx } of chosenBot) {
-    const retiring = lvl < 3 ? rankIdx >= nextBotN : true;
-    const rank = retiring ? b.retirePhase : 0;
-    emitBotanicalOrgan(pool, outIndices, b, wMult, hMult, retiring, rank, stats);
+  // 1. Arched 3-segment tussock sheaves
+  const sheafN = Math.min(sward.tussockBlades.length, SHEAF_COUNTS[lvl]);
+  const nextSheafN = lvl < 3 ? Math.min(sward.tussockBlades.length, SHEAF_COUNTS[lvl + 1]) : 0;
+  const chosenSheaves = sward.tussockBlades.slice(0, sheafN).map((b, rankIdx) => ({ b, rankIdx }));
+  chosenSheaves.sort((a, b) => spatialKey(a.b.rootX, a.b.rootZ) - spatialKey(b.b.rootX, b.b.rootZ));
+  for (const { b, rankIdx } of chosenSheaves) {
+    const retiring = lvl < 3 ? rankIdx >= nextSheafN : true;
+    emitCurvedSheafBlade(pool, outIndices, b, curW, nextW, hMult, retiring, lvl === 3, stats);
   }
 
-  const rankedTufts = [...turfTufts].sort((a, b) => b.score - a.score);
-  const activeTufts = rankedTufts.slice(0, Math.min(turfTufts.length, TUFT_KEEP_CELLS[lvl]));
-  const nextTuftSet = lvl < 3 ? new Set(rankedTufts.slice(0, Math.min(turfTufts.length, TUFT_KEEP_CELLS[lvl + 1]))) : null;
-  activeTufts.sort((a, b) => (a.gz * 16 + a.gx) - (b.gz * 16 + b.gx));
+  // 2. Low basal ground-hugger tufts
+  const hugN = Math.min(sward.huggerTufts.length, HUGGER_TUFT_COUNTS[lvl]);
+  const nextHugN = lvl < 3 ? Math.min(sward.huggerTufts.length, HUGGER_TUFT_COUNTS[lvl + 1]) : 0;
+  const curLeaves = HUGGER_LEAVES_PER_TUFT[lvl];
+  const nextLeaves = lvl < 3 ? HUGGER_LEAVES_PER_TUFT[lvl + 1] : 0;
+  const chosenHuggers = sward.huggerTufts.slice(0, hugN).map((t, rankIdx) => ({ t, rankIdx }));
+  chosenHuggers.sort((a, b) => spatialKey(a.t.rootX, a.t.rootZ) - spatialKey(b.t.rootX, b.t.rootZ));
+  for (const { t, rankIdx } of chosenHuggers) {
+    const tuftSurvives = lvl < 3 && rankIdx < nextHugN;
+    for (let li = 0; li < curLeaves; li++) {
+      const retiring = !tuftSurvives || li >= nextLeaves;
+      emitHuggerLeaf(pool, outIndices, t, t.leaves[li], curW, nextW, hMult, retiring, stats);
+    }
+  }
 
-  const curB = TUFT_BLADES_PER_CELL[lvl];
-  const nxtB = lvl < 3 ? TUFT_BLADES_PER_CELL[lvl + 1] : 0;
-  for (const tuft of activeTufts) {
-    const surviveNext = nextTuftSet?.has(tuft) ? nxtB : 0;
-    emitTurfTuft(pool, outIndices, tuft, curB, surviveNext, wMult, hMult, lvl, stats);
+  // 3. Tall golden oat/barley panicles
+  const panN = Math.min(sward.panicles.length, PANICLE_COUNTS[lvl]);
+  const nextPanN = lvl < 3 ? Math.min(sward.panicles.length, PANICLE_COUNTS[lvl + 1]) : 0;
+  const chosenPanicles = sward.panicles.slice(0, panN).map((p, rankIdx) => ({ p, rankIdx }));
+  chosenPanicles.sort((a, b) => spatialKey(a.p.rootX, a.p.rootZ) - spatialKey(b.p.rootX, b.p.rootZ));
+  for (const { p, rankIdx } of chosenPanicles) {
+    const retiring = lvl < 3 ? rankIdx >= nextPanN : true;
+    emitOatPanicle(pool, outIndices, p, curW * 0.92, nextW * 0.92, hMult, retiring, lvl === 3, stats);
+  }
+
+  // 4. Subtle Mediterranean coastal wildflowers
+  const flN = Math.min(sward.wildflowers.length, FLOWER_COUNTS[lvl]);
+  const nextFlN = lvl < 3 ? Math.min(sward.wildflowers.length, FLOWER_COUNTS[lvl + 1]) : 0;
+  for (let fi = 0; fi < flN; fi++) {
+    const retiring = lvl < 3 ? fi >= nextFlN : true;
+    emitWildflower(pool, outIndices, sward.wildflowers[fi], curW, hMult, retiring, stats);
   }
 
   const meanCol = stats.sumArea > 0
@@ -655,47 +1065,44 @@ function buildBotanicalMeadowLevel(pool, outIndices, botBlades, turfTufts, profi
   return { idxCount: outIndices.length - startIdx, meanCol, maxY: stats.maxY };
 }
 
-// Evaluates periodic 4.0 m boundary height so all adjacent continuum tiles meet at exact identical heights (zero Z-fighting).
+// D4-invariant & Z^2-periodic boundary height on [0, TILE_METRES]^2:
+// invariant under 0/90/180/270 deg tile rotations AND lattice translations -> 100% seam-free continuum!
 function evalPeriodicBorderCanopyY(tx, tz) {
   const px = (tx / TILE_METRES) * Math.PI * 2;
   const pz = (tz / TILE_METRES) * Math.PI * 2;
-  return 0.135
-    + 0.022 * Math.cos(px) * Math.cos(pz)
-    + 0.014 * Math.sin(px * 2.0 + 0.7)
-    + 0.014 * Math.cos(pz * 2.0 - 0.5);
+  return 0.148
+    + 0.016 * Math.cos(px) * Math.cos(pz)
+    + 0.009 * (Math.cos(px) + Math.cos(pz));
 }
 
-// Evaluates sculpted tussock-canopy height at tile coords [0..4]^2 from the variant's real botanical clumps,
-// blending smoothly onto the exact periodic border on the outer perimeter!
-function evalTussockCanopyY(tx, tz, varSpec, profile) {
+function evalTussockCanopyY(tx, tz, sward, profile) {
   const borderY = evalPeriodicBorderCanopyY(tx, tz);
   const edgeDist = Math.min(tx, TILE_METRES - tx, tz, TILE_METRES - tz);
-  if (edgeDist <= 0.05) return borderY;
+  if (edgeDist <= 0.03) return borderY;
 
   let clumpLift = 0.0;
   let weightSum = 0.0;
-  for (let ci = 0; ci < varSpec.clumps.length; ci++) {
-    const c = varSpec.clumps[ci];
-    const dx = tx - c.centre[0];
-    const dz = tz - c.centre[2];
-    const r = Math.max(0.32, c.radius * 1.15);
+  for (let ci = 0; ci < sward.tussockCenters.length; ci += 2) {
+    const tc = sward.tussockCenters[ci];
+    const dx = tx - tc.x;
+    const dz = tz - tc.z;
     const d2 = dx * dx + dz * dz;
-    if (d2 > r * r * 3.2) continue;
-    const w = Math.exp(-d2 / (0.65 * r * r));
-    const h = clamp(c.centre[1] * 0.62, 0.09, 0.28);
+    if (d2 > 0.22) continue;
+    const w = Math.exp(-d2 / 0.055);
+    const h = 0.15 + 0.09 * hash01(tc.seed, 3);
     clumpLift += h * w;
     weightSum += w;
   }
   const interiorY = weightSum > 0.05
-    ? lerp(profile.canopyBaseY, clamp(clumpLift / Math.max(weightSum, 0.65), 0.10, 0.26), clamp(weightSum * 0.55, 0, 0.85))
+    ? lerp(profile.canopyBaseY, clamp(clumpLift / Math.max(weightSum, 0.65), 0.12, 0.25), clamp(weightSum * 0.55, 0, 0.85))
     : profile.canopyBaseY;
-  const interiorBlend = clamp((edgeDist - 0.05) / 0.85, 0, 1);
+  const interiorBlend = clamp((edgeDist - 0.03) / 0.38, 0, 1);
   return lerp(borderY, interiorY, interiorBlend * interiorBlend * (3 - 2 * interiorBlend));
 }
 
 // Builds closed genus-0 (Euler = 2) 5x5 sculpted tussock canopy + underground pole (V=26, E=72, F=48 -> coreTriCount=6)
 // and bakes the flat O(1) cumulative vertex ancestor table (u8 packed 4-per-u32).
-function buildSculptedContinuumForVariant(varSpec, profile, tileMeanCol) {
+function buildSculptedContinuumForVariant(sward, profile, tileMeanCol) {
   const V = MORPH_VERTS; // 26
   const BOT = V - 1;     // 25
   const pos = new Float32Array(V * 3);
@@ -715,11 +1122,11 @@ function buildSculptedContinuumForVariant(varSpec, profile, tileMeanCol) {
     col[vi * 3 + 1] = clamp(rgb[1], 0, 1);
     col[vi * 3 + 2] = clamp(rgb[2], 0, 1);
     sway[vi * 3] = qAttr(alongVal);
-    sway[vi * 3 + 1] = qAttr(profile.stiffness * 1.15);
+    sway[vi * 3 + 1] = qAttr(profile.stiffness * 1.10);
     sway[vi * 3 + 2] = qAttr(alongVal * alongVal * 0.08);
   };
 
-  const borderCol = [0.098, 0.118, 0.054];
+  const borderCol = [0.068, 0.132, 0.038];
 
   for (let iz = 0; iz < MORPH_GRID; iz++) {
     for (let ix = 0; ix < MORPH_GRID; ix++) {
@@ -732,23 +1139,23 @@ function buildSculptedContinuumForVariant(varSpec, profile, tileMeanCol) {
       const tz = v * TILE_METRES;
 
       const isBorder = ix === 0 || ix === MORPH_GRID - 1 || iz === 0 || iz === MORPH_GRID - 1;
-      const y = isBorder ? evalPeriodicBorderCanopyY(tx, tz) : evalTussockCanopyY(tx, tz, varSpec, profile);
+      const y = isBorder ? evalPeriodicBorderCanopyY(tx, tz) : evalTussockCanopyY(tx, tz, sward, profile);
 
-      const eps = 0.35;
-      const yX1 = isBorder ? evalPeriodicBorderCanopyY(tx + eps, tz) : evalTussockCanopyY(clamp(tx + eps, 0, 4), tz, varSpec, profile);
-      const yX0 = isBorder ? evalPeriodicBorderCanopyY(tx - eps, tz) : evalTussockCanopyY(clamp(tx - eps, 0, 4), tz, varSpec, profile);
-      const yZ1 = isBorder ? evalPeriodicBorderCanopyY(tx, tz + eps) : evalTussockCanopyY(tx, clamp(tz + eps, 0, 4), varSpec, profile);
-      const yZ0 = isBorder ? evalPeriodicBorderCanopyY(tx, tz - eps) : evalTussockCanopyY(tx, clamp(tz - eps, 0, 4), varSpec, profile);
+      const eps = 0.16;
+      const yX1 = isBorder ? evalPeriodicBorderCanopyY(tx + eps, tz) : evalTussockCanopyY(clamp(tx + eps, 0, TILE_METRES), tz, sward, profile);
+      const yX0 = isBorder ? evalPeriodicBorderCanopyY(tx - eps, tz) : evalTussockCanopyY(clamp(tx - eps, 0, TILE_METRES), tz, sward, profile);
+      const yZ1 = isBorder ? evalPeriodicBorderCanopyY(tx, tz + eps) : evalTussockCanopyY(tx, clamp(tz + eps, 0, TILE_METRES), sward, profile);
+      const yZ0 = isBorder ? evalPeriodicBorderCanopyY(tx, tz - eps) : evalTussockCanopyY(tx, clamp(tz - eps, 0, TILE_METRES), sward, profile);
       const gx = (yX1 - yX0) / (2 * eps);
       const gz = (yZ1 - yZ0) / (2 * eps);
 
-      const alongVal = clamp(0.36 + (y - 0.10) * 1.6, 0.32, 0.68);
+      const alongVal = clamp(0.42 + (y - 0.12) * 1.8, 0.36, 0.68);
       const c = isBorder
         ? borderCol
         : [
-            lerp(tileMeanCol[0], profile.tipCol[0], clamp((y - 0.12) * 3.5, 0, 0.65)),
-            lerp(tileMeanCol[1], profile.tipCol[1], clamp((y - 0.12) * 3.5, 0, 0.65)),
-            lerp(tileMeanCol[2], profile.tipCol[2], clamp((y - 0.12) * 3.5, 0, 0.65)),
+            lerp(tileMeanCol[0], profile.tipCol[0], clamp((y - 0.13) * 3.2, 0, 0.55)),
+            lerp(tileMeanCol[1], profile.tipCol[1], clamp((y - 0.13) * 3.2, 0, 0.55)),
+            lerp(tileMeanCol[2], profile.tipCol[2], clamp((y - 0.13) * 3.2, 0, 0.55)),
           ];
       setV(vi, lx, y, lz, -gx, 1.0, -gz, c, alongVal);
     }
@@ -841,7 +1248,7 @@ function buildSculptedContinuumForVariant(varSpec, profile, tileMeanCol) {
       for (let j = 0; j < 3; j++) tri[j] = remap[tri[j]];
       if (tri[0] === tri[1] || tri[1] === tri[2] || tri[2] === tri[0]) activeFaces[f] = null;
     }
-    const err = +((0.18 + ((step + 1) / MORPH_STEPS) * 0.42).toFixed(4));
+    const err = +((0.104 + ((step + 1) / MORPH_STEPS) * 0.36).toFixed(4));
     collapseSteps.push({ retired: v, dst, err, aliveTris: activeFaces.filter(Boolean).length });
   }
 
@@ -874,62 +1281,71 @@ function buildSculptedContinuumForVariant(varSpec, profile, tileMeanCol) {
     collapseSteps,
     remapWords,
     splat: {
-      centreY: +(profile.canopyBaseY * 0.55).toFixed(4),
-      rx: +(MORPH_HALF_M * 0.98).toFixed(4),
-      ry: +(Math.min(0.14, profile.canopyBaseY * 0.72)).toFixed(4),
+      centreY: +(profile.canopyBaseY * 0.58).toFixed(4),
+      rx: +(MORPH_HALF_M * 0.985).toFixed(4),
+      ry: +(Math.min(0.16, profile.canopyBaseY * 0.76)).toFixed(4),
       meanCol: tileMeanCol.map((c) => +c.toFixed(4)),
     },
   };
 }
 
-function measureBotanicalVariantProfile(srcVerts, srcIndices, varSpec, mixIdx, vIdx) {
+function measureBotanicalVariantProfile(srcVerts, srcIndices, mixSpec, mixIdx, vIdx) {
+  const varSpec = mixSpec.variants[0];
   const startI = varSpec.firstIndex;
   const endI = startI + varSpec.indexCount;
-  let rootR = 0, rootG = 0, rootB = 0, rootN = 0;
-  let midR = 0, midG = 0, midB = 0, midN = 0;
-  let tipR = 0, tipG = 0, tipB = 0, tipN = 0;
   let stiffSum = 0, nSamples = 0;
-
-  // Quantize per-mix profile colors so shared border plants & micro-tufts share exact packedCol across variants!
-  const step = Math.max(3, Math.floor((endI - startI) / 2400) * 3);
+  const step = Math.max(3, Math.floor((endI - startI) / 1800) * 3);
   for (let ii = startI; ii < endI; ii += step) {
     const s = srcIndices[ii] * SOURCE_STRIDE;
-    const cr = srcVerts[s + 6], cg = srcVerts[s + 7], cb = srcVerts[s + 8];
-    const along = srcVerts[s + 9];
-    const stiff = clamp(srcVerts[s + 10], 1.5, 45.0);
-    stiffSum += stiff;
+    stiffSum += clamp(srcVerts[s + 10], 2.0, 35.0);
     nSamples++;
-    if (along < 0.25) {
-      rootR += cr; rootG += cg; rootB += cb; rootN++;
-    } else if (along < 0.70) {
-      midR += cr; midG += cg; midB += cb; midN++;
-    } else {
-      tipR += cr; tipG += cg; tipB += cb; tipN++;
-    }
   }
+  const measuredStiff = nSamples > 0 ? clamp(stiffSum / nSamples, 7.5, 13.0) : 9.5;
 
-  const sc = CANOPY_ALBEDO_SCALE;
-  const rootCol = [[0.070, 0.088, 0.040], [0.076, 0.086, 0.042], [0.072, 0.090, 0.041]][mixIdx];
-  const midCol = [[0.096, 0.120, 0.054], [0.106, 0.118, 0.054], [0.102, 0.122, 0.055]][mixIdx];
-  const tipCol = tipN > 0
-    ? [clamp((tipR / tipN) * sc * 1.08, 0.048, 0.22), clamp((tipG / tipN) * sc * 1.06, 0.060, 0.24), clamp((tipB / tipN) * sc, 0.022, 0.12)]
-    : [0.128, 0.146, 0.066];
-
-  const strawCol = [0.158, 0.148, 0.072];
-  const turfHeight = [0.22, 0.25, 0.27][mixIdx];
-  const canopyBaseY = [0.135, 0.150, 0.162][mixIdx];
-  const variantId = mixIdx * VARIANTS + vIdx;
+  // Natural Iberian coastal meadow chlorophyll & golden-oat linear-sRGB palettes per mix:
+  //   0: pasture (lush emerald-olive cocksfoot & ryegrass + clover)
+  //   1: waste (Mediterranean olive-sage fescue, brome & warm dry straw)
+  //   2: field-margin (tall rich meadow sheaves + abundant sunlit golden wild oat)
+  const rootCol = [
+    [0.044, 0.082, 0.026],
+    [0.056, 0.084, 0.030],
+    [0.048, 0.086, 0.028],
+  ][mixIdx];
+  const huggerCol = [
+    [0.046, 0.128, 0.030],
+    [0.064, 0.122, 0.036],
+    [0.050, 0.134, 0.032],
+  ][mixIdx];
+  const midCol = [
+    [0.056, 0.144, 0.034],
+    [0.078, 0.134, 0.040],
+    [0.062, 0.148, 0.036],
+  ][mixIdx];
+  const upperCol = [
+    [0.074, 0.158, 0.038],
+    [0.098, 0.146, 0.045],
+    [0.082, 0.162, 0.040],
+  ][mixIdx];
+  const tipCol = [
+    [0.094, 0.168, 0.044],
+    [0.124, 0.154, 0.050],
+    [0.106, 0.170, 0.046],
+  ][mixIdx];
+  const strawCol = [0.154, 0.138, 0.054];
+  const oatGoldCol = [0.196, 0.162, 0.058];
 
   return {
-    variantId,
-    turfHeight,
-    canopyBaseY,
-    stiffness: [10.0, 11.0, 10.5][mixIdx],
+    variantId: mixIdx * VARIANTS + vIdx,
+    sheafHeight: [0.24, 0.26, 0.29][mixIdx],
+    canopyBaseY: [0.150, 0.160, 0.172][mixIdx],
+    stiffness: lerp([8.6, 9.6, 9.0][mixIdx], measuredStiff, 0.25),
     rootCol,
+    huggerCol,
     midCol,
-    tipCol: [[0.126, 0.146, 0.064], [0.138, 0.144, 0.066], [0.134, 0.148, 0.065]][mixIdx],
-    rawTipCol: tipCol,
+    upperCol,
+    tipCol,
     strawCol,
+    oatGoldCol,
   };
 }
 
@@ -947,23 +1363,28 @@ function main() {
   const morphRecords = [];
 
   const half = TILE_METRES * 0.5;
+  const levelTriTotals = [0, 0, 0, 0];
 
   for (let mixIdx = 0; mixIdx < MIXES.length; mixIdx++) {
     const mixName = MIXES[mixIdx];
     const mixSpec = srcManifest.groves[mixName];
+    const bankSpecimens = [
+      extractSpecimenTemplates(srcVerts, srcIndices, mixSpec.variants[0], mixIdx, 0),
+      extractSpecimenTemplates(srcVerts, srcIndices, mixSpec.variants[1], mixIdx, 1),
+    ];
     for (let vIdx = 0; vIdx < VARIANTS; vIdx++) {
-      const varSpec = mixSpec.variants[vIdx];
-      const profile = measureBotanicalVariantProfile(srcVerts, srcIndices, varSpec, mixIdx, vIdx);
-      const botBlades = extractBotanicalOrgans(srcVerts, srcIndices, varSpec, mixIdx, vIdx);
-      const turfTufts = generateSupplementalTurfTufts(profile, mixIdx, vIdx);
+      const profile = measureBotanicalVariantProfile(srcVerts, srcIndices, mixSpec, mixIdx, vIdx);
+      const specimens = bankSpecimens[vIdx & 1];
+      const sward = generateBotanicalSward(profile, specimens, mixIdx, vIdx);
       const variantId = profile.variantId;
       const clusterFirst = clusterRecords.length / CLUSTER_WORDS;
       let l0MeanCol = profile.midCol;
 
       for (let lvl = 0; lvl < 4; lvl++) {
         const firstIdx = outIndices.length;
-        const geo = buildBotanicalMeadowLevel(vertPool, outIndices, botBlades, turfTufts, profile, lvl);
+        const geo = buildBotanicalMeadowLevel(vertPool, outIndices, sward, profile, lvl);
         if (lvl === 0) l0MeanCol = geo.meanCol;
+        levelTriTotals[lvl] += geo.idxCount / 3;
         clusterRecords.push(
           firstIdx,
           geo.idxCount,
@@ -973,14 +1394,14 @@ function main() {
           half,
           geo.maxY * 0.45,
           half,
-          Math.hypot(MORPH_HALF_M * Math.SQRT2, geo.maxY * 0.6),
+          Math.hypot(MORPH_HALF_M * Math.SQRT2, geo.maxY * 0.65),
           variantId,
           0,
           0,
         );
       }
 
-      const cont = buildSculptedContinuumForVariant(varSpec, profile, l0MeanCol);
+      const cont = buildSculptedContinuumForVariant(sward, profile, l0MeanCol);
       morphRecords.push({ variantId, mix: mixName, variant: vIdx, ...cont });
       variantRecords.push({
         variantId,
@@ -1059,6 +1480,10 @@ function main() {
   writeStream('clusters.bin', new Uint8Array(clBuf));
   writeStream('morph.bin', new Uint8Array(morphBuf));
 
+  const nVars = variantRecords.length;
+  const meanCuts = levelTriTotals.map((t) => Math.round(t / nVars));
+  const l0TrisPerM2 = +(meanCuts[0] / (TILE_METRES * TILE_METRES)).toFixed(1);
+
   const outManifest = {
     format: 'waterworld.meadow-grass-gpu',
     version: 2,
@@ -1090,7 +1515,12 @@ function main() {
   };
   fs.writeFileSync(path.join(OUT_DIR, 'manifest.json'), JSON.stringify(outManifest, null, 2));
   const totalGz = Object.values(filesMeta).reduce((s, f) => s + f.gzipBytes, 0);
-  console.log(`Baked meadows-gpu (botanical-tussock-continuum): ${outManifest.vertexCount} verts, ${outManifest.triangleCount} tris, ${outManifest.clusterCount} clusters, ${(totalGz / 1024).toFixed(1)} KB gz total`);
+  console.log(
+    `Baked meadows-gpu (${TILE_METRES}m x ${TILE_METRES}m = ${(TILE_METRES * TILE_METRES).toFixed(4)} m^2): ` +
+    `cuts=[${meanCuts.join(' -> ')}] tris/tile (${l0TrisPerM2} tris/m^2 at L0), ` +
+    `${outManifest.vertexCount} unique verts, ${outManifest.triangleCount} total tris, ` +
+    `Euler=2 across all ${nVars} variants, ${(totalGz / 1024).toFixed(1)} KB gz total`
+  );
 }
 
 main();
