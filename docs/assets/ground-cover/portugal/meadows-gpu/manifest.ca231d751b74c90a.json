@@ -1,0 +1,351 @@
+{
+  "format": "waterworld.meadow-grass-gpu",
+  "version": 2,
+  "style": "volumetric-cloud-tendrils",
+  "tileMetres": 1.35,
+  "mixes": [
+    "pasture",
+    "waste",
+    "field-margin"
+  ],
+  "variants": 4,
+  "subGrid": 1,
+  "levels": 4,
+  "levelErrors": [
+    0,
+    0.011,
+    0.026,
+    0.056
+  ],
+  "levelParentErrors": [
+    0.011,
+    0.026,
+    0.056,
+    0.125
+  ],
+  "strideBytes": 32,
+  "clusterRecordWords": 12,
+  "morph": {
+    "rings": 4,
+    "ringSegments": 5,
+    "vertexCount": 22,
+    "faceCount": 40,
+    "steps": 18,
+    "bytesPerVariant": 1472
+  },
+  "vertexCount": 17100,
+  "triangleCount": 15480,
+  "clusterCount": 48,
+  "variantRecords": [
+    {
+      "variantId": 0,
+      "mix": "pasture",
+      "variant": 0,
+      "firstCluster": 0,
+      "clusterCount": 4,
+      "genusZeroEuler": 2,
+      "coreTriCount": 4,
+      "meanColour": [
+        0.0465,
+        0.1001,
+        0.0176
+      ],
+      "splat": {
+        "centreY": 0.0978,
+        "rx": 1.104,
+        "ry": 0.115,
+        "meanCol": [
+          0.0465,
+          0.1001,
+          0.0176
+        ]
+      }
+    },
+    {
+      "variantId": 1,
+      "mix": "pasture",
+      "variant": 1,
+      "firstCluster": 4,
+      "clusterCount": 4,
+      "genusZeroEuler": 2,
+      "coreTriCount": 4,
+      "meanColour": [
+        0.0455,
+        0.0988,
+        0.0175
+      ],
+      "splat": {
+        "centreY": 0.0906,
+        "rx": 1.104,
+        "ry": 0.115,
+        "meanCol": [
+          0.0455,
+          0.0988,
+          0.0175
+        ]
+      }
+    },
+    {
+      "variantId": 2,
+      "mix": "pasture",
+      "variant": 2,
+      "firstCluster": 8,
+      "clusterCount": 4,
+      "genusZeroEuler": 2,
+      "coreTriCount": 4,
+      "meanColour": [
+        0.0482,
+        0.1022,
+        0.0179
+      ],
+      "splat": {
+        "centreY": 0.0953,
+        "rx": 1.104,
+        "ry": 0.115,
+        "meanCol": [
+          0.0482,
+          0.1022,
+          0.0179
+        ]
+      }
+    },
+    {
+      "variantId": 3,
+      "mix": "pasture",
+      "variant": 3,
+      "firstCluster": 12,
+      "clusterCount": 4,
+      "genusZeroEuler": 2,
+      "coreTriCount": 4,
+      "meanColour": [
+        0.0491,
+        0.103,
+        0.0176
+      ],
+      "splat": {
+        "centreY": 0.0938,
+        "rx": 1.104,
+        "ry": 0.115,
+        "meanCol": [
+          0.0491,
+          0.103,
+          0.0176
+        ]
+      }
+    },
+    {
+      "variantId": 4,
+      "mix": "waste",
+      "variant": 0,
+      "firstCluster": 16,
+      "clusterCount": 4,
+      "genusZeroEuler": 2,
+      "coreTriCount": 4,
+      "meanColour": [
+        0.0506,
+        0.1028,
+        0.0174
+      ],
+      "splat": {
+        "centreY": 0.107,
+        "rx": 1.104,
+        "ry": 0.115,
+        "meanCol": [
+          0.0506,
+          0.1028,
+          0.0174
+        ]
+      }
+    },
+    {
+      "variantId": 5,
+      "mix": "waste",
+      "variant": 1,
+      "firstCluster": 20,
+      "clusterCount": 4,
+      "genusZeroEuler": 2,
+      "coreTriCount": 4,
+      "meanColour": [
+        0.051,
+        0.1036,
+        0.0175
+      ],
+      "splat": {
+        "centreY": 0.1067,
+        "rx": 1.104,
+        "ry": 0.115,
+        "meanCol": [
+          0.051,
+          0.1036,
+          0.0175
+        ]
+      }
+    },
+    {
+      "variantId": 6,
+      "mix": "waste",
+      "variant": 2,
+      "firstCluster": 24,
+      "clusterCount": 4,
+      "genusZeroEuler": 2,
+      "coreTriCount": 4,
+      "meanColour": [
+        0.0518,
+        0.1042,
+        0.0173
+      ],
+      "splat": {
+        "centreY": 0.1123,
+        "rx": 1.104,
+        "ry": 0.115,
+        "meanCol": [
+          0.0518,
+          0.1042,
+          0.0173
+        ]
+      }
+    },
+    {
+      "variantId": 7,
+      "mix": "waste",
+      "variant": 3,
+      "firstCluster": 28,
+      "clusterCount": 4,
+      "genusZeroEuler": 2,
+      "coreTriCount": 4,
+      "meanColour": [
+        0.0529,
+        0.1049,
+        0.0174
+      ],
+      "splat": {
+        "centreY": 0.1172,
+        "rx": 1.104,
+        "ry": 0.115,
+        "meanCol": [
+          0.0529,
+          0.1049,
+          0.0174
+        ]
+      }
+    },
+    {
+      "variantId": 8,
+      "mix": "field-margin",
+      "variant": 0,
+      "firstCluster": 32,
+      "clusterCount": 4,
+      "genusZeroEuler": 2,
+      "coreTriCount": 4,
+      "meanColour": [
+        0.0506,
+        0.1033,
+        0.0175
+      ],
+      "splat": {
+        "centreY": 0.1199,
+        "rx": 1.104,
+        "ry": 0.115,
+        "meanCol": [
+          0.0506,
+          0.1033,
+          0.0175
+        ]
+      }
+    },
+    {
+      "variantId": 9,
+      "mix": "field-margin",
+      "variant": 1,
+      "firstCluster": 36,
+      "clusterCount": 4,
+      "genusZeroEuler": 2,
+      "coreTriCount": 4,
+      "meanColour": [
+        0.052,
+        0.1037,
+        0.0176
+      ],
+      "splat": {
+        "centreY": 0.1215,
+        "rx": 1.104,
+        "ry": 0.115,
+        "meanCol": [
+          0.052,
+          0.1037,
+          0.0176
+        ]
+      }
+    },
+    {
+      "variantId": 10,
+      "mix": "field-margin",
+      "variant": 2,
+      "firstCluster": 40,
+      "clusterCount": 4,
+      "genusZeroEuler": 2,
+      "coreTriCount": 4,
+      "meanColour": [
+        0.049,
+        0.1018,
+        0.0174
+      ],
+      "splat": {
+        "centreY": 0.1256,
+        "rx": 1.104,
+        "ry": 0.115,
+        "meanCol": [
+          0.049,
+          0.1018,
+          0.0174
+        ]
+      }
+    },
+    {
+      "variantId": 11,
+      "mix": "field-margin",
+      "variant": 3,
+      "firstCluster": 44,
+      "clusterCount": 4,
+      "genusZeroEuler": 2,
+      "coreTriCount": 4,
+      "meanColour": [
+        0.05,
+        0.1025,
+        0.0171
+      ],
+      "splat": {
+        "centreY": 0.1314,
+        "rx": 1.104,
+        "ry": 0.115,
+        "meanCol": [
+          0.05,
+          0.1025,
+          0.0171
+        ]
+      }
+    }
+  ],
+  "files": {
+    "vertices.bin": {
+      "bytes": 547200,
+      "gzipBytes": 354033,
+      "sha256": "f94679ba9d3c9f3794076be5a0d336cc78657b6f0dc15672553a6d98b3207e1b"
+    },
+    "indices.bin": {
+      "bytes": 185760,
+      "gzipBytes": 46232,
+      "sha256": "71bf757f72e2fffb7a28d1a7e5bcff4764db37580376c3011397bc391337b3d3"
+    },
+    "clusters.bin": {
+      "bytes": 2304,
+      "gzipBytes": 754,
+      "sha256": "c0a0bf6e6926dda5e945df00b24ba09ebcd577c71b133f0feb341832174b42b7"
+    },
+    "morph.bin": {
+      "bytes": 17664,
+      "gzipBytes": 6915,
+      "sha256": "2a250c53d05d824c45299dc48e7af961fef00ee7e4d67ccfc10068a34e850320"
+    }
+  }
+}

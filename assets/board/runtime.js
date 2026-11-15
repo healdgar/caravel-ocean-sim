@@ -18,6 +18,10 @@ globalThis.BOARD_MODEL = (() => {
 
   const EXTRA_FARPORTS = [
     { n: 'Seville', from: 1250, g: { wine: 0.8, silk: 0.3, spice: 0.3 } },
+    { n: 'Porto', from: 1150, g: { wine: 1.3, fish: 0.7, salt: 0.5 } },
+    { n: 'Cádiz', from: 1260, g: { wine: 0.9, salt: 0.6, spice: 0.4 } },
+    { n: 'Setúbal', from: 1250, g: { salt: 1.3, fish: 0.9, wine: 0.5 } },
+    { n: 'La Coruña', from: 1200, g: { fish: 1.1, timber: 0.6, ore: 0.4 } },
     { n: 'Antwerp', from: 1450, g: { cloth: 1.1, ore: 0.4, timber: 0.3 } },
     { n: 'Venice', from: 1050, g: { spice: 1.0, silk: 0.6, wine: 0.2 } },
     { n: 'Genoa', from: 1080, g: { spice: 0.8, silk: 0.5, wine: 0.3 } },
@@ -36,6 +40,408 @@ globalThis.BOARD_MODEL = (() => {
   let maritimeMasterSeq = 0;
   function nextShipMaster() {
     return SHIP_MASTERS[(maritimeMasterSeq++) % SHIP_MASTERS.length];
+  }
+
+  // Deterministic 32-bit integer hash so foreign ship manning never perturbs Castle & Commons' PRNG stream.
+  function maritimeHash(a, b = 0, c = 0) {
+    let h = (Math.imul(a | 0, 0x27d4eb2d) ^ Math.imul(b | 0, 0x165667b1) ^ Math.imul(c | 0, 0x9e3779b9)) | 0;
+    h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d);
+    h = Math.imul(h ^ (h >>> 12), 0x297a2d39);
+    return (h ^ (h >>> 15)) >>> 0;
+  }
+  function hashText(str) {
+    const s = String(str || '');
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619) >>> 0;
+    return h >>> 0;
+  }
+
+  // Pre-seeded partner ports (Sevilla, Porto, Antwerp, Venice, Bordeaux) headlessly simulated with C&C households & cards.
+  const PARTNER_REGISTRY = (() => {
+    const rawPorts = Array.isArray(globalThis.PARTNER_PORTS_SEED?.ports) ? globalThis.PARTNER_PORTS_SEED.ports : [];
+    const byAlias = new Map();
+    const cardById = new Map();
+    const soulById = new Map();
+    for (const p of rawPorts) {
+      if (!p || !p.name) continue;
+      byAlias.set(String(p.name).toLowerCase(), p);
+      if (p.id) byAlias.set(String(p.id).toLowerCase(), p);
+      for (const al of p.aliases || []) byAlias.set(String(al).toLowerCase(), p);
+      for (const group of [p.captains, p.merchants, p.mariners]) {
+        for (const s of group || []) {
+          if (s && Number.isInteger(s.id)) soulById.set(s.id, { ...s, homePort: p.name });
+        }
+      }
+      for (const [gidStr, entry] of Object.entries(p.cards || {})) {
+        const gid = Number(gidStr);
+        if (Number.isInteger(gid) && entry?.card) cardById.set(gid, { port: p, entry });
+      }
+    }
+    return { ports: rawPorts, byAlias, cardById, soulById };
+  })();
+
+  function resolvePartnerPort(originName, salt = 0) {
+    const ports = PARTNER_REGISTRY.ports;
+    if (!ports.length) return null;
+    const key = String(originName || '').trim().toLowerCase();
+    if (key && PARTNER_REGISTRY.byAlias.has(key)) return PARTNER_REGISTRY.byAlias.get(key);
+    return ports[maritimeHash(hashText(key), salt, 19) % ports.length];
+  }
+
+  function ensureMaritimeLivesStore() {
+    if (!W) return { persons: {}, ships: {} };
+    if (!W.maritimeLives || typeof W.maritimeLives !== 'object') {
+      W.maritimeLives = { persons: {}, ships: {} };
+    }
+    if (!W.maritimeLives.persons) W.maritimeLives.persons = {};
+    if (!W.maritimeLives.ships) W.maritimeLives.ships = {};
+    return W.maritimeLives;
+  }
+
+  function touchMaritimePersonLife(soul, defaults = {}) {
+    if (!soul || !Number.isInteger(soul.id)) return null;
+    const store = ensureMaritimeLivesStore();
+    const key = String(soul.id);
+    let rec = store.persons[key];
+    if (!rec) {
+      rec = {
+        id: soul.id,
+        name: soul.name,
+        role: soul.role || defaults.role || 'mariner',
+        homePort: soul.homePort || defaults.homePort || 'Sevilla',
+        voyages: defaults.voyages ?? 1,
+        freightCrowns: defaults.freightCrowns ?? 0,
+        nowLine: defaults.nowLine || '',
+        log: Array.isArray(defaults.initialLog) ? defaults.initialLog.slice(0, 8) : [],
+      };
+      store.persons[key] = rec;
+    }
+    if (defaults.nowLine) rec.nowLine = defaults.nowLine;
+    return rec;
+  }
+
+  function appendMaritimeLifeEvent(personId, eventText) {
+    if (!Number.isInteger(personId) || !eventText || !W) return;
+    const store = ensureMaritimeLivesStore();
+    const rec = store.persons[String(personId)];
+    if (!rec) return;
+    const stamp = typeof dateStr === 'function' ? dateStr(day()) : `Day ${day()}`;
+    const lineText = `${stamp}: ${eventText}`;
+    if (rec.log[rec.log.length - 1] !== lineText) {
+      rec.log.push(lineText);
+      if (rec.log.length > 14) rec.log.splice(0, rec.log.length - 14);
+    }
+  }
+
+  function formatCargoBrief(bag) {
+    const entries = Object.entries(bag || {}).filter(([, q]) => Number(q) > 0.4);
+    if (!entries.length) return 'ballast and stores';
+    entries.sort((a, b) => Number(b[1]) - Number(a[1]));
+    return entries.slice(0, 3).map(([g, q]) => `${Math.round(Number(q))} ${g}`).join(', ');
+  }
+
+  function fallbackPartnerSoul(idOffset, name, role, homePort, age) {
+    const id = 2_900_000 + idOffset;
+    if (!PARTNER_REGISTRY.cardById.has(id)) {
+      const bornYr = (typeof AD === 'function' ? AD() : 1550) - age;
+      const card = [
+        `${name} — ${age}, head · ${role} · ${homePort}`,
+        `← ${homePort}`,
+        `Home timbered waterside house in the artisan quarter`,
+        `Household worth ${role === 'merchant' ? 48 : 22} crowns`,
+        `Living ${role} : about ${role === 'merchant' ? 34 : 18} crowns a year here`,
+        `Personal status Free`,
+        `Household members`,
+        `Person | Age | Place`,
+        `${name} | ${age} | ${homePort}`,
+        `Learning and skills`,
+        `Skill | Ability`,
+        `reckoning | skilled · 72%`,
+        `letters | able · 54%`,
+        `craft | skilled · 78%`,
+        `Nature weather-beaten, steady, dark-haired`,
+        `Learning able letters, skilled reckoning, skilled craft`,
+        `Life`,
+        `Born Spring 14, AD ${bornYr}`,
+      ].join('\n');
+      PARTNER_REGISTRY.cardById.set(id, { port: { name: homePort }, entry: { card, links: [] } });
+    }
+    return { id, name, surname: name.split(' ').slice(1).join(' '), sex: 'm', age, role, homePort };
+  }
+
+  function staffOceanShip(sh, usedPersonIds = new Set()) {
+    if (!sh) return;
+    const worldSeed = typeof SEED === 'number' ? SEED : 1550;
+    const shipKey = Number.isInteger(sh.id) ? sh.id : (hashText(sh.from) & 0xffff);
+    const port = resolvePartnerPort(sh.from || sh.to, shipKey);
+    const homePort = port?.name || String(sh.from || 'Sevilla');
+    const localSettlement = W?.settlements?.[sh.port ?? 0]?.name || 'Lisboa';
+
+    const shipNames = port?.shipNames?.length ? port.shipNames : ['Santa Catarina', 'São Cristóvão', 'San Telmo', 'La Belle Marie'];
+    if (!sh.shipName) {
+      sh.shipName = shipNames[maritimeHash(worldSeed, shipKey, 3) % shipNames.length];
+    }
+    sh.homePort = homePort;
+
+    const pickUniqueFrom = (list, salt, fallbackRole, fallbackLabel) => {
+      if (Array.isArray(list) && list.length) {
+        const start = maritimeHash(worldSeed, shipKey, salt) % list.length;
+        for (let i = 0; i < list.length; i++) {
+          const cand = list[(start + i) % list.length];
+          if (cand && !usedPersonIds.has(cand.id)) {
+            usedPersonIds.add(cand.id);
+            return cand;
+          }
+        }
+        const cand = list[start];
+        if (cand) return cand;
+      }
+      const fbName = SHIP_MASTERS[maritimeHash(worldSeed, shipKey, salt + 71) % SHIP_MASTERS.length] || fallbackLabel;
+      const fb = fallbackPartnerSoul((shipKey * 13 + salt) % 80000, fbName, fallbackRole, homePort, 34 + (salt % 15));
+      usedPersonIds.add(fb.id);
+      return fb;
+    };
+
+    const existingCapt = sh.captain?.id ? (PARTNER_REGISTRY.soulById.get(sh.captain.id) || sh.captain) : null;
+    const captBase = (existingCapt && !usedPersonIds.has(existingCapt.id))
+      ? (usedPersonIds.add(existingCapt.id), existingCapt)
+      : pickUniqueFrom(port?.captains, 11, 'shipmaster', 'Diogo Cão');
+
+    const existingMerch = sh.merchant?.id ? (PARTNER_REGISTRY.soulById.get(sh.merchant.id) || sh.merchant) : null;
+    const merchBase = (existingMerch && existingMerch.id !== captBase.id && !usedPersonIds.has(existingMerch.id))
+      ? (usedPersonIds.add(existingMerch.id), existingMerch)
+      : pickUniqueFrom(port?.merchants, 23, 'merchant', 'Fernão Gomes');
+
+    const crewStations = ['helmsman', 'bosun', 'lookout', 'mariner', 'mariner'];
+    const crewOut = [];
+    const prevCrew = Array.isArray(sh.crew) ? sh.crew : [];
+    for (let ci = 0; ci < crewStations.length; ci++) {
+      const prev = prevCrew[ci]?.id ? (PARTNER_REGISTRY.soulById.get(prevCrew[ci].id) || prevCrew[ci]) : null;
+      const mBase = (prev && !usedPersonIds.has(prev.id))
+        ? (usedPersonIds.add(prev.id), prev)
+        : pickUniqueFrom(port?.mariners, 37 + ci * 7, 'boatman', `Mateus #${ci + 1}`);
+      crewOut.push({
+        id: mBase.id,
+        name: mBase.name,
+        surname: mBase.surname || '',
+        sex: mBase.sex || 'm',
+        age: mBase.age || 27,
+        role: crewStations[ci],
+        trade: mBase.role || 'boatman',
+        homePort: mBase.homePort || homePort,
+        shipName: sh.shipName,
+      });
+    }
+
+    const cargoText = sh.phase === 'out' && Object.keys(sh.load || {}).length ? formatCargoBrief(sh.load) : formatCargoBrief(sh.cargo);
+    const phaseVerb = sh.phase === 'dock'
+      ? `anchored off ${localSettlement}`
+      : sh.phase === 'out'
+        ? `outbound from ${localSettlement} toward ${sh.to || homePort}`
+        : `standing in toward ${localSettlement} from ${sh.from || homePort}`;
+
+    const baseVoyages = 2 + (maritimeHash(worldSeed, captBase.id, 91) % 9);
+    const captLife = touchMaritimePersonLife(captBase, {
+      role: 'shipmaster',
+      homePort,
+      voyages: baseVoyages,
+      freightCrowns: baseVoyages * 11,
+      nowLine: `Now ${phaseVerb} as master of the ${sh.kind || 'ship'} ${sh.shipName} (${cargoText})`,
+      initialLog: [
+        `Took command of the ${sh.kind || 'vessel'} ${sh.shipName} out of ${homePort} (${baseVoyages} Atlantic & coastal passages logged)`,
+      ],
+    });
+    const merchLife = touchMaritimePersonLife(merchBase, {
+      role: 'merchant',
+      homePort,
+      voyages: Math.max(1, baseVoyages - 1),
+      freightCrowns: baseVoyages * 19,
+      nowLine: `Now ${phaseVerb} aboard ${sh.shipName} as supercargo & factor (${cargoText})`,
+      initialLog: [
+        `Freighted ${cargoText} aboard ${sh.shipName} out of ${homePort} for the ${localSettlement} exchange`,
+      ],
+    });
+    for (const cm of crewOut) {
+      touchMaritimePersonLife(cm, {
+        role: cm.role,
+        homePort: cm.homePort,
+        voyages: 1 + (maritimeHash(worldSeed, cm.id, 103) % 6),
+        nowLine: `Now serving as ${cm.role} aboard the ${sh.kind || 'ship'} ${sh.shipName} (${phaseVerb})`,
+        initialLog: [
+          `Signed aboard ${sh.shipName} at ${homePort} under Master ${captBase.name}`,
+        ],
+      });
+    }
+
+    // Track phase transitions in `W.maritimeLives.ships` so real arrivals, tradings, and departures write to their biographies
+    const store = ensureMaritimeLivesStore();
+    const sKey = String(sh.id ?? shipKey);
+    const prevTrack = store.ships[sKey];
+    if (!prevTrack) {
+      store.ships[sKey] = { phase: sh.phase, port: sh.port ?? 0 };
+      const initMsg = sh.phase === 'dock'
+        ? `Anchored the ${sh.kind || 'ship'} ${sh.shipName} at ${localSettlement} with ${cargoText} from ${sh.from || homePort}`
+        : sh.phase === 'out'
+          ? `Cleared ${localSettlement} aboard ${sh.shipName} with ${cargoText} bound for ${sh.to || homePort}`
+          : `Sailed ${sh.shipName} from ${sh.from || homePort} bound for ${localSettlement} with ${cargoText}`;
+      appendMaritimeLifeEvent(captBase.id, initMsg);
+      appendMaritimeLifeEvent(merchBase.id, `Ventured ${cargoText} aboard ${sh.shipName} (${sh.from || homePort} → ${localSettlement})`);
+    } else if (prevTrack.phase !== sh.phase) {
+      prevTrack.phase = sh.phase;
+      if (sh.phase === 'dock') {
+        if (captLife) { captLife.voyages = (captLife.voyages || 1) + 1; captLife.freightCrowns = (captLife.freightCrowns || 0) + 14; }
+        if (merchLife) { merchLife.freightCrowns = (merchLife.freightCrowns || 0) + 26; }
+        appendMaritimeLifeEvent(captBase.id, `Brought ${sh.shipName} safely to anchor at ${localSettlement} with ${formatCargoBrief(sh.cargo)}`);
+        appendMaritimeLifeEvent(merchBase.id, `Landed ${formatCargoBrief(sh.cargo)} at ${localSettlement} customhouse from ${sh.from || homePort}`);
+      } else if (sh.phase === 'out') {
+        const exportBrief = formatCargoBrief(sh.load);
+        appendMaritimeLifeEvent(captBase.id, `Weighed anchor from ${localSettlement} in ${sh.shipName} bound for ${sh.to || homePort} (${exportBrief})`);
+        appendMaritimeLifeEvent(merchBase.id, `Laded ${exportBrief} at ${localSettlement} aboard ${sh.shipName} for ${sh.to || homePort}`);
+      }
+    }
+
+    sh.master = captBase.name;
+    sh.captain = {
+      id: captBase.id,
+      name: captBase.name,
+      surname: captBase.surname || '',
+      sex: captBase.sex || 'm',
+      age: captBase.age || 36,
+      role: 'shipmaster',
+      trade: captBase.role || 'boatman',
+      homePort,
+      shipName: sh.shipName,
+      voyages: captLife?.voyages ?? baseVoyages,
+    };
+    sh.merchant = {
+      id: merchBase.id,
+      name: merchBase.name,
+      surname: merchBase.surname || '',
+      sex: merchBase.sex || 'm',
+      age: merchBase.age || 34,
+      role: 'merchant',
+      trade: merchBase.role || 'merchant',
+      homePort,
+      shipName: sh.shipName,
+      cargoSummary: cargoText,
+      profitCrowns: merchLife?.freightCrowns ?? 0,
+    };
+    sh.crew = crewOut;
+  }
+
+  function staffSeaCaravan(c, idx, usedPersonIds = new Set()) {
+    if (!c || !c.sea) return;
+    const worldSeed = typeof SEED === 'number' ? SEED : 1550;
+    const portIdx = (idx + 1) % Math.max(1, PARTNER_REGISTRY.ports.length || 2);
+    const port = PARTNER_REGISTRY.ports[portIdx] || resolvePartnerPort('Porto', idx);
+    const homePort = port?.name || 'Porto';
+    const origName = W?.settlements?.[c.origin]?.name || homePort;
+    const destName = W?.settlements?.[c.dest]?.name || 'Lisboa';
+    const shipNames = port?.shipNames?.length ? port.shipNames : ['Flor do Douro', 'São Pedro', 'Bom Jesus'];
+    if (!c.shipName) c.shipName = shipNames[maritimeHash(worldSeed, idx + 101, 5) % shipNames.length];
+    c.homePort = homePort;
+
+    const pickFrom = (list, salt, fbRole, fbName) => {
+      if (Array.isArray(list) && list.length) {
+        const start = maritimeHash(worldSeed, idx + 211, salt) % list.length;
+        for (let i = 0; i < list.length; i++) {
+          const cand = list[(start + i) % list.length];
+          if (cand && !usedPersonIds.has(cand.id)) {
+            usedPersonIds.add(cand.id);
+            return cand;
+          }
+        }
+        return list[start];
+      }
+      return fallbackPartnerSoul(50000 + idx * 17 + salt, fbName, fbRole, homePort, 31);
+    };
+
+    const captBase = c.captain?.id ? (PARTNER_REGISTRY.soulById.get(c.captain.id) || c.captain) : pickFrom(port?.captains, 13, 'shipmaster', 'Gonçalo Velho');
+    usedPersonIds.add(captBase.id);
+    const merchBase = c.merchant?.id ? (PARTNER_REGISTRY.soulById.get(c.merchant.id) || c.merchant) : pickFrom(port?.merchants, 29, 'merchant', 'António Tenreiro');
+    usedPersonIds.add(merchBase.id);
+    const crewRoles = ['helmsman', 'lookout', 'mariner'];
+    const crewOut = [];
+    for (let ci = 0; ci < crewRoles.length; ci++) {
+      const mBase = c.crew?.[ci]?.id ? (PARTNER_REGISTRY.soulById.get(c.crew[ci].id) || c.crew[ci]) : pickFrom(port?.mariners, 43 + ci * 11, 'boatman', `Simão #${ci + 1}`);
+      usedPersonIds.add(mBase.id);
+      crewOut.push({
+        id: mBase.id,
+        name: mBase.name,
+        surname: mBase.surname || '',
+        sex: mBase.sex || 'm',
+        age: mBase.age || 26,
+        role: crewRoles[ci],
+        trade: mBase.role || 'boatman',
+        homePort,
+        shipName: c.shipName,
+      });
+      touchMaritimePersonLife(mBase, {
+        role: crewRoles[ci],
+        homePort,
+        nowLine: `Now sailing aboard coastal caravel ${c.shipName} (${origName} → ${destName} with ${Math.round(c.qty || 18)} ${c.good || 'wine'})`,
+      });
+    }
+    const cargoBrief = `${Math.round(c.qty || 18)} ${c.good || 'cargo'}`;
+    touchMaritimePersonLife(captBase, {
+      role: 'shipmaster',
+      homePort,
+      nowLine: `Now commanding coastal caravel ${c.shipName} between ${origName} and ${destName} (${cargoBrief})`,
+      initialLog: [`Commands coastal caravel ${c.shipName} carrying ${cargoBrief} from ${origName} to ${destName}`],
+    });
+    touchMaritimePersonLife(merchBase, {
+      role: 'merchant',
+      homePort,
+      nowLine: `Now accompanying ${cargoBrief} aboard ${c.shipName} (${origName} → ${destName})`,
+      initialLog: [`Shipped ${cargoBrief} coastwise from ${origName} to ${destName} aboard ${c.shipName}`],
+    });
+    c.master = captBase.name;
+    c.captain = {
+      id: captBase.id, name: captBase.name, surname: captBase.surname || '', sex: captBase.sex || 'm',
+      age: captBase.age || 34, role: 'shipmaster', trade: captBase.role || 'boatman', homePort, shipName: c.shipName,
+    };
+    c.pilot = {
+      id: captBase.id, name: captBase.name, settlementId: c.origin ?? 0, trade: 'shipmaster', homePort, shipName: c.shipName,
+    };
+    c.merchant = {
+      id: merchBase.id, name: merchBase.name, surname: merchBase.surname || '', sex: merchBase.sex || 'm',
+      age: merchBase.age || 33, role: 'merchant', trade: merchBase.role || 'merchant', homePort, shipName: c.shipName, cargoSummary: cargoBrief,
+    };
+    c.crew = crewOut;
+  }
+
+  function buildPartnerPersonInspect(personId) {
+    const found = PARTNER_REGISTRY.cardById.get(personId);
+    if (!found) return null;
+    const liveRec = W?.maritimeLives?.persons?.[String(personId)] || null;
+    const lines = String(found.entry.card || '').split('\n');
+    if (liveRec) {
+      // Update first-line role if serving as shipmaster
+      if (liveRec.role === 'shipmaster' && lines[0]) {
+        lines[0] = lines[0].replace(/ · (boatman|fisher|roper|shipwright) · /, ' · shipmaster · ');
+      }
+      if (liveRec.nowLine) {
+        const nowIdx = lines.findIndex((l) => l.startsWith('Now '));
+        if (nowIdx >= 0) lines[nowIdx] = liveRec.nowLine;
+        else lines.splice(Math.min(2, lines.length), 0, liveRec.nowLine);
+      }
+      if (Array.isArray(liveRec.log) && liveRec.log.length) {
+        let lifeIdx = lines.indexOf('Life');
+        if (lifeIdx < 0) {
+          lines.push('Life');
+          lifeIdx = lines.length - 1;
+        }
+        const existing = new Set(lines.slice(lifeIdx + 1));
+        for (const ev of liveRec.log) {
+          if (!existing.has(ev)) lines.push(ev);
+        }
+      }
+    }
+    return {
+      kind: 'person',
+      card: lines.join('\n'),
+      links: Array.isArray(found.entry.links) ? found.entry.links : [],
+    };
   }
   function anchorageBerths(s) {
     const out = typeof berthsOf === 'function' ? berthsOf(s).map((b) => ({ ...b })) : [];
@@ -181,6 +587,12 @@ globalThis.BOARD_MODEL = (() => {
           emit('trade', 2, R.poly[0], `Sails from ${F.n} sighted standing in toward ${s.name}.`);
         }
         W.ships.push(sh);
+      }
+    }
+    const usedPartnerFolk = new Set();
+    for (const sh of W.ships) {
+      if (sh && Array.isArray(sh.poly) && sh.poly.length >= 2) {
+        staffOceanShip(sh, usedPartnerFolk);
       }
     }
 
@@ -378,7 +790,7 @@ globalThis.BOARD_MODEL = (() => {
       }
     }
 
-    if (activeSea.length < 4 && harborPorts.length >= 2 && typeof seaRoute === 'function') {
+      if (activeSea.length < 4 && harborPorts.length >= 2 && typeof seaRoute === 'function') {
       const seaPairs = [];
       for (let a = 0; a < harborPorts.length; a++) {
         for (let b = a + 1; b < harborPorts.length; b++) {
@@ -393,6 +805,12 @@ globalThis.BOARD_MODEL = (() => {
         const forward = (i % 2) === 0;
         const poly = forward ? pair.poly : [...pair.poly].reverse();
         if (tryDispatchRoute('sea', forward ? pair.oi : pair.di, forward ? pair.di : pair.oi, poly, pair.len, 0.16 + ((i * 0.21) % 0.62))) needSea--;
+      }
+    }
+    let seaCaravanIdx = 0;
+    for (const c of W.caravans) {
+      if (c && !c.gone && !c.robbed && c.sea) {
+        staffSeaCaravan(c, seaCaravanIdx++, usedPartnerFolk);
       }
     }
 
@@ -680,11 +1098,13 @@ globalThis.BOARD_MODEL = (() => {
       const rep = MARITIME_PILOT.ships.get(idKey) || null;
       const s = W.settlements?.[sh.port] || null;
       if (rep?.sunk) {
+        if (sh.captain?.id) appendMaritimeLifeEvent(sh.captain.id, `Foundered aboard ${sh.shipName || sh.kind || 'her vessel'} off ${s?.name || 'the coast'}`);
+        if (sh.merchant?.id) appendMaritimeLifeEvent(sh.merchant.id, `Lost ventured cargo when ${sh.shipName || sh.kind || 'the ship'} foundered off ${s?.name || 'the coast'}`);
         shipsArr.splice(i, 1);
         MARITIME_PILOT.ships.delete(idKey);
         if (!W.prehistory && typeof emit === 'function') {
           const where = sh.berth || s?.pos || null;
-          emit('trade', 4, where, `The ${sh.kind || 'vessel'} out of ${sh.from || 'afar'} foundered off ${s?.name || 'the coast'}; her cargo is lost to the sea.`);
+          emit('trade', 4, where, `The ${sh.kind || 'vessel'} ${sh.shipName ? sh.shipName + ' ' : ''}out of ${sh.from || 'afar'} foundered off ${s?.name || 'the coast'}; her cargo is lost to the sea.`);
         }
         continue;
       }
@@ -823,6 +1243,37 @@ globalThis.BOARD_MODEL = (() => {
     };
     const baseView = model.view;
     model.view = (kind, payload = {}) => {
+      if (kind === 'ui' && payload?.panel === 'advisor-inspect') {
+        const codeStr = String(payload?.code || '');
+        if (/^p\d+$/.test(codeStr)) {
+          const pid = Number(codeStr.slice(1));
+          if (pid >= 2_000_000) {
+            const partnerAns = buildPartnerPersonInspect(pid);
+            if (partnerAns) return partnerAns;
+          }
+        }
+      }
+      if (kind === 'inspect') {
+        const codeStr = String(payload?.code || '');
+        if (codeStr.startsWith('ship:') || /^sh\d+$/.test(codeStr)) {
+          const shId = Number(codeStr.startsWith('ship:') ? codeStr.slice(5) : codeStr.slice(2));
+          const sh = (W?.ships || []).find((q, idx) => q && (q.id === shId || idx === shId));
+          if (sh) {
+            staffOceanShip(sh);
+            const portName = W.settlements?.[sh.port ?? 0]?.name || 'Lisboa';
+            const mid = sh.berth || sh.poly?.[Math.floor((sh.poly.length - 1) / 2)] || { x: 0, z: 0 };
+            const crewNames = Array.isArray(sh.crew) ? sh.crew.map((m) => `${m.name} (${m.role})`).join(', ') : '';
+            return {
+              targetType: 'ship',
+              title: `${sh.shipName || 'Merchant Vessel'} (${sh.kind || 'cog'})`,
+              sub: `Master: ${sh.captain?.name || sh.master} · Supercargo: ${sh.merchant?.name || 'Factor'} · Home port: ${sh.homePort || sh.from}`,
+              body: `<p>${sh.tonnage || 180}-ton ${sh.kind || 'vessel'} out of ${sh.homePort || sh.from} (${sh.phase === 'dock' ? 'anchored at ' + portName : sh.phase === 'out' ? 'outbound to ' + (sh.to || sh.homePort) : 'inbound to ' + portName}). Cargo: ${formatCargoBrief(sh.phase === 'out' && Object.keys(sh.load || {}).length ? sh.load : sh.cargo)}. Deck complement: ${crewNames}.</p>`,
+              actions: '',
+              anchor: { x: r1(mid.x), z: r1(mid.z) },
+            };
+          }
+        }
+      }
       if (kind === 'inspect' && String(payload?.code || '').startsWith('rb')) {
         const rbKey = String(payload.code);
         const rbId = Number(rbKey.slice(2));
@@ -1182,13 +1633,21 @@ globalThis.BOARD_MODEL = (() => {
           portBerths = berthsOf(settlement).map((b) => ({ x: r1(b.x), z: r1(b.z), rot: r3(b.rot || 0), shore: Boolean(b.shore) }));
         }
       } catch { portBerths = []; }
+      if (!sh.captain || !sh.merchant || !Array.isArray(sh.crew) || !sh.crew.length) {
+        staffOceanShip(sh);
+      }
       out.push({
         id: sh.id ?? index,
         kind: String(sh.kind || 'cog'),
+        shipName: String(sh.shipName || ''),
+        homePort: String(sh.homePort || sh.from || ''),
         phase: String(sh.phase || 'in'),
         from: String(sh.from || ''),
         to: String(sh.to || ''),
-        master: String(sh.master || ''),
+        master: String(sh.captain?.name || sh.master || ''),
+        captain: sh.captain ? { ...sh.captain } : null,
+        merchant: sh.merchant ? { ...sh.merchant } : null,
+        crew: Array.isArray(sh.crew) ? sh.crew.map((m) => ({ ...m })) : [],
         tonnage: Number(sh.tonnage || 0),
         place: sh.port ?? 0,
         t0: sh.t0 ?? 0,
@@ -1299,16 +1758,121 @@ globalThis.BOARD_MODEL = (() => {
   // The model's caravans on the road today: each load as it goes, by the route it takes and the days it left and is due.
   // Where one is on its way is no field of the model's: it is that share of its route, by the day (the model's polyPos).
   // `carts` is the model's own count of wagons for a load of that size (its display's spawnCarts).
+  function harborFleet() {
+    ensureMaritimeWorldRoutes();
+    const lives = ensureMaritimeLivesStore();
+    if (!Array.isArray(lives.harborFleet) || lives.harborFleet.length < 10) {
+      const worldSeed = typeof SEED === 'number' ? SEED : 1550;
+      const used = new Set();
+      for (const sh of W?.ships || []) {
+        if (sh?.captain?.id != null) used.add(sh.captain.id);
+        if (sh?.merchant?.id != null) used.add(sh.merchant.id);
+        for (const m of sh?.crew || []) if (m?.id != null) used.add(m.id);
+      }
+      const portName = W?.settlements?.[0]?.name || 'Lisboa';
+      const slots = [
+        { slot: 'roadstead:0', kind: 'carrack', duty: `anchored in the ${portName} roadstead discharging cargo` },
+        { slot: 'roadstead:1', kind: 'great cog', duty: `riding at anchor off ${portName} awaiting customs clearance` },
+        { slot: 'roadstead:2', kind: 'carrack', duty: `lying at moorings in ${portName} bay taking on ballast and wine` },
+        { slot: 'roadstead:3', kind: 'great cog', duty: `anchored off ${portName} trading salt and spice` },
+        { slot: 'harbor:0', kind: 'barque', duty: `plying ${portName} harbor lighterage between anchorage and quay` },
+        { slot: 'harbor:1', kind: 'caravel', duty: `working coastal trade across ${portName} bay` },
+        { slot: 'harbor:2', kind: 'barque', duty: `ferrying casks and bales across ${portName} roadstead` },
+        { slot: 'harbor:3', kind: 'caravel', duty: `standing across ${portName} estuary under lateen canvas` },
+        { slot: 'harbor:4', kind: 'barque', duty: `tending merchantmen anchored off ${portName}` },
+        { slot: 'harbor:5', kind: 'caravel', duty: `running coastwise packets into ${portName}` },
+      ];
+      lives.harborFleet = slots.map((spec, idx) => {
+        const port = PARTNER_REGISTRY.ports.length
+          ? PARTNER_REGISTRY.ports[(idx + 2) % PARTNER_REGISTRY.ports.length]
+          : null;
+        const homePort = port?.name || ['Porto', 'Sevilla', 'Antwerp', 'Venice', 'Bordeaux'][idx % 5];
+        const shipNames = port?.shipNames?.length ? port.shipNames : ['São Cristóvão', 'Nossa Senhora da Luz', 'Bom Jesus', 'Espírito Santo'];
+        const shipName = shipNames[maritimeHash(worldSeed, idx + 307, 11) % shipNames.length];
+        const pick = (list, salt, fbRole, fbName) => {
+          if (Array.isArray(list) && list.length) {
+            const start = maritimeHash(worldSeed, idx + 401, salt) % list.length;
+            for (let k = 0; k < list.length; k++) {
+              const cand = list[(start + k) % list.length];
+              if (cand && !used.has(cand.id)) {
+                used.add(cand.id);
+                return cand;
+              }
+            }
+            return list[start];
+          }
+          return fallbackPartnerSoul(70000 + idx * 23 + salt, fbName, fbRole, homePort, 33);
+        };
+        const captBase = pick(port?.captains, 17, 'shipmaster', `Master #${idx + 1}`);
+        const merchBase = pick(port?.merchants, 31, 'merchant', `Factor #${idx + 1}`);
+        const crewRoles = ['helmsman', 'lookout', 'bosun'];
+        const crew = crewRoles.map((role, ci) => {
+          const mBase = pick(port?.mariners, 53 + ci * 13, 'boatman', `Mariner #${ci + 1}`);
+          touchMaritimePersonLife(mBase, {
+            role,
+            homePort,
+            nowLine: `Now ${spec.duty} aboard ${shipName} (of ${homePort})`,
+          });
+          return {
+            id: mBase.id, name: mBase.name, surname: mBase.surname || '', sex: mBase.sex || 'm',
+            age: mBase.age || 27, role, trade: mBase.role || 'boatman', homePort, shipName,
+          };
+        });
+        touchMaritimePersonLife(captBase, {
+          role: 'shipmaster',
+          homePort,
+          nowLine: `Now commanding ${shipName} (of ${homePort}), ${spec.duty}`,
+          initialLog: [`Commands ${spec.kind} ${shipName} out of ${homePort}, ${spec.duty}`],
+        });
+        touchMaritimePersonLife(merchBase, {
+          role: 'merchant',
+          homePort,
+          nowLine: `Now supercargo aboard ${shipName} (of ${homePort}), ${spec.duty}`,
+          initialLog: [`Supercargo aboard ${shipName} of ${homePort}, ${spec.duty}`],
+        });
+        return {
+          slot: spec.slot,
+          kind: spec.kind,
+          shipName,
+          homePort,
+          captain: {
+            id: captBase.id, name: captBase.name, surname: captBase.surname || '', sex: captBase.sex || 'm',
+            age: captBase.age || 36, role: 'shipmaster', trade: captBase.role || 'boatman', homePort, shipName,
+          },
+          merchant: {
+            id: merchBase.id, name: merchBase.name, surname: merchBase.surname || '', sex: merchBase.sex || 'm',
+            age: merchBase.age || 34, role: 'merchant', trade: merchBase.role || 'merchant', homePort, shipName,
+          },
+          crew,
+        };
+      });
+    }
+    return lives.harborFleet.map((h) => ({
+      slot: h.slot,
+      kind: h.kind,
+      shipName: h.shipName,
+      homePort: h.homePort,
+      captain: h.captain ? { ...h.captain } : null,
+      merchant: h.merchant ? { ...h.merchant } : null,
+      crew: Array.isArray(h.crew) ? h.crew.map((m) => ({ ...m })) : [],
+    }));
+  }
+
   function riverBoats() {
     ensureMaritimeWorldRoutes();
     const out = [];
     for (let i = 0; i < (W?.riverBoats || []).length; i++) {
       const b = W.riverBoats[i];
       if (!b || b.sunk || !Array.isArray(b.points) || b.points.length < 2) continue;
-      const oarsCount = Array.isArray(b.oarsmen) ? b.oarsmen.length : (Number.isFinite(b.oarsmen) ? b.oarsmen : 4);
+      const oarsList = Array.isArray(b.oarsmen) ? b.oarsmen : [];
+      const oarsCount = oarsList.length ? oarsList.length : (Number.isFinite(b.oarsmen) ? b.oarsmen : 4);
+      const homePort = W?.settlements?.[b.si ?? 0]?.name || 'Ribatejo';
+      const shipName = b.shipName || `Barca do Tejo ${b.id ?? (i + 1)}`;
       out.push({
         id: b.id,
         key: b.key || `rb:${b.id}`,
+        shipName,
+        homePort,
         si: b.si ?? 0,
         destSi: b.destSi ?? b.si ?? 0,
         riverIdx: b.riverIdx ?? 0,
@@ -1320,9 +1884,21 @@ globalThis.BOARD_MODEL = (() => {
         pilot: b.pilot ? {
           id: b.pilot.id,
           name: String(b.pilot.name || 'Barqueiro'),
+          role: 'river pilot',
           settlementId: b.pilot.settlementId ?? b.si ?? 0,
           trade: String(b.pilot.trade || 'boatman'),
+          homePort,
+          shipName,
         } : null,
+        crew: oarsList.map((o) => ({
+          id: o.id,
+          name: String(o.name || 'Remador'),
+          role: 'oarsman',
+          settlementId: o.settlementId ?? b.si ?? 0,
+          trade: String(o.trade || 'boatman'),
+          homePort,
+          shipName,
+        })),
         points: line(b.points),
       });
     }
@@ -1343,13 +1919,39 @@ globalThis.BOARD_MODEL = (() => {
         points: line(c.poly),
       };
       if (mode === 'river') {
+        const homePort = W?.settlements?.[c.origin ?? 0]?.name || 'Ribatejo';
+        const shipName = c.shipName || `Barca #${index + 1}`;
+        entry.shipName = shipName;
+        entry.homePort = homePort;
         entry.pilot = c.pilot ? {
           id: c.pilot.id,
           name: String(c.pilot.name || 'Barqueiro'),
+          role: 'river pilot',
           settlementId: c.pilot.settlementId ?? c.origin ?? 0,
           trade: String(c.pilot.trade || 'boatman'),
+          homePort,
+          shipName,
         } : null;
         entry.oarsmen = Math.max(2, Array.isArray(c.oarsmen) ? c.oarsmen.length : 4);
+        entry.crew = Array.isArray(c.oarsmen) ? c.oarsmen.map((o) => ({
+          id: o.id,
+          name: String(o.name || 'Remador'),
+          role: 'oarsman',
+          settlementId: o.settlementId ?? c.origin ?? 0,
+          trade: String(o.trade || 'boatman'),
+          homePort,
+          shipName,
+        })) : [];
+      } else if (mode === 'sea') {
+        if (!c.captain || !c.merchant || !Array.isArray(c.crew) || !c.crew.length) {
+          staffSeaCaravan(c, index);
+        }
+        entry.shipName = String(c.shipName || '');
+        entry.homePort = String(c.homePort || '');
+        entry.pilot = c.pilot ? { ...c.pilot } : (c.captain ? { id: c.captain.id, name: c.captain.name, settlementId: c.origin ?? 0, trade: 'shipmaster' } : null);
+        entry.captain = c.captain ? { ...c.captain } : null;
+        entry.merchant = c.merchant ? { ...c.merchant } : null;
+        entry.crew = Array.isArray(c.crew) ? c.crew.map((m) => ({ ...m })) : [];
       }
       out.push(entry);
     });
@@ -1359,6 +1961,7 @@ globalThis.BOARD_MODEL = (() => {
       list: out,
       riverBoats: riverBoats(),
       ships: ships(),
+      harborFleet: harborFleet(),
     };
   }
 

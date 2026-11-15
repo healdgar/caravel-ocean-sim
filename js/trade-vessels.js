@@ -258,11 +258,13 @@ function appendLusoriaCargo(verts, inds, groups, modelId = 'lusoria') {
   });
 }
 
-// Appends a watertight articulated 16th-century mariner in design space scaled inversely by designScale to true metres.
-// Anatomy zone in uv.x: <0.22 skin, 0.22..0.48 breeches/boots, 0.48..0.78 tunic (tinted via uv.y), >=0.78 barrete cap.
-// Motion flexibility in uv.y: 0.0 fixed seated lower body/feet, >0.1 upper torso/head/arms sway factor.
+// Appends a watertight articulated 16th-century figure (captain, merchant, helmsman, mariner, or oarsman)
+// in design space scaled inversely by designScale to true human metric stature (~1.72 m).
+// Anatomy zone in uv.x: <0.22 skin, 0.22..0.48 breeches/boots, 0.48..0.72 coat/robe/tunic, 0.72..0.78 sash/manifest ledger, >=0.78 hat/beret/cap.
+// Motion flexibility in uv.y: 0.0 fixed seated lower body/soles, >0.12 upper torso/head/arms sway factor.
 function appendHumanFigure9(verts, inds, origin, facingYaw, designScale, matId, options = {}) {
   const {
+    role = 'mariner',
     seated = false,
     toneSeed = 0.35,
     leanZ = 0,
@@ -285,10 +287,10 @@ function appendHumanFigure9(verts, inds, origin, facingYaw, designScale, matId, 
     const len = Math.hypot(dx, dy, dz);
     if (len < 1e-4) return;
     const ax = [dx / len, dy / len, dz / len];
-    const ref = Math.abs(ax[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
-    let ux = ax[1] * ref[2] - ax[2] * ref[1];
-    let uy = ax[2] * ref[0] - ax[0] * ref[2];
-    let uz = ax[0] * ref[1] - ax[1] * ref[0];
+    const basis = Math.abs(ax[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+    let ux = ax[1] * basis[2] - ax[2] * basis[1];
+    let uy = ax[2] * basis[0] - ax[0] * basis[2];
+    let uz = ax[0] * basis[1] - ax[1] * basis[0];
     const ul = Math.hypot(ux, uy, uz) || 1;
     ux /= ul; uy /= ul; uz /= ul;
     const vx = ax[1] * uz - ax[2] * uy;
@@ -319,34 +321,57 @@ function appendHumanFigure9(verts, inds, origin, facingYaw, designScale, matId, 
     }
   };
 
-  // Encode anatomy + tunic tint + flexion weight in UV so animated stations bend naturally at waist.
+  const isCaptain = role === 'captain';
+  const isMerchant = role === 'merchant';
   const hipY = seated ? 0.06 : 0.84;
   const shoulderY = seated ? 0.56 : 1.38;
   const headBaseY = shoulderY + 0.08;
   const tunicUvY = Math.max(0.18, Math.min(0.95, 0.20 + toneSeed * 0.72));
 
   if (seated) {
-    // Seated thighs forward (+Z) + calves down to deck floorboards (uv.y = 0 -> locked on bench)
     for (const sx of [-0.11, 0.11]) {
       pushLimb([sx, 0.05, 0.0], [sx * 1.15, 0.02, 0.34], 0.078, 0.065, 6, 0.35, 0.0, 0.0);
       pushLimb([sx * 1.15, 0.02, 0.34], [sx * 1.1, -0.34, 0.42], 0.060, 0.048, 6, 0.35, 0.0, 0.0);
     }
+  } else if (isMerchant) {
+    // Leather shoes peeking beneath full Renaissance merchant houppelande robe
+    for (const sx of [-0.09, 0.09]) {
+      pushLimb([sx, 0.0, 0.02], [sx, 0.15, 0.02], 0.062, 0.060, 6, 0.35, 0.0, 0.04);
+    }
+    pushLimb([0, 0.08, 0.01], [0, hipY + 0.03, 0.0], 0.235, 0.168, 8, 0.60, 0.04, tunicUvY * 0.42);
   } else {
-    // Standing boots & breeches planted firmly on deck (origin.y == sole)
     for (const sx of [-0.10, 0.10]) {
-      pushLimb([sx, 0.0, 0.02], [sx, 0.42, 0.01], 0.065, 0.062, 6, 0.35, 0.0, 0.05);
-      pushLimb([sx, 0.42, 0.01], [sx * 0.9, hipY, 0.0], 0.068, 0.082, 6, 0.35, 0.05, 0.12);
+      pushLimb([sx, 0.0, 0.02], [sx, 0.42, 0.01], 0.066, 0.063, 6, 0.35, 0.0, 0.05);
+      pushLimb([sx, 0.42, 0.01], [sx * 0.9, hipY, 0.0], 0.070, 0.084, 6, 0.35, 0.05, 0.12);
+    }
+    if (isCaptain) {
+      // Flared 16th-century sea-officer's coat skirt + commander's waist sash
+      pushLimb([0, 0.45, 0.0], [0, hipY + 0.03, 0.0], 0.215, 0.162, 8, 0.60, 0.09, tunicUvY * 0.44);
+      pushLimb([0, hipY + 0.01, 0.0], [0, hipY + 0.10, leanZ * 0.12], 0.174, 0.172, 8, 0.75, 0.40, 0.48);
     }
   }
 
-  // Torso (waist -> broad shoulders) + tunic skirt
-  pushLimb([0, hipY - 0.03, 0], [0, shoulderY, leanZ], 0.145, 0.185, 8, 0.62, tunicUvY * 0.45, tunicUvY);
-  // Head (skin) & mariner's barrete wool cap
+  // Torso (waist -> broad shoulders)
+  const chestR0 = isCaptain || isMerchant ? 0.162 : 0.145;
+  const chestR1 = isCaptain ? 0.208 : isMerchant ? 0.202 : 0.185;
+  pushLimb([0, hipY - 0.03, 0], [0, shoulderY, leanZ], chestR0, chestR1, 8, 0.60, tunicUvY * 0.45, tunicUvY);
+
+  // Head & distinctive period headgear
   const headTopY = headBaseY + 0.19;
   pushLimb([0, headBaseY - 0.02, leanZ], [0, headTopY, leanZ * 1.05], 0.095, 0.092, 8, 0.10, 0.85, 0.95);
-  pushLimb([0, headTopY - 0.02, leanZ * 1.05], [0, headTopY + 0.09, leanZ * 1.02 - 0.02], 0.105, 0.072, 8, 0.88, 0.95, 1.0);
+  if (isCaptain) {
+    // Broad-brimmed 16th-century sea-captain's felt hat + tall crown
+    pushLimb([0, headTopY - 0.015, leanZ * 1.05], [0, headTopY + 0.018, leanZ * 1.05], 0.218, 0.208, 10, 0.88, 0.95, 0.97);
+    pushLimb([0, headTopY + 0.012, leanZ * 1.05], [0, headTopY + 0.115, leanZ * 1.02 - 0.01], 0.112, 0.088, 8, 0.88, 0.97, 1.0);
+  } else if (isMerchant) {
+    // Wide pleated Renaissance velvet chaperon / merchant's beret
+    pushLimb([0, headTopY - 0.02, leanZ * 1.05], [0, headTopY + 0.055, leanZ * 1.04 - 0.01], 0.125, 0.168, 9, 0.88, 0.95, 0.98);
+    pushLimb([0, headTopY + 0.050, leanZ * 1.04 - 0.01], [0, headTopY + 0.085, leanZ * 1.03 - 0.01], 0.162, 0.065, 9, 0.88, 0.98, 1.0);
+  } else {
+    pushLimb([0, headTopY - 0.02, leanZ * 1.05], [0, headTopY + 0.09, leanZ * 1.02 - 0.02], 0.105, 0.072, 8, 0.88, 0.95, 1.0);
+  }
 
-  // Arms from shoulders to target hands (if provided in design coords, convert to local offsets)
+  // Arms from shoulders to target hands (in design coords -> local metric offsets)
   const worldToLocal = (target) => {
     if (!target) return null;
     const dx = (target[0] - origin[0]) * (designScale[0] || 1);
@@ -354,13 +379,82 @@ function appendHumanFigure9(verts, inds, origin, facingYaw, designScale, matId, 
     const dz = (target[2] - origin[2]) * (designScale[2] || 1);
     return [dx * cf + dz * sf, dy, -dx * sf + dz * cf];
   };
-  const lHand = worldToLocal(leftHand) ?? [-0.22, shoulderY - 0.12, 0.28];
-  const rHand = worldToLocal(rightHand) ?? [0.22, shoulderY - 0.12, 0.28];
+  const defaultLeft = isMerchant
+    ? [-0.13, shoulderY - 0.22, 0.25]
+    : isCaptain
+      ? [-0.20, shoulderY - 0.28, 0.14]
+      : [-0.22, shoulderY - 0.12, 0.28];
+  const defaultRight = isMerchant
+    ? [0.13, shoulderY - 0.19, 0.27]
+    : isCaptain
+      ? [0.18, shoulderY - 0.14, 0.26]
+      : [0.22, shoulderY - 0.12, 0.28];
+  const lHand = worldToLocal(leftHand) ?? defaultLeft;
+  const rHand = worldToLocal(rightHand) ?? defaultRight;
+  const sleeveR0 = isMerchant ? 0.070 : isCaptain ? 0.064 : 0.055;
   for (const [sx, hand] of [[-0.18, lHand], [0.18, rHand]]) {
     const sh = [sx, shoulderY - 0.04, leanZ];
     const elbow = [(sh[0] + hand[0]) * 0.55 + sx * 0.18, (sh[1] + hand[1]) * 0.5 - 0.05, (sh[2] + hand[2]) * 0.5];
-    pushLimb(sh, elbow, 0.055, 0.046, 6, 0.62, 0.82, 0.88);
-    pushLimb(elbow, hand, 0.044, 0.036, 6, 0.12, 0.88, 0.96);
+    pushLimb(sh, elbow, sleeveR0, 0.048, 6, 0.60, 0.82, 0.88);
+    pushLimb(elbow, hand, 0.046, 0.036, 6, 0.12, 0.88, 0.96);
+  }
+
+  if (isMerchant && !leftHand && !rightHand) {
+    // Physical 3D wooden & parchment cargo manifest ledger held open in hands (uv.x = 0.75)
+    pushLimb([0.0, shoulderY - 0.28, 0.24], [0.0, shoulderY - 0.06, 0.34], 0.165, 0.165, 4, 0.75, 0.88, 0.96);
+  }
+}
+
+function probeDeckPlankY(verts, targetX, targetZ, radX, radZ, fallbackY, maxY = Infinity) {
+  let best = -Infinity;
+  for (const mul of [1, 1.85]) {
+    const rx = radX * mul, rz = radZ * mul;
+    for (let i = 0; i < verts.length; i += 9) {
+      if (Math.floor(verts[i + 6]) !== 0) continue;
+      if (verts[i + 4] < 0.72) continue;
+      const x = verts[i], y = verts[i + 1], z = verts[i + 2];
+      if (y > maxY) continue;
+      if (Math.abs(x - targetX) <= rx && Math.abs(z - targetZ) <= rz && y > best) {
+        best = y;
+      }
+    }
+    if (Number.isFinite(best)) return best;
+  }
+  return fallbackY;
+}
+
+function appendDeckStowedCargo9(verts, inds, origin, designScale, countScale = 1) {
+  const invX = 1 / (designScale[0] || 1);
+  const invY = 1 / (designScale[1] || 1);
+  const invZ = 1 / (designScale[2] || 1);
+  const [ox, oy, oz] = origin;
+  // Hooped oak wine/spice casks (matId 1 staves + matId 3 wrought-iron hoops)
+  const rMid = 0.21, halfL = 0.32;
+  const caskOffsets = countScale >= 2
+    ? [[-0.22, 0, -0.22], [0.22, 0, -0.20], [0.0, rMid * 1.72, -0.21]]
+    : [[-0.16, 0, -0.18]];
+  for (const [lx, ly, lz] of caskOffsets) {
+    const cx = ox + lx * invX;
+    const cy = oy + (rMid + ly) * invY;
+    const cz = oz + lz * invZ;
+    appendTaperedCylinder(verts, inds, [cx, cy, cz - halfL * invZ], [cx, cy, cz + halfL * invZ], rMid * invX, rMid * 0.82 * invX, 9, 1, 1, [1, (rMid * invY) / Math.max(1e-4, rMid * invX)]);
+    for (const hOff of [-0.19, 0.19]) {
+      appendTaperedCylinder(
+        verts, inds,
+        [cx, cy, cz + (hOff - 0.022) * invZ], [cx, cy, cz + (hOff + 0.022) * invZ],
+        rMid * 0.97 * invX, rMid * 0.97 * invX, 9, 3, 0,
+        [1, (rMid * invY) / Math.max(1e-4, rMid * invX)],
+      );
+    }
+  }
+  // Corded linen/wool merchant bale (matId 23 burlap + matId 12 hemp rope lashings — immune to sail furl)
+  const bx = ox + 0.04 * invX;
+  const by = oy + 0.20 * invY;
+  const bz = oz + 0.28 * invZ;
+  const hx = 0.28 * invX, hy = 0.20 * invY, hz = 0.24 * invZ;
+  appendRoundedBox9(verts, inds, bx, by, bz, hx, hy, hz, 23, 0.08);
+  for (const lOff of [-hz * 0.45, hz * 0.45]) {
+    appendTaperedCylinder(verts, inds, [bx - hx * 1.03, by, bz + lOff], [bx + hx * 1.03, by, bz + lOff], 0.022 * invX, 0.022 * invX, 6, 12, 0);
   }
 }
 
@@ -371,6 +465,17 @@ function appendTradeCrew(verts, inds, groups, spec, scaleSpec, model) {
     frame.verticalScale || 1,
     spec.length / (frame.length || 12),
   ];
+  const deckStations = [];
+  const recordStation = (station, originDesign) => {
+    deckStations.push({
+      station,
+      localMetres: [
+        originDesign[0] * designScale[0],
+        originDesign[1] * designScale[1],
+        originDesign[2] * designScale[2],
+      ],
+    });
+  };
   const addGroup = (id, nodeId, fn) => {
     const startIdx = inds.length;
     fn();
@@ -408,20 +513,34 @@ function appendTradeCrew(verts, inds, groups, spec, scaleSpec, model) {
       appendRoundedBox9(verts, inds, swBlade[0], swBlade[1], swBlade[2], 0.02, 0.13, 0.34, 28, 0);
     });
 
-    // 2. Standing stern river pilot holding steering sweep (matId 27)
+    // 2. Standing stern river pilot holding steering sweep + amidships supercargo/factor
+    const factorZ = warpSectionZ(-0.25, scaleSpec.waistWarpK);
+    const factorY = rowingDeck('lusoria', factorZ) + BARGE_Y_LIFT;
     addGroup('crew.pilot', 'hull', () => {
-      appendHumanFigure9(verts, inds, [helmX, helmY, helmZ], -0.25, designScale, 27, {
+      const pilotOrig = [helmX, helmY, helmZ];
+      recordStation('pilot', pilotOrig);
+      appendHumanFigure9(verts, inds, pilotOrig, -0.25, designScale, 27, {
+        role: 'helmsman',
         seated: false,
         toneSeed: 0.42,
         leanZ: 0.04,
         leftHand: [swHandle[0] - 0.06, swHandle[1] + 0.04, swHandle[2] - 0.08],
         rightHand: swHandle,
       });
+      const merchOrig = [0.22, factorY, factorZ];
+      recordStation('merchant', merchOrig);
+      appendHumanFigure9(verts, inds, merchOrig, 0.25, designScale, 27.45, {
+        role: 'merchant',
+        seated: false,
+        toneSeed: 0.64,
+        leanZ: 0.02,
+      });
     });
 
     // 3. Seated oarsmen synchronized with active oarlock stations (matId 29 + stationIdx/64)
     addGroup('crew.oarsmen', 'deck.main', () => {
       const ACTIVE_PAIRS = new Set([1, 3, 4, 7, 8, 10, 11]);
+      let oarRecorded = 0;
       for (const st of d.stations) {
         const pairIdx = st.index >> 1;
         if (!ACTIVE_PAIRS.has(pairIdx)) continue;
@@ -434,7 +553,12 @@ function appendTradeCrew(verts, inds, groups, spec, scaleSpec, model) {
         const gripX = pivX * 0.32;
         const gripY = Math.max(sy + 0.32 / designScale[1], pivY + 0.18 / designScale[1]);
         const gripZ = pivZ + 0.20 / designScale[2];
+        if (oarRecorded < 4) {
+          recordStation(`crew:${oarRecorded}`, [sx, sy - 0.34 / designScale[1], sz]);
+          oarRecorded++;
+        }
         appendHumanFigure9(verts, inds, [sx, sy, sz], 0, designScale, 29 + st.index / 64, {
+          role: 'mariner',
           seated: true,
           toneSeed: ((st.index * 37) % 100) / 100,
           leanZ: 0.08,
@@ -444,13 +568,14 @@ function appendTradeCrew(verts, inds, groups, spec, scaleSpec, model) {
       }
     });
   } else {
-    // Ocean vessels (cogs, carracks, caravels & harbor barques): standing helmsman + fore lookout (+ waist hand on large ships).
+    // Ocean cogs (0,1), carracks (2,3), coastal caravels (5) & harbor barques (6):
+    // Physical Captain on quarterdeck, Merchant with cargo manifest ledger beside stowed waist casks/bales,
+    // Helmsman at whipstaff/tiller, Foredeck Lookout, and Working Mariners.
     let sternDeckY = 1.15, bestSternY = -Infinity, deckMaxZ = 3.2;
-    let foreDeckY = 0.95, bestForeY = -Infinity, foreZ = -2.1;
+    let foreDeckY = 0.95, bestForeY = -Infinity, foreZ = -2.3;
     let waistDeckY = 0.72, bestWaistY = -Infinity;
     for (let i = 0; i < verts.length; i += 9) {
-      const mat = Math.floor(verts[i + 6]);
-      if (mat !== 0) continue;
+      if (Math.floor(verts[i + 6]) !== 0 || verts[i + 4] < 0.72) continue;
       const x = verts[i], y = verts[i + 1], z = verts[i + 2];
       if (Math.abs(x) < 0.75 && z > 1.8 && z < 4.35 && y > bestSternY) {
         bestSternY = y;
@@ -462,42 +587,141 @@ function appendTradeCrew(verts, inds, groups, spec, scaleSpec, model) {
         foreDeckY = y;
         foreZ = Math.max(-4.35, Math.min(-2.1, z + 0.35));
       }
-      if (Math.abs(x) > 0.45 && Math.abs(x) < 1.15 && Math.abs(z - 0.6) < 0.8 && y > bestWaistY) {
+      if (Math.abs(x) < 1.05 && z > -2.2 && z < 1.1 && y < 1.16 && y > bestWaistY) {
         bestWaistY = y;
         waistDeckY = y;
       }
     }
-    const helmZ = Math.min(4.2, Math.max(2.3, deckMaxZ - 0.45));
+    const isLarge = spec.index === 2 || spec.index === 3;
+    const isMedium = spec.index === 0 || spec.index === 1;
+    const isCaravel = spec.index === 5;
+    const isBarque = spec.index === 6;
+    const waistMaxY = waistDeckY + 0.30;
+    const sternMaxY = sternDeckY + 0.25;
+    const helmZ = Math.min(4.2, Math.max(2.4, deckMaxZ - 0.35));
     const helmX = -0.22;
     const tillerPivot = [0, sternDeckY + 0.85 / designScale[1], helmZ + 0.95 / designScale[2]];
     const tillerGrip = [0.02, sternDeckY + 0.92 / designScale[1], helmZ - 0.18 / designScale[2]];
-    if (spec.index === 6) {
+
+    if (isBarque) {
       addGroup('crew.sweep', 'hull', () => {
         appendTaperedCylinder(verts, inds, tillerPivot, tillerGrip, 0.045, 0.032, 8, 28, 0);
       });
     }
-    addGroup('crew.pilot', 'hull', () => {
-      appendHumanFigure9(verts, inds, [helmX, sternDeckY, helmZ], 0.15, designScale, 27, {
-        seated: false,
-        toneSeed: 0.72,
-        leanZ: 0.03,
-        leftHand: [-0.28 / designScale[0], sternDeckY + 0.96 / designScale[1], helmZ - 0.16 / designScale[2]],
-        rightHand: spec.index === 6 ? tillerGrip : [0.05 / designScale[0], sternDeckY + 0.92 / designScale[1], helmZ - 0.16 / designScale[2]],
-      });
-      if (!spec.furlSails || spec.index === 1 || spec.index === 3) {
-        appendHumanFigure9(verts, inds, [0.22, foreDeckY, foreZ], 0.1, designScale, 27, {
+
+    // Stowed waist cargo casks & corded bales in the open sunlit waist inspected by the ship's Merchant
+    const cargoX = isBarque ? -0.24 : isCaravel ? 0.20 : 0.22;
+    const cargoZ = isBarque ? -0.15 : isCaravel ? 0.42 : -1.72;
+    const cargoY = probeDeckPlankY(verts, cargoX, cargoZ, 0.55, 0.65, waistDeckY, waistMaxY);
+    addGroup('cargo.deck', 'hull', () => {
+      appendDeckStowedCargo9(verts, inds, [cargoX, cargoY, cargoZ], designScale, isLarge || isMedium ? 2 : 1);
+    });
+
+    addGroup('crew.officers', 'hull', () => {
+      if (isBarque) {
+        // On the compact Harbor Barque, the Master/Captain commands forward from the wooden tiller
+        const captOrig = [helmX, probeDeckPlankY(verts, helmX, helmZ, 0.45, 0.55, sternDeckY, sternMaxY), helmZ];
+        recordStation('captain', captOrig);
+        appendHumanFigure9(verts, inds, captOrig, Math.PI - 0.14, designScale, 27.15, {
+          role: 'captain',
           seated: false,
-          toneSeed: 0.18 + spec.index * 0.13,
+          toneSeed: 0.24,
+          leanZ: 0.03,
+          leftHand: [-0.26 / designScale[0], captOrig[1] + 0.96 / designScale[1], helmZ - 0.16 / designScale[2]],
+          rightHand: tillerGrip,
+        });
+      } else {
+        // Quarterdeck Sea-Captain commanding forward at the quarterdeck rail + dedicated Helmsman at the whipstaff
+        const captX = 0.34;
+        const captZ = Math.max(2.35, Math.min(3.35, helmZ - 0.55));
+        const captY = probeDeckPlankY(verts, captX, captZ, 0.5, 0.6, sternDeckY, sternMaxY);
+        const captOrig = [captX, captY, captZ];
+        recordStation('captain', captOrig);
+        appendHumanFigure9(verts, inds, captOrig, 2.82, designScale, 27.15, {
+          role: 'captain',
+          seated: false,
+          toneSeed: 0.22 + spec.index * 0.11,
+          leanZ: 0.02,
+        });
+
+        const helmY = probeDeckPlankY(verts, helmX, helmZ, 0.45, 0.55, sternDeckY, sternMaxY);
+        const helmOrig = [helmX, helmY, helmZ];
+        recordStation('crew:0', helmOrig);
+        appendHumanFigure9(verts, inds, helmOrig, Math.PI - 0.12, designScale, 27, {
+          role: 'helmsman',
+          seated: false,
+          toneSeed: 0.72,
+          leanZ: 0.03,
+          leftHand: [-0.28 / designScale[0], helmY + 0.96 / designScale[1], helmZ - 0.16 / designScale[2]],
+          rightHand: [0.05 / designScale[0], helmY + 0.92 / designScale[1], helmZ - 0.16 / designScale[2]],
         });
       }
-      if (!spec.furlSails && (spec.index === 0 || spec.index === 2)) {
-        appendHumanFigure9(verts, inds, [0.85, waistDeckY, 0.65], -0.4, designScale, 27, {
+
+      // Merchant / Supercargo with wooden & parchment manifest ledger beside stowed waist cargo
+      const merchX = isBarque ? 0.28 : isCaravel ? 0.38 : 0.44;
+      const merchZ = isBarque ? 0.45 : isCaravel ? 1.12 : -1.04;
+      const merchY = probeDeckPlankY(verts, merchX, merchZ, 0.55, 0.65, waistDeckY, waistMaxY);
+      const merchOrig = [merchX, merchY, merchZ];
+      recordStation('merchant', merchOrig);
+      appendHumanFigure9(verts, inds, merchOrig, 2.35, designScale, 27.45, {
+        role: 'merchant',
+        seated: false,
+        toneSeed: 0.35 + spec.index * 0.12,
+        leanZ: 0.02,
+      });
+    });
+
+    addGroup('crew.pilot', 'hull', () => {
+      // Foredeck Lookout facing forward over the bow
+      const lookX = 0.22;
+      const lookY = probeDeckPlankY(verts, lookX, foreZ, 0.5, 0.6, foreDeckY, foreDeckY + 0.30);
+      const lookOrig = [lookX, lookY, foreZ];
+      recordStation(isBarque ? 'crew:0' : 'crew:1', lookOrig);
+      appendHumanFigure9(verts, inds, lookOrig, Math.PI - 0.08, designScale, 27, {
+        role: 'mariner',
+        seated: false,
+        toneSeed: 0.18 + spec.index * 0.13,
+      });
+
+      // Port Waist Bosun / Deckhand tallying cargo opposite the Merchant on Cogs & Carracks
+      if (isMedium || isLarge) {
+        const bosunX = -0.46;
+        const bosunZ = -2.15;
+        const bosunY = probeDeckPlankY(verts, bosunX, bosunZ, 0.55, 0.65, waistDeckY, waistMaxY);
+        const bosunOrig = [bosunX, bosunY, bosunZ];
+        recordStation('crew:2', bosunOrig);
+        appendHumanFigure9(verts, inds, bosunOrig, 0.78, designScale, 27, {
+          role: 'mariner',
           seated: false,
           toneSeed: 0.61 + spec.index * 0.09,
         });
       }
+
+      // Additional Mariners on great Carracks & Hulks (2, 3)
+      if (isLarge) {
+        const aftWaistX = -0.62, aftWaistZ = 0.72;
+        const aftWaistY = probeDeckPlankY(verts, aftWaistX, aftWaistZ, 0.55, 0.65, waistDeckY, waistMaxY);
+        const portOrig = [aftWaistX, aftWaistY, aftWaistZ];
+        recordStation('crew:3', portOrig);
+        appendHumanFigure9(verts, inds, portOrig, 2.55, designScale, 27, {
+          role: 'mariner',
+          seated: false,
+          toneSeed: 0.44 + spec.index * 0.07,
+        });
+
+        const poopHandX = -0.48, poopHandZ = Math.min(4.1, helmZ + 0.28);
+        const poopHandY = probeDeckPlankY(verts, poopHandX, poopHandZ, 0.5, 0.55, sternDeckY, sternMaxY);
+        const poopOrig = [poopHandX, poopHandY, poopHandZ];
+        recordStation('crew:4', poopOrig);
+        appendHumanFigure9(verts, inds, poopOrig, Math.PI - 0.25, designScale, 27, {
+          role: 'mariner',
+          seated: false,
+          toneSeed: 0.83,
+        });
+      }
     });
   }
+  return deckStations;
 }
 
 // Resolves each triangle to its innermost leaf group index, drops unwanted groups, compacts
@@ -1149,11 +1373,12 @@ function buildArchetypeData(index) {
   let preCompactVerts = warpedVerts;
   let preCompactInds = stripped.indices;
   let preCompactGroups = stripped.groups;
+  let deckStations = [];
   {
     const crewVerts = Array.from(warpedVerts);
     const crewInds = Array.from(stripped.indices);
     const crewGroups = stripped.groups.map((g) => ({ ...g }));
-    appendTradeCrew(crewVerts, crewInds, crewGroups, spec, scaleSpec, model);
+    deckStations = appendTradeCrew(crewVerts, crewInds, crewGroups, spec, scaleSpec, model);
     preCompactVerts = new Float32Array(crewVerts);
     preCompactInds = new Uint32Array(crewInds);
     preCompactGroups = crewGroups;
@@ -1238,6 +1463,7 @@ function buildArchetypeData(index) {
     vertexCount: Math.floor(preFracture.vertices.length / 9),
     indexCount: preFracture.indices.length,
     triangleCount: Math.floor(preFracture.indices.length / 3),
+    deckStations,
     baseHydro,
   });
 }
@@ -1434,6 +1660,11 @@ export function buildTradeVesselRoutes(snapshot, origin = { x: 0, z: 0 }, { rive
     return false;
   };
 
+  const harborBySlot = new Map();
+  for (const h of snapshot?.harborFleet ?? []) {
+    if (h?.slot) harborBySlot.set(h.slot, h);
+  }
+
   for (const sh of snapshot?.ships ?? []) {
     const carrack = sh.kind === 'carrack' || sh.kind === 'hulk';
     const scale = sh.kind === 'carrack' ? 1.08 : sh.kind === 'hulk' ? 0.98 : sh.kind === 'great cog' ? 0.96 : 0.88;
@@ -1445,6 +1676,20 @@ export function buildTradeVesselRoutes(snapshot, origin = { x: 0, z: 0 }, { rive
           return { x: safeB.x, y: seaLevel, z: safeB.z, rot: b.rot || 0, shore: Boolean(b.shore) };
         })
       : [];
+    const shipMeta = {
+      shipName: sh.shipName || '',
+      homePort: sh.homePort || sh.from || '',
+      from: sh.from || '',
+      to: sh.to || '',
+      kind: sh.kind || 'cog',
+      tonnage: sh.tonnage || 0,
+      cargo: sh.cargo ? { ...sh.cargo } : {},
+      load: sh.load ? { ...sh.load } : {},
+      captain: sh.captain ?? null,
+      merchant: sh.merchant ?? null,
+      crew: Array.isArray(sh.crew) ? sh.crew : [],
+      pilot: sh.captain ?? null,
+    };
     if (sh.phase === 'dock' && sh.berth) {
       const safeB = nearestSafeWater(ox + sh.berth.x, oz + sh.berth.z, -2.6, 0, 420, carrack ? 22 : 16);
       routes.push({
@@ -1456,6 +1701,7 @@ export function buildTradeVesselRoutes(snapshot, origin = { x: 0, z: 0 }, { rive
         portBerths,
         pts: poly?.pts ?? null, totalLen: poly?.totalLen ?? 0,
         phaseOffset: (hashU32(sh.id | 0, 17) % 1000) / 1000,
+        ...shipMeta,
       });
       continue;
     }
@@ -1469,6 +1715,7 @@ export function buildTradeVesselRoutes(snapshot, origin = { x: 0, z: 0 }, { rive
       portBerths,
       pts: poly.pts, totalLen: poly.totalLen,
       phaseOffset: (hashU32(sh.id | 0, 29) % 1000) / 1000,
+      ...shipMeta,
     });
   }
 
@@ -1486,7 +1733,14 @@ export function buildTradeVesselRoutes(snapshot, origin = { x: 0, z: 0 }, { rive
       scale: isRiver ? 0.78 : seaArchetype === 5 ? 0.92 : 0.94,
       depart: c.depart ?? 0, arrive: Math.max((c.depart ?? 0) + 0.1, c.arrive ?? 1),
       berth: null,
-      pilot: c.pilot ?? null,
+      shipName: c.shipName || '',
+      homePort: c.homePort || '',
+      kind: isRiver ? 'river barge' : seaArchetype === 5 ? 'caravel' : seaArchetype === 2 ? 'carrack' : 'cog',
+      cargo: c.good ? { [c.good]: c.qty || 1 } : {},
+      captain: c.captain ?? null,
+      merchant: c.merchant ?? null,
+      crew: Array.isArray(c.crew) ? c.crew : [],
+      pilot: c.pilot ?? c.captain ?? null,
       oarsmen: Number.isFinite(c.oarsmen) ? c.oarsmen : 0,
       pts: poly.pts, totalLen: poly.totalLen,
       phaseOffset: (hashU32(c.index | 0, 53) % 1000) / 1000,
@@ -1511,6 +1765,12 @@ export function buildTradeVesselRoutes(snapshot, origin = { x: 0, z: 0 }, { rive
       depart: rb.depart ?? 0,
       arrive: Math.max((rb.depart ?? 0) + 0.25, rb.arrive ?? 1),
       berth: null,
+      shipName: rb.shipName || `Barca do Tejo ${rb.id ?? (ri + 1)}`,
+      homePort: rb.homePort || '',
+      kind: 'river barge',
+      captain: rb.captain ?? null,
+      merchant: rb.merchant ?? null,
+      crew: Array.isArray(rb.crew) ? rb.crew : [],
       pilot: rb.pilot ?? null,
       oarsmen: Number.isFinite(rb.oarsmen) ? rb.oarsmen : 4,
       pts: poly.pts,
@@ -1603,13 +1863,22 @@ export function buildTradeVesselRoutes(snapshot, origin = { x: 0, z: 0 }, { rive
           if (anchorSpots.some((e) => Math.hypot(e.x - ax, e.z - az) < 75)) continue;
           anchorSpots.push({ x: ax, z: az });
           const arch = (addedAnchor % 2 === 0) ? 3 : 1;
+          const slotId = `roadstead:${addedAnchor}`;
+          const hf = harborBySlot.get(slotId);
           routes.push({
-            id: `roadstead:${addedAnchor}`, mode: 'sea', phase: 'dock',
+            id: slotId, mode: 'sea', phase: 'dock',
             archetype: arch, scale: arch === 3 ? 1.04 : 0.94,
             depart: 0, arrive: 1,
             berth: { x: ax, y: seaLevel, z: az, rot: ang + Math.PI * 0.5 + (addedAnchor * 0.35) },
             pts: null, totalLen: 0,
             phaseOffset: ((hashU32(addedAnchor + 11, 71) % 1000) / 1000),
+            shipName: hf?.shipName || '',
+            homePort: hf?.homePort || '',
+            kind: arch === 3 ? 'carrack' : 'great cog',
+            captain: hf?.captain ?? null,
+            merchant: hf?.merchant ?? null,
+            crew: Array.isArray(hf?.crew) ? hf.crew : [],
+            pilot: hf?.captain ?? null,
           });
           addedAnchor++;
         }
@@ -1656,12 +1925,21 @@ export function buildTradeVesselRoutes(snapshot, origin = { x: 0, z: 0 }, { rive
         });
         if (acc < 120) continue;
         const arch = (ti % 2 === 0) ? 6 : 5;
+        const slotId = `harbor:${ti}`;
+        const hf = harborBySlot.get(slotId) || harborBySlot.get(`harbor:${ti % 6}`);
         routes.push({
-          id: `harbor:${ti}`, mode: 'sea', phase: 'shuttle',
+          id: slotId, mode: 'sea', phase: 'shuttle',
           archetype: arch, scale: arch === 5 ? 0.96 : 1.0,
           depart: 0, arrive: 1, berth: null,
           pts: linePts, totalLen: acc,
           phaseOffset: ((hashU32(ti + 5, 97) % 1000) / 1000),
+          shipName: hf?.shipName || '',
+          homePort: hf?.homePort || '',
+          kind: arch === 6 ? 'barque' : 'caravel',
+          captain: hf?.captain ?? null,
+          merchant: hf?.merchant ?? null,
+          crew: Array.isArray(hf?.crew) ? hf.crew : [],
+          pilot: hf?.captain ?? null,
         });
         addedShuttles++;
       }
@@ -2418,10 +2696,16 @@ ${SAIL_BRAIL_WGSL}
     let lean = sin(cyc) * 0.24 * clamp(sv.v, 0.0, 1.0) * min(P.motion, 1.5);
     p.z -= lean;
     p.y -= abs(lean) * 0.16;
-  } else if ((mInt == 27u || mInt == 28u) && P.motion > 0.05 && (abs(P.archetype - 4.0) < 0.5 || abs(P.archetype - 6.0) < 0.5)) {
+  } else if (mInt == 28u && P.motion > 0.05 && (abs(P.archetype - 4.0) < 0.5 || abs(P.archetype - 6.0) < 0.5)) {
     let helmSwing = sin(P.phase * 0.72) * 0.08 * min(P.motion, 1.4);
-    let weight = select(1.0, clamp(sv.v, 0.0, 1.0), mInt == 27u);
-    p.x += helmSwing * weight;
+    p.x += helmSwing;
+  } else if (mInt == 27u && sv.v > 0.12) {
+    let phaseSeed = fract(sv.v * 7.3) * 6.2831853 + p.z * 0.65;
+    let seaSway = sin(P.phase * 0.84 + phaseSeed) * (0.022 + 0.036 * min(P.motion, 1.3));
+    let foreLean = cos(P.phase * 0.62 + phaseSeed * 0.7) * 0.018;
+    let flex = clamp((sv.v - 0.12) / 0.88, 0.0, 1.0);
+    p.x += seaSway * flex;
+    p.z += foreLean * flex;
   }
   p = animateTradeSailBrail(p, sv.mat, vec2f(sv.u, sv.v), P.furl, u32(max(0.0, round(P.archetype))));
   dstPosed[idx].position = vec4f(p, 0.0);
@@ -2558,10 +2842,16 @@ fn animateTradeOar(pos: vec3f, norm: vec3f, material: f32, uv: vec2f, instAnim: 
     let lean = sin(cyc) * 0.24 * clamp(uv.y, 0.0, 1.0) * min(motion, 1.5);
     p.z -= lean;
     p.y -= abs(lean) * 0.16;
-  } else if ((mInt == 27u || mInt == 28u) && motion > 0.05 && (abs(archF - 4.0) < 0.5 || abs(archF - 6.0) < 0.5)) {
+  } else if (mInt == 28u && motion > 0.05 && (abs(archF - 4.0) < 0.5 || abs(archF - 6.0) < 0.5)) {
     let helmSwing = sin(F.camPos.w * 1.45 + phase) * 0.075 * min(motion, 1.4);
-    let weight = select(1.0, clamp(uv.y, 0.0, 1.0), mInt == 27u);
-    p.x += helmSwing * weight;
+    p.x += helmSwing;
+  } else if (mInt == 27u && uv.y > 0.12) {
+    let phaseSeed = fract(uv.y * 7.3) * 6.2831853 + p.z * 0.65;
+    let seaSway = sin(F.camPos.w * 1.38 + phase + phaseSeed) * (0.022 + 0.036 * min(motion, 1.3));
+    let foreLean = cos(F.camPos.w * 1.05 + phase + phaseSeed * 0.7) * 0.018;
+    let flex = clamp((uv.y - 0.12) / 0.88, 0.0, 1.0);
+    p.x += seaSway * flex;
+    p.z += foreLean * flex;
   }
   p = animateTradeSailBrail(p, material, uv, instAnim.w, aIdx);
   return array<vec3f, 2>(p, n);
@@ -2811,25 +3101,55 @@ ${damaged ? '' : 'struct TVFragmentOut { @location(0) color: vec4f, @builtin(sam
   } else if (m == 26u) {
     albedo = vec3f(0.020, 0.042, 0.10);
   } else if (m == 27u || m == 29u) {
-    // Pilots, helmsmen, lookouts & seated oarsmen (uv.x: skin <0.22, breeches/boots <0.48, tunic <0.78, cap >=0.78)
+    // Captains (matFrac ~0.15), Merchants with manifest ledgers (matFrac ~0.45), Helmsmen, Mariners & Oarsmen
     let u = in.uv.x;
     let clothTex = 0.92 + 0.08 * gnoise(in.local.xy * 26.0);
+    let isCaptain = m == 27u && matFrac > 0.08 && matFrac < 0.30;
+    let isMerchant = m == 27u && matFrac >= 0.30 && matFrac < 0.65;
     if (u < 0.22) {
       albedo = vec3f(0.42, 0.25, 0.17);
       rough = 0.76;
     } else if (u < 0.48) {
-      albedo = vec3f(0.055, 0.048, 0.042) * clothTex;
-      rough = 0.90;
-    } else if (u < 0.78) {
+      albedo = vec3f(0.052, 0.045, 0.039) * clothTex;
+      rough = 0.88;
+    } else if (u < 0.72) {
       let varT = fract(in.uv.y * 3.7);
-      var tunic = vec3f(0.44, 0.36, 0.25);
-      if (varT > 0.66) { tunic = vec3f(0.11, 0.16, 0.24); }
-      else if (varT > 0.33) { tunic = vec3f(0.36, 0.13, 0.09); }
-      albedo = tunic * clothTex;
-      rough = 0.92;
+      var garment = vec3f(0.44, 0.36, 0.25);
+      if (isCaptain) {
+        garment = select(vec3f(0.32, 0.048, 0.042), vec3f(0.042, 0.078, 0.185), varT > 0.5);
+      } else if (isMerchant) {
+        garment = select(vec3f(0.24, 0.055, 0.135), vec3f(0.055, 0.175, 0.105), varT > 0.5);
+      } else {
+        if (varT > 0.66) { garment = vec3f(0.11, 0.16, 0.24); }
+        else if (varT > 0.33) { garment = vec3f(0.36, 0.13, 0.09); }
+      }
+      albedo = garment * clothTex;
+      rough = select(0.92, 0.80, isCaptain || isMerchant);
+    } else if (u < 0.78) {
+      if (isMerchant) {
+        // Cream parchment cargo manifest ledger with dark iron-gall ink rulings
+        let inkLine = smoothstep(0.35, 0.85, sin(in.local.y * 150.0));
+        albedo = mix(vec3f(0.68, 0.60, 0.44), vec3f(0.16, 0.12, 0.09), inkLine * 0.32);
+        rough = 0.84;
+      } else if (isCaptain) {
+        // Gold-embroidered crimson/ochre commander's waist sash
+        albedo = vec3f(0.62, 0.44, 0.10) * clothTex;
+        rough = 0.68;
+      } else {
+        albedo = vec3f(0.34, 0.26, 0.18) * clothTex;
+        rough = 0.90;
+      }
     } else {
-      albedo = select(vec3f(0.05, 0.042, 0.038), vec3f(0.28, 0.06, 0.04), m == 27u) * clothTex;
-      rough = 0.95;
+      if (isCaptain) {
+        albedo = vec3f(0.032, 0.028, 0.026) * clothTex;
+        rough = 0.88;
+      } else if (isMerchant) {
+        albedo = vec3f(0.22, 0.038, 0.075) * clothTex;
+        rough = 0.82;
+      } else {
+        albedo = select(vec3f(0.05, 0.042, 0.038), vec3f(0.28, 0.06, 0.04), m == 27u) * clothTex;
+        rough = 0.95;
+      }
     }
   }
 
@@ -4207,30 +4527,109 @@ export async function createTradeVessels({
       rebuildVesselsFromRoutes();
     },
     locate() {
-      return vessels.map((v) => ({
-        x: v.ai.x,
-        y: v.ai.y,
-        z: v.ai.z,
-        yaw: v.ai.yaw,
-        heading: (v.ai.yaw * 180) / Math.PI,
-        pitch: v.ai.pitch,
-        roll: v.ai.roll,
-        bowDir: [Math.sin(v.ai.yaw), -Math.cos(v.ai.yaw)],
-        scale: v.scaleMul,
-        archetype: v.archIndex,
-        speed: v.ai.speed,
-        motion: v.ai.motion,
-        sailSet: v.ai.sailSet,
-        aiState: v.ai.state,
-        tacking: v.ai.tacking,
-        etaDays: v.ai.etaDays,
-        id: v.route.id,
-        mode: v.route.mode,
-        phase: v.route.phase,
-        phaseRad: v.ai.phaseRad,
-        pilot: v.route.pilot ?? null,
-        oarsmen: v.route.oarsmen ?? 0,
-      }));
+      const rotLocal = (lx, ly, lz, yaw, pitch, roll) => {
+        const cr = Math.cos(roll), sr = Math.sin(roll);
+        const cp = Math.cos(pitch), sp = Math.sin(pitch);
+        const ch = Math.cos(yaw), sh = Math.sin(yaw);
+        const xx = cr * lx - sr * ly;
+        const yy = sr * lx + cr * ly;
+        const yp = cp * yy - sp * lz;
+        const zp = sp * yy + cp * lz;
+        return [ch * xx - sh * zp, yp, sh * xx + ch * zp];
+      };
+      return vessels.map((v) => {
+        const effY = Number.isFinite(v.boat?.heave) ? v.boat.heave : v.ai.y;
+        const effPitch = Number.isFinite(v.boat?.pitch) ? v.boat.pitch : v.ai.pitch;
+        const effRoll = Number.isFinite(v.boat?.roll) ? v.boat.roll : v.ai.roll;
+        const r = v.route;
+        const shipLabel = r.shipName || r.id;
+        const portSuffix = r.homePort ? ` of ${r.homePort}` : '';
+        const actionVerb = r.phase === 'dock'
+          ? 'at anchor aboard'
+          : r.phase === 'out'
+            ? 'putting to sea aboard'
+            : r.mode === 'river'
+              ? 'working river passage aboard'
+              : 'sailing aboard';
+        const deckPeople = [];
+        if (!v.boat?.damage?.sunk && Array.isArray(v.arch?.deckStations)) {
+          const crewList = Array.isArray(r.crew) ? r.crew : [];
+          for (const st of v.arch.deckStations) {
+            let soul = null;
+            let duty = '';
+            if (st.station === 'captain') {
+              soul = r.captain ?? r.pilot ?? null;
+              duty = `commanding ${shipLabel}${portSuffix}`;
+            } else if (st.station === 'pilot') {
+              soul = r.pilot ?? r.captain ?? null;
+              duty = `piloting ${shipLabel}${portSuffix}`;
+            } else if (st.station === 'merchant') {
+              soul = r.merchant ?? null;
+              duty = `tending cargo manifest ${actionVerb} ${shipLabel}${portSuffix}`;
+            } else if (st.station.startsWith('crew:')) {
+              const ci = Number(st.station.slice(5)) | 0;
+              soul = crewList[ci] ?? null;
+              duty = `${soul?.role || 'mariner'} ${actionVerb} ${shipLabel}${portSuffix}`;
+            }
+            if (!soul || soul.id == null) continue;
+            const [wx, wy, wz] = rotLocal(
+              st.localMetres[0] * v.scaleMul,
+              st.localMetres[1],
+              st.localMetres[2] * v.scaleMul,
+              v.ai.yaw,
+              effPitch,
+              effRoll,
+            );
+            deckPeople.push({
+              soul,
+              station: st.station,
+              vesselId: r.id,
+              shipName: shipLabel,
+              homePort: r.homePort || '',
+              shipKind: r.kind || v.arch.label,
+              phase: r.phase,
+              x: v.ai.x + wx,
+              y: effY + wy,
+              z: v.ai.z + wz,
+              doing: duty,
+            });
+          }
+        }
+        return {
+          x: v.ai.x,
+          y: effY,
+          z: v.ai.z,
+          yaw: v.ai.yaw,
+          heading: (v.ai.yaw * 180) / Math.PI,
+          pitch: effPitch,
+          roll: effRoll,
+          bowDir: [Math.sin(v.ai.yaw), -Math.cos(v.ai.yaw)],
+          scale: v.scaleMul,
+          archetype: v.archIndex,
+          speed: v.ai.speed,
+          motion: v.ai.motion,
+          sailSet: v.ai.sailSet,
+          aiState: v.ai.state,
+          tacking: v.ai.tacking,
+          etaDays: v.ai.etaDays,
+          id: r.id,
+          mode: r.mode,
+          phase: r.phase,
+          phaseRad: v.ai.phaseRad,
+          shipName: r.shipName || '',
+          homePort: r.homePort || '',
+          kind: r.kind || v.arch.label,
+          tonnage: r.tonnage || 0,
+          cargo: r.cargo ?? {},
+          load: r.load ?? {},
+          captain: r.captain ?? null,
+          merchant: r.merchant ?? null,
+          crew: Array.isArray(r.crew) ? r.crew : [],
+          pilot: r.pilot ?? null,
+          oarsmen: r.oarsmen ?? 0,
+          deckPeople,
+        };
+      });
     },
     consumeDirtySync() {
       const dirty = dirtySyncFlag;

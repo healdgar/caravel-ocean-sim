@@ -1,6 +1,7 @@
 {
   "format": "waterworld.meadow-grass-gpu",
-  "version": 1,
+  "version": 2,
+  "style": "volumetric-cloud-tendrils",
   "tileMetres": 1.35,
   "mixes": [
     "pasture",
@@ -8,19 +9,19 @@
     "field-margin"
   ],
   "variants": 4,
-  "subGrid": 2,
+  "subGrid": 1,
   "levels": 4,
   "levelErrors": [
     0,
-    0.012,
-    0.03,
-    0.068
+    0.011,
+    0.026,
+    0.056
   ],
   "levelParentErrors": [
-    0.012,
-    0.03,
-    0.068,
-    0.145
+    0.011,
+    0.026,
+    0.056,
+    0.125
   ],
   "strideBytes": 32,
   "clusterRecordWords": 12,
@@ -32,31 +33,31 @@
     "steps": 18,
     "bytesPerVariant": 1472
   },
-  "vertexCount": 64512,
-  "triangleCount": 21504,
-  "clusterCount": 192,
+  "vertexCount": 17100,
+  "triangleCount": 15480,
+  "clusterCount": 48,
   "variantRecords": [
     {
       "variantId": 0,
       "mix": "pasture",
       "variant": 0,
       "firstCluster": 0,
-      "clusterCount": 16,
+      "clusterCount": 4,
       "genusZeroEuler": 2,
       "coreTriCount": 4,
       "meanColour": [
-        0.1954,
-        0.3206,
-        0.1287
+        0.0465,
+        0.1001,
+        0.0176
       ],
       "splat": {
-        "centreY": 0.0331,
-        "rx": 0.8721,
-        "ry": 0.0552,
+        "centreY": 0.0978,
+        "rx": 1.104,
+        "ry": 0.115,
         "meanCol": [
-          0.1954,
-          0.3206,
-          0.1287
+          0.0465,
+          0.1001,
+          0.0176
         ]
       }
     },
@@ -64,23 +65,23 @@
       "variantId": 1,
       "mix": "pasture",
       "variant": 1,
-      "firstCluster": 16,
-      "clusterCount": 16,
+      "firstCluster": 4,
+      "clusterCount": 4,
       "genusZeroEuler": 2,
       "coreTriCount": 4,
       "meanColour": [
-        0.1767,
-        0.2902,
-        0.1184
+        0.0455,
+        0.0988,
+        0.0175
       ],
       "splat": {
-        "centreY": 0.0315,
-        "rx": 0.8721,
-        "ry": 0.0525,
+        "centreY": 0.0906,
+        "rx": 1.104,
+        "ry": 0.115,
         "meanCol": [
-          0.1767,
-          0.2902,
-          0.1184
+          0.0455,
+          0.0988,
+          0.0175
         ]
       }
     },
@@ -88,23 +89,23 @@
       "variantId": 2,
       "mix": "pasture",
       "variant": 2,
-      "firstCluster": 32,
-      "clusterCount": 16,
+      "firstCluster": 8,
+      "clusterCount": 4,
       "genusZeroEuler": 2,
       "coreTriCount": 4,
       "meanColour": [
-        0.2059,
-        0.3323,
-        0.1429
+        0.0482,
+        0.1022,
+        0.0179
       ],
       "splat": {
-        "centreY": 0.0446,
-        "rx": 0.8721,
-        "ry": 0.0744,
+        "centreY": 0.0953,
+        "rx": 1.104,
+        "ry": 0.115,
         "meanCol": [
-          0.2059,
-          0.3323,
-          0.1429
+          0.0482,
+          0.1022,
+          0.0179
         ]
       }
     },
@@ -112,23 +113,23 @@
       "variantId": 3,
       "mix": "pasture",
       "variant": 3,
-      "firstCluster": 48,
-      "clusterCount": 16,
+      "firstCluster": 12,
+      "clusterCount": 4,
       "genusZeroEuler": 2,
       "coreTriCount": 4,
       "meanColour": [
-        0.2062,
-        0.3194,
-        0.1369
+        0.0491,
+        0.103,
+        0.0176
       ],
       "splat": {
-        "centreY": 0.0455,
-        "rx": 0.8721,
-        "ry": 0.0758,
+        "centreY": 0.0938,
+        "rx": 1.104,
+        "ry": 0.115,
         "meanCol": [
-          0.2062,
-          0.3194,
-          0.1369
+          0.0491,
+          0.103,
+          0.0176
         ]
       }
     },
@@ -136,23 +137,23 @@
       "variantId": 4,
       "mix": "waste",
       "variant": 0,
-      "firstCluster": 64,
-      "clusterCount": 16,
+      "firstCluster": 16,
+      "clusterCount": 4,
       "genusZeroEuler": 2,
       "coreTriCount": 4,
       "meanColour": [
-        0.2187,
-        0.3409,
-        0.1313
+        0.0506,
+        0.1028,
+        0.0174
       ],
       "splat": {
-        "centreY": 0.0444,
-        "rx": 0.8721,
-        "ry": 0.074,
+        "centreY": 0.107,
+        "rx": 1.104,
+        "ry": 0.115,
         "meanCol": [
-          0.2187,
-          0.3409,
-          0.1313
+          0.0506,
+          0.1028,
+          0.0174
         ]
       }
     },
@@ -160,23 +161,23 @@
       "variantId": 5,
       "mix": "waste",
       "variant": 1,
-      "firstCluster": 80,
-      "clusterCount": 16,
+      "firstCluster": 20,
+      "clusterCount": 4,
       "genusZeroEuler": 2,
       "coreTriCount": 4,
       "meanColour": [
-        0.2206,
-        0.3567,
-        0.1347
+        0.051,
+        0.1036,
+        0.0175
       ],
       "splat": {
-        "centreY": 0.0449,
-        "rx": 0.8721,
-        "ry": 0.0748,
+        "centreY": 0.1067,
+        "rx": 1.104,
+        "ry": 0.115,
         "meanCol": [
-          0.2206,
-          0.3567,
-          0.1347
+          0.051,
+          0.1036,
+          0.0175
         ]
       }
     },
@@ -184,23 +185,23 @@
       "variantId": 6,
       "mix": "waste",
       "variant": 2,
-      "firstCluster": 96,
-      "clusterCount": 16,
+      "firstCluster": 24,
+      "clusterCount": 4,
       "genusZeroEuler": 2,
       "coreTriCount": 4,
       "meanColour": [
-        0.229,
-        0.3651,
-        0.1396
+        0.0518,
+        0.1042,
+        0.0173
       ],
       "splat": {
-        "centreY": 0.0507,
-        "rx": 0.8721,
-        "ry": 0.0845,
+        "centreY": 0.1123,
+        "rx": 1.104,
+        "ry": 0.115,
         "meanCol": [
-          0.229,
-          0.3651,
-          0.1396
+          0.0518,
+          0.1042,
+          0.0173
         ]
       }
     },
@@ -208,23 +209,23 @@
       "variantId": 7,
       "mix": "waste",
       "variant": 3,
-      "firstCluster": 112,
-      "clusterCount": 16,
+      "firstCluster": 28,
+      "clusterCount": 4,
       "genusZeroEuler": 2,
       "coreTriCount": 4,
       "meanColour": [
-        0.2291,
-        0.3571,
-        0.1383
+        0.0529,
+        0.1049,
+        0.0174
       ],
       "splat": {
-        "centreY": 0.0502,
-        "rx": 0.8721,
-        "ry": 0.0837,
+        "centreY": 0.1172,
+        "rx": 1.104,
+        "ry": 0.115,
         "meanCol": [
-          0.2291,
-          0.3571,
-          0.1383
+          0.0529,
+          0.1049,
+          0.0174
         ]
       }
     },
@@ -232,23 +233,23 @@
       "variantId": 8,
       "mix": "field-margin",
       "variant": 0,
-      "firstCluster": 128,
-      "clusterCount": 16,
+      "firstCluster": 32,
+      "clusterCount": 4,
       "genusZeroEuler": 2,
       "coreTriCount": 4,
       "meanColour": [
-        0.2066,
-        0.3426,
-        0.1334
+        0.0506,
+        0.1033,
+        0.0175
       ],
       "splat": {
-        "centreY": 0.0438,
-        "rx": 0.8721,
-        "ry": 0.073,
+        "centreY": 0.1199,
+        "rx": 1.104,
+        "ry": 0.115,
         "meanCol": [
-          0.2066,
-          0.3426,
-          0.1334
+          0.0506,
+          0.1033,
+          0.0175
         ]
       }
     },
@@ -256,23 +257,23 @@
       "variantId": 9,
       "mix": "field-margin",
       "variant": 1,
-      "firstCluster": 144,
-      "clusterCount": 16,
+      "firstCluster": 36,
+      "clusterCount": 4,
       "genusZeroEuler": 2,
       "coreTriCount": 4,
       "meanColour": [
-        0.2278,
-        0.3492,
-        0.1436
+        0.052,
+        0.1037,
+        0.0176
       ],
       "splat": {
-        "centreY": 0.0491,
-        "rx": 0.8721,
-        "ry": 0.0818,
+        "centreY": 0.1215,
+        "rx": 1.104,
+        "ry": 0.115,
         "meanCol": [
-          0.2278,
-          0.3492,
-          0.1436
+          0.052,
+          0.1037,
+          0.0176
         ]
       }
     },
@@ -280,23 +281,23 @@
       "variantId": 10,
       "mix": "field-margin",
       "variant": 2,
-      "firstCluster": 160,
-      "clusterCount": 16,
+      "firstCluster": 40,
+      "clusterCount": 4,
       "genusZeroEuler": 2,
       "coreTriCount": 4,
       "meanColour": [
-        0.2223,
-        0.3505,
-        0.1394
+        0.049,
+        0.1018,
+        0.0174
       ],
       "splat": {
-        "centreY": 0.0431,
-        "rx": 0.8721,
-        "ry": 0.0718,
+        "centreY": 0.1256,
+        "rx": 1.104,
+        "ry": 0.115,
         "meanCol": [
-          0.2223,
-          0.3505,
-          0.1394
+          0.049,
+          0.1018,
+          0.0174
         ]
       }
     },
@@ -304,47 +305,47 @@
       "variantId": 11,
       "mix": "field-margin",
       "variant": 3,
-      "firstCluster": 176,
-      "clusterCount": 16,
+      "firstCluster": 44,
+      "clusterCount": 4,
       "genusZeroEuler": 2,
       "coreTriCount": 4,
       "meanColour": [
-        0.2165,
-        0.3443,
-        0.1365
+        0.05,
+        0.1025,
+        0.0171
       ],
       "splat": {
-        "centreY": 0.0434,
-        "rx": 0.8721,
-        "ry": 0.0723,
+        "centreY": 0.1314,
+        "rx": 1.104,
+        "ry": 0.115,
         "meanCol": [
-          0.2165,
-          0.3443,
-          0.1365
+          0.05,
+          0.1025,
+          0.0171
         ]
       }
     }
   ],
   "files": {
     "vertices.bin": {
-      "bytes": 2064384,
-      "gzipBytes": 914674,
-      "sha256": "190d2947e97461c5b05b4bb448638bb67028da0a68b1e74073687425b6c87f7e"
+      "bytes": 547200,
+      "gzipBytes": 354033,
+      "sha256": "f94679ba9d3c9f3794076be5a0d336cc78657b6f0dc15672553a6d98b3207e1b"
     },
     "indices.bin": {
-      "bytes": 258048,
-      "gzipBytes": 89265,
-      "sha256": "a37a4e84e7fdccda7368b971c60fce5a6898875ffe29e3e5ac92cb229eb1ac7d"
+      "bytes": 185760,
+      "gzipBytes": 46232,
+      "sha256": "71bf757f72e2fffb7a28d1a7e5bcff4764db37580376c3011397bc391337b3d3"
     },
     "clusters.bin": {
-      "bytes": 9216,
-      "gzipBytes": 1497,
-      "sha256": "f8f16804ca12e2034596678c54166a48976d7f22b9094fae0719b006442de75b"
+      "bytes": 2304,
+      "gzipBytes": 754,
+      "sha256": "c0a0bf6e6926dda5e945df00b24ba09ebcd577c71b133f0feb341832174b42b7"
     },
     "morph.bin": {
       "bytes": 17664,
-      "gzipBytes": 2543,
-      "sha256": "9264fa17541ae3b5c1549859928b4aadca9ba85ca6d388f94768d44b7f0f2529"
+      "gzipBytes": 6915,
+      "sha256": "2a250c53d05d824c45299dc48e7af961fef00ee7e4d67ccfc10068a34e850320"
     }
   }
 }

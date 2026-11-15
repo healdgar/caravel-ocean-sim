@@ -8,7 +8,11 @@
 // `request('command', ...)` for all a player may order, `request('advance', {days})` for its days.
 import { boardPrefix } from './board-model.js';
 
-export const BOARD_PROGRAM_ASSETS = Object.freeze({ game: 'assets/board/game.js', runtime: 'assets/board/runtime.js' });
+export const BOARD_PROGRAM_ASSETS = Object.freeze({
+  game: 'assets/board/game.js',
+  runtime: 'assets/board/runtime.js',
+  partnerPorts: 'assets/boards/partner-ports-1550.json',
+});
 
 // A worker has no frames of its own; the model asks for one only to draw, which it never does here.
 const BOARD_WORKER_SHIM = "if(typeof requestAnimationFrame==='undefined')globalThis.requestAnimationFrame=()=>0;\n";
@@ -32,12 +36,22 @@ let boardProgramLoad = null;
 // The model's program, fetched once however many coasts are founded, and its name: the hash of the model's own
 // text, under which a world is frozen and taken up again.
 export function loadBoardProgram(fetchImpl = fetch) {
-  return boardProgramLoad ??= Promise.all(Object.values(BOARD_PROGRAM_ASSETS).map((url) => fetchImpl(url).then((response) => {
-    if (!response.ok) throw new Error(`The board's program could not be fetched: ${url} ${response.status}`);
-    return response.text();
-  }))).then(async ([game, runtime]) => {
+  return boardProgramLoad ??= Promise.all([
+    fetchImpl(BOARD_PROGRAM_ASSETS.game).then((response) => {
+      if (!response.ok) throw new Error(`The board's program could not be fetched: ${BOARD_PROGRAM_ASSETS.game} ${response.status}`);
+      return response.text();
+    }),
+    fetchImpl(BOARD_PROGRAM_ASSETS.runtime).then((response) => {
+      if (!response.ok) throw new Error(`The board's program could not be fetched: ${BOARD_PROGRAM_ASSETS.runtime} ${response.status}`);
+      return response.text();
+    }),
+    Promise.resolve().then(() => fetchImpl(BOARD_PROGRAM_ASSETS.partnerPorts)).then((response) => response?.ok ? response.text() : 'null').catch(() => 'null'),
+  ]).then(async ([game, runtime, partnerPorts]) => {
     const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(game)));
-    return { text: game + '\n' + runtime, name: Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('') };
+    return {
+      text: game + '\nglobalThis.PARTNER_PORTS_SEED=' + ((partnerPorts && partnerPorts.trim()) || 'null') + ';\n' + runtime,
+      name: Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join(''),
+    };
   }).catch((error) => { boardProgramLoad = null; throw error; });
 }
 

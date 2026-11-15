@@ -10,11 +10,18 @@ import { Worker } from 'node:worker_threads';
 import { boardPrefix } from '../js/board-model.js';
 
 const here = (name) => new URL(`../assets/board/${name}`, import.meta.url);
+const partnerPortsHere = new URL('../assets/boards/partner-ports-1550.json', import.meta.url);
 let program = null;
 // The program's text, and its name: the hash of the model's own text (not of this game's hand on it, which only
 // reads), under which a world is frozen and taken up again.
-export const boardProgram = () => program ??= Promise.all([readFile(here('game.js'), 'utf8'), readFile(here('runtime.js'), 'utf8')])
-  .then(([game, runtime]) => ({ text: game + '\n' + runtime, name: createHash('sha256').update(game).digest('hex') }));
+export const boardProgram = () => program ??= Promise.all([
+  readFile(here('game.js'), 'utf8'),
+  readFile(here('runtime.js'), 'utf8'),
+  readFile(partnerPortsHere, 'utf8').catch(() => 'null'),
+]).then(([game, runtime, partnerPorts]) => ({
+  text: game + '\nglobalThis.PARTNER_PORTS_SEED=' + (partnerPorts.trim() || 'null') + ';\n' + runtime,
+  name: createHash('sha256').update(game).digest('hex'),
+}));
 
 // What a page gives the model that a Node thread does not; the model only ever asks for a frame to draw.
 const SHIM = "for(const name of ['addEventListener','removeEventListener','requestAnimationFrame'])if(typeof globalThis[name]!=='function')globalThis[name]=()=>0;\n";

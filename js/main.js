@@ -4284,25 +4284,31 @@ async function main() {
   // place (js/crew.js), each figure one of its soldiers or of its watch, named and asked after as the townsfolk are.
   const watchSeen=()=>{const garrison=fortSoldiers?.state;return garrison?.watch&&garrison.port===terrain?.port?garrison.soldiers:null;};
   const watchOnScreen=(s,rect)=>s.soul&&s.visible!==false&&s.casualtyState!=='fallen'?folkStandsAt(s.position[0],s.position[1],s.position[2],rect):null;
+  const shipFolkSeen=()=>{const vs=terrain?.tradeVessels?.locate?.();if(!vs?.length)return null;const out=[];for(const v of vs)for(const d of v.deckPeople??[])out.push(d);return out.length?out:null;};
+  const shipFolkOnScreen=(d,rect,off)=>d.soul?folkStandsAt(d.x+off.x,d.y,d.z+off.z,rect):null;
+  const anyFolkActive=()=>Boolean(folkSeen()||watchSeen()||mateAshore?.figure.visible||(terrain?.tradeVessels?.count??0)>0);
   const folkAbout=(streets,index,stride)=>folkDoing(streets.souls[index],stride,streets.walkers[index*WALKER_WORDS+8]);
   // Whoever is under a point of the window, of those who stand tall enough there to be made out. Of several within
   // reach of it, the one nearer the eye is meant unless another is much nearer the point: whoever stands in front
   // hides those behind (a wall between is not known here).
   function folkUnder(clientX,clientY){
-    const streets=folkSeen(),posts=watchSeen();
-    if(!streets&&!posts&&!mateAshore?.figure.visible)return null;
+    const streets=folkSeen(),posts=watchSeen(),decks=shipFolkSeen();
+    if(!streets&&!posts&&!decks&&!mateAshore?.figure.visible)return null;
     const rect=canvas.getBoundingClientRect(),px=clientX-rect.left,py=clientY-rect.top,count=streets?Math.min(streets.souls.length,townsfolk.people):0;
-    let best=-1,post=null,least=Infinity;
+    const off=terrain?.getWorldOffset?.()??{x:0,z:0};
+    let best=-1,post=null,shipHit=null,least=Infinity;
     const nearer=seen=>{
       if(!seen||seen.tall<FOLK_LEAST_PX)return false;
-      const reach=Math.max(FOLK_REACH_PX,seen.tall*.6),off=Math.hypot(seen.x-px,seen.y-py)/reach,score=seen.depth*(.5+off);
-      if(!(off<1&&score<least))return false;
+      const reach=Math.max(FOLK_REACH_PX,seen.tall*.6), d=Math.hypot(seen.x-px,seen.y-py)/reach,score=seen.depth*(.5+d);
+      if(!(d<1&&score<least))return false;
       least=score;return true;
     };
-    for(let i=0;i<count;i++)if(nearer(folkOnScreen(streets,i,rect))){best=i;post=null;}
-    for(const s of posts??[])if(nearer(watchOnScreen(s,rect)))post=s;
+    for(let i=0;i<count;i++)if(nearer(folkOnScreen(streets,i,rect))){best=i;post=null;shipHit=null;}
+    for(const s of posts??[])if(nearer(watchOnScreen(s,rect))){post=s;shipHit=null;}
+    for(const d of decks??[])if(nearer(shipFolkOnScreen(d,rect,off))){shipHit=d;post=null;}
     const mate=mateAshore?.figure;
     if(mate?.visible&&nearer(folkStandsAt(mate.position[0],mate.position[1],mate.position[2],rect)))return {mate:true,soul:mate.soul,doing:mateDoing(mateAshore)};
+    if(shipHit)return {ship:shipHit,soul:shipHit.soul,doing:shipHit.doing};
     if(post)return {post,soul:post.soul,doing:watchDoing(post)};
     if(best<0)return null;
     return {index:best,soul:streets.souls[best],doing:folkAbout(streets,best,folkWalker(streets,best))};
@@ -4310,6 +4316,8 @@ async function main() {
   function folkWhereabouts(id){
     const streets=folkSeen(),index=streets?streets.souls.findIndex(soul=>soul?.id===id):-1;
     if(index>=0&&index<townsfolk.people)return folkAbout(streets,index,folkWalker(streets,index));
+    const deck=shipFolkSeen()?.find(d=>d.soul?.id===id);
+    if(deck)return deck.doing;
     const post=watchSeen()?.find(s=>s.soul?.id===id);
     return post?watchDoing(post):firstMate?.id===id?mateDoing(mateAshore):'';
   }
@@ -4333,7 +4341,7 @@ async function main() {
     if(found){storyAsked={id:found.soul.id,name:found.soul.name};folkCard.show(found.soul,found.doing);}
   });
   canvas.addEventListener('pointermove',e=>{
-    if(e.pointerType!=='mouse'||e.buttons||!(folkSeen()||watchSeen()||mateAshore?.figure.visible)){if(!folkName.hidden){folkName.hidden=true;canvas.style.cursor='';}return;}
+    if(e.pointerType!=='mouse'||e.buttons||!anyFolkActive()){if(!folkName.hidden){folkName.hidden=true;canvas.style.cursor='';}return;}
     // Asked at most every 90 ms while the pointer moves, and once more where it comes to rest: else whoever it
     // passed over on the way stays named under it.
     clearTimeout(folkHoverLate);
@@ -4342,9 +4350,13 @@ async function main() {
   });
   function folkHover(x,y){
     folkHoverAt=performance.now();
-    const found=folkSeen()||watchSeen()||mateAshore?.figure.visible?folkUnder(x,y):null;
+    const found=anyFolkActive()?folkUnder(x,y):null;
     folkName.hidden=!found;canvas.style.cursor=found?'pointer':'';
-    if(found){folkName.textContent=found.soul.name+(found.soul.role?', '+found.soul.role:'')+(found.post?' · '+found.post.role:found.mate?' · first mate':'');folkName.style.left=x+'px';folkName.style.top=y+'px';}
+    if(found){
+      const shipTag=found.ship?(found.ship.shipName?' · '+found.ship.shipName+(found.ship.homePort?' ('+found.ship.homePort+')':''):''):'';
+      folkName.textContent=found.soul.name+(found.soul.role?', '+found.soul.role:'')+(found.ship?shipTag:found.post?' · '+found.post.role:found.mate?' · first mate':'');
+      folkName.style.left=x+'px';folkName.style.top=y+'px';
+    }
   }
   canvas.addEventListener('pointerleave',()=>{clearTimeout(folkHoverLate);folkName.hidden=true;canvas.style.cursor='';});
   window.oceanFolk={
@@ -4360,13 +4372,17 @@ async function main() {
     },
     // Where walker `index` stands in the world now, or null while they are indoors.
     where(index){const streets=folkSeen(),stride=streets&&index<townsfolk.people?folkWalker(streets,index):null;return stride&&{x:stride.position.x,y:stride.position.y,z:stride.position.z};},
-    ask(id){const streets=folkSeen(),soul=streets?.souls.find(one=>one?.id===id)??watchSeen()?.find(s=>s.soul?.id===id)?.soul;return soul?folkCard.show(soul,folkWhereabouts(id)):boardLife.person(id);},
+    ask(id){const streets=folkSeen(),soul=streets?.souls.find(one=>one?.id===id)??shipFolkSeen()?.find(d=>d.soul?.id===id)?.soul??watchSeen()?.find(s=>s.soul?.id===id)?.soul;return soul?folkCard.show(soul,folkWhereabouts(id)):boardLife.person(id);},
     // The port's posts and who stands each: the model's roll the forts were manned from, and every figure of them as
     // seen now ({x, y, tall} on the screen, null out of sight), with their soul, their post and what they are at.
     get watch(){return fortSoldiers?.state?.watch??null;},
     get posts(){
       const rect=canvas.getBoundingClientRect();
       return (watchSeen()??[]).map(s=>{const seen=watchOnScreen(s,rect);return {soul:s.soul,post:s.role,kind:s.stationKind,work:s.buildingPrefabId,doing:watchDoing(s),at:{x:s.position[0],y:s.position[1],z:s.position[2]},seen:seen&&{x:rect.left+seen.x,y:rect.top+seen.y,tall:seen.tall,depth:seen.depth}};});
+    },
+    get ships(){
+      const rect=canvas.getBoundingClientRect(),off=terrain?.getWorldOffset?.()??{x:0,z:0};
+      return (shipFolkSeen()??[]).map(d=>{const seen=shipFolkOnScreen(d,rect,off);return {soul:d.soul,station:d.station,vesselId:d.vesselId,shipName:d.shipName,homePort:d.homePort,doing:d.doing,at:{x:d.x+off.x,y:d.y,z:d.z+off.z},seen:seen&&{x:rect.left+seen.x,y:rect.top+seen.y,tall:seen.tall,depth:seen.depth}};});
     },
   };
   // The storyteller (js/storyteller.js): a dungeon master in the player's agent app, and in the story the captain's
@@ -4407,19 +4423,20 @@ async function main() {
   async function storyPerson(id){
     const life=storyLife(),answer=await folkCardOf(id);
     if(!answer?.card)throw new Error('The game knows no one of that number');
-    const soul=folkSeen()?.souls.find(one=>one?.id===id)??watchSeen()?.find(s=>s.soul?.id===id)?.soul??folkSoulOfTitle(id,answer.card.split('\n')[0]);
+    const soul=folkSeen()?.souls.find(one=>one?.id===id)??shipFolkSeen()?.find(d=>d.soul?.id===id)?.soul??watchSeen()?.find(s=>s.soul?.id===id)?.soul??folkSoulOfTitle(id,answer.card.split('\n')[0]);
     return storytellerScene({soul:firstMate?.id===id?{...soul,name:firstMate.name,role:'first mate'+(firstMate.role?', once '+firstMate.role:'')}:soul,answer,doing:folkWhereabouts(id),place:storyPlace(),status:life.status,news:life.news});
   }
   // Who is about the captain now, nearest first.
   function storyNearby(){
-    const streets=folkSeen(),rect=canvas.getBoundingClientRect(),about=[];
+    const streets=folkSeen(),rect=canvas.getBoundingClientRect(),off=terrain?.getWorldOffset?.()??{x:0,z:0},about=[];
     for(let i=0,n=streets?Math.min(streets.souls.length,townsfolk.people):0;i<n;i++){
       const soul=streets.souls[i],seen=soul?folkOnScreen(streets,i,rect):null;
       if(seen&&seen.tall>=FOLK_LEAST_PX)about.push({id:soul.id,name:soul.name,age:Math.floor(soul.age),sex:soul.sex,role:soul.role,doing:folkAbout(streets,i,seen.stride),metres:Math.round(seen.depth)});
     }
     const posts=(watchSeen()??[]).map(s=>({s,seen:watchOnScreen(s,rect)})).filter(one=>one.seen&&one.seen.tall>=FOLK_LEAST_PX).map(({s,seen})=>({id:s.soul.id,name:s.soul.name,role:s.soul.role,doing:watchDoing(s),metres:Math.round(seen.depth)}));
+    const aboardShips=(shipFolkSeen()??[]).map(d=>({d,seen:shipFolkOnScreen(d,rect,off)})).filter(one=>one.seen&&one.seen.tall>=FOLK_LEAST_PX).map(({d,seen})=>({id:d.soul.id,name:d.soul.name,role:d.soul.role,shipName:d.shipName,homePort:d.homePort,doing:d.doing,metres:Math.round(seen.depth)}));
     const near=(a,b)=>a.metres-b.metres;
-    return {place:storyPort(),ashore:ashore.on,living:boardLife?.state==='alive',inSight:about.sort(near).slice(0,24),atPosts:posts.sort(near).slice(0,12),aboutTheTown:streets?Math.min(streets.souls.length,townsfolk.people):0,lastAskedAfter:storyAsked};
+    return {place:storyPort(),ashore:ashore.on,living:boardLife?.state==='alive',inSight:about.sort(near).slice(0,24),atPosts:posts.sort(near).slice(0,12),aboardShips:aboardShips.sort(near).slice(0,16),aboutTheTown:streets?Math.min(streets.souls.length,townsfolk.people):0,lastAskedAfter:storyAsked};
   }
   // Who of the port's people might sign on as mate, each with what the model keeps of them.
   async function storyMateCandidates(n){

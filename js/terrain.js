@@ -1498,7 +1498,10 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   let inlandWater=proceduralPack?await createInlandWater({device,shader,format,samples,resources:nearResources,clouds,coastalField,oceanBridge,initialGeometry:proceduralPack.inlandWater??null}):null;
   let herds=proceduralPack?await createLivestockHerds({device,shader,format,samples,frameUBO,landUniform:uniform,nearDomain,elevation,landShadowUniform:activeLandShadows.uniform,resources:nearResources,clouds,initialHerds:proceduralPack.herds??null,initialBridges:proceduralPack.port?.country?.bridges??null,isMobile}):null;
   const meadowPack=await meadowPromise;
-  let meadowGrass=proceduralPack&&meadowPack?await createMeadowGrass({device,shader,pack:meadowPack,region:activeRegion,heights,biome,beaches:proceduralPack.beaches??null,port:proceduralPack.port??null,city:proceduralPack.city??null,elevation,nearDomain,resources:nearResources,clouds,format,samples,isMobile}):null;
+  let meadowGrass=null;
+  if(proceduralPack&&meadowPack)try{
+    meadowGrass=await createMeadowGrass({device,shader,pack:meadowPack,region:activeRegion,heights,biome,beaches:proceduralPack.beaches??null,port:proceduralPack.port??null,city:proceduralPack.city??null,elevation,nearDomain,resources:nearResources,clouds,format,samples,isMobile});
+  }catch(error){meadowFailure=error.message;}
   const meadowGrassStats=meadowGrass?.stats??{loaded:false,error:meadowFailure};
   let tradeVessels=proceduralPack?await createTradeVessels({device,format,samples,shader,computePipe,oceanBridge,resources:nearResources,shadowFormat:activeLandShadows.format}):null;
   if(tradeVessels&&proceduralPack?.port?.country?.board){
