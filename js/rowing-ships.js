@@ -118,7 +118,12 @@ export function createRowingShipMesh(modelId,{groups,parts}={}){
   }
   group('hull.frames','hull',framesStart);
   const railStart=out.length;
-  for(const side of [-1,1])for(let i=0;i<zs.length-1;i++)tube(outer(zs[i],p.deck,side),outer(zs[i+1],p.deck,side),.018,1,.018,6,undefined,true);
+  for(const side of [-1,1])for(let i=0;i<zs.length-1;i++){
+    tube(outer(zs[i],p.deck,side),outer(zs[i+1],p.deck,side),.020,15,.020,6,undefined,true);
+    // Exterior sheer rub-strake wale giving open vessels the heavy planked lip of the Niña.
+    const w0=outer(zs[i],p.deck-.05/sy,side),w1=outer(zs[i+1],p.deck-.05/sy,side);
+    tube([w0[0]+side*.008/sx,w0[1],w0[2]],[w1[0]+side*.008/sx,w1[1],w1[2]],.013,15,.013,5,undefined,true);
+  }
   group('hull.gunwales','hull',railStart);
   if(d.id==='oseberg'){
     const start=out.length;
@@ -194,14 +199,45 @@ export function createRowingShipMesh(modelId,{groups,parts}={}){
   for(const c of d.equipment.cargo){
     const y=rowingDeck(modelId,c.z),[w,h,L]=c.extent,base=p.railRise?Math.min(y,rowingDeck(modelId,c.z-L),rowingDeck(modelId,c.z+L)):y;
     box([-w,base,c.z-L],[w,y+h,c.z+L],1);
+    // Slatted cargo hatch frame & wrought-iron binding straps.
+    for(const zStrap of [c.z-L*.6,c.z+L*.6])box([-w-.008/sx,base,zStrap-.018/sz],[w+.008/sx,y+h+.008/sy,zStrap+.018/sz],3);
   }
   const bailerY=rowingDeck(modelId,2.8);box([.22,bailerY,2.7],[.35,bailerY+.09,2.9],1);
+  // Twin fore-and-aft mooring bitts, heavy athwartship mast partner & coiled painter hawser.
+  for(const bz of [-4.65,4.65]){
+    const bDeck=rowingDeck(modelId,bz),bw=Math.min(.22,rowingHullWidth(modelId,bz,bDeck+p.deck*.4)*.55);
+    if(bw>.08){
+      for(const bx of [-bw,bw])tube([bx,bDeck,bz],[bx,bDeck+.24/sy,bz],.028/sx,1,.025/sx,8);
+      tube([-bw*1.35,bDeck+.16/sy,bz],[bw*1.35,bDeck+.16/sy,bz],.024/sx,1,.024/sx,6);
+      if(bz<0)for(let t=0;t<3;t++){
+        const cr=(.07+t*.018)/sx,ry=bDeck+.016/sy+t*.012/sy;
+        for(let k=0;k<12;k++){
+          const a0=k*Math.PI/6,a1=(k+1)*Math.PI/6;
+          tube([cr*Math.cos(a0),ry,bz+.25/sz+cr*Math.sin(a0)],[cr*Math.cos(a1),ry,bz+.25/sz+cr*Math.sin(a1)],.009/sx,2,.009/sx,4,undefined,true);
+        }
+      }
+    }
+  }
   group('deck.stores','deck.main',cargoStart);
   if(d.equipment.anchor)for(const side of [-1,1]){
     const start=out.length,a=rowingAnchorFitting(modelId,side);tube(a.root,a.tip,.035/sy,1,.028/sy,6);
+    tube([a.tip[0],a.tip[1],a.tip[2]],[a.tip[0],a.tip[1]-.05/sy,a.tip[2]],.016/sx,3,.016/sx,6);
     group('anchor.'+(side<0?'port':'starboard'),'anchor.'+(side<0?'port':'starboard')+'.root',start);
   }
-  for(const m of context.masts){const start=out.length;tube(m.foot,m.head,m.radius,10,.018,12);group('mast.'+m.id,'mast.'+m.id,start);}
+  for(const m of context.masts){
+    const start=out.length;tube(m.foot,m.head,m.radius,10,.018,12);
+    // Mast-partner oak thwart beam & iron mast collars / hound band.
+    const mw=Math.max(.18,rowingHullWidth(modelId,m.foot[2],p.deck)-d.shellThicknessMetres/sx);
+    box([-mw,p.deck-.05/sy,m.foot[2]-.06/sz],[mw,p.deck+.01/sy,m.foot[2]+.06/sz],1);
+    for(const yf of [.38,.72,.92]){
+      const y=m.foot[1]+(m.head[1]-m.foot[1])*yf,mr=m.radius*(1-yf*.6)+.006/sx;
+      for(let k=0;k<12;k++){
+        const a0=k*Math.PI/6,a1=(k+1)*Math.PI/6,zOff=m.foot[2]+(m.head[2]-m.foot[2])*yf;
+        tube([mr*Math.cos(a0),y,zOff+mr*Math.sin(a0)],[mr*Math.cos(a1),y,zOff+mr*Math.sin(a1)],.008/sx,3,.008/sx,4,undefined,true);
+      }
+    }
+    group('mast.'+m.id,'mast.'+m.id,start);
+  }
   for(const s of context.surfaces){
     const start=out.length,n=20;
     for(let i=0;i<n;i++)for(let j=0;j<n;j++){
@@ -210,6 +246,12 @@ export function createRowingShipMesh(modelId,{groups,parts}={}){
     group('sail.'+s.name,'sail.'+s.name,start,{type:'surface-cloth',surface:s.id});
     const yardStart=out.length,spar=rowingSurfaceSpar(s);tube(spar.a,spar.b,spar.radius,tag(10,s.id),spar.radiusEnd,10);
     group('yard.'+s.name,'yard.'+s.name,yardStart,{type:'surface-yard',surface:s.id});
+    // Perimeter stitched bolt-ropes (tag 19) on square/lateen canvas matching Niña.
+    const edgeStart=out.length,edgeMat=tag(19,s.id);
+    const emitEdge=(uvA,uvB)=>tube(surfaceRestPoint(s,...uvA),surfaceRestPoint(s,...uvB),.009/sx,edgeMat,.009/sx,5,[uvA,uvB],true);
+    for(let j=0;j<n;j++){emitEdge([0,j/n],[0,(j+1)/n]);emitEdge([1,j/n],[1,(j+1)/n]);}
+    for(let i=0;i<n;i++){emitEdge([i/n,1],[(i+1)/n,1]);}
+    group('sail.'+s.name+'.edge','sail.'+s.name,edgeStart,{type:'surface-bolt-rope',surface:s.id});
   }
   const rigStart=out.length;for(const line of context.supports)rope(line.a,line.b,line.r,2,1,0);group('rig.standing','hull',rigStart);
   const runtime={...context,state:{},poses:new Map(context.surfaces.map(s=>[s.id,rigSurfacePose(s,{})]))},runningStart=out.length;
@@ -225,7 +267,12 @@ export function createRowingAssetPose(asset,options={}){
   if(!(source instanceof Float32Array)||source.length%9)throw Error('Rowing pose requires nine-float asset vertices');
   const scale=[d.runtime.beam/d.frame.beam,d.frame.verticalScale,d.runtime.length/d.frame.length],physical=p=>p.map((v,i)=>v*scale[i]);
   const restPoses=d.stations.map(s=>rowingStationPose(restBoat,s.id));restPoses.push(rowingSteeringPose(restBoat));
-  const restContext={...context,state:{},poses:new Map(d.surfaces.map(s=>[s.id,rigSurfacePose(s,{})]))},blades=[],yards=[],cloth=new Map(),ropes=new Map(),ropeVertices=[];
+  const restContext={...context,state:{},poses:new Map(d.surfaces.map(s=>[s.id,rigSurfacePose(s,{})]))},blades=[],yards=[],cloth=new Map(),bolts=[],ropes=new Map(),ropeVertices=[];
+  const clothBasis=(evalPt,u,v)=>{
+    const e=.0005,du=rowingMeshSub(evalPt(u+e,v),evalPt(u-e,v)),dv=rowingMeshSub(evalPt(u,v+e),evalPt(u,v-e));
+    const n=rowingMeshUnit(rowingMeshCross(du,dv)),t=rowingMeshUnit(du),b=rowingMeshUnit(rowingMeshCross(n,t));
+    return {t,b,n};
+  };
   for(let at=0;at<source.length;at+=9){
     const kind=Math.floor(source[at+6]),code=Math.round((source[at+6]-kind)*64),position=Array.from(source.subarray(at,at+3)),normal=Array.from(source.subarray(at+3,at+6));
     if(kind===16||kind===17){
@@ -233,9 +280,13 @@ export function createRowingAssetPose(asset,options={}){
       const q=rowingMeshSub(physical(position),pose.bladeCentre),N=rowingMeshUnit(normal.map((v,i)=>v/scale[i]));
       blades.push({at,index,p:[rowingMeshDot(q,pose.bladeAlong),rowingMeshDot(q,pose.bladeAcross),rowingMeshDot(q,pose.bladeNormal)],
         n:[rowingMeshDot(N,pose.bladeAlong),rowingMeshDot(N,pose.bladeAcross),rowingMeshDot(N,pose.bladeNormal)]});
-    }else if(kind===9&&surfaces.has(code)){
+    }else if((kind===9||kind===19)&&surfaces.has(code)){
       const u=source[at+7],v=source[at+8],key=code+'/'+u+'/'+v;let sample=cloth.get(key);
-      if(!sample){sample={surface:surfaces.get(code),u,v,indices:[]};cloth.set(key,sample);}sample.indices.push(at);
+      if(!sample){sample={surface:surfaces.get(code),u,v,indices:[]};cloth.set(key,sample);}
+      if(kind===19){
+        const r0=surfaceRestPoint(sample.surface,u,v),rf=clothBasis((uu,vv)=>surfaceRestPoint(sample.surface,uu,vv),u,v),off=rowingMeshSub(position,r0);
+        bolts.push({at,sample,ct:rowingMeshDot(off,rf.t),cb:rowingMeshDot(off,rf.b),cn:rowingMeshDot(off,rf.n),nt:rowingMeshDot(normal,rf.t),nb:rowingMeshDot(normal,rf.b),nn:rowingMeshDot(normal,rf.n)});
+      }else sample.indices.push(at);
     }else if(kind===10&&surfaces.has(code))yards.push({at,surface:surfaces.get(code),position,normal});
     else if(kind===12&&source[at+7]>=100){
       const index=Math.round(source[at+7]-100),line=context.lines[index],t=source[at+8],key=index+'/'+t;if(!line)throw Error('Invalid rowing rig line');let sample=ropes.get(key);
@@ -256,8 +307,14 @@ export function createRowingAssetPose(asset,options={}){
     }
     runtime.state=boat.sailState??{};runtime.time=time;runtime.wind=wind;runtime.ropeChain=resolveVesselRopeChain(boat);for(const s of d.surfaces)poses.set(s.id,rigSurfacePose(s,runtime.state));
     for(const sample of samples){
-      const {surface:s,u,v}=sample,pose=poses.get(s.id),e=.0005,point=surfaceClothPoint(s,u,v,pose,runtime,time,wind),du=rowingMeshSub(surfaceClothPoint(s,u+e,v,pose,runtime,time,wind),surfaceClothPoint(s,u-e,v,pose,runtime,time,wind)),dv=rowingMeshSub(surfaceClothPoint(s,u,v+e,pose,runtime,time,wind),surfaceClothPoint(s,u,v-e,pose,runtime,time,wind));
-      const normal=rowingMeshUnit(rowingMeshCross(du,dv));for(const at of sample.indices)write(target,at,point,normal);
+      const {surface:s,u,v}=sample,pose=poses.get(s.id),point=surfaceClothPoint(s,u,v,pose,runtime,time,wind),{t,b,n}=clothBasis((uu,vv)=>surfaceClothPoint(s,uu,vv,pose,runtime,time,wind),u,v);
+      sample.point=point;sample.frame={t,b,n};
+      for(const at of sample.indices)write(target,at,point,n);
+    }
+    for(const e of bolts){
+      const q=e.sample.point,fr=e.sample.frame;
+      write(target,e.at,rowingMeshAdd(q,rowingMeshAdd(rowingMeshMul(fr.t,e.ct),rowingMeshAdd(rowingMeshMul(fr.b,e.cb),rowingMeshMul(fr.n,e.cn)))),
+        rowingMeshUnit(rowingMeshAdd(rowingMeshMul(fr.t,e.nt),rowingMeshAdd(rowingMeshMul(fr.b,e.nb),rowingMeshMul(fr.n,e.nn)))));
     }
     for(const entry of yards){const pose=poses.get(entry.surface.id),point=surfaceYardPoint(entry.surface,entry.position,pose),N=surfaceYardPoint(entry.surface,rowingMeshAdd(entry.position,entry.normal),pose);write(target,entry.at,point,rowingMeshUnit(rowingMeshSub(N,point)));}
     for(const sample of ropeSamples){const {line,t}=sample,a=surfaceRopePoint(line,Math.max(0,t-.001),runtime),b=surfaceRopePoint(line,Math.min(1,t+.001),runtime);sample.point=surfaceRopePoint(line,t,runtime);sample.basis=rowingMeshBasis(rowingMeshSub(b,a),sample.across);}

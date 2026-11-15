@@ -2,7 +2,7 @@
 // Independent mixed-rig reconstructions. Every hull join follows this model's
 // loft; only the nine-float construction primitives are shared with other ships.
 import {createMeshWriter,OAK_ACROSS_PER_METRE,OAK_ALONG_PER_METRE,shipOakGrain} from './mesh-writer.js';
-import {additionalDesign,additionalHullWidth,additionalDeck,additionalStairFlights} from './models/additional.js';
+import {additionalDesign,additionalHullWidth,additionalDeck,additionalDeckWidth,additionalStairFlights} from './models/additional.js';
 import {hullLoftPoint,hullLoftBottom,hullLoftSheer,hullLoftStem} from './hull-loft.js';
 import {additionalRigContext,additionalGunAttachments} from './additional-rig.js';
 import {surfaceRestPoint,rigSurfacePose,surfaceClothPoint,surfaceYardPoint,surfaceRopePoint,withRigPoseContext} from './rig-surface.js';
@@ -184,6 +184,29 @@ export function createAdditionalShipMesh(modelId,{groups,parts}={}){
         for(let k=1;k<polygon.length-1;k++)tri(polygon[0],polygon[k],polygon[k+1],1);
       }
     }
+    // Athwartship balustrade across raised-deck breaks, leaving stair lanes open.
+    const breakRailY=zone.height+hullLoftSheer(profile,join),railH=.30;
+    const stairExcl=flights.filter(f=>f.zoneId===zone.id).map(f=>[f.x-f.width*.56,f.x+f.width*.56]);
+    const breakMaxW=additionalDeckWidth(modelId,join)-.06;
+    const railSpans=[[-breakMaxW,breakMaxW]];
+    for(const [lo,hi] of stairExcl){
+      for(let r=railSpans.length-1;r>=0;r--){
+        const [a,b]=railSpans[r];
+        if(hi<=a+.04||lo>=b-.04)continue;
+        railSpans.splice(r,1);
+        if(lo-a>.14)railSpans.push([a,lo]);
+        if(b-hi>.14)railSpans.push([hi,b]);
+      }
+    }
+    const zRail=join+(zone.bounds[0]>begin?.03:-.03);
+    for(const [a,b] of railSpans){
+      tube([a,breakRailY+railH,zRail],[b,breakRailY+railH,zRail],.022,17,.022,6);
+      const count=Math.max(2,Math.round((b-a)/.22)+1);
+      for(let s=0;s<count;s++){
+        const rx=a+(b-a)*s/(count-1);
+        tube([rx,breakRailY,zRail],[rx,breakRailY+railH,zRail],.014,1,.014,5);
+      }
+    }
     group('deck.bulkhead.'+zone.id,'hull',start);
   }
   // These same flight endpoints, widths and lanes drive crew navigation.
@@ -215,7 +238,16 @@ export function createAdditionalShipMesh(modelId,{groups,parts}={}){
       const next=i<zs.length-2?additionalDeck(modelId,(Z+zs[i+2])*.5)-hullLoftSheer(profile,(Z+zs[i+2])*.5):NaN;
       if(i===0||Math.abs(previous-base)>1e-8){quad(a,d,D,A,1);quad(cap(d,.024,-.03),cap(d,-.09,-.03),cap(d,-.09,.05),cap(d,.024,.05),17);}
       if(i===zs.length-2||Math.abs(next-base)>1e-8){quad(b,B,C,c,1);quad(cap(c,.024,-.03),cap(c,-.09,-.03),cap(c,-.09,.05),cap(c,.024,.05),17);}
-      if(i%4===0)tube(inset(a),inset(d),.016,1,.016,5,undefined,true);
+      if(i%4===0){
+        const postA=inset(a),postD=inset(d);
+        tube(postA,postD,.016,1,.016,5,undefined,true);
+        // Lodging knee & wrought-iron strap tying bulwark stanchion to deck beam, as on Niña.
+        const kneeTop=[postA[0],postA[1]+Math.min(.22,design.barrier*.52),postA[2]];
+        const kneeFoot=[postA[0]-side*.10,postA[1]+.01,postA[2]];
+        tube(postA,kneeTop,.018,3,.014,5,undefined,true);
+        tube(postA,kneeFoot,.017,1,.014,5,undefined,true);
+        if(i%8===0)tube([postA[0]-side*.03,postD[1]-.06,postA[2]-.10],[postA[0]-side*.03,postD[1]-.06,postA[2]+.10],.016,17,.016,5);
+      }
     }
     const sternBase=additionalDeck(modelId,end)-hullLoftSheer(profile,end),sternSheer=hullLoftSheer(profile,end),notch=design.steering.handle[1]>sternBase+sternSheer-.05&&design.steering.handle[1]<sternBase+sternSheer+design.barrier+.05,innerX=side*(notch?.09:0);
     const sA=[innerX,sternBase+sternSheer,end],sB=point(end,sternBase,side),sC=point(end,sternBase+design.barrier,side),sD=[innerX,sternBase+sternSheer+design.barrier,end],sIn=p=>[p[0],p[1],p[2]-.045];
@@ -229,14 +261,24 @@ export function createAdditionalShipMesh(modelId,{groups,parts}={}){
   if(windowHigh>windowLow){
     const widthAt=y=>additionalHullWidth(modelId,end,y+hullLoftSheer(profile,end));
     const count=modelId==='santa-maria'?5:3;
+    // Transom molding cornice & oak Sill beam tying cabin lights to hull sheer.
+    const transW=widthAt((windowLow+windowHigh)*.5)*.84,sheerEnd=hullLoftSheer(profile,end);
+    box([-transW,windowLow+sheerEnd-.045,end-.014],[transW,windowLow+sheerEnd-.016,end+.016],17);
+    box([-transW,windowHigh+sheerEnd+.016,end-.014],[transW,windowHigh+sheerEnd+.045,end+.016],17);
     for(let j=0;j<count;j++){
       const f=-.75+1.5*(j+.5)/count,half=.085,w=widthAt((windowLow+windowHigh)*.5),x=f*w,z=end+.004;
-      const y=windowLow+hullLoftSheer(profile,end),Y=windowHigh+hullLoftSheer(profile,end);
-      box([x-half-.018,y-.018,end-.012],[x+half+.018,Y+.018,end+.006],1);
+      const y=windowLow+sheerEnd,Y=windowHigh+sheerEnd;
+      box([x-half-.022,y-.022,end-.012],[x+half+.022,Y+.022,end+.008],1);
       quad([x-half,y,z+.004],[x+half,y,z+.004],[x+half,Y,z+.004],[x-half,Y,z+.004],11);
-      for(const X of [x-half,x,x+half])tube([X,y,z+.011],[X,Y,z+.011],.008,1,.008,4);
-      tube([x-half,(y+Y)*.5,z+.011],[x+half,(y+Y)*.5,z+.011],.008,1,.008,4);
+      for(const X of [x-half,x,x+half])tube([X,y,z+.012],[X,Y,z+.012],.009,17,.009,4);
+      tube([x-half,(y+Y)*.5,z+.012],[x+half,(y+Y)*.5,z+.012],.009,17,.009,4);
     }
+    // Brass poop-stern taffrail lantern on wrought-iron gooseneck bracket.
+    const taffY=additionalDeck(modelId,end)+design.barrier+.06;
+    tube([0,taffY-.12,end-.02],[0,taffY+.16,end+.16],.014,3,.011,6);
+    tube([0,taffY+.16,end+.16],[0,taffY+.28,end+.16],.045,25,.058,8);
+    tube([0,taffY+.19,end+.16],[0,taffY+.26,end+.16],.048,11,.048,8);
+    tube([0,taffY+.28,end+.16],[0,taffY+.36,end+.16],.056,25,.012,8);
   }
   group('stern.windows','hull',sternStart);
   const frameStart=out.length;
@@ -263,6 +305,10 @@ export function createAdditionalShipMesh(modelId,{groups,parts}={}){
   box([-.035,rudderBottom,stock[2]-.035],[.035,rudderTop,stock[2]+.055],14);
   for(const side of [-1,1])quad(...blade.map(([y,z])=>[side*.035,y,z]),14);
   for(let i=0;i<blade.length;i++){const a=blade[i],b=blade[(i+1)%blade.length];quad([-.035,...a],[.035,...a],[.035,...b],[-.035,...b],14);}
+  // Wrought-iron pintle/gudgeon straps across rudder cheeks.
+  for(const strapY of [rudderBottom+.18,(rudderBottom+.38)*.5,.32]){
+    box([-.040,strapY-.016,stock[2]-.040],[.040,strapY+.016,stock[2]+.28],3);
+  }
   group('helm.rudder','helm.rudder',rudderStart,{type:'rudder'});
   const tillerStart=out.length,handle=design.steering.handle;
   tube([0,handle[1],stock[2]],handle,.032,7,.022,8);
@@ -298,6 +344,9 @@ export function createAdditionalShipMesh(modelId,{groups,parts}={}){
     const around=q=>add(centre,add(mul(gammon.across,r*Math.cos(q*Math.PI/7)),mul(gammon.up,r*Math.sin(q*Math.PI/7))));
     for(let j=0;j<14;j++)tube(around(j),around(j+1),.012,2,.012,4,undefined,true);
   }
+  // Fake hawser anchor-cable coil on the foredeck beside the riding bitts, like Niña.
+  const hawserC=[-.68,bittDeck+.015,bittZ+.38];
+  for(let turn=0;turn<4;turn++)ring([hawserC[0],hawserC[1]+turn*.016,hawserC[2]],.10+turn*.026,.011,2,'y',18);
   group('bow.bowsprit','hull',bowStart);
   const coamingStart=out.length,hatchFloor=additionalDeck(modelId,design.hatch.centre[2]),coamingTop=design.hatch.centre[1]+.015;
   for(const x of [hatchLeft,hatchRight]){
@@ -306,16 +355,50 @@ export function createAdditionalShipMesh(modelId,{groups,parts}={}){
   }
   for(const z of [hatchFore,hatchAft])box([hatchLeft-.025,hatchFloor-.03,z-.025],[hatchRight+.025,coamingTop,z+.025],1);
   box([hatchLeft,hatchFloor-.32,hatchFore],[hatchRight,hatchFloor-.30,hatchAft],4);
+  // Recessed oak grating lattice inside the hatch coaming, visible under an open hatch.
+  for(let gx=hatchLeft+.07;gx<hatchRight-.05;gx+=.11)box([gx-.014,coamingTop-.036,hatchFore+.02],[gx+.014,coamingTop-.014,hatchAft-.02],1);
+  for(let gz=hatchFore+.07;gz<hatchAft-.05;gz+=.12)box([hatchLeft+.02,coamingTop-.024,gz-.013],[hatchRight-.02,coamingTop-.008,gz+.013],6);
   group('hatch.coaming','hatch.main',coamingStart);
   const hatchStart=out.length,h=design.hatch,hinge=[h.centre[0],h.centre[1],h.centre[2]-h.size[2]/2];
   box([h.centre[0]-h.size[0]/2,h.centre[1],hinge[2]],[h.centre[0]+h.size[0]/2,h.centre[1]+h.size[1],hinge[2]+h.size[2]],18);
-  for(const z of [hinge[2]+.10,hinge[2]+h.size[2]-.10])box([h.centre[0]-h.size[0]/2,h.centre[1]+h.size[1],z-.025],[h.centre[0]+h.size[0]/2,h.centre[1]+h.size[1]+.025,z+.025],18);
+  // Carved border battens, cross-cleats and wrought-iron hinges/lifting rings on hatch leaf.
+  for(const z of [hinge[2]+.10,hinge[2]+h.size[2]-.10]){
+    box([h.centre[0]-h.size[0]/2,h.centre[1]+h.size[1],z-.025],[h.centre[0]+h.size[0]/2,h.centre[1]+h.size[1]+.025,z+.025],17);
+  }
+  for(const x of [h.centre[0]-h.size[0]*.34,h.centre[0]+h.size[0]*.34]){
+    box([x-.018,h.centre[1]+h.size[1]-.002,hinge[2]+.02],[x+.018,h.centre[1]+h.size[1]+.018,hinge[2]+.30],3);
+    ring([x,h.centre[1]+h.size[1]+.024,hinge[2]+h.size[2]-.14],.032,.008,3,'y',10);
+  }
   group('hatch.main','hatch.main',hatchStart,{type:'hatch',pivot:hinge});
+  // Working deck furniture clear of crew lanes: windlass, main capstan & helmsman's binnacle.
+  const fitStart=out.length;
+  const wZ=hatchFore-.34,wY=additionalDeck(modelId,wZ);
+  for(const wx of [-.46,.46])box([wx-.04,wY,wZ-.045],[wx+.04,wY+.30,wZ+.045],17);
+  tube([-.50,wY+.21,wZ],[.50,wY+.21,wZ],.085,1,.085,12);
+  for(const rx of [-.24,0,.24])ring([rx,wY+.21,wZ],.090,.012,3,'z',12);
+  const cZ=modelId==='santa-maria'?.92:1.38,cY=additionalDeck(modelId,cZ);
+  tube([0,cY,cZ],[0,cY+.44,cZ],.15,1,.12,12);
+  tube([0,cY+.42,cZ],[0,cY+.54,cZ],.17,17,.17,12);
+  ring([0,cY+.48,cZ],.176,.012,3,'y',14);
+  for(let k=0;k<4;k++){const a=k*Math.PI/2+.4;tube([0,cY+.48,cZ],[.24*Math.cos(a),cY+.48,cZ+.24*Math.sin(a)],.016,17,.014,6);}
+  const binZ=modelId==='santa-maria'?3.55:3.25,binY=additionalDeck(modelId,binZ);
+  box([-.18,binY,binZ-.12],[.18,binY+.48,binZ+.12],1);
+  box([-.20,binY+.48,binZ-.14],[.20,binY+.52,binZ+.14],17);
+  tube([-.08,binY+.52,binZ],[ -.08,binY+.62,binZ],.042,25,.028,8);
+  tube([.08,binY+.52,binZ],[.08,binY+.62,binZ],.042,25,.028,8);
+  group('deck.fittings','hull',fitStart);
   for(const gun of additionalGunAttachments(modelId)){
     const start=out.length,[x,y,z]=gun.centre,side=gun.sideSign;
     tube([x,gun.floorDesign,z],[x,y-.035,z],.025,3,.025,8);tube([x,y-.02,z-.065],[x,y-.02,z+.065],.018,3,.018,6);
     const recoilStart=out.length,breech=gun.breechDesign,muzzle=gun.muzzleDesign,axis=unit(gun.directionDesign),across=unit([-axis[1],axis[0],0]),inside=add(muzzle,mul(axis,-.08));
     tube(breech,muzzle,.033,3,gun.barrelRadius,10,undefined,true);
+    // Cascabel, breech/chase reinforcing astragal bands and muzzle swell like Niña's falconets.
+    tube(add(breech,mul(axis,-.045)),breech,.014,3,.024,8);
+    for(const t of [.12,.45,.92]){
+      const ringA=add(breech,mul(sub(muzzle,breech),t)),ringB=add(breech,mul(sub(muzzle,breech),t+.032));
+      const rr=.036*(1-t*.22)+(t>.85?.008:0);
+      tube(ringA,ringB,rr,3,rr,10);
+    }
     const edge=(p,r,j)=>add(p,add(mul(across,r*Math.cos(j*Math.PI/5)),[0,0,r*Math.sin(j*Math.PI/5)]));
     for(let j=0;j<10;j++){
       quad(edge(muzzle,gun.barrelRadius,j),edge(muzzle,.018,j),edge(muzzle,.018,j+1),edge(muzzle,gun.barrelRadius,j+1),3);
@@ -328,7 +411,31 @@ export function createAdditionalShipMesh(modelId,{groups,parts}={}){
   }
   for(const [index,m] of context.masts.entries()){
     const start=out.length;tube(m.foot,m.head,m.radius,10,m.radius*.4,16);
-    for(let y=m.foot[1]+.45;y<m.head[1]*.65;y+=1.1)ring(context.mastPoint(index,y),m.radius*(1-(y-m.foot[1])/(m.head[1]-m.foot[1]))+.004,.008,2,'y',10);
+    for(let y=m.foot[1]+.45;y<m.head[1]*.84;y+=1.0){
+      const rm=m.radius*(1-.6*(y-m.foot[1])/(m.head[1]-m.foot[1]))+.005;
+      ring(context.mastPoint(index,y),rm,.009,3,'y',14);
+      if(y<m.head[1]*.55)ring(context.mastPoint(index,y+.18),rm,.008,2,'y',10);
+    }
+    // Mast hound collar & oak trestletrees/crosstrees supporting shroud heads.
+    const houndY=m.height*.72,hp=context.mastPoint(index,houndY),hr=m.radius*(1-.6*(houndY-m.foot[1])/(m.head[1]-m.foot[1]))+.012;
+    ring(hp,hr,.018,3,'y',14);
+    for(const tx of [-hr-.04,hr+.04])box([tx-.02,hp[1]-.04,hp[2]-.22],[tx+.02,hp[1]+.02,hp[2]+.22],17);
+    for(const tz of [-.14,.14])tube([-hr-.26,hp[1]+.02,hp[2]+tz],[hr+.26,hp[1]+.02,hp[2]+tz],.018,17,.014,6);
+    ring(context.mastPoint(index,m.height*.92),m.radius*.46,.016,3,'y',12);
+    // Cesto da gávea (round fighting top) on Santa María's tall mainmast under topsail.
+    if(modelId==='santa-maria'&&index===1){
+      const rTop=.38,rimH=.28;
+      for(let i=0;i<16;i++){
+        const a=i*Math.PI/8,b=(i+1)*Math.PI/8,A=add(hp,[rTop*Math.cos(a),.02,rTop*Math.sin(a)]),B=add(hp,[rTop*Math.cos(b),.02,rTop*Math.sin(b)]);
+        tri(add(hp,[0,.02,0]),A,B,0);
+        tube(A,B,.022,17,.022,6,undefined,true);
+        tube(add(A,[0,rimH,0]),add(B,[0,rimH,0]),.020,17,.020,6,undefined,true);
+        tube(add(A,[0,rimH*.55,0]),add(B,[0,rimH*.55,0]),.012,1,.012,5,undefined,true);
+        if(i%2===0)tube(A,add(A,[0,rimH,0]),.014,1,.014,5);
+        if(i%4===0)tube(context.mastPoint(index,houndY-.38),A,.020,2,.016,5);
+      }
+      ring(add(hp,[0,rimH,0]),rTop+.012,.010,3,'y',16);
+    }
     group('mast.'+m.id,'mast.'+m.id,start);
   }
   if(design.lookout){
@@ -357,9 +464,41 @@ export function createAdditionalShipMesh(modelId,{groups,parts}={}){
     const yardStart=out.length,a=s.corners[0],b=s.corners[1],axis=unit(sub(b,a)),A=add(a,mul(axis,-.12)),B=add(b,mul(axis,.12)),middle=mul(add(a,b),.5);
     tube(A,middle,.03,tag(10,s.id),.058,12);tube(middle,B,.058,tag(10,s.id),.03,12);
     group('yard.'+s.name,'yard.'+s.name,yardStart,{type:'surface-yard',surface:s.id});
+    // Perimeter stitched bolt-ropes (kind 19) following Niña's sail edging.
+    const edgeStart=out.length,edgeMat=tag(19,s.id);
+    const emitEdge=(uvA,uvB)=>tube(surfaceRestPoint(s,...uvA),surfaceRestPoint(s,...uvB),.011,edgeMat,.011,6,[uvA,uvB],true);
+    if(s.corners.length===3){
+      for(let i=0;i<n;i++){
+        emitEdge([i/n,0],[(i+1)/n,0]);
+        emitEdge([0,i/n],[0,(i+1)/n]);
+        emitEdge([(n-i)/n,i/n],[(n-i-1)/n,(i+1)/n]);
+      }
+    }else{
+      for(let j=0;j<n;j++){emitEdge([0,j/n],[0,(j+1)/n]);emitEdge([1,j/n],[1,(j+1)/n]);}
+      for(let i=0;i<n;i++){emitEdge([i/n,1],[(i+1)/n,1]);}
+    }
+    group('sail.'+s.name+'.edge','sail.'+s.name,edgeStart,{type:'surface-bolt-rope',surface:s.id});
   }
   const standingStart=out.length;
   for(const line of context.lines.filter(l=>l.static))rope(line.a,line.b,line.r??.008,2,1,0);
+  // Outboard oak shroud channels, chamfered deadeyes, iron chainplates & stay iron collars.
+  for(let mIdx=0;mIdx<context.masts.length;mIdx++)for(const side of [-1,1]){
+    const shrouds=context.lines.filter(l=>l.static&&l.kind==='shroud'&&l.mast===mIdx&&l.side===side);
+    if(!shrouds.length)continue;
+    const zMin=Math.min(...shrouds.map(l=>l.a[2]))-.08,zMax=Math.max(...shrouds.map(l=>l.a[2]))+.08;
+    const chY=shrouds.reduce((acc,l)=>acc+l.a[1],0)/shrouds.length-.045;
+    const chX0=side*(additionalDeckWidth(modelId,(zMin+zMax)*.5)-.02),chX1=side*(additionalDeckWidth(modelId,(zMin+zMax)*.5)+.065);
+    box([Math.min(chX0,chX1),chY-.025,zMin],[Math.max(chX0,chX1),chY+.02,zMax],17);
+    for(const sh of shrouds){
+      const f=sh.a;
+      tube([f[0]-side*.016,f[1],f[2]],[f[0]+side*.016,f[1],f[2]],.036,16,.036,8);
+      tube([f[0]+side*.008,f[1]-.02,f[2]],[f[0]+side*.008,f[1]-.34,f[2]],.014,3,.011,5);
+    }
+  }
+  for(const st of context.lines.filter(l=>l.static&&l.kind==='stay')){
+    tube([st.a[0]-.028,st.a[1],st.a[2]],[st.a[0]+.028,st.a[1],st.a[2]],.032,16,.032,8);
+    tube([st.a[0],st.a[1]-.06,st.a[2]],[st.a[0],st.a[1]+.01,st.a[2]],.016,3,.014,5);
+  }
   group('rig.standing','hull',standingStart);
   const runningStart=out.length;
   const restContext={...withRigPoseContext(context,{}),time:0,wind:0};
@@ -386,12 +525,23 @@ export function createAdditionalAssetPose(asset,options={}){
   const surfaces=new Map(context.surfaces.map(s=>[s.id,s])),entries=[],cloth=new Map(),ropes=new Map();
   const restContext={...withRigPoseContext(context,{}),time:0,wind:0};
   const hatch=design.hatch,hinge=[hatch.centre[0],hatch.centre[1],hatch.centre[2]-hatch.size[2]/2];
+  const clothBasis=(evalPt,u,v)=>{
+    const e=.0005,du=additionalMeshSub(evalPt(u+e,v),evalPt(u-e,v)),dv=additionalMeshSub(evalPt(u,v+e),evalPt(u,v-e));
+    const n=additionalMeshUnit(additionalMeshCross(du,dv)),t=additionalMeshUnit(du),b=additionalMeshUnit(additionalMeshCross(n,t));
+    return {t,b,n};
+  };
   for(let i=0;i<source.length;i+=9){
     const material=source[i+6],kind=Math.floor(material),surfaceId=Math.round((material-kind)*64),p=Array.from(source.subarray(i,i+3)),normal=Array.from(source.subarray(i+3,i+6));
-    if((kind===9||kind===13)&&surfaces.has(surfaceId)){
+    if((kind===9||kind===13||kind===19)&&surfaces.has(surfaceId)){
       const u=source[i+7],v=source[i+8],key=surfaceId+'/'+u+'/'+v;
       let sample=cloth.get(key);if(!sample){sample={surface:surfaces.get(surfaceId),u,v,indices:[]};cloth.set(key,sample);}
-      sample.indices.push(i);continue;
+      if(kind===19){
+        const sObj=sample.surface,r0=surfaceRestPoint(sObj,u,v);
+        const rf=clothBasis((uu,vv)=>surfaceRestPoint(sObj,uu,vv),u,v),off=additionalMeshSub(p,r0);
+        entries.push({kind,at:i,sample,ct:additionalMeshDot(off,rf.t),cb:additionalMeshDot(off,rf.b),cn:additionalMeshDot(off,rf.n),
+          nt:additionalMeshDot(normal,rf.t),nb:additionalMeshDot(normal,rf.b),nn:additionalMeshDot(normal,rf.n)});
+      }else{sample.indices.push(i);}
+      continue;
     }
     if(kind===10&&surfaces.has(surfaceId)){entries.push({kind,at:i,surface:surfaces.get(surfaceId),p,normal});continue;}
     if(kind===12&&source[i+7]>=100){
@@ -421,9 +571,9 @@ export function createAdditionalAssetPose(asset,options={}){
     runtime._surfaceActiveSupports=withRigPoseContext(context,runtime.state,poses)._surfaceActiveSupports;
     for(const sample of samples){
       const {surface:s,u,v}=sample,pose=poses.get(s.id),e=.0005,p=surfaceClothPoint(s,u,v,pose,runtime,time,wind);
-      const du=additionalMeshSub(surfaceClothPoint(s,u+e,v,pose,runtime,time,wind),surfaceClothPoint(s,u-e,v,pose,runtime,time,wind));
-      const dv=additionalMeshSub(surfaceClothPoint(s,u,v+e,pose,runtime,time,wind),surfaceClothPoint(s,u,v-e,pose,runtime,time,wind));
-      const n=additionalMeshUnit(additionalMeshCross(du,dv));for(const at of sample.indices)write(target,at,p,n);
+      const {t,b,n}=clothBasis((uu,vv)=>surfaceClothPoint(s,uu,vv,pose,runtime,time,wind),u,v);
+      sample.p=p;sample.frame={t,b,n};
+      for(const at of sample.indices)write(target,at,p,n);
     }
     for(const sample of ropeSamples){
       const {line,lineIndex,t}=sample;runtime.lineIndex=lineIndex;
@@ -434,7 +584,11 @@ export function createAdditionalAssetPose(asset,options={}){
     const steeringPose=options.steeringPose?.(boat);
     for(const entry of entries){
       const {kind,at,p,normal:n}=entry;
-      if(kind===10){
+      if(kind===19){
+        const q=entry.sample.p,fr=entry.sample.frame;
+        write(target,at,additionalMeshAdd(q,additionalMeshAdd(additionalMeshMul(fr.t,entry.ct),additionalMeshAdd(additionalMeshMul(fr.b,entry.cb),additionalMeshMul(fr.n,entry.cn)))),
+          additionalMeshUnit(additionalMeshAdd(additionalMeshMul(fr.t,entry.nt),additionalMeshAdd(additionalMeshMul(fr.b,entry.nb),additionalMeshMul(fr.n,entry.nn)))));
+      }else if(kind===10){
         const {origin,axes}=yardTransforms.get(entry.surface.id),transform=v=>[0,1,2].map(i=>axes[0][i]*v[0]+axes[1][i]*v[1]+axes[2][i]*v[2]);
         write(target,at,additionalMeshAdd(origin,transform(p)),additionalMeshUnit(transform(n)));
       }else if(kind===12){

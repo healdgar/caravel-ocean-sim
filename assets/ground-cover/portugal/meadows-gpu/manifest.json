@@ -1,7 +1,7 @@
 {
   "format": "waterworld.meadow-grass-gpu",
   "version": 1,
-  "tileMetres": 1.8,
+  "tileMetres": 1.35,
   "mixes": [
     "pasture",
     "waste",
@@ -12,15 +12,15 @@
   "levels": 4,
   "levelErrors": [
     0,
-    0.01,
-    0.028,
-    0.072
+    0.012,
+    0.03,
+    0.068
   ],
   "levelParentErrors": [
-    0.01,
-    0.028,
-    0.072,
-    0.19
+    0.012,
+    0.03,
+    0.068,
+    0.145
   ],
   "strideBytes": 32,
   "clusterRecordWords": 12,
@@ -32,8 +32,8 @@
     "steps": 18,
     "bytesPerVariant": 1472
   },
-  "vertexCount": 28266,
-  "triangleCount": 13248,
+  "vertexCount": 64512,
+  "triangleCount": 21504,
   "clusterCount": 192,
   "variantRecords": [
     {
@@ -45,18 +45,18 @@
       "genusZeroEuler": 2,
       "coreTriCount": 4,
       "meanColour": [
-        0.1879,
-        0.3225,
-        0.1284
+        0.1954,
+        0.3206,
+        0.1287
       ],
       "splat": {
-        "centreY": 0.2932,
-        "rx": 0.887,
-        "ry": 0.4328,
+        "centreY": 0.0331,
+        "rx": 0.8721,
+        "ry": 0.0552,
         "meanCol": [
-          0.1879,
-          0.3225,
-          0.1284
+          0.1954,
+          0.3206,
+          0.1287
         ]
       }
     },
@@ -69,18 +69,18 @@
       "genusZeroEuler": 2,
       "coreTriCount": 4,
       "meanColour": [
-        0.1822,
-        0.3085,
-        0.1192
+        0.1767,
+        0.2902,
+        0.1184
       ],
       "splat": {
-        "centreY": 0.2624,
-        "rx": 0.887,
-        "ry": 0.3874,
+        "centreY": 0.0315,
+        "rx": 0.8721,
+        "ry": 0.0525,
         "meanCol": [
-          0.1822,
-          0.3085,
-          0.1192
+          0.1767,
+          0.2902,
+          0.1184
         ]
       }
     },
@@ -93,18 +93,18 @@
       "genusZeroEuler": 2,
       "coreTriCount": 4,
       "meanColour": [
-        0.1966,
-        0.3338,
-        0.1353
+        0.2059,
+        0.3323,
+        0.1429
       ],
       "splat": {
-        "centreY": 0.2695,
-        "rx": 0.887,
-        "ry": 0.3978,
+        "centreY": 0.0446,
+        "rx": 0.8721,
+        "ry": 0.0744,
         "meanCol": [
-          0.1966,
-          0.3338,
-          0.1353
+          0.2059,
+          0.3323,
+          0.1429
         ]
       }
     },
@@ -117,18 +117,18 @@
       "genusZeroEuler": 2,
       "coreTriCount": 4,
       "meanColour": [
-        0.2009,
-        0.3279,
-        0.1289
+        0.2062,
+        0.3194,
+        0.1369
       ],
       "splat": {
-        "centreY": 0.3123,
-        "rx": 0.887,
-        "ry": 0.461,
+        "centreY": 0.0455,
+        "rx": 0.8721,
+        "ry": 0.0758,
         "meanCol": [
-          0.2009,
-          0.3279,
-          0.1289
+          0.2062,
+          0.3194,
+          0.1369
         ]
       }
     },
@@ -141,18 +141,18 @@
       "genusZeroEuler": 2,
       "coreTriCount": 4,
       "meanColour": [
-        0.2151,
-        0.352,
-        0.1323
+        0.2187,
+        0.3409,
+        0.1313
       ],
       "splat": {
-        "centreY": 0.2535,
-        "rx": 0.887,
-        "ry": 0.3742,
+        "centreY": 0.0444,
+        "rx": 0.8721,
+        "ry": 0.074,
         "meanCol": [
-          0.2151,
-          0.352,
-          0.1323
+          0.2187,
+          0.3409,
+          0.1313
         ]
       }
     },
@@ -165,18 +165,18 @@
       "genusZeroEuler": 2,
       "coreTriCount": 4,
       "meanColour": [
-        0.2139,
-        0.3591,
-        0.1355
+        0.2206,
+        0.3567,
+        0.1347
       ],
       "splat": {
-        "centreY": 0.2723,
-        "rx": 0.887,
-        "ry": 0.4019,
+        "centreY": 0.0449,
+        "rx": 0.8721,
+        "ry": 0.0748,
         "meanCol": [
-          0.2139,
-          0.3591,
-          0.1355
+          0.2206,
+          0.3567,
+          0.1347
         ]
       }
     },
@@ -189,18 +189,18 @@
       "genusZeroEuler": 2,
       "coreTriCount": 4,
       "meanColour": [
-        0.2168,
-        0.3613,
-        0.137
+        0.229,
+        0.3651,
+        0.1396
       ],
       "splat": {
-        "centreY": 0.2738,
-        "rx": 0.887,
-        "ry": 0.4042,
+        "centreY": 0.0507,
+        "rx": 0.8721,
+        "ry": 0.0845,
         "meanCol": [
-          0.2168,
-          0.3613,
-          0.137
+          0.229,
+          0.3651,
+          0.1396
         ]
       }
     },
@@ -213,18 +213,18 @@
       "genusZeroEuler": 2,
       "coreTriCount": 4,
       "meanColour": [
-        0.2122,
-        0.3555,
-        0.1339
+        0.2291,
+        0.3571,
+        0.1383
       ],
       "splat": {
-        "centreY": 0.2878,
-        "rx": 0.887,
-        "ry": 0.4248,
+        "centreY": 0.0502,
+        "rx": 0.8721,
+        "ry": 0.0837,
         "meanCol": [
-          0.2122,
-          0.3555,
-          0.1339
+          0.2291,
+          0.3571,
+          0.1383
         ]
       }
     },
@@ -237,18 +237,18 @@
       "genusZeroEuler": 2,
       "coreTriCount": 4,
       "meanColour": [
-        0.2088,
-        0.3489,
-        0.1339
+        0.2066,
+        0.3426,
+        0.1334
       ],
       "splat": {
-        "centreY": 0.3264,
-        "rx": 0.887,
-        "ry": 0.4819,
+        "centreY": 0.0438,
+        "rx": 0.8721,
+        "ry": 0.073,
         "meanCol": [
-          0.2088,
-          0.3489,
-          0.1339
+          0.2066,
+          0.3426,
+          0.1334
         ]
       }
     },
@@ -261,18 +261,18 @@
       "genusZeroEuler": 2,
       "coreTriCount": 4,
       "meanColour": [
-        0.2163,
-        0.3451,
-        0.1357
+        0.2278,
+        0.3492,
+        0.1436
       ],
       "splat": {
-        "centreY": 0.3145,
-        "rx": 0.887,
-        "ry": 0.4643,
+        "centreY": 0.0491,
+        "rx": 0.8721,
+        "ry": 0.0818,
         "meanCol": [
-          0.2163,
-          0.3451,
-          0.1357
+          0.2278,
+          0.3492,
+          0.1436
         ]
       }
     },
@@ -285,18 +285,18 @@
       "genusZeroEuler": 2,
       "coreTriCount": 4,
       "meanColour": [
-        0.2048,
-        0.3372,
-        0.1339
+        0.2223,
+        0.3505,
+        0.1394
       ],
       "splat": {
-        "centreY": 0.3073,
-        "rx": 0.887,
-        "ry": 0.4537,
+        "centreY": 0.0431,
+        "rx": 0.8721,
+        "ry": 0.0718,
         "meanCol": [
-          0.2048,
-          0.3372,
-          0.1339
+          0.2223,
+          0.3505,
+          0.1394
         ]
       }
     },
@@ -309,42 +309,42 @@
       "genusZeroEuler": 2,
       "coreTriCount": 4,
       "meanColour": [
-        0.2034,
-        0.348,
-        0.1325
+        0.2165,
+        0.3443,
+        0.1365
       ],
       "splat": {
-        "centreY": 0.2789,
-        "rx": 0.887,
-        "ry": 0.4116,
+        "centreY": 0.0434,
+        "rx": 0.8721,
+        "ry": 0.0723,
         "meanCol": [
-          0.2034,
-          0.348,
-          0.1325
+          0.2165,
+          0.3443,
+          0.1365
         ]
       }
     }
   ],
   "files": {
     "vertices.bin": {
-      "bytes": 904512,
-      "gzipBytes": 384248,
-      "sha256": "04b4f065195fbf6823e6994d149d5a527ef7fcacdb3da49469a7fdba1f16d648"
+      "bytes": 2064384,
+      "gzipBytes": 914674,
+      "sha256": "190d2947e97461c5b05b4bb448638bb67028da0a68b1e74073687425b6c87f7e"
     },
     "indices.bin": {
-      "bytes": 158976,
-      "gzipBytes": 59456,
-      "sha256": "961c6630e9fa82ce37a21e3d95f6b388cb209c0e177347c7e3db537c567d7853"
+      "bytes": 258048,
+      "gzipBytes": 89265,
+      "sha256": "a37a4e84e7fdccda7368b971c60fce5a6898875ffe29e3e5ac92cb229eb1ac7d"
     },
     "clusters.bin": {
       "bytes": 9216,
-      "gzipBytes": 1558,
-      "sha256": "43c4b033ed2cf5b602dd11168786835b2373e48c6c33d009675c400ad18f45d1"
+      "gzipBytes": 1497,
+      "sha256": "f8f16804ca12e2034596678c54166a48976d7f22b9094fae0719b006442de75b"
     },
     "morph.bin": {
       "bytes": 17664,
-      "gzipBytes": 2520,
-      "sha256": "c0d428556ad06916be3d1700b54ced19ada81ac8571a72b595e7d1bd678b78b0"
+      "gzipBytes": 2543,
+      "sha256": "9264fa17541ae3b5c1549859928b4aadca9ba85ca6d388f94768d44b7f0f2529"
     }
   }
 }

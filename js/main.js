@@ -4809,6 +4809,10 @@ async function main() {
     if (nodeCount) device.queue.writeBuffer(instBuf, 0, instData, 0, nodeCount * 4);
 
     frameStages.mark('Effects');
+    const terrainCamera={x:frameF[16],y:frameF[17],z:frameF[18],screenHeight:H,pixelError:polygons.pixelError,
+      tanHalfFovY:Math.hypot(frameF[24],frameF[25],frameF[26]),forward:frameF.subarray(28,31),
+      playerX:ashore.on?cam.x:boat.x,playerZ:ashore.on?cam.z:boat.z};
+    terrain?.prepare(terrainCamera,frameF);
     const enc = device.createCommandEncoder();
     if(celestial.update())envFull=true;celestial.encode(enc);
     gunEffects.encodeLights(enc,{frame:frameUBO,hull:vesselHullUBO});gunEffects.encode(enc);
@@ -4884,10 +4888,7 @@ async function main() {
     mainPass.colorAttachments[0].resolveTarget=hdrView;
     for(const [i,v] of vessels.entries())if((!v.bakedWreck||skyChanged)&&!v.dormantEncounter)v.shadows.encode(enc,profiler,vesselHasVisibleCrew(v)?v.crew?.drawShadow:null,i?v.id+' ':'');
     seaShadows.encode(enc,i=>{const v=vessels[i];return (!v.bakedWreck||skyChanged)&&!v.dormantEncounter&&v.shadows.data[19]>0;});
-    const terrainCamera={x:frameF[16],y:frameF[17],z:frameF[18],screenHeight:H,pixelError:polygons.pixelError,
-      tanHalfFovY:Math.hypot(frameF[24],frameF[25],frameF[26]),forward:frameF.subarray(28,31)};
     frameStages.mark('GPU commands');
-    terrain?.prepare(terrainCamera,frameF);
     if(terrain){
       const camGroundY=terrain.groundSample(terrainCamera.x,terrainCamera.z);
       const camGroundDist=Math.max(0,terrainCamera.y-Math.max(0,Number.isFinite(camGroundY)?camGroundY:0));

@@ -8,6 +8,7 @@ import { WALL_SOLID_HALF_WIDTH_M, enclosurePlan, pointOnEnclosureWall, pointWith
 const CELL_M = 2;
 // A deck that butts onto another, as a pier's head mole does, can be walked from one to the other.
 const DECK_RUNS_ON_M = 1;
+const BRIDGE_RAMP_M = 6.0;
 const SITE_MARGIN_M = 26;
 const MOST_TOWN_RADIUS_M = 560;
 const WALL_CLEARANCE_M = 1;
@@ -503,7 +504,7 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
     return Math.abs(lx) <= inst.width * 0.5 + margin && Math.abs(lz) <= inst.length * 0.5 + margin;
   };
   for (const inst of nearby) {
-    const reach = Math.hypot(inst.width, inst.length) * 0.5 + WALL_CLEARANCE_M + CELL_M * 2;
+    const reach = Math.hypot(inst.width, inst.length) * 0.5 + WALL_CLEARANCE_M + CELL_M * 2 + (inst.prefabId === 'stone_arch_bridge' ? BRIDGE_RAMP_M : 0);
     const i0 = Math.max(0, Math.floor((inst.x - reach - minX) / CELL_M)), i1 = Math.min(grid.nx - 1, Math.ceil((inst.x + reach - minX) / CELL_M));
     const j0 = Math.max(0, Math.floor((inst.z - reach - minZ) / CELL_M)), j1 = Math.min(grid.nz - 1, Math.ceil((inst.z + reach - minZ) / CELL_M));
     const deck = deckOf(inst);
@@ -516,7 +517,9 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
       else if (walled && Number.isFinite(grid.cost[c]) && pointOnEnclosureWall(inst, walled, grid.x(c), grid.z(c), WALL_SOLID_HALF_WIDTH_M + CELL_M)) grid.cost[c] += NEAR_WALL_COST;
       if (deck) {
         const { lx, lz } = worldToLocal(inst, grid.x(c), grid.z(c));
-        if (Math.abs(lx) <= deck.halfWidth + CELL_M * 0.2 && Math.abs(lz) <= inst.length * 0.5 + DECK_RUNS_ON_M) grid.cost[c] = 1;
+        const runOn = inst.prefabId === 'stone_arch_bridge' ? BRIDGE_RAMP_M : DECK_RUNS_ON_M;
+        if (Math.abs(lx) <= deck.halfWidth + CELL_M * 0.2 && Math.abs(lz) <= inst.length * 0.5 + runOn) grid.cost[c] = 1;
+        else if (inst.prefabId === 'stone_arch_bridge' && Math.abs(lx) <= inst.width * 0.5 + WALL_CLEARANCE_M && Math.abs(lz) <= inst.length * 0.5 + BRIDGE_RAMP_M - 0.8) grid.cost[c] = Infinity;
       } else if (!NOT_WALKED_ON.has(inst.prefabId)) {
         if (solid(inst, c, WALL_CLEARANCE_M)) grid.cost[c] = Infinity;
         else if (Number.isFinite(grid.cost[c]) && solid(inst, c, WALL_CLEARANCE_M + CELL_M)) grid.cost[c] += NEAR_WALL_COST;
@@ -524,17 +527,43 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
     }
   }
   const surfaceAt = (x, z) => {
-    let y = groundAt(x, z);
+    const gy = groundAt(x, z);
+    let y = gy;
     for (const { inst, y: top, halfWidth } of decks) {
       const { lx, lz } = worldToLocal(inst, x, z);
-      if (Math.abs(lz) <= inst.length * 0.5 + DECK_RUNS_ON_M && Math.abs(lx) <= halfWidth + 1.2 && top > y) y = top;
+      if (Math.abs(lx) > halfWidth + 1.2) continue;
+      const hl = inst.length * 0.5;
+      if (inst.prefabId === 'stone_arch_bridge') {
+        if (Math.abs(lz) <= hl) {
+          if (top > y) y = top;
+        } else if (Math.abs(lz) <= hl + BRIDGE_RAMP_M) {
+          const t = 1 - (Math.abs(lz) - hl) / BRIDGE_RAMP_M;
+          const ry = gy + (top - gy) * Math.max(0, Math.min(1, t));
+          if (ry > y) y = ry;
+        }
+      } else if (Math.abs(lz) <= hl + DECK_RUNS_ON_M && top > y) {
+        y = top;
+      }
     }
     return y;
   };
 
-  // Doors.
+  // Doors and axial bridge deck portals (so town ways meet bridge ends head-on rather than skirting banks).
   const doors = [];
   for (const inst of nearby) {
+    if (inst.prefabId === 'stone_arch_bridge') {
+      const hl = inst.length * 0.5;
+      const portalReach = hl + BRIDGE_RAMP_M + CELL_M * 0.5;
+      for (const sign of [-1, 1]) {
+        const outside = localToWorld(inst, 0, sign * portalReach);
+        const inside = localToWorld(inst, 0, sign * Math.max(0, hl - 1.8));
+        const cell = nearestFreeCell(grid, outside.x, outside.z);
+        if (cell >= 0 && Math.hypot(grid.x(cell) - outside.x, grid.z(cell) - outside.z) <= CELL_M * 3) {
+          doors.push({ inst, cell, outside, inside, business: 4 });
+        }
+      }
+      continue;
+    }
     if (WITHOUT_DOORS.has(inst.prefabId)) continue;
     const door = chooseDoor(inst, grid, centre);
     if (door) doors.push({ ...door, business: PLACE_BUSINESS[inst.prefabId] ?? 2 });

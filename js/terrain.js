@@ -43,6 +43,9 @@ import {
   detectCoastalContinuationDirs,
   prepareSectionConnectedBorders,
   stitchCoastalSectionBorders,
+  buildMockCoastalSection,
+  planUngrownFrontierParcels,
+  growFrontierParcel,
   generateCoastalNeighborSection,
   smoothCoastlineAndForeshoreBeaches,
   synthesizeCoastalBeaches,
@@ -1336,8 +1339,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   let currentPixelError=TREE_PIXEL_ERROR;
   let lastCamera=null,lastView=null;
   let importedCanopy=null;
-  let checkCameraSectionStreaming=null;
-  function updateTrees(camera,viewProjection){
+  let checkPlayerFrontierEntry=null;
+  const retireGPU=(fn)=>{if(typeof device.queue?.onSubmittedWorkDone==='function')device.queue.onSubmittedWorkDone().then(fn).catch(()=>{});else fn();};
+  function updateTrees(camera,viewProjection,allowStream=false){
     if(Number.isFinite(camera?.pixelError)&&camera.pixelError>0&&camera.pixelError!==currentPixelError){
       currentPixelError=camera.pixelError;
       forestMass?.setPixelError?.(currentPixelError);
@@ -1345,7 +1349,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       groundCull.setPixelError(currentPixelError,isMobile&&currentPixelError>3.8?1.35:1);
       treeCull?.setPixelError(currentPixelError);
     }
-    checkCameraSectionStreaming?.(camera);
+    if(allowStream)checkPlayerFrontierEntry?.(camera);
     importedCanopy?.prepare(camera,viewProjection);
     updateGroundResidency(camera);
     const localCam = {x:camera.x-worldOffset.x,z:camera.z-worldOffset.z};
@@ -1379,7 +1383,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // into a mesh and instanced wherever the plan stands one. The GPU picks which are near.
   let cityTypes=null,cityCull=null;
   const setCityBuildings=pack=>{
-    cityCull?.destroy();cityCull=null;cityDetail=0;
+    const oldCityCull=cityCull;cityCull=null;if(oldCityCull)retireGPU(()=>oldCityCull.destroy());
+    cityDetail=0;
     const city=pack?.city;
     // ?cityBuildings=0 leaves every building as its block, to compare the two tiers.
     if(city?.typedCount&&!isMobile&&search.get('cityBuildings')!=='0'){
@@ -1524,6 +1529,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   let sectionStreamBusy=false;
   let sectionEpoch=0;
   let lastStreamCheckCam={x:NaN,z:NaN};
+  let activeQueuePromise=null;
 
   const getSectionAt=(sx,sz,includePlanned=false)=>{
     if(sx===0&&sz===0){
@@ -1633,6 +1639,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       secX:secPack.secX,
       secZ:secPack.secZ,
       key:`${secPack.secX},${secPack.secZ}`,
+      isMock:Boolean(secPack.isMock),
+      state:secPack.state??(secPack.isMock?'mocked':'grown'),
+      generationCount:secPack.generationCount??(secPack.isMock?0:1),
       elevationSource:secPack.elevationSource,
       connectedEdges:secPack.connectedEdges??null,
       region:sReg,
@@ -1724,6 +1733,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       proceduralPack.region=activeRegion;
       proceduralPack.heights=heights;
       proceduralPack.biome=biome;
+      proceduralPack._cachedForestBuckets=null;
       const nextForestPack=retargetForestPackToProcedural(
         forestPack,
         proceduralPack,
@@ -1755,70 +1765,182 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     lastCamera=null;
   }
 
-  async function processSectionStreamQueue(){
-    if(terrainDisposed||sectionStreamBusy||!proceduralPack||!sectionQueue.length)return;
+  function rebindNearTownField(streets){
+    const oldTownField=activeTownField;
+    activeTownField=townField(streets);
+    nearResources=[...opaqueResources,[12,{buffer:nearDomain}],[13,nearAlbedo.createView()],...activeTownField.resources,...groundDetail.resources];
+    groups[0]=bind(terrainPipe,nearResources);groups[1]=bind(opaqueTreePipe,nearResources);craterLand=null;cityGroup=bind(cityPipe,nearResources);cityTypeGroup=bind(cityTypePipe,nearResources);cityStruckGroup=bind(cityStruckPipe,nearResources);
+    submergedGroup=submerged?.bindGroup(nearResources.map(([binding,resource])=>({binding,resource})));
+    inlandWater?.rebind(nearResources);
+    herds?.rebind(nearResources);
+    meadowGrass?.rebind(nearResources);
+    tradeVessels?.rebind(nearResources);
+    if(oldTownField)retireGPU(()=>{oldTownField.texture?.destroy?.();oldTownField.window?.destroy?.();});
+  }
+
+  function refreshFrontierParcelGPU(){
+    if(terrainDisposed||!proceduralPack)return;
+    if(proceduralPack.port?.streets)rebindNearTownField(proceduralPack.port.streets);
+    const oldCityBlocks=cityBlocks;
+    cityBlocks=cityBlocksFor(proceduralPack);
+    if(oldCityBlocks?.buffer)retireGPU(()=>oldCityBlocks.buffer.destroy());
+    if(cityBlocks&&cityStruckIndices.size&&proceduralPack.city?.typedBlocks){
+      for(const idx of cityStruckIndices){
+        for(let b=proceduralPack.city.typedBlocks[idx*2],end=b+proceduralPack.city.typedBlocks[idx*2+1];b<end;b++){
+          device.queue.writeBuffer(cityBlocks.buffer,(b*CITY_BLOCK_FLOATS+4)*4,cityNoSize);
+        }
+      }
+    }
+    setCityBuildings(proceduralPack);
+    if(cityCull&&cityStruckIndices.size&&proceduralPack.city?.typedAttached){
+      for(const idx of cityStruckIndices){
+        if(idx<proceduralPack.city.typedAttached.length){
+          cityCull.clearSlots(idx,1+(proceduralPack.city.typedAttached[idx]??0));
+        }
+      }
+    }
+    if(cityStruck&&proceduralPack.city?.typed){
+      const oldCityStruck=cityStruck;
+      cityStruck=buffer(proceduralPack.city.typed,GPUBufferUsage.VERTEX,'city struck buildings');
+      retireGPU(()=>oldCityStruck.destroy());
+    }
+    activeCity=proceduralPack.city??null;
+    cityTargets=cityTargetsFor(activeCity,proceduralPack.port);
+    if(!savedPortOverride&&!portFractures){
+      portFractures=portFracturesFor(proceduralPack.portGeometry,proceduralPack.port,portMesh?.indices,cityTargets);
+      portFractures?.restoreNow().catch(()=>{});
+    }
+    herds?.setHerds?.(proceduralPack.herds??null);
+    if(biome&&biomeTexture){
+      if(proceduralPack.biome&&proceduralPack.biome!==biome&&proceduralPack.biome.byteLength===biome.byteLength){
+        biome.set(proceduralPack.biome);
+      }
+      device.queue.writeTexture({texture:biomeTexture},biome,{bytesPerRow:activeRegion.biomeSize},[activeRegion.biomeSize,activeRegion.biomeSize]);
+      rebuildNeighborTreeInstances();
+    }
+    meadowGrass?.sync?.({
+      region:activeRegion,
+      heights,
+      biome,
+      beaches:proceduralPack.beaches??null,
+      port:(savedPortOverride?null:proceduralPack.port)??null,
+      city:proceduralPack.city??null,
+    });
+  }
+
+  function ensureMockSection(secX,secZ,{rebuildTrees=true}={}){
+    if(terrainDisposed||!proceduralPack||(secX===0&&secZ===0))return null;
+    if(Math.abs(secX)>4||Math.abs(secZ)>4)return null;
+    const key=`${secX},${secZ}`;
+    const existing=loadedSections.get(key);
+    if(existing)return existing;
+    const secPack=buildMockCoastalSection(
+      {...proceduralPack,region:activeRegion,heights,rawHeights:proceduralPack.rawHeights||heights},
+      secX,
+      secZ,
+      getSectionAt,
+      {
+        size:33,
+        biomeSize:64,
+        albedoSize:64,
+        vegetationCandidates:isMobile?180:320,
+        taperUnconnectedOuter:true,
+        skipStaticPalms:Boolean(forest&&forestPack),
+      }
+    );
+    const rec=buildSectionGPURecord(secPack);
+    loadedSections.set(key,rec);
+    craters?.invalidate(rec.region);
+    if(rebuildTrees)rebuildNeighborTreeInstances();
+    return rec;
+  }
+
+  function processSectionStreamQueue(){
+    if(terrainDisposed||!proceduralPack||!sectionQueue.length)return activeQueuePromise;
+    if(sectionStreamBusy&&activeQueuePromise)return activeQueuePromise;
     sectionStreamBusy=true;
     const myEpoch=sectionEpoch;
     // Synthesize neighboring coastal sections in topological distance order (cardinals before diagonals/2nd ring)
     // using real AWS Terrarium SRTM DEM geography (shared tile cache) so bays, islands, and lagoons appear directly.
     sectionQueue.sort((a,b)=>(Math.abs(a.secX)+Math.abs(a.secZ))-(Math.abs(b.secX)+Math.abs(b.secZ)));
-    let streamedCount=0,lastTreeRebuildCount=0;
-    while(sectionQueue.length&&myEpoch===sectionEpoch){
-      const {secX,secZ,wantRealDEM}=sectionQueue.shift();
-      const key=`${secX},${secZ}`;
-      try{
-        if(!loadedSections.has(key)){
-          const useDem=Boolean(wantRealDEM&&search.get('realDEM')!=='off');
-          const secPack=await generateCoastalNeighborSection(
-            {...proceduralPack,region:activeRegion,heights,rawHeights:proceduralPack.rawHeights||heights},
-            secX,
-            secZ,
-            getSectionAt,
-            {
-              size:isMobile?65:129,
-              biomeSize:isMobile?64:128,
-              albedoSize:isMobile?128:256,
-              vegetationCandidates:isMobile?1600:3600,
-              useRealDEM:useDem,
-              use1550:Boolean(discovery?.applied),
-              taperUnconnectedOuter:true,
-              skipStaticPalms:Boolean(forest&&forestPack),
+    activeQueuePromise=(async()=>{
+      let streamedCount=0,lastTreeRebuildCount=0;
+      while(sectionQueue.length&&myEpoch===sectionEpoch){
+        const {secX,secZ,wantRealDEM}=sectionQueue.shift();
+        const key=`${secX},${secZ}`;
+        const existing=loadedSections.get(key);
+        try{
+          if(!existing||existing.isMock){
+            if(existing?.isMock)existing.state='generating';
+            const useDem=Boolean(wantRealDEM&&search.get('realDEM')!=='off');
+            const secPack=await generateCoastalNeighborSection(
+              {...proceduralPack,region:activeRegion,heights,rawHeights:proceduralPack.rawHeights||heights},
+              secX,
+              secZ,
+              (sx,sz,inc)=>(sx===secX&&sz===secZ)?null:getSectionAt(sx,sz,inc),
+              {
+                size:isMobile?65:129,
+                biomeSize:isMobile?64:128,
+                albedoSize:isMobile?128:256,
+                vegetationCandidates:isMobile?1600:3600,
+                useRealDEM:useDem,
+                use1550:Boolean(discovery?.applied),
+                taperUnconnectedOuter:true,
+                skipStaticPalms:Boolean(forest&&forestPack),
+              }
+            );
+            if(myEpoch!==sectionEpoch)break;
+            const prevRec=loadedSections.get(key);
+            const rec=buildSectionGPURecord(secPack);
+            rec.isMock=false;
+            rec.state='grown';
+            rec.generationCount=(prevRec?.generationCount??0)+1;
+            loadedSections.set(key,rec);
+            if(prevRec)retireGPU(()=>destroySectionRecord(prevRec));
+            queuedSections.delete(key);
+            portsDirty=true;
+            craters?.invalidate(rec.region);
+            for(const [dx,dz,adjEdge] of [[-1,0,'east'],[1,0,'west'],[0,-1,'south'],[0,1,'north']]){
+              const adj=loadedSections.get(`${secX+dx},${secZ+dz}`);
+              if(adj&&!adj.connectedEdges?.[adjEdge])restitchNeighborSection(adj);
             }
-          );
-          if(myEpoch!==sectionEpoch)break;
-          const rec=buildSectionGPURecord(secPack);
-          loadedSections.set(key,rec);
-          portsDirty=true;
-          craters?.invalidate(rec.region);
-          for(const [dx,dz,adjEdge] of [[-1,0,'east'],[1,0,'west'],[0,-1,'south'],[0,1,'north']]){
-            const adj=loadedSections.get(`${secX+dx},${secZ+dz}`);
-            if(adj&&!adj.connectedEdges?.[adjEdge])restitchNeighborSection(adj);
+            streamedCount++;
+            if(streamedCount===4||sectionQueue.length===0){
+              rebuildNeighborTreeInstances();
+              lastTreeRebuildCount=streamedCount;
+            }
+          }else{
+            queuedSections.delete(key);
           }
-          streamedCount++;
-          if(streamedCount===4||sectionQueue.length===0){
-            rebuildNeighborTreeInstances();
-            lastTreeRebuildCount=streamedCount;
-          }
+        }catch{
+          if(existing?.isMock&&loadedSections.get(key)===existing)existing.state='mocked';
+          queuedSections.delete(key);
         }
-      }catch{/* non-fatal section stream */}
-      await new Promise(r=>setTimeout(r,20));
-    }
-    if(myEpoch===sectionEpoch&&streamedCount>lastTreeRebuildCount){
-      rebuildNeighborTreeInstances();
-    }
-    sectionStreamBusy=false;
+        await new Promise(r=>setTimeout(r,20));
+      }
+      if(myEpoch===sectionEpoch&&streamedCount>lastTreeRebuildCount){
+        rebuildNeighborTreeInstances();
+      }
+      sectionStreamBusy=false;
+      if(myEpoch===sectionEpoch&&sectionQueue.length)return processSectionStreamQueue();
+      activeQueuePromise=null;
+    })();
+    return activeQueuePromise;
   }
 
   function enqueueCoastalSection(secX,secZ,{priority=false,wantRealDEM=true,deferProcess=false}={}){
-    if(!proceduralPack||(secX===0&&secZ===0))return;
-    if(Math.abs(secX)>4||Math.abs(secZ)>4)return;
+    if(!proceduralPack||(secX===0&&secZ===0))return false;
+    if(Math.abs(secX)>4||Math.abs(secZ)>4)return false;
     const key=`${secX},${secZ}`;
-    if(loadedSections.has(key)||queuedSections.has(key))return;
+    const existing=loadedSections.get(key);
+    if((existing&&!existing.isMock)||queuedSections.has(key))return false;
+    if(existing?.isMock)existing.state='generating';
     queuedSections.add(key);
     const item={secX,secZ,wantRealDEM};
     if(priority)sectionQueue.unshift(item);
     else sectionQueue.push(item);
     if(!deferProcess)setTimeout(()=>processSectionStreamQueue(),20);
+    return true;
   }
 
   function seedInitialCoastalSections(){
@@ -1828,14 +1950,11 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       activeRegion.size,
       activeRegion.shoreBearing
     );
-    for(const {dx,dz} of dirs){
-      enqueueCoastalSection(dx,dz,{wantRealDEM:true,deferProcess:true});
-    }
     const connectedCenter={
-      west:queuedSections.has('-1,0')||loadedSections.has('-1,0'),
-      east:queuedSections.has('1,0')||loadedSections.has('1,0'),
-      north:queuedSections.has('0,-1')||loadedSections.has('0,-1'),
-      south:queuedSections.has('0,1')||loadedSections.has('0,1'),
+      west:loadedSections.has('-1,0')||dirs.some(d=>d.dx===-1&&d.dz===0),
+      east:loadedSections.has('1,0')||dirs.some(d=>d.dx===1&&d.dz===0),
+      north:loadedSections.has('0,-1')||dirs.some(d=>d.dx===0&&d.dz===-1),
+      south:loadedSections.has('0,1')||dirs.some(d=>d.dx===0&&d.dz===1),
     };
     if(connectedCenter.west||connectedCenter.east||connectedCenter.north||connectedCenter.south){
       const modified=prepareSectionConnectedBorders(heights,activeRegion.size,connectedCenter);
@@ -1854,15 +1973,21 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         craters?.invalidate(activeRegion);
       }
     }
-    if(sectionQueue.length){
-      setTimeout(()=>processSectionStreamQueue(),20);
+    let addedMocks=0;
+    for(const {dx,dz} of dirs){
+      if(!loadedSections.has(`${dx},${dz}`)){
+        ensureMockSection(dx,dz,{rebuildTrees:false});
+        addedMocks++;
+      }
     }
+    if(addedMocks)rebuildNeighborTreeInstances();
   }
 
   function resetStreamedSections(){
     sectionEpoch++;
     sectionQueue.length=0;
     queuedSections.clear();
+    activeQueuePromise=null;
     for(const rec of loadedSections.values())destroySectionRecord(rec);
     loadedSections.clear();
     portsDirty=true;
@@ -1871,28 +1996,70 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     seedInitialCoastalSections();
   }
 
-  checkCameraSectionStreaming=camera=>{
-    if(!proceduralPack||!camera||!Number.isFinite(camera.x)||!Number.isFinite(camera.z))return;
-    if(Math.hypot(camera.x-lastStreamCheckCam.x,camera.z-lastStreamCheckCam.z)<activeRegion.span*0.12)return;
-    lastStreamCheckCam={x:camera.x,z:camera.z};
+  function enterPlayerPosition(lx,lz,{deferProcess=false}={}){
+    if(terrainDisposed||!proceduralPack||!Number.isFinite(lx)||!Number.isFinite(lz)){
+      return {parcelsGrown:0,sectionsQueued:0,mocksSeeded:0};
+    }
+    let parcelsGrown=0;
+    const parcels=proceduralPack.frontierParcels;
+    if(Array.isArray(parcels)){
+      proceduralPack.biome=biome;
+      for(const parcel of parcels){
+        if(parcel.state!=='mocked')continue;
+        if(Math.abs(lx-parcel.cx)<=parcel.span*0.5&&Math.abs(lz-parcel.cz)<=parcel.span*0.5){
+          if(growFrontierParcel(proceduralPack,parcel,heights))parcelsGrown++;
+        }
+      }
+      if(parcelsGrown)refreshFrontierParcelGPU();
+    }
+
     const span=activeRegion.span;
-    const camSecX=Math.round((camera.x-activeRegion.x)/span);
-    const camSecZ=Math.round((camera.z-activeRegion.z)/span);
+    const halfSpan=span*0.5;
+    const pSecX=Math.round((lx-activeRegion.x)/span);
+    const pSecZ=Math.round((lz-activeRegion.z)/span);
+    let sectionsQueued=0;
+    let addedMocks=0;
     for(let dz=-1;dz<=1;dz++){
       for(let dx=-1;dx<=1;dx++){
-        const sx=camSecX+dx,sz=camSecZ+dz;
-        if((sx===0&&sz===0)||Math.abs(sx)>4||Math.abs(sz)>4)continue;
-        const key=`${sx},${sz}`;
-        if(loadedSections.has(key)||queuedSections.has(key))continue;
-        // Stream section only if it borders a loaded section along an edge with land and is within 1.45 * span of camera
-        const secCenterX=activeRegion.x+sx*span;
-        const secCenterZ=activeRegion.z+sz*span;
-        if(Math.hypot(camera.x-secCenterX,camera.z-secCenterZ)>span*1.45)continue;
-        if(doesNeighborBorderHaveLand(sx,sz)){
-          enqueueCoastalSection(sx,sz,{priority:dx===0&&dz===0,wantRealDEM:true});
+        const sx=pSecX+dx,sz=pSecZ+dz;
+        if(Math.abs(sx)>4||Math.abs(sz)>4)continue;
+        const secCx=activeRegion.x+sx*span;
+        const secCz=activeRegion.z+sz*span;
+        const borderDist=Math.hypot(Math.max(0,Math.abs(lx-secCx)-halfSpan),Math.max(0,Math.abs(lz-secCz)-halfSpan));
+        if(borderDist>260)continue;
+        const isCurrentSection=sx===pSecX&&sz===pSecZ;
+        if(sx!==0||sz!==0){
+          const key=`${sx},${sz}`;
+          const existing=loadedSections.get(key);
+          if((!existing||existing.isMock)&&!queuedSections.has(key)){
+            if(existing?.isMock||isCurrentSection||doesNeighborBorderHaveLand(sx,sz)){
+              if(enqueueCoastalSection(sx,sz,{priority:isCurrentSection,wantRealDEM:true,deferProcess})){
+                sectionsQueued++;
+              }
+            }
+          }
+        }
+        for(const [cx,cz] of [[-1,0],[1,0],[0,-1],[0,1]]){
+          const nx=sx+cx,nz=sz+cz;
+          if((nx===0&&nz===0)||Math.abs(nx)>4||Math.abs(nz)>4)continue;
+          const nKey=`${nx},${nz}`;
+          if(!loadedSections.has(nKey)&&!queuedSections.has(nKey)&&doesNeighborBorderHaveLand(nx,nz)){
+            ensureMockSection(nx,nz,{rebuildTrees:false});
+            addedMocks++;
+          }
         }
       }
     }
+    if(addedMocks)rebuildNeighborTreeInstances();
+    return {parcelsGrown,sectionsQueued,mocksSeeded:addedMocks};
+  }
+
+  checkPlayerFrontierEntry=camera=>{
+    if(!proceduralPack||!camera||!Number.isFinite(camera.playerX)||!Number.isFinite(camera.playerZ))return;
+    const lx=camera.playerX-worldOffset.x,lz=camera.playerZ-worldOffset.z;
+    if(Math.hypot(lx-lastStreamCheckCam.x,lz-lastStreamCheckCam.z)<48)return;
+    lastStreamCheckCam={x:lx,z:lz};
+    enterPlayerPosition(lx,lz);
   };
 
   const whenStartupSettled=(fn,delayMs=60)=>{
@@ -1987,27 +2154,25 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     oldVerts?.destroy?.();oldIdx?.destroy?.();oldSubIdx?.destroy?.();
     oldPort?.vertices?.destroy?.();oldPort?.indices?.destroy?.();
     // The buildings moved, so their ways did too.
-    const oldTownField=activeTownField;
-    activeTownField=townField(upgradedPack.port?.streets);
-    nearResources=[...opaqueResources,[12,{buffer:nearDomain}],[13,nearAlbedo.createView()],...activeTownField.resources,...groundDetail.resources];
-    groups[0]=bind(terrainPipe,nearResources);groups[1]=bind(opaqueTreePipe,nearResources);craterLand=null;cityGroup=bind(cityPipe,nearResources);cityTypeGroup=bind(cityTypePipe,nearResources);cityStruckGroup=bind(cityStruckPipe,nearResources);
-    submergedGroup=submerged?.bindGroup(nearResources.map(([binding,resource])=>({binding,resource})));
+    if(!upgradedPack.frontierParcels?.length){
+      planUngrownFrontierParcels(upgradedPack,heights,{playerPos:boat?{x:boat.x,z:boat.z}:null});
+    }
+    rebindNearTownField(upgradedPack.port?.streets);
     inlandWaterSampler=createInlandWaterSampler(upgradedPack.port?.country??null);
-    inlandWater?.rebind(nearResources);
     inlandWater?.setGeometry(upgradedPack.inlandWater??null);
-    herds?.rebind(nearResources);
     herds?.setBridges?.(upgradedPack.port?.country?.bridges??null);
     herds?.setHerds(upgradedPack.herds??null);
-    meadowGrass?.rebind(nearResources);
     meadowGrass?.sync({region:activeRegion,heights,biome,beaches:proceduralPack.beaches??null,port:portOwner.port??null,city:upgradedPack.city??proceduralPack.city??null});
-    tradeVessels?.rebind(nearResources);
     if(upgradedPack.port?.country?.board){
       tradeVessels?.setTraffic(null,activeRegion,upgradedPack.port.country.riverReaches??[],upgradedPack.port.country.places??[],{heights,region:activeRegion,port:upgradedPack.port,bridges:upgradedPack.port.country.bridges??[]});
     }
     if(upgradedPack.surveyHeights)proceduralPack.surveyHeights=upgradedPack.surveyHeights;
     proceduralPack.inlandWater=upgradedPack.inlandWater??null;
     proceduralPack.herds=upgradedPack.herds??null;
-    oldTownField.texture.destroy();oldTownField.window.destroy();
+    proceduralPack.frontierParcels=upgradedPack.frontierParcels??null;
+    proceduralPack.city=upgradedPack.city??proceduralPack.city??null;
+    proceduralPack._baseCity=upgradedPack._baseCity??proceduralPack._baseCity??null;
+    proceduralPack._baseHerds=upgradedPack._baseHerds??proceduralPack._baseHerds??null;
     // The city is laid out again on the new ground, whole; what was shot down is put back from the record.
     if(!heldPort)portDamage?.capture(proceduralPack?.port);
     cityStruckIndices.clear();cityStruck?.destroy();cityStruck=null;
@@ -2245,7 +2410,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     get forestStrikeKey(){return forest?forestStrikeKey:null;},
     farTreeTriangles:treeMeshes[0].map(mesh=>mesh.opaque.count/3),
     groundStats,groundTriangles:groundMeshes.map(mesh=>mesh.count/3),canopyStats,forestStats,canopyInspectionURL:canopyInspectionLink,
-    prepare:updateTrees,groundDetail,
+    prepare:(cam,vp)=>updateTrees(cam,vp,true),groundDetail,
     setPixelError(next){if(Number.isFinite(next)&&next>0){currentPixelError=next;forestMass?.setPixelError?.(next);forest?.setPixelError?.(next);groundCull.setPixelError(next,isMobile&&next>3.8?1.35:1);treeCull?.setPixelError(next);}},
     nearStats:{loaded:!!nearTile,error:nearFailure,domain:nearTile?.manifest.domain??null,triangles:(fineMesh?.indices.length??0)/3},
     height:(x,z)=>heightSample(x-worldOffset.x,z-worldOffset.z),
@@ -2260,13 +2425,23 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       const sz=Math.round((lz-activeRegion.z)/activeRegion.span);
       return loadedSections.has(`${sx},${sz}`);
     },
-    // Whether height() can be trusted at a point: built, still to come, or outside this coast.
+    // Whether height() can be trusted at a point: built, mocked shell, still to come, or outside this coast.
     coverageAt(x,z){
       const lx=x-worldOffset.x,lz=z-worldOffset.z;
       const sx=Math.round((lx-activeRegion.x)/activeRegion.span),sz=Math.round((lz-activeRegion.z)/activeRegion.span);
       if(sx===0&&sz===0)return 'known';
       if(!proceduralPack||Math.abs(sx)>4||Math.abs(sz)>4)return 'none';
-      return loadedSections.has(`${sx},${sz}`)?'known':'pending';
+      const rec=loadedSections.get(`${sx},${sz}`);
+      if(!rec)return 'pending';
+      return rec.isMock?'mocked':'known';
+    },
+    ensureMockAt(x,z){
+      if(!proceduralPack)return null;
+      const lx=x-worldOffset.x,lz=z-worldOffset.z;
+      const sx=Math.round((lx-activeRegion.x)/activeRegion.span);
+      const sz=Math.round((lz-activeRegion.z)/activeRegion.span);
+      if((sx===0&&sz===0)||Math.abs(sx)>4||Math.abs(sz)>4)return null;
+      return ensureMockSection(sx,sz);
     },
     ensureSectionAt(x,z){
       if(!proceduralPack)return;
@@ -2274,9 +2449,105 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       const sx=Math.round((lx-activeRegion.x)/activeRegion.span);
       const sz=Math.round((lz-activeRegion.z)/activeRegion.span);
       if((sx===0&&sz===0)||Math.abs(sx)>4||Math.abs(sz)>4)return;
-      if(!loadedSections.has(`${sx},${sz}`)&&!queuedSections.has(`${sx},${sz}`)){
+      const key=`${sx},${sz}`;
+      const existing=loadedSections.get(key);
+      if((!existing||existing.isMock)&&!queuedSections.has(key)){
         enqueueCoastalSection(sx,sz,{priority:true,wantRealDEM:true});
       }
+    },
+    get grownSpace(){
+      const summarizeSection=(rec,keyOverride)=>{
+        const key=keyOverride??rec.key;
+        const queued=queuedSections.has(key);
+        return {
+          key,
+          secX:rec.secX,
+          secZ:rec.secZ,
+          state:queued?'generating':(rec.state??(rec.isMock?'mocked':'grown')),
+          isMock:Boolean(rec.isMock),
+          generationCount:rec.generationCount??(rec.isMock?0:1),
+          elevationSource:rec.elevationSource??null,
+        };
+      };
+      const summarizeParcel=p=>({
+        id:p.id,
+        ix:p.ix,
+        iz:p.iz,
+        cx:p.cx+worldOffset.x,
+        cz:p.cz+worldOffset.z,
+        localCx:p.cx,
+        localCz:p.cz,
+        span:p.span,
+        dryShare:p.dryShare,
+        state:p.state,
+        generationCount:p.generationCount,
+      });
+      return {
+        get sections(){
+          return Array.from(loadedSections.values(),rec=>summarizeSection(rec));
+        },
+        get parcels(){
+          return (proceduralPack?.frontierParcels??[]).map(summarizeParcel);
+        },
+        parcelAt(x,z){
+          const lx=x-worldOffset.x,lz=z-worldOffset.z;
+          const hit=(proceduralPack?.frontierParcels??[]).find(p=>Math.abs(lx-p.cx)<=p.span*0.5&&Math.abs(lz-p.cz)<=p.span*0.5);
+          return hit?summarizeParcel(hit):null;
+        },
+        sectionAt(x,z){
+          const lx=x-worldOffset.x,lz=z-worldOffset.z;
+          const sx=Math.round((lx-activeRegion.x)/activeRegion.span);
+          const sz=Math.round((lz-activeRegion.z)/activeRegion.span);
+          if(sx===0&&sz===0){
+            return {key:'0,0',secX:0,secZ:0,state:'grown',isMock:false,generationCount:1,elevationSource:proceduralPack?.elevationSource??'procedural'};
+          }
+          if(!proceduralPack||Math.abs(sx)>4||Math.abs(sz)>4)return null;
+          const key=`${sx},${sz}`;
+          const rec=loadedSections.get(key);
+          if(rec)return summarizeSection(rec,key);
+          return {key,secX:sx,secZ:sz,state:queuedSections.has(key)?'generating':'pending',isMock:false,generationCount:0,elevationSource:null};
+        },
+        async enterAt(x,z){
+          if(!proceduralPack||!Number.isFinite(x)||!Number.isFinite(z)){
+            return {parcelsGrown:0,sectionsQueued:0,mocksSeeded:0};
+          }
+          const lx=x-worldOffset.x,lz=z-worldOffset.z;
+          lastStreamCheckCam={x:lx,z:lz};
+          const out=enterPlayerPosition(lx,lz,{deferProcess:true});
+          const pending=sectionQueue.length?processSectionStreamQueue():activeQueuePromise;
+          if(pending)await pending;
+          return out;
+        },
+        get stats(){
+          let mockedSections=0,generatingSections=0,grownSections=0;
+          for(const rec of loadedSections.values()){
+            if(rec.isMock){
+              if(rec.state==='generating'||queuedSections.has(rec.key))generatingSections++;
+              else mockedSections++;
+            }else{
+              grownSections++;
+            }
+          }
+          const parcels=proceduralPack?.frontierParcels??[];
+          let mockedParcels=0,generatingParcels=0,grownParcels=0;
+          for(const p of parcels){
+            if(p.state==='mocked')mockedParcels++;
+            else if(p.state==='generating')generatingParcels++;
+            else grownParcels++;
+          }
+          return {
+            mockedSections,
+            generatingSections,
+            grownSections,
+            totalLoadedSections:loadedSections.size,
+            mockedParcels,
+            generatingParcels,
+            grownParcels,
+            totalParcels:parcels.length,
+            lastPlayerEntry:Number.isFinite(lastStreamCheckCam.x)?{x:lastStreamCheckCam.x,z:lastStreamCheckCam.z}:null,
+          };
+        },
+      };
     },
     get region(){return worldOffset.x||worldOffset.z?{...activeRegion,x:activeRegion.x+worldOffset.x,z:activeRegion.z+worldOffset.z}:activeRegion;},
     get baseRegion(){return activeRegion;},

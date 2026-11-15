@@ -36,6 +36,9 @@ import {
 } from './terrain-model.js';
 import { vegetationProbability } from './vegetation.js';
 import { OLD_WORLD_LAND, bakedBoardFor, oldWorldCountry, oldWorldCityNear, oldWorldPeople } from './old-world.js';
+import { CITY_BLOCK_FLOATS, CITY_ROOF, CITY_WALL, cityMasonry, footprint } from './old-world-city.js';
+import { CITY_BUILDING_TYPES, CITY_PAINT, CITY_THATCH_ROOF, CITY_TYPE, CITY_TYPED_FLOATS, CITY_TYPED_ROOF } from './old-world-buildings.js';
+import { boardRoadCrossings } from './old-world-board.js';
 import { createInlandWaterSampler } from './inland-water.js';
 import {
   BUILDING_SUB_ASSEMBLIES,
@@ -4374,6 +4377,8 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       ...(overrides?.guards ? { guards: overrides.guards } : {}),
       ...(overrides?.enclosureShape ? { enclosureShape: overrides.enclosureShape } : {}),
       ...(overrides?.gateSide !== undefined ? { gateSide: overrides.gateSide } : {}),
+      ...(overrides?.bankYNeg !== undefined ? { bankYNeg: overrides.bankYNeg } : {}),
+      ...(overrides?.bankYPos !== undefined ? { bankYPos: overrides.bankYPos } : {}),
     });
     return instances[instances.length - 1];
   };
@@ -4921,13 +4926,52 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       addPrefab(qd.id, qd.along, qd.inland, qd.yaw, qd.minY, { label: qd.label });
     }
 
-    // (f) Derive perpendicular multi-arch stone bridges centered across navigable port river reaches
+    // (f) Derive road-aligned or river-perpendicular stone bridges centered across navigable port river reaches
+    const bakedPortBoard = bakedBoardFor(region);
+    const boardCrossings = bakedPortBoard?.board
+      ? boardRoadCrossings(bakedPortBoard.board.roads, bakedPortBoard.board.rivers, bakedPortBoard.board.places)
+      : [];
+    const bridgeCenters = [];
     let bridgesBuilt = 0;
+    for (const q of boardCrossings) {
+      if (bridgesBuilt >= 2) break;
+      const cx = region.x + q.x, cz = region.z + q.z;
+      const distAnchor = Math.hypot(cx - shoreAnchor.x, cz - shoreAnchor.z);
+      if (distAnchor < 50 || distAnchor > 360) continue;
+      const cf = coastalFrame(region, cx, cz);
+      if (cf.inland - bestShoreInland < 18 || cf.inland - bestShoreInland > 220) continue;
+      if (bridgeCenters.some((b) => Math.hypot(b.x - cx, b.z - cz) < 36)) continue;
+      const spanLen = Math.max(24, Math.min(48, Math.round(q.span + 6)));
+      const hA = terrainSurfaceSample(heights, cx + q.ux * (spanLen * 0.45), cz + q.uz * (spanLen * 0.45), region);
+      const hB = terrainSurfaceSample(heights, cx - q.ux * (spanLen * 0.45), cz - q.uz * (spanLen * 0.45), region);
+      if (hA < PREFAB_DRY_GROUND_M || hB < PREFAB_DRY_GROUND_M) continue;
+      const bankH = Math.max(hA, hB);
+      const bankYPos = Math.max(1.2, terrainSurfaceSample(heights, cx + q.ux * (spanLen * 0.5 + 6.0), cz + q.uz * (spanLen * 0.5 + 6.0), region));
+      const bankYNeg = Math.max(1.2, terrainSurfaceSample(heights, cx - q.ux * (spanLen * 0.5 + 6.0), cz - q.uz * (spanLen * 0.5 + 6.0), region));
+      const exactY = Math.max(2.2, bankH - 0.15);
+      const bridgeHeight = Math.max(3.15, 3.65 - exactY + 0.85);
+      const placedBridge = addPrefab('stone_arch_bridge', 0, 0, 0, Math.max(2.2, bankH + 0.4), {
+        at: { x: cx, z: cz },
+        yaw: Math.atan2(q.ux, q.uz),
+        length: spanLen,
+        width: 9.6,
+        height: bridgeHeight,
+        exactY,
+        bankYNeg,
+        bankYPos,
+        label: `River Cutwater Bridge #${bridgesBuilt + 1}`,
+      });
+      if (placedBridge) {
+        bridgeCenters.push({ x: cx, z: cz });
+        bridgesBuilt++;
+      }
+    }
     for (const reach of portRiverCorridor.reaches) {
       if (bridgesBuilt >= 2) break;
       let chosenSeg = null;
       let bestCrossScore = -Infinity;
       for (const seg of reach.segs) {
+        if (bridgeCenters.some((b) => Math.hypot(b.x - seg.cx, b.z - seg.cz) < 42)) continue;
         const distAnchor = Math.hypot(seg.cx - shoreAnchor.x, seg.cz - shoreAnchor.z);
         if (distAnchor < 56 || distAnchor > 340 || seg.hw < 1.8) continue;
         const cf = coastalFrame(region, seg.cx, seg.cz);
@@ -4948,15 +4992,25 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
           terrainSurfaceSample(heights, chosenSeg.cx + chosenSeg.nx * (spanLen * 0.45), chosenSeg.cz + chosenSeg.nz * (spanLen * 0.45), region),
           terrainSurfaceSample(heights, chosenSeg.cx - chosenSeg.nx * (spanLen * 0.45), chosenSeg.cz - chosenSeg.nz * (spanLen * 0.45), region),
         );
+        const bankYPos = Math.max(1.2, terrainSurfaceSample(heights, chosenSeg.cx + chosenSeg.nx * (spanLen * 0.5 + 6.0), chosenSeg.cz + chosenSeg.nz * (spanLen * 0.5 + 6.0), region));
+        const bankYNeg = Math.max(1.2, terrainSurfaceSample(heights, chosenSeg.cx - chosenSeg.nx * (spanLen * 0.5 + 6.0), chosenSeg.cz - chosenSeg.nz * (spanLen * 0.5 + 6.0), region));
+        const exactY = Math.max(2.2, bankH - 0.15);
+        const bridgeHeight = Math.max(3.15, 3.65 - exactY + 0.85);
         const placedBridge = addPrefab('stone_arch_bridge', 0, 0, 0, Math.max(2.2, bankH + 0.4), {
           at: { x: chosenSeg.cx, z: chosenSeg.cz },
           yaw: Math.atan2(chosenSeg.nx, chosenSeg.nz),
           length: spanLen,
           width: 9.6,
-          exactY: Math.max(2.2, bankH - 0.15),
+          height: bridgeHeight,
+          exactY,
+          bankYNeg,
+          bankYPos,
           label: `River Cutwater Bridge #${bridgesBuilt + 1}`,
         });
-        if (placedBridge) bridgesBuilt++;
+        if (placedBridge) {
+          bridgeCenters.push({ x: chosenSeg.cx, z: chosenSeg.cz });
+          bridgesBuilt++;
+        }
       }
     }
   } else if (
@@ -5157,9 +5211,42 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       addPrefab('l_wing_u_wing_solar', 60, 84, 90, 3.6);
       addPrefab('single_nave_solar', -74, 52, 0, 3.2);
       addPrefab('walled_mule_corral', 42, 124, 0, 4.0);
-      // 9. City Curtain Wall & Gatehouse, Cutwater Stone Arch Bridge, Frontier Palm-Thatch Bohíos & Cairn Landmarks
+      // 9. City Curtain Wall & Gatehouse, Cutwater Stone Arch Bridge (only on an actual river reach), Frontier Bohíos
       addPrefab('curtain_wall_and_gate', -36, 118, 90, 4.0);
-      addPrefab('stone_arch_bridge', -98, 48, 18, 2.2);
+      const bridgeWant = worldFromCoastalFrame(region, bestShoreAlong - 98, bestShoreInland + 48);
+      let bridgeSeg = null, bridgeBestDist = 180;
+      for (const reach of portRiverCorridor.reaches) {
+        for (const seg of reach.segs) {
+          if (seg.hw < 1.6) continue;
+          const spanHalf = Math.max(10, seg.hw + 7);
+          const hL = terrainSurfaceSample(heights, seg.cx + seg.nx * spanHalf, seg.cz + seg.nz * spanHalf, region);
+          const hR = terrainSurfaceSample(heights, seg.cx - seg.nx * spanHalf, seg.cz - seg.nz * spanHalf, region);
+          if (hL < PREFAB_DRY_GROUND_M || hR < PREFAB_DRY_GROUND_M) continue;
+          const d = Math.hypot(seg.cx - bridgeWant.x, seg.cz - bridgeWant.z);
+          if (d < bridgeBestDist) { bridgeBestDist = d; bridgeSeg = seg; }
+        }
+      }
+      if (bridgeSeg) {
+        const spanLen = Math.max(24, Math.min(48, Math.round(bridgeSeg.hw * 2 + 16)));
+        const bankH = Math.max(
+          terrainSurfaceSample(heights, bridgeSeg.cx + bridgeSeg.nx * (spanLen * 0.45), bridgeSeg.cz + bridgeSeg.nz * (spanLen * 0.45), region),
+          terrainSurfaceSample(heights, bridgeSeg.cx - bridgeSeg.nx * (spanLen * 0.45), bridgeSeg.cz - bridgeSeg.nz * (spanLen * 0.45), region),
+        );
+        const bankYPos = Math.max(1.2, terrainSurfaceSample(heights, bridgeSeg.cx + bridgeSeg.nx * (spanLen * 0.5 + 6.0), bridgeSeg.cz + bridgeSeg.nz * (spanLen * 0.5 + 6.0), region));
+        const bankYNeg = Math.max(1.2, terrainSurfaceSample(heights, bridgeSeg.cx - bridgeSeg.nx * (spanLen * 0.5 + 6.0), bridgeSeg.cz - bridgeSeg.nz * (spanLen * 0.5 + 6.0), region));
+        const exactY = Math.max(2.2, bankH - 0.15);
+        const bridgeHeight = Math.max(3.15, 3.65 - exactY + 0.85);
+        addPrefab('stone_arch_bridge', 0, 0, 0, Math.max(2.2, bankH + 0.4), {
+          at: { x: bridgeSeg.cx, z: bridgeSeg.cz },
+          yaw: Math.atan2(bridgeSeg.nx, bridgeSeg.nz),
+          length: spanLen,
+          width: 9.6,
+          height: bridgeHeight,
+          exactY,
+          bankYNeg,
+          bankYPos,
+        });
+      }
       addPrefab('thatched_bohio_palafito', -96, 18, -12, 2.0);
       addPrefab('catedral_basilica', 0, 128, 0, 4.1, {
         label: 'Catedral Basílica Metropolitana',
@@ -5822,6 +5909,31 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     pushSubdividedQuad(p010, p110, p111, p011, nx, nz, kind, Math.min(1, shade * 1.06), isGlazedWin);
     if (includeBottom) {
       pushQuad(p001, p101, p100, p000, kind, shade * 0.65, isGlazedWin);
+    }
+  };
+
+  const emitSlopedBoxZ = (toWorld, x0, x1, y0AtZ0, y1AtZ0, y0AtZ1, y1AtZ1, z0, z1, kind, shade = 0.88, includeBottom = false) => {
+    const p000 = toWorld(x0, y0AtZ0, z0);
+    const p100 = toWorld(x1, y0AtZ0, z0);
+    const p101 = toWorld(x1, y0AtZ1, z1);
+    const p001 = toWorld(x0, y0AtZ1, z1);
+    const p010 = toWorld(x0, y1AtZ0, z0);
+    const p110 = toWorld(x1, y1AtZ0, z0);
+    const p111 = toWorld(x1, y1AtZ1, z1);
+    const p011 = toWorld(x0, y1AtZ1, z1);
+    const spanX = Math.abs(x1 - x0);
+    const spanY = Math.max(Math.abs(y1AtZ0 - y0AtZ0), Math.abs(y1AtZ1 - y0AtZ1));
+    const spanZ = Math.abs(z1 - z0);
+    const nx = spanX >= 2.2 ? Math.min(12, Math.max(2, Math.round(spanX / 1.75))) : 1;
+    const ny = spanY >= 1.8 ? Math.min(8, Math.max(2, Math.round(spanY / 1.45))) : 1;
+    const nz = spanZ >= 2.2 ? Math.min(12, Math.max(2, Math.round(spanZ / 1.75))) : 1;
+    pushSubdividedQuad(p000, p100, p110, p010, nx, ny, kind, shade * 0.94, false);
+    pushSubdividedQuad(p100, p101, p111, p110, nz, ny, kind, shade, false);
+    pushSubdividedQuad(p101, p001, p011, p111, nx, ny, kind, shade * 0.96, false);
+    pushSubdividedQuad(p001, p000, p010, p011, nz, ny, kind, shade * 0.88, false);
+    pushSubdividedQuad(p010, p110, p111, p011, nx, nz, kind, Math.min(1, shade * 1.06), false);
+    if (includeBottom) {
+      pushQuad(p001, p101, p100, p000, kind, shade * 0.65, false);
     }
   };
 
@@ -7224,6 +7336,18 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
       beginSection('parapet_walls');
       emitBox(toWorld, -bridgeHW, -bridgeHW + 0.58, yDeck, yTop, -hl, hl, 11, 0.90);
       emitBox(toWorld, bridgeHW - 0.58, bridgeHW, yDeck, yTop, -hl, hl, 11, 0.90);
+      const rampLen = 6.0;
+      const yEndNeg = (Number.isFinite(inst.bankYNeg) ? inst.bankYNeg : yGround) - 0.35;
+      const yEndPos = (Number.isFinite(inst.bankYPos) ? inst.bankYPos : yGround) - 0.35;
+      beginSection('bridge_approach_ramp');
+      emitSlopedBoxZ(toWorld, -bridgeHW, bridgeHW, yBase, yEndNeg, ySpring, yDeck, -hl - rampLen, -hl, 11, 0.87);
+      emitSlopedBoxZ(toWorld, -bridgeHW + 0.55, bridgeHW - 0.55, yEndNeg - 0.08, yEndNeg + 0.08, yDeck, yDeck + 0.14, -hl - rampLen, -hl, 16, 0.84, true);
+      emitSlopedBoxZ(toWorld, -bridgeHW, -bridgeHW + 0.58, yEndNeg, yEndNeg + 0.42, yDeck, yTop, -hl - rampLen, -hl, 11, 0.90);
+      emitSlopedBoxZ(toWorld, bridgeHW - 0.58, bridgeHW, yEndNeg, yEndNeg + 0.42, yDeck, yTop, -hl - rampLen, -hl, 11, 0.90);
+      emitSlopedBoxZ(toWorld, -bridgeHW, bridgeHW, ySpring, yDeck, yBase, yEndPos, hl, hl + rampLen, 11, 0.87);
+      emitSlopedBoxZ(toWorld, -bridgeHW + 0.55, bridgeHW - 0.55, yDeck, yDeck + 0.14, yEndPos - 0.08, yEndPos + 0.08, hl, hl + rampLen, 16, 0.84, true);
+      emitSlopedBoxZ(toWorld, -bridgeHW, -bridgeHW + 0.58, yDeck, yTop, yEndPos, yEndPos + 0.42, hl, hl + rampLen, 11, 0.90);
+      emitSlopedBoxZ(toWorld, bridgeHW - 0.58, bridgeHW, yDeck, yTop, yEndPos, yEndPos + 0.42, hl, hl + rampLen, 11, 0.90);
 
       // Iterate deep seabed piers, triangular upstream/downstream cutwaters (tajamares), and radial voussoir arches
       for (let s = 0; s <= nSpans; s++) {
@@ -9749,7 +9873,7 @@ function dressProceduralCoastalPack(pack, heights, port, elevationSource, satell
   const portGeometry = buildPortPrefabGeometry(port, vegetation.palms);
   const views = pack.skipPortPlacement ? null : createCoastalViews(region, heights, port);
 
-  return Object.assign(pack, {
+  Object.assign(pack, {
     region,
     heights,
     mesh,
@@ -9770,6 +9894,10 @@ function dressProceduralCoastalPack(pack, heights, port, elevationSource, satell
     climateProfile,
     groundOnly: null,
   });
+  if (!pack.skipPortPlacement && region.span >= 4096) {
+    planUngrownFrontierParcels(pack, heights);
+  }
+  return pack;
 }
 
 // A pack left as ground and port only is dressed here: its city laid, its ground painted and planted.
@@ -11473,24 +11601,7 @@ export function stitchCoastalSectionBorders(
 // Generate a continuous neighboring coastal section at section coordinates (secX, secZ) relative to basePack.
 // Propagates connected neighbor boundary elevation profiles C0/C1-continuously with matching coastal orientation,
 // 1550 rainforest biome/albedo, and real SRTM DEM surrounding geography (islands, bays, lagoons, and hills).
-export async function generateCoastalNeighborSection(
-  basePack,
-  secX,
-  secZ,
-  getNeighborSection = null,
-  {
-    size = 129,
-    biomeSize = 128,
-    albedoSize = 256,
-    vegetationCandidates = 4500,
-    useRealDEM = true,
-    use1550 = true,
-    fetchTile = null,
-    fetchSatelliteTile = null,
-    taperUnconnectedOuter = true,
-    skipStaticPalms = false,
-  } = {}
-) {
+function createNeighborSectionFrame(basePack, secX, secZ, getNeighborSection, { size, biomeSize, albedoSize, vegetationCandidates }) {
   const baseRegion = basePack.region;
   const span = baseRegion.span;
   const geoSpan = baseRegion.demGeoSpan || (span < 4000 ? 6800 : span);
@@ -11528,297 +11639,716 @@ export async function generateCoastalNeighborSection(
     return null;
   };
 
-  // Synthesize continuous coastal & inland terrain directly by propagating connected neighbor boundary profiles
-  // so shoreline position, land/water orientation, rivers, and hills continue seamlessly across every section seam.
-  const synthContinuousHeights = () => {
-    const heights = new Float32Array(size * size);
-    const seed = baseRegion.seed || coastalHashCoords(baseRegion.latitude, baseRegion.longitude);
-    const peak = Math.min(280, Math.max(48, baseRegion.peakElevationMetres ?? 140));
+  return { baseRegion, span, geoSpan, secWorldX, secWorldZ, sectionRegion, lookupNeighbor };
+}
 
-    const westSec = lookupNeighbor(secX - 1, secZ, false);
-    const eastSec = lookupNeighbor(secX + 1, secZ, false);
-    const northSec = lookupNeighbor(secX, secZ - 1, false);
-    const southSec = lookupNeighbor(secX, secZ + 1, false);
+function synthContinuousCoastalHeights({ baseRegion, secX, secZ, secWorldX, secWorldZ, span, size, lookupNeighbor }) {
+  const heights = new Float32Array(size * size);
+  const seed = baseRegion.seed || coastalHashCoords(baseRegion.latitude, baseRegion.longitude);
+  const peak = Math.min(280, Math.max(48, baseRegion.peakElevationMetres ?? 140));
 
-    const sampleCleanEdge = (neighbor, wx, wz) => {
-      const src = neighbor.rawHeights || neighbor.heights;
-      const nr = neighbor.region;
-      const half = nr.span * 0.5 - 1e-3;
-      const cx = Math.max(nr.x - half, Math.min(nr.x + half, wx));
-      const cz = Math.max(nr.z - half, Math.min(nr.z + half, wz));
-      return terrainSample(src, cx, cz, nr);
-    };
+  const westSec = lookupNeighbor(secX - 1, secZ, false);
+  const eastSec = lookupNeighbor(secX + 1, secZ, false);
+  const northSec = lookupNeighbor(secX, secZ - 1, false);
+  const southSec = lookupNeighbor(secX, secZ + 1, false);
 
-    const xWest = secWorldX - span * 0.5;
-    const xEast = secWorldX + span * 0.5;
-    const zNorth = secWorldZ - span * 0.5;
-    const zSouth = secWorldZ + span * 0.5;
-
-    const westProfile = westSec?.heights ? new Float32Array(size) : null;
-    const eastProfile = eastSec?.heights ? new Float32Array(size) : null;
-    const northProfile = northSec?.heights ? new Float32Array(size) : null;
-    const southProfile = southSec?.heights ? new Float32Array(size) : null;
-
-    if (westProfile) {
-      for (let j = 0; j < size; j++) {
-        const z = secWorldZ + (j / (size - 1) - 0.5) * span;
-        westProfile[j] = sampleCleanEdge(westSec, xWest, z);
-      }
-    }
-    if (eastProfile) {
-      for (let j = 0; j < size; j++) {
-        const z = secWorldZ + (j / (size - 1) - 0.5) * span;
-        eastProfile[j] = sampleCleanEdge(eastSec, xEast, z);
-      }
-    }
-    if (northProfile) {
-      for (let i = 0; i < size; i++) {
-        const x = secWorldX + (i / (size - 1) - 0.5) * span;
-        northProfile[i] = sampleCleanEdge(northSec, x, zNorth);
-      }
-    }
-    if (southProfile) {
-      for (let i = 0; i < size; i++) {
-        const x = secWorldX + (i / (size - 1) - 0.5) * span;
-        southProfile[i] = sampleCleanEdge(southSec, x, zSouth);
-      }
-    }
-
-    const calcLandFrac = (prof) => {
-      if (!prof) return 0;
-      let c = 0;
-      for (let i = 0; i < size; i++) {
-        if (prof[i] > 0.25) c++;
-      }
-      return c / size;
-    };
-    const buildEnclosedWaterMask = (prof, landFrac) => {
-      if (!prof) return null;
-      const mask = new Float32Array(size);
-      const maxLeft = new Float32Array(size);
-      const maxRight = new Float32Array(size);
-      let ml = -999;
-      for (let i = 0; i < size; i++) {
-        if (prof[i] > ml) ml = prof[i];
-        maxLeft[i] = ml;
-      }
-      let mr = -999;
-      for (let i = size - 1; i >= 0; i--) {
-        if (prof[i] > mr) mr = prof[i];
-        maxRight[i] = mr;
-      }
-      for (let i = 0; i < size; i++) {
-        if (maxLeft[i] > 0.65 && maxRight[i] > 0.65) {
-          mask[i] = 1.0;
-        } else {
-          mask[i] = 0.0;
-        }
-      }
-      // Smooth the enclosed water mask over ~6 cells so the transition between coastal spit and open ocean is gradual
-      const smoothed = new Float32Array(size);
-      for (let i = 0; i < size; i++) {
-        let s = 0, cnt = 0;
-        for (let d = -5; d <= 5; d++) {
-          const idx = Math.max(0, Math.min(size - 1, i + d));
-          s += mask[idx];
-          cnt++;
-        }
-        smoothed[i] = s / cnt;
-      }
-      return smoothed;
-    };
-    const westLandFrac = calcLandFrac(westProfile);
-    const eastLandFrac = calcLandFrac(eastProfile);
-    const northLandFrac = calcLandFrac(northProfile);
-    const southLandFrac = calcLandFrac(southProfile);
-    const westEnclosed = buildEnclosedWaterMask(westProfile, westLandFrac);
-    const eastEnclosed = buildEnclosedWaterMask(eastProfile, eastLandFrac);
-    const northEnclosed = buildEnclosedWaterMask(northProfile, northLandFrac);
-    const southEnclosed = buildEnclosedWaterMask(southProfile, southLandFrac);
-
-    const sample1D = (prof, t) => {
-      const clamped = Math.max(0, Math.min(1, t));
-      const f = clamped * (size - 1);
-      const i0 = Math.floor(f);
-      const i1 = Math.min(size - 1, i0 + 1);
-      const a = f - i0;
-      return prof[i0] * (1 - a) + prof[i1] * a;
-    };
-
-    const evalEdgePropagation = (
-      prof,
-      enclosedMask,
-      profLandFrac,
-      tCoord,
-      dNorm,
-      x,
-      z,
-      dirSeed,
-      lockLowT,
-      lockHighT
-    ) => {
-      const dRamp = coastalSmoothstep(0.0, 0.26, dNorm);
-      const lowDamp = lockLowT ? coastalSmoothstep(0.0, 0.2, tCoord) : 1.0;
-      const highDamp = lockHighT ? coastalSmoothstep(0.0, 0.2, 1.0 - tCoord) : 1.0;
-      const fbmLarge = coastalFbm2D(x * 0.00038, z * 0.00038, seed + dirSeed, 3) - 0.5;
-      const fbmMeso = coastalFbm2D(x * 0.0011, z * 0.0011, seed + dirSeed + 71, 3) - 0.5;
-      // Preserve diagonal coastline trajectory when a shoreline clips the corner of a border profile
-      let cornerDrift = 0;
-      if (prof[0] <= 0.25 && prof[size - 1] > 0.25 && profLandFrac < 0.22 && !lockHighT) {
-        cornerDrift = -0.82 * dNorm;
-      } else if (prof[0] > 0.25 && prof[size - 1] <= 0.25 && profLandFrac < 0.22 && !lockLowT) {
-        cornerDrift = 0.82 * dNorm;
-      } else if (prof[0] <= 0.25 && prof[size - 1] > 0.25 && profLandFrac > 0.88 && !lockLowT) {
-        cornerDrift = 0.82 * dNorm;
-      } else if (prof[0] > 0.25 && prof[size - 1] <= 0.25 && profLandFrac > 0.88 && !lockHighT) {
-        cornerDrift = -0.82 * dNorm;
-      }
-      const meander = cornerDrift + (fbmLarge * 0.42 + fbmMeso * 0.22) * dRamp * lowDamp * highDamp;
-      const hBase = sample1D(prof, tCoord + meander);
-      const enclosed = enclosedMask ? sample1D(enclosedMask, tCoord + meander) : 0;
-      const ridge = coastalUberNoise2D(x * 0.00065, z * 0.00065, seed + 43, 4, 0.42);
-      const micro = (coastalFbm2D(x * 0.0024, z * 0.0024, seed + 109, 3) - 0.48) * 5.2;
-
-      // Only close off water segments that are enclosed by land on both sides (lagoons, estuaries, creeks)
-      // or lie along a predominantly inland border; never turn the open sea side of a coastline into land.
-      if (enclosed > 0.05 && hBase <= 0.25) {
-        const bayReach = 0.26 + 0.34 * coastalFbm2D(x * 0.00042, z * 0.00042, seed + dirSeed + 313, 3);
-        const inlandClose = coastalSmoothstep(bayReach * 0.42, bayReach, dNorm) * enclosed;
-        const valleyFloor = 4.2 + 14.0 * ridge + Math.max(0, micro);
-        const closedH = hBase * (1 - inlandClose) + valleyFloor * inlandClose;
-        if (closedH > 0.25) {
-          const hillGain = dRamp * Math.min(peak * 0.42, (6.0 + closedH * 0.5) * (0.35 + 0.65 * ridge));
-          return Math.max(2.4, Math.min(895, closedH + hillGain));
-        }
-        return closedH;
-      }
-
-      if (hBase > 0.25) {
-        const inlandRise = profLandFrac >= 0.35 ? coastalSmoothstep(0.06, 0.22, dNorm) * 3.8 : 0;
-        const hillGain =
-          inlandRise + dRamp * Math.min(peak * 0.52, (7.5 + hBase * 0.58) * (0.34 + 0.66 * ridge) + micro);
-        return Math.max(0.55, Math.min(895, hBase + hillGain));
-      }
-      return Math.max(-120, hBase - dRamp * (5.0 + 18.0 * dNorm));
-    };
-
-    const hasAnyProfile = Boolean(westProfile || eastProfile || northProfile || southProfile);
-
-    // Fallback true shore vector inferred from basePack.heights if a detached section is ever requested
-    const rad = (baseRegion.shoreBearing ?? 112) * COASTAL_DEG_TO_RAD;
-    const shoreDirX = Math.sin(rad);
-    const shoreDirZ = -Math.cos(rad);
-    const tangX = -shoreDirZ;
-    const tangZ = shoreDirX;
-
-    for (let j = 0; j < size; j++) {
-      const v = j / (size - 1);
-      const z = secWorldZ + (v - 0.5) * span;
-      for (let i = 0; i < size; i++) {
-        const u = i / (size - 1);
-        const x = secWorldX + (u - 0.5) * span;
-
-        if (hasAnyProfile) {
-          let wSum = 0;
-          let hSum = 0;
-          if (westProfile) {
-            const w = 1 / Math.pow(Math.max(1e-4, u), 2.35);
-            const hW = evalEdgePropagation(
-              westProfile,
-              westEnclosed,
-              westLandFrac,
-              v,
-              u,
-              x,
-              z,
-              31,
-              Boolean(northProfile),
-              Boolean(southProfile)
-            );
-            wSum += w;
-            hSum += w * hW;
-          }
-          if (eastProfile) {
-            const w = 1 / Math.pow(Math.max(1e-4, 1 - u), 2.35);
-            const hE = evalEdgePropagation(
-              eastProfile,
-              eastEnclosed,
-              eastLandFrac,
-              v,
-              1 - u,
-              x,
-              z,
-              47,
-              Boolean(northProfile),
-              Boolean(southProfile)
-            );
-            wSum += w;
-            hSum += w * hE;
-          }
-          if (northProfile) {
-            const w = 1 / Math.pow(Math.max(1e-4, v), 2.35);
-            const hN = evalEdgePropagation(
-              northProfile,
-              northEnclosed,
-              northLandFrac,
-              u,
-              v,
-              x,
-              z,
-              61,
-              Boolean(westProfile),
-              Boolean(eastProfile)
-            );
-            wSum += w;
-            hSum += w * hN;
-          }
-          if (southProfile) {
-            const w = 1 / Math.pow(Math.max(1e-4, 1 - v), 2.35);
-            const hS = evalEdgePropagation(
-              southProfile,
-              southEnclosed,
-              southLandFrac,
-              u,
-              1 - v,
-              x,
-              z,
-              79,
-              Boolean(westProfile),
-              Boolean(eastProfile)
-            );
-            wSum += w;
-            hSum += w * hS;
-          }
-          heights[j * size + i] = hSum / wSum;
-          continue;
-        }
-
-        const dx = (x - baseRegion.x) / span;
-        const dz = (z - baseRegion.z) / span;
-        const across = dx * shoreDirX + dz * shoreDirZ;
-        const along = dx * tangX + dz * tangZ;
-        const coastWobble =
-          0.18 * (coastalFbm2D(x * 0.00045, z * 0.00045, seed + 19, 3) - 0.5) +
-          0.08 * Math.sin(along * 2.1 + 0.7);
-        const signedShore = across + coastWobble;
-        if (signedShore > 0) {
-          const ridge = coastalUberNoise2D(x * 0.00065, z * 0.00065, seed + 43, 4, 0.42);
-          const ramp = coastalSmoothstep(0, 0.55, signedShore);
-          heights[j * size + i] = Math.min(895, 0.35 + signedShore * 22 + ramp * peak * (0.28 + 0.72 * ridge));
-        } else {
-          const seaDistM = Math.abs(signedShore) * span;
-          heights[j * size + i] = -Math.min(120, 0.5 + 0.12 * seaDistM);
-        }
-      }
-    }
-    return heights;
+  const sampleCleanEdge = (neighbor, wx, wz) => {
+    const src = neighbor.rawHeights || neighbor.heights;
+    const nr = neighbor.region;
+    const half = nr.span * 0.5 - 1e-3;
+    const cx = Math.max(nr.x - half, Math.min(nr.x + half, wx));
+    const cz = Math.max(nr.z - half, Math.min(nr.z + half, wz));
+    return terrainSample(src, cx, cz, nr);
   };
+
+  const xWest = secWorldX - span * 0.5;
+  const xEast = secWorldX + span * 0.5;
+  const zNorth = secWorldZ - span * 0.5;
+  const zSouth = secWorldZ + span * 0.5;
+
+  const westProfile = westSec?.heights ? new Float32Array(size) : null;
+  const eastProfile = eastSec?.heights ? new Float32Array(size) : null;
+  const northProfile = northSec?.heights ? new Float32Array(size) : null;
+  const southProfile = southSec?.heights ? new Float32Array(size) : null;
+
+  if (westProfile) {
+    for (let j = 0; j < size; j++) {
+      const z = secWorldZ + (j / (size - 1) - 0.5) * span;
+      westProfile[j] = sampleCleanEdge(westSec, xWest, z);
+    }
+  }
+  if (eastProfile) {
+    for (let j = 0; j < size; j++) {
+      const z = secWorldZ + (j / (size - 1) - 0.5) * span;
+      eastProfile[j] = sampleCleanEdge(eastSec, xEast, z);
+    }
+  }
+  if (northProfile) {
+    for (let i = 0; i < size; i++) {
+      const x = secWorldX + (i / (size - 1) - 0.5) * span;
+      northProfile[i] = sampleCleanEdge(northSec, x, zNorth);
+    }
+  }
+  if (southProfile) {
+    for (let i = 0; i < size; i++) {
+      const x = secWorldX + (i / (size - 1) - 0.5) * span;
+      southProfile[i] = sampleCleanEdge(southSec, x, zSouth);
+    }
+  }
+
+  const calcLandFrac = (prof) => {
+    if (!prof) return 0;
+    let c = 0;
+    for (let i = 0; i < size; i++) {
+      if (prof[i] > 0.25) c++;
+    }
+    return c / size;
+  };
+  const buildEnclosedWaterMask = (prof) => {
+    if (!prof) return null;
+    const mask = new Float32Array(size);
+    const maxLeft = new Float32Array(size);
+    const maxRight = new Float32Array(size);
+    let ml = -999;
+    for (let i = 0; i < size; i++) {
+      if (prof[i] > ml) ml = prof[i];
+      maxLeft[i] = ml;
+    }
+    let mr = -999;
+    for (let i = size - 1; i >= 0; i--) {
+      if (prof[i] > mr) mr = prof[i];
+      maxRight[i] = mr;
+    }
+    for (let i = 0; i < size; i++) {
+      mask[i] = maxLeft[i] > 0.65 && maxRight[i] > 0.65 ? 1.0 : 0.0;
+    }
+    const smoothed = new Float32Array(size);
+    for (let i = 0; i < size; i++) {
+      let s = 0, cnt = 0;
+      for (let d = -5; d <= 5; d++) {
+        s += mask[Math.max(0, Math.min(size - 1, i + d))];
+        cnt++;
+      }
+      smoothed[i] = s / cnt;
+    }
+    return smoothed;
+  };
+  const westLandFrac = calcLandFrac(westProfile);
+  const eastLandFrac = calcLandFrac(eastProfile);
+  const northLandFrac = calcLandFrac(northProfile);
+  const southLandFrac = calcLandFrac(southProfile);
+  const westEnclosed = buildEnclosedWaterMask(westProfile);
+  const eastEnclosed = buildEnclosedWaterMask(eastProfile);
+  const northEnclosed = buildEnclosedWaterMask(northProfile);
+  const southEnclosed = buildEnclosedWaterMask(southProfile);
+
+  const sample1D = (prof, t) => {
+    const clamped = Math.max(0, Math.min(1, t));
+    const f = clamped * (size - 1);
+    const i0 = Math.floor(f);
+    const i1 = Math.min(size - 1, i0 + 1);
+    const a = f - i0;
+    return prof[i0] * (1 - a) + prof[i1] * a;
+  };
+
+  const evalEdgePropagation = (
+    prof,
+    enclosedMask,
+    profLandFrac,
+    tCoord,
+    dNorm,
+    x,
+    z,
+    dirSeed,
+    lockLowT,
+    lockHighT
+  ) => {
+    const dRamp = coastalSmoothstep(0.0, 0.26, dNorm);
+    const lowDamp = lockLowT ? coastalSmoothstep(0.0, 0.2, tCoord) : 1.0;
+    const highDamp = lockHighT ? coastalSmoothstep(0.0, 0.2, 1.0 - tCoord) : 1.0;
+    const fbmLarge = coastalFbm2D(x * 0.00038, z * 0.00038, seed + dirSeed, 3) - 0.5;
+    const fbmMeso = coastalFbm2D(x * 0.0011, z * 0.0011, seed + dirSeed + 71, 3) - 0.5;
+    let cornerDrift = 0;
+    if (prof[0] <= 0.25 && prof[size - 1] > 0.25 && profLandFrac < 0.22 && !lockHighT) {
+      cornerDrift = -0.82 * dNorm;
+    } else if (prof[0] > 0.25 && prof[size - 1] <= 0.25 && profLandFrac < 0.22 && !lockLowT) {
+      cornerDrift = 0.82 * dNorm;
+    } else if (prof[0] <= 0.25 && prof[size - 1] > 0.25 && profLandFrac > 0.88 && !lockLowT) {
+      cornerDrift = 0.82 * dNorm;
+    } else if (prof[0] > 0.25 && prof[size - 1] <= 0.25 && profLandFrac > 0.88 && !lockHighT) {
+      cornerDrift = -0.82 * dNorm;
+    }
+    const meander = cornerDrift + (fbmLarge * 0.42 + fbmMeso * 0.22) * dRamp * lowDamp * highDamp;
+    const hBase = sample1D(prof, tCoord + meander);
+    const enclosed = enclosedMask ? sample1D(enclosedMask, tCoord + meander) : 0;
+    const ridge = coastalUberNoise2D(x * 0.00065, z * 0.00065, seed + 43, 4, 0.42);
+    const micro = (coastalFbm2D(x * 0.0024, z * 0.0024, seed + 109, 3) - 0.48) * 5.2;
+
+    if (enclosed > 0.05 && hBase <= 0.25) {
+      const bayReach = 0.26 + 0.34 * coastalFbm2D(x * 0.00042, z * 0.00042, seed + dirSeed + 313, 3);
+      const inlandClose = coastalSmoothstep(bayReach * 0.42, bayReach, dNorm) * enclosed;
+      const valleyFloor = 4.2 + 14.0 * ridge + Math.max(0, micro);
+      const closedH = hBase * (1 - inlandClose) + valleyFloor * inlandClose;
+      if (closedH > 0.25) {
+        const hillGain = dRamp * Math.min(peak * 0.42, (6.0 + closedH * 0.5) * (0.35 + 0.65 * ridge));
+        return Math.max(2.4, Math.min(895, closedH + hillGain));
+      }
+      return closedH;
+    }
+
+    if (hBase > 0.25) {
+      const inlandRise = profLandFrac >= 0.35 ? coastalSmoothstep(0.06, 0.22, dNorm) * 3.8 : 0;
+      const hillGain =
+        inlandRise + dRamp * Math.min(peak * 0.52, (7.5 + hBase * 0.58) * (0.34 + 0.66 * ridge) + micro);
+      return Math.max(0.55, Math.min(895, hBase + hillGain));
+    }
+    return Math.max(-120, hBase - dRamp * (5.0 + 18.0 * dNorm));
+  };
+
+  const hasAnyProfile = Boolean(westProfile || eastProfile || northProfile || southProfile);
+  const rad = (baseRegion.shoreBearing ?? 112) * COASTAL_DEG_TO_RAD;
+  const shoreDirX = Math.sin(rad);
+  const shoreDirZ = -Math.cos(rad);
+  const tangX = -shoreDirZ;
+  const tangZ = shoreDirX;
+
+  for (let j = 0; j < size; j++) {
+    const v = j / (size - 1);
+    const z = secWorldZ + (v - 0.5) * span;
+    for (let i = 0; i < size; i++) {
+      const u = i / (size - 1);
+      const x = secWorldX + (u - 0.5) * span;
+
+      if (hasAnyProfile) {
+        let wSum = 0;
+        let hSum = 0;
+        if (westProfile) {
+          const w = 1 / Math.pow(Math.max(1e-4, u), 2.35);
+          wSum += w;
+          hSum += w * evalEdgePropagation(westProfile, westEnclosed, westLandFrac, v, u, x, z, 31, Boolean(northProfile), Boolean(southProfile));
+        }
+        if (eastProfile) {
+          const w = 1 / Math.pow(Math.max(1e-4, 1 - u), 2.35);
+          wSum += w;
+          hSum += w * evalEdgePropagation(eastProfile, eastEnclosed, eastLandFrac, v, 1 - u, x, z, 47, Boolean(northProfile), Boolean(southProfile));
+        }
+        if (northProfile) {
+          const w = 1 / Math.pow(Math.max(1e-4, v), 2.35);
+          wSum += w;
+          hSum += w * evalEdgePropagation(northProfile, northEnclosed, northLandFrac, u, v, x, z, 61, Boolean(westProfile), Boolean(eastProfile));
+        }
+        if (southProfile) {
+          const w = 1 / Math.pow(Math.max(1e-4, 1 - v), 2.35);
+          wSum += w;
+          hSum += w * evalEdgePropagation(southProfile, southEnclosed, southLandFrac, u, 1 - v, x, z, 79, Boolean(westProfile), Boolean(eastProfile));
+        }
+        heights[j * size + i] = hSum / wSum;
+        continue;
+      }
+
+      const dx = (x - baseRegion.x) / span;
+      const dz = (z - baseRegion.z) / span;
+      const across = dx * shoreDirX + dz * shoreDirZ;
+      const along = dx * tangX + dz * tangZ;
+      const coastWobble =
+        0.18 * (coastalFbm2D(x * 0.00045, z * 0.00045, seed + 19, 3) - 0.5) +
+        0.08 * Math.sin(along * 2.1 + 0.7);
+      const signedShore = across + coastWobble;
+      if (signedShore > 0) {
+        const ridge = coastalUberNoise2D(x * 0.00065, z * 0.00065, seed + 43, 4, 0.42);
+        const ramp = coastalSmoothstep(0, 0.55, signedShore);
+        heights[j * size + i] = Math.min(895, 0.35 + signedShore * 22 + ramp * peak * (0.28 + 0.72 * ridge));
+      } else {
+        const seaDistM = Math.abs(signedShore) * span;
+        heights[j * size + i] = -Math.min(120, 0.5 + 0.12 * seaDistM);
+      }
+    }
+  }
+  return heights;
+}
+
+export function buildMockCoastalSection(
+  basePack,
+  secX,
+  secZ,
+  getNeighborSection = null,
+  { size = 33, biomeSize = 64, albedoSize = 64, vegetationCandidates = 320, taperUnconnectedOuter = true, skipStaticPalms = true } = {}
+) {
+  const { baseRegion, span, secWorldX, secWorldZ, sectionRegion, lookupNeighbor } = createNeighborSectionFrame(
+    basePack,
+    secX,
+    secZ,
+    getNeighborSection,
+    { size, biomeSize, albedoSize, vegetationCandidates }
+  );
+  const rawHeights = synthContinuousCoastalHeights({ baseRegion, secX, secZ, secWorldX, secWorldZ, span, size, lookupNeighbor });
+  const connectedEdges = {
+    west: Boolean(lookupNeighbor(secX - 1, secZ, true)),
+    east: Boolean(lookupNeighbor(secX + 1, secZ, true)),
+    north: Boolean(lookupNeighbor(secX, secZ - 1, true)),
+    south: Boolean(lookupNeighbor(secX, secZ + 1, true)),
+  };
+  const stitched = new Float32Array(rawHeights);
+  stitchCoastalSectionBorders(stitched, sectionRegion, secX, secZ, lookupNeighbor, { taperUnconnectedOuter, isRealDemSection: false });
+  const port = {
+    regionId: sectionRegion.id,
+    name: sectionRegion.name,
+    era: 1550,
+    center: { x: sectionRegion.x, z: sectionRegion.z, elevation: 2.5, shoreAlong: 0 },
+    berth: { x: sectionRegion.x, z: sectionRegion.z, depth: 8, heading: sectionRegion.shoreBearing ?? 112 },
+    clearRadius: 0,
+    instances: [],
+  };
+  const shoreDist = computeCoastalShoreDistances(stitched, size, span, 0.25);
+  const beaches = synthesizeCoastalBeaches(sectionRegion, stitched, null, shoreDist);
+  const mesh = buildCoastalMesh(sectionRegion, stitched, beaches, shoreDist);
+  const biome = synthesizeCoastalBiome(sectionRegion, stitched, beaches, port, null);
+  const albedo = synthesizeCoastalAlbedo(sectionRegion, stitched, beaches, port, biome, null, shoreDist);
+  const vegetation = skipStaticPalms
+    ? seedCoastalVegetation(sectionRegion, stitched, biome, beaches, port, 5, shoreDist, { maxPalms: 0 })
+    : seedCoastalVegetation(sectionRegion, stitched, biome, beaches, port, 5, shoreDist);
+  return {
+    region: sectionRegion,
+    secX,
+    secZ,
+    skipPortPlacement: true,
+    isMock: true,
+    state: 'mocked',
+    generationCount: 0,
+    elevationSource: 'procedural-mock',
+    connectedEdges,
+    rawHeights,
+    heights: stitched,
+    port,
+    beaches,
+    mesh,
+    biome,
+    albedo,
+    vegetation,
+    portGeometry: null,
+  };
+}
+
+function createEmptyCitySlice() {
+  return {
+    blocks: new Float32Array(0),
+    typed: new Float32Array(0),
+    typedTypes: new Uint32Array(0),
+    typedBlocks: new Uint32Array(0),
+    typedAttached: new Uint8Array(0),
+  };
+}
+
+function parcelHash(a, b) {
+  let h = Math.imul(a ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(b + 0x7f4a7c15, 0xc2b2ae35);
+  h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d);
+  h ^= h >>> 12;
+  h = Math.imul(h, 0x297a2d39);
+  h ^= h >>> 15;
+  return (h >>> 0) / 4294967296;
+}
+
+export function rebuildPackFrontierCity(pack) {
+  if (!pack) return null;
+  const base = pack._baseCity ?? {
+    blocks: new Float32Array(0),
+    count: 0,
+    typed: new Float32Array(0),
+    typedTypes: new Uint32Array(0),
+    typedCount: 0,
+    typedBlocks: new Uint32Array(0),
+    typedAttached: new Uint8Array(0),
+    stats: {},
+  };
+  const slices = [];
+  for (const parcel of pack.frontierParcels ?? []) {
+    const slice = parcel.state === 'mocked' ? parcel.mockCity : parcel.grownCity;
+    if (slice && (slice.blocks?.length || slice.typedTypes?.length)) slices.push(slice);
+  }
+  let totalBlocksFloats = base.blocks?.length ?? 0;
+  let totalTypedCount = base.typedCount ?? 0;
+  for (const s of slices) {
+    totalBlocksFloats += s.blocks.length;
+    totalTypedCount += s.typedTypes.length;
+  }
+  const blocks = new Float32Array(totalBlocksFloats);
+  const typed = new Float32Array(totalTypedCount * CITY_TYPED_FLOATS);
+  const typedTypes = new Uint32Array(totalTypedCount);
+  const typedBlocks = new Uint32Array(totalTypedCount * 2);
+  const typedAttached = new Uint8Array(totalTypedCount);
+
+  if (base.blocks?.length) blocks.set(base.blocks, 0);
+  if (base.typed?.length) typed.set(base.typed, 0);
+  if (base.typedTypes?.length) typedTypes.set(base.typedTypes, 0);
+  if (base.typedBlocks?.length) typedBlocks.set(base.typedBlocks, 0);
+  if (base.typedAttached?.length) typedAttached.set(base.typedAttached, 0);
+
+  let bFloatOff = base.blocks?.length ?? 0;
+  let tIdxOff = base.typedCount ?? 0;
+  for (const s of slices) {
+    const blockIdxOff = bFloatOff / CITY_BLOCK_FLOATS;
+    if (s.blocks.length) blocks.set(s.blocks, bFloatOff);
+    if (s.typed.length) typed.set(s.typed, tIdxOff * CITY_TYPED_FLOATS);
+    if (s.typedTypes.length) typedTypes.set(s.typedTypes, tIdxOff);
+    for (let k = 0; k < s.typedTypes.length; k++) {
+      typedBlocks[(tIdxOff + k) * 2] = blockIdxOff + s.typedBlocks[k * 2];
+      typedBlocks[(tIdxOff + k) * 2 + 1] = s.typedBlocks[k * 2 + 1];
+    }
+    bFloatOff += s.blocks.length;
+    tIdxOff += s.typedTypes.length;
+  }
+  pack.city = {
+    blocks,
+    count: blocks.length / CITY_BLOCK_FLOATS,
+    typed,
+    typedTypes,
+    typedCount: typedTypes.length,
+    typedBlocks,
+    typedAttached,
+    stats: base.stats ?? {},
+  };
+
+  const baseHerds = pack._baseHerds ?? new Float32Array(0);
+  let herdFloatsLen = baseHerds.length;
+  for (const p of pack.frontierParcels ?? []) {
+    if (p.state === 'grown' && p.grownHerds?.length) herdFloatsLen += p.grownHerds.length;
+  }
+  if (herdFloatsLen > 0) {
+    const mergedHerds = new Float32Array(herdFloatsLen);
+    if (baseHerds.length) mergedHerds.set(baseHerds, 0);
+    let hOff = baseHerds.length;
+    for (const p of pack.frontierParcels ?? []) {
+      if (p.state === 'grown' && p.grownHerds?.length) {
+        mergedHerds.set(p.grownHerds, hOff);
+        hOff += p.grownHerds.length;
+      }
+    }
+    pack.herds = mergedHerds;
+  } else {
+    pack.herds = null;
+  }
+  return pack.city;
+}
+
+function buildMockParcelCity(parcel, heights, region, waterSampler) {
+  const blocks = [];
+  const typed = [];
+  const typedTypes = [];
+  const typedBlocks = [];
+  let sCount = 0;
+  const rr = () => parcelHash(parcel.ix * 73856093 ^ parcel.iz * 19349663, ++sCount);
+  const heightAt = (x, z) => terrainSurfaceSample(heights, x, z, region);
+  const { pushBlock, pushTyped } = cityMasonry({ heightAt, blocks, typed, typedTypes, typedBlocks, gates: [], keep: () => {}, rr });
+  const pushSlight = (type, x, z, yaw, len, tone = 0.5) => {
+    const T = CITY_BUILDING_TYPES[type];
+    pushTyped(type, x, heightAt(x, z), z, yaw, T.width, T.height, len ?? T.length, tone, 0);
+  };
+  const half = parcel.span * 0.42;
+  const spots = [];
+  for (let a = 0; a < 16 && spots.length < 4; a++) {
+    const sx = parcel.cx + (rr() * 2 - 1) * half;
+    const sz = parcel.cz + (rr() * 2 - 1) * half;
+    const h = heightAt(sx, sz);
+    if (h < 1.6 || h > 160 || waterSampler?.(sx, sz)) continue;
+    const slope = Math.max(Math.abs(heightAt(sx + 5, sz) - h), Math.abs(heightAt(sx, sz + 5) - h)) / 5;
+    if (slope > 0.35) continue;
+    if (spots.some((q) => Math.hypot(q.x - sx, q.z - sz) < 64)) continue;
+    spots.push({ x: sx, z: sz, yaw: rr() * Math.PI * 2 });
+  }
+  for (let i = 0; i < spots.length; i++) {
+    const sp = spots[i];
+    if (i === 0 && parcel.dryShare >= 0.45) {
+      const T = CITY_BUILDING_TYPES[CITY_TYPE.SHED];
+      const f = footprint(sp.x, sp.z, T.width, T.length, sp.yaw);
+      const Far = footprint(sp.x, sp.z, f.d, f.w, sp.yaw + Math.PI / 2);
+      const floor = pushBlock(Far, T.height, 0.95, CITY_ROOF.GABLE + CITY_TYPED_ROOF + CITY_THATCH_ROOF, 10, 0.5);
+      pushTyped(CITY_TYPE.SHED, sp.x, floor, sp.z, sp.yaw, f.w, T.height, f.d, 0.5, 1);
+    } else if (i === 1) {
+      pushSlight(CITY_TYPE.FENCE_STONE, sp.x, sp.z, sp.yaw, 7.5, 0.5);
+    } else {
+      pushSlight(CITY_TYPE.CAIRN, sp.x, sp.z, sp.yaw, CITY_BUILDING_TYPES[CITY_TYPE.CAIRN].length, 0.5);
+    }
+  }
+  return {
+    blocks: new Float32Array(blocks),
+    typed: new Float32Array(typed),
+    typedTypes: new Uint32Array(typedTypes),
+    typedBlocks: new Uint32Array(typedBlocks),
+  };
+}
+
+export function planUngrownFrontierParcels(pack, heights, { playerPos = null } = {}) {
+  if (!pack?.region || !heights) return [];
+  const region = pack.region;
+  const gridN = 8;
+  const parcelSpan = region.span / gridN;
+  const minX = region.x - region.span * 0.5;
+  const minZ = region.z - region.span * 0.5;
+  const baseCity = pack._baseCity ?? (pack.city ? {
+    blocks: new Float32Array(pack.city.blocks ?? 0),
+    count: pack.city.count ?? 0,
+    typed: new Float32Array(pack.city.typed ?? 0),
+    typedTypes: new Uint32Array(pack.city.typedTypes ?? 0),
+    typedCount: pack.city.typedCount ?? 0,
+    typedBlocks: new Uint32Array(pack.city.typedBlocks ?? 0),
+    typedAttached: new Uint8Array(pack.city.typedAttached ?? 0),
+    stats: pack.city.stats ?? {},
+  } : { ...createEmptyCitySlice(), count: 0, typedCount: 0, stats: {} });
+  pack._baseCity = baseCity;
+  if (pack._baseHerds === undefined) pack._baseHerds = new Float32Array(pack.herds ?? 0);
+
+  const counts = new Int32Array(gridN * gridN);
+  const bump = (x, z) => {
+    const ix = Math.floor((x - minX) / parcelSpan);
+    const iz = Math.floor((z - minZ) / parcelSpan);
+    if (ix >= 0 && ix < gridN && iz >= 0 && iz < gridN) counts[iz * gridN + ix]++;
+  };
+  for (const inst of pack.port?.instances ?? []) bump(inst.x, inst.z);
+  for (let i = 0; i < baseCity.typedCount; i++) {
+    bump(baseCity.typed[i * CITY_TYPED_FLOATS], baseCity.typed[i * CITY_TYPED_FLOATS + 2]);
+  }
+  for (const pl of pack.port?.country?.places ?? []) {
+    if (Number.isFinite(pl?.x) && Number.isFinite(pl?.z)) bump(region.x + pl.x, region.z + pl.z);
+  }
+
+  const waterSampler = createInlandWaterSampler(pack.port?.country ?? null, { margin: 6 });
+  const portCx = pack.port?.center?.x ?? region.x;
+  const portCz = pack.port?.center?.z ?? region.z;
+  const parcels = [];
+
+  for (let iz = 0; iz < gridN; iz++) {
+    for (let ix = 0; ix < gridN; ix++) {
+      const cx = minX + (ix + 0.5) * parcelSpan;
+      const cz = minZ + (iz + 0.5) * parcelSpan;
+      let dryHits = 0;
+      for (let sy = -2; sy <= 2; sy++) {
+        for (let sx = -2; sx <= 2; sx++) {
+          const tx = cx + sx * parcelSpan * 0.16;
+          const tz = cz + sy * parcelSpan * 0.16;
+          if (terrainSurfaceSample(heights, tx, tz, region) > 1.2 && !waterSampler?.(tx, tz)) dryHits++;
+        }
+      }
+      const dryShare = dryHits / 25;
+      const nearPort = Math.hypot(cx - portCx, cz - portCz) < 750;
+      const hasPlayer = Boolean(playerPos && Math.abs(playerPos.x - cx) <= parcelSpan * 0.5 && Math.abs(playerPos.z - cz) <= parcelSpan * 0.5);
+      const occupied = counts[iz * gridN + ix] > 0;
+      const isMock = !occupied && !nearPort && !hasPlayer && dryShare >= 0.22;
+      const parcel = {
+        id: `parcel_${ix}_${iz}`,
+        ix,
+        iz,
+        cx,
+        cz,
+        span: parcelSpan,
+        dryShare,
+        state: isMock ? 'mocked' : 'grown',
+        generationCount: 0,
+        mockCity: null,
+        grownCity: null,
+        grownHerds: null,
+        grownPaving: null,
+      };
+      if (isMock) parcel.mockCity = buildMockParcelCity(parcel, heights, region, waterSampler);
+      parcels.push(parcel);
+    }
+  }
+  pack.frontierParcels = parcels;
+  rebuildPackFrontierCity(pack);
+  return parcels;
+}
+
+export function growFrontierParcel(pack, parcel, heights) {
+  if (!pack || !parcel || parcel.state !== 'mocked') return false;
+  parcel.state = 'generating';
+  const region = pack.region;
+  const hGrid = heights ?? pack.heights;
+  const heightAt = (x, z) => terrainSurfaceSample(hGrid, x, z, region);
+  const waterSampler = createInlandWaterSampler(pack.port?.country ?? null, { margin: 6 });
+
+  const blocks = [];
+  const typed = [];
+  const typedTypes = [];
+  const typedBlocks = [];
+  let sCount = 17;
+  const rr = () => parcelHash((parcel.ix + 11) * 83492791 ^ (parcel.iz + 23) * 297121507, ++sCount);
+  const { pushBlock, pushTyped } = cityMasonry({ heightAt, blocks, typed, typedTypes, typedBlocks, gates: [], keep: () => {}, rr });
+
+  // Locate flattest dry open pasture cluster hub & optional ridge crest for windmill
+  const bGrid = pack.biome instanceof Uint8Array ? pack.biome : null;
+  const bMask = bGrid ? Math.round(Math.sqrt(bGrid.length)) : 0;
+  const sampleBiomeAt = (x, z) => {
+    if (!bGrid || bMask <= 0) return 0;
+    const i = Math.floor(((x - (region.x - region.span * 0.5)) / region.span) * bMask);
+    const j = Math.floor(((z - (region.z - region.span * 0.5)) / region.span) * bMask);
+    return i >= 0 && j >= 0 && i < bMask && j < bMask ? bGrid[j * bMask + i] : 0;
+  };
+  const parcelAt = pack.port?.country?.parcelAt ?? null;
+  let hubX = parcel.cx, hubZ = parcel.cz, bestHubScore = -Infinity;
+  let crestX = parcel.cx, crestZ = parcel.cz, crestH = -Infinity;
+  const half = parcel.span * 0.36;
+  for (let gy = -4; gy <= 4; gy++) {
+    for (let gx = -4; gx <= 4; gx++) {
+      const tx = parcel.cx + (gx / 4) * half;
+      const tz = parcel.cz + (gy / 4) * half;
+      const h = heightAt(tx, tz);
+      if (h < 1.5 || h > 165 || waterSampler?.(tx, tz)) continue;
+      const slope = Math.max(Math.abs(heightAt(tx + 8, tz) - h), Math.abs(heightAt(tx, tz + 8) - h)) / 8;
+      const woodPen = (sampleBiomeAt(tx, tz) >= 42 ? 12 : 0) + (parcelAt?.(tx, tz)?.use?.wooded ? 10 : 0);
+      if (slope < 0.28) {
+        const sc = 8 - slope * 16 - woodPen - Math.hypot(tx - parcel.cx, tz - parcel.cz) * 0.008;
+        if (sc > bestHubScore) { bestHubScore = sc; hubX = tx; hubZ = tz; }
+      }
+      if (slope < 0.32 && sampleBiomeAt(tx, tz) < 60 && h > crestH) { crestH = h; crestX = tx; crestZ = tz; }
+    }
+  }
+  if (bGrid && bMask > 0) {
+    const stepM = region.span / bMask;
+    const x0 = region.x - region.span * 0.5;
+    const z0 = region.z - region.span * 0.5;
+    const clearPasture = (cx, cz, radius) => {
+      const i0 = Math.max(0, Math.floor((cx - radius - x0) / stepM));
+      const i1 = Math.min(bMask - 1, Math.ceil((cx + radius - x0) / stepM));
+      const j0 = Math.max(0, Math.floor((cz - radius - z0) / stepM));
+      const j1 = Math.min(bMask - 1, Math.ceil((cz + radius - z0) / stepM));
+      for (let j = j0; j <= j1; j++) {
+        const dz = z0 + (j + 0.5) * stepM - cz;
+        for (let i = i0; i <= i1; i++) {
+          const dx = x0 + (i + 0.5) * stepM - cx;
+          if (dx * dx + dz * dz <= radius * radius) {
+            const idx = j * bMask + i;
+            bGrid[idx] = Math.max(18, Math.min(bGrid[idx], 24));
+          }
+        }
+      }
+    };
+    clearPasture(hubX, hubZ, 92);
+    if (crestH > 18 && Math.hypot(crestX - hubX, crestZ - hubZ) > 28) clearPasture(crestX, crestZ, 36);
+  }
+
+  const placedLots = [];
+  const portCx = pack.port?.center?.x ?? region.x;
+  const portCz = pack.port?.center?.z ?? region.z;
+  const baseYaw = Math.atan2(portCx - hubX, portCz - hubZ);
+  const buildingPlan = [
+    [CITY_TYPE.THATCH_LONGHOUSE, 0, 0, CITY_ROOF.GABLE + CITY_TYPED_ROOF + CITY_THATCH_ROOF, CITY_WALL.HOUSE, 3.3, true],
+    [CITY_TYPE.BARN, 22, -10, CITY_ROOF.GABLE + CITY_TYPED_ROOF + CITY_THATCH_ROOF, CITY_WALL.STUCCO, 3.1, true],
+    [CITY_TYPE.THATCH_HOUSE, -20, 8, CITY_ROOF.GABLE + CITY_TYPED_ROOF + CITY_THATCH_ROOF, CITY_WALL.HOUSE, 3.6, true],
+    [CITY_TYPE.GRANARY, 16, 18, CITY_ROOF.PYRAMID + CITY_TYPED_ROOF, 10, 2.3, false],
+    [CITY_TYPE.THATCH_HOUSE, -16, -22, CITY_ROOF.GABLE + CITY_TYPED_ROOF + CITY_THATCH_ROOF, CITY_WALL.HOUSE, 3.6, true],
+    [CITY_TYPE.SHED, 28, 6, CITY_ROOF.GABLE + CITY_TYPED_ROOF + CITY_THATCH_ROOF, 10, 0.95, true],
+  ];
+  const wantBuildings = 3 + Math.min(3, Math.floor(parcel.dryShare * 4));
+  for (let bi = 0; bi < wantBuildings; bi++) {
+    const [type, ox, oz, roofKind, wallKind, rise, ridgeAlong] = buildingPlan[bi];
+    const T = CITY_BUILDING_TYPES[type];
+    const yaw = baseYaw + (rr() - 0.5) * 0.55;
+    const x = hubX + ox + (rr() - 0.5) * 6;
+    const z = hubZ + oz + (rr() - 0.5) * 6;
+    const h = heightAt(x, z);
+    if (h < 1.3 || h > 180 || waterSampler?.(x, z)) continue;
+    if (placedLots.some((q) => Math.hypot(q.x - x, q.z - z) < 14)) continue;
+    const f = footprint(x, z, T.width, T.length, yaw);
+    const Far = ridgeAlong ? footprint(x, z, f.d, f.w, yaw + Math.PI / 2) : f;
+    const tone = 0.35 + rr() * 0.35;
+    const floor = pushBlock(Far, T.height, rise, roofKind, wallKind, tone);
+    pushTyped(type, x, floor, z, yaw, f.w, T.height, f.d, tone, 1);
+    placedLots.push({ x, z });
+  }
+  if (crestH > 18 && Math.hypot(crestX - hubX, crestZ - hubZ) > 28 && !waterSampler?.(crestX, crestZ)) {
+    const T = CITY_BUILDING_TYPES[CITY_TYPE.WINDMILL];
+    const f = footprint(crestX, crestZ, T.width, T.length, baseYaw);
+    const floor = pushBlock(f, T.height, 1.8, CITY_ROOF.PYRAMID + CITY_TYPED_ROOF, CITY_WALL.STUCCO, 0.25);
+    pushTyped(CITY_TYPE.WINDMILL, crestX, floor, crestZ, baseYaw, f.w, T.height, f.d, 0.25, 1);
+  }
+  for (let fi = 0; fi < 4; fi++) {
+    const ang = (fi / 4) * Math.PI * 2 + 0.35;
+    const fx = hubX + Math.cos(ang) * 34;
+    const fz = hubZ + Math.sin(ang) * 34;
+    if (heightAt(fx, fz) < 1.2 || waterSampler?.(fx, fz)) continue;
+    const fType = fi & 1 ? CITY_TYPE.FENCE_STONE : CITY_TYPE.FENCE_RAIL;
+    const T = CITY_BUILDING_TYPES[fType];
+    pushTyped(fType, fx, heightAt(fx, fz), fz, ang + Math.PI * 0.5, T.width, T.height, 8.5, 0.5, 0);
+  }
+
+  const herdFloats = [];
+  for (let fl = 0; fl < 2; fl++) {
+    const fx = hubX + (fl === 0 ? 48 : -44);
+    const fz = hubZ + (fl === 0 ? 32 : -36);
+    if (heightAt(fx, fz) < 1.2 || waterSampler?.(fx, fz)) continue;
+    const count = fl === 0 ? 6 : 4;
+    const species = fl === 0 ? 0 : 1;
+    for (let m = 0; m < count; m++) {
+      const a = (m / count) * Math.PI * 2 + rr();
+      const d = 3 + rr() * 9;
+      const ax = fx + Math.cos(a) * d, az = fz + Math.sin(a) * d;
+      if (heightAt(ax, az) < 1.1 || waterSampler?.(ax, az)) continue;
+      herdFloats.push(ax, az, 5.5, rr() * Math.PI * 2, rr(), 0.9 + rr() * 0.2, species, baseYaw);
+    }
+  }
+
+  const toPortL = Math.max(1, Math.hypot(portCx - hubX, portCz - hubZ));
+  const dirX = (portCx - hubX) / toPortL, dirZ = (portCz - hubZ) / toPortL;
+  const edgeD = Math.min(parcel.span * 0.45, Math.max(85, toPortL * 0.45));
+  parcel.grownPaving = {
+    points: [
+      [hubX, hubZ, 4.4, 0.45],
+      [hubX + dirX * (edgeD * 0.5), hubZ + dirZ * (edgeD * 0.5), 4.0, 0.38],
+      [hubX + dirX * edgeD, hubZ + dirZ * edgeD, 3.6, 0.32],
+    ],
+  };
+  parcel.grownCity = {
+    blocks: new Float32Array(blocks),
+    typed: new Float32Array(typed),
+    typedTypes: new Uint32Array(typedTypes),
+    typedBlocks: new Uint32Array(typedBlocks),
+  };
+  parcel.grownHerds = herdFloats.length ? new Float32Array(herdFloats) : null;
+  parcel.mockCity = null;
+  parcel.state = 'grown';
+  parcel.generationCount = (parcel.generationCount || 0) + 1;
+
+  rebuildPackFrontierCity(pack);
+  if (pack.port?.streets && parcel.grownPaving) {
+    const paved = paveCityStreets(pack.port.streets, [parcel.grownPaving]);
+    if (paved) pack.port.streets = paved;
+  }
+  return true;
+}
+
+export async function generateCoastalNeighborSection(
+  basePack,
+  secX,
+  secZ,
+  getNeighborSection = null,
+  {
+    size = 129,
+    biomeSize = 128,
+    albedoSize = 256,
+    vegetationCandidates = 4500,
+    useRealDEM = true,
+    use1550 = true,
+    fetchTile = null,
+    fetchSatelliteTile = null,
+    taperUnconnectedOuter = true,
+    skipStaticPalms = false,
+  } = {}
+) {
+  const { baseRegion, span, geoSpan, secWorldX, secWorldZ, sectionRegion, lookupNeighbor } = createNeighborSectionFrame(
+    basePack,
+    secX,
+    secZ,
+    getNeighborSection,
+    { size, biomeSize, albedoSize, vegetationCandidates }
+  );
 
   const sectionPack = {
     region: sectionRegion,
     secX,
     secZ,
     skipPortPlacement: true,
+    isMock: false,
+    state: 'grown',
+    generationCount: 1,
     elevationSource: 'procedural-continuation',
   };
 
@@ -11887,7 +12417,7 @@ export async function generateCoastalNeighborSection(
   }
 
   if (!contHeights) {
-    contHeights = synthContinuousHeights();
+    contHeights = synthContinuousCoastalHeights({ baseRegion, secX, secZ, secWorldX, secWorldZ, span, size, lookupNeighbor });
   }
 
   const connectedEdges = {

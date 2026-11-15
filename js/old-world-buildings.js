@@ -426,7 +426,7 @@ export const CITY_TYPE_SLIGHT_FROM = AFTER_HOUSES + 15 + CITY_WORKS_BUILT;
 // What hangs over a street from a front: whoever walks there passes under it.
 export const CITY_TYPES_OVERHEAD = Object.freeze(new Set([CITY_TYPE.PENTICE, CITY_TYPE.SIGN, CITY_TYPE.ALE_STAKE]));
 // Bridges are destructible gunnery targets whose intact spans let walkers and caravans cross rivers cleanly.
-export const CITY_TYPES_BRIDGES = Object.freeze(new Set([CITY_TYPE.FOOTBRIDGE, CITY_TYPE.STONE_BRIDGE]));
+export const CITY_TYPES_BRIDGES = Object.freeze(new Set([CITY_TYPE.FOOTBRIDGE, CITY_TYPE.STONE_BRIDGE, CITY_TYPE.STONE_BRIDGE_SPAN]));
 // What is too slight to be laid as a gun's target or to stop anyone walking: what hangs overhead, a fence,
 // graves, a cairn, a standard.
 export const CITY_TYPES_SLIGHT = Object.freeze(new Set([...CITY_TYPES_OVERHEAD, CITY_TYPE.FENCE_RAIL, CITY_TYPE.FENCE_STONE, CITY_TYPE.GRAVES, CITY_TYPE.CAIRN, CITY_TYPE.STANDARD]));
@@ -441,7 +441,7 @@ const CITY_WORKS_TARGETS = Object.freeze({
   VATS: { prefabId: 'city_works', label: 'Tannery or dye works' }, STONE_HALL: { prefabId: 'city_stone_hall', label: 'Stone hall' }, CLOISTER: { prefabId: 'city_cloister', label: 'Cloister' },
   COURT: { prefabId: 'city_courtyard_house', label: 'Courtyard house' }, WHARF: { prefabId: 'city_wharf', label: 'Wharf' }, QUARRY: { prefabId: 'city_quarry', label: 'Quarry' },
   RUIN: { prefabId: 'city_ruin', label: 'Ruin' }, RUBBLE: { prefabId: 'city_rubble', label: 'Rubble' }, FENCE_RAIL: { prefabId: 'city_fence', label: 'Fence' }, FENCE_STONE: { prefabId: 'city_fence', label: 'Dry-stone wall' },
-  FOOTBRIDGE: { prefabId: 'city_timber_bridge', label: 'Timber bridge' }, STONE_BRIDGE: { prefabId: 'city_stone_bridge', label: 'Stone bridge' }, GRAVES: { prefabId: 'city_graves', label: 'Graves' },
+  FOOTBRIDGE: { prefabId: 'city_timber_bridge', label: 'Timber bridge' }, STONE_BRIDGE: { prefabId: 'city_stone_bridge', label: 'Stone bridge' }, STONE_BRIDGE_SPAN: { prefabId: 'city_stone_bridge', label: 'Stone bridge' }, GRAVES: { prefabId: 'city_graves', label: 'Graves' },
   CAIRN: { prefabId: 'city_cairn', label: 'Cairn' }, TENT: { prefabId: 'city_tent', label: 'Tent' }, STANDARD: { prefabId: 'city_standard', label: 'Standard' }, SCAFFOLD: { prefabId: 'city_scaffold', label: 'Scaffold' },
 });
 export function cityTypeTarget(type) {

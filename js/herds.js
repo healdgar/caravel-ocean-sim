@@ -212,14 +212,22 @@ export async function createLivestockHerds({
   // The model's day now and how fast its days pass, written once a frame (16 bytes) for the travellers' closed form.
   const clock = new ArrayBuffer(16), clockU = new Uint32Array(clock), clockF = new Float32Array(clock);
 
-  function releaseState() {
+  function releaseState(immediate = false) {
     if (!state) return;
-    state.seeds.destroy();
-    state.routes.destroy();
-    state.bodies.destroy();
-    state.draws.destroy();
-    state.cfg.destroy();
+    const old = state;
     state = null;
+    const drop = () => {
+      old.seeds.destroy();
+      old.routes.destroy();
+      old.bodies.destroy();
+      old.draws.destroy();
+      old.cfg.destroy();
+    };
+    if (!immediate && typeof device.queue?.onSubmittedWorkDone === 'function') {
+      device.queue.onSubmittedWorkDone().then(drop).catch(() => {});
+    } else {
+      drop();
+    }
   }
 
   function rebuildGroups() {
@@ -366,7 +374,7 @@ export async function createLivestockHerds({
       }
     },
     destroy() {
-      releaseState();
+      releaseState(true);
       for (const sp of speciesMeshes) {
         sp.vertex.destroy();
         sp.index.destroy();

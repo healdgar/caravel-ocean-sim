@@ -11,15 +11,15 @@ const SRC_DIR = 'assets/ground-cover/portugal/meadows';
 const OUT_DIR = 'assets/ground-cover/portugal/meadows-gpu';
 const MIXES = ['pasture', 'waste', 'field-margin'];
 const VARIANTS = 4;
-const TILE_METRES = 1.8;
-const SUB_GRID = 2; // 2x2 spatial clusters per tile variant (0.9m x 0.9m each)
+const TILE_METRES = 1.35;
+const SUB_GRID = 2; // 2x2 spatial clusters per tile variant (0.675m x 0.675m each)
 const SOURCE_STRIDE = 12;
-const GPU_VERTEX_WORDS = 8; // px, py, pz, packedNorm, packedCol, along, stiffness, anchor
+const GPU_VERTEX_WORDS = 8; // px, py, pz, packedNorm+wTag, packedCol, along, stiffness, packedMorphXZ(half2)
 const CLUSTER_WORDS = 12;
 
-const LEVEL_CAPS = [160, 72, 32, 12]; // triangles per 0.9m cluster (48 clusters total -> <= 13k tris overall!)
-const LEVEL_ERRORS = [0.0, 0.010, 0.028, 0.072];
-const LEVEL_PARENT_ERRORS = [0.010, 0.028, 0.072, 0.190];
+const LEVEL_CAPS = [240, 120, 60, 28]; // nested real curved blade subsets per sub-cell
+const LEVEL_ERRORS = [0.0, 0.012, 0.030, 0.068];
+const LEVEL_PARENT_ERRORS = [0.012, 0.030, 0.068, 0.145];
 
 const MORPH_RINGS = 4;
 const MORPH_K = 5;
@@ -27,6 +27,38 @@ const MORPH_STEPS = MORPH_RINGS * MORPH_K - 2; // 18 half-edge collapse steps fr
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 const sha256Hex = (buf) => createHash('sha256').update(buf).digest('hex');
+
+const _f16Buf = new ArrayBuffer(4);
+const _f16F32 = new Float32Array(_f16Buf);
+const _f16U32 = new Uint32Array(_f16Buf);
+function floatToHalf(val) {
+  _f16F32[0] = val;
+  const bits = _f16U32[0];
+  const sign = (bits >>> 16) & 0x8000;
+  let mantissa = bits & 0x007fffff;
+  let exp = (bits >>> 23) & 0xff;
+  if (exp === 0xff) return sign | (mantissa ? 0x7e00 : 0x7c00);
+  exp -= 112;
+  if (exp >= 31) return sign | 0x7c00;
+  if (exp <= 0) {
+    if (exp < -10) return sign;
+    mantissa = (mantissa | 0x00800000) >>> (1 - exp);
+    if (mantissa & 0x00001000) mantissa += 0x00002000;
+    return sign | (mantissa >>> 13);
+  }
+  if (mantissa & 0x00001000) {
+    mantissa += 0x00002000;
+    if (mantissa & 0x00800000) {
+      mantissa = 0;
+      exp += 1;
+      if (exp >= 31) return sign | 0x7c00;
+    }
+  }
+  return sign | (exp << 10) | (mantissa >>> 13);
+}
+function packHalf2(x, y) {
+  return (((floatToHalf(y) & 0xffff) << 16) | (floatToHalf(x) & 0xffff)) >>> 0;
+}
 
 function packSnorm8x4(nx, ny, nz, w = 0) {
   const len = Math.hypot(nx, ny, nz) || 1;
@@ -53,14 +85,26 @@ function triArea3D(ax, ay, az, bx, by, bz, cx, cy, cz) {
   return 0.5 * Math.hypot(ux, uy, uz);
 }
 
-function buildClusterGeometry(rawTris, scaleWidth = 1.0) {
+function widthExpandOffset(p, cx, cz, sw) {
+  if (sw <= 1.01) return [0, 0, 0];
+  const sx = sw - 1.0;
+  const dx = p.px - cx, dz = p.pz - cz;
+  const len = Math.hypot(dx, dz);
+  if (len > 1e-4) {
+    const add = Math.min(0.032, sx * len);
+    return [(dx / len) * add, 0, (dz / len) * add];
+  }
+  return [0, 0, 0];
+}
+
+function buildClusterGeometry(rawTris, scaleWidth = 1.0, nextScaleWidth = 1.0, nextCap = rawTris.length, isLastLevel = true) {
   const verts = [];
   const tris = [];
   const vertMap = new Map();
   let sumR = 0, sumG = 0, sumB = 0, sumArea = 0;
 
-  const pushVert = (v, inflationOffset) => {
-    const key = scaleWidth === 1.0 ? String(v.srcIdx) : `${v.srcIdx}:${v.tag}`;
+  const pushVert = (v, inflationOffset, wTag, morphDx, morphDz, tagKey) => {
+    const key = tagKey ?? String(v.srcIdx);
     let idx = vertMap.get(key);
     if (idx !== undefined) return idx;
     idx = verts.length / GPU_VERTEX_WORDS;
@@ -69,11 +113,11 @@ function buildClusterGeometry(rawTris, scaleWidth = 1.0) {
       v.px + inflationOffset[0],
       Math.max(0, v.py + inflationOffset[1]),
       v.pz + inflationOffset[2],
-      packSnorm8x4(v.nx, v.ny, v.nz, 0),
+      packSnorm8x4(v.nx, v.ny, v.nz, wTag),
       packColorUnorm8x4(v.cr, v.cg, v.cb, 1),
       v.along,
       v.stiffness,
-      v.anchor,
+      packHalf2(morphDx, morphDz),
     );
     return idx;
   };
@@ -87,85 +131,51 @@ function buildClusterGeometry(rawTris, scaleWidth = 1.0) {
     sumB += ((a.cb + b.cb + c.cb) / 3) * area;
     sumArea += area;
 
-    let offA = [0, 0, 0], offB = [0, 0, 0], offC = [0, 0, 0];
-    if (scaleWidth > 1.01) {
-      const cx = (a.px + b.px + c.px) / 3;
-      const cz = (a.pz + b.pz + c.pz) / 3;
-      const sx = scaleWidth - 1.0;
-      const pushOut = (p) => {
-        const dx = p.px - cx, dz = p.pz - cz;
-        const len = Math.hypot(dx, dz);
-        if (len > 1e-4) {
-          const add = Math.min(0.032, sx * len);
-          return [(dx / len) * add, 0, (dz / len) * add];
-        }
-        return [0, 0, 0];
-      };
-      offA = pushOut(a);
-      offB = pushOut(b);
-      offC = pushOut(c);
+    const cx = (a.px + b.px + c.px) / 3;
+    const cz = (a.pz + b.pz + c.pz) / 3;
+    const offA = widthExpandOffset(a, cx, cz, scaleWidth);
+    const offB = widthExpandOffset(b, cx, cz, scaleWidth);
+    const offC = widthExpandOffset(c, cx, cz, scaleWidth);
+
+    let rootV = a;
+    if (b.py < rootV.py) rootV = b;
+    if (c.py < rootV.py) rootV = c;
+    const rootX = rootV.px, rootZ = rootV.pz;
+
+    let wTag = 1.0;
+    let dA = [0, 0], dB = [0, 0], dC = [0, 0];
+    if (!isLastLevel && ti < nextCap) {
+      wTag = 1.0;
+      const nA = widthExpandOffset(a, cx, cz, nextScaleWidth);
+      const nB = widthExpandOffset(b, cx, cz, nextScaleWidth);
+      const nC = widthExpandOffset(c, cx, cz, nextScaleWidth);
+      dA = [nA[0] - offA[0], nA[2] - offA[2]];
+      dB = [nB[0] - offB[0], nB[2] - offB[2]];
+      dC = [nC[0] - offC[0], nC[2] - offC[2]];
+    } else if (!isLastLevel && ti >= nextCap) {
+      const rank = (ti - nextCap) / Math.max(1, rawTris.length - nextCap);
+      wTag = -(0.08 + 0.88 * rank);
+      dA = [rootX - (a.px + offA[0]), rootZ - (a.pz + offA[2])];
+      dB = [rootX - (b.px + offB[0]), rootZ - (b.pz + offB[2])];
+      dC = [rootX - (c.px + offC[0]), rootZ - (c.pz + offC[2])];
     }
-    const i0 = pushVert({ ...a, tag: `${ti}a` }, offA);
-    const i1 = pushVert({ ...b, tag: `${ti}b` }, offB);
-    const i2 = pushVert({ ...c, tag: `${ti}c` }, offC);
+
+    const perCornerKey = !isLastLevel || scaleWidth > 1.01;
+    const i0 = pushVert(a, offA, wTag, dA[0], dA[1], perCornerKey ? `${vKey(a, ti, 0)}` : null);
+    const i1 = pushVert(b, offB, wTag, dB[0], dB[1], perCornerKey ? `${vKey(b, ti, 1)}` : null);
+    const i2 = pushVert(c, offC, wTag, dC[0], dC[1], perCornerKey ? `${vKey(c, ti, 2)}` : null);
     tris.push(i0, i1, i2);
   }
   const meanCol = sumArea > 0 ? [sumR / sumArea, sumG / sumArea, sumB / sumArea] : [0.16, 0.24, 0.08];
   return { verts, tris, meanCol, totalArea: sumArea };
 }
 
-function buildSynthesizedL3Tufts(rawTris, subX, subZ, cellSize, maxTris, vertsOut, meanCol) {
-  const startV = vertsOut.length / GPU_VERTEX_WORDS;
-  const baseVerts = [];
-  const baseTris = [];
-  const half = cellSize * 0.5;
-  const cxBase = (subX + 0.5) * cellSize;
-  const czBase = (subZ + 0.5) * cellSize;
-
-  let maxH = 0.25, avgStiff = 12;
-  let stiffSum = 0, stiffW = 0;
-  for (const t of rawTris) {
-    for (const v of t.verts) {
-      if (v.py > maxH) maxH = v.py;
-      stiffSum += v.stiffness * v.areaWeight;
-      stiffW += v.areaWeight;
-    }
-  }
-  if (stiffW > 0) avgStiff = clamp(stiffSum / stiffW, 1.2, 60);
-
-  // Build 4 crossed 3D curved grass gables = 8..12 real physical non-flat 3D meadow triangles
-  const tuftPairs = Math.min(6, Math.max(2, Math.floor(maxTris / 2)));
-  for (let p = 0; p < tuftPairs; p++) {
-    const ang = (p / tuftPairs) * Math.PI + (subX * 0.7 + subZ * 1.1);
-    const ox = cxBase + Math.cos(ang * 2.1 + p) * (half * 0.42);
-    const oz = czBase + Math.sin(ang * 1.7 - p) * (half * 0.42);
-    const dx = Math.cos(ang) * (half * 0.52);
-    const dz = Math.sin(ang) * (half * 0.52);
-    const nx = -Math.sin(ang), nz = Math.cos(ang);
-    const tipH = clamp(maxH * (0.72 + 0.28 * ((p % 3) / 2)), 0.18, 0.95);
-    const tipBendX = nx * 0.08 * tipH;
-    const tipBendZ = nz * 0.08 * tipH;
-
-    const vi = baseVerts.length / GPU_VERTEX_WORDS;
-    const baseCol = packColorUnorm8x4(meanCol[0] * 0.42, meanCol[1] * 0.46, meanCol[2] * 0.42, 1);
-    const midCol = packColorUnorm8x4(meanCol[0] * 0.95, meanCol[1] * 0.98, meanCol[2] * 0.9, 1);
-    const tipCol = packColorUnorm8x4(Math.min(1, meanCol[0] * 1.28), Math.min(1, meanCol[1] * 1.18), Math.min(1, meanCol[2] * 0.85), 1);
-
-    // 4 vertices forming a bent gable tuft (2 triangles with real ridge fold, never a flat quad)
-    baseVerts.push(ox - dx, 0.0, oz - dz, packSnorm8x4(nx, 0.25, nz), baseCol, 0.0, avgStiff, 0.0);
-    baseVerts.push(ox + dx, 0.0, oz + dz, packSnorm8x4(nx, 0.25, nz), baseCol, 0.0, avgStiff, 0.0);
-    baseVerts.push(ox + tipBendX, tipH * 0.62, oz + tipBendZ, packSnorm8x4(nx * 0.7, 0.68, nz * 0.7), midCol, 0.55, avgStiff, 0.08);
-    baseVerts.push(ox + dx * 0.15 + tipBendX * 1.8, tipH, oz + dz * 0.15 + tipBendZ * 1.8, packSnorm8x4(nx * 0.4, 0.9, nz * 0.4), tipCol, 1.0, avgStiff, 0.18);
-
-    baseTris.push(vi, vi + 1, vi + 2);
-    if (baseTris.length / 3 < maxTris) baseTris.push(vi + 1, vi + 3, vi + 2);
-  }
-  for (let k = 0; k < baseVerts.length; k++) vertsOut.push(baseVerts[k]);
-  return { tris: baseTris.map((i) => startV + i) };
+function vKey(v, ti, c) {
+  return `${v.srcIdx}:${ti}:${c}`;
 }
 
 function buildGenusZeroContinuumForVariant(rawTileMeanCol, topH, radiusM, avgStiff) {
-  // Connected genus-0 closed tussock dome: bottom pole (0) + MORPH_RINGS x MORPH_K rings + top pole (V-1)
+  // Connected genus-0 low-relief sward sheet: bottom center (0) + MORPH_RINGS x MORPH_K rings + top center (V-1)
   // V = 22, E = 60, F = 40 -> V - E + F = 2 exact!
   const V = 2 + MORPH_RINGS * MORPH_K;
   const pos = new Float32Array(V * 3);
@@ -179,28 +189,28 @@ function buildGenusZeroContinuumForVariant(rawTileMeanCol, topH, radiusM, avgSti
     nrm[vi * 3] = nx / len; nrm[vi * 3 + 1] = ny / len; nrm[vi * 3 + 2] = nz / len;
     col[vi * 3] = clamp(rawTileMeanCol[0] * shade, 0, 1);
     col[vi * 3 + 1] = clamp(rawTileMeanCol[1] * shade, 0, 1);
-    col[vi * 3 + 2] = clamp(rawTileMeanCol[2] * shade * (alongVal > 0.7 ? 0.85 : 1.0), 0, 1);
+    col[vi * 3 + 2] = clamp(rawTileMeanCol[2] * shade, 0, 1);
     sway[vi * 3] = alongVal;
     sway[vi * 3 + 1] = avgStiff;
-    sway[vi * 3 + 2] = alongVal * alongVal * 0.12;
+    sway[vi * 3 + 2] = alongVal * alongVal * 0.06;
   };
 
-  setV(0, 0, 0.0, 0, 0, -1, 0, 0.35, 0.0);
+  setV(0, 0, 0.0, 0, 0, 0.97, 0, 0.88, 0.0);
   for (let r = 0; r < MORPH_RINGS; r++) {
-    const t = (r + 1) / (MORPH_RINGS + 1);
-    const phi = t * Math.PI * 0.58;
-    const ringR = radiusM * Math.sin(phi * 1.15);
-    const ringY = topH * Math.pow(t, 0.82);
+    const ringR = radiusM * (1.0 - 0.19 * r);
+    const ringY = r === 0 ? 0.004 : topH * (0.48 + 0.16 * r);
+    const alongVal = clamp(ringY / Math.max(0.05, topH), 0, 1);
+    const shade = 0.88 + 0.16 * alongVal;
     for (let k = 0; k < MORPH_K; k++) {
       const a = (k / MORPH_K) * Math.PI * 2 + r * 0.25;
       const vi = 1 + r * MORPH_K + k;
-      const lobe = 1.0 + 0.14 * Math.sin(k * 3.0 + r);
+      const lobe = 1.0 + 0.08 * Math.sin(k * 2.0 + r);
       const x = Math.cos(a) * ringR * lobe;
       const z = Math.sin(a) * ringR * lobe;
-      setV(vi, x, ringY, z, Math.cos(a) * 0.72, 0.55 + t * 0.35, Math.sin(a) * 0.72, 0.45 + t * 0.82, clamp(ringY / Math.max(0.2, topH), 0, 1));
+      setV(vi, x, ringY, z, Math.cos(a) * 0.16, 0.97, Math.sin(a) * 0.16, shade, alongVal);
     }
   }
-  setV(V - 1, 0, topH, 0, 0, 1, 0, 1.24, 1.0);
+  setV(V - 1, 0, topH, 0, 0, 1, 0, 1.04, 1.0);
 
   const faces = [];
   for (let k = 0; k < MORPH_K; k++) {
@@ -273,9 +283,9 @@ function buildGenusZeroContinuumForVariant(rawTileMeanCol, topH, radiusM, avgSti
     faces,
     collapseSteps,
     splat: {
-      centreY: +(topH * 0.42).toFixed(4),
-      rx: +(radiusM * 1.12).toFixed(4),
-      ry: +(topH * 0.62).toFixed(4),
+      centreY: +(topH * 0.45).toFixed(4),
+      rx: +(radiusM * 0.95).toFixed(4),
+      ry: +(Math.min(0.11, topH * 0.75)).toFixed(4),
       meanCol: rawTileMeanCol.map((c) => +c.toFixed(4)),
     },
   };
@@ -346,7 +356,7 @@ function main() {
 
       const variantId = mixIdx * VARIANTS + vIdx;
       const clusterFirst = clusterRecords.length / CLUSTER_WORDS;
-      let tileR = 0, tileG = 0, tileB = 0, tileW = 0, maxTileH = 0.25, stiffSum = 0;
+      let tileR = 0, tileG = 0, tileB = 0, tileW = 0, tileAvgHSum = 0, maxTileH = 0.25, stiffSum = 0;
 
       for (let subZ = 0; subZ < SUB_GRID; subZ++) {
         for (let subX = 0; subX < SUB_GRID; subX++) {
@@ -366,28 +376,26 @@ function main() {
               tileG += ((t.verts[0].cg + t.verts[1].cg + t.verts[2].cg) / 3) * t.area;
               tileB += ((t.verts[0].cb + t.verts[1].cb + t.verts[2].cb) / 3) * t.area;
               tileW += t.area;
+              tileAvgHSum += t.cy * t.area;
               if (t.cy > maxTileH) maxTileH = t.cy;
               stiffSum += t.verts[2].stiffness * t.area;
             }
           }
 
-          let cellMeanCol = [0.16, 0.24, 0.08];
           for (let lvl = 0; lvl < 4; lvl++) {
             const firstIdx = outIndices.length;
             const baseVertOffset = outVerts.length / GPU_VERTEX_WORDS;
-            let localTris;
-            if (lvl < 3) {
-              const subset = l0Tris.slice(0, Math.min(l0Tris.length, LEVEL_CAPS[lvl]));
-              const areaLvl = Math.max(1e-5, subset.reduce((s, t) => s + t.area, 0));
-              const wScale = lvl === 0 ? 1.0 : Math.min(2.6, Math.sqrt(area0 / areaLvl));
-              const geo = buildClusterGeometry(subset, wScale);
-              if (lvl === 0) cellMeanCol = geo.meanCol;
-              for (let k = 0; k < geo.verts.length; k++) outVerts.push(geo.verts[k]);
-              localTris = geo.tris.map((idx) => baseVertOffset + idx);
-            } else {
-              const l3 = buildSynthesizedL3Tufts(l0Tris, subX, subZ, cellSize, LEVEL_CAPS[3], outVerts, cellMeanCol);
-              localTris = l3.tris;
-            }
+            const subset = l0Tris.slice(0, Math.min(l0Tris.length, LEVEL_CAPS[lvl]));
+            const areaLvl = Math.max(1e-5, subset.reduce((s, t) => s + t.area, 0));
+            const wScale = lvl === 0 ? 1.0 : Math.min(2.35, Math.sqrt(area0 / areaLvl));
+            const isLastLevel = lvl === 3;
+            const nextCap = isLastLevel ? subset.length : Math.min(subset.length, LEVEL_CAPS[lvl + 1]);
+            const nextSubset = isLastLevel ? subset : subset.slice(0, nextCap);
+            const areaNext = Math.max(1e-5, nextSubset.reduce((s, t) => s + t.area, 0));
+            const nextScaleWidth = isLastLevel ? wScale : Math.min(2.35, Math.sqrt(area0 / areaNext));
+            const geo = buildClusterGeometry(subset, wScale, nextScaleWidth, nextCap, isLastLevel);
+            for (let k = 0; k < geo.verts.length; k++) outVerts.push(geo.verts[k]);
+            const localTris = geo.tris.map((idx) => baseVertOffset + idx);
             for (let k = 0; k < localTris.length; k++) outIndices.push(localTris[k]);
             clusterRecords.push(
               firstIdx,
@@ -408,8 +416,10 @@ function main() {
       }
 
       const tileMeanCol = tileW > 0 ? [tileR / tileW, tileG / tileW, tileB / tileW] : [0.16, 0.24, 0.08];
+      const avgTileH = tileW > 0 ? tileAvgHSum / tileW : 0.22;
       const avgStiff = tileW > 0 ? clamp(stiffSum / tileW, 2.0, 50) : 14;
-      const cont = buildGenusZeroContinuumForVariant(tileMeanCol, clamp(maxTileH * 0.92, 0.24, 0.85), TILE_METRES * 0.44, avgStiff);
+      const contTopH = clamp(avgTileH * 0.48, 0.07, 0.14);
+      const cont = buildGenusZeroContinuumForVariant(tileMeanCol, contTopH, TILE_METRES * 0.68, avgStiff);
       morphRecords.push({ variantId, mix: mixName, variant: vIdx, ...cont });
       variantRecords.push({
         variantId,
@@ -436,7 +446,7 @@ function main() {
     vu32[i + 4] = outVerts[i + 4] >>> 0;
     vf32[i + 5] = outVerts[i + 5];
     vf32[i + 6] = outVerts[i + 6];
-    vf32[i + 7] = outVerts[i + 7];
+    vu32[i + 7] = outVerts[i + 7] >>> 0;
   }
   const idxBuf = new Uint32Array(outIndices);
   const clBuf = new ArrayBuffer(clusterRecords.length * 4);

@@ -13,9 +13,9 @@ import { streetEdgeAt } from './town-streets.js';
 import { createInlandWaterSampler } from './inland-water.js';
 import { CITY_BLOCK_FLOATS, CITY_GROUND } from './old-world-city.js';
 
-export const MEADOW_TILE_METRES = 1.8;
-export const MEADOW_FADE_IN_PX = 22.0;
-export const MEADOW_FADE_OUT_PX = 15.0;
+export const MEADOW_TILE_METRES = 1.35;
+export const MEADOW_FADE_IN_PX = 18.0;
+export const MEADOW_FADE_OUT_PX = 11.5;
 export const MEADOW_SPLAT_PX = 3.5;
 export const MEADOW_MIN_PX = 1.0;
 export const MEADOW_BUCKETS = 8;
@@ -27,9 +27,9 @@ const MEADOW_MORPH_VERTS = 22;
 const MEADOW_MORPH_FACES = 40;
 const MEADOW_MORPH_STEPS = 18;
 const MEADOW_MORPH_VAR_WORDS = 368; // 22*8 + 40*3 + 18*4 = 368 words = 1472 bytes
-const MEADOW_GRID_SIDE_DESKTOP = 168;
-const MEADOW_GRID_SIDE_MOBILE = 104;
-const MEADOW_BUCKET_SPAN = 32768;
+const MEADOW_GRID_SIDE_DESKTOP = 320;
+const MEADOW_GRID_SIDE_MOBILE = 176;
+const MEADOW_BUCKET_SPAN = 49152;
 
 // Literal paths: build.mjs scans string literals from js/meadow-grass.js to emit content-hashed URLs.
 export const PORTUGAL_MEADOW_GRASS_ASSETS = Object.freeze({
@@ -377,7 +377,6 @@ fn meadowPush(bucket: u32, inst: MeadowInst) {
   let shiftedCenter = vec3f(centerXZ.x + shiftXZ.x, groundY + 0.45, centerXZ.y + shiftXZ.y);
   let rel = earthCurve(shiftedCenter - F.camPos.xyz, F.camPos.y);
   let dist = length(rel);
-  if (dist > 280.0) { return; }
 
   let clip = F.viewProj * vec4f(rel, 1.0);
   let margin = 1.65;
@@ -403,10 +402,12 @@ fn meadowPush(bucket: u32, inst: MeadowInst) {
   let allowedErr = (1.35 * dist) / max(focal * scaleY, 0.001);
 
   if (spanPx >= ${MEADOW_FADE_IN_PX}) {
-    // Near / mid 4-level coverage-preserving cluster DAG (data-driven from uploaded clusters.bin)
+    // Near / mid 4-level coverage-preserving cluster DAG with continuous per-instance morph parameter levelT
     for (var sub = 0u; sub < 4u; sub++) {
       var chosenCluster = variantId * 16u + sub * 4u + 3u;
       var chosenBucket = 3u;
+      var chosenParentErr = bitcast<f32>(meadowClusters[chosenCluster * ${MEADOW_CLUSTER_WORDS}u + 3u]);
+      var chosenErr = bitcast<f32>(meadowClusters[chosenCluster * ${MEADOW_CLUSTER_WORDS}u + 4u]);
       for (var lvl = 0u; lvl < 4u; lvl++) {
         let candidate = variantId * 16u + sub * 4u + lvl;
         let cb = candidate * ${MEADOW_CLUSTER_WORDS}u;
@@ -415,13 +416,16 @@ fn meadowPush(bucket: u32, inst: MeadowInst) {
         if (idxCnt > 0u && (errM <= allowedErr || lvl == 3u)) {
           chosenCluster = candidate;
           chosenBucket = lvl;
+          chosenParentErr = bitcast<f32>(meadowClusters[cb + 3u]);
+          chosenErr = errM;
           break;
         }
       }
       if (meadowClusters[chosenCluster * ${MEADOW_CLUSTER_WORDS}u + 1u] > 0u) {
+        let levelT = select(clamp((allowedErr - chosenErr) / max(chosenParentErr - chosenErr, 0.001), 0.0, 1.0), 0.0, chosenBucket == 3u);
         meadowPush(chosenBucket, MeadowInst(
           vec4f(originXZ.x, groundY, originXZ.y, rotRad),
-          vec4f(bitcast<f32>(chosenCluster), scaleY, 1.0, bitcast<f32>(seed)),
+          vec4f(bitcast<f32>(chosenCluster), scaleY, levelT, bitcast<f32>(seed)),
         ));
       }
     }
@@ -488,6 +492,8 @@ export const MEADOW_RENDER_WGSL = FRAME_WGSL + ATMO_CORE_WGSL + SHADOW_FRAME + S
 @group(0) @binding(10) var<storage, read> meadowMorph: array<u32>;
 @group(0) @binding(11) var<storage, read> meadowInstances: array<MeadowInst>;
 @group(0) @binding(12) var<uniform> nearTerrain: MeadowNearDomain;
+@group(0) @binding(17) var landAlbedo: texture_2d<f32>;
+@group(0) @binding(18) var landSampler: sampler;
 @group(0) @binding(19) var<uniform> landSH: ShadowFrame;
 @group(0) @binding(20) var landSolidShadow: texture_depth_2d;
 @group(0) @binding(21) var landShadowCompare: sampler_comparison;
@@ -507,19 +513,23 @@ struct MeadowVertexData {
   col: vec3f,
   along: f32,
   stiff: f32,
-  anchor: f32,
+  wTag: f32,
+  morphXZ: vec2f,
 };
 
 fn meadowReadClusterVert(vi: u32) -> MeadowVertexData {
   let b = vi * ${MEADOW_VERT_WORDS}u;
   let srgb = unpack4x8unorm(meadowVerts[b + 4u]).rgb;
+  let sn = unpack4x8snorm(meadowVerts[b + 3u]);
+  let morphXZ = unpack2x16float(meadowVerts[b + 7u]);
   return MeadowVertexData(
     vec3f(bitcast<f32>(meadowVerts[b]), bitcast<f32>(meadowVerts[b + 1u]), bitcast<f32>(meadowVerts[b + 2u])),
-    normalize(unpack4x8snorm(meadowVerts[b + 3u]).xyz),
+    normalize(sn.xyz),
     pow(srgb, vec3f(2.2)),
     bitcast<f32>(meadowVerts[b + 5u]),
     max(bitcast<f32>(meadowVerts[b + 6u]), 0.8),
-    bitcast<f32>(meadowVerts[b + 7u]),
+    sn.w,
+    morphXZ,
   );
 }
 
@@ -532,7 +542,8 @@ fn meadowReadMorphVert(vBase: u32, vi: u32) -> MeadowVertexData {
     pow(srgb, vec3f(2.2)),
     bitcast<f32>(meadowMorph[b + 5u]),
     max(bitcast<f32>(meadowMorph[b + 6u]), 0.8),
-    bitcast<f32>(meadowMorph[b + 7u]),
+    1.0,
+    vec2f(0.0),
   );
 }
 
@@ -540,6 +551,11 @@ fn meadowDegenerateOut() -> MeadowVertexOut {
   var o: MeadowVertexOut;
   o.pos = vec4f(0.0, 0.0, 0.0, 1.0);
   return o;
+}
+
+fn meadowGroundColour(unshiftedXZ: vec2f) -> vec3f {
+  let landUV = clamp((unshiftedXZ - cfg.domain.xy) / cfg.domain.z + 0.5, vec2f(0.001), vec2f(0.999));
+  return pow(textureSampleLevel(landAlbedo, landSampler, landUV, 1.5).rgb, vec3f(2.2));
 }
 
 fn meadowShadePlace(inst: MeadowInst, vd: MeadowVertexData, fadeVal: f32) -> MeadowVertexOut {
@@ -559,26 +575,32 @@ fn meadowShadePlace(inst: MeadowInst, vd: MeadowVertexData, fadeVal: f32) -> Mea
   let wind = meadowWindField(unshiftedXZ, F.camPos.w, F.windP[0]);
   let rawDir = F.windP[0].xy;
   let windDir = select(vec2f(0.82, 0.57), normalize(rawDir), dot(rawDir, rawDir) > 0.0004);
-  let heightM = max(0.0, vd.pos.y) * inst.attrs.y;
+  let shiftXZ = nearTerrain.grid.yz;
+  let camDist = distance(vec3f(unshiftedXZ.x + shiftXZ.x, groundY, unshiftedXZ.y + shiftXZ.y), F.camPos.xyz);
+  let heightTaper = 1.0 - 0.82 * smoothstep(45.0, 195.0, camDist);
+  let heightM = max(0.0, vd.pos.y) * inst.attrs.y * heightTaper;
 
   // Arc-length preserving wind bend weighted by along^1.6 and inverse stiffness
-  let bendDrive = wind.x * clamp((vd.along * vd.along + vd.anchor * 0.4) * 5.2 / clamp(vd.stiff, 0.8, 32.0), 0.0, 0.85);
+  let bendDrive = wind.x * clamp((vd.along * vd.along + vd.along * 0.08) * 5.2 / clamp(vd.stiff, 0.8, 32.0), 0.0, 0.85);
   let maxBend = max(0.04, heightM * 0.78);
   let bendLen = min(bendDrive * heightM, maxBend);
   let flutter = sin(unshiftedXZ.x * 2.3 + unshiftedXZ.y * 1.9 - F.camPos.w * 4.5 + f32(seed & 15u)) * 0.025 * vd.along * inst.attrs.y;
   let dispXZ = windDir * (bendLen + flutter);
   let arcDrop = (bendLen * bendLen) * 0.44 / max(heightM, 0.12);
 
-  let shiftXZ = nearTerrain.grid.yz;
   let world = vec3f(unshiftedXZ.x + dispXZ.x + shiftXZ.x, groundY + max(0.0, heightM - arcDrop), unshiftedXZ.y + dispXZ.y + shiftXZ.y);
   let nrX = vd.nrm.x * c - vd.nrm.z * s;
   let nrZ = vd.nrm.x * s + vd.nrm.z * c;
   let bentN = normalize(vec3f(nrX + windDir.x * bendDrive * 0.45, max(0.18, vd.nrm.y + 0.22), nrZ + windDir.y * bendDrive * 0.45));
+  let groundCol = meadowGroundColour(unshiftedXZ);
+  let rootMix = 1.0 - smoothstep(0.0, 0.48, vd.along);
+  let distMix = smoothstep(28.0, 110.0, camDist);
+  let colMatch = clamp(max(rootMix * 0.72, distMix), 0.0, 0.94);
 
   var o: MeadowVertexOut;
   o.world = world;
   o.normal = bentN;
-  o.colour = vd.col * hueShift;
+  o.colour = mix(vd.col * hueShift, groundCol, colMatch);
   o.windInfo = vec4f(vd.along, wind.x, wind.y, fadeVal);
   o.pos = F.viewProj * vec4f(earthCurve(world - F.camPos.xyz, F.camPos.y), 1.0);
   return o;
@@ -592,8 +614,21 @@ fn meadowShadePlace(inst: MeadowInst, vd: MeadowVertexData, fadeVal: f32) -> Mea
   let idxCount = meadowClusters[cBase + 1u];
   if (vid >= idxCount) { return meadowDegenerateOut(); }
   let vi = meadowIndices[firstIdx + vid];
-  let vd = meadowReadClusterVert(vi);
-  return meadowShadePlace(inst, vd, inst.attrs.z);
+  var vd = meadowReadClusterVert(vi);
+  let isFade = meadowDraw.y == 4u;
+  if (!isFade) {
+    let levelT = clamp(inst.attrs.z, 0.0, 1.0);
+    if (vd.wTag < 0.0) {
+      let startT = clamp((-vd.wTag - 0.08) / 0.88, 0.0, 0.58);
+      let shrink = smoothstep(startT, min(1.0, startT + 0.42), levelT);
+      vd.pos = vec3f(vd.pos.x + vd.morphXZ.x * shrink, vd.pos.y * (1.0 - shrink), vd.pos.z + vd.morphXZ.y * shrink);
+      vd.along *= (1.0 - shrink);
+    } else {
+      vd.pos = vec3f(vd.pos.x + vd.morphXZ.x * levelT, vd.pos.y, vd.pos.z + vd.morphXZ.y * levelT);
+    }
+  }
+  let fadeVal = select(1.0, inst.attrs.z, isFade);
+  return meadowShadePlace(inst, vd, fadeVal);
 }
 
 fn meadowMorphStepRemap(vBase: u32, vi: u32, stepIdx: u32) -> vec2u {
@@ -640,7 +675,8 @@ fn meadowMorphStepRemap(vBase: u32, vi: u32, stepIdx: u32) -> vec2u {
     mix(a.col, b.col, morphT),
     mix(a.along, b.along, morphT),
     mix(a.stiff, b.stiff, morphT),
-    mix(a.anchor, b.anchor, morphT),
+    mix(a.wTag, b.wTag, morphT),
+    mix(a.morphXZ, b.morphXZ, morphT),
   );
   return meadowShadePlace(inst, vd, inst.attrs.z);
 }
@@ -651,11 +687,14 @@ fn meadowMorphStepRemap(vBase: u32, vi: u32, stepIdx: u32) -> vec2u {
   let sA = cfg.splats[variantId * 2u];
   let sB = cfg.splats[variantId * 2u + 1u];
   let inflate = clamp(inst.attrs.z, 1.0, 4.0);
-  let rx = sA.y * inflate;
-  let ry = sA.z * inst.attrs.y * inflate;
-
   let unshiftedCenter = inst.posRot.xz + vec2f(${MEADOW_TILE_METRES * 0.5});
+  let groundY = meadowGroundY(unshiftedCenter, cfg.domain, elevation);
   let shiftXZ = nearTerrain.grid.yz;
+  let camDist = distance(vec3f(unshiftedCenter.x + shiftXZ.x, groundY, unshiftedCenter.y + shiftXZ.y), F.camPos.xyz);
+  let heightTaper = 1.0 - 0.82 * smoothstep(45.0, 195.0, camDist);
+  let rx = sA.y * inflate;
+  let ry = sA.z * inst.attrs.y * inflate * heightTaper;
+
   let camRightXZ = normalize(select(vec2f(1.0, 0.0), F.camRight.xz, length(F.camRight.xz) > 0.01));
   // Single view-facing 3-vertex triangle covering integrated silhouette (area ~ 2 * rx * ry)
   var ox = 0.0;
@@ -663,7 +702,6 @@ fn meadowMorphStepRemap(vBase: u32, vi: u32, stepIdx: u32) -> vec2u {
   if (vid == 1u) { ox = -rx * 1.45; oy = 0.0; }
   else if (vid == 2u) { ox = rx * 1.45; oy = 0.0; }
 
-  let groundY = meadowGroundY(unshiftedCenter, cfg.domain, elevation);
   let wind = meadowWindField(unshiftedCenter, F.camPos.w, F.windP[0]);
   let rawDir = F.windP[0].xy;
   let windDir = select(vec2f(0.82, 0.57), normalize(rawDir), dot(rawDir, rawDir) > 0.0004);
@@ -671,12 +709,13 @@ fn meadowMorphStepRemap(vBase: u32, vi: u32, stepIdx: u32) -> vec2u {
 
   let seed = bitcast<u32>(inst.attrs.w);
   let hueShift = 0.90 + 0.20 * (f32((seed >> 10u) & 255u) / 255.0);
+  let groundCol = meadowGroundColour(unshiftedCenter);
   let world = vec3f(worldXZ.x + shiftXZ.x, groundY + oy, worldXZ.y + shiftXZ.y);
   var o: MeadowVertexOut;
   o.world = world;
   o.normal = normalize(vec3f(windDir.x * wind.x * 0.3, 1.0, windDir.y * wind.x * 0.3));
-  o.colour = sB.rgb * hueShift;
-  o.windInfo = vec4f(clamp(oy / max(ry * 2.0, 0.2), 0.0, 1.0), wind.x, wind.y, 1.0);
+  o.colour = mix(sB.rgb * hueShift, groundCol, 0.88);
+  o.windInfo = vec4f(clamp(oy / max(ry * 2.0, 0.12), 0.0, 1.0), wind.x, wind.y, 1.0);
   o.pos = F.viewProj * vec4f(earthCurve(world - F.camPos.xyz, F.camPos.y), 1.0);
   return o;
 }
@@ -707,9 +746,11 @@ fn meadowShade(in: MeadowVertexOut, frontFacing: bool) -> vec4f {
   let along = clamp(in.windInfo.x, 0.0, 1.0);
   let gust = in.windInfo.y;
   let swell = in.windInfo.z;
-  // Wind crest catches warm golden sunlight across flattened blade tops; troughs darken slightly in basal shade.
-  let crestSheen = smoothstep(0.15, 0.95, swell) * (0.28 + 0.72 * along);
-  let albedo = clamp(in.colour * (0.52 + 0.55 * along) + vec3f(0.085, 0.075, 0.015) * crestSheen, vec3f(0.0), vec3f(1.0));
+  // Wind crest catches warm golden sunlight matching terrain.js grassWindWave crest modulation.
+  let rootLift = mix(0.84, 1.04, along);
+  let crest = smoothstep(-0.35, 0.75, swell);
+  let windTone = mix(vec3f(0.88, 0.91, 0.86), vec3f(1.24, 1.16, 0.84), crest);
+  let albedo = clamp(in.colour * rootLift * mix(vec3f(1.0), windTone, 0.72), vec3f(0.0), vec3f(1.0));
 
   let shadow = meadowShadowVis(in.world, n) * meadowCloudShadow(in.world);
   let sunVis = solarShadowVisibility(vec3f(shadow));
@@ -722,7 +763,7 @@ fn meadowShade(in: MeadowVertexOut, frontFacing: bool) -> vec4f {
   let skyDir = normalize(vec3f(n.x * 0.65, max(n.y, 0.18), n.z * 0.65));
   let envIrr = textureSampleLevel(envCube, sampC, skyDir, 6.0).rgb;
   let skyUp = skyAtmo(vec3f(0.0, 1.0, 0.0));
-  let ambient = (envIrr * 0.85 + skyUp * vec3f(0.10, 0.12, 0.05) * 0.38) * (0.38 + 0.62 * along);
+  let ambient = (envIrr * 0.85 + skyUp * vec3f(0.10, 0.12, 0.05) * 0.38) * mix(0.78, 1.0, along);
 
   let h = normalize(v + F.sunDir.xyz);
   let bladeSpec = pow(max(dot(n, h), 0.0), 16.0) * (0.04 + 0.09 * gust) * along * nDotL;
@@ -846,7 +887,7 @@ export async function createMeadowGrass({
     usage: B.STORAGE,
   });
 
-  const bucketCaps = [480, 216, 96, 36, 36, MEADOW_MORPH_FACES * 3, MEADOW_MORPH_FACES * 3, 3];
+  const bucketCaps = [720, 360, 180, 84, 84, MEADOW_MORPH_FACES * 3, MEADOW_MORPH_FACES * 3, 3];
   const drawTemplate = new Uint32Array(MEADOW_BUCKETS * MEADOW_DRAW_WORDS);
   for (let b = 0; b < MEADOW_BUCKETS; b++) drawTemplate[b * MEADOW_DRAW_WORDS] = bucketCaps[b];
   const drawsBuf = mkBuf('meadow draws', drawTemplate, B.STORAGE | B.INDIRECT);
@@ -917,6 +958,8 @@ export async function createMeadowGrass({
       [10, { buffer: morphBuf }],
       [11, { buffer: instancesBuf }],
       [12, { buffer: nearDomain }],
+      [17, resMap.get(7)],
+      [18, resMap.get(8)],
     ]);
     const getRes = (id) => extraMap.get(id) ?? resMap.get(id);
 
@@ -936,11 +979,11 @@ export async function createMeadowGrass({
     });
 
     const pipeSpecs = [
-      [clusterPipe, 'meadow cluster', [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 19, 20, 21], [0, 1, 2, 3]],
-      [clusterFadePipe, 'meadow cluster fade', [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 19, 20, 21], [4]],
-      [contFadePipe, 'meadow cont fade', [0, 1, 2, 3, 4, 5, 6, 10, 11, 12, 19, 20, 21], [5]],
-      [contSolidPipe, 'meadow cont solid', [0, 1, 2, 3, 4, 5, 6, 10, 11, 12, 19, 20, 21], [6]],
-      [splatPipe, 'meadow splat', [0, 1, 2, 3, 4, 5, 6, 11, 12, 19, 20, 21], [7]],
+      [clusterPipe, 'meadow cluster', [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 17, 18, 19, 20, 21], [0, 1, 2, 3]],
+      [clusterFadePipe, 'meadow cluster fade', [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 17, 18, 19, 20, 21], [4]],
+      [contFadePipe, 'meadow cont fade', [0, 1, 2, 3, 4, 5, 6, 10, 11, 12, 17, 18, 19, 20, 21], [5]],
+      [contSolidPipe, 'meadow cont solid', [0, 1, 2, 3, 4, 5, 6, 10, 11, 12, 17, 18, 19, 20, 21], [6]],
+      [splatPipe, 'meadow splat', [0, 1, 2, 3, 4, 5, 6, 11, 12, 17, 18, 19, 20, 21], [7]],
     ];
     for (const [pipe, name, ids, buckets] of pipeSpecs) {
       pipeGroups.set(pipe, device.createBindGroup({

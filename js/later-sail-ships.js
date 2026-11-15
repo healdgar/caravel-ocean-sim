@@ -7,6 +7,7 @@ import {laterSailDesign,laterSailHullWidth,laterSailDeck,laterSailDeckWidth,late
 import {laterSailRigContext,laterSailSteeringPose} from './additional-rig.js';
 import {surfaceRestPoint,rigSurfacePose,surfaceRopePoint,withRigPoseContext} from './rig-surface.js';
 import {createAdditionalAssetPose} from './additional-ships.js';
+import {ANCHOR_IRON} from './anchor-iron.js';
 
 const laterMeshAdd=(a,b)=>a.map((v,i)=>v+b[i]);
 const laterMeshSub=(a,b)=>a.map((v,i)=>v-b[i]);
@@ -182,6 +183,10 @@ export function createLaterSailShipMesh(id,{groups,parts}={}){
         quad([x,floor(zA),zA],[x,floor(zB),zB],[x,top,zB],[x,top,zA],23);
         const z=s.z0+(s.z1-s.z0)*(j+.5)/4,w=Math.min(.18/sz,(s.z1-s.z0)/12),y=low+(top-low)*.58,Y=y+.17/sy;
         quad([x+side*.003,y,z-w],[x+side*.003,y,z+w],[x+side*.003,Y,z+w],[x+side*.003,Y,z-w],11);
+        // Brass/teak window muntins & molding frame around cabin lights.
+        const fm=cloud?1:25,off=x+side*.006;
+        for(const wx of [z-w,z,z+w])tube([off,y,wx],[off,Y,wx],.006/sx,fm,.006/sx,4);
+        for(const wy of [y,Y])tube([off,wy,z-w],[off,wy,z+w],.007/sy,fm,.007/sy,4);
       }
     }
     for(const z of [s.z0,s.z1]){
@@ -227,6 +232,8 @@ export function createLaterSailShipMesh(id,{groups,parts}={}){
   for(let i=0;i<r.outline.length;i++){const a=r.outline[i],b=r.outline[(i+1)%r.outline.length];quad([-r.thickness/2,...a],[r.thickness/2,...a],[r.thickness/2,...b],[-r.thickness/2,...b],14);}
   const stockTop=d.steering.wheel?laterSailDeck(id,stock[2])+.04/sy:d.steering.handle[1];
   tube(stock,[stock[0],stockTop,stock[2]],.035/sx,14,.035/sx,8);
+  // Wrought-iron rudder pintle straps (clipper) or bronze heel fitting (yacht).
+  for(const yP of [stock[1]-.45/sy,stock[1]+.15/sy])box([-r.thickness*.6,yP-.015/sy,stock[2]-.03/sz],[r.thickness*.6,yP+.015/sy,stock[2]+.16/sz],cloud?3:25);
   group('helm.rudder','helm.rudder',rudderStart,{type:'rudder'});
   if(d.steering.wheel){
     const start=out.length,w=d.steering.wheel,material=tag(8,1);
@@ -235,6 +242,17 @@ export function createLaterSailShipMesh(id,{groups,parts}={}){
     tube(laterMeshAdd(w.centre,[0,0,-.08]),laterMeshAdd(w.centre,[0,0,.08]),.065/sx,material,.065/sx,8);
     group('helm.wheel','helm.tiller',start,{type:'wheel'});
     const pedestalStart=out.length,base=laterSailDeck(id,w.centre[2]);box([-.08,base,w.centre[2]+.03],[.08,w.centre[1]+.02/sy,w.centre[2]+.14],1);
+    // Brass compass binnacle pedestal just forward of the steering wheel.
+    const bz=w.centre[2]-.28/sz,bFloor=laterSailDeck(id,bz);
+    tube([0,bFloor,bz],[0,w.centre[1]+.02/sy,bz],.055/sx,1,.045/sx,10);
+    tube([0,w.centre[1]+.02/sy,bz],[0,w.centre[1]+.13/sy,bz],.065/sx,25,.050/sx,10);
+    tube([0,w.centre[1]+.04/sy,bz],[0,w.centre[1]+.10/sy,bz],.067/sx,11,.067/sx,10);
+    if(!cloud&&c){
+      for(const side of [-1,1])for(const wz of [c.bounds[0]+.45/sz,c.bounds[1]-.45/sz]){
+        const cy=c.coamingHeight+hullLoftSheer(p,wz);
+        tube([side*(c.halfWidth+.02/sx),cy,wz],[side*(c.halfWidth+.02/sx),cy+.08/sy,wz],.045/sx,25,.040/sx,10);
+      }
+    }
     group('helm.pedestal','hull',pedestalStart);
   }else{
     const start=out.length,handle=d.steering.handle;tube([stock[0],handle[1],stock[2]],handle,.035/sx,7,.022/sx,8);
@@ -247,19 +265,57 @@ export function createLaterSailShipMesh(id,{groups,parts}={}){
   }
   if(d.equipment.anchors)for(const side of [-1,1]){
     const start=out.length,a=context.anchorCathead(side);tube(a.root,a.tip,(cloud?.20:.025)/sx,cloud?1:3,(cloud?.16:.025)/sx,8);
+    if(cloud&&side>0){
+      const sc=1.35,eye=[a.fairlead[0],a.fairlead[1]-.55/sy,a.fairlead[2]];
+      const corner=(i,k)=>laterMeshAdd(eye,[ANCHOR_IRON[i+k*6]*sc/sx,ANCHOR_IRON[i+k*6+1]*sc/sy,ANCHOR_IRON[i+k*6+2]*sc/sz]);
+      const facing=(i,k)=>laterMeshUnit([ANCHOR_IRON[i+k*6+3]*sx,ANCHOR_IRON[i+k*6+4]*sy,ANCHOR_IRON[i+k*6+5]*sz]);
+      for(let i=0;i<ANCHOR_IRON.length;i+=18)tri(corner(i,0),corner(i,1),corner(i,2),3,[facing(i,0),facing(i,1),facing(i,2)]);
+      tube(a.fairlead,eye,.014/sx,2,.014/sx,5,undefined,true);
+    }
     group('anchor.'+(side<0?'port':'starboard'),'anchor.'+(side<0?'port':'starboard')+'.root',start);
   }
   const coamingStart=out.length;
   for(const x of [hatch.x0,hatch.x1])box([x-.035/sx,h.centre[1]-.06/sy,hatch.z0-.025/sz],[x+.035/sx,h.centre[1]+.02/sy,hatch.z1+.025/sz],1);
   for(const z of [hatch.z0,hatch.z1])box([hatch.x0,h.centre[1]-.06/sy,z-.025/sz],[hatch.x1,h.centre[1]+.02/sy,z+.025/sz],1);
+  for(let gx=hatch.x0+.07/sx;gx<hatch.x1-.04/sx;gx+=.11/sx)box([gx-.014/sx,h.centre[1]-.035/sy,hatch.z0+.01],[gx+.014/sx,h.centre[1]-.01/sy,hatch.z1-.01],1);
+  for(let gz=hatch.z0+.07/sz;gz<hatch.z1-.04/sz;gz+=.12/sz)box([hatch.x0+.01,h.centre[1]-.022/sy,gz-.013/sz],[hatch.x1-.01,h.centre[1]-.005/sy,gz+.013/sz],6);
   group('hatch.coaming','hull',coamingStart);
-  const hatchStart=out.length;box([hatch.x0,h.centre[1],hatch.z0],[hatch.x1,h.centre[1]+h.size[1],hatch.z1],18);
+  const hatchStart=out.length;
+  box([hatch.x0,h.centre[1],hatch.z0],[hatch.x1,h.centre[1]+h.size[1],hatch.z1],18);
+  for(const bz of [hatch.z0+.06/sz,hatch.z1-.06/sz])box([hatch.x0,h.centre[1]+h.size[1],bz-.022/sz],[hatch.x1,h.centre[1]+h.size[1]+.02/sy,bz+.022/sz],17);
+  for(const bx of [hatch.x0+(hatch.x1-hatch.x0)*.22,hatch.x1-(hatch.x1-hatch.x0)*.22]){
+    box([bx-.018/sx,h.centre[1]+h.size[1]-.002/sy,hatch.z0+.02/sz],[bx+.018/sx,h.centre[1]+h.size[1]+.016/sy,hatch.z0+.22/sz],cloud?3:25);
+    ring([bx,h.centre[1]+h.size[1]+.022/sy,hatch.z1-.08/sz],.028/sx,.007/sx,cloud?3:25,'y',10);
+  }
   group('hatch.main','hatch.main',hatchStart,{type:'hatch',pivot:[h.centre[0],h.centre[1],hatch.z0]});
+  if(cloud){
+    const fitStart=out.length,wZ=-4.05,wY=laterSailDeck(id,wZ),cZ=1.65,cY=laterSailDeck(id,cZ);
+    for(const wx of [-.24,.24])box([wx-.03/sx,wY,wZ-.03/sz],[wx+.03/sx,wY+.26/sy,wZ+.03/sz],17);
+    tube([-.28,wY+.18/sy,wZ],[.28,wY+.18/sy,wZ],.07/sx,1,.07/sx,12);
+    for(const rx of [-.14,0,.14])ring([rx,wY+.18/sy,wZ],.075/sx,.010/sx,3,'z',12);
+    tube([0,cY,cZ],[0,cY+.42/sy,cZ],.12/sx,1,.095/sx,12);
+    tube([0,cY+.40/sy,cZ],[0,cY+.50/sy,cZ],.14/sx,17,.14/sx,12);
+    ring([0,cY+.45/sy,cZ],.145/sx,.010/sx,3,'y',12);
+    group('deck.fittings','hull',fitStart);
+  }
   for(const [index,m]of context.masts.entries()){
     const start=out.length;tube(m.foot,m.head,m.radius,cloud?1:3,m.tipRadius,16);
     if(cloud){
-      const platform=context.mastPoint(index,m.foot[1]+(m.height-m.foot[1])*.47),radius=.34;
-      for(let j=0;j<16;j++){const a=j*Math.PI/8,b=(j+1)*Math.PI/8,A=laterMeshAdd(platform,[radius*Math.cos(a),0,radius*Math.sin(a)]),B=laterMeshAdd(platform,[radius*Math.cos(b),0,radius*Math.sin(b)]);tri(platform,A,B,1);tube(A,B,.025/sx,1,.025/sx,6);}
+      for(let y=m.foot[1]+.5/sy;y<m.head[1]*.85;y+=1.2/sy){
+        const mr=m.radius*(1-.6*(y-m.foot[1])/(m.head[1]-m.foot[1]))+.005/sx;
+        ring(context.mastPoint(index,y),mr,.009/sx,3,'y',12);
+      }
+      for(const hf of [.47,.80]){
+        const platform=context.mastPoint(index,m.foot[1]+(m.height-m.foot[1])*hf),radius=hf>.6?.24:.38,rimH=hf>.6?.16:.24;
+        for(let j=0;j<16;j++){
+          const a=j*Math.PI/8,b=(j+1)*Math.PI/8,A=laterMeshAdd(platform,[radius*Math.cos(a),0,radius*Math.sin(a)]),B=laterMeshAdd(platform,[radius*Math.cos(b),0,radius*Math.sin(b)]);
+          tri(platform,A,B,1);tube(A,B,.024/sx,17,.024/sx,6,undefined,true);
+          tube(laterMeshAdd(A,[0,rimH/sy,0]),laterMeshAdd(B,[0,rimH/sy,0]),.018/sx,17,.018/sx,6,undefined,true);
+          if(j%2===0)tube(A,laterMeshAdd(A,[0,rimH/sy,0]),.014/sx,1,.014/sx,5);
+          if(j%4===0)tube(context.mastPoint(index,platform[1]-.35/sy),A,.018/sx,2,.014/sx,5);
+        }
+        ring(laterMeshAdd(platform,[0,rimH/sy,0]),radius+.01/sx,.009/sx,3,'y',14);
+      }
     }
     group('mast.'+m.id,'mast.'+m.id,start);
   }
@@ -277,6 +333,22 @@ export function createLaterSailShipMesh(id,{groups,parts}={}){
     }
   }
   const standingStart=out.length;for(const line of context.lines.filter(line=>line.static))rope(line.a,line.b,line.r??.008,2);
+  // Outboard shroud channels, deadeyes & iron chainplates on clipper / stainless tangs on yacht.
+  for(let mIdx=0;mIdx<context.masts.length;mIdx++)for(const side of [-1,1]){
+    const shrouds=context.lines.filter(l=>l.static&&l.kind==='shroud'&&l.mast===mIdx&&l.side===side);
+    if(!shrouds.length)continue;
+    if(cloud){
+      const zMin=Math.min(...shrouds.map(l=>l.a[2]))-.08,zMax=Math.max(...shrouds.map(l=>l.a[2]))+.08;
+      const chY=shrouds.reduce((acc,l)=>acc+l.a[1],0)/shrouds.length-.04/sy;
+      const chX0=side*(laterSailDeckWidth(id,(zMin+zMax)*.5)-.02/sx),chX1=side*(laterSailDeckWidth(id,(zMin+zMax)*.5)+.06/sx);
+      box([Math.min(chX0,chX1),chY-.02/sy,zMin],[Math.max(chX0,chX1),chY+.02/sy,zMax],17);
+    }
+    for(const sh of shrouds){
+      const f=sh.a;
+      tube([f[0]-side*.016/sx,f[1],f[2]],[f[0]+side*.016/sx,f[1],f[2]],.032/sx,cloud?16:3,.032/sx,8);
+      tube([f[0]+side*.008/sx,f[1]-.02/sy,f[2]],[f[0]+side*.008/sx,f[1]-.30/sy,f[2]],.014/sx,3,.011/sx,5);
+    }
+  }
   group('rig.standing','hull',standingStart);
   for(const surface of d.surfaces)if(surface.stay)for(const fitting of [surface.stay.lowerFitting,surface.stay.upperFitting]){
     const start=out.length;tube(fitting.body,fitting.position,surface.stay.r*1.25,3,surface.stay.r*1.25,6);

@@ -1404,7 +1404,8 @@ export function createVoyageController(cfg) {
   // Always false, so it can sit in the sighting test: builds the coast along a bearing.
   function requestCoastToward(terrain, bearing) {
     const rad = (bearing * Math.PI) / 180, sx = Math.sin(rad), sz = -Math.cos(rad), span = terrain.region?.span ?? 8192;
-    for (let d = span * 0.5; d <= 34000; d += span * 0.5) terrain.ensureSectionAt?.(boat.x + sx * d, boat.z + sz * d);
+    const req = terrain.ensureMockAt ?? terrain.ensureSectionAt;
+    for (let d = span * 0.5; d <= 34000; d += span * 0.5) req?.call(terrain, boat.x + sx * d, boat.z + sz * d);
     return false;
   }
 
@@ -1497,10 +1498,11 @@ export function createVoyageController(cfg) {
     let landAheadIn3D = false;
     if (terrain && typeof terrain.height === 'function' && mapLandAhead) {
       const at = regionLocalOrigin({ shipLat: lat, shipLon: lon, shipX: boat.x, shipZ: boat.z, regionLat: mapLandAhead.lat, regionLon: mapLandAhead.lon });
-      terrain.ensureSectionAt?.(at.x, at.z);
-      // Built coast outranks the coarse map. Only built coast can ground her, and the map's cell
-      // can sit kilometres from the shore, so a built section with no land at that point still counts.
-      landAheadIn3D = (terrain.coverageAt?.(at.x, at.z) ?? 'known') === 'known'
+      (terrain.ensureMockAt ?? terrain.ensureSectionAt)?.call(terrain, at.x, at.z);
+      // Built coast outranks the coarse map. Only built or mocked coast can establish the silhouette, and the map's cell
+      // can sit kilometres from the shore, so a section with no land at that point still counts.
+      const covAt = terrain.coverageAt?.(at.x, at.z) ?? 'known';
+      landAheadIn3D = (covAt === 'known' || covAt === 'mocked')
         && (Boolean(terrain.coverageAt) || [[0, 0], [1500, 0], [-1500, 0], [0, 1500], [0, -1500]].some(([ox, oz]) => terrain.height(at.x + ox, at.z + oz) > -8));
     }
     const forwardCoastMismatch = Boolean(
@@ -1565,10 +1567,19 @@ export function createVoyageController(cfg) {
       for (let d = 40; d <= reach && !Number.isFinite(hazardM); d += d < 1000 ? 40 : d < 3000 ? 80 : 160) {
         const px = boat.x + sinC * d, pz = boat.z - cosC * d;
         // Water not built yet reads as deep. Ask for it, and do not outrun it.
-        if (terrain.coverageAt?.(px, pz) === 'pending') {
+        const cov = terrain.coverageAt?.(px, pz);
+        if (d > 450) {
+          if (cov === 'pending') {
+            (terrain.ensureMockAt ?? terrain.ensureSectionAt)?.call(terrain, px, pz);
+            unbuiltM = d;
+            break;
+          }
+        } else if (cov === 'pending' || cov === 'mocked') {
           terrain.ensureSectionAt?.(px, pz);
-          unbuiltM = d;
-          break;
+          if (cov === 'pending') {
+            unbuiltM = d;
+            break;
+          }
         }
         for (const side of [0, 60, -60]) {
           let h = terrain.height(px + cosC * side, pz + sinC * side);

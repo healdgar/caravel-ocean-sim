@@ -113,7 +113,7 @@ export const CITY_CULL = cullShell(1, /* wgsl */ `
 fn scenerySelect(index:u32,group:u32,instance:SceneryInstance)->i32 {
   let house=group<${CITY_HOUSE_TYPES}u;
   let compound=(group>=${CITY_TYPE.CHURCH_LEFT}u&&group<=${CITY_TYPE.CHURCH_GREAT}u)||group==${CITY_TYPE.GATE}u||group==${CITY_TYPE.CURTAIN_SHORT}u||group==${CITY_TYPE.CURTAIN_LONG}u;
-  let bridge=group==${CITY_TYPE.STONE_BRIDGE}u||group==${CITY_TYPE.FOOTBRIDGE}u;
+  let bridge=group==${CITY_TYPE.STONE_BRIDGE}u||group==${CITY_TYPE.STONE_BRIDGE_SPAN}u||group==${CITY_TYPE.FOOTBRIDGE}u;
   let worldRoot=instance.root.xyz+vec3f(params.z,0.0,params.w);
   let relative=worldRoot+vec3f(0.0,6.0,0.0)-F.camPos.xyz;
   let maxDist=select(params.x+select(36.0,52.0,compound),max(params.x+120.0,2800.0),bridge);
@@ -152,7 +152,8 @@ export function createSceneryCull({ device, pipeline, frameUBO, label, capacity,
     // First instance and each instance's bucket, for a run of slots coming into use.
     setInstances(slot, floats, slotGroups) {
       if (floats.length) device.queue.writeBuffer(instances, slot * INSTANCE_BYTES, floats);
-      device.queue.writeBuffer(groups, slot * 4, slotGroups);
+      const u32Groups = slotGroups instanceof Uint32Array ? slotGroups : Uint32Array.from(slotGroups);
+      if (u32Groups.length) device.queue.writeBuffer(groups, slot * 4, u32Groups);
     },
     clearSlots(slot, count) { device.queue.writeBuffer(groups, slot * 4, emptied, 0, count); },
     setPixelError(pixelError, scale = 1) {

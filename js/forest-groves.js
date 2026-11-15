@@ -424,7 +424,11 @@ export async function createForestGroves({ device, shader, module, frameUBO, pac
     });
     const scene = bind(pipeline), cloud = cloudEntries(pipeline);
     const sections = new Map(), stats = { loaded: true, tileMetres: m.tileMetres, levels: FOREST_GROVE_LEVELS, pixelsPerSquare, sections: 0, groves: 0, bakes: 0 };
-    const release = (section) => { for (const resource of section.owned) resource.destroy(); };
+    const release = (section, immediate = false) => {
+      const drop = () => { for (const resource of section.owned) resource.destroy(); };
+      if (!immediate && typeof device.queue?.onSubmittedWorkDone === 'function') device.queue.onSubmittedWorkDone().then(drop).catch(() => {});
+      else drop();
+    };
     const prepare = (key, source) => {
       const region = source.region, base = !!source.ground, size = base ? baseCoverSize : sectionCoverSize, span = region.span;
       const most = Math.ceil(span / m.tileMetres - 1e-6) ** 2, mine = [];
@@ -438,7 +442,7 @@ export async function createForestGroves({ device, shader, module, frameUBO, pac
       const uniform = hold(device.createBuffer({ label: `forest grove section ${key}`, size: 32, usage: B.UNIFORM | B.COPY_DST }));
       const entry = (binding, buffer) => ({ binding, resource: { buffer } });
       return {
-        owned: mine, ownsGround: !source.ground, ground, cover, tiles, draws, uniform, size, most, count: 0, stamp: '', bytes: null,
+        owned: mine, ownsGround: !source.ground, groundSize: region.size, ground, cover, tiles, draws, uniform, size, most, count: 0, stamp: '', bytes: null,
         resetGroup: device.createBindGroup({ layout: reset.getBindGroupLayout(0), entries: [entry(5, draws)] }),
         cullGroup: device.createBindGroup({ layout: cull.getBindGroupLayout(0), entries: [entry(0, frameUBO), entry(1, policy), entry(2, uniform), entry(3, tiles), entry(4, list), entry(5, draws)] }),
         drawGroup: device.createBindGroup({ layout: pipeline.getBindGroupLayout(2), entries: [
@@ -460,7 +464,7 @@ export async function createForestGroves({ device, shader, module, frameUBO, pac
           const key = source.key, stamp = forestGroveStamp(source);
           seen.add(key);
           let section = sections.get(key);
-          if (section && (section.size !== (source.ground ? baseCoverSize : sectionCoverSize) || section.most !== Math.ceil(source.region.span / m.tileMetres - 1e-6) ** 2 || section.ownsGround !== !source.ground)) { release(section); section = null; }
+          if (section && (section.size !== (source.ground ? baseCoverSize : sectionCoverSize) || section.most !== Math.ceil(source.region.span / m.tileMetres - 1e-6) ** 2 || section.ownsGround !== !source.ground || section.groundSize !== source.region.size)) { release(section); section = null; }
           if (!section) { section = prepare(key, source); sections.set(key, section); }
           const region = source.region;
           if (section.stamp !== stamp) {
@@ -500,7 +504,7 @@ export async function createForestGroves({ device, shader, module, frameUBO, pac
           for (let level = 0; level < FOREST_GROVE_LEVELS; level++) { pass.setBindGroup(3, levels[level]); pass.drawIndexedIndirect(section.draws, level * 20); }
         }
       },
-      destroy() { for (const section of sections.values()) release(section); sections.clear(); for (const resource of owned) resource.destroy(); },
+      destroy() { for (const section of sections.values()) release(section, true); sections.clear(); for (const resource of owned) resource.destroy(); },
     };
   } catch (error) { for (const resource of owned) resource.destroy(); throw error; }
 }

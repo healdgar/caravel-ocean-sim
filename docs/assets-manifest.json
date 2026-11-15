@@ -195,24 +195,24 @@
     "sha256": "56f1aa1fa50df97ef7a07537147f78576bcac0d7e2ac207110656d3dae02dc27"
   },
   "assets/ground-cover/portugal/meadows-gpu/vertices.bin.gz": {
-    "url": "assets/ground-cover/portugal/meadows-gpu/vertices.bin.f5c6659f34625f43.gz",
-    "bytes": 384248,
-    "sha256": "f5c6659f34625f433e8c3796c012635b1c8956eb6d19acea9df96dcd3d7c7856"
+    "url": "assets/ground-cover/portugal/meadows-gpu/vertices.bin.450aa196bf4efc3a.gz",
+    "bytes": 914674,
+    "sha256": "450aa196bf4efc3a256986f6fe79fb580251f161dfd9cc97ec1094ce10c35ef0"
   },
   "assets/ground-cover/portugal/meadows-gpu/indices.bin.gz": {
-    "url": "assets/ground-cover/portugal/meadows-gpu/indices.bin.70d4cbe055c8a5f6.gz",
-    "bytes": 59456,
-    "sha256": "70d4cbe055c8a5f658cedfd0e86462a2e15f15990bbd32593a89c19312b132b8"
+    "url": "assets/ground-cover/portugal/meadows-gpu/indices.bin.8fce6496d82e88d9.gz",
+    "bytes": 89265,
+    "sha256": "8fce6496d82e88d9e239c19f9eb44d59a665a51781d1c0ba97f7396a08d4a7d3"
   },
   "assets/ground-cover/portugal/meadows-gpu/clusters.bin.gz": {
-    "url": "assets/ground-cover/portugal/meadows-gpu/clusters.bin.37d3dc34ca85aba5.gz",
-    "bytes": 1558,
-    "sha256": "37d3dc34ca85aba5c06da211ea72ef67fd8c9b40591618cf44d14f2252ae82a4"
+    "url": "assets/ground-cover/portugal/meadows-gpu/clusters.bin.c6c3a4b2955fb16a.gz",
+    "bytes": 1497,
+    "sha256": "c6c3a4b2955fb16a612fbede7c4f2d815b1aefd8978c4bab0a1c21d92ec2bec4"
   },
   "assets/ground-cover/portugal/meadows-gpu/morph.bin.gz": {
-    "url": "assets/ground-cover/portugal/meadows-gpu/morph.bin.1a0688321c612bea.gz",
-    "bytes": 2520,
-    "sha256": "1a0688321c612bead8d4ee2a3898706322384ea817f50cb6aa6e9ebd80a90e49"
+    "url": "assets/ground-cover/portugal/meadows-gpu/morph.bin.5afb22bbf1223014.gz",
+    "bytes": 2543,
+    "sha256": "5afb22bbf12230142d1ef2b2e06ed5b755cadfbf248a96fe7782dda4a19e1efa"
   },
   "assets/wildlife/whale.glb": {
     "url": "assets/wildlife/whale.af1b3d2448efbc0f.glb",
@@ -1750,9 +1750,9 @@
     "sha256": "1d2651bbbcdd39c48b71a1ef83077e6b419f8c2d18efda4546aa38c838992fd3"
   },
   "assets/ground-cover/portugal/meadows-gpu/manifest.json": {
-    "url": "assets/ground-cover/portugal/meadows-gpu/manifest.805e47e5b63e50fd.json",
-    "bytes": 6566,
-    "sha256": "805e47e5b63e50fd9d8a9e8169ef1537d36300abb1b3fd2e08dba6d3b0bfc984"
+    "url": "assets/ground-cover/portugal/meadows-gpu/manifest.b1d795377ddc80fd.json",
+    "bytes": 6584,
+    "sha256": "b1d795377ddc80fd2b69746c3c6f785bfcce6acab2dee90a4a1288c62f42863b"
   },
   "assets/tree-foliage.png": {
     "url": "assets/tree-foliage.ad40fb471213f1f4.png",

@@ -128,7 +128,7 @@ test('a founded board stands in the game as its own buildings, land and woods, a
   for (let i = 0; i < plan.typedCount; i++) {
     const at = plan.typed.subarray(i * CITY_TYPED_FLOATS, (i + 1) * CITY_TYPED_FLOATS);
     assert.ok(at.every(Number.isFinite) && plan.typedTypes[i] < CITY_BUILDING_TYPES.length, `building ${i}`);
-    if (![CITY_TYPE.WHARF, CITY_TYPE.FOOTBRIDGE, CITY_TYPE.STONE_BRIDGE].includes(plan.typedTypes[i])) assert.ok(bayHeight(at[0], at[2]) > 0.5, `building ${i} stands in the water at ${at[0]}, ${at[2]}`);
+    if (![CITY_TYPE.WHARF, CITY_TYPE.FOOTBRIDGE, CITY_TYPE.STONE_BRIDGE, CITY_TYPE.STONE_BRIDGE_SPAN].includes(plan.typedTypes[i])) assert.ok(bayHeight(at[0], at[2]) > 0.5, `building ${i} stands in the water at ${at[0]}, ${at[2]}`);
   }
   assert.ok(stats.milliseconds < 2000, `laid in ${stats.milliseconds} ms`);
 
@@ -211,7 +211,7 @@ test('a founded board stands in the game as its own buildings, land and woods, a
   assert.equal(lengths, B.fences);
   assert.ok(fenced > 0 && lengths > fenced, `${lengths} lengths of fence on ${fenced} runs`);
   assert.ok(WORKS_FENCE_M > 2 && board.works.yards.length === B.yards);
-  assert.equal(of[CITY_TYPE.FOOTBRIDGE] + of[CITY_TYPE.STONE_BRIDGE], B.bridges);
+  assert.equal(of[CITY_TYPE.FOOTBRIDGE] + of[CITY_TYPE.STONE_BRIDGE] + of[CITY_TYPE.STONE_BRIDGE_SPAN], B.bridges);
 
   // Its land: uses only, no colour (the ground keeps its geography's; the GPU stamps the parcels on it).
   const kinds = new Set(); let woods = 0, forest = 0, town = 0, openPasture = 0, woodMargin = 0, openTilled = 0;

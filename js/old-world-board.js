@@ -52,6 +52,37 @@ export const BOARD_THATCHED = Object.freeze({
 // roads), so they are found here from its record of both. `roads` are {points: [x, z, …]}, `rivers` {points: [x, z,
 // half-width, …]}; a second road at a crossing uses the bridge already there.
 export const BOARD_ROAD_BRIDGE = Object.freeze({ width: 6, arch: 11, rise: 0.65 });
+function roadDirectionAt(P, segIdx, t, win = 14) {
+  const ax = P[segIdx], az = P[segIdx + 1], bx = P[segIdx + 2], bz = P[segIdx + 3];
+  const cx = ax + (bx - ax) * t, cz = az + (bz - az) * t;
+  let backX = ax, backZ = az, rem = win, px = cx, pz = cz, k = segIdx;
+  while (k >= 0 && rem > 1e-6) {
+    const qx = P[k], qz = P[k + 1], d = Math.hypot(px - qx, pz - qz);
+    if (d >= rem) {
+      const f = rem / d;
+      backX = px + (qx - px) * f; backZ = pz + (qz - pz) * f;
+      rem = 0; break;
+    }
+    rem -= d; px = qx; pz = qz; k -= 2;
+    backX = px; backZ = pz;
+  }
+  let fwdX = bx, fwdZ = bz;
+  rem = win; px = cx; pz = cz; k = segIdx + 2;
+  while (k + 1 < P.length && rem > 1e-6) {
+    const qx = P[k], qz = P[k + 1], d = Math.hypot(qx - px, qz - pz);
+    if (d >= rem) {
+      const f = rem / d;
+      fwdX = px + (qx - px) * f; fwdZ = pz + (qz - pz) * f;
+      rem = 0; break;
+    }
+    rem -= d; px = qx; pz = qz; k += 2;
+    fwdX = px; fwdZ = pz;
+  }
+  const dx = fwdX - backX, dz = fwdZ - backZ, L = Math.hypot(dx, dz);
+  if (L > 1e-4) return [dx / L, dz / L];
+  const segL = Math.hypot(bx - ax, bz - az);
+  return segL > 1e-6 ? [(bx - ax) / segL, (bz - az) / segL] : [1, 0];
+}
 export function boardRoadCrossings(roads, rivers, places = null) {
   const out = [];
   const candidates = [];
@@ -80,11 +111,14 @@ export function boardRoadCrossings(roads, rivers, places = null) {
           if (Math.abs(den) < 1e-9) continue;
           const t = ((cx - ax) * (dz - cz) - (cz - az) * (dx - cx)) / den, u = ((cx - ax) * (bz - az) - (cz - az) * (bx - ax)) / den;
           if (t < 0 || t >= 1 || u < 0 || u >= 1) continue;
-          const L = Math.hypot(bx - ax, bz - az), x = ax + (bx - ax) * t, z = az + (bz - az) * t;
+          const x = ax + (bx - ax) * t, z = az + (bz - az) * t;
           if (out.some((o) => Math.hypot(o.x - x, o.z - z) < 14)) continue;
-          // Across a river met askew the water is wider along the road; a road is brought to no shallower a crossing than this.
-          const sine = Math.abs(den) / (L * Math.hypot(dx - cx, dz - cz)), half = R[j + 2] + (R[j + 5] - R[j + 2]) * u;
-          out.push({ x, z, ux: (bx - ax) / L, uz: (bz - az) / L, span: 2 * half / Math.max(0.35, sine), stone: road.stone });
+          // Align along the smoothed ±14 m road tangent and guard extreme grazing angles so bridges seat bank-to-bank cleanly.
+          const [ux, uz] = roadDirectionAt(P, i, t, 14);
+          const riverLen = Math.hypot(dx - cx, dz - cz);
+          const sine = riverLen > 1e-6 ? Math.abs(ux * (dz - cz) - uz * (dx - cx)) / riverLen : 1;
+          const half = R[j + 2] + (R[j + 5] - R[j + 2]) * u;
+          out.push({ x, z, ux, uz, span: 2 * half / Math.max(0.42, sine), stone: road.stone });
         }
       }
     }
@@ -569,8 +603,56 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
   // A run of fence from one point to another, a length at a time, each on its own ground; none where a building
   // stands or a street runs through.
   const spans = works.trackBridges ?? [];
-  // On a bridge and at its two ends the way is open: no fence is run across it.
-  const bridged = (x, z) => { for (let k = 0; k + 5 < spans.length; k += 6) { const dx = x - ox - spans[k], dz = z - oz - spans[k + 1], ux = spans[k + 2], uz = spans[k + 3]; if (Math.abs(dx * ux + dz * uz) < spans[k + 4] / 2 + 3 && Math.abs(dx * uz - dz * ux) < 4) return true; } return false; };
+  const roadCrossings = boardRoadCrossings(board.roads, board.rivers, board.places);
+  const portBridges = (port.instances ?? []).filter((inst) => inst?.prefabId === 'stone_arch_bridge');
+  // On a bridge and at its two ±6 m approaches the way is open: no fence is run across it.
+  const inBridgeStrip = (x, z, bx, bz, ux, uz, halfLen, halfW) => {
+    const dx = x - bx, dz = z - bz;
+    return Math.abs(dx * ux + dz * uz) < halfLen && Math.abs(dx * uz - dz * ux) < halfW;
+  };
+  const bridged = (x, z) => {
+    for (let k = 0; k + 5 < spans.length; k += 6) {
+      if (inBridgeStrip(x, z, ox + spans[k], oz + spans[k + 1], spans[k + 2], spans[k + 3], spans[k + 4] / 2 + 6, 4.5)) return true;
+    }
+    for (const q of roadCrossings) {
+      const reach = Math.max(4.5, q.span / 2 + 2.4);
+      if (inBridgeStrip(x, z, ox + q.x, oz + q.z, q.ux, q.uz, reach + 6, 4.8)) return true;
+    }
+    for (const pb of portBridges) {
+      const ux = Math.sin(pb.yaw ?? 0), uz = Math.cos(pb.yaw ?? 0);
+      if (inBridgeStrip(x, z, pb.x, pb.z, ux, uz, (pb.length ?? 24) * 0.5 + 6, (pb.width ?? 9.6) * 0.5 + 2)) return true;
+    }
+    return false;
+  };
+  const snapRoadOrStreet = (bx, bz, outX, outZ, halfLen, px, pz, maxDist = 28) => {
+    let bestD = maxDist, bestPt = null;
+    segs.some(px, pz, maxDist + 16, (g) => {
+      const dx = g.bx - g.ax, dz = g.bz - g.az, l2 = dx * dx + dz * dz;
+      const t = l2 > 1e-9 ? Math.max(0, Math.min(1, ((px - g.ax) * dx + (pz - g.az) * dz) / l2)) : 0;
+      const cx = g.ax + dx * t, cz = g.az + dz * t;
+      if ((cx - bx) * outX + (cz - bz) * outZ <= halfLen * 0.45) return;
+      const d = Math.hypot(px - cx, pz - cz);
+      if (d < bestD) { bestD = d; bestPt = [cx, cz]; }
+    });
+    return bestPt;
+  };
+  const stampBridgeApproach = (bx, bz, ux, uz, length, width) => {
+    const halfLen = length * 0.5;
+    for (const dir of [-1, 1]) {
+      const outX = ux * dir, outZ = uz * dir;
+      const ex = bx + outX * halfLen, ez = bz + outZ * halfLen;
+      const inX = ex - outX * 2.0, inZ = ez - outZ * 2.0;
+      const extX = ex + outX * 4.5, extZ = ez + outZ * 4.5;
+      const snap = snapRoadOrStreet(bx, bz, outX, outZ, halfLen, extX, extZ, 28);
+      const rawPts = [
+        [inX, inZ, width, 0.85],
+        [ex, ez, width, 0.85],
+        [extX, extZ, Math.max(4.4, width * 0.9), 0.72],
+        ...(snap ? [[snap[0], snap[1], 5.0, 0.56]] : []),
+      ].filter(([qx, qz]) => inside(qx, qz, 4));
+      if (rawPts.length >= 2) paving.push({ points: rawPts });
+    }
+  };
   const fence = (ax, az, bx, bz, stone) => {
     const L = Math.hypot(bx - ax, bz - az);
     if (L < 1.5) return;
@@ -589,19 +671,29 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
   for (let k = 0; k + 5 < spans.length; k += 6) {
     const x = ox + spans[k], z = oz + spans[k + 1], ux = spans[k + 2], uz = spans[k + 3], span = Math.max(6, spans[k + 4]), half = span / 2;
     if (!inside(x, z, 12)) continue;
+    // Deduplicate track crossings that collide with a primary road crossing (which builds the aligned wide bridge).
+    if (roadCrossings.some((q) => Math.hypot(ox + q.x - x, oz + q.z - z) < 18)) continue;
+    const nearPort = portBridges.find((pb) => Math.hypot(pb.x - x, pb.z - z) < 24);
     const hA = heightAt(x - ux * (half + 2.5), z - uz * (half + 2.5));
     const hB = heightAt(x + ux * (half + 2.5), z + uz * (half + 2.5));
     if (Math.max(hA, hB) <= 0.12) continue;
     const deck = Math.max(hA, hB, BOARD_DRY_M) + 0.55;
+    if (nearPort) {
+      const pux = Math.sin(nearPort.yaw ?? 0), puz = Math.cos(nearPort.yaw ?? 0), pLen = nearPort.length ?? (span + 3.0), pW = nearPort.width ?? 9.6;
+      bridges.push({ x: nearPort.x, z: nearPort.z, ux: pux, uz: puz, length: pLen, halfWidth: pW * 0.5, deckY: nearPort.y ?? deck, span, isStone: true, cityIndices: [], collapsed: false });
+      stampBridgeApproach(nearPort.x, nearPort.z, pux, puz, pLen, pW);
+      continue;
+    }
     const isStone = Boolean(spans[k + 5]);
     const totalLen = span + 3.0;
     slight(isStone ? CITY_TYPE.STONE_BRIDGE : CITY_TYPE.FOOTBRIDGE, x, deck, z, Math.atan2(ux, uz), 0.5, totalLen);
     const width = CITY_BUILDING_TYPES[isStone ? CITY_TYPE.STONE_BRIDGE : CITY_TYPE.FOOTBRIDGE].width;
     bridges.push({ x, z, ux, uz, length: totalLen, halfWidth: width * 0.5, deckY: deck, span, isStone, cityIndices: [typedTypes.length - 1], collapsed: false });
+    stampBridgeApproach(x, z, ux, uz, totalLen, width);
     built.bridges++;
   }
   // A road's or arterial street's bridge where it crosses a river: stone, the road's width, bank to bank in arches.
-  for (const q of boardRoadCrossings(board.roads, board.rivers, board.places)) {
+  for (const q of roadCrossings) {
     const x = ox + q.x, z = oz + q.z, reach = Math.max(4.5, q.span / 2 + 2.4), T = CITY_BUILDING_TYPES[q.stone === false ? CITY_TYPE.FOOTBRIDGE : CITY_TYPE.STONE_BRIDGE];
     if (!inside(x, z, 12)) continue;
     if (bridges.some((b) => Math.hypot(b.x - x, b.z - z) < 14)) continue;
@@ -609,10 +701,17 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     const hB = heightAt(x + q.ux * (reach + 1.5), z + q.uz * (reach + 1.5));
     if (Math.max(hA, hB) <= 0.12) continue;
     const deck = Math.max(hA, hB, BOARD_DRY_M) + BOARD_ROAD_BRIDGE.rise;
+    const nearPort = portBridges.find((pb) => Math.hypot(pb.x - x, pb.z - z) < 24);
+    if (nearPort) {
+      const pux = Math.sin(nearPort.yaw ?? 0), puz = Math.cos(nearPort.yaw ?? 0), pLen = nearPort.length ?? (reach * 2), pW = nearPort.width ?? 9.6;
+      bridges.push({ x: nearPort.x, z: nearPort.z, ux: pux, uz: puz, length: pLen, halfWidth: pW * 0.5, deckY: nearPort.y ?? deck, span: q.span, isStone: true, cityIndices: [], collapsed: false });
+      stampBridgeApproach(nearPort.x, nearPort.z, pux, puz, pLen, pW);
+      continue;
+    }
     const isStone = q.stone !== false;
-    const bridgeType = isStone ? CITY_TYPE.STONE_BRIDGE : CITY_TYPE.FOOTBRIDGE;
     const bridgeWidth = isStone ? BOARD_ROAD_BRIDGE.width : T.width;
     const arches = isStone ? Math.max(1, Math.ceil(reach * 2 / BOARD_ROAD_BRIDGE.arch)) : 1, each = reach * 2 / arches;
+    const bridgeType = isStone ? (arches > 1 ? CITY_TYPE.STONE_BRIDGE_SPAN : CITY_TYPE.STONE_BRIDGE) : CITY_TYPE.FOOTBRIDGE;
     const cityIndices = [];
     for (let a = 0; a < arches; a++) {
       const along = (a + 0.5) * each - reach;
@@ -621,6 +720,7 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
       built.bridges++;
     }
     bridges.push({ x, z, ux: q.ux, uz: q.uz, length: reach * 2, halfWidth: bridgeWidth * 0.5, deckY: deck, span: q.span, isStone, cityIndices, collapsed: false });
+    stampBridgeApproach(x, z, q.ux, q.uz, reach * 2, bridgeWidth);
     built.roadBridges++;
   }
   // A churchyard: a dry-stone wall about it, and its graves as they are dug.

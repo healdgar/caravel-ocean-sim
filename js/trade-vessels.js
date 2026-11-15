@@ -134,12 +134,12 @@ function appendTaperedCylinder(verts, inds, p0, p1, rMid, rEnd, sides, matId, bu
   }
 }
 
-function appendFurledSailBundle(verts, inds, minP, maxP, matCanvas = 9, matRope = 12) {
+function appendFurledSailBundle(verts, inds, minP, maxP, matCanvas = 9, matRope = 12, mastHead = null) {
   const sx = maxP[0] - minP[0], sy = maxP[1] - minP[1], sz = maxP[2] - minP[2];
   const span = Math.hypot(sx, sy, sz);
   if (span < 0.25) return;
-  const rDrop = Math.min(0.14, span * 0.045);
-  // Hang compactly beneath the yard centerline
+  const rDrop = Math.min(0.155, span * 0.048);
+  // Hang compactly beneath the yard centerline with a stout midships bunt.
   const trim = 0.08;
   const p0 = [
     minP[0] + sx * trim,
@@ -152,17 +152,28 @@ function appendFurledSailBundle(verts, inds, minP, maxP, matCanvas = 9, matRope 
     maxP[2] - sz * trim,
   ];
   // Main furled canvas bunt (bulges thicker amidships like stowed sailcloth)
-  appendTaperedCylinder(verts, inds, p0, p1, rDrop * 1.15, rDrop * 0.42, 8, matCanvas, 1);
+  appendTaperedCylinder(verts, inds, p0, p1, rDrop * 1.24, rDrop * 0.42, 10, matCanvas, 1);
+  // Secondary tucked fold underneath for cloth depth
+  appendTaperedCylinder(verts, inds, [p0[0] + sx * 0.12, p0[1] - rDrop * 0.28, p0[2] + sz * 0.12],
+    [p1[0] - sx * 0.12, p1[1] - rDrop * 0.28, p1[2] - sz * 0.12], rDrop * 0.72, rDrop * 0.28, 8, matCanvas, 1);
   // Tightly wound rope gasket lashings along the yard
-  for (const frac of [0.16, 0.36, 0.5, 0.64, 0.84]) {
+  for (const frac of [0.10, 0.24, 0.38, 0.5, 0.62, 0.76, 0.90]) {
     const gx0 = p0[0] + (p1[0] - p0[0]) * (frac - 0.014);
     const gy0 = p0[1] + (p1[1] - p0[1]) * (frac - 0.014);
     const gz0 = p0[2] + (p1[2] - p0[2]) * (frac - 0.014);
     const gx1 = p0[0] + (p1[0] - p0[0]) * (frac + 0.014);
     const gy1 = p0[1] + (p1[1] - p0[1]) * (frac + 0.014);
     const gz1 = p0[2] + (p1[2] - p0[2]) * (frac + 0.014);
-    const bandR = rDrop * (0.48 + 0.72 * Math.sin(frac * Math.PI));
+    const bandR = rDrop * (0.48 + 0.78 * Math.sin(frac * Math.PI));
     appendTaperedCylinder(verts, inds, [gx0, gy0, gz0], [gx1, gy1, gz1], bandR, bandR, 8, matRope, 0);
+  }
+  // Keep standing yard lifts supporting braced yardarms when moored.
+  if (mastHead) {
+    for (const endP of [p0, p1]) {
+      if (Math.hypot(mastHead[0] - endP[0], mastHead[1] - endP[1], mastHead[2] - endP[2]) > 0.4) {
+        appendTaperedCylinder(verts, inds, mastHead, endP, 0.012, 0.012, 5, matRope, 0);
+      }
+    }
   }
 }
 
@@ -432,46 +443,59 @@ function appendTradeCrew(verts, inds, groups, spec, scaleSpec, model) {
         });
       }
     });
-  } else if (spec.index === 6 && spec.modelId === 'nina') {
-    // Harbor barque stern pilot on real deck + tiller sweep + fore deckhand
-    let deckMaxZ = 2.6;
-    let sternDeckY = 1.15;
-    let bestSternY = -Infinity;
-    let foreDeckY = 0.95;
-    let bestForeY = -Infinity;
+  } else {
+    // Ocean vessels (cogs, carracks, caravels & harbor barques): standing helmsman + fore lookout (+ waist hand on large ships).
+    let sternDeckY = 1.15, bestSternY = -Infinity, deckMaxZ = 3.2;
+    let foreDeckY = 0.95, bestForeY = -Infinity, foreZ = -2.1;
+    let waistDeckY = 0.72, bestWaistY = -Infinity;
     for (let i = 0; i < verts.length; i += 9) {
       const mat = Math.floor(verts[i + 6]);
       if (mat !== 0) continue;
       const x = verts[i], y = verts[i + 1], z = verts[i + 2];
-      if (Math.abs(x) < 0.7 && z > 1.8 && z < 4.5 && y > bestSternY) {
+      if (Math.abs(x) < 0.75 && z > 1.8 && z < 4.35 && y > bestSternY) {
         bestSternY = y;
         sternDeckY = y;
         deckMaxZ = z;
       }
-      if (Math.abs(x) < 0.6 && z < -1.0 && z > -3.5 && y > bestForeY) {
+      if (Math.abs(x) < 0.6 && z < -1.0 && z > -4.6 && y > bestForeY) {
         bestForeY = y;
         foreDeckY = y;
+        foreZ = Math.max(-4.35, Math.min(-2.1, z + 0.35));
+      }
+      if (Math.abs(x) > 0.45 && Math.abs(x) < 1.15 && Math.abs(z - 0.6) < 0.8 && y > bestWaistY) {
+        bestWaistY = y;
+        waistDeckY = y;
       }
     }
-    const helmZ = Math.min(3.5, Math.max(2.3, deckMaxZ - 0.35));
+    const helmZ = Math.min(4.2, Math.max(2.3, deckMaxZ - 0.45));
     const helmX = -0.22;
     const tillerPivot = [0, sternDeckY + 0.85 / designScale[1], helmZ + 0.95 / designScale[2]];
     const tillerGrip = [0.02, sternDeckY + 0.92 / designScale[1], helmZ - 0.18 / designScale[2]];
-    addGroup('crew.sweep', 'hull', () => {
-      appendTaperedCylinder(verts, inds, tillerPivot, tillerGrip, 0.045, 0.032, 8, 28, 0);
-    });
+    if (spec.index === 6) {
+      addGroup('crew.sweep', 'hull', () => {
+        appendTaperedCylinder(verts, inds, tillerPivot, tillerGrip, 0.045, 0.032, 8, 28, 0);
+      });
+    }
     addGroup('crew.pilot', 'hull', () => {
       appendHumanFigure9(verts, inds, [helmX, sternDeckY, helmZ], 0.15, designScale, 27, {
         seated: false,
         toneSeed: 0.72,
         leanZ: 0.03,
         leftHand: [-0.28 / designScale[0], sternDeckY + 0.96 / designScale[1], helmZ - 0.16 / designScale[2]],
-        rightHand: tillerGrip,
+        rightHand: spec.index === 6 ? tillerGrip : [0.05 / designScale[0], sternDeckY + 0.92 / designScale[1], helmZ - 0.16 / designScale[2]],
       });
-      appendHumanFigure9(verts, inds, [0.18, foreDeckY, -2.1], 0.1, designScale, 27, {
-        seated: false,
-        toneSeed: 0.18,
-      });
+      if (!spec.furlSails || spec.index === 1 || spec.index === 3) {
+        appendHumanFigure9(verts, inds, [0.22, foreDeckY, foreZ], 0.1, designScale, 27, {
+          seated: false,
+          toneSeed: 0.18 + spec.index * 0.13,
+        });
+      }
+      if (!spec.furlSails && (spec.index === 0 || spec.index === 2)) {
+        appendHumanFigure9(verts, inds, [0.85, waistDeckY, 0.65], -0.4, designScale, 27, {
+          seated: false,
+          toneSeed: 0.61 + spec.index * 0.09,
+        });
+      }
     });
   }
 }
@@ -1033,6 +1057,10 @@ function buildArchetypeData(index) {
   } else if (spec.furlSails) {
     dropRegex = /^(sail|rig\.running)\./i;
     const yardGroups = groupsArr.filter((g) => /^yard\./i.test(g.id));
+    const mastCenters = groupsArr.filter((g) => /^mast\./i.test(g.id)).map((mg) => {
+      const mb = groupDesignBounds(base.vertices, base.indices, mg);
+      return Number.isFinite(mb.max[1]) ? [(mb.min[0] + mb.max[0]) * 0.5, mb.max[1] * 0.92, (mb.min[2] + mb.max[2]) * 0.5] : null;
+    }).filter(Boolean);
     for (const yg of yardGroups) {
       const bounds = groupDesignBounds(base.vertices, base.indices, yg);
       if (!Number.isFinite(bounds.min[0])) continue;
@@ -1040,14 +1068,20 @@ function buildArchetypeData(index) {
       const spanX = bounds.max[0] - bounds.min[0];
       const spanZ = bounds.max[2] - bounds.min[2];
       const cy = (bounds.min[1] + bounds.max[1]) * 0.5;
+      const cz = (bounds.min[2] + bounds.max[2]) * 0.5;
       const p0 = spanX >= spanZ
-        ? [bounds.min[0], cy, (bounds.min[2] + bounds.max[2]) * 0.5]
+        ? [bounds.min[0], cy, cz]
         : [(bounds.min[0] + bounds.max[0]) * 0.5, bounds.min[1] + (bounds.max[1] - bounds.min[1]) * 0.25, bounds.min[2]];
       const p1 = spanX >= spanZ
-        ? [bounds.max[0], cy, (bounds.min[2] + bounds.max[2]) * 0.5]
+        ? [bounds.max[0], cy, cz]
         : [(bounds.min[0] + bounds.max[0]) * 0.5, bounds.min[1] + (bounds.max[1] - bounds.min[1]) * 0.75, bounds.max[2]];
+      let mastHead = null, bestD = Infinity;
+      for (const mh of mastCenters) {
+        const d = Math.hypot(mh[2] - cz, (mh[1] - cy) * 0.35);
+        if (d < bestD) { bestD = d; mastHead = mh; }
+      }
       const startIdx = indsArr.length;
-      appendFurledSailBundle(vertsArr, indsArr, p0, p1, 9, 12);
+      appendFurledSailBundle(vertsArr, indsArr, p0, p1, 9, 12, mastHead);
       if (indsArr.length > startIdx) {
         groupsArr.push({
           id: `sail.furled.${yg.id.slice(5)}`,
@@ -1115,7 +1149,7 @@ function buildArchetypeData(index) {
   let preCompactVerts = warpedVerts;
   let preCompactInds = stripped.indices;
   let preCompactGroups = stripped.groups;
-  if (spec.index === 4 || spec.index === 6) {
+  {
     const crewVerts = Array.from(warpedVerts);
     const crewInds = Array.from(stripped.indices);
     const crewGroups = stripped.groups.map((g) => ({ ...g }));
@@ -2482,7 +2516,7 @@ struct TVVertexOut {
   @location(4) @interpolate(flat) matId: u32,
   @location(5) uv: vec2f,
   @location(6) draftRatio: f32,
-  ${damaged ? '@location(7) damage: f32,' : '@location(7) fadeShare: f32,'}
+  @location(7) stateMatArch: vec3f,
 };
 
 fn rotateVessel(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
@@ -2571,7 +2605,7 @@ fn vesselWorldTransform(srcPos: vec3f, srcNorm: vec3f, material: f32, uv: vec2f,
   o.matId = u32(max(0.0, floor(v.material)));
   o.uv = v.uv;
   o.draftRatio = max(sc4.w, 0.4);
-  ${damaged ? 'o.damage = select(0.0, clamp(nLen - 1.0, 0.0, 1.5), nLen > 1.002);' : 'o.fadeShare = clamp(v.instAnim.z, 0.0, 1.0);'}
+  ${damaged ? 'o.stateMatArch = vec3f(select(0.0, clamp(nLen - 1.0, 0.0, 1.5), nLen > 1.002), v.material, v.instAttitude.w);' : 'o.stateMatArch = vec3f(clamp(v.instAnim.z, 0.0, 1.0), v.material, v.instAttitude.w);'}
   return o;
 }
 
@@ -2635,9 +2669,10 @@ fn canvasTearMask(uv: vec2f, p: vec3f, mat: u32, dmg: f32) -> f32 {
   return val - thr;
 }
 @fragment fn surviving(in: TVVertexOut) -> @location(0) vec4f {
+  let dmgVal = in.stateMatArch.x;
   if (isWoodMat(in.matId) && hullHoleRim(in.local) < 0.0) { discard; }
-  if (isRopeMat(in.matId) && ropeParted(in.local, in.damage)) { discard; }
-  if (isSailMat(in.matId) && in.damage > 0.04 && canvasTearMask(in.uv, in.local, in.matId, in.damage) > 0.0) { discard; }
+  if (isRopeMat(in.matId) && ropeParted(in.local, dmgVal)) { discard; }
+  if (isSailMat(in.matId) && dmgVal > 0.04 && canvasTearMask(in.uv, in.local, in.matId, dmgVal) > 0.0) { discard; }
   return vec4f(0.0);
 }
 ` : ''}
@@ -2652,43 +2687,76 @@ ${damaged ? '' : 'struct TVFragmentOut { @location(0) color: vec4f, @builtin(sam
   let deckAA = max(fwidth(deckCourse), 0.002);
   let sailDepth = canvasThickness(in.uv, in.matId);
 
+  let stateVal = in.stateMatArch.x;
+  let rawMat = in.stateMatArch.y;
+  let archF = in.stateMatArch.z;
+  let aIdx = u32(max(0.0, round(archF)));
+  let matFrac = fract(rawMat);
   let p = in.local;
   let nBase = normalize(in.normal) * select(-1.0, 1.0, front);
   var n = nBase;
   let m = in.matId;
-  let timber = mix(vec3f(0.24, 0.16, 0.095), timberRaw * vec3f(1.05, 0.96, 0.84), 0.78);
+  let woodFibre = 0.90 + 0.20 * gnoise(vec2f(p.z * 26.0 + sin(p.y * 12.0) * 0.4, p.y * 62.0));
+  let timber = mix(vec3f(0.24, 0.16, 0.095), timberRaw * vec3f(1.06, 0.97, 0.85), 0.82) * woodFibre;
   let strakeEdge = min(fract(course), 1.0 - fract(course));
   let seam = 1.0 - smoothstep(0.008, 0.036 + courseAA, strakeEdge);
   let deckEdge = min(fract(deckCourse), 1.0 - fract(deckCourse));
   let deckSeam = 1.0 - smoothstep(0.014, 0.040 + deckAA, deckEdge);
-  let boardHash = 0.88 + 0.18 * fract(sin(floor(course) * 74.17) * 4321.1);
+  let boardHash = 0.86 + 0.22 * fract(sin(floor(course) * 74.17) * 4321.1);
+  let isLusoria = abs(archF - 4.0) < 0.5;
+  let isLusoriaOar = (m == 16u && isLusoria && matFrac > 0.004);
+  let isLusoriaSweep = (m == 17u && isLusoria);
 
   var albedo = timber * boardHash;
   var rough = 0.84;
   var metal = 0.0;
   var isSail = false;
+  var emitGlow = vec3f(0.0);
 
   if (m == 0u) {
-    // Weathered caulked deck planks
-    albedo = mix(timber * vec3f(1.12, 1.06, 0.94), vec3f(0.016, 0.012, 0.009), deckSeam * 0.84);
-    rough = mix(0.82, 0.94, deckSeam);
+    // Weathered caulked deck planks matching Niña deck joinery
+    let plankSalt = 0.90 + 0.14 * fract(sin(floor(deckCourse) * 31.7) * 1931.3);
+    albedo = mix(timber * vec3f(1.12, 1.06, 0.94) * plankSalt, vec3f(0.015, 0.011, 0.008), deckSeam * 0.86);
+    rough = mix(0.80, 0.94, deckSeam);
   } else if (m == 15u) {
-    // Exterior hull planking: caulked seams + waterproof Stockholm pitch-tar strictly at/below waterline
-    let tar = 1.0 - smoothstep(-0.14, 0.03, p.y);
-    albedo = mix(timber * boardHash * (1.0 - seam * 0.55), vec3f(0.022, 0.018, 0.014), tar * 0.88);
-    rough = mix(0.84, 0.72, tar);
+    // Exterior hull planking: caulked strakes, castle mouldings & waterproof Stockholm pitch-tar below waterline
+    let tar = 1.0 - smoothstep(-0.22 * in.draftRatio, 0.02, p.y);
+    albedo = mix(timber * boardHash * (1.0 - seam * 0.58), vec3f(0.024, 0.020, 0.015), tar * 0.90);
+    rough = mix(0.82, 0.76, tar);
+    let isCastleSide = !isLusoria && p.y > 0.66 && abs(in.normalLocal.x) > 0.35;
+    if (isCastleSide) {
+      let mouldBand = 1.0 - smoothstep(0.015, 0.040, min(fract(p.y * 2.2), 1.0 - fract(p.y * 2.2)));
+      let futtockBand = 1.0 - smoothstep(0.018, 0.042, min(fract(p.z * 0.95 + 0.5), 1.0 - fract(p.z * 0.95 + 0.5)));
+      let castleTrim = max(mouldBand * 0.90, futtockBand * 0.82);
+      albedo = mix(albedo, timber * vec3f(0.20, 0.18, 0.15), castleTrim);
+      rough = mix(rough, 0.90, castleTrim);
+    }
+    let strakeBevel = clamp(0.08 * sin(fract(course) * 6.2831853), -0.08, 0.08);
+    n = normalize(nBase + vec3f(0.0, strakeBevel, 0.0));
   } else if (m == 10u) {
-    // Pine masts & yards with weathered checking + iron mast bands
+    // Pine masts & yards with longitudinal checking + dark wrought-iron mast hoops
+    let sparAngle = atan2(in.normalLocal.x, in.normalLocal.z);
+    let sparGrain = 0.92 + 0.08 * sin(sparAngle * 20.0 + gnoise(vec2f(p.y * 5.0, p.z * 5.0)) * 3.5);
     let band = 1.0 - smoothstep(0.04, 0.09, abs(fract(p.y * 0.65) - 0.5));
-    albedo = mix(timber * vec3f(1.10, 0.94, 0.72), vec3f(0.032, 0.030, 0.028), band * 0.65);
-    metal = mix(0.0, 0.45, band * 0.65);
-    rough = mix(0.76, 0.58, band);
+    albedo = mix(timber * vec3f(1.08, 0.92, 0.68) * sparGrain, vec3f(0.032, 0.030, 0.028), band * 0.72);
+    metal = mix(0.0, 0.52, band * 0.72);
+    rough = mix(0.75, 0.55, band);
+  } else if (m == 16u && !isLusoriaOar) {
+    // Tarred wales, stempost, deadeyes & stay collars matching Niña (caravel.js:558)
+    albedo = timber * vec3f(0.20, 0.18, 0.15) * (1.0 - seam * 0.30);
+    rough = 0.90;
+  } else if (m == 17u && !isLusoriaSweep) {
+    // Warm ochre painted cap rails, catheads, transom mouldings & balustrade rails matching Niña (caravel.js:559)
+    albedo = timber * vec3f(1.10, 1.00, 0.80) * (1.0 - seam * 0.25);
+    rough = 0.76;
   } else if (m == 1u || m == 5u || m == 6u || m == 7u || m == 14u || m == 16u || m == 17u || m == 18u || m == 28u) {
-    // Oak frames, oars, steering sweeps/tillers, casks, benches & bulwark timber
-    albedo = timber * select(vec3f(0.90, 0.82, 0.70), vec3f(0.82, 0.74, 0.62), m == 16u || m == 17u || m == 28u) * (1.0 - seam * 0.35);
+    // Oak frames, oars, steering sweeps/tillers, casks, benches & sternpost
+    let isKeelOrPost = (abs(p.x) < 0.068 && p.y < -0.46) || (abs(p.x) < 0.055 && p.z > 5.25 && p.y < 1.05);
+    let baseOak = select(vec3f(0.90, 0.82, 0.70), vec3f(0.84, 0.76, 0.64), isLusoriaOar || isLusoriaSweep || m == 28u);
+    albedo = mix(timber * baseOak * (1.0 - seam * 0.35), timber * vec3f(0.20, 0.18, 0.15), select(0.0, 0.85, isKeelOrPost));
     rough = 0.84;
   } else if (m == 3u || m == 8u) {
-    // Forged wrought iron anchors, ordnance & barrel hoops
+    // Forged wrought iron anchors, ordnance, pintle straps, chainplates & barrel hoops
     albedo = vec3f(0.055, 0.052, 0.050);
     rough = 0.44;
     metal = 0.78;
@@ -2696,21 +2764,35 @@ ${damaged ? '' : 'struct TVFragmentOut { @location(0) color: vec4f, @builtin(sam
     albedo = vec3f(0.020, 0.016, 0.013);
     rough = 0.88;
   } else if (m == 2u || m == 12u || m == 19u) {
-    // Standing tarred shrouds (2u) & natural hemp running rigging/lashings (12u, 19u)
-    albedo = select(vec3f(0.24, 0.19, 0.12), vec3f(0.045, 0.038, 0.030), m == 2u);
+    // 3-strand helical Z-twist hemp shrouds (2u), running lines (12u) & bolt-ropes (19u)
+    let layPhase = in.uv.y * 72.0 + (p.x + p.z + p.y) * 16.0;
+    let strand = 0.72 + 0.28 * sin(layPhase);
+    let baseCord = select(vec3f(0.26, 0.21, 0.135), vec3f(0.048, 0.040, 0.032), m == 2u);
+    albedo = baseCord * strand;
     rough = 0.94;
   } else if (m == 9u || m == 13u) {
-    // Woven Baltic linen canvas (9u square sails / bales, 13u lateen sails / sacks)
+    // Woven flax/hemp Baltic canvas with vertical bolted seams & belly highlights (caravel.js:321)
     isSail = true;
-    let woven = 0.95 + 0.05 * gnoise(in.uv * vec2f(24.0, 18.0));
-    let tint = select(vec3f(0.62, 0.58, 0.49), vec3f(0.56, 0.50, 0.39), m == 13u && in.local.y < 1.3);
-    albedo = tint * woven * clamp(1.12 - (sailDepth - 1.0) * 0.18, 0.72, 1.08);
-    rough = 0.93;
+    let woven = 0.94 + 0.06 * gnoise(in.uv * vec2f(28.0, 22.0));
+    let panelEdge = min(fract(in.uv.x * 7.0), 1.0 - fract(in.uv.x * 7.0));
+    let panelSeam = 1.0 - smoothstep(0.015, 0.048, panelEdge);
+    let tint = select(vec3f(0.62, 0.58, 0.49), vec3f(0.57, 0.51, 0.40), m == 13u && in.local.y < 1.3);
+    albedo = tint * woven * (1.0 - panelSeam * 0.16) * clamp(1.12 - (sailDepth - 1.0) * 0.18, 0.72, 1.08);
+    rough = mix(0.93, 0.88, panelSeam);
   } else if (m == 11u) {
-    // Glazed stern windows
-    albedo = vec3f(0.025, 0.042, 0.048);
-    rough = 0.08;
-    metal = 0.25;
+    // Recessed crown-glass cabin mullions & glowing stern poop lanterns matching Niña (caravel.js:520)
+    let mxEdge = min(fract(p.x * 11.0), 1.0 - fract(p.x * 11.0));
+    let myEdge = min(fract(p.y * 10.0), 1.0 - fract(p.y * 10.0));
+    let paneMask = smoothstep(0.06, 0.14, min(mxEdge, myEdge));
+    let muntinCol = vec3f(0.42, 0.24, 0.055);
+    let glassCol = vec3f(0.014, 0.028, 0.032);
+    albedo = mix(muntinCol, glassCol, paneMask);
+    rough = mix(0.52, 0.07, paneMask);
+    metal = mix(0.35, 0.22, paneMask);
+    if (p.z > 5.75 && abs(p.x) < 0.22) {
+      let dusk = smoothstep(0.35, -0.05, F.sunDir.y);
+      emitGlow = vec3f(1.35, 0.72, 0.22) * (0.28 + 0.95 * dusk);
+    }
   } else if (m == 20u) {
     albedo = vec3f(0.025, 0.022, 0.018);
     rough = 0.86;
@@ -2729,7 +2811,7 @@ ${damaged ? '' : 'struct TVFragmentOut { @location(0) color: vec4f, @builtin(sam
   } else if (m == 26u) {
     albedo = vec3f(0.020, 0.042, 0.10);
   } else if (m == 27u || m == 29u) {
-    // River pilots, helmsmen & seated oarsmen (uv.x: skin <0.22, breeches/boots <0.48, tunic <0.78, cap >=0.78)
+    // Pilots, helmsmen, lookouts & seated oarsmen (uv.x: skin <0.22, breeches/boots <0.48, tunic <0.78, cap >=0.78)
     let u = in.uv.x;
     let clothTex = 0.92 + 0.08 * gnoise(in.local.xy * 26.0);
     if (u < 0.22) {
@@ -2771,8 +2853,8 @@ ${damaged ? '' : 'struct TVFragmentOut { @location(0) color: vec4f, @builtin(sam
     albedo = mix(albedo, vec3f(0.032, 0.025, 0.020), scorch * 0.88);
     rough = mix(rough, 0.98, scorch);
   }
-  if (in.damage > 0.04) {
-    let charMix = clamp(in.damage * 0.58, 0.0, 0.82);
+  if (stateVal > 0.04) {
+    let charMix = clamp(stateVal * 0.58, 0.0, 0.82);
     albedo = mix(albedo, vec3f(0.045, 0.035, 0.026), charMix);
     rough = max(rough, 0.92);
   }
@@ -2800,12 +2882,12 @@ ${damaged ? '' : 'struct TVFragmentOut { @location(0) color: vec4f, @builtin(sam
   let envCol = textureSampleLevel(envCube, sampC, refl, rough * 7.0).rgb;
   let envSpec = envCol * vesselEnvironment(n, viewDir, rough, f0) * select(0.28, 0.85, metal > 0.1 || rough < 0.25);
 
-  let lit = diffTint * amb * 0.82 + direct + spec + envSpec;
+  let lit = diffTint * amb * 0.82 + direct + spec + envSpec + emitGlow;
   ${damaged ? `
   return vec4f(surfaceAir(lit, in.world), 1.0);
 }
   ` : `
-  let takeMask = vesselCrownSamples(in.fadeShare, in.pos.xy, TV_SAMPLES);
+  let takeMask = vesselCrownSamples(stateVal, in.pos.xy, TV_SAMPLES);
   let keepMask = (~takeMask) & TV_SAMPLE_MASK_ALL;
   var outF: TVFragmentOut;
   outF.color = vec4f(surfaceAir(lit, in.world), 1.0);
@@ -3260,13 +3342,27 @@ export function requestTradeVesselsPipelines({
 }
 
 function createPlaceholderOak(device) {
+  const S = 64;
+  const data = new Uint8Array(S * S * 4);
+  for (let y = 0; y < S; y++) {
+    for (let x = 0; x < S; x++) {
+      const wave = Math.sin(x * 0.55 + Math.sin(y * 0.18) * 2.2) * 0.5 + 0.5;
+      const pore = Math.sin(y * 1.9 + x * 3.1) > 0.82 ? -14 : 0;
+      const grain = (wave - 0.5) * 24 + pore;
+      const off = (y * S + x) * 4;
+      data[off] = Math.max(40, Math.min(220, Math.round(146 + grain)));
+      data[off + 1] = Math.max(28, Math.min(180, Math.round(108 + grain * 0.78)));
+      data[off + 2] = Math.max(16, Math.min(130, Math.round(70 + grain * 0.55)));
+      data[off + 3] = 255;
+    }
+  }
   const tex = device.createTexture({
     label: 'trade vessel oak fallback',
-    size: [1, 1],
+    size: [S, S],
     format: 'rgba8unorm',
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
   });
-  device.queue.writeTexture({ texture: tex }, new Uint8Array([146, 108, 70, 255]), { bytesPerRow: 4 }, [1, 1]);
+  device.queue.writeTexture({ texture: tex }, data, { bytesPerRow: S * 4 }, [S, S]);
   const sampler = device.createSampler({ addressModeU: 'repeat', addressModeV: 'repeat', magFilter: 'linear', minFilter: 'linear' });
   return { tex, view: tex.createView(), sampler };
 }

@@ -345,10 +345,7 @@ const WORKS_FOOTBRIDGE = worksSpec('Pontão (timber bridge of a track)', 3.2, WO
   ...[-2.8, 2.8].map((z) => worksBox('bridge_bent_cap', [-1.45, -0.78, z - 0.16], [1.45, -0.52, z + 0.16], 'oak')),
   ...[-1.42, 1.42].flatMap((x) => [...worksEvenly(5, -4.3, 4.3).map((z) => worksPost('bridge_rail_post', x, z, 0, 1.02, 0.07)), worksBox('bridge_rail', [x - 0.05, 0.94, -4.45], [x + 0.05, 1.04, 4.45], 'oak')]),
 ], 5.2);
-const WORKS_STONE_BRIDGE = worksSpec('Ponte de pedra (stone bridge of a track, arched with cutwaters)', 4.2, WORKS_BRIDGE_M, 6.5, 11, [
-  worksBox('bridge_deck', [-1.9, -0.4, -3.4], [1.9, 0.12, 3.4], 'limestone'),
-  worksBox('bridge_ramp_n', [-1.9, -0.55, -4.5], [1.9, -0.04, -3.35], 'dark_stone'),
-  worksBox('bridge_ramp_s', [-1.9, -0.55, 3.35], [1.9, -0.04, 4.5], 'dark_stone'),
+const STONE_BRIDGE_ARCH_AND_PARAPETS = [
   { primitive: 'group', name: 'bridge_arch', rotation: [0, 90, 0], children: [
     { primitive: 'arch', name: 'bridge_arch', from: [-3.15, -3.85, 0], to: [3.15, -3.85, 0], height: 3.55, thickness: 3.85, voussoirs: 11, pierWidth: 0.95, openThrough: true, material: 'ashlar' }] },
   worksBox('bridge_footing', [-2.05, -6.2, -4.5], [2.05, -2.2, -3.05], 'ashlar', { partGroup: 'foundation_plinth' }),
@@ -369,6 +366,16 @@ const WORKS_STONE_BRIDGE = worksSpec('Ponte de pedra (stone bridge of a track, a
     worksBox('bridge_bollard', [-2.08, 0.02, z - 0.18], [-1.62, 1.14, z + 0.18], 'limestone'),
     worksBox('bridge_bollard', [1.62, 0.02, z - 0.18], [2.08, 1.14, z + 0.18], 'limestone'),
   ]),
+];
+const WORKS_STONE_BRIDGE = worksSpec('Ponte de pedra (stone bridge of a track, arched with cutwaters)', 4.2, WORKS_BRIDGE_M, 6.5, 11, [
+  worksBox('bridge_deck', [-1.9, -0.4, -3.4], [1.9, 0.12, 3.4], 'limestone'),
+  worksBox('bridge_ramp_n', [-1.9, -0.55, -4.5], [1.9, -0.04, -3.35], 'dark_stone'),
+  worksBox('bridge_ramp_s', [-1.9, -0.55, 3.35], [1.9, -0.04, 4.5], 'dark_stone'),
+  ...STONE_BRIDGE_ARCH_AND_PARAPETS,
+], 5.5);
+const WORKS_STONE_BRIDGE_SPAN = worksSpec('Ponte de pedra — level interior arch span without mid-river ramp dips', 4.2, WORKS_BRIDGE_M, 6.5, 11, [
+  worksBox('bridge_deck', [-1.9, -0.4, -4.5], [1.9, 0.12, 4.5], 'limestone'),
+  ...STONE_BRIDGE_ARCH_AND_PARAPETS,
 ], 5.5);
 const WORKS_GRAVES = worksSpec('Campas (graves of a churchyard)', 6, 6, 1.2, 11, [
   worksBox('grave_slab', [-2.6, -0.4, -2.4], [-1.7, 0.14, -0.5], 'stone', { partGroup: 'foundation_plinth' }),
@@ -403,7 +410,7 @@ const WORKS_SCAFFOLD = worksSpec('Andaime (a work in hand: scaffold, stone and t
 export const CITY_WORKS = Object.freeze([
   ['WINDMILL', WORKS_WINDMILL], ['WATERMILL', WORKS_WATERMILL], ['GRANARY', WORKS_GRANARY], ['SHED', WORKS_SHED], ['BARN', WORKS_BARN], ['DOVECOTE', WORKS_DOVECOTE], ['TOLL', WORKS_TOLL], ['COT', WORKS_COT], ['THATCH_HOUSE', WORKS_THATCH_HOUSE], ['THATCH_LONGHOUSE', WORKS_THATCH_LONGHOUSE],
   ['WINEPRESS', WORKS_WINEPRESS], ['VATS', WORKS_VATS], ['STONE_HALL', WORKS_STONE_HALL], ['CLOISTER', WORKS_CLOISTER], ['COURT', WORKS_COURT], ['WHARF', WORKS_WHARF], ['QUARRY', WORKS_QUARRY], ['RUIN', WORKS_RUIN], ['RUBBLE', WORKS_RUBBLE],
-  ['FENCE_RAIL', WORKS_FENCE_RAIL], ['FENCE_STONE', WORKS_FENCE_STONE], ['FOOTBRIDGE', WORKS_FOOTBRIDGE], ['STONE_BRIDGE', WORKS_STONE_BRIDGE], ['GRAVES', WORKS_GRAVES], ['CAIRN', WORKS_CAIRN], ['TENT', WORKS_TENT], ['STANDARD', WORKS_STANDARD], ['SCAFFOLD', WORKS_SCAFFOLD],
+  ['FENCE_RAIL', WORKS_FENCE_RAIL], ['FENCE_STONE', WORKS_FENCE_STONE], ['FOOTBRIDGE', WORKS_FOOTBRIDGE], ['STONE_BRIDGE', WORKS_STONE_BRIDGE], ['STONE_BRIDGE_SPAN', WORKS_STONE_BRIDGE_SPAN], ['GRAVES', WORKS_GRAVES], ['CAIRN', WORKS_CAIRN], ['TENT', WORKS_TENT], ['STANDARD', WORKS_STANDARD], ['SCAFFOLD', WORKS_SCAFFOLD],
 ]);
 // How many of them stand on a footing as a house does; the rest are the slighter works.
 export const CITY_WORKS_BUILT = 19;
