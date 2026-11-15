@@ -2,6 +2,7 @@
 // Trees as cluster hierarchies, cut per tree on the GPU so each stays within a pixel error at any
 // distance. Built offline by scripts/prepare-forest-clusters.mjs with the builder from threejs-nanites.
 import { FOREST_CROWN_SPLAT_PIXELS, FOREST_CROWN_MIN_PIXELS, FOREST_CROWN_LIMIT, FOREST_CROWN_NEAREST, FOREST_CROWN_BAND, forestCrownLook, forestCrownSplatLook } from './forest-crowns.js';
+import { FOREST_WIND_BONES, FOREST_WIND_SHARED_LANES, FOREST_WIND_SKIN_WGSL } from './forest-wind.js';
 
 export const FOREST_CLUSTER_VERTEX_WORDS = 5;
 export const FOREST_CLUSTER_WORDS = 16;
@@ -149,10 +150,11 @@ fn forestClusterTree(index:u32)->u32{
  let r=roots[tree];let scale=r.rootScale.w;let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
  let origin=r.rootScale.xyz-F.camPos.xyz;
  let focal=F.screen.y/max(2.0*length(F.camUp.xyz),.0001);
- let limitLeaf=parameters.z*FOREST_CLUSTER_LEAF_LIMIT;let limitWood=parameters.z*FOREST_CLUSTER_WOOD_LIMIT;let limit=min(limitLeaf,limitWood);
  let b=bucket.centre.xyz*scale;
  let centre=origin+vec3f(c*b.x-s*b.z,b.y,s*b.x+c*b.z);
  let nearest=max(length(centre)-bucket.centre.w*scale,.25);
+ let closeWoodTighten=mix(0.24,1.0,smoothstep(18.0,46.0,nearest));
+ let limitLeaf=parameters.z*FOREST_CLUSTER_LEAF_LIMIT;let limitWood=parameters.z*FOREST_CLUSTER_WOOD_LIMIT*closeWoodTighten;let limit=min(limitLeaf,limitWood);
  let rowW=vec3f(F.viewProj[0].w,F.viewProj[1].w,F.viewProj[2].w);
  let rowX=vec3f(F.viewProj[0].x,F.viewProj[1].x,F.viewProj[2].x);
  let rowY=vec3f(F.viewProj[0].y,F.viewProj[1].y,F.viewProj[2].y);
@@ -172,7 +174,7 @@ fn forestClusterTree(index:u32)->u32{
     let slot=atomicAdd(&draws[(bucket.crown.y+${CROWN_FADE_REGION}u)*5u+1u],1u);
     if(slot<bucket.crownLists.z){list[bucket.crownLists.y+slot]=vec2u(tree,crownShare<<24u);}
    }else{
-    let crownReach=bucket.centre.w*scale+.35+F.windP[0].z*.08;
+    let crownReach=bucket.centre.w*scale+.35+F.windP[0].z*.12;
     if(r.identity.w>=0.&&(dot(planeL,centre)<-crownReach*lengthL||dot(planeR,centre)<-crownReach*lengthR||dot(planeB,centre)<-crownReach*lengthB||dot(planeT,centre)<-crownReach*lengthT||dot(rowW,centre)<-crownReach*length(rowW))){return;}
     let crownPixels=bucket.crownSize.y*scale*focal/max(away,.25);
     var inflateQ=4096u;
@@ -227,8 +229,8 @@ fn forestClusterTree(index:u32)->u32{
   let ownAt=origin+vec3f(c*k.lod.x-s*k.lod.z,k.lod.y,s*k.lod.x+c*k.lod.z)*scale;
   if(k.err*lodScale*focal/max(length(ownAt)-k.lod.w*scale,.001)>allowed){continue;}
   let at=origin+vec3f(c*k.cull.x-s*k.cull.z,k.cull.y,s*k.cull.x+c*k.cull.z)*scale;
-  // Wind carries leaves past the shapes they were baked from.
-  let reach=k.cull.w*scale+.2+F.windP[0].z*.07;
+  // Wind carries leaves and bent boughs past the shapes they were baked from.
+  let reach=k.cull.w*scale+.2+F.windP[0].z*.12;
   // A felled tree no longer stands where its clusters were baked.
   if(r.identity.w>=0.&&(dot(planeL,at)<-reach*lengthL||dot(planeR,at)<-reach*lengthR||dot(planeB,at)<-reach*lengthB||dot(planeT,at)<-reach*lengthT||dot(rowW,at)<-reach*length(rowW))){continue;}
   let draw=select(bucket.drawWood,bucket.drawLeaf,isLeaf);
@@ -281,7 +283,7 @@ const FOREST_CLUSTER_SHADOW_PIXELS=1.5;
   let ownAt=origin+vec3f(c*k.lod.x-s*k.lod.z,k.lod.y,s*k.lod.x+c*k.lod.z)*scale;
   if(k.err*scale>max(least,perMetre*max(length(ownAt)-k.lod.w*scale,.001))){continue;}
   let at=(shadowBox.lightView*vec4f(fromBox+vec3f(c*k.cull.x-s*k.cull.z,k.cull.y,s*k.cull.x+c*k.cull.z)*scale,1.)).xyz;
-  let reach=(k.cull.w*scale+.2+F.windP[0].z*.07)*scales;
+  let reach=(k.cull.w*scale+.2+F.windP[0].z*.12)*scales;
   if(r.identity.w>=0.&&(abs(at.x)>1.+reach.x||abs(at.y)>1.+reach.y||at.z<-reach.z||at.z>1.+reach.z)){continue;}
   let draw=drawBase+select(bucket.drawWood,bucket.drawLeaf,isLeaf);
   let slot=atomicAdd(&draws[draw*5u+1u],1u);
@@ -294,7 +296,7 @@ const FOREST_CLUSTER_SHADOW_PIXELS=1.5;
 `;
 
 // Shares forestPlace with the ordinary tree shader, so clusters light and sway exactly alike.
-export const FOREST_CLUSTER_VERTEX_WGSL = /* wgsl */`
+export const FOREST_CLUSTER_VERTEX_WGSL = FOREST_WIND_SKIN_WGSL + /* wgsl */`
 struct ForestCluster {lod:vec4f,parentLod:vec4f,cull:vec4f,err:f32,parentErr:f32,first:u32,shape:u32};
 @group(3)@binding(0)var<storage,read>forestClusterList:array<vec2u>;
 @group(3)@binding(1)var<storage,read>forestClusters:array<ForestCluster>;
@@ -311,6 +313,9 @@ fn forestClusterVertexCross(tree:u32,vertex:u32,kindValue:f32,crossLayer:u32)->F
  let w0=forestClusterVertices[at];let w1=forestClusterVertices[at+1u];let w2=forestClusterVertices[at+2u];let w3=forestClusterVertices[at+3u];let w4=forestClusterVertices[at+4u];
  let unit=vec3f(f32(w0&65535u),f32(w0>>16u),f32(w1&65535u))/65535.;
  var position=forestClusterBounds[0].xyz+unit*forestClusterBounds[0].w;
+ let r2Rest=dot(position.xz,position.xz);
+ let buried=kindValue<3.5&&(forestBin.z&256u)==0u&&((position.y<.08&&r2Rest>9.)||(position.y<.013&&r2Rest>.7)||(position.y<.025&&r2Rest>.7&&r2Rest<4.)||(position.y<-.01&&r2Rest>.22));
+ if(buried){position=vec3f(0.);}
  let r=forestRoots[tree];
  var normal=forestClusterOctahedral(vec2f(f32(w2&65535u),f32(w2>>16u))/65535.*2.-1.);
  let uv=forestClusterBounds[1].xy+vec2f(f32(w3&65535u),f32(w3>>16u))/65535.*forestClusterBounds[1].zw;
@@ -324,16 +329,16 @@ fn forestClusterVertexCross(tree:u32,vertex:u32,kindValue:f32,crossLayer:u32)->F
   let nearRelief=1.-smoothstep(12.,44.,dist);
   if(nearRelief>0.&&crossLayer==0u){
    let alongU=clamp(uv.x,0.,1.);
-   let camber=(-0.055*alongU*alongU+0.070*(abs(uvOff.y)*2.0-0.32))*nearRelief*invScale;
+   let camber=(-0.055*alongU*alongU+0.110*abs(uvOff.y)*alongU)*nearRelief*invScale;
    position+=normal*camber;
    normal=normalize(normal+(t1*uvOff.x*0.18+t2*uvOff.y*0.28)*nearRelief);
   }else if(crossLayer>0u){
    let layerFade=1.-smoothstep(14.,22.,dist);
    let alongU=clamp(uv.x,0.,1.);
    let sSign=select(-1.,1.,(crossLayer&2u)==0u);
-   let pitchLift=(0.030+alongU*0.155+abs(uvOff.y)*0.055)*layerFade*invScale;
-   let fanSide=(alongU*0.115*sSign+uvOff.y*0.05)*layerFade*invScale;
-   let stepAlong=(0.025+alongU*0.04)*layerFade*invScale;
+   let pitchLift=(alongU*0.165+abs(uvOff.y)*alongU*0.080)*layerFade*invScale;
+   let fanSide=(alongU*0.135*sSign+uvOff.y*alongU*0.050)*layerFade*invScale;
+   let stepAlong=(-alongU*0.035)*layerFade*invScale;
    position+=normal*pitchLift+t1*fanSide+t2*stepAlong;
    normal=normalize(normal+t1*(0.28*sSign+uvOff.y*0.24)*layerFade+t2*(0.22*layerFade));
   }
@@ -345,8 +350,14 @@ fn forestClusterVertexCross(tree:u32,vertex:u32,kindValue:f32,crossLayer:u32)->F
    normal=normalize(normal+(t1*uvOff.x+t2*uvOff.y)*(.10*midBlend));
   }
  }
+ let windOn=bitcast<vec4u>(forestWindPoses[0]).y>0u;
+ if(windOn&&!buried){
+  let skinned=forestWindSkinCluster(r,tree,position,normal,vertex,uv,kindValue>=3.5);
+  position=skinned.pos;
+  normal=skinned.normal;
+ }
  let root=vec3f(f32(w4&255u),f32((w4>>8u)&255u),f32((w4>>16u)&255u))/255.;
- return forestPlace(r,tree,position,normal,vec2f(kindValue,f32(w1>>24u)/255.),uv,root*root,f32((w1>>16u)&255u),vertex,f32(w4>>24u)/255.);
+ return forestPlaceSkinned(r,tree,position,normal,vec2f(kindValue,f32(w1>>24u)/255.),uv,root*root,f32((w1>>16u)&255u),vertex,f32(w4>>24u)/255.,windOn);
 }
 fn forestClusterVertex(tree:u32,vertex:u32,kindValue:f32)->ForestVertex{
  return forestClusterVertexCross(tree,vertex,kindValue,0u);
@@ -412,7 +423,7 @@ const LEAF_PATTERN = [0, 1, 2, 0, 2, 3, 3, 2, 4, 3, 4, 5];
 // one 1-triangle horizon splat list, and one crossfade list for trees still changing over.
 const ROOT_BYTES = 48;
 
-export async function createForestClusters({ device, shader, module, frame, source, crowns = null, crownChange = {}, prototypes, roots, visible, commands, parameters, format, samples, sceneEntries, cloudEntries, surfaceEntries, firstMaterials, bind, hasLandShadow = false, shadowUniform = null, shadowFormat = 'depth32float' }) {
+export async function createForestClusters({ device, shader, module, frame, source, crowns = null, crownChange = {}, wind = null, prototypes, roots, visible, commands, parameters, format, samples, sceneEntries, cloudEntries, surfaceEntries, firstMaterials, bind, hasLandShadow = false, shadowUniform = null, shadowFormat = 'depth32float' }) {
   const B = GPUBufferUsage, owned = [], count = prototypes.length;
   // A leaf cluster's place in the list shares a word with its tree's crown share (forestClusterSelect).
   if (source.manifest.clusterCount >= 1 << 24) throw Error('Forest clusters outnumber the bits that name them');
@@ -447,6 +458,8 @@ export async function createForestClusters({ device, shader, module, frame, sour
   const crownVertices = crownInfo ? make(crowns.vertices, B.STORAGE, 'forest crown vertices') : null;
   const crownIndices = crownInfo ? make(crowns.indices, B.INDEX | B.STORAGE, 'forest crown indices') : null;
   const crownMorph = make(crownInfo ? crowns.morph : new Uint32Array(4), B.STORAGE, 'forest crown morph');
+  const windPoses = wind?.posesBuffer ?? make(new Uint32Array([1, 0, FOREST_WIND_BONES, FOREST_WIND_SHARED_LANES]), B.STORAGE, 'forest wind fallback poses');
+  const windWeights = wind?.weightsBuffer ?? make(new Uint32Array(4), B.STORAGE, 'forest wind fallback weights');
   const shadowList = hasLandShadow ? device.createBuffer({ label: 'forest clusters casting shadows', size: count * 2 * SHADOW_CLUSTERS_PER_DRAW * 8, usage: B.STORAGE }) : null;
   if (shadowList) owned.push(shadowList);
   const leafIndices = make(Uint32Array.from({ length: CLUSTER_LEAVES * LEAF_PATTERN.length }, (_, i) => Math.floor(i / LEAF_PATTERN.length) * FOREST_LEAF_VERTICES + LEAF_PATTERN[i % LEAF_PATTERN.length]), B.INDEX, 'forest cluster leaf pattern');
@@ -507,7 +520,7 @@ export async function createForestClusters({ device, shader, module, frame, sour
     const woodShadow = uniform(id * 2 * SHADOW_CLUSTERS_PER_DRAW), leafShadow = uniform((id * 2 + 1) * SHADOW_CLUSTERS_PER_DRAW);
     const clusterGroup = (pipeline, hasIndices, from = list) => device.createBindGroup({
       layout: pipeline.getBindGroupLayout(3),
-      entries: [{ binding: 0, resource: { buffer: from } }, { binding: 1, resource: { buffer: clusters } }, { binding: 2, resource: { buffer: vertices } }, ...(hasIndices ? [{ binding: 3, resource: { buffer: indices } }] : []), { binding: 4, resource: { buffer: bounds } }],
+      entries: [{ binding: 0, resource: { buffer: from } }, { binding: 1, resource: { buffer: clusters } }, { binding: 2, resource: { buffer: vertices } }, ...(hasIndices ? [{ binding: 3, resource: { buffer: indices } }] : []), { binding: 4, resource: { buffer: bounds } }, { binding: 8, resource: { buffer: windPoses } }, { binding: 9, resource: { buffer: windWeights } }],
     });
     const shadowSurface = (pipeline, offset) => device.createBindGroup({
       layout: pipeline.getBindGroupLayout(2),
@@ -519,7 +532,7 @@ export async function createForestClusters({ device, shader, module, frame, sour
       const splat = make(forestCrownSplatLook(crownInfo[id]), B.UNIFORM, 'forest crown splat');
       const bins = [uniform(0, 0), uniform(0, 1024), uniform(0, 2048)];
       const groups = (pipeline) => ({
-        cluster: device.createBindGroup({ layout: pipeline.getBindGroupLayout(3), entries: [{ binding: 0, resource: { buffer: list } }, { binding: 2, resource: { buffer: crownVertices } }, { binding: 3, resource: { buffer: crownIndices } }, { binding: 5, resource: { buffer: look } }, { binding: 6, resource: { buffer: crownMorph } }, { binding: 7, resource: { buffer: splat } }] }),
+        cluster: device.createBindGroup({ layout: pipeline.getBindGroupLayout(3), entries: [{ binding: 0, resource: { buffer: list } }, { binding: 2, resource: { buffer: crownVertices } }, { binding: 3, resource: { buffer: crownIndices } }, { binding: 5, resource: { buffer: look } }, { binding: 6, resource: { buffer: crownMorph } }, { binding: 7, resource: { buffer: splat } }, { binding: 8, resource: { buffer: windPoses } }] }),
         surface: bins.map((bin) => device.createBindGroup({ layout: pipeline.getBindGroupLayout(2), entries: [{ binding: 0, resource: { buffer: roots } }, { binding: 2, resource: { buffer: bin } }] })),
       });
       return { info: crownInfo[id], bins, solid: groups(crownPipeline), fade: groups(crownFadePipeline) };

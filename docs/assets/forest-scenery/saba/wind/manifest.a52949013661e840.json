@@ -1,0 +1,99 @@
+{
+  "format": "waterworld.forest-wind",
+  "version": 1,
+  "bonesPerPrototype": 32,
+  "boneFloats": 16,
+  "clusterVertexCount": 5966489,
+  "physics": {
+    "woodDensityKgM3": 700,
+    "leafArealDensityKgM2": 0.6,
+    "leafOpticalDepth": 0.4
+  },
+  "files": {
+    "bones.bin": {
+      "bytes": 10240,
+      "sha256": "54cd668bc0266a66243fe4c7daab55844e5a70f3ad6ed57c94f46a25d29cc191",
+      "gzip": {
+        "file": "bones.bin.gz",
+        "bytes": 8268,
+        "sha256": "7d90547facd3c41c2886d0f9b914f4b275f25dce8f4e73cb5970de8d8bf85263"
+      }
+    },
+    "weights.bin": {
+      "bytes": 23865956,
+      "sha256": "6ad5237c3ad9550e089983f166ec23e2af6584f87ff0af87c862952249190296",
+      "gzip": {
+        "file": "weights.bin.gz",
+        "bytes": 4653156,
+        "sha256": "910b239ed5e6ed02afc0f96485e73e3bbb6afcca398f9486ad6dddabcf42ecbb"
+      }
+    }
+  },
+  "prototypes": [
+    {
+      "id": 0,
+      "species": "oak",
+      "cohort": null,
+      "boneCount": 32,
+      "heightMetres": 17.72,
+      "slenderness": 8,
+      "totalMassKg": 13747.4,
+      "totalDragAreaM2": 953.69,
+      "trunkNaturalFreqHz": 0.337,
+      "barkLockedLeafShare": 0.9095,
+      "l0BarkLockedShare": 0.9116
+    },
+    {
+      "id": 1,
+      "species": "maple",
+      "cohort": null,
+      "boneCount": 32,
+      "heightMetres": 16.11,
+      "slenderness": 8.62,
+      "totalMassKg": 7763.96,
+      "totalDragAreaM2": 545.63,
+      "trunkNaturalFreqHz": 0.349,
+      "barkLockedLeafShare": 0.9584,
+      "l0BarkLockedShare": 0.9547
+    },
+    {
+      "id": 2,
+      "species": "birch",
+      "cohort": null,
+      "boneCount": 32,
+      "heightMetres": 7.15,
+      "slenderness": 28.57,
+      "totalMassKg": 94.9,
+      "totalDragAreaM2": 24.38,
+      "trunkNaturalFreqHz": 0.423,
+      "barkLockedLeafShare": 0.9829,
+      "l0BarkLockedShare": 0.9806
+    },
+    {
+      "id": 3,
+      "species": "elm",
+      "cohort": null,
+      "boneCount": 32,
+      "heightMetres": 16.54,
+      "slenderness": 8,
+      "totalMassKg": 13186.69,
+      "totalDragAreaM2": 358.2,
+      "trunkNaturalFreqHz": 0.349,
+      "barkLockedLeafShare": 0.9541,
+      "l0BarkLockedShare": 0.9511
+    },
+    {
+      "id": 4,
+      "species": "chestnut",
+      "cohort": null,
+      "boneCount": 32,
+      "heightMetres": 21.19,
+      "slenderness": 10.83,
+      "totalMassKg": 11313.23,
+      "totalDragAreaM2": 590.96,
+      "trunkNaturalFreqHz": 0.292,
+      "barkLockedLeafShare": 0.9322,
+      "l0BarkLockedShare": 0.9349
+    }
+  ]
+}

@@ -1,0 +1,917 @@
+{
+ "format": "waterworld.forest-crowns",
+ "version": 3,
+ "vertexWords": 5,
+ "stepHeaderWords": 4,
+ "vertexCount": 2064,
+ "indexCount": 12099,
+ "morphWordCount": 89676,
+ "splatFirstIndex": 12096,
+ "files": {
+  "vertices.bin": {
+   "bytes": 41280,
+   "sha256": "8663ecdf2721eb821b70d2a35d0224a3e25faf9ebd6571cca67d063f7475bcdc",
+   "gzip": {
+    "file": "vertices.bin.gz",
+    "bytes": 34722,
+    "sha256": "586bbaeb1d5101ff59a48fd27fc57cb18590ceb6bab772956c30c60618a5d825"
+   }
+  },
+  "indices.bin": {
+   "bytes": 48396,
+   "sha256": "6758b30ab5ba7a1b81a1cac83d1dc7ed0af875ef9737421517b9fe760e1ead9b",
+   "gzip": {
+    "file": "indices.bin.gz",
+    "bytes": 16601,
+    "sha256": "e4283379ed0b929bd06b911ecdfa17ed96a5914101bd5228d0125b3eff32efb0"
+   }
+  },
+  "morph.bin": {
+   "bytes": 358704,
+   "sha256": "76c65a725220e130add9641dfa65da24385eccf4f9a53d59e861f0ae973e8cb0",
+   "gzip": {
+    "file": "morph.bin.gz",
+    "bytes": 33370,
+    "sha256": "1782028d78471117d2f7f0704e409919ebcdaa69f3b04cb6bfede0253bbf345b"
+   }
+  }
+ },
+ "prototypes": [
+  {
+   "id": 0,
+   "species": "oak",
+   "cohort": "veteran",
+   "firstVertex": 0,
+   "vertexCount": 172,
+   "firstIndex": 0,
+   "baseIndexCount": 1008,
+   "baseFoliageTriangles": 300,
+   "baseTrunkTriangles": 36,
+   "minFoliageTriangles": 6,
+   "stepCount": 158,
+   "morphOffset": 0,
+   "low": [
+    -13.275221954059589,
+    0.029999999329447746,
+    -12.09761905670166
+   ],
+   "posScale": 19.207766266539693,
+   "errorRangeMetres": [
+    0.5683,
+    5.6792
+   ],
+   "outlineShareRange": [
+    0.9952,
+    1.0015
+   ],
+   "splat": {
+    "centre": [
+     -5.4416,
+     9.9344,
+     -2.7375
+    ],
+    "rx": 7.8336,
+    "ry": 7.825,
+    "colour": [
+     0.0079,
+     0.0263,
+     0.0017
+    ],
+    "exposure": 0.4133,
+    "escape": 1,
+    "trunkAxisXZ": [
+     -0.082,
+     0.1678
+    ]
+   },
+   "leafErrorMetres": 0.3929,
+   "leaves": 22000,
+   "breadthMetres": 13.874,
+   "look": {
+    "alike": 0.7945,
+    "transmission": 0.13296535767236065,
+    "roughness": 0.94,
+    "undersideGain": [
+     1.9376,
+     1.5099,
+     5.1047
+    ]
+   },
+   "stats": {
+    "undersideSeenLevel": 0.445,
+    "undersideSeenAbove": 0.129,
+    "cellMetres": 0.3,
+    "level": 0.003598,
+    "fineTriangles": 15772,
+    "leafAreaSquareMetres": 9048.6,
+    "meanOutlineSquareMetres": 192.49,
+    "leavesCoverShare": 0.663,
+    "cardsCoverShareAtChange": 0.53,
+    "ms": 28240
+   }
+  },
+  {
+   "id": 1,
+   "species": "chestnut",
+   "cohort": "veteran",
+   "firstVertex": 172,
+   "vertexCount": 172,
+   "firstIndex": 1008,
+   "baseIndexCount": 1008,
+   "baseFoliageTriangles": 300,
+   "baseTrunkTriangles": 36,
+   "minFoliageTriangles": 6,
+   "stepCount": 158,
+   "morphOffset": 7473,
+   "low": [
+    -9.145304374275687,
+    0.029999999329447746,
+    -10.224757943340585
+   ],
+   "posScale": 22.933644028380513,
+   "errorRangeMetres": [
+    0.5692,
+    7.3518
+   ],
+   "outlineShareRange": [
+    0.9951,
+    1.0008
+   ],
+   "splat": {
+    "centre": [
+     0.8232,
+     12.2522,
+     -0.2562
+    ],
+    "rx": 9.9685,
+    "ry": 9.8807,
+    "colour": [
+     0.0077,
+     0.0217,
+     0.0018
+    ],
+    "exposure": 0.4115,
+    "escape": 1,
+    "trunkAxisXZ": [
+     0.2357,
+     0.0343
+    ]
+   },
+   "leafErrorMetres": 0.3929,
+   "leaves": 21000,
+   "breadthMetres": 17.587,
+   "look": {
+    "alike": 0.8044,
+    "transmission": 0.13296535767236065,
+    "roughness": 0.796,
+    "undersideGain": [
+     2.1083,
+     1.8511,
+     3.536
+    ]
+   },
+   "stats": {
+    "undersideSeenLevel": 0.462,
+    "undersideSeenAbove": 0.115,
+    "cellMetres": 0.3,
+    "level": 0.0605,
+    "fineTriangles": 43740,
+    "leafAreaSquareMetres": 8582.4,
+    "meanOutlineSquareMetres": 309.3,
+    "leavesCoverShare": 0.568,
+    "cardsCoverShareAtChange": 0.406,
+    "ms": 30011
+   }
+  },
+  {
+   "id": 2,
+   "species": "maple",
+   "cohort": "veteran",
+   "firstVertex": 344,
+   "vertexCount": 172,
+   "firstIndex": 2016,
+   "baseIndexCount": 1008,
+   "baseFoliageTriangles": 300,
+   "baseTrunkTriangles": 36,
+   "minFoliageTriangles": 6,
+   "stepCount": 158,
+   "morphOffset": 14946,
+   "low": [
+    -11.143645900219102,
+    -1.3785240650177002,
+    -11.371932983398438
+   ],
+   "posScale": 25.914674043655396,
+   "errorRangeMetres": [
+    0.5693,
+    8.3488
+   ],
+   "outlineShareRange": [
+    0.9951,
+    1.0002
+   ],
+   "splat": {
+    "centre": [
+     -0.2675,
+     11.8777,
+     0.0725
+    ],
+    "rx": 10.8761,
+    "ry": 12.11,
+    "colour": [
+     0.0154,
+     0.0368,
+     0.0023
+    ],
+    "exposure": 0.4769,
+    "escape": 1,
+    "trunkAxisXZ": [
+     -0.1763,
+     -0.0818
+    ]
+   },
+   "leafErrorMetres": 0.3929,
+   "leaves": 22500,
+   "breadthMetres": 20.337,
+   "look": {
+    "alike": 0.8346,
+    "transmission": 0.153201690575191,
+    "roughness": 0.85,
+    "undersideGain": [
+     1.6908,
+     1.5396,
+     6.785
+    ]
+   },
+   "stats": {
+    "undersideSeenLevel": 0.481,
+    "undersideSeenAbove": 0.122,
+    "cellMetres": 0.3,
+    "level": 0.1607,
+    "fineTriangles": 72652,
+    "leafAreaSquareMetres": 8238.1,
+    "meanOutlineSquareMetres": 413.6,
+    "leavesCoverShare": 0.611,
+    "cardsCoverShareAtChange": 0.432,
+    "ms": 32491
+   }
+  },
+  {
+   "id": 3,
+   "species": "elm",
+   "cohort": "veteran",
+   "firstVertex": 516,
+   "vertexCount": 172,
+   "firstIndex": 3024,
+   "baseIndexCount": 1008,
+   "baseFoliageTriangles": 300,
+   "baseTrunkTriangles": 36,
+   "minFoliageTriangles": 6,
+   "stepCount": 158,
+   "morphOffset": 22419,
+   "low": [
+    -12.659562423969206,
+    0.029999999329447746,
+    -8.664819717407227
+   ],
+   "posScale": 26.976849304167374,
+   "errorRangeMetres": [
+    0.5687,
+    7.279
+   ],
+   "outlineShareRange": [
+    0.9951,
+    1.0013
+   ],
+   "splat": {
+    "centre": [
+     -2.1589,
+     18.0288,
+     2.4123
+    ],
+    "rx": 10.5006,
+    "ry": 8.978,
+    "colour": [
+     0.0071,
+     0.0205,
+     0.002
+    ],
+    "exposure": 0.5107,
+    "escape": 1,
+    "trunkAxisXZ": [
+     -0.9088,
+     0.8892
+    ]
+   },
+   "leafErrorMetres": 0.3929,
+   "leaves": 24999,
+   "breadthMetres": 17.206,
+   "look": {
+    "alike": 0.8044,
+    "transmission": 0.13296535767236065,
+    "roughness": 0.868,
+    "undersideGain": [
+     2.4818,
+     2.1337,
+     4.2365
+    ]
+   },
+   "stats": {
+    "undersideSeenLevel": 0.452,
+    "undersideSeenAbove": 0.125,
+    "cellMetres": 0.3,
+    "level": 0.002876,
+    "fineTriangles": 19724,
+    "leafAreaSquareMetres": 10647.5,
+    "meanOutlineSquareMetres": 296.05,
+    "leavesCoverShare": 0.616,
+    "cardsCoverShareAtChange": 0.493,
+    "ms": 33498
+   }
+  },
+  {
+   "id": 4,
+   "species": "birch",
+   "cohort": "veteran",
+   "firstVertex": 688,
+   "vertexCount": 172,
+   "firstIndex": 4032,
+   "baseIndexCount": 1008,
+   "baseFoliageTriangles": 300,
+   "baseTrunkTriangles": 36,
+   "minFoliageTriangles": 6,
+   "stepCount": 158,
+   "morphOffset": 29892,
+   "low": [
+    -4.816239833831787,
+    -0.032941654324531555,
+    -3.7407076358795166
+   ],
+   "posScale": 10.885700061917305,
+   "errorRangeMetres": [
+    0.5018,
+    2.4603
+   ],
+   "outlineShareRange": [
+    0.9951,
+    1.0049
+   ],
+   "splat": {
+    "centre": [
+     -0.8968,
+     5.5846,
+     -0.7399
+    ],
+    "rx": 2.6938,
+    "ry": 4.4986,
+    "colour": [
+     0.0677,
+     0.1258,
+     0.0024
+    ],
+    "exposure": 0.522,
+    "escape": 1,
+    "trunkAxisXZ": [
+     -0.6007,
+     -0.3365
+    ]
+   },
+   "leafErrorMetres": 0.3929,
+   "leaves": 6800,
+   "breadthMetres": 6.169,
+   "look": {
+    "alike": 0.7565,
+    "transmission": 0.16105650921764147,
+    "roughness": 0.748,
+    "undersideGain": [
+     0.8833,
+     0.9434,
+     8.2704
+    ]
+   },
+   "stats": {
+    "undersideSeenLevel": 0.445,
+    "undersideSeenAbove": 0.116,
+    "cellMetres": 0.2636,
+    "level": 0.8345,
+    "fineTriangles": 4208,
+    "leafAreaSquareMetres": 1637.3,
+    "meanOutlineSquareMetres": 38.05,
+    "leavesCoverShare": 0.86,
+    "cardsCoverShareAtChange": 0.463,
+    "ms": 11770
+   }
+  },
+  {
+   "id": 5,
+   "species": "blueberry",
+   "cohort": "veteran",
+   "firstVertex": 860,
+   "vertexCount": 172,
+   "firstIndex": 5040,
+   "baseIndexCount": 1008,
+   "baseFoliageTriangles": 300,
+   "baseTrunkTriangles": 36,
+   "minFoliageTriangles": 6,
+   "stepCount": 158,
+   "morphOffset": 37365,
+   "low": [
+    -0.7763370871543884,
+    -0.23683935403823853,
+    -0.6309970732906015
+   ],
+   "posScale": 2.5627384781837463,
+   "errorRangeMetres": [
+    0.12,
+    0.5629
+   ],
+   "outlineShareRange": [
+    0.9951,
+    1.0022
+   ],
+   "splat": {
+    "centre": [
+     -0.118,
+     1.1104,
+     -0.0372
+    ],
+    "rx": 0.5938,
+    "ry": 1.1594,
+    "colour": [
+     0.0146,
+     0.0417,
+     0.0063
+    ],
+    "exposure": 0.8718,
+    "escape": 1,
+    "trunkAxisXZ": [
+     -0.048,
+     -0.0157
+    ]
+   },
+   "leafErrorMetres": 0.3929,
+   "leaves": 1189,
+   "breadthMetres": 1.47,
+   "look": {
+    "alike": 0.7891,
+    "transmission": 0.11931359658782183,
+    "roughness": 0.6699999999999999,
+    "undersideGain": [
+     2.4303,
+     2.0929,
+     3.6236
+    ]
+   },
+   "stats": {
+    "undersideSeenLevel": 0.449,
+    "undersideSeenAbove": 0.118,
+    "cellMetres": 0.0633,
+    "level": 1.013,
+    "fineTriangles": 3356,
+    "leafAreaSquareMetres": 274.7,
+    "meanOutlineSquareMetres": 2.16,
+    "leavesCoverShare": 0.924,
+    "cardsCoverShareAtChange": 0.487,
+    "ms": 18987
+   }
+  },
+  {
+   "id": 6,
+   "species": "oak",
+   "cohort": "canopy",
+   "firstVertex": 1032,
+   "vertexCount": 172,
+   "firstIndex": 6048,
+   "baseIndexCount": 1008,
+   "baseFoliageTriangles": 300,
+   "baseTrunkTriangles": 36,
+   "minFoliageTriangles": 6,
+   "stepCount": 158,
+   "morphOffset": 44838,
+   "low": [
+    -6.222834826822022,
+    0.029999999329447746,
+    -6.060216903686523
+   ],
+   "posScale": 17.423583742968166,
+   "errorRangeMetres": [
+    0.5687,
+    5.3865
+   ],
+   "outlineShareRange": [
+    0.995,
+    1.0005
+   ],
+   "splat": {
+    "centre": [
+     0.4639,
+     9.5674,
+     1.0406
+    ],
+    "rx": 6.6867,
+    "ry": 7.8862,
+    "colour": [
+     0.0079,
+     0.0262,
+     0.0017
+    ],
+    "exposure": 0.4316,
+    "escape": 1,
+    "trunkAxisXZ": [
+     0.0254,
+     -0.011
+    ]
+   },
+   "leafErrorMetres": 0.3929,
+   "leaves": 14000,
+   "breadthMetres": 12.868,
+   "look": {
+    "alike": 0.7954,
+    "transmission": 0.13296535767236065,
+    "roughness": 0.94,
+    "undersideGain": [
+     1.9376,
+     1.5099,
+     5.1047
+    ]
+   },
+   "stats": {
+    "undersideSeenLevel": 0.439,
+    "undersideSeenAbove": 0.11,
+    "cellMetres": 0.3,
+    "level": 0.2354,
+    "fineTriangles": 23224,
+    "leafAreaSquareMetres": 5221.1,
+    "meanOutlineSquareMetres": 165.59,
+    "leavesCoverShare": 0.62,
+    "cardsCoverShareAtChange": 0.464,
+    "ms": 20189
+   }
+  },
+  {
+   "id": 7,
+   "species": "chestnut",
+   "cohort": "canopy",
+   "firstVertex": 1204,
+   "vertexCount": 172,
+   "firstIndex": 7056,
+   "baseIndexCount": 1008,
+   "baseFoliageTriangles": 300,
+   "baseTrunkTriangles": 36,
+   "minFoliageTriangles": 6,
+   "stepCount": 158,
+   "morphOffset": 52311,
+   "low": [
+    -8.262900352478027,
+    0.029999999329447746,
+    -7.407003872662572
+   ],
+   "posScale": 19.56481239385903,
+   "errorRangeMetres": [
+    0.5684,
+    6.0865
+   ],
+   "outlineShareRange": [
+    0.995,
+    1.0003
+   ],
+   "splat": {
+    "centre": [
+     0.4351,
+     10.4152,
+     0.8407
+    ],
+    "rx": 8.2477,
+    "ry": 8.2676,
+    "colour": [
+     0.0105,
+     0.0293,
+     0.0025
+    ],
+    "exposure": 0.4615,
+    "escape": 1,
+    "trunkAxisXZ": [
+     0.0077,
+     -0.091
+    ]
+   },
+   "leafErrorMetres": 0.3929,
+   "leaves": 13501,
+   "breadthMetres": 14.633,
+   "look": {
+    "alike": 0.8064,
+    "transmission": 0.13296535767236065,
+    "roughness": 0.796,
+    "undersideGain": [
+     2.1083,
+     1.8511,
+     3.536
+    ]
+   },
+   "stats": {
+    "undersideSeenLevel": 0.438,
+    "undersideSeenAbove": 0.097,
+    "cellMetres": 0.3,
+    "level": 0.328,
+    "fineTriangles": 32176,
+    "leafAreaSquareMetres": 5269.5,
+    "meanOutlineSquareMetres": 214.13,
+    "leavesCoverShare": 0.698,
+    "cardsCoverShareAtChange": 0.522,
+    "ms": 21772
+   }
+  },
+  {
+   "id": 8,
+   "species": "maple",
+   "cohort": "canopy",
+   "firstVertex": 1376,
+   "vertexCount": 172,
+   "firstIndex": 8064,
+   "baseIndexCount": 1008,
+   "baseFoliageTriangles": 300,
+   "baseTrunkTriangles": 36,
+   "minFoliageTriangles": 6,
+   "stepCount": 158,
+   "morphOffset": 59784,
+   "low": [
+    -9.828682899475098,
+    -1.6559773776046622,
+    -9.139619587005445
+   ],
+   "posScale": 20.396999487590016,
+   "errorRangeMetres": [
+    1.069,
+    6.6917
+   ],
+   "outlineShareRange": [
+    0.9954,
+    1.0047
+   ],
+   "splat": {
+    "centre": [
+     0.2185,
+     7.1163,
+     -0.0195
+    ],
+    "rx": 9.1202,
+    "ry": 8.7723,
+    "colour": [
+     0.02,
+     0.0481,
+     0.0028
+    ],
+    "exposure": 0.4181,
+    "escape": 1,
+    "trunkAxisXZ": [
+     -0.0012,
+     0.091
+    ]
+   },
+   "leafErrorMetres": 0.3929,
+   "leaves": 14500,
+   "breadthMetres": 15.85,
+   "look": {
+    "alike": 0.8065,
+    "transmission": 0.153201690575191,
+    "roughness": 0.85,
+    "undersideGain": [
+     1.6908,
+     1.5396,
+     6.785
+    ]
+   },
+   "stats": {
+    "undersideSeenLevel": 0.451,
+    "undersideSeenAbove": 0.096,
+    "cellMetres": 0.3,
+    "level": 0.644,
+    "fineTriangles": 41400,
+    "leafAreaSquareMetres": 5202.3,
+    "meanOutlineSquareMetres": 251.23,
+    "leavesCoverShare": 0.714,
+    "cardsCoverShareAtChange": 0.496,
+    "ms": 22272
+   }
+  },
+  {
+   "id": 9,
+   "species": "elm",
+   "cohort": "canopy",
+   "firstVertex": 1548,
+   "vertexCount": 172,
+   "firstIndex": 9072,
+   "baseIndexCount": 1008,
+   "baseFoliageTriangles": 300,
+   "baseTrunkTriangles": 36,
+   "minFoliageTriangles": 6,
+   "stepCount": 158,
+   "morphOffset": 67257,
+   "low": [
+    -8.994704246520996,
+    0.029999999329447746,
+    -8.53643972849226
+   ],
+   "posScale": 20.29214264121446,
+   "errorRangeMetres": [
+    0.5691,
+    6.3395
+   ],
+   "outlineShareRange": [
+    0.995,
+    1.0006
+   ],
+   "splat": {
+    "centre": [
+     -0.475,
+     11.4154,
+     -0.2875
+    ],
+    "rx": 8.2489,
+    "ry": 8.9067,
+    "colour": [
+     0.008,
+     0.023,
+     0.0024
+    ],
+    "exposure": 0.3517,
+    "escape": 1,
+    "trunkAxisXZ": [
+     -0.2844,
+     -0.4544
+    ]
+   },
+   "leafErrorMetres": 0.3929,
+   "leaves": 14500,
+   "breadthMetres": 15.189,
+   "look": {
+    "alike": 0.8024,
+    "transmission": 0.13296535767236065,
+    "roughness": 0.868,
+    "undersideGain": [
+     2.4818,
+     2.1337,
+     4.2365
+    ]
+   },
+   "stats": {
+    "undersideSeenLevel": 0.437,
+    "undersideSeenAbove": 0.1,
+    "cellMetres": 0.3,
+    "level": 0.1329,
+    "fineTriangles": 33304,
+    "leafAreaSquareMetres": 5537.7,
+    "meanOutlineSquareMetres": 230.72,
+    "leavesCoverShare": 0.6,
+    "cardsCoverShareAtChange": 0.436,
+    "ms": 23320
+   }
+  },
+  {
+   "id": 10,
+   "species": "birch",
+   "cohort": "canopy",
+   "firstVertex": 1720,
+   "vertexCount": 172,
+   "firstIndex": 10080,
+   "baseIndexCount": 1008,
+   "baseFoliageTriangles": 300,
+   "baseTrunkTriangles": 36,
+   "minFoliageTriangles": 6,
+   "stepCount": 158,
+   "morphOffset": 74730,
+   "low": [
+    -2.1862239837646484,
+    -0.10410373657941818,
+    -2.759016513824463
+   ],
+   "posScale": 8.94540660828352,
+   "errorRangeMetres": [
+    0.4142,
+    1.7608
+   ],
+   "outlineShareRange": [
+    0.995,
+    1.0039
+   ],
+   "splat": {
+    "centre": [
+     0.2521,
+     4.6777,
+     -0.0904
+    ],
+    "rx": 1.8907,
+    "ry": 3.4843,
+    "colour": [
+     0.0584,
+     0.1102,
+     0.0025
+    ],
+    "exposure": 0.5745,
+    "escape": 1,
+    "trunkAxisXZ": [
+     0.1611,
+     0.1326
+    ]
+   },
+   "leafErrorMetres": 0.3929,
+   "leaves": 4800,
+   "breadthMetres": 4.548,
+   "look": {
+    "alike": 0.7522,
+    "transmission": 0.16105650921764147,
+    "roughness": 0.748,
+    "undersideGain": [
+     0.8833,
+     0.9434,
+     8.2704
+    ]
+   },
+   "stats": {
+    "undersideSeenLevel": 0.442,
+    "undersideSeenAbove": 0.111,
+    "cellMetres": 0.218,
+    "level": 1.066,
+    "fineTriangles": 3296,
+    "leafAreaSquareMetres": 1127.1,
+    "meanOutlineSquareMetres": 20.69,
+    "leavesCoverShare": 0.875,
+    "cardsCoverShareAtChange": 0.384,
+    "ms": 12004
+   }
+  },
+  {
+   "id": 11,
+   "species": "blueberry",
+   "cohort": "canopy",
+   "firstVertex": 1892,
+   "vertexCount": 172,
+   "firstIndex": 11088,
+   "baseIndexCount": 1008,
+   "baseFoliageTriangles": 300,
+   "baseTrunkTriangles": 36,
+   "minFoliageTriangles": 6,
+   "stepCount": 158,
+   "morphOffset": 82203,
+   "low": [
+    -0.36520761251449585,
+    -0.1453784853219986,
+    -0.4202127502404485
+   ],
+   "posScale": 1.665007010102272,
+   "errorRangeMetres": [
+    0.0865,
+    0.4815
+   ],
+   "outlineShareRange": [
+    0.995,
+    1.0047
+   ],
+   "splat": {
+    "centre": [
+     0.0934,
+     0.6543,
+     -0.0258
+    ],
+    "rx": 0.3944,
+    "ry": 0.7945,
+    "colour": [
+     0.0176,
+     0.05,
+     0.0082
+    ],
+    "exposure": 0.9678,
+    "escape": 1,
+    "trunkAxisXZ": [
+     0.0449,
+     -0.0194
+    ]
+   },
+   "leafErrorMetres": 0.3929,
+   "leaves": 284,
+   "breadthMetres": 0.992,
+   "look": {
+    "alike": 0.8166,
+    "transmission": 0.11931359658782183,
+    "roughness": 0.6699999999999999,
+    "undersideGain": [
+     2.4303,
+     2.0929,
+     3.6236
+    ]
+   },
+   "stats": {
+    "undersideSeenLevel": 0.413,
+    "undersideSeenAbove": 0.065,
+    "cellMetres": 0.0456,
+    "level": 1.046,
+    "fineTriangles": 2944,
+    "leafAreaSquareMetres": 66,
+    "meanOutlineSquareMetres": 0.98,
+    "leavesCoverShare": 0.952,
+    "cardsCoverShareAtChange": 0.709,
+    "ms": 13264
+   }
+  }
+ ]
+}

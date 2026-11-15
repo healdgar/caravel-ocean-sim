@@ -6875,9 +6875,9 @@ export async function createTradeVessels({
       selectParamsCtrl[0] = 0;
       device.queue.writeBuffer(selectUniformBuffer, 0, selectParamsCtrl);
       crewConfigU32[0] = 0;
-      device.queue.writeBuffer(crewConfigBuffer, 0, crewConfigU32, 0, 16);
+      device.queue.writeBuffer(crewConfigBuffer, 0, crewConfigU32, 0, 4);
       waveParamsU32[0] = 0;
-      device.queue.writeBuffer(waveParamsBuffer, 0, waveParamsU32, 0, 16);
+      device.queue.writeBuffer(waveParamsBuffer, 0, waveParamsU32, 0, 4);
       gpuSelectionEncoded = false;
       crewEncoded = false;
       return;

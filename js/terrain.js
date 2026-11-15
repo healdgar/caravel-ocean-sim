@@ -1371,6 +1371,14 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     const localCam = {x:camera.x-worldOffset.x,z:camera.z-worldOffset.z};
     craters?.follow(localCam);
     activeTownField?.follow?.(localCam);
+    if(forest?.wind?.enabled){
+      if(camera?.onFoot&&Number.isFinite(camera.x)&&Number.isFinite(camera.z)){
+        const gy=groundSample(localCam.x,localCam.z);
+        if(Number.isFinite(gy)&&camera.y-gy<3.6){
+          forest.wind.setPushCapsule(0,{ax:camera.x,ay:gy+0.25,az:camera.z,bx:camera.x,by:gy+1.85,bz:camera.z,radius:1.45,strength:1150,falloff:1.2});
+        }else forest.wind.clearPushCapsule(0);
+      }else forest.wind.clearPushCapsule(0);
+    }
     lastCamera=camera;lastView=viewProjection;
 
   }
@@ -2846,6 +2854,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     get streamedSectionCount(){return loadedSections.size;},
     get streamBusy(){return sectionStreamBusy;},
     get craters(){return craters;},
+    get forestWind(){return forest?.wind??null;},
+    get forestStats(){return forest?.stats??null;},
     // How much of the ground at a point is loose sand, from none to all: what the beach survey says, or the low,
     // gentle strand with no green in this coast's imagery, which the land shader leaves bare (landGroundCover).
     sandAt(x,z){

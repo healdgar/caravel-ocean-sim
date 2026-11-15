@@ -186,8 +186,10 @@ fn forestCrownLight(world:vec3f,leaves:vec3f,outward:vec3f,colour:vec3f,exposure
   let inflate=max(1.,f32((item.y>>8u)&65535u)/4096.);
   let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);let scale=r.rootScale.w;
   let localMid=forestCrownSplat.centre.xyz;
-  var centreLocal=vec3f(c*localMid.x-s*localMid.z,localMid.y,s*localMid.x+c*localMid.z)*scale;
-  centreLocal+=forestWind(r,centreLocal,localMid,true);
+  let windOnSplat=bitcast<vec4u>(forestWindPoses[0]).y>0u;
+  let swayedMid=select(localMid,forestWindCrownPos(r,item.x,localMid),windOnSplat);
+  var centreLocal=vec3f(c*swayedMid.x-s*swayedMid.z,swayedMid.y,s*swayedMid.x+c*swayedMid.z)*scale;
+  if(!windOnSplat){centreLocal+=forestWind(r,centreLocal,localMid,0.);}
   var tint=forestCrownSplat.colour.rgb*r.yawColour.yzw;var fallen=false;
   if(r.identity.w!=0.){
    let struck=forestStruckPlace(r,localMid,centreLocal,vec3f(0.,1.,0.),tint,false);
@@ -267,7 +269,9 @@ fn forestCrownLight(world:vec3f,leaves:vec3f,outward:vec3f,colour:vec3f,exposure
   }
  }
  // Material 1 is the trunk below the crown, which moves and is lit as the wood it stands for (forestNativeOpaqueFS).
- var o=forestPlace(r,item.x,pos,lean,vec2f(select(4.,3.,wood),exposure),vec2f(0.),col,-1.,gv0,escape);
+ let windOnCrown=bitcast<vec4u>(forestWindPoses[0]).y>0u;
+ let swayedPos=select(pos,forestWindCrownPos(r,item.x,pos),windOnCrown);
+ var o=forestPlaceSkinned(r,item.x,swayedPos,lean,vec2f(select(4.,3.,wood),exposure),vec2f(0.),col,-1.,gv0,escape,windOnCrown);
  o.crownFade=fade;
  if(wood){
   let n=normalize(o.normal);o.normal=n;
