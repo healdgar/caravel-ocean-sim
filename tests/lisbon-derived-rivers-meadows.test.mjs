@@ -188,19 +188,48 @@ test('Nanite meadow grass pack integrity, cover masking, and GPU-only zero-disca
     beaches: packLisbon.beaches,
     port: packLisbon.port,
     city: packLisbon.city,
-    size: 256,
+    board: packLisbon.board,
+    inlandWater: packLisbon.inlandWater,
+    size: 2048,
   });
   const waterAt = createInlandWaterSampler(packLisbon.port.country, { margin: 2.5 });
   let covered = 0, waterLeak = 0;
-  const x0 = region.x - region.span * 0.5, z0 = region.z - region.span * 0.5, step = region.span / 256;
-  for (let j = 0; j < 256; j++) {
+  const x0 = region.x - region.span * 0.5, z0 = region.z - region.span * 0.5, step = region.span / 2048;
+  for (let j = 0; j < 2048; j++) {
     const wz = z0 + (j + 0.5) * step;
-    for (let i = 0; i < 256; i++) {
-      const r = cover[(j * 256 + i) * 4];
+    for (let i = 0; i < 2048; i++) {
+      const r = cover[(j * 2048 + i) * 4];
       if (r > 0) covered++;
       if (r > 0 && waterAt(x0 + (i + 0.5) * step, wz)) waterLeak++;
     }
   }
-  assert.ok(covered > 1000, `expected >1000 covered meadow texels on Lisbon hillsides, got ${covered}`);
+  assert.ok(covered > 64000, `expected >64000 covered 4 m meadow texels on Lisbon hillsides, got ${covered}`);
   assert.equal(waterLeak, 0, 'meadow cover map leaked into inland rivers');
+
+  // Verify both nearest texel AND bilinearly sampled meadowCover are below the 0.015 zero-tuck threshold
+  // at EVERY rendered inlandWater triangle centroid across all 137k+ fluvial water triangles!
+  const iwV = packLisbon.inlandWater?.vertices, iwI = packLisbon.inlandWater?.indices;
+  assert.ok(iwV?.length > 0 && iwI?.length > 0, 'expected rendered inlandWater mesh on Lisbon');
+  let nearestWaterLeaks = 0, bilinearWaterLeaks = 0;
+  for (let t = 0; t + 2 < iwI.length; t += 3) {
+    const o0 = iwI[t] * 12, o1 = iwI[t + 1] * 12, o2 = iwI[t + 2] * 12;
+    const cx = (iwV[o0] + iwV[o1] + iwV[o2]) / 3;
+    const cz = (iwV[o0 + 2] + iwV[o1 + 2] + iwV[o2 + 2]) / 3;
+    const ii = Math.floor(((cx - x0) / region.span) * 2048);
+    const jj = Math.floor(((cz - z0) / region.span) * 2048);
+    if (ii < 0 || ii >= 2048 || jj < 0 || jj >= 2048) continue;
+    if (cover[(jj * 2048 + ii) * 4] > 0) nearestWaterLeaks++;
+    const qx = Math.max(0, Math.min(2047, ((cx - x0) / region.span) * 2048 - 0.5));
+    const qz = Math.max(0, Math.min(2047, ((cz - z0) / region.span) * 2048 - 0.5));
+    const i0 = Math.min(2046, Math.floor(qx)), j0 = Math.min(2046, Math.floor(qz));
+    const fx = qx - i0, fz = qz - j0;
+    const c00 = cover[(j0 * 2048 + i0) * 4] / 255;
+    const c10 = cover[(j0 * 2048 + i0 + 1) * 4] / 255;
+    const c01 = cover[((j0 + 1) * 2048 + i0) * 4] / 255;
+    const c11 = cover[((j0 + 1) * 2048 + i0 + 1) * 4] / 255;
+    const bi = (c00 * (1 - fx) + c10 * fx) * (1 - fz) + (c01 * (1 - fx) + c11 * fx) * fz;
+    if (bi >= 0.01) bilinearWaterLeaks++;
+  }
+  assert.equal(nearestWaterLeaks, 0, `expected 0 nearest-texel inlandWater leaks, got ${nearestWaterLeaks}`);
+  assert.equal(bilinearWaterLeaks, 0, `expected 0 bilinear inlandWater leaks, got ${bilinearWaterLeaks}`);
 });

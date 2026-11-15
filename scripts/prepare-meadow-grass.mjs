@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-// Bakes compact GPU-resident 4-level Volumetric Cloud + Wavy Tendrils grass continuum
-// (1 cluster per 1.35 m tile per level = 48 clusters total + genus-0 morph.bin + 1-tri splats)
+// Bakes compact GPU-resident 4-level Seamless Volumetric Turf Sheet + Wavy Tendrils grass continuum
+// (1 cluster per 1.35 m tile per level = 48 clusters total + full-footprint genus-0 morph.bin + 1-tri splats)
 // from raw botanical meadow data into assets/ground-cover/portugal/meadows-gpu/.
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
@@ -13,29 +13,36 @@ const OUT_DIR = 'assets/ground-cover/portugal/meadows-gpu';
 const MIXES = ['pasture', 'waste', 'field-margin'];
 const VARIANTS = 4;
 const TILE_METRES = 1.35;
-const SUB_GRID = 1; // 1 unified overlapping volumetric cloud+tendrils unit per tile (loop-free GPU select!)
+const SUB_GRID = 1; // 1 unified overlapping volumetric turf+tendrils unit per tile (loop-free GPU select!)
 const SOURCE_STRIDE = 12;
 const GPU_VERTEX_WORDS = 8; // px, py, pz, packedNorm+wTag, packedCol, along, stiffness, packedMorphXZ(half2)
 const CLUSTER_WORDS = 12;
 
 // Continuous screen-space error thresholds across L0 -> L1 -> L2 -> L3 -> Continuum
-const LEVEL_TENDRILS = [88, 38, 14, 4];
-const LEVEL_BILLOWS = [7, 4, 1, 0];
+// Zero per-tile cone billows (all volumetric cloud billows are evaluated in continuous world-space WGSL
+// so undulations span 3..16 m across tiles with zero 1.35 m tile repetition).
+const LEVEL_TENDRILS = [96, 44, 18, 5];
 const LEVEL_SHELL_CFG = [
-  { rings: 7, segs: 10 }, // L0: 140-tri undulating volumetric cloud + 7 soft billows + 88 slender 4-seg arched tendrils
-  { rings: 6, segs: 8 },  // L1: 96-tri undulating volumetric cloud + 4 soft billows + 38 slender 3-seg arched tendrils
-  { rings: 5, segs: 7 },  // L2: 70-tri undulating volumetric cloud + 1 billow + 14 wind-combed wave plumes
-  { rings: 4, segs: 5 },  // L3: 40-tri undulating volumetric cloud + 4 subtle crest plumes -> matches morph.bin!
+  { rings: 7, segs: 12 }, // L0: dense 168-tri seamless overlap sheet + 96 slender 4-seg arched tendrils
+  { rings: 6, segs: 10 }, // L1: 120-tri seamless overlap sheet + 44 slender 3-seg arched tendrils
+  { rings: 5, segs: 8 },  // L2: 80-tri seamless overlap sheet + 18 wind-combed wave plumes
+  { rings: 4, segs: 5 },  // L3: 40-tri seamless overlap sheet + 5 subtle crest plumes -> matches morph.bin!
 ];
 const LEVEL_ERRORS = [0.0, 0.011, 0.026, 0.056];
 const LEVEL_PARENT_ERRORS = [0.011, 0.026, 0.056, 0.125];
 
 const MORPH_RINGS = 4;
 const MORPH_K = 5;
-const MORPH_STEPS = MORPH_RINGS * MORPH_K - 2; // 18 half-edge collapse steps from 40 tris -> 4 core tris
+const MORPH_STEPS = 17; // 17 exact half-edge collapse steps from 40 tris -> 6 core tris (full 2.12 m square top + 4 skirt tris!)
+
+// Flat overlap plateau half-extent 1.06 m > 0.675 * sqrt(2) + jitter (1.035 m) guarantees 100% gap-free
+// neighbor overlap at EVERY arbitrary wind-lay rotation angle (0..2pi) and across every progressive collapse step.
+const PLATEAU_HALF_M = 1.06;
+const SKIRT_HALF_M = 1.13;
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 const lerp = (a, b, t) => a + (b - a) * t;
+const fract = (x) => x - Math.floor(x);
 const sha256Hex = (buf) => createHash('sha256').update(buf).digest('hex');
 
 function hash01(seed, idx) {
@@ -102,39 +109,61 @@ function triArea3D(ax, ay, az, bx, by, bz, cx, cy, cz) {
   return 0.5 * Math.hypot(ux, uy, uz);
 }
 
-// Evaluates the continuous volumetric turf-cloud surface height & normal at local offset (dx, dz) from tile center.
-// Radius 1.20 m > diagonal half-tile 0.955 m guarantees 100% gapless overlapping volumetric grass sward across slopes.
-function evalCloudSurface(dx, dz, profile) {
-  const r = Math.hypot(dx, dz);
-  const maxR = profile.cloudRadius;
-  const u = clamp(r / maxR, 0, 1);
-  const ang = Math.atan2(dz, dx);
-  const lobe = 1.0
-    + 0.095 * Math.sin(ang * 3.0 + profile.phaseA)
-    + 0.065 * Math.cos(ang * 5.0 - profile.phaseB);
-  const effU = clamp(u / lobe, 0, 1.08);
-  // Soft, deep volumetric dome with gentle skirt tuck (-0.034 m) at outer overlap rim so sloped hills never show gaps
-  const dome = Math.pow(Math.max(0, 1.0 - effU * effU * 0.84), 0.66);
-  const tussock = (
-    0.58 * Math.sin(dx * 4.1 + profile.phaseA) * Math.cos(dz * 3.8 - profile.phaseB)
-    + 0.42 * Math.cos((dx * 0.85 - dz * 0.55) * 5.8 + profile.phaseC)
-  ) * (1.0 - smooth01(0.62, 1.04, effU));
-  const y = -0.034 * smooth01(0.74, 1.04, effU) + profile.cloudHeight * dome * (0.84 + 0.30 * tussock);
-  const slopeR = (profile.cloudHeight * 1.28 * effU) / Math.max(0.22, maxR);
-  const nx = r > 1e-4 ? (dx / r) * slopeR - 0.16 * Math.cos(dx * 4.1 + profile.phaseA) : 0;
-  const nz = r > 1e-4 ? (dz / r) * slopeR + 0.16 * Math.sin(dz * 3.8 - profile.phaseB) : 0;
-  const ny = 0.92;
-  const nLen = Math.hypot(nx, ny, nz) || 1;
-  const along = clamp((y + 0.025) / Math.max(0.10, profile.cloudHeight * 1.52), 0.03, 0.62);
-  return { y, nx: nx / nLen, ny: ny / nLen, nz: nz / nLen, along, effU };
-}
-
 function smooth01(a, b, x) {
   const t = clamp((x - a) / (b - a || 1), 0, 1);
   return t * t * (3 - 2 * t);
 }
 
-function samplePaletteColor(profile, along, hueJitter, goldenTip = 0) {
+// Maps angle (0..2pi) onto a square perimeter of half-side `boxR`, preserving exact positive cyclic winding.
+function squareRingPoint(k, segs, boxR) {
+  if (segs === 5) {
+    // Exact 5-point perimeter around [-boxR, +boxR]^2 so collapsing k=3 onto k=2 leaves the exact 4 square corners!
+    switch (k % 5) {
+      case 0: return [-boxR, -boxR];
+      case 1: return [boxR, -boxR];
+      case 2: return [boxR, boxR];
+      case 3: return [0.0, boxR];
+      default: return [-boxR, boxR];
+    }
+  }
+  const ang = (k / segs) * Math.PI * 2 - Math.PI * 0.75;
+  const c = Math.cos(ang), s = Math.sin(ang);
+  const m = Math.max(Math.abs(c), Math.abs(s), 1e-4);
+  return [(c / m) * boxR, (s / m) * boxR];
+}
+
+// Tile-invariant flat overlap sheet: strictly flat y = cloudHeight, normal = (0, 1, 0), along = 0.48
+// across the entire [-1.06, +1.06]^2 plateau so overlapping neighbor sheets fuse with ZERO seam, dome, or ring!
+// Only the outer 7 cm lip (1.06..1.13 m, completely hidden beneath neighboring tiles) tucks down to close onto botCenter.
+function evalCloudSurface(dx, dz, profile) {
+  const boxR = Math.max(Math.abs(dx), Math.abs(dz));
+  if (boxR <= PLATEAU_HALF_M) {
+    return {
+      y: profile.cloudHeight,
+      nx: 0,
+      ny: 1,
+      nz: 0,
+      along: 0.48,
+    };
+  }
+  const lipT = smooth01(PLATEAU_HALF_M, SKIRT_HALF_M, boxR);
+  const y = lerp(profile.cloudHeight, -0.020, lipT);
+  const r = Math.hypot(dx, dz) || 1;
+  const outTilt = 0.28 * lipT;
+  const nx = (dx / r) * outTilt;
+  const nz = (dz / r) * outTilt;
+  const ny = 1.0;
+  const nLen = Math.hypot(nx, ny, nz);
+  return {
+    y,
+    nx: nx / nLen,
+    ny: ny / nLen,
+    nz: nz / nLen,
+    along: lerp(0.48, 0.34, lipT),
+  };
+}
+
+function samplePaletteColor(profile, along, hueJitter = 0.5, goldenTip = 0) {
   const t = clamp(along, 0, 1);
   const base = t < 0.48
     ? [
@@ -147,15 +176,26 @@ function samplePaletteColor(profile, along, hueJitter, goldenTip = 0) {
         lerp(profile.midCol[1], profile.tipCol[1], (t - 0.48) / 0.52),
         lerp(profile.midCol[2], profile.tipCol[2], (t - 0.48) / 0.52),
       ];
-  const warm = goldenTip * Math.pow(t, 1.9);
+  const warm = goldenTip * Math.pow(Math.max(0, (t - 0.42) / 0.58), 1.7);
+  const jAmt = smooth01(0.50, 0.78, t); // Zero per-vertex jitter on the flat base sheet so tile overlaps match 100%!
+  const jR = lerp(1.0, 0.88 + 0.24 * hueJitter, jAmt);
+  const jG = lerp(1.0, 0.90 + 0.20 * hueJitter, jAmt);
+  const jB = lerp(1.0, 0.86 + 0.22 * (1 - hueJitter), jAmt);
   return [
-    clamp(lerp(base[0], profile.seedCol[0], warm) * (0.88 + 0.24 * hueJitter), 0.004, 0.32),
-    clamp(lerp(base[1], profile.seedCol[1], warm) * (0.90 + 0.20 * hueJitter), 0.008, 0.36),
-    clamp(lerp(base[2], profile.seedCol[2], warm) * (0.86 + 0.22 * (1 - hueJitter)), 0.002, 0.16),
+    clamp(lerp(base[0], profile.seedCol[0], warm) * jR, 0.004, 0.32),
+    clamp(lerp(base[1], profile.seedCol[1], warm) * jG, 0.008, 0.36),
+    clamp(lerp(base[2], profile.seedCol[2], warm) * jB, 0.002, 0.16),
   ];
 }
 
-// Builds a single LOD level (0..3) of the unified Volumetric Cloud + Wavy Tendrils cluster centered at [0.675, 0.675].
+function ringHalfSide(r, rings) {
+  if (r === 0) return SKIRT_HALF_M;
+  if (r === 1) return PLATEAU_HALF_M;
+  const innerT = (r - 1) / Math.max(1, rings - 1); // 0 -> 1..
+  return lerp(PLATEAU_HALF_M, 0.22, innerT * 0.88);
+}
+
+// Builds a single LOD level (0..3) of the unified Seamless Turf Sheet + Wavy Tendrils cluster centered at [0.675, 0.675].
 function buildVolumetricTendrilLevel(profile, lvl) {
   const verts = [];
   const tris = [];
@@ -163,8 +203,6 @@ function buildVolumetricTendrilLevel(profile, lvl) {
   const { rings, segs } = LEVEL_SHELL_CFG[lvl];
   const tendrilCount = LEVEL_TENDRILS[lvl];
   const nextTendrilCount = lvl < 3 ? LEVEL_TENDRILS[lvl + 1] : 0;
-  const billowCount = LEVEL_BILLOWS[lvl];
-  const nextBillowCount = lvl < 3 ? LEVEL_BILLOWS[lvl + 1] : 0;
 
   let sumR = 0, sumG = 0, sumB = 0, sumArea = 0, maxY = profile.cloudHeight;
 
@@ -200,26 +238,20 @@ function buildVolumetricTendrilLevel(profile, lvl) {
     tris.push(i0, i1, i2);
   };
 
-  // 1. Primary Closed Genus-0 Volumetric Turf-Cloud Cushion (100% overlapping ground seal + billowing tussock volume)
-  const botCenter = addVert(half, -0.028, half, 0, 1, 0, profile.rootCol, 0.0, profile.stiffness * 1.4, 1.0, 0, 0);
+  // 1. Primary Closed Genus-0 Seamless Overlap Turf Sheet (flat top across [-1.06, +1.06]^2, zero local dome!)
+  const sheetCol = samplePaletteColor(profile, 0.48, 0.5, 0.0);
+  const botCenter = addVert(half, -0.028, half, 0, 1, 0, profile.rootCol, 0.25, profile.stiffness * 1.4, 1.0, 0, 0);
   const ringStart = verts.length / GPU_VERTEX_WORDS;
   for (let r = 0; r < rings; r++) {
-    const rf = 1.0 - (r / rings) * 0.80;
-    const rad = profile.cloudRadius * rf;
+    const boxR = ringHalfSide(r, rings);
     for (let k = 0; k < segs; k++) {
-      const ang = (k / segs) * Math.PI * 2 + r * 0.24 + profile.phaseA * 0.2;
-      const lobe = 1.0 + 0.09 * Math.sin(k * 2.0 + r * 1.1 + profile.phaseB);
-      const dx = Math.cos(ang) * rad * lobe;
-      const dz = Math.sin(ang) * rad * lobe;
+      const [dx, dz] = squareRingPoint(k, segs, boxR);
       const surf = evalCloudSurface(dx, dz, profile);
-      const hj = hash01(profile.seed, r * 31 + k * 7);
-      const col = samplePaletteColor(profile, surf.along, hj, 0.08);
+      const col = samplePaletteColor(profile, surf.along, 0.5, 0.0);
       addVert(half + dx, surf.y, half + dz, surf.nx, surf.ny, surf.nz, col, surf.along, profile.stiffness * 1.15, 1.0, 0, 0);
     }
   }
-  const topSurf = evalCloudSurface(0, 0, profile);
-  const topCol = samplePaletteColor(profile, topSurf.along + 0.08, 0.58, 0.14);
-  const topCenter = addVert(half, topSurf.y + 0.015, half, 0, 1, 0, topCol, topSurf.along + 0.08, profile.stiffness, 1.0, 0, 0);
+  const topCenter = addVert(half, profile.cloudHeight, half, 0, 1, 0, sheetCol, 0.48, profile.stiffness * 1.15, 1.0, 0, 0);
 
   for (let k = 0; k < segs; k++) {
     const kn = (k + 1) % segs;
@@ -229,107 +261,47 @@ function buildVolumetricTendrilLevel(profile, lvl) {
     const rA = ringStart + r * segs, rB = ringStart + (r + 1) * segs;
     for (let k = 0; k < segs; k++) {
       const kn = (k + 1) % segs;
-      const midCol = samplePaletteColor(profile, 0.18 + 0.36 * ((r + 0.5) / rings), 0.5, 0.08);
-      addTri(rA + k, rA + kn, rB + k, midCol);
-      addTri(rA + kn, rB + kn, rB + k, midCol);
+      addTri(rA + k, rA + kn, rB + k, sheetCol);
+      addTri(rA + kn, rB + kn, rB + k, sheetCol);
     }
   }
   const lastRing = ringStart + (rings - 1) * segs;
   for (let k = 0; k < segs; k++) {
     const kn = (k + 1) % segs;
-    addTri(lastRing + k, lastRing + kn, topCenter, topCol);
+    addTri(lastRing + k, lastRing + kn, topCenter, sheetCol);
   }
 
-  // 2. Secondary Volumetric Upper Cloud-Crest Pillows at near/mid levels (layered soft tussock depth)
-  const bSegs = 7;
-  for (let bi = 0; bi < billowCount; bi++) {
-    const bAng = (bi / Math.max(1, billowCount)) * Math.PI * 2 + profile.phaseB * 0.6;
-    const bDist = 0.24 + 0.38 * hash01(profile.seed + 19, bi);
-    const bx = Math.cos(bAng) * bDist;
-    const bz = Math.sin(bAng) * bDist;
-    const baseSurf = evalCloudSurface(bx, bz, profile);
-    const bRad = 0.36 + 0.16 * hash01(profile.seed + 43, bi);
-    const bLift = 0.085 + 0.060 * hash01(profile.seed + 71, bi);
-    const retiring = bi >= nextBillowCount;
-    const rank = retiring ? (bi - nextBillowCount) / Math.max(1, billowCount - nextBillowCount) : 0;
-    const wTag = retiring ? -(0.12 + 0.80 * rank) : 1.0;
-
-    const rimStart = verts.length / GPU_VERTEX_WORDS;
-    for (let k = 0; k < bSegs; k++) {
-      const ka = (k / bSegs) * Math.PI * 2 + bi * 0.4;
-      const rx = bx + Math.cos(ka) * bRad;
-      const rz = bz + Math.sin(ka) * bRad * 0.82;
-      const rs = evalCloudSurface(rx, rz, profile);
-      const col = samplePaletteColor(profile, rs.along + 0.04, hash01(profile.seed + 97, bi * 11 + k), 0.10);
-      addVert(
-        half + rx,
-        rs.y - 0.022,
-        half + rz,
-        Math.cos(ka) * 0.28,
-        0.94,
-        Math.sin(ka) * 0.28,
-        col,
-        rs.along + 0.04,
-        profile.stiffness * 0.90,
-        wTag,
-        retiring ? (bx - rx) * 0.5 : 0,
-        retiring ? (bz - rz) * 0.5 : 0,
-      );
-    }
-    const crestAlong = clamp(baseSurf.along + 0.22, 0.35, 0.80);
-    const crestCol = samplePaletteColor(profile, crestAlong, hash01(profile.seed + 131, bi), 0.16);
-    const crestIdx = addVert(
-      half + bx + Math.cos(profile.layAngle) * 0.09,
-      baseSurf.y + bLift,
-      half + bz + Math.sin(profile.layAngle) * 0.09,
-      baseSurf.nx * 0.45,
-      0.97,
-      baseSurf.nz * 0.45,
-      crestCol,
-      crestAlong,
-      profile.stiffness * 0.80,
-      wTag,
-      retiring ? -Math.cos(profile.layAngle) * 0.09 : 0,
-      retiring ? -Math.sin(profile.layAngle) * 0.09 : 0,
-    );
-    for (let k = 0; k < bSegs; k++) {
-      const kn = (k + 1) % bSegs;
-      addTri(rimStart + k, rimStart + kn, crestIdx, crestCol);
-    }
-  }
-
-  // 3. Slender, Wind-Combed Arched 3D Grass Tendrils emerging smoothly out of the volumetric cloud billows
-  // Golden-angle phyllotaxis spiral over the tile ensures rich, natural tuft clumping with zero grid regularity.
-  const GOLDEN_ANG = 2.399963229728653;
+  // 2. Slender, Wind-Combed Arched 3D Grass Tendrils uniformly covering the entire [-0.68, +0.68]^2 square
+  // via the 2D R2 low-discrepancy plastic sequence (zero circular clump or empty tile corners!).
+  const R2_A = 0.7548776662466927;
+  const R2_B = 0.5698402909980532;
+  const offU = hash01(profile.seed + 17, 1);
+  const offV = hash01(profile.seed + 29, 2);
   const segCount = lvl === 0 ? 4 : lvl === 1 ? 3 : 2;
   const widthBoost = [1.0, 1.38, 1.85, 2.30][lvl];
 
   for (let ti = 0; ti < tendrilCount; ti++) {
-    const frac = (ti + 0.5) / tendrilCount;
-    const r = Math.sqrt(frac) * (profile.cloudRadius * 0.82);
-    const theta = ti * GOLDEN_ANG + profile.phaseC;
-    const jx = (hash01(profile.seed + 211, ti) - 0.5) * 0.14;
-    const jz = (hash01(profile.seed + 223, ti) - 0.5) * 0.14;
-    const rx = Math.cos(theta) * r + jx;
-    const rz = Math.sin(theta) * r + jz;
-    const surf = evalCloudSurface(rx, rz, profile);
+    const u0 = fract(offU + (ti + 0.5) * R2_A);
+    const v0 = fract(offV + (ti + 0.5) * R2_B);
+    const jx = (hash01(profile.seed + 211, ti) - 0.5) * 0.08;
+    const jz = (hash01(profile.seed + 223, ti) - 0.5) * 0.08;
+    const rx = (u0 - 0.5) * (TILE_METRES * 1.02) + jx;
+    const rz = (v0 - 0.5) * (TILE_METRES * 1.02) + jz;
 
-    // Coherent wind-combed wave lay + gentle local splay so tendrils form silky flowing locks rather than upright wedges
-    const swirl = 0.48 * Math.sin(rx * 2.3 + profile.phaseA) + 0.34 * Math.cos(rz * 2.1 - profile.phaseB);
-    const splay = (hash01(profile.seed + 251, ti) - 0.5) * 0.52;
-    const dirAng = profile.layAngle + swirl + splay;
+    // Oriented around +X (local wind-lay axis; GPU rotates smoothly along continuous world wind-lay stream!)
+    const splay = (hash01(profile.seed + 251, ti) - 0.5) * 0.62;
+    const dirAng = splay;
     const dirX = Math.cos(dirAng), dirZ = Math.sin(dirAng);
     const sideX = -dirZ, sideZ = dirX;
     const sCurveSign = hash01(profile.seed + 263, ti) > 0.5 ? 1.0 : -1.0;
 
-    const tallFactor = 0.68 + 0.64 * hash01(profile.seed + 277, ti);
-    const tendrilRise = profile.tendrilHeight * tallFactor * (lvl === 3 ? 0.55 : 1.0);
-    const tendrilSweep = (0.28 + 0.26 * hash01(profile.seed + 307, ti)) * tallFactor;
-    // Slender botanical lock width (1.7..2.9 cm full ribbon width at L0, tapering smoothly to a fine hair tip!)
-    const baseHalfW = (0.0085 + 0.0060 * hash01(profile.seed + 331, ti)) * widthBoost;
+    const tallFactor = 0.70 + 0.60 * hash01(profile.seed + 277, ti);
+    const tendrilRise = profile.tendrilHeight * tallFactor * (lvl === 3 ? 0.52 : 1.0);
+    const tendrilSweep = (0.30 + 0.26 * hash01(profile.seed + 307, ti)) * tallFactor;
+    const baseHalfW = (0.0085 + 0.0058 * hash01(profile.seed + 331, ti)) * widthBoost;
     const hueJ = hash01(profile.seed + 353, ti);
-    const goldenSeed = hash01(profile.seed + 379, ti) > 0.66 ? profile.seedGolden : profile.seedGolden * 0.25;
-    const stiff = profile.stiffness * (0.58 + 0.48 * hash01(profile.seed + 401, ti));
+    const goldenSeed = hash01(profile.seed + 379, ti) > 0.68 ? profile.seedGolden : profile.seedGolden * 0.22;
+    const stiff = profile.stiffness * (0.60 + 0.44 * hash01(profile.seed + 401, ti));
 
     const retiring = lvl < 3 ? ti >= nextTendrilCount : true;
     const rank = lvl < 3
@@ -337,38 +309,37 @@ function buildVolumetricTendrilLevel(profile, lvl) {
       : (ti / Math.max(1, tendrilCount));
     const wTag = retiring ? -(0.10 + 0.86 * rank) : 1.0;
 
-    // Anchor root inside the volumetric cloud cushion so tendrils emerge seamlessly without hard joints
+    // Anchor root inside the flat turf sheet so tendrils emerge organically without hard joints
     const rootX = half + rx;
-    const rootY = surf.y - 0.036;
+    const rootY = profile.cloudHeight - 0.032;
     const rootZ = half + rz;
 
     const rowPairs = [];
     for (let s = 0; s < segCount; s++) {
-      const u = s / segCount; // 0 .. 0.75 (for 4-seg)
-      // Graceful arched S-curve spine: rises smoothly out of the cloud, crests horizontally, and curves downwind
-      const sweep = tendrilSweep * Math.pow(u, 1.32);
-      const sLateral = sCurveSign * 0.045 * Math.sin(u * Math.PI * 1.35) * tallFactor;
+      const u = s / segCount;
+      const sweep = tendrilSweep * Math.pow(u, 1.28);
+      const sLateral = sCurveSign * 0.044 * Math.sin(u * Math.PI * 1.35) * tallFactor;
       const lift = tendrilRise * Math.sin(u * Math.PI * 0.68);
       const cx = rootX + dirX * sweep + sideX * sLateral;
       const cy = rootY + lift;
       const cz = rootZ + dirZ * sweep + sideZ * sLateral;
       const hw = baseHalfW * Math.pow(1.0 - 0.78 * u, 0.85);
-      const along = clamp(surf.along + (1.0 - surf.along) * (0.16 + 0.74 * u), 0.22, 0.96);
+      const along = clamp(0.48 + 0.46 * u, 0.48, 0.96);
       const col = samplePaletteColor(profile, along, hueJ, goldenSeed);
 
-      const nUp = 0.86 - 0.16 * u;
+      const nUp = 0.88 - 0.14 * u;
       const lx = cx - sideX * hw, lz = cz - sideZ * hw;
       const rx2 = cx + sideX * hw, rz2 = cz + sideZ * hw;
       const iL = addVert(
         lx, cy, lz,
-        surf.nx * 0.35 - sideX * 0.28 + dirX * 0.18 * u, nUp, surf.nz * 0.35 - sideZ * 0.28 + dirZ * 0.18 * u,
+        -sideX * 0.24 + dirX * 0.16 * u, nUp, -sideZ * 0.24 + dirZ * 0.16 * u,
         col, along, stiff, wTag,
         retiring ? rootX - lx : 0,
         retiring ? rootZ - lz : 0,
       );
       const iR = addVert(
         rx2, cy, rz2,
-        surf.nx * 0.35 + sideX * 0.28 + dirX * 0.18 * u, nUp, surf.nz * 0.35 + sideZ * 0.28 + dirZ * 0.18 * u,
+        sideX * 0.24 + dirX * 0.16 * u, nUp, sideZ * 0.24 + dirZ * 0.16 * u,
         col, along, stiff, wTag,
         retiring ? rootX - rx2 : 0,
         retiring ? rootZ - rz2 : 0,
@@ -376,15 +347,14 @@ function buildVolumetricTendrilLevel(profile, lvl) {
       rowPairs.push([iL, iR, col]);
     }
 
-    // Drooping, wind-swept feathery tendril tip (u = 1.0: sin(0.68 * pi) = 0.844 -> arches gracefully downward past crest!)
-    const tipLat = sCurveSign * 0.045 * Math.sin(Math.PI * 1.35) * tallFactor;
+    const tipLat = sCurveSign * 0.044 * Math.sin(Math.PI * 1.35) * tallFactor;
     const tipX = rootX + dirX * tendrilSweep + sideX * tipLat;
     const tipY = rootY + tendrilRise * Math.sin(Math.PI * 0.68);
     const tipZ = rootZ + dirZ * tendrilSweep + sideZ * tipLat;
     const tipCol = samplePaletteColor(profile, 1.0, hueJ, goldenSeed);
     const iTip = addVert(
       tipX, tipY, tipZ,
-      dirX * 0.32, 0.88, dirZ * 0.32,
+      dirX * 0.30, 0.90, dirZ * 0.30,
       tipCol, 1.0, stiff * 0.82, wTag,
       retiring ? rootX - tipX : 0,
       retiring ? rootZ - tipZ : 0,
@@ -400,13 +370,15 @@ function buildVolumetricTendrilLevel(profile, lvl) {
     addTri(lastL, lastR, iTip, tipCol);
   }
 
-  const meanCol = sumArea > 0 ? [sumR / sumArea, sumG / sumArea, sumB / sumArea] : profile.midCol;
+  const meanCol = sumArea > 0 ? [sumR / sumArea, sumG / sumArea, sumB / sumArea] : sheetCol;
   return { verts, tris, meanCol, maxY };
 }
 
 function buildGenusZeroContinuumForVariant(profile, tileMeanCol) {
-  // Connected genus-0 billowing volumetric grass cloud continuum matching L3's exact footprint & silhouette:
+  // Connected genus-0 seamless overlap continuum matching L3's exact 2.12 m square plateau:
   // bottom center (0) + MORPH_RINGS x MORPH_K rings + top center (V-1) -> V = 22, E = 60, F = 40 -> V - E + F = 2!
+  // Retires inner rings and outer lip while ANCHORING the 4 full-square corners of ring r=1 ([-1.06, +1.06]^2),
+  // so every progressive collapse step down to coreTriCount = 6 maintains 100% gap-free neighbor overlap!
   const V = 2 + MORPH_RINGS * MORPH_K;
   const pos = new Float32Array(V * 3);
   const nrm = new Float32Array(V * 3);
@@ -421,28 +393,23 @@ function buildGenusZeroContinuumForVariant(profile, tileMeanCol) {
     col[vi * 3 + 1] = clamp(rgb[1], 0, 1);
     col[vi * 3 + 2] = clamp(rgb[2], 0, 1);
     sway[vi * 3] = alongVal;
-    sway[vi * 3 + 1] = profile.stiffness;
+    sway[vi * 3 + 1] = profile.stiffness * 1.15;
     sway[vi * 3 + 2] = alongVal * alongVal * 0.08;
   };
 
-  setV(0, 0, -0.024, 0, 0, 0.98, 0, profile.rootCol, 0.0);
+  const sheetCol = samplePaletteColor(profile, 0.48, 0.5, 0.0);
+  setV(0, 0, -0.028, 0, 0, 1, 0, profile.rootCol, 0.25);
   for (let r = 0; r < MORPH_RINGS; r++) {
-    const rf = 1.0 - 0.21 * r;
-    const ringR = profile.cloudRadius * rf;
+    const boxR = ringHalfSide(r, MORPH_RINGS);
     for (let k = 0; k < MORPH_K; k++) {
-      const a = (k / MORPH_K) * Math.PI * 2 + r * 0.26 + profile.phaseA * 0.2;
       const vi = 1 + r * MORPH_K + k;
-      const lobe = 1.0 + 0.085 * Math.sin(k * 2.0 + r + profile.phaseB);
-      const x = Math.cos(a) * ringR * lobe;
-      const z = Math.sin(a) * ringR * lobe;
+      const [x, z] = squareRingPoint(k, MORPH_K, boxR);
       const surf = evalCloudSurface(x, z, profile);
-      const c = samplePaletteColor(profile, surf.along, hash01(profile.seed + 503, vi), 0.12);
+      const c = samplePaletteColor(profile, surf.along, 0.5, 0.0);
       setV(vi, x, surf.y, z, surf.nx, surf.ny, surf.nz, c, surf.along);
     }
   }
-  const topSurf = evalCloudSurface(0, 0, profile);
-  const topC = samplePaletteColor(profile, topSurf.along + 0.12, 0.55, 0.18);
-  setV(V - 1, 0, topSurf.y + 0.015, 0, 0, 1, 0, topC, clamp(topSurf.along + 0.12, 0, 1));
+  setV(V - 1, 0, profile.cloudHeight, 0, 0, 1, 0, sheetCol, 0.48);
 
   const faces = [];
   for (let k = 0; k < MORPH_K; k++) {
@@ -473,20 +440,36 @@ function buildGenusZeroContinuumForVariant(profile, tileMeanCol) {
   const euler = V - edges.size + faces.length;
   if (euler !== 2) throw Error(`Genus-0 meadow continuum Euler=${euler}, expected 2`);
 
+  // Exact 17-step progressive collapse keeping the 4 full-square corners of ring r=1 (v = 6, 7, 8, 10) + bottom pole 0:
+  //   1..5:   r=3 (innermost ring) -> top pole V-1 (slides horizontally on flat y=cloudHeight sheet!)
+  //   6..10:  r=2 (middle ring)    -> top pole V-1 (slides horizontally on flat y=cloudHeight sheet!)
+  //   11..15: r=0 (hidden 7cm lip) -> r=1 plateau corners (1->6, 2->7, 3->8, 4->9, 5->10)
+  //   16:     r=1 south-mid (v=9)  -> SE corner (v=8)
+  //   17:     top pole (V-1)       -> NW corner (v=6)
+  // Leaving 6 triangles: 2 top triangles spanning [-1.06, +1.06]^2 + 4 underside skirt triangles closing onto v=0!
+  const r1Base = 1 + 1 * MORPH_K; // 6
   const retireOrder = [];
-  for (let r = 0; r < MORPH_RINGS; r++) {
+  for (let r = MORPH_RINGS - 1; r >= 2; r--) {
     for (let k = 0; k < MORPH_K; k++) {
-      const v = 1 + r * MORPH_K + k;
-      if (r === MORPH_RINGS - 1 && k < 2) continue; // Keep 2 core anchors + pole0 + topPole = 4 verts / 4 core tris
-      retireOrder.push({ v, target: k < 2 ? 1 + (MORPH_RINGS - 1) * MORPH_K + k : r === 0 ? 0 : V - 1 });
+      retireOrder.push({ v: 1 + r * MORPH_K + k, target: V - 1 });
     }
   }
+  for (let k = 0; k < MORPH_K; k++) {
+    retireOrder.push({ v: 1 + k, target: r1Base + k });
+  }
+  retireOrder.push({ v: r1Base + 3, target: r1Base + 2 }); // (0, +1.06) -> (+1.06, +1.06)
+  retireOrder.push({ v: V - 1, target: r1Base + 0 });      // (0, 0)     -> (-1.06, -1.06)
+
+  if (retireOrder.length !== MORPH_STEPS) {
+    throw Error(`Expected ${MORPH_STEPS} collapse steps, got ${retireOrder.length}`);
+  }
+
   const activeFaces = faces.map((f) => [...f]);
   const remap = new Int32Array(V);
   for (let i = 0; i < V; i++) remap[i] = i;
 
   const collapseSteps = [];
-  for (let step = 0; step < Math.min(MORPH_STEPS, retireOrder.length); step++) {
+  for (let step = 0; step < MORPH_STEPS; step++) {
     const { v, target } = retireOrder[step];
     let dst = target;
     while (remap[dst] !== dst) dst = remap[dst];
@@ -501,11 +484,16 @@ function buildGenusZeroContinuumForVariant(profile, tileMeanCol) {
     collapseSteps.push({ retired: v, dst, err, aliveTris: activeFaces.filter(Boolean).length });
   }
 
+  const coreTriCount = activeFaces.filter(Boolean).length;
+  if (coreTriCount !== 6) {
+    throw Error(`Expected 6 full-square core triangles, got ${coreTriCount}`);
+  }
+
   return {
     vertexCount: V,
     faceCount: faces.length,
     euler,
-    coreTriCount: activeFaces.filter(Boolean).length,
+    coreTriCount,
     pos,
     nrm,
     col,
@@ -513,9 +501,9 @@ function buildGenusZeroContinuumForVariant(profile, tileMeanCol) {
     faces,
     collapseSteps,
     splat: {
-      centreY: +(profile.cloudHeight * 0.44).toFixed(4),
-      rx: +(profile.cloudRadius * 0.92).toFixed(4),
-      ry: +(Math.min(0.115, profile.cloudHeight * 0.56)).toFixed(4),
+      centreY: +(profile.cloudHeight * 0.45).toFixed(4),
+      rx: +(PLATEAU_HALF_M * 0.98).toFixed(4),
+      ry: +(Math.min(0.105, profile.cloudHeight * 0.52)).toFixed(4),
       meanCol: tileMeanCol.map((c) => +c.toFixed(4)),
     },
   };
@@ -548,49 +536,35 @@ function measureBotanicalVariantProfile(srcVerts, srcIndices, varSpec, mixIdx, v
     }
   }
 
-  // Convert source sRGB botanical samples to physically calibrated linear PBR reflectance
-  // matching Lisbon's landAlbedo / forestCrown chlorophyll radiometric units (zero ACES white-out!).
   const toLin = (c) => Math.pow(clamp(c, 0, 1), 2.2);
   const rawRoot = rootN > 0 ? [toLin(rootR / rootN), toLin(rootG / rootN), toLin(rootB / rootN)] : [0.012, 0.034, 0.008];
   const rawMid = midN > 0 ? [toLin(midR / midN), toLin(midG / midN), toLin(midB / midN)] : [0.028, 0.072, 0.015];
   const rawTip = tipN > 0 ? [toLin(tipR / tipN), toLin(tipG / tipN), toLin(tipB / tipN)] : [0.052, 0.112, 0.022];
 
-  // Mix-specific Mediterranean botanical character:
-  // 0 = lush emerald-olive grazed pasture, 1 = taller tussocky coastal rough meadow, 2 = wild oat & golden-tipped field margin
-  const mixCloudH = [0.215, 0.255, 0.285][mixIdx];
-  const mixTendrilH = [0.22, 0.29, 0.35][mixIdx];
-  const mixGolden = [0.10, 0.24, 0.38][mixIdx];
+  // Keep cloudHeight & base sheet colors consistent across variants of a mix so overlapping flat sheets
+  // weld seamlessly with zero per-tile height or color step; all large-scale billows & hue drifts run in world-space WGSL.
+  const mixCloudH = [0.185, 0.205, 0.225][mixIdx];
+  const mixTendrilH = [0.22, 0.28, 0.34][mixIdx];
+  const mixGolden = [0.12, 0.26, 0.40][mixIdx];
   const variantId = mixIdx * VARIANTS + vIdx;
   const seed = 0x517cc1b7 ^ (variantId * 7919);
 
   return {
     variantId,
     seed,
-    cloudRadius: 1.20, // Overlaps 1.35 m neighbor tiles generously across all slopes and jitter
-    cloudHeight: mixCloudH * (0.94 + 0.12 * hash01(seed, 1)),
-    tendrilHeight: clamp(mixTendrilH * (0.92 + 0.18 * hash01(seed, 2)), 0.18, Math.min(0.42, maxY * 0.90)),
-    stiffness: nSamples > 0 ? clamp(stiffSum / nSamples, 3.0, 22.0) : 10.0,
-    layAngle: hash01(seed, 3) * Math.PI * 2,
-    phaseA: hash01(seed, 4) * Math.PI * 2,
-    phaseB: hash01(seed, 5) * Math.PI * 2,
-    phaseC: hash01(seed, 6) * Math.PI * 2,
+    cloudRadius: SKIRT_HALF_M,
+    cloudHeight: mixCloudH,
+    tendrilHeight: clamp(mixTendrilH * (0.95 + 0.10 * hash01(seed, 2)), 0.18, Math.min(0.42, maxY * 0.90)),
+    stiffness: nSamples > 0 ? clamp(stiffSum / nSamples, 4.0, 18.0) : 10.0,
     seedGolden: mixGolden,
-    rootCol: [
-      clamp(rawRoot[0] * 0.65 + 0.008, 0.008, 0.032),
-      clamp(rawRoot[1] * 0.85 + 0.024, 0.024, 0.068),
-      clamp(rawRoot[2] * 0.60 + 0.004, 0.004, 0.020),
-    ],
-    midCol: [
-      clamp(rawMid[0] * 0.72 + 0.016, 0.018, 0.062),
-      clamp(rawMid[1] * 0.95 + 0.048, 0.048, 0.120),
-      clamp(rawMid[2] * 0.65 + 0.009, 0.009, 0.034),
-    ],
+    rootCol: [0.016, 0.038, 0.010],
+    midCol: [0.034, 0.074, 0.019],
     tipCol: [
-      clamp(rawTip[0] * 0.80 + 0.030, 0.034, 0.105),
-      clamp(rawTip[1] * 1.02 + 0.072, 0.078, 0.168),
-      clamp(rawTip[2] * 0.72 + 0.014, 0.014, 0.048),
+      clamp(rawTip[0] * 0.78 + 0.032, 0.036, 0.102),
+      clamp(rawTip[1] * 0.96 + 0.068, 0.076, 0.158),
+      clamp(rawTip[2] * 0.68 + 0.014, 0.014, 0.046),
     ],
-    seedCol: [0.105, 0.112, 0.028], // Sunlit Mediterranean oat / dry grass gold accent in linear PBR units
+    seedCol: [0.108, 0.112, 0.030],
   };
 }
 
@@ -635,7 +609,7 @@ function main() {
           half,
           geo.maxY * 0.45,
           half,
-          Math.hypot(profile.cloudRadius, geo.maxY * 0.6),
+          Math.hypot(SKIRT_HALF_M * Math.SQRT2, geo.maxY * 0.6),
           variantId,
           0,
           0,
@@ -658,7 +632,6 @@ function main() {
     }
   }
 
-  // Pack mixed float32/uint32 buffers cleanly
   const vertBuf = new ArrayBuffer(outVerts.length * 4);
   const vf32 = new Float32Array(vertBuf), vu32 = new Uint32Array(vertBuf);
   for (let i = 0; i < outVerts.length; i += GPU_VERTEX_WORDS) {
@@ -689,7 +662,6 @@ function main() {
     cu32[i + 11] = clusterRecords[i + 11] >>> 0;
   }
 
-  // Pack morph.bin: per-variant continuum (V*8 GPU verts + F*3 u32 face indices + MORPH_STEPS*4 collapse u32/f32)
   const MORPH_VERT_FLOATS = 8;
   const perVarVertBytes = (2 + MORPH_RINGS * MORPH_K) * MORPH_VERT_FLOATS * 4;
   const perVarFaceBytes = (MORPH_RINGS * MORPH_K * 2) * 3 * 4;

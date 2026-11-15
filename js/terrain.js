@@ -1500,7 +1500,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const meadowPack=await meadowPromise;
   let meadowGrass=null;
   if(proceduralPack&&meadowPack)try{
-    meadowGrass=await createMeadowGrass({device,shader,pack:meadowPack,region:activeRegion,heights,biome,beaches:proceduralPack.beaches??null,port:proceduralPack.port??null,city:proceduralPack.city??null,elevation,nearDomain,resources:nearResources,clouds,format,samples,isMobile});
+    meadowGrass=await createMeadowGrass({device,shader,pack:meadowPack,region:activeRegion,heights,biome,beaches:proceduralPack.beaches??null,port:proceduralPack.port??null,city:proceduralPack.city??null,board:proceduralPack.board??null,inlandWater:proceduralPack.inlandWater??null,elevation,nearDomain,resources:nearResources,clouds,format,samples,isMobile});
   }catch(error){meadowFailure=error.message;}
   const meadowGrassStats=meadowGrass?.stats??{loaded:false,error:meadowFailure};
   let tradeVessels=proceduralPack?await createTradeVessels({device,format,samples,shader,computePipe,oceanBridge,resources:nearResources,shadowFormat:activeLandShadows.format}):null;
@@ -1828,6 +1828,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       beaches:proceduralPack.beaches??null,
       port:(savedPortOverride?null:proceduralPack.port)??null,
       city:proceduralPack.city??null,
+      board:proceduralPack.board??null,
+      inlandWater:proceduralPack.inlandWater??null,
     });
   }
 
@@ -2165,11 +2167,12 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     inlandWater?.setGeometry(upgradedPack.inlandWater??null);
     herds?.setBridges?.(upgradedPack.port?.country?.bridges??null);
     herds?.setHerds(upgradedPack.herds??null);
-    meadowGrass?.sync({region:activeRegion,heights,biome,beaches:proceduralPack.beaches??null,port:portOwner.port??null,city:upgradedPack.city??proceduralPack.city??null});
+    meadowGrass?.sync({region:activeRegion,heights,biome,beaches:proceduralPack.beaches??null,port:portOwner.port??null,city:upgradedPack.city??proceduralPack.city??null,board:upgradedPack.board??proceduralPack.board??null,inlandWater:upgradedPack.inlandWater??proceduralPack.inlandWater??null});
     if(upgradedPack.port?.country?.board){
       tradeVessels?.setTraffic(null,activeRegion,upgradedPack.port.country.riverReaches??[],upgradedPack.port.country.places??[],{heights,region:activeRegion,port:upgradedPack.port,bridges:upgradedPack.port.country.bridges??[]});
     }
     if(upgradedPack.surveyHeights)proceduralPack.surveyHeights=upgradedPack.surveyHeights;
+    if(upgradedPack.board)proceduralPack.board=upgradedPack.board;
     proceduralPack.inlandWater=upgradedPack.inlandWater??null;
     proceduralPack.herds=upgradedPack.herds??null;
     proceduralPack.frontierParcels=upgradedPack.frontierParcels??null;
