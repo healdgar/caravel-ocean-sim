@@ -38,7 +38,7 @@ const ROOF_KINDS = new Set([13, 15]);
 const STAYING_PLATE = /(^|_)(floor|plaza|terreplein|courtyard|cobble|apron|slipway|batey|earthwork|mounds?|sleepers|adarve)(_|$)/;
 const RAMPART_BODY = /scarp|bastion|retaining_wall|terreplein|adarve|earthwork|mounds?/;
 const SCARP_WALL = /scarp_walls|bastion_scarp|retaining_wall/;
-const ONE_PIECE = /garita|bollard|crane|capstan|dome|cupola|lantern|farol|spire|chimney|bell_chamber|monolith|firepit|altar|trough|beacon|canoe|rollers|hearth|mooring|espadana|turret/;
+const ONE_PIECE = /garita|bollard|crane|capstan|dome|cupola|lantern|farol|spire|chimney|bell_chamber|firepit|altar|trough|beacon|canoe|rollers|hearth|mooring|espadana|turret/;
 const GUN = /fort_cannon|cannon_embrasure|bastion_ordnance_battery|bulwark_ordnance_guns/;
 // The outer edge of a traced fort's rampart walk, and its cordon: these go with the wall under them.
 const WALK_EDGE = /rampart_walk_edge|scarp_cordon_cornice/;
@@ -505,18 +505,24 @@ export function* prepareBuildingFractureSteps({ vertices, indices, catalog, inst
       for (const face of partFaces) geometry[s].faces.push(face);
       continue;
     }
-    if (!partRooted && (partSpan <= PART_SMALL || (ONE_PIECE.test(partKey) && partSpan <= ONE_PIECE_LIMIT))) {
+    const partIslands = islandsOf(partFaces, vertices, originX, originZ);
+    const wholePart = !partRooted && (
+      (ONE_PIECE.test(partKey) && partSpan <= ONE_PIECE_LIMIT)
+      || (partIslands.length === 1 && partSpan <= (mostly.timber ? PART_SMALL : 1.25))
+    );
+    if (wholePart) {
       const s = keyed(`whole:${partIndex}`, BUILDING_SHARD_KINDS.whole, part, mostly);
       for (const face of partFaces) geometry[s].faces.push(face);
       continue;
     }
-    for (const [islandIndex, island] of islandsOf(partFaces, vertices, originX, originZ).entries()) {
+    for (const [islandIndex, island] of partIslands.entries()) {
       const rawIslandGround = groundAt((island.min[0] + island.max[0]) * 0.5, (island.min[2] + island.max[2]) * 0.5);
       const islandGround = isBridgePart ? rawIslandGround : Math.max(rawIslandGround, -0.6);
+      const islandSurface = surfaceOf(island.faces[0].kind, fortified);
       // A box set at an angle in the building is measured along its own sides.
       const frame = islandFrame(island.faces), bounds = frame ? boundsAlong(island.faces, frame) : localBounds(island.faces);
-      if (island.min[1] >= islandGround - 0.5 && spanOf(bounds.min, bounds.max) <= ISLAND_SMALL) {
-        const s = keyed(`island:${partIndex}:${islandIndex}`, BUILDING_SHARD_KINDS.whole, part, surfaceOf(island.faces[0].kind, fortified));
+      if (island.min[1] >= islandGround - 0.5 && spanOf(bounds.min, bounds.max) <= (islandSurface.timber ? ISLAND_SMALL : 1.25)) {
+        const s = keyed(`island:${partIndex}:${islandIndex}`, BUILDING_SHARD_KINDS.whole, part, islandSurface);
         for (const face of island.faces) geometry[s].faces.push(face);
         continue;
       }
@@ -958,8 +964,9 @@ function releaseShard(state, s, now, { direction = null, power = 1, proximity = 
   exposeNeighbours(state, shard);
   const a = blockNoise(s, 1), b = blockNoise(s, 2), c = blockNoise(s, 3);
   const out = direction ?? shard.normal, pivot = shard.centroid;
-  const massKg = shard.massKg ?? Math.max(12, (shard.volume ?? 0.25) * (shard.timber ? 680 : shard.earth ? 1600 : 2100));
-  // Momentum-conserving piece response: light timber splinters (~25-80 kg) fly fast, medium masonry stones (~250-600 kg)
+  const stoneDensity = fracture.density ?? 2100;
+  const massKg = shard.massKg ?? Math.max(12, (shard.volume ?? 0.25) * (shard.timber ? 680 : shard.earth ? 1600 : stoneDensity));
+  // Momentum-conserving piece response: light timber splinters (~25-80 kg) and rock spalls (~5-45 kg) fly fast, medium masonry stones (~250-600 kg)
   // heave outward on low arcs, and multi-tonne cut-stone blocks (~1,200-3,000 kg) are shoved out of their course and crash down.
   const massScale = shard.earth
     ? 0.18
@@ -967,7 +974,7 @@ function releaseShard(state, s, now, { direction = null, power = 1, proximity = 
       ? 0.62
       : shard.timber
         ? Math.min(1.25, Math.max(0.55, Math.pow(75 / massKg, 0.38)))
-        : Math.min(0.68, Math.max(0.22, Math.pow(78 / massKg, 0.44)));
+        : Math.min(1.12, Math.max(0.22, Math.pow(78 / massKg, 0.44)));
   const proxScale = 0.42 + 0.58 * Math.max(0, Math.min(1, proximity));
   const impulse = Math.min(1.28, power * massScale * proxScale);
   const velocity = drop
@@ -1095,7 +1102,7 @@ function strikeBuilding(state, point, normal, { radius, amount, power, now, drop
         const key = heapKey(curX, curZ), left = (state.heap.get(key) ?? 0) - share;
         if (left > 1e-6) state.heap.set(key, left); else state.heap.delete(key);
       };
-      if (rehits >= 3) {
+      if (rehits >= 3 && shard.timber) {
         if (onHeap) leaveHeap();
         const gY = Math.max(0, state.fracture.groundAt(shard.centroid[0], shard.centroid[2]));
         r.set([shard.centroid[0], Math.max(gY, shard.centroid[1]), shard.centroid[2], 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], at);
@@ -1136,7 +1143,7 @@ function strikeBuilding(state, point, normal, { radius, amount, power, now, drop
       : !drop && shard.timber
         ? state.fracture.toughness
         : 1;
-    const hardness = shard.earth && !topHit ? EARTH_HARDNESS : 1;
+    const hardness = shard.hardness ?? (shard.earth && !topHit ? EARTH_HARDNESS : 1);
     const fall = 1 - (d / reach) ** 2, burn = (amount * fall * matMul) / hardness;
     state.wear[s] += burn;
     state.scorch[s] = Math.min(0.5, state.scorch[s] + burn * 0.35);
@@ -1198,8 +1205,10 @@ export function applyBuildingFractureEvents(fracture, damage, events, now = 0) {
       // The floors and roof give way where the wall has been pounded. It falls, it is not thrown.
       released = strikeBuilding(state, point, normal, { radius: Math.max(4.5, Math.min(10.5, (event.radius || 5.5) * 1.05)), amount: (0.45 + 0.5 * severity) / (fracture.toughness * fracture.toughness), power: 0.5, now, drop: true, above: point[1] - 1.5 });
     } else {
-      const penetrating = event.stepDepth >= 0.4;
-      const radius = (penetrating ? 1.55 : 1.05) * Math.max(0.7, Math.min(1.2, severity));
+      const penetrating = fracture.boulder ? event.stepDepth >= 0.32 : event.stepDepth >= 0.4;
+      const radius = fracture.boulder && event.radius > 0
+        ? event.radius
+        : (penetrating ? 1.55 : 1.05) * Math.max(0.7, Math.min(1.2, severity));
       const amount = ((penetrating ? 1.38 : 0.48) * severity) / fracture.toughness;
       // Into bare earth, the shock reaches what stands round the hole, so a breach goes on widening.
       released = strikeBuilding(state, point, normal, { radius: radius + rimOfBreach(state, point), amount, power: 0.62 + severity * 0.45, now });
@@ -1513,6 +1522,7 @@ export function createPortFractures({ device, port, geometry, portIndices, groun
   };
   const stepsFor = (instance, instanceIndex) => {
     const source = instance.fractureSource ? instance.fractureSource() : null;
+    if (source?.prepared) return (function* () { return source.prepared; })();
     if (!source && !geometry?.partAssembly) return [][Symbol.iterator]();
     return prepareBuildingFractureSteps({
       vertices: source?.vertices ?? geometry.vertices, indices: source?.indices ?? geometry.indices, catalog: source?.partAssembly ?? geometry.partAssembly,
@@ -1593,7 +1603,7 @@ export function createPortFractures({ device, port, geometry, portIndices, groun
     // The buildings that brought their own mesh. `before(instance)` binds whatever each one's pipeline wants.
     get sourced() { for (const gpu of live.values()) if (gpu?.sourced) return true; return false; },
     drawSourced(pass, before = null) {
-      for (const [instance, gpu] of live) if (gpu?.sourced) { before?.(instance); gpu.draw(pass); }
+      for (const [instance, gpu] of live) if (gpu?.sourced) { if (before && before(instance) === false) continue; gpu.draw(pass); }
     },
     destroy() { for (const gpu of live.values()) gpu?.destroy(); live.clear(); building.clear(); },
   };

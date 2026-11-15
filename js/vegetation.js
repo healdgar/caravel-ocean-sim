@@ -56,13 +56,20 @@ export function createGroundCoverPatches(region,sampleHeight,extraHeightBounds=n
   }
   return patches;
 }
+export function rockArchetypeFromSeed(seed,group=seed>.5?1:0){
+  const f=seed*17.31+(group&1)*.5;
+  return Math.max(0,Math.min(ROCK_ARCHETYPES-1,Math.floor((f-Math.floor(f))*ROCK_ARCHETYPES)));
+}
+export function mayGrowGroundCover(craterLedger,x,z,isRock=false){
+  return isRock?true:!craterLedger?.covers?.(x,z);
+}
 export function groundCoverInstances(patch,region,sampleHeight,mask,mayGrowAt=null){
   if(patch.instances)return patch.instances;
   const rand=random(patch.seed),groups=[[],[],[],[]],span=GROUND_COVER.patchSpan;
   for(let i=0;i<GROUND_COVER.grassPerPatch+GROUND_COVER.rocksPerPatch;i++){
-    const grass=i>=GROUND_COVER.rocksPerPatch,u=rand(),v=rand(),density=rand(),seed=rand(),size=rand(),tall=rand();
+    const isRock=i<GROUND_COVER.rocksPerPatch,grass=!isRock,u=rand(),v=rand(),density=rand(),seed=rand(),size=rand(),tall=rand();
     const x=patch.x+u*span,z=patch.z+v*span,h=sampleHeight(x,z);
-    if(h<5||h>855||(mayGrowAt&&!mayGrowAt(x,z)))continue;
+    if(h<5||h>855||(mayGrowAt&&!mayGrowAt(x,z,isRock)))continue;
     const sx=(sampleHeight(x+.5,z)-sampleHeight(x-.5,z)),sz=(sampleHeight(x,z+.5)-sampleHeight(x,z-.5)),slope=Math.hypot(sx,sz);
     const probability=vegetationProbability(mask,region.biomeSize??512,(x-region.x)/region.span+.5,(z-region.z)/region.span+.5);
     if(grass?(probability<=0||slope>.9||density>probability*.9):(slope>1.8||density>.35+slope*.3))continue;

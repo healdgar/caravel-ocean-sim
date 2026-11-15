@@ -53,6 +53,7 @@ import { createChartDrawer } from './voyage/chart-drawer.js';
 import { islandCoordinates } from './terrain-model.js';
 import { greatCircleKm } from './voyage/ocean-climate.js';
 import { createGPUProfiler, createFrameStages } from './profiler.js';
+import { createWorldDebugUI } from './debug-world.js';
 import { deepSeaColour } from './sea-colour.js';
 import { measureIsolatedGPUStage } from './gpu-benchmark.js';
 import { createAdaptiveResolution, createAdaptivePolygons, POLYGON_COMFORT } from './resolution.js';
@@ -804,6 +805,7 @@ async function main() {
     hullContactProbePromise,
     probePipePromise,
   ]);
+  if(terrain&&sharedCrew)terrain.setSharedCrew?.(sharedCrew);
   if(terrain)coastalOcean=oceanVariant(await coastalOceanPromise);
   let coastalGroup=terrain?terrain.waterGroup(coastalOcean.pipe):null;
   let coastalDepthGroup=OCEAN_DEPTH&&terrain?terrain.waterGroup(coastalOcean.depthPipe):null;
@@ -824,7 +826,7 @@ async function main() {
       waterOptics,oceanBridge,device,frameUBO,transView,skyView,sampler:sampClamp,envCubeView,clouds,shader,computePipe,mipPipe:rgba8MipPipe,format:HDR,samples:MSAA,
       region:{...(typeof region==='object'?region:{}),id:region?.id,name:name??region?.name,latitude:lat??region?.latitude,longitude:lon??region?.longitude,year:liveYear},
       placement,
-      options:{lateSpawn:true},
+      options:{lateSpawn:true,sharedCrew},
       portDamage,
       landShadows,
       boardKept:BOARD_KEPT?{clock:boardKeepClock(),dateMs:gameDateMs()}:null,
@@ -3996,6 +3998,18 @@ async function main() {
     perfCoastBtn.onclick=()=>dolphinControls.swapCoastline();
     performancePanel.querySelector('.panel-body')?.prepend(perfDebugBox);
   }
+  const worldDebugUI=createWorldDebugUI({
+    performancePanel,
+    getBoardLife:()=>boardLife,
+    getCaravans:()=>caravanPlan.lastAnswer??(caravanPlan.lastList?.length?{day:caravanPlan.day,list:caravanPlan.lastList}:null),
+    getTradeVessels:()=>terrain?.tradeVessels??null,
+    getTerrain:()=>terrain,
+    getVessels:()=>vessels,
+    getProfiler:()=>profiler?.snapshot?.()??profiler,
+    getResolution:()=>resolution,
+    getPolygons:()=>polygons,
+  });
+  window.oceanWorldDebug=worldDebugUI;
   const marineControls=createMarineControls({parent:dolphinControls.root,encounter:marineLife.state,boat,getTerrain:()=>terrain,getVessels:()=>followerEnabled?dolphinVessels:dolphinPlayer,notice:dolphinControls.notice,
     onView:()=>{setCameraMode('ship');shipOrbit.fleet=false;shipOrbit.wildlife=true;shipOrbit.marine=true;shipOrbit.fleetZoom=1;shipOrbit.elevation=.28;setPanelOpen(false);}});
   const marineDebug=qs.get('shark')==='1'?'shark':qs.has('whale')?(['breach','fluke','blow'].includes(qs.get('whale'))?qs.get('whale'):'breach'):null;
@@ -4199,8 +4213,8 @@ async function main() {
       const list=answer?.list??[];
       const origin={x:region.x,z:region.z};
       herds.setCaravans(list,origin);
-      terrain?.tradeVessels?.setTraffic(answer,origin,terrain?.port?.country?.riverReaches??[],terrain?.port?.country?.places??[]);
-      Object.assign(caravanPlan,{day:answer?.day??boardLife.day,count:list.length,seen:herds,at:performance.now(),lastList:list,origin});
+      terrain?.tradeVessels?.setTraffic(answer,origin,terrain?.port?.country?.riverReaches??[],terrain?.port?.country?.places??[],{heights:window.oceanLand?.pack?.heights,region,port:terrain?.port,terrain,bridges:terrain?.bridges??[]});
+      Object.assign(caravanPlan,{day:answer?.day??boardLife.day,count:list.length,seen:herds,at:performance.now(),lastList:list,lastAnswer:answer,origin});
       syncBoardMarket();
     }).catch(error=>{console.warn('The board\'s caravans:',error);caravanPlan.at=performance.now();}).finally(()=>{caravanPlan.asking=false;});
   }
@@ -4217,13 +4231,13 @@ async function main() {
     // While the model is still living the days it is behind the calendar, its caravans are where its own day puts them.
     const lived=boardLife.day,shown=day>=lived+1?lived+(day-Math.floor(day)):day;
     herds.setBoardClock(shown,caravanPlan.rate);
-    terrain?.tradeVessels?.setBoardClock(shown,caravanPlan.rate,frameF[3]);
+    terrain?.tradeVessels?.setBoardClock(shown,caravanPlan.rate,frameF[19]);
   }
   function locateActiveCaravans(){
     const origin=caravanPlan.origin||{x:0,z:0};
     const lived=boardLife?.day??caravanPlan.day;
     const curDay=Number.isFinite(caravanPlan.lastDay)?(caravanPlan.lastDay>=lived+1?lived+(caravanPlan.lastDay-Math.floor(caravanPlan.lastDay)):caravanPlan.lastDay):lived;
-    const t=frameF[3]||0;
+    const t=frameF[19]||0;
     const out=[];
     for(const c of caravanPlan.lastList??[]){
       if(!c||!Array.isArray(c.points)||c.points.length<4||!(c.arrive>c.depart))continue;
@@ -4236,10 +4250,12 @@ async function main() {
       if(pts.length<2||totalLen<1)continue;
       const days=Math.max(c.arrive-c.depart,1e-3);
       const share=Math.max(0,Math.min(1,(curDay-c.depart)/days));
+      const phaseOffset=Math.max(0,Math.min(0.9999,Number(c.phaseOffset)||0));
+      const phaseShare=((share+phaseOffset)%1+1)%1;
       const calSpeed=totalLen/days*(caravanPlan.rate||0);
       const paceFloor=Math.max(0,0.92-calSpeed);
       const cycle=Math.max(totalLen+48,1);
-      const dist=calSpeed<0.92?((share*totalLen+paceFloor*t)%cycle+cycle)%cycle:share*totalLen;
+      const dist=calSpeed<0.92?((phaseShare*totalLen+paceFloor*t)%cycle+cycle)%cycle:phaseShare*totalLen;
       const clamped=Math.max(0,Math.min(totalLen,dist));
       let px=pts[0].x,pz=pts[0].z;
       for(let i=1;i<pts.length;i++){
@@ -4787,6 +4803,7 @@ async function main() {
       for(const p of freeCannon.state.projectiles)allProjectiles.push(p);
     }
     gunEffects.setProjectiles(allProjectiles);
+    terrain?.setBallisticProjectiles?.(allProjectiles,simTime);
     if(!castleDuel.active&&boat.showProw&&boat.effects!==false){
       const aimFallback=(helm.inBattle||!captainPanel.hidden)?(shipGuns.selectedSide??BROADSIDE_SIDE??'port'):null;
       const aimArcs=shipGuns.computeAimTrajectories?.({wind:windVec,fallbackSide:aimFallback})??[];
@@ -5109,6 +5126,16 @@ async function main() {
     syncBrowserUrlState(now);
     frameStages.mark('GPU commands');frameStages.end();
     frameWorkMs=performance.now()-cpuFrameStart;
+    worldDebugUI.update({
+      dt:elapsed,
+      frameMs:elapsed*1000,
+      viewProj:frameF,
+      camPos:[cam.x,cam.y,cam.z],
+      boardDay:caravanPlan.lastDay,
+      daysPerSecond:caravanPlan.rate,
+      screenWidth:canvas.clientWidth,
+      screenHeight:canvas.clientHeight,
+    });
   }
 
   async function saveShot(buf, bpr) {

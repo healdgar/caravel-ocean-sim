@@ -241,14 +241,16 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     let head = routes[routeHeader];
     let days = max(head.y - head.x, 1e-3);
     let share = clamp((cfg.boardDay - head.x) / days, 0.0, 1.0);
+    let phaseOffset = clamp(-roamR - 1.0, 0.0, 0.9999);
+    let phaseShare = fract(share + phaseOffset);
     let calSpeed = head.w / days * cfg.daysPerSecond;
     // In 1x real-time play calendar motion is ~6 mm/s; give active trains a 0.92 m/s visual pace driven by t
     // that yields cleanly back to exact calendar speed once Chart Course time-warp reaches walking speed.
     let paceFloor = max(0.0, 0.92 - calSpeed);
     let cycle = max(head.w + 48.0, 1.0);
-    let rawDist = share * head.w + paceFloor * t;
+    let rawDist = fract(share + phaseOffset) * head.w + paceFloor * t;
     let wrappedDist = rawDist - cycle * floor(rawDist / cycle);
-    let headDist = select(share * head.w, wrappedDist, calSpeed < 0.92 && head.w > 1.0);
+    let headDist = select(phaseShare * head.w, wrappedDist, calSpeed < 0.92 && head.w > 1.0);
     // A driven beast's coat word is lifted by one; a yoked ox's and a wagon's are not.
     let wander = select(0.0, 1.0, species != 4u && seed.traits.x >= 1.0);
     let behind = seed.anchor.y + wander * 0.9 * sin(t * 0.11 + phase * 3.0);

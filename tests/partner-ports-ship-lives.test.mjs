@@ -68,27 +68,21 @@ test('all 7 trade-vessel archetypes include physical 3D officers, merchants with
     );
 
     const groupIds = arch.groups.map((g) => g.id);
-    if (arch.index === 4) {
-      assert.ok(groupIds.includes('crew.pilot') && groupIds.includes('crew.oarsmen'), 'lusoria missing pilot/oarsmen groups');
-    } else {
-      assert.ok(groupIds.includes('crew.officers'), `${arch.label} missing crew.officers group`);
-      assert.ok(groupIds.includes('crew.pilot'), `${arch.label} missing crew.pilot group`);
+    if (arch.index !== 4) {
       assert.ok(groupIds.includes('cargo.deck'), `${arch.label} missing stowed cargo.deck group`);
     }
+    assert.ok(!groupIds.includes('crew.officers'), `${arch.label} must not bake static peg-man crew.officers mesh`);
 
-    // Verify officer (27.15) and/or merchant (27.45) material encodings exist in vertex buffer
-    let hasCaptainMat = false, hasMerchantMat = false;
+    // Verify zero baked peg-man material 27 / >=29 vertices remain, and every deckStation carries a valid GPU rig poseKind
     for (let i = 6; i < arch.vertices.length; i += 9) {
-      const m = arch.vertices[i];
-      if (Math.floor(m) === 27) {
-        const frac = m - 27;
-        if (frac > 0.08 && frac < 0.30) hasCaptainMat = true;
-        if (frac >= 0.30 && frac < 0.65) hasMerchantMat = true;
-      }
+      const m = Math.floor(arch.vertices[i] + 0.001);
+      assert.notEqual(m, 27, `${arch.label} still contains peg-man material 27`);
+      assert.ok(m < 29, `${arch.label} still contains peg-man oarsman material ${m}`);
     }
-    assert.equal(hasMerchantMat, true, `${arch.label} missing merchant garment/ledger material encoding`);
-    if (arch.index !== 4) {
-      assert.equal(hasCaptainMat, true, `${arch.label} missing captain coat/hat material encoding`);
+    const validPoses = new Set(['helm', 'merchant', 'brace', 'idle', 'row', 'paddle']);
+    for (const st of arch.deckStations) {
+      assert.ok(validPoses.has(st.poseKind), `${arch.label} station ${st.station} has invalid poseKind ${st.poseKind}`);
+      assert.ok(Array.isArray(st.localMetres) && st.localMetres.length === 3, `${arch.label} station ${st.station} missing localMetres`);
     }
   }
 });

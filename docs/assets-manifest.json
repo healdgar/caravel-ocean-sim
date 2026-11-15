@@ -10,9 +10,9 @@
     "sha256": "4666394ccfdb046710bc69a6ab7ddb5a78c73bde665936fa3c667b8abf87286e"
   },
   "assets/board/runtime.js": {
-    "url": "assets/board/runtime.803376cf091e5e44.js",
-    "bytes": 100963,
-    "sha256": "803376cf091e5e44be9751d610f1510512ae67ceac9fe6b7ef47bc529d50a2b7"
+    "url": "assets/board/runtime.412f5856a0795ff8.js",
+    "bytes": 114817,
+    "sha256": "412f5856a0795ff8e7f99d1b476e566e572790b94bfe4258ea12cbb6e4be4ed7"
   },
   "assets/boards/partner-ports-1550.json": {
     "url": "assets/boards/partner-ports-1550.3a90d74c36641615.json",
@@ -200,24 +200,24 @@
     "sha256": "56f1aa1fa50df97ef7a07537147f78576bcac0d7e2ac207110656d3dae02dc27"
   },
   "assets/ground-cover/portugal/meadows-gpu/vertices.bin.gz": {
-    "url": "assets/ground-cover/portugal/meadows-gpu/vertices.bin.0093c3490b512a9b.gz",
-    "bytes": 274176,
-    "sha256": "0093c3490b512a9b25f9dea9bc44ccf7f9f07cda3f0e074d98aba030ab019bd1"
+    "url": "assets/ground-cover/portugal/meadows-gpu/vertices.bin.41bb3b587d2c40e5.gz",
+    "bytes": 514961,
+    "sha256": "41bb3b587d2c40e52dd28c07e5d0edeef3b5b0c5368a49be45400b2e238921e0"
   },
   "assets/ground-cover/portugal/meadows-gpu/indices.bin.gz": {
-    "url": "assets/ground-cover/portugal/meadows-gpu/indices.bin.2679c6a88cfc6165.gz",
-    "bytes": 48953,
-    "sha256": "2679c6a88cfc616534a5c47cd0bf4d2c488f69076affb03d5a35c570282ea804"
+    "url": "assets/ground-cover/portugal/meadows-gpu/indices.bin.ae6829c7e618cbe6.gz",
+    "bytes": 214709,
+    "sha256": "ae6829c7e618cbe68ecba31c14fec70a2a54f8d652c79bad65a0745d8d3a464e"
   },
   "assets/ground-cover/portugal/meadows-gpu/clusters.bin.gz": {
-    "url": "assets/ground-cover/portugal/meadows-gpu/clusters.bin.e510a0dfacac5d28.gz",
-    "bytes": 746,
-    "sha256": "e510a0dfacac5d28c5afdfc526f7e1ae1ea95c2a7e3236155f6aff25894ab8aa"
+    "url": "assets/ground-cover/portugal/meadows-gpu/clusters.bin.8fba960ac8e0baca.gz",
+    "bytes": 622,
+    "sha256": "8fba960ac8e0bacaf0d53fed0fbd9f71421800206e17f132b90cb446f1068b27"
   },
   "assets/ground-cover/portugal/meadows-gpu/morph.bin.gz": {
-    "url": "assets/ground-cover/portugal/meadows-gpu/morph.bin.c51facbc79c328e8.gz",
-    "bytes": 687,
-    "sha256": "c51facbc79c328e8c594e4587848373f3a44f36cf0f3b86633711fd36f6f17b6"
+    "url": "assets/ground-cover/portugal/meadows-gpu/morph.bin.f3ce6af242b75147.gz",
+    "bytes": 1796,
+    "sha256": "f3ce6af242b75147b740fe935cd68f2b6e473760fe5550dbb19814dab5b0167c"
   },
   "assets/wildlife/whale.glb": {
     "url": "assets/wildlife/whale.af1b3d2448efbc0f.glb",
@@ -225,29 +225,29 @@
     "sha256": "af1b3d2448efbc0f67673f46494c890aa901a4728ac627c3d2d55e3b00fe43f3"
   },
   "assets/crew/sailor.glb": {
-    "url": "assets/crew/sailor.662e881a6f03ec03.glb",
-    "bytes": 986316,
-    "sha256": "662e881a6f03ec0385a307892a19d70a2afdb1dbed044f1af34372b75d36eae7"
+    "url": "assets/crew/sailor.b86119f37fdf2ba4.glb",
+    "bytes": 1014564,
+    "sha256": "b86119f37fdf2ba4a26aa66dab8bed096169a1248d52cad1e923fdede5d703a8"
   },
   "assets/crew/sailor-female.glb": {
-    "url": "assets/crew/sailor-female.2d3cb047a741e883.glb",
-    "bytes": 945376,
-    "sha256": "2d3cb047a741e8836fd6a5a296a5a094d3e033eddbeaaf3502c6d353a04fe045"
+    "url": "assets/crew/sailor-female.3cc44a04d559d00c.glb",
+    "bytes": 968772,
+    "sha256": "3cc44a04d559d00c36e3c3110de5109cfbf528aff18b00cbd264345228ee228e"
   },
   "assets/crew/captain.glb": {
-    "url": "assets/crew/captain.025647eacdbbbadd.glb",
-    "bytes": 932784,
-    "sha256": "025647eacdbbbadd063b76f88eeadf723c4723acf31b43f6f107be8c003d7bd9"
+    "url": "assets/crew/captain.043be60203f58851.glb",
+    "bytes": 933056,
+    "sha256": "043be60203f58851813d11b7eea9ac5c91ef13353224d971ddbc4dd6d2016d60"
   },
   "assets/crew/sailor-classic.glb": {
-    "url": "assets/crew/sailor-classic.ddb2d0c6143f2b94.glb",
-    "bytes": 995388,
-    "sha256": "ddb2d0c6143f2b949c8793ba558c7c6fba38d8fbf27c260665aa031047e42ca7"
+    "url": "assets/crew/sailor-classic.105a636fa1e571df.glb",
+    "bytes": 995240,
+    "sha256": "105a636fa1e571dfa43c4aa93eaa643ef9993fe2cc993bc0d93531cca7f5e03b"
   },
   "assets/crew/sailor-female-classic.glb": {
-    "url": "assets/crew/sailor-female-classic.f44baeb79dead97b.glb",
-    "bytes": 1214480,
-    "sha256": "f44baeb79dead97b27eef619301c39f8c9f0746d56f14a1244848a7990f1a6f6"
+    "url": "assets/crew/sailor-female-classic.9506114badf82f84.glb",
+    "bytes": 1214276,
+    "sha256": "9506114badf82f84e52bc635bdad7bf630e3e2e8c60e575231afb6af09db3645"
   },
   "assets/world/saba/height.bin": {
     "url": "assets/world/saba/height.44a7a266ceebe8c9.bin",
@@ -1755,9 +1755,9 @@
     "sha256": "1d2651bbbcdd39c48b71a1ef83077e6b419f8c2d18efda4546aa38c838992fd3"
   },
   "assets/ground-cover/portugal/meadows-gpu/manifest.json": {
-    "url": "assets/ground-cover/portugal/meadows-gpu/manifest.44236299e23fd423.json",
-    "bytes": 6591,
-    "sha256": "44236299e23fd423cd382de7e669f04072671494e06c5cb493ef49c6298ca9a7"
+    "url": "assets/ground-cover/portugal/meadows-gpu/manifest.53da360da5ec7e27.json",
+    "bytes": 6687,
+    "sha256": "53da360da5ec7e27f06dddf82e49ac235cc6731a51381f42b5bf6b3a168990b7"
   },
   "assets/tree-foliage.png": {
     "url": "assets/tree-foliage.ad40fb471213f1f4.png",

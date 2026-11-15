@@ -815,21 +815,54 @@ struct CityVertex {
   @location(3) leafUV:vec2f,
   @location(4) lodBlend:f32,
 };
-@vertex fn cityVS(@location(0) corner:vec3f,@location(1) face:vec3f,@location(2) part:vec2f,
-  @location(3) root:vec4f,@location(4) size:vec4f,@location(5) style:vec4f)->CityVertex{
-  let at=cityCorner(corner,face,root,size,style);
-  var o:CityVertex;o.world=at.world;o.normal=at.normal;o.kind=at.kind;o.leafUV=at.wall;
+fn cityFrustumOutside(shiftedRoot:vec3f,size:vec4f)->bool{
+  let hTot=size.z+size.w;
+  let centre=earthCurve(shiftedRoot+vec3f(0.0,hTot*0.5,0.0)-F.camPos.xyz,F.camPos.y);
+  let r=length(vec3f(size.x,hTot,size.y))*0.62+2.5;
+  let rowW=vec3f(F.viewProj[0].w,F.viewProj[1].w,F.viewProj[2].w);
+  let rowX=vec3f(F.viewProj[0].x,F.viewProj[1].x,F.viewProj[2].x);
+  let rowY=vec3f(F.viewProj[0].y,F.viewProj[1].y,F.viewProj[2].y);
+  let pL=rowW+rowX;let pR=rowW-rowX;let pB=rowW+rowY;let pT=rowW-rowY;
+  let w3=F.viewProj[3].w;
+  return dot(rowW,centre)+w3<-r*length(rowW)
+    ||dot(pL,centre)+w3+F.viewProj[3].x<-r*length(pL)
+    ||dot(pR,centre)+w3-F.viewProj[3].x<-r*length(pR)
+    ||dot(pB,centre)+w3+F.viewProj[3].y<-r*length(pB)
+    ||dot(pT,centre)+w3-F.viewProj[3].y<-r*length(pT);
+}
+@vertex fn citySolidVS(@location(0) corner:vec3f,@location(1) face:vec3f,@location(2) part:vec2f,
+  @location(3) root:vec4f,@location(4) size:vec4f,@location(5) style:vec4f)->LandVertex{
+  var o:LandVertex;
   let shiftedRoot=root.xyz+vec3f(nearTerrain.grid.y,0.0,nearTerrain.grid.z);
-  let shifted=at.world+vec3f(nearTerrain.grid.y,0.0,nearTerrain.grid.z);
-  o.pos=F.viewProj*vec4f(earthCurve(shifted-F.camPos.xyz,F.camPos.y),1.0);
-  // A merlon a mile off is less than a point: leave it out. So is a block whose building is
-  // crossfaded out in favour of its full Cairn type.
   let away=distance(shiftedRoot,F.camPos.xyz);
   let typed=(style.x-select(0.0,${CITY_THATCH_ROOF}.0,style.x>${CITY_THATCH_ROOF}.0-0.5))>${CITY_TYPED_ROOF}.0-0.5;
   let fadeStart=max(0.0,nearTerrain.grid.w-36.0);
   let fadeT=clamp((away-fadeStart)/72.0,0.0,1.0);
-  o.lodBlend=select(1.0,-fadeT,typed);
-  if((size.x<1.0&&away>1500.0)||(typed&&away<nearTerrain.grid.w&&away<fadeStart)){o.pos=vec4f(2.0,2.0,0.0,1.0);}
+  if(size.x<0.05||(size.x<1.0&&away>1500.0)||(typed&&nearTerrain.grid.w>0.5&&fadeT<0.999)||cityFrustumOutside(shiftedRoot,size)){
+    o.pos=vec4f(2.0,2.0,0.0,1.0);return o;
+  }
+  let at=cityCorner(corner,face,root,size,style);
+  o.world=at.world;o.normal=at.normal;o.kind=at.kind;o.leafUV=at.wall;
+  let shifted=at.world+vec3f(nearTerrain.grid.y,0.0,nearTerrain.grid.z);
+  o.pos=F.viewProj*vec4f(earthCurve(shifted-F.camPos.xyz,F.camPos.y),1.0);
+  return o;
+}
+@vertex fn cityVS(@location(0) corner:vec3f,@location(1) face:vec3f,@location(2) part:vec2f,
+  @location(3) root:vec4f,@location(4) size:vec4f,@location(5) style:vec4f)->CityVertex{
+  var o:CityVertex;
+  let shiftedRoot=root.xyz+vec3f(nearTerrain.grid.y,0.0,nearTerrain.grid.z);
+  let away=distance(shiftedRoot,F.camPos.xyz);
+  let typed=(style.x-select(0.0,${CITY_THATCH_ROOF}.0,style.x>${CITY_THATCH_ROOF}.0-0.5))>${CITY_TYPED_ROOF}.0-0.5;
+  let fadeStart=max(0.0,nearTerrain.grid.w-36.0);
+  let fadeT=clamp((away-fadeStart)/72.0,0.0,1.0);
+  if(!typed||nearTerrain.grid.w<=0.5||fadeT<=0.001||fadeT>=0.999||size.x<0.05||(size.x<1.0&&away>1500.0)||cityFrustumOutside(shiftedRoot,size)){
+    o.pos=vec4f(2.0,2.0,0.0,1.0);o.lodBlend=1.0;return o;
+  }
+  let at=cityCorner(corner,face,root,size,style);
+  o.world=at.world;o.normal=at.normal;o.kind=at.kind;o.leafUV=at.wall;
+  let shifted=at.world+vec3f(nearTerrain.grid.y,0.0,nearTerrain.grid.z);
+  o.pos=F.viewProj*vec4f(earthCurve(shifted-F.camPos.xyz,F.camPos.y),1.0);
+  o.lodBlend=-fadeT;
   return o;
 }
 // A building of a Cairn type: the type's mesh, stretched by shape.xyz, turned by root.w and
@@ -922,7 +955,8 @@ fn treeWorld(position:vec3f,root:vec4f,shape:vec4f)->vec3f{
   if(grass){let bend=F.windP[0].xy*clamp(F.windP[0].z/12.0,0.0,2.2)*.035*shape.x*position.y*position.y*sin(F.camPos.w*1.8+angle);sway=vec3f(bend.x,0,bend.y);}
   let scaled=normal/max(vec3f(root.w,shape.x,root.w),vec3f(.001));
   let n=vec3f(scaled.x*c-scaled.z*s,scaled.y,scaled.x*s+scaled.z*c);
-  var o:LandVertex;o.world=root.xyz+right*p.x+up*p.y+front*p.z+sway;o.normal=normalize(right*n.x+up*n.y+front*n.z);
+  let rawMag=max(length(normal),1.0);
+  var o:LandVertex;o.world=root.xyz+right*p.x+up*p.y+front*p.z+sway;o.normal=normalize(right*n.x+up*n.y+front*n.z)*rawMag;
   o.kind=kind;o.leafUV=leafUV;o.pos=F.viewProj*vec4f(earthCurve(o.world-F.camPos.xyz,F.camPos.y),1);return o;
 }
 // The opaque call graph contains neither discard nor a leaf texture fetch.
@@ -1655,23 +1689,37 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
   return landFinish(world,n,albedo,diffuse,ambientVisibility,wet,roughness);
 }
 @fragment fn fs(in:LandVertex)->@location(0) vec4f{return landOpaque(in);}
-fn cityBayer4(p:vec2u)->f32{
+struct CityCoverage{@location(0) colour:vec4f,@builtin(sample_mask) mask:u32};
+fn cityNearSampleMask(share:f32,p:vec2u)->u32{
+  if(share>=0.999){return 0xfu;}
+  if(share<=0.001){return 0u;}
   let idx=((p.y&3u)<<2u)|(p.x&3u);
-  let m=array<f32,16>(0.0,8.0,2.0,10.0,12.0,4.0,14.0,6.0,3.0,11.0,1.0,9.0,15.0,7.0,13.0,5.0);
-  return (m[idx]+0.5)/16.0;
-}
-@fragment fn cityFS(in:CityVertex)->@location(0) vec4f{
-  if(in.lodBlend<0.999){
-    let b=cityBayer4(vec2u(in.pos.xy));
-    if(in.lodBlend>=0.0){if(b>=in.lodBlend){discard;}}
-    else if(b<1.0-(-in.lodBlend)){discard;}
+  let m=array<u32,16>(0u,8u,2u,10u,12u,4u,14u,6u,3u,11u,1u,9u,15u,7u,13u,5u);
+  let base=m[idx];
+  let rot=(p.x+p.y*2u)&3u;
+  var mask=0u;
+  for(var s=0u;s<4u;s++){
+    let sub=(s+rot)&3u;
+    let thresh=(f32(base+sub*16u)+0.5)/64.0;
+    if(thresh<share){mask|=1u<<s;}
   }
-  return landOpaque(LandVertex(in.pos,in.world,in.normal,in.kind,in.leafUV));
+  return mask;
+}
+@fragment fn cityFS(in:CityVertex)->CityCoverage{
+  let colour=landOpaque(LandVertex(in.pos,in.world,in.normal,in.kind,in.leafUV));
+  var mask=0xfu;
+  if(in.lodBlend<0.999){
+    let p=vec2u(in.pos.xy);
+    if(in.lodBlend>=0.0){mask=cityNearSampleMask(in.lodBlend,p);}
+    else{mask=0xfu^cityNearSampleMask(1.0+in.lodBlend,p);}
+  }
+  return CityCoverage(colour,mask);
 }
 // The props use local atmosphere and the terrain's cached cloud sunlight. A
 // twelve-step volume integration per grass blade would defeat their budget.
 @fragment fn groundFS(in:LandVertex,@builtin(front_facing) front:bool)->@location(0) vec4f{
   let world=in.world;let grass=in.kind.x>6.5;
+  let rawExposure=clamp((length(in.normal)-1.0)/0.6,0.0,1.0);
   var n=normalize(in.normal);if(grass){n*=select(-1.0,1.0,front);}
   let uv=(world.xz-LAND.domain.xy)/LAND.domain.z+.5;
   let source=pow(textureSample(landAlbedo,landSampler,uv).rgb,vec3f(2.2));
@@ -1679,7 +1727,7 @@ fn cityBayer4(p:vec2u)->f32{
   let shade=.72+in.kind.y*.30;
   let vEye=normalize(F.camPos.xyz-world);
   let camDist=distance(world,F.camPos.xyz);
-  // Fractured boulder mineral lithology, crustose lichen & crystal micro-bump vs grass blades.
+  // Fractured boulder mineral lithology, raw cleavage scars, crustose lichen & crystal micro-bump vs grass blades.
   var albedo=vec3f(0.0);
   var roughness=0.84;
   if(!grass){
@@ -1690,17 +1738,21 @@ fn cityBayer4(p:vec2u)->f32{
     let litho=mix(mix(stoneA,stoneB,smoothstep(0.0,0.65,archTone)),stoneC,smoothstep(0.55,1.0,archTone));
     let crystal=sin(world.x*9.5+world.z*7.1)*0.5+cos(world.y*12.3-world.x*5.7)*0.5;
     let grainFade=smoothstep(48.0,10.0,camDist);
-    let gx=cos(world.x*19.0+world.z*11.0)*0.075*grainFade;
-    let gz=sin(world.z*19.0-world.x*11.0)*0.075*grainFade;
+    let gx=cos(world.x*19.0+world.z*11.0)*0.075*(grainFade+rawExposure*0.45);
+    let gz=sin(world.z*19.0-world.x*11.0)*0.075*(grainFade+rawExposure*0.45);
     n=normalize(n+vec3f(gx,0.0,gz));
     let lichenNoise=sin(world.x*2.4+world.z*1.9)*cos(world.z*3.1-world.x*2.7);
-    let lichen=smoothstep(0.55,0.88,max(n.y,0.0))*smoothstep(0.20,0.75,lichenNoise)*smoothstep(0.08,0.45,vegetation);
-    let rootMask=1.0-smoothstep(0.02,0.32,in.leafUV.y);
-    var rockBase=mix(litho,source,0.22)*shade*(0.90+0.12*max(n.y,0.0)+crystal*0.045*grainFade);
+    let lichen=smoothstep(0.55,0.88,max(n.y,0.0))*smoothstep(0.20,0.75,lichenNoise)*smoothstep(0.08,0.45,vegetation)*(1.0-rawExposure);
+    let rootMask=(1.0-smoothstep(0.02,0.32,in.leafUV.y))*(1.0-rawExposure);
+    var rockBase=mix(litho,source,0.22*(1.0-rawExposure*0.8))*shade*(0.90+0.12*max(n.y,0.0)+crystal*0.045*grainFade);
+    let freshCore=mix(litho*1.38+vec3f(0.045,0.042,0.038),vec3f(0.46,0.43,0.38),0.28+0.22*crystal);
+    let scorchRim=smoothstep(0.05,0.38,rawExposure)*(1.0-smoothstep(0.42,0.88,rawExposure));
+    rockBase=mix(rockBase,freshCore*shade,rawExposure*0.82);
+    rockBase=mix(rockBase,vec3f(0.055,0.050,0.046),scorchRim*0.36);
     rockBase=mix(rockBase,vec3f(0.24,0.27,0.16)*shade,lichen*0.62);
     rockBase=mix(rockBase,source*0.72,rootMask*0.38);
     albedo=rockBase;
-    roughness=clamp(0.76-crystal*0.05+lichen*0.14,0.60,0.92);
+    roughness=clamp(0.76-crystal*0.05+lichen*0.14-rawExposure*0.10,0.52,0.92);
   }else{
     let dry=vec3f(.17,.145,.065);let green=mix(leafMean.rgb,source,.18);
     albedo=mix(dry,green,smoothstep(.12,.7,vegetation))*shade;

@@ -6,7 +6,7 @@
 // Height queries do not see any of this. A pit is a metre or two across on ground the mesh holds at 16 m, and
 // shot, walkers and hulls keep the land they always had (js/terrain.js height and groundSample).
 import { requestOnce } from './gpu-program-cache.js';
-import { LAND_CRATER_BAKE, LAND_CRATER_CAPTURE, LAND_CRATER_CELL_M, LAND_CRATER_DRAWN_CELLS, LAND_CRATER_GUTTER, LAND_CRATER_PER_TILE, LAND_CRATER_REACH, LAND_CRATER_TEXELS, LAND_CRATER_TILE_M } from './wgsl/land-craters.js';
+import { LAND_CRATER_BAKE, LAND_CRATER_CAPTURE, LAND_CRATER_CELL_M, LAND_CRATER_DRAWN_CELLS, LAND_CRATER_GUTTER, LAND_CRATER_LOOKUP_SIZE, LAND_CRATER_PER_TILE, LAND_CRATER_REACH, LAND_CRATER_TEXELS, LAND_CRATER_TILE_M } from './wgsl/land-craters.js';
 
 const CRATER_REFERENCE_J = 1.1e6;
 const CRATER_MERGE_WITHIN = 0.8;
@@ -126,7 +126,7 @@ export function requestLandCraterPipelines({ device, shader, computePipe, module
     ]);
   });
 }
-export function createLandCraters({ device, module, shader, computePipe, format, samples, ledger, surfaces, sectionAt, groundAt, maxLayers = 384 }) {
+export function createLandCraters({ device, module, shader, computePipe, format, samples, ledger, surfaces, sectionAt, groundAt, maxLayers = 384, region: initialRegion = null }) {
   const tiles = new Map();
   const quadIndices = new Uint16Array(LAND_CRATER_DRAWN_CELLS * LAND_CRATER_DRAWN_CELLS * 6);
   for (let j = 0, at = 0; j < LAND_CRATER_DRAWN_CELLS; j++) {
@@ -140,9 +140,88 @@ export function createLandCraters({ device, module, shader, computePipe, format,
   let recordBuffer = null, jobBuffer = null, listBuffer = null;
   let renderPipeline = null, bakePipeline = null, capturePipeline = null, fieldGroup = null, sampler = null;
   const retired = [];
+  const reallocateListeners = new Set();
   let draws = new Map(), overflow = false, anchor = { x: 0, z: 0 }, movedFrom = null, wanting = false, disposed = false;
   const stats = { tiles: 0, layers: 0, captures: 0, bakes: 0, overflow: false, get craters() { return ledger.records.length; } };
   const keyOf = (ix, iz) => `${ix},${iz}`;
+
+  const snapOrigin = (c, span) => Math.floor(((c ?? 0) - (span ?? 8192) * 0.5) / LAND_CRATER_TILE_M) * LAND_CRATER_TILE_M;
+  const regionOrigin = new Float32Array([-4096, -4096]);
+  Object.defineProperties(regionOrigin, {
+    x: { get() { return regionOrigin[0]; }, enumerable: true },
+    z: { get() { return regionOrigin[1]; }, enumerable: true },
+  });
+  const lookupData = new Int16Array(LAND_CRATER_LOOKUP_SIZE * LAND_CRATER_LOOKUP_SIZE).fill(-1);
+  const singleLookupTexel = new Int16Array(1);
+  const lookupTexture = device.createTexture({
+    label: 'land crater tile lookup',
+    size: [LAND_CRATER_LOOKUP_SIZE, LAND_CRATER_LOOKUP_SIZE],
+    format: 'r16sint',
+    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+  });
+
+  function pickCoastRegion(hint = null) {
+    if (hint && Number.isFinite(hint.x) && Number.isFinite(hint.z) && hint.span >= 4096) return hint;
+    let best = null;
+    for (const m of surfaces?.() ?? []) {
+      if (m?.region && Number.isFinite(m.region.x) && m.region.span >= 4096 && (!best || m.region.span > best.span)) {
+        best = m.region;
+      }
+    }
+    return best;
+  }
+
+  const startReg = pickCoastRegion(initialRegion);
+  if (startReg) {
+    regionOrigin[0] = snapOrigin(startReg.x, startReg.span);
+    regionOrigin[1] = snapOrigin(startReg.z, startReg.span);
+  }
+  device.queue.writeTexture(
+    { texture: lookupTexture },
+    lookupData,
+    { bytesPerRow: LAND_CRATER_LOOKUP_SIZE * 2, rowsPerImage: LAND_CRATER_LOOKUP_SIZE },
+    [LAND_CRATER_LOOKUP_SIZE, LAND_CRATER_LOOKUP_SIZE],
+  );
+
+  function writeLookupTile(tileX, tileZ, val) {
+    const tx = Math.round((tileX - regionOrigin[0]) / LAND_CRATER_TILE_M);
+    const tz = Math.round((tileZ - regionOrigin[1]) / LAND_CRATER_TILE_M);
+    if (tx < 0 || tx >= LAND_CRATER_LOOKUP_SIZE || tz < 0 || tz >= LAND_CRATER_LOOKUP_SIZE) return;
+    const idx = tz * LAND_CRATER_LOOKUP_SIZE + tx;
+    if (lookupData[idx] === val) return;
+    lookupData[idx] = val;
+    singleLookupTexel[0] = val;
+    device.queue.writeTexture(
+      { texture: lookupTexture, origin: [tx, tz, 0] },
+      singleLookupTexel,
+      { offset: 0 },
+      [1, 1],
+    );
+  }
+
+  function syncRegionOrigin(hint = null) {
+    const reg = pickCoastRegion(hint ?? initialRegion);
+    if (!reg) return false;
+    const ox = snapOrigin(reg.x, reg.span), oz = snapOrigin(reg.z, reg.span);
+    if (ox === regionOrigin[0] && oz === regionOrigin[1]) return false;
+    regionOrigin[0] = ox;
+    regionOrigin[1] = oz;
+    lookupData.fill(-1);
+    for (const tile of tiles.values()) {
+      const tx = Math.round((tile.x - ox) / LAND_CRATER_TILE_M);
+      const tz = Math.round((tile.z - oz) / LAND_CRATER_TILE_M);
+      if (tx >= 0 && tx < LAND_CRATER_LOOKUP_SIZE && tz >= 0 && tz < LAND_CRATER_LOOKUP_SIZE) {
+        lookupData[tz * LAND_CRATER_LOOKUP_SIZE + tx] = tile.layer;
+      }
+    }
+    device.queue.writeTexture(
+      { texture: lookupTexture },
+      lookupData,
+      { bytesPerRow: LAND_CRATER_LOOKUP_SIZE * 2, rowsPerImage: LAND_CRATER_LOOKUP_SIZE },
+      [LAND_CRATER_LOOKUP_SIZE, LAND_CRATER_LOOKUP_SIZE],
+    );
+    return true;
+  }
 
   function storage(current, bytes, label) {
     if (current && current.size >= bytes) return current;
@@ -150,7 +229,7 @@ export function createLandCraters({ device, module, shader, computePipe, format,
     return device.createBuffer({ label, size: Math.max(256, bytes * 2), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
   }
   function ensureLayers(encoder, needed) {
-    if (needed <= layerCount) return;
+    if (needed <= layerCount) return false;
     let next = Math.max(CRATER_FIRST_LAYERS, layerCount);
     while (next < needed) next *= 2;
     next = Math.min(next, Math.max(maxLayers, needed));
@@ -172,6 +251,7 @@ export function createLandCraters({ device, module, shader, computePipe, format,
       { binding: 1, resource: field.createView({ dimension: '2d-array' }) },
       { binding: 2, resource: sampler },
     ] });
+    return true;
   }
   // Every tile each crater reaches, and each tile's craters. Where too many crowd one, the nearest its middle count.
   function tilesWanted() {
@@ -268,10 +348,17 @@ export function createLandCraters({ device, module, shader, computePipe, format,
   function refresh(changed = null) {
     if (disposed) return;
     if (!renderPipeline) { wanting = true; return; }
+    const originChanged = syncRegionOrigin();
     const wanted = tilesWanted();
     const encoder = device.createCommandEncoder({ label: 'crater tiles' });
-    for (const [key, tile] of tiles) if (!wanted.has(key)) { freeLayers.push(tile.layer); tiles.delete(key); }
-    ensureLayers(encoder, wanted.size);
+    for (const [key, tile] of tiles) {
+      if (!wanted.has(key)) {
+        writeLookupTile(tile.x, tile.z, -1);
+        freeLayers.push(tile.layer);
+        tiles.delete(key);
+      }
+    }
+    const reallocated = ensureLayers(encoder, wanted.size);
     const touched = changed ? ledger.records.indexOf(changed) : -1, toBake = [];
     for (const [key, want] of wanted) {
       let tile = tiles.get(key);
@@ -281,6 +368,7 @@ export function createLandCraters({ device, module, shader, computePipe, format,
       } else {
         tile.section = want.section;
       }
+      writeLookupTile(tile.x, tile.z, tile.layer);
       const moved = tile.craters.length !== want.craters.length || tile.craters.some((v, i) => v !== want.craters[i]);
       tile.craters = want.craters;
       if (!tile.baked || moved || want.craters.includes(touched)) toBake.push(tile);
@@ -313,6 +401,9 @@ export function createLandCraters({ device, module, shader, computePipe, format,
     stats.tiles = tiles.size;
     device.queue.submit([encoder.finish()]);
     for (const texture of retired.splice(0)) texture.destroy();
+    if (reallocated || originChanged) {
+      for (const fn of reallocateListeners) fn(fieldTexture);
+    }
   }
   const ready = (async () => {
     sampler = device.createSampler({ label: 'crater tiles', minFilter: 'linear', magFilter: 'linear', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge' });
@@ -327,6 +418,14 @@ export function createLandCraters({ device, module, shader, computePipe, format,
   return {
     stats, ledger, ready,
     get pipeline() { return renderPipeline; },
+    get fieldTexture() { return fieldTexture; },
+    get lookupTexture() { return lookupTexture; },
+    get regionOrigin() { return regionOrigin; },
+    onReallocate(fn) {
+      if (typeof fn !== 'function') return () => {};
+      reallocateListeners.add(fn);
+      return () => { reallocateListeners.delete(fn); };
+    },
     // A ball has landed. Worked out and on the GPU before this frame's drawing starts.
     strike(hit) {
       const record = ledger.strike(hit);
@@ -336,8 +435,13 @@ export function createLandCraters({ device, module, shader, computePipe, format,
     },
     // Land has changed under the tiles, or a section has come or gone. `region` limits it to the tiles there.
     invalidate(region = null) {
+      const originChanged = syncRegionOrigin(region);
       for (const tile of tiles.values()) if (!region || touches(tile, region)) { tile.captured = false; tile.baked = false; }
-      if (ledger.records.length) refresh();
+      if (ledger.records.length || tiles.size) {
+        refresh();
+      } else if (originChanged) {
+        for (const fn of reallocateListeners) fn(fieldTexture);
+      }
     },
     // When the craters will not all fit, the ones nearest the camera get the tiles.
     follow(camera) {
@@ -377,7 +481,9 @@ export function createLandCraters({ device, module, shader, computePipe, format,
     },
     dispose() {
       disposed = true;
+      reallocateListeners.clear();
       indexBuffer?.destroy(); instanceBuffer?.destroy(); groundTexture?.destroy(); fieldTexture?.destroy();
+      lookupTexture?.destroy();
       recordBuffer?.destroy(); jobBuffer?.destroy(); listBuffer?.destroy();
     },
   };

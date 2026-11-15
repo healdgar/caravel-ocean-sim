@@ -943,19 +943,36 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     if (crossY > 0) bankIndices.push(ia, ib, ic);
     else bankIndices.push(ia, ic, ib);
   };
-  const inChannel = (chainIdx, wx, wz, hw) => {
-    for (let o = 0; o < reachChains.length; o++) {
-      if (o === chainIdx || reachChains[o].isCanal) continue;
-      const ost = reachChains[o].stations;
-      for (let k = 0; k < ost.length - 1; k++) {
-        const ohw = ost[k].hw;
-        if (!(ohw > hw + 0.4 || (Math.abs(ohw - hw) <= 0.4 && o < chainIdx))) continue;
-        if (segDist(wx, wz, ost[k].wx, ost[k].wz, ost[k + 1].wx, ost[k + 1].wz) < ohw * 0.7) {
-          return { o, k, ost };
-        }
+  const projectOntoChain = (wx, wz, ost, maxSegIdx = ost.length - 2) => {
+    let best = null;
+    const lim = Math.min(ost.length - 2, maxSegIdx);
+    for (let k = 0; k <= lim; k++) {
+      const p0 = ost[k], p1 = ost[k + 1];
+      const dx = p1.wx - p0.wx, dz = p1.wz - p0.wz, d2 = dx * dx + dz * dz || 1;
+      const t = Math.max(0, Math.min(1, ((wx - p0.wx) * dx + (wz - p0.wz) * dz) / d2));
+      const px = p0.wx + dx * t, pz = p0.wz + dz * t;
+      const d = Math.hypot(wx - px, wz - pz);
+      if (!best || d < best.d) {
+        const ohw = p0.hw + (p1.hw - p0.hw) * t;
+        best = { k, t, px, pz, d, ohw, p0, p1 };
       }
     }
-    return null;
+    return best;
+  };
+  const refreshChainKinematics = (st) => {
+    let accumS = 0;
+    for (let i = 0; i < st.length; i++) {
+      if (i > 0) accumS += Math.hypot(st[i].wx - st[i - 1].wx, st[i].wz - st[i - 1].wz);
+      st[i].alongS = accumS;
+      const p0 = st[Math.max(0, i - 1)], p1 = st[Math.min(st.length - 1, i + 1)];
+      const dx = p1.wx - p0.wx, dz = p1.wz - p0.wz, dLen = Math.hypot(dx, dz) || 1;
+      st[i].tx = dx / dLen;
+      st[i].tz = dz / dLen;
+      st[i].nx = -st[i].tz;
+      st[i].nz = st[i].tx;
+      st[i].dLen = dLen;
+    }
+    return accumS;
   };
 
   for (let rIdx = 0; rIdx < (board.rivers?.length ?? 0); rIdx++) {
@@ -999,20 +1016,10 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     flushReach();
   }
 
-  // Compute fluvial bend curvature, outer-bend cut-bank thalweg shift, pool-riffle modulation, and carve asymmetric beds.
+  // 1. Compute fluvial bend curvature, outer-bend cut-bank thalweg shift, and pool-riffle modulation.
   for (let cIdx = 0; cIdx < reachChains.length; cIdx++) {
     const chain = reachChains[cIdx], st = chain.stations, isCanal = chain.isCanal;
-    let accumS = 0;
-    for (let i = 0; i < st.length; i++) {
-      if (i > 0) accumS += Math.hypot(st[i].wx - st[i - 1].wx, st[i].wz - st[i - 1].wz);
-      st[i].alongS = accumS;
-      const p0 = st[Math.max(0, i - 1)], p1 = st[Math.min(st.length - 1, i + 1)];
-      const dx = p1.wx - p0.wx, dz = p1.wz - p0.wz, dLen = Math.hypot(dx, dz) || 1;
-      st[i].tx = dx / dLen;
-      st[i].tz = dz / dLen;
-      st[i].nx = -st[i].tz;
-      st[i].nz = st[i].tx;
-    }
+    const accumS = refreshChainKinematics(st);
     // Box-filtered curvature over ~18 m to capture smooth bend centrifuges without jitter.
     const rawCurv = new Float32Array(st.length);
     for (let i = 1; i < st.length - 1; i++) {
@@ -1041,88 +1048,101 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
       const poolBoost = 1 + 0.34 * Math.min(1, Math.abs(thalweg) * 1.8) - 0.12 * riffleWave * free * bClear;
       if (!isCanal && !st[i].seaMouth) st[i].depth = Math.max(0.65, Math.min(3.1, st[i].depth * poolBoost));
     }
-
-    // Carve asymmetric riverbed trough into heights & wet mask so sub-grid banks and refracted bed match the sinuous channel.
-    const carveStride = grid.step > 20 ? 2 : 1;
-    for (let s = 0; s < st.length - 1; s += carveStride) {
-      const s1 = Math.min(st.length - 1, s + carveStride);
-      const a = st[s], b = st[s1];
-      const maxHw = Math.max(a.hw, b.hw);
-      const baseFlatR = grid.step > 20 ? maxHw + 0.5 : maxHw * 0.68;
-      const outer = grid.step > 20 ? baseFlatR + Math.min(grid.step * 0.55, 8.0) : maxHw + 4.4;
-      const scanR = Math.max(outer, maxHw + grid.step * 0.45);
-      const i0 = Math.max(1, Math.floor((Math.min(a.wx, b.wx) - scanR - grid.x0) / grid.step));
-      const i1 = Math.min(n - 2, Math.ceil((Math.max(a.wx, b.wx) + scanR - grid.x0) / grid.step));
-      const j0 = Math.max(1, Math.floor((Math.min(a.wz, b.wz) - scanR - grid.z0) / grid.step));
-      const j1 = Math.min(n - 2, Math.ceil((Math.max(a.wz, b.wz) + scanR - grid.z0) / grid.step));
-      const abx = b.wx - a.wx, abz = b.wz - a.wz, ab2 = abx * abx + abz * abz || 1;
-      for (let j = j0; j <= j1; j++) {
-        const gz = grid.z0 + j * grid.step;
-        for (let i = i0; i <= i1; i++) {
-          const gx = grid.x0 + i * grid.step;
-          const t = Math.max(0, Math.min(1, ((gx - a.wx) * abx + (gz - a.wz) * abz) / ab2));
-          const cx = a.wx + abx * t, cz = a.wz + abz * t;
-          const nx = a.nx + (b.nx - a.nx) * t, nz = a.nz + (b.nz - a.nz) * t;
-          const signedCross = (gx - cx) * nx + (gz - cz) * nz;
-          const dist = Math.hypot(gx - cx, gz - cz);
-          if (dist >= scanR) continue;
-          const k = j * n + i;
-          const hw = a.hw + (b.hw - a.hw) * t;
-          const thal = a.thalwegB + (b.thalwegB - a.thalwegB) * t;
-          if (dist <= hw + grid.step * 0.45) wet[k] = 1;
-          if (!heights || dist >= outer) continue;
-          const origH = uncarved[k];
-          const padHit = nearPad(gx, gz);
-          if (padHit && dist > hw + 1.0) continue;
-          const flatR = padHit ? hw + 0.4 : baseFlatR;
-          const wy = Math.max(origH > 0.45 ? 0.45 : -2.0, a.wy + (b.wy - a.wy) * t - 0.24);
-          const baseDepth = a.depth + (b.depth - a.depth) * t;
-          const normCross = Math.max(-1, Math.min(1, signedCross / Math.max(hw, 0.5)));
-          // Asymmetric bed depth: deepest near thalwegB, shoaling across the opposite inner point bar.
-          const symShape = Math.max(0, 1 - normCross * normCross);
-          const skewFocus = 0.65 + 0.48 * Math.exp(-1.8 * (normCross - thal) ** 2);
-          const bed = wy - baseDepth * Math.max(0.25, symShape * skewFocus + 0.25);
-          const u = dist <= flatR ? 0 : Math.min(1, (dist - flatR) / Math.max(0.75, outer - flatR));
-          const sm = u * u * (3 - 2 * u);
-          let target = dist <= flatR ? bed : bed * (1 - sm) + origH * sm;
-          if (origH > 0.45) target = Math.max(0.30, target);
-          if (target < heights[k]) heights[k] = target;
-        }
-      }
-    }
   }
 
-  // Trim tributary tongues overlapping main stems and extend sea mouths softly below tidewater.
+  // 2. Unified confluence detection, tail trimming, and smooth curved bridge extension into mainstems,
+  //    followed by tidewater sea-mouth flare extension (before final wy leveling and bed carving).
   for (let c = 0; c < reachChains.length; c++) {
     const chain = reachChains[c], st = chain.stations;
-    if (!chain.isCanal && st.length > 2) {
-      let cutAt = st.length - 1;
-      let joinTarget = null;
-      while (cutAt > 1) {
-        const hit = inChannel(c, st[cutAt - 1].wx, st[cutAt - 1].wz, st[cutAt - 1].hw);
-        if (!hit) break;
-        joinTarget = hit;
-        cutAt--;
+    const origEnd = st[st.length - 1];
+    if (!chain.isCanal && st.length >= 2 && !origEnd?.seaMouth) {
+      let bestJoin = null;
+      for (let o = 0; o < reachChains.length; o++) {
+        if (o === c || reachChains[o].isCanal) continue;
+        if (reachChains[o].mouthJoin?.otherIdx === c) continue;
+        const ost = reachChains[o].stations;
+        if (ost.length < 2) continue;
+        const oHasSeaMouth = Boolean(ost[ost.length - 1]?.seaMouth);
+        for (let k = 0; k < ost.length - 1; k++) {
+          const p0 = ost[k], p1 = ost[k + 1];
+          const dx = p1.wx - p0.wx, dz = p1.wz - p0.wz, d2 = dx * dx + dz * dz || 1;
+          const t = Math.max(0, Math.min(1, ((origEnd.wx - p0.wx) * dx + (origEnd.wz - p0.wz) * dz) / d2));
+          const px = p0.wx + dx * t, pz = p0.wz + dz * t;
+          const ohw = p0.hw + (p1.hw - p0.hw) * t;
+          const segHw = Math.max(p0.hw, ohw);
+          const isHeadOnTail = k >= ost.length - 2 && !oHasSeaMouth && t > 0.65;
+          if (isHeadOnTail && !(ohw > origEnd.hw + 0.4 || (Math.abs(ohw - origEnd.hw) <= 0.4 && o < c))) continue;
+          const reach = segHw + origEnd.hw + 10.0;
+          const d = Math.hypot(origEnd.wx - px, origEnd.wz - pz);
+          if (d <= reach && (!bestJoin || d < bestJoin.d)) {
+            bestJoin = { o, k, t, px, pz, d, ohw, ost };
+          }
+        }
       }
-      if (cutAt < st.length - 1) {
-        st.length = cutAt + 1;
-      } else {
-        const endHit = inChannel(c, st[st.length - 1].wx, st[st.length - 1].wz, st[st.length - 1].hw);
-        if (endHit) joinTarget = endHit;
-      }
-      if (joinTarget) {
-        const { ost, k } = joinTarget;
-        const p0 = ost[k], p1 = ost[k + 1];
-        const dx = p1.wx - p0.wx, dz = p1.wz - p0.wz, d2 = dx * dx + dz * dz || 1;
-        const end = st[st.length - 1];
-        const t = Math.max(0, Math.min(1, ((end.wx - p0.wx) * dx + (end.wz - p0.wz) * dz) / d2));
-        end.wx = p0.wx + dx * t;
-        end.wz = p0.wz + dz * t;
-        end.hw = Math.min(p0.hw * 0.92, end.hw * 1.45);
-        end.hwL = end.hw; end.hwR = end.hw;
-        chain.mouthJoin = { otherIdx: joinTarget.o, k };
+      if (bestJoin) {
+        const { ost, o } = bestJoin;
+        // Trim any tail stations of `c` already inside `ost`'s wet half-width (`segDist < ost[k].hw * 0.82`).
+        while (st.length > 2) {
+          const tail = st[st.length - 1];
+          const proj = projectOntoChain(tail.wx, tail.wz, ost);
+          const refHw = Math.max(ost[proj.k].hw, proj.ohw);
+          if (proj.d < refHw * 0.82) st.pop();
+          else break;
+        }
+        const approach = st[st.length - 1];
+        const prev = st[st.length - 2];
+        const adx = approach.wx - prev.wx, adz = approach.wz - prev.wz, aLen = Math.hypot(adx, adz) || 1;
+        const atx = adx / aLen, atz = adz / aLen;
+        // Project confluence target onto mainstem centerline (preferring origEnd's projection when forward of approach).
+        let targetProj = projectOntoChain(origEnd.wx, origEnd.wz, ost);
+        if ((targetProj.px - approach.wx) * atx + (targetProj.pz - approach.wz) * atz < -0.5) {
+          targetProj = projectOntoChain(approach.wx, approach.wz, ost);
+        }
+        const p0 = ost[targetProj.k], p1 = ost[targetProj.k + 1];
+        const txP = targetProj.px, tzP = targetProj.pz;
+        const bridgeDist = Math.hypot(txP - approach.wx, tzP - approach.wz);
+        const ohw = targetProj.ohw;
+        const mainDepth = p0.depth + (p1.depth - p0.depth) * targetProj.t;
+        const mainWy = p0.wy + (p1.wy - p0.wy) * targetProj.t;
+        const targetHw = Math.min(ohw * 0.92, Math.max(approach.hw, Math.min(ohw * 0.82, approach.hw * 1.35)));
+        if (bridgeDist > 0.25) {
+          const fwdDot = (txP - approach.wx) * atx + (tzP - approach.wz) * atz;
+          const handleLen = Math.max(0, Math.min(bridgeDist * 0.45, fwdDot * 0.62));
+          const cxCtrl = approach.wx + atx * handleLen;
+          const czCtrl = approach.wz + atz * handleLen;
+          const bridgeSteps = 3;
+          for (let s = 1; s <= bridgeSteps; s++) {
+            const u = s / bridgeSteps, inv = 1 - u;
+            const wx = inv * inv * approach.wx + 2 * inv * u * cxCtrl + u * u * txP;
+            const wz = inv * inv * approach.wz + 2 * inv * u * czCtrl + u * u * tzP;
+            const hw = approach.hw + (targetHw - approach.hw) * u;
+            st.push({
+              wx,
+              wz,
+              hw,
+              hwL: hw,
+              hwR: hw,
+              wy: approach.wy + (mainWy - approach.wy) * u,
+              bankMaxY: origAt(wx, wz),
+              depth: approach.depth + (mainDepth - approach.depth) * u,
+              seaMouth: false,
+              thalwegB: approach.thalwegB * inv,
+              curvature: approach.curvature * inv,
+              alongS: 0,
+            });
+          }
+        } else {
+          approach.wx = txP;
+          approach.wz = tzP;
+          approach.hw = targetHw;
+          approach.hwL = targetHw;
+          approach.hwR = targetHw;
+        }
+        refreshChainKinematics(st);
+        chain.mouthJoin = { otherIdx: o, k: targetProj.k, t: targetProj.t, wx: txP, wz: tzP };
       }
     }
+
     const last = st[st.length - 1];
     if (last?.seaMouth && !chain.mouthJoin && st.length >= 2) {
       const prev = st[Math.max(0, st.length - 4)];
@@ -1168,39 +1188,68 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
           alongS: shoreAlong + distOut,
         });
       }
-      // Carve a submerged estuary outlet channel and outer sandbar so wave shoaling and refraction align with the mouth.
-      if (heights && maxOut > 0) {
-        const endX = shoreX + ux * Math.min(maxOut, 48), endZ = shoreZ + uz * Math.min(maxOut, 48);
-        const padW = baseW * 2.6 + grid.step;
-        const i0 = Math.max(1, Math.floor((Math.min(shoreX, endX) - padW - grid.x0) / grid.step));
-        const i1 = Math.min(n - 2, Math.ceil((Math.max(shoreX, endX) + padW - grid.x0) / grid.step));
-        const j0 = Math.max(1, Math.floor((Math.min(shoreZ, endZ) - padW - grid.z0) / grid.step));
-        const j1 = Math.min(n - 2, Math.ceil((Math.max(shoreZ, endZ) + padW - grid.z0) / grid.step));
-        const maxCarve = Math.min(maxOut, 46);
-        for (let j = j0; j <= j1; j++) {
-          const gz = grid.z0 + j * grid.step;
-          for (let i = i0; i <= i1; i++) {
-            const gx = grid.x0 + i * grid.step;
-            if (nearPad(gx, gz)) continue;
-            const along = (gx - shoreX) * ux + (gz - shoreZ) * uz;
-            if (along < -2 || along > maxCarve + grid.step * 0.5) continue;
-            const across = Math.abs(-(gx - shoreX) * uz + (gz - shoreZ) * ux);
-            const mw = baseW * (1 + Math.max(0, along) / 32) * 1.25;
-            if (across > mw) continue;
-            const uAcross = across / Math.max(1, mw);
-            const fade = (1 - uAcross * uAcross) * Math.max(0, 1 - Math.max(0, along - maxCarve + 8) / 8);
-            const barBed = -0.95 - 0.018 * Math.max(0, along) + 0.22 * Math.exp(-(((along - 30) / 11) ** 2));
-            const k = j * n + i;
-            const carved = heights[k] + (barBed - heights[k]) * fade;
-            if (carved < heights[k]) heights[k] = carved;
-          }
+      refreshChainKinematics(st);
+      chain.seaMouthCarve = maxOut > 0 ? { shoreX, shoreZ, ux, uz, baseW, maxOut } : null;
+    }
+  }
+
+  // Densify reach stations near confluence zones (<= 0.70 m spacing) so intersecting bank/bed strips carve clean troughs.
+  const confluenceCenters = reachChains
+    .filter((ch) => ch.mouthJoin)
+    .map((ch) => ({
+      wx: ch.mouthJoin.wx,
+      wz: ch.mouthJoin.wz,
+      r: Math.max(16, (ch.stations[ch.stations.length - 1]?.hw ?? 3) * 3.5 + 12),
+    }));
+  if (confluenceCenters.length > 0) {
+    for (const chain of reachChains) {
+      const st = chain.stations;
+      const dense = [st[0]];
+      for (let i = 0; i < st.length - 1; i++) {
+        const a = st[i], b = st[i + 1];
+        const mx = 0.5 * (a.wx + b.wx), mz = 0.5 * (a.wz + b.wz);
+        let nearConf = false;
+        for (const c of confluenceCenters) {
+          if (Math.hypot(mx - c.wx, mz - c.wz) <= c.r + Math.max(a.hw, b.hw)) { nearConf = true; break; }
         }
+        const segLen = Math.hypot(b.wx - a.wx, b.wz - a.wz);
+        const steps = nearConf && !b.seaPlume ? Math.max(1, Math.min(8, Math.ceil(segLen / 0.68))) : 1;
+        for (let s = 1; s < steps; s++) {
+          const t = s / steps;
+          dense.push({
+            ...a,
+            wx: a.wx + (b.wx - a.wx) * t,
+            wz: a.wz + (b.wz - a.wz) * t,
+            hw: a.hw + (b.hw - a.hw) * t,
+            hwL: (a.hwL ?? a.hw) + ((b.hwL ?? b.hw) - (a.hwL ?? a.hw)) * t,
+            hwR: (a.hwR ?? a.hw) + ((b.hwR ?? b.hw) - (a.hwR ?? b.hw)) * t,
+            wy: a.wy + (b.wy - a.wy) * t,
+            bankMaxY: origAt(a.wx + (b.wx - a.wx) * t, a.wz + (b.wz - a.wz) * t),
+            depth: a.depth + (b.depth - a.depth) * t,
+            seaMouth: Boolean(a.seaMouth && b.seaMouth),
+            seaPlume: Boolean(a.seaPlume && b.seaPlume),
+            thalwegB: (a.thalwegB ?? 0) + ((b.thalwegB ?? 0) - (a.thalwegB ?? 0)) * t,
+            curvature: (a.curvature ?? 0) + ((b.curvature ?? 0) - (a.curvature ?? 0)) * t,
+            alongS: 0,
+          });
+        }
+        dense.push(b);
+      }
+      chain.stations = dense;
+      refreshChainKinematics(dense);
+      if (chain.shoreS != null) {
+        let bestIdx = 0, bestDiff = Infinity;
+        for (let i = 0; i < dense.length; i++) {
+          const d = Math.abs(dense[i].alongS - chain.shoreS);
+          if (d < bestDiff) { bestDiff = d; bestIdx = i; }
+        }
+        chain.shoreIdx = bestIdx;
       }
     }
   }
 
-  // Compute left/right normals & exact watertight bank crest elevations per reach, then PAV level + confluence joins.
-  for (const chain of reachChains) {
+  // 3. Compute initial bank crests & PAV hydraulic water-surface profile, then smooth confluence wy matching.
+  const updateChainCrests = (chain, clampInitialWy) => {
     const st = chain.stations;
     for (let i = 0; i < st.length; i++) {
       const p0 = st[Math.max(0, i - 1)], p1 = st[Math.min(st.length - 1, i + 1)];
@@ -1216,12 +1265,16 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
       st[i].tx = tx; st[i].tz = tz; st[i].nx = nx; st[i].nz = nz; st[i].dLen = dLen;
       st[i].crestHwL = crestHwL; st[i].crestHwR = crestHwR; st[i].crestHw = 0.5 * (crestHwL + crestHwR);
       st[i].lx = lx; st[i].lz = lz; st[i].ly = ly; st[i].rx = rx; st[i].rz = rz; st[i].ry = ry;
-      if (!st[i].seaMouth) {
+      if (clampInitialWy && !st[i].seaMouth) {
         const natMin = Math.min(origAt(lx, lz), origAt(rx, rz));
         const cap = Math.min(st[i].wy, Math.min(ly, ry) - 0.16, natMin - 0.30);
         st[i].wy = Math.max(0.06, cap);
       }
     }
+  };
+  for (const chain of reachChains) {
+    updateChainCrests(chain, true);
+    const st = chain.stations;
     const leveled = pavMonotoneDesc(st.map((s) => s.wy));
     for (let i = 0; i < st.length; i++) {
       if (!st[i].seaMouth) st[i].wy = Math.max(0.06, Math.min(st[i].wy, leveled[i]));
@@ -1229,31 +1282,64 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
       if (i > 0) st[i].wy = Math.min(st[i].wy, st[i - 1].wy);
     }
   }
+
   const confluenceJoins = [];
   for (let a = 0; a < reachChains.length; a++) {
     const chainA = reachChains[a], trib = chainA.stations, end = trib[trib.length - 1];
     if (end.seaMouth && !chainA.mouthJoin) continue;
-    let bestB = chainA.mouthJoin?.otherIdx ?? -1, bestJ = chainA.mouthJoin?.k ?? -1, bestD = Infinity;
-    if (bestB < 0) {
+    let bestB = chainA.mouthJoin?.otherIdx ?? -1;
+    let mainProj = null;
+    if (bestB >= 0) {
+      mainProj = projectOntoChain(end.wx, end.wz, reachChains[bestB].stations);
+    } else if (!chainA.isCanal) {
+      let bestD = Infinity;
       for (let b = 0; b < reachChains.length; b++) {
-        if (a === b) continue;
-        const main = reachChains[b].stations;
-        for (let j = 0; j < main.length; j++) {
-          const reach = main[j].hw + end.hw + 8;
-          const d = Math.hypot(end.wx - main[j].wx, end.wz - main[j].wz);
-          if (d < reach && d < bestD) { bestD = d; bestB = b; bestJ = j; }
+        if (a === b || reachChains[b].isCanal) continue;
+        const proj = projectOntoChain(end.wx, end.wz, reachChains[b].stations);
+        if (proj && proj.d < proj.ohw + end.hw + 10.0 && proj.d < bestD) {
+          bestD = proj.d;
+          bestB = b;
+          mainProj = proj;
         }
       }
     }
-    if (bestB >= 0) {
-      const targetWy = reachChains[bestB].stations[bestJ].wy;
-      end.wy = Math.min(end.wy, targetWy);
-      for (let i = trib.length - 2; i >= 0; i--) trib[i].wy = Math.max(trib[i].wy, trib[i + 1].wy);
-      confluenceJoins.push({ trib, end, main: reachChains[bestB].stations[bestJ] });
+    if (bestB >= 0 && mainProj) {
+      confluenceJoins.push({ tribIdx: a, mainIdx: bestB, trib, end });
+    }
+  }
+  const DRAWDOWN_SPAN_M = 25.0;
+  for (let pass = 0; pass < 3; pass++) {
+    for (const jn of confluenceJoins) {
+      const { trib, end, mainIdx } = jn;
+      const mainSt = reachChains[mainIdx].stations;
+      const proj = projectOntoChain(end.wx, end.wz, mainSt);
+      const targetWy = proj.p0.wy + (proj.p1.wy - proj.p0.wy) * proj.t;
+      jn.main = proj.t < 0.5 ? proj.p0 : proj.p1;
+      jn.proj = proj;
+      const endS = end.alongS;
+      if (targetWy < end.wy) {
+        for (let i = 0; i < trib.length; i++) {
+          const ds = Math.max(0, endS - trib[i].alongS);
+          if (ds >= DRAWDOWN_SPAN_M) continue;
+          const u = ds / DRAWDOWN_SPAN_M;
+          const sm = u * u * (3 - 2 * u);
+          trib[i].wy = Math.min(trib[i].wy, targetWy + Math.max(0, trib[i].wy - targetWy) * sm);
+        }
+      }
+      end.wy = targetWy;
+      for (let i = trib.length - 2; i >= 0; i--) {
+        trib[i].wy = Math.max(trib[i].wy, trib[i + 1].wy);
+      }
+      for (let i = 1; i < trib.length; i++) {
+        trib[i].wy = Math.min(trib[i].wy, trib[i - 1].wy);
+      }
     }
   }
   for (const chain of reachChains) {
     if (chain.isCanal) continue;
+    for (let i = 1; i < chain.stations.length; i++) {
+      chain.stations[i].wy = Math.min(chain.stations[i].wy, chain.stations[i - 1].wy);
+    }
     let y = -Infinity;
     for (let i = chain.stations.length - 1; i >= 0; i--) {
       y = Math.max(y, chain.stations[i].wy);
@@ -1261,25 +1347,208 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     }
   }
 
-  function riverJoinPolygon(end, main) {
-    const pts = [
-      [end.lx, end.lz], [end.rx, end.rz],
-      [main.lx, main.lz], [main.rx, main.rz],
-    ];
-    const cx = pts.reduce((s, p) => s + p[0], 0) / 4, cz = pts.reduce((s, p) => s + p[1], 0) / 4;
-    pts.sort((a, b) => Math.atan2(a[1] - cz, a[0] - cx) - Math.atan2(b[1] - cz, b[0] - cx));
-    return pts;
+  // 4. Carve asymmetric riverbed troughs and sea-mouth bars into heights AFTER confluence extension & final wy leveling.
+  for (let cIdx = 0; cIdx < reachChains.length; cIdx++) {
+    const chain = reachChains[cIdx], st = chain.stations;
+    const carveStride = grid.step > 20 ? 2 : 1;
+    for (let s = 0; s < st.length - 1; s += carveStride) {
+      const s1 = Math.min(st.length - 1, s + carveStride);
+      const a = st[s], b = st[s1];
+      const maxHw = Math.max(a.hw, b.hw);
+      const baseFlatR = grid.step > 20 ? maxHw + 0.5 : maxHw * 0.72;
+      const outer = grid.step > 20 ? baseFlatR + Math.min(grid.step * 0.55, 8.0) : maxHw + 4.4;
+      const scanR = Math.max(outer, maxHw + grid.step * 0.45);
+      const i0 = Math.max(1, Math.floor((Math.min(a.wx, b.wx) - scanR - grid.x0) / grid.step));
+      const i1 = Math.min(n - 2, Math.ceil((Math.max(a.wx, b.wx) + scanR - grid.x0) / grid.step));
+      const j0 = Math.max(1, Math.floor((Math.min(a.wz, b.wz) - scanR - grid.z0) / grid.step));
+      const j1 = Math.min(n - 2, Math.ceil((Math.max(a.wz, b.wz) + scanR - grid.z0) / grid.step));
+      const abx = b.wx - a.wx, abz = b.wz - a.wz, ab2 = abx * abx + abz * abz || 1;
+      for (let j = j0; j <= j1; j++) {
+        const gz = grid.z0 + j * grid.step;
+        for (let i = i0; i <= i1; i++) {
+          const gx = grid.x0 + i * grid.step;
+          const t = Math.max(0, Math.min(1, ((gx - a.wx) * abx + (gz - a.wz) * abz) / ab2));
+          const cx = a.wx + abx * t, cz = a.wz + abz * t;
+          const nx = a.nx + (b.nx - a.nx) * t, nz = a.nz + (b.nz - a.nz) * t;
+          const signedCross = (gx - cx) * nx + (gz - cz) * nz;
+          const dist = Math.hypot(gx - cx, gz - cz);
+          if (dist >= scanR) continue;
+          const k = j * n + i;
+          const hw = a.hw + (b.hw - a.hw) * t;
+          const thal = (a.thalwegB ?? 0) + ((b.thalwegB ?? 0) - (a.thalwegB ?? 0)) * t;
+          if (dist <= hw + grid.step * 0.45) wet[k] = 1;
+          if (!heights || dist >= outer) continue;
+          const origH = uncarved[k];
+          const padHit = nearPad(gx, gz);
+          if (padHit && dist > hw + 1.0) continue;
+          const flatR = padHit ? hw + 0.4 : baseFlatR;
+          const wy = Math.max(-2.0, a.wy + (b.wy - a.wy) * t - 0.14);
+          const baseDepth = a.depth + (b.depth - a.depth) * t;
+          const normCross = Math.max(-1, Math.min(1, signedCross / Math.max(hw, 0.5)));
+          const symShape = Math.max(0, 1 - normCross * normCross);
+          const skewFocus = 0.65 + 0.48 * Math.exp(-1.8 * (normCross - thal) ** 2);
+          const bed = wy - baseDepth * Math.max(0.28, symShape * skewFocus + 0.25);
+          const u = dist <= flatR ? 0 : Math.min(1, (dist - flatR) / Math.max(0.75, outer - flatR));
+          const sm = u * u * (3 - 2 * u);
+          const target = dist <= flatR ? bed : bed * (1 - sm) + origH * sm;
+          if (target < heights[k]) heights[k] = target;
+        }
+      }
+    }
+    if (heights && chain.seaMouthCarve) {
+      const { shoreX, shoreZ, ux, uz, baseW, maxOut } = chain.seaMouthCarve;
+      const endX = shoreX + ux * Math.min(maxOut, 48), endZ = shoreZ + uz * Math.min(maxOut, 48);
+      const padW = baseW * 2.6 + grid.step;
+      const i0 = Math.max(1, Math.floor((Math.min(shoreX, endX) - padW - grid.x0) / grid.step));
+      const i1 = Math.min(n - 2, Math.ceil((Math.max(shoreX, endX) + padW - grid.x0) / grid.step));
+      const j0 = Math.max(1, Math.floor((Math.min(shoreZ, endZ) - padW - grid.z0) / grid.step));
+      const j1 = Math.min(n - 2, Math.ceil((Math.max(shoreZ, endZ) + padW - grid.z0) / grid.step));
+      const maxCarve = Math.min(maxOut, 46);
+      for (let j = j0; j <= j1; j++) {
+        const gz = grid.z0 + j * grid.step;
+        for (let i = i0; i <= i1; i++) {
+          const gx = grid.x0 + i * grid.step;
+          const along = (gx - shoreX) * ux + (gz - shoreZ) * uz;
+          if (along < -2 || along > maxCarve + grid.step * 0.5) continue;
+          const across = Math.abs(-(gx - shoreX) * uz + (gz - shoreZ) * ux);
+          const mw = baseW * (1 + Math.max(0, along) / 32) * 1.25;
+          if (across > mw) continue;
+          if (nearPad(gx, gz) && across > mw * 0.8) continue;
+          const uAcross = across / Math.max(1, mw);
+          const fade = (1 - uAcross * uAcross) * Math.max(0, 1 - Math.max(0, along - maxCarve + 8) / 8);
+          const barBed = -0.95 - 0.018 * Math.max(0, along) + 0.22 * Math.exp(-(((along - 30) / 11) ** 2));
+          const k = j * n + i;
+          const carved = heights[k] + (barBed - heights[k]) * fade;
+          if (carved < heights[k]) heights[k] = carved;
+        }
+      }
+    }
   }
+  // Refresh outer bank crest heights (ly, ry) against the carved terrain surface so crests sit watertightly on heights.
+  for (const chain of reachChains) updateChainCrests(chain, false);
+
+  // Convex hull helper for watertight 2D sub-grid terrain riverCuts clipping across junctions (zero dry-rim pyramid!).
+  const convexHull2D = (pts) => {
+    const sorted = pts.slice().sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]));
+    if (sorted.length < 3) return sorted;
+    const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    const lower = [];
+    for (const p of sorted) {
+      while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+      lower.push(p);
+    }
+    const upper = [];
+    for (let i = sorted.length - 1; i >= 0; i--) {
+      const p = sorted[i];
+      while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+      upper.push(p);
+    }
+    lower.pop();
+    upper.pop();
+    return lower.concat(upper);
+  };
+  const pushRiverCutPoly = (rawPts) => {
+    const poly = rawPts.length > 3 ? convexHull2D(rawPts) : rawPts;
+    if (poly.length < 3) return;
+    let area2 = 0, x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i], b = poly[(i + 1) % poly.length];
+      area2 += a[0] * b[1] - b[0] * a[1];
+      x0 = Math.min(x0, a[0]); z0 = Math.min(z0, a[1]);
+      x1 = Math.max(x1, a[0]); z1 = Math.max(z1, a[1]);
+    }
+    if (Math.abs(area2) > 1e-4) riverCuts.push({ x0, z0, x1, z1, poly });
+  };
   for (const jn of confluenceJoins) {
-    const poly = riverJoinPolygon(jn.end, jn.main);
-    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
-    for (const [px, pz] of poly) { x0 = Math.min(x0, px); z0 = Math.min(z0, pz); x1 = Math.max(x1, px); z1 = Math.max(z1, pz); }
-    riverCuts.push({ x0, z0, x1, z1, poly });
-    const bedY = Math.min(jn.end.wy - jn.end.depth * 0.75, jn.main.wy - jn.main.depth * 0.75);
-    const vc = pushBankVert(jn.main.wx, bedY, jn.main.wz, 0, 1, 0, 1.0);
-    const rim = poly.map(([px, pz]) => pushBankVert(px, triHeightAt(px, pz), pz, 0, 1, 0, 0.05));
-    for (let k = 0; k < rim.length; k++) pushBankTri(vc, rim[k], rim[(k + 1) % rim.length]);
+    const { end, proj } = jn;
+    if (!proj) continue;
+    const m0 = proj.p0, m1 = proj.p1;
+    const eL = (end.hwL ?? end.hw) + 0.35, eR = (end.hwR ?? end.hw) + 0.35;
+    const m0L = (m0.hwL ?? m0.hw) + 0.35, m0R = (m0.hwR ?? m0.hw) + 0.35;
+    const m1L = (m1.hwL ?? m1.hw) + 0.35, m1R = (m1.hwR ?? m1.hw) + 0.35;
+    pushRiverCutPoly([
+      [end.wx - end.nx * eL, end.wz - end.nz * eL],
+      [end.wx + end.nx * eR, end.wz + end.nz * eR],
+      [m0.wx - m0.nx * m0L, m0.wz - m0.nz * m0L],
+      [m0.wx + m0.nx * m0R, m0.wz + m0.nz * m0R],
+      [m1.wx - m1.nx * m1L, m1.wz - m1.nz * m1L],
+      [m1.wx + m1.nx * m1R, m1.wz + m1.nz * m1R],
+    ]);
   }
+
+  // 5. Build a spatial segment grid across all reaches so intersecting bank strips depress cleanly below other channels.
+  const SEG_CELL = 16.0;
+  const reachSegGrid = new Map();
+  for (let oIdx = 0; oIdx < reachChains.length; oIdx++) {
+    const ost = reachChains[oIdx].stations;
+    for (let s = 0; s < ost.length - 1; s++) {
+      const a = ost[s], b = ost[s + 1];
+      if (a.seaPlume && b.seaPlume) continue;
+      const maxR = Math.max(a.crestHwL ?? a.crestHw, a.crestHwR ?? a.crestHw, b.crestHwL ?? b.crestHw, b.crestHwR ?? b.crestHw) + 1.5;
+      const seg = { oIdx, a, b, abx: b.wx - a.wx, abz: b.wz - a.wz, ab2: (b.wx - a.wx) ** 2 + (b.wz - a.wz) ** 2 || 1, maxR };
+      const gx0 = Math.floor((Math.min(a.wx, b.wx) - maxR) / SEG_CELL);
+      const gx1 = Math.floor((Math.max(a.wx, b.wx) + maxR) / SEG_CELL);
+      const gz0 = Math.floor((Math.min(a.wz, b.wz) - maxR) / SEG_CELL);
+      const gz1 = Math.floor((Math.max(a.wz, b.wz) + maxR) / SEG_CELL);
+      for (let gz = gz0; gz <= gz1; gz++) {
+        for (let gx = gx0; gx <= gx1; gx++) {
+          const key = `${gx},${gz}`;
+          let bucket = reachSegGrid.get(key);
+          if (!bucket) reachSegGrid.set(key, bucket = []);
+          bucket.push(seg);
+        }
+      }
+    }
+  }
+  const pushDepressedBankVert = (cIdx, vx, vy, vz, nx, ny, nz, wetAmt) => {
+    const bucket = reachSegGrid.get(`${Math.floor(vx / SEG_CELL)},${Math.floor(vz / SEG_CELL)}`);
+    let clampedY = vy, clampedWet = wetAmt;
+    if (bucket) {
+      for (let k = 0; k < bucket.length; k++) {
+        const seg = bucket[k];
+        if (seg.oIdx === cIdx) continue;
+        const { a, b, abx, abz, ab2, maxR } = seg;
+        const t = Math.max(0, Math.min(1, ((vx - a.wx) * abx + (vz - a.wz) * abz) / ab2));
+        const cx = a.wx + abx * t, cz = a.wz + abz * t;
+        const d = Math.hypot(vx - cx, vz - cz);
+        if (d >= maxR) continue;
+        const snx = a.nx + (b.nx - a.nx) * t, snz = a.nz + (b.nz - a.nz) * t;
+        const signedCross = (vx - cx) * snx + (vz - cz) * snz;
+        const hwL = (a.hwL ?? a.hw) + ((b.hwL ?? b.hw) - (a.hwL ?? a.hw)) * t;
+        const hwR = (a.hwR ?? a.hw) + ((b.hwR ?? b.hw) - (a.hwR ?? a.hw)) * t;
+        const crestL = (a.crestHwL ?? a.crestHw) + ((b.crestHwL ?? b.crestHw) - (a.crestHwL ?? a.crestHw)) * t;
+        const crestR = (a.crestHwR ?? a.crestHw) + ((b.crestHwR ?? b.crestHw) - (a.crestHwR ?? a.crestHw)) * t;
+        const crestY = signedCross < 0 ? a.ly + (b.ly - a.ly) * t : a.ry + (b.ry - a.ry) * t;
+        const hwSide = signedCross < 0 ? hwL : hwR;
+        const crestSide = signedCross < 0 ? crestL : crestR;
+        if (d >= crestSide) continue;
+        const wyO = a.wy + (b.wy - a.wy) * t;
+        const depthO = a.depth + (b.depth - a.depth) * t;
+        const bedYO = wyO - depthO;
+        const shoreYO = Math.min(crestY, wyO - Math.min(0.24, Math.max(0.10, depthO * 0.24)));
+        const wetShelf = hwSide + 0.36;
+        let surfOrBedY;
+        let subShare;
+        if (d <= hwSide) {
+          const u = d / Math.max(0.35, hwSide);
+          const sm = u * u * (3 - 2 * u);
+          surfOrBedY = bedYO + (shoreYO - bedYO) * sm;
+          subShare = 1.0 - 0.18 * sm;
+        } else if (d <= wetShelf) {
+          surfOrBedY = shoreYO;
+          subShare = 0.82;
+        } else {
+          const u = Math.min(1, (d - wetShelf) / Math.max(0.45, crestSide - wetShelf));
+          const sm = u * u * (3 - 2 * u);
+          surfOrBedY = shoreYO + (crestY - shoreYO) * sm;
+          subShare = 0.82 * (1 - sm);
+        }
+        if (surfOrBedY < clampedY) clampedY = surfOrBedY;
+        if (subShare > clampedWet) clampedWet = subShare;
+      }
+    }
+    return pushBankVert(vx, clampedY, vz, nx, ny, nz, clampedWet);
+  };
 
   for (let cIdx = 0; cIdx < reachChains.length; cIdx++) {
     const chain = reachChains[cIdx], st = chain.stations, isCanal = chain.isCanal;
@@ -1294,42 +1563,44 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
       reachPts.push([cur.wx, cur.wz, cur.hw, cur.wy, cur.depth, cur.tx * speed, cur.tz * speed, cur.thalwegB, cur.estuaryT ?? 0]);
     }
     riverReaches.push({ id: cIdx, isCanal, minHalfWidth, length, seaConnected: Boolean(st[st.length - 1].seaMouth), points: reachPts });
-    // Emit shared-crest embankment + asymmetric thalweg bed strips and matching 2D cut quads for sub-grid terrain clipping.
+    // Emit shared-crest embankment + subdivided bank ramps + asymmetric thalweg bed strips and convex 2D cut tris.
     let prevRow = null;
     for (let i = 0; i < st.length; i++) {
       const cur = st[i], nx = cur.nx, nz = cur.nz;
       if (cur.seaPlume) { prevRow = null; continue; }
       const hwL = cur.hwL ?? cur.hw, hwR = cur.hwR ?? cur.hw, thal = cur.thalwegB ?? 0;
+      const crestHwL = cur.crestHwL ?? cur.crestHw, crestHwR = cur.crestHwR ?? cur.crestHw;
       const bedOff = thal * cur.hw * 0.45;
       const bedHwL = Math.max(0.32, hwL * (0.58 - thal * 0.25));
       const bedHwR = Math.max(0.32, hwR * (0.58 + thal * 0.25));
       const bedY = cur.wy - cur.depth;
-      const slY = Math.min(cur.ly, Math.max(cur.wy + 0.02, cur.wy * 0.72 + bedY * 0.28));
-      const srY = Math.min(cur.ry, Math.max(cur.wy + 0.02, cur.wy * 0.72 + bedY * 0.28));
-      const bankDxL = Math.max(0.6, (cur.crestHwL ?? cur.crestHw) - hwL);
-      const bankDxR = Math.max(0.6, (cur.crestHwR ?? cur.crestHw) - hwR);
+      const subMargin = Math.min(0.24, Math.max(0.10, cur.depth * 0.24));
+      const slY = Math.min(cur.ly, cur.wy - subMargin);
+      const srY = Math.min(cur.ry, cur.wy - subMargin);
+      const bankDxL = Math.max(0.6, crestHwL - hwL);
+      const bankDxR = Math.max(0.6, crestHwR - hwR);
       const lSlopeLen = Math.hypot(bankDxL, Math.max(0, cur.ly - slY));
       const rSlopeLen = Math.hypot(bankDxR, Math.max(0, cur.ry - srY));
       const lnx = (cur.ly - slY) / lSlopeLen, lny = bankDxL / lSlopeLen;
       const rnx = (cur.ry - srY) / rSlopeLen, rny = bankDxR / rSlopeLen;
-      const vCL = pushBankVert(cur.lx, cur.ly, cur.lz, 0, 1, 0, 0.0);
-      const vSL = pushBankVert(cur.wx - nx * hwL, slY, cur.wz - nz * hwL, nx * lnx, lny, nz * lnx, 0.76);
-      const vBL = pushBankVert(cur.wx + nx * (bedOff - bedHwL), bedY * (1 - 0.12 * Math.max(0, thal)), cur.wz + nz * (bedOff - bedHwL), nx * 0.28, 0.96, nz * 0.28, 1.0);
-      const vBR = pushBankVert(cur.wx + nx * (bedOff + bedHwR), bedY * (1 - 0.12 * Math.max(0, -thal)), cur.wz + nz * (bedOff + bedHwR), -nx * 0.28, 0.96, -nz * 0.28, 1.0);
-      const vSR = pushBankVert(cur.wx + nx * hwR, srY, cur.wz + nz * hwR, -nx * rnx, rny, -nz * rnx, 0.76);
-      const vCR = pushBankVert(cur.rx, cur.ry, cur.rz, 0, 1, 0, 0.0);
-      const row = [vCL, vSL, vBL, vBR, vSR, vCR];
+      const slX = cur.wx - nx * hwL, slZ = cur.wz - nz * hwL;
+      const srX = cur.wx + nx * hwR, srZ = cur.wz + nz * hwR;
+      const vCL = pushDepressedBankVert(cIdx, cur.lx, cur.ly, cur.lz, 0, 1, 0, 0.0);
+      const vML1 = pushDepressedBankVert(cIdx, cur.lx + (slX - cur.lx) * 0.34, cur.ly + (slY - cur.ly) * 0.34, cur.lz + (slZ - cur.lz) * 0.34, nx * lnx, lny, nz * lnx, 0.24);
+      const vML2 = pushDepressedBankVert(cIdx, cur.lx + (slX - cur.lx) * 0.68, cur.ly + (slY - cur.ly) * 0.68, cur.lz + (slZ - cur.lz) * 0.68, nx * lnx, lny, nz * lnx, 0.56);
+      const vSL = pushDepressedBankVert(cIdx, slX, slY, slZ, nx * lnx, lny, nz * lnx, 0.82);
+      const vBL = pushDepressedBankVert(cIdx, cur.wx + nx * (bedOff - bedHwL), bedY - 0.12 * cur.depth * Math.max(0, thal), cur.wz + nz * (bedOff - bedHwL), nx * 0.28, 0.96, nz * 0.28, 1.0);
+      const vBR = pushDepressedBankVert(cIdx, cur.wx + nx * (bedOff + bedHwR), bedY - 0.12 * cur.depth * Math.max(0, -thal), cur.wz + nz * (bedOff + bedHwR), -nx * 0.28, 0.96, -nz * 0.28, 1.0);
+      const vSR = pushDepressedBankVert(cIdx, srX, srY, srZ, -nx * rnx, rny, -nz * rnx, 0.82);
+      const vMR2 = pushDepressedBankVert(cIdx, cur.rx + (srX - cur.rx) * 0.68, cur.ry + (srY - cur.ry) * 0.68, cur.rz + (srZ - cur.rz) * 0.68, -nx * rnx, rny, -nz * rnx, 0.56);
+      const vMR1 = pushDepressedBankVert(cIdx, cur.rx + (srX - cur.rx) * 0.34, cur.ry + (srY - cur.ry) * 0.34, cur.rz + (srZ - cur.rz) * 0.34, -nx * rnx, rny, -nz * rnx, 0.24);
+      const vCR = pushDepressedBankVert(cIdx, cur.rx, cur.ry, cur.rz, 0, 1, 0, 0.0);
+      const row = [vCL, vML1, vML2, vSL, vBL, vBR, vSR, vMR2, vMR1, vCR];
       if (prevRow) {
         const pSt = st[i - 1];
-        const poly = [[pSt.lx, pSt.lz], [cur.lx, cur.lz], [cur.rx, cur.rz], [pSt.rx, pSt.rz]];
-        riverCuts.push({
-          x0: Math.min(poly[0][0], poly[1][0], poly[2][0], poly[3][0]),
-          z0: Math.min(poly[0][1], poly[1][1], poly[2][1], poly[3][1]),
-          x1: Math.max(poly[0][0], poly[1][0], poly[2][0], poly[3][0]),
-          z1: Math.max(poly[0][1], poly[1][1], poly[2][1], poly[3][1]),
-          poly,
-        });
-        for (let b = 0; b < 5; b++) {
+        pushRiverCutPoly([[pSt.lx, pSt.lz], [cur.lx, cur.lz], [cur.rx, cur.rz]]);
+        pushRiverCutPoly([[pSt.lx, pSt.lz], [cur.rx, cur.rz], [pSt.rx, pSt.rz]]);
+        for (let b = 0; b < row.length - 1; b++) {
           pushBankTri(prevRow[b], row[b], row[b + 1]);
           pushBankTri(prevRow[b], row[b + 1], prevRow[b + 1]);
         }

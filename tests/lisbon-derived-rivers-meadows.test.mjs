@@ -64,16 +64,20 @@ test('ship continuum uses genus-0 cross-section (38->27 px) and rowed boats carr
   assert.doesNotMatch(TRADE_VESSELS_WGSL, /\bdiscard\b/);
   assert.doesNotMatch(TRADE_VESSEL_CONTINUUM_WGSL, /\bdiscard\b/);
 
-  // Arch 4 (river barge) & Arch 6 (harbor skiff) must carry stern pilot (27), sweep/tiller (28), and arch 4 carries seated oarsmen (>=29)
+  // Arch 4 (river barge) & Arch 6 (harbor skiff) must carry zero peg-man hull geometry (mat 27 / >=29 banned),
+  // real 3D wooden sweep/tiller (mat 28), and real 65-joint rigged human deckStations (stern pilot + oarsmen)
   for (const idx of [4, 6]) {
     const a = archetypes[idx];
     const mats = new Set();
     for (let k = 6; k < a.vertices.length; k += 9) mats.add(Math.floor(a.vertices[k] + 0.001));
-    assert.ok(mats.has(27), `archetype ${idx} missing 3D stern pilot (mat 27)`);
+    assert.ok(!mats.has(27), `archetype ${idx} must not bake hex peg-man pilot (mat 27)`);
+    assert.ok(![...mats].some((m) => m >= 29), `archetype ${idx} must not bake hex peg-man oarsmen (mat >= 29)`);
     assert.ok(mats.has(28), `archetype ${idx} missing 3D sweep/tiller (mat 28)`);
+    assert.ok(Array.isArray(a.deckStations) && a.deckStations.some((s) => s.station === 'pilot' || s.poseKind === 'helm'),
+      `archetype ${idx} missing rigged human stern pilot/helm station`);
     if (idx === 4) {
-      const hasOarsman = [...mats].some((m) => m >= 29);
-      assert.ok(hasOarsman, `archetype ${idx} missing 3D seated oarsmen (mat >= 29)`);
+      assert.ok(a.deckStations.some((s) => String(s.station).startsWith('crew:')),
+        `archetype ${idx} missing rigged human oarsmen deckStations`);
     }
   }
 });

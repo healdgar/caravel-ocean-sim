@@ -9111,7 +9111,8 @@ export function buildCoastalMesh(
   beaches = null,
   shoreDist = null,
   portPlacement = null,
-  rawHeights = null
+  rawHeights = null,
+  seamOptions = null
 ) {
   const region = resolveGlobalCoastalRegion(regionSpec);
   const prov = resolveGeographicCoastalProvince(region);
@@ -9304,6 +9305,73 @@ export function buildCoastalMesh(
     }
   };
 
+  // Detect higher-resolution authoritative neighbors along the 4 section borders so coarser tiles
+  // (n = 33 or 129) emit exact 1-cell transition fans with zero T-junction cracks against finer (129 or 513) meshes.
+  const lookupSeamNeighbor = seamOptions?.lookupNeighbor ?? null;
+  const seamSecX = seamOptions?.secX ?? null;
+  const seamSecZ = seamOptions?.secZ ?? null;
+  const selfIsMock = Boolean(seamOptions?.isMock);
+  const selfAuth = seamSecX === 0 && seamSecZ === 0 ? 3 : selfIsMock ? 1 : 2;
+  const resolveFinerNeighbor = (nx, nz) => {
+    if (typeof lookupSeamNeighbor !== 'function' || seamSecX === null || seamSecZ === null) return null;
+    const nb = lookupSeamNeighbor(nx, nz, false);
+    if (!nb?.heights || !nb?.region || !(nb.region.size > n)) return null;
+    const nbAuth = nx === 0 && nz === 0 ? 3 : nb.isMock ? 1 : 2;
+    if (nbAuth < selfAuth) return null;
+    const ratio = Math.round((nb.region.size - 1) / (n - 1));
+    return ratio >= 2 ? { nb, ratio } : null;
+  };
+  const finerWest = resolveFinerNeighbor(seamSecX !== null ? seamSecX - 1 : 0, seamSecZ ?? 0);
+  const finerEast = resolveFinerNeighbor(seamSecX !== null ? seamSecX + 1 : 0, seamSecZ ?? 0);
+  const finerNorth = resolveFinerNeighbor(seamSecX ?? 0, seamSecZ !== null ? seamSecZ - 1 : 0);
+  const finerSouth = resolveFinerNeighbor(seamSecX ?? 0, seamSecZ !== null ? seamSecZ + 1 : 0);
+
+  const sampleExactNeighborHeight = (nb, wx, wz) => {
+    const src = nb.heights || nb.rawHeights;
+    const nr = nb.region;
+    const ns = nr.size;
+    const u = Math.max(0, Math.min(1, (wx - nr.x) / nr.span + 0.5)) * (ns - 1);
+    const v = Math.max(0, Math.min(1, (wz - nr.z) / nr.span + 0.5)) * (ns - 1);
+    const i0 = Math.min(ns - 1, Math.floor(u));
+    const j0 = Math.min(ns - 1, Math.floor(v));
+    const i1 = Math.min(ns - 1, i0 + 1);
+    const j1 = Math.min(ns - 1, j0 + 1);
+    const fu = u - i0, fv = v - j0;
+    return (
+      (src[j0 * ns + i0] * (1 - fu) + src[j0 * ns + i1] * fu) * (1 - fv) +
+      (src[j1 * ns + i0] * (1 - fu) + src[j1 * ns + i1] * fu) * fv
+    );
+  };
+
+  const fineEdgeVertCache = new Map();
+  const getFineBorderVertex = (sideCode, cellCoord, subIdx, ratio, x, z, nb) => {
+    if (subIdx === 0) {
+      if (sideCode === 0) return cellCoord * n; // West: (0, j)
+      if (sideCode === 1) return (n - 1) * n + cellCoord; // South: (i, n-1)
+      if (sideCode === 2) return (cellCoord + 1) * n + (n - 1); // East S->N start: (n-1, j+1)
+      return cellCoord + 1; // North E->W start: (i+1, 0)
+    }
+    if (subIdx === ratio) {
+      if (sideCode === 0) return (cellCoord + 1) * n; // West: (0, j+1)
+      if (sideCode === 1) return (n - 1) * n + (cellCoord + 1); // South: (i+1, n-1)
+      if (sideCode === 2) return cellCoord * n + (n - 1); // East S->N end: (n-1, j)
+      return cellCoord; // North E->W end: (i, 0)
+    }
+    const key = ((sideCode * n + cellCoord) * 64) + subIdx;
+    const hit = fineEdgeVertCache.get(key);
+    if (hit !== undefined) return hit;
+    const h = sampleExactNeighborHeight(nb, x, z);
+    const eps = Math.max(1.0, step / ratio);
+    const dx = (coastalSampleClamped(heights, x - eps, z, region) - coastalSampleClamped(heights, x + eps, z, region)) / (2 * eps);
+    const dz = (coastalSampleClamped(heights, x, z - eps, region) - coastalSampleClamped(heights, x, z + eps, region)) / (2 * eps);
+    const idx = n * n + extraVerts.length / 8;
+    extraVerts.push(...computeVertexAttribs(x, z, h, dx, dz));
+    fineEdgeVertCache.set(key, idx);
+    return idx;
+  };
+
+  const borderSkirtSegments = [];
+
   for (let j = 0; j < n - 1; j++) {
     for (let i = 0; i < n - 1; i++) {
       const k = j * n + i;
@@ -9311,6 +9379,120 @@ export function buildCoastalMesh(
       const lo = Math.min(h00, h10, h01, h11);
       const hi = Math.max(h00, h10, h01, h11);
       const cutsHere = riverBin ? riverBin.get(j * (n - 1) + i) : null;
+
+      const fW = i === 0 ? finerWest : null;
+      const fE = i === n - 2 ? finerEast : null;
+      const fN = j === 0 ? finerNorth : null;
+      const fS = j === n - 2 ? finerSouth : null;
+
+      if (fW || fE || fN || fS) {
+        const x0 = region.x + (i / (n - 1) - 0.5) * region.span;
+        const x1 = region.x + ((i + 1) / (n - 1) - 0.5) * region.span;
+        const z0 = region.z + (j / (n - 1) - 0.5) * region.span;
+        const z1 = region.z + ((j + 1) / (n - 1) - 0.5) * region.span;
+        const xc = 0.5 * (x0 + x1), zc = 0.5 * (z0 + z1);
+        const hc = 0.25 * (h00 + h10 + h01 + h11);
+        const dxc = ((h00 - h10) + (h01 - h11)) / (2 * step);
+        const dzc = ((h00 - h01) + (h10 - h11)) / (2 * step);
+        const vCenter = n * n + extraVerts.length / 8;
+        extraVerts.push(...computeVertexAttribs(xc, zc, hc, dxc, dzc));
+
+        let cellHi = Math.max(hi, hc), cellLo = Math.min(lo, hc);
+        const fanTris = [];
+        const addFanEdge = (vA, vB, isOuterBorder) => {
+          const rA = readVert(vA), rB = readVert(vB);
+          cellHi = Math.max(cellHi, rA[1], rB[1]);
+          cellLo = Math.min(cellLo, rA[1], rB[1]);
+          fanTris.push([vCenter, vA, vB]);
+          if (isOuterBorder) borderSkirtSegments.push([vA, vB]);
+        };
+
+        // 1. West side: NW (k) -> SW (k + n)
+        if (fW) {
+          for (let s = 0; s < fW.ratio; s++) {
+            const za = z0 + (s / fW.ratio) * step, zb = z0 + ((s + 1) / fW.ratio) * step;
+            const vA = getFineBorderVertex(0, j, s, fW.ratio, x0, za, fW.nb);
+            const vB = getFineBorderVertex(0, j, s + 1, fW.ratio, x0, zb, fW.nb);
+            addFanEdge(vA, vB, true);
+          }
+        } else if (i > 0 && cellSub[j * (n - 1) + (i - 1)]) {
+          for (let sj = 0; sj < M; sj++) {
+            const a = sj / M, b = (sj + 1) / M;
+            addFanEdge(getSubVertex(i * M, j * M + sj, true, h00 * (1 - a) + h01 * a), getSubVertex(i * M, j * M + sj + 1, true, h00 * (1 - b) + h01 * b), false);
+          }
+        } else {
+          addFanEdge(k, k + n, i === 0);
+        }
+
+        // 2. South side: SW (k + n) -> SE (k + n + 1)
+        if (fS) {
+          for (let s = 0; s < fS.ratio; s++) {
+            const xa = x0 + (s / fS.ratio) * step, xb = x0 + ((s + 1) / fS.ratio) * step;
+            const vA = getFineBorderVertex(1, i, s, fS.ratio, xa, z1, fS.nb);
+            const vB = getFineBorderVertex(1, i, s + 1, fS.ratio, xb, z1, fS.nb);
+            addFanEdge(vA, vB, true);
+          }
+        } else if (j < n - 2 && cellSub[(j + 1) * (n - 1) + i]) {
+          for (let si = 0; si < M; si++) {
+            const a = si / M, b = (si + 1) / M;
+            addFanEdge(getSubVertex(i * M + si, (j + 1) * M, true, h01 * (1 - a) + h11 * a), getSubVertex(i * M + si + 1, (j + 1) * M, true, h01 * (1 - b) + h11 * b), false);
+          }
+        } else {
+          addFanEdge(k + n, k + n + 1, j === n - 2);
+        }
+
+        // 3. East side: SE (k + n + 1) -> NE (k + 1)
+        if (fE) {
+          for (let s = 0; s < fE.ratio; s++) {
+            const za = z1 - (s / fE.ratio) * step, zb = z1 - ((s + 1) / fE.ratio) * step;
+            const vA = getFineBorderVertex(2, j, s, fE.ratio, x1, za, fE.nb);
+            const vB = getFineBorderVertex(2, j, s + 1, fE.ratio, x1, zb, fE.nb);
+            addFanEdge(vA, vB, true);
+          }
+        } else if (i < n - 2 && cellSub[j * (n - 1) + (i + 1)]) {
+          for (let sj = M; sj > 0; sj--) {
+            const a = sj / M, b = (sj - 1) / M;
+            addFanEdge(getSubVertex((i + 1) * M, j * M + sj, true, h10 * (1 - a) + h11 * a), getSubVertex((i + 1) * M, j * M + sj - 1, true, h10 * (1 - b) + h11 * b), false);
+          }
+        } else {
+          addFanEdge(k + n + 1, k + 1, i === n - 2);
+        }
+
+        // 4. North side: NE (k + 1) -> NW (k)
+        if (fN) {
+          for (let s = 0; s < fN.ratio; s++) {
+            const xa = x1 - (s / fN.ratio) * step, xb = x1 - ((s + 1) / fN.ratio) * step;
+            const vA = getFineBorderVertex(3, i, s, fN.ratio, xa, z0, fN.nb);
+            const vB = getFineBorderVertex(3, i, s + 1, fN.ratio, xb, z0, fN.nb);
+            addFanEdge(vA, vB, true);
+          }
+        } else if (j > 0 && cellSub[(j - 1) * (n - 1) + i]) {
+          for (let si = M; si > 0; si--) {
+            const a = si / M, b = (si - 1) / M;
+            addFanEdge(getSubVertex(i * M + si, j * M, true, h00 * (1 - a) + h10 * a), getSubVertex(i * M + si - 1, j * M, true, h00 * (1 - b) + h10 * b), false);
+          }
+        } else {
+          addFanEdge(k + 1, k, j === 0);
+        }
+
+        if (cellHi > -0.5) {
+          for (let t = 0; t < fanTris.length; t++) {
+            emitLandTri(fanTris[t][0], fanTris[t][1], fanTris[t][2], cutsHere);
+          }
+        }
+        if (cellLo < 0 && cellHi > (n === 257 ? -24 : -42)) {
+          for (let t = 0; t < fanTris.length; t++) {
+            submergedIndices.push(fanTris[t][0], fanTris[t][1], fanTris[t][2]);
+          }
+        }
+        continue;
+      }
+
+      if (i === 0) borderSkirtSegments.push([k, k + n]);
+      if (j === n - 2) borderSkirtSegments.push([k + n, k + n + 1]);
+      if (i === n - 2) borderSkirtSegments.push([k + n + 1, k + 1]);
+      if (j === 0) borderSkirtSegments.push([k + 1, k]);
+
       if (!cellSub[j * (n - 1) + i]) {
         const useMainDiag = Math.abs(h00 - h11) < Math.abs(h10 - h01) - 0.01;
         if (hi > -0.5) {
@@ -9380,6 +9562,28 @@ export function buildCoastalMesh(
           }
         }
       }
+    }
+  }
+
+  // Emit a -1.5 m vertical manifold border-lip skirt along land section borders (i=0, n-1, j=0, n-1)
+  // so multi-resolution chords are 100% watertight from every viewing angle with zero sky/ocean bleed.
+  if (borderSkirtSegments.length > 0) {
+    const skirtVertCache = new Map();
+    const getSkirtVert = (topIdx) => {
+      const hit = skirtVertCache.get(topIdx);
+      if (hit !== undefined) return hit;
+      const tv = readVert(topIdx);
+      const idx = n * n + extraVerts.length / 8;
+      extraVerts.push(tv[0], tv[1] - 1.5, tv[2], tv[3], tv[4], tv[5], tv[6], tv[7]);
+      skirtVertCache.set(topIdx, idx);
+      return idx;
+    };
+    for (let s = 0; s < borderSkirtSegments.length; s++) {
+      const [vA, vB] = borderSkirtSegments[s];
+      const rA = readVert(vA), rB = readVert(vB);
+      if (Math.max(rA[1], rB[1]) <= -0.5) continue;
+      const lA = getSkirtVert(vA), lB = getSkirtVert(vB);
+      indices.push(vA, lA, lB, vA, lB, vB);
     }
   }
 
@@ -11427,7 +11631,7 @@ export function prepareSectionConnectedBorders(heights, regionOrSize, connectedE
   return modified;
 }
 
-// Stitch a coastal section's heightfield C0/C1-continuously to all already-loaded neighboring sections
+// Stitch a coastal section's heightfield C0/C1-continuously to all authoritative neighboring sections
 // along shared world borders, and organically round any unconnected outer world boundary into a natural cape.
 export function stitchCoastalSectionBorders(
   heights,
@@ -11435,29 +11639,151 @@ export function stitchCoastalSectionBorders(
   secX,
   secZ,
   getNeighborSection,
-  { taperUnconnectedOuter = true, isRealDemSection = false } = {}
+  { taperUnconnectedOuter = true, isRealDemSection = false, isMock = undefined } = {}
 ) {
   const n = region.size;
   const span = region.span;
-  const westSec = typeof getNeighborSection === 'function' ? getNeighborSection(secX - 1, secZ) : null;
-  const eastSec = typeof getNeighborSection === 'function' ? getNeighborSection(secX + 1, secZ) : null;
-  const northSec = typeof getNeighborSection === 'function' ? getNeighborSection(secX, secZ - 1) : null;
-  const southSec = typeof getNeighborSection === 'function' ? getNeighborSection(secX, secZ + 1) : null;
+  const selfIsMock = isMock !== undefined ? Boolean(isMock) : !isRealDemSection;
+  const selfAuth = secX === 0 && secZ === 0 ? 3 : selfIsMock ? 1 : 2;
+
+  const querySec = (nx, nz, includePlanned = false) =>
+    typeof getNeighborSection === 'function' ? getNeighborSection(nx, nz, includePlanned) : null;
+  const hasSec = (nx, nz) => Boolean(querySec(nx, nz, false) || querySec(nx, nz, true));
+
+  const westRaw = querySec(secX - 1, secZ, false);
+  const eastRaw = querySec(secX + 1, secZ, false);
+  const northRaw = querySec(secX, secZ - 1, false);
+  const southRaw = querySec(secX, secZ + 1, false);
+
+  const neighborAuth = (nb, nx, nz) => {
+    if (!nb?.heights) return 0;
+    if (nx === 0 && nz === 0) return 3;
+    return nb.isMock ? 1 : 2;
+  };
+  const authW = neighborAuth(westRaw, secX - 1, secZ);
+  const authE = neighborAuth(eastRaw, secX + 1, secZ);
+  const authN = neighborAuth(northRaw, secX, secZ - 1);
+  const authS = neighborAuth(southRaw, secX, secZ + 1);
+
+  // Strict authority priority: (0,0) center [3] > grown/real DEM (!isMock) [2] > mock (isMock) [1].
+  // A grown/real DEM section NEVER bends its border to match a mock neighbor; when the mock restitches, it bends to match the DEM.
+  const westSec = authW >= selfAuth ? westRaw : null;
+  const eastSec = authE >= selfAuth ? eastRaw : null;
+  const northSec = authN >= selfAuth ? northRaw : null;
+  const southSec = authS >= selfAuth ? southRaw : null;
 
   // Check if neighbor exists OR is queued/planned in the contiguous coastal block
-  const hasWest = Boolean(westSec || (typeof getNeighborSection === 'function' && getNeighborSection(secX - 1, secZ, true)));
-  const hasEast = Boolean(eastSec || (typeof getNeighborSection === 'function' && getNeighborSection(secX + 1, secZ, true)));
-  const hasNorth = Boolean(northSec || (typeof getNeighborSection === 'function' && getNeighborSection(secX, secZ - 1, true)));
-  const hasSouth = Boolean(southSec || (typeof getNeighborSection === 'function' && getNeighborSection(secX, secZ + 1, true)));
+  const hasWest = hasSec(secX - 1, secZ);
+  const hasEast = hasSec(secX + 1, secZ);
+  const hasNorth = hasSec(secX, secZ - 1);
+  const hasSouth = hasSec(secX, secZ + 1);
 
+  // Sample authoritative rendered neighbor.heights directly on exact clamped [0, 1] grid coordinates (zero 1e-3 inward shift).
   const sampleNeighborEdge = (neighbor, wx, wz) => {
-    const srcHeights = neighbor.rawHeights || neighbor.heights;
+    const srcHeights = neighbor.heights || neighbor.rawHeights;
     const nr = neighbor.region;
-    const half = nr.span * 0.5 - 1e-3;
-    const cx = Math.max(nr.x - half, Math.min(nr.x + half, wx));
-    const cz = Math.max(nr.z - half, Math.min(nr.z + half, wz));
-    return terrainSample(srcHeights, cx, cz, nr);
+    const ns = nr.size;
+    const u = Math.max(0, Math.min(1, (wx - nr.x) / nr.span + 0.5)) * (ns - 1);
+    const v = Math.max(0, Math.min(1, (wz - nr.z) / nr.span + 0.5)) * (ns - 1);
+    const i0 = Math.min(ns - 1, Math.floor(u));
+    const j0 = Math.min(ns - 1, Math.floor(v));
+    const i1 = Math.min(ns - 1, i0 + 1);
+    const j1 = Math.min(ns - 1, j0 + 1);
+    const fu = u - i0, fv = v - j0;
+    return (
+      (srcHeights[j0 * ns + i0] * (1 - fu) + srcHeights[j0 * ns + i1] * fu) * (1 - fv) +
+      (srcHeights[j1 * ns + i0] * (1 - fu) + srcHeights[j1 * ns + i1] * fu) * fv
+    );
   };
+
+  // 1. Run outer world-boundary tapering FIRST in continuous world coordinates (wx, wz) with a shared world seed
+  //    before authoritative shared-edge locking, so perpendicular outer seams taper smoothly together with zero
+  //    -26 m interior canals and zero 150 m 1-cell razor walls, while preserving continental highlands (> 25 m).
+  if (taperUnconnectedOuter) {
+    const centerSec = querySec(0, 0, true) || querySec(0, 0, false);
+    const seed =
+      centerSec?.region?.seed ||
+      centerSec?.region?.vegetationSeed ||
+      region.seed ||
+      region.vegetationSeed ||
+      coastalHashCoords(region.latitude, region.longitude);
+    const connW = hasWest;
+    const connE = hasEast;
+    const connN = hasNorth;
+    const connS = hasSouth;
+    // Only damp an outer border taper near a perpendicular seam if that adjacent neighbor actually has the outer neighbor
+    // (an L-concavity); when both tiles share the same outer world boundary, taper continuously right across their shared seam!
+    const northHasW = connN && hasSec(secX - 1, secZ - 1);
+    const southHasW = connS && hasSec(secX - 1, secZ + 1);
+    const northHasE = connN && hasSec(secX + 1, secZ - 1);
+    const southHasE = connS && hasSec(secX + 1, secZ + 1);
+    const westHasN = connW && hasSec(secX - 1, secZ - 1);
+    const eastHasN = connE && hasSec(secX + 1, secZ - 1);
+    const westHasS = connW && hasSec(secX - 1, secZ + 1);
+    const eastHasS = connE && hasSec(secX + 1, secZ + 1);
+
+    const maxOuterEdge = isRealDemSection ? 0.11 : 0.39;
+    for (let j = 0; j < n; j++) {
+      const v = j / (n - 1);
+      const z = region.z + (v - 0.5) * span;
+      for (let i = 0; i < n; i++) {
+        const u = i / (n - 1);
+        const x = region.x + (u - 0.5) * span;
+        const dW = !connW ? u : 1.0;
+        const dE = !connE ? 1 - u : 1.0;
+        const dN = !connN ? v : 1.0;
+        const dS = !connS ? 1 - v : 1.0;
+        const dX = Math.min(dW, dE);
+        const dZ = Math.min(dN, dS);
+        const dEdge = Math.min(dX, dZ);
+        if (dEdge >= maxOuterEdge) continue;
+        const k = j * n + i;
+        const hOrig = heights[k];
+        if (hOrig <= -16) continue;
+        const capeMajor = coastalFbm2D(x * 0.00048, z * 0.00048, seed + 947, 3);
+        const capeMinor = coastalFbm2D(x * 0.0016, z * 0.0016, seed + 1319, 2);
+        const baseMargin = isRealDemSection
+          ? Math.max(0.035, Math.min(0.10, 0.035 + 0.045 * capeMajor + 0.02 * capeMinor))
+          : Math.max(0.055, Math.min(0.38, 0.06 + 0.24 * capeMajor + 0.08 * capeMinor));
+        // Protect inland continental highlands (> 25 m) so continental interiors remain land rather than square islands.
+        const highland = coastalSmoothstep(12.0, 28.0, hOrig);
+        const margin = baseMargin * (1 - 0.65 * highland);
+        let oX = 0;
+        if (!connW && dW < margin) {
+          let lockX = 1.0;
+          if (northHasW && v < 0.16) lockX = Math.min(lockX, coastalSmoothstep(0.0, 0.16, v));
+          if (southHasW && 1 - v < 0.16) lockX = Math.min(lockX, coastalSmoothstep(0.0, 0.16, 1 - v));
+          oX = Math.max(oX, (margin - dW) * lockX);
+        }
+        if (!connE && dE < margin) {
+          let lockX = 1.0;
+          if (northHasE && v < 0.16) lockX = Math.min(lockX, coastalSmoothstep(0.0, 0.16, v));
+          if (southHasE && 1 - v < 0.16) lockX = Math.min(lockX, coastalSmoothstep(0.0, 0.16, 1 - v));
+          oX = Math.max(oX, (margin - dE) * lockX);
+        }
+        let oZ = 0;
+        if (!connN && dN < margin) {
+          let lockZ = 1.0;
+          if (westHasN && u < 0.16) lockZ = Math.min(lockZ, coastalSmoothstep(0.0, 0.16, u));
+          if (eastHasN && 1 - u < 0.16) lockZ = Math.min(lockZ, coastalSmoothstep(0.0, 0.16, 1 - u));
+          oZ = Math.max(oZ, (margin - dN) * lockZ);
+        }
+        if (!connS && dS < margin) {
+          let lockZ = 1.0;
+          if (westHasS && u < 0.16) lockZ = Math.min(lockZ, coastalSmoothstep(0.0, 0.16, u));
+          if (eastHasS && 1 - u < 0.16) lockZ = Math.min(lockZ, coastalSmoothstep(0.0, 0.16, 1 - u));
+          oZ = Math.max(oZ, (margin - dS) * lockZ);
+        }
+        const pen = Math.hypot(oX, oZ);
+        if (pen <= 0) continue;
+        const t = 1 - coastalSmoothstep(0.0, Math.max(1e-4, margin), Math.min(margin, pen));
+        const oceanShelf = -16 - (1 - t) * 10;
+        const highlandRim = Math.max(6.0, hOrig * (0.48 + 0.36 * t));
+        const targetOuter = oceanShelf * (1 - highland) + highlandRim * highland;
+        heights[k] = targetOuter * (1 - t) + hOrig * t;
+      }
+    }
+  }
 
   const blendBand = isRealDemSection ? 0.14 : 0.24;
   const xWest = region.x - span * 0.5;
@@ -11465,9 +11791,10 @@ export function stitchCoastalSectionBorders(
   const zNorth = region.z - span * 0.5;
   const zSouth = region.z + span * 0.5;
 
-  // 1. Smooth interior transition band + exact boundary lock on West and East borders
+  // 2. Smooth interior transition band + exact boundary lock on West and East borders (authoritative neighbors only)
   if (westSec?.heights) {
     for (let j = 0; j < n; j++) {
+      if ((j === 0 && northSec && authN > authW) || (j === n - 1 && southSec && authS > authW)) continue;
       const z = region.z + (j / (n - 1) - 0.5) * span;
       const hEdge = sampleNeighborEdge(westSec, xWest, z);
       const delta = hEdge - heights[j * n];
@@ -11482,6 +11809,7 @@ export function stitchCoastalSectionBorders(
   }
   if (eastSec?.heights) {
     for (let j = 0; j < n; j++) {
+      if ((j === 0 && northSec && authN > authE) || (j === n - 1 && southSec && authS > authE)) continue;
       const z = region.z + (j / (n - 1) - 0.5) * span;
       const hEdge = sampleNeighborEdge(eastSec, xEast, z);
       const delta = hEdge - heights[j * n + (n - 1)];
@@ -11495,13 +11823,14 @@ export function stitchCoastalSectionBorders(
     }
   }
 
-  // 2. Smooth interior transition band + exact boundary lock on North and South borders
+  // 3. Smooth interior transition band + exact boundary lock on North and South borders (preserving higher-authority corners)
   if (northSec?.heights) {
     for (let i = 0; i < n; i++) {
+      const skipCorner = (i === 0 && westSec && authW > authN) || (i === n - 1 && eastSec && authE > authN);
       const x = region.x + (i / (n - 1) - 0.5) * span;
       const hEdge = sampleNeighborEdge(northSec, x, zNorth);
-      const delta = hEdge - heights[i];
-      heights[i] = hEdge;
+      const delta = skipCorner ? 0 : hEdge - heights[i];
+      if (!skipCorner) heights[i] = hEdge;
       for (let j = 1; j < n; j++) {
         const v = j / (n - 1);
         if (v >= blendBand) break;
@@ -11522,10 +11851,11 @@ export function stitchCoastalSectionBorders(
   }
   if (southSec?.heights) {
     for (let i = 0; i < n; i++) {
+      const skipCorner = (i === 0 && westSec && authW > authS) || (i === n - 1 && eastSec && authE > authS);
       const x = region.x + (i / (n - 1) - 0.5) * span;
       const hEdge = sampleNeighborEdge(southSec, x, zSouth);
-      const delta = hEdge - heights[(n - 1) * n + i];
-      heights[(n - 1) * n + i] = hEdge;
+      const delta = skipCorner ? 0 : hEdge - heights[(n - 1) * n + i];
+      if (!skipCorner) heights[(n - 1) * n + i] = hEdge;
       for (let j = n - 2; j >= 0; j--) {
         const v = (n - 1 - j) / (n - 1);
         if (v >= blendBand) break;
@@ -11545,54 +11875,15 @@ export function stitchCoastalSectionBorders(
     }
   }
 
-  // 3. Carve any unconnected outer world boundary into an organic multi-scale cape/bay contour with rounded corners
-  if (taperUnconnectedOuter) {
-    const seed = region.seed || region.vegetationSeed || coastalHashCoords(region.latitude, region.longitude);
-    const connW = hasWest;
-    const connE = hasEast;
-    const connN = hasNorth;
-    const connS = hasSouth;
-    const maxOuterEdge = isRealDemSection ? 0.11 : 0.39;
+  // Re-assert exact (0, 0) center authority on West/East edges if North/South overwrote an equal-or-lower corner
+  if (westSec?.heights && authW === 3) {
     for (let j = 0; j < n; j++) {
-      const v = j / (n - 1);
-      const z = region.z + (v - 0.5) * span;
-      for (let i = 0; i < n; i++) {
-        const u = i / (n - 1);
-        const x = region.x + (u - 0.5) * span;
-        const dW = !connW ? u : 1.0;
-        const dE = !connE ? 1 - u : 1.0;
-        const dN = !connN ? v : 1.0;
-        const dS = !connS ? 1 - v : 1.0;
-        const dX = Math.min(dW, dE);
-        const dZ = Math.min(dN, dS);
-        const dEdge = Math.min(dX, dZ);
-        if (dEdge >= maxOuterEdge) continue;
-        const k = j * n + i;
-        if (heights[k] <= -16) continue;
-        const capeMajor = coastalFbm2D(x * 0.00048, z * 0.00048, seed + 947, 3);
-        const capeMinor = coastalFbm2D(x * 0.0016, z * 0.0016, seed + 1319, 2);
-        const margin = isRealDemSection
-          ? Math.max(0.035, Math.min(0.10, 0.035 + 0.045 * capeMajor + 0.02 * capeMinor))
-          : Math.max(0.055, Math.min(0.38, 0.06 + 0.24 * capeMajor + 0.08 * capeMinor));
-        const oX = Math.max(0, margin - dX);
-        const oZ = Math.max(0, margin - dZ);
-        const pen = Math.hypot(oX, oZ);
-        if (pen <= 0) continue;
-        const onConnectedEdge =
-          (connW && i === 0) || (connE && i === n - 1) || (connN && j === 0) || (connS && j === n - 1);
-        if (onConnectedEdge) continue;
-        let connLock = 1.0;
-        if (dEdge > 0) {
-          if (connW && u < 0.14) connLock = Math.min(connLock, coastalSmoothstep(0.0, 0.14, u));
-          if (connE && 1 - u < 0.14) connLock = Math.min(connLock, coastalSmoothstep(0.0, 0.14, 1 - u));
-          if (connN && v < 0.14) connLock = Math.min(connLock, coastalSmoothstep(0.0, 0.14, v));
-          if (connS && 1 - v < 0.14) connLock = Math.min(connLock, coastalSmoothstep(0.0, 0.14, 1 - v));
-        }
-        const t = 1 - coastalSmoothstep(0.0, margin, Math.min(margin, pen));
-        const blend = 1 - (1 - t) * connLock;
-        const shelfDepth = -16 - (1 - t) * 10;
-        heights[k] = shelfDepth * (1 - blend) + heights[k] * blend;
-      }
+      heights[j * n] = sampleNeighborEdge(westSec, xWest, region.z + (j / (n - 1) - 0.5) * span);
+    }
+  }
+  if (eastSec?.heights && authE === 3) {
+    for (let j = 0; j < n; j++) {
+      heights[j * n + (n - 1)] = sampleNeighborEdge(eastSec, xEast, region.z + (j / (n - 1) - 0.5) * span);
     }
   }
   return heights;
@@ -11642,23 +11933,36 @@ function createNeighborSectionFrame(basePack, secX, secZ, getNeighborSection, { 
   return { baseRegion, span, geoSpan, secWorldX, secWorldZ, sectionRegion, lookupNeighbor };
 }
 
-function synthContinuousCoastalHeights({ baseRegion, secX, secZ, secWorldX, secWorldZ, span, size, lookupNeighbor }) {
+function synthContinuousCoastalHeights({ baseRegion, secX, secZ, secWorldX, secWorldZ, span, size, lookupNeighbor, isMock = true }) {
   const heights = new Float32Array(size * size);
   const seed = baseRegion.seed || coastalHashCoords(baseRegion.latitude, baseRegion.longitude);
   const peak = Math.min(280, Math.max(48, baseRegion.peakElevationMetres ?? 140));
 
-  const westSec = lookupNeighbor(secX - 1, secZ, false);
-  const eastSec = lookupNeighbor(secX + 1, secZ, false);
-  const northSec = lookupNeighbor(secX, secZ - 1, false);
-  const southSec = lookupNeighbor(secX, secZ + 1, false);
+  const filterAuth = (nb, nx, nz) => {
+    if (!nb?.heights) return null;
+    if (!isMock && nb.isMock && !(nx === 0 && nz === 0)) return null;
+    return nb;
+  };
+  const westSec = filterAuth(lookupNeighbor(secX - 1, secZ, false), secX - 1, secZ);
+  const eastSec = filterAuth(lookupNeighbor(secX + 1, secZ, false), secX + 1, secZ);
+  const northSec = filterAuth(lookupNeighbor(secX, secZ - 1, false), secX, secZ - 1);
+  const southSec = filterAuth(lookupNeighbor(secX, secZ + 1, false), secX, secZ + 1);
 
   const sampleCleanEdge = (neighbor, wx, wz) => {
-    const src = neighbor.rawHeights || neighbor.heights;
+    const src = neighbor.heights || neighbor.rawHeights;
     const nr = neighbor.region;
-    const half = nr.span * 0.5 - 1e-3;
-    const cx = Math.max(nr.x - half, Math.min(nr.x + half, wx));
-    const cz = Math.max(nr.z - half, Math.min(nr.z + half, wz));
-    return terrainSample(src, cx, cz, nr);
+    const ns = nr.size;
+    const u = Math.max(0, Math.min(1, (wx - nr.x) / nr.span + 0.5)) * (ns - 1);
+    const v = Math.max(0, Math.min(1, (wz - nr.z) / nr.span + 0.5)) * (ns - 1);
+    const i0 = Math.min(ns - 1, Math.floor(u));
+    const j0 = Math.min(ns - 1, Math.floor(v));
+    const i1 = Math.min(ns - 1, i0 + 1);
+    const j1 = Math.min(ns - 1, j0 + 1);
+    const fu = u - i0, fv = v - j0;
+    return (
+      (src[j0 * ns + i0] * (1 - fu) + src[j0 * ns + i1] * fu) * (1 - fv) +
+      (src[j1 * ns + i0] * (1 - fu) + src[j1 * ns + i1] * fu) * fv
+    );
   };
 
   const xWest = secWorldX - span * 0.5;
@@ -11881,7 +12185,7 @@ export function buildMockCoastalSection(
     getNeighborSection,
     { size, biomeSize, albedoSize, vegetationCandidates }
   );
-  const rawHeights = synthContinuousCoastalHeights({ baseRegion, secX, secZ, secWorldX, secWorldZ, span, size, lookupNeighbor });
+  const rawHeights = synthContinuousCoastalHeights({ baseRegion, secX, secZ, secWorldX, secWorldZ, span, size, lookupNeighbor, isMock: true });
   const connectedEdges = {
     west: Boolean(lookupNeighbor(secX - 1, secZ, true)),
     east: Boolean(lookupNeighbor(secX + 1, secZ, true)),
@@ -11889,7 +12193,11 @@ export function buildMockCoastalSection(
     south: Boolean(lookupNeighbor(secX, secZ + 1, true)),
   };
   const stitched = new Float32Array(rawHeights);
-  stitchCoastalSectionBorders(stitched, sectionRegion, secX, secZ, lookupNeighbor, { taperUnconnectedOuter, isRealDemSection: false });
+  stitchCoastalSectionBorders(stitched, sectionRegion, secX, secZ, lookupNeighbor, {
+    taperUnconnectedOuter,
+    isRealDemSection: false,
+    isMock: true,
+  });
   const port = {
     regionId: sectionRegion.id,
     name: sectionRegion.name,
@@ -11901,7 +12209,12 @@ export function buildMockCoastalSection(
   };
   const shoreDist = computeCoastalShoreDistances(stitched, size, span, 0.25);
   const beaches = synthesizeCoastalBeaches(sectionRegion, stitched, null, shoreDist);
-  const mesh = buildCoastalMesh(sectionRegion, stitched, beaches, shoreDist);
+  const mesh = buildCoastalMesh(sectionRegion, stitched, beaches, shoreDist, null, rawHeights, {
+    lookupNeighbor,
+    secX,
+    secZ,
+    isMock: true,
+  });
   const biome = synthesizeCoastalBiome(sectionRegion, stitched, beaches, port, null);
   const albedo = synthesizeCoastalAlbedo(sectionRegion, stitched, beaches, port, biome, null, shoreDist);
   const vegetation = skipStaticPalms
@@ -12372,7 +12685,7 @@ export async function generateCoastalNeighborSection(
       if (demProbe.rawDem && demProbe.rawDem.length === size * size) {
         contHeights = new Float32Array(size * size);
         const elevScale = span < geoSpan ? Math.max(0.45, Math.sqrt(span / geoSpan)) : 1.0;
-        const baseSrc = basePack.rawHeights || basePack.heights;
+        const baseSrc = basePack.heights || basePack.rawHeights;
         const half0 = span * 0.5;
         const blendDist = span * 0.25;
         const blendedDem = new Float32Array(size * size);
@@ -12386,13 +12699,13 @@ export async function generateCoastalNeighborSection(
             const rawH = demProbe.rawDem[k];
             let h = rawH > 0.25 ? Math.min(895, 0.25 + (rawH - 0.25) * elevScale) : Math.min(-6.0, Math.max(-120, rawH));
             if (baseSrc) {
-              const cx = Math.max(baseRegion.x - half0 + 1e-3, Math.min(baseRegion.x + half0 - 1e-3, x));
-              const cz = Math.max(baseRegion.z - half0 + 1e-3, Math.min(baseRegion.z + half0 - 1e-3, z));
+              const cx = Math.max(baseRegion.x - half0, Math.min(baseRegion.x + half0, x));
+              const cz = Math.max(baseRegion.z - half0, Math.min(baseRegion.z + half0, z));
               const d0 = Math.hypot(x - cx, z - cz);
               if (d0 < blendDist) {
                 const w0 = 1 - coastalSmoothstep(0, blendDist, d0);
-                const hBaseEdge = terrainSample(baseSrc, cx, cz, baseRegion);
-                const effBase = hBaseEdge <= 0.25 ? Math.min(hBaseEdge, -10.5) : hBaseEdge;
+                const hBaseEdge = coastalSampleClamped(baseSrc, cx, cz, baseRegion);
+                const effBase = hBaseEdge;
                 h = effBase * w0 + h * (1 - w0);
               }
             }
@@ -12402,12 +12715,14 @@ export async function generateCoastalNeighborSection(
         const { distLand, step } = computeCoastalShoreDistances(blendedDem, size, span, 0.25);
         for (let k = 0; k < size * size; k++) {
           const bh = blendedDem[k];
-          if (bh > 0.25) {
+          if (bh >= 0.0) {
             contHeights[k] = bh;
           } else {
             const shoreDistance = Math.max(0, distLand[k] - step * 0.5);
             const authoredDepth = Math.min(120, 2 + 0.15 * shoreDistance);
-            contHeights[k] = Math.max(-120, bh < -2 ? Math.min(bh, -authoredDepth) : -authoredDepth);
+            const sub = coastalSmoothstep(0.0, -2.0, bh);
+            const targetSub = bh < -2 ? Math.min(bh, -authoredDepth) : -authoredDepth;
+            contHeights[k] = Math.max(-120, bh * (1 - sub) + targetSub * sub);
           }
         }
         isRealDemSection = true;
@@ -12417,7 +12732,7 @@ export async function generateCoastalNeighborSection(
   }
 
   if (!contHeights) {
-    contHeights = synthContinuousCoastalHeights({ baseRegion, secX, secZ, secWorldX, secWorldZ, span, size, lookupNeighbor });
+    contHeights = synthContinuousCoastalHeights({ baseRegion, secX, secZ, secWorldX, secWorldZ, span, size, lookupNeighbor, isMock: false });
   }
 
   const connectedEdges = {
@@ -12427,16 +12742,12 @@ export async function generateCoastalNeighborSection(
     south: Boolean(lookupNeighbor(secX, secZ + 1, true)),
   };
 
-  // Keep pristine un-tapered heights for future outer neighbors to stitch against
+  // Keep pristine un-tapered heights for future outer neighbors / restitches
   const rawHeights = new Float32Array(contHeights);
   sectionPack.rawHeights = rawHeights;
 
-  // Smooth coastline & foreshore beaches while protecting connected borders, then lock exact borders & round outer capes
+  // Smooth coastline & foreshore beaches while protecting connected borders, then apply single authoritative outer taper + seam lock
   const stitched = new Float32Array(rawHeights);
-  stitchCoastalSectionBorders(stitched, sectionRegion, secX, secZ, lookupNeighbor, {
-    taperUnconnectedOuter,
-    isRealDemSection,
-  });
   smoothCoastlineAndForeshoreBeaches(stitched, sectionRegion, {
     connectedEdges,
     taperOuterBorders: false,
@@ -12444,6 +12755,7 @@ export async function generateCoastalNeighborSection(
   stitchCoastalSectionBorders(stitched, sectionRegion, secX, secZ, lookupNeighbor, {
     taperUnconnectedOuter,
     isRealDemSection,
+    isMock: false,
   });
 
   const port = {
@@ -12456,10 +12768,16 @@ export async function generateCoastalNeighborSection(
     instances: [],
   };
   sectionPack.port = port;
+  sectionPack.isRealDemSection = isRealDemSection;
 
   const shoreDist = computeCoastalShoreDistances(stitched, size, span, 0.25);
   const beaches = synthesizeCoastalBeaches(sectionRegion, stitched, null, shoreDist);
-  const mesh = buildCoastalMesh(sectionRegion, stitched, beaches, shoreDist);
+  const mesh = buildCoastalMesh(sectionRegion, stitched, beaches, shoreDist, null, rawHeights, {
+    lookupNeighbor,
+    secX,
+    secZ,
+    isMock: false,
+  });
   const biome = synthesizeCoastalBiome(sectionRegion, stitched, beaches, port, null);
   const albedo = synthesizeCoastalAlbedo(
     sectionRegion,
@@ -12485,4 +12803,72 @@ export async function generateCoastalNeighborSection(
     vegetation,
     portGeometry,
   });
+}
+
+// Re-stitch an already-resident mock or grown neighbor section against newly loaded/upgraded authoritative neighbors
+// and rebuild its C0-watertight mesh (including multi-resolution border transition fans + -1.5 m border skirt).
+export function restitchCoastalSection(
+  sectionPack,
+  basePack,
+  getNeighborSection = null,
+  { taperUnconnectedOuter = true, refreshTextures = false } = {}
+) {
+  if (!sectionPack?.region || !(sectionPack.rawHeights || sectionPack.heights)) return sectionPack;
+  const { secX, secZ, region } = sectionPack;
+  const isMock = Boolean(sectionPack.isMock);
+  const isRealDemSection = Boolean(
+    sectionPack.isRealDemSection ?? (!isMock && sectionPack.elevationSource !== 'procedural-mock')
+  );
+  const lookupNeighbor = (nx, nz, includePlanned = false) => {
+    if (typeof getNeighborSection === 'function') {
+      const found = getNeighborSection(nx, nz, includePlanned);
+      if (found) return found;
+    }
+    if (nx === 0 && nz === 0) return basePack;
+    return null;
+  };
+  const connectedEdges = {
+    west: Boolean(lookupNeighbor(secX - 1, secZ, true)),
+    east: Boolean(lookupNeighbor(secX + 1, secZ, true)),
+    north: Boolean(lookupNeighbor(secX, secZ - 1, true)),
+    south: Boolean(lookupNeighbor(secX, secZ + 1, true)),
+  };
+  const baseHeights = sectionPack.rawHeights || sectionPack.heights;
+  const stitched = new Float32Array(baseHeights);
+  if (!isMock) {
+    smoothCoastlineAndForeshoreBeaches(stitched, region, {
+      connectedEdges,
+      taperOuterBorders: false,
+    });
+  }
+  stitchCoastalSectionBorders(stitched, region, secX, secZ, lookupNeighbor, {
+    taperUnconnectedOuter,
+    isRealDemSection,
+    isMock,
+  });
+  const shoreDist = computeCoastalShoreDistances(stitched, region.size, region.span, 0.25);
+  const beaches = synthesizeCoastalBeaches(region, stitched, null, shoreDist);
+  const mesh = buildCoastalMesh(region, stitched, beaches, shoreDist, null, baseHeights, {
+    lookupNeighbor,
+    secX,
+    secZ,
+    isMock,
+  });
+  sectionPack.connectedEdges = connectedEdges;
+  sectionPack.heights = stitched;
+  sectionPack.beaches = beaches;
+  sectionPack.mesh = mesh;
+  if (refreshTextures) {
+    sectionPack.biome = synthesizeCoastalBiome(region, stitched, beaches, sectionPack.port, null);
+    sectionPack.albedo = synthesizeCoastalAlbedo(
+      region,
+      stitched,
+      beaches,
+      sectionPack.port,
+      sectionPack.biome,
+      null,
+      shoreDist
+    );
+  }
+  return sectionPack;
 }

@@ -42,6 +42,205 @@ function packRgba16f(r, g, b, a, layers = 1) {
   return out;
 }
 
+const INLAND_CHUNK_GRID = 8; // 8 x 8 = 64 spatial chunks (~1024 m x 1024 m across an 8 km coast)
+
+function morton2D(x, y) {
+  let u = x & 0xff, v = y & 0xff;
+  u = (u | (u << 4)) & 0x0f0f;
+  u = (u | (u << 2)) & 0x3333;
+  u = (u | (u << 1)) & 0x5555;
+  v = (v | (v << 4)) & 0x0f0f;
+  v = (v | (v << 2)) & 0x3333;
+  v = (v | (v << 1)) & 0x5555;
+  return u | (v << 1);
+}
+
+/**
+ * Partitions inland-water triangle indices into <= 64 Morton-ordered spatial chunks with conservative 3D AABBs
+ * (padded for coastal ocean-swell displacement and earth curvature) while preserving 100% of input triangles.
+ */
+export function partitionInlandWaterIndices(vertices, indices, gridSide = INLAND_CHUNK_GRID) {
+  const srcIdx = indices instanceof Uint32Array ? indices : Uint32Array.from(indices ?? []);
+  const triCount = Math.floor(srcIdx.length / 3);
+  if (!triCount || !vertices?.byteLength) {
+    return { indices: srcIdx, chunks: [] };
+  }
+  const verts = vertices instanceof Float32Array
+    ? vertices
+    : new Float32Array(vertices.buffer, vertices.byteOffset, Math.floor(vertices.byteLength / 4));
+
+  let gMinX = Infinity, gMaxX = -Infinity, gMinZ = Infinity, gMaxZ = -Infinity;
+  for (let t = 0; t < triCount; t++) {
+    const o0 = srcIdx[t * 3] * INLAND_WATER_FLOATS;
+    const o1 = srcIdx[t * 3 + 1] * INLAND_WATER_FLOATS;
+    const o2 = srcIdx[t * 3 + 2] * INLAND_WATER_FLOATS;
+    const cx = (verts[o0] + verts[o1] + verts[o2]) / 3;
+    const cz = (verts[o0 + 2] + verts[o1 + 2] + verts[o2 + 2]) / 3;
+    if (cx < gMinX) gMinX = cx;
+    if (cx > gMaxX) gMaxX = cx;
+    if (cz < gMinZ) gMinZ = cz;
+    if (cz > gMaxZ) gMaxZ = cz;
+  }
+
+  const side = Math.max(1, Math.min(16, gridSide | 0));
+  const cellCount = side * side;
+  const invSpanX = side / Math.max(1.0, gMaxX - gMinX + 1e-3);
+  const invSpanZ = side / Math.max(1.0, gMaxZ - gMinZ + 1e-3);
+
+  const cellOfTri = new Uint16Array(triCount);
+  const counts = new Uint32Array(cellCount);
+  for (let t = 0; t < triCount; t++) {
+    const o0 = srcIdx[t * 3] * INLAND_WATER_FLOATS;
+    const o1 = srcIdx[t * 3 + 1] * INLAND_WATER_FLOATS;
+    const o2 = srcIdx[t * 3 + 2] * INLAND_WATER_FLOATS;
+    const cx = (verts[o0] + verts[o1] + verts[o2]) / 3;
+    const cz = (verts[o0 + 2] + verts[o1 + 2] + verts[o2 + 2]) / 3;
+    const ix = Math.max(0, Math.min(side - 1, Math.floor((cx - gMinX) * invSpanX)));
+    const iz = Math.max(0, Math.min(side - 1, Math.floor((cz - gMinZ) * invSpanZ)));
+    const cell = morton2D(ix, iz) % cellCount;
+    cellOfTri[t] = cell;
+    counts[cell] += 3;
+  }
+
+  const offsets = new Uint32Array(cellCount);
+  let cursor = 0;
+  for (let c = 0; c < cellCount; c++) {
+    offsets[c] = cursor;
+    cursor += counts[c];
+  }
+
+  const packed = new Uint32Array(srcIdx.length);
+  const writePtr = new Uint32Array(offsets);
+  const minX = new Float32Array(cellCount).fill(Infinity);
+  const minY = new Float32Array(cellCount).fill(Infinity);
+  const minZ = new Float32Array(cellCount).fill(Infinity);
+  const maxX = new Float32Array(cellCount).fill(-Infinity);
+  const maxY = new Float32Array(cellCount).fill(-Infinity);
+  const maxZ = new Float32Array(cellCount).fill(-Infinity);
+
+  for (let t = 0; t < triCount; t++) {
+    const cell = cellOfTri[t];
+    const i0 = srcIdx[t * 3], i1 = srcIdx[t * 3 + 1], i2 = srcIdx[t * 3 + 2];
+    const dst = writePtr[cell];
+    packed[dst] = i0;
+    packed[dst + 1] = i1;
+    packed[dst + 2] = i2;
+    writePtr[cell] = dst + 3;
+
+    const o0 = i0 * INLAND_WATER_FLOATS, o1 = i1 * INLAND_WATER_FLOATS, o2 = i2 * INLAND_WATER_FLOATS;
+    const x0 = verts[o0], y0 = verts[o0 + 1], z0 = verts[o0 + 2];
+    const x1 = verts[o1], y1 = verts[o1 + 1], z1 = verts[o1 + 2];
+    const x2 = verts[o2], y2 = verts[o2 + 1], z2 = verts[o2 + 2];
+    const lx = Math.min(x0, x1, x2), hx = Math.max(x0, x1, x2);
+    const ly = Math.min(y0, y1, y2), hy = Math.max(y0, y1, y2);
+    const lz = Math.min(z0, z1, z2), hz = Math.max(z0, z1, z2);
+    if (lx < minX[cell]) minX[cell] = lx;
+    if (hx > maxX[cell]) maxX[cell] = hx;
+    if (ly < minY[cell]) minY[cell] = ly;
+    if (hy > maxY[cell]) maxY[cell] = hy;
+    if (lz < minZ[cell]) minZ[cell] = lz;
+    if (hz > maxZ[cell]) maxZ[cell] = hz;
+  }
+  for (let r = triCount * 3; r < srcIdx.length; r++) packed[r] = srcIdx[r];
+
+  const chunks = [];
+  for (let c = 0; c < cellCount; c++) {
+    const count = counts[c];
+    if (!count) continue;
+    chunks.push({
+      firstIndex: offsets[c],
+      indexCount: count,
+      minX: minX[c] - 4.0,
+      minY: minY[c] - 8.0,
+      minZ: minZ[c] - 4.0,
+      maxX: maxX[c] + 4.0,
+      maxY: maxY[c] + 5.0,
+      maxZ: maxZ[c] + 4.0,
+    });
+  }
+  return { indices: packed, chunks };
+}
+
+/**
+ * Frustum-culls inland-water 3D chunk AABBs against a WebGPU [0, 1] clip-space column-major viewProj matrix
+ * and merges contiguous visible index ranges into `outSpans` ([first0, count0, first1, count1, ...]), returning span count.
+ */
+export function cullInlandWaterChunks(chunks, viewProj, worldOffset = null, outSpans = null, planesScratch = null) {
+  const spans = outSpans ?? new Int32Array(Math.max(2, chunks.length * 2));
+  if (!chunks.length) return 0;
+  if (!viewProj || viewProj.length < 16) {
+    const last = chunks[chunks.length - 1];
+    spans[0] = chunks[0].firstIndex;
+    spans[1] = (last.firstIndex + last.indexCount) - chunks[0].firstIndex;
+    return 1;
+  }
+
+  let ox = 0, oy = 0, oz = 0;
+  if (worldOffset) {
+    if (typeof worldOffset.length === 'number') {
+      ox = worldOffset[0] || 0;
+      oy = worldOffset[1] || 0;
+      oz = worldOffset[2] || 0;
+    } else if (worldOffset.camPos) {
+      ox = (worldOffset.shift?.[0] ?? worldOffset.shift?.x ?? 0) - (worldOffset.camPos[0] ?? worldOffset.camPos.x ?? 0);
+      oy = -(worldOffset.camPos[1] ?? worldOffset.camPos.y ?? 0);
+      oz = (worldOffset.shift?.[1] ?? worldOffset.shift?.z ?? 0) - (worldOffset.camPos[2] ?? worldOffset.camPos.z ?? 0);
+    } else {
+      ox = worldOffset.x || 0;
+      oy = worldOffset.y || 0;
+      oz = worldOffset.z || 0;
+    }
+  }
+
+  const p = planesScratch ?? new Float32Array(24);
+  const m0 = viewProj[0], m1 = viewProj[1], m2 = viewProj[2], m3 = viewProj[3];
+  const m4 = viewProj[4], m5 = viewProj[5], m6 = viewProj[6], m7 = viewProj[7];
+  const m8 = viewProj[8], m9 = viewProj[9], m10 = viewProj[10], m11 = viewProj[11];
+  const m12 = viewProj[12], m13 = viewProj[13], m14 = viewProj[14], m15 = viewProj[15];
+
+  // Left (w + x >= 0), Right (w - x >= 0), Bottom (w + y >= 0), Top (w - y >= 0), Z-min (z >= 0), Z-max (w - z >= 0)
+  p[0] = m3 + m0; p[1] = m7 + m4; p[2] = m11 + m8; p[3] = m15 + m12;
+  p[4] = m3 - m0; p[5] = m7 - m4; p[6] = m11 - m8; p[7] = m15 - m12;
+  p[8] = m3 + m1; p[9] = m7 + m5; p[10] = m11 + m9; p[11] = m15 + m13;
+  p[12] = m3 - m1; p[13] = m7 - m5; p[14] = m11 - m9; p[15] = m15 - m13;
+  p[16] = m2; p[17] = m6; p[18] = m10; p[19] = m14;
+  p[20] = m3 - m2; p[21] = m7 - m6; p[22] = m11 - m10; p[23] = m15 - m14;
+
+  let spanCount = 0;
+  for (let i = 0; i < chunks.length; i++) {
+    const ch = chunks[i];
+    const bMinX = ch.minX + ox, bMaxX = ch.maxX + ox;
+    const bMinY = ch.minY + oy, bMaxY = ch.maxY + oy;
+    const bMinZ = ch.minZ + oz, bMaxZ = ch.maxZ + oz;
+
+    let culled = false;
+    for (let k = 0; k < 24; k += 4) {
+      const px = p[k], py = p[k + 1], pz = p[k + 2], pw = p[k + 3];
+      const vx = px >= 0 ? bMaxX : bMinX;
+      const vy = py >= 0 ? bMaxY : bMinY;
+      const vz = pz >= 0 ? bMaxZ : bMinZ;
+      if (px * vx + py * vy + pz * vz + pw < 0) {
+        culled = true;
+        break;
+      }
+    }
+    if (culled) continue;
+
+    if (spanCount > 0) {
+      const prevBase = (spanCount - 1) * 2;
+      if (spans[prevBase] + spans[prevBase + 1] === ch.firstIndex) {
+        spans[prevBase + 1] += ch.indexCount;
+        continue;
+      }
+    }
+    const base = spanCount * 2;
+    spans[base] = ch.firstIndex;
+    spans[base + 1] = ch.indexCount;
+    spanCount++;
+  }
+  return spanCount;
+}
+
 export function requestInlandWaterPipeline({ device, shader, format = 'rgba16float', samples = 4 }) {
   return requestOnce(device, `inland water ${format} ${samples}`, async () => {
     const module = await shader(INLAND_WATER_WGSL, 'inland water');
@@ -198,7 +397,10 @@ export async function createInlandWater({
 
   let groups0 = [makeGroup0(resources, 0), makeGroup0(resources, 1)];
   const group1 = clouds.bindVolume(pipeline);
-  let vertexBuf = null, indexBuf = null, indexCount = 0;
+  let vertexBuf = null, indexBuf = null, indexCount = 0, chunks = [];
+  const visibleSpans = new Int32Array(INLAND_CHUNK_GRID * INLAND_CHUNK_GRID * 2);
+  const frustumPlanes = new Float32Array(24);
+  let lastDrawnIndices = 0, lastDrawCalls = 0;
 
   function setGeometry(geo) {
     vertexBuf?.destroy();
@@ -206,7 +408,10 @@ export async function createInlandWater({
     vertexBuf = null;
     indexBuf = null;
     indexCount = 0;
+    chunks = [];
     if (!geo?.vertices?.byteLength || !geo?.indices?.length) return;
+    const partitioned = partitionInlandWaterIndices(geo.vertices, geo.indices, INLAND_CHUNK_GRID);
+    chunks = partitioned.chunks;
     vertexBuf = device.createBuffer({
       label: 'inland water vertices',
       size: geo.vertices.byteLength,
@@ -215,23 +420,53 @@ export async function createInlandWater({
     device.queue.writeBuffer(vertexBuf, 0, geo.vertices);
     indexBuf = device.createBuffer({
       label: 'inland water indices',
-      size: geo.indices.byteLength,
+      size: partitioned.indices.byteLength,
       usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
     });
-    device.queue.writeBuffer(indexBuf, 0, geo.indices);
-    indexCount = geo.indices.length;
+    device.queue.writeBuffer(indexBuf, 0, partitioned.indices);
+    indexCount = partitioned.indices.length;
   }
 
   setGeometry(initialGeometry);
 
   return {
     get count() { return indexCount; },
+    get chunks() { return chunks; },
+    stats: {
+      get totalIndices() { return indexCount; },
+      get chunks() { return chunks.length; },
+      get visibleIndices() { return lastDrawnIndices; },
+      get drawCalls() { return lastDrawCalls; },
+    },
     setGeometry,
     rebind(nextResources) {
       groups0 = [makeGroup0(nextResources, 0), makeGroup0(nextResources, 1)];
     },
-    draw(pass) {
-      if (!indexCount || !vertexBuf || !indexBuf) return;
+    draw(pass, viewProj = null, worldOffset = null) {
+      if (!indexCount || !vertexBuf || !indexBuf) {
+        lastDrawnIndices = 0;
+        lastDrawCalls = 0;
+        return;
+      }
+      if (!viewProj || viewProj.length < 16 || !chunks.length) {
+        const g0 = groups0[surfaceWaves ? (surfaceWaves.current & 1) : 0];
+        pass.setPipeline(pipeline);
+        pass.setBindGroup(0, g0);
+        pass.setBindGroup(1, group1);
+        pass.setBindGroup(2, group2);
+        pass.setVertexBuffer(0, vertexBuf);
+        pass.setIndexBuffer(indexBuf, 'uint32');
+        pass.drawIndexed(indexCount);
+        lastDrawnIndices = indexCount;
+        lastDrawCalls = 1;
+        return;
+      }
+      const spanCount = cullInlandWaterChunks(chunks, viewProj, worldOffset, visibleSpans, frustumPlanes);
+      if (!spanCount) {
+        lastDrawnIndices = 0;
+        lastDrawCalls = 0;
+        return;
+      }
       const g0 = groups0[surfaceWaves ? (surfaceWaves.current & 1) : 0];
       pass.setPipeline(pipeline);
       pass.setBindGroup(0, g0);
@@ -239,7 +474,15 @@ export async function createInlandWater({
       pass.setBindGroup(2, group2);
       pass.setVertexBuffer(0, vertexBuf);
       pass.setIndexBuffer(indexBuf, 'uint32');
-      pass.drawIndexed(indexCount);
+      let drawn = 0;
+      for (let s = 0; s < spanCount; s++) {
+        const first = visibleSpans[s * 2];
+        const cnt = visibleSpans[s * 2 + 1];
+        pass.drawIndexed(cnt, 1, first, 0, 0);
+        drawn += cnt;
+      }
+      lastDrawnIndices = drawn;
+      lastDrawCalls = spanCount;
     },
     destroy() {
       vertexBuf?.destroy();
@@ -247,6 +490,7 @@ export async function createInlandWater({
       vertexBuf = null;
       indexBuf = null;
       indexCount = 0;
+      chunks = [];
       for (const t of ownedTextures) t.destroy();
       for (const b of ownedBuffers) b.destroy();
       ownedTextures.length = 0;

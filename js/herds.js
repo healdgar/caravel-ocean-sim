@@ -15,6 +15,8 @@ import {
   HERDS_STEP_WGSL,
 } from './wgsl/herds.js';
 
+export const MAX_HERDS = 1536;
+
 const HERDS_VERTEX_LAYOUT = [{
   arrayStride: LIVESTOCK_VERTEX_FLOATS * 4,
   attributes: [
@@ -115,20 +117,23 @@ export function caravanHerdSeeds(list, origin, bridges = null) {
     routes.push(c.depart, c.arrive, pts.length, along);
     for (const p of pts) routes.push(p[0], p[1], p[2], p[3]);
     const key = [...String(c.key)].reduce((h, ch) => (Math.imul(h, 31) + ch.charCodeAt(0)) | 0, 7);
+    const rawPhase = Number(c.phaseOffset);
+    const phaseOffset = Number.isFinite(rawPhase) ? (((rawPhase % 1) + 1) % 1) : 0;
+    const roamSentinel = -1 - phaseOffset * 0.9999;
     const drove = CARAVAN_DROVE_SPECIES[c.good];
     if (drove !== undefined) {
       const head = Math.max(1, Math.min(CARAVAN_DROVE_MOST, Math.round(c.qty || 1)));
       for (let k = 0; k < head; k++) {
         const u = caravanHash(key, k * 3 + 1), w = caravanHash(key, k * 3 + 2);
-        seeds.push(header, 1.2 + k * 1.5 + u * 1.2, -1, caravanHash(key, k * 3 + 3), 1 + w, 0.9 + u * 0.2, drove, (w - 0.5) * 4.2);
+        seeds.push(header, 1.2 + k * 1.5 + u * 1.2, roamSentinel, caravanHash(key, k * 3 + 3), 1 + w, 0.9 + u * 0.2, drove, (w - 0.5) * 4.2);
       }
       continue;
     }
     const tint = ((CARAVAN_CARGO_TINT[c.good] ?? Math.floor(caravanHash(key, 99) * 8)) + 0.5) / 8;
     for (let k = 0; k < Math.max(1, c.carts | 0); k++) {
       const behind = k * CARAVAN_CART_GAP_M + caravanHash(key, k) * 3;
-      seeds.push(header, behind, -1, caravanHash(key, k + 40), tint, 1, 4, 0);
-      for (const side of [-1, 1]) seeds.push(header, behind - CARAVAN_YOKE_AHEAD_M, -1, caravanHash(key, k * 2 + (side > 0 ? 61 : 60)), caravanHash(key, k + 80) * 0.99, 0.96, 1, side * CARAVAN_YOKE_SPREAD_M);
+      seeds.push(header, behind, roamSentinel, caravanHash(key, k + 40), tint, 1, 4, 0);
+      for (const side of [-1, 1]) seeds.push(header, behind - CARAVAN_YOKE_AHEAD_M, roamSentinel, caravanHash(key, k * 2 + (side > 0 ? 61 : 60)), caravanHash(key, k + 80) * 0.99, 0.96, 1, side * CARAVAN_YOKE_SPREAD_M);
     }
   }
   return { routes: new Float32Array(routes.length ? routes : [0, 1, 0, 0]), seeds: new Float32Array(seeds), header: HERD_ROUTE_HEADER };
@@ -280,13 +285,15 @@ export async function createLivestockHerds({
     releaseState();
     const herdData = pastureHerds;
     const rawCount = herdData?.length ? Math.floor(herdData.length / HERD_SEED_FLOATS) : 0;
-    const pastureCount = isMobile ? Math.round(rawCount * 0.55) : rawCount;
-    const travelCount = travellers.seeds.length / HERD_SEED_FLOATS;
+    const rawTravelCount = travellers.seeds.length / HERD_SEED_FLOATS;
+    const travelCount = Math.min(MAX_HERDS, rawTravelCount);
+    const rawPasture = isMobile ? Math.round(rawCount * 0.55) : rawCount;
+    const pastureCount = Math.min(rawPasture, Math.max(0, MAX_HERDS - travelCount));
     const count = pastureCount + travelCount;
     if (!count) return;
     const sliceData = new Float32Array(count * HERD_SEED_FLOATS);
     if (pastureCount) sliceData.set(herdData.subarray(0, pastureCount * HERD_SEED_FLOATS));
-    sliceData.set(travellers.seeds, pastureCount * HERD_SEED_FLOATS);
+    if (travelCount) sliceData.set(travellers.seeds.subarray(0, travelCount * HERD_SEED_FLOATS), pastureCount * HERD_SEED_FLOATS);
     const bucketSpan = Math.ceil(count / HERD_ALIGN_BODIES) * HERD_ALIGN_BODIES;
 
     const drawTemplate = new Uint32Array(HERD_BUCKETS * HERD_DRAW_WORDS);
@@ -332,6 +339,8 @@ export async function createLivestockHerds({
   return {
     get count() { return state?.count ?? 0; },
     get travellers() { return travellers.seeds.length / HERD_SEED_FLOATS; },
+    get activeCaravans() { return lastCaravans?.list ?? []; },
+    get caravanOrigin() { return lastCaravans?.origin ?? null; },
     setHerds,
     setCaravans,
     setBridges,

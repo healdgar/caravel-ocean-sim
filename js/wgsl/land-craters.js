@@ -16,9 +16,27 @@ export const LAND_CRATER_DRAWN_CELLS = LAND_CRATER_CELLS + 2;
 export const LAND_CRATER_PER_TILE = 32;
 // How far a crater's spoil reaches at most, in crater radii, before a flat shot draws it out.
 export const LAND_CRATER_REACH = 3.05;
+export const LAND_CRATER_LOOKUP_SIZE = 1024;
 const CELL = LAND_CRATER_CELL_M.toFixed(4);
 const GUTTER = LAND_CRATER_GUTTER.toFixed(1);
 const TEXELS = LAND_CRATER_TEXELS.toFixed(1);
+
+// O(1) GPU lookup from world XZ into the active 8 m crater tile layer and its [81, 81] field UV.
+export const LAND_CRATER_SAMPLE_WGSL = /* wgsl */ `
+fn landCraterLookupCell(worldXZ: vec2f, originXZ: vec2f) -> vec2i {
+  return vec2i(floor((worldXZ - originXZ) * ${(1 / LAND_CRATER_TILE_M).toFixed(4)}));
+}
+fn landCraterLayerAt(cell: vec2i, enabled: f32, lookupTex: texture_2d<i32>) -> i32 {
+  if (enabled < 0.5 || cell.x < 0 || cell.x >= ${LAND_CRATER_LOOKUP_SIZE} || cell.y < 0 || cell.y >= ${LAND_CRATER_LOOKUP_SIZE}) {
+    return -1;
+  }
+  return textureLoad(lookupTex, cell, 0).r;
+}
+fn landCraterFieldUV(worldXZ: vec2f, originXZ: vec2f, cell: vec2i) -> vec2f {
+  let tileOrig = originXZ + vec2f(cell) * ${LAND_CRATER_TILE_M.toFixed(1)};
+  return ((worldXZ - tileOrig) * ${(1 / LAND_CRATER_CELL_M).toFixed(1)} + ${(LAND_CRATER_GUTTER + 0.5).toFixed(1)}) / ${TEXELS};
+}
+`;
 
 // What the land was here, in its own triangles: height above the tile's floor, normal x and z, and kind in the
 // whole and fractional parts. Nothing is written where the land has no triangles, and that stays below zero.

@@ -69,10 +69,10 @@ class BodyEnvelope:
         self.neck_p = self.jpos['neck_01']
         self.cran_c = np.array([
             0.0,
-            self.head_p[1] + (0.068 if is_female else 0.064),
+            self.head_p[1] + (0.095 if is_female else 0.102),
             self.head_p[2] + (0.006 if is_female else 0.008),
         ], dtype=np.float64)
-        self.cran_r = np.array([0.071, 0.091, 0.089] if is_female else [0.075, 0.096, 0.093], dtype=np.float64)
+        self.cran_r = np.array([0.075, 0.103, 0.094] if is_female else [0.079, 0.108, 0.098], dtype=np.float64)
 
         # Identify non-arm body vertices for torso/hip garment fitting & weight transfer.
         arm_slots = {
@@ -92,7 +92,7 @@ class BodyEnvelope:
         # Precompute cylindrical torso radius table R(y, az) around (x=0, z=-0.025).
         self.torso_z0 = -0.025
         self.ny, self.na = 44, 48
-        self.y_grid = np.linspace(0.32, 1.52, self.ny)
+        self.y_grid = np.linspace(0.30, 1.46, self.ny)
         self.a_grid = np.linspace(-math.pi, math.pi, self.na, endpoint=False)
         self.r_table = np.zeros((self.ny, self.na), dtype=np.float64)
         tp = self.torso_P
@@ -707,7 +707,7 @@ def sculpt_hat_morion(env):
 
 def build_moustache_grid(bm, env, width=0.046, droop=0.012):
     """Adds a closed 3D sculpted moustache arch rooted inside the philtrum skin of sailor.glb."""
-    y_phil = env.head_p[1] + 0.0165  # ~1.6163 on male (right between nose base 1.628 and mouth 1.603)
+    y_phil = env.head_p[1] + 0.0530  # ~1.5580 on anatomical male (between nose base 1.568 and mouth 1.544)
     nx = 13
     xs = np.linspace(-width, width, nx)
     prof_angles = [0.0, 0.5 * math.pi, math.pi, 1.5 * math.pi]  # back(in skin), top, front, bottom
@@ -751,10 +751,10 @@ def sculpt_beard_iberian_barba(env):
     bm = bmesh.new()
     build_moustache_grid(bm, env, width=0.044, droop=0.011)
 
-    # Pointed chin goatee from lower lip/chin crease (head_p.y - 0.004) tapering to a point below the chin
+    # Pointed chin goatee from lower lip/chin crease (head_p.y + 0.031) tapering to a point below the chin
     na = 9
     azs = [(-0.48 * math.pi + 0.96 * math.pi * i / (na - 1)) for i in range(na)]  # front semicircle
-    y_top = env.head_p[1] - 0.004
+    y_top = env.head_p[1] + 0.0310
     layers = [
         (0.000, 0.030, 0.005, 0.000),
         (-0.015, 0.032, 0.011, 0.004),
@@ -768,7 +768,7 @@ def sculpt_beard_iberian_barba(env):
         back_row = []
         for az in azs:
             xv = half_w * math.sin(az)
-            z_skin = env.face_front_z(xv, max(yv, env.head_p[1] - 0.032))
+            z_skin = env.face_front_z(xv, max(yv, env.head_p[1] - 0.012))
             arch = math.cos(az) ** 1.3
             zf = z_skin + jut * arch + fwd_tip * arch
             zb = z_skin - 0.003 - 0.004 * (1.0 - arch)
@@ -778,7 +778,7 @@ def sculpt_beard_iberian_barba(env):
         rings.append(front_row + back_row[::-1])
     build_grid_cap(bm, rings[::-1], closed_pole=np.array([0.0, y_top + 0.003, env.face_front_z(0.0, y_top)]), tuck_bottom=0.65)
     shade_fn = lambda v, n: 0.86 + 0.16 * np.clip(n[:, 2], -0.3, 1.0)
-    return finalize_bmesh(bm, 11, SLOT_HAIR, shade_fn, lambda v: env.head_weights(v, neck_blend_below=env.head_p[1] - 0.035), low_ratio=0.58)
+    return finalize_bmesh(bm, 11, SLOT_HAIR, shade_fn, lambda v: env.head_weights(v, neck_blend_below=env.head_p[1] - 0.010), low_ratio=0.58)
 
 
 def sculpt_beard_full_sea(env):
@@ -788,7 +788,7 @@ def sculpt_beard_full_sea(env):
 
     na = 11
     azs = [(-0.56 * math.pi + 1.12 * math.pi * i / (na - 1)) for i in range(na)]
-    y_top = env.head_p[1] + 0.022  # sideburns start near mid-ear/cheek
+    y_top = env.head_p[1] + 0.0590  # sideburns start near mid-ear/cheek
     layers = [
         (0.000, 0.068, 0.007, 0.42),   # upper sideburns (hollowed in center for mouth/cheeks via mouth_clear)
         (-0.024, 0.066, 0.014, 0.16),  # jaw corners + lower lip
@@ -805,7 +805,7 @@ def sculpt_beard_full_sea(env):
             xv = half_w * s_az
             # Dip beard hairline below mouth & cheeks near center on the top ring
             y_eff = yv - mouth_dip * (c_az ** 2) * 0.062
-            z_skin = env.face_front_z(min(abs(xv), 0.056), max(y_eff, env.head_p[1] - 0.035))
+            z_skin = env.face_front_z(min(abs(xv), 0.056), max(y_eff, env.head_p[1] - 0.012))
             if abs(xv) > 0.048:
                 z_skin = min(z_skin, env.cran_c[2] + 0.052 * (1.0 - (abs(xv) - 0.048) * 6.0))
             wave = 0.0018 * math.cos(9.0 * az)
@@ -815,10 +815,10 @@ def sculpt_beard_full_sea(env):
             back_row.append(np.array([xv * 0.86, y_eff + 0.002, zb]))
         rings.append(front_row + back_row[::-1])
 
-    bot_pole = np.array([0.0, y_top - 0.104, env.face_front_z(0.0, env.head_p[1] - 0.035) + 0.008])
+    bot_pole = np.array([0.0, y_top - 0.104, env.face_front_z(0.0, env.head_p[1] - 0.012) + 0.008])
     build_grid_cap(bm, rings, closed_pole=bot_pole, tuck_bottom=0.55)
     shade_fn = lambda v, n: 0.85 + 0.17 * np.clip(n[:, 2], -0.4, 1.0) + 0.05 * np.cos(v[:, 0] * 110.0)
-    return finalize_bmesh(bm, 12, SLOT_HAIR, shade_fn, lambda v: env.head_weights(v, neck_blend_below=env.head_p[1] - 0.025, spine_tail=True), low_ratio=0.55)
+    return finalize_bmesh(bm, 12, SLOT_HAIR, shade_fn, lambda v: env.head_weights(v, neck_blend_below=env.head_p[1] - 0.005, spine_tail=True), low_ratio=0.55)
 
 
 def sculpt_garment_jerkin(env):
@@ -826,12 +826,12 @@ def sculpt_garment_jerkin(env):
     bm = bmesh.new()
     na = 22
     azs = [(-math.pi + 2.0 * math.pi * i / na) for i in range(na)]
-    y_lo = 0.895 if env.is_female else 0.910
-    y_hi = 1.395 if env.is_female else 1.435
+    y_lo = float(env.jpos['pelvis'][1] - 0.045)
+    y_hi = float(env.jpos['neck_01'][1] - 0.045)
     ys = np.linspace(y_lo, y_hi, 7)
 
     rings = []
-    arm_x = 0.132 if env.is_female else 0.152
+    arm_x = 0.125 if env.is_female else 0.138
     for ri, yv in enumerate(ys):
         s = ri / float(len(ys) - 1)
         # Slight flared peplum skirt below waist (s < 0.22)
@@ -881,7 +881,7 @@ def sculpt_garment_jerkin(env):
 def sculpt_garment_apron(env):
     """compId 14: Artisan / tavern-keeper / fishwife linen apron (*avental*) with full waist tie & front panel."""
     bm = bmesh.new()
-    y_waist = 0.995 if env.is_female else 1.015
+    y_waist = float(env.jpos['spine_01'][1] - 0.025)
     # 1. Tied waist cord all around waist
     na = 20
     azs = [(-math.pi + 2.0 * math.pi * i / na) for i in range(na)]
@@ -890,10 +890,10 @@ def sculpt_garment_apron(env):
         tie_rings.append([env.torso_point(y_waist + dy, az, extra=extra) for az in azs])
     build_grid_cap(bm, tie_rings, closed_pole=None, tuck_bottom=0.05)
 
-    # 2. Front draped linen panel from chest/bib or waist down to knees (y = 0.54), flared forward for stride clearance
+    # 2. Front draped linen panel from chest/bib or waist down to knees, flared forward for stride clearance
     ny, nx = 6, 9
-    y_top = 1.255 if env.is_female else 1.285
-    y_bot = 0.535 if env.is_female else 0.555
+    y_top = float(env.jpos['spine_03'][1] - 0.015)
+    y_bot = 0.495 if env.is_female else 0.515
     ys = np.linspace(y_bot, y_top, ny)
     panel_rows_f, panel_rows_b = [], []
     for yv in ys:
@@ -933,7 +933,7 @@ def sculpt_garment_saia_skirt(env):
     bm = bmesh.new()
     na = 26
     azs = [(-math.pi + 2.0 * math.pi * i / na) for i in range(na)]
-    y_bot, y_top = 0.34, 1.025
+    y_bot, y_top = 0.31, float(env.jpos['spine_01'][1] - 0.010)
     ys = np.linspace(y_bot, y_top, 7)
     rings = []
     for ri, yv in enumerate(ys):
@@ -941,7 +941,7 @@ def sculpt_garment_saia_skirt(env):
         flare = (1.0 - s) ** 1.18
         ring = []
         for az in azs:
-            base_r = env.torso_radius(max(yv, 0.84), az)
+            base_r = env.torso_radius(max(yv, 0.80), az)
             pleat = 0.0085 * math.cos(14.0 * az) * (0.25 + 0.75 * flare)
             # Bell-shaped Renaissance A-line flare with extra fore/aft stride room
             rx_extra = 0.009 + 0.078 * flare + pleat
@@ -980,7 +980,7 @@ def sculpt_garment_waist_sash(env):
     bm = bmesh.new()
     na = 20
     azs = [(-math.pi + 2.0 * math.pi * i / na) for i in range(na)]
-    y_mid = 0.985 if env.is_female else 1.005
+    y_mid = float(env.jpos['spine_01'][1] - 0.030)
     rings = []
     for dy, extra in [(-0.048, 0.008), (-0.025, 0.015), (0.005, 0.017), (0.036, 0.014), (0.052, 0.008)]:
         ring = []

@@ -1,6 +1,6 @@
 import { ISLAND, decodeIsland, decodeBiome, islandGeometry, islandVegetation, terrainSample, terrainSurfaceSample, constrainIslandMotion, safeLandfallStart, SPANISH_MAIN_1550_REGIONS, HISTORICAL_COLONIAL_PORTS, resolveColonialEra, generateProceduralCoastalPack, upgradeProceduralPackWithRealDEM } from './terrain-model.js';
 import { TREE_VARIANTS, TREE_VERTEX_FLOATS, TREE_PIXEL_ERROR, treeRenderGeometry,
-  GROUND_COVER, GROUND_COVER_BUCKETS, ROCK_ARCHETYPES, ROCK_LODS, createGroundCoverPatches, groundCoverInstances, groundCoverBucketGeometry } from './vegetation.js';
+  GROUND_COVER, GROUND_COVER_BUCKETS, ROCK_ARCHETYPES, ROCK_LODS, createGroundCoverPatches, groundCoverInstances, groundCoverBucketGeometry, mayGrowGroundCover } from './vegetation.js';
 import { TERRAIN, TERRAIN_LIGHT, COASTAL_FIELD_BAKE } from './wgsl/terrain.js';
 import { GROUND_DETAIL_BAKE } from './wgsl/ground-detail.js';
 import { createCoastalField } from './coastal-field.js';
@@ -32,6 +32,7 @@ import {createCityTargets} from './city-targets.js';
 import {createLandCraterLedger,createLandCraters,requestLandCraterPipelines,landCraterSize} from './land-craters.js';
 import {sharedGroundDetail} from './ground-detail.js';
 import {createLandShadows} from './shadows.js';
+import {createBoulderContinuum} from './boulder-continuum.js';
 
 import {
   buildPortPrefabGeometry,
@@ -43,6 +44,7 @@ import {
   detectCoastalContinuationDirs,
   prepareSectionConnectedBorders,
   stitchCoastalSectionBorders,
+  restitchCoastalSection,
   buildMockCoastalSection,
   planUngrownFrontierParcels,
   growFrontierParcel,
@@ -865,7 +867,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const treeBuffers=[treeLayout,{arrayStride:32,stepMode:'instance',attributes:[{shaderLocation:3,offset:0,format:'float32x4'},{shaderLocation:4,offset:16,format:'float32x4'}]}];
   // A city's blocks: one unit mesh (corner, face, part), drawn once per block from its twelve numbers.
   const cityBuffers=[meshLayout,{arrayStride:CITY_BLOCK_FLOATS*4,stepMode:'instance',attributes:[{shaderLocation:3,offset:0,format:'float32x4'},{shaderLocation:4,offset:16,format:'float32x4'},{shaderLocation:5,offset:32,format:'float32x4'}]}];
-  const makePipe=(module,entryPoint,buffers,fragmentEntry='fs',cullMode='none')=>device.createRenderPipelineAsync({label:entryPoint==='vs'?'island':entryPoint==='cityVS'?'city blocks':entryPoint==='cityTypeVS'?'city buildings':entryPoint==='cityStruckVS'?'city ruins':entryPoint==='groundVS'?'island ground cover':fragmentEntry==='leafFS'?'island trees':'island canopy and wood',layout:'auto',
+  const makePipe=(module,entryPoint,buffers,fragmentEntry='fs',cullMode='none')=>device.createRenderPipelineAsync({label:entryPoint==='vs'?'island':entryPoint==='citySolidVS'?'city solid blocks':entryPoint==='cityVS'?'city blocks':entryPoint==='cityTypeVS'?'city buildings':entryPoint==='cityStruckVS'?'city ruins':entryPoint==='groundVS'?'island ground cover':fragmentEntry==='leafFS'?'island trees':'island canopy and wood',layout:'auto',
     vertex:{module,entryPoint,buffers},fragment:{module,entryPoint:fragmentEntry,targets:[{format}]},
     primitive:{topology:'triangle-list',cullMode},
     depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples,alphaToCoverageEnabled:fragmentEntry==='leafFS'&&samples>1}});
@@ -891,6 +893,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     makePipe(module,'cityTypeVS',[meshLayout,treeBuffers[1]],'cityFS','back'),
     // One that shot has struck: its pieces, seen from within through the breach, so nothing is left out.
     makePipe(module,'cityStruckVS',[meshLayout,treeBuffers[1]],'fs','none'),
+    makePipe(module,'citySolidVS',cityBuffers,'fs','back'),
   ]));
   terrainPipesPromise.catch(()=>{});
   const submergedPipesPromise=waterOpticsResolvedPromise.then(wo=>wo?Promise.all([
@@ -1160,6 +1163,13 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       onFractured:targets?cityBuildingStruck:null,onRebuilt:targets?cityBuildingRebuilt:null});
   };
   let portFractures=portFracturesFor(proceduralPack?.portGeometry,proceduralPack?.port,portMesh?.indices,cityTargets);
+  let transientBoulderPort=null;
+  const ensureBoulderFracturePort=()=>{
+    const targetPort=proceduralPack?(proceduralPack.port??=(transientBoulderPort={regionId:activeRegion.id??'coast',name:activeRegion.name??'Coast',instances:[],transient:true})):(transientBoulderPort??={regionId:activeRegion.id??'saba',name:activeRegion.name??'Saba',instances:[],transient:true});
+    portFractures??=createPortFractures({device,port:targetPort,geometry:portMesh?proceduralPack?.portGeometry??null:null,portIndices:portMesh?.indices??null,groundAt:(x,z)=>heightSample(x,z),waterAt:(x,z)=>inlandWaterSampler?.(x,z)?.wy??null,damageStore:targetPort.transient?null:portDamage,onFractured:cityTargets?cityBuildingStruck:null,onRebuilt:cityTargets?cityBuildingRebuilt:null});
+    buildingFracturePipeline(device).catch(()=>{});
+    return targetPort;
+  };
   if(portMesh&&proceduralPack?.port?.instances?.length)buildingFracturePipeline(device).catch(()=>{});
   const fine=fineMesh?{vertices:buffer(fineMesh.vertices,GPUBufferUsage.VERTEX,'Wells Bay immutable near vertices'),
     indices:buffer(fineMesh.indices,GPUBufferUsage.INDEX,'Wells Bay near indices'),
@@ -1269,7 +1279,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const biomeTexture=device.createTexture({label:'regional vegetation probability',size:[activeRegion.biomeSize,activeRegion.biomeSize],format:'r8unorm',usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST});
   device.queue.writeTexture({texture:biomeTexture},biome,{bytesPerRow:activeRegion.biomeSize},[activeRegion.biomeSize,activeRegion.biomeSize]);
   const landSampler=device.createSampler({minFilter:'linear',magFilter:'linear',mipmapFilter:'linear',addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge',maxAnisotropy:4});
-  const [terrainPipe,opaqueTreePipe,treePipe,groundPipe,portShadowPipe,treeShadowPipe,lightPipe,module,cityPipe,cityShadowPipe,cityTypePipe,cityStruckPipe]=await terrainPipesPromise;
+  const [terrainPipe,opaqueTreePipe,treePipe,groundPipe,portShadowPipe,treeShadowPipe,lightPipe,module,cityPipe,cityShadowPipe,cityTypePipe,cityStruckPipe,citySolidPipe]=await terrainPipesPromise;
   const groundMeshes=Array.from({length:GROUND_COVER_BUCKETS},(_,bucket)=>{
     const geometry=groundCoverBucketGeometry(bucket);return{buffer:buffer(geometry,GPUBufferUsage.VERTEX,`ground cover bucket ${bucket}`),count:geometry.length/TREE_VERTEX_FLOATS};
   });
@@ -1280,11 +1290,13 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const groundCull=createSceneryCull({device,pipeline:groundCullPipeline,frameUBO,label:'ground cover',capacity:groundBlocks*groundBlock,
     bucketCapacities:Array.from({length:GROUND_COVER_BUCKETS},(_,bucket)=>groundBlocks*(bucket<rockBucketOffset?GROUND_COVER.rocksPerPatch:GROUND_COVER.grassPerPatch)),vertexCounts:[groundMeshes.map(mesh=>mesh.count)]});
   groundCull.setPixelError(TREE_PIXEL_ERROR);
+  groundCull.setSkipRocks(true);
+  let boulderContinuum=null;
   const groundStats={patches:groundPatches.length,resident:0};
   const groundResident=new Map(),groundFreeBlocks=Array.from({length:groundBlocks},(_,block)=>block);
   let groundWanted=[],groundResidencyAt=null;
   function clearGroundResidency(){
-    for(const block of groundResident.values()){groundCull.clearSlots(block*groundBlock,groundBlock);groundFreeBlocks.push(block);}
+    for(const block of groundResident.values()){groundCull.clearSlots(block*groundBlock,groundBlock);boulderContinuum?.clearSlots(block*groundBlock,groundBlock);groundFreeBlocks.push(block);}
     groundResident.clear();groundWanted=[];groundResidencyAt=null;groundStats.resident=0;
   }
   // Instances are worked out once per patch and uploaded as it comes into range; the GPU does the rest.
@@ -1294,26 +1306,29 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       groundResidencyAt={x:camera.x,z:camera.z};
       const distanceOf=patch=>Math.hypot(patch.centre[0]-camera.x,patch.centre[2]-camera.z);
       for(const [patch,block] of groundResident)if(distanceOf(patch)>GROUND_RESIDENT_M*GROUND_RESIDENT_RELEASE){
-        groundCull.clearSlots(block*groundBlock,groundBlock);groundFreeBlocks.push(block);groundResident.delete(patch);
+        groundCull.clearSlots(block*groundBlock,groundBlock);boulderContinuum?.clearSlots(block*groundBlock,groundBlock);groundFreeBlocks.push(block);groundResident.delete(patch);
       }
       groundWanted=groundPatches.filter(patch=>!groundResident.has(patch)&&distanceOf(patch)<GROUND_RESIDENT_M).sort((a,b)=>distanceOf(b)-distanceOf(a));
     }
     for(let i=0;i<GROUND_PATCHES_PER_FRAME&&groundWanted.length&&groundFreeBlocks.length;i++){
-      const patch=groundWanted.pop(),block=groundFreeBlocks.pop(),perVariant=groundCoverInstances(patch,activeRegion,baseGroundSample,biome,(x,z)=>streetEdgeAt(proceduralPack?.port?.streets,x,z)>=GROUND_COVER_STREET_GAP_M&&!craterLedger.covers(x,z)&&!inlandWaterSampler?.(x,z));
+      const patch=groundWanted.pop(),block=groundFreeBlocks.pop(),perVariant=groundCoverInstances(patch,activeRegion,baseGroundSample,biome,(x,z,isRock)=>streetEdgeAt(proceduralPack?.port?.streets,x,z)>=GROUND_COVER_STREET_GAP_M&&mayGrowGroundCover(craterLedger,x,z,isRock)&&!inlandWaterSampler?.(x,z));
       const floats=new Float32Array(groundBlock*8),slotGroups=new Uint32Array(groundBlock).fill(0xffffffff);let slot=0;
       perVariant.forEach((data,variant)=>{for(let k=0;k<data.length;k+=8){floats.set(data.subarray(k,k+8),slot*8);slotGroups[slot++]=variant;}});
-      groundCull.setInstances(block*groundBlock,floats,slotGroups);groundResident.set(patch,block);
+      boulderContinuum?.setInstances(block*groundBlock,floats,slotGroups);
+      if(!meadowGrass)groundCull.setInstances(block*groundBlock,floats,slotGroups);
+      groundResident.set(patch,block);
     }
     groundStats.resident=groundResident.size;
   }
   // What grew or lay where a pit has opened is worked out again without it, from the patch's same seed.
   function clearGroundCoverAt(x,z,radius){
+    if(meadowGrass)return;
     for(const patch of groundPatches){
       if(x+radius<patch.x||x-radius>patch.x+GROUND_COVER.patchSpan||z+radius<patch.z||z-radius>patch.z+GROUND_COVER.patchSpan)continue;
       patch.instances=null;
       const block=groundResident.get(patch);
       if(block===undefined)continue;
-      groundCull.clearSlots(block*groundBlock,groundBlock);groundFreeBlocks.push(block);groundResident.delete(patch);
+      groundCull.clearSlots(block*groundBlock,groundBlock);boulderContinuum?.clearSlots(block*groundBlock,groundBlock);groundFreeBlocks.push(block);groundResident.delete(patch);
       groundWanted.push(patch);
     }
   }
@@ -1347,6 +1362,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       forestMass?.setPixelError?.(currentPixelError);
       forest?.setPixelError?.(currentPixelError);
       groundCull.setPixelError(currentPixelError,isMobile&&currentPixelError>3.8?1.35:1);
+      boulderContinuum?.setPixelScale(TREE_PIXEL_ERROR/currentPixelError);
       treeCull?.setPixelError(currentPixelError);
     }
     if(allowStream)checkPlayerFrontierEntry?.(camera);
@@ -1484,6 +1500,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   let nearResources=[...opaqueResources,[12,{buffer:nearDomain}],[13,nearAlbedo.createView()],...activeTownField.resources,...groundDetail.resources];
   const leafResources=resources.filter(([binding])=>binding!==9&&binding!==11);
   const groups=[bind(terrainPipe,nearResources),bind(opaqueTreePipe,nearResources),bind(treePipe,leafResources)];
+  let citySolidGroup=bind(citySolidPipe,nearResources);const citySolidClouds=clouds.bindVolume(citySolidPipe);
   let cityGroup=bind(cityPipe,nearResources);const cityClouds=clouds.bindVolume(cityPipe);
   let cityTypeGroup=bind(cityTypePipe,nearResources);const cityTypeClouds=clouds.bindVolume(cityTypePipe);
   let cityStruckGroup=bind(cityStruckPipe,nearResources);const cityStruckClouds=clouds.bindVolume(cityStruckPipe);
@@ -1495,6 +1512,22 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const submergedGroundGroup=submergedGround?.bindGroup(opaqueResources.map(([binding,resource])=>({binding,resource})));
   const lightGroup=bind(lightPipe,[[0,{buffer:frameUBO}],[4,elevation.createView()],[5,lighting.createView()],[6,{buffer:uniform}],[7,{buffer:nearDomain}],[8,{buffer:nearElevation}]]);
   const cloudLight=clouds.bindVolume(lightPipe,true);
+  boulderContinuum=createBoulderContinuum(device,{
+    frameUBO,
+    resources:nearResources,
+    landShadowUniform:activeLandShadows.uniform,
+    capacity:groundBlocks*groundBlock,
+    colorFormat:format,
+    depthFormat:'depth32float',
+    depthCompare:'greater',
+    sampleCount:samples,
+    shadowDepthFormat:activeLandShadows.format,
+    shadowDepthCompare:'less',
+    getPort:()=>ensureBoulderFracturePort(),
+    groundAt:(x,z)=>baseGroundSample(x,z),
+    waterAt:(x,z)=>inlandWaterSampler?.(x,z)?.wy??null,
+  });
+  boulderContinuum.setPixelScale(TREE_PIXEL_ERROR/currentPixelError);
   let inlandWater=proceduralPack?await createInlandWater({device,shader,format,samples,resources:nearResources,clouds,coastalField,oceanBridge,initialGeometry:proceduralPack.inlandWater??null}):null;
   let herds=proceduralPack?await createLivestockHerds({device,shader,format,samples,frameUBO,landUniform:uniform,nearDomain,elevation,landShadowUniform:activeLandShadows.uniform,resources:nearResources,clouds,initialHerds:proceduralPack.herds??null,initialBridges:proceduralPack.port?.country?.bridges??null,isMobile}):null;
   const meadowPack=await meadowPromise;
@@ -1503,7 +1536,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     meadowGrass=await createMeadowGrass({device,shader,pack:meadowPack,region:activeRegion,heights,biome,beaches:proceduralPack.beaches??null,port:proceduralPack.port??null,city:proceduralPack.city??null,board:proceduralPack.board??null,inlandWater:proceduralPack.inlandWater??null,elevation,nearDomain,resources:nearResources,clouds,format,samples,isMobile});
   }catch(error){meadowFailure=error.message;}
   const meadowGrassStats=meadowGrass?.stats??{loaded:false,error:meadowFailure};
-  let tradeVessels=proceduralPack?await createTradeVessels({device,format,samples,shader,computePipe,oceanBridge,resources:nearResources,shadowFormat:activeLandShadows.format}):null;
+  let tradeVessels=proceduralPack?await createTradeVessels({device,format,samples,shader,computePipe,oceanBridge,resources:nearResources,shadowFormat:activeLandShadows.format,sharedCrew:options?.sharedCrew??null}):null;
   if(tradeVessels&&proceduralPack?.port?.country?.board){
     tradeVessels.setTraffic(null,activeRegion,proceduralPack.port.country.riverReaches??[],proceduralPack.port.country.places??[],{heights,region:activeRegion,port:proceduralPack.port,bridges:proceduralPack.port.country.bridges??[]});
   }
@@ -1528,6 +1561,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
 
   // Section-by-section continuous coastal world streaming
   const queuedSections=new Set();
+  const plannedSections=new Set();
   const sectionQueue=[];
   let sectionStreamBusy=false;
   let sectionEpoch=0;
@@ -1544,9 +1578,10 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         rawHeights:proceduralPack?.rawHeights||heights,
       };
     }
-    const loaded=loadedSections.get(`${sx},${sz}`);
+    const key=`${sx},${sz}`;
+    const loaded=loadedSections.get(key);
     if(loaded)return loaded;
-    if(includePlanned&&queuedSections.has(`${sx},${sz}`)){
+    if(includePlanned&&(queuedSections.has(key)||plannedSections.has(key))){
       return {planned:true,secX:sx,secZ:sz};
     }
     return null;
@@ -1684,33 +1719,21 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   }
 
   function restitchNeighborSection(adjRec){
-    if(!adjRec?.rawHeights)return;
+    if(!adjRec?.rawHeights||!proceduralPack)return;
     const sReg=adjRec.region;
-    const isRealDemSection=Boolean(adjRec.elevationSource?.startsWith('aws-terrarium'));
-    const connectedEdges={
-      west:Boolean(getSectionAt(adjRec.secX-1,adjRec.secZ,true)),
-      east:Boolean(getSectionAt(adjRec.secX+1,adjRec.secZ,true)),
-      north:Boolean(getSectionAt(adjRec.secX,adjRec.secZ-1,true)),
-      south:Boolean(getSectionAt(adjRec.secX,adjRec.secZ+1,true)),
-    };
-    const stitched=new Float32Array(adjRec.rawHeights);
-    stitchCoastalSectionBorders(stitched,sReg,adjRec.secX,adjRec.secZ,getSectionAt,{taperUnconnectedOuter:true,isRealDemSection});
-    smoothCoastlineAndForeshoreBeaches(stitched,sReg,{
-      port:null,
-      shoreBearing:sReg.shoreBearing??0,
-      connectedEdges,
-      taperOuterBorders:false,
-    });
-    stitchCoastalSectionBorders(stitched,sReg,adjRec.secX,adjRec.secZ,getSectionAt,{taperUnconnectedOuter:true,isRealDemSection});
-    adjRec.heights.set(stitched);
-    adjRec.connectedEdges=connectedEdges;
+    restitchCoastalSection(
+      adjRec,
+      {...proceduralPack,region:activeRegion,heights,rawHeights:proceduralPack.rawHeights||heights},
+      (sx,sz,inc)=>(sx===adjRec.secX&&sz===adjRec.secZ)?null:getSectionAt(sx,sz,inc),
+      {taperUnconnectedOuter:true,refreshTextures:false}
+    );
     adjRec._cachedForestBuckets=null;
-    adjRec.beaches=synthesizeCoastalBeaches(sReg,adjRec.heights,null);
-    const rebuiltMesh=buildCoastalMesh(sReg,adjRec.heights,adjRec.beaches,null,adjRec.port,adjRec.rawHeights??null);
+    const rebuiltMesh=adjRec.mesh;
     const oldVerts=adjRec.vertices;
     const oldIdx=adjRec.indices;
     const oldSubIdx=adjRec.submergedIndices&&adjRec.submergedIndices!==adjRec.indices?adjRec.submergedIndices:null;
     adjRec.vertices=buffer(rebuiltMesh.vertices,GPUBufferUsage.VERTEX,`coastal section (${adjRec.secX},${adjRec.secZ}) restitched vertices`);
+    adjRec.meshVertsCpu=rebuiltMesh.vertices;
     adjRec.indices=buffer(rebuiltMesh.indices,GPUBufferUsage.INDEX,`coastal section (${adjRec.secX},${adjRec.secZ}) restitched indices`);
     adjRec.indexCount=rebuiltMesh.indices.length;
     adjRec.submergedIndices=rebuiltMesh.submergedIndices?buffer(rebuiltMesh.submergedIndices,GPUBufferUsage.INDEX,`coastal section (${adjRec.secX},${adjRec.secZ}) restitched submerged`):adjRec.indices;
@@ -1772,8 +1795,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     const oldTownField=activeTownField;
     activeTownField=townField(streets);
     nearResources=[...opaqueResources,[12,{buffer:nearDomain}],[13,nearAlbedo.createView()],...activeTownField.resources,...groundDetail.resources];
-    groups[0]=bind(terrainPipe,nearResources);groups[1]=bind(opaqueTreePipe,nearResources);craterLand=null;cityGroup=bind(cityPipe,nearResources);cityTypeGroup=bind(cityTypePipe,nearResources);cityStruckGroup=bind(cityStruckPipe,nearResources);
+    groups[0]=bind(terrainPipe,nearResources);groups[1]=bind(opaqueTreePipe,nearResources);craterLand=null;citySolidGroup=bind(citySolidPipe,nearResources);cityGroup=bind(cityPipe,nearResources);cityTypeGroup=bind(cityTypePipe,nearResources);cityStruckGroup=bind(cityStruckPipe,nearResources);
     submergedGroup=submerged?.bindGroup(nearResources.map(([binding,resource])=>({binding,resource})));
+    boulderContinuum?.rebind(nearResources);
     inlandWater?.rebind(nearResources);
     herds?.rebind(nearResources);
     meadowGrass?.rebind(nearResources);
@@ -1855,6 +1879,10 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     );
     const rec=buildSectionGPURecord(secPack);
     loadedSections.set(key,rec);
+    for(const [dx,dz,adjEdge] of [[-1,0,'east'],[1,0,'west'],[0,-1,'south'],[0,1,'north']]){
+      const adj=loadedSections.get(`${secX+dx},${secZ+dz}`);
+      if(adj&&!adj.connectedEdges?.[adjEdge])restitchNeighborSection(adj);
+    }
     craters?.invalidate(rec.region);
     if(rebuildTrees)rebuildNeighborTreeInstances();
     return rec;
@@ -1905,9 +1933,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
             queuedSections.delete(key);
             portsDirty=true;
             craters?.invalidate(rec.region);
-            for(const [dx,dz,adjEdge] of [[-1,0,'east'],[1,0,'west'],[0,-1,'south'],[0,1,'north']]){
+            for(const [dx,dz] of [[-1,0],[1,0],[0,-1],[0,1]]){
               const adj=loadedSections.get(`${secX+dx},${secZ+dz}`);
-              if(adj&&!adj.connectedEdges?.[adjEdge])restitchNeighborSection(adj);
+              if(adj)restitchNeighborSection(adj);
             }
             streamedCount++;
             if(streamedCount===4||sectionQueue.length===0){
@@ -1969,7 +1997,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       if(modified){
         device.queue.writeTexture({texture:elevation},heights,{bytesPerRow:activeRegion.size*4},[activeRegion.size,activeRegion.size]);
         const oldVerts=vertices,oldIdx=indices,oldSubIdx=submergedIndices!==indices?submergedIndices:null;
-        mesh=buildCoastalMesh(activeRegion,heights,proceduralPack.beaches,null,savedPortOverride?null:proceduralPack.port,proceduralPack.rawHeights||heights);
+        mesh=buildCoastalMesh(activeRegion,heights,proceduralPack.beaches,null,savedPortOverride?null:proceduralPack.port,proceduralPack.rawHeights||heights,{lookupNeighbor:getSectionAt,secX:0,secZ:0,isMock:false});
         vertices=buffer(mesh.vertices,GPUBufferUsage.VERTEX,'island vertices border-synced');
         indices=buffer(mesh.indices,GPUBufferUsage.INDEX,'island indices border-synced');
         submergedIndices=mesh.submergedIndices?buffer(mesh.submergedIndices,GPUBufferUsage.INDEX,'submerged island indices border-synced'):indices;
@@ -1980,10 +2008,17 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     }
     let addedMocks=0;
     for(const {dx,dz} of dirs){
-      if(!loadedSections.has(`${dx},${dz}`)){
-        ensureMockSection(dx,dz,{rebuildTrees:false});
-        addedMocks++;
+      if((dx!==0||dz!==0)&&Math.abs(dx)<=4&&Math.abs(dz)<=4)plannedSections.add(`${dx},${dz}`);
+    }
+    try{
+      for(const {dx,dz} of dirs){
+        if(!loadedSections.has(`${dx},${dz}`)){
+          ensureMockSection(dx,dz,{rebuildTrees:false});
+          addedMocks++;
+        }
       }
+    }finally{
+      plannedSections.clear();
     }
     if(addedMocks)rebuildNeighborTreeInstances();
   }
@@ -1992,6 +2027,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     sectionEpoch++;
     sectionQueue.length=0;
     queuedSections.clear();
+    plannedSections.clear();
     activeQueuePromise=null;
     for(const rec of loadedSections.values())destroySectionRecord(rec);
     loadedSections.clear();
@@ -2391,7 +2427,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
 
   // Anything saved as ruined is a ruin before the port is first seen.
   await portFractures?.restoreNow();
-  craters=createLandCraters({device,module,shader,computePipe,format,samples,ledger:craterLedger,maxLayers:isMobile?96:384,
+  craters=createLandCraters({device,module,shader,computePipe,format,samples,ledger:craterLedger,maxLayers:isMobile?96:384,region:activeRegion,
     surfaces(){
       const list=[{vertices,indices,count:mesh.indices.length,region:null}];
       if(fine)list.push({vertices:fine.vertices,indices:fine.indices,count:fineMesh.indices.length,region:null});
@@ -2405,6 +2441,15 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     },
     groundAt:(x,z)=>groundSample(x,z),
   });
+  meadowGrass?.bindCraters?.(craters);
+  const recentBlastRings=[];
+  let lastBallisticClock=0;
+  function recordBlastRing(wx,wz,strength=1,hot=false,wy=null){
+    const lx=wx-worldOffset.x,lz=wz-worldOffset.z;
+    const y=Number.isFinite(wy)?wy:baseGroundSample(lx,lz);
+    recentBlastRings.push({x:lx,y,z:lz,t0:lastBallisticClock,maxAge:2.2,strength,speed:26.0,hot:Boolean(hot)});
+    if(recentBlastRings.length>16)recentBlastRings.splice(0,recentBlastRings.length-16);
+  }
   return {
     waterGroup:pipe=>coastalField.waterGroup(pipe),
     get turbidityScale(){return coastalTurbidityScale(activeRegion.latitude??0,activeRegion.coastalArchetype);},
@@ -2417,7 +2462,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     farTreeTriangles:treeMeshes[0].map(mesh=>mesh.opaque.count/3),
     groundStats,groundTriangles:groundMeshes.map(mesh=>mesh.count/3),canopyStats,forestStats,canopyInspectionURL:canopyInspectionLink,
     prepare:(cam,vp)=>updateTrees(cam,vp,true),groundDetail,
-    setPixelError(next){if(Number.isFinite(next)&&next>0){currentPixelError=next;forestMass?.setPixelError?.(next);forest?.setPixelError?.(next);groundCull.setPixelError(next,isMobile&&next>3.8?1.35:1);treeCull?.setPixelError(next);}},
+    setPixelError(next){if(Number.isFinite(next)&&next>0){currentPixelError=next;forestMass?.setPixelError?.(next);forest?.setPixelError?.(next);groundCull.setPixelError(next,isMobile&&next>3.8?1.35:1);boulderContinuum?.setPixelScale(TREE_PIXEL_ERROR/next);treeCull?.setPixelError(next);}},
     nearStats:{loaded:!!nearTile,error:nearFailure,domain:nearTile?.manifest.domain??null,triangles:(fineMesh?.indices.length??0)/3},
     height:(x,z)=>heightSample(x-worldOffset.x,z-worldOffset.z),
     surfaceHeight:(x,z)=>baseGroundSample(x-worldOffset.x,z-worldOffset.z),
@@ -2567,12 +2612,86 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     get herds(){return herds;},
     get meadowGrass(){return meadowGrass;},
     meadowGrassStats,
+    get bridges(){return proceduralPack?.port?.country?.bridges??[];},
+    getLoadedSections(){
+      const half=activeRegion.span*0.5;
+      const out=[{
+        sx:0,sz:0,
+        minX:activeRegion.x+worldOffset.x-half,maxX:activeRegion.x+worldOffset.x+half,
+        minZ:activeRegion.z+worldOffset.z-half,maxZ:activeRegion.z+worldOffset.z+half,
+        kind:'center',label:'(0,0) CENTER',seamOk:true,
+      }];
+      for(const rec of loadedSections.values()){
+        const r=rec.region;if(!r)continue;
+        const h=(r.span??activeRegion.span)*0.5;
+        const kind=rec.isMock?'mock':'dem';
+        out.push({
+          sx:rec.secX,sz:rec.secZ,
+          minX:r.x+worldOffset.x-h,maxX:r.x+worldOffset.x+h,
+          minZ:r.z+worldOffset.z-h,maxZ:r.z+worldOffset.z+h,
+          kind,label:`(${rec.secX},${rec.secZ}) ${kind.toUpperCase()}`,seamOk:true,
+        });
+      }
+      return out;
+    },
+    get boulderContinuum(){return boulderContinuum;},
+    sweepBoulderSegment(from,to,radius,options){return boulderContinuum?boulderContinuum.sweepBoulderSegment(from,to,radius,options):null;},
+    strikeBoulder(event){
+      const out=boulderContinuum?boulderContinuum.strikeBoulder(event):null;
+      if(out&&!event?.blastOnly){
+        const pos=event?.position??event?.surfacePosition??event?.sceneryPos;
+        if(Array.isArray(pos)&&Number.isFinite(pos[0])&&Number.isFinite(pos[2])){
+          recordBlastRing(pos[0],pos[2],Math.min(1.8,Math.max(0.45,Math.cbrt((event.energy??4e5)/1.1e6))),Boolean(event.heated||event.hot),pos[1]);
+        }
+      }
+      return out;
+    },
+    setBallisticProjectiles(projectiles,nowSec=0){
+      if(Number.isFinite(nowSec))lastBallisticClock=nowSec;
+      if(!meadowGrass)return;
+      for(let i=recentBlastRings.length-1;i>=0;i--){
+        if(lastBallisticClock-recentBlastRings[i].t0>recentBlastRings[i].maxAge)recentBlastRings.splice(i,1);
+      }
+      const shots=[];
+      if(Array.isArray(projectiles)){
+        for(let i=0;i<projectiles.length&&shots.length<16;i++){
+          const p=projectiles[i];
+          if(!p||p.active===false||!Number.isFinite(p.x)||!Number.isFinite(p.z))continue;
+          const lx=p.x-worldOffset.x,lz=p.z-worldOffset.z;
+          const gy=baseGroundSample(lx,lz);
+          if(!Number.isFinite(gy)||(p.y??0)>gy+8.5||(p.y??0)<gy-2.5)continue;
+          shots.push({
+            x:lx,
+            y:p.y??gy,
+            z:lz,
+            vx:p.vx??0,
+            vy:p.vy??0,
+            vz:p.vz??0,
+            radius:p.radius??0.08,
+            heated:Boolean(p.heated||p.hot||p.heatedShot),
+          });
+        }
+      }
+      const rings=recentBlastRings.map(r=>({
+        x:r.x,
+        y:r.y,
+        z:r.z,
+        age:Math.max(0,lastBallisticClock-r.t0),
+        maxAge:r.maxAge,
+        strength:r.strength,
+        speed:r.speed,
+        hot:r.hot,
+      }));
+      meadowGrass.setBallisticWakes(shots,rings);
+    },
+    setSharedCrew(crewAssets){tradeVessels?.setSharedCrew?.(crewAssets);},
     get tradeVessels(){return tradeVessels;},
     setWorldOffset(dx=0,dz=0){
       const nx=Number.isFinite(dx)?dx:0,nz=Number.isFinite(dz)?dz:0;
       if(Math.abs(nx-worldOffset.x)<0.05&&Math.abs(nz-worldOffset.z)<0.05)return;
       worldOffset.x=nx;worldOffset.z=nz;
       cityCull?.setWorldOffset?.(nx,nz);
+      boulderContinuum?.setWorldOffset(nx,nz);
       writeNearDomainUniform();
     },
     getWorldOffset(){return {...worldOffset};},
@@ -2591,6 +2710,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       (dolphins?.state??dolphins)?.shift?.(-dx,-dz);
       worldOffset.x=0;worldOffset.z=0;
       cityCull?.setWorldOffset?.(0,0);
+      boulderContinuum?.setWorldOffset(0,0);
       writeNearDomainUniform();
       lastCamera=null;
       return {dx,dz};
@@ -2598,7 +2718,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     dispose(){
       // Real-terrain upgrades and streamed sections can still arrive after this.
       terrainDisposed=true;
-      sectionEpoch++;sectionQueue.length=0;queuedSections.clear();
+      sectionEpoch++;sectionQueue.length=0;queuedSections.clear();plannedSections.clear();
       for(const rec of loadedSections.values())destroySectionRecord(rec);
       loadedSections.clear();
       vertices?.destroy?.();
@@ -2616,6 +2736,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       biomeTexture?.destroy?.();leafTexture?.destroy?.();leafMean?.destroy?.();
       for(const g of groundMeshes)g.buffer?.destroy?.();
       groundCull.destroy();
+      boulderContinuum?.destroy();
       for(const lod of treeMeshes)for(const v of lod){v.opaque?.buffer?.destroy?.();v.leaves?.buffer?.destroy?.();}
       treeCull?.destroy();
       cityCull?.destroy();cityBlocks?.buffer.destroy();cityStruck?.destroy();cityUnit.buffer.destroy();for(const type of cityTypes??[])type.buffer.destroy();
@@ -2649,7 +2770,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         for(const struck of this.pendingForestStrikes.splice(0,this.pendingForestStrikes.length))forest?.strikeTree?.(struck.tree,struck.impact,now,groundSample);
       }
       forest?.settleFalls?.(now);
-      flushPort(portMesh,portVertsCpu,proceduralPack?.port,portFractures);
+      flushPort(portMesh,portVertsCpu,proceduralPack?.port??transientBoulderPort,portFractures);
       for(const sec of loadedSections.values()){
         if(sec.port)flushPort(sec.portMesh,sec.portVertsCpu,sec.port,sec.portFractures);
       }
@@ -2693,6 +2814,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         const hits=this.pendingCraters.splice(0,this.pendingCraters.length),strikes=[];
         for(const hit of hits){
           const local={...hit,x:hit.x-worldOffset.x,z:hit.z-worldOffset.z},record=craters.strike(local),radius=landCraterSize(record.energyJ).radius;
+          recordBlastRing(hit.x,hit.z,Math.min(2.0,Math.max(0.45,Math.cbrt((hit.energyJ??4e5)/1.1e6))),Boolean(hit.heated||hit.hot));
           clearGroundCoverAt(record.x,record.z,radius*1.35);
           forest?.strike?.(record.x,record.z,now,groundSample);
           strikes.push({x:record.x,z:record.z,rSq:(radius*1.6)**2});
@@ -2744,7 +2866,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       if(frame)coastalField.encode(pass,frame);
       portFractures?.encode(pass);
       for(const sec of loadedSections.values())sec.portFractures?.encode(pass);
-      groundCull.encode(pass);
+      boulderContinuum?.prepare(pass);
+      if(!meadowGrass)groundCull.encode(pass);
       treeCull?.encode(pass);
       cityCull?.encode(pass);
       forestMass?.encode(pass);
@@ -2775,27 +2898,34 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
           pass.setBindGroup(0,sec.submergedGroup);pass.setVertexBuffer(0,sec.vertices);pass.setIndexBuffer(sec.submergedIndices,'uint32');pass.drawIndexed(sec.submergedCount);
         }
       }
-      if(submergedGround){
+      if(submergedGround&&!meadowGrass){
         submergedGround.bind(pass,above);pass.setBindGroup(0,submergedGroundGroup);
         for(let i=0;i<groundMeshes.length;i++)groundCull.draw(pass,i,0,groundMeshes[i].buffer);
       }
     },
     draw(pass,camera={x:0,y:6,z:0},viewProjection=null){
-      updateTrees(camera,viewProjection);
+      if(!lastCamera)updateTrees(camera,viewProjection);
       pass.setPipeline(terrainPipe);pass.setBindGroup(0,groups[0]);pass.setBindGroup(1,cloudGroups[0]);
       pass.setVertexBuffer(0,vertices);pass.setIndexBuffer(indices,'uint32');pass.drawIndexed(mesh.indices.length);
       if(fine&&fineMesh.indices.length){pass.setVertexBuffer(0,fine.vertices);pass.setIndexBuffer(fine.indices,'uint32');pass.drawIndexed(fineMesh.indices.length);}
       if(portMesh&&isSectionVisible(activeRegion,camera,viewProjection,4800)){pass.setVertexBuffer(0,portMesh.vertices);pass.setIndexBuffer(portMesh.indices,'uint32');pass.drawIndexed(portMesh.count);portFractures?.draw(pass);}
+      if(portFractures?.sourced&&isSectionVisible(activeRegion,camera,viewProjection,4800))portFractures.drawSourced(pass,instance=>Boolean(instance.boulder));
       if(cityBlocks&&isSectionVisible(activeRegion,camera,viewProjection)){
-        pass.setPipeline(cityPipe);pass.setBindGroup(0,cityGroup);pass.setBindGroup(1,cityClouds);
+        pass.setPipeline(citySolidPipe);pass.setBindGroup(0,citySolidGroup);pass.setBindGroup(1,citySolidClouds);
         pass.setVertexBuffer(0,cityUnit.buffer);pass.setVertexBuffer(1,cityBlocks.buffer);pass.draw(cityUnit.count,cityBlocks.count);
         if(cityCull){
+          pass.setPipeline(cityPipe);pass.setBindGroup(0,cityGroup);pass.setBindGroup(1,cityClouds);
+          pass.draw(cityUnit.count,cityBlocks.count);
           pass.setPipeline(cityTypePipe);pass.setBindGroup(0,cityTypeGroup);pass.setBindGroup(1,cityTypeClouds);
           for(let type=0;type<cityTypes.length;type++)cityCull.draw(pass,type,0,cityTypes[type].buffer);
         }
         if(cityStruck&&portFractures?.sourced){
           pass.setPipeline(cityStruckPipe);pass.setBindGroup(0,cityStruckGroup);pass.setBindGroup(1,cityStruckClouds);
-          portFractures.drawSourced(pass,instance=>pass.setVertexBuffer(1,cityStruck,instance.city.index*CITY_TYPED_FLOATS*4,CITY_TYPED_FLOATS*4));
+          portFractures.drawSourced(pass,instance=>{
+            if(!instance.city)return false;
+            pass.setVertexBuffer(1,cityStruck,instance.city.index*CITY_TYPED_FLOATS*4,CITY_TYPED_FLOATS*4);
+            return true;
+          });
         }
         pass.setPipeline(terrainPipe);pass.setBindGroup(0,groups[0]);pass.setBindGroup(1,cloudGroups[0]);
       }
@@ -2815,10 +2945,13 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
           craters.draw(pass,`${sec.secX},${sec.secZ}`,sec.craterGroup,craterClouds);
         }
       }
+      if(boulderContinuum&&isSectionVisible(activeRegion,camera,viewProjection,4800))boulderContinuum.draw(pass);
       // Opaque ground props have no cutout/depth reconstruction and no cloud
       // ray march per blade. They remain in Apple's opaque visibility path.
-      pass.setPipeline(groundPipe);pass.setBindGroup(0,groundGroup);
-      for(let i=0;i<groundMeshes.length;i++)groundCull.draw(pass,i,0,groundMeshes[i].buffer);
+      if(!meadowGrass){
+        pass.setPipeline(groundPipe);pass.setBindGroup(0,groundGroup);
+        for(let i=0;i<groundMeshes.length;i++)groundCull.draw(pass,i,0,groundMeshes[i].buffer);
+      }
       if(herds&&isSectionVisible(activeRegion,camera,viewProjection,2600))herds.draw(pass);
       if(meadowGrass&&isSectionVisible(activeRegion,camera,viewProjection,2400))meadowGrass.draw(pass);
       if(tradeVessels&&isSectionVisible(activeRegion,camera,viewProjection,12000))tradeVessels.draw(pass);
@@ -2838,7 +2971,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       if(tradeVessels&&isSectionVisible(activeRegion,camera,viewProjection,12000))tradeVessels.drawDamaged?.(pass);
     },
     drawWater(pass,camera={x:0,y:6,z:0},viewProjection=null){
-      if(inlandWater&&isSectionVisible(activeRegion,camera,viewProjection,5200))inlandWater.draw(pass);
+      if(inlandWater&&isSectionVisible(activeRegion,camera,viewProjection,5200)){
+        inlandWater.draw(pass,viewProjection,{shift:[worldOffset.x,worldOffset.z],camPos:[camera.x??0,camera.y??6,camera.z??0]});
+      }
     },
     drawShadow(pass,camera={x:0,y:6,z:0},viewProjection=null){
       pass.setPipeline(portShadowPipe);pass.setBindGroup(0,portShadowGroup);
@@ -2852,12 +2987,15 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
           sec.portFractures?.draw(pass);
         }
       }
+      if(portFractures?.sourced&&isSectionVisible(activeRegion,camera,null,2600)){
+        // A struck building's block or cleaved boulder is gone, so its pieces cast its shadow.
+        portFractures.drawSourced(pass);
+      }
       if(cityBlocks&&isSectionVisible(activeRegion,camera,null,2600)){
-        // A struck building's block is gone, so its pieces cast its shadow.
-        portFractures?.drawSourced(pass);
         pass.setPipeline(cityShadowPipe);pass.setBindGroup(0,cityShadowGroup);
         pass.setVertexBuffer(0,cityUnit.buffer);pass.setVertexBuffer(1,cityBlocks.buffer);pass.draw(cityUnit.count,cityBlocks.count);
       }
+      if(boulderContinuum&&isSectionVisible(activeRegion,camera,null,750))boulderContinuum.drawShadow(pass);
       if(treeCull){
         pass.setPipeline(treeShadowPipe);pass.setBindGroup(0,treeShadowGroup);
         for(let lod=0;lod<2;lod++)for(let variant=0;variant<TREE_VARIANTS;variant++){

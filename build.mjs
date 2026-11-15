@@ -90,8 +90,8 @@ wgslModules.push('js/wgsl/inland-water.js','js/wgsl/herds.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/models/livestock-meshes.js','js/inland-water.js','js/herds.js','js/meadow-grass.js','js/trade-vessels.js');
 order.splice(order.indexOf('js/trade-vessels.js'),0,'js/wgsl/hull-flood.js','js/hull-flood.js');
 // A city's buildings as the guns meet them: after the fracture code it hands them to, ahead of the land it is drawn with.
-order.splice(order.indexOf('js/terrain.js'),0,'js/city-targets.js');
-order.splice(order.indexOf('js/main.js'),0,'js/port-damage.js');
+order.splice(order.indexOf('js/terrain.js'),0,'js/city-targets.js','js/boulder-continuum.js');
+order.splice(order.indexOf('js/main.js'),0,'js/port-damage.js','js/debug-world.js');
 order.splice(order.indexOf('js/main.js'),0,'js/webgpu-adapter.js');
 order.splice(order.indexOf('js/ship-mesh.js'),0,'js/rig-gpu-data.js');
 order.splice(order.indexOf('js/ship-mesh.js'),0,'js/ship-collider.js');

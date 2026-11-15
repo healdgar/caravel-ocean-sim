@@ -65,6 +65,7 @@ fn scenerySelect(index:u32,group:u32,instance:SceneryInstance)->i32 {
   let px=sceneryProjected(relative,extent,extent);
   if(px<threshold){previous[index]=0u;return -1;}
   if(group<2u){
+    if(params.z>0.5){previous[index]=0u;return -1;}
     let arch=u32(clamp(floor(fract(instance.shape.y*17.31+f32(group)*0.5)*f32(${ROCK_ARCHETYPES})),0.0,f32(${ROCK_ARCHETYPES-1})));
     let h0=select(1.0,0.85,oldLod==0u);
     let h1=select(1.0,0.85,oldLod<=1u);
@@ -162,6 +163,10 @@ export function createSceneryCull({ device, pipeline, frameUBO, label, capacity,
     },
     setWorldOffset(dx = 0, dz = 0) {
       paramValues[2] = dx; paramValues[3] = dz;
+      device.queue.writeBuffer(params, 0, paramValues);
+    },
+    setSkipRocks(skip = true) {
+      paramValues[2] = skip ? 1 : 0;
       device.queue.writeBuffer(params, 0, paramValues);
     },
     encode(pass) {

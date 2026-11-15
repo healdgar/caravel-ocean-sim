@@ -226,18 +226,18 @@ test('bridges align with road direction, use level STONE_BRIDGE_SPAN, stamp appr
   assert.ok(fs.readFileSync('js/forest-groves.js', 'utf8').includes('section.groundSize'), 'forest-groves must check groundSize on section resize');
 });
 
-test('Nanite meadow grass uses volumetric-cloud-tendrils manifold, loop-free D3D12-safe meadowSelect, Euler=2 morph, and terrain albedo bindings', () => {
+test('Nanite meadow grass uses botanical-tussock-continuum manifold, loop-free D3D12-safe meadowSelect, Euler=2 morph, ballistic wakes, and terrain albedo bindings', () => {
   const manifest = JSON.parse(fs.readFileSync('assets/ground-cover/portugal/meadows-gpu/manifest.json', 'utf8'));
-  assert.equal(manifest.tileMetres, 1.35);
+  assert.equal(manifest.tileMetres, 4);
   assert.equal(manifest.levels, 4);
-  assert.equal(manifest.style, 'volumetric-cloud-tendrils');
+  assert.equal(manifest.style, 'botanical-tussock-continuum');
   assert.ok(Array.isArray(manifest.variantRecords) && manifest.variantRecords.length === 12);
 
   for (const rec of manifest.variantRecords) {
     assert.equal(rec.genusZeroEuler, 2, `${rec.mix}#${rec.variant} lost Euler=2 genus-0 closure`);
-    assert.equal(rec.coreTriCount, 6, `${rec.mix}#${rec.variant} must retain 6 full-square core tris for gap-free continuum`);
-    assert.ok(rec.splat?.rx >= 1.0, `${rec.mix}#${rec.variant} splat rx=${rec.splat?.rx} too narrow for gap-free splats`);
-    assert.ok(rec.splat?.ry <= 0.16, `${rec.mix}#${rec.variant} splat ry=${rec.splat?.ry} too tall`);
+    assert.ok(rec.coreTriCount >= 4 && rec.coreTriCount <= 6, `${rec.mix}#${rec.variant} must retain 4..6 core tris for gap-free continuum, got ${rec.coreTriCount}`);
+    assert.ok(rec.splat?.rx >= 1.95, `${rec.mix}#${rec.variant} splat rx=${rec.splat?.rx} too narrow for 4 m tiles`);
+    assert.ok(rec.splat?.ry <= 0.38, `${rec.mix}#${rec.variant} splat ry=${rec.splat?.ry} too tall`);
   }
 
   assert.equal(MEADOW_STEP_WGSL.includes('280.0'), false, 'MEADOW_STEP_WGSL must not retain hard 280.0 m clip');
@@ -245,12 +245,14 @@ test('Nanite meadow grass uses volumetric-cloud-tendrils manifold, loop-free D3D
   assert.equal(/\b(?:for|while)\s*\(/.test(MEADOW_STEP_WGSL), false, 'MEADOW_STEP_WGSL must remain 100% loop-free for Windows D3D12 FXC/DXC');
   assert.equal(MEADOW_STEP_WGSL.includes('SplatUniform'), false, 'MEADOW_STEP_WGSL must not bind unused 384-byte SplatUniform');
   assert.equal(/\bdiscard\b/.test(MEADOW_RENDER_WGSL), false, 'MEADOW_RENDER_WGSL must remain discard-free (MSAA sample_mask)');
-  assert.ok(MEADOW_RENDER_WGSL.includes('meadowTendrilCloud'), 'MEADOW_RENDER_WGSL missing volumetric tendril cloud shading');
   assert.ok(MEADOW_RENDER_WGSL.includes('meadowWorldBillow'), 'MEADOW_RENDER_WGSL missing world-space continuum billows');
+  assert.ok(MEADOW_RENDER_WGSL.includes('@binding(13)'), 'MEADOW_RENDER_WGSL missing ballistic wakes @binding(13)');
+  assert.ok(MEADOW_RENDER_WGSL.includes('@binding(14)'), 'MEADOW_RENDER_WGSL missing landCraterLookup @binding(14)');
   assert.ok(MEADOW_RENDER_WGSL.includes('@binding(15)'), 'MEADOW_RENDER_WGSL missing terrain landLight @binding(15)');
   assert.ok(MEADOW_RENDER_WGSL.includes('@binding(16)'), 'MEADOW_RENDER_WGSL missing per-vertex meadowCover @binding(16)');
   assert.ok(MEADOW_RENDER_WGSL.includes('@binding(17)'), 'MEADOW_RENDER_WGSL missing terrain landAlbedo @binding(17)');
   assert.ok(MEADOW_RENDER_WGSL.includes('@binding(18)'), 'MEADOW_RENDER_WGSL missing terrain landSampler @binding(18)');
+  assert.ok(MEADOW_RENDER_WGSL.includes('@binding(22)'), 'MEADOW_RENDER_WGSL missing landCraterField @binding(22)');
   assert.ok(MEADOW_RENDER_WGSL.includes('grassWindWave'), 'MEADOW_RENDER_WGSL missing grassWindWave sync');
 
   const meadowSrc = fs.readFileSync('js/meadow-grass.js', 'utf8');

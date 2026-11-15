@@ -54,6 +54,7 @@ export function addHullHole(damage, { design, local, radius, side, compartment }
 export function hullHoleDepth(boat, hole) {
   boatRotate(holeDepthRotation, hole.local[0], hole.local[1], hole.local[2], 0, boat.pitch ?? 0, boat.roll ?? 0);
   const waterY = boat?.target?.heave ?? 0;
+  if (!Number.isFinite(waterY) || waterY <= -500) return -999;
   return waterY - ((boat.heave ?? 0) + holeDepthRotation[1]);
 }
 
@@ -61,8 +62,7 @@ export function hullHoleDepth(boat, hole) {
 export function hullFloodLevel(boat, damage) {
   const tonnes = damage?.floodingTonnes ?? 0;
   const area = Math.max(1, (boat.length ?? 20) * (boat.beam ?? 6) * HULL_HOLD_AREA_SHARE);
-  const waterY = boat?.target?.heave ?? 0;
-  const keel = -(boat.hydrodynamics?.draft ?? 2) + (waterY - (boat.heave ?? 0));
+  const keel = -(boat.hydrodynamics?.draft ?? boat.draft ?? 2);
   return keel + tonnes / (SEA_TONNES_PER_CUBIC_METRE * area);
 }
 
@@ -85,13 +85,22 @@ export function hullHoleInflow(boat, damage, hole) {
 export function stepHullHoles(boat, damage, dt) {
   const byCompartment = {};
   let area = 0;
+  let totalFlow = 0;
   const holes = damage?.holes;
-  if (!holes?.length) return { byCompartment, area };
+  if (!holes?.length) return { byCompartment, area, totalFlow };
   let worst = null;
   for (const hole of holes) {
     hole.flow = hullHoleInflow(boat, damage, hole);
     if (hole.flow <= 0) continue;
-    byCompartment[hole.compartment] = (byCompartment[hole.compartment] ?? 0) + hole.flow;
+    totalFlow += hole.flow;
+    let compKey = hole.compartment || (hole.side >= 0 ? 'midStarboard' : 'midPort');
+    if (compKey === 'bow' || compKey === 'fore') compKey = hole.side >= 0 ? 'foreStarboard' : 'forePort';
+    else if (compKey === 'stern' || compKey === 'aft') compKey = hole.side >= 0 ? 'aftStarboard' : 'aftPort';
+    else if (compKey === 'mid') compKey = hole.side >= 0 ? 'midStarboard' : 'midPort';
+    byCompartment[compKey] = (byCompartment[compKey] ?? 0) + hole.flow;
+    if (hole.compartment && hole.compartment !== compKey) {
+      byCompartment[hole.compartment] = (byCompartment[hole.compartment] ?? 0) + hole.flow;
+    }
     area += Math.PI * hole.radius * hole.radius * (1 - (hole.plug ?? 0));
     if ((hole.plug ?? 0) < HULL_HOLE_PLUG_LIMIT && (!worst || hole.flow > worst.flow)) worst = hole;
   }
@@ -100,7 +109,7 @@ export function stepHullHoles(boat, damage, dt) {
   if (worst && !damage.surrendered && !damage.sunk) {
     worst.plug = Math.min(HULL_HOLE_PLUG_LIMIT, (worst.plug ?? 0) + (dt * hands) / HULL_HOLE_PLUG_SECONDS);
   }
-  return { byCompartment, area };
+  return { byCompartment, area, totalFlow };
 }
 
 // A yard's patch stops the water, though the planks still show until a proper refit.

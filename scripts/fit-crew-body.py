@@ -129,13 +129,43 @@ def yaw_between(a, b):
     a = a * [1, 0, 1]; b = b * [1, 0, 1]
     return rotation_between(a, b)
 R0 = yaw_between(s_pos('upperarm_l') - s_pos('upperarm_r'), d_pos('upperarm_l') - d_pos('upperarm_r'))
-# Same stature: top of mesh to the floor, against our own sailor's measured height.
-src_height = float(P[:, 1].max() - P[:, 1].min())
+# Scale the body floor-to-neck_01 rather than floor-to-tricorn-hat-tip so tall hats never shrink the body,
+# and align the head & eyes to anatomical 1:7.7 human proportions on our target skeleton.
+P_rot = P @ R0.T
+s_pos_rot = lambda n: R0 @ s_pos(n)
+src_floor_y = float(P_rot[:, 1].min())
+src_neck_h = float(s_pos_rot('neck_01')[1] - src_floor_y)
 body_node = next(i for i, n in enumerate(dst['nodes']) if n.get('name', '').lower().startswith('superhero_'))
 dst_body = dst['nodes'][body_node]['mesh']
 old = accessor(dst, dst_bin, dst['meshes'][dst_body]['primitives'][0]['attributes']['POSITION'])
-our_height = float(old[:, 1].max() - old[:, 1].min()); S = our_height / src_height
-print('turned', np.round(R0 @ np.array([1, 0, 0]), 2), 'our height', round(our_height, 3), 'scale', round(S, 3))
+dst_floor_target = -0.010
+S = float((d_pos('neck_01')[1] - dst_floor_target) / max(src_neck_h, 1e-6))
+
+# Locate painted eye whites in rotated source space so eyes align accurately with crewMorph eyeY.
+src_eye_y = float(s_pos_rot('head')[1] + (0.0445 if is_female else 0.0365))
+if image is not None:
+    px0 = np.asarray(image, dtype=np.float32) / 255.0
+    ih0, iw0 = px0.shape[:2]
+    ux0 = np.clip((UV[:, 0] % 1.0) * (iw0 - 1), 0, iw0 - 1).astype(int)
+    uy0 = np.clip((UV[:, 1] % 1.0) * (ih0 - 1), 0, ih0 - 1).astype(int)
+    srgb0 = px0[uy0, ux0]
+    col0 = np.where(srgb0 <= 0.04045, srgb0 / 12.92, ((srgb0 + 0.055) / 1.055) ** 2.4)
+    lum0 = col0 @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float64)
+    warmth0 = col0[:, 0] / np.maximum(col0[:, 1], 1e-4)
+    s_head_r = s_pos_rot('head'); s_neck_r = s_pos_rot('neck_01')
+    eye_mask0 = (
+        (P_rot[:, 1] > s_neck_r[1] + 0.06)
+        & (warmth0 < 1.45)
+        & (lum0 > 0.05)
+        & (np.abs(P_rot[:, 0]) < 0.04)
+        & (P_rot[:, 2] > s_head_r[2] + 0.03)
+    )
+    if int(eye_mask0.sum()) >= 3:
+        src_eye_y = float(np.median(P_rot[eye_mask0, 1]))
+
+eye_y_dst = float(d_pos('Head')[1] + (0.0910 if is_female else 0.0970))
+head_scale_ratio = 1.0 if textured else (1.045 if is_female else 1.025)
+print('turned', np.round(R0 @ np.array([1, 0, 0]), 2), 'floor->neck scale', round(S, 4), 'src_eye_y', round(src_eye_y, 4), 'head_scale_ratio', head_scale_ratio)
 toes = (R0 @ (s_pos('ball_l') - s_pos('foot_l')))[[0, 2]]; our_toes = (d_pos('ball_l') - d_pos('foot_l'))[[0, 2]]
 print('facing the same way:', float(toes @ our_toes) > 0)
 
@@ -151,7 +181,17 @@ def chain(src_chain, landmarks):
         for i in range(lo, hi + 1):
             target[names[i]] = a + (b - a) * (along / total)
             if i < hi: along += lengths[i - lo]
-chain(['pelvis', 'spine_01', 'spine_02', 'spine_03', 'spine_04', 'spine_05', 'neck_01', 'neck_02', 'head'], {'pelvis': 'pelvis', 'neck_01': 'neck_01', 'head': 'Head'})
+chain(['pelvis', 'spine_01', 'spine_02', 'spine_03', 'spine_04', 'spine_05', 'neck_01'], {'pelvis': 'pelvis', 'neck_01': 'neck_01'})
+s_head_rot = s_pos_rot('head')
+target['head'] = np.array([
+    d_pos('Head')[0],
+    eye_y_dst - head_scale_ratio * S * (src_eye_y - s_head_rot[1]),
+    d_pos('Head')[2],
+], dtype=np.float64)
+if 'neck_02' in sname:
+    l1 = np.linalg.norm(s_pos('neck_02') - s_pos('neck_01'))
+    l2 = np.linalg.norm(s_pos('head') - s_pos('neck_02'))
+    target['neck_02'] = target['neck_01'] + (target['head'] - target['neck_01']) * (l1 / max(l1 + l2, 1e-9))
 BONE_NEXT = {}
 def link(names):
     for a, b in zip(names, names[1:]): BONE_NEXT[a.lower()] = b.lower()
@@ -205,43 +245,118 @@ for side in ('_l', '_r'):
         bones[n] = (a, h[1] + h[2] @ (a - h[0]), h[2], 1.0, h[4])
 print('bones placed', len(bones), 'of', len(sname), 'stretch', {k: round(float(v[3]), 2) for k, v in bones.items() if k in ('spine_01', 'upperarm_l', 'lowerarm_l', 'thigh_l', 'calf_l', 'neck_01')})
 
-# Which of our joints each Tripo joint's weight goes to.
+# Which of our non-spine joints each Tripo joint's weight goes to (spine & pelvis weights are assigned
+# monotonically by Tripo spine band + fitted vertex Y after position fitting).
 def our_joint(n):
-    if n in dst_lower: return dst_lower[n]
-    if n.startswith('spine_'):
-        p = target[n]; spine = ['pelvis', 'spine_01', 'spine_02', 'spine_03', 'neck_01']
-        best = 'spine_03'
-        for s in spine[:-1]:
-            if d_pos(s)[1] <= p[1]: best = s
-        return dst_index[best]
+    if n.startswith('spine_'): return dst_index['spine_02']
     if n.startswith('neck'): return dst_index['neck_01']
     if 'metacarpal' in n: return dst_index['hand' + n[-2:]]
     if 'twist' in n: return dst_index[n.split('_twist')[0] + n[-2:]]
     if n == 'head': return dst_index['Head']
+    if n in dst_lower: return dst_lower[n]
     return None
 to_ours = {}
 for i, name in enumerate(src_names):
     k = our_joint(clean(name).lower()); to_ours[i] = k
 print('joints with no home in ours:', [src_names[i] for i, k in to_ours.items() if k is None])
 
+def sstep(lo, hi, val):
+    u = float(np.clip((val - lo) / max(hi - lo, 1e-6), 0.0, 1.0))
+    return u * u * (3.0 - 2.0 * u)
+
 P0 = P @ R0.T * S; N0 = N @ R0.T
 out_p = np.zeros_like(P); out_n = np.zeros_like(N); out_j = np.zeros_like(J); out_w = np.zeros_like(W)
 pelvis = bones['pelvis']
+s_pelvis_y = float(pelvis[0][1])
 for v in range(len(P)):
-    merged = {}
     for k in range(4):
         w = W[v, k]
         if w <= 0: continue
-        i = int(J[v, k]); n = clean(src_names[i]).lower(); a, t, R, stretch, axis = bones.get(n, pelvis)
+        i = int(J[v, k]); n = clean(src_names[i]).lower()
+        a, t, R, stretch, axis = bones.get(n, pelvis)
         rel = P0[v] - a
-        along = rel @ axis
-        moved = t + R @ (rel + axis * along * (stretch - 1))
-        out_p[v] += w * moved; out_n[v] += w * (R @ N0[v])
-        d = to_ours[i] if to_ours[i] is not None else dst_index['pelvis']
-        merged[d] = merged.get(d, 0) + w
-    top = sorted(merged.items(), key=lambda kv: -kv[1])[:4]; total = sum(w for _, w in top)
-    for k, (d, w) in enumerate(top): out_j[v, k] = d; out_w[v, k] = w / total
+        if n == 'head':
+            moved = t + (R @ rel) * head_scale_ratio
+            rot_n = R @ N0[v]
+        elif (n == 'pelvis' or n.startswith('spine_')) and P0[v, 1] < s_pelvis_y + 0.03:
+            # Coat-skirt / groin vertices hanging below pelvis follow hip translation cleanly without lumbar tilt/stretch.
+            rigid_moved = pelvis[1] + (P0[v] - pelvis[0])
+            along = rel @ axis
+            chain_moved = t + R @ (rel + axis * along * (stretch - 1))
+            bt = sstep(s_pelvis_y - 0.04, s_pelvis_y + 0.03, P0[v, 1])
+            moved = rigid_moved * (1.0 - bt) + chain_moved * bt
+            rot_n = N0[v] * (1.0 - bt) + (R @ N0[v]) * bt
+        else:
+            along = rel @ axis
+            moved = t + R @ (rel + axis * along * (stretch - 1))
+            rot_n = R @ N0[v]
+        out_p[v] += w * moved; out_n[v] += w * rot_n
 out_n /= np.maximum(np.linalg.norm(out_n, axis=1, keepdims=True), 1e-9)
+
+# Monotonic anatomical spine & coat-skirt weight assignment using fitted vertex coordinates.
+pelvis_idx = dst_index['pelvis']
+sp1_idx, sp2_idx, sp3_idx = dst_index['spine_01'], dst_index['spine_02'], dst_index['spine_03']
+thigh_l_idx, thigh_r_idx = dst_index['thigh_l'], dst_index['thigh_r']
+pelvis_y = float(d_pos('pelvis')[1])
+sp1_y = float(d_pos('spine_01')[1])
+sp2_y = float(d_pos('spine_02')[1])
+sp3_y = float(d_pos('spine_03')[1])
+waist_guard_y = max(pelvis_y + 0.06, 0.96 if not is_female else 0.922)
+
+for v in range(len(P)):
+    vy = float(out_p[v, 1]); vx = float(out_p[v, 0])
+    merged = {}
+    def add_w(j_idx, amt):
+        if amt > 1e-6:
+            merged[j_idx] = merged.get(j_idx, 0.0) + amt
+    for k in range(4):
+        w = float(W[v, k])
+        if w <= 0: continue
+        i = int(J[v, k]); n = clean(src_names[i]).lower()
+        if n == 'pelvis' or n.startswith('spine_'):
+            if vy <= pelvis_y:
+                # Coat-skirt & hip vertices below pelvis: blend smoothly from pelvis into left/right thighs, zero spine weight.
+                t_skirt = sstep(pelvis_y - 0.01, pelvis_y - 0.24, vy)
+                w_pel = w * (1.0 - 0.86 * t_skirt)
+                w_leg = w - w_pel
+                s_left = 0.5 + 0.5 * float(np.tanh(vx / 0.055))
+                add_w(pelvis_idx, w_pel)
+                add_w(thigh_l_idx, w_leg * s_left)
+                add_w(thigh_r_idx, w_leg * (1.0 - s_left))
+            elif vy < waist_guard_y:
+                # Lower-waist band (below 0.96 m on male/captain): only pelvis and spine_01, never spine_02/spine_03.
+                if n == 'pelvis':
+                    add_w(pelvis_idx, w)
+                else:
+                    tw = sstep(pelvis_y, waist_guard_y, vy)
+                    add_w(pelvis_idx, w * (1.0 - tw))
+                    add_w(sp1_idx, w * tw)
+            else:
+                if n == 'pelvis':
+                    add_w(pelvis_idx, w)
+                elif n == 'spine_01':
+                    add_w(sp1_idx, w)
+                elif n == 'spine_02':
+                    t12 = sstep(sp1_y + 0.01, sp2_y - 0.02, vy)
+                    add_w(sp1_idx, w * (1.0 - t12))
+                    add_w(sp2_idx, w * t12)
+                elif n == 'spine_03':
+                    add_w(sp2_idx, w)
+                elif n == 'spine_04':
+                    t23 = sstep(sp2_y + 0.04, sp3_y, vy)
+                    add_w(sp2_idx, w * (1.0 - t23))
+                    add_w(sp3_idx, w * t23)
+                else:  # spine_05+ (upper ribcage / pectorals) -> spine_03 (smoothly handing off from spine_02 below chest)
+                    t23 = sstep(sp2_y + 0.03, sp3_y - 0.01, vy)
+                    add_w(sp2_idx, w * (1.0 - t23))
+                    add_w(sp3_idx, w * t23)
+        else:
+            d = to_ours[i] if to_ours[i] is not None else mapping.get(i, pelvis_idx)
+            add_w(d, w)
+    top = sorted(merged.items(), key=lambda kv: -kv[1])[:4]
+    total = sum(w_ for _, w_ in top) or 1.0
+    for k, (d, w_) in enumerate(top):
+        out_j[v, k] = d; out_w[v, k] = w_ / total
 print('fitted bounds', out_p.min(0).round(3), out_p.max(0).round(3), 'ours were', old.min(0).round(3), old.max(0).round(3))
 
 # ---- hinges -----------------------------------------------------------------------------------
@@ -283,9 +398,23 @@ def classic_mesh():
 old_p, old_j, old_w = classic_mesh()
 def dominant(joints, weights): return joints[np.arange(len(joints)), weights.argmax(1)]
 old_top = dominant(old_j, old_w)
+MIN_LIMB_RAD = {
+    'upperarm': 0.068 if is_female else 0.076,
+    'lowerarm': 0.054 if is_female else 0.062,
+    'thigh': 0.104 if is_female else 0.108,
+    'calf': 0.076 if is_female else 0.082,
+}
 for bone, nxt in LIMBS.items():
+    if textured and bone.startswith('thigh'):
+        continue  # Preserve the captain's tailored frock-coat skirt over the thighs.
     index = dst_index[bone]
-    allowed = np.percentile(np.linalg.norm(radii(old_p[old_top == index], None, None, bone, nxt), axis=1), 95)
+    part_kind = bone[:-2]
+    allowed = max(
+        float(np.percentile(np.linalg.norm(radii(old_p[old_top == index], None, None, bone, nxt), axis=1), 95)),
+        MIN_LIMB_RAD[part_kind],
+    )
+    if textured:
+        allowed *= 1.12
     radial = radii(out_p, None, None, bone, nxt)
     mine = np.percentile(np.linalg.norm(radial[dominant(out_j, out_w) == index], axis=1), 95)
     if mine <= allowed: continue
@@ -295,7 +424,7 @@ for bone, nxt in LIMBS.items():
 
 # Scale radial hand & finger thickness to match the mended classic finger lengths (0.78x male, 0.84x female),
 # tapering smoothly across the distal wrist so forearms blend cleanly into natural human-proportioned hands.
-hand_radial_scale = 0.84 if is_female else 0.78
+hand_radial_scale = 0.80 if is_female else 0.76
 for side in ('_l', '_r'):
     hand_slot = dst_index['hand' + side]
     low_slot = dst_index['lowerarm' + side]
@@ -373,15 +502,15 @@ print('regions', {name: int((regions == k).sum()) for name, k in (('paint', 0), 
 if bald:
     head_p = d_pos('Head')
     head_slot = dst_index['Head']
-    cran_c = np.array([0.0, head_p[1] + (0.068 if is_female else 0.064), head_p[2] + (0.006 if is_female else 0.008)], dtype=np.float64)
-    cran_r = np.array([0.071, 0.091, 0.089] if is_female else [0.075, 0.096, 0.093], dtype=np.float64)
-    eye_y = head_p[1] + (0.078 if is_female else 0.070)
+    cran_c = np.array([0.0, head_p[1] + (0.095 if is_female else 0.102), head_p[2] + (0.006 if is_female else 0.008)], dtype=np.float64)
+    cran_r = np.array([0.075, 0.103, 0.094] if is_female else [0.079, 0.108, 0.098], dtype=np.float64)
+    eye_y = head_p[1] + (0.091 if is_female else 0.097)
     is_eyebrow = (
         (regions == HAIR)
         & (out_p[:, 2] > head_p[2] + 0.068)
-        & (np.abs(out_p[:, 0]) < 0.056)
-        & (out_p[:, 1] > eye_y - 0.020)
-        & (out_p[:, 1] < eye_y + 0.028)
+        & (np.abs(out_p[:, 0]) < 0.058)
+        & (out_p[:, 1] > eye_y - 0.018)
+        & (out_p[:, 1] < eye_y + 0.030)
     )
     if int(is_eyebrow.sum()) < 6:
         hair_idx = np.nonzero(regions == HAIR)[0]
@@ -391,7 +520,7 @@ if bald:
 
     rel_c = (out_p - cran_c) / cran_r
     rho = np.linalg.norm(rel_c, axis=1)
-    in_lower_front_face = (out_p[:, 2] > head_p[2] + 0.032) & (out_p[:, 1] < cran_c[1] + 0.042) & (np.abs(out_p[:, 0]) < 0.068)
+    in_lower_front_face = (out_p[:, 2] > head_p[2] + 0.032) & (out_p[:, 1] < eye_y + 0.034) & (np.abs(out_p[:, 0]) < 0.070)
     protruding_head = (out_p[:, 1] > head_p[1] - 0.015) & (regions != 0) & (~in_lower_front_face) & (~is_eyebrow) & (rho > 1.015)
     hair_scalp = (regions == HAIR) & (~is_eyebrow)
 
@@ -412,7 +541,7 @@ if bald:
     sc_w_idx = np.nonzero(sc_w_mask)[0]
 
     # Tuck any low-hanging ponytail / nape locks smoothly up onto the occipital skull base before ellipsoid projection.
-    nape_floor = cran_c[1] - 0.072
+    nape_floor = cran_c[1] - 0.078
     low_w = sc_w_mask & (weld_p[:, 1] < nape_floor)
     if np.any(low_w):
         weld_p[low_w, 1] = nape_floor - 0.010 * np.tanh((nape_floor - weld_p[low_w, 1]) / 0.045)
@@ -451,19 +580,31 @@ if bald:
     out_j[bind_head] = [head_slot, 0, 0, 0]
     out_w[bind_head] = [1.0, 0.0, 0.0, 0.0]
 
-    # Recompute smooth vertex normals across scalp + 1-ring welded boundary so the bald dome lights evenly.
-    touch_tris = sc_w_mask[tris_w].any(axis=1)
-    touch_w = np.zeros(len(weld_p), dtype=bool)
-    touch_w[np.unique(tris_w[touch_tris])] = True
-    fn = np.cross(out_p[tris0[:, 1]] - out_p[tris0[:, 0]], out_p[tris0[:, 2]] - out_p[tris0[:, 0]])
-    welded_n = np.zeros_like(weld_p)
-    for k_c in range(3):
-        np.add.at(welded_n, tris_w[:, k_c], fn)
-    wn_len = np.maximum(np.linalg.norm(welded_n, axis=1, keepdims=True), 1e-9)
-    welded_n /= wn_len
-    touch_verts = np.nonzero(touch_w[weld_inv])[0]
-    out_n[touch_verts] = welded_n[weld_inv[touch_verts]]
+# Recompute smooth vertex normals across the entire mesh after all vertex position adjustments,
+# welding UV-seam vertices with consistent facing (dot > -0.25) so thin cloth brims/cuffs stay crisp.
+tris_all = I.reshape(-1, 3)
+fn_all = np.cross(out_p[tris_all[:, 1]] - out_p[tris_all[:, 0]], out_p[tris_all[:, 2]] - out_p[tris_all[:, 0]])
+raw_vn = np.zeros_like(out_p)
+for k_c in range(3):
+    np.add.at(raw_vn, tris_all[:, k_c], fn_all)
+raw_len = np.linalg.norm(raw_vn, axis=1, keepdims=True)
+ref_n = np.where(raw_len > 1e-10, raw_vn / np.maximum(raw_len, 1e-10), out_n)
+pos_keys_n = np.round(out_p * 1e4).astype(np.int64)
+_, inv_n = np.unique(pos_keys_n, axis=0, return_inverse=True)
+inv_n = inv_n.ravel()
+order_n = np.argsort(inv_n)
+splits_n = np.nonzero(np.diff(inv_n[order_n]))[0] + 1
+smoothed_n = raw_vn.copy()
+for grp in np.split(order_n, splits_n):
+    if len(grp) <= 1:
+        continue
+    g_ref = ref_n[grp]
+    same_side = ((g_ref @ g_ref.T) > -0.25).astype(np.float64)
+    smoothed_n[grp] = same_side @ raw_vn[grp]
+sm_len = np.linalg.norm(smoothed_n, axis=1, keepdims=True)
+out_n = np.where(sm_len > 1e-10, smoothed_n / np.maximum(sm_len, 1e-10), ref_n)
 
+if bald:
     # Re-tag bald scalp vertices as SKIN with clean cranial skin shading matching the face's median skin tone.
     face_skin = (regions == SKIN) & (out_p[:, 1] > head_p[1]) & (~is_scalp)
     typical_face = np.median(colors[face_skin if np.any(face_skin) else (regions == SKIN)], axis=0)
@@ -520,7 +661,16 @@ def carry(index):
     a['bufferView'] = add_bytes(dst_bin[start:start + v['byteLength']]); accessors.append(a)
     carried[index] = len(accessors) - 1
     return carried[index]
-dst_skin['inverseBindMatrices'] = carry(dst_skin['inverseBindMatrices'])
+dst_node_worlds, _ = world_matrices(dst)
+ibm_mats = np.zeros((len(dst_skin['joints']), 4, 4), dtype=np.float64)
+max_ibm_err = 0.0
+for j_slot, node_idx in enumerate(dst_skin['joints']):
+    w_rest = dst_node_worlds[node_idx]
+    inv_w = np.linalg.inv(w_rest)
+    max_ibm_err = max(max_ibm_err, float(np.max(np.abs(w_rest @ inv_w.astype(np.float32) - np.eye(4)))))
+    ibm_mats[j_slot] = inv_w.T
+assert max_ibm_err < 1e-5, f'IBM rest-pose error too large: {max_ibm_err}'
+dst_skin['inverseBindMatrices'] = add(ibm_mats.astype(np.float32).reshape(-1, 16), None, 'MAT4', 5126)
 for animation in dst['animations']:
     for sampler in animation['samplers']:
         sampler['input'] = carry(sampler['input']); sampler['output'] = carry(sampler['output'])

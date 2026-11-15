@@ -2533,7 +2533,7 @@ export function sweepBuildingSegment(from, to, radius = 0.08, port, options = nu
   const previewOnly = options?.previewOnly === true, exact = !previewOnly || options?.exact === true;
   let best = sweepJettySegment(from, to, radius, port, options);
   for (const inst of instances) {
-    if (inst === options?.ignore) continue;
+    if (inst === options?.ignore || inst?.boulder) continue;
     const baseY = inst.baseY ?? inst.y ?? 0;
     const reach = buildingReach(inst);
     const foundDepth = Math.max(0, inst.foundationDepth ?? 4.5);
@@ -3900,6 +3900,15 @@ export function sweepScenerySegment(from, to, radius = 0.08, terrain, options = 
     }
   }
 
+  const bHit = terrain.sweepBoulderSegment?.(from, to, radius, options);
+  if (bHit && (!best || bHit.fraction < best.fraction)) {
+    best = {
+      ...bHit,
+      kind: 'scenery',
+      sceneryType: 'boulder',
+    };
+  }
+
   return best;
 }
 
@@ -3913,6 +3922,42 @@ export function applySceneryImpactDamage(terrain, event) {
   const pos = event.surfacePosition ?? event.position ?? event.sceneryPos ?? [0, 0, 0];
   const normal = event.normal ?? [0, 1, 0];
   const craterRadius = +(0.55 * Math.cbrt(mass / 5.4) * Math.max(0.8, Math.cbrt(energy / 100000))).toFixed(2);
+  if (event.sceneryType === 'boulder' || event.boulder) {
+    const record = {
+      position: [...pos],
+      normal: [...normal],
+      sceneryType: 'boulder',
+      materialClass: 'stone',
+      energyKj: +(energy / 1000).toFixed(1),
+      craterRadius,
+      time: event.time ?? 0,
+    };
+    if (terrain.sceneryImpacts.length >= 64) terrain.sceneryImpacts.shift();
+    terrain.sceneryImpacts.push(record);
+    event.materialClass = 'stone';
+    event.felled = false;
+    const struck = terrain.strikeBoulder?.({
+      ...event,
+      position: [...pos],
+      normal: [...normal],
+      velocity: [...vel],
+      energy,
+      mass,
+      craterRadius,
+      time: event.time ?? 0,
+    }) ?? null;
+    return {
+      kind: 'scenery',
+      sceneryType: 'boulder',
+      materialClass: 'stone',
+      hitCount: terrain.sceneryImpacts.length,
+      craterRadius,
+      energyKj: record.energyKj,
+      felled: false,
+      chipped: Boolean(struck?.chipped ?? true),
+      shardsReleased: struck?.shardsReleased ?? 0,
+    };
+  }
   // A tree of the forest: the ball's mark goes in its root, on the GPU and in the save, as the next frame begins.
   const forestTree = event.forestTree ?? null;
   if (forestTree) {
@@ -4104,6 +4149,17 @@ export function applyTerrainImpactDamage(terrain, event) {
   const sand = terrain.sandAt?.(pos[0], pos[2]) ?? 0;
   terrain.pendingCraters ??= [];
   terrain.pendingCraters.push({ x: pos[0], z: pos[2], energyJ: energy, velocity: vel, normal, sand });
+  terrain.strikeBoulder?.({
+    position: [...pos],
+    normal: [...normal],
+    velocity: [...vel],
+    energy: energy * 0.65,
+    mass,
+    craterRadius,
+    blastRadius: Math.max(2.2, craterRadius * 1.65),
+    blastOnly: true,
+    time: event.time ?? 0,
+  });
 
   // Also blast/char any coastal palm trees standing right next to the terrain crater
   const ports = terrain.ports ?? (terrain.port ? [terrain.port] : null);
@@ -4455,7 +4511,7 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
       ?4
       :hitInfo.kind==='ship'
         ?(hitInfo.hitZone==='rigging'?2:1)
-        :(hitInfo.kind==='terrain'||hitInfo.kind==='building'||hitInfo.kind==='jetty')
+        :(hitInfo.kind==='terrain'||hitInfo.kind==='building'||hitInfo.kind==='jetty'||(hitInfo.kind==='scenery'&&hitInfo.sceneryType==='boulder'))
           ?3
           :0;
     const segments=[];

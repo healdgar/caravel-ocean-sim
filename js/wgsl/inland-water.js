@@ -281,8 +281,12 @@ fn thalwegBoil(p: vec2f, t: f32, scale: f32) -> vec3f {
   let fw = fwidth(pat) + 0.03;
 
   // ---- Fluvial surface mechanics (advected current trains, swirling eddies, boils, standing riffles) ----
-  let detail1 = 1.0 - smoothstep(0.18, 0.75, footprint * 1.15);
-  let detail2 = 1.0 - smoothstep(0.16, 0.65, footprint * 2.45);
+  // Distance-gate sub-metre procedural gnoise normal finite-differences strictly within 220 m (< 0.5 px beyond 220 m),
+  // transferring unresolved slope energy smoothly into LEAN microfacet covariance unresFluvial.
+  let distFade1 = 1.0 - smoothstep(140.0, 220.0, dist);
+  let distFade2 = 1.0 - smoothstep(80.0, 145.0, dist);
+  let detail1 = (1.0 - smoothstep(0.18, 0.75, footprint * 1.15)) * distFade1;
+  let detail2 = (1.0 - smoothstep(0.16, 0.65, footprint * 2.45)) * distFade2;
   let eddyAmt = clamp(in.hydroVars.z, 0.0, 1.0);
   let riffleAmt = clamp(in.hydroVars.w, 0.0, 1.5);
   let thalDist = in.hydroVars.y - in.coordThal.z;
@@ -363,10 +367,11 @@ fn thalwegBoil(p: vec2f, t: f32, scale: f32) -> vec3f {
     var s = vec2f(0.0);
     for (var c = 0u; c < ${CASCADES}u; c++) {
       let invL = F.cascInvL[c >> 2u][c & 3u];
+      let mipLod = max(0.0, log2(max(footprint * invL * TEX_N, 1.0)));
+      if (c >= 3u && mipLod >= 7.5) { continue; }
       let uv = xz * invL;
       let cw = select(cws.chopScale, cws.swellScale, c <= 1u);
       let gk = mix(1.0, gust, select(0.0, select(0.5, 1.0, c >= 4u), c >= 3u)) * cw;
-      let mipLod = max(0.0, log2(max(footprint * invL * TEX_N, 1.0)));
       let dv = textureSampleLevel(derivTex, sampR, uv, c, mipLod) * gk;
       let moments = textureSampleLevel(momTex, sampR, uv, c, mipLod);
       let mv = moments.xyz * (gk * gk);
@@ -382,12 +387,14 @@ fn thalwegBoil(p: vec2f, t: f32, scale: f32) -> vec3f {
 
     let bankMask = mix(1.0 - 0.85 * smoothstep(0.68, 1.0, bankAbs), 1.0, seaOpen);
     let barEnv = 4.0 * estuaryT * (1.0 - estuaryT) * (1.0 - smoothstep(0.72, 0.89, oceanConv)) * bankMask;
-    let opposing = clamp(-dot(dir, cws.shoreDir) * 0.65 + 0.45, 0.0, 1.15);
-    let bw = riverBarWave(xz, dir, cws.shoreDir, speed, t);
-    let barScale = barEnv * opposing * (0.45 + 0.45 * min(speed, 2.0));
-    barSl = bw.yz * barScale;
-    let crestLine = smoothstep(0.015, 0.075, bw.x);
-    barFoam = clamp(barEnv * opposing * crestLine * (0.48 + 0.52 * speed * 0.5), 0.0, 0.82);
+    if (barEnv > 0.002) {
+      let opposing = clamp(-dot(dir, cws.shoreDir) * 0.65 + 0.45, 0.0, 1.15);
+      let bw = riverBarWave(xz, dir, cws.shoreDir, speed, t);
+      let barScale = barEnv * opposing * (0.45 + 0.45 * min(speed, 2.0));
+      barSl = bw.yz * barScale;
+      let crestLine = smoothstep(0.015, 0.075, bw.x);
+      barFoam = clamp(barEnv * opposing * crestLine * (0.48 + 0.52 * speed * 0.5), 0.0, 0.82);
+    }
     shoreBreak = coastalBreakerFoam(xz, cwsSwashH, oceanSl + barSl, cws);
   }
 
@@ -396,7 +403,7 @@ fn thalwegBoil(p: vec2f, t: f32, scale: f32) -> vec3f {
 
   // LEAN anisotropic covariance: preserves unresolved fluvial ripple sheen far upstream and merges seamlessly into oceanCov.
   let fluvialBaseVar = select(0.0022 + speed * 0.0026 + riffleAmt * 0.0045 + eddyAmt * 0.0020, 0.0014, isPond || isCanal);
-  let unresFluvial = fluvialBaseVar * (1.0 - detail2 * 0.55) * (1.0 - boilSlick * 0.72) * fluvialW * fluvialW;
+  let unresFluvial = fluvialBaseVar * (1.0 - detail1 * 0.25 - detail2 * 0.45) * (1.0 - boilSlick * 0.72) * fluvialW * fluvialW;
   let unresOcean = F.waterCol.w + 0.0035 * smoothstep(30.0, 500.0, dist);
   var cov = oceanCov * (oceanBlend * oceanBlend) + vec3f(unresOcean * oceanBlend + unresFluvial + length(barSl) * 0.015, unresOcean * oceanBlend + unresFluvial + length(barSl) * 0.015, 0.0);
   cov.x = max(cov.x, 1e-4);
@@ -461,7 +468,10 @@ fn thalwegBoil(p: vec2f, t: f32, scale: f32) -> vec3f {
   let refr = refract(-V, nrm, 1.0 / 1.333);
   let rayStep = depth / max(-refr.y, 0.25);
   let bedXZ = in.rawXZ + refr.xz * clamp(rayStep, 0.0, 4.5);
-  let pebble = select(0.0, gnoise(bedXZ * 3.4) * (1.0 - smoothstep(0.12, 0.55, footprint * 3.4)), detail2 > 0.0);
+  var pebble = 0.0;
+  if (detail2 > 0.0) {
+    pebble = gnoise(bedXZ * 3.4) * (1.0 - smoothstep(0.12, 0.55, footprint * 3.4)) * detail2;
+  }
   let bankAO = mix(1.0, 0.72, smoothstep(0.58, 0.96, bankAbs) * (1.0 - seaOpen));
   let bedShallow = vec3f(0.118, 0.100, 0.075) * (1.0 + 0.20 * pebble);
   let bedDeep = select(vec3f(0.032, 0.046, 0.036), vec3f(0.025, 0.042, 0.039), isPond);
@@ -502,7 +512,12 @@ fn thalwegBoil(p: vec2f, t: f32, scale: f32) -> vec3f {
   }
 
   // ---- Foam: advected riffle lace, swirling eddy scum, bridge cutwater wakes & river-bar breaker convergence ----
-  let riffleCover = smoothstep(0.28, 1.15, riffleAmt) * (0.42 + 0.58 * clamp(0.5 + 0.65 * gnoise(posA * 0.9), 0.0, 1.0));
+  let riffleBase = smoothstep(0.28, 1.15, riffleAmt);
+  var riffleMod = patFluvial;
+  if (riffleBase > 0.0 && distFade1 > 0.0) {
+    riffleMod = mix(patFluvial, clamp(0.5 + 0.65 * gnoise(posA * 0.9), 0.0, 1.0), distFade1);
+  }
+  let riffleCover = riffleBase * (0.42 + 0.58 * riffleMod);
   let eddyCover = smoothstep(0.32, 0.92, eddyAmt) * smoothstep(0.65, 2.4, speed) * (0.28 + 0.45 * eddyDimple) * 0.58;
   let bankLace = smoothstep(0.84, 0.99, bankAbs) * (1.0 - seaOpen) * smoothstep(0.85, 2.1, speed) * 0.30;
   let freshOcean = select(0.0, breakingCompression(jxx, jzz, jxz, F.foamP.x), estuaryT > 0.001);

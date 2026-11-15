@@ -9,13 +9,22 @@ import { poseMoveBone, poseRotation, solveCrewLimb, turnBone } from './crew-pose
 import { TOWN_COWER_FRAMES, TOWN_FALL_FRAMES, TOWN_FALL_RATE } from './wgsl/townsfolk.js';
 
 const JOINT_FLOATS = 65 * 16;
+export const TOWN_CLIP_IDLE = 0;
+export const TOWN_CLIP_WALK = 1;
+export const TOWN_CLIP_RUN = 2;
+export const TOWN_CLIP_COWER = 3;
+export const TOWN_CLIP_FALL_FWD = 4;
+export const TOWN_CLIP_FALL_BACK = 5;
+export const TOWN_CLIP_CARRY = 6;
+export const TOWN_CLIP_WORK = 7;
+
 // How much wider than a walk a run swings each limb, and how it carries itself.
-const RUN_SWING = Object.freeze({ thigh: 1.7, calf: 1.5, upperarm: 1.8, lowerarm: 1.15 });
-const RUN_LEAN_RADIANS = 0.3;
-const RUN_ELBOW_RADIANS = 1.05;
-const COWER_DROP_M = 0.5;
-const COWER_BACK_M = 0.14;
-const COWER_LEAN_RADIANS = 1.5;
+const RUN_SWING = Object.freeze({ thigh: 1.40, calf: 1.35, upperarm: 1.42, lowerarm: 1.12 });
+const RUN_LEAN_RADIANS = 0.22;
+const RUN_ELBOW_RADIANS = 0.90;
+const COWER_DROP_M = 0.44;
+const COWER_BACK_M = 0.12;
+const COWER_LEAN_RADIANS = 1.35;
 const FALL_STEPS_PER_FRAME = 2;
 const FALL_THROW_M_S = 2;
 
@@ -66,11 +75,15 @@ function bakeRun(a, frames, duration, keep) {
     }
     a.update();
     turnBone(a, spine, [0, 1, 0], [0, Math.cos(RUN_LEAN_RADIANS), Math.sin(RUN_LEAN_RADIANS)]);
-    const flex = Math.cos(RUN_ELBOW_RADIANS), raise = Math.sin(RUN_ELBOW_RADIANS);
+    // Flex elbows around the anatomical local hinge axis (+X in joint space) rather than character-global YZ.
+    const halfElbow = RUN_ELBOW_RADIANS * 0.5;
+    const elbowHinge = [Math.sin(halfElbow), 0, 0, Math.cos(halfElbow)];
+    const bent = new Float32Array(4);
     for (const [side] of LEFT_THEN_RIGHT) {
-      const lower = a.nodeIndex('lowerarm_' + side), elbow = nodeAt(a, lower), hand = nodeAt(a, a.nodeIndex('hand_' + side));
-      const d = [hand[0] - elbow[0], hand[1] - elbow[1], hand[2] - elbow[2]];
-      turnBone(a, lower, d, [d[0], d[1] * flex + d[2] * raise, d[2] * flex - d[1] * raise]);
+      const lower = a.nodeIndex('lowerarm_' + side);
+      gltfQuatMultiply(bent, a.pose[lower].r, elbowHinge);
+      a.pose[lower].r.set(bent);
+      a.updateBranch(lower);
     }
     let low = Infinity;
     for (const { node, rest } of soles) low = Math.min(low, nodeAt(a, node)[1] - rest);
@@ -96,10 +109,58 @@ function poseCower(a, amount) {
     keepSoleFlat(a, side);
   });
   const head = nodeAt(a, a.nodeIndex('Head'));
+  const arc = Math.sin(Math.PI * amount);
   LEFT_THEN_RIGHT.forEach(([side, sign], i) => {
-    const over = [head[0] + sign * 0.07, head[1] + 0.1, head[2] - 0.02];
-    solveCrewLimb(a, ['upperarm_' + side, 'lowerarm_' + side, 'hand_' + side], hands[i].map((v, k) => v + (over[k] - v) * amount), [sign * 0.7, 0.3, 0.5]);
+    const over = [head[0] + sign * 0.08, head[1] + 0.085, head[2] + 0.01];
+    const target = [
+      hands[i][0] + (over[0] - hands[i][0]) * amount + sign * 0.08 * arc,
+      hands[i][1] + (over[1] - hands[i][1]) * amount,
+      hands[i][2] + (over[2] - hands[i][2]) * amount + 0.14 * arc,
+    ];
+    solveCrewLimb(a, ['upperarm_' + side, 'lowerarm_' + side, 'hand_' + side], target, [sign * 0.8, -0.2, -0.5]);
   });
+}
+
+// Optional station pose helper: walking or standing while carrying a crate/basket in both hands before the waist.
+export function bakeCarryStationClip(a, frames, duration, keep) {
+  const halfElbow = 0.52;
+  const elbowHinge = [Math.sin(halfElbow), 0, 0, Math.cos(halfElbow)];
+  const bent = new Float32Array(4);
+  const spine2 = a.nodeIndex('spine_02');
+  for (let frame = 0; frame < frames; frame++) {
+    a.sample('Walk', frame / frames * duration);
+    if (spine2 >= 0) turnBone(a, spine2, [0, 1, 0], [0, Math.cos(-0.06), Math.sin(-0.06)]);
+    const chest = nodeAt(a, a.nodeIndex('spine_02'));
+    LEFT_THEN_RIGHT.forEach(([side, sign]) => {
+      const target = [chest[0] + sign * 0.13, chest[1] - 0.06, chest[2] + 0.24];
+      solveCrewLimb(a, ['upperarm_' + side, 'lowerarm_' + side, 'hand_' + side], target, [sign * 0.65, -0.35, -0.45]);
+      const lower = a.nodeIndex('lowerarm_' + side);
+      gltfQuatMultiply(bent, a.pose[lower].r, elbowHinge);
+      a.pose[lower].r.set(bent);
+      a.updateBranch(lower);
+    });
+    keep(frame);
+  }
+}
+
+// Optional station pose helper: standing work cycle tending nets, stalls, or cargo at bench height.
+export function bakeWorkStationClip(a, frames, duration, keep) {
+  const spine1 = a.nodeIndex('spine_01'), neck = a.nodeIndex('neck_01');
+  for (let frame = 0; frame < frames; frame++) {
+    const phase = (frame / frames) * Math.PI * 2;
+    a.sample('Idle', (frame / frames) * duration);
+    const lean = 0.18 + 0.04 * Math.sin(phase);
+    if (spine1 >= 0) turnBone(a, spine1, [0, 1, 0], [0, Math.cos(lean), Math.sin(lean)]);
+    if (neck >= 0) turnBone(a, neck, [0, 1, 0], [0, Math.cos(0.14), Math.sin(0.14)]);
+    const chest = nodeAt(a, a.nodeIndex('spine_02'));
+    LEFT_THEN_RIGHT.forEach(([side, sign]) => {
+      const reach = 0.24 + 0.05 * Math.sin(phase + sign * 0.9);
+      const lift = -0.02 + 0.03 * Math.cos(phase + sign * 0.9);
+      const target = [chest[0] + sign * 0.14, chest[1] + lift, chest[2] + reach];
+      solveCrewLimb(a, ['upperarm_' + side, 'lowerarm_' + side, 'hand_' + side], target, [sign * 0.7, -0.3, -0.45]);
+    });
+    keep(frame);
+  }
 }
 
 function bakeFall(a, sign, keep) {
@@ -124,18 +185,29 @@ export function bakeTownClips(a) {
   lengths.forEach((frames, i) => { layout[i * 2] = total; layout[i * 2 + 1] = frames; total += frames; });
   const palettes = new Float32Array(total * JOINT_FLOATS);
   const keeper = (clip) => (frame) => palettes.set(a.palette, (layout[clip * 2] + frame) * JOINT_FLOATS);
-  for (const [clip, name] of [[0, 'Idle'], [1, 'Walk']]) {
+  for (const [clip, name] of [[TOWN_CLIP_IDLE, 'Idle'], [TOWN_CLIP_WALK, 'Walk']]) {
     const duration = a.clips.get(name).duration, keep = keeper(clip);
     for (let frame = 0; frame < lengths[clip]; frame++) { a.sample(name, frame / lengths[clip] * duration); keep(frame); }
   }
-  bakeRun(a, walk, a.clips.get('Walk').duration, keeper(2));
-  const keepCower = keeper(3);
+  bakeRun(a, walk, a.clips.get('Walk').duration, keeper(TOWN_CLIP_RUN));
+  const keepCower = keeper(TOWN_CLIP_COWER);
   for (let frame = 0; frame < TOWN_COWER_FRAMES; frame++) {
     const t = frame / (TOWN_COWER_FRAMES - 1);
     poseCower(a, t * t * (3 - 2 * t));
     keepCower(frame);
   }
-  bakeFall(a, 1, keeper(4));
-  bakeFall(a, -1, keeper(5));
+  bakeFall(a, 1, keeper(TOWN_CLIP_FALL_FWD));
+  bakeFall(a, -1, keeper(TOWN_CLIP_FALL_BACK));
+  return { palettes, layout };
+}
+
+// Optional helper returning the two station clips (TOWN_CLIP_CARRY, TOWN_CLIP_WORK) without altering bakeTownClips layout.
+export function bakeTownStationClips(a) {
+  const framesOf = (name) => Math.max(1, Math.round(a.clips.get(name).duration * CREW_CLIP_RATE));
+  const carryFrames = framesOf('Walk'), workFrames = framesOf('Idle');
+  const layout = new Uint32Array([0, carryFrames, carryFrames, workFrames]);
+  const palettes = new Float32Array((carryFrames + workFrames) * JOINT_FLOATS);
+  bakeCarryStationClip(a, carryFrames, a.clips.get('Walk').duration, (f) => palettes.set(a.palette, f * JOINT_FLOATS));
+  bakeWorkStationClip(a, workFrames, a.clips.get('Idle').duration, (f) => palettes.set(a.palette, (carryFrames + f) * JOINT_FLOATS));
   return { palettes, layout };
 }

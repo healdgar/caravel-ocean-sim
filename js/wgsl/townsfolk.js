@@ -4,7 +4,7 @@
 // straight from the baked clips. Shot falling among them is all the pass keeps: a small record per
 // person, written only when something befalls them. js/town-shots.js says what it is given.
 import { FRAME_WGSL, SIM_CLOCK_LOOP_S } from './common.js';
-import { CREW_RENDER } from './crew.js';
+import { CREW_RENDER, CREW_JOINT_BLEND_WGSL } from './crew.js';
 import { SHADOW_FRAME } from './shadows.js';
 import { DRESS_MASK_SCALE } from '../indigenous-dress.js';
 import { ROUTE_STEP_M } from '../town-streets.js';
@@ -43,7 +43,7 @@ const TOWN_BLAST_CHANCE = 0.85;
 const TOWN_LOOK_AHEAD = 10;
 const TOWN_CORNERED_M = 2;
 const CLIP_FRAMES_PER_SECOND = 30;
-const BODY_HEIGHT_M = 1.75;
+const BODY_HEIGHT_M = 1.73;
 const BODY_BOUND_M = 1.3;
 const LYING_BOUND_M = 2.4;
 // How tall someone appears on screen, in pixels, at each change of detail. Each body is kept until it has about
@@ -354,15 +354,29 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
 }
 `;
 
+const TOWN_POSE_HELPERS = /* wgsl */ `
+fn townBonePose(frameA:u32,frameB:u32,blend:f32,bone:u32,isFemale:bool)->mat4x4f {
+  let b=min(bone,64u);
+  let mA=poses[frameA*65u+b];
+  if(blend<=0.0||frameA==frameB){return mA;}
+  return crewBlendJoint(mA,poses[frameB*65u+b],blend,crewRestJoint(b,isFemale));
+}
+fn townSkinPose(frameA:u32,frameB:u32,blend:f32,bones:vec4u,weights:vec4f,isFemale:bool)->mat4x4f {
+  var skin=mat4x4f(vec4f(0.0),vec4f(0.0),vec4f(0.0),vec4f(0.0));
+  if(weights.x>0.0){skin+=townBonePose(frameA,frameB,blend,bones.x,isFemale)*weights.x;}
+  if(weights.y>0.0){skin+=townBonePose(frameA,frameB,blend,bones.y,isFemale)*weights.y;}
+  if(weights.z>0.0){skin+=townBonePose(frameA,frameB,blend,bones.z,isFemale)*weights.z;}
+  if(weights.w>0.0){skin+=townBonePose(frameA,frameB,blend,bones.w,isFemale)*weights.w;}
+  return skin;
+}
+`;
+
 export const TOWNSFOLK_RENDER = CREW_RENDER + TOWN_BODY + /* wgsl */ `
 struct TownLook {shirt:vec4f,trousers:vec4f,skin:vec4f,hair:vec4f,face:vec4f};
 @group(0) @binding(10) var<storage,read> bodies:array<TownBody>;
 @group(0) @binding(11) var<storage,read> poses:array<mat4x4f>;
 @group(0) @binding(12) var<storage,read> looks:array<TownLook>;
-fn townPoseBones(frame:u32,bones:vec4u,weights:vec4f)->mat4x4f {
-  let at=frame*65u;
-  return poses[at+bones.x]*weights.x+poses[at+bones.y]*weights.y+poses[at+bones.z]*weights.z+poses[at+bones.w]*weights.w;
-}
+` + TOWN_POSE_HELPERS + /* wgsl */ `
 @vertex fn townsfolkVS(v:CrewInput)->CrewVertex {
   let body=bodies[v.instance];let look=looks[body.look];
   let dmgBits=u32(max(0.0,body.blend));
@@ -378,28 +392,28 @@ fn townPoseBones(frame:u32,bones:vec4u,weights:vec4f)->mat4x4f {
   var bones=v.bones;
   if(injury>=1u && injury<=5u){
     var loSlot=9u;var hiSlot=30u;var stumpSlot=8u;
-    var stumpPos=select(vec3f(0.308,1.192,-0.060),vec3f(0.243,1.163,-0.071),isFemale);
     if(injury==2u){
       loSlot=33u;hiSlot=54u;stumpSlot=32u;
-      stumpPos=select(vec3f(-0.239,1.212,-0.254),vec3f(-0.186,1.180,-0.224),isFemale);
     }else if(injury==3u){
       loSlot=56u;hiSlot=59u;stumpSlot=55u;
-      stumpPos=select(vec3f(0.175,0.501,0.109),vec3f(0.167,0.489,0.104),isFemale);
     }else if(injury==4u){
       loSlot=61u;hiSlot=64u;stumpSlot=60u;
-      stumpPos=select(vec3f(-0.189,0.481,-0.178),vec3f(-0.185,0.461,-0.170),isFemale);
     }else if(injury==5u){
       loSlot=5u;hiSlot=6u;stumpSlot=4u;
-      stumpPos=select(vec3f(-0.007,1.380,-0.031),vec3f(-0.006,1.350,-0.035),isFemale);
     }
+    let stumpPos=crewRestJoint(loSlot,isFemale);
     var sevWeight=0.0;
     if(bones.x>=loSlot && bones.x<=hiSlot){sevWeight+=v.weights.x;bones.x=stumpSlot;}
     if(bones.y>=loSlot && bones.y<=hiSlot){sevWeight+=v.weights.y;bones.y=stumpSlot;}
     if(bones.z>=loSlot && bones.z<=hiSlot){sevWeight+=v.weights.z;bones.z=stumpSlot;}
     if(bones.w>=loSlot && bones.w<=hiSlot){sevWeight+=v.weights.w;bones.w=stumpSlot;}
     if(sevWeight>0.0){
-      surface.position=mix(surface.position,stumpPos,clamp(sevWeight,0.0,1.0));
-      woundAmt=max(woundAmt,0.88+0.12*clamp(sevWeight,0.0,1.0));
+      let tSev=clamp(sevWeight,0.0,1.0);
+      let stumpAxis=stumpPos-crewRestJoint(stumpSlot,isFemale);
+      let stumpDir=stumpAxis*inverseSqrt(max(dot(stumpAxis,stumpAxis),1e-8));
+      surface.position=mix(surface.position,stumpPos,tSev);
+      surface.normal=normalize(mix(surface.normal,stumpDir,tSev));
+      woundAmt=max(woundAmt,0.88+0.12*tSev);
     }
   }else if(injury==6u || injury==7u){
     let isLeft=injury==6u;
@@ -410,18 +424,18 @@ fn townPoseBones(frame:u32,bones:vec4u,weights:vec4f)->mat4x4f {
     if(bones.z>=armLo && bones.z<=armHi){brkW+=v.weights.z;}
     if(bones.w>=armLo && bones.w<=armHi){brkW+=v.weights.w;}
     if(brkW>0.0){
-      let pivot=select(vec3f(-0.21,1.20,-0.18),vec3f(0.27,1.18,-0.06),isLeft);
+      let pivot=crewRestJoint(armLo,isFemale);
       let rel=surface.position-pivot;
       let ang=select(-0.68,0.68,isLeft)*clamp(brkW,0.0,1.0);
       let ca=cos(ang);let sa=sin(ang);
       surface.position=pivot+vec3f(rel.x*ca-rel.y*sa,rel.x*sa+rel.y*ca,rel.z);
+      surface.normal=normalize(vec3f(surface.normal.x*ca-surface.normal.y*sa,surface.normal.x*sa+surface.normal.y*ca,surface.normal.z));
     }
   }
-  var pose=townPoseBones(body.frameA,bones,v.weights);
-  if(blend>0.0){pose=pose*(1.0-blend)+townPoseBones(body.frameB,bones,v.weights)*blend;}
+  let pose=townSkinPose(body.frameA,body.frameB,blend,bones,v.weights,isFemale);
   let c=cos(body.heading);let s=sin(body.heading);
   let local=(pose*vec4f(surface.position,1)).xyz;
-  let turned=(pose*vec4f(surface.normal,0)).xyz;
+  let turned=crewOrthonormal3x3(pose)*surface.normal;
   var out:CrewVertex;
   out.world=vec3f(local.x*c+local.z*s,local.y,local.z*c-local.x*s)+body.position;
   out.position=F.viewProj*vec4f(out.world-F.camPos.xyz,1);
@@ -440,7 +454,7 @@ fn townPoseBones(frame:u32,bones:vec4u,weights:vec4f)->mat4x4f {
 }
 `;
 
-export const TOWNSFOLK_SHADOW = SHADOW_FRAME + TOWN_BODY + /* wgsl */ `
+export const TOWNSFOLK_SHADOW = SHADOW_FRAME + CREW_JOINT_BLEND_WGSL + TOWN_BODY + /* wgsl */ `
 struct TownLook {shirt:vec4f,trousers:vec4f,skin:vec4f,hair:vec4f,face:vec4f};
 struct CrewInput {
   @location(0) position:vec3f, @location(1) normal:vec3f,
@@ -451,6 +465,7 @@ struct CrewInput {
 @group(0) @binding(1) var<storage,read> bodies:array<TownBody>;
 @group(0) @binding(2) var<storage,read> poses:array<mat4x4f>;
 @group(0) @binding(3) var<storage,read> looks:array<TownLook>;
+` + TOWN_POSE_HELPERS + /* wgsl */ `
 fn crewDressOf(hairW:f32)->u32 {return u32(fract(hairW)*${DRESS_MASK_SCALE}.0+.5);}
 fn crewPieceHidden(color:vec3f,dress:u32)->bool {
   let piece=u32(color.r*.5);
@@ -475,18 +490,46 @@ fn crewCompHidden(color:vec3f,compMask:u32)->bool {
   if(comp<=12u){return beard==0u||comp!=9u+beard;}
   return gar==0u||comp!=12u+gar;
 }
-fn townPoseBones(frame:u32,bones:vec4u,weights:vec4f)->mat4x4f {
-  let at=frame*65u;
-  return poses[at+bones.x]*weights.x+poses[at+bones.y]*weights.y+poses[at+bones.z]*weights.z+poses[at+bones.w]*weights.w;
-}
 @vertex fn townsfolkShadowVS(v:CrewInput)->@builtin(position) vec4f {
   let body=bodies[v.instance];let look=looks[body.look];
   if(crewCompHidden(v.color,crewCompMask(look.face.w))){return vec4f(2,2,0,1);}
   let dress=crewDressOf(look.hair.w);
-  let surfacePos=select(v.position,vec3f(0.0,1.62,0.0),crewPieceHidden(v.color,dress));
+  let isFemale=look.skin.w>0.5;
+  var surfacePos=select(v.position,vec3f(0.0,1.55,0.0),crewPieceHidden(v.color,dress));
+  let dmgBits=u32(max(0.0,body.blend));
+  let injury=dmgBits&7u;
+  var bones=v.bones;
+  if(injury>=1u && injury<=5u){
+    var loSlot=9u;var hiSlot=30u;var stumpSlot=8u;
+    if(injury==2u){loSlot=33u;hiSlot=54u;stumpSlot=32u;}
+    else if(injury==3u){loSlot=56u;hiSlot=59u;stumpSlot=55u;}
+    else if(injury==4u){loSlot=61u;hiSlot=64u;stumpSlot=60u;}
+    else if(injury==5u){loSlot=5u;hiSlot=6u;stumpSlot=4u;}
+    let stumpPos=crewRestJoint(loSlot,isFemale);
+    var sevWeight=0.0;
+    if(bones.x>=loSlot && bones.x<=hiSlot){sevWeight+=v.weights.x;bones.x=stumpSlot;}
+    if(bones.y>=loSlot && bones.y<=hiSlot){sevWeight+=v.weights.y;bones.y=stumpSlot;}
+    if(bones.z>=loSlot && bones.z<=hiSlot){sevWeight+=v.weights.z;bones.z=stumpSlot;}
+    if(bones.w>=loSlot && bones.w<=hiSlot){sevWeight+=v.weights.w;bones.w=stumpSlot;}
+    if(sevWeight>0.0){surfacePos=mix(surfacePos,stumpPos,clamp(sevWeight,0.0,1.0));}
+  }else if(injury==6u || injury==7u){
+    let isLeft=injury==6u;
+    let armLo=select(33u,9u,isLeft);let armHi=select(54u,30u,isLeft);
+    var brkW=0.0;
+    if(bones.x>=armLo && bones.x<=armHi){brkW+=v.weights.x;}
+    if(bones.y>=armLo && bones.y<=armHi){brkW+=v.weights.y;}
+    if(bones.z>=armLo && bones.z<=armHi){brkW+=v.weights.z;}
+    if(bones.w>=armLo && bones.w<=armHi){brkW+=v.weights.w;}
+    if(brkW>0.0){
+      let pivot=crewRestJoint(armLo,isFemale);
+      let rel=surfacePos-pivot;
+      let ang=select(-0.68,0.68,isLeft)*clamp(brkW,0.0,1.0);
+      let ca=cos(ang);let sa=sin(ang);
+      surfacePos=pivot+vec3f(rel.x*ca-rel.y*sa,rel.x*sa+rel.y*ca,rel.z);
+    }
+  }
   let blend=fract(body.blend);
-  var pose=townPoseBones(body.frameA,v.bones,v.weights);
-  if(blend>0.0){pose=pose*(1.0-blend)+townPoseBones(body.frameB,v.bones,v.weights)*blend;}
+  let pose=townSkinPose(body.frameA,body.frameB,blend,bones,v.weights,isFemale);
   let c=cos(body.heading);let s=sin(body.heading);
   let local=(pose*vec4f(surfacePos,1)).xyz;
   let world=vec3f(local.x*c+local.z*s,local.y,local.z*c-local.x*s)+body.position;

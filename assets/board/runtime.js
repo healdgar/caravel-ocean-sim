@@ -461,11 +461,16 @@ globalThis.BOARD_MODEL = (() => {
     }
     return out;
   }
+  let lastMaritimeWorld = null;
+  let lastMaritimeDay = -1;
   function ensureMaritimeWorldRoutes(opts = {}) {
     if (!W || !Array.isArray(W.settlements) || !W.settlements.length) return;
     const force = Boolean(opts.force);
-    const S = W.settlements;
     const now = day();
+    if (!force && lastMaritimeWorld === W && lastMaritimeDay === now) return;
+    lastMaritimeWorld = W;
+    lastMaritimeDay = now;
+    const S = W.settlements;
     const ad = typeof AD === 'function' ? AD() : 1550;
     const cw = W.coinWeight || 1;
     const localNames = new Set(S.map((s) => String(s?.name || '').trim().toLowerCase()));
@@ -480,13 +485,40 @@ globalThis.BOARD_MODEL = (() => {
     const farPool = mergedFar.length ? mergedFar : EXTRA_FARPORTS.filter((f) => !localNames.has(f.n.toLowerCase()));
 
     // 1. Keep ocean merchantmen (W.ships) active across approaching, anchored/docked, and outbound phases.
+    // Deep-sea ships serve ONLY true deep-water `s.harbor` ports; shallow `s.riverside` settlements are served
+    // exclusively by unmasted `lusoria` riverboats (`W.riverBoats` & `c.river`).
     W.ships = W.ships || [];
     const harborPorts = [];
     for (let si = 0; si < S.length; si++) {
       const s = S[si];
       if (!s || (typeof closedToTrade === 'function' && closedToTrade(s))) continue;
-      if (!s.harbor && !s.riverside) continue;
+      if (!s.harbor) continue;
       if (typeof offRoute === 'function' && offRoute(si)) harborPorts.push(si);
+    }
+    if (W.ships.length) {
+      if (harborPorts.length) {
+        const primaryHarbor = harborPorts[0];
+        const primaryS = S[primaryHarbor];
+        const primaryRoute = typeof offRoute === 'function' ? offRoute(primaryHarbor) : null;
+        for (const sh of W.ships) {
+          if (!sh || S[sh.port]?.harbor) continue;
+          sh.port = primaryHarbor;
+          if (sh.phase !== 'out' && primaryS?.name) sh.to = String(primaryS.name);
+          if (primaryRoute?.poly?.length >= 2) {
+            sh.poly = primaryRoute.poly;
+            sh.len = primaryRoute.len;
+          }
+          if (sh.phase === 'dock') {
+            const berths = anchorageBerths(primaryS);
+            sh.bi = berths.length ? 0 : undefined;
+            sh.berth = berths[0] || null;
+          } else {
+            sh.berth = null;
+          }
+        }
+      } else {
+        W.ships = W.ships.filter((sh) => sh && S[sh.port]?.harbor);
+      }
     }
     if (harborPorts.length && farPool.length) {
       const targetShips = Math.min(7, Math.max(4, harborPorts.length + 3));
@@ -598,6 +630,13 @@ globalThis.BOARD_MODEL = (() => {
 
     // 2. Keep coastal bay boats (sea), river barges (river), and arterial wagon caravans (cart) moving through C&C routes.
     W.caravans = W.caravans || [];
+    for (const c of W.caravans) {
+      if (!c || !c.sea) continue;
+      if (!S[c.origin]?.harbor || !S[c.dest]?.harbor) {
+        c.sea = false;
+        c.river = Boolean(S[c.origin]?.riverside || S[c.dest]?.riverside || S[c.origin]?.river || S[c.dest]?.river);
+      }
+    }
     const activeByMode = (mode) => W.caravans.filter((c) => c && !c.gone && !c.robbed && Array.isArray(c.poly) && c.poly.length >= 2 && (c.sea ? 'sea' : c.river ? 'river' : 'cart') === mode && now >= c.departDay && now < c.arriveDay);
     const activeSea = activeByMode('sea');
     const activeRiver = activeByMode('river');
@@ -635,20 +674,27 @@ globalThis.BOARD_MODEL = (() => {
     const pickOrPromoteBoatman = (prefSi, role = 'pilot', usedIds = new Set()) => {
       const order = [];
       if (prefSi >= 0 && prefSi < S.length) order.push(prefSi);
-      for (let i = 0; i < S.length; i++) if (i !== prefSi && (S[i]?.harbor || S[i]?.riverside)) order.push(i);
+      for (let i = 0; i < S.length; i++) if (i !== prefSi && (S[i]?.harbor || S[i]?.riverside || S[i]?.river)) order.push(i);
       for (let i = 0; i < S.length; i++) if (!order.includes(i)) order.push(i);
+      const wantMerch = role === 'merchant';
       for (const pass of [0, 1]) {
         for (const si of order) {
           const s = S[si];
           const folkList = s?.folk;
           if (!Array.isArray(folkList) || !folkList.length) continue;
           for (const p of folkList) {
-            if (!p || p.dead || p.sx !== 'm' || usedIds.has(p.id) || isAwayNow(p)) continue;
+            if (!p || p.dead || usedIds.has(p.id) || isAwayNow(p)) continue;
+            if (!wantMerch && p.sx !== 'm') continue;
             const age = safeAgeYrs(p);
-            if (age < 16 || age > 62) continue;
-            if (pass === 0 && p.tr !== 'boatman') continue;
+            if (age < 16 || age > 64) continue;
+            if (pass === 0) {
+              if (wantMerch) {
+                if (p.tr !== 'merchant' && p.tr !== 'trader' && p.tr !== 'chandler' && p.tr !== 'spicer') continue;
+              } else if (p.tr !== 'boatman' && p.tr !== 'fisher') {
+                continue;
+              }
+            }
             if (pass === 1 && (p.office || p.estateOffice || p.schoolMaster || p.abbey != null || p.churchBody || p.outlawCampId)) continue;
-            if (pass === 1 && role === 'pilot') p.tr = 'boatman';
             if (p.si == null) p.si = si;
             usedIds.add(p.id);
             return p;
@@ -658,12 +704,18 @@ globalThis.BOARD_MODEL = (() => {
       const fallbackSi = order[0] ?? 0;
       const fallbackS = S[fallbackSi];
       if (fallbackS) {
-        fallbackS.folk = fallbackS.folk || [];
-        const id = 900000 + Math.floor(Math.random() * 90000) + fallbackS.folk.length;
-        const p = { id, gn: role === 'pilot' ? 'Diogo' : 'Mateus', fam: 0, sx: 'm', age: 28, tr: 'boatman', si: fallbackSi, w: 3, sk: {} };
-        fallbackS.folk.push(p);
+        const seedVal = typeof SEED === 'number' ? SEED : 1550;
+        const id = 900000 + (maritimeHash(seedVal, fallbackSi + 11, usedIds.size + 3) % 90000);
         usedIds.add(id);
-        return p;
+        return {
+          id,
+          gn: wantMerch ? 'Álvaro' : (role === 'pilot' ? 'Diogo' : 'Mateus'),
+          fam: 0,
+          sx: 'm',
+          age: wantMerch ? 34 : 28,
+          tr: wantMerch ? 'merchant' : 'boatman',
+          si: fallbackSi,
+        };
       }
       return null;
     };
@@ -750,36 +802,6 @@ globalThis.BOARD_MODEL = (() => {
         }
         if (needsRawDecrement) o.stores[g] = (o.stores[g] || 0) + qty;
       }
-      if (!(typeof commodityActive === 'function' && (commodityActive(o) || commodityActive(d)))) {
-        const g = GOODS.find((cand) => mode === 'cart' || typeof BEASTS === 'undefined' || !BEASTS.includes(cand)) || 'grain';
-        const span = Math.max(4.5, len / Math.max(240, baseSpeed));
-        const departDay = now - frac * span;
-        const arriveDay = Math.max(now + 2.8, departDay + span);
-        const qty = mode === 'cart' ? 16 : 24;
-        const c = {
-          origin: oi,
-          dest: di,
-          good: g,
-          qty,
-          value: qty * price(d, g),
-          poly: poly.map((p) => ({ x: p.x, z: p.z })),
-          len,
-          departDay,
-          arriveDay,
-          robbed: false,
-          sea: mode === 'sea',
-          river: mode === 'river',
-          unit: Math.max(0.08, price(d, g) - price(o, g)),
-          master: nextShipMaster(),
-        };
-        if (typeof crewFor === 'function' && !W.prehistory) {
-          c._staffed = true;
-          try { crewFor(c); } catch { /* settlement fallback */ }
-        }
-        staffRiverVessel(c, oi, di, mode);
-        W.caravans.push(c);
-        return true;
-      }
       return false;
     };
 
@@ -844,7 +866,9 @@ globalThis.BOARD_MODEL = (() => {
       }
     }
 
-    // Persistent canonical manned river boats on navigable river reaches (`W.riverBoats`).
+    // Persistent canonical manned river boats on navigable river reaches (`W.riverBoats`),
+    // parcelized into staggered small-load barges (`qty = 2..5`) spaced ~1 boat every 300-380 m
+    // while strictly conserving `W`'s economic ledger.
     if (!Array.isArray(W.riverBoats)) W.riverBoats = [];
     const distPt = (a, b) => Math.hypot((b.x || 0) - (a.x || 0), (b.z || 0) - (a.z || 0));
     const nearestSettlement = (pt) => {
@@ -857,7 +881,19 @@ globalThis.BOARD_MODEL = (() => {
       }
       return best;
     };
-    if (W.riverBoats.length === 0 && Array.isArray(W.rivStrips) && W.rivStrips.length > 0 && S.length > 0) {
+    const RIVER_PARCEL_GOODS = ['grain', 'wine', 'timber', 'fish', 'salt', 'char', 'ore'];
+    const pickRiverParcel = (si, idSalt) => {
+      const worldSeed = typeof SEED === 'number' ? SEED : 1550;
+      const stores = S[si]?.stores || {};
+      const availGoods = RIVER_PARCEL_GOODS.filter((g) => (Number(stores[g]) || 0) >= 2);
+      const pool = availGoods.length ? availGoods : RIVER_PARCEL_GOODS;
+      const good = pool[maritimeHash(worldSeed, idSalt, 17) % pool.length];
+      const qty = 2 + (maritimeHash(worldSeed, idSalt, 23) % 4);
+      return { good, qty };
+    };
+    const MAX_RIVER_BOATS = 28;
+    if (W.riverBoats.length < 14 && Array.isArray(W.rivStrips) && W.rivStrips.length > 0 && S.length > 0) {
+      W.riverBoats.length = 0;
       const reaches = [];
       for (let ri = 0; ri < W.rivStrips.length; ri++) {
         const q = W.rivStrips[ri];
@@ -868,38 +904,45 @@ globalThis.BOARD_MODEL = (() => {
           if (k > 0) totalLen += distPt(q.pts[k - 1], q.pts[k]);
         }
         const avgHw = hwSum / q.pts.length;
-        if (totalLen >= 160 && avgHw >= 2.05) {
-          reaches.push({ ri, pts: q.pts, totalLen });
+        if (totalLen >= 140 && avgHw >= 1.35) {
+          reaches.push({ ri, pts: q.pts, totalLen, avgHw });
         }
       }
+      reaches.sort((a, b) => b.totalLen - a.totalLen || a.ri - b.ri);
       let nextId = 1;
-      for (let idx = 0; idx < reaches.length && W.riverBoats.length < 4; idx++) {
+      for (let idx = 0; idx < reaches.length && W.riverBoats.length < MAX_RIVER_BOATS; idx++) {
         const r = reaches[idx];
-        const copies = r.totalLen >= 460 && W.riverBoats.length < 3 ? 2 : 1;
-        for (let copy = 0; copy < copies && W.riverBoats.length < 4; copy++) {
+        const copies = Math.max(2, Math.min(8, Math.round(r.totalLen / 335)));
+        for (let copy = 0; copy < copies && W.riverBoats.length < MAX_RIVER_BOATS; copy++) {
           const forward = ((idx + copy) % 2) === 0;
           const pts = (forward ? r.pts : [...r.pts].reverse()).map((p) => ({ x: p.x, z: p.z }));
           const si = nearestSettlement(pts[0]);
           const destSi = nearestSettlement(pts[pts.length - 1]);
-          const tripSpan = Math.max(2.4, +(r.totalLen / 380).toFixed(2));
-          const phaseFrac = ((idx * 0.37 + copy * 0.43 + 0.14) % 0.82);
-          const departDay = now - phaseFrac * tripSpan;
+          const tripSpan = Math.max(2.1, +(r.totalLen / 360).toFixed(2));
+          const phaseOffset = +((((copy + 0.5) / copies) + ((idx * 0.173) % 0.19)) % 1).toFixed(4);
+          const departDay = now - phaseOffset * tripSpan;
           const id = nextId++;
+          const parcel = pickRiverParcel(si, id);
           W.riverBoats.push({
             id,
             key: `rb:${id}`,
+            shipName: `Barca do Rio ${id}`,
             riverIdx: r.ri,
             si,
             destSi,
             phase: 'shuttle',
-            scale: +(0.74 + ((id * 0.04) % 0.14)).toFixed(2),
+            scale: +(0.72 + ((id * 0.037) % 0.14)).toFixed(2),
             tripSpan,
+            phaseOffset,
             departDay,
             arriveDay: departDay + tripSpan,
+            good: parcel.good,
+            qty: parcel.qty,
             points: pts,
             forward,
             pilotId: null,
             pilot: null,
+            merchant: null,
             oarsmen: [],
             sunk: false,
           });
@@ -909,24 +952,27 @@ globalThis.BOARD_MODEL = (() => {
     const usedRiverFolk = new Set();
     for (const b of W.riverBoats) {
       if (!b || b.sunk) continue;
+      if (!b.good || !(b.qty >= 2)) {
+        const parcel = pickRiverParcel(b.si ?? 0, b.id || 1);
+        b.good = parcel.good;
+        b.qty = parcel.qty;
+      }
+      if (!Number.isFinite(b.phaseOffset)) {
+        b.phaseOffset = +((((b.id || 1) * 0.29) % 0.92) + 0.04).toFixed(4);
+      }
       if (now >= (b.arriveDay ?? -Infinity)) {
-        const prevPilot = findFolkById(b.pilotId);
-        if (prevPilot) {
-          const acct = typeof accountOwner === 'function' ? accountOwner(prevPilot) : null;
-          if (acct && Number.isFinite(acct.w)) acct.w += 0.55;
-          else if (Number.isFinite(prevPilot.w)) prevPilot.w += 0.55;
-        }
         b.points = [...(b.points || [])].reverse();
         const prevSi = b.si;
         b.si = b.destSi ?? prevSi;
         b.destSi = prevSi ?? b.si;
         b.forward = !b.forward;
-        const span = Math.max(2.0, b.tripSpan || 3.5);
+        const span = Math.max(2.0, b.tripSpan || 3.2);
         b.departDay = now;
         b.arriveDay = now + span;
+        const nextParcel = pickRiverParcel(b.si ?? 0, (b.id || 1) + Math.floor(now));
+        b.good = nextParcel.good;
+        b.qty = nextParcel.qty;
       }
-      const until = (b.arriveDay || now + 3) + Math.max(0.5, b.tripSpan || 2);
-      const destName = S[b.destSi]?.name || S[b.si]?.name || 'harbor';
       let pilotFolk = findFolkById(b.pilotId);
       if (!pilotFolk || usedRiverFolk.has(pilotFolk.id)) {
         pilotFolk = pickOrPromoteBoatman(b.si ?? 0, 'pilot', usedRiverFolk);
@@ -934,22 +980,33 @@ globalThis.BOARD_MODEL = (() => {
         usedRiverFolk.add(pilotFolk.id);
       }
       if (pilotFolk) {
-        pilotFolk.tr = pilotFolk.tr || 'boatman';
-        pilotFolk.away = { until, what: `piloting river barge toward ${destName}` };
         b.pilotId = pilotFolk.id;
         b.pilot = {
           id: pilotFolk.id,
           name: safeFolkName(pilotFolk),
           settlementId: pilotFolk.si ?? b.si ?? 0,
-          trade: pilotFolk.tr,
+          trade: 'boatman',
         };
       }
+      if (!b.merchant || usedRiverFolk.has(b.merchant.id)) {
+        const merchFolk = pickOrPromoteBoatman(b.si ?? 0, 'merchant', usedRiverFolk);
+        if (merchFolk) {
+          b.merchant = {
+            id: merchFolk.id,
+            name: safeFolkName(merchFolk),
+            settlementId: merchFolk.si ?? b.si ?? 0,
+            trade: merchFolk.tr || 'merchant',
+          };
+        }
+      } else if (b.merchant?.id != null) {
+        usedRiverFolk.add(b.merchant.id);
+      }
+      const targetOars = 2 + ((b.id || 1) % 3 === 0 ? 2 : 0);
       const nextOars = [];
       for (const existing of Array.isArray(b.oarsmen) ? b.oarsmen : []) {
         const oarFolk = findFolkById(existing?.id);
         if (!oarFolk || usedRiverFolk.has(oarFolk.id)) continue;
         usedRiverFolk.add(oarFolk.id);
-        oarFolk.away = { until, what: `rowing river barge toward ${destName}` };
         nextOars.push({
           id: oarFolk.id,
           name: safeFolkName(oarFolk),
@@ -957,10 +1014,9 @@ globalThis.BOARD_MODEL = (() => {
           trade: oarFolk.tr || 'boatman',
         });
       }
-      while (nextOars.length < 4) {
+      while (nextOars.length < targetOars) {
         const oarFolk = pickOrPromoteBoatman(b.si ?? 0, 'oarsman', usedRiverFolk);
         if (!oarFolk) break;
-        oarFolk.away = { until, what: `rowing river barge toward ${destName}` };
         nextOars.push({
           id: oarFolk.id,
           name: safeFolkName(oarFolk),
@@ -1623,10 +1679,12 @@ globalThis.BOARD_MODEL = (() => {
 
   // Ocean-going foreign traders (cogs, hulks, carracks) currently approaching, docked at wharf/shore, or putting to sea.
   function ships() {
+    ensureMaritimeWorldRoutes();
     const out = [];
     (W.ships || []).forEach((sh, index) => {
       if (!sh || !Array.isArray(sh.poly) || sh.poly.length < 2) return;
       const settlement = W.settlements?.[sh.port] || null;
+      if (!settlement || !settlement.harbor) return;
       let portBerths = [];
       try {
         if (settlement && typeof berthsOf === 'function') {
@@ -1868,6 +1926,8 @@ globalThis.BOARD_MODEL = (() => {
       const oarsCount = oarsList.length ? oarsList.length : (Number.isFinite(b.oarsmen) ? b.oarsmen : 4);
       const homePort = W?.settlements?.[b.si ?? 0]?.name || 'Ribatejo';
       const shipName = b.shipName || `Barca do Tejo ${b.id ?? (i + 1)}`;
+      const good = String(b.good || 'grain');
+      const qty = Math.max(2, Math.min(5, Math.round(b.qty || 3)));
       out.push({
         id: b.id,
         key: b.key || `rb:${b.id}`,
@@ -1878,17 +1938,31 @@ globalThis.BOARD_MODEL = (() => {
         riverIdx: b.riverIdx ?? 0,
         phase: b.phase || 'shuttle',
         scale: Number.isFinite(b.scale) ? b.scale : 0.78,
+        phaseOffset: Number.isFinite(b.phaseOffset) ? b.phaseOffset : +(((i * 0.23) % 0.92) + 0.04).toFixed(4),
         depart: b.departDay ?? day(),
         arrive: b.arriveDay ?? (day() + 3),
+        good,
+        qty,
+        cargo: { [good]: qty },
         oarsmen: Math.max(2, oarsCount),
         pilot: b.pilot ? {
           id: b.pilot.id,
           name: String(b.pilot.name || 'Barqueiro'),
           role: 'river pilot',
           settlementId: b.pilot.settlementId ?? b.si ?? 0,
-          trade: String(b.pilot.trade || 'boatman'),
+          trade: 'boatman',
           homePort,
           shipName,
+        } : null,
+        merchant: b.merchant ? {
+          id: b.merchant.id,
+          name: String(b.merchant.name || 'Mercador'),
+          role: 'merchant',
+          settlementId: b.merchant.settlementId ?? b.si ?? 0,
+          trade: String(b.merchant.trade || 'merchant'),
+          homePort,
+          shipName,
+          cargoSummary: `${qty} ${good}`,
         } : null,
         crew: oarsList.map((o) => ({
           id: o.id,
@@ -1905,18 +1979,150 @@ globalThis.BOARD_MODEL = (() => {
     return out;
   }
 
+  const PARTNER_BENCHMARKS = [
+    { name: 'Sevilla', country: 'Castile', distanceNm: 265, g: { wine: 0.82, grain: 1.16, fish: 1.12, salt: 0.94, timber: 1.24, ore: 0.92, wool: 0.88, cloth: 1.18, tools: 1.15 } },
+    { name: 'Porto', country: 'Portugal', distanceNm: 175, g: { wine: 0.74, grain: 1.08, fish: 0.82, salt: 0.86, timber: 0.84, ore: 0.98, wool: 0.96, cloth: 1.06, tools: 1.04 } },
+    { name: 'Antwerp', country: 'Flanders', distanceNm: 980, g: { wine: 1.48, grain: 1.04, fish: 0.92, salt: 1.38, timber: 1.12, ore: 0.88, wool: 0.94, cloth: 0.72, tools: 0.78 } },
+    { name: 'Venice', country: 'Venetia', distanceNm: 1860, g: { wine: 1.22, grain: 1.28, fish: 1.18, salt: 1.14, timber: 1.32, ore: 1.08, wool: 1.12, cloth: 0.86, tools: 0.84 } },
+    { name: 'Bordeaux', country: 'Gascony', distanceNm: 690, g: { wine: 0.68, grain: 0.94, fish: 1.06, salt: 0.88, timber: 0.92, ore: 1.14, wool: 1.08, cloth: 1.12, tools: 1.10 } },
+  ];
+  const TELEMETRY_GOODS = ['grain', 'wine', 'fish', 'salt', 'timber', 'ore', 'wool', 'cloth', 'tools'];
+
+  function buildPartnerTelemetry(shipList, seaCaravans) {
+    const worldSeed = typeof SEED === 'number' ? SEED : 1550;
+    const today = day();
+    const cw = W?.coinWeight || 1;
+    const hub = W?.settlements?.find((s) => s?.harbor) || W?.settlements?.[0] || null;
+    const hubPrices = {};
+    for (const g of TELEMETRY_GOODS) {
+      const base = (typeof GOODBASE !== 'undefined' && GOODBASE[g]) ? GOODBASE[g] : 1;
+      hubPrices[g] = hub && typeof price === 'function' && GOODBASE?.[g] ? +price(hub, g).toFixed(3) : +(base / cw).toFixed(3);
+    }
+    return PARTNER_BENCHMARKS.map((pb, pIdx) => {
+      const reg = PARTNER_REGISTRY.byAlias.get(pb.name.toLowerCase()) || PARTNER_REGISTRY.ports[pIdx] || null;
+      const prices = {};
+      for (let gi = 0; gi < TELEMETRY_GOODS.length; gi++) {
+        const g = TELEMETRY_GOODS[gi];
+        const base = ((typeof GOODBASE !== 'undefined' && GOODBASE[g]) ? GOODBASE[g] : 1) / cw;
+        const mult = pb.g[g] ?? 1.0;
+        const seasonal = 1 + 0.055 * Math.sin((today * 0.0172) + pIdx * 1.3 + gi * 0.7);
+        const seedJit = 0.95 + ((maritimeHash(worldSeed, pIdx + 7, gi + 13) % 100) / 1000);
+        prices[g] = +(base * mult * seasonal * seedJit).toFixed(3);
+      }
+      const matchPort = (str) => {
+        const low = String(str || '').toLowerCase();
+        if (!low) return false;
+        if (low.includes(pb.name.toLowerCase())) return true;
+        if (pb.name === 'Sevilla' && low.includes('sevil')) return true;
+        return false;
+      };
+      const portShips = (shipList || []).filter((sh) => matchPort(sh.homePort) || matchPort(sh.from) || matchPort(sh.to));
+      const portSea = (seaCaravans || []).filter((c) => matchPort(c.homePort));
+      let importsToHub = 0, exportsFromHub = 0;
+      const manifests = [];
+      for (const sh of portShips) {
+        const bag = sh.phase === 'out' ? sh.load : sh.cargo;
+        for (const [g, q] of Object.entries(bag || {})) {
+          const val = (Number(q) || 0) * (hubPrices[g] || prices[g] || 1);
+          if (sh.phase === 'out') exportsFromHub += val;
+          else importsToHub += val;
+        }
+        manifests.push({
+          shipName: sh.shipName || sh.kind,
+          kind: sh.kind,
+          phase: sh.phase,
+          merchant: sh.merchant?.name || sh.master || '',
+          summary: formatCargoBrief(sh.phase === 'out' ? sh.load : sh.cargo),
+        });
+      }
+      for (const c of portSea) {
+        const val = (Number(c.qty) || 0) * (hubPrices[c.good] || 1);
+        importsToHub += val * 0.5;
+        exportsFromHub += val * 0.5;
+      }
+      const foreignMerchants = (reg?.merchants?.length || 0) + portShips.filter((s) => s.merchant).length;
+      return {
+        name: pb.name,
+        country: pb.country,
+        distanceNm: pb.distanceNm,
+        prices,
+        hubPrices,
+        activeShips: portShips.length + portSea.length,
+        foreignMerchants: Math.max(2, foreignMerchants),
+        importsCrowns: +importsToHub.toFixed(1),
+        exportsCrowns: +exportsFromHub.toFixed(1),
+        balanceCrowns: +(exportsFromHub - importsToHub).toFixed(1),
+        manifests: manifests.slice(0, 4),
+      };
+    });
+  }
+
   function caravans() {
+    ensureMaritimeWorldRoutes();
     const out = [];
+    const seaOut = [];
+    const S = W.settlements || [];
+    const now = day();
+    const worldSeed = typeof SEED === 'number' ? SEED : 1550;
+    let roadParcelCount = 0;
+
     (W.caravans || []).forEach((c, index) => {
       if (!c || c.gone || c.robbed || !Array.isArray(c.poly) || c.poly.length < 2) return;
-      const mode = c.sea ? 'sea' : c.river ? 'river' : 'cart';
-      let key = null;
-      try { key = typeof caravanInspectionKey === 'function' ? String(caravanInspectionKey(c)) : null; } catch { key = null; }
+      let mode = c.sea ? 'sea' : c.river ? 'river' : 'cart';
+      if (mode === 'sea' && (!S[c.origin]?.harbor || !S[c.dest]?.harbor)) {
+        mode = (S[c.origin]?.riverside || S[c.dest]?.riverside || S[c.origin]?.river || S[c.dest]?.river) ? 'river' : 'cart';
+      }
+      let baseKey = null;
+      try { baseKey = typeof caravanInspectionKey === 'function' ? String(caravanInspectionKey(c)) : null; } catch { baseKey = null; }
+      baseKey = baseKey ?? `${c.origin}>${c.dest}:${c.departDay}:${c.good}`;
+      const pts = line(c.poly);
+
+      if (mode === 'cart') {
+        const totalQty = Math.max(2, Math.round(c.qty || 4));
+        const parcelCount = Math.max(1, Math.min(12, Math.ceil(totalQty / 5)));
+        let remaining = totalQty;
+        for (let p = 0; p < parcelCount; p++) {
+          const leftParcels = parcelCount - p;
+          const parcelQty = leftParcels === 1
+            ? Math.max(1, remaining)
+            : Math.max(2, Math.min(6, Math.round(remaining / leftParcels)));
+          remaining = Math.max(0, remaining - parcelQty);
+          const phaseOffset = +(0.04 + ((((p + 0.5) / parcelCount) + index * 0.173) % 1) * 0.92).toFixed(4);
+          out.push({
+            key: parcelCount > 1 ? `${baseKey}#p${p}` : baseKey,
+            consignmentKey: baseKey,
+            index,
+            mode: 'cart',
+            good: String(c.good ?? 'grain'),
+            qty: parcelQty,
+            origin: c.origin,
+            dest: c.dest,
+            depart: c.departDay,
+            arrive: Math.max((c.departDay || now) + 0.5, c.arriveDay || (now + 4)),
+            halted: !!c.halted,
+            carts: 1,
+            phaseOffset,
+            points: pts,
+          });
+          roadParcelCount++;
+        }
+        return;
+      }
+
       const entry = {
-        key: key ?? `${c.origin}>${c.dest}:${c.departDay}:${c.good}`, index, mode, good: String(c.good ?? ''), qty: Math.round(c.qty || 0),
-        origin: c.origin, dest: c.dest, depart: c.departDay, arrive: c.arriveDay, halted: !!c.halted,
-        carts: mode === 'cart' ? Math.max(1, Math.min(4, Math.round((c.qty || 0) / 18))) : 1,
-        points: line(c.poly),
+        key: baseKey,
+        index,
+        mode,
+        good: String(c.good ?? ''),
+        qty: Math.round(c.qty || 0),
+        origin: c.origin,
+        dest: c.dest,
+        depart: c.departDay,
+        arrive: c.arriveDay,
+        halted: !!c.halted,
+        carts: 1,
+        phaseOffset: +(((index * 0.23) % 0.88) + 0.06).toFixed(4),
+        points: pts,
       };
       if (mode === 'river') {
         const homePort = W?.settlements?.[c.origin ?? 0]?.name || 'Ribatejo';
@@ -1952,16 +2158,124 @@ globalThis.BOARD_MODEL = (() => {
         entry.captain = c.captain ? { ...c.captain } : null;
         entry.merchant = c.merchant ? { ...c.merchant } : null;
         entry.crew = Array.isArray(c.crew) ? c.crew.map((m) => ({ ...m })) : [];
+        seaOut.push(entry);
       }
       out.push(entry);
     });
+
+    // Parcelize active town, market, harbor, mill, quarry, and woodcutter road volume (`W.roads`)
+    // into frequent small-parcel carrier trains (`qty = 2..6`, `carts = 1`) without mutating `W`'s ledger.
+    const TARGET_MIN_ROAD_PARCELS = 28;
+    const TARGET_MAX_ROAD_PARCELS = 38;
+    if (roadParcelCount < TARGET_MIN_ROAD_PARCELS) {
+      const roadCorridors = [];
+      for (let ri = 0; ri < (W.roads || []).length; ri++) {
+        const rd = W.roads[ri];
+        const rawPath = rd?.drawn || rd?.path;
+        if (!Array.isArray(rawPath) || rawPath.length < 2) continue;
+        let len = 0;
+        for (let k = 1; k < rawPath.length; k++) {
+          len += Math.hypot((rawPath[k].x || 0) - (rawPath[k - 1].x || 0), (rawPath[k].z || 0) - (rawPath[k - 1].z || 0));
+        }
+        if (len >= 65) {
+          roadCorridors.push({ key: `rd:${ri}`, oi: rd.a ?? 0, di: rd.b ?? 0, poly: rawPath, len });
+        }
+      }
+      if (typeof route === 'function' && roadCorridors.length < 4) {
+        for (let oi = 0; oi < S.length; oi++) {
+          for (let di = oi + 1; di < S.length; di++) {
+            const r = route(oi, di);
+            if (r?.poly?.length >= 2 && (r.len || 0) >= 65) {
+              roadCorridors.push({ key: `rt:${oi}-${di}`, oi, di, poly: r.poly, len: r.len });
+            }
+          }
+        }
+      }
+      // Also include active mill, woodcutter, quarry, and market tracks when settlements have outlying works.
+      if (typeof workerTrackSegments === 'function' && roadCorridors.length < 10) {
+        const tracks = workerTrackSegments() || [];
+        for (let ti = 0; ti < tracks.length && roadCorridors.length < 14; ti++) {
+          const tr = tracks[ti];
+          if (!tr?.a || !tr?.b) continue;
+          const len = Math.hypot((tr.b.x || 0) - (tr.a.x || 0), (tr.b.z || 0) - (tr.a.z || 0));
+          if (len >= 95) {
+            roadCorridors.push({ key: `trk:${ti}`, oi: 0, di: 0, poly: [tr.a, tr.b], len });
+          }
+        }
+      }
+      const ROAD_PARCEL_GOODS = ['grain', 'timber', 'wine', 'wool', 'ore', 'salt', 'char', 'cloth', 'sheep', 'cattle'];
+      const needed = Math.min(TARGET_MAX_ROAD_PARCELS, Math.max(TARGET_MIN_ROAD_PARCELS, roadCorridors.length * 3)) - roadParcelCount;
+      for (let k = 0; k < needed && roadCorridors.length > 0 && roadParcelCount < TARGET_MAX_ROAD_PARCELS; k++) {
+        const corr = roadCorridors[k % roadCorridors.length];
+        const forward = ((k + Math.floor(k / roadCorridors.length)) % 2) === 0;
+        const poly = forward ? corr.poly : [...corr.poly].reverse();
+        const oi = forward ? (corr.oi ?? 0) : (corr.di ?? 0);
+        const di = forward ? (corr.di ?? 0) : (corr.oi ?? 0);
+        const stores = S[oi]?.stores || {};
+        const stocked = ROAD_PARCEL_GOODS.filter((g) => (Number(stores[g]) || 0) >= 2);
+        const pool = stocked.length ? stocked : ROAD_PARCEL_GOODS;
+        const good = pool[maritimeHash(worldSeed, k + 31, oi + 5) % pool.length];
+        const qty = 2 + (maritimeHash(worldSeed, k + 47, di + 9) % 5);
+        const span = Math.max(2.2, corr.len / 480);
+        const phaseOffset = +(0.05 + (((k + 0.5) / Math.max(1, needed) + ((k * 0.137) % 0.11)) % 1) * 0.90).toFixed(4);
+        out.push({
+          key: `parcel:${corr.key}:${k}`,
+          index: 1000 + k,
+          mode: 'cart',
+          localParcel: true,
+          good,
+          qty,
+          origin: oi,
+          dest: di,
+          depart: +(now - span * 0.5).toFixed(3),
+          arrive: +(now + span * 1.5).toFixed(3),
+          halted: false,
+          carts: 1,
+          phaseOffset,
+          points: line(poly),
+        });
+        roadParcelCount++;
+      }
+    }
+
+    const shipList = ships();
+    const riverBoatList = riverBoats();
+    const hub = S.find((s) => s?.harbor) || S[0] || null;
+    const settlements = S.map((s, idx) => {
+      const prices = {}, stores = {};
+      for (const g of TELEMETRY_GOODS) {
+        const base = (typeof GOODBASE !== 'undefined' && GOODBASE[g]) ? GOODBASE[g] : 1;
+        prices[g] = s && typeof price === 'function' && GOODBASE?.[g] ? +price(s, g).toFixed(3) : +base.toFixed(3);
+        stores[g] = Math.round(Number(s?.stores?.[g]) || 0);
+      }
+      return {
+        index: idx,
+        name: String(s?.name || `Place ${idx + 1}`),
+        kind: String(s?.kind || 'village'),
+        pop: Math.round(s?.pop || 0),
+        harbor: Boolean(s?.harbor),
+        riverside: Boolean(s?.riverside || s?.river),
+        x: r1(s?.pos?.x || 0),
+        z: r1(s?.pos?.z || 0),
+        tradeV: Math.round(s?.tradeV || 0),
+        prices,
+        stores,
+      };
+    });
+
     return {
-      day: day(),
+      day: now,
+      year: typeof AD === 'function' ? AD() : 1550,
+      date: typeof dateStr === 'function' ? dateStr(now) : `Day ${Math.floor(now)}`,
+      realm: String(W?.name || hub?.name || 'Lisboa'),
+      coinWeight: +(W?.coinWeight || 1).toFixed(4),
       weather: { state: String(W.weather?.state ?? 'clear'), wind: r3(W.weather?.wind ?? 0) },
       list: out,
-      riverBoats: riverBoats(),
-      ships: ships(),
+      riverBoats: riverBoatList,
+      ships: shipList,
       harborFleet: harborFleet(),
+      partnerPorts: buildPartnerTelemetry(shipList, seaOut),
+      settlements,
     };
   }
 
