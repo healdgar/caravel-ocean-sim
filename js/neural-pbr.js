@@ -118,6 +118,9 @@ export function createNeuralPbrBank(device, {
   async function loadFromUrl(fetchUrl = url) {
     try {
       if (typeof fetch !== 'function') return false;
+      if (typeof location === 'undefined' && typeof fetchUrl === 'string' && !/^(?:https?:|file:|data:|blob:)/i.test(fetchUrl)) {
+        return false;
+      }
       const resp = await fetch(fetchUrl);
       if (!resp.ok) {
         console.warn(`[NeuralPBR] Asset HTTP ${resp.status} for ${fetchUrl}; keeping identity fallback.`);

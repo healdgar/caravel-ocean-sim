@@ -355,8 +355,12 @@ export function createEncounterDirector({ seed = 0x1550cafe } = {}) {
     // A sighting stays active until the captain answers it. One whose call is no longer the open one
     // (land, a gale or an arrival was raised over it) will never be answered, and no sail would be sighted again.
     if (state.active && voyage.interrupt?.encounter !== state.active) state.active = null;
-    if (state.active || voyage.interrupt || env.battleActive) return null;
+    if (voyage.passive || state.active || voyage.interrupt || env.battleActive) return null;
     if (Number.isFinite(env.coastKm) && env.coastKm < 12) return null;
+    const terrainReg = env.terrain?.region ?? env.terrain;
+    if (terrainReg && Number.isFinite(terrainReg.x) && Number.isFinite(terrainReg.z)) {
+      if (Math.hypot((boat?.x || 0) - terrainReg.x, (boat?.z || 0) - terrainReg.z) < 12000) return null;
+    }
 
     const rate = voyage.rate ?? 1;
     const dHrs = (dtRealSec * rate) / 3600;

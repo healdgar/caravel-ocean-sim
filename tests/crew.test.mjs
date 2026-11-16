@@ -28,8 +28,8 @@ function positions(palette,mesh=model){
   return out;
 }
 test('sailor GLB is self-contained, bounded and has the required clips',()=>{
-  assert.ok(bytes.length<1_100_000);assert.equal(model.animator.joints.length,65);
-  assert.ok(model.indices.length/3<16000);assert.deepEqual([...model.animator.clips.keys()],['Idle','Walk','Brace']);
+  assert.ok(bytes.length<1_800_000);assert.equal(model.animator.joints.length,65);
+  assert.ok(model.indices.length/3<28000&&model.indices.length/3>=20000);assert.deepEqual([...model.animator.clips.keys()],['Idle','Walk','Brace']);
   const rest=positions(model.animator.sample(null,0)),f=new Float32Array(model.vertices.buffer);
   for(let i=0;i<model.vertexCount;i++)for(let k=0;k<3;k++)assert.ok(Math.abs(rest[i*3+k]-f[i*15+k])<1e-5,'inverse binds preserve the authored rest geometry');
 });
@@ -46,7 +46,7 @@ test('the generated bodies say what each point wears, and carry their own levels
       seen.add(Math.floor(f[i*15+8]*.5));
     }
     assert.deepEqual([...seen].sort(),[0,1,2,3,4],'paint, shirt, trousers, skin and brow hair on bald base body');
-    assert.ok(body.lods[1].triangles<=4400&&body.lods[2].triangles<=1570);
+    assert.ok(body.lods[1].triangles<=7500&&body.lods[2].triangles<=2500);
     assert.ok(body.distantIndices.length/3<=320);
     assert.equal(createDistantCrewLOD(body),body.distantIndices,'townsfolk take the baked level');
 
@@ -117,7 +117,7 @@ test('orders and rough-weather interruption stop movement; invalid policies fall
 test('female asset has a distinct mesh, compatible rig and grounded animation',()=>{
   const female=loadCrewGLB(fs.readFileSync(new URL('../assets/crew/sailor-female.glb',import.meta.url)));
   assert.equal(female.animator.joints.length,65);assert.notEqual(female.vertexCount,model.vertexCount);
-  assert.ok(female.indices.length/3<24000);
+  assert.ok(female.indices.length/3<32000&&female.indices.length/3>=22000);
   const rest=positions(female.animator.sample(null,0),female),f=new Float32Array(female.vertices.buffer);
   for(let i=0;i<female.vertexCount;i++)for(let k=0;k<3;k++)assert.ok(Math.abs(rest[i*3+k]-f[i*15+k])<1e-5);
   for(const [name,clip] of female.animator.clips){
@@ -538,31 +538,71 @@ test('the swimming and floating loops are the pose a swimmer is solved with, bak
   assert.ok(far(place(palettes.slice(swim.first*J,(swim.first+1)*J),'hand_l'),place(palettes.slice((swim.first+Math.round(swim.frames/4))*J,(swim.first+Math.round(swim.frames/4)+1)*J),'hand_l'))>0.08);
 });
 
-test('captain GLB carries its embedded high-resolution texture, UV sentinels, 65-joint rig and decimated LODs',()=>{
+test('captain GLB carries its embedded high-resolution texture, UV sentinels, 65-joint rig and decimated LODs',async()=>{
+  const {CAPTAIN_TEXTURE_PX,loadGroomPackGLB,attachColonialGroomModel}=await import('../js/crew.js');
+  assert.equal(CAPTAIN_TEXTURE_PX,2048,'captain texture uploads at full 2048x2048 resolution');
   const captainBytes=fs.readFileSync(new URL('../assets/crew/captain.glb',import.meta.url));
-  assert.ok(captainBytes.length<1_100_000);
+  assert.ok(captainBytes.length<3_000_000);
   const captain=loadCrewGLB(captainBytes);
   assert.equal(captain.animator.joints.length,65);
   assert.deepEqual([...captain.animator.clips.keys()],['Idle','Walk','Brace']);
   assert.ok(captain.image instanceof Uint8Array && captain.image.byteLength>100_000,'embedded texture bytes present');
   assert.equal(captain.mime,'image/jpeg');
   assert.equal(captain.image[0],0xff);assert.equal(captain.image[1],0xd8,'valid JPEG header');
-  assert.ok(captain.lods[0].triangles<=3600&&captain.lods[0].triangles>=3200,'base mesh decimated within 3,600-triangle budget');
-  assert.ok(captain.lods[1].triangles<=1500&&captain.lods[1].triangles>=1200,'mid LOD decimated within 1,500-triangle budget');
-  assert.ok(captain.lods[2].triangles<=750&&captain.lods[2].triangles>=200);
+  assert.ok(captain.lods[0].triangles<=19500&&captain.lods[0].triangles>=18000,'base mesh preserves un-decimated high-res geometry');
+  assert.ok(captain.lods[1].triangles<=7500&&captain.lods[1].triangles>=5000,'mid LOD decimated cleanly');
+  assert.ok(captain.lods[2].triangles<=2600&&captain.lods[2].triangles>=1500);
   assert.ok(captain.distantIndices.length/3<=320);
   const f=new Float32Array(captain.vertices.buffer,captain.vertices.byteOffset,captain.vertexCount*15);
-  let skinVerts=0,clothVerts=0;
+  let skinVerts=0,clothVerts=0,uvSeamCrossTris=0;
   for(let i=0;i<captain.vertexCount;i++){
     const u=f[i*15+6],v=f[i*15+7],b=f[i*15+8];
     assert.ok(u>=0&&u<=1&&v>=0&&v<=1,'UV stored in color.rg');
     assert.ok(b<-1.0,'negative blue sentinel routes fragment shader to captain texture');
     if(b<-10.5)skinVerts++;else clothVerts++;
   }
-  assert.ok(skinVerts>100&&clothVerts>1000,'both skin and garment vertices tagged on textured captain');
+  const idx0=captain.lods[0].indices;
+  for(let t=0;t<idx0.length;t+=3){
+    const a=idx0[t],b=idx0[t+1],c=idx0[t+2];
+    const dAB=Math.hypot(f[a*15+6]-f[b*15+6],f[a*15+7]-f[b*15+7]);
+    const dBC=Math.hypot(f[b*15+6]-f[c*15+6],f[b*15+7]-f[c*15+7]);
+    const dCA=Math.hypot(f[c*15+6]-f[a*15+6],f[c*15+7]-f[a*15+7]);
+    if(Math.max(dAB,dBC,dCA)>0.08)uvSeamCrossTris++;
+  }
+  assert.equal(uvSeamCrossTris,0,'zero cross-island UV seam triangles on LOD 0 captain mesh');
+  assert.ok(skinVerts>500&&clothVerts>5000,'both skin and garment vertices tagged on textured captain');
   const company=createCompany();
   assert.equal(company.crew.filter(isCaptainActor).length,1,'exactly one captain in company');
   assert.equal(company.crew.find(isCaptainActor).role,'Captain');
+
+  // Verify 3D beards align flush on philtrum/jaw and transfer smooth neck_01 skin weights across sailor, captain & soldier
+  const groomPack=loadGroomPackGLB(fs.readFileSync(new URL('../assets/crew/groom-pack.glb',import.meta.url)));
+  const soldier=loadCrewGLB(fs.readFileSync(new URL('../assets/crew/soldier-1550.glb',import.meta.url)));
+  for(const [label,baseBody,variant,expectedPhilZ] of [['sailor',model,'male',0.094],['captain',captain,'captain',0.082],['soldier',soldier,'soldier',0.113]]){
+    const baseN=baseBody.vertexCount;
+    const groomed=attachColonialGroomModel(baseBody,groomPack,variant);
+    const gf=new Float32Array(groomed.vertices.buffer,groomed.vertices.byteOffset,groomed.vertexCount*15);
+    const gu=new Uint16Array(groomed.vertices.buffer,groomed.vertices.byteOffset,groomed.vertexCount*30);
+    for(const [pieceNum,pieceName] of [[8,'pointed'],[9,'mariner'],[10,'tercio']]){
+      if(variant==='captain'&&pieceNum===10)continue;
+      let moustMaxZ=-9,moustMinY=9,moustMaxY=-9,neckWeightSum=0,cnt=0;
+      for(let i=baseN;i<groomed.vertexCount;i++){
+        if(Math.floor(gf[i*15+6]*0.5)!==pieceNum)continue;
+        cnt++;
+        if(gu[i*30+19]>0)neckWeightSum+=gf[i*15+12];
+        const x=gf[i*15],y=gf[i*15+1],z=gf[i*15+2];
+        if(Math.abs(x)<0.018&&y>1.564){
+          moustMaxZ=Math.max(moustMaxZ,z);
+          moustMinY=Math.min(moustMinY,y);
+          moustMaxY=Math.max(moustMaxY,y);
+        }
+      }
+      assert.ok(cnt>=650,`${label} ${pieceName} preserves high-res sculpted beard (${cnt} verts)`);
+      assert.ok(moustMinY>=1.565&&moustMaxY<=1.602,`${label} ${pieceName} moustache sits cleanly on philtrum (${moustMinY.toFixed(3)}..${moustMaxY.toFixed(3)})`);
+      assert.ok(moustMaxZ>=expectedPhilZ+0.006&&moustMaxZ<=expectedPhilZ+0.018,`${label} ${pieceName} moustache depth flush to lips (${moustMaxZ.toFixed(4)} vs ${expectedPhilZ})`);
+      assert.ok(neckWeightSum/cnt>=0.08,`${label} ${pieceName} transfers smooth jaw/neck skin weights (${(neckWeightSum/cnt).toFixed(3)})`);
+    }
+  }
 });
 
 test('regenerated 1550 male, female and soldier rigs keep anatomical leg ratios, compact hands, level gaze and bald scalps',()=>{
@@ -613,7 +653,7 @@ test('regenerated 1550 male, female and soldier rigs keep anatomical leg ratios,
       }
     }
     assert.ok(crownSkin>=minSkin,`${label} bald scalp dome has ${crownSkin} SKIN vertices`);
-    assert.ok(browHair>=1&&browHair<=120,`${label} preserves ${browHair} eyebrow HAIR vertices`);
+    assert.ok(browHair>=1&&browHair<=220,`${label} preserves ${browHair} eyebrow HAIR vertices`);
     assert.ok(maxHeadHalfX<maxHalfX,`${label} bald head width free of tricorn hair wings: ${maxHeadHalfX.toFixed(3)} m`);
   }
 });

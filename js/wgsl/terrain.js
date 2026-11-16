@@ -1300,8 +1300,8 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       relief=detailA*0.004*archLodFade;
       roughness=clamp(pbr.roughness+detailB*0.03,0.60,0.90);
       ambientVisibility=(0.44+0.34*max(n.y,0.0))*aoVis*pbr.ao;
-      // Intertidal marine algae & barnacle biofouling on submerged/splash-zone dock pilings
-      let pilingTide=(1.0-smoothstep(0.15,1.45,world.y))*clamp(0.55+0.45*detailA,0.0,1.0);
+      // Intertidal marine algae & barnacle biofouling on submerged/splash-zone dock pilings (excluding carved canoes, kind.y > 0.85)
+      let pilingTide=(1.0-smoothstep(0.15,1.45,world.y))*(1.0-smoothstep(0.82,0.89,in.kind.y))*clamp(0.55+0.45*detailA,0.0,1.0);
       albedo=mix(albedo,vec3f(0.055,0.082,0.042),pilingTide*0.62);
       roughness=mix(roughness,0.92,pilingTide*0.5);
     }else if(in.kind.x<11.5){

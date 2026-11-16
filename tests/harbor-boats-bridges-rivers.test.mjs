@@ -1007,3 +1007,87 @@ test('Lisbon 1550 riverboats lock strictly inside rendered riverReaches at exact
     }
   }
 });
+
+test('riverboat oarsmen physically grip their rotating wooden oar shafts across all 8 sweep stations and 24 stroke frames', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { loadCrewGLB } = await import('../js/gltf.js');
+  const { bakeDeckCrewClips, bargeOarPivotsForWGSL } = await import('../js/trade-vessels.js');
+  const barge = getTradeVesselArchetype(4);
+  const pivots = bargeOarPivotsForWGSL();
+  const ds = barge.designScale;
+  const bv = barge.vertices;
+  const sailor = loadCrewGLB(readFileSync(new URL('../assets/crew/sailor.glb', import.meta.url)));
+  const a = sailor.animator;
+  a.sample(null, 0);
+  const slotOf = (name) => a.joints.indexOf(a.nodeIndex(name));
+  const handLSlot = slotOf('hand_l'), handRSlot = slotOf('hand_r');
+  const restHandL = [...a.world[a.nodeIndex('hand_l')].subarray(12, 15)];
+  const restHandR = [...a.world[a.nodeIndex('hand_r')].subarray(12, 15)];
+  const { palettes, layout } = bakeDeckCrewClips(a);
+
+  const rowStations = barge.deckStations.filter((s) => Number.isFinite(s.oarSide) && Number.isFinite(s.oarStationIdx));
+  assert.equal(rowStations.length, 8, 'river barge mans 4 port + 4 starboard sweep stations');
+
+  const pointSegDist = (p, a0, b0) => {
+    const abx = b0[0] - a0[0], aby = b0[1] - a0[1], abz = b0[2] - a0[2];
+    const t = Math.max(0, Math.min(1, ((p[0] - a0[0]) * abx + (p[1] - a0[1]) * aby + (p[2] - a0[2]) * abz) / (abx * abx + aby * aby + abz * abz)));
+    return Math.hypot(p[0] - (a0[0] + abx * t), p[1] - (a0[1] + aby * t), p[2] - (a0[2] + abz * t));
+  };
+
+  let worstGripDist = 0;
+  for (const st of rowStations) {
+    const side = st.oarSide;
+    const stIdx = st.oarStationIdx;
+    const px = pivots[stIdx * 4 + 0], py = pivots[stIdx * 4 + 1], pz = pivots[stIdx * 4 + 2];
+    let bestInboardX = Infinity;
+    const oarPts = [];
+    for (let i = 0; i < bv.length; i += 9) {
+      const m = bv[i + 6];
+      if (Math.floor(m) === 16 && Math.round((m - 16) * 64) === stIdx) {
+        const vx = bv[i], vy = bv[i + 1], vz = bv[i + 2];
+        if ((vx - px) * side <= 0) {
+          oarPts.push([vx, vy, vz]);
+          if (vx * side < bestInboardX) bestInboardX = vx * side;
+        }
+      }
+    }
+    const endRing = oarPts.filter((q) => q[0] * side <= bestInboardX + 0.035);
+    assert.ok(endRing.length > 0, `found inboard oar handle ring for station ${stIdx}`);
+    let tx = 0, ty = 0, tz = 0;
+    for (const q of endRing) { tx += q[0]; ty += q[1]; tz += q[2]; }
+    tx /= endRing.length; ty /= endRing.length; tz /= endRing.length;
+
+    const pivM = [px * ds[0], py * ds[1], pz * ds[2]];
+    const clipStart = side < 0 ? layout[8] : layout[10];
+    const clipFrames = side < 0 ? layout[9] : layout[11];
+    const cY = Math.cos(st.yaw), sY = Math.sin(st.yaw);
+    for (let f = 0; f < clipFrames; f++) {
+      const ang = (f / clipFrames) * Math.PI * 2;
+      const sweep = Math.sin(ang) * 0.30;
+      const dip = -Math.cos(ang) * 0.12;
+      const cy = Math.cos(sweep * side), sy = Math.sin(sweep * side);
+      const cr = Math.cos(dip * side), sr = Math.sin(dip * side);
+      const dx = tx - px, dy = ty - py, dz = tz - pz;
+      const dYawX = dx * cy - dz * sy, dYawY = dy, dYawZ = dx * sy + dz * cy;
+      const rotTipM = [
+        (px + (dYawX * cr - dYawY * sr)) * ds[0],
+        (py + (dYawX * sr + dYawY * cr)) * ds[1],
+        (pz + dYawZ) * ds[2],
+      ];
+      const baseOff = (clipStart + f) * 65 * 16;
+      for (const [slot, rest] of [[handLSlot, restHandL], [handRSlot, restHandR]]) {
+        const m = palettes.subarray(baseOff + slot * 16, baseOff + slot * 16 + 16);
+        const lx = m[0] * rest[0] + m[4] * rest[1] + m[8] * rest[2] + m[12];
+        const ly = m[1] * rest[0] + m[5] * rest[1] + m[9] * rest[2] + m[13];
+        const lz = m[2] * rest[0] + m[6] * rest[1] + m[10] * rest[2] + m[14];
+        const shipHand = [
+          st.localMetres[0] + lx * cY + lz * sY,
+          st.localMetres[1] + ly,
+          st.localMetres[2] + lz * cY - lx * sY,
+        ];
+        worstGripDist = Math.max(worstGripDist, pointSegDist(shipHand, pivM, rotTipM));
+      }
+    }
+  }
+  assert.ok(worstGripDist < 0.038, `all 8 oarsmen keep both hands within 3.8 cm of rotating oar shaft across stroke (max=${worstGripDist.toFixed(4)} m)`);
+});

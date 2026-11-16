@@ -309,7 +309,11 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
   if(!seen&&(length(relative)>=${SHADOW_NEAR_M.toFixed(1)}||!inFrustum(relative,${SHADOW_MARGIN_M.toFixed(1)}))){return;}
   let depth=max(dot(relative,normalize(F.camFwd.xyz)),1.2);
   let pixels=${BODY_HEIGHT_M.toFixed(3)}*F.screen.y/(2.0*length(F.camUp.xyz))/depth;
-  if(seen&&pixels<${SMALLEST_PIXELS.toFixed(1)}){return;}
+  let keepProb=clamp(pixels/1.0,0.06,1.0);
+  let h0=(id.x*747796405u+2891336453u)^((w.look+1u)*2654435761u);
+  let h1=((h0>>((h0>>28u)+4u))^h0)*277803737u;
+  let thinHash=f32(((h1>>22u)^h1)&65535u)/65536.0;
+  if(seen&&pixels<1.0&&thinHash>keepProb){return;}
   let tier=select(select(select(3u,2u,pixels>${FAR_PIXELS.toFixed(1)}),1u,pixels>${MID_PIXELS.toFixed(1)}),0u,pixels>${NEAR_PIXELS.toFixed(1)});
   let model=w.flags&1u;
   let plain=crowd.clips[model*3u];let fright=crowd.clips[model*3u+1u];let fall=crowd.clips[model*3u+2u];
@@ -389,8 +393,7 @@ struct TownLook {shirt:vec4f,trousers:vec4f,skin:vec4f,hair:vec4f,face:vec4f};
   let isFemale=look.skin.w>0.5;
   var surface=CrewSurface(CREW_PIECE_OUT,v.normal);
   if(!crewPieceHidden(v.color,dress)){
-    if(v.color.b<-1.0){surface=CrewSurface(v.position,v.normal);}
-    else{surface=crewMorph(v.position,v.normal,look.face,look.skin.w);}
+    surface=crewMorph(v.position,v.normal,look.face,look.skin.w);
   }
   var bones=v.bones;
   if(injury>=1u && injury<=5u){
@@ -437,7 +440,14 @@ struct TownLook {shirt:vec4f,trousers:vec4f,skin:vec4f,hair:vec4f,face:vec4f};
   }
   let pose=townSkinPose(body.frameA,body.frameB,blend,bones,v.weights,isFemale);
   let c=cos(body.heading);let s=sin(body.heading);
-  let local=(pose*vec4f(surface.position,1)).xyz;
+  var local=(pose*vec4f(surface.position,1)).xyz;
+  let relBody=body.position+vec3f(0.0,${(BODY_HEIGHT_M * 0.5).toFixed(3)},0.0)-F.camPos.xyz;
+  let vDepth=max(dot(relBody,normalize(F.camFwd.xyz)),1.2);
+  let vPixels=${BODY_HEIGHT_M.toFixed(3)}*F.screen.y/(2.0*max(length(F.camUp.xyz),1e-4))/vDepth;
+  if(vPixels<1.0){
+    let inflate=inverseSqrt(clamp(vPixels,0.06,1.0));
+    local=vec3f(0.0,0.86,0.0)+(local-vec3f(0.0,0.86,0.0))*inflate;
+  }
   let turned=crewOrthonormal3x3(pose)*surface.normal;
   var out:CrewVertex;
   out.world=vec3f(local.x*c+local.z*s,local.y,local.z*c-local.x*s)+body.position;

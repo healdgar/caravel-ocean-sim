@@ -546,7 +546,7 @@ globalThis.BOARD_MODEL = (() => {
         for (const g in F.g) {
           if (GOODBASE[g]) cargo[g] = Math.max(6, Math.round(F.g[g] * (18 + (typeof frand === 'function' ? frand() : Math.random()) * 26)));
         }
-        const phases = force ? ['dock', 'in', 'out', 'dock', 'in', 'out'] : ['in', 'dock', 'in'];
+        const phases = force ? ['dock', 'in', 'out', 'dock', 'in', 'out'] : ['in', 'in', 'in'];
         const phase = phases[k % phases.length];
         const span = Math.max(2.6, R.len / (typeof SHIP_MPD === 'number' ? SHIP_MPD : 3500));
         const berths = anchorageBerths(s);
@@ -568,8 +568,8 @@ globalThis.BOARD_MODEL = (() => {
           cargo,
           load: {},
           phase,
-          t0: now - span * (phase === 'out' ? 0.28 : 0.42),
-          t1: now + span * (phase === 'out' ? 0.85 : 0.72),
+          t0: force ? (now - span * (phase === 'out' ? 0.28 : 0.42)) : now,
+          t1: force ? (now + span * (phase === 'out' ? 0.85 : 0.72)) : (now + span),
           poly: R.poly,
           len: R.len,
           berth: phase === 'dock' ? berth : null,
@@ -826,7 +826,8 @@ globalThis.BOARD_MODEL = (() => {
         const pair = seaPairs[i % seaPairs.length];
         const forward = (i % 2) === 0;
         const poly = forward ? pair.poly : [...pair.poly].reverse();
-        if (tryDispatchRoute('sea', forward ? pair.oi : pair.di, forward ? pair.di : pair.oi, poly, pair.len, 0.16 + ((i * 0.21) % 0.62))) needSea--;
+        const backdate = force ? (0.16 + ((i * 0.21) % 0.62)) : 0;
+        if (tryDispatchRoute('sea', forward ? pair.oi : pair.di, forward ? pair.di : pair.oi, poly, pair.len, backdate)) needSea--;
       }
     }
     let seaCaravanIdx = 0;
@@ -843,7 +844,8 @@ globalThis.BOARD_MODEL = (() => {
         if (!pr?.route?.poly || pr.route.poly.length < 2) continue;
         const forward = (i % 2) === 0;
         const poly = forward ? pr.route.poly : [...pr.route.poly].reverse();
-        if (tryDispatchRoute('river', forward ? pr.a : pr.b, forward ? pr.b : pr.a, poly, pr.route.len || 400, 0.20 + ((i * 0.27) % 0.56))) needRiv--;
+        const backdate = force ? (0.20 + ((i * 0.27) % 0.56)) : 0;
+        if (tryDispatchRoute('river', forward ? pr.a : pr.b, forward ? pr.b : pr.a, poly, pr.route.len || 400, backdate)) needRiv--;
       }
     }
 
@@ -892,8 +894,10 @@ globalThis.BOARD_MODEL = (() => {
       return { good, qty };
     };
     const MAX_RIVER_BOATS = 28;
-    if (W.riverBoats.length < 14 && Array.isArray(W.rivStrips) && W.rivStrips.length > 0 && S.length > 0) {
-      W.riverBoats.length = 0;
+    const liveRiverBoatCount = W.riverBoats.filter((b) => b && !b.sunk).length;
+    if (liveRiverBoatCount < 14 && Array.isArray(W.rivStrips) && W.rivStrips.length > 0 && S.length > 0) {
+      const existingByKey = new Set(W.riverBoats.filter((b) => b && !b.sunk).map((b) => `${b.riverIdx}:${b.slotCopy ?? b.id}`));
+      let nextId = W.riverBoats.reduce((m, b) => Math.max(m, Number(b?.id) || 0), 0) + 1;
       const reaches = [];
       for (let ri = 0; ri < W.rivStrips.length; ri++) {
         const q = W.rivStrips[ri];
@@ -909,11 +913,13 @@ globalThis.BOARD_MODEL = (() => {
         }
       }
       reaches.sort((a, b) => b.totalLen - a.totalLen || a.ri - b.ri);
-      let nextId = 1;
-      for (let idx = 0; idx < reaches.length && W.riverBoats.length < MAX_RIVER_BOATS; idx++) {
+      for (let idx = 0; idx < reaches.length && W.riverBoats.filter((b) => b && !b.sunk).length < MAX_RIVER_BOATS; idx++) {
         const r = reaches[idx];
         const copies = Math.max(2, Math.min(8, Math.round(r.totalLen / 335)));
-        for (let copy = 0; copy < copies && W.riverBoats.length < MAX_RIVER_BOATS; copy++) {
+        for (let copy = 0; copy < copies && W.riverBoats.filter((b) => b && !b.sunk).length < MAX_RIVER_BOATS; copy++) {
+          const slotKey = `${r.ri}:${copy}`;
+          if (existingByKey.has(slotKey)) continue;
+          existingByKey.add(slotKey);
           const forward = ((idx + copy) % 2) === 0;
           const pts = (forward ? r.pts : [...r.pts].reverse()).map((p) => ({ x: p.x, z: p.z }));
           const si = nearestSettlement(pts[0]);
@@ -925,13 +931,14 @@ globalThis.BOARD_MODEL = (() => {
           const parcel = pickRiverParcel(si, id);
           W.riverBoats.push({
             id,
+            slotCopy: copy,
             key: `rb:${id}`,
             shipName: `Barca do Rio ${id}`,
             riverIdx: r.ri,
             si,
             destSi,
             phase: 'shuttle',
-            scale: +(0.72 + ((id * 0.037) % 0.14)).toFixed(2),
+            scale: +(0.76 + ((id * 0.037) % 0.14)).toFixed(2),
             tripSpan,
             phaseOffset,
             departDay,
@@ -961,7 +968,6 @@ globalThis.BOARD_MODEL = (() => {
         b.phaseOffset = +((((b.id || 1) * 0.29) % 0.92) + 0.04).toFixed(4);
       }
       if (now >= (b.arriveDay ?? -Infinity)) {
-        b.points = [...(b.points || [])].reverse();
         const prevSi = b.si;
         b.si = b.destSi ?? prevSi;
         b.destSi = prevSi ?? b.si;

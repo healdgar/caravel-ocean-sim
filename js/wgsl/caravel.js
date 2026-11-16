@@ -238,43 +238,85 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
   if(in.material==0u && abs(p.y-deckFloor(p.z))<0.08){wet.x=max(wet.x,sampleDeck(deckUV(p)).z);}
   var n = normalize(in.normal) * select(-1.0,1.0,front);
   let grainUV = in.uv;
-  let timber = pow(textureSample(oakAlbedo, oakSampler, grainUV).rgb, vec3f(2.2));
-  let relief = dot(timber, vec3f(0.2126,0.7152,0.0722));
-  let broad = gnoise(vec2f(grainUV.x * 18.0, grainUV.y * 0.7));
-  let grain = gnoise(vec2f(grainUV.x * 180.0 + broad*3.0, grainUV.y * 5.0));
-  let footprint = max(length(dpdx(grainUV)),length(dpdy(grainUV)));
-  // Plank seams follow the hull's girth and the cabin's horizontal strakes.
-  // Unlike a painted line, their recessed height also breaks the light response.
-  let paintedWood=vesselPainted(in.material);
+  let materialPoint = p * vec3f(hull.size.x / 3.6, hull.right.w, hull.size.y / 12.0);
+  let materialFootprint = max(length(dpdx(materialPoint)), length(dpdy(materialPoint)));
+  let paintedWood = vesselPainted(in.material);
   let isProceduralFleet=hull.rig.w<.5 && abs(hull.size.y-20.0)>.2;
-  let isCopper=in.material==22u || (in.material==20u && isProceduralFleet && p.y < -0.05);
-  let isGilt=in.material==25u || (in.material==20u && isProceduralFleet && abs(p.y - 0.53) < 0.018 && abs(in.normalLocal.x) > 0.35);
+  let isVictory = abs(hull.rig.w - 1.0) < 0.5;
+  let isRowingShip = hull.rig.w > 3.5 && hull.rig.w < 6.5;
+  let isDugoutCanoe = abs(hull.rig.w - 6.0) < 0.5;
+  let isFlyingCloud = abs(hull.rig.w - 7.0) < 0.5;
+  let isGipsyMoth = abs(hull.rig.w - 8.0) < 0.5;
+  let isCopper=in.material==22u || (in.material==20u && (isProceduralFleet || isFlyingCloud) && p.y < -0.05);
+  let isGilt=in.material==25u || (in.material==20u && (isProceduralFleet || isFlyingCloud) && abs(p.y - 0.53) < 0.018 && abs(in.normalLocal.x) > 0.35);
   let isMastSpar=vesselMastSpar(in.material,hull.rig.w,p);
   let hoopFootprint=max(fwidth(p.y*1.35),0.0005);
-  ${damaged?`// Timber stands raw and splintered around a hole, and whatever is seen through it lies in the dark of the hold.
-  let holedTimber=u32(hullDamage.scale.w)>0u && vesselWoodMaterial(in.material,paintedWood);
-  let holeRim=select(0.0,max(hullHoleRim(p),0.0),holedTimber);
-`:''}  let plankedWall=in.material==15u || (paintedWood && !isCopper && !isGilt && abs(in.normalLocal.y)<.5) || (in.material==1u && !isMastSpar && abs(in.normalLocal.y)<.35);
   // Wall strakes are the Niña's width in metres on every ship, not in the ship's design units.
   let course=select(p.y*hull.right.w/(.16*20.0/12.0),in.uv.x*18.0,in.material==15u);
   let board=floor(course);
+  var oakUV = grainUV;
+  if (isVictory && in.material != 9u && in.material != 13u && in.material != 2u && in.material != 12u && in.material != 19u && in.material != 11u) {
+    if (isMastSpar) {
+      let upSpar = abs(in.normalLocal.y) < 0.55;
+      oakUV = select(
+        vec2f(materialPoint.y * 0.96, (materialPoint.x + materialPoint.z) * 0.42),
+        vec2f(atan2(in.normalLocal.x, in.normalLocal.z) * 0.35, materialPoint.y * 0.45),
+        upSpar
+      );
+    } else if (abs(in.normalLocal.y) > 0.65) {
+      oakUV = vec2f(materialPoint.x * 0.96, materialPoint.z * 0.33);
+    } else if (abs(in.normalLocal.z) > 0.72) {
+      oakUV = vec2f(materialPoint.y * 0.96, materialPoint.x * 0.33);
+    } else {
+      oakUV = vec2f(materialPoint.y * 0.96, materialPoint.z * 0.33);
+    }
+  } else if (in.material == 15u && hull.rig.w > 1.5) {
+    oakUV = select(
+      vec2f(course * 0.24 + board * 0.37, materialPoint.z * 0.36 + fract(sin(board * 17.1) * 437.5)),
+      vec2f((materialPoint.y + abs(materialPoint.x) * 0.6) * 0.96, materialPoint.z * 0.36),
+      isDugoutCanoe
+    );
+  } else if (laterSailModel(hull.rig.w) && (in.material == 20u || in.material == 23u)) {
+    oakUV = vec2f(materialPoint.y * 0.96, select(materialPoint.z, materialPoint.x, abs(in.normalLocal.z) > 0.72) * 0.36);
+  }
+  let timber = pow(textureSample(oakAlbedo, oakSampler, oakUV).rgb, vec3f(2.2));
+  let relief = dot(timber, vec3f(0.2126,0.7152,0.0722));
+  let broad = gnoise(vec2f(oakUV.x * 18.0, oakUV.y * 0.7));
+  let grain = gnoise(vec2f(oakUV.x * 180.0 + broad*3.0, oakUV.y * 5.0));
+  let footprint = max(length(dpdx(oakUV)),length(dpdy(oakUV)));
+  ${damaged?`// Timber stands raw and splintered around a hole, and whatever is seen through it lies in the dark of the hold.
+  let holedTimber=u32(hullDamage.scale.w)>0u && vesselWoodMaterial(in.material,paintedWood);
+  let holeRim=select(0.0,max(hullHoleRim(p),0.0),holedTimber);
+`:''}  let isGunwaleRail = isRowingShip && in.material == 15u && abs(in.normalLocal.y) > 0.58;
+  let plankedWall = !isDugoutCanoe && !isGunwaleRail && (in.material==15u || (paintedWood && !isCopper && !isGilt && abs(in.normalLocal.y)<.5) || (in.material==1u && !isMastSpar && abs(in.normalLocal.y)<.35));
   let edge=min(fract(course),1.0-fract(course));
-  let seam=1.0-smoothstep(.008,.035+max(fwidth(course),.001),edge);
+  let seam=select(1.0-smoothstep(.008,.035+max(fwidth(course),.001),edge), 0.0, isDugoutCanoe || isGunwaleRail);
   let along=select(p.z,p.x,abs(in.normalLocal.z)>.75 && in.material!=15u);
   let buttCoord=(along+fract(sin(board*73.17)*4321.1)*2.6)/2.6;
   let butt=min(fract(buttCoord),1.0-fract(buttCoord));
-  let buttSeam=1.0-smoothstep(.0008,.003+max(fwidth(buttCoord),.0003),butt);
-  let deckCourse=(p.x+1.8)/.145;
+  let buttSeam=select(1.0-smoothstep(.0008,.003+max(fwidth(buttCoord),.0003),butt), 0.0, isDugoutCanoe || isGunwaleRail);
+  let deckCourse=select(
+    (p.x+1.8)/.145,
+    select(
+      select((p.x+1.8)/0.054, (p.x+1.8)/(3.6/44.0), laterSailModel(hull.rig.w)),
+      materialPoint.x / 0.17,
+      isRowingShip && !isDugoutCanoe
+    ),
+    isVictory || laterSailModel(hull.rig.w) || (isRowingShip && !isDugoutCanoe)
+  );
   let deckPlankId=floor(deckCourse);
   let deckEdge=min(fract(deckCourse),1.0-fract(deckCourse));
   let deckSeam=1.0-smoothstep(.014,.038+max(fwidth(deckCourse),.002),deckEdge);
-  let deckButtCoord=(p.z+fract(deckPlankId*0.413)*2.0)/2.3;
+  let deckButtSpan=select(2.3, 3.6, isVictory || laterSailModel(hull.rig.w));
+  let deckAlongZ=select(p.z, materialPoint.z, isVictory || laterSailModel(hull.rig.w) || isRowingShip);
+  let deckButtCoord=(deckAlongZ+fract(deckPlankId*0.413)*2.0)/deckButtSpan;
   let deckButtEdge=min(fract(deckButtCoord),1.0-fract(deckButtCoord));
   let deckButtSeam=1.0-smoothstep(.001,.004+max(fwidth(deckButtCoord),.001),deckButtEdge);
   // Pinta and Santa María carry their model code in rig.w, so isProceduralFleet
-  // above never matches them. It stays off for the other descriptor-driven ships.
+  // above never matches them.
   let isAdditionalIberian=hull.rig.w>1.5 && hull.rig.w<3.5;
-  let deckCaulk=select(0.0,max(deckSeam,deckButtSeam*.85),(isProceduralFleet || isAdditionalIberian) && in.material==0u);
+  let hasGaplessDeck=((isProceduralFleet || isAdditionalIberian) && in.material==0u) || ((isVictory || (isRowingShip && !isDugoutCanoe) || laterSailModel(hull.rig.w)) && in.material==0u);
+  let deckCaulk=select(0.0,max(deckSeam,deckButtSeam*.85),hasGaplessDeck);
   let castleFore=select(${ADDITIONAL_DESIGNS['santa-maria'].deckZones.find(zone=>zone.id==='forecastle').bounds[1]},${ADDITIONAL_DESIGNS.pinta.deckZones.find(zone=>zone.id==='forecastle').bounds[1]},hull.rig.w<2.5);
   let castleAft=select(${ADDITIONAL_DESIGNS['santa-maria'].deckZones.find(zone=>zone.id==='quarter').bounds[0]},${ADDITIONAL_DESIGNS.pinta.deckZones.find(zone=>zone.id==='quarter').bounds[0]},hull.rig.w<2.5);
   let isCastleWall=isAdditionalIberian && in.material==15u && p.y>.60 && (p.z>castleAft || p.z<castleFore);
@@ -297,8 +339,6 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
   let isWood=vesselWoodMaterial(in.material,paintedWood) && !isCopper && !isGilt;
   n = normalize(n - clamp(gradient,vec3f(-.38),vec3f(.38))*select(0.0,1.0,isWood));
   let isIron=in.material==3u || in.material==8u;
-  let materialPoint=p*vec3f(hull.size.x/3.6,hull.right.w,hull.size.y/12.0);
-  let materialFootprint=max(length(dpdx(materialPoint)),length(dpdy(materialPoint)));
   var iron:VesselIronSurface;
   if(isIron){iron=vesselIronSurface(materialPoint,materialFootprint,vesselAirFilm(wet.y));}
   // Derivatives remain outside material-dependent control flow. They use the
@@ -335,15 +375,17 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
   var albedo = timber * vec3f(1.02,.98,.88);
   var rough = clamp(.86 + (.2-relief)*.20 + (grain-.5)*.08,.78,.95); var metal = 0.0;
   let canvasDepth=canvasThickness(in.uv,in.material)*canvasWetDepth(wet.x);
-  let plank=select(floor((p.x+1.8)/.145),board,plankedWall);
-  albedo *= .88 + .16 * fract(sin(plank*74.17)*4321.1);
+  let plank=select(deckPlankId,board,plankedWall);
+  albedo *= .88 + .16 * select(fract(sin(plank*74.17)*4321.1), 0.5, isDugoutCanoe);
   albedo *= 1.0-join*.58;
   // Fine end-grain joints, splits, and oxidised grain.
-  let joint = abs(fract((p.z + fract(plank*0.413)*2.0)/2.3)-0.5);
+  let joint = abs(fract(deckButtCoord)-0.5);
   let jointAA = max(fwidth(joint),0.001);
   if(in.material==0u) {
-    albedo *= mix(0.3,1.0,smoothstep(0.001,0.004+jointAA,joint));
-    if(isProceduralFleet || isAdditionalIberian) {
+    if (!isDugoutCanoe) {
+      albedo *= mix(0.3,1.0,smoothstep(0.001,0.004+jointAA,joint));
+    }
+    if(isProceduralFleet || isAdditionalIberian || hasGaplessDeck) {
       albedo = mix(albedo, vec3f(0.015,0.011,0.008), deckCaulk * 0.86);
       rough = mix(rough, 0.94, deckCaulk);
     }
@@ -357,11 +399,11 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
       let checkCrack = smoothstep(0.86, 0.95, sin(sparAngle * 11.0 + p.y * 2.5));
       albedo = timber * vec3f(1.08, 0.92, 0.68) * sparGrain * (1.0 - checkCrack * 0.28);
       rough = clamp(0.74 + (1.0 - sparGrain) * 0.14 + checkCrack * 0.12, 0.68, 0.90);
-      let mastHoop = mastHoopBand(in.material, hull.rig.w, p.y, hoopFootprint);
+      let mastHoop = select(0.0, mastHoopBand(in.material, hull.rig.w, p.y, hoopFootprint), abs(p.z) < 4.6);
       albedo = mix(albedo, vec3f(0.032, 0.031, 0.029), mastHoop);
       rough = mix(rough, 0.58, mastHoop);
       metal = mix(metal, 0.45, mastHoop);
-    } else if((isProceduralFleet || isAdditionalIberian) && in.material == 1u) {
+    } else if(((isProceduralFleet || isAdditionalIberian) && in.material == 1u) || (((isRowingShip && !isDugoutCanoe) || laterSailModel(hull.rig.w)) && in.material == 1u)) {
       let isKeelOrPost = (abs(p.x) < 0.068 && p.y < -0.46) || (abs(p.x) < 0.055 && p.z > 5.25 && p.y < 1.05);
       let isCapRail = p.y > 0.58 && in.normalLocal.y > 0.52 && abs(p.x) > 0.32;
       if(isKeelOrPost) {
@@ -403,7 +445,7 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
   }
   if(in.material==23u){
     albedo=vec3f(.68,.65,.55);rough=.86;
-    if(isProceduralFleet && hull.size.y < 20.0 && abs(in.normalLocal.x) > 0.25) {
+    if(((isProceduralFleet && hull.size.y < 20.0) || isGipsyMoth) && abs(in.normalLocal.x) > 0.25) {
       if(p.y < -0.03) {
         albedo = vec3f(.26,.028,.018); rough = .82;
       } else if(abs(p.y - 0.34) < 0.018) {
@@ -545,13 +587,19 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
   }
   if(in.material == 14u) { albedo*=0.6; }
   if(in.material == 15u) {
-    albedo*=.93;
-    let tar=(1.0-smoothstep(-0.75,-0.2,p.y)); albedo=mix(albedo,vec3f(0.025,0.022,0.018),tar*0.9);
-    if(isAdditionalIberian) {
-      let frameWeight = clamp(castleMoulding + castleFuttock * 0.88, 0.0, 1.0);
-      if(frameWeight > 0.01) {
-        albedo = mix(albedo, timber * vec3f(0.20, 0.18, 0.15), frameWeight);
-        rough = mix(rough, 0.90, frameWeight);
+    if (isDugoutCanoe) {
+      albedo = timber * vec3f(1.06, 0.82, 0.62);
+      rough = clamp(rough - 0.03, 0.72, 0.90);
+    } else {
+      albedo*=.93;
+      let tar=select((1.0-smoothstep(-0.75,-0.2,p.y)), 0.0, isGunwaleRail);
+      albedo=mix(albedo,vec3f(0.025,0.022,0.018),tar*0.9);
+      if(isAdditionalIberian) {
+        let frameWeight = clamp(castleMoulding + castleFuttock * 0.88, 0.0, 1.0);
+        if(frameWeight > 0.01) {
+          albedo = mix(albedo, timber * vec3f(0.20, 0.18, 0.15), frameWeight);
+          rough = mix(rough, 0.90, frameWeight);
+        }
       }
     }
   }

@@ -34,6 +34,7 @@ export function createDevServer({ directory = root } = {}) {
   let url;
   try { url = new URL(req.url, 'http://localhost'); }
   catch { res.writeHead(400); res.end('bad request'); return; }
+  if (url.pathname === '/favicon.ico') { res.writeHead(204); res.end(); return; }
   if (req.method === 'POST' && url.pathname === '/__shot') {
     const name = path.basename(url.searchParams.get('name') || 'shot.png');
     const chunks = [];

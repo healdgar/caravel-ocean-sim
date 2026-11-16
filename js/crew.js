@@ -554,7 +554,7 @@ export function isCaptainActor(s){
 // The whole part of an actor's skin.w, which tells the shader whose body it is drawing: a man's, a woman's, or the
 // captain's worn by a woman, whose painted beard is then painted out. `own` is a body of its batch's own sex.
 export const crewBodyKind=(s,own)=>own?Number(s.sex==='female'):s.sex==='female'?2:0;
-export const CAPTAIN_TEXTURE_PX=1024;
+export const CAPTAIN_TEXTURE_PX=2048;
 async function uploadCaptainTexture(device,model){
   if(!model?.image||typeof createImageBitmap!=='function'){
     const texture=device.createTexture({label:'captain pigment fallback',size:[1,1],format:'rgba8unorm-srgb',usage:(globalThis.GPUTextureUsage?.TEXTURE_BINDING??4)|(globalThis.GPUTextureUsage?.COPY_DST??2)});
@@ -1030,15 +1030,16 @@ export function loadGroomPackGLB(bytes) {
 }
 
 const REF_GROOM_HEAD = Object.freeze({
-  topY: 1.769,
-  chinY: 1.514,
-  headH: 1.769 - 1.514,
+  topY: 1.7693,
+  chinY: 1.5241,
+  headH: 1.7693 - 1.5241,
   cranRx: 0.095,
   cranCz: -0.010,
   cranRz: 0.114,
-  noseY: 1.604,
-  noseZ: 0.114,
-  jawRx: 0.081,
+  noseY: 1.6035,
+  noseZ: 0.1145,
+  jawRx: 0.0527,
+  lipZ: 0.0937,
 });
 
 function clampRange(v, lo, hi) {
@@ -1070,10 +1071,11 @@ export function measureCrewHeadLandmarks(baseModel) {
 
   const hd = [];
   const chestPts = [];
+  const rawJawSamples = [];
   for (let i = 0; i < count; i++) {
     const fOff = i * 15, uOff = i * 30;
     const vx = vf[fOff], vy = vf[fOff + 1], vz = vf[fOff + 2];
-    let px = 0, py = 0, pz = 0, headW = 0, spine3W = 0;
+    let px = 0, py = 0, pz = 0, headW = 0, neckW = 0, spine3W = 0;
     for (let k = 0; k < 4; k++) {
       const slot = vu[uOff + 18 + k];
       const w = vf[fOff + 11 + k];
@@ -1083,10 +1085,14 @@ export function measureCrewHeadLandmarks(baseModel) {
       py += w * (pal[m + 1] * vx + pal[m + 5] * vy + pal[m + 9] * vz + pal[m + 13]);
       pz += w * (pal[m + 2] * vx + pal[m + 6] * vy + pal[m + 10] * vz + pal[m + 14]);
       if (slot === headSlot) headW += w;
-      if (slot === spine3Slot) spine3W += w;
+      else if (slot === neckSlot) neckW += w;
+      else if (slot === spine3Slot) spine3W += w;
     }
     if (headW > 0.45) hd.push([px, py, pz]);
     if (spine3W > 0.25 && py > neckY - 0.13 && py < neckY - 0.03) chestPts.push([px, py, pz]);
+    if ((headW + neckW) > 0.35 && py > neckY - 0.05 && py < hpY + 0.06) {
+      rawJawSamples.push([px, py, pz, headW, neckW, spine3W]);
+    }
   }
 
   if (!hd.length) {
@@ -1095,7 +1101,7 @@ export function measureCrewHeadLandmarks(baseModel) {
       topY: REF_GROOM_HEAD.topY, chinY: REF_GROOM_HEAD.chinY,
       cranCx: 0, cranRx: REF_GROOM_HEAD.cranRx, cranCz: REF_GROOM_HEAD.cranCz, cranRz: REF_GROOM_HEAD.cranRz,
       noseY: REF_GROOM_HEAD.noseY, noseZ: REF_GROOM_HEAD.noseZ, jawRx: REF_GROOM_HEAD.jawRx,
-      lipZ: REF_GROOM_HEAD.noseZ - 0.016, chestY: neckY - 0.055, chestZ: 0.118,
+      lipZ: REF_GROOM_HEAD.lipZ, chestY: neckY - 0.055, chestZ: 0.118, jawSkinSamples: [],
     };
   }
 
@@ -1126,20 +1132,20 @@ export function measureCrewHeadLandmarks(baseModel) {
   if (!Number.isFinite(chinY)) chinY = minAllY;
 
   const jawAbsX = [];
-  for (const [px, py] of hd) {
-    if (py > hpY - 0.01 && py < hpY + 0.03) jawAbsX.push(Math.abs(px - cranCx));
+  for (const [px, py, pz] of hd) {
+    if (py > hpY - 0.03 && py < hpY + 0.02 && pz > cranCz + 0.01) jawAbsX.push(Math.abs(px - cranCx));
   }
   jawAbsX.sort((x, y) => x - y);
   const jawRx = jawAbsX.length
-    ? Math.max(0.055, jawAbsX[Math.min(jawAbsX.length - 1, Math.floor((jawAbsX.length - 1) * 0.95))])
-    : cranRx;
+    ? Math.max(0.046, jawAbsX[Math.min(jawAbsX.length - 1, Math.floor((jawAbsX.length - 1) * 0.95))])
+    : REF_GROOM_HEAD.jawRx;
 
-  const lipTargetY = chinY + (noseY - chinY) * 0.34;
+  const lipTargetY = chinY + (noseY - chinY) * 0.58;
   let maxLipZ = -Infinity;
   for (const [px, py, pz] of hd) {
-    if (Math.abs(px - cranCx) < 0.022 && Math.abs(py - lipTargetY) < 0.018 && pz > maxLipZ) maxLipZ = pz;
+    if (Math.abs(px - cranCx) < 0.018 && Math.abs(py - lipTargetY) < 0.009 && pz > maxLipZ) maxLipZ = pz;
   }
-  const lipZ = Number.isFinite(maxLipZ) ? maxLipZ + 0.003 : noseZ - 0.016;
+  const lipZ = Number.isFinite(maxLipZ) ? maxLipZ : noseZ - 0.020;
 
   let maxChestZ = -Infinity;
   for (const [px, , pz] of chestPts) {
@@ -1148,9 +1154,52 @@ export function measureCrewHeadLandmarks(baseModel) {
   const chestY = neckY - 0.055;
   const chestZ = Number.isFinite(maxChestZ) ? clampRange(maxChestZ + 0.004, 0.085, 0.165) : 0.118;
 
+  const jawSkinSamples = rawJawSamples.filter(([, py, pz]) => py < noseY + 0.025 && pz > cranCz - 0.02);
+  if (jawSkinSamples.length > 360) {
+    const stride = Math.ceil(jawSkinSamples.length / 360);
+    const decimated = [];
+    for (let i = 0; i < jawSkinSamples.length; i += stride) decimated.push(jawSkinSamples[i]);
+    jawSkinSamples.length = 0;
+    jawSkinSamples.push(...decimated);
+  }
+
   return {
     headSlot, neckSlot, spine3Slot, hpY, neckY, spine3Y,
     topY, chinY, cranCx, cranRx, cranCz, cranRz, noseY, noseZ, jawRx, lipZ, chestY, chestZ,
+    jawSkinSamples,
+  };
+}
+
+function sampleBeardSkinWeights(px, py, pz, lm) {
+  const samples = lm.jawSkinSamples;
+  if (!samples || !samples.length) return { bones: [lm.headSlot, 0, 0, 0], weights: [1, 0, 0, 0] };
+  let b0 = 1e9, b1 = 1e9, b2 = 1e9, b3 = 1e9, b4 = 1e9, b5 = 1e9;
+  let s0 = null, s1 = null, s2 = null, s3 = null, s4 = null, s5 = null;
+  for (let i = 0; i < samples.length; i++) {
+    const s = samples[i];
+    const dx = px - s[0], dy = py - s[1], dz = (pz - s[2]) * 0.65;
+    const d2 = dx * dx + dy * dy + dz * dz;
+    if (d2 < b0) { b5 = b4; s5 = s4; b4 = b3; s4 = s3; b3 = b2; s3 = s2; b2 = b1; s2 = s1; b1 = b0; s1 = s0; b0 = d2; s0 = s; }
+    else if (d2 < b1) { b5 = b4; s5 = s4; b4 = b3; s4 = s3; b3 = b2; s3 = s2; b2 = b1; s2 = s1; b1 = d2; s1 = s; }
+    else if (d2 < b2) { b5 = b4; s5 = s4; b4 = b3; s4 = s3; b3 = b2; s3 = s2; b2 = d2; s2 = s; }
+    else if (d2 < b3) { b5 = b4; s5 = s4; b4 = b3; s4 = s3; b3 = d2; s3 = s; }
+    else if (d2 < b4) { b5 = b4; s5 = s4; b4 = d2; s4 = s; }
+    else if (d2 < b5) { b5 = d2; s5 = s; }
+  }
+  const near = [[s0, b0], [s1, b1], [s2, b2], [s3, b3], [s4, b4], [s5, b5]];
+  let wHead = 0, wNeck = 0, wSpine = 0;
+  for (const [s, d2] of near) {
+    if (!s) continue;
+    const inv = 1 / (d2 + 1.5e-5);
+    wHead += s[3] * inv;
+    wNeck += s[4] * inv;
+    wSpine += s[5] * inv;
+  }
+  const sum = wHead + wNeck + wSpine;
+  if (!(sum > 1e-6)) return { bones: [lm.headSlot, 0, 0, 0], weights: [1, 0, 0, 0] };
+  return {
+    bones: [lm.headSlot, lm.neckSlot, lm.spine3Slot, 0],
+    weights: [wHead / sum, wNeck / sum, wSpine / sum, 0],
   };
 }
 
@@ -1164,7 +1213,7 @@ function appendGroomPieceMesh(pieceMesh, pieceNumber, lm, baseVertCount, extraVe
   const capInflate = pieceMesh.name === 'hair_1550_coif_cap'
     ? 1.075
     : isBeard
-      ? 1.075
+      ? 1.005
       : (pieceMesh.name === 'hair_1550_female_bun' || pieceMesh.name === 'hair_1550_cropped' || pieceMesh.name === 'hair_1550_wavy')
         ? 1.044
         : (pieceMesh.name === 'hair_indigenous_plaits' || pieceMesh.name === 'hair_indigenous_long')
@@ -1176,13 +1225,11 @@ function appendGroomPieceMesh(pieceMesh, pieceNumber, lm, baseVertCount, extraVe
       ? 0.007
       : pieceMesh.name === 'hair_indigenous_long'
         ? 0.008
-        : isBeard
-          ? -0.002
-          : 0.0;
+        : 0.0;
   const zBias = pieceMesh.name === 'hair_indigenous_long'
     ? -0.011
     : isBeard
-      ? 0.011
+      ? 0.001
       : (pieceMesh.name === 'hair_indigenous_plaits' || pieceMesh.name === 'hair_1550_cropped' || pieceMesh.name === 'hair_1550_female_bun')
         ? 0.004
         : pieceMesh.name === 'hair_1550_coif_cap'
@@ -1196,7 +1243,7 @@ function appendGroomPieceMesh(pieceMesh, pieceNumber, lm, baseVertCount, extraVe
     ? clampRange((lm.noseY - lm.chinY) / (REF_GROOM_HEAD.noseY - REF_GROOM_HEAD.chinY), 0.84, 1.18)
     : clampRange((lm.topY - lm.chinY) / REF_GROOM_HEAD.headH, 0.84, 1.16)) * (pieceMesh.name === 'hair_1550_coif_cap' ? 1.03 : 1.0);
   const sz = (isBeard
-    ? clampRange((lm.noseZ - lm.cranCz) / (REF_GROOM_HEAD.noseZ - REF_GROOM_HEAD.cranCz), 0.84, 1.18)
+    ? clampRange((lm.lipZ - lm.cranCz) / (REF_GROOM_HEAD.lipZ - REF_GROOM_HEAD.cranCz), 0.84, 1.18)
     : clampRange(lm.cranRz / REF_GROOM_HEAD.cranRz, 0.82, 1.16)) * capInflate;
 
   const drapeTopY = lm.neckY + 0.025;
@@ -1209,17 +1256,19 @@ function appendGroomPieceMesh(pieceMesh, pieceNumber, lm, baseVertCount, extraVe
     const vx = positions[i3], vy = positions[i3 + 1], vz = positions[i3 + 2];
     const px = lm.cranCx + vx * sx;
     const py = (isBeard
-      ? lm.chinY + (vy - REF_GROOM_HEAD.chinY) * sy
+      ? lm.noseY + (vy - REF_GROOM_HEAD.noseY) * sy
       : lm.topY + (vy - REF_GROOM_HEAD.topY) * sy) + yBias;
     const pz = (isBeard
-      ? lm.noseZ + (vz - REF_GROOM_HEAD.noseZ) * sz
+      ? lm.lipZ + (vz - REF_GROOM_HEAD.lipZ) * sz
       : lm.cranCz + (vz - REF_GROOM_HEAD.cranCz) * sz) + zBias;
 
     const nx = normals[i3] / sx, ny = normals[i3 + 1] / sy, nz = normals[i3 + 2] / sz;
     const nLen = Math.hypot(nx, ny, nz) || 1;
     let bones = [lm.headSlot, 0, 0, 0];
     let weights = [1, 0, 0, 0];
-    if (isDraped && py < drapeTopY) {
+    if (isBeard) {
+      ({ bones, weights } = sampleBeardSkinWeights(px, py, pz, lm));
+    } else if (isDraped && py < drapeTopY) {
       const t = Math.min(1, (drapeTopY - py) / drapeSpan);
       const wHead = Math.max(0, 1 - t * 1.45);
       const wSpine = Math.max(0, (t - 0.30) / 0.70);

@@ -506,6 +506,57 @@ def main():
             out_j[v, k] = dj
             out_w[v, k] = val / tot
 
+    # Smooth skin weights across welded 3D edges in high-articulation garment zones:
+    # (a) shoulder/armpit puffed sleeves (T-pose -> Idle -68 deg drop) and
+    # (b) skirt/breeches centerline (prevents thigh_l vs thigh_r tearing across x=0).
+    num_joints = len(dst_skin['joints'])
+    dense_w = np.zeros((len(P), num_joints), dtype=np.float64)
+    for k in range(4):
+        np.add.at(dense_w, (np.arange(len(P)), out_j[:, k]), out_w[:, k])
+    w_keys = np.round(out_p / 2e-4).astype(np.int64)
+    _, w_first, w_inv = np.unique(w_keys, axis=0, return_index=True, return_inverse=True)
+    w_inv = w_inv.ravel()
+    n_u = len(w_first)
+    u_pos = out_p[w_first]
+    u_nbrs = [set() for _ in range(n_u)]
+    for ta, tb, tc in I.reshape(-1, 3):
+        ua, ub, uc = int(w_inv[ta]), int(w_inv[tb]), int(w_inv[tc])
+        if ua != ub:
+            u_nbrs[ua].add(ub); u_nbrs[ub].add(ua)
+        if ub != uc:
+            u_nbrs[ub].add(uc); u_nbrs[uc].add(ub)
+        if ua != uc:
+            u_nbrs[ua].add(uc); u_nbrs[uc].add(ua)
+    u_dense = np.zeros((n_u, num_joints), dtype=np.float64)
+    u_cnt = np.zeros(n_u, dtype=np.float64)
+    np.add.at(u_dense, w_inv, dense_w)
+    np.add.at(u_cnt, w_inv, 1.0)
+    u_dense /= np.maximum(u_cnt[:, None], 1.0)
+
+    pelvis_y = float(new_joint_pos['pelvis'][1])
+    sp2_y = float(new_joint_pos['spine_02'][1])
+    head_y = float(new_joint_pos['Head'][1])
+    in_armpit = (np.abs(u_pos[:, 0]) > 0.095) & (np.abs(u_pos[:, 0]) < 0.31) & (u_pos[:, 1] > sp2_y - 0.03) & (u_pos[:, 1] < head_y - 0.03)
+    in_skirt_seam = (np.abs(u_pos[:, 0]) < 0.125) & (u_pos[:, 1] > 0.20) & (u_pos[:, 1] < pelvis_y + 0.04)
+    smooth_zone = in_armpit | in_skirt_seam
+    for _ in range(4):
+        nxt_u = u_dense.copy()
+        for ui in np.nonzero(smooth_zone)[0]:
+            nb = list(u_nbrs[ui])
+            if not nb:
+                continue
+            alpha = 0.50 if in_skirt_seam[ui] else 0.38
+            nxt_u[ui] = (1.0 - alpha) * u_dense[ui] + alpha * u_dense[nb].mean(axis=0)
+        u_dense = nxt_u
+    smoothed_v = smooth_zone[w_inv]
+    for v in np.nonzero(smoothed_v)[0]:
+        row = u_dense[w_inv[v]]
+        top_idx = np.argsort(row)[::-1][:4]
+        vals = np.maximum(row[top_idx], 0.0)
+        tot = float(vals.sum()) or 1.0
+        out_j[v] = top_idx
+        out_w[v] = vals / tot
+
     # 5. Retarget Idle, Walk, and Brace onto the new anatomical 65-joint skeleton.
     dst_leg_len = float(np.linalg.norm(d_pos('calf_l') - d_pos('thigh_l')) + np.linalg.norm(d_pos('foot_l') - d_pos('calf_l')))
     new_leg_len = float(np.linalg.norm(new_joint_pos['calf_l'] - new_joint_pos['thigh_l']) + np.linalg.norm(new_joint_pos['foot_l'] - new_joint_pos['calf_l']))
@@ -568,6 +619,7 @@ def main():
         frame_min_ys = []
 
         # First pass: retarget rotations & scaled pelvis world translation
+        clav_nodes = {d_node_of[k] for k in ('clavicle_l', 'clavicle_r') if k in d_node_of}
         frame_worlds = []
         for fi in range(steps + 1):
             t_eval = 0.0 if fi == steps else float(times[fi])
@@ -575,10 +627,14 @@ def main():
             tgt_w_rot = [None] * len(dst['nodes'])
             tgt_w_pos = [None] * len(dst['nodes'])
             for idx in dst_order:
-                # Desired world rotation equals dst's animated world rotation:
-                # - Axial joints: W_new == W_dst -> applies exact world delta D(t) around upright bind.
-                # - Limb joints: W_new == R_diff @ W_dst -> skins bind limb R_diff @ dir_dst to D(t) @ dir_dst.
-                tgt_w_rot[idx] = src_w[idx][:3, :3]
+                # Dampen classic-rig clavicle forward hunch so straight-lateral 1550 T-pose shoulders
+                # never shove +4 cm forward into puffed sleeves/armpits when arms drop to the side.
+                if idx in clav_nodes:
+                    q_rest = mat3_to_quat(dst_worlds[idx][:3, :3])
+                    q_anim = mat3_to_quat(src_w[idx][:3, :3])
+                    tgt_w_rot[idx] = quat_to_mat3(quat_slerp(q_rest, q_anim, 0.22))
+                else:
+                    tgt_w_rot[idx] = src_w[idx][:3, :3]
                 if idx == pelvis_node:
                     dp = (src_w[pelvis_node][:3, 3] - orig_pelvis_world_rest) * leg_ratio
                     tgt_w_pos[idx] = new_pelvis_world_rest + dp
@@ -1311,14 +1367,13 @@ def main():
     dst.pop('samplers', None)
     if textured and image is not None:
         tex_img = image
-        if max(tex_img.size) > 1536:
-            tex_img = tex_img.resize((1536, 1536), Image.Resampling.LANCZOS)
+        if max(tex_img.size) > 2048:
+            tex_img = tex_img.resize((2048, 2048), Image.Resampling.LANCZOS)
         buf = io.BytesIO()
-        tex_img.save(buf, format='JPEG', quality=88, optimize=True)
-        if len(buf.getvalue()) > 520_000:
-            tex_img = image.resize((1024, 1024), Image.Resampling.LANCZOS)
+        tex_img.save(buf, format='JPEG', quality=87, optimize=True)
+        if len(buf.getvalue()) > 880_000:
             buf = io.BytesIO()
-            tex_img.save(buf, format='JPEG', quality=88, optimize=True)
+            tex_img.save(buf, format='JPEG', quality=80, optimize=True)
         img_bytes = buf.getvalue()
         img_view = add_bytes(img_bytes)
         dst['images'] = [{'bufferView': img_view, 'mimeType': 'image/jpeg'}]

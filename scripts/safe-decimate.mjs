@@ -250,7 +250,7 @@ function reducePart(part, allowed, options) {
   // A part that may vanish must not be pinned in place by its own ends.
   const mayVanish = options.dropSmall && size <= allowed;
   let locks = options.locks === false || mayVanish ? null : (part.locks ??= supportLocks(part));
-  if (!locks && part.uvs && allowed < 0.03) {
+  if (!locks && part.uvs && allowed < 0.032) {
     // Protect head/face UV-seam corners on near/mid textured character levels so facial features never stretch across atlas islands.
     const count = part.positions.length / 3;
     const posBuckets = new Map();

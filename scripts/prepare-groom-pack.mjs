@@ -18,16 +18,16 @@ const manifest = JSON.parse(readFileSync(inJson, 'utf8'));
 const rawBin = readFileSync(inBin);
 
 const TARGET_BUDGETS = {
-  hair_1550_cropped: [400, 180, 80],
-  hair_1550_wavy: [440, 190, 84],
-  hair_1550_female_bun: [400, 180, 80],
-  hair_1550_coif_cap: [400, 180, 80],
-  hair_indigenous_long: [400, 180, 80],
-  hair_indigenous_plaits: [440, 190, 84],
-  hair_algonquian_roach: [420, 180, 80],
-  beard_1550_pointed: [340, 150, 64],
-  beard_1550_full_mariner: [360, 160, 68],
-  beard_1550_tercio_strap: [340, 150, 64],
+  hair_1550_cropped: [1650, 620, 180],
+  hair_1550_wavy: [1850, 680, 190],
+  hair_1550_female_bun: [1650, 620, 180],
+  hair_1550_coif_cap: [1650, 620, 180],
+  hair_indigenous_long: [1700, 640, 180],
+  hair_indigenous_plaits: [1850, 680, 190],
+  hair_algonquian_roach: [1600, 600, 175],
+  beard_1550_pointed: [1450, 540, 160],
+  beard_1550_full_mariner: [1650, 620, 180],
+  beard_1550_tercio_strap: [1400, 520, 155],
 };
 
 function linToSrgb(x) {
@@ -106,7 +106,7 @@ function weldPiece(positions, rawColors, mode, indices) {
   for (let i = 0; i < count; i++) {
     const x = positions[i * 3], y = positions[i * 3 + 1], z = positions[i * 3 + 2];
     const band = encoded[i * 3 + 2] >= 7 ? 1 : 0;
-    const key = `${band}:${Math.round(x * 2000)},${Math.round(y * 2000)},${Math.round(z * 2000)}`;
+    const key = `${band}:${Math.round(x * 4000)},${Math.round(y * 4000)},${Math.round(z * 4000)}`;
     let dst = map.get(key);
     if (dst === undefined) {
       dst = outPos.length / 3;
@@ -139,7 +139,9 @@ function simplifyToTarget(mesh, targetTris) {
     attrs[i * 6 + 4] = mesh.colors[i * 3 + 1];
     attrs[i * 6 + 5] = mesh.colors[i * 3 + 2] >= 7 ? 2.0 : 0.0;
   }
-  const weights = [0.01, 0.01, 0.01, 0.02, 0.02, 0.5];
+  const weights = [0.02, 0.02, 0.02, 0.03, 0.03, 0.6];
+  const maxErr = targetTris < 350 ? 0.25 : 0.09;
+  const flags = targetTris < 350 ? ['Permissive', 'RegularizeLight'] : ['Permissive'];
   const [simplified] = MeshoptSimplifier.simplifyWithAttributes(
     mesh.indices,
     mesh.positions,
@@ -149,8 +151,8 @@ function simplifyToTarget(mesh, targetTris) {
     weights,
     null,
     targetTris * 3,
-    0.25,
-    ['Permissive', 'RegularizeLight'],
+    maxErr,
+    flags,
   );
   return new Uint32Array(simplified);
 }

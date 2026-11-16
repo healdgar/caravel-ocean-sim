@@ -29,6 +29,9 @@ import { DRESS_MASK_SCALE } from './indigenous-dress.js';
 import { createDistantCrewLOD } from './crew-lod.js';
 import { bakeTownClips, bakeWorkStationClip } from './town-clips.js';
 import { poseSeatedCrew, solveCrewLimb, turnBone } from './crew-pose.js';
+import { poseCrewFingers } from './crew-physics.js';
+import { sharedNeuralPbrBank } from './neural-pbr.js';
+import { withNeuralPbrTradeVessels } from './wgsl/neural-pbr.js';
 
 export const TRADE_VESSEL_VERTEX_FLOATS = 9; // pos(3), norm(3), material(1), uv(2)
 export const TRADE_VESSEL_INSTANCE_FLOATS = 12; // posYaw(4), attitudeScaleArch(4), animSink(4)
@@ -92,12 +95,18 @@ function pushTri9(verts, inds, a, b, c, matId, uvs = null, na = null, nb = null,
     nx /= len; ny /= len; nz /= len;
   }
   const baseV = Math.floor(verts.length / 9);
-  const uv0 = uvs?.[0] ?? [0.25, 0.25];
-  const uv1 = uvs?.[1] ?? [0.75, 0.25];
-  const uv2 = uvs?.[2] ?? [0.5, 0.75];
   const n0 = na ?? [nx, ny, nz];
   const n1 = nb ?? [nx, ny, nz];
   const n2 = nc ?? [nx, ny, nz];
+  const planarUV = (pt) => {
+    const ax = Math.abs(n0[0]), ay = Math.abs(n0[1]), az = Math.abs(n0[2]);
+    if (ay >= ax && ay >= az) return [pt[0] * 0.96, pt[2] * 0.36];
+    if (az >= ax) return [pt[1] * 0.96, pt[0] * 0.36];
+    return [pt[1] * 0.96, pt[2] * 0.36];
+  };
+  const uv0 = uvs?.[0] ?? planarUV(a);
+  const uv1 = uvs?.[1] ?? planarUV(b);
+  const uv2 = uvs?.[2] ?? planarUV(c);
   verts.push(
     a[0], a[1], a[2], n0[0], n0[1], n0[2], matId, uv0[0], uv0[1],
     b[0], b[1], b[2], n1[0], n1[1], n1[2], matId, uv1[0], uv1[1],
@@ -141,12 +150,15 @@ function appendTaperedCylinder(verts, inds, p0, p1, rMid, rEnd, sides, matId, bu
     }
     ringPts.push(pts);
   }
+  const circumScale = Math.max(0.18, 2 * Math.PI * Math.max(rMid, rEnd) * 0.96);
+  const axialScale = Math.max(0.12, len * 0.42);
   for (let r = 0; r < rings; r++) {
     for (let s = 0; s < sides; s++) {
       const ns = (s + 1) % sides;
-      const u0 = r / rings, u1 = (r + 1) / rings, v0 = s / sides, v1 = (s + 1) / sides;
+      const v0 = (r / rings) * axialScale, v1 = ((r + 1) / rings) * axialScale;
+      const u0 = (s / sides) * circumScale, u1 = ((s + 1) / sides) * circumScale;
       pushQuad9(verts, inds, ringPts[r][s], ringPts[r + 1][s], ringPts[r + 1][ns], ringPts[r][ns], matId, [
-        [u0, v0], [u1, v0], [u1, v1], [u0, v1],
+        [u0, v0], [u0, v1], [u1, v1], [u1, v0],
       ]);
     }
   }
@@ -214,12 +226,14 @@ function appendRoundedBox9(verts, inds, cx, cy, cz, hx, hy, hz, matId, bulge = 0
     [cx + hx * b(0), cy + hy, cz + hz * b(0)], [cx - hx * b(0), cy + hy, cz + hz * b(0)],
   ];
   const [c0, c1, c2, c3, c4, c5, c6, c7] = corners;
-  pushQuad9(verts, inds, c4, c5, c6, c7, matId); // +z
-  pushQuad9(verts, inds, c1, c0, c3, c2, matId); // -z
-  pushQuad9(verts, inds, c5, c1, c2, c6, matId); // +x
-  pushQuad9(verts, inds, c0, c4, c7, c3, matId); // -x
-  pushQuad9(verts, inds, c7, c6, c2, c3, matId); // +y
-  pushQuad9(verts, inds, c0, c1, c5, c4, matId); // -y
+  const ux = Math.max(0.08, hx * 2 * 0.96), uy = Math.max(0.08, hy * 2 * 0.96), uz = Math.max(0.08, hz * 2 * 0.42);
+  const boxUV = (su, sv) => [[0, 0], [su, 0], [su, sv], [0, sv]];
+  pushQuad9(verts, inds, c4, c5, c6, c7, matId, boxUV(uy, ux)); // +z
+  pushQuad9(verts, inds, c1, c0, c3, c2, matId, boxUV(uy, ux)); // -z
+  pushQuad9(verts, inds, c5, c1, c2, c6, matId, boxUV(uy, uz)); // +x
+  pushQuad9(verts, inds, c0, c4, c7, c3, matId, boxUV(uy, uz)); // -x
+  pushQuad9(verts, inds, c7, c6, c2, c3, matId, boxUV(ux, uz)); // +y
+  pushQuad9(verts, inds, c0, c1, c5, c4, matId, boxUV(ux, uz)); // -y
 }
 
 function appendLusoriaCargo(verts, inds, groups, modelId = 'lusoria') {
@@ -338,7 +352,7 @@ function appendLusoriaCargo(verts, inds, groups, modelId = 'lusoria') {
   nextGroup('cargo.amphorae', 'deck.main', () => {
     for (const [ax, az] of [[-0.16, -0.76], [0.0, -0.78], [0.16, -0.74]]) {
       const yd = rowingDeck(modelId, az);
-      appendTaperedCylinder(verts, inds, [ax, yd + 0.03, az], [ax, yd + 0.30, az], 0.085, 0.038, 8, 22, 1);
+      appendTaperedCylinder(verts, inds, [ax, yd + 0.03, az], [ax, yd + 0.30, az], 0.085, 0.038, 8, 24, 1);
     }
   });
   for (const [cTag, cz] of [['fore', -4.05], ['aft', 3.95]]) {
@@ -487,7 +501,7 @@ function appendDeckFixtures(verts, inds, groups, spec, scaleSpec, model) {
 export function buildTradeDeckStations(verts, spec, scaleSpec, model) {
   const designScale = archetypeDesignScale(spec, model);
   const deckStations = [];
-  const recordStation = (station, role, poseKind, originDesign, yaw, oarPhaseOffset = 0) => {
+  const recordStation = (station, role, poseKind, originDesign, yaw, oarPhaseOffset = 0, extra = null) => {
     const x = originDesign[0] * designScale[0];
     const y = originDesign[1] * designScale[1];
     const z = originDesign[2] * designScale[2];
@@ -501,6 +515,7 @@ export function buildTradeDeckStations(verts, spec, scaleSpec, model) {
       yaw,
       oarPhaseOffset,
       localMetres: Object.freeze([x, y, z]),
+      ...(extra || {}),
     }));
   };
 
@@ -514,6 +529,7 @@ export function buildTradeDeckStations(verts, spec, scaleSpec, model) {
 
   if (spec.index === 4 && spec.modelId === 'lusoria') {
     const d = rowingDesign('lusoria');
+    const pivots = bargeOarPivotsForWGSL();
     const helmZ = warpSectionZ(d.crewStations.helm.z, scaleSpec.waistWarpK);
     const helmY = rowingDeck('lusoria', helmZ) + BARGE_Y_LIFT;
     const helmX = Math.max(-0.35, Math.min(0.18, d.crewStations.helm.x - 0.18));
@@ -528,10 +544,19 @@ export function buildTradeDeckStations(verts, spec, scaleSpec, model) {
       const pairIdx = st.index >> 1;
       if (!ACTIVE_BARGE_OAR_PAIRS.has(pairIdx)) continue;
       if (deckStations.length >= MAX_DECK_STATIONS_PER_VESSEL) break;
-      const sz = warpSectionZ(st.seat[2], scaleSpec.waistWarpK);
+      const stIdx = st.index | 0;
+      const px = pivots[stIdx * 4 + 0];
+      const pz = pivots[stIdx * 4 + 2];
+      const side = pivots[stIdx * 4 + 3] || st.side;
+      // Seat oarsman inboard & forward of the diagonal oar handle, angled 30 deg toward his gunwale tholepin
+      // so the entire oar loom stays clearly in front of his chest and both arms extend forward onto the wood.
+      const sx = px - side * (1.00 / designScale[0]);
+      const sz = pz + (0.24 / designScale[2]);
       const soleY = rowingDeck('lusoria', sz) + BARGE_Y_LIFT;
-      const sx = st.seat[0] * 0.72;
-      recordStation(`crew:${oarIdx}`, 'oarsman', 'row', [sx, soleY, sz], 0, pairIdx * 0.16);
+      recordStation(`crew:${oarIdx}`, 'oarsman', 'row', [sx, soleY, sz], side * 0.52, pairIdx * 0.16, {
+        oarSide: side,
+        oarStationIdx: stIdx,
+      });
       oarIdx++;
     }
     return deckStations;
@@ -714,7 +739,7 @@ function buildBargeOarPivots(scaleSpec) {
 }
 
 let cachedBargeOarPivots = null;
-function bargeOarPivotsForWGSL() {
+export function bargeOarPivotsForWGSL() {
   if (cachedBargeOarPivots) return cachedBargeOarPivots;
   const s4 = ARCHETYPE_SPECS[4];
   const spec = computeArchetypeScaleSpec({ modelId: s4.modelId, length: s4.length, beam: s4.beam });
@@ -1244,9 +1269,15 @@ function buildArchetypeData(index) {
         } else {
           const dx = warpedVerts[i] - px;
           const dy = warpedVerts[i + 1] - py;
+          const dz = warpedVerts[i + 2] - pz;
           if (dx * side > 0) {
-            warpedVerts[i] = px + dx * 0.46;
-            warpedVerts[i + 1] = py + dy * 0.62;
+            warpedVerts[i] = px + dx * 0.48;
+            warpedVerts[i + 1] = py + dy * 0.58;
+            warpedVerts[i + 2] = pz + dz * 0.50;
+          } else {
+            warpedVerts[i] = px + dx * 1.28;
+            warpedVerts[i + 1] = py + dy * 1.28;
+            warpedVerts[i + 2] = pz + dz * 1.28;
           }
         }
       }
@@ -2276,9 +2307,14 @@ export function buildTradeVesselRoutes(
     if (c.mode !== 'sea' && c.mode !== 'river') continue;
     if (!Array.isArray(c.points) || c.points.length < 4) continue;
     const isRiver = c.mode === 'river';
-    const seaArchetype = [5, 0, 2, 5][(hashU32(c.index | 0, 41)) & 3];
+    const stableKeyStr = String(c.key ?? `${c.from ?? ''}>${c.to ?? ''}:${c.depart ?? c.index ?? 0}`);
+    let stableKeyHash = 2166136261;
+    for (let ki = 0; ki < stableKeyStr.length; ki++) {
+      stableKeyHash = Math.imul(stableKeyHash ^ stableKeyStr.charCodeAt(ki), 16777619) >>> 0;
+    }
+    const seaArchetype = [5, 0, 2, 5][hashU32(stableKeyHash, 41) & 3];
     const archIdx = isRiver ? 4 : seaArchetype;
-    let scale = isRiver ? 0.78 : seaArchetype === 5 ? 0.92 : 0.94;
+    let scale = isRiver ? 0.80 : seaArchetype === 5 ? 0.92 : 0.94;
     const pairs = parseFlatPairs(c.points);
     let poly = null;
     if (isRiver && parsedReachChains.length > 0) {
@@ -2382,7 +2418,7 @@ export function buildTradeVesselRoutes(
       );
       if (alreadyCovered) continue;
       const bargeBaseBeam = getTradeVesselArchetype(4).beam || 3.0;
-      const bargeScale = Math.max(0.58, Math.min(0.88, (reach.minHw - 0.55) / (bargeBaseBeam * 0.5)));
+      const bargeScale = Math.max(0.76, Math.min(0.92, (reach.minHw - 0.55) / (bargeBaseBeam * 0.5)));
       const built = buildDenseRouteFromNodePath(reach.nodeIds, bargeScale);
       if (!built || built.totalLen < 120) continue;
       const boats = built.totalLen > 760 ? 2 : 1;
@@ -2413,11 +2449,12 @@ export function buildTradeVesselRoutes(
     || (dockBerth && Number.isFinite(berthX) && Number.isFinite(berthZ) ? { x: berthX, z: berthZ, kind: 'town', harbor: true } : null);
   if (primary) {
     const hx = primary.x, hz = primary.z;
-    const existingDockSpots = routes.filter((r) => r.phase === 'dock' && r.berth).map((r) => r.berth);
-    if (existingDockSpots.length < 4) {
+    // Permanent roadstead moorings computed solely from harbor geometry & terrain safe-water so
+    // anchored carracks/cogs never blink out/in or shift berths when dynamic `ship:*` vessels dock/depart.
+    {
       let addedAnchor = 0;
       const anchorSpots = [];
-      for (let dist = 160; dist <= 620 && addedAnchor < 4; dist += 90) {
+      for (let dist = 190; dist <= 640 && addedAnchor < 4; dist += 90) {
         for (let a = 0; a < 16 && addedAnchor < 4; a++) {
           const ang = (a / 16) * Math.PI * 2 + dist * 0.017;
           const ax = hx + Math.cos(ang) * dist;
@@ -2426,8 +2463,8 @@ export function buildTradeVesselRoutes(
           const archScale = arch === 3 ? 1.04 : 0.94;
           if (!isSafeWater(ax, az, -3.0, 22)) continue;
           if (blockedByLowBridge(ax, az, ax, az, seaLevel, archAirDraft(arch, archScale), archHalfBeam(arch, archScale), normBridges)) continue;
-          if (existingDockSpots.some((e) => Math.hypot(e.x - ax, e.z - az) < 75)) continue;
-          if (anchorSpots.some((e) => Math.hypot(e.x - ax, e.z - az) < 75)) continue;
+          if (dockBerth && Number.isFinite(berthX) && Number.isFinite(berthZ) && Math.hypot(berthX - ax, berthZ - az) < 85) continue;
+          if (anchorSpots.some((e) => Math.hypot(e.x - ax, e.z - az) < 80)) continue;
           anchorSpots.push({ x: ax, z: az });
           const slotId = `roadstead:${addedAnchor}`;
           const hf = harborBySlot.get(slotId);
@@ -2452,7 +2489,7 @@ export function buildTradeVesselRoutes(
     }
 
     const harborShuttleCount = routes.filter((r) => r.id.startsWith('harbor:')).length;
-    if (harborShuttleCount < 4 && routes.length < MAX_TRADE_VESSELS) {
+    if (harborShuttleCount < 4) {
       const candidateTracks = [];
       for (let i = 0; i < seaHarbors.length; i++) {
         for (let j = i + 1; j < seaHarbors.length; j++) {
@@ -2493,7 +2530,7 @@ export function buildTradeVesselRoutes(
       }
 
       let addedShuttles = 0;
-      for (let ti = 0; ti < candidateTracks.length && addedShuttles < 5 && routes.length < MAX_TRADE_VESSELS; ti++) {
+      for (let ti = 0; ti < candidateTracks.length && addedShuttles < 5; ti++) {
         const raw = candidateTracks[ti];
         const arch = (ti % 2 === 0) ? 6 : 5;
         const archScale = arch === 5 ? 0.96 : 1.0;
@@ -2532,6 +2569,22 @@ export function buildTradeVesselRoutes(
     }
   }
 
+  // Priority-sort before capping at MAX_TRADE_VESSELS so primary harbor vessels (`ship:*`, `roadstead:*`, `harbor:*`)
+  // are never evicted by inland river/caravan fluctuations kilometers away.
+  if (routes.length > MAX_TRADE_VESSELS) {
+    const refX = primary?.x ?? ox;
+    const refZ = primary?.z ?? oz;
+    const routePriority = (r) => {
+      const id = String(r.id || '');
+      if (id.startsWith('ship:')) return 0;
+      if (id.startsWith('roadstead:')) return 1;
+      if (id.startsWith('harbor:')) return 2;
+      if (r.mode === 'sea') return 3;
+      const p0 = r.berth || r.pts?.[Math.floor((r.pts?.length || 1) * 0.5)] || { x: refX, z: refZ };
+      return 4 + Math.hypot(p0.x - refX, p0.z - refZ) * 1e-4;
+    };
+    routes.sort((a, b) => routePriority(a) - routePriority(b));
+  }
   return routes.slice(0, MAX_TRADE_VESSELS);
 }
 
@@ -3334,6 +3387,9 @@ function buildBargeOarPivotsWGSL() {
   return `const BARGE_OAR_PIVOTS = array<vec4f, 24>(\n  ${rows.join(',\n  ')}\n);`;
 }
 
+const BARGE_ROW_SWEEP_RAD = 0.30;
+const BARGE_ROW_DIP_RAD = 0.12;
+
 const SAIL_BRAIL_WGSL = /* wgsl */ `
 fn animateTradeSailBrail(pIn: vec3f, material: f32, uv: vec2f, furlRaw: f32, archIdx: u32) -> vec3f {
   let furl = clamp(furlRaw, 0.0, 1.0);
@@ -3352,13 +3408,13 @@ fn animateTradeSailBrail(pIn: vec3f, material: f32, uv: vec2f, furlRaw: f32, arc
       else if (p.z < 3.0) { spanY = 4.95; }
       else { spanY = 4.75; }
     }
-    let gather = furl * clamp(uv.y, 0.0, 1.0) * 0.88;
+    let gather = furl * clamp(uv.y, 0.0, 1.0) * 0.96;
     p.y += spanY * gather;
-    p.x *= (1.0 - 0.16 * gather);
+    p.x *= (1.0 - 0.68 * gather * furl);
   } else {
-    let targetY = clamp(p.y + (1.0 - smoothstep(2.0, 9.5, p.y)) * 2.5, p.y, 10.6);
-    p.y = mix(p.y, targetY, furl * 0.86);
-    p.x *= (1.0 - furl * 0.82);
+    let targetY = clamp(p.y + (1.0 - smoothstep(2.0, 9.5, p.y)) * 2.6, p.y, 10.6);
+    p.y = mix(p.y, targetY, furl * 0.94);
+    p.x *= (1.0 - furl * 0.86);
   }
   return p;
 }
@@ -3369,7 +3425,6 @@ struct SourceVertex { px: f32, py: f32, pz: f32, nx: f32, ny: f32, nz: f32, mat:
 struct PosedVertex { position: vec4f, normal: vec4f };
 struct PoseUniform { phase: f32, motion: f32, archetype: f32, furl: f32 };
 
-${buildBargeOarPivotsWGSL()}
 ${SAIL_BRAIL_WGSL}
 
 @group(0) @binding(0) var<storage, read> srcVerts: array<SourceVertex>;
@@ -3381,27 +3436,7 @@ ${SAIL_BRAIL_WGSL}
   if (idx >= arrayLength(&srcVerts) || idx >= arrayLength(&dstPosed)) { return; }
   let sv = srcVerts[idx];
   var p = vec3f(sv.px, sv.py, sv.pz);
-  var n = vec3f(sv.nx, sv.ny, sv.nz);
-  let matTone = vec2f(sv.mat, sv.u);
-  let mInt = u32(max(0.0, floor(matTone.x)));
-  if (matTone.x > 5.5 && mInt == 16u && abs(P.archetype - 4.0) < 0.5 && P.motion > 0.05) {
-    let stationIdx = min(23u, u32(max(0.0, round((matTone.x - 16.0) * 64.0))));
-    let piv = BARGE_OAR_PIVOTS[stationIdx];
-    let side = piv.w;
-    let cyc = P.phase * 1.15 + f32(stationIdx >> 1u) * 0.16;
-    let sweep = sin(cyc) * 0.36 * min(P.motion, 1.5);
-    let dip = cos(cyc) * 0.18 * min(P.motion, 1.5);
-    let d = p - piv.xyz;
-    let cy = cos(sweep * side); let sy = sin(sweep * side);
-    let dYaw = vec3f(d.x * cy - d.z * sy, d.y, d.x * sy + d.z * cy);
-    let cr = cos(dip * side); let sr = sin(dip * side);
-    p = piv.xyz + vec3f(dYaw.x * cr - dYaw.y * sr, dYaw.x * sr + dYaw.y * cr, dYaw.z);
-    let nYaw = vec3f(n.x * cy - n.z * sy, n.y, n.x * sy + n.z * cy);
-    n = vec3f(nYaw.x * cr - nYaw.y * sr, nYaw.x * sr + nYaw.y * cr, nYaw.z);
-  } else if (mInt == 28u && P.motion > 0.05 && (abs(P.archetype - 4.0) < 0.5 || abs(P.archetype - 6.0) < 0.5)) {
-    let helmSwing = sin(P.phase * 0.72) * 0.08 * min(P.motion, 1.4);
-    p.x += helmSwing;
-  }
+  let n = vec3f(sv.nx, sv.ny, sv.nz);
   p = animateTradeSailBrail(p, sv.mat, vec2f(sv.u, sv.v), P.furl, u32(max(0.0, round(P.archetype))));
   dstPosed[idx].position = vec4f(p, 0.0);
   dstPosed[idx].normal = vec4f(n, 0.0);
@@ -3436,7 +3471,7 @@ export function tradeVesselsSource(damaged = false, samples = 4, { submergedCapt
   const safeSamples = Math.max(1, Math.min(4, samples | 0));
   const sampleMaskAll = (1 << safeSamples) - 1;
   const useSubmergedEntry = Boolean(submergedCapture && !damaged);
-  return FRAME_WGSL + ATMO_CORE_WGSL + SKY_RENDER_FUNCS + SHADOW_FRAME + VESSEL_LIGHTING + CANVAS_OPTICS + VESSEL_SAMPLE_MASK_WGSL + /* wgsl */ `
+  const rawSource = FRAME_WGSL + ATMO_CORE_WGSL + SKY_RENDER_FUNCS + SHADOW_FRAME + VESSEL_LIGHTING + CANVAS_OPTICS + VESSEL_SAMPLE_MASK_WGSL + /* wgsl */ `
 struct TradeNearDomain { domain: vec4f, grid: vec4f };
 const TV_SAMPLES: u32 = ${safeSamples}u;
 const TV_SAMPLE_MASK_ALL: u32 = ${sampleMaskAll}u;
@@ -3495,7 +3530,7 @@ struct TVVertexOut {
   @location(3) normalLocal: vec3f,
   @location(4) @interpolate(flat) matId: u32,
   @location(5) uv: vec2f,
-  @location(6) draftRatio: f32,
+  @location(6) @interpolate(flat) yawPitchRollScale: vec4f,
   @location(7) stateMatArch: vec3f,
 };
 
@@ -3518,13 +3553,14 @@ fn animateTradeOar(pos: vec3f, norm: vec3f, material: f32, uv: vec2f, instAnim: 
   let motion = instAnim.y;
   let aIdx = min(u32(${TRADE_VESSEL_ARCHETYPES - 1}), u32(max(0.0, round(archF))));
   let mInt = u32(max(0.0, floor(matTone.x)));
-  if (matTone.x > 5.5 && mInt == 16u && abs(archF - 4.0) < 0.5 && motion > 0.05) {
+  if (matTone.x > 5.5 && mInt == 16u && abs(archF - 4.0) < 0.5) {
     let stationIdx = min(23u, u32(max(0.0, round((matTone.x - 16.0) * 64.0))));
     let piv = BARGE_OAR_PIVOTS[stationIdx];
     let side = piv.w;
-    let cyc = F.camPos.w * 2.15 + phase + f32(stationIdx >> 1u) * 0.16;
-    let sweep = sin(cyc) * 0.36 * min(motion, 1.5);
-    let dip = cos(cyc) * 0.18 * min(motion, 1.5);
+    let oarActive = motion > 0.035;
+    let cyc = select(3.14159265, F.camPos.w * 2.15 + phase + f32(stationIdx >> 1u) * 0.16, oarActive);
+    let sweep = sin(cyc) * ${BARGE_ROW_SWEEP_RAD.toFixed(4)};
+    let dip = -cos(cyc) * ${BARGE_ROW_DIP_RAD.toFixed(4)};
     let d = p - piv.xyz;
     let cy = cos(sweep * side); let sy = sin(sweep * side);
     let dYaw = vec3f(d.x * cy - d.z * sy, d.y, d.x * sy + d.z * cy);
@@ -3536,7 +3572,7 @@ fn animateTradeOar(pos: vec3f, norm: vec3f, material: f32, uv: vec2f, instAnim: 
     let helmSwing = sin(F.camPos.w * 1.45 + phase) * 0.075 * min(motion, 1.4);
     p.x += helmSwing;
   }
-  p = animateTradeSailBrail(p, material, uv, instAnim.w, aIdx);
+  ${damaged ? '' : 'p = animateTradeSailBrail(p, material, uv, instAnim.w, aIdx);'}
   return array<vec3f, 2>(p, n);
 }
 
@@ -3561,13 +3597,7 @@ fn vesselWorldTransform(srcPos: vec3f, srcNorm: vec3f, material: f32, uv: vec2f,
   let rawNorm = v.norm;
   `}
   let nLen = max(length(v.norm), length(rawNorm));
-  ${damaged ? `
   let tr = vesselWorldTransform(rawPos, rawNorm, v.material, v.uv, v.instPosYaw, v.instAttitude, v.instAnim);
-  ` : `
-  let tr = vesselWorldTransform(rawPos, rawNorm, v.material, v.uv, v.instPosYaw, v.instAttitude, v.instAnim);
-  `}
-  let aIdx = min(u32(${TRADE_VESSEL_ARCHETYPES - 1}), u32(max(0.0, round(v.instAttitude.w))));
-  let sc4 = ARCHETYPE_SCALES[aIdx];
   let shifted = tr[0] + vec3f(nearTerrain.grid.y, 0.0, nearTerrain.grid.z);
   var o: TVVertexOut;
   o.pos = F.viewProj * vec4f(earthCurve(shifted - F.camPos.xyz, F.camPos.y), 1.0);
@@ -3577,7 +3607,7 @@ fn vesselWorldTransform(srcPos: vec3f, srcNorm: vec3f, material: f32, uv: vec2f,
   o.normalLocal = tr[2];
   o.matId = u32(max(0.0, floor(v.material)));
   o.uv = v.uv;
-  o.draftRatio = max(sc4.w, 0.4);
+  o.yawPitchRollScale = vec4f(v.instPosYaw.w, v.instAttitude.x, v.instAttitude.y, max(v.instAttitude.z, 0.25));
   ${damaged ? 'o.stateMatArch = vec3f(select(0.0, clamp(nLen - 1.0, 0.0, 1.5), nLen > 1.002), v.material, v.instAttitude.w);' : 'o.stateMatArch = vec3f(clamp(v.instAnim.z, 0.0, 1.0), v.material, v.instAttitude.w);'}
   return o;
 }
@@ -3652,69 +3682,173 @@ fn canvasTearMask(uv: vec2f, p: vec3f, mat: u32, dmg: f32) -> f32 {
 
 ${damaged || useSubmergedEntry ? '' : 'struct TVFragmentOut { @location(0) color: vec4f, @builtin(sample_mask) mask: u32 };'}
 @fragment fn ${useSubmergedEntry ? 'tvSubmergedFS' : 'tvFS'}(in: TVVertexOut, @builtin(front_facing) front: bool) -> ${damaged || useSubmergedEntry ? '@location(0) vec4f' : 'TVFragmentOut'} {
-  // Uniform control flow: sample oak albedo and evaluate derivatives before any branches.
-  let timberRaw = pow(textureSample(oakAlbedo, oakSampler, in.uv * vec2f(1.2, 1.2)).rgb, vec3f(2.2));
-  let course = select(in.local.y * 9.0, in.uv.x * 18.0, in.matId == 15u);
-  let courseAA = max(fwidth(course), 0.001);
-  let deckCourse = (in.local.x + 1.8) / 0.145;
-  let deckAA = max(fwidth(deckCourse), 0.002);
-  let sailDepth = canvasThickness(in.uv, in.matId);
-
   let stateVal = in.stateMatArch.x;
   let rawMat = in.stateMatArch.y;
   let archF = in.stateMatArch.z;
-  let aIdx = u32(max(0.0, round(archF)));
-  let matFrac = fract(rawMat);
+  let aIdx = min(u32(${TRADE_VESSEL_ARCHETYPES - 1}), u32(max(0.0, round(archF))));
+  let sc4 = ARCHETYPE_SCALES[aIdx];
+  let draftRatio = max(sc4.w, 0.4);
+  let tvYaw = in.yawPitchRollScale.x;
+  let tvPitch = in.yawPitchRollScale.y;
+  let tvRoll = in.yawPitchRollScale.z;
+  let tvScaleMul = in.yawPitchRollScale.w;
+  let tvScaleMetres = sc4.xyz * tvScaleMul;
   let p = in.local;
-  let nBase = normalize(in.normal) * select(-1.0, 1.0, front);
-  var n = nBase;
+  let tvMetres = p * tvScaleMetres;
+  let tvNpbrMarker = 1;
+  let matFrac = fract(rawMat);
   let m = in.matId;
-  let woodFibre = 0.90 + 0.20 * gnoise(vec2f(p.z * 26.0 + sin(p.y * 12.0) * 0.4, p.y * 62.0));
-  let timber = mix(vec3f(0.24, 0.16, 0.095), timberRaw * vec3f(1.06, 0.97, 0.85), 0.82) * woodFibre;
-  let strakeEdge = min(fract(course), 1.0 - fract(course));
-  let seam = 1.0 - smoothstep(0.008, 0.036 + courseAA, strakeEdge);
-  let deckEdge = min(fract(deckCourse), 1.0 - fract(deckCourse));
-  let deckSeam = 1.0 - smoothstep(0.014, 0.040 + deckAA, deckEdge);
-  let boardHash = 0.86 + 0.22 * fract(sin(floor(course) * 74.17) * 4321.1);
   let isLusoria = abs(archF - 4.0) < 0.5;
   let isLusoriaOar = (m == 16u && isLusoria && matFrac > 0.004);
   let isLusoriaSweep = (m == 17u && isLusoria);
+  let isGunwaleTube = isLusoria && m == 15u && abs(in.normalLocal.y) > 0.58;
+
+  // Metric oak grain UVs matching Niña's 0.96 across-grain × 0.36 along-grain density across all 7 archetypes
+  let course = select(tvMetres.y / 0.24, in.uv.x * 18.0, m == 15u);
+  let courseBoard = floor(course);
+  var oakUV = in.uv;
+  if (m == 15u) {
+    oakUV = select(
+      vec2f(course * 0.24 + courseBoard * 0.37, tvMetres.z * 0.36 + fract(sin(courseBoard * 17.1) * 437.5)),
+      vec2f(tvMetres.x * 0.96, tvMetres.z * 0.36),
+      isGunwaleTube
+    );
+  } else if (m == 10u || isLusoriaOar || isLusoriaSweep) {
+    let upSpar = abs(in.normalLocal.y) < 0.55 && !isLusoriaOar && !isLusoriaSweep;
+    let sparAng = atan2(in.normalLocal.x, in.normalLocal.z);
+    oakUV = select(
+      vec2f((tvMetres.y + tvMetres.z) * 0.96, tvMetres.x * 0.42),
+      vec2f(sparAng * 0.35, tvMetres.y * 0.45),
+      upSpar
+    );
+  } else if (m == 0u) {
+    oakUV = vec2f(tvMetres.x * 0.96, tvMetres.z * 0.33);
+  } else if (isWoodMat(m) || m == 28u) {
+    let horiz = abs(in.normalLocal.y) > 0.65;
+    let zFace = abs(in.normalLocal.z) > 0.72;
+    oakUV = select(
+      select(vec2f(tvMetres.y * 0.96, tvMetres.z * 0.35), vec2f(tvMetres.y * 0.96, tvMetres.x * 0.35), zFace),
+      vec2f(tvMetres.x * 0.96, tvMetres.z * 0.35),
+      horiz
+    );
+  }
+
+  // Uniform control flow: sample oak albedo and evaluate screen-space derivatives before any branches.
+  let timberRaw = pow(textureSample(oakAlbedo, oakSampler, oakUV).rgb, vec3f(2.2));
+  let relief = dot(timberRaw, vec3f(0.2126, 0.7152, 0.0722));
+  let broad = gnoise(vec2f(oakUV.x * 18.0, oakUV.y * 0.7));
+  let grain = gnoise(vec2f(oakUV.x * 180.0 + broad * 3.0, oakUV.y * 5.0));
+  let oakFootprint = max(length(dpdx(oakUV)), length(dpdy(oakUV)));
+  let courseAA = max(fwidth(course), 0.001);
+  let deckPlankStep = select(0.145, 0.17, isLusoria);
+  let deckCourse = (tvMetres.x + 2.4) / deckPlankStep;
+  let deckPlankId = floor(deckCourse);
+  let deckAA = max(fwidth(deckCourse), 0.002);
+  let deckButtCoord = (tvMetres.z + fract(deckPlankId * 0.413) * 2.0) / 2.6;
+  let deckButtAA = max(fwidth(deckButtCoord), 0.001);
+  let alongHull = select(tvMetres.z, tvMetres.x, abs(in.normalLocal.z) > 0.72 && m != 15u);
+  let buttCoord = (alongHull + fract(sin(courseBoard * 73.17) * 4321.1) * 2.6) / 2.6;
+  let buttAA = max(fwidth(buttCoord), 0.0005);
+  let sailDepth = canvasThickness(in.uv, m);
+  let clothSeam = abs(fract(in.uv.x * 10.0) - 0.5);
+  let clothAA = max(fwidth(clothSeam), 0.001);
+  let weaveAA = max(fwidth(in.uv.x + in.uv.y), 0.001);
+  let reefDist = min(abs(in.uv.y - 0.26), abs(in.uv.y - 0.52));
+  let reefAA = max(fwidth(in.uv.y), 0.0005);
+  let dxW = dpdx(in.world);
+  let dyW = dpdy(in.world);
+  let metFootprint = max(length(dpdx(tvMetres)), length(dpdy(tvMetres)));
+
+  let nBase = normalize(in.normal) * select(-1.0, 1.0, front);
+  var n = nBase;
+  let sx = cross(dyW, nBase);
+  let sy = cross(nBase, dxW);
+  let det = dot(dxW, sx);
+  let invDet = sign(det) / max(abs(det), 1e-6);
+
+  let timber = timberRaw * vec3f(1.02, 0.98, 0.88);
+  let strakeEdge = min(fract(course), 1.0 - fract(course));
+  let seam = select(1.0 - smoothstep(0.008, 0.035 + courseAA, strakeEdge), 0.0, isGunwaleTube);
+  let buttEdge = min(fract(buttCoord), 1.0 - fract(buttCoord));
+  let buttSeam = select(1.0 - smoothstep(0.001, 0.004 + buttAA, buttEdge), 0.0, isGunwaleTube);
+  let deckEdge = min(fract(deckCourse), 1.0 - fract(deckCourse));
+  let deckSeam = 1.0 - smoothstep(0.014, 0.038 + deckAA, deckEdge);
+  let deckButtEdge = min(fract(deckButtCoord), 1.0 - fract(deckButtCoord));
+  let deckButtSeam = 1.0 - smoothstep(0.001, 0.004 + deckButtAA, deckButtEdge);
+  let deckCaulk = max(deckSeam, deckButtSeam * 0.85);
+  let boardHash = 0.88 + 0.16 * fract(sin(courseBoard * 74.17) * 4321.1);
+
+  // Authentic Cog/Carrack castle framing ONLY on Cog (0,1) & Carrack (2,3) fore/aft castle walls (never caravels/barques)
+  let isCogOrCarrack = aIdx <= 3u;
+  let isCarrack = aIdx == 2u || aIdx == 3u;
+  let castleForeZ = select(-3.85, -3.55, isCarrack);
+  let castleAftZ = select(2.35, 1.95, isCarrack);
+  let isCastleWall = isCogOrCarrack && m == 15u && p.y > 0.60 && abs(in.normalLocal.x) > 0.32 && (p.z > castleAftZ || p.z < castleForeZ);
+  let castleMoulding = select(0.0, 1.0 - smoothstep(0.14, 0.22, abs(fract(course * 0.3333) - 0.5) * 3.0), isCastleWall);
+  let castleFuttock = select(0.0, 1.0 - smoothstep(0.038, 0.062, abs(fract(p.z / 0.62) - 0.5)), isCastleWall && isCarrack && castleMoulding < 0.5);
+  let castleRelief = castleMoulding * 0.0024 + castleFuttock * 0.0018;
+
+  let plankedWall = !isGunwaleTube && (m == 15u || (m == 1u && abs(in.normalLocal.y) < 0.35));
+  let woodJoin = select(select(0.0, deckCaulk * 0.85, m == 0u), max(seam, buttSeam * 0.8), plankedWall);
+  let woodBump = relief * 0.006 + grain * 0.00065 * (1.0 - smoothstep(0.0005, 0.004, oakFootprint)) - woodJoin * 0.0018 + castleRelief;
+  let woodGrad = (dpdx(woodBump) * sx + dpdy(woodBump) * sy) * invDet;
+
+  // Sail canvas 10-panel pillowing, seam puckering & reef-band relief
+  let panelPillow = sin(fract(in.uv.x * 10.0 + 0.5) * 3.14159265);
+  let seamPucker = sin(in.uv.y * 95.0 + floor(in.uv.x * 10.0) * 2.3) * (1.0 - smoothstep(0.0, 0.08, clothSeam));
+  let reefBand = select(0.0, 1.0 - smoothstep(0.007, 0.014 + reefAA, reefDist), m == 9u);
+  let canvasRelief = (panelPillow * 0.0032 + seamPucker * 0.0011 + reefBand * 0.0018) * (1.0 - smoothstep(0.004, 0.025, weaveAA));
+  let canvasGrad = (dpdx(canvasRelief) * sx + dpdy(canvasRelief) * sy) * invDet;
+
+  // Cast-iron micro-oxide & pit relief
+  let ironCoarse = gnoise(vec2f(tvMetres.z * 9.0 + tvMetres.x * 5.0, tvMetres.y * 9.0));
+  let ironPits = gnoise(vec2f(tvMetres.z * 68.0, tvMetres.y * 68.0 + tvMetres.x * 34.0));
+  let ironRelief = (ironCoarse * 0.0016 - smoothstep(0.62, 0.92, ironPits) * 0.0014) * (1.0 - smoothstep(0.008, 0.045, metFootprint));
+  let ironGrad = (dpdx(ironRelief) * sx + dpdy(ironRelief) * sy) * invDet;
+
+  // Dynamic waterline wave-splash capillary meniscus
+  let tvWet = clamp((1.0 - smoothstep(0.0, 0.34, abs(in.world.y))) * select(0.0, 0.62, in.world.y < 1.6 && abs(in.normalLocal.x) > 0.22), 0.0, 0.85);
 
   var albedo = timber * boardHash;
-  var rough = 0.84;
+  var rough = clamp(0.86 + (0.2 - relief) * 0.20 + (grain - 0.5) * 0.08, 0.78, 0.95);
   var metal = 0.0;
   var isSail = false;
   var emitGlow = vec3f(0.0);
 
+  if (isWoodMat(m) || m == 28u) {
+    n = normalize(nBase - clamp(woodGrad, vec3f(-0.36), vec3f(0.36)));
+  }
+
   if (m == 0u) {
     // Weathered caulked deck planks matching Niña deck joinery
-    let plankSalt = 0.90 + 0.14 * fract(sin(floor(deckCourse) * 31.7) * 1931.3);
-    albedo = mix(timber * vec3f(1.12, 1.06, 0.94) * plankSalt, vec3f(0.015, 0.011, 0.008), deckSeam * 0.86);
-    rough = mix(0.80, 0.94, deckSeam);
+    let plankSalt = 0.88 + 0.16 * fract(sin(deckPlankId * 74.17) * 4321.1);
+    let endJoint = abs(fract(deckButtCoord) - 0.5);
+    albedo = timber * plankSalt * mix(0.32, 1.0, smoothstep(0.001, 0.004 + deckButtAA, endJoint));
+    albedo = mix(albedo, vec3f(0.015, 0.011, 0.008), deckCaulk * 0.86);
+    rough = mix(rough, 0.94, deckCaulk);
   } else if (m == 15u) {
     // Exterior hull planking: caulked strakes, castle mouldings & waterproof Stockholm pitch-tar below waterline
-    let tar = 1.0 - smoothstep(-0.22 * in.draftRatio, 0.02, p.y);
-    albedo = mix(timber * boardHash * (1.0 - seam * 0.58), vec3f(0.024, 0.020, 0.015), tar * 0.90);
-    rough = mix(0.82, 0.76, tar);
-    let isCastleSide = !isLusoria && p.y > 0.66 && abs(in.normalLocal.x) > 0.35;
-    if (isCastleSide) {
-      let mouldBand = 1.0 - smoothstep(0.015, 0.040, min(fract(p.y * 2.2), 1.0 - fract(p.y * 2.2)));
-      let futtockBand = 1.0 - smoothstep(0.018, 0.042, min(fract(p.z * 0.95 + 0.5), 1.0 - fract(p.z * 0.95 + 0.5)));
-      let castleTrim = max(mouldBand * 0.90, futtockBand * 0.82);
-      albedo = mix(albedo, timber * vec3f(0.20, 0.18, 0.15), castleTrim);
-      rough = mix(rough, 0.90, castleTrim);
+    let tar = select(1.0 - smoothstep(-0.22 * draftRatio, 0.02, p.y), 0.0, isGunwaleTube);
+    albedo = timber * boardHash * 0.93 * (1.0 - max(seam, buttSeam * 0.8) * 0.58);
+    albedo = mix(albedo, vec3f(0.025, 0.022, 0.018), tar * 0.90);
+    rough = mix(rough, 0.78, tar);
+    if (isCastleWall) {
+      let frameWeight = clamp(castleMoulding + castleFuttock * 0.88, 0.0, 1.0);
+      if (frameWeight > 0.01) {
+        albedo = mix(albedo, timber * vec3f(0.20, 0.18, 0.15), frameWeight);
+        rough = mix(rough, 0.90, frameWeight);
+      }
     }
-    let strakeBevel = clamp(0.08 * sin(fract(course) * 6.2831853), -0.08, 0.08);
-    n = normalize(nBase + vec3f(0.0, strakeBevel, 0.0));
   } else if (m == 10u) {
     // Pine masts & yards with longitudinal checking + dark wrought-iron mast hoops
     let sparHoriz2 = dot(in.normalLocal.xz, in.normalLocal.xz);
     let sparAngle = select(0.0, atan2(in.normalLocal.x, in.normalLocal.z), sparHoriz2 > 1e-8);
-    let sparGrain = 0.92 + 0.08 * sin(sparAngle * 20.0 + gnoise(vec2f(p.y * 5.0, p.z * 5.0)) * 3.5);
-    let band = 1.0 - smoothstep(0.04, 0.09, abs(fract(p.y * 0.65) - 0.5));
-    albedo = mix(timber * vec3f(1.08, 0.92, 0.68) * sparGrain, vec3f(0.032, 0.030, 0.028), band * 0.72);
-    metal = mix(0.0, 0.52, band * 0.72);
-    rough = mix(0.75, 0.55, band);
+    let sparGrain = 0.92 + 0.08 * sin(sparAngle * 24.0 + gnoise(vec2f(p.y * 6.0, p.z * 6.0)) * 4.0);
+    let checkCrack = smoothstep(0.86, 0.95, sin(sparAngle * 11.0 + p.y * 2.5));
+    let band = select(0.0, 1.0 - smoothstep(0.036, 0.075, abs(fract(p.y * 0.65) - 0.5)), sparHoriz2 > 0.35);
+    albedo = mix(timber * vec3f(1.08, 0.92, 0.68) * sparGrain * (1.0 - checkCrack * 0.28), vec3f(0.032, 0.031, 0.029), band * 0.78);
+    metal = mix(0.0, 0.45, band * 0.78);
+    rough = mix(clamp(0.74 + (1.0 - sparGrain) * 0.14 + checkCrack * 0.12, 0.68, 0.90), 0.58, band);
   } else if (m == 16u && !isLusoriaOar) {
     // Tarred wales, stempost, deadeyes & stay collars matching Niña (caravel.js:558)
     albedo = timber * vec3f(0.20, 0.18, 0.15) * (1.0 - seam * 0.30);
@@ -3722,37 +3856,48 @@ ${damaged || useSubmergedEntry ? '' : 'struct TVFragmentOut { @location(0) color
   } else if (m == 17u && !isLusoriaSweep) {
     // Warm ochre painted cap rails, catheads, transom mouldings & balustrade rails matching Niña (caravel.js:559)
     albedo = timber * vec3f(1.10, 1.00, 0.80) * (1.0 - seam * 0.25);
-    rough = 0.76;
+    rough = clamp(rough - 0.04, 0.74, 0.90);
   } else if (m == 1u || m == 5u || m == 6u || m == 7u || m == 14u || m == 16u || m == 17u || m == 18u || m == 28u) {
     // Oak frames, oars, steering sweeps/tillers, casks, benches & sternpost
     let isKeelOrPost = (abs(p.x) < 0.068 && p.y < -0.46) || (abs(p.x) < 0.055 && p.z > 5.25 && p.y < 1.05);
-    let baseOak = select(vec3f(0.90, 0.82, 0.70), vec3f(0.84, 0.76, 0.64), isLusoriaOar || isLusoriaSweep || m == 28u);
-    albedo = mix(timber * baseOak * (1.0 - seam * 0.35), timber * vec3f(0.20, 0.18, 0.15), select(0.0, 0.85, isKeelOrPost));
-    rough = 0.84;
+    let isCapRail = p.y > 0.58 && in.normalLocal.y > 0.52 && abs(p.x) > 0.32 && m == 1u;
+    let baseOak = select(select(vec3f(0.88, 0.84, 0.76), vec3f(1.06, 0.94, 0.74), isLusoriaOar || isLusoriaSweep || m == 28u), vec3f(1.10, 1.00, 0.80), isCapRail);
+    albedo = mix(timber * baseOak * (1.0 - woodJoin * 0.45), timber * vec3f(0.20, 0.18, 0.15), select(0.0, 0.88, isKeelOrPost));
+    if (m == 14u) { albedo *= 0.62; }
   } else if (m == 3u || m == 8u) {
-    // Forged wrought iron anchors, ordnance, pintle straps, chainplates & barrel hoops
-    albedo = vec3f(0.055, 0.052, 0.050);
-    rough = 0.44;
-    metal = 0.78;
+    // Cast & wrought iron anchors, ordnance, pintle straps, chainplates & barrel hoops
+    let oxide = smoothstep(0.56, 0.88, ironCoarse);
+    albedo = mix(vec3f(0.038, 0.037, 0.036), vec3f(0.085, 0.042, 0.024), oxide * 0.38);
+    rough = mix(0.48, 0.78, oxide);
+    metal = mix(0.76, 0.18, oxide);
+    n = normalize(nBase - clamp(ironGrad, vec3f(-0.18), vec3f(0.18)));
   } else if (m == 4u) {
-    albedo = vec3f(0.020, 0.016, 0.013);
-    rough = 0.88;
+    albedo = vec3f(0.018, 0.014, 0.011);
+    rough = 0.92;
   } else if (m == 2u || m == 12u || m == 19u) {
-    // 3-strand helical Z-twist hemp shrouds (2u), running lines (12u) & bolt-ropes (19u)
-    let layPhase = in.uv.y * 72.0 + (p.x + p.z + p.y) * 16.0;
-    let strand = 0.72 + 0.28 * sin(layPhase);
-    let baseCord = select(vec3f(0.26, 0.21, 0.135), vec3f(0.048, 0.040, 0.032), m == 2u);
-    albedo = baseCord * strand;
-    rough = 0.94;
+    // 3D Helical 3-strand laid hemp shrouds (2u), running lines (12u) & bolt-ropes (19u)
+    let rLoc = normalize(in.normalLocal);
+    let ropeLenM = length(tvMetres) * 0.85 + in.uv.y * 2.4;
+    let ropeAz = atan2(rLoc.x, rLoc.z + rLoc.y * 0.35);
+    let layPhase = ropeLenM * 52.0 + ropeAz * 3.0;
+    let layFade = 1.0 - smoothstep(0.6, 2.6, metFootprint * 52.0);
+    let strandCos = abs(cos(layPhase * 0.5));
+    let groove = 1.0 - strandCos;
+    let yarnRipple = sin(ropeLenM * 220.0 - ropeAz * 9.0) * 0.06 * layFade;
+    let baseCord = select(vec3f(0.29, 0.22, 0.135), vec3f(0.036, 0.030, 0.024), m == 2u);
+    albedo = baseCord * mix(1.0, 0.58 + 0.52 * strandCos + yarnRipple, layFade);
+    rough = select(0.88, 0.76, m == 2u) + groove * 0.08 * layFade;
+    let twistTilt = sin(layPhase) * 0.24 * layFade;
+    n = normalize(nBase + rotateVessel(vec3f(0.0, twistTilt, twistTilt * 0.5), tvYaw, tvPitch, tvRoll));
   } else if (m == 9u || m == 13u) {
-    // Woven flax/hemp Baltic canvas with vertical bolted seams & belly highlights (caravel.js:321)
+    // Woven flax/hemp Baltic canvas with 10-panel seams, reef bands, belly highlights & micro-relief
     isSail = true;
-    let woven = 0.94 + 0.06 * gnoise(in.uv * vec2f(28.0, 22.0));
-    let panelEdge = min(fract(in.uv.x * 7.0), 1.0 - fract(in.uv.x * 7.0));
-    let panelSeam = 1.0 - smoothstep(0.015, 0.048, panelEdge);
-    let tint = select(vec3f(0.62, 0.58, 0.49), vec3f(0.57, 0.51, 0.40), m == 13u && in.local.y < 1.3);
-    albedo = tint * woven * (1.0 - panelSeam * 0.16) * clamp(1.12 - (sailDepth - 1.0) * 0.18, 0.72, 1.08);
-    rough = mix(0.93, 0.88, panelSeam);
+    let warpWeft = 0.95 + 0.05 * gnoise(in.uv * vec2f(95.0, 82.0)) * (1.0 - smoothstep(0.004, 0.022, weaveAA));
+    let seamLine = 1.0 - smoothstep(0.008, 0.026 + clothAA, clothSeam);
+    let tint = select(vec3f(0.64, 0.59, 0.49), vec3f(0.58, 0.52, 0.41), m == 13u && p.y < 1.3);
+    albedo = tint * warpWeft * (1.0 - seamLine * 0.14 - reefBand * 0.10) * clamp(1.10 - (sailDepth - 1.0) * 0.16, 0.74, 1.08);
+    rough = mix(0.93, 0.86, max(seamLine, reefBand));
+    n = normalize(nBase - clamp(canvasGrad, vec3f(-0.24), vec3f(0.24)));
   } else if (m == 11u) {
     // Recessed crown-glass cabin mullions & glowing stern poop lanterns matching Niña (caravel.js:520)
     let mxEdge = min(fract(p.x * 11.0), 1.0 - fract(p.x * 11.0));
@@ -3768,8 +3913,9 @@ ${damaged || useSubmergedEntry ? '' : 'struct TVFragmentOut { @location(0) color
       emitGlow = vec3f(1.35, 0.72, 0.22) * (0.28 + 0.95 * dusk);
     }
   } else if (m == 20u) {
-    albedo = vec3f(0.025, 0.022, 0.018);
+    albedo = vec3f(0.020, 0.018, 0.015) * mix(0.90, 1.05, relief);
     rough = 0.86;
+    n = normalize(nBase - clamp(woodGrad * 0.75, vec3f(-0.25), vec3f(0.25)));
   } else if (m == 21u || m == 25u) {
     albedo = vec3f(0.48, 0.28, 0.065);
     rough = select(0.84, 0.42, m == 25u);
@@ -3779,11 +3925,23 @@ ${damaged || useSubmergedEntry ? '' : 'struct TVFragmentOut { @location(0) color
     rough = 0.48;
     metal = 0.70;
   } else if (m == 23u) {
-    albedo = vec3f(0.66, 0.62, 0.52);
+    // Stowed corded merchant wool/linen burlap bales
+    let baleWeave = 0.88 + 0.18 * gnoise(in.uv * 42.0 + tvMetres.xz * 18.0);
+    albedo = vec3f(0.48, 0.41, 0.29) * baleWeave;
+    rough = 0.93;
+    n = normalize(nBase - clamp(canvasGrad * 0.8, vec3f(-0.20), vec3f(0.20)));
   } else if (m == 24u) {
-    albedo = vec3f(0.28, 0.032, 0.020);
+    // Un-glazed kiln-fired Baetican terracotta olive-oil amphorae & red pigment trim
+    let clayVar = 0.90 + 0.16 * gnoise(vec2f((tvMetres.x + tvMetres.z) * 28.0, tvMetres.y * 34.0));
+    albedo = select(vec3f(0.28, 0.032, 0.020), vec3f(0.44, 0.19, 0.095) * clayVar, isLusoria);
+    rough = select(0.83, 0.79, isLusoria);
   } else if (m == 26u) {
     albedo = vec3f(0.020, 0.042, 0.10);
+  }
+
+  if (tvWet > 0.01 && m != 3u && m != 8u && m != 11u && m != 22u && m != 25u) {
+    albedo *= mix(1.0, 0.62, tvWet);
+    rough = mix(rough, 0.34, tvWet * 0.55);
   }
 
   ${damaged ? `
@@ -3849,9 +4007,10 @@ ${damaged || useSubmergedEntry ? '' : 'struct TVFragmentOut { @location(0) color
 }
   `}
 `;
+  return withNeuralPbrTradeVessels(rawSource);
 }
 
-export const TRADE_VESSELS_WGSL = tradeVesselsSource(false);
+export const TRADE_VESSELS_WGSL = /* @__PURE__ */ tradeVesselsSource(false);
 
 export function tradeVesselsSubmergedSource() {
   return tradeVesselsSource(false, 1, { submergedCapture: true });
@@ -4644,14 +4803,13 @@ export function appendMerchantCodexToModel(srcModel, sex = 'male') {
   };
 }
 
-// Bakes 6 65-joint deck station clips once at init:
-// 0: Idle (from bakeTownClips), 1: Brace, 2: Helm, 3: Merchant (holding raised codex in hand_l),
-// 4: Seated Row (synced to oarPhase), 5: Seated Paddle (for taino-canoe).
+// Bakes 7 65-joint deck station clips once at init:
+// 0: Idle (from bakeTownClips), 1: Work/Watch, 2: Helm, 3: Merchant (holding raised codex in hand_l),
+// 4: Seated Port Sweep Row (side = -1), 5: Seated Starboard Sweep Row (side = +1), 6: Seated Paddle (taino-canoe).
 export function bakeDeckCrewClips(a) {
   const town = bakeTownClips(a);
   const idleStart = town.layout[0];
   const idleCount = Math.min(28, Math.max(1, town.layout[1]));
-  const braceDur = a.clips.get('Brace')?.duration ?? a.clips.get('Idle')?.duration ?? 1.6;
   const idleDur = a.clips.get('Idle')?.duration ?? 1.6;
   const braceCount = 20;
   const helmCount = 20;
@@ -4659,8 +4817,8 @@ export function bakeDeckCrewClips(a) {
   const rowCount = 24;
   const paddleCount = 20;
 
-  const counts = [idleCount, braceCount, helmCount, merchCount, rowCount, paddleCount];
-  const layout = new Uint32Array(12);
+  const counts = [idleCount, braceCount, helmCount, merchCount, rowCount, rowCount, paddleCount];
+  const layout = new Uint32Array(counts.length * 2);
   let totalFrames = 0;
   for (let c = 0; c < counts.length; c++) {
     layout[c * 2] = totalFrames;
@@ -4683,6 +4841,7 @@ export function bakeDeckCrewClips(a) {
   // Clip 2: Helm (both hands gripping tiller / wheel forward with natural downward elbows & subtle steering sway)
   const spine2 = a.nodeIndex ? a.nodeIndex('spine_02') : -1;
   const neck1 = a.nodeIndex ? a.nodeIndex('neck_01') : -1;
+  const dummyStanding = { position: [0, 0, 0], yaw: 0, pitch: 0, roll: 0, climbPitch: 0, scale: [1, 1, 1] };
   for (let f = 0; f < helmCount; f++) {
     const ang = (f / helmCount) * Math.PI * 2;
     const sway = Math.sin(ang) * 0.04;
@@ -4691,6 +4850,7 @@ export function bakeDeckCrewClips(a) {
     const chest = spine2 >= 0 ? Array.from(a.world[spine2].subarray(12, 15)) : [0, 1.22, 0];
     solveCrewLimb(a, ['upperarm_l', 'lowerarm_l', 'hand_l'], [chest[0] + 0.16 + sway, chest[1] - 0.12, chest[2] + 0.28], [0.68, -0.35, -0.45]);
     solveCrewLimb(a, ['upperarm_r', 'lowerarm_r', 'hand_r'], [chest[0] - 0.16 + sway, chest[1] - 0.14, chest[2] + 0.26], [-0.68, -0.35, -0.45]);
+    poseCrewFingers(a, dummyStanding, 0.88, 0.88);
     a.update();
     palettes.set(a.palette, (layout[4] + f) * DECK_CREW_JOINT_FLOATS);
   }
@@ -4711,27 +4871,92 @@ export function bakeDeckCrewClips(a) {
     palettes.set(a.palette, (layout[6] + f) * DECK_CREW_JOINT_FLOATS);
   }
 
-  // Clip 4: Seated Row (synced to lusoria oarPhase; seated bench at y=0.38 above sole deck)
+  // Clips 4 & 5: Port (side = -1) & Starboard (side = +1) Sweep-Oar Rowing
+  // Computed directly from Archetype 4's actual warped inboard oar shaft centerline & BARGE_OAR_PIVOTS
+  // using the exact same R_roll(dip*side) * R_yaw(sweep*side) rotation as `animateTradeOar` in WGSL.
   const dummySeated = { position: [0, 0, 0], yaw: 0, pitch: 0, roll: 0, climbPitch: 0, scale: [1, 1, 1] };
-  for (let f = 0; f < rowCount; f++) {
-    const ang = (f / rowCount) * Math.PI * 2;
-    const drive = Math.sin(ang);
-    const feather = Math.cos(ang);
-    const lean = 0.28 * drive + 0.04;
-    const handZ = 0.28 + 0.22 * drive;
-    const handY = 0.80 - 0.055 * feather;
-    a.sample('Idle', 0);
-    poseSeatedCrew(a, dummySeated, {
-      seat: [0, 0.38, -0.06],
-      feet: [[0.14, 0.02, 0.44], [-0.14, 0.02, 0.44]],
-      hands: [[0.17, handY, handZ], [-0.17, handY, handZ]],
-      body: { lean },
-    });
-    a.update();
-    palettes.set(a.palette, (layout[8] + f) * DECK_CREW_JOINT_FLOATS);
+  const bargeArch = getTradeVesselArchetype(4);
+  const pivots = bargeOarPivotsForWGSL();
+  const ds = bargeArch.designScale;
+  const measureInboardTipDesign = (stIdx, side, px, py, pz) => {
+    const bv = bargeArch.vertices;
+    let bestInboardX = Infinity;
+    const oarPts = [];
+    for (let i = 0; i < bv.length; i += 9) {
+      const m = bv[i + 6];
+      if (Math.floor(m) === 16 && Math.round((m - 16) * 64) === stIdx) {
+        const vx = bv[i], vy = bv[i + 1], vz = bv[i + 2];
+        if ((vx - px) * side <= 0) {
+          oarPts.push([vx, vy, vz]);
+          if (vx * side < bestInboardX) bestInboardX = vx * side;
+        }
+      }
+    }
+    const endRing = oarPts.filter((q) => q[0] * side <= bestInboardX + 0.035);
+    if (!endRing.length) return [px - side * 0.635, py + 0.068, pz + 0.755];
+    let sx = 0, sy = 0, sz = 0;
+    for (const q of endRing) { sx += q[0]; sy += q[1]; sz += q[2]; }
+    return [sx / endRing.length, sy / endRing.length, sz / endRing.length];
+  };
+
+  for (const [clipSlot, side] of [[8, -1], [10, 1]]) {
+    const refSt = bargeArch.deckStations.find((s) => s.role === 'oarsman' && s.oarSide === side)
+      || bargeArch.deckStations.find((s) => s.role === 'oarsman');
+    const stIdx = refSt?.oarStationIdx ?? (side < 0 ? 2 : 3);
+    const px = pivots[stIdx * 4 + 0];
+    const py = pivots[stIdx * 4 + 1];
+    const pz = pivots[stIdx * 4 + 2];
+    const tip = measureInboardTipDesign(stIdx, side, px, py, pz);
+    const dxTip = tip[0] - px, dyTip = tip[1] - py, dzTip = tip[2] - pz;
+    const stMetres = refSt?.localMetres ?? [(px - side * (1.00 / ds[0])) * ds[0], 0.08, (pz + (0.24 / ds[2])) * ds[2]];
+    const stYaw = refSt?.yaw ?? (side * 0.52);
+    const cSt = Math.cos(stYaw), sSt = Math.sin(stYaw);
+
+    const gripPointLocal = (frac, ang) => {
+      const sweep = Math.sin(ang) * BARGE_ROW_SWEEP_RAD;
+      const dip = -Math.cos(ang) * BARGE_ROW_DIP_RAD;
+      const dx = dxTip * frac, dy = dyTip * frac, dz = dzTip * frac;
+      const cy = Math.cos(sweep * side), sy = Math.sin(sweep * side);
+      const dYawX = dx * cy - dz * sy;
+      const dYawY = dy;
+      const dYawZ = dx * sy + dz * cy;
+      const cr = Math.cos(dip * side), sr = Math.sin(dip * side);
+      const rx = px + (dYawX * cr - dYawY * sr);
+      const ry = py + (dYawX * sr + dYawY * cr);
+      const rz = pz + dYawZ;
+      const wx = rx * ds[0] - stMetres[0];
+      const wy = ry * ds[1] - stMetres[1] + 0.012;
+      const wz = rz * ds[2] - stMetres[2];
+      return [
+        wx * cSt - wz * sSt,
+        wy,
+        wx * sSt + wz * cSt,
+      ];
+    };
+
+    for (let f = 0; f < rowCount; f++) {
+      const ang = (f / rowCount) * Math.PI * 2;
+      const innerGrip = gripPointLocal(0.90, ang);
+      const outerGrip = gripPointLocal(0.60, ang);
+      // Character faces +Z (aft-gunwale): +X is left arm (`hand_l`), -X is right arm (`hand_r`).
+      // Port (`side = -1`): `innerGrip` is closer to +X (`hand_l`), `outerGrip` is closer to -X (`hand_r`).
+      // Starboard (`side = +1`): `outerGrip` is closer to +X (`hand_l`), `innerGrip` is closer to -X (`hand_r`).
+      const hands = side < 0 ? [innerGrip, outerGrip] : [outerGrip, innerGrip];
+      const lean = -0.16 * Math.sin(ang) + 0.08;
+      a.sample('Idle', 0);
+      poseSeatedCrew(a, dummySeated, {
+        seat: [0, 0.27, -0.02],
+        feet: [[0.13, 0.02, 0.40], [-0.13, 0.02, 0.40]],
+        hands,
+        body: { lean },
+      });
+      poseCrewFingers(a, dummySeated, 0.92, 0.92);
+      a.update();
+      palettes.set(a.palette, (layout[clipSlot] + f) * DECK_CREW_JOINT_FLOATS);
+    }
   }
 
-  // Clip 5: Seated Paddle (for taino-canoe)
+  // Clip 6: Seated Paddle (for taino-canoe)
   for (let f = 0; f < paddleCount; f++) {
     const ang = (f / paddleCount) * Math.PI * 2;
     const stroke = Math.sin(ang);
@@ -4747,8 +4972,9 @@ export function bakeDeckCrewClips(a) {
       ],
       body: { lean },
     });
+    poseCrewFingers(a, dummySeated, 0.90, 0.90);
     a.update();
-    palettes.set(a.palette, (layout[10] + f) * DECK_CREW_JOINT_FLOATS);
+    palettes.set(a.palette, (layout[12] + f) * DECK_CREW_JOINT_FLOATS);
   }
 
   a.sample('Idle', 0);
@@ -4870,9 +5096,10 @@ fn rotateDeckShip(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
   var cyc = fract(F.camPos.w * 0.42 + phaseOff);
   if (isSeated) {
     let oarActive = inst.animSink.y > 0.035;
+    let rowRad = F.camPos.w * 2.15 + inst.animSink.x + phaseOff;
     cyc = select(
-      fract(0.06 * sin(F.camPos.w * 0.85 + phaseOff * 6.2831853) + 1.0),
-      fract((inst.animSink.x + phaseOff) / 6.2831853),
+      0.5,
+      fract(rowRad / 6.2831853),
       oarActive,
     );
   }
@@ -5037,7 +5264,7 @@ fn deckCrewCompHidden(color: vec3f, compMask: u32, isMerchant: bool) -> bool {
 }
 fn deckCrewMorph(p: vec3f, normal: vec3f, f: vec4f, sex: f32, comp: u32) -> DeckCrewSurface {
   if (comp == 24u) { return DeckCrewSurface(p, normal); }
-  let headY = select(1.568, 1.516, sex > 0.5);
+  let headY = select(1.600, 1.550, sex > 0.5);
   let build = (deckCrewCompMask(f.w) >> 11u) & 3u;
   if (p.y <= headY + 0.015) {
     if (build == 0u || p.y <= 0.68 || p.y >= 1.40 || abs(p.x) >= 0.25) { return DeckCrewSurface(p, normal); }
@@ -5195,6 +5422,7 @@ struct DeckCrewVSOut {
   @location(2) @interpolate(perspective, centroid) color: vec3f,
   @location(3) @interpolate(perspective, centroid) skin: f32,
   @location(4) @interpolate(flat) splatFade: f32,
+  @location(5) @interpolate(perspective, centroid) bodyPos: vec3f,
 };
 
 @vertex fn tvCrewVS(v: DeckCrewInput) -> DeckCrewVSOut {
@@ -5215,6 +5443,7 @@ struct DeckCrewVSOut {
     out.color = vec3f(0.0);
     out.skin = 0.0;
     out.splatFade = 0.0;
+    out.bodyPos = vec3f(0.0);
     return out;
   }
 
@@ -5237,7 +5466,8 @@ struct DeckCrewVSOut {
 
   let inst = srcInstances[body.vesselSlot];
   let scaleMul = max(inst.attScaleArch.z, 0.25);
-  let shipLocalP = body.localPosYaw.xyz * scaleMul + turnedP;
+  let crewBodyScale = select(1.0, scaleMul, abs(inst.attScaleArch.w - 4.0) < 0.5);
+  let shipLocalP = body.localPosYaw.xyz * scaleMul + turnedP * crewBodyScale;
   let shipWorld = inst.posYaw.xyz + vec3f(nearTerrain.grid.y, 0.0, nearTerrain.grid.z);
   let worldP = shipWorld + rotateVesselCrew(shipLocalP, inst.posYaw.w, inst.attScaleArch.x, inst.attScaleArch.y);
   let worldN = normalize(rotateVesselCrew(turnedN, inst.posYaw.w, inst.attScaleArch.x, inst.attScaleArch.y));
@@ -5249,6 +5479,7 @@ struct DeckCrewVSOut {
   out.color = clothed.rgb;
   out.skin = clothed.w;
   out.splatFade = splatFade;
+  out.bodyPos = v.position;
   return out;
 }
 
@@ -5258,7 +5489,25 @@ struct DeckCrewFragOut {
 };
 
 @fragment fn tvCrewFS(in: DeckCrewVSOut, @builtin(front_facing) front: bool) -> DeckCrewFragOut {
-  let n = normalize(in.normal) * select(-1.0, 1.0, front);
+  let dPdx = dpdx(in.world); let dPdy = dpdy(in.world);
+  let dBpdx = dpdx(in.bodyPos); let dBpdy = dpdy(in.bodyPos);
+  let nGeom = normalize(in.normal) * select(-1.0, 1.0, front);
+  let clothGate = 1.0 - clamp(in.skin, 0.0, 1.0);
+  let bpFoot = max(length(dBpdx), length(dBpdy));
+  let fineFade = (1.0 - smoothstep(0.0009, 0.0036, bpFoot)) * step(1e-6, bpFoot) * clothGate;
+  let twillFade = (1.0 - smoothstep(0.0035, 0.016, bpFoot)) * step(1e-6, bpFoot) * clothGate;
+  let uWeave = (in.bodyPos.x + in.bodyPos.z) * 210.0 * 6.2831853;
+  let vWeave = in.bodyPos.y * 210.0 * 6.2831853;
+  let tWeave = (in.bodyPos.x * 44.0 - in.bodyPos.y * 36.0 + in.bodyPos.z * 40.0) * 6.2831853;
+  let gradFine = vec3f(cos(uWeave) * 210.0, cos(vWeave) * 210.0, cos(uWeave) * 210.0) * (0.00018 * fineFade);
+  let gradTwill = vec3f(cos(tWeave) * 44.0, -cos(tWeave) * 36.0, cos(tWeave) * 40.0) * (0.00055 * twillFade);
+  let gradBp = gradFine + gradTwill;
+  let dhdx = dot(gradBp, dBpdx); let dhdy = dot(gradBp, dBpdy);
+  let r1 = cross(dPdy, nGeom); let r2 = cross(nGeom, dPdx);
+  let det = dot(dPdx, r1);
+  let invDet = 1.0 / select(max(abs(det), 1e-8), -max(abs(det), 1e-8), det < 0.0);
+  let n = normalize(nGeom - (r1 * dhdx + r2 * dhdy) * select(0.0, invDet, abs(det) > 1e-8));
+  let clothCol = in.color * (1.0 + sin(uWeave) * sin(vWeave) * 0.032 * fineFade + sin(tWeave) * 0.022 * twillFade);
   let sunDir = normalize(F.sunDir.xyz);
   let viewDir = normalize(F.camPos.xyz - in.world);
   let sunVis = solarShadowVisibility(vec3f(deckCrewShadowVis(in.world, n)));
@@ -5270,14 +5519,14 @@ struct DeckCrewFragOut {
   let amb = vesselAmbient(n, skyCol, seaCol);
 
   let rough = select(0.84, 0.56, in.skin > 0.5);
-  let direct = (in.color / PI) * sunRad * (nDotL + skinWrap * vec3f(1.0, 0.48, 0.32));
+  let direct = (clothCol / PI) * sunRad * (nDotL + skinWrap * vec3f(1.0, 0.48, 0.32));
   let spec = select(vec3f(0.0), vesselSpecular(n, viewDir, sunDir, rough, vec3f(0.036)) * sunRad * nDotL, nDotL > 0.0);
   let c1 = clamp(1.0 - max(dot(n, viewDir), 0.0), 0.0, 1.0);
   let c2 = c1 * c1;
   let clothSheen = select((c2 * c2) * 0.045, 0.0, in.skin > 0.5);
   let envCol = textureSampleLevel(envCube, sampC, reflect(-viewDir, n), rough * 6.5).rgb * 0.035;
 
-  let lit = in.color * (amb * 0.85 + clothSheen * skyCol) + direct + spec + envCol;
+  let lit = clothCol * (amb * 0.85 + clothSheen * skyCol) + direct + spec + envCol;
   let dropMask = select(0u, vesselCrownSamples(in.splatFade, in.pos.xy, TV_CREW_SAMPLES), in.splatFade > 0.001);
   let keepMask = (~dropMask) & TV_CREW_MASK_ALL;
   return DeckCrewFragOut(vec4f(surfaceAir(lit, in.world), 1.0), keepMask);
@@ -5285,7 +5534,7 @@ struct DeckCrewFragOut {
 `;
 }
 
-export const DECK_CREW_RENDER_WGSL = buildDeckCrewRenderWGSL(4);
+export const DECK_CREW_RENDER_WGSL = /* @__PURE__ */ buildDeckCrewRenderWGSL(4);
 
 export const DECK_CREW_SHADOW_WGSL = SHADOW_FRAME + TRADE_SHARED_TYPES_WGSL + DECK_CREW_SHARED_WGSL + DECK_CREW_SKINNING_HELPERS_WGSL + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F_unused: vec4f;
@@ -5337,7 +5586,8 @@ fn deckSkinPoseSh(frameA: u32, frameB: u32, blend: f32, braceFrame: u32, braceW:
   let turnedP = vec3f(localP.x * cY + localP.z * sY, localP.y, localP.z * cY - localP.x * sY);
   let inst = srcInstances[body.vesselSlot];
   let scaleMul = max(inst.attScaleArch.z, 0.25);
-  let shipLocalP = body.localPosYaw.xyz * scaleMul + turnedP;
+  let crewBodyScale = select(1.0, scaleMul, abs(inst.attScaleArch.w - 4.0) < 0.5);
+  let shipLocalP = body.localPosYaw.xyz * scaleMul + turnedP * crewBodyScale;
   let shipWorld = inst.posYaw.xyz + vec3f(nearTerrain.grid.y, 0.0, nearTerrain.grid.z);
   let worldP = shipWorld + rotateVesselCrew(shipLocalP, inst.posYaw.w, inst.attScaleArch.x, inst.attScaleArch.y);
   let _keep = F_unused.x * 0.0;
@@ -5912,11 +6162,13 @@ export async function createTradeVessels({
 
   let bindGroup = pickEntries(pipe, [0, 1, 2, 3, 4, 12, 19, 20, 21]);
   let shadowBindGroup = pickEntries(shadowPipe, [0, 12, 19]);
+  const neuralPbr = sharedNeuralPbrBank(device, { autoLoad: typeof location !== 'undefined' });
   const makeGroup1 = (targetPipe, extraEntries = []) => device.createBindGroup({
     layout: targetPipe.getBindGroupLayout(1),
     entries: [
       { binding: 0, resource: oakView },
       { binding: 1, resource: oakSampler },
+      ...neuralPbr.vesselBindings(3, 4),
       ...extraEntries,
     ],
   });
@@ -6114,12 +6366,11 @@ export async function createTradeVessels({
     if (st.station.startsWith('crew:')) {
       const ci = Number(st.station.slice(5)) | 0;
       if (crewList[ci]) return crewList[ci];
-      // Ensure local river reach shuttles (`reach:*`) still show boatmen at the oars even without named household rolls.
-      const fallbackCount = typeof route.oarsmen === 'number' ? Math.min(4, route.oarsmen) : 0;
-      if (ci < fallbackCount && String(route.id || '').startsWith('reach:')) {
+      // Ensure every active river-barge oar (`mode === 'river'` / `archetype === 4`) has a seated oarsman at the handle.
+      if (route.mode === 'river' || route.archetype === 4 || String(route.id || '').startsWith('reach:')) {
         return { id: null, syntheticSeed: deckCrewStringHash(`${route.id}:oar:${ci}`), sex: 'm', role: st.role };
       }
-    } else if (st.station === 'pilot' && String(route.id || '').startsWith('reach:')) {
+    } else if (st.station === 'pilot' && (route.mode === 'river' || String(route.id || '').startsWith('reach:'))) {
       return { id: null, syntheticSeed: deckCrewStringHash(`${route.id}:pilot:${stationIndex}`), sex: 'm', role: 'pilot' };
     }
     return null;
@@ -6131,12 +6382,13 @@ export async function createTradeVessels({
     let lookCount = 0;
     let soulTotal = 0;
 
-    const clipIndexForPose = (poseKind) => {
+    const clipIndexForStation = (st) => {
+      const poseKind = st.poseKind;
       if (poseKind === 'brace') return 1;
       if (poseKind === 'helm') return 2;
       if (poseKind === 'merchant') return 3;
-      if (poseKind === 'row') return 4;
-      if (poseKind === 'paddle') return 5;
+      if (poseKind === 'row') return (st.oarSide ?? -1) > 0 ? 5 : 4;
+      if (poseKind === 'paddle') return 6;
       return 0;
     };
 
@@ -6160,7 +6412,7 @@ export async function createTradeVessels({
           : (soul.syntheticSeed ?? deckCrewStringHash(`${r.id}:${st.station}`));
         const sexStr = String(soul.sex || '').toLowerCase();
         const modelIdx = (sexStr === 'f' || sexStr === 'female') && deckCrewGPU?.hasDistinctFemale ? 1 : 0;
-        const clipIdx = clipIndexForPose(st.poseKind);
+        const clipIdx = clipIndexForStation(st);
         const clipLayout = deckCrewGPU
           ? (modelIdx === 1 ? deckCrewGPU.femaleLayout : deckCrewGPU.maleLayout)
           : null;
@@ -6550,7 +6802,7 @@ export async function createTradeVessels({
         ],
       });
       rebindDamagedVessel(v);
-      dmgState.ready = true;
+      dmgState.gpuCompiled = true;
     }).catch((err) => {
       console.error('[trade-vessels promote]', err);
     });
@@ -6745,7 +6997,10 @@ export async function createTradeVessels({
     };
     boat.damage = createVesselDamageState(boat);
 
-    const s0 = sampleTradeVesselState(route, boardDay, daysPerSecond, simElapsedSec);
+    // Pass 0 elapsed for brand-new voyages (`phase !== 'shuttle'` when `simElapsedSec > 2`) so newly created
+    // inbound ships start at `pts[0]` offshore instead of teleporting `vFloor * simElapsedSec` meters into harbors.
+    const initElapsed = route.phase === 'shuttle' ? simElapsedSec : 0;
+    const s0 = sampleTradeVesselState(route, boardDay, daysPerSecond, initElapsed);
     const ai = createVesselAutopilotState(route, aIdx, s0, simElapsedSec);
     boat.x = ai.x;
     boat.z = ai.z;
@@ -6754,14 +7009,20 @@ export async function createTradeVessels({
     boat.target.heave = ai.y;
     boat.yaw = ai.yaw;
     boat.heading = (ai.yaw * 180) / Math.PI;
+    const hydroSlot = allocHydroSlot();
+    if (vesselHydroStateBuffer && device?.queue?.writeBuffer) {
+      const initHydro = new Float32Array([boat.heave, s0.pitch || 0, s0.roll || 0, 1.0, 0, 0, 0, 0]);
+      device.queue.writeBuffer(vesselHydroStateBuffer, hydroSlot * 32, initHydro);
+    }
     return {
       route,
       arch,
       archIndex: aIdx,
       scaleMul,
+      spawnedAtSec: simElapsedSec,
       hydroSinkage: hydro.hydroSinkage,
       lightDraft: hydro.lightDraft,
-      hydroSlot: allocHydroSlot(),
+      hydroSlot,
       hydroInitialized: false,
       intactSlot: 0xFFFFFFFF >>> 0,
       boat,
@@ -6789,10 +7050,27 @@ export async function createTradeVessels({
 
   function rebuildVesselsFromRoutes() {
     const prevById = new Map(vessels.map((v) => [v.route.id, v]));
+    const orphanReachBarges = vessels.filter((v) => String(v.route.id || '').startsWith('reach:') && !routes.some((r) => r.id === v.route.id));
     const kept = new Set();
     const nextVessels = routes.map((route) => {
-      const prev = prevById.get(route.id);
+      let prev = prevById.get(route.id);
       const aIdx = Math.max(0, Math.min(TRADE_VESSEL_ARCHETYPES - 1, route.archetype | 0));
+      // Smoothly adopt an existing synthetic estuary `reach:*` barge when `boardLife` wakes up with `riverBoat:*`
+      // on the same river channel so barges never vanish and re-materialize at different positions on startup.
+      if (!prev && aIdx === 4 && String(route.id || '').startsWith('riverBoat:') && orphanReachBarges.length > 0 && Array.isArray(route.pts) && route.pts.length >= 2) {
+        let bestIdx = -1, bestDist = 260;
+        for (let oi = 0; oi < orphanReachBarges.length; oi++) {
+          const cand = orphanReachBarges[oi];
+          if (kept.has(cand)) continue;
+          let minRouteDist = Infinity;
+          for (let pi = 0; pi < route.pts.length; pi += Math.max(1, Math.floor(route.pts.length / 16))) {
+            const d = Math.hypot(route.pts[pi].x - cand.ai.x, route.pts[pi].z - cand.ai.z);
+            if (d < minRouteDist) minRouteDist = d;
+          }
+          if (minRouteDist < bestDist) { bestDist = minRouteDist; bestIdx = oi; }
+        }
+        if (bestIdx >= 0) prev = orphanReachBarges[bestIdx];
+      }
       if (prev && compatibleArch(prev.archIndex, aIdx) && !kept.has(prev)) {
         kept.add(prev);
         if (!isVesselDamaged(prev)) {
@@ -6860,7 +7138,7 @@ export async function createTradeVessels({
     }
     vessels = nextVessels;
     crewStationsDirty = true;
-    updateAllVessels(0, simElapsedSec, null, true, lastEnv);
+    updateAllVessels(0, simElapsedSec, lastContext?.terrain ?? null, true, lastEnv);
   }
 
   function makeBedSampler(terrain) {
@@ -7470,7 +7748,7 @@ export async function createTradeVessels({
         sailSet: effSailSet,
       };
 
-      if (v.damaged?.ready && v.damaged.fractureGPU) {
+      if ((v.damaged?.ready || v.damaged?.gpuCompiled) && v.damaged.fractureGPU) {
         const d = v.damaged;
         const pending = dmg.pendingBakes;
         if (pending.length > 0) {
@@ -7511,6 +7789,7 @@ export async function createTradeVessels({
         inst[4] = effPitch; inst[5] = effRoll; inst[6] = v.scaleMul; inst[7] = v.archIndex;
         inst[8] = phaseAnim; inst[9] = motion; inst[10] = floodSinkage; inst[11] = furl;
         device.queue.writeBuffer(d.instBuffer, 0, inst);
+        d.ready = true;
         continue;
       }
 
@@ -7589,7 +7868,6 @@ export async function createTradeVessels({
       waveInputU32[wOff + 13] = (v.intactSlot ?? 0xFFFFFFFF) >>> 0;
       waveInputU32[wOff + 14] = (v.crewSlot >= 0 ? v.crewSlot : 0xFFFFFFFF) >>> 0;
       waveInputU32[wOff + 15] = wm.flags >>> 0;
-      v.hydroInitialized = true;
       waveCount++;
     }
     activeWaveVesselCount = waveCount;
@@ -7963,6 +8241,9 @@ export async function createTradeVessels({
           pass.setPipeline(wavePipe);
           pass.setBindGroup(0, wbg);
           pass.dispatchWorkgroups(Math.ceil(activeWaveVesselCount / 64));
+          for (let vi = 0; vi < vessels.length; vi++) {
+            vessels[vi].hydroInitialized = true;
+          }
         }
       }
       if (clearPipe && clearBindGroup) {

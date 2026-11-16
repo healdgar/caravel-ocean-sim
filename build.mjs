@@ -259,7 +259,6 @@ function minifyWGSL(src) {
 // Minify every WGSL template literal in the shader modules in place (shared snippets stay
 // shared), handling nested ${...} expressions and nested template literals lexically.
 function minifyWGSLInJS(src, isWgslMod, rel = '') {
-  if (rel === 'js/forest-scenery.js') return src;
   const n = src.length;
   let i = 0;
   function scanJS(stopAtBrace) {
@@ -338,9 +337,9 @@ function minifyWGSLInJS(src, isWgslMod, rel = '') {
     }
     rawChunks.push(cur);
     const joinedRaw = rawChunks.join('__P__');
-    const shouldMinify = isWgslMod
+    const shouldMinify = !(rel === 'js/forest-scenery.js' && joinedRaw.includes('forestResidency')) && (isWgslMod
       ? !/<\/?[a-z][\s/>]/i.test(joinedRaw)
-      : ((/@(?:compute|vertex|fragment|group|workgroup_size)\b|\bfn\s+[A-Za-z_]\w*\s*\(|\b(?:struct\s+\w+\s*\{|var<(?:storage|uniform|workgroup|private)>|@(?:location|builtin|binding)\()/.test(joinedRaw)) && !/<\/?[a-z][\s/>]/i.test(joinedRaw));
+      : ((/@(?:compute|vertex|fragment|group|workgroup_size)\b|\bfn\s+[A-Za-z_]\w*\s*\(|\b(?:struct\s+\w+\s*\{|var<(?:storage|uniform|workgroup|private)>|@(?:location|builtin|binding)\()/.test(joinedRaw)) && !/<\/?[a-z][\s/>]/i.test(joinedRaw)));
     if (!shouldMinify) {
       let orig = rawChunks[0];
       for (let k = 0; k < exprs.length; k++) orig += exprs[k] + rawChunks[k + 1];
@@ -444,9 +443,11 @@ if (esbuild) {
 }
 
 const minifyPage = js => page
-  .replace(SCRIPT_TAG, () => `<script type="module">${js}</script>`)
-  .replace(/<style>([\s\S]*?)<\/style>/, (_, css) => `<style>${css.replace(/\s+/g, ' ').replace(/ ?([{}:;,>]) ?/g, '$1').trim()}</style>`)
-  .replace(/>\s+</g, '><');
+  .replace(/<script>([\s\S]*?)<\/script>/, (_, b) => `<script>${esbuild ? esbuild.transformSync(b, { loader: 'js', minify: true, legalComments: 'none' }).code.trim() : b.trim()}</script>`)
+  .replace(/<style>([\s\S]*?)<\/style>/, (_, css) => `<style>${esbuild ? esbuild.transformSync(css, { loader: 'css', minify: true, legalComments: 'none' }).code.trim() : css.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\s+/g, ' ').replace(/ ?([{}:;,>]) ?/g, '$1').trim()}</style>`)
+  .replace(/<[a-z][^>]*>/gi, tag => tag.replace(/\s+/g, ' '))
+  .replace(/>\s+</g, '><')
+  .replace(SCRIPT_TAG, () => `<script type="module">${js}</script>`);
 write('ocean.min.html', minifyPage(minJs));
 
 // Pages serves cached assets; the two ocean downloads remain self-contained. The published page opens on deck, so

@@ -175,11 +175,10 @@ const CREW_PIECE_OUT=vec3f(0.0,1.62,0.0);
 fn crewSurface(v:CrewInput)->CrewSurface {
   let actor=actors[v.instance];
   if(crewPieceHidden(v.color,crewDressOf(actor.hair.w))){return CrewSurface(CREW_PIECE_OUT,v.normal);}
-  if(v.color.b<-1.0){return CrewSurface(v.position,v.normal);}
   return crewMorph(v.position,v.normal,actor.face,select(0.0,1.0,actor.skin.w>.5&&actor.skin.w<1.5));
 }
 fn crewMorph(p:vec3f,normal:vec3f,f:vec4f,sex:f32)->CrewSurface {
-  let headY=select(1.568,1.516,sex>.5);
+  let headY=select(1.600,1.550,sex>.5);
   let build=(crewCompMask(f.w)>>11u)&3u;
   if(p.y<=headY+.015){
     if(build==0u||p.y<=.68||p.y>=1.40||abs(p.x)>=.25){return CrewSurface(p,normal);}
@@ -224,45 +223,40 @@ fn crewMorph(p:vec3f,normal:vec3f,f:vec4f,sex:f32)->CrewSurface {
 }
 `;
 export const CAPTAIN_OWN_COLOURS = /* wgsl */ `
-// One man sat for the captain's painting: his skin, his brown hair and beard, his navy coat. Every captain wears it,
-// so each one's own skin, hair and coat are laid over it wherever the paint is one of those, keeping the painting's
-// light and shade, and a woman's beard is painted out in her skin. Paint is told by its colour, since the painting's
-// islands follow no garment: flesh is far redder than green and lit, the coat is the only dark thing bluer than red,
-// and hair is whatever else is dark on the head, and everything on its crown. The cut of the body, the face and the
-// hair stay the sitter's.
+// The 1550 officer mesh carries crisp baked velvet, gold embroidery, white linen ruff/cuffs, leather boots, and a
+// clean-shaven bald head whose true flesh vertices are flagged in v.skin. Skin is recoloured uniformly from its
+// measured linear median so faces and necks stay seamless (with sculpted 3D hair/beards attached separately), while
+// the deep crimson velvet doublet body takes a subtle tint of the actor's shirt colour without staining gold trim.
 fn captainOwnColours(paint:vec3f,p:vec3f,flagged:f32,skin:vec4f,hair:vec3f,shirt:vec3f)->vec3f {
   let luma=dot(paint,vec3f(.2126,.7152,.0722));
-  let red=paint.r/max(paint.g,1e-4);
-  let dark=1.0-smoothstep(.12,.2,luma);
-  // The head, less the wings of the collar that stand up beside the jaw, and with the beard that hangs below the chin
-  // between them, which is darker than any shade on the collar.
-  let wing=smoothstep(.08,.095,abs(p.x))*smoothstep(.03,.05,p.z)*(1.0-smoothstep(1.505,1.525,p.y));
-  let onHead=max(smoothstep(1.415,1.445,p.y)*(1.0-smoothstep(.15,.19,abs(p.x)))*(1.0-wing),
-    smoothstep(1.375,1.39,p.y)*(1.0-smoothstep(.06,.085,abs(p.x)))*smoothstep(.02,.04,p.z)*(1.0-smoothstep(.06,.1,luma)));
-  // The coat's own black shadows are coat too. The head has none of it but the collar behind the neck: a blue shade
-  // under the fringe is hair.
-  let blue=paint.b/max(max(paint.r,paint.g),1e-4);
-  let nape=1.0-onHead*max(smoothstep(-.08,-.05,p.z),smoothstep(1.505,1.525,p.y));
-  let coat=smoothstep(.82,.94,blue)*(1.0-smoothstep(.05,.09,luma))*nape;
-  // Nothing but hair is painted on the top of the head, the back of it, or its sides above the ears.
-  let crown=onHead*max(smoothstep(1.68,1.695,p.y),max((1.0-smoothstep(-.085,-.06,p.z))*smoothstep(1.50,1.52,p.y),
-    smoothstep(.085,.1,abs(p.x))*smoothstep(1.585,1.605,p.y)));
-  // Where the body says skin, its deepest shade is still skin; elsewhere a dark red is the waistcoat.
-  let flesh=smoothstep(2.2,2.7,red)*smoothstep(mix(.035,.012,flagged),mix(.07,.03,flagged),luma)*(1.0-crown);
-  // Below the crown hair is only the deepest of what is not flesh: the paint fades from a beard into the collar
-  // beside it, and bright hair laid over that fade would stain the collar.
-  let hairy=(1.0-coat)*mix(onHead*(1.0-flesh)*(1.0-smoothstep(.07,.13,luma)),1.0,crown);
-  // A woman's jaw: the front of the head below the nose. The beard, whiskers and moustache are whatever is dark on
-  // it, and the shade the painter put round them goes with them.
-  let jaw=onHead*(1.0-crown)*smoothstep(-.035,-.01,p.z)*(1.0-smoothstep(1.555,1.58,p.y))*step(1.5,skin.w);
-  let lit=paint/vec3f(.40,.125,.058);
-  var shade=mix(vec3f(clamp(dot(lit,vec3f(.299,.587,.114)),.4,1.3)),clamp(lit,vec3f(.4),vec3f(1.3)),.45);
-  shade=mix(shade,max(shade,vec3f(.8)),jaw);
-  // A coat is heavier and darker cloth than the shirt whose colour it takes.
-  var worn=mix(paint,shirt*(${CAPTAIN_COAT_DEPTH}*clamp(luma/.0141,.55,1.4)),coat);
-  worn=mix(worn,hair*clamp(luma/.032,.45,1.6),hairy);
-  worn=mix(worn,skin.rgb*.9,jaw*(1.0-flesh)*dark);
-  return mix(worn,skin.rgb*shade,flesh);
+  // Eye opening on 1550_captain_officer_bald.glb sits around (|x| ~ 0.0248, y ~ 1.6365, z > 0.050) and has low R-G warmth compared to skin.
+  let eyeDist=length(vec2f(abs(p.x)-0.0248,(p.y-1.6365)*1.30));
+  let rgWarmth=(paint.r-paint.g)/max(paint.r,1e-4);
+  let inEyeOpening=step(0.050,p.z)*(1.0-smoothstep(0.0115,0.0155,eyeDist))*(1.0-smoothstep(0.28,0.44,rgWarmth));
+  let skinMask=clamp(flagged,0.0,1.0)*(1.0-inEyeOpening);
+  // Normalize painted skin against 1550_captain_officer_bald.glb's measured linear skin median (.5711, .2346, .1620).
+  let lit=paint/vec3f(.5711,.2346,.1620);
+  let shadeL=clamp(dot(lit,vec3f(.299,.587,.114)),.52,1.24);
+  let skinShade=mix(vec3f(shadeL),clamp(lit,vec3f(.48),vec3f(1.26)),.28);
+  // Eyebrows on the upper face tint gently toward the captain's hair.
+  let browMask=(1.0-skinMask)*(1.0-inEyeOpening)*smoothstep(1.644,1.654,p.y)*(1.0-smoothstep(1.682,1.696,p.y))*smoothstep(.045,.072,p.z)*(1.0-smoothstep(.055,.11,luma));
+  // Preserve the rich Renaissance crimson velvet & gold embroidery, adding only a subtle personal coat undertone.
+  let redRatio=paint.r/max(paint.g,1e-4);
+  let onDoublet=(1.0-skinMask)*smoothstep(.74,.79,p.y)*(1.0-smoothstep(1.40,1.45,p.y));
+  let isVelvet=onDoublet*smoothstep(2.5,3.8,redRatio)*(1.0-smoothstep(.045,.095,luma));
+  let coatTint=shirt*(${CAPTAIN_COAT_DEPTH}*clamp(luma/.0145,.45,1.45));
+  var worn=mix(paint,mix(paint,coatTint,.12),isVelvet);
+  worn=mix(worn,hair*clamp(luma/.032,.45,1.5),browMask*.65);
+  // Natural shadowed sclera + rich dark brown iris + pupil strictly inside the low-warmth eye opening.
+  if(inEyeOpening>0.01){
+    let sclera=vec3f(0.058,0.052,0.048)*clamp(0.75+luma*0.7,0.65,1.15);
+    let irisMask=1.0-smoothstep(0.0068,0.0092,eyeDist);
+    let pupilMask=1.0-smoothstep(0.0032,0.0048,eyeDist);
+    var eyeCol=mix(sclera,vec3f(0.018,0.010,0.006),irisMask);
+    eyeCol=mix(eyeCol,vec3f(0.003,0.003,0.004),pupilMask);
+    worn=mix(worn,eyeCol,inEyeOpening);
+  }
+  return mix(worn,skin.rgb*skinShade,skinMask);
 }
 `;
 // Shading never discards, so the GPU shades only what shows. Anyone with something to cut away,
@@ -363,18 +357,37 @@ fn crewClothed(tagged:vec3f,p:vec3f,shirt:vec3f,trousers:vec3f,skin:vec3f,hair:v
   return out;
 }
 fn crewShade(v:CrewVertex,front:bool,baseIn:vec3f)->vec4f {
+  let dPdx=dpdx(v.world);let dPdy=dpdy(v.world);
+  let dBpdx=dpdx(v.bodyPos);let dBpdy=dpdy(v.bodyPos);
   let woundAmt=v.damage.x;let scorchAmt=v.damage.y;let bSeed=v.damage.z;
   let bp=v.bodyPos;
   let nHash=fract(sin(dot(bp*vec3f(19.3,27.1,23.7)+vec3f(bSeed*31.0),vec3f(12.9898,78.233,45.164)))*43758.5453);
   let nLow=sin(bp.x*18.0+bSeed*41.0)*cos(bp.y*14.0-bSeed*23.0)*0.5+0.5;
-  let n=normalize(v.normal)*select(-1.0,1.0,front);let sun=F.sunDir.xyz;
+  let nGeom=normalize(v.normal)*select(-1.0,1.0,front);
+  let clothGate=(1.0-clamp(v.skin,0.0,1.0))*${(clothSheen / CREW_CLOTH_SHEEN).toFixed(4)};
+  let bpFoot=max(length(dBpdx),length(dBpdy));
+  let fineFade=(1.0-smoothstep(0.0009,0.0036,bpFoot))*step(1e-6,bpFoot)*clothGate;
+  let twillFade=(1.0-smoothstep(0.0035,0.016,bpFoot))*step(1e-6,bpFoot)*clothGate;
+  let uWeave=(bp.x+bp.z)*210.0*6.2831853;
+  let vWeave=bp.y*210.0*6.2831853;
+  let tWeave=(bp.x*44.0-bp.y*36.0+bp.z*40.0)*6.2831853;
+  let gradFine=vec3f(cos(uWeave)*210.0,cos(vWeave)*210.0,cos(uWeave)*210.0)*(0.00018*fineFade);
+  let gradTwill=vec3f(cos(tWeave)*44.0,-cos(tWeave)*36.0,cos(tWeave)*40.0)*(0.00055*twillFade);
+  let gradBp=gradFine+gradTwill;
+  let dhdx=dot(gradBp,dBpdx);let dhdy=dot(gradBp,dBpdy);
+  let r1=cross(dPdy,nGeom);let r2=cross(nGeom,dPdx);
+  let det=dot(dPdx,r1);
+  let invDet=1.0/select(max(abs(det),1e-8),-max(abs(det),1e-8),det<0.0);
+  let n=normalize(nGeom-(r1*dhdx+r2*dhdy)*select(0.0,invDet,abs(det)>1e-8));
+  let clothThreadMod=1.0+(sin(uWeave)*sin(vWeave)*0.032*fineFade+sin(tWeave)*0.022*twillFade);
+  let sun=F.sunDir.xyz;
   let shadowSample=vesselShadow(v.world,n);
   let direct=sunIlluminance()*sunVis[0]*step(0.0,sun.y)*solarShadowVisibility(shadowSample);
   let sky=textureSampleLevel(envCube,sampC,vec3f(0,1,0),${ENV_MIPS-1}.0).rgb;
   let sea=textureSampleLevel(envCube,sampC,normalize(vec3f(n.x,-.65,n.z)),${ENV_MIPS-1}.0).rgb;
   let ambient=vesselAmbient(n,sky,sea);
   let wet=clamp(v.wet,vec2f(0),vec2f(1));
-  var baseColor=baseIn;
+  var baseColor=baseIn*clothThreadMod;
   var roughBias=0.0;
   if(v.paint!=0u&&v.skin>.5){
     // Genipap: dark bands over the body and limbs, the face left clear.
