@@ -261,6 +261,19 @@ function normalizePercent(raw, fallback = 100) {
 function extractSceneGpuMs(prof) {
   if (prof == null) return 0;
   if (typeof prof === 'number') return Number.isFinite(prof) ? Math.max(0, prof) : 0;
+  if (typeof prof.sceneMs === 'function') {
+    const v = prof.sceneMs();
+    return Number.isFinite(v) && v > 0 ? v : 0;
+  }
+  if (typeof prof.summary === 'function') {
+    const sum = prof.summary();
+    const v = Number(sum?.smoothed?.Scene ?? sum?.totalMs ?? 0);
+    if (Number.isFinite(v) && v > 0) return v;
+  }
+  if (prof.smoothed && typeof prof.smoothed === 'object') {
+    const sScene = Number(prof.smoothed.Scene ?? prof.latest?.Scene ?? prof.totalMs ?? 0);
+    return Number.isFinite(sScene) && sScene > 0 ? sScene : 0;
+  }
   if (typeof prof.snapshot === 'function') {
     const snap = prof.snapshot();
     if (snap) {
@@ -538,6 +551,10 @@ export function createWorldDebugUI({
   let overlayVisible = false;
   let destroyed = false;
   let lastPanelHtmlMs = -Infinity;
+  let lastSparkMs = -Infinity;
+  let lastLocateMs = -Infinity;
+  let cachedRawLocatedVessels = [];
+  let cachedLocateSource = null;
   let lastFrameMs = 16.67;
   let lastGpuMs = 0;
   let lastResPct = 100;
@@ -560,6 +577,8 @@ export function createWorldDebugUI({
   let toggleBtn = null;
   let sparkCanvas = null;
   let sparkLegendEl = null;
+  let sparkLegendSpans = null;
+  const sparkLegendLast = ['', '', '', ''];
   let telemetryBodyEl = null;
 
   if (performancePanel && documentRef?.createElement) {
@@ -589,6 +608,12 @@ export function createWorldDebugUI({
     sparkWrap.className = 'ww-dw-spark-wrap';
     sparkLegendEl = documentRef.createElement('div');
     sparkLegendEl.className = 'ww-dw-spark-legend';
+    sparkLegendSpans = ['#fbbf24', '#38bdf8', '#34d399', '#c084fc'].map((color) => {
+      const span = documentRef.createElement('span');
+      if (span.style) span.style.color = color;
+      sparkLegendEl.appendChild?.(span);
+      return span;
+    });
     sparkCanvas = documentRef.createElement('canvas');
     sparkCanvas.className = 'ww-dw-spark-canvas';
     sparkCanvas.width = 280;
@@ -681,9 +706,22 @@ export function createWorldDebugUI({
     const riverCaravans = caravanList.filter((c) => c?.mode === 'river');
 
     const tv = getTradeVessels?.() ?? null;
-    const rawLocatedVessels = Array.isArray(tv)
-      ? tv
-      : (typeof tv?.locate === 'function' ? tv.locate() : []);
+    const nowLocate = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const needCrew = Boolean(frame.includeCrew);
+    const locateIntervalMs = overlayVisible ? 180 : 600;
+    let rawLocatedVessels;
+    if (Array.isArray(tv)) {
+      rawLocatedVessels = tv;
+    } else if (typeof tv?.locate === 'function') {
+      if (needCrew || tv !== cachedLocateSource || nowLocate - lastLocateMs >= locateIntervalMs) {
+        lastLocateMs = nowLocate;
+        cachedLocateSource = tv;
+        cachedRawLocatedVessels = tv.locate(needCrew ? undefined : { skipCrew: true });
+      }
+      rawLocatedVessels = cachedRawLocatedVessels;
+    } else {
+      rawLocatedVessels = [];
+    }
     const extraVesselsRaw = getVessels?.() ?? null;
     const extraVessels = Array.isArray(extraVesselsRaw)
       ? extraVesselsRaw
@@ -855,12 +893,19 @@ export function createWorldDebugUI({
     plotSeries(gpuHist, maxMs, '#38bdf8');
     plotSeries(frameHist, maxMs, '#fbbf24');
 
-    if (sparkLegendEl) {
-      sparkLegendEl.innerHTML =
-        `<span style="color:#fbbf24">● Frame ${lastFrameMs.toFixed(1)}ms</span>` +
-        `<span style="color:#38bdf8">● Scene GPU ${lastGpuMs.toFixed(2)}ms</span>` +
-        `<span style="color:#34d399">● Res ${lastResPct.toFixed(0)}%</span>` +
-        `<span style="color:#c084fc">● Poly ${lastPolyPct.toFixed(0)}%</span>`;
+    if (sparkLegendSpans) {
+      const nextLegend = [
+        `● Frame ${lastFrameMs.toFixed(1)}ms`,
+        `● Scene GPU ${lastGpuMs.toFixed(2)}ms`,
+        `● Res ${lastResPct.toFixed(0)}%`,
+        `● Poly ${lastPolyPct.toFixed(0)}%`,
+      ];
+      for (let i = 0; i < 4; i++) {
+        if (sparkLegendLast[i] !== nextLegend[i]) {
+          sparkLegendLast[i] = nextLegend[i];
+          sparkLegendSpans[i].textContent = nextLegend[i];
+        }
+      }
     }
   }
 
@@ -1507,7 +1552,10 @@ export function createWorldDebugUI({
 
     let worldState = null;
     if (panelVisible) {
-      drawSparklineCanvas();
+      if (nowMs - lastSparkMs >= 80) {
+        lastSparkMs = nowMs;
+        drawSparklineCanvas();
+      }
       if (nowMs - lastPanelHtmlMs >= 240) {
         lastPanelHtmlMs = nowMs;
         worldState = gatherWorldState(frame);
@@ -1529,6 +1577,7 @@ export function createWorldDebugUI({
     },
     refreshTelemetry(frame = {}) {
       lastPanelHtmlMs = -Infinity;
+      lastLocateMs = -Infinity;
       const worldState = gatherWorldState(frame);
       renderPanelTelemetry(worldState);
       return worldState;

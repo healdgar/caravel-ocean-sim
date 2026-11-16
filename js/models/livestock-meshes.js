@@ -76,7 +76,8 @@ export function decodeLivestockPack(arrayBuffer) {
       verts[w + 4] = ny / nl;
       verts[w + 5] = nz / nl;
       verts[w + 6] = dv.getInt16(vo + 12, true) * 0.001;
-      verts[w + 7] = dv.getInt16(vo + 14, true) * 0.001;
+      const ctRaw = dv.getInt16(vo + 14, true);
+      verts[w + 7] = ctRaw < 0 ? (-ctRaw) * 0.001 : (ctRaw > 0 ? 16.0 + ctRaw : 0.0);
     }
     off += vc * 16;
 

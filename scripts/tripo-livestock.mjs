@@ -123,7 +123,7 @@ async function findCachedGlb(dir) {
 export async function runBake({ fromTripoDir = OUT_DIR, run = execFileAsync } = {}) {
   const script = path.join(ROOT, 'scripts', 'bake-livestock-meshes.py');
   const args = ['-b', '-P', script, '--', '--from-tripo', fromTripoDir];
-  const { stdout, stderr } = await run(BLENDER_BIN, args, { timeout: 180000, maxBuffer: 16 * 1024 * 1024 });
+  const { stdout, stderr } = await run(BLENDER_BIN, args, { timeout: 360000, maxBuffer: 16 * 1024 * 1024 });
   if (stderr && /Error:|Traceback/i.test(stderr)) {
     throw new Error(redact(stderr));
   }

@@ -178,7 +178,7 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
   if(shots.count>0u&&fate.mode<FALLING){
     var fear=0.0;var danger=vec2f(0.0);var fearReach=1.0;var fearSeed=0.0;var fearBlast=0.0;var fearAway=1e6;
     var struck=false;var directHit=false;var hitSeed=1.0;var hitProx=1.0;var fallsTo=vec2f(0.0,1.0);
-    let bodyTop=select(${BODY_HEIGHT_M.toFixed(3)},2.22,isMounted);
+    let bodyTop=select(${BODY_HEIGHT_M.toFixed(3)},2.38,isMounted);
     for(var k=0u;k<shots.count;k++){
       let shot=shots.list[k];
       let line=shot.end-shot.start;
@@ -302,17 +302,17 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
       let latSlopeLift=select(0.0,min(0.45,abs(dot(dispXZ,rightVec))*0.09)+0.06,spot.position.y>0.05);
       let groundY=select(spot.position.y,max(spot.position.y,landSpot.position.y)+latSlopeLift,spot.position.y>0.05);
       let baseY=mix(spot.position.y,groundY,clamp(throwAge/max(tAirFlat,0.01),0.0,1.0));
-      let saddleDrop=select(0.0,0.48*(1.0-clamp(throwAge/max(tAirFlat,0.01),0.0,1.0)),isMounted);
+      let saddleDrop=select(0.0,0.62*(1.0-clamp(throwAge/max(tAirFlat,0.01),0.0,1.0)),isMounted);
       let arcY=max(0.0,saddleDrop+vy0*flyT-0.5*g*flyT*flyT);
       let bounceY=select(0.0,sin(groundT/0.24*3.14159)*min(0.18,vy0*0.045),groundT>0.0 && groundT<0.24);
       position=vec3f(spot.position.x+dispXZ.x,baseY+select(arcY,bounceY,throwAge>=tAirFlat),spot.position.z+dispXZ.y);
     }
   }
   if(hidden){return;}
-  let centerY=select(${(BODY_HEIGHT_M * 0.5).toFixed(3)},1.25,isMounted&&fate.mode==ABOUT);
+  let centerY=select(${(BODY_HEIGHT_M * 0.5).toFixed(3)},1.40,isMounted&&fate.mode==ABOUT);
   let relative=position+vec3f(0.0,centerY,0.0)-F.camPos.xyz;
   // Those out of sight are kept only for the shadow they may cast into it, and are never drawn themselves.
-  let boundR=select(select(${BODY_BOUND_M.toFixed(2)},1.85,isMounted),${LYING_BOUND_M.toFixed(2)},fate.mode>=FALLING);
+  let boundR=select(select(${BODY_BOUND_M.toFixed(2)},1.95,isMounted),${LYING_BOUND_M.toFixed(2)},fate.mode>=FALLING);
   let seen=inFrustum(relative,boundR);
   if(!seen&&(length(relative)>=${SHADOW_NEAR_M.toFixed(1)}||!inFrustum(relative,${SHADOW_MARGIN_M.toFixed(1)}))){return;}
   let depth=max(dot(relative,normalize(F.camFwd.xyz)),1.2);
@@ -564,6 +564,12 @@ fn crewCompHidden(color:vec3f,compMask:u32)->bool {
   let local=(pose*vec4f(surfacePos,1)).xyz;
   let world=vec3f(local.x*c+local.z*s,local.y,local.z*c-local.x*s)+body.position;
   return SH.lightView*vec4f(world-SH.origin.xyz,1.0);
+}
+`;
+export const TOWNSFOLK_RESET = /* wgsl */ `
+@group(0) @binding(0) var<storage,read_write> draws:array<u32>;
+@compute @workgroup_size(32) fn main(@builtin(global_invocation_id) id:vec3u){
+  if(id.x<${TOWNSFOLK_BUCKETS}u){draws[id.x*5u+1u]=0u;}
 }
 `;
 export const TOWNSFOLK_WGSL = TOWNSFOLK_RENDER;

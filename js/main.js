@@ -971,8 +971,10 @@ async function main() {
   // --------------------------------------------------------------------------------------
   // Screen-size dependent targets
   // --------------------------------------------------------------------------------------
-  const BLOOM_LEVELS = 8;
+  const BLOOM_LEVELS = 5;
   const linSamp = device.createSampler({ magFilter: 'linear', minFilter: 'linear', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge' });
+  const blackBloomTex = device.createTexture({ label: 'bloom off black', size: [1, 1], format: HDR, usage: TU.TEXTURE_BINDING });
+  const blackBloomView = blackBloomTex.createView();
   const compUBO = mkBuf(32, GU.UNIFORM | GU.COPY_DST, 'composite ubo');
   const compData = new Float32Array(8);
   const bloomUBOs = [];
@@ -1014,7 +1016,7 @@ async function main() {
     colorAttachments: [{ view: null, clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: 'clear', storeOp: 'store' }],
     timestampWrites: undefined,
   };
-  let bloomLevels = 0, bloomPasses = [], bgComp = null,bgCompUnderwater=null;
+  let bloomLevels = 0, bloomPasses = [], bgComp = null, bgCompUnderwater = null, bgCompNoBloom = null, bgCompUnderwaterNoBloom = null, bloomZeroCleared = false;
   let bloomMeasuring=false,bloomMeasureRequested=false,bloomCameraMediumBand=false,bloomFrameReady=false;
   let neuralMeasuring=false,neuralMeasureRequested=false;
 
@@ -1027,7 +1029,7 @@ async function main() {
     const w = Math.max(1, Math.min(limit, Math.round(forcedWidth || nw * resolution.scale)));
     const h = Math.max(1, Math.min(limit, Math.round(forcedHeight || nh * resolution.scale)));
     if (w === W && h === H) return;
-    W = w; H = h;bloomFrameReady=false;
+    W = w; H = h;bloomFrameReady=false;bloomZeroCleared=false;
     canvas.width = W; canvas.height = H;
     for (const t of [colorMS, depthMS, hdrTex, bloomTex, waterCopy,submergedColor,aboveWaterColor,submergedDepth]) t && t.destroy();
     // Refraction blurs and bends whatever these hold, so half size is all they need.
@@ -1099,6 +1101,8 @@ async function main() {
     }
     bgComp = bg(compPipe, [hdrView, bv[0], linSamp, { buffer: compUBO }]);
     bgCompUnderwater=bg(mediumCompPipe,[mediumView,bv[0],linSamp,{buffer:compUBO},hdrView,{buffer:frameUBO},{buffer:vessels[0].probe.output}]);
+    bgCompNoBloom = bg(compPipe, [hdrView, blackBloomView, linSamp, { buffer: compUBO }]);
+    bgCompUnderwaterNoBloom=bg(mediumCompPipe,[mediumView,blackBloomView,linSamp,{buffer:compUBO},hdrView,{buffer:frameUBO},{buffer:vessels[0].probe.output}]);
     neuralPass.resize({width:W,height:H,hdrView,mediumView,bloomView:bv[0],compUBO,cameraProbe:vessels[0].probe.output,depthView:mainPass.depthStencilAttachment.view});
   }
 
@@ -1201,7 +1205,7 @@ async function main() {
   // --------------------------------------------------------------------------------------
   // Camera & input
   // --------------------------------------------------------------------------------------
-  const cam = { x: 0, y: 2.4, z: 0, yaw: 0, pitch: -5.5 * D2R, fovY: 58 * D2R, speed: 6 };
+  const cam = { x: 0, y: 2.4, z: 0, yaw: 0, pitch: -5.5 * D2R, fovY: 58 * D2R, speed: 4.2 };
   // The captain ashore: the free camera on foot. It keeps to dry ground at the height of an eye, at a walk or a run,
   // and walks through no building of the port or its city. A pier is not walked yet: the ground under one is the
   // river's bed.
@@ -1214,7 +1218,7 @@ async function main() {
     return !ashore.solids(lx,lz)&&!terrain.cityTargets?.inside(lx,lz,ASHORE_BODY_M);
   }
   const activeLandViews=terrain?.views??LANDFALL_VIEWS;
-  if(LAND_STAGE){const view=activeLandViews[LAND_STAGE]??LANDFALL_VIEWS[LAND_STAGE];Object.assign(cam,view);cam.yaw=view.yaw*D2R;cam.pitch=view.pitch*D2R;cam.speed=45;}
+  if(LAND_STAGE){const view=activeLandViews[LAND_STAGE]??LANDFALL_VIEWS[LAND_STAGE];Object.assign(cam,view);cam.yaw=view.yaw*D2R;cam.pitch=view.pitch*D2R;cam.speed=4.2;}
   if (qs.get('cam')) {
     const v = qs.get('cam').split(',').map(Number);
     if (v.length >= 3 && Number.isFinite(v[0]) && Number.isFinite(v[1]) && Number.isFinite(v[2])) {
@@ -2090,7 +2094,7 @@ async function main() {
     mx += fwd * cp * sy + str * cy;
     my += fwd * sp + up;
     mz += -fwd * cp * cy + str * sy;
-    const boost = fast ? 5 : 1;
+    const boost = fast ? 10 : 1;
     const v = cam.speed * boost * dt;
     cam.x += mx * v; cam.y += my * v; cam.z += mz * v;
     cam.y = Math.max(-500, Math.min(3000, cam.y));
@@ -4231,7 +4235,7 @@ async function main() {
     getTradeVessels:()=>terrain?.tradeVessels??null,
     getTerrain:()=>terrain,
     getVessels:()=>vessels,
-    getProfiler:()=>profiler?.snapshot?.()??profiler,
+    getProfiler:()=>profiler,
     getResolution:()=>resolution,
     getPolygons:()=>polygons,
   });
@@ -5696,12 +5700,22 @@ async function main() {
       neuralPass.update({viewProj,camX:cam.x,camY:cam.y,camZ:cam.z,strength:0});
     }
     bloomCameraMediumBand=cameraMediumBand;
-    if(P.bloom>0)encodeBloom(enc,bloomProfileWrites,cameraMediumBand);
+    const bloomActive = P.bloom > 0.001 && bloomPasses.length > 0;
+    if (bloomActive) {
+      encodeBloom(enc, bloomProfileWrites, cameraMediumBand);
+      bloomZeroCleared = false;
+    } else if (!bloomZeroCleared && bloomPasses.length > 0) {
+      const clearBloom = enc.beginRenderPass({
+        colorAttachments: [{ view: bloomPasses[0].descriptor.colorAttachments[0].view, clearValue: { r: 0, g: 0, b: 0, a: 0 }, loadOp: 'clear', storeOp: 'store' }],
+      });
+      clearBloom.end();
+      bloomZeroCleared = true;
+    }
 
-    compData[0] = frameF[68]; compData[1] = P.bloom; compData[2] = frameIndex % 64; compData[3] = 0.10;
+    compData[0] = frameF[68]; compData[1] = bloomActive ? P.bloom : 0; compData[2] = frameIndex % 64; compData[3] = 0.10;
     // Neutral white balance: a fixed cool grade turned shaded oak green in daylight.
     // Colour fades as rods take over from cones.
-    compData[4] = 1.05 * (1 - 0.42 * (astronomy.mode === 'astronomy' ? astronomy.state.starVisibility : 0)); compData[5] = 1.06; compData[6] = 0; compData[7] = 1 / bloomLevels;
+    compData[4] = 1.05 * (1 - 0.42 * (astronomy.mode === 'astronomy' ? astronomy.state.starVisibility : 0)); compData[5] = 1.06; compData[6] = 0; compData[7] = 1 / Math.max(1, bloomLevels);
     device.queue.writeBuffer(compUBO, 0, compData);
     let swapTex = null;
     try {
@@ -5721,7 +5735,7 @@ async function main() {
     const pc = enc.beginRenderPass(compPass);
     if(!(neuralEncoded&&neuralPass.drawComposite(pc,cameraMediumBand))){
       pc.setPipeline(cameraMediumBand?mediumCompPipe:compPipe);
-      pc.setBindGroup(0, cameraMediumBand?bgCompUnderwater:bgComp);
+      pc.setBindGroup(0, cameraMediumBand?(bloomActive?bgCompUnderwater:bgCompUnderwaterNoBloom):(bloomActive?bgComp:bgCompNoBloom));
       pc.draw(3);
     }
     pc.end();
@@ -5780,28 +5794,48 @@ async function main() {
       }).catch(()=>{audioPending=false;});
     }
     for(const v of vessels){const p=v.probe;if(p.requested){p.pending=true;p.read.mapAsync(GPUMapMode.READ).then(()=>{
-      let heights = null;
+      const heights = (p.heightsScratch ??= new Float32Array(16));
+      let mappedOk = false;
       try {
-        heights = new Float32Array(p.read.getMappedRange(0,64)).slice();
+        heights.set(new Float32Array(p.read.getMappedRange(0,64)));
+        mappedOk = true;
       } finally {
         if (p.read.mapState === 'mapped') p.read.unmap();
         p.pending = false;
       }
-      if (!heights || heights.length < 10 || !heights.every((val) => Number.isFinite(val) && Math.abs(val) < 1e4)) return;
-      const shelter=terrain?.waveShelter?terrain.waveShelter(v.boat.x,v.boat.z,P.swellDir*D2R):1;
+      if (!mappedOk) return;
+      for (let i = 0; i < 16; i++) {
+        const val = heights[i];
+        if (!Number.isFinite(val) || Math.abs(val) >= 1e4) return;
+      }
+      let shelter = 1;
+      if (terrain?.waveShelter) {
+        const swellRad = P.swellDir * D2R;
+        const bx = v.boat.x, bz = v.boat.z;
+        if (
+          p._shelterTerrain !== terrain ||
+          !Number.isFinite(p._shelterVal) ||
+          (bx - p._shelterX) * (bx - p._shelterX) + (bz - p._shelterZ) * (bz - p._shelterZ) >= 16 ||
+          Math.abs(swellRad - p._shelterDir) > 0.02
+        ) {
+          p._shelterVal = terrain.waveShelter(bx, bz, swellRad);
+          p._shelterX = bx;
+          p._shelterZ = bz;
+          p._shelterDir = swellRad;
+          p._shelterTerrain = terrain;
+        }
+        shelter = p._shelterVal;
+      }
       if(shelter<0.999&&Number.isFinite(shelter)){
         for(let i=0;i<12;i++)heights[i]*=shelter;
       }
-      if (heights.length >= 10 && heights.every((val) => Number.isFinite(val) && Math.abs(val) < 1e4)) {
-        if(v.id==='player')waterH=heights[9];
-        acceptVesselProbe(v.boat,p.state,heights,p.time,p.revision,p.length,p.beam);
-      }
+      if(v.id==='player')waterH=heights[9];
+      acceptVesselProbe(v.boat,p.state,heights,p.time,p.revision,p.length,p.beam);
     },()=>{p.pending=false;});}}
     if (doTs) profiler.read();
     if (readBuf) saveShot(readBuf, Math.ceil(W * 4 / 256) * 256);
     syncBrowserUrlState(now);
-    frameStages.mark('GPU commands');frameStages.end();
-    frameWorkMs=performance.now()-cpuFrameStart;
+    frameStages.mark('GPU commands');
     worldDebugUI.update({
       dt:elapsed,
       frameMs:elapsed*1000,
@@ -5812,6 +5846,8 @@ async function main() {
       screenWidth:canvas.clientWidth,
       screenHeight:canvas.clientHeight,
     });
+    frameStages.mark('UI');frameStages.end();
+    frameWorkMs=performance.now()-cpuFrameStart;
   }
 
   async function saveShot(buf, bpr) {

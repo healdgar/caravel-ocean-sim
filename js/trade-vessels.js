@@ -50,13 +50,13 @@ export const VESSEL_MIN_PIXELS = 1.0;
 
 const TV_HULL_FLOOD_WORDS = 4 * (2 + 2 * HULL_HOLE_LIMIT);
 const BARGE_Y_LIFT = 0.0;
-const BARGE_FLOOR_LIFT_METRES = 0.18;
-const BARGE_BENCH_LIFT_METRES = 0.125;
-const BARGE_CRUTCH_LIFT_METRES = 0.31;
-const BARGE_PIVOT_AFT_SHIFT_M = 0.22;
-const BARGE_INBOARD_LEVER_METRES = 0.90;
-const BARGE_INBOARD_RISE_METRES = 0.12;
-const BARGE_SEAT_INBOARD_FROM_PIVOT_M = 0.69;
+const BARGE_FLOOR_LIFT_METRES = 0.26;
+const BARGE_BENCH_LIFT_METRES = 0.19;
+const BARGE_CRUTCH_LIFT_METRES = 0.255;
+const BARGE_PIVOT_AFT_SHIFT_M = 0.21;
+const BARGE_INBOARD_LEVER_METRES = 0.88;
+const BARGE_OAR_SLOPE_M = -0.37;
+const BARGE_SEAT_INBOARD_FROM_PIVOT_M = 0.72;
 
 const ARCHETYPE_SPECS = Object.freeze([
   Object.freeze({ index: 0, label: 'Underway Cog', modelId: 'pinta', length: 18.6, beam: 5.7, furlSails: false, unmasted: false, addCargo: false }),
@@ -273,10 +273,12 @@ function appendRoundedBox9(verts, inds, cx, cy, cz, hx, hy, hz, matId, bulge = 0
 
 function appendLusoriaCargo(verts, inds, groups, modelId = 'lusoria', designScale = [0.833333, 1.319496, 1.083333]) {
   const d = rowingDesign(modelId);
+  const sxBase = d.runtime.beam / d.frame.beam;
   const floorLiftDesign = BARGE_FLOOR_LIFT_METRES / (designScale[1] || 1);
   const dunnageClearDesign = 0.015 / (designScale[1] || 1);
   const crutchLiftDesign = BARGE_CRUTCH_LIFT_METRES / (designScale[1] || 1);
   const raisedDeckAt = (z) => rowingDeck(modelId, z) + floorLiftDesign;
+  const hullInnerHalfW = (z, y, margin = 0.014) => Math.max(0.0, rowingHullWidth(modelId, z, y) - d.shellThicknessMetres / sxBase - margin);
   const nextGroup = (id, nodeId, fn) => {
     const startIdx = inds.length;
     fn();
@@ -284,6 +286,46 @@ function appendLusoriaCargo(verts, inds, groups, modelId = 'lusoria', designScal
       groups.push({ id, nodeId, firstVertex: startIdx, vertexCount: inds.length - startIdx });
     }
   };
+  // Watertight tarred oak bilge ceiling pan beneath floorboards + raised timber fore/aft cuddy decks capping bow & stern bays
+  nextGroup('hull.sole.ceiling', 'hull', () => {
+    const zStops = [-4.76, -3.60, -2.40, -1.20, 0.0, 1.20, 2.40, 3.60, 4.76];
+    for (let s = 0; s + 1 < zStops.length; s++) {
+      const z0 = zStops[s], z1 = zStops[s + 1];
+      const y0 = raisedDeckAt(z0) - 0.022;
+      const y1 = raisedDeckAt(z1) - 0.022;
+      const w0 = hullInnerHalfW(z0, y0, 0.016);
+      const w1 = hullInnerHalfW(z1, y1, 0.016);
+      if (w0 < 0.02 && w1 < 0.02) continue;
+      pushQuad9(verts, inds, [-w0, y0, z0], [w0, y0, z0], [w1, y1, z1], [-w1, y1, z1], 14, [[0, 0], [1, 0], [1, 1], [0, 1]]);
+    }
+  });
+  for (const [endTag, zStops, bulkZ, bulkN] of [
+    ['fore', [-5.88, -5.56, -5.22, -4.92, -4.68], -4.68, 1],
+    ['aft', [4.68, 4.92, 5.22, 5.56, 5.88], 4.68, -1],
+  ]) {
+    nextGroup(`hull.cuddy.${endTag}`, 'hull', () => {
+      for (let s = 0; s + 1 < zStops.length; s++) {
+        const z0 = zStops[s], z1 = zStops[s + 1];
+        const y0 = raisedDeckAt(z0) + 0.018;
+        const y1 = raisedDeckAt(z1) + 0.018;
+        const w0 = hullInnerHalfW(z0, y0, 0.014);
+        const w1 = hullInnerHalfW(z1, y1, 0.014);
+        if (w0 < 0.012 && w1 < 0.012) continue;
+        pushQuad9(verts, inds, [-w0, y0, z0], [w0, y0, z0], [w1, y1, z1], [-w1, y1, z1], 0, [[0, 0], [1, 0], [1, 1], [0, 1]]);
+      }
+      const yTop = raisedDeckAt(bulkZ) + 0.018;
+      const yBot = rowingDeck(modelId, bulkZ) - 0.02;
+      const wTop = hullInnerHalfW(bulkZ, yTop, 0.014);
+      const wBot = hullInnerHalfW(bulkZ, yBot, 0.018);
+      if (wTop > 0.04) {
+        if (bulkN > 0) {
+          pushQuad9(verts, inds, [-wBot, yBot, bulkZ], [wBot, yBot, bulkZ], [wTop, yTop, bulkZ], [-wTop, yTop, bulkZ], 1);
+        } else {
+          pushQuad9(verts, inds, [wBot, yBot, bulkZ], [-wBot, yBot, bulkZ], [-wTop, yTop, bulkZ], [wTop, yTop, bulkZ], 1);
+        }
+      }
+    });
+  }
   // Structural oak coamings, fender rub-strakes, gunwale oarlock chocks (escalameiras), mooring bitts & raised dunnage
   for (const [side, tag] of [[-1, 'port'], [1, 'starboard']]) {
     nextGroup(`hull.coaming.${tag}`, 'hull', () => {
@@ -1258,15 +1300,17 @@ function appendNeutralBargeSweepOars(verts, inds, groups, designScale) {
     const matId = 16 + stIdx / 64;
     const startIdx = inds.length;
 
-    const tipIn = [
-      px - side * (BARGE_INBOARD_LEVER_METRES / sx),
-      py + (BARGE_INBOARD_RISE_METRES / sy),
+    // Exact 3D collinear sweep ray through pivot (px, py, pz) at physical slope m = BARGE_OAR_SLOPE_M (-0.34): 0.000 mm kink.
+    const ptOnRay = (rMetres) => [
+      px + side * (rMetres / sx),
+      py + (rMetres * BARGE_OAR_SLOPE_M) / sy,
       pz,
     ];
-    const collarIn = [px - side * (0.065 / sx), py + (0.013 / sy), pz];
-    const collarOut = [px + side * (0.085 / sx), py - (0.017 / sy), pz];
-    const neckEnd = [px + side * (1.82 / sx), -0.02 / sy, pz];
-    const bladeTip = [px + side * (2.48 / sx), -0.24 / sy, pz];
+    const tipIn = ptOnRay(-BARGE_INBOARD_LEVER_METRES);
+    const collarIn = ptOnRay(-0.065);
+    const collarOut = ptOnRay(0.085);
+    const neckEnd = ptOnRay(1.88);
+    const bladeTip = ptOnRay(2.68);
 
     // Ergonomic tapered wooden loom, leather tholepin collar seated on (px,py,pz), and straight outboard sweep shaft
     appendTaperedCylinder(verts, inds, tipIn, collarIn, 0.025, 0.021, 8, matId, 0);
@@ -1308,6 +1352,81 @@ function appendNeutralBargeSweepOars(verts, inds, groups, designScale) {
         motion: { type: 'rowing-blade', stationId: st.id },
       });
     }
+  }
+}
+
+function appendBargeSteeringSweep(verts, inds, groups) {
+  // Aft starboard quarter oak crutch block + twin hardwood tholepins mounted on top of the gunwale (z = 4.86)
+  const zCrutch = 4.86;
+  const railY = rowingHullDeck('lusoria', zCrutch);
+  const railX = rowingHullWidth('lusoria', zCrutch, railY);
+  const pCrutch = [railX + 0.025, railY + 0.145, zCrutch];
+
+  const crutchStart = inds.length;
+  appendRoundedBox9(verts, inds, railX - 0.015, railY + 0.042, zCrutch, 0.052, 0.052, 0.095, 1, 0.02, false);
+  for (const zSign of [-1, 1]) {
+    appendTaperedCylinder(
+      verts, inds,
+      [railX + 0.015, railY + 0.065, zCrutch + zSign * 0.054],
+      [railX + 0.015, railY + 0.185, zCrutch + zSign * 0.054],
+      0.015, 0.013, 6, 17, 0,
+    );
+  }
+  if (inds.length > crutchStart) {
+    groups.push({
+      id: 'hull.steering-crutch',
+      nodeId: 'hull',
+      firstVertex: crutchStart,
+      vertexCount: inds.length - crutchStart,
+    });
+  }
+
+  // Straight collinear stern steering sweep (matId = 28) resting OVER the starboard gunwale crutch (strictly > railY)
+  const sweepStart = inds.length;
+  const dX = 0.22, dY = -0.82, dZ = 0.72;
+  const sweepPt = (t) => [pCrutch[0] + dX * t, pCrutch[1] + dY * t, pCrutch[2] + dZ * t];
+  const loomHead = sweepPt(-0.44);
+  const collarIn = sweepPt(-0.08);
+  const collarOut = sweepPt(0.10);
+  const neckEnd = sweepPt(0.68);
+  const bladeTip = sweepPt(0.98);
+
+  appendTaperedCylinder(verts, inds, loomHead, collarIn, 0.026, 0.030, 8, 28, 0);
+  appendTaperedCylinder(verts, inds, collarIn, collarOut, 0.038, 0.037, 8, 28, 0);
+  appendTaperedCylinder(verts, inds, collarOut, neckEnd, 0.032, 0.025, 8, 28, 0);
+  // Mortised athwartships hardwood tiller bar extending inboard from loomHead to pilot station
+  appendTaperedCylinder(verts, inds, loomHead, [0.20, loomHead[1] - 0.015, loomHead[2] - 0.06], 0.020, 0.017, 7, 28, 0);
+
+  // Closed 6-face 3D tapered wooden steering blade aligned fore-and-aft in the river wake
+  const halfThk = 0.012;
+  const halfWRoot = 0.056, halfWTip = 0.095;
+  const mkBlade = (base, hw, sChord, sSide) => [
+    base[0] + halfThk * sSide,
+    base[1] + hw * 0.62 * sChord,
+    base[2] + hw * 0.78 * sChord,
+  ];
+  const f0 = mkBlade(neckEnd, halfWRoot, -1, 1);
+  const f1 = mkBlade(bladeTip, halfWTip, -1, 1);
+  const f2 = mkBlade(bladeTip, halfWTip, 1, 1);
+  const f3 = mkBlade(neckEnd, halfWRoot, 1, 1);
+  const b0 = mkBlade(neckEnd, halfWRoot, -1, -1);
+  const b1 = mkBlade(bladeTip, halfWTip, -1, -1);
+  const b2 = mkBlade(bladeTip, halfWTip, 1, -1);
+  const b3 = mkBlade(neckEnd, halfWRoot, 1, -1);
+  pushQuad9(verts, inds, f0, f1, f2, f3, 28);
+  pushQuad9(verts, inds, b3, b2, b1, b0, 28);
+  pushQuad9(verts, inds, f0, b0, b1, f1, 28);
+  pushQuad9(verts, inds, f1, b1, b2, f2, 28);
+  pushQuad9(verts, inds, f2, b2, b3, f3, 28);
+  pushQuad9(verts, inds, f3, b3, b0, f0, 28);
+
+  if (inds.length > sweepStart) {
+    groups.push({
+      id: 'helm.steering-oar',
+      nodeId: 'helm.rudder',
+      firstVertex: sweepStart,
+      vertexCount: inds.length - sweepStart,
+    });
   }
 }
 
@@ -1644,24 +1763,45 @@ function buildArchetypeData(index) {
   // River barges drop masts, standing/running rigging, unused benches, and all old galley oar geometry (rebuilt in neutral sweep=0 rest pose).
   let dropRegex = null;
   if (spec.index === 4) {
-    dropRegex = /^(?:(?:mast|yard|sail|rig|lookout|flag)(?:\.|$)|rowing\.(?:station|propulsor)\.rower\.)/i;
+    dropRegex = /^(?:(?:mast|yard|sail|rig|lookout|flag|anchor)(?:\.|$)|helm\.steering-oar|rowing\.(?:station|propulsor)\.rower\.)/i;
     const d = rowingDesign('lusoria');
     const sxBase = d.runtime.beam / d.frame.beam;
     const floorLiftDesign = BARGE_FLOOR_LIFT_METRES / (designScale0[1] || 1);
     const benchLiftDesign = BARGE_BENCH_LIFT_METRES / (designScale0[1] || 1);
     const activeSeatZs = [...ACTIVE_BARGE_OAR_PAIRS].map((p) => d.stations[p * 2].seat[2]);
 
-    // 1. Raise interior floorboards (+0.18 m hull metres) & flare X to match inner hull planking so hold stays >= +0.20 m dry
+    // 1. Raise interior floorboards (+0.26 m hull metres) & clamp strictly inside hull.outer so tips never poke through stems
     const floorGroup = groupsArr.find((g) => g.id === 'deck.floorboards');
     if (floorGroup) {
+      const wNewByVert = new Map();
       for (const vi of collectGroupUniqueVerts(indsArr, floorGroup)) {
         const o = vi * 9;
         const yOld = vertsArr[o + 1], z = vertsArr[o + 2];
         const yNew = yOld + floorLiftDesign;
-        const wOld = Math.max(0.08, rowingHullWidth('lusoria', z, yOld) - d.shellThicknessMetres / sxBase);
-        const wNew = Math.max(0.08, rowingHullWidth('lusoria', z, yNew) - d.shellThicknessMetres / sxBase);
+        const wOld = Math.max(0.06, rowingHullWidth('lusoria', z, yOld) - d.shellThicknessMetres / sxBase);
+        const wNew = Math.max(0.0, rowingHullWidth('lusoria', z, yNew) - d.shellThicknessMetres / sxBase - 0.012);
         vertsArr[o] *= (wNew / wOld);
         vertsArr[o + 1] = yNew;
+        wNewByVert.set(vi, wNew);
+      }
+      const fEnd = Math.min(indsArr.length, floorGroup.firstVertex + floorGroup.vertexCount);
+      for (let t = floorGroup.firstVertex; t + 2 < fEnd; t += 3) {
+        const i0 = indsArr[t], i1 = indsArr[t + 1], i2 = indsArr[t + 2];
+        if ((wNewByVert.get(i0) ?? 0) < 0.015 || (wNewByVert.get(i1) ?? 0) < 0.015 || (wNewByVert.get(i2) ?? 0) < 0.015) {
+          indsArr[t] = indsArr[t + 1] = indsArr[t + 2] = 0;
+        }
+      }
+    }
+
+    // 1b. Drop coplanar stem centerline triangles in `hull.inner` where port & starboard inner() clamped to x === 0
+    const innerGroup = groupsArr.find((g) => g.id === 'hull.inner');
+    if (innerGroup) {
+      const iEnd = Math.min(indsArr.length, innerGroup.firstVertex + innerGroup.vertexCount);
+      for (let t = innerGroup.firstVertex; t + 2 < iEnd; t += 3) {
+        const i0 = indsArr[t], i1 = indsArr[t + 1], i2 = indsArr[t + 2];
+        if (Math.abs(vertsArr[i0 * 9]) < 0.004 && Math.abs(vertsArr[i1 * 9]) < 0.004 && Math.abs(vertsArr[i2 * 9]) < 0.004) {
+          indsArr[t] = indsArr[t + 1] = indsArr[t + 2] = 0;
+        }
       }
     }
 
@@ -1749,6 +1889,95 @@ function buildArchetypeData(index) {
     }
   }
 
+  // Eliminate 0.000 mm coplanar stern z-fighting on Cog (pinta: Arch 0, 1) & Carrack (santa-maria: Arch 2, 3)
+  if (spec.modelId === 'pinta' || spec.modelId === 'santa-maria') {
+    for (const bulwarkId of ['bulwark.port', 'bulwark.starboard']) {
+      const bg = groupsArr.find((g) => g.id === bulwarkId);
+      if (!bg) continue;
+      const bEnd = Math.min(indsArr.length, bg.firstVertex + bg.vertexCount);
+      for (let t = bg.firstVertex; t + 2 < bEnd; t += 3) {
+        const i0 = indsArr[t], i1 = indsArr[t + 1], i2 = indsArr[t + 2];
+        const cz = (vertsArr[i0 * 9 + 2] + vertsArr[i1 * 9 + 2] + vertsArr[i2 * 9 + 2]) / 3;
+        const nz = (vertsArr[i0 * 9 + 5] + vertsArr[i1 * 9 + 5] + vertsArr[i2 * 9 + 5]) / 3;
+        if (cz > 5.992 && Math.abs(nz) > 0.90) {
+          indsArr[t] = indsArr[t + 1] = indsArr[t + 2] = 0;
+        }
+      }
+    }
+
+    const winGrp = groupsArr.find((g) => g.id === 'stern.windows');
+    if (winGrp) {
+      const wEnd = Math.min(indsArr.length, winGrp.firstVertex + winGrp.vertexCount);
+      const parent = new Map();
+      const findRoot = (v) => {
+        let r = v;
+        while (parent.get(r) !== r) r = parent.get(r);
+        let cur = v;
+        while (cur !== r) {
+          const nxt = parent.get(cur);
+          parent.set(cur, r);
+          cur = nxt;
+        }
+        return r;
+      };
+      const unionVerts = (a, b) => {
+        const ra = findRoot(a), rb = findRoot(b);
+        if (ra !== rb) parent.set(rb, ra);
+      };
+      for (let t = winGrp.firstVertex; t + 2 < wEnd; t += 3) {
+        const i0 = indsArr[t], i1 = indsArr[t + 1], i2 = indsArr[t + 2];
+        for (const vi of [i0, i1, i2]) if (!parent.has(vi)) parent.set(vi, vi);
+        unionVerts(i0, i1);
+        unionVerts(i0, i2);
+      }
+      const comps = new Map();
+      for (let t = winGrp.firstVertex; t + 2 < wEnd; t += 3) {
+        const i0 = indsArr[t], i1 = indsArr[t + 1], i2 = indsArr[t + 2];
+        const root = findRoot(i0);
+        let comp = comps.get(root);
+        if (!comp) {
+          comp = {
+            tris: [],
+            verts: new Set(),
+            minX: Infinity, maxX: -Infinity,
+            minY: Infinity, maxY: -Infinity,
+            minZ: Infinity, maxZ: -Infinity,
+            mat: Math.floor(vertsArr[i0 * 9 + 6]),
+          };
+          comps.set(root, comp);
+        }
+        comp.tris.push(t);
+        for (const vi of [i0, i1, i2]) {
+          comp.verts.add(vi);
+          const vx = vertsArr[vi * 9], vy = vertsArr[vi * 9 + 1], vz = vertsArr[vi * 9 + 2];
+          if (vx < comp.minX) comp.minX = vx;
+          if (vx > comp.maxX) comp.maxX = vx;
+          if (vy < comp.minY) comp.minY = vy;
+          if (vy > comp.maxY) comp.maxY = vy;
+          if (vz < comp.minZ) comp.minZ = vz;
+          if (vz > comp.maxZ) comp.maxZ = vz;
+        }
+      }
+      for (const comp of comps.values()) {
+        // Drop Santa María's central 5th window at x = 0 so hull.sternpost & helm.rudder stock never impale it
+        if (spec.modelId === 'santa-maria' && Math.abs(comp.minX) < 0.14 && Math.abs(comp.maxX) < 0.14 && comp.maxY < 1.95) {
+          for (const t of comp.tris) indsArr[t] = indsArr[t + 1] = indsArr[t + 2] = 0;
+          continue;
+        }
+        const spanX = comp.maxX - comp.minX;
+        const spanY = comp.maxY - comp.minY;
+        if (comp.mat === 11 && comp.maxZ < 6.05) {
+          // Shift stern window crown-glass aft (+0.014 design Z: 6.008 -> 6.022) clear of 6.008 oak casing box
+          for (const vi of comp.verts) vertsArr[vi * 9 + 2] += 0.014;
+        } else if ((comp.mat === 1 || comp.mat === 17) && comp.minZ > 6.005 && comp.maxZ < 6.035 && (spanX < 0.04 || spanY < 0.04)) {
+          // Shift muntin bars aft (+0.020 vertical / +0.024 horizontal design Z) clear of glass & crossing muntins
+          const dz = spanX < spanY ? 0.020 : 0.024;
+          for (const vi of comp.verts) vertsArr[vi * 9 + 2] += dz;
+        }
+      }
+    }
+  }
+
   if (spec.addCargo && spec.modelId === 'lusoria') {
     appendLusoriaCargo(vertsArr, indsArr, groupsArr, spec.modelId, designScale0);
   }
@@ -1793,6 +2022,7 @@ function buildArchetypeData(index) {
 
     if (spec.index === 4) {
       appendNeutralBargeSweepOars(fixVerts, fixInds, fixGroups, designScale0);
+      appendBargeSteeringSweep(fixVerts, fixInds, fixGroups);
     } else if (spec.index === 6) {
       appendHarborBarqueRigging(fixVerts, fixInds, fixGroups);
     } else if (spec.furlSails && !spec.unmasted) {
@@ -3057,7 +3287,7 @@ export function buildTradeVesselRoutes(
       if (Number.isInteger(poly.compIdx)) {
         const slotOnComp = coveredRiverComps.get(poly.compIdx) ?? 0;
         coveredRiverComps.set(poly.compIdx, slotOnComp + 1);
-        if (!Number.isFinite(c.phaseOffset)) phaseOffset = (phaseOffset + slotOnComp * 0.381966) % 1.0;
+        phaseOffset = (phaseOffset + slotOnComp * 0.381966) % 1.0;
       }
     }
     routes.push({
@@ -3106,7 +3336,7 @@ export function buildTradeVesselRoutes(
     if (Number.isInteger(poly.compIdx)) {
       const slotOnComp = coveredRiverComps.get(poly.compIdx) ?? 0;
       coveredRiverComps.set(poly.compIdx, slotOnComp + 1);
-      if (!Number.isFinite(rb.phaseOffset)) phaseOffset = (phaseOffset + slotOnComp * 0.381966) % 1.0;
+      phaseOffset = (phaseOffset + slotOnComp * 0.381966) % 1.0;
     }
     const rbCargo = rb.cargo && typeof rb.cargo === 'object'
       ? { ...rb.cargo }
@@ -3612,9 +3842,10 @@ export function stepTradeVesselAutopilot(ai, route, archIndex, {
 
       // Longitudinal river-channel spacing & speed modulation so barges on the same leg never drive through each other
       let passingUrgency = 0;
+      let speedMul = 1.0;
       if (avoidTargets && avoidTargets.length > 0) {
         const minFollowM = Math.max(19.0, length * 1.48);
-        let speedMul = 1.0;
+        const stopDistM = Math.max(18.0, minFollowM * 0.92);
         for (let k = 0; k < avoidTargets.length; k++) {
           const other = avoidTargets[k];
           if (!other || other.id === route.id) continue;
@@ -3629,8 +3860,8 @@ export function stepTradeVesselAutopilot(ai, route, archIndex, {
           const obx = Math.sin(other.yaw ?? 0), obz = -Math.cos(other.yaw ?? 0);
           const sameHeading = tx * obx + tz * obz;
           if (sameHeading > 0.25) {
-            if (fwd > -1.5 && sep < minFollowM + 22.0) {
-              speedMul = Math.min(speedMul, Math.max(0.16, (sep - minFollowM * 0.72) / 24.0));
+            if (fwd > -1.5 && sep < stopDistM + 22.0) {
+              speedMul = Math.min(speedMul, sep <= stopDistM ? 0.0 : Math.max(0.0, (sep - stopDistM) / 22.0));
             } else if (fwd < -1.5 && sep < minFollowM * 0.85) {
               speedMul = Math.max(speedMul, 1.18);
             }
@@ -3641,9 +3872,10 @@ export function stepTradeVesselAutopilot(ai, route, archIndex, {
         oarWaterSpeed *= speedMul;
       }
 
-      // Steersman crabs only into cross-track current so downstream hulls ride river flow cleanly.
-      const crossVx = cvx - flowTrackAlong * tx;
-      const crossVz = cvz - flowTrackAlong * tz;
+      // Steersman crabs only into cross-track current so downstream hulls ride river flow cleanly (and hold station when braking).
+      const driftScale = speedMul < 0.35 ? (speedMul / 0.35) : 1.0;
+      const crossVx = (cvx - flowTrackAlong * tx) * driftScale;
+      const crossVz = (cvz - flowTrackAlong * tz) * driftScale;
       const crabVx = tx * oarWaterSpeed - crossVx * 0.78;
       const crabVz = tz * oarWaterSpeed - crossVz * 0.78;
       const desiredYaw = (Math.abs(crabVx) + Math.abs(crabVz) > 1e-3) ? Math.atan2(crabVx, -crabVz) : Math.atan2(tx, -tz);
@@ -3652,16 +3884,18 @@ export function stepTradeVesselAutopilot(ai, route, archIndex, {
       ai.yaw = wrapAnglePi(ai.yaw + Math.max(-maxTurn, Math.min(maxTurn, dYaw)));
 
       const bowX = Math.sin(ai.yaw), bowZ = -Math.cos(ai.yaw);
-      const gvx = bowX * oarWaterSpeed + cvx * 0.78;
-      const gvz = bowZ * oarWaterSpeed + cvz * 0.78;
-      const groundSpd = Math.max(0.22, Math.hypot(gvx, gvz));
+      const gvx = bowX * oarWaterSpeed + cvx * 0.78 * driftScale;
+      const gvz = bowZ * oarWaterSpeed + cvz * 0.78 * driftScale;
+      const groundSpd = speedMul <= 0.01 ? 0.0 : Math.max(0.05, Math.hypot(gvx, gvz));
       ai.speed += (groundSpd - ai.speed) * (1 - Math.exp(-h * 2.4));
       ai.x += gvx * h;
       ai.z += gvz * h;
       ai.vx = gvx;
       ai.vz = gvz;
-      ai.motion = (upstream ? Math.min(1.5, 1.15 + Math.abs(flowTrackAlong) * 0.35) : Math.max(0.5, 0.78 - flowTrackAlong * 0.18))
-        * Math.max(0.35, Math.min(1.15, oarWaterSpeed / 1.15));
+      ai.motion = speedMul <= 0.02
+        ? 0.0
+        : (upstream ? Math.min(1.5, 1.15 + Math.abs(flowTrackAlong) * 0.35) : Math.max(0.5, 0.78 - flowTrackAlong * 0.18))
+          * Math.max(0.25, Math.min(1.15, oarWaterSpeed / 1.15));
       ai.sailSet = 0;
       ai.tacking = false;
       ai.heldByWeather = false;
@@ -4033,8 +4267,8 @@ function buildBargeOarPivotsWGSL() {
   return `const BARGE_OAR_PIVOTS = array<vec4f, 24>(\n  ${rows.join(',\n  ')}\n);`;
 }
 
-const BARGE_ROW_SWEEP_RAD = 0.22;
-const BARGE_ROW_DIP_RAD = 0.11;
+const BARGE_ROW_SWEEP_RAD = 0.30;
+const BARGE_ROW_DIP_RAD = 0.12;
 
 function buildSailBrailWGSL() {
   const rowsA = [];
@@ -4267,15 +4501,16 @@ fn animateTradeOar(pos: vec3f, norm: vec3f, material: f32, uv: vec2f, instAnim: 
     let dip = -cos(cyc) * ${BARGE_ROW_DIP_RAD.toFixed(4)};
     var d = p - piv.xyz;
     var nOar = n;
-    // Feather outboard sweep blade smoothly on the aerial recovery stroke without shifting the inboard handle shaft
-    let featherGate = clamp((abs(d.x) - 1.45) * 1.15, 0.0, 1.0) * select(0.0, 1.0, d.x * side > 0.0);
-    let feather = max(0.0, -cos(cyc)) * 0.65 * featherGate;
+    // Rigid Rodrigues rotation around the exact collinear oar shaft axis (zero shaft bending across recovery feathering)
+    let scBarge = ARCHETYPE_SCALES[4u];
+    let uShaft = normalize(vec3f(side / scBarge.x, (${BARGE_OAR_SLOPE_M.toFixed(6)}) / scBarge.y, 0.0));
+    let feather = max(0.0, -cos(cyc)) * 0.65;
     if (feather > 0.001) {
       let cf = cos(feather); let sf = sin(feather);
-      let axisY = -0.105 * (d.x * side);
-      let relY = d.y - axisY;
-      d = vec3f(d.x, axisY + relY * cf - d.z * sf, relY * sf + d.z * cf);
-      nOar = vec3f(nOar.x, nOar.y * cf - nOar.z * sf, nOar.y * sf + nOar.z * cf);
+      let dPar = uShaft * dot(uShaft, d);
+      d = dPar + (d - dPar) * cf + cross(uShaft, d) * (sf * side);
+      let nPar = uShaft * dot(uShaft, nOar);
+      nOar = nPar + (nOar - nPar) * cf + cross(uShaft, nOar) * (sf * side);
     }
     let cy = cos(sweep * side); let sy = sin(sweep * side);
     let dYaw = vec3f(d.x * cy - d.z * sy, d.y, d.x * sy + d.z * cy);
@@ -4395,8 +4630,7 @@ fn canvasTearMask(uv: vec2f, p: vec3f, mat: u32, dmg: f32) -> f32 {
 }
 ` : ''}
 
-${damaged || useSubmergedEntry ? '' : 'struct TVFragmentOut { @location(0) color: vec4f, @builtin(sample_mask) mask: u32 };'}
-@fragment fn ${useSubmergedEntry ? 'tvSubmergedFS' : 'tvFS'}(in: TVVertexOut, @builtin(front_facing) front: bool) -> ${damaged || useSubmergedEntry ? '@location(0) vec4f' : 'TVFragmentOut'} {
+fn tvShadeFragment(in: TVVertexOut, front: bool) -> vec4f {
   let stateVal = in.stateMatArch.x;
   let rawMat = in.stateMatArch.y;
   let archF = in.stateMatArch.z;
@@ -4709,18 +4943,28 @@ ${damaged || useSubmergedEntry ? '' : 'struct TVFragmentOut { @location(0) color
   let envSpec = envCol * vesselEnvironment(n, viewDir, rough, f0) * select(0.28, 0.85, metal > 0.1 || rough < 0.25);
 
   let lit = diffTint * amb * 0.82 + direct + spec + envSpec + emitGlow;
-  ${damaged || useSubmergedEntry ? `
   return vec4f(surfaceAir(lit, in.world), 1.0);
 }
-  ` : `
-  let takeMask = vesselCrownSamples(stateVal, in.pos.xy, TV_SAMPLES);
+
+${damaged || useSubmergedEntry ? `
+@fragment fn ${useSubmergedEntry ? 'tvSubmergedFS' : 'tvFS'}(in: TVVertexOut, @builtin(front_facing) front: bool) -> @location(0) vec4f {
+  return tvShadeFragment(in, front);
+}
+` : `
+struct TVFragmentOut { @location(0) color: vec4f, @builtin(sample_mask) mask: u32 };
+@fragment fn tvSolidFS(in: TVVertexOut, @builtin(front_facing) front: bool) -> @location(0) vec4f {
+  return tvShadeFragment(in, front);
+}
+@fragment fn tvFS(in: TVVertexOut, @builtin(front_facing) front: bool) -> TVFragmentOut {
+  let color = tvShadeFragment(in, front);
+  let takeMask = vesselCrownSamples(in.stateMatArch.x, in.pos.xy, TV_SAMPLES);
   let keepMask = (~takeMask) & TV_SAMPLE_MASK_ALL;
   var outF: TVFragmentOut;
-  outF.color = vec4f(surfaceAir(lit, in.world), 1.0);
+  outF.color = color;
   outF.mask = keepMask;
   return outF;
 }
-  `}
+`}
 `;
   return withNeuralPbrTradeVessels(rawSource);
 }
@@ -4751,13 +4995,15 @@ struct TradeSelectParams {
 };
 `;
 
+const TRADE_CONT_HALF_TRIS = MAX_TRADE_VESSELS * 100;
+
 function buildTradeVesselClearWGSL() {
   const counts = inspectTradeVesselArchetypes().map((a) => `${a.indexCount}u`);
   return /* wgsl */ `
 const ARCHETYPE_INDEX_COUNTS = array<u32, ${TRADE_VESSEL_ARCHETYPES}>(${counts.join(', ')});
 @group(0) @binding(8) var<storage, read_write> indirect: array<u32>;
 @compute @workgroup_size(1) fn main() {
-  for (var s = 0u; s < 14u; s++) {
+  for (var s = 0u; s < 28u; s++) {
     let base = s * 5u;
     indirect[base] = ARCHETYPE_INDEX_COUNTS[s % ${TRADE_VESSEL_ARCHETYPES}u];
     indirect[base + 1u] = 0u;
@@ -4765,8 +5011,9 @@ const ARCHETYPE_INDEX_COUNTS = array<u32, ${TRADE_VESSEL_ARCHETYPES}>(${counts.j
     indirect[base + 3u] = 0u;
     indirect[base + 4u] = 0u;
   }
-  indirect[70u] = 0u; indirect[71u] = 1u; indirect[72u] = 0u; indirect[73u] = 0u;
-  indirect[74u] = 0u; indirect[75u] = 1u; indirect[76u] = 0u; indirect[77u] = 0u;
+  indirect[140u] = 0u; indirect[141u] = 1u; indirect[142u] = 0u; indirect[143u] = 0u;
+  indirect[144u] = 0u; indirect[145u] = 1u; indirect[146u] = ${TRADE_CONT_HALF_TRIS * 3}u; indirect[147u] = 0u;
+  indirect[148u] = 0u; indirect[149u] = 1u; indirect[150u] = 0u; indirect[151u] = 0u;
 }
 `;
 }
@@ -4841,21 +5088,34 @@ fn rotateVesselSel(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
   // Keep full articulated part-built ships crisp across harbor/combat distances until ~38 px total screen span,
   // then MSAA sample_mask crossfade cleanly into the ship-profile continuum over 38 -> 27 px.
   if (spanPx > nearLoPx) {
+    let rawShare = select(clamp(smoothstep(nearHiPx, nearLoPx, spanPx), 0.0, 0.999), 0.0, spanPx >= nearHiPx);
+    let sharePacked = u32(round(rawShare * 65535.0));
+    let share = f32(sharePacked) / 65535.0;
+    var outInst = inst;
+    outInst.animSink.z = share;
     let nearSlot = atomicAdd(&indirect[aIdx * 5u + 1u], 1u);
     if (nearSlot < ${MAX_TRADE_VESSELS}u) {
-      var outInst = inst;
-      let rawShare = select(clamp(smoothstep(nearHiPx, nearLoPx, spanPx), 0.0, 0.999), 0.0, spanPx >= nearHiPx);
-      let sharePacked = u32(round(rawShare * 65535.0));
-      let share = f32(sharePacked) / 65535.0;
-      outInst.animSink.z = share;
       nearOut[aIdx * ${MAX_TRADE_VESSELS}u + nearSlot] = outInst;
+    }
+    if (sharePacked == 0u) {
+      // 100% opaque intact hull -> TBDR hardware Early-Z / HSR solid slice 14..20
+      let solidSlot = atomicAdd(&indirect[(14u + aIdx) * 5u + 1u], 1u);
+      if (solidSlot < ${MAX_TRADE_VESSELS}u) {
+        nearOut[(14u + aIdx) * ${MAX_TRADE_VESSELS}u + solidSlot] = outInst;
+      }
+    } else {
+      // MSAA crossfade band (38 -> 27 px) -> sample_mask slice 21..27 + continuum crossfade half
+      let fadeSlot = atomicAdd(&indirect[(21u + aIdx) * 5u + 1u], 1u);
+      if (fadeSlot < ${MAX_TRADE_VESSELS}u) {
+        nearOut[(21u + aIdx) * ${MAX_TRADE_VESSELS}u + fadeSlot] = outInst;
+      }
       if (sharePacked > 130u) {
         let triCount = u32(round(stepMeta[arch.counts.x].z));
-        let startVert = atomicAdd(&indirect[70u], triCount * 3u);
+        let startVert = atomicAdd(&indirect[144u], triCount * 3u);
         let startTri = startVert / 3u;
         if (startTri + triCount <= selP.ctrl.y) {
           for (var t = 0u; t < triCount; t++) {
-            contList[startTri + t] = vec4u(i, t, 0u, sharePacked);
+            contList[${TRADE_CONT_HALF_TRIS}u + startTri + t] = vec4u(i, t, 0u, sharePacked);
           }
         }
       }
@@ -4874,7 +5134,7 @@ fn rotateVesselSel(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
     let broadFactor = abs(bow.x * viewXZ.y - bow.y * viewXZ.x);
     let worldHalfW = mix(arch.splatExtentCol.x, arch.splatExtentCol.w, broadFactor) * scaleMul * inflate;
     let worldHalfH = arch.splatExtentCol.y * scaleMul * inflate;
-    let sVert = atomicAdd(&indirect[74u], 3u);
+    let sVert = atomicAdd(&indirect[148u], 3u);
     let sIdx = sVert / 3u;
     if (sIdx < selP.ctrl.w) {
       splatList[sIdx * 2u] = vec4f(worldCenter, worldHalfW);
@@ -4903,7 +5163,7 @@ fn rotateVesselSel(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
   let morphT = clamp((allowedErr - e0) / max(e1 - e0, 1e-4), 0.0, 1.0);
   let stepPacked = lo | (u32(round(morphT * 65535.0)) << 16u);
   let triCount = u32(round(stepMeta[stepBase + lo].z));
-  let startVert = atomicAdd(&indirect[70u], triCount * 3u);
+  let startVert = atomicAdd(&indirect[140u], triCount * 3u);
   let startTri = startVert / 3u;
   if (startTri + triCount <= selP.ctrl.y) {
     for (var t = 0u; t < triCount; t++) {
@@ -4994,8 +5254,7 @@ struct TVContOut {
   return o;
 }
 
-struct TVContFragOut { @location(0) color: vec4f, @builtin(sample_mask) mask: u32 };
-@fragment fn tvContFS(in: TVContOut, @builtin(front_facing) front: bool) -> TVContFragOut {
+fn tvContShade(in: TVContOut, front: bool) -> vec4f {
   let n = normalize(in.normal) * select(-1.0, 1.0, front);
   let sunDir = normalize(F.sunDir.xyz);
   let viewDir = normalize(F.camPos.xyz - in.world);
@@ -5010,8 +5269,17 @@ struct TVContFragOut { @location(0) color: vec4f, @builtin(sample_mask) mask: u3
   let refl = reflect(-viewDir, n);
   let envCol = textureSampleLevel(envCube, sampC, refl, 5.0).rgb * 0.04;
   let lit = albedo * amb * 0.82 + direct + spec + envCol;
+  return vec4f(surfaceAir(lit, in.world), 1.0);
+}
+
+struct TVContFragOut { @location(0) color: vec4f, @builtin(sample_mask) mask: u32 };
+@fragment fn tvContSolidFS(in: TVContOut, @builtin(front_facing) front: bool) -> @location(0) vec4f {
+  return tvContShade(in, front);
+}
+@fragment fn tvContFS(in: TVContOut, @builtin(front_facing) front: bool) -> TVContFragOut {
+  let color = tvContShade(in, front);
   let mask = select(vesselCrownSamples(in.fadeShare, in.pos.xy, TV_CONT_SAMPLES), TV_CONT_MASK_ALL, in.fadeShare >= 0.999);
-  return TVContFragOut(vec4f(surfaceAir(lit, in.world), 1.0), mask);
+  return TVContFragOut(color, mask);
 }
 `;
 }
@@ -5083,8 +5351,8 @@ struct TVSplatFragOut { @location(0) color: vec4f, @builtin(sample_mask) mask: u
 `;
 }
 
-export const TRADE_VESSEL_CONTINUUM_WGSL = buildTradeVesselContinuumWGSL(4);
-export const TRADE_VESSEL_SPLAT_WGSL = buildTradeVesselSplatWGSL(4);
+export const TRADE_VESSEL_CONTINUUM_WGSL = /* @__PURE__ */ buildTradeVesselContinuumWGSL(4);
+export const TRADE_VESSEL_SPLAT_WGSL = /* @__PURE__ */ buildTradeVesselSplatWGSL(4);
 
 // ============================================================================
 // GPU Multi-Point Ocean & River Wave Buoyancy Compute Pass (Zero CPU Readbacks)
@@ -5275,8 +5543,8 @@ fn tvStepDampedSpring(x: f32, v: f32, goal: f32, omega: f32, zeta: f32, dt: f32)
 // 100% GPU 65-Joint Rigged Deck-Crew Assets, 3D Merchant Codex & Shaders
 // ============================================================================
 const DECK_CREW_MODELS = 2; // 0: male (sailor), 1: female
-const DECK_CREW_BUCKETS = DECK_CREW_MODELS * DECK_CREW_TIERS + DECK_CREW_MODELS; // 0..7 render, 8..9 shadow
-const DECK_CREW_DRAW_WORDS = 56; // 10 * 5 DrawIndexedIndirect + 4 DrawIndirect splat + 2 pad
+const DECK_CREW_BUCKETS = DECK_CREW_MODELS * DECK_CREW_TIERS + DECK_CREW_MODELS * 2; // 0..7 solid render, 8..9 shadow, 10..11 crossfade
+const DECK_CREW_DRAW_WORDS = 68; // 12 * 5 DrawIndexedIndirect + 4 DrawIndirect splat + 4 pad
 const DECK_CREW_BODY_WORDS = 8; // 32 bytes per visible soul
 const DECK_CREW_STATION_WORDS = 8; // 32 bytes per (vesselSlot, stationIdx)
 const DECK_CREW_LOOK_WORDS = 20; // 80 bytes TownLook
@@ -5616,8 +5884,9 @@ export function bakeDeckCrewClips(a) {
   };
 
   for (const [clipSlot, side] of [[8, -1], [10, 1]]) {
-    const refSt = bargeArch.deckStations.find((s) => s.role === 'oarsman' && s.oarSide === side && (s.oarStationIdx >> 1) === 4)
-      || bargeArch.deckStations.find((s) => s.role === 'oarsman' && s.oarSide === side)
+    const sideStations = bargeArch.deckStations.filter((s) => s.role === 'oarsman' && s.oarSide === side);
+    const refSt = sideStations.find((s) => (s.oarStationIdx >> 1) === 4)
+      || sideStations[0]
       || bargeArch.deckStations.find((s) => s.role === 'oarsman');
     const stIdx = refSt?.oarStationIdx ?? (side < 0 ? 8 : 9);
     const px = pivots[stIdx * 4 + 0];
@@ -5625,9 +5894,26 @@ export function bakeDeckCrewClips(a) {
     const pz = pivots[stIdx * 4 + 2];
     const tip = measureInboardTipDesign(stIdx, side, px, py, pz);
     const dxTip = tip[0] - px, dyTip = tip[1] - py, dzTip = tip[2] - pz;
-    const stMetres = refSt?.localMetres ?? [(px - side * (BARGE_SEAT_INBOARD_FROM_PIVOT_M / ds[0])) * ds[0], 0.245, pz * ds[2] - 0.098];
+    // Average pivot-from-seat vector across all 4 active thwarts on this side so every oarsman grips within <1.5 cm of his shaft
+    let relPivX = side * BARGE_SEAT_INBOARD_FROM_PIVOT_M;
+    let relPivY = 0.38;
+    let relPivZ = 0.39;
+    let seatY = Number.isFinite(refSt?.seatHeightMetres) ? refSt.seatHeightMetres : 0.238;
+    if (sideStations.length > 0) {
+      let sumX = 0, sumY = 0, sumZ = 0, sumSeat = 0;
+      for (const s of sideStations) {
+        const si = s.oarStationIdx;
+        sumX += pivots[si * 4 + 0] * ds[0] - s.localMetres[0];
+        sumY += pivots[si * 4 + 1] * ds[1] - s.localMetres[1];
+        sumZ += pivots[si * 4 + 2] * ds[2] - s.localMetres[2];
+        sumSeat += Number.isFinite(s.seatHeightMetres) ? s.seatHeightMetres : 0.238;
+      }
+      relPivX = sumX / sideStations.length;
+      relPivY = sumY / sideStations.length;
+      relPivZ = sumZ / sideStations.length;
+      seatY = sumSeat / sideStations.length;
+    }
     const stYaw = refSt?.yaw ?? 0;
-    const seatY = Number.isFinite(refSt?.seatHeightMetres) ? refSt.seatHeightMetres : 0.253;
     const cSt = Math.cos(stYaw), sSt = Math.sin(stYaw);
 
     const gripPointLocal = (frac, ang) => {
@@ -5639,12 +5925,12 @@ export function bakeDeckCrewClips(a) {
       const dYawY = dy;
       const dYawZ = dx * sy + dz * cy;
       const cr = Math.cos(dip * side), sr = Math.sin(dip * side);
-      const rx = px + (dYawX * cr - dYawY * sr);
-      const ry = py + (dYawX * sr + dYawY * cr);
-      const rz = pz + dYawZ;
-      const wx = rx * ds[0] - stMetres[0];
-      const wy = ry * ds[1] - stMetres[1] + 0.008;
-      const wz = rz * ds[2] - stMetres[2];
+      const rx = dYawX * cr - dYawY * sr;
+      const ry = dYawX * sr + dYawY * cr;
+      const rz = dYawZ;
+      const wx = relPivX + rx * ds[0];
+      const wy = relPivY + ry * ds[1];
+      const wz = relPivZ + rz * ds[2];
       return [
         wx * cSt - wz * sSt,
         wy,
@@ -5655,19 +5941,26 @@ export function bakeDeckCrewClips(a) {
     for (let f = 0; f < rowCount; f++) {
       const ang = (f / rowCount) * Math.PI * 2;
       const innerGrip = gripPointLocal(0.90, ang);
-      const outerGrip = gripPointLocal(0.64, ang);
+      const outerGrip = gripPointLocal(0.72, ang);
       // Character faces straight aft (+Z, yaw === 0): +X is left arm (`hand_l`), -X is right arm (`hand_r`).
       // Port (`side = -1`): `innerGrip` is closer to +X (`hand_l`), `outerGrip` is closer to -X (`hand_r`).
       // Starboard (`side = +1`): `outerGrip` is closer to +X (`hand_l`), `innerGrip` is closer to -X (`hand_r`).
       const hands = side < 0 ? [innerGrip, outerGrip] : [outerGrip, innerGrip];
-      const lean = 0.10 - 0.14 * Math.sin(ang);
+      const strokeFwd = -Math.sin(ang);
+      const recovDip = Math.max(0, -Math.cos(ang));
+      const lean = 0.11 + 0.23 * strokeFwd + 0.06 * recovDip;
       a.sample('Idle', 0);
       poseSeatedCrew(a, dummySeated, {
-        seat: [0, seatY, 0],
+        seat: [0, seatY, 0.095 * strokeFwd],
         feet: [[0.13, 0.0, 0.46], [-0.13, 0.0, 0.46]],
-        hands: [[0.15, seatY + 0.42, 0.22], [-0.15, seatY + 0.42, 0.22]],
+        hands: [[0.18, 0.92, 0.18], [-0.18, 0.92, 0.18]],
         body: { lean },
       });
+      const spFlex = 0.02 + 0.045 * recovDip;
+      for (const spName of ['spine_01', 'spine_02', 'spine_03']) {
+        const spNode = a.nodeIndex ? a.nodeIndex(spName) : -1;
+        if (spNode >= 0) turnBone(a, spNode, [0, 1, 0], [0, Math.cos(spFlex), Math.sin(spFlex)]);
+      }
       solveCrewLimb(a, ['upperarm_l', 'lowerarm_l', 'hand_l'], hands[0], [0.46, seatY + 0.30, -0.34]);
       solveCrewLimb(a, ['upperarm_r', 'lowerarm_r', 'hand_r'], hands[1], [-0.46, seatY + 0.30, -0.34]);
       poseCrewFingers(a, dummySeated, 0.92, 0.92);
@@ -5735,6 +6028,7 @@ export function buildDeckCrewClearWGSL(tierCounts = [[300, 300, 300, 300], [300,
     m0[0], m0[1], m0[2], m0[3],
     m1[0], m1[1], m1[2], m1[3],
     m0[3], m1[3],
+    m0[3], m1[3],
   ].map((n) => `${Math.max(0, n | 0)}u`);
   return /* wgsl */ `
 const DECK_BUCKET_INDEX_COUNTS = array<u32, ${DECK_CREW_BUCKETS}>(${bucketIdxCounts.join(', ')});
@@ -5748,15 +6042,15 @@ const DECK_BUCKET_INDEX_COUNTS = array<u32, ${DECK_CREW_BUCKETS}>(${bucketIdxCou
     crewDraws[base + 3u] = 0u;
     crewDraws[base + 4u] = 0u;
   }
-  crewDraws[50u] = 0u;
-  crewDraws[51u] = 1u;
-  crewDraws[52u] = 0u;
-  crewDraws[53u] = 0u;
+  crewDraws[60u] = 0u;
+  crewDraws[61u] = 1u;
+  crewDraws[62u] = 0u;
+  crewDraws[63u] = 0u;
 }
 `;
 }
 
-export const DECK_CREW_CLEAR_WGSL = buildDeckCrewClearWGSL();
+export const DECK_CREW_CLEAR_WGSL = /* @__PURE__ */ buildDeckCrewClearWGSL();
 
 export const DECK_CREW_SELECT_WGSL = FRAME_WGSL + SHADOW_FRAME + VESSEL_SAMPLE_MASK_WGSL + TRADE_SHARED_TYPES_WGSL + DECK_CREW_SHARED_WGSL + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F: Frame;
@@ -5896,11 +6190,11 @@ fn rotateDeckShip(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
   let signedHalfW = select(baseHalfW, -baseHalfW, isSeated);
 
   if (pixels > splatPx) {
-    // 10.0 -> 4.0 px: MSAA @builtin(sample_mask) crossfade between distant 3D mesh and 1-triangle silhouette splat
+    // 10.0 -> 4.0 px: MSAA @builtin(sample_mask) crossfade between distant 3D mesh (buckets 10..11) and 1-triangle silhouette splat
     let rawShare = clamp(smoothstep(hiCrossPx, splatPx, pixels), 0.0, 0.999);
     let fadeBits = min(2047u, u32(round(rawShare * 2047.0)));
     let share = f32(fadeBits) / 2047.0;
-    let bucket = modelIdx * 4u + 3u;
+    let bucket = 10u + modelIdx;
     let slot = atomicAdd(&crewDraws[bucket * 5u + 1u], 1u);
     if (slot < crewCfg.ctrl.z) {
       let lookFlags = (lookIdx & 0x3FFu) | (isMerchant << 10u) | ((braceFrame & 0x3FFu) << 11u) | (fadeBits << 21u);
@@ -5908,7 +6202,7 @@ fn rotateDeckShip(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
         st.localPosYaw, vesselSlot, framesPacked, blendBrace, lookFlags,
       );
     }
-    let sVert = atomicAdd(&crewDraws[50u], 3u);
+    let sVert = atomicAdd(&crewDraws[60u], 3u);
     let sIdx = sVert / 3u;
     if (sIdx < crewCfg.splatCtrl.x) {
       crewSplatList[sIdx * 3u] = vec4f(worldCenter, signedHalfW);
@@ -5924,7 +6218,7 @@ fn rotateDeckShip(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
   let keep = (pixels >= minPx) || ((f32(h & 65535u) / 65536.0) <= keepProb);
   if (!keep) { return; }
   let inflate = select(1.0, inverseSqrt(keepProb), pixels < minPx);
-  let sVert = atomicAdd(&crewDraws[50u], 3u);
+  let sVert = atomicAdd(&crewDraws[60u], 3u);
   let sIdx = sVert / 3u;
   if (sIdx < crewCfg.splatCtrl.x) {
     crewSplatList[sIdx * 3u] = vec4f(worldCenter, signedHalfW * inflate);
@@ -6206,12 +6500,7 @@ struct DeckCrewVSOut {
   return out;
 }
 
-struct DeckCrewFragOut {
-  @location(0) color: vec4f,
-  @builtin(sample_mask) mask: u32,
-};
-
-@fragment fn tvCrewFS(in: DeckCrewVSOut, @builtin(front_facing) front: bool) -> DeckCrewFragOut {
+fn tvCrewShade(in: DeckCrewVSOut, front: bool) -> vec4f {
   let dPdx = dpdx(in.world); let dPdy = dpdy(in.world);
   let dBpdx = dpdx(in.bodyPos); let dBpdy = dpdy(in.bodyPos);
   let nGeom = normalize(in.normal) * select(-1.0, 1.0, front);
@@ -6250,9 +6539,23 @@ struct DeckCrewFragOut {
   let envCol = textureSampleLevel(envCube, sampC, reflect(-viewDir, n), rough * 6.5).rgb * 0.035;
 
   let lit = clothCol * (amb * 0.85 + clothSheen * skyCol) + direct + spec + envCol;
+  return vec4f(surfaceAir(lit, in.world), 1.0);
+}
+
+struct DeckCrewFragOut {
+  @location(0) color: vec4f,
+  @builtin(sample_mask) mask: u32,
+};
+
+@fragment fn tvCrewSolidFS(in: DeckCrewVSOut, @builtin(front_facing) front: bool) -> @location(0) vec4f {
+  return tvCrewShade(in, front);
+}
+
+@fragment fn tvCrewFS(in: DeckCrewVSOut, @builtin(front_facing) front: bool) -> DeckCrewFragOut {
+  let color = tvCrewShade(in, front);
   let dropMask = select(0u, vesselCrownSamples(in.splatFade, in.pos.xy, TV_CREW_SAMPLES), in.splatFade > 0.001);
   let keepMask = (~dropMask) & TV_CREW_MASK_ALL;
-  return DeckCrewFragOut(vec4f(surfaceAir(lit, in.world), 1.0), keepMask);
+  return DeckCrewFragOut(color, keepMask);
 }
 `;
 }
@@ -6432,7 +6735,7 @@ struct DeckCrewSplatFragOut {
 `;
 }
 
-export const DECK_CREW_SPLAT_WGSL = buildDeckCrewSplatWGSL(4);
+export const DECK_CREW_SPLAT_WGSL = /* @__PURE__ */ buildDeckCrewSplatWGSL(4);
 
 const tradePipelineCache = new WeakMap();
 
@@ -6499,12 +6802,21 @@ export function requestTradeVesselsPipelines({
   const key = `intact:${format}:${samples}:${shadowFormat}`;
   return getPipelineEntry(device, key, async () => {
     const module = await shader(tradeVesselsSource(false, samples), 'trade vessels');
-    const [pipe, shadowPipe] = await Promise.all([
+    const [pipe, nearSolidPipe, shadowPipe] = await Promise.all([
       device.createRenderPipelineAsync({
         label: 'trade vessels render',
         layout: 'auto',
         vertex: { module, entryPoint: 'tvVS', buffers: INTACT_VERTEX_BUFFERS },
         fragment: { module, entryPoint: 'tvFS', targets: [{ format }] },
+        primitive: { topology: 'triangle-list', cullMode: 'none' },
+        depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
+        multisample: { count: samples },
+      }),
+      device.createRenderPipelineAsync({
+        label: 'trade vessels near solid',
+        layout: 'auto',
+        vertex: { module, entryPoint: 'tvVS', buffers: INTACT_VERTEX_BUFFERS },
+        fragment: { module, entryPoint: 'tvSolidFS', targets: [{ format }] },
         primitive: { topology: 'triangle-list', cullMode: 'none' },
         depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
         multisample: { count: samples },
@@ -6517,7 +6829,7 @@ export function requestTradeVesselsPipelines({
         depthStencil: { format: shadowFormat, depthWriteEnabled: true, depthCompare: 'less', depthBias: 2, depthBiasSlopeScale: 1.5 },
       }),
     ]);
-    return { pipe, shadowPipe };
+    return { pipe, nearSolidPipe, shadowPipe };
   });
 }
 
@@ -6696,10 +7008,10 @@ export async function createTradeVessels({
   device.queue.writeBuffer(contVertColsBuffer, 0, contVertColsArray);
 
   const srcInstancesBuffer = device.createBuffer({ label: 'trade vessel src instances', size: NEAR_SLICE_BYTES, usage: U_STORAGE | U_COPY_DST });
-  const nearOutBuffer = device.createBuffer({ label: 'trade vessel near out', size: 14 * NEAR_SLICE_BYTES, usage: U_STORAGE | U_VERTEX });
-  const contListBuffer = device.createBuffer({ label: 'trade vessel cont list', size: MAX_CONT_TRIS * 16, usage: U_STORAGE });
+  const nearOutBuffer = device.createBuffer({ label: 'trade vessel near out', size: 28 * NEAR_SLICE_BYTES, usage: U_STORAGE | U_VERTEX });
+  const contListBuffer = device.createBuffer({ label: 'trade vessel cont list', size: 2 * TRADE_CONT_HALF_TRIS * 16, usage: U_STORAGE });
   const splatListBuffer = device.createBuffer({ label: 'trade vessel splat list', size: MAX_TRADE_VESSELS * 2 * 16, usage: U_STORAGE });
-  const indirectBuffer = device.createBuffer({ label: 'trade vessel indirect', size: 80 * 4, usage: U_STORAGE | U_INDIRECT | U_COPY_DST });
+  const indirectBuffer = device.createBuffer({ label: 'trade vessel indirect', size: 156 * 4, usage: U_STORAGE | U_INDIRECT | U_COPY_DST });
 
   const waveParamsBuf = new ArrayBuffer(32);
   const waveParamsU32 = new Uint32Array(waveParamsBuf, 0, 4);
@@ -6757,7 +7069,16 @@ export async function createTradeVessels({
           shader(buildTradeVesselContinuumWGSL(samples), 'trade vessel continuum'),
           shader(buildTradeVesselSplatWGSL(samples), 'trade vessel splat'),
         ]);
-        const [continuumPipe, splatPipe] = await Promise.all([
+        const [continuumSolidPipe, continuumPipe, splatPipe] = await Promise.all([
+          device.createRenderPipelineAsync({
+            label: 'trade vessel continuum solid',
+            layout: 'auto',
+            vertex: { module: contModule, entryPoint: 'tvContVS' },
+            fragment: { module: contModule, entryPoint: 'tvContSolidFS', targets: [{ format }] },
+            primitive: { topology: 'triangle-list', cullMode: 'back' },
+            depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
+            multisample: { count: samples },
+          }),
           device.createRenderPipelineAsync({
             label: 'trade vessel continuum',
             layout: 'auto',
@@ -6777,7 +7098,7 @@ export async function createTradeVessels({
             multisample: { count: samples },
           }),
         ]);
-        return { wavePipe, clearPipe, selectPipe, continuumPipe, splatPipe };
+        return { wavePipe, clearPipe, selectPipe, continuumSolidPipe, continuumPipe, splatPipe };
       })
     : Promise.resolve(null);
 
@@ -6801,7 +7122,7 @@ export async function createTradeVessels({
             })).catch(() => null)
           : Promise.resolve(null);
 
-  const [{ pipe, shadowPipe }, continuumPipes, resolvedSurfaceWaves, resolvedWaterOptics] = await Promise.all([
+  const [{ pipe, nearSolidPipe, shadowPipe }, continuumPipes, resolvedSurfaceWaves, resolvedWaterOptics] = await Promise.all([
     requestTradeVesselsPipelines({ device, shader, format, samples, shadowFormat }),
     continuumPromise,
     surfaceWavesPromise,
@@ -6845,6 +7166,7 @@ export async function createTradeVessels({
   const wavePipe = continuumPipes?.wavePipe ?? null;
   const clearPipe = continuumPipes?.clearPipe ?? null;
   const selectPipe = continuumPipes?.selectPipe ?? null;
+  const continuumSolidPipe = continuumPipes?.continuumSolidPipe ?? null;
   const continuumPipe = continuumPipes?.continuumPipe ?? null;
   const splatPipe = continuumPipes?.splatPipe ?? null;
 
@@ -6875,6 +7197,20 @@ export async function createTradeVessels({
       })
     : null;
   let selectBindGroup = makeSelectBindGroup(resources);
+  let contSolidGroup0 = continuumSolidPipe ? pickEntries(continuumSolidPipe, [0, 1, 2, 3, 4, 12]) : null;
+  const contSolidGroup1 = continuumSolidPipe
+    ? device.createBindGroup({
+        layout: continuumSolidPipe.getBindGroupLayout(1),
+        entries: [
+          { binding: 0, resource: { buffer: selectUniformBuffer } },
+          { binding: 1, resource: { buffer: srcInstancesBuffer } },
+          { binding: 2, resource: { buffer: contListBuffer } },
+          { binding: 3, resource: { buffer: contBaseIndicesBuffer } },
+          { binding: 4, resource: { buffer: contStatesBuffer } },
+          { binding: 5, resource: { buffer: contVertColsBuffer } },
+        ],
+      })
+    : null;
   let contGroup0 = continuumPipe ? pickEntries(continuumPipe, [0, 1, 2, 3, 4, 12]) : null;
   const contGroup1 = continuumPipe
     ? device.createBindGroup({
@@ -6898,6 +7234,7 @@ export async function createTradeVessels({
     : null;
 
   let bindGroup = pickEntries(pipe, [0, 1, 2, 3, 4, 12, 19, 20, 21]);
+  let solidBindGroup = nearSolidPipe ? pickEntries(nearSolidPipe, [0, 1, 2, 3, 4, 12, 19, 20, 21]) : bindGroup;
   let shadowBindGroup = pickEntries(shadowPipe, [0, 12, 19]);
   const neuralPbr = sharedNeuralPbrBank(device, { autoLoad: typeof location !== 'undefined' });
   const makeGroup1 = (targetPipe, extraEntries = []) => device.createBindGroup({
@@ -6910,6 +7247,7 @@ export async function createTradeVessels({
     ],
   });
   let intactGroup1 = makeGroup1(pipe);
+  let solidGroup1 = nearSolidPipe ? makeGroup1(nearSolidPipe) : intactGroup1;
   let submergedGroup0 = submergedCapture?.pipeline ? pickEntries(submergedCapture.pipeline, [0, 1, 2, 3, 4, 12, 19, 20, 21]) : null;
   let submergedGroup1 = submergedCapture?.pipeline ? makeGroup1(submergedCapture.pipeline) : null;
 
@@ -7234,6 +7572,9 @@ export async function createTradeVessels({
         { binding: 9, resource: byBinding.get(19) },
       ],
     });
+    state.solidGroup0 = state.solidPipe
+      ? pickEntries(state.solidPipe, [0, 1, 2, 3, 4, 12, 19, 20, 21], curResources)
+      : null;
     state.renderGroup0 = pickEntries(state.renderPipe, [0, 1, 2, 3, 4, 12, 19, 20, 21], curResources);
     state.shadowGroup0 = pickEntries(state.shadowPipe, [0, 12, 19], curResources);
     state.splatGroup0 = pickEntries(state.splatPipe, [0, 1, 2, 3, 4], curResources);
@@ -7247,22 +7588,37 @@ export async function createTradeVessels({
       offset: bucket * CREW_BODY_SLICE_BYTES,
       size: CREW_BODY_SLICE_BYTES,
     });
+    state.solidGroup1 = [];
+    state.fadeGroup1 = [];
     state.renderGroup1 = [];
     state.shadowGroup1 = [];
+    const solidPipeLayout1 = (state.solidPipe ?? state.renderPipe).getBindGroupLayout(1);
+    const fadePipeLayout1 = state.renderPipe.getBindGroupLayout(1);
     for (let m = 0; m < DECK_CREW_MODELS; m++) {
       const mGeo = state.models[m];
       for (let t = 0; t < DECK_CREW_TIERS; t++) {
         const bucket = m * DECK_CREW_TIERS + t;
-        state.renderGroup1.push(device.createBindGroup({
-          layout: state.renderPipe.getBindGroupLayout(1),
+        const g1 = device.createBindGroup({
+          layout: solidPipeLayout1,
           entries: [
             { binding: 0, resource: bodySlice(bucket) },
             { binding: 1, resource: { buffer: mGeo.palette } },
             { binding: 2, resource: { buffer: crewLooksBuffer } },
             { binding: 3, resource: { buffer: crewSrcInstancesBuffer } },
           ],
-        }));
+        });
+        state.solidGroup1.push(g1);
+        state.renderGroup1.push(g1);
       }
+      state.fadeGroup1.push(device.createBindGroup({
+        layout: fadePipeLayout1,
+        entries: [
+          { binding: 0, resource: bodySlice(10 + m) },
+          { binding: 1, resource: { buffer: mGeo.palette } },
+          { binding: 2, resource: { buffer: crewLooksBuffer } },
+          { binding: 3, resource: { buffer: crewSrcInstancesBuffer } },
+        ],
+      }));
       state.shadowGroup1.push(device.createBindGroup({
         layout: state.shadowPipe.getBindGroupLayout(1),
         entries: [
@@ -7309,7 +7665,16 @@ export async function createTradeVessels({
           shader(DECK_CREW_SHADOW_WGSL, 'trade deck crew shadow'),
           shader(buildDeckCrewSplatWGSL(samples), 'trade deck crew splat'),
         ]);
-        const [cRenderPipe, cShadowPipe, cSplatPipe] = await Promise.all([
+        const [cSolidPipe, cRenderPipe, cShadowPipe, cSplatPipe] = await Promise.all([
+          device.createRenderPipelineAsync({
+            label: 'trade deck crew solid',
+            layout: 'auto',
+            vertex: { module: renderMod, entryPoint: 'tvCrewVS', buffers: DECK_CREW_VERTEX_BUFFERS },
+            fragment: { module: renderMod, entryPoint: 'tvCrewSolidFS', targets: [{ format }] },
+            primitive: { topology: 'triangle-list', cullMode: 'none' },
+            depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
+            multisample: { count: samples },
+          }),
           device.createRenderPipelineAsync({
             label: 'trade deck crew render',
             layout: 'auto',
@@ -7336,7 +7701,7 @@ export async function createTradeVessels({
             multisample: { count: samples },
           }),
         ]);
-        return { cClearPipe, cSelectPipe, cRenderPipe, cShadowPipe, cSplatPipe };
+        return { cClearPipe, cSelectPipe, cSolidPipe, cRenderPipe, cShadowPipe, cSplatPipe };
       });
       if (destroyed || token !== lastSharedCrewToken) return null;
 
@@ -7361,6 +7726,7 @@ export async function createTradeVessels({
       const nextState = {
         clearPipe: pipes.cClearPipe,
         selectPipe: pipes.cSelectPipe,
+        solidPipe: pipes.cSolidPipe,
         renderPipe: pipes.cRenderPipe,
         shadowPipe: pipes.cShadowPipe,
         splatPipe: pipes.cSplatPipe,
@@ -7371,10 +7737,13 @@ export async function createTradeVessels({
         ownedBuffers,
         clearBindGroup: null,
         selectBindGroup: null,
+        solidGroup0: null,
         renderGroup0: null,
         shadowGroup0: null,
         splatGroup0: null,
         splatGroup1: null,
+        solidGroup1: [],
+        fadeGroup1: [],
         renderGroup1: [],
         shadowGroup1: [],
       };
@@ -7555,6 +7924,7 @@ export async function createTradeVessels({
       if (!tex || destroyed) return;
       oakView = tex.createView();
       intactGroup1 = makeGroup1(pipe);
+      solidGroup1 = nearSolidPipe ? makeGroup1(nearSolidPipe) : intactGroup1;
       if (submergedCapture?.pipeline) submergedGroup1 = makeGroup1(submergedCapture.pipeline);
       for (const v of vessels) {
         if (v.damaged && damagedAssets) rebindDamagedVessel(v);
@@ -7569,11 +7939,18 @@ export async function createTradeVessels({
   let lastUploadTime = -Infinity;
   let totalIntact = 0;
   let gpuSelectionEncoded = false;
+  let hasEncodedGpuOnce = false;
   let dirtySyncFlag = false;
   let lastEnv = { windVec: [8, 0], storm: false, avoidVessels: null };
   const counts = new Uint32Array(TRADE_VESSEL_ARCHETYPES);
   const scratch = Array.from({ length: TRADE_VESSEL_ARCHETYPES }, () => new Float32Array(MAX_TRADE_VESSELS * TRADE_VESSEL_INSTANCE_FLOATS));
   const allIntactScratch = new Float32Array(MAX_TRADE_VESSELS * TRADE_VESSEL_INSTANCE_FLOATS);
+  const wakeCandPool = Array.from({ length: MAX_TRADE_VESSELS }, () => ({
+    dSq: 0,
+    desc: { x: 0, z: 0, vx: 0, vz: 0, length: 0, beam: 0, draft: 0, displacement: 0, isRiver: false },
+  }));
+  const wakeCandActive = [];
+  const wakeOutScratch = [];
 
   if (sharedCrew) {
     await installSharedCrew(sharedCrew);
@@ -8344,7 +8721,22 @@ export async function createTradeVessels({
             : (colMid.waterY < 0.35 && colMid.waterDepth > 2.0 ? Math.max(0, 1 - colMid.waterY / 0.35) : 0))
         : (colMid.waterY > -500 ? 1.0 : 0.0);
 
-      const rawShelter = waveShelterFn ? waveShelterFn(wx, wz, swellDirRad) : 1.0;
+      let rawShelter = 1.0;
+      if (waveShelterFn) {
+        if (
+          !Number.isFinite(v._cachedShelter) ||
+          v._shelterTerrain !== terrain ||
+          (wx - v._shelterX) * (wx - v._shelterX) + (wz - v._shelterZ) * (wz - v._shelterZ) >= 64 ||
+          Math.abs(swellDirRad - v._shelterSwellDir) > 0.05
+        ) {
+          v._cachedShelter = waveShelterFn(wx, wz, swellDirRad);
+          v._shelterX = wx;
+          v._shelterZ = wz;
+          v._shelterSwellDir = swellDirRad;
+          v._shelterTerrain = terrain;
+        }
+        rawShelter = v._cachedShelter;
+      }
       const shelterMod = Number.isFinite(rawShelter) ? Math.max(0.18, Math.min(1.0, rawShelter)) : 1.0;
       const rawSwellWeight = (estuaryT > 0.20 && meanWaterY > -500 && !v.boat.aground && !dmg.sunk)
         ? Math.max(0, Math.min(1, (estuaryT - 0.20) / 0.80)) * shelterMod
@@ -8356,10 +8748,19 @@ export async function createTradeVessels({
       const zSpan = Math.max(1.8, v.boat.length * 0.42);
       const xSpan = Math.max(0.75, v.boat.beam * 0.44);
 
+      const refBoat = env?.avoidVessels?.[0] ?? null;
+      const hasPlayerRef = Boolean(refBoat && Number.isFinite(refBoat.x) && Number.isFinite(refBoat.z));
+      const hasAnyDamage = (dmg.hits ?? 0) > 0 || (dmg.holes?.length ?? 0) > 0 || (dmg.floodingTonnes ?? 0) > 0 || v.boat.aground || dmg.sunk;
+      const skipCpuWaveSample = hasEncodedGpuOnce
+        && Boolean(wavePipe && waveBindGroups)
+        && !hasAnyDamage
+        && typeof waveProbeFn !== 'function'
+        && (!hasPlayerRef || ((wx - refBoat.x) * (wx - refBoat.x) + (wz - refBoat.z) * (wz - refBoat.z) > 14400));
+
       let waveHeave = 0;
       let wavePitch = 0;
       let waveRoll = 0;
-      if (swellWeight > 0.001) {
+      if (swellWeight > 0.001 && !skipCpuWaveSample) {
         const hMid = sampleOceanSwellElevation(wx, wz, elapsedSec, windVec, stormFlag, waveProbeFn);
         const hBow = sampleOceanSwellElevation(wx + bowX * zSpan, wz + bowZ * zSpan, elapsedSec, windVec, stormFlag, waveProbeFn);
         const hStern = sampleOceanSwellElevation(wx - bowX * zSpan, wz - bowZ * zSpan, elapsedSec, windVec, stormFlag, waveProbeFn);
@@ -8395,11 +8796,7 @@ export async function createTradeVessels({
       v.boat.roll = baseRollNoWave + waveRoll + (dmg.floodingRoll ?? 0);
 
       // 4. Step Hydrostatic Flooding, Hull Holes & Sinking every frame when holed, flooding, hit, grounded, or sunk
-      const needsDamageStep = (dmg.hits ?? 0) > 0
-        || (dmg.holes?.length ?? 0) > 0
-        || (dmg.floodingTonnes ?? 0) > 0
-        || v.boat.aground
-        || dmg.sunk;
+      const needsDamageStep = hasAnyDamage;
       if (needsDamageStep) {
         if ((dmg.hits ?? 0) > 0 || (dmg.holes?.length ?? 0) > 0 || (dmg.floodingTonnes ?? 0) > 0 || dmg.sunk) {
           ensureDamagedSlot(v);
@@ -8462,20 +8859,22 @@ export async function createTradeVessels({
       v.boat.pitch = effPitch;
       v.boat.roll = effRoll;
 
-      v._waveMeta = {
-        baseWaterY,
-        zSpan,
-        xSpan,
-        totalSinkage,
-        minKeelY: Number.isFinite(minKeelHeave) ? minKeelHeave : -1e6,
-        swellWeight,
-        wakeWeight,
-        basePitch,
-        baseRoll,
-        flags: ((v.boat.aground || dmg.sunk || meanWaterY <= -500) ? 1 : 0)
-          | (isRiverRoute ? 2 : 0)
-          | (!v.hydroInitialized ? 4 : 0),
-      };
+      const wm = (v._waveMeta ??= {
+        baseWaterY: 0, zSpan: 0, xSpan: 0, totalSinkage: 0, minKeelY: -1e6,
+        swellWeight: 0, wakeWeight: 0, basePitch: 0, baseRoll: 0, flags: 0,
+      });
+      wm.baseWaterY = baseWaterY;
+      wm.zSpan = zSpan;
+      wm.xSpan = xSpan;
+      wm.totalSinkage = totalSinkage;
+      wm.minKeelY = Number.isFinite(minKeelHeave) ? minKeelHeave : -1e6;
+      wm.swellWeight = swellWeight;
+      wm.wakeWeight = wakeWeight;
+      wm.basePitch = basePitch;
+      wm.baseRoll = baseRoll;
+      wm.flags = ((v.boat.aground || dmg.sunk || meanWaterY <= -500) ? 1 : 0)
+        | (isRiverRoute ? 2 : 0)
+        | (!v.hydroInitialized ? 4 : 0);
 
       const fixedFurledOrBarge = v.archIndex === 1 || v.archIndex === 3 || v.archIndex === 4;
       const mastIntScalar = typeof dmg.mastIntegrity === 'number'
@@ -8489,22 +8888,25 @@ export async function createTradeVessels({
 
       const motion = (dmg.sunk || v.boat.aground) ? 0 : ai.motion * Math.max(0.15, dmg.hits > 0 ? (dmg.rigIntegrity ?? 1) : 1);
       const phaseAnim = ai.phaseRad + elapsedSec * 1.35;
-      v.lastState = {
-        x: ai.x,
-        y: surfY,
-        z: ai.z,
-        yaw: ai.yaw,
-        heading: headingDeg,
-        pitch: effPitch,
-        roll: effRoll,
-        bowDir: [bowX, bowZ],
-        scale: v.scaleMul,
-        phase: ai.phaseRad,
-        archetype: v.archIndex,
-        motion,
-        speed: ai.speed,
-        sailSet: effSailSet,
-      };
+      const ls = (v.lastState ??= {
+        x: 0, y: 0, z: 0, yaw: 0, heading: 0, pitch: 0, roll: 0,
+        bowDir: [0, -1], scale: 1, phase: 0, archetype: 0, motion: 0, speed: 0, sailSet: 1,
+      });
+      ls.x = ai.x;
+      ls.y = surfY;
+      ls.z = ai.z;
+      ls.yaw = ai.yaw;
+      ls.heading = headingDeg;
+      ls.pitch = effPitch;
+      ls.roll = effRoll;
+      ls.bowDir[0] = bowX;
+      ls.bowDir[1] = bowZ;
+      ls.scale = v.scaleMul;
+      ls.phase = ai.phaseRad;
+      ls.archetype = v.archIndex;
+      ls.motion = motion;
+      ls.speed = ai.speed;
+      ls.sailSet = effSailSet;
 
       if ((v.damaged?.ready || v.damaged?.gpuCompiled) && v.damaged.fractureGPU) {
         const d = v.damaged;
@@ -8551,17 +8953,19 @@ export async function createTradeVessels({
         continue;
       }
 
-      // Intact (or still compiling damaged pipeline) instance batch: upload both flat GPU select source and per-archetype fallback
+      // Intact (or still compiling damaged pipeline) instance batch: upload flat GPU select source; skip legacy CPU per-archetype packing once GPU selection is active
       // Note: `instAnim.z` (`offI + 10`) is MSAA crossfade `stateVal` in intact `tvVS` (NEVER `floodSinkage`!).
       const a = v.archIndex;
       const idx = counts[a];
       if (idx < MAX_TRADE_VESSELS) {
-        const dst = scratch[a];
-        const offI = idx * TRADE_VESSEL_INSTANCE_FLOATS;
-        dst[offI] = ai.x; dst[offI + 1] = effY; dst[offI + 2] = ai.z; dst[offI + 3] = ai.yaw;
-        dst[offI + 4] = effPitch; dst[offI + 5] = effRoll; dst[offI + 6] = v.scaleMul; dst[offI + 7] = a;
-        dst[offI + 8] = phaseAnim; dst[offI + 9] = motion; dst[offI + 10] = 0.0; dst[offI + 11] = furl;
         counts[a] = idx + 1;
+        if (!hasEncodedGpuOnce) {
+          const dst = scratch[a];
+          const offI = idx * TRADE_VESSEL_INSTANCE_FLOATS;
+          dst[offI] = ai.x; dst[offI + 1] = effY; dst[offI + 2] = ai.z; dst[offI + 3] = ai.yaw;
+          dst[offI + 4] = effPitch; dst[offI + 5] = effRoll; dst[offI + 6] = v.scaleMul; dst[offI + 7] = a;
+          dst[offI + 8] = phaseAnim; dst[offI + 9] = motion; dst[offI + 10] = 0.0; dst[offI + 11] = furl;
+        }
       }
       if (totalIntact < MAX_TRADE_VESSELS) {
         v.intactSlot = totalIntact >>> 0;
@@ -8658,9 +9062,11 @@ export async function createTradeVessels({
       }
       gpuSelectionEncoded = false;
       crewEncoded = false;
-      for (let a = 0; a < TRADE_VESSEL_ARCHETYPES; a++) {
-        if (counts[a] > 0) {
-          device.queue.writeBuffer(instanceBuffers[a], 0, scratch[a], 0, counts[a] * TRADE_VESSEL_INSTANCE_FLOATS);
+      if (!hasEncodedGpuOnce) {
+        for (let a = 0; a < TRADE_VESSEL_ARCHETYPES; a++) {
+          if (counts[a] > 0) {
+            device.queue.writeBuffer(instanceBuffers[a], 0, scratch[a], 0, counts[a] * TRADE_VESSEL_INSTANCE_FLOATS);
+          }
         }
       }
     }
@@ -8855,12 +9261,14 @@ export async function createTradeVessels({
     },
     getWakeSources(center = null, maxCount = 24) {
       const cap = Math.max(0, Math.min(24, maxCount | 0));
-      if (!cap || !vessels.length) return [];
+      wakeOutScratch.length = 0;
+      if (!cap || !vessels.length) return wakeOutScratch;
       const cx = Number(center?.x ?? center?.[0]);
       const cz = Number(center?.z ?? center?.[2] ?? center?.[1]);
       const hasCenter = Number.isFinite(cx) && Number.isFinite(cz);
-      const cands = [];
-      for (let i = 0; i < vessels.length; i++) {
+      wakeCandActive.length = 0;
+      let poolIdx = 0;
+      for (let i = 0; i < vessels.length && poolIdx < wakeCandPool.length; i++) {
         const v = vessels[i];
         const dmg = v.boat?.damage;
         if (dmg?.sunk || v.boat?.aground || (v.boat?.waterY ?? 0) <= -500) continue;
@@ -8876,28 +9284,25 @@ export async function createTradeVessels({
         const wx = v.boat?.x ?? (v.ai.x + worldOffsetX);
         const wz = v.boat?.z ?? (v.ai.z + worldOffsetZ);
         if (!Number.isFinite(wx) || !Number.isFinite(wz)) continue;
-        const dSq = hasCenter ? ((wx - cx) * (wx - cx) + (wz - cz) * (wz - cz)) : i;
-        cands.push({
-          dSq,
-          desc: {
-            x: wx,
-            z: wz,
-            vx,
-            vz,
-            length: v.boat.length,
-            beam: v.boat.beam,
-            draft: v.boat.draft,
-            displacement: +((v.boat.mass || 12000) / 1000).toFixed(2),
-            isRiver: v.route?.mode === 'river',
-          },
-        });
+        const slot = wakeCandPool[poolIdx++];
+        slot.dSq = hasCenter ? ((wx - cx) * (wx - cx) + (wz - cz) * (wz - cz)) : i;
+        const d = slot.desc;
+        d.x = wx;
+        d.z = wz;
+        d.vx = vx;
+        d.vz = vz;
+        d.length = v.boat.length;
+        d.beam = v.boat.beam;
+        d.draft = v.boat.draft;
+        d.displacement = +((v.boat.mass || 12000) / 1000).toFixed(2);
+        d.isRiver = v.route?.mode === 'river';
+        wakeCandActive.push(slot);
       }
-      if (hasCenter && cands.length > 1) {
-        cands.sort((a, b) => a.dSq - b.dSq);
+      if (hasCenter && wakeCandActive.length > 1) {
+        wakeCandActive.sort((a, b) => a.dSq - b.dSq);
       }
-      const out = [];
-      for (let i = 0; i < cands.length && i < cap; i++) out.push(cands[i].desc);
-      return out;
+      for (let i = 0; i < wakeCandActive.length && i < cap; i++) wakeOutScratch.push(wakeCandActive[i].desc);
+      return wakeOutScratch;
     },
     consumeDirtySync() {
       const dirty = dirtySyncFlag;
@@ -8979,12 +9384,14 @@ export async function createTradeVessels({
     rebind(nextResources) {
       resources = nextResources;
       bindGroup = pickEntries(pipe, [0, 1, 2, 3, 4, 12, 19, 20, 21]);
+      solidBindGroup = nearSolidPipe ? pickEntries(nearSolidPipe, [0, 1, 2, 3, 4, 12, 19, 20, 21]) : bindGroup;
       shadowBindGroup = pickEntries(shadowPipe, [0, 12, 19]);
       waveBindGroups = makeWaveBindGroups(resources);
       if (submergedCapture?.pipeline) {
         submergedGroup0 = pickEntries(submergedCapture.pipeline, [0, 1, 2, 3, 4, 12, 19, 20, 21]);
       }
       if (selectPipe) selectBindGroup = makeSelectBindGroup(resources);
+      if (continuumSolidPipe) contSolidGroup0 = pickEntries(continuumSolidPipe, [0, 1, 2, 3, 4, 12]);
       if (continuumPipe) contGroup0 = pickEntries(continuumPipe, [0, 1, 2, 3, 4, 12]);
       if (splatPipe) splatGroup0 = pickEntries(splatPipe, [0, 1, 2, 3, 4]);
       if (deckCrewGPU) rebuildDeckCrewBindGroups(deckCrewGPU, resources);
@@ -9015,6 +9422,7 @@ export async function createTradeVessels({
           pass.dispatchWorkgroups(Math.ceil(totalIntact / 64));
         }
         gpuSelectionEncoded = Boolean(selectPipe && continuumPipe && splatPipe);
+        if (gpuSelectionEncoded) hasEncodedGpuOnce = true;
       }
       if (deckCrewGPU?.clearBindGroup && deckCrewGPU?.selectBindGroup) {
         pass.setPipeline(deckCrewGPU.clearPipe);
@@ -9047,6 +9455,7 @@ export async function createTradeVessels({
       pass.setBindGroup(1, submergedGroup1);
       if (gpuSelectionEncoded && typeof pass.drawIndexedIndirect === 'function') {
         for (let a = 0; a < TRADE_VESSEL_ARCHETYPES; a++) {
+          if (above && !counts[a]) continue;
           const { vertexBuffer, indexBuffer } = archGPUs[a];
           pass.setVertexBuffer(0, vertexBuffer);
           pass.setVertexBuffer(1, nearOutBuffer, a * NEAR_SLICE_BYTES, NEAR_SLICE_BYTES);
@@ -9072,28 +9481,54 @@ export async function createTradeVessels({
       if (!pipe || !bindGroup) return;
       const canIndirect = typeof pass.drawIndexedIndirect === 'function' && typeof pass.drawIndirect === 'function';
       if (gpuSelectionEncoded && continuumPipe && splatPipe && canIndirect) {
-        pass.setPipeline(pipe);
-        pass.setBindGroup(0, bindGroup);
-        pass.setBindGroup(1, intactGroup1);
-        for (let a = 0; a < TRADE_VESSEL_ARCHETYPES; a++) {
-          const { vertexBuffer, indexBuffer } = archGPUs[a];
-          pass.setVertexBuffer(0, vertexBuffer);
-          pass.setVertexBuffer(1, nearOutBuffer, a * NEAR_SLICE_BYTES, NEAR_SLICE_BYTES);
-          pass.setIndexBuffer(indexBuffer, 'uint32');
-          pass.drawIndexedIndirect(indirectBuffer, a * 20);
+        if (totalIntact > 0) {
+          // 1. 100% opaque near hulls (spanPx >= 38) -> TBDR hardware Early-Z / HSR solid pipeline (no sample_mask)
+          const useSolidPipe = nearSolidPipe ?? pipe;
+          pass.setPipeline(useSolidPipe);
+          pass.setBindGroup(0, nearSolidPipe ? solidBindGroup : bindGroup);
+          pass.setBindGroup(1, nearSolidPipe ? solidGroup1 : intactGroup1);
+          for (let a = 0; a < TRADE_VESSEL_ARCHETYPES; a++) {
+            if (!counts[a]) continue;
+            const { vertexBuffer, indexBuffer } = archGPUs[a];
+            pass.setVertexBuffer(0, vertexBuffer);
+            pass.setVertexBuffer(1, nearOutBuffer, (14 + a) * NEAR_SLICE_BYTES, NEAR_SLICE_BYTES);
+            pass.setIndexBuffer(indexBuffer, 'uint32');
+            pass.drawIndexedIndirect(indirectBuffer, (14 + a) * 20);
+          }
+          // 2. 100% opaque continuum hulls (spanPx <= 27) -> TBDR hardware Early-Z / HSR solid pipeline
+          if (continuumSolidPipe && contSolidGroup0 && contSolidGroup1) {
+            pass.setPipeline(continuumSolidPipe);
+            pass.setBindGroup(0, contSolidGroup0);
+            pass.setBindGroup(1, contSolidGroup1);
+            pass.drawIndirect(indirectBuffer, 560);
+          }
+          // 3. MSAA sample_mask crossfade band (27 < spanPx < 38): near crossfade + continuum crossfade
+          pass.setPipeline(pipe);
+          pass.setBindGroup(0, bindGroup);
+          pass.setBindGroup(1, intactGroup1);
+          for (let a = 0; a < TRADE_VESSEL_ARCHETYPES; a++) {
+            if (!counts[a]) continue;
+            const { vertexBuffer, indexBuffer } = archGPUs[a];
+            pass.setVertexBuffer(0, vertexBuffer);
+            pass.setVertexBuffer(1, nearOutBuffer, (21 + a) * NEAR_SLICE_BYTES, NEAR_SLICE_BYTES);
+            pass.setIndexBuffer(indexBuffer, 'uint32');
+            pass.drawIndexedIndirect(indirectBuffer, (21 + a) * 20);
+          }
+          pass.setPipeline(continuumPipe);
+          pass.setBindGroup(0, contGroup0);
+          pass.setBindGroup(1, contGroup1);
+          pass.drawIndirect(indirectBuffer, 576);
+          // 4. Horizon silhouette splats (spanPx <= 3.5)
+          pass.setPipeline(splatPipe);
+          pass.setBindGroup(0, splatGroup0);
+          pass.setBindGroup(1, splatGroup1);
+          pass.drawIndirect(indirectBuffer, 592);
         }
-        pass.setPipeline(continuumPipe);
-        pass.setBindGroup(0, contGroup0);
-        pass.setBindGroup(1, contGroup1);
-        pass.drawIndirect(indirectBuffer, 280);
-        pass.setPipeline(splatPipe);
-        pass.setBindGroup(0, splatGroup0);
-        pass.setBindGroup(1, splatGroup1);
-        pass.drawIndirect(indirectBuffer, 296);
       } else {
-        pass.setPipeline(pipe);
-        pass.setBindGroup(0, bindGroup);
-        pass.setBindGroup(1, intactGroup1);
+        const useSolidPipe = nearSolidPipe ?? pipe;
+        pass.setPipeline(useSolidPipe);
+        pass.setBindGroup(0, nearSolidPipe ? solidBindGroup : bindGroup);
+        pass.setBindGroup(1, nearSolidPipe ? solidGroup1 : intactGroup1);
         for (let a = 0; a < TRADE_VESSEL_ARCHETYPES; a++) {
           if (!counts[a]) continue;
           const { arch, vertexBuffer, indexBuffer } = archGPUs[a];
@@ -9105,22 +9540,35 @@ export async function createTradeVessels({
       }
 
       if (crewEncoded && deckCrewGPU && activeDeckSoulCount > 0 && canIndirect) {
-        pass.setPipeline(deckCrewGPU.renderPipe);
-        pass.setBindGroup(0, deckCrewGPU.renderGroup0);
+        // 1. 100% opaque close/mid-range deck crew (pixels >= 10) -> TBDR hardware Early-Z / HSR solid pipeline
+        const crewSolid = deckCrewGPU.solidPipe ?? deckCrewGPU.renderPipe;
+        pass.setPipeline(crewSolid);
+        pass.setBindGroup(0, deckCrewGPU.solidGroup0 ?? deckCrewGPU.renderGroup0);
         for (let m = 0; m < DECK_CREW_MODELS; m++) {
           const mGeo = deckCrewGPU.models[m];
           pass.setVertexBuffer(0, mGeo.vertex);
           for (let tier = 0; tier < DECK_CREW_TIERS; tier++) {
             const bucket = m * DECK_CREW_TIERS + tier;
-            pass.setBindGroup(1, deckCrewGPU.renderGroup1[bucket]);
+            pass.setBindGroup(1, deckCrewGPU.solidGroup1[bucket]);
             pass.setIndexBuffer(mGeo.tiers[tier].buffer, 'uint32');
             pass.drawIndexedIndirect(crewIndirectBuffer, bucket * 20);
           }
         }
+        // 2. MSAA sample_mask crossfade crew band (4 < pixels < 10) -> buckets 10..11
+        pass.setPipeline(deckCrewGPU.renderPipe);
+        pass.setBindGroup(0, deckCrewGPU.renderGroup0);
+        for (let m = 0; m < DECK_CREW_MODELS; m++) {
+          const mGeo = deckCrewGPU.models[m];
+          pass.setVertexBuffer(0, mGeo.vertex);
+          pass.setBindGroup(1, deckCrewGPU.fadeGroup1[m]);
+          pass.setIndexBuffer(mGeo.tiers[DECK_CREW_TIERS - 1].buffer, 'uint32');
+          pass.drawIndexedIndirect(crewIndirectBuffer, (10 + m) * 20);
+        }
+        // 3. Distant 1-triangle silhouette splat crew (pixels <= 10)
         pass.setPipeline(deckCrewGPU.splatPipe);
         pass.setBindGroup(0, deckCrewGPU.splatGroup0);
         pass.setBindGroup(1, deckCrewGPU.splatGroup1);
-        pass.drawIndirect(crewIndirectBuffer, 200);
+        pass.drawIndirect(crewIndirectBuffer, 240);
       }
     },
     drawDamaged(pass) {
@@ -9154,6 +9602,7 @@ export async function createTradeVessels({
         pass.setBindGroup(0, shadowBindGroup);
         if (gpuSelectionEncoded && typeof pass.drawIndexedIndirect === 'function') {
           for (let a = 0; a < TRADE_VESSEL_ARCHETYPES; a++) {
+            if (!counts[a]) continue;
             const { vertexBuffer, indexBuffer } = archGPUs[a];
             pass.setVertexBuffer(0, vertexBuffer);
             pass.setVertexBuffer(1, nearOutBuffer, (7 + a) * NEAR_SLICE_BYTES, NEAR_SLICE_BYTES);

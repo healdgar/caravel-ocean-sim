@@ -23,7 +23,8 @@ export const HERD_SHOTS_WORDS = 4 + HERD_SHOT_LIMIT * HERD_SHOT_FLOATS;
 export const HERD_DRAW_WORDS = 5;
 export const HERD_SPECIES = 7;
 export const HERD_SPLAT_BUCKET = HERD_SPECIES * 2; // 14: 1-triangle far horizon splat bucket
-export const HERD_BUCKETS = HERD_SPECIES * 2 + 1;  // 0..6 main meshes, 7..13 shadow meshes, 14 horizon splats
+export const HERD_FADE_BUCKET = HERD_SPLAT_BUCKET + 1; // 15..21: MSAA sample_mask crossfade buckets (3.5..5.4 px)
+export const HERD_BUCKETS = HERD_FADE_BUCKET + HERD_SPECIES; // 22: 0..6 solid (TBDR HSR), 7..13 shadow, 14 splats, 15..21 fade
 export const HERD_ROUTE_HEADER = 1;
 export const HERD_MORPH_HI_PX = 26.0;
 export const HERD_STAMPEDE_RADIUS_M = 38.0;
@@ -163,7 +164,8 @@ fn poseLivestockVertex(pos: vec3f, nrm: vec3f, part: f32, shardId: u32, body: He
     if (!hasTack) {
       p = vec3f(0.0, rig.legs.x, 0.0);
     } else if (part >= 9.95 && part < 11.0) {
-      let w = clamp(part - 10.0, 0.0, 1.0);
+      let rw = clamp(part - 10.0, 0.0, 1.0);
+      let w = rw * rw * (3.0 - 2.0 * rw);
       let nibble = 0.055 * sin(tailOrTonguePitch * 3.4) * max(0.0, grazeOrTongueYaw);
       let pitch = select(grazeOrTongueYaw * rig.neck.w + nibble, 0.26, isFelled) * w;
       let yawTurn = select(0.14 * sin(tailOrTonguePitch * 0.73) * grazeOrTongueYaw * w, 0.0, isFelled);
@@ -175,7 +177,8 @@ fn poseLivestockVertex(pos: vec3f, nrm: vec3f, part: f32, shardId: u32, body: He
     }
   } else if (!isVehicle && part >= 1.0 && part < 1.995) {
     // Smoothly weighted neck & head pitch around chest/withers pivot while cropping grass (or lifted in alarm).
-    let w = clamp(part - 1.0, 0.0, 1.0);
+    let rw = clamp(part - 1.0, 0.0, 1.0);
+    let w = rw * rw * (3.0 - 2.0 * rw);
     let nibble = 0.055 * sin(tailOrTonguePitch * 3.4) * max(0.0, grazeOrTongueYaw);
     let pitch = select(grazeOrTongueYaw * rig.neck.w + nibble, 0.26, isFelled) * w;
     let yawTurn = select(0.14 * sin(tailOrTonguePitch * 0.73) * grazeOrTongueYaw * w, 0.0, isFelled);
@@ -663,7 +666,9 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   }
 
   var groundY = herdGroundY(worldXZ);
-  if (isStreetMount && wayGroundY > -500.0) {
+  if (isStreetMount && fate.status.x < 1.5 && wayGroundY > -500.0) {
+    groundY = wayGroundY;
+  } else if (isStreetMount && wayGroundY > -500.0) {
     groundY = max(groundY, wayGroundY);
   }
   let onBridge = travelling && routeDeckY > 0.25;
@@ -833,7 +838,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   let morphLevel = select(clamp((HERD_MORPH_HI_PX - pxSpan) / (HERD_MORPH_HI_PX - HERD_SPLAT_HI_PX), 0.0, 1.0), 0.0, (flags & 4u) != 0u);
   let meshKeep = select(1.0, smoothstep(HERD_SPLAT_LO_PX, HERD_SPLAT_HI_PX, pxSpan), pxSpan < HERD_SPLAT_HI_PX);
 
-  // 1. Near/mid physical 3D mesh bucket (full coverage above 5.4 px, MSAA crossfade over 3.5..5.4 px).
+  // 1. Near/mid physical 3D mesh buckets: 0..6 solid (>= 5.4 px, 100% TBDR Early-Z / HSR), 15..21 MSAA crossfade (3.5..5.4 px).
   if (pxSpan >= HERD_SPLAT_LO_PX) {
     let packedSpecies = f32(species) + clamp(meshKeep, 0.0, 1.0) * 0.95;
     let body = HerdBody(
@@ -842,9 +847,10 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       vec4f(slopePitch, scale, select(tailPhase, tonguePitch, isVehicle), packedSpecies),
       vec4f(morphLevel, f32(flags), hitAge, hitDirAngle),
     );
-    let slot = atomicAdd(&draws[species * 5u + 1u], 1u);
+    let meshBucket = select(${HERD_FADE_BUCKET}u + species, species, pxSpan >= HERD_SPLAT_HI_PX);
+    let slot = atomicAdd(&draws[meshBucket * 5u + 1u], 1u);
     if (slot < cfg.bucketSpan) {
-      bodies[species * cfg.bucketSpan + slot] = body;
+      bodies[meshBucket * cfg.bucketSpan + slot] = body;
     }
 
     if (landSH.origin.w > 0.5 && dist < 420.0 && meshKeep >= 0.45) {
@@ -914,9 +920,10 @@ struct HerdVertexOut {
   @builtin(position) pos: vec4f,
   @location(0) world: vec3f,
   @location(1) normal: vec3f,
-  @location(2) coatInfo: vec4f, // coatZone, aoShade, coatSeed, species
+  @location(2) coatInfo: vec4f, // coatCode (zone or 16+rgb15), aoShade, coatSeed, species
   @location(3) localXZ: vec2f,
   @location(4) lodInfo: vec2f,  // meshKeep (0..1), instHash
+  @location(5) texColor: vec3f, // smoothly interpolated linear RGB from 4K RGB555 (or -1 for zone path)
 };
 
 struct HerdSplatOut {
@@ -951,9 +958,66 @@ fn herdCloudShadow(world: vec3f) -> f32 {
   return clamp(exp(-max(cD, 0.0) * CF.shape.z * 0.6) * mix(1.0, cL, 0.5), 0.0, 1.0);
 }
 
-fn livestockCoatAlbedo(species: u32, zone: u32, seed: f32, localXZ: vec2f) -> vec3f {
+fn livestockCoatAlbedo(species: u32, coatCode: f32, texColor: vec3f, seed: f32, localXZ: vec2f) -> vec3f {
   let h1 = fract(seed * 13.713);
   let h2 = fract(seed * 47.219);
+  if (coatCode >= 16.0) {
+    let rgb15 = u32(round(coatCode - 16.0));
+    let baseTex = vec3f(f32((rgb15 >> 10u) & 31u), f32((rgb15 >> 5u) & 31u), f32(rgb15 & 31u)) / 31.0;
+    var col = select(baseTex * baseTex, max(texColor, vec3f(0.0)), texColor.x >= 0.0);
+    let lum = dot(col, vec3f(0.2126, 0.7152, 0.0722));
+    if (species == 0u) {
+      let woolMask = smoothstep(0.14, 0.28, lum);
+      let fleeceTint = mix(vec3f(0.90, 0.88, 0.82), vec3f(1.12, 1.09, 1.03), h1);
+      col = mix(col, col * fleeceTint, woolMask * 0.75);
+      if (h2 < 0.12) {
+        col = mix(col, col * vec3f(0.14, 0.12, 0.11), woolMask * 0.90);
+      } else if (h2 < 0.26) {
+        col = mix(col, col * vec3f(0.55, 0.52, 0.48), woolMask * 0.80);
+      }
+      return col;
+    }
+    if (species == 1u) {
+      let hornKeep = smoothstep(1.14, 1.26, localXZ.y) * smoothstep(0.18, 0.32, lum);
+      let hideMask = smoothstep(0.03, 0.09, lum) * (1.0 - hornKeep);
+      if (h1 < 0.22) {
+        col = mix(col, vec3f(lum * 0.38, lum * 0.34, lum * 0.32), hideMask * 0.88);
+      } else if (h1 < 0.52) {
+        col = mix(col, col * vec3f(1.06, 0.96, 0.88), hideMask * 0.65);
+      } else if (h1 < 0.78) {
+        col = mix(col, vec3f(col.r * 1.28, col.g * 1.55 + 0.02, col.b * 1.65 + 0.015), hideMask * 0.75);
+      }
+      if (h2 < 0.22) {
+        let coatPatch = smoothstep(0.05, 0.22, gnoise(localXZ * 2.4 + vec2f(seed * 19.0, seed * 7.0)));
+        col = mix(col, vec3f(0.56, 0.52, 0.44) * (0.65 + 0.70 * lum), hideMask * coatPatch * 0.85);
+      }
+      return col;
+    }
+    if (species == 2u) {
+      let bristleMask = smoothstep(0.015, 0.055, lum);
+      if (h1 < 0.32) {
+        col = mix(col, col * vec3f(1.65, 1.12, 0.88) + vec3f(0.032, 0.012, 0.005), bristleMask * 0.75);
+      } else {
+        col *= mix(0.86, 1.18, h1);
+      }
+      return col;
+    }
+    // Horse (species == 3u): preserve dark eyes/nostrils/hooves/mane while varying bay, chestnut, seal-brown, and dapple-grey coats.
+    let coatMask = smoothstep(0.024, 0.065, lum);
+    if (h1 < 0.16) {
+      let dapple = 0.84 + 0.16 * gnoise(localXZ * 8.5 + vec2f(seed * 13.0));
+      let grey = vec3f(0.44, 0.42, 0.39) * dapple * clamp(0.45 + lum * 4.2, 0.35, 1.15);
+      col = mix(col, grey, smoothstep(0.012, 0.045, lum) * 0.90);
+    } else if (h1 < 0.48) {
+      col = mix(col, col * vec3f(1.38, 1.22, 0.95) + vec3f(0.028, 0.010, 0.002), coatMask * 0.78);
+    } else if (h1 < 0.74) {
+      col = mix(col, col * vec3f(0.52, 0.56, 0.62), coatMask * 0.82);
+    } else {
+      col = mix(col, col * vec3f(1.08, 1.02, 0.96), coatMask * 0.50);
+    }
+    return col;
+  }
+  let zone = u32(round(coatCode));
   if (species == 0u) {
     var fleece = mix(vec3f(0.58, 0.53, 0.43), vec3f(0.70, 0.65, 0.54), h1);
     if (h2 < 0.12) { fleece = vec3f(0.055, 0.048, 0.044); }
@@ -1108,28 +1172,51 @@ fn shadeHerdSurface(world: vec3f, n: vec3f, albedo: vec3f, ao: f32, species: u32
   let morphed = morphLivestockVertex(vid, position, normal, partZone.x, body.extra.x);
   let posed = poseLivestockVertex(morphed.pos, morphed.nrm, morphed.part, morphed.shardId, body, herdRig);
   let shifted = posed.localPos + vec3f(nearTerrain.grid.y, 0.0, nearTerrain.grid.z);
-  let zone = floor(partZone.y + 0.001);
-  let ao = clamp(partZone.y - zone, 0.08, 0.98);
+  var coatVal = floor(partZone.y + 0.001);
+  var ao = clamp(partZone.y - coatVal, 0.08, 0.98);
+  var vTex = vec3f(-1.0);
+  if (partZone.y >= 16.0) {
+    coatVal = partZone.y;
+    ao = clamp(
+      0.42
+      + 0.33 * clamp(morphed.pos.y / max(herdRig.legs.w, 0.4), 0.0, 1.0)
+      + 0.23 * (0.5 + 0.5 * posed.localNrm.y),
+      0.12,
+      0.96,
+    );
+    let rgb15 = u32(round(partZone.y - 16.0));
+    let baseTex = vec3f(f32((rgb15 >> 10u) & 31u), f32((rgb15 >> 5u) & 31u), f32(rgb15 & 31u)) / 31.0;
+    vTex = baseTex * baseTex;
+  }
   var o: HerdVertexOut;
   o.world = shifted;
   o.normal = posed.localNrm;
-  o.coatInfo = vec4f(zone, ao, body.animCoat.w, spFloor);
+  o.coatInfo = vec4f(coatVal, ao, body.animCoat.w, spFloor);
   o.localXZ = vec2f(morphed.pos.z, morphed.pos.y);
   o.lodInfo = vec2f(meshKeep, f32(inst & 255u));
+  o.texColor = vTex;
   o.pos = F.viewProj * vec4f(earthCurve(shifted - F.camPos.xyz, F.camPos.y), 1.0);
   return o;
 }
 
-@fragment fn herdsFS(in: HerdVertexOut) -> HerdFragOut {
-  let pix = vec2u(in.pos.xy);
-  let mask = herdOrderedMask(u32(in.lodInfo.y), pix, in.lodInfo.x, false);
+fn shadeHerdVertexOut(in: HerdVertexOut) -> vec3f {
   let n = normalize(in.normal);
   let species = min(${HERD_SPECIES - 1}u, u32(round(in.coatInfo.w)));
-  let zone = u32(round(in.coatInfo.x));
+  let coatCode = in.coatInfo.x;
+  let zone = select(u32(round(coatCode)), 0u, coatCode >= 16.0);
   let ao = in.coatInfo.y;
-  let albedo = livestockCoatAlbedo(species, zone, in.coatInfo.z, in.localXZ);
-  let col = shadeHerdSurface(in.world, n, albedo, ao, species, zone);
-  return HerdFragOut(vec4f(col, 1.0), mask);
+  let albedo = livestockCoatAlbedo(species, coatCode, in.texColor, in.coatInfo.z, in.localXZ);
+  return shadeHerdSurface(in.world, n, albedo, ao, species, zone);
+}
+
+@fragment fn herdsSolidFS(in: HerdVertexOut) -> @location(0) vec4f {
+  return vec4f(shadeHerdVertexOut(in), 1.0);
+}
+
+@fragment fn herdsFadeFS(in: HerdVertexOut) -> HerdFragOut {
+  let pix = vec2u(in.pos.xy);
+  let mask = herdOrderedMask(u32(in.lodInfo.y), pix, in.lodInfo.x, false);
+  return HerdFragOut(vec4f(shadeHerdVertexOut(in), 1.0), mask);
 }
 
 // Rule-3 1-triangle view-facing horizon splat (3 vertices per instance, circumscribed around the integrated silhouette ellipse).
@@ -1181,7 +1268,7 @@ fn shadeHerdSurface(world: vec3f, n: vec3f, albedo: vec3f, ao: f32, species: u32
   let isVeh = species >= 4u;
   var zone = select(0u, 2u, isVeh && in.uv.y > -0.05);
   if (hasTack && in.uv.y > 0.15 && abs(in.uv.x) < 0.45) { zone = 6u; }
-  let albedo = livestockCoatAlbedo(species, zone, seed, in.uv * 0.5);
+  let albedo = livestockCoatAlbedo(species, f32(zone), vec3f(-1.0), seed, in.uv * 0.5);
 
   let toCam = normalize(F.camPos.xyz - in.world);
   let camR = normalize(F.camRight.xyz);
@@ -1215,5 +1302,15 @@ struct HerdNearDomain { domain: vec4f, grid: vec4f };
   let posed = poseLivestockVertex(morphed.pos, morphed.nrm, morphed.part, morphed.shardId, body, herdRig);
   let shifted = posed.localPos + vec3f(nearTerrain.grid.y, 0.0, nearTerrain.grid.z);
   return landSH.lightView * vec4f(shifted - landSH.origin.xyz, 1.0);
+}
+`;
+
+export const HERDS_RESET_WGSL = /* wgsl */ `
+@group(0) @binding(0) var<storage, read_write> draws: array<u32>;
+@compute @workgroup_size(32)
+fn main(@builtin(global_invocation_id) gid: vec3u) {
+  if (gid.x < ${HERD_BUCKETS}u) {
+    draws[gid.x * 5u + 1u] = 0u;
+  }
 }
 `;

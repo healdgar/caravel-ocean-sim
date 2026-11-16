@@ -12,7 +12,7 @@ import { createDistantCrewLOD } from './crew-lod.js';
 import { bakeTownClips } from './town-clips.js';
 import { buildStreetMountSeeds, getLivestockHerdsForDevice, STREET_MOUNT_FLAG } from './herds.js';
 import { TOWN_SHOTS_WORDS, createTownShots } from './town-shots.js';
-import { TOWN_FATE_WORDS, TOWN_SHOT_LIMIT, TOWN_SHOT_WORDS, TOWNSFOLK_BODY_WORDS, TOWNSFOLK_BUCKETS, TOWNSFOLK_LOOKS, TOWNSFOLK_MODELS, TOWNSFOLK_RENDER, TOWNSFOLK_SHADOW, TOWNSFOLK_SHADOW_BUCKET, TOWNSFOLK_TIERS, TOWNSFOLK_WALK } from './wgsl/townsfolk.js';
+import { TOWN_FATE_WORDS, TOWN_SHOT_LIMIT, TOWN_SHOT_WORDS, TOWNSFOLK_BODY_WORDS, TOWNSFOLK_BUCKETS, TOWNSFOLK_LOOKS, TOWNSFOLK_MODELS, TOWNSFOLK_RENDER, TOWNSFOLK_RESET, TOWNSFOLK_SHADOW, TOWNSFOLK_SHADOW_BUCKET, TOWNSFOLK_TIERS, TOWNSFOLK_WALK } from './wgsl/townsfolk.js';
 import { WALKER_WORDS } from './town-streets.js';
 
 const MODELS = TOWNSFOLK_MODELS;
@@ -20,6 +20,7 @@ const BODY_BYTES = TOWNSFOLK_BODY_WORDS * 4;
 const TOWN_DRAW_WORDS = 5;
 const STORAGE_ALIGNMENT_BODIES = 8;
 const PORT_REACH_M = 3200;
+const PORT_OFFSHORE_CULL_M = 3000;
 const PORT_CHECK_FRAMES = 45;
 const MOBILE_SHARE = 0.4;
 const CROWD_UNIFORM_WORDS = 28;
@@ -132,11 +133,12 @@ export function assignStreetMountsToWalkers(streets, { indigenous = false, maxPe
 
 // The people of a port, drawn, shadowed and walked: asked for once a device.
 export function requestTownsfolkPipelines({ device, shader, format = 'rgba16float', samples = 4 }) {
-  return requestOnce(device, `townsfolk v2 ${format} ${samples}`, async () => {
-    const [renderModule, shadowModule, walkModule] = await Promise.all([
+  return requestOnce(device, `townsfolk v3 ${format} ${samples}`, async () => {
+    const [renderModule, shadowModule, walkModule, resetModule] = await Promise.all([
       shader(TOWNSFOLK_RENDER, 'townsfolk'),
       shader(TOWNSFOLK_SHADOW, 'townsfolk shadow'),
       shader(TOWNSFOLK_WALK, 'townsfolk walk'),
+      shader(TOWNSFOLK_RESET, 'townsfolk reset'),
     ]);
     return Promise.all([
       device.createRenderPipelineAsync({
@@ -154,6 +156,7 @@ export function requestTownsfolkPipelines({ device, shader, format = 'rgba16floa
         depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'less', depthBias: 2, depthBiasSlopeScale: 1.5 },
       }),
       device.createComputePipelineAsync({ label: 'townsfolk walk', layout: 'auto', compute: { module: walkModule, entryPoint: 'main' } }),
+      device.createComputePipelineAsync({ label: 'townsfolk reset', layout: 'auto', compute: { module: resetModule, entryPoint: 'main' } }),
     ]);
   });
 }
@@ -166,7 +169,7 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
   };
   const models = shared.models;
   const layout = TOWNSFOLK_VERTICES;
-  const [pipeline, shadowPipeline, walkPipeline] = await requestTownsfolkPipelines({ device, shader, format, samples });
+  const [pipeline, shadowPipeline, walkPipeline, resetPipeline] = await requestTownsfolkPipelines({ device, shader, format, samples });
   const lighting = shadows.bind(pipeline);
   // The shader they share with sailors looks up a ship for its gun flashes. There is none ashore.
   const hullData = new Float32Array(52);
@@ -191,7 +194,13 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     return entry;
   };
 
-  let activePort = null, crowd = null, frameCount = 0;
+  let activePort = null, crowd = null, frameCount = 0, lastCameraX = NaN, lastCameraZ = NaN;
+  const withinPortReach = () => {
+    if (!crowd) return false;
+    const c = crowd.port?.center;
+    if (!c || !Number.isFinite(lastCameraX) || !Number.isFinite(lastCameraZ)) return true;
+    return Math.hypot(c.x - lastCameraX, c.z - lastCameraZ) <= PORT_OFFSHORE_CULL_M;
+  };
   const linkedHerds = () => herds ?? getLivestockHerdsForDevice(device);
   // What has befallen each town's people, kept while the town is out of reach so that the fallen are still lying there
   // on coming back. Each is a buffer on the GPU, so only the last few towns are remembered.
@@ -252,6 +261,10 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     const fateRecord = fatesFor(port, people), fates = fateRecord.buffer;
     const shotLog = createTownShots(streets), shotBytes = new ArrayBuffer(TOWN_SHOTS_WORDS * 4);
     port.townsfolkWatch = shotLog.note;
+    const resetGroup = device.createBindGroup({
+      label: 'townsfolk reset', layout: resetPipeline.getBindGroupLayout(0),
+      entries: [{ binding: 0, resource: { buffer: draws } }],
+    });
     const walkGroup = device.createBindGroup({
       label: 'townsfolk walk', layout: walkPipeline.getBindGroupLayout(0),
       entries: [frameUBO, walkers, route, bodies, draws, uniform, shots, fates].map((b, binding) => ({ binding, resource: { buffer: b } })),
@@ -278,7 +291,7 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
         ].map(([binding, resource]) => ({ binding, resource })),
       }));
     }
-    crowd = { port, people, walkers, route, looks, bodies, draws, uniform, crowdWords, crowdHours: new Float32Array(crowdWords.buffer), hours: NaN, shots, fates, fateRecord, shotLog, shotWords: new Uint32Array(shotBytes), shotFloats: new Float32Array(shotBytes), shotsSent: 0, drawArguments, walkGroup, groups, shadowGroups, geometries };
+    crowd = { port, people, walkers, route, looks, bodies, draws, uniform, crowdWords, crowdHours: new Float32Array(crowdWords.buffer), hours: NaN, shots, fates, fateRecord, shotLog, shotWords: new Uint32Array(shotBytes), shotFloats: new Float32Array(shotBytes), shotsSent: 0, drawArguments, resetGroup, walkGroup, groups, shadowGroups, geometries };
   }
 
   return {
@@ -291,6 +304,10 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     // The share of each town's people that is drawn, for whoever must agree with the picture: their footsteps.
     share: isMobile ? MOBILE_SHARE : 1,
     follow(ports, camera) {
+      if (camera && Number.isFinite(camera.x) && Number.isFinite(camera.z)) {
+        lastCameraX = camera.x;
+        lastCameraZ = camera.z;
+      }
       if (frameCount++ % PORT_CHECK_FRAMES) return;
       let best = null, bestDistance = PORT_REACH_M;
       for (const port of ports ?? []) {
@@ -304,8 +321,10 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     // out is what counts the day: it is told the hour, measured from when this town's record began so that a
     // 32-bit float holds it, and only when the hour has moved on.
     encode(pass, dateMs = Date.now()) {
-      if (!crowd) return;
-      device.queue.writeBuffer(crowd.draws, 0, crowd.drawArguments);
+      if (!withinPortReach()) return;
+      pass.setPipeline(resetPipeline);
+      pass.setBindGroup(0, crowd.resetGroup);
+      pass.dispatchWorkgroups(1);
       if (Number.isFinite(dateMs)) {
         const hours = (dateMs - (crowd.fateRecord.epochMs ??= dateMs)) / 3600000;
         if (!(Math.abs(hours - crowd.hours) < TOWN_CALENDAR_STEP_HOURS)) {
@@ -325,7 +344,7 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     },
     // With the other opaque bodies: no discard, so the GPU shades only what shows.
     draw(pass) {
-      if (!crowd) return;
+      if (!withinPortReach()) return;
       pass.setPipeline(pipeline);
       pass.setBindGroup(1, lighting);
       for (let m = 0; m < MODELS; m++) {
@@ -341,7 +360,7 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     },
     // One draw for each model, of everyone the pass kept for it, from the coarsest body.
     drawShadow(pass) {
-      if (!crowd) return;
+      if (!withinPortReach()) return;
       pass.setPipeline(shadowPipeline);
       for (let m = 0; m < MODELS; m++) {
         pass.setVertexBuffer(0, crowd.geometries[m].vertex);

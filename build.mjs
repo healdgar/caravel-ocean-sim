@@ -250,13 +250,42 @@ write('ocean.html', page.replace(SCRIPT_TAG, () => `<script type="module">\n${co
 // ---- minified bundle --------------------------------------------------------------------
 // WGSL has no string literals, so comments and whitespace can be removed safely. Spaces are
 // kept around + - / so that e.g. "a - -b" or "x / *p" never fuse into other tokens.
-function minifyWGSL(src) {
-  return src
+const TIGHT_WGSL_RELS = new Set([
+  'js/trade-vessels.js', 'js/meadow-grass.js', 'js/boulder-continuum.js',
+  'js/wgsl/herds.js', 'js/wgsl/townsfolk.js', 'js/wgsl/gunnery.js',
+  'js/wgsl/crew-solve.js', 'js/wgsl/inland-water.js', 'js/wgsl/hull-flood.js',
+  'js/wgsl/land-craters.js', 'js/wgsl/part-assembly.js',
+  'js/wgsl/clouds.js', 'js/wgsl/cloud-model.js', 'js/wgsl/sky.js', 'js/wgsl/weather.js',
+  'js/wgsl/spindrift.js', 'js/wgsl/rowing-water.js', 'js/wgsl/neural-pbr.js',
+  'js/wgsl/victory.js', 'js/wgsl/crew.js', 'js/wgsl/surface-waves.js',
+  'js/wgsl/surface-coupling.js', 'js/wgsl/underwater.js', 'js/wgsl/gunnery-probe.js',
+  'js/wgsl/hull-contact.js', 'js/wgsl/rig-surfaces.js', 'js/wgsl/vessel-pose.js',
+  'js/wgsl/vessel-recoil.js', 'js/wgsl/deck.js', 'js/wgsl/wetness.js',
+  'js/forest-clusters.js', 'js/forest-crowns.js', 'js/forest-groves.js',
+  'js/forest-middle.js', 'js/forest-volume.js', 'js/forest-mass.js',
+  'js/forest-surfaces.js', 'js/forest-impostor.js', 'js/forest-native-lod.js',
+  'js/forest-wind.js', 'js/forest-trunks.js', 'js/ship-colors.js',
+  'js/building-fracture.js', 'js/ship-fracture.js',
+  'js/wgsl/terrain.js', 'js/wgsl/caravel.js', 'js/wgsl/props.js',
+  'js/wgsl/vessel.js', 'js/wgsl/neural-post.js', 'js/wgsl/ground-detail.js', 'js/wgsl/lateen.js',
+]);
+const SEMI_TIGHT_WGSL_RELS = new Set();
+function minifyWGSL(src, mode = 0) {
+  let out = src
     .replace(/\/\*[\s\S]*?\*\//g, ' ')
     .replace(/\/\/[^\n]*/g, ' ')
     .replace(/\s+/g, ' ')
-    .replace(/ ?([{}()[\],;:=<>*&|^!%@.]) ?/g, '$1')
-    .trim();
+    .replace(/ ?([{}()[\],;:=<>*&|^!%@.]) ?/g, '$1');
+  if (mode > 0) {
+    out = out
+      .replace(/\b(vec[234]|mat[234]x[234])<(f32|u32|i32)>/g, (_, t, s) => t + s[0])
+      .replace(mode === 2 ? /\b(\d+\.\d*?)0+(?![0-9a-zA-Z_])/g : /\b(\d+\.\d*[1-9])0+(?![0-9a-zA-Z_])/g, '$1')
+      .replace(mode === 2 ? /(?<![0-9a-zA-Z_.])0\.(\d+)/g : /(?<![0-9a-zA-Z_.])0\.([1-9]\d*)/g, '.$1');
+    for (let pass = 0; pass < 2; pass++) {
+      out = out.replace(/([A-Za-z0-9_.)\]]) ([+\-/]) ([A-Za-z0-9_.(\[])/g, '$1$2$3');
+    }
+  }
+  return out.trim();
 }
 
 // Minify every WGSL template literal in the shader modules in place (shared snippets stay
@@ -342,17 +371,20 @@ function minifyWGSLInJS(src, isWgslMod, rel = '') {
     const joinedRaw = rawChunks.join('__P__');
     const shouldMinify = !(rel === 'js/forest-scenery.js' && joinedRaw.includes('forestResidency')) && (isWgslMod
       ? !/<\/?[a-z][\s/>]/i.test(joinedRaw)
-      : ((/@(?:compute|vertex|fragment|group|workgroup_size)\b|\bfn\s+[A-Za-z_]\w*\s*\(|\b(?:struct\s+\w+\s*\{|var<(?:storage|uniform|workgroup|private)>|@(?:location|builtin|binding)\()/.test(joinedRaw)) && !/<\/?[a-z][\s/>]/i.test(joinedRaw)));
+      : ((/@(?:compute|vertex|fragment|group|workgroup_size|location|builtin|binding)\b|\bfn\s+[A-Za-z_]\w*\s*\(|\b(?:struct\s+\w+\s*\{|var<(?:storage|uniform|workgroup|private)>|vec[234][fiu]\s*\(|mat[234]x[234]f)/.test(joinedRaw)) && !/<\/?[a-z][\s/>]/i.test(joinedRaw)));
     if (!shouldMinify) {
-      let orig = rawChunks[0];
-      for (let k = 0; k < exprs.length; k++) orig += exprs[k] + rawChunks[k + 1];
+      const compactHtml = /<\/?[a-z][\s/>]/i.test(joinedRaw) && !/<pre\b/i.test(joinedRaw);
+      const compactCss = !compactHtml && /\n\s*(?:body|\.|#)[\w.-]+[\s,{]/.test(joinedRaw);
+      const fmt = (s) => compactHtml ? s.replace(/\n\s+/g, ' ').replace(/>\s+</g, '><') : (compactCss ? s.replace(/\n\s+/g, ' ') : s);
+      let orig = fmt(rawChunks[0]);
+      for (let k = 0; k < exprs.length; k++) orig += exprs[k] + fmt(rawChunks[k + 1]);
       return '`' + orig + '`';
     }
     let masked = rawChunks[0];
     for (let k = 0; k < exprs.length; k++) masked += `__P${k}__` + rawChunks[k + 1];
     const leadSpace = /^\s/.test(masked) && !/@(?:compute|vertex|fragment)\b/.test(joinedRaw);
     const trailSpace = /\s$/.test(masked) && !/@(?:compute|vertex|fragment)\b/.test(joinedRaw);
-    let min = minifyWGSL(masked);
+    let min = minifyWGSL(masked, TIGHT_WGSL_RELS.has(rel) ? 2 : (SEMI_TIGHT_WGSL_RELS.has(rel) ? 1 : 0));
     if (min && leadSpace) min = ' ' + min;
     if (min && trailSpace) min = min + ' ';
     min = min.replace(/__P(\d+)__/g, (_, k) => exprs[Number(k)]);
@@ -412,6 +444,7 @@ if (esbuild) {
         treeShaking: true,
         format: 'esm',
         target: 'es2022',
+        charset: 'utf8',
         legalComments: 'none',
         logLevel: 'silent',
         write: false,

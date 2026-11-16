@@ -56,6 +56,7 @@ const PORTUGAL_ARCH_COLOURS = Object.freeze({
 export function unattenuatePortugalCrowns(manifest, vertices) {
   const words = new Uint32Array(vertices.buffer, vertices.byteOffset, vertices.byteLength >>> 2);
   for (const p of manifest.prototypes) {
+    if (!p.vertexCount) continue;
     const arch = PORTUGAL_ARCH_COLOURS[p.species];
     if (!arch) continue;
     p.splat.colour = p.splat.colour.map((v, c) => Math.min(2, v / arch.leaf[c]));
@@ -167,6 +168,12 @@ fn forestCrownUnpack(gv:u32)->ForestCrownUnpacked{
 // their mean). Eight leaves around that mean, each counted by how much of it the viewer sees, give the
 // light and colour a pixel full of them would average to. It is the arithmetic of forestNativeLeafFS.
 const FOREST_CROWN_RING=8;
+const FOREST_CROWN_RING_CS=array<vec2f,8>(
+ vec2f(.92387953,.38268343),vec2f(.38268343,.92387953),
+ vec2f(-.38268343,.92387953),vec2f(-.92387953,.38268343),
+ vec2f(-.92387953,-.38268343),vec2f(-.38268343,-.92387953),
+ vec2f(.38268343,-.92387953),vec2f(.92387953,-.38268343)
+);
 struct ForestCrownLight {colour:vec3f,kind:vec2f,leafUV:vec2f,normal:vec3f};
 // The light and colour of a patch of crown at world: leaves is the way its leaves face in the mean,
 // outward the way the body they make up faces there, and optics and underside are a ForestCrownLook's.
@@ -178,8 +185,8 @@ fn forestCrownLight(world:vec3f,leaves:vec3f,outward:vec3f,colour:vec3f,exposure
  let moonDir=lunarDirection();
  var weight=0.;var gain=vec3f(0.);var lit=vec3f(0.);var mean=vec3f(0.);var level=0.;var moon=0.;
  for(var k=0;k<FOREST_CROWN_RING;k++){
-  let a=(f32(k)+.5)*(6.2831853/f32(FOREST_CROWN_RING));
-  var n=middle*alike+(side*cos(a)+other*sin(a))*spread;
+  let cs=FOREST_CROWN_RING_CS[k];
+  var n=middle*alike+(side*cs.x+other*cs.y)*spread;
   let facing=dot(n,view);let seen=abs(facing);
   if(facing<0.){n=-n;}
   let nDotL=dot(n,F.sunDir.xyz);let backlit=max(-nDotL,0.)*optics.y;

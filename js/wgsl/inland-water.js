@@ -204,16 +204,16 @@ fn thalwegBoil(p: vec2f, t: f32, scale: f32) -> vec3f {
     barY = riverBarWave(xzBase, flowDir, cws.shoreDir, speed, t).x * barEnv * opposing;
   }
 
-  let seaBlendV = smoothstep(0.20, 0.36, estuaryT);
-  let tideVert = smoothstep(0.03, 0.30, estuaryT);
-  let horzW = smoothstep(0.18, 0.36, estuaryT);
-  let vertW = mix(tideVert * bankMask, 1.0, seaBlendV);
+  let seaBlendV = smoothstep(0.32, 0.56, estuaryT);
+  let tideVert = smoothstep(0.14, 0.55, estuaryT);
+  let horzW = smoothstep(0.28, 0.54, estuaryT);
+  let vertW = mix(tideVert * bankMask * 0.45, 1.0, seaBlendV);
   let displacedXZ = xzBase + oceanDisp.xz * horzW;
   let splashY = surfaceWaveAt(displacedXZ).x * mix(bankMask, 1.0, seaBlendV);
   let rawRelY = posKind.y + fluvialY + barY;
   let plumeRelY = max(rawRelY, 0.0) + mix(0.090, 0.055, smoothstep(0.42, 0.98, estuaryT));
   let relToOceanY = mix(
-    rawRelY + select(0.0, 0.022 * smoothstep(0.005, 0.08, estuaryT) * bankMask, estuaryT > 0.001),
+    rawRelY + select(0.0, 0.018 * smoothstep(0.08, 0.30, estuaryT) * bankMask, estuaryT > 0.08),
     plumeRelY,
     seaBlendV
   );

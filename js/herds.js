@@ -11,6 +11,7 @@ import {
   HERD_BODY_FLOATS,
   HERD_BUCKETS,
   HERD_DRAW_WORDS,
+  HERD_FADE_BUCKET,
   HERD_FATE_FLOATS,
   HERD_ROUTE_HEADER,
   HERD_SEED_FLOATS,
@@ -21,6 +22,7 @@ import {
   HERD_SPLAT_BUCKET,
   HERD_STAMPEDE_RADIUS_M,
   HERDS_RENDER_WGSL,
+  HERDS_RESET_WGSL,
   HERDS_SHADOW_WGSL,
   HERDS_STEP_WGSL,
 } from './wgsl/herds.js';
@@ -46,7 +48,7 @@ const HERDS_VERTEX_LAYOUT = [{
 const HERD_BODY_BYTES = HERD_BODY_FLOATS * 4;
 const HERD_ALIGN_BODIES = 16;
 // Max downward neck-and-head grazing rotation (radians) per species: sheep, cattle, swine, horse, wain, coach, ox-cart.
-const HERD_GRAZE_PITCH = [0.78, 0.62, 0.34, 0.74, 0, 0, 0];
+const HERD_GRAZE_PITCH = [0.52, 0.44, 0.28, 0.40, 0, 0, 0];
 const CARAVAN_CART_GAP_M = 15, CARAVAN_YOKE_SPREAD_M = 0.62, CARAVAN_DROVE_MOST = 16;
 const CARAVAN_DROVE_SPECIES = Object.freeze({ sheep: 0, cattle: 1, swine: 2, horses: 3 });
 const CARAVAN_COACH_GOODS = new Set([
@@ -740,7 +742,8 @@ export function evaluateHerdStateAt(seeds, routes, fates, idx, clock = 0, elevat
   }
 
   let wy = elev(worldX, worldZ);
-  if (isStreetMount && wayGroundY > -500) wy = Math.max(wy, wayGroundY);
+  if (isStreetMount && fState < 1.5 && wayGroundY > -500) wy = wayGroundY;
+  else if (isStreetMount && wayGroundY > -500) wy = Math.max(wy, wayGroundY);
   if (travelling && routeDeckY > 0.25) wy = Math.max(wy, routeDeckY);
   if (wy < 0.32 && !(travelling && routeDeckY > 0.25) && !isStreetMount) return null;
 
@@ -856,18 +859,28 @@ export function sweepHerdHit(seeds, routes, fates, clock, elevationFn, from, to,
 }
 
 export function requestHerdsPipelines({ device, shader, format = 'rgba16float', samples = 4 }) {
-  return requestOnce(device, `livestock herds v3 ${format} ${samples}`, async () => {
-    const [renderMod, shadowMod, stepMod] = await Promise.all([
+  return requestOnce(device, `livestock herds v4 ${format} ${samples}`, async () => {
+    const [renderMod, shadowMod, stepMod, resetMod] = await Promise.all([
       shader(HERDS_RENDER_WGSL, 'livestock herds'),
       shader(HERDS_SHADOW_WGSL, 'livestock herds shadow'),
       shader(HERDS_STEP_WGSL, 'livestock herds step'),
+      shader(HERDS_RESET_WGSL, 'livestock herds reset'),
     ]);
     return Promise.all([
       device.createRenderPipelineAsync({
-        label: 'livestock herds',
+        label: 'livestock herds solid',
         layout: 'auto',
         vertex: { module: renderMod, entryPoint: 'herdsVS', buffers: HERDS_VERTEX_LAYOUT },
-        fragment: { module: renderMod, entryPoint: 'herdsFS', targets: [{ format }] },
+        fragment: { module: renderMod, entryPoint: 'herdsSolidFS', targets: [{ format }] },
+        primitive: { topology: 'triangle-list', cullMode: 'back' },
+        depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
+        multisample: { count: samples },
+      }),
+      device.createRenderPipelineAsync({
+        label: 'livestock herds fade',
+        layout: 'auto',
+        vertex: { module: renderMod, entryPoint: 'herdsVS', buffers: HERDS_VERTEX_LAYOUT },
+        fragment: { module: renderMod, entryPoint: 'herdsFadeFS', targets: [{ format }] },
         primitive: { topology: 'triangle-list', cullMode: 'back' },
         depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
         multisample: { count: samples },
@@ -892,6 +905,11 @@ export function requestHerdsPipelines({ device, shader, format = 'rgba16float', 
         label: 'livestock herds step',
         layout: 'auto',
         compute: { module: stepMod, entryPoint: 'main' },
+      }),
+      device.createComputePipelineAsync({
+        label: 'livestock herds reset',
+        layout: 'auto',
+        compute: { module: resetMod, entryPoint: 'main' },
       }),
     ]);
   });
@@ -919,11 +937,12 @@ export async function createLivestockHerds({
     if (data.byteLength) device.queue.writeBuffer(buf, 0, data);
     return buf;
   };
-  const [pipeline, splatPipeline, shadowPipeline, stepPipeline] = await Promise.all([
+  const [solidPipeline, fadePipeline, splatPipeline, shadowPipeline, stepPipeline, resetPipeline] = await Promise.all([
     requestHerdsPipelines({ device, shader, format, samples }),
     loadLivestockMeshes(),
   ]).then(([pipes]) => pipes);
-  const cloudGroup = clouds.bindVolume(pipeline);
+  const solidCloudGroup = clouds.bindVolume(solidPipeline);
+  const fadeCloudGroup = clouds.bindVolume(fadePipeline);
   const splatCloudGroup = clouds.bindVolume(splatPipeline);
   const speciesMeshes = [...getLivestockMeshes(), ...getVehicleMeshes()].map((sp, idx) => {
     const rigData = new Float32Array([
@@ -986,12 +1005,22 @@ export async function createLivestockHerds({
       offset: bucket * state.bucketSpan * HERD_BODY_BYTES,
       size: state.bucketSpan * HERD_BODY_BYTES,
     });
-    state.renderGroups = speciesMeshes.map((sp, m) => device.createBindGroup({
-      label: `livestock render ${m}`,
-      layout: pipeline.getBindGroupLayout(0),
+    state.solidGroups = speciesMeshes.map((sp, m) => (state.activeSpeciesMask & (1 << m)) === 0 ? null : device.createBindGroup({
+      label: `livestock solid ${m}`,
+      layout: solidPipeline.getBindGroupLayout(0),
       entries: [
         ...baseEntries,
         [16, slice(m)],
+        [17, { buffer: sp.rig }],
+        [18, { buffer: sp.morph }],
+      ].map(([binding, resource]) => ({ binding, resource })),
+    }));
+    state.fadeGroups = speciesMeshes.map((sp, m) => (state.activeSpeciesMask & (1 << m)) === 0 ? null : device.createBindGroup({
+      label: `livestock fade ${m}`,
+      layout: fadePipeline.getBindGroupLayout(0),
+      entries: [
+        ...baseEntries,
+        [16, slice(HERD_FADE_BUCKET + m)],
         [17, { buffer: sp.rig }],
         [18, { buffer: sp.morph }],
       ].map(([binding, resource]) => ({ binding, resource })),
@@ -1004,7 +1033,7 @@ export async function createLivestockHerds({
         [16, slice(HERD_SPLAT_BUCKET)],
       ].map(([binding, resource]) => ({ binding, resource })),
     });
-    state.shadowGroups = speciesMeshes.map((sp, m) => device.createBindGroup({
+    state.shadowGroups = speciesMeshes.map((sp, m) => (state.activeSpeciesMask & (1 << m)) === 0 ? null : device.createBindGroup({
       label: `livestock shadow ${m}`,
       layout: shadowPipeline.getBindGroupLayout(0),
       entries: [
@@ -1099,12 +1128,19 @@ export async function createLivestockHerds({
       }
     }
 
+    let activeSpeciesMask = 0;
+    for (let i = 0; i < count; i++) {
+      const sp = Math.min(HERD_SPECIES - 1, Math.max(0, Math.round(sliceData[i * HERD_SEED_FLOATS + 6] || 0)));
+      activeSpeciesMask |= (1 << sp);
+    }
+
     const bucketSpan = Math.ceil(count / HERD_ALIGN_BODIES) * HERD_ALIGN_BODIES;
 
     const drawTemplate = new Uint32Array(HERD_BUCKETS * HERD_DRAW_WORDS);
     for (let m = 0; m < HERD_SPECIES; m++) {
       drawTemplate[m * HERD_DRAW_WORDS] = speciesMeshes[m].indexCount;
       drawTemplate[(m + HERD_SPECIES) * HERD_DRAW_WORDS] = speciesMeshes[m].indexCount;
+      drawTemplate[(m + HERD_FADE_BUCKET) * HERD_DRAW_WORDS] = speciesMeshes[m].indexCount;
     }
     // 1-triangle view-facing horizon splat (`drawIndirect`: 3 vertices per distant instance).
     drawTemplate[HERD_SPLAT_BUCKET * HERD_DRAW_WORDS] = 3;
@@ -1119,6 +1155,12 @@ export async function createLivestockHerds({
     const draws = mkBuf('livestock indirect draws', drawTemplate, B.STORAGE | B.INDIRECT);
     clockU[0] = count; clockU[1] = bucketSpan;
     const cfg = mkBuf('livestock config', clock, B.UNIFORM);
+
+    const resetGroup = device.createBindGroup({
+      label: 'livestock reset',
+      layout: resetPipeline.getBindGroupLayout(0),
+      entries: [{ binding: 0, resource: { buffer: draws } }],
+    });
 
     const stepGroup = device.createBindGroup({
       label: 'livestock step',
@@ -1144,6 +1186,7 @@ export async function createLivestockHerds({
       pastureCount,
       caravanCount,
       mountCount,
+      activeSpeciesMask,
       bucketSpan,
       seeds,
       routes,
@@ -1153,8 +1196,10 @@ export async function createLivestockHerds({
       drawTemplate,
       cpuSeeds: sliceData,
       cpuRoutes: combinedRoutes,
+      resetGroup,
       stepGroup,
-      renderGroups: [],
+      solidGroups: [],
+      fadeGroups: [],
       splatGroup: null,
       shadowGroups: [],
     };
@@ -1219,6 +1264,7 @@ export async function createLivestockHerds({
     get streetMounts() { return streetMounts.count ?? 0; },
     get activeCaravans() { return lastCaravans?.list ?? []; },
     get caravanOrigin() { return lastCaravans?.origin ?? null; },
+    get activeSpeciesMask() { return state?.activeSpeciesMask ?? 0; },
     get fates() { return cpuFates; },
     setHerds,
     setCaravans,
@@ -1239,7 +1285,9 @@ export async function createLivestockHerds({
     encode(pass, timeSeconds = null) {
       if (Number.isFinite(timeSeconds)) simClockSec = timeSeconds;
       if (!state) return;
-      device.queue.writeBuffer(state.draws, 0, state.drawTemplate);
+      pass.setPipeline(resetPipeline);
+      pass.setBindGroup(0, state.resetGroup);
+      pass.dispatchWorkgroups(1);
       if (travellers.seeds.length || streetMounts.seeds.length) {
         device.queue.writeBuffer(state.cfg, 8, clock, 8, 8);
       }
@@ -1270,14 +1318,24 @@ export async function createLivestockHerds({
       pass.dispatchWorkgroups(Math.ceil(state.count / 64));
     },
     draw(pass) {
-      if (!state) return;
-      pass.setPipeline(pipeline);
-      pass.setBindGroup(1, cloudGroup);
+      if (!state || !state.activeSpeciesMask) return;
+      pass.setPipeline(solidPipeline);
+      pass.setBindGroup(1, solidCloudGroup);
       for (let m = 0; m < HERD_SPECIES; m++) {
-        pass.setBindGroup(0, state.renderGroups[m]);
+        if ((state.activeSpeciesMask & (1 << m)) === 0) continue;
+        pass.setBindGroup(0, state.solidGroups[m]);
         pass.setVertexBuffer(0, speciesMeshes[m].vertex);
         pass.setIndexBuffer(speciesMeshes[m].index, 'uint32');
         pass.drawIndexedIndirect(state.draws, m * HERD_DRAW_WORDS * 4);
+      }
+      pass.setPipeline(fadePipeline);
+      pass.setBindGroup(1, fadeCloudGroup);
+      for (let m = 0; m < HERD_SPECIES; m++) {
+        if ((state.activeSpeciesMask & (1 << m)) === 0) continue;
+        pass.setBindGroup(0, state.fadeGroups[m]);
+        pass.setVertexBuffer(0, speciesMeshes[m].vertex);
+        pass.setIndexBuffer(speciesMeshes[m].index, 'uint32');
+        pass.drawIndexedIndirect(state.draws, (HERD_FADE_BUCKET + m) * HERD_DRAW_WORDS * 4);
       }
       if (state.splatGroup) {
         pass.setPipeline(splatPipeline);
@@ -1287,9 +1345,10 @@ export async function createLivestockHerds({
       }
     },
     drawShadow(pass) {
-      if (!state) return;
+      if (!state || !state.activeSpeciesMask) return;
       pass.setPipeline(shadowPipeline);
       for (let m = 0; m < HERD_SPECIES; m++) {
+        if ((state.activeSpeciesMask & (1 << m)) === 0) continue;
         pass.setBindGroup(0, state.shadowGroups[m]);
         pass.setVertexBuffer(0, speciesMeshes[m].vertex);
         pass.setIndexBuffer(speciesMeshes[m].index, 'uint32');

@@ -44,6 +44,8 @@ const MEADOW_MORPH_REMAP_WORDS = 276;
 const MEADOW_MORPH_VAR_WORDS = MEADOW_MORPH_REMAP_OFFSET + MEADOW_MORPH_REMAP_WORDS; // 628 words = 2512 bytes
 const MEADOW_GRID_SIDE_DESKTOP = 152; // 152 x 152 (~266 m near span) + 6x outer continuum ring (~782 m radius)
 const MEADOW_GRID_SIDE_MOBILE = 96;   // 96 x 96 (~168 m near span) + 6x outer continuum ring (~488 m radius)
+export const MEADOW_MAX_DIST = (MEADOW_GRID_SIDE_DESKTOP / 2) * MEADOW_TILE_METRES * MEADOW_MACRO_MUL - 16.0;
+const MEADOW_COARSE_GRID = 64;
 const MEADOW_BUCKET_SPAN = 32768;
 const MEADOW_COVER_DESKTOP = 2048; // 4.0 m/texel across 8192 m region with bilinear SDF filtering
 const MEADOW_COVER_MOBILE = 1024;
@@ -690,6 +692,12 @@ fn meadowPush(bucket: u32, posRot: vec4f, attrs: vec4f) {
     let base = (bucket * cfg.params.y + slot) * 2u;
     meadowInstWords[base] = posRot;
     meadowInstWords[base + 1u] = attrs;
+  }
+}
+
+@compute @workgroup_size(8, 1, 1) fn meadowReset(@builtin(global_invocation_id) gid: vec3u) {
+  if (gid.x < ${MEADOW_BUCKETS}u) {
+    atomicStore(&meadowDraws[gid.x * 4u + 1u], 0u);
   }
 }
 
@@ -1655,8 +1663,13 @@ struct MeadowCoverageOut {
 
 export function requestMeadowPipelines({ device, shader, format = 'rgba16float', samples = 4 }) {
   return requestOnce(device, `meadow grass ${format} ${samples}`, async () => {
-    // Compile sequentially across all 6 pipelines so Windows D3D12 DXC never spikes PSO heap memory.
+    // Compile sequentially across all pipelines so Windows D3D12 DXC never spikes PSO heap memory.
     const stepMod = await shader(MEADOW_STEP_WGSL, 'meadow grass step');
+    const resetPipe = await device.createComputePipelineAsync({
+      label: 'meadow reset',
+      layout: 'auto',
+      compute: { module: stepMod, entryPoint: 'meadowReset' },
+    });
     const stepPipe = await device.createComputePipelineAsync({
       label: 'meadow select',
       layout: 'auto',
@@ -1679,7 +1692,7 @@ export function requestMeadowPipelines({ device, shader, format = 'rgba16float',
     const contFadePipe = await mkPipe('meadow continuum fade', 'meadowContVS', 'meadowContFadeFS', 'back');
     const contSolidPipe = await mkPipe('meadow continuum solid', 'meadowContVS', 'meadowFS', 'back');
     const splatPipe = await mkPipe('meadow splat', 'meadowSplatVS', 'meadowFS', 'none');
-    return [stepPipe, clusterPipe, clusterFadePipe, contFadePipe, contSolidPipe, splatPipe];
+    return [stepPipe, clusterPipe, clusterFadePipe, contFadePipe, contSolidPipe, splatPipe, resetPipe];
   });
 }
 
@@ -1715,7 +1728,7 @@ export async function createMeadowGrass({
     return buf;
   };
 
-  const [stepPipe, clusterPipe, clusterFadePipe, contFadePipe, contSolidPipe, splatPipe] = await requestMeadowPipelines({
+  const [stepPipe, clusterPipe, clusterFadePipe, contFadePipe, contSolidPipe, splatPipe, resetPipe] = await requestMeadowPipelines({
     device,
     shader,
     format,
@@ -1723,6 +1736,7 @@ export async function createMeadowGrass({
   });
 
   const gridSide = isMobile ? MEADOW_GRID_SIDE_MOBILE : MEADOW_GRID_SIDE_DESKTOP;
+  const maxMeadowDist = (gridSide * 0.5) * MEADOW_TILE_METRES * MEADOW_MACRO_MUL - 16.0;
   const vertsBuf = mkBuf('meadow verts', pack.vertices, B.STORAGE);
   const idxBuf = mkBuf('meadow indices', pack.indices, B.STORAGE);
   const clusterBuf = mkBuf('meadow clusters', pack.clusters, B.STORAGE);
@@ -1848,6 +1862,11 @@ export async function createMeadowGrass({
 
   let activeResources = resources;
   let stepGroup = null;
+  const resetGroup = device.createBindGroup({
+    label: 'meadow reset group',
+    layout: resetPipe.getBindGroupLayout(0),
+    entries: [{ binding: 7, resource: { buffer: drawsBuf } }],
+  });
   const pipeGroups = new Map();
   const pipeCloudGroups = new Map();
   const bucketBindGroups = new Map();
@@ -1932,6 +1951,100 @@ export async function createMeadowGrass({
   let curBoard = board;
   let curInlandWater = inlandWater;
   let coverTexels = 0;
+  let worldOffX = 0, worldOffZ = 0;
+  let covMinX = -Infinity, covMaxX = Infinity, covMinZ = -Infinity, covMaxZ = Infinity;
+  const coarseMaxCover = new Uint8Array(MEADOW_COARSE_GRID * MEADOW_COARSE_GRID);
+  const coarseMinY = new Float32Array(MEADOW_COARSE_GRID * MEADOW_COARSE_GRID);
+  const coarseMaxY = new Float32Array(MEADOW_COARSE_GRID * MEADOW_COARSE_GRID);
+  let lastEncodeActive = true;
+
+  function isCameraInMeadowRange(camOrFrame = null, viewProjArg = null) {
+    if (!coverTexels) return false;
+    let camX = NaN, camY = NaN, camZ = NaN;
+    let vp = viewProjArg && viewProjArg.length >= 16 ? viewProjArg : null;
+    if (camOrFrame) {
+      if ((camOrFrame instanceof Float32Array || Array.isArray(camOrFrame)) && camOrFrame.length >= 19) {
+        camX = camOrFrame[16];
+        camY = camOrFrame[17];
+        camZ = camOrFrame[18];
+        if (!vp) vp = camOrFrame;
+      } else if (typeof camOrFrame === 'object') {
+        camX = Number(camOrFrame.x ?? camOrFrame[0]);
+        camY = Number(camOrFrame.y ?? camOrFrame[1] ?? 6);
+        camZ = Number(camOrFrame.z ?? camOrFrame[2]);
+      }
+    }
+    if (!Number.isFinite(camX) || !Number.isFinite(camZ)) return true;
+    const ux = camX - worldOffX;
+    const uz = camZ - worldOffZ;
+    const reach = maxMeadowDist + 60.0;
+    if (ux < covMinX - reach || ux > covMaxX + reach || uz < covMinZ - reach || uz > covMaxZ + reach) {
+      return false;
+    }
+
+    const span = curRegion.span;
+    const rx0 = curRegion.x - span * 0.5;
+    const rz0 = curRegion.z - span * 0.5;
+    const cellM = span / MEADOW_COARSE_GRID;
+    const invCell = MEADOW_COARSE_GRID / span;
+    const ci0 = Math.max(0, Math.floor((ux - reach - rx0) * invCell));
+    const ci1 = Math.min(MEADOW_COARSE_GRID - 1, Math.floor((ux + reach - rx0) * invCell));
+    const cj0 = Math.max(0, Math.floor((uz - reach - rz0) * invCell));
+    const cj1 = Math.min(MEADOW_COARSE_GRID - 1, Math.floor((uz + reach - rz0) * invCell));
+    if (ci0 > ci1 || cj0 > cj1) return false;
+
+    const reachSq = reach * reach;
+    let hasNearby = false;
+    let lMinX = Infinity, lMaxX = -Infinity, lMinY = Infinity, lMaxY = -Infinity, lMinZ = Infinity, lMaxZ = -Infinity;
+    for (let cj = cj0; cj <= cj1; cj++) {
+      const cz0 = rz0 + cj * cellM, cz1 = cz0 + cellM;
+      const dz = Math.max(cz0 - uz, 0, uz - cz1);
+      const dzSq = dz * dz;
+      if (dzSq > reachSq) continue;
+      const row = cj * MEADOW_COARSE_GRID;
+      for (let ci = ci0; ci <= ci1; ci++) {
+        if (!coarseMaxCover[row + ci]) continue;
+        const cx0 = rx0 + ci * cellM, cx1 = cx0 + cellM;
+        const dx = Math.max(cx0 - ux, 0, ux - cx1);
+        if (dx * dx + dzSq > reachSq) continue;
+        hasNearby = true;
+        if (cx0 < lMinX) lMinX = cx0;
+        if (cx1 > lMaxX) lMaxX = cx1;
+        if (cz0 < lMinZ) lMinZ = cz0;
+        if (cz1 > lMaxZ) lMaxZ = cz1;
+        const cMinY = coarseMinY[row + ci], cMaxY = coarseMaxY[row + ci];
+        if (cMinY < lMinY) lMinY = cMinY;
+        if (cMaxY > lMaxY) lMaxY = cMaxY;
+      }
+    }
+    if (!hasNearby) return false;
+
+    // Safe vertical altitude check: above 3.2 km over highest nearby grass ground, macro-tiles are sub-0.3 px and blend into landAlbedo.
+    if (Number.isFinite(camY) && camY - lMaxY > Math.max(maxMeadowDist * 3.5, 2800)) {
+      return false;
+    }
+
+    // Safe conservative frustum sphere check against nearby covered meadow AABB
+    if (vp && Number.isFinite(camY)) {
+      const boxMinY = lMinY - 32.0, boxMaxY = lMaxY + 18.0;
+      const cx = (lMinX + lMaxX) * 0.5 + worldOffX;
+      const cy = (boxMinY + boxMaxY) * 0.5;
+      const cz = (lMinZ + lMaxZ) * 0.5 + worldOffZ;
+      const rad = Math.hypot(lMaxX - lMinX, boxMaxY - boxMinY, lMaxZ - lMinZ) * 0.5 + 24.0;
+      const rx = cx - camX, ry = cy - camY, rz = cz - camZ;
+      const isCamRel = Math.abs(vp[12]) < 1e-4 && Math.abs(vp[13]) < 1e-4 && Math.abs(vp[15]) < 1e-4;
+      const px = isCamRel ? rx : cx, py = isCamRel ? ry : cy, pz = isCamRel ? rz : cz;
+      const clipX = vp[0] * px + vp[4] * py + vp[8] * pz + vp[12];
+      const clipY = vp[1] * px + vp[5] * py + vp[9] * pz + vp[13];
+      const clipW = vp[3] * px + vp[7] * py + vp[11] * pz + vp[15];
+      if (clipW < -rad * Math.hypot(vp[3], vp[7], vp[11])) return false;
+      if (clipW + clipX < -rad * Math.hypot(vp[3] + vp[0], vp[7] + vp[4], vp[11] + vp[8])) return false;
+      if (clipW - clipX < -rad * Math.hypot(vp[3] - vp[0], vp[7] - vp[4], vp[11] - vp[8])) return false;
+      if (clipW + clipY < -rad * Math.hypot(vp[3] + vp[1], vp[7] + vp[5], vp[11] + vp[9])) return false;
+      if (clipW - clipY < -rad * Math.hypot(vp[3] - vp[1], vp[7] - vp[5], vp[11] - vp[9])) return false;
+    }
+    return true;
+  }
 
   function sync(next = {}) {
     if (next.region !== undefined) curRegion = next.region;
@@ -1957,7 +2070,46 @@ export async function createMeadowGrass({
       size: coverSize,
     });
     coverTexels = 0;
-    for (let i = 0; i < map.length; i += 4) if (map[i] >= 32) coverTexels++;
+    coarseMaxCover.fill(0);
+    coarseMinY.fill(Infinity);
+    coarseMaxY.fill(-Infinity);
+    covMinX = Infinity; covMaxX = -Infinity; covMinZ = Infinity; covMaxZ = -Infinity;
+    const span = curRegion.span;
+    const rx0 = curRegion.x - span * 0.5, rz0 = curRegion.z - span * 0.5;
+    const step = span / coverSize;
+    const hN = curRegion.size || Math.round(Math.sqrt(curHeights?.length || 0));
+    const hasH = hN >= 2 && curHeights?.length >= hN * hN;
+    for (let j = 0; j < coverSize; j++) {
+      const cj = Math.min(MEADOW_COARSE_GRID - 1, Math.floor((j * MEADOW_COARSE_GRID) / coverSize));
+      const wz = rz0 + (j + 0.5) * step;
+      const hj = hasH ? Math.min(hN - 1, Math.floor(((j + 0.5) / coverSize) * (hN - 1))) * hN : 0;
+      const row = j * coverSize;
+      for (let i = 0; i < coverSize; i++) {
+        const r = map[(row + i) * 4];
+        if (r >= 32) coverTexels++;
+        if (r >= 5) {
+          const wx = rx0 + (i + 0.5) * step;
+          if (wx < covMinX) covMinX = wx;
+          if (wx > covMaxX) covMaxX = wx;
+          if (wz < covMinZ) covMinZ = wz;
+          if (wz > covMaxZ) covMaxZ = wz;
+          const ci = Math.min(MEADOW_COARSE_GRID - 1, Math.floor((i * MEADOW_COARSE_GRID) / coverSize));
+          const cIdx = cj * MEADOW_COARSE_GRID + ci;
+          if (r > coarseMaxCover[cIdx]) coarseMaxCover[cIdx] = r;
+          const gy = hasH
+            ? curHeights[hj + Math.min(hN - 1, Math.floor(((i + 0.5) / coverSize) * (hN - 1)))]
+            : 0;
+          if (gy < coarseMinY[cIdx]) coarseMinY[cIdx] = gy;
+          if (gy > coarseMaxY[cIdx]) coarseMaxY[cIdx] = gy;
+        }
+      }
+    }
+    for (let k = 0; k < coarseMaxCover.length; k++) {
+      if (!coarseMaxCover[k]) {
+        coarseMinY[k] = 0;
+        coarseMaxY[k] = 0;
+      }
+    }
     device.queue.writeTexture({ texture: coverTexture }, map, { bytesPerRow: coverSize * 4 }, [coverSize, coverSize]);
   }
 
@@ -2091,20 +2243,31 @@ export async function createMeadowGrass({
     sync,
     bindCraters,
     setBallisticWakes,
+    setWorldOffset(dx = 0, dz = 0) {
+      worldOffX = Number.isFinite(dx) ? dx : 0;
+      worldOffZ = Number.isFinite(dz) ? dz : 0;
+    },
     rebind(nextResources) {
       activeResources = nextResources;
       buildPipeBindGroups(activeResources);
     },
-    encode(pass) {
-      if (!coverTexels) return;
-      device.queue.writeBuffer(drawsBuf, 0, drawTemplate);
+    encode(pass, camOrFrame = null, viewProjArg = null) {
+      if (!isCameraInMeadowRange(camOrFrame, viewProjArg)) {
+        lastEncodeActive = false;
+        return;
+      }
+      lastEncodeActive = true;
+      pass.setPipeline(resetPipe);
+      pass.setBindGroup(0, resetGroup);
+      pass.dispatchWorkgroups(1);
       pass.setPipeline(stepPipe);
       pass.setBindGroup(0, stepGroup);
       const groups = Math.ceil(gridSide / 8);
       pass.dispatchWorkgroups(groups, groups, 2);
     },
-    draw(pass) {
-      if (!coverTexels) return;
+    draw(pass, camOrFrame = null, viewProjArg = null) {
+      if (!coverTexels || !lastEncodeActive) return;
+      if (camOrFrame && !isCameraInMeadowRange(camOrFrame, viewProjArg)) return;
       for (const [pipe, buckets] of DRAW_ORDER) {
         pass.setPipeline(pipe);
         pass.setBindGroup(0, pipeGroups.get(pipe));
@@ -2114,6 +2277,9 @@ export async function createMeadowGrass({
           pass.drawIndirect(drawsBuf, b * 16);
         }
       }
+    },
+    drawOpaque(pass, camOrFrame = null, viewProjArg = null) {
+      this.draw(pass, camOrFrame, viewProjArg);
     },
     destroy() {
       unsubscribeCraters?.();

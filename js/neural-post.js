@@ -110,6 +110,9 @@ export async function createNeuralLightPass({
   );
 
   const paramsData = new Float32Array(24);
+  const uploadedParams = new Float32Array(24);
+  let hasUploadedParams = false;
+  let lastUploadW = -1, lastUploadH = -1;
   const paramsUBO = device.createBuffer({
     label: 'neural light params',
     size: paramsData.byteLength,
@@ -117,6 +120,25 @@ export async function createNeuralLightPass({
   });
   const prevViewProj = new Float32Array(16);
   const prevCamPos = new Float64Array(3);
+
+  const flushParamsIfDirty = () => {
+    let dirty = !hasUploadedParams || width !== lastUploadW || height !== lastUploadH;
+    if (!dirty) {
+      for (let i = 0; i < 24; i++) {
+        if (paramsData[i] !== uploadedParams[i]) {
+          dirty = true;
+          break;
+        }
+      }
+    }
+    if (dirty) {
+      uploadedParams.set(paramsData);
+      hasUploadedParams = true;
+      lastUploadW = width;
+      lastUploadH = height;
+      device.queue.writeBuffer(paramsUBO, 0, paramsData);
+    }
+  };
 
   let width = 0, height = 0, qw = 0, qh = 0, wgX = 0, wgY = 0;
   let featBuf = null;
@@ -279,7 +301,7 @@ export async function createNeuralLightPass({
     if (currentStrength <= 0.001) {
       historyValid = 0;
       paramsData.fill(0);
-      device.queue.writeBuffer(paramsUBO, 0, paramsData);
+      flushParamsIfDirty();
       return;
     }
     let valid = historyValid && !resetHistory ? 1 : 0;
@@ -302,7 +324,7 @@ export async function createNeuralLightPass({
     paramsData[21] = giGain;
     paramsData[22] = detailGain;
     paramsData[23] = temporalAlpha;
-    device.queue.writeBuffer(paramsUBO, 0, paramsData);
+    flushParamsIfDirty();
 
     prevViewProj.set(viewProj);
     prevCamPos[0] = camX;

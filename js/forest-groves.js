@@ -461,6 +461,41 @@ export async function createForestGroves({ device, shader, module, frameUBO, pac
     });
     const scene = bind(pipeline), cloud = cloudEntries(pipeline);
     const sections = new Map(), stats = { loaded: true, tileMetres: m.tileMetres, levels: FOREST_GROVE_LEVELS, pixelsPerSquare, sections: 0, groves: 0, bakes: 0 };
+    const visibleSections = [];
+    let lastFrameF = null, worldOffX = 0, worldOffZ = 0;
+    const GROVE_MAX_DIST_SQ = 26000 * 26000;
+    const isSectionVisible = (section, frame) => {
+      if (!section.count) return false;
+      if (!frame || frame.length < 19) return true;
+      const camX = frame[16], camY = frame[17], camZ = frame[18];
+      if (!Number.isFinite(camX) || !Number.isFinite(camY) || !Number.isFinite(camZ)) return true;
+      const minX = section.minX + worldOffX, maxX = section.maxX + worldOffX;
+      const minZ = section.minZ + worldOffZ, maxZ = section.maxZ + worldOffZ;
+      const dxBox = Math.max(minX - camX, 0, camX - maxX);
+      const dzBox = Math.max(minZ - camZ, 0, camZ - maxZ);
+      if (dxBox * dxBox + dzBox * dzBox > GROVE_MAX_DIST_SQ) return false;
+      const cx = section.cx + worldOffX, cy = section.cy, cz = section.cz + worldOffZ;
+      const rx = cx - camX, ry = cy - camY, rz = cz - camZ;
+      const farEdge = Math.hypot(rx, ry, rz) + section.radius;
+      const effR = section.radius + (farEdge * farEdge) / 12742000;
+      const isCamRel = Math.abs(frame[12]) < 1e-4 && Math.abs(frame[13]) < 1e-4 && Math.abs(frame[15]) < 1e-4;
+      const px = isCamRel ? rx : cx, py = isCamRel ? ry : cy, pz = isCamRel ? rz : cz;
+      const clipX = frame[0] * px + frame[4] * py + frame[8] * pz + frame[12];
+      const clipY = frame[1] * px + frame[5] * py + frame[9] * pz + frame[13];
+      const clipW = frame[3] * px + frame[7] * py + frame[11] * pz + frame[15];
+      if (clipW < -effR * Math.hypot(frame[3], frame[7], frame[11])) return false;
+      if (clipW + clipX < -effR * Math.hypot(frame[3] + frame[0], frame[7] + frame[4], frame[11] + frame[8])) return false;
+      if (clipW - clipX < -effR * Math.hypot(frame[3] - frame[0], frame[7] - frame[4], frame[11] - frame[8])) return false;
+      if (clipW + clipY < -effR * Math.hypot(frame[3] + frame[1], frame[7] + frame[5], frame[11] + frame[9])) return false;
+      if (clipW - clipY < -effR * Math.hypot(frame[3] - frame[1], frame[7] - frame[5], frame[11] - frame[9])) return false;
+      return true;
+    };
+    const refreshVisible = (frame) => {
+      visibleSections.length = 0;
+      for (const section of sections.values()) {
+        if (isSectionVisible(section, frame)) visibleSections.push(section);
+      }
+    };
     const release = (section, immediate = false) => {
       const drop = () => { for (const resource of section.owned) resource.destroy(); };
       if (!immediate && typeof device.queue?.onSubmittedWorkDone === 'function') device.queue.onSubmittedWorkDone().then(drop).catch(() => {});
@@ -480,6 +515,7 @@ export async function createForestGroves({ device, shader, module, frameUBO, pac
       const entry = (binding, buffer) => ({ binding, resource: { buffer } });
       return {
         owned: mine, ownsGround: !source.ground, groundSize: region.size, ground, cover, tiles, draws, uniform, size, most, count: 0, stamp: '', bytes: null,
+        minX: 0, maxX: 0, minY: 0, maxY: 0, minZ: 0, maxZ: 0, cx: 0, cy: 0, cz: 0, radius: 0,
         resetGroup: device.createBindGroup({ layout: reset.getBindGroupLayout(0), entries: [entry(5, draws)] }),
         cullGroup: device.createBindGroup({ layout: cull.getBindGroupLayout(0), entries: [entry(0, frameUBO), entry(1, policy), entry(2, uniform), entry(3, tiles), entry(4, list), entry(5, draws)] }),
         drawGroup: device.createBindGroup({ layout: pipeline.getBindGroupLayout(2), entries: [
@@ -514,29 +550,69 @@ export async function createForestGroves({ device, shader, module, frameUBO, pac
           device.queue.writeTexture({ texture: section.cover }, section.bytes, { bytesPerRow: section.size * 2 }, [section.size, section.size]);
           const tiles = forestGroveTiles({ cover: section.bytes, size: section.size, region, heights: source.heights, tileMetres: m.tileMetres });
           section.count = tiles.length / 4;
-          if (section.count) device.queue.writeBuffer(section.tiles, 0, tiles);
+          if (section.count) {
+            device.queue.writeBuffer(section.tiles, 0, tiles);
+            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+            for (let t = 0; t < tiles.length; t += 4) {
+              const tx = tiles[t], tz = tiles[t + 1], lo = tiles[t + 2], hi = tiles[t + 3];
+              if (tx < minX) minX = tx;
+              if (tx + m.tileMetres > maxX) maxX = tx + m.tileMetres;
+              if (lo < minY) minY = lo;
+              if (hi > maxY) maxY = hi;
+              if (tz < minZ) minZ = tz;
+              if (tz + m.tileMetres > maxZ) maxZ = tz + m.tileMetres;
+            }
+            section.minX = minX;
+            section.maxX = maxX;
+            section.minY = minY - 80;
+            section.maxY = maxY + m.heightMetres + 8;
+            section.minZ = minZ;
+            section.maxZ = maxZ;
+            section.cx = (minX + maxX) * 0.5;
+            section.cy = (section.minY + section.maxY) * 0.5;
+            section.cz = (minZ + maxZ) * 0.5;
+            section.radius = Math.hypot(maxX - minX, section.maxY - section.minY, maxZ - minZ) * 0.5 * 1.25;
+          }
           const harbour = source.port?.center ?? sources[0].port?.center ?? sources[0].region;
           device.queue.writeBuffer(section.uniform, 0, new Float32Array([region.x - region.span / 2, region.z - region.span / 2, region.span, region.size, section.count, harbour.x, harbour.z, m.harbourHeight ?? FOREST_GROVE_HARBOUR_HEIGHT]));
           groves += section.count;
         }
         for (const [key, section] of sections) if (!seen.has(key)) { release(section); sections.delete(key); }
         stats.sections = sections.size; stats.groves = groves;
+        refreshVisible(lastFrameF);
         return stands;
+      },
+      setWorldOffset(dx = 0, dz = 0) {
+        worldOffX = Number.isFinite(dx) ? dx : 0;
+        worldOffZ = Number.isFinite(dz) ? dz : 0;
       },
       // The climate's cast on the leaves, which a coast learns late (js/terrain.js).
       setTint(next) { device.queue.writeBuffer(look, 32, new Float32Array(next.slice(0, 3))); },
       encode(pass) {
-        for (const section of sections.values()) {
-          if (!section.count) continue;
-          pass.setPipeline(reset); pass.setBindGroup(0, section.resetGroup); pass.dispatchWorkgroups(1);
-          pass.setPipeline(cull); pass.setBindGroup(0, section.cullGroup); pass.dispatchWorkgroups(Math.ceil(section.count / 64));
+        if (arguments.length > 1) lastFrameF = arguments[1] ?? null;
+        refreshVisible(lastFrameF);
+        const n = visibleSections.length;
+        if (!n) return;
+        pass.setPipeline(reset);
+        for (let i = 0; i < n; i++) {
+          pass.setBindGroup(0, visibleSections[i].resetGroup);
+          pass.dispatchWorkgroups(1);
+        }
+        pass.setPipeline(cull);
+        for (let i = 0; i < n; i++) {
+          const section = visibleSections[i];
+          pass.setBindGroup(0, section.cullGroup);
+          pass.dispatchWorkgroups(Math.ceil(section.count / 64));
         }
       },
       drawOpaque(pass) {
         if (!stats.groves) return;
+        if (arguments.length > 1) refreshVisible(arguments[1] ?? lastFrameF);
+        const n = visibleSections.length;
+        if (!n) return;
         pass.setPipeline(pipeline); pass.setBindGroup(0, scene); pass.setBindGroup(1, cloud); pass.setIndexBuffer(indices, 'uint16');
-        for (const section of sections.values()) {
-          if (!section.count) continue;
+        for (let i = 0; i < n; i++) {
+          const section = visibleSections[i];
           pass.setBindGroup(2, section.drawGroup);
           for (let level = 0; level < FOREST_GROVE_LEVELS; level++) { pass.setBindGroup(3, levels[level]); pass.drawIndexedIndirect(section.draws, level * 20); }
         }

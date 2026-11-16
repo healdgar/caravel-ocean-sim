@@ -1609,9 +1609,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   }
   let inlandWater=proceduralPack?await createInlandWater({device,shader,format,samples,resources:nearResources,clouds,coastalField,oceanBridge,initialGeometry:proceduralPack.inlandWater??null}):null;
   let herds=proceduralPack?await createLivestockHerds({device,shader,format,samples,frameUBO,landUniform:uniform,nearDomain,elevation,landShadowUniform:activeLandShadows.uniform,resources:nearResources,clouds,initialHerds:proceduralPack.herds??null,initialBridges:proceduralPack.port?.country?.bridges??null,isMobile}):null;
-  if(herds&&proceduralPack?.port?.streets?.mounts){
-    herds.setStreetMounts?.(proceduralPack.port.streets.mounts.seeds,proceduralPack.port.streets.mounts.routes);
-  }
   const meadowPack=await meadowPromise;
   let meadowGrass=null;
   if(proceduralPack&&meadowPack)try{
@@ -2306,9 +2303,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     inlandWater?.setGeometry(upgradedPack.inlandWater??null);
     herds?.setBridges?.(upgradedPack.port?.country?.bridges??null);
     herds?.setHerds(upgradedPack.herds??null);
-    if(upgradedPack.port?.streets?.mounts){
-      herds?.setStreetMounts?.(upgradedPack.port.streets.mounts.seeds,upgradedPack.port.streets.mounts.routes);
-    }
     meadowGrass?.sync({region:activeRegion,heights,biome,beaches:proceduralPack.beaches??null,port:portOwner.port??null,city:upgradedPack.city??proceduralPack.city??null,board:upgradedPack.board??proceduralPack.board??null,inlandWater:upgradedPack.inlandWater??proceduralPack.inlandWater??null});
     if(upgradedPack.port?.country?.board){
       tradeVessels?.setTraffic(null,activeRegion,upgradedPack.port.country.riverReaches??[],upgradedPack.port.country.places??[],{heights,region:activeRegion,port:upgradedPack.port,bridges:upgradedPack.port.country.bridges??[],inlandWaterAt:(wx,wz)=>inlandWaterSampler?inlandWaterSampler(wx,wz):null});
@@ -2549,7 +2543,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   });
   meadowGrass?.bindCraters?.(craters);
   const recentBlastRings=[];
+  const EMPTY_BALLISTIC_LIST=[];
   let lastBallisticClock=0;
+  let hadActiveBallistics=false;
   function recordBlastRing(wx,wz,strength=1,hot=false,wy=null){
     const lx=wx-worldOffset.x,lz=wz-worldOffset.z;
     const y=Number.isFinite(wy)?wy:baseGroundSample(lx,lz);
@@ -2827,6 +2823,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     setBallisticProjectiles(projectiles,nowSec=0){
       if(Number.isFinite(nowSec))lastBallisticClock=nowSec;
       if(!meadowGrass)return;
+      if((!projectiles||projectiles.length===0)&&recentBlastRings.length===0&&!hadActiveBallistics)return;
       for(let i=recentBlastRings.length-1;i>=0;i--){
         if(lastBallisticClock-recentBlastRings[i].t0>recentBlastRings[i].maxAge)recentBlastRings.splice(i,1);
       }
@@ -2850,6 +2847,14 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
           });
         }
       }
+      if(shots.length===0&&recentBlastRings.length===0){
+        if(hadActiveBallistics){
+          meadowGrass.setBallisticWakes(EMPTY_BALLISTIC_LIST,EMPTY_BALLISTIC_LIST);
+          hadActiveBallistics=false;
+        }
+        return;
+      }
+      hadActiveBallistics=true;
       const rings=recentBlastRings.map(r=>({
         x:r.x,
         y:r.y,
@@ -3052,7 +3057,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       cityCull?.encode(pass);
       forestMass?.encode(pass);
       forest?.encode(pass);
-      groves?.encode(pass);
+      groves?.encode(pass,frame);
       herds?.encode(pass);
       meadowGrass?.encode(pass);
       tradeVessels?.encode?.(pass);
@@ -3139,13 +3144,15 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       if(tradeVessels&&isSectionVisible(activeRegion,camera,viewProjection,12000))tradeVessels.draw(pass);
       // Draw solid crowns/wood before cutout leaves for Apple hidden-surface
       // removal. The far tier has no alpha foliage or expensive bark fallback.
-      for(const[pipe,groupIndex,part]of[[opaqueTreePipe,1,'opaque'],[treePipe,2,'leaves']]){
-        // All imported wood/crowns draw before either family's cutout leaves.
-        // Opaque terrain and both solid forest paths retain mobile HSR.
-        if(part==='opaque'){forestMass?.drawOpaque(pass);importedCanopy?.drawOpaque(pass);forest?.drawOpaque(pass);groves?.drawOpaque(pass);}
-        pass.setPipeline(pipe);pass.setBindGroup(0,groups[groupIndex]);pass.setBindGroup(1,cloudGroups[groupIndex]);
-        for(let lod=0;lod<3;lod++)for(let variant=0;variant<TREE_VARIANTS;variant++){
-          treeCull?.draw(pass,lod*TREE_VARIANTS+variant,part==='opaque'?0:1,treeMeshes[lod][variant][part].buffer);
+      // All imported wood/crowns draw before either family's cutout leaves.
+      // Opaque terrain and both solid forest paths retain mobile HSR.
+      forestMass?.drawOpaque(pass);importedCanopy?.drawOpaque(pass);forest?.drawOpaque(pass);groves?.drawOpaque(pass,viewProjection);
+      if(treeCull){
+        for(const[pipe,groupIndex,part]of[[opaqueTreePipe,1,'opaque'],[treePipe,2,'leaves']]){
+          pass.setPipeline(pipe);pass.setBindGroup(0,groups[groupIndex]);pass.setBindGroup(1,cloudGroups[groupIndex]);
+          for(let lod=0;lod<3;lod++)for(let variant=0;variant<TREE_VARIANTS;variant++){
+            treeCull.draw(pass,lod*TREE_VARIANTS+variant,part==='opaque'?0:1,treeMeshes[lod][variant][part].buffer);
+          }
         }
       }
       importedCanopy?.drawCutout(pass);

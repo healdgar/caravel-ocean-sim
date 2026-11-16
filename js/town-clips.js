@@ -56,10 +56,16 @@ function resetSymmetricTorso(a) {
   a.update();
 }
 
-// 1550 Iberian sela à gineta riding clip: seated in the high-pommel/cantle saddle (`y ≈ 1.36 m, z ≈ -0.02 m`),
-// thighs abducted clear of the Lusitano horse's 0.30 m ribcage, knees flexed (`~52°` short-stirrup gineta seat)
-// with boots resting level in the iron stirrups (`x = ±0.30 m, y = 0.88 m, z = +0.04 m`), left hand holding the
-// looped leather reins above the pommel, and right hand steadying the hip / courier dispatch pouch.
+export const HORSE_SADDLE_SEAT_TOP_Y = 1.230;
+export const HORSE_POMMEL_TOP_Y = 1.375;
+export const HORSE_BARREL_MAX_RX = 0.2506;
+export const HORSE_STIRRUP_BAR_TOP_Y = 0.790;
+export const HORSE_STIRRUP_Z = 0.04;
+
+// 1550 Iberian sela à gineta riding clip: seated ON TOP of the molded leather saddle seat (`saddle_seat_top_y = 1.230 m`,
+// `z = -0.02 m`) using each skeleton's measured `seatContact.pelvisAboveSeat` so zero buttocks/groin geometry ever merges
+// into the horse's spine, thighs/knees abducted cleanly outside the `0.251 m` saddleclothed barrel, and boot soles planted
+// squarely on the forged iron stirrup bars (`stirrup_bar_top_y = 0.740 m`) via `footContacts[side].ankleAboveSole`.
 export function bakeRideClip(a, frames = TOWN_RIDE_FRAMES, keep = null) {
   const palettes = keep ? null : new Float32Array(frames * JOINT_FLOATS);
   const pelvis = a.nodeIndex('pelvis');
@@ -67,42 +73,46 @@ export function bakeRideClip(a, frames = TOWN_RIDE_FRAMES, keep = null) {
   const spine2 = a.nodeIndex('spine_02');
   const neck = a.nodeIndex('neck_01');
   const head = a.nodeIndex('Head');
+  const pelvisAboveSeat = a.seatContact?.pelvisAboveSeat ?? 0.278;
+  const stirrupX = Math.max(0.335, HORSE_BARREL_MAX_RX + 0.085);
 
   for (let frame = 0; frame < frames; frame++) {
     const phase = (frame / frames) * Math.PI * 2;
     const beat2 = phase * 2;
-    const bobY = 0.018 * Math.sin(beat2);
+    const bobY = 0.016 * Math.sin(beat2);
     const swayX = 0.008 * Math.sin(phase);
-    const pelPitch = 0.045 + 0.032 * Math.cos(beat2);
-    const chestCounter = 0.035 - 0.024 * Math.cos(beat2);
+    const pelPitch = 0.040 + 0.028 * Math.cos(beat2);
+    const chestCounter = 0.032 - 0.022 * Math.cos(beat2);
     const headSteady = -0.025 + 0.012 * Math.sin(phase);
+    const pelvisY = HORSE_SADDLE_SEAT_TOP_Y + pelvisAboveSeat - 0.012 + bobY;
 
     a.sample('Idle', 0);
     resetSymmetricTorso(a);
     if (pelvis >= 0) {
-      poseMoveBone(a, pelvis, [swayX, 1.36 + bobY, -0.02]);
+      poseMoveBone(a, pelvis, [swayX, pelvisY, -0.02]);
       turnBone(a, pelvis, [0, 1, 0], [0, Math.cos(pelPitch), Math.sin(pelPitch)]);
     }
-    if (spine1 >= 0) turnBone(a, spine1, [0, 1, 0], [0, Math.cos(0.04), Math.sin(0.04)]);
+    if (spine1 >= 0) turnBone(a, spine1, [0, 1, 0], [0, Math.cos(0.035), Math.sin(0.035)]);
     if (spine2 >= 0) turnBone(a, spine2, [0, 1, 0], [0, Math.cos(chestCounter), Math.sin(chestCounter)]);
     if (neck >= 0) turnBone(a, neck, [0, 1, 0], [0, Math.cos(headSteady), Math.sin(headSteady)]);
     if (head >= 0) turnBone(a, head, [0, 0, 1], [0.025 * Math.sin(phase), 0, 1]);
 
-    // Short-stirrup sela à gineta leg geometry wrapping cleanly outside the 0.30 m barrel without clipping.
+    // Short-stirrup sela à gineta leg geometry wrapping cleanly outside the horse barrel without clipping.
     for (const [side, sign] of LEFT_THEN_RIGHT) {
-      const stirrupBounce = 0.007 * Math.sin(beat2 + (sign > 0 ? 0.25 : -0.25));
-      const stirrupFoot = [sign * 0.30, 0.88 + stirrupBounce, 0.04];
-      const kneePole = [sign * 0.52, 0.95 + bobY * 0.5, 0.36];
+      const ankleAboveSole = a.footContacts?.[side]?.ankleAboveSole ?? 0.11;
+      const stirrupBounce = 0.006 * Math.sin(beat2 + (sign > 0 ? 0.25 : -0.25));
+      const stirrupFoot = [sign * (stirrupX + 0.015), HORSE_STIRRUP_BAR_TOP_Y + ankleAboveSole + stirrupBounce, HORSE_STIRRUP_Z];
+      const kneePole = [sign * 0.96, pelvisY - 0.12, 0.20];
       solveCrewLimb(a, ['thigh_' + side, 'calf_' + side, 'foot_' + side], stirrupFoot, kneePole);
       keepSoleFlat(a, side);
     }
 
     // Left hand holds the gathered reins above the pommel; right hand steadies the hip / courier alforja pouch.
     const reinFollow = 0.014 * Math.sin(beat2 - 0.35);
-    const reinHand = [0.02, 1.64 + bobY * 0.65 + reinFollow * 0.5, 0.23 + reinFollow];
-    const hipHand = [-0.22, 1.38 + bobY * 0.8, 0.02];
-    solveCrewLimb(a, ['upperarm_l', 'lowerarm_l', 'hand_l'], reinHand, [0.46, 1.48 + bobY, -0.02]);
-    solveCrewLimb(a, ['upperarm_r', 'lowerarm_r', 'hand_r'], hipHand, [-0.50, 1.46 + bobY, -0.18]);
+    const reinHand = [0.02, HORSE_POMMEL_TOP_Y + 0.065 + bobY * 0.5 + reinFollow * 0.5, 0.26 + reinFollow];
+    const hipHand = [-0.22, pelvisY + 0.02, 0.02];
+    solveCrewLimb(a, ['upperarm_l', 'lowerarm_l', 'hand_l'], reinHand, [0.48, pelvisY + 0.06, -0.04]);
+    solveCrewLimb(a, ['upperarm_r', 'lowerarm_r', 'hand_r'], hipHand, [-0.52, pelvisY + 0.10, -0.18]);
 
     if (keep) keep(frame);
     else palettes.set(a.palette, frame * JOINT_FLOATS);

@@ -52,6 +52,28 @@ export const BOARD_THATCHED = Object.freeze({
 // roads), so they are found here from its record of both. `roads` are {points: [x, z, …]}, `rivers` {points: [x, z,
 // half-width, …]}; a second road at a crossing uses the bridge already there.
 export const BOARD_ROAD_BRIDGE = Object.freeze({ width: 6, arch: 11, rise: 0.65 });
+
+export function widenBoardRiverHalfWidth(rawHw, isCanal = false) {
+  const h = Number.isFinite(rawHw) ? Math.max(0.75, rawHw) : 2.5;
+  if (isCanal) return Math.max(6.0, h * 1.35);
+  return h >= 1.5 ? Math.min(14.5, 4.4 + h * 2.15) : Math.max(2.8, h * 2.1);
+}
+
+export function widenBoardRivers(rawRivers) {
+  if (!Array.isArray(rawRivers)) return [];
+  return rawRivers.map((river) => {
+    const src = river?.points;
+    if (!src || src.length < 3) return river;
+    const isCanal = Boolean(river.canal);
+    const pts = new Array(src.length);
+    for (let i = 0; i + 2 < src.length; i += 3) {
+      pts[i] = src[i];
+      pts[i + 1] = src[i + 1];
+      pts[i + 2] = widenBoardRiverHalfWidth(src[i + 2], isCanal);
+    }
+    return { ...river, points: pts };
+  });
+}
 function roadDirectionAt(P, segIdx, t, win = 14) {
   const ax = P[segIdx], az = P[segIdx + 1], bx = P[segIdx + 2], bz = P[segIdx + 3];
   const cx = ax + (bx - ax) * t, cz = az + (bz - az) * t;
@@ -362,6 +384,7 @@ function fillBoardFigure(index, size, points, value) {
 export function layBoardCountry({ baked, region, grid, heights = null, heightAt, port, wet, LAND, fieldAt, distanceTo }) {
   const started = typeof performance === 'object' ? performance.now() : 0;
   const board = baked.board, ox = region.x, oz = region.z, half = region.span / 2;
+  const rivers = widenBoardRivers(board.rivers);
   const bounds = { x0: ox - half, z0: oz - half, x1: ox + half, z1: oz + half };
   const inside = (x, z, pad) => x > bounds.x0 + pad && x < bounds.x1 - pad && z > bounds.z0 + pad && z < bounds.z1 - pad;
   const rr = mulberry((Math.round(port.center.x * 7.3) * 73856093) ^ (Math.round(port.center.z * 5.1) * 19349663) ^ (board.seed | 0) ^ 0x2b0a4d17);
@@ -511,12 +534,12 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
   }
   for (let k = paving.length - 1; k >= 0; k--) if (paving[k].points.length < 2) paving.splice(k, 1);
   // Register every river channel corridor with bank safety clearance so streets, plots, and blocks never stand in flowing water.
-  for (const river of board.rivers ?? []) {
+  for (const river of rivers) {
     const pts = river?.points;
     if (!pts || pts.length < 6) continue;
     for (let k = 0; k + 5 < pts.length; k += 3) {
       const ax = ox + pts[k], az = oz + pts[k + 1], bx = ox + pts[k + 3], bz = oz + pts[k + 4];
-      const hw = Math.max(2.5, (pts[k + 2] + pts[k + 5]) * 0.5) + 6.5;
+      const hw = Math.max(2.8, (pts[k + 2] + pts[k + 5]) * 0.5) + 2.8;
       const g = { ax, az, bx, bz, hw, river: true };
       riverSegs.add(g, Math.min(ax, bx) - hw, Math.min(az, bz) - hw, Math.max(ax, bx) + hw, Math.max(az, bz) + hw);
     }
@@ -692,23 +715,39 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
   };
   const wayClearance = (fp) => {
     let minC = Infinity, pushX = 0, pushZ = 0, roadHit = false;
-    const Reach = Math.hypot(fp.w, fp.d) * 0.5 + 14;
-    const visit = (g) => {
+    let minRiverC = Infinity, riverPushX = 0, riverPushZ = 0;
+    const Reach = Math.hypot(fp.w, fp.d) * 0.5 + 22;
+    const dirFromSeg = (g) => {
+      const dx = g.bx - g.ax, dz = g.bz - g.az, l2 = dx * dx + dz * dz;
+      const t = l2 > 1e-9 ? Math.max(0, Math.min(1, ((fp.x - g.ax) * dx + (fp.z - g.az) * dz) / l2)) : 0;
+      const px = g.ax + dx * t, pz = g.az + dz * t, ox0 = fp.x - px, oz0 = fp.z - pz, L = Math.hypot(ox0, oz0);
+      if (L > 1e-4) return [ox0 / L, oz0 / L];
+      if (l2 > 1e-4) { const inv = 1 / Math.sqrt(l2); return [-dz * inv, dx * inv]; }
+      return [0, 0];
+    };
+    segs.some(fp.x, fp.z, Reach, (g) => {
       const c = segRectDist(fp, g.ax, g.az, g.bx, g.bz) - g.hw;
       if (c < minC) {
         minC = c;
         roadHit = Boolean(g.road);
-        const dx = g.bx - g.ax, dz = g.bz - g.az, l2 = dx * dx + dz * dz;
-        const t = l2 > 1e-9 ? Math.max(0, Math.min(1, ((fp.x - g.ax) * dx + (fp.z - g.az) * dz) / l2)) : 0;
-        const px = g.ax + dx * t, pz = g.az + dz * t, ox0 = fp.x - px, oz0 = fp.z - pz, L = Math.hypot(ox0, oz0);
-        if (L > 1e-4) { pushX = ox0 / L; pushZ = oz0 / L; }
-        else if (l2 > 1e-4) { const inv = 1 / Math.sqrt(l2); pushX = -dz * inv; pushZ = dx * inv; }
+        [pushX, pushZ] = dirFromSeg(g);
       }
       return false;
-    };
-    segs.some(fp.x, fp.z, Reach, visit);
-    riverSegs.some(fp.x, fp.z, Reach, visit);
-    return { clearance: minC, pushX, pushZ, roadHit };
+    });
+    riverSegs.some(fp.x, fp.z, Reach, (g) => {
+      const c = segRectDist(fp, g.ax, g.az, g.bx, g.bz) - g.hw;
+      if (c < minRiverC) {
+        minRiverC = c;
+        [riverPushX, riverPushZ] = dirFromSeg(g);
+      }
+      if (c < minC) {
+        minC = c;
+        roadHit = false;
+        [pushX, pushZ] = dirFromSeg(g);
+      }
+      return false;
+    });
+    return { clearance: minC, pushX, pushZ, roadHit, riverClearance: minRiverC, riverPushX, riverPushZ };
   };
 
   // Pre-align waterfront wharves along local sea/river shoreline contours (`∇inland` tangent) so adjacent
@@ -731,7 +770,7 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
   let wharfOverrides = null;
   if (rawWharves.length > 0) {
     const wharfWet = new Uint8Array(wet);
-    for (const river of board.rivers ?? []) {
+    for (const river of rivers) {
       const pts = river?.points;
       if (!pts || pts.length < 6) continue;
       for (let k = 0; k + 5 < pts.length; k += 3) {
@@ -800,8 +839,11 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     if (keepClearOfWater && arch !== 'wall' && arch !== 'tower' && arch !== 'keep') {
       let wc = wayClearance(f);
       if (wc.clearance < -0.35 || hitsRiverCorridor(f, 0)) {
-        for (const step of [0.8, 1.6, 2.8, 4.2, 6.0, 8.0]) {
-          const cx = x + wc.pushX * step, cz = z + wc.pushZ * step;
+        for (const step of [0.8, 1.8, 3.0, 4.5, 6.5, 9.0, 12.0, 15.5, 19.5]) {
+          const inRiver = hitsRiverCorridor(f, 0);
+          const pxDir = inRiver && (wc.riverPushX || wc.riverPushZ) ? wc.riverPushX : wc.pushX;
+          const pzDir = inRiver && (wc.riverPushX || wc.riverPushZ) ? wc.riverPushZ : wc.pushZ;
+          const cx = x + pxDir * step, cz = z + pzDir * step;
           if (!inside(cx, cz, 12) || heightAt(cx, cz) < BOARD_DRY_M) continue;
           const cand = footprint(cx, cz, front, depth, yaw);
           if (taken(cand, 0.8) || hitsRiverCorridor(cand, 0)) continue;
@@ -887,19 +929,52 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
   // A run of fence from one point to another, a length at a time, each on its own ground; none where a building
   // stands or a street runs through.
   const spans = works.trackBridges ?? [];
-  const roadCrossings = boardRoadCrossings(board.roads, board.rivers, board.places);
+  const roadCrossings = boardRoadCrossings(board.roads, rivers, board.places);
   const portBridges = (port.instances ?? []).filter((inst) => inst?.prefabId === 'stone_arch_bridge');
+  const measureRiverCrossingAt = (bx, bz, ux, uz) => {
+    const lx = bx - ox, lz = bz - oz;
+    let bestD = 32, best = null;
+    for (const river of rivers) {
+      const pts = river?.points;
+      if (!pts || pts.length < 6) continue;
+      for (let j = 0; j + 5 < pts.length; j += 3) {
+        const cx = pts[j], cz = pts[j + 1], dx = pts[j + 3], dz = pts[j + 4];
+        const rx = dx - cx, rz = dz - cz, l2 = rx * rx + rz * rz;
+        const u = l2 > 1e-6 ? Math.max(0, Math.min(1, ((lx - cx) * rx + (lz - cz) * rz) / l2)) : 0;
+        const px = cx + rx * u, pz = cz + rz * u, d = Math.hypot(lx - px, lz - pz);
+        if (d < bestD) {
+          bestD = d;
+          const hw = pts[j + 2] + (pts[j + 5] - pts[j + 2]) * u;
+          const rLen = Math.sqrt(l2) || 1;
+          const sine = Math.abs(ux * rz - uz * rx) / rLen;
+          const s0 = Math.floor(j / 3), s1 = s0 + 1;
+          const lv0 = Number.isFinite(river.levels?.[s0]) ? river.levels[s0] : heightAt(ox + cx, oz + cz) - 0.55;
+          const lv1 = Number.isFinite(river.levels?.[s1]) ? river.levels[s1] : heightAt(ox + dx, oz + dz) - 0.55;
+          const wy = Math.max(0.05, lv0 + (lv1 - lv0) * u);
+          best = { hw, span: (2 * hw) / Math.max(0.42, sine), wy };
+        }
+      }
+    }
+    return best;
+  };
+  const trackBridgeSpecs = [];
+  for (let k = 0; k + 5 < spans.length; k += 6) {
+    const x = ox + spans[k], z = oz + spans[k + 1], ux = spans[k + 2], uz = spans[k + 3];
+    const crossing = measureRiverCrossingAt(x, z, ux, uz);
+    const span = Math.max(6, spans[k + 4], crossing ? crossing.span : 0);
+    trackBridgeSpecs.push({ x, z, ux, uz, span, isStone: Boolean(spans[k + 5]), crossing });
+  }
   // On a bridge and at its two ±6 m approaches the way is open: no fence is run across it.
   const inBridgeStrip = (x, z, bx, bz, ux, uz, halfLen, halfW) => {
     const dx = x - bx, dz = z - bz;
     return Math.abs(dx * ux + dz * uz) < halfLen && Math.abs(dx * uz - dz * ux) < halfW;
   };
   const bridged = (x, z) => {
-    for (let k = 0; k + 5 < spans.length; k += 6) {
-      if (inBridgeStrip(x, z, ox + spans[k], oz + spans[k + 1], spans[k + 2], spans[k + 3], spans[k + 4] / 2 + 6, 4.5)) return true;
+    for (const tb of trackBridgeSpecs) {
+      if (inBridgeStrip(x, z, tb.x, tb.z, tb.ux, tb.uz, tb.span / 2 + 6, 4.5)) return true;
     }
     for (const q of roadCrossings) {
-      const reach = Math.max(4.5, q.span / 2 + 2.4);
+      const reach = Math.max(4.5, q.span / 2 + 2.6);
       if (inBridgeStrip(x, z, ox + q.x, oz + q.z, q.ux, q.uz, reach + 6, 4.8)) return true;
     }
     for (const pb of portBridges) {
@@ -1102,8 +1177,8 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
   for (const run of prepareFenceRuns(works.fences ?? [])) fence(run.ax, run.az, run.bx, run.bz, run.stone);
   // A track's bridge and road/street crossings: seated above channel flood levels with masonry or timber piers.
   const bridges = [];
-  for (let k = 0; k + 5 < spans.length; k += 6) {
-    const x = ox + spans[k], z = oz + spans[k + 1], ux = spans[k + 2], uz = spans[k + 3], span = Math.max(6, spans[k + 4]), half = span / 2;
+  for (const tb of trackBridgeSpecs) {
+    const { x, z, ux, uz, span, isStone, crossing } = tb, half = span / 2;
     if (!inside(x, z, 12)) continue;
     // Deduplicate track crossings that collide with a primary road crossing (which builds the aligned wide bridge).
     if (roadCrossings.some((q) => Math.hypot(ox + q.x - x, oz + q.z - z) < 18)) continue;
@@ -1111,34 +1186,50 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     const hA = heightAt(x - ux * (half + 2.5), z - uz * (half + 2.5));
     const hB = heightAt(x + ux * (half + 2.5), z + uz * (half + 2.5));
     if (Math.max(hA, hB) <= 0.12) continue;
-    const deck = Math.max(hA, hB, BOARD_DRY_M) + 0.55;
+    const minNavDeck = (crossing && crossing.hw >= 5.5) ? (crossing.wy + 2.75) : -Infinity;
+    const deck = Math.max(Math.max(hA, hB, BOARD_DRY_M) + 0.55, minNavDeck);
     if (nearPort) {
-      const pux = Math.sin(nearPort.yaw ?? 0), puz = Math.cos(nearPort.yaw ?? 0), pLen = nearPort.length ?? (span + 3.0), pW = nearPort.width ?? 9.6;
-      bridges.push({ x: nearPort.x, z: nearPort.z, ux: pux, uz: puz, length: pLen, halfWidth: pW * 0.5, deckY: nearPort.y ?? deck, span, isStone: true, cityIndices: [], collapsed: false });
+      const pux = Math.sin(nearPort.yaw ?? 0), puz = Math.cos(nearPort.yaw ?? 0), pLen = nearPort.length ?? (span + 4.0), pW = nearPort.width ?? 9.6;
+      bridges.push({ x: nearPort.x, z: nearPort.z, ux: pux, uz: puz, length: pLen, halfWidth: pW * 0.5, deckY: Math.max(nearPort.y ?? deck, minNavDeck), span, isStone: true, cityIndices: [], collapsed: false });
       stampBridgeApproach(nearPort.x, nearPort.z, pux, puz, pLen, pW);
       continue;
     }
-    const isStone = Boolean(spans[k + 5]);
-    const totalLen = span + 3.0;
-    slight(isStone ? CITY_TYPE.STONE_BRIDGE : CITY_TYPE.FOOTBRIDGE, x, deck, z, Math.atan2(ux, uz), 0.5, totalLen);
+    const totalLen = span + 4.0;
     const width = CITY_BUILDING_TYPES[isStone ? CITY_TYPE.STONE_BRIDGE : CITY_TYPE.FOOTBRIDGE].width;
-    bridges.push({ x, z, ux, uz, length: totalLen, halfWidth: width * 0.5, deckY: deck, span, isStone, cityIndices: [typedTypes.length - 1], collapsed: false });
+    const cityIndices = [];
+    if (isStone) {
+      const T = CITY_BUILDING_TYPES[CITY_TYPE.STONE_BRIDGE];
+      const arches = Math.max(1, Math.ceil(totalLen / BOARD_ROAD_BRIDGE.arch)), each = totalLen / arches;
+      const bridgeType = arches > 1 ? CITY_TYPE.STONE_BRIDGE_SPAN : CITY_TYPE.STONE_BRIDGE;
+      for (let a = 0; a < arches; a++) {
+        const along = (a + 0.5) * each - totalLen * 0.5;
+        pushTyped(bridgeType, x + ux * along, deck, z + uz * along, Math.atan2(ux, uz), width, T.height, each, 0.5, 0);
+        cityIndices.push(typedTypes.length - 1);
+        built.bridges++;
+      }
+    } else {
+      slight(CITY_TYPE.FOOTBRIDGE, x, deck, z, Math.atan2(ux, uz), 0.5, totalLen);
+      cityIndices.push(typedTypes.length - 1);
+      built.bridges++;
+    }
+    bridges.push({ x, z, ux, uz, length: totalLen, halfWidth: width * 0.5, deckY: deck, span, isStone, cityIndices, collapsed: false });
     stampBridgeApproach(x, z, ux, uz, totalLen, width);
-    built.bridges++;
   }
   // A road's or arterial street's bridge where it crosses a river: stone, the road's width, bank to bank in arches.
   for (const q of roadCrossings) {
-    const x = ox + q.x, z = oz + q.z, reach = Math.max(4.5, q.span / 2 + 2.4), T = CITY_BUILDING_TYPES[q.stone === false ? CITY_TYPE.FOOTBRIDGE : CITY_TYPE.STONE_BRIDGE];
+    const x = ox + q.x, z = oz + q.z, reach = Math.max(4.5, q.span / 2 + 2.6), T = CITY_BUILDING_TYPES[q.stone === false ? CITY_TYPE.FOOTBRIDGE : CITY_TYPE.STONE_BRIDGE];
     if (!inside(x, z, 12)) continue;
     if (bridges.some((b) => Math.hypot(b.x - x, b.z - z) < 14)) continue;
     const hA = heightAt(x - q.ux * (reach + 1.5), z - q.uz * (reach + 1.5));
     const hB = heightAt(x + q.ux * (reach + 1.5), z + q.uz * (reach + 1.5));
     if (Math.max(hA, hB) <= 0.12) continue;
-    const deck = Math.max(hA, hB, BOARD_DRY_M) + BOARD_ROAD_BRIDGE.rise;
+    const crossing = measureRiverCrossingAt(x, z, q.ux, q.uz);
+    const minNavDeck = (crossing && crossing.hw >= 5.5) ? (crossing.wy + 2.75) : -Infinity;
+    const deck = Math.max(Math.max(hA, hB, BOARD_DRY_M) + BOARD_ROAD_BRIDGE.rise, minNavDeck);
     const nearPort = portBridges.find((pb) => Math.hypot(pb.x - x, pb.z - z) < 24);
     if (nearPort) {
       const pux = Math.sin(nearPort.yaw ?? 0), puz = Math.cos(nearPort.yaw ?? 0), pLen = nearPort.length ?? (reach * 2), pW = nearPort.width ?? 9.6;
-      bridges.push({ x: nearPort.x, z: nearPort.z, ux: pux, uz: puz, length: pLen, halfWidth: pW * 0.5, deckY: nearPort.y ?? deck, span: q.span, isStone: true, cityIndices: [], collapsed: false });
+      bridges.push({ x: nearPort.x, z: nearPort.z, ux: pux, uz: puz, length: pLen, halfWidth: pW * 0.5, deckY: Math.max(nearPort.y ?? deck, minNavDeck), span: q.span, isStone: true, cityIndices: [], collapsed: false });
       stampBridgeApproach(nearPort.x, nearPort.z, pux, puz, pLen, pW);
       continue;
     }
@@ -1409,8 +1500,8 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     return accumS;
   };
 
-  for (let rIdx = 0; rIdx < (board.rivers?.length ?? 0); rIdx++) {
-    const river = board.rivers[rIdx], pts = river.points, m = Math.floor((pts?.length ?? 0) / 3);
+  for (let rIdx = 0; rIdx < rivers.length; rIdx++) {
+    const river = rivers[rIdx], pts = river.points, m = Math.floor((pts?.length ?? 0) / 3);
     if (m < 2) continue;
     const isCanal = Boolean(river.canal);
     const rawProf = new Float32Array(m);
@@ -2491,7 +2582,7 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     // For the GPU, which stamps the country onto the ground's own colours: the furlong of every cell, each
     // furlong's use, and every way that runs across it.
     stamp: {
-      size, index, uses, roads, streets, squares, lots, town: urban, lanes: board.lanes, rivers: board.rivers.map((river) => river.points), bridges,
+      size, index, uses, roads, streets, squares, lots, town: urban, lanes: board.lanes, rivers: rivers.map((river) => river.points), bridges,
       origin: { x: ox, z: oz }, span: region.span,
     },
   };

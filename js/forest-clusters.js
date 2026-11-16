@@ -528,28 +528,33 @@ export async function createForestClusters({ device, shader, module, frame, sour
       leafShadow: leafShadowPipeline ? { surface: surfaceEntries(leafShadowPipeline, p.id, leafShadow, false), cluster: clusterGroup(leafShadowPipeline, false, shadowList) } : null,
     };
   });
+  const activeSpecies = [];
+  let hadActiveSpecies = false;
   function frameEntry(binding) { return { binding, resource: { buffer: bind.frameUBO } }; }
-  function placeTrees() {
+  function placeTrees(nextPrototypes = prototypes) {
     const crownSplatBase = crownListBase + count * CROWN_CONT_TRIS_PER_SPECIES;
     const crownFadeBase = crownSplatBase + maxRoots;
+    activeSpecies.length = 0;
     prototypes.forEach((p, id) => {
+      const srcProto = nextPrototypes?.[id] ?? p;
       const s = species[id], slots = count * 4 + id * 4;
-      s.rootCount = p.rootCount;
+      s.rootCount = srcProto.rootCount ?? 0;
+      if (s.rootCount > 0) activeSpecies.push({ s, id });
       const data = new ArrayBuffer(BUCKET_BYTES), u = new Uint32Array(data), f = new Float32Array(data);
       u.set([s.info.firstCluster, s.info.clusterCount, id * 2 * CLUSTERS_PER_DRAW, (id * 2 + 1) * CLUSTERS_PER_DRAW,
-        p.firstRoot * 4, id * 4, p.firstRoot * 4 + p.rootCount * 2, slots, p.firstRoot * 4 + p.rootCount * 3, slots + 2, id * 2, id * 2 + 1]);
+        srcProto.firstRoot * 4, id * 4, srcProto.firstRoot * 4 + s.rootCount * 2, slots, srcProto.firstRoot * 4 + s.rootCount * 3, slots + 2, id * 2, id * 2 + 1]);
       f.set([...p.centre, p.radius], 12);
-      u.set([CLUSTERS_PER_DRAW, p.firstRoot, p.rootCount, SHADOW_CLUSTERS_PER_DRAW], 16);
+      u.set([CLUSTERS_PER_DRAW, srcProto.firstRoot, s.rootCount, SHADOW_CLUSTERS_PER_DRAW], 16);
       // Each species keeps its own progressive continuum triangle slice plus root-indexed splat and fade stretches.
       if (s.crown) {
         const contBase = crownListBase + id * CROWN_CONT_TRIS_PER_SPECIES;
-        const splatBase = crownSplatBase + p.firstRoot;
-        const fadeBase = crownFadeBase + p.firstRoot;
+        const splatBase = crownSplatBase + srcProto.firstRoot;
+        const fadeBase = crownFadeBase + srcProto.firstRoot;
         u.set([contBase, count * 4 + id * CROWN_LISTS, s.crown.info.stepCount + 1, CROWN_CONT_TRIS_PER_SPECIES], 20);
-        u.set([splatBase, fadeBase, p.rootCount, s.crown.info.morphOffset], 24);
+        u.set([splatBase, fadeBase, s.rootCount, s.crown.info.morphOffset], 24);
         const widest = crownChange.widest ?? crowns.manifest.widestLeafErrors ?? 0;
         f.set([widest > 0 ? s.crown.info.breadthMetres / widest : 0, s.crown.info.breadthMetres, s.crown.info.leafErrorMetres, 0], 28);
-        u.set([p.firstRoot * 4 + p.rootCount, id * 4 + 2, 1, 0], 32);
+        u.set([srcProto.firstRoot * 4 + s.rootCount, id * 4 + 2, 1, 0], 32);
         device.queue.writeBuffer(s.crown.bins[CROWN_CONT_REGION], 0, new Uint32Array([contBase]));
         device.queue.writeBuffer(s.crown.bins[CROWN_SPLAT_REGION], 0, new Uint32Array([splatBase]));
         device.queue.writeBuffer(s.crown.bins[CROWN_FADE_REGION], 0, new Uint32Array([fadeBase]));
@@ -559,63 +564,90 @@ export async function createForestClusters({ device, shader, module, frame, sour
   }
   placeTrees();
   const drawWith = (pass, pipeline, group, cloud, part, leafDraw, firstDraw = 0) => {
+    const n = activeSpecies.length;
+    if (!n) return;
     pass.setPipeline(pipeline);
     pass.setBindGroup(0, group);
     if (cloud) pass.setBindGroup(1, cloud);
     if (leafDraw) pass.setIndexBuffer(leafIndices, 'uint32');
-    species.forEach((s, id) => {
+    for (let i = 0; i < n; i++) {
+      const { s, id } = activeSpecies[i];
       pass.setBindGroup(2, s[part].surface);
       pass.setBindGroup(3, s[part].cluster);
       if (leafDraw) pass.drawIndexedIndirect(draws, (firstDraw + id * 2 + 1) * 20);
       else pass.drawIndirect(draws, (firstDraw + id * 2) * 20);
-    });
+    }
   };
-  const drawCrowns = (pass, pipeline, group, part, regions) => {
+  const drawCrowns = (pass, pipeline, group, part, regions, needsIndexBuffer = true) => {
+    const n = activeSpecies.length;
+    if (!n) return;
     pass.setPipeline(pipeline);
     pass.setBindGroup(0, group.zero);
     pass.setBindGroup(1, group.cloud);
-    pass.setIndexBuffer(crownIndices, 'uint32');
-    species.forEach((s, id) => {
+    if (needsIndexBuffer) pass.setIndexBuffer(crownIndices, 'uint32');
+    for (let i = 0; i < n; i++) {
+      const { s, id } = activeSpecies[i];
       pass.setBindGroup(3, s.crown[part].cluster);
-      for (const region of regions) {
+      for (let r = 0; r < regions.length; r++) {
+        const region = regions[r];
         pass.setBindGroup(2, s.crown[part].surface[region]);
         const offset = (count * 4 + id * CROWN_LISTS + region) * 20;
         if (region === CROWN_CONT_REGION) pass.drawIndirect(draws, offset);
         else pass.drawIndexedIndirect(draws, offset);
       }
-    });
+    }
   };
   const crownSolidRegions = [CROWN_CONT_REGION, CROWN_SPLAT_REGION];
+  const crownFadeRegions = [CROWN_FADE_REGION];
   return {
     placeTrees,
+    updatePack: placeTrees,
     crowns: Boolean(crownInfo),
     encode(pass) {
+      const n = activeSpecies.length;
+      if (!n) {
+        if (hadActiveSpecies) {
+          hadActiveSpecies = false;
+          pass.setPipeline(reset);
+          pass.setBindGroup(0, resetGroup);
+          pass.dispatchWorkgroups(Math.ceil(count * (4 + CROWN_LISTS) / 64));
+        }
+        return;
+      }
+      hadActiveSpecies = true;
       pass.setPipeline(reset);
       pass.setBindGroup(0, resetGroup);
       pass.dispatchWorkgroups(Math.ceil(count * (4 + CROWN_LISTS) / 64));
       pass.setPipeline(select);
-      species.forEach((s) => {
-        if (!s.rootCount) return;
+      for (let i = 0; i < n; i++) {
+        const { s } = activeSpecies[i];
         pass.setBindGroup(0, s.select);
         pass.dispatchWorkgroups(Math.ceil(s.rootCount / 64));
-      });
+      }
       if (!shadowSelect) return;
       pass.setPipeline(shadowSelect);
-      species.forEach((s) => {
-        if (!s.rootCount) return;
+      for (let i = 0; i < n; i++) {
+        const { s } = activeSpecies[i];
         pass.setBindGroup(0, s.shadowSelect);
         pass.dispatchWorkgroups(Math.ceil(s.rootCount / 64));
-      });
+      }
     },
     drawOpaque(pass) {
+      if (!activeSpecies.length) return;
       drawWith(pass, woodPipeline, groups.wood.zero, groups.wood.cloud, 'wood', false);
       if (!crownInfo) return;
-      drawCrowns(pass, crownPipeline, groups.crown, 'solid', crownSolidRegions);
-      drawCrowns(pass, crownFadePipeline, groups.crownFade, 'fade', [CROWN_FADE_REGION]);
+      drawCrowns(pass, crownPipeline, groups.crown, 'solid', crownSolidRegions, true);
+      drawCrowns(pass, crownFadePipeline, groups.crownFade, 'fade', crownFadeRegions, true);
     },
     drawLeafDepth(pass) { drawWith(pass, leafDepthPipeline, groups.leafDepth.zero, null, 'leafDepth', true); },
     drawLeaves(pass) { drawWith(pass, leafPipeline, groups.leaf.zero, groups.leaf.cloud, 'leaf', true); },
+    drawCut(pass) {
+      if (!activeSpecies.length) return;
+      drawWith(pass, leafDepthPipeline, groups.leafDepth.zero, null, 'leafDepth', true);
+      drawWith(pass, leafPipeline, groups.leaf.zero, groups.leaf.cloud, 'leaf', true);
+    },
     drawShadow(pass) {
+      if (!activeSpecies.length) return;
       if (woodShadowPipeline && groups.woodShadow) {
         drawWith(pass, woodShadowPipeline, groups.woodShadow.zero, groups.woodShadow.empty1, 'woodShadow', false, count * 2);
       }

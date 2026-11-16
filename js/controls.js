@@ -690,15 +690,22 @@ export function bindEconSimControls(detailsEl, { onRate = null, onStep = null } 
       onStep?.(days);
     });
   }
+  let lastCatchupKey = catchupEl?.hidden ? '0' : '';
   return {
     element: detailsEl,
     syncRateUI,
     setCatchup(curDay, wantedDay, busy = false) {
       if (!catchupEl) return;
       const catchingUp = Number.isFinite(curDay) && Number.isFinite(wantedDay) && (wantedDay > curDay || busy);
+      const d0 = catchingUp ? Math.floor(curDay) : 0;
+      const d1 = catchingUp ? Math.max(d0, Math.floor(wantedDay)) : 0;
+      const lag = d1 - d0;
+      const key = catchingUp ? `1:${d0}:${d1}:${lag}` : '0';
+      if (key === lastCatchupKey) return;
+      lastCatchupKey = key;
       catchupEl.hidden = !catchingUp;
       if (catchingUp) {
-        catchupEl.textContent = `Advancing day ${Math.floor(curDay)} → ${Math.max(Math.floor(curDay), Math.floor(wantedDay))}…`;
+        catchupEl.textContent = `Advancing day ${d0} → ${d1}…`;
       }
     },
     setTelemetry(diag) {

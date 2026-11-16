@@ -38,7 +38,7 @@ import { vegetationProbability } from './vegetation.js';
 import { OLD_WORLD_LAND, bakedBoardFor, oldWorldCountry, oldWorldCityNear, oldWorldPeople } from './old-world.js';
 import { CITY_BLOCK_FLOATS, CITY_ROOF, CITY_WALL, buildColonialCityFabric, cityMasonry, footprint, planColonialStreets } from './old-world-city.js';
 import { CITY_BUILDING_TYPES, CITY_PAINT, CITY_THATCH_ROOF, CITY_TYPE, CITY_TYPED_FLOATS, CITY_TYPED_ROOF, cityHouseType } from './old-world-buildings.js';
-import { boardRoadCrossings } from './old-world-board.js';
+import { boardRoadCrossings, widenBoardRiverHalfWidth, widenBoardRivers } from './old-world-board.js';
 import { createInlandWaterSampler } from './inland-water.js';
 import {
   BUILDING_SUB_ASSEMBLIES,
@@ -4004,11 +4004,12 @@ function buildPortRiverCorridor(region) {
   for (let ri = 0; ri < rivers.length; ri++) {
     const pts = rivers[ri]?.points;
     if (!pts || pts.length < 6) continue;
+    const isCanal = Boolean(rivers[ri]?.canal);
     const reachSegs = [];
     let arc = 0;
     for (let k = 0; k + 5 < pts.length; k += 3) {
-      const ax = ox + pts[k], az = oz + pts[k + 1], hwA = Math.max(2.0, pts[k + 2] || 2.0);
-      const bx = ox + pts[k + 3], bz = oz + pts[k + 4], hwB = Math.max(2.0, pts[k + 5] || 2.0);
+      const ax = ox + pts[k], az = oz + pts[k + 1], hwA = widenBoardRiverHalfWidth(pts[k + 2] || 2.0, isCanal);
+      const bx = ox + pts[k + 3], bz = oz + pts[k + 4], hwB = widenBoardRiverHalfWidth(pts[k + 5] || 2.0, isCanal);
       const dx = bx - ax, dz = bz - az, len = Math.hypot(dx, dz);
       if (len < 0.5) continue;
       const tx = dx / len, tz = dz / len;
@@ -5213,7 +5214,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     // (f) Derive road-aligned or river-perpendicular stone bridges centered across navigable port river reaches
     const bakedPortBoard = bakedBoardFor(region);
     const boardCrossings = bakedPortBoard?.board
-      ? boardRoadCrossings(bakedPortBoard.board.roads, bakedPortBoard.board.rivers, bakedPortBoard.board.places)
+      ? boardRoadCrossings(bakedPortBoard.board.roads, widenBoardRivers(bakedPortBoard.board.rivers), bakedPortBoard.board.places)
       : [];
     const bridgeCenters = [];
     let bridgesBuilt = 0;
@@ -5225,7 +5226,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       const cf = coastalFrame(region, cx, cz);
       if (cf.inland - bestShoreInland < 18 || cf.inland - bestShoreInland > 220) continue;
       if (bridgeCenters.some((b) => Math.hypot(b.x - cx, b.z - cz) < 36)) continue;
-      const spanLen = Math.max(24, Math.min(48, Math.round(q.span + 6)));
+      const spanLen = Math.max(24, Math.min(76, Math.round(q.span + 6)));
       const hA = terrainSurfaceSample(heights, cx + q.ux * (spanLen * 0.45), cz + q.uz * (spanLen * 0.45), region);
       const hB = terrainSurfaceSample(heights, cx - q.ux * (spanLen * 0.45), cz - q.uz * (spanLen * 0.45), region);
       if (hA < PREFAB_DRY_GROUND_M || hB < PREFAB_DRY_GROUND_M) continue;
@@ -5271,7 +5272,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
         }
       }
       if (chosenSeg) {
-        const spanLen = Math.max(24, Math.min(48, Math.round(chosenSeg.hw * 2 + 16)));
+        const spanLen = Math.max(24, Math.min(76, Math.round(chosenSeg.hw * 2 + 16)));
         const bankH = Math.max(
           terrainSurfaceSample(heights, chosenSeg.cx + chosenSeg.nx * (spanLen * 0.45), chosenSeg.cz + chosenSeg.nz * (spanLen * 0.45), region),
           terrainSurfaceSample(heights, chosenSeg.cx - chosenSeg.nx * (spanLen * 0.45), chosenSeg.cz - chosenSeg.nz * (spanLen * 0.45), region),
@@ -5556,7 +5557,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
         }
       }
       if (bridgeSeg) {
-        const spanLen = Math.max(24, Math.min(48, Math.round(bridgeSeg.hw * 2 + 16)));
+        const spanLen = Math.max(24, Math.min(76, Math.round(bridgeSeg.hw * 2 + 16)));
         const bankH = Math.max(
           terrainSurfaceSample(heights, bridgeSeg.cx + bridgeSeg.nx * (spanLen * 0.45), bridgeSeg.cz + bridgeSeg.nz * (spanLen * 0.45), region),
           terrainSurfaceSample(heights, bridgeSeg.cx - bridgeSeg.nx * (spanLen * 0.45), bridgeSeg.cz - bridgeSeg.nz * (spanLen * 0.45), region),

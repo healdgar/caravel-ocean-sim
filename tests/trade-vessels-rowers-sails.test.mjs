@@ -403,3 +403,132 @@ test('Zero-flicker traffic invariants: no duplicate crew.sweep, caravan turnarou
     assert.ok(texMatches.length <= 16, `${name} uses <= 16 sampled textures (${texMatches.length})`);
   }
 });
+
+test('Harbor stern z-separation, 0.000 mm collinear river-barge oars, over-gunwale steering sweep, sealed cuddy decks & TBDR solid entry points', async () => {
+  const { rowingHullDeck } = await import('../js/models/rowing.js');
+
+  // 1. Harbor Cog (pinta: Arch 0, 1) & Carrack (santa-maria: Arch 2, 3) have zero coplanar stern taffrail/window faces
+  for (const archIdx of [0, 1, 2, 3]) {
+    const arch = getTradeVesselArchetype(archIdx);
+    const v = arch.vertices;
+    const ind = arch.indices;
+    for (const bId of ['bulwark.port', 'bulwark.starboard']) {
+      const bg = arch.groups.find((g) => g.id === bId);
+      assert.ok(bg, `Arch ${archIdx} retains ${bId}`);
+      for (let t = bg.firstVertex; t + 2 < bg.firstVertex + bg.vertexCount; t += 3) {
+        const i0 = ind[t], i1 = ind[t + 1], i2 = ind[t + 2];
+        const cz = (v[i0 * 9 + 2] + v[i1 * 9 + 2] + v[i2 * 9 + 2]) / 3;
+        const nz = (v[i0 * 9 + 5] + v[i1 * 9 + 5] + v[i2 * 9 + 5]) / 3;
+        assert.ok(
+          !(cz > 5.992 && Math.abs(nz) > 0.90),
+          `Arch ${archIdx} ${bId} has zero +Z/-Z stern taffrail triangle coplanar with hull.closure.stern at z=6.0`,
+        );
+      }
+    }
+
+    const winGrp = arch.groups.find((g) => g.id === 'stern.windows');
+    assert.ok(winGrp && winGrp.vertexCount > 0, `Arch ${archIdx} retains stern.windows`);
+    let maxCasingZ = -Infinity;
+    let minGlassZ = Infinity;
+    let minMuntinZ = Infinity;
+    for (let t = winGrp.firstVertex; t + 2 < winGrp.firstVertex + winGrp.vertexCount; t += 3) {
+      const i0 = ind[t], i1 = ind[t + 1], i2 = ind[t + 2];
+      const cx = (v[i0 * 9] + v[i1 * 9] + v[i2 * 9]) / 3;
+      const cy = (v[i0 * 9 + 1] + v[i1 * 9 + 1] + v[i2 * 9 + 1]) / 3;
+      const cz = (v[i0 * 9 + 2] + v[i1 * 9 + 2] + v[i2 * 9 + 2]) / 3;
+      const nz = (v[i0 * 9 + 5] + v[i1 * 9 + 5] + v[i2 * 9 + 5]) / 3;
+      const mat = Math.floor(v[i0 * 9 + 6]);
+      if (archIdx === 2 || archIdx === 3) {
+        if (mat === 11 && cy < 1.95) {
+          assert.ok(Math.abs(cx) >= 0.13, `Santa María Arch ${archIdx} drops center sternpost-impaled window at x=0 (cx=${cx.toFixed(3)})`);
+        }
+      }
+      if (cy < 1.95 && cz < 6.06 && nz > 0.85) {
+        if (mat === 1) maxCasingZ = Math.max(maxCasingZ, cz);
+        else if (mat === 11) minGlassZ = Math.min(minGlassZ, cz);
+        else if (mat === 17 && cz > 6.020) minMuntinZ = Math.min(minMuntinZ, cz);
+      }
+    }
+    assert.ok(minGlassZ - maxCasingZ >= 0.012, `Arch ${archIdx} stern window glass (${minGlassZ.toFixed(4)}) stands >= 0.012 design Z proud of oak casing (${maxCasingZ.toFixed(4)})`);
+    assert.ok(minMuntinZ - minGlassZ >= 0.004, `Arch ${archIdx} stern muntins (${minMuntinZ.toFixed(4)}) stand >= 0.004 design Z proud of glass (${minGlassZ.toFixed(4)})`);
+  }
+
+  // 2. River Barge (Arch 4): 0.000 mm collinear sweep oar shaft ray, Rodrigues uShaft feathering, over-gunwale steering sweep & sealed hold
+  const barge = getTradeVesselArchetype(4);
+  const ds = barge.designScale;
+  const bv = barge.vertices;
+  const bi = barge.indices;
+  const pivots = bargeOarPivotsForWGSL();
+
+  let maxCenterlineErrMm = 0;
+  for (const og of barge.groups.filter((g) => g.id.startsWith('rowing.propulsor.rower.'))) {
+    const uniq = new Set();
+    for (let t = og.firstVertex; t < og.firstVertex + og.vertexCount; t++) uniq.add(bi[t]);
+    const firstV = bi[og.firstVertex] * 9;
+    const stIdx = Math.round((bv[firstV + 6] - 16) * 64);
+    const pivDes = [pivots[stIdx * 4], pivots[stIdx * 4 + 1], pivots[stIdx * 4 + 2]];
+    const side = pivots[stIdx * 4 + 3];
+    const uDes = [side / ds[0], -0.37 / ds[1], 0];
+    const uDesLen = Math.hypot(uDes[0], uDes[1], uDes[2]);
+    uDes[0] /= uDesLen; uDes[1] /= uDesLen;
+    const uRayM = [side, -0.37, 0];
+    const uLenM = Math.hypot(uRayM[0], uRayM[1], uRayM[2]);
+    uRayM[0] /= uLenM; uRayM[1] /= uLenM;
+
+    // Group all cylinder & blade vertices by exact design-space station sDes along uDes
+    const buckets = [];
+    for (const vi of uniq) {
+      const pd = [bv[vi * 9], bv[vi * 9 + 1], bv[vi * 9 + 2]];
+      const ddx = pd[0] - pivDes[0], ddy = pd[1] - pivDes[1], ddz = pd[2] - pivDes[2];
+      const sDes = ddx * uDes[0] + ddy * uDes[1] + ddz * uDes[2];
+      let b = buckets.find((bk) => Math.abs(bk.sDes - sDes) < 1e-3);
+      if (!b) { b = { sDes, ptsM: [] }; buckets.push(b); }
+      const pm = [ddx * ds[0], ddy * ds[1], ddz * ds[2]];
+      if (!b.ptsM.some((q) => Math.hypot(q[0] - pm[0], q[1] - pm[1], q[2] - pm[2]) < 1e-5)) {
+        b.ptsM.push(pm);
+      }
+    }
+    assert.equal(buckets.length, 5, `${og.id} has 5 collinear stations (tipIn, collarIn, collarOut, neckEnd, bladeTip)`);
+    for (const b of buckets) {
+      assert.ok(b.ptsM.length >= 4, `station at s=${b.sDes.toFixed(3)} has symmetric ring/blade vertices`);
+      let cx = 0, cy = 0, cz = 0;
+      for (const p of b.ptsM) { cx += p[0]; cy += p[1]; cz += p[2]; }
+      cx /= b.ptsM.length; cy /= b.ptsM.length; cz /= b.ptsM.length;
+      const dot = cx * uRayM[0] + cy * uRayM[1] + cz * uRayM[2];
+      const perpM = Math.hypot(cx - uRayM[0] * dot, cy - uRayM[1] * dot, cz - uRayM[2] * dot);
+      maxCenterlineErrMm = Math.max(maxCenterlineErrMm, perpM * 1000);
+    }
+  }
+  assert.ok(maxCenterlineErrMm < 0.01, `all 8 river-barge oar rings & blades lie on exact 3D straight line (err=${maxCenterlineErrMm.toFixed(5)} mm < 0.01 mm)`);
+  assert.match(TRADE_VESSELS_WGSL, /let\s+uShaft\s*=\s*normalize\(/, 'animateTradeOar feathers via rigid Rodrigues rotation around uShaft');
+  assert.doesNotMatch(TRADE_VESSELS_WGSL, /\baxisY\b/, 'legacy dog-leg axisY feathering removed');
+
+  // Verify over-gunwale stern steering sweep (`helm.steering-oar`) stays strictly above gunwale `railY` where it crosses the quarter
+  const steerGrp = barge.groups.find((g) => g.id === 'helm.steering-oar');
+  assert.ok(steerGrp && steerGrp.vertexCount > 0, 'Arch 4 has rebuilt helm.steering-oar');
+  assert.ok(!barge.groups.some((g) => /^anchor(?:\.|$)/i.test(g.id)), 'Arch 4 strips sea anchors');
+  for (let t = steerGrp.firstVertex; t < steerGrp.firstVertex + steerGrp.vertexCount; t++) {
+    const o = bi[t] * 9;
+    const z = bv[o + 2];
+    if (z >= 4.70 && z <= 4.98) {
+      const railY = rowingHullDeck('lusoria', z);
+      assert.ok(bv[o + 1] > railY + 0.025, `helm.steering-oar clears gunwale at z=${z.toFixed(2)} (y=${bv[o + 1].toFixed(3)} > railY=${railY.toFixed(3)})`);
+    }
+  }
+  assert.ok(barge.groups.some((g) => g.id === 'hull.cuddy.fore' && g.vertexCount > 0), 'fore cuddy deck seals bow bay');
+  assert.ok(barge.groups.some((g) => g.id === 'hull.cuddy.aft' && g.vertexCount > 0), 'aft cuddy deck seals stern bay');
+  assert.ok(barge.groups.some((g) => g.id === 'hull.sole.ceiling' && g.vertexCount > 0), 'bilge ceiling seals sub-sole hold');
+
+  // 3. Verify TBDR Early-Z / HSR solid fragment entry points omit `@builtin(sample_mask)`
+  for (const [label, src, fnName] of [
+    ['nearSolidPipe', TRADE_VESSELS_WGSL, 'tvSolidFS'],
+    ['continuumSolidPipe', TRADE_VESSEL_CONTINUUM_WGSL, 'tvContSolidFS'],
+    ['crewSolidPipe', DECK_CREW_RENDER_WGSL, 'tvCrewSolidFS'],
+  ]) {
+    const start = src.indexOf(`@fragment fn ${fnName}`);
+    assert.ok(start >= 0, `${label} defines @fragment fn ${fnName}`);
+    const closeBrace = src.indexOf('\n}', start);
+    const snippet = src.slice(start, closeBrace > start ? closeBrace + 2 : start + 240);
+    assert.doesNotMatch(snippet, /@builtin\(sample_mask\)/, `${label} (${fnName}) omits @builtin(sample_mask) for hardware Early-Z/HSR`);
+  }
+});

@@ -14,7 +14,7 @@ const models = ['sailor', 'sailor-female'].map(load);
 
 // A device that makes nothing and remembers everything.
 function recorder() {
-  const buffers = [], writes = [], draws = [];
+  const buffers = [], writes = [], draws = [], dispatches = [];
   const device = {
     createBuffer(d) { const b = { ...d, destroyed: false, destroy() { this.destroyed = true; } }; buffers.push(b); return b; },
     queue: { writeBuffer(b, offset, data) { writes.push({ label: b.label, words: new Uint32Array(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)) }); } },
@@ -26,11 +26,11 @@ function recorder() {
     const state = {};
     return {
       setPipeline(p) { state.pipeline = p.label; }, setBindGroup(i, g) { if (i === 0) state.group = g; }, setVertexBuffer() {},
-      setIndexBuffer(b) { state.index = b; }, dispatchWorkgroups() {},
+      setIndexBuffer(b) { state.index = b; }, dispatchWorkgroups(x) { dispatches.push({ pipeline: state.pipeline, workgroups: x }); },
       drawIndexedIndirect(b, offset) { draws.push({ pipeline: state.pipeline, group: state.group, index: state.index, buffer: b, offset }); },
     };
   };
-  return { device, buffers, writes, draws, pass, live: (label) => buffers.filter((b) => b.label === label && !b.destroyed) };
+  return { device, buffers, writes, draws, dispatches, pass, live: (label) => buffers.filter((b) => b.label === label && !b.destroyed) };
 }
 const town = (name, people, x) => ({
   name, center: { x, z: 0 },
@@ -83,7 +83,7 @@ test('the fallen are remembered for the last few towns visited, and every record
 });
 
 test('the pass is told the date in hours from when the record began, and only when the hour has moved on', async (t) => {
-  const { folk, visit, writes, pass } = await crowdOf(t);
+  const { folk, visit, writes, dispatches, pass } = await crowdOf(t);
   const towns = [town('lisbon', 60, 0), town('porto', 50, 9000)];
   const start = Date.UTC(1492, 7, 3);
   visit(towns, 0);
@@ -108,10 +108,12 @@ test('the pass is told the date in hours from when the record began, and only wh
   writes.length = 0;
   folk.encode(pass(), start + 78 * HOUR);
   assert.equal(hoursSent(writes).at(-1), 78, 'so someone who fell at hour 30 has lain two days');
-  // Every frame resets the draw counts, and with no shot in the air that is all.
+  // Every frame resets the draw counts via a 1-workgroup GPU compute pass, with zero CPU writeBuffer uploads.
   writes.length = 0;
+  dispatches.length = 0;
   folk.encode(pass(), start + 78 * HOUR + 1000);
-  assert.deepEqual(writes.map((w) => w.label), ['townsfolk draws']);
+  assert.deepEqual(writes.map((w) => w.label), []);
+  assert.deepEqual(dispatches, [{ pipeline: 'townsfolk reset', workgroups: 1 }, { pipeline: 'townsfolk walk', workgroups: 1 }]);
   folk.destroy();
 });
 

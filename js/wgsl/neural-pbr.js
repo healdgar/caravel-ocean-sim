@@ -364,7 +364,7 @@ export function withNeuralPbrVessel(source, { group = 0, latentBinding = 16, wei
 
   out = neuralPbrReplaceRequired(
     out,
-    /let\s+ao\s*=\s*mix\(\s*0?\.65\s*,\s*1(?:\.0)?\s*,\s*smoothstep\(\s*0?\.72\s*,\s*1\.5\s*,\s*p\.y\s*\)\s*\)\s*;/,
+    /let\s+ao\s*=\s*mix\(\s*0?\.65\s*,\s*1(?:\.0?)?\s*,\s*smoothstep\(\s*0?\.72\s*,\s*1\.5\s*,\s*p\.y\s*\)\s*\)\s*;/,
     'let ao=mix(0.65,1.0,smoothstep(0.72,1.5,p.y))*npbr.cavityAO;',
     'vessel cavity ao'
   );
@@ -396,7 +396,7 @@ export function withNeuralPbrTerrain(source, { group = 0, latentBinding = 22, we
 
   out = neuralPbrReplaceRequired(
     out,
-    /var<private>\s*landNormalSpread\s*:\s*f32\s*=\s*0(?:\.0)?\s*;/,
+    /var<private>\s*landNormalSpread\s*:\s*f32\s*=\s*0(?:\.0?)?\s*;/,
     'var<private> landNormalSpread:f32=0.0;\nvar<private> landNpbrGloss:f32=0.0;',
     'terrain private gloss var'
   );
@@ -405,7 +405,7 @@ export function withNeuralPbrTerrain(source, { group = 0, latentBinding = 22, we
   // (vitrified terracotta glaze, calcite limestone crystals, burnished stucco, foot-worn cobbles)
   out = neuralPbrReplaceRequired(
     out,
-    /let\s+smoothFilm\s*=\s*select\(\s*clamp\(\s*\(\s*0?\.46\s*-\s*effRough\s*\)\s*\/\s*0?\.34\s*,\s*0(?:\.0)?\s*,\s*1(?:\.0)?\s*\)\s*\*\s*effWet\s*,\s*1(?:\.0)?\s*,\s*isMetal\s*\)\s*;/,
+    /let\s+smoothFilm\s*=\s*select\(\s*clamp\(\s*\(\s*0?\.46\s*-\s*effRough\s*\)\s*\/\s*0?\.34\s*,\s*0(?:\.0?)?\s*,\s*1(?:\.0?)?\s*\)\s*\*\s*effWet\s*,\s*1(?:\.0?)?\s*,\s*isMetal\s*\)\s*;/,
     `let npbrDryGloss=clamp((0.68-effRough)/0.42,0.0,1.0)*landNpbrGloss;
   let smoothFilm=select(max(clamp((0.46-effRough)/0.34,0.0,1.0)*effWet,npbrDryGloss*0.52),1.0,isMetal);`,
     'terrain smoothFilm'
@@ -413,7 +413,7 @@ export function withNeuralPbrTerrain(source, { group = 0, latentBinding = 22, we
 
   out = neuralPbrReplaceRequired(
     out,
-    /let\s+specMask\s*=\s*select\(\s*clamp\(\s*\(\s*0?\.72\s*-\s*effRough\s*\)\s*\/\s*0?\.42\s*,\s*0(?:\.0)?\s*,\s*1(?:\.0)?\s*\)\s*\*\s*\(\s*0?\.08\s*\+\s*0?\.92\s*\*\s*effWet\s*\)\s*,\s*0?\.65\s*,\s*isMetal\s*\)\s*;/,
+    /let\s+specMask\s*=\s*select\(\s*clamp\(\s*\(\s*0?\.72\s*-\s*effRough\s*\)\s*\/\s*0?\.42\s*,\s*0(?:\.0?)?\s*,\s*1(?:\.0?)?\s*\)\s*\*\s*\(\s*0?\.08\s*\+\s*0?\.92\s*\*\s*effWet\s*\)\s*,\s*0?\.65\s*,\s*isMetal\s*\)\s*;/,
     'let specMask=select(clamp((0.72-effRough)/0.42,0.0,1.0)*max(0.08+0.92*effWet,npbrDryGloss*0.64),0.65,isMetal);',
     'terrain specMask'
   );
@@ -665,14 +665,14 @@ export function withNeuralPbrTradeVessels(source, { group = 1, latentBinding = 3
 
   out = neuralPbrReplaceRequired(
     out,
-    /let\s+spec\s*=\s*select\(\s*vec3f\(\s*0(?:\.0)?\s*\)\s*,\s*vesselSpecular\(\s*n\s*,\s*viewDir\s*,\s*sunDir\s*,\s*rough\s*,\s*f0\s*\)\s*\*\s*sunRad\s*\*\s*nDotL\s*,\s*nDotL\s*>\s*0(?:\.0)?\s*\)\s*;/,
+    /let\s+spec\s*=\s*select\(\s*vec3f\(\s*0(?:\.0?)?\s*\)\s*,\s*vesselSpecular\(\s*n\s*,\s*viewDir\s*,\s*sunDir\s*,\s*rough\s*,\s*f0\s*\)\s*\*\s*sunRad\s*\*\s*nDotL\s*,\s*nDotL\s*>\s*0(?:\.0?)?\s*\)\s*;/,
     'let spec = select(vec3f(0.0), neuralPbrAnisoSpecular(n, npbrBasis, viewDir, sunDir, rough, npbr.aniso, f0) * sunRad * nDotL, nDotL > 0.0);',
     'trade vessels anisotropic specular'
   );
 
   out = neuralPbrReplaceRequired(
     out,
-    /let\s+lit\s*=\s*diffTint\s*\*\s*amb\s*\*\s*0\.82/,
+    /let\s+lit\s*=\s*diffTint\s*\*\s*amb\s*\*\s*0?\.82/,
     'let lit = diffTint * amb * (0.82 * npbr.cavityAO)',
     'trade vessels cavity ao'
   );

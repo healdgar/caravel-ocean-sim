@@ -436,21 +436,11 @@ export function createNeuralComposite(compositeSource) {
   if (!anchor.test(compositeSource)) {
     throw new Error('Unrecognized COMPOSITE source for neural light pass');
   }
-  const hasAirHDR = /\bpostCameraSea\b/.test(compositeSource);
-  const airSelectWGSL = hasAirHDR
-    ? /* wgsl */ `if (postCameraSea[9] - postFrame.camPos.y <= .005) { return saneHDR(textureLoad(airHDR, p, 0).rgb); }`
-    : '';
-
   const declarations = NEURAL_WEIGHTS_STRUCT_WGSL + /* wgsl */ `
 @group(1) @binding(0) var neuralLightTex: texture_2d<f32>;
 @group(1) @binding(1) var neuralGuideTex: texture_2d<f32>;
 @group(1) @binding(2) var<uniform> NW: NeuralWeights;
 @group(1) @binding(3) var<uniform> NP: NeuralParams;
-
-fn neuralLoadHDR(p: vec2i) -> vec3f {
-  ${airSelectWGSL}
-  return saneHDR(textureLoad(hdr, p, 0).rgb);
-}
 
 fn neuralApplyHDR(cIn: vec3f, pc: vec2i, uv: vec2f, dimsI: vec2i) -> vec3f {
   let strength = NP.tuning.x;
@@ -464,65 +454,62 @@ fn neuralApplyHDR(cIn: vec3f, pc: vec2i, uv: vec2f, dimsI: vec2i) -> vec3f {
 
   // 1. Joint-bilateral upsampling of 1/4-res 3D-guided illumination & contact occlusion
   let qDims = vec2i(textureDimensions(neuralLightTex));
+  let qMax = qDims - vec2i(1);
   let qCoord = uv * vec2f(qDims) - 0.5;
   let qBase = vec2i(floor(qCoord));
   let qFrac = qCoord - vec2f(qBase);
 
-  var lightAcc = vec4f(0.0);
-  var surfAcc = 0.0;
-  var wSum = 0.0;
-  var maxEdgeW = 0.0;
+  let qp00 = clamp(qBase, vec2i(0), qMax);
+  let qp10 = clamp(qBase + vec2i(1, 0), vec2i(0), qMax);
+  let qp01 = clamp(qBase + vec2i(0, 1), vec2i(0), qMax);
+  let qp11 = clamp(qBase + vec2i(1, 1), vec2i(0), qMax);
 
-  for (var dy = 0; dy <= 1; dy++) {
-    let wy = select(1.0 - qFrac.y, qFrac.y, dy == 1);
-    for (var dx = 0; dx <= 1; dx++) {
-      let wx = select(1.0 - qFrac.x, qFrac.x, dx == 1);
-      let bWeight = wx * wy;
-      let qp = clamp(qBase + vec2i(dx, dy), vec2i(0), qDims - vec2i(1));
-      let g = textureLoad(neuralGuideTex, qp, 0);
-      let l = textureLoad(neuralLightTex, qp, 0);
-      let dLuma = abs(cLogY - g.x);
-      let dChroma = abs(cWarm - g.y) + abs(cGreen - g.z);
-      let edgeW = exp(-dLuma * 7.2 - dChroma * 6.8);
-      maxEdgeW = max(maxEdgeW, edgeW);
-      let w = 1e-5 + bWeight * edgeW;
-      lightAcc += l * w;
-      surfAcc += clamp(g.w * (1.0 / 0.04), 0.0, 1.0) * w;
-      wSum += w;
-    }
-  }
-  let light = lightAcc / wSum;
-  let surfaceMask = surfAcc / wSum;
+  let g00 = textureLoad(neuralGuideTex, qp00, 0);
+  let g10 = textureLoad(neuralGuideTex, qp10, 0);
+  let g01 = textureLoad(neuralGuideTex, qp01, 0);
+  let g11 = textureLoad(neuralGuideTex, qp11, 0);
+
+  let e00 = exp(-abs(cLogY - g00.x) * 7.2 - (abs(cWarm - g00.y) + abs(cGreen - g00.z)) * 6.8);
+  let e10 = exp(-abs(cLogY - g10.x) * 7.2 - (abs(cWarm - g10.y) + abs(cGreen - g10.z)) * 6.8);
+  let e01 = exp(-abs(cLogY - g01.x) * 7.2 - (abs(cWarm - g01.y) + abs(cGreen - g01.z)) * 6.8);
+  let e11 = exp(-abs(cLogY - g11.x) * 7.2 - (abs(cWarm - g11.y) + abs(cGreen - g11.z)) * 6.8);
+
+  let maxEdgeW = max(max(e00, e10), max(e01, e11));
+  let w00 = 1e-5 + (1.0 - qFrac.x) * (1.0 - qFrac.y) * e00;
+  let w10 = 1e-5 + qFrac.x * (1.0 - qFrac.y) * e10;
+  let w01 = 1e-5 + (1.0 - qFrac.x) * qFrac.y * e01;
+  let w11 = 1e-5 + qFrac.x * qFrac.y * e11;
+  let invWSum = 1.0 / (w00 + w10 + w01 + w11);
+
+  let s00 = clamp(g00.w * (1.0 / 0.04), 0.0, 1.0);
+  let s10 = clamp(g10.w * (1.0 / 0.04), 0.0, 1.0);
+  let s01 = clamp(g01.w * (1.0 / 0.04), 0.0, 1.0);
+  let s11 = clamp(g11.w * (1.0 / 0.04), 0.0, 1.0);
+  let surfaceMask = (s00 * w00 + s10 * w10 + s01 * w01 + s11 * w11) * invWSum;
+  if (surfaceMask <= 0.001) { return cIn; }
+
+  let l00 = textureLoad(neuralLightTex, qp00, 0);
+  let l10 = textureLoad(neuralLightTex, qp10, 0);
+  let l01 = textureLoad(neuralLightTex, qp01, 0);
+  let l11 = textureLoad(neuralLightTex, qp11, 0);
+  let light = (l00 * w00 + l10 * w10 + l01 * w01 + l11 * w11) * invWSum;
   let bilateralConf = smoothstep(0.05, 0.36, maxEdgeW);
 
-  // 2. Full-resolution zero-bias 12 -> 12 (tanh) -> 3 Game-Texture SR & Optical Relief CNN
-  let maxPx = dimsI - vec2i(1);
-  let yNW = log2(1.0 + neuralLuma(neuralLoadHDR(clamp(pc + vec2i(-1, -1), vec2i(0), maxPx)))) - cLogY;
-  let yN  = log2(1.0 + neuralLuma(neuralLoadHDR(clamp(pc + vec2i( 0, -1), vec2i(0), maxPx)))) - cLogY;
-  let yNE = log2(1.0 + neuralLuma(neuralLoadHDR(clamp(pc + vec2i( 1, -1), vec2i(0), maxPx)))) - cLogY;
-  let yW  = log2(1.0 + neuralLuma(neuralLoadHDR(clamp(pc + vec2i(-1,  0), vec2i(0), maxPx)))) - cLogY;
-  let yE  = log2(1.0 + neuralLuma(neuralLoadHDR(clamp(pc + vec2i( 1,  0), vec2i(0), maxPx)))) - cLogY;
-  let ySW = log2(1.0 + neuralLuma(neuralLoadHDR(clamp(pc + vec2i(-1,  1), vec2i(0), maxPx)))) - cLogY;
-  let yS  = log2(1.0 + neuralLuma(neuralLoadHDR(clamp(pc + vec2i( 0,  1), vec2i(0), maxPx)))) - cLogY;
-  let ySE = log2(1.0 + neuralLuma(neuralLoadHDR(clamp(pc + vec2i( 1,  1), vec2i(0), maxPx)))) - cLogY;
-
-  let yW2 = log2(1.0 + neuralLuma(neuralLoadHDR(clamp(pc + vec2i(-2,  0), vec2i(0), maxPx)))) - cLogY;
-  let yE2 = log2(1.0 + neuralLuma(neuralLoadHDR(clamp(pc + vec2i( 2,  0), vec2i(0), maxPx)))) - cLogY;
-  let yN2 = log2(1.0 + neuralLuma(neuralLoadHDR(clamp(pc + vec2i( 0, -2), vec2i(0), maxPx)))) - cLogY;
-  let yS2 = log2(1.0 + neuralLuma(neuralLoadHDR(clamp(pc + vec2i( 0,  2), vec2i(0), maxPx)))) - cLogY;
-
-  let lap2H = 0.5 * (yW2 + yE2);
-  let lap2V = 0.5 * (yN2 + yS2);
+  // 2. Zero-extra-HDR-read compact optical relief MLP from center pixel residual (cLogY - gMeanY) + guide slopes
+  let gMeanY = (g00.x * w00 + g10.x * w10 + g01.x * w01 + g11.x * w11) * invWSum;
+  let hf = cLogY - gMeanY;
+  let gx = 0.25 * ((g10.x - g00.x) + (g11.x - g01.x));
+  let gy = 0.25 * ((g01.x - g00.x) + (g11.x - g10.x));
+  let yN = -hf - gy;
+  let yS = -hf + gy;
+  let yW = -hf - gx;
+  let yE = -hf + gx;
   let gradMag = abs(yN) + abs(yS) + abs(yE) + abs(yW);
 
-  let d0 = vec4f(yNW, yN, yNE, yW) * 3.0;
-  let d1 = vec4f(yE, ySW, yS, ySE) * 3.0;
-  let d2 = vec4f(lap2H * 3.0, lap2V * 3.0, cWarm * gradMag * 4.0, cGreen * gradMag * 4.0);
-
-  let dh0 = tanh(clamp(NW.detailW1[0] * d0 + NW.detailW1[1] * d1 + NW.detailW1[2] * d2, vec4f(-12.0), vec4f(12.0)));
-  let dh1 = tanh(clamp(NW.detailW1[3] * d0 + NW.detailW1[4] * d1 + NW.detailW1[5] * d2, vec4f(-12.0), vec4f(12.0)));
-  let dh2 = tanh(clamp(NW.detailW1[6] * d0 + NW.detailW1[7] * d1 + NW.detailW1[8] * d2, vec4f(-12.0), vec4f(12.0)));
-  let detLogRGB = (NW.detailW2[0] * dh0 + NW.detailW2[1] * dh1 + NW.detailW2[2] * dh2).xyz;
+  let d0 = vec4f(yN - gx, yN, yN + gx, yW) * 3.0;
+  let d2 = vec4f(-hf * 3.0, -hf * 3.0, cWarm * gradMag * 4.0, cGreen * gradMag * 4.0);
+  let dh0 = tanh(clamp(NW.detailW1[0] * d0 + NW.detailW1[2] * d2, vec4f(-12.0), vec4f(12.0)));
+  let detLogRGB = (NW.detailW2[0] * dh0).xyz;
 
   // Suppress micro-sharpening on specular sun glints and clear sky dome
   let glintGuard = 1.0 / (1.0 + max(0.0, cLuma - 1.25) * 1.5);

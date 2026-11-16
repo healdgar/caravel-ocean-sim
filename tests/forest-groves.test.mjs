@@ -203,7 +203,7 @@ test('the canopy is one surface the GPU alone places, chooses and draws',()=>{
     assert.ok(body,name);assert.ok(!/writeBuffer|writeTexture|new (Float32|Uint32|Uint8)Array|createBindGroup|createBuffer/.test(body),name);
   }
   const terrain=fs.readFileSync('js/terrain.js','utf8');
-  assert.match(terrain,/groves\?\.encode\(pass\)/);assert.match(terrain,/groves\?\.drawOpaque\(pass\)/);
+  assert.match(terrain,/groves\?\.encode\(pass(?:,\s*frame)?\)/);assert.match(terrain,/groves\?\.drawOpaque\(pass(?:,\s*viewProjection)?\)/);
   assert.match(terrain,/forest\.updatePack\(nextForestPack,[^;]*\);\n\s*syncGroves\(nextForestPack\.roots\);/);
   // The published page carries both packs' groves.
   const build=fs.readFileSync('build.mjs','utf8');

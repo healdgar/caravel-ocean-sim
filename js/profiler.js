@@ -8,6 +8,28 @@ export const GPU_PASS_NAMES = [
   ...Array.from({length:7},(_,i)=>`Bloom up ${i+1}`), 'Composite',
 ];
 
+export const PRIMARY_GPU_PASS_NAMES = Object.freeze([
+  'Waves + effects',
+  'Solid shadows',
+  'Land shadows',
+  'Submerged geometry',
+  'Scene',
+  'Cannon smoke',
+  'Underwater medium',
+  'Neural light pass',
+  'Bloom down 0',
+  'Bloom up 1',
+  'Composite',
+]);
+const PRIMARY_GPU_PASSES = new Set(PRIMARY_GPU_PASS_NAMES);
+const GPU_PASS_ALIASES = Object.freeze({
+  Compute: 'Waves + effects',
+  'Ship shadows': 'Solid shadows',
+  'Land shadow': 'Land shadows',
+  'Bloom first': 'Bloom down 0',
+  'Bloom last': 'Bloom up 1',
+});
+
 // Passes may begin before the first encoded compute pass starts. Preserve the
 // endpoint interval separately; only min(start)..max(end) encloses all samples.
 export function decodeGPUTimestamps(values,names,used) {
@@ -45,8 +67,9 @@ export function createFrameStages() {
   };
 }
 
-export function createGPUProfiler(device, requested=false) {
+export function createGPUProfiler(device, requested=false, options=null) {
   const supported=device.features.has('timestamp-query'), modes=new Map();
+  let deepTrace=Boolean(options?.deepTrace ?? (typeof location!=='undefined'&&new URLSearchParams(location.search).get('gpuTrace')==='deep'));
   let detailed=!!requested&&supported,epoch=0,active=null,pendingCapture=null;
   // Allocate timing resources only when opened. Closing stops sampling altogether.
   function timingMode(){
@@ -61,15 +84,29 @@ export function createGPUProfiler(device, requested=false) {
   }
   const latest={},smoothed={},samples=[];
   let collecting=false,pending=false,frame=0,pendingFrame=0,totalMs=0,sampleCount=0,droppedSamples=0,reading=Promise.resolve(),error='';
+  function sceneMs() {
+    return smoothed.Scene ?? null;
+  }
+  function summary() {
+    return { smoothed, count: samples.length, totalMs };
+  }
   function snapshot() {
     const sorted=samples.map(s=>s.totalMs).sort((a,b)=>a-b);
-    return {version:2,metric:'sampled GPU window',supported,detailed,error,totalMs,sampleCount,droppedSamples,latest:{...latest},smoothed:{...smoothed},
+    return {version:2,metric:'sampled GPU window',supported,detailed,deepTrace,error,totalMs,sampleCount,droppedSamples,latest:{...latest},smoothed:{...smoothed},
       medianMs:sorted.length?sorted[Math.floor(sorted.length/2)]:null,
       p95Ms:sorted.length?sorted[Math.min(sorted.length-1,Math.ceil(sorted.length*.95)-1)]:null,
       samples:samples.map(s=>({...s,passes:{...s.passes}}))};
   }
   return {
-    supported,get detailed(){return detailed;},get totalMs(){return totalMs;},snapshot,
+    supported,
+    get detailed(){return detailed;},
+    get deepTrace(){return deepTrace;},
+    set deepTrace(v){deepTrace=!!v;},
+    setDeepTrace(v){deepTrace=!!v;return deepTrace;},
+    get totalMs(){return totalMs;},
+    sceneMs,
+    summary,
+    snapshot,
     setDetailed(value){
       const next=!!value&&supported;if(next===detailed)return detailed;
       detailed=next;epoch++;collecting=false;active=null;totalMs=0;sampleCount=0;droppedSamples=0;samples.length=0;
@@ -79,8 +116,10 @@ export function createGPUProfiler(device, requested=false) {
     beginFrame(index){frame=index;collecting=detailed&&!pending&&!error&&(index&7)===0;active=collecting?timingMode():null;active?.used.fill(0);},
     writes(name){
       if(!collecting)return undefined;
-      const i=active.names.indexOf(name);
+      const canonical=GPU_PASS_ALIASES[name]??name;
+      const i=active.names.indexOf(canonical);
       if(i<0)throw new Error(`Unknown GPU timing pass: ${name}`);
+      if(!deepTrace&&!PRIMARY_GPU_PASSES.has(canonical))return undefined;
       active.used[i]=1;return active.descriptors[i];
     },
     resolve(encoder){
@@ -117,6 +156,7 @@ export function createGPUProfiler(device, requested=false) {
       if(!detailed)return 'GPU pass timing runs while this panel is open.';
       const lines=[`GPU sampled window  ${totalMs.toFixed(2)} ms`, 'Smoothed pass spans (overlap; not additive):'];
       for(const name of GPU_PASS_NAMES.filter(n=>!n.startsWith('Bloom '))){
+        if(!deepTrace&&!PRIMARY_GPU_PASSES.has(name)&&!(name in latest&&latest[name]>0))continue;
         if((name.startsWith('escort-')||name.startsWith('Companion '))&&!(name in latest&&latest[name]>0))continue;
         if(name==='Composite'){
           lines.push(`Bloom window (waits)    ${(smoothed.Bloom||0).toFixed(2)} ms`);

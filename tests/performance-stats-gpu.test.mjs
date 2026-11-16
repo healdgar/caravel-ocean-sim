@@ -18,7 +18,7 @@ test('native GPU profiler allocates lazily, discards pending old epochs and take
   try{
     await page.route('**/__stats-profiler',r=>r.fulfill({contentType:'text/html',body:'<!doctype html>'}));await page.goto(statsOrigin+'/__stats-profiler');
     const result=await page.evaluate(async()=>{
-      const {createGPUProfiler,GPU_PASS_NAMES}=await import('/js/profiler.js'),adapter=await navigator.gpu.requestAdapter();
+      const {createGPUProfiler,GPU_PASS_NAMES,PRIMARY_GPU_PASS_NAMES}=await import('/js/profiler.js'),adapter=await navigator.gpu.requestAdapter();
       if(!adapter.features.has('timestamp-query'))throw Error('Native timestamp lifecycle qualification requires timestamp-query');
       const device=await adapter.requestDevice({requiredFeatures:['timestamp-query']}),errors=[],queries=[],buffers=[];
       device.addEventListener('uncapturederror',e=>errors.push(e.error.message));
@@ -44,25 +44,28 @@ test('native GPU profiler allocates lazily, discards pending old epochs and take
       profiler.beginFrame(16);const whilePending=profiler.writes('Waves + effects'),pendingSnapshot=profiler.snapshot(),pendingQueries=queries.slice();
       release();await reading;GPUBuffer.prototype.mapAsync=nativeMap;
       const discarded=profiler.snapshot();
-      const detailed=encode(24,GPU_PASS_NAMES);await profiler.read();const detailedSnapshot=profiler.snapshot(),detailQueryCounts=queries.slice();
+      const primaryOnly=encode(24,GPU_PASS_NAMES);await profiler.read();
+      profiler.deepTrace=true;
+      const detailed=encode(32,GPU_PASS_NAMES);await profiler.read();const detailedSnapshot=profiler.snapshot(),detailQueryCounts=queries.slice();
       let releaseDetailed;const detailedDelivery=new Promise(resolve=>releaseDetailed=resolve);
       GPUBuffer.prototype.mapAsync=function(...args){const native=nativeMap.apply(this,args);return this.label==='timing read'?Promise.all([native,detailedDelivery]).then(()=>{}):native;};
-      encode(32,GPU_PASS_NAMES);const detailedReading=profiler.read();await device.queue.onSubmittedWorkDone();profiler.setDetailed(false);const cleared=profiler.snapshot();
+      encode(40,GPU_PASS_NAMES);const detailedReading=profiler.read();await device.queue.onSubmittedWorkDone();profiler.setDetailed(false);const cleared=profiler.snapshot();
       releaseDetailed();await detailedReading;GPUBuffer.prototype.mapAsync=nativeMap;const closedDiscarded=profiler.snapshot();
-      const closed=encode(40,['Waves + effects','Sky + clouds','escort-8 Solid shadows','Composite']);await profiler.read();
+      const closed=encode(48,['Waves + effects','Sky + clouds','escort-8 Solid shadows','Composite']);await profiler.read();
       const endpointSnapshot=profiler.snapshot(),closedText=profiler.text();profiler.destroy();await device.queue.onSubmittedWorkDone();device.destroy();
       // A real device without requested timestamp-query support must still
       // permit the CPU/FPS UI; do not pretend an unsupported feature exists.
       const plain=await(await navigator.gpu.requestAdapter()).requestDevice(),unsupported=createGPUProfiler(plain,true);unsupported.beginFrame(0);
       const unsupportedResult={supported:unsupported.supported,detailed:unsupported.detailed,writes:unsupported.writes('Waves + effects')??null,enabled:unsupported.setDetailed(true),text:unsupported.text()};unsupported.destroy();plain.destroy();
-      return {errors,before,closedFirst,closedQueries,firstOpen,whilePending:whilePending??null,pendingSnapshot,pendingQueries,discarded,detailed,detailedSnapshot,detailQueryCounts,cleared,closedDiscarded,closed,endpointSnapshot,closedText,unsupported:unsupportedResult,names:GPU_PASS_NAMES,buffers};
+      return {errors,before,closedFirst,closedQueries,firstOpen,whilePending:whilePending??null,pendingSnapshot,pendingQueries,discarded,primaryOnly,detailed,detailedSnapshot,detailQueryCounts,cleared,closedDiscarded,closed,endpointSnapshot,closedText,unsupported:unsupportedResult,names:GPU_PASS_NAMES,primaryNames:PRIMARY_GPU_PASS_NAMES,buffers};
     });
     t.diagnostic(JSON.stringify(result));assert.deepEqual(result.errors,[]);assert.deepEqual(result.before,{queries:0,buffers:0});
     assert.equal(result.closedFirst.copied,false);assert.ok(result.closedFirst.descriptors.every(d=>!d),'a closed panel writes no timestamps');assert.equal(result.closedQueries,0);assert.equal(result.firstOpen.copied,true);
     assert.equal(result.whilePending,null,'a pending read cannot start a second capture');assert.deepEqual(result.pendingQueries,[result.names.length*2],'reopening while pending cannot allocate or reuse live query memory');
     assert.equal(result.pendingSnapshot.sampleCount,0);assert.equal(result.discarded.sampleCount,0);assert.equal(result.discarded.totalMs,0);assert.deepEqual(result.discarded.latest,{},'an old readback cannot populate a newly opened epoch');assert.equal(result.discarded.error,'');
+    assert.equal(result.primaryOnly.descriptors.filter(Boolean).length,result.primaryNames.length,'default panel mode timestamps only primary passes to avoid TBDR sub-pass stalls');
     assert.deepEqual(result.detailQueryCounts,[result.names.length*2]);assert.equal(result.detailed.copied,true);assert.equal(result.detailed.descriptors.filter(Boolean).length,result.names.length);
-    assert.equal(result.detailedSnapshot.detailed,true);assert.equal(result.detailedSnapshot.sampleCount,1);assert.equal(result.detailedSnapshot.error,'');assert.ok(Object.values(result.detailedSnapshot.latest).every(x=>Number.isFinite(x)&&x>=0));
+    assert.equal(result.detailedSnapshot.detailed,true);assert.equal(result.detailedSnapshot.sampleCount,2);assert.equal(result.detailedSnapshot.error,'');assert.ok(Object.values(result.detailedSnapshot.latest).every(x=>Number.isFinite(x)&&x>=0));
     for(let escort=1;escort<=8;escort++)for(const kind of ['Solid','Canvas'])assert.ok(Object.hasOwn(result.detailedSnapshot.latest,`escort-${escort} ${kind} shadows`),'all production escort timing names are accepted');
     assert.equal(result.cleared.sampleCount,0);assert.deepEqual(result.cleared.latest,{});assert.equal(result.closedDiscarded.sampleCount,0);assert.deepEqual(result.closedDiscarded.latest,{},'an old read cannot leak spans into a closed panel');assert.equal(result.closedDiscarded.error,'');assert.equal(result.endpointSnapshot.detailed,false);assert.equal(result.endpointSnapshot.sampleCount,0);assert.deepEqual(result.endpointSnapshot.latest,{});
     assert.ok(result.closed.descriptors.every(d=>!d),'closing removes every timestamp write');assert.equal(result.closed.copied,false);assert.match(result.closedText,/runs while this panel is open/);
