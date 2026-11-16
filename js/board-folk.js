@@ -5,20 +5,47 @@
 // once when a plan arrives. Nothing here runs by the frame. Every walker is a soul of the model: its number, name,
 // age, calling, what it is about and where it lives, so that whoever is seen can be asked after by name.
 import { ROUTE_STEP_M, WALKER_WORDS } from './town-streets.js';
+import { buildStreetMountSeeds, STREET_MOUNT_FLAG } from './herds.js';
 
 // How long they stay where they went and at home between goings, in seconds, by what they went for.
 const FOLK_STAYS = Object.freeze({ work: [150, 420], errand: [35, 120], church: [240, 420], play: [4, 18] });
 // A way is walked no farther than this from the door: the fields of a great town lie half an hour off.
 export const FOLK_WAY_MOST_M = 1400;
+export const WALKER_MOUNTED_FLAG = STREET_MOUNT_FLAG;
 // To either hand of the line the model gives (which already keeps each to one side of the street).
 const FOLK_LANE_M = 0.45;
 const FOLK_PAUSE_SHARE = 0.3, FOLK_PAUSE_SECONDS = 9;
+
+const MOUNTED_EXPLICIT_ROLES = new Set([
+  'envoy', 'courier', 'messenger', 'correio', 'post', 'herald',
+  'bailiff', 'sheriff', 'steward', 'warden', 'lord', 'noble', 'gentry',
+  'hidalgo', 'fidalgo', 'knight', 'cavalier', 'corregedor', 'alcaide', 'justice', 'factor',
+]);
+const MOUNTED_AFFLUENT_ROLES = new Set([
+  'merchant', 'goldsmith', 'draper', 'clothier', 'physician', 'notary', 'clerk', 'vintner', 'apothecary',
+]);
 
 // A number in [0, 1) that is a soul's own, the same wherever and whenever it is asked.
 export function folkRoll(id, salt) {
   let h = (Math.imul(id | 0, 2654435761) ^ Math.imul((salt | 0) + 1, 40503)) >>> 0;
   h = Math.imul(h ^ (h >>> 15), 2246822519) >>> 0; h = Math.imul(h ^ (h >>> 13), 3266489917) >>> 0; h ^= h >>> 16;
   return (h >>> 8) / 16777216;
+}
+
+export function isMountedSoul(person, { indigenous = false, crowdCount = 0, routeMetres = 60, onPier = false } = {}) {
+  if (indigenous || onPier || !person) return false;
+  const age = person.age ?? 30;
+  if (age < 16 || age > 65 || person.goal === 'play') return false;
+  const role = String(person.role ?? '').toLowerCase();
+  const trade = String(person.trade ?? '').toLowerCase();
+  const office = String(person.office ?? '').toLowerCase();
+  if (person.mounted === true || MOUNTED_EXPLICIT_ROLES.has(role) || MOUNTED_EXPLICIT_ROLES.has(trade) || MOUNTED_EXPLICIT_ROLES.has(office)) {
+    return routeMetres >= 15;
+  }
+  if (crowdCount < 16 || routeMetres < 35) return false;
+  const r = folkRoll(person.id ?? 0, 19);
+  const share = (MOUNTED_AFFLUENT_ROLES.has(role) || MOUNTED_AFFLUENT_ROLES.has(trade)) ? 0.22 : 0.08;
+  return r < share;
 }
 
 // A way of the model's (x, z pairs on the board) as the walkers' samples: a point every ROUTE_STEP_M with its ground
@@ -51,15 +78,9 @@ const sameWay = (a, b) => a.length === b.length && a.every((v, k) => v === b[k])
  * The streets of a port with the model's people on them. `plan` is what the model's `folk` answered; `origin` the
  * middle of the board's ground in the streets' own coordinates; `heightAt(x, z)` the ground there; `base` the port's
  * streets as they were laid (its ways, doors and those who walk between its own buildings), or null.
- * Those of the plan walk the ways the model gave them. Those who walk the port's own ways are each given the soul of
- * one of the place's other grown people, so no one about is nameless; where the model names fewer than walk there,
- * only so many walk. Returns streets as js/townsfolk.js and js/audio.js read them, with `souls[i]` the soul of
- * walker i. `kept`, a Map the caller holds from one plan to the next, spares the ground being asked again for a way
- * someone took in the last plan too: when the eye moves on, most of those about are who they were. `blocked(x, z)`
- * says where a point stands inside a building of the port's own (js/town-streets.js townSolids). `away` is a Set of
- * the numbers of those who stand elsewhere today (at the port's posts: js/crew.js), and so walk no street.
  */
-export function boardFolkStreets({ plan: asked, origin, heightAt, base = null, kept = null, blocked = null, away = null }) {
+export function boardFolkStreets({ plan: asked, origin, heightAt, base = null, kept = null, blocked = null, away = null, indigenous = null }) {
+  const isIndigenous = Boolean(indigenous ?? base?.indigenous ?? asked?.indigenous);
   const about = (list) => away?.size ? list.filter((person) => !away.has(person.id)) : list;
   const plan = { ...asked, people: about(asked.people), others: about(asked.others) };
   const own = base?.people > 0 && base.walkers && base.samples ? Math.min(base.people, Math.floor(base.walkers.length / WALKER_WORDS), plan.others.length) : 0;
@@ -79,42 +100,81 @@ export function boardFolkStreets({ plan: asked, origin, heightAt, base = null, k
   const people = ways.length + own;
   const buffer = new ArrayBuffer(people * WALKER_WORDS * 4), words = new Uint32Array(buffer), floats = new Float32Array(buffer), souls = new Array(people);
   const here = (point) => [origin.x + point[0], origin.z + point[1]];
+  let mountedCount = 0;
+
   ways.forEach(({ person, first, count, whole, fromDoor }, w) => {
     const at = w * WALKER_WORDS, id = person.id, roll = (salt) => folkRoll(id, salt);
-    const stays = FOLK_STAYS[person.goal] ?? FOLK_STAYS.work, pauses = person.goal !== 'play' && roll(5) < FOLK_PAUSE_SHARE;
+    const lengthM = (count - 1) * ROUTE_STEP_M;
+    const mounted = isMountedSoul(person, { indigenous: isIndigenous, crowdCount: people, routeMetres: lengthM, onPier: false });
+    const stays = FOLK_STAYS[person.goal] ?? FOLK_STAYS.work;
+    const pauses = !mounted && person.goal !== 'play' && roll(5) < FOLK_PAUSE_SHARE;
     words[at] = first; words[at + 1] = count;
     floats[at + 2] = roll(1);
-    floats[at + 3] = Math.max(0.7, Math.min(2.4, person.pace * (person.run ? 1.5 : 1)));
+    floats[at + 3] = mounted
+      ? (2.45 + 0.45 * roll(21))
+      : Math.max(0.7, Math.min(2.4, person.pace * (person.run ? 1.5 : 1)));
     floats[at + 4] = 0.25 + 0.75 * roll(2);
     floats[at + 5] = pauses ? 0.2 + 0.6 * roll(3) : 0;
     floats[at + 6] = pauses ? FOLK_PAUSE_SECONDS * (0.5 + roll(4)) : 0;
     floats[at + 7] = stays[0] + (stays[1] - stays[0]) * roll(6);
-    floats[at + 8] = (count - 1) * ROUTE_STEP_M;
+    floats[at + 8] = lengthM;
     // Children are in before dark; the rest keep their own hours.
     floats[at + 9] = person.age < 14 ? 0.55 + 0.45 * roll(7) : roll(7);
     words[at + 10] = Math.floor(roll(8) * 0xffff);
     // The far end is in the open where the work is, if the way reaches it; play is in the open at both. An end
     // cut short at a building's wall is gone in at.
-    words[at + 11] = (person.sex === 'f' ? 1 : 0) | (person.goal === 'play' && fromDoor ? 2 : 0) | (whole && (person.open || person.goal === 'play') ? 4 : 0);
+    words[at + 11] = (person.sex === 'f' ? 1 : 0)
+      | (person.goal === 'play' && fromDoor ? 2 : 0)
+      | (whole && (person.open || person.goal === 'play') ? 4 : 0)
+      | (mounted ? WALKER_MOUNTED_FLAG : 0);
     const last = person.route.length - 2;
-    souls[w] = { id, name: person.name, surname: person.surname, sex: person.sex, age: person.age, role: person.role, goal: person.goal, there: person.there, via: person.via,
-      home: here(person.home), to: here([person.route[last], person.route[last + 1]]), planned: true };
+    const soulRec = {
+      id, name: person.name, surname: person.surname, sex: person.sex, age: person.age, role: person.role,
+      goal: person.goal, there: person.there, via: person.via,
+      home: here(person.home), to: here([person.route[last], person.route[last + 1]]), planned: true,
+    };
+    if (mounted) {
+      soulRec.mounted = true;
+      mountedCount++;
+    }
+    souls[w] = soulRec;
   });
   if (own) {
     const from = new Uint32Array(base.walkers.buffer, base.walkers.byteOffset, own * WALKER_WORDS);
     words.set(from, ways.length * WALKER_WORDS);
     for (let k = 0; k < own; k++) {
       const at = (ways.length + k) * WALKER_WORDS, soul = plan.others[k];
+      const baseFlags = words[at + 11] & ~WALKER_MOUNTED_FLAG;
+      const onPier = (baseFlags & 8) !== 0;
+      const lengthM = floats[at + 8];
+      const mounted = isMountedSoul(soul, { indigenous: isIndigenous, crowdCount: people, routeMetres: lengthM, onPier });
+      if (mounted) {
+        floats[at + 3] = 2.45 + 0.45 * folkRoll(soul.id, 21);
+        floats[at + 5] = 0;
+        floats[at + 6] = 0;
+        mountedCount++;
+      }
       words[at + 10] = Math.floor(folkRoll(soul.id, 8) * 0xffff);
-      words[at + 11] = (words[at + 11] & ~1) | (soul.sex === 'f' ? 1 : 0);
-      souls[ways.length + k] = { ...soul, goal: 'about', there: 'about the waterside', via: '', home: null, to: null, planned: false };
+      words[at + 11] = (baseFlags & ~1) | (soul.sex === 'f' ? 1 : 0) | (mounted ? WALKER_MOUNTED_FLAG : 0);
+      const soulRec = { ...soul, goal: 'about', there: 'about the waterside', via: '', home: null, to: null, planned: false };
+      if (mounted) soulRec.mounted = true;
+      souls[ways.length + k] = soulRec;
     }
   }
   const all = new Float32Array(ownSamples * 4 + samples.length);
   if (own) all.set(base.samples, 0);
   all.set(samples, ownSamples * 4);
-  return { ...(base ?? {}), samples: all, walkers: floats, people, souls, folk: { day: plan.day, date: plan.date, sunday: plan.sunday, planned: ways.length, own, cut } };
+  const out = { ...(base ?? {}), samples: all, walkers: floats, people, souls, folk: { day: plan.day, date: plan.date, sunday: plan.sunday, planned: ways.length, own, cut } };
+  if (isIndigenous) {
+    out.indigenous = true;
+    out.mountSeeds = { routes: new Float32Array(0), seeds: new Float32Array(0), count: 0, walkerIndices: [] };
+  } else if (mountedCount > 0) {
+    out.mountSeeds = buildStreetMountSeeds(out, { indigenous: false });
+  }
+  return out;
 }
+
+export { boardFolkStreets as crowdFromBoard };
 
 // What a soul is doing, in words, from where its walker is on its way (js/audio.js townWalkerStride gives `stride`,
 // null while they are indoors or home after dark).
@@ -124,17 +184,17 @@ export function folkDoing(soul, stride, length) {
   if (stride.stopped && stride.walked >= length - 0.5 && !stride.back) return soul.there;
   if (soul.goal === 'play') return soul.there;
   const by = soul.via ? ` by ${/^(the|a) /i.test(soul.via) ? '' : 'the '}${soul.via.toLowerCase()}` : '';
+  if (soul.mounted) {
+    return (stride.back ? 'riding home' : soul.goal === 'church' ? 'riding to mass' : soul.goal === 'errand' ? 'riding on an errand' : 'riding to work') + by;
+  }
   return (stride.back ? 'walking home' : soul.goal === 'church' ? 'walking to mass' : soul.goal === 'errand' ? 'out on an errand' : 'walking to work') + by;
 }
 
-// What one of the model's people at a port's post is at, in words that may follow "You find me". The post is this
-// game's (js/crew.js); the one who stands it is the model's: a townsman serving his turn on the watch, a man of a
-// host that lies in the place, or whoever holds the place for its lord.
+// What one of the model's people at a port's post is at, in words that may follow "You find me".
 const WATCH_WORKS = Object.freeze({ stone_sea_bastion: 'the sea bastion', torreon_atalaya_farol: 'the watchtower', bastion_trace_fortress: 'the fortress', curtain_wall_and_gate: 'the town wall' });
 const WATCH_POSTS = Object.freeze({ embrasure: 'at a gun of', crown: 'on the crown of', 'gate-roof': 'over the gate of', 'gate-portal': 'at the gate of', plinth: 'at the foot of', parade: 'before the gate of', citadel: 'in the yard of' });
 export function watchDoing(soldier) {
   const soul = soldier?.soul ?? {}, work = soldier?.building ?? {};
-  // A work's own name is its first words ("Torre de Belém Watchtower & River Beacon" is the Torre de Belém).
   const named = String(work.label || work.cairnSpec?.name || '').split(/\s+(?:[(·&]|Watchtower\b)/)[0].trim();
   const where = named ? `the ${named}` : WATCH_WORKS[soldier?.buildingPrefabId] || 'the fort';
   const duty = soul.of === 'host' ? `on guard with ${soul.host || 'the host'}` : soul.of === 'office' ? 'holding the place' : 'on watch';

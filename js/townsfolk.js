@@ -10,6 +10,7 @@ import { packCrewFaceW, townComponentMaskForLook } from './crew-components.js';
 import { DRESS_MASK_SCALE, indigenousDress } from './indigenous-dress.js';
 import { createDistantCrewLOD } from './crew-lod.js';
 import { bakeTownClips } from './town-clips.js';
+import { buildStreetMountSeeds, getLivestockHerdsForDevice, STREET_MOUNT_FLAG } from './herds.js';
 import { TOWN_SHOTS_WORDS, createTownShots } from './town-shots.js';
 import { TOWN_FATE_WORDS, TOWN_SHOT_LIMIT, TOWN_SHOT_WORDS, TOWNSFOLK_BODY_WORDS, TOWNSFOLK_BUCKETS, TOWNSFOLK_LOOKS, TOWNSFOLK_MODELS, TOWNSFOLK_RENDER, TOWNSFOLK_SHADOW, TOWNSFOLK_SHADOW_BUCKET, TOWNSFOLK_TIERS, TOWNSFOLK_WALK } from './wgsl/townsfolk.js';
 import { WALKER_WORDS } from './town-streets.js';
@@ -88,9 +89,50 @@ const TOWNSFOLK_VERTICES = [{
     { shaderLocation: 4, offset: 44, format: 'float32x4' },
   ],
 }];
+
+// Assigns ~8% of eligible non-pier street walkers in 1550 Old World & Colonial towns to mounted sela à gineta
+// riders (`STREET_MOUNT_FLAG`), and strictly clears any mounted flag in pre-contact Indigenous settlements.
+export function assignStreetMountsToWalkers(streets, { indigenous = false, maxPeople = Infinity } = {}) {
+  if (!streets?.walkers?.length) {
+    return { routes: new Float32Array(0), seeds: new Float32Array(0), count: 0, walkerIndices: [] };
+  }
+  const f = streets.walkers instanceof Float32Array
+    ? streets.walkers
+    : new Float32Array(streets.walkers.buffer, streets.walkers.byteOffset, Math.floor(streets.walkers.byteLength / 4));
+  const w = new Uint32Array(f.buffer, f.byteOffset, f.length);
+  const people = Math.min(streets.people ?? Math.floor(f.length / WALKER_WORDS), Math.floor(f.length / WALKER_WORDS), maxPeople);
+
+  if (indigenous) {
+    for (let i = 0; i < people; i++) {
+      w[i * WALKER_WORDS + 11] &= ~STREET_MOUNT_FLAG;
+    }
+    return { routes: new Float32Array(0), seeds: new Float32Array(0), count: 0, walkerIndices: [] };
+  }
+
+  let existing = 0;
+  for (let i = 0; i < people; i++) {
+    if ((w[i * WALKER_WORDS + 11] & STREET_MOUNT_FLAG) !== 0) existing++;
+  }
+  if (existing === 0 && people >= 16 && !streets.folk && streets.samples?.length >= 12) {
+    for (let i = 0; i < people; i++) {
+      if (((i * 7 + 3) % 12) !== 0) continue;
+      const at = i * WALKER_WORDS;
+      const count = w[at + 1];
+      const flags = w[at + 11];
+      const lengthM = f[at + 8];
+      if (count < 12 || lengthM < 35 || (flags & 8) !== 0) continue;
+      w[at + 11] = flags | STREET_MOUNT_FLAG;
+      f[at + 3] = 2.45 + 0.35 * ((i % 5) / 4);
+      f[at + 5] = 0;
+      f[at + 6] = 0;
+    }
+  }
+  return buildStreetMountSeeds(streets, { indigenous: false, maxPeople: people });
+}
+
 // The people of a port, drawn, shadowed and walked: asked for once a device.
 export function requestTownsfolkPipelines({ device, shader, format = 'rgba16float', samples = 4 }) {
-  return requestOnce(device, `townsfolk ${format} ${samples}`, async () => {
+  return requestOnce(device, `townsfolk v2 ${format} ${samples}`, async () => {
     const [renderModule, shadowModule, walkModule] = await Promise.all([
       shader(TOWNSFOLK_RENDER, 'townsfolk'),
       shader(TOWNSFOLK_SHADOW, 'townsfolk shadow'),
@@ -115,7 +157,7 @@ export function requestTownsfolkPipelines({ device, shader, format = 'rgba16floa
     ]);
   });
 }
-export async function createTownsfolk({ device, frameUBO, transView, skyView, sampClamp, envCubeView, sunVisBuf, shadows, shader, format = 'rgba16float', samples = 4, shared = null, isMobile = false }) {
+export async function createTownsfolk({ device, frameUBO, transView, skyView, sampClamp, envCubeView, sunVisBuf, shadows, shader, format = 'rgba16float', samples = 4, shared = null, herds = null, isMobile = false }) {
   const B = GPUBufferUsage;
   const buffer = (label, data, usage) => {
     const b = device.createBuffer({ label, size: data.byteLength, usage: usage | B.COPY_DST });
@@ -143,13 +185,14 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     }));
     const distant = createDistantCrewLOD(model);
     const tiers = [...lods.slice(0, TOWNSFOLK_TIERS - 1), { indexCount: distant.length, buffer: own(buffer('townsfolk distant indices', distant, B.INDEX)) }];
-    const { palettes, layout: clips } = bakeTownClips(model.animator);
-    const entry = { vertex, lods: tiers, clips, palette: own(buffer('townsfolk clips', palettes, B.STORAGE)) };
+    const { palettes, layout: clips, rideFrames } = bakeTownClips(model.animator, { includeRide: true });
+    const entry = { vertex, lods: tiers, clips, rideFrames, palette: own(buffer('townsfolk clips', palettes, B.STORAGE)) };
     geometryFor.set(model, entry);
     return entry;
   };
 
   let activePort = null, crowd = null, frameCount = 0;
+  const linkedHerds = () => herds ?? getLivestockHerdsForDevice(device);
   // What has befallen each town's people, kept while the town is out of reach so that the fallen are still lying there
   // on coming back. Each is a buffer on the GPU, so only the last few towns are remembered.
   const fatesOfTowns = new Map();
@@ -173,6 +216,7 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     if (!crowd) return;
     for (const b of [crowd.walkers, crowd.route, crowd.bodies, crowd.draws, crowd.uniform, crowd.looks, crowd.shots]) b.destroy();
     delete crowd.port.townsfolkWatch;
+    linkedHerds()?.setStreetMounts?.(null);
     crowd = null;
   }
   function buildCrowd(port) {
@@ -183,6 +227,9 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     const set = indigenous ? createIndigenousCrewModels(models, port.indigenousSettlement?.cultureId) : models;
     const geometries = set.slice(0, MODELS).map((model, i) => geometry(model, i, indigenous));
     const people = Math.max(1, Math.round(streets.people * (isMobile ? MOBILE_SHARE : 1)));
+    const mountSeeds = assignStreetMountsToWalkers(streets, { indigenous, maxPeople: people });
+    port.streetMounts = mountSeeds;
+    linkedHerds()?.setStreetMounts?.(indigenous ? null : mountSeeds);
     const bucketSpan = Math.ceil(people / STORAGE_ALIGNMENT_BODIES) * STORAGE_ALIGNMENT_BODIES;
     const drawArguments = new Uint32Array(TOWNSFOLK_BUCKETS * TOWN_DRAW_WORDS);
     for (let m = 0; m < MODELS; m++) {
@@ -197,8 +244,9 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     const bodies = device.createBuffer({ label: 'townsfolk bodies', size: TOWNSFOLK_BUCKETS * bucketSpan * BODY_BYTES, usage: B.STORAGE });
     const draws = buffer('townsfolk draws', drawArguments, B.STORAGE | B.INDIRECT);
     const crowdWords = new Uint32Array(CROWD_UNIFORM_WORDS);
-    for (let m = 0; m < MODELS; m++) crowdWords.set(geometries[m].clips, m * geometries[m].clips.length);
+    for (let m = 0; m < MODELS; m++) crowdWords.set(geometries[m].clips.subarray(0, 12), m * 12);
     crowdWords[24] = bucketSpan; crowdWords[25] = TOWNSFOLK_LOOKS;
+    crowdWords[27] = ((geometries[0]?.rideFrames ?? 0) & 0xffff) | (((geometries[1]?.rideFrames ?? 0) & 0xffff) << 16);
     const uniform = buffer('townsfolk crowd', crowdWords, B.UNIFORM);
     const shots = device.createBuffer({ label: 'townsfolk shots', size: TOWN_SHOTS_WORDS * 4, usage: B.UNIFORM | B.COPY_DST });
     const fateRecord = fatesFor(port, people), fates = fateRecord.buffer;

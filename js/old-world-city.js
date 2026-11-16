@@ -696,3 +696,530 @@ export function layOldWorldCity({ heightAt, urbanAt, earlyAt, inlandAt, seat, ro
     },
   };
 }
+
+function hashColonialSeed(text) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619) >>> 0;
+  return h >>> 0;
+}
+
+/**
+ * Street-first topography-, shoreline-, hydrology-, and polity-driven colonial urban plan:
+ * - 'spanish' (*Leyes de Indias* *traza*): harbour *Calle de la Marina*, bench-sited *Plaza Mayor*,
+ *   and terrain-conforming *damero* grid (*quadras* ~64–82 m) clipped/warped around bluffs & rivers.
+ * - 'portuguese' (*Cidade Baixa / Cidade Alta*): contour-following *Rua da Ribeira* + switchback
+ *   *ladeira* streets climbing to an elevated bluff *Largo da Sé* & ridge spine.
+ * - 'timber' (North European Tidewater): organic wharf lane + ridge main street + cross lanes.
+ */
+export function planColonialStreets({
+  region,
+  heights,
+  heightAt,
+  riverHits,
+  shoreCrossAt,
+  frameToWorld,
+  bearingRad,
+  stage = 'settlement',
+  expansionTier = 0,
+  manner = 'spanish',
+}) {
+  const seedKey = `${region.id || `${(region.latitude ?? 0).toFixed(4)},${(region.longitude ?? 0).toFixed(4)}`}:${manner}`;
+  const rr = mulberry(hashColonialSeed(seedKey));
+  const slopeAt = (x, z) => Math.hypot(heightAt(x + 6, z) - heightAt(x - 6, z), heightAt(x, z + 6) - heightAt(x, z - 6)) / 12;
+  const dryAt = (x, z, pad = 5) => {
+    const h = heightAt(x, z);
+    return Number.isFinite(h) && h >= 1.15 && h <= 68 && !riverHits(x, z, pad);
+  };
+
+  // Sample smoothed local shoreline contour across [-150..150] m along shore
+  const shorePts = [];
+  for (let a = -150; a <= 150; a += 15) {
+    const c = shoreCrossAt(a);
+    shorePts.push({ along: a, cross: Number.isFinite(c) ? c : 0 });
+  }
+  const shoreAt = (along) => {
+    const u = Math.max(0, Math.min(shorePts.length - 1.001, (along + 150) / 15));
+    const i = Math.floor(u), f = u - i;
+    return shorePts[i].cross * (1 - f) + shorePts[i + 1].cross * f;
+  };
+
+  // Estimate local shoreline tangent tilt from shore contour
+  const shoreSlope = (shoreAt(45) - shoreAt(-45)) / 90;
+  const gridTilt = Math.max(-0.22, Math.min(0.22, Math.atan(shoreSlope) + (rr() - 0.5) * 0.10));
+  const gridYaw = bearingRad + gridTilt;
+  const inX = Math.sin(gridYaw), inZ = -Math.cos(gridYaw);
+  const alX = Math.cos(gridYaw), alZ = Math.sin(gridYaw);
+
+  const streets = [];
+  const pushStreet = (pts, hw, kind = 'street', paved = 0.85) => {
+    const clean = [];
+    for (let i = 0; i < pts.length; i++) {
+      const [x, z] = pts[i];
+      if (!dryAt(x, z, 4.2) || slopeAt(x, z) > 0.24) {
+        if (clean.length >= 2) streets.push({ pts: resampleCityLine(clean, 8), hw, kind, paved });
+        clean.length = 0;
+        continue;
+      }
+      if (!clean.length || Math.hypot(x - clean[clean.length - 1][0], z - clean[clean.length - 1][1]) > 1.5) {
+        clean.push([x, z]);
+      }
+    }
+    if (clean.length >= 2) streets.push({ pts: resampleCityLine(clean, 8), hw, kind, paved });
+  };
+
+  // 1. Waterfront quay / Ribeira / Water Street following actual harbour contour
+  const quaySpan = stage === 'outpost' ? 68 : stage === 'settlement' ? 98 : stage === 'fortified-port' ? 124 : 142;
+  const wfPts = [];
+  for (let a = -quaySpan; a <= quaySpan; a += 14) {
+    const inOff = shoreAt(a) + (manner === 'timber' ? 20 : 19);
+    const p = frameToWorld(a, inOff);
+    wfPts.push([p.x, p.z]);
+  }
+  pushStreet(wfPts, manner === 'timber' ? 3.2 : 4.2, 'quay', stage === 'outpost' ? 0.35 : 0.92);
+
+  // 2. Site Plaza Mayor / Cidade Alta Largo / Tidewater Market Green from real terrain relief
+  let plazaAlong = (rr() - 0.5) * 24;
+  let plazaInland = manner === 'portuguese' ? 98 : manner === 'timber' ? 68 : 78;
+  let bestScore = -Infinity;
+  const inMin = manner === 'portuguese' ? 70 : 44;
+  const inMax = manner === 'portuguese' ? 156 : 128;
+  for (let a = -54; a <= 54; a += 12) {
+    for (let d = inMin; d <= inMax; d += 12) {
+      const p = frameToWorld(a, shoreAt(a) + d);
+      if (!dryAt(p.x, p.z, 16)) continue;
+      const h = heightAt(p.x, p.z);
+      const sl = slopeAt(p.x, p.z);
+      if (sl > (manner === 'portuguese' ? 0.21 : 0.19)) continue;
+      const elevTerm = manner === 'portuguese'
+        ? Math.min(14, h * 0.85) - sl * 28
+        : -sl * 38 - Math.abs(h - 4.2) * 0.45 - Math.abs(d - 78) * 0.03;
+      const jitter = ( (((Math.imul(a + 97, 73856093) ^ Math.imul(d + 31, 19349663)) >>> 0) % 1000) / 1000 ) * 0.65;
+      const sc = elevTerm - Math.abs(a) * 0.025 + jitter;
+      if (sc > bestScore) {
+        bestScore = sc;
+        plazaAlong = a;
+        plazaInland = shoreAt(a) + d;
+      }
+    }
+  }
+  const plazaCenter = frameToWorld(plazaAlong, plazaInland);
+  const plazaW = manner === 'timber' ? 28 : stage === 'outpost' ? 32 : 42;
+  const plazaD = manner === 'timber' ? 24 : stage === 'outpost' ? 28 : 36;
+
+  const quadraW = Math.round(64 + rr() * 18);
+  const quadraD = Math.round(62 + rr() * 16);
+  const solares = [];
+  const pushSolarSlot = (x, z, yaw, kind = 'solar', rank = 1) => {
+    if (!dryAt(x, z, 7) || slopeAt(x, z) > 0.22) return;
+    if (Math.hypot(x - plazaCenter.x, z - plazaCenter.z) < Math.max(plazaW, plazaD) * 0.46) return;
+    solares.push({ x, z, yaw, kind, rank });
+  };
+
+  if (manner === 'portuguese') {
+    // Portuguese Ultramar: Cidade Baixa Ribeira + diagonal contour-climbing Ladeiras + Cidade Alta spine
+    const baixaA = frameToWorld(plazaAlong - 34, shoreAt(plazaAlong - 34) + 20);
+    const baixaB = frameToWorld(plazaAlong + 34, shoreAt(plazaAlong + 34) + 20);
+    const midBend1 = frameToWorld(plazaAlong - 8 + (rr() - 0.5) * 14, (shoreAt(plazaAlong) + 20 + plazaInland) * 0.52);
+    const midBend2 = frameToWorld(plazaAlong + 14 + (rr() - 0.5) * 14, (shoreAt(plazaAlong) + 20 + plazaInland) * 0.56);
+    const altaW = { x: plazaCenter.x - alX * (plazaW * 0.56), z: plazaCenter.z - alZ * (plazaW * 0.56) };
+    const altaE = { x: plazaCenter.x + alX * (plazaW * 0.56), z: plazaCenter.z + alZ * (plazaW * 0.56) };
+    pushStreet([[baixaA.x, baixaA.z], [midBend1.x, midBend1.z], [altaW.x, altaW.z]], 3.4, 'street', 0.9);
+    pushStreet([[baixaB.x, baixaB.z], [midBend2.x, midBend2.z], [altaE.x, altaE.z]], 3.4, 'street', 0.9);
+
+    // Cidade Alta ridge spine street following hill crest
+    const spineReach = stage === 'outpost' ? 58 : stage === 'settlement' ? 96 : 138 + expansionTier * 8;
+    const ridgePts = [];
+    for (let s = -spineReach; s <= spineReach; s += 16) {
+      let bestR = 0, bestH = -Infinity;
+      for (const off of [-14, -7, 0, 7, 14]) {
+        const tx = plazaCenter.x + alX * s + inX * off;
+        const tz = plazaCenter.z + alZ * s + inZ * off;
+        const th = heightAt(tx, tz);
+        if (dryAt(tx, tz, 6) && slopeAt(tx, tz) <= 0.20 && th > bestH) { bestH = th; bestR = off; }
+      }
+      ridgePts.push([plazaCenter.x + alX * s + inX * bestR, plazaCenter.z + alZ * s + inZ * bestR]);
+    }
+    pushStreet(ridgePts, 3.8, 'street', 0.92);
+    if (stage !== 'outpost') {
+      const backD = quadraD * 0.82;
+      const backPts = ridgePts.map(([x, z]) => [x + inX * backD, z + inZ * backD]);
+      pushStreet(backPts, 3.1, 'lane', 0.78);
+      for (const s of [-quadraW, 0, quadraW]) {
+        pushStreet([
+          [plazaCenter.x + alX * s - inX * (plazaD * 0.55), plazaCenter.z + alZ * s - inZ * (plazaD * 0.55)],
+          [plazaCenter.x + alX * s + inX * (backD + 18), plazaCenter.z + alZ * s + inZ * (backD + 18)],
+        ], 3.0, 'lane', 0.8);
+      }
+    }
+  } else if (manner === 'timber') {
+    // North European Tidewater: organic main street from wharf/palisade inland + cross lanes
+    const mainReach = stage === 'outpost' ? 78 : stage === 'settlement' ? 118 : 156 + expansionTier * 8;
+    const mainAlong = (rr() - 0.5) * 18;
+    const mainPts = [];
+    let drift = mainAlong;
+    for (let d = 18; d <= mainReach; d += 16) {
+      let bestTurn = 0, bestSl = Infinity;
+      for (const stepA of [-5, 0, 5]) {
+        const cand = frameToWorld(drift + stepA, shoreAt(drift + stepA) + d);
+        const sl = slopeAt(cand.x, cand.z);
+        if (dryAt(cand.x, cand.z, 5) && sl < bestSl) { bestSl = sl; bestTurn = stepA; }
+      }
+      drift += bestTurn * 0.65;
+      const p = frameToWorld(drift, shoreAt(drift) + d);
+      mainPts.push([p.x, p.z]);
+    }
+    pushStreet(mainPts, 3.3, 'street', stage === 'outpost' ? 0.25 : 0.65);
+    const crossDists = stage === 'outpost' ? [54] : stage === 'settlement' ? [48, 86] : [46, 82, 118, 148];
+    const crossSpan = stage === 'outpost' ? 48 : stage === 'settlement' ? 78 : 108;
+    for (const cd of crossDists) {
+      const cPts = [];
+      for (let a = -crossSpan; a <= crossSpan; a += 16) {
+        const p = frameToWorld(a, shoreAt(a) + cd + Math.sin(a * 0.03 + cd) * 4);
+        cPts.push([p.x, p.z]);
+      }
+      pushStreet(cPts, 2.8, 'lane', stage === 'citadel-metropolis' ? 0.65 : 0.3);
+    }
+  } else {
+    // Spanish Indies (*Leyes de Indias* *traza*): orthogonal *damero* grid warped gently around contours
+    const colsHalf = stage === 'outpost' ? 1 : stage === 'settlement' ? 2 : stage === 'fortified-port' ? 2 : 3;
+    const rowsIn = stage === 'outpost' ? 1 : stage === 'settlement' ? 2 : stage === 'fortified-port' ? 3 : 3;
+    const warpPt = (uAlong, vIn) => {
+      const bx = plazaCenter.x + alX * uAlong + inX * vIn;
+      const bz = plazaCenter.z + alZ * uAlong + inZ * vIn;
+      const gx = (heightAt(bx + 8, bz) - heightAt(bx - 8, bz)) / 16;
+      const gz = (heightAt(bx, bz + 8) - heightAt(bx, bz - 8)) / 16;
+      const sl = Math.hypot(gx, gz);
+      const shift = sl > 0.08 ? Math.min(6.5, (sl - 0.08) * 32) : 0;
+      return [bx - (sl > 1e-4 ? (gx / sl) * shift : 0), bz - (sl > 1e-4 ? (gz / sl) * shift : 0)];
+    };
+    const alongStations = [];
+    for (let ci = -colsHalf; ci <= colsHalf; ci++) {
+      if (ci === 0) {
+        alongStations.push(-plazaW * 0.56, plazaW * 0.56);
+      } else {
+        const sign = Math.sign(ci);
+        alongStations.push(sign * (plazaW * 0.56 + (Math.abs(ci) - 1) * quadraW + quadraW));
+      }
+    }
+    const inStations = [-plazaD * 0.56, plazaD * 0.56];
+    for (let ri = 1; ri <= rowsIn; ri++) inStations.push(plazaD * 0.56 + ri * quadraD);
+    // Seaward connector avenues from harbour quay to Plaza Mayor
+    const seaBack = -Math.max(24, plazaInland - shoreAt(plazaAlong) - 18);
+    for (const u of alongStations) {
+      const pts = [];
+      for (let v = seaBack; v <= inStations[inStations.length - 1] + 12; v += 14) {
+        pts.push(warpPt(u, v));
+      }
+      pushStreet(pts, Math.abs(u) < plazaW ? 4.0 : 3.3, 'street', stage === 'outpost' ? 0.45 : 0.9);
+    }
+    for (const v of inStations) {
+      const spanU = alongStations[alongStations.length - 1] + 12;
+      const pts = [];
+      for (let u = -spanU; u <= spanU; u += 14) {
+        pts.push(warpPt(u, v));
+      }
+      pushStreet(pts, Math.abs(v) < plazaD ? 4.0 : 3.3, 'street', stage === 'outpost' ? 0.45 : 0.9);
+    }
+  }
+
+  // Harvest street-fronting *solar* candidate sites along traced streets (ordered from plaza/quay outward)
+  for (const st of streets) {
+    for (let i = 1; i < st.pts.length; i += 2) {
+      const [ax, az] = st.pts[i - 1], [bx, bz] = st.pts[i];
+      const dx = bx - ax, dz = bz - az, L = Math.hypot(dx, dz);
+      if (L < 5) continue;
+      const ux = dx / L, uz = dz / L, nx = -uz, nz = ux;
+      const mx = (ax + bx) * 0.5, mz = (az + bz) * 0.5;
+      for (const side of [-1, 1]) {
+        if (st.kind === 'quay' && (nx * side * inX + nz * side * inZ) < 0) continue; // never place buildings on the water side of the quay street
+        const sx = mx + nx * side * (st.hw + 10.5);
+        const sz = mz + nz * side * (st.hw + 10.5);
+        const faceYaw = Math.atan2(-(nx * side), -(nz * side)) + Math.PI * 0.5;
+        const dPlaza = Math.hypot(sx - plazaCenter.x, sz - plazaCenter.z);
+        pushSolarSlot(sx, sz, faceYaw, st.kind === 'quay' ? 'waterfront' : 'solar', dPlaza);
+      }
+    }
+  }
+  solares.sort((a, b) => a.rank - b.rank);
+
+  // Smoothly grade ONLY the street ribbons & Plaza Mayor / Largo court into `heights` (zero rectangular slab!)
+  if (heights && region?.size > 1) {
+    const n = region.size, span = region.span, step = span / (n - 1);
+    const x0 = region.x - span * 0.5, z0 = region.z - span * 0.5;
+    // Grade Plaza court gently toward its natural mean
+    const plazaMeanY = Math.max(2.2, heightAt(plazaCenter.x, plazaCenter.z));
+    const pr = Math.max(plazaW, plazaD) * 0.72 + step;
+    const pi0 = Math.max(1, Math.floor((plazaCenter.x - pr - x0) / step));
+    const pi1 = Math.min(n - 2, Math.ceil((plazaCenter.x + pr - x0) / step));
+    const pj0 = Math.max(1, Math.floor((plazaCenter.z - pr - z0) / step));
+    const pj1 = Math.min(n - 2, Math.ceil((plazaCenter.z + pr - z0) / step));
+    for (let j = pj0; j <= pj1; j++) {
+      const wz = z0 + j * step;
+      for (let i = pi0; i <= pi1; i++) {
+        const k = j * n + i;
+        if (heights[k] < 1.35) continue;
+        const wx = x0 + i * step;
+        const dx = wx - plazaCenter.x, dz = wz - plazaCenter.z;
+        const u = Math.abs(dx * alX + dz * alZ) / (plazaW * 0.62);
+        const v = Math.abs(dx * inX + dz * inZ) / (plazaD * 0.62);
+        const m = Math.max(u, v);
+        if (m >= 1.25) continue;
+        const t = m <= 0.75 ? 1 : 1 - ((m - 0.75) / 0.5);
+        const w = t * t * (3 - 2 * t) * 0.78;
+        const target = plazaMeanY + (dx * inX + dz * inZ) * 0.015;
+        heights[k] = heights[k] * (1 - w) + target * w;
+      }
+    }
+    // Grade street ribbons smoothly along their natural profile (strictly inland of foreshore/berth contours)
+    for (const st of streets) {
+      if (st.kind === 'quay') continue;
+      const pts = st.pts;
+      const targetY = pts.map(([x, z]) => Math.max(1.6, heightAt(x, z)));
+      for (let pass = 0; pass < 2; pass++) {
+        for (let k = 1; k < targetY.length - 1; k++) targetY[k] = (targetY[k - 1] + 2 * targetY[k] + targetY[k + 1]) * 0.25;
+      }
+      const band = st.hw + 4.5;
+      for (let s = 1; s < pts.length; s++) {
+        const [ax, az] = pts[s - 1], [bx, bz] = pts[s];
+        const i0 = Math.max(1, Math.floor((Math.min(ax, bx) - band - x0) / step));
+        const i1 = Math.min(n - 2, Math.ceil((Math.max(ax, bx) + band - x0) / step));
+        const j0 = Math.max(1, Math.floor((Math.min(az, bz) - band - z0) / step));
+        const j1 = Math.min(n - 2, Math.ceil((Math.max(az, bz) + band - z0) / step));
+        const dx = bx - ax, dz = bz - az, l2 = Math.max(1e-6, dx * dx + dz * dz);
+        for (let j = j0; j <= j1; j++) {
+          const wz = z0 + j * step;
+          for (let i = i0; i <= i1; i++) {
+            const k = j * n + i;
+            if (heights[k] < 1.35) continue;
+            const wx = x0 + i * step;
+            const t = Math.max(0, Math.min(1, ((wx - ax) * dx + (wz - az) * dz) / l2));
+            const d = Math.hypot(wx - (ax + dx * t), wz - (az + dz * t));
+            if (d >= band) continue;
+            const u = d <= st.hw ? 1 : 1 - (d - st.hw) / (band - st.hw);
+            const w = u * u * (3 - 2 * u) * 0.72;
+            const wantY = targetY[s - 1] * (1 - t) + targetY[s] * t;
+            heights[k] = heights[k] * (1 - w) + wantY * w;
+          }
+        }
+      }
+    }
+  }
+
+  // Civic frontage anchors directly on Plaza Mayor / Cidade Alta & Harbour Quay
+  const civicEdge = (uMul, vMul, faceInwardYaw) => ({
+    x: plazaCenter.x + alX * (uMul * (plazaW * 0.5 + 15)) + inX * (vMul * (plazaD * 0.5 + 15)),
+    z: plazaCenter.z + alZ * (uMul * (plazaW * 0.5 + 15)) + inZ * (vMul * (plazaD * 0.5 + 15)),
+    yaw: faceInwardYaw,
+  });
+  const aduanaAlong = Math.max(-28, Math.min(28, plazaAlong * 0.45));
+  const waterfrontBase = shoreAt(aduanaAlong) + 32;
+
+  return {
+    rr,
+    manner,
+    gridYaw,
+    alX,
+    alZ,
+    inX,
+    inZ,
+    quadraW,
+    quadraD,
+    quaySpan,
+    shoreAt,
+    plaza: { x: plazaCenter.x, z: plazaCenter.z, w: plazaW, d: plazaD, along: plazaAlong, inland: plazaInland },
+    civic: {
+      aduana: { ...frameToWorld(aduanaAlong, waterfrontBase), yaw: gridYaw },
+      lonja: { ...frameToWorld(aduanaAlong - 26, waterfrontBase - 8), yaw: gridYaw + Math.PI * 0.5 },
+      warehouse: { ...frameToWorld(aduanaAlong + 42, waterfrontBase + 2), yaw: gridYaw },
+      arsenal: { ...frameToWorld(aduanaAlong + 76, waterfrontBase - 4), yaw: gridYaw },
+      warehouse2: { ...frameToWorld(aduanaAlong - 64, waterfrontBase + 8), yaw: gridYaw },
+      catedral: civicEdge(0, 1, gridYaw),
+      chapel: civicEdge(-1, 0, gridYaw + Math.PI * 0.5),
+      palacio: civicEdge(1, 0, gridYaw - Math.PI * 0.5),
+      portales: civicEdge(0, -1, gridYaw + Math.PI),
+    },
+    streets,
+    solares,
+  };
+}
+
+/**
+ * Subdivides colonial *quadra*, *ladeira*, and Tidewater street frontages into individual
+ * physical Cairn lots + GPU `CITY_BLOCK_FLOATS` continuum blocks, and encloses fortified
+ * colonial ports with a continuous landward bastioned *muralla* circuit pierced by gates
+ * where streets cross (zero monolithic `colonial_town_block` and zero orphan floating walls).
+ */
+export function buildColonialCityFabric({
+  plan,
+  heightAt,
+  riverHits,
+  obstacles = [],
+  stage = 'settlement',
+  fortificationTier = 1,
+  expansionTier = 0,
+}) {
+  const { rr, manner, gridYaw, alX, alZ, inX, inZ, plaza, streets, quaySpan, shoreAt } = plan;
+  const blocks = [], typed = [], typedTypes = [], typedBlocks = [], gates = [];
+  const segs = makeHash(24), solids = makeHash(24), placed = makeHash(16), wallSegs = makeHash(24);
+  const keep = (f) => {
+    const reach = Math.hypot(f.w, f.d) * 0.5;
+    placed.add(f, f.x - reach, f.z - reach, f.x + reach, f.z + reach);
+  };
+  const { seatBlock, pushBlock, pushTyped, curtain, tower, gate } = cityMasonry({
+    heightAt, blocks, typed, typedTypes, typedBlocks, gates, keep, rr,
+  });
+
+  for (const o of obstacles) {
+    const f = footprint(o.x, o.z, (o.width ?? o.w ?? 12) + 2, (o.length ?? o.depth ?? o.d ?? 14) + 2, o.yaw ?? 0);
+    const r = Math.hypot(f.w, f.d) * 0.5;
+    solids.add(f, f.x - r, f.z - r, f.x + r, f.z + r);
+  }
+  for (const st of streets) {
+    for (let i = 1; i < st.pts.length; i++) {
+      const [ax, az] = st.pts[i - 1], [bx, bz] = st.pts[i];
+      segs.add({ ax, az, bx, bz, hw: st.hw, st }, Math.min(ax, bx) - st.hw, Math.min(az, bz) - st.hw, Math.max(ax, bx) + st.hw, Math.max(az, bz) + st.hw);
+    }
+  }
+  const inPlaza = (x, z, pad = 0) => {
+    const dx = x - plaza.x, dz = z - plaza.z;
+    return Math.abs(dx * alX + dz * alZ) < plaza.w * 0.5 + pad && Math.abs(dx * inX + dz * inZ) < plaza.d * 0.5 + pad;
+  };
+
+  // 1. Continuous landward bastioned *muralla* circuit on fortified colonial ports (Spanish & Portuguese)
+  const buildWallCircuit = manner !== 'timber' && (fortificationTier >= 3 || stage === 'citadel-metropolis' || (stage === 'fortified-port' && expansionTier >= 1));
+  if (buildWallCircuit) {
+    const flankR = Math.min(168, quaySpan + 22 + expansionTier * 6);
+    const landR = Math.min(205, (plaza.inland - shoreAt(plaza.along)) + (stage === 'citadel-metropolis' ? 102 : 82) + expansionTier * 5);
+    const poly = [];
+    const nArc = 6;
+    for (let k = 0; k <= nArc; k++) {
+      const t = k / nArc;
+      const ang = Math.PI * (1 - t); // left shoreline flank -> landward crown -> right shoreline flank
+      const u = Math.cos(ang) * flankR;
+      const v = Math.sin(ang) * landR;
+      const wx = plaza.x + alX * u + inX * (v - (plaza.inland - shoreAt(u) - 18) * (1 - Math.sin(ang)));
+      const wz = plaza.z + alZ * u + inZ * (v - (plaza.inland - shoreAt(u) - 18) * (1 - Math.sin(ang)));
+      poly.push([wx, wz]);
+    }
+    // Pierce arched gates wherever a street crosses the landward wall trace
+    for (let i = 0; i < poly.length - 1; i++) {
+      const [ax, az] = poly[i], [bx, bz] = poly[i + 1];
+      const L = Math.hypot(bx - ax, bz - az);
+      if (L < 8) continue;
+      const ux = (bx - ax) / L, uz = (bz - az) / L;
+      wallSegs.add({ ax, az, bx, bz }, Math.min(ax, bx) - 6, Math.min(az, bz) - 6, Math.max(ax, bx) + 6, Math.max(az, bz) + 6);
+      for (const st of streets) {
+        if (st.kind === 'quay') continue;
+        for (let s = 1; s < st.pts.length; s++) {
+          const hit = segsCross(ax, az, bx, bz, st.pts[s - 1][0], st.pts[s - 1][1], st.pts[s][0], st.pts[s][1]);
+          if (hit && heightAt(hit[0], hit[1]) >= 1.25 && !riverHits(hit[0], hit[1], 6) && !gates.some((g) => Math.hypot(g.x - hit[0], g.z - hit[1]) < 24)) {
+            const g = { x: hit[0], z: hit[1], half: 3.4, ux, uz };
+            gates.push(g);
+          }
+        }
+      }
+    }
+    for (const g of gates) {
+      if (!solids.some(g.x, g.z, 12, (o) => rectDist(o, g.x, g.z) < 6)) gate(g, g.ux, g.uz);
+    }
+    // Emit projecting bastion / flanking towers at dry polygon vertices & continuous curtain chords between them
+    for (let i = 0; i < poly.length; i++) {
+      const [vx, vz] = poly[i];
+      if (heightAt(vx, vz) >= 1.25 && !riverHits(vx, vz, 6) && !gates.some((g) => Math.hypot(g.x - vx, g.z - vz) < 12) && !solids.some(vx, vz, 12, (o) => rectDist(o, vx, vz) < 6)) {
+        tower(vx, vz, i === 0 || i === poly.length - 1 ? 6.8 : 7.4, 8.8, 0.88);
+      }
+    }
+    for (let i = 0; i < poly.length - 1; i++) {
+      const [ax, az] = poly[i], [bx, bz] = poly[i + 1];
+      const mx = (ax + bx) * 0.5, mz = (az + bz) * 0.5;
+      if (heightAt(ax, az) < 1.1 || heightAt(bx, bz) < 1.1 || riverHits(mx, mz, 5)) continue;
+      if (solids.some(mx, mz, Math.hypot(bx - ax, bz - az) * 0.5 + 4, (o) => segRectDist(o, ax, az, bx, bz) < 4.5)) continue;
+      const out = [mx - plaza.x, mz - plaza.z];
+      const ol = Math.hypot(out[0], out[1]) || 1;
+      curtain(ax, az, bx, bz, [out[0] / ol, out[1] / ol], 7.4, 0.86);
+    }
+  }
+
+  // 2. Subdivide street frontages into individual procedural *solares* / Cairn burgher lots
+  let houses = 0;
+  const maxLots = stage === 'outpost' ? (manner === 'timber' ? 4 : 8) : stage === 'settlement' ? 26 : stage === 'fortified-port' ? 54 + expansionTier * 6 : 82 + expansionTier * 8;
+  for (const st of streets) {
+    if (houses >= maxLots) break;
+    for (const side of [-1, 1]) {
+      let carry = 2 + rr() * 3;
+      for (let i = 1; i < st.pts.length && houses < maxLots; i++) {
+        const [ax, az] = st.pts[i - 1], [bx, bz] = st.pts[i];
+        const dx = bx - ax, dz = bz - az, L = Math.hypot(dx, dz);
+        if (L < 3) continue;
+        const ux = dx / L, uz = dz / L, nx = -uz * side, nz = ux * side;
+        if (st.kind === 'quay' && (nx * inX + nz * inZ) < 0) continue;
+        let t = carry;
+        while (t < L && houses < maxLots) {
+          const w = (manner === 'timber' ? 8.0 : 9.2) + rr() * 5.8;
+          const d = (manner === 'timber' ? 10.5 : 11.8) + rr() * 6.4;
+          const gap = manner === 'timber' ? 1.8 + rr() * 2.4 : 0.45 + rr() * 0.85;
+          if (t + w * 0.5 > L) break;
+          const fx = ax + ux * (t + w * 0.5) + nx * (st.hw + 0.8 + d * 0.5);
+          const fz = az + uz * (t + w * 0.5) + nz * (st.hw + 0.8 + d * 0.5);
+          const lotYaw = Math.atan2(nx, nz);
+          const f = footprint(fx, fz, w, d, lotYaw);
+          const h = heightAt(fx, fz);
+          const base = seatBlock(f, heightAt(ax + ux * (t + w * 0.5), az + uz * (t + w * 0.5)));
+          const clear =
+            h >= 1.25 &&
+            base.range <= 3.8 &&
+            !riverHits(fx, fz, Math.max(w, d) * 0.6) &&
+            !inPlaza(fx, fz, 2.5) &&
+            !solids.some(fx, fz, (w + d) * 0.6 + 4, (o) => overlap(f, o, 1.4)) &&
+            !placed.some(fx, fz, (w + d) * 0.6 + 2, (o) => overlap(f, o, 0.35)) &&
+            !segs.some(fx, fz, (w + d) * 0.5 + 5, (g) => g.st !== st && segDist(fx, fz, g.ax, g.az, g.bx, g.bz) < g.hw + Math.min(w, d) * 0.45) &&
+            !wallSegs.some(fx, fz, 12, (g) => segDist(fx, fz, g.ax, g.az, g.bx, g.bz) < 7.5);
+          if (clear) {
+            const dPlaza = Math.hypot(fx - plaza.x, fz - plaza.z);
+            const rich = dPlaza < 85 || st.kind === 'quay';
+            const storeys = stage === 'outpost' ? 1 : (rich && rr() < 0.68 ? 2 : rr() < 0.28 ? 2 : 1);
+            const wallH = storeys * CITY_STOREY_M + (rich ? 0.55 : 0.15) + rr() * 0.45;
+            const eaves = manner !== 'timber' || rr() < 0.55;
+            const type = manner === 'timber'
+              ? cityHouseType(storeys, false, cityHousePick(fx, fz))
+              : cityHouseType(storeys, eaves, cityHousePick(fx, fz));
+            const T = CITY_BUILDING_TYPES[type], up = wallH / T.height;
+            const rise = eaves ? 0.36 * T.length * 0.5 * up : 0.5 * T.width * 0.5 * up;
+            const tone = manner === 'timber' ? 0.28 + rr() * 0.32 : 0.52 + rr() * 0.42;
+            const wallKind = manner === 'timber' ? CITY_WALL.HOUSE : (rich ? CITY_WALL.STUCCO : CITY_WALL.HOUSE);
+            const blockFp = eaves ? footprint(fx, fz, d, w, lotYaw + Math.PI * 0.5) : f;
+            const floor = pushBlock(blockFp, wallH, rise, CITY_ROOF.GABLE + CITY_TYPED_ROOF, wallKind, tone, base);
+            pushTyped(type, fx, floor, fz, lotYaw, w, wallH, d, tone, 1);
+            keep(f);
+            houses++;
+          }
+          t += w + gap;
+        }
+        carry = Math.max(0, t - L);
+      }
+    }
+  }
+
+  const paving = streets.map((st) => ({ points: st.pts.map(([x, z]) => [x, z, st.hw * 2, st.paved]) }));
+  paving.push({
+    points: [
+      [plaza.x - alX * (plaza.w * 0.45), plaza.z - alZ * (plaza.w * 0.45), plaza.d, stage === 'outpost' ? 0.45 : 0.95],
+      [plaza.x + alX * (plaza.w * 0.45), plaza.z + alZ * (plaza.w * 0.45), plaza.d, stage === 'outpost' ? 0.45 : 0.95],
+    ],
+  });
+
+  const count = blocks.length / CITY_BLOCK_FLOATS;
+  return {
+    blocks: new Float32Array(blocks),
+    count,
+    houses,
+    streets,
+    gates,
+    paving,
+    typed: new Float32Array(typed),
+    typedTypes: new Uint32Array(typedTypes),
+    typedCount: typedTypes.length,
+    typedBlocks: new Uint32Array(typedBlocks),
+    stats: { blocks: count, typed: typedTypes.length, houses, streets: streets.length, gates: gates.length },
+  };
+}

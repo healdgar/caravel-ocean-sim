@@ -430,7 +430,24 @@ export function oldWorldCountry(region, heights, port = null) {
   return country;
 }
 
-function makeCountry(region, heights, port) {
+export function refreshOldWorldBoardCountry(nextBoardJson, region, heights, port = null, surveyHeights = null) {
+  if (!nextBoardJson || !region || !heights || !inIberia(region.latitude, region.longitude)) return null;
+  if (surveyHeights instanceof Float32Array && surveyHeights.length === heights.length && !uncarvedSurveys.has(heights)) {
+    uncarvedSurveys.set(heights, surveyHeights.slice());
+  }
+  const baseBaked = bakedBoardFor(region);
+  const nextBaked = {
+    ...(baseBaked || { port: region.id || 'lisbon', year: region.year ?? 1550 }),
+    board: nextBoardJson,
+  };
+  registerBakedBoard(nextBaked);
+  countries.delete(heights);
+  const country = makeCountry(region, heights, port, nextBaked);
+  countries.set(heights, { port, country });
+  return country;
+}
+
+function makeCountry(region, heights, port, explicitBaked = null) {
   const grid = sampler(heights, region), heightAt = grid.at;
   const geoSpan = region.demGeoSpan || (region.span < 4000 ? 6800 : region.span), scale = region.span / geoSpan;
   const cos = Math.max(0.1, Math.cos(region.latitude * DEG));
@@ -447,9 +464,9 @@ function makeCountry(region, heights, port) {
   const marked = () => { const w = new Uint8Array(heights.length); for (let k = 0; k < w.length; k++) w[k] = heights[k] <= 0.25 ? 1 : 0; return w; };
   // A board founded for this port on this ground stands in place of the town and country made here. One founded
   // on other ground (the same port on a coast made by other rules) is left aside, and the rules here make it.
-  const baked = holdsCity ? bakedBoardFor(region) : null;
+  const baked = explicitBaked ?? (holdsCity ? bakedBoardFor(region) : null);
   if (uncarvedSurveys.has(heights)) heights.set(uncarvedSurveys.get(heights));
-  const fitsBoard = Boolean(baked && baked.board.span === region.span && boardGroundFits(baked.survey, heights));
+  const fitsBoard = Boolean(baked && baked.board?.span === region.span && (explicitBaked || boardGroundFits(baked.survey, heights)));
   if (fitsBoard && !uncarvedSurveys.has(heights)) uncarvedSurveys.set(heights, heights.slice());
   const stood = fitsBoard
     ? layBoardCountry({ baked, region, grid, heights, heightAt, port, wet: marked(), LAND: OLD_WORLD_LAND, fieldAt, distanceTo }) : null;
@@ -649,20 +666,20 @@ function makeCountry(region, heights, port) {
   const NO_TREES = OLD_WORLD_NO_TREES;
   const TENDED = [
     NO_TREES,
-    { spacing: 12, height: [5.2, 3.4], scale: [0.55, 0.25], species: ['birch'], cohort: 'canopy', tint: [1, 1, 0.94] },
-    { spacing: 10.5, height: [10.0, 3.8], scale: [0.58, 0.22], species: ['oak'], cohort: 'canopy', tint: [0.86, 0.94, 0.9] },
+    { spacing: 12, height: [5.2, 3.4], scale: [0.55, 0.25], species: ['birch'], cohort: 'veteran', tint: [1, 1, 0.94] },
+    { spacing: 10.5, height: [10.0, 3.8], scale: [0.58, 0.22], species: ['oak'], cohort: 'veteran', tint: [0.86, 0.94, 0.9] },
     NO_TREES, NO_TREES, NO_TREES,
     { spacing: 48, height: [13.5, 7.5], scale: [0.82, 0.42], species: ['oak', 'elm'], cohort: 'veteran', tint: [0.94, 0.98, 0.9] },
-    { spacing: 36, height: [5.2, 3.6], scale: [0.55, 0.28], species: ['birch'], cohort: 'canopy', tint: [0.92, 0.96, 0.88] },
+    { spacing: 36, height: [5.2, 3.6], scale: [0.55, 0.28], species: ['birch'], cohort: 'veteran', tint: [0.92, 0.96, 0.88] },
     null,
   ];
-  const WOOD_EDGE = { spacing: 6.2, height: [10.2, 6.0], scale: [0.56, 0.32], species: ['birch', 'oak', 'maple', 'chestnut'], cohort: 'canopy', tint: [0.94, 0.99, 0.9] };
-  const HEDGEROW = { spacing: 10, height: [11.5, 6.0], scale: [0.7, 0.35], species: ['elm', 'chestnut', 'maple'], cohort: 'canopy', tint: [0.96, 1, 0.92] };
+  const WOOD_EDGE = { spacing: 6.2, height: [10.2, 6.0], scale: [0.56, 0.32], species: ['birch', 'oak', 'maple', 'chestnut'], cohort: 'veteran', tint: [0.94, 0.99, 0.9] };
+  const HEDGEROW = { spacing: 10, height: [11.5, 6.0], scale: [0.7, 0.35], species: ['elm', 'chestnut', 'maple'], cohort: 'veteran', tint: [0.96, 1, 0.92] };
   const ROADSIDE = { spacing: 11, height: [14.0, 8.0], scale: [0.85, 0.38], species: ['elm', 'maple', 'oak'], cohort: 'veteran', tint: [0.96, 1, 0.92] };
   // In the town: a ring of shade trees round a square, a walled garden's orchard, a tree in a yard.
-  const SQUARE_TREES = { spacing: 9, height: [11.5, 5.0], scale: [0.64, 0.25], species: ['maple', 'oak', 'elm'], cohort: 'canopy', tint: [0.96, 1, 0.92] };
-  const PARK_TREES = { spacing: 8, height: [10.5, 5.5], scale: [0.58, 0.28], species: ['maple', 'birch', 'oak', 'chestnut'], cohort: 'canopy', tint: [0.94, 1, 0.9] };
-  const YARD_TREES = { spacing: 13, height: [5.0, 3.2], scale: [0.55, 0.25], species: ['birch'], cohort: 'canopy', tint: [1, 1, 0.94] };
+  const SQUARE_TREES = { spacing: 9, height: [11.5, 5.0], scale: [0.64, 0.25], species: ['maple', 'oak', 'elm'], cohort: 'veteran', tint: [0.96, 1, 0.92] };
+  const PARK_TREES = { spacing: 8, height: [10.5, 5.5], scale: [0.58, 0.28], species: ['maple', 'birch', 'oak', 'chestnut'], cohort: 'veteran', tint: [0.94, 1, 0.9] };
+  const YARD_TREES = { spacing: 13, height: [5.0, 3.2], scale: [0.55, 0.25], species: ['birch'], cohort: 'veteran', tint: [1, 1, 0.94] };
   const treesAt = (x, z) => {
     if (stood && fieldAt(inland, grid, x, z) < 4) return NO_TREES;
     if (town && fieldAt(town.urban, grid, x, z) >= 0.5) {

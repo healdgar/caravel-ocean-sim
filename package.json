@@ -10,6 +10,7 @@
     "build": "node build.mjs",
     "deploy": "node scripts/deploy-cloudflare.mjs",
     "meshy": "node scripts/meshy.mjs",
+    "tripo:livestock": "node scripts/tripo-livestock.mjs",
     "audio": "node scripts/audio.mjs",
     "test": "node --test",
     "test:model": "node --test tests/caravel.test.mjs tests/wetness.test.mjs",

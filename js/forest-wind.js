@@ -215,6 +215,11 @@ fn forestWindSkinCluster(r:ForestRoot,tree:u32,posProto:vec3f,normProto:vec3f,ve
   res.pos=mix(res.pos,indiv.pos,promoBlend);
   res.normal=normalize(mix(res.normal,indiv.normal,promoBlend));
  }
+ if(!isLeaf){
+  let collarPin=smoothstep(0.22,1.05,posProto.y);
+  res.pos=mix(posProto,res.pos,collarPin);
+  res.normal=normalize(mix(normProto,res.normal,collarPin)+vec3f(0.,1e-9,0.));
+ }
  return res;
 }
 fn forestWindCrownPos(r:ForestRoot,tree:u32,posProto:vec3f)->vec3f{

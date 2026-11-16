@@ -10,9 +10,9 @@
     "sha256": "4666394ccfdb046710bc69a6ab7ddb5a78c73bde665936fa3c667b8abf87286e"
   },
   "assets/board/runtime.js": {
-    "url": "assets/board/runtime.b746e9dab577248d.js",
-    "bytes": 123612,
-    "sha256": "b746e9dab577248dbb9b4c6fb65cf69a97a1210217bc80cabe04debbb26cf00b"
+    "url": "assets/board/runtime.1c922dfc72daa730.js",
+    "bytes": 153204,
+    "sha256": "1c922dfc72daa7309f35c1ee37824eb8fa341ee24b011af5555b88160c238967"
   },
   "assets/boards/partner-ports-1550.json": {
     "url": "assets/boards/partner-ports-1550.3a90d74c36641615.json",
@@ -233,6 +233,11 @@
     "url": "assets/ground-cover/portugal/meadows-gpu/morph.bin.4c3c9e8f35ac7976.gz",
     "bytes": 1374,
     "sha256": "4c3c9e8f35ac79760e010fddfeb84fe683501e61ea69af372e1ee6327f803173"
+  },
+  "assets/world/hyg-stars.bin": {
+    "url": "assets/world/hyg-stars.e648341c03cb753b.bin",
+    "bytes": 42975,
+    "sha256": "e648341c03cb753b6db4f013e3bed98c8540d7f834a095a851305540c3e3868b"
   },
   "assets/neural-pbr/neural-pbr-latents.bin.gz": {
     "url": "assets/neural-pbr/neural-pbr-latents.bin.230404cc6e431ee1.gz",
@@ -1849,6 +1854,11 @@
     "bytes": 1673220,
     "sha256": "1d2651bbbcdd39c48b71a1ef83077e6b419f8c2d18efda4546aa38c838992fd3"
   },
+  "assets/wildlife/livestock-1550.bin": {
+    "url": "assets/wildlife/livestock-1550.9bb00339d5f80108.bin",
+    "bytes": 288628,
+    "sha256": "9bb00339d5f801084e5654f025270825e4c721d2d6bf59c97b52926d10e6b769"
+  },
   "assets/ground-cover/portugal/meadows-gpu/manifest.json": {
     "url": "assets/ground-cover/portugal/meadows-gpu/manifest.ba1fc0712d608468.json",
     "bytes": 6685,
@@ -2278,6 +2288,11 @@
     "url": "assets/audio/world/lookout-whale-ho.71b1f14d8f6c2de2.mp3",
     "bytes": 29244,
     "sha256": "71b1f14d8f6c2de294d83e61a681d0dff0b2cac677d2809fd75754fcb7b722b2"
+  },
+  "assets/neural-pbr/neural-light-weights.bin": {
+    "url": "assets/neural-pbr/neural-light-weights.38fcb4df7f809366.bin",
+    "bytes": 12480,
+    "sha256": "38fcb4df7f8093660e345a928a12d827a78e277bc116b41f873ece511d2ad3b8"
   },
   "assets/caravel-oak-albedo.webp": {
     "url": "assets/caravel-oak-albedo.79bd1c37de4acc5b.webp",

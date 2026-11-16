@@ -310,9 +310,7 @@ fn forestClusterVertex(tree:u32,vertex:u32,kindValue:f32)->ForestVertex{
  let w0=forestClusterVertices[at];let w1=forestClusterVertices[at+1u];let w2=forestClusterVertices[at+2u];let w3=forestClusterVertices[at+3u];let w4=forestClusterVertices[at+4u];
  let unit=vec3f(f32(w0&65535u),f32(w0>>16u),f32(w1&65535u))/65535.;
  var position=forestClusterBounds[0].xyz+unit*forestClusterBounds[0].w;
- let r2Rest=dot(position.xz,position.xz);
- let buried=kindValue<3.5&&(forestBin.z&256u)==0u&&((position.y<.08&&r2Rest>9.)||(position.y<.013&&r2Rest>.7)||(position.y<.025&&r2Rest>.7&&r2Rest<4.)||(position.y<-.01&&r2Rest>.22));
- if(buried){position=vec3f(0.);}
+ position=forestGroundRoot(position,kindValue);
  let r=forestRoots[tree];
  var normal=forestClusterOctahedral(vec2f(f32(w2&65535u),f32(w2>>16u))/65535.*2.-1.);
  let uv=forestClusterBounds[1].xy+vec2f(f32(w3&65535u),f32(w3>>16u))/65535.*forestClusterBounds[1].zw;
@@ -333,13 +331,13 @@ fn forestClusterVertex(tree:u32,vertex:u32,kindValue:f32)->ForestVertex{
   let midBlend=smoothstep(55.,320.,dist);
   if(midBlend>0.){
    let isSubBroadleaf=(forestBin.z&768u)!=0u;
-   let baseInflate=select(.16,.48,isSubBroadleaf)*midBlend*invScale;
+   let baseInflate=select(.16,.18,isSubBroadleaf)*midBlend*invScale;
    position+=t1*(uvOff.x*baseInflate)+t2*(uvOff.y*baseInflate);
    normal=forestSafeNormalize(normal+(t1*uvOff.x+t2*uvOff.y)*(.10*midBlend),normal);
   }
  }
  let windOn=bitcast<vec4u>(forestWindPoses[0]).y>0u;
- if(windOn&&!buried){
+ if(windOn){
   let skinned=forestWindSkinCluster(r,tree,position,normal,vertex,uv,kindValue>=3.5);
   position=skinned.pos;
   normal=skinned.normal;
@@ -496,7 +494,7 @@ export async function createForestClusters({ device, shader, module, frame, sour
     const words = new ArrayBuffer(BUCKET_BYTES), bucket = make(words, B.UNIFORM, 'forest cluster bucket');
     const boundsData = new Float32Array([...info.low, info.posScale, ...info.uvLow, ...info.uvScale]);
     const bounds = make(boundsData, B.UNIFORM, 'forest cluster bounds');
-    const subRoot = (p.species === 'ceiba' || p.species === 'mangrove') ? 256 : 0, closedCrown = p.cohort ? 512 : 0;
+    const subRoot = 0, closedCrown = p.cohort ? 512 : 0;
     const uniform = (listBase, extraFlags = 0) => make(new Uint32Array([listBase, firstMaterials[id], extraFlags | closedCrown | subRoot | p.nativeMaterials.length, samples]), B.UNIFORM, 'forest cluster bin');
     const wood = uniform(id * 2 * CLUSTERS_PER_DRAW), leaf = uniform((id * 2 + 1) * CLUSTERS_PER_DRAW);
     const woodShadow = uniform(id * 2 * SHADOW_CLUSTERS_PER_DRAW), leafShadow = uniform((id * 2 + 1) * SHADOW_CLUSTERS_PER_DRAW);

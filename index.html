@@ -369,8 +369,13 @@
     #chart-drawer .chart-side { max-height:none; border-top:0; border-left:1px solid #3a241288; }
   }
   #anchor-status { color:var(--gold); font-size:12px; }
-  #environment-debug,#voice-controls { border-top:1px solid #ffffff20; margin-top:12px; padding-top:6px; }
-  #environment-debug p,#voice-controls p { color:var(--muted); font-size:11px; }
+  #environment-debug,#voice-controls,#econ-sim-controls { border-top:1px solid #ffffff20; margin-top:12px; padding-top:6px; }
+  #environment-debug p,#voice-controls p,#econ-sim-controls p { color:var(--muted); font-size:11px; }
+  #econ-sim-controls .econ-rate-row,#econ-sim-controls .econ-step-row { display:flex; flex-wrap:wrap; gap:4px; margin:6px 0; }
+  #econ-sim-controls .econ-rate-row button,#econ-sim-controls .econ-step-row button { flex:1 1 auto; min-height:28px; padding:3px 7px; font-size:12px; font-variant-numeric:tabular-nums; }
+  #econ-sim-controls .econ-rate-row button[aria-pressed=true] { background:#dbc097; color:#1c2528; border-color:#edcf9c; font-weight:600; }
+  #econ-sim-catchup { margin:4px 0!important; color:var(--gold)!important; font-weight:600; font-variant-numeric:tabular-nums; }
+  #econ-sim-telemetry { margin:6px 0 2px; padding:7px 8px; border:1px solid #ffffff20; border-radius:6px; background:#0b151cc8; font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--ink); white-space:pre-line; font-variant-numeric:tabular-nums; }
   #panel #environment-debug label,#panel #voice-controls label { display:flex; justify-content:space-between; gap:8px; }
   #panel #environment-debug input[type=checkbox] { width:20px; }
   .encounter-buttons { display:flex; flex-wrap:wrap; gap:5px; }
@@ -532,7 +537,26 @@
 <div id="hud">
   <div id="fps">starting…</div>
 </div>
-<div id="panel" class="hidden"></div>
+<div id="panel" class="hidden">
+  <details id="econ-sim-controls" class="control-group">
+    <summary>Economic simulation &amp; time warp</summary>
+    <div class="econ-rate-row" role="group" aria-label="Economic simulation rate">
+      <button type="button" data-econ-rate="1" aria-pressed="true">1×</button>
+      <button type="button" data-econ-rate="10" aria-pressed="false">10×</button>
+      <button type="button" data-econ-rate="60" aria-pressed="false">60×</button>
+      <button type="button" data-econ-rate="360" aria-pressed="false">360×</button>
+      <button type="button" data-econ-rate="3600" aria-pressed="false">3600×</button>
+      <button type="button" data-econ-rate="14400" aria-pressed="false">14400×</button>
+    </div>
+    <div class="econ-step-row" role="group" aria-label="Step economic calendar">
+      <button type="button" data-econ-step="1">+1d</button>
+      <button type="button" data-econ-step="7">+7d</button>
+      <button type="button" data-econ-step="30">+30d</button>
+    </div>
+    <p id="econ-sim-catchup" role="status" aria-live="polite" hidden></p>
+    <div id="econ-sim-telemetry" aria-live="off">Waiting for board simulation…</div>
+  </details>
+</div>
 <canvas id="debug-world-overlay" class="ww-debug-world-overlay" hidden></canvas>
 <div id="err"></div>
 <script type="module" src="js/main.js"></script>

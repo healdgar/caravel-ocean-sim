@@ -46,6 +46,7 @@ export function ensureCareerLedger(career, era, dateMs) {
   ledger.prizesTaken ??= 0;
   ledger.tonnesTraded ??= 0;
   ledger.portsVisited ??= [];
+  ledger.intelLedger ??= { lastDepartedPortId: null, ports: {}, seaRumors: [] };
   return ledger;
 }
 

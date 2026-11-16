@@ -10,14 +10,26 @@ import {createAstronomyClock,writeAstronomyFrame} from './astronomy.js';
 import {createCelestialRenderer} from './celestial.js';
 import {withCelestialFrame,CELESTIAL_FRAME_BYTES,CELESTIAL_FRAME_FLOATS} from './wgsl/celestial.js';
 import { createSailingInstruments } from './instruments.js';
-import { controlIcon, createHelmControls, keyIsForField } from './controls.js';
+import { ECON_BOARD_DAY_MS, bindEconSimControls, controlIcon, createHelmControls, keyIsForField } from './controls.js';
 import { createSceneAudio, townWalkerStride } from './audio.js';
 import { createShipGunnery, createPortGunnery, resolveVesselCollisions, resetVesselDamageState } from './gunnery-control.js';
 import { setVesselHullIntegrity, vesselDamageSnapshot, restoreVesselDamageSnapshot } from './vessel-damage.js';
 import { createPortDamageStore } from './port-damage.js';
-import { careerGreatCircleKm, createCareerStore, applyShipwreckRecovery, nearestFoundedPort } from './career-save.js';
+import {
+  PORT_CONTACT_RANGE_M,
+  PORT_ROADSTEAD_ANCHOR_RANGE_M,
+  applyShipwreckRecovery,
+  careerGreatCircleKm,
+  checkLivePortContact,
+  createCareerStore,
+  mergeHailIntel,
+  nearestFoundedPort,
+  normalizeIntelLedger,
+  resolveMateIntel,
+  snapshotPortIntel,
+} from './career-save.js';
 import {lookoutEyeHeight} from './voyage/landfall-approach.js';
-import { serializeVoyage, normaliseVoyageEra } from './voyage/passage.js';
+import { DEFAULT_DEPARTURE, serializeVoyage, normaliseVoyageEra } from './voyage/passage.js';
 import { resetActiveIndigenousSovereigntyState } from './indigenous-sovereignty.js';
 import { coastalRegionStageURL } from './landfall.js';
 import { showCareerPrompt, showSceneNotice, showPortPanel, showCareerEnding, careerMoney } from './career-ui.js';
@@ -98,7 +110,7 @@ import { boardFolkStreets, folkDoing, watchDoing } from './board-folk.js';
 import { createFolkCard, folkCardFacts, folkSoulOfTitle } from './folk-card.js';
 import { createStoryteller, mateShortlist, storytellerScene } from './storyteller.js';
 import { createMateFigure, mateDoing, stepMateFigure } from './first-mate.js';
-import { mateAbout, mateCandidateAccount, mateCandidateLine, mateCounsel, mateTopics } from './mate-counsel.js';
+import { mateAbout, mateCandidateAccount, mateCandidateLine, mateCounsel, mateReply, mateTopics } from './mate-counsel.js';
 import { WALKER_WORDS, townSolids } from './town-streets.js';
 import { bakedBoardFor } from './old-world.js';
 import { createProps } from './props.js';
@@ -531,7 +543,7 @@ async function main() {
   // 2048 square is 16 MiB. At 4096 it was 64 MiB for shadows that differ only in how sharp a walker's is.
   const landShadows = createLandShadows(device);
   const terrainPromise = LAND_STAGE ? createTerrain({ waterOptics: waterOpticsPromise, oceanBridge, device, frameUBO, transView, skyView, sampler: sampClamp, envCubeView, clouds: cloudsPromise, shader, computePipe, mipPipe: rgba8MipPipePromise, format: HDR, samples: MSAA, portDamage, landShadows,
-    boardKept: BOARD_KEPT ? { clock: boardKeepClock(), dateMs: continuedCareer?.voyage?.dateMs ?? null } : null }) : Promise.resolve(null);
+    boardKept: BOARD_KEPT ? { clock: boardKeepClock(), dateMs: continuedCareer?.voyage?.dateMs ?? DEFAULT_DEPARTURE.dateMs } : null }) : Promise.resolve(null);
   const prewarmPromises = [
     computePipe(SCENE_DECK_UPDATE, 'deck wash'),
     shader(DECK_RENDER, 'deck water'),
@@ -1166,7 +1178,9 @@ async function main() {
   const LOOP = SIM_CLOCK_LOOP_S;  // s, spectrum time loop (frequencies quantised to it)
   let needSpectrum = true, envFull = true;
   // Chart Course voyage (covert time warp); created once the dock/UI exists.
-  let careerPort = null, shoreWay = null, voyageCtl = null, chartDrawer = null, propulsionInput = null, sailInputs = [], speedRow = null, sailControls = null, note = null, helm = null;
+  let careerPort = null, portPanel = null, shoreWay = null, voyageCtl = null, chartDrawer = null, propulsionInput = null, sailInputs = [], speedRow = null, sailControls = null, note = null, helm = null;
+  let sessionIntelLedger = normalizeIntelLedger(continuedCareer?.career?.intelLedger);
+  const boardHistoricalLog = [];
   let skySun = NaN, skyHaze = NaN, skyHeight = NaN;
 
   function writeSimStatic() {
@@ -2748,6 +2762,7 @@ async function main() {
       damage: vesselDamageSnapshot(boat),
     },
     portDamage: portDamage.snapshot(careerPorts()),
+    ...(careerPort?.ledger ? { career: { ...careerPort.ledger, intelLedger: sessionIntelLedger } } : {}),
   });
   const restoreCareerVessel = saved => {
     if (!saved) return;
@@ -3091,6 +3106,23 @@ async function main() {
         }
       },
       onHailVessel:enc=>activateEncounterVessel(enc,{mode:'hail',keepPosition:true}),
+      onHailIntel:(intelPacket)=>{
+        if(!intelPacket)return;
+        const nowMs=gameDateMs();
+        const res=mergeHailIntel(sessionIntelLedger,intelPacket,nowMs);
+        if(careerPort?.ledger)careerPort.ledger.intelLedger=sessionIntelLedger;
+        if(careerStore.owned())careerStore.write({career:{...(careerStore.read()?.career??{}),...(careerPort?.ledger??{}),intelLedger:sessionIntelLedger}});
+        if(res.updated)storyteller?.refresh?.();
+      },
+      portIntelSource:(originPort,departedDateMs)=>{
+        if(originPort?.id!=='lisbon'&&!/lisbo[an]?/i.test(originPort?.name??''))return null;
+        let best=null;
+        for(let i=boardHistoricalLog.length-1;i>=0;i--){
+          if(boardHistoricalLog[i].dateMs<=departedDateMs+43200000){best=boardHistoricalLog[i];break;}
+        }
+        if(!best&&boardHistoricalLog.length)best=boardHistoricalLog[0];
+        return best?{marketSnapshot:best.market,realmSnapshot:best.realm,townSnapshot:best.town,newsItems:best.news}:null;
+      },
       onEngageVessel:enc=>activateEncounterVessel(enc,{mode:'engage',keepPosition:true}),
       onBoardVessel:enc=>{
         activateEncounterVessel(enc,{mode:'engage',keepPosition:true});
@@ -3341,6 +3373,7 @@ async function main() {
       },
       onCrewRestored:company=>{reviveCompany(company);refreshCrewRosterDOM();updateCrewUI();},
       onPutToSea:port=>{
+        captureLivePortIntel();
         portDeparting=true;updatePortCall();
         dockingBoarding.castOff();updateCrewUI();
         const whenClear=()=>{
@@ -3384,7 +3417,7 @@ async function main() {
     const portCallButton=document.createElement('button');
     portCallButton.id='port-call';portCallButton.type='button';portCallButton.hidden=true;
     document.body.append(portCallButton);
-    let portPanel=null,portDeparting=false;
+    portPanel=null;let portDeparting=false;
     // With her alongside or her boat at the shore, the captain may walk the town: set down at the nearest door of
     // the port that stands on open ground, facing the town, and back aboard by the same button.
     const shoreWalkButton=document.createElement('button');
@@ -3907,7 +3940,12 @@ async function main() {
   const seaHeader=document.createElement('div');seaHeader.className='panel-header';
   const hideSea=controlIcon(document.createElement('button'),'close','Hide sea settings');
   hideSea.onclick=()=>{setPanelOpen(false);seaSettingsButton.focus();};seaHeader.append(seaTitle,hideSea);
+  const econSimDetails=document.getElementById('econ-sim-controls');
   const seaBody=document.createElement('div');seaBody.className='panel-body';panel.append(seaHeader,seaBody);
+  if(econSimDetails){
+    seaBody.append(econSimDetails);
+    if(qs.get('econ')==='1')econSimDetails.open=true;
+  }
   const astronomyControls=document.createElement('details');astronomyControls.id='astronomy-controls';astronomyControls.open=true;
   const astronomySummary=document.createElement('summary');astronomySummary.textContent='Sun, Moon & sky time';astronomyControls.append(astronomySummary);
   const skyMode=document.createElement('select');skyMode.id='sky-mode';skyMode.innerHTML='<option value="manual">Manual Sun</option><option value="astronomy">Astronomical sky</option>';skyMode.value=astronomy.mode;
@@ -3998,6 +4036,7 @@ async function main() {
     }
   }
   function applyAstronomy(values,syncSunAngles=false){try{astronomy.set(values,boat);envFull=true;syncAstronomySliders(syncSunAngles);astroStatus.textContent=astronomy.mode==='astronomy'?'Real Sun/Moon directions; sky clock is separate from wave simulation.':'Manual Sun controls active.';}catch(error){astroStatus.textContent=error.message;}}
+  astronomy.setDate=d=>applyAstronomy({mode:'astronomy',date:(d instanceof Date?d:new Date(d)).toISOString()},true);
   timeOfDayInput.addEventListener('input',()=>{
     const hrs=Number(timeOfDayInput.value);
     const dec=getLocalAstroDecomp();
@@ -4323,7 +4362,124 @@ async function main() {
   // game is on the screen (in a worker; the frame never waits on it) and lives a day for each day of the game's
   // calendar. window.oceanBoard is the door to all of it: its annals, people, great houses and every view and
   // command the model has. Its news is told as it happens, not more often than a reader can take in.
-  let boardLife=null,boardToldAt=-Infinity;
+  let boardLife=null,boardToldAt=-Infinity,missedQuayNews=[],wasInPortContact=true;
+  let econTimeScale=1,econStepTargetDay=null,econLastFabricDay=-1,econFabricBusy=false,econDiagBusy=false,econLastDiagAt=-Infinity,econLastDiag=null;
+
+  function distToActivePortM(){
+    const port=terrain?.port;
+    if(!port)return Infinity;
+    const off=terrain.getWorldOffset?.()??{x:0,z:0};
+    let best=Infinity;
+    if(port.center&&Number.isFinite(port.center.x)&&Number.isFinite(port.center.z)){
+      best=Math.hypot(port.center.x+off.x-boat.x,port.center.z+off.z-boat.z);
+    }
+    for(const inst of port.instances??[]){
+      if(!inst)continue;
+      const d=Math.hypot((inst.x??0)+off.x-boat.x,(inst.z??0)+off.z-boat.z);
+      if(d<best)best=d;
+    }
+    return best;
+  }
+  function hasLivePortContact(){
+    return checkLivePortContact({
+      moored:dockingBoarding.state.mooringPhase==='moored'&&dockingBoarding.state.mooringTargetKind!=='ship',
+      ashore:Boolean(ashore.on),
+      portCallOpen:Boolean(portPanel||document.getElementById('port-panel')),
+      anchored:Boolean(anchor.active),
+      distToPortM:distToActivePortM(),
+    });
+  }
+  function isEconFastForward(){
+    return econTimeScale>1||econStepTargetDay!==null||Boolean(boardLife&&Number.isFinite(boardLife.wanted)&&Number.isFinite(boardLife.day)&&boardLife.wanted>boardLife.day);
+  }
+  function refreshBoardFabricIfReady(){
+    if(!boardLife||boardLife.state!=='alive'||econFabricBusy||!terrain?.refreshBoardFabric)return Promise.resolve(false);
+    econFabricBusy=true;
+    return boardLife.board().then(nextBoard=>{
+      econLastFabricDay=boardLife.day??econLastFabricDay;
+      if(nextBoard)return terrain?.refreshBoardFabric?.(nextBoard);
+      return false;
+    }).catch(()=>false).finally(()=>{econFabricBusy=false;});
+  }
+  const econSimUI=bindEconSimControls(econSimDetails,{
+    onRate:rate=>{setEconSimRate(rate);},
+    onStep:days=>{stepEconSimDays(days);},
+  });
+  if(qs.get('econ')==='1')setPanelOpen(true);
+
+  function setEconSimRate(rate){
+    const next=Math.max(1,Number(rate)||1);
+    econTimeScale=next;
+    econSimUI?.syncRateUI(next);
+    if(next>1){
+      astronomy.setDate(new Date(gameDateMs()));
+      caravanPlan.at=-Infinity;
+      folkPlan.at=-Infinity;
+    }
+    return econTimeScale;
+  }
+  async function stepEconSimDays(days){
+    const nDays=Number(days);
+    if(!(nDays>0))return boardLife?.diagnostics?.(0)??null;
+    const deltaMs=nDays*ECON_BOARD_DAY_MS;
+    if(voyageCtl){
+      voyageCtl.advanceCalendarOnly(deltaMs);
+      if(careerStore.owned()&&voyageCtl.voyage){
+        voyageCtl.voyage.keepSaved=true;
+        voyageCtl.saveNow();
+      }
+    }else{
+      astronomy.setDate(new Date(gameDateMs()+deltaMs));
+    }
+    astronomy.setDate(new Date(gameDateMs()));
+    if(!boardLife||boardLife.state!=='alive')return null;
+    boardLife.tick(gameDateMs());
+    const targetDay=boardLife.wanted;
+    econStepTargetDay=targetDay;
+    econSimUI?.setCatchup(boardLife.day,targetDay,boardLife.busy);
+    while(boardLife.state==='alive'&&(boardLife.day<targetDay||boardLife.busy)){
+      boardLife.tick(gameDateMs());
+      econSimUI?.setCatchup(boardLife.day,boardLife.wanted,boardLife.busy);
+      await new Promise(r=>setTimeout(r,25));
+    }
+    econStepTargetDay=null;
+    econSimUI?.setCatchup(boardLife.day,boardLife.wanted,false);
+    syncBoardMarket();
+    caravanPlan.at=-Infinity;
+    folkPlan.at=-Infinity;
+    tendCaravans(performance.now());
+    tendFolk(performance.now());
+    await refreshBoardFabricIfReady();
+    const diag=await boardLife.diagnostics(0).catch(()=>null);
+    if(diag){econLastDiag=diag;econSimUI?.setTelemetry(diag);}
+    return diag;
+  }
+  function pollEconDiagnostics(now){
+    if(!boardLife||boardLife.state!=='alive')return;
+    econSimUI?.setCatchup(boardLife.day,boardLife.wanted,boardLife.busy);
+    if(econTimeScale>1&&Number.isFinite(boardLife.day)){
+      if(econLastFabricDay<0)econLastFabricDay=boardLife.day;
+      else if(boardLife.day-econLastFabricDay>=7){
+        econLastFabricDay=boardLife.day;
+        syncBoardMarket();
+        refreshBoardFabricIfReady();
+      }
+    }
+    const panelVisible=!panel.classList.contains('hidden')&&Boolean(econSimDetails?.open);
+    if((!panelVisible&&econTimeScale<=1)||econDiagBusy||now-econLastDiagAt<650)return;
+    econDiagBusy=true;
+    econLastDiagAt=now;
+    boardLife.diagnostics(0).then(diag=>{
+      if(diag){econLastDiag=diag;econSimUI?.setTelemetry(diag);}
+    }).catch(()=>{}).finally(()=>{econDiagBusy=false;});
+  }
+  window.oceanEconSim={
+    get rate(){return econTimeScale;},
+    setRate:setEconSimRate,
+    stepDays:stepEconSimDays,
+    getDiagnostics:(place=0)=>boardLife?.diagnostics?.(place)??Promise.resolve(econLastDiag),
+  };
+
   function wakeBoard(){
     if(boardLife||qs.get('boardLife')==='off')return;
     const region=terrain?.region,baked=region&&window.oceanLand?.pack?.board?bakedBoardFor(region):null;
@@ -4333,10 +4489,34 @@ async function main() {
       kept:()=>BOARD_KEPT&&baked.lived?keptBoard(baked.port,baked.year,{clock:boardKeepClock()}).then(left=>left?.day===baked.lived.day?left:null):null,
       keep:record=>BOARD_KEPT?keepBoard({...record,clock:boardKeepClock()}):false,
       onNews:lines=>{
-      const now=performance.now();if(now-boardToldAt<45000)return;
-      const line=lines.findLast(entry=>entry.cat!=='trade')??lines[lines.length-1];
-      if(line){boardToldAt=now;voyageCtl?.showToast?.(line.date+'. '+line.text,8);}
-    },onNewsAll:lines=>storyteller?.tell({kind:'news',lines:lines.slice(-6).map(entry=>entry.date+': '+entry.text)}),onState:state=>{if(state==='alive'){mateEmbark();syncBoardMarket();caravanPlan.frames=0;caravanPlan.at=-Infinity;tendCaravans(performance.now());}}});
+        recordBoardHistoricalLog();
+        if(!hasLivePortContact()){
+          for(const l of lines)missedQuayNews.push(l);
+          if(missedQuayNews.length>16)missedQuayNews.splice(0,missedQuayNews.length-16);
+          return;
+        }
+        captureLivePortIntel();
+        const now=performance.now();if(now-boardToldAt<45000)return;
+        const line=lines.findLast(entry=>entry.cat!=='trade')??lines[lines.length-1];
+        if(line){boardToldAt=now;voyageCtl?.showToast?.(line.date+'. '+line.text,8);}
+      },
+      onNewsAll:lines=>{
+        recordBoardHistoricalLog();
+        if(!hasLivePortContact())return;
+        captureLivePortIntel();
+        storyteller?.tell({kind:'news',lines:lines.slice(-6).map(entry=>entry.date+': '+entry.text)});
+      },
+      onState:state=>{
+        if(state==='alive'){
+          econLastFabricDay=boardLife.day??0;
+          mateEmbark();
+          syncBoardMarket();
+          recordBoardHistoricalLog();
+          if(hasLivePortContact())captureLivePortIntel();
+          caravanPlan.frames=0;caravanPlan.at=-Infinity;tendCaravans(performance.now());
+          pollEconDiagnostics(performance.now());
+        }
+      }});
     window.oceanBoard=boardLife;boardLife.start();
   }
   function syncBoardMarket(){
@@ -4345,8 +4525,12 @@ async function main() {
     if(!regionId)return;
     boardLife.market(0).then(market=>{
       if(market&&terrain?.region?.id===regionId){
-        careerPort.setBoardMarket(regionId,market);
-        portPanel?.refresh?.();
+        recordBoardHistoricalLog(market);
+        if(hasLivePortContact()){
+          careerPort.setBoardMarket(regionId,market);
+          portPanel?.refresh?.();
+          captureLivePortIntel();
+        }
       }
     }).catch(()=>{});
   }
@@ -4358,16 +4542,19 @@ async function main() {
   const FOLK_MOST=/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)?200:480,FOLK_EYE_MOVED_M=120,FOLK_DAY_WAIT_MS=30000,FOLK_EYE_WAIT_MS=8000,FOLK_CHECK_FRAMES=30;
   const folkPlan={asking:false,day:-1,x:NaN,z:NaN,at:-Infinity,frames:0,laidMs:0,laid:0,kept:new Map(),keptFor:null,solids:null};
   function tendFolk(now){
-    if(folkPlan.frames++%FOLK_CHECK_FRAMES||folkPlan.asking||boardLife?.state!=='alive')return;
+    const fastEcon=isEconFastForward();
+    const checkEvery=fastEcon?8:FOLK_CHECK_FRAMES;
+    const dayWaitMs=fastEcon?350:FOLK_DAY_WAIT_MS;
+    if(folkPlan.frames++%checkEvery||folkPlan.asking||boardLife?.state!=='alive')return;
     const port=townsfolk?.port;
     if(!port||port!==terrain?.port)return;
     const base=port.streetsOwn??=port.streets;
     if(!base?.window)return;
     const region=terrain.baseRegion,offset=terrain.getWorldOffset(),x=frameF[16]-offset.x-region.x,z=frameF[18]-offset.z-region.z,since=now-folkPlan.at;
     if(port.streets?.folk){
-      const turned=boardLife.day!==folkPlan.day&&since>FOLK_DAY_WAIT_MS,moved=Math.hypot(x-folkPlan.x,z-folkPlan.z)>FOLK_EYE_MOVED_M&&since>FOLK_EYE_WAIT_MS;
+      const turned=boardLife.day!==folkPlan.day&&since>dayWaitMs,moved=Math.hypot(x-folkPlan.x,z-folkPlan.z)>FOLK_EYE_MOVED_M&&since>(fastEcon?350:FOLK_EYE_WAIT_MS);
       if(!turned&&!moved)return;
-    }else if(since<FOLK_EYE_WAIT_MS)return;
+    }else if(since<(fastEcon?350:FOLK_EYE_WAIT_MS))return;
     folkPlan.asking=true;
     boardLife.folk(0,{focus:{x,z},most:FOLK_MOST,others:base.people}).then(plan=>{
       if(terrain?.port!==port||townsfolk.port!==port)return;
@@ -4386,21 +4573,26 @@ async function main() {
   const CARAVAN_CHECK_FRAMES=45,CARAVAN_WAIT_MS=4000;
   const caravanPlan={asking:false,day:-1,at:-Infinity,frames:0,count:0,seen:null,lastMs:NaN,lastDay:NaN,rate:0,lastList:[],origin:{x:0,z:0}};
   function tendCaravans(now){
+    const fastEcon=isEconFastForward();
     const urgentMaritime=Boolean(terrain?.tradeVessels?.consumeDirtySync?.());
-    if((!urgentMaritime&&caravanPlan.frames++%CARAVAN_CHECK_FRAMES)||caravanPlan.asking||boardLife?.state!=='alive')return;
+    const checkEvery=fastEcon?8:CARAVAN_CHECK_FRAMES;
+    const waitMs=fastEcon?350:CARAVAN_WAIT_MS;
+    if((!urgentMaritime&&caravanPlan.frames++%checkEvery)||caravanPlan.asking||boardLife?.state!=='alive')return;
     const herds=terrain?.herds;
     if(!herds)return;
-    if(!urgentMaritime&&(boardLife.day===caravanPlan.day&&caravanPlan.seen===herds||now-caravanPlan.at<CARAVAN_WAIT_MS))return;
-    if(urgentMaritime&&now-caravanPlan.at<750)return;
+    if(!urgentMaritime&&(boardLife.day===caravanPlan.day&&caravanPlan.seen===herds||now-caravanPlan.at<waitMs))return;
+    if(urgentMaritime&&now-caravanPlan.at<(fastEcon?350:750))return;
     caravanPlan.asking=true;
     boardLife.caravans().then(answer=>{
       if(terrain?.herds!==herds)return;
       const region=terrain.baseRegion;
       const list=answer?.list??[];
+      const riders=answer?.riders??[];
+      const combinedRoad=[...list,...riders];
       const origin={x:region.x,z:region.z};
-      herds.setCaravans(list,origin);
+      herds.setCaravans(combinedRoad,origin);
       terrain?.tradeVessels?.setTraffic(answer,origin,terrain?.port?.country?.riverReaches??[],terrain?.port?.country?.places??[],{heights:window.oceanLand?.pack?.heights,region,port:terrain?.port,terrain,bridges:terrain?.bridges??[]});
-      Object.assign(caravanPlan,{day:answer?.day??boardLife.day,count:list.length,seen:herds,at:performance.now(),lastList:list,lastAnswer:answer,origin});
+      Object.assign(caravanPlan,{day:answer?.day??boardLife.day,count:combinedRoad.length,seen:herds,at:performance.now(),lastList:combinedRoad,lastAnswer:answer,origin});
       syncBoardMarket();
     }).catch(error=>{console.warn('The board\'s caravans:',error);caravanPlan.at=performance.now();}).finally(()=>{caravanPlan.asking=false;});
   }
@@ -4624,28 +4816,190 @@ async function main() {
   function mateEmbark(){if(mateOfThisBoard())boardLife.embark(firstMate.id).then(()=>{folkPlan.at=-Infinity;folkPlan.day=-1;},error=>console.warn('The mate and the model:',error));}
   mateEmbark();
   const storyLife=()=>{if(boardLife?.state==='alive')return boardLife;throw new Error(boardLife?`The country's model is ${boardLife.state} here`:'This place has no living model: only the sea, the ship and the captain are known here');};
-  // The port in sight by the name its own people call it (the model's, where it has one), or null at sea.
-  const storyPort=()=>{if(!terrain?.port)return null;const garrison=fortSoldiers?.state;return (garrison?.watch&&garrison.port===terrain.port?garrison.watch.place:null)??terrain.region?.name??'a port';};
-  const storyPlace=()=>({name:storyPort()??'',kind:terrain?.port?'port':'sea',ruler:boardLife?.status?.monarch??undefined});
+  // The port in sight by the name its own people call it (the model's, where it has one), or null when beyond port contact.
+  const rawPortName=()=>{if(!terrain?.port)return null;const garrison=fortSoldiers?.state;return (garrison?.watch&&garrison.port===terrain.port?garrison.watch.place:null)??terrain.region?.name??'a port';};
+  const storyPort=()=>hasLivePortContact()?rawPortName():null;
+  const buildLiveRealm=()=>{
+    const s=boardLife?.status??null;
+    if(!s)return null;
+    const pName=rawPortName()??'';
+    const isLisbon=(terrain?.region?.id??boardLife?.port)==='lisbon'||/lisbo[an]?/i.test(pName);
+    return {
+      name:window.oceanLand?.pack?.board?.realm??(isLisbon?'Portugal':undefined),
+      monarch:s.monarch,
+      treasury:s.treasury,
+      people:s.people,
+      places:s.places,
+      war:Boolean(s.war),
+      plague:Boolean(s.plague),
+      feuds:s.feuds,
+      legitimacy:s.legitimacy,
+      weather:s.weather,
+      priceLevel:s.priceLevel,
+      ...(isLisbon?{palace:'Paço da Ribeira (Terreiro do Paço) & Alcáçova Keep'}:{}),
+    };
+  };
+  const shipMate=()=>vessels[0]?.crew?.state?.crew?.find(s=>s.role==='Mate')?.name??'The mate';
+  const mateTown={name:null,at:-Infinity,data:null,asking:false};
+  function mateTownRecordLive(){
+    const name=boardLife?.state==='alive'?rawPortName():null,now=performance.now();
+    if(!name){mateTown.name=null;mateTown.data=null;return null;}
+    if((name!==mateTown.name||now-mateTown.at>60000)&&!mateTown.asking){
+      mateTown.asking=true;if(name!==mateTown.name)mateTown.data=null;mateTown.name=name;
+      boardLife.panel('advisor-state',{path:'settlement:'+name}).then(data=>{
+        if(mateTown.name===name&&data?.name){
+          const isLisbon=/lisbo[an]?/i.test(name);
+          mateTown.data=isLisbon?{...data,palace:'Paço da Ribeira (Terreiro do Paço) & Alcáçova Keep'}:data;
+          if(hasLivePortContact()){captureLivePortIntel();storyteller?.refresh();}
+        }
+      },()=>{}).finally(()=>{mateTown.asking=false;mateTown.at=performance.now();});
+    }
+    return mateTown.data;
+  }
+  function mateMarketLive(boardMarketOverride=null){
+    const v=voyageCtl?.voyage,region=terrain?.region,era=careerPort?.era;
+    if(!v||!region||!era||!terrain?.port)return null;
+    try{
+      const ledger=careerPort.ledger,year=new Date(v.dateMs).getUTCFullYear(),port=ledger?.cargo?findHistoricalColonialPort(region.latitude,region.longitude,region.id,year):null;
+      if(!port)return null;
+      if(boardMarketOverride){
+        const tempLedger={...ledger,boardMarkets:{...(ledger.boardMarkets??{}),[port.id]:boardMarketOverride}};
+        return goodsInSeason(era,year).map(good=>({...marketQuote(era,tempLedger,port,good,v.dateMs),usual:good.price}));
+      }
+      return goodsInSeason(era,year).map(good=>({...marketQuote(era,ledger,port,good,v.dateMs),usual:good.price}));
+    }catch{return null;}
+  }
+  function recordBoardHistoricalLog(boardMarketOverride=null){
+    if(boardLife?.state!=='alive')return;
+    const dateMs=gameDateMs();
+    if(!Number.isFinite(dateMs))return;
+    const dayBucket=Math.floor(dateMs/86400000);
+    const snap={
+      dayBucket,
+      dateMs,
+      boardDay:boardLife.day,
+      realm:buildLiveRealm(),
+      town:mateTown.data,
+      market:mateMarketLive(boardMarketOverride),
+      news:(boardLife.news??[]).slice(-8),
+    };
+    if(boardHistoricalLog.length&&boardHistoricalLog[boardHistoricalLog.length-1].dayBucket===dayBucket){
+      boardHistoricalLog[boardHistoricalLog.length-1]=snap;
+    }else{
+      boardHistoricalLog.push(snap);
+      if(boardHistoricalLog.length>90)boardHistoricalLog.splice(0,boardHistoricalLog.length-90);
+    }
+  }
+  function captureLivePortIntel(){
+    if(!hasLivePortContact())return null;
+    const portId=terrain?.region?.id||boardLife?.port||careerPort?.here?.id||'lisbon';
+    const portName=rawPortName()||terrain?.region?.name||'Lisboa';
+    const rec=snapshotPortIntel(sessionIntelLedger,{
+      portId,
+      portName,
+      dateMs:gameDateMs(),
+      boardDay:boardLife?.day??null,
+      town:mateTownRecordLive(),
+      market:mateMarketLive(),
+      realm:buildLiveRealm(),
+      news:boardLife?.state==='alive'?boardLife.news.slice(-8):[],
+    });
+    if(careerPort?.ledger)careerPort.ledger.intelLedger=sessionIntelLedger;
+    return rec;
+  }
+  function hailNearbyShip(maxRangeM=220){
+    const tvList=terrain?.tradeVessels?.locate?.()??[];
+    const off=terrain?.getWorldOffset?.()??{x:0,z:0};
+    let best=null,bestD=maxRangeM;
+    for(const tv of tvList){
+      if(!tv)continue;
+      const d=Math.hypot((tv.x??0)+off.x-boat.x,(tv.z??0)+off.z-boat.z);
+      if(d<=bestD){bestD=d;best=tv;}
+    }
+    if(!best)return {ok:false,reason:'No passing vessel within speaking-trumpet hail (<= 220 m).'};
+    const nowMs=gameDateMs();
+    const transitDays=Math.max(0.25,Number(best.progress??0.25)*3);
+    const departedDateMs=Math.round(nowMs-transitDays*86400000);
+    const portId=terrain?.region?.id||'lisbon';
+    const portName=rawPortName()||'Lisboa';
+    let hist=null;
+    for(let i=boardHistoricalLog.length-1;i>=0;i--){
+      if(boardHistoricalLog[i].dateMs<=departedDateMs+43200000){hist=boardHistoricalLog[i];break;}
+    }
+    if(!hist&&boardHistoricalLog.length)hist=boardHistoricalLog[0];
+    const packet={
+      originPort:{id:portId,name:portName},
+      destPort:{id:best.homePort?.toLowerCase?.()||'seville',name:best.homePort||'afar'},
+      departedDateMs,
+      transitDays,
+      shipName:best.shipName||'Passing Barque',
+      shipKind:best.mode==='river'?'river barque':'caravel',
+      masterName:best.captain?.name||best.pilot?.name||'her master',
+      marketSnapshot:hist?.market??null,
+      realmSnapshot:hist?.realm??null,
+      townSnapshot:hist?.town??null,
+      newsItems:hist?.news??[],
+      rumor:`Spoke ${best.shipName||'a passing vessel'} (${Math.round(bestD)} m off, outbound from ${portName}).`,
+    };
+    const merged=mergeHailIntel(sessionIntelLedger,packet,nowMs);
+    if(careerPort?.ledger)careerPort.ledger.intelLedger=sessionIntelLedger;
+    if(merged.updated)storyteller?.refresh?.();
+    return {ok:true,distanceM:Math.round(bestD),updated:merged.updated,intelPacket:packet};
+  }
+
+  const storyPlace=()=>{
+    const inContact=hasLivePortContact();
+    const frozen=!inContact?resolveMateIntel(sessionIntelLedger,{nowDateMs:gameDateMs()}):null;
+    return {name:inContact?(rawPortName()??''):'',kind:inContact?'port':'sea',ruler:inContact?(boardLife?.status?.monarch??undefined):(frozen?.realm?.monarch??undefined)};
+  };
   function storySituation(){
-    const v=voyageCtl?.voyage??null,port=terrain?.port??null,era=careerPort?.era??null,dateMs=gameDateMs(),s=boardLife?.status??null,alive=boardLife?.state==='alive';
+    const v=voyageCtl?.voyage??null,inContact=hasLivePortContact(),era=careerPort?.era??null,dateMs=gameDateMs(),alive=boardLife?.state==='alive';
+    if(inContact)captureLivePortIntel();
+    const frozen=!inContact?resolveMateIntel(sessionIntelLedger,{nowDateMs:dateMs}):null;
+    const s=inContact?(boardLife?.status??null):null;
     let ledger=null;try{ledger=careerPort?.ledger??null;}catch{ledger=null;}
     const worth=ledger&&era?careerWorth(era,ledger,{}):undefined;
     // The wind and the heading as the helm's own panel gives them: by the compass, the wind by where it blows from.
     const weather=v?.weather??null,windFrom=Number.isFinite(weather?.windFrom)?weather.windFrom:compassFromRendererDir(P.windDir),turn=deg=>Math.round(((deg%360)+360)%360);
     const bound=v?.destination&&v?.dr&&Number.isFinite(v.destination.lat)?{leagues:greatCircleKm(v.dr.lat,v.dr.lon,v.destination.lat,v.destination.lon)/5.556,bearing:turn(initialBearing(v.dr.lat,v.dr.lon,v.destination.lat,v.destination.lon)-(v.variation??0))}:undefined;
     return {
-      date:{text:s?.date??(Number.isFinite(dateMs)?formatJulianDate(dateMs):''),day:alive?boardLife.day:undefined,year:Number.isFinite(dateMs)?new Date(dateMs).getUTCFullYear():undefined,season:s?.season},
-      realm:s?{name:window.oceanLand?.pack?.board?.realm??undefined,monarch:s.monarch,treasury:s.treasury,people:s.people,places:s.places,war:Boolean(s.war),plague:Boolean(s.plague),feuds:s.feuds,legitimacy:s.legitimacy,weather:s.weather,priceLevel:s.priceLevel}:null,
-      where:{name:storyPort()??(v?'at sea':''),kind:port?'port':'sea',ashore:ashore.on,living:alive,lat:v?.true?.lat,lon:v?.true?.lon,reckoned:v?.dr?{lat:v.dr.lat,lon:v.dr.lon}:undefined},
+      date:{text:s?.date??(Number.isFinite(dateMs)?formatJulianDate(dateMs):''),day:inContact&&alive?boardLife.day:(frozen?.asOfBoardDay??undefined),year:Number.isFinite(dateMs)?new Date(dateMs).getUTCFullYear():undefined,season:s?.season},
+      realm:inContact?buildLiveRealm():(frozen?.realm??null),
+      where:{name:inContact?(rawPortName()??'port'):(v?'at sea':'open sea'),kind:inContact?'port':'sea',ashore:ashore.on,living:inContact&&alive,lat:v?.true?.lat,lon:v?.true?.lon,reckoned:v?.dr?{lat:v.dr.lat,lon:v.dr.lon}:undefined},
       ship:{name:v?.shipName,class:boat.modelId,hands:v?.crew,headingDeg:Number.isFinite(boat.heading)?turn(boat.heading-(v?.variation??0)):undefined,compassCourse:v?.compassCourse,knots:Number.isFinite(boat.surgeVelocity)?Math.round(Math.abs(boat.surgeVelocity)/KNOT_TO_MPS*10)/10:undefined,windFrom:turn(windFrom),windWords:weather?.description??windDescription(P.windSpeed),windKnots:Math.round(P.windSpeed*19.44)/10,foodDays:v?.provisions?.food,waterDays:v?.provisions?.water},
       captain:{title:worth!==undefined?careerTitle(era,worth):undefined,worth,coin:ledger?.purse,currency:era?.currency?.plural,cargo:Object.entries(ledger?.cargo??{}).filter(([,tonnes])=>tonnes>0).map(([good,tonnes])=>({good,name:era?.goods?.find(one=>one.id===good)?.name??good,units:Math.round(tonnes*10)/10})),prizes:ledger?.prizesTaken,shipsLost:ledger?.shipsLost,portsVisited:ledger?.portsVisited?.length},
-      voyage:v?{from:v.departure?.name,to:v.destination?.name??null,toGo:bound,daysOut:v.dayAtSea,leagues:Math.round((v.distanceLoggedNm??0)/3),log:(v.log??[]).slice(-6).map(line=>line.text)}:null,
+      voyage:v?{from:v.departure?.name??frozen?.portName,to:v.destination?.name??null,toGo:bound,daysOut:v.dayAtSea,leagues:Math.round((v.distanceLoggedNm??0)/3),log:(v.log??[]).slice(-6).map(line=>line.text)}:null,
       mate:firstMate,
     };
   }
   // Someone of the model as whoever plays them is to be told: their card, where they are, the day and the talk.
   async function storyPerson(id){
+    if(!hasLivePortContact()){
+      if(firstMate&&Number(id)===firstMate.id){
+        const frozen=resolveMateIntel(sessionIntelLedger,{nowDateMs:gameDateMs()});
+        const cardLines=[
+          `${firstMate.name} — ${firstMate.age??30}, first mate · ${firstMate.role??'mariner'} · ${firstMate.port??'Lisboa'}`,
+          `Now at sea as first mate${voyageCtl?.voyage?.shipName?' of the '+voyageCtl.voyage.shipName:''}`,
+          ...(firstMate.about?.home?[`Home ${firstMate.about.home}`]:[]),
+          ...(firstMate.about?.spouse?[`Spouse ${firstMate.about.spouse}`]:[]),
+          ...(firstMate.about?.children?[`Children ${firstMate.about.children}`]:[]),
+          ...(firstMate.about?.head?[`Household of ${firstMate.about.head}`]:[]),
+          ...(firstMate.about?.nature?[`Nature ${firstMate.about.nature}`]:[]),
+          ...(firstMate.about?.learning?[`Learning ${firstMate.about.learning}`]:[]),
+          'Life',
+          ...(firstMate.about?.born?[firstMate.about.born]:[]),
+        ].join('\n');
+        return storytellerScene({
+          soul:{id:firstMate.id,name:firstMate.name,age:firstMate.age,sex:firstMate.sex,role:'first mate'},
+          answer:{card:cardLines,links:[]},
+          doing:'standing watch aboard ship',
+          place:storyPlace(),
+          status:frozen?.realm?{date:formatJulianDate(gameDateMs()),day:frozen.asOfBoardDay,year:new Date(gameDateMs()).getUTCFullYear()}:null,
+          news:frozen?.news??[],
+        });
+      }
+      throw new Error('Beyond port contact at sea: only the embarked first mate and last known port ledger can be consulted until speaking a passing sail or making port');
+    }
     const life=storyLife(),answer=await folkCardOf(id);
     if(!answer?.card)throw new Error('The game knows no one of that number');
     const soul=folkSeen()?.souls.find(one=>one?.id===id)??shipFolkSeen()?.find(d=>d.soul?.id===id)?.soul??watchSeen()?.find(s=>s.soul?.id===id)?.soul??folkSoulOfTitle(id,answer.card.split('\n')[0]);
@@ -4653,6 +5007,12 @@ async function main() {
   }
   // Who is about the captain now, nearest first.
   function storyNearby(){
+    if(!hasLivePortContact()){
+      const off=terrain?.getWorldOffset?.()??{x:0,z:0};
+      const rect=canvas.getBoundingClientRect();
+      const aboardShips=(shipFolkSeen()??[]).map(d=>({d,seen:shipFolkOnScreen(d,rect,off)})).filter(one=>one.seen&&one.seen.tall>=FOLK_LEAST_PX).map(({d,seen})=>({id:d.soul.id,name:d.soul.name,role:d.soul.role,shipName:d.shipName,homePort:d.homePort,doing:d.doing,metres:Math.round(seen.depth)}));
+      return {place:null,ashore:false,living:false,inSight:[],atPosts:[],aboardShips:aboardShips.sort((a,b)=>a.metres-b.metres).slice(0,16),aboutTheTown:0,lastAskedAfter:null};
+    }
     const streets=folkSeen(),rect=canvas.getBoundingClientRect(),off=terrain?.getWorldOffset?.()??{x:0,z:0},about=[];
     for(let i=0,n=streets?Math.min(streets.souls.length,townsfolk.people):0;i<n;i++){
       const soul=streets.souls[i],seen=soul?folkOnScreen(streets,i,rect):null;
@@ -4665,7 +5025,7 @@ async function main() {
   }
   // Who of the port's people might sign on as mate, each with what the model keeps of them.
   async function storyMateCandidates(n){
-    if(boardLife?.state!=='alive')return {none:'This port is not one of the living ones, so there is no one of the model to choose: the ship\'s own mate stands. Write mate.md from what the player tells you of them.'};
+    if(!hasLivePortContact()||boardLife?.state!=='alive')return {none:'Out at sea or beyond port contact there is no one ashore to sign on; make fast at a living port first.'};
     const plan=await boardLife.folk(0,{most:1,others:900}),posted=fortSoldiers?.state?.watch?new Set(fortSoldiers.state.soldiers.map(s=>s.soul?.id)):null;
     return Promise.all(mateShortlist(plan.others,{n,away:posted}).map(async soul=>{
       const card=folkCardFacts((await boardLife.person(soul.id))?.card??''),kin=['Wife','Husband','Children','Widow of','Widower of','Father','Mother'].filter(key=>card.facts[key]).map(key=>key+': '+card.facts[key]);
@@ -4688,35 +5048,39 @@ async function main() {
   }
   const storyName=async person=>{
     if(person==null||person===firstMate?.id)return firstMate?.name??'The mate';
+    if(!hasLivePortContact())return 'Someone';
     const seen=folkSeen()?.souls.find(one=>one?.id===person)??watchSeen()?.find(s=>s.soul?.id===person)?.soul;
     if(seen)return seen.name;
     const answer=await boardLife?.person(person).catch(()=>null);
     return answer?.card?folkSoulOfTitle(person,answer.card.split('\n')[0]).name:'Someone';
   };
-  // What the mate can tell the captain with no storyteller by (js/mate-counsel.js): the questions that fit the
-  // moment, each answered from what is gathered here of the game and the model. Until someone of a port is signed
-  // on the ship's own mate answers, and can say who would come.
-  const shipMate=()=>vessels[0]?.crew?.state?.crew?.find(s=>s.role==='Mate')?.name??'The mate';
-  const mateTown={name:null,at:-Infinity,data:null,asking:false};
-  function mateTownRecord(){
-    const name=boardLife?.state==='alive'?storyPort():null,now=performance.now();
-    if(!name){mateTown.name=null;mateTown.data=null;return null;}
-    if((name!==mateTown.name||now-mateTown.at>60000)&&!mateTown.asking){
-      mateTown.asking=true;if(name!==mateTown.name)mateTown.data=null;mateTown.name=name;
-      boardLife.panel('advisor-state',{path:'settlement:'+name}).then(data=>{if(mateTown.name===name&&data?.name){mateTown.data=data;storyteller?.refresh();}},()=>{}).finally(()=>{mateTown.asking=false;mateTown.at=performance.now();});
+  function mateKnows(){
+    const inContact=hasLivePortContact();
+    if(inContact){
+      captureLivePortIntel();
+      return {
+        mate:firstMate?{...firstMate,model:true}:{name:shipMate(),model:false},
+        now:storySituation(),
+        near:ashore.on?storyNearby():null,
+        news:boardLife?.state==='alive'?boardLife.news:[],
+        town:mateTownRecordLive(),
+        market:mateMarketLive(),
+        intel:null,
+        landing:shoreWay,
+      };
     }
-    return mateTown.data;
+    const frozen=resolveMateIntel(sessionIntelLedger,{nowDateMs:gameDateMs()});
+    return {
+      mate:firstMate?{...firstMate,model:true}:{name:shipMate(),model:false},
+      now:storySituation(),
+      near:null,
+      news:frozen?.news??[],
+      town:frozen?.town??null,
+      market:frozen?.market??null,
+      intel:frozen,
+      landing:shoreWay,
+    };
   }
-  // What this port's merchants quote today, each beside the good's usual price.
-  function mateMarket(){
-    const v=voyageCtl?.voyage,region=terrain?.region,era=careerPort?.era;
-    if(!v||!region||!era||!terrain?.port)return null;
-    try{
-      const ledger=careerPort.ledger,year=new Date(v.dateMs).getUTCFullYear(),port=ledger?.cargo?findHistoricalColonialPort(region.latitude,region.longitude,region.id,year):null;
-      return port?goodsInSeason(era,year).map(good=>({...marketQuote(era,ledger,port,good,v.dateMs),usual:good.price})):null;
-    }catch{return null;}
-  }
-  const mateKnows=()=>({mate:firstMate?{...firstMate,model:true}:{name:shipMate(),model:false},now:storySituation(),near:ashore.on?storyNearby():null,news:boardLife?.state==='alive'?boardLife.news:[],town:mateTownRecord(),market:mateMarket(),landing:shoreWay});
   let mateOffered=[];
   async function mateAnswer(id){
     if(id==='sign'){
@@ -4734,11 +5098,47 @@ async function main() {
     }
     return {text:mateCounsel(id,mateKnows())};
   }
-  storyteller=createStoryteller({storage:careerBrowserStorage('sessionStorage'),counsel:{who:()=>({name:firstMate?.name??shipMate()}),topics:()=>mateTopics(mateKnows(),8),answer:mateAnswer},game:{
+  const frozenIntelForMcp=()=>resolveMateIntel(sessionIntelLedger,{nowDateMs:gameDateMs()});
+  storyteller=createStoryteller({storage:careerBrowserStorage('sessionStorage'),counsel:{who:()=>({name:firstMate?.name??shipMate()}),topics:()=>mateTopics(mateKnows(),8),answer:mateAnswer,reply:q=>mateReply(q,mateKnows())},game:{
     situation:storySituation,nearby:storyNearby,person:storyPerson,mateCandidates:storyMateCandidates,mateChoose:storyMateChoose,nameOf:storyName,mate:()=>firstMate,
-    world:path=>storyLife().panel('advisor-state',path?{path}:{}),find:(name,n=60)=>storyLife().find(String(name??''),n),
-    inspect:(code,name)=>code?storyLife().inspect(String(code),true):storyLife().panel('advisor-inspect',{name:String(name??''),full:true}),
-    chronicle:args=>storyLife().annals({n:20,...args}),panel:({kind,town,house})=>storyLife().panel('advisor-panel',{of:kind,town,house}),
+    world:path=>{
+      if(!hasLivePortContact()){
+        const f=frozenIntelForMcp();
+        return {stale:true,horizon:'at-sea',asOfDateMs:f?.asOfDateMs??null,ageDays:f?.ageDays??null,source:f?.source??null,town:f?.town??null,realm:f?.realm??null,market:f?.market??null,seaRumors:f?.seaRumors??[]};
+      }
+      return storyLife().panel('advisor-state',path?{path}:{});
+    },
+    find:(name,n=60)=>{
+      if(!hasLivePortContact()){
+        const q=String(name??'').toLowerCase(),f=frozenIntelForMcp(),out=[];
+        if(firstMate&&(!q||firstMate.name.toLowerCase().includes(q)))out.push({code:'p'+firstMate.id,name:firstMate.name,kind:'person',note:'embarked first mate'});
+        if(f?.realm?.monarch&&(!q||String(f.realm.monarch).toLowerCase().includes(q)))out.push({code:'monarch',name:f.realm.monarch,kind:'notable',stale:true,ageDays:f.ageDays});
+        if(f?.portName&&(!q||f.portName.toLowerCase().includes(q)))out.push({code:'s0',name:f.portName,kind:'settlement',stale:true,ageDays:f.ageDays});
+        return out.slice(0,n);
+      }
+      return storyLife().find(String(name??''),n);
+    },
+    inspect:(code,name)=>{
+      if(!hasLivePortContact()){
+        const f=frozenIntelForMcp();
+        return {stale:true,horizon:'at-sea',code:code??null,name:name??null,intel:f,note:'Beyond physical port contact; only frozen port intelligence is known until speaking a passing sail or returning to port.'};
+      }
+      return code?storyLife().inspect(String(code),true):storyLife().panel('advisor-inspect',{name:String(name??''),full:true});
+    },
+    chronicle:args=>{
+      if(!hasLivePortContact()){
+        const f=frozenIntelForMcp();
+        return (f?.news??[]).slice(-(args?.n??20));
+      }
+      return storyLife().annals({n:20,...args});
+    },
+    panel:({kind,town,house})=>{
+      if(!hasLivePortContact()){
+        const f=frozenIntelForMcp();
+        return {stale:true,horizon:'at-sea',kind,town:f?.town??null,realm:f?.realm??null,market:f?.market??null,news:f?.news??[]};
+      }
+      return storyLife().panel('advisor-panel',{of:kind,town,house});
+    },
   }});
   if(qs.get('storyteller')!=='off'){storyteller.mount(captainBody);storyteller.resume();}
   // The mate's bar keeps to the lower left with its foot just above the helm, wherever the helm then lies. Where a
@@ -4761,9 +5161,23 @@ async function main() {
   const storySeen={ashore:ashore.on,port:storyPort()};
   let mateMoment='';
   setInterval(()=>{
+    // Snapshot live port intel while in physical contact, and surface quay arrival summary on returning from sea.
+    const inContact=hasLivePortContact();
+    if(inContact){
+      captureLivePortIntel();
+      if(!wasInPortContact){
+        syncBoardMarket();
+        if(missedQuayNews.length){
+          const latest=missedQuayNews.findLast(e=>e.cat!=='trade')??missedQuayNews[missedQuayNews.length-1];
+          missedQuayNews=[];
+          if(latest)voyageCtl?.showToast?.(`Quay word on returning to ${rawPortName()??'port'}: ${latest.date}. ${latest.text}`,8);
+        }
+      }
+    }
+    wasInPortContact=inContact;
     // The mate's questions follow the moment: where the ship is, whether the captain is ashore, who was last pointed at.
     let someone=false;if(ashore.on){const near=storyNearby();someone=Boolean(near.inSight.length||near.atPosts.length);}
-    const port=storyPort(),moment=[port,ashore.on,someone,firstMate?.id,storyAsked?.id,boardLife?.state,Boolean(mateTown.data),Boolean(voyageCtl?.voyage),shoreWay?.way].join('|');
+    const port=storyPort(),moment=[port,inContact,ashore.on,someone,firstMate?.id,storyAsked?.id,boardLife?.state,Boolean(mateTown.data),Boolean(voyageCtl?.voyage),shoreWay?.way].join('|');
     if(moment!==mateMoment){mateMoment=moment;storyteller.refresh();}
     if(storyteller.state!=='paired'){storySeen.ashore=ashore.on;storySeen.port=port;return;}
     if(ashore.on!==storySeen.ashore){storySeen.ashore=ashore.on;storyteller.tell({kind:ashore.on?'ashore':'aboard',place:port});}
@@ -4786,6 +5200,8 @@ async function main() {
       return {name:s.name,sex:s.sex,at:{x:s.position[0],y:s.position[1],z:s.position[2]},going:Boolean(s.going),fromCaptain:Math.hypot(s.position[0]-cam.x,s.position[2]-cam.z),drawn:mateSoldiers?.state?.soldiers?.[0]===s,seen:seen&&{x:rect.left+seen.x,y:rect.top+seen.y,tall:seen.tall}};
     },
     situation:storySituation,nearby:storyNearby,candidates:storyMateCandidates,choose:storyMateChoose,knows:mateKnows,
+    hasLivePortContact,hailNearbyShip,get intelLedger(){return sessionIntelLedger;},
+    reply:q=>mateReply(q,mateKnows()),
   };
   function frame(now) {
     if (gpuDeviceLost) return;
@@ -4877,6 +5293,13 @@ async function main() {
       }
     }
     if(voyageCtl?.active&&shipDt>0)voyageCtl.update(shipDt,now);
+    if(econTimeScale>1&&dt>0){
+      const econDeltaMs=dt*(econTimeScale-1)*1000;
+      if(voyageCtl)voyageCtl.advanceCalendarOnly(econDeltaMs);
+      else astronomy.setDate(new Date(gameDateMs()+econDeltaMs));
+      astronomy.setDate(new Date(gameDateMs()));
+    }
+    pollEconDiagnostics(now);
     instruments.update(now);
     helm.update(now);
     updateCamera(camDt);

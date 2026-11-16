@@ -35,7 +35,7 @@ export const BOARD_KEEP_DAYS = 10;
 // which case the board stands as it was founded and nothing else is lost. `kept()` answers the world as it was last
 // kept for this port (js/board-keep.js), which is then taken up in place of the founding one; `keep(record)` keeps
 // it, and is given the world as it stands every BOARD_KEEP_DAYS days it lives and whenever `life.keep()` is asked.
-export function createBoardLife({ baked, fetchImpl = fetch, open = openBoardWorker, onNews = null, onNewsAll = null, onState = null, stride = 6, kept = null, keep = null, keepEvery = BOARD_KEEP_DAYS }) {
+export function createBoardLife({ baked, fetchImpl = fetch, open = openBoardWorker, onNews = null, onNewsAll = null, onState = null, stride = null, kept = null, keep = null, keepEvery = BOARD_KEEP_DAYS }) {
   const world = baked?.world ?? null, asset = world ? bakedWorldAsset(baked.port, baked.year) : null;
   let model = null, busy = false, told = world?.day ?? 0, keeping = null;
   let pendingMaritime = null;
@@ -43,6 +43,7 @@ export function createBoardLife({ baked, fetchImpl = fetch, open = openBoardWork
     state: 'asleep', error: null, port: baked?.port ?? null, year: baked?.year ?? null,
     // The model's day now, the day the game's calendar asks for, and how many days it has lived here.
     day: world?.day ?? 0, wanted: world?.day ?? 0, lived: 0,
+    get busy() { return busy; },
     // The day of the kept world it was taken up from (null if from its founding), and the day it was last kept at.
     resumed: null, keptDay: world?.day ?? 0,
     // The model's own word on the realm: date, monarch, treasury, people, war, feuds, plague, weather.
@@ -83,6 +84,8 @@ export function createBoardLife({ baked, fetchImpl = fetch, open = openBoardWork
     ships: () => need().then(() => model.hook('ships')),
     // Live commodity prices, available stock, and monthly demand at any settlement on the board.
     market: (place = 0) => need().then(() => model.hook('market', [place])),
+    // Unpadded read-only economic, demographic, traffic, and urban-fabric diagnostics from W.
+    diagnostics: (place = 0) => need().then(() => model.hook('diagnostics', place)),
     // Execute a trade against the settlement's live market ledger and return the updated market snapshot.
     trade: (order) => need().then(() => model.hook('trade', [order])),
     // Autonomous vessel telemetry: actual wind/weather progress, waits, arrivals, departures, and sinkings fed back into simTick.
@@ -136,7 +139,8 @@ export function createBoardLife({ baked, fetchImpl = fetch, open = openBoardWork
       pendingMaritime = null;
       model.hook('pilotMaritime', [report]).catch(() => {});
     }
-    model.request('advance', { days: Math.min(stride, life.wanted - life.day) }).then(async (reply) => {
+    const batchStride = Number.isFinite(stride) && stride > 0 ? stride : ((life.wanted - life.day > 6) ? 15 : 6);
+    model.request('advance', { days: Math.min(batchStride, life.wanted - life.day) }).then(async (reply) => {
       life.lived += reply.day - life.day; life.day = reply.day;
       const lines = await model.request('view', { kind: 'ui', panel: 'advisor-annals', from: told + 1, n: 400 });
       told = life.day;

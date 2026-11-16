@@ -76,6 +76,35 @@ export function validateForestGroves(manifest) {
   return manifest;
 }
 
+const PORTUGAL_GROVE_ARCH_LEAF = [
+  [0.2215, 0.3600, 0.1895],
+  [0.2720, 0.4187, 0.1696],
+  [0.2720, 0.4603, 0.1999],
+  [0.2403, 0.4187, 0.1794],
+  [0.3101, 0.5207, 0.2105],
+  [0.2403, 0.4392, 0.2403],
+].map((rgb) => rgb.map((v) => 1 / Math.sqrt(v)));
+
+export function unattenuatePortugalGroves(manifest, maps, trees) {
+  const mapStride = forestGroveMapBytes();
+  for (let variant = 0; variant < FOREST_GROVE_VARIANTS; variant++) {
+    let levelOff = 0;
+    const baseMap0 = variant * FOREST_GROVE_MAPS * mapStride;
+    const baseMap1 = baseMap0 + mapStride;
+    for (let level = 0; level < FOREST_GROVE_LEVELS; level++) {
+      const n = FOREST_GROVE_TEXELS >> level, texels = n * n;
+      for (let i = 0; i < texels; i++) {
+        const p0 = baseMap0 + levelOff + i * 4, p1 = baseMap1 + levelOff + i * 4;
+        const owner = ((maps[p0 + 1] & 15) << 8) | maps[p0 + 2];
+        const protoId = Math.max(0, trees[(variant * manifest.maxTrees + owner) * FOREST_GROVE_TREE_FLOATS + 4] | 0);
+        const invSqrt = PORTUGAL_GROVE_ARCH_LEAF[protoId % PORTUGAL_GROVE_ARCH_LEAF.length];
+        for (let c = 0; c < 3; c++) maps[p1 + c] = Math.min(255, Math.round(maps[p1 + c] * invSqrt[c]));
+      }
+      levelOff += texels * 4;
+    }
+  }
+}
+
 export async function loadForestGroves({ assets, fetchAsset = fetch, signal } = {}) {
   const get = async (name) => {
     const response = await fetchAsset(assets[name], signal ? { signal } : undefined);
@@ -91,8 +120,12 @@ export async function loadForestGroves({ assets, fetchAsset = fetch, signal } = 
     if (Array.from(digest, (v) => v.toString(16).padStart(2, '0')).join('') !== receipt.sha256) throw Error(`Forest grove stream failed verification: ${name}`);
     return bytes;
   };
-  const [maps, trees] = await Promise.all(['maps.bin', 'trees.bin'].map(stream));
-  return { manifest, maps, trees: new Float32Array(trees.buffer, trees.byteOffset, trees.byteLength / 4) };
+  const [maps, treesBytes] = await Promise.all(['maps.bin', 'trees.bin'].map(stream));
+  const trees = new Float32Array(treesBytes.buffer, treesBytes.byteOffset, treesBytes.byteLength / 4);
+  if (String(assets?.['manifest.json'] ?? '').includes('/portugal/')) {
+    unattenuatePortugalGroves(manifest, maps, trees);
+  }
+  return { manifest, maps, trees };
 }
 
 // Where a wood may stand on one section of coast, as two bytes for each of size by size squares of it.

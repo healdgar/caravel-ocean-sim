@@ -235,7 +235,190 @@ export function describeEncounterThroughSpyglass(enc, targetVessel = null) {
   return `Through the spyglass from the crow's nest: "${enc.shipName}" — ${enc.archetype.title} (${enc.archetype.rig}, bearing ${enc.bearingPoint}). Flying ${enc.flag}, ~${crewCount} hands at stations, ${gunCount} broadside pieces (${hullPct}% hull, ~${enc.speedKts} kts).`;
 }
 
-export function createEncounterDirector({ seed = 0x1550cafe } = {}) {
+const ENCOUNTER_DAY_MS = 86_400_000;
+
+export const ENCOUNTER_ORIGIN_PORTS = Object.freeze({
+  portugal: [
+    { id: 'lisbon', name: 'Lisboa', lat: 38.707, lon: -9.136 },
+    { id: 'porto', name: 'Porto', lat: 41.140, lon: -8.613 },
+    { id: 'funchal', name: 'Funchal', lat: 32.641, lon: -16.908 },
+    { id: 'ponta-delgada', name: 'Ponta Delgada', lat: 37.740, lon: -25.668 },
+    { id: 'ribeira-grande', name: 'Ribeira Grande', lat: 14.916, lon: -23.605 },
+  ],
+  castile: [
+    { id: 'seville', name: 'Sevilla', lat: 37.386, lon: -5.995 },
+    { id: 'cadiz', name: 'Cádiz', lat: 36.530, lon: -6.295 },
+    { id: 'santo-domingo', name: 'Santo Domingo', lat: 18.473, lon: -69.882 },
+    { id: 'havana', name: 'La Habana', lat: 23.136, lon: -82.358 },
+    { id: 'lisbon', name: 'Lisboa', lat: 38.707, lon: -9.136 },
+  ],
+  basque: [
+    { id: 'pasajes', name: 'Pasajes', lat: 43.326, lon: -1.918 },
+    { id: 'bordeaux', name: 'Bordeaux', lat: 44.841, lon: -0.569 },
+    { id: 'lisbon', name: 'Lisboa', lat: 38.707, lon: -9.136 },
+  ],
+  france: [
+    { id: 'dieppe', name: 'Dieppe', lat: 49.925, lon: 1.077 },
+    { id: 'bordeaux', name: 'Bordeaux', lat: 44.841, lon: -0.569 },
+  ],
+  england: [
+    { id: 'bristol', name: 'Bristol', lat: 51.453, lon: -2.597 },
+    { id: 'plymouth', name: 'Plymouth', lat: 50.366, lon: -4.142 },
+  ],
+  netherlands: [
+    { id: 'antwerp', name: 'Antwerp', lat: 51.221, lon: 4.400 },
+    { id: 'amsterdam', name: 'Amsterdam', lat: 52.378, lon: 4.900 },
+  ],
+});
+
+const ENCOUNTER_MASTERS = Object.freeze({
+  portugal: ['Pero Álvares', 'Rui Gonçalves', 'Simão Lopes', 'Fernão Mendes', 'Gaspar Correia', 'Martim Afonso'],
+  castile: ['Rodrigo de Triana', 'Alonso de Ojeda', 'Juan de la Cosa', 'Pedro de Arana', 'Sancho de Tovar'],
+  basque: ['Joanes de Suhigaraychipi', 'Martín de Oyarzábal', 'Domingo de Echeveste'],
+  france: ['Jean Ango', 'Pierre Crignon', 'Guillaume Le Testu'],
+  england: ['John Hawkins', 'Christopher Newport', 'William Borough'],
+  netherlands: ['Willem Janszoon', 'Cornelis de Houtman', 'Dirck Gerritsz'],
+});
+
+export function pickEncounter({
+  id = 'sail-1',
+  lat = 36.2,
+  lon = -11.4,
+  headingDeg = 0,
+  variation = 0,
+  dateMs = Date.UTC(1550, 2, 15),
+  rand = Math.random,
+  archetype = null,
+  originPort = null,
+  destPort = null,
+  transitDays = null,
+  shipName: givenShipName = null,
+  masterName: givenMasterName = null,
+} = {}) {
+  const voyageYear = Number.isFinite(dateMs) ? new Date(dateMs).getUTCFullYear() : 1550;
+  const arch = archetype || pickEncounterArchetype(lat, lon, rand, voyageYear);
+  const shipName = givenShipName || arch.names[Math.floor(rand() * arch.names.length)];
+  const relSide = rand() < 0.5 ? -1 : 1;
+  const relDeg = relSide * (15 + rand() * 65);
+  const bearingDeg = encounterWrap360((headingDeg || 0) + relDeg);
+  const compassBrg = encounterWrap360(bearingDeg - (variation || 0));
+  const callout = relativeBearingCall(relDeg);
+  const distNm = +(3.2 + rand() * 2.8).toFixed(1);
+  const disguised = Boolean(arch.hostile && rand() < (arch.disguisedChance ?? 0));
+
+  const nationKey = ENCOUNTER_ORIGIN_PORTS[arch.colors] ? arch.colors : 'portugal';
+  const pool = ENCOUNTER_ORIGIN_PORTS[nationKey] || ENCOUNTER_ORIGIN_PORTS.portugal;
+  const nearLisbon = Math.hypot(lat - 38.707, lon - (-9.136)) < 14;
+  const fromPort = originPort
+    ? { ...originPort }
+    : (nearLisbon && (nationKey === 'portugal' || rand() < 0.55))
+      ? { ...ENCOUNTER_ORIGIN_PORTS.portugal[0] }
+      : { ...pool[Math.floor(rand() * pool.length)] };
+  const otherPool = pool.filter((p) => p.id !== fromPort.id);
+  const toPort = destPort
+    ? { ...destPort }
+    : (otherPool.length ? { ...otherPool[Math.floor(rand() * otherPool.length)] } : { id: 'funchal', name: 'Funchal', lat: 32.641, lon: -16.908 });
+  const masters = ENCOUNTER_MASTERS[nationKey] || ENCOUNTER_MASTERS.portugal;
+  const masterName = givenMasterName || masters[Math.floor(rand() * masters.length)];
+  const daysOut = Number.isFinite(transitDays)
+    ? Math.max(0.5, Number(transitDays))
+    : Math.max(1, Math.round(2 + rand() * (nearLisbon ? 7 : 16)));
+  const departedDateMs = Math.round(dateMs - daysOut * ENCOUNTER_DAY_MS);
+
+  return {
+    id,
+    kind: 'sail',
+    archetype: arch,
+    shipName,
+    masterName,
+    originPort: fromPort,
+    fromPort,
+    destPort: toPort,
+    toPort,
+    transitDays: daysOut,
+    departedDateMs,
+    flag: disguised ? 'Unidentified merchant colors (suspicious trim)' : arch.flag,
+    colors: disguised ? 'castile' : (arch.colors ?? 'castile'),
+    battleColors: arch.battleColors ?? arch.colors ?? 'jolly-roger',
+    apparentHostile: arch.hostile && !disguised,
+    actuallyHostile: Boolean(arch.hostile),
+    disguised,
+    distressed: Boolean(arch.distressed),
+    relBearingDeg: relDeg,
+    bearingDeg,
+    compassBearingDeg: compassBrg,
+    bearingPoint: compassPointName(compassBrg),
+    distanceNm: distNm,
+    speedKts: arch.speedKts,
+    callout,
+    title: `¡Vela! Sail ho! ${callout}`,
+    text: `The masthead lookout sings out: "Sail ${callout}!" A ${arch.rig} (${distNm} nm off, bearing ${compassPointName(compassBrg)} by the compass) — ${
+      disguised
+        ? 'flying worn merchant colors, though her ports sit low and weatherly'
+        : arch.hostile
+        ? `${arch.title} standing down upon us`
+        : `${arch.title} out of ${fromPort.name} (${arch.flag})`
+    }. What are your orders?`,
+  };
+}
+
+export function hailEncounter(enc, { voyage = null, nowDateMs = null, portIntelSource = null } = {}) {
+  if (!enc) return { ok: false, hostile: false, intelPacket: null, summary: 'No sail within hail.' };
+  if (enc.actuallyHostile) {
+    return {
+      ok: false,
+      hostile: true,
+      combatStarted: true,
+      intelPacket: null,
+      summary: `Treachery! As we closed to hail, ${enc.shipName} ran out her battery and opened fire!`,
+    };
+  }
+  const nowMs = Number.isFinite(nowDateMs)
+    ? nowDateMs
+    : (Number.isFinite(voyage?.dateMs) ? voyage.dateMs : Date.UTC(1550, 2, 15));
+  const originPort = enc.originPort || enc.fromPort || { id: 'lisbon', name: 'Lisboa' };
+  const destPort = enc.destPort || enc.toPort || { id: 'funchal', name: 'Funchal' };
+  const transitDays = Number.isFinite(enc.transitDays)
+    ? Math.max(0.5, enc.transitDays)
+    : Math.max(1, Math.round((nowMs - (enc.departedDateMs ?? (nowMs - 4 * ENCOUNTER_DAY_MS))) / ENCOUNTER_DAY_MS));
+  const departedDateMs = Number.isFinite(enc.departedDateMs)
+    ? enc.departedDateMs
+    : Math.round(nowMs - transitDays * ENCOUNTER_DAY_MS);
+  const sourced = typeof portIntelSource === 'function' ? (portIntelSource(originPort, departedDateMs, enc) || {}) : {};
+  const marketSnapshot = enc.marketSnapshot ?? sourced.marketSnapshot ?? null;
+  const realmSnapshot = enc.realmSnapshot ?? sourced.realmSnapshot ?? null;
+  const townSnapshot = enc.townSnapshot ?? sourced.townSnapshot ?? null;
+  const newsItems = enc.newsItems ?? sourced.newsItems ?? [];
+  const masterName = enc.masterName || 'her master';
+  const rumor = enc.rumor
+    || sourced.rumor
+    || `Master ${masterName} of ${enc.shipName} (${Math.round(transitDays)} days out of ${originPort.name} bound for ${destPort.name}) reports ${newsItems[0]?.text || `clear anchorage off ${originPort.name}`}.`;
+
+  const intelPacket = {
+    originPort: { ...originPort },
+    destPort: { ...destPort },
+    departedDateMs,
+    transitDays,
+    shipName: enc.shipName || 'Passing Sail',
+    shipKind: enc.archetype?.rig || enc.shipKind || 'caravel',
+    masterName,
+    marketSnapshot,
+    realmSnapshot,
+    townSnapshot,
+    newsItems,
+    rumor,
+  };
+  enc.intelPacket = intelPacket;
+  return {
+    ok: true,
+    hostile: false,
+    combatStarted: false,
+    intelPacket,
+    summary: `Hailed ${enc.shipName} (Master ${masterName}, ${Math.round(transitDays)} days out of ${originPort.name} bound for ${destPort.name}).`,
+  };
+}
+
+export function createEncounterDirector({ seed = 0x1550cafe, portIntelSource = null } = {}) {
   const rand = mulberry32(seed);
   const state = {
     active: null,
@@ -276,48 +459,20 @@ export function createEncounterDirector({ seed = 0x1550cafe } = {}) {
 
   function spawnSailEncounter(voyage, boat, env = {}) {
     const { lat, lon } = voyage.true;
-    const voyageYear = Number.isFinite(voyage?.dateMs) ? new Date(voyage.dateMs).getUTCFullYear() : 1550;
-    const arch = pickEncounterArchetype(lat, lon, rand, voyageYear);
-    const shipName = arch.names[Math.floor(rand() * arch.names.length)];
-    const relSide = rand() < 0.5 ? -1 : 1;
-    const relDeg = relSide * (15 + rand() * 65);
-    const bearingDeg = encounterWrap360((boat?.heading ?? 0) + relDeg);
-    const compassBrg = encounterWrap360(bearingDeg - (voyage.variation ?? 0));
-    const callout = relativeBearingCall(relDeg);
-    const distNm = +(3.2 + rand() * 2.8).toFixed(1);
-    const disguised = Boolean(arch.hostile && rand() < (arch.disguisedChance ?? 0));
-
     state.totalSails += 1;
-    const enc = {
+    const enc = pickEncounter({
       id: `sail-${state.totalSails}`,
-      kind: 'sail',
-      archetype: arch,
-      shipName,
-      flag: disguised ? 'Unidentified merchant colors (suspicious trim)' : arch.flag,
-      colors: disguised ? 'castile' : (arch.colors ?? 'castile'),
-      battleColors: arch.battleColors ?? arch.colors ?? 'jolly-roger',
-      apparentHostile: arch.hostile && !disguised,
-      actuallyHostile: Boolean(arch.hostile),
-      disguised,
-      distressed: Boolean(arch.distressed),
-      relBearingDeg: relDeg,
-      bearingDeg,
-      compassBearingDeg: compassBrg,
-      bearingPoint: compassPointName(compassBrg),
-      distanceNm: distNm,
-      speedKts: arch.speedKts,
-      callout,
-      title: `¡Vela! Sail ho! ${callout}`,
-      text: `The masthead lookout sings out: "Sail ${callout}!" A ${arch.rig} (${distNm} nm off, bearing ${compassPointName(compassBrg)} by the compass) — ${
-        disguised
-          ? 'flying worn merchant colors, though her ports sit low and weatherly'
-          : arch.hostile
-          ? `${arch.title} standing down upon us`
-          : `${arch.title} (${arch.flag})`
-      }. What are your orders?`,
-    };
+      lat,
+      lon,
+      headingDeg: boat?.heading ?? 0,
+      variation: voyage?.variation ?? 0,
+      dateMs: Number.isFinite(voyage?.dateMs) ? voyage.dateMs : Date.UTC(1550, 2, 15),
+      rand,
+    });
     state.active = enc;
     env.onSightVessel?.(enc);
+    const arch = enc.archetype;
+    const { callout, distanceNm: distNm, compassBearingDeg: compassBrg } = enc;
     addMark(voyage, { kind: 'sail', lat: voyage.dr.lat, lon: voyage.dr.lon, label: `Sail (${arch.title})` });
     const nearbyIndigenousCulture = resolveIndigenousCultureRegion(lat, lon);
     const choices = [
@@ -476,8 +631,13 @@ export function createEncounterDirector({ seed = 0x1550cafe } = {}) {
     }
 
     if (choiceId === 'hail') {
-      if (enc.actuallyHostile) {
-        outcome.summary = `Treachery! As we closed to hail, ${enc.shipName} ran out her battery and opened fire!`;
+      const hailRes = hailEncounter(enc, {
+        voyage,
+        nowDateMs: voyage?.dateMs,
+        portIntelSource: env.portIntelSource ?? portIntelSource,
+      });
+      if (hailRes.hostile) {
+        outcome.summary = hailRes.summary;
         outcome.combatStarted = true;
         addLog(voyage, outcome.summary, 'combat');
         env.onEngageVessel?.(enc);
@@ -485,7 +645,7 @@ export function createEncounterDirector({ seed = 0x1550cafe } = {}) {
         return outcome;
       }
 
-      // Friendly / neutral hail: compare pilot's reckoning!
+      // Friendly / neutral hail: compare pilot's reckoning & exchange port intelligence!
       voyage.dr.lat = voyage.dr.lat * 0.35 + voyage.true.lat * 0.65;
       voyage.dr.lon = voyage.dr.lon * 0.35 + voyage.true.lon * 0.65;
       voyage.latUncNm = Math.max(2, voyage.latUncNm * 0.5);
@@ -499,19 +659,23 @@ export function createEncounterDirector({ seed = 0x1550cafe } = {}) {
       });
 
       const posStr = `${formatLatitude(voyage.dr.lat)}, ${formatLongitude(voyage.dr.lon)}`;
+      const originLabel = hailRes.intelPacket?.originPort?.name
+        ? ` (${Math.round(hailRes.intelPacket.transitDays)}d out of ${hailRes.intelPacket.originPort.name})`
+        : '';
       if (enc.distressed) {
         voyage.provisions.water = Math.max(1, voyage.provisions.water - 1.5);
         voyage.morale = Math.min(1, voyage.morale + 0.08);
-        outcome.summary = `Spoke the distressed caravel ${enc.shipName}; shared a cask of water and compared pilot charts (${posStr}).`;
+        outcome.summary = `Spoke the distressed caravel ${enc.shipName}${originLabel}; shared a cask of water and compared pilot charts (${posStr}).`;
       } else {
         voyage.provisions.water = Math.min(90, voyage.provisions.water + 2.5);
         voyage.provisions.food = Math.min(120, voyage.provisions.food + 2.5);
         voyage.morale = Math.min(1, voyage.morale + 0.04);
-        outcome.summary = `Hailed ${enc.shipName} (${enc.archetype.title}) within speaking-trumpet range. Compared pilot reckoning (${posStr}) and traded fresh casks.`;
+        outcome.summary = `Hailed ${enc.shipName}${originLabel} (${enc.archetype.title}) within speaking-trumpet range. Compared pilot reckoning (${posStr}) and traded fresh word & casks.`;
       }
       outcome.hailed = true;
+      outcome.intelPacket = hailRes.intelPacket;
       addLog(voyage, outcome.summary, 'hail');
-      env.onHailVessel?.(enc);
+      env.onHailVessel?.(enc, hailRes.intelPacket);
       env.onToast?.(outcome.summary, 8);
       return outcome;
     }

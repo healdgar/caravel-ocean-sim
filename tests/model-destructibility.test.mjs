@@ -32,6 +32,14 @@ import { attachColonialGroomModel, loadGroomPackGLB } from '../js/crew.js';
 import { crewWoundOutcome, recordCrewWound, sweepCrewBodies } from '../js/crew-wounds.js';
 import { FOREST_TRUNK_SHAPES } from '../js/forest-trunk-shapes.js';
 import { buildForestTrunkGrid, forestTrunkShape, sweepForestTrunks } from '../js/forest-trunks.js';
+import { getLivestockMeshes, getVehicleMeshes } from '../js/models/livestock-meshes.js';
+import {
+  buildLivestockMorphBuffer,
+  caravanHerdSeeds,
+  evaluateHerdStateAt,
+  sweepHerdHit,
+} from '../js/herds.js';
+import { HERD_FATE_FLOATS, HERDS_RENDER_WGSL, HERDS_STEP_WGSL } from '../js/wgsl/herds.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -325,4 +333,95 @@ test('every forest tree species has destructible trunk capsules that intercept c
     assert.ok(hit, `${species}: cannonball ray strikes tree trunk`);
   }
   assert.ok(woodyCount >= 5, `verified ${woodyCount} woody tree species`);
+});
+
+test('all 7 livestock & caravan vehicle species (0..6) are physically destructible with GPU fates, stampede, hitch halt, and vehicle shard flight', () => {
+  const allMeshes = [...getLivestockMeshes(), ...getVehicleMeshes()];
+  assert.equal(allMeshes.length, 7, '4 livestock + 3 1550 road vehicles');
+  for (let s = 0; s < allMeshes.length; s++) {
+    const morphBuf = buildLivestockMorphBuffer(allMeshes[s], s >= 4);
+    assert.equal(morphBuf.length, allMeshes[s].vertices.length, `${allMeshes[s].name}: GPU morph/shard buffer matches 8 floats/vertex`);
+  }
+
+  // 1. Direct hits & 38 m near-miss stampede across all 4 livestock species (0..3) wired through createGunnerySolidSweep.
+  const elev = () => 3.0;
+  for (let species = 0; species < 4; species++) {
+    const seeds = new Float32Array([
+      0, 0, 8, 0.1, species === 3 ? 10.4 : 0.4, 1.0, species, 0,
+      0, 22, 8, 0.3, 0.6, 1.0, species, 0,
+    ]);
+    const routes = new Float32Array([0, 1, 0, 0]);
+    const fates = new Float32Array(2 * HERD_FATE_FLOATS);
+    const s0 = evaluateHerdStateAt(seeds, routes, fates, 0, 10, elev);
+    const s1Before = evaluateHerdStateAt(seeds, routes, fates, 1, 10, elev);
+
+    const sweep = createGunnerySolidSweep({
+      getVessels: () => [],
+      getTerrain: () => ({
+        herdsWatch: (from, to, _best, proj) => sweepHerdHit(seeds, routes, fates, 10, elev, from, to, proj?.radius ?? 0.08),
+      }),
+    });
+    const hit = sweep([s0.x - 10, s0.y + 0.5, s0.z], [s0.x + 10, s0.y + 0.5, s0.z], { radius: 0.08, ammo: 'round' });
+    assert.ok(hit, `species ${species}: cannonball intercepts animal`);
+    assert.equal(hit.kind, 'livestock');
+    assert.equal(hit.species, species);
+    assert.equal(fates[0], 2.0, `species ${species}: transitions to felled state (2.0)`);
+    assert.equal(fates[HERD_FATE_FLOATS], 1.0, `species ${species}: bystander within 38 m enters stampede state (1.0)`);
+
+    const report = resolveSolidGunneryImpact({ ...hit, type: 'impact', ammo: 'round', mass: 10.9, velocity: [180, 0, 0] });
+    assert.equal(report?.felled, true, `species ${species}: resolveSolidGunneryImpact reports felled casualty`);
+
+    const s0After = evaluateHerdStateAt(seeds, routes, fates, 0, 10.8, elev);
+    const s1Stampede = evaluateHerdStateAt(seeds, routes, fates, 1, 13.0, elev);
+    assert.ok((s0After.flags & 2) !== 0, `species ${species}: felled flag set`);
+    assert.ok(Math.hypot(s0After.x - s0.x, s0After.z - s0.z) >= 0.7, `species ${species}: knockback applied`);
+    assert.ok(Math.hypot(s1Stampede.x - s1Before.x, s1Stampede.z - s1Before.z) > 6.0, `species ${species}: bystander bolts radially away`);
+  }
+
+  // 2. Coupled caravan hitches for all 3 road vehicle archetypes (wain=4, coach=5, ox-cart=6):
+  //    a) Felling a draft beast halts the vehicle & pitches its draft pole down onto the roadbed.
+  //    b) Striking the vehicle shatters its rigid parts into ballistic flight while surviving draft beasts bolt ahead.
+  for (const vehSp of [4, 5, 6]) {
+    const draftSp = vehSp === 5 ? 3 : 1;
+    const routes = new Float32Array([
+      1, 5, 2, 400,
+      0, 0, 0, 0,
+      400, 0, 400, 0,
+    ]);
+    const seeds = new Float32Array([
+      0, 8, -1.25, 0.2, 0.35, 1.0, vehSp, 0,
+      0, 8, -1.25, 0.4, 0.45, 0.96, draftSp, -0.62,
+      0, 8, -1.25, 0.6, 0.55, 0.96, draftSp, 0.62,
+    ]);
+    const laid = { routes, seeds };
+
+    // (a) Shoot draft beast L (`idx = 1`) -> vehicle (`idx = 0`) halts and drops tongue (`flags & 8`, `tonguePitch > 0.25`)
+    const fatesHalt = new Float32Array(3 * HERD_FATE_FLOATS);
+    const clock0 = { time: 12, boardDay: 2.0, daysPerSecond: 0 };
+    const draftPos = evaluateHerdStateAt(laid.seeds, laid.routes, fatesHalt, 1, clock0, elev);
+    const hitDraft = sweepHerdHit(laid.seeds, laid.routes, fatesHalt, clock0, elev, [draftPos.x, draftPos.y + 0.7, draftPos.z - 8], [draftPos.x, draftPos.y + 0.7, draftPos.z + 8], 0.08);
+    assert.equal(hitDraft?.kind, 'livestock');
+    const halted1 = evaluateHerdStateAt(laid.seeds, laid.routes, fatesHalt, 0, { time: 13, boardDay: 2.0, daysPerSecond: 0 }, elev);
+    const halted2 = evaluateHerdStateAt(laid.seeds, laid.routes, fatesHalt, 0, { time: 25, boardDay: 2.0, daysPerSecond: 0 }, elev);
+    assert.ok((halted1.flags & 8) !== 0, 'vehicle hitch-halted flag set');
+    assert.ok(halted1.tonguePitch > 0.28, `draft pole pitched down onto roadbed (${halted1.tonguePitch.toFixed(2)} rad)`);
+    assert.ok(Math.hypot(halted2.x - halted1.x, halted2.z - halted1.z) < 1e-3, 'halted vehicle remains stationary');
+
+    // (b) Shoot vehicle (`idx = 0`) directly -> shattered (`flags & 4`), shards released, surviving draft beasts (`idx = 1, 2`) bolt forward!
+    const fatesShatter = new Float32Array(3 * HERD_FATE_FLOATS);
+    const vehPos = evaluateHerdStateAt(laid.seeds, laid.routes, fatesShatter, 0, clock0, elev);
+    const draftBefore = evaluateHerdStateAt(laid.seeds, laid.routes, fatesShatter, 1, clock0, elev);
+    const hitVeh = sweepHerdHit(laid.seeds, laid.routes, fatesShatter, clock0, elev, [vehPos.x, vehPos.y + 0.9, vehPos.z - 10], [vehPos.x, vehPos.y + 0.9, vehPos.z + 10], 0.08);
+    assert.equal(hitVeh?.kind, 'caravan');
+    const vehRep = resolveSolidGunneryImpact({ ...hitVeh, type: 'impact', ammo: 'round', mass: 10.9, velocity: [0, 0, 180] });
+    assert.ok(vehRep.releasedShards.length >= 4, 'shattered vehicle releases wheel, pole & body shards');
+    const vehAfter = evaluateHerdStateAt(laid.seeds, laid.routes, fatesShatter, 0, { time: 14, boardDay: 2.0, daysPerSecond: 0 }, elev);
+    const draftBolted = evaluateHerdStateAt(laid.seeds, laid.routes, fatesShatter, 1, { time: 16, boardDay: 2.0, daysPerSecond: 0 }, elev);
+    assert.ok((vehAfter.flags & 4) !== 0, 'vehicle shattered flag set for GPU ballistic shard flight');
+    assert.ok(draftBolted.rolled > draftBefore.rolled + 12, 'surviving unhitched draft beast breaks free and gallops ahead');
+  }
+
+  assert.match(HERDS_STEP_WGSL, /@binding\(10\)\s+var<uniform>\s+shots:\s*HerdShots/);
+  assert.match(HERDS_STEP_WGSL, /@binding\(11\)\s+var<storage,\s*read_write>\s+fates:\s*array<HerdFate>/);
+  assert.match(HERDS_RENDER_WGSL, /isVehicle\s*&&\s*isShattered/);
 });

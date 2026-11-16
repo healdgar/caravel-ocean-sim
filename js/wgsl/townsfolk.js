@@ -28,6 +28,8 @@ export const TOWN_COWER_FRAMES = 10;
 export const TOWN_FALL_FRAMES = 21;
 export const TOWN_FALL_RATE = 15;
 export const TOWN_RUN_CYCLE_METRES = 2.4;
+export const TOWN_RIDE_CYCLE_METRES = 2.2;
+export const WALKER_MOUNTED_BIT = 16;
 export const TOWN_RUN_SPEEDS = Object.freeze([3.4, 5.2]);
 // Who reacts to what. Fear is 1 at the shot and 0 at the edge of its reach, and fear times this is the chance of it.
 export const TOWN_REACT_GAIN = 2.5;
@@ -171,10 +173,12 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
     else if((fate.how&1u)==1u){heading=fate.heading;}
     else{heading=fate.heading+turnTo(fate.heading,fate.look)*smoothstep(0.0,.7,age)*(1.0-smoothstep(fate.until-.7,fate.until,age));}
   }
+  let isMounted=(w.flags&16u)!=0u;
   // What the guns did since the last frame. Nearly always nothing, and then this costs one comparison.
   if(shots.count>0u&&fate.mode<FALLING){
     var fear=0.0;var danger=vec2f(0.0);var fearReach=1.0;var fearSeed=0.0;var fearBlast=0.0;var fearAway=1e6;
     var struck=false;var directHit=false;var hitSeed=1.0;var hitProx=1.0;var fallsTo=vec2f(0.0,1.0);
+    let bodyTop=select(${BODY_HEIGHT_M.toFixed(3)},2.22,isMounted);
     for(var k=0u;k<shots.count;k++){
       let shot=shots.list[k];
       let line=shot.end-shot.start;
@@ -183,9 +187,10 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
       let t=select(0.0,clamp(-dot(toStart,line.xz)/flat,0.0,1.0),flat>1e-6);
       let nearest=toStart+line.xz*t;
       let y=shot.start.y+line.y*t;
-      let away=length(vec3f(nearest.x,max(max(position.y-y,y-position.y-${BODY_HEIGHT_M.toFixed(3)}),0.0),nearest.y));
+      let away=length(vec3f(nearest.x,max(max(position.y-y,y-position.y-bodyTop),0.0),nearest.y));
+      let effStrike=shot.strike+select(0.0,0.42,isMounted&&shot.strike>0.0);
       if(!hidden){
-        if(away<shot.strike){
+        if(away<effStrike){
           struck=true;directHit=true;hitSeed=shot.seed;hitProx=1.0;fallsTo=line.xz;
         }else if(away<shot.blast&&townRoll(id.x,shot.seed)<${TOWN_BLAST_CHANCE.toFixed(2)}*(1.0-away/shot.blast)){
           struck=true;hitSeed=shot.seed;hitProx=clamp(1.0-away/max(shot.blast,0.1),0.25,1.0);fallsTo=-nearest;
@@ -226,7 +231,7 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
       fate.clock=crowd.hours;
       heading=fate.heading;age=0.0;
       fates[id.x]=fate;
-    }else if(fear>0.0&&townRoll(id.x,fearSeed+1.0)<min(1.0,fear*${TOWN_REACT_GAIN.toFixed(2)})){
+    }else if(!isMounted&&fear>0.0&&townRoll(id.x,fearSeed+1.0)<min(1.0,fear*${TOWN_REACT_GAIN.toFixed(2)})){
       let settle=${TOWN_SETTLE_S[0].toFixed(1)}+fear*${TOWN_SETTLE_S[1].toFixed(1)}+townRoll(id.x,fearSeed+2.0)*${TOWN_SETTLE_S[2].toFixed(1)};
       if(fate.mode==AFRAID&&(age<1.0||hidden||(fate.how&1u)==1u)){
         // Already going, or already down in a doorway: it only takes them longer to get over it.
@@ -297,15 +302,18 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
       let latSlopeLift=select(0.0,min(0.45,abs(dot(dispXZ,rightVec))*0.09)+0.06,spot.position.y>0.05);
       let groundY=select(spot.position.y,max(spot.position.y,landSpot.position.y)+latSlopeLift,spot.position.y>0.05);
       let baseY=mix(spot.position.y,groundY,clamp(throwAge/max(tAirFlat,0.01),0.0,1.0));
-      let arcY=max(0.0,vy0*flyT-0.5*g*flyT*flyT);
+      let saddleDrop=select(0.0,0.48*(1.0-clamp(throwAge/max(tAirFlat,0.01),0.0,1.0)),isMounted);
+      let arcY=max(0.0,saddleDrop+vy0*flyT-0.5*g*flyT*flyT);
       let bounceY=select(0.0,sin(groundT/0.24*3.14159)*min(0.18,vy0*0.045),groundT>0.0 && groundT<0.24);
       position=vec3f(spot.position.x+dispXZ.x,baseY+select(arcY,bounceY,throwAge>=tAirFlat),spot.position.z+dispXZ.y);
     }
   }
   if(hidden){return;}
-  let relative=position+vec3f(0.0,${(BODY_HEIGHT_M * 0.5).toFixed(3)},0.0)-F.camPos.xyz;
+  let centerY=select(${(BODY_HEIGHT_M * 0.5).toFixed(3)},1.25,isMounted&&fate.mode==ABOUT);
+  let relative=position+vec3f(0.0,centerY,0.0)-F.camPos.xyz;
   // Those out of sight are kept only for the shadow they may cast into it, and are never drawn themselves.
-  let seen=inFrustum(relative,select(${BODY_BOUND_M.toFixed(2)},${LYING_BOUND_M.toFixed(2)},fate.mode>=FALLING));
+  let boundR=select(select(${BODY_BOUND_M.toFixed(2)},1.85,isMounted),${LYING_BOUND_M.toFixed(2)},fate.mode>=FALLING);
+  let seen=inFrustum(relative,boundR);
   if(!seen&&(length(relative)>=${SHADOW_NEAR_M.toFixed(1)}||!inFrustum(relative,${SHADOW_MARGIN_M.toFixed(1)}))){return;}
   let depth=max(dot(relative,normalize(F.camFwd.xyz)),1.2);
   let pixels=${BODY_HEIGHT_M.toFixed(3)}*F.screen.y/(2.0*length(F.camUp.xyz))/depth;
@@ -320,10 +328,19 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
   var first=plain.z;var frames=plain.w;var frame=0.0;var looped=true;
   let breathing=(time+w.phase*97.0)*${CLIP_FRAMES_PER_SECOND.toFixed(1)};
   if(fate.mode==ABOUT){
-    // A stride's frame follows the ground covered, so feet do not slide.
-    var cycle=walked/${CREW_WALK_CYCLE_METRES.toFixed(3)}+w.phase*7.0;
-    if(stopped){first=plain.x;frames=plain.y;cycle=breathing/f32(frames);}
-    frame=fract(cycle)*f32(frames);
+    if(isMounted){
+      let packedRide=(crowd.padding>>(model*16u))&65535u;
+      first=fall.z+fall.w;
+      frames=select(packedRide,plain.w,packedRide==0u);
+      var cycle=walked/${TOWN_RIDE_CYCLE_METRES.toFixed(3)}+w.phase*7.0;
+      if(stopped){cycle=breathing/(f32(frames)*2.5);}
+      frame=fract(cycle)*f32(frames);
+    }else{
+      // A stride's frame follows the ground covered, so feet do not slide.
+      var cycle=walked/${CREW_WALK_CYCLE_METRES.toFixed(3)}+w.phase*7.0;
+      if(stopped){first=plain.x;frames=plain.y;cycle=breathing/f32(frames);}
+      frame=fract(cycle)*f32(frames);
+    }
   }else if(fate.mode==AFRAID){
     if(ran>0.0&&ran<fate.runFor&&metres>0.0&&metres<w.length){
       first=fright.x;frames=fright.y;

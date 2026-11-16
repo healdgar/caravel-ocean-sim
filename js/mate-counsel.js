@@ -33,6 +33,37 @@ export function counselPointOfSail(windFrom, heading) {
     : off < 155 ? 'She has it on the quarter: her best point.' : 'She runs before it.';
 }
 
+export const ROYAL_TOPIC_RE = /\b(queen|king|monarch|crown|palace|pa[cç]o|ribeira|castle|alc[aá][cç]ova|alc[aá]zar|where.*live|court)\b/i;
+
+function resolveStaleMeta(about) {
+  const where = about?.now?.where ?? {};
+  if (where.kind === 'port') return null;
+  const srcObj = about?.intel ?? about?.now?.realm ?? about?.town ?? about?.market?.[0] ?? about?.news?.[0] ?? null;
+  if (!srcObj || srcObj.stale !== true) return null;
+  const source = about?.intel?.source ?? about?.now?.realm?.source ?? about?.town?.source ?? { kind: 'port' };
+  const portName = about?.intel?.portName ?? about?.town?.name ?? about?.now?.voyage?.from ?? 'Lisboa';
+  const ageDays = Math.max(0, Math.floor(Number(about?.intel?.ageDays ?? srcObj.ageDays ?? about?.now?.voyage?.daysOut ?? 0)));
+  const spokenDaysAgo = Number.isFinite(about?.intel?.spokenDaysAgo) ? Math.max(0, Math.floor(about.intel.spokenDaysAgo)) : 0;
+  const transitDaysAtHail = Number.isFinite(about?.intel?.transitDaysAtHail) ? Math.max(0, Math.round(about.intel.transitDaysAtHail)) : ageDays;
+  return { portName, ageDays, source, spokenDaysAgo, transitDaysAtHail };
+}
+
+function wrapStaleCounsel(about, bodyText) {
+  const meta = resolveStaleMeta(about);
+  if (!meta || !bodyText) return bodyText;
+  const trimmed = String(bodyText).replace(/\s+$/, '');
+  if (meta.source?.kind === 'hail') {
+    const vesselKind = meta.source.shipKind || 'caravel';
+    const vesselName = meta.source.shipName || 'passing sail';
+    const masterBit = meta.source.masterName ? ` (Master ${meta.source.masterName})` : '';
+    const spokenBit = `${meta.spokenDaysAgo} ${meta.spokenDaysAgo === 1 ? 'day' : 'days'} past`;
+    const outBit = `${meta.transitDaysAtHail} ${meta.transitDaysAtHail === 1 ? 'day' : 'days'} out of ${meta.portName}`;
+    return `By word of the ${vesselKind} ${vesselName}${masterBit}, spoken ${spokenBit} (${outBit}), ${trimmed.charAt(0).toLowerCase()}${trimmed.slice(1)}`;
+  }
+  const dayWord = meta.ageDays === 1 ? 'day' : 'days';
+  return `When we weighed from ${meta.portName} ${meta.ageDays} ${dayWord} back, ${trimmed.charAt(0).toLowerCase()}${trimmed.slice(1)} — no word has reached us since unless we speak a passing sail.`;
+}
+
 // The questions that fit the moment, most pressing first: no more than `most` of them.
 export function mateTopics(about, most = 6) {
   const { mate = null, now = null, near = null, news = [], town = null, market = null, landing = null } = about ?? {};
@@ -44,13 +75,14 @@ export function mateTopics(about, most = 6) {
   if (port) add('port', 'What is this place?');
   if (!port && now?.voyage) { add('where', 'Where are we?'); add('sail', 'How does she sail?'); }
   if (news?.length || now?.voyage?.log?.length) add('news', port ? 'What is the talk?' : 'What of late?');
-  if (port && market?.length) add('trade', 'What sells here?');
-  if (now?.realm) add('realm', 'Who rules here?');
+  if ((port || about?.intel?.stale) && market?.length) add('trade', port ? 'What sells here?' : 'What were prices?');
+  if (now?.realm) add('realm', port ? 'Who rules here?' : 'How stood the realm?');
+  if (now?.realm?.palace || town?.palace) add('royal', 'Where does the Queen keep court?');
   if (now?.ship && (now.ship.foodDays != null || now.captain?.coin != null)) add('stores', 'How are our stores?');
   if (mate?.model && mate.about) { add('self', 'Tell me of yourself'); if (mate.about.spouse || mate.about.children || mate.about.head) add('home', 'Who waits for you at home?'); }
   if (port && where.living && !mate?.model) add('sign', 'Who here would sign on as mate?');
   // The mate's own life gives way first when there is much to ask about the day.
-  const order = ['ashore', 'who', 'port', 'where', 'sail', 'trade', 'news', 'sign', 'stores', 'realm', 'self', 'home'];
+  const order = ['ashore', 'who', 'port', 'where', 'sail', 'trade', 'news', 'sign', 'stores', 'realm', 'royal', 'self', 'home'];
   return topics.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id)).slice(0, Math.max(1, most));
 }
 
@@ -101,7 +133,8 @@ const SAY = {
     said.push(cargo.length ? `In the hold: ${counselList(cargo.map((one) => `${one.units} tonnes of ${String(one.name ?? one.good).toLowerCase()}`))}.` : 'The hold is empty.');
     return said.join(' ');
   },
-  port({ now, town }) {
+  port(whole) {
+    const { now, town } = whole;
     const name = town?.name ?? now.where?.name;
     if (!town) return name ? `This is ${name}, captain. I know no more of it than the chart does.` : 'I know nothing of this place, captain.';
     const said = [`${name}, captain${town.role === 'seat' && now.realm?.monarch ? `: the seat of ${now.realm.monarch}` : town.kind ? `: ${counselArticle(town.kind)}` : ''}.`];
@@ -114,27 +147,46 @@ const SAY = {
     if (town.besieged) said.push('It lies under siege.');
     if (town.hunger > 0.2) said.push('There is hunger here.');
     if (town.unrest > 40) said.push('The streets are restless.'); else if (town.unrest < 15 && town.prosperity >= 50) said.push('It is a quiet town, and does well enough.');
-    return said.join(' ');
+    return wrapStaleCounsel(whole, said.join(' '));
   },
-  news({ now, news }) {
+  news(whole) {
+    const { now, news } = whole;
     const talk = (news ?? []).filter((line) => line?.text), told = talk.filter((line) => line.cat !== 'trade').slice(-3);
     const lines = (told.length ? told : talk.slice(-3)).map((line) => line.text.replace(/\s+$/, '').replace(/([^.!?])$/, '$1.'));
-    if (lines.length) return `The talk is this, captain. ${lines.join(' ')}`;
-    const log = (now.voyage?.log ?? []).slice(-2).map((line) => String(line).replace(/([^.!?])$/, '$1.'));
+    if (lines.length) return wrapStaleCounsel(whole, `The talk is this, captain. ${lines.join(' ')}`);
+    const log = (now.voyage?.log ?? []).slice(-2).map((line) => String(line?.text ?? line).replace(/([^.!?])$/, '$1.'));
+    if (resolveStaleMeta(whole)) {
+      return wrapStaleCounsel(whole, `All had been quiet ashore.${log.length ? ' ' + log.join(' ') : ''}`);
+    }
     return log.length ? `Nothing but what is in the log, captain. ${log.join(' ')}` : 'I have heard nothing new, captain.';
   },
-  realm({ now }) {
+  realm(whole) {
+    const { now } = whole;
     const realm = now.realm;
     if (!realm) return 'I do not know who holds this coast, captain.';
     const said = [`${realm.monarch ?? 'No one I can name'} rules${realm.name ? ` ${realm.name}` : ''}${realm.places ? `: ${realm.places} towns and villages` : ''}${realm.people ? ` and ${counselSouls(realm.people)} souls` : ''}.`];
+    if (Number.isFinite(realm.treasury)) said.push(`The royal treasury held ${Math.round(realm.treasury).toLocaleString('en-US')} crowns.`);
     if (Number.isFinite(realm.legitimacy)) said.push(realm.legitimacy >= 65 ? 'The crown\'s right is not questioned.' : realm.legitimacy >= 40 ? 'There are those who mutter at the crown\'s right.' : 'Few think the crown rightly held.');
     said.push(realm.war ? 'The realm is at war.' : 'The realm is at peace.');
     if (Array.isArray(realm.feuds) && realm.feuds.length) said.push(`The great houses feud: ${realm.feuds.length} ${realm.feuds.length === 1 ? 'quarrel' : 'quarrels'} that I know of.`);
     if (realm.plague) said.push('There is pestilence in the land.');
     if (realm.priceLevel > 1.15) said.push('Prices run high this year.'); else if (realm.priceLevel < 0.85) said.push('Prices are low this year.');
-    return said.join(' ');
+    return wrapStaleCounsel(whole, said.join(' '));
   },
-  trade({ now, market }) {
+  royal(whole) {
+    const { now, town } = whole;
+    const realm = now.realm ?? {};
+    const monarch = realm.monarch || town?.monarch || 'the Sovereign of the Realm';
+    const placeName = town?.name || now.where?.name || now.voyage?.from || 'Lisboa';
+    const isLisbon = /lisbo[an]?/i.test(placeName) || /portugal|lisbo[an]?/i.test(realm.name || '') || Boolean(realm.palace || town?.palace);
+    if (!isLisbon && !realm.monarch) {
+      return `I know of no royal palace at ${placeName}, captain; in Lisboa the Crown keeps court at the waterfront Paço da Ribeira on Terreiro do Paço and the hilltop Alcáçova of Castelo de São Jorge.`;
+    }
+    const base = `In Lisboa the Crown keeps court down by the Tagus at the waterfront Paço da Ribeira on Terreiro do Paço, right beside the Casa da Índia and the Ribeira das Naus — where King Manuel I brought the royal household down from the hilltop Alcáçova of Castelo de São Jorge in 1511, and where Queen Catarina of Austria and King João III keep the 1550 royal apartments, while the old Paço da Alcáçova (Alcázar de Lisboa) still crowns the castle hill above Alfama. In our realm's rolls, ${monarch} reigns and walks between the Paço da Ribeira terrace and the Alcáçova Keep.`;
+    return wrapStaleCounsel(whole, base);
+  },
+  trade(whole) {
+    const { now, market } = whole;
     const coin = now.captain?.currency ?? 'coins', quotes = (market ?? []).filter((one) => one.usual > 0);
     if (!quotes.length) return 'I have seen no merchant\'s list here, captain.';
     const cheap = quotes.filter((one) => one.offered && one.buy / one.usual < 0.97).sort((a, b) => a.buy / a.usual - b.buy / b.usual).slice(0, 2);
@@ -144,7 +196,13 @@ const SAY = {
     if (cheap.length) said.push(`${priced(cheap, 'buy').replace(/^./, (c) => c.toUpperCase())} ${cheap.length > 1 ? 'are' : 'is'} cheap here, captain, in ${coin} the tonne.`);
     if (dear.length) said.push(`They pay well for ${priced(dear, 'sell')}.`);
     for (const one of quotes.filter((q) => q.held > 0).slice(0, 3)) said.push(`Our ${String(one.name).toLowerCase()} would fetch ${one.sell}${one.sell / one.usual > 1.03 ? ': a good price' : one.sell / one.usual < 0.97 ? ': I would carry it on' : ''}.`);
-    return said.join(' ') || 'Nothing here is priced out of the common, captain.';
+    if (!said.length) {
+      const sample = quotes.slice(0, 3);
+      if (resolveStaleMeta(whole) && sample.length) {
+        said.push(`Quoted in ${coin} the tonne: ${priced(sample, 'buy')}.`);
+      }
+    }
+    return wrapStaleCounsel(whole, said.join(' ') || 'Nothing here is priced out of the common, captain.');
   },
   who({ near, mate }) {
     const someone = near?.lastAskedAfter ? [...(near.inSight ?? []), ...(near.atPosts ?? [])].find((one) => one.id === near.lastAskedAfter.id) ?? near.lastAskedAfter : near?.inSight?.[0] ?? near?.atPosts?.[0];
@@ -175,12 +233,41 @@ const SAY = {
   },
 };
 
+SAY.town = SAY.port;
+SAY.market = SAY.trade;
+
+export function mateMatchTopic(question) {
+  const q = String(question ?? '').trim();
+  if (!q) return null;
+  if (Object.hasOwn(SAY, q)) return q;
+  if (ROYAL_TOPIC_RE.test(q)) return 'royal';
+  if (/\b(prices?|market|sells?|buys?|trade|merchants?|dear|cheap|grain|wine|fish|spice|salt|cloth|sugar|timber)\b/i.test(q)) return 'trade';
+  if (/\b(news|talk|rumou?rs?|annals|lately|of\s+late|chronicle|events?|happened)\b/i.test(q)) return 'news';
+  if (/\b(rules?|ruler|treasury|realm|peace|war|feuds?|legitimacy)\b/i.test(q)) return 'realm';
+  if (/\b(where\s+are\s+we|reckoning|latitude|longitude|bearing|leagues)\b/i.test(q)) return 'where';
+  if (/\b(wind|sails?|knots|heading|point\s+of\s+sail|irons)\b/i.test(q)) return 'sail';
+  if (/\b(stores|food|water|victuals?|provisions|chest|coins?|hold)\b/i.test(q)) return 'stores';
+  if (/\b(ashore|landing|moor|berth|pier)\b/i.test(q)) return 'ashore';
+  if (/\b(town|city|port|place|lisbon|lisboa|walls|garrison|population)\b/i.test(q)) return 'port';
+  if (/\b(yourself|born|learning|who\s+are\s+you)\b/i.test(q)) return 'self';
+  if (/\b(wife|husband|children|family|household|waits\s+for\s+you)\b/i.test(q)) return 'home';
+  if (/\b(who\s+is|standing)\b/i.test(q)) return 'who';
+  return 'news';
+}
+
 // The mate's answer to one of the questions, in their own words. null for a question that is not one of these.
 export function mateCounsel(id, about) {
   if (!Object.hasOwn(SAY, id)) return null;
-  const whole = { mate: null, now: {}, near: null, news: [], town: null, market: null, landing: null, ...about };
+  const whole = { mate: null, now: {}, near: null, news: [], town: null, market: null, landing: null, intel: null, ...about };
   whole.now ??= {};
   return SAY[id](whole);
+}
+
+// Free-text or topic-id question answered strictly from the First Mate's bounded `about` knowledge.
+export function mateReply(question, about) {
+  const topic = mateMatchTopic(question);
+  if (!topic) return 'I cannot say, captain.';
+  return mateCounsel(topic, about) ?? 'I cannot say, captain.';
 }
 
 // One who might sign on, as a line to choose them by, and as the mate tells of them.

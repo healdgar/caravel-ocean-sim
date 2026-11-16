@@ -677,6 +677,8 @@ fn forestCrownSamples(share:f32,pixel:vec2f)->u32{
 // the trunk, and leaves flutter. Gust fronts roll downwind across the forest at the wind's own speed.
 fn forestWind(r:ForestRoot,local:vec3f,model:vec3f,flutterWeight:f32)->vec3f{
  let speed=F.windP[0].z;if(speed<=.05){return vec3f(0);}
+ let collarPin=select(smoothstep(0.22,1.05,model.y),1.0,flutterWeight>0.);
+ if(collarPin<=0.){return vec3f(0);}
  let downwind=F.windP[0].xy;let t=F.camPos.w;
  let front=(dot(r.rootScale.xz,downwind)-t*speed)*.035;
  let across=dot(r.rootScale.xz,vec2f(-downwind.y,downwind.x))*.02;
@@ -687,7 +689,27 @@ fn forestWind(r:ForestRoot,local:vec3f,model:vec3f,flutterWeight:f32)->vec3f{
  let reach=length(local.xz);
  let bob=strength*.045*reach*sin(t*2.3+phase+dot(model,vec3f(.7,.5,.6)));
  let flutter=strength*.03*flutterWeight*sin(t*9.+dot(model,vec3f(7.1,5.3,6.7)));
- return vec3f(downwind.x*(bend+bob+flutter),(bob+flutter)*.6,downwind.y*(bend+bob+flutter));
+ return vec3f(downwind.x*(bend+bob+flutter),(bob+flutter)*.6,downwind.y*(bend+bob+flutter))*collarPin;
+}
+fn forestGroundRoot(posIn:vec3f,kindVal:f32)->vec3f{
+ if(kindVal>=3.5){return posIn;}
+ var pos=posIn;
+ let rHoriz=length(pos.xz);
+ let flareEnv=0.32+0.14*min(rHoriz,4.0)-0.46*smoothstep(1.15,2.6,rHoriz);
+ if(pos.y<flareEnv+0.04&&(rHoriz>0.18||pos.y<0.02)){
+  let wEnv=1.0-smoothstep(flareEnv-0.08,flareEnv+0.04,pos.y);
+  let wRad=max(smoothstep(0.18,0.22,rHoriz),1.0-smoothstep(-0.01,0.02,pos.y));
+  let w=wEnv*wRad;
+  if(rHoriz>0.20){
+   let rOut=0.20+0.52*(1.0-exp(-(rHoriz-0.20)/0.52));
+   let k=mix(1.0,rOut/max(rHoriz,1e-5),w);
+   pos.x*=k;pos.z*=k;
+  }
+  let dr=max(0.0,rHoriz-0.18);
+  let py=max(-2.2,pos.y-(1.35*dr+0.45*min(dr*dr,4.0)));
+  pos.y=mix(pos.y,py,w);
+ }
+ return pos;
 }
 // What shot has done to this tree, from its root (js/forest-trunks.js). JavaScript writes it only when a ball lands.
 fn forestFallTurn(r:ForestRoot,code:u32)->vec2f{
@@ -737,9 +759,7 @@ fn forestStruckPlace(r:ForestRoot,model:vec3f,local:vec3f,normal:vec3f,colour:ve
 }
 fn forestPlaceSkinned(r:ForestRoot,rootId:u32,posLocal:vec3f,normAdj:vec3f,kind:vec2f,leafUV:vec2f,colour:vec3f,nativeMaterial:f32,vertex:u32,canopyAO:f32,alreadySkinned:bool)->ForestVertex{
  let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
- let r2=dot(posLocal.xz,posLocal.xz);
- let buried=!alreadySkinned&&kind.x<3.5&&(forestBin.z&256u)==0u&&((posLocal.y<.08&&r2>9.)||(posLocal.y<.013&&r2>.7)||(posLocal.y<.025&&r2>.7&&r2<4.)||(posLocal.y<-.01&&r2>.22));
- let posAdj=select(posLocal,vec3f(0.),buried);
+ let posAdj=posLocal;
  var local=vec3f(c*posAdj.x-s*posAdj.z,posAdj.y,s*posAdj.x+c*posAdj.z)*r.rootScale.w;
  if(!alreadySkinned){
   let flutterWeight=select(0.,clamp(leafUV.x,0.,1.),kind.x>=3.5&&nativeMaterial>=0.);
@@ -747,16 +767,16 @@ fn forestPlaceSkinned(r:ForestRoot,rootId:u32,posLocal:vec3f,normAdj:vec3f,kind:
  }
  var o:ForestVertex;
  o.normal=vec3f(c*normAdj.x-s*normAdj.z,normAdj.y,s*normAdj.x+c*normAdj.z);
- var tint=colour*r.yawColour.yzw;var fallen=false;
+ let baseCol=select(colour,vec3f(1.),nativeMaterial>=0.);
+ var tint=baseCol*r.yawColour.yzw;var fallen=false;
  if(r.identity.w!=0.){let struck=forestStruckPlace(r,posAdj,local,o.normal,tint,kind.x<3.5);local=struck.local;o.normal=struck.normal;tint=struck.colour;fallen=struck.fallen;}
  o.world=r.rootScale.xyz+local;
- // Roots below the soil line press flat onto it, leaving no fragment to cut away.
- if(!fallen){o.world.y=max(o.world.y,r.rootScale.y);}
+ if(!fallen&&kind.x>=3.5){o.world.y=max(o.world.y,r.rootScale.y);}
  o.nativeMaterial=i32(nativeMaterial);if(o.nativeMaterial>=0){o.nativeMaterial+=i32(forestBin.y);}
  o.kind=kind;o.leafUV=leafUV;o.colour=tint;o.canopyAO=canopyAO;o.coverageSeed=forestCoverageHash(vertex^(rootId*0x9e3779b9u));o.pos=F.viewProj*vec4f(earthCurve(o.world-F.camPos.xyz,F.camPos.y),1);return o;
 }
 fn forestPlace(r:ForestRoot,rootId:u32,posLocal:vec3f,normAdj:vec3f,kind:vec2f,leafUV:vec2f,colour:vec3f,nativeMaterial:f32,vertex:u32,canopyAO:f32)->ForestVertex{
- return forestPlaceSkinned(r,rootId,posLocal,normAdj,kind,leafUV,colour,nativeMaterial,vertex,canopyAO,false);
+ return forestPlaceSkinned(r,rootId,forestGroundRoot(posLocal,kind.x),normAdj,kind,leafUV,colour,nativeMaterial,vertex,canopyAO,false);
 }
 fn forestCanopyVertex(position:vec3f,normal:vec3f,kind:vec2f,leafUV:vec2f,colour:vec3f,nativeMaterial:f32,instance:u32,vertex:u32)->ForestVertex{
  let r=forestRoots[forestVisible[forestBin.x+instance]];let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
@@ -783,7 +803,7 @@ fn forestCanopyVertex(position:vec3f,normal:vec3f,kind:vec2f,leafUV:vec2f,colour
   let uvOff=leafUV-vec2f(.5,.5);
   let invScale=1./max(r.rootScale.w,.85);
   if(tierId>=2u){
-   let baseInflate=select(select(.03,.18,tierId==3u),select(.18,.8,tierId==3u),isSubBroadleaf);
+   let baseInflate=select(select(.03,.18,tierId==3u),select(.08,.22,tierId==3u),isSubBroadleaf);
    let inflate=baseInflate*invScale;
    posLocal+=t1*(uvOff.x*inflate)+t2*(uvOff.y*inflate);
    let domeCurve=select(0.08,0.14,tierId==3u);
@@ -809,9 +829,9 @@ fn forestCanopyVertex(position:vec3f,normal:vec3f,kind:vec2f,leafUV:vec2f,colour
 @vertex fn forestMiddleVS(@location(0)position:vec3f,@location(1)normal:vec3f,@location(2)kind:vec2f,
  @location(5)leafUV:vec2f,@location(6)colour:vec3f,@builtin(instance_index)instance:u32)->ForestVertex{
  let r=forestRoots[forestVisible[forestBin.x+instance]];let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
- let r2=dot(position.xz,position.xz);let posAdj=select(position,vec3f(0.),kind.x<3.5&&(forestBin.z&256u)==0u&&((position.y<.08&&r2>9.)||(position.y<.013&&r2>.7)||(position.y<.025&&r2>.7&&r2<4.)||(position.y<-.01&&r2>.22)));
+ let posAdj=forestGroundRoot(position,kind.x);
  let local=vec3f(c*posAdj.x-s*posAdj.z,posAdj.y,s*posAdj.x+c*posAdj.z)*r.rootScale.w;
- var o:ForestVertex;o.world=r.rootScale.xyz+local;o.world.y=max(o.world.y,r.rootScale.y);if(r.identity.w<0.){o.world=r.rootScale.xyz+forestFallen(r,posAdj,local);}o.normal=vec3f(c*normal.x-s*normal.z,normal.y,s*normal.x+c*normal.z);
+ var o:ForestVertex;o.world=r.rootScale.xyz+local;if(kind.x>=3.5){o.world.y=max(o.world.y,r.rootScale.y);}if(r.identity.w<0.){o.world=r.rootScale.xyz+forestFallen(r,posAdj,local);}o.normal=vec3f(c*normal.x-s*normal.z,normal.y,s*normal.x+c*normal.z);
  o.kind=kind;o.leafUV=leafUV;o.colour=colour*r.yawColour.yzw;o.nativeMaterial=-1;o.canopyAO=1.;o.coverageSeed=0u;o.pos=F.viewProj*vec4f(earthCurve(o.world-F.camPos.xyz,F.camPos.y),1);o.pos.z*=1.-f32(forestVisible[forestBin.x+instance]&63u)*2e-7;return o;
 }
 @fragment fn forestMiddleFS(in:ForestVertex)->@location(0)vec4f{
@@ -924,7 +944,8 @@ fn forestMappedNormal(geometric:vec3f,detail:vec3f,dx:vec3f,dy:vec3f,ux:vec2f,uy
  let barkWet=clamp(material.coordinates.w*(1.0-roughness),0.0,0.28);
  // Static escape through this specimen's original leaf-area field. Terrain
  // and cloud shadows remain dynamic in landFinish; this is not a sun shadow.
- return landFinish(in.world,n,colour,max(dot(n,F.sunDir.xyz),0.)*(.35+.65*in.canopyAO),(.36+max(n.y,0.)*.25)*in.canopyAO,barkWet,roughness);
+ let woodAO=min(in.canopyAO,select(1.0,mix(0.30,1.0,exposure),in.canopyAO>0.995&&exposure<0.995));
+ return landFinish(in.world,n,colour,max(dot(n,F.sunDir.xyz),0.)*(.35+.65*woodAO),(.36+max(n.y,0.)*.25)*woodAO,barkWet,roughness);
 }
 fn forestNativeAlpha(material:ForestLeafMaterial,uv:vec2f,ux:vec2f,uy:vec2f)->f32{
  return forestNativeAlbedoOnly(material,uv,ux,uy).a;
@@ -1333,7 +1354,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     let materialBase=0;
     const bins=m.prototypes.map(p=>{
       const firstMaterial=materialBase;materialBase+=p.nativeMaterials.length;
-      const subRoot=(p.species==='ceiba'||p.species==='mangrove')?256:0;
+      const subRoot=0;
       const closedCrown=p.cohort?512:0;
       return [0,1,2,...(nativeMid?[3]:[])].map(tier=>{
         const offset=make(new Uint32Array([p.firstRoot*visibleTiers+tier*p.rootCount,firstMaterial,(tier<<16)|closedCrown|subRoot|p.nativeMaterials.length,samples]),B.UNIFORM,'forest bin offset');
@@ -1530,7 +1551,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
           const base=p.id*20,firstMaterial=matBase;matBase+=p.nativeMaterials.length;
           if(m.prototypes[p.id]){m.prototypes[p.id].firstRoot=p.firstRoot;m.prototypes[p.id].rootCount=p.rootCount;}
           words[base+4]=p.firstRoot;words[base+5]=p.rootCount;
-          const subRoot=(p.species==='ceiba'||p.species==='mangrove')?256:0;
+          const subRoot=0;
           const closedCrown=p.cohort?512:0;
           for(const [tierIdx,tier]of [0,1,2,...(nativeMid?[3]:[])].entries()){
             const bin=bins[p.id]?.[tierIdx];

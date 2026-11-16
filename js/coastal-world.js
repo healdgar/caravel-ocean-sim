@@ -36,8 +36,8 @@ import {
 } from './terrain-model.js';
 import { vegetationProbability } from './vegetation.js';
 import { OLD_WORLD_LAND, bakedBoardFor, oldWorldCountry, oldWorldCityNear, oldWorldPeople } from './old-world.js';
-import { CITY_BLOCK_FLOATS, CITY_ROOF, CITY_WALL, cityMasonry, footprint } from './old-world-city.js';
-import { CITY_BUILDING_TYPES, CITY_PAINT, CITY_THATCH_ROOF, CITY_TYPE, CITY_TYPED_FLOATS, CITY_TYPED_ROOF } from './old-world-buildings.js';
+import { CITY_BLOCK_FLOATS, CITY_ROOF, CITY_WALL, buildColonialCityFabric, cityMasonry, footprint, planColonialStreets } from './old-world-city.js';
+import { CITY_BUILDING_TYPES, CITY_PAINT, CITY_THATCH_ROOF, CITY_TYPE, CITY_TYPED_FLOATS, CITY_TYPED_ROOF, cityHouseType } from './old-world-buildings.js';
 import { boardRoadCrossings } from './old-world-board.js';
 import { createInlandWaterSampler } from './inland-water.js';
 import {
@@ -3965,7 +3965,28 @@ export function settleDockBerth(heights, region, instances, wanted) {
     }
   }
   if (afloat) return { x: afloat.x, z: afloat.z };
-  if (!inMud) return { x: wanted.x, z: wanted.z };
+  if (!inMud) {
+    const berthHeading = (((region.shoreBearing ?? 112) - 108) % 360 + 360) % 360;
+    const dockCaravel = { length: 20, beam: 6, hydrodynamics: { draft: 2.1 } };
+    let bestCaravel = null;
+    for (const pier of piers) {
+      const c = Math.cos(pier.yaw ?? 0), s = Math.sin(pier.yaw ?? 0);
+      const hw = (pier.width ?? 0) * 0.5 + 34, hl = (pier.length ?? 0) * 0.5 + 34;
+      for (let lz = -hl; lz <= hl; lz += 4) for (let lx = -hw; lx <= hw; lx += 4) {
+        const x = pier.x + lx * c + lz * s, z = pier.z - lx * s + lz * c;
+        if (!inWaters(x, z)) continue;
+        const line = lineTo(x, z);
+        if (line < 8 || line > 34) continue;
+        const off = Math.hypot(x - wanted.x, z - wanted.z);
+        if (bestCaravel && off >= bestCaravel.off) continue;
+        if (-terrainSample(heights, x, z, region) < 3.2) continue;
+        const check = safeLandfallStart(heights, { x, z, heading: berthHeading }, dockCaravel, region);
+        if (!check.moved) bestCaravel = { x, z, off };
+      }
+    }
+    if (bestCaravel) return { x: bestCaravel.x, z: bestCaravel.z };
+    return { x: wanted.x, z: wanted.z };
+  }
   cellsWithin(inMud.x, inMud.z, dredgeReach + cell * 3, (k, d) => {
     if (heights[k] > 0.25) return;
     const ease = coastalSmoothstep(dredgeReach + cell * 3, dredgeReach, d);
@@ -4219,19 +4240,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
         h = h * (1 - slipW) + Math.min(h, slipDepth) * slipW;
       }
 
-      if (allowColonialPort && !hasOrthoFootprints && h > -0.15) {
-        // 2. Level Waterfront Quay & Plaza Mayor / Terreiro do Paço terrace (synthetic colonial ports without top-down footprints)
-        if (relInland >= -2 && relInland <= plazaRadiusInland && Math.abs(relAlong) <= plazaRadiusAlong) {
-          const alongW = coastalSmoothstep(plazaRadiusAlong, plazaRadiusAlong * 0.55, Math.abs(relAlong));
-          const inlandW =
-            coastalSmoothstep(-2, 14, relInland) *
-            coastalSmoothstep(plazaRadiusInland, plazaRadiusInland * 0.64, relInland);
-          const stampW = alongW * inlandW;
-          const targetPlazaY = 2.6 + Math.max(0, relInland - 12) * 0.016;
-          h = h * (1 - stampW * 0.88) + targetPlazaY * (stampW * 0.88);
-        }
-
-      } else if (preIndigenousVillage && h > 0.20) {
+      if (!allowColonialPort && preIndigenousVillage && h > 0.20) {
         // 2b. Natural coastal village terrace for Native American settlements (grades steep hills into a gentle 1.6m..2.8m bench)
         if (relInland >= 2 && relInland <= 108 && Math.abs(relAlong) <= 84) {
           const alongW = coastalSmoothstep(84, 46, Math.abs(relAlong));
@@ -4409,6 +4418,9 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
         const root = Math.max(a, b), head = Math.min(a, b);
         if (root >= PIER_ROOT_LOWEST_M && root <= PIER_ROOT_HIGHEST_M && head <= PIER_HEAD_HIGHEST_M) {
           const x = wanted.x + axisX * slide, z = wanted.z + axisZ * slide;
+          const headEnd = a <= b ? 1 : -1;
+          const hx = x + axisX * headEnd * half, hz = z + axisZ * headEnd * half;
+          if (Math.abs(hx - region.x) > span * 0.422 || Math.abs(hz - region.z) > span * 0.422) continue;
           // Two piers never share water: a ship could lie at neither.
           if (footprintFitsEnclosures(instances, x, z, yaw, width, length) && !instances.some((other) => (other.prefabId === 'timber_mole_pier' || other.trace?.outline) && obbsMeet(x, z, yaw, width, length, other, PIER_APART_M))) return { x, z };
         }
@@ -4798,10 +4810,11 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       if (chosenPiers.length >= (metropoleScale >= 0.7 ? 2 : 1)) break;
     }
     if (!chosenPiers.length) chosenPiers.push({ alongProbe: 0, reachLen: 68, score: 0 });
+    const isLisbon = region.id === 'lisbon';
     const mainPier = chosenPiers[0];
     const mainInlandOffset = -(mainPier.reachLen * 0.42);
     addPrefab('timber_mole_pier', mainPier.alongProbe, mainInlandOffset, 180, null, {
-      label: `${nearOldWorldCity?.name || region.name} Main Royal Embarkation Pier`,
+      label: isLisbon ? 'Ponte da Casa da Índia (Main Royal Embarkation Pier)' : `${nearOldWorldCity?.name || region.name} Main Royal Embarkation Pier`,
       length: mainPier.reachLen,
       width: 8.4,
       height: 1.75,
@@ -4809,9 +4822,9 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       exactY: 0.45,
     });
     const lHeadTip = worldFromCoastalFrame(region, bestShoreAlong + mainPier.alongProbe - 14, bestShoreInland - (mainPier.reachLen - 6));
-    if (terrainSample(heights, lHeadTip.x, lHeadTip.z, region) <= -1.6) {
+    if (isLisbon || terrainSample(heights, lHeadTip.x, lHeadTip.z, region) <= -1.6) {
       addPrefab('timber_mole_pier', mainPier.alongProbe - 14, -(mainPier.reachLen - 3), 90, null, {
-        label: 'Harbor Crane Wharf & Fitting Mole',
+        label: isLisbon ? 'Cais da Ribeira Crane Wharf & Fitting Mole' : 'Harbor Crane Wharf & Fitting Mole',
         length: 36,
         width: 8.0,
         height: 1.75,
@@ -4819,10 +4832,10 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
         exactY: 0.45,
       });
     }
-    if (chosenPiers[1]) {
-      const alt = chosenPiers[1];
+    if (chosenPiers[1] || isLisbon) {
+      const alt = chosenPiers[1] ?? { alongProbe: mainPier.alongProbe >= 0 ? mainPier.alongProbe - 56 : mainPier.alongProbe + 56, reachLen: 54 };
       addPrefab('timber_mole_pier', alt.alongProbe, -(alt.reachLen * 0.36), 180, null, {
-        label: 'Shipyard Fitting-Out & Careening Pier',
+        label: isLisbon ? 'Estaleiro da Ribeira das Naus Pier' : 'Shipyard Fitting-Out & Careening Pier',
         length: Math.min(58, alt.reachLen),
         width: 7.2,
         height: 1.65,
@@ -4878,9 +4891,8 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       });
     }
   } else if (allowColonialPort) {
-    const pierTipPos = worldFromCoastalFrame(region, bestShoreAlong, bestShoreInland - 32);
-    if (terrainSample(heights, pierTipPos.x, pierTipPos.z, region) <= -0.5) {
-      addPrefab('timber_mole_pier', 0, -24, 0, 2.2);
+    for (const alongTry of [0, -18, 18, -36, 36, -54, 54]) {
+      if (addPrefab('timber_mole_pier', alongTry, -24, 0, 2.2)) break;
     }
   }
 
@@ -4895,6 +4907,8 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
   );
   if (allowColonialPort && !hasOrthoFootprints && !inTimberManner) siteDefences();
 
+  let plannedStreets = null;
+  let colonialCity = null;
   if (allowColonialPort && hasOrthoFootprints) {
     const fps = orthoFootprints.footprints.slice();
     const hasPreassigned = fps.some((f) => Boolean(f.prefabId));
@@ -5060,13 +5074,13 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     });
     // Progressive 17th-century expansion for orthophoto ports when year > 1560 (Antonelli & Buccaneer eras)
     if (colonyGrowth.expansionTier >= 2) {
-      addPrefab('colonial_town_block', 68, 92, 0, 3.8, {
+      addPrefab('modular_patio_cloister', 68, 92, 0, 3.8, {
         label: 'Barrio de los Mercaderes (17th-Century Expansion)',
       });
     }
     if (colonyGrowth.expansionTier >= 3) {
-      addPrefab('curtain_wall_and_gate', 48, 128, 0, 4.2, {
-        label: 'Muralla Real & Puerta de Tierra',
+      addPrefab('royal_warehouse', 48, 128, 0, 4.2, {
+        label: 'Almacén Real de Flota',
       });
       addPrefab('acueducto_de_piedra', -68, 118, 12, 4.0, {
         label: 'Acueducto Real de Sillería (Royal Stone Aqueduct)',
@@ -5075,7 +5089,8 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
   } else if (allowColonialPort && isDerivedMetropolePort) {
     // Procedural metropole harbor derivation from terrain contour, bathymetry, slope, hill relief, river corridors, and population:
     // (a) Continuous contour-following stone seawall ribbon along shoreline stretches free of river mouths
-    placeContinuousQuayRibbon(-112, 88, `${nearOldWorldCity?.name || region.name} Stone Quay Wall`, 12);
+    const isLisbon = region.id === 'lisbon';
+    placeContinuousQuayRibbon(-112, 88, isLisbon ? 'Cais da Ribeira & Terreiro do Paço Stone Seawall' : `${nearOldWorldCity?.name || region.name} Stone Quay Wall`, 12);
 
     // (b) Find flattest river-clear waterfront bench for civic Terreiro plaza & royal customhouse / palace complex
     let benchAlong = 10, benchInland = 40, bestBenchScore = -Infinity;
@@ -5096,7 +5111,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     }
     const isIberianMetropole = colonyGrowth.crown === 'portugal' || colonyGrowth.crown === 'spain';
     addPrefab('torreon_atalaya_farol', benchAlong + 28, Math.max(4, benchInland - 34), 0, 2.8, {
-      label: isIberianMetropole ? 'Waterfront Royal Palace Turret' : 'Harbor Citadel Watchtower',
+      label: isLisbon ? 'Torreão do Paço da Ribeira' : isIberianMetropole ? 'Waterfront Royal Palace Turret' : 'Harbor Citadel Watchtower',
       width: 18,
       length: 22,
       height: 20.5,
@@ -5104,16 +5119,13 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       cairnSpec: isIberianMetropole ? CAIRN_ARCHITECTURAL_TEMPLATES.paco_da_ribeira_torreao : undefined,
     });
     addPrefab('casa_de_contratacion', benchAlong, benchInland, 0, 3.0, {
-      label: isIberianMetropole ? 'Royal Customhouse & Chamber of Commerce' : 'Customhouse & Staple Hall',
+      label: isLisbon ? 'Paço da Ribeira & Casa da Índia' : isIberianMetropole ? 'Royal Customhouse & Chamber of Commerce' : 'Customhouse & Staple Hall',
     });
     addPrefab('open_lonja_loggia', benchAlong - 24, Math.max(22, benchInland - 12), 0, 2.8, {
       label: 'Merchant Guild Arcaded Loggia',
     });
     addPrefab('modular_patio_cloister', benchAlong + 38, benchInland + 2, 0, 3.2, {
       label: 'Waterfront Palace & Exchange Cloister',
-    });
-    addPrefab('curtain_wall_and_gate', benchAlong + 6, benchInland + 74, 0, 4.0, {
-      label: 'Triumphal River Gate & City Curtain Wall',
     });
 
     // (c) Pick gentler foreshore flank without river mouth blocking for royal shipyards & slipways
@@ -5128,13 +5140,13 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     };
     const shipSide = flankScore(-1) >= flankScore(1) ? -1 : 1;
     addPrefab('royal_atarazanas_arsenal', shipSide * 52, 48, 0, 2.9, {
-      label: 'Tercenas & Naval Arsenal Halls',
+      label: isLisbon ? 'Ribeira das Naus Royal Naval Arsenal' : 'Tercenas & Naval Arsenal Halls',
       width: 34,
       length: 36,
       height: 9.2,
     });
     addPrefab('royal_warehouse', shipSide * 92, 46, 0, 2.9, {
-      label: 'Royal Naval & Spice Storehouses',
+      label: isLisbon ? 'Armazéns da Índia & Naval Storehouses' : 'Royal Naval & Spice Storehouses',
       length: 34,
       width: 15,
     });
@@ -5149,7 +5161,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     });
     if (oldWorldPop >= 50000) {
       addPrefab('mosteiro_dos_jeronimos', shipSide * 124, 88, 0, 3.8, {
-        label: 'Great Estuary Cloister & Abbey',
+        label: isLisbon ? 'Mosteiro dos Jerónimos (Belém)' : 'Great Estuary Cloister & Abbey',
       });
     }
 
@@ -5172,7 +5184,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       }
     }
     addPrefab('mission_chapel', hillAlong, hillInland, 0, 4.2, {
-      label: isIberianMetropole && oldWorldPop >= 40000 ? 'Metropolitan Twin-Tower Cathedral' : 'Principal Harbor Church',
+      label: isLisbon ? 'Sé Patriarcal de Lisboa' : isIberianMetropole && oldWorldPop >= 40000 ? 'Metropolitan Twin-Tower Cathedral' : 'Principal Harbor Church',
       width: 24,
       length: 34,
       height: 19.0,
@@ -5180,19 +5192,19 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       cairnSpec: isIberianMetropole && oldWorldPop >= 40000 ? CAIRN_ARCHITECTURAL_TEMPLATES.se_patriarcal_de_lisboa : undefined,
     });
     addPrefab('acueducto_de_piedra', -shipSide * 48, 124, 8, 4.2, {
-      label: 'Arched Royal Water Aqueduct',
+      label: isLisbon ? 'Aqueduto Real (Royal Stone Aqueduct)' : 'Arched Royal Water Aqueduct',
     });
 
-    // (e) Derive merchant quarters & pack yards procedurally across river-clear upland lots
+    // (e) Derive subdivided merchant solares & pack yards procedurally across river-clear upland lots (zero colonial_town_block)
     const quarterDefs = [
-      { id: 'colonial_town_block', along: -18, inland: 84, yaw: 0, minY: 3.6, label: 'Upper Merchant Cloister Block' },
-      { id: 'colonial_town_block', along: 24, inland: 84, yaw: 0, minY: 3.6, label: 'Waterfront Guild Quarter' },
+      { id: 'modular_patio_cloister', along: -18, inland: 84, yaw: 0, minY: 3.6, label: 'Upper Merchant Cloister Solar' },
+      { id: 'l_wing_u_wing_solar', along: 24, inland: 84, yaw: 0, minY: 3.6, label: 'Waterfront Guild Solar' },
       { id: 'l_wing_u_wing_solar', along: -56, inland: 86, yaw: 90, minY: 3.5, label: 'Noble Courtyard Solar' },
       { id: 'single_nave_solar', along: 88, inland: 56, yaw: 0, minY: 3.6, label: 'Hillside Merchant Terrace' },
       { id: 'walled_mule_corral', along: -22, inland: 118, yaw: 0, minY: 4.0, label: 'Caravan & Pack-Train Courtyard' },
     ];
     if (metropoleScale >= 0.75) {
-      quarterDefs.push({ id: 'colonial_town_block', along: 64, inland: 116, yaw: 0, minY: 4.2, label: 'Upper Hillside Quarter' });
+      quarterDefs.push({ id: 'modular_patio_cloister', along: 64, inland: 116, yaw: 0, minY: 4.2, label: 'Upper Hillside Cloister' });
     }
     for (const qd of quarterDefs) {
       addPrefab(qd.id, qd.along, qd.inland, qd.yaw, qd.minY, { label: qd.label });
@@ -5288,9 +5300,8 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
   } else if (
     inTimberManner
   ) {
-    // Historically authentic 17th-century English / North American Timber & Palisade Settlement
-    // (1607 James Fort triangular palisade with corner bulwarks, half-timbered wattle-and-daub church & storehouses,
-    // riven-clapboard steep-gable cottages, boatyard, cooperage, and river watchtower — never Spanish Caribbean stucco!)
+    // North European Timber & Tidewater Procedural Urban Plan (Jamestown, Plymouth, Boston, New Amsterdam, Québec):
+    // Enclosing palisade fort + organic Tidewater wharf lane, ridge main street, cross lanes & subdivided timber burgher lots!
     const isJamestown = region.id === 'jamestown';
     const fortLabel = isJamestown
       ? 'James Fort (1607 Triangular Timber Palisade & Bulwarks)'
@@ -5305,7 +5316,6 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       ? '1608 Timber-Framed Church & Virginia Company Storehouse'
       : 'Half-Timbered Meetinghouse & Company Magazine';
 
-    // Piers and forts go down before the town does, so that the town builds round them.
     const grownToSecondPier = colonyGrowth.stage === 'fortified-port' || colonyGrowth.stage === 'citadel-metropolis' || colonyGrowth.expansionTier >= 3;
     if (grownToSecondPier) {
       const secondPierTip = worldFromCoastalFrame(region, bestShoreAlong + 42, bestShoreInland - 30);
@@ -5315,12 +5325,9 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
         });
       }
     }
-    // The fort that holds the settlement (James Fort, 118m x 90m; four-sided where the record says so), then the
-    // harbour's other works, from the record or the rule.
     const heldBy = fortRecordsFor(recordedPortId, colonyGrowth.year).forts.find((record) => record.encloses) ?? fortRecordsFor(recordedPortId, 1800).forts.find((record) => record.encloses) ?? null;
     const fort = placeEnclosingFort(fortLabel, heldBy);
     siteDefences(true);
-    // Core church, company storehouse & flanked rows of half-timbered / mud-and-stud cottages INSIDE the palisade
     const fortPlan = fort ? enclosurePlan(fort) : null;
     const inFort = (slot) => (fort ? { homeFort: fort, fortSlot: slot } : null);
     addPrefab('english_half_timber_hall', 0, 44, 0, 2.8, {
@@ -5343,140 +5350,200 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       label: 'Artificers’ & Smiths’ Timber Forge Cottage (Inside Fort)',
       ...inFort(fortPlan?.cottageSlots[1]),
     });
-    // Waterfront shallop careening shed, slipway & river watch beacon outside the fort curtains
-    addPrefab('careening_shed', -68, 14, 10, 2.0, {
+
+    const sampleShoreCross = (alongOff) => {
+      for (let d = -32; d <= 36; d += 4) {
+        const p = worldFromCoastalFrame(region, bestShoreAlong + alongOff, bestShoreInland + d);
+        if (terrainSample(heights, p.x, p.z, region) > 0.25) return d;
+      }
+      return 0;
+    };
+    const colPlan = planColonialStreets({
+      region,
+      heights,
+      heightAt: (x, z) => terrainSurfaceSample(heights, x, z, region),
+      riverHits: (x, z, pad) => portRiverCorridor.pointHits(x, z, pad),
+      shoreCrossAt: sampleShoreCross,
+      frameToWorld: (a, d) => worldFromCoastalFrame(region, bestShoreAlong + a, bestShoreInland + d),
+      bearingRad,
+      stage: colonyGrowth.stage,
+      expansionTier: colonyGrowth.expansionTier,
+      manner: 'timber',
+    });
+
+    addPrefab('careening_shed', -66, colPlan.shoreAt(-66) + 12, 10, 2.0, {
       label: 'Shallop & Pinnace Careening Shed',
     });
-    addPrefab('astillero_and_moored_hull', -44, 9, 5, 1.8, {
+    addPrefab('astillero_and_moored_hull', -42, colPlan.shoreAt(-42) + 8, 5, 1.8, {
       label: 'River Shallop Slipway & Timber Stocks',
     });
-    addPrefab('torreon_atalaya_farol', 72, 12, -10, 2.5, {
+    addPrefab('torreon_atalaya_farol', 70, colPlan.shoreAt(70) + 10, -10, 2.5, {
       label: isJamestown ? 'Point Comfort / River Watch Beacon' : 'Harbor Look-Out Beacon Tower',
       materialKind: 10,
     });
 
-    if (colonyGrowth.colonyAge >= 5 || colonyGrowth.stage !== 'outpost') {
-      addPrefab('english_half_timber_hall', -56, 42, 0, 2.8, {
-        label: isJamestown ? '1617 Timber-Framed Choir Church (First Assembly)' : 'Colonial Assembly & Custom Hall',
-      });
-      addPrefab('walled_mule_corral', 62, 52, 0, 2.8, {
-        label: isJamestown ? 'Tobacco Hogshead Yard & Livestock Pales' : 'Colonial Commons & Stockade Yard',
-      });
-      addPrefab('english_timber_cottage', -62, 64, 12, 2.9, {
-        label: 'Outer Palisade Quarter & Cooperage Cottage',
-      });
+    const wantOutside = colonyGrowth.stage === 'outpost'
+      ? (colonyGrowth.colonyAge >= 5 ? 2 : 0)
+      : colonyGrowth.stage === 'settlement'
+        ? 6
+        : 11 + Math.min(5, colonyGrowth.expansionTier);
+    let placedOut = 0;
+    for (const slot of colPlan.solares) {
+      if (placedOut >= wantOutside) break;
+      const prefabId = placedOut === 0
+        ? 'english_half_timber_hall'
+        : placedOut === 1 && colonyGrowth.stage !== 'outpost'
+          ? 'walled_mule_corral'
+          : placedOut % 4 === 2
+            ? 'english_half_timber_hall'
+            : 'english_timber_cottage';
+      if (addPrefab(prefabId, 0, 0, 0, 2.2, { at: { x: slot.x, z: slot.z }, yaw: slot.yaw })) {
+        placedOut++;
+      }
     }
-    if (colonyGrowth.stage !== 'outpost') {
-      // Expansion into "New Towne" /Growing Colonial Settlement along the riverfront (1620s–1680s)
-      addPrefab('careening_shed', -74, 32, 0, 2.4, {
-        label: 'Hemp, Pitch & Cordage Ropewalk Shed',
-      });
-      addPrefab('english_half_timber_hall', 46, 24, 0, 2.5, {
-        label: isJamestown ? 'New Towne Tobacco & Fur Magazine' : 'Merchant Company Waterfront Warehouse',
-      });
-      addPrefab('english_timber_cottage', -52, 74, 0, 3.2, {
-        label: 'New Towne Half-Timbered Burgess House',
-      });
-      addPrefab('english_timber_cottage', 48, 76, 0, 3.2, {
-        label: 'New Towne Brick-Nogged Merchant House',
-      });
-      addPrefab('english_timber_cottage', 0, 92, 0, 3.4, {
-        label: 'Country Road Planter’s Homestead',
-      });
-    }
-    if (grownToSecondPier) {
-      addPrefab('english_half_timber_hall', -22, 96, 0, 3.5, {
-        label: isJamestown ? 'Statehouse & General Court Building' : 'Provincial Statehouse & Court',
-      });
-      addPrefab('english_timber_cottage', 28, 96, 0, 3.5, {
-        label: 'Tavern & Ordinary Inn',
-      });
-      addPrefab('english_timber_cottage', -68, 96, 8, 3.4, {
-        label: 'Coopers’ & Chandlers’ Row',
-      });
-      addPrefab('english_timber_cottage', 68, 96, -8, 3.4, {
-        label: 'Mariners’ Quarter Tenement',
-      });
-    }
-    if (colonyGrowth.expansionTier >= 4) {
-      addPrefab('english_half_timber_hall', -36, 122, 0, 3.8, {
-        label: 'Company Customhouse & Guildhall',
-      });
-      addPrefab('english_timber_cottage', 36, 122, 0, 3.8, {
-        label: 'Upper Street Merchant Tenement',
-      });
-    }
+    plannedStreets = colPlan.streets.map((s) => ({ points: s.pts.map(([x, z]) => [x, z, s.hw * 2, s.paved]) }));
+    colonialCity = buildColonialCityFabric({
+      plan: colPlan,
+      heightAt: (x, z) => terrainSurfaceSample(heights, x, z, region),
+      riverHits: (x, z, pad) => portRiverCorridor.pointHits(x, z, pad),
+      obstacles: instances,
+      stage: colonyGrowth.stage,
+      fortificationTier: colonyGrowth.fortificationTier,
+      expansionTier: colonyGrowth.expansionTier,
+    });
   } else if (allowColonialPort) {
+    // Street-first topography-, shoreline-, hydrology-, and polity-driven Colonial Port Generator:
+    // - Portuguese Ultramar ('portuguese'): Cidade Baixa Ribeira + switchback Ladeiras + Cidade Alta Largo da Sé
+    // - Spanish Indies ('spanish'): Leyes de Indias harbour Malecón + bench-sited Plaza Mayor + terrain-conforming Damero quadras
+    const inPortugueseManner = colonyGrowth.crown === 'portugal';
+    const sampleShoreCross = (alongOff) => {
+      for (let d = -34; d <= 38; d += 4) {
+        const p = worldFromCoastalFrame(region, bestShoreAlong + alongOff, bestShoreInland + d);
+        if (terrainSample(heights, p.x, p.z, region) > 0.25) return d;
+      }
+      return 0;
+    };
+    const colPlan = planColonialStreets({
+      region,
+      heights,
+      heightAt: (x, z) => terrainSurfaceSample(heights, x, z, region),
+      riverHits: (x, z, pad) => portRiverCorridor.pointHits(x, z, pad),
+      shoreCrossAt: sampleShoreCross,
+      frameToWorld: (a, d) => worldFromCoastalFrame(region, bestShoreAlong + a, bestShoreInland + d),
+      bearingRad,
+      stage: colonyGrowth.stage,
+      expansionTier: colonyGrowth.expansionTier,
+      manner: inPortugueseManner ? 'portuguese' : 'spanish',
+    });
+
+    if (colonyGrowth.stage !== 'outpost') {
+      const qSpan = Math.round(colPlan.quaySpan * 0.58);
+      placeContinuousQuayRibbon(
+        -qSpan,
+        qSpan + 12,
+        inPortugueseManner ? 'Cais de Cantaria da Ribeira' : PORT_PREFABS.stone_quay_seawall.label,
+        12,
+      );
+    }
+    if (colonyGrowth.expansionTier >= 3) {
+      const secondPierTip = worldFromCoastalFrame(region, bestShoreAlong + 42, bestShoreInland - 30);
+      if (terrainSample(heights, secondPierTip.x, secondPierTip.z, region) <= -0.4) {
+        addPrefab('timber_mole_pier', 42, -22, 0, 2.2, {
+          label: inPortugueseManner ? 'Ponte da Alfândega' : 'Muelle de Mercaderes (Merchant Fleet Wharf)',
+        });
+      }
+    }
+
+    // Sheltered foreshore astillero, careening shed, headland watchtower & peripheral palm-thatch fishermen's bohío
+    const shipFlank = colPlan.shoreAt(-64) <= colPlan.shoreAt(64) ? -1 : 1;
+    addPrefab('careening_shed', shipFlank * 72, colPlan.shoreAt(shipFlank * 72) + 15, shipFlank * -10, 2.0);
+    addPrefab('astillero_and_moored_hull', shipFlank * 48, colPlan.shoreAt(shipFlank * 48) + 12, shipFlank * -4, 1.6);
+    addPrefab('torreon_atalaya_farol', -shipFlank * 114, colPlan.shoreAt(-shipFlank * 114) - 4, 0, 4.2, {
+      label: inPortugueseManner ? 'Torre de Vigia da Barra' : 'Atalaya de Piedra (Harbor Watchtower)',
+    });
+    addPrefab('thatched_bohio_palafito', shipFlank * 96, colPlan.shoreAt(shipFlank * 96) + 18, shipFlank * 12, 2.0);
+
+    const { civic } = colPlan;
     if (colonyGrowth.stage === 'outpost') {
-      // Frontier Colonial Outpost (< 14 yrs old, or post-1597 decayed Nombre de Dios):
-      // Timber landing, careening shed, boatyard, coastal watchtower, single-nave hall, corral, and palm-thatch bohíos.
-      addPrefab('careening_shed', -54, 14, 10, 2.1);
-      addPrefab('astillero_and_moored_hull', -32, 11, 5, 1.8);
-      addPrefab('torreon_atalaya_farol', 82, -4, 0, 4.2, {
-        label: 'Atalaya de Madera y Piedra (Frontier Watchtower)',
+      addPrefab('single_nave_solar', 0, 0, 0, 2.5, {
+        at: { x: civic.aduana.x, z: civic.aduana.z },
+        yaw: civic.aduana.yaw,
+        label: inPortugueseManner ? 'Feitoria & Armazém Real' : 'Casa del Gobernador & Almacén (Frontier Hall)',
       });
-      addPrefab('single_nave_solar', -12, 38, 0, 2.9, {
-        label: 'Casa del Gobernador & Almacén (Frontier Hall)',
-      });
-      addPrefab('walled_mule_corral', 24, 58, 0, 3.2);
-      addPrefab('thatched_bohio_palafito', -68, 22, -10, 2.0);
-      addPrefab('thatched_bohio_palafito', 48, 26, 12, 2.1);
+      addPrefab('walled_mule_corral', 0, 0, 0, 2.6, { at: { x: civic.palacio.x, z: civic.palacio.z }, yaw: civic.palacio.yaw });
+      addPrefab('thatched_bohio_palafito', -shipFlank * 52, colPlan.shoreAt(-shipFlank * 52) + 22, 10, 2.0);
       if (colonyGrowth.colonyAge >= 4) {
-        addPrefab('mission_chapel', -32, 66, 90, 3.4, {
-          label: 'Ermita de la Misión (Frontier Parish Chapel)',
+        addPrefab('mission_chapel', 0, 0, 0, 2.8, {
+          at: { x: civic.chapel.x, z: civic.chapel.z },
+          yaw: civic.chapel.yaw,
+          label: inPortugueseManner ? 'Capela da Misericórdia' : 'Ermita de la Misión (Frontier Parish Chapel)',
         });
       }
       if (colonyGrowth.colonyAge >= 8) {
-        addPrefab('open_lonja_loggia', 16, 26, 90, 2.6);
-        addPrefab('single_nave_solar', -48, 44, 0, 3.0);
+        addPrefab('open_lonja_loggia', 0, 0, 0, 2.4, { at: { x: civic.lonja.x, z: civic.lonja.z }, yaw: civic.lonja.yaw });
+        if (colPlan.solares[0]) {
+          addPrefab('single_nave_solar', 0, 0, 0, 2.5, { at: { x: colPlan.solares[0].x, z: colPlan.solares[0].z }, yaw: colPlan.solares[0].yaw });
+        }
       }
     } else if (colonyGrowth.stage === 'settlement') {
-      // Growing Colonial Settlement (14..31 yrs old):
-      // Continuous contour-following stone quay ribbon, sea bastion, customhouse, lonja, royal warehouse, parish church, and early town blocks.
-      placeContinuousQuayRibbon(-32, 52, PORT_PREFABS.stone_quay_seawall.label, 12);
-      addPrefab('careening_shed', -76, 18, 12, 2.2);
-      addPrefab('astillero_and_moored_hull', -50, 15, 4, 1.6);
-      addPrefab('torreon_atalaya_farol', 132, -8, 0, 4.8);
-      addPrefab('casa_de_contratacion', 0, 44, 0, 3.2);
-      addPrefab('open_lonja_loggia', -24, 28, 90, 2.8);
-      addPrefab('royal_warehouse', 46, 48, 0, 3.2);
-      addPrefab('mission_chapel', -38, 82, 90, 3.8);
-      addPrefab('colonial_town_block', 28, 88, 0, 3.8);
-      addPrefab('single_nave_solar', -74, 52, 0, 3.2);
-      addPrefab('walled_mule_corral', 38, 124, 0, 4.0);
-      addPrefab('thatched_bohio_palafito', -96, 20, -12, 2.0);
-      if (colonyGrowth.colonyAge >= 22) {
-        addPrefab('colonial_town_block', -44, 48, 0, 3.2);
-        addPrefab('l_wing_u_wing_solar', 60, 84, 90, 3.6);
+      addPrefab('casa_de_contratacion', 0, 0, 0, 2.6, {
+        at: { x: civic.aduana.x, z: civic.aduana.z },
+        yaw: civic.aduana.yaw,
+        label: inPortugueseManner ? 'Alfândega Real da Ribeira' : PORT_PREFABS.casa_de_contratacion.label,
+      });
+      addPrefab('open_lonja_loggia', 0, 0, 0, 2.4, { at: { x: civic.lonja.x, z: civic.lonja.z }, yaw: civic.lonja.yaw });
+      addPrefab('royal_warehouse', 0, 0, 0, 2.6, { at: { x: civic.warehouse.x, z: civic.warehouse.z }, yaw: civic.warehouse.yaw });
+      addPrefab('mission_chapel', 0, 0, 0, 3.0, {
+        at: { x: civic.chapel.x, z: civic.chapel.z },
+        yaw: civic.chapel.yaw,
+        label: inPortugueseManner ? 'Igreja Matriz da Cidade Alta' : PORT_PREFABS.mission_chapel.label,
+      });
+      addPrefab('walled_mule_corral', 0, 0, 0, 3.0, { at: { x: civic.palacio.x, z: civic.palacio.z }, yaw: civic.palacio.yaw });
+      const solarMix = ['single_nave_solar', 'l_wing_u_wing_solar', 'modular_patio_cloister', 'single_nave_solar', 'l_wing_u_wing_solar'];
+      const targetSolares = colonyGrowth.colonyAge >= 22 ? 5 : 3;
+      let sBuilt = 0;
+      for (const slot of colPlan.solares) {
+        if (sBuilt >= targetSolares) break;
+        if (addPrefab(solarMix[sBuilt % solarMix.length], 0, 0, 0, 2.5, { at: { x: slot.x, z: slot.z }, yaw: slot.yaw })) sBuilt++;
       }
     } else {
-      // Mature Fortified Port & 17th-Century Citadel Metropolis (1550 baseline + progressive 1565–1689 expansions):
-      // 2. Continuous contour-following Stone Seawall & Wharf (Malecón) along the harbor edge
-      placeContinuousQuayRibbon(-36, 60, PORT_PREFABS.stone_quay_seawall.label, 12);
-      // 3. Careening shed & Astillero slipway with skeletal caravel hull on the sheltered foreshore
-      addPrefab('careening_shed', -76, 18, 12, 2.2);
-      addPrefab('astillero_and_moored_hull', -50, 15, 4, 1.6);
-      // 4. Watchtower. The forts themselves are sited with the rest, where the harbour needs them.
-      addPrefab('torreon_atalaya_farol', 132, -8, 0, 4.8);
-      // 5. Casa de la Contratación (Customhouse) & Open Market Loggia (Lonja) facing the waterfront plaza
-      addPrefab('casa_de_contratacion', 0, 44, 0, 3.2);
-      addPrefab('open_lonja_loggia', -24, 28, 90, 2.8);
-      // 6. Almacén Real (Royal Warehouse) & Multi-Gable Reales Atarazanas Arsenal beside the customhouse
-      addPrefab('royal_warehouse', 46, 48, 0, 3.2);
-      addPrefab('royal_atarazanas_arsenal', 78, 36, 0, 3.0);
-      // 7. Mission Chapel & Bell Tower on the upper plaza
-      addPrefab('mission_chapel', -38, 82, 90, 3.8);
-      // 8. Bay-Iterated Courtyard Cloisters, L/U-Wing Solares, Single-Nave Row Houses & Walled Corral
-      addPrefab('colonial_town_block', 28, 88, 0, 3.8);
-      addPrefab('colonial_town_block', -44, 48, 0, 3.2);
-      addPrefab('modular_patio_cloister', -4, 88, 0, 3.8);
-      addPrefab('l_wing_u_wing_solar', 60, 84, 90, 3.6);
-      addPrefab('single_nave_solar', -74, 52, 0, 3.2);
-      addPrefab('walled_mule_corral', 42, 124, 0, 4.0);
-      // 9. City Curtain Wall & Gatehouse, Cutwater Stone Arch Bridge (only on an actual river reach), Frontier Bohíos
-      addPrefab('curtain_wall_and_gate', -36, 118, 90, 4.0);
-      const bridgeWant = worldFromCoastalFrame(region, bestShoreAlong - 98, bestShoreInland + 48);
-      let bridgeSeg = null, bridgeBestDist = 180;
+      // Mature Fortified Port & Citadel Metropolis: harbour civic frontages + Plaza Mayor / Cidade Alta civic block edges + subdivided solares
+      addPrefab('casa_de_contratacion', 0, 0, 0, 2.6, {
+        at: { x: civic.aduana.x, z: civic.aduana.z },
+        yaw: civic.aduana.yaw,
+        label: inPortugueseManner ? 'Alfândega & Casa dos Contos' : PORT_PREFABS.casa_de_contratacion.label,
+      });
+      addPrefab('open_lonja_loggia', 0, 0, 0, 2.4, { at: { x: civic.lonja.x, z: civic.lonja.z }, yaw: civic.lonja.yaw });
+      addPrefab('royal_warehouse', 0, 0, 0, 2.6, { at: { x: civic.warehouse.x, z: civic.warehouse.z }, yaw: civic.warehouse.yaw });
+      addPrefab('royal_atarazanas_arsenal', 0, 0, 0, 2.6, { at: { x: civic.arsenal.x, z: civic.arsenal.z }, yaw: civic.arsenal.yaw });
+      if (colonyGrowth.expansionTier >= 3) {
+        addPrefab('royal_warehouse', 0, 0, 0, 2.6, {
+          at: { x: civic.warehouse2.x, z: civic.warehouse2.z },
+          yaw: civic.warehouse2.yaw,
+          label: inPortugueseManner ? 'Armazém de Açúcar e Tabaco' : 'Almacén de Flota y Azúcar (Fleet Storehouse)',
+        });
+      }
+      addPrefab('catedral_basilica', 0, 0, 0, 3.2, {
+        at: { x: civic.catedral.x, z: civic.catedral.z },
+        yaw: civic.catedral.yaw,
+        label: inPortugueseManner ? 'Sé Catedral Metropolitana' : 'Catedral Basílica Metropolitana',
+      });
+      addPrefab('mission_chapel', 0, 0, 0, 3.0, {
+        at: { x: civic.chapel.x, z: civic.chapel.z },
+        yaw: civic.chapel.yaw,
+        label: inPortugueseManner ? 'Igreja e Colégio da Companhia' : PORT_PREFABS.mission_chapel.label,
+      });
+      addPrefab('palacio_del_gobernador', 0, 0, 0, 3.0, {
+        at: { x: civic.palacio.x, z: civic.palacio.z },
+        yaw: civic.palacio.yaw,
+        label: inPortugueseManner ? 'Paço do Governador-Geral' : 'Palacio de los Capitanes Generales (Governor Palace)',
+      });
+      addPrefab('acueducto_de_piedra', shipFlank * 74, colPlan.plaza.inland + 42, 12, 3.6, {
+        label: inPortugueseManner ? 'Aqueduto das Águas da Cidade' : 'Acueducto Real de Sillería (Royal Stone Aqueduct)',
+      });
+
+      // River cutwater bridge only where an actual river channel crosses near the traza
+      let bridgeSeg = null, bridgeBestDist = 185;
       for (const reach of portRiverCorridor.reaches) {
         for (const seg of reach.segs) {
           if (seg.hw < 1.6) continue;
@@ -5484,7 +5551,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
           const hL = terrainSurfaceSample(heights, seg.cx + seg.nx * spanHalf, seg.cz + seg.nz * spanHalf, region);
           const hR = terrainSurfaceSample(heights, seg.cx - seg.nx * spanHalf, seg.cz - seg.nz * spanHalf, region);
           if (hL < PREFAB_DRY_GROUND_M || hR < PREFAB_DRY_GROUND_M) continue;
-          const d = Math.hypot(seg.cx - bridgeWant.x, seg.cz - bridgeWant.z);
+          const d = Math.hypot(seg.cx - colPlan.plaza.x, seg.cz - colPlan.plaza.z);
           if (d < bridgeBestDist) { bridgeBestDist = d; bridgeSeg = seg; }
         }
       }
@@ -5497,65 +5564,38 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
         const bankYPos = Math.max(1.2, terrainSurfaceSample(heights, bridgeSeg.cx + bridgeSeg.nx * (spanLen * 0.5 + 6.0), bridgeSeg.cz + bridgeSeg.nz * (spanLen * 0.5 + 6.0), region));
         const bankYNeg = Math.max(1.2, terrainSurfaceSample(heights, bridgeSeg.cx - bridgeSeg.nx * (spanLen * 0.5 + 6.0), bridgeSeg.cz - bridgeSeg.nz * (spanLen * 0.5 + 6.0), region));
         const exactY = Math.max(2.2, bankH - 0.15);
-        const bridgeHeight = Math.max(3.15, 3.65 - exactY + 0.85);
         addPrefab('stone_arch_bridge', 0, 0, 0, Math.max(2.2, bankH + 0.4), {
           at: { x: bridgeSeg.cx, z: bridgeSeg.cz },
           yaw: Math.atan2(bridgeSeg.nx, bridgeSeg.nz),
           length: spanLen,
           width: 9.6,
-          height: bridgeHeight,
+          height: Math.max(3.15, 3.65 - exactY + 0.85),
           exactY,
           bankYNeg,
           bankYPos,
         });
       }
-      addPrefab('thatched_bohio_palafito', -96, 18, -12, 2.0);
-      addPrefab('catedral_basilica', 0, 128, 0, 4.1, {
-        label: 'Catedral Basílica Metropolitana',
-      });
-      addPrefab('palacio_del_gobernador', 108, 56, 0, 3.5, {
-        label: 'Palacio de los Capitanes Generales (Governor Palace)',
-      });
-      addPrefab('acueducto_de_piedra', -74, 118, 12, 4.0, {
-        label: 'Acueducto Real de Sillería (Royal Stone Aqueduct)',
-      });
 
-      // 10. Progressive year-by-year & era-by-era expansion (1565–1689: Antonelli, Colonial Planting & High Buccaneer Eras)
-      if (colonyGrowth.expansionTier >= 1) {
-        addPrefab('colonial_town_block', 64, 122, 0, 4.1, {
-          label: 'Barrio de los Mercaderes (Upper Town Quarter)',
-        });
-      }
-      if (colonyGrowth.expansionTier >= 3) {
-        const secondPierTip = worldFromCoastalFrame(region, bestShoreAlong + 42, bestShoreInland - 30);
-        if (terrainSample(heights, secondPierTip.x, secondPierTip.z, region) <= -0.4) {
-          addPrefab('timber_mole_pier', 42, -22, 0, 2.2, {
-            label: 'Muelle de Mercaderes (Merchant Fleet Wharf)',
-          });
-        }
-        addPrefab('royal_warehouse', -82, 86, 0, 3.6, {
-          label: 'Almacén de Flota y Azúcar (Fleet Storehouse)',
-        });
-      }
-      if (colonyGrowth.expansionTier >= 4) {
-        addPrefab('modular_patio_cloister', -48, 148, 0, 4.4, {
-          label: 'Convento y Hospital de San Juan de Dios',
-        });
-      }
-      if (colonyGrowth.expansionTier >= 5) {
-        addPrefab('curtain_wall_and_gate', 58, 152, 0, 4.5, {
-          label: 'Muralla Abaluartada y Puerta de Tierra',
-        });
-      }
-      if (colonyGrowth.expansionTier >= 7) {
-        addPrefab('colonial_town_block', -8, 152, 0, 4.4, {
-          label: 'Plaza de Armas & Intendencia Quarter (1680s)',
-        });
-        addPrefab('l_wing_u_wing_solar', 98, 88, 90, 3.9, {
-          label: 'Palacio del Cabildo y Audiencia',
-        });
+      // Individual subdivided solares along actual quadra / ladeira frontages (monotonically expanding across 1550 -> 1605 -> 1689)
+      const solarTypes = ['modular_patio_cloister', 'l_wing_u_wing_solar', 'single_nave_solar', 'walled_mule_corral', 'l_wing_u_wing_solar', 'modular_patio_cloister', 'single_nave_solar'];
+      const wantSolares = 5 + Math.min(8, colonyGrowth.expansionTier);
+      let sBuilt = 0;
+      for (const slot of colPlan.solares) {
+        if (sBuilt >= wantSolares) break;
+        if (addPrefab(solarTypes[sBuilt % solarTypes.length], 0, 0, 0, 2.5, { at: { x: slot.x, z: slot.z }, yaw: slot.yaw })) sBuilt++;
       }
     }
+
+    plannedStreets = colPlan.streets.map((s) => ({ points: s.pts.map(([x, z]) => [x, z, s.hw * 2, s.paved]) }));
+    colonialCity = buildColonialCityFabric({
+      plan: colPlan,
+      heightAt: (x, z) => terrainSurfaceSample(heights, x, z, region),
+      riverHits: (x, z, pad) => portRiverCorridor.pointHits(x, z, pad),
+      obstacles: instances,
+      stage: colonyGrowth.stage,
+      fortificationTier: colonyGrowth.fortificationTier,
+      expansionTier: colonyGrowth.expansionTier,
+    });
   } else {
     // Uncolonized coast or Sovereign Indigenous Polity: check Native American settlement profile for this region & year
     const indigenousSettlement =
@@ -5691,6 +5731,8 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     reach: instances.reduce((most, inst) => Math.max(most, Math.hypot(inst.x - center.x, inst.z - center.z) + Math.hypot(inst.width, inst.length) * 0.5), 0),
     harbour: harbour ? harbourSummary(harbour) : null,
     hasOrthophotoFootprints: hasOrthoFootprints,
+    plannedStreets,
+    colonialCity,
     berth: {
       x: berthPos.x,
       z: berthPos.z,
@@ -9163,6 +9205,38 @@ export function seedCoastalVegetation(
   const scrub = [];
   const upland = [];
 
+  const vegWaterAt = portPlacement ? createInlandWaterSampler(portPlacement.country ?? portPlacement._resolvedCountry ?? null, { margin: 3.5 }) : null;
+  const vegCity = portPlacement?.colonialCity ?? portPlacement?._resolvedCountry?.plan ?? null;
+  const hitsVegCityLot = (px, pz, pad = 2.5) => {
+    if (!vegCity?.blocks?.length) return false;
+    const bl = vegCity.blocks;
+    for (let b = 0; b < bl.length; b += CITY_BLOCK_FLOATS) {
+      const dx = px - bl[b], dz = pz - bl[b + 2];
+      const hw = bl[b + 4] * 0.5 + pad, hd = bl[b + 5] * 0.5 + pad;
+      if (Math.abs(dx) > hw + hd || Math.abs(dz) > hw + hd) continue;
+      const c = Math.cos(bl[b + 3]), s = Math.sin(bl[b + 3]);
+      if (Math.abs(dx * c - dz * s) <= hw && Math.abs(dx * s + dz * c) <= hd) return true;
+    }
+    return false;
+  };
+  const isClearOfTownAndWater = (px, pz) => {
+    if (vegWaterAt?.(px, pz)) return false;
+    if (!portPlacement) return true;
+    const distPort = Math.hypot(px - portPlacement.center.x, pz - portPlacement.center.z);
+    const hullMargin = portPlacement.hasOrthophotoFootprints ? 6 : 10;
+    if (
+      (!portPlacement.hasOrthophotoFootprints &&
+        !portPlacement.hasIndigenousSettlement &&
+        distPort < portPlacement.clearRadius * 0.68) ||
+      !portClearanceEnvelope(portPlacement, px, pz, hullMargin) ||
+      streetEdgeAt(portPlacement.streets, px, pz) < PLANT_STREET_GAP_M ||
+      hitsVegCityLot(px, pz, 2.5)
+    ) {
+      return false;
+    }
+    return true;
+  };
+
   for (let id = 0; id < candidates; id++) {
     const u = rand();
     const v = rand();
@@ -9176,19 +9250,7 @@ export function seedCoastalVegetation(
     const h = terrainSample(heights, x, z, region);
     if (h < 2.4 || h > 855) continue;
 
-    if (portPlacement) {
-      const distPort = Math.hypot(x - portPlacement.center.x, z - portPlacement.center.z);
-      const hullMargin = portPlacement.hasOrthophotoFootprints ? 4 : 10;
-      if (
-        (!portPlacement.hasOrthophotoFootprints &&
-          !portPlacement.hasIndigenousSettlement &&
-          distPort < portPlacement.clearRadius * 0.68) ||
-        !portClearanceEnvelope(portPlacement, x, z, hullMargin) ||
-        streetEdgeAt(portPlacement.streets, x, z) < PLANT_STREET_GAP_M
-      ) {
-        continue;
-      }
-    }
+    if (!isClearOfTownAndWater(x, z)) continue;
 
     const sx = (coastalSampleClamped(heights, x + 12, z, region) - coastalSampleClamped(heights, x - 12, z, region)) / 24;
     const sz = (coastalSampleClamped(heights, x, z + 12, region) - coastalSampleClamped(heights, x, z - 12, region)) / 24;
@@ -9235,7 +9297,7 @@ export function seedCoastalVegetation(
         palms.push(...tuple);
         const scale = ht / 22.0;
         const yaw = shape * Math.PI * 2;
-        const sink = Math.max(0.12, COCONUT_PALM_GENOME_SPEC.basalRadiusMetres * scale * slope + 0.08);
+        const sink = 0.22 + 0.68 * COCONUT_PALM_GENOME_SPEC.basalRadiusMetres * scale * slope;
         const tint = 0.94 + 0.12 * tNorm;
         palmRoots.push(
           x,
@@ -9268,11 +9330,7 @@ export function seedCoastalVegetation(
             gv > 0.02 &&
             gv < 0.98 &&
             vegetationProbability(biomeMask, m, gu, gv) > 0 &&
-            (!portPlacement ||
-              ((portPlacement.hasOrthophotoFootprints ||
-                Math.hypot(gx - portPlacement.center.x, gz - portPlacement.center.z) >=
-                  portPlacement.clearRadius * 0.72) &&
-                portClearanceEnvelope(portPlacement, gx, gz, portPlacement.hasOrthophotoFootprints ? 4 : 10)))
+            isClearOfTownAndWater(gx, gz)
           ) {
             const gsx = (coastalSampleClamped(heights, gx + 12, gz, region) - coastalSampleClamped(heights, gx - 12, gz, region)) / 24;
             const gsz = (coastalSampleClamped(heights, gx, gz + 12, region) - coastalSampleClamped(heights, gx, gz - 12, region)) / 24;
@@ -9291,7 +9349,7 @@ export function seedCoastalVegetation(
               allTrees.push(...gTuple);
               palms.push(...gTuple);
               const gScale = ght / 22.0;
-              const gSink = Math.max(0.12, COCONUT_PALM_GENOME_SPEC.basalRadiusMetres * gScale * gSlope + 0.08);
+              const gSink = 0.22 + 0.68 * COCONUT_PALM_GENOME_SPEC.basalRadiusMetres * gScale * gSlope;
               palmRoots.push(
                 gx,
                 gh - gSink,
@@ -9840,7 +9898,7 @@ export function buildCoastalMesh(
 
   // Emit a -1.5 m vertical manifold border-lip skirt along land section borders (i=0, n-1, j=0, n-1)
   // so multi-resolution chords are 100% watertight from every viewing angle with zero sky/ocean bleed.
-  if (borderSkirtSegments.length > 0) {
+  if ((seamOptions || n < 513) && borderSkirtSegments.length > 0) {
     const skirtVertCache = new Map();
     const getSkirtVert = (topIdx) => {
       const hit = skirtVertCache.get(topIdx);
@@ -10318,7 +10376,7 @@ function dressProceduralCoastalPack(pack, heights, port, elevationSource, satell
     };
     port.riverCut = country.riverCut ?? null;
   }
-  const cityPlan = country?.plan ?? null;
+  const cityPlan = country?.plan ?? port?.colonialCity ?? null;
   // A founded country names who mans its seat; the port's forts are manned from that roll.
   if (country?.watch) port.watch = country.watch;
   if (cityPlan?.paving?.length) port.streets = paveCityStreets(port.streets, cityPlan.paving);
@@ -13267,14 +13325,36 @@ export function growFrontierParcel(pack, parcel, heights) {
   const portCx = pack.port?.center?.x ?? region.x;
   const portCz = pack.port?.center?.z ?? region.z;
   const baseYaw = Math.atan2(portCx - hubX, portCz - hubZ);
-  const buildingPlan = [
-    [CITY_TYPE.THATCH_LONGHOUSE, 0, 0, CITY_ROOF.GABLE + CITY_TYPED_ROOF + CITY_THATCH_ROOF, CITY_WALL.HOUSE, 3.3, true],
-    [CITY_TYPE.BARN, 22, -10, CITY_ROOF.GABLE + CITY_TYPED_ROOF + CITY_THATCH_ROOF, CITY_WALL.STUCCO, 3.1, true],
-    [CITY_TYPE.THATCH_HOUSE, -20, 8, CITY_ROOF.GABLE + CITY_TYPED_ROOF + CITY_THATCH_ROOF, CITY_WALL.HOUSE, 3.6, true],
-    [CITY_TYPE.GRANARY, 16, 18, CITY_ROOF.PYRAMID + CITY_TYPED_ROOF, 10, 2.3, false],
-    [CITY_TYPE.THATCH_HOUSE, -16, -22, CITY_ROOF.GABLE + CITY_TYPED_ROOF + CITY_THATCH_ROOF, CITY_WALL.HOUSE, 3.6, true],
-    [CITY_TYPE.SHED, 28, 6, CITY_ROOF.GABLE + CITY_TYPED_ROOF + CITY_THATCH_ROOF, 10, 0.95, true],
-  ];
+  const isTropicalHinterland = Math.abs(region.latitude ?? 0) < 31.5 || region.climate === 'tropical' || region.climate === 'subtropical';
+  const isAmericasColonial = !pack.port?.country && ((region.longitude ?? 0) < -30 || isTropicalHinterland);
+  const buildingPlan = isTropicalHinterland
+    ? [
+        // Colonial tropical *estancia / ingenio*: limewashed *Casa de Hacienda*, cane-press *trapiche* & boiling house, cacao/maize *troje*
+        [CITY_TYPE.STONE_HALL, 0, 0, CITY_ROOF.HIP + CITY_TYPED_ROOF, CITY_WALL.STUCCO, 2.5, true],
+        [CITY_TYPE.WINEPRESS, 22, -10, CITY_ROOF.GABLE + CITY_TYPED_ROOF, CITY_WALL.STUCCO, 2.7, true],
+        [CITY_TYPE.BARN, -20, 8, CITY_ROOF.GABLE + CITY_TYPED_ROOF, CITY_WALL.STUCCO, 2.9, true],
+        [CITY_TYPE.GRANARY, 16, 18, CITY_ROOF.PYRAMID + CITY_TYPED_ROOF, 10, 2.3, false],
+        [CITY_TYPE.COURT, -16, -22, CITY_ROOF.HIP + CITY_TYPED_ROOF, CITY_WALL.STUCCO, 2.4, true],
+        [CITY_TYPE.SHED, 28, 6, CITY_ROOF.HIP + CITY_TYPED_ROOF + CITY_THATCH_ROOF, 10, 1.35, true],
+      ]
+    : isAmericasColonial
+      ? [
+          // Temperate colonial Tidewater / northern farmstead: timber planter hall, clapboard barn, granary & sheds
+          [CITY_TYPE.HALL, 0, 0, CITY_ROOF.GABLE + CITY_TYPED_ROOF, CITY_WALL.HOUSE, 3.2, true],
+          [CITY_TYPE.BARN, 22, -10, CITY_ROOF.GABLE + CITY_TYPED_ROOF, 10, 3.1, true],
+          [cityHouseType(1, false, 0.25), -20, 8, CITY_ROOF.GABLE + CITY_TYPED_ROOF, CITY_WALL.HOUSE, 3.0, true],
+          [CITY_TYPE.GRANARY, 16, 18, CITY_ROOF.PYRAMID + CITY_TYPED_ROOF, 10, 2.3, false],
+          [cityHouseType(1, true, 0.45), -16, -22, CITY_ROOF.GABLE + CITY_TYPED_ROOF, CITY_WALL.HOUSE, 3.0, true],
+          [CITY_TYPE.SHED, 28, 6, CITY_ROOF.GABLE + CITY_TYPED_ROOF, 10, 1.15, true],
+        ]
+      : [
+          [CITY_TYPE.THATCH_LONGHOUSE, 0, 0, CITY_ROOF.GABLE + CITY_TYPED_ROOF + CITY_THATCH_ROOF, CITY_WALL.HOUSE, 3.3, true],
+          [CITY_TYPE.BARN, 22, -10, CITY_ROOF.GABLE + CITY_TYPED_ROOF + CITY_THATCH_ROOF, CITY_WALL.STUCCO, 3.1, true],
+          [CITY_TYPE.THATCH_HOUSE, -20, 8, CITY_ROOF.GABLE + CITY_TYPED_ROOF + CITY_THATCH_ROOF, CITY_WALL.HOUSE, 3.6, true],
+          [CITY_TYPE.GRANARY, 16, 18, CITY_ROOF.PYRAMID + CITY_TYPED_ROOF, 10, 2.3, false],
+          [CITY_TYPE.THATCH_HOUSE, -16, -22, CITY_ROOF.GABLE + CITY_TYPED_ROOF + CITY_THATCH_ROOF, CITY_WALL.HOUSE, 3.6, true],
+          [CITY_TYPE.SHED, 28, 6, CITY_ROOF.GABLE + CITY_TYPED_ROOF + CITY_THATCH_ROOF, 10, 0.95, true],
+        ];
   const wantBuildings = 3 + Math.min(3, Math.floor(parcel.dryShare * 4));
   for (let bi = 0; bi < wantBuildings; bi++) {
     const [type, ox, oz, roofKind, wallKind, rise, ridgeAlong] = buildingPlan[bi];
@@ -13287,12 +13367,30 @@ export function growFrontierParcel(pack, parcel, heights) {
     if (placedLots.some((q) => Math.hypot(q.x - x, q.z - z) < 14)) continue;
     const f = footprint(x, z, T.width, T.length, yaw);
     const Far = ridgeAlong ? footprint(x, z, f.d, f.w, yaw + Math.PI / 2) : f;
-    const tone = 0.35 + rr() * 0.35;
+    const tone = isTropicalHinterland ? 0.62 + rr() * 0.30 : 0.35 + rr() * 0.35;
     const floor = pushBlock(Far, T.height, rise, roofKind, wallKind, tone);
     pushTyped(type, x, floor, z, yaw, f.w, T.height, f.d, tone, 1);
     placedLots.push({ x, z });
   }
-  if (crestH > 18 && Math.hypot(crestX - hubX, crestZ - hubZ) > 28 && !waterSampler?.(crestX, crestZ)) {
+  if (isTropicalHinterland) {
+    // Peripheral indigenous *conuco* clearing with palm-thatch *bohío / oca* huts outside the estancia corral
+    const conucoAng = baseYaw + Math.PI * 0.72 + (rr() - 0.5) * 0.4;
+    const conucoDist = 56 + rr() * 14;
+    const cx = hubX + Math.sin(conucoAng) * conucoDist;
+    const cz = hubZ + Math.cos(conucoAng) * conucoDist;
+    for (let k = 0; k < 2; k++) {
+      const bx = cx + (k === 0 ? 0 : 12 * (rr() - 0.3));
+      const bz = cz + (k === 0 ? 0 : 12 * (rr() - 0.3));
+      const bh = heightAt(bx, bz);
+      if (bh < 1.4 || bh > 165 || waterSampler?.(bx, bz)) continue;
+      const bType = k === 0 ? CITY_TYPE.COT : CITY_TYPE.SHED;
+      const T = CITY_BUILDING_TYPES[bType];
+      const byaw = baseYaw + rr() * Math.PI;
+      const f = footprint(bx, bz, T.width, T.length, byaw);
+      const floor = pushBlock(f, T.height, 1.55, CITY_ROOF.HIP + CITY_TYPED_ROOF + CITY_THATCH_ROOF, 10, 0.48);
+      pushTyped(bType, bx, floor, bz, byaw, f.w, T.height, f.d, 0.48, 1);
+    }
+  } else if (!isAmericasColonial && crestH > 18 && Math.hypot(crestX - hubX, crestZ - hubZ) > 28 && !waterSampler?.(crestX, crestZ)) {
     const T = CITY_BUILDING_TYPES[CITY_TYPE.WINDMILL];
     const f = footprint(crestX, crestZ, T.width, T.length, baseYaw);
     const floor = pushBlock(f, T.height, 1.8, CITY_ROOF.PYRAMID + CITY_TYPED_ROOF, CITY_WALL.STUCCO, 0.25);
@@ -13308,7 +13406,7 @@ export function growFrontierParcel(pack, parcel, heights) {
     gateWidth: 4.5,
     maxBayLen: 6.8,
     wobble: 0.1,
-    stoneOnly: false,
+    stoneOnly: isTropicalHinterland,
     heightAt,
     waterSampler,
     pushTyped,
@@ -13321,7 +13419,8 @@ export function growFrontierParcel(pack, parcel, heights) {
     const fz = hubZ + (fl === 0 ? 32 : -36);
     if (heightAt(fx, fz) < 1.2 || waterSampler?.(fx, fz)) continue;
     const count = fl === 0 ? 6 : 4;
-    const species = fl === 0 ? 0 : 1;
+    // Tropical/colonial *estancias* graze Criollo cattle (1) & horses/mules (3); Old World crofts graze sheep (0) & cattle (1).
+    const species = (isTropicalHinterland || isAmericasColonial) ? (fl === 0 ? 1 : 3) : (fl === 0 ? 0 : 1);
     for (let m = 0; m < count; m++) {
       const a = (m / count) * Math.PI * 2 + rr();
       const d = 3 + rr() * 9;

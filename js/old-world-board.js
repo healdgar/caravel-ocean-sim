@@ -588,31 +588,58 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
     const T = CITY_BUILDING_TYPES[type];
     pushTyped(type, x, y, z, yaw, across, T.height, T.length, paint + 0.3 + 0.65 * tone, 0);
   };
+  const placeWallRadiusAt = (pl, wx, wz) => {
+    const rad = pl?.wall?.rad;
+    if (!rad?.length) return pl?.reach || pl?.radius || Infinity;
+    const n = rad.length, a = Math.atan2(wz - pl.z, wx - pl.x) / (2 * Math.PI) * n, i = Math.floor(a), f = a - i;
+    return rad[((i % n) + n) % n] * (1 - f) + rad[(((i + 1) % n) + n) % n] * f;
+  };
+  const royalAnchors = [];
+  for (const pl of places) {
+    if (pl?.castle?.keep) royalAnchors.push({ x: ox + pl.castle.keep.x, z: oz + pl.castle.keep.z });
+  }
+  for (const inst of port.instances ?? []) {
+    if (/Royal Palace|Waterfront Palace/i.test(inst?.label || '')) {
+      royalAnchors.push({ x: inst.x, z: inst.z });
+    }
+  }
+  if (seat?.kind === 'capital') royalAnchors.push({ x: seat.x, z: seat.z });
+  const nearRoyalOrKeep = (wx, wz) => {
+    for (let i = 0; i < royalAnchors.length; i++) {
+      if (Math.hypot(wx - royalAnchors[i].x, wz - royalAnchors[i].z) <= 180) return true;
+    }
+    return false;
+  };
+
   // The street front of a house of trade: fixed to its front wall, hung out over the street.
-  const standFront = (k, f, floor, wallH) => {
+  const standFront = (k, f, floor, wallH, extraMural = false) => {
     const arch = arches[kinds[k * 6 + 1]], look = BOARD_STREETFRONT[arch === 'burgher' && quarter && quarter[k] === market ? 'shop' : arch];
     if (!look) return;
+    // Suppress urban retail shop-awnings on extra-mural country road spokes; wayside inns/smithies keep only signs or bushes.
+    if (extraMural && !look.sign && !look.bush) return;
     const hue = form[k * 3 + 2], hu = hue > 0 && hue < 1 ? hue : boardHashUnit(k, 31), side = hu > 0.5 ? 1 : -1;
     // Under the eaves of a house of one floor; never so near the ground that a head meets them.
     const penticeY = Math.min(BOARD_PENTICE_M, Math.max(2.25, wallH - 0.7)), signY = Math.min(BOARD_SIGN_M, Math.max(2.7, wallH - 0.3)), stakeY = Math.min(BOARD_STAKE_M, Math.max(2.9, wallH - 0.3));
-    if (look.awn) { const [x, z] = local(f, 0, -f.d / 2); furnish(CITY_TYPE.PENTICE, x, floor + penticeY, z, f.yaw, look.awn === true ? BOARD_CLOTHS[Math.floor(hu * 5)] : look.awn, boardHashUnit(k, 67), f.w * 0.82); }
+    if (look.awn && !extraMural) { const [x, z] = local(f, 0, -f.d / 2); furnish(CITY_TYPE.PENTICE, x, floor + penticeY, z, f.yaw, look.awn === true ? BOARD_CLOTHS[Math.floor(hu * 5)] : look.awn, boardHashUnit(k, 67), f.w * 0.82); }
     if (look.sign) { const [x, z] = local(f, f.w * 0.36 * side, -f.d / 2); furnish(CITY_TYPE.SIGN, x, floor + signY, z, f.yaw, look.sign, boardHashUnit(k, 71)); }
     if (look.bush) { const [x, z] = local(f, -f.w * 0.36 * side, -f.d / 2); furnish(CITY_TYPE.ALE_STAKE, x, floor + stakeY, z, f.yaw, CITY_PAINT.GREEN, boardHashUnit(k, 73)); }
     fronts++;
   };
-  const standHouse = (k, f, storeys, toStreet, mannered = true) => {
-    const wallH = storeys * CITY_STOREY_M + boardHashUnit(k, 11) * 0.5;
+  const standHouse = (k, f, storeys, toStreet, mannered = true, { extraMural = false, royalProximity = false } = {}) => {
+    const storeySpan = extraMural ? (1 + (boardHashUnit(k, 61) < 0.38 ? 0.45 : 0)) : storeys;
+    const wallH = storeySpan * CITY_STOREY_M + boardHashUnit(k, 11) * (extraMural ? 0.35 : 0.5);
     const base = seatBlock(f, toStreet ? heightAt(f.x - Math.sin(f.yaw) * (f.d / 2 + 1.5), f.z - Math.cos(f.yaw) * (f.d / 2 + 1.5)) : null);
     if (base.range > 7.5) { dropped.steep++; return; }
-    const tone = washOf(k);
+    const tone = royalProximity ? (0.90 + boardHashUnit(k, 29) * 0.09) : washOf(k);
+    const wallMat = royalProximity ? (boardHashUnit(k, 63) < 0.45 ? CITY_WALL.ASHLAR : CITY_WALL.STUCCO) : CITY_WALL.HOUSE;
     // A broad front keeps its eaves to the street; a narrow, deep plot more often turns its gable to it.
-    const eaves = boardHashUnit(k, 47) < (f.w >= f.d * 0.8 ? 0.85 : 0.5), type = cityHouseType(storeys, eaves, mannered ? boardHashUnit(k, 53) : 0), T = CITY_BUILDING_TYPES[type], up = wallH / T.height;
-    if (eaves) pushBlock(footprint(f.x, f.z, f.d, f.w, f.yaw + Math.PI / 2), wallH, 0.36 * T.length / 2 * up, CITY_ROOF.GABLE + CITY_TYPED_ROOF, CITY_WALL.HOUSE, tone, base);
-    else pushBlock(f, wallH, 0.5 * T.width / 2 * up, CITY_ROOF.GABLE + CITY_TYPED_ROOF, CITY_WALL.HOUSE, tone, base);
+    const eaves = boardHashUnit(k, 47) < (f.w >= f.d * 0.8 ? 0.85 : 0.5), type = cityHouseType(extraMural ? 1 : storeys, eaves, (mannered && !extraMural) ? (royalProximity ? 0.85 : boardHashUnit(k, 53)) : 0), T = CITY_BUILDING_TYPES[type], up = wallH / T.height;
+    if (eaves) pushBlock(footprint(f.x, f.z, f.d, f.w, f.yaw + Math.PI / 2), wallH, 0.36 * T.length / 2 * up, CITY_ROOF.GABLE + CITY_TYPED_ROOF, wallMat, tone, base);
+    else pushBlock(f, wallH, 0.5 * T.width / 2 * up, CITY_ROOF.GABLE + CITY_TYPED_ROOF, wallMat, tone, base);
     pushTyped(type, f.x, base.floor, f.z, f.yaw, f.w, wallH, f.d, tone);
     occupy(f); houses++;
     const house = typedTypes.length - 1;
-    if (toStreet) standFront(k, f, base.floor, wallH);
+    if (toStreet) standFront(k, f, base.floor, wallH, extraMural);
     if (typedTypes.length - 1 > house) attached.set(house, typedTypes.length - 1 - house);
   };
   const standChurch = (k, f, great, tall) => {
@@ -822,13 +849,21 @@ export function layBoardCountry({ baked, region, grid, heights = null, heightAt,
       // and five the tallest of those (the Rua Nova's "three, four and even five").
       let storeys = Math.max(1, Math.min(2, Math.round(h / CITY_STOREY_M)));
       const plain = arch === 'shed' || arch === 'longhouse';
-      if (plain) storeys = 1;
-      else if (place === 0 && seat.reach > 0) {
+      const pl = places[place] ?? seat;
+      const wallR = placeWallRadiusAt(pl, bx, bz);
+      const distFromCenter = Math.hypot(bx - pl.x, bz - pl.z);
+      const extraMural = Boolean(pl?.wall?.rad?.length && distFromCenter > wallR * 1.05);
+      const royalProximity = !plain && !extraMural && nearRoyalOrKeep(bx, bz);
+      if (plain || extraMural) storeys = 1;
+      else if (royalProximity) {
+        const lot = boardHashUnit(k, 59);
+        storeys = Math.max(storeys, lot < 0.45 ? 4 : 3);
+      } else if (place === 0 && seat.reach > 0) {
         const near = 1 - Math.hypot(bx - seat.x, bz - seat.z) / seat.reach, lot = boardHashUnit(k, 59), merchant = arch === 'burgher' || arch === 'shop';
         if (near > 0.72) storeys = merchant ? (lot < 0.1 ? 5 : lot < 0.4 ? 4 : 3) : lot < 0.55 ? 3 : 2;
         else if (near > 0.4) storeys = Math.min(3, storeys + (lot < (merchant ? 0.5 : 0.25) ? 1 : 0));
       }
-      standHouse(k, f, Math.min(CITY_HOUSE_STOREYS, storeys), fx || fz, !plain);
+      standHouse(k, f, Math.min(CITY_HOUSE_STOREYS, storeys), fx || fz, !plain && !extraMural, { extraMural, royalProximity });
     }
   }
 

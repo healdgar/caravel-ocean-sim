@@ -17,8 +17,8 @@ import {loadForestMass,createForestMassRenderer,forestMiddleWoodPartition,FOREST
 import {loadForestMiddle,FOREST_MIDDLE_ASSETS,SUBTROPICAL_FOREST_MIDDLE_ASSETS,PORTUGAL_FOREST_MIDDLE_ASSETS} from './forest-middle.js';
 import {bakeLandImpactDeformations} from './part-assembly.js';
 import {buildingFracturePipeline,createPortFractures} from './building-fracture.js';
-import {streetEdgeAt} from './town-streets.js';
-import {oldWorldCountry,registerBakedBoard} from './old-world.js';
+import {paveCityStreets,streetEdgeAt} from './town-streets.js';
+import {oldWorldCountry,refreshOldWorldBoardCountry,registerBakedBoard} from './old-world.js';
 import {boardAsKept,keptBoard} from './board-keep.js';
 import {bakedBoardAsset} from './board-model.js';
 import {createBoardStamp,requestBoardStampPipelines} from './board-stamp.js';
@@ -50,6 +50,7 @@ import {
   buildMockCoastalSection,
   planUngrownFrontierParcels,
   growFrontierParcel,
+  rebuildPackFrontierCity,
   generateCoastalNeighborSection,
   smoothCoastlineAndForeshoreBeaches,
   synthesizeCoastalBeaches,
@@ -102,7 +103,7 @@ const SPECIES_VETERAN_AFFINITY = Object.freeze({
 export function retargetForestPackToProcedural(
   forestPack,
   proceduralPack,
-  groundSample,
+  groundSample = (x, z) => terrainSurfaceSample(proceduralPack.heights, x, z, proceduralPack.region),
   { isMobile = false, extraSections = [], maxRootCapacity = null, climateProfile = null } = {}
 ) {
   const protoCount = forestPack.manifest.prototypes.length;
@@ -183,12 +184,50 @@ export function retargetForestPackToProcedural(
     for (let k = 0; k < src.length; k++) dst.push(src[k]);
   };
 
+  const buildCityBlockTester = (cityObj, pad = 2.6) => {
+    const bl = cityObj?.blocks;
+    if (!bl?.length) return null;
+    const cellM = 32;
+    const grid = new Map();
+    const keyOf = (i, j) => (i + 32768) * 65536 + (j + 32768);
+    for (let b = 0; b < bl.length; b += CITY_BLOCK_FLOATS) {
+      const bx = bl[b], bz = bl[b + 2], yaw = bl[b + 3];
+      const hw = bl[b + 4] * 0.5 + pad, hd = bl[b + 5] * 0.5 + pad;
+      const reach = Math.hypot(hw, hd);
+      const entry = { bx, bz, c: Math.cos(yaw), s: Math.sin(yaw), hw, hd };
+      for (let j = Math.floor((bz - reach) / cellM); j <= Math.floor((bz + reach) / cellM); j++) {
+        for (let i = Math.floor((bx - reach) / cellM); i <= Math.floor((bx + reach) / cellM); i++) {
+          const k = keyOf(i, j);
+          let list = grid.get(k);
+          if (!list) grid.set(k, list = []);
+          list.push(entry);
+        }
+      }
+    }
+    return (px, pz) => {
+      const list = grid.get(keyOf(Math.floor(px / cellM), Math.floor(pz / cellM)));
+      if (!list) return false;
+      for (let m = 0; m < list.length; m++) {
+        const e = list[m], dx = px - e.bx, dz = pz - e.bz;
+        if (Math.abs(dx * e.c - dz * e.s) <= e.hw && Math.abs(dx * e.s + dz * e.c) <= e.hd) return true;
+      }
+      return false;
+    };
+  };
+
+  const heightFingerprint = (hArr) => {
+    if (!hArr?.length) return '0';
+    const len = hArr.length;
+    const idxs = [0, len >> 3, len >> 2, (len * 3) >> 3, len >> 1, (len * 5) >> 3, (len * 3) >> 2, (len * 7) >> 3, len - 1];
+    return idxs.map((idx) => Math.round((hArr[Math.min(len - 1, idx)] || 0) * 100)).join(',');
+  };
+
   const seedSectionCanopy = (secPack, secMaxRoots) => {
     const region = secPack.region;
     const span = region.span ?? 8192;
     const areaScale = span < 4096 ? Math.max(0.45, Math.min(1, Math.pow(span / 4096, 1.15))) : 1;
     const effectiveSecMaxRoots = Math.max(64, Math.round(secMaxRoots * areaScale));
-    const cacheKey = `${activeClimate.koppenCode ?? activeClimate.climate}:${protoCount}:${effectiveSecMaxRoots}:${span}:${secPack.heights ? secPack.heights[0] : 0}`;
+    const cacheKey = `${activeClimate.koppenCode ?? activeClimate.climate}:${protoCount}:${effectiveSecMaxRoots}:${span}:${heightFingerprint(secPack.heights)}:${secPack.port?.instances?.length ?? 0}:${secPack.city?.count ?? 0}`;
     if (secPack._cachedForestBuckets?.key === cacheKey) {
       const cached = secPack._cachedForestBuckets.buckets;
       for (let i = 0; i < protoCount; i++) {
@@ -211,6 +250,7 @@ export function retargetForestPackToProcedural(
     // Tended country: trees stand where a farmer set them, apart and kept small.
     const country = oldWorldCountry(region, secPack.heights, port);
     const secWaterAt = createInlandWaterSampler(port?.country ?? country, { margin: 3.8 });
+    const secCityBlocked = buildCityBlockTester(secPack.city ?? country?.plan ?? port?.colonialCity, 2.6);
     const tendedKinds = new Map();
     const tendedPrototypes = (tended) => {
       let ids = tendedKinds.get(tended);
@@ -335,20 +375,21 @@ export function retargetForestPackToProcedural(
       // No forest giants and no nurse rings among a farmer's trees.
       if (tended && (tended.none || isVeteran || isSatellite)) return -1;
 
-      if (port && port.clearRadius > 0) {
+      if (port && (port.clearRadius > 0 || port.instances?.length > 0)) {
         const envPad = port.hasOrthophotoFootprints ? 8 : port.hasIndigenousSettlement ? 8.5 : 10;
         const clearEnv = !portClearanceEnvelope(port, x, z, envPad);
         const clearRad =
           !port.hasOrthophotoFootprints &&
           !port.hasIndigenousSettlement &&
+          port.clearRadius > 0 &&
           Math.hypot(x - port.center.x, z - port.center.z) < port.clearRadius * 0.38;
         if (clearEnv || clearRad) return -1;
-        if (!planted && streetEdgeAt(port.streets, x, z) < PLANT_STREET_GAP_M) return -1;
+        if (streetEdgeAt(port.streets, x, z) < (planted ? 1.2 : PLANT_STREET_GAP_M)) return -1;
       }
-      if (secWaterAt?.(x, z)) return -1;
+      if (secWaterAt?.(x, z) || secCityBlocked?.(x, z)) return -1;
 
       const gy = sampleSecGround(x, z);
-      const minGy = hasMangrove ? 0.32 : 0.75;
+      const minGy = hasMangrove ? 0.35 : 0.75;
       if (!Number.isFinite(gy) || gy < minGy || gy > 845) return -1;
       const sx = (sampleSecGround(x + 2, z) - sampleSecGround(x - 2, z)) * 0.25;
       const sz = (sampleSecGround(x, z + 2) - sampleSecGround(x, z - 2)) * 0.25;
@@ -559,7 +600,7 @@ export function retargetForestPackToProcedural(
       totalPlaced++;
 
       const basal = proto.basalRadius ?? 1.2;
-      const sink = Math.min(0.85, Math.max(0.16, basal * scale * slope * 0.65 + 0.12));
+      const sink = Math.min(1.6, 0.22 + 0.68 * basal * scale * slope);
       const yaw = (hash32Forest(key + 3) / 4294967296) * Math.PI * 2;
       const tint = 0.92 + (hash32Forest(key + 4) / 4294967296) * 0.16;
       const climateTint = activeClimate.foliageTint ?? (isTrop ? [0.78, 1.12, 0.68] : [1.0, 1.0, 1.0]);
@@ -636,8 +677,10 @@ export function retargetForestPackToProcedural(
       const wild = [validLandCells, nearLandCells, midLandCells, farLandCells];
       [validLandCells, nearLandCells, midLandCells, farLandCells] = [tendedCells.all, tendedCells.near, tendedCells.mid, tendedCells.far];
       setBandCuts();
+      const maxTendedShare = country?.board ? 0.26 : 0.48;
+      const wildWeight = country?.board ? 4.5 : 1.35;
       const tendedShare = wild[0].length > 0
-        ? Math.min(0.24, Math.max(0.10, tendedCells.all.length / Math.max(1, tendedCells.all.length + wild[0].length * 4.5)))
+        ? Math.min(maxTendedShare, Math.max(0.10, tendedCells.all.length / Math.max(1, tendedCells.all.length + wild[0].length * wildWeight)))
         : 1;
       const tendedBudget = Math.min(effectiveSecMaxRoots, totalPlaced + Math.round(Math.max(0, effectiveSecMaxRoots - totalPlaced) * tendedShare));
       const tendedSeed = (seed ^ 0x3c6ef372) >>> 0;
@@ -730,6 +773,21 @@ export function retargetForestPackToProcedural(
     }
   }
 
+  const basePort = proceduralPack.port ?? null;
+  const baseWaterAt = createInlandWaterSampler(basePort?.country ?? basePort?._resolvedCountry ?? null, { margin: 3.8 });
+  const baseCityBlocked = buildCityBlockTester(proceduralPack.city ?? basePort?.colonialCity ?? basePort?._resolvedCountry?.plan, 2.6);
+  const isBaseClearForTree = (px, pz) => {
+    if (baseWaterAt?.(px, pz) || baseCityBlocked?.(px, pz)) return false;
+    if (basePort && (basePort.clearRadius > 0 || basePort.instances?.length > 0)) {
+      const envPad = basePort.hasOrthophotoFootprints ? 8 : basePort.hasIndigenousSettlement ? 8.5 : 10;
+      if (!portClearanceEnvelope(basePort, px, pz, envPad)) return false;
+      if (!basePort.hasOrthophotoFootprints && !basePort.hasIndigenousSettlement && basePort.clearRadius > 0 &&
+          Math.hypot(px - basePort.center.x, pz - basePort.center.z) < basePort.clearRadius * 0.38) return false;
+      if (streetEdgeAt(basePort.streets, px, pz) < PLANT_STREET_GAP_M) return false;
+    }
+    return true;
+  };
+
   // Fallback to explicit scrub/upland arrays if biome grid did not place roots
   if (buckets.every((b) => b.length === 0)) {
     const sources = [
@@ -738,6 +796,7 @@ export function retargetForestPackToProcedural(
     ];
     for (let i = 0; i < sources.length; i += 8) {
       const x = sources[i], z = sources[i + 2];
+      if (!isBaseClearForTree(x, z)) continue;
       const legacyScale = sources[i + 3], yaw = sources[i + 4];
       const gy = groundSample(x, z);
       if (!Number.isFinite(gy) || gy < 2.0) continue;
@@ -750,7 +809,7 @@ export function retargetForestPackToProcedural(
       const scale = Math.max(0.90, Math.min(1.36, 0.72 + legacyScale * 0.085));
       const tint = 0.92 + ((hash * 7.3) % 0.16);
       const basal = forestPack.manifest.prototypes[protoId].basalRadius ?? 1.2;
-      const sink = Math.max(0.12, basal * scale * slope + 0.08);
+      const sink = Math.min(1.6, 0.22 + 0.68 * basal * scale * slope);
       buckets[protoId].push(x, gy - sink, z, scale, yaw, tint, tint, tint, protoId, sink, -2, 0);
     }
   }
@@ -761,12 +820,15 @@ export function retargetForestPackToProcedural(
     const basal = forestPack.manifest.prototypes[coconutId].basalRadius ?? 0.3;
     for (let i = 0; i < foreshore.length && i < FORESHORE_PALMS_MAX * 8; i += 8) {
       const x = foreshore[i], z = foreshore[i + 2], shape = foreshore[i + 5], seaX = -foreshore[i + 6], seaZ = -foreshore[i + 7];
+      if (!isBaseClearForTree(x, z)) continue;
       const gy = groundSample(x, z);
       if (!Number.isFinite(gy) || gy < 1.2) continue;
       const fsx = (groundSample(x + 2, z) - groundSample(x - 2, z)) * 0.25;
       const fsz = (groundSample(x, z + 2) - groundSample(x, z - 2)) * 0.25;
-      if (Math.hypot(fsx, fsz) > 0.34) continue;
-      const { scale, sink, yaw } = foreshorePalmPlacement(shape, seaX, seaZ, basal);
+      const fSlope = Math.hypot(fsx, fsz);
+      if (fSlope > 0.34) continue;
+      const { scale, sink: baseSink, yaw } = foreshorePalmPlacement(shape, seaX, seaZ, basal);
+      const sink = Math.max(baseSink, 0.22 + 0.68 * basal * scale * fSlope);
       const tint = 0.94 + shape * 0.12;
       buckets[coconutId].push(x, gy - sink, z, scale, yaw, tint, tint, tint, coconutId, sink, -2, 0);
     }
@@ -1547,6 +1609,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   }
   let inlandWater=proceduralPack?await createInlandWater({device,shader,format,samples,resources:nearResources,clouds,coastalField,oceanBridge,initialGeometry:proceduralPack.inlandWater??null}):null;
   let herds=proceduralPack?await createLivestockHerds({device,shader,format,samples,frameUBO,landUniform:uniform,nearDomain,elevation,landShadowUniform:activeLandShadows.uniform,resources:nearResources,clouds,initialHerds:proceduralPack.herds??null,initialBridges:proceduralPack.port?.country?.bridges??null,isMobile}):null;
+  if(herds&&proceduralPack?.port?.streets?.mounts){
+    herds.setStreetMounts?.(proceduralPack.port.streets.mounts.seeds,proceduralPack.port.streets.mounts.routes);
+  }
   const meadowPack=await meadowPromise;
   let meadowGrass=null;
   if(proceduralPack&&meadowPack)try{
@@ -2019,12 +2084,15 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       north:loadedSections.has('0,-1')||dirs.some(d=>d.dx===0&&d.dz===-1),
       south:loadedSections.has('0,1')||dirs.some(d=>d.dx===0&&d.dz===1),
     };
+    let bordersModified=false;
     if(connectedCenter.west||connectedCenter.east||connectedCenter.north||connectedCenter.south){
       const modified=prepareSectionConnectedBorders(heights,activeRegion.size,connectedCenter);
       if(proceduralPack.rawHeights&&proceduralPack.rawHeights!==heights){
         prepareSectionConnectedBorders(proceduralPack.rawHeights,activeRegion.size,connectedCenter);
       }
       if(modified){
+        bordersModified=true;
+        proceduralPack._cachedForestBuckets=null;
         device.queue.writeTexture({texture:elevation},heights,{bytesPerRow:activeRegion.size*4},[activeRegion.size,activeRegion.size]);
         const oldVerts=vertices,oldIdx=indices,oldSubIdx=submergedIndices!==indices?submergedIndices:null;
         mesh=buildCoastalMesh(activeRegion,heights,proceduralPack.beaches,null,savedPortOverride?null:proceduralPack.port,proceduralPack.rawHeights||heights,{lookupNeighbor:getSectionAt,secX:0,secZ:0,isMock:false});
@@ -2050,7 +2118,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     }finally{
       plannedSections.clear();
     }
-    if(addedMocks)rebuildNeighborTreeInstances();
+    if(addedMocks||bordersModified)rebuildNeighborTreeInstances();
   }
 
   function resetStreamedSections(){
@@ -2238,6 +2306,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     inlandWater?.setGeometry(upgradedPack.inlandWater??null);
     herds?.setBridges?.(upgradedPack.port?.country?.bridges??null);
     herds?.setHerds(upgradedPack.herds??null);
+    if(upgradedPack.port?.streets?.mounts){
+      herds?.setStreetMounts?.(upgradedPack.port.streets.mounts.seeds,upgradedPack.port.streets.mounts.routes);
+    }
     meadowGrass?.sync({region:activeRegion,heights,biome,beaches:proceduralPack.beaches??null,port:portOwner.port??null,city:upgradedPack.city??proceduralPack.city??null,board:upgradedPack.board??proceduralPack.board??null,inlandWater:upgradedPack.inlandWater??proceduralPack.inlandWater??null});
     if(upgradedPack.port?.country?.board){
       tradeVessels?.setTraffic(null,activeRegion,upgradedPack.port.country.riverReaches??[],upgradedPack.port.country.places??[],{heights,region:activeRegion,port:upgradedPack.port,bridges:upgradedPack.port.country.bridges??[],inlandWaterAt:(wx,wz)=>inlandWaterSampler?inlandWaterSampler(wx,wz):null});
@@ -2645,6 +2716,78 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     get inlandWater(){return inlandWater;},
     inlandWaterAt(x,z){return inlandWaterSampler?inlandWaterSampler(x-worldOffset.x,z-worldOffset.z):null;},
     get herds(){return herds;},
+    herdsWatch(from,to,best,projectile){return herds?.watchShot?herds.watchShot(from,to,best,projectile):best;},
+    setStreetMounts(mountSeeds,routes){return herds?.setStreetMounts?.(mountSeeds,routes);},
+    async refreshBoardFabric(nextBoardJson){
+      if(terrainDisposed||!proceduralPack||!nextBoardJson)return false;
+      const portObj=savedPortOverride?.port??proceduralPack.port;
+      const country=refreshOldWorldBoardCountry(nextBoardJson,activeRegion,heights,portObj,proceduralPack.surveyHeights??heights);
+      if(!country)return false;
+      device.queue.writeTexture({texture:elevation},heights,{bytesPerRow:activeRegion.size*4},[activeRegion.size,activeRegion.size]);
+      if(portObj){
+        portObj._resolvedCountry=country;
+        portObj.country={
+          board:country.board??null,
+          places:country.places??null,
+          riverReaches:country.riverReaches??null,
+          ponds:country.ponds??null,
+          bridges:country.bridges??null,
+        };
+        portObj.riverCut=country.riverCut??null;
+        if(country.watch)portObj.watch=country.watch;
+        if(country.plan?.paving?.length){
+          portObj.streets=paveCityStreets(portObj.streets,country.plan.paving);
+          rebindNearTownField(portObj.streets);
+        }
+      }
+      const nextBaseCity=country.plan?{
+        blocks:country.plan.blocks,
+        count:country.plan.count,
+        typed:country.plan.typed,
+        typedTypes:country.plan.typedTypes,
+        typedCount:country.plan.typedCount,
+        typedBlocks:country.plan.typedBlocks,
+        typedAttached:country.plan.typedAttached??null,
+        stats:country.plan.stats,
+      }:null;
+      proceduralPack.board=country.board??null;
+      proceduralPack.inlandWater=country.inlandWater??null;
+      proceduralPack._baseCity=nextBaseCity;
+      proceduralPack._baseHerds=country.herds?new Float32Array(country.herds):new Float32Array(0);
+      if(proceduralPack.frontierParcels?.length){
+        rebuildPackFrontierCity(proceduralPack);
+      }else{
+        proceduralPack.city=nextBaseCity;
+        proceduralPack.herds=country.herds??null;
+      }
+      inlandWaterSampler=createInlandWaterSampler(portObj?.country??null);
+      inlandWater?.setGeometry?.(proceduralPack.inlandWater??null);
+      herds?.setBridges?.(portObj?.country?.bridges??null);
+      herds?.setHerds?.(proceduralPack.herds??null);
+      if(proceduralPack.albedo){
+        device.queue.writeTexture({texture:albedo},proceduralPack.albedo,{bytesPerRow:activeRegion.albedoSize*4},[activeRegion.albedoSize,activeRegion.albedoSize]);
+      }
+      boardStamp?.dispose();boardStamp=null;
+      if(proceduralPack.board){
+        const stamp=await createBoardStamp({device,shader,board:proceduralPack.board});
+        if(terrainDisposed){stamp.dispose();return false;}
+        boardStamp=stamp;
+        boardStamp.stamp(albedo,activeRegion.albedoSize);
+      }
+      regenerateAlbedoMips();
+      cityStruckIndices.clear();cityStruck?.destroy();cityStruck=null;
+      cityBlocks?.buffer.destroy();cityBlocks=cityBlocksFor(proceduralPack);setCityBuildings(proceduralPack);
+      activeCity=proceduralPack.city??null;cityTargets=cityTargetsFor(activeCity,portObj);
+      if(!savedPortOverride){
+        portFractures?.destroy();
+        portFractures=portFracturesFor(proceduralPack.portGeometry,portObj,portMesh?.indices,cityTargets);
+      }
+      meadowGrass?.sync?.({
+        region:activeRegion,heights,biome,beaches:proceduralPack.beaches??null,port:portObj??null,
+        city:proceduralPack.city??null,board:proceduralPack.board??null,inlandWater:proceduralPack.inlandWater??null,
+      });
+      return true;
+    },
     get meadowGrass(){return meadowGrass;},
     meadowGrassStats,
     get bridges(){return proceduralPack?.port?.country?.bridges??[];},

@@ -435,6 +435,7 @@ export function createVoyageController(cfg) {
       } else if (mode === 'hail') {
         pursuit.actionTriggered = true;
         pursuit.active = false;
+        if (enc?.intelPacket) cfg.onHailIntel?.(enc.intelPacket, enc);
         cfg.onHailVessel?.(enc, targetV);
       } else {
         pursuit.actionTriggered = true;
@@ -542,6 +543,7 @@ export function createVoyageController(cfg) {
       if (dist <= pursuit.hailRangeM && !pursuit.actionTriggered) {
         pursuit.actionTriggered = true;
         pursuit.active = false;
+        if (pursuit.encounter?.intelPacket) cfg.onHailIntel?.(pursuit.encounter.intelPacket, pursuit.encounter);
         cfg.onHailVessel?.(pursuit.encounter, targetV);
       }
     }
@@ -726,7 +728,9 @@ export function createVoyageController(cfg) {
       encounterDirector.resolveDecision(choiceId, voyage, boat, helmsman, {
         onOrderCompassCourse: (c) => orderCompassCourse(c),
         onToast: showToast,
-        onHailVessel: (enc) => {
+        portIntelSource: cfg.portIntelSource,
+        onHailVessel: (enc, intelPacket) => {
+          if (intelPacket) cfg.onHailIntel?.(intelPacket, enc);
           beginEncounterPursuit(enc, 'hail');
         },
         onEngageVessel: (enc, opts) => {
@@ -1903,6 +1907,22 @@ export function createVoyageController(cfg) {
       if (!voyage || !(days > 0)) return;
       voyage.dateMs += Math.round(days * 86400000);
       emit('change');
+    },
+    // Advance calendar clock strictly without engaging promoteActive() autopilot or tripping shoalScraping / localWarpCap.
+    advanceCalendarOnly(deltaMs) {
+      const dMs = Number(deltaMs);
+      if (!Number.isFinite(dMs) || dMs === 0) return voyage?.dateMs ?? DEFAULT_DEPARTURE.dateMs;
+      if (!voyage) {
+        start({ dateMs: DEFAULT_DEPARTURE.dateMs, passive: true });
+      }
+      voyage.dateMs += Math.round(dMs);
+      if (astronomy && !respectManualSky) {
+        astronomy.set({ mode: 'astronomy', date: new Date(voyage.dateMs).toISOString() }, boat);
+        lastAstroRevision = astronomy.revision;
+      }
+      if (hud && !hud.root.hidden) updateHud();
+      emit('change');
+      return voyage.dateMs;
     },
     // A pilot takes her out past the bar and drops off in open water.
     pilotOut({ drop = null } = {}) {

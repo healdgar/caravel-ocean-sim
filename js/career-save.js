@@ -11,9 +11,172 @@ export const SHIPWRECK_PROVISION_DAYS = 14;
 export const SHIPWRECK_SURVIVAL = 0.6;
 export const SHIPWRECK_REPLACEMENT_HULL = 0.7;
 export const SHIPWRECK_PURSE_SAVED = 0.5;
+export const PORT_CONTACT_RANGE_M = 650;
+export const PORT_ROADSTEAD_ANCHOR_RANGE_M = 950;
+const INTEL_DAY_MS = 86_400_000;
+
+const clonePlain = (val) => (val === undefined ? undefined : JSON.parse(JSON.stringify(val)));
+
+export function createIntelLedger() {
+  return { lastDepartedPortId: null, ports: {}, seaRumors: [] };
+}
+
+export function normalizeIntelLedger(raw) {
+  const base = createIntelLedger();
+  if (!raw || typeof raw !== 'object') return base;
+  return {
+    lastDepartedPortId: typeof raw.lastDepartedPortId === 'string' ? raw.lastDepartedPortId : null,
+    ports: (raw.ports && typeof raw.ports === 'object' && !Array.isArray(raw.ports)) ? { ...raw.ports } : {},
+    seaRumors: Array.isArray(raw.seaRumors) ? raw.seaRumors.slice(-16) : [],
+  };
+}
+
+export function checkLivePortContact({
+  moored = false,
+  ashore = false,
+  portCallOpen = false,
+  anchored = false,
+  distToPortM = Infinity,
+} = {}) {
+  if (moored || ashore || portCallOpen) return true;
+  if (Number.isFinite(distToPortM) && distToPortM <= PORT_CONTACT_RANGE_M) return true;
+  if (anchored && Number.isFinite(distToPortM) && distToPortM <= PORT_ROADSTEAD_ANCHOR_RANGE_M) return true;
+  return false;
+}
+
+export function snapshotPortIntel(ledger, {
+  portId,
+  portName = '',
+  dateMs = Date.now(),
+  boardDay = null,
+  town = null,
+  market = null,
+  realm = null,
+  news = [],
+} = {}) {
+  if (!ledger || typeof ledger !== 'object' || !portId) return null;
+  if (!ledger.ports || typeof ledger.ports !== 'object') ledger.ports = {};
+  if (!Array.isArray(ledger.seaRumors)) ledger.seaRumors = [];
+  const prev = ledger.ports[portId] || null;
+  const rec = {
+    portId: String(portId),
+    portName: String(portName || town?.name || prev?.portName || portId),
+    asOfDateMs: Number.isFinite(dateMs) ? dateMs : (prev?.asOfDateMs ?? 0),
+    asOfBoardDay: Number.isFinite(boardDay) ? boardDay : (prev?.asOfBoardDay ?? null),
+    source: { kind: 'port', shipName: null, masterName: null, hailedAtDateMs: null },
+    town: town ? clonePlain(town) : (prev?.town ?? null),
+    market: Array.isArray(market) ? clonePlain(market) : (prev?.market ?? null),
+    realm: realm ? clonePlain(realm) : (prev?.realm ?? null),
+    news: Array.isArray(news) ? clonePlain(news.slice(-8)) : (prev?.news ?? []),
+  };
+  ledger.ports[portId] = rec;
+  ledger.lastDepartedPortId = String(portId);
+  return rec;
+}
+
+export function mergeHailIntel(ledger, intelPacket, hailedAtDateMs = Date.now()) {
+  if (!ledger || typeof ledger !== 'object' || !intelPacket || typeof intelPacket !== 'object') {
+    return { updated: false, record: null };
+  }
+  if (!ledger.ports || typeof ledger.ports !== 'object') ledger.ports = {};
+  if (!Array.isArray(ledger.seaRumors)) ledger.seaRumors = [];
+
+  if (intelPacket.rumor) {
+    ledger.seaRumors.push({
+      dateMs: hailedAtDateMs,
+      shipName: intelPacket.shipName || null,
+      masterName: intelPacket.masterName || null,
+      originPort: intelPacket.originPort?.name || null,
+      text: String(intelPacket.rumor),
+    });
+    if (ledger.seaRumors.length > 16) ledger.seaRumors.splice(0, ledger.seaRumors.length - 16);
+  }
+
+  const portId = intelPacket.originPort?.id || null;
+  const departedDateMs = Number(intelPacket.departedDateMs);
+  if (!portId || !Number.isFinite(departedDateMs)) {
+    return { updated: false, record: null };
+  }
+  const existing = ledger.ports[portId] || null;
+  const existingMs = Number.isFinite(existing?.asOfDateMs) ? existing.asOfDateMs : -Infinity;
+  if (!(departedDateMs > existingMs)) {
+    return { updated: false, record: existing };
+  }
+
+  const nextMarket = Array.isArray(intelPacket.marketSnapshot) && intelPacket.marketSnapshot.length
+    ? clonePlain(intelPacket.marketSnapshot)
+    : (existing?.market ?? null);
+  const nextRealm = intelPacket.realmSnapshot
+    ? { ...(existing?.realm ?? {}), ...clonePlain(intelPacket.realmSnapshot) }
+    : (existing?.realm ?? null);
+  const nextTown = intelPacket.townSnapshot
+    ? { ...(existing?.town ?? {}), ...clonePlain(intelPacket.townSnapshot) }
+    : (existing?.town ?? (intelPacket.originPort?.name ? { name: intelPacket.originPort.name } : null));
+  const nextNews = Array.isArray(intelPacket.newsItems) && intelPacket.newsItems.length
+    ? clonePlain(intelPacket.newsItems.slice(-8))
+    : (existing?.news ?? []);
+
+  const rec = {
+    portId: String(portId),
+    portName: String(intelPacket.originPort?.name || existing?.portName || portId),
+    asOfDateMs: departedDateMs,
+    asOfBoardDay: Number.isFinite(intelPacket.asOfBoardDay) ? intelPacket.asOfBoardDay : (existing?.asOfBoardDay ?? null),
+    source: {
+      kind: 'hail',
+      shipName: intelPacket.shipName ? String(intelPacket.shipName) : 'a passing sail',
+      shipKind: intelPacket.shipKind ? String(intelPacket.shipKind) : 'vessel',
+      masterName: intelPacket.masterName ? String(intelPacket.masterName) : null,
+      hailedAtDateMs: Number.isFinite(hailedAtDateMs) ? hailedAtDateMs : departedDateMs,
+    },
+    town: nextTown,
+    market: nextMarket,
+    realm: nextRealm,
+    news: nextNews,
+  };
+  ledger.ports[portId] = rec;
+  if (!ledger.lastDepartedPortId) ledger.lastDepartedPortId = String(portId);
+  return { updated: true, record: rec };
+}
+
+export function resolveMateIntel(ledger, { portId = null, nowDateMs = Date.now() } = {}) {
+  if (!ledger || typeof ledger !== 'object' || !ledger.ports) return null;
+  const key = (portId && ledger.ports[portId])
+    ? portId
+    : (ledger.lastDepartedPortId && ledger.ports[ledger.lastDepartedPortId])
+      ? ledger.lastDepartedPortId
+      : Object.keys(ledger.ports)[0] || null;
+  if (!key || !ledger.ports[key]) return null;
+  const rec = ledger.ports[key];
+  const asOfDateMs = Number.isFinite(rec.asOfDateMs) ? rec.asOfDateMs : nowDateMs;
+  const ageDays = Math.max(0, Math.floor((nowDateMs - asOfDateMs) / INTEL_DAY_MS));
+  const src = rec.source || { kind: 'port' };
+  const spokenDaysAgo = src.kind === 'hail' && Number.isFinite(src.hailedAtDateMs)
+    ? Math.max(0, Math.floor((nowDateMs - src.hailedAtDateMs) / INTEL_DAY_MS))
+    : null;
+  const transitDaysAtHail = src.kind === 'hail' && Number.isFinite(src.hailedAtDateMs)
+    ? Math.max(0, Math.round((src.hailedAtDateMs - asOfDateMs) / INTEL_DAY_MS))
+    : null;
+  const tagMeta = { stale: true, ageDays, source: { ...src }, portId: rec.portId, portName: rec.portName, asOfDateMs };
+  return {
+    stale: true,
+    portId: rec.portId,
+    portName: rec.portName,
+    asOfDateMs,
+    asOfBoardDay: rec.asOfBoardDay ?? null,
+    ageDays,
+    spokenDaysAgo,
+    transitDaysAtHail,
+    source: { ...src },
+    town: rec.town ? { ...clonePlain(rec.town), ...tagMeta } : null,
+    market: Array.isArray(rec.market) ? rec.market.map((m) => ({ ...clonePlain(m), stale: true, ageDays })) : null,
+    realm: rec.realm ? { ...clonePlain(rec.realm), ...tagMeta } : null,
+    news: Array.isArray(rec.news) ? rec.news.map((n) => ({ ...clonePlain(n), stale: true, ageDays })) : [],
+    seaRumors: Array.isArray(ledger.seaRumors) ? clonePlain(ledger.seaRumors.slice(-6)) : [],
+  };
+}
 
 export function createCareerSave({ era = 'new-world' } = {}) {
-  return { version: CAREER_SAVE_VERSION, era, savedAtMs: 0, voyage: null, vessel: null, sovereignty: null, url: null, career: { shipsLost: 0 } };
+  return { version: CAREER_SAVE_VERSION, era, savedAtMs: 0, voyage: null, vessel: null, sovereignty: null, url: null, career: { shipsLost: 0, intelLedger: createIntelLedger() } };
 }
 
 export function parseCareerSave(raw) {
@@ -21,7 +184,9 @@ export function parseCareerSave(raw) {
   try {
     const save = typeof raw === 'string' ? JSON.parse(raw) : raw;
     if (save?.version !== CAREER_SAVE_VERSION) return null;
-    return { ...createCareerSave(), ...save, career: { shipsLost: 0, ...save.career } };
+    const career = { shipsLost: 0, ...save.career };
+    career.intelLedger = normalizeIntelLedger(career.intelLedger);
+    return { ...createCareerSave(), ...save, career };
   } catch {
     return null;
   }

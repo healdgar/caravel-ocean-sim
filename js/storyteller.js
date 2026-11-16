@@ -131,7 +131,7 @@ export function createStoryteller({ game, counsel = null, documentRef = globalTh
   function set(next, words) {
     state = next; said = words;
     if (stateEl) stateEl.textContent = words;
-    if (saysEl) { saysEl.hidden = !shown(); if (speakEl) speakEl.hidden = state !== 'paired'; }
+    if (saysEl) { saysEl.hidden = !shown(); if (speakEl) speakEl.hidden = !(state === 'paired' || Boolean(counsel?.reply)); }
     try { onState?.(state, words); } catch (fault) { console.error(fault); }
   }
   const send = (message) => { try { socket?.send(JSON.stringify(message)); return Boolean(socket); } catch { return false; } };
@@ -220,7 +220,18 @@ export function createStoryteller({ game, counsel = null, documentRef = globalTh
     if (!text) return false;
     const mate = game.mate?.() ?? null, to = soul ?? mate;
     show({ kind: 'mine', who: 'You', person: to?.id ?? null, text });
-    return tell({ kind: 'spoke', to: soul && soul.id !== mate?.id ? 'person' : 'mate', person: to?.id ?? null, name: to?.name ?? null, text });
+    const kindTo = soul && soul.id !== mate?.id ? 'person' : 'mate';
+    if (state === 'paired') {
+      return tell({ kind: 'spoke', to: kindTo, person: to?.id ?? null, name: to?.name ?? null, text });
+    }
+    if (kindTo === 'mate' && typeof counsel?.reply === 'function') {
+      Promise.resolve().then(() => counsel.reply(text)).then((ans) => {
+        const replyText = String(typeof ans === 'string' ? ans : ans?.text ?? '').trim();
+        if (replyText) show({ kind: 'say', who: mateName(), person: mate?.id ?? null, text: replyText });
+      }).catch((fault) => console.error(fault));
+      return true;
+    }
+    return false;
   }
 
   // The storyteller's place in a panel of the game (where its code is typed), and the words it puts on the screen.
@@ -241,7 +252,7 @@ export function createStoryteller({ game, counsel = null, documentRef = globalTh
     bodyEl = make('div', 'mate-body');
     listEl = make('ol'); listEl.setAttribute('aria-live', 'polite');
     topicsEl = make('div', 'mate-topics'); topicEls.add(topicsEl);
-    speakEl = make('form'); speakEl.hidden = state !== 'paired';
+    speakEl = make('form'); speakEl.hidden = !(state === 'paired' || Boolean(counsel?.reply));
     const words = make('input'), sayIt = make('button', '', 'Say'); words.maxLength = STORYTELLER_SAID_MOST; words.placeholder = 'Speak to your mate…'; words.setAttribute('aria-label', 'Speak to your first mate');
     speakEl.append(words, sayIt);
     speakEl.addEventListener('submit', (event) => { event.preventDefault(); if (speak(null, words.value)) words.value = ''; });

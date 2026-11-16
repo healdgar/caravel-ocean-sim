@@ -1,7 +1,8 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-// The poses of a town's people, baked once when a town comes into reach: the walk and stand that everyone has, and
-// what they do under fire. Falls come from the same ragdoll that brings down a soldier or a sailor, run once here,
-// so people in a street go down as they do without any of it being worked out per body per frame.
+// The poses of a town's people, baked once when a town comes into reach: the walk and stand that everyone has,
+// 1550 Iberian sela à gineta saddle-riding for mounted couriers/gentry, and what they do under fire. Falls come
+// from the same ragdoll that brings down a soldier or a sailor, run once here, so people in a street go down as
+// they do without any of it being worked out per body per frame.
 import { gltfQuatMultiply } from './gltf.js';
 import { CREW_CLIP_RATE } from './crew-clip-pose.js';
 import { applyArticulatedRagdollPose, initArticulatedRagdoll, stepArticulatedRagdoll } from './crew-physics.js';
@@ -15,6 +16,10 @@ export const TOWN_CLIP_RUN = 2;
 export const TOWN_CLIP_COWER = 3;
 export const TOWN_CLIP_FALL_FWD = 4;
 export const TOWN_CLIP_FALL_BACK = 5;
+export const CLIP_RIDE = 6;
+export const TOWN_CLIP_RIDE = 6;
+export const TOWN_CLIP_COUNT = 7;
+export const TOWN_RIDE_FRAMES = 20;
 export const TOWN_CLIP_CARRY = 6;
 export const TOWN_CLIP_WORK = 7;
 
@@ -38,6 +43,71 @@ function keepSoleFlat(a, side) {
   const toe = a.nodeIndex('ball_' + side);
   if (toe >= 0) a.pose[toe].r.set(a.rest[toe].r);
   a.updateBranch(f.node);
+}
+
+function resetSymmetricTorso(a) {
+  for (const name of ['root', 'pelvis', 'spine_01', 'spine_02', 'spine_03', 'neck_01', 'Head', 'clavicle_l', 'clavicle_r']) {
+    const node = a.nodeIndex(name);
+    if (node < 0) continue;
+    a.pose[node].t.set(a.rest[node].t);
+    a.pose[node].r.set(a.rest[node].r);
+    a.pose[node].s.set(a.rest[node].s);
+  }
+  a.update();
+}
+
+// 1550 Iberian sela à gineta riding clip: seated in the high-pommel/cantle saddle (`y ≈ 1.36 m, z ≈ -0.02 m`),
+// thighs abducted clear of the Lusitano horse's 0.30 m ribcage, knees flexed (`~52°` short-stirrup gineta seat)
+// with boots resting level in the iron stirrups (`x = ±0.30 m, y = 0.88 m, z = +0.04 m`), left hand holding the
+// looped leather reins above the pommel, and right hand steadying the hip / courier dispatch pouch.
+export function bakeRideClip(a, frames = TOWN_RIDE_FRAMES, keep = null) {
+  const palettes = keep ? null : new Float32Array(frames * JOINT_FLOATS);
+  const pelvis = a.nodeIndex('pelvis');
+  const spine1 = a.nodeIndex('spine_01');
+  const spine2 = a.nodeIndex('spine_02');
+  const neck = a.nodeIndex('neck_01');
+  const head = a.nodeIndex('Head');
+
+  for (let frame = 0; frame < frames; frame++) {
+    const phase = (frame / frames) * Math.PI * 2;
+    const beat2 = phase * 2;
+    const bobY = 0.018 * Math.sin(beat2);
+    const swayX = 0.008 * Math.sin(phase);
+    const pelPitch = 0.045 + 0.032 * Math.cos(beat2);
+    const chestCounter = 0.035 - 0.024 * Math.cos(beat2);
+    const headSteady = -0.025 + 0.012 * Math.sin(phase);
+
+    a.sample('Idle', 0);
+    resetSymmetricTorso(a);
+    if (pelvis >= 0) {
+      poseMoveBone(a, pelvis, [swayX, 1.36 + bobY, -0.02]);
+      turnBone(a, pelvis, [0, 1, 0], [0, Math.cos(pelPitch), Math.sin(pelPitch)]);
+    }
+    if (spine1 >= 0) turnBone(a, spine1, [0, 1, 0], [0, Math.cos(0.04), Math.sin(0.04)]);
+    if (spine2 >= 0) turnBone(a, spine2, [0, 1, 0], [0, Math.cos(chestCounter), Math.sin(chestCounter)]);
+    if (neck >= 0) turnBone(a, neck, [0, 1, 0], [0, Math.cos(headSteady), Math.sin(headSteady)]);
+    if (head >= 0) turnBone(a, head, [0, 0, 1], [0.025 * Math.sin(phase), 0, 1]);
+
+    // Short-stirrup sela à gineta leg geometry wrapping cleanly outside the 0.30 m barrel without clipping.
+    for (const [side, sign] of LEFT_THEN_RIGHT) {
+      const stirrupBounce = 0.007 * Math.sin(beat2 + (sign > 0 ? 0.25 : -0.25));
+      const stirrupFoot = [sign * 0.30, 0.88 + stirrupBounce, 0.04];
+      const kneePole = [sign * 0.52, 0.95 + bobY * 0.5, 0.36];
+      solveCrewLimb(a, ['thigh_' + side, 'calf_' + side, 'foot_' + side], stirrupFoot, kneePole);
+      keepSoleFlat(a, side);
+    }
+
+    // Left hand holds the gathered reins above the pommel; right hand steadies the hip / courier alforja pouch.
+    const reinFollow = 0.014 * Math.sin(beat2 - 0.35);
+    const reinHand = [0.02, 1.64 + bobY * 0.65 + reinFollow * 0.5, 0.23 + reinFollow];
+    const hipHand = [-0.22, 1.38 + bobY * 0.8, 0.02];
+    solveCrewLimb(a, ['upperarm_l', 'lowerarm_l', 'hand_l'], reinHand, [0.46, 1.48 + bobY, -0.02]);
+    solveCrewLimb(a, ['upperarm_r', 'lowerarm_r', 'hand_r'], hipHand, [-0.50, 1.46 + bobY, -0.18]);
+
+    if (keep) keep(frame);
+    else palettes.set(a.palette, frame * JOINT_FLOATS);
+  }
+  return palettes;
 }
 
 // The walk, swung wider, leaning into it and with the elbows bent, and let down until the lower foot is on the ground.
@@ -175,12 +245,14 @@ function bakeFall(a, sign, keep) {
 }
 
 // Palettes for every frame, and where each clip starts and how long it is: idle, walk, run, cower, fall on the face,
-// fall on the back. A cower runs from standing to right down; a fall ends where the body stays.
-export function bakeTownClips(a) {
+// fall on the back, plus (when `includeRide` is requested by `townsfolk.js`) `CLIP_RIDE` (`6`) seated à gineta.
+export function bakeTownClips(a, { includeRide = false } = {}) {
   const framesOf = (name) => Math.max(1, Math.round(a.clips.get(name).duration * CREW_CLIP_RATE));
   const idle = framesOf('Idle'), walk = framesOf('Walk');
-  const lengths = [idle, walk, walk, TOWN_COWER_FRAMES, TOWN_FALL_FRAMES, TOWN_FALL_FRAMES];
-  const layout = new Uint32Array(12);
+  const lengths = includeRide
+    ? [idle, walk, walk, TOWN_COWER_FRAMES, TOWN_FALL_FRAMES, TOWN_FALL_FRAMES, TOWN_RIDE_FRAMES]
+    : [idle, walk, walk, TOWN_COWER_FRAMES, TOWN_FALL_FRAMES, TOWN_FALL_FRAMES];
+  const layout = new Uint32Array(lengths.length * 2);
   let total = 0;
   lengths.forEach((frames, i) => { layout[i * 2] = total; layout[i * 2 + 1] = frames; total += frames; });
   const palettes = new Float32Array(total * JOINT_FLOATS);
@@ -198,7 +270,10 @@ export function bakeTownClips(a) {
   }
   bakeFall(a, 1, keeper(TOWN_CLIP_FALL_FWD));
   bakeFall(a, -1, keeper(TOWN_CLIP_FALL_BACK));
-  return { palettes, layout };
+  if (includeRide) {
+    bakeRideClip(a, TOWN_RIDE_FRAMES, keeper(CLIP_RIDE));
+  }
+  return { palettes, layout, rideFrames: TOWN_RIDE_FRAMES };
 }
 
 // Optional helper returning the two station clips (TOWN_CLIP_CARRY, TOWN_CLIP_WORK) without altering bakeTownClips layout.

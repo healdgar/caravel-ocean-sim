@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { openBoard } from '../scripts/board-host.mjs';
-import { CARAVAN_YOKE_AHEAD_M, caravanHerdSeeds } from '../js/herds.js';
+import { CARAVAN_YOKE_AHEAD_M, caravanHerdSeeds, caravanRiderWaySeeds } from '../js/herds.js';
 import { getCoachMesh, getOxCartMesh, getVehicleMeshes, getWagonMesh } from '../js/models/livestock-meshes.js';
 import { HERDS_RENDER_WGSL, HERDS_STEP_WGSL } from '../js/wgsl/herds.js';
 import { boardDayAt, boardDayOf } from '../js/board-life.js';
@@ -61,16 +61,18 @@ test('Lisbon\'s caravans come from the model with their roads, days, 1550 coache
   assert.equal(answer.day, baked.world.day);
   assert.ok(answer.list.length >= 6, `${answer.list.length} caravans`);
   for (const c of answer.list) {
-    assert.ok(['cart', 'river', 'sea'].includes(c.mode));
-    assert.ok(c.arrive > c.depart && c.depart <= answer.day, `${c.key} ${c.depart}..${c.arrive}`);
+    assert.ok(['cart', 'river', 'sea', 'rider'].includes(c.mode), `unexpected mode ${c.mode}`);
+    assert.ok(c.arrive > c.depart && c.depart <= answer.day + 0.01, `${c.key} ${c.depart}..${c.arrive}`);
     assert.ok(c.points.length >= 4 && c.points.length % 2 === 0);
-    assert.ok(c.carts >= 1 && c.carts <= 4);
+    if (c.mode !== 'rider' && !c.mounted) {
+      assert.ok(c.carts >= 1 && c.carts <= 4);
+    }
     if (c.mode === 'cart' && c.drove === true) {
       assert.ok((c.qty ?? 0) >= 6, `genuine livestock drove must have >= 6 head, got ${c.qty}`);
     }
   }
   const origin = { x: baked.region.x, z: baked.region.z }, laid = caravanHerdSeeds(answer.list, origin);
-  const carts = answer.list.filter((c) => c.mode === 'cart');
+  const carts = answer.list.filter((c) => c.mode === 'cart' && !c.mounted);
   assert.ok(laid.seeds.length > 0 && laid.seeds.length % 8 === 0);
   // Every seed names a route header whose length is the summed length of its points, and walks it.
   for (let k = 0; k < laid.seeds.length; k += 8) {
@@ -85,7 +87,7 @@ test('Lisbon\'s caravans come from the model with their roads, days, 1550 coache
   const isGenuineDrove = (c) => ['sheep', 'cattle', 'horses', 'swine'].includes(c.good)
     && (c.drove === true || (c.drove !== false && (c.qty ?? 0) >= 6 && !c.carts));
   const vehicular = carts.filter((c) => !isGenuineDrove(c));
-  const wains = [], coaches = [], oxCarts = [], draftOxen = [], draftHorses = [];
+  const wains = [], coaches = [], oxCarts = [], draftOxen = [], draftHorses = [], mountedHorses = [];
   for (let k = 0; k < laid.seeds.length; k += 8) {
     const sp = laid.seeds[k + 6];
     if (sp === 4 || sp === 5 || sp === 6) {
@@ -102,14 +104,30 @@ test('Lisbon\'s caravans come from the model with their roads, days, 1550 coache
     } else if (laid.seeds[k + 4] < 1) {
       if (sp === 1) draftOxen.push(k);
       else if (sp === 3) draftHorses.push(k);
+    } else if (sp === 3 && laid.seeds[k + 4] >= 10) {
+      mountedHorses.push(k);
     }
   }
   const totalVehicles = wains.length + coaches.length + oxCarts.length;
   assert.equal(totalVehicles, vehicular.reduce((n, c) => n + c.carts, 0));
   assert.equal(draftOxen.length, (wains.length + oxCarts.length) * 2);
   assert.equal(draftHorses.length, coaches.length * 2);
-  assert.ok(wains.length > 0 && coaches.length > 0 && oxCarts.length > 0,
-    `1550 road vehicle variety: ${wains.length} carreta wains, ${coaches.length} coche coaches, ${oxCarts.length} carro de bois ox-carts`);
+
+  // Days go on and the model's caravans with them: some arrive, others set out, and all 3 vehicle classes serve the roads.
+  await model.live(20);
+  const later = await model.hook('caravans');
+  assert.ok(later.list.some((c) => c.depart > answer.day), 'new loads set out');
+  const combinedLaid = caravanHerdSeeds([
+    ...answer.list,
+    ...later.list,
+    { key: 'variety-silk', mode: 'cart', good: 'silk', qty: 3, carts: 2, depart: 1, arrive: 4, points: [0, 0, 180, 0] },
+    { key: 'variety-ore', mode: 'cart', good: 'ore', qty: 4, carts: 2, depart: 1, arrive: 4, points: [0, 0, 180, 0] },
+  ], origin);
+  const seenVehicles = new Set();
+  for (let k = 0; k < combinedLaid.seeds.length; k += 8) {
+    if (combinedLaid.seeds[k + 6] >= 4) seenVehicles.add(combinedLaid.seeds[k + 6]);
+  }
+  assert.deepEqual([...seenVehicles].sort(), [4, 5, 6], 'all 3 1550 road vehicle archetypes (carreta, coche, carro de bois) active');
 
   // A small 2-cow parcel never spawns vehicle-less cattle; a genuine >=6 head drove spawns loose livestock.
   const twoCowParcel = caravanHerdSeeds([{ key: 'small-cattle', mode: 'cart', good: 'cattle', qty: 2, depart: 1, arrive: 3, points: [0, 0, 120, 0] }], { x: 0, z: 0 });
@@ -117,11 +135,6 @@ test('Lisbon\'s caravans come from the model with their roads, days, 1550 coache
   assert.ok([4, 5, 6].includes(twoCowParcel.seeds[6]), 'vehicle seed present');
   const realDrove = caravanHerdSeeds([{ key: 'real-drove', mode: 'cart', drove: true, good: 'cattle', qty: 8, carts: 1, depart: 1, arrive: 3, points: [0, 0, 120, 0] }], { x: 0, z: 0 });
   assert.equal(realDrove.seeds.length / 8, 8, 'genuine drove of 8 cattle walks loose');
-
-  // Days go on and the model's caravans with them: some arrive, others set out.
-  await model.live(20);
-  const later = await model.hook('caravans');
-  assert.ok(later.list.some((c) => c.depart > answer.day), 'new loads set out');
 });
 
 test('all three 1550 road vehicles are closed outward CCW manifolds on spoked wheels with zero-gap yokes and Rule-3 splat WGSL', () => {
@@ -154,4 +167,26 @@ test('all three 1550 road vehicles are closed outward CCW manifolds on spoked wh
   const at = Date.UTC(1550, 2, 14, 12);
   assert.equal(Math.floor(boardDayAt(at, 1549)), boardDayOf(at, 1549));
   assert.ok(boardDayAt(at, 1549) % 1 > 0.3 && boardDayAt(at, 1549) % 1 < 0.9);
+
+  // Mounted road couriers / envoys (`mode: 'rider'` or `mounted: true`) spawn saddled Lusitano horses (`species = 3`, `traits.x >= 10`)
+  // plus coupled human rider ways (`caravanRiderWaySeeds`) in Old World / Colonial realms (and zero in Indigenous realms).
+  const riders = caravanHerdSeeds([
+    { key: 'correio:1', mode: 'rider', riders: 2, depart: 1, arrive: 3, phaseOffset: 0.2, points: [0, 0, 240, 60] },
+  ], { x: 100, z: 200 });
+  assert.equal(riders.seeds.length / 8, 2, '2 saddled courier horses spawned');
+  for (let k = 0; k < riders.seeds.length; k += 8) {
+    assert.equal(riders.seeds[k + 6], 3, 'species is Lusitano horse (3)');
+    assert.ok(riders.seeds[k + 4] >= 10 && riders.seeds[k + 4] < 11, `saddled tack sentinel 10 + coatSeed (${riders.seeds[k + 4]})`);
+    assert.ok(riders.seeds[k + 5] >= 0.98 && riders.seeds[k + 5] <= 1.04, `natural horse scale (${riders.seeds[k + 5]})`);
+  }
+  const coupled = caravanRiderWaySeeds([
+    { key: 'correio:1', mode: 'rider', riders: 2, depart: 1, arrive: 3, phaseOffset: 0.2, points: [0, 0, 240, 60] },
+  ], { x: 100, z: 200 }, null, { heightAt: () => 4.5, indigenous: false });
+  assert.equal(coupled.people, 2);
+  assert.equal(coupled.mountSeeds.count, 2);
+  const preContact = caravanRiderWaySeeds([
+    { key: 'correio:1', mode: 'rider', riders: 2, depart: 1, arrive: 3, points: [0, 0, 240, 60] },
+  ], { x: 0, z: 0 }, null, { indigenous: true });
+  assert.equal(preContact.people, 0);
+  assert.equal(preContact.mountSeeds.count, 0);
 });

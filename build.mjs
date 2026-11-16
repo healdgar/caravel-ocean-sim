@@ -124,6 +124,7 @@ const runtimeAssetTypes = new Map([
   ['assets/board/runtime.js','text/javascript'],
   ['assets/caravel-oak-albedo.webp','image/webp'],
   ['assets/wildlife/whale.glb','model/gltf-binary'],
+  ['assets/wildlife/livestock-1550.bin','application/octet-stream'],
   ['assets/crew/sailor.glb','model/gltf-binary'],
   ['assets/crew/sailor-female.glb','model/gltf-binary'],
   ['assets/crew/captain.glb','model/gltf-binary'],
@@ -150,6 +151,7 @@ const runtimeAssetTypes = new Map([
   ['assets/world/saba/height.bin','application/octet-stream'],
   ['assets/world/saba/manifest.json','application/json'],
   ['assets/world/land.json','application/json'],
+  ['assets/world/hyg-stars.bin','application/octet-stream'],
   ['assets/canopy-scenery/saba/manifest.json','application/json'],
   ['assets/canopy-scenery/saba/near.bin','application/octet-stream'],
   ['assets/canopy-scenery/saba/leaf.bin','application/octet-stream'],
@@ -159,6 +161,7 @@ const runtimeAssetTypes = new Map([
   ['assets/ports/1550/buildings-1550-photo-atlas.jpg','image/jpeg'],
   ['assets/ports/1550/land-materials-pbr.png','image/png'],
   ['assets/neural-pbr/neural-pbr-latents.bin.gz','application/octet-stream'],
+  ['assets/neural-pbr/neural-light-weights.bin','application/octet-stream'],
 ]);
 // The optional exporter declares this pack only after real source baking. Never
 // manufacture a near tile to satisfy a build or fetch absent optional assets.

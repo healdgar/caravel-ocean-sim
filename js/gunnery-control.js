@@ -4297,18 +4297,22 @@ export function createGunnerySolidSweep({ sourceBoat, sourceBuilding = null, get
           for (const hit of hits) strikeCrewBodyWithBall(targetBoat, hit, projectile, direction);
         }
       }
-      // Men ashore: a ball goes through them too, on the way to whatever stops it.
-      if (!arrow && projectile) {
+      // Livestock, road caravans, and men ashore: cannonfire fells herds, shatters hitches, and scatters streets.
+      if (projectile) {
         const land = getTerrain?.(), shores = land?.ports ?? (land?.port ? [land.port] : null);
-        const segDir = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
-        for (const port of shores ?? []) {
-          // The people in its streets see it go by. What it does to them is worked out on the GPU.
-          port?.townsfolkWatch?.(from, to, best, projectile);
-          const soldiers = port?.garrison?.soldiers;
-          if (!soldiers?.length) continue;
-          const reach = Math.max(400, (port.reach ?? 0) + 60) + Math.hypot(to[0] - from[0], to[2] - from[2]), mx = (from[0] + to[0]) * 0.5, mz = (from[2] + to[2]) * 0.5;
-          if (Math.hypot(mx - (port.center?.x ?? mx), mz - (port.center?.z ?? mz)) > reach) continue;
-          for (const hit of sweepCrewBodies(from, to, radius, soldiers, best?.fraction ?? 1)) strikeSoldierWithBall(hit, projectile, port, segDir);
+        const herdHit = land?.herdsWatch?.(from, to, best, projectile) ?? (!land?.herdsWatch ? land?.herds?.watchShot?.(from, to, best, projectile, land) : null);
+        if (herdHit && (!best || herdHit.fraction < best.fraction)) best = herdHit;
+        if (!arrow) {
+          const segDir = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
+          for (const port of shores ?? []) {
+            // The people in its streets see it go by. What it does to them is worked out on the GPU.
+            port?.townsfolkWatch?.(from, to, best, projectile);
+            const soldiers = port?.garrison?.soldiers;
+            if (!soldiers?.length) continue;
+            const reach = Math.max(400, (port.reach ?? 0) + 60) + Math.hypot(to[0] - from[0], to[2] - from[2]), mx = (from[0] + to[0]) * 0.5, mz = (from[2] + to[2]) * 0.5;
+            if (Math.hypot(mx - (port.center?.x ?? mx), mz - (port.center?.z ?? mz)) > reach) continue;
+            for (const hit of sweepCrewBodies(from, to, radius, soldiers, best?.fraction ?? 1)) strikeSoldierWithBall(hit, projectile, port, segDir);
+          }
         }
       }
     }
@@ -4337,6 +4341,15 @@ export function resolveSolidGunneryImpact(event, { getTerrain = () => null } = {
   if (event.kind === 'scenery') {
     const terrain = getTerrain();
     if (terrain) return applySceneryImpactDamage(terrain, event);
+  }
+  if (event.kind === 'caravan' || event.kind === 'livestock') {
+    return {
+      kind: event.kind,
+      species: event.species ?? 0,
+      herdIndex: event.herdIndex ?? -1,
+      releasedShards: event.kind === 'caravan' ? [0, 1, 2, 3, 4] : [],
+      felled: event.kind === 'livestock',
+    };
   }
   if (event.kind === 'terrain') {
     const terrain = getTerrain();
@@ -5454,6 +5467,7 @@ export function resolveVesselCollisions(vessels, dt = 1 / 60, options = {}) {
 const GROUNDING_GRIND_SCALE = 0.15;
 export function applyGroundingImpactDamage(boat, contact, options = {}) {
   if (!boat || !contact) return null;
+  options = options ?? {};
   const subInfo = contact.substrateInfo ?? GROUNDING_SUBSTRATES[contact.substrate] ?? GROUNDING_SUBSTRATES.shoal;
   const impactSpeed = Math.max(0, Number.isFinite(contact.impactSpeed) ? contact.impactSpeed : 0);
   if (impactSpeed <= subInfo.safeTouchSpeed) return null;

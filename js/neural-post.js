@@ -9,7 +9,7 @@
 import { requestOnce } from './gpu-program-cache.js';
 import { COMPOSITE, createUnderwaterPost } from './wgsl/post.js';
 import { createNeuralEncodeWGSL, createNeuralTrunkWGSL, createNeuralComposite } from './wgsl/neural-post.js';
-import { NEURAL_LIGHT_WEIGHT_BYTES, NEURAL_LIGHT_WEIGHTS_FAST, NEURAL_LIGHT_WEIGHTS_DEPTH } from './models/neural-light-weights.js';
+import { NEURAL_LIGHT_WEIGHT_BYTES, loadNeuralLightWeights } from './models/neural-light-weights.js';
 
 export function normalizeNeuralLightMode(mode) {
   return mode === 'depth' ? 'depth' : 'fast';
@@ -85,13 +85,16 @@ export async function createNeuralLightPass({
   let desiredMode = activeMode;
   let modeEpoch = 0;
 
-  const [initialCompute, { compositePipe, mediumCompositePipe }] = await requestNeuralLightPipelines({
-    device,
-    shader,
-    swapFormat,
-    samples,
-    mode: activeMode,
-  });
+  const [[initialCompute, { compositePipe, mediumCompositePipe }], loadedWeights] = await Promise.all([
+    requestNeuralLightPipelines({
+      device,
+      shader,
+      swapFormat,
+      samples,
+      mode: activeMode,
+    }),
+    loadNeuralLightWeights(),
+  ]);
 
   let activeCompute = initialCompute;
 
@@ -103,7 +106,7 @@ export async function createNeuralLightPass({
   device.queue.writeBuffer(
     weightsUBO,
     0,
-    activeMode === 'depth' ? NEURAL_LIGHT_WEIGHTS_DEPTH : NEURAL_LIGHT_WEIGHTS_FAST,
+    activeMode === 'depth' ? loadedWeights.depth : loadedWeights.fast,
   );
 
   const paramsData = new Float32Array(24);
@@ -398,7 +401,7 @@ export async function createNeuralLightPass({
     device.queue.writeBuffer(
       weightsUBO,
       0,
-      normalized === 'depth' ? NEURAL_LIGHT_WEIGHTS_DEPTH : NEURAL_LIGHT_WEIGHTS_FAST,
+      normalized === 'depth' ? loadedWeights.depth : loadedWeights.fast,
     );
     historyValid = 0;
     rebuildComputeGroups();

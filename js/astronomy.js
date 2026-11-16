@@ -1,5 +1,5 @@
 import { OceanAstronomyEngine } from './vendor/astronomy-engine.js';
-import { OCEAN_STARS } from './star-catalog.js';
+import { getOceanStars, POLARIS_TUPLE } from './star-catalog.js';
 
 const ASTRO_RAD=Math.PI/180,ASTRO_AU_KM=149597870.7,ASTRO_J2000=Date.UTC(2000,0,1,12),ASTRO_YEAR_MS=365.25*86400000;
 // Night adaptation: the working light that makes a full Moon read about a twentieth of day,
@@ -46,7 +46,7 @@ export function computeAstronomy(date,observer){
 }
 export function propagatedStars(date){
   const years=(new Date(date).getTime()-ASTRO_J2000)/ASTRO_YEAR_MS;
-  return OCEAN_STARS.map(star=>({hip:star[0],name:star[1],direction:astroUnit([star[2]+star[5]*years,star[3]+star[6]*years,star[4]+star[7]*years]),magnitude:star[8],colorIndex:star[9]}));
+  return getOceanStars().map(star=>({hip:star[0],name:star[1],direction:astroUnit([star[2]+star[5]*years,star[3]+star[6]*years,star[4]+star[7]*years]),magnitude:star[8],colorIndex:star[9]}));
 }
 export function createAstronomyClock(search=new URLSearchParams(),position={x:0,z:0}){
   const number=(key,fallback,min,max)=>search.has(key)&&Number.isFinite(+search.get(key))?astroClamp(+search.get(key),min,max):fallback;
@@ -79,7 +79,7 @@ export function writeAstronomyFrame(frame,clock){
   frame[112]=active?1:0;frame[113]=active&&clock.stars?s.starVisibility:0;frame[114]=active&&clock.constellations?s.starVisibility:0;frame[115]=active&&s.moonShadows?1:0;frame.set(s.starRotation,116);
 }
 
-const POLARIS_STAR=OCEAN_STARS.find(s=>s[0]===11767)||OCEAN_STARS[0];
+const POLARIS_STAR=POLARIS_TUPLE;
 export function horizonDipDegrees(eyeHeightMetres=1.7){
   return (1.76/60)*Math.sqrt(Math.max(0,Number(eyeHeightMetres)||0));
 }

@@ -44,6 +44,32 @@ export function validateForestCrowns(manifest) {
   return manifest;
 }
 
+const PORTUGAL_ARCH_COLOURS = Object.freeze({
+  oak: { leaf: [0.2215, 0.3600, 0.1895], wood: [0.0508, 0.0416, 0.0332] },
+  chestnut: { leaf: [0.2720, 0.4187, 0.1696], wood: [0.0680, 0.0526, 0.0400] },
+  maple: { leaf: [0.2720, 0.4603, 0.1999], wood: [0.1164, 0.1111, 0.1009] },
+  elm: { leaf: [0.2403, 0.4187, 0.1794], wood: [0.0563, 0.0491, 0.0424] },
+  birch: { leaf: [0.3101, 0.5207, 0.2105], wood: [0.6150, 0.5818, 0.5178] },
+  blueberry: { leaf: [0.2403, 0.4392, 0.2403], wood: [0.1507, 0.0670, 0.0432] },
+});
+
+export function unattenuatePortugalCrowns(manifest, vertices) {
+  const words = new Uint32Array(vertices.buffer, vertices.byteOffset, vertices.byteLength >>> 2);
+  for (const p of manifest.prototypes) {
+    const arch = PORTUGAL_ARCH_COLOURS[p.species];
+    if (!arch) continue;
+    p.splat.colour = p.splat.colour.map((v, c) => Math.min(2, v / arch.leaf[c]));
+    const invSqrtLeaf = arch.leaf.map((v) => 1 / Math.sqrt(v));
+    const invSqrtWood = arch.wood.map((v) => 1 / Math.sqrt(v));
+    for (let gv = p.firstVertex; gv < p.firstVertex + p.vertexCount; gv++) {
+      const w1 = words[gv * CROWN_VERTEX_WORDS + 1];
+      const invSqrt = ((w1 >>> 16) & 255) === 1 ? invSqrtWood : invSqrtLeaf;
+      const byteAt = gv * CROWN_VERTEX_WORDS * 4 + 16;
+      for (let c = 0; c < 3; c++) vertices[byteAt + c] = Math.min(255, Math.round(vertices[byteAt + c] * invSqrt[c]));
+    }
+  }
+}
+
 export async function loadForestCrowns({ assets, fetchAsset = fetch, signal } = {}) {
   const get = async (name) => {
     const response = await fetchAsset(assets[name], signal ? { signal } : undefined);
@@ -61,6 +87,9 @@ export async function loadForestCrowns({ assets, fetchAsset = fetch, signal } = 
   };
   const [vertices, indices, morph] = await Promise.all(['vertices.bin', 'indices.bin', 'morph.bin'].map(stream));
   if (vertices.byteLength !== manifest.vertexCount * CROWN_VERTEX_WORDS * 4 || indices.byteLength !== manifest.indexCount * 4 || morph.byteLength !== manifest.morphWordCount * 4) throw Error('Forest crown streams do not match their manifest');
+  if (String(assets?.['manifest.json'] ?? '').includes('/portugal/') || manifest.prototypes.some((p) => p.cohort && PORTUGAL_ARCH_COLOURS[p.species] && p.splat.colour[1] < 0.055)) {
+    unattenuatePortugalCrowns(manifest, vertices);
+  }
   return { manifest, vertices, indices, morph };
 }
 

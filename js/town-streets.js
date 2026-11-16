@@ -498,6 +498,28 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
     const grade = Math.hypot(right - left, up - down) / (2 * CELL_M);
     grid.cost[c] = 1 + SLOPE_COST * grade * grade;
   }
+  if (Array.isArray(port.plannedStreets) && port.plannedStreets.length) {
+    for (const way of port.plannedStreets) {
+      const pts = way?.points ?? way;
+      if (!Array.isArray(pts) || pts.length < 2) continue;
+      for (let s = 1; s < pts.length; s++) {
+        const ax = pts[s - 1][0], az = pts[s - 1][1], bx = pts[s][0], bz = pts[s][1];
+        const hw = Math.max(2.6, (pts[s - 1][2] ?? 6) * 0.5);
+        const i0 = Math.max(0, Math.floor((Math.min(ax, bx) - hw - minX) / CELL_M));
+        const i1 = Math.min(grid.nx - 1, Math.ceil((Math.max(ax, bx) + hw - minX) / CELL_M));
+        const j0 = Math.max(0, Math.floor((Math.min(az, bz) - hw - minZ) / CELL_M));
+        const j1 = Math.min(grid.nz - 1, Math.ceil((Math.max(az, bz) + hw - minZ) / CELL_M));
+        const dx = bx - ax, dz = bz - az, l2 = Math.max(1e-6, dx * dx + dz * dz);
+        for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+          const c = j * grid.nx + i;
+          if (!Number.isFinite(grid.cost[c])) continue;
+          const px = grid.x(c), pz = grid.z(c);
+          const t = Math.max(0, Math.min(1, ((px - ax) * dx + (pz - az) * dz) / l2));
+          if (Math.hypot(px - (ax + dx * t), pz - (az + dz * t)) <= hw) grid.cost[c] *= 0.28;
+        }
+      }
+    }
+  }
   const decks = [];
   const solid = (inst, c, margin) => {
     const { lx, lz } = worldToLocal(inst, grid.x(c), grid.z(c));
@@ -835,12 +857,53 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
     words[at + 11] = (w & 1) | (OPEN_AIR.has(trip.a.inst.prefabId) ? 2 : 0) | (OPEN_AIR.has(trip.b.inst.prefabId) ? 4 : 0) | (pierTrip ? 8 : 0);
   }
 
+  let mounts = null;
+  if (!indigenous) {
+    const mountRoutes = [], mountSeeds = [];
+    const candidateLines = [
+      ...roads.filter((r) => r.length >= 6),
+      ...trips
+        .filter((tr) => tr.a.inst.prefabId !== 'timber_mole_pier' && tr.b.inst.prefabId !== 'timber_mole_pier' && tr.cells.length >= 16)
+        .slice(0, 4)
+        .map((tr) => tr.cells.filter((_, k) => k % 2 === 0 || k === tr.cells.length - 1).map((c) => [wayX[c] || grid.x(c), wayZ[c] || grid.z(c)])),
+    ];
+    const wantMounts = port.stage === 'citadel-metropolis' ? 8 : port.stage === 'fortified-port' ? 6 : port.stage === 'settlement' ? 4 : 2;
+    for (let rIdx = 0; rIdx < candidateLines.length && mountSeeds.length / 8 < wantMounts; rIdx++) {
+      const line = candidateLines[rIdx];
+      let along = 0;
+      const pts = [];
+      for (let k = 0; k < line.length; k++) {
+        const [x, z] = line[k];
+        if (pts.length) {
+          const step = Math.hypot(x - pts[pts.length - 1][0], z - pts[pts.length - 1][1]);
+          if (step < 0.25) continue;
+          along += step;
+        }
+        pts.push([x, z, along, 0]);
+      }
+      if (pts.length < 3 || along < 18) continue;
+      const header = mountRoutes.length / 4;
+      const travelDays = Math.max(0.02, along / 86400);
+      mountRoutes.push(0, travelDays, pts.length, along);
+      for (const p of pts) mountRoutes.push(p[0], p[1], p[2], p[3]);
+      const ridersHere = Math.min(2, wantMounts - mountSeeds.length / 8);
+      for (let m = 0; m < ridersHere; m++) {
+        const ph = random();
+        mountSeeds.push(header, m * 14 + random() * 4, -1 - ph * 0.9999, random(), random(), 0.96 + random() * 0.08, 3, (random() - 0.5) * 1.1);
+      }
+    }
+    if (mountSeeds.length) {
+      mounts = { seeds: new Float32Array(mountSeeds), routes: new Float32Array(mountRoutes) };
+    }
+  }
+
   return {
     window, field, size,
     ways: fieldWays,
     doors: reachable.map((door) => ({ prefabId: door.inst.prefabId, x: door.outside.x, z: door.outside.z })),
     samples: new Float32Array(routeSamples),
     walkers: floats,
+    mounts,
     people,
     stats: {
       doors: doors.length, stranded, strandedDoors, links, trips: trips.length, roads: roads.length, people,

@@ -645,3 +645,66 @@ export function createHelmControls(boat,onSails,onPropulsionChange=()=>{},battle
   document.body.append(root);update(0,true);
   return {root,update,get inBattle(){return inBattleState;}};
 }
+
+export const ECON_SIM_RATES = Object.freeze([1, 10, 60, 360, 3600, 14400]);
+export const ECON_SIM_STEPS = Object.freeze([1, 7, 30]);
+export const ECON_BOARD_DAY_MS = (365.2425 / 360) * 86_400_000;
+
+export function formatEconDiagnostics(diag) {
+  if (!diag) return 'Waiting for board simulation…';
+  const mon = diag.monarch?.title ? ` · ${diag.monarch.title}` : '';
+  const riders = (diag.traffic?.envoys ?? 0) + (diag.traffic?.mountedTravellers ?? 0);
+  return [
+    `Day ${Math.floor(diag.day ?? 0)} · ${diag.dateLabel ?? ''} (${diag.season ?? ''}, AD ${diag.year ?? 1550})${mon}`,
+    `Pop ${(diag.pop ?? 0).toLocaleString('en-US')} (Realm ${(diag.realmPop ?? 0).toLocaleString('en-US')}) · ${(diag.households ?? 0).toLocaleString('en-US')} households`,
+    `Crown ${Math.round(diag.crownTreasury ?? 0).toLocaleString('en-US')} cr · Town Chest ${Math.round(diag.townChest ?? 0).toLocaleString('en-US')} cr · Purses ${Math.round(diag.householdCoin ?? 0).toLocaleString('en-US')} cr`,
+    `Grain ${Math.round(diag.stores?.grain ?? 0)} (${Number(diag.prices?.grain ?? 0).toFixed(2)}) · Fish ${Math.round(diag.stores?.fish ?? 0)} (${Number(diag.prices?.fish ?? 0).toFixed(2)})`,
+    `Wine ${Math.round(diag.stores?.wine ?? 0)} (${Number(diag.prices?.wine ?? 0).toFixed(2)}) · Spice ${Math.round(diag.stores?.spice ?? 0)} (${Number(diag.prices?.spice ?? 0).toFixed(2)})`,
+    `Ships ${diag.traffic?.ships ?? 0} · Wagons ${diag.traffic?.cartCaravans ?? 0} · Barges ${diag.traffic?.riverCaravans ?? 0} · Mounted Riders ${riders}`,
+    `Buildings ${(diag.fabric?.buildings ?? 0).toLocaleString('en-US')} · Active Scaffolds ${diag.fabric?.projects ?? 0} · Roads ${diag.fabric?.roads ?? 0}`,
+  ].join('\n');
+}
+
+export function bindEconSimControls(detailsEl, { onRate = null, onStep = null } = {}) {
+  if (!detailsEl) return null;
+  const rateButtons = Array.from(detailsEl.querySelectorAll('[data-econ-rate]'));
+  const stepButtons = Array.from(detailsEl.querySelectorAll('[data-econ-step]'));
+  const catchupEl = detailsEl.querySelector('#econ-sim-catchup');
+  const telemetryEl = detailsEl.querySelector('#econ-sim-telemetry');
+
+  const syncRateUI = (rate) => {
+    for (const btn of rateButtons) {
+      btn.setAttribute('aria-pressed', String(Number(btn.dataset.econRate) === rate));
+    }
+  };
+  for (const btn of rateButtons) {
+    btn.addEventListener('click', () => {
+      const r = Number(btn.dataset.econRate) || 1;
+      syncRateUI(r);
+      onRate?.(r);
+    });
+  }
+  for (const btn of stepButtons) {
+    btn.addEventListener('click', () => {
+      const days = Number(btn.dataset.econStep) || 1;
+      onStep?.(days);
+    });
+  }
+  return {
+    element: detailsEl,
+    syncRateUI,
+    setCatchup(curDay, wantedDay, busy = false) {
+      if (!catchupEl) return;
+      const catchingUp = Number.isFinite(curDay) && Number.isFinite(wantedDay) && (wantedDay > curDay || busy);
+      catchupEl.hidden = !catchingUp;
+      if (catchingUp) {
+        catchupEl.textContent = `Advancing day ${Math.floor(curDay)} → ${Math.max(Math.floor(curDay), Math.floor(wantedDay))}…`;
+      }
+    },
+    setTelemetry(diag) {
+      if (!telemetryEl) return;
+      const txt = formatEconDiagnostics(diag);
+      if (telemetryEl.textContent !== txt) telemetryEl.textContent = txt;
+    },
+  };
+}

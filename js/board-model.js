@@ -116,7 +116,8 @@ export function boardPrefix(request, program = null) {
   const heights = request.heights
     ? `new Float32Array(Uint8Array.from(atob('${boardBase64(new Uint8Array(request.heights.buffer, request.heights.byteOffset, request.heights.byteLength))}'),c=>c.charCodeAt(0)).buffer)`
     : `new Float32Array(${request.size * request.size})`;
-  return 'globalThis.FURLONG_HEADLESS=true;globalThis.FURLONG_OPTIONS=' + JSON.stringify(options) + ';' +
+  const placeEdgeShim = 'globalThis.placeEdge=(p)=>{const r=p?.r,n=r?.length||24;return Array.from({length:n+1},(_,k)=>{const a=(k/n)*Math.PI*2,rad=r?r[k%n]:(p?.rad||20);return{x:p.x+Math.cos(a)*rad,z:p.z+Math.sin(a)*rad};});};';
+  return 'globalThis.FURLONG_HEADLESS=true;globalThis.FURLONG_OPTIONS=' + JSON.stringify(options) + ';' + placeEdgeShim +
     `globalThis.KA_MAPS={board:{w:${request.size},h:${request.size},hgt:${heights},` +
     `vscale:1,crown:${JSON.stringify(request.site.culture)},sites:${JSON.stringify(sites)},title:${JSON.stringify(request.site.name)}}};\n`;
 }

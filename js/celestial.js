@@ -1,9 +1,10 @@
 import { propagatedStars } from './astronomy.js';
-import { OCEAN_CONSTELLATIONS } from './star-catalog.js';
+import { loadOceanStars, OCEAN_CONSTELLATIONS } from './star-catalog.js';
 import { CELESTIAL_STARS, CELESTIAL_LINES } from './wgsl/celestial.js';
 const STAR_DISPLAY_GAIN=8;
 
 export async function createCelestialRenderer({device,shader,frameUBO,clock,sampler,format,samples}){
+  await loadOceanStars();
   // Stars are points: the texel size sets how sharp and how bright one can look.
   const size=1024,U=GPUTextureUsage,B=GPUBufferUsage;
   const texture=device.createTexture({label:'geographic stellar sky',size:[size,size,6],format:'rgba16float',usage:U.TEXTURE_BINDING|U.RENDER_ATTACHMENT});
