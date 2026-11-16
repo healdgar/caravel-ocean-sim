@@ -55,6 +55,42 @@ function formatFlySpeed(speed) {
   return s < 10 ? `${s.toFixed(1)} m/s` : `${Math.round(s)} m/s`;
 }
 
+const guardedDocs = new WeakSet();
+
+// Blocks accidental mobile browser viewport zoom during two-thumb camera control
+// (WebKit gesturestart/gesturechange, cross-element multi-touch touchmove, rapid double-tap
+// dblclick on HUD buttons, and Ctrl+wheel trackpad pinch over HUD overlays) while preserving
+// single-finger vertical scrolling inside open settings/modal panels.
+export function installViewportZoomGuard(targetDoc = typeof document !== 'undefined' ? document : null) {
+  if (!targetDoc || typeof targetDoc.addEventListener !== 'function' || guardedDocs.has(targetDoc)) return false;
+  guardedDocs.add(targetDoc);
+
+  const blockGesture = (e) => {
+    e.preventDefault();
+  };
+  targetDoc.addEventListener('gesturestart', blockGesture, { passive: false });
+  targetDoc.addEventListener('gesturechange', blockGesture, { passive: false });
+  targetDoc.addEventListener('gestureend', blockGesture, { passive: false });
+
+  targetDoc.addEventListener('touchmove', (e) => {
+    if ((e.touches && e.touches.length > 1) || (typeof e.scale === 'number' && e.scale !== 1)) {
+      e.preventDefault();
+    }
+  }, { passive: false });
+
+  targetDoc.addEventListener('dblclick', (e) => {
+    const t = e.target;
+    if (t && typeof t.closest === 'function' && t.closest('input, textarea, select, [contenteditable]')) return;
+    e.preventDefault();
+  }, { passive: false });
+
+  targetDoc.addEventListener('wheel', (e) => {
+    if (e.ctrlKey) e.preventDefault();
+  }, { passive: false });
+
+  return true;
+}
+
 export function createFreeCamMobileControls({
   getCamera,
   getCameraMode,
@@ -68,6 +104,7 @@ export function createFreeCamMobileControls({
   const coarseQuery = typeof matchMedia === 'function' ? matchMedia('(pointer: coarse)') : { matches: false, addEventListener() {} };
   let hasTouch = Boolean(forceVisible || coarseQuery.matches);
   let manualPadEnabled = Boolean(forceVisible);
+  installViewportZoomGuard();
 
   const state = {
     forward: 0,

@@ -24,6 +24,8 @@ import { HULL_DAMAGE_UNIFORM_BYTES, writeHullFloodUniform, writeHullCraters } fr
 import { addHullHole, stepHullHoles } from './hull-holes.js';
 import { POSED_VERTEX_LAYOUT } from './vessel-pose.js';
 import { attachCrewComponents, ensureCrewComponentPacks, packCrewCompMask, packCrewFaceW } from './crew-components.js';
+import { colonialGroomMask, reconcileColonialGroomAndComp } from './crew.js';
+import { DRESS_MASK_SCALE } from './indigenous-dress.js';
 import { createDistantCrewLOD } from './crew-lod.js';
 import { bakeTownClips, bakeWorkStationClip } from './town-clips.js';
 import { poseSeatedCrew, solveCrewLimb, turnBone } from './crew-pose.js';
@@ -4514,6 +4516,7 @@ export function appendMerchantCodexToModel(srcModel, sex = 'male') {
   const model = {
     ...srcModel,
     componentsAttached: Boolean(srcModel.componentsAttached),
+    distantIndices: srcModel.distantIndices ?? null,
     vertices: new Float32Array(rawBytes),
     vertexCount: srcModel.vertexCount ?? (srcModel.vertices.byteLength / 60),
     indices: srcModel.indices.slice(),
@@ -4997,7 +5000,7 @@ fn deckCrewRamp(lo: f32, hi: f32, x: f32) -> vec2f {
   return vec2f(t * t * (3.0 - 2.0 * t), 6.0 * t * (1.0 - t) / (hi - lo));
 }
 fn deckCrewDressOf(hairW: f32) -> u32 {
-  return u32(fract(hairW) * 16777216.0 + 0.5);
+  return u32(fract(hairW) * ${DRESS_MASK_SCALE}.0 + 0.5);
 }
 fn deckCrewPieceHidden(color: vec3f, dress: u32) -> bool {
   let piece = u32(color.r * 0.5);
@@ -5034,20 +5037,20 @@ fn deckCrewCompHidden(color: vec3f, compMask: u32, isMerchant: bool) -> bool {
 }
 fn deckCrewMorph(p: vec3f, normal: vec3f, f: vec4f, sex: f32, comp: u32) -> DeckCrewSurface {
   if (comp == 24u) { return DeckCrewSurface(p, normal); }
-  let headY = select(1.5998, 1.5496, sex > 0.5);
+  let headY = select(1.568, 1.516, sex > 0.5);
   let build = (deckCrewCompMask(f.w) >> 11u) & 3u;
   if (p.y <= headY + 0.015) {
-    if (build == 0u || p.y <= 0.72 || p.y >= 1.38 || abs(p.x) >= 0.25) { return DeckCrewSurface(p, normal); }
-    let env = deckCrewRamp(0.72, 0.90, p.y).x * (1.0 - deckCrewRamp(1.26, 1.38, p.y).x) * (1.0 - deckCrewRamp(0.20, 0.25, abs(p.x)).x);
-    let sx = select(select(0.11, -0.085, build == 1u), 0.095 * deckCrewRamp(0.88, 1.24, p.y).x, build == 2u);
+    if (build == 0u || p.y <= 0.68 || p.y >= 1.40 || abs(p.x) >= 0.25) { return DeckCrewSurface(p, normal); }
+    let env = deckCrewRamp(0.68, 0.86, p.y).x * (1.0 - deckCrewRamp(1.24, 1.40, p.y).x) * (1.0 - deckCrewRamp(0.20, 0.25, abs(p.x)).x);
+    let sx = select(select(0.11, -0.085, build == 1u), 0.095 * deckCrewRamp(0.84, 1.18, p.y).x, build == 2u);
     let sz = select(select(0.10, -0.095, build == 1u), 0.075, build == 2u);
-    let belly = select(0.0, 0.030 * smoothstep(-0.02, 0.08, p.z) * (1.0 - deckCrewRamp(1.12, 1.30, p.y).x), build == 3u);
+    let belly = select(0.0, 0.030 * smoothstep(-0.02, 0.08, p.z) * (1.0 - deckCrewRamp(1.06, 1.24, p.y).x), build == 3u);
     let qx = p.x * (1.0 + sx * env);
     let qz = -0.025 + (p.z + 0.025) * (1.0 + sz * env) + belly * env;
     let nrm = normalize(vec3f(normal.x / (1.0 + sx * env), normal.y, normal.z / (1.0 + sz * env)));
     return DeckCrewSurface(vec3f(qx, p.y, qz), nrm);
   }
-  let eyeY = select(1.699, 1.656, sex > 0.5);
+  let eyeY = select(1.666, 1.612, sex > 0.5);
   let head = deckCrewRamp(headY + 0.015, headY + 0.065, p.y);
   let jaw = vec2f(1.0, 0.0) - deckCrewRamp(headY + 0.06, headY + 0.13, p.y);
   let width = 1.0 + head.x * ((f.x - 1.0) + (f.y - 1.0) * jaw.x);
@@ -5055,31 +5058,32 @@ fn deckCrewMorph(p: vec3f, normal: vec3f, f: vec4f, sex: f32, comp: u32) -> Deck
   let nx = vec2f(1.0, 0.0) - deckCrewRamp(0.012, 0.045, abs(p.x));
   let ny0 = deckCrewRamp(eyeY - 0.065, eyeY - 0.025, p.y);
   let ny1 = vec2f(1.0, 0.0) - deckCrewRamp(eyeY + 0.005, eyeY + 0.04, p.y);
-  let nz = deckCrewRamp(0.07, 0.10, p.z);
+  let nz = deckCrewRamp(0.045, 0.085, p.z);
   let nose = nx.x * ny0.x * ny1.x * nz.x;
   let noseD = vec3f(
     nx.y * sign(p.x) * ny0.x * ny1.x * nz.x,
     nx.x * (ny0.y * ny1.x + ny0.x * ny1.y) * nz.x,
     nx.x * ny0.x * ny1.x * nz.y,
   );
+  let noseScale = f.z * 0.35;
   let ex0 = deckCrewRamp(0.015, 0.026, abs(p.x));
   let ex1 = vec2f(1.0, 0.0) - deckCrewRamp(0.058, 0.080, abs(p.x));
   let ey = vec2f(1.0, 0.0) - deckCrewRamp(0.016, 0.040, abs(p.y - eyeY));
-  let ez = deckCrewRamp(0.025, 0.060, p.z);
+  let ez = deckCrewRamp(0.015, 0.055, p.z);
   let eye = ex0.x * ex1.x * ey.x * ez.x;
   let eyeD = vec3f(
     (ex0.y * ex1.x + ex0.x * ex1.y) * sign(p.x) * ey.x * ez.x,
     ex0.x * ex1.x * ey.y * sign(p.y - eyeY) * ez.x,
     ex0.x * ex1.x * ey.x * ez.y,
   );
-  let eyeOpen = deckCrewEyeOpen(f.w);
+  let eyeOpen = 1.0 + (deckCrewEyeOpen(f.w) - 1.0) * 0.35;
   let eyeShift = (p.y - eyeY) * (eyeOpen - 1.0);
   let eyeGradient = eyeShift * eyeD + vec3f(0.0, (eyeOpen - 1.0) * eye, 0.0);
-  let dx = vec3f(width, eyeGradient.x, f.z * noseD.x);
-  let dy = vec3f(p.x * widthY, 1.0 + eyeGradient.y, f.z * noseD.y);
-  let dz = vec3f(0.0, eyeGradient.z, 1.0 + f.z * noseD.z);
+  let dx = vec3f(width, eyeGradient.x, noseScale * noseD.x);
+  let dy = vec3f(p.x * widthY, 1.0 + eyeGradient.y, noseScale * noseD.y);
+  let dz = vec3f(0.0, eyeGradient.z, 1.0 + noseScale * noseD.z);
   let morphed = normalize(cross(dy, dz) * normal.x + cross(dz, dx) * normal.y + cross(dx, dy) * normal.z);
-  return DeckCrewSurface(vec3f(p.x * width, p.y + eyeShift * eye, p.z + f.z * nose), morphed);
+  return DeckCrewSurface(vec3f(p.x * width, p.y + eyeShift * eye, p.z + noseScale * nose), morphed);
 }
 fn deckCrewClothed(tagged: vec3f, p: vec3f, shirt: vec3f, trousers: vec3f, skin: vec3f, hair: vec3f, isIndigenous: bool, dress: u32, compMask: u32) -> vec4f {
   if (tagged.b < -1.0) {
@@ -5087,10 +5091,12 @@ fn deckCrewClothed(tagged: vec3f, p: vec3f, shirt: vec3f, trousers: vec3f, skin:
   }
   let garment = u32(tagged.b * 0.5);
   if (garment > 0u) {
+    let piece = u32(tagged.r * 0.5);
     let comp = u32(tagged.g * 0.5);
-    let rawShade = vec3f(tagged.r, tagged.g - 2.0 * f32(comp), tagged.b - 2.0 * f32(garment));
+    let rawShade = vec3f(tagged.r - 2.0 * f32(piece), tagged.g - 2.0 * f32(comp), tagged.b - 2.0 * f32(garment));
     let shadeLuma = clamp(dot(rawShade, vec3f(0.299, 0.587, 0.114)), 0.64, 1.16);
-    let shade = mix(vec3f(shadeLuma), clamp(rawShade, vec3f(0.62), vec3f(1.18)), select(0.20, 0.45, garment == 3u));
+    let compShade = mix(vec3f(shadeLuma), clamp(rawShade, vec3f(0.62), vec3f(1.18)), select(0.20, 0.45, garment == 3u));
+    let shade = select(rawShade, compShade, comp > 0u);
     var worn = select(select(select(hair, skin, garment == 3u), trousers, garment == 2u), shirt, garment == 1u);
     if (garment == 5u) {
       let acc = (compMask >> 13u) & 3u;
@@ -6057,8 +6063,17 @@ export async function createTradeVessels({
       ? (h5 < 0.45 ? 3 : 0)
       : (role === 'oarsman' ? (h5 < 0.60 ? 2 : 0) : (Math.floor(h5 * 4) & 3));
     const accent = isElite ? (h1 < 0.55 ? 1 : 2) : (Math.floor(h4 * 4) & 3);
-    const compMask = packCrewCompMask({ hair, hat, beard, garment, build, accent });
+    const rawCompMask = packCrewCompMask({ hair, hat, beard, garment, build, accent });
     const isIndig = role === 'paddler';
+    const sex = female ? 'female' : 'male';
+    const reconciled = isIndig
+      ? { dress: 0, compMask: 0 }
+      : reconcileColonialGroomAndComp(
+          colonialGroomMask(sex, lookIdx, { isCaptain: role === 'captain' && hat === 0 }),
+          rawCompMask,
+          sex,
+          { seed: lookIdx },
+        );
 
     const at = lookIdx * DECK_CREW_LOOK_WORDS;
     crewLooksF32[at + 0] = shirt[0];
@@ -6076,11 +6091,11 @@ export async function createTradeVessels({
     crewLooksF32[at + 12] = person.hair[0];
     crewLooksF32[at + 13] = person.hair[1];
     crewLooksF32[at + 14] = person.hair[2];
-    crewLooksF32[at + 15] = 0;
+    crewLooksF32[at + 15] = reconciled.dress / DRESS_MASK_SCALE;
     crewLooksF32[at + 16] = person.face[0];
     crewLooksF32[at + 17] = person.face[1];
     crewLooksF32[at + 18] = person.face[2];
-    crewLooksF32[at + 19] = packCrewFaceW(person.face[3], compMask, isIndig);
+    crewLooksF32[at + 19] = packCrewFaceW(person.face[3], reconciled.compMask, isIndig);
   }
 
   function resolveStationSoul(route, st, stationIndex) {

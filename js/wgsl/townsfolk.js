@@ -498,7 +498,7 @@ fn crewCompHidden(color:vec3f,compMask:u32)->bool {
   if(crewCompHidden(v.color,crewCompMask(look.face.w))){return vec4f(2,2,0,1);}
   let dress=crewDressOf(look.hair.w);
   let isFemale=look.skin.w>0.5;
-  var surfacePos=select(v.position,vec3f(0.0,1.55,0.0),crewPieceHidden(v.color,dress));
+  var surfacePos=select(v.position,vec3f(0.0,1.62,0.0),crewPieceHidden(v.color,dress));
   let dmgBits=u32(max(0.0,body.blend));
   let injury=dmgBits&7u;
   var bones=v.bones;

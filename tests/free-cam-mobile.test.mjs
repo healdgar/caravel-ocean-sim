@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { once } from 'node:events';
 import { before, after, test } from 'node:test';
 import { chromium } from 'playwright';
@@ -71,9 +72,11 @@ before(async () => {
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   origin = 'http://127.0.0.1:' + server.address().port;
+  const macChrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+  const executablePath = process.env.CHROMIUM_PATH || (fs.existsSync(macChrome) ? macChrome : undefined);
   browser = await chromium.launch({
-    executablePath: process.env.CHROMIUM_PATH || undefined,
-    args: process.env.WEBGPU_BACKEND === 'metal'
+    executablePath,
+    args: process.env.WEBGPU_BACKEND === 'metal' || (!process.env.WEBGPU_BACKEND && process.platform === 'darwin')
       ? ['--enable-unsafe-webgpu', '--use-angle=metal', '--disable-gpu-watchdog']
       : ['--enable-unsafe-webgpu', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--disable-gpu-watchdog'],
   });
@@ -170,6 +173,53 @@ test('mobile free-cam HUD provides >=44px WCAG touch targets, thumbstick flight,
     const afterGyro = await page.evaluate(() => ({ yaw: window.oceanFleet.freeCam.yaw, pitch: window.oceanFleet.freeCam.pitch }));
     assert.ok(afterGyro.yaw > baseLook.yaw + 0.35, `gyro yaw rotated East (${baseLook.yaw} -> ${afterGyro.yaw})`);
     assert.ok(afterGyro.pitch > baseLook.pitch + 0.15, `gyro pitch tilted Up (${baseLook.pitch} -> ${afterGyro.pitch})`);
+
+    // Verify accidental browser page zoom is locked out across HUD controls, canvas, WebKit gestures, multi-touch, and double-tap
+    const zoomLock = await page.evaluate(() => {
+      const ta = (sel) => getComputedStyle(document.querySelector(sel)).touchAction;
+      const gestureEvt = new Event('gesturestart', { bubbles: true, cancelable: true });
+      document.getElementById('fcm-gyro-btn').dispatchEvent(gestureEvt);
+      const multiTouchEvt = new Event('touchmove', { bubbles: true, cancelable: true });
+      Object.defineProperty(multiTouchEvt, 'touches', { value: [{ clientX: 50, clientY: 700 }, { clientX: 300, clientY: 400 }] });
+      document.getElementById('fcm-stick').dispatchEvent(multiTouchEvt);
+      const singleScrollEvt = new Event('touchmove', { bubbles: true, cancelable: true });
+      Object.defineProperty(singleScrollEvt, 'touches', { value: [{ clientX: 200, clientY: 300 }] });
+      document.querySelector('.panel-body').dispatchEvent(singleScrollEvt);
+      const dblEvt = new MouseEvent('dblclick', { bubbles: true, cancelable: true });
+      document.getElementById('fcm-speed-up').dispatchEvent(dblEvt);
+      const ctrlWheelEvt = new WheelEvent('wheel', { bubbles: true, cancelable: true, ctrlKey: true, deltaY: -20 });
+      document.getElementById('free-cam-controls').dispatchEvent(ctrlWheelEvt);
+      return {
+        bodyTA: ta('body'),
+        canvasTA: ta('#c'),
+        fcmTA: ta('#free-cam-controls'),
+        pillTA: ta('#fcm-gyro-btn'),
+        stepTA: ta('#fcm-speed-up'),
+        helmTA: ta('#helm-controls'),
+        dockTA: ta('#camera-dock'),
+        panelBodyTA: ta('.panel-body'),
+        rudderTA: ta('#boat-rudder'),
+        gestureBlocked: gestureEvt.defaultPrevented,
+        multiTouchBlocked: multiTouchEvt.defaultPrevented,
+        singleTouchAllowed: !singleScrollEvt.defaultPrevented,
+        dblClickBlocked: dblEvt.defaultPrevented,
+        ctrlWheelBlocked: ctrlWheelEvt.defaultPrevented,
+      };
+    });
+    assert.equal(zoomLock.bodyTA, 'none', 'body forbids browser pan/pinch-zoom');
+    assert.equal(zoomLock.canvasTA, 'none', 'canvas forbids browser pan/pinch-zoom');
+    assert.equal(zoomLock.fcmTA, 'none', 'free-cam-controls forbids pinch-zoom');
+    assert.equal(zoomLock.pillTA, 'none', 'HUD pill buttons forbid pinch-zoom');
+    assert.equal(zoomLock.stepTA, 'none', 'HUD stepper buttons forbid pinch-zoom');
+    assert.equal(zoomLock.helmTA, 'none', 'helm-controls forbids pinch-zoom');
+    assert.equal(zoomLock.dockTA, 'none', 'camera-dock forbids pinch-zoom');
+    assert.equal(zoomLock.panelBodyTA, 'pan-y', 'settings panel-body preserves vertical scrolling without pinch-zoom');
+    assert.equal(zoomLock.rudderTA, 'pan-x', 'range sliders preserve horizontal dragging without pinch-zoom');
+    assert.equal(zoomLock.gestureBlocked, true, 'WebKit gesturestart prevented');
+    assert.equal(zoomLock.multiTouchBlocked, true, 'two-finger cross-element touchmove prevented');
+    assert.equal(zoomLock.singleTouchAllowed, true, 'single-finger panel scroll touchmove allowed');
+    assert.equal(zoomLock.dblClickBlocked, true, 'rapid button double-tap zoom prevented');
+    assert.equal(zoomLock.ctrlWheelBlocked, true, 'Ctrl+wheel trackpad pinch over HUD prevented');
 
     // Tap Aboard button -> returns to boat mode and hides free-cam-controls
     await page.click('#fcm-aboard-btn');

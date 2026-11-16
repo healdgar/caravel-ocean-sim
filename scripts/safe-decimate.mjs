@@ -113,7 +113,13 @@ export function readGLB(bytes, { allowSkinned = false } = {}) {
       const indices = primitive.indices === undefined ? Uint32Array.from({ length: count }, (_, i) => i) : Uint32Array.from(read(primitive.indices));
       const uvAccessor = primitive.attributes.TEXCOORD_0;
       const uvs = uvAccessor === undefined || doc.accessors[uvAccessor].componentType !== 5126 ? null : read(uvAccessor);
-      parts.push({ name: node.name ?? `part${parts.length}`, material: primitive.material, positions, indices, uvs });
+      const colAccessor = primitive.attributes.COLOR_0;
+      let colors = null;
+      if (colAccessor !== undefined && doc.accessors[colAccessor].componentType === 5126) {
+        const rawCol = read(colAccessor), colStride = doc.accessors[colAccessor].type === 'VEC4' ? 4 : 3;
+        colors = colStride === 3 ? rawCol : Float32Array.from({ length: count * 3 }, (_, idx) => rawCol[Math.floor(idx / 3) * 4 + (idx % 3)]);
+      }
+      parts.push({ name: node.name ?? `part${parts.length}`, material: primitive.material, positions, indices, uvs, colors });
     }
     for (const child of node.children ?? []) visit(child, world);
   };
@@ -125,13 +131,24 @@ export function readGLB(bytes, { allowSkinned = false } = {}) {
 // Merge corners at one place, so the simplifier sees a closed surface and not split seams. A texture
 // seam stays split, because a corner there has two places in the image.
 function weld(part, epsilon) {
-  const map = new Map(), remap = new Uint32Array(part.positions.length / 3), positions = [], uvs = part.uvs ? [] : null, origin = [];
+  const map = new Map(), remap = new Uint32Array(part.positions.length / 3), positions = [], uvs = part.uvs ? [] : null, colors = (!part.uvs && part.colors) ? [] : null, origin = [];
   for (let i = 0; i < remap.length; i++) {
     const x = part.positions[i * 3], y = part.positions[i * 3 + 1], z = part.positions[i * 3 + 2];
     let key = `${Math.round(x / epsilon)},${Math.round(y / epsilon)},${Math.round(z / epsilon)}`;
     if (uvs) key += `,${Math.round(part.uvs[i * 2] * 4096)},${Math.round(part.uvs[i * 2 + 1] * 4096)}`;
+    else if (colors) {
+      const gar = Math.floor(Math.max(part.colors[i * 3 + 2], 0) * 0.5 + 1e-4);
+      key += `,${gar}`;
+    }
     let id = map.get(key);
-    if (id === undefined) { id = positions.length / 3; map.set(key, id); origin.push(i); positions.push(x, y, z); if (uvs) uvs.push(part.uvs[i * 2], part.uvs[i * 2 + 1]); }
+    if (id === undefined) {
+      id = positions.length / 3;
+      map.set(key, id);
+      origin.push(i);
+      positions.push(x, y, z);
+      if (uvs) uvs.push(part.uvs[i * 2], part.uvs[i * 2 + 1]);
+      if (colors) colors.push(part.colors[i * 3], part.colors[i * 3 + 1], part.colors[i * 3 + 2]);
+    }
     remap[i] = id;
   }
   const indices = [];
@@ -139,7 +156,7 @@ function weld(part, epsilon) {
     const a = remap[part.indices[t]], b = remap[part.indices[t + 1]], c = remap[part.indices[t + 2]];
     if (a !== b && b !== c && a !== c) indices.push(a, b, c);
   }
-  return { ...part, positions: new Float32Array(positions), uvs: uvs && new Float32Array(uvs), indices: Uint32Array.from(indices), origin: Uint32Array.from(origin) };
+  return { ...part, positions: new Float32Array(positions), uvs: uvs && new Float32Array(uvs), colors: colors && new Float32Array(colors), indices: Uint32Array.from(indices), origin: Uint32Array.from(origin) };
 }
 
 const faceNormal = (p, a, b, c) => {
@@ -187,7 +204,8 @@ function supportLocks(part) {
   return locks;
 }
 function vertexAttributes(part) {
-  const stride = part.uvs ? 5 : 3, count = part.positions.length / 3, values = new Float32Array(count * stride);
+  const hasColors = !part.uvs && Boolean(part.colors);
+  const stride = part.uvs ? 5 : hasColors ? 6 : 3, count = part.positions.length / 3, values = new Float32Array(count * stride);
   for (let t = 0; t < part.indices.length; t += 3) {
     const a = part.indices[t], b = part.indices[t + 1], c = part.indices[t + 2], n = faceNormal(part.positions, a, b, c);
     for (const v of [a, b, c]) for (let k = 0; k < 3; k++) values[v * stride + k] += n[k];
@@ -195,9 +213,27 @@ function vertexAttributes(part) {
   for (let i = 0; i < count; i++) {
     const n = unit([values[i * stride], values[i * stride + 1], values[i * stride + 2]]);
     values.set(n, i * stride);
-    if (part.uvs) { values[i * stride + 3] = part.uvs[i * 2]; values[i * stride + 4] = part.uvs[i * 2 + 1]; }
+    if (part.uvs) {
+      values[i * stride + 3] = part.uvs[i * 2];
+      values[i * stride + 4] = part.uvs[i * 2 + 1];
+    } else if (hasColors) {
+      const r = part.colors[i * 3], g = part.colors[i * 3 + 1], b = part.colors[i * 3 + 2];
+      const piece = Math.floor(Math.max(r, 0) * 0.5 + 1e-4);
+      const comp = Math.floor(Math.max(g, 0) * 0.5 + 1e-4);
+      const gar = Math.floor(Math.max(b, 0) * 0.5 + 1e-4);
+      const px = part.positions[i * 3], py = part.positions[i * 3 + 1], pz = part.positions[i * 3 + 2];
+      const onFrontFace = py > 1.44 && pz > 0.01 && Math.abs(px) < 0.072;
+      const faceGain = onFrontFace ? (gar === 0 ? 18.0 : 6.0) : 0.06;
+      values[i * stride + 3] = (r - 2 * piece) * faceGain;
+      values[i * stride + 4] = (g - 2 * comp) * faceGain;
+      values[i * stride + 5] = (b - 2 * gar) * faceGain + (onFrontFace ? gar * 1.2 : gar * 0.03);
+    }
   }
-  const weights = part.uvs ? [NORMAL_WEIGHT, NORMAL_WEIGHT, NORMAL_WEIGHT, UV_WEIGHT, UV_WEIGHT] : [NORMAL_WEIGHT, NORMAL_WEIGHT, NORMAL_WEIGHT];
+  const weights = part.uvs
+    ? [NORMAL_WEIGHT, NORMAL_WEIGHT, NORMAL_WEIGHT, UV_WEIGHT, UV_WEIGHT]
+    : hasColors
+      ? [NORMAL_WEIGHT, NORMAL_WEIGHT, NORMAL_WEIGHT, 0.25, 0.25, 0.25]
+      : [NORMAL_WEIGHT, NORMAL_WEIGHT, NORMAL_WEIGHT];
   return { values, stride, weights };
 }
 function reducePart(part, allowed, options) {
@@ -208,6 +244,9 @@ function reducePart(part, allowed, options) {
   // which is what the simplifier does by itself. Locking them stalled a textured body at 6,000 triangles.
   const flags = ['ErrorAbsolute', ...(part.uvs ? ['Permissive'] : []), ...(options.flags ?? [])];
   const attributes = (part.attributes ??= vertexAttributes(part));
+  const effWeights = (!part.uvs && part.colors && allowed > 0.055)
+    ? [NORMAL_WEIGHT, NORMAL_WEIGHT, NORMAL_WEIGHT, 0.02, 0.02, 0.02]
+    : attributes.weights;
   // A part that may vanish must not be pinned in place by its own ends.
   const mayVanish = options.dropSmall && size <= allowed;
   let locks = options.locks === false || mayVanish ? null : (part.locks ??= supportLocks(part));
@@ -228,7 +267,7 @@ function reducePart(part, allowed, options) {
       }
     }
   }
-  const [indices] = MeshoptSimplifier.simplifyWithAttributes(part.indices, part.positions, 3, attributes.values, attributes.stride, attributes.weights, locks, 3, limit, flags);
+  const [indices] = MeshoptSimplifier.simplifyWithAttributes(part.indices, part.positions, 3, attributes.values, attributes.stride, effWeights, locks, 3, limit, flags);
   return { ...part, indices: Uint32Array.from(indices) };
 }
 function partBox(part) {

@@ -115,7 +115,7 @@ import { createFreeCannon } from './free-cannon.js';
 import { createCastleDuelController, CASTLE_DUEL_DISTANCE_M } from './castle-duel.js';
 import { cameraModeFromLink, propulsionFromLink, createShareLink, encodeGameStateParam, decodeGameStateParam, ROUGH_SEAS } from './sharing.js';
 import { ORBIT_LIMIT, orbitElevation, orbitDistance, panOrbit, placeOrbitCamera } from './camera.js';
-import { createFreeCamMobileControls } from './free-cam-mobile.js';
+import { createFreeCamMobileControls, installViewportZoomGuard } from './free-cam-mobile.js';
 // WebGPU ocean — custom renderer.
 // FFT ocean (6 cascades) + CDLOD surface mesh + physically based sky + HDR post.
 // All per-frame data lives in preallocated typed arrays / descriptors (no per-frame garbage
@@ -1901,6 +1901,7 @@ async function main() {
   });
   const releaseTouch=e=>lookPointers.delete(e.pointerId);
   canvas.addEventListener('pointerup',releaseTouch);canvas.addEventListener('pointercancel',releaseTouch);canvas.addEventListener('lostpointercapture',releaseTouch);
+  installViewportZoomGuard(document);
   canvas.addEventListener('wheel', (e) => {
     // Trackpad pinch arrives as Ctrl-wheel in Chromium. The scene owns this
     // gesture; allowing its browser default would also scale the HUD/panels.

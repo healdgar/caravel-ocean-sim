@@ -136,9 +136,15 @@ export function applyPirateCrewAttire(company,pirate=true){
     }
     if(!s.indigenous){
       const fullComp=crewComponentMaskForActor(s,i,{pirate});
-      const hat=isCaptainActor(s)?0:((fullComp>>3)&7);
-      s.compMask=fullComp&~0xc7;
-      s.dress=suppressCrownHairUnderHat(colonialGroomMask(s.sex,i,{isCaptain:isCaptainActor(s)}),hat,s.sex);
+      const isCap=isCaptainActor(s);
+      const {dress,compMask}=reconcileColonialGroomAndComp(
+        colonialGroomMask(s.sex,i,{isCaptain:isCap}),
+        fullComp,
+        s.sex,
+        {isCaptain:isCap,explicitBald:!pirate&&!s.soul&&(s.id==='duarte'||s.id==='afonso'),seed:i},
+      );
+      s.compMask=compMask;
+      s.dress=dress;
     }
   }
   return company;
@@ -225,9 +231,17 @@ export function createCompany(policy=deckhandDecision,modelId='nina',options={})
     s.hair=crewLinearColour(look.hair);
     s.face=initialIndigenous?indigDress.face:[look.face[0],look.face[1],look.face[2],look.face[3]];
     const fullComp=initialIndigenous?0:crewComponentMaskForActor(s,i,{pirate});
-    const hat=isCaptainActor(s)?0:((fullComp>>3)&7);
-    s.compMask=initialIndigenous?0:(fullComp&~0xc7);
-    s.dress=initialIndigenous?indigDress.mask:suppressCrownHairUnderHat(colonialGroomMask(person.sex,i,{isCaptain:isCaptainActor(s)}),hat,person.sex);
+    const isCap=isCaptainActor(s);
+    const reconciled=initialIndigenous
+      ?{dress:indigDress.mask,compMask:0}
+      :reconcileColonialGroomAndComp(
+          colonialGroomMask(person.sex,i,{isCaptain:isCap}),
+          fullComp,
+          person.sex,
+          {isCaptain:isCap,explicitBald:!pirate&&!s.soul&&(s.id==='duarte'||s.id==='afonso'),seed:i},
+        );
+    s.compMask=reconciled.compMask;
+    s.dress=reconciled.dress;
     return s;
   })};
 }
@@ -681,6 +695,8 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
     return {vertex,index,lods,owned:true};
   });
   const captainModel=models[2],captainGeometry=geometry[2];
+  const moistureProbeAlignOffset=Math.max(0,Math.min(wetness.crewOffset,Math.max(0,(wetness.probeCount??1)-1))&~31);
+  const moistureByteOffset=moistureProbeAlignOffset*8;
   // A vessel has two batches of bodies, by sex. Her captain is one more body in his or her own, last in it, and
   // drawn from it with the captain's mesh: one person is not worth a third set of joint and actor storage.
   const batches=pairModels.map((model,i)=>{
@@ -690,7 +706,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
     for(const s of captains)s.walkClipDuration=captainModel.animator.clips.get('Walk').duration;
     // A one-person company legitimately has no actors in one sex batch.
     // Bind valid storage buffers, but submit no phantom instance for that batch.
-    const poses=new Float32Array(Math.max(1,people.length)*65*16),actors=new Float32Array(Math.max(1,people.length)*CREW_ACTOR_FLOATS);
+    const poses=new Float32Array(Math.max(1,people.length)*65*16),actors=new Float32Array(Math.max(1,people.length)*CREW_ACTOR_FLOATS),actorsU32=new Uint32Array(actors.buffer);
     const {vertex,index,lods}=geometry[i];
     const bones=buffer('crew joints',poses,B.STORAGE),actor=buffer('crew transforms',actors,B.STORAGE);
     // Two solved poses per sailor, and how far along the way from one to the other each is.
@@ -704,14 +720,14 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
     // Anyone near enough to see what their hands are at is solved on the GPU, into the two poses they are shown between.
     const solve=createCrewSolveBatch(device,solver,model,solved,people.length),captainSolve=captains.length?createCrewSolveBatch(device,solver,captainModel,solved,people.length):null;
     const common=[{buffer:hullUBO},{buffer:bones},{buffer:actor}];
-    const mainResources=[{buffer:frameUBO},...common,transView,sampClamp,envCubeView,{buffer:sunVisBuf},{buffer:wetness.state},skyView,{binding:13,resource:captainTexView},{binding:14,resource:captainSampler}];
+    const mainResources=[{buffer:frameUBO},...common,transView,sampClamp,envCubeView,{buffer:sunVisBuf},{buffer:wetness.state,offset:moistureByteOffset},skyView,{binding:13,resource:captainTexView},{binding:14,resource:captainSampler}];
     const main=group(pipeline,mainResources),mainCut=group(cutPipeline,mainResources);
     // The depth entry reads only what the vertex stage does, and the frame.
     const cutDepth=device.createBindGroup({layout:cutDepthPipeline.getBindGroupLayout(0),entries:[0,1,2,3,8].map(binding=>({binding,resource:mainResources[binding]}))});
     const shadow=group(shadowPipeline,[{buffer:shadows.uniform},...common]);
     // What is drawn from this batch's storage: its own bodies, then the captain's, each a run of its slots.
     const parts=[{model,vertex,index,lods,first:0,people:hands},...(captains.length?[{model:captainModel,...captainGeometry,first:hands.length,people:captains}]:[])];
-    return {model,people,hands:hands.length,parts,poses,actors,bones,actor,main,mainCut,cutDepth,shadow,mainResources,solved,blend,blends,poseBlendGroup,clip,captainClip,turn,solve,captainSolve};
+    return {model,people,hands:hands.length,parts,poses,actors,actorsU32,bones,actor,main,mainCut,cutDepth,shadow,mainResources,solved,blend,blends,poseBlendGroup,clip,captainClip,turn,solve,captainSolve};
   });
   const partRuns=(part,tierOf)=>{const runs=crewDrawRuns(part.people,tierOf);if(part.first)for(const run of runs)run.first+=part.first;return runs;};
   const shownTierOf=s=>s.visible===false||s.cutShader?-1:s.lodTier,cutTierOf=s=>s.visible!==false&&s.cutShader?s.lodTier:-1;
@@ -829,7 +845,8 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
           b.actors[offset+19]=!s.visible?1.0:(woundAmt*0.45);
           // Integer part of trousers.w is boat.enabled; fractional part (< 0.45) carries soot/scorch.
           b.actors[offset+23]=Number(boat.enabled===true)+scorchAmt*0.42;
-          b.actors[offset+31]=wetness.crewOffset+(s.crewIndex??state.crew.indexOf(s))*4+(s.dress??0)/DRESS_MASK_SCALE;
+          const localMoistureBase=(wetness.crewOffset-moistureProbeAlignOffset)+(s.crewIndex??state.crew.indexOf(s))*4;
+          b.actorsU32[offset+31]=packCrewMoistureAndDressU32(localMoistureBase,s.dress??0);
         }
         for(const part of b.parts){part.runs=partRuns(part,shownTierOf);part.cutRuns=partRuns(part,cutTierOf);part.shadowRuns=partRuns(part,shadowTierOf);}
         device.queue.writeBuffer(b.blend,0,b.blends);device.queue.writeBuffer(b.actor,0,b.actors);b.clip.upload();b.captainClip?.upload();b.solve.upload();b.captainSolve?.upload();b.turn.update(b.people);
@@ -1147,22 +1164,26 @@ function appendGroomPieceMesh(pieceMesh, pieceNumber, lm, baseVertCount, extraVe
   const capInflate = pieceMesh.name === 'hair_1550_coif_cap'
     ? 1.075
     : isBeard
-      ? 1.06
-      : (pieceMesh.name === 'hair_indigenous_plaits' || pieceMesh.name === 'hair_1550_cropped' || pieceMesh.name === 'hair_indigenous_long')
-        ? 1.032
-        : 1.0;
+      ? 1.075
+      : (pieceMesh.name === 'hair_1550_female_bun' || pieceMesh.name === 'hair_1550_cropped' || pieceMesh.name === 'hair_1550_wavy')
+        ? 1.044
+        : (pieceMesh.name === 'hair_indigenous_plaits' || pieceMesh.name === 'hair_indigenous_long')
+          ? 1.035
+          : 1.0;
   const yBias = pieceMesh.name === 'hair_1550_coif_cap'
     ? 0.006
-    : pieceMesh.name === 'hair_indigenous_long'
-      ? 0.008
-      : isBeard
-        ? -0.002
-        : 0.0;
+    : (pieceMesh.name === 'hair_1550_female_bun' || pieceMesh.name === 'hair_1550_cropped' || pieceMesh.name === 'hair_1550_wavy')
+      ? 0.007
+      : pieceMesh.name === 'hair_indigenous_long'
+        ? 0.008
+        : isBeard
+          ? -0.002
+          : 0.0;
   const zBias = pieceMesh.name === 'hair_indigenous_long'
     ? -0.011
     : isBeard
-      ? 0.006
-      : (pieceMesh.name === 'hair_indigenous_plaits' || pieceMesh.name === 'hair_1550_cropped')
+      ? 0.011
+      : (pieceMesh.name === 'hair_indigenous_plaits' || pieceMesh.name === 'hair_1550_cropped' || pieceMesh.name === 'hair_1550_female_bun')
         ? 0.004
         : pieceMesh.name === 'hair_1550_coif_cap'
           ? 0.003
@@ -1736,6 +1757,51 @@ export function suppressCrownHairUnderHat(dress, hat = 0, sex = "male") {
     : (COLONIAL_HAIR_CROPPED | COLONIAL_HAIR_WAVY);
   return (dress & ~clearMask) >>> 0;
 }
+
+// Packs local moisture probe slot (11 bits, 0..2047) and 18-bit dress mask (0..262143) into a
+// normal finite negative IEEE-754 float32 word (exponent 128..159; never NaN, Inf, or denormal)
+// so large hull wetness probe counts (e.g. nina=9722, victory=15347) never round away hair/dress bits.
+export function packCrewMoistureAndDressU32(localMoistureBase, dress = 0) {
+  return (0xC0000000 | (((localMoistureBase | 0) & 0x7ff) << 18) | ((dress | 0) & 0x3ffff)) >>> 0;
+}
+
+export function unpackCrewMoistureAndDressU32(word) {
+  const u = (word | 0) >>> 0;
+  return {
+    localMoistureBase: (u >>> 18) & 0x7ff,
+    dress: u & 0x3ffff,
+  };
+}
+
+// Reconciles 3D groom-pack.glb hair/beard masks (`dress`) with non-clipping 1550 hats/builds (`compMask`).
+// Keeps sculpted 3D Tripo groom-pack hair, buns, coifs, and beards while avoiding legacy sailor-classic
+// torso vests/aprons/blob-hair that would intersect the sculpted 1550 shirts, puffed sleeves, and bodices.
+export function reconcileColonialGroomAndComp(baseGroomMask, fullComp = 0, sex = "male", { isCaptain = false, explicitBald = false, seed = 0 } = {}) {
+  const female = sex === "female";
+  if (isCaptain) {
+    return {
+      dress: suppressCrownHairUnderHat(baseGroomMask >>> 0, 0, sex),
+      compMask: 0,
+    };
+  }
+  const rawHat = (fullComp >>> 3) & 7;
+  // Keep only high-crown wide-brim chapéu (2) and steel morion (4); linen coifs come from groom-pack.glb.
+  const hat = (rawHat === 2 || rawHat === 4) ? rawHat : 0;
+  let dress = suppressCrownHairUnderHat(baseGroomMask >>> 0, hat, sex);
+  const groomHairBits = female
+    ? (COLONIAL_FEMALE_BUN | COLONIAL_FEMALE_COIF | COLONIAL_FEMALE_WAVY)
+    : (COLONIAL_HAIR_CROPPED | COLONIAL_HAIR_WAVY | COLONIAL_CAPTAIN_BUN);
+  if (explicitBald) {
+    dress = (dress & ~groomHairBits) >>> 0;
+  } else if (!female && hat === 0 && (dress & groomHairBits) === 0 && ((seed | 0) % 7 !== 3)) {
+    // Ensure nearly all unhatted mariners wear sculpted 3D groom-pack hair unless intentionally bald.
+    dress = (dress | (((seed | 0) & 1) ? COLONIAL_HAIR_WAVY : COLONIAL_HAIR_CROPPED)) >>> 0;
+  }
+  // Retain only non-clipping hat (2 or 4), body build (bits 11..12), and hat accent palette (bits 13..14).
+  const buildAndAccent = fullComp & ((3 << 11) | (3 << 13));
+  const compMask = (((hat & 7) << 3) | buildAndAccent) >>> 0;
+  return { dress: dress >>> 0, compMask };
+}
 // 16th-century Spanish Garrison (*Soldados de Presidio*) uniform colours (linear RGB):
 // Tercio crimson, buff leather jerkin, steel breastplate, artillery slate, officer gold-ochre, garrison russet.
 const GARRISON_SHIRTS = Object.freeze([
@@ -2012,10 +2078,18 @@ export function createFortificationSoldiersForInstance(inst, startIndex = 0) {
       dress: isIndigenousFort ? dress.mask : 0,
     });
     const fullComp = isIndigenousFort ? 0 : crewComponentMaskForActor(s, globalIdx, { garrison: true });
-    const hat = isCaptainActor(s) ? 0 : ((fullComp >> 3) & 7);
-    s.compMask = isIndigenousFort ? 0 : (fullComp & ~0xc7);
-    if (!isIndigenousFort) {
-      s.dress = suppressCrownHairUnderHat(colonialGroomMask(sex, globalIdx, { isCaptain: isCaptainActor(s), isSoldier: true }), hat, sex);
+    if (isIndigenousFort) {
+      s.compMask = 0;
+    } else {
+      const isCap = isCaptainActor(s);
+      const reconciled = reconcileColonialGroomAndComp(
+        colonialGroomMask(sex, globalIdx, { isCaptain: isCap, isSoldier: true }),
+        fullComp,
+        sex,
+        { isCaptain: isCap, seed: globalIdx },
+      );
+      s.compMask = reconciled.compMask;
+      s.dress = reconciled.dress;
     }
     s.scale.fill((s.sex === 'female' ? 1.04 : 1.02) * (1 + ((globalIdx % 3) - 1) * 0.02));
     s.position.set([wx, wy, wz]);
@@ -2143,9 +2217,15 @@ export function garrisonEnlist(s, person) {
   Object.assign(s, { soul: person, name: person.name, sex, identityId: identity.id, skin: crewLinearColour(look.skin), hair: crewLinearColour(look.hair), face: [...look.face] });
   const idx = s.crewIndex ?? 0;
   const fullComp = crewComponentMaskForActor(s, idx, { garrison: true });
-  const hat = isCaptainActor(s) ? 0 : ((fullComp >> 3) & 7);
-  s.compMask = fullComp & ~0xc7;
-  s.dress = suppressCrownHairUnderHat(colonialGroomMask(sex, idx, { isCaptain: isCaptainActor(s), isSoldier: true }), hat, sex);
+  const isCap = isCaptainActor(s);
+  const reconciled = reconcileColonialGroomAndComp(
+    colonialGroomMask(sex, idx, { isCaptain: isCap, isSoldier: true }),
+    fullComp,
+    sex,
+    { isCaptain: isCap, seed: idx },
+  );
+  s.compMask = reconciled.compMask;
+  s.dress = reconciled.dress;
   s.scale.fill((sex === 'female' ? 1.04 : 1.02) * (1 + ((idx % 3) - 1) * 0.02));
   return s;
 }

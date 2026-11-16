@@ -5,7 +5,7 @@ import {readGLB,gltfAccessor,gltfSlerp,loadCrewGLB} from '../js/gltf.js';
 import {
   createDeckhand,stepDeckhand,createCompany,stepCompany,issueCaptainOrder,CREW_ROSTER,
   createIndigenousCrewModels,isCaptainActor,loadGroomPackGLB,attachColonialGroomModel,colonialGroomMask,
-  suppressCrownHairUnderHat,
+  suppressCrownHairUnderHat,packCrewMoistureAndDressU32,unpackCrewMoistureAndDressU32,reconcileColonialGroomAndComp,
   COLONIAL_HAIR_CROPPED,COLONIAL_HAIR_WAVY,COLONIAL_BEARD_POINTED,COLONIAL_BEARD_MARINER,COLONIAL_BEARD_TERCIO,
   COLONIAL_CAPTAIN_BUN,COLONIAL_FEMALE_BUN,COLONIAL_FEMALE_COIF,COLONIAL_FEMALE_WAVY,
 } from '../js/crew.js';
@@ -650,12 +650,18 @@ test('1550 colonial groom pack covers sailors, captains, soldiers and villagers 
   assert.equal(suppressCrownHairUnderHat(COLONIAL_HAIR_WAVY|COLONIAL_BEARD_POINTED,2,'male'),COLONIAL_BEARD_POINTED,'male hat suppresses crown hair while preserving pointed beard');
   assert.equal(suppressCrownHairUnderHat(COLONIAL_FEMALE_WAVY,1,'female'),0,'female hat suppresses loose crown hair');
 
-  for(const mask of new Set([...maleLooks,...soldierLooks,...femaleLooks,...captainLooks])){
-    for(const moistureBase of [0,1,42,512,1599]){
-      const packed=Math.fround(moistureBase+mask/DRESS_MASK_SCALE);
-      const frac=packed-Math.floor(packed);
-      const recovered=Math.round(frac*DRESS_MASK_SCALE);
-      assert.equal(recovered,mask,`mask ${mask} survives float32 moisture packing at base=${moistureBase}`);
+  for(const mask of new Set([...maleLooks,...soldierLooks,...femaleLooks,...captainLooks,1,3,31,262143])){
+    for(const crewOffset of [0,42,1599,9722,15347]){
+      const alignOffset=crewOffset&~31;
+      for(const crewIdx of [0,5,11,120]){
+        const localBase=(crewOffset-alignOffset)+crewIdx*4;
+        const u32=new Uint32Array([packCrewMoistureAndDressU32(localBase,mask)]);
+        const f32=new Float32Array(u32.buffer);
+        assert.ok(Number.isFinite(f32[0])&&f32[0]<-1.0,`finite negative float for localBase=${localBase}, mask=${mask}`);
+        const got=unpackCrewMoistureAndDressU32(new Uint32Array(f32.buffer)[0]);
+        assert.equal(got.localMoistureBase,localBase);
+        assert.equal(got.dress,mask,`exact 18-bit dress preserved at crewOffset=${crewOffset}`);
+      }
     }
   }
 });
@@ -716,6 +722,16 @@ test('modular 3D character components pack 15-bit masks losslessly in f32, keep 
     seenCrewMasks.add(m);
     const u=unpackCrewCompMask(m);
     if(s.sex==='female')assert.equal(u.beard,0,`female sailor ${s.id} has zero facial hair`);
+    const groomHairBits=s.sex==='female'
+      ?(COLONIAL_FEMALE_BUN|COLONIAL_FEMALE_COIF|COLONIAL_FEMALE_WAVY)
+      :(COLONIAL_HAIR_CROPPED|COLONIAL_HAIR_WAVY|COLONIAL_CAPTAIN_BUN);
+    const hasGroomHair=(s.dress&groomHairBits)!==0;
+    const hat=(s.compMask>>>3)&7;
+    assert.equal(s.compMask&7,0,`${s.id} avoids legacy blob hair over 3D base head`);
+    assert.equal((s.compMask>>>8)&7,0,`${s.id} avoids legacy torso vest/apron clipping`);
+    if(s.id!=='duarte'&&s.id!=='afonso'&&hat===0&&(idx%7!==3)){
+      assert.equal(hasGroomHair,true,`${s.id} wears sculpted 3D groom-pack hair`);
+    }
   }
   assert.ok(seenCrewMasks.size>=10,`distinct named crew component masks: ${seenCrewMasks.size}`);
   let morions=0,saiaSkirts=0;

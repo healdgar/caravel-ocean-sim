@@ -132,8 +132,16 @@ fn crewRamp(lo:f32,hi:f32,x:f32)->vec2f {
   return vec2f(t*t*(3.0-2.0*t),6.0*t*(1.0-t)/(hi-lo));
 }
 // Optional pieces of a body carry their number in the red channel of their colour, and each person's
-// look says which they wear, in the fraction of hair.w. Anyone else's fraction is zero and they have no pieces.
-fn crewDressOf(hairW:f32)->u32 {return u32(fract(hairW)*${DRESS_MASK_SCALE}.0+.5);}
+// look says which they wear: either bit-packed with the local moisture slot when hair.w < 0, or in
+// the fraction of hair.w when hair.w >= 0.
+fn crewDressOf(hairW:f32)->u32 {
+  if(hairW<0.0){return bitcast<u32>(hairW)&0x3ffffu;}
+  return u32(fract(hairW)*${DRESS_MASK_SCALE}.0+.5);
+}
+fn crewMoistureBase(hairW:f32)->u32 {
+  if(hairW<0.0){return (bitcast<u32>(hairW)>>18u)&0x7ffu;}
+  return u32(hairW);
+}
 fn crewPieceHidden(color:vec3f,dress:u32)->bool {
   let piece=u32(color.r*.5);
   return piece>0u&&((dress>>(piece-1u))&1u)==0u;
@@ -161,7 +169,7 @@ fn crewCompHidden(color:vec3f,compMask:u32)->bool {
   if(comp<=12u){return beard==0u||comp!=9u+beard;}
   return gar==0u||comp!=12u+gar;
 }
-const CREW_PIECE_OUT=vec3f(0.0,1.55,0.0);
+const CREW_PIECE_OUT=vec3f(0.0,1.62,0.0);
 // The whole part of skin.w says whose body this is: 0 a man's, 1 a woman's, 2 a woman captain in the captain's body,
 // which is built on the man's and so takes the man's face.
 fn crewSurface(v:CrewInput)->CrewSurface {
@@ -171,9 +179,9 @@ fn crewSurface(v:CrewInput)->CrewSurface {
   return crewMorph(v.position,v.normal,actor.face,select(0.0,1.0,actor.skin.w>.5&&actor.skin.w<1.5));
 }
 fn crewMorph(p:vec3f,normal:vec3f,f:vec4f,sex:f32)->CrewSurface {
-  let headY=select(1.5450,1.4900,sex>.5);
+  let headY=select(1.568,1.516,sex>.5);
   let build=(crewCompMask(f.w)>>11u)&3u;
-  if(p.y<=headY-.025){
+  if(p.y<=headY+.015){
     if(build==0u||p.y<=.68||p.y>=1.40||abs(p.x)>=.25){return CrewSurface(p,normal);}
     let env=crewRamp(.68,.86,p.y).x*(1.0-crewRamp(1.24,1.40,p.y).x)*(1.0-crewRamp(.20,.25,abs(p.x)).x);
     let sx=select(select(.11,-.085,build==1u),.095*crewRamp(.84,1.18,p.y).x,build==2u);
@@ -184,34 +192,35 @@ fn crewMorph(p:vec3f,normal:vec3f,f:vec4f,sex:f32)->CrewSurface {
     let nrm=normalize(vec3f(normal.x/(1.0+sx*env),normal.y,normal.z/(1.0+sz*env)));
     return CrewSurface(vec3f(qx,p.y,qz),nrm);
   }
-  let eyeY=select(1.6380,1.5780,sex>.5);
-  let head=crewRamp(headY-.025,headY+.025,p.y);
-  let jaw=vec2f(1,0)-crewRamp(headY+.020,headY+.090,p.y);
+  let eyeY=select(1.666,1.612,sex>.5);
+  let head=crewRamp(headY+.015,headY+.065,p.y);
+  let jaw=vec2f(1,0)-crewRamp(headY+.06,headY+.13,p.y);
   let width=1.0+head.x*((f.x-1.0)+(f.y-1.0)*jaw.x);
   let widthY=head.y*((f.x-1.0)+(f.y-1.0)*jaw.x)+head.x*(f.y-1.0)*jaw.y;
   let nx=vec2f(1,0)-crewRamp(.012,.045,abs(p.x));
-  let ny0=crewRamp(eyeY-.062,eyeY-.025,p.y);
-  let ny1=vec2f(1,0)-crewRamp(eyeY+.005,eyeY+.040,p.y);
-  let nz=crewRamp(.050,.095,p.z);
+  let ny0=crewRamp(eyeY-.065,eyeY-.025,p.y);
+  let ny1=vec2f(1,0)-crewRamp(eyeY+.005,eyeY+.04,p.y);
+  let nz=crewRamp(.045,.085,p.z);
   let nose=nx.x*ny0.x*ny1.x*nz.x;
   let noseD=vec3f(nx.y*sign(p.x)*ny0.x*ny1.x*nz.x,
     nx.x*(ny0.y*ny1.x+ny0.x*ny1.y)*nz.x,nx.x*ny0.x*ny1.x*nz.y);
+  let noseScale=f.z*0.35;
   let ex0=crewRamp(.015,.026,abs(p.x));
   let ex1=vec2f(1,0)-crewRamp(.058,.080,abs(p.x));
   let ey=vec2f(1,0)-crewRamp(.016,.040,abs(p.y-eyeY));
-  let ez=crewRamp(.025,.060,p.z);
+  let ez=crewRamp(.015,.055,p.z);
   let eye=ex0.x*ex1.x*ey.x*ez.x;
   let eyeD=vec3f((ex0.y*ex1.x+ex0.x*ex1.y)*sign(p.x)*ey.x*ez.x,
     ex0.x*ex1.x*ey.y*sign(p.y-eyeY)*ez.x,ex0.x*ex1.x*ey.x*ez.y);
-  let eyeOpen=crewEyeOpen(f.w);
+  let eyeOpen=1.0+(crewEyeOpen(f.w)-1.0)*0.35;
   let eyeShift=(p.y-eyeY)*(eyeOpen-1.0);
   let eyeGradient=eyeShift*eyeD+vec3f(0,(eyeOpen-1.0)*eye,0);
   // Columns of the deformation Jacobian; cofactor columns transform normals.
-  let dx=vec3f(width,eyeGradient.x,f.z*noseD.x);
-  let dy=vec3f(p.x*widthY,1.0+eyeGradient.y,f.z*noseD.y);
-  let dz=vec3f(0,eyeGradient.z,1.0+f.z*noseD.z);
+  let dx=vec3f(width,eyeGradient.x,noseScale*noseD.x);
+  let dy=vec3f(p.x*widthY,1.0+eyeGradient.y,noseScale*noseD.y);
+  let dz=vec3f(0,eyeGradient.z,1.0+noseScale*noseD.z);
   let morphed=normalize(cross(dy,dz)*normal.x+cross(dz,dx)*normal.y+cross(dx,dy)*normal.z);
-  return CrewSurface(vec3f(p.x*width,p.y+eyeShift*eye,p.z+f.z*nose),morphed);
+  return CrewSurface(vec3f(p.x*width,p.y+eyeShift*eye,p.z+noseScale*nose),morphed);
 }
 `;
 export const CAPTAIN_OWN_COLOURS = /* wgsl */ `
@@ -296,7 +305,8 @@ fn crewClothed(tagged:vec3f,p:vec3f,shirt:vec3f,trousers:vec3f,skin:vec3f,hair:v
     let comp=u32(tagged.g*.5);
     let rawShade=vec3f(tagged.r-2.0*f32(piece),tagged.g-2.0*f32(comp),tagged.b-2.0*f32(garment));
     let shadeLuma=clamp(dot(rawShade,vec3f(0.299,0.587,0.114)),0.64,1.16);
-    let shade=mix(vec3f(shadeLuma),clamp(rawShade,vec3f(0.62),vec3f(1.18)),select(0.20,0.45,garment==3u));
+    let compShade=mix(vec3f(shadeLuma),clamp(rawShade,vec3f(0.62),vec3f(1.18)),select(0.20,0.45,garment==3u));
+    let shade=select(rawShade,compShade,comp>0u);
     let bareUpper=garment==1u && (dress&${1 << 14}u)!=0u;
     let bareLower=garment==2u && (dress&${1 << 15}u)!=0u && p.y<0.64;
     let shaved=garment==4u && piece==0u && ((dress&${1 << 12}u)!=0u||((dress&${1 << 13}u)!=0u&&p.z>-.02));
@@ -341,7 +351,7 @@ fn crewClothed(tagged:vec3f,p:vec3f,shirt:vec3f,trousers:vec3f,skin:vec3f,hair:v
   let scorchAmt=clamp(fract(actor.trousers.w)/0.42,0.0,1.0);
   let bandageSeed=fract(actor.skin.w);
   out.damage=vec3f(woundAmt,scorchAmt,bandageSeed);
-  let base=u32(actor.hair.w);let y=v.position.y;
+  let base=crewMoistureBase(actor.hair.w);let y=v.position.y;
   let lower=mix(moisture[base],moisture[base+1u],smoothstep(.08,.48,y));
   let upper=mix(moisture[base+2u],moisture[base+3u],smoothstep(1.02,1.48,y));
   out.wet=mix(lower,upper,smoothstep(.48,1.02,y));

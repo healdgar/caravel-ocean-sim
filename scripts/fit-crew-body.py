@@ -630,17 +630,6 @@ def main():
         retargeted_clips.append((name, times, tracks_r, tracks_t))
 
     # 6. High-quality texture sampling & anatomical garment/skin/hair/beard classification.
-    # Lightly smooth noisy 1px UV seam artifacts while keeping crisp edges for vertices.
-    blurred = image.filter(ImageFilter.BoxBlur(0.65))
-    pixels_sharp = np.asarray(image, dtype=np.float32) / 255.0
-    pixels_smooth = np.asarray(blurred, dtype=np.float32) / 255.0
-    srgb = 0.65 * bilinear_sample(pixels_smooth, UV) + 0.35 * bilinear_sample(pixels_sharp, UV)
-    colors = srgb_to_linear(srgb)
-    lab = linear_to_oklab(colors)
-    lum = (colors @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)).astype(np.float32)
-    chroma = np.hypot(lab[:, 1], lab[:, 2])
-
-    # Build joint-group weights per vertex using the 65-joint mapping
     slot_names = [dst['nodes'][j]['name'] for j in dst_skin['joints']]
     head_slots = {i for i, n in enumerate(slot_names) if n == 'Head'}
     neck_slots = {i for i, n in enumerate(slot_names) if n == 'neck_01'}
@@ -654,6 +643,148 @@ def main():
         mask = np.isin(out_j, list(slot_set))
         return (out_w * mask).sum(axis=1)
 
+    head_pos = new_joint_pos['Head']
+    neck_pos = new_joint_pos['neck_01']
+    spine1_pos = new_joint_pos['spine_01']
+    spine3_pos = new_joint_pos['spine_03']
+
+    # Conforming 2-pass front-face midpoint subdivision for vertex-coloured characters so 4K painted
+    # eyes, pupils, sclera, eyebrows, nostrils, and lips are captured at ~1.8 mm vertex resolution
+    # without adding any runtime texture bindings or T-junction cracks across UV island seams.
+    if not textured:
+        def merge_joint_weights(ja, wa, jb, wb):
+            acc = {}
+            for slot, wt in zip(ja, wa):
+                if wt > 1e-6:
+                    acc[int(slot)] = acc.get(int(slot), 0.0) + 0.5 * float(wt)
+            for slot, wt in zip(jb, wb):
+                if wt > 1e-6:
+                    acc[int(slot)] = acc.get(int(slot), 0.0) + 0.5 * float(wt)
+            top = sorted(acc.items(), key=lambda kv: -kv[1])[:4]
+            while len(top) < 4:
+                top.append((0, 0.0))
+            tot = sum(wt for _, wt in top) or 1.0
+            return (
+                np.array([s for s, _ in top], dtype=out_j.dtype),
+                np.array([wt / tot for _, wt in top], dtype=out_w.dtype),
+            )
+
+        for pass_idx, (max_dx, min_dy_off, max_dy_frac, min_dz_off, min_edge_m) in enumerate((
+            (0.072, -0.045, 0.78, 0.008, 0.0038),
+            (0.056, -0.025, 0.68, 0.022, 0.0020),
+        )):
+            wh_cur = group_weight(head_slots)
+            hv_cur = wh_cur > 0.42
+            htop_cur = float(out_p[hv_cur, 1].max()) if hv_cur.any() else head_pos[1] + 0.18
+            hfz_cur = float(np.percentile(out_p[hv_cur, 2], 95)) if hv_cur.any() else head_pos[2] + 0.10
+            hbz_cur = float(np.percentile(out_p[hv_cur, 2], 8)) if hv_cur.any() else head_pos[2] - 0.10
+            hmid_cur = 0.5 * (hfz_cur + hbz_cur)
+            hspan_cur = max(htop_cur - head_pos[1], 0.12)
+            elig = (
+                (wh_cur > 0.42)
+                & (np.abs(out_p[:, 0] - head_pos[0]) < max_dx)
+                & (out_p[:, 1] > head_pos[1] + min_dy_off)
+                & (out_p[:, 1] < head_pos[1] + max_dy_frac * hspan_cur)
+                & (out_p[:, 2] > hmid_cur + min_dz_off)
+            )
+            p_quant = [tuple(row) for row in np.round(out_p / 1e-4).astype(np.int64)]
+            canon_pos = {}
+            for vi, pk in enumerate(p_quant):
+                if pk not in canon_pos:
+                    canon_pos[pk] = out_p[vi]
+            tris_cur = I.reshape(-1, 3)
+            split_spatial = set()
+            for a, b, c in tris_cur:
+                for u, v in ((a, b), (b, c), (c, a)):
+                    if elig[u] and elig[v]:
+                        pku, pkv = p_quant[u], p_quant[v]
+                        if pku != pkv:
+                            elen = float(np.linalg.norm(canon_pos[pku] - canon_pos[pkv]))
+                            if elen > min_edge_m:
+                                split_spatial.add((pku, pkv) if pku < pkv else (pkv, pku))
+            if not split_spatial:
+                continue
+            p_list = list(out_p)
+            n_list = list(out_n)
+            uv_list = list(UV)
+            j_list = list(out_j)
+            w_list = list(out_w)
+            corner_mid = {}
+
+            def edge_mid_vertex(u, v):
+                u_i, v_i = (int(u), int(v)) if u < v else (int(v), int(u))
+                ck = (u_i, v_i)
+                if ck in corner_mid:
+                    return corner_mid[ck]
+                pku, pkv = p_quant[u_i], p_quant[v_i]
+                mp = 0.5 * (canon_pos[pku] + canon_pos[pkv])
+                mn = out_n[u_i] + out_n[v_i]
+                mn = mn / max(float(np.linalg.norm(mn)), 1e-9)
+                muv = 0.5 * (UV[u_i] + UV[v_i])
+                mj, mw = merge_joint_weights(out_j[u_i], out_w[u_i], out_j[v_i], out_w[v_i])
+                idx_new = len(p_list)
+                p_list.append(mp)
+                n_list.append(mn)
+                uv_list.append(muv)
+                j_list.append(mj)
+                w_list.append(mw)
+                corner_mid[ck] = idx_new
+                return idx_new
+
+            def is_split(u, v):
+                pku, pkv = p_quant[u], p_quant[v]
+                if pku == pkv:
+                    return False
+                return ((pku, pkv) if pku < pkv else (pkv, pku)) in split_spatial
+
+            new_tris = []
+            for a, b, c in tris_cur:
+                s01 = is_split(a, b)
+                s12 = is_split(b, c)
+                s20 = is_split(c, a)
+                cnt = int(s01) + int(s12) + int(s20)
+                if cnt == 0:
+                    new_tris.append((a, b, c))
+                elif cnt == 3:
+                    m01 = edge_mid_vertex(a, b)
+                    m12 = edge_mid_vertex(b, c)
+                    m20 = edge_mid_vertex(c, a)
+                    new_tris.extend(((a, m01, m20), (m01, b, m12), (m20, m12, c), (m01, m12, m20)))
+                elif cnt == 1:
+                    if s01:
+                        v0, v1, v2 = a, b, c
+                    elif s12:
+                        v0, v1, v2 = b, c, a
+                    else:
+                        v0, v1, v2 = c, a, b
+                    m01 = edge_mid_vertex(v0, v1)
+                    new_tris.extend(((v0, m01, v2), (m01, v1, v2)))
+                else:
+                    # Rotate cyclically so v0-v1 and v1-v2 are the two split edges
+                    if s01 and s12:
+                        v0, v1, v2 = a, b, c
+                    elif s12 and s20:
+                        v0, v1, v2 = b, c, a
+                    else:
+                        v0, v1, v2 = c, a, b
+                    m01 = edge_mid_vertex(v0, v1)
+                    m12 = edge_mid_vertex(v1, v2)
+                    new_tris.extend(((v0, m01, v2), (m01, m12, v2), (m01, v1, m12)))
+
+            out_p = np.asarray(p_list, dtype=np.float64)
+            out_n = np.asarray(n_list, dtype=np.float64)
+            UV = np.asarray(uv_list, dtype=np.float64)
+            out_j = np.asarray(j_list, dtype=out_j.dtype)
+            out_w = np.asarray(w_list, dtype=out_w.dtype)
+            I = np.asarray(new_tris, dtype=np.int64).ravel()
+
+    # Lightly smooth noisy 1px UV seam artifacts on garments while keeping sharp detail on facial features.
+    blurred = image.filter(ImageFilter.BoxBlur(0.65))
+    pixels_sharp = np.asarray(image, dtype=np.float32) / 255.0
+    pixels_smooth = np.asarray(blurred, dtype=np.float32) / 255.0
+    srgb_sharp = bilinear_sample(pixels_sharp, UV)
+    srgb_smooth = bilinear_sample(pixels_smooth, UV)
+
     w_head = group_weight(head_slots)
     w_neck = group_weight(neck_slots)
     w_hand = group_weight(hand_slots)
@@ -662,10 +793,11 @@ def main():
     w_leg = group_weight(leg_slots)
     w_foot = group_weight(foot_slots)
 
-    head_pos = new_joint_pos['Head']
-    neck_pos = new_joint_pos['neck_01']
-    spine1_pos = new_joint_pos['spine_01']
-    spine3_pos = new_joint_pos['spine_03']
+    srgb = np.where((w_head > 0.42)[:, None], 0.15 * srgb_smooth + 0.85 * srgb_sharp, 0.65 * srgb_smooth + 0.35 * srgb_sharp)
+    colors = srgb_to_linear(srgb)
+    lab = linear_to_oklab(colors)
+    lum = (colors @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)).astype(np.float32)
+    chroma = np.hypot(lab[:, 1], lab[:, 2])
 
     head_verts = w_head > 0.45
     head_top_y = float(out_p[head_verts, 1].max()) if head_verts.any() else head_pos[1] + 0.18
@@ -745,17 +877,34 @@ def main():
     dz_h = out_p[:, 2] - head_mid_z
     dy_h = (out_p[:, 1] - head_pos[1]) / max(head_top_y - head_pos[1], 0.12)
 
-    # Eye socket box (protects sclera + iris/pupil from hair or skin recolouring)
+    # Eye socket box (protects sclera + iris/pupil from hair or skin recolouring across male & female proportions)
+    head_span = max(head_top_y - head_pos[1], 0.12)
     eye_box = (
         on_head
-        & (dx_h > 0.012) & (dx_h < 0.049)
-        & (np.abs(out_p[:, 1] - eye_y) < 0.019)
-        & (dz_h > 0.028)
+        & (dx_h > 0.011) & (dx_h < 0.052)
+        & (out_p[:, 1] > head_pos[1] + 0.25 * head_span)
+        & (out_p[:, 1] < head_pos[1] + 0.62 * head_span)
+        & (dz_h > 0.020)
     )
-    eye_feature = eye_box & (
-        ((chroma < 0.060) & (lum > max(0.11, skin_lum * 1.04)))
-        | (lum < skin_lum * 0.62)
-        | ((dist_skin > 0.11) & (lum < skin_lum * 0.80))
+    eye_sclera = eye_box & (chroma < 0.068) & (lum > max(0.10, skin_lum * 1.04))
+    iris_pupil = np.zeros(len(colors), dtype=bool)
+    pupil_core = np.zeros(len(colors), dtype=bool)
+    if eye_sclera.sum() >= 4:
+        eye_cx = float(np.clip(np.median(dx_h[eye_sclera]), 0.024, 0.038))
+        eye_cy = float(np.median(out_p[eye_sclera, 1]))
+    else:
+        eye_cx = 0.031
+        eye_cy = head_pos[1] + 0.42 * head_span
+    eye_rad = np.hypot(dx_h - eye_cx, (out_p[:, 1] - eye_cy) * 1.35)
+    iris_pupil = on_head & (dz_h > 0.024) & (eye_rad < 0.0056)
+    pupil_core = on_head & (dz_h > 0.024) & (eye_rad < 0.0027)
+    eye_sclera = eye_sclera & ~iris_pupil
+    eye_feature = iris_pupil | eye_sclera | (
+        eye_box
+        & (
+            (lum < skin_lum * 0.56)
+            | ((dist_skin > 0.11) & (lum < skin_lum * 0.76))
+        )
     )
 
     # Central mid-face guard (nose bridge & inner cheeks stay SKIN)
@@ -1024,15 +1173,33 @@ def main():
             med_rgb = np.maximum(np.median(colors[at], axis=0), 1e-3)
             lum_ratio = np.clip(lum[at] / med_lum, lo_s, hi_s)[:, None]
             rgb_ratio = np.clip(colors[at] / med_rgb, lo_s, hi_s)
+            if k == SKIN:
+                # Preserve full dark eyelid/lash/nostril/mouth creases and warm lip tint on the face
+                on_face_at = on_head[at]
+                if on_face_at.any():
+                    f_lum = np.clip(lum[at][on_face_at] / med_lum, 0.06, 1.42)[:, None]
+                    f_rgb = np.clip(colors[at][on_face_at] / med_rgb, 0.06, 1.44)
+                    f_rgb_lum = np.maximum(f_rgb @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32), 1e-3)[:, None]
+                    f_rgb_norm = f_rgb * (f_lum / f_rgb_lum)
+                    lum_ratio[on_face_at] = f_lum
+                    rgb_ratio[on_face_at] = f_rgb_norm
             # Normalize rgb_ratio luminance to lum_ratio so chroma_mix adds subtle warmth without hue blowup
             rgb_ratio_lum = np.maximum(rgb_ratio @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32), 1e-3)[:, None]
             rgb_norm = rgb_ratio * (lum_ratio / rgb_ratio_lum)
-            shade = np.clip((1.0 - chroma_mix) * lum_ratio + chroma_mix * rgb_norm, 0.04, 1.92).astype(np.float32)
+            cmix = np.where(on_head[at], 0.42, chroma_mix)[:, None] if k == SKIN else chroma_mix
+            shade = np.clip((1.0 - cmix) * lum_ratio + cmix * rgb_norm, 0.04, 1.92).astype(np.float32)
             shaded[at] = shade
             shaded[at, 2] += 2.0 * k
         # Paint (0): keep red < 1.95 so optional dress-piece decoding (u32(r * 0.5)) stays 0
         paint_at = regions == 0
         shaded[paint_at] = np.clip(colors[paint_at], 0.0, 1.92)
+        # Shade sclera with natural upper-lid occlusion so eyes never glow white, and render crisp iris + pupil disc
+        if eye_sclera.any():
+            shaded[eye_sclera] = np.clip(colors[eye_sclera] * 0.45, 0.08, 0.30)
+        if iris_pupil.any():
+            shaded[iris_pupil] = np.array([0.036, 0.021, 0.013], dtype=np.float32)
+        if pupil_core.any():
+            shaded[pupil_core] = np.array([0.009, 0.008, 0.008], dtype=np.float32)
         keys = np.concatenate([
             np.round(out_p / 2e-4),
             np.round(out_n / 0.05),

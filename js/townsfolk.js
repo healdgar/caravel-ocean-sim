@@ -5,7 +5,7 @@
 // befallen people lives on the GPU, for the last few towns visited, and the fallen lie a day by the game's calendar.
 // It is not saved: after a reload the ruins are still there, and the people are all back on their feet.
 import { requestOnce } from './gpu-program-cache.js';
-import { createIndigenousCrewModels, colonialGroomMask, suppressCrownHairUnderHat } from './crew.js';
+import { createIndigenousCrewModels, colonialGroomMask, reconcileColonialGroomAndComp } from './crew.js';
 import { packCrewFaceW, townComponentMaskForLook } from './crew-components.js';
 import { DRESS_MASK_SCALE, indigenousDress } from './indigenous-dress.js';
 import { createDistantCrewLOD } from './crew-lod.js';
@@ -69,11 +69,11 @@ function townLooks(random, indigenous, cultureId) {
     data[at + 11] = model;
     data.set(linearRGB(person.hair), at + 12);
     const fullComp = townComponentMaskForLook(model, i, null, i % ELITE_LOOK_EVERY === 0);
-    const hat = (fullComp >> 3) & 7;
     const sex = model ? 'female' : 'male';
-    data[at + 15] = suppressCrownHairUnderHat(colonialGroomMask(sex, i), hat, sex) / DRESS_MASK_SCALE;
+    const { dress, compMask } = reconcileColonialGroomAndComp(colonialGroomMask(sex, i), fullComp, sex, { seed: i });
+    data[at + 15] = dress / DRESS_MASK_SCALE;
     data.set(person.face, at + 16);
-    data[at + 19] = packCrewFaceW(person.face[3], fullComp & ~0x1c7, false);
+    data[at + 19] = packCrewFaceW(person.face[3], compMask, false);
   }
   return data;
 }
