@@ -115,6 +115,7 @@ import { createFreeCannon } from './free-cannon.js';
 import { createCastleDuelController, CASTLE_DUEL_DISTANCE_M } from './castle-duel.js';
 import { cameraModeFromLink, propulsionFromLink, createShareLink, encodeGameStateParam, decodeGameStateParam, ROUGH_SEAS } from './sharing.js';
 import { ORBIT_LIMIT, orbitElevation, orbitDistance, panOrbit, placeOrbitCamera } from './camera.js';
+import { createFreeCamMobileControls } from './free-cam-mobile.js';
 // WebGPU ocean — custom renderer.
 // FFT ocean (6 cascades) + CDLOD surface mesh + physically based sky + HDR post.
 // All per-frame data lives in preallocated typed arrays / descriptors (no per-frame garbage
@@ -1842,6 +1843,7 @@ async function main() {
   addEventListener('keyup', (e) => { keys[e.code] = false; });
   addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  let freeCamMobile = null;
   function turnView(dx,dy) {
     if(cameraMode === 'ship') {
       shipOrbit.yaw -= dx * 0.005;
@@ -1852,11 +1854,13 @@ async function main() {
     } else {
       cam.yaw += dx * 0.0022;
       cam.pitch = Math.max(-1.5, Math.min(1.5, cam.pitch - dy * 0.0022));
+      if (cameraMode === 'free') freeCamMobile?.addLookOffset(dx * 0.0022, -dy * 0.0022);
     }
   }
   const lookPointers=new Map();
   const panView=(dx,dy)=>panOrbit(shipOrbit,dx,dy,shipOrbit.radius,cam.fovY,canvas.clientHeight);
   canvas.addEventListener('pointerdown',e=>{
+    if(e.pointerType==='touch')freeCamMobile?.noteTouch();
     if(e.defaultPrevented||lookPointers.size>=2||![0,2].includes(e.button))return;
     if(lookPointers.size&&e.pointerType!=='touch')return;
     e.preventDefault();lookPointers.set(e.pointerId,{x:e.clientX,y:e.clientY,pan:e.button===2||e.shiftKey});canvas.setPointerCapture(e.pointerId);
@@ -1875,6 +1879,22 @@ async function main() {
         if(shipOrbit.fleet||shipOrbit.wildlife)shipOrbit.fleetZoom=Math.max(.1,Math.min(6,shipOrbit.fleetZoom*ratio));
         else shipOrbit.distance=orbitDistance(shipOrbit.distance*ratio);
       }
+    }else if(cameraMode==='free'&&lookPointers.size===2){
+      const other=[...lookPointers.entries()].find(([id])=>id!==e.pointerId)[1];
+      const before=Math.hypot(pointer.x-other.x,pointer.y-other.y);
+      const after=Math.hypot(e.clientX-other.x,e.clientY-other.y);
+      if(!ashore.on){
+        if(before>8&&after>8){
+          cam.speed=Math.max(0.5,Math.min(400,cam.speed*(after/before)));
+          freeCamMobile?.sync();
+        }
+        const panScale=Math.max(0.015,cam.speed*0.0022);
+        const cy=Math.cos(cam.yaw),sy=Math.sin(cam.yaw);
+        cam.x+=(-dx*0.5*cy)*panScale;
+        cam.z+=(-dx*0.5*sy)*panScale;
+        cam.y=Math.max(-500,Math.min(3000,cam.y+dy*0.5*panScale));
+        if(terrain)cam.y=Math.max(cam.y,terrain.height(cam.x,cam.z)+.35);
+      }
     }else if(cameraMode==='ship'&&(pointer.pan||e.shiftKey))panView(dx,dy);
     else turnView(dx,dy);
     pointer.x=e.clientX;pointer.y=e.clientY;
@@ -1887,7 +1907,7 @@ async function main() {
     e.preventDefault();
     if(cameraMode === 'ship'&&(shipOrbit.fleet||shipOrbit.wildlife))shipOrbit.fleetZoom=Math.max(.1,Math.min(6,shipOrbit.fleetZoom*(e.deltaY<0?.9:1/.9)));
     else if(cameraMode === 'ship') shipOrbit.distance=orbitDistance(shipOrbit.distance*(e.deltaY<0?0.9:1/0.9));
-    else cam.speed = Math.max(0.5, Math.min(400, cam.speed * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+    else { cam.speed = Math.max(0.5, Math.min(400, cam.speed * (e.deltaY < 0 ? 1.15 : 1 / 1.15))); freeCamMobile?.sync(); }
   }, { passive: false });
 
   function updateBoat(dt,resetSea=false){
@@ -2031,14 +2051,17 @@ async function main() {
       if(terrain)cam.y=Math.max(cam.y,terrain.height(cam.x,cam.z)+.35);
       return;
     }
+    freeCamMobile?.applyGyro(cam, dt);
     const cy = Math.cos(cam.yaw), sy = Math.sin(cam.yaw), cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
     let mx = 0, my = 0, mz = 0;
-    const fwd = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0);
-    const str = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
+    const mob = freeCamMobile?.state;
+    const fwd = Math.max(-1, Math.min(1, ((keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0)) + (mob ? mob.forward : 0)));
+    const str = Math.max(-1, Math.min(1, ((keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0)) + (mob ? mob.strafe : 0)));
+    const fast = Boolean(keys.ShiftLeft || keys.ShiftRight || mob?.boost);
     if(ashore.on&&terrain){
       // On foot: the way the eye faces, over the ground. A step that a wall or the water stops is tried along
       // each of its two directions alone, so a wall is walked along and not stuck to.
-      const reach=Math.hypot(fwd,str),pace=reach?(keys.ShiftLeft||keys.ShiftRight?ASHORE_RUN_MS:ASHORE_WALK_MS)*dt/reach:0;
+      const reach=Math.hypot(fwd,str),norm=Math.max(1,reach),pace=reach>1e-4?(fast?ASHORE_RUN_MS:ASHORE_WALK_MS)*dt/norm:0;
       const dx=(fwd*sy+str*cy)*pace,dz=(-fwd*cy+str*sy)*pace;
       if(pace){
         if(ashoreOpen(cam.x+dx,cam.z+dz)){cam.x+=dx;cam.z+=dz;}
@@ -2048,11 +2071,11 @@ async function main() {
       cam.y+=(terrain.groundSample(cam.x,cam.z)+ASHORE_EYE_M-cam.y)*Math.min(1,dt*12);
       return;
     }
-    const up = (keys.KeyE || keys.Space ? 1 : 0) - (keys.KeyQ || keys.KeyC ? 1 : 0);
+    const up = Math.max(-1, Math.min(1, ((keys.KeyE || keys.Space ? 1 : 0) - (keys.KeyQ || keys.KeyC ? 1 : 0)) + (mob ? mob.up : 0)));
     mx += fwd * cp * sy + str * cy;
     my += fwd * sp + up;
     mz += -fwd * cp * cy + str * sy;
-    const boost = keys.ShiftLeft || keys.ShiftRight ? 5 : 1;
+    const boost = fast ? 5 : 1;
     const v = cam.speed * boost * dt;
     cam.x += mx * v; cam.y += my * v; cam.z += mz * v;
     cam.y = Math.max(-500, Math.min(3000, cam.y));
@@ -2382,8 +2405,13 @@ async function main() {
   fleetViewButton.onclick=()=>{setCameraMode('ship');shipOrbit.fleet=true;shipOrbit.wildlife=false;shipOrbit.fleetZoom=1;shipOrbit.elevation=.31;setCameraOpen(false);};cameraBody.append(fleetViewButton);
   const recenterView=document.createElement('button');recenterView.textContent='Centre inspection view';
   recenterView.onclick=()=>{shipOrbit.panX=shipOrbit.panY=shipOrbit.panZ=0;setCameraOpen(false);};cameraBody.append(recenterView);
+  const mobilePadToggleBtn=document.createElement('button');mobilePadToggleBtn.id='camera-mobile-pad-toggle';mobilePadToggleBtn.textContent='Free-cam touch pad';mobilePadToggleBtn.setAttribute('aria-pressed','false');
+  mobilePadToggleBtn.onclick=()=>{setCameraMode('free');freeCamMobile?.setManualPadEnabled(!freeCamMobile.manualPadEnabled);setCameraOpen(false);};
+  const gyroPanelToggleBtn=document.createElement('button');gyroPanelToggleBtn.id='camera-gyro-toggle';gyroPanelToggleBtn.textContent='Free-cam motion look (Gyro)';gyroPanelToggleBtn.setAttribute('aria-pressed','false');
+  gyroPanelToggleBtn.onclick=async()=>{setCameraMode('free');await freeCamMobile?.toggleGyro();setCameraOpen(false);};
+  cameraBody.append(mobilePadToggleBtn,gyroPanelToggleBtn);
   const cameraHint=document.createElement('p');cameraHint.className='help';
-  cameraHint.textContent='View ship: drag to orbit; right-drag or Shift-drag to pan; wheel to zoom. Touch: two fingers pan and pinch to zoom. Orbit below the surface to inspect underwater.';
+  cameraHint.textContent='View ship: drag to orbit; two fingers pan and pinch to zoom. Free camera on mobile: left thumbstick moves, ▲/▼ sets altitude, pinch or −/+ sets speed, and Motion aims by tilting your device.';
   cameraBody.append(cameraHint);
   const seaSettingsButton = controlIcon(document.createElement('button'),'weather','Sea settings');
   seaSettingsButton.setAttribute('aria-controls', 'panel');
@@ -3542,14 +3570,16 @@ async function main() {
     heading.textContent=view==='boat'?'Keys aboard':view==='ship'?'Keys, ship view':'Keys, free camera';
     for(const [key,does] of rows){const dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=key;dd.textContent=does;list.append(dt,dd);}
     keyList.replaceChildren(heading,list);
+    const touchFree = freeCamMobile?.padVisible;
     lookHint.textContent = boat.enabled
       ? 'Drag mouse or ↑↓←→ keys to turn view · W S Q E walk deck'
       : cameraMode === 'ship'
       ? 'Drag mouse or ↑↓←→ keys to orbit · Scroll zoom · Shift-drag pan'
       : ashore.on
-      ? 'Drag mouse or ↑↓←→ keys to look · W A S D walk · Shift run · Click someone to ask who they are'
-      : 'Drag mouse or ↑↓←→ keys to look · WASD fly · E/Q up/down · Hold F to fire the cannon';
+      ? (touchFree ? 'Left stick to walk · Drag or tap Motion to look · Tap someone to ask who they are' : 'Drag mouse or ↑↓←→ keys to look · W A S D walk · Shift run · Click someone to ask who they are')
+      : (touchFree ? 'Left stick to fly · ▲/▼ altitude · Drag or tap Motion to look · Pinch speed' : 'Drag mouse or ↑↓←→ keys to look · WASD fly · E/Q up/down · Hold F to fire the cannon');
     lookHint.append(keysTip);
+    freeCamMobile?.sync();
     if(flashHint&&lookHint.isConnected){
       document.body.classList.remove('has-looked');
       lookHint.style.animation='none';
@@ -3603,6 +3633,27 @@ async function main() {
     if(P.sunElev!==saved.sunElev||P.sunAzim!==saved.sunAzim){P.sunElev=saved.sunElev;P.sunAzim=saved.sunAzim;showSunSliders();envFull=true;}
     if(astronomy.mode!==saved.skyMode)applyAstronomy({mode:saved.skyMode});
   }
+  freeCamMobile = createFreeCamMobileControls({
+    getCamera: () => cam,
+    getCameraMode: () => cameraMode,
+    isAshore: () => ashore.on,
+    isDuelActive: () => castleDuel.active,
+    onReturnAboard: () => {
+      if (ashore.on) ashore.on = false;
+      setCameraMode('boat');
+      helm?.update?.(performance.now(), true);
+    },
+    onLookActivity: () => document.body.classList.add('has-looked'),
+    onToast: (msg, sec) => voyageCtl?.showToast?.(msg, sec),
+    forceVisible: qs.get('mobileControls') === '1',
+  });
+  freeCamMobile.onSync(({ gyroEnabled, manualPadEnabled }) => {
+    mobilePadToggleBtn.setAttribute('aria-pressed', String(manualPadEnabled));
+    gyroPanelToggleBtn.setAttribute('aria-pressed', String(gyroEnabled));
+  });
+  document.body.append(freeCamMobile.element);
+  window.oceanFreeCamMobile = freeCamMobile;
+  addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch') freeCamMobile.noteTouch(); }, true);
   updateHelp();
   const propulsionRow=document.createElement('label');propulsionRow.textContent='Propulsion';
   const shipChoice=document.createElement('label');shipChoice.textContent='Vessel';
@@ -3795,6 +3846,8 @@ async function main() {
         }
         setBoatViewStation(boat,'deck');
         setCameraMode('ship');
+      }else if(cameraMode==='ship'){
+        setCameraMode('free');
       }else{
         if(spyglassActive){
           spyglassPrevCameraMode=null;
@@ -4929,7 +4982,7 @@ async function main() {
     const windVec=frameWind;
     if(!castleDuel.active){
       portGunnery?.update(dt,windVec,gameDateMs());
-      freeCannon.update(dt,{firing:cameraMode==='free'&&!ashore.on&&keys.KeyF===true,eye:[cam.x,cam.y,cam.z],
+      freeCannon.update(dt,{firing:cameraMode==='free'&&!ashore.on&&(keys.KeyF===true||Boolean(freeCamMobile?.state.firing)),eye:[cam.x,cam.y,cam.z],
         forward:[Math.cos(cam.pitch)*Math.sin(cam.yaw),Math.sin(cam.pitch),-Math.cos(cam.pitch)*Math.cos(cam.yaw)],wind:windVec});
       fortSoldiers?.update(terrain?.port??null,dt,P.windSpeed,cam,!portGunnery,gameDateMs());
     }else{
