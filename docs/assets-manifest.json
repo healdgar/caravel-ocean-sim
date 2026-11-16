@@ -30,9 +30,9 @@
     "sha256": "f889cffa1a9eaf76b27d2ed2682475c364151d26a39f2d3efe0c4b600f11d3ec"
   },
   "assets/forest-scenery/portugal/wind/weights.bin.gz": {
-    "url": "assets/forest-scenery/portugal/wind/weights.bin.73d4099da62d049a.gz",
-    "bytes": 1635844,
-    "sha256": "73d4099da62d049a279412ae9a90a49fdb725f5c9c29d6c3d656cccb0bf24921"
+    "url": "assets/forest-scenery/portugal/wind/weights.bin.7ae17b3dbd530031.gz",
+    "bytes": 2275866,
+    "sha256": "7ae17b3dbd530031a4d82d0554280216f83b2e4ceaf86b282d7e0d922ee6f514"
   },
   "assets/forest-scenery/saba/clusters/vertices.bin.gz": {
     "url": "assets/forest-scenery/saba/clusters/vertices.bin.f0293e612db25c5c.gz",
@@ -45,14 +45,14 @@
     "sha256": "0f68da0056057761395521f90ff931537ab272dbde05ba2cafddab89f25f468f"
   },
   "assets/forest-scenery/portugal/clusters/vertices.bin.gz": {
-    "url": "assets/forest-scenery/portugal/clusters/vertices.bin.439aa3dc525b7fb8.gz",
-    "bytes": 28043033,
-    "sha256": "439aa3dc525b7fb8557a327da3a23587eba9fadb6a6cb448a599763288202781"
+    "url": "assets/forest-scenery/portugal/clusters/vertices.bin.9101018bee547822.gz",
+    "bytes": 37709888,
+    "sha256": "9101018bee5478229f55c1382bf146c00a25e0043fe7a4894ca497e2a1477538"
   },
   "assets/forest-scenery/portugal/clusters/indices.bin.gz": {
-    "url": "assets/forest-scenery/portugal/clusters/indices.bin.e1c6a9208756a1f9.gz",
-    "bytes": 3011165,
-    "sha256": "e1c6a9208756a1f9652a089d58ab78d5144411ec8ad697383c55046c799cad64"
+    "url": "assets/forest-scenery/portugal/clusters/indices.bin.5ddbad0d17d00e6e.gz",
+    "bytes": 2877761,
+    "sha256": "5ddbad0d17d00e6ec1f6f32e60e967b0d4e453049d01b04794fab2ebef112157"
   },
   "assets/forest-scenery/saba/surfaces/family-0-albedo.bc7.bin.gz": {
     "url": "assets/forest-scenery/saba/surfaces/family-0-albedo.bc7.bin.28b0535a10332087.gz",
@@ -135,44 +135,44 @@
     "sha256": "e107a572b0d8e00ed029517ddc600b29b207aef48810e59f8d11ce45171fc5df"
   },
   "assets/forest-scenery/portugal/surfaces/family-0-albedo.bc7.bin.gz": {
-    "url": "assets/forest-scenery/portugal/surfaces/family-0-albedo.bc7.bin.b5c938d268b4a364.gz",
+    "url": "assets/forest-scenery/portugal/surfaces/family-0-albedo.bc7.bin.e98e7c85d2e24980.gz",
     "bytes": 3733606,
-    "sha256": "b5c938d268b4a364992435e56c09e6c06a7fbdee3bb43f553de96d5f75d4294d"
+    "sha256": "e98e7c85d2e249802fd5a0853794740f5853626199b005e78db62e053db92111"
   },
   "assets/forest-scenery/portugal/surfaces/family-0-detail.bc7.bin.gz": {
-    "url": "assets/forest-scenery/portugal/surfaces/family-0-detail.bc7.bin.e67d1c633a943bf1.gz",
+    "url": "assets/forest-scenery/portugal/surfaces/family-0-detail.bc7.bin.1197ebc247df3c28.gz",
     "bytes": 3803125,
-    "sha256": "e67d1c633a943bf1d341431407f0f7fc73fcb25c5ff805cd556e3ed4e200a38e"
+    "sha256": "1197ebc247df3c28bf59e5bb882f4ac426b60d757cd9a4d6f7b2f6723711d499"
   },
   "assets/forest-scenery/portugal/surfaces/family-1-albedo.bc7.bin.gz": {
-    "url": "assets/forest-scenery/portugal/surfaces/family-1-albedo.bc7.bin.52cda8b88e20fada.gz",
-    "bytes": 3403571,
-    "sha256": "52cda8b88e20fada20cf9aeb59029601b2c2877823c114283491c692be67ba34"
+    "url": "assets/forest-scenery/portugal/surfaces/family-1-albedo.bc7.bin.318225a1de8d57f2.gz",
+    "bytes": 1043465,
+    "sha256": "318225a1de8d57f2ec769757018248409f339bb26660a6d83c305a8f82622684"
   },
   "assets/forest-scenery/portugal/surfaces/family-1-detail.bc7.bin.gz": {
-    "url": "assets/forest-scenery/portugal/surfaces/family-1-detail.bc7.bin.b3569c06070002a7.gz",
-    "bytes": 4421719,
-    "sha256": "b3569c06070002a7fe858157c532feb0b30bde63c6db07648dcefbadb5d953e4"
+    "url": "assets/forest-scenery/portugal/surfaces/family-1-detail.bc7.bin.3465e96d56e12257.gz",
+    "bytes": 1129365,
+    "sha256": "3465e96d56e12257501a57aea1749d85c9a9cd7acaed638b792ee3facb9fb519"
   },
   "assets/forest-scenery/portugal/surfaces/family-0-albedo.astc.bin.gz": {
-    "url": "assets/forest-scenery/portugal/surfaces/family-0-albedo.astc.bin.b98012ffd0865722.gz",
+    "url": "assets/forest-scenery/portugal/surfaces/family-0-albedo.astc.bin.d6fe1c6558d2570b.gz",
     "bytes": 3820618,
-    "sha256": "b98012ffd08657227d7310c74745e70aa0a26a4d5f70f5e69fb73c5b7b92fc97"
+    "sha256": "d6fe1c6558d2570b17f909f85b3d1f134623d42fdb5c5fac5954a910baf345c3"
   },
   "assets/forest-scenery/portugal/surfaces/family-0-detail.astc.bin.gz": {
-    "url": "assets/forest-scenery/portugal/surfaces/family-0-detail.astc.bin.10ef0ae5fca51603.gz",
+    "url": "assets/forest-scenery/portugal/surfaces/family-0-detail.astc.bin.12b02fbfbc53c99f.gz",
     "bytes": 3546652,
-    "sha256": "10ef0ae5fca5160398cb6e5b89cab5fd4f09b16a667b65c641e2113182424074"
+    "sha256": "12b02fbfbc53c99f212cabd74052f7d7997dbb4097036a0d9ead486ea8594bc4"
   },
   "assets/forest-scenery/portugal/surfaces/family-1-albedo.astc.bin.gz": {
-    "url": "assets/forest-scenery/portugal/surfaces/family-1-albedo.astc.bin.63e23ff9955b32a7.gz",
-    "bytes": 3575506,
-    "sha256": "63e23ff9955b32a7658d26483dd92b27ae951fdef542b15ed8b24e6ea392e582"
+    "url": "assets/forest-scenery/portugal/surfaces/family-1-albedo.astc.bin.bb9eff55ad4a1280.gz",
+    "bytes": 1111655,
+    "sha256": "bb9eff55ad4a1280ec39cc0eac0d7f36ce7f27cf154431b9fc10265c3096db4b"
   },
   "assets/forest-scenery/portugal/surfaces/family-1-detail.astc.bin.gz": {
-    "url": "assets/forest-scenery/portugal/surfaces/family-1-detail.astc.bin.1a28d0e9cda5017f.gz",
-    "bytes": 4230902,
-    "sha256": "1a28d0e9cda5017fb70f2400599100831ff8910fa69b0f13f9fa63c9d0c3c40f"
+    "url": "assets/forest-scenery/portugal/surfaces/family-1-detail.astc.bin.9c6893a4d79e52a8.gz",
+    "bytes": 1088938,
+    "sha256": "9c6893a4d79e52a89fc2676f6ccb208ba00362b46f8d948f0ce520435d830204"
   },
   "assets/forest-scenery/saba/vertices.bin.gz": {
     "url": "assets/forest-scenery/saba/vertices.bin.e45e1be7b39d818e.gz",
@@ -195,14 +195,14 @@
     "sha256": "33925b5a65cc26818e01489d90c9ce41ffcf14d8fb6fcfd894cbd0a3fb91f573"
   },
   "assets/forest-scenery/portugal/vertices.bin.gz": {
-    "url": "assets/forest-scenery/portugal/vertices.bin.93626e0d84573202.gz",
-    "bytes": 34295424,
-    "sha256": "93626e0d8457320223448dccbf7fcb68b0dd4302a68deda5c02c0e002d4bff07"
+    "url": "assets/forest-scenery/portugal/vertices.bin.3a5aa18809f7248b.gz",
+    "bytes": 41759784,
+    "sha256": "3a5aa18809f7248b3c0400887c61c5280d23755280144a856897fd04b97c46fa"
   },
   "assets/forest-scenery/portugal/indices.bin.gz": {
-    "url": "assets/forest-scenery/portugal/indices.bin.42ede5f7d3a12636.gz",
-    "bytes": 3142339,
-    "sha256": "42ede5f7d3a126365fc60a0f631c4cf938f596b80828b8f1abfb785ebe5eb658"
+    "url": "assets/forest-scenery/portugal/indices.bin.2a811f50dfdd148a.gz",
+    "bytes": 4168187,
+    "sha256": "2a811f50dfdd148a46958e174ffa75c2fed9d24f47604f4a42960735fef80e11"
   },
   "assets/forest-scenery/saba/mass/vertices.bin.gz": {
     "url": "assets/forest-scenery/saba/mass/vertices.bin.9d2b0da3a80ea14d.gz",
@@ -234,35 +234,85 @@
     "bytes": 1374,
     "sha256": "4c3c9e8f35ac79760e010fddfeb84fe683501e61ea69af372e1ee6327f803173"
   },
+  "assets/neural-pbr/neural-pbr-latents.bin.gz": {
+    "url": "assets/neural-pbr/neural-pbr-latents.bin.230404cc6e431ee1.gz",
+    "bytes": 455654,
+    "sha256": "230404cc6e431ee18b0683c1a680b90463e83ac02da9652c607387090c8cc12e"
+  },
   "assets/wildlife/whale.glb": {
     "url": "assets/wildlife/whale.af1b3d2448efbc0f.glb",
     "bytes": 8319500,
     "sha256": "af1b3d2448efbc0f67673f46494c890aa901a4728ac627c3d2d55e3b00fe43f3"
   },
+  "assets/crew/components-1550.json": {
+    "url": "assets/crew/components-1550.3ae2d6fb54a9bf3c.json",
+    "bytes": 198463,
+    "sha256": "3ae2d6fb54a9bf3cbcff42e236785adea167a40796d850492fbc408ff2ed99f6"
+  },
   "assets/crew/sailor.glb": {
-    "url": "assets/crew/sailor.b86119f37fdf2ba4.glb",
-    "bytes": 1014564,
-    "sha256": "b86119f37fdf2ba4a26aa66dab8bed096169a1248d52cad1e923fdede5d703a8"
+    "url": "assets/crew/sailor.d0deeaf659280950.glb",
+    "bytes": 687720,
+    "sha256": "d0deeaf659280950e17ea62f79b6f663da3634418cae64140779db6253d029ec"
   },
   "assets/crew/sailor-female.glb": {
-    "url": "assets/crew/sailor-female.3cc44a04d559d00c.glb",
-    "bytes": 968772,
-    "sha256": "3cc44a04d559d00c36e3c3110de5109cfbf528aff18b00cbd264345228ee228e"
+    "url": "assets/crew/sailor-female.445659ff75354065.glb",
+    "bytes": 676820,
+    "sha256": "445659ff75354065c7bcc47995f7b74893301923d0b6c11d8ad836c2bb7d73ce"
   },
   "assets/crew/captain.glb": {
-    "url": "assets/crew/captain.043be60203f58851.glb",
-    "bytes": 933056,
-    "sha256": "043be60203f58851813d11b7eea9ac5c91ef13353224d971ddbc4dd6d2016d60"
+    "url": "assets/crew/captain.e012660a66bec46b.glb",
+    "bytes": 949280,
+    "sha256": "e012660a66bec46b714b7ff10e9de579b20b9cc8f55fcfdca7192d99b070361d"
   },
-  "assets/crew/sailor-classic.glb": {
-    "url": "assets/crew/sailor-classic.105a636fa1e571df.glb",
-    "bytes": 995240,
-    "sha256": "105a636fa1e571dfa43c4aa93eaa643ef9993fe2cc993bc0d93531cca7f5e03b"
+  "assets/crew/soldier-1550.glb": {
+    "url": "assets/crew/soldier-1550.a19ceb9374932e2b.glb",
+    "bytes": 460172,
+    "sha256": "a19ceb9374932e2b87a74d718d0acb4ed5af4bcbd115917056e2af0497a3ecf4"
   },
-  "assets/crew/sailor-female-classic.glb": {
-    "url": "assets/crew/sailor-female-classic.9506114badf82f84.glb",
-    "bytes": 1214276,
-    "sha256": "9506114badf82f84e52bc635bdad7bf630e3e2e8c60e575231afb6af09db3645"
+  "assets/crew/groom-pack.glb": {
+    "url": "assets/crew/groom-pack.b6703bc58584fe3a.glb",
+    "bytes": 155580,
+    "sha256": "b6703bc58584fe3aca87770374eaa5ebb64686498fb41730d10dfa81cb0bd516"
+  },
+  "assets/crew/indigenous-algonquian-male.glb": {
+    "url": "assets/crew/indigenous-algonquian-male.3a1d02b5e8fb029b.glb",
+    "bytes": 463284,
+    "sha256": "3a1d02b5e8fb029b4b84cba5c8f219d4a94bd95f11256268582793306f799d18"
+  },
+  "assets/crew/indigenous-algonquian-female.glb": {
+    "url": "assets/crew/indigenous-algonquian-female.1b1d88a6941d3918.glb",
+    "bytes": 462536,
+    "sha256": "1b1d88a6941d3918766402d6da2463cce4d831774a9ca826cd729af34a2484e6"
+  },
+  "assets/crew/indigenous-caribbean-male.glb": {
+    "url": "assets/crew/indigenous-caribbean-male.f775b9cf984753d5.glb",
+    "bytes": 459388,
+    "sha256": "f775b9cf984753d55eae7189203bf92eeaf974d1afc3965011d028b54ae8b652"
+  },
+  "assets/crew/indigenous-caribbean-female.glb": {
+    "url": "assets/crew/indigenous-caribbean-female.b4ba4cfcd7ee8a52.glb",
+    "bytes": 463216,
+    "sha256": "b4ba4cfcd7ee8a52a73c3f7cea5994708cfd0ceab7d1afe34fdd2493c18eb37a"
+  },
+  "assets/crew/indigenous-maya-male.glb": {
+    "url": "assets/crew/indigenous-maya-male.336008e4caf9fc27.glb",
+    "bytes": 462940,
+    "sha256": "336008e4caf9fc2792f223169075cb1c3943e0c6a1c30ad8f4fb5406bb069878"
+  },
+  "assets/crew/indigenous-maya-female.glb": {
+    "url": "assets/crew/indigenous-maya-female.f491512e2488a52b.glb",
+    "bytes": 462340,
+    "sha256": "f491512e2488a52bd3316006e64ea22f6b63a45c3e8f71c804572233eccce2b2"
+  },
+  "assets/crew/indigenous-andean-male.glb": {
+    "url": "assets/crew/indigenous-andean-male.6f90229578a57eb1.glb",
+    "bytes": 459584,
+    "sha256": "6f90229578a57eb16e418b50236a0c3a22c8b95ce597478aa325b89eab3987f0"
+  },
+  "assets/crew/indigenous-andean-female.glb": {
+    "url": "assets/crew/indigenous-andean-female.8146a03af1456782.glb",
+    "bytes": 456608,
+    "sha256": "8146a03af14567821a89cb437156f6ba22b30b379d66b4d8ef740b81b7705081"
   },
   "assets/world/saba/height.bin": {
     "url": "assets/world/saba/height.44a7a266ceebe8c9.bin",
@@ -530,129 +580,129 @@
     "sha256": "4ee67319dd59b399e1f1003082f74c4db0b80809a9404ab1ff0e257fbb4ccf34"
   },
   "assets/forest-scenery/portugal/volumes/manifest.json": {
-    "url": "assets/forest-scenery/portugal/volumes/manifest.9cbabb0b880df9fe.json",
-    "bytes": 16889,
-    "sha256": "9cbabb0b880df9fef80c92723744f37af526f1a727f1858f39a5248b9a953b0d"
+    "url": "assets/forest-scenery/portugal/volumes/manifest.2e7507aa326c1ab4.json",
+    "bytes": 16845,
+    "sha256": "2e7507aa326c1ab49f23cbdd8730bcbc1f44af1c1a2af8486dd964e65302f33a"
   },
   "assets/forest-scenery/portugal/volumes/prototype-0-oak-veteran/field.rgba16f.bin.gz": {
-    "url": "assets/forest-scenery/portugal/volumes/prototype-0-oak-veteran/field.rgba16f.bin.fb64d996cdecb6d3.gz",
-    "bytes": 188888,
-    "sha256": "fb64d996cdecb6d3b723de7cdf02531a95d7dc0ff48f8b24113ac1b24e5668ff"
+    "url": "assets/forest-scenery/portugal/volumes/prototype-0-oak-veteran/field.rgba16f.bin.085f2220fb119a61.gz",
+    "bytes": 243279,
+    "sha256": "085f2220fb119a613e336bb25f06b5fecc082b4a624fecd568036914b8594e14"
   },
   "assets/forest-scenery/portugal/volumes/prototype-0-oak-veteran/exposure.r8.bin.gz": {
-    "url": "assets/forest-scenery/portugal/volumes/prototype-0-oak-veteran/exposure.r8.bin.17472ac356b52f21.gz",
-    "bytes": 54269,
-    "sha256": "17472ac356b52f215b2211a9bc6cd17b770da3659f75fb8ac759bf873d18bc3a"
+    "url": "assets/forest-scenery/portugal/volumes/prototype-0-oak-veteran/exposure.r8.bin.f38c58c456f00f68.gz",
+    "bytes": 56214,
+    "sha256": "f38c58c456f00f68f7f955d6caa66e9948730210e95996a922643e86b35515a8"
   },
   "assets/forest-scenery/portugal/volumes/prototype-1-chestnut-veteran/field.rgba16f.bin.gz": {
-    "url": "assets/forest-scenery/portugal/volumes/prototype-1-chestnut-veteran/field.rgba16f.bin.dd6c768dbc082ec8.gz",
-    "bytes": 244419,
-    "sha256": "dd6c768dbc082ec847778a459ec1887c34b4c43156fde8b17abc911aa693ce9a"
+    "url": "assets/forest-scenery/portugal/volumes/prototype-1-chestnut-veteran/field.rgba16f.bin.996cf89d4bdfea50.gz",
+    "bytes": 257489,
+    "sha256": "996cf89d4bdfea500e07af8de6a5b30a33dcf8bafb5722692fdbcfc105fd723f"
   },
   "assets/forest-scenery/portugal/volumes/prototype-1-chestnut-veteran/exposure.r8.bin.gz": {
-    "url": "assets/forest-scenery/portugal/volumes/prototype-1-chestnut-veteran/exposure.r8.bin.2bb6abdaa0dee73d.gz",
-    "bytes": 59434,
-    "sha256": "2bb6abdaa0dee73d4897015f0c836560d57035f02a69c40fe61cde46e04c780c"
+    "url": "assets/forest-scenery/portugal/volumes/prototype-1-chestnut-veteran/exposure.r8.bin.f167075614b940d3.gz",
+    "bytes": 55352,
+    "sha256": "f167075614b940d309ec595ccd099e32166521fede5b3924e9684d0259a16217"
   },
   "assets/forest-scenery/portugal/volumes/prototype-2-maple-veteran/field.rgba16f.bin.gz": {
-    "url": "assets/forest-scenery/portugal/volumes/prototype-2-maple-veteran/field.rgba16f.bin.a72f01fcf79bbb62.gz",
-    "bytes": 320597,
-    "sha256": "a72f01fcf79bbb624458d8c8bd97be050d17ba23a0127bd59f987dc4d2a42715"
+    "url": "assets/forest-scenery/portugal/volumes/prototype-2-maple-veteran/field.rgba16f.bin.c6ced0edafb6f592.gz",
+    "bytes": 303237,
+    "sha256": "c6ced0edafb6f59236b626dc9b1cae84f445735c0e9e212243e39d513aa658e8"
   },
   "assets/forest-scenery/portugal/volumes/prototype-2-maple-veteran/exposure.r8.bin.gz": {
-    "url": "assets/forest-scenery/portugal/volumes/prototype-2-maple-veteran/exposure.r8.bin.cc26fbea2bf9a74a.gz",
-    "bytes": 66876,
-    "sha256": "cc26fbea2bf9a74a8469c60222d0dd3081f2ddff49ec9213b8626a0ce4cc5629"
+    "url": "assets/forest-scenery/portugal/volumes/prototype-2-maple-veteran/exposure.r8.bin.b6a8c54d4cd514ca.gz",
+    "bytes": 60854,
+    "sha256": "b6a8c54d4cd514cabb11a741c0f947a911e06a8a9871aad768752147c2eea83a"
   },
   "assets/forest-scenery/portugal/volumes/prototype-3-elm-veteran/field.rgba16f.bin.gz": {
-    "url": "assets/forest-scenery/portugal/volumes/prototype-3-elm-veteran/field.rgba16f.bin.67eb17193cc340e3.gz",
-    "bytes": 278583,
-    "sha256": "67eb17193cc340e3b38ede0485b1118d3d2d155366c07fa21969680dc2ac1975"
+    "url": "assets/forest-scenery/portugal/volumes/prototype-3-elm-veteran/field.rgba16f.bin.1f5812fb07f4eebd.gz",
+    "bytes": 305555,
+    "sha256": "1f5812fb07f4eebd9788e3ce46feb23b98c67c70f9cbb9f3147b0f3cc8f6412b"
   },
   "assets/forest-scenery/portugal/volumes/prototype-3-elm-veteran/exposure.r8.bin.gz": {
-    "url": "assets/forest-scenery/portugal/volumes/prototype-3-elm-veteran/exposure.r8.bin.3189ba225f1a4656.gz",
-    "bytes": 81180,
-    "sha256": "3189ba225f1a4656cea2428c3ed603c2cf7cf93545d8d1e37e9797fd03274334"
+    "url": "assets/forest-scenery/portugal/volumes/prototype-3-elm-veteran/exposure.r8.bin.ba05de98f11425d8.gz",
+    "bytes": 69862,
+    "sha256": "ba05de98f11425d8e2ec8d27134cb1a4084fbf910e4c5704537f7681e2b30c56"
   },
   "assets/forest-scenery/portugal/volumes/prototype-4-birch-veteran/field.rgba16f.bin.gz": {
-    "url": "assets/forest-scenery/portugal/volumes/prototype-4-birch-veteran/field.rgba16f.bin.8b8b8d2c6ba2754a.gz",
-    "bytes": 21052,
-    "sha256": "8b8b8d2c6ba2754a463d5ba8c5d11d3cec2727c0449e1ae5fc01d18c756d6aff"
+    "url": "assets/forest-scenery/portugal/volumes/prototype-4-birch-veteran/field.rgba16f.bin.5b3b8a1c765eab91.gz",
+    "bytes": 22227,
+    "sha256": "5b3b8a1c765eab91bc25699e67946410a5fc766a7a9540f2ba9c5db4bad2f8f4"
   },
   "assets/forest-scenery/portugal/volumes/prototype-4-birch-veteran/exposure.r8.bin.gz": {
-    "url": "assets/forest-scenery/portugal/volumes/prototype-4-birch-veteran/exposure.r8.bin.598fd71c8f02146e.gz",
-    "bytes": 3707,
-    "sha256": "598fd71c8f02146e3d22b6f9e661031ffb887c3b4fb56cdf4faa3ce38e0f9c74"
+    "url": "assets/forest-scenery/portugal/volumes/prototype-4-birch-veteran/exposure.r8.bin.e96cb266b9de111b.gz",
+    "bytes": 3877,
+    "sha256": "e96cb266b9de111b3543519e4480b79876e7032328e224c804dcc72bfec3af52"
   },
   "assets/forest-scenery/portugal/volumes/prototype-5-blueberry-veteran/field.rgba16f.bin.gz": {
-    "url": "assets/forest-scenery/portugal/volumes/prototype-5-blueberry-veteran/field.rgba16f.bin.000e361a33831757.gz",
-    "bytes": 2541,
-    "sha256": "000e361a3383175781b42ba44903bc8f7a16513e04c2b08ee2f4befb0735d2ff"
+    "url": "assets/forest-scenery/portugal/volumes/prototype-5-blueberry-veteran/field.rgba16f.bin.0371954263142d2e.gz",
+    "bytes": 2833,
+    "sha256": "0371954263142d2e20983b0bb60a1d4d778e06026c66e24b1869b5b0984aef50"
   },
   "assets/forest-scenery/portugal/volumes/prototype-5-blueberry-veteran/exposure.r8.bin.gz": {
-    "url": "assets/forest-scenery/portugal/volumes/prototype-5-blueberry-veteran/exposure.r8.bin.10f7ec1c1909d8a3.gz",
-    "bytes": 285,
-    "sha256": "10f7ec1c1909d8a355fec0a9159d8c22e79f206b5cf38b35bde537fe88cc6d8b"
+    "url": "assets/forest-scenery/portugal/volumes/prototype-5-blueberry-veteran/exposure.r8.bin.ce7f8d3c126d4a5b.gz",
+    "bytes": 331,
+    "sha256": "ce7f8d3c126d4a5bd456e3773109818e6970ec3c53a80e88ff9e33eb204a1595"
   },
   "assets/forest-scenery/portugal/volumes/prototype-6-oak-canopy/field.rgba16f.bin.gz": {
-    "url": "assets/forest-scenery/portugal/volumes/prototype-6-oak-canopy/field.rgba16f.bin.2ea6344c5fc2fbd4.gz",
-    "bytes": 115718,
-    "sha256": "2ea6344c5fc2fbd430634cfd5fbc57721e548dd1bd5c4ad75a01704a7ad064a1"
+    "url": "assets/forest-scenery/portugal/volumes/prototype-6-oak-canopy/field.rgba16f.bin.6715db01cf72f08c.gz",
+    "bytes": 117923,
+    "sha256": "6715db01cf72f08cfe4180bda67cffdec791184b407bef53b751657888c08cef"
   },
   "assets/forest-scenery/portugal/volumes/prototype-6-oak-canopy/exposure.r8.bin.gz": {
-    "url": "assets/forest-scenery/portugal/volumes/prototype-6-oak-canopy/exposure.r8.bin.52e7ab4cb6618a67.gz",
-    "bytes": 24585,
-    "sha256": "52e7ab4cb6618a67b143c948e14022397b92817654c548b08d0bbc222d80dc3a"
+    "url": "assets/forest-scenery/portugal/volumes/prototype-6-oak-canopy/exposure.r8.bin.bc4835b174b653da.gz",
+    "bytes": 23005,
+    "sha256": "bc4835b174b653daea8bf27cae0f104304adb3e866df9e37a44e218c931a3f14"
   },
   "assets/forest-scenery/portugal/volumes/prototype-7-chestnut-canopy/field.rgba16f.bin.gz": {
-    "url": "assets/forest-scenery/portugal/volumes/prototype-7-chestnut-canopy/field.rgba16f.bin.291b4b1c5eb91fd0.gz",
-    "bytes": 142415,
-    "sha256": "291b4b1c5eb91fd06c1256156e6489cb0a13ed9fdee57c6c62b4d09e1e7c7b4c"
+    "url": "assets/forest-scenery/portugal/volumes/prototype-7-chestnut-canopy/field.rgba16f.bin.997f0a40cc9ff7cc.gz",
+    "bytes": 145512,
+    "sha256": "997f0a40cc9ff7cc05efbfd3682e3fd81d35e0893f7a884b7d26783ddba26cfa"
   },
   "assets/forest-scenery/portugal/volumes/prototype-7-chestnut-canopy/exposure.r8.bin.gz": {
-    "url": "assets/forest-scenery/portugal/volumes/prototype-7-chestnut-canopy/exposure.r8.bin.b682b1af63fd003f.gz",
-    "bytes": 30180,
-    "sha256": "b682b1af63fd003f40c21c14736dec122039d4863394f1af02155f4fa6841314"
+    "url": "assets/forest-scenery/portugal/volumes/prototype-7-chestnut-canopy/exposure.r8.bin.83b5641730389207.gz",
+    "bytes": 29257,
+    "sha256": "83b56417303892072cf8fbb4e80238c9755b8be066b7e349c73f901021f0244d"
   },
   "assets/forest-scenery/portugal/volumes/prototype-8-maple-canopy/field.rgba16f.bin.gz": {
-    "url": "assets/forest-scenery/portugal/volumes/prototype-8-maple-canopy/field.rgba16f.bin.c6da95ad0a8ed1a9.gz",
-    "bytes": 167579,
-    "sha256": "c6da95ad0a8ed1a9034c0223c3e18d7adc0698af5fdedb408dc4f20b8624bf14"
+    "url": "assets/forest-scenery/portugal/volumes/prototype-8-maple-canopy/field.rgba16f.bin.748b094494d625ee.gz",
+    "bytes": 159399,
+    "sha256": "748b094494d625ee7bd129a6b7e2cce3e8b3edb4cc942e825fee63a083006468"
   },
   "assets/forest-scenery/portugal/volumes/prototype-8-maple-canopy/exposure.r8.bin.gz": {
-    "url": "assets/forest-scenery/portugal/volumes/prototype-8-maple-canopy/exposure.r8.bin.c13bfa95f8e07440.gz",
-    "bytes": 31209,
-    "sha256": "c13bfa95f8e0744092127824a1f3aa01511fb58df46867ca7860fc1a435a1b7e"
+    "url": "assets/forest-scenery/portugal/volumes/prototype-8-maple-canopy/exposure.r8.bin.f9af0f6bf9fc1f30.gz",
+    "bytes": 29803,
+    "sha256": "f9af0f6bf9fc1f30d5cc547e2c370bfff3788c1e2b1ee974720c2c5ea8e4fc81"
   },
   "assets/forest-scenery/portugal/volumes/prototype-9-elm-canopy/field.rgba16f.bin.gz": {
-    "url": "assets/forest-scenery/portugal/volumes/prototype-9-elm-canopy/field.rgba16f.bin.0036b28d6b1bc509.gz",
-    "bytes": 176106,
-    "sha256": "0036b28d6b1bc5097bea1fd4f73f9d3ec7b2f3622c9b09433e0d76c6e4226754"
+    "url": "assets/forest-scenery/portugal/volumes/prototype-9-elm-canopy/field.rgba16f.bin.4ff567d641e4cd76.gz",
+    "bytes": 163415,
+    "sha256": "4ff567d641e4cd76d41366d912b7fe7bcfa78013b6d143a770d759592a6e42fa"
   },
   "assets/forest-scenery/portugal/volumes/prototype-9-elm-canopy/exposure.r8.bin.gz": {
-    "url": "assets/forest-scenery/portugal/volumes/prototype-9-elm-canopy/exposure.r8.bin.b10ddbcf6839ad82.gz",
-    "bytes": 40403,
-    "sha256": "b10ddbcf6839ad823595935ed3c247f0486d4badb7e9f3479ae63ded3bdd2c65"
+    "url": "assets/forest-scenery/portugal/volumes/prototype-9-elm-canopy/exposure.r8.bin.8199183631ee2d06.gz",
+    "bytes": 33114,
+    "sha256": "8199183631ee2d06030bb3d86ebfdbebf5bb386d45907900ea8c04a816f9c5a4"
   },
   "assets/forest-scenery/portugal/volumes/prototype-10-birch-canopy/field.rgba16f.bin.gz": {
-    "url": "assets/forest-scenery/portugal/volumes/prototype-10-birch-canopy/field.rgba16f.bin.2940a37f7776d044.gz",
-    "bytes": 12332,
-    "sha256": "2940a37f7776d04456bd8e42a650a58e2e6b49c1544d098214229f73e8eb06e9"
+    "url": "assets/forest-scenery/portugal/volumes/prototype-10-birch-canopy/field.rgba16f.bin.dbbae704fe9803a1.gz",
+    "bytes": 13343,
+    "sha256": "dbbae704fe9803a1a5fb2873584a2817520dd87ead050b29f7f668c3f3d11a80"
   },
   "assets/forest-scenery/portugal/volumes/prototype-10-birch-canopy/exposure.r8.bin.gz": {
-    "url": "assets/forest-scenery/portugal/volumes/prototype-10-birch-canopy/exposure.r8.bin.b305a9bff1752045.gz",
-    "bytes": 2171,
-    "sha256": "b305a9bff17520452a72c5c3a6d8028ca354dea5872a8a1790f25d5e9d0ae856"
+    "url": "assets/forest-scenery/portugal/volumes/prototype-10-birch-canopy/exposure.r8.bin.f10cb987237fbdec.gz",
+    "bytes": 2310,
+    "sha256": "f10cb987237fbdec44b6a4decdea72debfc99a12a736abf8f95b2b7562f76924"
   },
   "assets/forest-scenery/portugal/volumes/prototype-11-blueberry-canopy/field.rgba16f.bin.gz": {
-    "url": "assets/forest-scenery/portugal/volumes/prototype-11-blueberry-canopy/field.rgba16f.bin.94681cd5a5f9639a.gz",
-    "bytes": 1935,
-    "sha256": "94681cd5a5f9639a28b68918d6e8d005ac582ff75183b62ffc8969853b415775"
+    "url": "assets/forest-scenery/portugal/volumes/prototype-11-blueberry-canopy/field.rgba16f.bin.5de647d62563693e.gz",
+    "bytes": 2266,
+    "sha256": "5de647d62563693ea4b8ad1570cfe9558eca0d2fb17c008b7d0e6530c9b6ee28"
   },
   "assets/forest-scenery/portugal/volumes/prototype-11-blueberry-canopy/exposure.r8.bin.gz": {
-    "url": "assets/forest-scenery/portugal/volumes/prototype-11-blueberry-canopy/exposure.r8.bin.f74f3c31405ff34d.gz",
-    "bytes": 191,
-    "sha256": "f74f3c31405ff34df114d433c60c4e11570eb44f5fad9a6d03881a96ac2b2c0d"
+    "url": "assets/forest-scenery/portugal/volumes/prototype-11-blueberry-canopy/exposure.r8.bin.a7e36425b50cffd7.gz",
+    "bytes": 231,
+    "sha256": "a7e36425b50cffd733d44c0713dc2c292ab0b3421c38fd51a8946859c18fba45"
   },
   "assets/forest-scenery/saba/middle/manifest.json": {
     "url": "assets/forest-scenery/saba/middle/manifest.149dfe5ec83d9b27.json",
@@ -685,19 +735,19 @@
     "sha256": "9d499a041bae41ca34df5ec0649c8f2717cde813721ef390c42f9c116d72e93e"
   },
   "assets/forest-scenery/portugal/middle/manifest.json": {
-    "url": "assets/forest-scenery/portugal/middle/manifest.91a21a37c94bb015.json",
-    "bytes": 7357,
-    "sha256": "91a21a37c94bb015dcbb33285099f8d2dd7d6979aa59389ca3f551b4990902f8"
+    "url": "assets/forest-scenery/portugal/middle/manifest.945c1a941262aee7.json",
+    "bytes": 7371,
+    "sha256": "945c1a941262aee72b370b1f89a7be11456f0a89ec4c9dd44097bde2b5039c16"
   },
   "assets/forest-scenery/portugal/middle/middle-vertices.bin.gz": {
-    "url": "assets/forest-scenery/portugal/middle/middle-vertices.bin.253d484867dc5888.gz",
-    "bytes": 562597,
-    "sha256": "253d484867dc58880eed84ba0b592dd95c95f5b4c219534865701b71c287e0b8"
+    "url": "assets/forest-scenery/portugal/middle/middle-vertices.bin.1c89191e90c2969d.gz",
+    "bytes": 876716,
+    "sha256": "1c89191e90c2969deae1a7f79215beeff21afb5e48faccb9632c2b6bd24ccc41"
   },
   "assets/forest-scenery/portugal/middle/middle-indices.bin.gz": {
-    "url": "assets/forest-scenery/portugal/middle/middle-indices.bin.986744c68d5fa5cf.gz",
-    "bytes": 82229,
-    "sha256": "986744c68d5fa5cf176bb7f6ae0153de339eea30bf77b94a89d4c6b7f3bfb6f1"
+    "url": "assets/forest-scenery/portugal/middle/middle-indices.bin.07ca87ca8b210725.gz",
+    "bytes": 147681,
+    "sha256": "07ca87ca8b21072500cedf75912e16ef4b5fd213fb2dc89281e8a81b72b4db80"
   },
   "assets/forest-scenery/saba/wind/manifest.json": {
     "url": "assets/forest-scenery/saba/wind/manifest.a52949013661e840.json",
@@ -720,34 +770,34 @@
     "sha256": "7f88ad266c3a7b888c51d1c9cd88f9d5e8c89cb6355f618090462456397b921d"
   },
   "assets/forest-scenery/portugal/wind/manifest.json": {
-    "url": "assets/forest-scenery/portugal/wind/manifest.e147b00fc991e4e3.json",
-    "bytes": 4777,
-    "sha256": "e147b00fc991e4e3a5c8c210d0c0845456b53dab061a3eb698f87d038f057891"
+    "url": "assets/forest-scenery/portugal/wind/manifest.8148338a7b767994.json",
+    "bytes": 4762,
+    "sha256": "8148338a7b7679941e7db3a1c382d6ca390831c5c38168d5da9657b0b2565cbd"
   },
   "assets/forest-scenery/portugal/wind/bones.bin.gz": {
-    "url": "assets/forest-scenery/portugal/wind/bones.bin.eab79ef17d1d1cce.gz",
-    "bytes": 19482,
-    "sha256": "eab79ef17d1d1cceb42480c6e3c1f35c732ff0e72b7b14dbd68912a1ea1d649c"
+    "url": "assets/forest-scenery/portugal/wind/bones.bin.1639cac5e999cf8d.gz",
+    "bytes": 19564,
+    "sha256": "1639cac5e999cf8d966ca61824486b264a215a5fd9bb499c9926c5c4a44eeea8"
   },
   "assets/forest-scenery/portugal/crowns/manifest.json": {
-    "url": "assets/forest-scenery/portugal/crowns/manifest.7c49cb79f80f5b84.json",
-    "bytes": 17525,
-    "sha256": "7c49cb79f80f5b84f812e7113b469dc13b4351277a004a173af8eb50aeeee705"
+    "url": "assets/forest-scenery/portugal/crowns/manifest.fa280a44750c5f03.json",
+    "bytes": 17533,
+    "sha256": "fa280a44750c5f03226c0ab2a10cf631ef7a46de16da9b15823c65902915615d"
   },
   "assets/forest-scenery/portugal/crowns/vertices.bin.gz": {
-    "url": "assets/forest-scenery/portugal/crowns/vertices.bin.586bbaeb1d5101ff.gz",
-    "bytes": 34722,
-    "sha256": "586bbaeb1d5101ff59a48fd27fc57cb18590ceb6bab772956c30c60618a5d825"
+    "url": "assets/forest-scenery/portugal/crowns/vertices.bin.a6e26c7c46c6672a.gz",
+    "bytes": 34408,
+    "sha256": "a6e26c7c46c6672aa28dd5ee6759e90bcd51b2a5fa2ea9ae7b57861b46087782"
   },
   "assets/forest-scenery/portugal/crowns/indices.bin.gz": {
-    "url": "assets/forest-scenery/portugal/crowns/indices.bin.e4283379ed0b929b.gz",
-    "bytes": 16601,
-    "sha256": "e4283379ed0b929bd06b911ecdfa17ed96a5914101bd5228d0125b3eff32efb0"
+    "url": "assets/forest-scenery/portugal/crowns/indices.bin.5936117bad04f5dc.gz",
+    "bytes": 16604,
+    "sha256": "5936117bad04f5dccf9e91615248823992d43c2c01cde99cfc181be0f3e7e637"
   },
   "assets/forest-scenery/portugal/crowns/morph.bin.gz": {
-    "url": "assets/forest-scenery/portugal/crowns/morph.bin.1782028d78471117.gz",
-    "bytes": 33370,
-    "sha256": "1782028d78471117d2f7f0704e409919ebcdaa69f3b04cb6bfede0253bbf345b"
+    "url": "assets/forest-scenery/portugal/crowns/morph.bin.adbfd1de54a31d5a.gz",
+    "bytes": 33862,
+    "sha256": "adbfd1de54a31d5a6fa401a4c35c9fe11c30cf8cabd16c2de347799458c26fa7"
   },
   "assets/forest-scenery/subtropical/crowns/manifest.json": {
     "url": "assets/forest-scenery/subtropical/crowns/manifest.20e1a1fbff3a6366.json",
@@ -800,14 +850,14 @@
     "sha256": "ae65563999d0b44588970d2f17df428f3e718d69b43c913ba57f91922e101e4b"
   },
   "assets/forest-scenery/portugal/clusters/manifest.json": {
-    "url": "assets/forest-scenery/portugal/clusters/manifest.bb98c64f6ad83a69.json",
-    "bytes": 9448,
-    "sha256": "bb98c64f6ad83a697760bc9efc4e8a6517b982b52f9a0696a4a16e2244f88079"
+    "url": "assets/forest-scenery/portugal/clusters/manifest.3fac6bf55bd0127f.json",
+    "bytes": 9549,
+    "sha256": "3fac6bf55bd0127f41d1fa7bd919d481d37ed177e3d3113ae311e2fef51dc98f"
   },
   "assets/forest-scenery/portugal/clusters/clusters.bin.gz": {
-    "url": "assets/forest-scenery/portugal/clusters/clusters.bin.f62bcc4c3ef95b77.gz",
-    "bytes": 461174,
-    "sha256": "f62bcc4c3ef95b77933dfc6cdb4f0c644b4acfaaa43e5fe2cbc6b39393ff9e94"
+    "url": "assets/forest-scenery/portugal/clusters/clusters.bin.066a650719b59b7d.gz",
+    "bytes": 595642,
+    "sha256": "066a650719b59b7d477b08725df83935158f573896e26c46c5e123ba011c6c0d"
   },
   "assets/forest-scenery/saba/surfaces/manifest.json": {
     "url": "assets/forest-scenery/saba/surfaces/manifest.9ac1fbb22bb9fd63.json",
@@ -820,9 +870,9 @@
     "sha256": "b3a61247e8b1658a309d5b1dafe1d7a469d9df8fc3a98ced48a92d385de13f47"
   },
   "assets/forest-scenery/portugal/surfaces/manifest.json": {
-    "url": "assets/forest-scenery/portugal/surfaces/manifest.08b64259d2bb50a4.json",
-    "bytes": 20203,
-    "sha256": "08b64259d2bb50a46c0784445206c3e3029c41905970598664e0566ab380958a"
+    "url": "assets/forest-scenery/portugal/surfaces/manifest.fafc7f36d27362a7.json",
+    "bytes": 19872,
+    "sha256": "fafc7f36d27362a77eec5304cd88f6b5568ddd48b36a9a011af01bebd61edeea"
   },
   "assets/forest-scenery/saba/manifest.json": {
     "url": "assets/forest-scenery/saba/manifest.447959ed7e073853.json",
@@ -1370,9 +1420,9 @@
     "sha256": "8571ce38e63f3890b500ab15cbf1cf08d3b405ba9bc08dc36a1f1722935138b7"
   },
   "assets/forest-scenery/portugal/manifest.json": {
-    "url": "assets/forest-scenery/portugal/manifest.6753b61207d559f8.json",
-    "bytes": 78725,
-    "sha256": "6753b61207d559f8a011c40761b414a25de97b604bf56cc822ca94374c8ed8d9"
+    "url": "assets/forest-scenery/portugal/manifest.b9f38e67d964afd9.json",
+    "bytes": 80981,
+    "sha256": "b9f38e67d964afd98f26abd29f2bba61b63fce06e4aaf5bb36ef73a9f5c3fb37"
   },
   "assets/forest-scenery/portugal/roots.bin.gz": {
     "url": "assets/forest-scenery/portugal/roots.bin.74168e3df040459f.gz",
@@ -1395,49 +1445,49 @@
     "sha256": "99ea11ee38b47cb4df40af0987b4139d65b55f7ec936f8fdc4f94b732bba5b48"
   },
   "assets/forest-scenery/portugal/oak-veteran-wounds-albedo.png": {
-    "url": "assets/forest-scenery/portugal/oak-veteran-wounds-albedo.472c3a7a509b079f.png",
-    "bytes": 56087,
-    "sha256": "472c3a7a509b079fbe486f130d339a304a595d3caffac12f1459547622a282a3"
+    "url": "assets/forest-scenery/portugal/oak-veteran-wounds-albedo.afc6e47fec27ff04.png",
+    "bytes": 42732,
+    "sha256": "afc6e47fec27ff045a02986deae43106e47802f958f3ae35826e3a4e48b0335d"
   },
   "assets/forest-scenery/portugal/oak-veteran-wounds-normal.png": {
-    "url": "assets/forest-scenery/portugal/oak-veteran-wounds-normal.2da940cc9c4ea077.png",
-    "bytes": 293006,
-    "sha256": "2da940cc9c4ea077ceb7d4b490d90d4375e855f67854e7e4d0949b1c85e856ad"
+    "url": "assets/forest-scenery/portugal/oak-veteran-wounds-normal.8095960c672058b3.png",
+    "bytes": 113164,
+    "sha256": "8095960c672058b3f4ccdfb9d2481bb8c894163d58697174c5ac9cdcef8a59de"
   },
   "assets/forest-scenery/portugal/oak-veteran-wounds-roughness.png": {
-    "url": "assets/forest-scenery/portugal/oak-veteran-wounds-roughness.a1e1c95f8fabf6ba.png",
-    "bytes": 49683,
-    "sha256": "a1e1c95f8fabf6ba6fe4646cd4c8e8ffc91801e18c069a79d539bad397732401"
+    "url": "assets/forest-scenery/portugal/oak-veteran-wounds-roughness.f1dab42bc4201fbe.png",
+    "bytes": 25339,
+    "sha256": "f1dab42bc4201fbe25d34ce3f031a790d55d9d206372c35aa7e241b0cbd03335"
   },
   "assets/forest-scenery/portugal/oak-veteran-foliage-0-albedo.png": {
-    "url": "assets/forest-scenery/portugal/oak-veteran-foliage-0-albedo.15bf47980a5ac366.png",
-    "bytes": 271267,
-    "sha256": "15bf47980a5ac3667320018df9426d97185f2b67853d17ad9d998ea1d3f08d54"
+    "url": "assets/forest-scenery/portugal/oak-veteran-foliage-0-albedo.1866133bfb120c22.png",
+    "bytes": 82783,
+    "sha256": "1866133bfb120c2262b4ac91760d068d717cc9c8f0acf08fbc3d73ce546af41f"
   },
   "assets/forest-scenery/portugal/oak-veteran-foliage-0-normal.png": {
-    "url": "assets/forest-scenery/portugal/oak-veteran-foliage-0-normal.061a24715c5b5874.png",
-    "bytes": 453362,
-    "sha256": "061a24715c5b5874ad9905f7b1f1dee8b2c4def68097c817b5dc310053da9e92"
+    "url": "assets/forest-scenery/portugal/oak-veteran-foliage-0-normal.98522c2c0155e06b.png",
+    "bytes": 167799,
+    "sha256": "98522c2c0155e06b8b4998a2cc2e040c23adfe1f411235d6c77feb5695c54d9a"
   },
   "assets/forest-scenery/portugal/oak-veteran-foliage-1-albedo.png": {
-    "url": "assets/forest-scenery/portugal/oak-veteran-foliage-1-albedo.57b658ac7564d161.png",
-    "bytes": 251124,
-    "sha256": "57b658ac7564d1611a232af0d5f64cfa2e81b1c037a264d9fb4e7f951293a387"
+    "url": "assets/forest-scenery/portugal/oak-veteran-foliage-1-albedo.0058b47d08ac8ae0.png",
+    "bytes": 82971,
+    "sha256": "0058b47d08ac8ae06ba4707202c3b23a449e2256fcdb289a3cb35c58297ebae7"
   },
   "assets/forest-scenery/portugal/oak-veteran-foliage-1-normal.png": {
-    "url": "assets/forest-scenery/portugal/oak-veteran-foliage-1-normal.5f00a0676cd38ad2.png",
-    "bytes": 423094,
-    "sha256": "5f00a0676cd38ad2374ecb7935aec57190ab0af759faf5c5f00f38c554d697b1"
+    "url": "assets/forest-scenery/portugal/oak-veteran-foliage-1-normal.69fe8a42a7bde8b0.png",
+    "bytes": 167569,
+    "sha256": "69fe8a42a7bde8b0dbffd3f1476dd58dc2600d0e834e06c386c6fa7370479b96"
   },
   "assets/forest-scenery/portugal/oak-veteran-foliage-2-albedo.png": {
-    "url": "assets/forest-scenery/portugal/oak-veteran-foliage-2-albedo.b3e47c5279043053.png",
-    "bytes": 251233,
-    "sha256": "b3e47c52790430539fcb2ca03bbe4919bb6951f646f6471b0f69da055e4157d7"
+    "url": "assets/forest-scenery/portugal/oak-veteran-foliage-2-albedo.2205249ea46646f4.png",
+    "bytes": 82686,
+    "sha256": "2205249ea46646f4338bb4f73627ce5ef15dc72656a73a99a4e5eec81702930a"
   },
   "assets/forest-scenery/portugal/oak-veteran-foliage-2-normal.png": {
-    "url": "assets/forest-scenery/portugal/oak-veteran-foliage-2-normal.61e53793d8a978e9.png",
-    "bytes": 426749,
-    "sha256": "61e53793d8a978e90b0c027d24521f96a3140b1635acd0d68f0d327811f18c5c"
+    "url": "assets/forest-scenery/portugal/oak-veteran-foliage-2-normal.bb3c501a05cc8c7e.png",
+    "bytes": 167691,
+    "sha256": "bb3c501a05cc8c7e874e1c174ba2e99e9660d5e770c36f5a98286624d9bc7001"
   },
   "assets/forest-scenery/portugal/chestnut-veteran-bark-albedo.png": {
     "url": "assets/forest-scenery/portugal/chestnut-veteran-bark-albedo.e929ab50808b7e89.png",
@@ -1455,49 +1505,49 @@
     "sha256": "7f9177f0501578e8cfd3cc3723db30851fab7688f0f496f87234d7711af7e945"
   },
   "assets/forest-scenery/portugal/chestnut-veteran-wounds-albedo.png": {
-    "url": "assets/forest-scenery/portugal/chestnut-veteran-wounds-albedo.ff779b377bb7c0ea.png",
-    "bytes": 63851,
-    "sha256": "ff779b377bb7c0eac392f4ea34dc44352a424136310c493f232a411009f6e791"
+    "url": "assets/forest-scenery/portugal/chestnut-veteran-wounds-albedo.7c2b4e605b1eca03.png",
+    "bytes": 45084,
+    "sha256": "7c2b4e605b1eca03699784a32fddb5237f541e846829718c311392365c6cdb80"
   },
   "assets/forest-scenery/portugal/chestnut-veteran-wounds-normal.png": {
-    "url": "assets/forest-scenery/portugal/chestnut-veteran-wounds-normal.bcf32210d7e6c481.png",
-    "bytes": 297344,
-    "sha256": "bcf32210d7e6c4811ccfb4b2edec361ad4680475fe066861fda0b76b03a1ac56"
+    "url": "assets/forest-scenery/portugal/chestnut-veteran-wounds-normal.68f1754bd5b43649.png",
+    "bytes": 114046,
+    "sha256": "68f1754bd5b436493524ca7827879d1fa0cae06728eb78cab041196836b7b6d0"
   },
   "assets/forest-scenery/portugal/chestnut-veteran-wounds-roughness.png": {
-    "url": "assets/forest-scenery/portugal/chestnut-veteran-wounds-roughness.109abffd0f612955.png",
-    "bytes": 51754,
-    "sha256": "109abffd0f6129558a62290b6d44ada6dc8690ad8e6cf1c6c6ae33bb115b69f2"
+    "url": "assets/forest-scenery/portugal/chestnut-veteran-wounds-roughness.7d3a1dab828754d6.png",
+    "bytes": 26028,
+    "sha256": "7d3a1dab828754d61037fa251ab4d8934cec4d5f237165d1e859bf626c91f8db"
   },
   "assets/forest-scenery/portugal/chestnut-veteran-foliage-0-albedo.png": {
-    "url": "assets/forest-scenery/portugal/chestnut-veteran-foliage-0-albedo.0a96d7bfac2b3d14.png",
-    "bytes": 267528,
-    "sha256": "0a96d7bfac2b3d14cc2cb41d21b37a41e1926bd4a6a1f1523d9474bfcc876c0d"
+    "url": "assets/forest-scenery/portugal/chestnut-veteran-foliage-0-albedo.c5c81ac225c55e10.png",
+    "bytes": 101040,
+    "sha256": "c5c81ac225c55e106d0e2b8106f4f07fabb6072fab392eb5b384b56b143d56fb"
   },
   "assets/forest-scenery/portugal/chestnut-veteran-foliage-0-normal.png": {
-    "url": "assets/forest-scenery/portugal/chestnut-veteran-foliage-0-normal.8c6b9b913ec6360f.png",
-    "bytes": 438665,
-    "sha256": "8c6b9b913ec6360f78db1373523dfc53fd9cbc0553bc721efd0541e9cbce57d2"
+    "url": "assets/forest-scenery/portugal/chestnut-veteran-foliage-0-normal.63750516f1b37639.png",
+    "bytes": 180948,
+    "sha256": "63750516f1b376397a5731a91f493c6154f0d1ef3737122785ed472c67a5b001"
   },
   "assets/forest-scenery/portugal/chestnut-veteran-foliage-1-albedo.png": {
-    "url": "assets/forest-scenery/portugal/chestnut-veteran-foliage-1-albedo.aefe5a70430521d8.png",
-    "bytes": 240209,
-    "sha256": "aefe5a70430521d8f2aa47d7ff6ef80b4c20a15c84f0f83d1fcda46c33fd6228"
+    "url": "assets/forest-scenery/portugal/chestnut-veteran-foliage-1-albedo.0a72637974c904f2.png",
+    "bytes": 101862,
+    "sha256": "0a72637974c904f2d3decd098bcdeeff71b00ac69c76d5c2254da54a5ec14af8"
   },
   "assets/forest-scenery/portugal/chestnut-veteran-foliage-1-normal.png": {
-    "url": "assets/forest-scenery/portugal/chestnut-veteran-foliage-1-normal.7e17eb872f55e601.png",
-    "bytes": 389365,
-    "sha256": "7e17eb872f55e60155f42e4d76e6555039cc557c685300c2570c5c5c33f18443"
+    "url": "assets/forest-scenery/portugal/chestnut-veteran-foliage-1-normal.57e38f73ed810ac5.png",
+    "bytes": 180662,
+    "sha256": "57e38f73ed810ac5b3aa46ca15919b01922260ed777d6f57580794b63100f348"
   },
   "assets/forest-scenery/portugal/chestnut-veteran-foliage-2-albedo.png": {
-    "url": "assets/forest-scenery/portugal/chestnut-veteran-foliage-2-albedo.845fc6ba7340f3f7.png",
-    "bytes": 249665,
-    "sha256": "845fc6ba7340f3f782efd8461e9bb3ed9d75e150e0c7eca323d9221207547702"
+    "url": "assets/forest-scenery/portugal/chestnut-veteran-foliage-2-albedo.cf33787428a63d8e.png",
+    "bytes": 101068,
+    "sha256": "cf33787428a63d8e8a42e6f3e37a1fb82bdb207ce185978a9fc0162fd3f6defa"
   },
   "assets/forest-scenery/portugal/chestnut-veteran-foliage-2-normal.png": {
-    "url": "assets/forest-scenery/portugal/chestnut-veteran-foliage-2-normal.72762a61cd5fcd14.png",
-    "bytes": 409739,
-    "sha256": "72762a61cd5fcd1483195db3051afb80736b8843d73c8770e75821b6a7a6660a"
+    "url": "assets/forest-scenery/portugal/chestnut-veteran-foliage-2-normal.3b6490e0cedddbd2.png",
+    "bytes": 180929,
+    "sha256": "3b6490e0cedddbd287feffbcc6b5d2e99d0df1fe636dcb95b84b188a45adf819"
   },
   "assets/forest-scenery/portugal/maple-veteran-bark-albedo.png": {
     "url": "assets/forest-scenery/portugal/maple-veteran-bark-albedo.1a1400cdfae64c65.png",
@@ -1515,49 +1565,49 @@
     "sha256": "bfe9c30fba924bce4d65dcd1c5a310b9b903d4875f0d1c696cd2fdbc7f4db491"
   },
   "assets/forest-scenery/portugal/maple-veteran-wounds-albedo.png": {
-    "url": "assets/forest-scenery/portugal/maple-veteran-wounds-albedo.e7a8f1a6ad0c8bdd.png",
-    "bytes": 84525,
-    "sha256": "e7a8f1a6ad0c8bdd9d618112aa98df8ec9451f95cdc0b6be3ce1062105efe253"
+    "url": "assets/forest-scenery/portugal/maple-veteran-wounds-albedo.490ad92689896e07.png",
+    "bytes": 51410,
+    "sha256": "490ad92689896e07ef856a36e4285e874c176b25c3619e0d30ca10a8259bf55c"
   },
   "assets/forest-scenery/portugal/maple-veteran-wounds-normal.png": {
-    "url": "assets/forest-scenery/portugal/maple-veteran-wounds-normal.a73d715de5eb831a.png",
-    "bytes": 299486,
-    "sha256": "a73d715de5eb831ae7c5f978368964a929b06d31f161636f7efc31b3bf495a6d"
+    "url": "assets/forest-scenery/portugal/maple-veteran-wounds-normal.cccf45189d063016.png",
+    "bytes": 115590,
+    "sha256": "cccf45189d063016378e79c3e56c2ae16d16ff62cc74be3f387fb4c80487fa30"
   },
   "assets/forest-scenery/portugal/maple-veteran-wounds-roughness.png": {
-    "url": "assets/forest-scenery/portugal/maple-veteran-wounds-roughness.2ee481077bfb0811.png",
-    "bytes": 51935,
-    "sha256": "2ee481077bfb0811ab69745deee0f171bffecb55e98bd54584502bbbf20c3a2e"
+    "url": "assets/forest-scenery/portugal/maple-veteran-wounds-roughness.e3657cdcb1598836.png",
+    "bytes": 26183,
+    "sha256": "e3657cdcb15988362768fcb24f9aa10ef20f4aded5bfaf10ca49d4b8a506120e"
   },
   "assets/forest-scenery/portugal/maple-veteran-foliage-0-albedo.png": {
-    "url": "assets/forest-scenery/portugal/maple-veteran-foliage-0-albedo.c9b62d6d857ebc8b.png",
-    "bytes": 245007,
-    "sha256": "c9b62d6d857ebc8b5f1e69846436a259506a42fe7aa06d167a3b4f00e0b8404d"
+    "url": "assets/forest-scenery/portugal/maple-veteran-foliage-0-albedo.afb4718aae43d488.png",
+    "bytes": 81483,
+    "sha256": "afb4718aae43d488e7957cfa35d18187fe29f947cc50aac56f4d1b6e8838d51a"
   },
   "assets/forest-scenery/portugal/maple-veteran-foliage-0-normal.png": {
-    "url": "assets/forest-scenery/portugal/maple-veteran-foliage-0-normal.ab5378608377259b.png",
-    "bytes": 415605,
-    "sha256": "ab5378608377259bbfea3fc0f748e508913ee2002564cf9d0d2e84d84c2baf97"
+    "url": "assets/forest-scenery/portugal/maple-veteran-foliage-0-normal.5bf41cf1832fbe8c.png",
+    "bytes": 166308,
+    "sha256": "5bf41cf1832fbe8cdd82464b44f9be5e1cf69ab371728b396af6d9590664b29c"
   },
   "assets/forest-scenery/portugal/maple-veteran-foliage-1-albedo.png": {
-    "url": "assets/forest-scenery/portugal/maple-veteran-foliage-1-albedo.bad4b9b88f25a77e.png",
-    "bytes": 226648,
-    "sha256": "bad4b9b88f25a77e69a4256c83edb90b90dd05fb1946aac922e890d9e79a1679"
+    "url": "assets/forest-scenery/portugal/maple-veteran-foliage-1-albedo.cfe97504caecd090.png",
+    "bytes": 82077,
+    "sha256": "cfe97504caecd090e0a32df6446c52badf4896b146344f59d12f0a76e9e01641"
   },
   "assets/forest-scenery/portugal/maple-veteran-foliage-1-normal.png": {
-    "url": "assets/forest-scenery/portugal/maple-veteran-foliage-1-normal.502b3b73053298a4.png",
-    "bytes": 380765,
-    "sha256": "502b3b73053298a4943a503f44decac34e4c3e0f20912ffc6052b1a4d8475d1c"
+    "url": "assets/forest-scenery/portugal/maple-veteran-foliage-1-normal.e0e6e82e345697b8.png",
+    "bytes": 166007,
+    "sha256": "e0e6e82e345697b85bcd09790ae50579da3a5f4a36d836a505d3fe664a927a75"
   },
   "assets/forest-scenery/portugal/maple-veteran-foliage-2-albedo.png": {
-    "url": "assets/forest-scenery/portugal/maple-veteran-foliage-2-albedo.cb32f72f0ed9b44e.png",
-    "bytes": 224452,
-    "sha256": "cb32f72f0ed9b44e618516903d1574cc1d184faf2616b565f5847a16291eec63"
+    "url": "assets/forest-scenery/portugal/maple-veteran-foliage-2-albedo.07c4d229f73580f8.png",
+    "bytes": 81510,
+    "sha256": "07c4d229f73580f8c08a9cc5acd89fe0d704ce114489e769cb854c3c3c1b1774"
   },
   "assets/forest-scenery/portugal/maple-veteran-foliage-2-normal.png": {
-    "url": "assets/forest-scenery/portugal/maple-veteran-foliage-2-normal.a41e31d2f03d770e.png",
-    "bytes": 382517,
-    "sha256": "a41e31d2f03d770e30633e9d86b1ab05587a392e68f1c9be5903a14bf8d988ea"
+    "url": "assets/forest-scenery/portugal/maple-veteran-foliage-2-normal.5ed3700efc877613.png",
+    "bytes": 166177,
+    "sha256": "5ed3700efc87761337694a17312bbfb2a598dd03dfba1d2562c5d520d4f7920a"
   },
   "assets/forest-scenery/portugal/elm-veteran-bark-albedo.png": {
     "url": "assets/forest-scenery/portugal/elm-veteran-bark-albedo.e43f4db9ebef374a.png",
@@ -1575,49 +1625,49 @@
     "sha256": "a98a475c280123ca73b79394cf2648b6f80bb709dcf7871b0783278aaad1767c"
   },
   "assets/forest-scenery/portugal/elm-veteran-wounds-albedo.png": {
-    "url": "assets/forest-scenery/portugal/elm-veteran-wounds-albedo.49255778f8d0f9c3.png",
-    "bytes": 63444,
-    "sha256": "49255778f8d0f9c32988ccb8ad9ecab7c6b803f6fdc4c6690ae15cb916f14afc"
+    "url": "assets/forest-scenery/portugal/elm-veteran-wounds-albedo.838c79f10bf97de0.png",
+    "bytes": 44973,
+    "sha256": "838c79f10bf97de05f916fa02192b9ceb8298e91a2a4931fcc6c4577ec4315bb"
   },
   "assets/forest-scenery/portugal/elm-veteran-wounds-normal.png": {
-    "url": "assets/forest-scenery/portugal/elm-veteran-wounds-normal.1d80a78f3cbeb3f5.png",
-    "bytes": 300213,
-    "sha256": "1d80a78f3cbeb3f53012a8ca2441e1b823ba9197c72ff0a348c05c1a23c03c8a"
+    "url": "assets/forest-scenery/portugal/elm-veteran-wounds-normal.9ef150fa01e8957e.png",
+    "bytes": 115490,
+    "sha256": "9ef150fa01e8957e7aa8c74f5801225f3f9ce1d8ce9838f3c411832171f317be"
   },
   "assets/forest-scenery/portugal/elm-veteran-wounds-roughness.png": {
-    "url": "assets/forest-scenery/portugal/elm-veteran-wounds-roughness.bb63b475fa8450e0.png",
-    "bytes": 52924,
-    "sha256": "bb63b475fa8450e0df50f1dcf034a3342533abbcbb9d30bee21685a0449f00ab"
+    "url": "assets/forest-scenery/portugal/elm-veteran-wounds-roughness.224a3abb564252eb.png",
+    "bytes": 26517,
+    "sha256": "224a3abb564252eb1067582758b06b6beddd87e19d1419a2b6a3694258d75a6a"
   },
   "assets/forest-scenery/portugal/elm-veteran-foliage-0-albedo.png": {
-    "url": "assets/forest-scenery/portugal/elm-veteran-foliage-0-albedo.4daa1d56b23b6352.png",
-    "bytes": 288134,
-    "sha256": "4daa1d56b23b6352805bcbcad7990b41fec45af6b453237c05052bab749d884a"
+    "url": "assets/forest-scenery/portugal/elm-veteran-foliage-0-albedo.c1ead0e12030b2b0.png",
+    "bytes": 109292,
+    "sha256": "c1ead0e12030b2b0c34d7e2c2f09d1c326e8310b0738e9f22dd33a616c944835"
   },
   "assets/forest-scenery/portugal/elm-veteran-foliage-0-normal.png": {
-    "url": "assets/forest-scenery/portugal/elm-veteran-foliage-0-normal.7973e219dc74135b.png",
-    "bytes": 432155,
-    "sha256": "7973e219dc74135ba1c3170502237e2c7defcaf61f419bbe0b5325475d92ba29"
+    "url": "assets/forest-scenery/portugal/elm-veteran-foliage-0-normal.beeda6522072477d.png",
+    "bytes": 186779,
+    "sha256": "beeda6522072477d8e31c2e7ead2fddb172b8550e1bff1e6f6596fba5d526652"
   },
   "assets/forest-scenery/portugal/elm-veteran-foliage-1-albedo.png": {
-    "url": "assets/forest-scenery/portugal/elm-veteran-foliage-1-albedo.9464768988d1f255.png",
-    "bytes": 289274,
-    "sha256": "9464768988d1f255a4febe7fe08b7b9a9c647e53ebffdc6709f9155c4f1bf6ae"
+    "url": "assets/forest-scenery/portugal/elm-veteran-foliage-1-albedo.c9d780d574a7ecc7.png",
+    "bytes": 109890,
+    "sha256": "c9d780d574a7ecc762bb724e47d40c1e97b4aa860d68383924c60987bd208252"
   },
   "assets/forest-scenery/portugal/elm-veteran-foliage-1-normal.png": {
-    "url": "assets/forest-scenery/portugal/elm-veteran-foliage-1-normal.e264aafb61464009.png",
-    "bytes": 437187,
-    "sha256": "e264aafb6146400994e606f2157eb1a6f76863b2d6fbdc199ba1e3480ba32d36"
+    "url": "assets/forest-scenery/portugal/elm-veteran-foliage-1-normal.e17236c07b67908f.png",
+    "bytes": 186527,
+    "sha256": "e17236c07b67908f6d70b103219ff103b72c9b7d3f5e772e489081d8b57a454a"
   },
   "assets/forest-scenery/portugal/elm-veteran-foliage-2-albedo.png": {
-    "url": "assets/forest-scenery/portugal/elm-veteran-foliage-2-albedo.74e8de6dc171553e.png",
-    "bytes": 280869,
-    "sha256": "74e8de6dc171553e6cc2fd0d2909fefc56c627995f9b5d852fa345b0834306b2"
+    "url": "assets/forest-scenery/portugal/elm-veteran-foliage-2-albedo.436b5161a538c55a.png",
+    "bytes": 109462,
+    "sha256": "436b5161a538c55a12e625e737f8018fb7a1899ee4c48b0b329410dc0ec7af0b"
   },
   "assets/forest-scenery/portugal/elm-veteran-foliage-2-normal.png": {
-    "url": "assets/forest-scenery/portugal/elm-veteran-foliage-2-normal.196414961da28ed4.png",
-    "bytes": 426975,
-    "sha256": "196414961da28ed4db8a00516aa37c876d4af5e9f59add7f03f369fcf4d38c33"
+    "url": "assets/forest-scenery/portugal/elm-veteran-foliage-2-normal.d3d5c35b31c58ed2.png",
+    "bytes": 186455,
+    "sha256": "d3d5c35b31c58ed2b1f2f88a06f2757a874201b781077ff7882d0d88e0cf87f5"
   },
   "assets/forest-scenery/portugal/birch-veteran-bark-albedo.png": {
     "url": "assets/forest-scenery/portugal/birch-veteran-bark-albedo.92dbb6d852d8c626.png",
@@ -1635,49 +1685,49 @@
     "sha256": "e1e19b5d64eba902341451d9fea33d666778b8179a1f187020f38fe26c62a457"
   },
   "assets/forest-scenery/portugal/birch-veteran-wounds-albedo.png": {
-    "url": "assets/forest-scenery/portugal/birch-veteran-wounds-albedo.232797fd00b8052b.png",
-    "bytes": 137229,
-    "sha256": "232797fd00b8052b233308ddfa2dfa247cc90ff27bf5fb3d3aa846a32edd51e0"
+    "url": "assets/forest-scenery/portugal/birch-veteran-wounds-albedo.8a2b89c738ae121d.png",
+    "bytes": 62496,
+    "sha256": "8a2b89c738ae121dfa84bfef646290d51b60542ff358f66961514c3f8c81b67c"
   },
   "assets/forest-scenery/portugal/birch-veteran-wounds-normal.png": {
-    "url": "assets/forest-scenery/portugal/birch-veteran-wounds-normal.f72c874f41bffbe9.png",
-    "bytes": 298482,
-    "sha256": "f72c874f41bffbe9544f024d8a4a46a6faa234614da6cb755cd3228cf44a08da"
+    "url": "assets/forest-scenery/portugal/birch-veteran-wounds-normal.16be2581c0b2cafb.png",
+    "bytes": 115224,
+    "sha256": "16be2581c0b2cafbab8322df16d58e2582e2b68204add7e0cef1c95c210b4084"
   },
   "assets/forest-scenery/portugal/birch-veteran-wounds-roughness.png": {
-    "url": "assets/forest-scenery/portugal/birch-veteran-wounds-roughness.7c83364b4164bf07.png",
-    "bytes": 52055,
-    "sha256": "7c83364b4164bf07a168d957482710214159d84624a8eef9dd0d56594fd10537"
+    "url": "assets/forest-scenery/portugal/birch-veteran-wounds-roughness.c2493bd814b8e51b.png",
+    "bytes": 26208,
+    "sha256": "c2493bd814b8e51b776977575567174e7ae0588a062632a14a22df665d905b48"
   },
   "assets/forest-scenery/portugal/birch-veteran-foliage-0-albedo.png": {
-    "url": "assets/forest-scenery/portugal/birch-veteran-foliage-0-albedo.55cecc7368a01e52.png",
-    "bytes": 225351,
-    "sha256": "55cecc7368a01e52d54637bdced0c4db3460403a99b7da5bc431173f2a7c1030"
+    "url": "assets/forest-scenery/portugal/birch-veteran-foliage-0-albedo.5391c40fe83acfbd.png",
+    "bytes": 84771,
+    "sha256": "5391c40fe83acfbddf5997fcfc3ba1a5821bf724cea5a3498ba8a050d8895be3"
   },
   "assets/forest-scenery/portugal/birch-veteran-foliage-0-normal.png": {
-    "url": "assets/forest-scenery/portugal/birch-veteran-foliage-0-normal.04d56eb8df4eeb05.png",
-    "bytes": 360379,
-    "sha256": "04d56eb8df4eeb05e2e2b358a887b50648cabe8b7c1009f1cf7abec8352ea857"
+    "url": "assets/forest-scenery/portugal/birch-veteran-foliage-0-normal.5868e701876f56db.png",
+    "bytes": 127824,
+    "sha256": "5868e701876f56db74c645ae6df6fcd277ae7b29d03ec513f1be9eff10876667"
   },
   "assets/forest-scenery/portugal/birch-veteran-foliage-1-albedo.png": {
-    "url": "assets/forest-scenery/portugal/birch-veteran-foliage-1-albedo.fee0129768ee5914.png",
-    "bytes": 224337,
-    "sha256": "fee0129768ee5914f87b32cdfb13b8e033f6776740b78f3e619ba380c650c301"
+    "url": "assets/forest-scenery/portugal/birch-veteran-foliage-1-albedo.b03a6fe49e655572.png",
+    "bytes": 85086,
+    "sha256": "b03a6fe49e65557296cce9d63cad13797f8f2fd770b4b3331e8e3b54afaaa4e3"
   },
   "assets/forest-scenery/portugal/birch-veteran-foliage-1-normal.png": {
-    "url": "assets/forest-scenery/portugal/birch-veteran-foliage-1-normal.fde7287346a54395.png",
-    "bytes": 356874,
-    "sha256": "fde7287346a5439585a832bed3fa75184355c754a687d1ac9726c5c8f33a57da"
+    "url": "assets/forest-scenery/portugal/birch-veteran-foliage-1-normal.ad70c1c5b5c2a970.png",
+    "bytes": 127683,
+    "sha256": "ad70c1c5b5c2a9706a2a21cb8ca0a3edfaaaff822f693b460f1c0fd0ce80fe51"
   },
   "assets/forest-scenery/portugal/birch-veteran-foliage-2-albedo.png": {
-    "url": "assets/forest-scenery/portugal/birch-veteran-foliage-2-albedo.c579523ac597763d.png",
-    "bytes": 231713,
-    "sha256": "c579523ac597763daa4a79728e34b2ec7e66d3d5b13882d90aa3ae4b9bcb0516"
+    "url": "assets/forest-scenery/portugal/birch-veteran-foliage-2-albedo.3fdb3be03b6aa2a5.png",
+    "bytes": 84616,
+    "sha256": "3fdb3be03b6aa2a529484ec5491c0866a6df330b0efeb115da1628564e0d453c"
   },
   "assets/forest-scenery/portugal/birch-veteran-foliage-2-normal.png": {
-    "url": "assets/forest-scenery/portugal/birch-veteran-foliage-2-normal.a16a1ee6445dd2f5.png",
-    "bytes": 371338,
-    "sha256": "a16a1ee6445dd2f5f564933ef1dd6c676e7561bcff25454c8a960cf3f19d783c"
+    "url": "assets/forest-scenery/portugal/birch-veteran-foliage-2-normal.4d07735cadebc9e3.png",
+    "bytes": 127390,
+    "sha256": "4d07735cadebc9e3a46095144e1e2eff7d59bc3598183e5ba21ed9a605473203"
   },
   "assets/forest-scenery/portugal/blueberry-veteran-bark-albedo.png": {
     "url": "assets/forest-scenery/portugal/blueberry-veteran-bark-albedo.1b4076a207774424.png",
@@ -1695,49 +1745,49 @@
     "sha256": "5f17cb858f7b1acb9255ea345c629d15ae89c5b48f5b1274fc4c6fa5937d94eb"
   },
   "assets/forest-scenery/portugal/blueberry-veteran-wounds-albedo.png": {
-    "url": "assets/forest-scenery/portugal/blueberry-veteran-wounds-albedo.7a30c5763b98a82b.png",
-    "bytes": 74294,
-    "sha256": "7a30c5763b98a82bb8a2e1449d45cfccc9b085467defaba192bd3154f618de14"
+    "url": "assets/forest-scenery/portugal/blueberry-veteran-wounds-albedo.7210d79c3bec79dc.png",
+    "bytes": 48085,
+    "sha256": "7210d79c3bec79dca23a33acda1039f4a4f8bca7ea326e989fb5aea71a5144e4"
   },
   "assets/forest-scenery/portugal/blueberry-veteran-wounds-normal.png": {
-    "url": "assets/forest-scenery/portugal/blueberry-veteran-wounds-normal.fca3e0ff9c524cf2.png",
-    "bytes": 296046,
-    "sha256": "fca3e0ff9c524cf2c8c35e0eb7ecd82408b072c0952cedf72e046491c7c7a066"
+    "url": "assets/forest-scenery/portugal/blueberry-veteran-wounds-normal.a53b786a4564f71d.png",
+    "bytes": 114614,
+    "sha256": "a53b786a4564f71d04516973747df6918ce144a6f195cfa4e50765e03a408f4f"
   },
   "assets/forest-scenery/portugal/blueberry-veteran-wounds-roughness.png": {
-    "url": "assets/forest-scenery/portugal/blueberry-veteran-wounds-roughness.a2eed5f0489e4b1f.png",
-    "bytes": 52456,
-    "sha256": "a2eed5f0489e4b1f581c00adaa044dcb1495fd73ae97afd4e32b094705e581df"
+    "url": "assets/forest-scenery/portugal/blueberry-veteran-wounds-roughness.992430197178d90c.png",
+    "bytes": 26480,
+    "sha256": "992430197178d90cd3091bb5bb08d0a47f82668d2745b3791a48ff6d315d7cdb"
   },
   "assets/forest-scenery/portugal/blueberry-veteran-foliage-0-albedo.png": {
-    "url": "assets/forest-scenery/portugal/blueberry-veteran-foliage-0-albedo.08e286f7501752af.png",
-    "bytes": 315899,
-    "sha256": "08e286f7501752af22a4e3347153c41dc7e3865735a08b7ade66ebe46035fbb7"
+    "url": "assets/forest-scenery/portugal/blueberry-veteran-foliage-0-albedo.e5e226fd3f02ee49.png",
+    "bytes": 118291,
+    "sha256": "e5e226fd3f02ee49b6313463b6800534adf3ccc694852ab9d3a9effd7a7067ea"
   },
   "assets/forest-scenery/portugal/blueberry-veteran-foliage-0-normal.png": {
-    "url": "assets/forest-scenery/portugal/blueberry-veteran-foliage-0-normal.3494e13ea64f8ede.png",
-    "bytes": 766050,
-    "sha256": "3494e13ea64f8edebd3d66abdb0f5b07ae1a1a1e2df7d33ae8fbd0818bbd4558"
+    "url": "assets/forest-scenery/portugal/blueberry-veteran-foliage-0-normal.616fcaf906dda137.png",
+    "bytes": 189933,
+    "sha256": "616fcaf906dda1372ef1136dde30ef01683f346d93d8d66d0693305bd0c859f9"
   },
   "assets/forest-scenery/portugal/blueberry-veteran-foliage-1-albedo.png": {
-    "url": "assets/forest-scenery/portugal/blueberry-veteran-foliage-1-albedo.c3df892edc844013.png",
-    "bytes": 316942,
-    "sha256": "c3df892edc844013c2be03bb61465f8f403fecf0afb4faf1f4c95b27f3b2445e"
+    "url": "assets/forest-scenery/portugal/blueberry-veteran-foliage-1-albedo.d920a8865e378515.png",
+    "bytes": 119465,
+    "sha256": "d920a8865e37851515ca93a00953c47c55e30eab7561599ac0921a562b8407d8"
   },
   "assets/forest-scenery/portugal/blueberry-veteran-foliage-1-normal.png": {
-    "url": "assets/forest-scenery/portugal/blueberry-veteran-foliage-1-normal.925863f8a863d2a0.png",
-    "bytes": 764763,
-    "sha256": "925863f8a863d2a0102c64e7f8b22e640ea6e03268bb338e4729f44d78236967"
+    "url": "assets/forest-scenery/portugal/blueberry-veteran-foliage-1-normal.5bcb527643814eb9.png",
+    "bytes": 189653,
+    "sha256": "5bcb527643814eb962aca0b18d9b35f99d056805cf7c2767515d7ec71d683470"
   },
   "assets/forest-scenery/portugal/blueberry-veteran-foliage-2-albedo.png": {
-    "url": "assets/forest-scenery/portugal/blueberry-veteran-foliage-2-albedo.9c4f6583349df6c6.png",
-    "bytes": 314513,
-    "sha256": "9c4f6583349df6c6556aaf0d753a09e189c101a1a5c8c5b9aade720564836a12"
+    "url": "assets/forest-scenery/portugal/blueberry-veteran-foliage-2-albedo.26536cc1d279ffe7.png",
+    "bytes": 118616,
+    "sha256": "26536cc1d279ffe7d91745ed7f21f15c798f44cadda7f49a0f00c37162e1e9d9"
   },
   "assets/forest-scenery/portugal/blueberry-veteran-foliage-2-normal.png": {
-    "url": "assets/forest-scenery/portugal/blueberry-veteran-foliage-2-normal.482f4b738318a06a.png",
-    "bytes": 766770,
-    "sha256": "482f4b738318a06a396e8a5f34981e8344dd24496d47cbe5e96a9d3d3bf9cbbf"
+    "url": "assets/forest-scenery/portugal/blueberry-veteran-foliage-2-normal.99144cfe8e28e64f.png",
+    "bytes": 189857,
+    "sha256": "99144cfe8e28e64f98390a7fa321f51456931e9bea0e6b134a82cd16a20fadbd"
   },
   "assets/forest-scenery/saba/mass/manifest.json": {
     "url": "assets/forest-scenery/saba/mass/manifest.7b1046a440895b2e.json",
@@ -1765,19 +1815,19 @@
     "sha256": "9c4734cc9442118670d58edc11f2eae0ef641c6ffbaf582717487e78b917b174"
   },
   "assets/forest-scenery/portugal/groves/manifest.json": {
-    "url": "assets/forest-scenery/portugal/groves/manifest.8a618398a5624004.json",
-    "bytes": 1482,
-    "sha256": "8a618398a56240042038f3f1d980fa73933c0e413f6fb859544f694225d930c4"
+    "url": "assets/forest-scenery/portugal/groves/manifest.312222c4a61a5219.json",
+    "bytes": 1484,
+    "sha256": "312222c4a61a52199e95cdaebadbc9246abb59332ef8177e3f62db74aeecf7cd"
   },
   "assets/forest-scenery/portugal/groves/maps.bin.gz": {
-    "url": "assets/forest-scenery/portugal/groves/maps.bin.2a131a3c4f5a2253.gz",
-    "bytes": 812794,
-    "sha256": "2a131a3c4f5a2253a4a74eccbc80686bcc760ff8ddefa27db49796cd12e6f26c"
+    "url": "assets/forest-scenery/portugal/groves/maps.bin.0d05e494c8b01c43.gz",
+    "bytes": 781500,
+    "sha256": "0d05e494c8b01c43ec14356ea34828dea2c440e9f45668e98af4798f66634cb8"
   },
   "assets/forest-scenery/portugal/groves/trees.bin.gz": {
-    "url": "assets/forest-scenery/portugal/groves/trees.bin.c386f26445b26a63.gz",
-    "bytes": 5237,
-    "sha256": "c386f26445b26a63b9fe8f7c4223ad9f61d23487e77d71e60c19e4c8d1108c8c"
+    "url": "assets/forest-scenery/portugal/groves/trees.bin.9c2f4c55a86fb0e6.gz",
+    "bytes": 5913,
+    "sha256": "9c2f4c55a86fb0e62e94b33fc507da6b40658e0e4577b67db7d89e9c4326cc6f"
   },
   "assets/forest-scenery/subtropical/groves/manifest.json": {
     "url": "assets/forest-scenery/subtropical/groves/manifest.57a1bc12bde044ef.json",

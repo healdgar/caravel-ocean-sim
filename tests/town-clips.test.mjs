@@ -8,8 +8,15 @@ import {TOWN_COWER_FRAMES,TOWN_FALL_FRAMES} from '../js/wgsl/townsfolk.js';
 
 const JOINTS=65,MATRIX=16;
 const load=name=>{const bytes=readFileSync(new URL(`../assets/crew/${name}.glb`,import.meta.url));return loadCrewGLB(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength));};
-// The classic bodies are what Indigenous people are built on.
-const models=['sailor','sailor-female','sailor-classic','sailor-female-classic'].map(name=>({name,model:load(name)}));
+// Colonial, Indigenous regional, garrison soldier and classic bodies all share the 65-joint townsfolk clip bake.
+const models=[
+  'sailor','sailor-female','soldier-1550',
+  'indigenous-algonquian-male','indigenous-algonquian-female',
+  'indigenous-caribbean-male','indigenous-caribbean-female',
+  'indigenous-maya-male','indigenous-maya-female',
+  'indigenous-andean-male','indigenous-andean-female',
+  'sailor-classic','sailor-female-classic',
+].map(name=>({name,model:load(name)}));
 
 // The body as it would be drawn at one frame: every vertex through its bones.
 function extent({vertices,vertexCount},palettes,frame){

@@ -125,7 +125,7 @@ fn eddyVortex(p: vec2f, t: f32, spinSign: f32, scale: f32) -> vec3f {
   let radDir = d / r;
   let tangDir = vec2f(-radDir.y, radDir.x) * spinSign;
   let coreEnv = exp(-r * r / (0.14 * scale * scale));
-  let angle = atan2(d.y, d.x) * spinSign;
+  let angle = select(0.0, atan2(d.y, d.x), dot(d, d) > 1e-8) * spinSign;
   let spiral = 2.0 * angle - r * (4.2 / scale) + t * (2.6 + h1 * 1.4);
   let dSlope = (radDir * (-4.2 / scale * sin(spiral)) + tangDir * (2.0 * sin(spiral) / max(r, 0.15))) * coreEnv * 0.065;
   return vec3f(dSlope.x, dSlope.y, coreEnv);
@@ -426,7 +426,8 @@ fn thalwegBoil(p: vec2f, t: f32, scale: f32) -> vec3f {
       textureSampleLevel(envCube, sampC, vec3f(0.0, 0.34, -0.94), ENV_MAXMIP - 1.0).rgb);
 
   // ---- Sun & Moon glitter: exact anisotropic Gaussian LEAN microfacet BRDF matching ocean.js ----
-  let Hv = normalize(V + Ld);
+  let hvRaw = V + Ld;
+  let Hv = select(vec3f(0.0, 1.0, 0.0), normalize(hvRaw), length(hvRaw) > 1e-5);
   let hs = -Hv.xz / max(Hv.y, 1e-3);
   let dsl = hs - sl;
   let det = max(cov.x * cov.y - cov.z * cov.z, 1e-10);
@@ -440,10 +441,12 @@ fn thalwegBoil(p: vec2f, t: f32, scale: f32) -> vec3f {
 
   var moonSpec = vec3f(0.0);
   if (lunarIrradiance() > 0.0) {
-    let mh = normalize(V + lunarDirection());
+    let mhRaw = V + lunarDirection();
+    let mh = select(vec3f(0.0, 1.0, 0.0), normalize(mhRaw), length(mhRaw) > 1e-5);
     let ms = -mh.xz / max(mh.y, 1e-3) - sl;
     let me = (ms.x * ms.x * cov.y + ms.y * ms.y * cov.x - 2.0 * ms.x * ms.y * cov.z) / det;
-    let md = exp(-0.5 * me) / (2.0 * PI * sqrt(det) * max(pow(mh.y, 4.0), 1e-6));
+    let mhy2 = mh.y * mh.y;
+    let md = exp(-0.5 * me) / (2.0 * PI * sqrt(det) * max(mhy2 * mhy2, 1e-6));
     let mg = 1.0 / (1.0 + lambdaSmith(V, cov) + lambdaSmith(lunarDirection(), cov));
     moonSpec = moonE * fresnelWater(dot(V, mh)) * md * mg / (4.0 * max(V.y, 0.02));
   }
@@ -452,7 +455,7 @@ fn thalwegBoil(p: vec2f, t: f32, scale: f32) -> vec3f {
   let sig = sqrt(max(cov.x + cov.y, 1e-6) * 0.5);
   let vh = normalize(vec3f(V.x, 0.0, V.z) + vec3f(1e-5, 0.0, 0.0));
   let sigV = sqrt(max(vh.x * vh.x * cov.x + vh.z * vh.z * cov.y + 2.0 * vh.x * vh.z * cov.z, 1e-6));
-  let aV = max(V.y, 1e-3) / max(sqrt(1.0 - V.y * V.y), 1e-3) / (1.4142 * sigV);
+  let aV = max(V.y, 1e-3) / max(sqrt(max(1.0 - V.y * V.y, 0.0)), 1e-3) / (1.4142 * sigV);
   let tilt = 0.32 * sigV * (1.0 - smoothstep(0.0, 2.5, aV));
   let nV = normalize(nrm + vh * tilt);
   var R = reflect(-V, nV);

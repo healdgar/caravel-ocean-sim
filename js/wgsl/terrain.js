@@ -1018,17 +1018,19 @@ fn landFinishShadowed(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambientVisibi
   let effWet=select(wet,0.0,isMetal);
   var col=albedo*(1.0-effWet*0.32)*diffuseTerm;
   // Physical GGX microfacet specular + roughness-mipmapped envCube reflections
-  let v=normalize(F.camPos.xyz-world);let h=normalize(v+F.sunDir.xyz);
-  let nDotV=max(dot(n,v),1e-4);
+  let v=normalize(F.camPos.xyz-world);
+  let hRaw=v+F.sunDir.xyz;
+  let h=select(vec3f(0.0,1.0,0.0),normalize(hRaw),length(hRaw)>1e-5);
+  let nDotV=clamp(dot(n,v),1e-4,1.0);
   let nDotL=max(dot(n,F.sunDir.xyz),0.0);
   let nDotH=max(dot(n,h),0.0);
-  let vDotH=max(dot(v,h),0.0);
+  let vDotH=clamp(dot(v,h),0.0,1.0);
   let effRough=clamp(mix(roughness,min(roughness,0.12),effWet*0.80),0.06,0.98);
   let smoothFilm=select(clamp((0.46-effRough)/0.34,0.0,1.0)*effWet,1.0,isMetal);
   let f0=select(mix(0.038,0.058,effWet),clamp(-wet,0.18,0.56),isMetal);
   let maxF=select(mix(f0,0.75,smoothFilm),max(1.0-effRough*0.55,f0),isMetal);
-  let fresnel=f0+(maxF-f0)*pow(1.0-nDotV,5.0);
-  let fresnelSun=f0+(maxF-f0)*pow(1.0-vDotH,5.0);
+  let fresnel=f0+(maxF-f0)*pow(clamp(1.0-nDotV,0.0,1.0),5.0);
+  let fresnelSun=f0+(maxF-f0)*pow(clamp(1.0-vDotH,0.0,1.0),5.0);
   let a=effRough*effRough;
   let a2=clamp(a*a+landNormalSpread,1e-4,1.0);
   let denom=nDotH*nDotH*(a2-1.0)+1.0;
@@ -1182,7 +1184,8 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
       let dryZone=smoothstep(-0.35,0.65,coastY)*(1.0-smoothstep(1.85,3.25+stoneRaw*0.45,coastY))*gentle*beachSand;
       waterFilm=smoothstep(-0.95,-0.15,coastY)*(1.0-smoothstep(swashRunup-0.12,swashRunup+0.22,coastY))*gentle*beachSand;
       let capillaryZone=smoothstep(-0.85,-0.05,coastY)*(1.0-smoothstep(swashRunup+0.12,swashRunup+1.15+stoneRaw*0.22,coastY))*gentle*beachSand;
-      let wrack=exp(-pow((coastY-(1.12+cuspWave*0.55+stoneRaw*0.20))/0.14,2.0))*gentle*beachSand;
+      let wrackD=(coastY-(1.12+cuspWave*0.55+stoneRaw*0.20))/0.14;
+      let wrack=exp(-(wrackD*wrackD))*gentle*beachSand;
       let shoalZone=(1.0-smoothstep(-5.5,0.12,world.y))*gentle*beachSand;
       let shellGrit=max(0.0,pores-0.25)*landDetailWeight(materialWidth*5.4)*0.08*(1.0-waterFilm*0.7);
       let dryCoralSand=vec3f(0.57,0.47,0.32)*(1.0+stoneRaw*0.06+pores*0.035+shellGrit);
@@ -1549,7 +1552,7 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
     canopyBackscatter=0.22*exposure;
   }else{
     let barkNoise=gnoise(in.leafUV*vec2f(38.0,9.0));
-    let ridges=pow(0.5+0.5*sin(in.leafUV.x*PI*56.0+barkNoise*3.0),5.0);
+    let ridges=pow(clamp(0.5+0.5*sin(in.leafUV.x*PI*56.0+barkNoise*3.0),0.0,1.0),5.0);
     let fissure=smoothstep(0.15,0.75,ridges);
     albedo=vec3f(0.095,0.068,0.038)*(0.76+fissure*0.12+barkNoise*0.18+in.kind.y*0.16);
     relief=(ridges-0.5)*0.014*(1.2-in.kind.y)*detailFade;roughness=0.91;
@@ -1580,7 +1583,8 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
             // A road's two wheel tracks run a pace either side of its middle.
             let rutted=1.0-smoothstep(.2,.45,abs(way.g-.5));
             let rutBroken=clamp(1.0+(gd.mid.a*1.4+gd.big.a*.9)*2.0,.3,1.25);
-            let ruts=rutted*exp(-pow((frayed+.85)/.38,2.0))*(1.0-smoothstep(.06,.5,footprint))*mix(1.0,rutBroken,gd.near);
+            let rutD=(frayed+.85)/.38;
+            let ruts=rutted*exp(-(rutD*rutD))*(1.0-smoothstep(.06,.5,footprint))*mix(1.0,rutBroken,gd.near);
             surface=earth*(1.0-ruts*.26);
             surfaceRelief=wear*.03-ruts*.05+gd.fine.g*.0035+gd.mid.g*.012;
             // Between the tracks of a country road, grass the wheels never reach.
@@ -1785,7 +1789,9 @@ fn cityNearSampleMask(share:f32,p:vec2u)->u32{
   let wet=(1.0-smoothstep(0.6,3.2,world.y))*.55;
   var color=albedo*(1.0-wet*.3)*(direct*diffuse/PI+ambient*visibility);
   if(!grass){
-    let hVec=normalize(vEye+normalize(F.sunDir.xyz));
+    let sunL=select(vec3f(0.0,1.0,0.0),normalize(F.sunDir.xyz),length(F.sunDir.xyz)>1e-5);
+    let hRaw=vEye+sunL;
+    let hVec=select(vec3f(0.0,1.0,0.0),normalize(hRaw),length(hRaw)>1e-5);
     let nDotH=max(dot(n,hVec),0.0);
     let specPower=mix(14.0,36.0,wet);
     color+=direct*pow(nDotH,specPower)*(0.045+wet*0.12);

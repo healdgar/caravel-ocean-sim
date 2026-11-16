@@ -73,7 +73,7 @@ fn landCraterStamp(c:LandCraterRecord,p:vec2f,rock:f32)->LandCraterStamp{
   let off=p-c.centre;
   let side=vec2f(-c.heading.y,c.heading.x);
   let q=vec2f((dot(off,c.heading)-.22*c.grazing*radius)/(1.0+.32*c.grazing),dot(off,side)/(1.0-.06*c.grazing))/radius;
-  let angle=atan2(q.y,q.x);
+  let angle=select(0.0,atan2(q.y,q.x),dot(q,q)>1e-8);
   let ahead=cos(angle);
   let dir=q/max(length(q),.0001);
   let r=max(length(q)*(1.0+gnoise(dir*1.3+c.seed*17.0)*.12+gnoise(p*.85+c.seed*31.0)*.07),.0001);

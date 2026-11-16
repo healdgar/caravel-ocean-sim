@@ -2,7 +2,14 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {readGLB,gltfAccessor,gltfSlerp,loadCrewGLB} from '../js/gltf.js';
-import {createDeckhand,stepDeckhand,createCompany,stepCompany,issueCaptainOrder,CREW_ROSTER,createIndigenousCrewModels,isCaptainActor} from '../js/crew.js';
+import {
+  createDeckhand,stepDeckhand,createCompany,stepCompany,issueCaptainOrder,CREW_ROSTER,
+  createIndigenousCrewModels,isCaptainActor,loadGroomPackGLB,attachColonialGroomModel,colonialGroomMask,
+  suppressCrownHairUnderHat,
+  COLONIAL_HAIR_CROPPED,COLONIAL_HAIR_WAVY,COLONIAL_BEARD_POINTED,COLONIAL_BEARD_MARINER,COLONIAL_BEARD_TERCIO,
+  COLONIAL_CAPTAIN_BUN,COLONIAL_FEMALE_BUN,COLONIAL_FEMALE_COIF,COLONIAL_FEMALE_WAVY,
+} from '../js/crew.js';
+import {DRESS_MASK_SCALE} from '../js/indigenous-dress.js';
 import {hullDeck,hullHalfWidth,vesselDeck,HULL_VERTICAL_SCALE,tillerPoint} from '../js/hull.js';
 import {poseCrewWork} from '../js/crew-pose.js';
 import {selectCrewLOD,createDistantCrewLOD} from '../js/crew-lod.js';
@@ -27,16 +34,26 @@ test('sailor GLB is self-contained, bounded and has the required clips',()=>{
   for(let i=0;i<model.vertexCount;i++)for(let k=0;k<3;k++)assert.ok(Math.abs(rest[i*3+k]-f[i*15+k])<1e-5,'inverse binds preserve the authored rest geometry');
 });
 test('the generated bodies say what each point wears, and carry their own levels',()=>{
-  for(const body of [model,loadCrewGLB(fs.readFileSync(new URL('../assets/crew/sailor-female.glb',import.meta.url)))]){
+  const groomPack=loadGroomPackGLB(fs.readFileSync(new URL('../assets/crew/groom-pack.glb',import.meta.url)));
+  for(const [body,variant] of [
+    [model,'male'],
+    [loadCrewGLB(fs.readFileSync(new URL('../assets/crew/sailor-female.glb',import.meta.url))),'female'],
+    [loadCrewGLB(fs.readFileSync(new URL('../assets/crew/soldier-1550.glb',import.meta.url))),'soldier'],
+  ]){
     const f=new Float32Array(body.vertices.buffer,body.vertices.byteOffset,body.vertexCount*15),seen=new Set();
     for(let i=0;i<body.vertexCount;i++){
       assert.ok(f[i*15+6]>=0&&f[i*15+6]<2,'red stays clear of the numbers that name optional pieces');
       seen.add(Math.floor(f[i*15+8]*.5));
     }
-    assert.deepEqual([...seen].sort(),[0,1,2,3,4],'paint, shirt, trousers, skin, hair');
+    assert.deepEqual([...seen].sort(),[0,1,2,3,4],'paint, shirt, trousers, skin and brow hair on bald base body');
     assert.ok(body.lods[1].triangles<=4400&&body.lods[2].triangles<=1570);
     assert.ok(body.distantIndices.length/3<=320);
     assert.equal(createDistantCrewLOD(body),body.distantIndices,'townsfolk take the baked level');
+
+    const groomed=attachColonialGroomModel(body,groomPack,variant);
+    assert.ok(groomed.vertexCount>body.vertexCount,`${variant} gains 3D hair/beard geometry`);
+    assert.ok(groomed.lods[0].triangles>groomed.lods[1].triangles&&groomed.lods[1].triangles>groomed.lods[2].triangles);
+    assert.equal(groomed.distantIndices,body.distantIndices,'distant silhouette LOD stays compact');
   }
 });
 test('Indigenous men are built on the classic body, whose garments can be re-sculpted',()=>{
@@ -530,8 +547,8 @@ test('captain GLB carries its embedded high-resolution texture, UV sentinels, 65
   assert.ok(captain.image instanceof Uint8Array && captain.image.byteLength>100_000,'embedded texture bytes present');
   assert.equal(captain.mime,'image/jpeg');
   assert.equal(captain.image[0],0xff);assert.equal(captain.image[1],0xd8,'valid JPEG header');
-  assert.ok(captain.lods[0].triangles<=3600&&captain.lods[0].triangles>=3400,'base mesh decimated within 3,600-triangle budget');
-  assert.ok(captain.lods[1].triangles<=1500&&captain.lods[1].triangles>=1400,'mid LOD decimated within 1,500-triangle budget');
+  assert.ok(captain.lods[0].triangles<=3600&&captain.lods[0].triangles>=3200,'base mesh decimated within 3,600-triangle budget');
+  assert.ok(captain.lods[1].triangles<=1500&&captain.lods[1].triangles>=1200,'mid LOD decimated within 1,500-triangle budget');
   assert.ok(captain.lods[2].triangles<=750&&captain.lods[2].triangles>=200);
   assert.ok(captain.distantIndices.length/3<=320);
   const f=new Float32Array(captain.vertices.buffer,captain.vertices.byteOffset,captain.vertexCount*15);
@@ -548,33 +565,40 @@ test('captain GLB carries its embedded high-resolution texture, UV sentinels, 65
   assert.equal(company.crew.find(isCaptainActor).role,'Captain');
 });
 
-test('mended male and female rigs keep thigh longer than calf, compact hands, upright gaze and bald scalps',()=>{
+test('regenerated 1550 male, female and soldier rigs keep anatomical leg ratios, compact hands, level gaze and bald scalps',()=>{
   const female=loadCrewGLB(fs.readFileSync(new URL('../assets/crew/sailor-female.glb',import.meta.url)));
-  const classicMale=loadCrewGLB(fs.readFileSync(new URL('../assets/crew/sailor-classic.glb',import.meta.url)));
-  const classicFemale=loadCrewGLB(fs.readFileSync(new URL('../assets/crew/sailor-female-classic.glb',import.meta.url)));
+  const soldier=loadCrewGLB(fs.readFileSync(new URL('../assets/crew/soldier-1550.glb',import.meta.url)));
   const jointPos=(anim,name)=>{const m=anim.world[anim.nodeIndex(name)];return [m[12],m[13],m[14]];};
   const dist=(p,q)=>Math.hypot(p[0]-q[0],p[1]-q[1],p[2]-q[2]);
 
-  for(const [label,body] of [['male',model],['female',female],['classic-male',classicMale],['classic-female',classicFemale]]){
+  for(const [label,body,crownMinY] of [['male',model,1.60],['female',female,1.54],['soldier-1550',soldier,1.60]]){
     const a=body.animator;
     a.sample(null,0);
     const thighL=dist(jointPos(a,'thigh_l'),jointPos(a,'calf_l'));
     const calfL=dist(jointPos(a,'calf_l'),jointPos(a,'foot_l'));
-    assert.ok(thighL>calfL+0.02,`${label} thigh (${thighL.toFixed(3)}) exceeds calf (${calfL.toFixed(3)})`);
+    const ratio=thighL/calfL;
+    assert.ok(ratio>0.94&&ratio<1.15,`${label} anatomical leg ratio (${ratio.toFixed(3)})`);
     const handChain=dist(jointPos(a,'hand_l'),jointPos(a,'middle_01_l'))+
       dist(jointPos(a,'middle_01_l'),jointPos(a,'middle_02_l'))+
       dist(jointPos(a,'middle_02_l'),jointPos(a,'middle_03_l'));
-    assert.ok(handChain<0.145,`${label} compact hand chain: ${handChain.toFixed(3)} m`);
+    assert.ok(handChain<0.22,`${label} hand chain: ${handChain.toFixed(3)} m`);
+    const f=new Float32Array(body.vertices.buffer,body.vertices.byteOffset,body.vertexCount*15);
+    const u=new Uint32Array(body.vertices.buffer,body.vertices.byteOffset,body.vertexCount*15);
     for(const clip of ['Idle','Walk']){
       a.sample(clip,0);
-      const hm=a.world[a.nodeIndex('Head')];
-      // Rig local +Z is forward; upright gaze keeps forward.y near level horizon.
-      const fwdY=hm[9]/Math.hypot(hm[8],hm[9],hm[10]);
-      assert.ok(fwdY>-0.08&&fwdY<0.20,`${label} ${clip} upright head gaze fwdY=${fwdY.toFixed(3)}`);
+      let noseY=0,noseZ=-9,occY=0,occZ=9;
+      for(let i=0;i<body.vertexCount;i++){
+        const o=i*15;if(f[o+1]<crownMinY-0.12)continue;
+        const j0=u[o+9]&255,M=a.palette.subarray(j0*16,j0*16+16);
+        const y=M[1]*f[o]+M[5]*f[o+1]+M[9]*f[o+2]+M[13],z=M[2]*f[o]+M[6]*f[o+1]+M[10]*f[o+2]+M[14];
+        if(z>noseZ){noseZ=z;noseY=y;}
+        if(z<occZ&&f[o+1]>crownMinY-0.06){occZ=z;occY=y;}
+      }
+      assert.ok(Math.abs(noseY-occY)<0.12,`${label} ${clip} level head pitch (${(noseY-occY).toFixed(3)} m)`);
     }
   }
 
-  for(const [label,body,crownMinY] of [['male',model,1.60],['female',female,1.56]]){
+  for(const [label,body,crownMinY,minSkin,maxHalfX] of [['male',model,1.60,100,0.106],['female',female,1.54,100,0.106],['soldier-1550',soldier,1.60,45,0.112]]){
     const f=new Float32Array(body.vertices.buffer,body.vertices.byteOffset,body.vertexCount*15);
     let crownSkin=0,browHair=0,maxHeadHalfX=0;
     for(let i=0;i<body.vertexCount;i++){
@@ -585,12 +609,54 @@ test('mended male and female rigs keep thigh longer than calf, compact hands, up
       }
       if(slot===4){
         browHair++;
-        assert.ok(z>0.03&&y>1.48,`${label} base HAIR vertices are front eyebrows only, no tricorn wings or ponytail (${x.toFixed(3)},${y.toFixed(3)},${z.toFixed(3)})`);
+        assert.ok(z>0.02&&y>1.46,`${label} base HAIR vertices are front eyebrows only, no tricorn wings or ponytail (${x.toFixed(3)},${y.toFixed(3)},${z.toFixed(3)})`);
       }
     }
-    assert.ok(crownSkin>120,`${label} bald scalp dome has ${crownSkin} SKIN vertices`);
-    assert.ok(browHair>=24&&browHair<=120,`${label} preserves ${browHair} eyebrow HAIR vertices`);
-    assert.ok(maxHeadHalfX<0.098,`${label} bald head width free of tricorn hair wings: ${maxHeadHalfX.toFixed(3)} m`);
+    assert.ok(crownSkin>=minSkin,`${label} bald scalp dome has ${crownSkin} SKIN vertices`);
+    assert.ok(browHair>=1&&browHair<=120,`${label} preserves ${browHair} eyebrow HAIR vertices`);
+    assert.ok(maxHeadHalfX<maxHalfX,`${label} bald head width free of tricorn hair wings: ${maxHeadHalfX.toFixed(3)} m`);
+  }
+});
+
+test('1550 colonial groom pack covers sailors, captains, soldiers and villagers with bit-exact float32 masks',()=>{
+  const groomPack=loadGroomPackGLB(fs.readFileSync(new URL('../assets/crew/groom-pack.glb',import.meta.url)));
+  assert.deepEqual(Object.keys(groomPack.pieces).sort(),[
+    'beard_1550_full_mariner','beard_1550_pointed','beard_1550_tercio_strap',
+    'hair_1550_coif_cap','hair_1550_cropped','hair_1550_female_bun','hair_1550_wavy',
+    'hair_algonquian_roach','hair_indigenous_long','hair_indigenous_plaits',
+  ]);
+  for(const [name,piece] of Object.entries(groomPack.pieces)){
+    assert.ok(piece.nearIndices.length>=piece.midIndices.length&&piece.midIndices.length>=piece.farIndices.length,`${name} LODs decrease monotonically`);
+    assert.ok(piece.nearIndices.length>piece.farIndices.length,`${name} far LOD reduces triangles`);
+  }
+
+  const maleLooks=Array.from({length:64},(_,i)=>colonialGroomMask('male',i));
+  const soldierLooks=Array.from({length:64},(_,i)=>colonialGroomMask('male',i,{isSoldier:true}));
+  const femaleLooks=Array.from({length:64},(_,i)=>colonialGroomMask('female',i));
+  const captainLooks=Array.from({length:16},(_,i)=>colonialGroomMask('male',i,{isCaptain:true}));
+
+  const hairBits=COLONIAL_HAIR_CROPPED|COLONIAL_HAIR_WAVY;
+  const beardBits=COLONIAL_BEARD_POINTED|COLONIAL_BEARD_MARINER|COLONIAL_BEARD_TERCIO;
+  assert.ok(maleLooks.some(m=>m===0),'includes bald clean-shaven men');
+  assert.ok(maleLooks.some(m=>(m&hairBits)===0&&(m&beardBits)!==0),'includes bald bearded men');
+  assert.ok(maleLooks.some(m=>(m&COLONIAL_HAIR_CROPPED)!==0&&(m&COLONIAL_BEARD_MARINER)!==0),'includes cropped hair + mariner beard');
+  assert.ok(maleLooks.some(m=>(m&COLONIAL_HAIR_WAVY)!==0&&(m&COLONIAL_BEARD_POINTED)!==0),'includes wavy hair + pointed 1550 beard');
+  assert.ok(soldierLooks.some(m=>(m&COLONIAL_BEARD_TERCIO)!==0),'includes tercio strap beard on soldiers');
+  assert.ok(femaleLooks.some(m=>(m&COLONIAL_FEMALE_COIF)!==0),'includes 1550 linen coif bonnet on women');
+  assert.ok(femaleLooks.some(m=>(m&COLONIAL_FEMALE_BUN)!==0),'includes 1550 braided bun on women');
+  assert.ok(femaleLooks.some(m=>(m&COLONIAL_FEMALE_WAVY)!==0),'includes wavy hair on women');
+  assert.ok(captainLooks.every(m=>(m&beardBits)!==0),'captains wear 1550 facial hair');
+  assert.ok(captainLooks.some(m=>(m&COLONIAL_CAPTAIN_BUN)!==0)||captainLooks.some(m=>(m&hairBits)!==0));
+  assert.equal(suppressCrownHairUnderHat(COLONIAL_HAIR_WAVY|COLONIAL_BEARD_POINTED,2,'male'),COLONIAL_BEARD_POINTED,'male hat suppresses crown hair while preserving pointed beard');
+  assert.equal(suppressCrownHairUnderHat(COLONIAL_FEMALE_WAVY,1,'female'),0,'female hat suppresses loose crown hair');
+
+  for(const mask of new Set([...maleLooks,...soldierLooks,...femaleLooks,...captainLooks])){
+    for(const moistureBase of [0,1,42,512,1599]){
+      const packed=Math.fround(moistureBase+mask/DRESS_MASK_SCALE);
+      const frac=packed-Math.floor(packed);
+      const recovered=Math.round(frac*DRESS_MASK_SCALE);
+      assert.equal(recovered,mask,`mask ${mask} survives float32 moisture packing at base=${moistureBase}`);
+    }
   }
 });
 

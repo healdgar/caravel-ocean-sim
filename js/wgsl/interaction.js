@@ -235,9 +235,18 @@ export const WAKE_UPDATE = INTERACTION_TYPES + /* wgsl */ `
 @group(0) @binding(3) var dstWake: texture_storage_2d<rgba16float, write>;
 @group(0) @binding(4) var<storage, read> contacts: array<Contact, ${CONTACT_COUNT}>;
 @group(0) @binding(5) var<storage, read_write> landings: array<atomic<u32>>;
+fn wakeSqr(x: f32) -> f32 { return x * x; }
+fn wakeClean1(x: f32) -> f32 {
+  let bits = bitcast<u32>(x) & 0x7fffffffu;
+  if ((x != x) || !(x == x) || bits >= 0x7f800000u || abs(x) > 1e4) { return 0.0; }
+  return x;
+}
+fn wakeClean4(v: vec4f) -> vec4f {
+  return vec4f(wakeClean1(v.x), wakeClean1(v.y), wakeClean1(v.z), wakeClean1(v.w));
+}
 fn previousCell(q: vec2i) -> vec4f {
   if (any(q < vec2i(1)) || any(q >= vec2i(${WAKE_SIZE - 1})) || I.previous.w > 0.5) { return vec4f(0.0); }
-  return textureLoad(prevWake, q, 0);
+  return wakeClean4(textureLoad(prevWake, q, 0));
 }
 fn previousFoam(q:vec2f)->vec2f {
   let cell=vec2i(floor(q));let f=fract(q);
@@ -268,8 +277,8 @@ fn wakePressure(p:vec2f,c:Contact,width:f32)->WakePressure {
   // Equal-width translated kernels balance each local pressure pair. Moving
   // interpolation and hull clipping still do not constitute volume conservation.
   // Their breadth is resolved by the wake grid, not a separate reflective strip.
-  let crest=exp(-pow((outside-width*.2)/(width*.7),2.0)-tangent*tangent);
-  let hollow=exp(-pow((outside-width*1.6)/(width*.7),2.0)-tangent*tangent);
+  let crest=exp(-wakeSqr((outside-width*.2)/(width*.7))-tangent*tangent);
+  let hollow=exp(-wakeSqr((outside-width*1.6)/(width*.7))-tangent*tangent);
   let pulse=exp(-r2*2.0)*(1.0-r2*2.0)*smoothstep(-.1,.2,outside)*c.axis.w;
   let relativeFlow=c.flow.xz-H.forward.xz*max(0.0,I.motion.x)*.8;
   let peel=max(0.0,dot(relativeFlow,c.axis.xz));
@@ -277,7 +286,7 @@ fn wakePressure(p:vec2f,c:Contact,width:f32)->WakePressure {
   // Its outward e-folding edge is 1.7 widths from the measured planking (about
   // .31 beam at the normal grid resolution); never add a hull-attached ribbon.
   // Keep these foam-only terms separate from the balanced displacement kernels.
-  let froth=exp(-pow((outside-width*.45)/(width*1.25),2.0)-tangent*tangent*.4)*edge;
+  let froth=exp(-wakeSqr((outside-width*.45)/(width*1.25))-tangent*tangent*.4)*edge;
   return WakePressure(vec4f(crest*c.point.w,hollow*c.point.w,pulse,froth*c.point.w*peel/max(width,.1)),c.axis.xz*peel*froth*c.flow.w);
 }
 @compute @workgroup_size(8, 8) fn main(@builtin(global_invocation_id) id: vec3u) {
@@ -286,8 +295,10 @@ fn wakePressure(p:vec2f,c:Contact,width:f32)->WakePressure {
   if (I.motion.y < 0.5) { textureStore(dstWake, q, vec4f(0.0)); return; }
   let shift = vec2i(round((I.domain.xy - I.previous.xy) / I.domain.w));
   let pq = q + shift;
-  let old = previousCell(pq);
-  let neighbours = previousCell(pq + vec2i(1,0)) + previousCell(pq - vec2i(1,0)) + previousCell(pq + vec2i(0,1)) + previousCell(pq - vec2i(0,1));
+  var old = wakeClean4(previousCell(pq));
+  if (any(old != old)) { old = vec4f(0.0); }
+  var neighbours = wakeClean4(previousCell(pq + vec2i(1,0)) + previousCell(pq - vec2i(1,0)) + previousCell(pq + vec2i(0,1)) + previousCell(pq - vec2i(0,1)));
+  if (any(neighbours != neighbours)) { neighbours = vec4f(0.0); }
   let lap = neighbours.x - 4.0 * old.x;
   let p = (vec2f(id.xy) + 0.5 - ${WAKE_SIZE / 2}.0) * I.domain.w + I.domain.xy;
   let delta = p - H.origin.xz;
@@ -312,7 +323,7 @@ fn wakePressure(p:vec2f,c:Contact,width:f32)->WakePressure {
   let sternAcross = dot(sternDelta,horizontalRight);
   let sternLength=max(I.domain.w*2.0,H.size.y*.065);
   let sternWidth=max(I.domain.w*1.5,H.size.x*.32);
-  let stern=exp(-pow(sternAlong/sternLength,2.0)-pow(sternAcross/sternWidth,2.0));
+  let stern=exp(-wakeSqr(sternAlong/sternLength)-wakeSqr(sternAcross/sternWidth));
   let sternWet = (contacts[35].flow.w + contacts[39].flow.w) * 0.5;
   let forwardSpeed = max(0.0, I.motion.x);
   // A trough at the transom and a recovery crest behind it radiate into the trail.
@@ -321,7 +332,7 @@ fn wakePressure(p:vec2f,c:Contact,width:f32)->WakePressure {
   let recoveryDistance=max(I.domain.w*2.0,min(H.size.y*.35,3.14159265*forwardSpeed*forwardSpeed/9.81));
   let recoveryLength=max(I.domain.w*2.0,recoveryDistance*.6);
   let recoveryWidth=max(I.domain.w*1.5,H.size.x*.5);
-  let recovery=exp(-pow((sternAlong+recoveryDistance)/recoveryLength,2.0)-pow(sternAcross/recoveryWidth,2.0));
+  let recovery=exp(-wakeSqr((sternAlong+recoveryDistance)/recoveryLength)-wakeSqr(sternAcross/recoveryWidth));
   let recoveryWeight=sternLength*sternWidth/(recoveryLength*recoveryWidth);
   let headway=smoothstep(.15,1.2,forwardSpeed);
   let sternHead=min(.35,forwardSpeed*forwardSpeed/(2.0*9.81)*.30)*sternWet*headway;
@@ -332,8 +343,8 @@ fn wakePressure(p:vec2f,c:Contact,width:f32)->WakePressure {
   let shedLength=max(I.domain.w*2.0,H.size.x*.42);
   let shedWidth=max(I.domain.w*1.5,H.size.x*.20);
   let shedAlong=(sternAlong+sternLength*.6)/shedLength;
-  let portR2=shedAlong*shedAlong+pow((sternAcross+H.size.x*.23)/shedWidth,2.0);
-  let starboardR2=shedAlong*shedAlong+pow((sternAcross-H.size.x*.23)/shedWidth,2.0);
+  let portR2=shedAlong*shedAlong+wakeSqr((sternAcross+H.size.x*.23)/shedWidth);
+  let starboardR2=shedAlong*shedAlong+wakeSqr((sternAcross-H.size.x*.23)/shedWidth);
   let shedding=sin(I.phase.x*sqrt(9.81/max(H.size.x,1.0))*1.1)*((1.0-portR2)*exp(-portR2)-(1.0-starboardR2)*exp(-starboardR2));
   let forcing=(source-hollow)*10.0+pulse*14.0
     +(recovery*recoveryWeight-stern)*sternWet*min(.65,forwardSpeed*forwardSpeed*.035)
@@ -363,7 +374,9 @@ fn wakePressure(p:vec2f,c:Contact,width:f32)->WakePressure {
   let aged=mix(transported,neighbours.zw*0.25,spread)*exp(-dt*vec2f(0.11,0.8));
   let born=1.0-exp(-foamSource*dt);
   let foam=clamp(aged+(vec2f(1.0)-aged)*born+deposited,vec2f(0.0),vec2f(1.0))*edge;
-  textureStore(dstWake, q, vec4f(height, velocity * edge, foam));
+  var outWake = wakeClean4(vec4f(height, velocity * edge, foam));
+  if (any(outWake != outWake) || any(abs(outWake) > vec4f(1e4))) { outWake = vec4f(0.0); }
+  textureStore(dstWake, q, outWake);
 }
 `;
 
@@ -530,7 +543,7 @@ fn sprayLight(p: vec3f) -> vec3f {
   let noise=clamp(0.5+gnoise(o.uv*vec2f(9.0,5.0)+vec2f(o.data.z*2.7,-o.data.y*1.3)),0.0,1.0);
   let lip=smoothstep(0.72,0.98,o.uv.y);
   let foam=lip*(0.35+noise*0.45);
-  let fresnel=0.04+0.65*pow(1.0-abs(dot(n,view)),5.0);
+  let fresnel=0.04+0.65*pow(clamp(1.0-abs(dot(n,view)),0.0,1.0),5.0);
   let color=mix(reflected*(0.45+fresnel)+F.waterCol.rgb*0.3,sprayLight(o.world),foam);
   let ends=smoothstep(0.0,0.16,o.uv.x)*(1.0-smoothstep(0.84,1.0,o.uv.x));
   let holes=mix(1.0,smoothstep(0.25,0.58,noise),smoothstep(0.3,0.85,o.data.y)*smoothstep(0.3,0.95,o.uv.y));

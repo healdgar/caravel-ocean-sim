@@ -23,7 +23,7 @@ test('Pages uses versioned, byte-identical runtime assets and excludes inline me
     assert.equal(record.sha256,createHash('sha256').update(original).digest('hex'));
     assert.ok(record.url.includes(record.sha256.slice(0,16)),'cache version follows actual bytes');
   }
-  for(const source of ['assets/crew/sailor.glb','assets/crew/sailor-female.glb','assets/crew/sailor-classic.glb','assets/crew/sailor-female-classic.glb','assets/caravel-oak-albedo.webp'])
+  for(const source of ['assets/crew/sailor.glb','assets/crew/sailor-female.glb','assets/crew/captain.glb','assets/crew/soldier-1550.glb','assets/crew/groom-pack.glb','assets/caravel-oak-albedo.webp'])
     assert.ok(html.includes(`as="fetch" href="${manifest[source].url}" crossorigin="anonymous"`),'startup model discovery: '+source);
   assert.ok(!html.includes(`as="fetch" href="${manifest['assets/wildlife/whale.glb'].url}"`),'inactive wildlife must not preload');
 });
@@ -36,9 +36,9 @@ test('downloads embed sailing and native forest atlases; optional mature buffers
       assert.ok(html.includes('data:'+mime+';base64,'),file+' includes '+mime);
     assert.ok(!/href="assets\/[^"\s]+\.[a-f0-9]{16}\./.test(html),'web-only preloads do not leak into offline downloads');
     for(const source of Object.keys(manifest)){
-      // Close-up forest geometry, and the living board (a port's frozen world and the model that lives it), are
+      // Close-up forest geometry, wind weight tables, GPU meadow grass streams, and the living board are
       // fetched when wanted: megabytes a downloaded page starts and sails without.
-      if(/^assets\/forest-scenery\/((saba|subtropical|portugal)\/(mass\/)?|(saba|portugal)\/clusters\/)(vertices|indices)\.bin\.gz$|\/surfaces\/.*\.gz$|^assets\/boards\/[^/]+\.world$|^assets\/board\/(game|runtime)\.js$/.test(source)){
+      if(/^assets\/forest-scenery\/((saba|subtropical|portugal)\/(mass\/)?|(saba|portugal)\/clusters\/)(vertices|indices)\.bin\.gz$|^assets\/forest-scenery\/(saba|subtropical|portugal)\/wind\/weights\.bin\.gz$|^assets\/ground-cover\/portugal\/meadows-gpu\/.*\.gz$|\/surfaces\/.*\.gz$|^assets\/boards\/([^/]+\.world|partner-ports-1550\.json)$|^assets\/board\/(game|runtime)\.js$/.test(source)){
         assert.ok(html.includes('https://sixcailloux.com/waterworld/'+manifest[source].url),file+' uses exact optional close-up geometry');continue;
       }
       const bytes=await readFile(new URL(source,root));

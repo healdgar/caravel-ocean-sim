@@ -79,6 +79,9 @@ import {createRowingSurfaceEvents} from './rowing-surface-events.js';
 import {ROWING_DESIGNS} from './models/rowing.js';
 import { createWaterOptics } from './water-optics.js';
 import { createUnderwater, requestUnderwaterPipeline } from './underwater.js';
+import { createNeuralLightPass, requestNeuralLightPipelines, normalizeNeuralLightMode } from './neural-post.js';
+import { sharedNeuralPbrBank } from './neural-pbr.js';
+import { withNeuralPbrVessel } from './wgsl/neural-pbr.js';
 import { createShipAssetCache } from './ship-mesh.js';
 import { createVesselPose, POSED_VERTEX_LAYOUT, withPosedVesselVertices } from './vessel-pose.js';
 import { VESSEL_POSE_UPDATE, VESSEL_SURFACE_POSE_UPDATE } from './wgsl/vessel-pose.js';
@@ -217,6 +220,7 @@ const LAND_WEATHER=Object.hasOwn(LANDFALL_WEATHER,qs.get('weather'))?qs.get('wea
 const DBG = Number(qs.get('dbg')) || 0;
 // Depth-first visibility avoids costly hidden-water shading; keep an A/B fallback.
 const OCEAN_DEPTH = qs.get('oceanDepth') !== '0';
+const INITIAL_NEURAL_MODE = normalizeNeuralLightMode(qs.get('neuralMode'));
 const D2R = Math.PI / 180;
 const GU = globalThis.GPUBufferUsage;
 const TU = globalThis.GPUTextureUsage;
@@ -252,6 +256,8 @@ export const P = {
   soundVolume: .7,
   seabirds: .25,
   bloom: 0.10,
+  neuralLight: 0.85,
+  neuralPbr: 1.0,
 };
 if(BROADSIDE_SCENARIO){
   Object.assign(P,{windSpeed:7.5,windDir:300,swellHs:2.0,swellDir:25,swellLength:110,sunElev:14,sunAzim:155});
@@ -320,8 +326,59 @@ async function main() {
   const hasTS = device.features.has('timestamp-query');
   validateFleetDevice(device.limits,fleetCount);
   let firstGpuError = false,oceanStartupDeviceLost=false,oceanStartupFirstFrameSubmitted=false;
-  device.lost.then((i) => {oceanStartupDeviceLost=true;log('device lost: ' + i.message);window.oceanStartup?.fail('The graphics device was lost during startup. '+i.message);});
-  device.onuncapturederror = (e) => { if (firstGpuError) return; firstGpuError = true; window.oceanStartup?.fail(e.error); log('GPU error: ' + e.error.message); const errorPanel = document.getElementById('err'); errorPanel.style.display = 'block'; errorPanel.textContent = e.error.message; };
+  let gpuDeviceLost = false, firstFrameRendered = false, persistRecoveryState = null;
+  const DEVICE_LOST_STATE_KEY = 'waterworld.deviceLostState';
+  const DEVICE_LOST_RELOAD_TS_KEY = 'waterworld.deviceLostReloadAt';
+  device.lost.then((info) => {
+    if (info?.reason === 'destroyed') return;
+    gpuDeviceLost = true;
+    oceanStartupDeviceLost = true;
+    const reasonText = info?.reason || 'driver reset';
+    const detailText = info?.message ? ` (${info.message})` : '';
+    log('device lost [' + reasonText + ']: ' + (info?.message || ''));
+    if (!firstFrameRendered) {
+      window.oceanStartup?.fail('The graphics device was lost during startup. ' + (info?.message || reasonText));
+      return;
+    }
+    try { persistRecoveryState?.(); } catch {}
+    const errorPanel = document.getElementById('err');
+    if (errorPanel) {
+      errorPanel.textContent = '';
+      errorPanel.style.display = 'block';
+      const msgEl = document.createElement('div');
+      msgEl.textContent = `Graphics device was reset by Windows (${reasonText})${detailText}. Reloading view…`;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = 'Restore Now';
+      btn.style.cssText = 'margin-top:8px;padding:6px 12px;border-radius:6px;border:1px solid rgba(255,180,180,0.6);background:rgba(255,120,120,0.18);color:#fff;cursor:pointer;font:600 13px system-ui,sans-serif;';
+      btn.onclick = () => location.reload();
+      errorPanel.append(msgEl, btn);
+    }
+    try {
+      const nowMs = Date.now();
+      const prevMs = Number(sessionStorage.getItem(DEVICE_LOST_RELOAD_TS_KEY) || 0);
+      if (!Number.isFinite(prevMs) || nowMs - prevMs > 30000) {
+        sessionStorage.setItem(DEVICE_LOST_RELOAD_TS_KEY, String(nowMs));
+        setTimeout(() => location.reload(), 350);
+      }
+    } catch {}
+  });
+  device.onuncapturederror = (e) => {
+    const msg = `${e.error?.constructor?.name || 'GPUError'}: ${e.error?.message || 'Graphics error (possible VRAM pressure)'}`;
+    log('GPU error: ' + msg);
+    if (firstGpuError) return;
+    firstGpuError = true;
+    if (!firstFrameRendered) {
+      window.oceanStartup?.fail(msg);
+      const errorPanel = document.getElementById('err');
+      if (errorPanel) {
+        errorPanel.style.display = 'block';
+        errorPanel.textContent = msg;
+      }
+    } else {
+      console.warn('[WebGPU uncaptured error]', msg);
+    }
+  };
 
   const canvas = document.getElementById('c');
   const ctx = canvas.getContext('webgpu');
@@ -505,7 +562,9 @@ async function main() {
   const gunSeaPromise=surfaceWavesPromise.then(surfaceWaves=>createGunnerySeaProbe({surfaceWaves,device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,shader,computePipe}));
   const gunportSafetyPromise=surfaceWavesPromise.then(surfaceWaves=>createGunportSafety({surfaceWaves,device,frameUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,maxAge:1.5,maxTravel:6.0}));
   const probePipePromise=computePipe(SCENE_HEIGHT_PROBE,'height probe');
-  const vesselSource=withPosedVesselVertices(CARAVEL);
+  const neuralPbr=sharedNeuralPbrBank(device,{strength:qs.has('neuralPbr')&&Number.isFinite(Number(qs.get('neuralPbr')))?Math.max(0,Math.min(1.5,Number(qs.get('neuralPbr')))):P.neuralPbr});
+  window.oceanNeuralPbr=neuralPbr;
+  const vesselSource=withNeuralPbrVessel(withPosedVesselVertices(CARAVEL));
   const vesselVertexLayouts=[{arrayStride:36,attributes:[
     {shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},
     {shaderLocation:2,offset:24,format:'float32'},{shaderLocation:3,offset:28,format:'float32x2'},
@@ -534,6 +593,7 @@ async function main() {
     requestTownsfolkPipelines({device,shader,format:HDR,samples:MSAA}),
     requestShipColorsPipeline({device,shader,format:HDR,samples:MSAA}),
     requestUnderwaterPipeline({device,shader,format:HDR,samples:MSAA,cameraProbe:true,surfaceWaves:true,shadows:true,skipAir:true}),
+    requestNeuralLightPipelines({device,shader,swapFormat,samples:MSAA,mode:INITIAL_NEURAL_MODE}),
     requestHullFloodPipelines({device,shader,format:HDR,samples:MSAA}),
     computePipe(HULL_CONTACT_QUERY,'underside incident sea contact'),
     computePipe(PART_ASSEMBLY_POSE_UPDATE,'shared part assembly deformation'),
@@ -698,7 +758,7 @@ async function main() {
     const result={asset,gpuPose,pipeline,submerged,indexBuffer,poseAssets:null,damaged:null,
       // Compiled once the game is running: until then a damaged ship draws whole for a moment.
       async compileDamaged(){
-        const damagedSource=gpuPose?withPosedVesselVertices(CARAVEL_DAMAGED):CARAVEL_DAMAGED;
+        const damagedSource=withNeuralPbrVessel(gpuPose?withPosedVesselVertices(CARAVEL_DAMAGED):CARAVEL_DAMAGED);
         const damagedModule=await shader(damagedSource,modelId+' damaged vessel');
         const base={layout:'auto',vertex:{module:damagedModule,entryPoint:'vs',buffers:vertexLayouts},primitive:{topology:'triangle-list',cullMode:'none'},multisample:{count:MSAA}};
         const [cut,shade]=await Promise.all([
@@ -746,7 +806,7 @@ async function main() {
   const hullBelongsDamaged=v=>Boolean(v.render.damaged&&(v.pose?.scarred||v.boat.damage?.holes?.length||v.boat.damage?.craters?.length));
   function damagedHullGroups(v){
     if(v.damagedGroups)return v.damagedGroups;
-    const {cut,shade}=v.render.damaged,resources=[...v.hullResources,{buffer:v.holesUBO}];
+    const {cut,shade}=v.render.damaged,resources=[...v.hullResources,{buffer:v.holesUBO},{buffer:neuralPbr.latentBuffer},{buffer:neuralPbr.weightBuffer}];
     // The depth entry reads only the vertex stage's resources and the damage record.
     const forDepth=new Set([0,6,13,14,15]);
     return v.damagedGroups={cut:bg(cut,resources.map((resource,binding)=>forDepth.has(binding)?resource:null),v.id+' surviving surface'),
@@ -924,6 +984,8 @@ async function main() {
   const opticsUBO=mkBuf(16,GU.UNIFORM|GU.COPY_DST,'water extinction'),opticsData=new Float32Array(4);
   const underwaterMedium=await createUnderwater({device,shader,frameUBO,opticsUBO,transView,skyView,sampler:sampClamp,sunVis:sunVisBuf,
     derivView:fullArr(derivTex),seaSampler:samplerSim,cameraProbe:vessels[0].probe.output,surfaceWaves,sceneShadows,format:HDR,samples:MSAA,skipAir:true});
+  const neuralPass=await createNeuralLightPass({device,shader,frameUBO,linSamp,swapFormat,samples:MSAA,initialMode:INITIAL_NEURAL_MODE});
+  window.oceanNeuralLight=neuralPass;
   const opticsEmptyLayout=device.createBindGroupLayout({entries:[]});
   const opticsEmptyGroup=device.createBindGroup({layout:opticsEmptyLayout,entries:[]});
   const submergedPass={label:'Submerged geometry',colorAttachments:[{view:null,clearValue:{r:0,g:0,b:0,a:0},loadOp:'clear',storeOp:'store'}],
@@ -941,9 +1003,10 @@ async function main() {
   };
   let bloomLevels = 0, bloomPasses = [], bgComp = null,bgCompUnderwater=null;
   let bloomMeasuring=false,bloomMeasureRequested=false,bloomCameraMediumBand=false,bloomFrameReady=false;
+  let neuralMeasuring=false,neuralMeasureRequested=false;
 
   function resize() {
-    if(bloomMeasuring)return;
+    if(bloomMeasuring||neuralMeasuring)return;
     const dpr = window.devicePixelRatio || 1;
     const nw = Math.max(1, Math.round(canvas.clientWidth * dpr)), nh = Math.max(1, Math.round(canvas.clientHeight * dpr));
     if (nw !== nativeWidth || nh !== nativeHeight) { nativeWidth=nw; nativeHeight=nh; resolution.reset(); }
@@ -981,7 +1044,8 @@ async function main() {
         envCubeView,{buffer:sunVisBuf},{buffer:v.hullUBO},waterCopy.createView(),fullArr(dispTex),samplerSim,oakTex.createView(),oakSampler,v.interaction.deck.view,
         {buffer:v.wetness.state},{buffer:v.wetness.lookup}];
       v.hullResources=resources;v.damagedGroups=null;
-      v.bindGroup=bg(v.render.pipeline,resources,v.id+' vessel');v.submergedGroup=v.render.submerged.bindGroup(resources);
+      v.bindGroup=bg(v.render.pipeline,[...resources,null,{buffer:neuralPbr.latentBuffer},{buffer:neuralPbr.weightBuffer}],v.id+' vessel');
+      v.submergedGroup=v.render.submerged.bindGroup([...resources.map((resource,binding)=>({binding,resource})),...neuralPbr.vesselBindings(16,17)]);
     }
     const bw = Math.max(1, W >> 1), bh = Math.max(1, H >> 1);
     bloomLevels = Math.min(BLOOM_LEVELS, Math.floor(Math.log2(Math.max(bw, bh))) + 1);
@@ -1022,6 +1086,7 @@ async function main() {
     }
     bgComp = bg(compPipe, [hdrView, bv[0], linSamp, { buffer: compUBO }]);
     bgCompUnderwater=bg(mediumCompPipe,[mediumView,bv[0],linSamp,{buffer:compUBO},hdrView,{buffer:frameUBO},{buffer:vessels[0].probe.output}]);
+    neuralPass.resize({width:W,height:H,hdrView,mediumView,bloomView:bv[0],compUBO,cameraProbe:vessels[0].probe.output,depthView:mainPass.depthStencilAttachment.view});
   }
 
   // --------------------------------------------------------------------------------------
@@ -1042,7 +1107,11 @@ async function main() {
   const bloomMeasureResult=document.createElement('p');bloomMeasureResult.id='bloom-measurement';bloomMeasureResult.setAttribute('role','status');
   bloomMeasureResult.textContent=hasTS?'Pauses briefly to exclude earlier GPU waits.':'Separate bloom timing needs browser GPU timestamp support.';
   bloomMeasureButton.addEventListener('click',()=>{bloomMeasureRequested=true;delete bloomMeasureResult.dataset.measurement;bloomMeasureButton.disabled=true;bloomMeasureResult.textContent='Measuring bloom alone…';});
-  performancePanel.querySelector('.panel-body').append(performanceSummary,bloomMeasureButton,bloomMeasureResult,profileDetails);document.body.append(performancePanel);
+  const neuralMeasureButton=document.createElement('button');neuralMeasureButton.type='button';neuralMeasureButton.textContent='Measure neural pass alone';neuralMeasureButton.disabled=!hasTS;
+  const neuralMeasureResult=document.createElement('p');neuralMeasureResult.id='neural-measurement';neuralMeasureResult.setAttribute('role','status');
+  neuralMeasureResult.textContent=hasTS?'Measures isolated 1/4-res neural light compute.':'Separate neural timing needs browser GPU timestamp support.';
+  neuralMeasureButton.addEventListener('click',()=>{neuralMeasureRequested=true;delete neuralMeasureResult.dataset.measurement;neuralMeasureButton.disabled=true;neuralMeasureResult.textContent='Measuring neural pass alone…';});
+  performancePanel.querySelector('.panel-body').append(performanceSummary,bloomMeasureButton,bloomMeasureResult,neuralMeasureButton,neuralMeasureResult,profileDetails);document.body.append(performancePanel);
   const bloomProfileWrites=(_,name)=>profiler.writes(name);
   function encodeBloom(encoder,timestamps,mediumBand=bloomCameraMediumBand){
     for(let i=0;i<bloomPasses.length;i++){
@@ -1062,6 +1131,18 @@ async function main() {
     }catch(error){bloomMeasureResult.textContent='Bloom measurement unavailable: '+(error.message||error);}
     finally{
       bloomMeasuring=false;bloomMeasureButton.disabled=!hasTS;
+      last=performance.now();fpsN=0;fpsT=0;resolution.reset();requestAnimationFrame(frame);
+    }
+  }
+  async function measureNeuralAlone(){
+    neuralMeasuring=true;neuralMeasureRequested=false;
+    try{
+      const result=await measureIsolatedGPUStage({device,encode:neuralPass.encodeIsolated,passCount:neuralPass.passCount,width:W,height:H});
+      neuralMeasureResult.textContent=`Neural pass alone (${neuralPass.mode}): ${result.milliseconds>0?result.milliseconds.toFixed(2)+' ms':'below timer precision'} · ${W} × ${H} (${neuralPass.quarterWidth} × ${neuralPass.quarterHeight} latent) · ${neuralPass.passCount} passes. Median of ${result.samples.length} isolated batches; earlier GPU work excluded.`;
+      neuralMeasureResult.dataset.measurement=JSON.stringify(result);
+    }catch(error){neuralMeasureResult.textContent='Neural measurement unavailable: '+(error.message||error);}
+    finally{
+      neuralMeasuring=false;neuralMeasureButton.disabled=!hasTS;
       last=performance.now();fpsN=0;fpsT=0;resolution.reset();requestAnimationFrame(frame);
     }
   }
@@ -2088,7 +2169,15 @@ async function main() {
   // Two fire lights ride in spare slots of the frame. The GPU fills them from its own fire records after
   // this upload (gunEffects.encodeLights), so all JavaScript sends is darkness.
   function clearFireLights(f){for(const slot of FRAME_FIRE_SLOTS)f[slot]=0;}
+  const lastFiniteFrameState = { x: 0, y: 2.5, z: 0, yaw: 0, pitch: 0, fovY: 60 * D2R, waterH: 0 };
   function writeFrame(time) {
+    if (Number.isFinite(cam.x) && Math.abs(cam.x) < 1e7) lastFiniteFrameState.x = cam.x; else cam.x = lastFiniteFrameState.x;
+    if (Number.isFinite(cam.y) && Math.abs(cam.y) < 1e5) lastFiniteFrameState.y = cam.y; else cam.y = lastFiniteFrameState.y;
+    if (Number.isFinite(cam.z) && Math.abs(cam.z) < 1e7) lastFiniteFrameState.z = cam.z; else cam.z = lastFiniteFrameState.z;
+    if (Number.isFinite(cam.yaw) && Math.abs(cam.yaw) < 1e6) lastFiniteFrameState.yaw = cam.yaw; else cam.yaw = lastFiniteFrameState.yaw;
+    if (Number.isFinite(cam.pitch) && Math.abs(cam.pitch) < 1e3) lastFiniteFrameState.pitch = cam.pitch; else cam.pitch = lastFiniteFrameState.pitch;
+    if (Number.isFinite(cam.fovY) && cam.fovY > 1e-3 && cam.fovY < 3.0) lastFiniteFrameState.fovY = cam.fovY; else cam.fovY = lastFiniteFrameState.fovY;
+    if (Number.isFinite(waterH) && Math.abs(waterH) < 1e4) lastFiniteFrameState.waterH = waterH; else waterH = lastFiniteFrameState.waterH;
     const aspect = W / H;
     const tanY = Math.tan(cam.fovY * 0.5), tanX = tanY * aspect;
     const near = 0.05;
@@ -2134,7 +2223,8 @@ async function main() {
     f[60] = boat.heading * D2R;
     f[63] = boat.showProw && qs.get('boatReflections') !== '0' ? 1 : 0;
     f[64] = Math.max(4, R0 * polygons.oceanRangeScale); f[65] = GRID; f[66] = FOAM_LEVEL_SIZE[0]; f[67] = FOAM_LEVEL_SIZE[1];
-    f[68] = P.exposure*(astronomy.mode==='astronomy'?astronomy.state.exposureScale:1); f[69] = P.bloom; f[70] = frameIndex; f[71] = DBG;
+    const exposure = P.exposure*(astronomy.mode==='astronomy'?astronomy.state.exposureScale:1);
+    f[68] = Number.isFinite(exposure) && exposure > 0 ? exposure : 1.0; f[69] = P.bloom; f[70] = frameIndex; f[71] = DBG;
     f[72] = P.haze; f[73] = Math.max(cam.y, 10) * 0.001;
     const strike=weather.strike,dx=strike?strike.x-cam.x:0,dz=strike?strike.z-cam.z:1,range=Math.hypot(dx,dz)||1;
     f[74]=dx/range;f[75]=dz/range;
@@ -2149,6 +2239,7 @@ async function main() {
     f[91] = 1.1e-4;
     f[92]=weather.intensity;f[93]=weather.type;f[94]=weather.flash;f[95]=weather.time;
     clearFireLights(f);
+    if (!Number.isFinite(f[68]) || !(f[68] > 0)) f[68] = 1.0;
     device.queue.writeBuffer(frameUBO, 0, f);
     opticsData[0]=P.turbidity*(terrain?.turbidityScale??1);opticsData[1]=qs.get('waterOptics')==='0'?0:1;
     opticsData[2]=waterH;opticsData[3]=1;
@@ -2650,6 +2741,34 @@ async function main() {
       if (!sharePanel.hidden) shareInput.value = url;
     } catch { /* standalone file */ }
   };
+  persistRecoveryState = () => {
+    syncBrowserUrlState(performance.now(), true);
+    try {
+      sessionStorage.setItem(DEVICE_LOST_STATE_KEY, JSON.stringify({
+        savedAt: Date.now(),
+        boat: { x: boat.x, z: boat.z, heading: boat.heading, modelId: boat.modelId },
+        cam: { x: cam.x, y: cam.y, z: cam.z, yaw: cam.yaw, pitch: cam.pitch, mode: cameraMode },
+      }));
+    } catch {}
+  };
+  try {
+    const rawLost = sessionStorage.getItem(DEVICE_LOST_STATE_KEY);
+    if (rawLost) {
+      sessionStorage.removeItem(DEVICE_LOST_STATE_KEY);
+      const savedLost = JSON.parse(rawLost);
+      if (savedLost && Date.now() - (savedLost.savedAt || 0) < 60000 && !qs.has('x') && !qs.has('z')) {
+        if (Number.isFinite(savedLost.boat?.x) && Number.isFinite(savedLost.boat?.z)) {
+          boat.x = savedLost.boat.x; boat.z = savedLost.boat.z;
+          if (Number.isFinite(savedLost.boat.heading)) boat.heading = savedLost.boat.heading;
+        }
+        if (Number.isFinite(savedLost.cam?.x) && Number.isFinite(savedLost.cam?.y) && Number.isFinite(savedLost.cam?.z)) {
+          cam.x = savedLost.cam.x; cam.y = savedLost.cam.y; cam.z = savedLost.cam.z;
+          if (Number.isFinite(savedLost.cam.yaw)) cam.yaw = savedLost.cam.yaw;
+          if (Number.isFinite(savedLost.cam.pitch)) cam.pitch = savedLost.cam.pitch;
+        }
+      }
+    }
+  } catch {}
   shareButton.onclick = async () => {
     const url = createShareLink(location.href, P, boat, cameraMode, buildShareCameraPayload());
     setPanelOpen(false);setBoatOpen(false);setCaptainOpen(false);setCameraOpen(false);landfallUI.close();
@@ -3704,6 +3823,8 @@ async function main() {
   note = document.createElement('p'); boatBody.append(note);showPropulsionControls();
   if(LAND_STAGE)Object.assign(P,LANDFALL_WEATHER[LAND_WEATHER],coastalSeaForRegion(terrain?.region,LAND_STAGE));
   for (const k of Object.keys(P)) if (qs.has(k) && Number.isFinite(Number(qs.get(k)))) P[k] = Number(qs.get(k));
+  if (qs.has('neural') && Number.isFinite(Number(qs.get('neural')))) P.neuralLight = Math.max(0, Math.min(1.5, Number(qs.get('neural'))));
+  if (qs.has('neuralPbr') && Number.isFinite(Number(qs.get('neuralPbr')))) P.neuralPbr = Math.max(0, Math.min(1.5, Number(qs.get('neuralPbr'))));
   if(LAND_STAGE&&terrain?.region&&terrain.region.id!=='saba'&&Number(qs.get('swellDir'))===22&&Number(qs.get('windDir'))===118){
     const naturalSea=coastalSeaForRegion(terrain.region,LAND_STAGE);
     P.swellDir=naturalSea.swellDir;P.windDir=naturalSea.windDir;
@@ -3899,6 +4020,15 @@ async function main() {
   polygonInput.addEventListener('change',()=>{polygons.setMode(polygonInput.value);terrain?.setPixelError?.(polygons.pixelError);updatePolygonStatus();});
   polygonLabel.append(polygonInput);
   seaBody.append(polygonLabel,polygonStatus);
+  const neuralModeLabel=document.createElement('label');neuralModeLabel.className='resolution-control';neuralModeLabel.textContent='Neural light mode';
+  const neuralModeInput=document.createElement('select');neuralModeInput.id='neural-light-mode';
+  for(const [value,label] of [['fast','Fast · Zero depth flush'],['depth','3D depth-guided']]){
+    const option=document.createElement('option');option.value=value;option.textContent=label;neuralModeInput.append(option);
+  }
+  neuralModeInput.value=neuralPass.desiredMode;
+  neuralModeInput.addEventListener('change',()=>{neuralPass.setMode(neuralModeInput.value).catch(()=>{});});
+  neuralModeLabel.append(neuralModeInput);
+  seaBody.append(neuralModeLabel);
   const roughButton = document.createElement('button'); roughButton.textContent = 'Hella rough';
   roughButton.title = '28 m/s wind, 8 m swell, and crossing waves';
   const stormButton=document.createElement('button');stormButton.textContent='Thunderstorm';
@@ -3938,6 +4068,8 @@ async function main() {
     ['cloudQuality', 'Cloud quality', 0.25, 1, 0.05, ''],
     ['exposure', 'Exposure', 0.1, 4, 0.01, ''],
     ['bloom', 'Bloom', 0, 0.3, 0.001, ''],
+    ['neuralLight', 'Neural light & detail', 0, 1.5, 0.01, ''],
+    ['neuralPbr', 'Neural PBR materials', 0, 1.5, 0.01, ''],
   ];
   for (const [key, label, min, max, step, kind] of SLIDERS) {
     const row = document.createElement('label');
@@ -4118,7 +4250,6 @@ async function main() {
       foamSnap[l * 2] = cx; foamSnap[l * 2 + 1] = cz;
       foamUF[8 + l] = ts;
     }
-    foamFirst = false;
     foamUF[10] = dt; foamUF[11] = 0.85;          // decay 1/s
     foamUF[12] = 0.45; foamUF[13] = 1.0; foamUF[14] = P.foam; foamUF[15] = 0;
     for (let c = 0; c < C; c++) { foamUF[16 + c] = CASC_L[c]; foamUF[24 + c] = 1 / CASC_L[c]; }
@@ -4603,8 +4734,10 @@ async function main() {
     situation:storySituation,nearby:storyNearby,candidates:storyMateCandidates,choose:storyMateChoose,knows:mateKnows,
   };
   function frame(now) {
+    if (gpuDeviceLost) return;
     if (shooting) return;  // paused while a screenshot is read back
     if(bloomMeasureRequested&&bloomFrameReady){measureBloomAlone();return;}
+    if(neuralMeasureRequested&&bloomFrameReady){measureNeuralAlone();return;}
     const cpuFrameStart=performance.now();frameStages.begin();
     requestAnimationFrame(frame);
     landfallUI.update(now);
@@ -4879,12 +5012,13 @@ async function main() {
     if(celestial.update())envFull=true;celestial.encode(enc);
     gunEffects.encodeLights(enc,{frame:frameUBO,hull:vesselHullUBO});gunEffects.encode(enc);
     profiler.beginFrame(frameIndex);
+    const prevFoamCur = foamCur, prevSkySun = skySun, prevSkyHaze = skyHaze, prevSkyHeight = skyHeight;
+    const ranSpectrum = needSpectrum;
     let cp = enc.beginComputePass({timestampWrites:profiler.writes('Waves + effects')});
-    if (needSpectrum) {
+    if (ranSpectrum) {
       cp.setPipeline(initPipe);
       cp.setBindGroup(0, bgInit);
       cp.dispatchWorkgroups(N / 16, N / 16, C);
-      needSpectrum = false;
     }
     const hazeChanged = frameF[72] !== skyHaze;
     const skyChanged = hazeChanged || frameF[33] !== skySun || frameF[73] !== skyHeight;
@@ -4930,9 +5064,9 @@ async function main() {
     cp.setBindGroup(0, bgEnv);
     cp.setBindGroup(1, bgEnvClouds);
     // one cube face per frame (all six on start-up / after parameter changes)
-    const envFaces = envFull ? 6 : 1;
+    const ranEnvFull = envFull;
+    const envFaces = ranEnvFull ? 6 : 1;
     cp.dispatchWorkgroups(ENV_SIZE / 8, ENV_SIZE / 8, envFaces);
-    envFull = false;
     cp.setPipeline(cubeMipPipe);
     for (let m = 1; m < ENV_MIPS; m++) {
       const s = Math.max(1, ENV_SIZE >> m);
@@ -4989,9 +5123,11 @@ async function main() {
       }
       dolphins.drawSubmerged(aboveWater,true);marineLife.drawSubmerged(aboveWater,true);aboveWater.end();
     }
+    const useNeuralLight = P.neuralLight > 0.001;
+    neuralPbr.setStrength(P.neuralPbr);
     mainPass.timestampWrites=profiler.writes('Scene');
     mainPass.colorAttachments[0].storeOp = 'discard';
-    mainPass.depthStencilAttachment.depthStoreOp = gunVolumes||cameraMediumBand ? 'store' : 'discard';
+    mainPass.depthStencilAttachment.depthStoreOp = gunVolumes||cameraMediumBand||(useNeuralLight&&neuralPass.wantsDepth) ? 'store' : 'discard';
     // One pass for the whole scene keeps its multisampled attachments in tile memory. Whole hulls
     // come first: they neither discard nor blend, so what they hide is never shaded, sea included.
     if(drawProw){
@@ -5075,6 +5211,13 @@ async function main() {
     }
 
     underwaterMedium.encode(enc,cameraMediumBand,cameraMediumBand?profiler.writes('Underwater medium'):undefined);
+    let neuralEncoded=false;
+    if(useNeuralLight){
+      neuralPass.update({viewProj,camX:cam.x,camY:cam.y,camZ:cam.z,strength:P.neuralLight});
+      neuralEncoded=neuralPass.encode(enc,profiler.writes('Neural light pass'));
+    }else if(neuralPass.active){
+      neuralPass.update({viewProj,camX:cam.x,camY:cam.y,camZ:cam.z,strength:0});
+    }
     bloomCameraMediumBand=cameraMediumBand;
     if(P.bloom>0)encodeBloom(enc,bloomProfileWrites,cameraMediumBand);
 
@@ -5083,13 +5226,27 @@ async function main() {
     // Colour fades as rods take over from cones.
     compData[4] = 1.05 * (1 - 0.42 * (astronomy.mode === 'astronomy' ? astronomy.state.starVisibility : 0)); compData[5] = 1.06; compData[6] = 0; compData[7] = 1 / bloomLevels;
     device.queue.writeBuffer(compUBO, 0, compData);
-    const swapTex = ctx.getCurrentTexture();
+    let swapTex = null;
+    try {
+      swapTex = ctx.getCurrentTexture();
+    } catch (err) {
+      foamCur = prevFoamCur; skySun = prevSkySun; skyHaze = prevSkyHaze; skyHeight = prevSkyHeight;
+      frameStages.end();
+      return;
+    }
+    if (!swapTex || swapTex.width === 0 || swapTex.height === 0) {
+      foamCur = prevFoamCur; skySun = prevSkySun; skyHaze = prevSkyHaze; skyHeight = prevSkyHeight;
+      frameStages.end();
+      return;
+    }
     compPass.colorAttachments[0].view = swapTex.createView();
     compPass.timestampWrites=profiler.writes('Composite');
     const pc = enc.beginRenderPass(compPass);
-    pc.setPipeline(cameraMediumBand?mediumCompPipe:compPipe);
-    pc.setBindGroup(0, cameraMediumBand?bgCompUnderwater:bgComp);
-    pc.draw(3);
+    if(!(neuralEncoded&&neuralPass.drawComposite(pc,cameraMediumBand))){
+      pc.setPipeline(cameraMediumBand?mediumCompPipe:compPipe);
+      pc.setBindGroup(0, cameraMediumBand?bgCompUnderwater:bgComp);
+      pc.draw(3);
+    }
     pc.end();
 
     for(const {probe:p} of vessels)if(p.requested)enc.copyBufferToBuffer(p.output,0,p.read,0,64);
@@ -5105,7 +5262,12 @@ async function main() {
       enc.copyTextureToBuffer({ texture: swapTex }, { buffer: readBuf, bytesPerRow: bpr }, [W, H]);
     }
     submitList[0] = enc.finish();
-    device.queue.submit(submitList);bloomFrameReady=true;
+    device.queue.submit(submitList);
+    if (ranSpectrum) needSpectrum = false;
+    foamFirst = false;
+    if (ranEnvFull) envFull = false;
+    firstFrameRendered = true;
+    bloomFrameReady = true;
     for(const v of vessels)v.rowingWater?.readback();
     if(!oceanStartupFirstFrameSubmitted){
       oceanStartupFirstFrameSubmitted=true;
@@ -5141,13 +5303,22 @@ async function main() {
       }).catch(()=>{audioPending=false;});
     }
     for(const v of vessels){const p=v.probe;if(p.requested){p.pending=true;p.read.mapAsync(GPUMapMode.READ).then(()=>{
-      const heights=new Float32Array(p.read.getMappedRange(0,64)).slice();
+      let heights = null;
+      try {
+        heights = new Float32Array(p.read.getMappedRange(0,64)).slice();
+      } finally {
+        if (p.read.mapState === 'mapped') p.read.unmap();
+        p.pending = false;
+      }
+      if (!heights || heights.length < 10 || !heights.every((val) => Number.isFinite(val) && Math.abs(val) < 1e4)) return;
       const shelter=terrain?.waveShelter?terrain.waveShelter(v.boat.x,v.boat.z,P.swellDir*D2R):1;
-      if(shelter<0.999){
+      if(shelter<0.999&&Number.isFinite(shelter)){
         for(let i=0;i<12;i++)heights[i]*=shelter;
       }
-      if(v.id==='player')waterH=heights[9];
-      acceptVesselProbe(v.boat,p.state,heights,p.time,p.revision,p.length,p.beam);p.read.unmap();p.pending=false;
+      if (heights.length >= 10 && heights.every((val) => Number.isFinite(val) && Math.abs(val) < 1e4)) {
+        if(v.id==='player')waterH=heights[9];
+        acceptVesselProbe(v.boat,p.state,heights,p.time,p.revision,p.length,p.beam);
+      }
     },()=>{p.pending=false;});}}
     if (doTs) profiler.read();
     if (readBuf) saveShot(readBuf, Math.ceil(W * 4 / 256) * 256);

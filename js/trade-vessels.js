@@ -23,7 +23,7 @@ import { createVesselDamageState, stepVesselDamage } from './gunnery-control.js'
 import { HULL_DAMAGE_UNIFORM_BYTES, writeHullFloodUniform, writeHullCraters } from './hull-flood.js';
 import { addHullHole, stepHullHoles } from './hull-holes.js';
 import { POSED_VERTEX_LAYOUT } from './vessel-pose.js';
-import { attachCrewComponents, packCrewCompMask, packCrewFaceW } from './crew-components.js';
+import { attachCrewComponents, ensureCrewComponentPacks, packCrewCompMask, packCrewFaceW } from './crew-components.js';
 import { createDistantCrewLOD } from './crew-lod.js';
 import { bakeTownClips, bakeWorkStationClip } from './town-clips.js';
 import { poseSeatedCrew, solveCrewLimb, turnBone } from './crew-pose.js';
@@ -3706,7 +3706,8 @@ ${damaged || useSubmergedEntry ? '' : 'struct TVFragmentOut { @location(0) color
     n = normalize(nBase + vec3f(0.0, strakeBevel, 0.0));
   } else if (m == 10u) {
     // Pine masts & yards with longitudinal checking + dark wrought-iron mast hoops
-    let sparAngle = atan2(in.normalLocal.x, in.normalLocal.z);
+    let sparHoriz2 = dot(in.normalLocal.xz, in.normalLocal.xz);
+    let sparAngle = select(0.0, atan2(in.normalLocal.x, in.normalLocal.z), sparHoriz2 > 1e-8);
     let sparGrain = 0.92 + 0.08 * sin(sparAngle * 20.0 + gnoise(vec2f(p.y * 5.0, p.z * 5.0)) * 3.5);
     let band = 1.0 - smoothstep(0.04, 0.09, abs(fract(p.y * 0.65) - 0.5));
     albedo = mix(timber * vec3f(1.08, 0.92, 0.68) * sparGrain, vec3f(0.032, 0.030, 0.028), band * 0.72);
@@ -4274,7 +4275,9 @@ fn tvSampleWaterOffset(p: vec2f, footprint: f32, swellWeight: f32, wakeWeight: f
     }
   }
   let wakeCap = select(0.42, 0.12, isRiver);
-  let rawWake = surfaceWaveAt(p).x * wakeWeight;
+  let rawWakeSample = surfaceWaveAt(p).x;
+  let safeWakeSample = select(0.0, rawWakeSample, (rawWakeSample == rawWakeSample) && ((bitcast<u32>(rawWakeSample) & 0x7fffffffu) < 0x7f800000u) && abs(rawWakeSample) <= 1e4);
+  let rawWake = safeWakeSample * wakeWeight;
   let wakeY = clamp(rawWake, -wakeCap, wakeCap);
   var chopY = 0.0;
   if (isRiver && wakeWeight > 0.001) {
@@ -4283,7 +4286,17 @@ fn tvSampleWaterOffset(p: vec2f, footprint: f32, swellWeight: f32, wakeWeight: f
       + sin(dot(p, vec2f(-0.27, 0.53)) + elapsedSec * 1.65) * 0.009
     ) * wakeWeight;
   }
-  return seaY + wakeY + chopY;
+  let totalOffset = seaY + wakeY + chopY;
+  if (!(totalOffset == totalOffset) || ((bitcast<u32>(totalOffset) & 0x7fffffffu) >= 0x7f800000u) || abs(totalOffset) > 1e4) {
+    return 0.0;
+  }
+  return totalOffset;
+}
+
+fn tvFiniteVec4(v: vec4f) -> bool {
+  let okEq = all(v == v) && !any(v != v);
+  let okBits = all((bitcast<vec4u>(v) & vec4u(0x7fffffffu)) < vec4u(0x7f800000u));
+  return okEq && okBits && all(abs(v) <= vec4f(1e4));
 }
 
 fn tvStepDampedSpring(x: f32, v: f32, goal: f32, omega: f32, zeta: f32, dt: f32) -> vec2f {
@@ -4345,7 +4358,8 @@ fn tvStepDampedSpring(x: f32, v: f32, goal: f32, omega: f32, zeta: f32, dt: f32)
 
   var st = hydroState[stateSlot];
   let dt = clamp(waveP.timing.x, 0.0, 0.05);
-  if (forceReset || st.pose.w < 0.5 || groundedOrSunk) {
+  let stCorrupt = !tvFiniteVec4(st.pose) || !tvFiniteVec4(st.vel);
+  if (forceReset || st.pose.w < 0.5 || groundedOrSunk || stCorrupt) {
     st.pose = vec4f(targetY, targetPitch, targetRoll, 1.0);
     st.vel = vec4f(0.0);
   } else if (dt > 1e-5) {
@@ -4358,6 +4372,10 @@ fn tvStepDampedSpring(x: f32, v: f32, goal: f32, omega: f32, zeta: f32, dt: f32)
     let rs = tvStepDampedSpring(st.pose.z, st.vel.z, targetRoll, omegaR, zeta, dt);
     st.pose = vec4f(max(minKeelY, hs.x), ps.x, rs.x, 1.0);
     st.vel = vec4f(hs.y, ps.y, rs.y, 0.0);
+    if (!tvFiniteVec4(st.pose) || !tvFiniteVec4(st.vel)) {
+      st.pose = vec4f(targetY, targetPitch, targetRoll, 1.0);
+      st.vel = vec4f(0.0);
+    }
   } else {
     st.pose.x = max(minKeelY, st.pose.x);
   }
@@ -5248,7 +5266,9 @@ struct DeckCrewFragOut {
   let rough = select(0.84, 0.56, in.skin > 0.5);
   let direct = (in.color / PI) * sunRad * (nDotL + skinWrap * vec3f(1.0, 0.48, 0.32));
   let spec = select(vec3f(0.0), vesselSpecular(n, viewDir, sunDir, rough, vec3f(0.036)) * sunRad * nDotL, nDotL > 0.0);
-  let clothSheen = select(pow(1.0 - max(dot(n, viewDir), 0.0), 4.0) * 0.045, 0.0, in.skin > 0.5);
+  let c1 = clamp(1.0 - max(dot(n, viewDir), 0.0), 0.0, 1.0);
+  let c2 = c1 * c1;
+  let clothSheen = select((c2 * c2) * 0.045, 0.0, in.skin > 0.5);
   let envCol = textureSampleLevel(envCube, sampC, reflect(-viewDir, n), rough * 6.5).rgb * 0.035;
 
   let lit = in.color * (amb * 0.85 + clothSheen * skyCol) + direct + spec + envCol;
@@ -6251,7 +6271,10 @@ export async function createTradeVessels({
     if (!nextShared || !canCompute || !makeCompute || destroyed) return null;
     const token = ++lastSharedCrewToken;
     try {
-      const resolved = await Promise.resolve(nextShared);
+      const [resolved] = await Promise.all([
+        Promise.resolve(nextShared),
+        ensureCrewComponentPacks().catch(() => null),
+      ]);
       if (destroyed || token !== lastSharedCrewToken || !resolved) return null;
       const maleSrc = resolved?.sailor ?? resolved?.models?.[0] ?? null;
       const femaleSrc = resolved?.female ?? resolved?.models?.[1] ?? maleSrc;

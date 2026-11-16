@@ -10,6 +10,49 @@ export const WEBGPU_ADAPTER_OPTIONS = Object.freeze([
   Object.freeze({ forceFallbackAdapter: true }),
 ]);
 
+function adapterMeetsStorageLimits(adapter, option) {
+  const limits = adapter?.limits;
+  if (!limits) {
+    // Allow bare mock adapters in unit tests unless compatibility mode was explicitly requested.
+    return option?.featureLevel !== 'compatibility';
+  }
+  if ((limits.maxStorageBuffersPerShaderStage ?? 0) < 8) return false;
+  if ('maxStorageBuffersInVertexStage' in limits && (limits.maxStorageBuffersInVertexStage ?? 0) < 8) {
+    return false;
+  }
+  return true;
+}
+
+function buildRequiredLimits(adapterLimits, requestedLimits = {}) {
+  if (!adapterLimits || typeof adapterLimits !== 'object') return null;
+  const requiredLimits = {};
+  const stageMax = adapterLimits.maxStorageBuffersPerShaderStage;
+  if (Number.isFinite(stageMax) && stageMax >= 8) {
+    const reqStage = Number.isFinite(requestedLimits?.maxStorageBuffersPerShaderStage)
+      ? requestedLimits.maxStorageBuffersPerShaderStage
+      : 8;
+    requiredLimits.maxStorageBuffersPerShaderStage = Math.min(stageMax, Math.max(8, reqStage));
+  }
+  if ('maxStorageBuffersInVertexStage' in adapterLimits) {
+    const vertMax = adapterLimits.maxStorageBuffersInVertexStage;
+    if (Number.isFinite(vertMax) && vertMax >= 8) {
+      const reqVert = Number.isFinite(requestedLimits?.maxStorageBuffersInVertexStage)
+        ? requestedLimits.maxStorageBuffersInVertexStage
+        : 8;
+      requiredLimits.maxStorageBuffersInVertexStage = Math.min(vertMax, Math.max(8, reqVert));
+    }
+  }
+  const bufMax = adapterLimits.maxBufferSize;
+  if (Number.isFinite(bufMax) && bufMax > 256 * 1024 * 1024) {
+    requiredLimits.maxBufferSize = Math.min(bufMax, 512 * 1024 * 1024);
+  }
+  const storageBindMax = adapterLimits.maxStorageBufferBindingSize;
+  if (Number.isFinite(storageBindMax) && storageBindMax > 128 * 1024 * 1024) {
+    requiredLimits.maxStorageBufferBindingSize = Math.min(storageBindMax, 256 * 1024 * 1024);
+  }
+  return Object.keys(requiredLimits).length > 0 ? requiredLimits : null;
+}
+
 /**
  * Request a WebGPU adapter, cascading through power preferences, compatibility
  * mode, and software fallback options with a short retry for transient GPU restarts.
@@ -26,7 +69,7 @@ export async function requestWebGPUAdapter(
         const adapter = option === undefined
           ? await gpu.requestAdapter()
           : await gpu.requestAdapter(option);
-        if (adapter) {
+        if (adapter && adapterMeetsStorageLimits(adapter, option)) {
           return { adapter, option: option ?? null, attempt };
         }
       } catch {
@@ -41,10 +84,10 @@ export async function requestWebGPUAdapter(
 }
 
 /**
- * Request a WebGPU device with supported optional features, falling back cleanly
- * if a browser rejects privacy-gated features such as timestamp-query.
+ * Request a WebGPU device with supported optional features and adapter-clamped
+ * limits, falling back cleanly if a browser rejects timestamp-query or requiredLimits.
  */
-export async function requestWebGPUDevice(adapter, optionalFeatures = []) {
+export async function requestWebGPUDevice(adapter, optionalFeatures = [], requestedLimits = {}) {
   const supported = [];
   const seen = new Set();
   for (const feature of optionalFeatures) {
@@ -54,22 +97,33 @@ export async function requestWebGPUDevice(adapter, optionalFeatures = []) {
       supported.push(feature);
     }
   }
+  const requiredLimits = buildRequiredLimits(adapter?.limits, requestedLimits);
+  const makeDescriptor = (features, limits) => {
+    if (!features.length && !limits) return undefined;
+    const desc = {};
+    if (features.length) desc.requiredFeatures = features;
+    if (limits) desc.requiredLimits = limits;
+    return desc;
+  };
   try {
-    return await adapter.requestDevice(
-      supported.length ? { requiredFeatures: supported } : undefined,
-    );
+    return await adapter.requestDevice(makeDescriptor(supported, requiredLimits));
   } catch (err) {
     const withoutTimestamp = supported.filter((feature) => feature !== 'timestamp-query');
     if (withoutTimestamp.length < supported.length) {
       try {
-        return await adapter.requestDevice(
-          withoutTimestamp.length ? { requiredFeatures: withoutTimestamp } : undefined,
-        );
+        return await adapter.requestDevice(makeDescriptor(withoutTimestamp, requiredLimits));
+      } catch {
+        // Fall through to retry without requiredLimits below.
+      }
+    }
+    if (requiredLimits) {
+      try {
+        return await adapter.requestDevice(makeDescriptor(withoutTimestamp, null));
       } catch {
         // Fall through to bare requestDevice below.
       }
     }
-    if (supported.length > 0) {
+    if (supported.length > 0 || requiredLimits) {
       return await adapter.requestDevice();
     }
     throw err;

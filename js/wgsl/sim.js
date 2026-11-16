@@ -396,17 +396,27 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     // semi-Lagrangian advection: foam slowly drifts downwind (and spreads a little)
     let back = (vec2f(id.xy) + 0.5 - U.drift.xy * U.p0.z / ts) / f32(RES);
     prev = textureSampleLevel(prevTex, sampPrev, back, lvl, 0.0);
+    if (any(prev != prev) || any((bitcast<vec4u>(prev) & vec4u(0x7fffffffu)) >= vec4u(0x7f800000u)) || any(abs(prev) > vec4f(1e4))) {
+      prev = vec4f(0.0);
+    }
   }
   let dt = U.p0.z;
   // The clipmap is read at the FFT's material coordinate p. Hull contacts and
   // both fleet wake grids are Eulerian: sample them where that material point
   // actually lies after horizontal displacement, matching the ocean vertex.
-  let hullFoam = wakeAt(p + horizontalDisp);
+  var hullFoam = wakeAt(p + horizontalDisp);
+  if (any(hullFoam != hullFoam) || any((bitcast<vec4u>(hullFoam) & vec4u(0x7fffffffu)) >= vec4u(0x7f800000u)) || any(abs(hullFoam) > vec4f(1e4))) {
+    hullFoam = vec4f(0.0);
+  }
   let breaking=breakingCompression(jxx,jzz,jxz,U.p1.x);
   let seaFoam=foamCoverage(prev.r,breaking,U.p1.z,U.p0.w,dt);
   let f=max(seaFoam,min(1.0,hullFoam.z*0.95));
   let fresh=max(mix(prev.g,breaking*min(U.p1.z,1.0),1.0-exp(-dt*5.0)),min(1.0,hullFoam.w*0.95));
-  textureStore(dst, id.xy, lvl, vec4f(f, fresh, J, 1.0));
+  var outFoam = vec4f(f, fresh, clamp(J, -1e3, 1e3), 1.0);
+  if (any(outFoam != outFoam) || any((bitcast<vec4u>(outFoam) & vec4u(0x7fffffffu)) >= vec4u(0x7f800000u))) {
+    outFoam = vec4f(0.0, 0.0, 1.0, 1.0);
+  }
+  textureStore(dst, id.xy, lvl, outFoam);
 }
 `;
 
@@ -420,13 +430,17 @@ export const SCENE_FOAM_UPDATE=FLEET_FOAM_UPDATE.replace(FLEET_WAKE_SAMPLE,SCENE
 export const ARRAY16_MIPS = /* wgsl */ `
 @group(0) @binding(0) var src: texture_2d_array<f32>;
 @group(0) @binding(1) var dst: texture_storage_2d_array<rgba16float, write>;
+fn arrMipSanitize(v: vec4f) -> vec4f {
+  let bad = (v != v) | ((bitcast<vec4u>(v) & vec4u(0x7fffffffu)) >= vec4u(0x7f800000u));
+  return clamp(select(v, vec4f(0.0), bad), vec4f(-6.0e4), vec4f(6.0e4));
+}
 @compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) id: vec3u) {
   let size = textureDimensions(dst);
   if (id.x >= size.x || id.y >= size.y) { return; }
   let p = vec2i(id.xy) * 2;
-  let v = 0.25 * (textureLoad(src, p, id.z, 0) + textureLoad(src, p + vec2i(1, 0), id.z, 0) +
-                  textureLoad(src, p + vec2i(0, 1), id.z, 0) + textureLoad(src, p + vec2i(1, 1), id.z, 0));
+  let v = 0.25 * (arrMipSanitize(textureLoad(src, p, id.z, 0)) + arrMipSanitize(textureLoad(src, p + vec2i(1, 0), id.z, 0)) +
+                  arrMipSanitize(textureLoad(src, p + vec2i(0, 1), id.z, 0)) + arrMipSanitize(textureLoad(src, p + vec2i(1, 1), id.z, 0)));
   textureStore(dst, id.xy, id.z, v);
 }
 `;

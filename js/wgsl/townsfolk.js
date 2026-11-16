@@ -388,7 +388,10 @@ struct TownLook {shirt:vec4f,trousers:vec4f,skin:vec4f,hair:vec4f,face:vec4f};
   let dress=crewDressOf(look.hair.w);
   let isFemale=look.skin.w>0.5;
   var surface=CrewSurface(CREW_PIECE_OUT,v.normal);
-  if(!crewPieceHidden(v.color,dress)){surface=crewMorph(v.position,v.normal,look.face,look.skin.w);}
+  if(!crewPieceHidden(v.color,dress)){
+    if(v.color.b<-1.0){surface=CrewSurface(v.position,v.normal);}
+    else{surface=crewMorph(v.position,v.normal,look.face,look.skin.w);}
+  }
   var bones=v.bones;
   if(injury>=1u && injury<=5u){
     var loSlot=9u;var hiSlot=30u;var stumpSlot=8u;
@@ -536,3 +539,4 @@ fn crewCompHidden(color:vec3f,compMask:u32)->bool {
   return SH.lightView*vec4f(world-SH.origin.xyz,1.0);
 }
 `;
+export const TOWNSFOLK_WGSL = TOWNSFOLK_RENDER;

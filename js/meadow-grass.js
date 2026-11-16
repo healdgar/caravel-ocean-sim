@@ -1588,9 +1588,10 @@ fn meadowShade(in: MeadowVertexOut, frontFacing: bool) -> vec4f {
   let ambient = mix(groundIrr * 0.50, skyIrr, clamp(n.y * 0.5 + 0.5, 0.0, 1.0)) * mix(1.0, ao, swardWeight);
 
   // Silky grazing-angle + Kajiya-Kay specular sheen across wind-flattened wave troughs!
-  let h = normalize(v + F.sunDir.xyz);
+  let hRaw = v + F.sunDir.xyz;
+  let h = select(vec3f(0.0, 1.0, 0.0), normalize(hRaw), length(hRaw) > 1e-5);
   let nDotH = max(dot(n, h), 0.0);
-  let graze = pow(1.0 - max(dot(n, v), 0.0), 2.3);
+  let graze = pow(clamp(1.0 - max(dot(n, v), 0.0), 0.0, 1.0), 2.3);
   let flatGust = clamp(gust * 0.65 + bendSlope * 0.45, 0.0, 1.0);
   let fiberTan = normalize(vec3f(windDir.x * (0.36 + 0.56 * flatGust), max(0.18, 0.78 - 0.50 * flatGust), windDir.y * (0.36 + 0.56 * flatGust)));
   let tDotH = clamp(dot(fiberTan, h), -1.0, 1.0);

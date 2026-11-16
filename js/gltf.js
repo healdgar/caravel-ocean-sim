@@ -199,8 +199,8 @@ export function createSkinAnimator(asset) {
           else if(y<ankle[13]&&(ankle[13]-y)+(ankle[14]-z)>heelBelow+heelBehind){heelBelow=ankle[13]-y;heelBehind=ankle[14]-z;}
         }
       }
-      // A centimetre of give, for the thigh that a lean or a raised knee turns further under.
-      animator.seatContact=Object.freeze({pelvisAboveSeat:behind-(hip[13]-pelvis[13])+.01,heelBelow,heelBehind});
+      // Three centimetres of give, for fuller 1550 breeches and the thigh that a lean turns further under.
+      animator.seatContact=Object.freeze({pelvisAboveSeat:behind-(hip[13]-pelvis[13])+.055,heelBelow,heelBehind});
     }
   }
   return animator;

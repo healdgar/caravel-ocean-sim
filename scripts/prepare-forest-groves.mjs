@@ -74,7 +74,7 @@ const BACKDROP_SHADE = 0.5;
 // EMERGENT of its rise over the grove's middle height: seen from outside, a wood's roof is nearly level,
 // and a tall tree is a swell in it, not a tower. Within AGREE_CELLS of a grove's edge the heights are
 // drawn to the first grove's, so that every grove meets every other at the same height.
-const FILL_METRES = 3, ROUND_METRES = 2.4, EMERGENT = 0.55, AGREE_CELLS = 6;
+const FILL_METRES = fullGrown ? 5 : 3, ROUND_METRES = 2.4, EMERGENT = 0.55, AGREE_CELLS = 6;
 
 function seeded(seed) {
   let a = seed >>> 0;

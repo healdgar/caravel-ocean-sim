@@ -396,6 +396,96 @@ def mend_classic_glb(path, female=False):
     print(f'mended {path}: thigh={thigh_len:.4f}m > calf={calf_len:.4f}m, hand->mid3={hand_len:.4f}m')
 
 
+def mend_tripo_posture_glb(path: str):
+    """Apply pure animation-clip upright horizon gaze counter-pitch (Idle & Walk) + pelvis sole grounding on 65-joint Tripo GLBs."""
+    doc, bin_buf = read_glb(path)
+    extras = doc['meshes'][0]['primitives'][0].setdefault('extras', {})
+    if extras.get('tripoPostureMendedRevision') == 1:
+        print(f'{path}: already mended (tripoPostureMendedRevision=1)')
+        return
+    nodes = doc['nodes']
+    by_name = {n.get('name'): i for i, n in enumerate(nodes) if n.get('name')}
+    rest_worlds, _ = compute_worlds(nodes)
+    root_rot_inv = rest_worlds[by_name['root']][:3, :3].T if 'root' in by_name else np.eye(3)
+
+    pitch_corr = {
+        'spine_02': -0.065,
+        'spine_03': -0.125,
+        'neck_01': -0.060,
+    }
+
+    for anim in doc.get('animations', []):
+        aname = anim.get('name', '')
+        if aname not in ('Idle', 'Walk'):
+            continue
+        ch_map = {(ch['target']['node'], ch['target']['path']): ch for ch in anim['channels']}
+        pel_t_ch = ch_map.get((by_name['pelvis'], 'translation'))
+        pel_out_idx = anim['samplers'][pel_t_ch['sampler']]['output'] if pel_t_ch else None
+        key_count = len(get_acc(doc, bin_buf, pel_out_idx)) if pel_out_idx is not None else 0
+
+        old_ys = []
+        if key_count:
+            key_data = {(ni, pk): get_acc(doc, bin_buf, anim['samplers'][ch['sampler']]['output']).astype(np.float64)
+                        for (ni, pk), ch in ch_map.items()}
+            for k in range(key_count):
+                ov = {}
+                for (ni, pk), arr in key_data.items():
+                    ov.setdefault(ni, {})['r' if pk == 'rotation' else 't'] = arr[min(k, len(arr) - 1)]
+                wk, _ = compute_worlds(nodes, ov)
+                old_ys.append(min(wk[by_name['foot_l']][1, 3], wk[by_name['foot_r']][1, 3],
+                                  wk[by_name['ball_l']][1, 3], wk[by_name['ball_r']][1, 3]))
+
+        for jname, ang in pitch_corr.items():
+            ni = by_name[jname]
+            ch = ch_map.get((ni, 'rotation'))
+            if not ch:
+                continue
+            local_world_x = rest_worlds[ni][:3, :3].T @ np.array([1.0, 0.0, 0.0])
+            dq = axis_angle_quat(local_world_x, ang)
+            out_idx = anim['samplers'][ch['sampler']]['output']
+            qs = get_acc(doc, bin_buf, out_idx).astype(np.float64)
+            qs_new = quat_mul(qs, dq)
+            qs_new[-1] = qs_new[0]
+            set_acc(doc, bin_buf, out_idx, qs_new.astype(np.float32))
+
+        if pel_out_idx is not None and old_ys:
+            pel_t = get_acc(doc, bin_buf, pel_out_idx).astype(np.float64)
+            key_data = {(ni, pk): get_acc(doc, bin_buf, anim['samplers'][ch['sampler']]['output']).astype(np.float64)
+                        for (ni, pk), ch in ch_map.items()}
+            for k in range(key_count):
+                ov = {}
+                for (ni, pk), arr in key_data.items():
+                    ov.setdefault(ni, {})['r' if pk == 'rotation' else 't'] = arr[min(k, len(arr) - 1)]
+                wk, _ = compute_worlds(nodes, ov)
+                new_y = min(wk[by_name['foot_l']][1, 3], wk[by_name['foot_r']][1, 3],
+                            wk[by_name['ball_l']][1, 3], wk[by_name['ball_r']][1, 3])
+                dy = new_y - old_ys[k]
+                pel_t[k] += root_rot_inv @ np.array([0.0, -dy, 0.0])
+            pel_t[-1] = pel_t[0]
+            set_acc(doc, bin_buf, pel_out_idx, pel_t.astype(np.float32))
+
+    extras['tripoPostureMendedRevision'] = 1
+    write_glb(path, doc, bin_buf)
+    print(f'mended Tripo upright posture: {path}')
+
+
 if __name__ == '__main__':
+    import sys
     mend_classic_glb('assets/crew/sailor-classic.glb', female=False)
     mend_classic_glb('assets/crew/sailor-female-classic.glb', female=True)
+    if '--tripo' in sys.argv:
+        for tripo_glb in (
+            'assets/crew/sailor.glb',
+            'assets/crew/sailor-female.glb',
+            'assets/crew/captain.glb',
+            'assets/crew/soldier-1550.glb',
+            'assets/crew/indigenous-algonquian-male.glb',
+            'assets/crew/indigenous-algonquian-female.glb',
+            'assets/crew/indigenous-caribbean-male.glb',
+            'assets/crew/indigenous-caribbean-female.glb',
+            'assets/crew/indigenous-maya-male.glb',
+            'assets/crew/indigenous-maya-female.glb',
+            'assets/crew/indigenous-andean-male.glb',
+            'assets/crew/indigenous-andean-female.glb',
+        ):
+            mend_tripo_posture_glb(tripo_glb)

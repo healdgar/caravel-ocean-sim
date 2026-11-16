@@ -5,7 +5,7 @@
 // befallen people lives on the GPU, for the last few towns visited, and the fallen lie a day by the game's calendar.
 // It is not saved: after a reload the ruins are still there, and the people are all back on their feet.
 import { requestOnce } from './gpu-program-cache.js';
-import { createIndigenousCrewModels } from './crew.js';
+import { createIndigenousCrewModels, colonialGroomMask, suppressCrownHairUnderHat } from './crew.js';
 import { packCrewFaceW, townComponentMaskForLook } from './crew-components.js';
 import { DRESS_MASK_SCALE, indigenousDress } from './indigenous-dress.js';
 import { createDistantCrewLOD } from './crew-lod.js';
@@ -68,8 +68,12 @@ function townLooks(random, indigenous, cultureId) {
     data.set(linearRGB(person.skin), at + 8);
     data[at + 11] = model;
     data.set(linearRGB(person.hair), at + 12);
+    const fullComp = townComponentMaskForLook(model, i, null, i % ELITE_LOOK_EVERY === 0);
+    const hat = (fullComp >> 3) & 7;
+    const sex = model ? 'female' : 'male';
+    data[at + 15] = suppressCrownHairUnderHat(colonialGroomMask(sex, i), hat, sex) / DRESS_MASK_SCALE;
     data.set(person.face, at + 16);
-    data[at + 19] = packCrewFaceW(person.face[3], townComponentMaskForLook(model, i, null, i % ELITE_LOOK_EVERY === 0), false);
+    data[at + 19] = packCrewFaceW(person.face[3], fullComp & ~0x1c7, false);
   }
   return data;
 }
@@ -144,7 +148,6 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     geometryFor.set(model, entry);
     return entry;
   };
-  let indigenousModels = null;
 
   let activePort = null, crowd = null, frameCount = 0;
   // What has befallen each town's people, kept while the town is out of reach so that the fallen are still lying there
@@ -177,7 +180,7 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     const streets = port?.streets;
     if (!streets?.people) return;
     const indigenous = Boolean(port.hasIndigenousSettlement && !port.hasColonialPort);
-    const set = indigenous ? (indigenousModels ??= createIndigenousCrewModels(models)) : models;
+    const set = indigenous ? createIndigenousCrewModels(models, port.indigenousSettlement?.cultureId) : models;
     const geometries = set.slice(0, MODELS).map((model, i) => geometry(model, i, indigenous));
     const people = Math.max(1, Math.round(streets.people * (isMobile ? MOBILE_SHARE : 1)));
     const bucketSpan = Math.ceil(people / STORAGE_ALIGNMENT_BODIES) * STORAGE_ALIGNMENT_BODIES;

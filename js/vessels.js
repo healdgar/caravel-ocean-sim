@@ -34,14 +34,41 @@ export function copyVessel(source,{id='companion',modelId=source.modelId??'nina'
 
 export function createVesselProbeState(){return {time:-1,revision:-1,rate:{heave:0,pitch:0,roll:0}};}
 
+function sanitizeVesselState(boat,fallbackX=0,fallbackZ=0,fallbackHeading=0){
+  if(!boat)return;
+  const sinkage=Number.isFinite(boat.hydrodynamics?.sinkage)?boat.hydrodynamics.sinkage:0;
+  if(!Number.isFinite(boat.x))boat.x=Number.isFinite(fallbackX)?fallbackX:0;
+  if(!Number.isFinite(boat.z))boat.z=Number.isFinite(fallbackZ)?fallbackZ:0;
+  if(!Number.isFinite(boat.heading))boat.heading=Number.isFinite(fallbackHeading)?fallbackHeading:0;
+  if(!Number.isFinite(boat.heave))boat.heave=-sinkage;
+  if(!Number.isFinite(boat.pitch))boat.pitch=0;
+  if(!Number.isFinite(boat.roll))boat.roll=0;
+  for(const k of ['yawRate','surgeVelocity','surgeAcceleration','leewayVelocity','leewayDistance','heaveVelocity','pitchVelocity','rollVelocity','waveSlopeX','waveSlopeZ']){
+    if(k in boat&&!Number.isFinite(boat[k]))boat[k]=0;
+  }
+  if(boat.target){
+    for(const key of AXES){
+      if(!Number.isFinite(boat.target[key]))boat.target[key]=0;
+    }
+  }
+}
+
 export function acceptVesselProbe(boat,state,heights,time,revision,length,beam){
+  if(!heights||heights.length<12)return false;
+  for(let i=0;i<heights.length;i++){
+    if(!Number.isFinite(heights[i])||Math.abs(heights[i])>=1e4)return false;
+  }
+  if(!Number.isFinite(time)||!Number.isFinite(length)||!Number.isFinite(beam))return false;
   if(revision!==boat.revision)return false;
-  const next={...boatTargets(heights.subarray(0,9),length,beam),...boatWaveAttitude(heights[10],heights[11],boat.heading)};
+  const probeSlice=typeof heights.subarray==='function'?heights.subarray(0,9):heights.slice(0,9);
+  const next={...boatTargets(probeSlice,length,beam),...boatWaveAttitude(heights[10],heights[11],boat.heading)};
+  if(!AXES.every((key)=>Number.isFinite(next[key])))return false;
   const elapsed=time-state.time,placed=state.time<0,valid=state.revision===revision&&elapsed>0&&elapsed<WAVE_READING_LIFE_S;
   for(const key of AXES){
     const limit=key==='heave'?8:1.2;
     const rate=valid?Math.max(-limit,Math.min(limit,(next[key]-boat.target[key])/elapsed)):0;
     state.rate[key]=valid?state.rate[key]+(rate-state.rate[key])*(1-Math.exp(-elapsed*8)):0;
+    if(!Number.isFinite(state.rate[key]))state.rate[key]=0;
     if(placed){boat[key]=next[key]-(key==='heave'?boat.hydrodynamics.sinkage:0);boat[key+'Velocity']=0;}
   }
   if(placed)boat.revision++;
@@ -51,6 +78,13 @@ export function acceptVesselProbe(boat,state,heights,time,revision,length,beam){
 }
 
 export function stepVessel(boat,probe,dt,time,windSpeed,windDirection,steering=0,terrain=null){
+  const safeX=Number.isFinite(boat.x)?boat.x:0,safeZ=Number.isFinite(boat.z)?boat.z:0,safeHeading=Number.isFinite(boat.heading)?boat.heading:0;
+  sanitizeVesselState(boat,safeX,safeZ,safeHeading);
+  if(!Number.isFinite(dt)||dt<0)dt=0;
+  if(!Number.isFinite(time))time=0;
+  if(!Number.isFinite(windSpeed))windSpeed=0;
+  if(!Number.isFinite(windDirection))windDirection=0;
+  if(!Number.isFinite(steering))steering=0;
   const dmg=boat.damage;
   const extraSink=dmg?Math.max(0,(dmg.floodingSinkage??0)-Math.max(0,boat.hydrodynamics.sinkage)):0;
   if(dmg?.settledWreck){
@@ -60,13 +94,18 @@ export function stepVessel(boat,probe,dt,time,windSpeed,windDirection,steering=0
     boat.heave=-boat.hydrodynamics.sinkage-extraSink;
     boat.roll=(dmg?.floodingRoll??0)+(boat.groundingRoll??0);
     boat.pitch=(dmg?.floodingPitch??0)+(boat.groundingPitch??0);
+    sanitizeVesselState(boat,safeX,safeZ,safeHeading);
     return;
   }
-  const previousX=boat.x,previousZ=boat.z,age=Math.max(0,time-probe.time);
+  const previousX=boat.x,previousZ=boat.z,age=Math.max(0,time-(Number.isFinite(probe?.time)?probe.time:time));
   const predicted=boat.waveAttitude??={heave:0,pitch:0,roll:0};
-  const fresh=age<WAVE_READING_LIFE_S&&probe.revision===boat.revision;
+  const fresh=age<WAVE_READING_LIFE_S&&probe?.revision===boat.revision;
   const waveDecay=dmg?.sunk?Math.exp(-(dmg.sinkingDepth??0)/5):1;
-  for(const key of AXES)predicted[key]=(boat.target[key]+(fresh?probe.rate[key]:0)*age)*waveDecay;
+  for(const key of AXES){
+    const rateVal=fresh&&Number.isFinite(probe?.rate?.[key])?probe.rate[key]:0;
+    predicted[key]=(boat.target[key]+rateVal*age)*waveDecay;
+    if(!Number.isFinite(predicted[key]))predicted[key]=0;
+  }
   if(dmg){
     predicted.roll+=(dmg.floodingRoll??0);
     predicted.pitch+=(dmg.floodingPitch??0);
@@ -95,5 +134,7 @@ export function stepVessel(boat,probe,dt,time,windSpeed,windDirection,steering=0
     }
     if(terrain)boat.coastBlocked=terrain.constrain(boat,previousX,previousZ);
   }
-  boatSpring(boat,'heave',predicted.heave-boat.hydrodynamics.sinkage-extraSink,boat.hydrodynamics.heaveOmega,dt,fresh?(probe.rate.heave*waveDecay):0);
+  const heaveRate=fresh&&Number.isFinite(probe?.rate?.heave)?probe.rate.heave*waveDecay:0;
+  boatSpring(boat,'heave',predicted.heave-boat.hydrodynamics.sinkage-extraSink,boat.hydrodynamics.heaveOmega,dt,heaveRate);
+  sanitizeVesselState(boat,previousX,previousZ,safeHeading);
 }

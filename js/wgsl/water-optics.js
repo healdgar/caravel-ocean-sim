@@ -29,6 +29,36 @@ fn waterRefract(view:vec3f,normal:vec3f)->vec3f {
   if(dot(n,v)<0.0){n=-n;}
   return normalize(refract(-v,n,1.0/WATER_REFRACTIVE_INDEX));
 }
+fn waterOpticsCleanTexel(c:vec4f)->vec4f {
+  let ok=(c==c)&((bitcast<vec4u>(c)&vec4u(0x7fffffffu))<vec4u(0x7f800000u));
+  let safe=select(vec4f(0.0),c,ok);
+  return vec4f(clamp(safe.rgb,vec3f(0.0),vec3f(6.0e4)),clamp(safe.a,0.0,6.0e4));
+}
+`;
+
+export const WATER_SCENE_MIP_WGSL = /* wgsl */ `
+@group(0) @binding(0) var sceneMipSrc: texture_2d<f32>;
+@group(0) @binding(1) var sceneMipDst: texture_storage_2d<rgba16float, write>;
+fn waterSceneMipFetch(p: vec2i) -> vec4f {
+  let c = textureLoad(sceneMipSrc, p, 0);
+  let ok = (c == c) & ((bitcast<vec4u>(c) & vec4u(0x7fffffffu)) < vec4u(0x7f800000u));
+  let safe = select(vec4f(0.0), c, ok);
+  return clamp(safe, vec4f(0.0), vec4f(6.0e4));
+}
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) id: vec3u) {
+  let size = textureDimensions(sceneMipDst);
+  if (any(id.xy >= size)) { return; }
+  let ext = vec2i(textureDimensions(sceneMipSrc)) - vec2i(1);
+  let base = vec2i(id.xy) * 2;
+  let v = 0.25 * (
+    waterSceneMipFetch(min(base, ext)) +
+    waterSceneMipFetch(min(base + vec2i(1, 0), ext)) +
+    waterSceneMipFetch(min(base + vec2i(0, 1), ext)) +
+    waterSceneMipFetch(min(base + vec2i(1, 1), ext))
+  );
+  textureStore(sceneMipDst, vec2i(id.xy), v);
+}
 `;
 
 // Opaque scene radiance and forward camera depth are captured before water.
@@ -45,9 +75,9 @@ fn waterSourceSample(uv:vec2f)->vec4f {
   // filter radiance only where neighboring samples describe the same surface.
   let dimensions=vec2i(textureDimensions(underwaterSource));
   let pixel=clamp(vec2i(floor(uv*vec2f(dimensions))),vec2i(0),dimensions-1);
-  let nearest=textureLoad(underwaterSource,pixel,0);
+  let nearest=waterOpticsCleanTexel(textureLoad(underwaterSource,pixel,0));
   if(nearest.a<=0.0){return vec4f(0);}
-  let filtered=textureSampleLevel(underwaterSource,opticsSampler,uv,0.0);
+  let filtered=waterOpticsCleanTexel(textureSampleLevel(underwaterSource,opticsSampler,uv,0.0));
   let continuous=abs(filtered.a-nearest.a)<max(.02,nearest.a*.005);
   return vec4f(select(nearest.rgb,filtered.rgb,continuous),select(nearest.a,filtered.a,continuous));
 }
@@ -134,9 +164,9 @@ export const WATER_AIR_TRANSMISSION=/* wgsl */ `
 fn waterAboveSourceSample(uv:vec2f)->vec4f {
   let dimensions=vec2i(textureDimensions(aboveWaterSource));
   let pixel=clamp(vec2i(floor(uv*vec2f(dimensions))),vec2i(0),dimensions-1);
-  let nearest=textureLoad(aboveWaterSource,pixel,0);
+  let nearest=waterOpticsCleanTexel(textureLoad(aboveWaterSource,pixel,0));
   if(nearest.a<=0.0){return vec4f(0);}
-  let filtered=textureSampleLevel(aboveWaterSource,opticsSampler,uv,0.0);
+  let filtered=waterOpticsCleanTexel(textureSampleLevel(aboveWaterSource,opticsSampler,uv,0.0));
   let continuous=abs(filtered.a-nearest.a)<max(.02,nearest.a*.005);
   return vec4f(select(nearest.rgb,filtered.rgb,continuous),nearest.a);
 }

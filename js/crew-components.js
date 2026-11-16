@@ -1,7 +1,45 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // Modular 3D character component attachment & deterministic 15-bit GPU appearance packing
 // for crew, fort garrisons, and port townsfolk. Zero extra draw calls; zero fragment discard.
-import { CREW_COMPONENT_PACKS } from './models/crew-components.js';
+const CREW_COMPONENTS_ASSET_URL = 'assets/crew/components-1550.json';
+let cachedCrewComponentPacks = null;
+let pendingCrewComponentPacks = null;
+
+export async function ensureCrewComponentPacks() {
+  if (cachedCrewComponentPacks) return cachedCrewComponentPacks;
+  if (!pendingCrewComponentPacks && typeof fetch === 'function') {
+    pendingCrewComponentPacks = fetch(CREW_COMPONENTS_ASSET_URL)
+      .then((res) => {
+        if (!res.ok) throw Error('Crew component asset unavailable: ' + CREW_COMPONENTS_ASSET_URL);
+        return res.json();
+      })
+      .then((json) => {
+        cachedCrewComponentPacks = Object.freeze(json);
+        return cachedCrewComponentPacks;
+      })
+      .catch((err) => {
+        pendingCrewComponentPacks = null;
+        throw err;
+      });
+  }
+  return pendingCrewComponentPacks;
+}
+
+export function getCrewComponentPacks() {
+  if (cachedCrewComponentPacks) return cachedCrewComponentPacks;
+  if (typeof process !== 'undefined' && typeof process.getBuiltinModule === 'function') {
+    const fsMod = process.getBuiltinModule('node:fs');
+    const pathMod = process.getBuiltinModule('node:path');
+    if (fsMod && pathMod && /^assets\//.test(CREW_COMPONENTS_ASSET_URL)) {
+      const fullPath = pathMod.resolve(process.cwd(), CREW_COMPONENTS_ASSET_URL);
+      if (fsMod.existsSync(fullPath)) {
+        cachedCrewComponentPacks = Object.freeze(JSON.parse(fsMod.readFileSync(fullPath, 'utf8')));
+        return cachedCrewComponentPacks;
+      }
+    }
+  }
+  return null;
+}
 
 function decodeCrewComponentB64(b64) {
   if (typeof Buffer !== 'undefined') {
@@ -191,7 +229,8 @@ export function townComponentMaskForLook(modelIndex, lookIndex, random, elite = 
 // Leaves `model.distantIndices` untouched so distant crowd and shadow passes stay <= 320 triangles.
 export function attachCrewComponents(model, sex = 'male') {
   if (!model || model.componentsAttached) return model;
-  const pack = CREW_COMPONENT_PACKS[sex === 'female' ? 'female' : 'male'];
+  const packs = getCrewComponentPacks();
+  const pack = packs ? packs[sex === 'female' ? 'female' : 'male'] : null;
   if (!pack) return model;
 
   const baseVertCount = model.vertexCount ?? (model.vertices.byteLength / 60);
@@ -226,6 +265,7 @@ export function attachCrewComponents(model, sex = 'male') {
     const compId = qBytes[qOff + 9];
     const slot = qBytes[qOff + 10];
     const shade = 0.50 + (qBytes[qOff + 11] / 255) * 0.75;
+    const hatLiftY = (compId === 7 || compId === 9) ? 0.018 : (compId === 6 ? 0.008 : 0.0);
 
     const j0 = qBytes[qOff + 12];
     const j1 = qBytes[qOff + 13];
@@ -238,7 +278,7 @@ export function attachCrewComponents(model, sex = 'male') {
     const wSum = (w0 + w1 + w2 + w3) || 255;
 
     vf[fOff + 0] = px;
-    vf[fOff + 1] = py;
+    vf[fOff + 1] = py + hatLiftY;
     vf[fOff + 2] = pz;
     vf[fOff + 3] = nx0 / nLen;
     vf[fOff + 4] = ny0 / nLen;

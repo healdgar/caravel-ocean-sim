@@ -7,71 +7,71 @@
  "variants": 4,
  "maps": 3,
  "heightMetres": 37,
- "maxTrees": 82,
+ "maxTrees": 98,
  "treeFloats": 8,
  "harbourHeight": 0.94,
  "look": {
-  "alike": 0.7879,
+  "alike": 0.7253,
   "transmission": 0.1377,
-  "roughness": 0.8677,
+  "roughness": 0.8658,
   "undersideGain": [
-   2.04,
-   1.737,
-   4.9539
+   1.9834,
+   1.6715,
+   4.6997
   ]
  },
  "files": {
   "maps.bin": {
    "bytes": 1048512,
-   "sha256": "41665f8c541b04534616cfbc6a76b34fee6041ab599e4ba3a115043cde8f44a1",
+   "sha256": "151380e23f2e3024a3e254d4243fa7e3b0bb40cb43bc9b4a720f918243f6487d",
    "gzip": {
     "file": "maps.bin.gz",
-    "bytes": 812794,
-    "sha256": "2a131a3c4f5a2253a4a74eccbc80686bcc760ff8ddefa27db49796cd12e6f26c"
+    "bytes": 781500,
+    "sha256": "0d05e494c8b01c43ec14356ea34828dea2c440e9f45668e98af4798f66634cb8"
    }
   },
   "trees.bin": {
-   "bytes": 10496,
-   "sha256": "e7e335bffc692077bc4d182b6aca4ee969b153ecf9d684c5cca0499bdb9774b7",
+   "bytes": 12544,
+   "sha256": "61be603f3c825ee13ab2840c3bcf68d24b60bae55311e9f70029746882b39ccd",
    "gzip": {
     "file": "trees.bin.gz",
-    "bytes": 5237,
-    "sha256": "c386f26445b26a63b9fe8f7c4223ad9f61d23487e77d71e60c19e4c8d1108c8c"
+    "bytes": 5913,
+    "sha256": "9c2f4c55a86fb0e62e94b33fc507da6b40658e0e4577b67db7d89e9c4326cc6f"
    }
   }
  },
  "groves": [
   {
-   "trees": 71,
-   "tall": 21,
-   "shared": 31,
-   "standingShare": 0.9906,
-   "meanHeightMetres": 20.76,
-   "highestMetres": 27.4
+   "trees": 84,
+   "tall": 22,
+   "shared": 38,
+   "standingShare": 0.9429,
+   "meanHeightMetres": 20.07,
+   "highestMetres": 25.9
   },
   {
-   "trees": 77,
-   "tall": 21,
-   "shared": 31,
-   "standingShare": 0.9888,
-   "meanHeightMetres": 20.28,
-   "highestMetres": 26.58
-  },
-  {
-   "trees": 77,
+   "trees": 93,
    "tall": 20,
-   "shared": 31,
-   "standingShare": 0.9901,
-   "meanHeightMetres": 20.46,
-   "highestMetres": 26.6
+   "shared": 38,
+   "standingShare": 0.9648,
+   "meanHeightMetres": 20.04,
+   "highestMetres": 25.88
+  },
+  {
+   "trees": 97,
+   "tall": 20,
+   "shared": 38,
+   "standingShare": 0.9694,
+   "meanHeightMetres": 19.92,
+   "highestMetres": 25.8
   },
   {
    "trees": 81,
-   "tall": 20,
-   "shared": 31,
-   "standingShare": 0.9897,
-   "meanHeightMetres": 20.11,
-   "highestMetres": 26.48
+   "tall": 24,
+   "shared": 38,
+   "standingShare": 0.9448,
+   "meanHeightMetres": 20.1,
+   "highestMetres": 25.92
   }
  ]
 }

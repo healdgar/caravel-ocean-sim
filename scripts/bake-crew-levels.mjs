@@ -25,21 +25,91 @@ const primitive = doc.meshes[0].primitives[0];
 if (primitive.extras?.crewLevels) throw Error('This body already has levels. Fit it again first');
 const options = doc.images?.length ? { ...ASSET_TYPES.character, ignoreUvs: false } : ASSET_TYPES.character;
 const decimator = createDecimator(bytes, options), diagonal = decimator.diagonal;
+let baseIndices = null;
 if (baseBudget) {
-  const row = decimator.finish(decimator.atBudget(baseBudget)), indices = Uint32Array.from(sourceIndices(row)[0].indices), data = Buffer.from(indices.buffer);
+  const row = decimator.finish(decimator.atBudget(baseBudget));
+  baseIndices = Uint32Array.from(sourceIndices(row)[0].indices);
   console.log(`base ${baseBudget}: ${row.triangles} triangles, surface ${(row.distance / diagonal * 100).toFixed(2)}%, outline moved ${(row.drift / diagonal * 100).toFixed(2)}%, overlap ${(row.overlap * 100).toFixed(1)}%`);
-  const acc = doc.accessors[primitive.indices], view = doc.bufferViews[acc.bufferView];
-  const oldStart = view.byteOffset ?? 0, oldLen = view.byteLength, delta = data.length - oldLen;
-  bin = Buffer.concat([bin.subarray(0, oldStart), data, bin.subarray(oldStart + oldLen)]);
-  view.byteLength = data.length;
-  acc.count = indices.length;
-  for (const v of doc.bufferViews) if ((v.byteOffset ?? 0) > oldStart) v.byteOffset += delta;
+}
+const levelArrays = budgets.map((budget) => {
+  const row = decimator.finish(decimator.atBudget(budget));
+  console.log(`${budget}: ${row.triangles} triangles, surface ${(row.distance / diagonal * 100).toFixed(2)}%, outline moved ${(row.drift / diagonal * 100).toFixed(2)}%, overlap ${(row.overlap * 100).toFixed(1)}%`);
+  return Uint32Array.from(sourceIndices(row)[0].indices);
+});
+if (baseIndices) {
+  const posAcc = doc.accessors[primitive.attributes.POSITION];
+  const usedFlags = new Uint8Array(posAcc.count);
+  for (const idx of baseIndices) usedFlags[idx] = 1;
+  for (const arr of levelArrays) for (const idx of arr) usedFlags[idx] = 1;
+  // Also preserve at least 1 vertex of each garment tag [0..4] on untextured crew meshes so palette invariants hold
+  if (!doc.images?.length && primitive.attributes.COLOR_0 !== undefined) {
+    const cAcc = doc.accessors[primitive.attributes.COLOR_0], cView = doc.bufferViews[cAcc.bufferView];
+    const cStart = (cView.byteOffset ?? 0) + (cAcc.byteOffset ?? 0);
+    const haveTag = new Set();
+    for (let v = 0; v < posAcc.count; v++) {
+      if (!usedFlags[v]) continue;
+      const bVal = bin.readFloatLE(cStart + v * 12 + 8);
+      haveTag.add(Math.floor(Math.max(bVal, 0) * 0.5 + 1e-5));
+    }
+    for (let v = 0; v < posAcc.count && haveTag.size < 5; v++) {
+      const bVal = bin.readFloatLE(cStart + v * 12 + 8);
+      const tag = Math.floor(Math.max(bVal, 0) * 0.5 + 1e-5);
+      if (tag >= 0 && tag <= 4 && !haveTag.has(tag)) { usedFlags[v] = 1; haveTag.add(tag); }
+    }
+  }
+  const kept = [], remap = new Uint32Array(posAcc.count);
+  for (let v = 0; v < posAcc.count; v++) if (usedFlags[v]) { remap[v] = kept.length; kept.push(v); }
+  for (let i = 0; i < baseIndices.length; i++) baseIndices[i] = remap[baseIndices[i]];
+  for (const arr of levelArrays) for (let i = 0; i < arr.length; i++) arr[i] = remap[arr[i]];
+  const viewReplacements = new Map();
+  const COMP_BYTES = { 5120: 1, 5121: 1, 5122: 2, 5123: 2, 5125: 4, 5126: 4 };
+  const TYPE_LEN = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT4: 16 };
+  for (const [attrName, accIdx] of Object.entries(primitive.attributes)) {
+    const acc = doc.accessors[accIdx], view = doc.bufferViews[acc.bufferView];
+    const elemBytes = COMP_BYTES[acc.componentType] * TYPE_LEN[acc.type];
+    const stride = view.byteStride ?? elemBytes;
+    const srcStart = (view.byteOffset ?? 0) + (acc.byteOffset ?? 0);
+    const compact = Buffer.alloc(kept.length * elemBytes);
+    for (let i = 0; i < kept.length; i++) {
+      const off = srcStart + kept[i] * stride;
+      bin.copy(compact, i * elemBytes, off, off + elemBytes);
+    }
+    acc.count = kept.length;
+    delete acc.byteOffset;
+    delete view.byteStride;
+    if (attrName === 'POSITION') {
+      const mins = [Infinity, Infinity, Infinity], maxs = [-Infinity, -Infinity, -Infinity];
+      for (let i = 0; i < kept.length; i++) for (let c = 0; c < 3; c++) {
+        const val = compact.readFloatLE(i * 12 + c * 4);
+        if (val < mins[c]) mins[c] = val;
+        if (val > maxs[c]) maxs[c] = val;
+      }
+      acc.min = mins; acc.max = maxs;
+    }
+    viewReplacements.set(acc.bufferView, compact);
+  }
+  const idxAcc = doc.accessors[primitive.indices];
+  idxAcc.count = baseIndices.length;
+  delete idxAcc.byteOffset;
+  viewReplacements.set(idxAcc.bufferView, Buffer.from(baseIndices.buffer));
+  const rebuiltChunks = [];
+  let cursor = 0;
+  for (let vi = 0; vi < doc.bufferViews.length; vi++) {
+    const v = doc.bufferViews[vi];
+    const slice = viewReplacements.get(vi) ?? bin.subarray(v.byteOffset ?? 0, (v.byteOffset ?? 0) + v.byteLength);
+    const pad = (4 - cursor % 4) % 4;
+    if (pad) { rebuiltChunks.push(Buffer.alloc(pad)); cursor += pad; }
+    v.byteOffset = cursor;
+    v.byteLength = slice.length;
+    rebuiltChunks.push(slice);
+    cursor += slice.length;
+  }
+  bin = Buffer.concat(rebuiltChunks);
 }
 const chunks = [bin];
 let offset = bin.length;
-primitive.extras = { crewLevels: budgets.map((budget) => {
-  const row = decimator.finish(decimator.atBudget(budget)), indices = Uint32Array.from(sourceIndices(row)[0].indices), data = Buffer.from(indices.buffer);
-  console.log(`${budget}: ${row.triangles} triangles, surface ${(row.distance / diagonal * 100).toFixed(2)}%, outline moved ${(row.drift / diagonal * 100).toFixed(2)}%, overlap ${(row.overlap * 100).toFixed(1)}%`);
+primitive.extras = { crewLevels: levelArrays.map((indices) => {
+  const data = Buffer.from(indices.buffer);
   const pad = (4 - offset % 4) % 4;
   chunks.push(Buffer.alloc(pad), data);
   offset += pad;

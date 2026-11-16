@@ -763,7 +763,7 @@ fn canvasTear(uv:vec2f,p:vec3f,material:u32,damage:f32)->CanvasTear {
       let paneId = floor(paneCoord);
       let paneUV = fract(paneCoord) - vec2f(0.5);
       let paneHash = fract(sin(dot(paneId, vec2f(127.1, 311.7))) * 43758.5453);
-      let angle = atan2(paneUV.y, paneUV.x);
+      let angle = select(0.0, atan2(paneUV.y, paneUV.x), dot(paneUV, paneUV) > 1e-8);
       // Angular jagged triangular glass teeth clinging to the muntin putty frame
       let shardRay = sin(angle * 7.0 + paneHash * 18.0) * 0.55 + cos(angle * 13.0 - paneHash * 29.0) * 0.45;
       let radialDist = length(paneUV * vec2f(1.08, 0.94));
@@ -957,10 +957,10 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   let size=textureDimensions(dst); if(any(id.xy>=size)){return;}
   let extent=vec2i(textureDimensions(src))-1;
   let base=vec2i(id.xy)*2;
-  let a=textureLoad(src,min(base,extent),0).rgb;
-  let b=textureLoad(src,min(base+vec2i(1,0),extent),0).rgb;
-  let c=textureLoad(src,min(base+vec2i(0,1),extent),0).rgb;
-  let d=textureLoad(src,min(base+vec2i(1,1),extent),0).rgb;
+  let a=min(saneHDR(textureLoad(src,min(base,extent),0).rgb),vec3f(6.0e4));
+  let b=min(saneHDR(textureLoad(src,min(base+vec2i(1,0),extent),0).rgb),vec3f(6.0e4));
+  let c=min(saneHDR(textureLoad(src,min(base+vec2i(0,1),extent),0).rgb),vec3f(6.0e4));
+  let d=min(saneHDR(textureLoad(src,min(base+vec2i(1,1),extent),0).rgb),vec3f(6.0e4));
   let weights=1.0/(vec4f(dot(a,vec3f(0.2126,0.7152,0.0722)),dot(b,vec3f(0.2126,0.7152,0.0722)),dot(c,vec3f(0.2126,0.7152,0.0722)),dot(d,vec3f(0.2126,0.7152,0.0722)))*0.03+1.0);
   // Infinity weighs nothing here, and nothing times infinity is NaN: one bad pixel must not reach a hull.
   let color=saneHDR((a*weights.x+b*weights.y+c*weights.z+d*weights.w)/dot(weights,vec4f(1.0)));

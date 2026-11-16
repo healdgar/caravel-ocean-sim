@@ -86,7 +86,11 @@ ${originalSignature}{
   let eyeDepth=dot(captureWorld-F.camPos.xyz,F.camFwd.xyz);
   if(eyeDepth<=0.0){discard;return vec4f(0);}
   let material=waterCaptureMaterial(${argumentsList});
-  return vec4f(material.rgb,eyeDepth);
+  let rgbOk=(material.rgb==material.rgb)&((bitcast<vec3u>(material.rgb)&vec3u(0x7fffffffu))<vec3u(0x7f800000u));
+  let safeRgb=clamp(select(vec3f(0.0),material.rgb,rgbOk),vec3f(0.0),vec3f(6.0e4));
+  let depthOk=(eyeDepth==eyeDepth)&&((bitcast<u32>(eyeDepth)&0x7fffffffu)<0x7f800000u);
+  let safeDepth=select(0.0,clamp(eyeDepth,0.0,6.0e4),depthOk);
+  return vec4f(safeRgb,safeDepth);
 }
 `;
 }

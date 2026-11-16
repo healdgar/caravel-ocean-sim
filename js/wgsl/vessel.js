@@ -28,7 +28,9 @@ fn gunFlashSurface(world:vec3f,n:vec3f,eye:vec3f,albedo:vec3f,rough:f32)->vec3f 
     let scale=vec3f(hull.size.x/3.6,hull.right.w,hull.size.y/12.0);
     let light=hull.origin.xyz+rotateHull(local*scale);
     let delta=light-world;let d=max(.25,length(delta));let l=delta/d;
-    let halfV=normalize(l+eye);let spec=pow(max(dot(n,halfV),0.0),mix(90.0,8.0,rough));
+    let halfRaw=l+eye;
+    let halfV=select(vec3f(0.0,1.0,0.0),normalize(halfRaw),length(halfRaw)>1e-5);
+    let spec=pow(max(dot(n,halfV),0.0),mix(90.0,8.0,rough));
     // A finite, warm black-powder flash. Illumination falls with distance, lasts
     // less than a tenth of a second, and adds no persistent glow to the wood.
     result+=vec3f(1.0,.47,.12)*energy*90.0/(1.0+d*d)*(albedo*.31831*max(dot(n,l),0.0)+spec*.07);
@@ -42,7 +44,9 @@ fn gunFlashSurface(world:vec3f,n:vec3f,eye:vec3f,albedo:vec3f,rough:f32)->vec3f 
     let fireLocal=vec3f(sin(t*7.1)*0.25,1.85*hull.right.w,fireDesignZ);
     let fireLight=hull.origin.xyz+rotateHull(fireLocal);
     let fDelta=fireLight-world;let fd=max(0.6,length(fDelta));let fl=fDelta/fd;
-    let fHalf=normalize(fl+eye);let fSpec=pow(max(dot(n,fHalf),0.0),mix(64.0,6.0,rough));
+    let fHalfRaw=fl+eye;
+    let fHalf=select(vec3f(0.0,1.0,0.0),normalize(fHalfRaw),length(fHalfRaw)>1e-5);
+    let fSpec=pow(max(dot(n,fHalf),0.0),mix(64.0,6.0,rough));
     let ndl=max(dot(n,fl),0.0)*0.92+0.08;
     result+=vec3f(1.0,0.36,0.07)*(fireInt*flicker*3.2/(2.2+fd*fd*0.95))*(albedo*0.31831*ndl+fSpec*0.015);
   }

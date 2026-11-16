@@ -73,7 +73,7 @@ fn detailStones(uv:vec2f,cells:i32,seed:u32,chance:f32,least:f32,most:f32)->vec3
     let rel=q-centre;
     let c=cos(r.z*TAU);let k=sin(r.z*TAU);
     let turned=vec2f(rel.x*c-rel.y*k,(rel.x*k+rel.y*c)/(.68+.32*s.x));
-    let angle=atan2(turned.y,turned.x);
+    let angle=select(0.0,atan2(turned.y,turned.x),dot(turned,turned)>1e-8);
     let radius=mix(least,most,s.y)*(1.0+.14*sin(angle*3.0+s.z*9.0)+.07*sin(angle*5.0+s.w*7.0));
     let at=length(turned)/radius;
     ring=max(ring,1.0-smoothstep(.95,1.55,at));

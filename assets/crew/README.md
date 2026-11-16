@@ -1,19 +1,33 @@
 # Crew assets
 
-`sailor.glb`: the male crew body, generated with Tripo on paid API credits and fitted to the classic
-skeleton: 15,692 triangles, 8,342 vertices, 65 joints; Idle, Walk and Brace clips. Its file carries lighter
-levels of 4,327, 1,569 and 320 triangles.
-`sailor-female.glb`: the female crew body, made the same way on the classic female skeleton: 15,353
-triangles, 7,742 vertices, 65 joints; the same clips and levels of 4,386, 1,552 and 320 triangles.
-`captain.glb`: the ship and presidio captain body, generated with Tripo on paid API credits, fitted to the
-classic skeleton (`--textured`) with its embedded 2048×2048 JPEG texture preserved, and decimated with
-`scripts/safe-decimate.mjs` (`ignoreUvs: false`): 3,600 base triangles (from 5,316 raw), 3,567 vertices,
-65 joints; Idle, Walk and Brace clips, and lighter baked levels of 1,500, 742 and 317 triangles.
-`sailor-classic.glb`: 993,696 bytes, 15,995 triangles, 65 joints; the same clips. Its skeleton and clips are
-what the male body is fitted to, and Indigenous men are built on it, because their dress re-sculpts its
-garment pieces.
-`sailor-female-classic.glb`: 1,212,816 bytes, 18,720 triangles, 65 joints; the same clips, retargeted to the
-distinct female base mesh with tied hair. The same goes for the female body and Indigenous women.
+`sailor.glb`: the 1550-era bald, clean-shaven male European mariner and townsman base body, generated with Tripo
+on paid credits and fitted without distortion to the classic 65-joint skeleton: 9,445 triangles, 4,742 vertices,
+65 joints; Idle, Walk and Brace clips, and baked levels of 3,748, 1,436 and 300 triangles.
+`sailor-female.glb`: the 1550-era bald, clean-shaven female European mariner and townswoman base body, made the
+same way on the classic female skeleton: 9,187 triangles, 4,608 vertices, 65 joints; the same clips and baked
+levels of 3,761, 1,420 and 298 triangles.
+`captain.glb`: the 1550-era bald, clean-shaven Iberian ship and presidio captain base body in velvet-trimmed
+doublet and trunk hose, generated with Tripo on paid credits, fitted (`--textured`) with its embedded 2048×2048
+JPEG texture preserved, and decimated with `scripts/safe-decimate.mjs` (`ignoreUvs: false`): 3,573 base triangles,
+4,275 vertices, 65 joints; Idle, Walk and Brace clips, and baked levels of 1,500, 650 and 294 triangles.
+`soldier-1550.glb`: the 1550-era bald, clean-shaven Iberian tercio/presidio garrison soldier in buff jerkin and
+slashed trunk hose: 4,738 triangles, 2,384 vertices, 65 joints; Idle, Walk and Brace clips, and baked levels of
+1,950, 790 and 278 triangles.
+`indigenous-{algonquian,caribbean,maya,andean}-{male,female}.glb`: eight regional bald, clean-shaven Indigenous
+character base bodies (~4,633–4,800 triangles, ~2,334–2,417 vertices, 65 joints; Idle, Walk and Brace clips, with
+baked levels around 1,950, 790 and 280 triangles) covering Algonquian/Woodland buckskin dress, Taíno/Kalinago/Tupinambá
+cotton *naguas* and body-paint base, coastal Maya woven *pati*/*ex* and *huipil*/*kub*, and Pacific/Andean *unku*
+and *anaku*/*lliklla* tunics across all nine `INDIGENOUS_CULTURE_REGIONS`.
+`groom-pack.glb`: ten dedicated Tripo-generated 3D hair, coif and 1550 facial-hair assets (`hair_male_1550_cropped`,
+`hair_male_1550_wavy`, `hair_female_1550_bun`, `hair_female_1550_coif`, `hair_indigenous_plaits`,
+`hair_indigenous_long`, `hair_algonquian_roach`, `beard_1550_pointed`, `beard_1550_mariner`, `beard_1550_tercio_strap`),
+stripped of mannequin geometry, registered onto canonical cranial/jaw landmarks (`scripts/prepare-groom-pack.mjs`),
+and decimated with `[near, mid, far]` levels (`155,580` bytes total). Runtime combines these as GPU-selectable
+optional dress pieces across ship crews, captains, garrison soldiers, colonial port villagers, and Indigenous
+villagers/canoe crews.
+`sailor-classic.glb` (993,696 bytes, 15,995 triangles, 65 joints) and `sailor-female-classic.glb` (1,212,816 bytes,
+18,720 triangles, 65 joints): the CC0 Quaternius Universal Base Character reference rigs whose 65-joint skeletons
+and animation clips anchor `scripts/fit-crew-body.py` and legacy unit tests.
 Each GLB contains all geometry, vertex colours, skeleton and animation.
 Runtime instances share each mesh and vary clothing, skin/hair colours, height,
 facial proportions and animation phase. Six instances of each model form the

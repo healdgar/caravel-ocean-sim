@@ -217,10 +217,20 @@ export const CLOUD_RESOLVE = /* wgsl */ `
 @group(0) @binding(4) var historyDepth:texture_2d<f32>;
 @group(0) @binding(5) var linearSampler:sampler;
 @group(0) @binding(6) var resolved:texture_storage_2d<rgba16float,write>;
+fn cloudClean4(v:vec4f)->vec4f {
+  let bad=(v!=v)|((bitcast<vec4u>(v)&vec4u(0x7fffffffu))>=vec4u(0x7f800000u));
+  let safe=select(v,vec4f(0.0),bad);
+  return vec4f(clamp(safe.rgb,vec3f(0.0),vec3f(6.0e4)),clamp(safe.a,0.0,1.0));
+}
+fn cloudScalarFinite(x:f32)->bool {
+  return (x==x)&&!(x!=x)&&((bitcast<u32>(x)&0x7fffffffu)<0x7f800000u);
+}
 @compute @workgroup_size(8,8)
 fn main(@builtin(global_invocation_id) id:vec3u){
   let size=vec2i(textureDimensions(resolved));let p=vec2i(id.xy);if(any(p>=size)){return;}
-  let current=textureLoad(rawColor,p,0);let distance=textureLoad(currentDepth,p,0).r;
+  let current=cloudClean4(textureLoad(rawColor,p,0));
+  let rawDist=textureLoad(currentDepth,p,0).r;
+  let distance=select(0.0,rawDist,cloudScalarFinite(rawDist));
   var result=current;
   if(CF.shape.w>0.5 && current.a>0.0001 && distance>0.0){
     let uv=(vec2f(p)+0.5)/vec2f(size);let ndc=uv*vec2f(2,-2)+vec2f(-1,1);
@@ -230,19 +240,23 @@ fn main(@builtin(global_invocation_id) id:vec3u){
     let previous=CF.previousView*vec4f(world-CF.previousCamera.xyz,1.0);
     let at=previous.xy/max(previous.w,0.0001)*vec2f(0.5,-0.5)+0.5;
     if(previous.w>0.0 && all(at>vec2f(0)) && all(at<vec2f(1))){
-      let oldDepth=textureLoad(historyDepth,clamp(vec2i(at*vec2f(size)),vec2i(0),size-1),0).r;
+      let previousDepth=textureLoad(historyDepth,clamp(vec2i(at*vec2f(size)),vec2i(0),size-1),0).r;
+      let rawOld=textureSampleLevel(history,linearSampler,at,0.0);
+      let historyFinite=!(any(rawOld!=rawOld)||!(previousDepth==previousDepth))&&cloudScalarFinite(previousDepth)&&all((bitcast<vec4u>(rawOld)&vec4u(0x7fffffffu))<vec4u(0x7f800000u));
       let expected=length(world-CF.previousCamera.xyz)*0.001;
-      if(abs(oldDepth-expected)<max(0.35,distance*0.15)){
+      if(historyFinite && abs(previousDepth-expected)<max(0.35,distance*0.15)){
         var lo=current;var hi=current;
         for(var y=-1;y<=1;y++){for(var x=-1;x<=1;x++){
-          let c=textureLoad(rawColor,clamp(p+vec2i(x,y),vec2i(0),size-1),0);lo=min(lo,c);hi=max(hi,c);
+          let c=cloudClean4(textureLoad(rawColor,clamp(p+vec2i(x,y),vec2i(0),size-1),0));lo=min(lo,c);hi=max(hi,c);
         }}
-        let old=clamp(textureSampleLevel(history,linearSampler,at,0.0),lo,hi);
+        let old=clamp(rawOld,lo,hi);
         let confidence=0.86*(1.0-saturate(abs(old.a-current.a)*2.0));
         result=mix(current,old,confidence);
       }
     }
   }
+  result=cloudClean4(result);
+  if(any(result!=result)){result=vec4f(0.0);}
   textureStore(resolved,p,result);
 }
 `;

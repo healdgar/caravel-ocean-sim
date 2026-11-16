@@ -1760,7 +1760,9 @@ fn shadeBoulderRock(worldNormal: vec3f, baseLitho: vec3f, aoShade: f32, unshifte
   let vEye = normalize(F.camPos.xyz - shiftedWorld);
 
   var color = albedo * (1.0 - wet * 0.3) * (direct * diffuse / PI + ambient * visibility);
-  let hVec = normalize(vEye + normalize(select(vec3f(0.0, 1.0, 0.0), F.sunDir.xyz, length(F.sunDir.xyz) > 0.001)));
+  let sunDirSafe = normalize(select(vec3f(0.0, 1.0, 0.0), F.sunDir.xyz, length(F.sunDir.xyz) > 0.001));
+  let hRaw = vEye + sunDirSafe;
+  let hVec = select(vec3f(0.0, 1.0, 0.0), normalize(hRaw), length(hRaw) > 1e-5);
   let nDotH = max(dot(n, hVec), 0.0);
   color += direct * pow(nDotH, mix(14.0, 36.0, wet)) * (0.042 + wet * 0.11);
   color += lunarSurface(n, vEye, albedo, roughness, vec3f(0.035), vec3f(sunlight.g) * lunarShadowVisibility(shadowed));
@@ -1963,7 +1965,9 @@ fn vsMain(v: SplatVSIn) -> SplatVarying {
   let centreShifted = centreUnshifted + shift;
 
   let toCam = normalize(F.camPos.xyz - centreShifted);
-  let camRight = normalize(cross(up, toCam));
+  let splatRefUp = select(up, vec3f(1.0, 0.0, 0.0), abs(dot(up, toCam)) > 0.999 || abs(toCam.y) > 0.999);
+  let camRightRaw = cross(splatRefUp, toCam);
+  let camRight = select(vec3f(1.0, 0.0, 0.0), normalize(camRightRaw), length(camRightRaw) > 1e-5);
   let billboardUp = normalize(cross(toCam, camRight));
 
   let rx = optA.w * radius;
@@ -2061,7 +2065,7 @@ fn vsMain(v: MorphVSIn) -> @builtin(position) vec4f {
 }
 `;
 
-export function createBoulderContinuum(device, {
+export async function createBoulderContinuum(device, {
   frameUBO,
   resources = null,
   landShadowUniform = null,
@@ -2171,29 +2175,6 @@ export function createBoulderContinuum(device, {
   const cullParamsBuf = createBuf('boulder continuum cull params', cullParamBytes.byteLength, U.UNIFORM | U.COPY_DST);
   device.queue.writeBuffer(cullParamsBuf, 0, cullParamBytes);
 
-  const computePipeline = device.createComputePipeline({
-    label: 'boulder continuum compute',
-    layout: 'auto',
-    compute: {
-      module: device.createShaderModule({ label: 'boulder continuum compute', code: BOULDER_CONTINUUM_COMPUTE_WGSL }),
-      entryPoint: 'main',
-    },
-  });
-
-  const computeBindGroup = device.createBindGroup({
-    label: 'boulder continuum compute bg',
-    layout: computePipeline.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: { buffer: frameUBO } },
-      { binding: 1, resource: { buffer: cullParamsBuf } },
-      { binding: 2, resource: { buffer: srcInstancesBuf } },
-      { binding: 3, resource: { buffer: slotGroupsBuf } },
-      { binding: 4, resource: { buffer: stepMetaBuf } },
-      { binding: 5, resource: { buffer: shownBuf } },
-      { binding: 6, resource: { buffer: drawsBuf } },
-    ],
-  });
-
   const instanceAttribs = (baseShaderLocation) => ({
     arrayStride: CONTINUUM_INSTANCE_BYTES,
     stepMode: 'instance',
@@ -2204,6 +2185,7 @@ export function createBoulderContinuum(device, {
     ],
   });
 
+  const computeModule = device.createShaderModule({ label: 'boulder continuum compute', code: BOULDER_CONTINUUM_COMPUTE_WGSL });
   const nearModule = device.createShaderModule({ label: 'boulder near render', code: buildBoulderNearWGSL(useSceneShading) });
   const morphModule = device.createShaderModule({ label: 'boulder morph render', code: buildBoulderMorphWGSL(useSceneShading) });
   const splatModule = device.createShaderModule({ label: 'boulder splat render', code: buildBoulderSplatWGSL(useSceneShading) });
@@ -2211,66 +2193,6 @@ export function createBoulderContinuum(device, {
   const primitive = { topology: 'triangle-list', cullMode: 'back', frontFace: 'ccw' };
   const depthStencil = { format: depthFormat, depthWriteEnabled: true, depthCompare };
   const multisample = { count: sampleCount };
-
-  const nearPipeline = device.createRenderPipeline({
-    label: 'boulder continuum near',
-    layout: 'auto',
-    vertex: {
-      module: nearModule,
-      entryPoint: 'vsMain',
-      buffers: [
-        {
-          arrayStride: 32,
-          stepMode: 'vertex',
-          attributes: [
-            { shaderLocation: 0, offset: 0, format: 'float32x3' },
-            { shaderLocation: 1, offset: 12, format: 'float32x3' },
-            { shaderLocation: 2, offset: 24, format: 'float32x2' },
-          ],
-        },
-        instanceAttribs(3),
-      ],
-    },
-    fragment: { module: nearModule, entryPoint: 'fsMain', targets: [{ format: colorFormat }] },
-    primitive,
-    depthStencil,
-    multisample,
-  });
-
-  const morphPipeline = device.createRenderPipeline({
-    label: 'boulder continuum morph',
-    layout: 'auto',
-    vertex: {
-      module: morphModule,
-      entryPoint: 'vsMain',
-      buffers: [
-        {
-          arrayStride: 8,
-          stepMode: 'vertex',
-          attributes: [{ shaderLocation: 0, offset: 0, format: 'uint32x2' }],
-        },
-        instanceAttribs(1),
-      ],
-    },
-    fragment: { module: morphModule, entryPoint: 'fsMain', targets: [{ format: colorFormat }] },
-    primitive,
-    depthStencil,
-    multisample,
-  });
-
-  const splatPipeline = device.createRenderPipeline({
-    label: 'boulder continuum splat',
-    layout: 'auto',
-    vertex: {
-      module: splatModule,
-      entryPoint: 'vsMain',
-      buffers: [instanceAttribs(0)],
-    },
-    fragment: { module: splatModule, entryPoint: 'fsMain', targets: [{ format: colorFormat }] },
-    primitive: { topology: 'triangle-list', cullMode: 'none' },
-    depthStencil,
-    multisample,
-  });
 
   const useLightShadow = Boolean(landShadowUniform);
   const shadowNearShader = useLightShadow
@@ -2285,46 +2207,141 @@ export function createBoulderContinuum(device, {
     depthCompare: shadowDepthCompare,
     ...(useLightShadow ? { depthBiasSlopeScale: 1.5 } : {}),
   };
-  const shadowNearPipeline = device.createRenderPipeline({
-    label: 'boulder continuum shadow near',
-    layout: 'auto',
-    vertex: {
-      module: shadowNearShader,
-      entryPoint: 'vsMain',
-      buffers: [
-        {
-          arrayStride: 32,
-          stepMode: 'vertex',
-          attributes: [
-            { shaderLocation: 0, offset: 0, format: 'float32x3' },
-            { shaderLocation: 1, offset: 12, format: 'float32x3' },
-            { shaderLocation: 2, offset: 24, format: 'float32x2' },
-          ],
-        },
-        instanceAttribs(3),
-      ],
-    },
-    primitive,
-    depthStencil: shadowDepthStencil,
-  });
 
-  const shadowMorphPipeline = device.createRenderPipeline({
-    label: 'boulder continuum shadow morph',
-    layout: 'auto',
-    vertex: {
-      module: shadowMorphShader,
-      entryPoint: 'vsMain',
-      buffers: [
-        {
-          arrayStride: 8,
-          stepMode: 'vertex',
-          attributes: [{ shaderLocation: 0, offset: 0, format: 'uint32x2' }],
-        },
-        instanceAttribs(1),
-      ],
-    },
-    primitive,
-    depthStencil: shadowDepthStencil,
+  const makeComputeAsync = (desc) => typeof device.createComputePipelineAsync === 'function'
+    ? device.createComputePipelineAsync(desc)
+    : Promise.resolve(device.createComputePipeline(desc));
+  const makeRenderAsync = (desc) => typeof device.createRenderPipelineAsync === 'function'
+    ? device.createRenderPipelineAsync(desc)
+    : Promise.resolve(device.createRenderPipeline(desc));
+
+  const [
+    computePipeline,
+    nearPipeline,
+    morphPipeline,
+    splatPipeline,
+    shadowNearPipeline,
+    shadowMorphPipeline,
+  ] = await Promise.all([
+    makeComputeAsync({
+      label: 'boulder continuum compute',
+      layout: 'auto',
+      compute: {
+        module: computeModule,
+        entryPoint: 'main',
+      },
+    }),
+    makeRenderAsync({
+      label: 'boulder continuum near',
+      layout: 'auto',
+      vertex: {
+        module: nearModule,
+        entryPoint: 'vsMain',
+        buffers: [
+          {
+            arrayStride: 32,
+            stepMode: 'vertex',
+            attributes: [
+              { shaderLocation: 0, offset: 0, format: 'float32x3' },
+              { shaderLocation: 1, offset: 12, format: 'float32x3' },
+              { shaderLocation: 2, offset: 24, format: 'float32x2' },
+            ],
+          },
+          instanceAttribs(3),
+        ],
+      },
+      fragment: { module: nearModule, entryPoint: 'fsMain', targets: [{ format: colorFormat }] },
+      primitive,
+      depthStencil,
+      multisample,
+    }),
+    makeRenderAsync({
+      label: 'boulder continuum morph',
+      layout: 'auto',
+      vertex: {
+        module: morphModule,
+        entryPoint: 'vsMain',
+        buffers: [
+          {
+            arrayStride: 8,
+            stepMode: 'vertex',
+            attributes: [{ shaderLocation: 0, offset: 0, format: 'uint32x2' }],
+          },
+          instanceAttribs(1),
+        ],
+      },
+      fragment: { module: morphModule, entryPoint: 'fsMain', targets: [{ format: colorFormat }] },
+      primitive,
+      depthStencil,
+      multisample,
+    }),
+    makeRenderAsync({
+      label: 'boulder continuum splat',
+      layout: 'auto',
+      vertex: {
+        module: splatModule,
+        entryPoint: 'vsMain',
+        buffers: [instanceAttribs(0)],
+      },
+      fragment: { module: splatModule, entryPoint: 'fsMain', targets: [{ format: colorFormat }] },
+      primitive: { topology: 'triangle-list', cullMode: 'none' },
+      depthStencil,
+      multisample,
+    }),
+    makeRenderAsync({
+      label: 'boulder continuum shadow near',
+      layout: 'auto',
+      vertex: {
+        module: shadowNearShader,
+        entryPoint: 'vsMain',
+        buffers: [
+          {
+            arrayStride: 32,
+            stepMode: 'vertex',
+            attributes: [
+              { shaderLocation: 0, offset: 0, format: 'float32x3' },
+              { shaderLocation: 1, offset: 12, format: 'float32x3' },
+              { shaderLocation: 2, offset: 24, format: 'float32x2' },
+            ],
+          },
+          instanceAttribs(3),
+        ],
+      },
+      primitive,
+      depthStencil: shadowDepthStencil,
+    }),
+    makeRenderAsync({
+      label: 'boulder continuum shadow morph',
+      layout: 'auto',
+      vertex: {
+        module: shadowMorphShader,
+        entryPoint: 'vsMain',
+        buffers: [
+          {
+            arrayStride: 8,
+            stepMode: 'vertex',
+            attributes: [{ shaderLocation: 0, offset: 0, format: 'uint32x2' }],
+          },
+          instanceAttribs(1),
+        ],
+      },
+      primitive,
+      depthStencil: shadowDepthStencil,
+    }),
+  ]);
+
+  const computeBindGroup = device.createBindGroup({
+    label: 'boulder continuum compute bg',
+    layout: computePipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: frameUBO } },
+      { binding: 1, resource: { buffer: cullParamsBuf } },
+      { binding: 2, resource: { buffer: srcInstancesBuf } },
+      { binding: 3, resource: { buffer: slotGroupsBuf } },
+      { binding: 4, resource: { buffer: stepMetaBuf } },
+      { binding: 5, resource: { buffer: shownBuf } },
+      { binding: 6, resource: { buffer: drawsBuf } },
+    ],
   });
 
   const buildSceneGroup0 = (pipe, resList) => device.createBindGroup({

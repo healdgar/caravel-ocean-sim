@@ -451,7 +451,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   // 2. Far continuum 1-triangle view-facing horizon splat bucket (crossfades in over 5.4..3.5 px, sole representation < 3.5 px).
   if (pxSpan < HERD_SPLAT_HI_PX) {
     let toCamXZ = F.camPos.xz - (worldXZ + shiftXZ);
-    let viewAz = atan2(toCamXZ.x, toCamXZ.y);
+    let viewAz = select(0.0, atan2(toCamXZ.x, toCamXZ.y), dot(toCamXZ, toCamXZ) > 1e-8);
     let broadside = abs(sin(viewAz - walkYaw));
     var halfLen = bodyRadius * 0.85;
     var halfWid = bodyRadius * 0.42;
@@ -647,7 +647,8 @@ fn shadeHerdSurface(world: vec3f, n: vec3f, albedo: vec3f, ao: f32, species: u32
   let ambient = (envIrr * 0.88 + groundBounce) * (0.38 + 0.68 * ao);
 
   let v = normalize(F.camPos.xyz - world);
-  let h = normalize(v + F.sunDir.xyz);
+  let hRaw = v + F.sunDir.xyz;
+  let h = select(vec3f(0.0, 1.0, 0.0), normalize(hRaw), length(hRaw) > 1e-5);
   let isCoach = species == 5u;
   let rough = select(select(0.56, 0.38, isCoach), 0.92, species == 0u);
   let specPow = select(select(18.0, 34.0, isCoach), 4.0, species == 0u);
@@ -702,8 +703,11 @@ fn shadeHerdSurface(world: vec3f, n: vec3f, albedo: vec3f, ao: f32, species: u32
   let b = herdBodies[inst];
   let worldBase = vec3f(b.posYaw.x + nearTerrain.grid.y, b.posYaw.y + b.slopeScale.x, b.posYaw.z + nearTerrain.grid.z);
   let curvedCenter = earthCurve(worldBase - F.camPos.xyz, F.camPos.y);
-  let toCam = normalize(-curvedCenter);
-  let camR = normalize(F.camRight.xyz);
+  let toCamRaw = -curvedCenter;
+  let toCam = select(vec3f(0.0, 0.0, 1.0), normalize(toCamRaw), length(toCamRaw) > 1e-5);
+  let camR0 = select(vec3f(1.0, 0.0, 0.0), normalize(F.camRight.xyz), length(F.camRight.xyz) > 1e-5);
+  let zenithUp = select(vec3f(0.0, 1.0, 0.0), vec3f(0.0, 0.0, 1.0), abs(toCam.y) > 0.999);
+  let camR = select(camR0, normalize(cross(zenithUp, toCam)), abs(dot(camR0, toCam)) > 0.995 || abs(toCam.y) > 0.999);
   let camU = normalize(cross(camR, toCam));
 
   // Single equilateral triangle circumscribing unit circle r = 1: (0, 2), (-sqrt(3), -1), (+sqrt(3), -1).

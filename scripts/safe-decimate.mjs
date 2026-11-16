@@ -37,7 +37,7 @@ const HIDDEN_BIAS_PIXELS = 1.5;
 const SMALLEST_PART_SHARE = 0.12;
 // The simplifier scales each part to one unit, so these compare with an error of a few thousandths.
 const NORMAL_WEIGHT = 0.01;
-const UV_WEIGHT = 0.1;
+const UV_WEIGHT = 0.35;
 
 // What each kind of asset can stand, from generated models looked at side by side. Limits are shares of
 // the diagonal. Seams are dropped and the texture baked afresh where a mesh is textured, because a
@@ -206,11 +206,28 @@ function reducePart(part, allowed, options) {
   const limit = options.dropSmall ? allowed : Math.min(allowed, size * SMALLEST_PART_SHARE);
   // Texture seams are not locked: corners that share a place are collapsed together along the seam,
   // which is what the simplifier does by itself. Locking them stalled a textured body at 6,000 triangles.
-  const flags = ['ErrorAbsolute', ...(options.flags ?? [])];
+  const flags = ['ErrorAbsolute', ...(part.uvs ? ['Permissive'] : []), ...(options.flags ?? [])];
   const attributes = (part.attributes ??= vertexAttributes(part));
   // A part that may vanish must not be pinned in place by its own ends.
   const mayVanish = options.dropSmall && size <= allowed;
-  const locks = options.locks === false || mayVanish ? null : (part.locks ??= supportLocks(part));
+  let locks = options.locks === false || mayVanish ? null : (part.locks ??= supportLocks(part));
+  if (!locks && part.uvs && allowed < 0.03) {
+    // Protect head/face UV-seam corners on near/mid textured character levels so facial features never stretch across atlas islands.
+    const count = part.positions.length / 3;
+    const posBuckets = new Map();
+    for (let i = 0; i < count; i++) {
+      const py = part.positions[i * 3 + 1], pz = part.positions[i * 3 + 2];
+      if (py < 1.48 || pz < -0.02) continue;
+      const k = `${Math.round(part.positions[i * 3] * 2000)},${Math.round(py * 2000)},${Math.round(pz * 2000)}`;
+      const prev = posBuckets.get(k);
+      if (prev === undefined) posBuckets.set(k, i);
+      else {
+        locks ??= new Uint8Array(count);
+        locks[prev] = 1;
+        locks[i] = 1;
+      }
+    }
+  }
   const [indices] = MeshoptSimplifier.simplifyWithAttributes(part.indices, part.positions, 3, attributes.values, attributes.stride, attributes.weights, locks, 3, limit, flags);
   return { ...part, indices: Uint32Array.from(indices) };
 }

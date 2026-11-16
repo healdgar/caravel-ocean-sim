@@ -6,7 +6,7 @@
 // steps in JavaScript, which is what the tests hold this against.
 
 // What one entry of a sailor's list asks for. An entry is eight numbers; a stance takes several entries.
-export const CREW_SOLVE_OP = Object.freeze({ blend: 1, neutral: 2, turn: 3, shift: 4, move: 5, limb: 6, limbHead: 7, gunBody: 8, seated: 9, rowFeet: 10, ragdoll: 11, grip: 12, seaLegs: 13, gaze: 14, fingers: 15, inertia: 16, injury: 17 });
+export const CREW_SOLVE_OP = Object.freeze({ blend: 1, neutral: 2, turn: 3, shift: 4, move: 5, limb: 6, limbHead: 7, gunBody: 8, seated: 9, rowFeet: 10, ragdoll: 11, grip: 12, seaLegs: 13, gaze: 14, fingers: 15, inertia: 16, injury: 17, climbBody: 18 });
 // The bones a pose step names, in the order the rig table lists their joints.
 export const CREW_SOLVE_BONES = Object.freeze(['root', 'pelvis', 'spine_01', 'spine_02', 'spine_03', 'neck_01', 'Head', 'clavicle_l', 'upperarm_l', 'lowerarm_l', 'hand_l', 'clavicle_r', 'upperarm_r', 'lowerarm_r', 'hand_r', 'thigh_l', 'calf_l', 'foot_l', 'ball_l', 'thigh_r', 'calf_r', 'foot_r', 'ball_r']);
 // A limb is its upper bone's place in that list: an arm at 8 and 12, a leg at 15 and 19.
@@ -224,10 +224,16 @@ fn gunBody(k: u32) {
   let feet = array<vec3f, 2>(ops[k + 2u].a.xyz, ops[k + 2u].b.xyz);
   let normals = array<vec3f, 2>(ops[k + 3u].a.xyz, ops[k + 3u].b.xyz);
   let pelvis = bone(PELVIS); let base = at(pelvis);
-  var lean = asked; var drop = 0.0; var short = 0.0;
+  let stoop = mode == 1u;
+  var lean = asked; var drop = 0.0; var short = 0.0; var leanSway = vec2f(0.0, 1.0);
   if (mode == 1u) {
+    let centre = (hands[0] + hands[1]) * 0.5;
+    let dx = centre.x - base.x; let dz = max(0.05, centre.z - base.z); let dn = max(length(vec2f(dx, dz)), 1e-9);
+    leanSway = vec2f(dx / dn, dz / dn);
+    let minTargetY = min(hands[0].y, hands[1].y);
     for (var c = 0u; c < 2u; c++) { short = max(short, armShort(c, hands[c], lift, 0.02)); }
-    drop = min(0.24, short * 0.7); lean = min(0.42, short * 0.9);
+    drop = clamp(min(max(0.0, short) * 0.85, base.y + lift - minTargetY + 0.04), 0.0, 0.28);
+    lean = min(0.68, max(0.0, short) * 1.65);
   } else if (mode == 2u) {
     let centre = (hands[0] + hands[1]) * 0.5;
     for (var c = 0u; c < 2u; c++) { short = max(short, armShort(c, hands[c], 0.0, 0.015)); }
@@ -236,11 +242,13 @@ fn gunBody(k: u32) {
     drop = max(0.0, min(dropCap, shoulders - centre.y - 0.16));
   } else if (mode == 3u) { drop = 0.12 * min(1.0, asked / 0.45); }
   let fraction = clamp(lean / 0.45, 0.0, 1.0);
-  moveTo(pelvis, vec3f(base.x, base.y + lift - drop, base.z + 0.08 * fraction));
+  let hipShift = select(0.0, min(0.085, max(0.0, short) * 0.45), stoop);
+  moveTo(pelvis, vec3f(base.x + leanSway.x * hipShift, base.y + lift - drop, base.z + select(0.08 * fraction, leanSway.y * hipShift * 0.35, stoop)));
   if (abs(lean) > 1e-6) {
-    turn(pelvis, UP, vec3f(0.0, cos(lean * 0.18), sin(lean * 0.18)));
-    turn(bone(SPINE1), UP, vec3f(0.0, cos(lean * 0.45), sin(lean * 0.45)));
-    turn(bone(SPINE2), UP, vec3f(0.0, cos(lean * 0.37), sin(lean * 0.37)));
+    let w0 = select(0.18, 0.08, stoop); let w2 = select(0.37, 0.44, stoop);
+    turn(pelvis, UP, vec3f(leanSway.x * sin(lean * w0), cos(lean * w0), leanSway.y * sin(lean * w0)));
+    turn(bone(SPINE1), UP, vec3f(leanSway.x * sin(lean * 0.48), cos(lean * 0.48), leanSway.y * sin(lean * 0.48)));
+    turn(bone(SPINE2), UP, vec3f(leanSway.x * sin(lean * w2), cos(lean * w2), leanSway.y * sin(lean * w2)));
   }
   if (reachCap > 0.0) {
     var forward = 0.0;
@@ -267,17 +275,37 @@ fn seated(k: u32) {
   let pelvis = bone(PELVIS);
   turn(pelvis, UP, vec3f(0.0, cos(lean), sin(lean)));
   moveTo(pelvis, hips);
-  var excess = 0.0; var toward = vec3f(0.0);
+  var excess = 0.0; var worstHand = vec3f(0.0);
   for (var c = 0u; c < 2u; c++) {
     let over = armShort(c, hands[c], 0.0, 0.02);
-    if (over > excess) { excess = over; toward = hands[c] - at(bone(limbBase(c))); }
+    if (over > excess) { excess = over; worstHand = hands[c]; }
   }
   if (excess > 0.0) {
-    let angle = min(0.6, excess / 0.32); var along = length(toward.xz);
+    let chest = at(bone(SPINE3));
+    let t = vec2f(worstHand.x - chest.x, (worstHand.z - chest.z) + 0.08);
+    var along = length(t);
     if (along == 0.0) { along = 1.0; }
-    let sway = toward.xz / along;
-    turn(bone(SPINE1), UP, vec3f(sway.x * sin(angle * 0.55), cos(angle * 0.55), sway.y * sin(angle * 0.55)));
-    turn(bone(SPINE2), UP, vec3f(sway.x * sin(angle * 0.45), cos(angle * 0.45), sway.y * sin(angle * 0.45)));
+    let sway = t / along;
+    if (excess > 0.03) {
+      let slide = min(0.020, (excess - 0.03) * 0.5);
+      let p = at(pelvis);
+      moveTo(pelvis, vec3f(p.x + sway.x * slide, p.y, p.z + sway.y * slide));
+    }
+    let angle = min(0.96, excess / 0.19);
+    turn(pelvis, UP, vec3f(sway.x * sin(angle * 0.38), cos(angle * 0.38), sway.y * sin(angle * 0.38)));
+    turn(bone(SPINE1), UP, vec3f(sway.x * sin(angle * 0.58), cos(angle * 0.58), sway.y * sin(angle * 0.58)));
+    turn(bone(SPINE2), UP, vec3f(sway.x * sin(angle * 0.50), cos(angle * 0.50), sway.y * sin(angle * 0.50)));
+    turn(bone(SPINE3), UP, vec3f(sway.x * sin(angle * 0.42), cos(angle * 0.42), sway.y * sin(angle * 0.42)));
+    for (var side = 0u; side < 2u; side++) {
+      let clav = bone(CLAVICLE_L + 4u * side); let b = limbBase(side);
+      let clP = at(clav); let shP = at(bone(b)); let elP = at(bone(b + 1u)); let wrP = at(bone(b + 2u));
+      let armReach = length(elP - shP) + length(wrP - elP) - 0.01;
+      let short = length(hands[side] - shP) - armReach;
+      if (short > 0.0) {
+        let cur = unit(shP - clP); let aim = unit(hands[side] - clP); let w = min(0.72, short / 0.11);
+        turn(clav, cur, cur * (1.0 - w) + aim * w);
+      }
+    }
   }
   for (var side = 0u; side < 2u; side++) {
     let sgn = select(-1.0, 1.0, side == 0u); let base = THIGH_L + 4u * side;
@@ -290,6 +318,44 @@ fn seated(k: u32) {
     if (raise > 0.002) { foot.y += raise; limb(2u + side, foot, pole); }
     bootFlat(side, vec3f(0.0, cos(back * 0.5), -sin(back * 0.5)));
     limb(side, hands[side], vec3f(sgn * 0.6, 0.6, 0.15));
+  }
+}
+fn climbBody(k: u32) {
+  let hands = array<vec3f, 2>(ops[k].a.yzw, ops[k].b.xyz);
+  let feet = array<vec3f, 2>(ops[k + 1u].a.xyz, ops[k + 1u].b.xyz);
+  let pelvis = bone(PELVIS);
+  var shiftY = 0.0; var shiftZ = 0.0;
+  for (var c = 0u; c < 2u; c++) {
+    let b = limbBase(c); let sh = at(bone(b)); let el = at(bone(b + 1u)); let wr = at(bone(b + 2u));
+    let reach = length(el - sh) + length(wr - el) - 0.012;
+    let ray = hands[c] - sh; let dist = length(ray);
+    if (dist > reach) {
+      let need = dist - reach; let dir = unit(ray);
+      shiftY = max(shiftY, dir.y * need);
+      shiftZ = max(shiftZ, dir.z * need);
+    }
+  }
+  if (shiftY > 0.0 || shiftZ > 0.0) {
+    let p = at(pelvis);
+    moveTo(pelvis, vec3f(p.x, p.y + min(0.085, shiftY), p.z + min(0.10, shiftZ)));
+  }
+  var lower = 0.0;
+  for (var side = 0u; side < 2u; side++) {
+    let base = THIGH_L + 4u * side; let hip = at(bone(base)); let knee = at(bone(base + 1u)); let ankle = at(bone(base + 2u));
+    let legLen = length(knee - hip) + length(ankle - knee);
+    let across = dot(feet[side].xz - hip.xz, feet[side].xz - hip.xz);
+    lower = min(lower, feet[side].y + sqrt(max(0.0, legLen * legLen - across)) - hip.y + 0.04);
+  }
+  if (lower < 0.0) { let p = at(pelvis); moveTo(pelvis, vec3f(p.x, p.y + lower, p.z)); }
+  for (var side = 0u; side < 2u; side++) {
+    let clav = bone(CLAVICLE_L + 4u * side); let b = limbBase(side);
+    let clP = at(clav); let shP = at(bone(b)); let elP = at(bone(b + 1u)); let wrP = at(bone(b + 2u));
+    let armReach = length(elP - shP) + length(wrP - elP) - 0.012;
+    let short = length(hands[side] - shP) - armReach;
+    if (short > 0.0) {
+      let cur = unit(shP - clP); let aim = unit(hands[side] - clP); let w = min(0.75, short / 0.10);
+      turn(clav, cur, cur * (1.0 - w) + aim * w);
+    }
   }
 }
 // The walking clip's upper body over two boots set where a rowed ship's own floor is. js/crew-pose.js,
@@ -430,6 +496,7 @@ fn inertia(sailor: u32, flags: u32, weight: f32) {
       case ${CREW_SOLVE_OP.gunBody}u { gunBody(k); k += 4u; }
       case ${CREW_SOLVE_OP.seated}u { seated(k); k += 3u; }
       case ${CREW_SOLVE_OP.rowFeet}u { rowFeet(k); k += 2u; }
+      case ${CREW_SOLVE_OP.climbBody}u { climbBody(k); k += 2u; }
       case ${CREW_SOLVE_OP.ragdoll}u { ragdoll(k); k += 5u; }
       // What a hand holds: a place it was sent to, or wherever its reach left it.
       case ${CREW_SOLVE_OP.grip}u { let side = u32(a.y); gripped[side] = 1u; grip[side] = select(vec3f(a.w, b.x, b.y), at(bone(HAND_L + 4u * side)), a.z > 0.5); k += 1u; }

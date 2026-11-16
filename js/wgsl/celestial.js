@@ -45,7 +45,7 @@ fn lunarSky(dir:vec3f)->vec3f {
   // Starlight and airglow as adapted eyes read them: a dim blue-grey sky that land and hull
   // stand out against. Physically about 7.6e-8, raised so a moonless night is dark, not blank.
   // Airglow thickens toward the horizon, which is what shows land against the sky.
-  let airglow=vec3f(.56,.72,1.0)*1.7e-6*(1.0+2.2*pow(1.0-h,5.0))*(1.0-smoothstep(-.2,-.06,F.sunDir.y));
+  let airglow=vec3f(.56,.72,1.0)*1.7e-6*(1.0+2.2*pow(clamp(1.0-h,0.0,1.0),5.0))*(1.0-smoothstep(-.2,-.06,F.sunDir.y));
   return moon+airglow;
 }
 fn lunarDisk(dir:vec3f)->vec3f {
@@ -66,11 +66,13 @@ fn lunarDisk(dir:vec3f)->vec3f {
 fn lunarSurface(n:vec3f,v:vec3f,albedo:vec3f,rough:f32,f0:vec3f,visibility:vec3f)->vec3f {
   if(lunarIrradiance()<=0.0){return vec3f(0);}
   let l=lunarDirection();let nl=max(dot(n,l),0.0);let nv=max(dot(n,v),.001);
-  let h=normalize(v+l+vec3f(1e-6));let nh=max(dot(n,h),0.0);let vh=max(dot(v,h),0.0);
+  let hRaw=v+l;
+  let h=select(vec3f(0.0,1.0,0.0),normalize(hRaw),length(hRaw)>1e-5);
+  let nh=max(dot(n,h),0.0);let vh=clamp(dot(v,h),0.0,1.0);
   let alpha=max(.025,rough*rough);let aa=alpha*alpha;let denom=nh*nh*(aa-1.0)+1.0;
   let distribution=aa/(PI*denom*denom);let k=(rough+1.0)*(rough+1.0)*.125;
   let geometry=nl/(nl*(1.0-k)+k)*nv/(nv*(1.0-k)+k);
-  let fresnel=f0+(vec3f(1)-f0)*pow(1.0-vh,5.0);
+  let fresnel=f0+(vec3f(1)-f0)*pow(clamp(1.0-vh,0.0,1.0),5.0);
   let brdf=distribution*geometry*fresnel/max(4.0*nl*nv,.001);
   return lunarIlluminance()*clamp(visibility,vec3f(0),vec3f(1))*nl*(albedo/PI+brdf);
 }

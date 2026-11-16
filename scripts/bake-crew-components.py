@@ -12,7 +12,7 @@ import bpy, bmesh
 from mathutils import Vector
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUT_JS = os.path.join(ROOT, 'js', 'models', 'crew-components.js')
+OUT_JSON = os.path.join(ROOT, 'assets', 'crew', 'components-1550.json')
 
 SLOT_HAIR = 4
 SLOT_ACCENT = 5
@@ -67,12 +67,31 @@ class BodyEnvelope:
         self.jpos = body['jpos']
         self.head_p = self.jpos['Head']
         self.neck_p = self.jpos['neck_01']
-        self.cran_c = np.array([
-            0.0,
-            self.head_p[1] + (0.095 if is_female else 0.102),
-            self.head_p[2] + (0.006 if is_female else 0.008),
-        ], dtype=np.float64)
-        self.cran_r = np.array([0.075, 0.103, 0.094] if is_female else [0.079, 0.108, 0.098], dtype=np.float64)
+
+        # Head vertices for exact skull & front-face queries (strictly Head-weighted, excluding T-pose shoulders/arms).
+        head_slot = self.jidx['Head']
+        head_w = np.zeros(len(self.P), dtype=np.float64)
+        for k in range(4):
+            mask = self.J[:, k] == head_slot
+            head_w[mask] += self.W[mask, k]
+        self.head_verts = self.P[(head_w > 0.45) & (self.P[:, 1] > self.neck_p[1] + 0.005) & (np.abs(self.P[:, 0]) < 0.115)]
+
+        top_y = float(self.head_verts[:, 1].max())
+        upper_hv = self.head_verts[self.head_verts[:, 1] > self.head_p[1] + 0.035]
+        if len(upper_hv) < 8:
+            upper_hv = self.head_verts
+        cran_cx = 0.5 * float(upper_hv[:, 0].min() + upper_hv[:, 0].max())
+        cran_cz = 0.5 * float(upper_hv[:, 2].min() + upper_hv[:, 2].max())
+        cran_rx = max(0.075, 0.5 * float(upper_hv[:, 0].max() - upper_hv[:, 0].min()) * 0.94)
+        cran_ry = 0.105 if is_female else 0.109
+        cran_rz = max(0.092, 0.5 * float(upper_hv[:, 2].max() - upper_hv[:, 2].min()) * 0.96)
+        self.cran_c = np.array([cran_cx, top_y - cran_ry, cran_cz], dtype=np.float64)
+        self.cran_r = np.array([cran_rx, cran_ry, cran_rz], dtype=np.float64)
+
+        nose_idx = int(np.argmax(self.head_verts[:, 2]))
+        self.nose_y = float(self.head_verts[nose_idx, 1])
+        front_chin = self.head_verts[(np.abs(self.head_verts[:, 0] - cran_cx) < 0.035) & (self.head_verts[:, 2] > cran_cz + 0.04)]
+        self.chin_y = float(front_chin[:, 1].min()) if len(front_chin) else float(self.head_p[1] - 0.055)
 
         # Identify non-arm body vertices for torso/hip garment fitting & weight transfer.
         arm_slots = {
@@ -83,16 +102,17 @@ class BodyEnvelope:
         for k in range(4):
             mask = np.isin(self.J[:, k], list(arm_slots))
             arm_w[mask] += self.W[mask, k]
-        self.torso_mask = (arm_w < 0.35) & (np.abs(self.P[:, 0]) < 0.235)
+        self.torso_mask = (arm_w < 0.35) & (np.abs(self.P[:, 0]) < 0.245)
         self.torso_P = self.P[self.torso_mask]
         self.torso_J = self.J[self.torso_mask]
         self.torso_W = self.W[self.torso_mask]
         self.arm_slots = arm_slots
 
-        # Precompute cylindrical torso radius table R(y, az) around (x=0, z=-0.025).
-        self.torso_z0 = -0.025
+        # Precompute cylindrical torso radius table R(y, az) around measured torso Z centroid.
+        mid_torso = self.torso_P[(self.torso_P[:, 1] > 0.85) & (self.torso_P[:, 1] < 1.30)]
+        self.torso_z0 = float(np.median(mid_torso[:, 2])) if len(mid_torso) else 0.0
         self.ny, self.na = 44, 48
-        self.y_grid = np.linspace(0.30, 1.46, self.ny)
+        self.y_grid = np.linspace(0.30, 1.50, self.ny)
         self.a_grid = np.linspace(-math.pi, math.pi, self.na, endpoint=False)
         self.r_table = np.zeros((self.ny, self.na), dtype=np.float64)
         tp = self.torso_P
@@ -122,14 +142,6 @@ class BodyEnvelope:
             pad = np.vstack([self.r_table[:1], self.r_table, self.r_table[-1:]])
             self.r_table = 0.5 * self.r_table + 0.25 * pad[:-2] + 0.25 * pad[2:]
         self.r_table = np.maximum(self.r_table, raw_r * 0.99)
-
-        # Head vertices for exact skull & front-face queries (strictly Head-weighted, excluding T-pose shoulders/arms).
-        head_slot = self.jidx['Head']
-        head_w = np.zeros(len(self.P), dtype=np.float64)
-        for k in range(4):
-            mask = self.J[:, k] == head_slot
-            head_w[mask] += self.W[mask, k]
-        self.head_verts = self.P[(head_w > 0.45) & (self.P[:, 1] > self.neck_p[1] + 0.005) & (np.abs(self.P[:, 0]) < 0.102)]
 
     def skull_point(self, ux, uy, uz, clearance=0.005):
         """Point on cranial dome along direction (ux, uy, uz) from cran_c, clearing all actual skull vertices."""
@@ -254,7 +266,7 @@ class BodyEnvelope:
         return J, W
 
 
-def finalize_bmesh(bm, comp_id, slot, shade_fn, weight_fn, low_ratio=0.52):
+def finalize_bmesh(bm, comp_id, slot, shade_fn, weight_fn, low_ratio=0.35):
     """Triangulates a bmesh in Blender, computes smooth normals, decimates low-LOD indices over the SAME vertex buffer."""
     bmesh.ops.triangulate(bm, faces=bm.faces[:])
     bm.verts.ensure_lookup_table()
@@ -603,14 +615,14 @@ def sculpt_hat_wide_brim(env):
     band_lo = [p + np.array([0.0, 0.003, 0.0]) for p in seat]
     band_hi = [p + np.array([math.sin(azs[i]) * (-0.002), 0.018, math.cos(azs[i]) * (-0.002)]) for i, p in enumerate(seat)]
     crown_mid = [
-        np.array([p[0] * 0.88, env.cran_c[1] + env.cran_r[1] + 0.022, env.cran_c[2] + (p[2] - env.cran_c[2]) * 0.88])
+        np.array([env.cran_c[0] + (p[0] - env.cran_c[0]) * 0.88, env.cran_c[1] + env.cran_r[1] + 0.022, env.cran_c[2] + (p[2] - env.cran_c[2]) * 0.88])
         for p in seat
     ]
     crown_top = [
-        np.array([p[0] * 0.72, env.cran_c[1] + env.cran_r[1] + 0.040, env.cran_c[2] + (p[2] - env.cran_c[2]) * 0.72])
+        np.array([env.cran_c[0] + (p[0] - env.cran_c[0]) * 0.72, env.cran_c[1] + env.cran_r[1] + 0.040, env.cran_c[2] + (p[2] - env.cran_c[2]) * 0.72])
         for p in seat
     ]
-    pole = np.array([0.0, env.cran_c[1] + env.cran_r[1] + 0.043, env.cran_c[2] - 0.004])
+    pole = np.array([env.cran_c[0], env.cran_c[1] + env.cran_r[1] + 0.043, env.cran_c[2] - 0.004])
     rings = [brim_under_in, brim_outer_lo, brim_outer_hi, band_lo, band_hi, crown_mid, crown_top]
     build_grid_cap(bm, rings, closed_pole=pole, tuck_bottom=0.06)
 
@@ -618,7 +630,7 @@ def sculpt_hat_wide_brim(env):
     band_y1 = float(np.mean([p[1] for p in band_hi]))
 
     def shade_fn(v, n):
-        in_band = (v[:, 1] > band_y0 - 0.002) & (v[:, 1] < band_y1 + 0.003) & (np.hypot(v[:, 0], v[:, 2] - env.cran_c[2]) < 0.105)
+        in_band = (v[:, 1] > band_y0 - 0.002) & (v[:, 1] < band_y1 + 0.003) & (np.hypot(v[:, 0] - env.cran_c[0], v[:, 2] - env.cran_c[2]) < 0.115)
         base = 0.88 + 0.16 * np.clip(n[:, 1], -0.6, 1.0)
         base[in_band] *= 0.72  # contrasting dark hatband ribbon
         return base
@@ -697,9 +709,9 @@ def sculpt_hat_morion(env):
             # Raised sagittal comb along x ~ 0 (|sin(az)| small)
             comb = 0.020 * math.exp(-((math.sin(az) / 0.20) ** 2)) * s_bowl
             y = p[1] + (env.cran_c[1] + env.cran_r[1] + 0.044 - p[1]) * (s_bowl ** 0.82) + comb
-            ring.append(np.array([p[0] * shrink, y, env.cran_c[2] + (p[2] - env.cran_c[2]) * (shrink * 0.96 + 0.06)]))
+            ring.append(np.array([env.cran_c[0] + (p[0] - env.cran_c[0]) * shrink, y, env.cran_c[2] + (p[2] - env.cran_c[2]) * (shrink * 0.96 + 0.06)]))
         rings.append(ring)
-    pole = np.array([0.0, env.cran_c[1] + env.cran_r[1] + 0.066, env.cran_c[2] - 0.004])
+    pole = np.array([env.cran_c[0], env.cran_c[1] + env.cran_r[1] + 0.066, env.cran_c[2] - 0.004])
     build_grid_cap(bm, rings, closed_pole=pole, tuck_bottom=0.06)
     shade_fn = lambda v, n: 0.85 + 0.20 * np.clip(n[:, 1], -0.5, 1.0) + 0.06 * np.abs(n[:, 0])
     return finalize_bmesh(bm, 9, SLOT_ACCENT, shade_fn, lambda v: env.head_weights(v))
@@ -707,7 +719,8 @@ def sculpt_hat_morion(env):
 
 def build_moustache_grid(bm, env, width=0.046, droop=0.012):
     """Adds a closed 3D sculpted moustache arch rooted inside the philtrum skin of sailor.glb."""
-    y_phil = env.head_p[1] + 0.0530  # ~1.5580 on anatomical male (between nose base 1.568 and mouth 1.544)
+    y_phil = env.chin_y + 0.72 * (env.nose_y - env.chin_y)
+    cx = float(env.cran_c[0])
     nx = 13
     xs = np.linspace(-width, width, nx)
     prof_angles = [0.0, 0.5 * math.pi, math.pi, 1.5 * math.pi]  # back(in skin), top, front, bottom
@@ -726,7 +739,7 @@ def build_moustache_grid(bm, env, width=0.046, droop=0.012):
             sy = math.sin(ang)
             z = zc_skin - 0.0020 + sz * (thick_z + 0.0020)
             y = yc + sy * thick_y
-            col.append(bm.verts.new(Vector([float(xv), float(y), float(z)])))
+            col.append(bm.verts.new(Vector([float(cx + xv), float(y), float(z)])))
         cols.append(col)
     for ix in range(nx - 1):
         ca, cb = cols[ix], cols[ix + 1]
@@ -743,7 +756,7 @@ def sculpt_beard_moustache(env):
     bm = bmesh.new()
     build_moustache_grid(bm, env, width=0.046, droop=0.013)
     shade_fn = lambda v, n: 0.88 + 0.15 * np.clip(n[:, 2], -0.3, 1.0)
-    return finalize_bmesh(bm, 10, SLOT_HAIR, shade_fn, lambda v: env.head_weights(v), low_ratio=0.60)
+    return finalize_bmesh(bm, 10, SLOT_HAIR, shade_fn, lambda v: env.head_weights(v), low_ratio=0.38)
 
 
 def sculpt_beard_iberian_barba(env):
@@ -751,10 +764,11 @@ def sculpt_beard_iberian_barba(env):
     bm = bmesh.new()
     build_moustache_grid(bm, env, width=0.044, droop=0.011)
 
-    # Pointed chin goatee from lower lip/chin crease (head_p.y + 0.031) tapering to a point below the chin
+    # Pointed chin goatee from lower lip/chin crease tapering to a point below the chin
+    cx = float(env.cran_c[0])
     na = 9
     azs = [(-0.48 * math.pi + 0.96 * math.pi * i / (na - 1)) for i in range(na)]  # front semicircle
-    y_top = env.head_p[1] + 0.0310
+    y_top = env.chin_y + 0.36 * (env.nose_y - env.chin_y)
     layers = [
         (0.000, 0.030, 0.005, 0.000),
         (-0.015, 0.032, 0.011, 0.004),
@@ -768,17 +782,17 @@ def sculpt_beard_iberian_barba(env):
         back_row = []
         for az in azs:
             xv = half_w * math.sin(az)
-            z_skin = env.face_front_z(xv, max(yv, env.head_p[1] - 0.012))
+            z_skin = env.face_front_z(xv, max(yv, env.chin_y + 0.004))
             arch = math.cos(az) ** 1.3
             zf = z_skin + jut * arch + fwd_tip * arch
             zb = z_skin - 0.003 - 0.004 * (1.0 - arch)
-            front_row.append(np.array([xv, yv, zf]))
-            back_row.append(np.array([xv * 0.85, yv + 0.002, zb]))
+            front_row.append(np.array([cx + xv, yv, zf]))
+            back_row.append(np.array([cx + xv * 0.85, yv + 0.002, zb]))
         # Closed loop around cross-section (front L->R then back R->L)
         rings.append(front_row + back_row[::-1])
-    build_grid_cap(bm, rings[::-1], closed_pole=np.array([0.0, y_top + 0.003, env.face_front_z(0.0, y_top)]), tuck_bottom=0.65)
+    build_grid_cap(bm, rings[::-1], closed_pole=np.array([cx, y_top + 0.003, env.face_front_z(0.0, y_top)]), tuck_bottom=0.65)
     shade_fn = lambda v, n: 0.86 + 0.16 * np.clip(n[:, 2], -0.3, 1.0)
-    return finalize_bmesh(bm, 11, SLOT_HAIR, shade_fn, lambda v: env.head_weights(v, neck_blend_below=env.head_p[1] - 0.010), low_ratio=0.58)
+    return finalize_bmesh(bm, 11, SLOT_HAIR, shade_fn, lambda v: env.head_weights(v, neck_blend_below=env.chin_y + 0.008), low_ratio=0.38)
 
 
 def sculpt_beard_full_sea(env):
@@ -786,9 +800,10 @@ def sculpt_beard_full_sea(env):
     bm = bmesh.new()
     build_moustache_grid(bm, env, width=0.048, droop=0.013)
 
+    cx = float(env.cran_c[0])
     na = 11
     azs = [(-0.56 * math.pi + 1.12 * math.pi * i / (na - 1)) for i in range(na)]
-    y_top = env.head_p[1] + 0.0590  # sideburns start near mid-ear/cheek
+    y_top = env.chin_y + 0.84 * (env.nose_y - env.chin_y)
     layers = [
         (0.000, 0.068, 0.007, 0.42),   # upper sideburns (hollowed in center for mouth/cheeks via mouth_clear)
         (-0.024, 0.066, 0.014, 0.16),  # jaw corners + lower lip
@@ -805,20 +820,20 @@ def sculpt_beard_full_sea(env):
             xv = half_w * s_az
             # Dip beard hairline below mouth & cheeks near center on the top ring
             y_eff = yv - mouth_dip * (c_az ** 2) * 0.062
-            z_skin = env.face_front_z(min(abs(xv), 0.056), max(y_eff, env.head_p[1] - 0.012))
+            z_skin = env.face_front_z(min(abs(xv), 0.056), max(y_eff, env.chin_y + 0.004))
             if abs(xv) > 0.048:
-                z_skin = min(z_skin, env.cran_c[2] + 0.052 * (1.0 - (abs(xv) - 0.048) * 6.0))
+                z_skin = min(z_skin, env.cran_c[2] + 0.068 * (1.0 - (abs(xv) - 0.048) * 6.0))
             wave = 0.0018 * math.cos(9.0 * az)
             zf = z_skin + jut * (0.55 + 0.45 * c_az) + wave
             zb = z_skin - 0.005 - 0.008 * c_az
-            front_row.append(np.array([xv, y_eff, zf]))
-            back_row.append(np.array([xv * 0.86, y_eff + 0.002, zb]))
+            front_row.append(np.array([cx + xv, y_eff, zf]))
+            back_row.append(np.array([cx + xv * 0.86, y_eff + 0.002, zb]))
         rings.append(front_row + back_row[::-1])
 
-    bot_pole = np.array([0.0, y_top - 0.104, env.face_front_z(0.0, env.head_p[1] - 0.012) + 0.008])
+    bot_pole = np.array([cx, y_top - 0.104, env.face_front_z(0.0, env.chin_y + 0.004) + 0.008])
     build_grid_cap(bm, rings, closed_pole=bot_pole, tuck_bottom=0.55)
-    shade_fn = lambda v, n: 0.85 + 0.17 * np.clip(n[:, 2], -0.4, 1.0) + 0.05 * np.cos(v[:, 0] * 110.0)
-    return finalize_bmesh(bm, 12, SLOT_HAIR, shade_fn, lambda v: env.head_weights(v, neck_blend_below=env.head_p[1] - 0.005, spine_tail=True), low_ratio=0.55)
+    shade_fn = lambda v, n: 0.85 + 0.17 * np.clip(n[:, 2], -0.4, 1.0) + 0.05 * np.cos((v[:, 0] - cx) * 110.0)
+    return finalize_bmesh(bm, 12, SLOT_HAIR, shade_fn, lambda v: env.head_weights(v, neck_blend_below=env.chin_y + 0.012, spine_tail=True), low_ratio=0.38)
 
 
 def sculpt_garment_jerkin(env):
@@ -1091,16 +1106,11 @@ def main():
     bpy.ops.wm.read_factory_settings(use_empty=True)
     male_pack = pack_sex_components(os.path.join(ROOT, 'assets', 'crew', 'sailor.glb'), False)
     female_pack = pack_sex_components(os.path.join(ROOT, 'assets', 'crew', 'sailor-female.glb'), True)
-    os.makedirs(os.path.dirname(OUT_JS), exist_ok=True)
-    js = (
-        '// Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.\n'
-        '// Generated by scripts/bake-crew-components.py (headless Blender 5.2 LTS, 0 paid model credits).\n'
-        '// Quantized 20-byte skinned component vertices (<3h3b3B4B4B) + near/low uint16 relative index lists.\n'
-        f'export const CREW_COMPONENT_PACKS = Object.freeze({json.dumps({"male": male_pack, "female": female_pack}, separators=(",", ":"))});\n'
-    )
-    with open(OUT_JS, 'w', encoding='utf-8') as f:
-        f.write(js)
-    print(f'Wrote {OUT_JS} ({len(js) // 1024} KB)')
+    os.makedirs(os.path.dirname(OUT_JSON), exist_ok=True)
+    payload = json.dumps({"male": male_pack, "female": female_pack}, separators=(",", ":")) + "\n"
+    with open(OUT_JSON, 'w', encoding='utf-8') as f:
+        f.write(payload)
+    print(f'Wrote {OUT_JSON} ({len(payload) // 1024} KB)')
 
 
 if __name__ == '__main__':

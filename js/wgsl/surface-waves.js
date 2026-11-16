@@ -36,9 +36,18 @@ struct SurfaceWaveSource {position:vec4f,direction:vec4f,detail:vec4f};
 struct SurfaceWakeHull {posVel:vec4f,dims:vec4f};
 @group(0)@binding(3)var<storage,read>surfaceSources:array<SurfaceWaveSource>;
 @group(0)@binding(4)var<storage,read>surfaceHulls:array<SurfaceWakeHull>;
+fn swSqr(x:f32)->f32 { return x * x; }
+fn swClean1(x:f32)->f32 {
+  let bits = bitcast<u32>(x) & 0x7fffffffu;
+  if ((x != x) || !(x == x) || bits >= 0x7f800000u || abs(x) > 1e4) { return 0.0; }
+  return x;
+}
+fn swClean4(v:vec4f)->vec4f {
+  return vec4f(swClean1(v.x), swClean1(v.y), swClean1(v.z), swClean1(v.w));
+}
 fn surfaceOld(q:vec2i,layer:i32,size:vec2i)->vec4f {
   if(SW.step.y>.5||any(q<vec2i(1))||any(q>=size-1)){return vec4f(0);}
-  return textureLoad(surfacePrevious,q,layer,0);
+  return swClean4(textureLoad(surfacePrevious,q,layer,0));
 }
 fn surfaceSourceGaussian(delta:vec2f,direction:vec2f,sigma:f32,elongation:f32)->f32 {
   let along=dot(delta,direction);let across=dot(delta,vec2f(-direction.y,direction.x));
@@ -52,8 +61,10 @@ fn surfaceSourceGaussian(delta:vec2f,direction:vec2f,sigma:f32,elongation:f32)->
   let layer=i32(id.z);let domain=select(SW.nearDomain,SW.farDomain,layer==1);
   let previous=select(SW.previousCenters.xy,SW.previousCenters.zw,layer==1);
   let shift=vec2i(round((domain.xy-previous)/domain.w));let oldQ=q+shift;
-  let old=surfaceOld(oldQ,layer,size);
-  let neighbours=surfaceOld(oldQ+vec2i(1,0),layer,size)+surfaceOld(oldQ-vec2i(1,0),layer,size)+surfaceOld(oldQ+vec2i(0,1),layer,size)+surfaceOld(oldQ-vec2i(0,1),layer,size);
+  var old=swClean4(surfaceOld(oldQ,layer,size));
+  if(any(old!=old)){old=vec4f(0);}
+  var neighbours=swClean4(surfaceOld(oldQ+vec2i(1,0),layer,size)+surfaceOld(oldQ-vec2i(1,0),layer,size)+surfaceOld(oldQ+vec2i(0,1),layer,size)+surfaceOld(oldQ-vec2i(0,1),layer,size));
+  if(any(neighbours!=neighbours)){neighbours=vec4f(0);}
   let p=(vec2f(q)+.5-vec2f(size)*.5)*domain.w+domain.xy;
   let packedCounts=u32(max(0.0,SW.step.z)+0.5);
   let sourceCount=packedCounts&255u;
@@ -100,12 +111,12 @@ fn surfaceSourceGaussian(delta:vec2f,direction:vec2f,sigma:f32,elongation:f32)->
     let maxHalfW=halfB+wakeReach*0.42+domain.w*3.0;
     if(s>halfL+B*1.8+domain.w*2.0||s<-halfL-wakeReach||y>maxHalfW){continue;}
     let uLong=clamp(s/max(halfL,0.5),-1.0,1.0);
-    let planform=halfB*clamp(1.0-pow(abs(uLong),2.35)*0.86,0.14,1.0);
+    let planform=halfB*clamp(1.0-pow(max(abs(uLong),0.0),2.35)*0.86,0.14,1.0);
     let shoulderW=max(max(0.55,B*0.20),domain.w*1.35);
     let foreEnv=smoothstep(-0.05*halfL,0.35*halfL,s)*(1.0-smoothstep(0.82*halfL,1.12*halfL,s));
     let outDist=y-planform*0.92;
-    let bowCrest=exp(-pow((outDist-shoulderW*0.25)/(shoulderW*0.72),2.0))*foreEnv;
-    let bowHollow=exp(-pow((outDist+shoulderW*0.75)/(shoulderW*0.72),2.0))*foreEnv;
+    let bowCrest=exp(-swSqr((outDist-shoulderW*0.25)/(shoulderW*0.72)))*foreEnv;
+    let bowHollow=exp(-swSqr((outDist+shoulderW*0.75)/(shoulderW*0.72)))*foreEnv;
     let stemAlong=(s-halfL*0.90)/max(shoulderW*0.85,0.6);
     let stemAcross=y/max(halfB*0.72,domain.w*1.3);
     let stemR2=stemAlong*stemAlong+stemAcross*stemAcross;
@@ -119,7 +130,7 @@ fn surfaceSourceGaussian(delta:vec2f,direction:vec2f,sigma:f32,elongation:f32)->
     let recDist=clamp(speed*speed*0.32,domain.w*1.8,L*0.38);
     let recLen=max(domain.w*1.8,recDist*0.65);
     let recWid=max(domain.w*1.5,halfB*1.05);
-    let recCrest=exp(-pow((s-(sStern-recDist))/recLen,2.0)-pow(y/recWid,2.0));
+    let recCrest=exp(-swSqr((s-(sStern-recDist))/recLen)-swSqr(y/recWid));
     let recWeight=(sternLen*sternWid)/(recLen*recWid);
     let sApex=halfL*0.78;
     let trailBehind=sApex-s;
@@ -137,10 +148,10 @@ fn surfaceSourceGaussian(delta:vec2f,direction:vec2f,sigma:f32,elongation:f32)->
     let pressureHead=min(0.60,speed*speed/(2.0*9.81)*0.95)*headway*draftScale;
     hullForce+=((bowCrest-bowHollow)*11.5+stemWave*6.5+kelvinForce*5.2)*pressureHead
       +(recCrest*recWeight-sternTrough)*min(0.55,speed*speed*0.042)*headway*draftScale;
-    let bowFroth=exp(-pow((outDist-shoulderW*0.35)/(shoulderW*1.15),2.0))*foreEnv*smoothstep(-shoulderW*0.35,shoulderW*0.25,outDist);
+    let bowFroth=exp(-swSqr((outDist-shoulderW*0.35)/(shoulderW*1.15)))*foreEnv*smoothstep(-shoulderW*0.35,shoulderW*0.25,outDist);
     let aftTrail=max(0.0,sStern-s);
     let wakeRibbonW=max(domain.w*1.1,halfB*mix(0.58,1.35,clamp(aftTrail/max(L*1.6,6.0),0.0,1.0)));
-    let sternWash=select(0.0,exp(-pow(y/wakeRibbonW,2.0))*exp(-aftTrail/max(L*1.35,7.0)),s<=sStern+domain.w);
+    let sternWash=select(0.0,exp(-swSqr(y/wakeRibbonW))*exp(-aftTrail/max(L*1.35,7.0)),s<=sStern+domain.w);
     let insideHull=smoothstep(planform*0.92,planform*0.55,y)*smoothstep(halfL*0.92,halfL*0.55,abs(s));
     let speedFoam=smoothstep(0.26,2.1,speed)*select(1.0,0.75,isRiver);
     hullFoamRate+=(bowFroth*2.4+sternTrough*2.2+sternWash*1.65+kelvinFoam*0.95)*speedFoam*(1.0-insideHull*0.85);
@@ -153,6 +164,8 @@ fn surfaceSourceGaussian(delta:vec2f,direction:vec2f,sigma:f32,elongation:f32)->
   let boundary=select(1.0,0.0,any(q<vec2i(1))||any(q>=size-1));
   let foam=clamp(old.z*exp(-dt*.65)+foamSource*.08+hullFoamRate*dt*.85,0.0,1.0)*absorption;
   let fresh=clamp(old.w*exp(-dt*2.0)+foamSource*.12+hullFoamRate*dt*1.35,0.0,1.0)*absorption;
-  textureStore(surfaceNext,q,layer,vec4f(height,velocity,foam,fresh)*boundary);
+  var outWave=swClean4(vec4f(height,velocity,foam,fresh)*boundary);
+  if(any(outWave!=outWave)||any(abs(outWave)>vec4f(1e4))){outWave=vec4f(0.0);}
+  textureStore(surfaceNext,q,layer,outWave);
 }
 `;

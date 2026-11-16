@@ -31,6 +31,8 @@ import {CITY_DETAIL_M,CITY_TYPED_FLOATS,compileCityBuildingTypes} from './old-wo
 import {createCityTargets} from './city-targets.js';
 import {createLandCraterLedger,createLandCraters,requestLandCraterPipelines,landCraterSize} from './land-craters.js';
 import {sharedGroundDetail} from './ground-detail.js';
+import {sharedNeuralPbrBank} from './neural-pbr.js';
+import {withNeuralPbrTerrain} from './wgsl/neural-pbr.js';
 import {createLandShadows} from './shadows.js';
 import {createBoulderContinuum} from './boulder-continuum.js';
 
@@ -861,7 +863,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // Start shader compilation, foliage fetch, and forest downloads immediately in parallel with DEM/terrain loading
   const mipPipePromise=Promise.resolve(mipPipe),cloudsResolvedPromise=Promise.resolve(clouds),waterOpticsResolvedPromise=Promise.resolve(waterOptics);
   mipPipePromise.catch(()=>{});cloudsResolvedPromise.catch(()=>{});waterOpticsResolvedPromise.catch(()=>{});
-  const modulePromise=shader(TERRAIN+FOREST_VERTEX_WGSL+FOREST_CROWN_WGSL+FOREST_GROVE_WGSL+FOREST_SHADOW_WGSL+FOREST_MASS_VERTEX_WGSL,'island terrain');
+  const neuralPbr=sharedNeuralPbrBank(device);
+  const terrainSource=withNeuralPbrTerrain(TERRAIN);
+  const modulePromise=shader(terrainSource+FOREST_VERTEX_WGSL+FOREST_CROWN_WGSL+FOREST_GROVE_WGSL+FOREST_SHADOW_WGSL+FOREST_MASS_VERTEX_WGSL,'island terrain');
   const meshLayout={arrayStride:32,attributes:[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},{shaderLocation:2,offset:24,format:'float32x2'}]};
   const treeLayout={arrayStride:TREE_VERTEX_FLOATS*4,attributes:[...meshLayout.attributes,{shaderLocation:5,offset:32,format:'float32x2'}]};
   const treeBuffers=[treeLayout,{arrayStride:32,stepMode:'instance',attributes:[{shaderLocation:3,offset:0,format:'float32x4'},{shaderLocation:4,offset:16,format:'float32x4'}]}];
@@ -897,7 +901,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   ]));
   terrainPipesPromise.catch(()=>{});
   const submergedPipesPromise=waterOpticsResolvedPromise.then(wo=>wo?Promise.all([
-    wo.capture({source:TERRAIN,vertex:{buffers:[meshLayout]},world:'in.world',groups:2,land:true}),
+    wo.capture({source:terrainSource,vertex:{buffers:[meshLayout]},world:'in.world',groups:2,land:true}),
     wo.capture({source:TERRAIN,vertex:{entryPoint:'groundVS',buffers:treeBuffers},entry:'groundFS',world:'in.world',groups:1,land:true}),
   ]):[null,null]);
   submergedPipesPromise.catch(()=>{});
@@ -1505,7 +1509,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     return {texture,window,resources:[[14,texture.createView()],[15,{buffer:window}]],follow};
   };
   let activeTownField=townField(proceduralPack?.port?.streets);
-  let nearResources=[...opaqueResources,[12,{buffer:nearDomain}],[13,nearAlbedo.createView()],...activeTownField.resources,...groundDetail.resources];
+  let nearResources=[...opaqueResources,[12,{buffer:nearDomain}],[13,nearAlbedo.createView()],...activeTownField.resources,...groundDetail.resources,...neuralPbr.terrainResources];
   const leafResources=resources.filter(([binding])=>binding!==9&&binding!==11);
   const groups=[bind(terrainPipe,nearResources),bind(opaqueTreePipe,nearResources),bind(treePipe,leafResources)];
   let citySolidGroup=bind(citySolidPipe,nearResources);const citySolidClouds=clouds.bindVolume(citySolidPipe);
@@ -1520,22 +1524,27 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const submergedGroundGroup=submergedGround?.bindGroup(opaqueResources.map(([binding,resource])=>({binding,resource})));
   const lightGroup=bind(lightPipe,[[0,{buffer:frameUBO}],[4,elevation.createView()],[5,lighting.createView()],[6,{buffer:uniform}],[7,{buffer:nearDomain}],[8,{buffer:nearElevation}]]);
   const cloudLight=clouds.bindVolume(lightPipe,true);
-  boulderContinuum=createBoulderContinuum(device,{
-    frameUBO,
-    resources:nearResources,
-    landShadowUniform:activeLandShadows.uniform,
-    capacity:groundBlocks*groundBlock,
-    colorFormat:format,
-    depthFormat:'depth32float',
-    depthCompare:'greater',
-    sampleCount:samples,
-    shadowDepthFormat:activeLandShadows.format,
-    shadowDepthCompare:'less',
-    getPort:()=>ensureBoulderFracturePort(),
-    groundAt:(x,z)=>baseGroundSample(x,z),
-    waterAt:(x,z)=>inlandWaterSampler?.(x,z)?.wy??null,
-  });
-  boulderContinuum.setPixelScale(TREE_PIXEL_ERROR/currentPixelError);
+  try {
+    boulderContinuum=await createBoulderContinuum(device,{
+      frameUBO,
+      resources:nearResources,
+      landShadowUniform:activeLandShadows.uniform,
+      capacity:groundBlocks*groundBlock,
+      colorFormat:format,
+      depthFormat:'depth32float',
+      depthCompare:'greater',
+      sampleCount:samples,
+      shadowDepthFormat:activeLandShadows.format,
+      shadowDepthCompare:'less',
+      getPort:()=>ensureBoulderFracturePort(),
+      groundAt:(x,z)=>baseGroundSample(x,z),
+      waterAt:(x,z)=>inlandWaterSampler?.(x,z)?.wy??null,
+    });
+    boulderContinuum.setPixelScale(TREE_PIXEL_ERROR/currentPixelError);
+  } catch (error) {
+    console.warn('Boulder continuum unavailable:', error);
+    boulderContinuum = null;
+  }
   let inlandWater=proceduralPack?await createInlandWater({device,shader,format,samples,resources:nearResources,clouds,coastalField,oceanBridge,initialGeometry:proceduralPack.inlandWater??null}):null;
   let herds=proceduralPack?await createLivestockHerds({device,shader,format,samples,frameUBO,landUniform:uniform,nearDomain,elevation,landShadowUniform:activeLandShadows.uniform,resources:nearResources,clouds,initialHerds:proceduralPack.herds??null,initialBridges:proceduralPack.port?.country?.bridges??null,isMobile}):null;
   const meadowPack=await meadowPromise;
@@ -1677,7 +1686,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       [5,lighting.createView()],[6,{buffer:sUniform}],[7,sAlbedo.createView()],
       [8,landSampler],[9,sBiome.createView()],[11,{buffer:leafMean}],
       [12,{buffer:nearDomain}],[13,nearAlbedo.createView()],
-      ...sTownField.resources,...groundDetail.resources,...activeLandShadows.terrainResources,
+      ...sTownField.resources,...groundDetail.resources,...activeLandShadows.terrainResources,...neuralPbr.terrainResources,
     ];
     const terrainGroup=bind(terrainPipe,secOpaqueResources);
     const submergedSecGroup=submerged?.bindGroup(secOpaqueResources.map(([binding,resource])=>({binding,resource})));
@@ -1802,7 +1811,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   function rebindNearTownField(streets){
     const oldTownField=activeTownField;
     activeTownField=townField(streets);
-    nearResources=[...opaqueResources,[12,{buffer:nearDomain}],[13,nearAlbedo.createView()],...activeTownField.resources,...groundDetail.resources];
+    nearResources=[...opaqueResources,[12,{buffer:nearDomain}],[13,nearAlbedo.createView()],...activeTownField.resources,...groundDetail.resources,...neuralPbr.terrainResources];
     groups[0]=bind(terrainPipe,nearResources);groups[1]=bind(opaqueTreePipe,nearResources);craterLand=null;citySolidGroup=bind(citySolidPipe,nearResources);cityGroup=bind(cityPipe,nearResources);cityTypeGroup=bind(cityTypePipe,nearResources);cityStruckGroup=bind(cityStruckPipe,nearResources);
     submergedGroup=submerged?.bindGroup(nearResources.map(([binding,resource])=>({binding,resource})));
     boulderContinuum?.rebind(nearResources);

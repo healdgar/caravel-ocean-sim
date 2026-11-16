@@ -376,7 +376,11 @@ fn evalCapsulePushAtWorld(cap:ForestWindCapsule,worldPos:vec3f,now:f32)->vec3f{
  let dLen=length(rawDir);
  let dirUnit=select(vec2f(1.,0.),rawDir/max(dLen,1e-5),dLen>1e-4);
  let blend=select(1.0-exp(-dt*2.5),1.0,firstFrame);
- let curW=mix(simState[1].zw,dirUnit*rawSpeed,blend);
+ var prevW=simState[1].zw;
+ if(any(prevW!=prevW)||any((bitcast<vec2u>(prevW)&vec2u(0x7fffffffu))>=vec2u(0x7f800000u))){prevW=vec2f(0.);}
+ var targetW=dirUnit*rawSpeed;
+ if(any(targetW!=targetW)||any((bitcast<vec2u>(targetW)&vec2u(0x7fffffffu))>=vec2u(0x7f800000u))){targetW=vec2f(0.);}
+ let curW=mix(prevW,targetW,blend);
  let smoothSpd=length(curW);
  let smoothDir=select(dirUnit,curW/max(smoothSpd,1e-5),smoothSpd>1e-4);
  simState[0]=vec4f(now,smoothDir.x,smoothDir.y,smoothSpd*amp);
@@ -427,17 +431,20 @@ fn evalCapsulePushAtWorld(cap:ForestWindCapsule,worldPos:vec3f,now:f32)->vec3f{
    if(cap.params.y>0.5&&length(worldPos-0.5*(cap.aRadius.xyz+cap.bStrength.xyz))<cap.aRadius.w+length(cap.bStrength.xyz-cap.aRadius.xyz)*0.5+6.0){touched=true;break;}
   }
  }
- // Check if this tree already owns a promoted slot (either still touched or within its grace period).
+ // Check if this tree already owns one of its 12 deterministic hash-probed slots.
+ let rootIdx=id.x;
+ let probeStart=(rootIdx*2654435761u)&255u;
+ let probeStep=(((rootIdx>>8u)*2u+1u)&255u);
  var mySlot=0xffffffffu;
- for(var s=0u;s<MAX_PROMOTED;s++){
-  if(atomicLoad(&promoTable[1u+s])==id.x+1u){mySlot=s;break;}
+ for(var s=0u;s<12u;s++){
+  let cand=(probeStart+s*probeStep)&255u;
+  if(atomicLoad(&promoTable[1u+cand])==rootIdx+1u){mySlot=cand;break;}
  }
  if(mySlot==0xffffffffu&&touched){
-  // Claim a free slot deterministically using hash probe + atomicCompareExchangeWeak.
-  let start=windHash(id.x)%MAX_PROMOTED;
-  for(var p=0u;p<MAX_PROMOTED;p++){
-   let cand=(start+p)%MAX_PROMOTED;
-   let ex=atomicCompareExchangeWeak(&promoTable[1u+cand],0u,id.x+1u);
+  // Claim a free slot deterministically using bounded 12-slot odd-stride hash probe + atomicCompareExchangeWeak.
+  for(var p=0u;p<12u;p++){
+   let cand=(probeStart+p*probeStep)&255u;
+   let ex=atomicCompareExchangeWeak(&promoTable[1u+cand],0u,rootIdx+1u);
    if(ex.exchanged){
     mySlot=cand;
     // Initialize promoted bone state seamlessly from this tree's matching shared lane so promotion has zero pop!
@@ -522,6 +529,9 @@ fn stepSkeletonBones(skelIdx:u32,protoId:u32,windProtoDir:vec3f,windSpeed:f32,gu
   let sAt=BONE_STATE_BASE+(skelIdx*WIND_BONES+b)*2u;
   var theta=simState[sAt].xyz;
   var omegaVel=simState[sAt+1u].xyz;
+  if(any(theta!=theta)||any(omegaVel!=omegaVel)||any((bitcast<vec3u>(theta)&vec3u(0x7fffffffu))>=vec3u(0x7f800000u))||any((bitcast<vec3u>(omegaVel)&vec3u(0x7fffffffu))>=vec3u(0x7f800000u))||!(dot(theta,theta)<1e4)||!(dot(omegaVel,omegaVel)<1e6)){
+   theta=vec3f(0.);omegaVel=vec3f(0.);
+  }
 
   let stiffness=max(bone.spring.x,1.0);
   let natOmega=clamp(bone.spring.y,0.8,18.0);
@@ -587,6 +597,9 @@ fn stepSkeletonBones(skelIdx:u32,protoId:u32,windProtoDir:vec3f,windSpeed:f32,gu
      theta*=sat/mag;
     }
    }
+  }
+  if(any(theta!=theta)||any(omegaVel!=omegaVel)||any((bitcast<vec3u>(theta)&vec3u(0x7fffffffu))>=vec3u(0x7f800000u))||any((bitcast<vec3u>(omegaVel)&vec3u(0x7fffffffu))>=vec3u(0x7f800000u))||!(dot(theta,theta)<1e4)||!(dot(omegaVel,omegaVel)<1e6)){
+   theta=vec3f(0.);omegaVel=vec3f(0.);
   }
   simState[sAt]=vec4f(theta,0.);
   simState[sAt+1u]=vec4f(omegaVel,0.);

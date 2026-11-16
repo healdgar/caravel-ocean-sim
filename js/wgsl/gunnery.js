@@ -1135,10 +1135,14 @@ struct GunneryArcVertex{
   if(isRing){
     let r=length(v.uv);
     if(r>1.0){discard;}
-    let outerRing=exp(-pow((r-.84)/.075,2.0));
-    let innerRing=exp(-pow((r-.38)/.065,2.0))*.72;
-    let centerDot=exp(-pow(r/.11,2.0))*.85;
-    let crossHair=exp(-pow(min(abs(v.uv.x),abs(v.uv.y))/.035,2.0))*smoothstep(.18,.82,r)*step(r,.92)*.48;
+    let outerD=(r-.84)/.075;
+    let innerD=(r-.38)/.065;
+    let centerD=r/.11;
+    let crossD=min(abs(v.uv.x),abs(v.uv.y))/.035;
+    let outerRing=exp(-(outerD*outerD));
+    let innerRing=exp(-(innerD*innerD))*.72;
+    let centerDot=exp(-(centerD*centerD))*.85;
+    let crossHair=exp(-(crossD*crossD))*smoothstep(.18,.82,r)*step(r,.92)*.48;
     let pulse=.82+.18*sin(F.camPos.w*4.2-r*6.28318);
     let alpha=clamp((outerRing+innerRing+centerDot+crossHair)*baseAlpha*pulse,0.0,1.0);
     if(alpha<.004){discard;}

@@ -235,12 +235,8 @@ fn forestClusterTree(index:u32)->u32{
   if(r.identity.w>=0.&&(dot(planeL,at)<-reach*lengthL||dot(planeR,at)<-reach*lengthR||dot(planeB,at)<-reach*lengthB||dot(planeT,at)<-reach*lengthT||dot(rowW,at)<-reach*length(rowW))){continue;}
   let draw=select(bucket.drawWood,bucket.drawLeaf,isLeaf);
   let slot=atomicAdd(&draws[draw*5u+1u],1u);
-  // A leaf cluster carries its tree's crown share above its own number, and close axillary sub-shoots pack layer bits into upper item.x.
+  // A leaf cluster carries its tree's crown share above its own number.
   if(slot<bucket.capacity.x){list[select(bucket.listWood,bucket.listLeaf,isLeaf)+slot]=vec2u(tree,index|select(0u,crownShare<<24u,isLeaf));}
-  if(isLeaf&&crownShare==0u&&nearest<22.0){
-   let slotAxil=atomicAdd(&draws[draw*5u+1u],1u);
-   if(slotAxil<bucket.capacity.x){list[bucket.listLeaf+slotAxil]=vec2u(tree|(1u<<28u),index);}
-  }
  }
 }
 // What casts into the land shadow map is chosen here, from every tree of the species and against the
@@ -303,12 +299,13 @@ struct ForestCluster {lod:vec4f,parentLod:vec4f,cull:vec4f,err:f32,parentErr:f32
 @group(3)@binding(2)var<storage,read>forestClusterVertices:array<u32>;
 @group(3)@binding(3)var<storage,read>forestClusterIndices:array<u32>;
 @group(3)@binding(4)var<uniform>forestClusterBounds:array<vec4f,2>;
+fn forestSafeNormalize(v:vec3f,fb:vec3f)->vec3f{let l2=dot(v,v);return select(fb,v*inverseSqrt(max(l2,1e-12)),l2>1e-12);}
 fn forestClusterOctahedral(e:vec2f)->vec3f{
  var n=vec3f(e,1.-abs(e.x)-abs(e.y));
  if(n.z<0.){let x=n.x;n.x=(1.-abs(n.y))*select(-1.,1.,x>=0.);n.y=(1.-abs(x))*select(-1.,1.,n.y>=0.);}
- return normalize(n);
+ return forestSafeNormalize(n,vec3f(0.,1.,0.));
 }
-fn forestClusterVertexCross(tree:u32,vertex:u32,kindValue:f32,crossLayer:u32)->ForestVertex{
+fn forestClusterVertex(tree:u32,vertex:u32,kindValue:f32)->ForestVertex{
  let at=vertex*${FOREST_CLUSTER_VERTEX_WORDS}u;
  let w0=forestClusterVertices[at];let w1=forestClusterVertices[at+1u];let w2=forestClusterVertices[at+2u];let w3=forestClusterVertices[at+3u];let w4=forestClusterVertices[at+4u];
  let unit=vec3f(f32(w0&65535u),f32(w0>>16u),f32(w1&65535u))/65535.;
@@ -323,31 +320,22 @@ fn forestClusterVertexCross(tree:u32,vertex:u32,kindValue:f32,crossLayer:u32)->F
   let dist=length(r.rootScale.xyz-F.camPos.xyz);
   let invScale=1./max(r.rootScale.w,.85);
   let upRef=select(vec3f(0.,1.,0.),vec3f(1.,0.,0.),abs(normal.y)>.9);
-  let t1=normalize(cross(normal,upRef));let t2=cross(normal,t1);
+  let t1=forestSafeNormalize(cross(normal,upRef),vec3f(1.,0.,0.));let t2=cross(normal,t1);
   let uvOff=clamp(uv-vec2f(.5,.5),vec2f(-.65),vec2f(.65));
-  // Close-range 3D botanical camber: curve shoots gently along midrib droop and lateral V-arch, and pitch axillary sub-shoots from the twig node without flat X-cross intersections.
-  let nearRelief=1.-smoothstep(12.,44.,dist);
-  if(nearRelief>0.&&crossLayer==0u){
+  // Subtle single-leaf lamina flex away from the petiole base (uv.x == 0 stays anchored at 0 mm on the woody shoot).
+  let nearRelief=1.-smoothstep(10.,36.,dist);
+  if(nearRelief>0.){
    let alongU=clamp(uv.x,0.,1.);
-   let camber=(-0.055*alongU*alongU+0.110*abs(uvOff.y)*alongU)*nearRelief*invScale;
+   let camber=(-0.014*alongU*alongU+0.026*abs(uvOff.y)*alongU)*nearRelief*invScale;
    position+=normal*camber;
-   normal=normalize(normal+(t1*uvOff.x*0.18+t2*uvOff.y*0.28)*nearRelief);
-  }else if(crossLayer>0u){
-   let layerFade=1.-smoothstep(14.,22.,dist);
-   let alongU=clamp(uv.x,0.,1.);
-   let sSign=select(-1.,1.,(crossLayer&2u)==0u);
-   let pitchLift=(alongU*0.165+abs(uvOff.y)*alongU*0.080)*layerFade*invScale;
-   let fanSide=(alongU*0.135*sSign+uvOff.y*alongU*0.050)*layerFade*invScale;
-   let stepAlong=(-alongU*0.035)*layerFade*invScale;
-   position+=normal*pitchLift+t1*fanSide+t2*stepAlong;
-   normal=normalize(normal+t1*(0.28*sSign+uvOff.y*0.24)*layerFade+t2*(0.22*layerFade));
+   normal=forestSafeNormalize(normal+(t1*uvOff.x*0.10+t2*uvOff.y*0.18)*nearRelief,normal);
   }
   let midBlend=smoothstep(55.,320.,dist);
   if(midBlend>0.){
    let isSubBroadleaf=(forestBin.z&768u)!=0u;
-   let baseInflate=select(.18,.48,isSubBroadleaf)*midBlend*invScale;
+   let baseInflate=select(.16,.48,isSubBroadleaf)*midBlend*invScale;
    position+=t1*(uvOff.x*baseInflate)+t2*(uvOff.y*baseInflate);
-   normal=normalize(normal+(t1*uvOff.x+t2*uvOff.y)*(.10*midBlend));
+   normal=forestSafeNormalize(normal+(t1*uvOff.x+t2*uvOff.y)*(.10*midBlend),normal);
   }
  }
  let windOn=bitcast<vec4u>(forestWindPoses[0]).y>0u;
@@ -359,9 +347,6 @@ fn forestClusterVertexCross(tree:u32,vertex:u32,kindValue:f32,crossLayer:u32)->F
  let root=vec3f(f32(w4&255u),f32((w4>>8u)&255u),f32((w4>>16u)&255u))/255.;
  return forestPlaceSkinned(r,tree,position,normal,vec2f(kindValue,f32(w1>>24u)/255.),uv,root*root,f32((w1>>16u)&255u),vertex,f32(w4>>24u)/255.,windOn);
 }
-fn forestClusterVertex(tree:u32,vertex:u32,kindValue:f32)->ForestVertex{
- return forestClusterVertexCross(tree,vertex,kindValue,0u);
-}
 // A cluster with fewer triangles than the draw's fixed count collapses the rest to a point.
 @vertex fn forestClusterWoodVS(@builtin(instance_index)instance:u32,@builtin(vertex_index)index:u32)->ForestVertex{
  let item=forestClusterList[forestBin.x+instance];let cluster=forestClusters[item.y];
@@ -371,10 +356,7 @@ fn forestClusterVertex(tree:u32,vertex:u32,kindValue:f32)->ForestVertex{
 @vertex fn forestClusterLeafVS(@builtin(instance_index)instance:u32,@builtin(vertex_index)index:u32)->ForestVertex{
  let item=forestClusterList[forestBin.x+instance];let cluster=forestClusters[item.y&0xffffffu];
  if(index>=(cluster.shape>>1u)/4u*${FOREST_LEAF_VERTICES}u){var o:ForestVertex;return o;}
- let treeId=item.x&0x0fffffffu;
- let rawCross=(item.x>>28u)&3u;
- let crossLayer=select(0u,1u|(((index/${FOREST_LEAF_VERTICES}u)&1u)<<1u),rawCross>0u);
- var o=forestClusterVertexCross(treeId,cluster.first+index,4.,crossLayer);
+ var o=forestClusterVertex(item.x&0x0fffffffu,cluster.first+index,4.);
  // The share of each pixel this tree's far crown has taken from its leaves (forestClusterSelect).
  o.crownFade=f32(item.y>>24u)/255.;
  return o;

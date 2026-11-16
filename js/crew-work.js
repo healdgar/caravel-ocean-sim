@@ -66,10 +66,10 @@ export function updateCrewRowingAttendance(company,boat){
 // Niña's is a square timber, the Pinta's and Santa María's end in a crossbar. The
 // Gipsy Moth's helmsman sits to it instead, so she has hands but no stance.
 const HELM_TILLER=Object.freeze({
-  nina:{back:.30,out:.30,turn:.40,hands:[[.07,.11,.13],[.25,.11,.13]]},
-  pinta:{back:.24,out:.28,turn:.40,hands:[[.08,.15,.09],[.09,.04,.09]]},
-  'santa-maria':{back:.24,out:.28,turn:.40,hands:[[.08,.15,.09],[.09,.04,.09]]},
-  'gipsy-moth-iv':{hands:[[.04,.05,.08],[.18,.05,.08]]},
+  nina:{back:.30,out:.30,turn:.40,hands:[[.07,.11,.15],[.25,.11,.15]]},
+  pinta:{back:.24,out:.28,turn:.40,hands:[[.08,.16,.11],[.10,.08,.115]]},
+  'santa-maria':{back:.24,out:.28,turn:.40,hands:[[.08,.17,.12],[.10,.10,.13]]},
+  'gipsy-moth-iv':{hands:[[.04,.075,.105],[.18,.075,.105]]},
 });
 // A wheel's rim is a circle in the design frame, and stays one as the wheel turns, so a hand on it stays on it:
 // angles up from the side he stands, and how far aft of the wheel's plane the wrist rides, in design units.

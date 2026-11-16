@@ -26,7 +26,7 @@ import { FOREST_MASS_ASSETS } from './js/forest-mass.js';
 import { FOREST_SURFACE_ASSETS, SUBTROPICAL_FOREST_SURFACE_ASSETS, PORTUGAL_FOREST_SURFACE_ASSETS } from './js/forest-surfaces.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
-const wgslModules = ['js/wgsl/common.js', 'js/wgsl/celestial.js', 'js/wgsl/hull.js', 'js/wgsl/lateen.js', 'js/wgsl/victory.js', 'js/wgsl/vessel.js', 'js/wgsl/vessel-pose.js', 'js/wgsl/shadows.js', 'js/wgsl/interaction.js', 'js/wgsl/surface-waves.js', 'js/wgsl/surface-coupling.js', 'js/wgsl/fleet-wakes.js', 'js/wgsl/cloud-model.js', 'js/wgsl/clouds.js', 'js/wgsl/sky.js', 'js/wgsl/deck.js', 'js/wgsl/spindrift.js', 'js/wgsl/wetness.js', 'js/wgsl/sim.js', 'js/wgsl/water-optics.js', 'js/wgsl/underwater.js', 'js/wgsl/ocean.js', 'js/wgsl/ocean-lighting.js', 'js/wgsl/post.js', 'js/wgsl/caravel.js', 'js/wgsl/crew.js', 'js/wgsl/terrain.js', 'js/wgsl/weather.js', 'js/wgsl/anchor.js', 'js/wgsl/dolphins.js', 'js/wgsl/marine-life.js', 'js/wgsl/gunnery.js', 'js/wgsl/gunnery-probe.js', 'js/wgsl/hull-contact.js', 'js/wgsl/rowing-water.js', 'js/wgsl/crew-solve.js'];
+const wgslModules = ['js/wgsl/common.js', 'js/wgsl/celestial.js', 'js/wgsl/hull.js', 'js/wgsl/lateen.js', 'js/wgsl/victory.js', 'js/wgsl/vessel.js', 'js/wgsl/vessel-pose.js', 'js/wgsl/shadows.js', 'js/wgsl/interaction.js', 'js/wgsl/surface-waves.js', 'js/wgsl/surface-coupling.js', 'js/wgsl/fleet-wakes.js', 'js/wgsl/cloud-model.js', 'js/wgsl/clouds.js', 'js/wgsl/sky.js', 'js/wgsl/deck.js', 'js/wgsl/spindrift.js', 'js/wgsl/wetness.js', 'js/wgsl/sim.js', 'js/wgsl/water-optics.js', 'js/wgsl/underwater.js', 'js/wgsl/ocean.js', 'js/wgsl/ocean-lighting.js', 'js/wgsl/post.js', 'js/wgsl/neural-post.js', 'js/wgsl/neural-pbr.js', 'js/wgsl/caravel.js', 'js/wgsl/crew.js', 'js/wgsl/terrain.js', 'js/wgsl/weather.js', 'js/wgsl/anchor.js', 'js/wgsl/dolphins.js', 'js/wgsl/marine-life.js', 'js/wgsl/gunnery.js', 'js/wgsl/gunnery-probe.js', 'js/wgsl/hull-contact.js', 'js/wgsl/rowing-water.js', 'js/wgsl/crew-solve.js'];
 const order = ['js/vendor/astronomy-engine.js', 'js/star-catalog.js', 'js/astronomy.js', 'js/rig-definition.js', 'js/hull-loft.js', 'js/models/additional.js', 'js/models/rowing.js', 'js/models/later-sail.js', 'js/models/procedural.js', 'js/models/nina.js', 'js/models/victory.js', 'js/hull.js', 'js/rig-plan.js', 'js/rigging.js', 'js/lateen.js', 'js/additional-rig.js', 'js/rig-surface.js', 'js/rowing.js', 'js/procedural-models.js', 'js/ship-models.js', 'js/victory-motion.js', 'js/sail-aerodynamics.js', 'js/sailing.js', 'js/dolphin-state.js', 'js/marine-life-state.js', 'js/hull-lateral.js', 'js/boat.js', 'js/gunnery-state.js', 'js/gunnery-models.js', ...wgslModules, 'js/celestial.js', 'js/fleet.js', 'js/surface-waves.js', 'js/surface-bindings.js', 'js/rowing-water.js', 'js/rowing-surface-events.js', 'js/gunnery-effects.js', 'js/gunnery-sea-probe.js', 'js/gunport-safety.js', 'js/hull-contact.js', 'js/vessels.js', 'js/follower.js', 'js/anchor-state.js', 'js/ship-parts.js', 'js/water-optics.js', 'js/underwater.js', 'js/anchor-iron.js', 'js/anchor.js', 'js/dolphin-mesh.js', 'js/dolphins.js', 'js/dolphin-ui.js', 'js/gltf.js', 'js/marine-asset.js', 'js/marine-rig.js', 'js/marine-life.js', 'js/marine-loader.js', 'js/marine-ui.js', 'js/caravel.js', 'js/mesh-writer.js', 'js/victory.js', 'js/additional-ships.js', 'js/rowing-ships.js', 'js/later-sail-ships.js', 'js/ship-mesh.js', 'js/crew-work.js', 'js/gunnery-tools.js', 'js/crew-pose.js', 'js/crew.js', 'js/wetness.js', 'js/sharing.js', 'js/camera.js', 'js/vessel-pose.js', 'js/shadows.js', 'js/deck.js', 'js/interaction.js', 'js/spindrift.js', 'js/clouds.js', 'js/terrain-model.js', 'js/vegetation.js', 'js/terrain.js', 'js/landfall.js', 'js/profiler.js', 'js/resolution.js', 'js/instruments.js', 'js/controls.js', 'js/weather-state.js', 'js/audio-assets.js', 'js/voice-assets.js', 'js/voice-lines.js', 'js/gunnery-audio-assets.js', 'js/gunnery-audio.js', 'js/gunnery-control.js', 'js/gunnery-ui.js', 'js/audio.js', 'js/weather.js', 'js/main.js'];
 // Baked stand loading is deferred to landfall; preserve existing module order.
 order.splice(order.indexOf('js/vegetation.js')+1,0,'js/indigenous-sovereignty.js','js/cairn-primitives.js','js/coastal-world.js');
@@ -54,16 +54,16 @@ order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-surfaces.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/task-yield.js','js/forest-occlusion.js');
 order.splice(order.indexOf('js/forest-scenery.js'),0,'js/forest-trunk-shapes.js','js/forest-trunks.js');
 order.splice(order.indexOf('js/profiler.js')+1,0,'js/gpu-benchmark.js');
-order.splice(order.indexOf('js/main.js'),0,'js/wgsl-prune.js','js/gpu-program-cache.js');
+order.splice(order.indexOf('js/main.js'),0,'js/wgsl-prune.js','js/gpu-program-cache.js','js/models/neural-light-weights.js','js/neural-post.js');
 order.splice(order.indexOf('js/main.js'),0,'js/career-save.js','js/career-ui.js','js/career-era.js','js/career-trade.js','js/career-port.js');
 order.splice(order.indexOf('js/gunnery-control.js'),0,'js/hull-holes.js','js/vessel-damage.js');
 order.splice(order.indexOf('js/main.js'),0,'js/sea-shadows.js');
 order.splice(order.indexOf('js/crew-solve.js'),0,'js/crew-wounds.js');
 order.splice(order.indexOf('js/crew.js'),0,'js/crew-overboard.js');
-order.splice(order.indexOf('js/crew.js'),0,'js/crew-aloft.js','js/models/crew-components.js','js/crew-components.js');
+order.splice(order.indexOf('js/crew.js'),0,'js/crew-aloft.js','js/crew-components.js');
 order.splice(order.indexOf('js/wgsl/vessel-pose.js'),0,'js/wgsl/rig-surfaces.js');
 order.splice(order.indexOf('js/wgsl/vessel-pose.js'),0,'js/wgsl/vessel-recoil.js');
-wgslModules.push('js/wgsl/part-assembly.js');
+wgslModules.push('js/wgsl/part-assembly.js','js/wgsl/rig-surfaces.js','js/wgsl/vessel-recoil.js','js/wgsl/hull-flood.js','js/wgsl/townsfolk.js','js/wgsl/props.js');
 // Shaders read these constants as they are built, so they come first, after the fort plan the streets import.
 order.unshift('js/fort-plan.js','js/fort-records.js','js/harbour-geography.js','js/harbour-defences.js','js/town-streets.js','js/indigenous-dress.js');
 order.splice(order.indexOf('js/main.js'),0,'js/wgsl/townsfolk.js','js/town-clips.js','js/town-shots.js','js/townsfolk.js','js/wgsl/props.js','js/props.js','js/free-cannon.js','js/castle-duel.js');
@@ -78,7 +78,8 @@ order.splice(order.indexOf('js/terrain.js'),0,'js/building-fracture.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/land-craters.js');
 order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/wgsl/land-craters.js');
 wgslModules.push('js/wgsl/land-craters.js');
-order.splice(order.indexOf('js/terrain.js'),0,'js/ground-detail.js');
+order.splice(order.indexOf('js/wgsl/neural-pbr.js'),0,'js/models/neural-pbr-weights.js');
+order.splice(order.indexOf('js/terrain.js'),0,'js/ground-detail.js','js/neural-pbr.js');
 order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/wgsl/ground-detail.js');
 wgslModules.push('js/wgsl/ground-detail.js');
 // The Old World: building types ahead of the land shader, which reads their constants, then the town plan and its country.
@@ -126,6 +127,17 @@ const runtimeAssetTypes = new Map([
   ['assets/crew/sailor.glb','model/gltf-binary'],
   ['assets/crew/sailor-female.glb','model/gltf-binary'],
   ['assets/crew/captain.glb','model/gltf-binary'],
+  ['assets/crew/soldier-1550.glb','model/gltf-binary'],
+  ['assets/crew/groom-pack.glb','model/gltf-binary'],
+  ['assets/crew/components-1550.json','application/json'],
+  ['assets/crew/indigenous-algonquian-male.glb','model/gltf-binary'],
+  ['assets/crew/indigenous-algonquian-female.glb','model/gltf-binary'],
+  ['assets/crew/indigenous-caribbean-male.glb','model/gltf-binary'],
+  ['assets/crew/indigenous-caribbean-female.glb','model/gltf-binary'],
+  ['assets/crew/indigenous-maya-male.glb','model/gltf-binary'],
+  ['assets/crew/indigenous-maya-female.glb','model/gltf-binary'],
+  ['assets/crew/indigenous-andean-male.glb','model/gltf-binary'],
+  ['assets/crew/indigenous-andean-female.glb','model/gltf-binary'],
   ['assets/crew/sailor-classic.glb','model/gltf-binary'],
   ['assets/crew/sailor-female-classic.glb','model/gltf-binary'],
   ['assets/props/cleat.glb','model/gltf-binary'],
@@ -146,6 +158,7 @@ const runtimeAssetTypes = new Map([
   ['assets/ports/1550/buildings-1550-lrm.bin','application/octet-stream'],
   ['assets/ports/1550/buildings-1550-photo-atlas.jpg','image/jpeg'],
   ['assets/ports/1550/land-materials-pbr.png','image/png'],
+  ['assets/neural-pbr/neural-pbr-latents.bin.gz','application/octet-stream'],
 ]);
 // The optional exporter declares this pack only after real source baking. Never
 // manufacture a near tile to satisfy a build or fetch absent optional assets.
@@ -206,8 +219,8 @@ const stripModuleSyntax = (src,inlineAssets=true) => {
     return mime?JSON.stringify(runtimeAssetURL(file,mime,inlineAssets)):match;
   })
   .replace(/^import[\s\S]*?from\s+['"][^'"]+['"];\s*$/gm, '')                 // drop imports
-  .replace(/^export\s+(const|function|async function|let|class)\s/gm, '$1 ')
-  .replace(/^export\s*\{[^}]*\}\s*from\s*['"][^'"]+['"];\s*$/gm, '')
+  .replace(/^export\s+(const|function\*?|async function\*?|let|class)\s/gm, '$1 ')
+  .replace(/^export\s*\{[^}]*\}(?:\s*from\s*['"][^'"]+['"])?;\s*$/gm, '')
   ;
 };
 
@@ -244,21 +257,112 @@ function minifyWGSL(src) {
 }
 
 // Minify every WGSL template literal in the shader modules in place (shared snippets stay
-// shared). ${...} interpolations are swapped for identifier-like placeholders first so the
-// minifier never fuses tokens across them.
-function minifyTemplates(src) {
-  return src.replace(/`([^`]*)`/g, (_, body) => {
-    const parts = [];
-    const masked = body.replace(/\$\{[^}]*\}/g, (m) => `__P${parts.push(m) - 1}__`);
-    const out = minifyWGSL(masked).replace(/__P(\d+)__/g, (_, i) => parts[Number(i)]);
-    return '`' + out + '`';
-  });
+// shared), handling nested ${...} expressions and nested template literals lexically.
+function minifyWGSLInJS(src, isWgslMod, rel = '') {
+  if (rel === 'js/forest-scenery.js') return src;
+  const n = src.length;
+  let i = 0;
+  function scanJS(stopAtBrace) {
+    let out = '', depth = 0, canRegex = true;
+    while (i < n) {
+      const c = src[i];
+      if (stopAtBrace && c === '}') {
+        if (depth === 0) return out;
+        depth--; out += c; i++; canRegex = false; continue;
+      }
+      if (c === '{') { depth++; out += c; i++; canRegex = true; continue; }
+      if (c === '/' && src[i + 1] === '/') {
+        const start = i; i += 2;
+        while (i < n && src[i] !== '\n') i++;
+        out += src.slice(start, i); continue;
+      }
+      if (c === '/' && src[i + 1] === '*') {
+        const start = i; i += 2;
+        while (i < n && !(src[i] === '*' && src[i + 1] === '/')) i++;
+        i = Math.min(n, i + 2);
+        out += src.slice(start, i); continue;
+      }
+      if (c === "'" || c === '"') {
+        const start = i, q = c; i++;
+        while (i < n && src[i] !== q) { if (src[i] === '\\') i += 2; else i++; }
+        if (i < n) i++;
+        out += src.slice(start, i); canRegex = false; continue;
+      }
+      if (c === '/' && canRegex && src[i + 1] !== '/' && src[i + 1] !== '*') {
+        const start = i; i++; let inClass = false;
+        while (i < n) {
+          const rc = src[i];
+          if (rc === '\\') { i += 2; continue; }
+          if (rc === '[') { inClass = true; i++; continue; }
+          if (rc === ']') { inClass = false; i++; continue; }
+          if (rc === '/' && !inClass) { i++; break; }
+          if (rc === '\n') break;
+          i++;
+        }
+        while (i < n && /[a-z]/i.test(src[i])) i++;
+        out += src.slice(start, i); canRegex = false; continue;
+      }
+      if (c === '`') { out += scanTemplate(); canRegex = false; continue; }
+      if (/\s/.test(c)) { out += c; i++; continue; }
+      if (/[A-Za-z0-9_$]/.test(c)) {
+        const start = i; i++;
+        while (i < n && /[A-Za-z0-9_$]/.test(src[i])) i++;
+        const word = src.slice(start, i);
+        out += word;
+        canRegex = /^(?:return|case|throw|typeof|void|delete|in|of|instanceof|new|yield|await|else|do)$/.test(word);
+        continue;
+      }
+      if ((c === '+' || c === '-') && src[i + 1] === c) {
+        out += c + c; i += 2; canRegex = false; continue;
+      }
+      out += c; i++;
+      canRegex = /[=(:,;!&|?+\-~^%*<>[\]]/.test(c);
+    }
+    return out;
+  }
+  function scanTemplate() {
+    i++; // skip opening `
+    const rawChunks = [], exprs = [];
+    let cur = '';
+    while (i < n) {
+      if (src[i] === '\\') { cur += src.slice(i, i + 2); i += 2; continue; }
+      if (src[i] === '`') { i++; break; }
+      if (src[i] === '$' && src[i + 1] === '{') {
+        rawChunks.push(cur); cur = ''; i += 2;
+        const expr = scanJS(true);
+        if (i < n && src[i] === '}') i++;
+        exprs.push('${' + expr + '}');
+        continue;
+      }
+      cur += src[i++];
+    }
+    rawChunks.push(cur);
+    const joinedRaw = rawChunks.join('__P__');
+    const shouldMinify = isWgslMod
+      ? !/<\/?[a-z][\s/>]/i.test(joinedRaw)
+      : ((/@(?:compute|vertex|fragment|group|workgroup_size)\b|\bfn\s+[A-Za-z_]\w*\s*\(|\b(?:struct\s+\w+\s*\{|var<(?:storage|uniform|workgroup|private)>|@(?:location|builtin|binding)\()/.test(joinedRaw)) && !/<\/?[a-z][\s/>]/i.test(joinedRaw));
+    if (!shouldMinify) {
+      let orig = rawChunks[0];
+      for (let k = 0; k < exprs.length; k++) orig += exprs[k] + rawChunks[k + 1];
+      return '`' + orig + '`';
+    }
+    let masked = rawChunks[0];
+    for (let k = 0; k < exprs.length; k++) masked += `__P${k}__` + rawChunks[k + 1];
+    const leadSpace = /^\s/.test(masked) && !/@(?:compute|vertex|fragment)\b/.test(joinedRaw);
+    const trailSpace = /\s$/.test(masked) && !/@(?:compute|vertex|fragment)\b/.test(joinedRaw);
+    let min = minifyWGSL(masked);
+    if (min && leadSpace) min = ' ' + min;
+    if (min && trailSpace) min = min + ' ';
+    min = min.replace(/__P(\d+)__/g, (_, k) => exprs[Number(k)]);
+    return '`' + min + '`';
+  }
+  return scanJS(false);
 }
 function collectMinJS(inlineAssets){
   let result='';
   for(const f of order){
     const src=fs.readFileSync(path.join(root,f),'utf8');
-    result+=stripModuleSyntax(wgslModules.includes(f)?minifyTemplates(src):src,inlineAssets)+'\n';
+    result+=stripModuleSyntax(minifyWGSLInJS(src,wgslModules.includes(f),f),inlineAssets)+'\n';
   }
   return result;
 }
@@ -297,8 +401,42 @@ if (esbuild) {
   const initCheckJs = esbuild.transformSync(beforeMain, { format: 'iife', target: 'es2022' }).code;
   vm.runInContext(initCheckJs, vm.createContext(vmBase));
 
-  minJs = esbuild.transformSync(minJs, { minify: true, format: 'esm', target: 'es2022', legalComments: 'none' }).code;
-  pagesJs = esbuild.transformSync(pagesJs, { minify: true, format: 'esm', target: 'es2022', legalComments: 'none' }).code;
+  if (typeof esbuild.build === 'function') {
+    const bundleWithAssets = async (inlineAssets) => {
+      const res = await esbuild.build({
+        entryPoints: [path.join(root, 'js/main.js')],
+        bundle: true,
+        minify: true,
+        treeShaking: true,
+        format: 'esm',
+        target: 'es2022',
+        legalComments: 'none',
+        logLevel: 'silent',
+        write: false,
+        plugins: [{
+          name: 'waterworld-assets',
+          setup(b) {
+            b.onLoad({ filter: /\.js$/ }, ({ path: p }) => {
+              const rel = path.relative(root, p).split(path.sep).join('/');
+              const raw = fs.readFileSync(p, 'utf8');
+              const contents = minifyWGSLInJS(raw, wgslModules.includes(rel), rel)
+                .replace(/(['"])(assets\/[a-z0-9./-]+)\1/g, (match, _, file) => {
+                  const mime = runtimeAssetTypes.get(file) || (/^assets\/audio\/[a-z0-9/-]+\.mp3$/.test(file) ? 'audio/mpeg' : null);
+                  return mime ? JSON.stringify(runtimeAssetURL(file, mime, inlineAssets)) : match;
+                });
+              return { contents, loader: 'js' };
+            });
+          },
+        }],
+      });
+      return new TextDecoder().decode(res.outputFiles[0].contents);
+    };
+    minJs = await bundleWithAssets(true);
+    pagesJs = await bundleWithAssets(false);
+  } else {
+    minJs = esbuild.transformSync(minJs, { minify: true, format: 'esm', target: 'es2022', legalComments: 'none' }).code;
+    pagesJs = esbuild.transformSync(pagesJs, { minify: true, format: 'esm', target: 'es2022', legalComments: 'none' }).code;
+  }
 } else {
   console.log('esbuild not found: JS gets comment/indentation stripping only');
   minJs = minJs.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('//')).join('\n');
@@ -325,7 +463,7 @@ fs.writeFileSync(path.join(root,'docs','assets-manifest.json'),JSON.stringify(Ob
 // Only sailing essentials preload. Marine encounters load their whale asset
 // on demand, keeping optional downloads off the first-frame critical path.
 const startupPreloads=['assets/caravel-oak-albedo.webp','assets/crew/sailor.glb',
-  'assets/crew/sailor-female.glb','assets/crew/captain.glb','assets/crew/sailor-classic.glb','assets/crew/sailor-female-classic.glb']
+  'assets/crew/sailor-female.glb','assets/crew/captain.glb','assets/crew/soldier-1550.glb','assets/crew/groom-pack.glb','assets/crew/components-1550.json']
   .map(file=>`<link rel="preload" as="fetch" href="${pagesAssets.get(file).url}" crossorigin="anonymous">`).join('');
 write('docs/index.html', minifyPage(pagesJs).replace('</head>','<meta name="robots" content="noindex, nofollow, noarchive">'+startupPreloads+'</head>')
   .replace('<script type="module">', pagesBootstrap + '<script type="module">'));

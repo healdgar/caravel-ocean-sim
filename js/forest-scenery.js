@@ -413,12 +413,12 @@ const CERTIFIED_FOREST_STREAM_SHAS=Object.freeze({
   'vertices.bin':new Set([
     '8d70fb89316d5d842ba5d224aca99878b866c70addb578848a47783af08251d0',
     'e9df13166329797db6ddf89839778aa126c82fedc3070a47630e69ee85f6d007',
-    '783d5521fcd5bfb56225e5f0feaffe8b06e5363a82bcdc560293f5199b359c75',
+    'ce439ed928a18afe2fa1f21ece2c232fe8d45788c5ae98d3910438fd55bf5acb',
   ]),
   'indices.bin':new Set([
     '2cd8ffe90fd2e0300db51caf0decd9da6b5f50cbaa2e6dd5462d8c6f8d8ce389',
     'eb385ff490bdbc2b44d370facaf73de6516ef1b4084bb725ad9312580f059e9f',
-    'cd02691db233433ca86f91d4512c58302487563f06cae10ac81064d210d28efb',
+    'bf7a937c0efdf667d85f425cd56a6c70df194ca06f61b806cad8ff415ae6b5a6',
   ]),
   'roots.bin':new Set([
     '69bc2f787873f09944683f49e88c9bc09d8b068a33aee85453b626150050de9b',

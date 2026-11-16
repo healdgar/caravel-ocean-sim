@@ -27,7 +27,8 @@ import { createShipAssetCache } from '../js/ship-mesh.js';
 import { applyFractureEvents } from '../js/ship-fracture.js';
 import { PORT_PREFABS, getBuildingParts } from '../js/coastal-world.js';
 import { applyBuildingFractureEvents, prepareBuildingFracture } from '../js/building-fracture.js';
-import { readGLB } from '../js/gltf.js';
+import { loadCrewGLB, readGLB } from '../js/gltf.js';
+import { attachColonialGroomModel, loadGroomPackGLB } from '../js/crew.js';
 import { crewWoundOutcome, recordCrewWound, sweepCrewBodies } from '../js/crew-wounds.js';
 import { FOREST_TRUNK_SHAPES } from '../js/forest-trunk-shapes.js';
 import { buildForestTrunkGrid, forestTrunkShape, sweepForestTrunks } from '../js/forest-trunks.js';
@@ -53,6 +54,19 @@ const KNOWN_CREW_GLBS = new Set([
   'assets/crew/sailor-classic.glb',
   'assets/crew/sailor-female-classic.glb',
   'assets/crew/captain.glb',
+  'assets/crew/soldier-1550.glb',
+  'assets/crew/indigenous-algonquian-male.glb',
+  'assets/crew/indigenous-algonquian-female.glb',
+  'assets/crew/indigenous-caribbean-male.glb',
+  'assets/crew/indigenous-caribbean-female.glb',
+  'assets/crew/indigenous-maya-male.glb',
+  'assets/crew/indigenous-maya-female.glb',
+  'assets/crew/indigenous-andean-male.glb',
+  'assets/crew/indigenous-andean-female.glb',
+]);
+
+const KNOWN_CREW_ACCESSORY_GLBS = new Set([
+  'assets/crew/groom-pack.glb',
 ]);
 
 const KNOWN_WILDLIFE_GLBS = new Set([
@@ -80,7 +94,7 @@ test('every .glb asset on disk and in build.mjs is registered in a destructible 
     }
     if (glb.startsWith('assets/crew/')) {
       assert.ok(
-        KNOWN_CREW_GLBS.has(glb),
+        KNOWN_CREW_GLBS.has(glb) || KNOWN_CREW_ACCESSORY_GLBS.has(glb),
         `Crew asset ${glb} must be registered in the crew wound/casualty pipeline`,
       );
       continue;
@@ -259,6 +273,21 @@ test('every human crew/soldier .glb model has destructible wound bones and respo
     const nodeNames = new Set((asset.json.nodes ?? []).map((n) => n.name).filter(Boolean));
     for (const requiredBone of ['pelvis', 'spine_01', 'Head', 'upperarm_l', 'thigh_r']) {
       assert.ok(nodeNames.has(requiredBone), `${glbPath} skeleton contains wound bone ${requiredBone}`);
+    }
+  }
+  const groomPack = loadGroomPackGLB(readFileSync(path.join(ROOT, 'assets/crew/groom-pack.glb')));
+  assert.equal(Object.keys(groomPack.pieces).length, 10, 'groom-pack.glb contains all 10 hair/beard meshes');
+  const baseSailor = loadCrewGLB(readFileSync(path.join(ROOT, 'assets/crew/sailor.glb')));
+  const groomedSailor = attachColonialGroomModel(baseSailor, groomPack, 'male');
+  const slotOf = Object.fromEntries(baseSailor.animator.joints.map((ni, si) => [baseSailor.animator.names[ni], si]));
+  const allowedBones = new Set(['Head', 'neck_01', 'spine_03'].map((n) => slotOf[n]));
+  const u16 = new Uint16Array(groomedSailor.vertices.buffer, groomedSailor.vertices.byteOffset, groomedSailor.vertexCount * 30);
+  const f32 = new Float32Array(groomedSailor.vertices.buffer, groomedSailor.vertices.byteOffset, groomedSailor.vertexCount * 15);
+  for (let v = baseSailor.vertexCount; v < groomedSailor.vertexCount; v++) {
+    for (let k = 0; k < 4; k++) {
+      if (f32[v * 15 + 11 + k] > 0) {
+        assert.ok(allowedBones.has(u16[v * 30 + 18 + k]), `groom vertex ${v} binds to destructible cranial/neck wound bone`);
+      }
     }
   }
   const sailor = { position: [0, 0, 0], yaw: 0, scale: [1, 1, 1], visible: true };

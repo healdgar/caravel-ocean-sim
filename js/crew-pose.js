@@ -129,16 +129,35 @@ export function poseSeatedCrew(a,s,targets=s.seatedPose){
   // The low grip at the bottom of a paddle stroke is out of an arm's reach from a
   // sitting shoulder. Bow from the hips over it, as a paddler does, rather than
   // leave the hand short of the shaft or lengthen a bone.
-  let excess=0,toward=null;
+  let excess=0,worstHand=null;
   for(const [i,side]of ['l','r'].entries()){
-    const shoulder=posePosition(a.world[poseNodeIndex(a,'upperarm_'+side)]),elbow=posePosition(a.world[poseNodeIndex(a,'lowerarm_'+side)]),wrist=posePosition(a.world[poseNodeIndex(a,'hand_'+side)]),ray=poseSub(actorLocal(targets.hands[i],s),shoulder);
+    const hand=actorLocal(targets.hands[i],s);
+    const shoulder=posePosition(a.world[poseNodeIndex(a,'upperarm_'+side)]),elbow=posePosition(a.world[poseNodeIndex(a,'lowerarm_'+side)]),wrist=posePosition(a.world[poseNodeIndex(a,'hand_'+side)]),ray=poseSub(hand,shoulder);
     const over=Math.hypot(...ray)-Math.hypot(...poseSub(elbow,shoulder))-Math.hypot(...poseSub(wrist,elbow))+.02;
-    if(over>excess){excess=over;toward=ray;}
+    if(over>excess){excess=over;worstHand=hand;}
   }
-  if(toward){
-    const angle=Math.min(.6,excess/.32),along=Math.hypot(toward[0],toward[2])||1,sway=[toward[0]/along,toward[2]/along];
-    for(const [name,weight]of [['spine_01',.55],['spine_02',.45]]){
+  if(worstHand){
+    const chest=posePosition(a.world[poseNodeIndex(a,'spine_03')]);
+    const tx=worstHand[0]-chest[0],tz=(worstHand[2]-chest[2])+.08;
+    const along=Math.hypot(tx,tz)||1,sway=[tx/along,tz/along];
+    if(excess>.03){
+      const slide=Math.min(.020,(excess-.03)*.5),p=posePosition(a.world[pelvis]);
+      poseMoveBone(a,pelvis,[p[0]+sway[0]*slide,p[1],p[2]+sway[1]*slide]);
+    }
+    const angle=Math.min(.96,excess/.19);
+    for(const [name,weight]of [['pelvis',.38],['spine_01',.58],['spine_02',.50],['spine_03',.42]]){
       const node=poseNodeIndex(a,name);if(node>=0){const bend=angle*weight;turnBone(a,node,[0,1,0],[sway[0]*Math.sin(bend),Math.cos(bend),sway[1]*Math.sin(bend)]);}
+    }
+    for(const [i,side]of ['l','r'].entries()){
+      const hand=actorLocal(targets.hands[i],s),clav=poseNodeIndex(a,'clavicle_'+side),up=poseNodeIndex(a,'upperarm_'+side),el=poseNodeIndex(a,'lowerarm_'+side),wr=poseNodeIndex(a,'hand_'+side);
+      if(clav<0||up<0||el<0||wr<0)continue;
+      const clP=posePosition(a.world[clav]),shP=posePosition(a.world[up]),elP=posePosition(a.world[el]),wrP=posePosition(a.world[wr]);
+      const armReach=Math.hypot(...poseSub(elP,shP))+Math.hypot(...poseSub(wrP,elP))-.01;
+      const short=Math.hypot(...poseSub(hand,shP))-armReach;
+      if(short>0){
+        const cur=poseUnit(poseSub(shP,clP)),aim=poseUnit(poseSub(hand,clP)),w=Math.min(.72,short/.11);
+        turnBone(a,clav,cur,[cur[0]*(1-w)+aim[0]*w,cur[1]*(1-w)+aim[1]*w,cur[2]*(1-w)+aim[2]*w]);
+      }
     }
   }
   const grips={},contact=a.seatContact;
@@ -229,7 +248,8 @@ function poseGroundedGunBody(a,s,boat,requestedLean,hands=null,{floorAt=null,sto
   }
   for(const side of ['l','r']){
     const f=a.footContacts?.[side];if(!f)throw Error('Gunnery stance requires measured '+side+' boot');
-    const x=f.ankle[0]*s.scale[0],z=f.ankle[2]*s.scale[2],X=s.position[0]+c*x+sn*z;
+    const stanceX=stoop?Math.sign(f.ankle[0])*Math.min(Math.abs(f.ankle[0]),.095):f.ankle[0];
+    const x=stanceX*s.scale[0],z=f.ankle[2]*s.scale[2],X=s.position[0]+c*x+sn*z;
     let Z=s.position[2]-sn*x+c*z;
     const extent=[];
     for(const u of [f.min[0],f.max[0]])for(const v of [f.min[2],f.max[2]])extent.push(-sn*u*s.scale[0]+c*v*s.scale[2]);
@@ -253,16 +273,23 @@ function poseGroundedGunBody(a,s,boat,requestedLean,hands=null,{floorAt=null,sto
     return;
   }
   const base=posePosition(a.world[pelvis]);let lean=requestedLean,drop=0,reachExcess=0;
+  let leanSway=[0,1];
   if(hands&&stoop){
-    // A helmsman's bar is often lower than his hands hang. Bend the knees and hips
-    // only as far as both hands need to meet it.
+    // A helmsman hinges from the upper spine toward the wheel or tiller so legs stay
+    // clear of pedestals/bars; knees bend only when the grip itself sits below the hips.
     const lift=feet.reduce((sum,p)=>sum+p.target[1]-a.footContacts[p.side].ankle[1],0)/2;
+    const targets=hands.map(p=>actorLocal(p,s)),centre=targets[0].map((v,i)=>(v+targets[1][i])*.5);
+    const dx=centre[0]-base[0],dz=Math.max(.05,centre[2]-base[2]),dn=Math.hypot(dx,dz)||1;
+    leanSway=[dx/dn,dz/dn];
+    let minTargetY=Infinity;
     for(const [i,side]of ['l','r'].entries()){
-      const target=actorLocal(hands[i],s),shoulder=posePosition(a.world[poseNodeIndex(a,'upperarm_'+side)]),elbow=posePosition(a.world[poseNodeIndex(a,'lowerarm_'+side)]),hand=posePosition(a.world[poseNodeIndex(a,'hand_'+side)]);
+      const target=targets[i],shoulder=posePosition(a.world[poseNodeIndex(a,'upperarm_'+side)]),elbow=posePosition(a.world[poseNodeIndex(a,'lowerarm_'+side)]),hand=posePosition(a.world[poseNodeIndex(a,'hand_'+side)]);
+      minTargetY=Math.min(minTargetY,target[1]);
       shoulder[1]+=lift;
       reachExcess=Math.max(reachExcess,Math.hypot(...poseSub(target,shoulder))-Math.hypot(...poseSub(elbow,poseSub(shoulder,[0,lift,0])))-Math.hypot(...poseSub(hand,elbow))+.02);
     }
-    drop=Math.min(.24,reachExcess*.7);lean=Math.min(.42,reachExcess*.9);
+    drop=Math.max(0,Math.min(.28,Math.min(Math.max(0,reachExcess)*.85,base[1]+lift-minTargetY+.04)));
+    lean=Math.min(.68,Math.max(0,reachExcess)*1.65);
   }else if(hands&&requestedLean>0){
     const targets=hands.map(p=>actorLocal(p,s)),centre=targets[0].map((v,i)=>(v+targets[1][i])*.5),shoulders=[];
     for(const [i,side]of ['l','r'].entries()){
@@ -283,9 +310,10 @@ function poseGroundedGunBody(a,s,boat,requestedLean,hands=null,{floorAt=null,sto
   const lift=feet.reduce((sum,p)=>sum+p.target[1]-a.footContacts[p.side].ankle[1],0)/2;
   // Knees and the hip hinge supply the reach. The actor remains upright/yaw-only,
   // while measured boots keep the same contacts and all limb lengths survive.
-  poseMoveBone(a,pelvis,[base[0],base[1]+lift-drop,base[2]+.08*fraction]);
-  if(Math.abs(lean)>1e-6)for(const [name,weight]of [['pelvis',.18],['spine_01',.45],['spine_02',.37]]){
-    const node=poseNodeIndex(a,name);if(node>=0){const angle=lean*weight;turnBone(a,node,[0,1,0],[0,Math.cos(angle),Math.sin(angle)]);}
+  const hipShift=stoop?Math.min(.085,Math.max(0,reachExcess)*.45):0;
+  poseMoveBone(a,pelvis,[base[0]+leanSway[0]*hipShift,base[1]+lift-drop,base[2]+(stoop?leanSway[1]*hipShift*.35:.08*fraction)]);
+  if(Math.abs(lean)>1e-6)for(const [name,weight]of [['pelvis',stoop?.08:.18],['spine_01',.48],['spine_02',stoop?.44:.37]]){
+    const node=poseNodeIndex(a,name);if(node>=0){const angle=lean*weight;turnBone(a,node,[0,1,0],[leanSway[0]*Math.sin(angle),Math.cos(angle),leanSway[1]*Math.sin(angle)]);}
   }
   let workspaceForward=0;
   if(boat.modelId==='victory'&&hands&&requestedLean>0){
@@ -425,17 +453,59 @@ export function poseCrewWork(a,s,boat){
     const footBase=base+.20+smooth(.46,.94);
     const handSteps={l:base+2.65+smooth(.02,.46),r:base+3.15+smooth(.28,.72)};
     const footSteps={l:footBase+.07,r:footBase-.07};
+    const runnerPoint=(r,wrap,sign)=>{const p=resolveShipNode(boat,`mast.${crewMastName(boat,j.mast)}.runner`,{space:'design',side:j.side,step:r/spacing});return actorLocal([p[0]*boat.beam/3.6,p[1]*vesselVerticalScale(boat)+.08,p[2]*boat.length/12+sign*wrap],s);};
+    const ftL=runnerPoint(footSteps.l,.014,1),ftR=runnerPoint(footSteps.r,.014,-1);
+    const htL=runnerPoint(handSteps.l,.018,1),htR=runnerPoint(handSteps.r,.018,-1);
+    if(pelvis>=0&&!isLookoutWatch){
+      if(a.record){
+        a.put(CREW_SOLVE_OP.climbBody,...htL,...htR,0,...ftL,0,...ftR);
+      }else{
+        let shiftY=0,shiftZ=0;
+        for(const [side,ht] of [['l',htL],['r',htR]]){
+          const sh=posePosition(a.world[poseNodeIndex(a,'upperarm_'+side)]),el=posePosition(a.world[poseNodeIndex(a,'lowerarm_'+side)]),wr=posePosition(a.world[poseNodeIndex(a,'hand_'+side)]);
+          const reach=Math.hypot(...poseSub(el,sh))+Math.hypot(...poseSub(wr,el))-.012;
+          const dist=Math.hypot(...poseSub(ht,sh));
+          if(dist>reach){
+            const need=dist-reach,dir=poseUnit(poseSub(ht,sh));
+            shiftY=Math.max(shiftY,dir[1]*need);
+            shiftZ=Math.max(shiftZ,dir[2]*need);
+          }
+        }
+        if(shiftY>0||shiftZ>0){
+          const p=posePosition(a.world[pelvis]);
+          poseMoveBone(a,pelvis,[p[0],p[1]+Math.min(.085,shiftY),p[2]+Math.min(.10,shiftZ)]);
+        }
+        let lower=0;
+        for(const [side,ft] of [['l',ftL],['r',ftR]]){
+          const hip=posePosition(a.world[poseNodeIndex(a,'thigh_'+side)]),knee=posePosition(a.world[poseNodeIndex(a,'calf_'+side)]),ankle=posePosition(a.world[poseNodeIndex(a,'foot_'+side)]);
+          const length=Math.hypot(...poseSub(knee,hip))+Math.hypot(...poseSub(ankle,knee));
+          const horizontal=Math.hypot(ft[0]-hip[0],ft[2]-hip[2]);
+          lower=Math.min(lower,ft[1]+Math.sqrt(Math.max(0,length*length-horizontal*horizontal))-hip[1]+.04);
+        }
+        if(lower<0){const p=posePosition(a.world[pelvis]);poseMoveBone(a,pelvis,[p[0],p[1]+lower,p[2]]);}
+        for(const [side,ht] of [['l',htL],['r',htR]]){
+          const clav=poseNodeIndex(a,'clavicle_'+side),up=poseNodeIndex(a,'upperarm_'+side),el=poseNodeIndex(a,'lowerarm_'+side),wr=poseNodeIndex(a,'hand_'+side);
+          if(clav<0||up<0||el<0||wr<0)continue;
+          const clP=posePosition(a.world[clav]),shP=posePosition(a.world[up]),elP=posePosition(a.world[el]),wrP=posePosition(a.world[wr]);
+          const armReach=Math.hypot(...poseSub(elP,shP))+Math.hypot(...poseSub(wrP,elP))-.012;
+          const short=Math.hypot(...poseSub(ht,shP))-armReach;
+          if(short>0){
+            const cur=poseUnit(poseSub(shP,clP)),aim=poseUnit(poseSub(ht,clP)),w=Math.min(.75,short/.10);
+            turnBone(a,clav,cur,[cur[0]*(1-w)+aim[0]*w,cur[1]*(1-w)+aim[1]*w,cur[2]*(1-w)+aim[2]*w]);
+          }
+        }
+      }
+    }
     for(const side of ['l','r']){
       const sign=side==='l'?1:-1;
-      const point=(r,wrap)=>{const p=resolveShipNode(boat,`mast.${crewMastName(boat,j.mast)}.runner`,{space:'design',side:j.side,step:r/spacing});return actorLocal([p[0]*boat.beam/3.6,p[1]*vesselVerticalScale(boat)+.08,p[2]*boat.length/12+sign*wrap],s);};
-      const ft=point(footSteps[side],.014);
+      const ft=side==='l'?ftL:ftR;
       solveCrewLimb(a,[`thigh_${side}`,`calf_${side}`,`foot_${side}`],ft,[sign*.12,.55,.78]);
       targets[`foot_${side}`]=ft;
       if(isLookoutWatch&&side==='r'){
         solveCrewLimbFromHead(a,['upperarm_r','lowerarm_r','hand_r'],[-0.06,-0.02,0.18],[-0.55,-0.15,0.24],[0,1.45,0.10]);
         targets.hand_r=poseHandReached(a,'hand_r');
       }else{
-        const ht=point(handSteps[side],.018);
+        const ht=side==='l'?htL:htR;
         solveCrewLimb(a,[`upperarm_${side}`,`lowerarm_${side}`,`hand_${side}`],ht,[sign*.55,.95,.18]);
         targets[`hand_${side}`]=ht;
       }
@@ -482,7 +552,14 @@ export function poseCrewWork(a,s,boat){
     return;
   }
   if(j?.stage==='working' && (j.kind==='haul'||j.kind==='hatch')){
-    if(j.kind==='hatch')a.blend('Brace',s.time,.8);
+    const hasNodeHatch=j.kind==='hatch'&&hasExtendedCrewModel(boat.modelId)&&Boolean(requirePlayableShipModel(boat.modelId).nodes['hatch.grip']);
+    if(j.kind==='hatch'){
+      if(hasNodeHatch){
+        for(const [name,bend] of [['spine_01',.24],['spine_02',.20]]){
+          const node=poseNodeIndex(a,name);if(node>=0)turnBone(a,node,[0,1,0],[0,Math.cos(bend),Math.sin(bend)]);
+        }
+      }else a.blend('Brace',s.time,.8);
+    }
     const phase=s.time*3.4;
     for(const [side,sign] of [['l',1],['r',-1]]){
       let hand;

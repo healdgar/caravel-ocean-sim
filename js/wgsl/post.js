@@ -1,4 +1,5 @@
 import {FRAME_WGSL,SANE_HDR} from './common.js';
+import {CAMERA_MEDIUM_GUARD_WGSL} from './underwater.js';
 // Bloom (dual-filter chain) and final composite with AgX tonemapping.
 const FS_TRI = /* wgsl */ `
 struct VO { @builtin(position) pos: vec4f, @location(0) uv: vec2f };
@@ -63,19 +64,23 @@ fn karis(c: vec3f) -> f32 { return 1.0 / (1.0 + luma(c) * 0.25); }
     let w3 = karis(g3) * 0.125; let w4 = karis(g4) * 0.5;
     o = (g0 * w0 + g1 * w1 + g2 * w2 + g3 * w3 + g4 * w4) / (w0 + w1 + w2 + w3 + w4);
   } else {
-    o = e * 0.125 + (a + c + g + i) * 0.03125 + (b + d + f + h) * 0.0625 + (j + k + l + m) * 0.125;
+    let sa = saneHDR(a); let sb = saneHDR(b); let sc = saneHDR(c);
+    let sd = saneHDR(d); let se = saneHDR(e); let sf = saneHDR(f);
+    let sg = saneHDR(g); let sh = saneHDR(h); let si = saneHDR(i);
+    let sj = saneHDR(j); let sk = saneHDR(k); let sl = saneHDR(l); let sm = saneHDR(m);
+    o = se * 0.125 + (sa + sc + sg + si) * 0.03125 + (sb + sd + sf + sh) * 0.0625 + (sj + sk + sl + sm) * 0.125;
   }
-  return vec4f(min(o, vec3f(6.0e4)), 1.0);
+  return vec4f(min(saneHDR(o), vec3f(3.0e4)), 1.0);
 }
 `;
 
-export const BLOOM_UP = FS_TRI + /* wgsl */ `
+export const BLOOM_UP = FS_TRI + SANE_HDR + /* wgsl */ `
 override bloomFoldTent: bool = true;
 struct P { texel: vec4f };   // xy = 1/src size, z = radius, w = weight
 @group(0) @binding(0) var src: texture_2d<f32>;
 @group(0) @binding(1) var samp: sampler;
 @group(0) @binding(2) var<uniform> U: P;
-fn tap(uv: vec2f) -> vec3f { return textureSampleLevel(src, samp, uv, 0.0).rgb; }
+fn tap(uv: vec2f) -> vec3f { return saneHDR(textureSampleLevel(src, samp, uv, 0.0).rgb); }
 @fragment fn fs(in: VO) -> @location(0) vec4f {
   let t = U.texel.xy * U.texel.z;
   let uv = in.uv;
@@ -94,12 +99,12 @@ fn tap(uv: vec2f) -> vec3f { return textureSampleLevel(src, samp, uv, 0.0).rgb; 
     let weight = right * 0.25;
     let lower = mix(tap(lo), tap(vec2f(hi.x, lo.y)), weight.x);
     let upper = mix(tap(vec2f(lo.x, hi.y)), tap(hi), weight.x);
-    return vec4f(mix(lower, upper, weight.y) * U.texel.w, 1.0);
+    return vec4f(min(saneHDR(mix(lower, upper, weight.y) * U.texel.w), vec3f(3.0e4)), 1.0);
   }
   var o = tap(uv) * 4.0;
   o += (tap(uv + vec2f(-t.x, 0.0)) + tap(uv + vec2f(t.x, 0.0)) + tap(uv + vec2f(0.0, -t.y)) + tap(uv + vec2f(0.0, t.y))) * 2.0;
   o += tap(uv + vec2f(-t.x, -t.y)) + tap(uv + vec2f(t.x, -t.y)) + tap(uv + vec2f(-t.x, t.y)) + tap(uv + vec2f(t.x, t.y));
-  return vec4f(o * (U.texel.w / 16.0), 1.0);
+  return vec4f(min(saneHDR(o * (U.texel.w / 16.0)), vec3f(3.0e4)), 1.0);
 }
 `;
 
@@ -145,10 +150,12 @@ fn ign(p: vec2f) -> f32 { return fract(52.9829189 * fract(dot(p, vec2f(0.0671105
   var c = textureLoad(hdr, pc, 0).rgb;
   c = saneHDR(c);
   if (U.p.y > 0.0) {
-    let b = textureSampleLevel(bloom, samp, in.uv, 0.0).rgb * U.q.w;
+    let b = saneHDR(textureSampleLevel(bloom, samp, in.uv, 0.0).rgb) * U.q.w;
     c = mix(c, b, U.p.y);
   }
-  c *= U.p.x;
+  let expFinite = (U.p.x == U.p.x) && ((bitcast<u32>(U.p.x) & 0x7fffffffu) < 0x7f800000u) && U.p.x > 0.0;
+  let expScale = select(1.0, clamp(U.p.x, 1e-4, 1e4), expFinite);
+  c *= expScale;
   // subtle vignette
   let d = (in.uv - 0.5) * vec2f(dims.x / dims.y, 1.0);
   c *= 1.0 - U.p.w * dot(d, d);
@@ -162,7 +169,8 @@ fn ign(p: vec2f) -> f32 { return fract(52.9829189 * fract(dot(p, vec2f(0.0671105
   // triangular dither against banding in the sky gradients
   let n = ign(in.pos.xy + U.p.z * 5.588238) + ign(in.pos.xy * 1.37 + 17.0 + U.p.z * 3.1) - 1.0;
   o += n / 255.0;
-  return vec4f(clamp(o, vec3f(0.0), vec3f(1.0)), 1.0);
+  let oFinite = all(o == o) && all((bitcast<vec3u>(o) & vec3u(0x7fffffffu)) < vec3u(0x7f800000u));
+  return vec4f(select(vec3f(0.0), clamp(o, vec3f(0.0), vec3f(1.0)), oFinite), 1.0);
 }
 `;
 
@@ -174,11 +182,11 @@ export function createUnderwaterPost(source,kind){
   if(kind==='bloom'){
     binding=3;
     pattern=/return\s+textureSampleLevel\s*\(\s*src\s*,\s*samp\s*,\s*uv\s*,\s*0\.0\s*\)\s*\.rgb\s*;/;
-    replacement='if(postCameraSea[9]-postFrame.camPos.y<=.005){return textureSampleLevel(airHDR,samp,uv,0.0).rgb;}return textureSampleLevel(src,samp,uv,0.0).rgb;';
+    replacement='if(!postCameraScalarFinite(postCameraSea[9])||!postCameraScalarFinite(postFrame.camPos.y)){return textureSampleLevel(airHDR,samp,uv,0.0).rgb;}if(postCameraSea[9]-postFrame.camPos.y<=.005){return textureSampleLevel(airHDR,samp,uv,0.0).rgb;}return textureSampleLevel(src,samp,uv,0.0).rgb;';
   }else if(kind==='composite'){
     binding=4;
     pattern=/var\s+c\s*=\s*textureLoad\s*\(\s*hdr\s*,\s*pc\s*,\s*0\s*\)\s*\.rgb\s*;/;
-    replacement='var c:vec3f;if(postCameraSea[9]-postFrame.camPos.y<=.005){c=textureLoad(airHDR,pc,0).rgb;}else{c=textureLoad(hdr,pc,0).rgb;}';
+    replacement='var c:vec3f;if(postCameraSea[9]-postFrame.camPos.y<=.005){c=textureLoad(airHDR,pc,0).rgb;}else{c=applyCameraMedium(textureLoad(airHDR,pc,0).rgb,textureLoad(hdr,pc,0).rgb);}';
   }else throw new Error('Unknown underwater post pass');
   if(!pattern.test(source))throw new Error('Unrecognized underwater post source');
   source=source.replace(pattern,replacement);
@@ -186,5 +194,5 @@ export function createUnderwaterPost(source,kind){
 @group(0)@binding(${binding})var airHDR:texture_2d<f32>;
 @group(0)@binding(${binding+1})var<uniform>postFrame:Frame;
 @group(0)@binding(${binding+2})var<storage,read>postCameraSea:array<f32,16>;
-`;
+`+CAMERA_MEDIUM_GUARD_WGSL;
 }

@@ -7,6 +7,8 @@
 import { PROP_MODELS, PROP_WORDS, preparePortJetties, propDrawRadius, readPropModel, stepJettyFracture } from './port-props.js';
 import { SIM_CLOCK_LOOP_S } from './wgsl/common.js';
 import { PROP_DRAW_WORDS, PROPS_CULL, PROPS_RENDER, PROPS_SHADOW } from './wgsl/props.js';
+import { sharedNeuralPbrBank } from './neural-pbr.js';
+import { withNeuralPbrProps } from './wgsl/neural-pbr.js';
 
 const PROP_REACH_M = 3000;
 const PROP_CHECK_FRAMES = 30;
@@ -45,6 +47,7 @@ async function uploadPigment(device, model) {
 
 export function createProps({ device, frameUBO, transView, skyView, sampClamp, envCubeView, sunVisBuf, shadows, shader, format = 'rgba16float', samples = 4 }) {
   const B = GPUBufferUsage;
+  const neuralPbr = sharedNeuralPbrBank(device);
   const buffer = (label, data, usage) => { const b = device.createBuffer({ label, size: Math.max(4, data.byteLength), usage: usage | B.COPY_DST }); device.queue.writeBuffer(b, 0, data); return b; };
   const radiusWord = new Float32Array(1);
   let kit = null, kitLoading = null, unavailable = false, activePort = null, scene = null, frameCount = 0;
@@ -58,7 +61,7 @@ export function createProps({ device, frameUBO, transView, skyView, sampClamp, e
         return readPropModel(new Uint8Array(await response.arrayBuffer()), spec);
       }));
       const [renderModule, shadowModule, cullModule] = await Promise.all([
-        shader(PROPS_RENDER, 'props'),
+        shader(withNeuralPbrProps(PROPS_RENDER), 'props'),
         shader(PROPS_SHADOW, 'props shadow'),
         shader(PROPS_CULL, 'props cull'),
       ]);
@@ -158,7 +161,7 @@ export function createProps({ device, frameUBO, transView, skyView, sampClamp, e
       label: 'props', layout: kit.pipeline.getBindGroupLayout(0),
       entries: [
         [0, { buffer: frameUBO }], [1, { buffer: kit.hull }], [4, transView], [5, sampClamp], [6, envCubeView], [7, { buffer: sunVisBuf }], [9, skyView],
-        [10, listOf(m)], [11, piece.pigment.createView()], [12, kit.sampler], [13, { buffer: records }],
+        [10, listOf(m)], [11, piece.pigment.createView()], [12, kit.sampler], [13, { buffer: records }], ...neuralPbr.propResources,
       ].map(([binding, resource]) => ({ binding, resource })),
     }));
     const shadowGroups = kit.pieces.map((_, m) => device.createBindGroup({

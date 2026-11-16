@@ -237,7 +237,8 @@ ${OCEAN_HULL_MASK}
   let skyN = textureSampleLevel(envCube, sampC, nrm, ENV_MAXMIP - 1.0).rgb;
 
   // ---- sun glitter: anisotropic Gaussian slope distribution ----
-  let Hv = normalize(V + Ld);
+  let hvRaw = V + Ld;
+  let Hv = select(vec3f(0.0, 1.0, 0.0), normalize(hvRaw), length(hvRaw) > 1e-5);
   let hs = -Hv.xz / max(Hv.y, 1e-3);
   let dsl = hs - sl;
   let det = max(cov.x * cov.y - cov.z * cov.z, 1e-10);
@@ -251,9 +252,12 @@ ${OCEAN_HULL_MASK}
 
   var moonSpec=vec3f(0);let moonE=lunarIlluminance()*sunVis[1]*lunarShadowVisibility(surfaceShadow);
   if(lunarIrradiance()>0.0){
-    let mh=normalize(V+lunarDirection());let ms=-mh.xz/max(mh.y,1e-3)-sl;
+    let mhRaw=V+lunarDirection();
+    let mh=select(vec3f(0.0,1.0,0.0),normalize(mhRaw),length(mhRaw)>1e-5);
+    let ms=-mh.xz/max(mh.y,1e-3)-sl;
     let me=(ms.x*ms.x*cov.y+ms.y*ms.y*cov.x-2.0*ms.x*ms.y*cov.z)/det;
-    let md=exp(-.5*me)/(2.0*PI*sqrt(det)*max(pow(mh.y,4.0),1e-6));
+    let mhy2=mh.y*mh.y;
+    let md=exp(-.5*me)/(2.0*PI*sqrt(det)*max(mhy2*mhy2,1e-6));
     let mg=1.0/(1.0+lambdaSmith(V,cov)+lambdaSmith(lunarDirection(),cov));
     moonSpec=moonE*fresnelWater(dot(V,mh))*md*mg/(4.0*max(V.y,.02));
   }
@@ -263,7 +267,7 @@ ${OCEAN_HULL_MASK}
   let sig = sqrt(max(cov.x + cov.y, 1e-6) * 0.5);
   let vh = normalize(vec3f(V.x, 0.0, V.z) + vec3f(1e-5, 0.0, 0.0));
   let sigV = sqrt(max(vh.x * vh.x * cov.x + vh.z * vh.z * cov.y + 2.0 * vh.x * vh.z * cov.z, 1e-6));
-  let aV = max(V.y, 1e-3) / max(sqrt(1.0 - V.y * V.y), 1e-3) / (1.4142 * sigV);
+  let aV = max(V.y, 1e-3) / max(sqrt(max(1.0 - V.y * V.y, 0.0)), 1e-3) / (1.4142 * sigV);
   let tilt = 0.32 * sigV * (1.0 - smoothstep(0.0, 2.5, aV));
   let nV = normalize(nrm + vh * tilt);
   var R = reflect(-V, nV);
@@ -383,7 +387,7 @@ export function createOpticalOcean(coast='',depthFirst=true,surfaceWaves=false,c
     +(cameraProbe?'\n@group(3)@binding(3)var<storage,read>cameraSea:array<f32,16>;\n':'');
   const optical=code.replace(/let\s+Fr\s*=\s*fresnelWater\(/,'let Fr = waterFresnel(')
     .replace(/var\s+col\s*=\s*body\s*\*\s*\(1\.0\s*-\s*Fr\)/,
-      `if(${cameraProbe?'F.camPos.y<cameraSea[9]-.005':'optics.w>.5&&F.camPos.y<optics.z-.005'}){
+      `if(${cameraProbe?'cameraSea[9]==cameraSea[9]&&F.camPos.y==F.camPos.y&&F.camPos.y<cameraSea[9]-.005':'optics.w>.5&&optics.z==optics.z&&F.camPos.y==F.camPos.y&&F.camPos.y<optics.z-.005'}){
     return vec4f(underwaterBoundary(in.rel+F.camPos.xyz,nrm,V,skyHemi,foamMask,foamLit),1);
   }
   body = waterTransmission(in.rel + F.camPos.xyz, nrm, body);\n  var col = body * (1.0 - Fr)`);
@@ -435,20 +439,26 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     let d = dispAt(x0);
     x0 = goal - d.xz;
   }
-  outH[id.x] = dispAt(x0).y + wakeAt(goal).x;
+  let rawH = dispAt(x0).y + wakeAt(goal).x;
+  let hOk = (rawH == rawH) && (abs(rawH) < 1e4);
+  outH[id.x] = select(0.0, rawH, hOk);
   pressureSlopes[id.x] = vec2f(0.0);
   if (id.x < 9u) {
     let wf = select(1.0, 4.0, id.x / 3u == 1u);
     let wr = select(1.0, 4.0, id.x % 3u == 1u);
     // Linear incident-wave gradient at the undisturbed world position. Exclude
     // the ship's own wake and choppy horizontal displacement from propulsion.
-    pressureSlopes[id.x] = pressureSlopeAt(goal) * wf * wr / 36.0;
+    let rawSlope = pressureSlopeAt(goal) * wf * wr / 36.0;
+    let sOk = (rawSlope == rawSlope) & (abs(rawSlope) < vec2f(1e4));
+    pressureSlopes[id.x] = select(vec2f(0.0), rawSlope, sOk);
   }
   workgroupBarrier();
   if (id.x == 0u) {
     var meanSlope = vec2f(0.0);
     for (var i = 0u; i < 9u; i++) { meanSlope += pressureSlopes[i]; }
-    outH[10] = meanSlope.x; outH[11] = meanSlope.y;
+    let mOk = (meanSlope == meanSlope) & (abs(meanSlope) < vec2f(1e4));
+    let safeSlope = select(vec2f(0.0), meanSlope, mOk);
+    outH[10] = safeSlope.x; outH[11] = safeSlope.y;
   }
 }
 `;

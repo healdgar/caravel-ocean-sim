@@ -17,44 +17,44 @@
       "crownRadiusMetres": 13.202,
       "crownBaseMetres": 7.639,
       "originXYZ": [
-        -15.0,
+        -15.6,
         -3.0,
         -16.2
       ],
       "cellMetres": 0.6,
       "dimensionsXYZ": [
-        54,
-        54,
+        55,
+        55,
         54
       ],
       "low": [
-        -15.3,
+        -15.9,
         -3.3,
         -16.5
       ],
       "high": [
-        17.1,
-        29.1,
+        17.099999999999994,
+        29.699999999999996,
         15.900000000000002
       ],
       "samplingFootprintMetres": 1.0392304845413263,
       "files": {
         "field.rgba16f.bin": {
-          "bytes": 1259712,
-          "sha256": "69e652cccc74e047f5dc09a6ef9f550384e8228a0e3b6fee5bbaf9cb504d7c89",
+          "bytes": 1306800,
+          "sha256": "4c6de2546408cd4888cb6c9c9d5c71f126638b78d6356468b10a3f8ac4e9c1a7",
           "gzip": {
             "file": "prototype-0-oak-veteran/field.rgba16f.bin.gz",
-            "bytes": 188888,
-            "sha256": "fb64d996cdecb6d3b723de7cdf02531a95d7dc0ff48f8b24113ac1b24e5668ff"
+            "bytes": 243279,
+            "sha256": "085f2220fb119a613e336bb25f06b5fecc082b4a624fecd568036914b8594e14"
           }
         },
         "exposure.r8.bin": {
-          "bytes": 157464,
-          "sha256": "418556d85220758457c88c5940509cdbb7aa26402b85f12a56f012361e5d0ea8",
+          "bytes": 163350,
+          "sha256": "43b58af47c362236364eea1613688bc0308a0c0a32ed913bd77cdd799cadfaba",
           "gzip": {
             "file": "prototype-0-oak-veteran/exposure.r8.bin.gz",
-            "bytes": 54269,
-            "sha256": "17472ac356b52f215b2211a9bc6cd17b770da3659f75fb8ac759bf873d18bc3a"
+            "bytes": 56214,
+            "sha256": "f38c58c456f00f68f7f955d6caa66e9948730210e95996a922643e86b35515a8"
           }
         }
       }
@@ -68,44 +68,44 @@
       "crownRadiusMetres": 16.178,
       "crownBaseMetres": 5.65,
       "originXYZ": [
-        -14.399999999999999,
+        -13.799999999999999,
         -3.0,
-        -19.8
+        -20.4
       ],
       "cellMetres": 0.6,
       "dimensionsXYZ": [
-        54,
+        53,
         56,
-        60
+        61
       ],
       "low": [
-        -14.7,
+        -14.1,
         -3.3,
-        -20.1
+        -20.7
       ],
       "high": [
         17.700000000000003,
         30.299999999999997,
-        15.899999999999995
+        15.899999999999999
       ],
       "samplingFootprintMetres": 1.0392304845413263,
       "files": {
         "field.rgba16f.bin": {
-          "bytes": 1451520,
-          "sha256": "4689c4f06cc2e0d3083ef7c1552eb083366823707b020d716fb5340abc31f67c",
+          "bytes": 1448384,
+          "sha256": "66c521524dabe7335a70a013e3a73735955ec8ffeed3fa825bd15555c6a3776d",
           "gzip": {
             "file": "prototype-1-chestnut-veteran/field.rgba16f.bin.gz",
-            "bytes": 244419,
-            "sha256": "dd6c768dbc082ec847778a459ec1887c34b4c43156fde8b17abc911aa693ce9a"
+            "bytes": 257489,
+            "sha256": "996cf89d4bdfea500e07af8de6a5b30a33dcf8bafb5722692fdbcfc105fd723f"
           }
         },
         "exposure.r8.bin": {
-          "bytes": 181440,
-          "sha256": "6ec40b5188cb8fe5446b5be1bfa078775535a4cf4b3201ff419ead4936cd5207",
+          "bytes": 181048,
+          "sha256": "1b0509415ac629d425fa7f0780be10f0cafcc4451ea0ba59666f2443c4e790f9",
           "gzip": {
             "file": "prototype-1-chestnut-veteran/exposure.r8.bin.gz",
-            "bytes": 59434,
-            "sha256": "2bb6abdaa0dee73d4897015f0c836560d57035f02a69c40fe61cde46e04c780c"
+            "bytes": 55352,
+            "sha256": "f167075614b940d309ec595ccd099e32166521fede5b3924e9684d0259a16217"
           }
         }
       }
@@ -120,18 +120,18 @@
       "crownBaseMetres": 4.176,
       "originXYZ": [
         -16.2,
-        -4.8,
+        -4.2,
         -16.2
       ],
       "cellMetres": 0.6,
       "dimensionsXYZ": [
         56,
-        61,
+        60,
         55
       ],
       "low": [
         -16.5,
-        -5.1,
+        -4.5,
         -16.5
       ],
       "high": [
@@ -142,21 +142,21 @@
       "samplingFootprintMetres": 1.0392304845413263,
       "files": {
         "field.rgba16f.bin": {
-          "bytes": 1503040,
-          "sha256": "98fcfc73474c7b86c29c599415dd5d77adf0012d5df628fab70e27b07215a32f",
+          "bytes": 1478400,
+          "sha256": "79c9c5fdc635467aac7125a9cb5878eb201f1f6f0f026211a097272f2acbbdd0",
           "gzip": {
             "file": "prototype-2-maple-veteran/field.rgba16f.bin.gz",
-            "bytes": 320597,
-            "sha256": "a72f01fcf79bbb624458d8c8bd97be050d17ba23a0127bd59f987dc4d2a42715"
+            "bytes": 303237,
+            "sha256": "c6ced0edafb6f59236b626dc9b1cae84f445735c0e9e212243e39d513aa658e8"
           }
         },
         "exposure.r8.bin": {
-          "bytes": 187880,
-          "sha256": "811fa675181b187cae5a743670887701e33248916bf5a0b1ce4d6092f4ea408d",
+          "bytes": 184800,
+          "sha256": "b1d98fd845afbca5799ba65fef9a5a16ab7a98eae3c51b23d438183621262f8d",
           "gzip": {
             "file": "prototype-2-maple-veteran/exposure.r8.bin.gz",
-            "bytes": 66876,
-            "sha256": "cc26fbea2bf9a74a8469c60222d0dd3081f2ddff49ec9213b8626a0ce4cc5629"
+            "bytes": 60854,
+            "sha256": "b6a8c54d4cd514cabb11a741c0f947a911e06a8a9871aad768752147c2eea83a"
           }
         }
       }
@@ -171,7 +171,7 @@
       "crownBaseMetres": 6.237,
       "originXYZ": [
         -20.4,
-        -2.4,
+        -3.0,
         -19.8
       ],
       "cellMetres": 0.6,
@@ -182,32 +182,32 @@
       ],
       "low": [
         -20.7,
-        -2.6999999999999997,
+        -3.3,
         -20.1
       ],
       "high": [
         19.5,
-        32.7,
+        32.1,
         20.099999999999998
       ],
       "samplingFootprintMetres": 1.0392304845413263,
       "files": {
         "field.rgba16f.bin": {
           "bytes": 2118808,
-          "sha256": "b5a3794eecd1485f5c1ceb06a2a075dbbaa198e3baf8fd35e4d2412a41671605",
+          "sha256": "a32f28e30029147a8234bcf595c1c9d857f9397f8e52de138565fca99aad951d",
           "gzip": {
             "file": "prototype-3-elm-veteran/field.rgba16f.bin.gz",
-            "bytes": 278583,
-            "sha256": "67eb17193cc340e3b38ede0485b1118d3d2d155366c07fa21969680dc2ac1975"
+            "bytes": 305555,
+            "sha256": "1f5812fb07f4eebd9788e3ce46feb23b98c67c70f9cbb9f3147b0f3cc8f6412b"
           }
         },
         "exposure.r8.bin": {
           "bytes": 264851,
-          "sha256": "674ed65c39faceffb460349bd8e788093e0cd63520cfcc02d8523ec1f8fefe18",
+          "sha256": "f1df34cbf56c96070462a16e79855ad053d81c9f3a4f28b0f2ccc7ee1f3dd8e4",
           "gzip": {
             "file": "prototype-3-elm-veteran/exposure.r8.bin.gz",
-            "bytes": 81180,
-            "sha256": "3189ba225f1a4656cea2428c3ed603c2cf7cf93545d8d1e37e9797fd03274334"
+            "bytes": 69862,
+            "sha256": "ba05de98f11425d8e2ec8d27134cb1a4084fbf910e4c5704537f7681e2b30c56"
           }
         }
       }
@@ -227,7 +227,7 @@
       ],
       "cellMetres": 0.6,
       "dimensionsXYZ": [
-        24,
+        25,
         31,
         22
       ],
@@ -237,28 +237,28 @@
         -7.499999999999999
       ],
       "high": [
-        5.699999999999999,
+        6.299999999999999,
         14.700000000000001,
         5.700000000000001
       ],
       "samplingFootprintMetres": 1.0392304845413263,
       "files": {
         "field.rgba16f.bin": {
-          "bytes": 130944,
-          "sha256": "02c1e7c968569b11f0050fc158920ab91057d436eb95617e91a1f1dd52f4cf40",
+          "bytes": 136400,
+          "sha256": "d1549fbaf60f0a77f55eaaf85174cca6d8028c4002323f952f811cfc4d158847",
           "gzip": {
             "file": "prototype-4-birch-veteran/field.rgba16f.bin.gz",
-            "bytes": 21052,
-            "sha256": "8b8b8d2c6ba2754a463d5ba8c5d11d3cec2727c0449e1ae5fc01d18c756d6aff"
+            "bytes": 22227,
+            "sha256": "5b3b8a1c765eab91bc25699e67946410a5fc766a7a9540f2ba9c5db4bad2f8f4"
           }
         },
         "exposure.r8.bin": {
-          "bytes": 16368,
-          "sha256": "eadbd4a176491a3f384e2fbbb3422ee0a720acca6d735d8efccf547f717252f2",
+          "bytes": 17050,
+          "sha256": "59b2f2fae61ac9b2191afa57be48cafc0d81be40ce756142413e7409cd382c2d",
           "gzip": {
             "file": "prototype-4-birch-veteran/exposure.r8.bin.gz",
-            "bytes": 3707,
-            "sha256": "598fd71c8f02146e3d22b6f9e661031ffb887c3b4fb56cdf4faa3ce38e0f9c74"
+            "bytes": 3877,
+            "sha256": "e96cb266b9de111b3543519e4480b79876e7032328e224c804dcc72bfec3af52"
           }
         }
       }
@@ -279,7 +279,7 @@
       "cellMetres": 0.6,
       "dimensionsXYZ": [
         14,
-        16,
+        17,
         13
       ],
       "low": [
@@ -289,27 +289,27 @@
       ],
       "high": [
         3.8999999999999995,
-        5.699999999999999,
+        6.300000000000001,
         3.9000000000000004
       ],
       "samplingFootprintMetres": 1.0392304845413263,
       "files": {
         "field.rgba16f.bin": {
-          "bytes": 23296,
-          "sha256": "4bcf13b4dfb21bd08129abb53cf4a9e09755eb7d9c8e6598cf4151f646052c67",
+          "bytes": 24752,
+          "sha256": "0cf5956b99de686122a15a6e69e0892a5a444b5cef83409d5bbb9c9c29abd7c9",
           "gzip": {
             "file": "prototype-5-blueberry-veteran/field.rgba16f.bin.gz",
-            "bytes": 2541,
-            "sha256": "000e361a3383175781b42ba44903bc8f7a16513e04c2b08ee2f4befb0735d2ff"
+            "bytes": 2833,
+            "sha256": "0371954263142d2e20983b0bb60a1d4d778e06026c66e24b1869b5b0984aef50"
           }
         },
         "exposure.r8.bin": {
-          "bytes": 2912,
-          "sha256": "ea49dbc82bb831541089fbd5ff9fae17d52c876b2806e4528a1c5cc64b4a368f",
+          "bytes": 3094,
+          "sha256": "5d7f9020a78892ab0088c521254e39ddd5ef9774cae0bee9faa321cf2baba5ae",
           "gzip": {
             "file": "prototype-5-blueberry-veteran/exposure.r8.bin.gz",
-            "bytes": 285,
-            "sha256": "10f7ec1c1909d8a355fec0a9159d8c22e79f206b5cf38b35bde537fe88cc6d8b"
+            "bytes": 331,
+            "sha256": "ce7f8d3c126d4a5bd456e3773109818e6970ec3c53a80e88ff9e33eb204a1595"
           }
         }
       }
@@ -323,44 +323,44 @@
       "crownRadiusMetres": 10.068,
       "crownBaseMetres": 5.489,
       "originXYZ": [
-        -10.799999999999999,
+        -10.2,
         -1.7999999999999998,
         -10.799999999999999
       ],
       "cellMetres": 0.6,
       "dimensionsXYZ": [
-        39,
+        38,
         45,
         41
       ],
       "low": [
-        -11.1,
+        -10.5,
         -2.0999999999999996,
         -11.1
       ],
       "high": [
-        12.299999999999999,
+        12.3,
         24.9,
         13.500000000000002
       ],
       "samplingFootprintMetres": 1.0392304845413263,
       "files": {
         "field.rgba16f.bin": {
-          "bytes": 575640,
-          "sha256": "a34f8684b9f0516c4486ed64c7fec8b3d00f0f3395939445a47ce08dc51f7e0a",
+          "bytes": 560880,
+          "sha256": "4b7a992bfe4eefa5d463216ab0f2f120abfd03ec3bd7e48bccdaa91dab97b16d",
           "gzip": {
             "file": "prototype-6-oak-canopy/field.rgba16f.bin.gz",
-            "bytes": 115718,
-            "sha256": "2ea6344c5fc2fbd430634cfd5fbc57721e548dd1bd5c4ad75a01704a7ad064a1"
+            "bytes": 117923,
+            "sha256": "6715db01cf72f08cfe4180bda67cffdec791184b407bef53b751657888c08cef"
           }
         },
         "exposure.r8.bin": {
-          "bytes": 71955,
-          "sha256": "1deb9ce961c510e856ee0615005ee342954a66658ad42f7f9e6f246cb2cc59bd",
+          "bytes": 70110,
+          "sha256": "aa316a7ae8bafbaad27f8c8ae8780fcc852fa2f05f531373241baf564c1d6e68",
           "gzip": {
             "file": "prototype-6-oak-canopy/exposure.r8.bin.gz",
-            "bytes": 24585,
-            "sha256": "52e7ab4cb6618a67b143c948e14022397b92817654c548b08d0bbc222d80dc3a"
+            "bytes": 23005,
+            "sha256": "bc4835b174b653daea8bf27cae0f104304adb3e866df9e37a44e218c931a3f14"
           }
         }
       }
@@ -380,7 +380,7 @@
       ],
       "cellMetres": 0.6,
       "dimensionsXYZ": [
-        48,
+        49,
         45,
         41
       ],
@@ -390,28 +390,28 @@
         -11.700000000000001
       ],
       "high": [
-        14.100000000000001,
+        14.7,
         23.7,
         12.9
       ],
       "samplingFootprintMetres": 1.0392304845413263,
       "files": {
         "field.rgba16f.bin": {
-          "bytes": 708480,
-          "sha256": "6b49f09fbd8b6da99e20c9ce3fe099cd178a9d43d2197fa69c2d9149730707f8",
+          "bytes": 723240,
+          "sha256": "18a3cf812a29641c96f6428fd2142197d98dc91b632b980138d9d971e9455b6b",
           "gzip": {
             "file": "prototype-7-chestnut-canopy/field.rgba16f.bin.gz",
-            "bytes": 142415,
-            "sha256": "291b4b1c5eb91fd06c1256156e6489cb0a13ed9fdee57c6c62b4d09e1e7c7b4c"
+            "bytes": 145512,
+            "sha256": "997f0a40cc9ff7cc05efbfd3682e3fd81d35e0893f7a884b7d26783ddba26cfa"
           }
         },
         "exposure.r8.bin": {
-          "bytes": 88560,
-          "sha256": "3441f76db2ae6b769f12d308986abbcf6c62f3ed1762f14f25bd6416f7099ab8",
+          "bytes": 90405,
+          "sha256": "2859823d8c0e88072ab49767ba302e1870fbf857af6db8d68768a38950004eb7",
           "gzip": {
             "file": "prototype-7-chestnut-canopy/exposure.r8.bin.gz",
-            "bytes": 30180,
-            "sha256": "b682b1af63fd003f40c21c14736dec122039d4863394f1af02155f4fa6841314"
+            "bytes": 29257,
+            "sha256": "83b56417303892072cf8fbb4e80238c9755b8be066b7e349c73f901021f0244d"
           }
         }
       }
@@ -449,20 +449,20 @@
       "files": {
         "field.rgba16f.bin": {
           "bytes": 712448,
-          "sha256": "bfd999754c118fdbc842d386a295cab44c57de9b62e2dfc538e13195947add77",
+          "sha256": "fbfa8e8a62053ad84ae06b1ca2ef6cd97057809523922d318daf2a4e1218394a",
           "gzip": {
             "file": "prototype-8-maple-canopy/field.rgba16f.bin.gz",
-            "bytes": 167579,
-            "sha256": "c6da95ad0a8ed1a9034c0223c3e18d7adc0698af5fdedb408dc4f20b8624bf14"
+            "bytes": 159399,
+            "sha256": "748b094494d625ee7bd129a6b7e2cce3e8b3edb4cc942e825fee63a083006468"
           }
         },
         "exposure.r8.bin": {
           "bytes": 89056,
-          "sha256": "eeba8a14b260ad7efe52bf2560f7f4751d22b4a93547534eeed652abbd74e02d",
+          "sha256": "1b3181e8495dc80761f4e8205f53bc68cf9793c013b3872229b82fc045f47b25",
           "gzip": {
             "file": "prototype-8-maple-canopy/exposure.r8.bin.gz",
-            "bytes": 31209,
-            "sha256": "c13bfa95f8e0744092127824a1f3aa01511fb58df46867ca7860fc1a435a1b7e"
+            "bytes": 29803,
+            "sha256": "f9af0f6bf9fc1f30d5cc547e2c370bfff3788c1e2b1ee974720c2c5ea8e4fc81"
           }
         }
       }
@@ -477,43 +477,43 @@
       "crownBaseMetres": 7.318,
       "originXYZ": [
         -13.2,
-        -1.7999999999999998,
-        -13.2
+        -2.4,
+        -12.6
       ],
       "cellMetres": 0.6,
       "dimensionsXYZ": [
         48,
         50,
-        48
+        46
       ],
       "low": [
         -13.5,
-        -2.0999999999999996,
-        -13.5
+        -2.6999999999999997,
+        -12.9
       ],
       "high": [
         15.3,
-        27.9,
-        15.3
+        27.3,
+        14.700000000000001
       ],
       "samplingFootprintMetres": 1.0392304845413263,
       "files": {
         "field.rgba16f.bin": {
-          "bytes": 921600,
-          "sha256": "5bc3464e87cb452a3c3a2a2d927a00dea2eb4288e7001e1d0e59595a2feb8c32",
+          "bytes": 883200,
+          "sha256": "a1f3c081f0e1b153cae4c6dd67718571a86f29caf9d88d05a0bacc2c0dd102fa",
           "gzip": {
             "file": "prototype-9-elm-canopy/field.rgba16f.bin.gz",
-            "bytes": 176106,
-            "sha256": "0036b28d6b1bc5097bea1fd4f73f9d3ec7b2f3622c9b09433e0d76c6e4226754"
+            "bytes": 163415,
+            "sha256": "4ff567d641e4cd76d41366d912b7fe7bcfa78013b6d143a770d759592a6e42fa"
           }
         },
         "exposure.r8.bin": {
-          "bytes": 115200,
-          "sha256": "826dd1413b163961494fb5c7477dbf78a376ebf2cdf87860fa32ac9a0f283a7a",
+          "bytes": 110400,
+          "sha256": "39893ad7c0f1ff03593e4a28d4100636081aaf58230df8bab380f611a904060e",
           "gzip": {
             "file": "prototype-9-elm-canopy/exposure.r8.bin.gz",
-            "bytes": 40403,
-            "sha256": "b10ddbcf6839ad823595935ed3c247f0486d4badb7e9f3479ae63ded3bdd2c65"
+            "bytes": 33114,
+            "sha256": "8199183631ee2d06030bb3d86ebfdbebf5bb386d45907900ea8c04a816f9c5a4"
           }
         }
       }
@@ -534,7 +534,7 @@
       "cellMetres": 0.6,
       "dimensionsXYZ": [
         19,
-        27,
+        28,
         21
       ],
       "low": [
@@ -544,27 +544,27 @@
       ],
       "high": [
         5.7,
-        12.299999999999999,
+        12.9,
         6.299999999999999
       ],
       "samplingFootprintMetres": 1.0392304845413263,
       "files": {
         "field.rgba16f.bin": {
-          "bytes": 86184,
-          "sha256": "7f8f1dab4f51284533d80d29b089bd9b80176079e4af92e41b4846be4a19c760",
+          "bytes": 89376,
+          "sha256": "947e68d49267f890bf9c2169b9fbce5eeb3d6649becad8f2c58ba07dd02ac8ce",
           "gzip": {
             "file": "prototype-10-birch-canopy/field.rgba16f.bin.gz",
-            "bytes": 12332,
-            "sha256": "2940a37f7776d04456bd8e42a650a58e2e6b49c1544d098214229f73e8eb06e9"
+            "bytes": 13343,
+            "sha256": "dbbae704fe9803a1a5fb2873584a2817520dd87ead050b29f7f668c3f3d11a80"
           }
         },
         "exposure.r8.bin": {
-          "bytes": 10773,
-          "sha256": "ee849a193aa5652cb8ad010b8b308ebd69095f71ae2015db31db6a83dad50a7a",
+          "bytes": 11172,
+          "sha256": "1b5f2199bb27ef026eb76c542726968cc5bd15d24384ccc0aab9f08857400780",
           "gzip": {
             "file": "prototype-10-birch-canopy/exposure.r8.bin.gz",
-            "bytes": 2171,
-            "sha256": "b305a9bff17520452a72c5c3a6d8028ca354dea5872a8a1790f25d5e9d0ae856"
+            "bytes": 2310,
+            "sha256": "f10cb987237fbdec44b6a4decdea72debfc99a12a736abf8f95b2b7562f76924"
           }
         }
       }
@@ -602,20 +602,20 @@
       "files": {
         "field.rgba16f.bin": {
           "bytes": 20280,
-          "sha256": "e40f517ac467f6bb0a1fa1f53912e056250585a1a734563b2a467cb0339e37d4",
+          "sha256": "4286923fb7ff2ef9a95ebf6e8a492139202a15e492e1ffd1282579f989a280a1",
           "gzip": {
             "file": "prototype-11-blueberry-canopy/field.rgba16f.bin.gz",
-            "bytes": 1935,
-            "sha256": "94681cd5a5f9639a28b68918d6e8d005ac582ff75183b62ffc8969853b415775"
+            "bytes": 2266,
+            "sha256": "5de647d62563693ea4b8ad1570cfe9558eca0d2fb17c008b7d0e6530c9b6ee28"
           }
         },
         "exposure.r8.bin": {
           "bytes": 2535,
-          "sha256": "cbb96600a3b6a0d28575692bfbce8abd8d50dedeb9b85d4410a1cfc872566c5b",
+          "sha256": "2c5406b47f38a20720eeedbc00f37a466fa548d7a39181a3707d85641d94a11c",
           "gzip": {
             "file": "prototype-11-blueberry-canopy/exposure.r8.bin.gz",
-            "bytes": 191,
-            "sha256": "f74f3c31405ff34df114d433c60c4e11570eb44f5fad9a6d03881a96ac2b2c0d"
+            "bytes": 231,
+            "sha256": "a7e36425b50cffd733d44c0713dc2c292ab0b3421c38fd51a8946859c18fba45"
           }
         }
       }

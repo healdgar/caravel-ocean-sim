@@ -3,7 +3,15 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {INDIGENOUS_CULTURE_REGIONS} from '../js/coastal-world.js';
 import {DRESS_BARE_TORSO,DRESS_FEATHERS,DRESS_MASK_SCALE,DRESS_PIECES,INDIGENOUS_DRESS,indigenousDress} from '../js/indigenous-dress.js';
-import {buildIndigenousCrewModel,createIndigenousVillagersForInstance} from '../js/crew.js';
+import {loadCrewGLB} from '../js/gltf.js';
+import {
+  INDIGENOUS_ARCHETYPE_IDS,
+  buildIndigenousCrewModel,
+  createIndigenousCrewModels,
+  createIndigenousVillagersForInstance,
+  indigenousArchetypeForCulture,
+  loadGroomPackGLB,
+} from '../js/crew.js';
 
 const everyone=(culture,sex,count=400)=>Array.from({length:count},(_,i)=>indigenousDress(culture,sex,i));
 
@@ -58,4 +66,34 @@ test('every piece is tagged in the model, and the sailors have none',()=>{
   const source=readFileSync(new URL('../js/crew.js',import.meta.url),'utf8');
   for(const name of DRESS_PIECES)assert.ok(source.includes(`'${name}'`),`${name} is never built`);
   assert.equal(typeof buildIndigenousCrewModel,'function');
+});
+
+test('all nine Indigenous culture regions map onto four dedicated regional M/F base models with 3D Tripo groom',()=>{
+  const groomPack=loadGroomPackGLB(readFileSync(new URL('../assets/crew/groom-pack.glb',import.meta.url)));
+  const load=name=>{const m=loadCrewGLB(readFileSync(new URL(`../assets/crew/${name}.glb`,import.meta.url)));m.groomPack=groomPack;return m;};
+  const sailor=load('sailor'),sailorFemale=load('sailor-female');
+  const archetypes={
+    algonquian:[load('indigenous-algonquian-male'),load('indigenous-algonquian-female')],
+    caribbean:[load('indigenous-caribbean-male'),load('indigenous-caribbean-female')],
+    maya:[load('indigenous-maya-male'),load('indigenous-maya-female')],
+    andean:[load('indigenous-andean-male'),load('indigenous-andean-female')],
+  };
+  sailor.indigenousBase=archetypes.caribbean[0];
+  sailorFemale.indigenousBase=archetypes.caribbean[1];
+  sailor.indigenousArchetypes=archetypes;
+
+  const seenArchetypes=new Set();
+  for(const {id} of INDIGENOUS_CULTURE_REGIONS){
+    const arch=indigenousArchetypeForCulture(id);
+    assert.ok(INDIGENOUS_ARCHETYPE_IDS.includes(arch),`${id} maps to valid regional archetype ${arch}`);
+    seenArchetypes.add(arch);
+    const [maleModel,femaleModel]=createIndigenousCrewModels([sailor,sailorFemale],id);
+    assert.ok(maleModel.vertexCount>archetypes[arch][0].vertexCount,`${id} male attaches 3D groom & cultural regalia`);
+    assert.ok(femaleModel.vertexCount>archetypes[arch][1].vertexCount,`${id} female attaches 3D groom & cultural regalia`);
+    assert.equal(maleModel.lods.length,3,`${id} male keeps [near, mid, far] LODs`);
+    assert.equal(femaleModel.lods.length,3,`${id} female keeps [near, mid, far] LODs`);
+    assert.ok(maleModel.distantIndices?.length>0,`${id} male keeps baked distantIndices for townsfolk`);
+    assert.ok(femaleModel.distantIndices?.length>0,`${id} female keeps baked distantIndices for townsfolk`);
+  }
+  assert.deepEqual([...seenArchetypes].sort(),[...INDIGENOUS_ARCHETYPE_IDS].sort(),'all four regional M/F pairs are exercised');
 });

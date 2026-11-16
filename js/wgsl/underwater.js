@@ -144,12 +144,16 @@ export function createUnderwaterMedium({samples=4,cameraProbe=false,surfaceWaves
 ${cameraProbe?'@group(0)@binding(11)var<storage,read>cameraSea:array<f32,16>;':''}
 `+SKY_RENDER_FUNCS+(shadows?SCENE_SHADOW_SAMPLE:'')+(surfaceWaves?surfaceWaveSource(2,0,1,'seaSampler'):'')
   +waterCausticFunctions({derivatives:'derivTex',sampler:'seaSampler',surfaceWaves,shadows})+UNDERWATER_SCATTER+/* wgsl */ `
+fn uwScalarFinite(x:f32)->bool {
+  return (x==x)&&!(x!=x)&&((bitcast<u32>(x)&0x7fffffffu)<0x7f800000u);
+}
 struct UnderwaterVertex{@builtin(position)position:vec4f,@location(0)ndc:vec2f};
 @vertex fn vs(@builtin(vertex_index)i:u32)->UnderwaterVertex {
   let p=vec2f(f32((i<<1u)&2u),f32(i&2u))*2.0-1.0;
   ${skipAir?`// The post passes choose original HDR using this same current GPU probe.
   // Degenerate geometry avoids an otherwise identity full-screen copy in air.
-  if(${cameraProbe?'cameraSea[9]':'optics.z'}-F.camPos.y<=.005){return UnderwaterVertex(vec4f(0,0,0,1),p);}`:''}
+  let vsSeaY=${cameraProbe?'cameraSea[9]':'optics.z'};let vsCamY=F.camPos.y;
+  if(!(vsSeaY==vsSeaY)||!(vsCamY==vsCamY)||!uwScalarFinite(vsSeaY)||!uwScalarFinite(vsCamY)||vsSeaY-vsCamY<=.005){return UnderwaterVertex(vec4f(0,0,0,1),p);}`:''}
   return UnderwaterVertex(vec4f(p,0,1),p);
 }
 fn underwaterSceneDistance(pixel:vec2i,ray:vec3f)->f32 {
@@ -161,9 +165,9 @@ fn underwaterSceneDistance(pixel:vec2i,ray:vec3f)->f32 {
 }
 @fragment fn fs(v:UnderwaterVertex)->@location(0)vec4f {
   let pixel=vec2i(v.position.xy);let original=textureLoad(hdrSource,pixel,0);
-  let surfaceY=${cameraProbe?'cameraSea[9]':'optics.z'};
-  let eyeDepth=surfaceY-F.camPos.y;
-  if(eyeDepth<=.005){return original;}
+  let surfaceY=${cameraProbe?'cameraSea[9]':'optics.z'};let camY=F.camPos.y;
+  if(!(surfaceY==surfaceY)||!(camY==camY)||!uwScalarFinite(surfaceY)||!uwScalarFinite(camY)||surfaceY-camY<=.005){return original;}
+  let eyeDepth=surfaceY-camY;
   let ray=normalize(F.camFwd.xyz+v.ndc.x*F.camRight.xyz+v.ndc.y*F.camUp.xyz);
   let distance=underwaterSceneDistance(pixel,ray);
   var path=select(120.0,min(distance,120.0),distance>=0.0);
@@ -202,8 +206,37 @@ fn underwaterSceneDistance(pixel:vec2i,ray:vec3f)->f32 {
   let scatter=scatterAlbedo*(sky*1.4*underwaterLightIntegral(path,eyeDepth,ray.y,.65,optics.x)
     +sun*solarShadowVisibility(sunShadow)*underwaterPhase(dot(ray,normalize(-refract(-normalize(F.sunDir.xyz),vec3f(0,1,0),1.0/WATER_REFRACTIVE_INDEX))))*underwaterLightIntegral(path,eyeDepth,ray.y,lightCos,optics.x)
     +moon*lunarShadowVisibility(sunShadow)*underwaterPhase(dot(ray,normalize(-moonDown)))*underwaterLightIntegral(path,eyeDepth,ray.y,moonCos,optics.x));
-  return vec4f(max(vec3f(0),radiance*transmission+scatter),1);
+  let outRgb=max(vec3f(0),radiance*transmission+scatter);
+  let r=outRgb.x;let g=outRgb.y;let b=outRgb.z;
+  if(!(r==r)||!(g==g)||!(b==b)||!uwScalarFinite(r)||!uwScalarFinite(g)||!uwScalarFinite(b)){return original;}
+  return vec4f(outRgb,1);
 }
 `;
+}
+export const CAMERA_MEDIUM_GUARD_WGSL = /* wgsl */ `
+fn postCameraScalarFinite(x: f32) -> bool {
+  return (x == x) && !(x != x) && ((bitcast<u32>(x) & 0x7fffffffu) < 0x7f800000u);
+}
+fn applyCameraMedium(color: vec3f, mediumColor: vec3f) -> vec3f {
+  let seaY = postCameraSea[9];
+  let camY = postFrame.camPos.y;
+  if (!(seaY == seaY) || !(camY == camY) || !postCameraScalarFinite(seaY) || !postCameraScalarFinite(camY) || seaY - camY <= .005) {
+    return color;
+  }
+  let r = mediumColor.x;
+  let g = mediumColor.y;
+  let b = mediumColor.z;
+  if (!(r == r) || !(g == g) || !(b == b) || !postCameraScalarFinite(r) || !postCameraScalarFinite(g) || !postCameraScalarFinite(b)) {
+    return color;
+  }
+  return mediumColor;
+}
+`;
+export function applyCameraMedium(color, mediumColor, postCameraSea, postFrame) {
+  const seaY = postCameraSea?.[9];
+  const camY = postFrame?.camPos?.y ?? postFrame?.camPos?.[1] ?? 0;
+  if (!Number.isFinite(seaY) || !Number.isFinite(camY) || seaY - camY <= 0.005) return color;
+  if (!mediumColor || !Number.isFinite(mediumColor[0]) || !Number.isFinite(mediumColor[1]) || !Number.isFinite(mediumColor[2])) return color;
+  return mediumColor;
 }
 export const UNDERWATER_MEDIUM=createUnderwaterMedium();
