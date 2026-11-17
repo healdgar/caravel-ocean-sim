@@ -718,11 +718,18 @@ test('modular 3D character components pack 15-bit masks losslessly in f32, keep 
     townComponentMaskForLook,
   }=await import('../js/crew-components.js');
   const {CREW_WGSL}=await import('../js/wgsl/crew.js');
-  const {TOWNSFOLK_WGSL}=await import('../js/wgsl/townsfolk.js');
+  const {crewContinuumRenderWGSL}=await import('../js/wgsl/crew-continuum.js');
+  // The townsfolk are drawn with the people continuum's opaque passes: those fragment stages, and the shading they share.
+  const continuum=crewContinuumRenderWGSL(),fnBody=name=>{
+    const at=continuum.indexOf(`fn ${name}(`);let i=continuum.indexOf('{',at),depth=0;const start=i;
+    for(;i<continuum.length;i++){if(continuum[i]==='{')depth++;else if(continuum[i]==='}'&&!--depth)break;}
+    return continuum.slice(start,i+1);
+  };
+  const TOWNSFOLK_OPAQUE=['crewContinuumFS','crewContinuumFarFS','crewContinuumMask','crewContinuumPictured','crewShade'].map(fnBody).join('\n');
   const {INLAND_WATER_WGSL}=await import('../js/wgsl/inland-water.js');
   const {HERDS_RENDER_WGSL}=await import('../js/wgsl/herds.js');
 
-  for(const [name,src] of [['crew',CREW_WGSL],['townsfolk',TOWNSFOLK_WGSL],['inland-water',INLAND_WATER_WGSL],['herds',HERDS_RENDER_WGSL]]){
+  for(const [name,src] of [['crew',CREW_WGSL],['townsfolk',TOWNSFOLK_OPAQUE],['inland-water',INLAND_WATER_WGSL],['herds',HERDS_RENDER_WGSL]]){
     assert.equal(/\bdiscard\b/.test(src),false,`${name} opaque WGSL contains zero discard`);
   }
 

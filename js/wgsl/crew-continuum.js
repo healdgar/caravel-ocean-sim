@@ -10,9 +10,9 @@
 import { FRAME_WGSL } from './common.js';
 import { VESSEL_RIG } from './vessel.js';
 import { SHADOW_FRAME } from './shadows.js';
-import { CREW_SKIN, crewRenderWGSL } from './crew.js';
+import { CREW_JOINT_BLEND_WGSL, CREW_SKIN, crewRenderWGSL } from './crew.js';
 import { CONTINUUM_CORE_WGSL, continuumClusterPrefixWGSL, continuumMorphStepWGSL } from '../continuum-core.js';
-import { CREW_JOINT_COUNT } from '../crew-skeleton.js';
+import { CREW_JOINT_COUNT, CREW_JOINT_PARENTS, CREW_SLOT } from '../crew-skeleton.js';
 import { CREW_CONTINUUM_VERTEX_WORDS, CREW_CONTINUUM_CLUSTER_WORDS, CREW_CONTINUUM_STEP_WORDS, CREW_CONTINUUM_NEVER } from '../crew-continuum.js';
 
 // The lists a person can be entered in, each with its own indirect draw. Cut: people the camera stands among or who
@@ -22,10 +22,17 @@ export const CREW_CONTINUUM_LISTS = Object.freeze(['clusters', 'chain', 'splat',
 export const CREW_CONTINUUM_INSTANCE_VERTICES = Object.freeze([384, 384, 3, 384, 384, 384]);
 // How each draw reads its list: the list buffer bound as an instance-rate vertex buffer at the list's first entry.
 export const CREW_CONTINUUM_ENTRY_LAYOUT = Object.freeze([Object.freeze({ arrayStride: 8, stepMode: 'instance', attributes: Object.freeze([Object.freeze({ shaderLocation: 0, offset: 0, format: 'uint32x2' })]) })]);
+// What the GPU is told of a person, beside their joints and actor record (crewOrders in the cut).
+export const CREW_CONTINUUM_ORDER_CUT = 1;        // drawn depth first and shaded at equal depth
+export const CREW_CONTINUUM_ORDER_IMPORTANT = 2;  // wounded, spoken to or aimed at: cut finer
 // Who is cut finer: a wounded person, one being spoken to, or one aimed at. Their pixel error is this share.
 export const CREW_CONTINUUM_IMPORTANT = 0.5;
 // How many shadow-map texels a shadow's far body may be in error.
 export const CREW_CONTINUUM_SHADOW_TEXELS = 1.5;
+// A person's orders (crewOrders): bits 0 and 1 as CREW_CONTINUUM_ORDER_* say; above them, when not 0, who they are
+// plus one. Where people are compacted afresh each frame their slot changes, and the hash that thins them and splits
+// their samples follows who they are, so no one flickers as others come and go.
+export const CREW_CONTINUUM_IDENTITY_SHIFT = 2;
 
 // What every pass knows of a body and of the batch of people it draws (js/crew-continuum-draw.js writes both).
 const CREW_CONTINUUM_STRUCTS = /* wgsl */`
@@ -46,8 +53,8 @@ struct CrewContinuumPart {
 };
 `;
 
-// A person's state, two entries ahead of the lists: x = flags | handoff share << 8 | splat share << 16, y = step;
-// then morph (f32 bits) and splat scale (f32 bits).
+// A person's state, two entries ahead of the lists: x = seed | handoff share << 8 | splat share << 16, y = step;
+// then morph (f32 bits) and splat scale (f32 bits). The seed is 8 bits of a hash of who they are.
 const CREW_CONTINUUM_DECODE = /* wgsl */`
 struct CrewContinuumPoint { position:vec3f, normal:vec3f, surface:u32, joints:vec4u, weights:vec4f, region:u32 };
 fn crewContinuumOctahedral(e:vec2f)->vec3f {
@@ -160,10 +167,11 @@ fn crewContinuumChunks(list:u32,person:u32,step:u32){
     var candidates=0u;var list=0u;var share=0u;
     let actor=actors[slot];
     let orders=crewOrders[person];
-    var flags=0u;var step=0u;var shadowStep=0u;var morph=0.0;var splatScale=1.0;var splatShare=0u;
+    let identity=select(slot,(orders>>${CREW_CONTINUUM_IDENTITY_SHIFT}u)-1u,(orders>>${CREW_CONTINUUM_IDENTITY_SHIFT}u)!=0u);
+    let seed=continuumHash(identity)&255u;var step=0u;var shadowStep=0u;var morph=0.0;var splatScale=1.0;var splatShare=0u;
     let scale=max(length(actor.transform[0].xyz),1e-3);
     let focal=F.screen.y/max(2.0*length(F.camUp.xyz),1e-4);
-    let pixels=crewPart.view.x*select(1.0,CREW_CONTINUUM_IMPORTANT,(orders&2u)!=0u);
+    let pixels=crewPart.view.x*select(1.0,CREW_CONTINUUM_IMPORTANT,(orders&${CREW_CONTINUUM_ORDER_IMPORTANT}u)!=0u);
     if(actor.shirt.w<=0.5){
       let centre=crewContinuumPlace(u32(crewBody.splat.w),crewBody.splat.xyz);
       let away=max(length(centre),1e-3);
@@ -176,7 +184,7 @@ fn crewContinuumChunks(list:u32,person:u32,step:u32){
         crewContinuumChunks(5u,person,shadowStep);
       }
       if(!crewContinuumOutside(centre,reach)){
-        let cut=(orders&1u)!=0u;
+        let cut=(orders&${CREW_CONTINUUM_ORDER_CUT}u)!=0u;
         // Where the far body's own error is all the scene allows, it takes over, over a band of distance.
         // Until a body's full mesh has arrived (far.x is 0), the far body draws everyone.
         let start=crewBody.far.x*scale*focal/pixels;
@@ -186,7 +194,7 @@ fn crewContinuumChunks(list:u32,person:u32,step:u32){
         let splat=continuumSplatShare(span);
         splatShare=u32(round(splat*255.0));
         if(share>0u){
-          splatScale=continuumThin(span,slot*0x9e3779b9u+0x85ebca6bu);
+          splatScale=continuumThin(span,identity*0x9e3779b9u+0x85ebca6bu);
           if(splatShare>0u&&splatScale>0.0){
             let at=crewContinuumAppend(2u,1u);
             if(at!=0xffffffffu){crewList[at]=vec2u(person,0u);}
@@ -200,7 +208,7 @@ fn crewContinuumChunks(list:u32,person:u32,step:u32){
         if(share<255u){candidates=crewContinuumPrefix(0u,crewBody.mesh.x,pixels*nearest/(focal*scale));list=select(0u,3u,cut);}
       }
     }
-    crewList[person*2u]=vec2u(flags|(share<<8u)|(splatShare<<16u),step|(shadowStep<<16u));
+    crewList[person*2u]=vec2u(seed|(share<<8u)|(splatShare<<16u),step|(shadowStep<<16u));
     crewList[person*2u+1u]=vec2u(bitcast<u32>(morph),bitcast<u32>(splatScale));
     crewShared=vec4u(candidates,list,share,bitcast<u32>(scale));
     crewView=vec4f(focal,pixels,scale,0.0);
@@ -220,6 +228,106 @@ fn crewContinuumChunks(list:u32,person:u32,step:u32){
     if(crewContinuumOutside(crewContinuumPlace((packed>>16u)&255u,cull.xyz),cull.w*scale)){continue;}
     let entry=crewContinuumAppend(cut.y,1u);
     if(entry!=0xffffffffu){crewList[entry]=vec2u(group.x,i);}
+  }
+}
+`;
+}
+
+// --------------------------------------------------------------------------------------------- posing people placed on the GPU
+// People whose place and pose a compute pass works out (the townsfolk, a vessel's deck hands) are written as one record
+// each, compacted by who is kept, and this pass turns each record into the joints and actor the cut and the draws read,
+// as the crew's own passes write them for the ship's company. One workgroup a person, dispatched from the count the
+// placing pass kept, so nothing on the CPU knows how many there are.
+//   transform  where the person stands, metres and radians in the world (or the hull's frame, if the batch has one)
+//   frames     (clip frame A, frame B, brace frame, look)
+//   blend      (A toward B, toward the brace frame, unused, unused)
+//   who        (identity, damage, orders, moisture slot): damage is injury | wound << 3 | scorch << 7 | seed << 11,
+//              orders bit 1 cuts them finer, and the moisture slot is the first of four the drawing reads.
+export const CREW_CONTINUUM_PLACED_WORDS = 28;
+// A look: shirt, trousers, skin (w the body: 0 a man's, 1 a woman's), hair (w the dress / DRESS_MASK_SCALE) and face.
+export const CREW_CONTINUUM_LOOK_WORDS = 20;
+const CREW_CONTINUUM_PLACED = /* wgsl */`
+struct CrewPlaced { transform:mat4x4f, frames:vec4u, blend:vec4f, who:vec4u };
+`;
+// What a wound takes off, in slots of the skeleton: the joint it parts at and every joint that hangs from it. Each joint
+// is followed in the skin order by all its descendants, so they are one run, ended by the first joint whose parent comes
+// before the one parted. Injury 1 takes off the left forearm, 2 the right, 3 and 4 the left and right shins, 5 the
+// head; 6 and 7 break the left and right arm at the elbow.
+const CREW_CONTINUUM_SEVERED = Object.freeze(['lowerarm_l', 'lowerarm_r', 'calf_l', 'calf_r', 'neck_01'].map((name) => {
+  const first = CREW_SLOT[name];
+  let last = first;
+  while (last + 1 < CREW_JOINT_COUNT && CREW_JOINT_PARENTS[last + 1] >= first) last++;
+  return Object.freeze([first, last]);
+}));
+export function crewContinuumPoseWGSL() {
+  const N = CREW_JOINT_COUNT, run = ([first, last]) => `vec2u(${first}u,${last}u)`;
+  return CREW_JOINT_BLEND_WGSL + CREW_CONTINUUM_PLACED + /* wgsl */`
+struct CrewActor { transform:mat4x4f, shirt:vec4f, trousers:vec4f, skin:vec4f, hair:vec4f, face:vec4f };
+struct CrewLook { shirt:vec4f, trousers:vec4f, skin:vec4f, hair:vec4f, face:vec4f };
+struct CrewPoseRun { first:u32, unused0:u32, unused1:u32, unused2:u32 };
+@group(0) @binding(0) var<storage,read> placed:array<CrewPlaced>;
+@group(0) @binding(1) var<storage,read> palettes:array<mat4x4f>;
+@group(0) @binding(2) var<storage,read> looks:array<CrewLook>;
+@group(0) @binding(3) var<storage,read> rest:array<vec4f>;
+@group(0) @binding(4) var<storage,read_write> joints:array<mat4x4f>;
+@group(0) @binding(5) var<storage,read_write> actors:array<CrewActor>;
+@group(0) @binding(6) var<storage,read_write> orders:array<u32>;
+@group(0) @binding(7) var<uniform> poseRun:CrewPoseRun;
+var<workgroup> crewPosed:array<mat4x4f,${N}>;
+fn crewPoseSevered(injury:u32)->vec2u {
+  switch injury {
+    case 1u: { return ${run(CREW_CONTINUUM_SEVERED[0])}; }
+    case 2u: { return ${run(CREW_CONTINUUM_SEVERED[1])}; }
+    case 3u: { return ${run(CREW_CONTINUUM_SEVERED[2])}; }
+    case 4u: { return ${run(CREW_CONTINUUM_SEVERED[3])}; }
+    case 5u: { return ${run(CREW_CONTINUUM_SEVERED[4])}; }
+    default: { return vec2u(1u,0u); }
+  }
+}
+fn crewPoseBroken(injury:u32)->vec2u {
+  if(injury==6u){return ${run(CREW_CONTINUUM_SEVERED[0])};}
+  if(injury==7u){return ${run(CREW_CONTINUUM_SEVERED[1])};}
+  return vec2u(1u,0u);
+}
+@compute @workgroup_size(64) fn crewContinuumPose(@builtin(workgroup_id) group:vec3u,@builtin(local_invocation_index) lane:u32){
+  let person=group.x;
+  let slot=poseRun.first+person;
+  if(slot>=arrayLength(&placed)){return;}
+  let at=placed[slot];
+  // The clip's two frames, blended about each joint's own place at rest, and then toward the brace.
+  for(var j=lane;j<${N}u;j+=64u){
+    let pivot=rest[j].xyz;
+    var m=palettes[at.frames.x*${N}u+j];
+    if(at.blend.x>0.0&&at.frames.y!=at.frames.x){m=crewBlendJoint(m,palettes[at.frames.y*${N}u+j],at.blend.x,pivot);}
+    if(at.blend.y>0.0){m=crewBlendJoint(m,palettes[at.frames.z*${N}u+j],at.blend.y,pivot);}
+    crewPosed[j]=m;
+  }
+  workgroupBarrier();
+  // What a wound took off is drawn in to the stump, where it parted; a broken arm hangs bent at the elbow.
+  let injury=at.who.y&7u;
+  let severed=crewPoseSevered(injury);let broken=crewPoseBroken(injury);
+  let stump=crewPosed[min(severed.x,${N - 1}u)];let stumpRest=rest[min(severed.x,${N - 1}u)].xyz;
+  let elbow=rest[min(broken.x,${N - 1}u)].xyz;
+  let turn=select(-0.68,0.68,injury==6u);let c=cos(turn);let s=sin(turn);
+  let bend=mat4x4f(vec4f(c,s,0.0,0.0),vec4f(-s,c,0.0,0.0),vec4f(0.0,0.0,1.0,0.0),vec4f(elbow-vec3f(elbow.x*c-elbow.y*s,elbow.x*s+elbow.y*c,elbow.z),1.0));
+  for(var j=lane;j<${N}u;j+=64u){
+    var m=crewPosed[j];
+    if(j>=severed.x&&j<=severed.y){
+      let a=mat3x3f(stump[0].xyz,stump[1].xyz,stump[2].xyz)*0.001;
+      m=mat4x4f(vec4f(a[0],0.0),vec4f(a[1],0.0),vec4f(a[2],0.0),vec4f((stump*vec4f(stumpRest,1.0)).xyz-a*stumpRest,1.0));
+    }else if(j>=broken.x&&j<=broken.y){m=m*bend;}
+    joints[slot*${N}u+j]=m;
+  }
+  if(lane==0u){
+    let look=looks[at.frames.w];
+    let damage=at.who.y;
+    let wound=f32((damage>>3u)&15u)/15.0;
+    let scorch=f32((damage>>7u)&15u)/15.0;
+    let bandage=select(0.0,0.06+f32((damage>>11u)&7u)/7.0*0.32,damage>0u);
+    let shirt=mix(look.shirt.rgb,look.shirt.rgb*vec3f(0.55,0.32,0.32)+vec3f(0.2,0.0,0.0),smoothstep(0.15,0.85,wound));
+    actors[slot]=CrewActor(at.transform,vec4f(shirt,wound*0.45),vec4f(look.trousers.rgb,scorch*0.42),vec4f(look.skin.rgb,floor(look.skin.w)+bandage),
+      vec4f(look.hair.rgb,f32(at.who.w)+fract(look.hair.w)),look.face);
+    orders[person]=(at.who.z&3u)|((at.who.x+1u)<<${CREW_CONTINUUM_IDENTITY_SHIFT}u);
   }
 }
 `;
@@ -278,6 +386,8 @@ fn crewContinuumFinish(slot:u32,world:vec3f,normal:vec3f,bodyPos:vec3f)->CrewCon
   return out;
 }
 fn crewContinuumState(person:u32)->vec4u { let a=crewList[person*2u];let b=crewList[person*2u+1u];return vec4u(a.x,a.y,b.x,b.y); }
+// What a draw tells its fragments: which draw it is and the person's seed (x), and the shares (y).
+fn crewContinuumCoverage(kind:u32,state:u32)->vec2u { return vec2u(kind|((state&255u)<<8u),(state>>8u)&65535u); }
 @vertex fn crewContinuumClusterVS(@builtin(vertex_index) vertex:u32,listed:CrewContinuumEntry)->CrewContinuumVertex {
   let touched=crewContinuumBindings()+crewContinuumSceneBindings();
   let entry=listed.entry;
@@ -291,7 +401,7 @@ fn crewContinuumState(person:u32)->vec4u { let a=crewList[person*2u];let b=crewL
   var out=crewContinuumFinish(slot,world,normalize(rotateHull(crewOrthonormal3x3(skin)*p.normal)),p.position);
   out.uv=crewContinuumUV(p.surface);out.region=p.region;
   // The full body gives up the samples the far body takes across the handoff.
-  out.coverage=vec2u(1u,(crewContinuumState(entry.x).x>>8u)&65535u);
+  out.coverage=crewContinuumCoverage(1u,crewContinuumState(entry.x).x);
   return out;
 }
 // One far-body vertex at the person's step, on its way to where the next collapse takes it.
@@ -321,7 +431,7 @@ fn crewContinuumFarVertex(person:u32,chunk:u32,vertex:u32,state:vec4u)->CrewCont
   var out=crewContinuumFarVertex(entry.x,entry.y,vertex,state);
   out.world+=vec3f(touched);
   // The far body takes the handoff's share from the full body and gives the splat its own.
-  out.coverage=vec2u(2u,(state.x>>8u)&65535u);
+  out.coverage=crewContinuumCoverage(2u,state.x);
   return out;
 }
 @vertex fn crewContinuumSplatVS(@builtin(vertex_index) vertex:u32,listed:CrewContinuumEntry)->CrewContinuumVertex {
@@ -350,20 +460,22 @@ fn crewContinuumFarVertex(person:u32,chunk:u32,vertex:u32,state:vec4u)->CrewCont
     colour+=worn.rgb*share.w;skin+=worn.w*share.w;
   }
   out.color=colour;out.skin=skin;out.region=0u;
-  out.coverage=vec2u(3u,(state.x>>8u)&65535u);
+  out.coverage=crewContinuumCoverage(3u,state.x);
   return out;
 }
 // The samples of this pixel each draw takes (continuumSamples, the shared core's split): the far body the handoff's
 // share and the full body the rest; of the far body's, the splat its own share and the far body the rest. Every
-// sample is drawn by exactly one of the three. coverage.x names the draw, coverage.y holds handoff | splat << 8.
-fn crewContinuumMask(coverage:vec2u,pixel:vec2f,actor:u32)->u32 {
+// sample is drawn by exactly one of the three. coverage.x names the draw in its low byte and holds the person's seed
+// above it; coverage.y holds handoff | splat << 8.
+fn crewContinuumMask(coverage:vec2u,pixel:vec2f)->u32 {
   let samples=clamp(crewPart.people.z,1u,8u);
   let all=(1u<<samples)-1u;
-  let seed=actor*0x9e3779b9u+1u;
+  let seed=(coverage.x>>8u)*0x9e3779b9u+1u;
   let handoff=continuumSamples(f32(coverage.y&255u)/255.0,pixel,samples,seed);
   let splat=handoff&continuumSamples(f32((coverage.y>>8u)&255u)/255.0,pixel,samples,seed+7u);
-  if(coverage.x==1u){return all&~handoff;}
-  if(coverage.x==2u){return handoff&~splat;}
+  let kind=coverage.x&255u;
+  if(kind==1u){return all&~handoff;}
+  if(kind==2u){return handoff&~splat;}
   return splat;
 }
 fn crewContinuumAsCrew(c:CrewContinuumVertex,base:vec4f)->CrewVertex {
@@ -381,13 +493,13 @@ struct CrewContinuumCoverage { @location(0) colour:vec4f, @builtin(sample_mask) 
   let surface=crewContinuumPictured(c);
   var out:CrewContinuumCoverage;
   out.colour=crewShade(crewContinuumAsCrew(c,surface),front,surface.rgb);
-  out.mask=crewContinuumMask(c.coverage,c.position.xy,c.actor);
+  out.mask=crewContinuumMask(c.coverage,c.position.xy);
   return out;
 }
 @fragment fn crewContinuumFarFS(c:CrewContinuumVertex,@builtin(front_facing) front:bool)->CrewContinuumCoverage {
   var out:CrewContinuumCoverage;
   out.colour=crewShade(crewContinuumAsCrew(c,vec4f(c.color,c.skin)),front,c.color);
-  out.mask=crewContinuumMask(c.coverage,c.position.xy,c.actor);
+  out.mask=crewContinuumMask(c.coverage,c.position.xy);
   return out;
 }
 // Under water, single-sampled, the water's own capture wrapping it: everyone's far body at the step their shadow
@@ -422,7 +534,7 @@ struct CrewContinuumCoverage { @location(0) colour:vec4f, @builtin(sample_mask) 
       if(fray*0.65+nHash*0.35>1.12-(woundAmt*0.32+scorchAmt*0.25)){discard;}
     }
   }
-  var out:CrewContinuumCoverage;out.colour=vec4f(0.0);out.mask=crewContinuumMask(c.coverage,c.position.xy,c.actor);
+  var out:CrewContinuumCoverage;out.colour=vec4f(0.0);out.mask=crewContinuumMask(c.coverage,c.position.xy);
   return out;
 }
 `;

@@ -448,7 +448,8 @@ test('mounted street riders lock < 1 mm on sloped banks, skip zero-population sp
     device,
     frameUBO: {},
     shader: async (code, label) => ({ code, label }),
-    shared: { models: sailorModels },
+    // Without the continuum's programs, the old bodies stand in with the sailors' own pipelines.
+    shared: { models: sailorModels, pipeline: { label: 'crew', getBindGroupLayout: () => ({}) }, shadowPipeline: { label: 'crew shadow', getBindGroupLayout: () => ({}) }, captainTexView: {}, captainSampler: {} },
     shadows: { bind: () => ({}), uniform: {} },
   });
 

@@ -19,7 +19,7 @@ after(async()=>{await browser?.close();server?.closeAllConnections?.();server?.c
 
 const instrument=()=>{
   window.townSent={};window.townBuffers={};
-  const kept=label=>/^townsfolk (draws|bodies)$/.test(label)?label:/^frame ubo \(/.test(label)?'frame':null;
+  const kept=label=>/^townsfolk (placed|counts|crowd)$/.test(label)?label:/^frame ubo \(/.test(label)?'frame':null;
   const createBuffer=GPUDevice.prototype.createBuffer;
   GPUDevice.prototype.createBuffer=function(d){
     const name=kept(d.label||''),buffer=createBuffer.call(this,name?{...d,usage:d.usage|GPUBufferUsage.COPY_SRC}:d);
@@ -35,21 +35,23 @@ const instrument=()=>{
   };
 };
 
-// Where the GPU last put each person it drew, and where the listener's reckoning puts every walker at that frame's
+// Where the GPU last put each person it kept, and where the listener's reckoning puts every walker at that frame's
 // clock and at the clock a second later.
 const compare=page=>page.evaluate(async()=>{
   await new Promise(requestAnimationFrame);
-  const device=townDevice,sources=[townBuffers['townsfolk bodies'],townBuffers['townsfolk draws'],townBuffers.frame];
+  const device=townDevice,sources=[townBuffers['townsfolk placed'],townBuffers['townsfolk counts'],townBuffers['townsfolk crowd'],townBuffers.frame];
   const reads=sources.map(b=>device.createBuffer({size:b.size,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}));
   const encoder=device.createCommandEncoder();
   sources.forEach((b,i)=>encoder.copyBufferToBuffer(b,0,reads[i],0,b.size));
   device.queue.submit([encoder.finish()]);
   await Promise.all(reads.map(b=>b.mapAsync(GPUMapMode.READ)));
-  const [bodyBytes,drawBytes,frameBytes]=reads.map(b=>{const bytes=b.getMappedRange().slice(0);b.unmap();b.destroy();return bytes;});
-  const bodies=new Float32Array(bodyBytes),draws=new Uint32Array(drawBytes),frame=new Float32Array(frameBytes);
+  const [placedBytes,countBytes,crowdBytes,frameBytes]=reads.map(b=>{const bytes=b.getMappedRange().slice(0);b.unmap();b.destroy();return bytes;});
+  const placed=new Float32Array(placedBytes),counts=new Uint32Array(countBytes),second=new Uint32Array(crowdBytes)[24],frame=new Float32Array(frameBytes);
   const {townWalkerStride}=await import('/js/audio.js');
-  // Past the drawn buckets lie the shadow casters, who include people just out of sight.
-  const {TOWNSFOLK_BUCKETS,TOWNSFOLK_SHADOW_BUCKET}=await import('/js/wgsl/townsfolk.js');
+  // Everyone kept: those in sight, and those just out of it whose shadow may fall into it. Each body's people are a run
+  // from its own first slot, as many as its indirect dispatch counts.
+  const {TOWNSFOLK_DISPATCH_WORDS,TOWNSFOLK_MODELS}=await import('/js/wgsl/townsfolk.js');
+  const {CREW_CONTINUUM_PLACED_WORDS}=await import('/js/wgsl/crew-continuum.js');
   const streets={walkers:townSent['townsfolk walkers'],samples:townSent['townsfolk routes']};
   const people=streets.walkers.length/12,clock=frame[19],sunY=frame[33];
   const reckon=at=>{
@@ -58,8 +60,8 @@ const compare=page=>page.evaluate(async()=>{
     return list;
   };
   const now=reckon(clock),later=reckon(clock+1);
-  const span=bodies.length/8/TOWNSFOLK_BUCKETS,drawn=[];
-  for(let b=0;b<TOWNSFOLK_SHADOW_BUCKET;b++)for(let slot=0;slot<draws[b*5+1];slot++){const at=(b*span+slot)*8;drawn.push([bodies[at],bodies[at+1],bodies[at+2]]);}
+  const drawn=[];
+  for(let m=0;m<TOWNSFOLK_MODELS;m++)for(let k=0;k<counts[m*TOWNSFOLK_DISPATCH_WORDS];k++){const at=((m?second:0)+k)*CREW_CONTINUUM_PLACED_WORDS;drawn.push([placed[at+12],placed[at+13],placed[at+14]]);}
   const worst=list=>{
     let far=0;
     for(const body of drawn){

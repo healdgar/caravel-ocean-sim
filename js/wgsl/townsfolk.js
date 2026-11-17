@@ -1,24 +1,26 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-// People walking between a town's buildings. Where each one is follows from the time alone, so a
-// compute pass finds them, culls them and picks their detail, and the vertex stage reads their pose
-// straight from the baked clips. Shot falling among them is all the pass keeps: a small record per
-// person, written only when something befalls them. js/town-shots.js says what it is given.
+// People walking between a town's buildings. Where each one is follows from the time alone, so a compute pass finds
+// them, keeps those in sight or whose shadow may fall into it, and writes each one kept as a placed person
+// (CrewPlaced, js/wgsl/crew-continuum.js), compacted by body: the people continuum poses, cuts and draws them from
+// there. Shot falling among them is all the pass keeps of its own: a small record per person, written only when
+// something befalls them. js/town-shots.js says what it is given.
 import { FRAME_WGSL, SIM_CLOCK_LOOP_S } from './common.js';
-import { CREW_RENDER, CREW_JOINT_BLEND_WGSL } from './crew.js';
-import { SHADOW_FRAME } from './shadows.js';
-import { DRESS_MASK_SCALE } from '../indigenous-dress.js';
 import { ROUTE_STEP_M } from '../town-streets.js';
 import { CREW_WALK_CYCLE_METRES } from '../crew-motion.js';
-import { CREW_JOINT_COUNT, CREW_JOINT_PARENTS, CREW_SLOT } from '../crew-skeleton.js';
+import { CREW_CONTINUUM_ORDER_IMPORTANT } from './crew-continuum.js';
 
+// The two bodies of a town: walker flags bit 0 says which a person wears, a man's or a woman's.
 export const TOWNSFOLK_MODELS = 2;
-export const TOWNSFOLK_TIERS = 4;
-// Bodies are kept in one run for each model at each level of detail, and then one run for each model of everyone who
-// casts a shadow: all who are drawn, and those just out of sight whose shadow may fall into it.
-export const TOWNSFOLK_SHADOW_BUCKET = TOWNSFOLK_MODELS * TOWNSFOLK_TIERS;
-export const TOWNSFOLK_BUCKETS = TOWNSFOLK_SHADOW_BUCKET + TOWNSFOLK_MODELS;
-export const TOWNSFOLK_BODY_WORDS = 8;
 export const TOWNSFOLK_LOOKS = 48;
+// What the pass counts, for each body: an indirect dispatch (kept, 1, 1, unused) that sizes the pose and the cut, and
+// then, where the continuum's bodies are absent, an indexed draw of the old bodies (index count, kept, 0, 0, 0).
+export const TOWNSFOLK_DISPATCH_WORDS = 4;
+export const TOWNSFOLK_FALLBACK_AT = TOWNSFOLK_MODELS * TOWNSFOLK_DISPATCH_WORDS;
+export const TOWNSFOLK_FALLBACK_WORDS = 5;
+export const TOWNSFOLK_COUNT_WORDS = TOWNSFOLK_FALLBACK_AT + TOWNSFOLK_MODELS * TOWNSFOLK_FALLBACK_WORDS;
+// The moisture slots their drawing reads (four each): dry but for the rain, and in the sea.
+export const TOWNSFOLK_MOISTURE_SLOTS = 8;
+export const TOWNSFOLK_SEA_MOISTURE = 4;
 export const TOWN_FATE_WORDS = 12;
 export const TOWN_SHOT_LIMIT = 64;
 export const TOWN_SHOT_WORDS = 12;
@@ -49,23 +51,15 @@ const CLIP_FRAMES_PER_SECOND = 30;
 const BODY_HEIGHT_M = 1.73;
 const BODY_BOUND_M = 1.3;
 const LYING_BOUND_M = 2.4;
-// How tall someone appears on screen, in pixels, at each change of detail. Each body is kept until it has about
-// five pixels to a triangle facing the eye, which is where the next coarser one begins to show in its shading.
-const NEAR_PIXELS = 200;
-const MID_PIXELS = 100;
-const FAR_PIXELS = 32;
 // Out of sight, someone this near the eye and this near the edge of the view may still cast a shadow into it.
 const SHADOW_NEAR_M = 110;
 const SHADOW_MARGIN_M = 18;
-const SMALLEST_PIXELS = 2.5;
 
-const TOWN_BODY = /* wgsl */ `
-struct TownBody {position:vec3f,heading:f32,frameA:u32,frameB:u32,blend:f32,look:u32};
-`;
-
-export const TOWNSFOLK_WALK = FRAME_WGSL + TOWN_BODY + /* wgsl */ `
+export const TOWNSFOLK_WALK = FRAME_WGSL + /* wgsl */ `
 struct Walker {first:u32,count:u32,phase:f32,speed:f32,side:f32,pauseAt:f32,pauseFor:f32,indoors:f32,length:f32,abroad:f32,look:u32,flags:u32};
-struct TownCrowd {clips:array<vec4u,6>,bucketSpan:u32,looks:u32,hours:f32,padding:u32};
+struct CrewPlaced {transform:mat4x4f,frames:vec4u,blend:vec4f,who:vec4u};
+// second: the first slot of the second body's people; ride: each body's frames of the ride clip, 16 bits each.
+struct TownCrowd {clips:array<vec4u,6>,second:u32,looks:u32,hours:f32,ride:u32};
 struct TownShot {start:vec3f,strike:f32,end:vec3f,blast:f32,reach:f32,seed:f32,padding:vec2f};
 struct TownShots {count:u32,list:array<TownShot,${TOWN_SHOT_LIMIT}>};
 struct TownFate {mode:u32,since:f32,until:f32,runFor:f32,along:f32,going:f32,lane:f32,heading:f32,clock:f32,speed:f32,look:f32,how:u32};
@@ -73,11 +67,12 @@ struct TownSpot {position:vec3f,forward:vec2f,centerXZ:vec2f,halfWidth:f32};
 @group(0) @binding(0) var<uniform> F:Frame;
 @group(0) @binding(1) var<storage,read> walkers:array<Walker>;
 @group(0) @binding(2) var<storage,read> route:array<vec4f>;
-@group(0) @binding(3) var<storage,read_write> bodies:array<TownBody>;
-@group(0) @binding(4) var<storage,read_write> draws:array<atomic<u32>>;
+@group(0) @binding(3) var<storage,read_write> placed:array<CrewPlaced>;
+@group(0) @binding(4) var<storage,read_write> counts:array<atomic<u32>>;
 @group(0) @binding(5) var<uniform> crowd:TownCrowd;
 @group(0) @binding(6) var<uniform> shots:TownShots;
 @group(0) @binding(7) var<storage,read_write> fates:array<TownFate>;
+@group(0) @binding(8) var<storage,read_write> moisture:array<vec2f>;
 const ABOUT=${TOWN_ABOUT}u;const AFRAID=${TOWN_AFRAID}u;const FALLING=${TOWN_FALLING}u;const DOWN=${TOWN_DOWN}u;
 fn inFrustum(relative:vec3f,radius:f32)->bool {
   let clip=F.viewProj*vec4f(relative,1);
@@ -115,6 +110,13 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
   return select(0.0,leg,going<0.0)+inLeg-fract(time/(2.0*leg)+w.phase)*2.0*leg;
 }
 @compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id:vec3u){
+  // Rain and sleet wet them. Snow and hail do not, and neither does anything else the frame happens to carry. Those in
+  // the sea are soaked.
+  if(id.x==0u){
+    let rain=clamp(F.reserved.x,0.0,1.0)*select(0.0,1.0,F.reserved.y<0.5||(F.reserved.y>1.5&&F.reserved.y<2.5));
+    let dry=vec2f(rain*0.65,rain*0.75);
+    for(var i=0u;i<4u;i++){moisture[i]=dry;moisture[${TOWNSFOLK_SEA_MOISTURE}u+i]=max(dry,vec2f(0.92));}
+  }
   if(id.x>=arrayLength(&walkers)){return;}
   let w=walkers[id.x];
   var fate=fates[id.x];
@@ -316,21 +318,13 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
   let boundR=select(select(${BODY_BOUND_M.toFixed(2)},1.95,isMounted),${LYING_BOUND_M.toFixed(2)},fate.mode>=FALLING);
   let seen=inFrustum(relative,boundR);
   if(!seen&&(length(relative)>=${SHADOW_NEAR_M.toFixed(1)}||!inFrustum(relative,${SHADOW_MARGIN_M.toFixed(1)}))){return;}
-  let depth=max(dot(relative,normalize(F.camFwd.xyz)),1.2);
-  let pixels=${BODY_HEIGHT_M.toFixed(3)}*F.screen.y/(2.0*length(F.camUp.xyz))/depth;
-  let keepProb=clamp(pixels/1.0,0.06,1.0);
-  let h0=(id.x*747796405u+2891336453u)^((w.look+1u)*2654435761u);
-  let h1=((h0>>((h0>>28u)+4u))^h0)*277803737u;
-  let thinHash=f32(((h1>>22u)^h1)&65535u)/65536.0;
-  if(seen&&pixels<1.0&&thinHash>keepProb){return;}
-  let tier=select(select(select(3u,2u,pixels>${FAR_PIXELS.toFixed(1)}),1u,pixels>${MID_PIXELS.toFixed(1)}),0u,pixels>${NEAR_PIXELS.toFixed(1)});
   let model=w.flags&1u;
   let plain=crowd.clips[model*3u];let fright=crowd.clips[model*3u+1u];let fall=crowd.clips[model*3u+2u];
   var first=plain.z;var frames=plain.w;var frame=0.0;var looped=true;
   let breathing=(time+w.phase*97.0)*${CLIP_FRAMES_PER_SECOND.toFixed(1)};
   if(fate.mode==ABOUT){
     if(isMounted){
-      let packedRide=(crowd.padding>>(model*16u))&65535u;
+      let packedRide=(crowd.ride>>(model*16u))&65535u;
       first=fall.z+fall.w;
       frames=select(packedRide,plain.w,packedRide==0u);
       var cycle=walked/${TOWN_RIDE_CYCLE_METRES.toFixed(3)}+w.phase*7.0;
@@ -363,221 +357,22 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
   let whole=min(u32(frame),frames-1u);
   let after=select(min(whole+1u,frames-1u),(whole+1u)%frames,looped);
   let dmgCode=select(select(0u,u32(max(0.0,fate.look)),fate.mode==AFRAID&&(fate.runFor>0.0||fate.how==1u)),fate.how>>1u,fate.mode>=FALLING);
-  let rawBlend=select(fract(frame),0.0,tier>=3u||fate.mode==DOWN);
-  let packedBlend=select(rawBlend,f32(dmgCode)+clamp(rawBlend,0.0,0.96875),dmgCode>0u);
-  let body=TownBody(position,heading,first+whole,first+after,packedBlend,model*crowd.looks+w.look%crowd.looks);
-  if(seen){
-    let bucket=model*${TOWNSFOLK_TIERS}u+tier;
-    bodies[bucket*crowd.bucketSpan+atomicAdd(&draws[bucket*5u+1u],1u)]=body;
-  }
-  // Everyone kept casts a shadow, from the coarsest body: a shadow is a few texels tall however near they stand.
-  let shade=${TOWNSFOLK_SHADOW_BUCKET}u+model;
-  bodies[shade*crowd.bucketSpan+atomicAdd(&draws[shade*5u+1u],1u)]=body;
-}
-`;
-
-// What a wound takes off, in slots of the crew skeleton: the joint it parts at, every joint that hangs from it, and the
-// joint left holding the stump. Each joint is followed in the skin order by all its descendants, so they are one run,
-// ended by the first joint whose parent comes before the one parted.
-const TOWN_SEVERED = Object.freeze(Object.fromEntries(['lowerarm_l', 'lowerarm_r', 'calf_l', 'calf_r', 'neck_01'].map((name) => {
-  const first = CREW_SLOT[name];
-  let last = first;
-  while (last + 1 < CREW_JOINT_COUNT && CREW_JOINT_PARENTS[last + 1] >= first) last++;
-  return [name, Object.freeze({ first, last, stump: CREW_JOINT_PARENTS[first] })];
-})));
-const townSever = ({ first, last, stump }) => `loSlot=${first}u;hiSlot=${last}u;stumpSlot=${stump}u;`;
-// Injury 1 takes off the left forearm, 2 the right, 3 and 4 the left and right shins, and 5 the head.
-const TOWN_SEVER_SLOTS = /* wgsl */ `var loSlot=0u;var hiSlot=0u;var stumpSlot=0u;
-    if(injury==2u){${townSever(TOWN_SEVERED.lowerarm_r)}}
-    else if(injury==3u){${townSever(TOWN_SEVERED.calf_l)}}
-    else if(injury==4u){${townSever(TOWN_SEVERED.calf_r)}}
-    else if(injury==5u){${townSever(TOWN_SEVERED.neck_01)}}
-    else{${townSever(TOWN_SEVERED.lowerarm_l)}}`;
-// Injuries 6 and 7 break the left and right arm at the elbow: the forearm and all that hangs from it bend.
-const TOWN_ARM_BREAK_SLOTS = /* wgsl */ `let armLo=select(${TOWN_SEVERED.lowerarm_r.first}u,${TOWN_SEVERED.lowerarm_l.first}u,isLeft);let armHi=select(${TOWN_SEVERED.lowerarm_r.last}u,${TOWN_SEVERED.lowerarm_l.last}u,isLeft);`;
-
-const TOWN_POSE_HELPERS = /* wgsl */ `
-fn townBonePose(frameA:u32,frameB:u32,blend:f32,bone:u32,isFemale:bool)->mat4x4f {
-  let b=min(bone,${CREW_JOINT_COUNT - 1}u);
-  let mA=poses[frameA*${CREW_JOINT_COUNT}u+b];
-  if(blend<=0.0||frameA==frameB){return mA;}
-  return crewBlendJoint(mA,poses[frameB*${CREW_JOINT_COUNT}u+b],blend,crewRestJoint(b,isFemale));
-}
-fn townSkinPose(frameA:u32,frameB:u32,blend:f32,bones:vec4u,weights:vec4f,isFemale:bool)->mat4x4f {
-  var skin=mat4x4f(vec4f(0.0),vec4f(0.0),vec4f(0.0),vec4f(0.0));
-  if(weights.x>0.0){skin+=townBonePose(frameA,frameB,blend,bones.x,isFemale)*weights.x;}
-  if(weights.y>0.0){skin+=townBonePose(frameA,frameB,blend,bones.y,isFemale)*weights.y;}
-  if(weights.z>0.0){skin+=townBonePose(frameA,frameB,blend,bones.z,isFemale)*weights.z;}
-  if(weights.w>0.0){skin+=townBonePose(frameA,frameB,blend,bones.w,isFemale)*weights.w;}
-  return skin;
-}
-`;
-
-export const TOWNSFOLK_RENDER = CREW_RENDER + TOWN_BODY + /* wgsl */ `
-struct TownLook {shirt:vec4f,trousers:vec4f,skin:vec4f,hair:vec4f,face:vec4f};
-@group(0) @binding(10) var<storage,read> bodies:array<TownBody>;
-@group(0) @binding(11) var<storage,read> poses:array<mat4x4f>;
-@group(0) @binding(12) var<storage,read> looks:array<TownLook>;
-` + TOWN_POSE_HELPERS + /* wgsl */ `
-@vertex fn townsfolkVS(v:CrewInput)->CrewVertex {
-  let body=bodies[v.instance];let look=looks[body.look];
-  let dmgBits=u32(max(0.0,body.blend));
-  let blend=fract(body.blend);
-  let injury=dmgBits&7u;
-  var woundAmt=f32((dmgBits>>3u)&15u)/15.0;
-  let scorchAmt=f32((dmgBits>>7u)&15u)/15.0;
-  let bSeed=select(0.0,0.06+f32((dmgBits>>11u)&7u)/7.0*0.32,dmgBits>0u);
-  let dress=crewDressOf(look.hair.w);
-  let isFemale=look.skin.w>0.5;
-  var surface=CrewSurface(CREW_PIECE_OUT,v.normal);
-  if(!crewPieceHidden(v.color,dress)){
-    surface=crewMorph(v.position,v.normal,look.face,look.skin.w);
-  }
-  var bones=v.bones;
-  if(injury>=1u && injury<=5u){
-    ${TOWN_SEVER_SLOTS}
-    let stumpPos=crewRestJoint(loSlot,isFemale);
-    var sevWeight=0.0;
-    if(bones.x>=loSlot && bones.x<=hiSlot){sevWeight+=v.weights.x;bones.x=stumpSlot;}
-    if(bones.y>=loSlot && bones.y<=hiSlot){sevWeight+=v.weights.y;bones.y=stumpSlot;}
-    if(bones.z>=loSlot && bones.z<=hiSlot){sevWeight+=v.weights.z;bones.z=stumpSlot;}
-    if(bones.w>=loSlot && bones.w<=hiSlot){sevWeight+=v.weights.w;bones.w=stumpSlot;}
-    if(sevWeight>0.0){
-      let tSev=clamp(sevWeight,0.0,1.0);
-      let stumpAxis=stumpPos-crewRestJoint(stumpSlot,isFemale);
-      let stumpDir=stumpAxis*inverseSqrt(max(dot(stumpAxis,stumpAxis),1e-8));
-      surface.position=mix(surface.position,stumpPos,tSev);
-      surface.normal=normalize(mix(surface.normal,stumpDir,tSev));
-      woundAmt=max(woundAmt,0.88+0.12*tSev);
-    }
-  }else if(injury==6u || injury==7u){
-    let isLeft=injury==6u;
-    ${TOWN_ARM_BREAK_SLOTS}
-    var brkW=0.0;
-    if(bones.x>=armLo && bones.x<=armHi){brkW+=v.weights.x;}
-    if(bones.y>=armLo && bones.y<=armHi){brkW+=v.weights.y;}
-    if(bones.z>=armLo && bones.z<=armHi){brkW+=v.weights.z;}
-    if(bones.w>=armLo && bones.w<=armHi){brkW+=v.weights.w;}
-    if(brkW>0.0){
-      let pivot=crewRestJoint(armLo,isFemale);
-      let rel=surface.position-pivot;
-      let ang=select(-0.68,0.68,isLeft)*clamp(brkW,0.0,1.0);
-      let ca=cos(ang);let sa=sin(ang);
-      surface.position=pivot+vec3f(rel.x*ca-rel.y*sa,rel.x*sa+rel.y*ca,rel.z);
-      surface.normal=normalize(vec3f(surface.normal.x*ca-surface.normal.y*sa,surface.normal.x*sa+surface.normal.y*ca,surface.normal.z));
-    }
-  }
-  let pose=townSkinPose(body.frameA,body.frameB,blend,bones,v.weights,isFemale);
-  let c=cos(body.heading);let s=sin(body.heading);
-  var local=(pose*vec4f(surface.position,1)).xyz;
-  let relBody=body.position+vec3f(0.0,${(BODY_HEIGHT_M * 0.5).toFixed(3)},0.0)-F.camPos.xyz;
-  let vDepth=max(dot(relBody,normalize(F.camFwd.xyz)),1.2);
-  let vPixels=${BODY_HEIGHT_M.toFixed(3)}*F.screen.y/(2.0*max(length(F.camUp.xyz),1e-4))/vDepth;
-  if(vPixels<1.0){
-    let inflate=inverseSqrt(clamp(vPixels,0.06,1.0));
-    local=vec3f(0.0,0.86,0.0)+(local-vec3f(0.0,0.86,0.0))*inflate;
-  }
-  let turned=crewOrthonormal3x3(pose)*surface.normal;
-  var out:CrewVertex;
-  out.world=vec3f(local.x*c+local.z*s,local.y,local.z*c-local.x*s)+body.position;
-  out.position=F.viewProj*vec4f(out.world-F.camPos.xyz,1);
-  out.normal=normalize(vec3f(turned.x*c+turned.z*s,turned.y,turned.z*c-turned.x*s));
-  let compMask=crewCompMask(look.face.w);
-  let shirtCol=mix(look.shirt.rgb,look.shirt.rgb*vec3f(0.55,0.32,0.32)+vec3f(0.20,0.0,0.0),smoothstep(0.15,0.85,woundAmt));
-  let clothed=crewClothed(v.color,v.position,shirtCol,look.trousers.rgb,look.skin.rgb,look.hair.rgb,look.face.w>1.5,dress,compMask);
-  out.color=clothed.rgb;out.skin=clothed.w;out.paint=dress>>16u;
-  // Rain and sleet wet them. Snow and hail do not, and neither does anything else the frame happens to carry.
-  let rainWet=clamp(F.reserved.x,0.0,1.0)*select(0.0,1.0,F.reserved.y<0.5||(F.reserved.y>1.5&&F.reserved.y<2.5));
-  let seaWet=select(0.0,0.92,body.position.y<-0.02);
-  out.helm=0.0;out.wet=max(vec2f(rainWet*0.65,rainWet*0.75),vec2f(seaWet,seaWet));
-  out.bodyPos=v.position;out.damage=vec3f(woundAmt,scorchAmt,bSeed);
-  if(crewCompHidden(v.color,compMask)){out.position=vec4f(2,2,0,1);}
-  return out;
-}
-`;
-
-export const TOWNSFOLK_SHADOW = SHADOW_FRAME + CREW_JOINT_BLEND_WGSL + TOWN_BODY + /* wgsl */ `
-struct TownLook {shirt:vec4f,trousers:vec4f,skin:vec4f,hair:vec4f,face:vec4f};
-struct CrewInput {
-  @location(0) position:vec3f, @location(1) normal:vec3f,
-  @location(2) color:vec3f, @location(3) bones:vec4u, @location(4) weights:vec4f,
-  @builtin(instance_index) instance:u32
-};
-@group(0) @binding(0) var<uniform> SH:ShadowFrame;
-@group(0) @binding(1) var<storage,read> bodies:array<TownBody>;
-@group(0) @binding(2) var<storage,read> poses:array<mat4x4f>;
-@group(0) @binding(3) var<storage,read> looks:array<TownLook>;
-` + TOWN_POSE_HELPERS + /* wgsl */ `
-fn crewDressOf(hairW:f32)->u32 {return u32(fract(hairW)*${DRESS_MASK_SCALE}.0+.5);}
-fn crewPieceHidden(color:vec3f,dress:u32)->bool {
-  let piece=u32(color.r*.5);
-  return piece>0u&&((dress>>(piece-1u))&1u)==0u;
-}
-fn crewCompMask(faceW:f32)->u32 {return select(0u,u32((-faceW)*.5),faceW<0.0);}
-fn crewCompHidden(color:vec3f,compMask:u32)->bool {
-  let comp=u32(color.g*.5);
-  if(comp==0u){return false;}
-  let hair=compMask&7u;
-  let hat=(compMask>>3u)&7u;
-  let beard=(compMask>>6u)&3u;
-  let gar=(compMask>>8u)&7u;
-  if(comp<=5u){
-    if(comp!=hair){return true;}
-    if(hat==3u){return true;}
-    if(hat==1u){return comp!=3u;}
-    if(hat==2u||hat==4u){return comp==1u||comp==5u;}
-    return false;
-  }
-  if(comp<=9u){return hat==0u||comp!=5u+hat;}
-  if(comp<=12u){return beard==0u||comp!=9u+beard;}
-  return gar==0u||comp!=12u+gar;
-}
-@vertex fn townsfolkShadowVS(v:CrewInput)->@builtin(position) vec4f {
-  let body=bodies[v.instance];let look=looks[body.look];
-  if(crewCompHidden(v.color,crewCompMask(look.face.w))){return vec4f(2,2,0,1);}
-  let dress=crewDressOf(look.hair.w);
-  let isFemale=look.skin.w>0.5;
-  var surfacePos=select(v.position,vec3f(0.0,1.62,0.0),crewPieceHidden(v.color,dress));
-  let dmgBits=u32(max(0.0,body.blend));
-  let injury=dmgBits&7u;
-  var bones=v.bones;
-  if(injury>=1u && injury<=5u){
-    ${TOWN_SEVER_SLOTS}
-    let stumpPos=crewRestJoint(loSlot,isFemale);
-    var sevWeight=0.0;
-    if(bones.x>=loSlot && bones.x<=hiSlot){sevWeight+=v.weights.x;bones.x=stumpSlot;}
-    if(bones.y>=loSlot && bones.y<=hiSlot){sevWeight+=v.weights.y;bones.y=stumpSlot;}
-    if(bones.z>=loSlot && bones.z<=hiSlot){sevWeight+=v.weights.z;bones.z=stumpSlot;}
-    if(bones.w>=loSlot && bones.w<=hiSlot){sevWeight+=v.weights.w;bones.w=stumpSlot;}
-    if(sevWeight>0.0){surfacePos=mix(surfacePos,stumpPos,clamp(sevWeight,0.0,1.0));}
-  }else if(injury==6u || injury==7u){
-    let isLeft=injury==6u;
-    ${TOWN_ARM_BREAK_SLOTS}
-    var brkW=0.0;
-    if(bones.x>=armLo && bones.x<=armHi){brkW+=v.weights.x;}
-    if(bones.y>=armLo && bones.y<=armHi){brkW+=v.weights.y;}
-    if(bones.z>=armLo && bones.z<=armHi){brkW+=v.weights.z;}
-    if(bones.w>=armLo && bones.w<=armHi){brkW+=v.weights.w;}
-    if(brkW>0.0){
-      let pivot=crewRestJoint(armLo,isFemale);
-      let rel=surfacePos-pivot;
-      let ang=select(-0.68,0.68,isLeft)*clamp(brkW,0.0,1.0);
-      let ca=cos(ang);let sa=sin(ang);
-      surfacePos=pivot+vec3f(rel.x*ca-rel.y*sa,rel.x*sa+rel.y*ca,rel.z);
-    }
-  }
-  let blend=fract(body.blend);
-  let pose=townSkinPose(body.frameA,body.frameB,blend,bones,v.weights,isFemale);
-  let c=cos(body.heading);let s=sin(body.heading);
-  let local=(pose*vec4f(surfacePos,1)).xyz;
-  let world=vec3f(local.x*c+local.z*s,local.y,local.z*c-local.x*s)+body.position;
-  return SH.lightView*vec4f(world-SH.origin.xyz,1.0);
+  let blend=select(fract(frame),0.0,fate.mode==DOWN);
+  // Kept, in the run of their body's people: everyone kept is posed, and the cut decides who is drawn and how.
+  let kept=atomicAdd(&counts[model*${TOWNSFOLK_DISPATCH_WORDS}u],1u);
+  atomicAdd(&counts[${TOWNSFOLK_FALLBACK_AT}u+model*${TOWNSFOLK_FALLBACK_WORDS}u+1u],1u);
+  let c=cos(heading);let s=sin(heading);
+  // Turned by their heading about the vertical: +z, the way they face, comes round toward +x.
+  let transform=mat4x4f(vec4f(c,0.0,-s,0.0),vec4f(0.0,1.0,0.0,0.0),vec4f(s,0.0,c,0.0),vec4f(position,1.0));
+  // The fallen and the hurt are cut finer, and anyone in the sea is wet through.
+  let important=select(0u,${CREW_CONTINUUM_ORDER_IMPORTANT}u,fate.mode>=FALLING||dmgCode>0u);
+  let wet=select(0u,${TOWNSFOLK_SEA_MOISTURE}u,position.y<-0.02);
+  placed[select(0u,crowd.second,model==1u)+kept]=CrewPlaced(transform,vec4u(first+whole,first+after,first+whole,model*crowd.looks+w.look%crowd.looks),vec4f(blend,0.0,0.0,0.0),vec4u(id.x,dmgCode,important,wet));
 }
 `;
 export const TOWNSFOLK_RESET = /* wgsl */ `
-@group(0) @binding(0) var<storage,read_write> draws:array<u32>;
+@group(0) @binding(0) var<storage,read_write> counts:array<u32>;
 @compute @workgroup_size(32) fn main(@builtin(global_invocation_id) id:vec3u){
-  if(id.x<${TOWNSFOLK_BUCKETS}u){draws[id.x*5u+1u]=0u;}
+  if(id.x<${TOWNSFOLK_MODELS}u){counts[id.x*${TOWNSFOLK_DISPATCH_WORDS}u]=0u;counts[${TOWNSFOLK_FALLBACK_AT}u+id.x*${TOWNSFOLK_FALLBACK_WORDS}u+1u]=0u;}
 }
 `;
-export const TOWNSFOLK_WGSL = TOWNSFOLK_RENDER;

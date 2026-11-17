@@ -19,7 +19,7 @@ const instrument=()=>{
   const createBuffer=GPUDevice.prototype.createBuffer;
   window.town={};window.townCreated=[];
   GPUDevice.prototype.createBuffer=function(d){
-    const part=/^townsfolk (draws|bodies|fates)$/.exec(d.label||'')?.[1];
+    const part=/^townsfolk (placed|counts|crowd|fates)$/.exec(d.label||'')?.[1];
     const b=createBuffer.call(this,part?{...d,usage:d.usage|GPUBufferUsage.COPY_SRC}:d);
     if(part)town[part]=b;
     if(/^townsfolk /.test(d.label||''))townCreated.push(d.label);
@@ -56,9 +56,11 @@ const instrument=()=>{
   };
   window.readBodies=async()=>{
     await new Promise(requestAnimationFrame);
-    // A run of bodies for each of the draws listed: eight of those drawn, and then those who cast a shadow.
-    const span=town.bodies.size/(town.draws.size/20)/32,[bytes,drawBytes]=await Promise.all([pull(town.bodies),pull(town.draws)]),w=new Uint32Array(bytes),f=new Float32Array(bytes),draws=new Uint32Array(drawBytes),out=[];
-    for(let b=0;b<8;b++)for(let s=0;s<draws[b*5+1];s++){const a=(b*span+s)*8;out.push({x:f[a],y:f[a+1],z:f[a+2],frame:w[a+4]});}
+    // Everyone the walk kept, as it placed them (CrewPlaced, 28 words): each body's run from its own first slot, the
+    // second's at word 24 of the crowd block, and how many in each the first word of its indirect dispatch.
+    const [bytes,countBytes,crowdBytes]=await Promise.all([pull(town.placed),pull(town.counts),pull(town.crowd)]);
+    const w=new Uint32Array(bytes),f=new Float32Array(bytes),counts=new Uint32Array(countBytes),second=new Uint32Array(crowdBytes)[24],out=[];
+    for(const m of [0,1])for(let k=0;k<counts[m*4];k++){const a=((m?second:0)+k)*28;out.push({x:f[a+12],y:f[a+13],z:f[a+14],frame:w[a+16]});}
     return out;
   };
   // Where a person's fate says they were on their way, for reckoning distances without asking the GPU anything more.
@@ -112,7 +114,7 @@ test('a ball among people strikes those it reaches and frightens those near, and
   const {eye,cam,fov}=viewOf(street);
   ({page,errors}=await open({cam,fov}));
   try{
-    await page.waitForFunction(()=>window.town?.bodies&&window.townClips,null,{timeout:60000,polling:200});
+    await page.waitForFunction(()=>window.town?.placed&&window.townClips,null,{timeout:60000,polling:200});
     await page.waitForFunction(async()=>(await readBodies()).length>=8,null,{timeout:60000,polling:500});
     // Shot flying far out over the sea is nothing to anyone here. All the time any flew, it used to empty the town.
     const distant=await page.evaluate(async spot=>{
@@ -191,13 +193,13 @@ test('a ball among people strikes those it reaches and frightens those near, and
     // Going out of reach of the town and back raises no one. Its people are laid out afresh, with the same record.
     const returned=await page.evaluate(async()=>{
       const terrain=oceanFleet.terrain,ports=Object.getOwnPropertyDescriptor(terrain,'ports'),frames=async n=>{for(let i=0;i<n;i++)await new Promise(requestAnimationFrame);};
-      const watched=oceanProps.port,bodiesBefore=town.bodies;
+      const watched=oceanProps.port,bodiesBefore=town.placed;
       Object.defineProperty(terrain,'ports',{configurable:true,get:()=>[]});
       await frames(100);
       const gone=!watched.townsfolkWatch;
       Object.defineProperty(terrain,'ports',ports);
       await frames(100);
-      return {gone,back:Boolean(watched.townsfolkWatch),relaid:town.bodies!==bodiesBefore,records:townCreated.filter(label=>label==='townsfolk fates').length,fates:await readFates()};
+      return {gone,back:Boolean(watched.townsfolkWatch),relaid:town.placed!==bodiesBefore,records:townCreated.filter(label=>label==='townsfolk fates').length,fates:await readFates()};
     });
     assert.ok(returned.gone&&returned.back&&returned.relaid,JSON.stringify({...returned,fates:undefined}));
     assert.equal(returned.records,1,'one record of them, kept');
@@ -264,7 +266,7 @@ test('a page with no town has no one to fire on and pays for nothing',{timeout:3
     await page.waitForFunction(()=>window.oceanFreeCannon.state.guns[0].roundsFired>=1,null,{timeout:60000,polling:100});
     await page.keyboard.up('f');
     const seen=await page.evaluate(()=>({created:townCreated,writes:townShotWrites}));
-    assert.deepEqual(seen.created.filter(label=>label!=='townsfolk ship stand-in'),[],'no buffer for people who are not there');
+    assert.deepEqual(seen.created.filter(label=>label!=='townsfolk ship stand-in'&&label!=='townsfolk moisture'),[],'no buffer for people who are not there');
     assert.equal(seen.writes,0);
     assert.deepEqual(errors,[]);
   }finally{await page.close();}

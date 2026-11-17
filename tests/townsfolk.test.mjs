@@ -6,7 +6,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { loadCrewGLB } from '../js/gltf.js';
 import { createTownsfolk } from '../js/townsfolk.js';
-import { TOWN_FATE_WORDS, TOWNSFOLK_BUCKETS, TOWNSFOLK_MODELS, TOWNSFOLK_RENDER, TOWNSFOLK_SHADOW_BUCKET, TOWNSFOLK_TIERS, TOWNSFOLK_WALK } from '../js/wgsl/townsfolk.js';
+import { TOWN_FATE_WORDS, TOWNSFOLK_COUNT_WORDS, TOWNSFOLK_DISPATCH_WORDS, TOWNSFOLK_FALLBACK_AT, TOWNSFOLK_FALLBACK_WORDS, TOWNSFOLK_MODELS, TOWNSFOLK_WALK } from '../js/wgsl/townsfolk.js';
+import { CREW_JOINT_COUNT } from '../js/crew-skeleton.js';
 import { WALKER_WORDS } from '../js/town-streets.js';
 
 const load = (name) => { const bytes = readFileSync(new URL(`../assets/crew/${name}.glb`, import.meta.url)); return loadCrewGLB(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)); };
@@ -27,6 +28,7 @@ function recorder() {
     return {
       setPipeline(p) { state.pipeline = p.label; }, setBindGroup(i, g) { if (i === 0) state.group = g; }, setVertexBuffer() {},
       setIndexBuffer(b) { state.index = b; }, dispatchWorkgroups(x) { dispatches.push({ pipeline: state.pipeline, workgroups: x }); },
+      dispatchWorkgroupsIndirect(b, offset) { dispatches.push({ pipeline: state.pipeline, counted: b.label, offset }); },
       drawIndexedIndirect(b, offset) { draws.push({ pipeline: state.pipeline, group: state.group, index: state.index, buffer: b, offset }); },
     };
   };
@@ -41,8 +43,14 @@ async function crowdOf(t) {
   globalThis.GPUBufferUsage = { VERTEX: 1, INDEX: 2, UNIFORM: 4, STORAGE: 8, COPY_DST: 16, INDIRECT: 32 };
   t.after(() => { if (usage === undefined) delete globalThis.GPUBufferUsage; else globalThis.GPUBufferUsage = usage; });
   const gpu = recorder();
+  // No continuum's programs on a device that makes nothing, so the old bodies stand in: the sailors' own pipelines.
+  const old = (label) => ({ label, getBindGroupLayout: () => ({}) });
+  const warn = console.warn;
+  console.warn = () => {};
+  t.after(() => { console.warn = warn; });
   const folk = await createTownsfolk({
-    device: gpu.device, frameUBO: {}, shader: async (code, label) => ({ code, label }), shared: { models },
+    device: gpu.device, frameUBO: {}, shader: async (code, label) => ({ code, label }),
+    shared: { models, pipeline: old('crew'), shadowPipeline: old('crew shadow'), captainTexView: {}, captainSampler: {} },
     shadows: { bind: () => ({}), uniform: {} },
   });
   // The nearest town is looked for once in a while, so a visit is as many calls as that takes.
@@ -108,51 +116,63 @@ test('the pass is told the date in hours from when the record began, and only wh
   writes.length = 0;
   folk.encode(pass(), start + 78 * HOUR);
   assert.equal(hoursSent(writes).at(-1), 78, 'so someone who fell at hour 30 has lain two days');
-  // Every frame resets the draw counts via a 1-workgroup GPU compute pass, with zero CPU writeBuffer uploads.
+  // Every frame resets the counts via a 1-workgroup GPU compute pass, with zero CPU writeBuffer uploads; the walk then
+  // keeps whom it keeps, and each body's people are posed as many as it counted.
   writes.length = 0;
   dispatches.length = 0;
   folk.encode(pass(), start + 78 * HOUR + 1000);
   assert.deepEqual(writes.map((w) => w.label), []);
-  assert.deepEqual(dispatches, [{ pipeline: 'townsfolk reset', workgroups: 1 }, { pipeline: 'townsfolk walk', workgroups: 1 }]);
+  assert.deepEqual(dispatches, [
+    { pipeline: 'townsfolk reset', workgroups: 1 }, { pipeline: 'townsfolk walk', workgroups: 1 },
+    ...Array.from({ length: TOWNSFOLK_MODELS }, (_, m) => ({ pipeline: 'crew continuum pose', counted: 'townsfolk counts', offset: m * TOWNSFOLK_DISPATCH_WORDS * 4 })),
+  ]);
   folk.destroy();
 });
 
-test('shadows are one draw for each model, of its coarsest body, from a run of bodies kept for them', async (t) => {
+test('where the continuum\'s bodies are absent, the old ones are drawn and shadowed in one draw a body, of everyone the walk kept', async (t) => {
   const { folk, visit, writes, draws, pass, live } = await crowdOf(t);
-  visit([town('lisbon', 60, 0)], 0);
-  const listed = writes.find((w) => w.label === 'townsfolk draws').words;
-  assert.equal(listed.length, TOWNSFOLK_BUCKETS * 5);
-  assert.equal(TOWNSFOLK_BUCKETS, TOWNSFOLK_MODELS * (TOWNSFOLK_TIERS + 1));
-  const span = live('townsfolk bodies')[0].size / TOWNSFOLK_BUCKETS / 32;
-  assert.ok(span >= 60 && span % 8 === 0, `a run holds everyone: ${span}`);
+  // Walker flags bit 0 is the body: 25 men and 35 women.
+  const lisbon = town('lisbon', 60, 0), words = lisbon.streets.walkers;
+  for (let i = 25; i < 60; i++) words[i * WALKER_WORDS + 11] = 1;
+  visit([lisbon], 0);
+  assert.equal(folk.continuum, false);
+  const counted = writes.find((w) => w.label === 'townsfolk counts').words;
+  assert.equal(counted.length, TOWNSFOLK_COUNT_WORDS);
+  for (let m = 0; m < TOWNSFOLK_MODELS; m++) {
+    assert.deepEqual([...counted.subarray(m * TOWNSFOLK_DISPATCH_WORDS, m * TOWNSFOLK_DISPATCH_WORDS + 3)], [0, 1, 1], 'an empty dispatch the walk fills');
+    assert.ok(counted[TOWNSFOLK_FALLBACK_AT + m * TOWNSFOLK_FALLBACK_WORDS] > 0, 'and an old body\'s draw');
+  }
+  // Each body's people have a run of slots of their own, the second's at a slot a bind group may begin at.
+  const joints = live('townsfolk joints')[0], actors = live('townsfolk actors')[0];
+  assert.equal(joints.size, (32 + 35) * CREW_JOINT_COUNT * 64);
   folk.draw(pass());
   folk.drawShadow(pass());
-  const main = draws.filter((d) => d.pipeline === 'townsfolk'), shade = draws.filter((d) => d.pipeline === 'townsfolk shadow');
-  assert.equal(main.length, TOWNSFOLK_MODELS * TOWNSFOLK_TIERS);
+  const main = draws.filter((d) => d.pipeline === 'crew'), shade = draws.filter((d) => d.pipeline === 'crew shadow');
+  assert.equal(main.length, TOWNSFOLK_MODELS);
   assert.equal(shade.length, TOWNSFOLK_MODELS);
-  const bodiesOf = (draw) => draw.group.entries.find((e) => e.resource?.buffer?.label === 'townsfolk bodies').resource;
-  for (const [m, draw] of shade.entries()) {
-    const bucket = draw.offset / 20;
-    assert.equal(bucket, TOWNSFOLK_SHADOW_BUCKET + m);
-    const coarsest = Math.min(...main.slice(m * TOWNSFOLK_TIERS, (m + 1) * TOWNSFOLK_TIERS).map((d) => listed[d.offset / 20 * 5]));
-    assert.equal(listed[bucket * 5], coarsest, 'the fewest triangles that model has');
-    assert.ok(coarsest / 3 < 400, `${coarsest / 3} triangles to a shadow`);
-    assert.equal(draw.index.size, coarsest * 4, 'and the index buffer that goes with them');
-    assert.deepEqual([bodiesOf(draw).offset, bodiesOf(draw).size], [bucket * span * 32, span * 32], 'from its own run of bodies');
+  for (const [m, draw] of [...main.entries(), ...shade.entries()]) {
+    assert.equal(draw.buffer.label, 'townsfolk counts');
+    assert.equal(draw.offset, (TOWNSFOLK_FALLBACK_AT + m * TOWNSFOLK_FALLBACK_WORDS) * 4, 'the count the walk kept for that body');
+    const slices = draw.group.entries.filter((e) => e.resource?.buffer === joints || e.resource?.buffer === actors).map((e) => e.resource);
+    assert.equal(slices.length, 2);
+    for (const slice of slices) {
+      assert.equal(slice.offset % 256, 0, 'at an offset a bind group may take');
+      assert.equal(slice.offset / (slice.buffer === joints ? CREW_JOINT_COUNT * 64 : 144), m ? 32 : 0, 'from that body\'s first slot');
+      assert.equal(slice.size / (slice.buffer === joints ? CREW_JOINT_COUNT * 64 : 144), m ? 35 : 25);
+    }
   }
-  assert.equal(new Set([...main, ...shade].map((d) => bodiesOf(d).offset)).size, TOWNSFOLK_BUCKETS, 'no two draws read the same run');
   folk.destroy();
 });
 
 test('rain wets people ashore, and nothing else in the frame does', () => {
-  const wet = /let rainWet=([^;]+);/.exec(TOWNSFOLK_RENDER)?.[1] ?? '';
+  const wet = /let rain=([^;]+);/.exec(TOWNSFOLK_WALK)?.[1] ?? '';
   assert.match(wet, /F\.reserved\.x/, 'how hard it is raining');
   assert.match(wet, /F\.reserved\.y/, 'and whether it is rain at all');
-  assert.doesNotMatch(TOWNSFOLK_RENDER.slice(TOWNSFOLK_RENDER.indexOf('fn townsfolkVS')), /windP/, 'not the ship\'s heading, which shares a row with the wind');
+  assert.doesNotMatch(wet, /windP/, 'not the ship\'s heading, which shares a row with the wind');
 });
 
 test('the fallen are counted off by the calendar, since the frame clock runs round every ten minutes', () => {
   assert.doesNotMatch(TOWNSFOLK_WALK, /age>=86400/, 'an age on the frame clock never reaches a day');
   assert.match(TOWNSFOLK_WALK, /fate\.mode==DOWN&&abs\(crowd\.hours-fate\.clock\)>=24\.0/);
-  assert.match(TOWNSFOLK_WALK, /struct TownCrowd \{clips:array<vec4u,6>,bucketSpan:u32,looks:u32,hours:f32,padding:u32\};/, 'the hour is word 26 of the block');
+  assert.match(TOWNSFOLK_WALK, /struct TownCrowd \{clips:array<vec4u,6>,second:u32,looks:u32,hours:f32,ride:u32\};/, 'the hour is word 26 of the block');
 });

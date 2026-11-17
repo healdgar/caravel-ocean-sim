@@ -605,7 +605,7 @@ async function main() {
     requestDeckWaterPipelines({device,shader}),
     requestCrestSprayPipeline({device,shader}),
     requestWeatherPipelines({device,shader,format:HDR,samples:MSAA}),
-    requestTownsfolkPipelines({device,shader,format:HDR,samples:MSAA}),
+    requestTownsfolkPipelines({device,shader}),
     requestShipColorsPipeline({device,shader,format:HDR,samples:MSAA}),
     requestUnderwaterPipeline({device,shader,format:HDR,samples:MSAA,cameraProbe:true,surfaceWaves:true,shadows:true,skipAir:true}),
     requestNeuralLightPipelines({device,shader,swapFormat,samples:MSAA,mode:INITIAL_NEURAL_MODE}),
@@ -837,6 +837,7 @@ async function main() {
   window.oceanProps=props;
   let townsfolk=null;
   try{if(sharedCrew)townsfolk=await createTownsfolk({device,frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shader,format:HDR,samples:MSAA,shared:sharedCrew,isMobile:/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)});}catch(error){console.warn('Townsfolk initialization:',error);}
+  window.oceanTownsfolk=townsfolk;
   const spindriftPromise=createSpindrift({device,frameUBO,hullUBO,seaView:fullArr(dispTex),derivView:fullArr(derivTex),seaSampler:samplerSim,envView:envCubeView,transView,sunVis:sunVisBuf,shader,computePipe,shadows});
   const weatherRendererPromise=createWeatherRenderer({device,frameUBO,hullUBO,transView,skyView,sampler:sampClamp,shader,format:HDR,samples:MSAA});
   const hullContactProbePromise=createHullContactProbe({device,frameUBO,hullUBO,seaView:fullArr(dispTex),seaSampler:samplerSim,computePipe,modelId:shipAsset.model.id});
@@ -5759,8 +5760,8 @@ async function main() {
     const audioRevision=boat.revision,audioEpoch=hullContactProbe.epoch,audioRequestedAt=performance.now(),audioSimTime=simTime;
     if(doAudio){enc.copyBufferToBuffer(interaction.contacts,0,audioRead,0,72*64);hullContactProbe.copy(enc,frameIndex);}
     if(continuumCensus&&(censusEveryFrame||(frameIndex&7)===0)){
-      // People are one family across every company, the garrison and the mate.
-      const people=[...vessels.flatMap(v=>v.crew?.continuumDraws?.()??[]),...(fortSoldiers?.continuumDraws?.()??[]),...(mateSoldiers?.continuumDraws?.()??[])];
+      // People are one family across every company, the garrison, the mate and the town.
+      const people=[...vessels.flatMap(v=>v.crew?.continuumDraws?.()??[]),...(fortSoldiers?.continuumDraws?.()??[]),...(mateSoldiers?.continuumDraws?.()??[]),...(townsfolk?.continuumDraws?.()??[])];
       continuumCensus.encode(enc,[...(terrain?.continuumSources?.()??[]),...(people.length?[{name:'people',draws:people}]:[])]);
     }
     const doTs=profiler.resolve(enc);

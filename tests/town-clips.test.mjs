@@ -4,7 +4,8 @@ import {readFileSync} from 'node:fs';
 import {performance} from 'node:perf_hooks';
 import {loadCrewGLB} from '../js/gltf.js';
 import {bakeTownClips} from '../js/town-clips.js';
-import {TOWN_COWER_FRAMES,TOWN_FALL_FRAMES,TOWNSFOLK_RENDER,TOWNSFOLK_SHADOW} from '../js/wgsl/townsfolk.js';
+import {TOWN_COWER_FRAMES,TOWN_FALL_FRAMES} from '../js/wgsl/townsfolk.js';
+import {crewContinuumPoseWGSL} from '../js/wgsl/crew-continuum.js';
 import {CREW_JOINT_COUNT,CREW_JOINT_NAMES,CREW_SLOT} from '../js/crew-skeleton.js';
 
 const JOINTS=CREW_JOINT_COUNT,MATRIX=16;
@@ -73,13 +74,11 @@ for(const {name,model} of models)test(`${name}: what people do under fire is bak
 });
 
 test('a wound in the street takes off the crew-skeleton joint it parts at and all that hang from it',()=>{
-  // From the joint parted to the last of its descendants, held by the joint above it.
-  const run=(parted,last,stump)=>`loSlot=${CREW_SLOT[parted]}u;hiSlot=${CREW_SLOT[last]}u;stumpSlot=${CREW_SLOT[stump]}u;`;
-  for(const shader of [TOWNSFOLK_RENDER,TOWNSFOLK_SHADOW]){
-    for(const severed of [run('lowerarm_l','thumb_03_l','upperarm_l'),run('lowerarm_r','thumb_03_r','upperarm_r'),
-      run('calf_l','ball_l','thigh_l'),run('calf_r','ball_r','thigh_r'),run('neck_01','FACIAL_R_Brow','spine_05')])
-      assert.ok(shader.includes(severed),severed);
-    assert.ok(shader.includes(`let armLo=select(${CREW_SLOT.lowerarm_r}u,${CREW_SLOT.lowerarm_l}u,isLeft);let armHi=select(${CREW_SLOT.thumb_03_r}u,${CREW_SLOT.thumb_03_l}u,isLeft);`),'a broken arm bends from the elbow down');
-    assert.ok(shader.includes(`let b=min(bone,${CREW_JOINT_COUNT-1}u);`)&&shader.includes(`poses[frameA*${CREW_JOINT_COUNT}u+b]`),'poses are read a whole skeleton to a frame');
-  }
+  // From the joint parted to the last of its descendants, drawn in to the stump where it parted.
+  const pose=crewContinuumPoseWGSL(),run=(parted,last)=>`vec2u(${CREW_SLOT[parted]}u,${CREW_SLOT[last]}u)`;
+  for(const [injury,severed] of [[1,run('lowerarm_l','thumb_03_l')],[2,run('lowerarm_r','thumb_03_r')],[3,run('calf_l','ball_l')],[4,run('calf_r','ball_r')],[5,run('neck_01','FACIAL_R_Brow')]])
+    assert.ok(pose.includes(`case ${injury}u: { return ${severed}; }`),severed);
+  // A broken arm bends from the elbow down.
+  assert.ok(pose.includes(`if(injury==6u){return ${run('lowerarm_l','thumb_03_l')};}`)&&pose.includes(`if(injury==7u){return ${run('lowerarm_r','thumb_03_r')};}`));
+  assert.ok(pose.includes(`palettes[at.frames.x*${CREW_JOINT_COUNT}u+j]`),'poses are read a whole skeleton to a frame');
 });

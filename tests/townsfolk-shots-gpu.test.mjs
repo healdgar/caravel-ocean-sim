@@ -1,5 +1,6 @@
 // The compute pass on its own, on the real GPU, with a clock and shots of the test's choosing: one straight street
 // 200 m long along x, 96 people strung out along it, and nothing else. See townsfolk-under-fire-gpu for the real town.
+// What it writes is one placed person (CrewPlaced) for each kept, compacted by body, which the people continuum poses.
 import {test,before,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {once} from 'node:events';
@@ -23,17 +24,20 @@ const PEOPLE=96,LENGTH=200,STEP=1.25,WALK_SPEED=1.25,INDOORS=10,HALF_WIDTH=1.5;
 
 // Runs in the page. `town(options)` builds a crowd, and `run(town,seconds,shots)` is one frame at that time.
 async function setUp(){
-  const {TOWNSFOLK_WALK,TOWNSFOLK_RENDER,TOWNSFOLK_SHADOW,TOWNSFOLK_BUCKETS:BUCKETS,TOWNSFOLK_SHADOW_BUCKET:SHADE,TOWN_FATE_WORDS,TOWN_SHOT_WORDS:SW,TOWN_SHOT_LIMIT:SL}=await import('/js/wgsl/townsfolk.js');
+  const {TOWNSFOLK_WALK,TOWNSFOLK_RESET,TOWNSFOLK_COUNT_WORDS:COUNT_WORDS,TOWNSFOLK_DISPATCH_WORDS:DISPATCH,TOWNSFOLK_MOISTURE_SLOTS,TOWN_FATE_WORDS,TOWN_SHOT_WORDS:SW,TOWN_SHOT_LIMIT:SL}=await import('/js/wgsl/townsfolk.js');
+  const {CREW_CONTINUUM_PLACED_WORDS:PLACED,crewContinuumPoseWGSL}=await import('/js/wgsl/crew-continuum.js');
   const device=await(await navigator.gpu.requestAdapter()).requestDevice(),B=GPUBufferUsage,errors=[];
   device.onuncapturederror=e=>errors.push(e.error.message);
-  const module=device.createShaderModule({code:TOWNSFOLK_WALK});
-  const bad=(await module.getCompilationInfo()).messages.filter(m=>m.type==='error');
-  if(bad.length)throw Error(bad.map(m=>m.message).join('\n'));
-  const renderMod=device.createShaderModule({code:TOWNSFOLK_RENDER});
-  const badRender=(await renderMod.getCompilationInfo()).messages.filter(m=>m.type==='error');
-  if(badRender.length)throw Error(badRender.map(m=>m.message).join('\n'));
-  const badShadow=(await device.createShaderModule({code:TOWNSFOLK_SHADOW}).getCompilationInfo()).messages.filter(m=>m.type==='error');
-  if(badShadow.length)throw Error(badShadow.map(m=>m.message).join('\n'));
+  const compiled=async code=>{
+    const module=device.createShaderModule({code});
+    const bad=(await module.getCompilationInfo()).messages.filter(m=>m.type==='error');
+    if(bad.length)throw Error(bad.map(m=>m.message).join('\n'));
+    return module;
+  };
+  const module=await compiled(TOWNSFOLK_WALK);
+  // The reset, and the pass that poses whoever is kept, compile too.
+  await compiled(TOWNSFOLK_RESET);
+  await device.createComputePipelineAsync({layout:'auto',compute:{module:await compiled(crewContinuumPoseWGSL()),entryPoint:'crewContinuumPose'}});
   const pipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'main'}});
   const made=(data,usage)=>{const b=device.createBuffer({size:data.byteLength,usage:usage|B.COPY_DST|B.COPY_SRC});device.queue.writeBuffer(b,0,data);return b;};
   const LOOKS=48;
@@ -50,6 +54,7 @@ async function setUp(){
       f[at+3]=speed;f[at+4]=side;f[at+5]=0;f[at+6]=0;f[at+7]=indoors;f[at+8]=length;f[at+9]=0;
       w[at+10]=i%LOOKS;w[at+11]=(i>=LOOKS?1:0)|flags;
     });
+    // The second body's people are placed from this slot on.
     const span=people.length;
     const clips=new Uint32Array(28),calendar=new Float32Array(clips.buffer);
     // idle 0+10, walk 10+10, run 20+10, cower 30+5, face 35+6, back 41+6, the same for both.
@@ -61,18 +66,19 @@ async function setUp(){
     frameData[25]=1;frameData[30]=1;frameData[33]=sun;frameData[37]=1000;
     const parts={
       frame,walkers:made(new Uint8Array(walkers),B.STORAGE),route:made(new Float32Array(samples),B.STORAGE),
-      bodies:device.createBuffer({size:BUCKETS*span*32,usage:B.STORAGE|B.COPY_SRC}),
-      draws:made(new Uint32Array(BUCKETS*5),B.STORAGE),
+      placed:device.createBuffer({size:2*span*PLACED*4,usage:B.STORAGE|B.COPY_SRC}),
+      counts:made(new Uint32Array(COUNT_WORDS),B.STORAGE),
       crowd:made(clips,B.UNIFORM),shots:device.createBuffer({size:(4+SL*SW)*4,usage:B.UNIFORM|B.COPY_DST}),
       fates:device.createBuffer({size:people.length*TOWN_FATE_WORDS*4,usage:B.STORAGE|B.COPY_SRC}),
+      moisture:device.createBuffer({size:TOWNSFOLK_MOISTURE_SLOTS*8,usage:B.STORAGE|B.COPY_SRC}),
     };
-    const group=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:['frame','walkers','route','bodies','draws','crowd','shots','fates'].map((name,binding)=>({binding,resource:{buffer:parts[name]}}))});
+    const group=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:['frame','walkers','route','placed','counts','crowd','shots','fates','moisture'].map((name,binding)=>({binding,resource:{buffer:parts[name]}}))});
     return {parts,group,frameData,clips,calendar,people:people.length,span};
   };
   // `hours` is the game's date as the pass is told it, and stays as it was last given.
   window.run=async(t,seconds,shots=[],{wantBodies=true,hours}={})=>{
     t.frameData[19]=seconds;device.queue.writeBuffer(t.parts.frame,0,t.frameData);
-    device.queue.writeBuffer(t.parts.draws,0,new Uint32Array(BUCKETS*5));
+    device.queue.writeBuffer(t.parts.counts,0,new Uint32Array(COUNT_WORDS));
     if(hours!==undefined){t.calendar[26]=hours;device.queue.writeBuffer(t.parts.crowd,0,t.clips);}
     const words=new Uint32Array(4+SL*SW),floats=new Float32Array(words.buffer);
     words[0]=shots.length;
@@ -81,19 +87,19 @@ async function setUp(){
     const encoder=device.createCommandEncoder(),pass=encoder.beginComputePass();
     pass.setPipeline(pipeline);pass.setBindGroup(0,t.group);pass.dispatchWorkgroups(Math.ceil(t.people/64));pass.end();
     const copy=(buffer)=>{const read=device.createBuffer({size:buffer.size,usage:B.COPY_DST|B.MAP_READ});encoder.copyBufferToBuffer(buffer,0,read,0,buffer.size);return read;};
-    const fateRead=copy(t.parts.fates),bodyRead=wantBodies?copy(t.parts.bodies):null,drawRead=wantBodies?copy(t.parts.draws):null;
+    const fateRead=copy(t.parts.fates),bodyRead=wantBodies?copy(t.parts.placed):null,drawRead=wantBodies?copy(t.parts.counts):null;
     device.queue.submit([encoder.finish()]);
     const take=async(read)=>{await read.mapAsync(GPUMapMode.READ);const bytes=read.getMappedRange().slice(0);read.unmap();read.destroy();return bytes;};
     const fateBytes=await take(fateRead),fateWords=new Uint32Array(fateBytes),fateFloats=new Float32Array(fateBytes);
     const fates=[];
     for(let i=0;i<t.people;i++){const a=i*TOWN_FATE_WORDS;fates.push({mode:fateWords[a],since:fateFloats[a+1],until:fateFloats[a+2],runFor:fateFloats[a+3],along:fateFloats[a+4],going:fateFloats[a+5],lane:fateFloats[a+6],clock:fateFloats[a+8],how:fateWords[a+11]});}
-    const out={fates,bodies:[],shadows:[]};
+    const out={fates,bodies:[]};
     if(wantBodies){
-      const bytes=await take(bodyRead),draws=new Uint32Array(await take(drawRead)),bw=new Uint32Array(bytes),bf=new Float32Array(bytes);
-      // Those drawn, a run for each model at each level of detail, and then a run for each model of who casts a shadow.
-      for(let bucket=0;bucket<BUCKETS;bucket++)for(let slot=0;slot<draws[bucket*5+1];slot++){
-        const a=(bucket*t.span+slot)*8,who=bw[a+7];
-        (bucket<SHADE?out.bodies:out.shadows).push({who,tier:bucket%4,x:bf[a],y:bf[a+1],z:bf[a+2],heading:bf[a+3],frameA:bw[a+4],frameB:bw[a+5],blend:bf[a+6]});
+      const bytes=await take(bodyRead),counts=new Uint32Array(await take(drawRead)),bw=new Uint32Array(bytes),bf=new Float32Array(bytes);
+      // Everyone kept, each body's from its own first slot: where they stand and face, their frames, and who they are.
+      for(const model of [0,1])for(let k=0;k<counts[model*DISPATCH];k++){
+        const a=((model?t.span:0)+k)*PLACED;
+        out.bodies.push({who:bw[a+24],model,x:bf[a+12],y:bf[a+13],z:bf[a+14],heading:Math.atan2(bf[a+8],bf[a+10]),frameA:bw[a+16],frameB:bw[a+17],look:bw[a+19],blend:bf[a+20],damage:bw[a+25],orders:bw[a+26],wet:bw[a+27]});
       }
     }
     return out;
@@ -101,7 +107,7 @@ async function setUp(){
   window.townErrors=errors;
 }
 
-// `who` in a body is its look, which here is simply the person's index.
+// `who` in a placed person is who they are: the walker's own index.
 const street=(people,more={})=>({people,length:LENGTH,step:STEP,flags:6,side:.8,halfWidth:HALF_WIDTH,speed:WALK_SPEED,indoors:INDOORS,...more});
 const strung=at=>Array.from({length:PEOPLE},(_,i)=>({m:(i+.5)*LENGTH/PEOPLE,at}));
 const inPage=(fn,arg)=>page.evaluate(fn,arg);
@@ -158,14 +164,16 @@ test('a ball that passes through someone brings them down where they were, and t
   const flying=findHit(frames[1]);
   assert.equal(flying.length,1,'body is in flight while falling');
   assert.ok(flying[0].z>people.onStreet.z+0.5,`thrown forward along the shot path from ${people.onStreet.z} to ${flying[0].z}`);
-  assert.ok(Math.floor(flying[0].blend)>0,`damage/injury bits encoded in blend (${flying[0].blend})`);
+  assert.ok(flying[0].damage>0,`damage/injury bits written (${flying[0].damage})`);
+  assert.ok((flying[0].orders&2)!==0,'and the fallen are cut finer');
   const landed=findHit(frames[2])[0];
   assert.ok(landed.z>people.onStreet.z+1.0,`thrown well past where they stood (${landed.z} > ${people.onStreet.z})`);
   const bodyOf=f=>f.bodies.filter(b=>b.who===hit&&Math.hypot(b.x-landed.x,b.z-landed.z)<.05);
   for(const frame of frames.slice(2)){
     const lying=bodyOf(frame);
     assert.equal(lying.length,1,'in the very place they landed after being thrown');
-    assert.ok(Math.floor(lying[0].blend)>0,'retains wound/scorch/limb-severance damage while down');
+    assert.ok(lying[0].damage>0,'retains wound/scorch/limb-severance damage while down');
+    assert.equal(lying[0].blend,0,'and lies still in the last frame of the fall');
   }
   // The last frame of a fall, whichever way they went, still after the clock has gone round.
   const last=bodyOf(frames.at(-1))[0];
@@ -322,25 +330,26 @@ test('those struck lie where they fell at night, when the rest have gone home, a
   assert.equal(seen.lastFate.mode,TOWN_ABOUT);
 });
 
-test('everyone drawn casts a shadow, and so does someone just out of sight, who is not drawn',async()=>{
-  // The view is forty metres wide here, about the middle of the street.
-  const {bodies,shadows,errors}=await inPage(async spec=>{
+test('everyone in sight is kept, and so is someone just out of it whose shadow may fall into it, and no one further',async()=>{
+  // The view is forty metres wide here, about the middle of the street. The continuum's cut decides who is drawn.
+  const {bodies,errors}=await inPage(async spec=>{
     const t=town(spec);
     t.frameData[0]=1/20;t.frameData[16]=100;
     return {...await run(t,5),errors:[...townErrors]};
   },street(strung(0)));
   assert.deepEqual(errors,[]);
-  const drawn=new Set(bodies.map(b=>b.who)),cast=new Map(shadows.map(b=>[b.who,b]));
-  assert.ok(drawn.size>10&&drawn.size<PEOPLE/2,`${drawn.size} drawn`);
-  assert.equal(shadows.length,cast.size,'no one casts two');
+  const kept=new Set(bodies.map(b=>b.who));
+  assert.equal(kept.size,bodies.length,'no one is kept twice');
+  const inSight=bodies.filter(b=>Math.abs(b.x-100)<20+1.3+.01),beside=bodies.filter(b=>Math.abs(b.x-100)>=20+1.3+.01);
+  assert.ok(inSight.length>10&&inSight.length<PEOPLE/2,`${inSight.length} in sight`);
+  assert.ok(beside.length>=8,`${beside.length} kept for the shadow they cast from out of sight`);
+  for(const body of beside)assert.ok(Math.abs(body.x-100)<=38.01,`${body.who} at ${body.x} is beside the view and near it`);
+  assert.equal(kept.size,[...Array(PEOPLE).keys()].filter(i=>Math.abs((i+.5)*LENGTH/PEOPLE+5*WALK_SPEED-100)<=38).length,'and no one further off is kept at all');
   for(const body of bodies){
-    assert.ok(Math.abs(body.x-100)<20+1.3+.01,`${body.who} at ${body.x} is drawn only if in view`);
-    assert.deepEqual({...cast.get(body.who),tier:0},{...body,tier:0},'and casts a shadow from the same place in the same pose');
+    assert.equal(body.model,body.who>=48?1:0,'each in the run of their own body');
+    assert.equal(body.look,body.who,'wearing their own look');
+    assert.equal(body.wet,0,'and dry on a street');
   }
-  const unseen=shadows.filter(b=>!drawn.has(b.who));
-  assert.ok(unseen.length>=8,`${unseen.length} cast a shadow from out of sight`);
-  for(const body of unseen)assert.ok(Math.abs(body.x-100)>20&&Math.abs(body.x-100)<=38.01,`${body.who} at ${body.x} is beside the view and near it`);
-  assert.equal(cast.size,[...Array(PEOPLE).keys()].filter(i=>Math.abs((i+.5)*LENGTH/PEOPLE+5*WALK_SPEED-100)<=38).length,'and no one further off is kept at all');
 });
 
 test('the list JavaScript sends says where shot went and nothing about anyone',()=>{

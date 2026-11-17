@@ -16,12 +16,12 @@ import {
 } from './crew-continuum.js';
 import {
   CREW_CONTINUUM_ENTRY_LAYOUT, CREW_CONTINUUM_INSTANCE_VERTICES, CREW_CONTINUUM_LISTS,
-  crewContinuumRenderWGSL, crewContinuumSelectWGSL, crewContinuumShadowWGSL,
+  crewContinuumPoseWGSL, crewContinuumRenderWGSL, crewContinuumSelectWGSL, crewContinuumShadowWGSL,
 } from './wgsl/crew-continuum.js';
+import { CREW_JOINT_COUNT } from './crew-skeleton.js';
 
 // What the GPU is told of a person, beside their joints and actor record (crewOrders in the cut).
-export const CREW_CONTINUUM_ORDER_CUT = 1;        // drawn depth first and shaded at equal depth
-export const CREW_CONTINUUM_ORDER_IMPORTANT = 2;  // wounded, spoken to or aimed at: cut finer
+export { CREW_CONTINUUM_ORDER_CUT, CREW_CONTINUUM_ORDER_IMPORTANT } from './wgsl/crew-continuum.js';
 // Cluster entries a batch's list holds: enough for the whole scene's budget of 128-triangle clusters.
 const CREW_CONTINUUM_CLUSTER_ROOM = Math.ceil(CONTINUUM_TRIANGLE_BUDGET / 128);
 const CREW_CONTINUUM_BODY_BYTES = 256, CREW_CONTINUUM_PART_BYTES = 128, CREW_CONTINUUM_DRAW_BYTES = 16;
@@ -178,11 +178,56 @@ export function requestCrewContinuumPipelines({ device, shader, format = 'rgba16
   return Promise.all([drawn, submerged]).then(([pipelines, under]) => ({ ...pipelines, ...under }));
 }
 
+// The pass that poses people placed on the GPU (crewContinuumPoseWGSL), once a device.
+export function requestCrewContinuumPose({ device, shader }) {
+  return requestOnce(device, 'crew continuum pose', async () => device.createComputePipelineAsync({
+    label: 'crew continuum pose', layout: 'auto', compute: { module: await shader(crewContinuumPoseWGSL(), 'crew continuum pose'), entryPoint: 'crewContinuumPose' },
+  }));
+}
+// Where each joint of a rig stands at rest, in its bind space: what each inverse bind matrix undoes (vec4 a joint).
+// The pose pass blends each joint about its own, and draws a parted limb in to its stump there.
+export function crewContinuumRestPlaces(animator) {
+  const places = new Float32Array(CREW_JOINT_COUNT * 4);
+  for (let j = 0; j < CREW_JOINT_COUNT; j++) {
+    const m = animator.inverseBinds.subarray(j * 16, j * 16 + 16);
+    const [a, b, c, d, e, f, g, h, i] = [m[0], m[4], m[8], m[1], m[5], m[9], m[2], m[6], m[10]];
+    const A = e * i - f * h, B = f * g - d * i, C = d * h - e * g, det = a * A + b * B + c * C || 1;
+    const inverse = [A, c * h - b * i, b * f - c * e, B, a * i - c * g, c * d - a * f, C, b * g - a * h, a * e - b * d].map((v) => v / det);
+    const t = [-m[12], -m[13], -m[14]];
+    for (let r = 0; r < 3; r++) places[j * 4 + r] = inverse[r * 3] * t[0] + inverse[r * 3 + 1] * t[1] + inverse[r * 3 + 2] * t[2];
+    places[j * 4 + 3] = 1;
+  }
+  return places;
+}
+// One run of placed people posed into a joint and actor buffer from `first` on, each with their batch's orders.
+//   placed    the CrewPlaced records, indexed by slot as the joints are
+//   palettes  the clips' skin matrices, CREW_JOINT_COUNT a frame; looks the CrewLook table; rest a body's rest places
+//   counted   { buffer, offset } of the indirect dispatch (count, 1, 1) the placing pass wrote
+export function createCrewContinuumPoser({ device, pipeline, placed, palettes, looks, rest, joints, actors, orders, first = 0, counted }) {
+  const run = device.createBuffer({ label: 'crew continuum pose run', size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  device.queue.writeBuffer(run, 0, new Uint32Array([first, 0, 0, 0]));
+  const group = device.createBindGroup({
+    label: 'crew continuum pose', layout: pipeline.getBindGroupLayout(0),
+    entries: [placed, palettes, looks, rest, joints, actors, orders, run].map((buffer, binding) => ({ binding, resource: { buffer } })),
+  });
+  return {
+    // In a compute pass, after the placing pass and before the batch's cut.
+    encode(pass) {
+      pass.setPipeline(pipeline);
+      pass.setBindGroup(0, group);
+      pass.dispatchWorkgroupsIndirect(counted.buffer, counted.offset);
+    },
+    destroy() { run.destroy(); },
+  };
+}
+
 // One batch: people `first`..`first + capacity` of a joint and actor buffer, all wearing `body`.
 //   frame, hull, bones, actor   the crew's own buffers (group 0 of the cut)
 //   main                        the crew's group-0 resources for drawing, in binding order (bindings 13 and 14 as entries)
 //   shadows                     the shadow set: its `uniform` and `bind(pipeline)` for the lighting group
-export function createCrewContinuumBatch({ device, pipelines: P, body, capacity, first = 0, samples = 4, frame, hull, bones, actor, main, shadows }) {
+//   counted                     for people a GPU pass keeps: { buffer, offset } of the indirect dispatch (count, 1, 1)
+//                               that sizes the cut; the orders are then the pose pass's to write, never the CPU's
+export function createCrewContinuumBatch({ device, pipelines: P, body, capacity, first = 0, samples = 4, frame, hull, bones, actor, main, shadows, counted = null }) {
   const B = GPUBufferUsage, chunks = body.chunks;
   const room = [CREW_CONTINUUM_CLUSTER_ROOM, capacity * chunks, capacity, CREW_CONTINUUM_CLUSTER_ROOM, capacity * chunks, capacity * chunks];
   const lists = [];
@@ -191,6 +236,7 @@ export function createCrewContinuumBatch({ device, pipelines: P, body, capacity,
   const list = device.createBuffer({ label: `crew continuum ${body.id} lists`, size: entries * 8, usage: B.STORAGE | B.VERTEX | B.COPY_SRC });
   const draws = device.createBuffer({ label: `crew continuum ${body.id} draws`, size: CREW_CONTINUUM_LISTS.length * CREW_CONTINUUM_DRAW_BYTES, usage: B.STORAGE | B.INDIRECT | B.COPY_DST | B.COPY_SRC });
   const orders = device.createBuffer({ label: `crew continuum ${body.id} orders`, size: Math.max(16, capacity * 4), usage: B.STORAGE | B.COPY_DST });
+  device.queue.writeBuffer(orders, 0, new Uint32Array(Math.max(4, capacity)));
   const part = device.createBuffer({ label: `crew continuum ${body.id} batch`, size: CREW_CONTINUUM_PART_BYTES, usage: B.UNIFORM | B.COPY_DST });
   const orderWords = new Uint32Array(Math.max(4, capacity)), partWords = new Uint32Array(CREW_CONTINUUM_PART_BYTES / 4), partFloats = new Float32Array(partWords.buffer);
   lists.forEach(([at, n], i) => partWords.set([at, n, 0, 0], 8 + i * 4));
@@ -229,14 +275,15 @@ export function createCrewContinuumBatch({ device, pipelines: P, body, capacity,
     for (const index of indices) drawList(pass, index);
   };
   return {
-    body, lists, list, draws,
+    body, lists, list, draws, orders,
     get count() { return count; },
     // Before the frame's passes: who is drawn, with what orders, at the scene's one pixel error.
     // `at` moves the batch's first slot, where a garrison's captains follow however many soldiers a port has.
+    // A counted batch is given how many it may hold (a number), and the GPU says how many there are.
     update(people, orderOf = () => 0, castShadows = true, at = first) {
-      count = Math.min(people.length, capacity);
-      for (let i = 0; i < count; i++) orderWords[i] = orderOf(people[i], i) >>> 0;
-      if (count) device.queue.writeBuffer(orders, 0, orderWords, 0, Math.max(4, count));
+      count = Math.min(typeof people === 'number' ? people : people.length, capacity);
+      if (!counted) for (let i = 0; i < count; i++) orderWords[i] = orderOf(people[i], i) >>> 0;
+      if (count && !counted) device.queue.writeBuffer(orders, 0, orderWords, 0, Math.max(4, count));
       partWords.set([at, count, samples, castShadows ? 1 : 0], 0);
       partFloats[4] = continuumPixelError();
       device.queue.writeBuffer(part, 0, partWords);
@@ -249,7 +296,8 @@ export function createCrewContinuumBatch({ device, pipelines: P, body, capacity,
       armed = false;
       pass.setPipeline(P.select);
       pass.setBindGroup(0, select);
-      pass.dispatchWorkgroups(count);
+      if (counted) pass.dispatchWorkgroupsIndirect(counted.buffer, counted.offset);
+      else pass.dispatchWorkgroups(count);
     },
     drawOpaque(pass) {
       if (!count) return;
