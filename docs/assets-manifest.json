@@ -714,6 +714,16 @@
     "bytes": 455654,
     "sha256": "230404cc6e431ee18b0683c1a680b90463e83ac02da9652c607387090c8cc12e"
   },
+  "assets/city-continuum/manifest.json": {
+    "url": "assets/city-continuum/manifest.e3a0c37eb41f70ae.json",
+    "bytes": 101120,
+    "sha256": "e3a0c37eb41f70aef0a8035d986119ceb4369e12c3aef9156f67fdb871e50b3c"
+  },
+  "assets/city-continuum/atlas.bin.gz": {
+    "url": "assets/city-continuum/atlas.bin.2135c8d221f2df36.gz",
+    "bytes": 3861873,
+    "sha256": "2135c8d221f2df3641ef0e24966c29f9e0bbc357e7f146ee931a3d57e98d7fc0"
+  },
   "assets/wildlife/whale.glb": {
     "url": "assets/wildlife/whale.af1b3d2448efbc0f.glb",
     "bytes": 8319500,

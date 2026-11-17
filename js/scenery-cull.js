@@ -4,7 +4,6 @@
 // JavaScript only uploads an instance when it first comes into use. Used by ground cover and trees.
 import { FRAME_WGSL } from './wgsl/common.js';
 import { GRASS_VARIANTS, ROCK_ARCHETYPES, TREE_GEOMETRY_ERRORS, TREE_LOD, TREE_VARIANTS } from './vegetation.js';
-import { CITY_HOUSE_TYPES, CITY_TYPE } from './old-world-buildings.js';
 
 const INSTANCE_BYTES = 32;
 const DRAW_WORDS = 4;
@@ -102,26 +101,6 @@ fn scenerySelect(index:u32,group:u32,instance:SceneryInstance)->i32 {
   }
   previous[index]=lod+1u;
   return i32(lod*${TREE_VARIANTS}u+group);
-}
-`);
-
-// A city's buildings near the camera, each drawn as its Cairn type: one bucket to a type. Farther
-// off the building's plain block stands in, and the land shader drops that block inside the same
-// distance. A church's towers, a gate's chamber and a wall's merlons are blocks of their own, a
-// little way from the building's root, so those types are shown that much farther and none is ever missing.
-// params.x is that distance, the one the land shader is given; previous marks who was shown.
-export const CITY_CULL = cullShell(1, /* wgsl */ `
-fn scenerySelect(index:u32,group:u32,instance:SceneryInstance)->i32 {
-  let house=group<${CITY_HOUSE_TYPES}u;
-  let compound=(group>=${CITY_TYPE.CHURCH_LEFT}u&&group<=${CITY_TYPE.CHURCH_GREAT}u)||group==${CITY_TYPE.GATE}u||group==${CITY_TYPE.CURTAIN_SHORT}u||group==${CITY_TYPE.CURTAIN_LONG}u;
-  let bridge=group==${CITY_TYPE.STONE_BRIDGE}u||group==${CITY_TYPE.STONE_BRIDGE_SPAN}u||group==${CITY_TYPE.FOOTBRIDGE}u;
-  let worldRoot=instance.root.xyz+vec3f(params.z,0.0,params.w);
-  let relative=worldRoot+vec3f(0.0,6.0,0.0)-F.camPos.xyz;
-  let maxDist=select(params.x+select(36.0,52.0,compound),max(params.x+120.0,2800.0),bridge);
-  let near=distance(worldRoot,F.camPos.xyz)<maxDist+select(0.0,10.0,previous[index]==1u);
-  if(!near||!sceneryInFrustum(relative,select(select(42.0,18.0,house),36.0,bridge))){previous[index]=0u;return -1;}
-  previous[index]=1u;
-  return i32(group);
 }
 `);
 

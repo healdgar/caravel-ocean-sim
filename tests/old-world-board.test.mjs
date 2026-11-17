@@ -12,7 +12,7 @@ import { BOARD_INDEX_SIZE, BOARD_STREETFRONT, BOARD_THATCHED, BOARD_WORKS, align
 import { CITY_BLOCK_FLOATS, CITY_TREES } from '../js/old-world-city.js';
 import { CITY_BUILDING_TYPES, CITY_THATCH_ROOF, CITY_TYPE, CITY_TYPE_SLIGHT_FROM, CITY_TYPED_FLOATS, CITY_TYPES_OVERHEAD, CITY_TYPES_SLIGHT } from '../js/old-world-buildings.js';
 import { WORKS_FENCE_M, WORKS_FENCE_POST, WORKS_FENCE_RAIL, WORKS_FENCE_STONE, WORKS_WHEEL } from '../js/old-world-works.js';
-import { TERRAIN } from '../js/wgsl/terrain.js';
+import { cityContinuumRenderWGSL, cityContinuumSelectWGSL } from '../js/wgsl/city-continuum.js';
 import { OLD_WORLD_LAND, OLD_WORLD_NO_TREES, OLD_WORLD_PLACES, bakedBoardFor, oldWorldCountry, registerBakedBoard } from '../js/old-world.js';
 import { openBoard } from '../scripts/board-host.mjs';
 
@@ -388,7 +388,7 @@ test('waterfront wharves chain continuously along shoreline contours and roadsid
     }
   }
 
-  // 3. Lisbon 1550 roadside verge preservation + hillside slope shear + cityTypeVS WGSL verification.
+  // 3. Lisbon 1550 roadside verge preservation + hillside slope shear, as the city continuum stands it.
   const baked = JSON.parse(readFileSync(new URL('../' + BAKED_BOARDS['lisbon:1550'], import.meta.url), 'utf8'));
   const sN = BOARD_SURVEY_SIZE, tN = 257, heights = new Float32Array(tN * tN);
   for (let j = 0; j < tN; j++) {
@@ -416,6 +416,11 @@ test('waterfront wharves chain continuously along shoreline contours and roadsid
     if (Math.abs(dzSlope) > 0.04) shearedHillsideBays++;
   }
   assert.ok(shearedHillsideBays > 500, `hillside fence bays sheared to local ground slope: ${shearedHillsideBays}`);
-  assert.match(TERRAIN, /let\s+py\s*=\s*p\.y\s*\+\s*p\.z\s*\*\s*dzSlope/);
-  assert.match(TERRAIN, /inverseSqrt\(keepProb\)/);
+  // The continuum shears each bay to its slope (its errors and bounds grown to match), and thins the horizon's bays
+  // through the shared core's area-preserving hash, not a copy of it.
+  const CITY_RENDER = cityContinuumRenderWGSL(), CITY_SELECT = cityContinuumSelectWGSL();
+  assert.match(CITY_RENDER, /q\.y\+q\.z\*cityContinuumSlope\(place\.shape\)/);
+  assert.match(CITY_SELECT, /\*\(1\.0\+abs\(cityContinuumSlope\(place\.shape\)\)\)/);
+  assert.match(CITY_SELECT, /splatScale=continuumThin\(span,/);
+  assert.doesNotMatch(CITY_SELECT + CITY_RENDER, /keepProb/);
 });

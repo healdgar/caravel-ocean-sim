@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // A house of Lisbon under fire, on the actual GPU: the ball stops at it, it breaks up as a port's own building
-// does, its block and its instance give way to its pieces, a save brings the ruin back, and the town rebuilds it.
+// does, its place in the city continuum gives way to its pieces, a save brings the ruin back, and the town rebuilds it.
 import assert from 'node:assert/strict';
 import {once} from 'node:events';
 import {after,before,test} from 'node:test';
@@ -21,7 +21,7 @@ const EYE=[-70,34,-6250],PITCH=-24;
 function instrument(){
   const r=window.cityAudit={errors:[],ruins:0,frames:0,writes:[]};
   const request=GPUAdapter.prototype.requestDevice;GPUAdapter.prototype.requestDevice=async function(...args){const d=await request.apply(this,args);d.addEventListener('uncapturederror',e=>r.errors.push(e.error.message));return d;};
-  const write=GPUQueue.prototype.writeBuffer;GPUQueue.prototype.writeBuffer=function(buffer,...rest){if(/^city (blocks|buildings groups|struck buildings)$/.test(buffer.label||''))r.writes.push(buffer.label);return write.call(this,buffer,...rest);};
+  const write=GPUQueue.prototype.writeBuffer;GPUQueue.prototype.writeBuffer=function(buffer,...rest){if(/^city (continuum flags|struck buildings)$/.test(buffer.label||''))r.writes.push(buffer.label);return write.call(this,buffer,...rest);};
   const pass=GPURenderPassEncoder.prototype,set=pass.setPipeline,draw=pass.drawIndexed,current=new WeakMap();
   pass.setPipeline=function(p){current.set(this,p.label);return set.call(this,p);};
   pass.drawIndexed=function(...args){if(current.get(this)==='city ruins')r.ruins++;return draw.apply(this,args);};
@@ -101,7 +101,7 @@ test('a house of the city takes shot, breaks up, comes back a ruin from a save, 
     await frames(page,30);
     const later=await page.evaluate(()=>({ruins:cityAudit.ruins,frames:cityAudit.frames,writes:cityAudit.writes.length,errors:cityAudit.errors}));
     assert.ok(later.ruins-settled.ruins>=later.frames-settled.frames,`${later.ruins-settled.ruins} ruin draws in ${later.frames-settled.frames} frames`);
-    assert.ok(settled.writes.includes('city blocks')&&settled.writes.includes('city buildings groups')&&settled.writes.includes('city struck buildings'),`its block and its instance were left out: ${settled.writes}`);
+    assert.ok(settled.writes.includes('city continuum flags')&&settled.writes.includes('city struck buildings'),`it was not left out of the city continuum's cut: ${settled.writes}`);
     assert.equal(later.writes,settled.writes.length,'a settled ruin is sent nothing');
     assert.deepEqual(later.errors,[]);assert.deepEqual(first.errors,[]);
     // And it looks struck.
@@ -123,7 +123,7 @@ test('a house of the city takes shot, breaks up, comes back a ruin from a save, 
     assert.ok(back,'the record found its house');
     assert.equal(back.broken,saved.broken,'the same pieces are gone');
     assert.equal(back.flying,0);assert.equal(back.replay,null);
-    assert.ok(back.ruins>0&&back.writes.includes('city blocks'),'and it is drawn as the ruin, not as its block');
+    assert.ok(back.ruins>0&&back.writes.includes('city continuum flags'),'and it is drawn as the ruin, not through the continuum');
     // A long time passes with no shot fired: the town has it standing again, drawn as it was at first.
     const rebuilt=await page.evaluate(async()=>{
       const building=cityStruck;

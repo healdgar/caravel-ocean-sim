@@ -462,9 +462,6 @@ export function cityTypeTarget(type) {
 }
 // Eight numbers to an instance of a type: x, floor height, z, turn; scale across, up and along; tone.
 export const CITY_TYPED_FLOATS = 8;
-// How near a building must be to be drawn as its type rather than its block, at the scene's base pixel error;
-// js/terrain.js divides it by the scene's coarsening (continuumCoarsening), so the switch follows the one scalar.
-export const CITY_DETAIL_M = 240;
 // A plan's block that a type replaces near the camera carries its roof form plus this.
 export const CITY_TYPED_ROOF = 4;
 // And this besides where its roof is thatch: far off, its block is roofed in straw and not in tile.
@@ -506,7 +503,7 @@ export function compileCityBuildingTypes(buildGeometry) {
     let out = null;
     // A timber's grain runs its length. Which way that is (1 upright, 2 across the plot, 3 along it; 0 where it has
     // none to speak of) is the long axis of the part it belongs to, and rides in twos on the vertex's shade, where
-    // the renderer takes it off again (cityTypeVS): a post is then not shaded as a stack of plank ends.
+    // the renderer takes it off again (cityContinuumWorn): a post is then not shaded as a stack of plank ends.
     const assembly = built.partAssembly, grains = new Map();
     const grainOf = (triangle) => {
       const number = assembly?.trianglePartIds?.[triangle];

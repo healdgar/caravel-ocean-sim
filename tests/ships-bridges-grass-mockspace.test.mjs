@@ -99,8 +99,10 @@ test('ship quality parity across all playable ship hulls and trade-vessel archet
 test('bridges align with road direction, use level STONE_BRIDGE_SPAN, stamp approach paving, and respect street portals', () => {
   assert.ok(CITY_TYPES_BRIDGES.has(CITY_TYPE.STONE_BRIDGE_SPAN), 'STONE_BRIDGE_SPAN must be registered in CITY_TYPES_BRIDGES');
   assert.equal(cityTypeTarget(CITY_TYPE.STONE_BRIDGE_SPAN)?.prefabId, 'city_stone_bridge');
-  const cullSrc = fs.readFileSync('js/scenery-cull.js', 'utf8');
-  assert.ok(cullSrc.includes('CITY_TYPE.STONE_BRIDGE_SPAN'), 'CITY_CULL must include STONE_BRIDGE_SPAN in bridge group');
+  // The span is baked into the city continuum like every type, so it is drawn as itself at every distance.
+  const continuum = JSON.parse(fs.readFileSync('assets/city-continuum/manifest.json', 'utf8'));
+  const bakedSpan = continuum.types.find((type) => type.id === CITY_TYPE.STONE_BRIDGE_SPAN);
+  assert.ok(bakedSpan?.clusters.count > 0 && bakedSpan.chain.steps > 0, 'STONE_BRIDGE_SPAN must be baked into the city continuum');
 
   // Verify smoothed tangent alignment and acute crossing width clamping in boardRoadCrossings
   const river = { points: [0, -240, 10, 0, 0, 10, 0, 240, 10] };

@@ -42,7 +42,8 @@ import {
   TREE_VERTEX_FLOATS,
   groundCoverBucketGeometry,
 } from '../js/vegetation.js';
-import { CITY_CULL, GROUND_COVER_CULL } from '../js/scenery-cull.js';
+import { GROUND_COVER_CULL } from '../js/scenery-cull.js';
+import { cityContinuumRenderWGSL, cityContinuumSelectWGSL } from '../js/wgsl/city-continuum.js';
 import { HERDS_STEP_WGSL } from '../js/wgsl/herds.js';
 import { TERRAIN } from '../js/wgsl/terrain.js';
 import { GROUND_DETAIL_RENDER } from '../js/wgsl/ground-detail.js';
@@ -307,18 +308,23 @@ test('fractured polyhedral boulders (18 buckets) + 4 grass buckets + progressive
   assert.match(TRADE_VESSELS_WGSL, /@vertex\s+fn\s+tvShadowVS\b/);
   assert.match(TRADE_VESSELS_WGSL, /matTone\.x\s*>\s*5\.5/);
   assert.match(GROUND_COVER_CULL, /\*f32\(6\)|ROCK_ARCHETYPES|lod\*6u/);
-  assert.match(CITY_CULL, /params\.z\s*,\s*0\.0\s*,\s*params\.w/);
+  // The city's cut stands every building in the world's own frame, shifted by its offset.
+  assert.match(wgslBody('cityContinuumShift', cityContinuumSelectWGSL()), /cityView\.scene\.y\s*,\s*0\.0\s*,\s*cityView\.scene\.z/);
 
-  // Zero-discard invariant across terrain and city passes (cityFS crossfades via MSAA @builtin(sample_mask)).
+  // Zero-discard invariant across terrain and city passes (the city continuum hands off via MSAA @builtin(sample_mask)).
   assert.doesNotMatch(GROUND_DETAIL_RENDER, /\bdiscard\b/);
   assert.doesNotMatch(wgslBody('landSurface'), /\bdiscard\b/);
   assert.doesNotMatch(wgslBody('landOpaque'), /\bdiscard\b/);
   assert.doesNotMatch(wgslBody('landFinish'), /\bdiscard\b/);
-  const cityFsBody = wgslBody('cityFS');
-  assert.doesNotMatch(cityFsBody, /\bdiscard\b/);
-  // Type and block split each pixel's samples through the continuum core, complements paired.
-  assert.match(cityFsBody, /mask=continuumSamples\(in\.lodBlend,/);
-  assert.match(cityFsBody, /mask=0xfu\^continuumSamples\(1\.0\+in\.lodBlend,/);
+  const CITY_RENDER = cityContinuumRenderWGSL();
+  assert.doesNotMatch(CITY_RENDER, /\bdiscard\b/);
+  // Clusters, far body and splat split each pixel's samples through the continuum core: complements, each sample once.
+  const cityMask = wgslBody('cityContinuumMask', CITY_RENDER);
+  assert.match(cityMask, /let handoff=continuumSamples\(/);
+  assert.match(cityMask, /let splat=handoff&continuumSamples\(/);
+  assert.match(cityMask, /return all&~handoff;/);
+  assert.match(cityMask, /return handoff&~splat;/);
+  assert.match(wgslBody('cityContinuumFS', CITY_RENDER), /out\.mask=cityContinuumMask\(/);
 });
 
 test('harbor fleet archetypes, bathymetry & berth safety, caravan bridge decks, and Lisbon street bridges', async () => {

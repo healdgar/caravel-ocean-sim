@@ -21,6 +21,7 @@ import { SUBTROPICAL_FOREST_GROVE_ASSETS, PORTUGAL_FOREST_GROVE_ASSETS } from '.
 import { PORTUGAL_MEADOW_GRASS_ASSETS } from './js/meadow-grass.js';
 import { FOREST_SURFACE_ASSETS, SUBTROPICAL_FOREST_SURFACE_ASSETS, PORTUGAL_FOREST_SURFACE_ASSETS } from './js/forest-surfaces.js';
 import { CREW_CONTINUUM_ASSETS } from './js/crew-continuum.js';
+import { CITY_CONTINUUM_ASSETS } from './js/city-continuum.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const wgslModules = ['js/wgsl/common.js', 'js/wgsl/celestial.js', 'js/wgsl/hull.js', 'js/wgsl/lateen.js', 'js/wgsl/victory.js', 'js/wgsl/vessel.js', 'js/wgsl/vessel-pose.js', 'js/wgsl/shadows.js', 'js/wgsl/interaction.js', 'js/wgsl/surface-waves.js', 'js/wgsl/surface-coupling.js', 'js/wgsl/fleet-wakes.js', 'js/wgsl/cloud-model.js', 'js/wgsl/clouds.js', 'js/wgsl/sky.js', 'js/wgsl/deck.js', 'js/wgsl/spindrift.js', 'js/wgsl/wetness.js', 'js/wgsl/sim.js', 'js/wgsl/water-optics.js', 'js/wgsl/underwater.js', 'js/wgsl/ocean.js', 'js/wgsl/ocean-lighting.js', 'js/wgsl/post.js', 'js/wgsl/neural-post.js', 'js/wgsl/neural-pbr.js', 'js/wgsl/caravel.js', 'js/wgsl/crew.js', 'js/wgsl/terrain.js', 'js/wgsl/weather.js', 'js/wgsl/anchor.js', 'js/wgsl/dolphins.js', 'js/wgsl/marine-life.js', 'js/wgsl/gunnery.js', 'js/wgsl/gunnery-probe.js', 'js/wgsl/hull-contact.js', 'js/wgsl/rowing-water.js', 'js/wgsl/crew-solve.js'];
@@ -79,6 +80,8 @@ order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/wgsl/ground-detail.js');
 wgslModules.push('js/wgsl/ground-detail.js');
 // The Old World: building types ahead of the land shader, which reads their constants, then the town plan and its country.
 order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/old-world-works.js','js/old-world-buildings.js');
+// The city continuum: its atlas format, then its programs, which read the buildings' own constants.
+order.splice(order.indexOf('js/wgsl/terrain.js'),0,'js/city-continuum.js','js/wgsl/city-continuum.js');
 // A port's country as Castle and Commons' model founded it: what is asked of the model, how it stands here, and the GPU's stamp of it.
 // The herds go first: board-folk.js reads herds.js's STREET_MOUNT_FLAG as it loads.
 order.splice(order.indexOf('js/coastal-world.js'),0,'js/models/livestock-meshes.js','js/herds.js','js/board-model.js','js/board-worker.js','js/board-life.js','js/board-keep.js','js/board-folk.js','js/folk-card.js','js/mate-counsel.js','js/storyteller.js','js/first-mate.js','js/old-world-city.js','js/old-world-board.js','js/old-world.js');
@@ -88,7 +91,7 @@ wgslModules.push('js/wgsl/inland-water.js','js/wgsl/herds.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/inland-water.js','js/meadow-grass.js','js/trade-vessels.js');
 order.splice(order.indexOf('js/trade-vessels.js'),0,'js/wgsl/hull-flood.js','js/hull-flood.js');
 // A city's buildings as the guns meet them: after the fracture code it hands them to, ahead of the land it is drawn with.
-order.splice(order.indexOf('js/terrain.js'),0,'js/city-targets.js','js/boulder-continuum.js');
+order.splice(order.indexOf('js/terrain.js'),0,'js/city-targets.js','js/boulder-continuum.js','js/city-continuum-draw.js');
 order.splice(order.indexOf('js/main.js'),0,'js/port-damage.js','js/debug-world.js');
 order.splice(order.indexOf('js/main.js'),0,'js/webgpu-adapter.js');
 order.splice(order.indexOf('js/ship-mesh.js'),0,'js/rig-gpu-data.js');
@@ -185,6 +188,8 @@ if(fs.existsSync(path.join(root,'assets/ground-cover/portugal/meadows-gpu/manife
     if(fs.existsSync(path.join(root,file)))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':'application/octet-stream');
   }
 }
+// The city continuum's atlas (scripts/prepare-city-continuum.mjs), kept in git: the city is drawn from nothing else.
+for(const file of Object.values(CITY_CONTINUUM_ASSETS))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':'application/octet-stream');
 // The people continuum's bodies, each where it has been baked (scripts/prepare-crew-continuum.mjs). Their streams are
 // not committed; a checkout without them draws the old bodies.
 for(const files of Object.values(CREW_CONTINUUM_ASSETS))for(const file of Object.values(files)){

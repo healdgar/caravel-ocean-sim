@@ -5,9 +5,9 @@ import {OLD_WORLD_LAND,OLD_WORLD_CITIES,OLD_WORLD_NO_TREES,inIberia,oldWorldPeop
   oldWorldHoldingSeat,growOldWorldTown,layOldWorldRoads,oldWorldCountry} from '../js/old-world.js';
 import {CITY_BLOCK_FLOATS,CITY_GROUND,CITY_ROOF,CITY_TREES,CITY_WALL,cityFootprintsOverlap} from '../js/old-world-city.js';
 import {streetEdgeAt} from '../js/town-streets.js';
-import {CITY_BUILDING_TYPES,CITY_CHURCH,CITY_DETAIL_M,CITY_GATE,CITY_HOUSE_STOREYS,CITY_HOUSE_TYPES,CITY_TYPE,CITY_TYPE_SLIGHT_FROM,CITY_TYPED_FLOATS,CITY_TYPED_ROOF,cityHouseType,compileCityBuildingTypes} from '../js/old-world-buildings.js';
-import {CITY_CULL} from '../js/scenery-cull.js';
+import {CITY_BUILDING_TYPES,CITY_CHURCH,CITY_GATE,CITY_HOUSE_STOREYS,CITY_HOUSE_TYPES,CITY_TYPE,CITY_TYPE_SLIGHT_FROM,CITY_TYPED_FLOATS,CITY_TYPED_ROOF,cityHouseType,compileCityBuildingTypes} from '../js/old-world-buildings.js';
 import {TERRAIN} from '../js/wgsl/terrain.js';
+import {readFileSync} from 'node:fs';
 
 // A straight shore along z=0 with the sea to the south, ground rising gently inland, and one
 // steep hill standing a little way back from the water.
@@ -275,9 +275,10 @@ test('each house, church, tower, gate and length of wall of the plan is a Cairn 
   assert.equal(of[CITY_TYPE.HALL],plan.castle?1:0);
   let plain=0;for(let k=0;k<plan.blocks.length;k+=CITY_BLOCK_FLOATS)if(plan.blocks[k+8]<CITY_TYPED_ROOF)plain++;
   assert.equal(plain,0,`plain blocks: ${plain}`);
-  // The shader that drops a block and the cull that shows its type agree on the distance.
-  assert.ok(CITY_CULL.includes('<params.x+')&&CITY_DETAIL_M>100&&CITY_DETAIL_M<600);
-  assert.ok(TERRAIN.includes('fn cityTypeVS')&&TERRAIN.includes('away<nearTerrain.grid.w'));
+  // Every type is baked into the one continuum, which draws them all at every distance: no block stands in.
+  const continuum=JSON.parse(readFileSync(new URL('../assets/city-continuum/manifest.json',import.meta.url),'utf8'));
+  assert.deepEqual(continuum.types.map(t=>t.id),CITY_BUILDING_TYPES.map((_,i)=>i));
+  assert.ok(!TERRAIN.includes('fn cityVS(')&&!TERRAIN.includes('fn cityTypeVS(')&&!TERRAIN.includes('fn citySolidVS('),'the block and type tiers are retired');
 });
 
 test('a castle takes the height the old town climbs, and nothing else is built there',()=>{
