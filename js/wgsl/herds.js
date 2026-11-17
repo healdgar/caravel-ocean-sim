@@ -24,7 +24,7 @@ export const HERD_SHOTS_WORDS = 4 + HERD_SHOT_LIMIT * HERD_SHOT_FLOATS;
 export const HERD_DRAW_WORDS = 5;
 export const HERD_SPECIES = 7;
 export const HERD_SPLAT_BUCKET = HERD_SPECIES * 2; // 14: 1-triangle far horizon splat bucket
-export const HERD_FADE_BUCKET = HERD_SPLAT_BUCKET + 1; // 15..21: MSAA sample_mask crossfade buckets (3.5..5.4 px at the base error)
+export const HERD_FADE_BUCKET = HERD_SPLAT_BUCKET + 1; // 15..21: MSAA sample_mask crossfade buckets (the core's splat band, 3.5..5.25 px at the base error)
 export const HERD_BUCKETS = HERD_FADE_BUCKET + HERD_SPECIES; // 22: 0..6 solid (TBDR HSR), 7..13 shadow, 14 splats, 15..21 fade
 export const HERD_ROUTE_HEADER = 1;
 export const HERD_MORPH_HI_PX = 26.0;
@@ -326,8 +326,8 @@ struct HerdFate {
 
 const CARAVAN_YOKE_AHEAD_M: f32 = 4.05;
 // Spans tuned at the core's base pixel error, read against a body's span over cfg.coarsening: the morph, the
-// mesh-to-splat band (down to CONTINUUM_SPLAT_PIXELS) and the splat itself follow the one scene scalar.
-const HERD_SPLAT_HI_PX: f32 = 5.4;
+// mesh-to-splat band (the core's, CONTINUUM_SPLAT_BAND_PIXELS down to CONTINUUM_SPLAT_PIXELS) and the splat
+// itself follow the one scene scalar.
 const HERD_MORPH_HI_PX: f32 = ${HERD_MORPH_HI_PX.toFixed(1)};
 const HERD_STAMPEDE_M: f32 = ${HERD_STAMPEDE_RADIUS_M.toFixed(1)};
 const HERD_STAMPEDE_SPAN_S: f32 = 14.0;
@@ -829,15 +829,15 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   let walkPhase = select(tau * walkFreq + phase * 6.2831853, roadPhase, travelling || isStreetMount);
   let tailPhase = t * (1.2 + 0.35 * fract(phase * 7.13)) + phase * 9.1;
 
-  // Continuous Rule-3 half-edge collapse continuum level (0 above 26 px -> 1 at 5.4 px, at the base error).
-  let morphLevel = select(clamp((HERD_MORPH_HI_PX - pxSpan) / (HERD_MORPH_HI_PX - HERD_SPLAT_HI_PX), 0.0, 1.0), 0.0, (flags & 4u) != 0u);
-  let meshKeep = select(1.0, smoothstep(CONTINUUM_SPLAT_PIXELS, HERD_SPLAT_HI_PX, pxSpan), pxSpan < HERD_SPLAT_HI_PX);
+  // Continuous Rule-3 half-edge collapse continuum level (0 above 26 px -> 1 at the core's splat band, at the base error).
+  let morphLevel = select(clamp((HERD_MORPH_HI_PX - pxSpan) / (HERD_MORPH_HI_PX - CONTINUUM_SPLAT_BAND_PIXELS), 0.0, 1.0), 0.0, (flags & 4u) != 0u);
+  let meshKeep = 1.0 - continuumSplatShare(pxSpan);
   // Species plus the mesh's share of the handoff, and the flags with the herd index above them: written alike
   // into both sides of the handoff so they split each pixel's samples between them exactly (herdMeshKeep, herdSeedOf).
   let packedSpecies = f32(species) + clamp(meshKeep, 0.0, 1.0) * 0.95;
   let packedFlags = f32(flags | (min(idx, 0xfffffu) << 4u));
 
-  // 1. Near/mid physical 3D mesh buckets: 0..6 solid (>= 5.4 px, 100% TBDR Early-Z / HSR), 15..21 MSAA crossfade (3.5..5.4 px).
+  // 1. Near/mid physical 3D mesh buckets: 0..6 solid (above the core's splat band, 100% TBDR Early-Z / HSR), 15..21 MSAA crossfade (in it).
   if (pxSpan >= CONTINUUM_SPLAT_PIXELS) {
     let body = HerdBody(
       vec4f(worldXZ.x, wy, worldXZ.y, walkYaw),
@@ -845,7 +845,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       vec4f(slopePitch, scale, select(tailPhase, tonguePitch, isVehicle), packedSpecies),
       vec4f(morphLevel, packedFlags, hitAge, hitDirAngle),
     );
-    let meshBucket = select(${HERD_FADE_BUCKET}u + species, species, pxSpan >= HERD_SPLAT_HI_PX);
+    let meshBucket = select(${HERD_FADE_BUCKET}u + species, species, pxSpan >= CONTINUUM_SPLAT_BAND_PIXELS);
     let slot = atomicAdd(&draws[meshBucket * 5u + 1u], 1u);
     if (slot < cfg.bucketSpan) {
       bodies[meshBucket * cfg.bucketSpan + slot] = body;
@@ -863,8 +863,8 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     }
   }
 
-  // 2. Far continuum 1-triangle view-facing horizon splat bucket (crossfades in over 5.4..3.5 px, sole representation < 3.5 px).
-  if (pxSpan < HERD_SPLAT_HI_PX) {
+  // 2. Far continuum 1-triangle view-facing horizon splat bucket (crossfades in over the core's splat band, sole representation < 3.5 px).
+  if (pxSpan < CONTINUUM_SPLAT_BAND_PIXELS) {
     let toCamXZ = F.camPos.xz - (worldXZ + shiftXZ);
     let viewAz = select(0.0, atan2(toCamXZ.x, toCamXZ.y), dot(toCamXZ, toCamXZ) > 1e-8);
     let broadside = abs(sin(viewAz - walkYaw));

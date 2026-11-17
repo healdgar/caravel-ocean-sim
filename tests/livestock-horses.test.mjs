@@ -119,7 +119,7 @@ test('Tripo H3.1 4K livestock continuum packs RGB555 coats, crack-free manifolds
   assert.match(solidMatch[1], /@location\(0\)\s*vec4f/, 'herdsSolidFS returns plain @location(0) vec4f without HerdFragOut');
   assert.doesNotMatch(solidMatch[0], /sample_mask/, 'herdsSolidFS has strictly zero sample_mask');
   assert.match(HERDS_RENDER_WGSL, /@fragment\s+fn\s+herdsFadeFS\s*\([^)]*\)\s*->\s*HerdFragOut/, 'herdsFadeFS retains MSAA sample_mask crossfade');
-  assert.match(HERDS_STEP_WGSL, /pxSpan\s*>=\s*HERD_SPLAT_HI_PX/, 'HERDS_STEP_WGSL splits solid (>= 5.4 px) vs fade (3.5..5.4 px) buckets');
+  assert.match(HERDS_STEP_WGSL, /pxSpan\s*>=\s*CONTINUUM_SPLAT_BAND_PIXELS/, 'HERDS_STEP_WGSL splits solid (above the core\'s splat band) vs fade (in it) buckets');
 
   const expectedHeights = [0.82, 1.52, 0.66, 1.84];
   const triRanges = [[3300, 3500], [3700, 3900], [2900, 3100], [5800, 6400]];

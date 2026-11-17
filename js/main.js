@@ -5631,6 +5631,8 @@ async function main() {
       rp.setVertexBuffer(0,v.vertexBuffer);if(v.pose)rp.setVertexBuffer(1,v.pose.buffer);rp.setIndexBuffer(v.render.indexBuffer,'uint32');rp.drawIndexed(v.asset.indices.length);
     };
     for(const v of hulls)if(!hullBelongsDamaged(v))drawHull(v,v.render.pipeline,v.bindGroup,v.lighting);
+    // The ships' hulls are sized on the CPU: a whole hull is drawn once, a damaged one twice (its depth, then its shade).
+    continuumCensus?.report('ships',hulls.reduce((sum,v)=>sum+v.asset.indices.length/3*(hullBelongsDamaged(v)?2:1),0));
     for(const v of hulls)if(vesselHasVisibleCrew(v))v.crew?.drawOpaque(rp);
     fortSoldiers?.draw(rp);mateSoldiers?.draw(rp);
     townsfolk?.draw(rp);
@@ -5749,7 +5751,11 @@ async function main() {
     const doAudio=sceneAudio.enabled&&sceneAudio.ready&&!document.hidden&&!audioPending&&boat.showProw&&boat.effects!==false&&(frameIndex&7)===0;
     const audioRevision=boat.revision,audioEpoch=hullContactProbe.epoch,audioRequestedAt=performance.now(),audioSimTime=simTime;
     if(doAudio){enc.copyBufferToBuffer(interaction.contacts,0,audioRead,0,72*64);hullContactProbe.copy(enc,frameIndex);}
-    continuumCensus?.encode(enc,terrain?.continuumSources?.()??[]);
+    if(continuumCensus){
+      // People are one family across every company, the garrison and the mate.
+      const people=[...vessels.flatMap(v=>v.crew?.continuumDraws?.()??[]),...(fortSoldiers?.continuumDraws?.()??[]),...(mateSoldiers?.continuumDraws?.()??[])];
+      continuumCensus.encode(enc,[...(terrain?.continuumSources?.()??[]),...(people.length?[{name:'people',draws:people}]:[])]);
+    }
     const doTs=profiler.resolve(enc);
     let readBuf = null;
     if (shotName && shotIdx < shotSeq && frameIndex >= shotFrames + shotIdx) {

@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import zlib from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { CREW_JOINT_NAMES, CREW_JOINT_COUNT } from '../js/crew-skeleton.js';
-import { CREW_CONTINUUM_BAND } from '../js/wgsl/crew-continuum.js';
+import { CONTINUUM_HANDOFF_BAND } from '../js/continuum-core.js';
 import {
   CREW_CONTINUUM_ASSETS, CREW_CONTINUUM_BODIES, CREW_CONTINUUM_CLUSTER_WORDS, CREW_CONTINUUM_JOINT_PART, CREW_CONTINUUM_NEVER,
   CREW_CONTINUUM_PARTS, CREW_CONTINUUM_REGIONS, CREW_CONTINUUM_STEP_WORDS, CREW_CONTINUUM_STREAMS, CREW_CONTINUUM_VERTEX_WORDS,
@@ -144,9 +144,9 @@ for (const { id } of CREW_CONTINUUM_BODIES) {
     assert.equal(next, manifest.indexCount);
     assert.equal(level0, manifest.source.triangles, 'the finest cut is the whole source body');
     // Any cut by error alone draws each part of the body once: ever fewer triangles, never two layers of one surface.
-    // Clusters draw only until the far body has taken over (CREW_CONTINUUM_BAND past its own error); to there the
+    // Clusters draw only until the far body has taken over (CONTINUUM_HANDOFF_BAND past its own error); to there the
     // surface holds, and past it, where thin cloth and fingers fold away, it may only shrink.
-    const drawn = Math.min(manifest.clusters.rootError, manifest.chain.baseError * (1 + CREW_CONTINUUM_BAND));
+    const drawn = Math.min(manifest.clusters.rootError, manifest.chain.baseError * (1 + CONTINUUM_HANDOFF_BAND));
     let whole = 0, previous = Infinity;
     const cut = (allowed) => {
       let triangles = 0, surface = 0;

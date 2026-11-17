@@ -5,7 +5,7 @@
 // and 1-triangle horizon splat; js/forest-clusters.js decimates each tree smoothly on the GPU by eye-angle
 // pixel span down to 1 pixel. A tree wholly in its crown draws no cluster of leaf or wood.
 
-import { CONTINUUM_SPLAT_PIXELS, CONTINUUM_MIN_PIXELS } from './continuum-core.js';
+import { CONTINUUM_SPLAT_PIXELS, CONTINUUM_MIN_PIXELS, CONTINUUM_HANDOFF_BAND } from './continuum-core.js';
 
 export const FOREST_CROWN_VERSION = 3;
 export const FOREST_CROWN_STEP_WORDS = 4;
@@ -128,7 +128,7 @@ export function forestCrownSplatLook(info) {
 // for tests and for anything that must know where the change falls; leafPixels is the error the forest
 // allows a leaf cluster on screen.
 export const FOREST_CROWN_NEAREST = 330;
-export const FOREST_CROWN_BAND = 0.3;
+export const FOREST_CROWN_BAND = CONTINUUM_HANDOFF_BAND;
 // Where a pack's trees stand apart on open ground its manifest also names widestLeafErrors: a crown then
 // stands only for a tree no broader on screen than that many times the leaf error the forest allows, and
 // a broader tree keeps its leaves until it is that small. An open ceiba 20 m across is plainly boughs and

@@ -6,8 +6,14 @@
 
 // Below this projected span, in pixels, a body morphs into its single view-facing horizon splat.
 export const CONTINUUM_SPLAT_PIXELS = 3.5;
+// From this span down to CONTINUUM_SPLAT_PIXELS a body's coarsest mesh hands over to its splat, smoothly: by
+// morphing its last step into the splat's shape, or by giving the splat a rising share of each pixel's samples.
+export const CONTINUUM_SPLAT_BAND_PIXELS = 5.25;
 // Below this span the splat is thinned by a deterministic hash and the survivors are inflated to keep its area.
 export const CONTINUUM_MIN_PIXELS = 1.0;
+// Where a finer side of a body hands over to a coarser one (clusters to the far body, leaves to the crown), both
+// are worn, sample by sample, over this share of the distance at which the handoff begins.
+export const CONTINUUM_HANDOFF_BAND = 0.3;
 // The scene's one triangle budget, in submitted triangles (rule 3, item 5).
 export const CONTINUUM_TRIANGLE_BUDGET = 3_000_000;
 // The pixel error the scene's cut is drawn at before any governor moves it.
@@ -27,7 +33,9 @@ export function setContinuumPixelError(pixels) {
 // The same core for the GPU. A shader takes it once, at the top of its source; it defines only `continuum*` names.
 export const CONTINUUM_CORE_WGSL = /* wgsl */`
 const CONTINUUM_SPLAT_PIXELS: f32 = ${CONTINUUM_SPLAT_PIXELS.toFixed(4)};
+const CONTINUUM_SPLAT_BAND_PIXELS: f32 = ${CONTINUUM_SPLAT_BAND_PIXELS.toFixed(4)};
 const CONTINUUM_MIN_PIXELS: f32 = ${CONTINUUM_MIN_PIXELS.toFixed(4)};
+const CONTINUUM_HANDOFF_BAND: f32 = ${CONTINUUM_HANDOFF_BAND.toFixed(4)};
 fn continuumHash(value: u32) -> u32 {
   var x = value;
   x = (x ^ (x >> 16u)) * 0x7feb352du;
@@ -38,6 +46,12 @@ fn continuumHash(value: u32) -> u32 {
 fn continuumPixels(size: f32, focal: f32, distance: f32) -> f32 { return size * focal / max(distance, 1e-4); }
 // The geometric error, in metres, a cut may leave at 'distance' and stay within 'pixels' on screen.
 fn continuumAllowedError(pixels: f32, focal: f32, distance: f32) -> f32 { return pixels * distance / max(focal, 1e-4); }
+// The coarser side's share of a handoff that begins 'start' metres away, at 'distance': 0 short of it, 1 once
+// the band (CONTINUUM_HANDOFF_BAND of 'start') is crossed.
+fn continuumHandoff(distance: f32, start: f32) -> f32 { return clamp((distance - start) / max(start * CONTINUUM_HANDOFF_BAND, 1e-6), 0.0, 1.0); }
+// The splat's share of a body that spans 'pixels': 0 above CONTINUUM_SPLAT_BAND_PIXELS, 1 at and below
+// CONTINUUM_SPLAT_PIXELS. A family either morphs its last step toward the splat by it or splits samples by it.
+fn continuumSplatShare(pixels: f32) -> f32 { return 1.0 - smoothstep(CONTINUUM_SPLAT_PIXELS, CONTINUUM_SPLAT_BAND_PIXELS, pixels); }
 // The samples of a pixel, of 'samples' (1 to 8), that the coarser side of a handoff takes when it holds 'share'
 // of the pixel. The finer side gives up exactly these (the same call, inverted against the full mask), so each
 // sample is drawn once and the change needs no blending. Every pixel rounds the share its own way, which spreads

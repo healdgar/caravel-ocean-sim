@@ -22,11 +22,6 @@ export const CREW_CONTINUUM_LISTS = Object.freeze(['clusters', 'chain', 'splat',
 export const CREW_CONTINUUM_INSTANCE_VERTICES = Object.freeze([384, 384, 3, 384, 384, 384]);
 // How each draw reads its list: the list buffer bound as an instance-rate vertex buffer at the list's first entry.
 export const CREW_CONTINUUM_ENTRY_LAYOUT = Object.freeze([Object.freeze({ arrayStride: 8, stepMode: 'instance', attributes: Object.freeze([Object.freeze({ shaderLocation: 0, offset: 0, format: 'uint32x2' })]) })]);
-// Over this share of the handoff distance a person wears both the full body and the far body, sample by sample:
-// the forest's band (FOREST_CROWN_BAND), until the shared core names one.
-export const CREW_CONTINUUM_BAND = 0.3;
-// The splat takes over from the far body's last step over this span of pixels above CONTINUUM_SPLAT_PIXELS.
-export const CREW_CONTINUUM_SPLAT_BAND = 1.5;
 // Who is cut finer: a wounded person, one being spoken to, or one aimed at. Their pixel error is this share.
 export const CREW_CONTINUUM_IMPORTANT = 0.5;
 // How many shadow-map texels a shadow's far body may be in error.
@@ -127,8 +122,6 @@ export function crewContinuumSelectWGSL() {
 @group(0) @binding(8) var<uniform> crewPart:CrewContinuumPart;
 @group(0) @binding(9) var<storage,read> crewOrders:array<u32>;
 @group(0) @binding(10) var<uniform> SH:ShadowFrame;
-const CREW_CONTINUUM_BAND:f32=${CREW_CONTINUUM_BAND.toFixed(4)};
-const CREW_CONTINUUM_SPLAT_BAND:f32=${CREW_CONTINUUM_SPLAT_BAND.toFixed(4)};
 const CREW_CONTINUUM_IMPORTANT:f32=${CREW_CONTINUUM_IMPORTANT.toFixed(4)};
 const CREW_CONTINUUM_SHADOW_TEXELS:f32=${CREW_CONTINUUM_SHADOW_TEXELS.toFixed(4)};
 ${continuumClusterPrefixWGSL('crewContinuumPrefix', (i) => `bitcast<f32>(crewShape[(${i})*${CREW_CONTINUUM_CLUSTER_WORDS}u+13u])`)}
@@ -187,10 +180,10 @@ fn crewContinuumChunks(list:u32,person:u32,step:u32){
         // Where the far body's own error is all the scene allows, it takes over, over a band of distance.
         // Until a body's full mesh has arrived (far.x is 0), the far body draws everyone.
         let start=crewBody.far.x*scale*focal/pixels;
-        let handoff=select(clamp((away-start)/max(start*CREW_CONTINUUM_BAND,1e-6),0.0,1.0),1.0,crewBody.far.x<=0.0);
+        let handoff=select(continuumHandoff(away,start),1.0,crewBody.far.x<=0.0);
         share=u32(round(handoff*255.0));
         let span=2.0*max(crewBody.far.z,crewBody.far.w)*scale*focal/away;
-        let splat=1.0-smoothstep(CONTINUUM_SPLAT_PIXELS,CONTINUUM_SPLAT_PIXELS*CREW_CONTINUUM_SPLAT_BAND,span);
+        let splat=continuumSplatShare(span);
         splatShare=u32(round(splat*255.0));
         if(share>0u){
           splatScale=continuumThin(span,slot*0x9e3779b9u+0x85ebca6bu);

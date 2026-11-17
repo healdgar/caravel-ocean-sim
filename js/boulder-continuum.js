@@ -14,8 +14,8 @@ export const BOULDER_DENSITY_KG_M3 = 2650;
 export const BOULDER_TOUGHNESS = 1.35;
 export const BOULDER_BAND_START_PX = 16.0;
 export const BOULDER_BAND_END_PX = 10.5;
-export const BOULDER_SPLAT_HANDOFF_PX = 4.5;
-// The splat and thinning limits are the continuum's own (CONTINUUM_SPLAT_PIXELS, continuumThin in js/continuum-core.js).
+// The splat, its band and thinning are the continuum's own (CONTINUUM_SPLAT_PIXELS, CONTINUUM_SPLAT_BAND_PIXELS,
+// continuumSplatShare and continuumThin in js/continuum-core.js).
 
 const BOULDER_RAW_SURFACE = 1.6;
 const BOULDER_RAW_LENGTH_SQUARED = 2.0;
@@ -1659,13 +1659,13 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   }
 
   // Stage 3: Continuous genus-0 half-edge collapse continuum (10.5 -> 3.5 px):
-  //   - 10.5 -> 4.5 px: 100% Early-Z solid continuum!
-  //   -  4.5 -> 3.5 px: MSAA sample_mask handoff into 1-tri splat, which takes 'sFade' of each pixel.
+  //   - 10.5 px -> the core's splat band: 100% Early-Z solid continuum!
+  //   - the band -> 3.5 px: MSAA sample_mask handoff into 1-tri splat, which takes 'sFade' of each pixel.
   if (px >= CONTINUUM_SPLAT_PIXELS) {
     let errNorm = pow(clamp((${BOULDER_BAND_START_PX} - px) / (${BOULDER_BAND_START_PX} - CONTINUUM_SPLAT_PIXELS), 0.0, 1.0), 1.2);
     let stepPack = packMorphStep(arch, errNorm);
-    if (px < ${BOULDER_SPLAT_HANDOFF_PX}) {
-      let sFade = clamp((${BOULDER_SPLAT_HANDOFF_PX} - px) / (${BOULDER_SPLAT_HANDOFF_PX} - CONTINUUM_SPLAT_PIXELS), 0.0, 1.0);
+    if (px < CONTINUUM_SPLAT_BAND_PIXELS) {
+      let sFade = continuumSplatShare(px);
       if (sFade <= 0.0) {
         emitMorphSolid(arch, slot, src, fullMask, stepPack);
       } else if (sFade >= 1.0) {

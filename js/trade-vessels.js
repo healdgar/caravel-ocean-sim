@@ -5008,7 +5008,7 @@ const ARCHETYPE_INDEX_COUNTS = array<u32, ${TRADE_VESSEL_ARCHETYPES}>(${counts.j
 `;
 }
 
-const TRADE_VESSEL_SELECT_WGSL = CONTINUUM_CORE_WGSL + FRAME_WGSL + SHADOW_FRAME + TRADE_SHARED_TYPES_WGSL + /* wgsl */ `
+export const TRADE_VESSEL_SELECT_WGSL = CONTINUUM_CORE_WGSL + FRAME_WGSL + SHADOW_FRAME + TRADE_SHARED_TYPES_WGSL + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<uniform> nearTerrain: TradeNearDomain;
 @group(0) @binding(2) var<uniform> selP: TradeSelectParams;
@@ -5115,7 +5115,10 @@ fn rotateVesselSel(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
     return;
   }
 
-  if (spanPx <= CONTINUUM_SPLAT_PIXELS) {
+  // Over the core's splat band the continuum's last step hands the splat a rising share of each pixel's samples
+  // (continuumSplatShare), so the change is never a cut; under CONTINUUM_SPLAT_PIXELS the splat stands alone.
+  let splatShare = continuumSplatShare(spanPx);
+  if (splatShare > 0.0) {
     // Sub-pixel horizon splats thin by the core's area-preserving hash, seeded by the instance so it holds still.
     let inflate = continuumThin(spanPx, i);
     if (inflate <= 0.0) { return; }
@@ -5127,10 +5130,12 @@ fn rotateVesselSel(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
     let sVert = atomicAdd(&indirect[148u], 3u);
     let sIdx = sVert / 3u;
     if (sIdx < selP.ctrl.w) {
-      splatList[sIdx * 2u] = vec4f(worldCenter, worldHalfW);
-      splatList[sIdx * 2u + 1u] = vec4f(arch.splatCol.rgb, worldHalfH);
+      splatList[sIdx * 3u] = vec4f(worldCenter, worldHalfW);
+      splatList[sIdx * 3u + 1u] = vec4f(arch.splatCol.rgb, worldHalfH);
+      // Its share and its seed, the instance's, which the continuum's half of the band uses too.
+      splatList[sIdx * 3u + 2u] = vec4f(splatShare, f32(i), 0.0, 0.0);
     }
-    return;
+    if (spanPx <= CONTINUUM_SPLAT_PIXELS) { return; }
   }
 
   let stepBase = arch.counts.x;
@@ -5140,9 +5145,9 @@ fn rotateVesselSel(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
   let rawErr = continuumAllowedError(errPx, focal * scaleMul, dist);
   let errAtLo = continuumAllowedError(errPx, focal * scaleMul, distAtLo);
   let stepMaxErr = stepMeta[stepBase + stepCount].x;
-  // The morph reaches the minimal core by ~CONTINUUM_SPLAT_PIXELS at base error (27 / 7.7 px), sooner when coarser,
-  // and never later than the splat, so a finer-than-base scalar cannot pop from a detailed cut into the splat.
-  let morphSpan = min(6.7, nearLoPx / CONTINUUM_SPLAT_PIXELS - 1.0);
+  // The morph reaches the minimal core by the top of the core's splat band at base error, sooner when coarser,
+  // and never later than the band, so a finer-than-base scalar cannot carry a detailed cut into the splat.
+  let morphSpan = min(6.7, nearLoPx / CONTINUUM_SPLAT_BAND_PIXELS - 1.0);
   let contT = clamp((rawErr - errAtLo) / max(errAtLo * morphSpan, 1e-3), 0.0, 1.0);
   let allowedErr = mix(startErrM, stepMaxErr, contT);
   var lo = 0u;
@@ -5157,6 +5162,19 @@ fn rotateVesselSel(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
   let morphT = clamp((allowedErr - e0) / max(e1 - e0, 1e-4), 0.0, 1.0);
   let stepPacked = lo | (u32(round(morphT * 65535.0)) << 16u);
   let triCount = u32(round(stepMeta[stepBase + lo].z));
+  if (splatShare > 0.0) {
+    // In the splat band the continuum draws through the sample-masked half, keeping what the splat does not take
+    // (bit 16 marks it the finer side of the handoff; tvContFS).
+    let fadeVert = atomicAdd(&indirect[144u], triCount * 3u);
+    let fadeTri = fadeVert / 3u;
+    if (fadeTri + triCount <= selP.ctrl.y) {
+      let handed = u32(round(splatShare * 65535.0)) | 0x10000u;
+      for (var t = 0u; t < triCount; t++) {
+        contList[${TRADE_CONT_HALF_TRIS}u + fadeTri + t] = vec4u(i, t, stepPacked, handed);
+      }
+    }
+    return;
+  }
   let startVert = atomicAdd(&indirect[140u], triCount * 3u);
   let startTri = startVert / 3u;
   if (startTri + triCount <= selP.ctrl.y) {
@@ -5244,7 +5262,7 @@ struct TVContOut {
   o.world = worldP;
   o.normal = worldN;
   o.color = colEntry.rgb;
-  o.fade = vec2u(entry.w & 0xFFFFu, entry.x);
+  o.fade = vec2u(entry.w & 0x1FFFFu, entry.x);
   return o;
 }
 
@@ -5272,8 +5290,10 @@ struct TVContFragOut { @location(0) color: vec4f, @builtin(sample_mask) mask: u3
 }
 @fragment fn tvContFS(in: TVContOut, @builtin(front_facing) front: bool) -> TVContFragOut {
   let color = tvContShade(in, front);
-  // Exactly the samples the full ship's tvFS gives up; whole outside the band.
-  let mask = select(continuumSamples(f32(in.fade.x) / 65535.0, in.pos.xy, TV_CONT_SAMPLES, in.fade.y), TV_CONT_MASK_ALL, in.fade.x >= 65535u);
+  // Near the ship it is the coarser side and takes exactly the samples the full ship's tvFS gives up. In the splat
+  // band (bit 16) it is the finer side and keeps exactly those tvSplatFS does not take. Whole outside both bands.
+  let taken = continuumSamples(f32(in.fade.x & 0xFFFFu) / 65535.0, in.pos.xy, TV_CONT_SAMPLES, in.fade.y);
+  let mask = select(select(taken, ~taken & TV_CONT_MASK_ALL, (in.fade.x & 0x10000u) != 0u), TV_CONT_MASK_ALL, in.fade.x == 65535u);
   return TVContFragOut(color, mask);
 }
 `;
@@ -5281,7 +5301,7 @@ struct TVContFragOut { @location(0) color: vec4f, @builtin(sample_mask) mask: u3
 
 export function buildTradeVesselSplatWGSL(samples = 4) {
   const safeSamples = Math.max(1, Math.min(4, samples | 0));
-  return FRAME_WGSL + ATMO_CORE_WGSL + SKY_RENDER_FUNCS + VESSEL_LIGHTING + /* wgsl */ `
+  return CONTINUUM_CORE_WGSL + FRAME_WGSL + ATMO_CORE_WGSL + SKY_RENDER_FUNCS + VESSEL_LIGHTING + /* wgsl */ `
 const TV_SPLAT_SAMPLES: u32 = ${safeSamples}u;
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var transLUT: texture_2d<f32>;
@@ -5295,13 +5315,15 @@ struct TVSplatOut {
   @location(0) world: vec3f,
   @location(1) color: vec3f,
   @location(2) uv: vec2f,
+  @location(3) @interpolate(flat) fade: vec2u,
 };
 
 @vertex fn tvSplatVS(@builtin(vertex_index) vid: u32) -> TVSplatOut {
   let sIdx = vid / 3u;
   let corner = vid % 3u;
-  let a = splatList[sIdx * 2u];
-  let b = splatList[sIdx * 2u + 1u];
+  let a = splatList[sIdx * 3u];
+  let b = splatList[sIdx * 3u + 1u];
+  let c = splatList[sIdx * 3u + 2u];
   var uv = vec2f(0.0, 2.0);
   if (corner == 1u) { uv = vec2f(-1.7320508, -1.0); }
   else if (corner == 2u) { uv = vec2f(1.7320508, -1.0); }
@@ -5314,6 +5336,7 @@ struct TVSplatOut {
   o.world = worldP;
   o.color = b.rgb;
   o.uv = uv;
+  o.fade = vec2u(u32(round(clamp(c.x, 0.0, 1.0) * 65535.0)), u32(c.y));
   return o;
 }
 
@@ -5331,6 +5354,8 @@ struct TVSplatFragOut { @location(0) color: vec4f, @builtin(sample_mask) mask: u
       if (dot(puv, puv) <= 1.0) { mask |= (1u << s); }
     }
   }
+  // In the core's splat band the splat takes only its share of the samples; the continuum keeps the rest.
+  if (in.fade.x < 65535u) { mask &= continuumSamples(f32(in.fade.x) / 65535.0, in.pos.xy, TV_SPLAT_SAMPLES, in.fade.y); }
   let n = normalize(vec3f(in.uv.x * 0.4, 0.72, -0.3) + normalize(F.camPos.xyz - in.world) * 0.55);
   let sunDir = normalize(F.sunDir.xyz);
   let viewDir = normalize(F.camPos.xyz - in.world);
@@ -7012,7 +7037,7 @@ export async function createTradeVessels({
   const srcInstancesBuffer = device.createBuffer({ label: 'trade vessel src instances', size: NEAR_SLICE_BYTES, usage: U_STORAGE | U_COPY_DST });
   const nearOutBuffer = device.createBuffer({ label: 'trade vessel near out', size: 28 * NEAR_SLICE_BYTES, usage: U_STORAGE | U_VERTEX });
   const contListBuffer = device.createBuffer({ label: 'trade vessel cont list', size: 2 * TRADE_CONT_HALF_TRIS * 16, usage: U_STORAGE });
-  const splatListBuffer = device.createBuffer({ label: 'trade vessel splat list', size: MAX_TRADE_VESSELS * 2 * 16, usage: U_STORAGE });
+  const splatListBuffer = device.createBuffer({ label: 'trade vessel splat list', size: MAX_TRADE_VESSELS * 3 * 16, usage: U_STORAGE });
   // COPY_SRC: the continuum census reads the draws' own arguments (continuumDraws below).
   const indirectBuffer = device.createBuffer({ label: 'trade vessel indirect', size: 156 * 4, usage: U_STORAGE | U_INDIRECT | U_COPY_DST | U_COPY_SRC });
 
@@ -9522,7 +9547,7 @@ export async function createTradeVessels({
           pass.setBindGroup(0, contGroup0);
           pass.setBindGroup(1, contGroup1);
           pass.drawIndirect(indirectBuffer, 576);
-          // 4. Horizon silhouette splats (spanPx <= 3.5)
+          // 4. Horizon silhouette splats (from the core's splat band down; sample-masked within it)
           pass.setPipeline(splatPipe);
           pass.setBindGroup(0, splatGroup0);
           pass.setBindGroup(1, splatGroup1);

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // Trees as cluster hierarchies, cut per tree on the GPU so each stays within a pixel error at any
 // distance. Built offline by scripts/prepare-forest-clusters.mjs with the builder from threejs-nanites.
-import { FOREST_CROWN_LIMIT, FOREST_CROWN_NEAREST, FOREST_CROWN_BAND, forestCrownLook, forestCrownSplatLook } from './forest-crowns.js';
+import { FOREST_CROWN_LIMIT, FOREST_CROWN_NEAREST, forestCrownLook, forestCrownSplatLook } from './forest-crowns.js';
 import { CONTINUUM_CORE_WGSL, continuumClusterPrefixWGSL, continuumMorphStepWGSL } from './continuum-core.js';
 import { FOREST_WIND_BONES, FOREST_WIND_SHARED_LANES, FOREST_WIND_SKIN_WGSL } from './forest-wind.js';
 
@@ -125,15 +125,12 @@ const FOREST_CLUSTER_WOOD_LIMIT=.5;
 // A crown takes over from a tree's leaves at the range where a leaf cut of the error its manifest names
 // (crownSize.z) is drawn, so a sharper view or a spyglass carries the change further out; never nearer
 // than the range at which leaf cards have reached their far shape and coverage (forestClusterVertex,
-// forestNativeLeafDepthFS). Over a further share of that distance a tree wears both, sample by sample
-// (forestCrownSamples). Beyond that, its single genus-0 base mesh decimates smoothly one half-edge collapse
+// forestNativeLeafDepthFS). Over the core's handoff band (continuumHandoff) a tree wears both, sample by
+// sample (forestCrownSamples). Beyond that, its single genus-0 base mesh decimates smoothly one half-edge collapse
 // at a time by angular pixel span down to a 4-triangle core and the core's 1-triangle horizon splat
 // (CONTINUUM_SPLAT_PIXELS), thinned below a pixel (continuumThin).
 const FOREST_CROWN_LIMIT=${(crown.limit ?? FOREST_CROWN_LIMIT).toFixed(4)};
 const FOREST_CROWN_NEAREST=${(crown.nearest ?? FOREST_CROWN_NEAREST).toFixed(2)};
-const FOREST_CROWN_BAND=${(crown.band ?? FOREST_CROWN_BAND).toFixed(4)};
-// Under this span a crown stands at its last collapse step and morphs over into its splat.
-const FOREST_CROWN_MORPH_PIXELS=5.2;
 ${continuumClusterPrefixWGSL('forestClusterPrefix', (i) => `clusters[${i}].parentErr`)}
 ${continuumMorphStepWGSL('forestCrownStep', (step) => `bitcast<f32>(crownMorph[bucket.crownLists.w+(${step})*4u+1u])`)}
 fn forestClusterTree(index:u32)->u32{
@@ -172,7 +169,7 @@ fn forestClusterTree(index:u32)->u32{
   let stepCount=bucket.crown.z-1u;
   let away=length(origin);let pixels=parameters.z*FOREST_CROWN_LIMIT;
   let start=max(max(FOREST_CROWN_NEAREST,bucket.crownSize.z*focal/limitLeaf),bucket.crownSize.x*scale*focal/limitLeaf);
-  let share=clamp((away-start)/(start*FOREST_CROWN_BAND),0.,1.);
+  let share=continuumHandoff(away,start);
   if(share>0.){
    crownShare=max(u32(share*255.),1u);
    if(crownShare<255u){
@@ -193,7 +190,8 @@ fn forestClusterTree(index:u32)->u32{
     let allowedErr=continuumAllowedError(pixels,scale*focal,away);
     let found=forestCrownStep(stepCount,allowedErr);
     var stepIdx=u32(found.x);var morphT=found.y;
-    if(crownPixels<FOREST_CROWN_MORPH_PIXELS||stepIdx>=stepCount){stepIdx=stepCount;morphT=1.-smoothstep(CONTINUUM_SPLAT_PIXELS,FOREST_CROWN_MORPH_PIXELS,crownPixels);}
+    // Over the core's splat band a crown stands at its last collapse step and morphs over into its splat.
+    if(crownPixels<CONTINUUM_SPLAT_BAND_PIXELS||stepIdx>=stepCount){stepIdx=stepCount;morphT=continuumSplatShare(crownPixels);}
     let hdr=bucket.crownLists.w+stepIdx*4u;
     let aliveTris=crownMorph[hdr]&65535u;
     let morphByte=u32(clamp(morphT,0.,1.)*255.);
