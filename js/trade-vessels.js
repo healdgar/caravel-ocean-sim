@@ -9,7 +9,6 @@ import { VESSEL_LIGHTING, CANVAS_OPTICS } from './wgsl/vessel.js';
 import { CONTINUUM_SPLAT_PIXELS, CONTINUUM_MIN_PIXELS, CONTINUUM_CORE_WGSL, continuumCoarsening } from './continuum-core.js';
 import { SURFACE_WAVE_SAMPLE } from './wgsl/surface-waves.js';
 import { SHIP_FRACTURE_POSE_UPDATE } from './wgsl/ship-fracture.js';
-import { CREW_JOINT_BLEND_WGSL } from './wgsl/crew.js';
 import { CREW_JOINT_COUNT } from './crew-skeleton.js';
 import { terrainSurfaceSample } from './terrain-model.js';
 import { createShipAssetCache } from './ship-mesh.js';
@@ -25,10 +24,14 @@ import { createVesselDamageState, stepVesselDamage } from './gunnery-control.js'
 import { HULL_DAMAGE_UNIFORM_BYTES, writeHullFloodUniform, writeHullCraters } from './hull-flood.js';
 import { addHullHole, stepHullHoles } from './hull-holes.js';
 import { POSED_VERTEX_LAYOUT } from './vessel-pose.js';
-import { attachCrewComponents, ensureCrewComponentPacks, packCrewCompMask, packCrewFaceW } from './crew-components.js';
-import { colonialGroomMask, reconcileColonialGroomAndComp } from './crew.js';
+import { packCrewCompMask, packCrewFaceW } from './crew-components.js';
+import { colonialGroomMask, createIndigenousCrewModels, reconcileColonialGroomAndComp, CREW_ACTOR_FLOATS } from './crew.js';
 import { DRESS_MASK_SCALE } from './indigenous-dress.js';
-import { createDistantCrewLOD } from './crew-lod.js';
+import {
+  createCrewContinuumBatch, createCrewContinuumPoser, createCrewContinuumWorldHull, crewContinuumBodyFor, crewContinuumRestPlaces,
+  loadCrewContinuumBody, requestCrewContinuumPipelines, requestCrewContinuumPose,
+} from './crew-continuum-draw.js';
+import { CREW_CONTINUUM_LOOK_WORDS, CREW_CONTINUUM_ORDER_IMPORTANT, CREW_CONTINUUM_PLACED_WGSL, CREW_CONTINUUM_PLACED_WORDS } from './wgsl/crew-continuum.js';
 import { bakeTownClips, bakeWorkStationClip } from './town-clips.js';
 import { poseSeatedCrew, solveCrewLimb, turnBone } from './crew-pose.js';
 import { poseCrewFingers } from './crew-physics.js';
@@ -40,11 +43,6 @@ export const TRADE_VESSEL_INSTANCE_FLOATS = 12; // posYaw(4), attitudeScaleArch(
 export const TRADE_VESSEL_ARCHETYPES = 7; // 0: cog sail, 1: cog moored, 2: carrack sail, 3: carrack moored, 4: river barge, 5: lateen caravel, 6: harbor barque
 export const MAX_TRADE_VESSELS = 84;
 export const MAX_DECK_STATIONS_PER_VESSEL = 10;
-export const DECK_CREW_TIERS = 4;
-export const DECK_CREW_CROSSFADE_HI_PX = 10.0;
-export const DECK_CREW_SPLAT_PIXELS = 4.0;
-// Deck-crew splats thin below the continuum's own limit (continuumThin in js/continuum-core.js).
-export const DECK_CREW_MIN_PIXELS = CONTINUUM_MIN_PIXELS;
 
 export const VESSEL_CONTINUUM_BAND = 0.25;
 // The vessel cut's pixel error at the scene's base error; the cut and the near band below scale with
@@ -5560,28 +5558,42 @@ fn tvStepDampedSpring(x: f32, v: f32, goal: f32, omega: f32, zeta: f32, dt: f32)
 `;
 
 // ============================================================================
-// 100% GPU Crew-Skeleton Rigged Deck-Crew Assets, 3D Merchant Codex & Shaders
+// Deck hands, placed on the GPU and drawn through the people continuum (AGENTS.md rule 3)
 // ============================================================================
-const DECK_CREW_MODELS = 2; // 0: male (sailor), 1: female
-const DECK_CREW_BUCKETS = DECK_CREW_MODELS * DECK_CREW_TIERS + DECK_CREW_MODELS * 2; // 0..7 solid render, 8..9 shadow, 10..11 crossfade
-const DECK_CREW_DRAW_WORDS = 68; // 12 * 5 DrawIndexedIndirect + 4 DrawIndirect splat + 4 pad
-const DECK_CREW_BODY_WORDS = 8; // 32 bytes per visible soul
-const DECK_CREW_STATION_WORDS = 8; // 32 bytes per (vesselSlot, stationIdx)
-const DECK_CREW_LOOK_WORDS = 20; // 80 bytes TownLook
+// Each soul at a vessel's deck station is placed each frame by one compute pass, from the vessel's pose on the GPU
+// and the station's clip, as a CrewPlaced record (js/wgsl/crew-continuum.js) compacted by the body they wear. The
+// continuum's pose pass, cut and draws do the rest, as for the townsfolk; nothing on the CPU touches them a frame.
+// Bodies a ship may carry: hands of either sex, captains and factors, and the paddlers of an island canoe.
+const DECK_CREW_BODY_LIMIT = 8;
+// Each body's run of slots begins where a bind group may (256 bytes of joints and actors).
+const DECK_CREW_SLOT_ALIGNMENT = 16;
+// The counts the placing pass keeps: each body's indirect dispatch (count, 1, 1, unused), then the indexed draw its
+// old body would take (index count, instances, 0, 0, 0).
+export const DECK_CREW_DISPATCH_WORDS = 4;
+export const DECK_CREW_FALLBACK_AT = DECK_CREW_BODY_LIMIT * DECK_CREW_DISPATCH_WORDS;
+export const DECK_CREW_FALLBACK_WORDS = 5;
+export const DECK_CREW_COUNT_WORDS = DECK_CREW_FALLBACK_AT + DECK_CREW_BODY_LIMIT * DECK_CREW_FALLBACK_WORDS;
+// A station: where on the deck and which way (4 floats), what it does (4 words), and who stands there (4 words).
+export const DECK_CREW_STATION_WORDS = 12;
+// The pass's uniform: its counts (4 words), and each body's first slot, room, and work clip (4 words each).
+export const DECK_CREW_CONFIG_BYTES = 16 + DECK_CREW_BODY_LIMIT * 16;
+// Moisture slots the drawing reads (four): dry but for the rain.
+const DECK_CREW_MOISTURE_SLOTS = 4;
+const DECK_CREW_LOOK_WORDS = CREW_CONTINUUM_LOOK_WORDS;
 const DECK_CREW_MAX_TOTAL = MAX_TRADE_VESSELS * MAX_DECK_STATIONS_PER_VESSEL;
 const DECK_CREW_JOINT_FLOATS = CREW_JOINT_COUNT * 16;
+const DECK_CREW_JOINT_BYTES = CREW_JOINT_COUNT * 64;
+const DECK_CREW_ACTOR_BYTES = CREW_ACTOR_FLOATS * 4;
+const DECK_CREW_PLACED_BYTES = CREW_CONTINUUM_PLACED_WORDS * 4;
 
-const DECK_CREW_VERTEX_BUFFERS = Object.freeze([{
-  arrayStride: 60,
-  stepMode: 'vertex',
-  attributes: Object.freeze([
-    { shaderLocation: 0, offset: 0, format: 'float32x3' },
-    { shaderLocation: 1, offset: 12, format: 'float32x3' },
-    { shaderLocation: 2, offset: 24, format: 'float32x3' },
-    { shaderLocation: 3, offset: 36, format: 'uint16x4' },
-    { shaderLocation: 4, offset: 44, format: 'float32x4' },
-  ]),
-}]);
+// The body a soul at a station wears: captains, and factors who are men, the captain's; island paddlers their own pair.
+export function deckCrewBodyFor(role, female) {
+  return crewContinuumBodyFor({
+    sex: female ? 'female' : 'male',
+    role: role === 'captain' || (role === 'merchant' && !female) ? 'captain' : 'hand',
+    culture: role === 'paddler' ? 'caribbean' : null,
+  });
+}
 
 const DECK_CREW_SHIRTS = Object.freeze([
   [0.58, 0.53, 0.43], [0.20, 0.28, 0.36], [0.42, 0.14, 0.09], [0.30, 0.32, 0.20],
@@ -5621,190 +5633,6 @@ function deckCrewStringHash(str) {
     h = Math.imul(h, 16777619) >>> 0;
   }
   return h | 0;
-}
-
-function invertMat4ColMajor(m) {
-  const inv = new Float32Array(16);
-  const m00 = m[0], m01 = m[1], m02 = m[2], m03 = m[3];
-  const m10 = m[4], m11 = m[5], m12 = m[6], m13 = m[7];
-  const m20 = m[8], m21 = m[9], m22 = m[10], m23 = m[11];
-  const m30 = m[12], m31 = m[13], m32 = m[14], m33 = m[15];
-
-  const b00 = m00 * m11 - m01 * m10;
-  const b01 = m00 * m12 - m02 * m10;
-  const b02 = m00 * m13 - m03 * m10;
-  const b03 = m01 * m12 - m02 * m11;
-  const b04 = m01 * m13 - m03 * m11;
-  const b05 = m02 * m13 - m03 * m12;
-  const b06 = m20 * m31 - m21 * m30;
-  const b07 = m20 * m32 - m22 * m30;
-  const b08 = m20 * m33 - m23 * m30;
-  const b09 = m21 * m32 - m22 * m31;
-  const b10 = m21 * m33 - m23 * m31;
-  const b11 = m22 * m33 - m23 * m32;
-
-  const det = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
-  if (Math.abs(det) < 1e-10) {
-    inv[0] = 1; inv[5] = 1; inv[10] = 1; inv[15] = 1;
-    return inv;
-  }
-  const invDet = 1.0 / det;
-  inv[0] = (m11 * b11 - m12 * b10 + m13 * b09) * invDet;
-  inv[1] = (-m01 * b11 + m02 * b10 - m03 * b09) * invDet;
-  inv[2] = (m31 * b05 - m32 * b04 + m33 * b03) * invDet;
-  inv[3] = (-m21 * b05 + m22 * b04 - m23 * b03) * invDet;
-  inv[4] = (-m10 * b11 + m12 * b08 - m13 * b07) * invDet;
-  inv[5] = (m00 * b11 - m02 * b08 + m03 * b07) * invDet;
-  inv[6] = (-m30 * b05 + m32 * b02 - m33 * b01) * invDet;
-  inv[7] = (m20 * b05 - m22 * b02 + m23 * b01) * invDet;
-  inv[8] = (m10 * b10 - m11 * b08 + m13 * b06) * invDet;
-  inv[9] = (-m00 * b10 + m01 * b08 - m03 * b06) * invDet;
-  inv[10] = (m30 * b04 - m31 * b02 + m33 * b00) * invDet;
-  inv[11] = (-m20 * b04 + m21 * b02 - m23 * b00) * invDet;
-  inv[12] = (-m10 * b09 + m11 * b07 - m12 * b06) * invDet;
-  inv[13] = (m00 * b09 - m01 * b07 + m02 * b06) * invDet;
-  inv[14] = (-m30 * b03 + m31 * b01 - m32 * b00) * invDet;
-  inv[15] = (m20 * b03 - m21 * b01 + m22 * b00) * invDet;
-  return inv;
-}
-
-// Clones a crew GLB model, attaches 3D period garment/hat/beard components, and appends a
-// watertight 3D leather-and-parchment merchant codex mesh bound to `hand_l` (comp = 24u).
-export function appendMerchantCodexToModel(srcModel, sex = 'male') {
-  if (!srcModel?.vertices || !srcModel?.animator) return null;
-  const rawBytes = srcModel.vertices.buffer.slice(
-    srcModel.vertices.byteOffset,
-    srcModel.vertices.byteOffset + srcModel.vertices.byteLength,
-  );
-  const model = {
-    ...srcModel,
-    componentsAttached: Boolean(srcModel.componentsAttached),
-    distantIndices: srcModel.distantIndices ?? null,
-    vertices: new Float32Array(rawBytes),
-    vertexCount: srcModel.vertexCount ?? (srcModel.vertices.byteLength / 60),
-    indices: srcModel.indices.slice(),
-    lods: Array.isArray(srcModel.lods)
-      ? srcModel.lods.map((l) => ({ ...l, indices: l.indices.slice(), indexCount: l.indexCount ?? l.indices.length }))
-      : null,
-  };
-  if (!model.componentsAttached) {
-    attachCrewComponents(model, sex);
-  }
-
-  const distantIndices = createDistantCrewLOD(model);
-  const a = model.animator;
-  const handNode = a.nodeIndex ? a.nodeIndex('hand_l') : -1;
-  const handJoint = handNode >= 0 && a.joints ? a.joints.indexOf(handNode) : -1;
-  if (handJoint < 0 || !a.inverseBinds) {
-    const baseLods = model.lods ?? [{ indices: model.indices, indexCount: model.indices.length }];
-    return {
-      model,
-      tiers: [
-        baseLods[0],
-        baseLods[1] ?? baseLods[0],
-        baseLods[2] ?? baseLods[1] ?? baseLods[0],
-        { indices: distantIndices, indexCount: distantIndices.length },
-      ],
-      codexVertexCount: 0,
-      codexIndexCount: 0,
-    };
-  }
-
-  const ibm = a.inverseBinds.subarray(handJoint * 16, handJoint * 16 + 16);
-  const bindWorld = invertMat4ColMajor(ibm);
-  const codexVerts = [];
-  const codexInds = [];
-  const baseVert = model.vertexCount ?? (model.vertices.byteLength / 60);
-
-  const pushCodexBox = (x0, x1, y0, y1, z0, z1, garment, shadeBase) => {
-    const faces = [
-      { n: [0, 0, 1], p: [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]], s: 1.06 },
-      { n: [0, 0, -1], p: [[x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0]], s: 0.88 },
-      { n: [1, 0, 0], p: [[x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1]], s: 0.98 },
-      { n: [-1, 0, 0], p: [[x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]], s: 0.92 },
-      { n: [0, 1, 0], p: [[x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [x0, y1, z0]], s: 1.08 },
-      { n: [0, -1, 0], p: [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]], s: 0.82 },
-    ];
-    for (const f of faces) {
-      const vStart = baseVert + codexVerts.length;
-      const sh = Math.max(0.66, Math.min(1.16, shadeBase * f.s));
-      const nx = bindWorld[0] * f.n[0] + bindWorld[4] * f.n[1] + bindWorld[8] * f.n[2];
-      const ny = bindWorld[1] * f.n[0] + bindWorld[5] * f.n[1] + bindWorld[9] * f.n[2];
-      const nz = bindWorld[2] * f.n[0] + bindWorld[6] * f.n[1] + bindWorld[10] * f.n[2];
-      const nLen = Math.hypot(nx, ny, nz) || 1;
-      for (const pt of f.p) {
-        const px = bindWorld[0] * pt[0] + bindWorld[4] * pt[1] + bindWorld[8] * pt[2] + bindWorld[12];
-        const py = bindWorld[1] * pt[0] + bindWorld[5] * pt[1] + bindWorld[9] * pt[2] + bindWorld[13];
-        const pz = bindWorld[2] * pt[0] + bindWorld[6] * pt[1] + bindWorld[10] * pt[2] + bindWorld[14];
-        codexVerts.push({
-          pos: [px, py, pz],
-          nrm: [nx / nLen, ny / nLen, nz / nLen],
-          // comp = 24u => color.g = 48.0 + sh; garment = 5u (leather) or 6u (parchment) => color.b = 2*garment + sh
-          col: [sh, 48.0 + sh, 2.0 * garment + sh],
-        });
-      }
-      codexInds.push(vStart, vStart + 1, vStart + 2, vStart, vStart + 2, vStart + 3);
-    }
-  };
-
-  // 1. Stiff dark-leather ledger boards & ribbed spine held in hand_l palm
-  pushCodexBox(-0.072, 0.072, 0.025, 0.205, 0.014, 0.026, 5, 0.94);
-  // 2. Cream laid-rag parchment page block slightly inset from leather boards
-  pushCodexBox(-0.064, 0.066, 0.033, 0.197, 0.026, 0.048, 6, 1.04);
-  // 3. Upper leather cover leaf & brass fore-edge clasp strap
-  pushCodexBox(-0.072, 0.072, 0.025, 0.205, 0.048, 0.055, 5, 0.98);
-  pushCodexBox(0.058, 0.075, 0.098, 0.132, 0.013, 0.057, 5, 1.12);
-
-  const totalVerts = baseVert + codexVerts.length;
-  const mergedBuf = new ArrayBuffer(totalVerts * 60);
-  new Uint8Array(mergedBuf).set(new Uint8Array(model.vertices.buffer, model.vertices.byteOffset, baseVert * 60));
-  const f32 = new Float32Array(mergedBuf);
-  const u16 = new Uint16Array(mergedBuf);
-  for (let i = 0; i < codexVerts.length; i++) {
-    const vIdx = baseVert + i;
-    const fOff = vIdx * 15;
-    const uOff = vIdx * 30;
-    const cv = codexVerts[i];
-    f32[fOff + 0] = cv.pos[0];
-    f32[fOff + 1] = cv.pos[1];
-    f32[fOff + 2] = cv.pos[2];
-    f32[fOff + 3] = cv.nrm[0];
-    f32[fOff + 4] = cv.nrm[1];
-    f32[fOff + 5] = cv.nrm[2];
-    f32[fOff + 6] = cv.col[0];
-    f32[fOff + 7] = cv.col[1];
-    f32[fOff + 8] = cv.col[2];
-    u16[uOff + 18] = handJoint;
-    u16[uOff + 19] = 0;
-    u16[uOff + 20] = 0;
-    u16[uOff + 21] = 0;
-    f32[fOff + 11] = 1.0;
-    f32[fOff + 12] = 0.0;
-    f32[fOff + 13] = 0.0;
-    f32[fOff + 14] = 0.0;
-  }
-  model.vertices = f32;
-  model.vertexCount = totalVerts;
-
-  const appendInds = (arr) => {
-    const out = new Uint32Array(arr.length + codexInds.length);
-    out.set(arr, 0);
-    out.set(codexInds, arr.length);
-    return { indices: out, indexCount: out.length };
-  };
-  const baseLods = model.lods ?? [{ indices: model.indices, indexCount: model.indices.length }];
-  const tier0 = appendInds(baseLods[0].indices);
-  const tier1 = appendInds((baseLods[1] ?? baseLods[0]).indices);
-  const tier2Src = baseLods[2] ?? baseLods[1] ?? baseLods[0];
-  const tier2 = { indices: new Uint32Array(tier2Src.indices), indexCount: tier2Src.indices.length };
-  const tier3 = { indices: new Uint32Array(distantIndices), indexCount: distantIndices.length };
-
-  return {
-    model,
-    tiers: [tier0, tier1, tier2, tier3],
-    codexVertexCount: codexVerts.length,
-    codexIndexCount: codexInds.length,
-  };
 }
 
 // Bakes 7 crew-skeleton deck station clips once at init:
@@ -6014,75 +5842,26 @@ export function bakeDeckCrewClips(a) {
   return { palettes, layout };
 }
 
-const DECK_CREW_SHARED_WGSL = /* wgsl */ `
+// The pass that places every deck hand, and the one that empties its counts before it. One module, two entry points.
+export const DECK_CREW_PLACE_WGSL = FRAME_WGSL + SHADOW_FRAME + TRADE_SHARED_TYPES_WGSL + CREW_CONTINUUM_PLACED_WGSL + /* wgsl */ `
 struct DeckCrewConfig {
-  ctrl: vec4u,        // activeVessels, maxStationsPerVessel, bucketSpan, samples
-  splatCtrl: vec4u,   // maxSplats, lookCount, maleBraceStart, maleBraceLen
-  femaleBrace: vec4u, // femaleBraceStart, femaleBraceLen, pad, pad
-  thresholds: vec4f,  // hiCrossPx (10.0), splatPx (4.0), minPx (1.0, informational: continuumThin uses CONTINUUM_MIN_PIXELS), pad
+  ctrl: vec4u,                                    // vessels, stations a vessel, bodies, looks
+  runs: array<vec4u, ${DECK_CREW_BODY_LIMIT}>,    // each body's first slot, room, and work clip's first frame and length
 };
-struct DeckStationGPU {
-  localPosYaw: vec4f, // x, y, z (metres), yaw
-  stationMeta: vec4u, // flags(active|model<<1|merchant<<2|poseKind<<4), clipFirst|(clipLen<<16), lookIdx, phaseBits
+struct DeckStation {
+  localPosYaw: vec4f, // metres on the deck, and the way they face
+  work: vec4u,        // active | body << 1 | clip << 4, the clip's first frame | its length << 16, look, phase (f32 bits)
+  who: vec4u,         // identity, unused, unused, unused
 };
-struct DeckCrewBody {
-  localPosYaw: vec4f,
-  vesselSlot: u32,
-  framesPacked: u32,  // frameA | (frameB << 16)
-  blendBrace: u32,    // blend16 | (braceWeight16 << 16)
-  lookFlags: u32,     // lookIdx(10) | (isMerchant<<10) | (braceFrame<<11) | (splatFade11<<21)
-};
-struct TownLook {
-  shirt: vec4f,
-  trousers: vec4f,
-  skin: vec4f,
-  hair: vec4f,
-  face: vec4f,
-};
-`;
-
-export function buildDeckCrewClearWGSL(tierCounts = [[300, 300, 300, 300], [300, 300, 300, 300]]) {
-  const m0 = tierCounts[0] ?? [300, 300, 300, 300];
-  const m1 = tierCounts[1] ?? m0;
-  const bucketIdxCounts = [
-    m0[0], m0[1], m0[2], m0[3],
-    m1[0], m1[1], m1[2], m1[3],
-    m0[3], m1[3],
-    m0[3], m1[3],
-  ].map((n) => `${Math.max(0, n | 0)}u`);
-  return /* wgsl */ `
-const DECK_BUCKET_INDEX_COUNTS = array<u32, ${DECK_CREW_BUCKETS}>(${bucketIdxCounts.join(', ')});
-@group(0) @binding(0) var<storage, read_write> crewDraws: array<u32>;
-@compute @workgroup_size(1) fn main() {
-  for (var b = 0u; b < ${DECK_CREW_BUCKETS}u; b++) {
-    let base = b * 5u;
-    crewDraws[base] = DECK_BUCKET_INDEX_COUNTS[b];
-    crewDraws[base + 1u] = 0u;
-    crewDraws[base + 2u] = 0u;
-    crewDraws[base + 3u] = 0u;
-    crewDraws[base + 4u] = 0u;
-  }
-  crewDraws[60u] = 0u;
-  crewDraws[61u] = 1u;
-  crewDraws[62u] = 0u;
-  crewDraws[63u] = 0u;
-}
-`;
-}
-
-export const DECK_CREW_CLEAR_WGSL = /* @__PURE__ */ buildDeckCrewClearWGSL();
-
-export const DECK_CREW_SELECT_WGSL = CONTINUUM_CORE_WGSL + FRAME_WGSL + SHADOW_FRAME + TRADE_SHARED_TYPES_WGSL + DECK_CREW_SHARED_WGSL + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<uniform> nearTerrain: TradeNearDomain;
-@group(0) @binding(2) var<uniform> crewCfg: DeckCrewConfig;
+@group(0) @binding(2) var<uniform> deckCfg: DeckCrewConfig;
 @group(0) @binding(3) var<storage, read> srcInstances: array<TradeInstance>;
-@group(0) @binding(4) var<storage, read> crewStations: array<DeckStationGPU>;
-@group(0) @binding(5) var<storage, read> crewLooks: array<TownLook>;
-@group(0) @binding(6) var<storage, read_write> crewBodies: array<DeckCrewBody>;
-@group(0) @binding(7) var<storage, read_write> crewSplatList: array<vec4f>;
-@group(0) @binding(8) var<storage, read_write> crewDraws: array<atomic<u32>>;
-@group(0) @binding(9) var<uniform> landSH: ShadowFrame;
+@group(0) @binding(4) var<storage, read> stations: array<DeckStation>;
+@group(0) @binding(5) var<storage, read_write> placed: array<CrewPlaced>;
+@group(0) @binding(6) var<storage, read_write> counts: array<atomic<u32>>;
+@group(0) @binding(7) var<uniform> landSH: ShadowFrame;
+@group(0) @binding(8) var<storage, read_write> moisture: array<vec2f>;
 
 fn rotateDeckShip(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
   let cr = cos(roll); let sr = sin(roll);
@@ -6095,13 +5874,21 @@ fn rotateDeckShip(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
   return vec3f(ch * xx - sh * zp, yp, sh * xx + ch * zp);
 }
 
-@compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id: vec3u) {
-  let gid = id.x;
-  let maxSt = max(crewCfg.ctrl.y, 1u);
-  let vesselSlot = gid / maxSt;
-  if (vesselSlot >= crewCfg.ctrl.x) { return; }
-  let st = crewStations[gid];
-  let flags = st.stationMeta.x;
+@compute @workgroup_size(${DECK_CREW_BODY_LIMIT}) fn deckCrewReset(@builtin(local_invocation_index) body: u32) {
+  atomicStore(&counts[body * ${DECK_CREW_DISPATCH_WORDS}u], 0u);
+  atomicStore(&counts[${DECK_CREW_FALLBACK_AT}u + body * ${DECK_CREW_FALLBACK_WORDS}u + 1u], 0u);
+}
+
+@compute @workgroup_size(64) fn deckCrewPlace(@builtin(global_invocation_id) id: vec3u) {
+  // Rain and sleet wet them, as they do the townsfolk; nothing else the frame carries does.
+  if (id.x == 0u) {
+    let rain = clamp(F.reserved.x, 0.0, 1.0) * select(0.0, 1.0, F.reserved.y < 0.5 || (F.reserved.y > 1.5 && F.reserved.y < 2.5));
+    for (var i = 0u; i < ${DECK_CREW_MOISTURE_SLOTS}u; i++) { moisture[i] = vec2f(rain * 0.65, rain * 0.75); }
+  }
+  let vesselSlot = id.x / max(deckCfg.ctrl.y, 1u);
+  if (vesselSlot >= deckCfg.ctrl.x) { return; }
+  let st = stations[id.x];
+  let flags = st.work.x;
   if ((flags & 1u) == 0u) { return; }
 
   let inst = srcInstances[vesselSlot];
@@ -6110,655 +5897,67 @@ fn rotateDeckShip(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
   let roll = inst.attScaleArch.y;
   let scaleMul = max(inst.attScaleArch.z, 0.25);
   let shipWorld = inst.posYaw.xyz + vec3f(nearTerrain.grid.y, 0.0, nearTerrain.grid.z);
+  let body = min((flags >> 1u) & 7u, ${DECK_CREW_BODY_LIMIT - 1}u);
+  let clipKind = (flags >> 4u) & 7u;
+  let isSeated = clipKind >= 4u;
 
-  let modelIdx = (flags >> 1u) & 1u;
-  let isMerchant = (flags >> 2u) & 1u;
-  let poseKind = (flags >> 4u) & 7u;
-  let isSeated = poseKind >= 4u;
-  let bodyHeightM = select(1.74, 1.16, isSeated);
-  let halfHeightM = bodyHeightM * 0.5;
-  let splatLocalOffset = select(vec3f(0.0, halfHeightM, 0.0), vec3f(0.0, halfHeightM + 0.06, 0.10), isSeated);
+  // Where they stand, carried with the vessel. The station scales with the hull; an adult never does.
+  let crewBodyScale = 1.0;
+  let cY = cos(st.localPosYaw.w);
+  let sY = sin(st.localPosYaw.w);
+  let origin = shipWorld + rotateDeckShip(st.localPosYaw.xyz * scaleMul, yaw, pitch, roll);
+  let transform = mat4x4f(
+    vec4f(rotateDeckShip(vec3f(cY, 0.0, -sY), yaw, pitch, roll) * crewBodyScale, 0.0),
+    vec4f(rotateDeckShip(vec3f(0.0, 1.0, 0.0), yaw, pitch, roll) * crewBodyScale, 0.0),
+    vec4f(rotateDeckShip(vec3f(sY, 0.0, cY), yaw, pitch, roll) * crewBodyScale, 0.0),
+    vec4f(origin, 1.0),
+  );
 
-  let stDeck = st.localPosYaw.xyz * scaleMul;
-  let worldCenter = shipWorld + rotateDeckShip(stDeck + splatLocalOffset, yaw, pitch, roll);
-  let shipUpWorld = normalize(rotateDeckShip(vec3f(0.0, 1.0, 0.0), yaw, pitch, roll));
-
-  let clipFirst = st.stationMeta.y & 0xFFFFu;
-  let clipLen = max(1u, (st.stationMeta.y >> 16u) & 0xFFFFu);
-  let lookIdx = min(st.stationMeta.z, max(1u, crewCfg.splatCtrl.y) - 1u);
-  let phaseOff = bitcast<f32>(st.stationMeta.w);
-
-  var cyc = fract(F.camPos.w * 0.42 + phaseOff);
-  if (isSeated) {
-    let oarActive = inst.animSink.y > 0.035;
-    let rowRad = F.camPos.w * 2.15 + inst.animSink.x + phaseOff;
-    cyc = select(
-      0.5,
-      fract(rowRad / 6.2831853),
-      oarActive,
-    );
+  // Kept if in sight, or near enough to cast a shadow into it.
+  let centre = origin + transform[1].xyz * select(0.87, 0.64, isSeated);
+  let toCam = centre - F.camPos.xyz;
+  var kept = false;
+  if (landSH.origin.w > 0.5 && length(toCam) < 360.0) {
+    let shP = landSH.lightView * vec4f(centre - landSH.origin.xyz, 1.0);
+    kept = abs(shP.x) <= 1.12 && abs(shP.y) <= 1.12 && shP.z >= -0.15 && shP.z <= 1.12;
   }
-  let exactFrame = clamp(cyc * f32(clipLen), 0.0, max(0.0, f32(clipLen) - 1e-3));
-  let f0 = min(u32(exactFrame), clipLen - 1u);
-  let f1 = (f0 + 1u) % clipLen;
-  let blend = fract(exactFrame);
-
-  var braceWeight = 0.0;
-  if (!isSeated) {
-    braceWeight = select(
-      clamp((abs(roll) - 0.14) * 2.2, 0.0, 0.45),
-      0.0,
-      poseKind == 1u,
-    );
-  }
-  let braceStart = select(crewCfg.splatCtrl.z, crewCfg.femaleBrace.x, modelIdx == 1u);
-  let braceLen = max(1u, select(crewCfg.splatCtrl.w, crewCfg.femaleBrace.y, modelIdx == 1u));
-  let braceFrame = braceStart + (u32(fract(F.camPos.w * 0.38 + phaseOff) * f32(braceLen)) % braceLen);
-
-  let framesPacked = (clipFirst + f0) | ((clipFirst + f1) << 16u);
-  let blendBrace = u32(round(blend * 65535.0)) | (u32(round(braceWeight * 65535.0)) << 16u);
-
-  // 1. Shadow caster bucket when inside land shadow frustum
-  let toCamRaw = worldCenter - F.camPos.xyz;
-  let rawDist = length(toCamRaw);
-  if (landSH.origin.w > 0.5 && rawDist < 360.0) {
-    let shP = landSH.lightView * vec4f(worldCenter - landSH.origin.xyz, 1.0);
-    if (abs(shP.x) <= 1.12 && abs(shP.y) <= 1.12 && shP.z >= -0.15 && shP.z <= 1.12) {
-      let shBucket = 8u + modelIdx;
-      let shSlot = atomicAdd(&crewDraws[shBucket * 5u + 1u], 1u);
-      if (shSlot < crewCfg.ctrl.z) {
-        let shFlags = (lookIdx & 0x3FFu) | (isMerchant << 10u) | ((braceFrame & 0x3FFu) << 11u);
-        crewBodies[shBucket * crewCfg.ctrl.z + shSlot] = DeckCrewBody(
-          st.localPosYaw, vesselSlot, framesPacked, blendBrace, shFlags,
-        );
-      }
-    }
-  }
-
-  // 2. Camera frustum & continuous pixel-span LOD / MSAA crossfade / 1-triangle silhouette splat
-  let curved = earthCurve(toCamRaw, F.camPos.y);
-  let dist = max(length(curved), 0.75);
-  let clip = F.viewProj * vec4f(curved, 1.0);
+  let clip = F.viewProj * vec4f(earthCurve(toCam, F.camPos.y), 1.0);
   let tanX = max(length(F.camRight.xyz), 0.15);
   let tanY = max(length(F.camUp.xyz), 0.15);
   let wEff = max(clip.w, 1.0);
-  if (clip.w < -1.6 || abs(clip.x) > wEff * 1.16 + 1.4 / tanX || abs(clip.y) > wEff * 1.16 + 1.4 / tanY) { return; }
+  kept = kept || !(clip.w < -1.6 || abs(clip.x) > wEff * 1.16 + 1.4 / tanX || abs(clip.y) > wEff * 1.16 + 1.4 / tanY);
+  if (!kept) { return; }
 
-  let focal = 0.5 * F.screen.y / tanY;
-  let pixels = continuumPixels(bodyHeightM, focal, dist);
-  let hiCrossPx = crewCfg.thresholds.x; // 10.0 px
-  let splatPx = crewCfg.thresholds.y;   // 4.0 px
-
-  if (pixels >= hiCrossPx) {
-    let tier = select(select(select(3u, 2u, pixels >= 26.0), 1u, pixels >= 68.0), 0u, pixels >= 150.0);
-    let bucket = modelIdx * 4u + tier;
-    let slot = atomicAdd(&crewDraws[bucket * 5u + 1u], 1u);
-    if (slot < crewCfg.ctrl.z) {
-      let lookFlags = (lookIdx & 0x3FFu) | (isMerchant << 10u) | ((braceFrame & 0x3FFu) << 11u);
-      crewBodies[bucket * crewCfg.ctrl.z + slot] = DeckCrewBody(
-        st.localPosYaw, vesselSlot, framesPacked, blendBrace, lookFlags,
-      );
-    }
-    return;
-  }
-
-  let look = crewLooks[lookIdx];
-  let meanCol = look.shirt.rgb * 0.46 + look.trousers.rgb * 0.30 + look.skin.rgb * 0.14 + look.hair.rgb * 0.10;
-  let baseHalfW = select(0.28, 0.33, isSeated);
-  let baseHalfH = select(halfHeightM * 1.04, halfHeightM * 0.96, isSeated);
-  let signedHalfW = select(baseHalfW, -baseHalfW, isSeated);
-
-  if (pixels > splatPx) {
-    // 10.0 -> 4.0 px: MSAA @builtin(sample_mask) crossfade between distant 3D mesh (buckets 10..11) and 1-triangle silhouette splat
-    let rawShare = clamp(smoothstep(hiCrossPx, splatPx, pixels), 0.0, 0.999);
-    let fadeBits = min(2047u, u32(round(rawShare * 2047.0)));
-    let bucket = 10u + modelIdx;
-    let slot = atomicAdd(&crewDraws[bucket * 5u + 1u], 1u);
-    if (slot < crewCfg.ctrl.z) {
-      let lookFlags = (lookIdx & 0x3FFu) | (isMerchant << 10u) | ((braceFrame & 0x3FFu) << 11u) | (fadeBits << 21u);
-      crewBodies[bucket * crewCfg.ctrl.z + slot] = DeckCrewBody(
-        st.localPosYaw, vesselSlot, framesPacked, blendBrace, lookFlags,
-      );
-    }
-    let sVert = atomicAdd(&crewDraws[60u], 3u);
-    let sIdx = sVert / 3u;
-    if (sIdx < crewCfg.splatCtrl.x) {
-      crewSplatList[sIdx * 3u] = vec4f(worldCenter, signedHalfW);
-      crewSplatList[sIdx * 3u + 1u] = vec4f(meanCol, baseHalfH);
-      // fadeBits + 2048 * lookIdx (the body's seed, as the mesh side reads it), exact in f32.
-      crewSplatList[sIdx * 3u + 2u] = vec4f(shipUpWorld, f32(fadeBits | ((lookIdx & 0x3FFu) << 11u)));
-    }
-    return;
-  }
-
-  // <= 4.0 px down to < 1.0 px: 1-triangle silhouette splat, thinned below CONTINUUM_MIN_PIXELS by the core's
-  // area-preserving hash and inflation.
-  let inflate = continuumThin(pixels, gid);
-  if (inflate <= 0.0) { return; }
-  let sVert = atomicAdd(&crewDraws[60u], 3u);
-  let sIdx = sVert / 3u;
-  if (sIdx < crewCfg.splatCtrl.x) {
-    crewSplatList[sIdx * 3u] = vec4f(worldCenter, signedHalfW * inflate);
-    crewSplatList[sIdx * 3u + 1u] = vec4f(meanCol, baseHalfH * inflate);
-    // 2047: the whole splat, no band.
-    crewSplatList[sIdx * 3u + 2u] = vec4f(shipUpWorld, f32(2047u | ((lookIdx & 0x3FFu) << 11u)));
-  }
-}
-`;
-
-const DECK_CREW_SKINNING_HELPERS_WGSL = CREW_JOINT_BLEND_WGSL + /* wgsl */ `
-struct DeckCrewInput {
-  @location(0) position: vec3f,
-  @location(1) normal: vec3f,
-  @location(2) color: vec3f,
-  @location(3) bones: vec4u,
-  @location(4) weights: vec4f,
-  @builtin(instance_index) instance: u32,
-};
-struct DeckCrewSurface { position: vec3f, normal: vec3f };
-
-fn deckCrewRamp(lo: f32, hi: f32, x: f32) -> vec2f {
-  let t = clamp((x - lo) / (hi - lo), 0.0, 1.0);
-  return vec2f(t * t * (3.0 - 2.0 * t), 6.0 * t * (1.0 - t) / (hi - lo));
-}
-fn deckCrewDressOf(hairW: f32) -> u32 {
-  return u32(fract(hairW) * ${DRESS_MASK_SCALE}.0 + 0.5);
-}
-fn deckCrewPieceHidden(color: vec3f, dress: u32) -> bool {
-  let piece = u32(color.r * 0.5);
-  return piece > 0u && ((dress >> (piece - 1u)) & 1u) == 0u;
-}
-fn deckCrewCompMask(faceW: f32) -> u32 {
-  return select(0u, u32((-faceW) * 0.5), faceW < 0.0);
-}
-fn deckCrewEyeOpen(faceW: f32) -> f32 {
-  if (faceW < 0.0) {
-    let raw = -faceW;
-    return raw - f32(u32(raw * 0.5)) * 2.0;
-  }
-  return select(faceW, faceW - 2.0, faceW > 1.5);
-}
-fn deckCrewCompHidden(color: vec3f, compMask: u32, isMerchant: bool) -> bool {
-  let comp = u32(color.g * 0.5);
-  if (comp == 0u) { return false; }
-  if (comp == 24u) { return !isMerchant; }
-  let hair = compMask & 7u;
-  let hat = (compMask >> 3u) & 7u;
-  let beard = (compMask >> 6u) & 3u;
-  let gar = (compMask >> 8u) & 7u;
-  if (comp <= 5u) {
-    if (comp != hair) { return true; }
-    if (hat == 3u) { return true; }
-    if (hat == 1u) { return comp != 3u; }
-    if (hat == 2u || hat == 4u) { return comp == 1u || comp == 5u; }
-    return false;
-  }
-  if (comp <= 9u) { return hat == 0u || comp != 5u + hat; }
-  if (comp <= 12u) { return beard == 0u || comp != 9u + beard; }
-  return gar == 0u || comp != 12u + gar;
-}
-fn deckCrewMorph(p: vec3f, normal: vec3f, f: vec4f, sex: f32, comp: u32) -> DeckCrewSurface {
-  if (comp == 24u) { return DeckCrewSurface(p, normal); }
-  let headY = select(1.600, 1.550, sex > 0.5);
-  let build = (deckCrewCompMask(f.w) >> 11u) & 3u;
-  if (p.y <= headY + 0.015) {
-    if (build == 0u || p.y <= 0.68 || p.y >= 1.40 || abs(p.x) >= 0.25) { return DeckCrewSurface(p, normal); }
-    let env = deckCrewRamp(0.68, 0.86, p.y).x * (1.0 - deckCrewRamp(1.24, 1.40, p.y).x) * (1.0 - deckCrewRamp(0.20, 0.25, abs(p.x)).x);
-    let sx = select(select(0.11, -0.085, build == 1u), 0.095 * deckCrewRamp(0.84, 1.18, p.y).x, build == 2u);
-    let sz = select(select(0.10, -0.095, build == 1u), 0.075, build == 2u);
-    let belly = select(0.0, 0.030 * smoothstep(-0.02, 0.08, p.z) * (1.0 - deckCrewRamp(1.06, 1.24, p.y).x), build == 3u);
-    let qx = p.x * (1.0 + sx * env);
-    let qz = -0.025 + (p.z + 0.025) * (1.0 + sz * env) + belly * env;
-    let nrm = normalize(vec3f(normal.x / (1.0 + sx * env), normal.y, normal.z / (1.0 + sz * env)));
-    return DeckCrewSurface(vec3f(qx, p.y, qz), nrm);
-  }
-  let eyeY = select(1.666, 1.612, sex > 0.5);
-  let head = deckCrewRamp(headY + 0.015, headY + 0.065, p.y);
-  let jaw = vec2f(1.0, 0.0) - deckCrewRamp(headY + 0.06, headY + 0.13, p.y);
-  let width = 1.0 + head.x * ((f.x - 1.0) + (f.y - 1.0) * jaw.x);
-  let widthY = head.y * ((f.x - 1.0) + (f.y - 1.0) * jaw.x) + head.x * (f.y - 1.0) * jaw.y;
-  let nx = vec2f(1.0, 0.0) - deckCrewRamp(0.012, 0.045, abs(p.x));
-  let ny0 = deckCrewRamp(eyeY - 0.065, eyeY - 0.025, p.y);
-  let ny1 = vec2f(1.0, 0.0) - deckCrewRamp(eyeY + 0.005, eyeY + 0.04, p.y);
-  let nz = deckCrewRamp(0.045, 0.085, p.z);
-  let nose = nx.x * ny0.x * ny1.x * nz.x;
-  let noseD = vec3f(
-    nx.y * sign(p.x) * ny0.x * ny1.x * nz.x,
-    nx.x * (ny0.y * ny1.x + ny0.x * ny1.y) * nz.x,
-    nx.x * ny0.x * ny1.x * nz.y,
-  );
-  let noseScale = f.z * 0.35;
-  let ex0 = deckCrewRamp(0.015, 0.026, abs(p.x));
-  let ex1 = vec2f(1.0, 0.0) - deckCrewRamp(0.058, 0.080, abs(p.x));
-  let ey = vec2f(1.0, 0.0) - deckCrewRamp(0.016, 0.040, abs(p.y - eyeY));
-  let ez = deckCrewRamp(0.015, 0.055, p.z);
-  let eye = ex0.x * ex1.x * ey.x * ez.x;
-  let eyeD = vec3f(
-    (ex0.y * ex1.x + ex0.x * ex1.y) * sign(p.x) * ey.x * ez.x,
-    ex0.x * ex1.x * ey.y * sign(p.y - eyeY) * ez.x,
-    ex0.x * ex1.x * ey.x * ez.y,
-  );
-  let eyeOpen = 1.0 + (deckCrewEyeOpen(f.w) - 1.0) * 0.35;
-  let eyeShift = (p.y - eyeY) * (eyeOpen - 1.0);
-  let eyeGradient = eyeShift * eyeD + vec3f(0.0, (eyeOpen - 1.0) * eye, 0.0);
-  let dx = vec3f(width, eyeGradient.x, noseScale * noseD.x);
-  let dy = vec3f(p.x * widthY, 1.0 + eyeGradient.y, noseScale * noseD.y);
-  let dz = vec3f(0.0, eyeGradient.z, 1.0 + noseScale * noseD.z);
-  let morphed = normalize(cross(dy, dz) * normal.x + cross(dz, dx) * normal.y + cross(dx, dy) * normal.z);
-  return DeckCrewSurface(vec3f(p.x * width, p.y + eyeShift * eye, p.z + noseScale * nose), morphed);
-}
-fn deckCrewClothed(tagged: vec3f, p: vec3f, shirt: vec3f, trousers: vec3f, skin: vec3f, hair: vec3f, isIndigenous: bool, dress: u32, compMask: u32) -> vec4f {
-  if (tagged.b < -1.0) {
-    return vec4f(tagged, select(0.0, 1.0, tagged.b < -10.5));
-  }
-  let garment = u32(tagged.b * 0.5);
-  if (garment > 0u) {
-    let piece = u32(tagged.r * 0.5);
-    let comp = u32(tagged.g * 0.5);
-    let rawShade = vec3f(tagged.r - 2.0 * f32(piece), tagged.g - 2.0 * f32(comp), tagged.b - 2.0 * f32(garment));
-    let shadeLuma = clamp(dot(rawShade, vec3f(0.299, 0.587, 0.114)), 0.64, 1.16);
-    let compShade = mix(vec3f(shadeLuma), clamp(rawShade, vec3f(0.62), vec3f(1.18)), select(0.20, 0.45, garment == 3u));
-    let shade = select(rawShade, compShade, comp > 0u);
-    var worn = select(select(select(hair, skin, garment == 3u), trousers, garment == 2u), shirt, garment == 1u);
-    if (garment == 5u) {
-      let acc = (compMask >> 13u) & 3u;
-      var pal = select(select(select(vec3f(0.24, 0.13, 0.065), vec3f(0.38, 0.065, 0.048), acc == 1u), vec3f(0.085, 0.125, 0.20), acc == 2u), vec3f(0.46, 0.35, 0.19), acc == 3u);
-      if (comp == 9u) { pal = select(vec3f(0.14, 0.145, 0.155), pal * 0.65, acc == 1u || acc == 2u); }
-      if (comp == 24u) { pal = select(vec3f(0.20, 0.10, 0.052), vec3f(0.58, 0.44, 0.16), tagged.r > 1.09); }
-      worn = pal;
-    } else if (garment == 6u) {
-      let acc = (compMask >> 13u) & 3u;
-      let rawLinen = select(vec3f(0.46, 0.41, 0.33), vec3f(0.72, 0.66, 0.52), comp == 24u);
-      let kerchiefPal = select(select(rawLinen, vec3f(0.36, 0.085, 0.062), acc == 1u), vec3f(0.11, 0.16, 0.26), acc == 2u);
-      worn = select(rawLinen, kerchiefPal, comp == 8u);
-    }
-    return vec4f(worn * shade, select(0.0, 1.0, garment == 3u));
-  }
-  let color = vec3f(tagged.r - 2.0 * f32(u32(tagged.r * 0.5)), tagged.gb);
-  let isShirt = distance(color, vec3f(0.55, 0.47, 0.31)) < 0.001;
-  let isLower = distance(color, vec3f(0.095, 0.12, 0.15)) < 0.001;
-  let isHair = distance(color, vec3f(0.045, 0.019, 0.009)) < 0.001;
-  let isArmSkin = isIndigenous && isShirt && abs(p.x) > 0.155 && p.y > 0.86 && p.y < 1.48;
-  let isCalfSkin = isIndigenous && isLower && p.y > 0.21 && p.y < 0.62;
-  var worn = color;
-  if (isShirt) { worn = select(shirt, skin, isArmSkin); }
-  if (isLower) { worn = select(trousers, skin, isCalfSkin); }
-  if (distance(color, vec3f(0.36, 0.18, 0.10)) < 0.001) { worn = skin; }
-  if (isHair) { worn = hair; }
-  return vec4f(worn, select(0.0, 1.0, distance(color, vec3f(0.36, 0.18, 0.10)) < 0.001 || isArmSkin || isCalfSkin));
-}
-fn rotateVesselCrew(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
-  let cr = cos(roll); let sr = sin(roll);
-  let cp = cos(pitch); let sp = sin(pitch);
-  let ch = cos(heading); let sh = sin(heading);
-  let xx = cr * v.x - sr * v.y;
-  let yy = sr * v.x + cr * v.y;
-  let yp = cp * yy - sp * v.z;
-  let zp = sp * yy + cp * v.z;
-  return vec3f(ch * xx - sh * zp, yp, sh * xx + ch * zp);
-}
-`;
-
-export function buildDeckCrewRenderWGSL(samples = 4) {
-  const safeSamples = Math.max(1, Math.min(4, samples | 0));
-  const sampleMaskAll = (1 << safeSamples) - 1;
-  return CONTINUUM_CORE_WGSL + FRAME_WGSL + ATMO_CORE_WGSL + SKY_RENDER_FUNCS + SHADOW_FRAME + VESSEL_LIGHTING + TRADE_SHARED_TYPES_WGSL + DECK_CREW_SHARED_WGSL + DECK_CREW_SKINNING_HELPERS_WGSL + /* wgsl */ `
-const TV_CREW_SAMPLES: u32 = ${safeSamples}u;
-const TV_CREW_MASK_ALL: u32 = ${sampleMaskAll}u;
-
-@group(0) @binding(0) var<uniform> F: Frame;
-@group(0) @binding(1) var transLUT: texture_2d<f32>;
-@group(0) @binding(2) var skyLUT: texture_2d<f32>;
-@group(0) @binding(3) var sampC: sampler;
-@group(0) @binding(4) var envCube: texture_cube<f32>;
-@group(0) @binding(12) var<uniform> nearTerrain: TradeNearDomain;
-@group(0) @binding(19) var<uniform> landSH: ShadowFrame;
-@group(0) @binding(20) var landSolidShadow: texture_depth_2d;
-@group(0) @binding(21) var landShadowCompare: sampler_comparison;
-
-@group(1) @binding(0) var<storage, read> bodies: array<DeckCrewBody>;
-@group(1) @binding(1) var<storage, read> poses: array<mat4x4f>;
-@group(1) @binding(2) var<storage, read> looks: array<TownLook>;
-@group(1) @binding(3) var<storage, read> srcInstances: array<TradeInstance>;
-
-fn deckBonePose(frameA: u32, frameB: u32, blend: f32, braceFrame: u32, braceW: f32, bone: u32, isFemale: bool) -> mat4x4f {
-  let b = min(bone, ${CREW_JOINT_COUNT - 1}u);
-  let piv = crewRestJoint(b, isFemale);
-  var m = poses[frameA * ${CREW_JOINT_COUNT}u + b];
-  if (blend > 0.001 && frameA != frameB) { m = crewBlendJoint(m, poses[frameB * ${CREW_JOINT_COUNT}u + b], blend, piv); }
-  if (braceW > 0.001) { m = crewBlendJoint(m, poses[braceFrame * ${CREW_JOINT_COUNT}u + b], braceW, piv); }
-  return m;
-}
-fn deckSkinPose(frameA: u32, frameB: u32, blend: f32, braceFrame: u32, braceW: f32, bones: vec4u, weights: vec4f, isFemale: bool) -> mat4x4f {
-  var skin = mat4x4f(vec4f(0.0), vec4f(0.0), vec4f(0.0), vec4f(0.0));
-  if (weights.x > 0.0) { skin += deckBonePose(frameA, frameB, blend, braceFrame, braceW, bones.x, isFemale) * weights.x; }
-  if (weights.y > 0.0) { skin += deckBonePose(frameA, frameB, blend, braceFrame, braceW, bones.y, isFemale) * weights.y; }
-  if (weights.z > 0.0) { skin += deckBonePose(frameA, frameB, blend, braceFrame, braceW, bones.z, isFemale) * weights.z; }
-  if (weights.w > 0.0) { skin += deckBonePose(frameA, frameB, blend, braceFrame, braceW, bones.w, isFemale) * weights.w; }
-  return skin;
-}
-
-fn deckCrewShadowVis(world: vec3f, normal: vec3f) -> f32 {
-  if (landSH.origin.w < 0.5) { return 1.0; }
-  let p = landSH.lightView * vec4f(world - landSH.origin.xyz + normal * 0.04 + landSH.sun.xyz * 0.03, 1.0);
-  let uv = p.xy * vec2f(0.5, -0.5) + 0.5;
-  let edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
-  let fade = smoothstep(0.0, 0.06, edge) * step(0.0, p.z) * step(p.z, 1.0);
-  if (fade <= 0.0) { return 1.0; }
-  let refZ = min(p.z - 0.10 / max(landSH.sun.w, 1.0), 0.99999);
-  let s = textureSampleCompareLevel(landSolidShadow, landShadowCompare, uv, refZ);
-  return mix(1.0, s, fade);
-}
-
-struct DeckCrewVSOut {
-  @builtin(position) pos: vec4f,
-  @location(0) @interpolate(perspective, centroid) world: vec3f,
-  @location(1) @interpolate(perspective, centroid) normal: vec3f,
-  @location(2) @interpolate(perspective, centroid) color: vec3f,
-  @location(3) @interpolate(perspective, centroid) skin: f32,
-  // The mesh-to-splat band's share (of 2047) and the body's seed (its look index), as the splat side reads them.
-  @location(4) @interpolate(flat) fade: vec2u,
-  @location(5) @interpolate(perspective, centroid) bodyPos: vec3f,
-};
-
-@vertex fn tvCrewVS(v: DeckCrewInput) -> DeckCrewVSOut {
-  let body = bodies[v.instance];
-  let lookIdx = body.lookFlags & 0x3FFu;
-  let isMerchant = ((body.lookFlags >> 10u) & 1u) != 0u;
-  let braceFrame = (body.lookFlags >> 11u) & 0x3FFu;
-  let fade = vec2u((body.lookFlags >> 21u) & 0x7FFu, lookIdx);
-  let look = looks[lookIdx];
-  let dress = deckCrewDressOf(look.hair.w);
-  let compMask = deckCrewCompMask(look.face.w);
-
-  var out: DeckCrewVSOut;
-  if (deckCrewCompHidden(v.color, compMask, isMerchant) || deckCrewPieceHidden(v.color, dress)) {
-    out.pos = vec4f(2.0, 2.0, 0.0, 1.0);
-    out.world = vec3f(0.0);
-    out.normal = vec3f(0.0, 1.0, 0.0);
-    out.color = vec3f(0.0);
-    out.skin = 0.0;
-    out.fade = vec2u(0u);
-    out.bodyPos = vec3f(0.0);
-    return out;
-  }
-
-  let comp = u32(v.color.g * 0.5);
-  let surface = deckCrewMorph(v.position, v.normal, look.face, look.skin.w, comp);
-  let frameA = body.framesPacked & 0xFFFFu;
-  let frameB = (body.framesPacked >> 16u) & 0xFFFFu;
-  let blend = f32(body.blendBrace & 0xFFFFu) / 65535.0;
-  let braceW = f32((body.blendBrace >> 16u) & 0xFFFFu) / 65535.0;
-
-  let isFemale = look.skin.w > 0.5;
-  let skinMat = deckSkinPose(frameA, frameB, blend, braceFrame, braceW, v.bones, v.weights, isFemale);
-  let localP = (skinMat * vec4f(surface.position, 1.0)).xyz;
-  let localN = (skinMat * vec4f(surface.normal, 0.0)).xyz;
-
-  let cY = cos(body.localPosYaw.w);
-  let sY = sin(body.localPosYaw.w);
-  let turnedP = vec3f(localP.x * cY + localP.z * sY, localP.y, localP.z * cY - localP.x * sY);
-  let turnedN = vec3f(localN.x * cY + localN.z * sY, localN.y, localN.z * cY - localN.x * sY);
-
-  let inst = srcInstances[body.vesselSlot];
-  let scaleMul = max(inst.attScaleArch.z, 0.25);
-  let crewBodyScale = 1.0;
-  let shipLocalP = body.localPosYaw.xyz * scaleMul + turnedP * crewBodyScale;
-  let shipWorld = inst.posYaw.xyz + vec3f(nearTerrain.grid.y, 0.0, nearTerrain.grid.z);
-  let worldP = shipWorld + rotateVesselCrew(shipLocalP, inst.posYaw.w, inst.attScaleArch.x, inst.attScaleArch.y);
-  let worldN = normalize(rotateVesselCrew(turnedN, inst.posYaw.w, inst.attScaleArch.x, inst.attScaleArch.y));
-
-  let clothed = deckCrewClothed(v.color, v.position, look.shirt.rgb, look.trousers.rgb, look.skin.rgb, look.hair.rgb, look.face.w > 1.5, dress, compMask);
-  out.pos = F.viewProj * vec4f(earthCurve(worldP - F.camPos.xyz, F.camPos.y), 1.0);
-  out.world = worldP;
-  out.normal = worldN;
-  out.color = clothed.rgb;
-  out.skin = clothed.w;
-  out.fade = fade;
-  out.bodyPos = v.position;
-  return out;
-}
-
-fn tvCrewShade(in: DeckCrewVSOut, front: bool) -> vec4f {
-  let dPdx = dpdx(in.world); let dPdy = dpdy(in.world);
-  let dBpdx = dpdx(in.bodyPos); let dBpdy = dpdy(in.bodyPos);
-  let nGeom = normalize(in.normal) * select(-1.0, 1.0, front);
-  let clothGate = 1.0 - clamp(in.skin, 0.0, 1.0);
-  let bpFoot = max(length(dBpdx), length(dBpdy));
-  let fineFade = (1.0 - smoothstep(0.0009, 0.0036, bpFoot)) * step(1e-6, bpFoot) * clothGate;
-  let twillFade = (1.0 - smoothstep(0.0035, 0.016, bpFoot)) * step(1e-6, bpFoot) * clothGate;
-  let uWeave = (in.bodyPos.x + in.bodyPos.z) * 210.0 * 6.2831853;
-  let vWeave = in.bodyPos.y * 210.0 * 6.2831853;
-  let tWeave = (in.bodyPos.x * 44.0 - in.bodyPos.y * 36.0 + in.bodyPos.z * 40.0) * 6.2831853;
-  let gradFine = vec3f(cos(uWeave) * 210.0, cos(vWeave) * 210.0, cos(uWeave) * 210.0) * (0.00018 * fineFade);
-  let gradTwill = vec3f(cos(tWeave) * 44.0, -cos(tWeave) * 36.0, cos(tWeave) * 40.0) * (0.00055 * twillFade);
-  let gradBp = gradFine + gradTwill;
-  let dhdx = dot(gradBp, dBpdx); let dhdy = dot(gradBp, dBpdy);
-  let r1 = cross(dPdy, nGeom); let r2 = cross(nGeom, dPdx);
-  let det = dot(dPdx, r1);
-  let invDet = 1.0 / select(max(abs(det), 1e-8), -max(abs(det), 1e-8), det < 0.0);
-  let n = normalize(nGeom - (r1 * dhdx + r2 * dhdy) * select(0.0, invDet, abs(det) > 1e-8));
-  let clothCol = in.color * (1.0 + sin(uWeave) * sin(vWeave) * 0.032 * fineFade + sin(tWeave) * 0.022 * twillFade);
-  let sunDir = normalize(F.sunDir.xyz);
-  let viewDir = normalize(F.camPos.xyz - in.world);
-  let sunVis = solarShadowVisibility(vec3f(deckCrewShadowVis(in.world, n)));
-  let sunRad = sunIlluminance() * sunVis;
-  let nDotL = max(dot(n, sunDir), 0.0);
-  let skinWrap = select(0.0, max(0.0, dot(n, sunDir) * 0.55 + 0.45) * 0.18, in.skin > 0.5);
-  let skyCol = skyAtmo(normalize(vec3f(n.x * 0.35, max(n.y, 0.14), n.z * 0.35)));
-  let seaCol = skyAtmo(vec3f(0.0, 0.25, 0.0)) * 0.45 + F.waterCol.rgb * 0.65;
-  let amb = vesselAmbient(n, skyCol, seaCol);
-
-  let rough = select(0.84, 0.56, in.skin > 0.5);
-  let direct = (clothCol / PI) * sunRad * (nDotL + skinWrap * vec3f(1.0, 0.48, 0.32));
-  let spec = select(vec3f(0.0), vesselSpecular(n, viewDir, sunDir, rough, vec3f(0.036)) * sunRad * nDotL, nDotL > 0.0);
-  let c1 = clamp(1.0 - max(dot(n, viewDir), 0.0), 0.0, 1.0);
-  let c2 = c1 * c1;
-  let clothSheen = select((c2 * c2) * 0.045, 0.0, in.skin > 0.5);
-  let envCol = textureSampleLevel(envCube, sampC, reflect(-viewDir, n), rough * 6.5).rgb * 0.035;
-
-  let lit = clothCol * (amb * 0.85 + clothSheen * skyCol) + direct + spec + envCol;
-  return vec4f(surfaceAir(lit, in.world), 1.0);
-}
-
-struct DeckCrewFragOut {
-  @location(0) color: vec4f,
-  @builtin(sample_mask) mask: u32,
-};
-
-@fragment fn tvCrewSolidFS(in: DeckCrewVSOut, @builtin(front_facing) front: bool) -> @location(0) vec4f {
-  return tvCrewShade(in, front);
-}
-
-@fragment fn tvCrewFS(in: DeckCrewVSOut, @builtin(front_facing) front: bool) -> DeckCrewFragOut {
-  let color = tvCrewShade(in, front);
-  // The splat takes these samples (tvCrewSplatFS); the mesh keeps the rest. Share 0 drops nothing.
-  let dropMask = continuumSamples(f32(in.fade.x) / 2047.0, in.pos.xy, TV_CREW_SAMPLES, in.fade.y);
-  let keepMask = (~dropMask) & TV_CREW_MASK_ALL;
-  return DeckCrewFragOut(color, keepMask);
-}
-`;
-}
-
-export const DECK_CREW_RENDER_WGSL = /* @__PURE__ */ buildDeckCrewRenderWGSL(4);
-
-export const DECK_CREW_SHADOW_WGSL = SHADOW_FRAME + TRADE_SHARED_TYPES_WGSL + DECK_CREW_SHARED_WGSL + DECK_CREW_SKINNING_HELPERS_WGSL + /* wgsl */ `
-@group(0) @binding(0) var<uniform> F_unused: vec4f;
-@group(0) @binding(12) var<uniform> nearTerrain: TradeNearDomain;
-@group(0) @binding(19) var<uniform> landSH: ShadowFrame;
-
-@group(1) @binding(0) var<storage, read> bodies: array<DeckCrewBody>;
-@group(1) @binding(1) var<storage, read> poses: array<mat4x4f>;
-@group(1) @binding(2) var<storage, read> looks: array<TownLook>;
-@group(1) @binding(3) var<storage, read> srcInstances: array<TradeInstance>;
-
-fn deckBonePoseSh(frameA: u32, frameB: u32, blend: f32, braceFrame: u32, braceW: f32, bone: u32, isFemale: bool) -> mat4x4f {
-  let b = min(bone, ${CREW_JOINT_COUNT - 1}u);
-  let piv = crewRestJoint(b, isFemale);
-  var m = poses[frameA * ${CREW_JOINT_COUNT}u + b];
-  if (blend > 0.001 && frameA != frameB) { m = crewBlendJoint(m, poses[frameB * ${CREW_JOINT_COUNT}u + b], blend, piv); }
-  if (braceW > 0.001) { m = crewBlendJoint(m, poses[braceFrame * ${CREW_JOINT_COUNT}u + b], braceW, piv); }
-  return m;
-}
-fn deckSkinPoseSh(frameA: u32, frameB: u32, blend: f32, braceFrame: u32, braceW: f32, bones: vec4u, weights: vec4f, isFemale: bool) -> mat4x4f {
-  var skin = mat4x4f(vec4f(0.0), vec4f(0.0), vec4f(0.0), vec4f(0.0));
-  if (weights.x > 0.0) { skin += deckBonePoseSh(frameA, frameB, blend, braceFrame, braceW, bones.x, isFemale) * weights.x; }
-  if (weights.y > 0.0) { skin += deckBonePoseSh(frameA, frameB, blend, braceFrame, braceW, bones.y, isFemale) * weights.y; }
-  if (weights.z > 0.0) { skin += deckBonePoseSh(frameA, frameB, blend, braceFrame, braceW, bones.z, isFemale) * weights.z; }
-  if (weights.w > 0.0) { skin += deckBonePoseSh(frameA, frameB, blend, braceFrame, braceW, bones.w, isFemale) * weights.w; }
-  return skin;
-}
-
-@vertex fn tvCrewShadowVS(v: DeckCrewInput) -> @builtin(position) vec4f {
-  let body = bodies[v.instance];
-  let lookIdx = body.lookFlags & 0x3FFu;
-  let isMerchant = ((body.lookFlags >> 10u) & 1u) != 0u;
-  let braceFrame = (body.lookFlags >> 11u) & 0x3FFu;
-  let look = looks[lookIdx];
-  let dress = deckCrewDressOf(look.hair.w);
-  let compMask = deckCrewCompMask(look.face.w);
-  if (deckCrewCompHidden(v.color, compMask, isMerchant) || deckCrewPieceHidden(v.color, dress)) {
-    return vec4f(2.0, 2.0, 0.0, 1.0);
-  }
-  let frameA = body.framesPacked & 0xFFFFu;
-  let frameB = (body.framesPacked >> 16u) & 0xFFFFu;
-  let blend = f32(body.blendBrace & 0xFFFFu) / 65535.0;
-  let braceW = f32((body.blendBrace >> 16u) & 0xFFFFu) / 65535.0;
-  let isFemale = look.skin.w > 0.5;
-  let skinMat = deckSkinPoseSh(frameA, frameB, blend, braceFrame, braceW, v.bones, v.weights, isFemale);
-  let localP = (skinMat * vec4f(v.position, 1.0)).xyz;
-  let cY = cos(body.localPosYaw.w);
-  let sY = sin(body.localPosYaw.w);
-  let turnedP = vec3f(localP.x * cY + localP.z * sY, localP.y, localP.z * cY - localP.x * sY);
-  let inst = srcInstances[body.vesselSlot];
-  let scaleMul = max(inst.attScaleArch.z, 0.25);
-  let crewBodyScale = 1.0;
-  let shipLocalP = body.localPosYaw.xyz * scaleMul + turnedP * crewBodyScale;
-  let shipWorld = inst.posYaw.xyz + vec3f(nearTerrain.grid.y, 0.0, nearTerrain.grid.z);
-  let worldP = shipWorld + rotateVesselCrew(shipLocalP, inst.posYaw.w, inst.attScaleArch.x, inst.attScaleArch.y);
-  let _keep = F_unused.x * 0.0;
-  return landSH.lightView * vec4f(worldP - landSH.origin.xyz + vec3f(_keep, 0.0, 0.0), 1.0);
-}
-`;
-
-export function buildDeckCrewSplatWGSL(samples = 4) {
-  const safeSamples = Math.max(1, Math.min(4, samples | 0));
-  const sampleMaskAll = (1 << safeSamples) - 1;
-  return CONTINUUM_CORE_WGSL + FRAME_WGSL + ATMO_CORE_WGSL + SKY_RENDER_FUNCS + VESSEL_LIGHTING + /* wgsl */ `
-const TV_CREW_SPLAT_SAMPLES: u32 = ${safeSamples}u;
-const TV_CREW_SPLAT_MASK_ALL: u32 = ${sampleMaskAll}u;
-
-@group(0) @binding(0) var<uniform> F: Frame;
-@group(0) @binding(1) var transLUT: texture_2d<f32>;
-@group(0) @binding(2) var skyLUT: texture_2d<f32>;
-@group(0) @binding(3) var sampC: sampler;
-@group(0) @binding(4) var envCube: texture_cube<f32>;
-@group(1) @binding(0) var<storage, read> crewSplatList: array<vec4f>;
-
-struct DeckCrewSplatOut {
-  @builtin(position) pos: vec4f,
-  @location(0) world: vec3f,
-  @location(1) color: vec3f,
-  @location(2) uv: vec2f,
-  // The band's share (of 2047; 2047 is the whole splat) and the body's seed, as tvCrewFS reads them.
-  @location(3) @interpolate(flat) fade: vec2u,
-  @location(4) @interpolate(flat) seatedFlag: u32,
-};
-
-fn humanSilhouetteInside(p: vec2f, isSeated: bool) -> bool {
-  if (abs(p.x) > 1.0 || abs(p.y) > 1.0) { return false; }
+  // The station's clip: oarsmen and paddlers pull with the vessel's stroke, and rest when it does not row.
+  let clipFirst = st.work.y & 0xFFFFu;
+  let clipLen = max(1u, st.work.y >> 16u);
+  let phase = bitcast<f32>(st.work.w);
+  var cycle = fract(F.camPos.w * 0.42 + phase);
   if (isSeated) {
-    // Seated oarsman silhouette strictly above hull sole (y >= -0.84: bent knees/lap + upright torso + head crown)
-    let headD = length((p - vec2f(0.0, 0.72)) * vec2f(1.85, 3.6));
-    if (headD <= 1.0) { return true; }
-    let torsoHalfW = mix(0.68, 0.90, smoothstep(-0.12, 0.34, p.y)) * (1.0 - 0.34 * smoothstep(0.36, 0.54, p.y));
-    if (p.y >= -0.12 && p.y <= 0.54 && abs(p.x) <= torsoHalfW) { return true; }
-    let lapHalfW = mix(0.52, 0.72, smoothstep(-0.84, -0.12, p.y));
-    return p.y >= -0.84 && p.y <= -0.10 && abs(p.x) <= lapHalfW;
+    cycle = select(0.5, fract((F.camPos.w * 2.15 + inst.animSink.x + phase) / 6.2831853), inst.animSink.y > 0.035);
   }
-  // Head & hat crown (y in [0.48, 0.96])
-  let headD = length((p - vec2f(0.0, 0.72)) * vec2f(1.85, 3.8));
-  if (headD <= 1.0) { return true; }
-  // Shoulders & torso (y in [-0.14, 0.52])
-  let torsoHalfW = mix(0.62, 0.92, smoothstep(-0.14, 0.36, p.y)) * (1.0 - 0.35 * smoothstep(0.38, 0.54, p.y));
-  if (p.y >= -0.14 && p.y <= 0.52 && abs(p.x) <= torsoHalfW) { return true; }
-  // Legs / coat skirt (y in [-0.98, -0.10])
-  let legHalfW = mix(0.46, 0.60, smoothstep(-0.98, -0.10, p.y));
-  let strideGap = p.y < -0.36 && abs(p.x) < 0.08;
-  return p.y >= -0.98 && p.y <= -0.10 && abs(p.x) <= legHalfW && !strideGap;
-}
+  let exact = clamp(cycle * f32(clipLen), 0.0, max(0.0, f32(clipLen) - 1e-3));
+  let f0 = min(u32(exact), clipLen - 1u);
+  let f1 = (f0 + 1u) % clipLen;
+  // Those standing lean into the work as the deck rolls under them; those already at it, and the seated, do not.
+  let run = deckCfg.runs[body];
+  let brace = select(clamp((abs(roll) - 0.14) * 2.2, 0.0, 0.45), 0.0, isSeated || clipKind == 1u);
+  let braceLen = max(run.w, 1u);
+  let braceFrame = run.z + u32(fract(F.camPos.w * 0.38 + phase) * f32(braceLen)) % braceLen;
 
-@vertex fn tvCrewSplatVS(@builtin(vertex_index) vid: u32) -> DeckCrewSplatOut {
-  let sIdx = vid / 3u;
-  let corner = vid % 3u;
-  let s0 = crewSplatList[sIdx * 3u];
-  let s1 = crewSplatList[sIdx * 3u + 1u];
-  let s2 = crewSplatList[sIdx * 3u + 2u];
-  var uv = vec2f(0.0, 2.0);
-  if (corner == 1u) { uv = vec2f(-1.7320508, -1.0); }
-  else if (corner == 2u) { uv = vec2f(1.7320508, -1.0); }
-
-  let halfW = abs(s0.w);
-  let isSeated = select(0u, 1u, s0.w < 0.0);
-  let toCam = normalize(F.camPos.xyz - s0.xyz);
-  let refUp = normalize(s2.xyz + vec3f(0.0, 1e-4, 0.0));
-  let right = normalize(cross(select(refUp, vec3f(1.0, 0.0, 0.0), abs(dot(refUp, toCam)) > 0.96), toCam));
-  let up = normalize(cross(toCam, right));
-  let worldP = s0.xyz + right * (uv.x * halfW) + up * (uv.y * s1.w);
-
-  var o: DeckCrewSplatOut;
-  o.pos = F.viewProj * vec4f(earthCurve(worldP - F.camPos.xyz, F.camPos.y), 1.0);
-  o.world = worldP;
-  o.color = s1.rgb;
-  o.uv = uv;
-  let fadeWord = u32(max(round(s2.w), 0.0));
-  o.fade = vec2u(fadeWord & 0x7FFu, fadeWord >> 11u);
-  o.seatedFlag = isSeated;
-  return o;
-}
-
-struct DeckCrewSplatFragOut {
-  @location(0) color: vec4f,
-  @builtin(sample_mask) mask: u32,
-};
-
-@fragment fn tvCrewSplatFS(in: DeckCrewSplatOut) -> DeckCrewSplatFragOut {
-  let ux = dpdx(in.uv);
-  let uy = dpdy(in.uv);
-  let isSeated = in.seatedFlag != 0u;
-  var silMask = 0u;
-  if (TV_CREW_SPLAT_SAMPLES <= 1u) {
-    if (humanSilhouetteInside(in.uv, isSeated)) { silMask = 1u; }
-  } else {
-    let offs = array<vec2f, 4>(vec2f(-0.125, -0.375), vec2f(0.375, -0.125), vec2f(-0.375, 0.125), vec2f(0.125, 0.375));
-    for (var s = 0u; s < 4u; s++) {
-      let puv = in.uv + ux * offs[s].x + uy * offs[s].y;
-      if (humanSilhouetteInside(puv, isSeated)) { silMask |= (1u << s); }
-    }
-  }
-  // Exactly the samples the mesh's tvCrewFS gives up; whole past the band.
-  let fadeMask = select(
-    continuumSamples(f32(in.fade.x) / 2047.0, in.pos.xy, TV_CREW_SPLAT_SAMPLES, in.fade.y),
-    TV_CREW_SPLAT_MASK_ALL,
-    in.fade.x >= 2047u,
+  let rank = atomicAdd(&counts[body * ${DECK_CREW_DISPATCH_WORDS}u], 1u);
+  if (rank >= run.y) { return; }
+  atomicAdd(&counts[${DECK_CREW_FALLBACK_AT}u + body * ${DECK_CREW_FALLBACK_WORDS}u + 1u], 1u);
+  // The people of a vessel taking water are cut finer, as anything damaged is.
+  let important = select(0u, ${CREW_CONTINUUM_ORDER_IMPORTANT}u, inst.animSink.z > 0.001);
+  placed[run.x + rank] = CrewPlaced(
+    transform,
+    vec4u(clipFirst + f0, clipFirst + f1, braceFrame, st.work.z),
+    vec4f(fract(exact), brace, 0.0, 0.0),
+    vec4u(st.who.x, 0u, important, 0u),
   );
-  let mask = silMask & fadeMask;
-  let viewDir = normalize(F.camPos.xyz - in.world);
-  let n = normalize(vec3f(in.uv.x * 0.45, 0.35 + in.uv.y * 0.25, 0.0) + viewDir * 0.65);
-  let sunDir = normalize(F.sunDir.xyz);
-  let sunRad = sunIlluminance();
-  let nDotL = max(dot(n, sunDir), 0.0);
-  let skyCol = skyAtmo(vec3f(0.0, 0.45, 0.0));
-  let seaCol = skyAtmo(vec3f(0.0, 0.22, 0.0)) * 0.45 + F.waterCol.rgb * 0.65;
-  let amb = vesselAmbient(n, skyCol, seaCol);
-  let envHaze = textureSampleLevel(envCube, sampC, viewDir, 6.0).rgb * 0.025;
-  let lit = in.color * (amb * 0.85 + (sunRad * nDotL) / PI) + envHaze;
-  return DeckCrewSplatFragOut(vec4f(surfaceAir(lit, in.world), 1.0), mask);
 }
 `;
-}
-
-export const DECK_CREW_SPLAT_WGSL = /* @__PURE__ */ buildDeckCrewSplatWGSL(4);
 
 const tradePipelineCache = new WeakMap();
 
@@ -7280,40 +6479,24 @@ export async function createTradeVessels({
   let submergedGroup1 = submergedCapture?.pipeline ? makeGroup1(submergedCapture.pipeline) : null;
 
   // ==========================================================================
-  // 100% GPU Rigged Deck-Crew Renderer (crew skeleton, CREW_JOINT_COUNT joints) State & Buffers
+  // Deck hands: the stations and looks the placing pass reads, and the counts it keeps
   // ==========================================================================
-  const CREW_BUCKET_SPAN = Math.ceil(DECK_CREW_MAX_TOTAL / 16) * 16; // 848 * 32B = 27136B (256-byte aligned)
-  const CREW_BODY_SLICE_BYTES = CREW_BUCKET_SPAN * DECK_CREW_BODY_WORDS * 4;
   const CREW_LOOK_CAP = Math.max(64, DECK_CREW_MAX_TOTAL);
-
-  const crewConfigBuf = new ArrayBuffer(64);
-  const crewConfigU32 = new Uint32Array(crewConfigBuf, 0, 12);
-  const crewConfigF32 = new Float32Array(crewConfigBuf, 48, 4);
-  crewConfigU32[0] = 0;
-  crewConfigU32[1] = MAX_DECK_STATIONS_PER_VESSEL;
-  crewConfigU32[2] = CREW_BUCKET_SPAN;
-  crewConfigU32[3] = samples;
-  crewConfigU32[4] = DECK_CREW_MAX_TOTAL;
-  crewConfigU32[5] = 1;
-  crewConfigF32[0] = DECK_CREW_CROSSFADE_HI_PX;
-  crewConfigF32[1] = DECK_CREW_SPLAT_PIXELS;
-  crewConfigF32[2] = DECK_CREW_MIN_PIXELS;
-  crewConfigF32[3] = 0;
-
+  const deckConfigBuf = new ArrayBuffer(DECK_CREW_CONFIG_BYTES);
+  const deckConfigU32 = new Uint32Array(deckConfigBuf);
   const crewStationsBuf = new ArrayBuffer(DECK_CREW_MAX_TOTAL * DECK_CREW_STATION_WORDS * 4);
   const crewStationsF32 = new Float32Array(crewStationsBuf);
   const crewStationsU32 = new Uint32Array(crewStationsBuf);
   const crewLooksF32 = new Float32Array(CREW_LOOK_CAP * DECK_CREW_LOOK_WORDS);
   const crewSrcInstancesScratch = new Float32Array(MAX_TRADE_VESSELS * TRADE_VESSEL_INSTANCE_FLOATS);
 
-  const crewConfigBuffer = device.createBuffer({ label: 'trade deck crew cfg', size: 64, usage: U_UNIFORM | U_COPY_DST });
-  device.queue.writeBuffer(crewConfigBuffer, 0, crewConfigBuf);
+  const crewConfigBuffer = device.createBuffer({ label: 'trade deck crew config', size: DECK_CREW_CONFIG_BYTES, usage: U_UNIFORM | U_COPY_DST });
   const crewSrcInstancesBuffer = device.createBuffer({ label: 'trade deck crew src instances', size: NEAR_SLICE_BYTES, usage: U_STORAGE | U_COPY_DST });
   const crewStationsBuffer = device.createBuffer({ label: 'trade deck crew stations', size: crewStationsBuf.byteLength, usage: U_STORAGE | U_COPY_DST });
   const crewLooksBuffer = device.createBuffer({ label: 'trade deck crew looks', size: crewLooksF32.byteLength, usage: U_STORAGE | U_COPY_DST });
-  const crewBodiesBuffer = device.createBuffer({ label: 'trade deck crew bodies', size: DECK_CREW_BUCKETS * CREW_BODY_SLICE_BYTES, usage: U_STORAGE });
-  const crewSplatListBuffer = device.createBuffer({ label: 'trade deck crew splats', size: DECK_CREW_MAX_TOTAL * 3 * 16, usage: U_STORAGE });
-  const crewIndirectBuffer = device.createBuffer({ label: 'trade deck crew indirect', size: DECK_CREW_DRAW_WORDS * 4, usage: U_STORAGE | U_INDIRECT | U_COPY_DST | U_COPY_SRC });
+  // INDIRECT: each body's pose pass and cut are dispatched from it, and its old body drawn. COPY_SRC: read back by tests.
+  const crewCountsBuffer = device.createBuffer({ label: 'trade deck crew counts', size: DECK_CREW_COUNT_WORDS * 4, usage: U_STORAGE | U_INDIRECT | U_COPY_DST | U_COPY_SRC });
+  const crewMoistureBuffer = device.createBuffer({ label: 'trade deck crew moisture', size: DECK_CREW_MOISTURE_SLOTS * 8, usage: U_STORAGE });
 
   const makeWaveBindGroups = (curResources = resources) => {
     if (!wavePipe) return null;
@@ -7349,20 +6532,99 @@ export async function createTradeVessels({
   let waveBindGroups = makeWaveBindGroups(resources);
   let activeWaveVesselCount = 0;
 
-  let deckCrewGPU = null;
+  // What the people continuum draws deck hands with (setPeople: the scene's frame, lights and shadow set), the crew's
+  // shared assets (the old bodies, and their programs for the fallback), and this device's deck-crew programs.
+  let deckDrawing = null;
+  let deckShared = null;
+  let deckPrograms = null;
+  let deckProgramsAsked = null;
+  // Each continuum body by id once fetched: null while it comes, false if it cannot be had (the old body stands in).
+  const deckBodies = new Map();
+  // Each rig's deck clips and rest places, baked once; the old bodies' geometry, uploaded once.
+  const deckRigs = new Map();
+  const deckOldGeometry = new Map();
+  const deckOwned = [];
+  let deckHull = null;
+  // The company drawn: each body's run of slots, its buffers, batches and passes. Laid again when the runs change.
+  let deckCompany = null;
   let activeCrewVessels = 0;
   let activeDeckSoulCount = 0;
   let crewStationsDirty = true;
   let crewEncoded = false;
-  let lastSharedCrewToken = 0;
 
-  function releaseDeckCrewGPU(state) {
-    if (!state) return;
-    for (const b of state.ownedBuffers ?? []) b?.destroy?.();
-  }
+  const deckOwnedBuffer = (label, data, usage) => {
+    const buf = device.createBuffer({ label, size: Math.max(16, data.byteLength), usage: usage | U_COPY_DST });
+    device.queue.writeBuffer(buf, 0, data);
+    deckOwned.push(buf);
+    return buf;
+  };
+  const requestDeckCrewPrograms = () => getPipelineEntry(device, `deckCrew:${format}:${samples}`, async () => {
+    const module = await shader(DECK_CREW_PLACE_WGSL, 'trade deck crew place');
+    const [place, reset, pose, continuum] = await Promise.all([
+      device.createComputePipelineAsync({ label: 'trade deck crew place', layout: 'auto', compute: { module, entryPoint: 'deckCrewPlace' } }),
+      device.createComputePipelineAsync({ label: 'trade deck crew reset', layout: 'auto', compute: { module, entryPoint: 'deckCrewReset' } }),
+      requestCrewContinuumPose({ device, shader }),
+      requestCrewContinuumPipelines({ device, shader, format, samples }).catch((error) => {
+        console.warn('Trade deck crews: the continuum is unavailable; the old bodies stand in', error);
+        return null;
+      }),
+    ]);
+    return { place, reset, pose, continuum };
+  });
+  // A continuum body, asked for the first time a soul wears it; the tables are laid again when it comes.
+  const deckBodyOf = (id) => {
+    if (!deckPrograms?.continuum) return null;
+    if (!deckBodies.has(id)) {
+      deckBodies.set(id, null);
+      loadCrewContinuumBody(device, id).then((body) => {
+        if (destroyed) return;
+        deckBodies.set(id, body);
+        crewStationsDirty = true;
+      }).catch((error) => {
+        deckBodies.set(id, false);
+        console.warn(`Trade deck crews: the ${id} body cannot be had; the old one stands in`, error);
+      });
+    }
+    return deckBodies.get(id) || null;
+  };
+  // The old body standing in for a continuum one: the crew's sailor, woman or captain, or the island pair.
+  const deckOldModelOf = (id) => {
+    const models = deckShared?.models;
+    if (!Array.isArray(models) || !models.length) return null;
+    const female = id.endsWith('female');
+    if (id.startsWith('caribbean') && models.length >= 2) return createIndigenousCrewModels(models, null)[female ? 1 : 0];
+    if (id === 'captain') return models[2] ?? models[0];
+    return models[female ? 1 : 0] ?? models[0];
+  };
+  const deckOldGeometryOf = (model) => {
+    if (deckOldGeometry.has(model)) return deckOldGeometry.get(model);
+    const index = deckShared.models.indexOf(model);
+    const given = index >= 0 ? deckShared.geometry?.[index] : null;
+    const levels = given?.lods ?? (model.lods ?? [{ indices: model.indices }]).map((tier) => ({ indexCount: tier.indexCount ?? tier.indices.length, indices: tier.indices }));
+    const level = levels[Math.min(1, levels.length - 1)];
+    const entry = {
+      vertex: given?.vertex ?? deckOwnedBuffer('trade deck crew old vertices', model.vertices, U_VERTEX),
+      index: level.buffer ?? deckOwnedBuffer('trade deck crew old indices', level.indices, U_INDEX),
+      indexCount: level.indexCount,
+    };
+    deckOldGeometry.set(model, entry);
+    return entry;
+  };
+  const deckRigOf = (animator) => {
+    let rig = deckRigs.get(animator);
+    if (!rig) {
+      const { palettes, layout } = bakeDeckCrewClips(animator);
+      rig = {
+        layout,
+        palette: deckOwnedBuffer('trade deck crew clips', palettes, U_STORAGE),
+        rest: deckOwnedBuffer('trade deck crew rest places', crewContinuumRestPlaces(animator), U_STORAGE),
+      };
+      deckRigs.set(animator, rig);
+    }
+    return rig;
+  };
 
-  function writeDeckCrewLook(lookIdx, soul, role, stationSeed, modelIdx) {
-    const female = modelIdx === 1;
+  function writeDeckCrewLook(lookIdx, role, stationSeed, female) {
     const h0 = deckCrewHash(stationSeed, 11);
     const h1 = deckCrewHash(stationSeed, 23);
     const h2 = deckCrewHash(stationSeed, 37);
@@ -7377,9 +6639,9 @@ export async function createTradeVessels({
       : DECK_CREW_SHIRTS[Math.floor(h1 * DECK_CREW_SHIRTS.length) % DECK_CREW_SHIRTS.length];
     const trousers = DECK_CREW_TROUSERS[Math.floor(h2 * DECK_CREW_TROUSERS.length) % DECK_CREW_TROUSERS.length];
 
+    // The pieces the old bodies put on (hair, hat, beard, garment), for where they stand in.
     const hairPool = female ? [2, 3, 4, 5] : [0, 1, 2, 3];
     const hair = hairPool[Math.floor(h3 * hairPool.length) % hairPool.length];
-
     let hat = 0;
     if (role === 'captain') {
       hat = female ? 2 : (h4 < 0.62 ? 4 : 2);
@@ -7387,33 +6649,22 @@ export async function createTradeVessels({
       hat = female ? (h4 < 0.55 ? 3 : 2) : (h4 < 0.52 ? 2 : (h4 < 0.82 ? 1 : 4));
     } else if (role === 'pilot') {
       hat = female ? 2 : (h4 < 0.58 ? 2 : 1);
-    } else if (role === 'paddler') {
-      hat = 0;
-    } else {
-      hat = female
-        ? [0, 1, 2, 3][Math.floor(h4 * 4) % 4]
-        : [0, 1, 2, 0][Math.floor(h4 * 4) % 4];
+    } else if (role !== 'paddler') {
+      hat = female ? [0, 1, 2, 3][Math.floor(h4 * 4) % 4] : [0, 1, 2, 0][Math.floor(h4 * 4) % 4];
     }
-
     const beard = (female || role === 'paddler')
       ? 0
-      : (isElite
-          ? [1, 2, 2, 3][Math.floor(h5 * 4) % 4]
-          : [0, 1, 2, 3][Math.floor(h5 * 4) % 4]);
-
+      : (isElite ? [1, 2, 2, 3][Math.floor(h5 * 4) % 4] : [0, 1, 2, 3][Math.floor(h5 * 4) % 4]);
     let garment = 0;
     if (female) {
       garment = isElite ? 3 : [1, 3, 4, 2][Math.floor(h2 * 4) % 4];
-    } else if (role === 'captain' || role === 'merchant') {
+    } else if (isElite) {
       garment = h3 < 0.78 ? 1 : 4;
     } else if (role === 'pilot') {
       garment = h3 < 0.65 ? 1 : 4;
-    } else if (role === 'paddler') {
-      garment = 0;
-    } else {
+    } else if (role !== 'paddler') {
       garment = [0, 1, 4, 2][Math.floor((h2 + h3) * 2) % 4];
     }
-
     const build = role === 'merchant'
       ? (h5 < 0.45 ? 3 : 0)
       : (role === 'oarsman' ? (h5 < 0.60 ? 2 : 0) : (Math.floor(h5 * 4) & 3));
@@ -7431,26 +6682,11 @@ export async function createTradeVessels({
         );
 
     const at = lookIdx * DECK_CREW_LOOK_WORDS;
-    crewLooksF32[at + 0] = shirt[0];
-    crewLooksF32[at + 1] = shirt[1];
-    crewLooksF32[at + 2] = shirt[2];
-    crewLooksF32[at + 3] = 0;
-    crewLooksF32[at + 4] = trousers[0];
-    crewLooksF32[at + 5] = trousers[1];
-    crewLooksF32[at + 6] = trousers[2];
-    crewLooksF32[at + 7] = 0;
-    crewLooksF32[at + 8] = person.skin[0];
-    crewLooksF32[at + 9] = person.skin[1];
-    crewLooksF32[at + 10] = person.skin[2];
-    crewLooksF32[at + 11] = modelIdx;
-    crewLooksF32[at + 12] = person.hair[0];
-    crewLooksF32[at + 13] = person.hair[1];
-    crewLooksF32[at + 14] = person.hair[2];
-    crewLooksF32[at + 15] = reconciled.dress / DRESS_MASK_SCALE;
-    crewLooksF32[at + 16] = person.face[0];
-    crewLooksF32[at + 17] = person.face[1];
-    crewLooksF32[at + 18] = person.face[2];
-    crewLooksF32[at + 19] = packCrewFaceW(person.face[3], reconciled.compMask, isIndig);
+    crewLooksF32.set([shirt[0], shirt[1], shirt[2], 0], at);
+    crewLooksF32.set([trousers[0], trousers[1], trousers[2], 0], at + 4);
+    crewLooksF32.set([person.skin[0], person.skin[1], person.skin[2], female ? 1 : 0], at + 8);
+    crewLooksF32.set([person.hair[0], person.hair[1], person.hair[2], reconciled.dress / DRESS_MASK_SCALE], at + 12);
+    crewLooksF32.set([person.face[0], person.face[1], person.face[2], packCrewFaceW(person.face[3], reconciled.compMask, isIndig)], at + 16);
   }
 
   function resolveStationSoul(route, st, stationIndex) {
@@ -7479,12 +6715,11 @@ export async function createTradeVessels({
     return null;
   }
 
+  // Who stands at each station, which body they wear and which clip they work: laid out on the CPU when the traffic,
+  // a body, or the drawing changes, never a frame.
   function syncDeckCrewStationTables() {
     crewStationsU32.fill(0);
-    let slot = 0;
-    let lookCount = 0;
-    let soulTotal = 0;
-
+    crewStationsDirty = false;
     const clipIndexForStation = (st) => {
       const poseKind = st.poseKind;
       if (poseKind === 'brace') return 1;
@@ -7495,6 +6730,8 @@ export async function createTradeVessels({
       return 0;
     };
 
+    const souls = [];
+    let slot = 0;
     for (let vi = 0; vi < vessels.length && slot < MAX_TRADE_VESSELS; vi++) {
       const v = vessels[vi];
       if (v.boat?.damage?.sunk) continue;
@@ -7509,283 +6746,211 @@ export async function createTradeVessels({
           soul = { id: null, syntheticSeed: deckCrewStringHash(`${r.id}:pilot`), sex: 'm', role: 'pilot' };
         }
         if (!soul) continue;
-
         const seedBase = soul.id != null
           ? (Number(soul.id) || deckCrewStringHash(String(soul.id)))
           : (soul.syntheticSeed ?? deckCrewStringHash(`${r.id}:${st.station}`));
         const sexStr = String(soul.sex || '').toLowerCase();
-        const modelIdx = (sexStr === 'f' || sexStr === 'female') && deckCrewGPU?.hasDistinctFemale ? 1 : 0;
-        const clipIdx = clipIndexForStation(st);
-        const clipLayout = deckCrewGPU
-          ? (modelIdx === 1 ? deckCrewGPU.femaleLayout : deckCrewGPU.maleLayout)
-          : null;
-        const clipFirst = clipLayout ? clipLayout[clipIdx * 2] : 0;
-        const clipLen = clipLayout ? Math.max(1, clipLayout[clipIdx * 2 + 1]) : 1;
-
-        const lookIdx = Math.min(CREW_LOOK_CAP - 1, lookCount++);
-        writeDeckCrewLook(lookIdx, soul, st.role, seedBase ^ (si * 7919), modelIdx);
-
-        const isMerchant = st.role === 'merchant' ? 1 : 0;
-        const flags = 1 | (modelIdx << 1) | (isMerchant << 2) | ((clipIdx & 7) << 4);
-        const phaseVal = st.poseKind === 'row' || st.poseKind === 'paddle'
-          ? (st.oarPhaseOffset || 0)
-          : deckCrewHash(seedBase, 97);
-
-        const gid = slot * MAX_DECK_STATIONS_PER_VESSEL + si;
-        const wOff = gid * DECK_CREW_STATION_WORDS;
-        const invScale = 1 / Math.max(0.25, v.scaleMul || 1);
-        const stLocalY = (st.poseKind === 'row' && Number.isFinite(st.seatHeightMetres))
-          ? (st.localMetres[1] + st.seatHeightMetres * (1 - invScale))
-          : st.localMetres[1];
-        crewStationsF32[wOff + 0] = st.localMetres[0];
-        crewStationsF32[wOff + 1] = stLocalY;
-        crewStationsF32[wOff + 2] = st.localMetres[2];
-        crewStationsF32[wOff + 3] = st.yaw || 0;
-        crewStationsU32[wOff + 4] = flags >>> 0;
-        crewStationsU32[wOff + 5] = ((clipFirst & 0xFFFF) | ((clipLen & 0xFFFF) << 16)) >>> 0;
-        crewStationsU32[wOff + 6] = lookIdx >>> 0;
-        crewStationsF32[wOff + 7] = phaseVal;
-        soulTotal++;
+        const female = sexStr === 'f' || sexStr === 'female';
+        souls.push({ v, st, si, gid: slot * MAX_DECK_STATIONS_PER_VESSEL + si, seedBase, female, body: deckCrewBodyFor(st.role, female) });
       }
       slot++;
     }
-
     activeCrewVessels = slot;
-    activeDeckSoulCount = soulTotal;
-    const uploadLooks = Math.max(1, lookCount);
-    if (lookCount === 0) {
-      writeDeckCrewLook(0, null, 'crew', 1, 0);
+    activeDeckSoulCount = souls.length;
+
+    // Each body's run of slots, in order of its first wearer, and the rig its clips are baked from: the continuum
+    // body's own once it has come, else the old body standing in for it. Without either, its people are not drawn.
+    const runs = [];
+    const runOf = new Map();
+    let slots = 0;
+    const drawn = Boolean(deckDrawing && deckPrograms && (deckDrawing.shared ?? deckShared)?.captainTexView);
+    for (const soul of souls) {
+      if (!drawn) break;
+      if (!runOf.has(soul.body)) {
+        if (runs.length >= DECK_CREW_BODY_LIMIT) { runOf.set(soul.body, null); continue; }
+        const body = deckBodyOf(soul.body);
+        const old = body ? null : deckOldModelOf(soul.body);
+        const animator = body?.standIn?.animator ?? old?.animator ?? null;
+        const run = animator ? { id: soul.body, index: runs.length, body, old, rig: deckRigOf(animator), people: 0 } : null;
+        runOf.set(soul.body, run);
+        if (run) runs.push(run);
+      }
+      const run = runOf.get(soul.body);
+      if (run) run.people++;
     }
-    crewConfigU32[0] = activeCrewVessels;
-    crewConfigU32[5] = uploadLooks;
-    if (deckCrewGPU) {
-      crewConfigU32[6] = deckCrewGPU.maleLayout[2];
-      crewConfigU32[7] = deckCrewGPU.maleLayout[3];
-      crewConfigU32[8] = deckCrewGPU.femaleLayout[2];
-      crewConfigU32[9] = deckCrewGPU.femaleLayout[3];
+    for (const run of runs) {
+      run.first = slots;
+      run.capacity = Math.ceil(run.people / DECK_CREW_SLOT_ALIGNMENT) * DECK_CREW_SLOT_ALIGNMENT;
+      slots += run.capacity;
     }
-    device.queue.writeBuffer(crewConfigBuffer, 0, crewConfigBuf);
+
+    let looks = 0;
+    for (const soul of souls) {
+      const run = runOf.get(soul.body);
+      if (!run) continue;
+      const { st, si, gid, seedBase } = soul;
+      const clipIdx = clipIndexForStation(st);
+      const clipFirst = run.rig.layout[clipIdx * 2];
+      const clipLen = Math.max(1, run.rig.layout[clipIdx * 2 + 1]);
+      const lookIdx = Math.min(CREW_LOOK_CAP - 1, looks++);
+      writeDeckCrewLook(lookIdx, st.role, seedBase ^ (si * 7919), soul.female);
+      const phaseVal = st.poseKind === 'row' || st.poseKind === 'paddle'
+        ? (st.oarPhaseOffset || 0)
+        : deckCrewHash(seedBase, 97);
+      const invScale = 1 / Math.max(0.25, soul.v.scaleMul || 1);
+      const stLocalY = (st.poseKind === 'row' && Number.isFinite(st.seatHeightMetres))
+        ? (st.localMetres[1] + st.seatHeightMetres * (1 - invScale))
+        : st.localMetres[1];
+      const wOff = gid * DECK_CREW_STATION_WORDS;
+      crewStationsF32.set([st.localMetres[0], stLocalY, st.localMetres[2], st.yaw || 0], wOff);
+      crewStationsU32[wOff + 4] = (1 | (run.index << 1) | ((clipIdx & 7) << 4)) >>> 0;
+      crewStationsU32[wOff + 5] = ((clipFirst & 0xFFFF) | ((clipLen & 0xFFFF) << 16)) >>> 0;
+      crewStationsU32[wOff + 6] = lookIdx >>> 0;
+      crewStationsF32[wOff + 7] = phaseVal;
+      // Who they are, for the thinning and the sample mask: the same soul keeps the same seed wherever they stand.
+      crewStationsU32[wOff + 8] = ((seedBase >>> 0) % 0x3fffffff) >>> 0;
+    }
+
+    deckConfigU32.fill(0);
+    deckConfigU32.set([activeCrewVessels, MAX_DECK_STATIONS_PER_VESSEL, runs.length, Math.max(1, looks)], 0);
+    // Each body's work clip is what its standing people brace into as the deck rolls.
+    runs.forEach((run, b) => deckConfigU32.set([run.first, run.capacity, run.rig.layout[2], run.rig.layout[3]], 4 + b * 4));
+    device.queue.writeBuffer(crewConfigBuffer, 0, deckConfigBuf);
     if (activeCrewVessels > 0) {
-      device.queue.writeBuffer(
-        crewStationsBuffer,
-        0,
-        crewStationsBuf,
-        0,
-        activeCrewVessels * MAX_DECK_STATIONS_PER_VESSEL * DECK_CREW_STATION_WORDS * 4,
-      );
+      device.queue.writeBuffer(crewStationsBuffer, 0, crewStationsBuf, 0, activeCrewVessels * MAX_DECK_STATIONS_PER_VESSEL * DECK_CREW_STATION_WORDS * 4);
     }
-    device.queue.writeBuffer(crewLooksBuffer, 0, crewLooksF32, 0, uploadLooks * DECK_CREW_LOOK_WORDS);
-    crewStationsDirty = false;
+    if (looks) device.queue.writeBuffer(crewLooksBuffer, 0, crewLooksF32, 0, looks * DECK_CREW_LOOK_WORDS);
+
+    const key = runs.map((run) => `${run.id}:${run.capacity}:${run.body ? 'continuum' : 'old'}`).join('|');
+    if (!runs.length) disposeDeckCompany();
+    else if (deckCompany?.key !== key) buildDeckCompany(runs, slots, key);
   }
 
-  function rebuildDeckCrewBindGroups(state, curResources = resources) {
-    if (!state) return;
-    const byBinding = new Map(curResources.map(([b, r]) => [b, r]));
-    state.clearBindGroup = device.createBindGroup({
-      layout: state.clearPipe.getBindGroupLayout(0),
-      entries: [{ binding: 0, resource: { buffer: crewIndirectBuffer } }],
+  function disposeDeckCompany() {
+    if (!deckCompany) return;
+    for (const b of [deckCompany.placed, deckCompany.joints, deckCompany.actors, ...deckCompany.orders]) b?.destroy?.();
+    for (const made of [...deckCompany.posers, ...deckCompany.batches]) made?.destroy?.();
+    deckCompany = null;
+  }
+
+  // The company's buffers and passes: one continuum batch a body, cut and drawn on the GPU, or where its body has
+  // not come, the old body at one level, posed by the same pass.
+  function buildDeckCompany(runs, slots, key) {
+    disposeDeckCompany();
+    const d = deckDrawing;
+    const shared = d.shared ?? deckShared;
+    const P = deckPrograms;
+    const placed = device.createBuffer({ label: 'trade deck crew placed', size: slots * DECK_CREW_PLACED_BYTES, usage: U_STORAGE });
+    const joints = device.createBuffer({ label: 'trade deck crew joints', size: slots * DECK_CREW_JOINT_BYTES, usage: U_STORAGE });
+    const actors = device.createBuffer({ label: 'trade deck crew actors', size: slots * DECK_CREW_ACTOR_BYTES, usage: U_STORAGE });
+    const countWords = new Uint32Array(DECK_CREW_COUNT_WORDS);
+    for (let b = 0; b < DECK_CREW_BODY_LIMIT; b++) {
+      countWords.set([0, 1, 1, 0], b * DECK_CREW_DISPATCH_WORDS);
+      const old = runs[b]?.old;
+      countWords[DECK_CREW_FALLBACK_AT + b * DECK_CREW_FALLBACK_WORDS] = old ? deckOldGeometryOf(old).indexCount : 0;
+    }
+    device.queue.writeBuffer(crewCountsBuffer, 0, countWords);
+    deckHull ??= createCrewContinuumWorldHull(device, 'trade deck crew world frame');
+    const main = [
+      { buffer: d.frameUBO }, { buffer: deckHull }, { buffer: joints }, { buffer: actors }, d.transView, d.sampClamp, d.envCubeView,
+      { buffer: d.sunVisBuf }, { buffer: crewMoistureBuffer }, d.skyView,
+      { binding: 13, resource: shared.captainTexView }, { binding: 14, resource: shared.captainSampler },
+    ];
+    const countedOf = (b) => ({ buffer: crewCountsBuffer, offset: b * DECK_CREW_DISPATCH_WORDS * 4 });
+    const batches = runs.map((run, b) => (run.body && P.continuum
+      ? createCrewContinuumBatch({
+          device, pipelines: P.continuum, body: run.body, capacity: run.capacity, first: run.first, samples,
+          frame: d.frameUBO, hull: deckHull, bones: joints, actor: actors, main, shadows: d.shadows, counted: countedOf(b),
+        })
+      : null));
+    const orders = runs.map((run, b) => (batches[b] ? null : device.createBuffer({ label: 'trade deck crew old orders', size: Math.max(16, run.capacity * 4), usage: U_STORAGE })));
+    const posers = runs.map((run, b) => createCrewContinuumPoser({
+      device, pipeline: P.pose, placed, palettes: run.rig.palette, looks: crewLooksBuffer, rest: run.rig.rest, joints, actors,
+      orders: batches[b]?.orders ?? orders[b], first: run.first, counted: countedOf(b),
+    }));
+    // The old bodies' draws, each from the slice of joints and actors its people were posed into.
+    const slice = (buffer, bytes, run) => ({ buffer, offset: run.first * bytes, size: run.capacity * bytes });
+    const groupOf = (pipeline, resources) => device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries: resources.map((resource, binding) => (resource?.resource !== undefined ? resource : { binding, resource })),
     });
-    state.selectBindGroup = device.createBindGroup({
-      layout: state.selectPipe.getBindGroupLayout(0),
+    const fallback = runs.map((run) => (run.old && shared.pipeline && shared.shadowPipeline ? {
+      geometry: deckOldGeometryOf(run.old),
+      group: groupOf(shared.pipeline, [main[0], main[1], slice(joints, DECK_CREW_JOINT_BYTES, run), slice(actors, DECK_CREW_ACTOR_BYTES, run), ...main.slice(4)]),
+      shadowGroup: groupOf(shared.shadowPipeline, [{ buffer: d.shadows.uniform }, main[1], slice(joints, DECK_CREW_JOINT_BYTES, run), slice(actors, DECK_CREW_ACTOR_BYTES, run)]),
+    } : null));
+    deckCompany = {
+      key, runs, placed, joints, actors, orders, batches, posers, fallback, shared,
+      lighting: fallback.some(Boolean) ? d.shadows.bind(shared.pipeline) : null,
+      resetGroup: device.createBindGroup({ label: 'trade deck crew reset', layout: P.reset.getBindGroupLayout(0), entries: [{ binding: 6, resource: { buffer: crewCountsBuffer } }] }),
+      placeGroup: null,
+    };
+    rebuildDeckCrewPlaceGroup(resources);
+  }
+
+  function rebuildDeckCrewPlaceGroup(curResources = resources) {
+    if (!deckCompany) return;
+    const byBinding = new Map(curResources.map(([b, r]) => [b, r]));
+    deckCompany.placeGroup = device.createBindGroup({
+      label: 'trade deck crew place',
+      layout: deckPrograms.place.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: byBinding.get(0) },
         { binding: 1, resource: byBinding.get(12) },
         { binding: 2, resource: { buffer: crewConfigBuffer } },
         { binding: 3, resource: { buffer: crewSrcInstancesBuffer } },
         { binding: 4, resource: { buffer: crewStationsBuffer } },
-        { binding: 5, resource: { buffer: crewLooksBuffer } },
-        { binding: 6, resource: { buffer: crewBodiesBuffer } },
-        { binding: 7, resource: { buffer: crewSplatListBuffer } },
-        { binding: 8, resource: { buffer: crewIndirectBuffer } },
-        { binding: 9, resource: byBinding.get(19) },
+        { binding: 5, resource: { buffer: deckCompany.placed } },
+        { binding: 6, resource: { buffer: crewCountsBuffer } },
+        { binding: 7, resource: byBinding.get(19) },
+        { binding: 8, resource: { buffer: crewMoistureBuffer } },
       ],
     });
-    state.solidGroup0 = state.solidPipe
-      ? pickEntries(state.solidPipe, [0, 1, 2, 3, 4, 12, 19, 20, 21], curResources)
-      : null;
-    state.renderGroup0 = pickEntries(state.renderPipe, [0, 1, 2, 3, 4, 12, 19, 20, 21], curResources);
-    state.shadowGroup0 = pickEntries(state.shadowPipe, [0, 12, 19], curResources);
-    state.splatGroup0 = pickEntries(state.splatPipe, [0, 1, 2, 3, 4], curResources);
-    state.splatGroup1 = device.createBindGroup({
-      layout: state.splatPipe.getBindGroupLayout(1),
-      entries: [{ binding: 0, resource: { buffer: crewSplatListBuffer } }],
-    });
+  }
 
-    const bodySlice = (bucket) => ({
-      buffer: crewBodiesBuffer,
-      offset: bucket * CREW_BODY_SLICE_BYTES,
-      size: CREW_BODY_SLICE_BYTES,
-    });
-    state.solidGroup1 = [];
-    state.fadeGroup1 = [];
-    state.renderGroup1 = [];
-    state.shadowGroup1 = [];
-    const solidPipeLayout1 = (state.solidPipe ?? state.renderPipe).getBindGroupLayout(1);
-    const fadePipeLayout1 = state.renderPipe.getBindGroupLayout(1);
-    for (let m = 0; m < DECK_CREW_MODELS; m++) {
-      const mGeo = state.models[m];
-      for (let t = 0; t < DECK_CREW_TIERS; t++) {
-        const bucket = m * DECK_CREW_TIERS + t;
-        const g1 = device.createBindGroup({
-          layout: solidPipeLayout1,
-          entries: [
-            { binding: 0, resource: bodySlice(bucket) },
-            { binding: 1, resource: { buffer: mGeo.palette } },
-            { binding: 2, resource: { buffer: crewLooksBuffer } },
-            { binding: 3, resource: { buffer: crewSrcInstancesBuffer } },
-          ],
-        });
-        state.solidGroup1.push(g1);
-        state.renderGroup1.push(g1);
+  // The old bodies of a company whose continuum bodies have not come, each from its slice.
+  function drawDeckFallback(pass, shadow) {
+    const c = deckCompany;
+    const pipeline = shadow ? c.shared.shadowPipeline : c.shared.pipeline;
+    let set = false;
+    c.fallback.forEach((f, b) => {
+      if (!f) return;
+      if (!set) {
+        pass.setPipeline(pipeline);
+        if (!shadow && c.lighting) pass.setBindGroup(1, c.lighting);
+        set = true;
       }
-      state.fadeGroup1.push(device.createBindGroup({
-        layout: fadePipeLayout1,
-        entries: [
-          { binding: 0, resource: bodySlice(10 + m) },
-          { binding: 1, resource: { buffer: mGeo.palette } },
-          { binding: 2, resource: { buffer: crewLooksBuffer } },
-          { binding: 3, resource: { buffer: crewSrcInstancesBuffer } },
-        ],
-      }));
-      state.shadowGroup1.push(device.createBindGroup({
-        layout: state.shadowPipe.getBindGroupLayout(1),
-        entries: [
-          { binding: 0, resource: bodySlice(8 + m) },
-          { binding: 1, resource: { buffer: mGeo.palette } },
-          { binding: 2, resource: { buffer: crewLooksBuffer } },
-          { binding: 3, resource: { buffer: crewSrcInstancesBuffer } },
-        ],
-      }));
-    }
+      pass.setBindGroup(0, shadow ? f.shadowGroup : f.group);
+      pass.setVertexBuffer(0, f.geometry.vertex);
+      pass.setIndexBuffer(f.geometry.index, 'uint32');
+      pass.drawIndexedIndirect(crewCountsBuffer, (DECK_CREW_FALLBACK_AT + b * DECK_CREW_FALLBACK_WORDS) * 4);
+    });
   }
 
   async function installSharedCrew(nextShared) {
-    if (!nextShared || !canCompute || !makeCompute || destroyed) return null;
-    const token = ++lastSharedCrewToken;
-    try {
-      const [resolved] = await Promise.all([
-        Promise.resolve(nextShared),
-        ensureCrewComponentPacks().catch(() => null),
-      ]);
-      if (destroyed || token !== lastSharedCrewToken || !resolved) return null;
-      const maleSrc = resolved?.sailor ?? resolved?.models?.[0] ?? null;
-      const femaleSrc = resolved?.female ?? resolved?.models?.[1] ?? maleSrc;
-      if (!maleSrc?.vertices || !maleSrc?.animator) return null;
-
-      const maleBuilt = appendMerchantCodexToModel(maleSrc, 'male');
-      const hasDistinctFemale = Boolean(femaleSrc && femaleSrc !== maleSrc && femaleSrc.vertices && femaleSrc.animator);
-      const femaleBuilt = hasDistinctFemale ? appendMerchantCodexToModel(femaleSrc, 'female') : maleBuilt;
-      if (!maleBuilt) return null;
-
-      const maleClips = bakeDeckCrewClips(maleBuilt.model.animator);
-      const femaleClips = hasDistinctFemale && femaleBuilt ? bakeDeckCrewClips(femaleBuilt.model.animator) : maleClips;
-
-      const tierCounts = [
-        maleBuilt.tiers.map((t) => t.indexCount),
-        femaleBuilt.tiers.map((t) => t.indexCount),
-      ];
-      const pipeKey = `deckCrew:${format}:${samples}:${shadowFormat}:${Boolean(computePipe)}:${tierCounts[0].join(',')}:${tierCounts[1].join(',')}`;
-      const pipes = await getPipelineEntry(device, pipeKey, async () => {
-        const [cClearPipe, cSelectPipe, renderMod, shadowMod, splatMod] = await Promise.all([
-          makeCompute(buildDeckCrewClearWGSL(tierCounts), 'trade deck crew clear'),
-          makeCompute(DECK_CREW_SELECT_WGSL, 'tradeCrewSelect'),
-          shader(buildDeckCrewRenderWGSL(samples), 'trade deck crew render'),
-          shader(DECK_CREW_SHADOW_WGSL, 'trade deck crew shadow'),
-          shader(buildDeckCrewSplatWGSL(samples), 'trade deck crew splat'),
-        ]);
-        const [cSolidPipe, cRenderPipe, cShadowPipe, cSplatPipe] = await Promise.all([
-          device.createRenderPipelineAsync({
-            label: 'trade deck crew solid',
-            layout: 'auto',
-            vertex: { module: renderMod, entryPoint: 'tvCrewVS', buffers: DECK_CREW_VERTEX_BUFFERS },
-            fragment: { module: renderMod, entryPoint: 'tvCrewSolidFS', targets: [{ format }] },
-            primitive: { topology: 'triangle-list', cullMode: 'none' },
-            depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
-            multisample: { count: samples },
-          }),
-          device.createRenderPipelineAsync({
-            label: 'trade deck crew render',
-            layout: 'auto',
-            vertex: { module: renderMod, entryPoint: 'tvCrewVS', buffers: DECK_CREW_VERTEX_BUFFERS },
-            fragment: { module: renderMod, entryPoint: 'tvCrewFS', targets: [{ format }] },
-            primitive: { topology: 'triangle-list', cullMode: 'none' },
-            depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
-            multisample: { count: samples },
-          }),
-          device.createRenderPipelineAsync({
-            label: 'trade deck crew shadow',
-            layout: 'auto',
-            vertex: { module: shadowMod, entryPoint: 'tvCrewShadowVS', buffers: DECK_CREW_VERTEX_BUFFERS },
-            primitive: { topology: 'triangle-list', cullMode: 'none' },
-            depthStencil: { format: shadowFormat, depthWriteEnabled: true, depthCompare: 'less', depthBias: 2, depthBiasSlopeScale: 1.5 },
-          }),
-          device.createRenderPipelineAsync({
-            label: 'trade deck crew splat',
-            layout: 'auto',
-            vertex: { module: splatMod, entryPoint: 'tvCrewSplatVS' },
-            fragment: { module: splatMod, entryPoint: 'tvCrewSplatFS', targets: [{ format }] },
-            primitive: { topology: 'triangle-list', cullMode: 'none' },
-            depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
-            multisample: { count: samples },
-          }),
-        ]);
-        return { cClearPipe, cSelectPipe, cSolidPipe, cRenderPipe, cShadowPipe, cSplatPipe };
-      });
-      if (destroyed || token !== lastSharedCrewToken) return null;
-
-      const ownedBuffers = [];
-      const mkOwned = (lbl, typed, usage) => {
-        const buf = device.createBuffer({ label: lbl, size: Math.max(16, typed.byteLength), usage: usage | U_COPY_DST });
-        if (typed.byteLength) device.queue.writeBuffer(buf, 0, typed);
-        ownedBuffers.push(buf);
-        return buf;
-      };
-      const buildModelGPU = (built, clips, tag) => ({
-        vertex: mkOwned(`trade deck crew ${tag} verts`, built.model.vertices, U_VERTEX),
-        tiers: built.tiers.map((t, ti) => ({
-          indexCount: t.indexCount,
-          buffer: mkOwned(`trade deck crew ${tag} idx t${ti}`, t.indices, U_INDEX),
-        })),
-        palette: mkOwned(`trade deck crew ${tag} clips`, clips.palettes, U_STORAGE),
-      });
-      const m0GPU = buildModelGPU(maleBuilt, maleClips, 'male');
-      const m1GPU = hasDistinctFemale ? buildModelGPU(femaleBuilt, femaleClips, 'female') : m0GPU;
-
-      const nextState = {
-        clearPipe: pipes.cClearPipe,
-        selectPipe: pipes.cSelectPipe,
-        solidPipe: pipes.cSolidPipe,
-        renderPipe: pipes.cRenderPipe,
-        shadowPipe: pipes.cShadowPipe,
-        splatPipe: pipes.cSplatPipe,
-        models: [m0GPU, m1GPU],
-        hasDistinctFemale,
-        maleLayout: maleClips.layout,
-        femaleLayout: femaleClips.layout,
-        ownedBuffers,
-        clearBindGroup: null,
-        selectBindGroup: null,
-        solidGroup0: null,
-        renderGroup0: null,
-        shadowGroup0: null,
-        splatGroup0: null,
-        splatGroup1: null,
-        solidGroup1: [],
-        fadeGroup1: [],
-        renderGroup1: [],
-        shadowGroup1: [],
-      };
-      rebuildDeckCrewBindGroups(nextState, resources);
-      const prev = deckCrewGPU;
-      deckCrewGPU = nextState;
-      releaseDeckCrewGPU(prev);
+    const resolved = await Promise.resolve(nextShared).catch(() => null);
+    if (destroyed || !resolved) return null;
+    deckShared = resolved;
+    crewStationsDirty = true;
+    return resolved;
+  }
+  // What the people continuum draws with, from the scene: its frame and lights, the land's shadow set, and the crew's
+  // shared assets. Deck hands are drawn once it is given.
+  function setDeckPeople(drawing) {
+    if (!drawing || drawing === deckDrawing || !canCompute || destroyed) return deckProgramsAsked;
+    deckDrawing = drawing;
+    if (drawing.shared) deckShared = drawing.shared;
+    crewStationsDirty = true;
+    deckProgramsAsked ??= requestDeckCrewPrograms().then((programs) => {
+      if (destroyed) return null;
+      deckPrograms = programs;
       crewStationsDirty = true;
-      if (vessels.length) syncDeckCrewStationTables();
-      return nextState;
-    } catch (err) {
-      console.error('[trade-vessels sharedCrew]', err);
+      return programs;
+    }).catch((error) => {
+      console.error('[trade-vessels deck crew]', error);
       return null;
-    }
+    });
+    return deckProgramsAsked;
   }
 
   // Lazy compilation for damaged-boat pipelines (render, depth prepass, shadow, compute restToPosed) triggered on first cannon hit / grounding breach.
@@ -8352,8 +7517,9 @@ export async function createTradeVessels({
       activeWaveVesselCount = 0;
       selectParamsCtrl[0] = 0;
       device.queue.writeBuffer(selectUniformBuffer, 0, selectParamsCtrl);
-      crewConfigU32[0] = 0;
-      device.queue.writeBuffer(crewConfigBuffer, 0, crewConfigU32, 0, 4);
+      activeDeckSoulCount = 0;
+      deckConfigU32[0] = 0;
+      device.queue.writeBuffer(crewConfigBuffer, 0, deckConfigU32, 0, 4);
       waveParamsU32[0] = 0;
       device.queue.writeBuffer(waveParamsBuffer, 0, waveParamsU32, 0, 4);
       gpuSelectionEncoded = false;
@@ -9145,6 +8311,11 @@ export async function createTradeVessels({
     setSharedCrew(nextSharedCrew) {
       return installSharedCrew(nextSharedCrew);
     },
+    // What deck hands are drawn with through the people continuum: { frameUBO, transView, skyView, sampClamp,
+    // envCubeView, sunVisBuf, shadows (the land's), shared (the crew's assets) }, from the scene that owns them.
+    setPeople(drawing) {
+      return setDeckPeople(drawing);
+    },
     setTraffic(snapshot, origin, riverReaches = [], places = [], context = null) {
       if (context) lastContext = context;
       const effReaches = (Array.isArray(riverReaches) && riverReaches.length > 0)
@@ -9423,7 +8594,7 @@ export async function createTradeVessels({
       if (continuumSolidPipe) contSolidGroup0 = pickEntries(continuumSolidPipe, [0, 1, 2, 3, 4, 12]);
       if (continuumPipe) contGroup0 = pickEntries(continuumPipe, [0, 1, 2, 3, 4, 12]);
       if (splatPipe) splatGroup0 = pickEntries(splatPipe, [0, 1, 2, 3, 4]);
-      if (deckCrewGPU) rebuildDeckCrewBindGroups(deckCrewGPU, resources);
+      rebuildDeckCrewPlaceGroup(resources);
       for (const v of vessels) {
         if (v.damaged && damagedAssets) rebindDamagedVessel(v);
       }
@@ -9453,16 +8624,19 @@ export async function createTradeVessels({
         gpuSelectionEncoded = Boolean(selectPipe && continuumPipe && splatPipe);
         if (gpuSelectionEncoded) hasEncodedGpuOnce = true;
       }
-      if (deckCrewGPU?.clearBindGroup && deckCrewGPU?.selectBindGroup) {
-        pass.setPipeline(deckCrewGPU.clearPipe);
-        pass.setBindGroup(0, deckCrewGPU.clearBindGroup);
+      // Deck hands: their counts emptied, everyone in sight placed from the vessels the wave pass just posed, each body's
+      // people posed, then each body's cut, as many workgroups as the placing pass kept.
+      if (deckCompany?.placeGroup && activeDeckSoulCount > 0) {
+        const c = deckCompany;
+        c.batches.forEach((batch, b) => batch?.update(c.runs[b].capacity));
+        pass.setPipeline(deckPrograms.reset);
+        pass.setBindGroup(0, c.resetGroup);
         pass.dispatchWorkgroups(1);
-        const totalStations = activeCrewVessels * MAX_DECK_STATIONS_PER_VESSEL;
-        if (totalStations > 0 && activeDeckSoulCount > 0) {
-          pass.setPipeline(deckCrewGPU.selectPipe);
-          pass.setBindGroup(0, deckCrewGPU.selectBindGroup);
-          pass.dispatchWorkgroups(Math.ceil(totalStations / 64));
-        }
+        pass.setPipeline(deckPrograms.place);
+        pass.setBindGroup(0, c.placeGroup);
+        pass.dispatchWorkgroups(Math.ceil(activeCrewVessels * MAX_DECK_STATIONS_PER_VESSEL / 64));
+        for (const poser of c.posers) poser.encode(pass);
+        for (const batch of c.batches) batch?.encodeSelect(pass);
         crewEncoded = true;
       }
       if (!damagedAssets || !vessels.length) return;
@@ -9568,36 +8742,10 @@ export async function createTradeVessels({
         }
       }
 
-      if (crewEncoded && deckCrewGPU && activeDeckSoulCount > 0 && canIndirect) {
-        // 1. 100% opaque close/mid-range deck crew (pixels >= 10) -> TBDR hardware Early-Z / HSR solid pipeline
-        const crewSolid = deckCrewGPU.solidPipe ?? deckCrewGPU.renderPipe;
-        pass.setPipeline(crewSolid);
-        pass.setBindGroup(0, deckCrewGPU.solidGroup0 ?? deckCrewGPU.renderGroup0);
-        for (let m = 0; m < DECK_CREW_MODELS; m++) {
-          const mGeo = deckCrewGPU.models[m];
-          pass.setVertexBuffer(0, mGeo.vertex);
-          for (let tier = 0; tier < DECK_CREW_TIERS; tier++) {
-            const bucket = m * DECK_CREW_TIERS + tier;
-            pass.setBindGroup(1, deckCrewGPU.solidGroup1[bucket]);
-            pass.setIndexBuffer(mGeo.tiers[tier].buffer, 'uint32');
-            pass.drawIndexedIndirect(crewIndirectBuffer, bucket * 20);
-          }
-        }
-        // 2. MSAA sample_mask crossfade crew band (4 < pixels < 10) -> buckets 10..11
-        pass.setPipeline(deckCrewGPU.renderPipe);
-        pass.setBindGroup(0, deckCrewGPU.renderGroup0);
-        for (let m = 0; m < DECK_CREW_MODELS; m++) {
-          const mGeo = deckCrewGPU.models[m];
-          pass.setVertexBuffer(0, mGeo.vertex);
-          pass.setBindGroup(1, deckCrewGPU.fadeGroup1[m]);
-          pass.setIndexBuffer(mGeo.tiers[DECK_CREW_TIERS - 1].buffer, 'uint32');
-          pass.drawIndexedIndirect(crewIndirectBuffer, (10 + m) * 20);
-        }
-        // 3. Distant 1-triangle silhouette splat crew (pixels <= 10)
-        pass.setPipeline(deckCrewGPU.splatPipe);
-        pass.setBindGroup(0, deckCrewGPU.splatGroup0);
-        pass.setBindGroup(1, deckCrewGPU.splatGroup1);
-        pass.drawIndirect(crewIndirectBuffer, 240);
+      // Deck hands, opaque with the rest: no discard, so the GPU shades only what shows.
+      if (crewEncoded && deckCompany && canIndirect) {
+        for (const batch of deckCompany.batches) batch?.drawOpaque(pass);
+        drawDeckFallback(pass, false);
       }
     },
     // The indirect draws draw() submits in the main scene pass this frame, for the continuum census
@@ -9611,14 +8759,18 @@ export async function createTradeVessels({
           { buffer: indirectBuffer, offset: 140 * 4, records: 3, stride: 4 }, // continuum solid, continuum band, splats
         );
       }
-      if (crewEncoded && deckCrewGPU && activeDeckSoulCount > 0) {
-        draws.push(
-          { buffer: crewIndirectBuffer, offset: 0, records: DECK_CREW_MODELS * DECK_CREW_TIERS, stride: 5 }, // tiers, solid
-          { buffer: crewIndirectBuffer, offset: 10 * 20, records: DECK_CREW_MODELS, stride: 5 }, // mesh side of the band
-          { buffer: crewIndirectBuffer, offset: 240, records: 1, stride: 4 }, // splats
-        );
-      }
       return draws;
+    },
+    // The deck hands' own draws, for the census's one family of people (js/main.js).
+    peopleDraws() {
+      return crewEncoded && deckCompany ? deckCompany.batches.flatMap((batch) => batch?.continuumDraws() ?? []) : [];
+    },
+    // Whether the deck hands are drawn through the continuum (each body that has come), and the counts their placing
+    // pass keeps, for whoever reads them back.
+    get deckCrew() {
+      return deckCompany
+        ? { bodies: deckCompany.runs.map((run) => ({ id: run.id, continuum: Boolean(deckCompany.batches[run.index]), first: run.first, capacity: run.capacity })), counts: crewCountsBuffer }
+        : null;
     },
     drawDamaged(pass) {
       if (!damagedAssets || !vessels.length) return;
@@ -9669,16 +8821,9 @@ export async function createTradeVessels({
           }
         }
       }
-      if (crewEncoded && deckCrewGPU && activeDeckSoulCount > 0 && typeof pass.drawIndexedIndirect === 'function') {
-        pass.setPipeline(deckCrewGPU.shadowPipe);
-        pass.setBindGroup(0, deckCrewGPU.shadowGroup0);
-        for (let m = 0; m < DECK_CREW_MODELS; m++) {
-          const mGeo = deckCrewGPU.models[m];
-          pass.setVertexBuffer(0, mGeo.vertex);
-          pass.setBindGroup(1, deckCrewGPU.shadowGroup1[m]);
-          pass.setIndexBuffer(mGeo.tiers[DECK_CREW_TIERS - 1].buffer, 'uint32');
-          pass.drawIndexedIndirect(crewIndirectBuffer, (8 + m) * 20);
-        }
+      if (crewEncoded && deckCompany && typeof pass.drawIndexedIndirect === 'function') {
+        for (const batch of deckCompany.batches) batch?.drawShadow(pass);
+        drawDeckFallback(pass, true);
       }
       if (damagedAssets?.dmgShadowPipe) {
         pass.setPipeline(damagedAssets.dmgShadowPipe);
@@ -9699,8 +8844,10 @@ export async function createTradeVessels({
       if (destroyed) return;
       destroyed = true;
       for (const v of vessels) destroyVesselDamaged(v);
-      releaseDeckCrewGPU(deckCrewGPU);
-      deckCrewGPU = null;
+      disposeDeckCompany();
+      for (const b of deckOwned) b?.destroy?.();
+      deckOwned.length = 0;
+      deckHull?.destroy?.();
       for (const g of archGPUs) {
         g.vertexBuffer?.destroy?.();
         g.indexBuffer?.destroy?.();
@@ -9711,7 +8858,7 @@ export async function createTradeVessels({
         contVertColsBuffer, srcInstancesBuffer, nearOutBuffer, contListBuffer, splatListBuffer, indirectBuffer,
         waveParamsBuffer, vesselWaveInputBuffer, vesselHydroStateBuffer, swUniformFallbackBuffer,
         crewConfigBuffer, crewSrcInstancesBuffer, crewStationsBuffer, crewLooksBuffer,
-        crewBodiesBuffer, crewSplatListBuffer, crewIndirectBuffer,
+        crewCountsBuffer, crewMoistureBuffer,
       ]) b?.destroy?.();
       seaDispFallbackTex?.destroy?.();
       swFallbackTex?.destroy?.();

@@ -12,7 +12,7 @@ import {
 import {DRESS_MASK_SCALE} from '../js/indigenous-dress.js';
 import {hullDeck,hullHalfWidth,vesselDeck,HULL_VERTICAL_SCALE,tillerPoint} from '../js/hull.js';
 import {poseCrewWork} from '../js/crew-pose.js';
-import {selectCrewLOD,createDistantCrewLOD} from '../js/crew-lod.js';
+import {selectCrewLOD} from '../js/crew-lod.js';
 import {advanceSails,sailingState} from '../js/sailing.js';
 import {createShareLink} from '../js/sharing.js';
 import {crewHelmStand,crewHelmHands} from '../js/crew-work.js';
@@ -50,7 +50,6 @@ test('the generated bodies say what each point wears, and carry their own levels
     assert.deepEqual([...seen].sort(),[0,1,2,3,4],'paint, shirt, trousers, skin and brow hair on bald base body');
     assert.ok(body.lods[1].triangles<=7500&&body.lods[2].triangles<=2500);
     assert.ok(body.distantIndices.length/3<=320);
-    assert.equal(createDistantCrewLOD(body),body.distantIndices,'townsfolk take the baked level');
 
     const groomed=attachColonialGroomModel(body,groomPack,variant);
     assert.ok(groomed.vertexCount>body.vertexCount,`${variant} gains 3D hair/beard geometry`);

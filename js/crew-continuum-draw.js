@@ -199,6 +199,15 @@ export function crewContinuumRestPlaces(animator) {
   }
   return places;
 }
+// The frame people a GPU pass places in the world are drawn in. The shaders they share with sailors place a body in a
+// ship's frame and look it up for gun flashes; for these that frame is the world's own, and no gun flashes.
+export function createCrewContinuumWorldHull(device, label = 'crew continuum world frame') {
+  const data = new Float32Array(52);
+  data.set([1, 0, 0, 1], 0); data.set([0, 1, 0, 0], 4); data.set([0, 0, -1, 0], 8); data.set([3.6, 12, 1, 1], 12);
+  const hull = device.createBuffer({ label, size: data.byteLength, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  device.queue.writeBuffer(hull, 0, data);
+  return hull;
+}
 // One run of placed people posed into a joint and actor buffer from `first` on, each with their batch's orders.
 //   placed    the CrewPlaced records, indexed by slot as the joints are
 //   palettes  the clips' skin matrices, CREW_JOINT_COUNT a frame; looks the CrewLook table; rest a body's rest places

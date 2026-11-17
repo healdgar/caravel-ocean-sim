@@ -20,10 +20,7 @@ import {
   TRADE_VESSEL_CONTINUUM_WGSL,
   TRADE_VESSEL_SPLAT_WGSL,
   TRADE_VESSEL_WAVE_WGSL,
-  DECK_CREW_SELECT_WGSL,
-  DECK_CREW_RENDER_WGSL,
-  DECK_CREW_SHADOW_WGSL,
-  DECK_CREW_SPLAT_WGSL,
+  DECK_CREW_PLACE_WGSL,
 } from '../js/trade-vessels.js';
 
 function groupTriangleBounds(arch, group) {
@@ -145,10 +142,10 @@ test('Archetype 4 river barge keeps only 4 active wooden thwarts, dry raised sol
     }
   }
 
-  // Adult human crewBodyScale === 1.0 in both crew vertex shaders (never miniature scaleMul)
-  assert.match(DECK_CREW_RENDER_WGSL, /let\s+crewBodyScale\s*=\s*1\.0\s*;/);
-  assert.match(DECK_CREW_SHADOW_WGSL, /let\s+crewBodyScale\s*=\s*1\.0\s*;/);
-  assert.doesNotMatch(DECK_CREW_RENDER_WGSL, /select\s*\(\s*1\.0\s*,\s*scaleMul/);
+  // Adult human crewBodyScale === 1.0 where each deck hand is placed (never miniature scaleMul): the station scales
+  // with the hull, the body never does.
+  assert.match(DECK_CREW_PLACE_WGSL, /let\s+crewBodyScale\s*=\s*1\.0\s*;/);
+  assert.doesNotMatch(DECK_CREW_PLACE_WGSL, /select\s*\(\s*1\.0\s*,\s*scaleMul/);
 
   // 5. Bake Clips 4 & 5 and verify zero spine jackknife (`neck_01.y > spine_03.y + 0.10`), natural spine rock, level shoulders, and forward-of-chest hands across all 24 frames
   const sailor = loadCrewGLB(readFileSync(new URL('../assets/crew/sailor.glb', import.meta.url)));
@@ -380,10 +377,7 @@ test('Zero-flicker traffic invariants: no duplicate crew.sweep, caravan turnarou
     ['continuum', TRADE_VESSEL_CONTINUUM_WGSL],
     ['splat', TRADE_VESSEL_SPLAT_WGSL],
     ['waveCompute', TRADE_VESSEL_WAVE_WGSL],
-    ['crewSelect', DECK_CREW_SELECT_WGSL],
-    ['crewRender', DECK_CREW_RENDER_WGSL],
-    ['crewShadow', DECK_CREW_SHADOW_WGSL],
-    ['crewSplat', DECK_CREW_SPLAT_WGSL],
+    ['crewPlace', DECK_CREW_PLACE_WGSL],
   ];
   for (const [name, code] of opaqueShaders) {
     let depth = 0;
@@ -524,7 +518,6 @@ test('Harbor stern z-separation, 0.000 mm collinear river-barge oars, over-gunwa
   for (const [label, src, fnName] of [
     ['nearSolidPipe', TRADE_VESSELS_WGSL, 'tvSolidFS'],
     ['continuumSolidPipe', TRADE_VESSEL_CONTINUUM_WGSL, 'tvContSolidFS'],
-    ['crewSolidPipe', DECK_CREW_RENDER_WGSL, 'tvCrewSolidFS'],
   ]) {
     const start = src.indexOf(`@fragment fn ${fnName}`);
     assert.ok(start >= 0, `${label} defines @fragment fn ${fnName}`);

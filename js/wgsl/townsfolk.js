@@ -7,7 +7,7 @@
 import { FRAME_WGSL, SIM_CLOCK_LOOP_S } from './common.js';
 import { ROUTE_STEP_M } from '../town-streets.js';
 import { CREW_WALK_CYCLE_METRES } from '../crew-motion.js';
-import { CREW_CONTINUUM_ORDER_IMPORTANT } from './crew-continuum.js';
+import { CREW_CONTINUUM_ORDER_IMPORTANT, CREW_CONTINUUM_PLACED_WGSL } from './crew-continuum.js';
 
 // The two bodies of a town: walker flags bit 0 says which a person wears, a man's or a woman's.
 export const TOWNSFOLK_MODELS = 2;
@@ -55,9 +55,8 @@ const LYING_BOUND_M = 2.4;
 const SHADOW_NEAR_M = 110;
 const SHADOW_MARGIN_M = 18;
 
-export const TOWNSFOLK_WALK = FRAME_WGSL + /* wgsl */ `
+export const TOWNSFOLK_WALK = FRAME_WGSL + CREW_CONTINUUM_PLACED_WGSL + /* wgsl */ `
 struct Walker {first:u32,count:u32,phase:f32,speed:f32,side:f32,pauseAt:f32,pauseFor:f32,indoors:f32,length:f32,abroad:f32,look:u32,flags:u32};
-struct CrewPlaced {transform:mat4x4f,frames:vec4u,blend:vec4f,who:vec4u};
 // second: the first slot of the second body's people; ride: each body's frames of the ride clip, 16 bits each.
 struct TownCrowd {clips:array<vec4u,6>,second:u32,looks:u32,hours:f32,ride:u32};
 struct TownShot {start:vec3f,strike:f32,end:vec3f,blast:f32,reach:f32,seed:f32,padding:vec2f};

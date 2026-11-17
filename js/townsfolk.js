@@ -20,8 +20,8 @@ import {
 import { WALKER_WORDS } from './town-streets.js';
 import { CREW_CONTINUUM_PLACED_WORDS } from './wgsl/crew-continuum.js';
 import {
-  createCrewContinuumBatch, createCrewContinuumPoser, crewContinuumBodyFor, crewContinuumRestPlaces, loadCrewContinuumBody,
-  requestCrewContinuumPipelines, requestCrewContinuumPose,
+  createCrewContinuumBatch, createCrewContinuumPoser, createCrewContinuumWorldHull, crewContinuumBodyFor, crewContinuumRestPlaces,
+  loadCrewContinuumBody, requestCrewContinuumPipelines, requestCrewContinuumPose,
 } from './crew-continuum-draw.js';
 import { CREW_JOINT_COUNT } from './crew-skeleton.js';
 
@@ -164,11 +164,8 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     requestTownsfolkPipelines({ device, shader }),
     requestCrewContinuumPipelines({ device, shader, format, samples }).catch((error) => { console.warn('Townsfolk: the continuum is unavailable; the old bodies stand in', error); return null; }),
   ]);
-  // The shaders they share with sailors place a body in a ship's frame, and look it up for gun flashes. Ashore the
-  // frame is the world's own.
-  const hullData = new Float32Array(52);
-  hullData.set([1, 0, 0, 1], 0); hullData.set([0, 1, 0, 0], 4); hullData.set([0, 0, -1, 0], 8); hullData.set([3.6, 12, 1, 1], 12);
-  const hull = buffer('townsfolk ship stand-in', hullData, B.UNIFORM);
+  // Ashore the frame people are drawn in is the world's own.
+  const hull = createCrewContinuumWorldHull(device, 'townsfolk ship stand-in');
   // Dry but for the rain, and in the sea: the walk pass writes both each frame.
   const moisture = device.createBuffer({ label: 'townsfolk moisture', size: TOWNSFOLK_MOISTURE_SLOTS * 8, usage: B.STORAGE });
 

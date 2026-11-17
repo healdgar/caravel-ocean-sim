@@ -883,6 +883,9 @@ async function main() {
     probePipePromise,
   ]);
   if(terrain&&sharedCrew)terrain.setSharedCrew?.(sharedCrew);
+  // Deck hands aboard the land's vessels are drawn through the people continuum, with the scene's frame and lights.
+  const peopleOfTheLand=land=>{if(sharedCrew)land?.tradeVessels?.setPeople?.({frameUBO,transView,skyView,sampClamp,envCubeView,sunVisBuf,shadows:landShadows,shared:sharedCrew});};
+  peopleOfTheLand(terrain);
   if(terrain)coastalOcean=oceanVariant(await coastalOceanPromise);
   let coastalGroup=terrain?terrain.waterGroup(coastalOcean.pipe):null;
   let coastalDepthGroup=OCEAN_DEPTH&&terrain?terrain.waterGroup(coastalOcean.depthPipe):null;
@@ -911,6 +914,7 @@ async function main() {
     if(!nextTerrain)return null;
     coastalOcean??=oceanVariant(await coastalOceanPromise);
     terrain=nextTerrain;
+    peopleOfTheLand(terrain);
     // A founded port made landfall at wakes its model, if none is awake yet.
     try{wakeBoard();}catch{/* not yet at the game's own start */}
     coastalGroup=terrain.waterGroup(coastalOcean.pipe);
@@ -4686,7 +4690,7 @@ async function main() {
     return out;
   }
   window.oceanCaravans={get plan(){return {...caravanPlan,seen:undefined};},get travellers(){return terrain?.herds?.travellers??0;},ground:(x,z)=>terrain?.groundSample(x,z)??null,locate:locateActiveCaravans,vessels:()=>terrain?.tradeVessels?.locate?.()??[]};
-  window.oceanTradeVessels={get count(){return terrain?.tradeVessels?.count??0;},locate:()=>terrain?.tradeVessels?.locate?.()??[],report:()=>terrain?.tradeVessels?.getMaritimeReport?.()??null};
+  window.oceanTradeVessels={get count(){return terrain?.tradeVessels?.count??0;},get deckCrewCount(){return terrain?.tradeVessels?.deckCrewCount??0;},get deckCrew(){return terrain?.tradeVessels?.deckCrew??null;},peopleDraws:()=>terrain?.tradeVessels?.peopleDraws?.()??[],locate:()=>terrain?.tradeVessels?.locate?.()??[],report:()=>terrain?.tradeVessels?.getMaritimeReport?.()??null};
   // Where walker `index` of the town in sight is now, as the GPU walks them (the same clock and sun), or null.
   const folkStride={position:{x:0,y:0,z:0},walked:0,stopped:false,cycle:0,back:false};
   let folkWords=null,folkWordsOf=null;
@@ -5760,8 +5764,8 @@ async function main() {
     const audioRevision=boat.revision,audioEpoch=hullContactProbe.epoch,audioRequestedAt=performance.now(),audioSimTime=simTime;
     if(doAudio){enc.copyBufferToBuffer(interaction.contacts,0,audioRead,0,72*64);hullContactProbe.copy(enc,frameIndex);}
     if(continuumCensus&&(censusEveryFrame||(frameIndex&7)===0)){
-      // People are one family across every company, the garrison, the mate and the town.
-      const people=[...vessels.flatMap(v=>v.crew?.continuumDraws?.()??[]),...(fortSoldiers?.continuumDraws?.()??[]),...(mateSoldiers?.continuumDraws?.()??[]),...(townsfolk?.continuumDraws?.()??[])];
+      // People are one family across every company, the garrison, the mate, the town and the decks of passing vessels.
+      const people=[...vessels.flatMap(v=>v.crew?.continuumDraws?.()??[]),...(fortSoldiers?.continuumDraws?.()??[]),...(mateSoldiers?.continuumDraws?.()??[]),...(townsfolk?.continuumDraws?.()??[]),...(terrain?.tradeVessels?.peopleDraws?.()??[])];
       continuumCensus.encode(enc,[...(terrain?.continuumSources?.()??[]),...(people.length?[{name:'people',draws:people}]:[])]);
     }
     const doTs=profiler.resolve(enc);

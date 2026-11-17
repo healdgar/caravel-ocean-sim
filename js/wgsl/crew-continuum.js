@@ -246,7 +246,7 @@ fn crewContinuumChunks(list:u32,person:u32,step:u32){
 export const CREW_CONTINUUM_PLACED_WORDS = 28;
 // A look: shirt, trousers, skin (w the body: 0 a man's, 1 a woman's), hair (w the dress / DRESS_MASK_SCALE) and face.
 export const CREW_CONTINUUM_LOOK_WORDS = 20;
-const CREW_CONTINUUM_PLACED = /* wgsl */`
+export const CREW_CONTINUUM_PLACED_WGSL = /* wgsl */`
 struct CrewPlaced { transform:mat4x4f, frames:vec4u, blend:vec4f, who:vec4u };
 `;
 // What a wound takes off, in slots of the skeleton: the joint it parts at and every joint that hangs from it. Each joint
@@ -261,7 +261,7 @@ const CREW_CONTINUUM_SEVERED = Object.freeze(['lowerarm_l', 'lowerarm_r', 'calf_
 }));
 export function crewContinuumPoseWGSL() {
   const N = CREW_JOINT_COUNT, run = ([first, last]) => `vec2u(${first}u,${last}u)`;
-  return CREW_JOINT_BLEND_WGSL + CREW_CONTINUUM_PLACED + /* wgsl */`
+  return CREW_JOINT_BLEND_WGSL + CREW_CONTINUUM_PLACED_WGSL + /* wgsl */`
 struct CrewActor { transform:mat4x4f, shirt:vec4f, trousers:vec4f, skin:vec4f, hair:vec4f, face:vec4f };
 struct CrewLook { shirt:vec4f, trousers:vec4f, skin:vec4f, hair:vec4f, face:vec4f };
 struct CrewPoseRun { first:u32, unused0:u32, unused1:u32, unused2:u32 };
