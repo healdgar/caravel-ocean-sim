@@ -100,6 +100,17 @@ globalThis.BOARD_MODEL = (() => {
 
   const NOTABLE_PERSON_BASE = 1_900_000;
 
+  // Where a boat comes alongside a town. The model keeps the answer on the town (`s.landing`) the first time it is
+  // asked for, which would change the world for a question that only looks at it, and the saved world with it: so
+  // it is asked, and the town left as it was.
+  function landingSeen(s) {
+    if (typeof landingOf !== 'function') return null;
+    const had = Object.prototype.hasOwnProperty.call(s, 'landing'), was = s.landing;
+    const at = landingOf(s);
+    if (!had) delete s.landing; else if (was === undefined) s.landing = undefined;
+    return at;
+  }
+
   function ensureMaritimeLivesStore() {
     if (!W) return { persons: {}, ships: {}, partnerMarkets: {} };
     if (!W.maritimeLives || typeof W.maritimeLives !== 'object') {
@@ -577,7 +588,7 @@ globalThis.BOARD_MODEL = (() => {
   }
   function anchorageBerths(s) {
     const out = typeof berthsOf === 'function' ? berthsOf(s).map((b) => ({ ...b })) : [];
-    const L = typeof landingOf === 'function' ? landingOf(s) : null;
+    const L = landingSeen(s);
     if (!L || typeof toCell !== 'function' || typeof inB !== 'function' || typeof cIdx !== 'function') return out;
     const cx0 = toCell(L.x), cz0 = toCell(L.z);
     for (let r = 3; r <= 8 && out.length < 6; r++) {
@@ -1672,7 +1683,7 @@ globalThis.BOARD_MODEL = (() => {
     // walk visibly in 3D between the waterfront Paço da Ribeira (Terreiro do Paço) and the hilltop Alcáçova Keep.
     const residentNotables = residentNotablesOf(si);
     if (residentNotables.length && g?.N?.length && typeof planWalk === 'function') {
-      const landPt = typeof landingOf === 'function' ? landingOf(s) : null;
+      const landPt = landingSeen(s);
       const rawRibeira = landPt
         ? { x: s.pos.x * 0.55 + landPt.x * 0.45, z: s.pos.z * 0.55 + landPt.z * 0.45 }
         : { x: s.pos.x + 14, z: s.pos.z + 24 };
@@ -1774,7 +1785,7 @@ globalThis.BOARD_MODEL = (() => {
       } else if (ageYrs(p) < 14) goal = 'play';
       const sInfo = soul(p);
       if (sInfo.mounted && si === 0 && g?.N?.length) {
-        const landPt = typeof landingOf === 'function' ? landingOf(s) : null;
+        const landPt = landingSeen(s);
         const palacePt = snapStreet(landPt ? { x: s.pos.x * 0.55 + landPt.x * 0.45, z: s.pos.z * 0.55 + landPt.z * 0.45 } : s.pos);
         to = palacePt;
         open = true;
