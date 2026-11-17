@@ -4484,6 +4484,7 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
       flightSeconds:+flightSeconds.toFixed(2),
       hitKind:hitInfo.kind,
       hitZone:hitInfo.hitZone,
+      hitPosition:hitInfo.position,
       kindCode,
     };
   }
@@ -4901,6 +4902,7 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
       const windVec=Array.isArray(wind)&&wind.length===3?wind:[0,0,0];
       const allSegments=[];
       let midTrace=null;
+      const falls=[];
       for(let i=0;i<picked.length;i++){
         const isMid=i===Math.floor(picked.length*0.5);
         const trace=traceBallisticPreview(picked[i],windVec,{
@@ -4911,6 +4913,7 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
           isLiveRoll:false,
         });
         if(isMid||!midTrace)midTrace=trace;
+        falls.push(trace.hitPosition);
         allSegments.push(...trace.segments);
       }
       // Also render the live instantaneous roll trajectory from the midships gun when the vessel is rolling
@@ -4925,12 +4928,22 @@ export function createShipGunnery(boat,{onEvent=()=>{},onOrder=()=>{},muzzleBloc
         });
         allSegments.push(...liveTrace.segments);
       }
+      // Where the broadside would fall: the midships ball's mark, and as far about it as the fore and aft guns' fall
+      // and a ball's scatter (js/terrain.js setGunneryAim cuts what stands there finer).
+      let fall=null;
+      if(midTrace){
+        const [x,y,z]=midTrace.hitPosition;
+        let radius=4;
+        for(const p of falls)radius=Math.max(radius,Math.hypot(p[0]-x,p[1]-y,p[2]-z)+4);
+        fall={x,y,z,radius};
+      }
       lastAimSummary=midTrace?{
         side:activeSide,
         rangeMeters:midTrace.rangeMeters,
         flightSeconds:midTrace.flightSeconds,
         hitKind:midTrace.hitKind,
         hitZone:midTrace.hitZone,
+        fall,
         targetElevation,
         targetTraverse,
       }:null;

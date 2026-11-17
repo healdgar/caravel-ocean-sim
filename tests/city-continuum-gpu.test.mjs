@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // A city's buildings on the one continuum (AGENTS.md rule 3): one house cut on the GPU at the scene's pixel error,
 // near as clusters, across the handoff band as clusters and far body sharing samples, then far body alone at a step
-// of its collapse, then a splat; a building shot down not at all. And in Lisbon itself, the cut lists the game's own
-// frames leave, read back.
+// of its collapse, then a splat; a building shot down not at all; one struck, or where the player's guns would fall,
+// cut finer. And in Lisbon itself, the cut lists the game's own frames leave, read back.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { once } from 'node:events';
@@ -15,7 +15,7 @@ const launch = () => chromium.launch({
   args: process.env.WEBGPU_BACKEND === 'metal' ? ['--enable-unsafe-webgpu', '--use-angle=metal', '--disable-gpu-watchdog'] : ['--enable-unsafe-webgpu', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--disable-gpu-watchdog'],
 });
 
-test('one house through the city continuum: clusters, handoff, far body, splat, and none once felled', { timeout: 240000 }, async (t) => {
+test('one house through the city continuum: clusters, handoff, far body, splat, none once felled, finer once struck or aimed at', { timeout: 240000 }, async (t) => {
   const server = createDevServer(); server.listen(0, '127.0.0.1'); await once(server, 'listening'); let browser;
   try {
     browser = await launch();
@@ -40,10 +40,12 @@ test('one house through the city continuum: clusters, handoff, far body, splat, 
       const steps = typeField(0, T.steps), stepError = (s) => new Float32Array(atlas.words.buffer, atlas.words.byteOffset + (steps + s * CITY_CONTINUUM_STEP_WORDS + 1) * 4, 1)[0];
       const house = { farFirst: typeField(0, T.farFirst), stepCount: typeField(0, T.stepCount), clusterFirst: typeField(0, T.clusterFirst), clusterCount: typeField(0, T.clusterCount), rx: typeFloat(0, T.splatRx), ry: typeFloat(0, T.splatRy) };
       house.handoff = stepError(house.farFirst);
-      const run = async ({ away, pixels = 3, felled = false }) => {
+      const run = async ({ away, pixels = 3, felled = false, struck = false, aim = null }) => {
         const city = createCityContinuum({ device, atlas, pipelines, view: null, typed: new Float32Array([0, 0, away, 0, 1, 1, 1, 0.5]), types: new Uint32Array([0]), frame: frameUBO, shadowUniform: shadowUBO, samples: 4 });
         city.setShadows(false); city.setPixelError(pixels);
         if (felled) city.hide(0, 1, true);
+        if (struck) city.strike(0, 1, true);
+        city.setAim(aim);
         const encoder = device.createCommandEncoder(), pass = encoder.beginComputePass();
         city.encode(pass); pass.end();
         const readDraws = device.createBuffer({ size: city.draws.size, usage: B.MAP_READ | B.COPY_DST }), readList = device.createBuffer({ size: city.list.size, usage: B.MAP_READ | B.COPY_DST });
@@ -67,6 +69,11 @@ test('one house through the city continuum: clusters, handoff, far body, splat, 
         near: await run({ away: 40 }), band: await run({ away: start * 1.15 }), coarser: await run({ away: start * 1.15, pixels: 6 }),
         far: await run({ away: start * 3 }), farther: await run({ away: start * 9 }), splat: await run({ away: splatAt }),
         felled: await run({ away: 40, felled: true }),
+        // At twice the scene's error, a house struck or under the guns' fall is cut as at the scene's own.
+        struck: await run({ away: start * 1.15, pixels: 6, struck: true }),
+        aimed: await run({ away: start * 1.15, pixels: 6, aim: { x: 0, y: 0, z: start * 1.15, radius: 2 } }),
+        aimedAside: await run({ away: start * 1.15, pixels: 6, aim: { x: 400, y: 0, z: start * 1.15, radius: 2 } }),
+        felledStruck: await run({ away: 40, felled: true, struck: true }),
       };
       await device.queue.onSubmittedWorkDone();
       return { errors, house, start, splatAt, cases };
@@ -99,6 +106,14 @@ test('one house through the city continuum: clusters, handoff, far body, splat, 
     assert.equal(cases.splat.state.splatShare, 255);
     // Shot down, it is drawn as its pieces (js/building-fracture.js), and not here.
     assert.deepEqual([cases.felled.clusters.length, cases.felled.far.length, cases.felled.splat.length], [0, 0, 0]);
+    // Struck or aimed at, it is cut at the core's CONTINUUM_IMPORTANT share of the error: at twice the scene's 3 px it
+    // stands in the band, as at 3 px; aimed at elsewhere, it does not.
+    for (const name of ['struck', 'aimed']) {
+      assert.deepEqual(cases[name].state, cases.band.state, `${name}: cut as at half the error`);
+      assert.deepEqual([cases[name].clusters.length, cases[name].far.length], [cases.band.clusters.length, cases.band.far.length]);
+    }
+    assert.deepEqual(cases.aimedAside.state, cases.coarser.state, 'a fall elsewhere leaves it at the scene\'s error');
+    assert.deepEqual([cases.felledStruck.clusters.length, cases.felledStruck.far.length, cases.felledStruck.splat.length], [0, 0, 0], 'struck and in pieces, still not here');
   } finally { await browser?.close(); server.closeAllConnections?.(); await new Promise((resolve) => server.close(resolve)); }
 });
 

@@ -32,6 +32,11 @@ export const CITY_CONTINUUM_ROW = 8192;
 export const CITY_CONTINUUM_ENTRY_LAYOUT = Object.freeze([Object.freeze({ arrayStride: 8, stepMode: 'instance', attributes: Object.freeze([Object.freeze({ shaderLocation: 0, offset: 0, format: 'uint32x2' })]) })]);
 // How many shadow-map texels a shadow's far body may be in error.
 export const CITY_CONTINUUM_SHADOW_TEXELS = 1.5;
+// A building's flag word: its type in the low 16 bits; this bit while it stands as pieces (js/building-fracture.js);
+// and this one once shot has struck it, until the town stands it again, so that it is cut at the core's
+// CONTINUUM_IMPORTANT share of the error.
+export const CITY_CONTINUUM_FELLED = 1 << 16;
+export const CITY_CONTINUUM_STRUCK = 1 << 17;
 // What an entry is, in the top four bits of its second word.
 const CITY_CONTINUUM_CLUSTER_ENTRY = 1, CITY_CONTINUUM_FAR_ENTRY = 2, CITY_CONTINUUM_SPLAT_ENTRY = 3;
 
@@ -41,6 +46,7 @@ struct CityContinuumView {
   counts:vec4u,             // buildings, samples a pixel, 1 when shadows are cast, unused
   scene:vec4f,              // the scene's pixel error, the world's offset x and z, unused
   lists:array<vec4u,${CITY_CONTINUUM_LISTS.length}>,     // each list's first entry and capacity
+  aim:vec4f,                // where the player's guns would fall, in the scene's frame, and how far about it (0: none)
 };
 // Where a building stands (its type's mesh turned by root.w and stood at root.xyz) and how it is stretched
 // (shape.xyz); shape.w its tint, or, below -50, a fence's slope along its length (plus 100).
@@ -187,7 +193,7 @@ var<workgroup> citySelectedView:vec4f;      // focal, allowed pixels, scale
       let archetype=flags&65535u;
       var share=0u;var splatShare=0u;var step=0u;var shadowStep=0u;var morph=0.0;var splatScale=0.0;
       // A building shot down is drawn as its pieces (js/building-fracture.js), not here.
-      if(((flags>>16u)&1u)==0u){
+      if((flags&${CITY_CONTINUUM_FELLED}u)==0u){
         let place=cityContinuumPlaceOf(building);
         scale=cityContinuumScale(place);
         let sphere=${sphereOf('archetype')};
@@ -196,7 +202,10 @@ var<workgroup> citySelectedView:vec4f;      // focal, allowed pixels, scale
         let relative=world+cityContinuumShift()-F.camPos.xyz;
         let away=max(length(relative),1e-3);
         focal=cityContinuumFocal();
-        pixels=cityView.scene.x;
+        // A building struck, or within the fall of the player's guns, is cut finer (rule 3, item 5).
+        let aim=cityView.aim;
+        let aimed=aim.w>0.0&&length(relative+F.camPos.xyz-aim.xyz)<=reach+aim.w;
+        pixels=continuumImportance(cityView.scene.x,aimed||(flags&${CITY_CONTINUUM_STRUCK}u)!=0u);
         let steps=cityContinuumType(archetype,${T.stepCount}u);
         // The far body is drawn from the first step no heavier than the clusters' coarsest cut; finer is theirs.
         let farFirst=cityContinuumType(archetype,${T.farFirst}u);

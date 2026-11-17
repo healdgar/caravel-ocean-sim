@@ -5464,9 +5464,12 @@ async function main() {
       const aimFallback=(helm.inBattle||!captainPanel.hidden)?(shipGuns.selectedSide??BROADSIDE_SIDE??'port'):null;
       const aimArcs=shipGuns.computeAimTrajectories?.({wind:windVec,fallbackSide:aimFallback})??[];
       gunEffects.setAimArcs?.(aimArcs);
+      // What stands where the broadside would fall is cut finer (one continuum, rule 3 item 5).
+      terrain?.setGunneryAim?.(shipGuns.aimSummary?.fall??null);
       if(!captainPanel.hidden&&(frameIndex&3)===0)gunControls.update();
     }else{
       gunEffects.setAimArcs?.(NO_AIM_ARCS);
+      terrain?.setGunneryAim?.(null);
     }
     hullContactProbe.update(boat,dt,{enabled:sceneAudio.enabled&&sceneAudio.ready&&boat.effects!==false,hidden:document.hidden,resetSea:needSpectrum||elapsed>.5});
     // Every fire burning, and the hull each is aboard (-1 ashore) so the GPU can carry it with her.

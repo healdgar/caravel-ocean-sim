@@ -42,9 +42,10 @@ export function standCityBuildingMesh(source, x, floor, z, yaw, across, up, alon
 
 /**
  * The buildings of one city's plan, for one port. `types()` gives the compiled types with their sources
- * (compileCityBuildingTypes); `port` is the coast's own, whose list a struck building joins.
+ * (compileCityBuildingTypes); `port` is the coast's own, whose list a struck building joins. `onStruck(index)` is
+ * told of every real shot that strikes one and of every one a save names, so that it is cut finer from then on.
  */
-export function createCityTargets({ city, types, port }) {
+export function createCityTargets({ city, types, port, onStruck = null }) {
   const typed = city?.typed, kinds = city?.typedTypes, count = city?.typedCount ?? 0, F = CITY_TYPED_FLOATS;
   const records = new Map(), ready = new Map();
   let grid = null, turns = null, seen = null, sweeps = 0, catalogue = null;
@@ -195,7 +196,7 @@ export function createCityTargets({ city, types, port }) {
           if (hit?.kind === 'building' && (!best || hit.fraction < best.fraction)) { best = hit; bestRecord = record; }
         }
       });
-      if (bestRecord && options?.previewOnly !== true) enrol(bestRecord);
+      if (bestRecord && options?.previewOnly !== true) { enrol(bestRecord); onStruck?.(bestRecord.index); }
       return best;
     },
     // Buildings a save names, stood before the port's damage is put back so that the record finds them.
@@ -205,6 +206,7 @@ export function createCityTargets({ city, types, port }) {
         const index = Number(CITY_TARGET_NAME.exec(name)?.[1] ?? -1);
         if (!(index >= 0 && index < count)) continue;
         enrol(stand(index));
+        onStruck?.(index);
         revived++;
       }
       return revived;

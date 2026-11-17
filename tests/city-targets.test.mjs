@@ -80,7 +80,7 @@ test('a type stood in the world is the mesh the land shader would draw of it',()
 });
 
 test('shot meets a city building, which only then becomes a building of the port',()=>{
-  const port=freshPort(),targets=createCityTargets({city:plan,types:()=>types,port});
+  const struck=[],port=freshPort(),targets=createCityTargets({city:plan,types:()=>types,port,onStruck:index=>struck.push(index)});
   assert.equal(targets.count,plan.typedCount);
   const house=firstOf(type=>type<CITY_HOUSE_TYPES),[from,to]=plumb(house);
   // Over the sea, and high over the town: nothing, and nothing made ready.
@@ -91,6 +91,7 @@ test('shot meets a city building, which only then becomes a building of the port
   const aimed=targets.sweep(from,to,.08,{previewOnly:true,exact:true},sweepBuildingSegment);
   assert.equal(aimed?.kind,'building');assert.equal(aimed.building.city.index,house);
   assert.equal(port.instances.length,1);assert.equal(aimed.building.damageState,undefined);
+  assert.deepEqual(struck,[],'aiming strikes nothing');
   // A ball strikes its roof, not the ground under it.
   const hit=targets.sweep(from,to,.08,null,sweepBuildingSegment),t=record(house);
   assert.equal(hit.building,aimed.building);
@@ -100,6 +101,8 @@ test('shot meets a city building, which only then becomes a building of the port
   assert.deepEqual(port.instances.slice(1),[hit.building]);
   targets.sweep(from,to,.08,null,sweepBuildingSegment);
   assert.equal(port.instances.length,2,'it joins once');
+  // Every real hit is told, so that the city's cut draws it finer from then on (js/terrain.js cityBuildingHit).
+  assert.deepEqual(struck,[house,house]);
   // It is as large as the plan made it, and its reach is its mesh's.
   const T=types[plan.typedTypes[house]],reach=buildingReach(hit.building);
   assert.ok(Math.abs(hit.building.width-T.width*t[4])<1e-3&&Math.abs(hit.building.height-T.height*t[5])<1e-3&&Math.abs(hit.building.depth-T.length*t[6])<1e-3);
@@ -147,8 +150,9 @@ test('a struck city building breaks up as a port building does, and is put back 
   store.capture(port);
   const names=store.recorded(port);
   assert.deepEqual(names,[`city_${house}`]);
-  const again=freshPort(),revived=createCityTargets({city:plan,types:()=>types,port:again});
+  const told=[],again=freshPort(),revived=createCityTargets({city:plan,types:()=>types,port:again,onStruck:index=>told.push(index)});
   assert.equal(revived.revive([...names,'prop:3','city_99999999','quay']),1);
+  assert.deepEqual(told,[house],'a building a save names is struck');
   assert.equal(again.instances.length,2);
   assert.equal(store.restore(again),1);
   const back=again.instances[1];

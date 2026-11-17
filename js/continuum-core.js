@@ -18,6 +18,9 @@ export const CONTINUUM_HANDOFF_BAND = 0.3;
 export const CONTINUUM_TRIANGLE_BUDGET = 3_000_000;
 // The pixel error the scene's cut is drawn at before any governor moves it.
 export const CONTINUUM_BASE_PIXEL_ERROR = 3;
+// What the player is looking at, speaking to or firing upon, and whatever is wounded or struck, is cut at this share
+// of the scene's pixel error (rule 3, item 5): every family's importance is this one factor.
+export const CONTINUUM_IMPORTANT = 0.5;
 
 let continuumScenePixelError = CONTINUUM_BASE_PIXEL_ERROR;
 // The scene's one pixel-error scalar. Every family's cut reads it each frame; only a frame-time or budget governor
@@ -36,6 +39,9 @@ const CONTINUUM_SPLAT_PIXELS: f32 = ${CONTINUUM_SPLAT_PIXELS.toFixed(4)};
 const CONTINUUM_SPLAT_BAND_PIXELS: f32 = ${CONTINUUM_SPLAT_BAND_PIXELS.toFixed(4)};
 const CONTINUUM_MIN_PIXELS: f32 = ${CONTINUUM_MIN_PIXELS.toFixed(4)};
 const CONTINUUM_HANDOFF_BAND: f32 = ${CONTINUUM_HANDOFF_BAND.toFixed(4)};
+const CONTINUUM_IMPORTANT: f32 = ${CONTINUUM_IMPORTANT.toFixed(4)};
+// The pixel error an instance is cut at: the scene's, or CONTINUUM_IMPORTANT of it for one that matters.
+fn continuumImportance(pixels: f32, important: bool) -> f32 { return pixels * select(1.0, CONTINUUM_IMPORTANT, important); }
 fn continuumHash(value: u32) -> u32 {
   var x = value;
   x = (x ^ (x >> 16u)) * 0x7feb352du;

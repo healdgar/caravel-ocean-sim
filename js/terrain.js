@@ -1192,10 +1192,11 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // drawn by the port's fractures, and the continuum leaves it out.
   let cityCatalogue=null;
   const cityTypeCatalogue=()=>cityCatalogue??=compileCityBuildingTypes(buildPortPrefabGeometry);
-  const cityTargetsFor=(city,port)=>city?.typedCount&&city.typedBlocks&&port&&search.get('cityTargets')!=='0'?createCityTargets({city,types:cityTypeCatalogue,port}):null;
+  const cityTargetsFor=(city,port)=>city?.typedCount&&city.typedBlocks&&port&&search.get('cityTargets')!=='0'?createCityTargets({city,types:cityTypeCatalogue,port,onStruck:index=>cityBuildingHit(index)}):null;
   let activeCity=proceduralPack?.city??null,cityTargets=cityTargetsFor(activeCity,proceduralPack?.port);
-  let cityStruck=null,cityContinuum=null;
-  const cityStruckIndices=new Set();
+  let cityStruck=null,cityContinuum=null,cityAim=null;
+  // Buildings in pieces, and buildings shot has struck (cut finer from the first hit until the town stands them again).
+  const cityStruckIndices=new Set(),cityHitIndices=new Set();
   const syncCollapsedBridges=(index,city,struck)=>{
     const bridges=proceduralPack?.port?.country?.bridges;
     if(!bridges?.length)return;
@@ -1221,14 +1222,21 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     // Where each building stands and its tone, for the pieces' limewash and tiles: made at the first one struck.
     cityStruck??=buffer(city.typed,GPUBufferUsage.VERTEX,'city struck buildings');
   };
+  const cityBuildingHit=index=>{
+    const city=activeCity;
+    if(!(index>=0)||!city)return;
+    cityHitIndices.add(index);
+    cityContinuum?.strike(index,1+(city.typedAttached?.[index]??0),true);
+  };
   const cityBuildingRebuilt=instance=>{
     const index=instance.city?.index,city=activeCity;
+    if(cityHitIndices.delete(index)&&city)cityContinuum?.strike(index,1+(city.typedAttached?.[index]??0),false);
     if(!cityStruckIndices.delete(index)||!city)return;
     syncCollapsedBridges(index,city,false);
     cityContinuum?.hide(index,1+(city.typedAttached?.[index]??0),false);
   };
   // When the port's fractures are let go (another port stands in, or the coast is loaded again), the city stands whole.
-  const cityStandsWhole=()=>{for(const index of [...cityStruckIndices])cityBuildingRebuilt({city:{index}});};
+  const cityStandsWhole=()=>{for(const index of new Set([...cityStruckIndices,...cityHitIndices]))cityBuildingRebuilt({city:{index}});};
   const portFracturesFor=(geometry,port,indexBuffer,targets=null)=>{
     const own=Boolean(port?.instances?.length&&geometry?.partAssembly&&indexBuffer);
     if(!port||(!own&&!targets))return null;
@@ -1408,6 +1416,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     cityContinuum=createCityContinuum({device,atlas,pipelines:programs,view:cityPipe,typed:city.typed,types:city.typedTypes,frame:frameUBO,shadowUniform:activeLandShadows.uniform,samples,label:'city'});
     cityContinuum.setPixelError(currentPixelError);cityContinuum.setWorldOffset(worldOffset.x,worldOffset.z);
     for(const index of cityStruckIndices)cityContinuum.hide(index,1+(city.typedAttached?.[index]??0),true);
+    for(const index of cityHitIndices)cityContinuum.strike(index,1+(city.typedAttached?.[index]??0),true);
+    cityContinuum.setAim(cityAim);
   };
   await setCityBuildings(proceduralPack);
   clouds=await cloudsResolvedPromise;waterOptics=await waterOpticsResolvedPromise;
@@ -2144,7 +2154,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     proceduralPack._baseHerds=upgradedPack._baseHerds??proceduralPack._baseHerds??null;
     // The city is laid out again on the new ground, whole; what was shot down is put back from the record.
     if(!heldPort)portDamage?.capture(proceduralPack?.port);
-    cityStruckIndices.clear();cityStruck?.destroy();cityStruck=null;
+    cityStruckIndices.clear();cityHitIndices.clear();cityStruck?.destroy();cityStruck=null;
     setCityBuildings(upgradedPack).catch(error=>console.warn('city continuum',error));
     activeCity=upgradedPack.city??null;cityTargets=cityTargetsFor(activeCity,upgradedPack.port);
     if(!heldPort){
@@ -2598,7 +2608,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         boardStamp.stamp(albedo,activeRegion.albedoSize);
       }
       regenerateAlbedoMips();
-      cityStruckIndices.clear();cityStruck?.destroy();cityStruck=null;
+      cityStruckIndices.clear();cityHitIndices.clear();cityStruck?.destroy();cityStruck=null;
       setCityBuildings(proceduralPack).catch(error=>console.warn('city continuum',error));
       activeCity=proceduralPack.city??null;cityTargets=cityTargetsFor(activeCity,portObj);
       if(!savedPortOverride){
@@ -2695,6 +2705,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       meadowGrass.setBallisticWakes(shots,rings);
     },
     setSharedCrew(crewAssets){tradeVessels?.setSharedCrew?.(crewAssets);},
+    // Where the player's guns would fall now ({x,y,z,radius} in the scene's frame, or null): the city's buildings
+    // there are cut finer. Four floats a frame at most, written only when they change.
+    setGunneryAim(fall){cityAim=fall??null;cityContinuum?.setAim(cityAim);},
     get tradeVessels(){return tradeVessels;},
     setWorldOffset(dx=0,dz=0){
       const nx=Number.isFinite(dx)?dx:0,nz=Number.isFinite(dz)?dz:0;

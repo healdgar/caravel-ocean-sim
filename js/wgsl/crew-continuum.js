@@ -24,9 +24,7 @@ export const CREW_CONTINUUM_INSTANCE_VERTICES = Object.freeze([384, 384, 3, 384,
 export const CREW_CONTINUUM_ENTRY_LAYOUT = Object.freeze([Object.freeze({ arrayStride: 8, stepMode: 'instance', attributes: Object.freeze([Object.freeze({ shaderLocation: 0, offset: 0, format: 'uint32x2' })]) })]);
 // What the GPU is told of a person, beside their joints and actor record (crewOrders in the cut).
 export const CREW_CONTINUUM_ORDER_CUT = 1;        // drawn depth first and shaded at equal depth
-export const CREW_CONTINUUM_ORDER_IMPORTANT = 2;  // wounded, spoken to or aimed at: cut finer
-// Who is cut finer: a wounded person, one being spoken to, or one aimed at. Their pixel error is this share.
-export const CREW_CONTINUUM_IMPORTANT = 0.5;
+export const CREW_CONTINUUM_ORDER_IMPORTANT = 2;  // wounded, spoken to or aimed at: cut at the core's CONTINUUM_IMPORTANT
 // How many shadow-map texels a shadow's far body may be in error.
 export const CREW_CONTINUUM_SHADOW_TEXELS = 1.5;
 // A person's orders (crewOrders): bits 0 and 1 as CREW_CONTINUUM_ORDER_* say; above them, when not 0, who they are
@@ -129,7 +127,6 @@ export function crewContinuumSelectWGSL() {
 @group(0) @binding(8) var<uniform> crewPart:CrewContinuumPart;
 @group(0) @binding(9) var<storage,read> crewOrders:array<u32>;
 @group(0) @binding(10) var<uniform> SH:ShadowFrame;
-const CREW_CONTINUUM_IMPORTANT:f32=${CREW_CONTINUUM_IMPORTANT.toFixed(4)};
 const CREW_CONTINUUM_SHADOW_TEXELS:f32=${CREW_CONTINUUM_SHADOW_TEXELS.toFixed(4)};
 ${continuumClusterPrefixWGSL('crewContinuumPrefix', (i) => `bitcast<f32>(crewShape[(${i})*${CREW_CONTINUUM_CLUSTER_WORDS}u+13u])`)}
 ${continuumMorphStepWGSL('crewContinuumMorphStep', (i) => `bitcast<f32>(crewShape[crewBody.chain.x+crewBody.chain.w+(${i})*${CREW_CONTINUUM_STEP_WORDS}u+1u])`)}
@@ -171,7 +168,7 @@ fn crewContinuumChunks(list:u32,person:u32,step:u32){
     let seed=continuumHash(identity)&255u;var step=0u;var shadowStep=0u;var morph=0.0;var splatScale=1.0;var splatShare=0u;
     let scale=max(length(actor.transform[0].xyz),1e-3);
     let focal=F.screen.y/max(2.0*length(F.camUp.xyz),1e-4);
-    let pixels=crewPart.view.x*select(1.0,CREW_CONTINUUM_IMPORTANT,(orders&${CREW_CONTINUUM_ORDER_IMPORTANT}u)!=0u);
+    let pixels=continuumImportance(crewPart.view.x,(orders&${CREW_CONTINUUM_ORDER_IMPORTANT}u)!=0u);
     if(actor.shirt.w<=0.5){
       let centre=crewContinuumPlace(u32(crewBody.splat.w),crewBody.splat.xyz);
       let away=max(length(centre),1e-3);

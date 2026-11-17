@@ -8,11 +8,11 @@ import { loadCityContinuum } from './city-continuum.js';
 import { CITY_TYPED_FLOATS } from './old-world-buildings.js';
 import {
   CITY_CONTINUUM_LISTS, CITY_CONTINUUM_VIEW_LISTS, CITY_CONTINUUM_DRAW_WORDS, CITY_CONTINUUM_VIEW_BYTES, CITY_CONTINUUM_ROW,
-  CITY_CONTINUUM_ENTRY_LAYOUT, cityContinuumSelectWGSL, cityContinuumShadowWGSL,
+  CITY_CONTINUUM_ENTRY_LAYOUT, CITY_CONTINUUM_FELLED, CITY_CONTINUUM_STRUCK, cityContinuumSelectWGSL, cityContinuumShadowWGSL,
 } from './wgsl/city-continuum.js';
 
-// A building's flag: its type, and this bit while it stands as pieces (js/building-fracture.js).
-export const CITY_CONTINUUM_FELLED = 1 << 16;
+export { CITY_CONTINUUM_FELLED, CITY_CONTINUUM_STRUCK } from './wgsl/city-continuum.js';
+
 // Room in each list, per building: far-body pieces of 32 triangles for the view and for the shadow map; clusters
 // of every size, with a floor for small cities that are walked through.
 const CITY_CONTINUUM_ROOM = Object.freeze({ clusters: 8, least: 16384, far: 24, splat: 1, shadow: 24 });
@@ -94,6 +94,17 @@ export function createCityContinuum({ device, atlas, pipelines: P, view: viewPip
   lists.forEach(([at, n], i) => viewWords.set([at, n, 0, 0], 8 + i * 4));
   let viewChanged = true;
   const setView = (at, value) => { if (viewFloats[at] !== Math.fround(value)) { viewFloats[at] = value; viewChanged = true; } };
+  // One bit of buildings' flags, written only where it changes.
+  const setFlag = (index, n, bit, on) => {
+    if (!(index >= 0) || index >= count) return;
+    const end = Math.min(count, index + n);
+    let changed = false;
+    for (let i = index; i < end; i++) {
+      const word = on ? flagWords[i] | bit : flagWords[i] & ~bit;
+      if (word !== flagWords[i]) { flagWords[i] = word; changed = true; }
+    }
+    if (changed) device.queue.writeBuffer(flags, index * 4, flagWords, index, end - index);
+  };
 
   const group = (layout, resources) => device.createBindGroup({ layout, entries: resources.map(([binding, buffer]) => ({ binding, resource: { buffer } })) });
   const cut = group(P.computeLayout, [[0, frame], [1, shadowUniform], [2, atlas.buffer], [3, places], [4, flags], [5, list], [6, view], [7, draws]]);
@@ -112,14 +123,18 @@ export function createCityContinuum({ device, atlas, pipelines: P, view: viewPip
     setPixelError(pixels) { setView(4, pixels); },
     setWorldOffset(x, z) { setView(5, x); setView(6, z); },
     setShadows(on) { if (viewWords[2] !== (on ? 1 : 0)) { viewWords[2] = on ? 1 : 0; viewChanged = true; } },
-    // Buildings `index`..`index + n` hidden while they stand as pieces, or shown again.
-    hide(index, n = 1, hidden = true) {
-      if (!(index >= 0) || index >= count) return;
-      const end = Math.min(count, index + n);
-      for (let i = index; i < end; i++) flagWords[i] = (types[i] & 0xffff) | (hidden ? CITY_CONTINUUM_FELLED : 0);
-      device.queue.writeBuffer(flags, index * 4, flagWords, index, end - index);
+    // Where the player's guns would fall now, in the scene's frame, and how far about it (js/gunnery-control.js
+    // aimSummary.fall): every building within it is cut finer. A radius of 0, or none, aims at nothing.
+    setAim(fall) {
+      const on = fall && fall.radius > 0;
+      setView(28, on ? fall.x : 0); setView(29, on ? fall.y : 0); setView(30, on ? fall.z : 0); setView(31, on ? fall.radius : 0);
     },
+    // Buildings `index`..`index + n` hidden while they stand as pieces, or shown again.
+    hide(index, n = 1, hidden = true) { setFlag(index, n, CITY_CONTINUUM_FELLED, hidden); },
     hidden(index) { return (flagWords[index] & CITY_CONTINUUM_FELLED) !== 0; },
+    // Buildings `index`..`index + n` struck, so cut finer; or stood again.
+    strike(index, n = 1, struck = true) { setFlag(index, n, CITY_CONTINUUM_STRUCK, struck); },
+    struck(index) { return (flagWords[index] & CITY_CONTINUUM_STRUCK) !== 0; },
     // In the frame's compute pass, before any pass draws: the lists emptied, then every building cut.
     encode(pass) {
       if (destroyed || !count) return;
