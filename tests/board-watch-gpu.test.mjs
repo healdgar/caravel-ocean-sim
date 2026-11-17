@@ -59,7 +59,9 @@ test('Lisbon\'s fort posts are manned by the model\'s watch: each named, each an
   await page.mouse.down(); await page.mouse.up();
   await page.waitForFunction(() => { const el = document.getElementById('folk-card'); return el && !el.hidden && el.querySelector('.folk-facts'); }, null, { timeout: 60000, polling: 200 });
   const card = await page.evaluate(() => document.getElementById('folk-card').innerText);
-  assert.ok(card.includes(one.name) && /on watch on the crown of the /.test(card) && /You find me on watch on the crown of the /.test(card), card.slice(0, 400));
+  // Whoever stands the crown is of the watch, of a host that lies in the place, or holds it for its lord.
+  const post = '(on watch|on guard with [^.]+?|holding the place) on the crown of the ';
+  assert.ok(card.includes(one.name) && new RegExp(post).test(card) && new RegExp('You find me ' + post).test(card), card.slice(0, 400));
   assert.match(card, /Home|Household/);
   t.diagnostic(card.split('\n').filter(Boolean).slice(1, 4).join(' | '));
 
