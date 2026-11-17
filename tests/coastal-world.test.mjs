@@ -1283,14 +1283,14 @@ test('Native American settlements, regional structures, demographic collapse tim
   assert.equal(indigMale.modelVariant, 'indigenous-male');
   assert.ok(indigMale.vertexCount > maleBase.vertices.byteLength / 60, 'indigenous male model appends 3D headband, feathers, braids, and pectoral collar');
   assert.ok(indigMale.accessoryTriangleCount >= 80);
-  assert.equal(indigMale.lods.length, 3);
+  assert.equal(indigMale.lods, undefined, 'drawn whole: the continuum is the only simplification');
 
   assert.equal(indigFemale.sex, 'female');
   assert.equal(indigFemale.indigenous, true);
   assert.equal(indigFemale.modelVariant, 'indigenous-female');
   assert.ok(indigFemale.vertexCount > femaleBase.vertices.byteLength / 60, 'indigenous female model appends 3D headband, feathers, braids, and pectoral collar');
   assert.ok(indigFemale.accessoryTriangleCount >= 80);
-  assert.equal(indigFemale.lods.length, 3);
+  assert.equal(indigFemale.lods, undefined, 'drawn whole: the continuum is the only simplification');
 
   // Verify shore villagers populate Native American settlements with both male and female models
   const boston1550Pack = generateProceduralCoastalPack({
