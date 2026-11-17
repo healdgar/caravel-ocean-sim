@@ -194,7 +194,7 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     }
     return pairs.get(key).bodies;
   };
-  // The old bodies, for the fallback: their meshes at one level, uploaded when a town first wants them. The sailors'
+  // The old bodies, for the fallback: their meshes whole, uploaded when a town first wants them. The sailors'
   // own, where they are shared, are not let go here.
   const oldSets = new Map(), oldGeometry = new Map(), ownGeometry = [];
   const own = (made) => { ownGeometry.push(made); return made; };
@@ -207,11 +207,9 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
   const oldGeometryOf = (model, index) => {
     if (oldGeometry.has(model)) return oldGeometry.get(model);
     const given = models[index] === model ? shared?.geometry?.[index] : null;
-    const levels = given?.lods ?? (model.lods ?? [{ indices: model.indices }]).map((tier) => ({ indexCount: tier.indexCount ?? tier.indices.length, indices: tier.indices }));
-    const level = levels[Math.min(1, levels.length - 1)];
     const entry = {
       vertex: given?.vertex ?? own(buffer('townsfolk old vertices', model.vertices, B.VERTEX)),
-      index: level.buffer ?? own(buffer('townsfolk old indices', level.indices, B.INDEX)), indexCount: level.indexCount,
+      index: given?.index ?? own(buffer('townsfolk old indices', model.indices, B.INDEX)), indexCount: model.indices.length,
     };
     oldGeometry.set(model, entry);
     return entry;

@@ -1,6 +1,5 @@
 // Deliberately bounded glTF 2.0 subset for locally prepared crew assets.
 // No extensions, sparse data, textures, morph targets or matrix-authored nodes.
-import { createCrewLODs } from './crew-lod.js';
 
 export function readGLB(input) {
   const bytes=input instanceof Uint8Array?input:new Uint8Array(input);
@@ -207,7 +206,7 @@ export function createSkinAnimator(asset) {
 }
 
 export function loadCrewGLB(bytes) {
-  const asset=readGLB(bytes),g=asset.json,animator=createSkinAnimator(asset),chunks=[],indices=[];let count=0,levels=null,image=null,mime=null;
+  const asset=readGLB(bytes),g=asset.json,animator=createSkinAnimator(asset),chunks=[],indices=[];let count=0,image=null,mime=null;
   if(g.textures?.length){
     if(g.textures.length!==1||g.images?.length!==1)throw Error('Crew materials expect at most one embedded texture');
     const img=g.images[0],view=g.bufferViews?.[img?.bufferView],start=view?.byteOffset??0,len=view?.byteLength??0;
@@ -230,16 +229,12 @@ export function loadCrewGLB(bytes) {
       }
       const idx=gltfAccessor(asset,p.indices);if(idx.length%3)throw Error('Invalid triangle count');
       for(const n of idx){if(!Number.isInteger(n)||n<0||n>=num)throw Error('Crew index out of range');indices.push(n+count);}
-      if(p.extras?.crewLevels){
-        levels=p.extras.crewLevels.map(a=>Uint32Array.from(gltfAccessor(asset,a),n=>n+count));
-        for(const level of levels)for(const n of level)if(n>=count+num)throw Error('Crew level out of range');
-      }
+      // A body's file may still carry the decimated levels of the retired ladder (extras.crewLevels). They are not
+      // read: an old body stands in only where the continuum is absent, and then at its full detail.
       chunks.push(new Uint8Array(data));count+=num;
     }
   }
   if(count===0||count>100000)throw Error('Crew mesh exceeds budget');
   const vertices=new Uint8Array(count*60);let offset=0;for(const c of chunks){vertices.set(c,offset);offset+=c.length;}
-  const indexArray=new Uint32Array(indices);
-  const lods=createCrewLODs({vertices,indices:indexArray,vertexCount:count,animator,levels});
-  return {asset,animator,vertices,indices:indexArray,lods,vertexCount:count,distantIndices:levels?.[2]??null,image,mime};
+  return {asset,animator,vertices,indices:new Uint32Array(indices),vertexCount:count,image,mime};
 }

@@ -90,10 +90,10 @@ test('all nine Indigenous culture regions map onto four dedicated regional M/F b
     const [maleModel,femaleModel]=createIndigenousCrewModels([sailor,sailorFemale],id);
     assert.ok(maleModel.vertexCount>archetypes[arch][0].vertexCount,`${id} male attaches 3D groom & cultural regalia`);
     assert.ok(femaleModel.vertexCount>archetypes[arch][1].vertexCount,`${id} female attaches 3D groom & cultural regalia`);
-    assert.equal(maleModel.lods.length,3,`${id} male keeps [near, mid, far] LODs`);
-    assert.equal(femaleModel.lods.length,3,`${id} female keeps [near, mid, far] LODs`);
-    assert.ok(maleModel.distantIndices?.length>0,`${id} male keeps baked distantIndices for townsfolk`);
-    assert.ok(femaleModel.distantIndices?.length>0,`${id} female keeps baked distantIndices for townsfolk`);
+    // No ladder of decimated levels: where the continuum is absent an old body stands in whole.
+    assert.equal(maleModel.lods,undefined,`${id} male carries no tier ladder`);
+    assert.equal(femaleModel.lods,undefined,`${id} female carries no tier ladder`);
+    assert.equal(maleModel.indices.length/3,archetypes[arch][0].indices.length/3+maleModel.accessoryTriangleCount,`${id} male draws every triangle`);
   }
   assert.deepEqual([...seenArchetypes].sort(),[...INDIGENOUS_ARCHETYPE_IDS].sort(),'all four regional M/F pairs are exercised');
 });

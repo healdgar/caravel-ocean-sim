@@ -225,8 +225,8 @@ export function townComponentMaskForLook(modelIndex, lookIndex, random, elite = 
   return packCrewCompMask({ hair, hat, beard, garment, build, accent });
 }
 
-// Appends quantized 3D component vertices and near/low LOD index slices onto a loaded crew GLB model.
-// Leaves `model.distantIndices` untouched so distant crowd and shadow passes stay <= 320 triangles.
+// Appends quantized 3D component vertices and their full-detail triangles onto a loaded crew GLB model. The pack's
+// low slices served the retired ladder and are not read: an old body stands in only where the continuum is absent.
 export function attachCrewComponents(model, sex = 'male') {
   if (!model || model.componentsAttached) return model;
   const packs = getCrewComponentPacks();
@@ -306,7 +306,6 @@ export function attachCrewComponents(model, sex = 'male') {
   };
 
   const nearExtra = decodeShiftedIndices(pack.nearIndicesB64);
-  const lowExtra = decodeShiftedIndices(pack.lowIndicesB64);
 
   const baseIndices = model.indices;
   const mergedNear = new Uint32Array(baseIndices.length + nearExtra.length);
@@ -318,29 +317,6 @@ export function attachCrewComponents(model, sex = 'male') {
   model.vertices = vertices;
   model.vertexCount = totalVertCount;
   model.indices = mergedNear;
-  if (Array.isArray(model.lods)) {
-    model.lods = model.lods.map((tier, level) => {
-      if (level === 0) {
-        return Object.freeze({
-          ...tier,
-          indices: mergedNear,
-          indexCount: mergedNear.length,
-          triangles: mergedNear.length / 3,
-          ratio: 1,
-        });
-      }
-      const mergedTier = new Uint32Array(tier.indices.length + lowExtra.length);
-      mergedTier.set(tier.indices, 0);
-      mergedTier.set(lowExtra, tier.indices.length);
-      return Object.freeze({
-        ...tier,
-        indices: mergedTier,
-        indexCount: mergedTier.length,
-        triangles: mergedTier.length / 3,
-        ratio: mergedTier.length / mergedNear.length,
-      });
-    });
-  }
   model.componentsAttached = true;
   return model;
 }

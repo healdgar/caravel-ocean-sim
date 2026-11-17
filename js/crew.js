@@ -24,7 +24,7 @@ import { crewDeckHazard, crewMotionPolicy, crewTurnTowards, crewAdvanceWalk } fr
 import { crewNavigationStation, crewNavigationRoute, crewRoutineSegmentClear } from './crew-navigation.js';
 import { crewTrafficStep, crewTrafficAfterStep } from './crew-traffic.js';
 import { crewDeckField, crewDeckRoom } from './crew-deck.js';
-import { selectCrewLOD, CREW_LOD_TIERS, createCrewLODs, crewPoseInterval, crewApparentDistance, crewLensZoom, crewSailorTier, crewDrawRuns, crewNeedsCutShader, crewClipOnly, crewBakedPose, crewPoseDue, crewPoseSolved, fortPoseDue } from './crew-lod.js';
+import { crewCompanyDistance, crewPoseInterval, fortPoseStride, crewApparentDistance, crewLensZoom, crewDrawRuns, crewNeedsCutShader, crewClipOnly, crewBakedPose, crewPoseDue, crewPoseSolved, fortPoseDue } from './crew-pose-cadence.js';
 import { createCrewClipPipeline, createCrewClipBatch, createCrewTurnPipeline, createCrewTurnBatch } from './crew-clip-pose.js';
 import { createCrewSolver, createCrewSolveBatch, createCrewArrowPipeline, createCrewArrowBatch, resolveCrewWoundsOnSkeleton } from './crew-solve.js';
 import { attachCrewComponents, crewComponentMaskForActor, ensureCrewComponentPacks, packCrewFaceW } from './crew-components.js';
@@ -663,9 +663,9 @@ export function requestCrewPipelines({device,shader,format='rgba16float',samples
   });
 }
 
-// How far off, allowing for the lens, anyone drawn through the continuum is still drawn. By then a person is a
-// fifth of a pixel and thinned nearly to nothing; the GPU culls and thins everyone nearer. The old bodies stop
-// at CREW_CULL_DISTANCE.
+// How far off, allowing for the lens, a company is still drawn. By then a person is a fifth of a pixel and thinned
+// nearly to nothing; the GPU culls and thins everyone nearer. The old bodies, where the continuum is absent, are
+// drawn whole to the same sight.
 export const CREW_CONTINUUM_SIGHT=6000;
 // What the cut is told of a person: drawn depth first while being cut away, and cut finer while hurt or falling.
 const crewContinuumOrder=s=>(s.cutShader?CREW_CONTINUUM_ORDER_CUT:0)
@@ -707,14 +707,13 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
   const turnPipeline=shared?.turnPipeline??requested.turnPipeline;
   const pairModels=bodies?[bodies[0].standIn,bodies[1].standIn]:state.indigenousAttire?createIndigenousCrewModels(models,'taino-greater-antilles'):models.slice(0,2);
   const activeModels=[pairModels[0],pairModels[1],bodies?bodies[2].standIn:models[2]];
-  // Each body's mesh is uploaded once and shared by the fleet: the men's, the women's and the captain's. The
+  // Each body's mesh is uploaded once and shared by the fleet: the men's, the women's and the captain's, whole. The
   // continuum's bodies are their own, held once a device.
   const geometry=bodies?null:activeModels.map((model,i)=>{
     const sharedGeo=(state.indigenousAttire&&i<2)?null:shared?.geometry?.[i];
     if(sharedGeo)return {...sharedGeo,owned:false};
     const vertex=buffer('crew vertices',model.vertices,B.VERTEX),index=buffer('crew indices',model.indices,B.INDEX);
-    const lods=(model.lods??[{id:'near',level:0,indices:model.indices,indexCount:model.indices.length,triangles:model.indices.length/3}]).map((tier,t)=>({...tier,buffer:t===0?index:buffer('crew indices '+tier.id,tier.indices,B.INDEX)}));
-    return {vertex,index,lods,owned:true};
+    return {vertex,index,indexCount:model.indices.length,owned:true};
   });
   const captainModel=activeModels[2],captainGeometry=geometry?.[2];
   const moistureProbeAlignOffset=Math.max(0,Math.min(wetness.crewOffset,Math.max(0,(wetness.probeCount??1)-1))&~31);
@@ -729,7 +728,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
     // A one-person company legitimately has no actors in one sex batch.
     // Bind valid storage buffers, but submit no phantom instance for that batch.
     const poses=new Float32Array(Math.max(1,people.length)*CREW_JOINT_COUNT*16),actors=new Float32Array(Math.max(1,people.length)*CREW_ACTOR_FLOATS),actorsU32=new Uint32Array(actors.buffer);
-    const {vertex,index,lods}=geometry?.[i]??{};
+    const {vertex,index,indexCount}=geometry?.[i]??{};
     const bones=buffer('crew joints',poses,B.STORAGE),actor=buffer('crew transforms',actors,B.STORAGE);
     // Two solved poses per sailor, and how far along the way from one to the other each is.
     const blends=new Float32Array(Math.max(1,people.length)*2);
@@ -749,15 +748,15 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
     const shadow=bodies?null:group(shadowPipeline,[{buffer:shadows.uniform},...common]);
     // What is drawn from this batch's storage: its own bodies, then the captain's, each a run of its slots. Through
     // the continuum each part is one batch of the cut, reading the same joints and actors.
-    const parts=[{model,vertex,index,lods,first:0,people:hands,body:bodies?.[i]},...(captains.length?[{model:captainModel,...captainGeometry,first:hands.length,people:captains,body:bodies?.[2]}]:[])];
+    const parts=[{model,vertex,index,indexCount,first:0,people:hands,body:bodies?.[i]},...(captains.length?[{model:captainModel,...captainGeometry,first:hands.length,people:captains,body:bodies?.[2]}]:[])];
     if(bodies)for(const part of parts)if(part.people.length)part.continuum=createCrewContinuumBatch({device,pipelines:continuum.pipelines,body:part.body,capacity:part.people.length,first:part.first,samples,frame:frameUBO,hull:hullUBO,bones,actor,main:mainResources,shadows});
     return {model,people,hands:hands.length,parts,poses,actors,actorsU32,bones,actor,main,mainCut,cutDepth,shadow,mainResources,solved,blend,blends,poseBlendGroup,clip,captainClip,turn,solve,captainSolve};
   });
-  const partRuns=(part,tierOf)=>{const runs=crewDrawRuns(part.people,tierOf);if(part.first)for(const run of runs)run.first+=part.first;return runs;};
-  const shownTierOf=s=>s.visible===false||s.cutShader?-1:s.lodTier,cutTierOf=s=>s.visible!==false&&s.cutShader?s.lodTier:-1;
-  const shadowTierOf=s=>s.visible===false||s.lodTier>=2?-1:Math.min(CREW_LOD_TIERS.length-1,s.lodTier+1);
-  // Through the continuum the finest cut is the whole body; what is drawn of it is the GPU's to choose.
-  const partTriangles=(part,tier)=>(part.body?part.body.triangles:tier===null?part.model.indices.length/3:(part.lods?.[tier]?.triangles??part.model.indices.length/3))*part.people.length;
+  // The old bodies' runs: who of a part each pass draws, opaque, cut away or into the shadow map, all whole.
+  const partRuns=(part,drawn)=>{const runs=crewDrawRuns(part.people,drawn);if(part.first)for(const run of runs)run.first+=part.first;return runs;};
+  const shownOpaque=s=>s.visible!==false&&!s.cutShader,shownCut=s=>s.visible!==false&&Boolean(s.cutShader),castsShadow=s=>s.visible!==false;
+  // The finest cut is the whole body. Through the continuum what is drawn of it is the GPU's to choose.
+  const partTriangles=part=>(part.body?part.body.triangles:part.model.indices.length/3)*part.people.length;
   const everyPart=batches.flatMap(b=>b.parts);
   const lighting=bodies?null:shadows.bind(pipeline),cutLighting=bodies?null:shadows.bind(cutPipeline);
   const submerged=!bodies&&waterOptics?await waterOptics.capture({source:CREW_RENDER,entry:'crewFS',pipeline,vertex:{buffers:layout},groups:2}):null;
@@ -770,9 +769,9 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
     b.arrows=createCrewArrowBatch(device,arrowPipeline,b.bones,b.actor,gunTools.tubes,34);
     b.people.forEach((s,i)=>placeOf.set(s,{b,i,animator:(i<b.hands?b.model:captainModel).animator}));
   }
-  let enabled=true,drawEnabled=false,posed=false,activeTier=0,shadowTier=1,poseFrame=0,anyCut=false;
-  // Whether the company is drawn at all from where the camera is: the continuum's sight, or the old bodies' range.
-  const inSight=(lod,camera)=>bodies?!(lod.distance/crewLensZoom(camera)>CREW_CONTINUUM_SIGHT):!lod.culled;
+  let enabled=true,drawEnabled=false,posed=false,poseFrame=0,anyCut=false;
+  // Whether the company is drawn at all from where the camera is.
+  const inSight=(boat,camera)=>!(crewCompanyDistance(boat,camera)/crewLensZoom(camera)>CREW_CONTINUUM_SIGHT);
   // Each part's cut is told who is drawn and how, at the scene's pixel error, every frame the company is shown.
   const orderCut=()=>{
     anyCut=false;
@@ -784,31 +783,22 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
       const runs=shadow?part.shadowRuns:cutGroup?part.cutRuns:part.runs;
       if(!part.people.length||runs?.length===0||(cutGroup&&!runs))continue;
       if(!grouped){pass.setBindGroup(0,shadow?b.shadow:cutGroup??b.main);grouped=true;}
-      pass.setVertexBuffer(0,part.vertex);
-      let bound=null;
-      for(const run of runs??[{tier:shadow?shadowTier:activeTier,first:part.first,count:part.people.length}]){
-        const lod=part.lods?.[run.tier]??part.lods?.[0]??{buffer:part.index,indexCount:part.model.indices.length};
-        if(lod.buffer!==bound){pass.setIndexBuffer(lod.buffer,'uint32');bound=lod.buffer;}
-        pass.drawIndexed(lod.indexCount??lod.indices.length,run.count,0,0,run.first);
-      }
+      pass.setVertexBuffer(0,part.vertex);pass.setIndexBuffer(part.index,'uint32');
+      for(const run of runs??[{first:part.first,count:part.people.length}])pass.drawIndexed(part.indexCount,run.count,0,0,run.first);
     }
   };
-  return {state,assets:{models,pipeline,cutDepthPipeline,cutPipeline,shadowPipeline,poseBlendPipeline,clipPipeline,turnPipeline,arrowPipeline,captainTexture,captainTexView,captainSampler,gunTools:gunTools.assets,geometry:state.indigenousAttire||bodies?(shared?.geometry??null):geometry},triangles:everyPart.reduce((n,part)=>n+partTriangles(part,null),0),lods:CREW_LOD_TIERS,
+  return {state,assets:{models,pipeline,cutDepthPipeline,cutPipeline,shadowPipeline,poseBlendPipeline,clipPipeline,turnPipeline,arrowPipeline,captainTexture,captainTexView,captainSampler,gunTools:gunTools.assets,geometry:state.indigenousAttire||bodies?(shared?.geometry??null):geometry},triangles:everyPart.reduce((n,part)=>n+partTriangles(part),0),
     continuum:Boolean(bodies),
-    get lodLevel(){return activeTier;},
     get posed(){return posed;},
-    get activeTriangles(){return everyPart.reduce((n,part)=>n+partTriangles(part,activeTier),0);},
     joints:CREW_JOINT_COUNT,
     order(boat,id){return issueCaptainOrder(state,boat,id);},
     // A paused frame moves nobody, but the camera and the crew and ship toggles still apply.
     refreshDraw(boat,camera=null){
-      const lod=selectCrewLOD(boat,camera);activeTier=lod.mainTier;shadowTier=lod.shadowTier;
-      drawEnabled=boat.crew!==false&&boat.showProw&&inSight(lod,camera)&&state.crew.some(s=>s.visible);
+      drawEnabled=boat.crew!==false&&boat.showProw&&inSight(boat,camera)&&state.crew.some(s=>s.visible);
       if(drawEnabled&&posed)orderCut();
     },
     update(boat,dt,wind,camera=null){
-      const lod=selectCrewLOD(boat,camera);activeTier=lod.mainTier;shadowTier=lod.shadowTier;
-      stepCompany(state,boat,dt,wind);enabled=boat.crew!==false;drawEnabled=enabled&&boat.showProw&&inSight(lod,camera)&&state.crew.some(s=>s.visible);
+      stepCompany(state,boat,dt,wind);enabled=boat.crew!==false;drawEnabled=enabled&&boat.showProw&&inSight(boat,camera)&&state.crew.some(s=>s.visible);
       if(!drawEnabled){
         gunTools.update(state,boat,false);
         for(const b of batches){b.arrows.begin();b.arrows.upload();}
@@ -826,7 +816,6 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
           s.poseElapsed=(s.poseElapsed??0)+dt;
           // A wound or a fall shows at once. Anyone not on show keeps their slot until they are.
           const apparent=crewApparentDistance(s.position,boat,camera);
-          if(!bodies)s.lodTier=crewSailorTier(apparent,s.lodTier??0);
           // A man in the water, or anyone far off, is posed on the GPU from a baked clip and solved for no further.
           let baked=crewBakedPose(apparent,s);
           if(baked==='walk')clips.set(i,s.time,s.walkTime,s.walk);
@@ -882,7 +871,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
           const localMoistureBase=(wetness.crewOffset-moistureProbeAlignOffset)+(s.crewIndex??state.crew.indexOf(s))*4;
           b.actorsU32[offset+31]=packCrewMoistureAndDressU32(localMoistureBase,s.dress??0);
         }
-        if(!bodies)for(const part of b.parts){part.runs=partRuns(part,shownTierOf);part.cutRuns=partRuns(part,cutTierOf);part.shadowRuns=partRuns(part,shadowTierOf);}
+        if(!bodies)for(const part of b.parts){part.runs=partRuns(part,shownOpaque);part.cutRuns=partRuns(part,shownCut);part.shadowRuns=partRuns(part,castsShadow);}
         device.queue.writeBuffer(b.blend,0,b.blends);device.queue.writeBuffer(b.actor,0,b.actors);b.clip.upload();b.captainClip?.upload();b.solve.upload();b.captainSolve?.upload();b.turn.update(b.people);
       }
       orderCut();
@@ -913,8 +902,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
         pass.setBindGroup(0,b.submerged);
         for(const part of b.parts){
           if(!part.people.length)continue;
-          const lod=part.lods?.at(-1)??{buffer:part.index,indexCount:part.model.indices.length};
-          pass.setVertexBuffer(0,part.vertex);pass.setIndexBuffer(lod.buffer,'uint32');pass.drawIndexed(lod.indexCount??lod.indices.length,part.people.length,0,0,part.first);
+          pass.setVertexBuffer(0,part.vertex);pass.setIndexBuffer(part.index,'uint32');pass.drawIndexed(part.indexCount,part.people.length,0,0,part.first);
         }
       }
       gunTools.drawSubmerged(pass,above);
@@ -944,10 +932,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
     destroy(){
       gunTools.destroy();
       if(!shared)captainTexture?.destroy?.();
-      for(const g of geometry??[]){
-        if(!g.owned)continue;
-        for(const resource of [g.vertex,g.index,...(g.lods?.slice(1).map(l=>l.buffer)??[])])resource.destroy();
-      }
+      for(const g of geometry??[])if(g.owned){g.vertex.destroy();g.index.destroy();}
       for(const part of everyPart)part.continuum?.destroy();
       for(const b of batches){for(const resource of [b.bones,b.actor,b.solved,b.blend])resource.destroy();b.clip.destroy();b.captainClip?.destroy();b.turn.destroy();b.solve.destroy();b.captainSolve?.destroy();b.arrows.destroy();}
     },
@@ -1064,8 +1049,8 @@ export function loadGroomPackGLB(bytes) {
     const positions = gltfAccessor(asset, a.POSITION);
     const normals = gltfAccessor(asset, a.NORMAL);
     const colors = gltfAccessor(asset, a.COLOR_0);
+    // Each piece at its full detail; any levels its file still carries (extras.crewLevels) served the retired ladder.
     const nearIndices = Uint32Array.from(gltfAccessor(asset, p.indices));
-    const [midIndices, farIndices] = (p.extras?.crewLevels ?? []).map((idx) => Uint32Array.from(gltfAccessor(asset, idx)));
     pieces[mesh.name] = Object.freeze({
       name: mesh.name,
       vertexCount: positions.length / 3,
@@ -1073,8 +1058,6 @@ export function loadGroomPackGLB(bytes) {
       normals,
       colors,
       nearIndices,
-      midIndices: midIndices ?? nearIndices,
-      farIndices: farIndices ?? midIndices ?? nearIndices,
     });
   }
   return Object.freeze({ pieces: Object.freeze(pieces) });
@@ -1256,7 +1239,7 @@ function sampleBeardSkinWeights(px, py, pz, lm) {
   };
 }
 
-function appendGroomPieceMesh(pieceMesh, pieceNumber, lm, baseVertCount, extraVerts, extraNearTris, extraMidTris, extraFarTris) {
+function appendGroomPieceMesh(pieceMesh, pieceNumber, lm, baseVertCount, extraVerts, extraTris) {
   if (!pieceMesh || !(pieceNumber > 0)) return;
   const isBeard = pieceMesh.name.startsWith('beard_');
   const isDraped = pieceMesh.name === 'hair_1550_wavy'
@@ -1338,9 +1321,7 @@ function appendGroomPieceMesh(pieceMesh, pieceNumber, lm, baseVertCount, extraVe
       weights,
     });
   }
-  for (let i = 0; i < pieceMesh.nearIndices.length; i++) extraNearTris.push(pieceMesh.nearIndices[i] + vertOffset);
-  if (extraMidTris) for (let i = 0; i < pieceMesh.midIndices.length; i++) extraMidTris.push(pieceMesh.midIndices[i] + vertOffset);
-  if (extraFarTris) for (let i = 0; i < pieceMesh.farIndices.length; i++) extraFarTris.push(pieceMesh.farIndices[i] + vertOffset);
+  for (let i = 0; i < pieceMesh.nearIndices.length; i++) extraTris.push(pieceMesh.nearIndices[i] + vertOffset);
 }
 
 const COLONIAL_GROOM_SPECS = Object.freeze({
@@ -1380,9 +1361,9 @@ export function attachColonialGroomModel(baseModel, groomPack, variant = 'male')
   const specs = COLONIAL_GROOM_SPECS[variant] ?? COLONIAL_GROOM_SPECS.male;
   const lm = measureCrewHeadLandmarks(baseModel);
   const baseVertCount = baseModel.vertices.byteLength / 60;
-  const extraVerts = [], extraNearTris = [], extraMidTris = [], extraFarTris = [];
+  const extraVerts = [], extraTris = [];
   for (const [pieceNumber, meshName] of specs) {
-    appendGroomPieceMesh(groomPack.pieces[meshName], pieceNumber, lm, baseVertCount, extraVerts, extraNearTris, extraMidTris, extraFarTris);
+    appendGroomPieceMesh(groomPack.pieces[meshName], pieceNumber, lm, baseVertCount, extraVerts, extraTris);
   }
   if (!extraVerts.length) return baseModel;
 
@@ -1400,25 +1381,14 @@ export function attachColonialGroomModel(baseModel, groomPack, variant = 'male')
     vu[uOff + 18] = v.bones[0]; vu[uOff + 19] = v.bones[1]; vu[uOff + 20] = v.bones[2]; vu[uOff + 21] = v.bones[3];
     vf[fOff + 11] = v.weights[0]; vf[fOff + 12] = v.weights[1]; vf[fOff + 13] = v.weights[2]; vf[fOff + 14] = v.weights[3];
   }
-  const indices = concatIndexArrays(baseModel.indices, extraNearTris);
-  const hasBakedLevels = baseModel.lods?.length >= 3 && baseModel.distantIndices;
-  const levels = hasBakedLevels
-    ? [
-        concatIndexArrays(baseModel.lods[1].indices, extraMidTris),
-        concatIndexArrays(baseModel.lods[2].indices, extraFarTris),
-      ]
-    : null;
-  const lods = createCrewLODs({ vertices, indices, vertexCount: totalVertCount, animator: baseModel.animator, levels });
   return {
     ...baseModel,
     modelVariant: `colonial-${variant}`,
     vertices,
-    indices,
-    lods,
+    indices: concatIndexArrays(baseModel.indices, extraTris),
     vertexCount: totalVertCount,
-    distantIndices: baseModel.distantIndices ?? null,
     groomVertexCount: extraVerts.length,
-    groomTriangleCount: extraNearTris.length / 3,
+    groomTriangleCount: extraTris.length / 3,
   };
 }
 
@@ -1510,21 +1480,14 @@ export function buildIndigenousCrewModel(baseModel, female = false, groomPack = 
   // braided plaits / loose hair / roach from Tripo groomPack when present, and collars).
   const extraVerts = [];
   const extraTris = [];
-  const extraMidTris = [];
-  const extraFarTris = [];
   let piece = 0;
-  let keepInFarLod = true;
-  const asPiece = (name, build, farVisible = true) => {
+  const asPiece = (name, build) => {
     piece = DRESS_PIECES.indexOf(name) + 1;
-    keepInFarLod = farVisible;
     build();
     piece = 0;
-    keepInFarLod = true;
   };
   const pushTri = (aIdx, bIdx, cIdx) => {
     extraTris.push(aIdx, bIdx, cIdx);
-    extraMidTris.push(aIdx, bIdx, cIdx);
-    if (keepInFarLod) extraFarTris.push(aIdx, bIdx, cIdx);
   };
   const pushVertex = (pos, norm, col, bones, weights) => {
     const idx = baseVertCount + extraVerts.length;
@@ -1617,7 +1580,7 @@ export function buildIndigenousCrewModel(baseModel, female = false, groomPack = 
   const tieCol = [0.58, 0.14, 0.08];
   asPiece('PLAITS', () => {
     if (groomPack?.pieces?.hair_indigenous_plaits) {
-      appendGroomPieceMesh(groomPack.pieces.hair_indigenous_plaits, piece, lm, baseVertCount, extraVerts, extraTris, extraMidTris, extraFarTris);
+      appendGroomPieceMesh(groomPack.pieces.hair_indigenous_plaits, piece, lm, baseVertCount, extraVerts, extraTris);
       return;
     }
     const braidLen = female ? 0.36 : 0.31, braidSegs = 6;
@@ -1680,7 +1643,7 @@ export function buildIndigenousCrewModel(baseModel, female = false, groomPack = 
   // 5. Long hair, falling loose down the back (3D Tripo asset when groomPack present)
   asPiece('LOOSE_HAIR', () => {
     if (groomPack?.pieces?.hair_indigenous_long) {
-      appendGroomPieceMesh(groomPack.pieces.hair_indigenous_long, piece, lm, baseVertCount, extraVerts, extraTris, extraMidTris, extraFarTris);
+      appendGroomPieceMesh(groomPack.pieces.hair_indigenous_long, piece, lm, baseVertCount, extraVerts, extraTris);
       return;
     }
     const rows = 7, columns = 7, length = female ? 0.46 : 0.38, grid = [];
@@ -1702,7 +1665,7 @@ export function buildIndigenousCrewModel(baseModel, female = false, groomPack = 
   // 6. Crest of hair and dyed deer hair along the middle of the skull (3D Tripo roach when groomPack present)
   asPiece('ROACH', () => {
     if (groomPack?.pieces?.hair_algonquian_roach) {
-      appendGroomPieceMesh(groomPack.pieces.hair_algonquian_roach, piece, lm, baseVertCount, extraVerts, extraTris, extraMidTris, extraFarTris);
+      appendGroomPieceMesh(groomPack.pieces.hair_algonquian_roach, piece, lm, baseVertCount, extraVerts, extraTris);
       return;
     }
     const steps = 9, tip = [0.34, 0.07, 0.04];
@@ -1763,7 +1726,7 @@ export function buildIndigenousCrewModel(baseModel, female = false, groomPack = 
     const cV = pushVertex([bandCx + r, y + r, z], n, stone, headBones, headWeights);
     const dV = pushVertex([bandCx - r, y + r, z], n, stone, headBones, headWeights);
     pushQuad(aV, bV, cV, dV);
-  }, false);
+  });
 
   const totalVertCount = baseVertCount + extraVerts.length;
   const vertices = new Uint8Array(totalVertCount * 60);
@@ -1794,31 +1757,13 @@ export function buildIndigenousCrewModel(baseModel, female = false, groomPack = 
     vf[fOff + 14] = v.weights[3];
   }
 
-  const indices = concatIndexArrays(baseModel.indices, extraTris);
-  const hasBakedLevels = baseModel.lods?.length >= 3 && baseModel.distantIndices;
-  const levels = hasBakedLevels
-    ? [
-        concatIndexArrays(baseModel.lods[1].indices, extraMidTris),
-        concatIndexArrays(baseModel.lods[2].indices, extraFarTris),
-      ]
-    : null;
-  const lods = createCrewLODs({
-    vertices,
-    indices,
-    vertexCount: totalVertCount,
-    animator: baseModel.animator,
-    levels,
-  });
-
   return {
     ...baseModel,
     sex: female ? 'female' : 'male',
     indigenous: true,
     modelVariant: female ? 'indigenous-female' : 'indigenous-male',
     vertices,
-    indices,
-    lods,
-    distantIndices: baseModel.distantIndices ?? null,
+    indices: concatIndexArrays(baseModel.indices, extraTris),
     vertexCount: totalVertCount,
     accessoryVertexCount: extraVerts.length,
     accessoryTriangleCount: extraTris.length / 3,
@@ -2835,11 +2780,7 @@ export async function createFortSoldiers({
     if (given) return { ...given, model, owned: false };
     const vertex = buffer('fort crew vertices', model.vertices, B.VERTEX);
     const index = buffer('fort crew indices', model.indices, B.INDEX);
-    const lods = (model.lods ?? [{ id: 'near', level: 0, indices: model.indices, indexCount: model.indices.length, triangles: model.indices.length / 3 }]).map((tier, t) => ({
-      ...tier,
-      buffer: t === 0 ? index : buffer('fort crew indices ' + tier.id, tier.indices, B.INDEX),
-    }));
-    return { vertex, index, lods, model, owned: true };
+    return { vertex, index, indexCount: model.indices.length, model, owned: true };
   };
   // One run of a batch's slots cut and drawn through the continuum: its soldiers, or its captains after them.
   const fortCut = (b, body, capacity) => createCrewContinuumBatch({ device, pipelines: continuum.pipelines, body, capacity, samples, frame: frameUBO, hull: fortHullUBO, bones: b.bones, actor: b.actor, main: b.mainResources, shadows });
@@ -2906,13 +2847,12 @@ export async function createFortSoldiers({
     return b;
   });
   const lighting = bodies ? null : shadows.bind(pipeline);
-  // One batch's bodies at the garrison's level of detail: its soldiers, then any captains after them.
+  // One batch's old bodies, whole: its soldiers, then any captains after them.
   const drawFortRun = (pass, geometry, first, count) => {
     if (!count || !geometry) return;
-    const lod = geometry.lods?.[activeTier] ?? { buffer: geometry.index, indexCount: geometry.model.indices.length };
     pass.setVertexBuffer(0, geometry.vertex);
-    pass.setIndexBuffer(lod.buffer, 'uint32');
-    pass.drawIndexed(lod.indexCount ?? lod.indices.length, count, 0, 0, first);
+    pass.setIndexBuffer(geometry.index, 'uint32');
+    pass.drawIndexed(geometry.indexCount ?? geometry.model.indices.length, count, 0, 0, first);
   };
   const drawFortBatch = (pass, b, group) => {
     if (!b.people.length) return;
@@ -2925,7 +2865,6 @@ export async function createFortSoldiers({
   let garrison = null;
   let reach = 0;
   let drawEnabled = false;
-  let activeTier = 0;
   let sampleTick = 0;
   let posesDirty = true;
 
@@ -2999,7 +2938,6 @@ export async function createFortSoldiers({
 
   return {
     get state() { return garrison; },
-    get lodLevel() { return activeTier; },
     setPort(nextPort) { syncPort(nextPort); },
     // `dateMs` is the game's date, by which a fallen soldier's day on the ground is counted.
     update(nextPort, dt, wind = 0, camera = null, stepSimulation = true, dateMs = null) {
@@ -3028,12 +2966,10 @@ export async function createFortSoldiers({
         minDist = 0;
         anyVisible = garrison.soldiers.some(s => s.visible);
       }
-      const lod = selectCrewLOD({ x: 0, z: 0, heave: 0 }, { x: Math.min(minDist, 380), y: 0, z: 0 });
-      activeTier = lod.mainTier;
       drawEnabled = minDist <= GARRISON_SIGHT_M && anyVisible;
       if (!drawEnabled) return;
 
-      const stride = activeTier === 0 ? 1 : activeTier === 1 ? 2 : 4;
+      const stride = fortPoseStride(minDist);
       const everyone = posesDirty, shouldSamplePoses = posesDirty || (sampleTick++ % stride) === 0;
       posesDirty = false;
       for (const b of batches) {
@@ -3115,7 +3051,7 @@ export async function createFortSoldiers({
     },
     drawShadow(pass) {
       if (bodies) { if (drawEnabled) for (const b of batches) { b.soldierCut?.drawShadow(pass); b.captainCut?.drawShadow(pass); } return; }
-      if (!drawEnabled || activeTier >= 2) return;
+      if (!drawEnabled) return;
       pass.setPipeline(shadowPipeline);
       for (const b of batches) drawFortBatch(pass, b, b.shadow);
     },
@@ -3126,21 +3062,15 @@ export async function createFortSoldiers({
       dryMoistureBuf.destroy();
       if (!shared?.captainTexture) captainTexture?.destroy?.();
       for (const entry of indigenousBatchCache.values()) {
-        if (entry.geometry?.owned) {
-          for (const resource of [entry.geometry.vertex, entry.geometry.index, ...(entry.geometry.lods?.slice(1).map(l => l.buffer) ?? [])]) resource?.destroy?.();
-        }
+        if (entry.geometry?.owned) { entry.geometry.vertex.destroy(); entry.geometry.index.destroy(); }
         entry.clip.destroy();
         entry.solve.destroy();
         entry.soldierCut?.destroy();
       }
-      if (captainGeometry?.owned) {
-        for (const resource of [captainGeometry.vertex, captainGeometry.index, ...(captainGeometry.lods?.slice(1).map(l => l.buffer) ?? [])]) resource?.destroy?.();
-      }
+      if (captainGeometry?.owned) { captainGeometry.vertex.destroy(); captainGeometry.index.destroy(); }
       for (const b of batches) {
         if (!b.isIndigenousBatch) {
-          if (b.geometry?.owned) {
-            for (const resource of [b.geometry.vertex, b.geometry.index, ...(b.geometry.lods?.slice(1).map(l => l.buffer) ?? [])]) resource?.destroy?.();
-          }
+          if (b.geometry?.owned) { b.geometry.vertex.destroy(); b.geometry.index.destroy(); }
           b.clip.destroy();
           b.captainClip?.destroy();
           b.solve.destroy();

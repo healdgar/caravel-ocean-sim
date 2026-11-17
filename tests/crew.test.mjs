@@ -12,7 +12,7 @@ import {
 import {DRESS_MASK_SCALE} from '../js/indigenous-dress.js';
 import {hullDeck,hullHalfWidth,vesselDeck,HULL_VERTICAL_SCALE,tillerPoint} from '../js/hull.js';
 import {poseCrewWork} from '../js/crew-pose.js';
-import {selectCrewLOD} from '../js/crew-lod.js';
+import {crewCompanyDistance,crewLensZoom} from '../js/crew-pose-cadence.js';
 import {advanceSails,sailingState} from '../js/sailing.js';
 import {createShareLink} from '../js/sharing.js';
 import {crewHelmStand,crewHelmHands} from '../js/crew-work.js';
@@ -35,7 +35,7 @@ test('sailor GLB is self-contained, bounded and has the required clips',()=>{
   const rest=positions(model.animator.sample(null,0)),f=new Float32Array(model.vertices.buffer);
   for(let i=0;i<model.vertexCount;i++)for(let k=0;k<3;k++)assert.ok(Math.abs(rest[i*3+k]-f[i*15+k])<1e-5,'inverse binds preserve the authored rest geometry');
 });
-test('the generated bodies say what each point wears, and carry their own levels',()=>{
+test('the generated bodies say what each point wears, and are drawn whole',()=>{
   const groomPack=loadGroomPackGLB(fs.readFileSync(new URL('../assets/crew/groom-pack.glb',import.meta.url)));
   for(const [body,variant] of [
     [model,'male'],
@@ -48,13 +48,12 @@ test('the generated bodies say what each point wears, and carry their own levels
       seen.add(Math.floor(f[i*15+8]*.5));
     }
     assert.deepEqual([...seen].sort(),[0,1,2,3,4],'paint, shirt, trousers, skin and brow hair on bald base body');
-    assert.ok(body.lods[1].triangles<=7500&&body.lods[2].triangles<=2500);
-    assert.ok(body.distantIndices.length/3<=320);
+    assert.equal(body.lods,undefined,'no ladder of decimated levels: the continuum is the only simplification');
 
     const groomed=attachColonialGroomModel(body,groomPack,variant);
     assert.ok(groomed.vertexCount>body.vertexCount,`${variant} gains 3D hair/beard geometry`);
-    assert.ok(groomed.lods[0].triangles>groomed.lods[1].triangles&&groomed.lods[1].triangles>groomed.lods[2].triangles);
-    assert.equal(groomed.distantIndices,body.distantIndices,'distant silhouette LOD stays compact');
+    assert.ok(groomed.indices.length>body.indices.length,'and draws every triangle of it');
+    assert.equal(groomed.lods,undefined);
   }
 });
 test('Indigenous men are built on the classic body, whose garments can be re-sculpted',()=>{
@@ -62,9 +61,9 @@ test('Indigenous men are built on the classic body, whose garments can be re-scu
   const classicFemale=loadCrewGLB(fs.readFileSync(new URL('../assets/crew/sailor-female-classic.glb',import.meta.url)));
   const male=loadCrewGLB(bytes);male.indigenousBase=classic;female.indigenousBase=classicFemale;
   const [indigenous,indigenousFemale]=createIndigenousCrewModels([male,female]);
-  assert.ok(indigenousFemale.vertexCount>classicFemale.vertexCount);assert.equal(indigenousFemale.distantIndices,null);
+  assert.ok(indigenousFemale.vertexCount>classicFemale.vertexCount);
   assert.ok(indigenous.vertexCount>classic.vertexCount,'classic vertices, and its accessories');
-  assert.equal(indigenous.distantIndices,null,'levels baked for another body stay with it');
+  assert.ok(indigenous.indices.length/3===classic.indices.length/3+indigenous.accessoryTriangleCount,'drawn whole, accessories and all');
 });
 test('retargeted clips remain human-sized, grounded and loop without a jump',()=>{
   for(const [name,clip] of model.animator.clips){
@@ -232,23 +231,20 @@ test('helmsman follows the direct tiller below the quarterdeck at full port and 
     }
   }
 });
-test('crew LODs build progressive index tiers over the shared skinned vertex buffer',()=>{
-  assert.equal(model.lods?.length,3);
-  const [near,mid,far]=model.lods;
-  assert.equal(near.id,'near');assert.equal(mid.id,'mid');assert.equal(far.id,'far');
-  assert.equal(near.triangles,model.indices.length/3);
-  assert.ok(mid.triangles<near.triangles*.5&&mid.triangles>near.triangles*.15,`mid tier triangles: ${mid.triangles}`);
-  assert.ok(far.triangles<mid.triangles*.6&&far.triangles>=200,`far tier triangles: ${far.triangles}`);
-  for(const tier of model.lods)for(const idx of tier.indices)assert.ok(idx>=0&&idx<model.vertexCount);
-  assert.deepEqual(selectCrewLOD({x:0,z:0,enabled:true},{x:200,y:10,z:200}),{mainTier:0,shadowTier:1,distance:0});
-  assert.equal(selectCrewLOD({x:0,z:0,enabled:false},{x:10,y:2,z:10}).mainTier,0);
-  assert.equal(selectCrewLOD({x:0,z:0,enabled:false},{x:45,y:2,z:0}).mainTier,1);
+test('an old body is drawn whole, and a company is seen as far as its nearest person',()=>{
+  // No ladder of decimated levels: the continuum is the only simplification, and an old body stands in whole.
+  assert.equal(model.lods,undefined);
+  for(const idx of model.indices)assert.ok(idx>=0&&idx<model.vertexCount);
+  assert.equal(crewCompanyDistance({x:0,z:0,enabled:true},{x:200,y:10,z:200}),0,'aboard, the company is here');
+  assert.equal(crewCompanyDistance({x:0,z:0,enabled:false},null),0,'and without a camera');
+  assert.ok(Math.abs(crewCompanyDistance({x:0,z:0,enabled:false},{x:45,y:0,z:0})-45)<1e-9);
+  const swimmer={visible:true,overboard:{x:40,y:0,z:0,gone:false}};
+  assert.ok(Math.abs(crewCompanyDistance({x:0,z:0,enabled:false,crewCompany:{crew:[swimmer]}},{x:45,y:0,z:0})-5)<1e-9,'a man overboard is nearer than his ship');
+  assert.ok(Math.abs(crewCompanyDistance({x:0,z:0,enabled:false,crewCompany:{crew:[{...swimmer,overboard:{...swimmer.overboard,gone:true}}]}},{x:45,y:0,z:0})-45)<1e-9,'one out of sight is nobody');
   // A spyglass brings a far crew as near as the ordinary view would at a fifth of the range.
   const lens=12.5*Math.PI/180;
-  assert.equal(selectCrewLOD({x:0,z:0,enabled:false},{x:45,y:2,z:0,fovY:lens}).mainTier,0);
-  assert.equal(selectCrewLOD({x:0,z:0,enabled:false},{x:600,y:2,z:0}).culled,true);
-  assert.notEqual(selectCrewLOD({x:0,z:0,enabled:false},{x:600,y:2,z:0,fovY:lens}).culled,true);
-  assert.equal(selectCrewLOD({x:0,z:0,enabled:false},{x:120,y:2,z:0}).mainTier,2);
+  assert.ok(Math.abs(crewLensZoom({fovY:lens})-Math.tan(29*Math.PI/180)/Math.tan(lens/2))<1e-9);
+  assert.equal(crewLensZoom({}),1);
 });
 test('crew animation mixer, sea-legs balance, 30-joint finger grip, gaze tracking, inertializer, and 11-body XPBD ragdoll operate smoothly',async ()=>{
   const {applyCrewRealism,stepArticulatedRagdoll,poseCrewFingers,resolveLookoutTarget}=await import('../js/crew-physics.js');
@@ -363,15 +359,14 @@ test('crew and soldiers working at mast halyard falls and hatches always face th
 
 
 
-test('sailors far from the eye keep a pose longer and draw simpler models, in as few draws as neighbours allow',async()=>{
-  const {crewPoseInterval,crewSailorTier,crewDrawRuns,crewApparentDistance}=await import('../js/crew-lod.js');
+test('sailors far from the eye keep a pose longer, and old bodies draw in as few runs as neighbours allow',async()=>{
+  const {crewPoseInterval,fortPoseStride,crewDrawRuns,crewApparentDistance}=await import('../js/crew-pose-cadence.js');
   assert.equal(crewPoseInterval(5),1,'anyone close is posed every frame');
   assert.ok(crewPoseInterval(60)>crewPoseInterval(20));
-  assert.equal(crewSailorTier(5,0),0);assert.equal(crewSailorTier(20,0),1);assert.equal(crewSailorTier(80,1),2);
-  assert.equal(crewSailorTier(13,0),0,'hysteresis holds the better model just past the boundary');
-  assert.equal(crewSailorTier(13,1),1,'and does not take it back up until clearly inside');
-  const runs=crewDrawRuns([0,0,1,1,-1,1,2].map(tier=>({tier})),s=>s.tier);
-  assert.deepEqual(runs,[{tier:0,first:0,count:2},{tier:1,first:2,count:2},{tier:1,first:5,count:1},{tier:2,first:6,count:1}],'a hidden sailor splits a run and draws nothing');
+  assert.equal(fortPoseStride(10),1,'a garrison close by is sampled every frame');
+  assert.ok(fortPoseStride(200)>fortPoseStride(50)&&fortPoseStride(50)>1);
+  const runs=crewDrawRuns([1,1,0,1,1,1].map(drawn=>({drawn})),s=>s.drawn===1);
+  assert.deepEqual(runs,[{first:0,count:2},{first:3,count:3}],'one not drawn by a pass splits a run and draws nothing');
   assert.equal(crewApparentDistance([1,1,1],{x:0,z:0},null),0,'without a camera everyone counts as close');
   const boat={x:100,z:0,heading:0,heave:0};
   assert.ok(Math.abs(crewApparentDistance([0,0,0],boat,{x:100,y:0,z:30})-30)<1e-9);
@@ -380,7 +375,7 @@ test('sailors far from the eye keep a pose longer and draw simpler models, in as
 });
 
 test('only sailors whose fragments can actually be cut pay for the shader that cuts them',async()=>{
-  const {crewNeedsCutShader}=await import('../js/crew-lod.js');
+  const {crewNeedsCutShader}=await import('../js/crew-pose-cadence.js');
   assert.equal(crewNeedsCutShader(3,false,0),false,'an unhurt sailor beside a third-person eye stays opaque');
   assert.equal(crewNeedsCutShader(3,true,0),true,'first person fades whoever stands in the sightline');
   assert.equal(crewNeedsCutShader(20,true,0),false,'the fade only reaches so far');
@@ -389,7 +384,7 @@ test('only sailors whose fragments can actually be cut pay for the shader that c
 });
 
 test('far sailors pose from baked clips unless their own pose still matters',async()=>{
-  const {crewClipOnly}=await import('../js/crew-lod.js');
+  const {crewClipOnly}=await import('../js/crew-pose-cadence.js');
   assert.equal(crewClipOnly(49,{}),false);
   assert.equal(crewClipOnly(50,{}),true);
   assert.equal(crewClipOnly(90,{seatedPose:{}}),false);
@@ -404,7 +399,7 @@ test('far sailors pose from baked clips unless their own pose still matters',asy
 });
 
 test('a body that has come to rest is solved twice more and then left until it is disturbed',async()=>{
-  const {crewPoseDue,crewPoseSolved,crewBodyAtRest}=await import('../js/crew-lod.js');
+  const {crewPoseDue,crewPoseSolved,crewBodyAtRest}=await import('../js/crew-pose-cadence.js');
   const body={casualtyState:'fallen',visible:true,poseAge:9,ragdoll:{active:true,settled:false}};
   assert.equal(crewPoseDue(body,false,false,3),true,'still tumbling');
   crewPoseSolved(body);
@@ -425,7 +420,7 @@ test('a body that has come to rest is solved twice more and then left until it i
 });
 
 test('a garrison is solved on its stride, except what has just changed or is still falling',async()=>{
-  const {fortPoseDue,crewPoseSolved}=await import('../js/crew-lod.js');
+  const {fortPoseDue,crewPoseSolved}=await import('../js/crew-pose-cadence.js');
   const sentry={_poseReady:false,walk:1};
   assert.equal(fortPoseDue(sentry,false,false,false),false,'a walking sentry waits for the stride');
   assert.equal(fortPoseDue(sentry,true,false,false),true);
@@ -488,7 +483,7 @@ test('baked clips store every frame in order and wrap time without a jump',async
 });
 
 test('a whole man in the water is posed from a baked loop, and only one with a wound to show is solved for',async()=>{
-  const {crewAfloatClip,crewBakedPose,crewPoseDue}=await import('../js/crew-lod.js');
+  const {crewAfloatClip,crewBakedPose,crewPoseDue}=await import('../js/crew-pose-cadence.js');
   const swimmer={casualtyState:'fallen',overboard:{inWater:true,alive:true},posedOnce:true,poseAge:99,visible:true};
   assert.equal(crewAfloatClip(swimmer),'Swim');
   assert.equal(crewBakedPose(3,swimmer),'Swim','however near he is');
@@ -550,10 +545,8 @@ test('captain GLB carries its embedded high-resolution texture, UV sentinels, cr
   assert.ok(captain.image instanceof Uint8Array && captain.image.byteLength>100_000,'embedded texture bytes present');
   assert.equal(captain.mime,'image/jpeg');
   assert.equal(captain.image[0],0xff);assert.equal(captain.image[1],0xd8,'valid JPEG header');
-  assert.ok(captain.lods[0].triangles<=19500&&captain.lods[0].triangles>=18000,'base mesh preserves un-decimated high-res geometry');
-  assert.ok(captain.lods[1].triangles<=7500&&captain.lods[1].triangles>=5000,'mid LOD decimated cleanly');
-  assert.ok(captain.lods[2].triangles<=2600&&captain.lods[2].triangles>=1500);
-  assert.ok(captain.distantIndices.length/3<=320);
+  assert.ok(captain.indices.length/3<=19500&&captain.indices.length/3>=18000,'base mesh preserves un-decimated high-res geometry');
+  assert.equal(captain.lods,undefined,'and is drawn whole where the continuum is absent');
   const f=new Float32Array(captain.vertices.buffer,captain.vertices.byteOffset,captain.vertexCount*15);
   let skinVerts=0,clothVerts=0,uvSeamCrossTris=0;
   for(let i=0;i<captain.vertexCount;i++){
@@ -562,7 +555,7 @@ test('captain GLB carries its embedded high-resolution texture, UV sentinels, cr
     assert.ok(b<-1.0,'negative blue sentinel routes fragment shader to captain texture');
     if(b<-10.5)skinVerts++;else clothVerts++;
   }
-  const idx0=captain.lods[0].indices;
+  const idx0=captain.indices;
   for(let t=0;t<idx0.length;t+=3){
     const a=idx0[t],b=idx0[t+1],c=idx0[t+2];
     const dAB=Math.hypot(f[a*15+6]-f[b*15+6],f[a*15+7]-f[b*15+7]);
@@ -570,7 +563,7 @@ test('captain GLB carries its embedded high-resolution texture, UV sentinels, cr
     const dCA=Math.hypot(f[c*15+6]-f[a*15+6],f[c*15+7]-f[a*15+7]);
     if(Math.max(dAB,dBC,dCA)>0.08)uvSeamCrossTris++;
   }
-  assert.equal(uvSeamCrossTris,0,'zero cross-island UV seam triangles on LOD 0 captain mesh');
+  assert.equal(uvSeamCrossTris,0,'zero cross-island UV seam triangles on the captain mesh');
   assert.ok(skinVerts>500&&clothVerts>5000,'both skin and garment vertices tagged on textured captain');
   const company=createCompany();
   assert.equal(company.crew.filter(isCaptainActor).length,1,'exactly one captain in company');
@@ -667,8 +660,9 @@ test('1550 colonial groom pack covers sailors, captains, soldiers and villagers 
     'hair_algonquian_roach','hair_indigenous_long','hair_indigenous_plaits',
   ]);
   for(const [name,piece] of Object.entries(groomPack.pieces)){
-    assert.ok(piece.nearIndices.length>=piece.midIndices.length&&piece.midIndices.length>=piece.farIndices.length,`${name} LODs decrease monotonically`);
-    assert.ok(piece.nearIndices.length>piece.farIndices.length,`${name} far LOD reduces triangles`);
+    assert.ok(piece.nearIndices.length>=3&&piece.nearIndices.length%3===0,`${name} has its whole mesh`);
+    for(const i of piece.nearIndices)assert.ok(i<piece.vertexCount,`${name} indexes its own vertices`);
+    assert.equal(piece.midIndices,undefined,`${name} carries no tier ladder`);
   }
 
   const maleLooks=Array.from({length:64},(_,i)=>colonialGroomMask('male',i));
@@ -750,16 +744,12 @@ test('modular 3D character components pack 15-bit masks losslessly in f32, keep 
 
   const maleCopy=loadCrewGLB(bytes);
   const femaleCopy=loadCrewGLB(fs.readFileSync(new URL('../assets/crew/sailor-female.glb',import.meta.url)));
-  const maleDistantBefore=maleCopy.distantIndices.length;
-  const femaleDistantBefore=femaleCopy.distantIndices.length;
   attachCrewComponents(maleCopy,'male');
   attachCrewComponents(femaleCopy,'female');
-  assert.equal(maleCopy.distantIndices.length,maleDistantBefore,'distant shadow/far indices stay untouched');
-  assert.equal(femaleCopy.distantIndices.length,femaleDistantBefore,'female distant shadow/far indices stay untouched');
   assert.ok(maleCopy.vertexCount>maleCopy.baseVertexCount+2000);
   assert.ok(femaleCopy.vertexCount>femaleCopy.baseVertexCount+1900);
-  assert.ok(maleCopy.lods[0].triangles>maleCopy.baseTriangleCount+3500);
-  assert.ok(maleCopy.lods[1].triangles<maleCopy.lods[0].triangles*0.4);
+  assert.ok(maleCopy.indices.length/3>maleCopy.baseTriangleCount+3500);
+  assert.equal(maleCopy.lods,undefined);
   // Every component rides joints of the crew skeleton that the body itself is skinned to: hips, spine, neck, head and legs.
   const componentJoints=new Set(['pelvis','spine_01','spine_02','spine_03','neck_01','head','thigh_l','calf_l','thigh_r','calf_r'].map(name=>CREW_SLOT[name]));
   for(const body of [maleCopy,femaleCopy]){

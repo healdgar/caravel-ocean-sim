@@ -7,7 +7,6 @@ import {before,after,test} from 'node:test';
 import {chromium} from 'playwright';
 import {createDevServer} from '../server.mjs';
 import {createCompany,CREW_CONTINUUM_SIGHT} from '../js/crew.js';
-import {CREW_CULL_DISTANCE} from '../js/crew-lod.js';
 import {createNavalBattleGunDefinitions} from '../js/gunnery-models.js';
 
 const nineModels=['nina','pinta','santa-maria','victory','oseberg','lusoria','taino-canoe','flying-cloud','gipsy-moth-iv'];
@@ -87,16 +86,16 @@ for(const path of ['/', '/docs/index.html'])test(`${path} nine distinct real mod
     // before clicking through the startup dialog, as a real user must.
     await nineStep(page);await page.waitForFunction(()=>window.oceanStartup.state==='ready');
     // Crew beyond sight of the camera draw nothing (edb1469), so count the actual GPU batches from the lead ship,
-    // before the far-off fleet camera. The people continuum takes everyone within its sight (CREW_CONTINUUM_SIGHT)
-    // and lets its cut thin them; the old bodies stop at CREW_CULL_DISTANCE.
+    // before the far-off fleet camera. Everyone within sight (CREW_CONTINUUM_SIGHT) is drawn: through the continuum,
+    // whose cut thins them, or, where it is absent, as the old bodies whole.
     const continuum=await page.evaluate(()=>oceanFleet.vessels[0].crew?.continuum===true),submitted=()=>page.evaluate(()=>oceanFleet.vessels.reduce((n,v)=>n+(v.crew?.continuumDraws()??[]).reduce((m,d)=>m+d.people,0),0));
     const nearFrame=await nineStep(page),nearCrew=continuum?await submitted():nearFrame.draws.crew.instances;
-    const inRange=await page.evaluate(limit=>{const [lead]=oceanFleet.vessels;return oceanFleet.vessels.filter(v=>Math.hypot(v.boat.x-lead.boat.x,v.boat.z-lead.boat.z)<limit).reduce((n,v)=>n+v.crew.state.crew.length,0);},continuum?CREW_CONTINUUM_SIGHT:CREW_CULL_DISTANCE);
+    const inRange=await page.evaluate(limit=>{const [lead]=oceanFleet.vessels;return oceanFleet.vessels.filter(v=>Math.hypot(v.boat.x-lead.boat.x,v.boat.z-lead.boat.z)<limit).reduce((n,v)=>n+v.crew.state.crew.length,0);},CREW_CONTINUUM_SIGHT);
     assert.equal(nearCrew,inRange,'actual crew GPU batches contain every real company in range');
     await page.getByRole('button',{name:'Camera views',exact:true}).click();await page.getByRole('button',{name:'View fleet',exact:true}).click();
     let frame;for(let i=0;i<8;i++)frame=await nineStep(page);const s=await nineSnapshot(page);
     assert.equal(s.startup,'ready');assert.equal(s.active,9);assert.equal(s.assets,9);assert.equal(s.config,8);assert.deepEqual(s.rows.map(v=>v.model),nineModels);assert.deepEqual(s.rows.map(v=>v.code),nineCodes);
-    assert.deepEqual(s.rows.map(v=>v.crew),nineCompanies);assert.equal(frame.draws.crew,undefined,continuum?'the continuum alone draws the people':'the whole-fleet camera is beyond crew range');
+    assert.deepEqual(s.rows.map(v=>v.crew),nineCompanies);if(continuum)assert.equal(frame.draws.crew,undefined,'the continuum alone draws the people');
     if(continuum){assert.equal(s.continuum,true);assert.ok(s.bodies.length>=3&&new Set(s.bodies).size===s.bodies.length,'each continuum body is on the device once, shared by every vessel: '+s.bodies.join(', '));assert.deepEqual(s.sharedCrew,{vertices:0,indices:0,joints:18,actors:18},'no old bodies, and two batches of joints and actors for each of nine vessels');}
     else assert.deepEqual(s.sharedCrew,{vertices:3,indices:3,joints:18,actors:18},'three shared bodies, and two batches of joints and actors for each of nine vessels');
     assert.deepEqual(s.rows.map(v=>v.masts),nineMasts);assert.deepEqual(s.rows.map(v=>v.guns),nineGuns);assert.deepEqual(s.rows.map(v=>v.anchor),nineModels.map(id=>id!=='taino-canoe'));
