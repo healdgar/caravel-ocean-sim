@@ -537,12 +537,18 @@ export function compileCityBuildingTypes(buildGeometry) {
       out = []; grain = grainOf(k / 3); corner(a, 1); corner(b, 1); corner(c, 1);
       const roofKind = Math.floor(from[a * 8 + 6] + 0.01);
       if (roofKind === 13 || roofKind === 15) { corner(a, -1); corner(c, -1); corner(b, -1); }
-      faces.push({ out, rank: outward(a, b, c), order: faces.length });
+      faces.push({ out, rank: outward(a, b, c), order: faces.length, part: assembly?.trianglePartIds?.[k / 3] ?? 0 });
     }
     faces.sort((p, q) => q.rank - p.rank || p.order - q.order);
     const vertices = new Float32Array(faces.reduce((sum, face) => sum + face.out.length, 0));
+    // Each drawn triangle's part in the builder's assembly (a roof's underside is its sheet's), so the continuum's bake
+    // (scripts/prepare-city-continuum.mjs) never simplifies across one.
+    const parts = new Uint32Array(vertices.length / 24);
     let filled = 0;
-    for (const face of faces) { vertices.set(face.out, filled); filled += face.out.length; }
+    for (const face of faces) {
+      for (let t = 0; t < face.out.length / 24; t++) parts[filled / 24 + t] = face.part;
+      vertices.set(face.out, filled); filled += face.out.length;
+    }
     // What the builder made, as it made it: shot is traced against this, and the first hit cuts it into pieces.
     const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
     for (let at = 0; at < from.length; at += 8) for (let axis = 0; axis < 3; axis++) {
@@ -550,6 +556,6 @@ export function compileCityBuildingTypes(buildGeometry) {
       if (from[at + axis] > max[axis]) max[axis] = from[at + axis];
     }
     const source = { vertices: from, indices: built.indices, partAssembly: built.partAssembly, min, max };
-    return { id, name: spec.name, width: spec.width, length: spec.length, height: spec.height, vertices, count: vertices.length / 8, triangles: vertices.length / 24, source };
+    return { id, name: spec.name, width: spec.width, length: spec.length, height: spec.height, vertices, parts, count: vertices.length / 8, triangles: vertices.length / 24, source };
   });
 }

@@ -1,0 +1,149 @@
+// Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
+// A city's buildings in the one continuum (AGENTS.md rule 3). Each Cairn type (js/old-world-buildings.js), houses,
+// churches, towers, walls, gates, works and bridges, is baked by scripts/prepare-city-continuum.mjs from the mesh its
+// builder makes, part by part, into a cluster hierarchy the GPU cuts by projected error, a closed far body wrapped
+// round it that collapses one half-edge at a time to a few triangles, and a single splat. The bake is offline and per
+// type: the types are a fixed catalogue, every building of every plan is one of them placed, stretched and tinted, and
+// the browser then holds no simplifier. All of it is one atlas, so a city is cut by one dispatch and drawn by one list
+// a pass. The GPU side is js/wgsl/city-continuum.js; js/city-continuum-draw.js keeps a city's lists and draws.
+
+export const CITY_CONTINUUM_FORMAT = 'waterworld.city-continuum';
+export const CITY_CONTINUUM_VERSION = 1;
+export const CITY_CONTINUUM_MAGIC = 0x4354_4e43;
+// The atlas: a header, one record a type, the clusters of every type, their vertices and indices, then each type's
+// far body (vertices, collapse records, triangles in order of death, steps). Every number a 32-bit word.
+export const CITY_CONTINUUM_HEADER_WORDS = 16;
+export const CITY_CONTINUUM_HEADER = Object.freeze({ magic: 0, version: 1, typeCount: 2, typesAt: 3, clustersAt: 4, clusterCount: 5, verticesAt: 6, vertexCount: 7, indicesAt: 8, indexCount: 9, chainsAt: 10, words: 11 });
+export const CITY_CONTINUUM_TYPE_WORDS = 32;
+// Where each of a type's numbers lies in its record. Positions are in the type's own metres, before a building
+// stretches it; `low` and `span` quantize its vertices; `sphere` bounds everything it can draw.
+export const CITY_CONTINUUM_TYPE = Object.freeze({
+  low: 0, span: 3, sphere: 4, clusterFirst: 8, clusterCount: 9, chainVertices: 10, stepCount: 11,
+  chainVertexCount: 12, records: 13, triangles: 14, steps: 15, baseError: 16, rootError: 17, splatRx: 18, splatRy: 19,
+  splatCentre: 20, roofShare: 23, wallKind: 24, roofKind: 26, chainTriangleCount: 28, flags: 29, sourceTriangles: 30, farFirst: 31,
+});
+// A cluster: its LOD sphere, its parent group's, its culling sphere, its error and its parent's (metres), the first of
+// its indices, and its triangles | level << 8 | part << 16. Clusters of a type are stored coarsest parent first.
+export const CITY_CONTINUUM_CLUSTER_WORDS = 16;
+// A vertex: x | y << 16, z | kind.y << 16, octahedral normal, material | kind fraction << 8.
+export const CITY_CONTINUUM_VERTEX_WORDS = 4;
+// A far-body step: triangles alive (a prefix), error in metres, how far along its normals the surface is grown to
+// keep the outline its collapses take in, and a spare word.
+export const CITY_CONTINUUM_STEP_WORDS = 4;
+// A far-body triangle: its three corners and its kind (material | fraction << 8 | kind.y << 20).
+export const CITY_CONTINUUM_TRIANGLE_WORDS = 4;
+// A far-body vertex that never collapses holds this step in its record (step | target << 16).
+export const CITY_CONTINUUM_NEVER = 65535;
+// The most collapses one far-body vertex may pass through, as far as the GPU follows them.
+export const CITY_CONTINUUM_HOPS = 256;
+// The largest kind.y a type carries (a timber's shade plus twice its grain), for quantizing it.
+export const CITY_CONTINUUM_KIND_Y = 8;
+// The far body is drawn in pieces of this many triangles; clusters of at most CITY_CONTINUUM_SMALL_CLUSTER triangles
+// are drawn from a list of their own, so a cut of many small parts does not pay for 128-triangle draws.
+export const CITY_CONTINUUM_CHUNK_TRIANGLES = 32;
+export const CITY_CONTINUUM_CLUSTER_TRIANGLES = 128;
+export const CITY_CONTINUUM_SMALL_CLUSTER = 32;
+// Flags of a type: the slight things (fences, graves, signs) that never stand as a target in their own right.
+export const CITY_CONTINUUM_SLIGHT = 1;
+
+// The baked atlas and its manifest. Spelled out, not composed, because the build publishes (and versions) only the
+// asset paths it finds quoted in the source. Both are kept in git: the city is drawn from nothing else.
+export const CITY_CONTINUUM_ASSETS = Object.freeze({
+  'manifest.json': 'assets/city-continuum/manifest.json',
+  'atlas.bin.gz': 'assets/city-continuum/atlas.bin.gz',
+});
+
+const cityUnit16 = (v) => Math.max(0, Math.min(65535, Math.round(v * 65535)));
+// Octahedral normal, so two 16-bit values hold a whole direction.
+export function cityContinuumOctahedral([x, y, z]) {
+  const length = Math.abs(x) + Math.abs(y) + Math.abs(z) || 1;
+  let u = x / length, v = y / length;
+  if (z / length < 0) { const a = u; u = (1 - Math.abs(v)) * (a >= 0 ? 1 : -1); v = (1 - Math.abs(a)) * (v >= 0 ? 1 : -1); }
+  return [u * 0.5 + 0.5, v * 0.5 + 0.5];
+}
+export function cityContinuumOctahedralNormal([u, v]) {
+  const fx = u * 2 - 1, fy = v * 2 - 1, n = [fx, fy, 1 - Math.abs(fx) - Math.abs(fy)], t = Math.max(-n[2], 0);
+  n[0] += n[0] >= 0 ? -t : t; n[1] += n[1] >= 0 ? -t : t;
+  const l = Math.hypot(...n) || 1;
+  return n.map((x) => x / l);
+}
+// A kind (material + fraction, kind.y) split into its parts.
+function cityKindParts([x, y]) {
+  const material = Math.floor(x + 0.01);
+  return { material, fraction: Math.min(Math.max(x - material, 0), 0.999999), y: Math.min(Math.max(y / CITY_CONTINUUM_KIND_Y, 0), 1) };
+}
+// One vertex as four 32-bit words, quantized over its type's `low` and `span`.
+export function packCityContinuumVertex({ position, normal, kind = [0, 0] }, { low, span }) {
+  const p = position.map((v, a) => cityUnit16((v - low[a]) / span)), n = cityContinuumOctahedral(normal), k = cityKindParts(kind);
+  if (!(k.material >= 0 && k.material < 256)) throw Error(`A city vertex has a material out of range: ${kind[0]}`);
+  return [
+    (p[0] | (p[1] << 16)) >>> 0,
+    (p[2] | (cityUnit16(k.y) << 16)) >>> 0,
+    (cityUnit16(n[0]) | (cityUnit16(n[1]) << 16)) >>> 0,
+    (k.material | (Math.round(k.fraction * 16777215) << 8)) >>> 0,
+  ];
+}
+export function unpackCityContinuumVertex(words, at, { low, span }) {
+  const w = (k) => words[at + k];
+  const q = [w(0) & 65535, w(0) >>> 16, w(1) & 65535];
+  return {
+    position: q.map((v, a) => low[a] + (v / 65535) * span),
+    normal: cityContinuumOctahedralNormal([(w(2) & 65535) / 65535, (w(2) >>> 16) / 65535]),
+    kind: [(w(3) & 255) + (w(3) >>> 8) / 16777215, ((w(1) >>> 16) / 65535) * CITY_CONTINUUM_KIND_Y],
+  };
+}
+// A far-body triangle's kind in one word.
+export function packCityContinuumKind(kind) {
+  const k = cityKindParts(kind);
+  return (k.material | (Math.round(k.fraction * 4095) << 8) | (Math.round(k.y * 4095) << 20)) >>> 0;
+}
+export function unpackCityContinuumKind(word) {
+  return [(word & 255) + ((word >>> 8) & 4095) / 4095, ((word >>> 20) / 4095) * CITY_CONTINUUM_KIND_Y];
+}
+export function packCityContinuumCluster({ lod, parentLod, cull, error, parentError, first, triangles, level, part }) {
+  const words = new ArrayBuffer(CITY_CONTINUUM_CLUSTER_WORDS * 4), f = new Float32Array(words), u = new Uint32Array(words);
+  if (!(triangles > 0 && triangles <= CITY_CONTINUUM_CLUSTER_TRIANGLES)) throw Error(`A city cluster holds ${triangles} triangles`);
+  f.set(lod, 0); f.set(parentLod, 4); f.set(cull, 8);
+  f[12] = error; f[13] = Math.min(parentError, 1e30);
+  u[14] = first;
+  u[15] = (triangles | (Math.min(level, 255) << 8) | ((part & 65535) << 16)) >>> 0;
+  return u;
+}
+// What the bake read of a type, byte for byte: its drawn triangles and their parts. The manifest keeps each type's
+// digest of these, so a builder changed since the bake is caught (tests/city-continuum-bake.test.mjs).
+export function cityContinuumSourceBytes(type) {
+  const vertices = new Uint8Array(type.vertices.buffer, type.vertices.byteOffset, type.vertices.byteLength);
+  const parts = new Uint8Array(type.parts.buffer, type.parts.byteOffset, type.parts.byteLength), out = new Uint8Array(vertices.length + parts.length);
+  out.set(vertices, 0); out.set(parts, vertices.length);
+  return out;
+}
+
+export function validateCityContinuumManifest(manifest) {
+  if (manifest?.format !== CITY_CONTINUUM_FORMAT || manifest.version !== CITY_CONTINUUM_VERSION) throw Error('Invalid city continuum manifest');
+  const { types, atlas } = manifest;
+  if (!Array.isArray(types) || !types.length) throw Error('The city continuum holds no types');
+  types.forEach((type, id) => {
+    if (type.id !== id || !/^[0-9a-f]{64}$/.test(type.fingerprint ?? '')) throw Error(`City continuum type ${id} is malformed`);
+    if (!(type.clusters?.count > 0) || !(type.chain?.baseTriangles >= 4) || !(type.chain.steps >= 1 && type.chain.steps < CITY_CONTINUUM_NEVER)) throw Error(`City continuum type ${id} is incomplete`);
+  });
+  if (!(atlas?.words > CITY_CONTINUUM_HEADER_WORDS) || atlas.bytes !== atlas.words * 4 || !/^[0-9a-f]{64}$/.test(atlas.sha256 ?? '') || !atlas.gzip?.file) throw Error('The city continuum atlas is malformed');
+  return manifest;
+}
+
+// The atlas, fetched, unpacked and checked against its receipt. Resolves to { manifest, words }.
+export async function loadCityContinuum({ fetchAsset = fetch } = {}) {
+  const get = async (path) => {
+    const response = await fetchAsset(path);
+    if (!response.ok) throw Error(`City continuum unavailable (${response.status}): ${path}`);
+    return response;
+  };
+  const manifest = validateCityContinuumManifest(await (await get(CITY_CONTINUUM_ASSETS['manifest.json'])).json());
+  const response = await get(CITY_CONTINUUM_ASSETS['atlas.bin.gz']);
+  const bytes = new Uint8Array(await new Response(response.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+  if (bytes.byteLength !== manifest.atlas.bytes) throw Error('The city continuum atlas has the wrong size');
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+  if (Array.from(digest, (v) => v.toString(16).padStart(2, '0')).join('') !== manifest.atlas.sha256) throw Error('The city continuum atlas failed verification');
+  const words = new Uint32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4);
+  if (words[CITY_CONTINUUM_HEADER.magic] !== CITY_CONTINUUM_MAGIC || words[CITY_CONTINUUM_HEADER.version] !== CITY_CONTINUUM_VERSION) throw Error('The city continuum atlas is of another format');
+  return { manifest, words };
+}
