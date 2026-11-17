@@ -5,7 +5,7 @@
 // one waits twice as long, so a settled scene stops asking.
 // A device that needs seconds per frame is the one most in need of reduction, so only
 // a pause longer than this counts as an interruption. Hidden tabs are reported separately.
-import { CONTINUUM_BASE_PIXEL_ERROR } from './continuum-core.js';
+import { CONTINUUM_BASE_PIXEL_ERROR, CONTINUUM_TRIANGLE_BUDGET } from './continuum-core.js';
 const ADAPTIVE_FRAME_LIMIT = 8;
 // Normally judge at least a dozen frames, but do not wait a minute to see that
 // frames are taking seconds: three of them over four seconds are enough.
@@ -130,6 +130,11 @@ const POLYGON_MODE_ALIASES = Object.freeze({
 // `minimum` is how far the governor may lower the budget by itself. A budget the player or the address
 // bar chose is given as chosen, down to the least the game can draw with.
 const POLYGON_CHOSEN_MINIMUM = 0.06;
+// The scene's triangle budget moves the same scale in bounded steps, so detail yields through the morph and the
+// sample-mask bands rather than at once: never below this share of itself per count read, and back up only once
+// the count is under this share of the budget.
+const POLYGON_BUDGET_STEP = 0.85;
+const POLYGON_BUDGET_RECOVER = 0.8;
 export function createAdaptivePolygons(initialMode = 'auto', { basePixelError = CONTINUUM_BASE_PIXEL_ERROR, minimum = POLYGON_CHOSEN_MINIMUM, targetFPS = 60 } = {}) {
   let mode = POLYGON_MODE_ALIASES[initialMode] ?? 'auto';
   let scale = mode === 'auto' || mode === 'native' || mode === 'fixed' ? 1 : Number(mode);
@@ -137,12 +142,16 @@ export function createAdaptivePolygons(initialMode = 'auto', { basePixelError = 
   let count = 0, seconds = 0, settle = ADAPTIVE_STARTUP_SETTLE_SECONDS, fps = 0;
   const probe = createHeadroomProbe(4);
   const reset = () => { count = 0; seconds = 0; settle = 1.6; };
-  const granted = () => Math.max(mode === 'auto' ? minimum : Math.min(minimum, POLYGON_CHOSEN_MINIMUM), scale);
+  // Two limits on the one scale: frame time (scale) and the scene's triangle budget (budgetScale). The tighter wins.
+  let budgetScale = 1;
+  const timeGranted = () => Math.max(mode === 'auto' ? minimum : Math.min(minimum, POLYGON_CHOSEN_MINIMUM), scale);
+  const granted = () => Math.min(timeGranted(), Math.max(POLYGON_CHOSEN_MINIMUM, budgetScale));
   return {
     get mode() { return mode; },
     get scale() { return scale; },
     get fps() { return fps; },
     get trying() { return probe.trying; },
+    get budgetScale() { return budgetScale; },
     get pixelError() { return basePixelError / Math.sqrt(granted()); },
     get oceanRangeScale() { return Math.sqrt(granted()); },
     maxNodes(baseMax = 8192) { return Math.max(256, Math.round(baseMax * granted())); },
@@ -153,6 +162,23 @@ export function createAdaptivePolygons(initialMode = 'auto', { basePixelError = 
       mode = normalized;
       scale = mode === 'auto' ? scale : mode === 'native' || mode === 'fixed' ? 1 : Number(mode);
       probe.cancel(); reset();
+    },
+    // The scene's one triangle budget (AGENTS.md rule 3, item 5), from the continuum census's count of submitted
+    // triangles, read a few frames late. Submitted triangles go as 1 / pixelError², that is as the scale granted,
+    // so over budget the scale is brought toward budget / total of itself, a bounded step at a time; well under, it
+    // recovers the same way. A fixed budget (tests, comparisons) is never moved. True when the pixel error changed.
+    observeTriangles(total, budget = CONTINUUM_TRIANGLE_BUDGET) {
+      if (mode === 'fixed' || !(total > 0) || !(budget > 0)) return false;
+      const before = granted();
+      let next = budgetScale;
+      if (total > budget * 1.02) next = Math.max(POLYGON_CHOSEN_MINIMUM, before * Math.max(POLYGON_BUDGET_STEP, budget / total));
+      else if (budgetScale < 1 && budgetScale <= timeGranted() && total < budget * POLYGON_BUDGET_RECOVER) {
+        next = Math.min(1, budgetScale * Math.min(1 / POLYGON_BUDGET_STEP, (budget * 0.9) / total));
+      }
+      next = Math.round(next * 1000) / 1000;
+      if (next === budgetScale) return false;
+      budgetScale = next;
+      return granted() !== before;
     },
     sample(elapsed, visible = true, workMs = null, { mayLower = true, mayLowerFurther = true } = {}) {
       if (mode !== 'auto') return false;

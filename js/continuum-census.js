@@ -2,7 +2,8 @@
 // How many triangles the scene submits, family by family, against the one budget (AGENTS.md rule 3, item 5).
 // Counted on the GPU from the draws' own indirect arguments: after the frame's selections, each family's argument
 // records are copied into one buffer and summed by one small compute pass. A read arrives a few frames late and
-// never stalls a frame. Off unless asked for, so a frame that does not ask pays nothing.
+// never stalls a frame. The game counts every eighth frame to hold the scene to its budget (js/resolution.js
+// observeTriangles), and every frame when profiled.
 //
 // A family offers its draws as `continuumDraws()`: a list of { buffer, offset, records, stride }, where `buffer`
 // holds indirect records (made with COPY_SRC), `offset` is in bytes, and `stride` is the record's length in u32s:
@@ -91,7 +92,7 @@ export function createContinuumCensus(device, { maxFamilies = 32 } = {}) {
     // After the frame is submitted: start reading this frame's count if it was copied out.
     afterSubmit() {
       if (!copiedThisFrame || reading) return;
-      reading = true;
+      reading = true; copiedThisFrame = false;
       staging.mapAsync(GPUMapMode.READ).then(() => {
         const counts = new Uint32Array(staging.getMappedRange().slice(0));
         staging.unmap();

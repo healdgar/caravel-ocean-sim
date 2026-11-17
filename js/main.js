@@ -1112,8 +1112,12 @@ async function main() {
   // GPU timing
   // --------------------------------------------------------------------------------------
   const profiler=createGPUProfiler(device,qs.get('profile')==='1');
-  // Submitted triangles against the one scene budget (AGENTS.md rule 3, item 5), counted on the GPU; ?census=1 or the profile panel.
-  const continuumCensus=qs.get('census')==='1'||qs.get('profile')==='1'?createContinuumCensus(device):null;
+  // Submitted triangles against the one scene budget (AGENTS.md rule 3, item 5), counted on the GPU every eighth frame
+  // and fed to the polygon governor, which holds the scene to it through the one pixel-error scalar. ?census=1 or the
+  // profile panel counts every frame; ?census=0 turns the count, and with it the budget, off.
+  const continuumCensus=qs.get('census')==='0'?null:createContinuumCensus(device);
+  const censusEveryFrame=qs.get('census')==='1'||qs.get('profile')==='1';
+  let censusSeen=null;
   window.oceanContinuumCensus=continuumCensus;
   let profileSummary='Waiting for frame timing…';
   const performancePanel=document.createElement('section');performancePanel.id='performance-panel';
@@ -5232,6 +5236,9 @@ async function main() {
     const resChanged = resolution.sample(elapsed,!document.hidden,frameWorkMs,{mayRaise:polygons.mode!=='auto'||polygons.scale>=POLYGON_COMFORT,mayLower:!polygons.trying});
     if(resChanged)polygons.reset();
     if(polygons.sample(elapsed,!document.hidden,frameWorkMs,{mayLower:!resolution.trying,mayLowerFurther:resolution.mode!=='auto'||resolution.scale<=POLYGONS_YIELD_AT}))terrain?.setPixelError?.(setContinuumPixelError(polygons.pixelError));
+    // Each new count of the scene's submitted triangles holds it to the one budget through the same scalar.
+    const census=continuumCensus?.latest;
+    if(census&&census!==censusSeen){censusSeen=census;if(polygons.observeTriangles(census.total,census.budget))terrain?.setPixelError?.(setContinuumPixelError(polygons.pixelError));}
     resize();
     let camDt = Math.min(0.1, elapsed);
     last = now;
@@ -5751,7 +5758,7 @@ async function main() {
     const doAudio=sceneAudio.enabled&&sceneAudio.ready&&!document.hidden&&!audioPending&&boat.showProw&&boat.effects!==false&&(frameIndex&7)===0;
     const audioRevision=boat.revision,audioEpoch=hullContactProbe.epoch,audioRequestedAt=performance.now(),audioSimTime=simTime;
     if(doAudio){enc.copyBufferToBuffer(interaction.contacts,0,audioRead,0,72*64);hullContactProbe.copy(enc,frameIndex);}
-    if(continuumCensus){
+    if(continuumCensus&&(censusEveryFrame||(frameIndex&7)===0)){
       // People are one family across every company, the garrison and the mate.
       const people=[...vessels.flatMap(v=>v.crew?.continuumDraws?.()??[]),...(fortSoldiers?.continuumDraws?.()??[]),...(mateSoldiers?.continuumDraws?.()??[])];
       continuumCensus.encode(enc,[...(terrain?.continuumSources?.()??[]),...(people.length?[{name:'people',draws:people}]:[])]);
