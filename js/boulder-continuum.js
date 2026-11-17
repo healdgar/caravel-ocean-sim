@@ -6,7 +6,7 @@
 import { FRAME_WGSL, ATMO_CORE_WGSL } from './wgsl/common.js';
 import { SKY_RENDER_FUNCS } from './wgsl/sky.js';
 import { SHADOW_FRAME } from './wgsl/shadows.js';
-import { CONTINUUM_SPLAT_PIXELS, CONTINUUM_MIN_PIXELS } from './continuum-core.js';
+import { CONTINUUM_CORE_WGSL } from './continuum-core.js';
 import { ROCK_ARCHETYPES, rockArchetypeFromSeed } from './vegetation.js';
 import { BUILDING_SHARD_KINDS, buildingKindWithYaw, noteBuildingMesh, traceShotAtBuilding } from './building-fracture.js';
 
@@ -15,8 +15,7 @@ export const BOULDER_TOUGHNESS = 1.35;
 export const BOULDER_BAND_START_PX = 16.0;
 export const BOULDER_BAND_END_PX = 10.5;
 export const BOULDER_SPLAT_HANDOFF_PX = 4.5;
-export const BOULDER_SPLAT_PIXELS = CONTINUUM_SPLAT_PIXELS;
-export const BOULDER_MIN_PIXELS = CONTINUUM_MIN_PIXELS;
+// The splat and thinning limits are the continuum's own (CONTINUUM_SPLAT_PIXELS, continuumThin in js/continuum-core.js).
 
 const BOULDER_RAW_SURFACE = 1.6;
 const BOULDER_RAW_LENGTH_SQUARED = 2.0;
@@ -26,6 +25,8 @@ const CONTINUUM_INSTANCE_BYTES = CONTINUUM_INSTANCE_FLOATS * 4;
 const SOURCE_INSTANCE_FLOATS = 8;
 const SOURCE_INSTANCE_BYTES = SOURCE_INSTANCE_FLOATS * 4;
 const BOULDER_DRAW_WORDS = 4;
+// A shown instance's second meta word holds its archetype in these low bits and its slot above them.
+const BOULDER_ARCH_BITS = 3;
 const BOULDER_EMPTY_SLOT = 0xffffffff;
 const MAX_MORPH_STEPS = 48;
 const MAX_POLY_VERTS = 64;
@@ -1374,7 +1375,8 @@ export function createBoulderField({
 //   Stage 1 (>= 16.0 px): Near/Mid full physical cleavage polyhedron (`lod 0`)
 //   Stage 2 (16.0 -> 10.5 px): Deterministic MSAA @builtin(sample_mask) crossfade (zero discard)
 //   Stage 3 (10.5 -> 3.5 px): Genus-0 progressive half-edge collapse continuum (`boulderMorph` -> 4-6 core tris)
-//   Stage 4 (< 3.5 px): 1-triangle view-facing horizon splat + < 1.0 px stochastic thinning w/ inverseSqrt(keepProb) inflation
+//   Stage 4 (< 3.5 px): 1-triangle view-facing horizon splat + < 1.0 px thinning with area-preserving inflation (continuumThin)
+//   Both handoffs split each pixel with continuumSamples, seeded by the boulder's slot (js/continuum-core.js).
 // ============================================================================
 
 function packMorphGpuData() {
@@ -1461,7 +1463,7 @@ function packMorphGpuData() {
   };
 }
 
-export const BOULDER_CONTINUUM_COMPUTE_WGSL = FRAME_WGSL + /* wgsl */ `
+export const BOULDER_CONTINUUM_COMPUTE_WGSL = FRAME_WGSL + CONTINUUM_CORE_WGSL + /* wgsl */ `
 struct SourceBoulder {
   root: vec4f,
   shape: vec4f,
@@ -1507,24 +1509,13 @@ fn boulderReset(@builtin(global_invocation_id) gid: vec3u) {
   }
 }
 
-fn boulderHash(slot: u32, seed: f32) -> f32 {
-  var x = slot ^ bitcast<u32>(seed * 4096.0 + 13.37);
-  x = ((x >> 16u) ^ x) * 0x45d9f3bu;
-  x = ((x >> 16u) ^ x) * 0x45d9f3bu;
-  x = (x >> 16u) ^ x;
-  return f32(x & 0x00ffffffu) / 16777216.0;
+// A boulder changing over carries, for the fragments to split each pixel by (boulderHandoffMask), the coarser
+// side's share of the pixel, which side this instance is, and the pixel's sample count.
+fn boulderHandoff(coarserShare: f32, finer: bool, sampleCount: u32) -> u32 {
+  return u32(round(clamp(coarserShare, 0.0, 1.0) * 65535.0)) | select(0u, 0x10000u, finer) | ((sampleCount - 1u) << 17u);
 }
-
-fn boulderSampleMask(slot: u32, coverage: f32, sampleCount: u32) -> u32 {
-  let sc = max(1u, min(8u, sampleCount));
-  let fullMask = (1u << sc) - 1u;
-  let onCount = u32(clamp(round(coverage * f32(sc)), 0.0, f32(sc)));
-  if (onCount == 0u) { return 0u; }
-  if (onCount >= sc) { return fullMask; }
-  let rot = ((slot * 0x9e3779b9u) >> 24u) % sc;
-  let raw = (1u << onCount) - 1u;
-  return ((raw << rot) | (raw >> (sc - rot))) & fullMask;
-}
+// The instance's archetype and slot in one word: the slot seeds its handoff and thinning.
+fn boulderArchSlot(arch: u32, slot: u32) -> u32 { return arch | (slot << ${BOULDER_ARCH_BITS}u); }
 
 fn boulderInFrustum(relative: vec3f, radius: f32) -> bool {
   let clip = F.viewProj * vec4f(relative, 1.0);
@@ -1539,9 +1530,8 @@ fn boulderInFrustum(relative: vec3f, radius: f32) -> bool {
 }
 
 fn boulderProjectedDiameterPx(relative: vec3f, diameter: f32) -> f32 {
-  let dist = max(0.25, length(relative));
   let focal = F.screen.y / max(1e-4, 2.0 * length(F.camUp.xyz));
-  return (diameter * focal / dist) * P.pixelScale;
+  return continuumPixels(diameter, focal, max(0.25, length(relative))) * P.pixelScale;
 }
 
 fn packMorphStep(arch: u32, allowedErr: f32) -> vec2u {
@@ -1569,55 +1559,53 @@ fn packMorphStep(arch: u32, allowedErr: f32) -> vec2u {
   return vec2u(lo, u32(round(t * 65535.0)));
 }
 
-fn emitNearSolid(arch: u32, src: SourceBoulder, fullMask: u32) {
+// 'handoff' is the full mask for a solid instance, which never reads it, and boulderHandoff's word for a fading one.
+fn emitNearSolid(arch: u32, slot: u32, src: SourceBoulder, fullMask: u32) {
   let idx = atomicAdd(&draws[arch * ${BOULDER_DRAW_WORDS}u + 1u], 1u);
   if (idx < P.nearSolidCap) {
-    shownOut[arch * P.nearSolidCap + idx] = ContinuumBoulder(src.root, src.shape, vec4u(fullMask, arch, 0u, bitcast<u32>(1.0)));
+    shownOut[arch * P.nearSolidCap + idx] = ContinuumBoulder(src.root, src.shape, vec4u(fullMask, boulderArchSlot(arch, slot), 0u, bitcast<u32>(1.0)));
   }
 }
 
-fn emitNearFade(arch: u32, src: SourceBoulder, mask: u32) {
-  if (mask == 0u) { return; }
+fn emitNearFade(arch: u32, slot: u32, src: SourceBoulder, handoff: u32) {
   let drawBucket = ${ROCK_ARCHETYPES}u + arch;
   let idx = atomicAdd(&draws[drawBucket * ${BOULDER_DRAW_WORDS}u + 1u], 1u);
   if (idx < P.nearFadeCap) {
-    shownOut[P.nearFadeBase + arch * P.nearFadeCap + idx] = ContinuumBoulder(src.root, src.shape, vec4u(mask, arch, 0u, bitcast<u32>(1.0)));
+    shownOut[P.nearFadeBase + arch * P.nearFadeCap + idx] = ContinuumBoulder(src.root, src.shape, vec4u(handoff, boulderArchSlot(arch, slot), 0u, bitcast<u32>(1.0)));
   }
 }
 
-fn emitMorphSolid(arch: u32, src: SourceBoulder, fullMask: u32, stepPack: vec2u) {
+fn emitMorphSolid(arch: u32, slot: u32, src: SourceBoulder, fullMask: u32, stepPack: vec2u) {
   let drawBucket = ${ROCK_ARCHETYPES * 2}u + arch;
   let idx = atomicAdd(&draws[drawBucket * ${BOULDER_DRAW_WORDS}u + 1u], 1u);
   if (idx < P.morphSolidCap) {
     let packed = (stepPack.x & 0xffffu) | ((stepPack.y & 0xffffu) << 16u);
-    shownOut[P.morphSolidBase + arch * P.morphSolidCap + idx] = ContinuumBoulder(src.root, src.shape, vec4u(fullMask, arch, packed, bitcast<u32>(1.0)));
+    shownOut[P.morphSolidBase + arch * P.morphSolidCap + idx] = ContinuumBoulder(src.root, src.shape, vec4u(fullMask, boulderArchSlot(arch, slot), packed, bitcast<u32>(1.0)));
   }
 }
 
-fn emitMorphFade(arch: u32, src: SourceBoulder, mask: u32, stepPack: vec2u) {
-  if (mask == 0u) { return; }
+fn emitMorphFade(arch: u32, slot: u32, src: SourceBoulder, handoff: u32, stepPack: vec2u) {
   let drawBucket = ${ROCK_ARCHETYPES * 3}u + arch;
   let idx = atomicAdd(&draws[drawBucket * ${BOULDER_DRAW_WORDS}u + 1u], 1u);
   if (idx < P.morphFadeCap) {
     let packed = (stepPack.x & 0xffffu) | ((stepPack.y & 0xffffu) << 16u);
-    shownOut[P.morphFadeBase + arch * P.morphFadeCap + idx] = ContinuumBoulder(src.root, src.shape, vec4u(mask, arch, packed, bitcast<u32>(1.0)));
+    shownOut[P.morphFadeBase + arch * P.morphFadeCap + idx] = ContinuumBoulder(src.root, src.shape, vec4u(handoff, boulderArchSlot(arch, slot), packed, bitcast<u32>(1.0)));
   }
 }
 
-fn emitSplatSolid(arch: u32, src: SourceBoulder, fullMask: u32, inflate: f32) {
+fn emitSplatSolid(arch: u32, slot: u32, src: SourceBoulder, fullMask: u32, inflate: f32) {
   let drawBucket = ${ROCK_ARCHETYPES * 4}u;
   let idx = atomicAdd(&draws[drawBucket * ${BOULDER_DRAW_WORDS}u + 1u], 1u);
   if (idx < P.splatSolidCap) {
-    shownOut[P.splatSolidBase + idx] = ContinuumBoulder(src.root, src.shape, vec4u(fullMask, arch, 0u, bitcast<u32>(inflate)));
+    shownOut[P.splatSolidBase + idx] = ContinuumBoulder(src.root, src.shape, vec4u(fullMask, boulderArchSlot(arch, slot), 0u, bitcast<u32>(inflate)));
   }
 }
 
-fn emitSplatFade(arch: u32, src: SourceBoulder, mask: u32, inflate: f32) {
-  if (mask == 0u) { return; }
+fn emitSplatFade(arch: u32, slot: u32, src: SourceBoulder, handoff: u32) {
   let drawBucket = ${ROCK_ARCHETYPES * 4 + 1}u;
   let idx = atomicAdd(&draws[drawBucket * ${BOULDER_DRAW_WORDS}u + 1u], 1u);
   if (idx < P.splatFadeCap) {
-    shownOut[P.splatFadeBase + idx] = ContinuumBoulder(src.root, src.shape, vec4u(mask, arch, 0u, bitcast<u32>(inflate)));
+    shownOut[P.splatFadeBase + idx] = ContinuumBoulder(src.root, src.shape, vec4u(handoff, boulderArchSlot(arch, slot), 0u, bitcast<u32>(1.0)));
   }
 }
 
@@ -1643,70 +1631,60 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   let arch = u32(clamp(floor(fract(src.shape.y * 17.31 + f32(group) * 0.5) * f32(${ROCK_ARCHETYPES})), 0.0, f32(${ROCK_ARCHETYPES - 1})));
   let diameter = max(radius * 1.84, height * 1.05);
   let px = boulderProjectedDiameterPx(relative, diameter);
-  if (px < 0.16) { return; }
 
   let sc = max(1u, min(8u, P.sampleCount));
   let fullMask = (1u << sc) - 1u;
 
   // Stage 1: Near / Mid full physical cleavage polyhedron (>= 16.0 px) -> 100% Early-Z solid!
   if (px >= ${BOULDER_BAND_START_PX}) {
-    emitNearSolid(arch, src, fullMask);
+    emitNearSolid(arch, slot, src, fullMask);
     return;
   }
 
   // Stage 2: Proportional MSAA @builtin(sample_mask) handoff (16.0 -> 10.5 px, zero double-blend, zero discard).
+  // The continuum (coarser) takes 'fade' of each pixel's samples and the polyhedron keeps exactly the rest; every
+  // pixel rounds the share its own way, so both sides draw while the share lies strictly between 0 and 1.
   if (px >= ${BOULDER_BAND_END_PX}) {
     let fade = clamp((${BOULDER_BAND_START_PX} - px) / (${BOULDER_BAND_START_PX} - ${BOULDER_BAND_END_PX}), 0.0, 1.0);
-    let nearMask = boulderSampleMask(slot, 1.0 - fade, sc);
-    let farMask = fullMask ^ nearMask;
     let stepPack = packMorphStep(arch, fade * 0.14);
-    if (nearMask >= fullMask) {
-      emitNearSolid(arch, src, fullMask);
-    } else if (nearMask > 0u) {
-      emitNearFade(arch, src, nearMask);
-    }
-    if (farMask >= fullMask) {
-      emitMorphSolid(arch, src, fullMask, stepPack);
-    } else if (farMask > 0u) {
-      emitMorphFade(arch, src, farMask, stepPack);
+    if (fade <= 0.0) {
+      emitNearSolid(arch, slot, src, fullMask);
+    } else if (fade >= 1.0) {
+      emitMorphSolid(arch, slot, src, fullMask, stepPack);
+    } else {
+      emitNearFade(arch, slot, src, boulderHandoff(fade, true, sc));
+      emitMorphFade(arch, slot, src, boulderHandoff(fade, false, sc), stepPack);
     }
     return;
   }
 
   // Stage 3: Continuous genus-0 half-edge collapse continuum (10.5 -> 3.5 px):
   //   - 10.5 -> 4.5 px: 100% Early-Z solid continuum!
-  //   -  4.5 -> 3.5 px: MSAA sample_mask handoff into 1-tri splat.
-  if (px >= ${BOULDER_SPLAT_PIXELS}) {
-    let errNorm = pow(clamp((${BOULDER_BAND_START_PX} - px) / (${BOULDER_BAND_START_PX} - ${BOULDER_SPLAT_PIXELS}), 0.0, 1.0), 1.2);
+  //   -  4.5 -> 3.5 px: MSAA sample_mask handoff into 1-tri splat, which takes 'sFade' of each pixel.
+  if (px >= CONTINUUM_SPLAT_PIXELS) {
+    let errNorm = pow(clamp((${BOULDER_BAND_START_PX} - px) / (${BOULDER_BAND_START_PX} - CONTINUUM_SPLAT_PIXELS), 0.0, 1.0), 1.2);
     let stepPack = packMorphStep(arch, errNorm);
     if (px < ${BOULDER_SPLAT_HANDOFF_PX}) {
-      let sFade = clamp((${BOULDER_SPLAT_HANDOFF_PX} - px) / (${BOULDER_SPLAT_HANDOFF_PX} - ${BOULDER_SPLAT_PIXELS}), 0.0, 1.0);
-      let morphMask = boulderSampleMask(slot + 17u, 1.0 - sFade, sc);
-      let splatMask = fullMask ^ morphMask;
-      if (morphMask >= fullMask) {
-        emitMorphSolid(arch, src, fullMask, stepPack);
-      } else if (morphMask > 0u) {
-        emitMorphFade(arch, src, morphMask, stepPack);
-      }
-      if (splatMask >= fullMask) {
-        emitSplatSolid(arch, src, fullMask, 1.0);
-      } else if (splatMask > 0u) {
-        emitSplatFade(arch, src, splatMask, 1.0);
+      let sFade = clamp((${BOULDER_SPLAT_HANDOFF_PX} - px) / (${BOULDER_SPLAT_HANDOFF_PX} - CONTINUUM_SPLAT_PIXELS), 0.0, 1.0);
+      if (sFade <= 0.0) {
+        emitMorphSolid(arch, slot, src, fullMask, stepPack);
+      } else if (sFade >= 1.0) {
+        emitSplatSolid(arch, slot, src, fullMask, 1.0);
+      } else {
+        emitMorphFade(arch, slot, src, boulderHandoff(sFade, true, sc), stepPack);
+        emitSplatFade(arch, slot, src, boulderHandoff(sFade, false, sc));
       }
     } else {
-      emitMorphSolid(arch, src, fullMask, stepPack);
+      emitMorphSolid(arch, slot, src, fullMask, stepPack);
     }
     return;
   }
 
-  // Stage 4: 1-triangle view-facing horizon splat (< 3.5 px) -> 100% Early-Z solid + sub-pixel stochastic hash thinning (< 1.0 px).
-  var inflate = 1.0;
-  if (px < ${BOULDER_MIN_PIXELS}) {
-    let keepProb = clamp(px * px, 0.035, 1.0);
-    if (boulderHash(slot, src.shape.y) >= keepProb) { return; }
-    inflate = inverseSqrt(keepProb);
-  }
-  emitSplatSolid(arch, src, fullMask, inflate);
+  // Stage 4: 1-triangle view-facing horizon splat (< 3.5 px) -> 100% Early-Z solid + the continuum's sub-pixel
+  // thinning (< 1.0 px): kept by a hash of the slot, and the survivors inflated to keep the horizon's area.
+  let inflate = continuumThin(px, slot);
+  if (inflate <= 0.0) { return; }
+  emitSplatSolid(arch, slot, src, fullMask, inflate);
 }
 `;
 
@@ -1839,22 +1817,31 @@ struct BoulderVarying {
   @location(1) worldNrm: vec3f,
   @location(2) colour: vec3f,
   @location(3) shadeAndLocalY: vec2f,
-  @location(4) @interpolate(flat) mask: u32,
+  // A fading instance's boulderHandoff word, and its slot as the split's seed.
+  @location(4) @interpolate(flat) handoff: vec2u,
 };
 struct FragOut {
   @location(0) color: vec4f,
   @builtin(sample_mask) mask: u32,
 };
+// The continuum's one split (continuumSamples): the coarser side takes these samples of the pixel, and the
+// finer side, drawn with the same share and seed, keeps exactly the rest.
+fn boulderHandoffMask(handoff: vec2u, pixel: vec2f) -> u32 {
+  let samples = ((handoff.x >> 17u) & 7u) + 1u;
+  let coarser = continuumSamples(f32(handoff.x & 0xffffu) / 65535.0, pixel, samples, handoff.y);
+  return select(coarser, ((1u << samples) - 1u) & ~coarser, (handoff.x & 0x10000u) != 0u);
+}
+fn boulderHandoffOut(instMeta: vec4u) -> vec2u { return vec2u(instMeta.x, instMeta.y >> ${BOULDER_ARCH_BITS}u); }
 @fragment fn fsSolid(v: BoulderVarying) -> @location(0) vec4f {
   return shadeBoulderRock(v.worldNrm, v.colour, v.shadeAndLocalY.x, v.worldPos, v.shadeAndLocalY.y);
 }
 @fragment fn fsMain(v: BoulderVarying) -> FragOut {
-  return FragOut(shadeBoulderRock(v.worldNrm, v.colour, v.shadeAndLocalY.x, v.worldPos, v.shadeAndLocalY.y), v.mask);
+  return FragOut(shadeBoulderRock(v.worldNrm, v.colour, v.shadeAndLocalY.x, v.worldPos, v.shadeAndLocalY.y), boulderHandoffMask(v.handoff, v.clipPos.xy));
 }
 `;
 
 function buildBoulderNearWGSL(sceneShading = false) {
-  return FRAME_WGSL + (sceneShading ? BOULDER_SCENE_SHADING_WGSL : BOULDER_COMMON_SHADING_WGSL) + BOULDER_VARYING_WGSL + /* wgsl */ `
+  return FRAME_WGSL + CONTINUUM_CORE_WGSL + (sceneShading ? BOULDER_SCENE_SHADING_WGSL : BOULDER_COMMON_SHADING_WGSL) + BOULDER_VARYING_WGSL + /* wgsl */ `
 struct NearVSIn {
   @location(0) localPos: vec3f,
   @location(1) localNrm: vec3f,
@@ -1887,7 +1874,7 @@ fn vsMain(v: NearVSIn) -> BoulderVarying {
   o.worldNrm = worldNrm;
   o.colour = boulderStonePalette(v.shadeAndArch.y, v.instShape.y);
   o.shadeAndLocalY = vec2f(v.shadeAndArch.x, v.localPos.y);
-  o.mask = v.instMeta.x;
+  o.handoff = boulderHandoffOut(v.instMeta);
   return o;
 }
 `;
@@ -1897,7 +1884,7 @@ function buildBoulderMorphWGSL(sceneShading = false) {
   const tableBinding = sceneShading
     ? '@group(1) @binding(0) var<storage, read> morphTable: array<MorphEntry>;'
     : '@group(0) @binding(1) var<storage, read> morphTable: array<MorphEntry>;';
-  return FRAME_WGSL + (sceneShading ? BOULDER_SCENE_SHADING_WGSL : BOULDER_COMMON_SHADING_WGSL) + BOULDER_VARYING_WGSL + /* wgsl */ `
+  return FRAME_WGSL + CONTINUUM_CORE_WGSL + (sceneShading ? BOULDER_SCENE_SHADING_WGSL : BOULDER_COMMON_SHADING_WGSL) + BOULDER_VARYING_WGSL + /* wgsl */ `
 struct MorphEntry {
   posAndArch: vec4f,
   nrmAndShade: vec4f,
@@ -1920,7 +1907,7 @@ fn fetchMorph(arch: u32, step: u32, vertIdx: u32) -> MorphEntry {
 
 @vertex
 fn vsMain(v: MorphVSIn) -> BoulderVarying {
-  let arch = min(v.instMeta.y, ${ROCK_ARCHETYPES - 1}u);
+  let arch = min(v.instMeta.y & ${(1 << BOULDER_ARCH_BITS) - 1}u, ${ROCK_ARCHETYPES - 1}u);
   let packed = v.instMeta.z;
   let step0 = packed & 0xffffu;
   let morphT = f32((packed >> 16u) & 0xffffu) / 65535.0;
@@ -1951,7 +1938,7 @@ fn vsMain(v: MorphVSIn) -> BoulderVarying {
   o.worldNrm = worldNrm;
   o.colour = boulderStonePalette(e0.posAndArch.w, v.instShape.y);
   o.shadeAndLocalY = vec2f(shade, localPos.y);
-  o.mask = v.instMeta.x;
+  o.handoff = boulderHandoffOut(v.instMeta);
   return o;
 }
 `;
@@ -1961,7 +1948,7 @@ function buildBoulderSplatWGSL(sceneShading = false) {
   const splatBinding = sceneShading
     ? '@group(1) @binding(0) var<uniform> S: SplatUniforms;'
     : '@group(0) @binding(1) var<uniform> S: SplatUniforms;';
-  return FRAME_WGSL + (sceneShading ? BOULDER_SCENE_SHADING_WGSL : BOULDER_COMMON_SHADING_WGSL) + BOULDER_VARYING_WGSL + /* wgsl */ `
+  return FRAME_WGSL + CONTINUUM_CORE_WGSL + (sceneShading ? BOULDER_SCENE_SHADING_WGSL : BOULDER_COMMON_SHADING_WGSL) + BOULDER_VARYING_WGSL + /* wgsl */ `
 struct SplatUniforms {
   optics: array<vec4f, ${ROCK_ARCHETYPES * 2}>,
 };
@@ -1977,7 +1964,7 @@ ${splatBinding}
 
 @vertex
 fn vsMain(v: SplatVSIn) -> BoulderVarying {
-  let arch = min(v.instMeta.y, ${ROCK_ARCHETYPES - 1}u);
+  let arch = min(v.instMeta.y & ${(1 << BOULDER_ARCH_BITS) - 1}u, ${ROCK_ARCHETYPES - 1}u);
   let inflate = bitcast<f32>(v.instMeta.w);
   let optA = S.optics[arch * 2u];
   let optB = S.optics[arch * 2u + 1u];
@@ -2017,7 +2004,7 @@ fn vsMain(v: SplatVSIn) -> BoulderVarying {
   o.worldNrm = domeNrm;
   o.colour = boulderStonePalette((f32(arch) + 0.5) / 6.0, v.instShape.y);
   o.shadeAndLocalY = vec2f(clamp(0.58 + 0.24 * uv.y, 0.42, 0.96), uv.y * 0.45);
-  o.mask = v.instMeta.x;
+  o.handoff = boulderHandoffOut(v.instMeta);
   return o;
 }
 `;
@@ -2069,7 +2056,7 @@ fn fetchMorph(arch: u32, step: u32, vertIdx: u32) -> MorphEntry {
 }
 @vertex
 fn vsMain(v: MorphVSIn) -> @builtin(position) vec4f {
-  let arch = min(v.instMeta.y, ${ROCK_ARCHETYPES - 1}u);
+  let arch = min(v.instMeta.y & ${(1 << BOULDER_ARCH_BITS) - 1}u, ${ROCK_ARCHETYPES - 1}u);
   let packed = v.instMeta.z;
   let step0 = packed & 0xffffu;
   let morphT = f32((packed >> 16u) & 0xffffu) / 65535.0;
@@ -2106,6 +2093,8 @@ export async function createBoulderContinuum(device, {
   const templates = getAllBoulderCleavageTemplates();
   const morphPack = packMorphGpuData();
   const useSceneShading = Array.isArray(resources) && resources.length > 0;
+  if (ROCK_ARCHETYPES > 1 << BOULDER_ARCH_BITS) throw Error('Boulder archetypes outnumber the bits that name them');
+  let destroyed = false;
   const SCENE_BINDING_IDS = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 19, 20, 21]);
 
   const nearSolidCapPerArch = Math.max(256, Math.ceil(capacity / ROCK_ARCHETYPES));
@@ -2191,7 +2180,7 @@ export async function createBoulderContinuum(device, {
   }
   resetDraws[ROCK_ARCHETYPES * 4 * BOULDER_DRAW_WORDS] = 3;
   resetDraws[(ROCK_ARCHETYPES * 4 + 1) * BOULDER_DRAW_WORDS] = 3;
-  const drawsBuf = createBuf('boulder continuum indirect draws', resetDraws.byteLength, U.STORAGE | U.INDIRECT | U.COPY_DST);
+  const drawsBuf = createBuf('boulder continuum indirect draws', resetDraws.byteLength, U.STORAGE | U.INDIRECT | U.COPY_DST | U.COPY_SRC);
   device.queue.writeBuffer(drawsBuf, 0, resetDraws);
 
   // CullParams: 16 scalars (64 bytes) + worldShift vec4f (16 bytes) + 12 vec4f (192 bytes) = 272 bytes.
@@ -2772,6 +2761,11 @@ export async function createBoulderContinuum(device, {
       );
       pass.drawIndirect(drawsBuf, (ROCK_ARCHETYPES * 4 + 1) * BOULDER_DRAW_WORDS * 4);
     },
+    // draw()'s indirect records, every bucket drawn once, for the continuum census (js/continuum-census.js).
+    continuumDraws() {
+      if (destroyed || activeDenseCount === 0) return [];
+      return [{ buffer: drawsBuf, offset: 0, records: drawBucketCount, stride: BOULDER_DRAW_WORDS }];
+    },
     drawShadow(pass) {
       if (activeDenseCount === 0) return;
       pass.setPipeline(shadowNearPipeline);
@@ -2810,6 +2804,7 @@ export async function createBoulderContinuum(device, {
       }
     },
     destroy() {
+      destroyed = true;
       for (const buf of [
         nearMeshBuf, morphCornerBuf, morphTableBuf, stepMetaBuf, splatUniformBuf,
         srcInstancesBuf, slotGroupsBuf, shownBuf, drawsBuf, cullParamsBuf,

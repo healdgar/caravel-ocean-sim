@@ -462,7 +462,8 @@ export function cityTypeTarget(type) {
 }
 // Eight numbers to an instance of a type: x, floor height, z, turn; scale across, up and along; tone.
 export const CITY_TYPED_FLOATS = 8;
-// How near a building must be to be drawn as its type rather than its block.
+// How near a building must be to be drawn as its type rather than its block, at the scene's base pixel error;
+// js/terrain.js divides it by the scene's coarsening (continuumCoarsening), so the switch follows the one scalar.
 export const CITY_DETAIL_M = 240;
 // A plan's block that a type replaces near the camera carries its roof form plus this.
 export const CITY_TYPED_ROOF = 4;

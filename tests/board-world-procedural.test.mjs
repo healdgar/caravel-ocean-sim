@@ -316,7 +316,9 @@ test('fractured polyhedral boulders (18 buckets) + 4 grass buckets + progressive
   assert.doesNotMatch(wgslBody('landFinish'), /\bdiscard\b/);
   const cityFsBody = wgslBody('cityFS');
   assert.doesNotMatch(cityFsBody, /\bdiscard\b/);
-  assert.match(cityFsBody, /cityNearSampleMask/);
+  // Type and block split each pixel's samples through the continuum core, complements paired.
+  assert.match(cityFsBody, /mask=continuumSamples\(in\.lodBlend,/);
+  assert.match(cityFsBody, /mask=0xfu\^continuumSamples\(1\.0\+in\.lodBlend,/);
 });
 
 test('harbor fleet archetypes, bathymetry & berth safety, caravan bridge decks, and Lisbon street bridges', async () => {

@@ -32,7 +32,11 @@ test('packaged island reaches a real rendered frame without per-batch timer stal
     const result=await page.evaluate(()=>({state:oceanStartup.state,error:document.querySelector('#err').textContent,ready:performance.getEntriesByName('ocean-startup-ready')[0]?.startTime,...forestStartupAudit}));
     t.diagnostic(JSON.stringify(result));
     assert.equal(result.state,'ready',result.error);assert.deepEqual(errors,[]);assert.deepEqual(result.errors,[]);assert.ok(result.frames>0);assert.equal(result.nativeResident,true);assert.ok(result.tasks>0);assert.ok(result.timers<100,'validation must not sleep after every small batch');
-    for(const label of ['forest immutable prototype vertices','forest immutable prototype indices','forest mass immutable vertices','forest mass immutable indices']){assert.ok(result.buffers[label]>10000000,label);assert.equal(result.uploads[label],result.buffers[label],label+' uploads every byte exactly once');}
-    assert.ok(result.pipelines.includes('instanced forest shaded native crown shell'),'actual source-field canopy renders');
+    for(const label of ['forest immutable prototype vertices','forest immutable prototype indices','forest cluster vertices','forest cluster indices']){assert.ok(result.buffers[label]>10000000,label);assert.equal(result.uploads[label],result.buffers[label],label+' uploads every byte exactly once');}
+    // The far canopy is the continuum's crowns; the old far tiers are not uploaded at all.
+    for(const label of ['forest crown vertices','forest crown morph'])assert.equal(result.uploads[label],result.buffers[label],label+' uploads every byte exactly once');
+    assert.ok(result.pipelines.includes('forest crowns forestCrownFS'),'continuum crowns render the far canopy');
+    for(const label of ['forest mass immutable vertices','forest mass immutable indices'])assert.equal(result.buffers[label],undefined,label+' is not allocated');
+    assert.ok(!result.pipelines.includes('instanced forest shaded native crown shell'),'no crown shells beside the crowns');
   }finally{await browser?.close();server.closeAllConnections?.();await new Promise(resolve=>server.close(resolve));}
 });

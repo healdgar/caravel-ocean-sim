@@ -5,6 +5,7 @@ import { STREET_FIELD_RANGE_M, STREET_FIELD_EDGE_M } from '../town-streets.js';
 import { LAND_CRATER_RENDER } from './land-craters.js';
 import { GROUND_DETAIL_RENDER } from './ground-detail.js';
 import { SHADOW_FRAME } from './shadows.js';
+import { CONTINUUM_CORE_WGSL } from '../continuum-core.js';
 import { CITY_DETAIL_M, CITY_THATCH_ROOF, CITY_TYPED_ROOF } from '../old-world-buildings.js';
 
 // Procedurals need their sampling rate in material coordinates, just as image
@@ -566,7 +567,9 @@ fn main(@builtin(global_invocation_id) id:vec3u){
 }
 `;
 
-export const TERRAIN = FRAME_WGSL + ATMO_CORE_WGSL + SHADOW_FRAME + /* wgsl */ `
+// Carries the continuum core once for the whole 'island terrain' module, forest code appended to it included
+// (js/terrain.js), so nothing concatenated after TERRAIN may carry the core again.
+export const TERRAIN = FRAME_WGSL + ATMO_CORE_WGSL + SHADOW_FRAME + CONTINUUM_CORE_WGSL + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F:Frame;
 @group(0) @binding(1) var transLUT:texture_2d<f32>;
 @group(0) @binding(2) var skyLUT:texture_2d<f32>;
@@ -1713,28 +1716,16 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
 }
 @fragment fn fs(in:LandVertex)->@location(0) vec4f{return landOpaque(in);}
 struct CityCoverage{@location(0) colour:vec4f,@builtin(sample_mask) mask:u32};
-fn cityNearSampleMask(share:f32,p:vec2u)->u32{
-  if(share>=0.999){return 0xfu;}
-  if(share<=0.001){return 0u;}
-  let idx=((p.y&3u)<<2u)|(p.x&3u);
-  let m=array<u32,16>(0u,8u,2u,10u,12u,4u,14u,6u,3u,11u,1u,9u,15u,7u,13u,5u);
-  let base=m[idx];
-  let rot=(p.x+p.y*2u)&3u;
-  var mask=0u;
-  for(var s=0u;s<4u;s++){
-    let sub=(s+rot)&3u;
-    let thresh=(f32(base+sub*16u)+0.5)/64.0;
-    if(thresh<share){mask|=1u<<s;}
-  }
-  return mask;
-}
+// A building's type and its block split each pixel's samples by the continuum core: the type takes the share it
+// holds (lodBlend), the block the same call inverted against the full mask, so each sample is drawn once. The seed
+// is 0, the pixel alone: a compound's blocks stand apart from its type's root, so no per-building seed is common
+// to both sides.
 @fragment fn cityFS(in:CityVertex)->CityCoverage{
   let colour=landOpaque(LandVertex(in.pos,in.world,in.normal,in.kind,in.leafUV));
   var mask=0xfu;
   if(in.lodBlend<0.999){
-    let p=vec2u(in.pos.xy);
-    if(in.lodBlend>=0.0){mask=cityNearSampleMask(in.lodBlend,p);}
-    else{mask=0xfu^cityNearSampleMask(1.0+in.lodBlend,p);}
+    if(in.lodBlend>=0.0){mask=continuumSamples(in.lodBlend,in.pos.xy,4u,0u);}
+    else{mask=0xfu^continuumSamples(1.0+in.lodBlend,in.pos.xy,4u,0u);}
   }
   return CityCoverage(colour,mask);
 }

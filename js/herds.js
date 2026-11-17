@@ -5,6 +5,7 @@
 // Lusitano horses + sela à gineta tack, covered wain, coach, cargo ox-cart) plus progressive
 // half-edge collapse continuum and Rule-3 1-triangle horizon splats via indirect instancing.
 import { requestOnce } from './gpu-program-cache.js';
+import { continuumCoarsening } from './continuum-core.js';
 import { getLivestockMeshes, getVehicleMeshes, LIVESTOCK_VERTEX_FLOATS, loadLivestockMeshes } from './models/livestock-meshes.js';
 import { ROUTE_STEP_M, WALKER_WORDS } from './town-streets.js';
 import {
@@ -859,7 +860,7 @@ export function sweepHerdHit(seeds, routes, fates, clock, elevationFn, from, to,
 }
 
 export function requestHerdsPipelines({ device, shader, format = 'rgba16float', samples = 4 }) {
-  return requestOnce(device, `livestock herds v4 ${format} ${samples}`, async () => {
+  return requestOnce(device, `livestock herds v5 ${format} ${samples}`, async () => {
     const [renderMod, shadowMod, stepMod, resetMod] = await Promise.all([
       shader(HERDS_RENDER_WGSL, 'livestock herds'),
       shader(HERDS_SHADOW_WGSL, 'livestock herds shadow'),
@@ -977,7 +978,9 @@ export async function createLivestockHerds({
   let lastCaravans = null;
   let travellers = { routes: new Float32Array([0, 1, 0, 0]), seeds: new Float32Array(0) };
   let streetMounts = { routes: new Float32Array(0), seeds: new Float32Array(0), count: 0 };
-  const clock = new ArrayBuffer(16), clockU = new Uint32Array(clock), clockF = new Float32Array(clock);
+  // HerdConfig: count, bucketSpan, boardDay, daysPerSecond, then the scene's coarsening (continuumCoarsening).
+  const clock = new ArrayBuffer(32), clockU = new Uint32Array(clock), clockF = new Float32Array(clock);
+  clockF[4] = continuumCoarsening();
 
   function releaseState(immediate = false) {
     if (!state) return;
@@ -1152,7 +1155,7 @@ export async function createLivestockHerds({
       size: HERD_BUCKETS * bucketSpan * HERD_BODY_BYTES,
       usage: B.STORAGE,
     });
-    const draws = mkBuf('livestock indirect draws', drawTemplate, B.STORAGE | B.INDIRECT);
+    const draws = mkBuf('livestock indirect draws', drawTemplate, B.STORAGE | B.INDIRECT | B.COPY_SRC);
     clockU[0] = count; clockU[1] = bucketSpan;
     const cfg = mkBuf('livestock config', clock, B.UNIFORM);
 
@@ -1291,6 +1294,12 @@ export async function createLivestockHerds({
       if (travellers.seeds.length || streetMounts.seeds.length) {
         device.queue.writeBuffer(state.cfg, 8, clock, 8, 8);
       }
+      // The scene's one pixel-error scalar, read each frame as every family's cut reads it (AGENTS.md rule 3, item 5).
+      const coarsening = Math.fround(continuumCoarsening());
+      if (coarsening !== clockF[4]) {
+        clockF[4] = coarsening;
+        device.queue.writeBuffer(state.cfg, 16, clock, 16, 4);
+      }
       const pendingCount = Math.min(HERD_SHOT_LIMIT, shotFlights.size);
       if (pendingCount > 0 || shotsSentLastFrame > 0) {
         shotsU32.fill(0, 0, 4);
@@ -1343,6 +1352,18 @@ export async function createLivestockHerds({
         pass.setBindGroup(0, state.splatGroup);
         pass.drawIndirect(state.draws, HERD_SPLAT_BUCKET * HERD_DRAW_WORDS * 4);
       }
+    },
+    // The main pass's indirect draws for the continuum census (js/continuum-census.js): the solid and fade
+    // meshes (drawIndexedIndirect, 5 words) and the horizon splats (drawIndirect, read as 4 words). The shadow
+    // buckets between them are not main-pass draws.
+    continuumDraws() {
+      if (!state || !state.activeSpeciesMask) return [];
+      const record = HERD_DRAW_WORDS * 4;
+      return [
+        { buffer: state.draws, offset: 0, records: HERD_SPECIES, stride: HERD_DRAW_WORDS },
+        { buffer: state.draws, offset: HERD_SPLAT_BUCKET * record, records: 1, stride: 4 },
+        { buffer: state.draws, offset: HERD_FADE_BUCKET * record, records: HERD_SPECIES, stride: HERD_DRAW_WORDS },
+      ];
     },
     drawShadow(pass) {
       if (!state || !state.activeSpeciesMask) return;

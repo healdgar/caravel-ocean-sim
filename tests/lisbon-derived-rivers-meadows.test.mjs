@@ -178,6 +178,11 @@ test('Nanite meadow grass pack integrity, cover masking, and GPU-only zero-disca
   assert.ok(storageCount <= 8, `MEADOW_RENDER_WGSL storage buffer count=${storageCount} exceeds 8`);
   assert.match(GROUND_DETAIL_RENDER, /fn grassWindWave\(/);
   assert.match(MEADOW_RENDER_WGSL, /fn meadowWindField\(/);
+  // The cluster/continuum handoff is the continuum's one split, carried once, the clusters keeping its complement.
+  assert.equal(MEADOW_RENDER_WGSL.split('fn continuumSamples(').length - 1, 1);
+  assert.doesNotMatch(MEADOW_RENDER_WGSL, /meadowSampleMask/);
+  assert.match(MEADOW_RENDER_WGSL, /let contMask = continuumSamples\(in\.windInfo\.w, in\.pos\.xy, samples, 0u\);[\s\S]*?o\.mask = full & \(~contMask\);/);
+  assert.match(MEADOW_RENDER_WGSL, /o\.mask = continuumSamples\(in\.windInfo\.w, in\.pos\.xy, samples, 0u\);/);
 
   // Build cover map on Lisbon and confirm zero grass in rivers/streets and real grass on hillsides
   const baked = JSON.parse(fs.readFileSync(BAKED_BOARDS['lisbon:1550'], 'utf8'));

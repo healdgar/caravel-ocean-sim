@@ -2,7 +2,7 @@
 // Mobile locomotion & gyroscope motion controls for Free Camera (flight and ashore walk).
 // Pure O(1) event-driven state; zero per-frame DOM layout reads or allocations.
 
-const D2R = Math.PI / 180;
+const FREE_CAM_D2R = Math.PI / 180;
 const PITCH_LIMIT = 1.5;
 
 export function wrapAngleRad(rad) {
@@ -17,7 +17,7 @@ export function deviceOrientationToViewAngles(alphaDeg, betaDeg, gammaDeg) {
   if (alphaDeg == null || betaDeg == null || gammaDeg == null) return null;
   const a = Number(alphaDeg), b = Number(betaDeg), g = Number(gammaDeg);
   if (!Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(g)) return null;
-  const ar = a * D2R, br = b * D2R, gr = g * D2R;
+  const ar = a * FREE_CAM_D2R, br = b * FREE_CAM_D2R, gr = g * FREE_CAM_D2R;
   const ca = Math.cos(ar), sa = Math.sin(ar);
   const cb = Math.cos(br), sb = Math.sin(br);
   const cg = Math.cos(gr), sg = Math.sin(gr);

@@ -11,6 +11,7 @@
 //   - Ballistics: GPU cannonball crater burial, radial blast parting, soot scorching & thrown-soil dusting,
 //     live low-flying cannonball V-wake furrows + hot-shot tip singeing, and 26 m/s impact shockwave rings.
 import { requestOnce } from './gpu-program-cache.js';
+import { CONTINUUM_CORE_WGSL, CONTINUUM_SPLAT_PIXELS, CONTINUUM_MIN_PIXELS } from './continuum-core.js';
 import { FRAME_WGSL, ATMO_CORE_WGSL } from './wgsl/common.js';
 import { SKY_RENDER_FUNCS } from './wgsl/sky.js';
 import { CLOUD_SAMPLE } from './wgsl/clouds.js';
@@ -24,8 +25,8 @@ import { streetEdgeAt } from './town-streets.js';
 export const MEADOW_TILE_METRES = 1.75;
 export const MEADOW_FADE_IN_PX = 22.0;
 export const MEADOW_FADE_OUT_PX = 16.5;
-export const MEADOW_SPLAT_PX = 3.5;
-export const MEADOW_MIN_PX = 1.0;
+export const MEADOW_SPLAT_PX = CONTINUUM_SPLAT_PIXELS;
+export const MEADOW_MIN_PX = CONTINUUM_MIN_PIXELS;
 export const MEADOW_BUCKETS = 8;
 export const MEADOW_DRAW_WORDS = 4;
 export const MEADOW_MAX_SHOT_WAKES = 16;
@@ -926,7 +927,7 @@ fn meadowRotQuadXZ(v: vec2f, q: u32) -> vec2f {
 }
 `;
 
-export const MEADOW_RENDER_WGSL = FRAME_WGSL + ATMO_CORE_WGSL + SHADOW_FRAME + SKY_RENDER_FUNCS + CLOUD_SAMPLE + MEADOW_COMMON_WGSL + /* wgsl */ `
+export const MEADOW_RENDER_WGSL = FRAME_WGSL + ATMO_CORE_WGSL + SHADOW_FRAME + SKY_RENDER_FUNCS + CLOUD_SAMPLE + CONTINUUM_CORE_WGSL + MEADOW_COMMON_WGSL + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var transLUT: texture_2d<f32>;
 @group(0) @binding(2) var skyLUT: texture_2d<f32>;
@@ -1621,18 +1622,9 @@ fn meadowShade(in: MeadowVertexOut, frontFacing: bool) -> vec4f {
   return vec4f(col, 1.0);
 }
 
-fn meadowSampleMask(share: f32, pixel: vec2f, samples: u32) -> u32 {
-  let full = (1u << samples) - 1u;
-  if (share <= 0.0) { return 0u; }
-  if (share >= 1.0) { return full; }
-  let p = vec2u(pixel);
-  let rnd = meadowHash(p.x ^ meadowHash(p.y * 0x9e3779b9u + 0x51ed270bu));
-  let cnt = min(samples, u32(floor(share * f32(samples) + f32(rnd & 65535u) / 65536.0)));
-  let bits = (1u << cnt) - 1u;
-  let rot = (rnd >> 16u) % samples;
-  return ((bits << rot) | (bits >> (samples - rot))) & full;
-}
-
+// A tile changing over from its clusters to its continuum splits each pixel with the continuum's one split
+// (continuumSamples): the continuum takes the samples its share (windInfo.w) asks for, and the clusters keep
+// exactly the rest, so each sample is drawn once and nothing is blended.
 struct MeadowCoverageOut {
   @location(0) colour: vec4f,
   @builtin(sample_mask) mask: u32,
@@ -1645,7 +1637,7 @@ struct MeadowCoverageOut {
 @fragment fn meadowClusterFadeFS(in: MeadowVertexOut, @builtin(front_facing) front: bool) -> MeadowCoverageOut {
   let samples = max(1u, cfg.params.z);
   let full = (1u << samples) - 1u;
-  let contMask = meadowSampleMask(in.windInfo.w, in.pos.xy, samples);
+  let contMask = continuumSamples(in.windInfo.w, in.pos.xy, samples, 0u);
   var o: MeadowCoverageOut;
   o.colour = meadowShade(in, front);
   o.mask = full & (~contMask);
@@ -1656,7 +1648,7 @@ struct MeadowCoverageOut {
   let samples = max(1u, cfg.params.z);
   var o: MeadowCoverageOut;
   o.colour = meadowShade(in, front);
-  o.mask = meadowSampleMask(in.windInfo.w, in.pos.xy, samples);
+  o.mask = continuumSamples(in.windInfo.w, in.pos.xy, samples, 0u);
   return o;
 }
 `;
@@ -1766,7 +1758,7 @@ export async function createMeadowGrass({
   ];
   const drawTemplate = new Uint32Array(MEADOW_BUCKETS * MEADOW_DRAW_WORDS);
   for (let b = 0; b < MEADOW_BUCKETS; b++) drawTemplate[b * MEADOW_DRAW_WORDS] = bucketCaps[b];
-  const drawsBuf = mkBuf('meadow draws', drawTemplate, B.STORAGE | B.INDIRECT);
+  const drawsBuf = mkBuf('meadow draws', drawTemplate, B.STORAGE | B.INDIRECT | B.COPY_SRC);
 
   const stepCfgData = new ArrayBuffer(32);
   const stepCfgF = new Float32Array(stepCfgData);
@@ -1957,6 +1949,7 @@ export async function createMeadowGrass({
   const coarseMinY = new Float32Array(MEADOW_COARSE_GRID * MEADOW_COARSE_GRID);
   const coarseMaxY = new Float32Array(MEADOW_COARSE_GRID * MEADOW_COARSE_GRID);
   let lastEncodeActive = true;
+  let destroyed = false;
 
   function isCameraInMeadowRange(camOrFrame = null, viewProjArg = null) {
     if (!coverTexels) return false;
@@ -2281,7 +2274,13 @@ export async function createMeadowGrass({
     drawOpaque(pass, camOrFrame = null, viewProjArg = null) {
       this.draw(pass, camOrFrame, viewProjArg);
     },
+    // draw()'s indirect records, every bucket drawn once, for the continuum census (js/continuum-census.js).
+    continuumDraws() {
+      if (destroyed || !coverTexels || !lastEncodeActive) return [];
+      return [{ buffer: drawsBuf, offset: 0, records: MEADOW_BUCKETS, stride: MEADOW_DRAW_WORDS }];
+    },
     destroy() {
+      destroyed = true;
       unsubscribeCraters?.();
       unsubscribeCraters = null;
       boundCraters = null;

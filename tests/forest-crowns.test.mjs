@@ -6,6 +6,7 @@ import zlib from 'node:zlib';
 import {FOREST_CROWN_VERSION,FOREST_CROWN_STEP_WORDS,FOREST_CROWN_SPLAT_PIXELS,FOREST_CROWN_MIN_PIXELS,FOREST_CROWN_NEAREST,FOREST_CROWN_BAND,PORTUGAL_FOREST_CROWN_ASSETS,SUBTROPICAL_FOREST_CROWN_ASSETS,validateForestCrowns,loadForestCrowns,forestCrownLook,forestCrownSplatLook,forestCrownChange,FOREST_CROWN_WGSL} from '../js/forest-crowns.js';
 import {FOREST_CLUSTER_SELECT,FOREST_CLUSTER_VERTEX_WGSL,FOREST_CLUSTER_VERTEX_WORDS} from '../js/forest-clusters.js';
 import {FOREST_VERTEX_WGSL} from '../js/forest-scenery.js';
+import {CONTINUUM_SPLAT_PIXELS,CONTINUUM_MIN_PIXELS} from '../js/continuum-core.js';
 
 const PACKS={portugal:PORTUGAL_FOREST_CROWN_ASSETS,subtropical:SUBTROPICAL_FOREST_CROWN_ASSETS};
 const f32Buf=new ArrayBuffer(4),u32View=new Uint32Array(f32Buf),f32View=new Float32Array(f32Buf);
@@ -180,17 +181,27 @@ test('a crown takes over no nearer than the range at which leaf cards reach thei
 test('the GPU progressive continuum cut, the leaves and the crown agree on which samples each draws',()=>{
   const select=FOREST_CLUSTER_SELECT('struct Frame{x:f32};');
   assert.ok(select.includes(`const FOREST_CROWN_NEAREST=${FOREST_CROWN_NEAREST.toFixed(2)};`));
-  assert.ok(select.includes(`const FOREST_CROWN_SPLAT_PIXELS=${FOREST_CROWN_SPLAT_PIXELS.toFixed(4)};`));
-  assert.ok(select.includes(`const FOREST_CROWN_MIN_PIXELS=${FOREST_CROWN_MIN_PIXELS.toFixed(4)};`));
+  // The splat limit and the thinning are the continuum core's (AGENTS.md rule 3, item 7), which this module
+  // carries once: no forest copy of them, nor of the hash, the cluster test or the two searches.
+  assert.equal(FOREST_CROWN_SPLAT_PIXELS,CONTINUUM_SPLAT_PIXELS);assert.equal(FOREST_CROWN_MIN_PIXELS,CONTINUUM_MIN_PIXELS);
+  assert.equal(select.split('fn continuumHash(').length,2,'the select module carries the core once');
+  assert.ok(!/FOREST_CROWN_SPLAT_PIXELS|FOREST_CROWN_MIN_PIXELS|fn forestClusterHash|while\(low<high\)|while\(sLo<sHi\)/.test(select),'no forest copy of the core');
+  assert.match(select,/let inflate=continuumThin\(crownPixels,tree\^0x9e3779b9u\);if\(inflate==0\.\)\{return;\}/);
+  assert.match(select,/if\(crownPixels<=CONTINUUM_SPLAT_PIXELS\)/);
+  assert.match(select,/if\(!continuumClusterDrawn\(k\.err\*lodScale,ownAt,k\.lod\.w\*scale,k\.parentErr\*lodScale,parentAt,k\.parentLod\.w\*scale,focal,allowed\)\)\{continue;\}/);
+  assert.equal(select.split('forestClusterPrefix(bucket.firstCluster,bucket.clusterCount,finest)').length,3,'the camera and the shadow cuts search one prefix');
+  assert.match(select,/fn forestCrownStep\(steps: u32, allowed: f32\)[\s\S]*crownMorph\[bucket\.crownLists\.w\+\(low \+ 1u\)\*4u\+1u\]/);
   assert.match(FOREST_CLUSTER_SELECT('',{nearest:150,limit:1000}),/FOREST_CROWN_LIMIT=1000\.0000;\nconst FOREST_CROWN_NEAREST=150\.00;/);
   assert.match(select,/let start=max\(max\(FOREST_CROWN_NEAREST,bucket\.crownSize\.z\*focal\/limitLeaf\),bucket\.crownSize\.x\*scale\*focal\/limitLeaf\);/);
-  assert.match(select,/while\(sLo<sHi\)/);
+  assert.match(select,/let found=forestCrownStep\(stepCount,allowedErr\);/);
   assert.match(FOREST_CROWN_WGSL,/let wood=\(\(w1>>16u\)&255u\)==1u;/);
   assert.match(select,/index\|select\(0u,crownShare<<24u,isLeaf\)/);
   assert.match(FOREST_CLUSTER_VERTEX_WGSL,/forestClusters\[item\.y&0xffffffu\]/);
   assert.match(FOREST_CLUSTER_VERTEX_WGSL,/o\.crownFade=f32\(item\.y>>24u\)\/255\.;/);
   assert.match(FOREST_VERTEX_WGSL,/forestLeafSampleMask\(alpha,in\.coverageSeed,in\.pos\.xy\)&~forestCrownSamples\(in\.crownFade,in\.pos\.xy\)/);
   assert.match(FOREST_CROWN_WGSL,/o\.mask=forestCrownSamples\(in\.crownFade,in\.pos\.xy\)/);
+  assert.match(FOREST_VERTEX_WGSL,/fn forestCrownSamples\(share:f32,pixel:vec2f\)->u32\{return continuumSamples\(share,pixel,[^;]*,0u\);\}/,'the crown handoff is the continuum split with the forest seed');
+  for(const source of [FOREST_VERTEX_WGSL,FOREST_CROWN_WGSL])assert.ok(!/fn continuum/.test(source),'the land module carries the continuum core once; forest strings never copy it');
   const solid=/@fragment fn forestCrownFS\([^)]*\)->@location\(0\)vec4f\{[^}]*\}/.exec(FOREST_CROWN_WGSL)?.[0]??'';
   assert.ok(solid&&!/discard|sample_mask/.test(solid));
   assert.ok(!/discard/.test(FOREST_CROWN_WGSL));

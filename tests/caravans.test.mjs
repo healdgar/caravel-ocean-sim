@@ -154,11 +154,11 @@ test('all three 1550 road vehicles are closed outward CCW manifolds on spoked wh
   assert.ok(canvas > 0, 'covered wain tilt canvas present');
 
   // Verify Rule-2 & Rule-3 GPU execution: atomic hitch culling, tongue articulation, MSAA sample_mask handoff,
-  // 1-triangle horizon splat, sub-pixel stochastic thinning with inverseSqrt inflation, and zero discard.
+  // 1-triangle horizon splat, the core's sub-pixel stochastic thinning with area-preserving inflation, and zero discard.
   assert.doesNotMatch(HERDS_STEP_WGSL, /\bdiscard\b/);
   assert.doesNotMatch(HERDS_RENDER_WGSL, /\bdiscard\b/);
   assert.match(HERDS_STEP_WGSL, /isHitch/);
-  assert.match(HERDS_STEP_WGSL, /inverseSqrt\(keepProb\)/);
+  assert.match(HERDS_STEP_WGSL, /continuumThin\(screenPx, thinSeed\)/);
   assert.match(HERDS_RENDER_WGSL, /@builtin\(sample_mask\)/);
   assert.match(HERDS_RENDER_WGSL, /fn\s+herdsSplatVS\b/);
   assert.match(HERDS_RENDER_WGSL, /fn\s+herdsSplatFS\b/);

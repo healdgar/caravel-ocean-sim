@@ -6,7 +6,7 @@ import { FRAME_WGSL, ATMO_CORE_WGSL, CASCADES, HULL_HOLE_LIMIT, HULL_CRATER_LIMI
 import { SKY_RENDER_FUNCS } from './wgsl/sky.js';
 import { SHADOW_FRAME } from './wgsl/shadows.js';
 import { VESSEL_LIGHTING, CANVAS_OPTICS } from './wgsl/vessel.js';
-import { CONTINUUM_SPLAT_PIXELS, CONTINUUM_MIN_PIXELS } from './continuum-core.js';
+import { CONTINUUM_SPLAT_PIXELS, CONTINUUM_MIN_PIXELS, CONTINUUM_CORE_WGSL, continuumCoarsening } from './continuum-core.js';
 import { SURFACE_WAVE_SAMPLE } from './wgsl/surface-waves.js';
 import { SHIP_FRACTURE_POSE_UPDATE } from './wgsl/ship-fracture.js';
 import { CREW_JOINT_BLEND_WGSL } from './wgsl/crew.js';
@@ -43,10 +43,16 @@ export const MAX_DECK_STATIONS_PER_VESSEL = 10;
 export const DECK_CREW_TIERS = 4;
 export const DECK_CREW_CROSSFADE_HI_PX = 10.0;
 export const DECK_CREW_SPLAT_PIXELS = 4.0;
-export const DECK_CREW_MIN_PIXELS = 1.0;
+// Deck-crew splats thin below the continuum's own limit (continuumThin in js/continuum-core.js).
+export const DECK_CREW_MIN_PIXELS = CONTINUUM_MIN_PIXELS;
 
 export const VESSEL_CONTINUUM_BAND = 0.25;
+// The vessel cut's pixel error at the scene's base error; the cut and the near band below scale with
+// continuumCoarsening(), so they follow the scene's one pixel-error scalar (AGENTS.md rule 3, item 5).
 export const VESSEL_ERROR_PIXELS = 1.5;
+// Projected ship span, in pixels at the base error, over which the full part-built ship hands off to its continuum.
+export const VESSEL_NEAR_HI_PIXELS = 38.0;
+export const VESSEL_NEAR_LO_PIXELS = 27.0;
 export const VESSEL_SPLAT_PIXELS = CONTINUUM_SPLAT_PIXELS;
 export const VESSEL_MIN_PIXELS = CONTINUUM_MIN_PIXELS;
 
@@ -4378,40 +4384,15 @@ ${SAIL_BRAIL_WGSL}
 }
 `;
 
-const VESSEL_SAMPLE_MASK_WGSL = /* wgsl */ `
-fn vesselCovHash(v: u32) -> u32 {
-  var h = v;
-  h ^= h >> 16u;
-  h *= 0x7feb352du;
-  h ^= h >> 15u;
-  h *= 0x846ca68bu;
-  h ^= h >> 16u;
-  return h;
-}
-fn vesselCrownSamples(share: f32, pixel: vec2f, samples: u32) -> u32 {
-  if (share <= 0.0) { return 0u; }
-  let s = clamp(samples, 1u, 4u);
-  let fullMask = (1u << s) - 1u;
-  if (share >= 1.0) { return fullMask; }
-  let p = vec2u(pixel);
-  let bx = p.x & 3u;
-  let by = p.y & 3u;
-  // Ordered 4x4 Bayer threshold in (0, 1): stable under motion with zero complement pinhole mismatch
-  let bayerIdx = (((bx & 1u) << 3u) | ((bx & 2u) << 1u)) ^ (((by & 1u) << 2u) | (by & 2u) | ((bx & 1u) << 2u) | ((bx & 2u) >> 1u));
-  let thresh = (f32(bayerIdx & 15u) + 0.5) / 16.0;
-  let scaled = share * f32(s);
-  let baseCount = u32(floor(scaled));
-  let extra = select(0u, 1u, fract(scaled) > thresh);
-  let count = min(s, baseCount + extra);
-  return ((1u << count) - 1u) & fullMask;
-}
-`;
+// Every vessel handoff splits a pixel's samples with the continuum core's continuumSamples: the coarser side takes
+// continuumSamples(share, pixel, samples, seed), the finer side its complement against the full mask, both from
+// the same flat integer share and the same instance seed, so each sample is drawn exactly once.
 
 export function tradeVesselsSource(damaged = false, samples = 4, { submergedCapture = false } = {}) {
   const safeSamples = Math.max(1, Math.min(4, samples | 0));
   const sampleMaskAll = (1 << safeSamples) - 1;
   const useSubmergedEntry = Boolean(submergedCapture && !damaged);
-  const rawSource = FRAME_WGSL + ATMO_CORE_WGSL + SKY_RENDER_FUNCS + SHADOW_FRAME + VESSEL_LIGHTING + CANVAS_OPTICS + VESSEL_SAMPLE_MASK_WGSL + /* wgsl */ `
+  const rawSource = CONTINUUM_CORE_WGSL + FRAME_WGSL + ATMO_CORE_WGSL + SKY_RENDER_FUNCS + SHADOW_FRAME + VESSEL_LIGHTING + CANVAS_OPTICS + /* wgsl */ `
 struct TradeNearDomain { domain: vec4f, grid: vec4f };
 const TV_SAMPLES: u32 = ${safeSamples}u;
 const TV_SAMPLE_MASK_ALL: u32 = ${sampleMaskAll}u;
@@ -4472,6 +4453,8 @@ struct TVVertexOut {
   @location(5) uv: vec2f,
   @location(6) @interpolate(flat) yawPitchRollScale: vec4f,
   @location(7) stateMatArch: vec3f,
+  // Intact: the near-to-continuum handoff share (of 65535) and the instance seed, exactly as the select pass packed them.
+  @location(8) @interpolate(flat) fade: vec2u,
 };
 
 fn rotateVessel(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
@@ -4560,7 +4543,11 @@ fn vesselWorldTransform(srcPos: vec3f, srcNorm: vec3f, material: f32, uv: vec2f,
   o.matId = u32(max(0.0, floor(v.material)));
   o.uv = v.uv;
   o.yawPitchRollScale = vec4f(v.instPosYaw.w, v.instAttitude.x, v.instAttitude.y, max(v.instAttitude.z, 0.25));
-  ${damaged ? 'o.stateMatArch = vec3f(select(0.0, clamp(nLen - 1.0, 0.0, 1.5), nLen > 1.002), v.material, v.instAttitude.w);' : 'o.stateMatArch = vec3f(clamp(v.instAnim.z, 0.0, 1.0), v.material, v.instAttitude.w);'}
+  ${damaged ? `o.stateMatArch = vec3f(select(0.0, clamp(nLen - 1.0, 0.0, 1.5), nLen > 1.002), v.material, v.instAttitude.w);
+  o.fade = vec2u(0u);` : `// instAnim.z holds share16 + 65536 * seed as an exact integer float (TRADE_VESSEL_SELECT_WGSL).
+  let fadeWord = u32(max(round(v.instAnim.z), 0.0));
+  o.fade = vec2u(fadeWord & 0xFFFFu, fadeWord >> 16u);
+  o.stateMatArch = vec3f(f32(o.fade.x) / 65535.0, v.material, v.instAttitude.w);`}
   return o;
 }
 
@@ -4959,7 +4946,8 @@ struct TVFragmentOut { @location(0) color: vec4f, @builtin(sample_mask) mask: u3
 }
 @fragment fn tvFS(in: TVVertexOut, @builtin(front_facing) front: bool) -> TVFragmentOut {
   let color = tvShadeFragment(in, front);
-  let takeMask = vesselCrownSamples(in.stateMatArch.x, in.pos.xy, TV_SAMPLES);
+  // The continuum takes these samples of the pixel (tvContFS); the full ship keeps the rest.
+  let takeMask = continuumSamples(f32(in.fade.x) / 65535.0, in.pos.xy, TV_SAMPLES, in.fade.y);
   let keepMask = (~takeMask) & TV_SAMPLE_MASK_ALL;
   var outF: TVFragmentOut;
   outF.color = color;
@@ -4992,7 +4980,7 @@ struct ArchContInfo {
 };
 struct TradeSelectParams {
   ctrl: vec4u,
-  params: vec4f,
+  params: vec4f, // cut pixel error (VESSEL_ERROR_PIXELS x coarsening), coarsening, pad, pad
   arch: array<ArchContInfo, ${TRADE_VESSEL_ARCHETYPES}>,
 };
 `;
@@ -5020,7 +5008,7 @@ const ARCHETYPE_INDEX_COUNTS = array<u32, ${TRADE_VESSEL_ARCHETYPES}>(${counts.j
 `;
 }
 
-const TRADE_VESSEL_SELECT_WGSL = FRAME_WGSL + SHADOW_FRAME + VESSEL_SAMPLE_MASK_WGSL + TRADE_SHARED_TYPES_WGSL + /* wgsl */ `
+const TRADE_VESSEL_SELECT_WGSL = CONTINUUM_CORE_WGSL + FRAME_WGSL + SHADOW_FRAME + TRADE_SHARED_TYPES_WGSL + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<uniform> nearTerrain: TradeNearDomain;
 @group(0) @binding(2) var<uniform> selP: TradeSelectParams;
@@ -5080,21 +5068,24 @@ fn rotateVesselSel(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
 
   let focal = 0.5 * F.screen.y / tanY;
   let startErrM = max(arch.splatExtentCol.z, 0.04) * scaleMul;
+  // The scene's one pixel-error scalar: the cut's error and the near band both coarsen with it (1 at base).
   let errPx = selP.params.x;
-  let splatPx = selP.params.y;
-  let minPx = selP.params.z;
-  let spanPx = (2.0 * boundRad * focal) / dist;
-  let nearHiPx = 38.0;
-  let nearLoPx = 27.0;
+  let coarsening = selP.params.y;
+  let spanPx = continuumPixels(2.0 * boundRad, focal, dist);
+  let nearHiPx = ${VESSEL_NEAR_HI_PIXELS.toFixed(1)} * coarsening;
+  let nearLoPx = ${VESSEL_NEAR_LO_PIXELS.toFixed(1)} * coarsening;
 
   // Keep full articulated part-built ships crisp across harbor/combat distances until ~38 px total screen span,
-  // then MSAA sample_mask crossfade cleanly into the ship-profile continuum over 38 -> 27 px.
+  // then MSAA sample_mask crossfade cleanly into the ship-profile continuum over 38 -> 27 px (at base error).
   if (spanPx > nearLoPx) {
     let rawShare = select(clamp(smoothstep(nearHiPx, nearLoPx, spanPx), 0.0, 0.999), 0.0, spanPx >= nearHiPx);
-    let sharePacked = u32(round(rawShare * 65535.0));
-    let share = f32(sharePacked) / 65535.0;
+    // A share too small for the continuum half to be listed (below) keeps the ship whole and solid, so the two
+    // sides of the band are always drawn together and each takes exactly the other's complement.
+    let rawPacked = u32(round(rawShare * 65535.0));
+    let sharePacked = select(rawPacked, 0u, rawPacked <= 130u);
     var outInst = inst;
-    outInst.animSink.z = share;
+    // share16 + 65536 * instance seed, exact in f32 (i < ${MAX_TRADE_VESSELS}); tvVS unpacks it to a flat vec2u.
+    outInst.animSink.z = f32(sharePacked + (i << 16u));
     let nearSlot = atomicAdd(&indirect[aIdx * 5u + 1u], 1u);
     if (nearSlot < ${MAX_TRADE_VESSELS}u) {
       nearOut[aIdx * ${MAX_TRADE_VESSELS}u + nearSlot] = outInst;
@@ -5111,26 +5102,23 @@ fn rotateVesselSel(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
       if (fadeSlot < ${MAX_TRADE_VESSELS}u) {
         nearOut[(21u + aIdx) * ${MAX_TRADE_VESSELS}u + fadeSlot] = outInst;
       }
-      if (sharePacked > 130u) {
-        let triCount = u32(round(stepMeta[arch.counts.x].z));
-        let startVert = atomicAdd(&indirect[144u], triCount * 3u);
-        let startTri = startVert / 3u;
-        if (startTri + triCount <= selP.ctrl.y) {
-          for (var t = 0u; t < triCount; t++) {
-            contList[${TRADE_CONT_HALF_TRIS}u + startTri + t] = vec4u(i, t, 0u, sharePacked);
-          }
+      // The continuum's half of the band; its seed is entry.x == i, the same instance seed packed above.
+      let triCount = u32(round(stepMeta[arch.counts.x].z));
+      let startVert = atomicAdd(&indirect[144u], triCount * 3u);
+      let startTri = startVert / 3u;
+      if (startTri + triCount <= selP.ctrl.y) {
+        for (var t = 0u; t < triCount; t++) {
+          contList[${TRADE_CONT_HALF_TRIS}u + startTri + t] = vec4u(i, t, 0u, sharePacked);
         }
       }
     }
     return;
   }
 
-  if (spanPx <= splatPx) {
-    let keepProb = clamp(spanPx / max(minPx, 1e-3), 0.06, 1.0);
-    let h = vesselCovHash(i ^ u32(abs(inst.animSink.x) * 131.0));
-    let keep = (spanPx >= minPx) || ((f32(h & 65535u) / 65536.0) <= keepProb);
-    if (!keep) { return; }
-    let inflate = select(1.0, 1.0 / sqrt(keepProb), spanPx < minPx);
+  if (spanPx <= CONTINUUM_SPLAT_PIXELS) {
+    // Sub-pixel horizon splats thin by the core's area-preserving hash, seeded by the instance so it holds still.
+    let inflate = continuumThin(spanPx, i);
+    if (inflate <= 0.0) { return; }
     let bow = vec2f(sin(yaw), -cos(yaw));
     let viewXZ = normalize(vec2f(toCenter.x, toCenter.z) + vec2f(1e-5, 0.0));
     let broadFactor = abs(bow.x * viewXZ.y - bow.y * viewXZ.x);
@@ -5148,10 +5136,14 @@ fn rotateVesselSel(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
   let stepBase = arch.counts.x;
   let stepCount = arch.counts.y;
   let distAtLo = (2.0 * boundRad * focal) / nearLoPx;
-  let rawErr = (errPx * dist) / max(focal * scaleMul, 1.0);
-  let errAtLo = (errPx * distAtLo) / max(focal * scaleMul, 1.0);
+  // Allowed error in the archetype's own (unscaled) metres: the instance's scale folds into the focal length.
+  let rawErr = continuumAllowedError(errPx, focal * scaleMul, dist);
+  let errAtLo = continuumAllowedError(errPx, focal * scaleMul, distAtLo);
   let stepMaxErr = stepMeta[stepBase + stepCount].x;
-  let contT = clamp((rawErr - errAtLo) / max(errAtLo * 6.7, 1e-3), 0.0, 1.0);
+  // The morph reaches the minimal core by ~CONTINUUM_SPLAT_PIXELS at base error (27 / 7.7 px), sooner when coarser,
+  // and never later than the splat, so a finer-than-base scalar cannot pop from a detailed cut into the splat.
+  let morphSpan = min(6.7, nearLoPx / CONTINUUM_SPLAT_PIXELS - 1.0);
+  let contT = clamp((rawErr - errAtLo) / max(errAtLo * morphSpan, 1e-3), 0.0, 1.0);
   let allowedErr = mix(startErrM, stepMaxErr, contT);
   var lo = 0u;
   var hi = select(0u, stepCount - 1u, stepCount > 0u);
@@ -5178,7 +5170,7 @@ fn rotateVesselSel(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
 export function buildTradeVesselContinuumWGSL(samples = 4) {
   const safeSamples = Math.max(1, Math.min(4, samples | 0));
   const sampleMaskAll = (1 << safeSamples) - 1;
-  return FRAME_WGSL + ATMO_CORE_WGSL + SKY_RENDER_FUNCS + VESSEL_LIGHTING + VESSEL_SAMPLE_MASK_WGSL + TRADE_SHARED_TYPES_WGSL + /* wgsl */ `
+  return CONTINUUM_CORE_WGSL + FRAME_WGSL + ATMO_CORE_WGSL + SKY_RENDER_FUNCS + VESSEL_LIGHTING + TRADE_SHARED_TYPES_WGSL + /* wgsl */ `
 const TV_CONT_SAMPLES: u32 = ${safeSamples}u;
 const TV_CONT_MASK_ALL: u32 = ${sampleMaskAll}u;
 struct ContState { px: f32, py: f32, pz: f32, normPacked: u32 };
@@ -5213,7 +5205,8 @@ struct TVContOut {
   @location(0) world: vec3f,
   @location(1) normal: vec3f,
   @location(2) color: vec3f,
-  @location(3) fadeShare: f32,
+  // The band's share (of 65535; 65535 outside the band) and the instance seed, matching the full ship's tvFS.
+  @location(3) @interpolate(flat) fade: vec2u,
 };
 
 @vertex fn tvContVS(@builtin(vertex_index) vid: u32) -> TVContOut {
@@ -5225,7 +5218,6 @@ struct TVContOut {
   let arch = selP.arch[aIdx];
   let stepIdx = entry.z & 0xFFFFu;
   let morphT = f32((entry.z >> 16u) & 0xFFFFu) / 65535.0;
-  let share = f32(entry.w & 0xFFFFu) / 65535.0;
   let vi = baseIndices[arch.counts.z + entry.y * 3u + corner];
   let stepVerts = u32(max(1.0, round(arch.splatCol.w)));
   let v0 = contStates[arch.counts.w + stepIdx * stepVerts + vi];
@@ -5252,7 +5244,7 @@ struct TVContOut {
   o.world = worldP;
   o.normal = worldN;
   o.color = colEntry.rgb;
-  o.fadeShare = share;
+  o.fade = vec2u(entry.w & 0xFFFFu, entry.x);
   return o;
 }
 
@@ -5280,7 +5272,8 @@ struct TVContFragOut { @location(0) color: vec4f, @builtin(sample_mask) mask: u3
 }
 @fragment fn tvContFS(in: TVContOut, @builtin(front_facing) front: bool) -> TVContFragOut {
   let color = tvContShade(in, front);
-  let mask = select(vesselCrownSamples(in.fadeShare, in.pos.xy, TV_CONT_SAMPLES), TV_CONT_MASK_ALL, in.fadeShare >= 0.999);
+  // Exactly the samples the full ship's tvFS gives up; whole outside the band.
+  let mask = select(continuumSamples(f32(in.fade.x) / 65535.0, in.pos.xy, TV_CONT_SAMPLES, in.fade.y), TV_CONT_MASK_ALL, in.fade.x >= 65535u);
   return TVContFragOut(color, mask);
 }
 `;
@@ -6001,7 +5994,7 @@ struct DeckCrewConfig {
   ctrl: vec4u,        // activeVessels, maxStationsPerVessel, bucketSpan, samples
   splatCtrl: vec4u,   // maxSplats, lookCount, maleBraceStart, maleBraceLen
   femaleBrace: vec4u, // femaleBraceStart, femaleBraceLen, pad, pad
-  thresholds: vec4f,  // hiCrossPx (10.0), splatPx (4.0), minPx (1.0), pad
+  thresholds: vec4f,  // hiCrossPx (10.0), splatPx (4.0), minPx (1.0, informational: continuumThin uses CONTINUUM_MIN_PIXELS), pad
 };
 struct DeckStationGPU {
   localPosYaw: vec4f, // x, y, z (metres), yaw
@@ -6054,7 +6047,7 @@ const DECK_BUCKET_INDEX_COUNTS = array<u32, ${DECK_CREW_BUCKETS}>(${bucketIdxCou
 
 export const DECK_CREW_CLEAR_WGSL = /* @__PURE__ */ buildDeckCrewClearWGSL();
 
-export const DECK_CREW_SELECT_WGSL = FRAME_WGSL + SHADOW_FRAME + VESSEL_SAMPLE_MASK_WGSL + TRADE_SHARED_TYPES_WGSL + DECK_CREW_SHARED_WGSL + /* wgsl */ `
+export const DECK_CREW_SELECT_WGSL = CONTINUUM_CORE_WGSL + FRAME_WGSL + SHADOW_FRAME + TRADE_SHARED_TYPES_WGSL + DECK_CREW_SHARED_WGSL + /* wgsl */ `
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<uniform> nearTerrain: TradeNearDomain;
 @group(0) @binding(2) var<uniform> crewCfg: DeckCrewConfig;
@@ -6167,10 +6160,9 @@ fn rotateDeckShip(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
   if (clip.w < -1.6 || abs(clip.x) > wEff * 1.16 + 1.4 / tanX || abs(clip.y) > wEff * 1.16 + 1.4 / tanY) { return; }
 
   let focal = 0.5 * F.screen.y / tanY;
-  let pixels = (bodyHeightM * focal) / dist;
+  let pixels = continuumPixels(bodyHeightM, focal, dist);
   let hiCrossPx = crewCfg.thresholds.x; // 10.0 px
   let splatPx = crewCfg.thresholds.y;   // 4.0 px
-  let minPx = crewCfg.thresholds.z;     // 1.0 px
 
   if (pixels >= hiCrossPx) {
     let tier = select(select(select(3u, 2u, pixels >= 26.0), 1u, pixels >= 68.0), 0u, pixels >= 150.0);
@@ -6195,7 +6187,6 @@ fn rotateDeckShip(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
     // 10.0 -> 4.0 px: MSAA @builtin(sample_mask) crossfade between distant 3D mesh (buckets 10..11) and 1-triangle silhouette splat
     let rawShare = clamp(smoothstep(hiCrossPx, splatPx, pixels), 0.0, 0.999);
     let fadeBits = min(2047u, u32(round(rawShare * 2047.0)));
-    let share = f32(fadeBits) / 2047.0;
     let bucket = 10u + modelIdx;
     let slot = atomicAdd(&crewDraws[bucket * 5u + 1u], 1u);
     if (slot < crewCfg.ctrl.z) {
@@ -6209,23 +6200,23 @@ fn rotateDeckShip(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
     if (sIdx < crewCfg.splatCtrl.x) {
       crewSplatList[sIdx * 3u] = vec4f(worldCenter, signedHalfW);
       crewSplatList[sIdx * 3u + 1u] = vec4f(meanCol, baseHalfH);
-      crewSplatList[sIdx * 3u + 2u] = vec4f(shipUpWorld, share);
+      // fadeBits + 2048 * lookIdx (the body's seed, as the mesh side reads it), exact in f32.
+      crewSplatList[sIdx * 3u + 2u] = vec4f(shipUpWorld, f32(fadeBits | ((lookIdx & 0x3FFu) << 11u)));
     }
     return;
   }
 
-  // <= 4.0 px down to < 1.0 px: 1-triangle silhouette splat with deterministic hash thinning + inverseSqrt(keepProb) inflation
-  let keepProb = clamp(pixels / max(minPx, 1e-3), 0.06, 1.0);
-  let h = vesselCovHash(gid ^ (lookIdx * 2654435761u));
-  let keep = (pixels >= minPx) || ((f32(h & 65535u) / 65536.0) <= keepProb);
-  if (!keep) { return; }
-  let inflate = select(1.0, inverseSqrt(keepProb), pixels < minPx);
+  // <= 4.0 px down to < 1.0 px: 1-triangle silhouette splat, thinned below CONTINUUM_MIN_PIXELS by the core's
+  // area-preserving hash and inflation.
+  let inflate = continuumThin(pixels, gid);
+  if (inflate <= 0.0) { return; }
   let sVert = atomicAdd(&crewDraws[60u], 3u);
   let sIdx = sVert / 3u;
   if (sIdx < crewCfg.splatCtrl.x) {
     crewSplatList[sIdx * 3u] = vec4f(worldCenter, signedHalfW * inflate);
     crewSplatList[sIdx * 3u + 1u] = vec4f(meanCol, baseHalfH * inflate);
-    crewSplatList[sIdx * 3u + 2u] = vec4f(shipUpWorld, 1.0);
+    // 2047: the whole splat, no band.
+    crewSplatList[sIdx * 3u + 2u] = vec4f(shipUpWorld, f32(2047u | ((lookIdx & 0x3FFu) << 11u)));
   }
 }
 `;
@@ -6386,7 +6377,7 @@ fn rotateVesselCrew(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
 export function buildDeckCrewRenderWGSL(samples = 4) {
   const safeSamples = Math.max(1, Math.min(4, samples | 0));
   const sampleMaskAll = (1 << safeSamples) - 1;
-  return FRAME_WGSL + ATMO_CORE_WGSL + SKY_RENDER_FUNCS + SHADOW_FRAME + VESSEL_LIGHTING + VESSEL_SAMPLE_MASK_WGSL + TRADE_SHARED_TYPES_WGSL + DECK_CREW_SHARED_WGSL + DECK_CREW_SKINNING_HELPERS_WGSL + /* wgsl */ `
+  return CONTINUUM_CORE_WGSL + FRAME_WGSL + ATMO_CORE_WGSL + SKY_RENDER_FUNCS + SHADOW_FRAME + VESSEL_LIGHTING + TRADE_SHARED_TYPES_WGSL + DECK_CREW_SHARED_WGSL + DECK_CREW_SKINNING_HELPERS_WGSL + /* wgsl */ `
 const TV_CREW_SAMPLES: u32 = ${safeSamples}u;
 const TV_CREW_MASK_ALL: u32 = ${sampleMaskAll}u;
 
@@ -6440,7 +6431,8 @@ struct DeckCrewVSOut {
   @location(1) @interpolate(perspective, centroid) normal: vec3f,
   @location(2) @interpolate(perspective, centroid) color: vec3f,
   @location(3) @interpolate(perspective, centroid) skin: f32,
-  @location(4) @interpolate(flat) splatFade: f32,
+  // The mesh-to-splat band's share (of 2047) and the body's seed (its look index), as the splat side reads them.
+  @location(4) @interpolate(flat) fade: vec2u,
   @location(5) @interpolate(perspective, centroid) bodyPos: vec3f,
 };
 
@@ -6449,7 +6441,7 @@ struct DeckCrewVSOut {
   let lookIdx = body.lookFlags & 0x3FFu;
   let isMerchant = ((body.lookFlags >> 10u) & 1u) != 0u;
   let braceFrame = (body.lookFlags >> 11u) & 0x3FFu;
-  let splatFade = f32((body.lookFlags >> 21u) & 0x7FFu) / 2047.0;
+  let fade = vec2u((body.lookFlags >> 21u) & 0x7FFu, lookIdx);
   let look = looks[lookIdx];
   let dress = deckCrewDressOf(look.hair.w);
   let compMask = deckCrewCompMask(look.face.w);
@@ -6461,7 +6453,7 @@ struct DeckCrewVSOut {
     out.normal = vec3f(0.0, 1.0, 0.0);
     out.color = vec3f(0.0);
     out.skin = 0.0;
-    out.splatFade = 0.0;
+    out.fade = vec2u(0u);
     out.bodyPos = vec3f(0.0);
     return out;
   }
@@ -6497,7 +6489,7 @@ struct DeckCrewVSOut {
   out.normal = worldN;
   out.color = clothed.rgb;
   out.skin = clothed.w;
-  out.splatFade = splatFade;
+  out.fade = fade;
   out.bodyPos = v.position;
   return out;
 }
@@ -6555,7 +6547,8 @@ struct DeckCrewFragOut {
 
 @fragment fn tvCrewFS(in: DeckCrewVSOut, @builtin(front_facing) front: bool) -> DeckCrewFragOut {
   let color = tvCrewShade(in, front);
-  let dropMask = select(0u, vesselCrownSamples(in.splatFade, in.pos.xy, TV_CREW_SAMPLES), in.splatFade > 0.001);
+  // The splat takes these samples (tvCrewSplatFS); the mesh keeps the rest. Share 0 drops nothing.
+  let dropMask = continuumSamples(f32(in.fade.x) / 2047.0, in.pos.xy, TV_CREW_SAMPLES, in.fade.y);
   let keepMask = (~dropMask) & TV_CREW_MASK_ALL;
   return DeckCrewFragOut(color, keepMask);
 }
@@ -6626,7 +6619,7 @@ fn deckSkinPoseSh(frameA: u32, frameB: u32, blend: f32, braceFrame: u32, braceW:
 export function buildDeckCrewSplatWGSL(samples = 4) {
   const safeSamples = Math.max(1, Math.min(4, samples | 0));
   const sampleMaskAll = (1 << safeSamples) - 1;
-  return FRAME_WGSL + ATMO_CORE_WGSL + SKY_RENDER_FUNCS + VESSEL_LIGHTING + VESSEL_SAMPLE_MASK_WGSL + /* wgsl */ `
+  return CONTINUUM_CORE_WGSL + FRAME_WGSL + ATMO_CORE_WGSL + SKY_RENDER_FUNCS + VESSEL_LIGHTING + /* wgsl */ `
 const TV_CREW_SPLAT_SAMPLES: u32 = ${safeSamples}u;
 const TV_CREW_SPLAT_MASK_ALL: u32 = ${sampleMaskAll}u;
 
@@ -6642,7 +6635,8 @@ struct DeckCrewSplatOut {
   @location(0) world: vec3f,
   @location(1) color: vec3f,
   @location(2) uv: vec2f,
-  @location(3) @interpolate(flat) fadeShare: f32,
+  // The band's share (of 2047; 2047 is the whole splat) and the body's seed, as tvCrewFS reads them.
+  @location(3) @interpolate(flat) fade: vec2u,
   @location(4) @interpolate(flat) seatedFlag: u32,
 };
 
@@ -6692,7 +6686,8 @@ fn humanSilhouetteInside(p: vec2f, isSeated: bool) -> bool {
   o.world = worldP;
   o.color = s1.rgb;
   o.uv = uv;
-  o.fadeShare = s2.w;
+  let fadeWord = u32(max(round(s2.w), 0.0));
+  o.fade = vec2u(fadeWord & 0x7FFu, fadeWord >> 11u);
   o.seatedFlag = isSeated;
   return o;
 }
@@ -6716,10 +6711,11 @@ struct DeckCrewSplatFragOut {
       if (humanSilhouetteInside(puv, isSeated)) { silMask |= (1u << s); }
     }
   }
+  // Exactly the samples the mesh's tvCrewFS gives up; whole past the band.
   let fadeMask = select(
-    vesselCrownSamples(in.fadeShare, in.pos.xy, TV_CREW_SPLAT_SAMPLES),
+    continuumSamples(f32(in.fade.x) / 2047.0, in.pos.xy, TV_CREW_SPLAT_SAMPLES, in.fade.y),
     TV_CREW_SPLAT_MASK_ALL,
-    in.fadeShare >= 0.999,
+    in.fade.x >= 2047u,
   );
   let mask = silMask & fadeMask;
   let viewDir = normalize(F.camPos.xyz - in.world);
@@ -6904,6 +6900,7 @@ export async function createTradeVessels({
   const U_STORAGE = GPUBufferUsage.STORAGE ?? 128;
   const U_INDIRECT = GPUBufferUsage.INDIRECT ?? 256;
   const U_COPY_DST = GPUBufferUsage.COPY_DST ?? 8;
+  const U_COPY_SRC = GPUBufferUsage.COPY_SRC ?? 4;
 
   const instanceBuffers = archGPUs.map((_, i) => device.createBuffer({
     label: `trade vessel instances ${i}`,
@@ -6921,10 +6918,13 @@ export async function createTradeVessels({
   selectParamsCtrl[1] = MAX_CONT_TRIS;
   selectParamsCtrl[2] = samples;
   selectParamsCtrl[3] = MAX_TRADE_VESSELS;
-  selectParamsFloats[0] = VESSEL_ERROR_PIXELS;
-  selectParamsFloats[1] = VESSEL_SPLAT_PIXELS;
-  selectParamsFloats[2] = VESSEL_MIN_PIXELS;
-  selectParamsFloats[3] = VESSEL_CONTINUUM_BAND;
+  // The cut follows the scene's one pixel-error scalar: rewritten with the per-frame upload (writeSelectParams).
+  const writeSelectParams = () => {
+    const coarsening = continuumCoarsening();
+    selectParamsFloats[0] = VESSEL_ERROR_PIXELS * coarsening;
+    selectParamsFloats[1] = coarsening;
+  };
+  writeSelectParams();
 
   let totalSteps = 0, totalContIndices = 0, totalStateVerts = 0, totalColVerts = 0;
   for (let a = 0; a < archGPUs.length; a++) {
@@ -7013,7 +7013,8 @@ export async function createTradeVessels({
   const nearOutBuffer = device.createBuffer({ label: 'trade vessel near out', size: 28 * NEAR_SLICE_BYTES, usage: U_STORAGE | U_VERTEX });
   const contListBuffer = device.createBuffer({ label: 'trade vessel cont list', size: 2 * TRADE_CONT_HALF_TRIS * 16, usage: U_STORAGE });
   const splatListBuffer = device.createBuffer({ label: 'trade vessel splat list', size: MAX_TRADE_VESSELS * 2 * 16, usage: U_STORAGE });
-  const indirectBuffer = device.createBuffer({ label: 'trade vessel indirect', size: 156 * 4, usage: U_STORAGE | U_INDIRECT | U_COPY_DST });
+  // COPY_SRC: the continuum census reads the draws' own arguments (continuumDraws below).
+  const indirectBuffer = device.createBuffer({ label: 'trade vessel indirect', size: 156 * 4, usage: U_STORAGE | U_INDIRECT | U_COPY_DST | U_COPY_SRC });
 
   const waveParamsBuf = new ArrayBuffer(32);
   const waveParamsU32 = new Uint32Array(waveParamsBuf, 0, 4);
@@ -7287,7 +7288,7 @@ export async function createTradeVessels({
   const crewLooksBuffer = device.createBuffer({ label: 'trade deck crew looks', size: crewLooksF32.byteLength, usage: U_STORAGE | U_COPY_DST });
   const crewBodiesBuffer = device.createBuffer({ label: 'trade deck crew bodies', size: DECK_CREW_BUCKETS * CREW_BODY_SLICE_BYTES, usage: U_STORAGE });
   const crewSplatListBuffer = device.createBuffer({ label: 'trade deck crew splats', size: DECK_CREW_MAX_TOTAL * 3 * 16, usage: U_STORAGE });
-  const crewIndirectBuffer = device.createBuffer({ label: 'trade deck crew indirect', size: DECK_CREW_DRAW_WORDS * 4, usage: U_STORAGE | U_INDIRECT | U_COPY_DST });
+  const crewIndirectBuffer = device.createBuffer({ label: 'trade deck crew indirect', size: DECK_CREW_DRAW_WORDS * 4, usage: U_STORAGE | U_INDIRECT | U_COPY_DST | U_COPY_SRC });
 
   const makeWaveBindGroups = (curResources = resources) => {
     if (!wavePipe) return null;
@@ -9043,7 +9044,8 @@ export async function createTradeVessels({
       selectParamsCtrl[1] = MAX_CONT_TRIS;
       selectParamsCtrl[2] = samples;
       selectParamsCtrl[3] = MAX_TRADE_VESSELS;
-      device.queue.writeBuffer(selectUniformBuffer, 0, selectParamsCtrl);
+      writeSelectParams();
+      device.queue.writeBuffer(selectUniformBuffer, 0, selectParamsBuf, 0, 32);
       waveParamsU32[0] = activeWaveVesselCount;
       waveParamsU32[1] = MAX_TRADE_VESSELS;
       waveParamsU32[2] = oceanBridge?.dispView ? 1 : 0;
@@ -9572,6 +9574,26 @@ export async function createTradeVessels({
         pass.setBindGroup(1, deckCrewGPU.splatGroup1);
         pass.drawIndirect(crewIndirectBuffer, 240);
       }
+    },
+    // The indirect draws draw() submits in the main scene pass this frame, for the continuum census
+    // (js/continuum-census.js). Damaged ships (drawDamaged) and the pre-selection fallback are sized on the CPU.
+    continuumDraws() {
+      const draws = [];
+      if (gpuSelectionEncoded && continuumPipe && splatPipe && totalIntact > 0) {
+        draws.push(
+          { buffer: indirectBuffer, offset: 14 * 20, records: TRADE_VESSEL_ARCHETYPES, stride: 5 }, // whole ships, solid
+          { buffer: indirectBuffer, offset: 21 * 20, records: TRADE_VESSEL_ARCHETYPES, stride: 5 }, // whole ships, band
+          { buffer: indirectBuffer, offset: 140 * 4, records: 3, stride: 4 }, // continuum solid, continuum band, splats
+        );
+      }
+      if (crewEncoded && deckCrewGPU && activeDeckSoulCount > 0) {
+        draws.push(
+          { buffer: crewIndirectBuffer, offset: 0, records: DECK_CREW_MODELS * DECK_CREW_TIERS, stride: 5 }, // tiers, solid
+          { buffer: crewIndirectBuffer, offset: 10 * 20, records: DECK_CREW_MODELS, stride: 5 }, // mesh side of the band
+          { buffer: crewIndirectBuffer, offset: 240, records: 1, stride: 4 }, // splats
+        );
+      }
+      return draws;
     },
     drawDamaged(pass) {
       if (!damagedAssets || !vessels.length) return;

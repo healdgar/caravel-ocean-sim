@@ -142,11 +142,13 @@ export function createSceneryCull({ device, pipeline, frameUBO, label, capacity,
   // Instance counts start at zero each frame, and the cull counts them back up.
   const drawArguments = new Uint32Array(buckets * parts * DRAW_WORDS);
   for (let bucket = 0; bucket < buckets; bucket++) for (let part = 0; part < parts; part++) drawArguments[(bucket * parts + part) * DRAW_WORDS] = vertexCounts[part][bucket];
-  const draws = storage('draws', drawArguments.byteLength, GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_DST);
+  const draws = storage('draws', drawArguments.byteLength, GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC);
   const params = device.createBuffer({ label: `${label} params`, size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   const paramValues = new Float32Array(4);
   const emptied = new Uint32Array(capacity).fill(EMPTY_SLOT);
   device.queue.writeBuffer(groups, 0, emptied);
+  // A cull never encoded has drawn nothing (ground cover stands down when the meadow draws instead).
+  let encoded = false;
   const group = device.createBindGroup({ label: `${label} cull`, layout: pipeline.getBindGroupLayout(0), entries: [frameUBO, params, instances, groups, shown, draws, previous, firstBuffer].map((buffer, binding) => ({ binding, resource: { buffer } })) });
   return {
     capacity,
@@ -170,6 +172,7 @@ export function createSceneryCull({ device, pipeline, frameUBO, label, capacity,
       device.queue.writeBuffer(params, 0, paramValues);
     },
     encode(pass) {
+      encoded = true;
       device.queue.writeBuffer(draws, 0, drawArguments);
       pass.setPipeline(pipeline); pass.setBindGroup(0, group); pass.dispatchWorkgroups(Math.ceil(capacity / 64));
     },
@@ -178,6 +181,9 @@ export function createSceneryCull({ device, pipeline, frameUBO, label, capacity,
       pass.setVertexBuffer(0, mesh); pass.setVertexBuffer(1, shown, first[bucket] * INSTANCE_BYTES, bucketCapacities[bucket] * INSTANCE_BYTES);
       pass.drawIndirect(draws, (bucket * parts + part) * DRAW_WORDS * 4);
     },
+    // Every bucket's indirect draws, each part a drawIndirect record of four words, for the continuum census
+    // (js/continuum-census.js). Shared by the city's types, the trees and the ground cover alike.
+    continuumDraws() { return encoded ? [{ buffer: draws, offset: 0, records: buckets * parts, stride: DRAW_WORDS }] : []; },
     destroy() { for (const buffer of [instances, groups, previous, shown, firstBuffer, draws, params]) buffer.destroy(); },
   };
 }

@@ -32,7 +32,7 @@ test('production forest volume integrates density, tint, escape and hit depth on
     browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||undefined,args:process.env.WEBGPU_BACKEND==='metal'?['--enable-unsafe-webgpu','--use-angle=metal','--disable-gpu-watchdog']:['--enable-unsafe-webgpu','--use-angle=swiftshader','--enable-unsafe-swiftshader','--disable-gpu-watchdog']});
     const page=await browser.newPage();await page.goto('http://127.0.0.1:'+server.address().port+'/tests/fixtures/forest-gpu.html');
     const result=await page.evaluate(async input=>{
-      const {FRAME_WGSL}=await import('/js/wgsl/common.js'),{FOREST_VERTEX_WGSL}=await import('/js/forest-scenery.js'),{FOREST_VOLUME_WGSL,createForestVolumeResources}=await import('/js/forest-volume.js');
+      const {FRAME_WGSL}=await import('/js/wgsl/common.js'),{CONTINUUM_CORE_WGSL}=await import('/js/continuum-core.js'),{FOREST_VERTEX_WGSL}=await import('/js/forest-scenery.js'),{FOREST_VOLUME_WGSL,createForestVolumeResources}=await import('/js/forest-volume.js');
       const adapter=await navigator.gpu.requestAdapter(),device=await adapter.requestDevice(),B=GPUBufferUsage,T=GPUTextureUsage,errors=[],allocated=[],textureWrites=new Map(),bufferWrites=new Map(),runtimeBuffers=[];let active=false;
       device.onuncapturederror=e=>errors.push(e.error.message);
       const shader=async code=>{const module=device.createShaderModule({code}),bad=(await module.getCompilationInfo()).messages.filter(m=>m.type==='error');if(bad.length)throw Error(bad.map(m=>m.message).join('\n'));return module;};
@@ -46,7 +46,7 @@ test('production forest volume integrates density, tint, escape and hit depth on
 // R preserves source pigment/tint for coverage recovery; G/B expose the real
 // ambient/diffuse terms passed by the production optical shader.
 fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,roughness:f32)->vec4f{return vec4f(albedo.r,ambient,diffuse,1);}
-`+FOREST_VERTEX_WGSL);
+`+CONTINUUM_CORE_WGSL+FOREST_VERTEX_WGSL);
       if(!FOREST_VERTEX_WGSL.includes(FOREST_VOLUME_WGSL))throw Error('Production shader must include the exact volume entry points');
       const pipeline=await device.createRenderPipelineAsync({layout:'auto',vertex:{module,entryPoint:'forestVolumeVS'},fragment:{module,entryPoint:'forestVolumeFS',targets:[{format:'rgba16float'}]},primitive:{topology:'triangle-list',cullMode:'back'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:4,alphaToCoverageEnabled:true}});
       const W=256,H=128,fd=new Float32Array(96);fd[0]=1/.8;fd[5]=1/.4;fd[11]=-1;fd[14]=.1;fd.set([0,10.5,10,0],16);fd.set([.8,0,0],20);fd.set([0,.4,0],24);fd.set([0,0,-1],28);fd.set([0,0,1,1],32);fd.set([W,H,1/W,1/H],36);

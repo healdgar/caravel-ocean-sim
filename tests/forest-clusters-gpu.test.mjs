@@ -97,14 +97,16 @@ for(const [region,pack,query] of [['lisbon','portugal',{view:'free',prow:0,cam:'
   });
 }
 
-test('the surveyed island keeps crown shells on its far canopy',{timeout:360000},async()=>{
+test('the surveyed island\'s far canopy is the one continuum\'s crowns, not its old shells and mass',{timeout:360000},async()=>{
   const {page,errors,requested}=await open({},'saba');
   try{
     const totals=await drawn(page);
-    assert.ok(totals['instanced forest shaded native crown shell']>0,`the far canopy keeps its look: ${JSON.stringify(totals)}`);
-    // Its far canopy is opaque already, so it is given no far crowns.
-    assert.ok(!requested.some(path=>path.includes('/crowns/')),'Saba asked for far crowns');
-    for(const label of ['forest crowns forestCrownFS','forest crowns forestCrownFadeFS'])assert.equal(totals[label]??0,0,label);
+    // Saba's far trees take the continuum every pack takes (AGENTS.md rule 3): clusters near, its own baked crowns far.
+    assert.ok(requested.some(path=>path.includes('/saba/crowns/morph.bin')),'Saba loads its own continuum crowns');
+    assert.ok((totals['forest crowns forestCrownFS']??0)>0,`far trees draw through continuum crowns: ${JSON.stringify(totals)}`);
+    // The per-family far tiers the crowns replace are not fetched or drawn.
+    assert.equal(totals['instanced forest shaded native crown shell']??0,0,`no crown shells beside the crowns: ${JSON.stringify(totals)}`);
+    for(const tier of ['/saba/mass/','/saba/middle/','/saba/volumes/','/saba/impostors/'])assert.ok(!requested.some(path=>path.includes(tier)),`Saba fetched its old far tier ${tier}`);
     for(const label of ['forestNativeOpaqueFS','forestNativeLeafFS','forestNativeLeafDepthFS'])assert.equal(totals[`instanced forest ${label}`]??0,0,`${label} must not draw beside clusters`);
     assert.deepEqual(errors,[]);
   }finally{await page.close();}

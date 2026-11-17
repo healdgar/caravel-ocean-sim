@@ -7,7 +7,7 @@ import {loadForestImpostors,createForestImpostorResources,FOREST_IMPOSTOR_WGSL} 
 import {loadForestLight,forestLightGPUBytes,FOREST_LIGHT_WGSL} from './forest-light.js';
 import {loadForestNativeLOD} from './forest-native-lod.js';
 import {loadForestClusters,createForestClusters,FOREST_CLUSTER_ASSETS,SUBTROPICAL_FOREST_CLUSTER_ASSETS,PORTUGAL_FOREST_CLUSTER_ASSETS,FOREST_CLUSTER_VERTEX_WGSL,FOREST_CLUSTER_SHADOW_WGSL} from './forest-clusters.js';
-import {loadForestCrowns,SUBTROPICAL_FOREST_CROWN_ASSETS,PORTUGAL_FOREST_CROWN_ASSETS,FOREST_CROWN_SPLAT_PIXELS,FOREST_CROWN_MIN_PIXELS} from './forest-crowns.js';
+import {loadForestCrowns,FOREST_CROWN_ASSETS,SUBTROPICAL_FOREST_CROWN_ASSETS,PORTUGAL_FOREST_CROWN_ASSETS,FOREST_CROWN_SPLAT_PIXELS,FOREST_CROWN_MIN_PIXELS} from './forest-crowns.js';
 import {loadForestWind,createForestWind,FOREST_WIND_ASSETS,SUBTROPICAL_FOREST_WIND_ASSETS,PORTUGAL_FOREST_WIND_ASSETS,FOREST_WIND_BASIS_RADIAL,FOREST_WIND_EVENT_FRIEDLANDER,FOREST_WIND_EVENT_PULSE} from './forest-wind.js';
 import {FOREST_FALL_BEARINGS,FOREST_FALL_HEIGHT_STEPS,FOREST_FALL_REST_MIN_DEG,FOREST_FALL_SECONDS,FOREST_LONG_FALLEN,FOREST_WOUND_BEARINGS,buildForestTrunkGridAsync,forestStrikesFromSave,forestStrikesToSave,forestTrunkShape,reapplyForestStrikes,strikeForestRoot,strikeForestTree} from './forest-trunks.js';
 import {FOREST_SURFACE_ASSETS,SUBTROPICAL_FOREST_SURFACE_ASSETS,PORTUGAL_FOREST_SURFACE_ASSETS,chooseForestSurfaceCodec,createForestSurfaceTextures,forestMaterialOptics,loadForestSurfaceSet} from './forest-surfaces.js';
@@ -651,7 +651,8 @@ struct ForestVertex {
  @location(7)canopyAO:f32,
  @location(8)@interpolate(flat)coverageSeed:u32,
 };
-fn forestCoverageHash(value:u32)->u32{var x=value;x=(x^(x>>16u))*0x7feb352du;x=(x^(x>>15u))*0x846ca68bu;return x^(x>>16u);}
+// The continuum's own hash (js/continuum-core.js), which the land's module carries once for every family in it.
+fn forestCoverageHash(value:u32)->u32{return continuumHash(value);}
 fn forestLeafSampleMask(alpha:f32,seed:u32,pixel:vec2f)->u32{
  let samples=select(4u,forestBin.w,forestBin.w>0u);let p=vec2u(pixel);
  let random=forestCoverageHash(seed^forestCoverageHash(p.x)^forestCoverageHash(p.y*0x9e3779b9u));
@@ -662,17 +663,10 @@ fn forestLeafSampleMask(alpha:f32,seed:u32,pixel:vec2f)->u32{
  let bits=(1u<<count)-1u;let rotation=(random>>16u)%samples;
  return ((bits<<rotation)|(bits>>(samples-rotation)))&((1u<<samples)-1u);
 }
-// The samples of a pixel that a tree's far crown takes while it comes in over its own leaves. The crown
-// draws these and the leaves give exactly these up, so between them each sample is drawn once and the
-// change needs no blending. Every pixel rounds the share its own way, which spreads the change evenly.
-fn forestCrownSamples(share:f32,pixel:vec2f)->u32{
- if(share<=0.){return 0u;}
- let samples=select(4u,forestBin.w,forestBin.w>0u);let p=vec2u(pixel);
- let random=forestCoverageHash(p.x^forestCoverageHash(p.y*0x9e3779b9u+0x51ed270bu));
- let count=min(samples,u32(floor(share*f32(samples)+f32(random&65535u)/65536.)));
- let bits=(1u<<count)-1u;let rotation=(random>>16u)%samples;
- return ((bits<<rotation)|(bits>>(samples-rotation)))&((1u<<samples)-1u);
-}
+// The samples of a pixel that a tree's far crown takes while it comes in over its own leaves: the continuum's
+// one split (continuumSamples) with seed 0, the forest's own pattern. The crown draws these and the leaves give
+// exactly these up, so between them each sample is drawn once and the change needs no blending.
+fn forestCrownSamples(share:f32,pixel:vec2f)->u32{return continuumSamples(share,pixel,select(4u,forestBin.w,forestBin.w>0u),0u);}
 // Three motions at three speeds. The whole tree bends with height, branches bob by their reach from
 // the trunk, and leaves flutter. Gust fronts roll downwind across the forest at the wind's own speed.
 fn forestWind(r:ForestRoot,local:vec3f,model:vec3f,flutterWeight:f32)->vec3f{
@@ -1242,19 +1236,21 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
   // broad a tree may stand on screen as a crown, in leaf errors.
   const crownQuery=typeof location==='undefined'?new URLSearchParams():new URLSearchParams(location.search);
   const crownsWanted=crownQuery.get('forestCrowns')!=='0',crownChange={};
-  for(const [key,name]of [['nearest','forestCrownNearest'],['limit','forestCrownLimit'],['widest','forestCrownWidest'],['splatPixels','forestCrownSplat'],['minPixels','forestCrownMin']]){const value=Number(crownQuery.get(name));if(crownQuery.has(name)&&value>=0)crownChange[key]=value;}
+  for(const [key,name]of [['nearest','forestCrownNearest'],['limit','forestCrownLimit'],['widest','forestCrownWidest']]){const value=Number(crownQuery.get(name));if(crownQuery.has(name)&&value>=0)crownChange[key]=value;}
   try{
     const volumeOff=typeof location!=='undefined'&&new URLSearchParams(location.search).get('forestVolume')==='off';
     const volumeForce=typeof location!=='undefined'&&new URLSearchParams(location.search).get('forestVolume')==='force';
     const isSubtropicalPack=m.prototypes.some(p=>p.species==='royal_palm'||p.species==='ceiba'||p.species==='mangrove');
     const isCohortPack=m.prototypes.some(p=>Boolean(p.cohort));
-    if(pack.volumes&&((!isSubtropicalPack&&!isCohortPack)||volumeForce)&&middle?.woodIndices&&mode==='auto'&&impostorMode!=='force'&&!volumeOff){
+    // Every pack's far trees are the one continuum's crowns (AGENTS.md rule 3). The volumes and their crown
+    // shells were Saba's own far tier; they stand only where the address forces them, for inspection.
+    if(pack.volumes&&volumeForce&&middle?.woodIndices&&mode==='auto'&&impostorMode!=='force'&&!volumeOff){
       volume=createForestVolumeResources({device,pack:pack.volumes});
       volumeShell=middle.reduced&&new URLSearchParams(typeof location==='undefined'?'':location.search).get('forestVolume')!=='ray';shellIndices=middle.indices;
       middle={...middle,indices:middle.woodIndices,prototypes:middle.woodPrototypes.map((p,id)=>({...p,lodErrorMetres:isSubtropicalPack?0.045:(volumeShell?volume.prototypes[id].samplingFootprintMetres+p.simplification.reportedErrorMetres:volume.samplingFootprints[id])}))};
     }
     if(pack.impostors&&impostorMode!=='off'&&!volume)atlas=await createForestImpostorResources({device,shader,pack:pack.impostors,forest:m});
-    const nativeMid=Boolean(nativeLod&&(middle||isSubtropicalPack||isCohortPack)&&!atlas),commandSlots=nativeMid?8:4,visibleTiers=nativeMid?4:3;
+    const nativeMid=Boolean(nativeLod&&!atlas),commandSlots=nativeMid?8:4,visibleTiers=nativeMid?4:3;
     const samplerOptions={minFilter:'linear',magFilter:'linear',mipmapFilter:'linear',maxAnisotropy:4};
     const nativeSampler=device.createSampler({...samplerOptions,addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge'});
     const nativeRepeatSampler=device.createSampler({...samplerOptions,addressModeU:'repeat',addressModeV:'repeat'});
@@ -1306,7 +1302,7 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     }
     const prototypes=make(new Uint8Array(meta),B.STORAGE,'forest prototype bounds and ranges');
     const visible=make(new Uint32Array(maxRootCapacity*visibleTiers),B.STORAGE,'forest GPU visible root IDs');
-    const commands=make(draws,B.STORAGE|B.INDIRECT,'forest GPU indirect draws');
+    const commands=make(draws,B.STORAGE|B.INDIRECT|B.COPY_SRC,'forest GPU indirect draws');
     const previous=make(new Uint32Array(maxRootCapacity),B.STORAGE,'forest GPU previous LOD');
     const modeIndex=['auto','near','far'].indexOf(mode);
     const deferred=(Boolean(middle&&volume)||atlas?.fullSphere)&&mode==='auto'&&!pack.vertices;
@@ -1440,9 +1436,10 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
           }
         }
         if(clusterSource){
-          // Saba's far trees wear the crown shells of its volumes; the other packs' wear crowns baked from
-          // their own leaves. Without them the leaves draw as far as they did before, so a failure only costs speed.
-          const crownAssets=volumeShell?null:isSubtropicalPack?SUBTROPICAL_FOREST_CROWN_ASSETS:isCohortPack?PORTUGAL_FOREST_CROWN_ASSETS:null;
+          // Far trees wear crowns baked from their own leaves (js/forest-crowns.js), Saba's as every other pack's,
+          // unless the address forces the old volume shells. Without crowns the leaves draw as far as they did
+          // before, so a failure only costs speed.
+          const crownAssets=volumeShell?null:isSubtropicalPack?SUBTROPICAL_FOREST_CROWN_ASSETS:isCohortPack?PORTUGAL_FOREST_CROWN_ASSETS:FOREST_CROWN_ASSETS;
           const crownSource=crownAssets&&crownsWanted?await loadForestCrowns({assets:crownAssets,signal:abort.signal}).catch(error=>{if(abort.signal.aborted)throw error;stats.crowns={loaded:false,error:error.message};return null;}):null;forestLoadAbort(abort.signal);
           const windWanted=typeof location==='undefined'||new URLSearchParams(location.search).get('forestWind')!=='0';
           const windAssets=isSubtropicalPack?SUBTROPICAL_FOREST_WIND_ASSETS:isCohortPack?PORTUGAL_FOREST_WIND_ASSETS:FOREST_WIND_ASSETS;
@@ -1602,7 +1599,33 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       },
       setPixelError(next){if(!destroyed&&Number.isFinite(next)&&next>0&&Math.abs(next-currentNearPixels)>1e-4){currentNearPixels=next;stats.nearPixels=next;device.queue.writeBuffer(parameters,0,new Float32Array([activeRootCount,m.prototypes.length,next,nativeStatus.resident?modeIndex:effectiveModeIndex]));}},
       encode(pass){if(!activeRootCount)return;pass.setPipeline(reset);pass.setBindGroup(0,resetGroup);pass.dispatchWorkgroups(Math.ceil(m.prototypes.length*commandSlots/64));pass.setPipeline(cull);pass.setBindGroup(0,cullGroup);pass.dispatchWorkgroups(Math.ceil(activeRootCount/64));wind?.encode(pass);clusters?.encode(pass);},
-      drawOpaque(pass){drawMiddle(pass);draw(pass,opaque,opaqueGroup,opaqueCloud,false);clusters?.drawOpaque(pass);if(volumeShell)drawVolumes(pass);},drawCutout(pass){draw(pass,leafDepth,leafDepthGroup,null,true,'leafDepth');draw(pass,leaf,leafGroup,leafCloud,true);clusters?.drawLeafDepth(pass);clusters?.drawLeaves(pass);if(!volumeShell)drawVolumes(pass);drawImpostors(pass);},
+      drawOpaque(pass){drawMiddle(pass);draw(pass,opaque,opaqueGroup,opaqueCloud,false);clusters?.drawOpaque(pass);if(volumeShell)drawVolumes(pass);},
+      // The indirect draws drawOpaque and drawCutout submit, for the continuum census (js/continuum-census.js). Both
+      // buffers lay records five words apart, whichever draw call reads them; leaves drawn for depth and again to
+      // shade are listed twice, because they are submitted twice.
+      continuumDraws(){
+        if(destroyed)return [];
+        const out=[],P=m.prototypes.length,record=(buffer,at,records=1)=>{if(records>0)out.push({buffer,offset:at*20,records,stride:5});};
+        if(middlePipeline)for(const p of m.prototypes)record(commands,p.id*4+2);
+        const nativeDraws=cutout=>{
+          if(!native||(clusters&&(cutout||middle||clusters.crowns)))return;
+          for(const p of m.prototypes){
+            for(const slot of clusters?[2]:cutout?[1]:middle?[0]:[0,2])if(p[['wood','leaf','far'][slot]].indexCount)record(commands,p.id*4+slot);
+            if(nativeMid&&!clusters){record(commands,P*4+p.id*4+(cutout?1:0));record(commands,P*4+p.id*4+(cutout?3:2));}
+          }
+        };
+        nativeDraws(false);nativeDraws(true);nativeDraws(true);
+        if(volumePipeline)for(const p of m.prototypes)record(commands,p.id*4+3);
+        if(impostor)for(const p of m.prototypes)record(commands,p.id*4+3);
+        if(clusters?.draws){
+          // Per species: camera wood and leaves, then the shadow map's two, then the crowns' lists (js/forest-clusters.js).
+          record(clusters.draws,0,P*2);
+          for(const p of m.prototypes)record(clusters.draws,p.id*2+1);
+          if(clusters.crowns)record(clusters.draws,P*4,clusters.draws.size/20-P*4);
+        }
+        return out;
+      },
+      drawCutout(pass){draw(pass,leafDepth,leafDepthGroup,null,true,'leafDepth');draw(pass,leaf,leafGroup,leafCloud,true);clusters?.drawLeafDepth(pass);clusters?.drawLeaves(pass);if(!volumeShell)drawVolumes(pass);drawImpostors(pass);},
       drawShadow(pass){
         if(clusters){clusters.drawShadow(pass);return;}
         if(!native||!shadowPipe)return;

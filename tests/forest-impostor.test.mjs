@@ -79,7 +79,7 @@ test('actual GPU atlas shader reconstructs front depth rather than writing the b
       ?['--enable-unsafe-webgpu','--use-angle=metal','--disable-gpu-watchdog']:['--enable-unsafe-webgpu','--use-angle=swiftshader','--enable-unsafe-swiftshader','--disable-gpu-watchdog']});
     const page=await browser.newPage();await page.route('**/__forest-depth',r=>r.fulfill({contentType:'text/html',body:'<!doctype html>'}));await page.goto('http://127.0.0.1:'+server.address().port+'/__forest-depth');
     const fixture=atlasFixture(),result=await page.evaluate(async({forest,manifest})=>{
-      const {FRAME_WGSL}=await import('/js/wgsl/common.js'),{FOREST_VERTEX_WGSL}=await import('/js/forest-scenery.js'),{createForestImpostorResources}=await import('/js/forest-impostor.js');
+      const {FRAME_WGSL}=await import('/js/wgsl/common.js'),{CONTINUUM_CORE_WGSL}=await import('/js/continuum-core.js'),{FOREST_VERTEX_WGSL}=await import('/js/forest-scenery.js'),{createForestImpostorResources}=await import('/js/forest-impostor.js');
       const device=await(await navigator.gpu.requestAdapter()).requestDevice(),errors=[];device.onuncapturederror=e=>errors.push(e.error.message);
       const shader=async(code,label)=>{const m=device.createShaderModule({code,label});errors.push(...(await m.getCompilationInfo()).messages.filter(e=>e.type==='error').map(e=>e.message));return m;};
       const half=value=>{const f=new Float32Array([value]),bits=new Uint32Array(f.buffer)[0],sign=(bits>>>16)&32768,e=((bits>>>23)&255)-112,m=bits&8388607;
@@ -92,7 +92,7 @@ test('actual GPU atlas shader reconstructs front depth rather than writing the b
         }
       }
       const atlas=await createForestImpostorResources({device,shader,forest,pack:{manifest,streams:[{albedo:pigment.buffer,normalDepth:surface.buffer}]}});
-      const code=FRAME_WGSL+'\n@group(0)@binding(0)var<uniform>F:Frame;\nfn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,roughness:f32)->vec4f{return vec4f(albedo,1);}\n'+FOREST_VERTEX_WGSL;
+      const code=FRAME_WGSL+'\n@group(0)@binding(0)var<uniform>F:Frame;\nfn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,roughness:f32)->vec4f{return vec4f(albedo,1);}\n'+CONTINUUM_CORE_WGSL+FOREST_VERTEX_WGSL;
       const module=await shader(code,'actual forest impostor depth witness'),pipeline=await device.createRenderPipelineAsync({layout:'auto',vertex:{module,entryPoint:'forestImpostorVS'},fragment:{module,entryPoint:'forestImpostorFS',targets:[{format:'rgba16float'}]},
         primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'}});
       const B=GPUBufferUsage,T=GPUTextureUsage,buffer=(data,usage)=>{const b=device.createBuffer({size:data.byteLength,usage:usage|B.COPY_DST});device.queue.writeBuffer(b,0,data);return b;};

@@ -15,7 +15,7 @@ test('native wood, leaves and generated middle clip buried roots at the instance
     const page=await browser.newPage();await page.route('**/__forest_root_visibility',route=>route.fulfill({contentType:'text/html',body:'<!doctype html>'}));
     await page.goto('http://127.0.0.1:'+server.address().port+'/__forest_root_visibility');
     const result=await page.evaluate(async()=>{
-      const {FRAME_WGSL}=await import('/js/wgsl/common.js');
+      const {FRAME_WGSL}=await import('/js/wgsl/common.js'),{CONTINUUM_CORE_WGSL}=await import('/js/continuum-core.js');
       const {createForestLeafSurfaces,FOREST_VERTEX_WGSL,FOREST_VERTEX_LAYOUT,FOREST_MIDDLE_VERTEX_LAYOUT}=await import('/js/forest-scenery.js');
       const {forestLightGPUBytes}=await import('/js/forest-light.js');
       const adapter=await navigator.gpu.requestAdapter(),device=await adapter.requestDevice(),B=GPUBufferUsage,T=GPUTextureUsage,S=GPUShaderStage,errors=[],buffers=[],textures=[];
@@ -35,7 +35,7 @@ test('native wood, leaves and generated middle clip buried roots at the instance
       const surfaces=await createForestLeafSurfaces({device,shader,pack:{manifest:{prototypes:[{nativeMaterials}]},textures:sourceTextures}});
       const module=await shader(FRAME_WGSL+`@group(0)@binding(0)var<uniform>F:Frame;
 fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,roughness:f32)->vec4f{return vec4f(albedo,1);}
-`+FOREST_VERTEX_WGSL,'production forest collar visibility');
+`+CONTINUUM_CORE_WGSL+FOREST_VERTEX_WGSL,'production forest collar visibility');
       const W=128,H=128,fd=new Float32Array(96),frame=make(fd,B.UNIFORM,'collar frame'),rootData=new Float32Array([7,10,2,1,0,1,1,1,0,0,-1,0]),roots=make(rootData,B.STORAGE,'collar instance'),visible=make(new Uint32Array([0]),B.STORAGE,'collar visible ID'),bin=make(new Uint32Array([0,0,2,0]),B.UNIFORM,'collar bin'),materials=make(surfaces.optics,B.STORAGE,'collar exact source optics');
       const layout0=device.createBindGroupLayout({entries:[{binding:0,visibility:S.VERTEX|S.FRAGMENT,buffer:{type:'uniform'}}]}),layout1=device.createBindGroupLayout({entries:[]});
       const entries=[{binding:0,visibility:S.VERTEX,buffer:{type:'read-only-storage'}},{binding:1,visibility:S.VERTEX,buffer:{type:'read-only-storage'}},{binding:2,visibility:S.VERTEX|S.FRAGMENT,buffer:{type:'uniform'}},

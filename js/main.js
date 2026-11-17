@@ -69,6 +69,8 @@ import { createWorldDebugUI } from './debug-world.js';
 import { deepSeaColour } from './sea-colour.js';
 import { measureIsolatedGPUStage } from './gpu-benchmark.js';
 import { createAdaptiveResolution, createAdaptivePolygons, POLYGON_COMFORT } from './resolution.js';
+import { setContinuumPixelError } from './continuum-core.js';
+import { createContinuumCensus } from './continuum-census.js';
 import { bindVesselModel, copyVessel, createVesselProbeState, acceptVesselProbe, stepVessel } from './vessels.js';
 import { createFollower, steerFollower, commandFriendlyFleet, stepVesselCombatAI } from './follower.js';
 import {readyFleetModels,fleetFromSearch,fleetToSearch,fleetFormation,broadsideFormation,fleetModelCode,fleetViewBounds,createFleetWakePool,validateFleetDevice,normalizeVesselFaction,MAX_FOLLOWERS} from './fleet.js';
@@ -913,7 +915,7 @@ async function main() {
     coastalGroup=terrain.waterGroup(coastalOcean.pipe);
     coastalDepthGroup=OCEAN_DEPTH?terrain.waterGroup(coastalOcean.depthPipe):null;
     if(typeof anchorEnvironment==='object'&&anchorEnvironment)anchorEnvironment.terrain=terrain;
-    terrain.setPixelError?.(polygons.pixelError);
+    terrain.setPixelError?.(setContinuumPixelError(polygons.pixelError));
     envFull=true;
     return terrain;
   }
@@ -989,7 +991,7 @@ async function main() {
     {initial:Math.sqrt(AUTO_START_PIXELS/Math.max(1,canvas.clientWidth*canvas.clientHeight*(window.devicePixelRatio||1)**2))});
   const fixedPolygons = fixedResolution && !qs.has('polygons');
   const polygons = createAdaptivePolygons(fixedPolygons ? 'fixed' : qs.get('polygons') || 'auto', { minimum: 0.35 });
-  terrain?.setPixelError?.(polygons.pixelError);
+  terrain?.setPixelError?.(setContinuumPixelError(polygons.pixelError));
   let nativeWidth = 0, nativeHeight = 0;
   let colorMS, depthMS, hdrTex, bloomTex, waterCopy, hdrView;
   let submergedColor,aboveWaterColor,submergedDepth;
@@ -1110,6 +1112,9 @@ async function main() {
   // GPU timing
   // --------------------------------------------------------------------------------------
   const profiler=createGPUProfiler(device,qs.get('profile')==='1');
+  // Submitted triangles against the one scene budget (AGENTS.md rule 3, item 5), counted on the GPU; ?census=1 or the profile panel.
+  const continuumCensus=qs.get('census')==='1'||qs.get('profile')==='1'?createContinuumCensus(device):null;
+  window.oceanContinuumCensus=continuumCensus;
   let profileSummary='Waiting for frame timing…';
   const performancePanel=document.createElement('section');performancePanel.id='performance-panel';
   performancePanel.hidden=qs.get('profile')!=='1'||matchMedia('(max-width:900px), (pointer:coarse)').matches;
@@ -4114,7 +4119,7 @@ async function main() {
   polygonInput.value=polygons.mode;polygonInput.disabled=fixedPolygons;
   const polygonStatus=document.createElement('p');polygonStatus.id='polygon-status';
   const updatePolygonStatus=()=>{polygonStatus.textContent=`${polygons.mode==='fixed'?'fixed by URL':Math.round(polygons.scale*100)+'% budget'} · ${polygons.pixelError.toFixed(1)} px LOD threshold${polygons.mode==='auto'?' · target '+polygons.targetFPS+' FPS':''}`;};
-  polygonInput.addEventListener('change',()=>{polygons.setMode(polygonInput.value);terrain?.setPixelError?.(polygons.pixelError);updatePolygonStatus();});
+  polygonInput.addEventListener('change',()=>{polygons.setMode(polygonInput.value);terrain?.setPixelError?.(setContinuumPixelError(polygons.pixelError));updatePolygonStatus();});
   polygonLabel.append(polygonInput);
   seaBody.append(polygonLabel,polygonStatus);
   const neuralModeLabel=document.createElement('label');neuralModeLabel.className='resolution-control';neuralModeLabel.textContent='Neural light mode';
@@ -5226,7 +5231,7 @@ async function main() {
     // wait until the image is at half size, and come back before any sharpness does.
     const resChanged = resolution.sample(elapsed,!document.hidden,frameWorkMs,{mayRaise:polygons.mode!=='auto'||polygons.scale>=POLYGON_COMFORT,mayLower:!polygons.trying});
     if(resChanged)polygons.reset();
-    if(polygons.sample(elapsed,!document.hidden,frameWorkMs,{mayLower:!resolution.trying,mayLowerFurther:resolution.mode!=='auto'||resolution.scale<=POLYGONS_YIELD_AT}))terrain?.setPixelError?.(polygons.pixelError);
+    if(polygons.sample(elapsed,!document.hidden,frameWorkMs,{mayLower:!resolution.trying,mayLowerFurther:resolution.mode!=='auto'||resolution.scale<=POLYGONS_YIELD_AT}))terrain?.setPixelError?.(setContinuumPixelError(polygons.pixelError));
     resize();
     let camDt = Math.min(0.1, elapsed);
     last = now;
@@ -5235,7 +5240,7 @@ async function main() {
       const fps = fpsN / fpsT;
       hudFps.textContent = `${fps.toFixed(0)} fps  ${(1000 / fps).toFixed(2)} ms` +
         (profiler.detailed ? `  |  GPU window ${profiler.totalMs.toFixed(2)} ms` : '') + `  |  ${nodeCount} nodes  ${W}x${H}`;
-      profileSummary=`${fps.toFixed(1)} fps · ${(1000/fps).toFixed(1)} ms/frame\n${W} × ${H} pixels · DPR ${window.devicePixelRatio||1}\nResolution: ${resolution.mode} · ${Math.round(resolution.scale*100)}%${resolution.mode==='auto'?' · target '+resolution.targetFPS+' FPS':''}\nPolygons: ${polygons.mode} · ${Math.round(polygons.scale*100)}% · ${polygons.pixelError.toFixed(1)} px\nMain thread: ${frameStages.text()}\nCPU frame work: ${frameWorkMs.toFixed(2)} ms\nOcean nodes: ${nodeCount} · Active vessels: ${1+(followerEnabled?vessels.length-1:0)}\nOcean visibility: ${OCEAN_DEPTH?'depth first':'inline'}`;
+      profileSummary=`${fps.toFixed(1)} fps · ${(1000/fps).toFixed(1)} ms/frame\n${W} × ${H} pixels · DPR ${window.devicePixelRatio||1}\nResolution: ${resolution.mode} · ${Math.round(resolution.scale*100)}%${resolution.mode==='auto'?' · target '+resolution.targetFPS+' FPS':''}\nPolygons: ${polygons.mode} · ${Math.round(polygons.scale*100)}% · ${polygons.pixelError.toFixed(1)} px${continuumCensus?.latest?`\nTriangles: ${(continuumCensus.latest.total/1e6).toFixed(2)}M of ${(continuumCensus.latest.budget/1e6).toFixed(1)}M · `+Object.entries(continuumCensus.latest.families).filter(([,n])=>n>0).map(([name,n])=>`${name} ${n>=1e5?(n/1e6).toFixed(2)+'M':Math.round(n/1e3)+'k'}`).join(' · '):''}\nMain thread: ${frameStages.text()}\nCPU frame work: ${frameWorkMs.toFixed(2)} ms\nOcean nodes: ${nodeCount} · Active vessels: ${1+(followerEnabled?vessels.length-1:0)}\nOcean visibility: ${OCEAN_DEPTH?'depth first':'inline'}`;
       if(!performancePanel.hidden){performanceSummary.textContent=profileSummary;profilePanel.textContent=profiler.text();}
       updateResolutionStatus();
       updatePolygonStatus();
@@ -5744,6 +5749,7 @@ async function main() {
     const doAudio=sceneAudio.enabled&&sceneAudio.ready&&!document.hidden&&!audioPending&&boat.showProw&&boat.effects!==false&&(frameIndex&7)===0;
     const audioRevision=boat.revision,audioEpoch=hullContactProbe.epoch,audioRequestedAt=performance.now(),audioSimTime=simTime;
     if(doAudio){enc.copyBufferToBuffer(interaction.contacts,0,audioRead,0,72*64);hullContactProbe.copy(enc,frameIndex);}
+    continuumCensus?.encode(enc,terrain?.continuumSources?.()??[]);
     const doTs=profiler.resolve(enc);
     let readBuf = null;
     if (shotName && shotIdx < shotSeq && frameIndex >= shotFrames + shotIdx) {
@@ -5754,6 +5760,7 @@ async function main() {
     }
     submitList[0] = enc.finish();
     device.queue.submit(submitList);
+    continuumCensus?.afterSubmit();
     if (ranSpectrum) needSpectrum = false;
     foamFirst = false;
     if (ranEnvFull) envFull = false;

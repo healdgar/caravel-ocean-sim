@@ -5,6 +5,7 @@
 // one waits twice as long, so a settled scene stops asking.
 // A device that needs seconds per frame is the one most in need of reduction, so only
 // a pause longer than this counts as an interruption. Hidden tabs are reported separately.
+import { CONTINUUM_BASE_PIXEL_ERROR } from './continuum-core.js';
 const ADAPTIVE_FRAME_LIMIT = 8;
 // Normally judge at least a dozen frames, but do not wait a minute to see that
 // frames are taking seconds: three of them over four seconds are enough.
@@ -129,7 +130,7 @@ const POLYGON_MODE_ALIASES = Object.freeze({
 // `minimum` is how far the governor may lower the budget by itself. A budget the player or the address
 // bar chose is given as chosen, down to the least the game can draw with.
 const POLYGON_CHOSEN_MINIMUM = 0.06;
-export function createAdaptivePolygons(initialMode = 'auto', { basePixelError = 3, minimum = POLYGON_CHOSEN_MINIMUM, targetFPS = 60 } = {}) {
+export function createAdaptivePolygons(initialMode = 'auto', { basePixelError = CONTINUUM_BASE_PIXEL_ERROR, minimum = POLYGON_CHOSEN_MINIMUM, targetFPS = 60 } = {}) {
   let mode = POLYGON_MODE_ALIASES[initialMode] ?? 'auto';
   let scale = mode === 'auto' || mode === 'native' || mode === 'fixed' ? 1 : Number(mode);
   const samples = new Float64Array(240), workSamples = new Float64Array(240);

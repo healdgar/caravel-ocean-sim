@@ -16,7 +16,12 @@ export const FOREST_CROWN_MIN_PIXELS = CONTINUUM_MIN_PIXELS;
 const CROWN_VERTEX_WORDS = 5;
 
 // Literal paths: build.mjs finds what to publish by reading them from the source.
-// Saba has no entry. Its far trees already wear the crown shells of js/forest-volume.js.
+export const FOREST_CROWN_ASSETS = Object.freeze({
+  'manifest.json': 'assets/forest-scenery/saba/crowns/manifest.json',
+  'vertices.bin.gz': 'assets/forest-scenery/saba/crowns/vertices.bin.gz',
+  'indices.bin.gz': 'assets/forest-scenery/saba/crowns/indices.bin.gz',
+  'morph.bin.gz': 'assets/forest-scenery/saba/crowns/morph.bin.gz',
+});
 export const PORTUGAL_FOREST_CROWN_ASSETS = Object.freeze({
   'manifest.json': 'assets/forest-scenery/portugal/crowns/manifest.json',
   'vertices.bin.gz': 'assets/forest-scenery/portugal/crowns/vertices.bin.gz',

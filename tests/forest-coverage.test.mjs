@@ -16,7 +16,7 @@ test('native leaves accumulate independent sample coverage while reporting lost 
     const page=await browser.newPage();await page.route('**/__forest_coverage',route=>route.fulfill({contentType:'text/html',body:'<!doctype html>'}));
     await page.goto('http://127.0.0.1:'+server.address().port+'/__forest_coverage');
     const result=await page.evaluate(async()=>{
-      const {FRAME_WGSL}=await import('/js/wgsl/common.js');
+      const {FRAME_WGSL}=await import('/js/wgsl/common.js'),{CONTINUUM_CORE_WGSL}=await import('/js/continuum-core.js');
       const {createForestLeafSurfaces,FOREST_VERTEX_WGSL,FOREST_VERTEX_LAYOUT,FOREST_SURFACE_MIPS_WGSL}=await import('/js/forest-scenery.js');
       const {forestLightGPUBytes}=await import('/js/forest-light.js');
       const adapter=await navigator.gpu.requestAdapter(),device=await adapter.requestDevice(),errors=[],buffers=[],textures=[];
@@ -46,7 +46,7 @@ test('native leaves accumulate independent sample coverage while reporting lost 
 
       const code=FRAME_WGSL+`@group(0)@binding(0)var<uniform>F:Frame;
 fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,roughness:f32)->vec4f{return vec4f(1);}
-`+FOREST_VERTEX_WGSL,module=await shader(code,'actual native leaf coverage shader');
+`+CONTINUUM_CORE_WGSL+FOREST_VERTEX_WGSL,module=await shader(code,'actual native leaf coverage shader');
       const W=64,H=16,SCALE=4,frameData=new Float32Array(96);for(let i=0;i<4;i++)frameData[i*5]=1;frameData.set([0,0,1,1],32);
       const frame=make(frameData,B.UNIFORM),roots=make(new Float32Array([0,-2,0,1,0,1,1,1,0,0,-1,0]),B.STORAGE),visible=make(new Uint32Array([0]),B.STORAGE),bin=make(new Uint32Array([0,0,6,0]),B.UNIFORM),materials=make(surfaces.optics,B.STORAGE);
       const rows=[],indexRows=[];

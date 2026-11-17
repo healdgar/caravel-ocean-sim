@@ -16,6 +16,7 @@ test('actual mature native trees and their depth impostors preserve silhouette a
     await page.goto('http://127.0.0.1:'+server.address().port+'/__forest_appearance');
     const result=await page.evaluate(async()=>{
       const {FRAME_WGSL}=await import('/js/wgsl/common.js');
+      const {CONTINUUM_CORE_WGSL}=await import('/js/continuum-core.js');
       const {loadForestScenery,createForestLeafSurfaces,FOREST_VERTEX_WGSL,FOREST_VERTEX_LAYOUT}=await import('/js/forest-scenery.js');
       const {forestLightGPUBytes}=await import('/js/forest-light.js');
       const {createForestImpostorResources}=await import('/js/forest-impostor.js');
@@ -33,7 +34,7 @@ test('actual mature native trees and their depth impostors preserve silhouette a
       const shader=async(code,label)=>{const module=device.createShaderModule({code,label}),bad=(await module.getCompilationInfo()).messages.filter(m=>m.type==='error');if(bad.length)throw Error(bad.map(m=>m.message).join('\n'));return module;};
       const code=FRAME_WGSL+`@group(0)@binding(0)var<uniform>F:Frame;
 fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,roughness:f32)->vec4f{return vec4f(1);}
-`+FOREST_VERTEX_WGSL;
+`+CONTINUUM_CORE_WGSL+FOREST_VERTEX_WGSL;
       const module=await shader(code,'actual forest silhouette shaders'),surfaces=await createForestLeafSurfaces({device,shader,pack:source});
       const atlas=await createForestImpostorResources({device,shader,pack:pack.impostors,forest:pack.manifest}),B=GPUBufferUsage,T=GPUTextureUsage,S=GPUShaderStage;
       const allocated=[],make=(data,usage)=>{const b=device.createBuffer({size:data.byteLength,usage:usage|B.COPY_DST});device.queue.writeBuffer(b,0,data);allocated.push(b);return b;};

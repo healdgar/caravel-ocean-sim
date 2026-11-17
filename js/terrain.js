@@ -28,6 +28,7 @@ import {PORTUGAL_MEADOW_GRASS_ASSETS,loadMeadowGrass,createMeadowGrass} from './
 import {createTradeVessels,requestTradeVesselsPipelines} from './trade-vessels.js';
 import {CITY_BLOCK_FLOATS} from './old-world-city.js';
 import {CITY_DETAIL_M,CITY_TYPED_FLOATS,compileCityBuildingTypes} from './old-world-buildings.js';
+import {continuumCoarsening} from './continuum-core.js';
 import {createCityTargets} from './city-targets.js';
 import {createLandCraterLedger,createLandCraters,requestLandCraterPipelines,landCraterSize} from './land-craters.js';
 import {sharedGroundDetail} from './ground-detail.js';
@@ -993,9 +994,11 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const forceSubtropicalVolume=typeof location!=='undefined'&&search.get('forestVolume')==='force';
   const forestPromise=canopyMode==='off'?Promise.resolve(null):loadForestScenery({
     assets:useSubtropicalForest?SUBTROPICAL_FOREST_ASSETS:usePortugalForest?PORTUGAL_FOREST_ASSETS:FOREST_ASSETS,
-    loadAtlases:!useSubtropicalForest&&!usePortugalForest,
-    loadVolumes:(!useSubtropicalForest&&!usePortugalForest)||forceSubtropicalVolume,
-    skipNative:skipNativeForest&&!useSubtropicalForest&&!usePortugalForest,
+    // Every pack's far trees are the continuum's crowns; Saba's impostor atlases and volumes load only when
+    // the address asks for them, for inspection.
+    loadAtlases:!useSubtropicalForest&&!usePortugalForest&&['auto','force'].includes(search.get('forestImpostor')),
+    loadVolumes:forceSubtropicalVolume,
+    skipNative:skipNativeForest&&!useSubtropicalForest&&!usePortugalForest&&search.has('forestMass'),
     deferNative:!skipNativeForest&&useProcedural&&!useSubtropicalForest&&!usePortugalForest,
     skipRoots:useProcedural,
     deferSurfaces:Boolean(chooseForestSurfaceCodec(device,search.get('forestSurfaces')||'auto')),
@@ -1019,7 +1022,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   // This is a new optional asset, never an alias of the rejected crown pack.
   // Missing/unqualified transport retains the existing native/atlas forest.
   const forestMassPromise=forestManifestPromise.then(forestManifest=>{
-    if(!forestManifest||forestMassMode==='off'||useSubtropicalForest||usePortugalForest){resolveMassManifest(null);return null;}
+    // Saba's chunked forest mass (and the middle mesh drawn from it) was its own far tier; the crowns took its
+    // place, so it loads only when the address names a forestMass mode.
+    if(!forestManifest||forestMassMode==='off'||!search.has('forestMass')||useSubtropicalForest||usePortugalForest){resolveMassManifest(null);return null;}
     return loadForestMass({forest:forestManifest,rootsPromise:massOnly?null:forestRootsPromise,manifestOnly:massOnly,onManifest:resolveMassManifest}).catch(error=>{forestMassFailure=error.message;resolveMassManifest(null);return null;});
   });
   const forestMiddlePromise=Promise.all([forestManifestPromise,massManifestPromise]).then(async([forestManifest,massManifest])=>{
@@ -1246,6 +1251,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const worldOffset={x:0,z:0};
   // How near a city building is drawn as its Cairn type, not its block: none until a city has types.
   let cityDetail=0;
+  // That distance follows the scene's one pixel-error scalar: CITY_DETAIL_M at the base error, nearer as it coarsens.
+  const cityDetailRange=()=>CITY_DETAIL_M/continuumCoarsening();
   const nearDomainValues=()=>nearTile
     ?[nearTile.manifest.domain.x,nearTile.manifest.domain.z,nearTile.manifest.domain.span,1,nearTile.manifest.domain.size,worldOffset.x,worldOffset.z,cityDetail]
     :regionalElevationSize
@@ -1483,7 +1490,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       for(const type of city.typedTypes)standing[type]++;
       cityCull=createSceneryCull({device,pipeline:cityCullPipeline,frameUBO,label:'city buildings',capacity:city.typedCount,bucketCapacities:standing,vertexCounts:[cityTypes.map(type=>type.count)]});
       cityCull.setInstances(0,city.typed,city.typedTypes);
-      cityDetail=CITY_DETAIL_M;cityCull.setPixelError(cityDetail);
+      cityDetail=cityDetailRange();cityCull.setPixelError(cityDetail);
       cityCull.setWorldOffset?.(worldOffset.x,worldOffset.z);
     }
     writeNearDomainUniform();
@@ -2564,7 +2571,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     farTreeTriangles:treeMeshes[0].map(mesh=>mesh.opaque.count/3),
     groundStats,groundTriangles:groundMeshes.map(mesh=>mesh.count/3),canopyStats,forestStats,canopyInspectionURL:canopyInspectionLink,
     prepare:(cam,vp)=>updateTrees(cam,vp,true),groundDetail,
-    setPixelError(next){if(Number.isFinite(next)&&next>0){currentPixelError=next;forestMass?.setPixelError?.(next);forest?.setPixelError?.(next);groundCull.setPixelError(next,isMobile&&next>3.8?1.35:1);boulderContinuum?.setPixelScale(TREE_PIXEL_ERROR/next);treeCull?.setPixelError(next);}},
+    // Each family's indirect draws for the continuum census (js/continuum-census.js): only the families that offer them.
+    continuumSources(){return [['forest',forest],['forest mass',forestMass],['boulders',boulderContinuum],['meadow',meadowGrass],['herds',herds],['trade vessels',tradeVessels],['city',cityCull],['trees',treeCull],['ground',groundCull]].map(([name,family])=>({name,draws:family?.continuumDraws?.()??null})).filter(source=>source.draws?.length);},
+    setPixelError(next){if(Number.isFinite(next)&&next>0){currentPixelError=next;forestMass?.setPixelError?.(next);forest?.setPixelError?.(next);groundCull.setPixelError(next,isMobile&&next>3.8?1.35:1);boulderContinuum?.setPixelScale(TREE_PIXEL_ERROR/next);treeCull?.setPixelError(next);if(cityCull){cityDetail=cityDetailRange();cityCull.setPixelError(cityDetail);writeNearDomainUniform();}}},
     nearStats:{loaded:!!nearTile,error:nearFailure,domain:nearTile?.manifest.domain??null,triangles:(fineMesh?.indices.length??0)/3},
     height:(x,z)=>heightSample(x-worldOffset.x,z-worldOffset.z),
     surfaceHeight:(x,z)=>baseGroundSample(x-worldOffset.x,z-worldOffset.z),

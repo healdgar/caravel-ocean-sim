@@ -458,7 +458,7 @@ test('revamped meandered rivers, 12-float hydraulics, estuary convergence shader
 function createMockTradeEnv(t) {
   const prevBuf = globalThis.GPUBufferUsage;
   const prevTex = globalThis.GPUTextureUsage;
-  globalThis.GPUBufferUsage = { VERTEX: 1, INDEX: 2, UNIFORM: 4, STORAGE: 8, COPY_DST: 16, INDIRECT: 256 };
+  globalThis.GPUBufferUsage = { VERTEX: 1, INDEX: 2, UNIFORM: 4, STORAGE: 8, COPY_DST: 16, COPY_SRC: 32, INDIRECT: 256 };
   globalThis.GPUTextureUsage = { TEXTURE_BINDING: 1, COPY_DST: 2 };
   t.after(() => {
     if (prevBuf === undefined) delete globalThis.GPUBufferUsage; else globalThis.GPUBufferUsage = prevBuf;
@@ -467,8 +467,10 @@ function createMockTradeEnv(t) {
 
   let destroyedDamagedBuffers = 0;
   const mockDevice = {
-    createBuffer: ({ label = '', size }) => ({
+    createBuffer: ({ label = '', size, usage = 0 }) => ({
+      label,
       size,
+      usage,
       destroy() {
         if (label.startsWith('trade vessel damaged') || label.startsWith('trade vessel hull damage') || label.startsWith('trade vessel pose')) {
           destroyedDamagedBuffers++;
@@ -980,6 +982,19 @@ test('Lisbon 1550 riverboats lock strictly inside rendered riverReaches at exact
   const selectIdx = computeOrder.indexOf('trade vessel select');
   assert.ok(waveIdx === 0, `GPU wave buoyancy pass runs first in encode() (order=${computeOrder.join(' -> ')})`);
   assert.ok(selectIdx > waveIdx, 'GPU wave buoyancy writes pose before trade vessel select runs');
+
+  // The continuum census reads every indirect draw draw() submits in the main pass from its own arguments.
+  const census = tv.continuumDraws();
+  const vesselDraws = census.filter((d) => d.buffer.label === 'trade vessel indirect');
+  assert.deepEqual(
+    vesselDraws.map((d) => [d.offset, d.records, d.stride]),
+    [[14 * 20, TRADE_VESSEL_ARCHETYPES, 5], [21 * 20, TRADE_VESSEL_ARCHETYPES, 5], [140 * 4, 3, 4]],
+    'census lists the whole-ship solid and band slices, then continuum solid, continuum band and splats',
+  );
+  for (const d of census) {
+    assert.ok(d.buffer.usage & GPUBufferUsage.COPY_SRC, `${d.buffer.label} can be copied by the census`);
+    assert.ok(d.offset + d.records * d.stride * 4 <= d.buffer.size, `${d.buffer.label} census region lies inside the buffer`);
+  }
 
   const subPass = {
     setPipeline() {},

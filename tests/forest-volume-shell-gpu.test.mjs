@@ -38,7 +38,7 @@ test('production opaque forest shell keeps real mesh holes and raster depth whil
     browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||undefined,args:process.env.WEBGPU_BACKEND==='metal'?['--enable-unsafe-webgpu','--use-angle=metal','--disable-gpu-watchdog']:['--enable-unsafe-webgpu','--use-angle=swiftshader','--enable-unsafe-swiftshader','--disable-gpu-watchdog']});
     const page=await browser.newPage();await page.goto('http://127.0.0.1:'+server.address().port+'/tests/fixtures/forest-gpu.html');
     const result=await page.evaluate(async input=>{
-      const {FRAME_WGSL}=await import('/js/wgsl/common.js'),{FOREST_VERTEX_WGSL,FOREST_MIDDLE_VERTEX_LAYOUT}=await import('/js/forest-scenery.js'),{FOREST_VOLUME_WGSL,FOREST_VOLUME_SHELL_WGSL,createForestVolumeResources}=await import('/js/forest-volume.js');
+      const {FRAME_WGSL}=await import('/js/wgsl/common.js'),{CONTINUUM_CORE_WGSL}=await import('/js/continuum-core.js'),{FOREST_VERTEX_WGSL,FOREST_MIDDLE_VERTEX_LAYOUT}=await import('/js/forest-scenery.js'),{FOREST_VOLUME_WGSL,FOREST_VOLUME_SHELL_WGSL,createForestVolumeResources}=await import('/js/forest-volume.js');
       if(!FOREST_VERTEX_WGSL.includes(FOREST_VOLUME_WGSL)||!FOREST_VERTEX_WGSL.includes(FOREST_VOLUME_SHELL_WGSL))throw Error('Production forest shader omits the exact volume/shell entry points');
       const adapter=await navigator.gpu.requestAdapter(),device=await adapter.requestDevice(),B=GPUBufferUsage,T=GPUTextureUsage,S=GPUShaderStage,errors=[],buffers=[],textures=[],writes=new Map(),textureWrites=new Map(),runtimeBuffers=[];let active=false;
       device.onuncapturederror=e=>errors.push(e.error.message);
@@ -53,7 +53,7 @@ test('production opaque forest shell keeps real mesh holes and raster depth whil
 fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,roughness:f32)->vec4f{
  if(F.sunDir.w>.5){return vec4f(ambient,diffuse,0,1);}return vec4f(albedo,1);
 }
-`+FOREST_VERTEX_WGSL+`
+`+CONTINUUM_CORE_WGSL+FOREST_VERTEX_WGSL+`
 // Same production VS and source mesh, independently ordinary raster depth.
 @fragment fn shellReferenceFS(in:ForestVolumeShellVertex)->@location(0)vec4f{if(in.local.y<forestVolumeMeta.highFloor.w){discard;}return vec4f(1);}`);
       const layouts=[device.createBindGroupLayout({entries:[{binding:0,visibility:S.VERTEX|S.FRAGMENT,buffer:{type:'uniform'}}]}),device.createBindGroupLayout({entries:[]}),device.createBindGroupLayout({entries:[{binding:0,visibility:S.VERTEX,buffer:{type:'read-only-storage'}},{binding:1,visibility:S.VERTEX,buffer:{type:'read-only-storage'}},{binding:2,visibility:S.VERTEX,buffer:{type:'uniform'}}]}),device.createBindGroupLayout({entries:[{binding:0,visibility:S.FRAGMENT,texture:{viewDimension:'3d'}},{binding:1,visibility:S.FRAGMENT,texture:{viewDimension:'3d'}},{binding:2,visibility:S.FRAGMENT,sampler:{}},{binding:3,visibility:S.FRAGMENT,buffer:{type:'uniform'}}]})],layout=device.createPipelineLayout({bindGroupLayouts:layouts});
