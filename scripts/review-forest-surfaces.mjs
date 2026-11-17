@@ -57,7 +57,7 @@ try{
       window.surfaceTextures=[];const create=GPUDevice.prototype.createTexture;
       GPUDevice.prototype.createTexture=function(desc){if(/forest immutable native/.test(desc.label||''))surfaceTextures.push({label:desc.label,format:desc.format});return create.call(this,desc);};
     });
-    const q=new URLSearchParams({landfall:'approach',view:'free',boat:'0',prow:'0',follower:'0',fleet:'',crew:'0',effects:'0',clouds:'0',sunElev:'40',sunAzim:'155',windSpeed:'0',swellHs:'0',ui:'0',resolution:'native',polygons:'fixed',...(FAR?{}:{canopy:'near',forestMass:'off',forestImpostor:'off'}),cam:views[0].cam.join(','),w:String(WIDTH),h:String(HEIGHT),...extra});
+    const q=new URLSearchParams({landfall:'approach',view:'free',boat:'0',prow:'0',follower:'0',fleet:'',crew:'0',effects:'0',clouds:'0',sunElev:'40',sunAzim:'155',windSpeed:'0',swellHs:'0',ui:'0',resolution:'native',polygons:'fixed',...(FAR?{}:{canopy:'near'}),cam:views[0].cam.join(','),w:String(WIDTH),h:String(HEIGHT),...extra});
     await page.goto(`http://127.0.0.1:${server.address().port}/?${q}`);
     await page.waitForFunction(()=>window.oceanStartup?.state==='ready'||window.oceanStartup?.state==='failed',null,{timeout:180000,polling:200});
     await page.waitForFunction(()=>surfaceTextures.length>=2,null,{timeout:180000,polling:200}).catch(()=>errors.push('native surfaces never loaded'));

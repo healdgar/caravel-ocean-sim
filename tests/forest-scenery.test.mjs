@@ -4,7 +4,6 @@ import {createHash} from 'node:crypto';
 import {gzipSync} from 'node:zlib';
 import {readFile} from 'node:fs/promises';
 import {test} from 'node:test';
-import {FOREST_VOLUME_WGSL,FOREST_VOLUME_SHELL_WGSL} from '../js/forest-volume.js';
 import {validateForestScenery,validateForestMaterials,decodeForestScenery,decodeForestSceneryAsync,loadForestScenery,forestCoversPoint,excludeForestRoots,FOREST_ASSETS,FOREST_VERTEX_LAYOUT,FOREST_VERTEX_WGSL,FOREST_SURFACE_MIPS_WGSL} from '../js/forest-scenery.js';
 
 function fixture(){
@@ -34,31 +33,6 @@ function nativeFixture(){
   });
   return{...f,textures};
 }
-function attachAtlas(f){
-  const hash=bytes=>createHash('sha256').update(bytes).digest('hex'),views=[];
-  for(let row=0;row<16;row++)for(let column=0;column<16;column++){
-    const u=2*(column+.5)/16-1,v=2*(row+.5)/16-1;let x=u,y=1-Math.abs(u)-Math.abs(v),z=v;
-    if(y<0){x=(1-Math.abs(v))*Math.sign(u);z=(1-Math.abs(u))*Math.sign(v);}
-    const length=Math.hypot(x,y,z),direction=[x/length,y/length,z/length],reference=Math.abs(direction[1])>.999?[0,0,1]:[0,1,0];
-    const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],r=cross(reference,direction),right=r.map(n=>n/Math.hypot(...r)),up=cross(direction,right);
-    views.push({index:views.length,row,column,direction,right,up});
-  }
-  const raw=new Uint8Array(1024*1024*8),encoded=gzipSync(raw),rawHash=hash(raw),encodedHash=hash(encoded),responses={},assets={'manifest.json':'atlas.json'};
-  const files=structuredClone(f.manifest.files);
-  for(const p of f.manifest.prototypes)for(const m of p.nativeMaterials)for(const key of ['albedo','normal','roughnessMap'])if(m[key])files[m[key].file]=m[key];
-  const prototypes=f.manifest.prototypes.map(p=>{
-    const outputs={};for(const [key,stem]of [['albedo','albedo'],['normalDepth','normal-depth']]){
-      const file=`prototype-${p.id}-${p.species}/${stem}.rgba16f.bin`;
-      outputs[key]={file,bytes:raw.byteLength,sha256:rawHash,gzip:{file:file+'.gz',bytes:encoded.byteLength,sha256:encodedHash,uncompressedSHA256:rawHash}};
-      assets[file+'.gz']=file+'.gz';responses[file+'.gz']=encoded;
-    }
-    return{id:p.id,species:p.species,centre:p.centre,radius:p.radius,projection:{extent:p.radius*1.05},detailedGeometry:{wood:p.wood,leaf:p.leaf},outputs};
-  });
-  const manifest={format:'waterworld.native-impostors',version:1,complete:true,units:'metres',upAxis:'Y',layout:{grid:[16,16],tilePixels:64,atlasPixels:[1024,1024],views},source:{files},prototypes};
-  const bytes=new TextEncoder().encode(JSON.stringify(manifest));responses['atlas.json']=bytes;
-  f.manifest.impostors={file:'impostors/manifest.json',bytes:bytes.byteLength,sha256:hash(bytes)};
-  return{assets,responses};
-}
 test('instanced pack preserves prototype vertices and compact roots, and declares no appearance certification',()=>{
   const {manifest,streams}=fixture(),before=structuredClone(streams),pack=decodeForestScenery(manifest,streams);
   assert.equal(pack.vertices.length,117);assert.equal(pack.roots.length,12);assert.equal(pack.indices.length,9);
@@ -73,14 +47,14 @@ test('cooperative native validation preserves exact bytes, failures and abort se
   await assert.rejects(decodeForestSceneryAsync(bad.manifest,bad.streams,{yieldTask:async()=>{}}),/index outside/);
   const abort=new AbortController();await assert.rejects(decodeForestSceneryAsync(f.manifest,f.streams,{signal:abort.signal,yieldTask:async()=>abort.abort()}),{name:'AbortError'});
 });
-test('full-sphere first forest requires only roots and atlases; native fetch is cached and receipt verified later',async()=>{
-  const f=nativeFixture(),atlas=attachAtlas(f),requests=[],assets=Object.fromEntries(['manifest.json',...Object.keys(f.streams),...Object.keys(f.textures)].map(n=>[n,n]));
+test('a deferred forest requires only its roots; native fetch is cached and receipt verified later',async()=>{
+  const f=nativeFixture(),requests=[],assets=Object.fromEntries(['manifest.json',...Object.keys(f.streams),...Object.keys(f.textures)].map(n=>[n,n]));
   const fetchAsset=async name=>{
     requests.push(name);if(name==='manifest.json')return Response.json(f.manifest);
-    return new Response(new Uint8Array(atlas.responses[name]??f.streams[name]??f.textures[name]));
+    return new Response(new Uint8Array(f.streams[name]??f.textures[name]));
   };
-  const pack=await loadForestScenery({assets,impostorAssets:atlas.assets,fetchAsset});
-  assert.equal(pack.vertices,null);assert.equal(pack.indices,null);assert.equal(pack.textures,null);assert.ok(pack.impostors);
+  const pack=await loadForestScenery({assets,fetchAsset,deferNative:true});
+  assert.equal(pack.vertices,null);assert.equal(pack.indices,null);assert.equal(pack.textures,null);
   assert.equal(requests.includes('vertices.bin'),false);assert.equal(requests.includes('indices.bin'),false);
   assert.equal(requests.some(name=>name.endsWith('.png')),false);assert.equal(pack.roots.length,12);
   assert.equal(pack.releaseNativeCPU(),false,'no fulfilled cache exists at first readiness');
@@ -94,8 +68,8 @@ test('full-sphere first forest requires only roots and atlases; native fetch is 
   const fresh=pack.loadNative();assert.notEqual(fresh,a);assert.equal(pack.loadNative(),fresh);
   assert.deepEqual((await fresh).vertices,retained,'explicit reload verifies the original immutable bytes again');
   for(const name of ['vertices.bin','indices.bin',...Object.keys(f.textures)])assert.equal(requests.filter(value=>value===name).length,2,name+' reloaded once after release');
-  const tampered=nativeFixture(),tamperedAtlas=attachAtlas(tampered);new Uint8Array(tampered.streams['vertices.bin'])[0]^=1;
-  const delayed=await loadForestScenery({assets,impostorAssets:tamperedAtlas.assets,fetchAsset:async name=>name==='manifest.json'?Response.json(tampered.manifest):new Response(new Uint8Array(tamperedAtlas.responses[name]??tampered.streams[name]??tampered.textures[name]))});
+  const tampered=nativeFixture();new Uint8Array(tampered.streams['vertices.bin'])[0]^=1;
+  const delayed=await loadForestScenery({assets,fetchAsset:async name=>name==='manifest.json'?Response.json(tampered.manifest):new Response(new Uint8Array(tampered.streams[name]??tampered.textures[name])),deferNative:true});
   await assert.rejects(delayed.loadNative(),/Forest digest mismatch: vertices/);
 });
 test('invalid species, bounds, partitions, roots, indices and invented error certification are rejected',()=>{
@@ -169,21 +143,19 @@ test('native stream transport verifies both encoded and decoded receipts',async(
     manifest.files[name].gzip={file:name+'.gz',bytes:bytes.byteLength,sha256:createHash('sha256').update(bytes).digest('hex')};
   }
   const fetchAsset=async name=>name==='manifest.json'?Response.json(manifest):new Response(new Uint8Array(encoded[name]??textures[name]));
-  assert.equal((await loadForestScenery({assets,fetchAsset,loadAtlases:false})).vertices.length,126);
+  assert.equal((await loadForestScenery({assets,fetchAsset})).vertices.length,126);
   const original=Uint8Array.from(encoded['roots.bin.gz']);encoded['roots.bin.gz'][8]^=1;
-  await assert.rejects(loadForestScenery({assets,fetchAsset,loadAtlases:false}),/encoded digest/);
+  await assert.rejects(loadForestScenery({assets,fetchAsset}),/encoded digest/);
   encoded['roots.bin.gz']=original;manifest.files['roots.bin'].sha256='0'.repeat(64);
-  await assert.rejects(loadForestScenery({assets,fetchAsset,loadAtlases:false}),/Forest digest/);
+  await assert.rejects(loadForestScenery({assets,fetchAsset}),/Forest digest/);
 });
 test('forest rendering cannot fall back to the legacy generic mask or threshold averaged coverage',async()=>{
   const source=await readFile(new URL('../js/forest-scenery.js',import.meta.url),'utf8');
   // Buried roots press flat at the soil line in the vertex stage, which keeps opaque trees
   // free of discard. Leaves are cut by sample coverage only, never a threshold on it.
-  assert.equal(FOREST_VERTEX_WGSL.split('o.world.y=max(o.world.y,r.rootScale.y);').length-1,2,'canopy and middle roots stop at the soil');
+  assert.equal(FOREST_VERTEX_WGSL.split('o.world.y=max(o.world.y,r.rootScale.y);').length-1,1,'canopy roots stop at the soil');
   assert.doesNotMatch(FOREST_VERTEX_WGSL,/leafSpray|tree-foliage|canopyLeafFS/);
-  assert.ok(FOREST_VERTEX_WGSL.endsWith(FOREST_VOLUME_WGSL+FOREST_VOLUME_SHELL_WGSL),'volume/shell are separate shader entry points');
-  const nativeShader=FOREST_VERTEX_WGSL.slice(0,-FOREST_VOLUME_WGSL.length-FOREST_VOLUME_SHELL_WGSL.length);
-  assert.doesNotMatch(nativeShader,/discard/,'native trees never discard; volume ray misses are separate');
+  assert.doesNotMatch(FOREST_VERTEX_WGSL,/discard/,'native trees never discard');
   assert.match(FOREST_VERTEX_WGSL,/@location\(7\)nativeMaterial/);
   assert.match(FOREST_VERTEX_WGSL,/forestNativeOpaqueFS/);assert.match(FOREST_VERTEX_WGSL,/forestNativeLeafFS/);
   assert.match(FOREST_VERTEX_WGSL,/return vec4f\(lit\.rgb,pigment\.a\)/);
@@ -194,10 +166,10 @@ test('forest rendering cannot fall back to the legacy generic mask or threshold 
   assert.match(source,/multisample:\{count:samples,alphaToCoverageEnabled:false\}/);
   assert.match(source,/nearPixels=3/);assert.match(source,/nearPixels<=3/);
 });
-test('skipNative and skipRoots defer heavy native geometry and Saba roots for procedural/mobile landfalls',async()=>{
+test('deferNative and skipRoots defer heavy native geometry and Saba roots for procedural landfalls',async()=>{
   const f=nativeFixture(),requests=[],assets=Object.fromEntries(['manifest.json',...Object.keys(f.streams),...Object.keys(f.textures)].map(n=>[n,n]));
   const fetchAsset=async name=>{requests.push(name);return name==='manifest.json'?Response.json(f.manifest):new Response(new Uint8Array(f.streams[name]??f.textures[name]));};
-  const pack=await loadForestScenery({assets,fetchAsset,loadAtlases:false,loadVolumes:false,skipNative:true,skipRoots:true});
-  assert.equal(pack.skipNative,true);assert.equal(pack.vertices,null);assert.equal(pack.indices,null);assert.equal(pack.roots.length,0);
+  const pack=await loadForestScenery({assets,fetchAsset,deferNative:true,skipRoots:true});
+  assert.equal(pack.vertices,null);assert.equal(pack.indices,null);assert.equal(pack.roots.length,0);
   assert.deepEqual(requests,['manifest.json']);
 });

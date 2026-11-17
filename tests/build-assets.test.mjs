@@ -28,7 +28,7 @@ test('Pages uses versioned, byte-identical runtime assets and excludes inline me
   assert.ok(!html.includes(`as="fetch" href="${manifest['assets/wildlife/whale.glb'].url}"`),'inactive wildlife must not preload');
 });
 
-test('downloads embed sailing and native forest atlases; optional mature buffers use byte-versioned URLs',async()=>{
+test('downloads embed sailing and native forest maps; optional mature buffers use byte-versioned URLs',async()=>{
   const manifest=JSON.parse(await readFile(new URL('docs/assets-manifest.json',root),'utf8'));
   for(const file of ['ocean.html','ocean.min.html']){
     const html=await readFile(new URL(file,root),'utf8');
@@ -38,7 +38,7 @@ test('downloads embed sailing and native forest atlases; optional mature buffers
     for(const source of Object.keys(manifest)){
       // Close-up forest geometry, wind weight tables, GPU meadow grass streams, the living board and the people
       // continuum's bodies are fetched when wanted: megabytes a downloaded page starts and sails without.
-      if(/^assets\/crew\/continuum\/[a-z-]+\/|^assets\/forest-scenery\/((saba|subtropical|portugal)\/(mass\/)?|(saba|portugal)\/clusters\/)(vertices|indices)\.bin\.gz$|^assets\/forest-scenery\/(saba|subtropical|portugal)\/wind\/weights\.bin\.gz$|^assets\/ground-cover\/portugal\/meadows-gpu\/.*\.gz$|\/surfaces\/.*\.gz$|^assets\/boards\/([^/]+\.world|partner-ports-1550\.json)$|^assets\/board\/(game|runtime)\.js$/.test(source)){
+      if(/^assets\/crew\/continuum\/[a-z-]+\/|^assets\/forest-scenery\/((saba|subtropical|portugal)\/|(saba|portugal)\/clusters\/)(vertices|indices)\.bin\.gz$|^assets\/forest-scenery\/(saba|subtropical|portugal)\/wind\/weights\.bin\.gz$|^assets\/ground-cover\/portugal\/meadows-gpu\/.*\.gz$|\/surfaces\/.*\.gz$|^assets\/boards\/([^/]+\.world|partner-ports-1550\.json)$|^assets\/board\/(game|runtime)\.js$/.test(source)){
         assert.ok(html.includes('https://sixcailloux.com/waterworld/'+manifest[source].url),file+' uses exact optional close-up geometry');continue;
       }
       const bytes=await readFile(new URL(source,root));

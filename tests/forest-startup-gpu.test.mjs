@@ -21,7 +21,7 @@ test('packaged island reaches a real rendered frame without per-batch timer stal
       const write=GPUQueue.prototype.writeBuffer;GPUQueue.prototype.writeBuffer=function(buffer,offset,data,dataOffset=0,size){
         const bytes=(size??data.byteLength/(data.BYTES_PER_ELEMENT??1)-dataOffset)*(data.BYTES_PER_ELEMENT??1);
         if(buffer.label.startsWith('forest '))r.uploads[buffer.label]=(r.uploads[buffer.label]??0)+bytes;
-        if(['forest native residency','forest mass shared native residency'].includes(buffer.label))r.nativeResident=new Uint32Array(data.buffer??data,data.byteOffset??0,1)[0]===1;
+        if(buffer.label==='forest native residency')r.nativeResident=new Uint32Array(data.buffer??data,data.byteOffset??0,1)[0]===1;
         return write.call(this,buffer,offset,data,dataOffset,size);
       };
       const pipeline=GPUDevice.prototype.createRenderPipelineAsync;GPUDevice.prototype.createRenderPipelineAsync=function(desc){r.pipelines.push(desc.label);return pipeline.call(this,desc);};
@@ -33,10 +33,8 @@ test('packaged island reaches a real rendered frame without per-batch timer stal
     t.diagnostic(JSON.stringify(result));
     assert.equal(result.state,'ready',result.error);assert.deepEqual(errors,[]);assert.deepEqual(result.errors,[]);assert.ok(result.frames>0);assert.equal(result.nativeResident,true);assert.ok(result.tasks>0);assert.ok(result.timers<100,'validation must not sleep after every small batch');
     for(const label of ['forest immutable prototype vertices','forest immutable prototype indices','forest cluster vertices','forest cluster indices']){assert.ok(result.buffers[label]>10000000,label);assert.equal(result.uploads[label],result.buffers[label],label+' uploads every byte exactly once');}
-    // The far canopy is the continuum's crowns; the old far tiers are not uploaded at all.
+    // The far canopy is the continuum's crowns.
     for(const label of ['forest crown vertices','forest crown morph'])assert.equal(result.uploads[label],result.buffers[label],label+' uploads every byte exactly once');
     assert.ok(result.pipelines.includes('forest crowns forestCrownFS'),'continuum crowns render the far canopy');
-    for(const label of ['forest mass immutable vertices','forest mass immutable indices'])assert.equal(result.buffers[label],undefined,label+' is not allocated');
-    assert.ok(!result.pipelines.includes('instanced forest shaded native crown shell'),'no crown shells beside the crowns');
   }finally{await browser?.close();server.closeAllConnections?.();await new Promise(resolve=>server.close(resolve));}
 });

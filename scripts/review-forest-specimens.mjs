@@ -34,7 +34,7 @@ try{
    window.specimen={device:null,errors:[]};
    const request=GPUAdapter.prototype.requestDevice;GPUAdapter.prototype.requestDevice=async function(...args){const d=await request.apply(this,args);specimen.device=d;d.addEventListener('uncapturederror',e=>specimen.errors.push(e.error.message));return d;};
   });
-  const q=new URLSearchParams({landfall:'approach',view:'free',boat:'0',prow:'0',follower:'0',fleet:'',crew:'0',effects:'0',clouds:'0',sunElev:'40',sunAzim:'155',windSpeed:'0',swellHs:'0',ui:'0',resolution:'native',canopy:'near',forestMass:'off',forestImpostor:'off',cam:camera.join(','),w:'960',h:'800'});
+  const q=new URLSearchParams({landfall:'approach',view:'free',boat:'0',prow:'0',follower:'0',fleet:'',crew:'0',effects:'0',clouds:'0',sunElev:'40',sunAzim:'155',windSpeed:'0',swellHs:'0',ui:'0',resolution:'native',canopy:'near',cam:camera.join(','),w:'960',h:'800'});
   await page.goto('http://127.0.0.1:'+server.address().port+'/?'+q);
   await page.waitForFunction(()=>window.oceanStartup?.state==='ready'||window.oceanStartup?.state==='failed'||document.querySelector('#err')?.textContent,undefined,{timeout:30000}).catch(async error=>{console.log(JSON.stringify(await page.evaluate(()=>({startup:window.oceanStartup?.state,error:document.querySelector('#err')?.textContent,body:document.body.innerText.slice(0,900),gpu:specimen.errors}))));throw error;});
   assert.equal(await page.locator('#err').textContent(),'');

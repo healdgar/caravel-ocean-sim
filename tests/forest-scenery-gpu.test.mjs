@@ -27,30 +27,25 @@ test('native forest compute compacts roots, resets indirect counts and responds 
       const resetGroup=device.createBindGroup({layout:reset.getBindGroupLayout(0),entries:[{binding:4,resource:{buffer:commands}},{binding:6,resource:{buffer:parameters}}]});
       const cullGroup=device.createBindGroup({layout:cull.getBindGroupLayout(0),entries:[frame,roots,prototypes,visible,commands,previous,parameters,residency].map((buffer,binding)=>({binding,resource:{buffer}}))});
       const read=device.createBuffer({size:128,usage:B.COPY_DST|B.MAP_READ});
-      async function run(height,mode=0,atlasFlags=0,resident=1,errorMetres=0,certified=false){
+      async function run(height,mode=0,resident=1,errorMetres=0,certified=false){
         frameData[37]=height;parameterData[3]=mode;device.queue.writeBuffer(frame,0,frameData);device.queue.writeBuffer(parameters,0,parameterData);
-        u[6]=atlasFlags;u[7]=32;f[18]=errorMetres;u[19]=certified?1:0;device.queue.writeBuffer(prototypes,0,new Uint8Array(meta));
+        f[18]=errorMetres;u[19]=certified?1:0;device.queue.writeBuffer(prototypes,0,new Uint8Array(meta));
         device.queue.writeBuffer(residency,0,new Uint32Array([resident,0,0,0]));
         const enc=device.createCommandEncoder(),pass=enc.beginComputePass();pass.setPipeline(reset);pass.setBindGroup(0,resetGroup);pass.dispatchWorkgroups(1);pass.setPipeline(cull);pass.setBindGroup(0,cullGroup);pass.dispatchWorkgroups(1);pass.end();
         enc.copyBufferToBuffer(commands,0,read,0,80);enc.copyBufferToBuffer(visible,0,read,80,48);device.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);
         const data=Array.from(new Uint32Array(read.getMappedRange()));read.unmap();const counts=[data[1],data[6],data[11],data[16]];
-        return {counts,near:data.slice(20,20+counts[0]).sort(),far:data.slice(24,24+counts[2]).sort(),middle:data.slice(28,28+counts[3]).sort(),commands:data.slice(0,20)};
+        return {counts,near:data.slice(20,20+counts[0]).sort(),far:data.slice(24,24+counts[2]).sort(),commands:data.slice(0,20)};
       }
       const normal=await run(1080),repeat=await run(1080),high=await run(2160),farDebug=await run(2160,2),nearDebug=await run(1080,1);
-      const hemisphereBelow=await run(2160,0,1),fullSphere=await run(2160,0,2),forced=await run(2160,0,6);
-      const deferred=await run(1080,0,2,0),deferredNear=await run(2160,1,2,0),unavailable=await run(1080,0,0,0),residentAgain=await run(1080,0,2,1);
-      const certified=await run(1080,0,2,1,.01,true),unflagged=await run(1080,0,2,1,.01,false);
-      await device.queue.onSubmittedWorkDone();device.destroy();return {errors,normal,repeat,high,farDebug,nearDebug,hemisphereBelow,fullSphere,forced,deferred,deferredNear,unavailable,residentAgain,certified,unflagged};
+      const unavailable=await run(1080,0,0),unavailableNear=await run(2160,1,0),residentAgain=await run(1080,0,1);
+      const certified=await run(1080,0,1,.01,true),unflagged=await run(1080,0,1,.01,false);
+      await device.queue.onSubmittedWorkDone();device.destroy();return {errors,normal,repeat,high,farDebug,nearDebug,unavailable,unavailableNear,residentAgain,certified,unflagged};
     });
     assert.deepEqual(result.errors,[]);
     for(const name of ['normal','repeat']){assert.deepEqual(result[name].counts,[1,1,1,0],name);assert.deepEqual(result[name].near,[0]);assert.deepEqual(result[name].far,[1]);}
     assert.deepEqual(result.high.counts,[2,2,0,0],'higher rendered pixel density retains actual detail');
     assert.deepEqual(result.high.near,[0,1]);assert.deepEqual(result.farDebug.counts,[0,0,2,0]);assert.deepEqual(result.nearDebug.counts,[2,2,0,0]);
-    assert.deepEqual(result.hemisphereBelow.counts,[2,2,0,0],'upper-only legacy atlas cannot replace native trees seen from below');
-    assert.deepEqual(result.fullSphere.counts,[1,1,0,1]);assert.deepEqual(result.fullSphere.middle,[1]);
-    assert.deepEqual(result.forced.counts,[0,0,0,2],'explicit debug forcing never alters default thresholds');
-    for(const name of ['deferred','deferredNear'])assert.deepEqual(result[name].counts,[0,0,0,2],'nonresident native geometry is never addressed: '+name);
-    assert.deepEqual(result.unavailable.counts,[0,0,0,0],'unsupported atlas cannot issue native draws before residency');
+    for(const name of ['unavailable','unavailableNear'])assert.deepEqual(result[name].counts,[0,0,0,0],'nonresident native geometry is never addressed: '+name);
     assert.deepEqual(result.residentAgain.counts,[1,1,1,0],'one residency transition restores normal GPU LOD selection');
     assert.deepEqual(result.certified.counts,[0,0,2,0],'qualified geometric error uses the same projected three-pixel bound');
     assert.deepEqual(result.unflagged.counts,[1,1,1,0],'an unqualified error value never bypasses the whole-support fallback');

@@ -5,7 +5,7 @@ import {test} from 'node:test';
 import {chromium} from 'playwright';
 import {createDevServer} from '../server.mjs';
 import {forestTerrainPyramid,withForestTerrainOcclusion} from '../js/forest-occlusion.js';
-import {FOREST_CULL_WGSL,FOREST_MASS_MIDDLE_NEIGHBOR_ROOT_CULL_WGSL} from '../js/forest-scenery.js';
+import {FOREST_CULL_WGSL,FOREST_MIDDLE_ROOT_CULL_WGSL,forestWithNativeLod} from '../js/forest-scenery.js';
 
 test('terrain bounds cover both raster triangles at every pyramid level, including saddle cells',()=>{
  const size=9,heights=Float32Array.from({length:size*size},(_,i)=>((i*17)%31)-10),region={size,span:80,x:0,z:0},p=forestTerrainPyramid(heights,region);
@@ -22,7 +22,7 @@ test('terrain bounds cover both raster triangles at every pyramid level, includi
  heights[0]=NaN;assert.throws(()=>forestTerrainPyramid(heights,region),/Nonfinite/);
 });
 test('terrain occlusion extends both standalone and production neighbor culling without changing LOD thresholds',()=>{
- for(const source of [FOREST_CULL_WGSL,FOREST_MASS_MIDDLE_NEIGHBOR_ROOT_CULL_WGSL]){
+ for(const source of [FOREST_CULL_WGSL,forestWithNativeLod(FOREST_MIDDLE_ROOT_CULL_WGSL)]){
   const extended=withForestTerrainOcclusion(source);
   assert.ok(extended.includes('if(forestTerrainHidden(world,radius)){return;}'));
   assert.ok(extended.includes('farError<=threshold'));

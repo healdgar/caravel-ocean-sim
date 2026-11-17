@@ -69,11 +69,6 @@ import {
   loadForestScenery,
 } from '../js/forest-scenery.js';
 import {
-  SUBTROPICAL_FOREST_MIDDLE_ASSETS,
-  PORTUGAL_FOREST_MIDDLE_ASSETS,
-  loadForestMiddle,
-} from '../js/forest-middle.js';
-import {
   terrainSample,
   safeLandfallStart,
   constrainIslandMotion,
@@ -852,7 +847,7 @@ test('subtropical forest scenery pack, public NASA POWER climate lookup, and cli
   assert.equal(liveProfile.koppenCode, 'Aw');
   assert.equal(liveProfile.forestPackKind, 'subtropical');
 
-  // 3. Load the 5-tier subtropical forest scenery pack & middle LOD pack and verify all 4 tropical species
+  // 3. Load the subtropical forest scenery pack and verify all 4 tropical species
   const fetchLocalAsset = async (url) => {
     const buf = fs.readFileSync(url);
     const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
@@ -873,13 +868,6 @@ test('subtropical forest scenery pack, public NASA POWER climate lookup, and cli
     subtropicalPack.manifest.prototypes.map((p) => p.species),
     ['royal_palm', 'palm', 'ceiba', 'mangrove']
   );
-  assert.ok(subtropicalPack.volumes?.prototypes?.length === 4, 'Subtropical pack includes 4 3D optical volume fields');
-  const subtropicalMiddle = await loadForestMiddle({
-    forest: subtropicalPack.manifest,
-    assets: SUBTROPICAL_FOREST_MIDDLE_ASSETS,
-    fetchAsset: fetchLocalAsset,
-  });
-  assert.equal(subtropicalMiddle.prototypes.length, 4);
 
   // 4. Verify retargetForestPackToProcedural places all 4 subtropical species and adapts mix to climate
   const { retargetForestPackToProcedural } = await import('../js/terrain.js');
@@ -1101,7 +1089,7 @@ test('scenery pass: beach wet sand, stratified stone, baked distant canopy domes
   assert.match(TERRAIN, /crownGap/);
   assert.match(TERRAIN, /skyRefl/);
 
-  // Verify WGSL forest LOD shaders include rounded cluster dome curvature, wind flutter, and far/middle crown-clump normal relief
+  // Verify WGSL forest LOD shaders include rounded cluster dome curvature, wind flutter, and far crown-clump normal relief
   assert.match(FOREST_VERTEX_WGSL, /domeCurve/);
   assert.match(FOREST_VERTEX_WGSL, /frondCurve/);
   assert.match(FOREST_VERTEX_WGSL, /farNorm/);
@@ -2031,14 +2019,7 @@ test('Portugal 5-tier multi-cohort forest pack loads 12 veteran+canopy prototype
       'blueberry:canopy',
     ]
   );
-  assert.equal(portugalPack.volumes?.prototypes?.length, 12, 'Portugal pack includes 12 3D optical volume fields');
   assert.equal(portugalPack.nativeLod?.prototypes?.length, 12, 'Portugal pack builds 12 runtime multi-tier wood & leaf-ribbon LODs');
-  const portugalMiddle = await loadForestMiddle({
-    forest: portugalPack.manifest,
-    assets: PORTUGAL_FOREST_MIDDLE_ASSETS,
-    fetchAsset: fetchLocalAsset,
-  });
-  assert.equal(portugalMiddle.prototypes.length, 12, 'Portugal middle LOD pack includes 12 3D structural branch hulls');
 
   const { retargetForestPackToProcedural } = await import('../js/terrain.js');
   const lisbonPack = generateProceduralCoastalPack('lisbon');

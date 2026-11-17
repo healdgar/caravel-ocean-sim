@@ -43,7 +43,7 @@ const FOREST_GROVE_HARBOUR_HEIGHT = 0.78, FOREST_GROVE_INLAND_METRES = [100, 580
 const FOREST_GROVE_CLOSING = [0.7, 0.94];
 
 // Literal paths: build.mjs finds what to publish by reading them from the source.
-// Saba has no entry. Its far woods are the masses of js/forest-mass.js.
+// Saba has no entry. Its far woods are its own trees' crowns (js/forest-crowns.js).
 export const PORTUGAL_FOREST_GROVE_ASSETS = Object.freeze({
   'manifest.json': 'assets/forest-scenery/portugal/groves/manifest.json',
   'maps.bin.gz': 'assets/forest-scenery/portugal/groves/maps.bin.gz',

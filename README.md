@@ -779,8 +779,8 @@ target bounds the **authored sampling estimate**, not native appearance: finite
 native/MASK comparisons still expose coverage and silhouette differences. Pigment,
 leaf underside lighting and opaque density are approximations; no universal
 imperceptible transition or performance target is claimed. See
-[Native forest instances](FOREST_INSTANCES.md) and
-[Native-derived canopy pipeline and validation](FOREST_MASS.md). The
+[Native forest instances](FOREST_INSTANCES.md); the native-derived canopy mass it
+mentions is retired (its record, FOREST_MASS.md, is in git history). The
 earlier bounded forest checkpoint passed source/package checks: its static
 1280×900 coastal test improved from 2.35 FPS to 54–57 FPS. This validates that
 particular view, not the complete detail-transition architecture.
@@ -800,11 +800,10 @@ detail and its rendered transition qualification remain unfinished; see the
 October23close-forest entry in [BACKLOG.md](BACKLOG.md).
 
 Forest geometry loads only for landfall. Full native detail remains a background
-download; transport verifies encoded and decoded SHA-256 receipts. The local
-meshopt decoder and gzip preserve the packed geometry bytes. Explicit
-`forestImpostor=auto|force` retains the individual-atlas diagnostic; it disables
-the new mass/middle path and is not the production canopy. `forestVolume=ray`
-selects the slower comparison raymarch; `forestVolume=off` disables field shading.
+download; transport verifies encoded and decoded SHA-256 receipts; gzip
+preserves the packed geometry bytes. Every pack's far canopy is the one
+continuum's crowns (AGENTS.md rule 3); the old forest mass, middle mesh, volume
+shells and impostor atlases are retired.
 The reusable field/surface exporters and Three.js adapter are now available
 in Forestmodeler; growth and biological leaf-area accounting remain independent.
 

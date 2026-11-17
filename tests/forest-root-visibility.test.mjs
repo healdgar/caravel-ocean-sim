@@ -7,7 +7,7 @@ import {test} from 'node:test';
 import {chromium} from 'playwright';
 import {createDevServer} from '../server.mjs';
 
-test('native wood, leaves and generated middle clip buried roots at the instance collar on the GPU',{timeout:120000},async t=>{
+test('native wood and leaves clip buried roots at the instance collar on the GPU',{timeout:120000},async t=>{
   const server=createDevServer();server.listen(0,'127.0.0.1');await once(server,'listening');let browser;
   try{
     browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||undefined,args:process.env.WEBGPU_BACKEND==='metal'
@@ -16,7 +16,7 @@ test('native wood, leaves and generated middle clip buried roots at the instance
     await page.goto('http://127.0.0.1:'+server.address().port+'/__forest_root_visibility');
     const result=await page.evaluate(async()=>{
       const {FRAME_WGSL}=await import('/js/wgsl/common.js'),{CONTINUUM_CORE_WGSL}=await import('/js/continuum-core.js');
-      const {createForestLeafSurfaces,FOREST_VERTEX_WGSL,FOREST_VERTEX_LAYOUT,FOREST_MIDDLE_VERTEX_LAYOUT}=await import('/js/forest-scenery.js');
+      const {createForestLeafSurfaces,FOREST_VERTEX_WGSL,FOREST_VERTEX_LAYOUT}=await import('/js/forest-scenery.js');
       const {forestLightGPUBytes}=await import('/js/forest-light.js');
       const adapter=await navigator.gpu.requestAdapter(),device=await adapter.requestDevice(),B=GPUBufferUsage,T=GPUTextureUsage,S=GPUShaderStage,errors=[],buffers=[],textures=[];
       device.onuncapturederror=e=>errors.push(e.error.message);
@@ -48,15 +48,15 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,r
       for(let family=0;family<4;family++){const first=family?5+family*2:3,f=surfaces.families[0];bindings.push({binding:first,resource:f.albedo.createView({dimension:'2d-array'})},{binding:first+1,resource:f.normal.createView({dimension:'2d-array'})});}
       const group2=device.createBindGroup({layout:layout2,entries:bindings});
       const fixtures=[];
-      for(const [name,kind,material,middle]of [['wood',3,0,false],['leaf',4,1,false],['middle-wood',3,0,true],['middle-leaf',4,1,true]]){
+      for(const [name,kind,material]of [['wood',3,0],['leaf',4,1]]){
         const rows=[];
         // Separate buried/above cards and one straddling Y0. Each card consists
         // of two triangles, preserving interpolation across the collar plane.
         for(const [x0,x1,y0,y1]of [[-.9,-.4,-.85,-.35],[.4,.9,.35,.85],[-.25,.25,-.65,.65]]){
           const corners=[[x0,y0,0,1],[x1,y0,1,1],[x1,y1,1,0],[x0,y1,0,0]];
-          for(const id of [0,1,2,0,2,3]){const [x,y,u,v]=corners[id];rows.push(x,y,0,0,0,1,kind,.72,u,v,1,1,1,...(middle?[]:[material]));}
+          for(const id of [0,1,2,0,2,3]){const [x,y,u,v]=corners[id];rows.push(x,y,0,0,0,1,kind,.72,u,v,1,1,1,material);}
         }
-        const vertices=make(new Float32Array(rows),B.VERTEX,'immutable collar '+name),pipeline=await device.createRenderPipelineAsync({label:'collar '+name,layout,vertex:{module,entryPoint:middle?'forestMiddleVS':'forestCanopyVS',buffers:[middle?FOREST_MIDDLE_VERTEX_LAYOUT:FOREST_VERTEX_LAYOUT]},fragment:{module,entryPoint:middle?'forestMiddleFS':name==='leaf'?'forestNativeLeafFS':'forestNativeOpaqueFS',targets:[{format:'rgba8unorm'}]},primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:4,alphaToCoverageEnabled:false}});
+        const vertices=make(new Float32Array(rows),B.VERTEX,'immutable collar '+name),pipeline=await device.createRenderPipelineAsync({label:'collar '+name,layout,vertex:{module,entryPoint:'forestCanopyVS',buffers:[FOREST_VERTEX_LAYOUT]},fragment:{module,entryPoint:name==='leaf'?'forestNativeLeafFS':'forestNativeOpaqueFS',targets:[{format:'rgba8unorm'}]},primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:4,alphaToCoverageEnabled:false}});
         fixtures.push({name,vertices,pipeline});
       }
       const resolve=device.createTexture({size:[W,H],format:'rgba8unorm',usage:T.RENDER_ATTACHMENT|T.COPY_SRC}),msaa=device.createTexture({size:[W,H],format:'rgba8unorm',sampleCount:4,usage:T.RENDER_ATTACHMENT}),depth=device.createTexture({size:[W,H],format:'depth32float',sampleCount:4,usage:T.RENDER_ATTACHMENT});textures.push(resolve,msaa,depth);
@@ -71,16 +71,14 @@ fn landFinish(world:vec3f,n:vec3f,albedo:vec3f,diffuse:f32,ambient:f32,wet:f32,r
       }
       await device.queue.onSubmittedWorkDone();const immutable=fixtures.map(f=>({name:f.name,writes:writes.get(f.vertices)})),rootReadUsage=!!(roots.usage&(B.MAP_READ|B.COPY_SRC));surfaces.destroy();for(const b of buffers)b.destroy();for(const texture of textures)texture.destroy();device.destroy();return {errors,results,immutable,rootReadUsage,adapter:Object.fromEntries(['vendor','architecture','device','description'].map(k=>[k,adapter.info?.[k]??'']))};
     });
-    assert.deepEqual(result.errors,[]);assert.equal(result.results.length,16);assert.equal(result.rootReadUsage,false);
+    assert.deepEqual(result.errors,[]);assert.equal(result.results.length,8);assert.equal(result.rootReadUsage,false);
     for(const fixture of result.immutable)assert.equal(fixture.writes,1,'source geometry uploads once: '+fixture.name);
     for(const row of result.results)for(const [name,region]of Object.entries(row.regions)){
       assert.ok(region.count>100,'nonempty interior raster witness');
       if(name==='above'||name==='crossingAbove'){
-        // 514b716 modulates middle crown pigment by (.88+.20*exposure+clump*.15) at this .72 exposure.
-        const visible=row.shader==='middle-leaf'?Math.floor(255*(.88+.20*.72-.15)):254;
-        assert.ok(region.minR>=visible,'above-collar native geometry remains visible: '+JSON.stringify({row,name}));assert.equal(region.minA,255);}
+        assert.ok(region.minR>=254,'above-collar native geometry remains visible: '+JSON.stringify({row,name}));assert.equal(region.minA,255);}
       else{assert.equal(region.maxR,0,'buried/empty geometry cannot float over downhill abyss: '+JSON.stringify({row,name}));assert.equal(region.maxA,0);}
     }
-    t.diagnostic(JSON.stringify({qualification:'Production native/middle shader collar visibility; no opaque ground or terrain occlusion, unchanged immutable source geometry',...result}));
+    t.diagnostic(JSON.stringify({qualification:'Production native shader collar visibility; no opaque ground or terrain occlusion, unchanged immutable source geometry',...result}));
   }finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}
 });

@@ -2,7 +2,7 @@
 
 October 23, 2026. **Adopted implementation plan; not a shipped replacement.**
 This supersedes the intended native-tree/middle-shell transition architecture in
-`FOREST_INSTANCES.md` and `FOREST_MASS.md`. Those files remain records of the
+`FOREST_INSTANCES.md` and `FOREST_MASS.md` (now retired, in git history). They remain records of the
 current implementation, source receipts and experiments. No performance or
 appearance qualification follows from adopting this plan.
 

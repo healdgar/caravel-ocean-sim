@@ -66,10 +66,9 @@ The current native-derived production path uses original near geometry, reduced
 native wood/leaf-field meshes between, and opaque regional leaf-density masses
 far away. The same planted roots and their overlapping detailed leaf fields
 supply that mass; no generic crown domes or individual-tree atlas cards supply
-its surface. See [the cache/assembly pipeline](FOREST_MASS.md) for provenance,
-projected sampling policy, timings and unresolved native-appearance differences.
-The following atlases remain an explicit `forestImpostor=auto|force` diagnostic
-and a load-failure fallback, not the production distant-canopy representation.
+its surface. The forest mass and the atlases below are retired: every pack's far
+canopy is now the one continuum's crowns (`js/forest-crowns.js`). What follows is
+kept as a record of the atlas design.
 
 
 Prototype geometry is shared across roots. Uploaded root and prototype buffers
@@ -87,9 +86,8 @@ the native tree's volume.
 
 The initial **32-rendered-pixel** impostor switch is an authored policy,
 **not an appearance-error certificate**. Native rendered comparisons remain
-required before calling the transition imperceptible. `forestImpostorPixels`
-adjusts that policy; `forestImpostor=off` and `forestImpostor=force` support
-comparison. Atlas alpha, colour, depth and lighting error are not bounded by
+required before calling the transition imperceptible. The atlas
+policy and its `forestImpostor*` address flags are retired. Atlas alpha, colour, depth and lighting error are not bounded by
 the old geometric 3-pixel criterion.
 
 Forestmodeler's existing `_build_opaque_crown_dome` also generates each tree's
