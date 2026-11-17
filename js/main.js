@@ -5766,6 +5766,8 @@ async function main() {
     if(continuumCensus&&(censusEveryFrame||(frameIndex&7)===0)){
       // People are one family across every company, the garrison, the mate, the town and the decks of passing vessels.
       const people=[...vessels.flatMap(v=>v.crew?.continuumDraws?.()??[]),...(fortSoldiers?.continuumDraws?.()??[]),...(mateSoldiers?.continuumDraws?.()??[]),...(townsfolk?.continuumDraws?.()??[]),...(terrain?.tradeVessels?.peopleDraws?.()??[])];
+      // Damaged trade vessels and their pre-selection fallback are sized on the CPU, beside their indirect draws.
+      continuumCensus.report('trade vessels',terrain?.tradeVessels?.cpuTriangles??0);
       continuumCensus.encode(enc,[...(terrain?.continuumSources?.()??[]),...(people.length?[{name:'people',draws:people}]:[])]);
     }
     const doTs=profiler.resolve(enc);

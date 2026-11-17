@@ -7132,6 +7132,8 @@ export async function createTradeVessels({
   let lastUploadTime = -Infinity;
   let totalIntact = 0;
   let gpuSelectionEncoded = false;
+  // Triangles drawn this frame at sizes the CPU holds, for the continuum census (cpuTriangles).
+  let damagedTriangles = 0, fallbackTriangles = 0;
   let hasEncodedGpuOnce = false;
   let dirtySyncFlag = false;
   let lastEnv = { windVec: [8, 0], storm: false, avoidVessels: null };
@@ -8681,6 +8683,8 @@ export async function createTradeVessels({
       if (!hasSimClock || Number.isFinite(elapsedSec)) {
         updateAllVessels(0, t, null, false, lastEnv);
       }
+      // Both counts start over each frame here; drawDamaged follows draw in the same frame.
+      fallbackTriangles = 0; damagedTriangles = 0;
       if (!pipe || !bindGroup) return;
       const canIndirect = typeof pass.drawIndexedIndirect === 'function' && typeof pass.drawIndirect === 'function';
       if (gpuSelectionEncoded && continuumPipe && splatPipe && canIndirect) {
@@ -8739,6 +8743,7 @@ export async function createTradeVessels({
           pass.setVertexBuffer(1, instanceBuffers[a]);
           pass.setIndexBuffer(indexBuffer, 'uint32');
           pass.drawIndexed(arch.indexCount, counts[a]);
+          fallbackTriangles += (arch.indexCount / 3) * counts[a];
         }
       }
 
@@ -8748,6 +8753,9 @@ export async function createTradeVessels({
         drawDeckFallback(pass, false);
       }
     },
+    // The triangles the CPU sized this frame, for the census to add to the indirect draws below: damaged ships
+    // (drawDamaged: their surviving depth, then their shade) and the pre-selection fallback.
+    get cpuTriangles() { return damagedTriangles + fallbackTriangles; },
     // The indirect draws draw() submits in the main scene pass this frame, for the continuum census
     // (js/continuum-census.js). Damaged ships (drawDamaged) and the pre-selection fallback are sized on the CPU.
     continuumDraws() {
@@ -8795,6 +8803,7 @@ export async function createTradeVessels({
         pass.setVertexBuffer(1, d.posedBuffer);
         pass.setVertexBuffer(2, d.instBuffer);
         pass.drawIndexed(arch.indexCount, 1);
+        damagedTriangles += (2 * arch.indexCount) / 3;
       }
     },
     drawShadow(pass) {
