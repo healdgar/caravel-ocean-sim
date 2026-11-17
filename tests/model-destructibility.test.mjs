@@ -30,6 +30,7 @@ import { applyBuildingFractureEvents, prepareBuildingFracture } from '../js/buil
 import { loadCrewGLB, readGLB } from '../js/gltf.js';
 import { CREW_SLOT } from '../js/crew-skeleton.js';
 import { attachColonialGroomModel, loadGroomPackGLB } from '../js/crew.js';
+import { CREW_CONTINUUM_ASSETS } from '../js/crew-continuum.js';
 import { crewWoundOutcome, recordCrewWound, sweepCrewBodies } from '../js/crew-wounds.js';
 import { FOREST_TRUNK_SHAPES } from '../js/forest-trunk-shapes.js';
 import { buildForestTrunkGrid, forestTrunkShape, sweepForestTrunks } from '../js/forest-trunks.js';
@@ -74,6 +75,10 @@ const KNOWN_CREW_GLBS = new Set([
   'assets/crew/indigenous-andean-female.glb',
 ]);
 
+// The people continuum's posing rigs: the same 93 joints as the bodies above, driving the HD skin of a person whose
+// wounds and casualty the skeleton carries.
+const CREW_CONTINUUM_GLBS = new Set(Object.values(CREW_CONTINUUM_ASSETS).map((files) => files['body.glb']));
+
 const KNOWN_CREW_ACCESSORY_GLBS = new Set([
   'assets/crew/groom-pack.glb',
 ]);
@@ -103,7 +108,7 @@ test('every .glb asset on disk and in build.mjs is registered in a destructible 
     }
     if (glb.startsWith('assets/crew/')) {
       assert.ok(
-        KNOWN_CREW_GLBS.has(glb) || KNOWN_CREW_ACCESSORY_GLBS.has(glb),
+        KNOWN_CREW_GLBS.has(glb) || CREW_CONTINUUM_GLBS.has(glb) || KNOWN_CREW_ACCESSORY_GLBS.has(glb),
         `Crew asset ${glb} must be registered in the crew wound/casualty pipeline`,
       );
       continue;
@@ -277,7 +282,7 @@ test('every coastal building and fort prefab in PORT_PREFABS fractures into flyi
 });
 
 test('every human crew/soldier .glb model has destructible wound bones and responds to cannonball sweeps', () => {
-  for (const glbPath of KNOWN_CREW_GLBS) {
+  for (const glbPath of [...KNOWN_CREW_GLBS, ...CREW_CONTINUUM_GLBS]) {
     const asset = readGLB(readFileSync(path.join(ROOT, glbPath)));
     const nodeNames = new Set((asset.json.nodes ?? []).map((n) => n.name).filter(Boolean));
     for (const requiredBone of ['pelvis', 'spine_01', 'head', 'upperarm_l', 'thigh_r']) {

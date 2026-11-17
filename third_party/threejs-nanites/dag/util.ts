@@ -13,6 +13,9 @@ export interface Cluster {
   cull: Sphere;
   parentErr: number;
   parentLod: Sphere | null;
+  /** The bark group this cluster was simplified in (none at the finest level), and the one it was merged into. */
+  ownGroup?: number;
+  parentGroup?: number;
 }
 /** A leaf card: its first vertex, the base of its stem, its size. */
 export interface Leaf {

@@ -24,6 +24,7 @@ import { SUBTROPICAL_FOREST_GROVE_ASSETS, PORTUGAL_FOREST_GROVE_ASSETS } from '.
 import { PORTUGAL_MEADOW_GRASS_ASSETS } from './js/meadow-grass.js';
 import { FOREST_MASS_ASSETS } from './js/forest-mass.js';
 import { FOREST_SURFACE_ASSETS, SUBTROPICAL_FOREST_SURFACE_ASSETS, PORTUGAL_FOREST_SURFACE_ASSETS } from './js/forest-surfaces.js';
+import { CREW_CONTINUUM_ASSETS } from './js/crew-continuum.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const wgslModules = ['js/wgsl/common.js', 'js/wgsl/celestial.js', 'js/wgsl/hull.js', 'js/wgsl/lateen.js', 'js/wgsl/victory.js', 'js/wgsl/vessel.js', 'js/wgsl/vessel-pose.js', 'js/wgsl/shadows.js', 'js/wgsl/interaction.js', 'js/wgsl/surface-waves.js', 'js/wgsl/surface-coupling.js', 'js/wgsl/fleet-wakes.js', 'js/wgsl/cloud-model.js', 'js/wgsl/clouds.js', 'js/wgsl/sky.js', 'js/wgsl/deck.js', 'js/wgsl/spindrift.js', 'js/wgsl/wetness.js', 'js/wgsl/sim.js', 'js/wgsl/water-optics.js', 'js/wgsl/underwater.js', 'js/wgsl/ocean.js', 'js/wgsl/ocean-lighting.js', 'js/wgsl/post.js', 'js/wgsl/neural-post.js', 'js/wgsl/neural-pbr.js', 'js/wgsl/caravel.js', 'js/wgsl/crew.js', 'js/wgsl/terrain.js', 'js/wgsl/weather.js', 'js/wgsl/anchor.js', 'js/wgsl/dolphins.js', 'js/wgsl/marine-life.js', 'js/wgsl/gunnery.js', 'js/wgsl/gunnery-probe.js', 'js/wgsl/hull-contact.js', 'js/wgsl/rowing-water.js', 'js/wgsl/crew-solve.js'];
@@ -39,6 +40,8 @@ order.splice(order.indexOf('js/crew-work.js'),0,'js/crew-navigation.js','js/crew
 order.splice(order.indexOf('js/crew-pose.js'),0,'js/crew-physics.js');
 order.splice(order.indexOf('js/crew.js'),0,'js/crew-clip-pose.js');
 order.splice(order.indexOf('js/crew.js'),0,'js/crew-solve.js');
+// People through the one continuum: the baked format, its GPU cut and draws, and the batches crew.js keeps.
+order.splice(order.indexOf('js/crew.js'),0,'js/crew-continuum.js','js/wgsl/crew-continuum.js','js/crew-continuum-draw.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/terrain-near.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/forest-scenery.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/vendor/forest-meshopt.js','js/forest-mass.js');
@@ -194,6 +197,11 @@ if(fs.existsSync(path.join(root,'assets/ground-cover/portugal/meadows-gpu/manife
     if(fs.existsSync(path.join(root,file)))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':'application/octet-stream');
   }
 }
+// The people continuum's bodies, each where it has been baked (scripts/prepare-crew-continuum.mjs). Their streams are
+// not committed; a checkout without them draws the old bodies.
+for(const files of Object.values(CREW_CONTINUUM_ASSETS))for(const file of Object.values(files)){
+  if(fs.existsSync(path.join(root,file)))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':file.endsWith('.glb')?'model/gltf-binary':'application/octet-stream');
+}
 if(fs.existsSync(path.join(root,'assets/boards/partner-ports-1550.json'))){
   runtimeAssetTypes.set('assets/boards/partner-ports-1550.json','application/json');
 }
@@ -204,6 +212,8 @@ const runtimeAssetBytes = new Map(), pagesAssets = new Map();
 const externalDownloadGeometry=new Set(['assets/boards/lisbon-1550.world','assets/boards/partner-ports-1550.json','assets/board/game.js','assets/board/runtime.js','assets/forest-scenery/saba/clusters/vertices.bin.gz','assets/forest-scenery/saba/clusters/indices.bin.gz','assets/forest-scenery/portugal/clusters/vertices.bin.gz','assets/forest-scenery/portugal/clusters/indices.bin.gz','assets/forest-scenery/saba/wind/weights.bin.gz','assets/forest-scenery/portugal/wind/weights.bin.gz','assets/forest-scenery/subtropical/wind/weights.bin.gz','assets/forest-scenery/saba/vertices.bin.gz','assets/forest-scenery/saba/indices.bin.gz','assets/forest-scenery/saba/mass/vertices.bin.gz','assets/forest-scenery/saba/mass/indices.bin.gz','assets/forest-scenery/subtropical/vertices.bin.gz','assets/forest-scenery/subtropical/indices.bin.gz','assets/forest-scenery/portugal/vertices.bin.gz','assets/forest-scenery/portugal/indices.bin.gz', ...Object.values(PORTUGAL_MEADOW_GRASS_ASSETS).filter(f=>f.endsWith('.gz'))]);
 // Both block-compressed sets are a saving for online play. Offline, the embedded maps serve instead.
 for(const file of [...Object.values(FOREST_SURFACE_ASSETS),...Object.values(SUBTROPICAL_FOREST_SURFACE_ASSETS),...Object.values(PORTUGAL_FOREST_SURFACE_ASSETS)])if(file.endsWith('.gz'))externalDownloadGeometry.add(file);
+// The people continuum's bodies (hundreds of MB) stay out of the downloads, which fetch the published copies.
+for(const files of Object.values(CREW_CONTINUUM_ASSETS))for(const file of Object.values(files))externalDownloadGeometry.add(file);
 function runtimeAssetURL(file,mime,inlineAssets){
   if(!runtimeAssetBytes.has(file))runtimeAssetBytes.set(file,fs.readFileSync(path.join(root,file)));
   const bytes=runtimeAssetBytes.get(file);

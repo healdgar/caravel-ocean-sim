@@ -31,3 +31,7 @@ assets/ports/1550/*.png
 assets/ports/1550/*/*.png
 # Large raw offline meadow source binaries (compact meadows-gpu/ pack is tracked)
 assets/ground-cover/portugal/meadows/
+# The people continuum's baked streams: npm run deploy publishes them, scripts/prepare-crew-continuum.mjs bakes them.
+assets/crew/continuum/*/*
+!assets/crew/continuum/*/manifest.json
+docs/assets/crew/continuum/

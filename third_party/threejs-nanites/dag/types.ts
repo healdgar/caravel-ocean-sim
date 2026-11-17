@@ -30,6 +30,17 @@ export interface DagRequest {
   barkAttr?: [number, number];
   /** How a bark group's error adds to its children's: the max (default: each switch moves <= tau) or the sum (?barkerr=sum). */
   barkErr?: 'sum' | 'max';
+  /**
+   * Each bark vertex's part. A cluster then holds one part only. The caller makes every part boundary a seam
+   * (vertices duplicated, one copy per part), so the simplifier coarsens a boundary on both sides alike and never
+   * makes a triangle that spans two parts.
+   */
+  barkParts?: ArrayLike<number>;
+  /**
+   * A bark group's own error, measured by the caller from the group's merged child triangles and their
+   * simplification (global vertex indices) and the simplifier's own error; the larger of the two is kept.
+   */
+  barkGroupError?: (children: Uint32Array, simplified: Uint32Array, error: number) => number;
 }
 
 /** A leaf texture's alpha as a coarse mask: `size` x `size`, 1 = opaque, rows from the image's top. */
@@ -63,6 +74,8 @@ export interface DagResult {
   idx: Uint32Array;
   rec: Float32Array;
   meta: Uint32Array;
+  /** 2 ints per cluster: the bark group it was simplified in and the one it was merged into (-1: none). */
+  groups: Int32Array;
   stats: DagStats;
   /** For each leaf vertex after the bark's, the source leaf vertex it came from. */
   leafSource: Uint32Array;

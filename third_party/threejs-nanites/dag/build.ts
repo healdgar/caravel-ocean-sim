@@ -81,11 +81,31 @@ function groupByAdjacency(clusters: Cluster[], remap: Uint32Array): Cluster[][] 
 /** The bark simplifier's attribute weights (normal xyz, uv): their error adds to the position error (m). */
 const BARK_WEIGHTS = [0.5, 0.5, 0.5, 0.08, 0.08];
 
-function buildBark(pos: Float32Array, attr: Float32Array, idx: Uint32Array, out: Cluster[], [ns, us] = [1, 1], errMode: 'sum' | 'max' = 'max'): number {
+// Splits a triangle list into clusters, each holding one part only when parts are given (DagRequest.barkParts).
+function partClusters(idx: Uint32Array, pos: Float32Array, parts: ArrayLike<number> | undefined): Uint32Array[] {
+  if (!parts) return meshletize(idx, pos);
+  const byPart = new Map<number, number[]>();
+  for (let t = 0; t < idx.length; t += 3) {
+    const part = parts[idx[t]];
+    if (parts[idx[t + 1]] !== part || parts[idx[t + 2]] !== part) throw Error('A triangle spans two parts');
+    let list = byPart.get(part);
+    if (!list) byPart.set(part, (list = []));
+    list.push(idx[t], idx[t + 1], idx[t + 2]);
+  }
+  return [...byPart.keys()].sort((a, b) => a - b).flatMap((part) => meshletize(Uint32Array.from(byPart.get(part)!), pos));
+}
+
+interface BarkHooks {
+  parts?: ArrayLike<number>;
+  groupError?: (children: Uint32Array, simplified: Uint32Array, error: number) => number;
+}
+
+function buildBark(pos: Float32Array, attr: Float32Array, idx: Uint32Array, out: Cluster[], [ns, us] = [1, 1], errMode: 'sum' | 'max' = 'max', hooks: BarkHooks = {}): number {
   const weights = BARK_WEIGHTS.map((w, i) => w * (i < 3 ? ns : us));
   const nv = pos.length / 3;
   const remap = MeshoptSimplifier.generatePositionRemap(pos, 3);
-  let current = meshletize(idx, pos).map((ci) => makeCluster(ci, pos, 0, 0, null));
+  let current = partClusters(idx, pos, hooks.parts).map((ci) => makeCluster(ci, pos, 0, 0, null));
+  let groupCount = 0;
   out.push(...current);
   let level = 0;
   const owner = new Int32Array(nv);
@@ -131,19 +151,25 @@ function buildBark(pos: Float32Array, attr: Float32Array, idx: Uint32Array, out:
         continue;
       }
       progress = true;
+      const groupId = groupCount++;
+      for (const c of g) c.parentGroup = groupId;
+      // A caller may measure the group's error its own way (a skinned body measures it in every pose it can take),
+      // never below what the simplifier reports.
+      const own = hooks.groupError ? Math.max(err, hooks.groupError(merged, Uint32Array.from(res, (v) => verts[v]), err)) : err;
       const childMax = Math.max(...g.map((c) => c.err));
       // The group's error: the largest of its children's and its own simplification's (measured from the children's
       // mesh), as Nanite does: each switch then moves the image by at most tau. The sum (meshoptimizer's demo:
       // conservative, the drift from full detail) kept far trees' bark several levels too fine: a 30 px oak drew
       // ~2900 bark triangles (~40% of all at the user's zoomed spot), with the same popping (`--sweep=lod`).
-      const gErr = errMode === 'max' ? Math.max(childMax, err, 1e-5) : childMax + Math.max(err, 1e-5);
+      const gErr = errMode === 'max' ? Math.max(childMax, own, 1e-5) : childMax + Math.max(own, 1e-5);
       const gSphere = mergeSpheres(g.map((c) => c.lod));
       for (const c of g) { c.parentErr = gErr; c.parentLod = gSphere; }
       if (res.length === 0) continue; // whole group collapsed away (tiny twigs)
       const gIdx = new Uint32Array(res.length);
       for (let i = 0; i < res.length; i++) gIdx[i] = verts[res[i]];
-      for (const ci of meshletize(gIdx, pos)) {
+      for (const ci of partClusters(gIdx, pos, hooks.parts)) {
         const c = makeCluster(ci, pos, level, gErr, gSphere);
+        c.ownGroup = groupId;
         out.push(c);
         next.push(c);
       }
@@ -156,7 +182,7 @@ function buildBark(pos: Float32Array, attr: Float32Array, idx: Uint32Array, out:
 
 /** The DAG of one mesh (bark + leaves; `leaves.pos` empty for a plain model), packed for the renderer. */
 export async function buildDag(req: DagRequest): Promise<DagResult> {
-  const { id, bark, leaves, leafErr, leafMask, barkAttr, barkErr } = req;
+  const { id, bark, leaves, leafErr, leafMask, barkAttr, barkErr, barkParts, barkGroupError } = req;
   {
     await MeshoptClusterizer.ready;
     await MeshoptSimplifier.ready;
@@ -169,7 +195,7 @@ export async function buildDag(req: DagRequest): Promise<DagResult> {
       battr.set(bark.nrm.subarray(i * 3, i * 3 + 3), i * 5);
       battr.set(bark.uv.subarray(i * 2, i * 2 + 2), i * 5 + 3);
     }
-    const barkLevels = buildBark(bark.pos, battr, bark.idx, barkClusters, barkAttr, barkErr);
+    const barkLevels = buildBark(bark.pos, battr, bark.idx, barkClusters, barkAttr, barkErr, { parts: barkParts, groupError: barkGroupError });
 
     // leaves (vertex arrays grow as reduced leaves are appended)
     const lv: LeafVerts = { pos: Array.from(leaves.pos), nrm: Array.from(leaves.nrm), uv: Array.from(leaves.uv), src: Array.from({ length: leaves.pos.length / 3 }, (_, i) => i) };
@@ -206,6 +232,7 @@ export async function buildDag(req: DagRequest): Promise<DagResult> {
     const idx = new Uint32Array(totalIdx);
     const rec = new Float32Array(all.length * 16);
     const meta = new Uint32Array(all.length * 4);
+    const groups = new Int32Array(all.length * 2);
     let o = 0;
     all.forEach(([c, kind], i) => {
       const off = kind === 1 ? nb : 0;
@@ -222,6 +249,8 @@ export async function buildDag(req: DagRequest): Promise<DagResult> {
       meta[i * 4 + 1] = c.idx.length / 3;
       meta[i * 4 + 2] = c.level;
       meta[i * 4 + 3] = kind;
+      groups[i * 2] = c.ownGroup ?? -1;
+      groups[i * 2 + 1] = c.parentGroup ?? -1;
       o += c.idx.length;
     });
     const stats = {
@@ -236,6 +265,6 @@ export async function buildDag(req: DagRequest): Promise<DagResult> {
       leafGrowth,
       ms: Math.round(performance.now() - t0),
     };
-    return { id, vtx, idx, rec, meta, stats, leafSource: Uint32Array.from(leafSrc, (v) => lv.src[v]), barkVertices: nb };
+    return { id, vtx, idx, rec, meta, groups, stats, leafSource: Uint32Array.from(leafSrc, (v) => lv.src[v]), barkVertices: nb };
   }
 }

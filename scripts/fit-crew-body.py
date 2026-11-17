@@ -1317,6 +1317,10 @@ def main():
     out_j = out_j[kept]
     out_w = out_w[kept]
     out_uv = (UV % 1.0)[kept].astype(np.float32)
+    # Each welded vertex's region (0 paint, 1 shirt, 2 trousers, 3 skin, 4 hair), so a textured body can still be
+    # worn in each person's own colours. Four bytes a vertex, as glTF aligns vertex attributes.
+    out_region = np.zeros((len(kept), 4), dtype=np.uint8)
+    out_region[:, 0] = regions[kept].astype(np.uint8)
     faces = remap[I].reshape(-1, 3)
     faces = faces[(faces[:, 0] != faces[:, 1]) & (faces[:, 1] != faces[:, 2]) & (faces[:, 0] != faces[:, 2])]
     I_out = faces.ravel()
@@ -1381,6 +1385,7 @@ def main():
             **({'TEXCOORD_0': add_acc(out_uv, 34962, 'VEC2', 5126)} if textured else {}),
             'JOINTS_0': add_acc(out_j.astype(np.uint16), 34962, 'VEC4', 5123),
             'WEIGHTS_0': add_acc(out_w.astype(np.float32), 34962, 'VEC4', 5126),
+            **({'_REGION': add_acc(out_region, 34962, 'VEC4', 5121)} if textured else {}),
         },
         'indices': add_acc(I_out.astype(np.uint32), 34963, 'SCALAR', 5125),
         'material': 0,

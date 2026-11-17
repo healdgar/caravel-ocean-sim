@@ -1,0 +1,326 @@
+{
+ "format": "waterworld.crew-continuum",
+ "version": 1,
+ "id": "soldier",
+ "sex": "male",
+ "role": "soldier",
+ "source": {
+  "file": "soldier.glb",
+  "sha256": "974ebb91f4f0c67afee5f7f1522fcbf05fb9f98f5784f0776514eae8603b317a",
+  "vertices": 990137,
+  "triangles": 1931936
+ },
+ "vertexWords": 6,
+ "clusterWords": 20,
+ "stepWords": 4,
+ "vertexCount": 996109,
+ "indexCount": 11594199,
+ "clusterCount": 31231,
+ "quantization": {
+  "low": [
+   -0.874094,
+   0.004,
+   -0.221067
+  ],
+  "posScale": 1.761479,
+  "uvLow": [
+   0,
+   0
+  ],
+  "uvScale": [
+   0.999894,
+   0.999989
+  ]
+ },
+ "parts": [
+  "trunk",
+  "head",
+  "upperarm_l",
+  "lowerarm_l",
+  "upperarm_r",
+  "lowerarm_r",
+  "thigh_l",
+  "calf_l",
+  "thigh_r",
+  "calf_r"
+ ],
+ "regions": [
+  "paint",
+  "shirt",
+  "trousers",
+  "skin",
+  "hair"
+ ],
+ "regionMedians": [
+  [
+   0.03632,
+   0.0163,
+   0.00933
+  ],
+  [
+   0.07808,
+   0.03423,
+   0.01786
+  ],
+  [
+   0.05951,
+   0.02664,
+   0.0115
+  ],
+  [
+   0.23707,
+   0.1001,
+   0.05837
+  ],
+  [
+   0.39728,
+   0.26964,
+   0.17726
+  ]
+ ],
+ "clusters": {
+  "triangles": 3864733,
+  "levels": 14,
+  "roots": 22,
+  "groups": 3909,
+  "partCopies": 5985,
+  "rootError": 0.3409
+ },
+ "chain": {
+  "vertexCount": 3002,
+  "triangleCount": 6000,
+  "stepCount": 2994,
+  "offsets": {
+   "vertices": 0,
+   "records": 18012,
+   "indices": 21014,
+   "steps": 39014
+  },
+  "baseTriangles": 6000,
+  "baseVertices": 3002,
+  "baseError": 0.077,
+  "baseGeometric": 0.077,
+  "simplifyError": 0.0161,
+  "steps": 2994,
+  "coreTriangles": 12,
+  "depth": 9,
+  "errorRange": [
+   0.077,
+   1.0112
+  ],
+  "inflateMax": 0.08,
+  "boundaryEdges": 0,
+  "nonManifoldEdges": 5
+ },
+ "splat": {
+  "joint": 1,
+  "centre": [
+   -0.0017,
+   0.8827,
+   -0.0245
+  ],
+  "ry": 0.8787,
+  "rx": 0.2027,
+  "regions": [
+   {
+    "name": "paint",
+    "share": 0.0839,
+    "mean": [
+     0.06067,
+     0.03278,
+     0.02198
+    ]
+   },
+   {
+    "name": "shirt",
+    "share": 0.3749,
+    "mean": [
+     0.13516,
+     0.0828,
+     0.05358
+    ]
+   },
+   {
+    "name": "trousers",
+    "share": 0.4366,
+    "mean": [
+     0.08053,
+     0.04196,
+     0.02379
+    ]
+   },
+   {
+    "name": "skin",
+    "share": 0.0427,
+    "mean": [
+     0.32684,
+     0.13724,
+     0.082
+    ]
+   },
+   {
+    "name": "hair",
+    "share": 0.0619,
+    "mean": [
+     0.39642,
+     0.24151,
+     0.1598
+    ]
+   }
+  ]
+ },
+ "texture": {
+  "width": 4096,
+  "height": 4096,
+  "coverage": 0.6352,
+  "levels": [
+   {
+    "width": 4096,
+    "height": 4096,
+    "offset": 0,
+    "bytes": 16777216
+   },
+   {
+    "width": 2048,
+    "height": 2048,
+    "offset": 16777216,
+    "bytes": 4194304
+   },
+   {
+    "width": 1024,
+    "height": 1024,
+    "offset": 20971520,
+    "bytes": 1048576
+   },
+   {
+    "width": 512,
+    "height": 512,
+    "offset": 22020096,
+    "bytes": 262144
+   },
+   {
+    "width": 256,
+    "height": 256,
+    "offset": 22282240,
+    "bytes": 65536
+   },
+   {
+    "width": 128,
+    "height": 128,
+    "offset": 22347776,
+    "bytes": 16384
+   },
+   {
+    "width": 64,
+    "height": 64,
+    "offset": 22364160,
+    "bytes": 4096
+   },
+   {
+    "width": 32,
+    "height": 32,
+    "offset": 22368256,
+    "bytes": 1024
+   },
+   {
+    "width": 16,
+    "height": 16,
+    "offset": 22369280,
+    "bytes": 256
+   },
+   {
+    "width": 8,
+    "height": 8,
+    "offset": 22369536,
+    "bytes": 64
+   },
+   {
+    "width": 4,
+    "height": 4,
+    "offset": 22369600,
+    "bytes": 16
+   },
+   {
+    "width": 2,
+    "height": 2,
+    "offset": 22369616,
+    "bytes": 16
+   },
+   {
+    "width": 1,
+    "height": 1,
+    "offset": 22369632,
+    "bytes": 16
+   }
+  ]
+ },
+ "body": {
+  "file": "body.glb",
+  "bytes": 974644,
+  "sha256": "90bfbc95d0098a24cd414b95ca22e261783b23ec74a79925e1b7fd2c0330a5fe",
+  "triangles": 20000,
+  "vertices": 10002,
+  "contactDrift": {
+   "ankleAboveSole_l": 0,
+   "ankleAboveSole_r": 0,
+   "pelvisAboveSeat": -0.0002
+  }
+ },
+ "poses": 27,
+ "files": {
+  "vertices.bin": {
+   "bytes": 23906616,
+   "sha256": "920b86840a24ec45e30016d8b8ddbc55e053e559c072f6f2e344299904879518",
+   "gzip": {
+    "file": "vertices.bin.gz",
+    "bytes": 17077213,
+    "sha256": "1775b4ef7fa91861f32879e031e77754c9dce4210a32633ae88641ad32668c96"
+   }
+  },
+  "indices.bin": {
+   "bytes": 46376796,
+   "sha256": "9187e9bf0f8c1dbbf14f25287dbdf997c9ff0b068d31a51632f7dde97c90ee18",
+   "gzip": {
+    "file": "indices.bin.gz",
+    "bytes": 14734176,
+    "sha256": "23599a33bfad87b4c6223023ebe548cd059ec874c52c14ea244613aafb19556e"
+   }
+  },
+  "clusters.bin": {
+   "bytes": 2498480,
+   "sha256": "8f6ae1cd4b25143b1dcd41db5d7db0dbb1ff6841265f8788a853dee5d6ced751",
+   "gzip": {
+    "file": "clusters.bin.gz",
+    "bytes": 906207,
+    "sha256": "4f77df4d279342b3f1d43675884f79592deb27d1fe159b1d6b8cf44426954e31"
+   }
+  },
+  "chain.bin": {
+   "bytes": 203976,
+   "sha256": "b719b9ed83713b7f87bddb8c2432253b384a0bb1d909bab861bed38f0c0361f4",
+   "gzip": {
+    "file": "chain.bin.gz",
+    "bytes": 120121,
+    "sha256": "c3bd27ea0c7bf5eeb40ec8ba0c9bdd24ff2c02b142a7f783ff360441f30d6f43"
+   }
+  },
+  "albedo.bc7.bin": {
+   "bytes": 22369648,
+   "sha256": "e367eea2cee373a7c50cc1bc07a44cfaec683cea5cf022e7cb50b1fcb42d786b",
+   "gzip": {
+    "file": "albedo.bc7.bin.gz",
+    "bytes": 12241147,
+    "sha256": "e47137171e8276eba80d9fdfe6eb726e393aec25a1f6fe9df2124df9e6aa9dcb"
+   }
+  },
+  "albedo.astc.bin": {
+   "bytes": 22369648,
+   "sha256": "a026bedb992a25f84ca298053e186a3fb92ef3538a56c1815d56fc146d43a0e9",
+   "gzip": {
+    "file": "albedo.astc.bin.gz",
+    "bytes": 12955664,
+    "sha256": "f9178b0cb2a2da347e85f533621638ba365a8135733001f6e7eccc8fa4de5cb4"
+   }
+  }
+ }
+}
