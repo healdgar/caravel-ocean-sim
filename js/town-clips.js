@@ -8,8 +8,9 @@ import { CREW_CLIP_RATE } from './crew-clip-pose.js';
 import { applyArticulatedRagdollPose, initArticulatedRagdoll, stepArticulatedRagdoll } from './crew-physics.js';
 import { poseMoveBone, poseRotation, solveCrewLimb, turnBone } from './crew-pose.js';
 import { TOWN_COWER_FRAMES, TOWN_FALL_FRAMES, TOWN_FALL_RATE } from './wgsl/townsfolk.js';
+import { CREW_JOINT_COUNT } from './crew-skeleton.js';
 
-const JOINT_FLOATS = 65 * 16;
+const JOINT_FLOATS = CREW_JOINT_COUNT * 16;
 export const TOWN_CLIP_IDLE = 0;
 export const TOWN_CLIP_WALK = 1;
 export const TOWN_CLIP_RUN = 2;
@@ -46,7 +47,7 @@ function keepSoleFlat(a, side) {
 }
 
 function resetSymmetricTorso(a) {
-  for (const name of ['root', 'pelvis', 'spine_01', 'spine_02', 'spine_03', 'neck_01', 'Head', 'clavicle_l', 'clavicle_r']) {
+  for (const name of ['root', 'pelvis', 'spine_01', 'spine_02', 'spine_03', 'spine_04', 'spine_05', 'neck_01', 'neck_02', 'head', 'clavicle_l', 'clavicle_r']) {
     const node = a.nodeIndex(name);
     if (node < 0) continue;
     a.pose[node].t.set(a.rest[node].t);
@@ -72,7 +73,7 @@ export function bakeRideClip(a, frames = TOWN_RIDE_FRAMES, keep = null) {
   const spine1 = a.nodeIndex('spine_01');
   const spine2 = a.nodeIndex('spine_02');
   const neck = a.nodeIndex('neck_01');
-  const head = a.nodeIndex('Head');
+  const head = a.nodeIndex('head');
   const pelvisAboveSeat = a.seatContact?.pelvisAboveSeat ?? 0.278;
   const stirrupX = Math.max(0.335, HORSE_BARREL_MAX_RX + 0.085);
 
@@ -188,7 +189,7 @@ function poseCower(a, amount) {
     solveCrewLimb(a, ['thigh_' + side, 'calf_' + side, 'foot_' + side], ankles[i], [sign * 0.3, 0.35, 0.85]);
     keepSoleFlat(a, side);
   });
-  const head = nodeAt(a, a.nodeIndex('Head'));
+  const head = nodeAt(a, a.nodeIndex('head'));
   const arc = Math.sin(Math.PI * amount);
   LEFT_THEN_RIGHT.forEach(([side, sign], i) => {
     const over = [head[0] + sign * 0.08, head[1] + 0.085, head[2] + 0.01];

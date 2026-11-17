@@ -10,6 +10,7 @@
 // continuous MSAA sample-mask crossfade into a 1-triangle horizon splat + sub-pixel hash thinning.
 import { FRAME_WGSL, ATMO_CORE_WGSL, SIM_CLOCK_LOOP_S } from './common.js';
 import { SKY_RENDER_FUNCS } from './sky.js';
+import { CONTINUUM_SPLAT_PIXELS } from '../continuum-core.js';
 import { CLOUD_SAMPLE } from './clouds.js';
 import { SHADOW_FRAME } from './shadows.js';
 import { ROUTE_STEP_M } from '../town-streets.js';
@@ -329,7 +330,7 @@ struct HerdFate {
 };
 
 const CARAVAN_YOKE_AHEAD_M: f32 = 4.05;
-const HERD_SPLAT_LO_PX: f32 = 3.5;
+const HERD_SPLAT_LO_PX: f32 = ${CONTINUUM_SPLAT_PIXELS.toFixed(1)};
 const HERD_SPLAT_HI_PX: f32 = 5.4;
 const HERD_MORPH_HI_PX: f32 = ${HERD_MORPH_HI_PX.toFixed(1)};
 const HERD_MIN_PX: f32 = 1.0;

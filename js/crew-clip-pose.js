@@ -5,9 +5,10 @@
 import { CREW_CLIP_POSE, CREW_SHOULDER_TURN } from './wgsl/crew.js';
 import { CREW_AFLOAT_LOOPS, poseCrewAfloat } from './crew-pose.js';
 import { poseCrewFingers } from './crew-physics.js';
+import { CREW_JOINT_COUNT } from './crew-skeleton.js';
 
 export const CREW_CLIP_RATE = 30;
-const CREW_JOINT_FLOATS = 65 * 16;
+const CREW_JOINT_FLOATS = CREW_JOINT_COUNT * 16;
 const CREW_CLIPS = ['Idle', 'Walk'];
 // What a body's fourth number says of it: left alone, standing and walking by its first three, or a loop at its first.
 export const CREW_CLIP_MODES = { off: 0, walk: 1, Swim: 2, Float: 3 };
@@ -87,7 +88,7 @@ export function createCrewClipBatch(device, pipeline, model, joints, capacity, a
     upload() { if (any) device.queue.writeBuffer(stateBuffer, 0, states, 0, count * 4); },
     encode(pass) {
       if (!any) return;
-      pass.setPipeline(pipeline); pass.setBindGroup(0, group); pass.dispatchWorkgroups(Math.ceil(count * 65 / 64));
+      pass.setPipeline(pipeline); pass.setBindGroup(0, group); pass.dispatchWorkgroups(Math.ceil(count * CREW_JOINT_COUNT / 64));
     },
     destroy() { stateBuffer.destroy(); },
   };
@@ -95,9 +96,10 @@ export function createCrewClipBatch(device, pipeline, model, joints, capacity, a
 
 // How much of a shoulder turn each joint takes. The legs none, so the feet stay on the line he walks; the hips a little, the
 // spine more, the shoulders and arms all of it, and the head some of it back, so that he still looks where he is going.
-const CREW_TURN_SHARES = [[/^(root|thigh|calf|foot|ball)/, 0], [/^pelvis/, 0.3], [/^spine_01/, 0.55], [/^spine_02/, 0.8], [/^(neck|Head)/, 0.55]];
+// A twist takes its limb's share, a metacarpal its hand's, and the face its head's.
+const CREW_TURN_SHARES = [[/^(root|thigh|calf|foot|ball)/, 0], [/^pelvis/, 0.3], [/^spine_01/, 0.55], [/^spine_02/, 0.8], [/^(neck|head|FACIAL_)/, 0.55]];
 export function crewTurnShares(animator) {
-  const shares = new Float32Array(65);
+  const shares = new Float32Array(CREW_JOINT_COUNT);
   animator.joints.forEach((node, joint) => {
     const name = animator.names[node] ?? '', rule = CREW_TURN_SHARES.find(([pattern]) => pattern.test(name));
     shares[joint] = rule ? rule[1] : 1;
@@ -137,7 +139,7 @@ export function createCrewTurnBatch(device, pipeline, model, joints, capacity) {
     },
     encode(pass) {
       if (!any) return;
-      pass.setPipeline(pipeline); pass.setBindGroup(0, group); pass.dispatchWorkgroups(Math.ceil(capacity * 65 / 64));
+      pass.setPipeline(pipeline); pass.setBindGroup(0, group); pass.dispatchWorkgroups(Math.ceil(capacity * CREW_JOINT_COUNT / 64));
     },
     destroy() { shareBuffer.destroy(); rigBuffer.destroy(); turnBuffer.destroy(); },
   };

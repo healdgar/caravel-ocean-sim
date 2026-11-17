@@ -25,7 +25,7 @@ const animator = (bones) => {
     updateBranch(node) { const s = pose[node].s; world[node].set([s[0], 0, 0, 0, 0, s[1], 0, 0, 0, 0, s[2], 0], 0); },
   };
 };
-const skeleton = () => animator({ spine_03: [0, 1.35, 0], Head: [0, 1.62, 0], upperarm_l: [0.2, 1.4, 0], lowerarm_l: [0.42, 1.2, 0], thigh_r: [-0.1, 0.9, 0], calf_r: [-0.1, 0.48, 0] });
+const skeleton = () => animator({ spine_03: [0, 1.35, 0], head: [0, 1.62, 0], upperarm_l: [0.2, 1.4, 0], lowerarm_l: [0.42, 1.2, 0], thigh_r: [-0.1, 0.9, 0], calf_r: [-0.1, 0.48, 0] });
 
 test('a shot meets only the bodies on its path, nearest first', () => {
   const crew = [sailor(0, [0, 0, 0]), sailor(1, [4, 0, 0.05]), sailor(2, [2, 0, 3]), sailor(3, [1, 0, 0], { casualtyState: 'fallen' }), sailor(4, [1.5, 0, 0], { visible: false })];
@@ -83,6 +83,13 @@ test('a body keeps only its latest arrows, and a lost limb takes its arrows with
   assert.equal(s.stuckArrowPoses.length, 0);
 });
 
+test('an arrow at the head stays in the head', () => {
+  const s = sailor(0, [0, 0, 0]);
+  recordCrewWound(s, 'arrow', [0.03, 1.66, 0.08], [0, 0, -1]);
+  applyCrewWounds(skeleton(), s);
+  assert.equal(s.stuckArrows[0].bone, 'head');
+});
+
 test('a ball through a body kills it, may take or break a limb, and flies on', () => {
   const struck = sailor(0, [0, 1.2, 0]), beside = sailor(1, [0, 1.2, 2]);
   const target = makeBoat('nina', [struck, beside]);
@@ -100,7 +107,7 @@ test('a ball through a body kills it, may take or break a limb, and flies on', (
   assert.deepEqual(crewWoundOutcome('ball', 'calf_r', CREW_BALL_SEVER_CHANCE + 0.01), { kind: 'broken', bone: 'calf_r' });
   assert.equal(crewWoundOutcome('ball', 'calf_r', CREW_BALL_SEVER_CHANCE + CREW_BALL_BREAK_CHANCE + 0.01), null, 'sometimes it leaves the body whole');
   assert.deepEqual(crewWoundOutcome('ball', 'spine_02', 0), { kind: 'crushed', bone: 'spine_03' });
-  assert.equal(crewWoundOutcome('ball', 'Head', 0.99), null);
+  assert.equal(crewWoundOutcome('ball', 'head', 0.99), null);
   assert.equal(crewWoundOutcome('arrow', 'lowerarm_l', 0), null, 'an arrow takes no limb');
   assert.equal(crewWoundOutcome('splinter', 'spine_03', 0), null);
   assert.equal(crewWoundOutcome('splinter', 'calf_r', 0).kind, 'broken');

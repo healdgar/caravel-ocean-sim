@@ -6,6 +6,7 @@
 import { FRAME_WGSL, ATMO_CORE_WGSL } from './wgsl/common.js';
 import { SKY_RENDER_FUNCS } from './wgsl/sky.js';
 import { SHADOW_FRAME } from './wgsl/shadows.js';
+import { CONTINUUM_SPLAT_PIXELS, CONTINUUM_MIN_PIXELS } from './continuum-core.js';
 import { ROCK_ARCHETYPES, rockArchetypeFromSeed } from './vegetation.js';
 import { BUILDING_SHARD_KINDS, buildingKindWithYaw, noteBuildingMesh, traceShotAtBuilding } from './building-fracture.js';
 
@@ -14,8 +15,8 @@ export const BOULDER_TOUGHNESS = 1.35;
 export const BOULDER_BAND_START_PX = 16.0;
 export const BOULDER_BAND_END_PX = 10.5;
 export const BOULDER_SPLAT_HANDOFF_PX = 4.5;
-export const BOULDER_SPLAT_PIXELS = 3.5;
-export const BOULDER_MIN_PIXELS = 1.0;
+export const BOULDER_SPLAT_PIXELS = CONTINUUM_SPLAT_PIXELS;
+export const BOULDER_MIN_PIXELS = CONTINUUM_MIN_PIXELS;
 
 const BOULDER_RAW_SURFACE = 1.6;
 const BOULDER_RAW_LENGTH_SQUARED = 2.0;

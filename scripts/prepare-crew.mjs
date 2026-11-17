@@ -3,6 +3,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
 import {readGLB,gltfAccessor,createSkinAnimator,gltfQuatMultiply,gltfSlerp,gltfTRS} from '../js/gltf.js';
 const source=process.argv[2]??'/tmp/waterworld-crew';
 const revision='5821923af517ac5fdc82505faa92a0d575fc1b1a';
@@ -518,3 +519,8 @@ const out=new URL('../assets/crew/'+(female?'sailor-female-classic.glb':'sailor-
 const output=Buffer.concat([header,json,bh,bin]);await fs.writeFile(out,output);
 console.log(female?'Female sailor GLB:':'Male sailor GLB:',output.length,'bytes;',g.animations.map(a=>a.name).join(', '));
 }
+// The classic rig is mended, then moved onto the crew skeleton (Unreal 5's 80 body joints and 13 face joints), the
+// only skeleton the game draws.
+const repo=path.dirname(path.dirname(new URL(import.meta.url).pathname));
+for(const step of [['scripts/mend-classic-crew-rig.py','--force'],['scripts/extend-crew-skeleton.py','assets/crew/sailor-classic.glb'],['scripts/extend-crew-skeleton.py','assets/crew/sailor-female-classic.glb']])
+  execFileSync('python3',step,{cwd:repo,stdio:'inherit'});

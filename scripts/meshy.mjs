@@ -266,7 +266,7 @@ export async function inspectCrew(file) {
     for(const sex of ['male','female']){
       const template=loadCrewGLB(await fs.readFile(path.join(ROOT,'assets/crew',sex==='male'?'sailor-classic.glb':'sailor-female-classic.glb'))).animator;
       template.sample(null,0);
-      const match=a.joints.length===65&&a.joints.every((node,i)=>{
+      const match=a.joints.length===template.joints.length&&a.joints.every((node,i)=>{
         const other=template.joints[i];
         return a.names[node]===template.names[other]&&a.names[a.parent[node]]===template.names[template.parent[other]]&&
           a.world[node].every((v,j)=>Math.abs(v-template.world[other][j])<.0002)&&

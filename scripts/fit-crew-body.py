@@ -1,21 +1,28 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-"""Binds a rigged generated character to the game's 65-joint crew skeleton without warping geometry.
+"""Binds a rigged generated character to the game's crew skeleton without warping geometry.
 
-Preserves the character's own uniformly scaled anatomical joint positions (zero shoulder shear,
-zero pelvis/hip inversion, zero head-pitch tilt, zero limb-radius crushing), recomputes exact
-inverseBindMatrices, and retargets Idle, Walk, and Brace in model space with grounded soles.
-Segments skin, hair/beard, upper garment, lower garment, and untinted leather/trim using
-joint weights, anatomical coordinates, character-specific colour prototypes, and mesh-graph
-despeckling so facial features, beards, and hair render cleanly across all palettes.
+The crew skeleton (scripts/crew_skeleton.py) is Unreal 5's 80-joint body, the one Tripo rigs with
+--spec unreal, and 13 face joints. The character keeps its own uniformly scaled anatomical joint
+positions (zero shoulder shear, zero pelvis/hip inversion, zero head-pitch tilt, zero limb-radius
+crushing) and its own skin weights, joint for joint; the face joints are placed on its face and
+take their share of the head's weight. Recomputes exact inverseBindMatrices, and retargets Idle,
+Walk, and Brace in model space with grounded soles. Segments skin, hair/beard, upper garment,
+lower garment, and untinted leather/trim using joint weights, anatomical coordinates,
+character-specific colour prototypes, and mesh-graph despeckling so facial features, beards, and
+hair render cleanly across all palettes.
 
-  python3 scripts/fit-crew-body.py [--textured] rigged.glb assets/crew/sailor-classic.glb out.glb
+  python3 scripts/fit-crew-body.py [--textured] [--full-texture] rigged.glb assets/crew/sailor-classic.glb out.glb
 
+--full-texture keeps the character's texture as generated instead of reducing it to 2048 pixels.
 Needs numpy and Pillow.
 """
-import io, json, math, struct, sys
+import io, json, math, os, struct, sys
 import numpy as np
 from PIL import Image, ImageFilter
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from crew_skeleton import JOINTS, FACE_JOINTS, INSERTED, face_landmarks  # noqa: E402
 
 
 def read_glb(path):
@@ -188,6 +195,7 @@ def main():
     if len(args) < 3:
         raise SystemExit('Usage: python3 scripts/fit-crew-body.py [--textured] source_rigged.glb target_classic.glb out.glb')
     textured = '--textured' in flags
+    full_texture = '--full-texture' in flags
     force_bald = '--bald' in flags
     source_path, target_path, out_path = args[:3]
 
@@ -198,6 +206,8 @@ def main():
     src_names = [src['nodes'][j].get('name', f'j{j}') for j in skin['joints']]
     dst_skin = dst['skins'][0]
     dst_names = [dst['nodes'][j]['name'] for j in dst_skin['joints']]
+    if dst_names != list(JOINTS):
+        raise SystemExit(f'{target_path} is not on the crew skeleton; run scripts/extend-crew-skeleton.py on it first')
     dst_index = {n: i for i, n in enumerate(dst_names)}
     dst_lower = {n.lower(): i for i, n in enumerate(dst_names)}
 
@@ -277,7 +287,7 @@ def main():
     body_node = next(i for i, n in enumerate(dst['nodes']) if n.get('name', '').lower().startswith('superhero_'))
     dst_body_pos = accessor(dst, dst_bin, dst['meshes'][dst['nodes'][body_node]['mesh']]['primitives'][0]['attributes']['POSITION'])
     dst_sole_y = float(dst_body_pos[:, 1].min())
-    dst_head_above_sole = float(d_pos('Head')[1] - dst_sole_y)
+    dst_head_above_sole = float(d_pos('head')[1] - dst_sole_y)
 
     P_rot = P @ R0.T
     N_rot = N @ R0.T
@@ -309,53 +319,30 @@ def main():
     out_n = N_rot.copy()
     print(f'rigid fit: scale={S:.3f}, height={(out_p[:, 1].max() - out_p[:, 1].min()):.3f}m, bounds={out_p.min(0).round(3)}..{out_p.max(0).round(3)}')
 
-    # 2. Place all 65 joints at Tripo's own transformed anatomical locations.
+    # 2. Place every body joint at Tripo's own transformed anatomical location, joint for joint, and the face joints
+    # on the face.
     def tp(name):
         return (R0 @ s_pos(name)) * S + T0
 
-    spine_chain = [n for n in ('pelvis', 'spine_01', 'spine_02', 'spine_03', 'spine_04', 'spine_05', 'neck_01') if n in sname]
-    spine_pts = [tp(n) for n in spine_chain]
-    spine_cum = [0.0]
-    for a_pt, b_pt in zip(spine_pts, spine_pts[1:]):
-        spine_cum.append(spine_cum[-1] + float(np.linalg.norm(b_pt - a_pt)))
-    spine_total = spine_cum[-1] or 1.0
-
-    def spine_at(frac):
-        d = frac * spine_total
-        for k in range(len(spine_cum) - 1):
-            if spine_cum[k + 1] >= d or k == len(spine_cum) - 2:
-                span = max(spine_cum[k + 1] - spine_cum[k], 1e-9)
-                u = np.clip((d - spine_cum[k]) / span, 0.0, 1.0)
-                return spine_pts[k] * (1.0 - u) + spine_pts[k + 1] * u
-        return spine_pts[-1]
-
-    new_joint_pos = {
-        'Armature': np.array([0.0, 0.0, 0.0]),
-        'root': np.array([0.0, 0.0, 0.0]),
-        'pelvis': tp('pelvis'),
-        'spine_01': spine_at(0.24),
-        'spine_02': spine_at(0.50),
-        'spine_03': tp('spine_05') if 'spine_05' in sname else spine_at(0.76),
-        'neck_01': tp('neck_01'),
-        'Head': tp('head'),
-    }
-    for side in ('_l', '_r'):
-        for limb_j in ('clavicle', 'upperarm', 'lowerarm', 'hand', 'thigh', 'calf', 'foot', 'ball'):
-            new_joint_pos[limb_j + side] = tp(limb_j + side)
-        p_foot = new_joint_pos['foot' + side]
-        p_ball = new_joint_pos['ball' + side]
-        new_joint_pos['ball_leaf' + side] = p_ball + 0.5 * (p_ball - p_foot)
-        for finger in ('index', 'middle', 'ring', 'pinky', 'thumb'):
-            for k in (1, 2, 3):
-                jn = f'{finger}_0{k}{side}'
-                if jn in sname:
-                    new_joint_pos[jn] = tp(jn)
-                else:
-                    # Fallback relative offset if a finger joint is absent
-                    new_joint_pos[jn] = new_joint_pos['hand' + side] + (d_pos(jn) - d_pos('hand' + side))
-            p2 = new_joint_pos[f'{finger}_02{side}']
-            p3 = new_joint_pos[f'{finger}_03{side}']
-            new_joint_pos[f'{finger}_04_leaf{side}'] = p3 + 0.85 * (p3 - p2)
+    new_joint_pos = {'Armature': np.array([0.0, 0.0, 0.0]), 'root': np.array([0.0, 0.0, 0.0])}
+    for name in JOINTS:
+        if name in ('root',) or name in FACE_JOINTS:
+            continue
+        if name.lower() in sname:
+            new_joint_pos[name] = tp(name)
+    for name, (a_name, b_name, f) in INSERTED.items():
+        # A rig without Unreal's twist, metacarpal or upper spine joints: place them along the bones it has.
+        if name not in new_joint_pos:
+            new_joint_pos[name] = new_joint_pos[a_name] * (1.0 - f) + new_joint_pos[b_name] * f
+    missing = [n for n in JOINTS if n not in new_joint_pos and n not in FACE_JOINTS]
+    if missing:
+        raise SystemExit(f'{source_path} lacks joints the crew skeleton needs: {", ".join(missing)}')
+    src_head = sname['head']
+    src_head_weight = np.where(J == src_head, W, 0.0).sum(axis=1)
+    face_marks, face_measures = face_landmarks(out_p, src_head_weight, new_joint_pos['head'])
+    new_joint_pos.update(face_marks)
+    print('face: eyes at {:.3f} m, mouth at {:.3f} m, chin at {:.3f} m, nose tip {:.3f} m forward'.format(
+        face_measures['eye_y'], face_measures['mouth_y'], face_measures['chin_y'], face_measures['nose'][1]))
 
     # 3. Compute rest world rotations W_rot[node].
     # Axial / posture joints keep dst's exact world rest rotation (upright head/spine/pelvis, flat feet).
@@ -370,7 +357,17 @@ def main():
         for finger in ('index', 'middle', 'ring', 'pinky', 'thumb'):
             LIMB_AIM[f'{finger}_01{side}'] = f'{finger}_02{side}'
             LIMB_AIM[f'{finger}_02{side}'] = f'{finger}_03{side}'
-            LIMB_AIM[f'{finger}_03{side}'] = f'{finger}_04_leaf{side}'
+            if finger != 'thumb':
+                LIMB_AIM[f'{finger}_metacarpal{side}'] = f'{finger}_01{side}'
+    # Joints turned as the joint they hang from is turned: a fingertip bone as the one before it, a twist joint as
+    # its limb bone.
+    FOLLOW = {}
+    for side in ('_l', '_r'):
+        for finger in ('index', 'middle', 'ring', 'pinky', 'thumb'):
+            FOLLOW[f'{finger}_03{side}'] = f'{finger}_02{side}'
+        for limb in ('upperarm', 'lowerarm', 'thigh', 'calf'):
+            for k in ('01', '02'):
+                FOLLOW[f'{limb}_twist_{k}{side}'] = f'{limb}{side}'
 
     new_world_rot = {}
     new_world_pos = {}
@@ -399,18 +396,14 @@ def main():
             dir_new = new_joint_pos[mid_name] - new_joint_pos[name]
             R_diff = rotation_between(dir_dst, dir_new)
             new_world_rot[i] = R_diff @ w_dst_r
-        elif '_04_leaf_' in name:
-            prev_name = name.replace('_04_leaf_', '_03_')
-            prev_idx = d_node_of[prev_name]
-            # Computed after parent in dst_order below
-            new_world_rot[i] = w_dst_r
         else:
+            # Followers are computed after the joint they follow, in dst_order below.
             new_world_rot[i] = w_dst_r
 
     for i in dst_order:
         name = dst['nodes'][i].get('name', '')
-        if '_04_leaf_' in name:
-            prev_idx = d_node_of[name.replace('_04_leaf_', '_03_')]
+        if name in FOLLOW:
+            prev_idx = d_node_of[FOLLOW[name]]
             R_parent_diff = new_world_rot[prev_idx] @ dst_worlds[prev_idx][:3, :3].T
             new_world_rot[i] = R_parent_diff @ dst_worlds[i][:3, :3]
 
@@ -441,32 +434,11 @@ def main():
         # glTF stores column-major MAT4
         new_ibm[slot] = inv_w.T.astype(np.float32)
 
-    # 4. Transfer Tripo's 80-joint skin weights onto our 65 joints smoothly.
+    # 4. Keep Tripo's skin weights, joint for joint: its Unreal rig is the crew skeleton's body.
     joint_weight_splits = {}
     for i, raw_name in enumerate(src_names):
         n = clean_joint_name(raw_name).lower()
-        if n == 'head':
-            joint_weight_splits[i] = [(dst_index['Head'], 1.0)]
-        elif n == 'neck_02':
-            joint_weight_splits[i] = [(dst_index['neck_01'], 0.45), (dst_index['Head'], 0.55)]
-        elif n.startswith('neck'):
-            joint_weight_splits[i] = [(dst_index['neck_01'], 1.0)]
-        elif n == 'spine_01':
-            joint_weight_splits[i] = [(dst_index['spine_01'], 1.0)]
-        elif n == 'spine_02':
-            joint_weight_splits[i] = [(dst_index['spine_01'], 0.5), (dst_index['spine_02'], 0.5)]
-        elif n == 'spine_03':
-            joint_weight_splits[i] = [(dst_index['spine_02'], 1.0)]
-        elif n == 'spine_04':
-            joint_weight_splits[i] = [(dst_index['spine_02'], 0.5), (dst_index['spine_03'], 0.5)]
-        elif n == 'spine_05':
-            joint_weight_splits[i] = [(dst_index['spine_03'], 1.0)]
-        elif 'metacarpal' in n:
-            joint_weight_splits[i] = [(dst_index['hand' + n[-2:]], 1.0)]
-        elif 'twist' in n:
-            base_limb = n.split('_twist')[0] + n[-2:]
-            joint_weight_splits[i] = [(dst_index[base_limb], 1.0)]
-        elif n in dst_lower:
+        if n in dst_lower:
             joint_weight_splits[i] = [(dst_lower[n], 1.0)]
         else:
             # Walk up Tripo hierarchy to nearest mapped ancestor
@@ -480,12 +452,6 @@ def main():
                     anc_name = clean_joint_name(src_names[j_of_node[cur]]).lower()
                     if anc_name in dst_lower:
                         found = dst_lower[anc_name]
-                        break
-                    if anc_name == 'head':
-                        found = dst_index['Head']
-                        break
-                    if anc_name.startswith('spine'):
-                        found = dst_index['spine_03']
                         break
             joint_weight_splits[i] = [(found if found is not None else dst_index['pelvis'], 1.0)]
 
@@ -535,7 +501,7 @@ def main():
 
     pelvis_y = float(new_joint_pos['pelvis'][1])
     sp2_y = float(new_joint_pos['spine_02'][1])
-    head_y = float(new_joint_pos['Head'][1])
+    head_y = float(new_joint_pos['head'][1])
     in_armpit = (np.abs(u_pos[:, 0]) > 0.095) & (np.abs(u_pos[:, 0]) < 0.31) & (u_pos[:, 1] > sp2_y - 0.03) & (u_pos[:, 1] < head_y - 0.03)
     in_skirt_seam = (np.abs(u_pos[:, 0]) < 0.125) & (u_pos[:, 1] > 0.20) & (u_pos[:, 1] < pelvis_y + 0.04)
     smooth_zone = in_armpit | in_skirt_seam
@@ -557,7 +523,77 @@ def main():
         out_j[v] = top_idx
         out_w[v] = vals / tot
 
-    # 5. Retarget Idle, Walk, and Brace onto the new anatomical 65-joint skeleton.
+    # 4b. The face joints take their share of what the head and neck carry, each a soft region about its own feature: the
+    # jaw everything below the mouth and in front of the ear, each lip and lip corner its own, each eye the eye
+    # between the lids, each lid the skin above or below that, each brow its own.
+    fm, s = face_measures, face_measures['scale']
+    cx = fm['cx']
+    fx, fy, fz = out_p[:, 0] - cx, out_p[:, 1], out_p[:, 2]
+
+    def ramp(e0, e1, value):
+        t = np.clip((value - e0) / (e1 - e0), 0.0, 1.0)
+        return t * t * (3.0 - 2.0 * t)
+
+    def region(centre, rx, ry, rz):
+        d = np.sqrt(((out_p[:, 0] - centre[0]) / rx) ** 2 + ((out_p[:, 1] - centre[1]) / ry) ** 2 + ((out_p[:, 2] - centre[2]) / rz) ** 2)
+        return ramp(1.0, 0.45, d)
+
+    # A rig without a jaw may hang the lips and chin on the neck, so the face carves from the neck as well as the head.
+    head_slot = dst_index['head']
+    carving = [head_slot, dst_index['neck_01'], dst_index['neck_02']]
+    carried = np.where(np.isin(out_j, carving), out_w, 0.0).sum(axis=1)
+    facing = ramp(fm['mid_z'] - 0.005 * s, fm['mid_z'] + 0.025 * s, fz)
+    mouth_y, lips_z = fm['mouth_y'], fm['lips_z']
+    jaw_at = new_joint_pos['FACIAL_C_Jaw']
+    share = {}
+    share['FACIAL_C_Jaw'] = (ramp(mouth_y + 0.002 * s, mouth_y - 0.007 * s, fy) * ramp(jaw_at[2] - 0.020 * s, jaw_at[2] + 0.025 * s, fz)
+                             * ramp(0.078 * s, 0.056 * s, np.abs(fx)) * ramp(fm['chin_y'] - 0.045 * s, fm['chin_y'] - 0.012 * s, fy))
+    share['FACIAL_C_LipUpper'] = region((cx, mouth_y + 0.006 * s, lips_z), 0.021 * s, 0.010 * s, 0.016 * s) * (fy > mouth_y - 0.0005 * s)
+    share['FACIAL_C_LipLower'] = region((cx, mouth_y - 0.008 * s, lips_z), 0.020 * s, 0.011 * s, 0.016 * s) * (fy < mouth_y + 0.0005 * s)
+    for side in ('L', 'R'):
+        corner = new_joint_pos[f'FACIAL_{side}_LipCorner']
+        share[f'FACIAL_{side}_LipCorner'] = region((corner[0], corner[1], corner[2] + 0.005 * s), 0.010 * s, 0.010 * s, 0.016 * s)
+        eye = new_joint_pos[f'FACIAL_{side}_Eye']
+        front_of_eye = fz > eye[2]
+        open_eye = np.sqrt(((out_p[:, 0] - eye[0]) / (0.0135 * s)) ** 2 + ((out_p[:, 1] - eye[1]) / (0.0058 * s)) ** 2)
+        share[f'FACIAL_{side}_Eye'] = ramp(1.0, 0.7, open_eye) * front_of_eye
+        across = ramp(1.0, 0.55, np.abs(out_p[:, 0] - eye[0]) / (0.017 * s)) * front_of_eye
+        rise = out_p[:, 1] - eye[1]
+        share[f'FACIAL_{side}_EyelidUpper'] = across * ramp(0.002 * s, 0.006 * s, rise) * ramp(0.016 * s, 0.010 * s, rise) * (1 - share[f'FACIAL_{side}_Eye'])
+        share[f'FACIAL_{side}_EyelidLower'] = across * ramp(-0.002 * s, -0.006 * s, rise) * ramp(-0.013 * s, -0.008 * s, rise) * (1 - share[f'FACIAL_{side}_Eye'])
+        brow = new_joint_pos[f'FACIAL_{side}_Brow']
+        share[f'FACIAL_{side}_Brow'] = region((brow[0], brow[1], brow[2] + 0.006 * s), 0.024 * s, 0.011 * s, 0.020 * s) * front_of_eye
+    # The lips ride the jaw's region rather than adding to it.
+    share['FACIAL_C_Jaw'] = share['FACIAL_C_Jaw'] * (1.0 - share['FACIAL_C_LipLower'])
+    total = sum(share.values()) * facing
+    scale_down = np.where(total > 1.0, 1.0 / np.maximum(total, 1e-9), 1.0)
+    face_rows = np.nonzero((carried > 1e-4) & (total > 1e-4))[0]
+    face_slots = [dst_index[n] for n in FACE_JOINTS]
+    for v in face_rows:
+        row = {}
+        for k in range(4):
+            if out_w[v, k] > 0:
+                row[int(out_j[v, k])] = row.get(int(out_j[v, k]), 0.0) + float(out_w[v, k])
+        given = 0.0
+        for name, slot in zip(FACE_JOINTS, face_slots):
+            w = carried[v] * float(share[name][v] * facing[v] * scale_down[v])
+            if w > 1e-5:
+                row[slot] = row.get(slot, 0.0) + w
+                given += w
+        keep = max(1.0 - given / carried[v], 0.0)
+        for slot in carving:
+            if slot in row:
+                row[slot] *= keep
+        top = sorted(row.items(), key=lambda kv: -kv[1])[:4]
+        tot = sum(val for _, val in top) or 1.0
+        out_j[v] = 0
+        out_w[v] = 0.0
+        for k, (slot, val) in enumerate(top):
+            out_j[v, k] = slot
+            out_w[v, k] = val / tot
+    print('face weights:', {n: int((out_j == dst_index[n]).any(axis=1).sum()) for n in FACE_JOINTS})
+
+    # 5. Retarget Idle, Walk, and Brace onto the new anatomical skeleton.
     dst_leg_len = float(np.linalg.norm(d_pos('calf_l') - d_pos('thigh_l')) + np.linalg.norm(d_pos('foot_l') - d_pos('calf_l')))
     new_leg_len = float(np.linalg.norm(new_joint_pos['calf_l'] - new_joint_pos['thigh_l']) + np.linalg.norm(new_joint_pos['foot_l'] - new_joint_pos['calf_l']))
     leg_ratio = new_leg_len / max(dst_leg_len, 1e-6)
@@ -687,11 +723,11 @@ def main():
 
     # 6. High-quality texture sampling & anatomical garment/skin/hair/beard classification.
     slot_names = [dst['nodes'][j]['name'] for j in dst_skin['joints']]
-    head_slots = {i for i, n in enumerate(slot_names) if n == 'Head'}
-    neck_slots = {i for i, n in enumerate(slot_names) if n == 'neck_01'}
+    head_slots = {i for i, n in enumerate(slot_names) if n == 'head' or n.startswith('FACIAL_')}
+    neck_slots = {i for i, n in enumerate(slot_names) if n in ('neck_01', 'neck_02')}
     hand_slots = {i for i, n in enumerate(slot_names) if n.startswith(('hand_', 'index_', 'middle_', 'ring_', 'pinky_', 'thumb_'))}
     arm_slots = {i for i, n in enumerate(slot_names) if n.startswith(('upperarm_', 'lowerarm_'))}
-    torso_slots = {i for i, n in enumerate(slot_names) if n in ('pelvis', 'spine_01', 'spine_02', 'spine_03', 'clavicle_l', 'clavicle_r')}
+    torso_slots = {i for i, n in enumerate(slot_names) if n in ('pelvis', 'spine_01', 'spine_02', 'spine_03', 'spine_04', 'spine_05', 'clavicle_l', 'clavicle_r')}
     leg_slots = {i for i, n in enumerate(slot_names) if n.startswith(('thigh_', 'calf_'))}
     foot_slots = {i for i, n in enumerate(slot_names) if n.startswith(('foot_', 'ball_'))}
 
@@ -699,7 +735,7 @@ def main():
         mask = np.isin(out_j, list(slot_set))
         return (out_w * mask).sum(axis=1)
 
-    head_pos = new_joint_pos['Head']
+    head_pos = new_joint_pos['head']
     neck_pos = new_joint_pos['neck_01']
     spine1_pos = new_joint_pos['spine_01']
     spine3_pos = new_joint_pos['spine_03']
@@ -1366,17 +1402,23 @@ def main():
     dst.pop('textures', None)
     dst.pop('samplers', None)
     if textured and image is not None:
-        tex_img = image
-        if max(tex_img.size) > 2048:
-            tex_img = tex_img.resize((2048, 2048), Image.Resampling.LANCZOS)
-        buf = io.BytesIO()
-        tex_img.save(buf, format='JPEG', quality=87, optimize=True)
-        if len(buf.getvalue()) > 880_000:
+        if full_texture:
+            # The generated texture, byte for byte.
+            img_bytes = raw_image
+            mime = 'image/png' if raw_image[:4] == b'\x89PNG' else 'image/jpeg'
+        else:
+            tex_img = image
+            if max(tex_img.size) > 2048:
+                tex_img = tex_img.resize((2048, 2048), Image.Resampling.LANCZOS)
             buf = io.BytesIO()
-            tex_img.save(buf, format='JPEG', quality=80, optimize=True)
-        img_bytes = buf.getvalue()
+            tex_img.save(buf, format='JPEG', quality=87, optimize=True)
+            if len(buf.getvalue()) > 880_000:
+                buf = io.BytesIO()
+                tex_img.save(buf, format='JPEG', quality=80, optimize=True)
+            img_bytes = buf.getvalue()
+            mime = 'image/jpeg'
         img_view = add_bytes(img_bytes)
-        dst['images'] = [{'bufferView': img_view, 'mimeType': 'image/jpeg'}]
+        dst['images'] = [{'bufferView': img_view, 'mimeType': mime}]
         dst['textures'] = [{'source': 0}]
         material['pbrMetallicRoughness']['baseColorTexture'] = {'index': 0}
 

@@ -16,9 +16,11 @@ import {selectCrewLOD,createDistantCrewLOD} from '../js/crew-lod.js';
 import {advanceSails,sailingState} from '../js/sailing.js';
 import {createShareLink} from '../js/sharing.js';
 import {crewHelmStand,crewHelmHands} from '../js/crew-work.js';
+import {CREW_JOINT_COUNT,CREW_JOINT_NAMES,CREW_SLOT} from '../js/crew-skeleton.js';
 const bytes=fs.readFileSync(new URL('../assets/crew/sailor.glb',import.meta.url));
 const model=loadCrewGLB(bytes);
 const boat={length:12,beam:3.6,roll:0,rollVelocity:0};
+const skinNames=mesh=>mesh.animator.joints.map(node=>mesh.animator.names[node]);
 function positions(palette,mesh=model){
   const f=new Float32Array(mesh.vertices.buffer),u=new Uint16Array(mesh.vertices.buffer),out=new Float32Array(mesh.vertexCount*3);
   for(let i=0;i<mesh.vertexCount;i++)for(let k=0;k<4;k++){
@@ -28,7 +30,7 @@ function positions(palette,mesh=model){
   return out;
 }
 test('sailor GLB is self-contained, bounded and has the required clips',()=>{
-  assert.ok(bytes.length<1_800_000);assert.equal(model.animator.joints.length,65);
+  assert.ok(bytes.length<1_800_000);assert.equal(model.animator.joints.length,CREW_JOINT_COUNT);assert.deepEqual(skinNames(model),CREW_JOINT_NAMES,'the skin is the crew skeleton, in its order');
   assert.ok(model.indices.length/3<28000&&model.indices.length/3>=20000);assert.deepEqual([...model.animator.clips.keys()],['Idle','Walk','Brace']);
   const rest=positions(model.animator.sample(null,0)),f=new Float32Array(model.vertices.buffer);
   for(let i=0;i<model.vertexCount;i++)for(let k=0;k<3;k++)assert.ok(Math.abs(rest[i*3+k]-f[i*15+k])<1e-5,'inverse binds preserve the authored rest geometry');
@@ -116,7 +118,7 @@ test('orders and rough-weather interruption stop movement; invalid policies fall
 });
 test('female asset has a distinct mesh, compatible rig and grounded animation',()=>{
   const female=loadCrewGLB(fs.readFileSync(new URL('../assets/crew/sailor-female.glb',import.meta.url)));
-  assert.equal(female.animator.joints.length,65);assert.notEqual(female.vertexCount,model.vertexCount);
+  assert.equal(female.animator.joints.length,CREW_JOINT_COUNT);assert.deepEqual(skinNames(female),CREW_JOINT_NAMES);assert.notEqual(female.vertexCount,model.vertexCount);
   assert.ok(female.indices.length/3<32000&&female.indices.length/3>=22000);
   const rest=positions(female.animator.sample(null,0),female),f=new Float32Array(female.vertices.buffer);
   for(let i=0;i<female.vertexCount;i++)for(let k=0;k<3;k++)assert.ok(Math.abs(rest[i*3+k]-f[i*15+k])<1e-5);
@@ -316,7 +318,7 @@ test('crew animation mixer, sea-legs balance, 30-joint finger grip, gaze trackin
   a.sample('Idle',sailor.time);
   poseCrewWork(a,sailor,rollingBoat);
   applyCrewRealism(a,sailor,rollingBoat,1/30);
-  assert.ok(a.palette.every(Number.isFinite),'ragdoll-posed 65-joint skinning palette is finite');
+  assert.ok(a.palette.every(Number.isFinite),'ragdoll-posed crew-skeleton skinning palette is finite');
 });
 
 test('crew and soldiers working at mast halyard falls and hatches always face their work with forward arms and elbows',async ()=>{
@@ -467,7 +469,7 @@ test('a captain\'s body is told from a hand\'s, and a woman in it keeps its face
 
 test('baked clips store every frame in order and wrap time without a jump',async()=>{
   const {bakeCrewClips,crewClipFrame}=await import('../js/crew-clip-pose.js');
-  const joints=65*16,sampled=[];
+  const joints=CREW_JOINT_COUNT*16,sampled=[];
   const animator={
     clips:new Map([['Idle',{duration:2}],['Walk',{duration:1}]]),
     palette:new Float32Array(joints),
@@ -505,7 +507,7 @@ test('a whole man in the water is posed from a baked loop, and only one with a w
 test('the swimming and floating loops are the pose a swimmer is solved with, baked, and each closes on itself',async()=>{
   const {bakeCrewClips,crewClipFrame,CREW_SOLVED_LOOPS,CREW_CLIP_MODES}=await import('../js/crew-clip-pose.js');
   const {crewAfloatSeconds,CREW_AFLOAT_RATE}=await import('../js/crew-pose.js');
-  const a=model.animator,J=65*16;
+  const a=model.animator,J=CREW_JOINT_COUNT*16;
   const {palettes,clips}=bakeCrewClips(a,30,CREW_SOLVED_LOOPS);
   // The order the shader's layout reads them in.
   assert.deepEqual(clips.map(c=>c.name),['Idle','Walk','Swim','Float']);
@@ -513,7 +515,7 @@ test('the swimming and floating loops are the pose a swimmer is solved with, bak
   assert.equal(palettes.length,clips.reduce((n,c)=>n+c.frames,0)*J);
   // Where a palette puts a joint: the palette maps the bind pose, so it is applied to the joint's place at rest.
   a.sample(null,0);
-  const rest=new Map(['pelvis','Head','hand_l','hand_r','foot_l','foot_r','calf_r'].map(name=>[name,[...a.world[a.nodeIndex(name)].slice(12,15)]]));
+  const rest=new Map(['pelvis','head','hand_l','hand_r','foot_l','foot_r','calf_r'].map(name=>[name,[...a.world[a.nodeIndex(name)].slice(12,15)]]));
   const place=(palette,name)=>{const at=a.joints.indexOf(a.nodeIndex(name))*16,[x,y,z]=rest.get(name);
     return [0,1,2].map(k=>palette[at+k]*x+palette[at+4+k]*y+palette[at+8+k]*z+palette[at+12+k]);};
   const far=(p,q)=>Math.hypot(...p.map((v,i)=>v-q[i]));
@@ -533,18 +535,18 @@ test('the swimming and floating loops are the pose a swimmer is solved with, bak
   assert.ok(Math.abs(crewAfloatSeconds(s)-seconds)<1e-9);
   assert.ok(Math.abs(crewClipFrame(swim,crewAfloatSeconds(s))-at)<1e-6);
   a.sample('Idle',0);poseCrewWork(a,s,boat);const solved=a.palette.slice(),baked=palettes.slice((swim.first+at)*J,(swim.first+at+1)*J);
-  for(const name of ['pelvis','Head','hand_l','hand_r','foot_l','foot_r','calf_r'])assert.ok(far(place(solved,name),place(baked,name))<1e-4,`${name} is where the solved pose has it`);
+  for(const name of ['pelvis','head','hand_l','hand_r','foot_l','foot_r','calf_r'])assert.ok(far(place(solved,name),place(baked,name))<1e-4,`${name} is where the solved pose has it`);
   // And he moves: a stroke is not a statue.
   assert.ok(far(place(palettes.slice(swim.first*J,(swim.first+1)*J),'hand_l'),place(palettes.slice((swim.first+Math.round(swim.frames/4))*J,(swim.first+Math.round(swim.frames/4)+1)*J),'hand_l'))>0.08);
 });
 
-test('captain GLB carries its embedded high-resolution texture, UV sentinels, 65-joint rig and decimated LODs',async()=>{
+test('captain GLB carries its embedded high-resolution texture, UV sentinels, crew-skeleton rig and decimated LODs',async()=>{
   const {CAPTAIN_TEXTURE_PX,loadGroomPackGLB,attachColonialGroomModel}=await import('../js/crew.js');
   assert.equal(CAPTAIN_TEXTURE_PX,2048,'captain texture uploads at full 2048x2048 resolution');
   const captainBytes=fs.readFileSync(new URL('../assets/crew/captain.glb',import.meta.url));
   assert.ok(captainBytes.length<3_000_000);
   const captain=loadCrewGLB(captainBytes);
-  assert.equal(captain.animator.joints.length,65);
+  assert.equal(captain.animator.joints.length,CREW_JOINT_COUNT);assert.deepEqual(skinNames(captain),CREW_JOINT_NAMES);
   assert.deepEqual([...captain.animator.clips.keys()],['Idle','Walk','Brace']);
   assert.ok(captain.image instanceof Uint8Array && captain.image.byteLength>100_000,'embedded texture bytes present');
   assert.equal(captain.mime,'image/jpeg');
@@ -752,6 +754,14 @@ test('modular 3D character components pack 15-bit masks losslessly in f32, keep 
   assert.ok(femaleCopy.vertexCount>femaleCopy.baseVertexCount+1900);
   assert.ok(maleCopy.lods[0].triangles>maleCopy.baseTriangleCount+3500);
   assert.ok(maleCopy.lods[1].triangles<maleCopy.lods[0].triangles*0.4);
+  // Every component rides joints of the crew skeleton that the body itself is skinned to: hips, spine, neck, head and legs.
+  const componentJoints=new Set(['pelvis','spine_01','spine_02','spine_03','neck_01','head','thigh_l','calf_l','thigh_r','calf_r'].map(name=>CREW_SLOT[name]));
+  for(const body of [maleCopy,femaleCopy]){
+    const f=new Float32Array(body.vertices.buffer,body.vertices.byteOffset,body.vertexCount*15),u=new Uint16Array(body.vertices.buffer,body.vertices.byteOffset,body.vertexCount*30);
+    const strays=[];
+    for(let v=body.baseVertexCount;v<body.vertexCount;v++)for(let k=0;k<4;k++)if(f[v*15+11+k]>0&&!componentJoints.has(u[v*30+18+k]))strays.push([v,u[v*30+18+k]]);
+    assert.deepEqual(strays,[],'component vertices ride only the hips, spine, neck, head and legs');
+  }
 
   // Component variety & anatomical constraints across named crew, garrison, and townsfolk.
   const company=createCompany();

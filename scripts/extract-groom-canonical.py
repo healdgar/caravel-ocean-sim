@@ -132,7 +132,7 @@ def measure_sailor_face_envelope(sailor_path):
     J = acc(doc, b, p['attributes']['JOINTS_0']).astype(np.int64)
     W = acc(doc, b, p['attributes']['WEIGHTS_0']).astype(np.float64)
     jnames = [doc['nodes'][j]['name'] for j in doc['skins'][0]['joints']]
-    hs = jnames.index('Head')
+    hs = jnames.index('head')
     hw = (W * (J == hs)).sum(axis=1)
     hv = P[hw > 0.45]
 

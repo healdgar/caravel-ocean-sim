@@ -6,7 +6,7 @@
 import { gltfQuatMultiply } from './gltf.js';
 import { CREW_SOLVE_OP, CREW_INJURY_KINDS } from './wgsl/crew-solve.js';
 
-const CREW_WOUND_BONES = Object.freeze(['pelvis', 'spine_01', 'spine_02', 'spine_03', 'Head', 'upperarm_l', 'lowerarm_l', 'hand_l', 'upperarm_r', 'lowerarm_r', 'hand_r', 'thigh_l', 'calf_l', 'foot_l', 'thigh_r', 'calf_r', 'foot_r']);
+const CREW_WOUND_BONES = Object.freeze(['pelvis', 'spine_01', 'spine_02', 'spine_03', 'head', 'upperarm_l', 'lowerarm_l', 'hand_l', 'upperarm_r', 'lowerarm_r', 'hand_r', 'thigh_l', 'calf_l', 'foot_l', 'thigh_r', 'calf_r', 'foot_r']);
 // The joint a limb parts at when a ball strikes that bone.
 const CREW_LIMB_JOINTS = Object.freeze({
   upperarm_l: 'upperarm_l', lowerarm_l: 'lowerarm_l', hand_l: 'lowerarm_l',

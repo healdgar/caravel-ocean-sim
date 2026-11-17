@@ -1,12 +1,13 @@
 // Layered Animation Mixer, Pose-Space Spring Inertializer, Inverted-Pendulum "Sea Legs",
 // 30-Joint Anatomical Finger Articulation, Autonomous Gaze Tracking, and 11-Body XPBD
-// Articulated Ragdoll / Active-Ragdoll Physics for 65-joint crew & villager rigs.
+// Articulated Ragdoll / Active-Ragdoll Physics for crew & villager rigs on the crew skeleton (js/crew-skeleton.js).
 
 import { gltfQuatMultiply, gltfSlerp } from './gltf.js';
 import { vesselVerticalScale, modelDeckWidth } from './hull.js';
 import { crewDeckHeight } from './crew-work.js';
 import { crewNavigationObstacles } from './crew-navigation.js';
 import { CREW_SOLVE_OP } from './wgsl/crew-solve.js';
+import { CREW_JOINT_NAMES } from './crew-skeleton.js';
 
 const crewPhysMixerMaskCache = new WeakMap();
 
@@ -150,7 +151,7 @@ export function getCrewMixerMasks(animator) {
     spine2: idx('spine_02'),
     spine3: idx('spine_03'),
     neck: idx('neck_01'),
-    head: idx('Head'),
+    head: idx('head'),
     clavicleL: idx('clavicle_l'),
     clavicleR: idx('clavicle_r'),
     upperarmL: idx('upperarm_l'),
@@ -166,13 +167,15 @@ export function getCrewMixerMasks(animator) {
     calfR: idx('calf_r'),
     footR: idx('foot_r'),
     fingers,
+    // The hips and legs, twists among them; and the spine, neck, head and face, shoulders and arms, twists among
+    // them, down to the hands and the metacarpals in them. The fingers' three phalanges are in neither.
     lowerBodySet: new Set(
-      ['pelvis', 'thigh_l', 'calf_l', 'foot_l', 'ball_l', 'thigh_r', 'calf_r', 'foot_r', 'ball_r']
+      CREW_JOINT_NAMES.filter(name => /^(pelvis|thigh|calf|foot|ball)/.test(name))
         .map(idx)
         .filter(n => n >= 0),
     ),
     upperBodySet: new Set(
-      ['spine_01', 'spine_02', 'spine_03', 'neck_01', 'Head', 'clavicle_l', 'upperarm_l', 'lowerarm_l', 'hand_l', 'clavicle_r', 'upperarm_r', 'lowerarm_r', 'hand_r']
+      CREW_JOINT_NAMES.filter(name => /^(spine|neck|head|FACIAL_|clavicle|upperarm|lowerarm|hand)|_metacarpal_/.test(name))
         .map(idx)
         .filter(n => n >= 0),
     ),

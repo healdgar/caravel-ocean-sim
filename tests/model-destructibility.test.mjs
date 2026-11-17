@@ -28,6 +28,7 @@ import { applyFractureEvents } from '../js/ship-fracture.js';
 import { PORT_PREFABS, getBuildingParts } from '../js/coastal-world.js';
 import { applyBuildingFractureEvents, prepareBuildingFracture } from '../js/building-fracture.js';
 import { loadCrewGLB, readGLB } from '../js/gltf.js';
+import { CREW_SLOT } from '../js/crew-skeleton.js';
 import { attachColonialGroomModel, loadGroomPackGLB } from '../js/crew.js';
 import { crewWoundOutcome, recordCrewWound, sweepCrewBodies } from '../js/crew-wounds.js';
 import { FOREST_TRUNK_SHAPES } from '../js/forest-trunk-shapes.js';
@@ -279,7 +280,7 @@ test('every human crew/soldier .glb model has destructible wound bones and respo
   for (const glbPath of KNOWN_CREW_GLBS) {
     const asset = readGLB(readFileSync(path.join(ROOT, glbPath)));
     const nodeNames = new Set((asset.json.nodes ?? []).map((n) => n.name).filter(Boolean));
-    for (const requiredBone of ['pelvis', 'spine_01', 'Head', 'upperarm_l', 'thigh_r']) {
+    for (const requiredBone of ['pelvis', 'spine_01', 'head', 'upperarm_l', 'thigh_r']) {
       assert.ok(nodeNames.has(requiredBone), `${glbPath} skeleton contains wound bone ${requiredBone}`);
     }
   }
@@ -288,7 +289,8 @@ test('every human crew/soldier .glb model has destructible wound bones and respo
   const baseSailor = loadCrewGLB(readFileSync(path.join(ROOT, 'assets/crew/sailor.glb')));
   const groomedSailor = attachColonialGroomModel(baseSailor, groomPack, 'male');
   const slotOf = Object.fromEntries(baseSailor.animator.joints.map((ni, si) => [baseSailor.animator.names[ni], si]));
-  const allowedBones = new Set(['Head', 'neck_01', 'spine_03'].map((n) => slotOf[n]));
+  for (const name of ['head', 'neck_01', 'spine_03']) assert.equal(slotOf[name], CREW_SLOT[name], `sailor.glb skins ${name} at its crew-skeleton slot`);
+  const allowedBones = new Set(['head', 'neck_01', 'spine_03'].map((n) => CREW_SLOT[n]));
   const u16 = new Uint16Array(groomedSailor.vertices.buffer, groomedSailor.vertices.byteOffset, groomedSailor.vertexCount * 30);
   const f32 = new Float32Array(groomedSailor.vertices.buffer, groomedSailor.vertices.byteOffset, groomedSailor.vertexCount * 15);
   for (let v = baseSailor.vertexCount; v < groomedSailor.vertexCount; v++) {

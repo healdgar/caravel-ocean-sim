@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 // Multi-tier Level of Detail (LOD) for skinned crew models.
 // Simplifies triangle index buffers while indexing directly into the shared
-// 60-byte-stride skinned vertex buffer, preserving 65-joint skin weights,
+// 60-byte-stride skinned vertex buffer, preserving the crew skeleton's skin weights,
 // sentinel COLOR_0 regions (shirt, trousers, skin, hair) and watertight seams.
 
 export const CREW_LOD_TIERS=Object.freeze([
@@ -21,10 +21,12 @@ function vertexPartGroup(animator,joints,floats,i){
     const w=floats[i*15+11+k];
     if(w>bestWeight){bestWeight=w;bestSlot=joints[i*30+18+k];}
   }
+  // Left limbs, right limbs, the neck and head with the face on it, and the trunk: no cell is shared between two.
+  // The face joints are named FACIAL_L_*, FACIAL_R_*, not *_l, *_r, and go with the head.
   const name=animator?.names?.[animator.joints[bestSlot]]??'';
   if(/_l$/.test(name))return 1;
   if(/_r$/.test(name))return 2;
-  if(/^(Head|neck)/.test(name))return 3;
+  if(/^(head|neck|FACIAL_)/.test(name))return 3;
   return 0;
 }
 

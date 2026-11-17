@@ -10,6 +10,7 @@ import {getShipModel,resolveShipNode} from '../js/ship-models.js';
 import {createGunDefinitions} from '../js/gunnery-models.js';
 import {createShipGunnery} from '../js/gunnery-control.js';
 import {sailingState} from '../js/sailing.js';
+import {CREW_JOINT_NAMES} from '../js/crew-skeleton.js';
 
 const assets=['sailor.glb','sailor-female.glb'].map(file=>readGLB(fs.readFileSync(new URL('../assets/crew/'+file,import.meta.url))));
 const rawBytes=array=>new Uint8Array(array.buffer,array.byteOffset,array.byteLength);
@@ -34,7 +35,8 @@ function cloneActor(actor){return {...actor,position:actor.position.slice(),scal
 test('branch refresh preserves every world/palette byte while visiting only dependent nodes',()=>{
   for(const asset of assets){
     const actual=createSkinAnimator(asset),expected=createSkinAnimator(asset),actualWork=countTransforms(actual),expectedWork=countTransforms(expected);
-    for(const name of ['upperarm_l','lowerarm_r','thigh_l','calf_r','hand_l']){
+    assert.deepEqual(actual.joints.map(node=>actual.names[node]),CREW_JOINT_NAMES,'the crew skeleton, in its order');
+    for(const name of ['upperarm_l','lowerarm_r','thigh_l','calf_r','hand_l','head']){
       const node=actual.nodeIndex(name);assert.equal(node,actual.names.indexOf(name));assert.ok(node>=0);
       actual.sample('Idle',.37,'Walk',1.2,.4);expected.sample('Idle',.37,'Walk',1.2,.4);
       const before=actual.world.map(matrix=>matrix.slice());

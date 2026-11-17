@@ -54,7 +54,7 @@ test('rower hands, pelvis and planted boots follow shared stroke targets without
           const sole=targets.feet[i].slice();sole[1]+=a.footContacts[side].ankleAboveSole*s.scale[1];
           assert.ok(crewProposedDistance(at('foot_'+side),sole)<.08,id+' actual boot reaches the authored floor');
         }
-        assert.ok(at('Head')[1]<targets.seat[1]+1.2,'seated workers are not standing templates');
+        assert.ok(at('head')[1]<targets.seat[1]+1.2,'seated workers are not standing templates');
         assert.equal(s.moisturePoints.length,4);assert.ok(s.moisturePoints.every(p=>p.every(Number.isFinite)));
         const authoritative=s.stationId?rowingStationPose(boat,s.stationId):s.role==='Helmsman'?rowingSteeringPose(boat):null;
         if(authoritative)for(let i=0;i<2;i++)assert.ok(crewProposedDistance(targets.hands[i],authoritative.hands[i])<1e-9);

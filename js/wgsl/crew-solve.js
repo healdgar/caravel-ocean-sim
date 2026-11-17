@@ -4,14 +4,15 @@
 // gaze, fingers, the ease from his last action into this one, and his wounds. JavaScript sends the list and the
 // numbers the simulation owns; no joint is touched there. js/crew-pose.js and js/crew-physics.js hold the same
 // steps in JavaScript, which is what the tests hold this against.
+import { CREW_JOINT_COUNT } from '../crew-skeleton.js';
 
 // What one entry of a sailor's list asks for. An entry is eight numbers; a stance takes several entries.
 export const CREW_SOLVE_OP = Object.freeze({ blend: 1, neutral: 2, turn: 3, shift: 4, move: 5, limb: 6, limbHead: 7, gunBody: 8, seated: 9, rowFeet: 10, ragdoll: 11, grip: 12, seaLegs: 13, gaze: 14, fingers: 15, inertia: 16, injury: 17, climbBody: 18 });
 // The bones a pose step names, in the order the rig table lists their joints.
-export const CREW_SOLVE_BONES = Object.freeze(['root', 'pelvis', 'spine_01', 'spine_02', 'spine_03', 'neck_01', 'Head', 'clavicle_l', 'upperarm_l', 'lowerarm_l', 'hand_l', 'clavicle_r', 'upperarm_r', 'lowerarm_r', 'hand_r', 'thigh_l', 'calf_l', 'foot_l', 'ball_l', 'thigh_r', 'calf_r', 'foot_r', 'ball_r']);
+export const CREW_SOLVE_BONES = Object.freeze(['root', 'pelvis', 'spine_01', 'spine_02', 'spine_03', 'neck_01', 'head', 'clavicle_l', 'upperarm_l', 'lowerarm_l', 'hand_l', 'clavicle_r', 'upperarm_r', 'lowerarm_r', 'hand_r', 'thigh_l', 'calf_l', 'foot_l', 'ball_l', 'thigh_r', 'calf_r', 'foot_r', 'ball_r']);
 // A limb is its upper bone's place in that list: an arm at 8 and 12, a leg at 15 and 19.
 export const CREW_SOLVE_LIMBS = Object.freeze({ upperarm_l: 0, upperarm_r: 1, thigh_l: 2, thigh_r: 3 });
-export const CREW_SOLVE_JOINTS = 65;
+export const CREW_SOLVE_JOINTS = CREW_JOINT_COUNT;
 // What the pass remembers of each sailor between solves: every joint's last turn, the turn it is easing from, and
 // the pelvis's place for both.
 export const CREW_SOLVE_MEMORY = CREW_SOLVE_JOINTS * 2 + 2;
@@ -32,8 +33,8 @@ struct Rig {
   // The one joint a clip moves as well as turns, where the clips' moves start, and keys a second.
   misc: vec4u,
   bones: array<u32, 24>,
-  joints: array<Joint, 65>,
-  binds: array<mat4x4f, 65>,
+  joints: array<Joint, ${CREW_JOINT_COUNT}>,
+  binds: array<mat4x4f, ${CREW_JOINT_COUNT}>,
 }
 // Where a sailor is in his clips, whether he is there at all, and where his steps start, how many they are, which
 // rig he is built on and where the pass keeps what it remembers of him.
@@ -55,12 +56,13 @@ const CLAVICLE_R = 11u; const UPPERARM_R = 12u; const HAND_R = 14u;
 const THIGH_L = 15u; const FOOT_L = 17u; const UP = vec3f(0.0, 1.0, 0.0);
 
 var<private> RIG: u32;
-var<private> R: array<vec4f, 65>;
-var<private> T: array<vec3f, 65>;
-var<private> S: array<vec3f, 65>;
-// Where each joint is in the sailor's own frame: how it is turned and scaled, and its place.
-var<private> W: array<mat3x3f, 65>;
-var<private> P: array<vec3f, 65>;
+// A thread's working pose is 80 bytes a joint, inside the 8 KB of private memory WGSL promises everywhere and small
+// enough not to spill on tile GPUs: each joint's turn under its parent; its place under its parent with, in .w, how
+// an injury has left its scale (0 as the rig has it, 1 severed, 2 crushed); and where it is in the sailor's own
+// frame, its turn and scale in the columns' .xyz and its place in their .w.
+var<private> R: array<vec4f, ${CREW_JOINT_COUNT}>;
+var<private> T: array<vec4f, ${CREW_JOINT_COUNT}>;
+var<private> WP: array<mat3x4f, ${CREW_JOINT_COUNT}>;
 var<private> grip: array<vec3f, 2>;
 var<private> gripped: array<u32, 2>;
 
@@ -101,12 +103,21 @@ fn mquat(m: mat3x3f) -> vec4f {
   return q / max(length(q), 1e-12);
 }
 fn unit(v: vec3f) -> vec3f { return v / max(length(v), 1e-9); }
-fn at(n: u32) -> vec3f { return P[n]; }
+fn at(n: u32) -> vec3f { return vec3f(WP[n][0].w, WP[n][1].w, WP[n][2].w); }
+fn world(n: u32) -> mat3x3f { return mat3x3f(WP[n][0].xyz, WP[n][1].xyz, WP[n][2].xyz); }
+fn scaleOf(n: u32) -> vec3f {
+  let injury = u32(T[n].w);
+  if (injury == 1u) { return vec3f(0.001); }
+  if (injury == 2u) { return vec3f(${crushedScale.map(v => v.toFixed(4)).join(', ')}); }
+  return rigs[RIG].joints[n].s.xyz;
+}
 fn place(i: u32) {
   let p = rigs[RIG].joints[i].link.x;
-  let local = turned(R[i], S[i]);
-  if (p >= 0) { let over = W[u32(p)]; W[i] = over * local; P[i] = over * T[i] + P[u32(p)]; }
-  else { let over = linear(rigs[RIG].rootParent); W[i] = over * local; P[i] = over * T[i] + rigs[RIG].rootParent[3].xyz; }
+  let local = turned(R[i], scaleOf(i));
+  var over = linear(rigs[RIG].rootParent); var origin = rigs[RIG].rootParent[3].xyz;
+  if (p >= 0) { over = world(u32(p)); origin = at(u32(p)); }
+  let m = over * local; let q = over * T[i].xyz + origin;
+  WP[i] = mat3x4f(vec4f(m[0], q.x), vec4f(m[1], q.y), vec4f(m[2], q.z));
 }
 // A joint and everything hanging from it. Joints are stored parent first with each one's descendants straight
 // after it, so that is one run of the table. Fingers are most of the joints and nothing is solved from where
@@ -116,19 +127,19 @@ fn fkFrom(n: u32) {
   for (var i = n; i < end; i++) { if (rigs[RIG].joints[i].link.w == 0) { place(i); } }
 }
 fn placeFingers() {
-  for (var i = 0u; i < 65u; i++) { if (rigs[RIG].joints[i].link.w != 0) { place(i); } }
+  for (var i = 0u; i < ${CREW_JOINT_COUNT}u; i++) { if (rigs[RIG].joints[i].link.w != 0) { place(i); } }
 }
 fn parentMatrix(n: u32) -> mat3x3f {
   let p = rigs[RIG].joints[n].link.x;
   if (p < 0) { return linear(rigs[RIG].rootParent); }
-  return W[u32(p)];
+  return world(u32(p));
 }
 // What carries a point of the body at rest to where this pose has it.
 fn palette(j: u32) -> mat4x4f {
-  let bind = rigs[RIG].binds[j]; let m = W[j] * linear(bind);
-  return mat4x4f(vec4f(m[0], 0.0), vec4f(m[1], 0.0), vec4f(m[2], 0.0), vec4f(W[j] * bind[3].xyz + P[j], 1.0));
+  let bind = rigs[RIG].binds[j]; let w = world(j); let m = w * linear(bind);
+  return mat4x4f(vec4f(m[0], 0.0), vec4f(m[1], 0.0), vec4f(m[2], 0.0), vec4f(w * bind[3].xyz + at(j), 1.0));
 }
-fn rest(n: u32) { R[n] = rigs[RIG].joints[n].r; T[n] = rigs[RIG].joints[n].t.xyz; S[n] = rigs[RIG].joints[n].s.xyz; }
+fn rest(n: u32) { R[n] = rigs[RIG].joints[n].r; T[n] = vec4f(rigs[RIG].joints[n].t.xyz, 0.0); }
 // Turn a bone so that what pointed along 'was' points along 'to', both in the sailor's own frame.
 fn turn(n: u32, was: vec3f, to: vec3f) {
   let u = unit(was); let v = unit(to); let d = dot(u, v);
@@ -174,7 +185,7 @@ fn neutral() {
   fkFrom(bone(ROOT));
 }
 fn fingers(left: f32, right: f32) {
-  for (var j = 0u; j < 65u; j++) {
+  for (var j = 0u; j < ${CREW_JOINT_COUNT}u; j++) {
     let side = rigs[RIG].joints[j].link.z;
     if (side == 0) { continue; }
     let f = rigs[RIG].joints[j].finger; let half = select(right, left, side == 1) * f.w * 0.5;
@@ -190,14 +201,14 @@ fn clipKey(c: u32, seconds: f32) -> vec3f {
 // Mix a clip into the pose, or with 'first' start the pose from it.
 fn blendClip(c: u32, seconds: f32, weight: f32, first: bool) {
   let key = clipKey(c, seconds); let lo = u32(key.x); let hi = u32(key.y); let w = clamp(weight, 0.0, 1.0);
-  for (var j = 0u; j < 65u; j++) {
-    let q = slerp(clips[lo * 65u + j], clips[hi * 65u + j], key.z);
+  for (var j = 0u; j < ${CREW_JOINT_COUNT}u; j++) {
+    let q = slerp(clips[lo * ${CREW_JOINT_COUNT}u + j], clips[hi * ${CREW_JOINT_COUNT}u + j], key.z);
     if (first) { R[j] = q; } else { R[j] = slerp(R[j], q, w); }
   }
   let moved = rigs[RIG].misc.x;
-  if (moved < 65u) {
+  if (moved < ${CREW_JOINT_COUNT}u) {
     let t = mix(clips[rigs[RIG].misc.y + lo].xyz, clips[rigs[RIG].misc.y + hi].xyz, key.z);
-    if (first) { T[moved] = t; } else { T[moved] = mix(T[moved], t, w); }
+    if (first) { T[moved] = vec4f(t, T[moved].w); } else { T[moved] = vec4f(mix(T[moved].xyz, t, w), T[moved].w); }
   }
 }
 // How far short of a hand's goal an arm falls, from the shoulder as it is, raised by 'lift'.
@@ -406,7 +417,7 @@ fn seaLegs(k: u32) {
   let flags = u32(a.y); let stance = a.z;
   if ((flags & 1u) != 0u) {
     let footL = bone(FOOT_L); let footR = bone(FOOT_L + 4u);
-    let pL = at(footL); let pR = at(footR); let qL = mquat(W[footL]); let qR = mquat(W[footR]);
+    let pL = at(footL); let pR = at(footR); let qL = mquat(world(footL)); let qR = mquat(world(footR));
     var rise = vec2f(b.z, b.w);
     // Ashore the ground is a slope, and each foot rises with it from where the foot is.
     if ((flags & 2u) != 0u) {
@@ -454,21 +465,21 @@ fn gaze(yaw: f32, pitch: f32) {
 fn inertia(sailor: u32, flags: u32, weight: f32) {
   let base = sailor * ${CREW_SOLVE_MEMORY}u; let pelvis = bone(PELVIS);
   if ((flags & 1u) != 0u) {
-    for (var j = 0u; j < 65u; j++) { memory[base + j] = R[j]; memory[base + 65u + j] = R[j]; }
-    memory[base + 130u] = vec4f(T[pelvis], 0.0); memory[base + 131u] = vec4f(T[pelvis], 0.0);
+    for (var j = 0u; j < ${CREW_JOINT_COUNT}u; j++) { memory[base + j] = R[j]; memory[base + ${CREW_JOINT_COUNT}u + j] = R[j]; }
+    memory[base + ${CREW_JOINT_COUNT * 2}u] = vec4f(T[pelvis].xyz, 0.0); memory[base + ${CREW_JOINT_COUNT * 2 + 1}u] = vec4f(T[pelvis].xyz, 0.0);
     return;
   }
   if ((flags & 2u) != 0u) {
-    for (var j = 0u; j < 65u; j++) { memory[base + 65u + j] = memory[base + j]; }
-    memory[base + 131u] = memory[base + 130u];
+    for (var j = 0u; j < ${CREW_JOINT_COUNT}u; j++) { memory[base + ${CREW_JOINT_COUNT}u + j] = memory[base + j]; }
+    memory[base + ${CREW_JOINT_COUNT * 2 + 1}u] = memory[base + ${CREW_JOINT_COUNT * 2}u];
   }
   if (weight > 1e-3) {
-    for (var j = 0u; j < 65u; j++) { R[j] = slerp(R[j], memory[base + 65u + j], weight); }
-    T[pelvis] = mix(T[pelvis], memory[base + 131u].xyz, weight);
+    for (var j = 0u; j < ${CREW_JOINT_COUNT}u; j++) { R[j] = slerp(R[j], memory[base + ${CREW_JOINT_COUNT}u + j], weight); }
+    T[pelvis] = vec4f(mix(T[pelvis].xyz, memory[base + ${CREW_JOINT_COUNT * 2 + 1}u].xyz, weight), T[pelvis].w);
     fkFrom(bone(ROOT));
   }
-  for (var j = 0u; j < 65u; j++) { memory[base + j] = R[j]; }
-  memory[base + 130u] = vec4f(T[pelvis], 0.0);
+  for (var j = 0u; j < ${CREW_JOINT_COUNT}u; j++) { memory[base + j] = R[j]; }
+  memory[base + ${CREW_JOINT_COUNT * 2}u] = vec4f(T[pelvis].xyz, 0.0);
 }
 
 @compute @workgroup_size(8) fn main(@builtin(global_invocation_id) id: vec3u) {
@@ -476,7 +487,7 @@ fn inertia(sailor: u32, flags: u32, weight: f32) {
   let sailor = sailors[id.x]; let flags = u32(sailor.more.y);
   if ((flags & 1u) == 0u) { return; }
   RIG = sailor.at.z;
-  for (var j = 0u; j < 65u; j++) { T[j] = rigs[RIG].joints[j].t.xyz; S[j] = rigs[RIG].joints[j].s.xyz; }
+  for (var j = 0u; j < ${CREW_JOINT_COUNT}u; j++) { T[j] = vec4f(rigs[RIG].joints[j].t.xyz, 0.0); }
   blendClip(0u, sailor.clip.x, 1.0, true);
   if (sailor.clip.z > 0.0) { blendClip(1u, sailor.clip.y, sailor.clip.z, false); }
   if (sailor.clip.w > 0.0) { blendClip(2u, sailor.more.x, sailor.clip.w, false); }
@@ -506,8 +517,7 @@ fn inertia(sailor: u32, flags: u32, weight: f32) {
       case ${CREW_SOLVE_OP.inertia}u { inertia(sailor.at.w, u32(a.y), a.z); k += 1u; }
       case ${CREW_SOLVE_OP.injury}u {
         let n = u32(a.y); let kind = u32(a.z);
-        if (kind == 1u) { S[n] = vec3f(0.001); }
-        else if (kind == 2u) { S[n] = vec3f(${crushedScale.map(v => v.toFixed(4)).join(', ')}); }
+        if (kind == 1u || kind == 2u) { T[n].w = f32(kind); }
         else { R[n] = qmul(R[n], vec4f(${Math.sin(brokenAngle / 2).toFixed(7)}, 0.0, 0.0, ${Math.cos(brokenAngle / 2).toFixed(7)})); }
         fkFrom(n); k += 1u;
       }
@@ -515,8 +525,8 @@ fn inertia(sailor: u32, flags: u32, weight: f32) {
     }
   }
   placeFingers();
-  let slot = id.x * 65u;
-  for (var j = 0u; j < 65u; j++) { poses[slot + j] = palette(j); }
+  let slot = id.x * ${CREW_JOINT_COUNT}u;
+  for (var j = 0u; j < ${CREW_JOINT_COUNT}u; j++) { poses[slot + j] = palette(j); }
 }
 `;
 
@@ -528,13 +538,13 @@ struct Placing { solved: u32, slot: u32, beside: u32, spare: u32 }
 @group(0) @binding(1) var<storage, read> solved: array<mat4x4f>;
 @group(0) @binding(2) var<storage, read_write> poses: array<mat4x4f>;
 @compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id: vec3u) {
-  let n = id.x / 65u; let j = id.x % 65u;
+  let n = id.x / ${CREW_JOINT_COUNT}u; let j = id.x % ${CREW_JOINT_COUNT}u;
   if (n >= arrayLength(&placings)) { return; }
   let placing = placings[n];
   if (placing.solved == 0xffffffffu) { return; }
-  let pose = solved[placing.solved * 65u + j];
-  poses[placing.slot * 65u + j] = pose;
-  if (placing.beside != 0xffffffffu) { poses[placing.beside * 65u + j] = pose; }
+  let pose = solved[placing.solved * ${CREW_JOINT_COUNT}u + j];
+  poses[placing.slot * ${CREW_JOINT_COUNT}u + j] = pose;
+  if (placing.beside != 0xffffffffu) { poses[placing.beside * ${CREW_JOINT_COUNT}u + j] = pose; }
 }
 `;
 
@@ -555,7 +565,7 @@ struct Tube { a: vec4f, b: vec4f }
   let arrow = arrows[id.x];
   if (arrow.tip.w < 0.0) { return; }
   let record = u32(arrow.tip.w); let which = u32(arrow.along.w); let joint = joints[which];
-  let body = actors[which / 65u].transform;
+  let body = actors[which / ${CREW_JOINT_COUNT}u].transform;
   let tip = (joint * vec4f(arrow.tip.xyz, 1.0)).xyz; let along = (joint * vec4f(arrow.along.xyz, 0.0)).xyz; let reach = length(along);
   // A bone lost after the arrow struck takes its arrow with it.
   if (reach < 0.05) { tubes[record] = Tube(vec4f(0.0), vec4f(0.0)); tubes[record + 1u] = Tube(vec4f(0.0), vec4f(0.0)); return; }

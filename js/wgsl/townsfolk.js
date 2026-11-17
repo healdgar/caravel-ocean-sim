@@ -9,6 +9,7 @@ import { SHADOW_FRAME } from './shadows.js';
 import { DRESS_MASK_SCALE } from '../indigenous-dress.js';
 import { ROUTE_STEP_M } from '../town-streets.js';
 import { CREW_WALK_CYCLE_METRES } from '../crew-motion.js';
+import { CREW_JOINT_COUNT, CREW_JOINT_PARENTS, CREW_SLOT } from '../crew-skeleton.js';
 
 export const TOWNSFOLK_MODELS = 2;
 export const TOWNSFOLK_TIERS = 4;
@@ -375,12 +376,32 @@ fn routineClock(w:Walker,metres:f32,going:f32,time:f32)->f32 {
 }
 `;
 
+// What a wound takes off, in slots of the crew skeleton: the joint it parts at, every joint that hangs from it, and the
+// joint left holding the stump. Each joint is followed in the skin order by all its descendants, so they are one run,
+// ended by the first joint whose parent comes before the one parted.
+const TOWN_SEVERED = Object.freeze(Object.fromEntries(['lowerarm_l', 'lowerarm_r', 'calf_l', 'calf_r', 'neck_01'].map((name) => {
+  const first = CREW_SLOT[name];
+  let last = first;
+  while (last + 1 < CREW_JOINT_COUNT && CREW_JOINT_PARENTS[last + 1] >= first) last++;
+  return [name, Object.freeze({ first, last, stump: CREW_JOINT_PARENTS[first] })];
+})));
+const townSever = ({ first, last, stump }) => `loSlot=${first}u;hiSlot=${last}u;stumpSlot=${stump}u;`;
+// Injury 1 takes off the left forearm, 2 the right, 3 and 4 the left and right shins, and 5 the head.
+const TOWN_SEVER_SLOTS = /* wgsl */ `var loSlot=0u;var hiSlot=0u;var stumpSlot=0u;
+    if(injury==2u){${townSever(TOWN_SEVERED.lowerarm_r)}}
+    else if(injury==3u){${townSever(TOWN_SEVERED.calf_l)}}
+    else if(injury==4u){${townSever(TOWN_SEVERED.calf_r)}}
+    else if(injury==5u){${townSever(TOWN_SEVERED.neck_01)}}
+    else{${townSever(TOWN_SEVERED.lowerarm_l)}}`;
+// Injuries 6 and 7 break the left and right arm at the elbow: the forearm and all that hangs from it bend.
+const TOWN_ARM_BREAK_SLOTS = /* wgsl */ `let armLo=select(${TOWN_SEVERED.lowerarm_r.first}u,${TOWN_SEVERED.lowerarm_l.first}u,isLeft);let armHi=select(${TOWN_SEVERED.lowerarm_r.last}u,${TOWN_SEVERED.lowerarm_l.last}u,isLeft);`;
+
 const TOWN_POSE_HELPERS = /* wgsl */ `
 fn townBonePose(frameA:u32,frameB:u32,blend:f32,bone:u32,isFemale:bool)->mat4x4f {
-  let b=min(bone,64u);
-  let mA=poses[frameA*65u+b];
+  let b=min(bone,${CREW_JOINT_COUNT - 1}u);
+  let mA=poses[frameA*${CREW_JOINT_COUNT}u+b];
   if(blend<=0.0||frameA==frameB){return mA;}
-  return crewBlendJoint(mA,poses[frameB*65u+b],blend,crewRestJoint(b,isFemale));
+  return crewBlendJoint(mA,poses[frameB*${CREW_JOINT_COUNT}u+b],blend,crewRestJoint(b,isFemale));
 }
 fn townSkinPose(frameA:u32,frameB:u32,blend:f32,bones:vec4u,weights:vec4f,isFemale:bool)->mat4x4f {
   var skin=mat4x4f(vec4f(0.0),vec4f(0.0),vec4f(0.0),vec4f(0.0));
@@ -414,16 +435,7 @@ struct TownLook {shirt:vec4f,trousers:vec4f,skin:vec4f,hair:vec4f,face:vec4f};
   }
   var bones=v.bones;
   if(injury>=1u && injury<=5u){
-    var loSlot=9u;var hiSlot=30u;var stumpSlot=8u;
-    if(injury==2u){
-      loSlot=33u;hiSlot=54u;stumpSlot=32u;
-    }else if(injury==3u){
-      loSlot=56u;hiSlot=59u;stumpSlot=55u;
-    }else if(injury==4u){
-      loSlot=61u;hiSlot=64u;stumpSlot=60u;
-    }else if(injury==5u){
-      loSlot=5u;hiSlot=6u;stumpSlot=4u;
-    }
+    ${TOWN_SEVER_SLOTS}
     let stumpPos=crewRestJoint(loSlot,isFemale);
     var sevWeight=0.0;
     if(bones.x>=loSlot && bones.x<=hiSlot){sevWeight+=v.weights.x;bones.x=stumpSlot;}
@@ -440,7 +452,7 @@ struct TownLook {shirt:vec4f,trousers:vec4f,skin:vec4f,hair:vec4f,face:vec4f};
     }
   }else if(injury==6u || injury==7u){
     let isLeft=injury==6u;
-    let armLo=select(33u,9u,isLeft);let armHi=select(54u,30u,isLeft);
+    ${TOWN_ARM_BREAK_SLOTS}
     var brkW=0.0;
     if(bones.x>=armLo && bones.x<=armHi){brkW+=v.weights.x;}
     if(bones.y>=armLo && bones.y<=armHi){brkW+=v.weights.y;}
@@ -530,11 +542,7 @@ fn crewCompHidden(color:vec3f,compMask:u32)->bool {
   let injury=dmgBits&7u;
   var bones=v.bones;
   if(injury>=1u && injury<=5u){
-    var loSlot=9u;var hiSlot=30u;var stumpSlot=8u;
-    if(injury==2u){loSlot=33u;hiSlot=54u;stumpSlot=32u;}
-    else if(injury==3u){loSlot=56u;hiSlot=59u;stumpSlot=55u;}
-    else if(injury==4u){loSlot=61u;hiSlot=64u;stumpSlot=60u;}
-    else if(injury==5u){loSlot=5u;hiSlot=6u;stumpSlot=4u;}
+    ${TOWN_SEVER_SLOTS}
     let stumpPos=crewRestJoint(loSlot,isFemale);
     var sevWeight=0.0;
     if(bones.x>=loSlot && bones.x<=hiSlot){sevWeight+=v.weights.x;bones.x=stumpSlot;}
@@ -544,7 +552,7 @@ fn crewCompHidden(color:vec3f,compMask:u32)->bool {
     if(sevWeight>0.0){surfacePos=mix(surfacePos,stumpPos,clamp(sevWeight,0.0,1.0));}
   }else if(injury==6u || injury==7u){
     let isLeft=injury==6u;
-    let armLo=select(33u,9u,isLeft);let armHi=select(54u,30u,isLeft);
+    ${TOWN_ARM_BREAK_SLOTS}
     var brkW=0.0;
     if(bones.x>=armLo && bones.x<=armHi){brkW+=v.weights.x;}
     if(bones.y>=armLo && bones.y<=armHi){brkW+=v.weights.y;}

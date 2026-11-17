@@ -17,6 +17,7 @@ import {
   prepareBuildingFracture,
 } from '../js/building-fracture.js';
 import { applyFractureEvents } from '../js/ship-fracture.js';
+import { CREW_JOINT_COUNT } from '../js/crew-skeleton.js';
 import { bridgeDeckYAt, caravanHerdSeeds } from '../js/herds.js';
 import { createInlandWaterSampler } from '../js/inland-water.js';
 import { INLAND_WATER_FLOATS, INLAND_WATER_WGSL } from '../js/wgsl/inland-water.js';
@@ -1074,7 +1075,7 @@ test('riverboat oarsmen physically grip their rotating wooden oar shafts across 
         (py + (dYawX * sr + dYawY * cr)) * ds[1],
         (pz + dYawZ) * ds[2],
       ];
-      const baseOff = (clipStart + f) * 65 * 16;
+      const baseOff = (clipStart + f) * CREW_JOINT_COUNT * 16;
       for (const [slot, rest] of [[handLSlot, restHandL], [handRSlot, restHandR]]) {
         const m = palettes.subarray(baseOff + slot * 16, baseOff + slot * 16 + 16);
         const lx = m[0] * rest[0] + m[4] * rest[1] + m[8] * rest[2] + m[12];

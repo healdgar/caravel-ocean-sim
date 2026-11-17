@@ -173,6 +173,11 @@ def surface_normals(pos, indices, fallback):
 
 def mend_classic_glb(path, female=False):
     doc, bin_buf = read_glb(path)
+    if len(doc['skins'][0]['joints']) != 65:
+        # Mending scales fingers about the hand and turns the classic clips; it is for the classic rig as
+        # scripts/prepare-crew.mjs makes it, before scripts/extend-crew-skeleton.py moves it onto the crew skeleton.
+        print(f'{path}: already on the crew skeleton; mend the classic rig before extending it')
+        return
     extras = doc.setdefault('extras', {})
     if extras.get('rigMendedRevision') == 1 and '--force' not in sys.argv:
         print(f'{path}: already mended (rigMendedRevision=1), skipping')

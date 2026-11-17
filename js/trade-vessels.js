@@ -6,9 +6,11 @@ import { FRAME_WGSL, ATMO_CORE_WGSL, CASCADES, HULL_HOLE_LIMIT, HULL_CRATER_LIMI
 import { SKY_RENDER_FUNCS } from './wgsl/sky.js';
 import { SHADOW_FRAME } from './wgsl/shadows.js';
 import { VESSEL_LIGHTING, CANVAS_OPTICS } from './wgsl/vessel.js';
+import { CONTINUUM_SPLAT_PIXELS, CONTINUUM_MIN_PIXELS } from './continuum-core.js';
 import { SURFACE_WAVE_SAMPLE } from './wgsl/surface-waves.js';
 import { SHIP_FRACTURE_POSE_UPDATE } from './wgsl/ship-fracture.js';
 import { CREW_JOINT_BLEND_WGSL } from './wgsl/crew.js';
+import { CREW_JOINT_COUNT } from './crew-skeleton.js';
 import { terrainSurfaceSample } from './terrain-model.js';
 import { createShipAssetCache } from './ship-mesh.js';
 import { getShipModel } from './ship-models.js';
@@ -45,8 +47,8 @@ export const DECK_CREW_MIN_PIXELS = 1.0;
 
 export const VESSEL_CONTINUUM_BAND = 0.25;
 export const VESSEL_ERROR_PIXELS = 1.5;
-export const VESSEL_SPLAT_PIXELS = 3.5;
-export const VESSEL_MIN_PIXELS = 1.0;
+export const VESSEL_SPLAT_PIXELS = CONTINUUM_SPLAT_PIXELS;
+export const VESSEL_MIN_PIXELS = CONTINUUM_MIN_PIXELS;
 
 const TV_HULL_FLOOD_WORDS = 4 * (2 + 2 * HULL_HOLE_LIMIT);
 const BARGE_Y_LIFT = 0.0;
@@ -563,7 +565,7 @@ function appendDeckFixtures(verts, inds, groups, spec, scaleSpec, model) {
   });
 }
 
-// Pure deck-crew station metadata (zero mesh triangles) driving both GPU 65-joint rigged humans and locate() inspection.
+// Pure deck-crew station metadata (zero mesh triangles) driving both GPU-skinned crew-skeleton humans and locate() inspection.
 export function buildTradeDeckStations(verts, spec, scaleSpec, model) {
   const designScale = archetypeDesignScale(spec, model);
   const deckStations = [];
@@ -5540,7 +5542,7 @@ fn tvStepDampedSpring(x: f32, v: f32, goal: f32, omega: f32, zeta: f32, dt: f32)
 `;
 
 // ============================================================================
-// 100% GPU 65-Joint Rigged Deck-Crew Assets, 3D Merchant Codex & Shaders
+// 100% GPU Crew-Skeleton Rigged Deck-Crew Assets, 3D Merchant Codex & Shaders
 // ============================================================================
 const DECK_CREW_MODELS = 2; // 0: male (sailor), 1: female
 const DECK_CREW_BUCKETS = DECK_CREW_MODELS * DECK_CREW_TIERS + DECK_CREW_MODELS * 2; // 0..7 solid render, 8..9 shadow, 10..11 crossfade
@@ -5549,7 +5551,7 @@ const DECK_CREW_BODY_WORDS = 8; // 32 bytes per visible soul
 const DECK_CREW_STATION_WORDS = 8; // 32 bytes per (vesselSlot, stationIdx)
 const DECK_CREW_LOOK_WORDS = 20; // 80 bytes TownLook
 const DECK_CREW_MAX_TOTAL = MAX_TRADE_VESSELS * MAX_DECK_STATIONS_PER_VESSEL;
-const DECK_CREW_JOINT_FLOATS = 65 * 16;
+const DECK_CREW_JOINT_FLOATS = CREW_JOINT_COUNT * 16;
 
 const DECK_CREW_VERTEX_BUFFERS = Object.freeze([{
   arrayStride: 60,
@@ -5787,7 +5789,7 @@ export function appendMerchantCodexToModel(srcModel, sex = 'male') {
   };
 }
 
-// Bakes 7 65-joint deck station clips once at init:
+// Bakes 7 crew-skeleton deck station clips once at init:
 // 0: Idle (from bakeTownClips), 1: Work/Watch, 2: Helm, 3: Merchant (holding raised codex in hand_l),
 // 4: Seated Port Sweep Row (side = -1), 5: Seated Starboard Sweep Row (side = +1), 6: Seated Paddle (taino-canoe).
 export function bakeDeckCrewClips(a) {
@@ -6404,11 +6406,11 @@ const TV_CREW_MASK_ALL: u32 = ${sampleMaskAll}u;
 @group(1) @binding(3) var<storage, read> srcInstances: array<TradeInstance>;
 
 fn deckBonePose(frameA: u32, frameB: u32, blend: f32, braceFrame: u32, braceW: f32, bone: u32, isFemale: bool) -> mat4x4f {
-  let b = min(bone, 64u);
+  let b = min(bone, ${CREW_JOINT_COUNT - 1}u);
   let piv = crewRestJoint(b, isFemale);
-  var m = poses[frameA * 65u + b];
-  if (blend > 0.001 && frameA != frameB) { m = crewBlendJoint(m, poses[frameB * 65u + b], blend, piv); }
-  if (braceW > 0.001) { m = crewBlendJoint(m, poses[braceFrame * 65u + b], braceW, piv); }
+  var m = poses[frameA * ${CREW_JOINT_COUNT}u + b];
+  if (blend > 0.001 && frameA != frameB) { m = crewBlendJoint(m, poses[frameB * ${CREW_JOINT_COUNT}u + b], blend, piv); }
+  if (braceW > 0.001) { m = crewBlendJoint(m, poses[braceFrame * ${CREW_JOINT_COUNT}u + b], braceW, piv); }
   return m;
 }
 fn deckSkinPose(frameA: u32, frameB: u32, blend: f32, braceFrame: u32, braceW: f32, bones: vec4u, weights: vec4f, isFemale: bool) -> mat4x4f {
@@ -6573,11 +6575,11 @@ export const DECK_CREW_SHADOW_WGSL = SHADOW_FRAME + TRADE_SHARED_TYPES_WGSL + DE
 @group(1) @binding(3) var<storage, read> srcInstances: array<TradeInstance>;
 
 fn deckBonePoseSh(frameA: u32, frameB: u32, blend: f32, braceFrame: u32, braceW: f32, bone: u32, isFemale: bool) -> mat4x4f {
-  let b = min(bone, 64u);
+  let b = min(bone, ${CREW_JOINT_COUNT - 1}u);
   let piv = crewRestJoint(b, isFemale);
-  var m = poses[frameA * 65u + b];
-  if (blend > 0.001 && frameA != frameB) { m = crewBlendJoint(m, poses[frameB * 65u + b], blend, piv); }
-  if (braceW > 0.001) { m = crewBlendJoint(m, poses[braceFrame * 65u + b], braceW, piv); }
+  var m = poses[frameA * ${CREW_JOINT_COUNT}u + b];
+  if (blend > 0.001 && frameA != frameB) { m = crewBlendJoint(m, poses[frameB * ${CREW_JOINT_COUNT}u + b], blend, piv); }
+  if (braceW > 0.001) { m = crewBlendJoint(m, poses[braceFrame * ${CREW_JOINT_COUNT}u + b], braceW, piv); }
   return m;
 }
 fn deckSkinPoseSh(frameA: u32, frameB: u32, blend: f32, braceFrame: u32, braceW: f32, bones: vec4u, weights: vec4f, isFemale: bool) -> mat4x4f {
@@ -7252,7 +7254,7 @@ export async function createTradeVessels({
   let submergedGroup1 = submergedCapture?.pipeline ? makeGroup1(submergedCapture.pipeline) : null;
 
   // ==========================================================================
-  // 100% GPU 65-Joint Rigged Deck-Crew Renderer State & Buffers
+  // 100% GPU Rigged Deck-Crew Renderer (crew skeleton, CREW_JOINT_COUNT joints) State & Buffers
   // ==========================================================================
   const CREW_BUCKET_SPAN = Math.ceil(DECK_CREW_MAX_TOTAL / 16) * 16; // 848 * 32B = 27136B (256-byte aligned)
   const CREW_BODY_SLICE_BYTES = CREW_BUCKET_SPAN * DECK_CREW_BODY_WORDS * 4;

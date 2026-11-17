@@ -28,6 +28,7 @@ import { selectCrewLOD, CREW_LOD_TIERS, createCrewLODs, crewPoseInterval, crewAp
 import { createCrewClipPipeline, createCrewClipBatch, createCrewTurnPipeline, createCrewTurnBatch } from './crew-clip-pose.js';
 import { createCrewSolver, createCrewSolveBatch, createCrewArrowPipeline, createCrewArrowBatch, resolveCrewWoundsOnSkeleton } from './crew-solve.js';
 import { attachCrewComponents, crewComponentMaskForActor, ensureCrewComponentPacks, packCrewFaceW } from './crew-components.js';
+import { CREW_JOINT_COUNT, CREW_SLOT } from './crew-skeleton.js';
 
 // Authored, disjoint stations keep a full company clear of stairs and masts.
 // Policies choose intent. The executor alone changes position and animation.
@@ -670,7 +671,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
   const buffer=(label,data,usage)=>{const b=device.createBuffer({label,size:data.byteLength,usage:usage|B.COPY_DST});device.queue.writeBuffer(b,0,data);return b;};
   const layout=CREW_BODY_VERTICES;
   const [models,requested]=await Promise.all([modelsPromise,requestCrewPipelines({device,shader,format,samples,waterOptics})]);
-  if(models.some(m=>m.animator.joints.length!==65))throw Error('Crew expects the prepared 65-joint rigs');
+  if(models.some(m=>m.animator.joints.length!==CREW_JOINT_COUNT))throw Error(`Crew expects the prepared ${CREW_JOINT_COUNT}-joint rigs`);
   const [pipeline,cutDepthPipeline,cutPipeline,shadowPipeline,captainTexture]=await Promise.all([shared?.pipeline??requested.pipeline,
     shared?.cutDepthPipeline??requested.cutDepthPipeline,
     shared?.cutPipeline??requested.cutPipeline,
@@ -706,7 +707,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
     for(const s of captains)s.walkClipDuration=captainModel.animator.clips.get('Walk').duration;
     // A one-person company legitimately has no actors in one sex batch.
     // Bind valid storage buffers, but submit no phantom instance for that batch.
-    const poses=new Float32Array(Math.max(1,people.length)*65*16),actors=new Float32Array(Math.max(1,people.length)*CREW_ACTOR_FLOATS),actorsU32=new Uint32Array(actors.buffer);
+    const poses=new Float32Array(Math.max(1,people.length)*CREW_JOINT_COUNT*16),actors=new Float32Array(Math.max(1,people.length)*CREW_ACTOR_FLOATS),actorsU32=new Uint32Array(actors.buffer);
     const {vertex,index,lods}=geometry[i];
     const bones=buffer('crew joints',poses,B.STORAGE),actor=buffer('crew transforms',actors,B.STORAGE);
     // Two solved poses per sailor, and how far along the way from one to the other each is.
@@ -765,7 +766,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
     get lodLevel(){return activeTier;},
     get posed(){return posed;},
     get activeTriangles(){return everyPart.reduce((n,part)=>n+partTriangles(part,activeTier),0);},
-    joints:65,
+    joints:CREW_JOINT_COUNT,
     order(boat,id){return issueCaptainOrder(state,boat,id);},
     // A paused frame moves nobody, but the camera and the crew and ship toggles still apply.
     refreshDraw(boat,camera=null){
@@ -818,8 +819,8 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
               poseCrewWork(a,s,boat);
               applyCrewRealism(a,s,boat,s.poseElapsed);
               applyCrewWounds(a,s);
-              device.queue.writeBuffer(b.solved,(i*2+s.poseSlot)*65*64,a.palette);
-              if(snap)device.queue.writeBuffer(b.solved,(i*2+1-s.poseSlot)*65*64,a.palette);
+              device.queue.writeBuffer(b.solved,(i*2+s.poseSlot)*CREW_JOINT_COUNT*64,a.palette);
+              if(snap)device.queue.writeBuffer(b.solved,(i*2+1-s.poseSlot)*CREW_JOINT_COUNT*64,a.palette);
             }
             s.poseElapsed=0;
           }
@@ -862,7 +863,7 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
       if(!drawEnabled)return;
       for(const b of batches)if(b.people.length){b.solve.encode(pass);b.captainSolve?.encode(pass);}
       pass.setPipeline(poseBlendPipeline);
-      for(const b of batches)if(b.people.length){pass.setBindGroup(0,b.poseBlendGroup);pass.dispatchWorkgroups(Math.ceil(b.people.length*65/64));}
+      for(const b of batches)if(b.people.length){pass.setBindGroup(0,b.poseBlendGroup);pass.dispatchWorkgroups(Math.ceil(b.people.length*CREW_JOINT_COUNT/64));}
       for(const b of batches)if(b.people.length){b.clip.encode(pass);b.captainClip?.encode(pass);}
       for(const b of batches)if(b.people.length)b.turn.encode(pass);
       // Last, from the joints everybody will be drawn with.
@@ -1057,9 +1058,11 @@ export function measureCrewHeadLandmarks(baseModel) {
   const a = baseModel.animator;
   a.sample(null, 0);
   const slotMap = Object.fromEntries(a.joints.map((nodeIdx, slotIdx) => [a.names[nodeIdx], slotIdx]));
-  const headSlot = slotMap.Head ?? 6;
-  const neckSlot = slotMap.neck_01 ?? 5;
-  const spine3Slot = slotMap.spine_03 ?? 4;
+  const headSlot = slotMap.head ?? CREW_SLOT.head;
+  // The body's neck is skinned to neck_01 alone; neck_02 above it carries no skin. Beards and hair that hang to
+  // the neck take the same joints as the skin under them, so they keep to it however the neck is posed.
+  const neckSlot = slotMap.neck_01 ?? CREW_SLOT.neck_01;
+  const spine3Slot = slotMap.spine_03 ?? CREW_SLOT.spine_03;
   const hpY = a.world[a.joints[headSlot]]?.[13] ?? 1.58;
   const neckY = a.world[a.joints[neckSlot]]?.[13] ?? 1.45;
   const spine3Y = a.world[a.joints[spine3Slot]]?.[13] ?? 1.28;
@@ -1377,8 +1380,8 @@ export function buildIndigenousCrewModel(baseModel, female = false, groomPack = 
   const { headSlot, neckSlot, spine3Slot } = lm;
   const a = baseModel.animator;
   const slotMap = Object.fromEntries(a.joints.map((nodeIdx, slotIdx) => [a.names[nodeIdx], slotIdx]));
-  const armSlots = new Set([slotMap.upperarm_l ?? 8, slotMap.lowerarm_l ?? 9, slotMap.upperarm_r ?? 32, slotMap.lowerarm_r ?? 33]);
-  const calfSlots = new Set([slotMap.calf_l ?? 56, slotMap.calf_r ?? 61]);
+  const armSlots = new Set(['upperarm_l', 'lowerarm_l', 'upperarm_r', 'lowerarm_r'].map((name) => slotMap[name] ?? CREW_SLOT[name]));
+  const calfSlots = new Set(['calf_l', 'calf_r'].map((name) => slotMap[name] ?? CREW_SLOT[name]));
 
   const baseVertCount = baseModel.vertices.byteLength / 60;
   const baseBytes = new Uint8Array(baseModel.vertices.byteLength);
@@ -1499,7 +1502,7 @@ export function buildIndigenousCrewModel(baseModel, female = false, groomPack = 
   const bandH = 0.024;
   const bandSegs = 16;
 
-  // 1. Woven Wampum / Dyed Quillwork Headband around brow (Head bone)
+  // 1. Woven Wampum / Dyed Quillwork Headband around brow (head bone)
   asPiece('HEADBAND', () => { for (let s = 0; s < bandSegs; s++) {
     const a0 = (s / bandSegs) * Math.PI * 2;
     const a1 = ((s + 1) / bandSegs) * Math.PI * 2;
@@ -1519,7 +1522,7 @@ export function buildIndigenousCrewModel(baseModel, female = false, groomPack = 
     pushQuad(v0, v1, v2, v3);
   } });
 
-  // 2. Crown Eagle / Hawk / Macaw Feathers rising from the back/sides of the headband (Head bone)
+  // 2. Crown Eagle / Hawk / Macaw Feathers rising from the back/sides of the headband (head bone)
   const featherSpecs = female
     ? [
         { x: bandCx, z: bandCenterZ - bandRz * 0.96, h: 0.145, w: 0.017, tiltX: 0.0, tiltZ: -0.22 },
@@ -2805,7 +2808,7 @@ export async function createFortSoldiers({
       : i === 1
         ? shared?.geometry?.[1]
         : shared?.indigenousGeometry?.[i - 2];
-    const poses = new Float32Array(most * 65 * 16);
+    const poses = new Float32Array(most * CREW_JOINT_COUNT * 16);
     const actors = new Float32Array(most * CREW_ACTOR_FLOATS);
     const bones = buffer('fort crew joints', poses, B.STORAGE);
     const actor = buffer('fort crew transforms', actors, B.STORAGE);
@@ -2986,7 +2989,7 @@ export async function createFortSoldiers({
               if (s.brace > 0.001) a.blend('Brace', s.time, s.brace);
               applyCrewRealism(a, s, null, dt);
               applyCrewWounds(a, s);
-              device.queue.writeBuffer(b.bones, i * 65 * 64, a.palette);
+              device.queue.writeBuffer(b.bones, i * CREW_JOINT_COUNT * 64, a.palette);
             }
             crewPoseSolved(s);
           }

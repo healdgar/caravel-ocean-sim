@@ -3,49 +3,25 @@ import { VESSEL_RIG, VESSEL_LIGHTING } from './vessel.js';
 import { SKY_RENDER_FUNCS } from './sky.js';
 import { SHADOW_SAMPLE, SHADOW_FRAME } from './shadows.js';
 import { DRESS_MASK_SCALE } from '../indigenous-dress.js';
+import { CREW_JOINT_COUNT, CREW_REST_MALE_PLACES, CREW_REST_FEMALE_PLACES } from '../crew-skeleton.js';
 
 // The captain's painted texture is read a third of a mip level sharper than its footprint: 2^-0.35 of it.
 const CAPTAIN_TEXTURE_SHARPEN = (2 ** -0.35).toFixed(4);
 // How much of the light a shirt of some colour throws back, a captain's coat of that colour does.
 const CAPTAIN_COAT_DEPTH = 0.3;
 
+// Where each joint of the crew skeleton is at rest on the male and female bodies, as WGSL array members.
+const crewRestPlacesWgsl = (places) => places.map(([x, y, z]) => `vec3f(${x.toFixed(4)},${y.toFixed(4)},${z.toFixed(4)})`).join(',');
+
 export const CREW_JOINT_BLEND_WGSL = /* wgsl */ `
-const CREW_REST_MALE=array<vec3f,65>(
-  vec3f(0.0,0.0,0.0),vec3f(0.0,0.9591,-0.0116),vec3f(0.0,1.0844,-0.0048),vec3f(0.0,1.2193,-0.0134),vec3f(0.0,1.3177,-0.0392),
-  vec3f(0.0,1.4763,-0.0599),vec3f(0.0,1.5797,-0.0323),vec3f(0.0621,1.428,-0.0599),vec3f(0.1793,1.4211,-0.0875),vec3f(0.4275,1.4142,-0.1013),
-  vec3f(0.6423,1.4135,-0.0478),vec3f(0.7662,1.4123,0.013),vec3f(0.8006,1.4077,0.0279),vec3f(0.8293,1.4009,0.036),vec3f(0.8537,1.395,0.0428),
-  vec3f(0.7731,1.4135,-0.0076),vec3f(0.8121,1.4066,0.0016),vec3f(0.8431,1.3997,0.0096),vec3f(0.8694,1.3939,0.0164),vec3f(0.7651,1.4032,-0.0489),
-  vec3f(0.796,1.3951,-0.0524),vec3f(0.819,1.3883,-0.0535),vec3f(0.8385,1.3824,-0.0545),vec3f(0.7731,1.4066,-0.0294),vec3f(0.8098,1.3997,-0.0271),
-  vec3f(0.8396,1.3917,-0.0248),vec3f(0.865,1.3849,-0.0229),vec3f(0.6848,1.4066,-0.0099),vec3f(0.7111,1.3963,0.0245),vec3f(0.7352,1.3756,0.0532),
-  vec3f(0.7557,1.3581,0.0775),vec3f(-0.0621,1.428,-0.0599),vec3f(-0.1724,1.4211,-0.0875),vec3f(-0.4275,1.4142,-0.1082),vec3f(-0.6492,1.4175,-0.0449),
-  vec3f(-0.78,1.4106,0.0193),vec3f(-0.811,1.4072,0.0285),vec3f(-0.8396,1.3991,0.0365),vec3f(-0.864,1.3923,0.0434),vec3f(-0.7857,1.4095,-0.0047),
-  vec3f(-0.8201,1.406,0.0021),vec3f(-0.8511,1.3991,0.0102),vec3f(-0.8774,1.3933,0.017),vec3f(-0.7788,1.4014,-0.0495),vec3f(-0.8064,1.3946,-0.0518),
-  vec3f(-0.8293,1.3888,-0.0518),vec3f(-0.8488,1.3839,-0.0518),vec3f(-0.7857,1.4037,-0.0277),vec3f(-0.8178,1.3991,-0.0254),vec3f(-0.8477,1.39,-0.0231),
-  vec3f(-0.873,1.3822,-0.0212),vec3f(-0.6871,1.4049,-0.0082),vec3f(-0.7169,1.3946,0.0228),vec3f(-0.7398,1.3751,0.0538),vec3f(-0.7593,1.3585,0.0801),
-  vec3f(0.0965,0.897,-0.0116),vec3f(0.1379,0.5108,-0.0048),vec3f(0.1862,0.1247,-0.0875),vec3f(0.2414,0.035,0.0297),vec3f(0.2689,-0.0098,0.0883),
-  vec3f(-0.0965,0.897,-0.0116),vec3f(-0.131,0.5108,-0.0048),vec3f(-0.1793,0.1247,-0.0875),vec3f(-0.2345,0.035,0.0297),vec3f(-0.262,-0.0098,0.0883)
-);
-const CREW_REST_FEMALE=array<vec3f,65>(
-  vec3f(0.0,0.0,0.0),vec3f(0.0,0.974,-0.0368),vec3f(0.0,1.0808,-0.0302),vec3f(0.0,1.1966,-0.033),vec3f(0.0,1.2852,-0.0434),
-  vec3f(0.0,1.4176,-0.0633),vec3f(0.0,1.5235,-0.0434),vec3f(0.053,1.3845,-0.0368),vec3f(0.1655,1.3646,-0.0765),vec3f(0.4105,1.3381,-0.0831),
-  vec3f(0.6319,1.3371,-0.0574),vec3f(0.7469,1.3381,-0.0105),vec3f(0.7764,1.3353,-0.0105),vec3f(0.804,1.3316,-0.0087),vec3f(0.8274,1.3285,-0.0071),
-  vec3f(0.7479,1.3362,-0.0335),vec3f(0.7801,1.3362,-0.0317),vec3f(0.8113,1.3316,-0.0289),vec3f(0.8379,1.3277,-0.0266),vec3f(0.7423,1.3261,-0.0712),
-  vec3f(0.7672,1.3252,-0.0675),vec3f(0.7883,1.3224,-0.0666),vec3f(0.8063,1.3201,-0.0658),vec3f(0.7469,1.3298,-0.0537),vec3f(0.7764,1.3316,-0.0519),
-  vec3f(0.8049,1.3279,-0.0501),vec3f(0.8291,1.3248,-0.0485),vec3f(0.6715,1.3261,-0.0252),vec3f(0.7009,1.3197,0.0005),vec3f(0.7285,1.3105,0.018),
-  vec3f(0.752,1.3026,0.0329),vec3f(-0.0596,1.3845,-0.0368),vec3f(-0.1655,1.3646,-0.0765),vec3f(-0.4105,1.3381,-0.0831),vec3f(-0.6432,1.3371,-0.0556),
-  vec3f(-0.7526,1.3381,-0.0096),vec3f(-0.7821,1.3353,-0.0105),vec3f(-0.8097,1.3325,-0.0087),vec3f(-0.8331,1.3302,-0.0071),vec3f(-0.7526,1.3344,-0.0344),
-  vec3f(-0.7848,1.3362,-0.0326),vec3f(-0.817,1.3316,-0.0298),vec3f(-0.8444,1.3277,-0.0275),vec3f(-0.749,1.3261,-0.0712),vec3f(-0.7738,1.3252,-0.0675),
-  vec3f(-0.794,1.3224,-0.0666),vec3f(-0.8112,1.3201,-0.0658),vec3f(-0.7526,1.3298,-0.0537),vec3f(-0.783,1.3316,-0.0528),vec3f(-0.8106,1.3279,-0.0519),
-  vec3f(-0.8341,1.3248,-0.0511),vec3f(-0.6763,1.3261,-0.0243),vec3f(-0.7066,1.3197,-0.0004),vec3f(-0.7342,1.3105,0.0171),vec3f(-0.7577,1.3026,0.032),
-  vec3f(0.0927,0.9078,-0.0434),vec3f(0.0927,0.5039,-0.05),vec3f(0.0927,0.1,-0.0765),vec3f(0.1324,0.0338,0.0427),vec3f(0.1523,0.0007,0.1023),
-  vec3f(-0.0927,0.9078,-0.0434),vec3f(-0.0927,0.5039,-0.05),vec3f(-0.0927,0.1,-0.0765),vec3f(-0.1324,0.0338,0.0427),vec3f(-0.1523,0.0007,0.1023)
-);
+const CREW_REST_MALE=array<vec3f,${CREW_JOINT_COUNT}>(${crewRestPlacesWgsl(CREW_REST_MALE_PLACES)});
+const CREW_REST_FEMALE=array<vec3f,${CREW_JOINT_COUNT}>(${crewRestPlacesWgsl(CREW_REST_FEMALE_PLACES)});
 fn crewRestJoint(joint:u32,isFemale:bool)->vec3f {
-  let j=min(joint,64u);
+  let j=min(joint,${CREW_JOINT_COUNT - 1}u);
   return select(CREW_REST_MALE[j],CREW_REST_FEMALE[j],isFemale);
 }
 fn crewRestJointMid(joint:u32)->vec3f {
-  let j=min(joint,64u);
+  let j=min(joint,${CREW_JOINT_COUNT - 1}u);
   return 0.5*(CREW_REST_MALE[j]+CREW_REST_FEMALE[j]);
 }
 fn crewRotVec(v:vec3f,axis:vec3f,ca:f32,sa:f32)->vec3f {
@@ -119,7 +95,7 @@ struct CrewInput {
   @builtin(instance_index) instance:u32
 };
 fn crewSkin(v:CrewInput)->mat4x4f {
-  let b=v.bones+vec4u(v.instance*65u);
+  let b=v.bones+vec4u(v.instance*${CREW_JOINT_COUNT}u);
   return actors[v.instance].transform*(joints[b.x]*v.weights.x+joints[b.y]*v.weights.y+
     joints[b.z]*v.weights.z+joints[b.w]*v.weights.w);
 }
@@ -497,9 +473,9 @@ export const CREW_POSE_BLEND = CREW_JOINT_BLEND_WGSL + /* wgsl */ `
 @group(0) @binding(2) var<storage,read_write> shownJoints:array<mat4x4f>;
 @compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id:vec3u){
   if(id.x>=arrayLength(&shownJoints)){return;}
-  let sailor=id.x/65u;let joint=id.x%65u;let blend=blends[sailor];
+  let sailor=id.x/${CREW_JOINT_COUNT}u;let joint=id.x%${CREW_JOINT_COUNT}u;let blend=blends[sailor];
   let newest=u32(blend.y);
-  let older=solved[(sailor*2u+1u-newest)*65u+joint];let latest=solved[(sailor*2u+newest)*65u+joint];
+  let older=solved[(sailor*2u+1u-newest)*${CREW_JOINT_COUNT}u+joint];let latest=solved[(sailor*2u+newest)*${CREW_JOINT_COUNT}u+joint];
   shownJoints[id.x]=crewBlendJoint(older,latest,blend.x,crewRestJointMid(joint));
 }
 `;
@@ -517,13 +493,13 @@ fn mixJoints(a:mat4x4f,b:mat4x4f,t:f32,joint:u32)->mat4x4f {
 }
 fn clipJoint(first:u32,frames:u32,frame:f32,joint:u32)->mat4x4f {
   let whole=u32(frame)%frames;let next=(whole+1u)%frames;
-  return mixJoints(palettes[(first+whole)*65u+joint],palettes[(first+next)*65u+joint],fract(frame),joint);
+  return mixJoints(palettes[(first+whole)*${CREW_JOINT_COUNT}u+joint],palettes[(first+next)*${CREW_JOINT_COUNT}u+joint],fract(frame),joint);
 }
 @compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id:vec3u){
   if(id.x>=arrayLength(&shownJoints)){return;}
-  let body=bodies[id.x/65u];
+  let body=bodies[id.x/${CREW_JOINT_COUNT}u];
   if(body.w<0.5){return;}
-  let joint=id.x%65u;
+  let joint=id.x%${CREW_JOINT_COUNT}u;
   if(body.w>2.5){shownJoints[id.x]=clipJoint(layout_.floatFirst,max(layout_.floatFrames,1u),body.x,joint);return;}
   if(body.w>1.5){shownJoints[id.x]=clipJoint(layout_.swimFirst,max(layout_.swimFrames,1u),body.x,joint);return;}
   shownJoints[id.x]=mixJoints(clipJoint(layout_.idleFirst,layout_.idleFrames,body.x,joint),clipJoint(layout_.walkFirst,layout_.walkFrames,body.y,joint),body.z,joint);
@@ -541,9 +517,9 @@ struct CrewTurnRig {pivot:vec2f,count:u32,pad:u32};
 @group(0) @binding(3) var<storage,read_write> shownJoints:array<mat4x4f>;
 @compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id:vec3u){
   if(id.x>=arrayLength(&shownJoints)){return;}
-  let sailor=id.x/65u;
+  let sailor=id.x/${CREW_JOINT_COUNT}u;
   if(sailor>=rig.count){return;}
-  let angle=turns[sailor]*shares[id.x%65u];
+  let angle=turns[sailor]*shares[id.x%${CREW_JOINT_COUNT}u];
   if(angle==0.0){return;}
   let c=cos(angle);let s=sin(angle);
   // About the vertical through the pelvis, in the same sense as a body's yaw: +z comes round toward +x.

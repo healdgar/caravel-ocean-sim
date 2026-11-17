@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { after, before, test } from 'node:test';
 import { chromium } from 'playwright';
 import { createCompany } from '../js/crew.js';
+import { CREW_JOINT_COUNT } from '../js/crew-skeleton.js';
 
 const port = process.env.TEST_PORT || 8082;
 const origin = `http://localhost:${port}`;
@@ -2008,7 +2009,7 @@ test('crew renders the full Niña watch as independent sailors in two batches, o
       const joints=Array.from(new Float32Array(read.getMappedRange()));read.unmap();read.destroy();return joints;
     });
     const bones=await readJoints();
-    assert.equal(bones.length,batches.at(-1)*65*16);assert.notDeepEqual(bones.slice(0,65*16),bones.slice(65*16,2*65*16));
+    const J=CREW_JOINT_COUNT*16;assert.equal(bones.length,batches.at(-1)*J);assert.notDeepEqual(bones.slice(0,J),bones.slice(J,2*J));
     // Past the longest gap between solves, every sailor has moved on.
     for(let i=0;i<9;i++)await step(page,100);
     assert.notDeepEqual(await readJoints(),bones);

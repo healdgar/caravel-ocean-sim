@@ -250,29 +250,29 @@
     "sha256": "af1b3d2448efbc0f67673f46494c890aa901a4728ac627c3d2d55e3b00fe43f3"
   },
   "assets/crew/components-1550.json": {
-    "url": "assets/crew/components-1550.3ae2d6fb54a9bf3c.json",
+    "url": "assets/crew/components-1550.ed6b407ce96c1175.json",
     "bytes": 198463,
-    "sha256": "3ae2d6fb54a9bf3cbcff42e236785adea167a40796d850492fbc408ff2ed99f6"
+    "sha256": "ed6b407ce96c1175ff995e32285c8daac764e76ab0e65fdd64be761e570a53aa"
   },
   "assets/crew/sailor.glb": {
-    "url": "assets/crew/sailor.0ee165fe9d4ca9ae.glb",
-    "bytes": 1344460,
-    "sha256": "0ee165fe9d4ca9ae0b06a2393b408b1fbbfb1396c42519b13015c7a38c3d9380"
+    "url": "assets/crew/sailor.58f1c4db2bdd5a20.glb",
+    "bytes": 1350476,
+    "sha256": "58f1c4db2bdd5a20cb9600362739139f1fee90fe74c80ea2c00d84f6677a6682"
   },
   "assets/crew/sailor-female.glb": {
-    "url": "assets/crew/sailor-female.432259fa937490c1.glb",
-    "bytes": 1542660,
-    "sha256": "432259fa937490c1971933f235b397cbf95d76173efeac26163c7522d3f83ee5"
+    "url": "assets/crew/sailor-female.4fd747777328c9f5.glb",
+    "bytes": 1549232,
+    "sha256": "4fd747777328c9f5f5cabb8aa50b06159b5438c8f7e0ad81cad8d71154667495"
   },
   "assets/crew/captain.glb": {
-    "url": "assets/crew/captain.1060a271c1285d7c.glb",
-    "bytes": 2728088,
-    "sha256": "1060a271c1285d7c8bda112fa1eef7fda656425918a191bbf6633b7a4bd5e015"
+    "url": "assets/crew/captain.e01d1a38ec10efe8.glb",
+    "bytes": 2734056,
+    "sha256": "e01d1a38ec10efe8a960a5761dc3766017b7a6176d3a1fc94c0f6b99a0cf7c1c"
   },
   "assets/crew/soldier-1550.glb": {
-    "url": "assets/crew/soldier-1550.e67511d5d1bb803e.glb",
-    "bytes": 1354752,
-    "sha256": "e67511d5d1bb803e59da4205ca6ec48cf31ade0b35286543a1f946cfc05f7925"
+    "url": "assets/crew/soldier-1550.388a75bdce3412a8.glb",
+    "bytes": 1360760,
+    "sha256": "388a75bdce3412a8f31900634303f06488fa33e52fadd89200379dedca8f9f42"
   },
   "assets/crew/groom-pack.glb": {
     "url": "assets/crew/groom-pack.d3aa52608fd8edf1.glb",
@@ -280,44 +280,44 @@
     "sha256": "d3aa52608fd8edf110a3fbd44efc3341ad939c271777fbd644568d86a3bb13aa"
   },
   "assets/crew/indigenous-algonquian-male.glb": {
-    "url": "assets/crew/indigenous-algonquian-male.c44060e4d0f40d57.glb",
-    "bytes": 1466440,
-    "sha256": "c44060e4d0f40d57c1c7fed0fb16cbf7655c0b3b46fa5c2f18f285aa0ddbb5b0"
+    "url": "assets/crew/indigenous-algonquian-male.d1052492f90e2f19.glb",
+    "bytes": 1472556,
+    "sha256": "d1052492f90e2f196c6ceff706daaaff151fac50b0161a21eef0f8fba837d059"
   },
   "assets/crew/indigenous-algonquian-female.glb": {
-    "url": "assets/crew/indigenous-algonquian-female.b51489a678a5971f.glb",
-    "bytes": 1396968,
-    "sha256": "b51489a678a5971f64dd38fe475b453068b1e52227e02dd5a25d0881ae3783e8"
+    "url": "assets/crew/indigenous-algonquian-female.41d42c8a35aa77bb.glb",
+    "bytes": 1403652,
+    "sha256": "41d42c8a35aa77bb899dc11eabf79ca98a48008fd5191ad7c0e7ce175e9d2a74"
   },
   "assets/crew/indigenous-caribbean-male.glb": {
-    "url": "assets/crew/indigenous-caribbean-male.a407dacd48c4ef56.glb",
-    "bytes": 1449384,
-    "sha256": "a407dacd48c4ef56b3a2156e0ce4226a15325ab4dc0d72ef4404a0a0d4ac28a9"
+    "url": "assets/crew/indigenous-caribbean-male.a966cf88b6628127.glb",
+    "bytes": 1455376,
+    "sha256": "a966cf88b66281275dfde16767dc6c2a04bdc6be5c300a721b0ef60c638835a0"
   },
   "assets/crew/indigenous-caribbean-female.glb": {
-    "url": "assets/crew/indigenous-caribbean-female.fe4305b1b109f068.glb",
-    "bytes": 1417856,
-    "sha256": "fe4305b1b109f06851cff187e6fee2b907c559a28433ac0a1bd9f87463b2ddf1"
+    "url": "assets/crew/indigenous-caribbean-female.df48ad8a74b85070.glb",
+    "bytes": 1424504,
+    "sha256": "df48ad8a74b8507009dd1b7d37d27092a739c1c23b30af0c7e217c9eb4be5b14"
   },
   "assets/crew/indigenous-maya-male.glb": {
-    "url": "assets/crew/indigenous-maya-male.7480a751d47b2ac1.glb",
-    "bytes": 1446572,
-    "sha256": "7480a751d47b2ac1d388895389b369f9c52b964cc5aefd1d12cfef28caf28141"
+    "url": "assets/crew/indigenous-maya-male.7a64a20578d082e2.glb",
+    "bytes": 1452668,
+    "sha256": "7a64a20578d082e2fc8645636e864fc256bddd83f83e71cd43f9c04bf8884a74"
   },
   "assets/crew/indigenous-maya-female.glb": {
-    "url": "assets/crew/indigenous-maya-female.1a047d137d12a2cc.glb",
-    "bytes": 1637580,
-    "sha256": "1a047d137d12a2cc12b35f757bcdc484fe0fb37e69514d54ba4fc7dd4af19861"
+    "url": "assets/crew/indigenous-maya-female.9d4ab97cefbf8191.glb",
+    "bytes": 1644312,
+    "sha256": "9d4ab97cefbf8191abdc56a6702160c81dfea79ccd09e27d0fe8d5048ea042ed"
   },
   "assets/crew/indigenous-andean-male.glb": {
-    "url": "assets/crew/indigenous-andean-male.0ab81200af1984e4.glb",
-    "bytes": 1300356,
-    "sha256": "0ab81200af1984e48db99792f4598cf9cb48193fe0def4c49b336b6fa60e8c0c"
+    "url": "assets/crew/indigenous-andean-male.df925a422bbf7f1f.glb",
+    "bytes": 1306428,
+    "sha256": "df925a422bbf7f1f6e55f2c732267db5151aa5820070f932a8d8187d548e57ba"
   },
   "assets/crew/indigenous-andean-female.glb": {
-    "url": "assets/crew/indigenous-andean-female.337dcf8ad46f5266.glb",
-    "bytes": 1461696,
-    "sha256": "337dcf8ad46f5266714f6aa0fb1a156d592ba65b77f796652ca4926cf5fbfeef"
+    "url": "assets/crew/indigenous-andean-female.3df57cd3822cb781.glb",
+    "bytes": 1468348,
+    "sha256": "3df57cd3822cb78133a1a65e15ee161f207ee900f7728d9614e1fcbb7816397b"
   },
   "assets/world/saba/height.bin": {
     "url": "assets/world/saba/height.44a7a266ceebe8c9.bin",

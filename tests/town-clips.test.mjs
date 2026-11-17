@@ -4,11 +4,12 @@ import {readFileSync} from 'node:fs';
 import {performance} from 'node:perf_hooks';
 import {loadCrewGLB} from '../js/gltf.js';
 import {bakeTownClips} from '../js/town-clips.js';
-import {TOWN_COWER_FRAMES,TOWN_FALL_FRAMES} from '../js/wgsl/townsfolk.js';
+import {TOWN_COWER_FRAMES,TOWN_FALL_FRAMES,TOWNSFOLK_RENDER,TOWNSFOLK_SHADOW} from '../js/wgsl/townsfolk.js';
+import {CREW_JOINT_COUNT,CREW_JOINT_NAMES,CREW_SLOT} from '../js/crew-skeleton.js';
 
-const JOINTS=65,MATRIX=16;
+const JOINTS=CREW_JOINT_COUNT,MATRIX=16;
 const load=name=>{const bytes=readFileSync(new URL(`../assets/crew/${name}.glb`,import.meta.url));return loadCrewGLB(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength));};
-// Colonial, Indigenous regional, garrison soldier and classic bodies all share the 65-joint townsfolk clip bake.
+// Colonial, Indigenous regional, garrison soldier and classic bodies all share the crew skeleton and its townsfolk clip bake.
 const models=[
   'sailor','sailor-female','soldier-1550',
   'indigenous-algonquian-male','indigenous-algonquian-female',
@@ -36,6 +37,7 @@ function extent({vertices,vertexCount},palettes,frame){
 }
 
 for(const {name,model} of models)test(`${name}: what people do under fire is baked into poses that keep them on the ground`,()=>{
+  assert.deepEqual(model.animator.joints.map(node=>model.animator.names[node]),CREW_JOINT_NAMES,'the skin is the crew skeleton, in its order');
   const started=performance.now();
   const {palettes,layout}=bakeTownClips(model.animator);
   const milliseconds=performance.now()-started;
@@ -67,5 +69,17 @@ for(const {name,model} of models)test(`${name}: what people do under fire is bak
     assert.ok(lying.low[1]>-.2,`lying ${lying.low[1].toFixed(2)} m into the ground`);
     assert.ok(sign*(lying.high[2]+lying.low[2])>.2,`fell towards ${((lying.high[2]+lying.low[2])/2).toFixed(2)} m`);
     assert.ok(Math.abs(lying.high[1]-before.high[1])<.04,'settled by the end of the clip');
+  }
+});
+
+test('a wound in the street takes off the crew-skeleton joint it parts at and all that hang from it',()=>{
+  // From the joint parted to the last of its descendants, held by the joint above it.
+  const run=(parted,last,stump)=>`loSlot=${CREW_SLOT[parted]}u;hiSlot=${CREW_SLOT[last]}u;stumpSlot=${CREW_SLOT[stump]}u;`;
+  for(const shader of [TOWNSFOLK_RENDER,TOWNSFOLK_SHADOW]){
+    for(const severed of [run('lowerarm_l','thumb_03_l','upperarm_l'),run('lowerarm_r','thumb_03_r','upperarm_r'),
+      run('calf_l','ball_l','thigh_l'),run('calf_r','ball_r','thigh_r'),run('neck_01','FACIAL_R_Brow','spine_05')])
+      assert.ok(shader.includes(severed),severed);
+    assert.ok(shader.includes(`let armLo=select(${CREW_SLOT.lowerarm_r}u,${CREW_SLOT.lowerarm_l}u,isLeft);let armHi=select(${CREW_SLOT.thumb_03_r}u,${CREW_SLOT.thumb_03_l}u,isLeft);`),'a broken arm bends from the elbow down');
+    assert.ok(shader.includes(`let b=min(bone,${CREW_JOINT_COUNT-1}u);`)&&shader.includes(`poses[frameA*${CREW_JOINT_COUNT}u+b]`),'poses are read a whole skeleton to a frame');
   }
 });

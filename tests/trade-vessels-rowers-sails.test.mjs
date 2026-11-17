@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { loadCrewGLB } from '../js/gltf.js';
+import { CREW_JOINT_COUNT } from '../js/crew-skeleton.js';
 import {
   TRADE_VESSEL_ARCHETYPES,
   MAX_TRADE_VESSELS,
@@ -171,7 +172,7 @@ test('Archetype 4 river barge keeps only 4 active wooden thwarts, dry raised sol
     const count = layout[clipSlot + 1];
     assert.equal(count, 24, `${label} has 24 frames`);
     for (let f = 0; f < count; f++) {
-      const pal = palettes.subarray((start + f) * 65 * 16, (start + f + 1) * 65 * 16);
+      const pal = palettes.subarray((start + f) * CREW_JOINT_COUNT * 16, (start + f + 1) * CREW_JOINT_COUNT * 16);
       const neck = jointPosFromPalette(pal, 'neck_01');
       const spine3 = jointPosFromPalette(pal, 'spine_03');
       const pelvis = jointPosFromPalette(pal, 'pelvis');

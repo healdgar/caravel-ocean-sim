@@ -65,11 +65,11 @@ class BodyEnvelope:
         self.W = body['W']
         self.jidx = body['jidx']
         self.jpos = body['jpos']
-        self.head_p = self.jpos['Head']
+        self.head_p = self.jpos['head']
         self.neck_p = self.jpos['neck_01']
 
-        # Head vertices for exact skull & front-face queries (strictly Head-weighted, excluding T-pose shoulders/arms).
-        head_slot = self.jidx['Head']
+        # Head vertices for exact skull & front-face queries (strictly head-weighted, excluding T-pose shoulders/arms).
+        head_slot = self.jidx['head']
         head_w = np.zeros(len(self.P), dtype=np.float64)
         for k in range(4):
             mask = self.J[:, k] == head_slot
@@ -188,7 +188,7 @@ class BodyEnvelope:
         return np.array([r * math.sin(az), y, self.torso_z0 + r * math.cos(az)], dtype=np.float64)
 
     def head_weights(self, pts, neck_blend_below=None, spine_tail=False):
-        h_slot = self.jidx['Head']
+        h_slot = self.jidx['head']
         n_slot = self.jidx['neck_01']
         s_slot = self.jidx['spine_03']
         n = len(pts)

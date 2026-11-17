@@ -8,6 +8,8 @@ import { once } from 'node:events';
 import { test } from 'node:test';
 import { chromium } from 'playwright';
 import { createDevServer } from '../server.mjs';
+import { CREW_JOINT_COUNT, CREW_SLOT } from '../js/crew-skeleton.js';
+import { CREW_SOLVE_BONES } from '../js/wgsl/crew-solve.js';
 
 // An empty page on the project's own server, with a GPU, to run one of these in.
 async function inPage(run) {
@@ -32,7 +34,8 @@ test('the pose pass puts every joint where the JavaScript skeleton has it, for c
   {
     const result = await inPage(async () => {
       const { loadCrewGLB } = await import('/js/gltf.js');
-      const { createCrewSolver, createCrewSolveBatch } = await import('/js/crew-solve.js');
+      const { createCrewSolver, createCrewSolveBatch, crewSolveRig } = await import('/js/crew-solve.js');
+      const { CREW_JOINT_COUNT } = await import('/js/crew-skeleton.js');
       const { createCompany, stepCompany } = await import('/js/crew.js');
       const { stepCrewWork, crewGunStation } = await import('/js/crew-work.js');
       const { poseCrewWork } = await import('/js/crew-pose.js');
@@ -108,7 +111,7 @@ test('the pose pass puts every joint where the JavaScript skeleton has it, for c
       people.forEach((c, i) => { c.index = i; c.rig = i % models.length; });
 
       // Two poses a sailor, as he is drawn: each frame the older is replaced, or both when a change must show at once.
-      const J = 65, pose = J * 16, bytes = people.length * 2 * pose * 4;
+      const J = CREW_JOINT_COUNT, pose = J * 16, bytes = people.length * 2 * pose * 4;
       const poses = device.createBuffer({ size: bytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
       const shader = async (code, label) => { const module = device.createShaderModule({ code, label }), bad = (await module.getCompilationInfo()).messages.filter((m) => m.type === 'error'); if (bad.length) throw Error(bad.map((m) => m.lineNum + ': ' + m.message).join('\n')); return module; };
       const pipeline = await createCrewSolver(device, shader), batches = models.map((model) => createCrewSolveBatch(device, pipeline, model, poses, people.length));
@@ -184,10 +187,16 @@ test('the pose pass puts every joint where the JavaScript skeleton has it, for c
       for (const batch of batches) batch.destroy();
       poses.destroy();
       rows.sort((a, b) => b.worst - a.worst);
-      return { errors, people: people.length, lists, longest, beside, kinds: [...kinds].sort(), worst: rows.slice(0, 12), broken: rows.filter((r) => !r.finite).slice(0, 8), over: rows.filter((r) => r.worst > 0.004).length, rows: rows.length };
+      return { errors, joints: models.map((model) => model.animator.joints.length), bones: models.map((model) => Array.from(crewSolveRig(model.animator).bones)), people: people.length, lists, longest, beside, kinds: [...kinds].sort(), worst: rows.slice(0, 12), broken: rows.filter((r) => !r.finite).slice(0, 8), over: rows.filter((r) => r.worst > 0.004).length, rows: rows.length };
     });
     if (process.env.CREW_SOLVE_REPORT) console.log(JSON.stringify({ ...result, worst: result.worst.slice(0, 3) }));
     assert.deepEqual(result.errors, []);
+    assert.deepEqual(result.joints, [CREW_JOINT_COUNT, CREW_JOINT_COUNT, CREW_JOINT_COUNT], 'every rig is the crew skeleton');
+    // The bones the steps name, at their slots on the crew skeleton: the head under neck_02, the arms past spine_05
+    // and the twists, the legs past the face and fingers.
+    const slots = [0, 1, 2, 3, 4, 7, 9, 23, 24, 27, 30, 50, 51, 54, 57, 77, 80, 83, 84, 85, 88, 91, 92];
+    assert.deepEqual(CREW_SOLVE_BONES.map((name) => CREW_SLOT[name]), slots);
+    for (const bones of result.bones) assert.deepEqual(bones, slots, 'each rig table names those slots');
     assert.deepEqual(result.broken, [], 'every joint the pass writes is a number');
     assert.ok(result.people > 100 && result.rows === result.people * 5, 'three companies and every kind of work, over five frames: ' + result.people);
     assert.ok(result.longest <= 24, 'a sailor\'s list of steps stays short: ' + result.longest);
@@ -208,6 +217,7 @@ test('an arrow stays in the bone it struck, placed from the joints the pose pass
     const { poseCrewWork } = await import('/js/crew-pose.js');
     const { applyCrewRealism } = await import('/js/crew-physics.js');
     const { applyCrewWounds, recordCrewWound } = await import('/js/crew-wounds.js');
+    const { CREW_JOINT_COUNT } = await import('/js/crew-skeleton.js');
     const { writeGunneryToolInstances } = await import('/js/gunnery-tools.js');
     const { getShipModel } = await import('/js/ship-models.js');
     const { sailingState } = await import('/js/sailing.js');
@@ -231,7 +241,7 @@ test('an arrow stays in the bone it struck, placed from the joints the pose pass
     struck[1].crewInjuries = [{ kind: 'severed', bone: 'lowerarm_l' }];
     struck[2].casualtyState = 'fallen'; struck[2].health = 0;
 
-    const J = 65, B = GPUBufferUsage, shader = async (code, label) => { const module = device.createShaderModule({ code, label }), bad = (await module.getCompilationInfo()).messages.filter((m) => m.type === 'error'); if (bad.length) throw Error(bad.map((m) => m.lineNum + ': ' + m.message).join('\n')); return module; };
+    const J = CREW_JOINT_COUNT, B = GPUBufferUsage, shader = async (code, label) => { const module = device.createShaderModule({ code, label }), bad = (await module.getCompilationInfo()).messages.filter((m) => m.type === 'error'); if (bad.length) throw Error(bad.map((m) => m.lineNum + ': ' + m.message).join('\n')); return module; };
     const joints = device.createBuffer({ size: people.length * J * 64, usage: B.STORAGE }), actors = new Float32Array(people.length * CREW_ACTOR_FLOATS), instances = new Float32Array(68 * 8);
     const actorBuffer = device.createBuffer({ size: actors.byteLength, usage: B.STORAGE | B.COPY_DST }), tubes = device.createBuffer({ size: instances.byteLength, usage: B.STORAGE | B.COPY_DST | B.COPY_SRC });
     const batch = createCrewSolveBatch(device, await createCrewSolver(device, shader), model, joints, people.length);

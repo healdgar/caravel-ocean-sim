@@ -20,12 +20,13 @@ test('the shoulder turn moves what is above the hips, leaves the legs on their l
     const result = await page.evaluate(async () => {
       const { loadCrewGLB } = await import('/js/gltf.js');
       const { createCrewTurnBatch, createCrewTurnPipeline } = await import('/js/crew-clip-pose.js');
+      const { CREW_JOINT_COUNT, CREW_SLOT } = await import('/js/crew-skeleton.js');
       const adapter = await navigator.gpu.requestAdapter(), device = await adapter.requestDevice(), errors = [];
       device.onuncapturederror = (e) => errors.push(e.error.message);
       const model = loadCrewGLB(await (await fetch('/assets/crew/sailor.glb')).arrayBuffer()), a = model.animator;
       a.sample('Walk', 0.4);
-      const people = 3, palette = new Float32Array(people * 65 * 16);
-      for (let i = 0; i < people; i++) palette.set(a.palette, i * 65 * 16);
+      const J = CREW_JOINT_COUNT, people = 3, palette = new Float32Array(people * J * 16);
+      for (let i = 0; i < people; i++) palette.set(a.palette, i * J * 16);
       const joints = device.createBuffer({ size: palette.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
       device.queue.writeBuffer(joints, 0, palette);
       const shader = async (code, label) => { const module = device.createShaderModule({ code, label }), bad = (await module.getCompilationInfo()).messages.filter((m) => m.type === 'error'); if (bad.length) throw Error(bad.map((m) => m.message).join()); return module; };
@@ -47,26 +48,27 @@ test('the shoulder turn moves what is above the hips, leaves the legs on their l
         return { out, dispatches };
       };
       const square = await run([0, 0, 0]), turned = await run([0, 1, -1]);
-      const joint = (name) => a.joints.indexOf(a.nodeIndex(name));
+      const joint = (name) => CREW_SLOT[name];
       // Where a joint's bind position ends up, for one body. Palette times the joint's bind position gives its posed place.
       const place = (buffer, body, name) => {
-        const j = joint(name), m = buffer.subarray((body * 65 + j) * 16, (body * 65 + j + 1) * 16), n = a.nodeIndex(name), restWorld = a.world[n], p = [restWorld[12], restWorld[13], restWorld[14]];
+        const j = joint(name), m = buffer.subarray((body * J + j) * 16, (body * J + j + 1) * 16), n = a.nodeIndex(name), restWorld = a.world[n], p = [restWorld[12], restWorld[13], restWorld[14]];
         // The palette maps bind space, so compare what each does to one fixed point.
         return [m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12], m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13], m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14]];
       };
-      const rows = { dispatchWhileSquare: square.dispatches.length, dispatchWhileTurned: turned.dispatches.length, errors };
-      for (const name of ['foot_l', 'foot_r', 'calf_l', 'thigh_r', 'upperarm_l', 'upperarm_r', 'pelvis', 'spine_02']) {
+      const rows = { dispatchWhileSquare: square.dispatches.length, dispatchWhileTurned: turned.dispatches.length, errors, inOrder: a.joints.every((node, slot) => joint(a.names[node]) === slot) };
+      for (const name of ['foot_l', 'foot_r', 'calf_l', 'thigh_r', 'thigh_twist_01_l', 'calf_twist_02_r', 'upperarm_l', 'upperarm_r', 'upperarm_twist_01_l', 'lowerarm_twist_02_r', 'pelvis', 'spine_02', 'head', 'FACIAL_L_Eye', 'FACIAL_C_LipLower']) {
         rows[name] = { square: place(square.out, 1, name), turned: place(turned.out, 1, name), left: place(turned.out, 2, name), still: place(turned.out, 0, name) };
       }
       batch.destroy(); joints.destroy();
       return rows;
     });
     assert.deepEqual(result.errors, []);
+    assert.ok(result.inOrder, 'the sailor rig is the crew skeleton, in its order');
     assert.equal(result.dispatchWhileSquare, 0, 'everyone square: nothing dispatched');
     assert.equal(result.dispatchWhileTurned, 1, 'anyone turned: one dispatch for the batch');
     const moved = (row, key = 'turned') => Math.hypot(...row[key].map((v, i) => v - row.square[i]));
-    for (const name of ['foot_l', 'foot_r', 'calf_l', 'thigh_r']) assert.ok(moved(result[name]) < 1e-5, `${name} stays on the line he walks: ${moved(result[name])}`);
-    for (const name of ['upperarm_l', 'upperarm_r']) {
+    for (const name of ['foot_l', 'foot_r', 'calf_l', 'thigh_r', 'thigh_twist_01_l', 'calf_twist_02_r']) assert.ok(moved(result[name]) < 1e-5, `${name} stays on the line he walks: ${moved(result[name])}`);
+    for (const name of ['upperarm_l', 'upperarm_r', 'upperarm_twist_01_l', 'lowerarm_twist_02_r']) {
       assert.ok(moved(result[name]) > 0.1, `${name} comes round: ${moved(result[name])}`);
       assert.ok(moved(result[name], 'still') < 1e-6, `${name} of the body who is square stays put`);
       // Positive turn is the same sense as yaw, so +z comes round toward +x: a left shoulder (+x) goes toward -z.
@@ -74,6 +76,12 @@ test('the shoulder turn moves what is above the hips, leaves the legs on their l
     assert.ok(result.upperarm_l.turned[2] < result.upperarm_l.square[2] - 0.05, 'in the sense of his yaw');
     assert.ok(result.upperarm_l.left[2] > result.upperarm_l.square[2] + 0.05, 'and the other way for the other hand');
     assert.ok(moved(result.spine_02) < moved(result.upperarm_l), 'less at the waist than at the shoulder');
+    // The face turns with the head, by the head's share of the turn: 0.55 of the body's one radian.
+    const c = Math.cos(0.55), s = Math.sin(0.55), from = (row, key) => row[key].map((v, i) => v - result.head[key][i]);
+    for (const name of ['FACIAL_L_Eye', 'FACIAL_C_LipLower']) {
+      const [x, y, z] = from(result[name], 'square'), turned = from(result[name], 'turned');
+      assert.ok(Math.hypot(turned[0] - (c * x + s * z), turned[1] - y, turned[2] - (c * z - s * x)) < 1e-4, `${name} stays where it is on the head: ${turned}`);
+    }
   } finally {
     await browser?.close();
     server.close();

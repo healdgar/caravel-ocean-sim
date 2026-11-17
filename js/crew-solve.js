@@ -9,6 +9,7 @@ import { gltfSlerp } from './gltf.js';
 import { poseCrewWork, poseRotation } from './crew-pose.js';
 import { applyCrewRealism, getCrewMixerMasks } from './crew-physics.js';
 import { applyCrewWounds, CREW_BROKEN_ANGLE, CREW_CRUSHED_SCALE, CREW_ARROW_LENGTH } from './crew-wounds.js';
+import { CREW_JOINT_NAMES } from './crew-skeleton.js';
 
 // The published page is every module in one scope, so each name here says whose it is.
 const CREW_SOLVE_CLIPS = ['Idle', 'Walk', 'Brace'], CREW_SOLVE_RATE = 30;
@@ -37,6 +38,8 @@ export function crewSolveRig(animator) {
   if (crewSolveRigs.has(animator)) return crewSolveRigs.get(animator);
   const a = animator, joints = a.joints;
   if (joints.length !== CREW_SOLVE_JOINTS) throw Error('The crew pose pass expects a rig of ' + CREW_SOLVE_JOINTS + ' joints');
+  // Every pose buffer holds the joints in the crew skeleton's order, js/crew-skeleton.js, and is read so elsewhere.
+  joints.forEach((node, slot) => { if (a.names[node] !== CREW_JOINT_NAMES[slot]) throw Error('Crew joint ' + slot + ' is ' + a.names[node] + ', not ' + CREW_JOINT_NAMES[slot]); });
   if (!a.footContacts?.l || !a.footContacts?.r || !a.seatContact) throw Error('The crew pose pass expects measured boots and a measured seat');
   const slots = new Int16Array(a.names.length).fill(-1);
   joints.forEach((node, slot) => { slots[node] = slot; });
@@ -115,7 +118,7 @@ export function crewSolveRig(animator) {
     footNodes.forEach((node, side) => feet.set(a.world[node].subarray(12, 15), ((clip.first + key) * 2 + side) * 3));
   }
   a.sample(null, 0);
-  const restPoints = ['pelvis', 'spine_02', 'Head'].map((name) => Array.from(a.world[a.nodeIndex(name)].subarray(12, 15)));
+  const restPoints = ['pelvis', 'spine_02', 'head'].map((name) => Array.from(a.world[a.nodeIndex(name)].subarray(12, 15)));
   // A joint's own frame on the body at rest: what its inverse bind matrix undoes. Worked out when first asked for.
   const binds = new Map();
   const bind = (slot) => {
@@ -204,7 +207,7 @@ async function makeCrewSolver(device, shader) {
   const retire = (buffer) => { if (buffer) device.queue.onSubmittedWorkDone().then(() => buffer.destroy(), () => {}); };
   const filled = (label, data) => { const buffer = device.createBuffer({ label, size: data.byteLength, usage }); device.queue.writeBuffer(buffer, 0, data); return buffer; };
   // Every rig in one table, and every rig's clip keys in another. Each rig's keys start on a whole pose, so a key
-  // is still a run of 65 turns.
+  // is still a run of turns, one a joint.
   const layRigs = () => {
     let keys = 0;
     const firsts = rigs.map((rig) => { const first = keys; keys += Math.ceil(rig.table.length / 4 / CREW_SOLVE_JOINTS) * CREW_SOLVE_JOINTS; return first; });
@@ -309,7 +312,7 @@ async function makeCrewSolver(device, shader) {
   };
 }
 
-// One batch of bodies on one rig, solved into `poses`, a buffer of 65 matrices a pose. `add` writes down one
+// One batch of bodies on one rig, solved into `poses`, a buffer of one matrix a joint a pose. `add` writes down one
 // sailor's pose for this frame; `upload` says the writing is done; `encode` has the solver solve whatever is
 // waiting, this batch's and every other's.
 export function createCrewSolveBatch(device, solver, model, poses, capacity) {

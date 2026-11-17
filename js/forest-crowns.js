@@ -5,10 +5,12 @@
 // and 1-triangle horizon splat; js/forest-clusters.js decimates each tree smoothly on the GPU by eye-angle
 // pixel span down to 1 pixel. A tree wholly in its crown draws no cluster of leaf or wood.
 
+import { CONTINUUM_SPLAT_PIXELS, CONTINUUM_MIN_PIXELS } from './continuum-core.js';
+
 export const FOREST_CROWN_VERSION = 3;
 export const FOREST_CROWN_STEP_WORDS = 4;
-export const FOREST_CROWN_SPLAT_PIXELS = 3.5;
-export const FOREST_CROWN_MIN_PIXELS = 1.0;
+export const FOREST_CROWN_SPLAT_PIXELS = CONTINUUM_SPLAT_PIXELS;
+export const FOREST_CROWN_MIN_PIXELS = CONTINUUM_MIN_PIXELS;
 // A crown's single base mesh packs vertices as cluster vertices (packForestClusterVertex in js/forest-clusters.js),
 // while morph.bin stores 4-word progressive collapse step headers and u8 cumulative vertex ancestor maps.
 const CROWN_VERTEX_WORDS = 5;

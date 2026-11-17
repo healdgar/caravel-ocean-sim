@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
 import { loadCrewGLB } from '../js/gltf.js';
+import { CREW_JOINT_COUNT } from '../js/crew-skeleton.js';
 import { townWalkerStride } from '../js/audio.js';
 import { getLivestockMeshes, getVehicleMeshes } from '../js/models/livestock-meshes.js';
 import {
@@ -253,7 +254,7 @@ test('1550 Lusitano horse mesh fits sela à gineta tack to Tripo H3.1 contours w
 
     let buttMinY = Infinity, thighInnerMinX = Infinity, maxSoleErr = 0;
     for (let f = 0; f < TOWN_RIDE_FRAMES; f++) {
-      const base = f * 65 * 16;
+      const base = f * CREW_JOINT_COUNT * 16;
       let frameSoleMinY = Infinity;
       for (let v = 0; v < model.vertexCount; v++) {
         const o = v * 60;
@@ -301,7 +302,7 @@ test('1550 Lusitano horse mesh fits sela à gineta tack to Tripo H3.1 contours w
       frames.push({
         pelvis: at('pelvis'),
         handL: at('hand_l'),
-        head: at('Head'),
+        head: at('head'),
       });
     });
     for (const fr of frames) {

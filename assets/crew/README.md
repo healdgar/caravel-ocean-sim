@@ -1,20 +1,20 @@
 # Crew assets
 
 `sailor.glb`: the 1550-era bald, clean-shaven male European mariner and townsman base body, generated with Tripo
-on paid credits and fitted without distortion to the classic 65-joint skeleton: 9,445 triangles, 4,742 vertices,
-65 joints; Idle, Walk and Brace clips, and baked levels of 3,748, 1,436 and 300 triangles.
+on paid credits and fitted without distortion to the classic skeleton: 9,445 triangles, 4,742 vertices,
+93 joints; Idle, Walk and Brace clips, and baked levels of 3,748, 1,436 and 300 triangles.
 `sailor-female.glb`: the 1550-era bald, clean-shaven female European mariner and townswoman base body, made the
-same way on the classic female skeleton: 9,187 triangles, 4,608 vertices, 65 joints; the same clips and baked
+same way on the classic female skeleton: 9,187 triangles, 4,608 vertices, 93 joints; the same clips and baked
 levels of 3,761, 1,420 and 298 triangles.
 `captain.glb`: the 1550-era bald, clean-shaven Iberian ship and presidio captain base body in velvet-trimmed
 doublet and trunk hose, generated with Tripo on paid credits, fitted (`--textured`) with its embedded 2048×2048
 JPEG texture preserved, and decimated with `scripts/safe-decimate.mjs` (`ignoreUvs: false`): 3,573 base triangles,
-4,275 vertices, 65 joints; Idle, Walk and Brace clips, and baked levels of 1,500, 650 and 294 triangles.
+4,275 vertices, 93 joints; Idle, Walk and Brace clips, and baked levels of 1,500, 650 and 294 triangles.
 `soldier-1550.glb`: the 1550-era bald, clean-shaven Iberian tercio/presidio garrison soldier in buff jerkin and
-slashed trunk hose: 4,738 triangles, 2,384 vertices, 65 joints; Idle, Walk and Brace clips, and baked levels of
+slashed trunk hose: 4,738 triangles, 2,384 vertices, 93 joints; Idle, Walk and Brace clips, and baked levels of
 1,950, 790 and 278 triangles.
 `indigenous-{algonquian,caribbean,maya,andean}-{male,female}.glb`: eight regional bald, clean-shaven Indigenous
-character base bodies (~4,633–4,800 triangles, ~2,334–2,417 vertices, 65 joints; Idle, Walk and Brace clips, with
+character base bodies (~4,633–4,800 triangles, ~2,334–2,417 vertices, 93 joints; Idle, Walk and Brace clips, with
 baked levels around 1,950, 790 and 280 triangles) covering Algonquian/Woodland buckskin dress, Taíno/Kalinago/Tupinambá
 cotton *naguas* and body-paint base, coastal Maya woven *pati*/*ex* and *huipil*/*kub*, and Pacific/Andean *unku*
 and *anaku*/*lliklla* tunics across all nine `INDIGENOUS_CULTURE_REGIONS`.
@@ -25,9 +25,26 @@ stripped of mannequin geometry, registered onto canonical cranial/jaw landmarks 
 and decimated with `[near, mid, far]` levels (`155,580` bytes total). Runtime combines these as GPU-selectable
 optional dress pieces across ship crews, captains, garrison soldiers, colonial port villagers, and Indigenous
 villagers/canoe crews.
-`sailor-classic.glb` (993,696 bytes, 15,995 triangles, 65 joints) and `sailor-female-classic.glb` (1,212,816 bytes,
-18,720 triangles, 65 joints): the CC0 Quaternius Universal Base Character reference rigs whose 65-joint skeletons
-and animation clips anchor `scripts/fit-crew-body.py` and legacy unit tests.
+`sailor-classic.glb` (15,995 triangles) and `sailor-female-classic.glb` (18,720 triangles), 93 joints each: the
+CC0 Quaternius Universal Base Character reference rigs whose skeletons and animation clips anchor
+`scripts/fit-crew-body.py` and legacy unit tests.
+
+## The crew skeleton
+
+Every person is drawn on one skeleton of 93 joints (`scripts/crew_skeleton.py`; the runtime's copy,
+`js/crew-skeleton.js`, is written from it by `scripts/write-crew-skeleton-js.py`). Its body is Unreal 5's
+80-joint mannequin, the rig Tripo makes with `--spec unreal`: five spine joints, two neck joints, `head`, a
+metacarpal under each finger but the thumb, and two twist joints on each upper arm, forearm, thigh and calf.
+Thirteen face joints hang from the head: `FACIAL_C_Jaw` (with `FACIAL_C_LipLower` under it), `FACIAL_C_LipUpper`,
+both lip corners, both eyes, an upper and a lower lid for each, and both brows. Tripo rigs no face, so the fit
+places these on each face's own features (the midline profile's nose, mouth and chin, the nasion and each
+eyeball's bulge) and gives each a soft share of what the head carries.
+
+The bodies above were fitted to the classic 65-joint rig and moved onto this skeleton by
+`scripts/extend-crew-skeleton.py`, which leaves every vertex where it was in every clip (within 0.001 mm): the
+added joints start turned as their parents and carry no weight until a body is fitted to them again. A body
+fitted now keeps Tripo's own weights joint for joint. `scripts/prepare-crew.mjs` builds the classic rigs, mends
+them (`scripts/mend-classic-crew-rig.py`) and extends them in one run.
 Each GLB contains all geometry, vertex colours, skeleton and animation.
 Runtime instances share each mesh and vary clothing, skin/hair colours, height,
 facial proportions and animation phase. Six instances of each model form the

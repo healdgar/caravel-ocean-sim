@@ -22,10 +22,11 @@ test('the clip pass swims the living and floats the dead as the solved pose woul
       const { loadCrewGLB } = await import('/js/gltf.js');
       const { createCrewClipBatch, createCrewClipPipeline } = await import('/js/crew-clip-pose.js');
       const { poseCrewWork, crewAfloatSeconds } = await import('/js/crew-pose.js');
+      const { CREW_JOINT_COUNT, CREW_SLOT } = await import('/js/crew-skeleton.js');
       const adapter = await navigator.gpu.requestAdapter(), device = await adapter.requestDevice(), errors = [];
       device.onuncapturederror = (e) => errors.push(e.error.message);
       const model = loadCrewGLB(await (await fetch('/assets/crew/sailor.glb')).arrayBuffer()), a = model.animator;
-      const people = 5, J = 65 * 16, marker = new Float32Array(people * J).fill(7);
+      const people = 5, J = CREW_JOINT_COUNT * 16, marker = new Float32Array(people * J).fill(7);
       const joints = device.createBuffer({ size: marker.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
       device.queue.writeBuffer(joints, 0, marker);
       const shader = async (code, label) => { const module = device.createShaderModule({ code, label }), bad = (await module.getCompilationInfo()).messages.filter((m) => m.type === 'error'); if (bad.length) throw Error(bad.map((m) => m.message).join()); return module; };
@@ -48,21 +49,21 @@ test('the clip pass swims the living and floats the dead as the solved pose woul
       const out = new Float32Array(read.getMappedRange().slice(0));
       read.unmap(); read.destroy();
       // Where a palette puts a joint: it maps the bind pose, so it is applied to the joint's place at rest.
-      const names = ['pelvis', 'Head', 'hand_l', 'hand_r', 'foot_l', 'foot_r'];
+      const names = ['pelvis', 'head', 'hand_l', 'hand_r', 'foot_l', 'foot_r'];
       a.sample(null, 0);
       const rest = new Map(names.map((name) => [name, [...a.world[a.nodeIndex(name)].slice(12, 15)]]));
       const place = (palette, name) => {
-        const at = a.joints.indexOf(a.nodeIndex(name)) * 16, [x, y, z] = rest.get(name);
+        const at = CREW_SLOT[name] * 16, [x, y, z] = rest.get(name);
         return [0, 1, 2].map((k) => palette[at + k] * x + palette[at + 4 + k] * y + palette[at + 8 + k] * z + palette[at + 12 + k]);
       };
       const body = (i) => out.subarray(i * J, (i + 1) * J);
-      const rows = { errors, took, untouched: body(4).every((v) => v === 7), people: {} };
+      const rows = { errors, slots: names.map((name) => a.joints.indexOf(a.nodeIndex(name))), took, untouched: body(4).every((v) => v === 7), people: {} };
       for (const i of [0, 1, 3]) {
         a.sample('Idle', 0);
         poseCrewWork(a, cast[i], null);
         const solved = a.palette.slice();
         rows.people[i] = Object.fromEntries(names.map((name) => [name, Math.hypot(...place(solved, name).map((v, k) => v - place(body(i), name)[k]))]));
-        rows.people[i].headHeight = place(body(i), 'Head')[1];
+        rows.people[i].headHeight = place(body(i), 'head')[1];
       }
       a.sample('Walk', 0.3);
       rows.walker = Object.fromEntries(names.map((name) => [name, Math.hypot(...place(a.palette, name).map((v, k) => v - place(body(2), name)[k]))]));
@@ -71,10 +72,11 @@ test('the clip pass swims the living and floats the dead as the solved pose woul
       return rows;
     });
     assert.deepEqual(result.errors, []);
+    assert.deepEqual(result.slots, [1, 9, 30, 57, 83, 91], 'the sailor rig is the crew skeleton, in its order');
     assert.deepEqual(result.took, [true, true, true, false], 'the loops this model has, and not one it has not');
     assert.equal(result.untouched, true, 'a body left off keeps the joints something else wrote');
     // Baked at ten frames a second and five, and shown between frames, so within a centimetre or two of the solved pose.
-    for (const [i, row] of Object.entries(result.people)) for (const name of ['pelvis', 'Head', 'hand_l', 'hand_r', 'foot_l', 'foot_r']) {
+    for (const [i, row] of Object.entries(result.people)) for (const name of ['pelvis', 'head', 'hand_l', 'hand_r', 'foot_l', 'foot_r']) {
       assert.ok(row[name] < 0.025, `body ${i} ${name} is where the solved pose has it: ${row[name]}`);
     }
     for (const [name, off] of Object.entries(result.walker)) assert.ok(off < 0.03, `the walker's ${name} still comes from his standing and walking clips: ${off}`);
