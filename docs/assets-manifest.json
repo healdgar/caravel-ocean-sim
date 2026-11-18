@@ -654,36 +654,6 @@
     "bytes": 1088938,
     "sha256": "9c6893a4d79e52a89fc2676f6ccb208ba00362b46f8d948f0ce520435d830204"
   },
-  "assets/forest-scenery/saba/vertices.bin.gz": {
-    "url": "assets/forest-scenery/saba/vertices.bin.e45e1be7b39d818e.gz",
-    "bytes": 78658880,
-    "sha256": "e45e1be7b39d818e7534242681795faaa914c47f583ea6dc936bcdc1a9515a05"
-  },
-  "assets/forest-scenery/saba/indices.bin.gz": {
-    "url": "assets/forest-scenery/saba/indices.bin.ff26e388355583e0.gz",
-    "bytes": 13716582,
-    "sha256": "ff26e388355583e0071c453f92bb62508d43a278fc4dc1e8523c769a59b1da8a"
-  },
-  "assets/forest-scenery/subtropical/vertices.bin.gz": {
-    "url": "assets/forest-scenery/subtropical/vertices.bin.7fe1cfe99b87e94b.gz",
-    "bytes": 2008426,
-    "sha256": "7fe1cfe99b87e94b6c95f078c5a6f30888cdecbaec8ec3d8785d45aa5262a45c"
-  },
-  "assets/forest-scenery/subtropical/indices.bin.gz": {
-    "url": "assets/forest-scenery/subtropical/indices.bin.33925b5a65cc2681.gz",
-    "bytes": 272424,
-    "sha256": "33925b5a65cc26818e01489d90c9ce41ffcf14d8fb6fcfd894cbd0a3fb91f573"
-  },
-  "assets/forest-scenery/portugal/vertices.bin.gz": {
-    "url": "assets/forest-scenery/portugal/vertices.bin.3a5aa18809f7248b.gz",
-    "bytes": 41759784,
-    "sha256": "3a5aa18809f7248b3c0400887c61c5280d23755280144a856897fd04b97c46fa"
-  },
-  "assets/forest-scenery/portugal/indices.bin.gz": {
-    "url": "assets/forest-scenery/portugal/indices.bin.2a811f50dfdd148a.gz",
-    "bytes": 4168187,
-    "sha256": "2a811f50dfdd148a46958e174ffa75c2fed9d24f47604f4a42960735fef80e11"
-  },
   "assets/ground-cover/portugal/meadows-gpu/vertices.bin.gz": {
     "url": "assets/ground-cover/portugal/meadows-gpu/vertices.bin.756917cdd0da6a86.gz",
     "bytes": 1240597,
@@ -893,26 +863,6 @@
     "url": "assets/world/saba/wells-bay/albedo.40f4ab5de9b803a3.png",
     "bytes": 1063137,
     "sha256": "40f4ab5de9b803a3331cd4fe56e38526bc46cd5040ebf8aa03d142b34b27b5d1"
-  },
-  "assets/forest-scenery/saba/canopy-shade.json": {
-    "url": "assets/forest-scenery/saba/canopy-shade.f2236de00211102a.json",
-    "bytes": 10887,
-    "sha256": "f2236de00211102a08c955f6f0226139104521137ed9748c9142676eb6304069"
-  },
-  "assets/forest-scenery/saba/canopy-shade.bin.gz": {
-    "url": "assets/forest-scenery/saba/canopy-shade.bin.1a4c04c1eb04d1ae.gz",
-    "bytes": 1870555,
-    "sha256": "1a4c04c1eb04d1ae1eca84d49b866422015a166f187792f1f605055b23e8cf7d"
-  },
-  "assets/forest-scenery/saba/lod/manifest.json": {
-    "url": "assets/forest-scenery/saba/lod/manifest.5e5c0769d47390e1.json",
-    "bytes": 19887,
-    "sha256": "5e5c0769d47390e11024563b195ff7b4fedddd9911cce8d9f849025559e319ac"
-  },
-  "assets/forest-scenery/saba/lod/lod-indices.bin.gz": {
-    "url": "assets/forest-scenery/saba/lod/lod-indices.bin.648f9aac99e419cf.gz",
-    "bytes": 6704623,
-    "sha256": "648f9aac99e419cf5f0c0d05eef413ff6b062b9985cd8f85e89b50e42071f1c3"
   },
   "assets/forest-scenery/saba/wind/manifest.json": {
     "url": "assets/forest-scenery/saba/wind/manifest.a52949013661e840.json",

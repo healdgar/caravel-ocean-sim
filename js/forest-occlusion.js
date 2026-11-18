@@ -129,15 +129,12 @@ fn forestCoastalStandHidden(centre:vec3f,rootScale:vec4f,identity:vec4f,rootId:u
  return false;
 }
 `;
+// Puts the terrain's tests into the forest's cull (FOREST_CULL_WGSL, js/forest-scenery.js) just before a tree
+// that passes the frustum takes its place on its species' visible list.
 export function withForestTerrainOcclusion(source){
- const marker3='previousLod[id.x]=select(select(0u,2u,midLod),1u,nearLod);';
- const marker4='previousLod[id.x]=select(select(select(0u,3u,mid2Lod),2u,midLod),1u,nearLod);';
- const marker=source.includes(marker4)?marker4:marker3;
+ const marker='let slot=atomicAdd(&visibleCounts[pi],1u);';
  if(!source.includes(marker)||source.includes('fn forestTerrainHidden('))throw Error('Forest terrain occlusion source mismatch');
- const hasStandVar=source.includes('var coastalStandSteps=0u;');
- const next=hasStandVar?source.replace('var coastalStandSteps=0u;','var coastalStandSteps=forestCoastalStandSteps(world,r.rootScale,r.identity);'):source;
- const standArg=hasStandVar?'coastalStandSteps':'forestCoastalStandSteps(world,r.rootScale,r.identity)';
- return next.replace(marker,`if(forestTerrainHidden(world,radius)){return;}\n if(forestCoastalStandHidden(world,r.rootScale,r.identity,id.x,${standArg},parameters.z)){return;}\n `+marker)+FOREST_TERRAIN_OCCLUSION_WGSL;
+ return source.replace(marker,`if(forestTerrainHidden(world,radius)){return;}\n if(forestCoastalStandHidden(world,r.rootScale,r.identity,id.x,forestCoastalStandSteps(world,r.rootScale,r.identity),parameters.z)){return;}\n `+marker)+FOREST_TERRAIN_OCCLUSION_WGSL;
 }
 export function createForestTerrainOcclusion({device,heights,region,near=null}){
  const textures=[];let uniform=null;try{const coarse=forestTerrainPyramid(heights,region),fine=near?forestTerrainPyramid(near.heights,near.manifest.domain):null;

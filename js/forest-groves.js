@@ -9,7 +9,6 @@ import { FRAME_WGSL } from './wgsl/common.js';
 import { terrainSurfaceSample } from './terrain-model.js';
 import { portClearanceEnvelope, PLANT_STREET_GAP_M } from './coastal-world.js';
 import { streetEdgeAt } from './town-streets.js';
-import { FOREST_CANOPY_RANGE_WGSL } from './forest-scenery.js';
 import { createInlandWaterSampler } from './inland-water.js';
 
 // A grove's maps are this many texels square, kept at this many levels each half as fine as the last,
@@ -38,9 +37,6 @@ const FOREST_GROVE_EDGE = 0.45, FOREST_GROVE_FULL = 0.95, FOREST_GROVE_TAKEN = 0
 // FOREST_GROVE_INLAND_METRES[1] away. A grove of full-grown trees, which are planted at nearly one size
 // everywhere, names a share of its own (harbourHeight in its manifest).
 const FOREST_GROVE_HARBOUR_HEIGHT = 0.78, FOREST_GROVE_INLAND_METRES = [100, 580];
-// Over these shares of the forest's canopy range (FOREST_CANOPY_RANGE_WGSL) the canopy closes over the
-// hollows planted trees stand in, so it is whole before the trees are no longer drawn.
-const FOREST_GROVE_CLOSING = [0.7, 0.94];
 
 // Literal paths: build.mjs finds what to publish by reading them from the source.
 // Saba has no entry. Its far woods are its own trees' crowns (js/forest-crowns.js).
@@ -204,25 +200,10 @@ export function forestGroveOccupy(cover, size, region, roots, reach) {
   return cover;
 }
 
-// Sets, a bit for each planted tree in the roots' order, those that stand in closed wood: where the
-// canopy, were the tree not there, would stand to half its height or more. From far off the forest
-// leaves these to the canopy (forestWithGroveCanopy in js/forest-scenery.js). A tree at a wood's very
-// edge, or in thin growth, is always drawn as itself.
-export function forestGroveStands(cover, size, region, roots, stands) {
-  const step = region.span / size, x0 = region.x - region.span / 2, z0 = region.z - region.span / 2;
-  const least = (FOREST_GROVE_EDGE + FOREST_GROVE_FULL) / 2 * 255;
-  for (let k = 0, tree = 0; k + FOREST_GROVE_ROOT_FLOATS <= roots.length; k += FOREST_GROVE_ROOT_FLOATS, tree++) {
-    if (!(roots[k + 3] > 0)) continue;
-    const i = Math.floor((roots[k] - x0) / step), j = Math.floor((roots[k + 2] - z0) / step);
-    if (i >= 0 && j >= 0 && i < size && j < size && cover[(j * size + i) * 2] >= least) stands[tree >> 5] |= 1 << (tree & 31);
-  }
-  return stands;
-}
-
 // The groves a section draws: each tile of its ground on which some wood is marked, counting a square
 // of the cover beyond the tile's edge, over which the canopy's edge slopes down. A tile wholly taken
-// by planted trees is drawn too, since from far off the canopy closes over them. Four floats a tile:
-// its corner, then the lowest and highest ground under it.
+// by planted trees has none: they are drawn as themselves at every distance. Four floats a tile: its
+// corner, then the lowest and highest ground under it.
 export function forestGroveTiles({ cover, size, region, heights, tileMetres }) {
   const span = region.span, x0 = region.x - span / 2, z0 = region.z - span / 2, side = Math.ceil(span / tileMetres - 1e-6), per = size / span * tileMetres;
   const n = region.size, grid = (n - 1) / span, tiles = [];
@@ -230,7 +211,8 @@ export function forestGroveTiles({ cover, size, region, heights, tileMetres }) {
     const a0 = Math.max(0, Math.floor(ti * per) - 1), a1 = Math.min(size, Math.ceil((ti + 1) * per) + 1), b0 = Math.max(0, Math.floor(tj * per) - 1), b1 = Math.min(size, Math.ceil((tj + 1) * per) + 1);
     let stands = false;
     search: for (let j = b0; j < b1; j++) for (let i = a0; i < a1; i++) {
-      if (cover[(j * size + i) * 2] > FOREST_GROVE_EDGE * 255) { stands = true; break search; }
+      const at = (j * size + i) * 2;
+      if (cover[at] > FOREST_GROVE_EDGE * 255 && cover[at + 1] < FOREST_GROVE_TAKEN * 255) { stands = true; break search; }
     }
     if (!stands) continue;
     const i0 = Math.max(0, Math.floor(ti * tileMetres * grid)), i1 = Math.min(n - 1, Math.ceil((ti + 1) * tileMetres * grid));
@@ -322,15 +304,13 @@ fn forestGroveGroundAt(p:vec2f)->f32{
  if(f.x+f.y<=1.){return h00+f.x*(h10-h00)+f.y*(h01-h00);}
  return h11+(1.-f.x)*(h01-h11)+(1.-f.y)*(h10-h11);
 }
-${FOREST_CANOPY_RANGE_WGSL}
 // How much of its height the canopy stands to at a place: none where no wood is marked or a planted
 // tree has the ground, and all of it a square or two of the cover further in. So a wood's edge slopes to
-// the ground as its mantle does, and the canopy parts round a planted tree instead of standing over it.
-// parted is how far it parts for planted trees at all: wholly near the camera, and not at all from just
-// short of the range beyond which the forest draws no tree in closed wood.
-fn forestGroveStanding(p:vec2f,parted:f32)->f32{
+// the ground as its mantle does, and the canopy parts round a planted tree at every distance instead of
+// standing over it: a planted tree is drawn as itself to the horizon (js/forest-crowns.js).
+fn forestGroveStanding(p:vec2f)->f32{
  let cover=textureSampleLevel(forestGroveCover,forestGroveSampler,clamp((p-forestGroveSection.domain.xy)/forestGroveSection.domain.z,vec2f(.0005),vec2f(.9995)),0.).rg;
- return smoothstep(${FOREST_GROVE_EDGE},${FOREST_GROVE_FULL},cover.r)*(1.-parted*smoothstep(0.,${FOREST_GROVE_TAKEN},cover.g));
+ return smoothstep(${FOREST_GROVE_EDGE},${FOREST_GROVE_FULL},cover.r)*(1.-smoothstep(0.,${FOREST_GROVE_TAKEN},cover.g));
 }
 @vertex fn forestGroveVS(@builtin(instance_index)instance:u32,@builtin(vertex_index)vertex:u32)->ForestVertex{
  let level=forestGroveLevel.x;let squares=forestGroveLevel.y;let side=squares+3u;
@@ -360,8 +340,7 @@ fn forestGroveStanding(p:vec2f,parted:f32)->f32{
  let ground=forestGroveGroundAt(at);
  let camDist=distance(vec3f(at.x,ground,at.y),F.camPos.xyz);
  let nearFade=smoothstep(95.0,165.0,camDist);
- let parted=1.-smoothstep(${FOREST_GROVE_CLOSING[0]},${FOREST_GROVE_CLOSING[1]},distance(vec3f(at.x,ground,at.y),F.camPos.xyz)/forestCanopyRange());
- let standing=forestGroveStanding(at,parted);
+ let standing=forestGroveStanding(at);
  let sunk=${FOREST_GROVE_SUNK_METRES.toFixed(1)}+max(square-${FOREST_GROVE_FLAT_METRES.toFixed(1)},0.)*${FOREST_GROVE_SUNK_SHARE};
  var y=ground+(tall+sunk)*standing-sunk;
  let standEff=standing*nearFade;
@@ -380,7 +359,7 @@ fn forestGroveStanding(p:vec2f,parted:f32)->f32{
  let reach=max(square,4.);
  let east=at+vec2f(reach,0.);let south=at+vec2f(0.,reach);
  let rise=vec2f(forestGroveGroundAt(east)-ground,forestGroveGroundAt(south)-ground)/reach
-  +(tall+sunk)*nearFade*vec2f(forestGroveStanding(east,parted)-standing,forestGroveStanding(south,parted)-standing)/reach
+  +(tall+sunk)*nearFade*vec2f(forestGroveStanding(east)-standing,forestGroveStanding(south)-standing)/reach
   -lump/up*standEff;
  let outward=normalize(vec3f(-rise.x,1.,-rise.y));
  let colour=look.rgb*look.rgb*forestGrove.tint.rgb*mix(.92,1.08,f32((seed>>24u)&255u)/255.);
@@ -529,9 +508,8 @@ export async function createForestGroves({ device, shader, module, frameUBO, pac
       // sources: every section of ground there is, each with its region, heights, biome, beaches and
       // port, and for the base section the land's own texture of its heights. roots: the trees planted
       // one by one, twelve floats each. reach: how far a planted tree's crown spreads, from its kind and scale.
-      // Returns forestGroveStands' bits: the planted trees the canopy stands in for from far off.
       sync(sources, roots, reach, mangrove = false) {
-        const seen = new Set(), stands = new Uint32Array(Math.ceil((roots?.length ?? 0) / FOREST_GROVE_ROOT_FLOATS / 32));
+        const seen = new Set();
         let groves = 0;
         for (const source of sources) {
           const key = source.key, stamp = forestGroveStamp(source);
@@ -546,7 +524,6 @@ export async function createForestGroves({ device, shader, module, frameUBO, pac
             if (section.ownsGround) device.queue.writeTexture({ texture: section.ground }, source.heights, { bytesPerRow: region.size * 4 }, [region.size, region.size]);
           }
           forestGroveOccupy(section.bytes, section.size, region, roots, reach);
-          if (roots?.length) forestGroveStands(section.bytes, section.size, region, roots, stands);
           device.queue.writeTexture({ texture: section.cover }, section.bytes, { bytesPerRow: section.size * 2 }, [section.size, section.size]);
           const tiles = forestGroveTiles({ cover: section.bytes, size: section.size, region, heights: source.heights, tileMetres: m.tileMetres });
           section.count = tiles.length / 4;
@@ -580,7 +557,6 @@ export async function createForestGroves({ device, shader, module, frameUBO, pac
         for (const [key, section] of sections) if (!seen.has(key)) { release(section); sections.delete(key); }
         stats.sections = sections.size; stats.groves = groves;
         refreshVisible(lastFrameF);
-        return stands;
       },
       setWorldOffset(dx = 0, dz = 0) {
         worldOffX = Number.isFinite(dx) ? dx : 0;

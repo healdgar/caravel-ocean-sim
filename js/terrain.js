@@ -985,7 +985,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   let forestFailure=null;
   const forestPromise=canopyMode==='off'?Promise.resolve(null):loadForestScenery({
     assets:useSubtropicalForest?SUBTROPICAL_FOREST_ASSETS:usePortugalForest?PORTUGAL_FOREST_ASSETS:FOREST_ASSETS,
-    deferNative:!isMobile&&useProcedural&&!useSubtropicalForest&&!usePortugalForest,
     skipRoots:useProcedural,
     deferSurfaces:Boolean(chooseForestSurfaceCodec(device,search.get('forestSurfaces')||'auto')),
   }).catch(error=>{forestFailure=error.message;return null;});
@@ -1427,7 +1426,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const activeForestPack=proceduralPack&&forestPack?retargetForestPackToProcedural(forestPack,proceduralPack,baseGroundSample,{isMobile,maxRootCapacity:streamMaxRoots,climateProfile:activeClimate}):forestPack;
   // What has been shot down on this coast comes back with it, and is kept with the port damage.
   const forestStrikeKey=activeRegion.id??`${activeRegion.latitude},${activeRegion.longitude}`;
-  const forest=activeForestPack?await createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack:activeForestPack,groundSample:proceduralPack?null:groundSample,mode:canopyMode,savedStrikes:portDamage?.forestStrikes?.(forestStrikeKey)??null,strikeOrigin:{x:activeRegion.x??0,z:activeRegion.z??0},onStrikesChanged:trees=>portDamage?.setForestStrikes?.(forestStrikeKey,trees),terrainOcclusion:typeof location!=='undefined'&&new URLSearchParams(location.search).get('forestOcclusion')==='off'?null:{heights:regionalElevationData??heights,region:getRegionalOcclusionRegion(),near:nearTile??(regionalElevationSize?{heights,manifest:{domain:{x:activeRegion.x,z:activeRegion.z,span:activeRegion.span,size:activeRegion.size}}}:null)}}):null;
+  const forest=activeForestPack?await createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack:activeForestPack,groundSample:proceduralPack?null:groundSample,savedStrikes:portDamage?.forestStrikes?.(forestStrikeKey)??null,strikeOrigin:{x:activeRegion.x??0,z:activeRegion.z??0},onStrikesChanged:trees=>portDamage?.setForestStrikes?.(forestStrikeKey,trees),terrainOcclusion:typeof location!=='undefined'&&new URLSearchParams(location.search).get('forestOcclusion')==='off'?null:{heights:regionalElevationData??heights,region:getRegionalOcclusionRegion(),near:nearTile??(regionalElevationSize?{heights,manifest:{domain:{x:activeRegion.x,z:activeRegion.z,span:activeRegion.span,size:activeRegion.size}}}:null)}}):null;
   const forestStats=forest?.stats??{loaded:false,mode:canopyMode,error:forestFailure};
   // The cast a climate gives its leaves, as planted trees carry it in their roots.
   const groveTint=()=>activeClimate?.foliageTint??(['tropical','subtropical'].includes(activeClimate?.climate)||['tropical','subtropical'].includes(activeRegion.climate)?[0.78,1.12,0.68]:[1,1,1]);
@@ -1447,8 +1446,8 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     const sources=[{key:'0,0',region:activeRegion,heights,biome,beaches:proceduralPack.beaches,port:proceduralPack.port,ground:elevation}];
     for(const sec of loadedSections.values())sources.push({key:sec.key,region:sec.region,heights:sec.heights,biome:sec.biome,beaches:sec.beaches,port:sec.port});
     groves.setTint(groveTint());
-    // From far off the trees standing in closed wood give way to the canopy the groves draw there.
-    forest.leaveToCanopy(groves.sync(sources,roots,groveReach,forestPack.manifest.prototypes.some(p=>p.species==='mangrove')));
+    // A planted tree is drawn as itself at every distance: the canopy parts round it, never stands in for it.
+    groves.sync(sources,roots,groveReach,forestPack.manifest.prototypes.some(p=>p.species==='mangrove'));
   }
   syncGroves(activeForestPack?.roots);
   forestStats.replacedProceduralTrees=(canopyTrees.length-trees.length)/8;forestStats.coverage=forestPack?.manifest.coverage??null;

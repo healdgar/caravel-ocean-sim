@@ -8,7 +8,7 @@ import fs from 'node:fs';
 const source=fs.readFileSync('js/forest-scenery.js','utf8');
 
 test('every compute pipeline the forest renderer creates is dispatched',()=>{
-  const lines=source.split('\n'),start=lines.findIndex(line=>/^\s*const \[reset,cull,[\w,]+\]=await Promise\.all\(\[$/.test(line));
+  const lines=source.split('\n'),start=lines.findIndex(line=>/^\s*const \[reset,cull(?:,[\w,]+)?\]=await Promise\.all\(\[$/.test(line));
   assert.ok(start>0,'the renderer\'s pipeline list has moved; point this test at it');
   const names=/const \[([\w,]+)\]/.exec(lines[start])[1].split(','),indent=/^\s*/.exec(lines[start+1])[0],elements=[];
   // One pipeline to a line at the list's own indent; deeper lines continue the one above.

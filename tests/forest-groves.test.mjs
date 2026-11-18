@@ -4,8 +4,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import zlib from 'node:zlib';
 import {FOREST_GROVE_TEXELS,FOREST_GROVE_LEVELS,FOREST_GROVE_VARIANTS,FOREST_GROVE_MAPS,FOREST_GROVE_TREE_FLOATS,PORTUGAL_FOREST_GROVE_ASSETS,SUBTROPICAL_FOREST_GROVE_ASSETS,
-  validateForestGroves,loadForestGroves,forestGroveCover,forestGroveOccupy,forestGroveStands,forestGroveTiles,FOREST_GROVE_WGSL,FOREST_GROVE_CULL_WGSL} from '../js/forest-groves.js';
-import {FOREST_CULL_WGSL,FOREST_MIDDLE_ROOT_CULL_WGSL,FOREST_CANOPY_RANGE_WGSL,FOREST_CANOPY_CROWN_METRES,FOREST_CANOPY_CROWN_PIXELS,forestWithNativeLod,forestWithGroveCanopy} from '../js/forest-scenery.js';
+  validateForestGroves,loadForestGroves,forestGroveCover,forestGroveOccupy,forestGroveTiles,FOREST_GROVE_WGSL,FOREST_GROVE_CULL_WGSL} from '../js/forest-groves.js';
+import {FOREST_CULL_WGSL} from '../js/forest-scenery.js';
 
 const PACKS={portugal:PORTUGAL_FOREST_GROVE_ASSETS,subtropical:SUBTROPICAL_FOREST_GROVE_ASSETS};
 const serve=(change=bytes=>bytes)=>async path=>{
@@ -143,46 +143,28 @@ test('groves are listed for the ground a canopy stands on and nowhere else',()=>
   assert.ok(!columns.has(0)&&!columns.has(2));
   for(const column of [5,8,11,13,15])assert.ok(columns.has(column),`column ${column}`);
   assert.equal(tiles.length/4,columns.size*16);
-  // Where planted trees have all the ground the groves are listed all the same: far off the canopy closes over them.
+  // Where planted trees have all the ground no grove is listed: they are drawn as themselves at every distance.
   for(let k=1;k<cover.length;k+=2)cover[k]=255;
-  assert.deepEqual(forestGroveTiles({cover,size,region,heights,tileMetres:tile}),tiles);
+  assert.equal(forestGroveTiles({cover,size,region,heights,tileMetres:tile}).length,0);
   // Unmarked ground has none.
   assert.equal(forestGroveTiles({cover:new Uint8Array(cover.length),size,region,heights,tileMetres:tile}).length,0);
 });
 
-test('far off, a tree standing in closed wood gives way to the canopy, which has closed over it',()=>{
-  const {region,heights,biome}=coast(),size=256,cover=forestGroveCover({region,heights,biome,size});
-  const x0=region.x-region.span/2,z0=region.z-region.span/2,record=(x,scale=2)=>[x0+x,10,z0+1000,scale,0,1,1,1,3,.2,-1.25,0];
-  // Deep in the wood; at its very edge by the shore; on the sea; an empty place deep in the wood; and, the 34th, deep in again.
-  const roots=new Float32Array(34*12);
-  roots.set(record(900),0);roots.set(record(522),12);roots.set(record(200),24);roots.set(record(1000,0),36);roots.set(record(1900),33*12);
-  const stands=forestGroveStands(cover,size,region,roots,new Uint32Array(2));
-  assert.deepEqual([...stands],[1,2]);
-  // Marks from another section of ground are kept, and trees outside this one are not judged by it.
-  const far=new Float32Array(12);far.set([x0-500,10,z0+1000,2,0,1,1,1,3,.2,-1.25,0]);
-  assert.deepEqual([...forestGroveStands(cover,size,region,far,new Uint32Array([1]))],[1]);
-  // The forest's choice of trees drops a marked tree past the range at which a crown is a dozen pixels.
-  for(const source of [FOREST_CULL_WGSL,forestWithNativeLod(FOREST_MIDDLE_ROOT_CULL_WGSL)]){
-    const cull=forestWithGroveCanopy(source);
-    assert.match(cull,/@group\(0\)@binding\(13\)var<storage,read>forestCanopyRoots:array<u32>;/);
-    assert.match(cull,/if\(\(\(forestCanopyRoots\[id\.x>>5u\]>>\(id\.x&31u\)\)&1u\)==1u&&length\(relative\)>forestCanopyRange\(\)\)\{return;\}\n let clip=/);
-    assert.ok(!source.includes('forestCanopyRoots'));
-  }
-  assert.equal(FOREST_CANOPY_CROWN_METRES/FOREST_CANOPY_CROWN_PIXELS,20/12);
-  assert.ok(FOREST_CANOPY_RANGE_WGSL.includes('F.screen.y/max(2.0*length(F.camUp.xyz),.0001)*1.6667'));
-  // The canopy parts for planted trees near the camera and not at all before that range, by the same measure.
-  assert.ok(FOREST_GROVE_WGSL.includes(FOREST_CANOPY_RANGE_WGSL));
-  assert.match(FOREST_GROVE_WGSL,/let parted=1\.-smoothstep\(0\.7,0\.94,distance\(vec3f\(at\.x,ground,at\.y\),F\.camPos\.xyz\)\/forestCanopyRange\(\)\);/);
+test('a planted tree is drawn as itself at every distance, and the canopy parts round it there',()=>{
+  // The forest's choice lists every tree in view; nothing hands a planted tree to the groves' canopy.
+  assert.ok(!/forestCanopy|@binding\(13\)/.test(FOREST_CULL_WGSL));
+  assert.ok(!/forestCanopyRange|parted/.test(FOREST_GROVE_WGSL));
+  assert.match(FOREST_GROVE_WGSL,/fn forestGroveStanding\(p:vec2f\)->f32\{/);
   const scenery=fs.readFileSync('js/forest-scenery.js','utf8'),terrain=fs.readFileSync('js/terrain.js','utf8');
-  assert.match(scenery,/cullSource=forestWithGroveCanopy\(cullSource\);/);assert.match(scenery,/\{binding:13,resource:\{buffer:canopyRoots\}\}/);
-  assert.match(terrain,/forest\.leaveToCanopy\(groves\.sync\(/);
+  assert.ok(!/leaveToCanopy|canopyRoots/.test(scenery+terrain));
+  assert.match(terrain,/\n    groves\.sync\(sources,roots,groveReach,/);
 });
 
 test('the canopy is one surface the GPU alone places, chooses and draws',()=>{
   // It lies on the ground at each of its own points, so it follows the land, and comes down where the cover says.
-  assert.match(FOREST_GROVE_WGSL,/let ground=forestGroveGroundAt\(at\);/);assert.match(FOREST_GROVE_WGSL,/let standing=forestGroveStanding\(at,parted\);/);
+  assert.match(FOREST_GROVE_WGSL,/let ground=forestGroveGroundAt\(at\);/);assert.match(FOREST_GROVE_WGSL,/let standing=forestGroveStanding\(at\);/);
   assert.match(FOREST_GROVE_WGSL,/var y=ground\+\(tall\+sunk\)\*standing-sunk;/);
-  assert.match(FOREST_GROVE_WGSL,/smoothstep\(0\.45,0\.95,cover\.r\)\*\(1\.-parted\*smoothstep\(0\.,0\.9,cover\.g\)\)/);
+  assert.match(FOREST_GROVE_WGSL,/smoothstep\(0\.45,0\.95,cover\.r\)\*\(1\.-smoothstep\(0\.,0\.9,cover\.g\)\)/);
   // No tree of it stands or falls alone: nothing in the vertex stage branches on a tree.
   const vertex=/@vertex fn forestGroveVS[\s\S]*?\n\}/.exec(FOREST_GROVE_WGSL)[0];
   assert.ok(!/if\(owner|stands=/.test(vertex));

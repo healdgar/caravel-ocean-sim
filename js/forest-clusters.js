@@ -83,16 +83,17 @@ export function forestClusterIsDrawn({ error, parentError, lodDistance, parentDi
   return projected(error, lodDistance) <= limit && projected(parentError, parentDistance) > limit;
 }
 
-// Trees already culled and sorted into near, mid and far lists by the forest's own pass. This takes
-// each near or mid tree's cut and lists its clusters for one indirect draw per species and kind. A module of its
-// own, so it takes the continuum core once at its head: the projected error, the cluster test, the prefix and
-// morph-step searches, the splat limit and the horizon thinning are the core's; the forest supplies its tables.
+// Trees already culled into one visible list a species by the forest's own pass (js/forest-scenery.js). This
+// takes each listed tree's cut, its crown or its splat, and lists them for one indirect draw per species and kind.
+// A module of its own, so it takes the continuum core once at its head: the projected error, the cluster test, the
+// prefix and morph-step searches, the splat limit and the horizon thinning are the core's; the forest supplies its tables.
 export const FOREST_CLUSTER_SELECT = (FRAME, crown = {}) => FRAME + CONTINUUM_CORE_WGSL + /* wgsl */`
 struct ForestRoot {rootScale:vec4f,yawColour:vec4f,identity:vec4f};
 struct ForestCluster {lod:vec4f,parentLod:vec4f,cull:vec4f,err:f32,parentErr:f32,first:u32,shape:u32};
 struct ForestClusterBucket {
  firstCluster:u32,clusterCount:u32,listWood:u32,listLeaf:u32,
- near:vec2u,mid:vec2u,far:vec2u,drawWood:u32,drawLeaf:u32,
+ // The species' visible list: its first root, and its species, which names its count.
+ visible:vec2u,drawWood:u32,drawLeaf:u32,
  centre:vec4f,capacity:vec4u,
  // Far crowns (js/forest-crowns.js): continuum triangle list base, first crown indirect draw, stepStates
  // (stepCount + 1, or 0 when disabled), continuum triangle capacity; then splat/fade list bases, rootCount,
@@ -101,12 +102,11 @@ struct ForestClusterBucket {
  // crownSize.x = breadthMetres / widestLeafErrors (0 in closed woods), crownSize.y = breadthMetres,
  // crownSize.z = leafErrorMetres.
  crownSize:vec4f,
- horizon:vec4u,
 };
 @group(0)@binding(0)var<uniform>F:Frame;
 @group(0)@binding(1)var<storage,read>roots:array<ForestRoot>;
 @group(0)@binding(2)var<storage,read>visible:array<u32>;
-@group(0)@binding(3)var<storage,read>commands:array<u32>;
+@group(0)@binding(3)var<storage,read>visibleCounts:array<u32>;
 @group(0)@binding(4)var<storage,read>clusters:array<ForestCluster>;
 @group(0)@binding(5)var<storage,read_write>list:array<vec2u>;
 @group(0)@binding(6)var<storage,read_write>draws:array<atomic<u32>>;
@@ -134,18 +134,8 @@ const FOREST_CROWN_NEAREST=${(crown.nearest ?? FOREST_CROWN_NEAREST).toFixed(2)}
 ${continuumClusterPrefixWGSL('forestClusterPrefix', (i) => `clusters[${i}].parentErr`)}
 ${continuumMorphStepWGSL('forestCrownStep', (step) => `bitcast<f32>(crownMorph[bucket.crownLists.w+(${step})*4u+1u])`)}
 fn forestClusterTree(index:u32)->u32{
- let nearCount=commands[bucket.near.y*5u+1u];
- if(index<nearCount){return visible[bucket.near.x+index];}
- let midCount=commands[bucket.mid.y*5u+1u];
- if(index-nearCount<midCount){return visible[bucket.mid.x+index-nearCount];}
- let farCount=commands[bucket.far.y*5u+1u];
- if(index-nearCount-midCount<farCount){return visible[bucket.far.x+index-nearCount-midCount];}
- if(bucket.horizon.z!=0u){
-  let horizonCount=commands[bucket.horizon.y*5u+1u];
-  let rem=index-nearCount-midCount-farCount;
-  if(rem<horizonCount){return visible[bucket.horizon.x+rem];}
- }
- return 0xffffffffu;
+ if(index>=min(visibleCounts[bucket.visible.y],bucket.capacity.z)){return 0xffffffffu;}
+ return visible[bucket.visible.x+index];
 }
 @compute @workgroup_size(64)fn forestClusterSelect(@builtin(global_invocation_id)id:vec3u){
  let tree=forestClusterTree(id.x);if(tree==0xffffffffu){return;}
@@ -276,7 +266,8 @@ const FOREST_CLUSTER_SHADOW_PIXELS=1.5;
 }
 `;
 
-// Shares forestPlace with the ordinary tree shader, so clusters light and sway exactly alike.
+// Places its vertices through forestPlaceSkinned (js/forest-scenery.js), as the crowns do, so a tree's
+// clusters and its crown light, sway and fall exactly alike.
 export const FOREST_CLUSTER_VERTEX_WGSL = FOREST_WIND_SKIN_WGSL + /* wgsl */`
 struct ForestCluster {lod:vec4f,parentLod:vec4f,cull:vec4f,err:f32,parentErr:f32,first:u32,shape:u32};
 @group(3)@binding(0)var<storage,read>forestClusterList:array<vec2u>;
@@ -376,7 +367,7 @@ struct ForestClusterShadowVertex {@builtin(position)pos:vec4f,@location(0)leafUV
 `;
 
 // ForestClusterBucket, as FOREST_CLUSTER_SELECT lays it out.
-const BUCKET_BYTES = 144;
+const BUCKET_BYTES = 112;
 const CLUSTER_TRIANGLES = 128;
 const CLUSTER_INDICES = CLUSTER_TRIANGLES * 3;
 const CLUSTER_LEAVES = CLUSTER_TRIANGLES / 4;
@@ -388,7 +379,7 @@ const LEAF_PATTERN = [0, 1, 2, 0, 2, 3, 3, 2, 4, 3, 4, 5];
 // one 1-triangle horizon splat list, and one crossfade list for trees still changing over.
 const ROOT_BYTES = 48;
 
-export async function createForestClusters({ device, shader, module, frame, source, crowns = null, crownChange = {}, wind = null, prototypes, roots, visible, commands, parameters, format, samples, sceneEntries, cloudEntries, surfaceEntries, firstMaterials, bind, hasLandShadow = false, shadowUniform = null, shadowFormat = 'depth32float' }) {
+export async function createForestClusters({ device, shader, module, frame, source, crowns = null, crownChange = {}, wind = null, prototypes, roots, visible, visibleCounts, parameters, format, samples, sceneEntries, cloudEntries, surfaceEntries, firstMaterials, bind, hasLandShadow = false, shadowUniform = null, shadowFormat = 'depth32float' }) {
   const B = GPUBufferUsage, owned = [], count = prototypes.length;
   // A leaf cluster's place in the list shares a word with its tree's crown share (forestClusterSelect).
   if (source.manifest.clusterCount >= 1 << 24) throw Error('Forest clusters outnumber the bits that name them');
@@ -504,7 +495,7 @@ export async function createForestClusters({ device, shader, module, frame, sour
     })() : null;
     return {
       info, bucket, crown, rootCount: p.rootCount,
-      select: device.createBindGroup({ layout: select.getBindGroupLayout(0), entries: [frameEntry(0), ...[roots, visible, commands, clusters, list, draws, parameters, bucket].map((buffer, k) => ({ binding: k + 1, resource: { buffer } })), { binding: 10, resource: { buffer: crownMorph } }] }),
+      select: device.createBindGroup({ layout: select.getBindGroupLayout(0), entries: [frameEntry(0), ...[roots, visible, visibleCounts, clusters, list, draws, parameters, bucket].map((buffer, k) => ({ binding: k + 1, resource: { buffer } })), { binding: 10, resource: { buffer: crownMorph } }] }),
       wood: { surface: surfaceEntries(woodPipeline, p.id, wood, true), cluster: clusterGroup(woodPipeline, true) },
       leafDepth: { surface: surfaceEntries(leafDepthPipeline, p.id, leaf, false), cluster: clusterGroup(leafDepthPipeline, false) },
       leaf: { surface: surfaceEntries(leafPipeline, p.id, leaf, true), cluster: clusterGroup(leafPipeline, false) },
@@ -522,24 +513,23 @@ export async function createForestClusters({ device, shader, module, frame, sour
     activeSpecies.length = 0;
     prototypes.forEach((p, id) => {
       const srcProto = nextPrototypes?.[id] ?? p;
-      const s = species[id], slots = count * 4 + id * 4;
+      const s = species[id];
       s.rootCount = srcProto.rootCount ?? 0;
       if (s.rootCount > 0) activeSpecies.push({ s, id });
       const data = new ArrayBuffer(BUCKET_BYTES), u = new Uint32Array(data), f = new Float32Array(data);
       u.set([s.info.firstCluster, s.info.clusterCount, id * 2 * CLUSTERS_PER_DRAW, (id * 2 + 1) * CLUSTERS_PER_DRAW,
-        srcProto.firstRoot * 4, id * 4, srcProto.firstRoot * 4 + s.rootCount * 2, slots, srcProto.firstRoot * 4 + s.rootCount * 3, slots + 2, id * 2, id * 2 + 1]);
-      f.set([...p.centre, p.radius], 12);
-      u.set([CLUSTERS_PER_DRAW, srcProto.firstRoot, s.rootCount, SHADOW_CLUSTERS_PER_DRAW], 16);
+        srcProto.firstRoot, id, id * 2, id * 2 + 1]);
+      f.set([...p.centre, p.radius], 8);
+      u.set([CLUSTERS_PER_DRAW, srcProto.firstRoot, s.rootCount, SHADOW_CLUSTERS_PER_DRAW], 12);
       // Each species keeps its own progressive continuum triangle slice plus root-indexed splat and fade stretches.
       if (s.crown) {
         const contBase = crownListBase + id * CROWN_CONT_TRIS_PER_SPECIES;
         const splatBase = crownSplatBase + srcProto.firstRoot;
         const fadeBase = crownFadeBase + srcProto.firstRoot;
-        u.set([contBase, count * 4 + id * CROWN_LISTS, s.crown.info.stepCount + 1, CROWN_CONT_TRIS_PER_SPECIES], 20);
-        u.set([splatBase, fadeBase, s.rootCount, s.crown.info.morphOffset], 24);
+        u.set([contBase, count * 4 + id * CROWN_LISTS, s.crown.info.stepCount + 1, CROWN_CONT_TRIS_PER_SPECIES], 16);
+        u.set([splatBase, fadeBase, s.rootCount, s.crown.info.morphOffset], 20);
         const widest = crownChange.widest ?? crowns.manifest.widestLeafErrors ?? 0;
-        f.set([widest > 0 ? s.crown.info.breadthMetres / widest : 0, s.crown.info.breadthMetres, s.crown.info.leafErrorMetres, 0], 28);
-        u.set([srcProto.firstRoot * 4 + s.rootCount, id * 4 + 2, 1, 0], 32);
+        f.set([widest > 0 ? s.crown.info.breadthMetres / widest : 0, s.crown.info.breadthMetres, s.crown.info.leafErrorMetres, 0], 24);
         device.queue.writeBuffer(s.crown.bins[CROWN_CONT_REGION], 0, new Uint32Array([contBase]));
         device.queue.writeBuffer(s.crown.bins[CROWN_SPLAT_REGION], 0, new Uint32Array([splatBase]));
         device.queue.writeBuffer(s.crown.bins[CROWN_FADE_REGION], 0, new Uint32Array([fadeBase]));

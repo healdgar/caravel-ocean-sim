@@ -1,20 +1,22 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT.
 // Grown temperate specimens are authored visual proxies, not surveyed Saba flora.
+// A pack's trees are drawn through the one continuum alone (AGENTS.md rule 3): each tree's cluster cut near
+// (js/forest-clusters.js), its progressive crown far and its splat at the horizon (js/forest-crowns.js). This
+// module places the roots, culls them once on the GPU into one visible list a species, and shades bark and leaves.
 import {createForestTerrainOcclusion,withForestTerrainOcclusion} from './forest-occlusion.js';
 import {FRAME_WGSL} from './wgsl/common.js';
-import {createTaskYieldBudget,yieldCooperativeTask} from './task-yield.js';
-import {loadForestLight,forestLightGPUBytes,FOREST_LIGHT_WGSL} from './forest-light.js';
-import {loadForestNativeLOD} from './forest-native-lod.js';
+import {createTaskYieldBudget} from './task-yield.js';
 import {loadForestClusters,createForestClusters,FOREST_CLUSTER_ASSETS,SUBTROPICAL_FOREST_CLUSTER_ASSETS,PORTUGAL_FOREST_CLUSTER_ASSETS,FOREST_CLUSTER_VERTEX_WGSL,FOREST_CLUSTER_SHADOW_WGSL} from './forest-clusters.js';
 import {loadForestCrowns,FOREST_CROWN_ASSETS,SUBTROPICAL_FOREST_CROWN_ASSETS,PORTUGAL_FOREST_CROWN_ASSETS,FOREST_CROWN_SPLAT_PIXELS,FOREST_CROWN_MIN_PIXELS} from './forest-crowns.js';
 import {loadForestWind,createForestWind,FOREST_WIND_ASSETS,SUBTROPICAL_FOREST_WIND_ASSETS,PORTUGAL_FOREST_WIND_ASSETS,FOREST_WIND_BASIS_RADIAL,FOREST_WIND_EVENT_FRIEDLANDER,FOREST_WIND_EVENT_PULSE} from './forest-wind.js';
 import {FOREST_FALL_BEARINGS,FOREST_FALL_HEIGHT_STEPS,FOREST_FALL_REST_MIN_DEG,FOREST_FALL_SECONDS,FOREST_LONG_FALLEN,FOREST_WOUND_BEARINGS,buildForestTrunkGridAsync,forestStrikesFromSave,forestStrikesToSave,forestTrunkShape,reapplyForestStrikes,strikeForestRoot,strikeForestTree} from './forest-trunks.js';
 import {FOREST_SURFACE_ASSETS,SUBTROPICAL_FOREST_SURFACE_ASSETS,PORTUGAL_FOREST_SURFACE_ASSETS,chooseForestSurfaceCodec,createForestSurfaceTextures,forestMaterialOptics,loadForestSurfaceSet} from './forest-surfaces.js';
 
+// What the game fetches of a pack: its manifest, its roots, and the maps a device without block compression
+// builds its surfaces from. The pack's own vertex and index streams are the bake source of its clusters and
+// crowns (scripts/prepare-forest-clusters.mjs) and stay on disk.
 export const FOREST_ASSETS=Object.freeze({
   'manifest.json':'assets/forest-scenery/saba/manifest.json',
-  'vertices.bin':'assets/forest-scenery/saba/vertices.bin.gz',
-  'indices.bin':'assets/forest-scenery/saba/indices.bin.gz',
   'roots.bin':'assets/forest-scenery/saba/roots.bin.gz',
   'leaf-oak-0-albedo.png':'assets/forest-scenery/saba/leaf-oak-0-albedo.png',
   'leaf-oak-0-normal.png':'assets/forest-scenery/saba/leaf-oak-0-normal.png',
@@ -79,8 +81,6 @@ export const FOREST_ASSETS=Object.freeze({
 });
 export const SUBTROPICAL_FOREST_ASSETS=Object.freeze({
   'manifest.json':'assets/forest-scenery/subtropical/manifest.json',
-  'vertices.bin':'assets/forest-scenery/subtropical/vertices.bin.gz',
-  'indices.bin':'assets/forest-scenery/subtropical/indices.bin.gz',
   'roots.bin':'assets/forest-scenery/subtropical/roots.bin.gz',
   'royal-palm-bark-albedo.png':'assets/forest-scenery/subtropical/royal-palm-bark-albedo.png',
   'royal-palm-bark-normal.png':'assets/forest-scenery/subtropical/royal-palm-bark-normal.png',
@@ -133,8 +133,6 @@ export const SUBTROPICAL_FOREST_ASSETS=Object.freeze({
 });
 export const PORTUGAL_FOREST_ASSETS=Object.freeze({
   'manifest.json':'assets/forest-scenery/portugal/manifest.json',
-  'vertices.bin':'assets/forest-scenery/portugal/vertices.bin.gz',
-  'indices.bin':'assets/forest-scenery/portugal/indices.bin.gz',
   'roots.bin':'assets/forest-scenery/portugal/roots.bin.gz',
   'oak-veteran-bark-albedo.png':'assets/forest-scenery/portugal/oak-veteran-bark-albedo.png',
   'oak-veteran-bark-normal.png':'assets/forest-scenery/portugal/oak-veteran-bark-normal.png',
@@ -211,15 +209,6 @@ export const PORTUGAL_FOREST_ASSETS=Object.freeze({
 });
 export const FOREST_SPECIES=Object.freeze(['oak','maple','birch','elm','chestnut','palm','royal_palm','ceiba','mangrove','blueberry']);
 export const FOREST_ROOT_FLOATS=12;
-export const FOREST_VERTEX_LAYOUT=Object.freeze({arrayStride:56,attributes:[
-  {shaderLocation:0,offset:0,format:'float32x3'},
-  {shaderLocation:1,offset:12,format:'float32x3'},
-  {shaderLocation:2,offset:24,format:'float32x2'},
-  {shaderLocation:5,offset:32,format:'float32x2'},
-  {shaderLocation:6,offset:40,format:'float32x3'},
-  {shaderLocation:7,offset:52,format:'float32'},
-]});
-const forestMiddleUpward=value=>{const n=Math.fround(value);if(n>=value)return n;const bytes=new ArrayBuffer(4),floats=new Float32Array(bytes),words=new Uint32Array(bytes);floats[0]=n;words[0]++;return floats[0];};
 const finite=(v,n)=>Array.isArray(v)&&v.length===n&&v.every(Number.isFinite);
 const uint=n=>Number.isSafeInteger(n)&&n>=0;
 const forestMapReceipt=(value,encoding)=>value&&/^[a-z0-9-]+\.png$/.test(value.file)&&uint(value.bytes)&&value.bytes>0&&value.bytes<=8*1024*1024&&/^[a-f0-9]{64}$/.test(value.sha256)&&value.encoding===encoding;
@@ -303,127 +292,22 @@ function* forestRootChecks(manifest,roots){
     if((i&1023)===0)yield;
   }
 }
-function* forestGeometryChecks(manifest,streams){
-  validateForestScenery(manifest);
-  const requiredStreams=streams?.skipRoots?['vertices.bin','indices.bin']:['vertices.bin','indices.bin','roots.bin'];
-  for(const name of requiredStreams)if(!(streams[name] instanceof ArrayBuffer)||streams[name].byteLength!==manifest.files[name].bytes)throw Error('Incomplete forest stream: '+name);
-  const vertices=new Float32Array(streams['vertices.bin']),indices=new Uint32Array(streams['indices.bin']),roots=streams?.skipRoots?new Float32Array(0):new Float32Array(streams['roots.bin']);
-  const stride=manifest.vertexStride/4,isV2=manifest.version===2;
-  for(let i=0,vIdx=0;i<vertices.length;i+=stride,vIdx++){
-    for(let k=0;k<stride;k++)if(!Number.isFinite(vertices[i+k]))throw Error('Invalid forest vertex');
-    const nx=vertices[i+3],ny=vertices[i+4],nz=vertices[i+5],len2=nx*nx+ny*ny+nz*nz,v6=vertices[i+6],v7=vertices[i+7];
-    if((!(len2>.998001&&len2<1.002001)&&Math.abs(Math.sqrt(len2)-1)>.001)||!uint(v6)||v6<3||v7<0||v7>1||vertices[i+10]<0||vertices[i+11]<0||vertices[i+12]<0)throw Error('Invalid forest vertex');
-    if((vIdx&4095)===0)yield;
-  }
-  for(const p of manifest.prototypes){
-    const low0=p.low[0]-.001,low1=p.low[1]-.001,low2=p.low[2]-.001,high0=p.high[0]+.001,high1=p.high[1]+.001,high2=p.high[2]+.001;
-    const nativeCount=p.nativeMaterials?.length??0,matLimit=4+(p.nativeMaterials?.length??1);
-    for(const key of ['wood','leaf','far']){
-      const isWood=key==='wood',isFar=key==='far',first=p[key].firstIndex,end=first+p[key].indexCount;
-      for(let j=first;j<end;j++){
-        const v=indices[j]*stride;if(v>=vertices.length)throw Error('Forest index outside stream');
-        const v6=vertices[v+6];
-        if(isWood?v6!==3:isFar?(v6!==3&&v6!==4):(v6<4||v6>=matLimit))throw Error('Forest material range mismatch');
-        const x=vertices[v],y=vertices[v+1],z=vertices[v+2];
-        if(x<low0||x>high0||y<low1||y>high1||z<low2||z>high2)throw Error('Forest vertex outside prototype bound');
-        if(isV2){
-          const material=vertices[v+13];
-          if(isFar?material!==-1:(!Number.isInteger(material)||material<0||material>=nativeCount))throw Error('Forest native material index mismatch');
-          if((j-first)%3===0&&(vertices[indices[j+1]*stride+13]!==material||vertices[indices[j+2]*stride+13]!==material))throw Error('Forest triangle crosses native material groups');
-        }
-        if((j&16383)===0)yield;
-      }
-    }
-  }
-  if(!streams?.skipRoots)yield* forestRootChecks(manifest,roots);
-  return {manifest,vertices,indices,roots};
-}
-export function decodeForestScenery(manifest,streams){
-  const iterator=forestGeometryChecks(manifest,streams);let next;do{next=iterator.next();}while(!next.done);return next.value;
-}
 function forestLoadAbort(signal){if(signal?.aborted)throw signal.reason??new DOMException('Forest load aborted','AbortError');}
-async function finishForestChecks(iterator,{yieldTask,signal}={}){
+// Walks a pack's checks, yielding to the page as the work grows long.
+async function finishForestChecks(iterator){
   const pauseIfNeeded=createTaskYieldBudget();
-  for(;;){
-    forestLoadAbort(signal);const next=iterator.next();if(next.done)return next.value;
-    if(yieldTask)await yieldTask();else{const pause=pauseIfNeeded();if(pause)await pause;}
-  }
+  for(;;){const next=iterator.next();if(next.done)return next.value;const pause=pauseIfNeeded();if(pause)await pause;}
 }
-export async function decodeForestSceneryAsync(manifest,streams,options){return finishForestChecks(forestGeometryChecks(manifest,streams),options);}
-function createSubtropicalNativeLod(manifest){
-  if(!Array.isArray(manifest?.prototypes)||!manifest.prototypes.some(p=>p.cohort||p.species==='royal_palm'||p.species==='ceiba'||p.species==='mangrove'))return null;
-  let cursor=0;
-  const prototypes=manifest.prototypes.map((p,id)=>{
-    const origWoodTris=Math.floor(p.wood.indexCount/3);
-    const isPalm=p.species==='royal_palm'||p.species==='palm';
-    const isCohort=Boolean(p.cohort);
-    const woodFracs=isPalm?[0.85,0.55,0.35]:isCohort?[1.0,1.0,0.85]:[0.92,0.68,0.45],woodErrs=[0,0.08,0.22];
-    const woodTiers=woodFracs.map((frac,tier)=>{
-      const tris=Math.max(4,Math.floor(origWoodTris*frac)),indexCount=tris*3,firstIndex=cursor;
-      cursor+=indexCount;
-      return{tier,firstIndex,indexCount,triangles:tris,originalTriangles:origWoodTris,maximumReportedErrorMetres:woodErrs[tier]};
-    });
-    const origLeafQuads=Math.floor(p.leaf.indexCount/6);
-    const keepQuads=Math.max(8,Math.floor(origLeafQuads*(isCohort?0.85:isPalm?0.68:0.62))),leafIndexCount=keepQuads*6,leafFirstIndex=cursor;
-    cursor+=leafIndexCount;
-    const leafRibbons={firstIndex:leafFirstIndex,indexCount:leafIndexCount,leafCount:keepQuads,originalFirstIndex:p.leaf.firstIndex,originalIndexCount:p.leaf.indexCount,maximumPositionErrorUpperMetres:0.04};
-    const farFirstIndex=cursor,farIndexCount=p.far.indexCount;
-    cursor+=farIndexCount;
-    const far={firstIndex:farFirstIndex,indexCount:farIndexCount,originalFirstIndex:p.far.firstIndex,originalIndexCount:p.far.indexCount,geometryErrorMetres:0.3822};
-    return{id,species:p.species,woodTiers,leafRibbons,far};
-  });
-  return{manifest:{indexCount:cursor,files:{'lod-indices.bin':{bytes:cursor*4,indexCount:cursor}}},prototypes,indices:null,sourceValidated:true};
-}
-function populateSubtropicalNativeLodIndices(manifest,nativeLod,sourceIndices,sourceVertices){
-  if(!nativeLod||nativeLod.indices)return nativeLod;
-  const out=new Uint32Array(nativeLod.manifest.indexCount),stride=manifest.vertexStride/4;
-  const gcd=(a,b)=>{while(b){const t=a%b;a=b;b=t;}return a;};
-  for(const [id,p]of manifest.prototypes.entries()){
-    const lp=nativeLod.prototypes[id],woodTris=Math.floor(p.wood.indexCount/3);
-    const ranked=Array.from({length:woodTris},(_,t)=>{
-      const j=p.wood.firstIndex+t*3,a=sourceIndices[j]*stride,b=sourceIndices[j+1]*stride,c=sourceIndices[j+2]*stride;
-      const ux=sourceVertices[b]-sourceVertices[a],uy=sourceVertices[b+1]-sourceVertices[a+1],uz=sourceVertices[b+2]-sourceVertices[a+2];
-      const vx=sourceVertices[c]-sourceVertices[a],vy=sourceVertices[c+1]-sourceVertices[a+1],vz=sourceVertices[c+2]-sourceVertices[a+2];
-      const cx=uy*vz-uz*vy,cy=uz*vx-ux*vz,cz=ux*vy-uy*vx;
-      const mat=sourceVertices[a+13]===0?1:0;
-      return{j,mat,area2:cx*cx+cy*cy+cz*cz};
-    }).sort((x,y)=>y.mat-x.mat||y.area2-x.area2);
-    for(const wt of lp.woodTiers){
-      for(let t=0;t<wt.triangles;t++){
-        const src=ranked[t].j,dst=wt.firstIndex+t*3;
-        out[dst]=sourceIndices[src];out[dst+1]=sourceIndices[src+1];out[dst+2]=sourceIndices[src+2];
-      }
-    }
-    const origQuads=Math.floor(p.leaf.indexCount/6),keepQuads=lp.leafRibbons.leafCount;
-    let step=Math.max(1,Math.floor(origQuads*0.61803398875));
-    while(origQuads>1&&gcd(step,origQuads)!==1)step=(step+1)%origQuads||1;
-    for(let k=0;k<keepQuads;k++){
-      const q=(k*step)%Math.max(1,origQuads),src=p.leaf.firstIndex+q*6,dst=lp.leafRibbons.firstIndex+k*6;
-      for(let c=0;c<6;c++)out[dst+c]=sourceIndices[src+c];
-    }
-    out.set(sourceIndices.subarray(p.far.firstIndex,p.far.firstIndex+p.far.indexCount),lp.far.firstIndex);
-  }
-  nativeLod.indices=out;
-  return nativeLod;
-}
-const CERTIFIED_FOREST_STREAM_SHAS=Object.freeze({
-  'vertices.bin':new Set([
-    '8d70fb89316d5d842ba5d224aca99878b866c70addb578848a47783af08251d0',
-    'e9df13166329797db6ddf89839778aa126c82fedc3070a47630e69ee85f6d007',
-    'ce439ed928a18afe2fa1f21ece2c232fe8d45788c5ae98d3910438fd55bf5acb',
-  ]),
-  'indices.bin':new Set([
-    '2cd8ffe90fd2e0300db51caf0decd9da6b5f50cbaa2e6dd5462d8c6f8d8ce389',
-    'eb385ff490bdbc2b44d370facaf73de6516ef1b4084bb725ad9312580f059e9f',
-    'bf7a937c0efdf667d85f425cd56a6c70df194ca06f61b806cad8ff415ae6b5a6',
-  ]),
-  'roots.bin':new Set([
-    '69bc2f787873f09944683f49e88c9bc09d8b068a33aee85453b626150050de9b',
-    '5e26e551af5855219ef1ac84ef97fafeef1a4826cd94da7ff6fcda78dfed6963',
-    '2c700a58140e7dcb2772fc999e6d52b487621ad168ebe70f4b7447210ee1af40',
-  ]),
-});
-export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,deferNative=false,skipRoots=false,deferSurfaces=false}={}){
+// Roots whose bytes were checked once when the pack was baked need not be walked again at every landfall.
+const CERTIFIED_FOREST_ROOT_SHAS=new Set([
+  '69bc2f787873f09944683f49e88c9bc09d8b068a33aee85453b626150050de9b',
+  '5e26e551af5855219ef1ac84ef97fafeef1a4826cd94da7ff6fcda78dfed6963',
+  '2c700a58140e7dcb2772fc999e6d52b487621ad168ebe70f4b7447210ee1af40',
+]);
+// A pack as the game holds it: its manifest and its roots, verified, and its maps, which a device with
+// block-compressed surfaces never needs (deferSurfaces leaves them to loadSurfaces). Procedural coasts plant
+// their own roots (js/terrain.js) and skip the pack's.
+export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,skipRoots=false,deferSurfaces=false}={}){
   const load=async(n,signal)=>{forestLoadAbort(signal);if(typeof assets[n]!=='string')throw Error('Unregistered forest asset: '+n);const r=await fetchAsset(assets[n],signal?{signal}:undefined);if(!r.ok)throw Error('Forest scenery unavailable ('+r.status+'): '+n);return r;};
   const manifest=validateForestScenery(await(await load('manifest.json')).json());
   if(!globalThis.crypto?.subtle)throw Error('Forest receipt verification requires Web Crypto');
@@ -432,7 +316,7 @@ export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,d
     const receipt=manifest.files[name];let raw=await(await load(name,signal)).arrayBuffer();
     if(receipt.gzip){
       if(raw.byteLength!==receipt.gzip.bytes||await digest(raw)!==receipt.gzip.sha256)throw Error('Forest encoded digest mismatch: '+name);
-      if(typeof DecompressionStream!=='function')throw Error('Forest geometry requires gzip decoding');
+      if(typeof DecompressionStream!=='function')throw Error('Forest roots require gzip decoding');
       raw=await new Response(new Blob([raw]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
     }
     forestLoadAbort(signal);if(raw.byteLength!==receipt.bytes||await digest(raw)!==receipt.sha256)throw Error('Forest digest mismatch: '+name);return raw;
@@ -441,13 +325,10 @@ export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,d
   // forest must never silently borrow that stand's generic foliage image.
   if(manifest.version!==2||manifest.materialContract!=='gene-surfaces-v3')throw Error('Regional forest requires current native surfaces');
   validateForestMaterials(manifest.prototypes);
-  const rootsPromise=skipRoots?Promise.resolve(new ArrayBuffer(0)):stream('roots.bin');
-  const lodPromise=assets===FOREST_ASSETS?loadForestNativeLOD({forest:manifest,fetchAsset}).then(nativeLod=>({nativeLod,nativeLodError:null})).catch(error=>({nativeLod:null,nativeLodError:error.message})):Promise.resolve({nativeLod:createSubtropicalNativeLod(manifest),nativeLodError:null});
-  const [rootBytes,lod]=await Promise.all([rootsPromise,lodPromise]),roots=new Float32Array(rootBytes);
-  const certifiedRoots=!skipRoots&&CERTIFIED_FOREST_STREAM_SHAS['roots.bin'].has(manifest.files['roots.bin']?.sha256);
-  if(!skipRoots&&!certifiedRoots)await finishForestChecks(forestRootChecks(manifest,roots));
-  let nativePromise,mapsPromise,nativeLoaded=false;
-  // The maps, kept apart from geometry: a device using prebuilt blocks never needs them.
+  const roots=new Float32Array(skipRoots?new ArrayBuffer(0):await stream('roots.bin'));
+  if(!skipRoots&&!CERTIFIED_FOREST_ROOT_SHAS.has(manifest.files['roots.bin']?.sha256))await finishForestChecks(forestRootChecks(manifest,roots));
+  let mapsPromise;
+  // The maps, fetched once however often they are asked for.
   const loadSurfaces=({signal}={})=>mapsPromise??=(async()=>{
     const textures={},pending=new Map();
     await Promise.all(manifest.prototypes.flatMap(p=>p.nativeMaterials.flatMap(material=>['albedo','normal','roughnessMap'].filter(kind=>material[kind]).map(async kind=>{
@@ -460,31 +341,9 @@ export async function loadForestScenery({fetchAsset=fetch,assets=FOREST_ASSETS,d
     }))));
     return textures;
   })();
-  const loadNative=({signal,skipSurfaces=false,skipNativeLodIndices=false}={})=>nativePromise??=(async()=>{
-    const lightPromise=loadForestLight({forest:manifest,fetchAsset}).then(canopyLight=>({canopyLight,canopyLightError:null})).catch(error=>({canopyLight:null,canopyLightError:error.message}));
-    const geometryPromise=Promise.all([stream('vertices.bin',signal),stream('indices.bin',signal)]).then(async([vertices,indices])=>{
-      const certifiedGeometry=CERTIFIED_FOREST_STREAM_SHAS['vertices.bin'].has(manifest.files['vertices.bin']?.sha256)&&
-        CERTIFIED_FOREST_STREAM_SHAS['indices.bin'].has(manifest.files['indices.bin']?.sha256)&&(skipRoots||certifiedRoots);
-      if(certifiedGeometry){
-        forestLoadAbort(signal);
-        await yieldCooperativeTask();
-        forestLoadAbort(signal);
-        return{manifest,vertices:new Float32Array(vertices),indices:new Uint32Array(indices),roots};
-      }
-      return decodeForestSceneryAsync(manifest,{'vertices.bin':vertices,'indices.bin':indices,'roots.bin':rootBytes,skipRoots:true},{signal}).then(g=>({...g,roots}));
-    });
-    const materialPromise=skipSurfaces?Promise.resolve({}):loadSurfaces({signal});
-    const [geometry,textures,light]=await Promise.all([geometryPromise,materialPromise,lightPromise]);
-    if(lod.nativeLod&&!lod.nativeLod.indices&&!skipNativeLodIndices)populateSubtropicalNativeLodIndices(manifest,lod.nativeLod,geometry.indices,geometry.vertices);
-    nativeLoaded=true;return{...geometry,textures,...light,...lod};
-  })();
-  // Drop only our fulfilled cache reference after successful GPU installation.
-  // Existing callers retain their immutable arrays; a later explicit native
-  // load fetches and verifies fresh bytes. An in-flight load stays deduplicated.
-  const releaseNativeCPU=()=>{if(!nativeLoaded)return false;nativePromise=undefined;mapsPromise=undefined;nativeLoaded=false;return true;};
-  // A deferred pack is its roots alone: the renderer fetches the native streams through loadNative.
-  return deferNative?{manifest,roots,vertices:null,indices:null,textures:null,...lod,loadNative,loadSurfaces,releaseNativeCPU}:
-    {...await loadNative({skipSurfaces:deferSurfaces}),...lod,loadNative,loadSurfaces,releaseNativeCPU};
+  // Once the GPU holds the surfaces the pack lets go of the maps; a later call fetches and verifies them afresh.
+  const releaseSurfaces=()=>{mapsPromise=undefined;};
+  return {manifest,roots,textures:deferSurfaces?null:await loadSurfaces(),loadSurfaces,releaseSurfaces};
 }
 const coverageSets=new WeakMap();
 export function forestCoversPoint(manifest,x,z){
@@ -614,9 +473,9 @@ export async function createForestLeafSurfaces({device,shader,pack}){
 const ROOT_WGSL=/* wgsl */`
 struct ForestRoot {rootScale:vec4f,yawColour:vec4f,identity:vec4f};
 `;
-export const FOREST_VERTEX_WGSL=ROOT_WGSL+FOREST_LIGHT_WGSL+/* wgsl */`
+// What every tree's clusters and crowns are placed and shaded through (js/forest-clusters.js, js/forest-crowns.js).
+export const FOREST_VERTEX_WGSL=ROOT_WGSL+/* wgsl */`
 @group(2)@binding(0)var<storage,read>forestRoots:array<ForestRoot>;
-@group(2)@binding(1)var<storage,read>forestVisible:array<u32>;
 @group(2)@binding(2)var<uniform>forestBin:vec4u;
 struct ForestLeafMaterial {optics:vec4f,underside:vec4f,coordinates:vec4f};
 @group(2)@binding(3)var forestNativeAlbedo0:texture_2d_array<f32>;
@@ -636,6 +495,7 @@ struct ForestVertex {
  @location(5)@interpolate(flat)nativeMaterial:i32,
  // The share of each pixel that the tree's far crown has taken from its leaves (js/forest-crowns.js).
  @location(6)@interpolate(flat)crownFade:f32,
+ // The light the tree's own canopy lets through to this vertex, baked into its cluster (scripts/prepare-forest-clusters.mjs).
  @location(7)canopyAO:f32,
  @location(8)@interpolate(flat)coverageSeed:u32,
 };
@@ -644,9 +504,7 @@ fn forestCoverageHash(value:u32)->u32{return continuumHash(value);}
 fn forestLeafSampleMask(alpha:f32,seed:u32,pixel:vec2f)->u32{
  let samples=select(4u,forestBin.w,forestBin.w>0u);let p=vec2u(pixel);
  let random=forestCoverageHash(seed^forestCoverageHash(p.x)^forestCoverageHash(p.y*0x9e3779b9u));
- let tierId=forestBin.z>>16u;
- let coverageScale=select(1.,select(1.62,3.2,tierId==3u),tierId>=2u);
- let coverage=clamp(alpha*coverageScale,0.,1.)*f32(samples);let whole=u32(floor(coverage));
+ let coverage=clamp(alpha,0.,1.)*f32(samples);let whole=u32(floor(coverage));
  let count=min(samples,whole+select(0u,1u,fract(coverage)>f32(random&65535u)/65536.));
  let bits=(1u<<count)-1u;let rotation=(random>>16u)%samples;
  return ((bits<<rotation)|(bits>>(samples-rotation)))&((1u<<samples)-1u);
@@ -657,6 +515,7 @@ fn forestLeafSampleMask(alpha:f32,seed:u32,pixel:vec2f)->u32{
 fn forestCrownSamples(share:f32,pixel:vec2f)->u32{return continuumSamples(share,pixel,select(4u,forestBin.w,forestBin.w>0u),0u);}
 // Three motions at three speeds. The whole tree bends with height, branches bob by their reach from
 // the trunk, and leaves flutter. Gust fronts roll downwind across the forest at the wind's own speed.
+// The wind's own simulation (js/forest-wind.js) replaces this where it runs.
 fn forestWind(r:ForestRoot,local:vec3f,model:vec3f,flutterWeight:f32)->vec3f{
  let speed=F.windP[0].z;if(speed<=.05){return vec3f(0);}
  let collarPin=select(smoothstep(0.22,1.05,model.y),1.0,flutterWeight>0.);
@@ -751,55 +610,6 @@ fn forestPlaceSkinned(r:ForestRoot,rootId:u32,posLocal:vec3f,normAdj:vec3f,kind:
  o.nativeMaterial=i32(nativeMaterial);if(o.nativeMaterial>=0){o.nativeMaterial+=i32(forestBin.y);}
  o.kind=kind;o.leafUV=leafUV;o.colour=tint;o.canopyAO=canopyAO;o.coverageSeed=forestCoverageHash(vertex^(rootId*0x9e3779b9u));o.pos=F.viewProj*vec4f(earthCurve(o.world-F.camPos.xyz,F.camPos.y),1);return o;
 }
-fn forestPlace(r:ForestRoot,rootId:u32,posLocal:vec3f,normAdj:vec3f,kind:vec2f,leafUV:vec2f,colour:vec3f,nativeMaterial:f32,vertex:u32,canopyAO:f32)->ForestVertex{
- return forestPlaceSkinned(r,rootId,forestGroundRoot(posLocal,kind.x),normAdj,kind,leafUV,colour,nativeMaterial,vertex,canopyAO,false);
-}
-fn forestCanopyVertex(position:vec3f,normal:vec3f,kind:vec2f,leafUV:vec2f,colour:vec3f,nativeMaterial:f32,instance:u32,vertex:u32)->ForestVertex{
- let r=forestRoots[forestVisible[forestBin.x+instance]];let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
- let tierId=forestBin.z>>16u;
- let isSubBroadleaf=(forestBin.z&768u)!=0u;
- var posLocal=position;var normAdj=normal;
- if(nativeMaterial<0.){
-  if(kind.x<3.5){
-   posLocal=vec3f(posLocal.x*2.6,posLocal.y*0.72,posLocal.z*2.6);
-  }else{
-   let rXZ=length(posLocal.xz);
-   let isTopApex=rXZ<1.1&&posLocal.y>8.0;
-   let isBotApex=rXZ<1.1&&posLocal.y<=8.0;
-   let yRound=select(posLocal.y,select(posLocal.y+1.4,posLocal.y-1.6,isTopApex),isTopApex||isBotApex);
-   let lobe=1.0+0.16*sin(posLocal.x*0.85+posLocal.z*0.95+r.yawColour.x*3.0);
-   let flare=select(1.12,1.38,isSubBroadleaf)*lobe;
-   posLocal=vec3f(posLocal.x*flare,max(0.25,yRound*0.66-0.35),posLocal.z*flare);
-   normAdj=normalize(vec3f(posLocal.x*0.35,max(0.35,normAdj.y+0.25),posLocal.z*0.35));
-  }
- }
- if(kind.x>=3.5){
-  let upRef=select(vec3f(0.,1.,0.),vec3f(1.,0.,0.),abs(normal.y)>.9);
-  let t1=normalize(cross(normal,upRef));let t2=cross(normal,t1);
-  let uvOff=leafUV-vec2f(.5,.5);
-  let invScale=1./max(r.rootScale.w,.85);
-  if(tierId>=2u){
-   let baseInflate=select(select(.03,.18,tierId==3u),select(.08,.22,tierId==3u),isSubBroadleaf);
-   let inflate=baseInflate*invScale;
-   posLocal+=t1*(uvOff.x*inflate)+t2*(uvOff.y*inflate);
-   let domeCurve=select(0.08,0.14,tierId==3u);
-   normAdj=normalize(normAdj+(t1*uvOff.x+t2*uvOff.y)*domeCurve);
-  }else{
-   let nearRelief=1.-smoothstep(12.,46.,length(r.rootScale.xyz-F.camPos.xyz));
-   if(nearRelief>0.){
-    let alongU=clamp(leafUV.x,0.,1.);
-    let camber=(-0.055*alongU*alongU+0.115*abs(uvOff.y)*alongU)*nearRelief*invScale;
-    posLocal+=normal*camber;
-    normAdj=normalize(normAdj+(t1*uvOff.x*0.18+t2*uvOff.y*0.30)*nearRelief);
-   }
-  }
- }
- return forestPlace(r,forestVisible[forestBin.x+instance],posLocal,normAdj,kind,leafUV,colour,nativeMaterial,vertex,forestNativeCanopyAO(vertex));
-}
-@vertex fn forestCanopyVS(@location(0)position:vec3f,@location(1)normal:vec3f,@location(2)kind:vec2f,
- @location(5)leafUV:vec2f,@location(6)colour:vec3f,@location(7)nativeMaterial:f32,@builtin(instance_index)instance:u32,@builtin(vertex_index)vertex:u32)->ForestVertex{
- return forestCanopyVertex(position,normal,kind,leafUV,colour,nativeMaterial,instance,vertex);
-}
 fn forestNativeLinear(c:vec3f)->vec3f{
  return select(pow((c+vec3f(.055))/1.055,vec3f(2.4)),c/12.92,c<=vec3f(.04045));
 }
@@ -853,25 +663,6 @@ fn forestMappedNormal(geometric:vec3f,detail:vec3f,dx:vec3f,dy:vec3f,ux:vec2f,uy
 @fragment fn forestNativeOpaqueFS(in:ForestVertex,@builtin(front_facing)front:bool)->@location(0)vec4f{
  let dx=dpdx(in.world);let dy=dpdy(in.world);let ux=dpdx(in.leafUV);let uy=dpdy(in.leafUV);
  let geometric=normalize(in.normal);let exposure=clamp(in.kind.y,0.,1.);
- // This explicitly labelled legacy far approximation is permitted only when
- // the complete specimen fits three pixels. Its dome UVs are not native UVs.
- if(in.nativeMaterial<0){
-   let isCrown=in.kind.x>3.5;
-   let isSubtropicalFoliage=isCrown&&in.colour.g>in.colour.r*2.2;
-   let camDist=length(in.world-F.camPos.xyz);
-   let clumpW=select(0.0,1.0-smoothstep(160.0,1500.0,camDist),isCrown);
-   let clumpA=sin(in.world.x*0.68+in.world.y*0.44)*cos(in.world.z*0.68-in.world.y*0.36);
-   let clumpB=sin(in.world.x*1.55-in.world.z*1.38+in.world.y*0.88);
-   let farNorm=normalize(geometric+vec3f(cos(in.world.x*0.68)*0.24+cos(in.world.x*1.55)*0.12,clumpA*0.18,-sin(in.world.z*0.68)*0.24)*clumpW);
-   let expAtten=select(1.0,.24+.76*exposure*exposure,isSubtropicalFoliage);
-   let aoAtten=select(1.0,0.78,isSubtropicalFoliage)*(1.0+(clumpA*0.12+clumpB*0.06)*clumpW);
-   let nDotL=dot(farNorm,F.sunDir.xyz);
-   let diffuse=(max(nDotL,0.)+select(0.,max(-nDotL,0.)*0.18*exposure,isCrown))*expAtten*aoAtten;
-   let ambient=select(.36+max(farNorm.y,0.)*.25,(.14+exposure*.48+max(farNorm.y,0.)*.09)*aoAtten,isCrown);
-   let baseFarCol=select(in.colour,vec3f(in.colour.r*0.68+in.colour.g*0.06,in.colour.g*0.62,in.colour.b*0.65+in.colour.g*0.04),isSubtropicalFoliage);
-   let farCol=baseFarCol*(1.0+(clumpA*0.09+clumpB*0.05)*clumpW);
-   return landFinish(in.world,farNorm,farCol,diffuse,ambient,0.,select(.95,.86,isCrown));
- }
  let material=forestNativeMaterials[u32(in.nativeMaterial)];
  let surface=forestReadNative(material,in.leafUV,ux,uy);
  var colour=forestOwnColour(surface.pigment)*in.colour;
@@ -938,19 +729,6 @@ struct ForestLeafCoverage {@location(0)colour:vec4f,@builtin(sample_mask)mask:u3
  let material=forestNativeMaterials[u32(in.nativeMaterial)];
  let ux=dpdx(in.leafUV);let uy=dpdy(in.leafUV);
  let viewDist=1./max(in.pos.w,1e-6);
- let tierId=forestBin.z>>16u;
- if(tierId>=3u){
-  let pigment=forestNativeAlbedoOnly(material,in.leafUV,ux,uy);
-  var colour=forestOwnColour(pigment)*in.colour;
-  if(!front){colour=mix(colour,forestNativeLinear(material.underside.rgb)*in.colour,material.optics.y);}
-  let n=normalize(in.normal)*select(-1.,1.,front);
-  let exposure=clamp(in.kind.y,0.,1.);let nDotL=dot(n,F.sunDir.xyz);
-  let backlit=max(-nDotL,0.)*material.optics.z;
-  let diffuse=(max(nDotL,0.)+backlit)*(.22+.78*exposure*exposure)*(.35+.65*in.canopyAO);
-  let ambient=(.12+exposure*.56+abs(n.y)*.09)*in.canopyAO;
-  let lit=landFinish(in.world,n,colour,diffuse,ambient,0.08,clamp(material.optics.x,0.35,0.88));
-  return vec4f(lit.rgb,pigment.a);
- }
  let dx=dpdx(in.world);let dy=dpdy(in.world);
  let surface=forestReadNative(material,in.leafUV,ux,uy);let pigment=surface.pigment;
  var colour=forestOwnColour(pigment)*in.colour;
@@ -979,36 +757,28 @@ struct ForestLeafCoverage {@location(0)colour:vec4f,@builtin(sample_mask)mask:u3
  return vec4f(lit.rgb,pigment.a);
 }
 `+FOREST_CLUSTER_VERTEX_WGSL;
-export const FOREST_SHADOW_WGSL=/* wgsl */`
-@vertex fn forestCanopyShadowVS(@location(0)position:vec3f,@location(1)normal:vec3f,@location(2)kind:vec2f,
- @location(5)leafUV:vec2f,@location(6)colour:vec3f,@location(7)nativeMaterial:f32,@builtin(instance_index)instance:u32,@builtin(vertex_index)vertex:u32)->@builtin(position)vec4f{
- let r=forestRoots[forestVisible[forestBin.x+instance]];
- let dCam=r.rootScale.xyz-F.camPos.xyz;
- let dCam2=dot(dCam,dCam);
- if(dCam2>24025.){return vec4f(2.,2.,0.,1.);}
- let rc=landSH.lightView*vec4f(r.rootScale.xyz+vec3f(0.,8.*r.rootScale.w,0.)-landSH.origin.xyz,1.);
- if(abs(rc.x)>1.12||abs(rc.y)>1.12||rc.z<-0.05||rc.z>1.05){return vec4f(2.,2.,0.,1.);}
- let v=forestCanopyVertex(position,normal,kind,leafUV,colour,nativeMaterial,instance,vertex);
- return landSH.lightView*vec4f(v.world-landSH.origin.xyz,1.);
-}
-`+FOREST_CLUSTER_SHADOW_WGSL;
+// The land shadow map takes each tree's own cluster cut against the light's box (js/forest-clusters.js).
+export const FOREST_SHADOW_WGSL=FOREST_CLUSTER_SHADOW_WGSL;
+// One pass over the roots a frame: every tree in view goes on its species' one visible list, however far
+// off; no tree is ever handed to another surface. Nothing here sorts trees by distance; what each listed tree draws, from its finest leaves
+// to a single splat, is its own continuum's choice (forestClusterSelect, js/forest-clusters.js).
 export const FOREST_CULL_WGSL=FRAME_WGSL+ROOT_WGSL+/* wgsl */`
-struct ForestPrototype {bound:vec4f,roots:vec4u,wood:vec4u,leaf:vec4u,far:vec4u};
+struct ForestPrototype {bound:vec4f,roots:vec4u};
 @group(0)@binding(0)var<uniform>F:Frame;
 @group(0)@binding(1)var<storage,read>roots:array<ForestRoot>;
 @group(0)@binding(2)var<storage,read>prototypes:array<ForestPrototype>;
 @group(0)@binding(3)var<storage,read_write>visible:array<u32>;
-@group(0)@binding(4)var<storage,read_write>commands:array<atomic<u32>>;
-@group(0)@binding(5)var<storage,read_write>previousLod:array<u32>;
-@group(0)@binding(6)var<uniform>parameters:vec4f;
-@group(0)@binding(7)var<uniform>forestResidency:vec4u;
+@group(0)@binding(4)var<storage,read_write>visibleCounts:array<atomic<u32>>;
+// Roots in use, species, the scene's pixel error, unused.
+@group(0)@binding(5)var<uniform>parameters:vec4f;
 @compute @workgroup_size(64)fn forestReset(@builtin(global_invocation_id)id:vec3u){
- if(id.x>=u32(parameters.y)*4u){return;}atomicStore(&commands[id.x*5u+1u],0u);
+ if(id.x>=u32(parameters.y)){return;}atomicStore(&visibleCounts[id.x],0u);
 }
 @compute @workgroup_size(64)fn forestCull(@builtin(global_invocation_id)id:vec3u){
  if(id.x>=u32(parameters.x)){return;}
  let r=roots[id.x];if(r.rootScale.w<=0.0){return;}let pi=u32(r.identity.x);let p=prototypes[pi];let c=cos(r.yawColour.x);let s=sin(r.yawColour.x);
  let b=p.bound.xyz*r.rootScale.w;
+ // A felled tree lies as far as its own height from where it stood.
  let world=r.rootScale.xyz+vec3f(c*b.x-s*b.z,b.y,s*b.x+c*b.z);let relative=world-F.camPos.xyz;let radius=p.bound.w*r.rootScale.w*select(1.,2.,r.identity.w<0.);
  let clip=F.viewProj*vec4f(relative,1);
  let rowW=vec3f(F.viewProj[0].w,F.viewProj[1].w,F.viewProj[2].w);
@@ -1017,156 +787,29 @@ struct ForestPrototype {bound:vec4f,roots:vec4u,wood:vec4u,leaf:vec4u,far:vec4u}
    if(clip.w+clip[a]<-radius*length(rowW+row)||clip.w-clip[a]<-radius*length(rowW-row)){return;}
  }
  if(clip.w<-radius*length(rowW)){return;}
- let depth=dot(relative,normalize(F.camFwd.xyz));let near=depth-radius;
- let lateral=sqrt(max(0.0,dot(relative,relative)-depth*depth))+radius;
- let projected=F.screen.y/max(2.0*length(F.camUp.xyz),.0001)*2.0*radius*sqrt(1.0+lateral*lateral/max(near*near,.0001))/max(near,.0001);
- // A source-bound symmetric geometry certificate may bound displacement.
- // Without it, collapse only when the WHOLE crown fits three pixels. Neither
- // path certifies alpha/colour appearance; forced far mode is debug-only.
- let threshold=parameters.z*select(.88,1.0,previousLod[id.x]==0u);
- let resident=forestResidency.x>0u;
- let geometricError=bitcast<f32>(p.far.z)*r.rootScale.w;
- let farError=select(projected,projected*geometricError/(2.0*radius),p.far.w==1u);
- let farLod=resident&&(parameters.w==2.0||(parameters.w!=1.0&&near>radius&&farError<=threshold));
- let atlasSupported=p.roots.z>0u&&((p.roots.z&2u)!=0u||F.camPos.y>=world.y);
- let atlasThreshold=f32(p.roots.w)*select(.88,1.0,previousLod[id.x]==2u);
- let midLod=!farLod&&atlasSupported&&(!resident||(parameters.w==0.0&&near>radius&&(((p.roots.z&4u)!=0u)||projected<=atlasThreshold)));
- let nearLod=resident&&!farLod&&!midLod;
- if(!nearLod&&!farLod&&!midLod){return;}
- previousLod[id.x]=select(select(0u,2u,midLod),1u,nearLod);
- let command=(pi*4u+select(select(2u,3u,midLod),0u,nearLod))*5u;
- let slot=atomicAdd(&commands[command+1u],1u);
- let base=p.roots.x*3u+p.roots.y*select(select(1u,2u,midLod),0u,nearLod);
- visible[base+slot]=id.x;
- if(nearLod){atomicAdd(&commands[(pi*4u+1u)*5u+1u],1u);}
+ let slot=atomicAdd(&visibleCounts[pi],1u);
+ if(slot<p.roots.y){visible[p.roots.x+slot]=id.x;}
 }
 `;
-// Optional extensions retain the canonical cull/bindings for old packs/tests.
-// They compile the same per-root GPU mechanism; no CPU visibility fallback.
-const forestCullReplace=(source,from,to)=>{if(!source.includes(from))throw Error('Forest GPU cull extension no longer matches canonical source');return source.replace(from,to);};
-// The source forestWithNativeLod rewrites into the near native-LOD cull. Its middle bit and atlas tier are
-// never set now that the middle mesh and atlases are retired; they go with that ladder.
-export const FOREST_MIDDLE_ROOT_CULL_WGSL=forestCullReplace(forestCullReplace(FOREST_CULL_WGSL,
- ` let geometricError=bitcast<f32>(p.far.z)*r.rootScale.w;
- let farError=select(projected,projected*geometricError/(2.0*radius),p.far.w==1u);
- let farLod=resident&&(parameters.w==2.0||(parameters.w!=1.0&&near>radius&&farError<=threshold));`,
- ` // Bit8 identifies resident generated middle geometry. Its E is an authored
- // sampling/wood-clustering footprint, NEVER the native certificate flag.
- let authoredMiddle=(p.roots.z&8u)!=0u;
- let geometricError=bitcast<f32>(p.far.z)*r.rootScale.w;
- let footprint=F.screen.y/max(2.0*length(F.camUp.xyz),.0001)*geometricError*sqrt(1.0+lateral*lateral/max(near*near,.0001))/max(near-geometricError,.0001);
- let legacyError=select(projected,projected*geometricError/(2.0*radius),p.far.w==1u);
- let farError=select(legacyError,footprint,authoredMiddle);
- let farLod=(resident||authoredMiddle)&&(parameters.w==2.0||(parameters.w!=1.0&&(!authoredMiddle||(p.roots.z&4u)==0u)&&near>radius&&(!authoredMiddle||near>geometricError)&&farError<=threshold));`),
- 'let atlasSupported=p.roots.z>0u&&','let atlasSupported=(p.roots.z&7u)>0u&&');
-// Closed wood far off is the groves' canopy alone (js/forest-groves.js), never a scatter of small
-// models. A tree the groves mark as standing in closed wood is left to that canopy beyond the range at
-// which a crown FOREST_CANOPY_CROWN_METRES across spans FOREST_CANOPY_CROWN_PIXELS pixels; by then
-// the canopy has closed over the hollow it stood in. A spyglass lengthens the range with the view.
-export const FOREST_CANOPY_CROWN_METRES=20,FOREST_CANOPY_CROWN_PIXELS=12;
-export const FOREST_CANOPY_RANGE_WGSL=`fn forestCanopyRange()->f32{return F.screen.y/max(2.0*length(F.camUp.xyz),.0001)*${(FOREST_CANOPY_CROWN_METRES/FOREST_CANOPY_CROWN_PIXELS).toFixed(4)};}`;
-export const forestWithGroveCanopy=source=>forestCullReplace(forestCullReplace(source,
- '@group(0)@binding(7)var<uniform>forestResidency:vec4u;',
- '@group(0)@binding(7)var<uniform>forestResidency:vec4u;\n@group(0)@binding(13)var<storage,read>forestCanopyRoots:array<u32>;\n'+FOREST_CANOPY_RANGE_WGSL),
- 'let clip=F.viewProj*vec4f(relative,1);',
- 'if(((forestCanopyRoots[id.x>>5u]>>(id.x&31u))&1u)==1u&&length(relative)>forestCanopyRange()){return;}\n let clip=F.viewProj*vec4f(relative,1);');
-export const forestWithNativeLod=source=>forestCullReplace(forestCullReplace(forestCullReplace(forestCullReplace(forestCullReplace(source,
- 'if(id.x>=u32(parameters.y)*4u){return;}',
- 'if(id.x>=u32(parameters.y)*8u){return;}'),
- 'let footprint=F.screen.y/max(2.0*length(F.camUp.xyz),.0001)*geometricError*sqrt(1.0+lateral*lateral/max(near*near,.0001))/max(near-geometricError,.0001);',
- `let forwardDir=normalize(F.camFwd.xyz);
- let dist=length(relative);
- // A spyglass brings everything closer, so every limit set in metres stretches with it.
- // Ordinary view angles stay on the limits the budget was tuned for.
- let forestLensZoom=0.5543/max(length(F.camUp.xyz),.0001);
- let forestViewZoom=select(1.0,min(forestLensZoom,6.0),forestLensZoom>1.5);
- let isCoastalRoot=r.identity.z<0.0;
- let isSubtropicalCoastal=r.identity.z<-1.1;
- let isCohortCoastal=r.identity.z<-1.1&&r.identity.z>-1.5;
- var coastalStandSteps=0u;
- let inCanopy=clamp((F.camPos.y-18.0)/24.0,0.0,1.0);
- let crownFront=min(radius*0.22,8.5*r.rootScale.w);
- let midNear=max(select(near,dist-select(radius*0.45,crownFront,isCoastalRoot),inCanopy>0.0),1.5);
- let cosGaze=clamp(dot(relative/max(dist,.0001),forwardDir),0.0,1.0);
- let sinGaze2=1.0-cosGaze*cosGaze;
- let gazeAcuity=1.0/(1.0+4.5*sinGaze2+6.0*sinGaze2*sinGaze2);
- let canopyMask=1.0/(1.0+max(0.0,midNear/forestViewZoom-2.0)*select(0.04,0.025,isCoastalRoot));
- let offAxis=sqrt(1.0+lateral*lateral/max(near*near,.0001));
- let perceptualScreenY=mix(F.screen.y,min(F.screen.y,1080.0),inCanopy);
- let baseFocal=perceptualScreenY/max(2.0*length(F.camUp.xyz),.0001);
- let perceptualFocal=baseFocal*mix(offAxis,select(gazeAcuity,1.0,isCoastalRoot)*canopyMask,inCanopy);
- let farFocal=select(perceptualFocal,baseFocal,isCoastalRoot);
- let farDist=select(near,midNear,isCoastalRoot);
- let footprint=farFocal*geometricError/max(farDist-geometricError,.0001);`),
- ` let farLod=(resident||authoredMiddle)&&(parameters.w==2.0||(parameters.w!=1.0&&(!authoredMiddle||(p.roots.z&4u)==0u)&&near>radius&&(!authoredMiddle||near>geometricError)&&farError<=threshold));
- let atlasSupported=(p.roots.z&7u)>0u&&((p.roots.z&2u)!=0u||F.camPos.y>=world.y);
- let atlasThreshold=f32(p.roots.w)*select(.88,1.0,previousLod[id.x]==2u);
- let midLod=!farLod&&atlasSupported&&(!resident||(parameters.w==0.0&&near>radius&&(((p.roots.z&4u)!=0u)||projected<=atlasThreshold)));
- let nearLod=resident&&!farLod&&!midLod;
- if(!nearLod&&!farLod&&!midLod){return;}`,
- ` // Foreground trees keep native detail inside these radii, which shrink with the adaptive
- // polygon budget. Fixed radii would leave a weak device unable to shed any of this work.
- let forestBudgetBase=clamp(3.0/max(parameters.z,3.0),0.35,1.0);
- let forestBudgetScale=forestBudgetBase*forestViewZoom;
- let stdFarLod=(resident||authoredMiddle)&&(parameters.w==2.0||(parameters.w!=1.0&&(!authoredMiddle||(p.roots.z&4u)==0u)&&near>max(radius,select(0.0,140.0*forestBudgetScale,resident&&parameters.w==0.0))&&(!authoredMiddle||near>geometricError)&&farError<=threshold));
- let coastalLodScale=clamp(sqrt(forestBudgetBase),0.68,1.0)*mix(0.85,1.0,gazeAcuity)*forestViewZoom;
- let baseFarDist=select(select(1580.0,980.0,coastalStandSteps>=2u),2400.0,isCohortCoastal);
- let coastalFarDist=baseFarDist*coastalLodScale*select(1.0,0.90,previousLod[id.x]==0u);
- let coastalFarLod=resident&&(parameters.w==2.0||(parameters.w!=1.0&&dist>coastalFarDist));
- let farLod=select(stdFarLod,coastalFarLod,isSubtropicalCoastal);
- let mid2GeomError=bitcast<f32>(p.leaf.z)*r.rootScale.w;
- let mid2Footprint=perceptualFocal*mid2GeomError/max(midNear-mid2GeomError,.0001);
- let mid2Threshold=parameters.z*select(.88,1.0,previousLod[id.x]==3u||previousLod[id.x]==0u);
- let stdMid2Lod=!farLod&&p.leaf.w==1u&&resident&&parameters.w==0.0&&midNear>max(mid2GeomError,30.0*forestBudgetScale)&&mid2Footprint<=mid2Threshold;
- let baseMid2Min=select(select(440.0,260.0,coastalStandSteps==1u),180.0,coastalStandSteps>=2u);
- let coastalMid2Min=baseMid2Min*coastalLodScale*select(1.0,0.90,previousLod[id.x]==3u||previousLod[id.x]==0u);
- let coastalMid2Lod=!farLod&&resident&&parameters.w==0.0&&p.leaf.w==1u&&dist>coastalMid2Min;
- let mid2Lod=select(stdMid2Lod,coastalMid2Lod,isSubtropicalCoastal);
- let midGeomError=bitcast<f32>(p.wood.z)*r.rootScale.w;
- let midFootprint=perceptualFocal*midGeomError/max(midNear-midGeomError,.0001);
- let midThreshold=parameters.z*select(.88,1.0,previousLod[id.x]==2u||previousLod[id.x]==3u||previousLod[id.x]==0u);
- let stdMidLod=!farLod&&!mid2Lod&&p.wood.w==1u&&resident&&parameters.w==0.0&&(inCanopy>0.0||near>radius)&&midNear>max(midGeomError,12.0*forestBudgetScale)&&midFootprint<=midThreshold;
- let baseMid1Min=select(160.0,95.0,coastalStandSteps>=1u);
- let coastalMid1Min=baseMid1Min*coastalLodScale*select(1.0,0.90,previousLod[id.x]==2u||previousLod[id.x]==3u||previousLod[id.x]==0u);
- let coastalMidLod=!farLod&&!mid2Lod&&resident&&parameters.w==0.0&&p.wood.w==1u&&dist>coastalMid1Min;
- let midLod=select(stdMidLod,coastalMidLod,isSubtropicalCoastal);
- let nearLod=resident&&!farLod&&!mid2Lod&&!midLod;
- if(!nearLod&&!farLod&&!mid2Lod&&!midLod){return;}`),
- 'previousLod[id.x]=select(select(0u,2u,midLod),1u,nearLod);',
- 'previousLod[id.x]=select(select(select(0u,3u,mid2Lod),2u,midLod),1u,nearLod);'),
- ` let command=(pi*4u+select(select(2u,3u,midLod),0u,nearLod))*5u;
- let slot=atomicAdd(&commands[command+1u],1u);
- let base=p.roots.x*3u+p.roots.y*select(select(1u,2u,midLod),0u,nearLod);
- visible[base+slot]=id.x;
- if(nearLod){atomicAdd(&commands[(pi*4u+1u)*5u+1u],1u);}`,
- ` let midCommandBase=u32(parameters.y)*4u+pi*4u+select(0u,2u,mid2Lod);
- let command=select(pi*4u+select(2u,0u,nearLod),midCommandBase,midLod||mid2Lod)*5u;
- let slot=atomicAdd(&commands[command+1u],1u);
- let base=p.roots.x*4u+p.roots.y*select(select(select(1u,3u,mid2Lod),2u,midLod),0u,nearLod);
- visible[base+slot]=id.x;
- if(nearLod){atomicAdd(&commands[(pi*4u+1u)*5u+1u],1u);}
- if(midLod||mid2Lod){atomicAdd(&commands[(midCommandBase+1u)*5u+1u],1u);}`);
 
-export async function createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack,groundSample,mode='auto',nearPixels=3,
+export async function createForestRenderer({device,module,frameUBO,shader,resources,clouds,format,samples,pack,groundSample,pixelError=3,
   terrainOcclusion=null,savedStrikes=null,strikeOrigin={x:0,z:0},onStrikesChanged=null}){
-  if(!['auto','near','far'].includes(mode)||!(nearPixels>0&&nearPixels<=3))throw Error('Invalid forest LOD policy');
-  if(samples<2)throw Error('Native forest coverage requires MSAA');
+  if(!(pixelError>0))throw Error('Invalid forest pixel error');
+  if(samples<2)throw Error('Forest leaf coverage requires MSAA');
   const m=pack.manifest,allocated=[],B=GPUBufferUsage;
   const make=(data,usage,label)=>{if(data.byteLength>device.limits.maxBufferSize)throw Error(label+' exceeds GPU maxBufferSize');const b=device.createBuffer({size:Math.max(4,data.byteLength),usage:usage|B.COPY_DST,label});allocated.push(b);if(data.byteLength)device.queue.writeBuffer(b,0,data);return b;};
-  const nativeLod=pack.nativeLod?.sourceValidated?pack.nativeLod:null;
-  const abort=new AbortController(),nativeStatus={status:'deferred',resident:false,error:null,uploadedBytes:0,totalBytes:m.files['vertices.bin'].bytes+(nativeLod?nativeLod.manifest.files['lod-indices.bin'].bytes:m.files['indices.bin'].bytes)};
-  let native=null,destroyed=false,terrainVisibility=null;
-  let clusters=null,wind=null,fallCapsuleCursor=4;const clustersWanted=typeof location==='undefined'||new URLSearchParams(location.search).get('forestClusters')!=='0';
+  const abort=new AbortController();
+  let destroyed=false,terrainVisibility=null,surfaces=null,clusters=null,wind=null,fallCapsuleCursor=4;
   // Far crowns (js/forest-crowns.js). forestCrowns=0 draws every tree's leaves as far as they go; the
   // others move the change for inspection: the nearest it may fall, in metres, the pixel share, and how
-  // broad a tree may stand on screen as a crown, in leaf errors.
-  const crownQuery=typeof location==='undefined'?new URLSearchParams():new URLSearchParams(location.search);
-  const crownsWanted=crownQuery.get('forestCrowns')!=='0',crownChange={};
-  for(const [key,name]of [['nearest','forestCrownNearest'],['limit','forestCrownLimit'],['widest','forestCrownWidest']]){const value=Number(crownQuery.get(name));if(crownQuery.has(name)&&value>=0)crownChange[key]=value;}
+  // broad a tree may stand on screen as a crown, in leaf errors. forestWind=0 leaves the trees to the
+  // shader's own sway.
+  const query=typeof location==='undefined'?new URLSearchParams():new URLSearchParams(location.search);
+  const crownsWanted=query.get('forestCrowns')!=='0',windWanted=query.get('forestWind')!=='0',crownChange={};
+  for(const [key,name]of [['nearest','forestCrownNearest'],['limit','forestCrownLimit'],['widest','forestCrownWidest']]){const value=Number(query.get(name));if(query.has(name)&&value>=0)crownChange[key]=value;}
   try{
     const isSubtropicalPack=m.prototypes.some(p=>p.species==='royal_palm'||p.species==='ceiba'||p.species==='mangrove');
     const isCohortPack=m.prototypes.some(p=>Boolean(p.cohort));
-    const nativeMid=Boolean(nativeLod),commandSlots=nativeMid?8:4,visibleTiers=nativeMid?4:3;
     const samplerOptions={minFilter:'linear',magFilter:'linear',mipmapFilter:'linear',maxAnisotropy:4};
     const nativeSampler=device.createSampler({...samplerOptions,addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge'});
     const nativeRepeatSampler=device.createSampler({...samplerOptions,addressModeU:'repeat',addressModeV:'repeat'});
@@ -1187,82 +830,43 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
     let activeRootCount=m.rootCount;
     // Trees shot down in an earlier sitting are down before the coast is first seen.
     reapplyForestStrikes(rooted,activeRootCount,strikes);
+    const stats={loaded:true,backend:'continuum',roots:m.rootCount-excludedRoots,excludedRoots,prototypes:m.prototypes.length,gpuCulling:true,terrainOcclusion:false,pixelError,
+      materialContract:m.materialContract,materialLayers:0,textureFamilies:[],coverageFiltering:'Stable independent leaf footprint sample masks',
+      species:[...new Set(m.prototypes.map(p=>p.species))],sourceClaim:m.sourceClaim};
+    // Clusters are each tree near and middling, crowns beyond (js/forest-clusters.js, js/forest-crowns.js): fetched
+    // at once, while the roots are culled and the surfaces built. A pack without clusters cannot draw its trees.
+    // Without crowns its leaves draw as far as they go, and without wind its trees sway in the shader alone.
+    const clusterPromise=loadForestClusters({assets:isSubtropicalPack?SUBTROPICAL_FOREST_CLUSTER_ASSETS:isCohortPack?PORTUGAL_FOREST_CLUSTER_ASSETS:FOREST_CLUSTER_ASSETS,signal:abort.signal})
+      .catch(error=>{if(!abort.signal.aborted)stats.clusters={loaded:false,error:error.message};throw error;});
+    const crownPromise=crownsWanted?loadForestCrowns({assets:isSubtropicalPack?SUBTROPICAL_FOREST_CROWN_ASSETS:isCohortPack?PORTUGAL_FOREST_CROWN_ASSETS:FOREST_CROWN_ASSETS,signal:abort.signal})
+      .catch(error=>{if(abort.signal.aborted)throw error;stats.crowns={loaded:false,error:error.message};return null;}):Promise.resolve(null);
+    const windPromise=windWanted?loadForestWind({assets:isSubtropicalPack?SUBTROPICAL_FOREST_WIND_ASSETS:isCohortPack?PORTUGAL_FOREST_WIND_ASSETS:FOREST_WIND_ASSETS,signal:abort.signal})
+      .catch(error=>{if(abort.signal.aborted)throw error;stats.wind={enabled:false,error:error.message};return null;}):Promise.resolve(null);
+    for(const promise of [clusterPromise,crownPromise,windPromise])promise.catch(()=>{});
     const maxRootCapacity=Math.max(m.rootCount,pack.maxRootCapacity||m.rootCount);
     const roots=device.createBuffer({size:Math.max(4,maxRootCapacity*12*4),usage:B.STORAGE|B.COPY_DST,label:'forest immutable root transforms'});
     allocated.push(roots);if(rooted.byteLength)device.queue.writeBuffer(roots,0,rooted);
-    const meta=new ArrayBuffer(m.prototypes.length*80),floats=new Float32Array(meta),words=new Uint32Array(meta),draws=new Uint32Array(m.prototypes.length*commandSlots*5);
-    for(const p of m.prototypes){const base=p.id*20,lp=nativeLod?.prototypes[p.id];
-      floats.set([...p.centre,p.radius],base);words.set([p.firstRoot,p.rootCount,0,0],base+4);
-      const ranges=lp?[lp.woodTiers[0],lp.leafRibbons,lp.far]:[p.wood,p.leaf,p.far];
-      for(const [i,r]of ranges.entries()){words.set([r.firstIndex,r.indexCount,0,0],base+8+i*4);draws.set([r.indexCount,0,r.firstIndex,0,0],(p.id*4+i)*5);}
-      if(nativeMid){
-        floats[base+10]=forestMiddleUpward(lp.woodTiers[1].maximumReportedErrorMetres);words[base+11]=1;
-        floats[base+14]=forestMiddleUpward(lp.woodTiers[2].maximumReportedErrorMetres);words[base+15]=1;
-        const isBroadleafDense=Boolean(p.cohort)||(isSubtropicalPack&&(p.species==='ceiba'||p.species==='mangrove'));
-        // These two tiers draw only when the pack's clusters are absent. Ordinary crowns keep the shares the
-        // frame-rate work of 8c6d5e3 settled on: a larger second share put 26M leaf triangles into one close view.
-        const mid1LeafIndices=Math.max(6,Math.floor((lp.leafRibbons.indexCount/6)*(isBroadleafDense?0.68:0.36))*6);
-        const mid2LeafIndices=Math.max(6,Math.floor((lp.leafRibbons.indexCount/6)*(isBroadleafDense?0.42:0.05))*6);
-        draws.set([lp.woodTiers[1].indexCount,0,lp.woodTiers[1].firstIndex,0,0],(m.prototypes.length*4+p.id*4)*5);
-        draws.set([mid1LeafIndices,0,lp.leafRibbons.firstIndex,0,0],(m.prototypes.length*4+p.id*4+1)*5);
-        draws.set([lp.woodTiers[2].indexCount,0,lp.woodTiers[2].firstIndex,0,0],(m.prototypes.length*4+p.id*4+2)*5);
-        draws.set([mid2LeafIndices,0,lp.leafRibbons.firstIndex,0,0],(m.prototypes.length*4+p.id*4+3)*5);
-      }
-      if(p.geometryErrorSupported===true||lp?.far?.geometryErrorMetres>0){floats[base+18]=p.geometryErrorSupported===true?p.geometryErrorMetres:lp.far.geometryErrorMetres;words[base+19]=1;}
-    }
-    const prototypes=make(new Uint8Array(meta),B.STORAGE,'forest prototype bounds and ranges');
-    const visible=make(new Uint32Array(maxRootCapacity*visibleTiers),B.STORAGE,'forest GPU visible root IDs');
-    const commands=make(draws,B.STORAGE|B.INDIRECT|B.COPY_SRC,'forest GPU indirect draws');
-    const previous=make(new Uint32Array(maxRootCapacity),B.STORAGE,'forest GPU previous LOD');
-    const modeIndex=['auto','near','far'].indexOf(mode);
-    let currentNearPixels=nearPixels;
-    const parameters=make(new Float32Array([activeRootCount,m.prototypes.length,nearPixels,modeIndex]),B.UNIFORM,'forest projected size policy');
-    const residency=make(new Uint32Array([0,0,0,0]),B.UNIFORM,'forest native residency');
-    // A bit a root: set by leaveToCanopy for the trees the groves' canopy stands in for when far.
-    const canopyRoots=make(new Uint32Array(Math.ceil(maxRootCapacity/32)),B.STORAGE,'forest roots left to grove canopy');
-    let cullSource=nativeMid?forestWithNativeLod(FOREST_MIDDLE_ROOT_CULL_WGSL):FOREST_CULL_WGSL;
-    if(terrainOcclusion){terrainVisibility=createForestTerrainOcclusion({device,...terrainOcclusion});cullSource=withForestTerrainOcclusion(cullSource);}
-    cullSource=forestWithGroveCanopy(cullSource);
-    const computePromise=shader(cullSource,'forest GPU cull and compact');
-    const hasLandShadow=resources.some(([id])=>id===19);
-    const pipe=(fragment,target={format},depthStencil={depthWriteEnabled:true,depthCompare:'greater'})=>device.createRenderPipelineAsync({label:'instanced forest '+fragment,layout:'auto',vertex:{module,entryPoint:'forestCanopyVS',buffers:[FOREST_VERTEX_LAYOUT]},
-      fragment:{module,entryPoint:fragment,targets:[target]},primitive:{topology:'triangle-list',cullMode:'none'},
-      depthStencil:{format:'depth32float',...depthStencil},multisample:{count:samples,alphaToCoverageEnabled:false}});
-    const [reset,cull,opaque,leafDepth,leaf,shadowPipe]=await Promise.all([
-      computePromise.then(compute=>device.createComputePipelineAsync({label:'forest reset indirect counts',layout:'auto',compute:{module:compute,entryPoint:'forestReset'}})),
-      computePromise.then(compute=>device.createComputePipelineAsync({label:'forest cull and LOD',layout:'auto',compute:{module:compute,entryPoint:'forestCull'}})),
-      pipe('forestNativeOpaqueFS'),
-      pipe('forestNativeLeafDepthFS',{format,writeMask:0}),
-      pipe('forestNativeLeafFS',{format},{depthWriteEnabled:false,depthCompare:'equal'}),
-      hasLandShadow?device.createRenderPipelineAsync({label:'instanced forest shadow',layout:'auto',vertex:{module,entryPoint:'forestCanopyShadowVS',buffers:[FOREST_VERTEX_LAYOUT]},primitive:{topology:'triangle-list',cullMode:'none'},depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'less',depthBiasSlopeScale:1.5}}):null,
+    // Each species' bound and the stretch of the roots it holds, which its visible list shares.
+    const meta=new ArrayBuffer(m.prototypes.length*32),floats=new Float32Array(meta),words=new Uint32Array(meta);
+    for(const p of m.prototypes){floats.set([...p.centre,p.radius],p.id*8);words.set([p.firstRoot,p.rootCount,0,0],p.id*8+4);}
+    const prototypes=make(new Uint8Array(meta),B.STORAGE,'forest species bounds and root ranges');
+    const visible=make(new Uint32Array(maxRootCapacity),B.STORAGE,'forest GPU visible root IDs');
+    const visibleCounts=make(new Uint32Array(m.prototypes.length),B.STORAGE,'forest GPU visible root counts');
+    let currentPixelError=pixelError;
+    const parameters=make(new Float32Array([activeRootCount,m.prototypes.length,pixelError,0]),B.UNIFORM,'forest roots and pixel error');
+    const writeParameters=()=>device.queue.writeBuffer(parameters,0,new Float32Array([activeRootCount,m.prototypes.length,currentPixelError,0]));
+    let cullSource=FOREST_CULL_WGSL;
+    if(terrainOcclusion){terrainVisibility=createForestTerrainOcclusion({device,...terrainOcclusion});cullSource=withForestTerrainOcclusion(cullSource);stats.terrainOcclusion=true;}
+    const cullModule=await shader(cullSource,'forest GPU cull');
+    const [reset,cull]=await Promise.all([
+      device.createComputePipelineAsync({label:'forest reset visible counts',layout:'auto',compute:{module:cullModule,entryPoint:'forestReset'}}),
+      device.createComputePipelineAsync({label:'forest cull',layout:'auto',compute:{module:cullModule,entryPoint:'forestCull'}}),
     ]);
-    const resetGroup=device.createBindGroup({layout:reset.getBindGroupLayout(0),entries:[{binding:4,resource:{buffer:commands}},{binding:6,resource:{buffer:parameters}}]});
-    const cullBuffers=[frameUBO,roots,prototypes,visible,commands,previous,parameters,residency];
-    const cullGroup=device.createBindGroup({layout:cull.getBindGroupLayout(0),entries:[...cullBuffers.map((buffer,binding)=>({binding,resource:{buffer}})),{binding:13,resource:{buffer:canopyRoots}},...(terrainVisibility?.entries??[])]});
-    const sceneIds=[0,1,2,3,4,5,6,19,20,21];
-    const bind=(p,ids)=>device.createBindGroup({layout:p.getBindGroupLayout(0),entries:resources.filter(([i])=>ids.includes(i)).map(([binding,resource])=>({binding,resource}))});
-    const opaqueGroup=bind(opaque,sceneIds),leafGroup=bind(leaf,sceneIds),leafDepthGroup=bind(leafDepth,[0]);
-    const shadowGroup=shadowPipe?bind(shadowPipe,[0,19]):null,shadowEmpty1=shadowPipe?device.createBindGroup({layout:shadowPipe.getBindGroupLayout(1),entries:[]}):null;
-    const opaqueCloud=clouds.bindVolume(opaque),leafCloud=clouds.bindVolume(leaf);
-    let materialBase=0;
-    const bins=m.prototypes.map(p=>{
-      const firstMaterial=materialBase;materialBase+=p.nativeMaterials.length;
-      const subRoot=0;
-      const closedCrown=p.cohort?512:0;
-      return [0,1,2,...(nativeMid?[3]:[])].map(tier=>{
-        const offset=make(new Uint32Array([p.firstRoot*visibleTiers+tier*p.rootCount,firstMaterial,(tier<<16)|closedCrown|subRoot|p.nativeMaterials.length,samples]),B.UNIFORM,'forest bin offset');
-        return{offset,opaque:null,leaf:null};
-      });
-    });
-    const stats={loaded:true,roots:m.rootCount-excludedRoots,excludedRoots,prototypes:m.prototypes.length,gpuCulling:true,terrainOcclusion:!!terrainVisibility,nearPixels,appearanceErrorSupported:false,mode,
-      get backend(){return 'native'+(nativeLod?' / reduced woody & ribbon LOD':'');},
-      materialContract:m.materialContract,nativeMaterialLayers:0,nativeTextureFamilies:[],coverageFiltering:'Stable independent native footprint sample masks',native:nativeStatus,
-      canopyLight:{loaded:false,error:null,scope:'Static own-canopy hemispheric escape; no inter-tree or directional sun shadow'},
-      certifiedGeometryPrototypes:m.prototypes.filter(p=>p.geometryErrorSupported===true).length,
-      species:[...new Set(m.prototypes.map(p=>p.species))],sourceClaim:m.sourceClaim};
+    const resetGroup=device.createBindGroup({layout:reset.getBindGroupLayout(0),entries:[{binding:4,resource:{buffer:visibleCounts}},{binding:5,resource:{buffer:parameters}}]});
+    const cullGroup=device.createBindGroup({layout:cull.getBindGroupLayout(0),entries:[...[frameUBO,roots,prototypes,visible,visibleCounts,parameters].map((buffer,binding)=>({binding,resource:{buffer}})),...(terrainVisibility?.entries??[])]});
     async function loadCompressedSurfaces(){
       const materials=m.prototypes.flatMap(p=>p.nativeMaterials);
-      const codec=chooseForestSurfaceCodec(device,typeof location==='undefined'?'auto':new URLSearchParams(location.search).get('forestSurfaces')||'auto');
+      const codec=chooseForestSurfaceCodec(device,query.get('forestSurfaces')||'auto');
       stats.surfaces={codec:null,downloadBytes:0,error:null};
       if(!codec)return null;
       let set;
@@ -1277,104 +881,37 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       if(result)stats.surfaces={codec,downloadBytes:set.families.reduce((sum,f)=>sum+f.albedo.downloadBytes+f.detail.downloadBytes,0),error:null};
       return result;
     }
-    async function installNative(){
-      let surfaces,surfacesPromise;const candidateBuffers=[];
-      try{
-        forestLoadAbort(abort.signal);
-        for(const name of ['vertices.bin','indices.bin'])if(m.files[name].bytes>device.limits.maxBufferSize){nativeStatus.status='unsupported';throw Error('Native forest '+name+' exceeds device maxBufferSize ('+device.limits.maxBufferSize+')');}
-        nativeStatus.status='loading';
-        const clusterSource=nativeMid&&clustersWanted?await loadForestClusters({assets:isSubtropicalPack?SUBTROPICAL_FOREST_CLUSTER_ASSETS:isCohortPack?PORTUGAL_FOREST_CLUSTER_ASSETS:FOREST_CLUSTER_ASSETS,signal:abort.signal}).catch(error=>{stats.clusters={loaded:false,error:error.message};return null;}):null;
-        if(clusterSource){
-          for(const p of m.prototypes){
-            const base=p.id*20;
-            words[base+16]=p.far.firstIndex;words[base+17]=p.far.indexCount;
-            draws.set([p.far.indexCount,0,p.far.firstIndex,0,0],(p.id*4+2)*5);
-          }
-          device.queue.writeBuffer(prototypes,0,meta);
-          device.queue.writeBuffer(commands,0,draws);
-        }
-        // Clusters hold every tree's geometry. Only the subtropical far models still come from the native streams.
-        // Prebuilt blocks avoid the map download and the half-float arrays. If they cannot be used, for any reason, the maps can.
-        const compressed=await loadCompressedSurfaces();forestLoadAbort(abort.signal);
-        const source=pack.vertices?pack:await pack.loadNative({signal:abort.signal,skipSurfaces:Boolean(compressed),skipNativeLodIndices:Boolean(clusterSource)});forestLoadAbort(abort.signal);
-        surfacesPromise=compressed?Promise.resolve(compressed):(async()=>createForestLeafSurfaces({device,shader,pack:{...source,textures:Object.keys(source.textures??{}).length?source.textures:await pack.loadSurfaces({signal:abort.signal})}}))();surfacesPromise.catch(()=>{});
-        const upload=async(data,usage,label)=>{
-          const bytes=new Uint8Array(data.buffer,data.byteOffset,data.byteLength),buffer=device.createBuffer({label,size:bytes.byteLength,usage:usage|B.COPY_DST});allocated.push(buffer);candidateBuffers.push(buffer);
-          // Each byte is uploaded once. Keep transfer chunks bounded and
-          // yield by elapsed work, without a timer delay for every chunk.
-          const pauseIfNeeded=createTaskYieldBudget();
-          for(let offset=0;offset<bytes.length;offset+=1024*1024){forestLoadAbort(abort.signal);const size=Math.min(1024*1024,bytes.length-offset);device.queue.writeBuffer(buffer,offset,bytes,offset,size);nativeStatus.uploadedBytes+=size;const pause=pauseIfNeeded();if(pause)await pause;}
-          return buffer;
-        };
-        nativeStatus.status='uploading';const vertices=source.vertices?await upload(source.vertices,B.VERTEX,'forest immutable prototype vertices'):null,indices=source.vertices?await upload(nativeLod&&!clusterSource?nativeLod.indices:source.indices,B.INDEX,'forest immutable prototype indices'):null;
-        surfaces=await surfacesPromise;forestLoadAbort(abort.signal);
-        const materials=make(surfaces.optics,B.STORAGE,'forest immutable native material optics');candidateBuffers.push(materials);
-        const canopyLight=make(forestLightGPUBytes(source.canopyLight),B.STORAGE,'forest immutable native canopy exposure');candidateBuffers.push(canopyLight);
-        for(const p of m.prototypes)for(const tier of clusterSource?[1]:nativeMid?[0,1,2,3]:[0,1]){
-          const bin=bins[p.id][tier],group=(pipeline,normals=true)=>{
-            const entries=[...[roots,visible,bin.offset].map((buffer,binding)=>({binding,resource:{buffer}})),
-              {binding:5,resource:nativeSampler},{binding:6,resource:{buffer:materials}},{binding:13,resource:nativeRepeatSampler},{binding:14,resource:{buffer:canopyLight}}];
-            for(let family=0;family<4;family++){const texture=surfaces.families[family]??surfaces.families[0],first=family?5+family*2:3;
-              entries.push({binding:first,resource:texture.albedo.createView({dimension:'2d-array'})});if(normals)entries.push({binding:first+1,resource:texture.normal.createView({dimension:'2d-array'})});}
-            return device.createBindGroup({layout:pipeline.getBindGroupLayout(2),entries});
-          };
-          bin.opaque=group(opaque);if(tier!==1){bin.leaf=group(leaf);bin.leafDepth=group(leafDepth,false);}
-          if(shadowPipe){
-            bin.shadow=device.createBindGroup({layout:shadowPipe.getBindGroupLayout(2),entries:[
-              ...[roots,visible,bin.offset].map((buffer,binding)=>({binding,resource:{buffer}})),
-              {binding:14,resource:{buffer:canopyLight}},
-            ]});
-          }
-        }
-        if(clusterSource){
-          // Far trees wear crowns baked from their own leaves (js/forest-crowns.js), Saba's as every other pack's.
-          // Without crowns the leaves draw as far as they did before, so a failure only costs speed.
-          const crownAssets=isSubtropicalPack?SUBTROPICAL_FOREST_CROWN_ASSETS:isCohortPack?PORTUGAL_FOREST_CROWN_ASSETS:FOREST_CROWN_ASSETS;
-          const crownSource=crownsWanted?await loadForestCrowns({assets:crownAssets,signal:abort.signal}).catch(error=>{if(abort.signal.aborted)throw error;stats.crowns={loaded:false,error:error.message};return null;}):null;forestLoadAbort(abort.signal);
-          const windWanted=typeof location==='undefined'||new URLSearchParams(location.search).get('forestWind')!=='0';
-          const windAssets=isSubtropicalPack?SUBTROPICAL_FOREST_WIND_ASSETS:isCohortPack?PORTUGAL_FOREST_WIND_ASSETS:FOREST_WIND_ASSETS;
-          const windSource=windWanted?await loadForestWind({assets:windAssets,signal:abort.signal}).catch(error=>{if(abort.signal.aborted)throw error;stats.wind={enabled:false,error:error.message};return null;}):null;forestLoadAbort(abort.signal);
-          wind=await createForestWind({device,shader,frameWGSL:FRAME_WGSL,frameUBO,windSource,roots,maxRoots:maxRootCapacity,prototypes:m.prototypes});
-          wind.updateRoots(activeRootCount);
-          stats.wind=wind.stats;
-          if(typeof window!=='undefined')window.oceanForestWind=wind;
-          const firstMaterials=[];let materialCursor=0;for(const p of m.prototypes){firstMaterials.push(materialCursor);materialCursor+=p.nativeMaterials.length;}
-          const clusterBind=(p,ids=sceneIds)=>bind(p,ids);clusterBind.frameUBO=frameUBO;
-          clusters=await createForestClusters({device,shader,module,frame:FRAME_WGSL,source:clusterSource,crowns:crownSource,crownChange,wind,prototypes:m.prototypes,roots,visible,commands,parameters,format,samples,bind:clusterBind,hasLandShadow,shadowUniform:resources.find(([id])=>id===19)?.[1].buffer??null,
-            cloudEntries:p=>clouds.bindVolume(p),
-            surfaceEntries:(pipeline,id,offset,normals)=>{
-              const entries=[{binding:0,resource:{buffer:roots}},{binding:2,resource:{buffer:offset}},{binding:5,resource:nativeSampler},{binding:6,resource:{buffer:materials}},{binding:13,resource:nativeRepeatSampler}];
-              for(let family=0;family<4;family++){const texture=surfaces.families[family]??surfaces.families[0],first=family?5+family*2:3;
-                entries.push({binding:first,resource:texture.albedo.createView({dimension:'2d-array'})});if(normals)entries.push({binding:first+1,resource:texture.normal.createView({dimension:'2d-array'})});}
-              return device.createBindGroup({layout:pipeline.getBindGroupLayout(2),entries});
-            },firstMaterials});
-          stats.clusters={loaded:true,count:clusterSource.manifest.clusterCount,bytes:clusterSource.vertices.byteLength+clusterSource.indices.byteLength+clusterSource.clusters.byteLength};
-          if(crownSource)stats.crowns={loaded:true,mode:'progressive-continuum',steps:crownSource.manifest.prototypes.reduce((sum,q)=>sum+q.stepCount,0),splatPixels:FOREST_CROWN_SPLAT_PIXELS,minPixels:FOREST_CROWN_MIN_PIXELS,triangles:crownSource.manifest.indexCount/3,bytes:crownSource.vertices.byteLength+crownSource.indices.byteLength+crownSource.morph.byteLength,error:null};
-        }
-        forestLoadAbort(abort.signal);native={vertices,indices,surfaces};
-        stats.nativeMaterialLayers=surfaces.layers;stats.nativeTextureFamilies=surfaces.families.map(f=>({width:f.width,height:f.height,layers:f.rows.length,mipLevels:f.levels}));
-        stats.canopyLight.loaded=!!source.canopyLight;stats.canopyLight.error=source.canopyLightError??null;
-        device.queue.writeBuffer(residency,0,new Uint32Array([1,0,0,0]));
-        device.queue.writeBuffer(parameters,0,new Float32Array([activeRootCount,m.prototypes.length,currentNearPixels,modeIndex]));
-        nativeStatus.resident=true;nativeStatus.status='resident';
-        pack.releaseNativeCPU?.();return true;
-      }catch(error){if(!surfaces&&surfacesPromise)surfaces=await surfacesPromise.catch(()=>null);surfaces?.destroy();for(const buffer of candidateBuffers)buffer.destroy();nativeStatus.error=error.message;
-        if(!destroyed&&nativeStatus.status!=='unsupported')nativeStatus.status='failed';throw error;}
+    // Prebuilt blocks avoid the map download and the half-float arrays. If they cannot be used, for any reason, the maps can.
+    surfaces=await loadCompressedSurfaces();forestLoadAbort(abort.signal);
+    if(!surfaces){
+      const textures=pack.textures&&Object.keys(pack.textures).length?pack.textures:await pack.loadSurfaces({signal:abort.signal});
+      surfaces=await createForestLeafSurfaces({device,shader,pack:{manifest:m,textures}});forestLoadAbort(abort.signal);
     }
-    const nativeReady=Promise.resolve(await installNative());
-    const draw=(pass,pipeline,group,cloud,cutout,binKey=cutout?'leaf':'opaque')=>{
-      if(!native||(clusters&&(cutout||clusters.crowns)))return;pass.setPipeline(pipeline);pass.setBindGroup(0,group);if(cloud)pass.setBindGroup(1,cloud);pass.setVertexBuffer(0,native.vertices);pass.setIndexBuffer(native.indices,'uint32');
-      for(const p of m.prototypes){
-        for(const slot of clusters?[2]:cutout?[1]:[0,2]){
-          if(!p[['wood','leaf','far'][slot]].indexCount)continue;
-          pass.setBindGroup(2,bins[p.id][slot===2?1:0][binKey]);pass.drawIndexedIndirect(commands,(p.id*4+slot)*20);
-        }
-        if(nativeMid&&!clusters){
-          pass.setBindGroup(2,bins[p.id][2][binKey]);pass.drawIndexedIndirect(commands,(m.prototypes.length*4+p.id*4+(cutout?1:0))*20);
-          pass.setBindGroup(2,bins[p.id][3][binKey]);pass.drawIndexedIndirect(commands,(m.prototypes.length*4+p.id*4+(cutout?3:2))*20);
-        }
-      }
-    };
+    const materials=make(surfaces.optics,B.STORAGE,'forest material optics');
+    stats.materialLayers=surfaces.layers;stats.textureFamilies=surfaces.families.map(f=>({width:f.width,height:f.height,layers:f.rows.length,mipLevels:f.levels}));
+    const [clusterSource,crownSource,windSource]=await Promise.all([clusterPromise,crownPromise,windPromise]);forestLoadAbort(abort.signal);
+    wind=await createForestWind({device,shader,frameWGSL:FRAME_WGSL,frameUBO,windSource,roots,maxRoots:maxRootCapacity,prototypes:m.prototypes});
+    wind.updateRoots(activeRootCount);
+    stats.wind=wind.stats;
+    if(typeof window!=='undefined')window.oceanForestWind=wind;
+    const firstMaterials=[];let materialCursor=0;for(const p of m.prototypes){firstMaterials.push(materialCursor);materialCursor+=p.nativeMaterials.length;}
+    const sceneIds=[0,1,2,3,4,5,6,19,20,21];
+    const bind=(p,ids=sceneIds)=>device.createBindGroup({layout:p.getBindGroupLayout(0),entries:resources.filter(([i])=>ids.includes(i)).map(([binding,resource])=>({binding,resource}))});
+    bind.frameUBO=frameUBO;
+    clusters=await createForestClusters({device,shader,module,frame:FRAME_WGSL,source:clusterSource,crowns:crownSource,crownChange,wind,prototypes:m.prototypes,roots,visible,visibleCounts,parameters,format,samples,bind,
+      hasLandShadow:resources.some(([id])=>id===19),shadowUniform:resources.find(([id])=>id===19)?.[1].buffer??null,
+      cloudEntries:p=>clouds.bindVolume(p),
+      surfaceEntries:(pipeline,id,offset,normals)=>{
+        const entries=[{binding:0,resource:{buffer:roots}},{binding:2,resource:{buffer:offset}},{binding:5,resource:nativeSampler},{binding:6,resource:{buffer:materials}},{binding:13,resource:nativeRepeatSampler}];
+        for(let family=0;family<4;family++){const texture=surfaces.families[family]??surfaces.families[0],first=family?5+family*2:3;
+          entries.push({binding:first,resource:texture.albedo.createView({dimension:'2d-array'})});if(normals)entries.push({binding:first+1,resource:texture.normal.createView({dimension:'2d-array'})});}
+        return device.createBindGroup({layout:pipeline.getBindGroupLayout(2),entries});
+      },firstMaterials});
+    forestLoadAbort(abort.signal);
+    stats.clusters={loaded:true,count:clusterSource.manifest.clusterCount,bytes:clusterSource.vertices.byteLength+clusterSource.indices.byteLength+clusterSource.clusters.byteLength};
+    if(crownSource)stats.crowns={loaded:true,mode:'progressive-continuum',steps:crownSource.manifest.prototypes.reduce((sum,q)=>sum+q.stepCount,0),splatPixels:FOREST_CROWN_SPLAT_PIXELS,minPixels:FOREST_CROWN_MIN_PIXELS,triangles:crownSource.manifest.indexCount/3,bytes:crownSource.vertices.byteLength+crownSource.indices.byteLength+crownSource.morph.byteLength,error:null};
+    // The GPU holds the surfaces now; the pack lets go of its maps.
+    pack.releaseSurfaces?.();
     // A ball finds its trees through this. A new one builds off the frame; the old one serves until it is ready.
     // A pack's trees are struck as the wood measured for their species (js/forest-trunk-shapes.js). Full-grown trees are
     // not the size of the trees measured, so for them that wood is made as tall as each kind of tree and as stout in the trunk.
@@ -1406,10 +943,8 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
       return -1;
     };
     const saveStrikes=()=>{onStrikesChanged?.(forestStrikesToSave(strikes,strikeOrigin));};
-    return {stats,nativeReady,prepare(){},trunksReady,
+    return {stats,trunksReady,
       get wind(){return wind;},
-      // stands: a bit for each root, in the roots' order, set where the tree stands in closed wood.
-      leaveToCanopy(stands){if(destroyed)return;const words=new Uint32Array(Math.ceil(maxRootCapacity/32));if(stands)words.set(stands.subarray(0,words.length));device.queue.writeBuffer(canopyRoots,0,words);},
       get trunks(){return trunkGrid;},
       updatePack(nextPack,nextHeights=null,nextRegion=null){
         if(destroyed||!nextPack?.roots||!nextPack?.manifest)return;
@@ -1420,22 +955,14 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
           liveRoots=nextPack.roots;reapplyForestStrikes(liveRoots,nextCount,strikes);
           device.queue.writeBuffer(roots,0,nextPack.roots.subarray(0,nextCount*12));
         }
-        let matBase=0;
         for(const p of nextPack.manifest.prototypes){
-          const base=p.id*20,firstMaterial=matBase;matBase+=p.nativeMaterials.length;
           if(m.prototypes[p.id]){m.prototypes[p.id].firstRoot=p.firstRoot;m.prototypes[p.id].rootCount=p.rootCount;}
-          words[base+4]=p.firstRoot;words[base+5]=p.rootCount;
-          const subRoot=0;
-          const closedCrown=p.cohort?512:0;
-          for(const [tierIdx,tier]of [0,1,2,...(nativeMid?[3]:[])].entries()){
-            const bin=bins[p.id]?.[tierIdx];
-            if(bin?.offset)device.queue.writeBuffer(bin.offset,0,new Uint32Array([p.firstRoot*visibleTiers+tier*p.rootCount,firstMaterial,(tier<<16)|closedCrown|subRoot|p.nativeMaterials.length,samples]));
-          }
+          words[p.id*8+4]=p.firstRoot;words[p.id*8+5]=p.rootCount;
         }
-        clusters?.placeTrees();
-        wind?.updateRoots(nextCount);
+        clusters.placeTrees();
+        wind.updateRoots(nextCount);
         device.queue.writeBuffer(prototypes,0,new Uint8Array(meta));
-        device.queue.writeBuffer(parameters,0,new Float32Array([activeRootCount,m.prototypes.length,currentNearPixels,modeIndex]));
+        writeParameters();
         if(nextHeights)terrainVisibility?.update?.(nextHeights,nextRegion);
         rebuildTrunks();
       },
@@ -1474,47 +1001,24 @@ export async function createForestRenderer({device,module,frameUBO,shader,resour
           for(let i=0;i<activeRootCount;i++)if(liveRoots[i*12]===fall.x&&liveRoots[i*12+2]===fall.z){liveRoots[i*12+11]=FOREST_LONG_FALLEN;writeRoot(i);break;}
         }
       },
-      setPixelError(next){if(!destroyed&&Number.isFinite(next)&&next>0&&Math.abs(next-currentNearPixels)>1e-4){currentNearPixels=next;stats.nearPixels=next;device.queue.writeBuffer(parameters,0,new Float32Array([activeRootCount,m.prototypes.length,next,modeIndex]));}},
-      encode(pass){if(!activeRootCount)return;pass.setPipeline(reset);pass.setBindGroup(0,resetGroup);pass.dispatchWorkgroups(Math.ceil(m.prototypes.length*commandSlots/64));pass.setPipeline(cull);pass.setBindGroup(0,cullGroup);pass.dispatchWorkgroups(Math.ceil(activeRootCount/64));wind?.encode(pass);clusters?.encode(pass);},
-      drawOpaque(pass){draw(pass,opaque,opaqueGroup,opaqueCloud,false);clusters?.drawOpaque(pass);},
-      // The indirect draws drawOpaque and drawCutout submit, for the continuum census (js/continuum-census.js). Both
-      // buffers lay records five words apart, whichever draw call reads them; leaves drawn for depth and again to
-      // shade are listed twice, because they are submitted twice.
+      // The scene's one pixel error, which every tree's cut and crown read.
+      setPixelError(next){if(!destroyed&&Number.isFinite(next)&&next>0&&Math.abs(next-currentPixelError)>1e-4){currentPixelError=next;stats.pixelError=next;writeParameters();}},
+      encode(pass){if(!activeRootCount)return;pass.setPipeline(reset);pass.setBindGroup(0,resetGroup);pass.dispatchWorkgroups(Math.ceil(m.prototypes.length/64));pass.setPipeline(cull);pass.setBindGroup(0,cullGroup);pass.dispatchWorkgroups(Math.ceil(activeRootCount/64));wind.encode(pass);clusters.encode(pass);},
+      drawOpaque(pass){clusters.drawOpaque(pass);},
+      // The indirect draws drawOpaque and drawCutout submit, for the continuum census (js/continuum-census.js).
+      // Records lie five words apart, whichever draw call reads them; leaves drawn for depth and again to shade
+      // are listed twice, because they are submitted twice.
       continuumDraws(){
         if(destroyed)return [];
         const out=[],P=m.prototypes.length,record=(buffer,at,records=1)=>{if(records>0)out.push({buffer,offset:at*20,records,stride:5});};
-        const nativeDraws=cutout=>{
-          if(!native||(clusters&&(cutout||clusters.crowns)))return;
-          for(const p of m.prototypes){
-            for(const slot of clusters?[2]:cutout?[1]:[0,2])if(p[['wood','leaf','far'][slot]].indexCount)record(commands,p.id*4+slot);
-            if(nativeMid&&!clusters){record(commands,P*4+p.id*4+(cutout?1:0));record(commands,P*4+p.id*4+(cutout?3:2));}
-          }
-        };
-        nativeDraws(false);nativeDraws(true);nativeDraws(true);
-        if(clusters?.draws){
-          // Per species: camera wood and leaves, then the shadow map's two, then the crowns' lists (js/forest-clusters.js).
-          record(clusters.draws,0,P*2);
-          for(const p of m.prototypes)record(clusters.draws,p.id*2+1);
-          if(clusters.crowns)record(clusters.draws,P*4,clusters.draws.size/20-P*4);
-        }
+        // Per species: camera wood and leaves, then the shadow map's two, then the crowns' lists (js/forest-clusters.js).
+        record(clusters.draws,0,P*2);
+        for(const p of m.prototypes)record(clusters.draws,p.id*2+1);
+        if(clusters.crowns)record(clusters.draws,P*4,clusters.draws.size/20-P*4);
         return out;
       },
-      drawCutout(pass){draw(pass,leafDepth,leafDepthGroup,null,true,'leafDepth');draw(pass,leaf,leafGroup,leafCloud,true);clusters?.drawLeafDepth(pass);clusters?.drawLeaves(pass);},
-      drawShadow(pass){
-        if(clusters){clusters.drawShadow(pass);return;}
-        if(!native||!shadowPipe)return;
-        pass.setPipeline(shadowPipe);pass.setBindGroup(0,shadowGroup);pass.setBindGroup(1,shadowEmpty1);pass.setVertexBuffer(0,native.vertices);pass.setIndexBuffer(native.indices,'uint32');
-        for(const p of m.prototypes){
-          for(const slot of [0,1]){
-            if(!p[['wood','leaf'][slot]].indexCount)continue;
-            pass.setBindGroup(2,bins[p.id][0].shadow);pass.drawIndexedIndirect(commands,(p.id*4+slot)*20);
-          }
-          if(nativeMid){
-            pass.setBindGroup(2,bins[p.id][2].shadow);pass.drawIndexedIndirect(commands,(m.prototypes.length*4+p.id*4)*20);
-            pass.drawIndexedIndirect(commands,(m.prototypes.length*4+p.id*4+1)*20);
-          }
-        }
-      },
-      destroy(){destroyed=true;abort.abort();nativeStatus.status='destroyed';nativeStatus.resident=false;for(const b of allocated)b.destroy();wind?.destroy();clusters?.destroy();native?.surfaces.destroy();terrainVisibility?.destroy();}};
-  }catch(error){destroyed=true;abort.abort();for(const b of allocated)b.destroy();wind?.destroy();clusters?.destroy();native?.surfaces.destroy();terrainVisibility?.destroy();throw error;}
+      drawCutout(pass){clusters.drawLeafDepth(pass);clusters.drawLeaves(pass);},
+      drawShadow(pass){clusters.drawShadow(pass);},
+      destroy(){destroyed=true;abort.abort();for(const b of allocated)b.destroy();wind?.destroy();clusters?.destroy();surfaces?.destroy();terrainVisibility?.destroy();}};
+  }catch(error){destroyed=true;abort.abort();for(const b of allocated)b.destroy();wind?.destroy();clusters?.destroy();surfaces?.destroy();terrainVisibility?.destroy();throw error;}
 }

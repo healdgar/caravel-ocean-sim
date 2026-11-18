@@ -6,11 +6,10 @@ This supersedes the intended native-tree/middle-shell transition architecture in
 current implementation, source receipts and experiments. No performance or
 appearance qualification follows from adopting this plan.
 
-The bounded implementation now lives in [FOREST_LOD_PILOT.md](FOREST_LOD_PILOT.md):
-original-leaf cluster captures, woody LODs, paged inspection geometry, GPU
-ownership/refinement, strict policy/loader regressions and native reference
-comparisons. It remains isolated and unqualified; this plan's regional rollout
-and complete representation ladder are not finished.
+Its tier ladder is retired. The isolated pilot (`FOREST_LOD_PILOT.md`, `js/forest-lod-*.js`) and the
+native tiers (`js/forest-native-lod.js`) are in git history; every tree is now drawn through the one
+continuum of AGENTS.md rule 3: clusters near (`js/forest-clusters.js`), progressive crowns and the
+horizon splat far (`js/forest-crowns.js`, `js/continuum-core.js`).
 
 ## Evidence and research
 

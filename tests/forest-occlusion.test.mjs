@@ -5,7 +5,7 @@ import {test} from 'node:test';
 import {chromium} from 'playwright';
 import {createDevServer} from '../server.mjs';
 import {forestTerrainPyramid,withForestTerrainOcclusion} from '../js/forest-occlusion.js';
-import {FOREST_CULL_WGSL,FOREST_MIDDLE_ROOT_CULL_WGSL,forestWithNativeLod} from '../js/forest-scenery.js';
+import {FOREST_CULL_WGSL} from '../js/forest-scenery.js';
 
 test('terrain bounds cover both raster triangles at every pyramid level, including saddle cells',()=>{
  const size=9,heights=Float32Array.from({length:size*size},(_,i)=>((i*17)%31)-10),region={size,span:80,x:0,z:0},p=forestTerrainPyramid(heights,region);
@@ -21,13 +21,10 @@ test('terrain bounds cover both raster triangles at every pyramid level, includi
  assert.throws(()=>forestTerrainPyramid(new Float32Array(16),{size:4,span:3,x:0,z:0}),/grid/);
  heights[0]=NaN;assert.throws(()=>forestTerrainPyramid(heights,region),/Nonfinite/);
 });
-test('terrain occlusion extends both standalone and production neighbor culling without changing LOD thresholds',()=>{
- for(const source of [FOREST_CULL_WGSL,forestWithNativeLod(FOREST_MIDDLE_ROOT_CULL_WGSL)]){
-  const extended=withForestTerrainOcclusion(source);
-  assert.ok(extended.includes('if(forestTerrainHidden(world,radius)){return;}'));
-  assert.ok(extended.includes('farError<=threshold'));
-  assert.throws(()=>withForestTerrainOcclusion(extended),/mismatch/);
- }
+test('terrain occlusion joins the forest cull just before a tree takes its place on its visible list',()=>{
+ const extended=withForestTerrainOcclusion(FOREST_CULL_WGSL);
+ assert.ok(extended.includes('if(forestTerrainHidden(world,radius)){return;}\n if(forestCoastalStandHidden(world,r.rootScale,r.identity,id.x,forestCoastalStandSteps(world,r.rootScale,r.identity),parameters.z)){return;}\n let slot=atomicAdd(&visibleCounts[pi],1u);'));
+ assert.throws(()=>withForestTerrainOcclusion(extended),/mismatch/);
 });
 test('GPU terrain curtain keeps visible crowns, saddle apertures, near seams and underwater views',{timeout:120000},async t=>{
  const server=createDevServer();server.listen(0,'127.0.0.1');await once(server,'listening');let browser;

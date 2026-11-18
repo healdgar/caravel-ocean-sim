@@ -5,7 +5,10 @@ import {test} from 'node:test';
 import {chromium} from 'playwright';
 import {createDevServer} from '../server.mjs';
 
-test('native forest compute compacts roots, resets indirect counts and responds to rendered resolution',{timeout:120000},async()=>{
+// The cull lists each tree in view once on its species' one list; what a listed tree draws is its own continuum's
+// choice (forestClusterSelect), so neither the rendered resolution nor the scene's pixel error moves a tree off the
+// list, and no tree, however far, is handed to another surface.
+test('forest compute lists every tree in view once, however far, and resets its counts',{timeout:120000},async()=>{
   const server=createDevServer();server.listen(0,'127.0.0.1');await once(server,'listening');let browser;
   try{
     browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||undefined,args:process.env.WEBGPU_BACKEND==='metal'
@@ -17,39 +20,32 @@ test('native forest compute compacts roots, resets indirect counts and responds 
       const B=GPUBufferUsage,make=(data,usage)=>{const b=device.createBuffer({size:data.byteLength,usage:usage|B.COPY_DST});device.queue.writeBuffer(b,0,data);return b;};
       const frameData=new Float32Array(96);frameData[0]=1/.6;frameData[5]=1/.45;frameData[11]=-1;frameData[14]=.1;
       frameData.set([.6,0,0],20);frameData.set([0,.45,0],24);frameData.set([0,0,-1],28);frameData.set([1920,1080,1/1920,1/1080],36);
-      const frame=make(frameData,B.UNIFORM),roots=make(new Float32Array([[0,0,-20],[0,0,-2000],[0,0,20],[1000,0,-20]].flatMap(p=>[...p,1,0,1,1,1,0,0,0,0])),B.STORAGE);
-      const meta=new ArrayBuffer(80),f=new Float32Array(meta),u=new Uint32Array(meta);f.set([0,1,0,2]);u.set([0,4,0,0],4);u.set([0,3,0,0,3,3,0,0,6,3,0,0],8);
-      const prototypes=make(new Uint8Array(meta),B.STORAGE),visible=make(new Uint32Array(12),B.STORAGE|B.COPY_SRC),commands=make(new Uint32Array([3,999,0,0,0,3,999,3,0,0,3,999,6,0,0,6,999,0,0,0]),B.STORAGE|B.INDIRECT|B.COPY_SRC);
-      const previous=make(new Uint32Array(4),B.STORAGE),parameterData=new Float32Array([4,1,3,0]),parameters=make(parameterData,B.UNIFORM),residency=make(new Uint32Array([1,0,0,0]),B.UNIFORM);
+      // In front near, in front 30 km off, behind, and off to the side.
+      const frame=make(frameData,B.UNIFORM),roots=make(new Float32Array([[0,0,-20],[0,0,-30000],[0,0,20],[1000,0,-20]].flatMap(p=>[...p,1,0,1,1,1,0,0,0,0])),B.STORAGE);
+      const meta=new ArrayBuffer(32),f=new Float32Array(meta),u=new Uint32Array(meta);f.set([0,1,0,2]);u.set([0,4,0,0],4);
+      const prototypes=make(new Uint8Array(meta),B.STORAGE),visible=make(new Uint32Array(4),B.STORAGE|B.COPY_SRC),visibleCounts=make(new Uint32Array([999]),B.STORAGE|B.COPY_SRC);
+      const parameterData=new Float32Array([4,1,3,0]),parameters=make(parameterData,B.UNIFORM);
       const module=device.createShaderModule({code:FOREST_CULL_WGSL});errors.push(...(await module.getCompilationInfo()).messages.filter(m=>m.type==='error').map(m=>m.message));
       const pipeline=entryPoint=>device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint}});
       const reset=await pipeline('forestReset'),cull=await pipeline('forestCull');
-      const resetGroup=device.createBindGroup({layout:reset.getBindGroupLayout(0),entries:[{binding:4,resource:{buffer:commands}},{binding:6,resource:{buffer:parameters}}]});
-      const cullGroup=device.createBindGroup({layout:cull.getBindGroupLayout(0),entries:[frame,roots,prototypes,visible,commands,previous,parameters,residency].map((buffer,binding)=>({binding,resource:{buffer}}))});
-      const read=device.createBuffer({size:128,usage:B.COPY_DST|B.MAP_READ});
-      async function run(height,mode=0,resident=1,errorMetres=0,certified=false){
-        frameData[37]=height;parameterData[3]=mode;device.queue.writeBuffer(frame,0,frameData);device.queue.writeBuffer(parameters,0,parameterData);
-        f[18]=errorMetres;u[19]=certified?1:0;device.queue.writeBuffer(prototypes,0,new Uint8Array(meta));
-        device.queue.writeBuffer(residency,0,new Uint32Array([resident,0,0,0]));
+      const resetGroup=device.createBindGroup({layout:reset.getBindGroupLayout(0),entries:[{binding:4,resource:{buffer:visibleCounts}},{binding:5,resource:{buffer:parameters}}]});
+      const cullGroup=device.createBindGroup({layout:cull.getBindGroupLayout(0),entries:[...[frame,roots,prototypes,visible,visibleCounts,parameters].map((buffer,binding)=>({binding,resource:{buffer}}))]});
+      const read=device.createBuffer({size:20,usage:B.COPY_DST|B.MAP_READ});
+      async function run(height,pixelError=3,capacity=4){
+        frameData[37]=height;parameterData[2]=pixelError;u[5]=capacity;
+        device.queue.writeBuffer(frame,0,frameData);device.queue.writeBuffer(parameters,0,parameterData);device.queue.writeBuffer(prototypes,0,new Uint8Array(meta));
         const enc=device.createCommandEncoder(),pass=enc.beginComputePass();pass.setPipeline(reset);pass.setBindGroup(0,resetGroup);pass.dispatchWorkgroups(1);pass.setPipeline(cull);pass.setBindGroup(0,cullGroup);pass.dispatchWorkgroups(1);pass.end();
-        enc.copyBufferToBuffer(commands,0,read,0,80);enc.copyBufferToBuffer(visible,0,read,80,48);device.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);
-        const data=Array.from(new Uint32Array(read.getMappedRange()));read.unmap();const counts=[data[1],data[6],data[11],data[16]];
-        return {counts,near:data.slice(20,20+counts[0]).sort(),far:data.slice(24,24+counts[2]).sort(),commands:data.slice(0,20)};
+        enc.copyBufferToBuffer(visibleCounts,0,read,0,4);enc.copyBufferToBuffer(visible,0,read,4,16);device.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);
+        const data=Array.from(new Uint32Array(read.getMappedRange()));read.unmap();
+        return {count:data[0],listed:data.slice(1,1+Math.min(data[0],capacity)).sort()};
       }
-      const normal=await run(1080),repeat=await run(1080),high=await run(2160),farDebug=await run(2160,2),nearDebug=await run(1080,1);
-      const unavailable=await run(1080,0,0),unavailableNear=await run(2160,1,0),residentAgain=await run(1080,0,1);
-      const certified=await run(1080,0,1,.01,true),unflagged=await run(1080,0,1,.01,false);
-      await device.queue.onSubmittedWorkDone();device.destroy();return {errors,normal,repeat,high,farDebug,nearDebug,unavailable,unavailableNear,residentAgain,certified,unflagged};
+      const normal=await run(1080),repeat=await run(1080),high=await run(2160),coarse=await run(1080,12);
+      const full=await run(1080,3,1);
+      await device.queue.onSubmittedWorkDone();device.destroy();return {errors,normal,repeat,high,coarse,full};
     });
     assert.deepEqual(result.errors,[]);
-    for(const name of ['normal','repeat']){assert.deepEqual(result[name].counts,[1,1,1,0],name);assert.deepEqual(result[name].near,[0]);assert.deepEqual(result[name].far,[1]);}
-    assert.deepEqual(result.high.counts,[2,2,0,0],'higher rendered pixel density retains actual detail');
-    assert.deepEqual(result.high.near,[0,1]);assert.deepEqual(result.farDebug.counts,[0,0,2,0]);assert.deepEqual(result.nearDebug.counts,[2,2,0,0]);
-    for(const name of ['unavailable','unavailableNear'])assert.deepEqual(result[name].counts,[0,0,0,0],'nonresident native geometry is never addressed: '+name);
-    assert.deepEqual(result.residentAgain.counts,[1,1,1,0],'one residency transition restores normal GPU LOD selection');
-    assert.deepEqual(result.certified.counts,[0,0,2,0],'qualified geometric error uses the same projected three-pixel bound');
-    assert.deepEqual(result.unflagged.counts,[1,1,1,0],'an unqualified error value never bypasses the whole-support fallback');
-    for(const row of Object.values(result).filter(v=>v?.commands))for(let i=0;i<4;i++)assert.deepEqual(row.commands.slice(i*5,i*5+5).filter((_,k)=>k!==1),[[3,0,0,0],[3,3,0,0],[3,6,0,0],[6,0,0,0]][i],'draw topology and zero firstInstance survive GPU count reset');
+    for(const name of ['normal','repeat','high','coarse'])assert.deepEqual(result[name],{count:2,listed:[0,1]},name+': both trees in view, once each, whatever the resolution or pixel error');
+    assert.equal(result.full.count,2);assert.equal(result.full.listed.length,1,'a list never writes past its species\' stretch of the roots');
   }finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}
 });
 
@@ -109,101 +105,5 @@ test('native surface arrays preserve source size, linear pigment and fractional 
     assert.equal(result.uploads.length,5,'each actual map uploads once');
     assert.deepEqual(result.metadata.slice(8,12),[0,0,0,0]);assert.deepEqual(result.metadata.slice(20,24),[1,0,1,0]);
     assert.equal(result.created.filter(t=>t.label.startsWith('forest immutable')).length,4);
-  }finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}
-});
-
-test('perceptual gaze and canopy masking reserve full woody resolution for the closest tree in front of the viewer and respond to polygon budget pixelError',{timeout:120000},async()=>{
-  const server=createDevServer();server.listen(0,'127.0.0.1');await once(server,'listening');let browser;
-  try{
-    browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||undefined,args:process.env.WEBGPU_BACKEND==='metal'
-      ?['--enable-unsafe-webgpu','--use-angle=metal','--disable-gpu-watchdog']:['--enable-unsafe-webgpu','--use-angle=swiftshader','--enable-unsafe-swiftshader','--disable-gpu-watchdog']});
-    const page=await browser.newPage();await page.route('**/__forest-native-lod-gpu',r=>r.fulfill({contentType:'text/html',body:'<!doctype html>'}));await page.goto('http://127.0.0.1:'+server.address().port+'/__forest-native-lod-gpu');
-    const result=await page.evaluate(async()=>{
-      const {FOREST_MIDDLE_ROOT_CULL_WGSL,forestWithNativeLod}=await import('/js/forest-scenery.js');
-      const device=await(await navigator.gpu.requestAdapter()).requestDevice(),errors=[];device.onuncapturederror=e=>errors.push(e.error.message);
-      const B=GPUBufferUsage,make=(data,usage)=>{const b=device.createBuffer({size:data.byteLength,usage:usage|B.COPY_DST});device.queue.writeBuffer(b,0,data);return b;};
-      const frameData=new Float32Array(96);frameData[0]=1/.6;frameData[5]=1/.45;frameData[11]=-1;frameData[14]=.1;
-      frameData.set([0,100,0],16);frameData.set([.6,0,0],20);frameData.set([0,.45,0],24);frameData.set([0,0,-1],28);frameData.set([1920,1080,1/1920,1/1080],36);
-      // At full budget a native tree within 12 m keeps wood0, and wood1 is allowed only
-      // past 12 m, wood2 past 30 m and the far shell past 140 m. These radii shrink with
-      // the polygon budget. Error budgets then decide within those distance bands.
-      const rootRecords=(points,identity=0)=>new Float32Array(points.flatMap(p=>[...p,1,0,1,1,1,0,0,identity,0]));
-      const frame=make(frameData,B.UNIFORM),roots=make(rootRecords([[0,100,-16],[0,100,-25],[20,100,-100],[0,100,-300]]),B.STORAGE);
-      const meta=new ArrayBuffer(80),f=new Float32Array(meta),u=new Uint32Array(meta);
-      f.set([0,0,0,2]);u.set([0,4,8,32],4);u.set([0,3,0,0,3,3,0,0,6,3,0,0],8);
-      f[10]=0.08;u[11]=1;f[14]=0.16;u[15]=1;f[18]=0.8;u[19]=0;
-      const prototypes=make(new Uint8Array(meta),B.STORAGE),visible=make(new Uint32Array(16),B.STORAGE|B.COPY_SRC);
-      const commands=make(new Uint32Array(40),B.STORAGE|B.INDIRECT|B.COPY_SRC),previous=make(new Uint32Array(4),B.STORAGE);
-      const parameterData=new Float32Array([4,1,3,0]),parameters=make(parameterData,B.UNIFORM),residency=make(new Uint32Array([1,0,0,0]),B.UNIFORM);
-      const module=device.createShaderModule({code:forestWithNativeLod(FOREST_MIDDLE_ROOT_CULL_WGSL)});
-      errors.push(...(await module.getCompilationInfo()).messages.filter(m=>m.type==='error').map(m=>m.message));
-      const reset=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'forestReset'}});
-      const cull=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'forestCull'}});
-      const resetGroup=device.createBindGroup({layout:reset.getBindGroupLayout(0),entries:[{binding:4,resource:{buffer:commands}},{binding:6,resource:{buffer:parameters}}]});
-      const cullGroup=device.createBindGroup({layout:cull.getBindGroupLayout(0),entries:[frame,roots,prototypes,visible,commands,previous,parameters,residency].map((buffer,binding)=>({binding,resource:{buffer}}))});
-      const read=device.createBuffer({size:256,usage:B.COPY_DST|B.MAP_READ});
-      async function run(pixelError){
-        parameterData[2]=pixelError;device.queue.writeBuffer(parameters,0,parameterData);
-        device.queue.writeBuffer(previous,0,new Uint32Array(4));
-        const enc=device.createCommandEncoder(),pass=enc.beginComputePass();
-        pass.setPipeline(reset);pass.setBindGroup(0,resetGroup);pass.dispatchWorkgroups(1);
-        pass.setPipeline(cull);pass.setBindGroup(0,cullGroup);pass.dispatchWorkgroups(1);pass.end();
-        enc.copyBufferToBuffer(commands,0,read,0,160);enc.copyBufferToBuffer(visible,0,read,160,64);
-        device.queue.submit([enc.finish()]);await read.mapAsync(GPUMapMode.READ);
-        const data=Array.from(new Uint32Array(read.getMappedRange()));read.unmap();
-        const c=slot=>data[slot*5+1],vis=(tier,n)=>data.slice(40+tier*4,40+tier*4+n).sort();
-        return {nearCount:c(0),nearLeafCount:c(1),farCount:c(2),mid1Count:c(4),mid1LeafCount:c(5),mid2Count:c(6),mid2LeafCount:c(7),
-          nearIds:vis(0,c(0)),farIds:vis(1,c(2)),mid1Ids:vis(2,c(4)),mid2Ids:vis(3,c(6))};
-      }
-      const highBudget=await run(3);
-      const place=(points,identity)=>device.queue.writeBuffer(roots,0,rootRecords(points,identity));
-      // With wood cheap enough for either budget, the protected radius alone decides:
-      // all four hold wood0 at full budget, and the farthest gives way at half.
-      f[10]=0.02;device.queue.writeBuffer(prototypes,0,new Uint8Array(meta));
-      place([[0,100,-4],[0,100,-6],[4,100,-5],[0,100,-9]]);
-      const foregroundHigh=await run(3),foregroundMobile=await run(6);
-      // Past each distance gate, a coarser budget accepts a coarser wood or leaf tier.
-      f[10]=0.35;f[14]=0.7;device.queue.writeBuffer(prototypes,0,new Uint8Array(meta));
-      place([[0,100,-16],[0,100,-40],[0,100,-60],[0,100,-300]]);
-      const distantHigh=await run(3),distantMobile=await run(6);
-      f[10]=0.08;f[14]=0.16;device.queue.writeBuffer(prototypes,0,new Uint8Array(meta));
-      // From a deck at sea level (y=6 m), coastal roots step through the same tiers.
-      frameData.set([0,6,0],16);device.queue.writeBuffer(frame,0,frameData);
-      f[18]=0.3822;device.queue.writeBuffer(prototypes,0,new Uint8Array(meta));
-      place([[0,6,-14],[0,6,-120],[18,6,-190],[0,6,-300]],-1);
-      const coastalSeaLevel=await run(3);
-      place([[0,6,-14],[0,6,-200],[0,6,-500],[0,6,-1700]],-2);
-      const subtropicalSeaLevel=await run(3);
-      await device.queue.onSubmittedWorkDone();device.destroy();
-      return {errors,highBudget,foregroundHigh,foregroundMobile,distantHigh,distantMobile,coastalSeaLevel,subtropicalSeaLevel};
-    });
-    assert.deepEqual(result.errors,[]);
-    assert.deepEqual(result.highBudget.nearIds,[0],'the closest tree directly in front of the viewer uses full wood0 resolution');
-    assert.equal(result.highBudget.nearLeafCount,1);
-    assert.deepEqual(result.highBudget.mid1Ids,[1],'a tree past 12 m steps down to wood1');
-    assert.deepEqual(result.highBudget.mid2Ids,[2],'an off-axis tree past 30 m steps down to wood2');
-    assert.deepEqual(result.highBudget.farIds,[3],'a tree past 140 m steps down to the far shell');
-    assert.deepEqual(result.foregroundHigh.nearIds,[0,1,2,3],'every tree within 12 m keeps wood0 at full budget, even off-axis');
-    assert.equal(result.foregroundHigh.nearLeafCount,4);assert.equal(result.foregroundHigh.mid1Count+result.foregroundHigh.mid2Count+result.foregroundHigh.farCount,0);
-    assert.deepEqual(result.foregroundMobile.nearIds,[0,1,2],'half the pixel budget keeps wood0 only within a smaller radius');
-    assert.deepEqual(result.foregroundMobile.mid1Ids,[3],'a tree outside the shrunken radius sheds wood0');
-    assert.deepEqual(result.distantHigh.nearIds,[0,1],'at a 3 px budget a 40 m tree with coarse wood1 error holds wood0');
-    assert.deepEqual(result.distantHigh.mid1Ids,[2],'at a 3 px budget a 60 m tree with coarse wood2 error holds wood1');
-    assert.deepEqual(result.distantMobile.nearIds,[0],'the 6 px budget leaves the foreground tree on wood0');
-    assert.deepEqual(result.distantMobile.mid1Ids,[1],'the 6 px budget shifts the 40 m tree from wood0 to wood1');
-    assert.deepEqual(result.distantMobile.mid2Ids,[2],'the 6 px budget shifts the 60 m tree from wood1 to wood2');
-    assert.deepEqual(result.coastalSeaLevel.nearIds,[0],'immediate shoreline tree (14 m) uses nearLod (wood0 + 100% leafRibbons)');
-    assert.deepEqual(result.coastalSeaLevel.mid2Ids,[1],'a coastal tree past 30 m uses wood2 from a deck at sea level');
-    assert.equal(result.coastalSeaLevel.mid1Count,0);
-    assert.deepEqual(result.coastalSeaLevel.farIds,[2,3],'coastal trees past 140 m use farLod');
-    assert.equal(result.coastalSeaLevel.nearLeafCount,1);
-    assert.equal(result.coastalSeaLevel.mid2LeafCount,1);
-    assert.deepEqual(result.subtropicalSeaLevel.nearIds,[0],'immediate subtropical shoreline tree stays on nearLod');
-    assert.deepEqual(result.subtropicalSeaLevel.mid1Ids,[1],'a 200 m subtropical tree uses mid1Lod');
-    assert.deepEqual(result.subtropicalSeaLevel.mid2Ids,[2],'a 500 m subtropical tree uses mid2Lod');
-    assert.deepEqual(result.subtropicalSeaLevel.farIds,[3],'a 1700 m subtropical tree uses farLod');
-    assert.equal(result.subtropicalSeaLevel.nearLeafCount,1);
-    assert.equal(result.subtropicalSeaLevel.mid1LeafCount,1);
-    assert.equal(result.subtropicalSeaLevel.mid2LeafCount,1);
   }finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}
 });

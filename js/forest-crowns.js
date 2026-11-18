@@ -144,7 +144,7 @@ export function forestCrownChange({ leafErrorMetres, breadthMetres = 0, widestLe
 }
 
 // Joins FOREST_VERTEX_WGSL in the land's module (js/terrain.js): it reads the cluster lists and unpacks the
-// same vertex words, and forestPlace sways and fells a crown exactly as it does the leaves inside it. It
+// same vertex words, and forestPlaceSkinned sways and fells a crown exactly as it does the leaves inside it. It
 // stays out of FOREST_VERTEX_WGSL itself because it asks the land for its shadow map and the moon by name,
 // which the forest's own shaders never do.
 export const FOREST_CROWN_WGSL = /* wgsl */`

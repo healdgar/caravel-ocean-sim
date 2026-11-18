@@ -1089,10 +1089,8 @@ test('scenery pass: beach wet sand, stratified stone, baked distant canopy domes
   assert.match(TERRAIN, /crownGap/);
   assert.match(TERRAIN, /skyRefl/);
 
-  // Verify WGSL forest LOD shaders include rounded cluster dome curvature, wind flutter, and far crown-clump normal relief
-  assert.match(FOREST_VERTEX_WGSL, /domeCurve/);
+  // A leaf's cut surface curves as a frond does; far crowns are the continuum's own (js/forest-crowns.js).
   assert.match(FOREST_VERTEX_WGSL, /frondCurve/);
-  assert.match(FOREST_VERTEX_WGSL, /farNorm/);
 });
 
 test('colony growth year-by-year and era-by-era (1550–1689): founding dates, stage progression, fortifications, chart knowledge, and 17th-century encounters', async () => {
@@ -2019,7 +2017,7 @@ test('Portugal 5-tier multi-cohort forest pack loads 12 veteran+canopy prototype
       'blueberry:canopy',
     ]
   );
-  assert.equal(portugalPack.nativeLod?.prototypes?.length, 12, 'Portugal pack builds 12 runtime multi-tier wood & leaf-ribbon LODs');
+  assert.equal(portugalPack.nativeLod, undefined, 'a pack carries no tier ladder: its trees draw through the one continuum');
 
   const { retargetForestPackToProcedural } = await import('../js/terrain.js');
   const lisbonPack = generateProceduralCoastalPack('lisbon');

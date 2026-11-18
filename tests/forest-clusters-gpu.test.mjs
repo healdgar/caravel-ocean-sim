@@ -32,6 +32,12 @@ const drawn=page=>page.evaluate(async()=>{
   for(const d of forestDraws){const words=contents.get(d.buffer),inst=words[d.offset/4+1]/2,n=words[d.offset/4]*inst/3;totals[d.label]=(totals[d.label]??0)+n;totals.__instances[d.label]=(totals.__instances[d.label]??0)+inst;}
   return totals;
 });
+// The forest has no representation but its continuum: no pipeline of the old native ladder draws, and the
+// pack's own vertex and index streams, the bake source of its clusters and crowns, are never fetched.
+function continuumAlone(totals,requested){
+  assert.deepEqual(Object.keys(totals).filter(label=>label.startsWith('instanced forest')),[],JSON.stringify(totals));
+  assert.deepEqual(requested.filter(path=>/\/forest-scenery\/[a-z]+\/(vertices|indices)\.bin|\/forest-scenery\/saba\/(lod|middle|mass|volumes|impostors)\/|canopy-shade/.test(path)),[],'the native ladder\'s streams are never fetched');
+}
 async function open(query,region='lisbon'){
   // Saba is the surveyed home island, approached from the sea; the others are generated coasts, seen from the dock.
   const url=region==='saba'?landfallStageURL(base,'coast','clear'):coastalRegionStageURL(base,region,'dock','clear',1650);
@@ -49,19 +55,19 @@ async function open(query,region='lisbon'){
   return {page,errors,requested};
 }
 
-// Lisbon wears the Portugal pack since 224cd17. With hybrid continuum crowns active, near trees draw as
-// per-tree cluster cuts and mid-to-far trees decimate smoothly through 8 geomorphing crown levels down to a
-// 1-triangle horizon splat at 1 pixel, replacing the 44-triangle native far models completely.
+// Lisbon wears the Portugal pack since 224cd17. Near trees draw as per-tree cluster cuts and farther trees
+// decimate smoothly through their geomorphing crowns down to a 1-triangle horizon splat: one continuum, and
+// nothing else. The view is over the wooded ground above the town, where planted trees stand near and far;
+// the quay itself is the city's now, and has none.
 test('Lisbon\'s trees draw as clusters near and hybrid continuum crowns to the horizon, and no map the compressed set replaces is fetched',{timeout:360000},async()=>{
-  const {page,errors,requested}=await open({view:'free',prow:0,cam:'-70,45,-6250,0,-12'});
+  const {page,errors,requested}=await open({view:'free',prow:0,cam:'5,70,-5760,0,-14'});
   try{
     const totals=await drawn(page);
     assert.ok(totals['forest clusters forestNativeOpaqueFS']>1000,JSON.stringify(totals));
     assert.ok(totals['forest clusters forestNativeLeafFS']>1000,JSON.stringify(totals));
     assert.equal(totals['forest clusters forestNativeLeafDepthFS'],totals['forest clusters forestNativeLeafFS'],'every leaf lays depth and then shades');
     assert.ok((totals['forest crowns forestCrownFS']??0)>0,`far trees draw through hybrid continuum crowns: ${JSON.stringify(totals)}`);
-    assert.equal(totals['instanced forest forestNativeOpaqueFS']??0,0,`continuum crowns replace the 44-tri native far models: ${JSON.stringify(totals)}`);
-    for(const label of ['forestNativeLeafFS','forestNativeLeafDepthFS'])assert.equal(totals[`instanced forest ${label}`]??0,0,`${label} must not draw beside clusters`);
+    continuumAlone(totals,requested);
     assert.ok(requested.some(path=>path.includes('/portugal/clusters/vertices.bin')),'Lisbon draws the Portugal pack\'s own clusters');
     assert.ok(requested.some(path=>path.includes('/portugal/crowns/morph.bin')),'Lisbon loads 3D geomorph targets for continuum crowns');
     assert.ok(requested.some(path=>/\/portugal\/surfaces\/family-\d+-albedo\.(bc7|astc)\.bin/.test(path)),'bark and leaves arrive block-compressed');
@@ -91,8 +97,8 @@ for(const [region,pack,query] of [['lisbon','portugal',{view:'free',prow:0,cam:'
     // Far trees cast into the land shadow map exactly as they did: the shadow cut never asks about crowns.
     for(const label of ['forest clusters forestClusterLeafShadowVS','forest clusters forestClusterWoodShadowVS'])assert.equal(crowned.totals[label]??0,cards.totals[label]??0,label);
     for(const label of ['forest crowns forestCrownFS','forest crowns forestCrownFadeFS'])assert.equal(cards.totals[label]??0,0,`${label} draws with crowns switched off`);
-    assert.equal(crowned.totals['instanced forest forestNativeOpaqueFS']??0,0,'continuum crowns replace native far models when enabled');
-    assert.ok((cards.totals['instanced forest forestNativeOpaqueFS']??0)>0,'native far models remain as fallback when forestCrowns=0');
+    // With crowns switched off the leaves draw as far as they go: there is no other far model to fall back on.
+    continuumAlone(crowned.totals,crowned.requested);continuumAlone(cards.totals,cards.requested);
     assert.deepEqual(crowned.errors,[]);assert.deepEqual(cards.errors,[]);
   });
 }
@@ -105,20 +111,21 @@ test('the surveyed island\'s far canopy is the one continuum\'s crowns, not its 
     assert.ok(requested.some(path=>path.includes('/saba/crowns/morph.bin')),'Saba loads its own continuum crowns');
     assert.ok((totals['forest crowns forestCrownFS']??0)>0,`far trees draw through continuum crowns: ${JSON.stringify(totals)}`);
     // The per-family far tiers the crowns replaced are retired; their packs stay on disk and must not be fetched.
-    for(const tier of ['/saba/mass/','/saba/middle/','/saba/volumes/','/saba/impostors/'])assert.ok(!requested.some(path=>path.includes(tier)),`Saba fetched its old far tier ${tier}`);
-    for(const label of ['forestNativeOpaqueFS','forestNativeLeafFS','forestNativeLeafDepthFS'])assert.equal(totals[`instanced forest ${label}`]??0,0,`${label} must not draw beside clusters`);
+    for(const tier of ['/saba/mass/','/saba/middle/','/saba/volumes/','/saba/impostors/','/saba/lod/'])assert.ok(!requested.some(path=>path.includes(tier)),`Saba fetched its old far tier ${tier}`);
+    assert.ok(totals['forest clusters forestNativeLeafFS']>0,`near trees draw as clusters: ${JSON.stringify(totals)}`);
+    continuumAlone(totals,requested);
     assert.deepEqual(errors,[]);
   }finally{await page.close();}
 });
 
 test('tropical coasts draw palms as clusters near and continuum crowns far, down to 1-triangle horizon splats',{timeout:360000},async()=>{
   // Among the palms of the San Juan shore, looking inland.
-  const {page,errors}=await open({view:'free',prow:0,cam:'3274.9,8.4,-2425.1,40,12'},'san-juan');
+  const {page,errors,requested}=await open({view:'free',prow:0,cam:'3274.9,8.4,-2425.1,40,12'},'san-juan');
   try{
     const totals=await drawn(page);
     assert.ok(totals['forest clusters forestNativeLeafFS']>0,JSON.stringify(totals));
     assert.ok((totals['forest crowns forestCrownFS']??0)>0,`far tropical trees draw through continuum crowns: ${JSON.stringify(totals)}`);
-    assert.equal(totals['instanced forest forestNativeOpaqueFS']??0,0,`continuum crowns replace 44-tri far models: ${JSON.stringify(totals)}`);
+    continuumAlone(totals,requested);
     // Verify both progressive continuum triangles (firstVertex === 0) and 1-triangle horizon splats (firstIndex > 0) are actively drawn.
     const crownRegions=await page.evaluate(async()=>{
       forestDraws.length=0;forestCapture=true;await new Promise(requestAnimationFrame);forestCapture=false;

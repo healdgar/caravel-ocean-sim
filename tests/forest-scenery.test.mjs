@@ -4,7 +4,7 @@ import {createHash} from 'node:crypto';
 import {gzipSync} from 'node:zlib';
 import {readFile} from 'node:fs/promises';
 import {test} from 'node:test';
-import {validateForestScenery,validateForestMaterials,decodeForestScenery,decodeForestSceneryAsync,loadForestScenery,forestCoversPoint,excludeForestRoots,FOREST_ASSETS,FOREST_VERTEX_LAYOUT,FOREST_VERTEX_WGSL,FOREST_SURFACE_MIPS_WGSL} from '../js/forest-scenery.js';
+import {validateForestScenery,validateForestMaterials,loadForestScenery,forestCoversPoint,excludeForestRoots,FOREST_ASSETS,SUBTROPICAL_FOREST_ASSETS,PORTUGAL_FOREST_ASSETS,FOREST_VERTEX_WGSL,FOREST_CULL_WGSL,FOREST_SURFACE_MIPS_WGSL} from '../js/forest-scenery.js';
 
 function fixture(){
   const vertices=new Float32Array([3,4,4].flatMap(kind=>[[-1,0,0],[1,0,0],[0,2,0]].flatMap(p=>[...p,0,0,1,kind,.5,0,0,.1,.2,.05])));
@@ -33,53 +33,46 @@ function nativeFixture(){
   });
   return{...f,textures};
 }
-test('instanced pack preserves prototype vertices and compact roots, and declares no appearance certification',()=>{
-  const {manifest,streams}=fixture(),before=structuredClone(streams),pack=decodeForestScenery(manifest,streams);
-  assert.equal(pack.vertices.length,117);assert.equal(pack.roots.length,12);assert.equal(pack.indices.length,9);
-  for(const name of Object.keys(streams))assert.deepEqual(new Uint8Array(streams[name]),new Uint8Array(before[name]));
+// What the game fetches of a pack, as a fetch that notes each request.
+function served(f,source=f){
+  const requests=[],assets=Object.fromEntries(['manifest.json',...Object.keys(f.streams),...Object.keys(f.textures??{})].map(n=>[n,n]));
+  const fetchAsset=async name=>{requests.push(name);return name==='manifest.json'?Response.json(source.manifest):new Response(new Uint8Array(source.streams[name]??source.textures[name]));};
+  return {requests,assets,fetchAsset};
+}
+test('a pack loads as its roots and maps: its vertex and index streams stay on disk as the continuum bakes\' source',async()=>{
+  const f=nativeFixture(),{requests,assets,fetchAsset}=served(f);
   assert.ok(Object.values(FOREST_ASSETS).every(path=>path.startsWith('assets/forest-scenery/')));
-});
-test('cooperative native validation preserves exact bytes, failures and abort semantics',async()=>{
-  const f=nativeFixture(),sync=decodeForestScenery(f.manifest,f.streams);let yields=0;
-  const asyncPack=await decodeForestSceneryAsync(f.manifest,f.streams,{yieldTask:async()=>{yields++;}});
-  assert.ok(yields>0);for(const key of ['vertices','indices','roots'])assert.deepEqual(asyncPack[key],sync[key]);
-  const bad=nativeFixture();new Uint32Array(bad.streams['indices.bin'])[0]=999;
-  await assert.rejects(decodeForestSceneryAsync(bad.manifest,bad.streams,{yieldTask:async()=>{}}),/index outside/);
-  const abort=new AbortController();await assert.rejects(decodeForestSceneryAsync(f.manifest,f.streams,{signal:abort.signal,yieldTask:async()=>abort.abort()}),{name:'AbortError'});
-});
-test('a deferred forest requires only its roots; native fetch is cached and receipt verified later',async()=>{
-  const f=nativeFixture(),requests=[],assets=Object.fromEntries(['manifest.json',...Object.keys(f.streams),...Object.keys(f.textures)].map(n=>[n,n]));
-  const fetchAsset=async name=>{
-    requests.push(name);if(name==='manifest.json')return Response.json(f.manifest);
-    return new Response(new Uint8Array(f.streams[name]??f.textures[name]));
-  };
-  const pack=await loadForestScenery({assets,fetchAsset,deferNative:true});
-  assert.equal(pack.vertices,null);assert.equal(pack.indices,null);assert.equal(pack.textures,null);
+  for(const table of [FOREST_ASSETS,SUBTROPICAL_FOREST_ASSETS,PORTUGAL_FOREST_ASSETS])assert.equal(Object.keys(table).some(name=>/^(vertices|indices)\.bin/.test(name)),false);
+  const pack=await loadForestScenery({assets,fetchAsset});
+  assert.equal(pack.roots.length,12);assert.deepEqual(Object.keys(pack.textures).sort(),Object.keys(f.textures).sort());
+  assert.equal('vertices' in pack,false);assert.equal('indices' in pack,false);
   assert.equal(requests.includes('vertices.bin'),false);assert.equal(requests.includes('indices.bin'),false);
-  assert.equal(requests.some(name=>name.endsWith('.png')),false);assert.equal(pack.roots.length,12);
-  assert.equal(pack.releaseNativeCPU(),false,'no fulfilled cache exists at first readiness');
-  const a=pack.loadNative(),b=pack.loadNative();assert.equal(a,b,'one cached native load');
-  assert.equal(pack.releaseNativeCPU(),false,'an in-flight load remains deduplicated');assert.equal(pack.loadNative(),a);
-  const native=await a;assert.deepEqual(native.vertices,decodeForestScenery(f.manifest,f.streams).vertices);
-  assert.equal(requests.filter(name=>name==='vertices.bin').length,1);assert.equal(requests.filter(name=>name==='indices.bin').length,1);
-  for(const name of Object.keys(f.textures))assert.equal(requests.filter(value=>value===name).length,1,name);
-  const retained=native.vertices.slice();assert.equal(pack.releaseNativeCPU(),true);assert.equal(pack.releaseNativeCPU(),false);
-  assert.deepEqual(native.vertices,retained,'cache release never detaches or mutates caller-held geometry');
-  const fresh=pack.loadNative();assert.notEqual(fresh,a);assert.equal(pack.loadNative(),fresh);
-  assert.deepEqual((await fresh).vertices,retained,'explicit reload verifies the original immutable bytes again');
-  for(const name of ['vertices.bin','indices.bin',...Object.keys(f.textures)])assert.equal(requests.filter(value=>value===name).length,2,name+' reloaded once after release');
-  const tampered=nativeFixture();new Uint8Array(tampered.streams['vertices.bin'])[0]^=1;
-  const delayed=await loadForestScenery({assets,fetchAsset:async name=>name==='manifest.json'?Response.json(tampered.manifest):new Response(new Uint8Array(tampered.streams[name]??tampered.textures[name])),deferNative:true});
-  await assert.rejects(delayed.loadNative(),/Forest digest mismatch: vertices/);
 });
-test('invalid species, bounds, partitions, roots, indices and invented error certification are rejected',()=>{
+test('deferred maps are fetched once, verified, and fetched afresh only after the pack lets them go',async()=>{
+  const f=nativeFixture(),{requests,assets,fetchAsset}=served(f);
+  const pack=await loadForestScenery({assets,fetchAsset,deferSurfaces:true});
+  assert.equal(pack.textures,null);assert.equal(requests.some(name=>name.endsWith('.png')),false);assert.equal(pack.roots.length,12);
+  const a=pack.loadSurfaces(),b=pack.loadSurfaces();assert.equal(a,b,'one cached map load');
+  assert.deepEqual(Object.keys(await a).sort(),Object.keys(f.textures).sort());
+  for(const name of Object.keys(f.textures))assert.equal(requests.filter(value=>value===name).length,1,name);
+  pack.releaseSurfaces();const fresh=pack.loadSurfaces();assert.notEqual(fresh,a);await fresh;
+  for(const name of Object.keys(f.textures))assert.equal(requests.filter(value=>value===name).length,2,name+' fetched again once let go');
+  const tampered=nativeFixture();new Uint8Array(tampered.textures[Object.keys(tampered.textures)[0]])[4]^=1;
+  const delayed=await loadForestScenery({...served(f,tampered),deferSurfaces:true});
+  await assert.rejects(delayed.loadSurfaces(),/surface digest/i);
+});
+test('roots out of their species, their coverage or the ground are rejected before the GPU sees them',async()=>{
+  for(const edit of [r=>r[8]=1,r=>r[0]=80,r=>r[9]=-.1,r=>r[3]=NaN]){
+    const f=nativeFixture();edit(new Float32Array(f.streams['roots.bin']));
+    f.manifest.files['roots.bin'].sha256=createHash('sha256').update(new Uint8Array(f.streams['roots.bin'])).digest('hex');
+    const {assets,fetchAsset}=served(f);
+    await assert.rejects(loadForestScenery({assets,fetchAsset}),/Invalid forest root transform/);
+  }
+});
+test('invalid species, bounds, partitions, root receipts and invented error certification are rejected',()=>{
   for(const edit of [m=>m.appearanceErrorSupported=true,m=>m.prototypes[0].species='fir',m=>m.rootStride=32,m=>m.prototypes[0].radius=.1,
     m=>m.prototypes[0].leaf.firstIndex=0,m=>m.prototypes[0].firstRoot=1,m=>m.coverage.cells.push(0),m=>m.files['roots.bin'].bytes=0]){
     const {manifest}=fixture();edit(manifest);assert.throws(()=>validateForestScenery(manifest));
-  }
-  for(const edit of [s=>new Uint32Array(s['indices.bin'])[0]=100,s=>new Float32Array(s['roots.bin'])[8]=1,s=>new Float32Array(s['roots.bin'])[0]=80,
-    s=>new Float32Array(s['vertices.bin'])[3]=NaN,s=>new Float32Array(s['roots.bin'])[9]=-.1]){
-    const {manifest,streams}=fixture();edit(streams);assert.throws(()=>decodeForestScenery(manifest,streams));
   }
 });
 test('only occupied cells suppress old roots; explicit bare/coastal cells and old root bytes survive',()=>{
@@ -95,20 +88,13 @@ test('optional loader verifies binary digests before publishing a pack',async()=
   new Uint8Array(streams['roots.bin'])[0]^=1;
   await assert.rejects(loadForestScenery({assets,fetchAsset}),/digest/i);
 });
-test('native material IDs preserve every source group and explicitly isolate the coarse far approximation',()=>{
-  const {manifest,streams}=nativeFixture(),pack=decodeForestScenery(manifest,streams);
-  assert.equal(FOREST_VERTEX_LAYOUT.arrayStride,56);assert.deepEqual(FOREST_VERTEX_LAYOUT.attributes.at(-1),{shaderLocation:7,offset:52,format:'float32'});
-  assert.equal(validateForestMaterials(manifest.prototypes),2);assert.deepEqual([pack.vertices[13],pack.vertices[55],pack.vertices[97]],[0,1,-1]);
+test('native material receipts are counted and checked',()=>{
+  const {manifest}=nativeFixture();
+  assert.equal(validateForestMaterials(manifest.prototypes),2);
   for(const edit of [m=>delete m.materialContract,m=>m.prototypes[0].nativeMaterials[0].albedo.encoding='linear',
     m=>m.prototypes[0].nativeMaterials[1].transmission=1.1,m=>m.prototypes[0].nativeMaterials[0].roughnessMap.file='../escape.png']){
     const f=nativeFixture();edit(f.manifest);assert.throws(()=>validateForestScenery(f.manifest));
   }
-  for(const [vertex,value]of [[0,-1],[3,2],[6,0]]){
-    const f=nativeFixture();new Float32Array(f.streams['vertices.bin'])[vertex*14+13]=value;
-    assert.throws(()=>decodeForestScenery(f.manifest,f.streams),/material/i);
-  }
-  const mixed=nativeFixture();new Float32Array(mixed.streams['vertices.bin'])[27]=1;
-  assert.throws(()=>decodeForestScenery(mixed.manifest,mixed.streams),/material groups/);
 });
 test('geometry error certificates bind exact source and packed ranges without claiming appearance certification',()=>{
   const f=nativeFixture(),p=f.manifest.prototypes[0],receipt=file=>({file,bytes:4,sha256:'0'.repeat(64)});
@@ -136,14 +122,14 @@ test('native surface receipts are verified and an old regional pack cannot borro
   const old=fixture(),oldAssets=Object.fromEntries(['manifest.json',...Object.keys(old.streams)].map(n=>[n,n]));
   await assert.rejects(loadForestScenery({assets:oldAssets,fetchAsset:async name=>name==='manifest.json'?Response.json(old.manifest):new Response(old.streams[name])}),/native surfaces/);
 });
-test('native stream transport verifies both encoded and decoded receipts',async()=>{
+test('root transport verifies both encoded and decoded receipts',async()=>{
   const {manifest,streams,textures}=nativeFixture(),encoded={},assets=Object.fromEntries(['manifest.json',...Object.keys(textures)].map(name=>[name,name]));
   for(const [name,raw]of Object.entries(streams)){
     const bytes=gzipSync(new Uint8Array(raw));encoded[name+'.gz']=bytes;assets[name]=name+'.gz';
     manifest.files[name].gzip={file:name+'.gz',bytes:bytes.byteLength,sha256:createHash('sha256').update(bytes).digest('hex')};
   }
   const fetchAsset=async name=>name==='manifest.json'?Response.json(manifest):new Response(new Uint8Array(encoded[name]??textures[name]));
-  assert.equal((await loadForestScenery({assets,fetchAsset})).vertices.length,126);
+  assert.equal((await loadForestScenery({assets,fetchAsset})).roots.length,12);
   const original=Uint8Array.from(encoded['roots.bin.gz']);encoded['roots.bin.gz'][8]^=1;
   await assert.rejects(loadForestScenery({assets,fetchAsset}),/encoded digest/);
   encoded['roots.bin.gz']=original;manifest.files['roots.bin'].sha256='0'.repeat(64);
@@ -151,25 +137,32 @@ test('native stream transport verifies both encoded and decoded receipts',async(
 });
 test('forest rendering cannot fall back to the legacy generic mask or threshold averaged coverage',async()=>{
   const source=await readFile(new URL('../js/forest-scenery.js',import.meta.url),'utf8');
+  const clusters=await readFile(new URL('../js/forest-clusters.js',import.meta.url),'utf8');
   // Buried roots press flat at the soil line in the vertex stage, which keeps opaque trees
   // free of discard. Leaves are cut by sample coverage only, never a threshold on it.
   assert.equal(FOREST_VERTEX_WGSL.split('o.world.y=max(o.world.y,r.rootScale.y);').length-1,1,'canopy roots stop at the soil');
   assert.doesNotMatch(FOREST_VERTEX_WGSL,/leafSpray|tree-foliage|canopyLeafFS/);
   assert.doesNotMatch(FOREST_VERTEX_WGSL,/discard/,'native trees never discard');
-  assert.match(FOREST_VERTEX_WGSL,/@location\(7\)nativeMaterial/);
+  // The forest draws through its clusters and crowns alone: no vertex stream, no visible-root list of its own.
+  assert.doesNotMatch(FOREST_VERTEX_WGSL,/forestCanopyVS|forestCanopyVertex|forestVisible|tierId|@location\(7\)nativeMaterial/);
   assert.match(FOREST_VERTEX_WGSL,/forestNativeOpaqueFS/);assert.match(FOREST_VERTEX_WGSL,/forestNativeLeafFS/);
   assert.match(FOREST_VERTEX_WGSL,/return vec4f\(lit\.rgb,pigment\.a\)/);
   assert.match(FOREST_VERTEX_WGSL,/forestNativeLeafDepthFS/,'leaves lay depth first, so hidden layers are never lit');
   assert.match(FOREST_VERTEX_WGSL,/@builtin\(sample_mask\)mask:u32/);
   assert.match(FOREST_SURFACE_MIPS_WGSL,/forestMipLinear\(c\.rgb\)\*c\.a/);
   assert.match(FOREST_SURFACE_MIPS_WGSL,/colour\*\.25/);assert.doesNotMatch(FOREST_SURFACE_MIPS_WGSL,/discard|step\(/);
-  assert.match(source,/multisample:\{count:samples,alphaToCoverageEnabled:false\}/);
-  assert.match(source,/nearPixels=3/);assert.match(source,/nearPixels<=3/);
+  assert.match(clusters,/multisample: \{ count: samples, alphaToCoverageEnabled: false \}/);
+  assert.match(source,/pixelError=3/);
+  assert.doesNotMatch(source,/setVertexBuffer|drawIndexedIndirect|nativeLod|nativeMid|previousLod|forestResidency|deferNative|loadNative/);
 });
-test('deferNative and skipRoots defer heavy native geometry and Saba roots for procedural landfalls',async()=>{
-  const f=nativeFixture(),requests=[],assets=Object.fromEntries(['manifest.json',...Object.keys(f.streams),...Object.keys(f.textures)].map(n=>[n,n]));
-  const fetchAsset=async name=>{requests.push(name);return name==='manifest.json'?Response.json(f.manifest):new Response(new Uint8Array(f.streams[name]??f.textures[name]));};
-  const pack=await loadForestScenery({assets,fetchAsset,deferNative:true,skipRoots:true});
-  assert.equal(pack.vertices,null);assert.equal(pack.indices,null);assert.equal(pack.roots.length,0);
+test('the cull puts each tree in view once on its species\' one list, and sorts nothing by distance',()=>{
+  assert.equal(FOREST_CULL_WGSL.split('atomicAdd(&visibleCounts[pi],1u)').length-1,1);
+  assert.match(FOREST_CULL_WGSL,/if\(slot<p\.roots\.y\)\{visible\[p\.roots\.x\+slot\]=id\.x;\}/);
+  assert.doesNotMatch(FOREST_CULL_WGSL,/nearLod|midLod|farLod|previousLod|commands|atlasThreshold/);
+});
+test('a procedural landfall skips the pack\'s roots, and a device with prebuilt surfaces its maps',async()=>{
+  const f=nativeFixture(),{requests,assets,fetchAsset}=served(f);
+  const pack=await loadForestScenery({assets,fetchAsset,skipRoots:true,deferSurfaces:true});
+  assert.equal(pack.roots.length,0);assert.equal(pack.textures,null);
   assert.deepEqual(requests,['manifest.json']);
 });

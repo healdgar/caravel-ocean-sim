@@ -10,8 +10,8 @@ function forestOcclusionFrameCapture(){
  const r=window.forestOcclusionFrame={callback:null,device:null,target:null,capture:false,image:null,errors:[],indirect:[],pipelineSources:[]};
  window.requestAnimationFrame=callback=>{r.callback=callback;return 1;};
  const request=GPUAdapter.prototype.requestDevice;GPUAdapter.prototype.requestDevice=async function(...args){const d=await request.apply(this,args);r.device=d;d.addEventListener('uncapturederror',e=>r.errors.push(e.error.message));d.lost.then(e=>r.lost=e.message);return d;};
- const module=GPUDevice.prototype.createShaderModule;GPUDevice.prototype.createShaderModule=function(desc){if(desc.label==='forest GPU cull and compact')r.pipelineSources.push(desc.code);return module.call(this,desc);};
- const buffer=GPUDevice.prototype.createBuffer;GPUDevice.prototype.createBuffer=function(desc){const inspect=desc.label==='forest GPU indirect draws',b=buffer.call(this,inspect?{...desc,usage:desc.usage|GPUBufferUsage.COPY_SRC}:desc);if(inspect)r.indirect.push(b);return b;};
+ const module=GPUDevice.prototype.createShaderModule;GPUDevice.prototype.createShaderModule=function(desc){if(desc.label==='forest GPU cull')r.pipelineSources.push(desc.code);return module.call(this,desc);};
+ const buffer=GPUDevice.prototype.createBuffer;GPUDevice.prototype.createBuffer=function(desc){const inspect=desc.label==='forest cluster indirect draws',b=buffer.call(this,inspect?{...desc,usage:desc.usage|GPUBufferUsage.COPY_SRC}:desc);if(inspect)r.indirect.push(b);return b;};
  const texture=GPUCanvasContext.prototype.getCurrentTexture;GPUCanvasContext.prototype.getCurrentTexture=function(...args){r.target=texture.apply(this,args);return r.target;};
  const submit=GPUQueue.prototype.submit;GPUQueue.prototype.submit=function(commands){submit.call(this,commands);if(!r.capture||!r.target)return;r.capture=false;
   const target=r.target,row=Math.ceil(target.width*4/256)*256,read=r.device.createBuffer({size:row*target.height,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),enc=r.device.createCommandEncoder();enc.copyTextureToBuffer({texture:target},{buffer:read,bytesPerRow:row},[target.width,target.height]);submit.call(this,[enc.finish()]);
@@ -53,16 +53,15 @@ test('GPU terrain occlusion preserves full close-forest, shore, horizon and unde
    // Metal does not repeat these frames exactly: two identical occlusion captures of the
    // close view differed in 63 of its 8.3M channels, by up to 12/255, and two identical
    // references in 55, by up to 4/255. SwiftShader is exact.
-   // The quarter-budget scene exists to read its triangle count. Lower budgets sit closer to
-   // tier boundaries, where a culled tree's remembered tier can shift a few pixels by 1/255.
+   // The quarter-budget scene exists to read its triangle count.
    const metal=process.env.WEBGPU_BACKEND==='metal';if(!scene.budgetOnly)assert.ok(differences<=(metal?Math.ceil(row.channels*4e-5):0)&&maxError<=(metal?16:0),JSON.stringify(row));
   }
   // Checked once every scene has compared its pixels, so a budget miss cannot hide them.
   const close=rows.find(row=>row.name==='reported-close-view');
-  assert.ok(close.occlusionTriangles<close.referenceTriangles*.9,'actual native indirect work decreases, without changing pixels');
-  // Full budget keeps native foreground trees; the adaptive polygon budget must then be able to shed them.
+  assert.ok(close.occlusionTriangles<close.referenceTriangles*.9,'the continuum\'s indirect work decreases, without changing pixels');
+  // Full budget keeps foreground trees sharp; the adaptive polygon budget must then be able to shed their detail.
   const weak=rows.find(row=>row.name==='reported-close-view-weak-device');
   assert.ok(close.occlusionTriangles<=30000000,'full-budget close canopy stays within 30M indirect triangles: '+JSON.stringify(close));
-  assert.ok(weak.occlusionTriangles<=close.occlusionTriangles*.55,'a quarter polygon budget sheds foreground trees: '+JSON.stringify({close,weak}));
+  assert.ok(weak.occlusionTriangles<=close.occlusionTriangles*.55,'a quarter polygon budget sheds foreground detail: '+JSON.stringify({close,weak}));
  }finally{await browser?.close();server.closeAllConnections?.();await new Promise(r=>server.close(r));}
 });
