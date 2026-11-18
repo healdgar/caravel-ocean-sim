@@ -15,7 +15,7 @@ const flag = (name) => process.argv.includes('--' + name);
 const option = (name) => process.argv.find((a) => a.startsWith(`--${name}=`))?.split('=')[1];
 
 export async function loadAuditModules() {
-  const names = ['forest-trunks', 'gunnery-control', 'building-fracture', 'coastal-world', 'ship-fracture', 'hull', 'gunnery-models', 'crew', 'crew-pose', 'crew-physics', 'crew-work', 'crew-navigation', 'ship-models', 'models/victory', 'terrain-model', 'port-props', 'gltf', 'old-world-buildings'];
+  const names = ['forest-trunks', 'gunnery-control', 'building-fracture', 'coastal-world', 'ship-fracture', 'hull', 'gunnery-models', 'crew', 'crew-pose', 'crew-physics', 'crew-work', 'crew-navigation', 'ship-models', 'models/victory', 'terrain-model', 'port-props', 'gltf', 'old-world-buildings', 'board-model', 'old-world'];
   return Object.assign({}, ...(await Promise.all(names.map((n) => import(new URL(`../js/${n}.js`, import.meta.url).href)))));
 }
 // As js/crew.js chooses them: Indigenous people are built on the classic bodies.
@@ -142,12 +142,32 @@ export function auditForestTrees(lib, fan = {}) {
 }
 
 export const AUDIT_PORTS = Object.freeze(['lisbon', 'havana', 'san-juan', 'cartagena', 'veracruz', 'jamestown', 'boston', 'plymouth-colony', 'quebec', 'cape-town']);
+function upsampleSurvey(survey, n) {
+  const sN = Math.round(Math.sqrt(survey.length)), out = new Float32Array(n * n);
+  for (let j = 0; j < n; j++) {
+    const sy = (j / (n - 1)) * (sN - 1), y0 = Math.min(sN - 2, Math.floor(sy)), ty = sy - y0;
+    for (let i = 0; i < n; i++) {
+      const sx = (i / (n - 1)) * (sN - 1), x0 = Math.min(sN - 2, Math.floor(sx)), tx = sx - x0;
+      const a = survey[y0 * sN + x0], b = survey[y0 * sN + x0 + 1], c = survey[(y0 + 1) * sN + x0], d = survey[(y0 + 1) * sN + x0 + 1];
+      out[j * n + i] = (a * (1 - tx) + b * tx) * (1 - ty) + (c * (1 - tx) + d * tx) * ty;
+    }
+  }
+  return out;
+}
 export function auditPorts(lib, ids = AUDIT_PORTS) {
   const models = lib.PROP_MODELS.map((spec) => lib.readPropModel(readFileSync(new URL(spec.file, root)), spec));
   const jetties = lib.PROP_MODELS.flatMap((spec, i) => (spec.deckShare ? [A.auditJettyModel(spec, models[i])] : []));
   const ports = [];
   for (const id of ids) {
-    const pack = lib.generateProceduralCoastalPack(id, { size: 257, biomeSize: 64, albedoSize: 64, vegetationCandidates: 400 });
+    const boardPath = lib.BAKED_BOARDS?.[`${id}:1550`];
+    let pack;
+    if (boardPath) {
+      const baked = JSON.parse(readFileSync(new URL(boardPath, root), 'utf8'));
+      lib.registerBakedBoard(baked);
+      pack = lib.generateProceduralCoastalPack({ ...baked.region, size: 257, biomeSize: 64, albedoSize: 64, vegetationCandidates: 400, year: 1550 }, {}, upsampleSurvey(baked.survey, 257));
+    } else {
+      pack = lib.generateProceduralCoastalPack(id, { size: 257, biomeSize: 64, albedoSize: 64, vegetationCandidates: 400 });
+    }
     ports.push({ ...A.auditPortProps(pack, lib, models), ...A.auditPortMeshes(pack, lib) });
   }
   return { ports, jetties };

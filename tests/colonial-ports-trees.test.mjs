@@ -33,7 +33,7 @@ test('Deliverable 1: every town Spain and Portugal planted by 1550 is a board fo
   for (const gone of ['planColonialStreets', 'buildColonialCityFabric', 'plannedStreets', 'colonialCity']) {
     assert.equal(coastal.includes(gone) || city.includes(gone), false, `${gone} is gone: a planted town is its board`);
   }
-  for (const town of COLONIAL_TOWNS) {
+  for (const town of COLONIAL_TOWNS.filter((t) => t.founded <= 1550 && t.manner)) {
     const file = BAKED_BOARDS[`${town.port}:1550`];
     assert.ok(file && fs.existsSync(file), `${town.port} has its board baked for 1550`);
     const baked = JSON.parse(fs.readFileSync(file, 'utf8'));

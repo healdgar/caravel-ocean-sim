@@ -43,7 +43,7 @@ const PAUSE_SHARE = 0.3;
 // places in the open, where someone arriving stays in view rather than going indoors.
 const NOT_WALKED_ON = new Set(['pier', 'quay']);
 const WITHOUT_DOORS = new Set(['quay']);
-const OPEN_AIR = new Set(['pier']);
+const OPEN_AIR = new Set(['pier', 'quay', 'canoe']);
 // How often people have business at a place. Anything else counts for two.
 const PLACE_BUSINESS = Object.freeze({ pier: 5, slipway: 3, careening: 2 });
 // People abroad at once at each size of town, before those indoors are taken off.
@@ -448,15 +448,18 @@ export function streetEdgeAt(streets, x, z) {
 
 export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSize = MOST_FIELD_SIZE, suppressSyntheticCountryRoads = false } = {}) {
   const all = port?.waterfront ?? [];
-  if (all.length < 2 || !port.center) return null;
+  if (!all.length || !port.center) return null;
   const started = typeof performance === 'object' ? performance.now() : 0;
   const random = seededRandom(`${port.regionId ?? 'port'}:${port.year ?? 0}`);
-  const centre = port.center;
+  const seatWf = all.filter((inst) => inst.seat === true);
+  const nearby = seatWf.length ? seatWf : all.filter((inst) => Math.hypot(inst.x - port.center.x, inst.z - port.center.z) < MOST_TOWN_RADIUS_M);
+  if (!nearby.length) return null;
+  const centre = seatWf.length
+    ? { x: seatWf.reduce((s, w) => s + w.x, 0) / seatWf.length, z: seatWf.reduce((s, w) => s + w.z, 0) / seatWf.length }
+    : port.center;
 
   // The ground the town stands on, and what is solid on it.
   let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
-  const nearby = all.filter((inst) => Math.hypot(inst.x - centre.x, inst.z - centre.z) < MOST_TOWN_RADIUS_M);
-  if (nearby.length < 2) return null;
   for (const inst of nearby) {
     const r = Math.hypot(inst.width, inst.length) * 0.5 + SITE_MARGIN_M;
     minX = Math.min(minX, inst.x - r); maxX = Math.max(maxX, inst.x + r);
@@ -468,7 +471,7 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
   for (let c = 0; c < grid.count; c++) {
     const h = groundAt(grid.x(c), grid.z(c));
     heightAt[c] = h;
-    grid.cost[c] = h < DRY_GROUND_M ? Infinity : 1;
+    grid.cost[c] = h < 0.05 ? Infinity : h < DRY_GROUND_M ? 2.5 : 1;
   }
   for (let c = 0; c < grid.count; c++) {
     if (!Number.isFinite(grid.cost[c])) continue;
@@ -476,7 +479,7 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
     const left = heightAt[j * grid.nx + Math.max(0, i - 1)], right = heightAt[j * grid.nx + Math.min(grid.nx - 1, i + 1)];
     const down = heightAt[Math.max(0, j - 1) * grid.nx + i], up = heightAt[Math.min(grid.nz - 1, j + 1) * grid.nx + i];
     const grade = Math.hypot(right - left, up - down) / (2 * CELL_M);
-    grid.cost[c] = 1 + SLOPE_COST * grade * grade;
+    grid.cost[c] += SLOPE_COST * grade * grade;
   }
   const decks = [];
   const solid = (inst, c, margin) => {
@@ -484,7 +487,7 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
     return Math.abs(lx) <= inst.width * 0.5 + margin && Math.abs(lz) <= inst.length * 0.5 + margin;
   };
   for (const inst of nearby) {
-    const reach = Math.hypot(inst.width, inst.length) * 0.5 + WALL_CLEARANCE_M + CELL_M * 2;
+    const reach = Math.hypot(inst.width, inst.length) * 0.5 + WALL_CLEARANCE_M + CELL_M * 4;
     const i0 = Math.max(0, Math.floor((inst.x - reach - minX) / CELL_M)), i1 = Math.min(grid.nx - 1, Math.ceil((inst.x + reach - minX) / CELL_M));
     const j0 = Math.max(0, Math.floor((inst.z - reach - minZ) / CELL_M)), j1 = Math.min(grid.nz - 1, Math.ceil((inst.z + reach - minZ) / CELL_M));
     const deck = deckOf(inst);
@@ -493,7 +496,8 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
       const c = j * grid.nx + i;
       if (deck) {
         const { lx, lz } = worldToLocal(inst, grid.x(c), grid.z(c));
-        if (Math.abs(lx) <= deck.halfWidth + CELL_M * 0.2 && Math.abs(lz) <= inst.length * 0.5 + DECK_RUNS_ON_M) grid.cost[c] = 1;
+        const shoreBrow = inst.kind === 'pier' && lz > 0 && heightAt[c] >= -0.4 ? 6 : DECK_RUNS_ON_M;
+        if (Math.abs(lx) <= deck.halfWidth + CELL_M * 0.2 && lz >= -(inst.length * 0.5 + DECK_RUNS_ON_M) && lz <= inst.length * 0.5 + shoreBrow) grid.cost[c] = 1;
       } else if (!NOT_WALKED_ON.has(inst.kind)) {
         if (solid(inst, c, WALL_CLEARANCE_M)) grid.cost[c] = Infinity;
         else if (Number.isFinite(grid.cost[c]) && solid(inst, c, WALL_CLEARANCE_M + CELL_M)) grid.cost[c] += NEAR_WALL_COST;
@@ -517,6 +521,44 @@ export function layTownStreets(port, groundAt, { townsfolkScale = 1, mostFieldSi
     if (WITHOUT_DOORS.has(inst.kind)) continue;
     const door = chooseDoor(inst, grid, centre);
     if (door) doors.push({ ...door, business: PLACE_BUSINESS[inst.kind] ?? 2 });
+  }
+  if (doors.length === 1) {
+    const first = doors[0];
+    const quays = nearby.filter((inst) => inst.kind === 'quay');
+    if (quays.length) {
+      let farQuay = null, farD = 14;
+      for (const q of quays) {
+        for (const endSign of [-0.4, 0, 0.4]) {
+          const pt = localToWorld(q, endSign * q.width, 0);
+          const d = Math.hypot(pt.x - first.outside.x, pt.z - first.outside.z);
+          if (d > farD) { farD = d; farQuay = { q, pt }; }
+        }
+      }
+      if (farQuay) {
+        const cell = nearestFreeCell(grid, farQuay.pt.x, farQuay.pt.z);
+        if (cell >= 0 && cell !== first.cell) doors.push({ inst: farQuay.q, cell, outside: farQuay.pt, inside: farQuay.pt, business: 2 });
+      }
+    }
+    if (doors.length === 1 && first.inst.kind === 'pier') {
+      const reach = Math.max(2.0, first.inst.length * 0.5 - 1.5);
+      const a = localToWorld(first.inst, 0, reach), b = localToWorld(first.inst, 0, -reach);
+      const root = Math.hypot(a.x - first.outside.x, a.z - first.outside.z) > Math.hypot(b.x - first.outside.x, b.z - first.outside.z) ? a : b;
+      const cell = nearestFreeCell(grid, root.x, root.z);
+      if (cell >= 0 && cell !== first.cell) doors.push({ inst: first.inst, cell, outside: root, inside: root, business: 3 });
+    }
+    if (doors.length === 1) {
+      let bestCell = -1, bestCost = Infinity;
+      for (let c = 0; c < grid.count; c++) {
+        if (!Number.isFinite(grid.cost[c])) continue;
+        const d = Math.hypot(grid.x(c) - first.outside.x, grid.z(c) - first.outside.z);
+        if (d < 18 || d > 32) continue;
+        if (grid.cost[c] < bestCost) { bestCost = grid.cost[c]; bestCell = c; }
+      }
+      if (bestCell >= 0) {
+        const pt = { x: grid.x(bestCell), z: grid.z(bestCell) };
+        doors.push({ inst: first.inst, cell: bestCell, outside: pt, inside: pt, business: 2 });
+      }
+    }
   }
   if (doors.length < 2) return null;
 

@@ -815,18 +815,6 @@ export const INDIGENOUS_CULTURE_REGIONS = Object.freeze([
     lonMin: -74.6,
     lonMax: -52.0,
     preContactPopEstimate: 128000,
-    prefabMix: Object.freeze([
-      'indigenous_canoe_landing',
-      'algonquian_longhouse',
-      'abenaki_birchbark_wigwam',
-      'abenaki_birchbark_wigwam',
-      'indigenous_palisade_ring',
-      'abenaki_birchbark_wigwam',
-      'algonquian_longhouse',
-      'abenaki_birchbark_wigwam',
-      'abenaki_birchbark_wigwam',
-      'abenaki_birchbark_wigwam',
-    ]),
   }),
   Object.freeze({
     id: 'mid-atlantic-algonquian',
@@ -839,17 +827,6 @@ export const INDIGENOUS_CULTURE_REGIONS = Object.freeze([
     lonMin: -81.5,
     lonMax: -72.0,
     preContactPopEstimate: 96000,
-    prefabMix: Object.freeze([
-      'indigenous_canoe_landing',
-      'algonquian_longhouse',
-      'indigenous_palisade_ring',
-      'algonquian_longhouse',
-      'abenaki_birchbark_wigwam',
-      'abenaki_birchbark_wigwam',
-      'algonquian_longhouse',
-      'abenaki_birchbark_wigwam',
-      'abenaki_birchbark_wigwam',
-    ]),
   }),
   Object.freeze({
     id: 'florida-gulf-chiefdoms',
@@ -862,17 +839,6 @@ export const INDIGENOUS_CULTURE_REGIONS = Object.freeze([
     lonMin: -97.5,
     lonMax: -79.5,
     preContactPopEstimate: 185000,
-    prefabMix: Object.freeze([
-      'indigenous_canoe_landing',
-      'taino_cacique_caney',
-      'taino_batey_court',
-      'taino_circular_bohio',
-      'taino_circular_bohio',
-      'palafito_estuary_village',
-      'indigenous_palisade_ring',
-      'taino_circular_bohio',
-      'taino_circular_bohio',
-    ]),
   }),
   Object.freeze({
     id: 'taino-greater-antilles',
@@ -885,17 +851,6 @@ export const INDIGENOUS_CULTURE_REGIONS = Object.freeze([
     lonMin: -85.2,
     lonMax: -64.5,
     preContactPopEstimate: 600000,
-    prefabMix: Object.freeze([
-      'indigenous_canoe_landing',
-      'taino_cacique_caney',
-      'taino_batey_court',
-      'taino_circular_bohio',
-      'taino_circular_bohio',
-      'taino_circular_bohio',
-      'taino_circular_bohio',
-      'taino_cacique_caney',
-      'taino_circular_bohio',
-    ]),
   }),
   Object.freeze({
     id: 'kalinago-lesser-antilles',
@@ -908,16 +863,6 @@ export const INDIGENOUS_CULTURE_REGIONS = Object.freeze([
     lonMin: -64.5,
     lonMax: -59.0,
     preContactPopEstimate: 68000,
-    prefabMix: Object.freeze([
-      'indigenous_canoe_landing',
-      'kalinago_carbet_hall',
-      'taino_circular_bohio',
-      'taino_circular_bohio',
-      'kalinago_carbet_hall',
-      'taino_circular_bohio',
-      'taino_circular_bohio',
-      'taino_circular_bohio',
-    ]),
   }),
   Object.freeze({
     id: 'maya-mesoamerica-coast',
@@ -930,16 +875,6 @@ export const INDIGENOUS_CULTURE_REGIONS = Object.freeze([
     lonMin: -97.5,
     lonMax: -83.0,
     preContactPopEstimate: 245000,
-    prefabMix: Object.freeze([
-      'indigenous_canoe_landing',
-      'maya_limestone_shrine_and_na',
-      'taino_batey_court',
-      'taino_circular_bohio',
-      'maya_limestone_shrine_and_na',
-      'taino_circular_bohio',
-      'taino_cacique_caney',
-      'taino_circular_bohio',
-    ]),
   }),
   Object.freeze({
     id: 'tierra-firme-carib-arawak',
@@ -952,16 +887,6 @@ export const INDIGENOUS_CULTURE_REGIONS = Object.freeze([
     lonMin: -85.0,
     lonMax: -59.5,
     preContactPopEstimate: 225000,
-    prefabMix: Object.freeze([
-      'indigenous_canoe_landing',
-      'palafito_estuary_village',
-      'palafito_estuary_village',
-      'taino_cacique_caney',
-      'taino_circular_bohio',
-      'taino_circular_bohio',
-      'palafito_estuary_village',
-      'taino_circular_bohio',
-    ]),
   }),
   Object.freeze({
     id: 'tupinamba-brazil-guiana',
@@ -974,16 +899,6 @@ export const INDIGENOUS_CULTURE_REGIONS = Object.freeze([
     lonMin: -60.0,
     lonMax: -34.0,
     preContactPopEstimate: 340000,
-    prefabMix: Object.freeze([
-      'indigenous_canoe_landing',
-      'tupinamba_oca_longhouse',
-      'indigenous_palisade_ring',
-      'tupinamba_oca_longhouse',
-      'tupinamba_oca_longhouse',
-      'taino_circular_bohio',
-      'taino_circular_bohio',
-      'tupinamba_oca_longhouse',
-    ]),
   }),
   Object.freeze({
     id: 'pacific-indigenous-coast',
@@ -996,15 +911,6 @@ export const INDIGENOUS_CULTURE_REGIONS = Object.freeze([
     lonMin: -135.0,
     lonMax: -70.0,
     preContactPopEstimate: 210000,
-    prefabMix: Object.freeze([
-      'indigenous_canoe_landing',
-      'algonquian_longhouse',
-      'taino_cacique_caney',
-      'abenaki_birchbark_wigwam',
-      'abenaki_birchbark_wigwam',
-      'algonquian_longhouse',
-      'abenaki_birchbark_wigwam',
-    ]),
   }),
 ]);
 
@@ -1075,7 +981,6 @@ export function computeIndigenousSettlementProfile(specOrRegion = {}, year = 155
       villageScale: 0,
       targetStructureCount: 0,
       villagerCount: 0,
-      prefabMix: Object.freeze([]),
       historicalNote: 'Uninhabited coast',
     });
   }
@@ -1096,7 +1001,6 @@ export function computeIndigenousSettlementProfile(specOrRegion = {}, year = 155
       villageScale: 0,
       targetStructureCount: 0,
       villagerCount: 0,
-      prefabMix: Object.freeze([]),
       historicalNote: 'No pre-contact indigenous population on this pelagic island or Old World coast',
     });
   }
@@ -1314,20 +1218,6 @@ export function computeIndigenousSettlementProfile(specOrRegion = {}, year = 155
     ? 0
     : Math.max(6, Math.min(28, Math.round(targetStructureCount * 2.2)));
 
-  let effectivePrefabMix = culture.prefabMix;
-  if (sov && sov.strengthScore > 0 && effectivePrefabMix.length < 12) {
-    const extended = effectivePrefabMix.slice();
-    if (!extended.includes('indigenous_palisade_ring')) {
-      extended.push('indigenous_palisade_ring');
-    }
-    const primaryHall = extended[1] || 'algonquian_longhouse';
-    const familyDwelling = extended[2] || 'abenaki_birchbark_wigwam';
-    while (extended.length < 12) {
-      extended.push(extended.length % 2 === 0 ? primaryHall : familyDwelling);
-    }
-    effectivePrefabMix = Object.freeze(extended);
-  }
-
   return Object.freeze({
     year: simYear,
     hasIndigenousSettlement,
@@ -1361,8 +1251,6 @@ export function computeIndigenousSettlementProfile(specOrRegion = {}, year = 155
     targetStructureCount,
     buildingCount: targetStructureCount,
     villagerCount,
-    prefabMix: effectivePrefabMix,
-    prefabs: effectivePrefabMix,
     historicalNote,
   });
 }
@@ -2770,8 +2658,14 @@ export function settleDockBerth(heights, region, piers, wanted) {
     if (bestCaravel) return { x: bestCaravel.x, z: bestCaravel.z };
     return { x: wanted.x, z: wanted.z };
   }
+  const pierRoots = piers.map((p) => {
+    const hl = (p.length ?? 0) * 0.5;
+    return [p.x + Math.sin(p.yaw ?? 0) * hl, p.z + Math.cos(p.yaw ?? 0) * hl];
+  });
   cellsWithin(inMud.x, inMud.z, dredgeReach + cell * 3, (k, d) => {
     if (heights[k] > 0.25) return;
+    const cx = region.x + ((k % n) / (n - 1) - 0.5) * span, cz = region.z + (Math.floor(k / n) / (n - 1) - 0.5) * span;
+    for (const [rx, rz] of pierRoots) if (Math.hypot(cx - rx, cz - rz) < Math.max(12, cell * 0.75)) return;
     const ease = coastalSmoothstep(dredgeReach + cell * 3, dredgeReach, d);
     heights[k] = Math.min(heights[k], -DOCK_BERTH_DREDGED_M * ease);
   });

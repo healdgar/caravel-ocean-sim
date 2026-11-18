@@ -417,7 +417,6 @@ def build_game_texture_sr_samples(repo_root: pathlib.Path, rng: np.random.Genera
     """
     texture_specs = [
         ("assets/caravel-oak-albedo.png", None),
-        ("assets/ports/1550/buildings-1550-photo-atlas.png", None),
         ("assets/ports/1550/land-materials-pbr.png", None),
         ("assets/artcraft/kind11_pedra_lioz_ashlar-preview.png", None),
         ("assets/artcraft/kind13_terracotta_telha-preview.png", None),

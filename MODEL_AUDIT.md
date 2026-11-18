@@ -1,6 +1,6 @@
 # Model audit
 
-Compares the hand-written numbers that describe each ship and port building with the geometry actually drawn. Nine ships, 32 building prefabs, ten ports, nine forest tree species.
+Compares the hand-written numbers that describe each ship and port building with the geometry actually drawn. Nine ships, 107 city building families (551 types), ten ports, nine forest tree species.
 
 ```bash
 WEBGPU_BACKEND=metal node scripts/model-audit.mjs --report=MODEL_AUDIT.md
@@ -67,8 +67,8 @@ The audit changes no model. No plain typo turned up.
 
 ## What holds
 
-- **Buildings as meshes.** All 34 prefabs: every line agrees with the mesh, before any hit.
-- **Ports.** Every building is known by its own mesh: four live, ten offline. Other ports: a streamed section's port has `instances: []` (`js/coastal-world.js:10810`), so only the active port ever has buildings, and live `terrain.ports` held one.
+- **Buildings as meshes.** All 107 city families (551 types): every line agrees with the mesh, before any hit.
+- **Ports.** Every building of each port's board is known by its city type's mesh (`js/city-targets.js` stands a struck building on demand), and every cleat stands on its mole's deck.
 - **Hydrostatics.** Displaced volume within 1.4% of the mesh on all nine. Hull-width formula within 0.07 m at P90. Draft exact, but for Niña's separate keel, 0.12 m.
 - **Mast stations.** Within 0.34 m of the mesh on all ships, after the earlier fix. Santa María's foremast is the largest, from its rake.
 - **Gun muzzles and breeches** of drawn guns. Within 0.14 m of the barrel, at rest.

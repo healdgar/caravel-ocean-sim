@@ -24,11 +24,6 @@ Thumbs.db
 .vscode/
 .idea/
 *.log
-# Intermediate Hunyuan3D-2mv GLB and turnaround slice PNGs (final WW3D bundle is tracked)
-assets/ports/1550/*.glb
-assets/ports/1550/*.png
-!assets/ports/1550/land-materials-pbr.png
-assets/ports/1550/*/*.png
 # Large raw offline meadow source binaries (the meadows-gpu/ manifests are tracked)
 assets/ground-cover/portugal/meadows/
 # The people continuum's baked streams: npm run deploy publishes them, scripts/prepare-crew-continuum.mjs bakes them.

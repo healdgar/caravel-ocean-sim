@@ -45,12 +45,47 @@ export function layBoardWaterfront({ place, seat = false, sovereign = false, hei
     const e = 4, gx = inlandAt(x + e, z) - inlandAt(x - e, z), gz = inlandAt(x, z + e) - inlandAt(x, z - e), L = Math.hypot(gx, gz);
     return L > 1e-4 ? [-gx / L, -gz / L] : null;
   };
+  // Signed distance inland from the true heightAt === 0 waterline along `toWater` (whereas `inlandAt` is only cell-centred).
+  const shoreAtLine = (x, z) => {
+    const w = toWater(x, z);
+    if (!w) return inlandAt(x, z);
+    const h0 = heightAt(x, z);
+    // Search along w (towards water, +t) if dry, or -w (inland, -t) if wet, up to 48 m for the 0 m crossing.
+    if (h0 >= 0) {
+      let prevT = 0;
+      for (let t = 4; t <= 48; t += 4) {
+        if (heightAt(x + w[0] * t, z + w[1] * t) <= 0) {
+          let lo = prevT, hi = t;
+          for (let b = 0; b < 6; b++) {
+            const mid = (lo + hi) * 0.5;
+            if (heightAt(x + w[0] * mid, z + w[1] * mid) > 0) lo = mid; else hi = mid;
+          }
+          return (lo + hi) * 0.5;
+        }
+        prevT = t;
+      }
+      return Math.max(48, inlandAt(x, z));
+    }
+    let prevT = 0;
+    for (let t = 4; t <= 48; t += 4) {
+      if (heightAt(x - w[0] * t, z - w[1] * t) >= 0) {
+        let lo = prevT, hi = t;
+        for (let b = 0; b < 6; b++) {
+          const mid = (lo + hi) * 0.5;
+          if (heightAt(x - w[0] * mid, z - w[1] * mid) < 0) lo = mid; else hi = mid;
+        }
+        return -(lo + hi) * 0.5;
+      }
+      prevT = t;
+    }
+    return -48;
+  };
   // A point moved across the shore onto the quay's line, holding it `from` a joint at `chord` metres.
   const onLine = (x, z, line = WATERFRONT_LINE_M) => {
     for (let i = 0; i < 6; i++) {
       const w = toWater(x, z);
       if (!w) return [x, z];
-      const err = inlandAt(x, z) - line;
+      const err = shoreAtLine(x, z) - line;
       if (Math.abs(err) < 0.05) break;
       x += w[0] * err; z += w[1] * err;
     }
@@ -85,7 +120,7 @@ export function layBoardWaterfront({ place, seat = false, sovereign = false, hei
     ax += w[0] * step; az += w[1] * step;
   }
   [ax, az] = onLine(ax, az);
-  if (Math.hypot(ax - place.x, az - place.z) > reach || !inside(ax, az, 40) || Math.abs(inlandAt(ax, az) - WATERFRONT_LINE_M) > WATERFRONT_SAG_M) return out;
+  if (Math.hypot(ax - place.x, az - place.z) > reach || !inside(ax, az, 40) || Math.abs(shoreAtLine(ax, az) - WATERFRONT_LINE_M) > WATERFRONT_SAG_M) return out;
 
   // A native place lays no stone quay: its canoes are drawn up on the strand, with a tidal fish weir in the shallows
   // before them; a proclaimed sovereign polity also runs a timber trade mole out to deep water.
@@ -94,11 +129,13 @@ export function layBoardWaterfront({ place, seat = false, sovereign = false, hei
     if (!w0) return out;
     const birchbark = place.culture === 'iroquoian' || place.culture === 'massachusett' || place.culture === 'lenape';
     const type = waterfrontType('CANOE_LANDING', birchbark ? 1 : 0), T = CITY_BUILDING_TYPES[type];
-    const dir = [-w0[1], w0[0]], want = seat && (place.people || 0) >= 450 ? 2 : 1;
+    const dir0 = [-w0[1], w0[0]], want = seat && (place.people || 0) >= 450 ? 2 : 1;
     let laid = 0;
-    for (const off of [0, -18, 18, -36, 36]) {
+    const offsets = [0];
+    for (let step = 18; step <= 252; step += 18) offsets.push(-step, step);
+    for (const off of offsets) {
       if (laid >= want) break;
-      const [x, z] = onLine(ax + dir[0] * off, az + dir[1] * off, T.length / 2 - 2.5);
+      const [x, z] = onLine(ax + dir0[0] * off, az + dir0[1] * off, T.length / 2 - 2.5);
       const w = toWater(x, z);
       if (!w || !inside(x, z, 24)) continue;
       const yaw = Math.atan2(-w[0], -w[1]), f = footprint(x, z, T.width, T.length, yaw);
@@ -107,7 +144,7 @@ export function layBoardWaterfront({ place, seat = false, sovereign = false, hei
         const h = heightAt(x + lx * f.c * T.width / 2 + lz * f.s * T.length / 2, z - lx * f.s * T.width / 2 + lz * f.c * T.length / 2);
         lo = Math.min(lo, h); hi = Math.max(hi, h);
       }
-      if (lo < -0.4 || hi - lo > 3.5 || hi > WATERFRONT_LOW_M + 2 || taken(f, 1.5)) continue;
+      if (lo < -0.9 || hi - lo > 5.0 || hi > WATERFRONT_LOW_M + 3.5 || taken(f, 1.5)) continue;
       const floor = Math.max(0.25, (lo + hi) / 2), tone = 0.72 + 0.18 * rr();
       keep(f); occupy(f);
       pushBlock(f, T.height, 0, CITY_ROOF.FLAT + CITY_TYPED_ROOF, birchbark ? 17 : 10, tone, { floor, plinth: Math.max(0.3, floor - lo + 0.4), range: hi - lo });
@@ -116,7 +153,7 @@ export function layBoardWaterfront({ place, seat = false, sovereign = false, hei
       laid++;
     }
     if (seat && sovereign) {
-      const pierFamily = cityFamilyOf(CITY_TYPE.PIER), [rx, rz] = onLine(ax + dir[0] * 26, az + dir[1] * 26, 0), pw = toWater(rx, rz);
+      const pierFamily = cityFamilyOf(CITY_TYPE.PIER), [rx, rz] = onLine(ax + dir0[0] * 26, az + dir0[1] * 26, 0), pw = toWater(rx, rz);
       if (pw) {
         const nx = -pw[0], nz = -pw[1], pyaw = Math.atan2(nx, nz);
         let pick = null;
@@ -155,7 +192,7 @@ export function layBoardWaterfront({ place, seat = false, sovereign = false, hei
     return { x: mx, z: mz, yaw: Math.atan2(nx, nz), ux, uz, nx, nz, L };
   };
   const fits = (s, bays) => {
-    if (!s || !inside(s.x, s.z, 30) || Math.abs(inlandAt(s.x, s.z) - WATERFRONT_LINE_M) > WATERFRONT_SAG_M) return null;
+    if (!s || !inside(s.x, s.z, 30) || Math.abs(shoreAtLine(s.x, s.z) - WATERFRONT_LINE_M) > WATERFRONT_SAG_M) return null;
     // The ground behind its face, along its back: low enough for a quay, and dry.
     const back = [s.x + s.nx * (CITY_QUAY.depth / 2 - 0.5), s.z + s.nz * (CITY_QUAY.depth / 2 - 0.5)];
     if (heightAt(...back) > WATERFRONT_LOW_M || heightAt(...back) < -0.5) return null;
@@ -225,17 +262,17 @@ export function layBoardWaterfront({ place, seat = false, sovereign = false, hei
       }
     }
   } else {
-    // No shore to lay a quay on: a mole from the water's edge alone.
-    const w = toWater(ax, az), [rx, rz] = onLine(ax, az, 0);
-    if (w) roots.push({ x: rx, z: rz, nx: -w[0], nz: -w[1], yaw: Math.atan2(-w[0], -w[1]) });
+    // No shore to lay a quay on: a mole rooted on the dry strand just above the water's edge.
+    const w = toWater(ax, az), [rx, rz] = onLine(ax, az, 4);
+    if (w) roots.push({ x: rx, z: rz, nx: -w[0], nz: -w[1], yaw: Math.atan2(-w[0], -w[1]), strand: true });
   }
   for (const root of roots) {
     let pick = null;
     for (let k = 0; k < pierFamily.count; k++) {
       const type = pierFamily.from + k, T = CITY_BUILDING_TYPES[type];
-      // Over the water all its length, and the deeper at its head the better until a ship lies there afloat.
+      // Over the water past its root, and the deeper at its head the better until a ship lies there afloat.
       let wet = true;
-      for (let t = 4; t <= T.length; t += 4) if (heightAt(root.x - root.nx * t, root.z - root.nz * t) > 0.2) { wet = false; break; }
+      for (let t = root.strand ? 8 : 4; t <= T.length; t += 4) if (heightAt(root.x - root.nx * t, root.z - root.nz * t) > 0.2) { wet = false; break; }
       if (!wet) break;
       const head = heightAt(root.x - root.nx * T.length, root.z - root.nz * T.length);
       pick = { type, T, head };
@@ -259,25 +296,37 @@ export function layBoardWaterfront({ place, seat = false, sovereign = false, hei
   if (seat && (place.people || 0) >= WATERFRONT_SLIPWAY_PEOPLE) beach.push(['slipway', 'SLIPWAY']);
   if (seat && (place.people || 0) >= WATERFRONT_CAREENING_PEOPLE) beach.push(['careening', 'CAREENING_SHED']);
   beach.forEach(([kind, key], side) => {
-    const end = ends[side], type = waterfrontType(key, 0), T = CITY_BUILDING_TYPES[type];
-    for (let tries = 0; tries < 5; tries++) {
-      const go = 8 + T.width / 2 + tries * 12;
-      const [x, z] = onLine(end.joint[0] + end.dir[0] * go, end.joint[1] + end.dir[1] * go, T.length / 2 - 3);
-      const w = toWater(x, z);
-      if (!w || !inside(x, z, 30)) break;
-      const yaw = Math.atan2(-w[0], -w[1]), f = footprint(x, z, T.width, T.length, yaw);
-      let lo = Infinity, hi = -Infinity;
-      for (const [lx, lz] of [[-1, 0], [1, 0], [0, 1], [-1, 1], [1, 1]]) {
-        const h = heightAt(x + lx * f.c * T.width / 2 + lz * f.s * T.length / 2, z - lx * f.s * T.width / 2 + lz * f.c * T.length / 2);
-        lo = Math.min(lo, h); hi = Math.max(hi, h);
+    const type = waterfrontType(key, 0), T = CITY_BUILDING_TYPES[type];
+    let placedShed = false;
+    for (const which of [side, 1 - side]) {
+      if (placedShed) break;
+      const end = ends[which];
+      let [sx, sz] = end.joint, [dx, dz] = end.dir;
+      for (let tries = 0; tries < 28; tries++) {
+        const step = tries === 0 ? 8 + T.width / 2 : 12;
+        [sx, sz] = onLine(sx + dx * step, sz + dz * step);
+        const sw = toWater(sx, sz);
+        if (!sw || !inside(sx, sz, 30)) break;
+        dx = which === 0 ? -sw[1] : sw[1];
+        dz = which === 0 ? sw[0] : -sw[0];
+        const [x, z] = onLine(sx, sz, T.length / 2 - 3);
+        const w = toWater(x, z);
+        if (!w || !inside(x, z, 30)) continue;
+        const yaw = Math.atan2(-w[0], -w[1]), f = footprint(x, z, T.width, T.length, yaw);
+        let lo = Infinity, hi = -Infinity;
+        for (const [lx, lz] of [[-1, 0], [1, 0], [0, 1], [-1, 1], [1, 1]]) {
+          const h = heightAt(x + lx * f.c * T.width / 2 + lz * f.s * T.length / 2, z - lx * f.s * T.width / 2 + lz * f.c * T.length / 2);
+          lo = Math.min(lo, h); hi = Math.max(hi, h);
+        }
+        if (lo < -1.2 || hi - lo > 5.5 || hi > WATERFRONT_LOW_M + 4 || taken(f, 1.5)) continue;
+        const floor = Math.max(0.3, (lo + hi) / 2), tone = 0.7 + 0.2 * rr();
+        keep(f); occupy(f);
+        pushBlock(f, T.height, 0, CITY_ROOF.FLAT + CITY_TYPED_ROOF, 10, tone, { floor, plinth: Math.max(0.3, floor - lo + 0.5), range: hi - lo });
+        pushTyped(type, x, floor, z, yaw, tone);
+        out.push({ kind, type, piece: typedTypes.length - 1, x, y: floor, z, yaw, width: T.width, length: T.length, deck: null });
+        placedShed = true;
+        break;
       }
-      if (lo < 0 || hi - lo > 3 || hi > WATERFRONT_LOW_M + 2 || taken(f, 1.5)) continue;
-      const floor = Math.max(0.3, (lo + hi) / 2), tone = 0.7 + 0.2 * rr();
-      keep(f); occupy(f);
-      pushBlock(f, T.height, 0, CITY_ROOF.FLAT + CITY_TYPED_ROOF, 10, tone, { floor, plinth: floor - lo + 0.5, range: hi - lo });
-      pushTyped(type, x, floor, z, yaw, tone);
-      out.push({ kind, type, piece: typedTypes.length - 1, x, y: floor, z, yaw, width: T.width, length: T.length, deck: null });
-      break;
     }
   });
   return out;

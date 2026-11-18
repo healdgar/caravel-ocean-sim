@@ -1748,7 +1748,7 @@ function dockBerthFault(label, port, views, heights, region) {
 }
 
 test('every port founded on its board berths the caravel afloat within a line of its waterfront', () => {
-  const familyOfKind = { quay: 'QUAY', pier: 'PIER', slipway: 'SLIPWAY', careening: 'CAREENING_SHED' };
+  const familyOfKind = { quay: 'QUAY', pier: 'PIER', slipway: 'SLIPWAY', careening: 'CAREENING_SHED', canoe: 'CANOE_LANDING' };
   const faults = [];
   let berthed = 0, lisbon = null;
   for (const key of Object.keys(BAKED_BOARDS)) {
