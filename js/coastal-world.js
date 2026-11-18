@@ -16,18 +16,10 @@ import {
   palisadeRingPlan,
   ringPostIsGate,
   triangularFortPlan,
-  clipOutlineAt,
-  depthInOutline,
   enclosurePlan,
-  TRACE_BATTER_M,
-  TRACE_PARAPET_M,
-  TRACE_RAMPART_EDGE_M,
-  insetOutline,
-  traceWalls,
-  triangulateOutline,
 } from './fort-plan.js';
-import { bestGroundNear, readHarbourGeography } from './harbour-geography.js';
-import { carveRecordedChannel, drawFortAt, planHarbourDefences, shoreNormal, worldOfPosition } from './harbour-defences.js';
+import { readHarbourGeography } from './harbour-geography.js';
+import { carveRecordedChannel, shoreNormal, worldOfPosition } from './harbour-defences.js';
 import { fortRecordsFor } from './fort-records.js';
 import {
   terrainSample,
@@ -1955,18 +1947,11 @@ export function syncPortInstancesToTerrain(portOrInstances, heights, region, { g
           const lx = Math.abs(lxSigned);
           const lz = Math.abs(lzSigned);
           if (lx > outerX || lz > outerZ) continue;
-          let wBlend;
-          if (inst.trace?.outline) {
-            // A fort drawn to the ground levels only what is under it, and the land beyond keeps its shape.
-            const t = Math.max(0, Math.min(1, 1 + (depthInOutline(inst.trace.outline, lxSigned, lzSigned) - step) / feather));
-            wBlend = t * t * (3 - 2 * t);
-          } else {
-            const tx = Math.max(0, Math.min(1, 1 - Math.max(0, lx - coreX) / feather));
-            const tz = Math.max(0, Math.min(1, 1 - Math.max(0, lz - coreZ) / feather));
-            const sx = tx * tx * (3 - 2 * tx);
-            const sz = tz * tz * (3 - 2 * tz);
-            wBlend = sx * sz;
-          }
+          const tx = Math.max(0, Math.min(1, 1 - Math.max(0, lx - coreX) / feather));
+          const tz = Math.max(0, Math.min(1, 1 - Math.max(0, lz - coreZ) / feather));
+          const sx = tx * tx * (3 - 2 * tx);
+          const sz = tz * tz * (3 - 2 * tz);
+          const wBlend = sx * sz;
           heights[k] = heights[k] * (1 - wBlend) + targetH * wBlend;
         }
       }
@@ -4376,9 +4361,8 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
   };
   // Nobody builds in front of a fort's guns: the town keeps out of the ground between it and the water.
   const inFieldOfFire = (x, z, yaw, width, length) => instances.some((fort) => {
-    const hasFortTrace = Boolean(fort.trace?.outline);
-    if (!hasFortTrace && !enclosurePlan(fort)?.gate) return false;
-    const field = hasFortTrace ? FIELD_OF_FIRE_M : FIELD_OF_FIRE_M * 0.5, reach = fort.length * 0.5 + field * 0.5;
+    if (!enclosurePlan(fort)?.gate) return false;
+    const field = FIELD_OF_FIRE_M * 0.5, reach = fort.length * 0.5 + field * 0.5;
     return obbsMeet(x, z, yaw, width, length, { x: fort.x - Math.sin(fort.yaw) * reach, z: fort.z - Math.cos(fort.yaw) * reach, yaw: fort.yaw, width: hasFortTrace ? fort.width + 12 : fort.width * 0.8, length: field });
   });
   // The layout below is written against a straight shore, and real coasts curve. So each prefab says
@@ -4439,7 +4423,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
           const hx = x + axisX * headEnd * half, hz = z + axisZ * headEnd * half;
           if (Math.abs(hx - region.x) > span * 0.422 || Math.abs(hz - region.z) > span * 0.422) continue;
           // Two piers never share water: a ship could lie at neither.
-          if (footprintFitsEnclosures(instances, x, z, yaw, width, length) && !instances.some((other) => (other.prefabId === 'timber_mole_pier' || other.trace?.outline) && obbsMeet(x, z, yaw, width, length, other, PIER_APART_M))) return { x, z };
+          if (footprintFitsEnclosures(instances, x, z, yaw, width, length) && !instances.some((other) => other.prefabId === 'timber_mole_pier' && obbsMeet(x, z, yaw, width, length, other, PIER_APART_M))) return { x, z };
         }
       }
     }
@@ -4502,7 +4486,7 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       ? fortLocalToWorld(homeFort, overrides.fortSlot[0], overrides.fortSlot[1])
       : worldFromCoastalFrame(region, bestShoreAlong + alongOffset, bestShoreInland + inlandOffset));
     const isWaterfrontStructure = prefabId === 'stone_arch_bridge' || prefabId === 'timber_mole_pier' || prefabId === 'stone_quay_seawall';
-    const fixedPositionRequested = Boolean(overrides?.lockSite || overrides?.exactY !== undefined || overrides?.trace);
+    const fixedPositionRequested = Boolean(overrides?.lockSite || overrides?.exactY !== undefined);
     const collidesRiver = !isWaterfrontStructure && portRiverCorridor.hits(wanted.x, wanted.z, yaw, instWidth, instLength, 4.0);
     const site = fixedPositionRequested && !collidesRiver
       ? wanted
@@ -4518,7 +4502,6 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
         : minElevation !== null
           ? Math.max(minElevation, groundY)
           : Math.max(1.2, groundY);
-    const tracePayload = overrides?.trace && typeof overrides.trace === 'object' ? overrides.trace : null;
     instances.push({
       prefabId,
       label: overrides?.label ?? prefab?.label ?? prefab?.name ?? prefabId,
@@ -4542,7 +4525,6 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       // A pier or quay asked to carry guns, or a magazine, keeps the asking.
       ...(overrides?.armed !== undefined ? { armed: Boolean(overrides.armed) } : {}),
       ...(overrides?.hasMagazine !== undefined ? { hasMagazine: Boolean(overrides.hasMagazine) } : {}),
-      ...(tracePayload ? { trace: tracePayload } : {}),
       ...(overrides?.guards ? { guards: overrides.guards } : {}),
       ...(overrides?.enclosureShape ? { enclosureShape: overrides.enclosureShape } : {}),
       ...(overrides?.gateSide !== undefined ? { gateSide: overrides.gateSide } : {}),
@@ -4698,41 +4680,6 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     return emitted;
   };
 
-  // The forts, where the harbour needs them and shaped to the ground there. They go down before the town does, so
-  // that the town builds round them. See FORTS.md.
-  // The town's own waterfront is spoken for, whether or not its quays are down yet.
-  const onTownWaterfront = (x, z, width, length) => {
-    const frame = coastalFrame(region, x, z), margin = Math.hypot(width, length) * 0.5, reach = isDerivedMetropolePort ? 150 : 70;
-    return Math.abs(frame.along - bestShoreAlong - 10) < reach + margin && frame.inland - bestShoreInland > -80 - margin && frame.inland - bestShoreInland < 16 + margin;
-  };
-  const footprintIsFree = (x, z, yaw, width, length, prefabId) =>
-    !onTownWaterfront(x, z, width, length) &&
-    !obbOverlapsExisting(x, z, yaw, width, length, prefabId) &&
-    footprintFitsEnclosures(instances, x, z, yaw, width, length) &&
-    !instances.some((other) => other.prefabId === 'timber_mole_pier' && obbsMeet(x, z, yaw, width, length, other));
-  const groundHere = (x, z) => terrainSurfaceSample(heights, x, z, region);
-  const buildFort = (plan) => {
-    const prefabFor = { battery: 'stone_sea_bastion', drum: 'stone_sea_bastion' };
-    const drawn = drawFortAt(harbour, plan.spot, {
-      shape: plan.shape, sizeM: plan.sizeM, bastions: plan.bastions, earth: plan.earth, terraces: plan.terraces, groundAt: groundHere, town: shoreAnchor,
-      fits: (x, z, yaw, width, length) => footprintIsFree(x, z, yaw, width, length, prefabFor[plan.shape] ?? 'bastion_trace_fortress'),
-    });
-    if (!drawn) return null;
-    const fort = addPrefab(drawn.prefabId, 0, 0, 0, drawn.level, {
-      at: { x: drawn.x, z: drawn.z }, yaw: drawn.yaw, width: drawn.width, length: drawn.length, height: drawn.height, label: plan.name, trace: drawn.trace,
-      foundationDepth: Math.max(4.5, drawn.level - drawn.lowest + 2.5), materialKind: plan.earth ? 16 : 11,
-      guards: { role: plan.role, what: plan.what, source: plan.source, name: plan.name, faceBearing: drawn.faceBearing, shape: drawn.shape },
-    });
-    if (fort && plan.landmark) {
-      const beside = fortLocalToWorld(fort, -fort.width * 0.5 - 14, 0);
-      addPrefab('torreon_atalaya_farol', 0, 0, 0, 3.4, {
-        at: beside, yaw: fort.yaw, label: 'Torre de Belém Watchtower & River Beacon', width: 18, length: 28, height: 22.5, foundationDepth: 9.5,
-        cairnSpec: CAIRN_ARCHITECTURAL_TEMPLATES[plan.landmark],
-      });
-    }
-    return fort;
-  };
-  let defencesSited = false;
   // A fort that holds the settlement stands back from the water and looks at it. It is sited first of all.
   const placeEnclosingFort = (label, recordOf) => {
     const shape = recordOf?.encloses === 'triangle' || region.id === 'jamestown' ? 'triangle' : 'square';
@@ -4775,26 +4722,6 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
       ...(shape === 'square' ? { enclosureShape: 'square' } : { gateSide }),
       guards: { role: recordOf?.role ?? 'waterfront', what: 'the anchorage off the town', source: recordOf && coastIsReal ? 'record' : recordOf ? 'role' : 'rule', name: recordOf?.name ?? label },
     });
-  };
-  const siteDefences = (withEnclosure = false) => {
-    if (defencesSited || !harbour?.anchorage) return { enclosure: null };
-    defencesSited = true;
-    const plan = planHarbourDefences({
-      harbour, region, portId: recordedPortId, year: colonyGrowth.year, coastIsReal, stage: colonyGrowth.stage, expansionTier: colonyGrowth.expansionTier, crown: colonyGrowth.crown, withEnclosure,
-    });
-    const stood = [];
-    for (const fort of plan.forts) {
-      // Ground that will not take it, or is spoken for: the next best near there, then a plainer work.
-      for (let attempt = 0; attempt < 4; attempt++) {
-        if (buildFort(fort)) break;
-        stood.push({ x: fort.spot.x, z: fort.spot.z, apart: 110 });
-        if (attempt === 2) fort.shape = 'battery';
-        const next = bestGroundNear(harbour, fort.spot, { reach: 700, taken: stood, commandWeight: 1, nearWeight: 0.7, pointWeight: 0.3 });
-        if (!next) break;
-        fort.spot = { ...fort.spot, ...next };
-      }
-    }
-    return plan;
   };
 
   // 1. Timber mole piers & stone quays derived procedurally from bathymetry, river mouths & population (or orthophoto outlines)
@@ -4925,7 +4852,6 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     region.id === 'charleston' || region.id === 'philadelphia' ||
     ((colonyGrowth.crown === 'england' || colonyGrowth.crown === 'netherlands' || colonyGrowth.crown === 'france') && Math.abs(region.latitude ?? 0) >= 31.5)
   );
-  if (allowColonialPort && !hasOrthoFootprints && !inTimberManner) siteDefences();
 
   if (allowColonialPort && hasOrthoFootprints) {
     const fps = orthoFootprints.footprints.slice();
@@ -5069,7 +4995,6 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
         fromOrthophotoFootprint: true,
       });
     }
-    siteDefences();
     // Declarative Cairn JSON landmarks for orthophoto colonial ports (placed clear of existing orthophoto footprints)
     const findClearPortOffset = (baseAlong, baseInland, minClearDist = 34) => {
       let along = baseAlong;
@@ -5346,7 +5271,6 @@ export function placeCoastalPort(regionSpec, heights, { preserveRealCoast = fals
     }
     const heldBy = fortRecordsFor(recordedPortId, colonyGrowth.year).forts.find((record) => record.encloses) ?? fortRecordsFor(recordedPortId, 1800).forts.find((record) => record.encloses) ?? null;
     const fort = placeEnclosingFort(fortLabel, heldBy);
-    siteDefences(true);
     const fortPlan = fort ? enclosurePlan(fort) : null;
     const inFort = (slot) => (fort ? { homeFort: fort, fortSlot: slot } : null);
     addPrefab('english_half_timber_hall', 0, 44, 0, 2.8, {
@@ -6055,164 +5979,6 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
     pushSubdividedQuad(p010, p110, p111, p011, nx, nz, kind, Math.min(1, shade * 1.06), false);
     if (includeBottom) {
       pushQuad(p001, p101, p100, p000, kind, shade * 0.65, false);
-    }
-  };
-
-  // A fort built to its own line. Every wall of the trace has its scarp, a parapet with its merlons, the guns the trace
-  // gives it and an inner walk. The fill is one level floor. See drawFortTrace in js/fort-plan.js.
-  const emitTracedFort = (inst, toWorld, yBase, yTop) => {
-    const trace = inst.trace, outline = trace.outline, walls = traceWalls(trace), stone = trace.earth ? 16 : 11;
-    const wallKind = stone, count = outline.length;
-    const lowZ = trace.lowZ ?? null, lowDrop = trace.lowDrop ?? 0;
-    const dropOf = (wall) => (lowZ !== null && (wall.az + wall.bz) * 0.5 < lowZ ? lowDrop : 0);
-    const dropAt = (z) => (lowZ !== null && z < lowZ ? lowDrop : 0);
-    const footing = insetOutline(outline, -TRACE_BATTER_M);
-    const scarpTop = yTop - 1.5;
-    const quad = (p00, p10, p11, p01, kind, shade, height = 0) => {
-      const nu = Math.min(12, Math.max(1, Math.round(Math.hypot(p10[0] - p00[0], p10[2] - p00[2]) / 3.5)));
-      const nv = height >= 1.8 ? Math.min(8, Math.max(2, Math.round(height / 1.45))) : 1;
-      pushSubdividedQuad(p00, p10, p11, p01, nu, nv, kind, shade);
-    };
-    beginSection('foundation_scarp_walls');
-    for (const wall of walls) {
-      const i = wall.index, j = (i + 1) % count, top = scarpTop - dropOf(wall);
-      quad(toWorld(footing[i][0], yBase, footing[i][1]), toWorld(footing[j][0], yBase, footing[j][1]), toWorld(outline[j][0], top, outline[j][1]), toWorld(outline[i][0], top, outline[i][1]), wallKind, 0.84, top - yBase);
-    }
-    beginSection('scarp_cordon_cornice');
-    const cordon = insetOutline(outline, -0.42), cordonIn = insetOutline(outline, 0.06);
-    for (const wall of walls) {
-      const i = wall.index, j = (i + 1) % count, y = scarpTop - dropOf(wall);
-      quad(toWorld(cordon[i][0], y, cordon[i][1]), toWorld(cordon[j][0], y, cordon[j][1]), toWorld(cordon[j][0], y + 0.46, cordon[j][1]), toWorld(cordon[i][0], y + 0.46, cordon[i][1]), wallKind, 0.93);
-      quad(toWorld(cordon[i][0], y + 0.46, cordon[i][1]), toWorld(cordon[j][0], y + 0.46, cordon[j][1]), toWorld(cordonIn[j][0], y + 0.46, cordonIn[j][1]), toWorld(cordonIn[i][0], y + 0.46, cordonIn[i][1]), wallKind, 0.9);
-    }
-    // The walk round the top, which comes down with the wall under it, and the floor inside, which stays.
-    const deckY = yTop - 0.85, walkLine = insetOutline(outline, Math.min(TRACE_RAMPART_EDGE_M, trace.shortestWall * 0.4));
-    beginSection('rampart_walk_edge');
-    for (const wall of walls) {
-      const i = wall.index, j = (i + 1) % count, y = deckY - dropOf(wall);
-      quad(toWorld(outline[i][0], y, outline[i][1]), toWorld(outline[j][0], y, outline[j][1]), toWorld(walkLine[j][0], y, walkLine[j][1]), toWorld(walkLine[i][0], y, walkLine[i][1]), 16, 0.82);
-    }
-    beginSection('terreplein_gun_deck');
-    const fillLevel = (line, y) => {
-      if (line.length < 3) return;
-      const fill = triangulateOutline(line);
-      for (let t = 0; t + 2 < fill.length; t += 3) {
-        const [a, b, c] = [line[fill[t]], line[fill[t + 1]], line[fill[t + 2]]];
-        pushTri(toWorld(a[0], y, a[1]), toWorld(b[0], y, b[1]), toWorld(c[0], y, c[1]), 16, 0.82);
-      }
-    };
-    if (lowZ === null) {
-      fillLevel(walkLine, deckY);
-    } else {
-      fillLevel(clipOutlineAt(walkLine, lowZ, false), deckY);
-      fillLevel(clipOutlineAt(walkLine, lowZ, true), deckY - lowDrop);
-      // The wall across the step, from the lower floor up to the parapet of the upper.
-      const across = clipOutlineAt(walkLine, lowZ, false).filter((p) => Math.abs(p[1] - lowZ) < 1e-3).sort((a, b) => a[0] - b[0]);
-      if (across.length >= 2) {
-        const x0 = across[0][0], x1 = across[across.length - 1][0];
-        beginSection('terrace_retaining_wall');
-        emitBox(toWorld, x0, x1, deckY - lowDrop, yTop, lowZ - 0.1, lowZ + 1.2, wallKind, 0.86);
-      }
-    }
-    // Each wall in its own frame: x along it, -z out from it.
-    const frameOf = (wall) => (lx, ly, lz) => toWorld(wall.ax + wall.ux * lx - wall.uz * lz, ly, wall.az + wall.uz * lx + wall.ux * lz);
-    const parapetTop = yTop, merlonY = yTop + 0.92;
-    const gunsOn = new Map();
-    for (const gun of trace.guns) (gunsOn.get(gun.wall) ?? gunsOn.set(gun.wall, []).get(gun.wall)).push(gun);
-    for (const wall of walls) {
-      const frame = frameOf(wall), before = walls[(wall.index + count - 1) % count], after = walls[(wall.index + 1) % count];
-      // At an inside corner a wall runs on behind its neighbour, or their inner faces would part.
-      const reachOn = (a, b) => {
-        const turn = a.ux * b.uz - a.uz * b.ux, along = a.ux * b.ux + a.uz * b.uz;
-        return (TRACE_PARAPET_M * Math.max(0, -turn)) / Math.max(0.3, 1 + along);
-      };
-      const from = -reachOn(before, wall), to = wall.length + reachOn(wall, after);
-      const drop = dropOf(wall), floor = deckY - drop, top = parapetTop - drop;
-      const isGate = wall.index === trace.gate.wall, gateAt = isGate ? wall.length * 0.5 : -100;
-      const span = (a, b) => {
-        if (b - a < 0.05) return;
-        beginSection('parapet_wall');
-        emitBox(frame, a, b, floor, top, 0, TRACE_PARAPET_M, wallKind, 0.86);
-      };
-      if (isGate) {
-        span(from, gateAt - trace.gate.halfWidth);
-        span(gateAt + trace.gate.halfWidth, to);
-        beginSection('fort_gate');
-        const yFoot = yBase + (inst.foundationDepth ?? 0);
-        // The arch, an opening in the scarp with a stone frame, and a timber bridge out over the batter.
-        emitBox(frame, gateAt - trace.gate.halfWidth - 0.8, gateAt + trace.gate.halfWidth + 0.8, yFoot, top + 0.9, -0.5, TRACE_PARAPET_M, wallKind, 0.9);
-        emitBox(frame, gateAt - trace.gate.halfWidth * 0.7, gateAt + trace.gate.halfWidth * 0.7, yFoot, top - 1.2, -0.56, TRACE_PARAPET_M + 0.1, 14, DARK_PORTAL_SHADE);
-        emitBox(frame, gateAt - trace.gate.halfWidth * 0.75, gateAt + trace.gate.halfWidth * 0.75, yFoot + 0.3, yFoot + 0.55, -TRACE_BATTER_M - 1.8, 0, 10, 0.76, true);
-      } else {
-        span(from, to);
-      }
-      const onWall = (gunsOn.get(wall.index) ?? []).slice().sort((a, b) => a.along - b.along);
-      // Carve open embrasures around every gun and the gate so merlons never overlap a cannon barrel.
-      const gaps = onWall.map((gun) => [gun.along - 0.72, gun.along + 0.72]);
-      if (isGate) gaps.push([gateAt - trace.gate.halfWidth - 0.85, gateAt + trace.gate.halfWidth + 0.85]);
-      gaps.sort((a, b) => a[0] - b[0]);
-      const merlonSpans = [];
-      let cursor = 0;
-      for (const [g0, g1] of gaps) {
-        if (g0 > cursor + 1.05) merlonSpans.push([cursor, Math.min(wall.length, g0)]);
-        cursor = Math.max(cursor, g1);
-      }
-      if (wall.length > cursor + 1.05) merlonSpans.push([cursor, wall.length]);
-      beginSection('parapet_merlons');
-      for (const [s0, s1] of merlonSpans) {
-        const segLen = s1 - s0;
-        const bays = Math.max(1, Math.round(segLen / 2.4));
-        for (let b = 0; b < bays; b++) {
-          const a0 = s0 + (segLen * b) / bays;
-          const a1 = s0 + (segLen * (b + 1)) / bays;
-          if (a1 - a0 < 0.45) continue;
-          emitBox(frame, a0 + 0.1, a1 - 0.1, top, top + (merlonY - parapetTop), 0, TRACE_PARAPET_M, wallKind, 0.88, false, 0.06);
-        }
-      }
-      // Firing step (banquette) behind the parapet and beveled stone embrasure sills.
-      beginSection('parapet_wall');
-      if (to - from > 3 || onWall.length > 0) {
-        emitBox(frame, Math.max(0, from), Math.min(wall.length, to), floor, floor + 0.7, TRACE_PARAPET_M, TRACE_PARAPET_M + 1.35, wallKind, 0.82);
-      }
-      for (const gun of onWall) {
-        emitBox(frame, gun.along - 0.62, gun.along + 0.62, top - 0.08, top + 0.08, 0.06, TRACE_PARAPET_M - 0.06, wallKind, 0.84, true);
-        emitFortCannon(frame, gun.along, floor + 0.7, TRACE_PARAPET_M + 0.42, 0, -1, 1.0);
-      }
-    }
-    // Sentry boxes on the points of the bastions.
-    for (const at of trace.salients) {
-      const [px, pz] = insetOutline(outline, 0.9)[at], drop = dropAt(pz), yC = scarpTop - drop, yM = yC + 2.42;
-      beginSection('sentry_garita');
-      emitCylinder(toWorld, px, pz, yC - 1.1, yC + 0.35, 0.35, 1.3, 8, wallKind, 0.78, false);
-      emitCylinder(toWorld, px, pz, yC + 0.35, yC + 0.65, 1.38, 1.38, 8, wallKind, 0.92, true);
-      emitCylinder(toWorld, px, pz, yC + 0.65, yM + 1.1, 1.2, 1.2, 8, wallKind, 0.9, true);
-      emitBox(toWorld, px - 1.24, px + 1.24, yC + 1.35, yM + 0.7, pz - 0.2, pz + 0.2, 14, 0.3);
-      emitCylinder(toWorld, px, pz, yM + 1.1, yM + 1.32, 1.32, 1.32, 8, wallKind, 0.94, true);
-      emitCylinder(toWorld, px, pz, yM + 1.32, yM + 2.1, 1.24, 0.62, 8, wallKind, 0.95, false);
-      emitCylinder(toWorld, px, pz, yM + 2.1, yM + 2.5, 0.62, 0.12, 8, wallKind, 0.97, true);
-    }
-    if (trace.keep) {
-      // A drum's round tower, as at the Bugio or a Fortaleza.
-      const radius = Math.max(3.6, Math.min(8, Math.abs(outline[0][0]) * 0.34));
-      beginSection('citadel_keep');
-      emitCylinder(toWorld, 0, 0, deckY, yTop + 5.4, radius + 0.3, radius, 12, 11, 0.88, true);
-      emitCylinder(toWorld, 0, 0, yTop + 5.4, yTop + 5.9, radius + 0.45, radius + 0.45, 12, 11, 0.92, true);
-    }
-    for (const building of trace.buildings) {
-      const floor = deckY - dropAt(building.z);
-      if (building.kind === 'barracks') {
-        const x0 = building.x - building.halfWidth, x1 = building.x + building.halfWidth, z0 = building.z - building.halfLength, z1 = building.z + building.halfLength, eave = floor + 3.2;
-        beginSection('interior_barracks');
-        emitBox(toWorld, x0, x1, floor, eave, z0, z1, 12, 0.9);
-        emitRoof(toWorld, x0, x1, eave, eave + roofRise(x1 - x0), z0, z1, 0.52, 0.22, 12);
-      } else if (building.kind === 'magazine') {
-        const r = building.radius;
-        beginSection('polvorin_magazine');
-        emitCylinder(toWorld, building.x, building.z, floor, floor + 3.0, r + 0.25, r, 10, 11, 0.88, true);
-        beginSection('polvorin_dome');
-        emitCylinder(toWorld, building.x, building.z, floor + 3.0, floor + 4.6, r + 0.15, r * 0.46, 10, 11, 0.93, false);
-        emitCylinder(toWorld, building.x, building.z, floor + 4.6, floor + 5.4, r * 0.46, 0.18, 10, 11, 0.96, true);
-      }
     }
   };
 
@@ -6987,8 +6753,6 @@ export function buildPortPrefabGeometry(portPlacement, palms = null, lrmTemplate
         emitCylinder(toWorld, bx, -hl + 0.52, quayDeckY, quayDeckY + 0.64, 0.24, 0.20, 8, 11, 0.76, true);
         emitTripoDockCleat(pushTri, toWorld, bx, quayDeckY + 0.64, -hl + 0.52, 0.72, 0);
       }
-    } else if ((inst.prefabId === 'stone_sea_bastion' || inst.prefabId === 'bastion_trace_fortress') && inst.trace?.outline) {
-      emitTracedFort(inst, toWorld, yBase, yTop);
     } else if (inst.prefabId === 'stone_sea_bastion' || inst.prefabId === 'bastion_trace_fortress') {
       // 16th-Century Spanish Bastion & Star-Bastioned Trace-Italienne Fortress (Baluarte / Fuerte Abaluartado con Foso y Polvorín):
       // Battered ashlar/coquina scarp walls + projecting diamond corner bastions (on bastion_trace_fortress) + iterated cannon embrasures

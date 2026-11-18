@@ -2,7 +2,7 @@
 // What a harbour needs guarding, read from the height field alone, on coasts made to order.
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {bestGroundNear,commandFrom,readHarbourGeography} from '../js/harbour-geography.js';
+import {readHarbourGeography} from '../js/harbour-geography.js';
 
 const SPAN=8192,SIZE=257;
 const region={x:0,z:0,span:SPAN,size:SIZE};
@@ -67,17 +67,3 @@ test('the reading does not depend on the resolution of the terrain',()=>{
   assert.ok(Math.abs(a.mouth.z-b.mouth.z)<130,`${a.mouth.z} and ${b.mouth.z}`);
 });
 
-test('ground that commands the mouth is found beside it, and a hill in the way counts against a gun',()=>{
-  const read=readHarbourGeography(bayWithMouth,region,{town:{x:900,z:2800}});
-  const spot=bestGroundNear(read,read.mouth.left,{reach:500});
-  assert.ok(spot,'ground found');
-  assert.ok(Math.hypot(spot.x-read.mouth.left.x,spot.z-read.mouth.left.z)<500);
-  assert.ok(spot.command>0.1,`command ${spot.command}`);
-  const faces=commandFrom(read,spot.x,spot.z);
-  const toMouth=[read.mouth.x-spot.x,read.mouth.z-spot.z],length=Math.hypot(...toMouth);
-  assert.ok((faces.faceX*toMouth[0]+faces.faceZ*toMouth[1])/length>0,'it looks towards the water it holds');
-  const walled=coast((x,z)=>(z<0?-8:Math.abs(z-300)<60?60:5));
-  const open=readHarbourGeography(walled,region,{town:{x:0,z:20}});
-  assert.ok(commandFrom(open,0,1000).held===0,'behind a ridge nothing can be laid on the sea');
-  assert.ok(commandFrom(open,0,100).held>0,'in front of it, the sea is open');
-});

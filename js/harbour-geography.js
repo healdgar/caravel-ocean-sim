@@ -18,10 +18,6 @@ const SHELTER_REACH_M = 2400;
 const ANCHORAGE_ROOM_M = 320;
 // How far a piece of the period reaches to any purpose against a ship.
 export const HARBOUR_GUN_RANGE_M = 1000;
-// A gun laid down further than this overshoots whatever is close under it.
-const GUN_MOST_DEPRESSION = Math.tan((8 * Math.PI) / 180);
-const GUN_ABOVE_GROUND_M = 7;
-const TARGET_Y_M = 2;
 // Water narrower than this can be closed by guns on one bank or crossed from both.
 const NARROWS_MOST_WIDTH_M = 3400;
 const NARROWS_ALONE_WIDTH_M = 1000;
@@ -359,84 +355,4 @@ function guardedTargets(out) {
     for (const t of [-0.5, 0, 0.5]) targets.push({ x: place.x - place.uz * place.width * t * 0.7, z: place.z + place.ux * place.width * t * 0.7, weight: 3 });
   }
   return targets;
-}
-
-// Whether a straight flight from a gun at this ground to a ship at this spot meets the land or goes over it.
-export function gunLineClear(grid, x, z, gunY, tx, tz) {
-  const { at, ground, cell } = grid, length = Math.hypot(tx - x, tz - z);
-  if (length < 1) return true;
-  if ((gunY - TARGET_Y_M) / length > GUN_MOST_DEPRESSION) return false;
-  const steps = Math.ceil(length / cell);
-  for (let s = 1; s < steps; s++) {
-    const t = s / steps, k = at(x + (tx - x) * t, z + (tz - z) * t);
-    if (k < 0) continue;
-    if (ground[k] > gunY + (TARGET_Y_M - gunY) * t) return false;
-  }
-  return true;
-}
-
-// How much of the guarded water a fort at this spot could lay guns on: a share, and the way that water lies from it.
-export function commandFrom(harbour, x, z, { range = HARBOUR_GUN_RANGE_M, targets = harbour.targets, gunAbove = GUN_ABOVE_GROUND_M } = {}) {
-  const { grid } = harbour, k = grid.at(x, z);
-  const gunY = (k >= 0 ? Math.max(0, grid.ground[k]) : 0) + gunAbove;
-  let total = 0, held = 0, sumX = 0, sumZ = 0;
-  for (const target of targets) {
-    total += target.weight;
-    const d = Math.hypot(target.x - x, target.z - z);
-    if (d > range || d < 1) continue;
-    if (!gunLineClear(grid, x, z, gunY, target.x, target.z)) continue;
-    held += target.weight;
-    // Nearer water matters more to a gun.
-    const pull = target.weight * (1.2 - d / range) / d;
-    sumX += (target.x - x) * pull;
-    sumZ += (target.z - z) * pull;
-  }
-  const length = Math.hypot(sumX, sumZ);
-  return { share: total ? held / total : 0, held, faceX: length ? sumX / length : 0, faceZ: length ? sumZ / length : 0 };
-}
-
-// What share of the country round a spot is water, at a radius: a point of land reads high, a bay's head low.
-export function waterRound(grid, x, z, radius) {
-  let wet = 0;
-  const rays = 32;
-  for (let r = 0; r < rays; r++) {
-    const angle = (r / rays) * Math.PI * 2, k = grid.at(x + Math.cos(angle) * radius, z + Math.sin(angle) * radius);
-    if (k < 0 || grid.ground[k] < WATER_M) wet++;
-  }
-  return wet / rays;
-}
-
-/**
- * The best ground for a fort that must hold the water, among land near a place. Searches outward to `reach` metres.
- * `side` limits it to one hand of a line: {x, z, ux, uz, hand}, going along (ux, uz); hand -1 left and +1 right.
- * `taken` are spots others stand on, with how far apart they must be. Returns null if nothing near will do.
- */
-export function bestGroundNear(harbour, near, { reach = 700, side = null, taken = [], apart = 170, highest = 70, furthestFromWater = 150, flatOver = 40, mostRise = 9, leastFromWater = 0, commandWeight = 1, nearWeight = 0.5, pointWeight = 0.25, targets = harbour.targets } = {}) {
-  const { grid } = harbour, { nx, nz, cell, ground, dry, at, xOf, zOf } = grid;
-  const i0 = Math.max(0, Math.floor((near.x - reach - grid.originX) / cell)), i1 = Math.min(nx - 1, Math.ceil((near.x + reach - grid.originX) / cell));
-  const j0 = Math.max(0, Math.floor((near.z - reach - grid.originZ) / cell)), j1 = Math.min(nz - 1, Math.ceil((near.z + reach - grid.originZ) / cell));
-  let best = null;
-  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
-    const k = j * nx + i, h = ground[k];
-    if (h < 0.6 || h > highest || dry[k] > furthestFromWater || dry[k] < leastFromWater) continue;
-    const x = xOf(k), z = zOf(k), d = Math.hypot(x - near.x, z - near.z);
-    if (d > reach) continue;
-    if (side && ((x - side.x) * -side.uz + (z - side.z) * side.ux) * side.hand <= 0) continue;
-    if (taken.some((spot) => Math.hypot(spot.x - x, spot.z - z) < (spot.apart ?? apart))) continue;
-    // A fort wants room to stand: no cliff within its own walls.
-    let low = Infinity, high = -Infinity;
-    for (const [dx, dz] of [[flatOver, 0], [-flatOver, 0], [0, flatOver], [0, -flatOver]]) {
-      const m = at(x + dx, z + dz);
-      if (m < 0) continue;
-      const g = Math.max(0, ground[m]);
-      if (g < low) low = g;
-      if (g > high) high = g;
-    }
-    if (high - Math.max(low, h) > mostRise) continue;
-    const command = commandFrom(harbour, x, z, { targets }).share;
-    // A bluff has dead water under it, and costs a gun its first few hundred metres.
-    const score = command * commandWeight - (d / reach) * nearWeight + waterRound(grid, x, z, 220) * pointWeight - (dry[k] / furthestFromWater) * 0.2 - Math.max(0, h - 14) * 0.012 * commandWeight;
-    if (!best || score > best.score) best = { x, z, score, command, h, dry: dry[k] };
-  }
-  return best;
 }

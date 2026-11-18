@@ -1,5 +1,16 @@
 # Forts and the harbours they guard
 
+A coast's forts, batteries and watchtowers are its board's, founded by Castle and Commons like its towns. The bake
+(`scripts/bake-board.mjs`) gathers every work `js/fort-records.js` stands on a port's ground in its year into the board
+request; the board program (`scripts/board-forts.mjs`) sets each on the nearest dry ground to its record, turns its
+front to the nearest water, brings a battery or a work set back from the shore down to the water's edge, and stands
+it as a building of the nearest place (a citadel being that place's castle on its hill). `js/old-world-board.js`
+builds each of the wall's own types (curtains, bastions, a gate, a hall or keep; the battery and watchtower types of
+`js/old-world-buildings.js`) and records its line, guns and gate; `portWorkBuildings` in `js/fort-plan.js` hands them
+to the guns and the garrison. A port with no record of a work has the walls and citadels its board raises, and no fort
+of its own. What follows below describes the siting by rule and the drawn traces that this replaced, kept for the
+record's history; `js/harbour-defences.js` keeps only the record's geography (positions, channels, shore normals).
+
 A port's forts stand where the harbour needs them. `js/harbour-geography.js` reads the coast from the terrain: the
 water a ship must cross from the sea to the anchorage, the narrow places on the way, and the ground that commands it.
 `js/harbour-defences.js` puts forts there, by the record below where there is one and by the rule where there is not.
