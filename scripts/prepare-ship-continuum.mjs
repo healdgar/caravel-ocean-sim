@@ -25,8 +25,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { buildDag } from '../third_party/threejs-nanites/dag/build.ts';
-// What every rigid family's bake shares (scripts/continuum-bake.mjs), used here as it is there.
-import { closest, closestOnTriangle, triangleSpheres, surfaceArea, ancestor } from './continuum-bake.mjs';
+// What every rigid family's bake shares (js/continuum-bake.js), used here as it is there.
+import { closest, closestOnTriangle, triangleSpheres, surfaceArea, ancestor } from '../js/continuum-bake.js';
 import { getTradeVesselArchetype, poseTradeVesselPoint, tradeMaterialLinearColor } from '../js/trade-vessels.js';
 import { createShipAssetCache } from '../js/ship-mesh.js';
 import { vesselHull } from '../js/hull.js';

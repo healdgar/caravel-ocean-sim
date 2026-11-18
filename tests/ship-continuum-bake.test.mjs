@@ -152,7 +152,7 @@ for (const entry of SHIP_CONTINUUM_BODIES) {
 
   // The far end of the chain is a minimal core (AGENTS.md rule 3.3). Bodies of many handles (a ship-rigged hull's
   // shrouds, ratlines and oar ports) keep cores of hundreds of triangles until the shared bake
-  // (scripts/continuum-bake.mjs) collapses a multi-shell far body to its core: those are to do, not let off.
+  // (js/continuum-bake.js) collapses a multi-shell far body to its core: those are to do, not let off.
   const LARGE_CORES = new Set(['player-victory', 'player-oseberg', 'player-lusoria', 'player-flying-cloud']);
   test(`${id} far body ends in a core of a few triangles`, { todo: LARGE_CORES.has(id) && 'the shared bake does not yet collapse a body of many handles to its core' }, () => {
     const { far } = manifestOf(id);
