@@ -123,7 +123,7 @@
     "rx": 0.2013,
     "ry": 0.42
    },
-   "bakeMs": 962
+   "bakeMs": 1235
   },
   {
    "id": 1,
@@ -144,7 +144,7 @@
     -0.0463,
     3,
     -0.05,
-    9.2539
+    10.7025
    ],
    "clusters": {
     "count": 64,
@@ -168,14 +168,14 @@
     "outward": 0.7427,
     "inward": 0.6732,
     "simplifyError": 0.0786,
-    "steps": 1795,
-    "coreTriangles": 118,
-    "depth": 7,
+    "steps": 1825,
+    "coreTriangles": 4,
+    "depth": 9,
     "errorRange": [
      0.7427,
-     3.3906
+     6.7332
     ],
-    "inflateMax": 0.2006,
+    "inflateMax": 1.6492,
     "rootTriangles": 1065,
     "farFirst": 1322,
     "farFirstTriangles": 1064,
@@ -190,7 +190,7 @@
     "rx": 4.0112,
     "ry": 3.15
    },
-   "bakeMs": 5533
+   "bakeMs": 12409
   },
   {
    "id": 2,
@@ -211,7 +211,7 @@
     0.0584,
     2.1937,
     0.1125,
-    10.7606
+    11.9335
    ],
    "clusters": {
     "count": 66,
@@ -235,14 +235,14 @@
     "outward": 0.8654,
     "inward": 0.7414,
     "simplifyError": 0.1106,
-    "steps": 1881,
-    "coreTriangles": 102,
-    "depth": 7,
+    "steps": 1910,
+    "coreTriangles": 6,
+    "depth": 8,
     "errorRange": [
      0.8654,
-     4.0377
+     6.6718
     ],
-    "inflateMax": 0.6487,
+    "inflateMax": 1.8216,
     "rootTriangles": 1901,
     "farFirst": 982,
     "farFirstTriangles": 1900,
@@ -257,7 +257,7 @@
     "rx": 5.6672,
     "ry": 2.1937
    },
-   "bakeMs": 6029
+   "bakeMs": 10824
   },
   {
    "id": 3,
@@ -324,18 +324,18 @@
     "rx": 1,
     "ry": 1
    },
-   "bakeMs": 7094
+   "bakeMs": 15336
   }
  ],
  "atlas": {
-  "words": 186866,
-  "bytes": 747464,
-  "sha256": "d2f91da1128a4e48d40578a288b68b943faed57b635ed92685ef82886b5a2db4",
+  "words": 187102,
+  "bytes": 748408,
+  "sha256": "700ae5f96a8854b35b7418190fe44eb5afd1849430eea6ddc3d20585af091eb7",
   "gzip": {
    "file": "atlas.bin.gz",
-   "bytes": 322761,
-   "sha256": "25edd2589754cfc951447fa7bd6aec59cde55ab6658b6bd1e1490110dd8d12d9"
+   "bytes": 323403,
+   "sha256": "77edf8eda0ca6bf19df75db017d6c339051d326db951efb5682d0039773730ce"
   }
  },
- "bakeSeconds": 19.8
+ "bakeSeconds": 40.1
 }
