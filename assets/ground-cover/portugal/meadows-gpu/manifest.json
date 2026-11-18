@@ -6,9 +6,9 @@
  "source": {
   "format": "waterworld.meadow-groves",
   "generator": "forestmodeler gardenplans.meadow",
-  "manifestSha256": "bdec3e8e444d5a16dc7fa82d9aa7859197ffb5452d72cafcba41a3ba31c4e5c6",
-  "vertices": "65124698dd637cc85dcf10cebc1e980b36623099c9d59e992d09c77d04139023",
-  "indices": "dfb46c748db4833eef2f46488b4c014e8dc244cb9e85bebc51499b36fc7961f0"
+  "manifestSha256": "67518eb746f7d3016e5c36d43bc0b986f81bfb99d67001df85819e723645ab73",
+  "vertices": "9ba2d1b27a9ff964cabfe1c002ca0b10ce2c8f9fbd0c229a0d27c143363423fe",
+  "indices": "832d032b994b2b01fcf0f113a610be90a15a506249de8efad57317e90def48d7"
  },
  "patchMetres": 4,
  "levels": 8,
@@ -28,27 +28,41 @@
   "quantile": 0.5,
   "errorQuantile": 0.9,
   "rim": {
-   "height": 0.1166,
-   "cover": 0.5613,
+   "height": 0.093,
+   "cover": 0.5269,
    "colour": [
-    0.11877,
-    0.15461,
-    0.07257
+    0.11935,
+    0.15489,
+    0.07235
    ]
   }
  },
  "organErrorShare": 0.35,
- "farError": 0.45797,
- "canopy": 0.1231,
- "variants": [
+ "farError": 0.496,
+ "canopy": 0.0992,
+ "frame": {
+  "low": [
+   -0.63,
+   -0.15,
+   -0.62
+  ],
+  "span": 5.35
+ },
+ "types": [
   {
    "id": 0,
    "mix": 0,
    "variant": 0,
    "sourceTriangles": 452455,
    "organs": 60370,
-   "clusters": 7688,
+   "vertices": 958228,
+   "clusters": 7684,
    "coverage": 0.4998,
+   "sway": 1.8928,
+   "entries": {
+    "clusters": 7684,
+    "farChunks": 10
+   },
    "levels": [
     {
      "triangles": 452455,
@@ -104,14 +118,14 @@
     "steps": 157,
     "coreTriangles": 6,
     "farFirst": 0,
-    "baseError": 0.30261,
-    "firstError": 0.30261,
-    "lastError": 1.05552,
+    "baseError": 0.30621,
+    "firstError": 0.496,
+    "lastError": 3.1692,
     "hops": 7,
-    "knots": 6
+    "knots": 7
    },
    "splat": {
-    "canopy": 0.0813,
+    "canopy": 0.072,
     "seenAlong": 0.7986,
     "headShare": 0.1184,
     "topColour": [
@@ -125,10 +139,10 @@
      0.07793
     ],
     "sphere": [
-     1.8332,
-     0.7354,
-     2.0451,
-     3.8316
+     1.9895,
+     0.6966,
+     2.1148,
+     3.6931
     ]
    }
   },
@@ -136,57 +150,63 @@
    "id": 1,
    "mix": 0,
    "variant": 1,
-   "sourceTriangles": 487758,
-   "organs": 66275,
-   "clusters": 8292,
-   "coverage": 0.5325,
+   "sourceTriangles": 477928,
+   "organs": 65682,
+   "vertices": 1021554,
+   "clusters": 8123,
+   "coverage": 0.529,
+   "sway": 1.6548,
+   "entries": {
+    "clusters": 8123,
+    "farChunks": 10
+   },
    "levels": [
     {
-     "triangles": 487758,
+     "triangles": 477928,
      "error": 0,
      "growth": 1,
      "shortfall": 0
     },
     {
-     "triangles": 245860,
-     "error": 0.01875,
-     "growth": 1.9326,
+     "triangles": 240790,
+     "error": 0.01874,
+     "growth": 1.9314,
      "shortfall": 0
     },
     {
-     "triangles": 124666,
-     "error": 0.02065,
-     "growth": 3.5675,
+     "triangles": 122182,
+     "error": 0.02072,
+     "growth": 3.5629,
      "shortfall": 0
     },
     {
-     "triangles": 63800,
-     "error": 0.02523,
-     "growth": 6.3503,
+     "triangles": 62500,
+     "error": 0.0252,
+     "growth": 6.3377,
      "shortfall": 0
     },
     {
-     "triangles": 31842,
+     "triangles": 31150,
      "error": 0.04012,
-     "growth": 10.8308,
+     "growth": 10.7862,
      "shortfall": 0
     },
     {
-     "triangles": 16304,
-     "error": 0.06532,
-     "growth": 17.5736,
+     "triangles": 15944,
+     "error": 0.06556,
+     "growth": 17.5802,
      "shortfall": 0
     },
     {
-     "triangles": 8877,
-     "error": 0.09871,
-     "growth": 26.0043,
+     "triangles": 8725,
+     "error": 0.09841,
+     "growth": 25.8424,
      "shortfall": 0
     },
     {
-     "triangles": 5101,
-     "error": 0.1406,
-     "growth": 35.1782,
+     "triangles": 5029,
+     "error": 0.14023,
+     "growth": 34.9907,
      "shortfall": 0
     }
    ],
@@ -195,31 +215,31 @@
     "steps": 157,
     "coreTriangles": 6,
     "farFirst": 0,
-    "baseError": 0.29133,
-    "firstError": 0.29133,
-    "lastError": 2.10603,
+    "baseError": 0.29769,
+    "firstError": 0.496,
+    "lastError": 1.413,
     "hops": 6,
-    "knots": 7
+    "knots": 6
    },
    "splat": {
-    "canopy": 0.0915,
-    "seenAlong": 0.7991,
-    "headShare": 0.1211,
+    "canopy": 0.0801,
+    "seenAlong": 0.799,
+    "headShare": 0.1206,
     "topColour": [
-     0.10668,
-     0.14871,
-     0.07549
+     0.10691,
+     0.14881,
+     0.07544
     ],
     "sideColour": [
-     0.10393,
-     0.14652,
-     0.07836
+     0.10441,
+     0.14667,
+     0.0783
     ],
     "sphere": [
-     1.8331,
-     0.7665,
-     2.0452,
-     3.8326
+     1.9885,
+     0.6963,
+     2.1146,
+     3.8309
     ]
    }
   },
@@ -229,8 +249,14 @@
    "variant": 2,
    "sourceTriangles": 469834,
    "organs": 65226,
-   "clusters": 7985,
+   "vertices": 1008320,
+   "clusters": 7979,
    "coverage": 0.509,
+   "sway": 1.7722,
+   "entries": {
+    "clusters": 7979,
+    "farChunks": 10
+   },
    "levels": [
     {
      "triangles": 469834,
@@ -286,14 +312,14 @@
     "steps": 157,
     "coreTriangles": 6,
     "farFirst": 0,
-    "baseError": 0.28501,
-    "firstError": 0.28501,
-    "lastError": 0.6679,
+    "baseError": 0.2897,
+    "firstError": 0.496,
+    "lastError": 1.9861,
     "hops": 7,
-    "knots": 13
+    "knots": 6
    },
    "splat": {
-    "canopy": 0.1003,
+    "canopy": 0.091,
     "seenAlong": 0.8004,
     "headShare": 0.1285,
     "topColour": [
@@ -307,10 +333,10 @@
      0.07759
     ],
     "sphere": [
-     1.8339,
-     0.8115,
-     2.0439,
-     3.7919
+     1.9841,
+     0.6909,
+     2.111,
+     3.8883
     ]
    }
   },
@@ -318,57 +344,63 @@
    "id": 3,
    "mix": 0,
    "variant": 3,
-   "sourceTriangles": 507188,
-   "organs": 70037,
-   "clusters": 8576,
-   "coverage": 0.5426,
+   "sourceTriangles": 478230,
+   "organs": 68354,
+   "vertices": 1034687,
+   "clusters": 8092,
+   "coverage": 0.529,
+   "sway": 1.7115,
+   "entries": {
+    "clusters": 8092,
+    "farChunks": 10
+   },
    "levels": [
     {
-     "triangles": 507188,
+     "triangles": 478230,
      "error": 0,
      "growth": 1,
      "shortfall": 0
     },
     {
-     "triangles": 255216,
-     "error": 0.01898,
-     "growth": 1.9558,
+     "triangles": 240884,
+     "error": 0.01889,
+     "growth": 1.9473,
      "shortfall": 0
     },
     {
-     "triangles": 127919,
-     "error": 0.02002,
-     "growth": 3.6246,
+     "triangles": 120933,
+     "error": 0.02051,
+     "growth": 3.635,
      "shortfall": 0
     },
     {
-     "triangles": 65201,
-     "error": 0.02567,
-     "growth": 6.4697,
+     "triangles": 61575,
+     "error": 0.02598,
+     "growth": 6.4748,
      "shortfall": 0
     },
     {
-     "triangles": 32154,
-     "error": 0.04009,
-     "growth": 11.0897,
+     "triangles": 30486,
+     "error": 0.04039,
+     "growth": 11.0511,
      "shortfall": 0
     },
     {
-     "triangles": 16627,
-     "error": 0.06482,
-     "growth": 17.6824,
+     "triangles": 15699,
+     "error": 0.06524,
+     "growth": 17.6477,
      "shortfall": 0
     },
     {
-     "triangles": 9141,
-     "error": 0.0979,
-     "growth": 25.9279,
+     "triangles": 8607,
+     "error": 0.09868,
+     "growth": 25.877,
      "shortfall": 0
     },
     {
-     "triangles": 5368,
-     "error": 0.14286,
-     "growth": 35.2647,
+     "triangles": 5132,
+     "error": 0.14359,
+     "growth": 35.1639,
      "shortfall": 0
     }
    ],
@@ -377,31 +409,31 @@
     "steps": 157,
     "coreTriangles": 6,
     "farFirst": 0,
-    "baseError": 0.27564,
-    "firstError": 0.27564,
-    "lastError": 0.62827,
-    "hops": 6,
-    "knots": 13
+    "baseError": 0.29628,
+    "firstError": 0.496,
+    "lastError": 3.82176,
+    "hops": 8,
+    "knots": 8
    },
    "splat": {
-    "canopy": 0.116,
-    "seenAlong": 0.7993,
-    "headShare": 0.1224,
+    "canopy": 0.0932,
+    "seenAlong": 0.799,
+    "headShare": 0.1207,
     "topColour": [
-     0.10736,
-     0.15033,
-     0.07595
+     0.10804,
+     0.15068,
+     0.07578
     ],
     "sideColour": [
-     0.10349,
-     0.14734,
-     0.07805
+     0.10495,
+     0.14791,
+     0.07814
     ],
     "sphere": [
-     1.833,
-     0.7334,
-     2.0453,
-     3.8375
+     1.9876,
+     0.6971,
+     2.1151,
+     4.3985
     ]
    }
   },
@@ -409,57 +441,63 @@
    "id": 4,
    "mix": 1,
    "variant": 0,
-   "sourceTriangles": 615583,
-   "organs": 115391,
-   "clusters": 10306,
-   "coverage": 0.6534,
+   "sourceTriangles": 466705,
+   "organs": 98928,
+   "vertices": 1128547,
+   "clusters": 7846,
+   "coverage": 0.5623,
+   "sway": 1.7842,
+   "entries": {
+    "clusters": 7846,
+    "farChunks": 10
+   },
    "levels": [
     {
-     "triangles": 615583,
+     "triangles": 466705,
      "error": 0,
      "growth": 1,
      "shortfall": 0
     },
     {
-     "triangles": 307938,
-     "error": 0.01792,
-     "growth": 1.9326,
+     "triangles": 233212,
+     "error": 0.01799,
+     "growth": 1.918,
      "shortfall": 0
     },
     {
-     "triangles": 152923,
-     "error": 0.02948,
-     "growth": 3.3882,
+     "triangles": 115877,
+     "error": 0.03016,
+     "growth": 3.3555,
      "shortfall": 0
     },
     {
-     "triangles": 77370,
-     "error": 0.0482,
-     "growth": 5.6713,
+     "triangles": 58747,
+     "error": 0.04958,
+     "growth": 5.6043,
      "shortfall": 0
     },
     {
-     "triangles": 39672,
-     "error": 0.07396,
-     "growth": 9.022,
+     "triangles": 29955,
+     "error": 0.07632,
+     "growth": 8.8812,
      "shortfall": 0
     },
     {
-     "triangles": 20555,
-     "error": 0.11362,
-     "growth": 13.7797,
+     "triangles": 15779,
+     "error": 0.11491,
+     "growth": 13.3369,
      "shortfall": 0
     },
     {
-     "triangles": 10823,
-     "error": 0.16773,
-     "growth": 20.3062,
+     "triangles": 8571,
+     "error": 0.16515,
+     "growth": 19.1816,
      "shortfall": 0
     },
     {
-     "triangles": 6446,
-     "error": 0.22264,
-     "growth": 27.0485,
+     "triangles": 5199,
+     "error": 0.21954,
+     "growth": 25.4802,
      "shortfall": 0
     }
    ],
@@ -468,31 +506,31 @@
     "steps": 157,
     "coreTriangles": 6,
     "farFirst": 0,
-    "baseError": 0.45797,
-    "firstError": 0.45797,
-    "lastError": 1.00685,
-    "hops": 8,
-    "knots": 5
+    "baseError": 0.496,
+    "firstError": 0.496,
+    "lastError": 1.3635,
+    "hops": 6,
+    "knots": 7
    },
    "splat": {
-    "canopy": 0.1525,
-    "seenAlong": 0.8163,
-    "headShare": 0.2325,
+    "canopy": 0.102,
+    "seenAlong": 0.8167,
+    "headShare": 0.2355,
     "topColour": [
-     0.13208,
-     0.15834,
-     0.06877
+     0.13371,
+     0.15856,
+     0.06851
     ],
     "sideColour": [
-     0.1345,
-     0.15881,
-     0.07002
+     0.13858,
+     0.15997,
+     0.06997
     ],
     "sphere": [
-     2.132,
-     0.7676,
-     2.0945,
-     3.5649
+     2.0853,
+     0.6885,
+     1.9946,
+     3.7667
     ]
    }
   },
@@ -500,57 +538,63 @@
    "id": 5,
    "mix": 1,
    "variant": 1,
-   "sourceTriangles": 625907,
-   "organs": 117715,
-   "clusters": 10498,
-   "coverage": 0.6632,
+   "sourceTriangles": 475520,
+   "organs": 101928,
+   "vertices": 1160050,
+   "clusters": 7995,
+   "coverage": 0.5734,
+   "sway": 1.7842,
+   "entries": {
+    "clusters": 7995,
+    "farChunks": 10
+   },
    "levels": [
     {
-     "triangles": 625907,
+     "triangles": 475520,
      "error": 0,
      "growth": 1,
      "shortfall": 0
     },
     {
-     "triangles": 313271,
-     "error": 0.01764,
-     "growth": 1.9229,
+     "triangles": 238259,
+     "error": 0.01759,
+     "growth": 1.9106,
      "shortfall": 0
     },
     {
-     "triangles": 155746,
-     "error": 0.02923,
-     "growth": 3.357,
+     "triangles": 118369,
+     "error": 0.03001,
+     "growth": 3.3334,
      "shortfall": 0
     },
     {
-     "triangles": 78936,
-     "error": 0.04759,
-     "growth": 5.6232,
+     "triangles": 60239,
+     "error": 0.04887,
+     "growth": 5.5673,
      "shortfall": 0
     },
     {
-     "triangles": 40489,
-     "error": 0.07305,
-     "growth": 8.9454,
+     "triangles": 30857,
+     "error": 0.07552,
+     "growth": 8.8429,
      "shortfall": 0
     },
     {
-     "triangles": 21419,
-     "error": 0.11242,
-     "growth": 13.7501,
+     "triangles": 16600,
+     "error": 0.11293,
+     "growth": 13.3011,
      "shortfall": 0
     },
     {
-     "triangles": 11436,
-     "error": 0.16618,
-     "growth": 20.3465,
+     "triangles": 9282,
+     "error": 0.16076,
+     "growth": 19.1301,
      "shortfall": 0
     },
     {
-     "triangles": 6718,
-     "error": 0.22014,
-     "growth": 27.1767,
+     "triangles": 5569,
+     "error": 0.21208,
+     "growth": 25.4118,
      "shortfall": 0
     }
    ],
@@ -559,31 +603,31 @@
     "steps": 157,
     "coreTriangles": 6,
     "farFirst": 0,
-    "baseError": 0.44813,
-    "firstError": 0.44813,
-    "lastError": 1.81337,
-    "hops": 8,
-    "knots": 7
+    "baseError": 0.48122,
+    "firstError": 0.496,
+    "lastError": 1.28174,
+    "hops": 9,
+    "knots": 9
    },
    "splat": {
-    "canopy": 0.162,
-    "seenAlong": 0.8159,
-    "headShare": 0.2292,
+    "canopy": 0.1137,
+    "seenAlong": 0.8164,
+    "headShare": 0.2328,
     "topColour": [
-     0.13224,
-     0.15986,
-     0.06972
+     0.13369,
+     0.15988,
+     0.06899
     ],
     "sideColour": [
-     0.13379,
-     0.16019,
-     0.0712
+     0.13849,
+     0.16108,
+     0.07045
     ],
     "sphere": [
-     2.1322,
-     0.7642,
-     2.0944,
-     3.5677
+     2.0854,
+     0.6443,
+     1.9953,
+     3.6811
     ]
    }
   },
@@ -591,57 +635,63 @@
    "id": 6,
    "mix": 1,
    "variant": 2,
-   "sourceTriangles": 650941,
-   "organs": 121453,
-   "clusters": 10895,
-   "coverage": 0.6765,
+   "sourceTriangles": 473721,
+   "organs": 101930,
+   "vertices": 1155947,
+   "clusters": 7979,
+   "coverage": 0.5669,
+   "sway": 1.839,
+   "entries": {
+    "clusters": 7979,
+    "farChunks": 10
+   },
    "levels": [
     {
-     "triangles": 650941,
+     "triangles": 473721,
      "error": 0,
      "growth": 1,
      "shortfall": 0
     },
     {
-     "triangles": 325841,
-     "error": 0.01776,
-     "growth": 1.9265,
+     "triangles": 237684,
+     "error": 0.01787,
+     "growth": 1.918,
      "shortfall": 0
     },
     {
-     "triangles": 162167,
-     "error": 0.02891,
-     "growth": 3.3705,
+     "triangles": 118106,
+     "error": 0.02998,
+     "growth": 3.3321,
      "shortfall": 0
     },
     {
-     "triangles": 81669,
-     "error": 0.04725,
-     "growth": 5.6375,
+     "triangles": 59733,
+     "error": 0.0488,
+     "growth": 5.5407,
      "shortfall": 0
     },
     {
-     "triangles": 41975,
-     "error": 0.07284,
-     "growth": 8.9957,
+     "triangles": 30503,
+     "error": 0.07556,
+     "growth": 8.8414,
      "shortfall": 0
     },
     {
-     "triangles": 22151,
-     "error": 0.1108,
-     "growth": 13.6956,
+     "triangles": 16467,
+     "error": 0.11221,
+     "growth": 13.2232,
      "shortfall": 0
     },
     {
-     "triangles": 11957,
-     "error": 0.1618,
-     "growth": 20.0318,
+     "triangles": 9216,
+     "error": 0.15932,
+     "growth": 18.8728,
      "shortfall": 0
     },
     {
-     "triangles": 6973,
-     "error": 0.2167,
-     "growth": 26.9031,
+     "triangles": 5553,
+     "error": 0.21179,
+     "growth": 25.2774,
      "shortfall": 0
     }
    ],
@@ -650,31 +700,31 @@
     "steps": 157,
     "coreTriangles": 6,
     "farFirst": 0,
-    "baseError": 0.44422,
-    "firstError": 0.44422,
-    "lastError": 1.13866,
-    "hops": 7,
+    "baseError": 0.48755,
+    "firstError": 0.496,
+    "lastError": 1.949,
+    "hops": 8,
     "knots": 6
    },
    "splat": {
-    "canopy": 0.1671,
-    "seenAlong": 0.8163,
-    "headShare": 0.2322,
+    "canopy": 0.1099,
+    "seenAlong": 0.8171,
+    "headShare": 0.2381,
     "topColour": [
-     0.13233,
-     0.15926,
-     0.06934
+     0.13419,
+     0.15893,
+     0.06887
     ],
     "sideColour": [
-     0.13362,
-     0.15946,
-     0.07046
+     0.1382,
+     0.16035,
+     0.07023
     ],
     "sphere": [
-     2.1318,
-     0.7573,
-     2.0945,
-     3.5614
+     2.0855,
+     0.6412,
+     1.9965,
+     4.0048
     ]
    }
   },
@@ -682,57 +732,63 @@
    "id": 7,
    "mix": 1,
    "variant": 3,
-   "sourceTriangles": 593681,
-   "organs": 111141,
-   "clusters": 10007,
-   "coverage": 0.6569,
+   "sourceTriangles": 474721,
+   "organs": 98496,
+   "vertices": 1143592,
+   "clusters": 8012,
+   "coverage": 0.5826,
+   "sway": 1.7842,
+   "entries": {
+    "clusters": 8012,
+    "farChunks": 10
+   },
    "levels": [
     {
-     "triangles": 593681,
+     "triangles": 474721,
      "error": 0,
      "growth": 1,
      "shortfall": 0
     },
     {
-     "triangles": 298053,
-     "error": 0.01777,
-     "growth": 1.9302,
+     "triangles": 238562,
+     "error": 0.01784,
+     "growth": 1.9277,
      "shortfall": 0
     },
     {
-     "triangles": 148672,
-     "error": 0.02928,
-     "growth": 3.3722,
+     "triangles": 118703,
+     "error": 0.03029,
+     "growth": 3.3702,
      "shortfall": 0
     },
     {
-     "triangles": 75769,
-     "error": 0.04705,
-     "growth": 5.6362,
+     "triangles": 60320,
+     "error": 0.04959,
+     "growth": 5.6988,
      "shortfall": 0
     },
     {
-     "triangles": 39180,
-     "error": 0.07326,
-     "growth": 9.0556,
+     "triangles": 30845,
+     "error": 0.07653,
+     "growth": 9.0866,
      "shortfall": 0
     },
     {
-     "triangles": 20584,
-     "error": 0.1124,
-     "growth": 13.9194,
+     "triangles": 16531,
+     "error": 0.11439,
+     "growth": 13.712,
      "shortfall": 0
     },
     {
-     "triangles": 11197,
-     "error": 0.16187,
-     "growth": 20.2063,
+     "triangles": 9140,
+     "error": 0.16061,
+     "growth": 19.3361,
      "shortfall": 0
     },
     {
-     "triangles": 6412,
-     "error": 0.21856,
-     "growth": 27.0387,
+     "triangles": 5360,
+     "error": 0.21472,
+     "growth": 25.7799,
      "shortfall": 0
     }
    ],
@@ -741,31 +797,31 @@
     "steps": 157,
     "coreTriangles": 6,
     "farFirst": 0,
-    "baseError": 0.45613,
-    "firstError": 0.45613,
-    "lastError": 1.00458,
-    "hops": 8,
-    "knots": 5
+    "baseError": 0.48119,
+    "firstError": 0.496,
+    "lastError": 1.49613,
+    "hops": 7,
+    "knots": 6
    },
    "splat": {
-    "canopy": 0.1583,
-    "seenAlong": 0.815,
-    "headShare": 0.2232,
+    "canopy": 0.1186,
+    "seenAlong": 0.8153,
+    "headShare": 0.225,
     "topColour": [
-     0.13149,
-     0.15961,
-     0.06882
+     0.13281,
+     0.1599,
+     0.06843
     ],
     "sideColour": [
-     0.13482,
-     0.1598,
-     0.07033
+     0.13867,
+     0.16089,
+     0.07014
     ],
     "sphere": [
-     2.132,
-     0.7502,
-     2.0945,
-     3.5642
+     2.0868,
+     0.6472,
+     1.9932,
+     3.7235
     ]
    }
   },
@@ -775,8 +831,14 @@
    "variant": 0,
    "sourceTriangles": 462604,
    "organs": 73702,
-   "clusters": 7838,
+   "vertices": 1026764,
+   "clusters": 7835,
    "coverage": 0.5607,
+   "sway": 1.7244,
+   "entries": {
+    "clusters": 7835,
+    "farChunks": 10
+   },
    "levels": [
     {
      "triangles": 462604,
@@ -832,14 +894,14 @@
     "steps": 157,
     "coreTriangles": 6,
     "farFirst": 0,
-    "baseError": 0.3582,
-    "firstError": 0.3582,
-    "lastError": 1.07912,
+    "baseError": 0.36488,
+    "firstError": 0.496,
+    "lastError": 1.61022,
     "hops": 6,
-    "knots": 5
+    "knots": 4
    },
    "splat": {
-    "canopy": 0.1143,
+    "canopy": 0.105,
     "seenAlong": 0.8043,
     "headShare": 0.1517,
     "topColour": [
@@ -853,10 +915,10 @@
      0.07445
     ],
     "sphere": [
-     2.0883,
-     0.7521,
-     1.9927,
-     3.7753
+     2.0147,
+     0.6735,
+     2.0052,
+     3.8369
     ]
    }
   },
@@ -866,8 +928,14 @@
    "variant": 1,
    "sourceTriangles": 463511,
    "organs": 74082,
-   "clusters": 7851,
+   "vertices": 1030162,
+   "clusters": 7848,
    "coverage": 0.5575,
+   "sway": 1.7244,
+   "entries": {
+    "clusters": 7848,
+    "farChunks": 10
+   },
    "levels": [
     {
      "triangles": 463511,
@@ -923,14 +991,14 @@
     "steps": 157,
     "coreTriangles": 6,
     "farFirst": 0,
-    "baseError": 0.35952,
-    "firstError": 0.35952,
-    "lastError": 0.95408,
-    "hops": 5,
-    "knots": 7
+    "baseError": 0.36553,
+    "firstError": 0.496,
+    "lastError": 1.78248,
+    "hops": 8,
+    "knots": 4
    },
    "splat": {
-    "canopy": 0.1115,
+    "canopy": 0.1022,
     "seenAlong": 0.8046,
     "headShare": 0.1535,
     "topColour": [
@@ -944,10 +1012,10 @@
      0.07464
     ],
     "sphere": [
-     2.0866,
-     0.7638,
-     1.9928,
-     3.7457
+     2.0151,
+     0.6786,
+     1.997,
+     3.8608
     ]
    }
   },
@@ -957,8 +1025,14 @@
    "variant": 2,
    "sourceTriangles": 462300,
    "organs": 70705,
-   "clusters": 7826,
+   "vertices": 1012675,
+   "clusters": 7823,
    "coverage": 0.5671,
+   "sway": 1.817,
+   "entries": {
+    "clusters": 7823,
+    "farChunks": 10
+   },
    "levels": [
     {
      "triangles": 462300,
@@ -1014,14 +1088,14 @@
     "steps": 157,
     "coreTriangles": 6,
     "farFirst": 0,
-    "baseError": 0.36608,
-    "firstError": 0.36608,
-    "lastError": 0.90433,
+    "baseError": 0.37183,
+    "firstError": 0.496,
+    "lastError": 1.37518,
     "hops": 7,
-    "knots": 5
+    "knots": 6
    },
    "splat": {
-    "canopy": 0.108,
+    "canopy": 0.0987,
     "seenAlong": 0.8036,
     "headShare": 0.1479,
     "topColour": [
@@ -1035,10 +1109,10 @@
      0.0744
     ],
     "sphere": [
-     2.0869,
-     0.7475,
-     1.9928,
-     3.7512
+     2.015,
+     0.6707,
+     2.0019,
+     3.8428
     ]
    }
   },
@@ -1048,8 +1122,14 @@
    "variant": 3,
    "sourceTriangles": 468803,
    "organs": 74500,
-   "clusters": 7927,
+   "vertices": 1038779,
+   "clusters": 7922,
    "coverage": 0.5618,
+   "sway": 1.7244,
+   "entries": {
+    "clusters": 7922,
+    "farChunks": 10
+   },
    "levels": [
     {
      "triangles": 468803,
@@ -1105,14 +1185,14 @@
     "steps": 157,
     "coreTriangles": 6,
     "farFirst": 0,
-    "baseError": 0.35256,
-    "firstError": 0.35256,
-    "lastError": 1.09987,
+    "baseError": 0.35876,
+    "firstError": 0.496,
+    "lastError": 1.40091,
     "hops": 7,
     "knots": 7
    },
    "splat": {
-    "canopy": 0.1138,
+    "canopy": 0.1045,
     "seenAlong": 0.8044,
     "headShare": 0.1523,
     "topColour": [
@@ -1126,25 +1206,26 @@
      0.07455
     ],
     "sphere": [
-     2.0873,
-     0.7591,
-     1.9928,
-     3.7586
+     2.0149,
+     0.6716,
+     2.0061,
+     3.9004
     ]
    }
   }
  ],
  "atlas": {
-  "words": 48455489,
-  "bytes": 193821956,
-  "sha256": "b36a4494e90b0a80712066c6205e942131f54c951738deecdb74b95586f41fd9",
+  "words": 99058485,
+  "bytes": 396233940,
+  "sha256": "eee90aaec58e27d9fb1a328aeeb70b4bdacddcde42336be194ff93840eeedf4a",
   "gzip": {
    "file": "atlas.bin.gz",
-   "bytes": 84255733,
-   "sha256": "68c1f181375a66a1621595170063e4b780acb0012492306621d2132d21f38b8e"
+   "bytes": 194986066,
+   "sha256": "d34b60c3c113e824568785c68666c1eeb82e8402c7c19c103ca64e615696b861"
   },
-  "clusters": 105689,
-  "vertices": 6968751,
-  "indices": 37727946
- }
+  "clusters": 95138,
+  "vertices": 12721249,
+  "indices": 33904728
+ },
+ "bakeSeconds": 125
 }

@@ -1663,7 +1663,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const meadowPack=await meadowPromise;
   let meadowGrass=null;
   if(meadowPack)try{
-    meadowGrass=await createMeadowGrass({device,shader,pack:meadowPack,region:activeRegion,heights,biome,beaches:proceduralPack?.beaches??null,port:proceduralPack?.port??null,city:proceduralPack?.city??null,board:proceduralPack?.board??null,inlandWater:proceduralPack?.inlandWater??null,elevation,nearDomain,resources:nearResources,clouds,format,samples,shadowFormat:activeLandShadows.format,waterOptics:waterOpticsResolvedPromise,isMobile});
+    meadowGrass=await createMeadowGrass({device,shader,pack:meadowPack,region:activeRegion,heights,biome,beaches:proceduralPack?.beaches??null,port:proceduralPack?.port??null,city:proceduralPack?.city??null,board:proceduralPack?.board??null,inlandWater:proceduralPack?.inlandWater??null,elevation,nearDomain,resources:nearResources,clouds,format,samples,shadowFormat:activeLandShadows.format,waterOptics:waterOpticsResolvedPromise,isMobile,worldOffset});
   }catch(error){meadowFailure=error.message;}
   const meadowGrassStats=meadowGrass?.stats??{loaded:false,error:meadowFailure};
   let tradeVessels=proceduralPack?await createTradeVessels({device,format,samples,shader,computePipe,oceanBridge,resources:nearResources,shadowFormat:activeLandShadows.format,sharedCrew:options?.sharedCrew??null,submerged:submerged??null}):null;
@@ -2845,7 +2845,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       if(Math.abs(nx-worldOffset.x)<0.05&&Math.abs(nz-worldOffset.z)<0.05)return;
       worldOffset.x=nx;worldOffset.z=nz;
       cityContinuum?.setWorldOffset(nx,nz);prefabs?.setWorldOffset(nx,nz);forest?.setWorldOffset(nx,nz);
-      boulderContinuum?.setWorldOffset(nx,nz);
+      boulderContinuum?.setWorldOffset(nx,nz);meadowGrass?.setWorldOffset(nx,nz);
       landContinuum?.setWorldOffset(nx,nz);
       writeNearDomainUniform();
     },
@@ -2865,7 +2865,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       (dolphins?.state??dolphins)?.shift?.(-dx,-dz);
       worldOffset.x=0;worldOffset.z=0;
       cityContinuum?.setWorldOffset(0,0);prefabs?.setWorldOffset(0,0);forest?.setWorldOffset(0,0);
-      boulderContinuum?.setWorldOffset(0,0);
+      boulderContinuum?.setWorldOffset(0,0);meadowGrass?.setWorldOffset(0,0);
       landContinuum?.setWorldOffset(0,0);
       writeNearDomainUniform();
       lastCamera=null;

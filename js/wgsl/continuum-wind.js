@@ -16,7 +16,9 @@
 //                so that up goes toward `bearing` (radians in the type's frame, from +x toward +z).
 //       WOUNDED  [height, bearing, severity (0 to 1), 0]: a gouge on the side the ball came from (bearing), its wood
 //                pressed in (continuumWindWound; a material reads the same to show the raw wood).
-//   [2] push: a displacement at full weight (the type's metres, in its frame), 0 for none.
+//   [2] push: a displacement at full weight (the type's metres, in its frame), 0 for none; and in w the gust's wave
+//       number along the wind (radians a metre of the scene's frame): a body wide enough to span the gust fronts, as a
+//       meadow's patch is, sees them roll across it downwind, and its neighbours see the same fronts. 0 for a tree.
 import { CONTINUUM_KIND, CONTINUUM_HEADER, CONTINUUM_TYPE, CONTINUUM_STREAMS } from '../continuum-format.js';
 import { defineContinuumKind } from './continuum-kinds.js';
 
@@ -72,11 +74,14 @@ fn continuumWindPose(record:ContinuumRecord,data:u32,part:u32,vertex:u32,p:Conti
   // The whole bends with the gust, its branches bob, its leaves flutter: three motions at three speeds.
   let t=F.camPos.w;let rate=1.0+gust.z;
   let toward=continuumQuat(vec4f(-record.turn.xyz,record.turn.w),vec3f(F.windP[0].x,0.0,F.windP[0].y));
-  let bend=0.65+0.35*sin(t*1.1*rate+gust.x);
-  let bob=0.3*sin(t*2.3*rate+gust.x+branch);
+  let push=continuumPoses[data+2u];
+  let downwind=F.windP[0].xy/max(length(F.windP[0].xy),1e-4);
+  let front=gust.x-push.w*dot(continuumPlace(record,p.position).xz,downwind);
+  let bend=0.65+0.35*sin(t*1.1*rate+front);
+  let bob=0.3*sin(t*2.3*rate+front+branch);
   let flutter=0.25*sin(t*9.0*rate+branch*7.0);
   let sway=gust.y*weight;
-  out.position+=toward*(sway*(bend+bob+flutter))+vec3f(0.0,sway*0.6*(bob+flutter),0.0)+continuumPoses[data+2u].xyz*weight;
+  out.position+=toward*(sway*(bend+bob+flutter))+vec3f(0.0,sway*0.6*(bob+flutter),0.0)+push.xyz*weight;
   return out;
 }
 fn continuumWindSphere(record:ContinuumRecord,data:u32,part:u32,sphere:vec4f)->vec4f {

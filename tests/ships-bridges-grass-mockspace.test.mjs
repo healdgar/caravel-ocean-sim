@@ -17,7 +17,8 @@ import {
   generateProceduralCoastalPack,
   growFrontierParcel,
 } from '../js/coastal-world.js';
-import { MEADOW_CUT_WGSL, MEADOW_RENDER_WGSL } from '../js/meadow-grass.js';
+import { MEADOW_CONTINUUM_SPEC, meadowContinuumStandWGSL } from '../js/wgsl/meadow-continuum.js';
+import { continuumModuleWGSL } from '../js/wgsl/continuum-cut.js';
 import { validateMeadowGrass } from '../js/meadow-continuum.js';
 import { OLD_WORLD_LAND, registerBakedBoard } from '../js/old-world.js';
 import {
@@ -230,30 +231,28 @@ test('meadow grass is one continuum atlas cut on the GPU: clusters, a 4..6 trian
   const manifest = validateMeadowGrass(JSON.parse(fs.readFileSync('assets/ground-cover/portugal/meadows-gpu/manifest.json', 'utf8')));
   assert.equal(manifest.patchMetres, 4);
   assert.equal(manifest.levels, 8);
-  assert.equal(manifest.variants.length, 12);
-  for (const variant of manifest.variants) {
+  assert.equal(manifest.types.length, 12);
+  for (const variant of manifest.types) {
     assert.ok(variant.chain.coreTriangles >= 4 && variant.chain.coreTriangles <= 6, `variant ${variant.id} must end in a 4..6 triangle core, got ${variant.chain.coreTriangles}`);
     assert.ok(variant.clusters > 0 && variant.chain.baseTriangles > variant.chain.coreTriangles);
     // Each variant's share of the ground its sward hides, which the error counts when it is lost.
     assert.ok(variant.coverage > 0 && variant.coverage <= 1);
   }
-  // The cut reads the scene's pixel error and the continuum's core; it never clips at a fixed range.
-  assert.equal(MEADOW_CUT_WGSL.includes('280.0'), false, 'the meadow cut must not keep a hard 280 m clip');
-  assert.equal(/\bdiscard\b/.test(MEADOW_CUT_WGSL), false);
-  assert.equal(/\bdiscard\b/.test(MEADOW_RENDER_WGSL), false, 'MEADOW_RENDER_WGSL must remain discard-free (MSAA sample_mask)');
-  assert.ok(MEADOW_RENDER_WGSL.includes('@binding(13)'), 'MEADOW_RENDER_WGSL missing ballistic wakes @binding(13)');
-  assert.ok(MEADOW_RENDER_WGSL.includes('@binding(14)'), 'MEADOW_RENDER_WGSL missing landCraterLookup @binding(14)');
-  assert.ok(MEADOW_RENDER_WGSL.includes('@binding(15)'), 'MEADOW_RENDER_WGSL missing terrain landLight @binding(15)');
-  assert.ok(MEADOW_RENDER_WGSL.includes('@binding(16)'), 'MEADOW_RENDER_WGSL missing per-vertex meadowCover @binding(16)');
-  assert.ok(MEADOW_RENDER_WGSL.includes('@binding(17)'), 'MEADOW_RENDER_WGSL missing terrain landAlbedo @binding(17)');
-  assert.ok(MEADOW_RENDER_WGSL.includes('@binding(18)'), 'MEADOW_RENDER_WGSL missing terrain landSampler @binding(18)');
-  assert.ok(MEADOW_RENDER_WGSL.includes('@binding(22)'), 'MEADOW_RENDER_WGSL missing landCraterField @binding(22)');
-  assert.ok(MEADOW_RENDER_WGSL.includes('grassWindWave'), 'MEADOW_RENDER_WGSL missing grassWindWave sync');
+  // The one cut reads the scene's pixel error and the continuum's core; the stand pass never clips at a fixed range.
+  const stand = meadowContinuumStandWGSL();
+  const view = continuumModuleWGSL({ pass: 'view', material: MEADOW_CONTINUUM_SPEC });
+  assert.equal(stand.includes('280.0'), false, 'the meadow stand pass must not keep a hard 280 m clip');
+  assert.equal(/\bdiscard\b/.test(stand), false);
+  assert.equal(/\bdiscard\b/.test(view), false, 'the meadow view must remain discard-free (MSAA sample_mask)');
+  for (const [binding, name] of [[13, 'ballistic wakes'], [14, 'landCraterLookup'], [15, 'terrain landLight'], [16, 'meadowCover'], [17, 'terrain landAlbedo'], [18, 'terrain landSampler'], [22, 'landCraterField']]) {
+    assert.ok(view.includes(`@group(0) @binding(${binding})`), `the meadow view is missing ${name} @binding(${binding})`);
+  }
+  assert.match(stand, /fn meadowWindField\(/, 'the meadow stand pass is missing the wind field grassWindWave keeps time with');
 
   const meadowSrc = fs.readFileSync('js/meadow-grass.js', 'utf8');
-  const reqBlock = meadowSrc.slice(meadowSrc.indexOf('export function requestMeadowPipelines'), meadowSrc.indexOf('export function meadowBlocksOf'));
+  const reqBlock = meadowSrc.slice(meadowSrc.indexOf('export function requestMeadowStand'), meadowSrc.indexOf('const MEADOW_STAND_BINDINGS'));
   assert.ok(reqBlock.includes('createComputePipelineAsync'));
-  assert.equal(reqBlock.includes('Promise.all'), false,'requestMeadowPipelines must compile pipelines sequentially to avoid D3D12 PSO OOM');
+  assert.equal(reqBlock.includes('Promise.all'), false, 'requestMeadowStand must compile pipelines sequentially to avoid D3D12 PSO OOM');
 });
 
 test('ungrown frontier parcels & neighbor sections stay mocked until player entry, then grow once on first entry', () => {

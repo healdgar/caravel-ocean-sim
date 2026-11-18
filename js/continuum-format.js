@@ -180,13 +180,16 @@ export function packContinuumCluster({ lod, parentLod, cull, error, parentError,
 // `streams` a stream's words for a welded vertex (`{ uv: (v) => [word] }`), `farStreams` the same for far vertex i
 // (`{ rider: (i) => [word] }` for a far body posed by what its vertices ride; a skinned body's far points wear the
 // skin of the source nearest them; a far vertex without reads zeros), each packed only where some vertex's words are
-// not all zero, and `splatArea` the outline's area (an ellipse's if not given).
+// not all zero, and `splatArea` the outline's area (an ellipse's if not given). `frame` ({ low, span }): the
+// quantization, for a family whose types must share one (a meadow's patches, which tile and drape alike at their
+// seams); every point must lie within it.
 export function packContinuumBody(packing, { welded, clusters, far }) {
-  const { triangles = 0, flags = 0, material = [], vertex = () => ({}), farWord = () => 0, streams = {}, farStreams = {}, splat = far.splat } = packing;
+  const { triangles = 0, flags = 0, material = [], vertex = () => ({}), farWord = () => 0, streams = {}, farStreams = {}, splat = far.splat, frame = null } = packing;
   if (material.length > CONTINUUM_MATERIAL_WORDS) throw Error(`A continuum material block holds ${material.length} words`);
   const low = [Infinity, Infinity, Infinity], high = [-Infinity, -Infinity, -Infinity];
   for (const P of [welded.position, far.position]) for (let v = 0; v < P.length / 3; v++) for (let k = 0; k < 3; k++) { low[k] = Math.min(low[k], P[v * 3 + k]); high[k] = Math.max(high[k], P[v * 3 + k]); }
-  const span = Math.max(...high.map((v, k) => v - low[k]), 1e-6), quant = { low, span };
+  if (frame && [0, 1, 2].some((k) => low[k] < frame.low[k] || high[k] > frame.low[k] + frame.span)) throw Error(`A continuum body reaches outside its frame: ${low.map((v) => v.toFixed(3))} to ${high.map((v) => v.toFixed(3))}`);
+  const span = frame ? frame.span : Math.max(...high.map((v, k) => v - low[k]), 1e-6), quant = frame ? { low: [...frame.low], span } : { low, span };
   // Every point it can draw, grown by the far body's largest inflation, within one sphere.
   const centre = low.map((v, k) => (v + high[k]) / 2);
   let radius = 0;
@@ -227,7 +230,7 @@ export function packContinuumBody(packing, { welded, clusters, far }) {
   }
   // The type's record, its places counted from the body's own clusters, vertices and far body.
   const F = CONTINUUM_TYPE, rx = splat.rx, ry = splat.ry, area = splat.area ?? Math.PI * rx * ry;
-  floats.set([...low, span], typeAt + F.low);
+  floats.set([...quant.low, span], typeAt + F.low);
   floats.set([...centre, radius], typeAt + F.sphere);
   words.set([0, clusters.count, ownVertices, S, V, 0, trianglesAt, stepsAt, far.farFirst], typeAt + F.clusterFirst);
   // The splat's triangle circumscribes its outline's ellipse (corners (0, 2) and (±√3, -1) of its radii, an area of
@@ -235,7 +238,7 @@ export function packContinuumBody(packing, { welded, clusters, far }) {
   floats.set([rx, ry, ...splat.centre, rx > 0 && ry > 0 ? Math.sqrt(area / (3 * Math.sqrt(3) * rx * ry)) : CONTINUUM_SPLAT_AREA], typeAt + F.splatRx);
   words[typeAt + F.flags] = flags >>> 0;
   words.set(Uint32Array.from(material, (w) => w >>> 0), typeAt + F.material);
-  return { words, low, span, centre, radius };
+  return { words, low: quant.low, span, centre, radius };
 }
 // A body of pieces (js/building-fracture.js): a struck building's, each piece a part. It is drawn as clusters alone,
 // every cluster riding its piece's flight, so it carries no far body, no chain and no splat.

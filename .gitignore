@@ -29,7 +29,7 @@ assets/ports/1550/*.glb
 assets/ports/1550/*.png
 !assets/ports/1550/land-materials-pbr.png
 assets/ports/1550/*/*.png
-# Large raw offline meadow source binaries (compact meadows-gpu/ pack is tracked)
+# Large raw offline meadow source binaries (the meadows-gpu/ manifests are tracked)
 assets/ground-cover/portugal/meadows/
 # The people continuum's baked streams: npm run deploy publishes them, scripts/prepare-crew-continuum.mjs bakes them.
 assets/crew/continuum/*/*
@@ -45,3 +45,7 @@ assets/ground-cover/tropical/meadows/
 # scripts/prepare-forest-continuum.mjs saba bakes it (its manifest, with the atlas's digest, is tracked).
 assets/forest-scenery/saba/continuum/atlas.bin.gz
 docs/assets/forest-scenery/saba/continuum/atlas.bin.*gz
+# The meadow continuum's atlases are past GitHub's 100 MB a file: npm run deploy publishes them,
+# scripts/prepare-meadow-grass.mjs bakes them (their manifests, with each atlas's digest, are tracked).
+assets/ground-cover/*/meadows-gpu/atlas.bin.gz
+docs/assets/ground-cover/*/meadows-gpu/atlas.bin.*gz

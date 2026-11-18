@@ -3,25 +3,30 @@
 // Bakes the meadow continuum (js/meadow-continuum.js; AGENTS.md rule 3) from a pack of meadow groves: twelve 4 m
 // tiles (three mixes, four variants each) drawn plant by plant at full resolution, kept out of git in
 // assets/ground-cover/<pack>/meadows/ (the Portuguese from forestmodeler, the tropical from
-// scripts/prepare-tropical-sward.mjs). Usage: node scripts/prepare-meadow-grass.mjs [portugal] [tropical]
-// (both when none is named). Each tile becomes one patch:
+// scripts/prepare-tropical-sward.mjs). Usage: node scripts/prepare-meadow-grass.mjs [portugal] [tropical] [--check]
+// (both when none is named; --check reads the baked atlas back and checks it, baking nothing). Each tile becomes one
+// type of an atlas of the one format (js/continuum-format.js), drawn by the one cut:
 //   - a cluster hierarchy of eight levels, cells 16 to a side halving to one by the fifth. A level keeps half the
 //     organs (leaves, culms, florets) of every plant of the level below, never fewer than one, and widens each kept
-//     organ about its own midrib until the patch covers, seen from above and from two sides, what the full sward did.
-//     As the forest's leaves, a cell's error is a share of the width its kept organs are grown to (and, should no
-//     widening restore the cover, the height of what is lost), never less than its children's.
+//     organ about its own midrib until the patch covers, seen from above and from two sides, what the full sward did;
+//     each level's kept organs are their own vertices, widened as that level draws them. As the forest's leaves, a
+//     cell's error is a share of the width its kept organs are grown to (and, should no widening restore the cover,
+//     the height of what is lost), never less than its children's.
 //   - a closed canopy body: the sward as the eye sees it from above (its highest surface over every 4 mm of ground,
 //     or the ground itself where the sward leaves a gap), as a slab over the patch whose top stands where half of
 //     that view lies below, its error where nine tenths of it lie within. The share of ground the sward hides rides
-//     each body vertex, so the far meadow shows its soil where the near one does. Every variant's body meets the edge
-//     of its patch at one height, colour and cover, so patches of any mix meet without a step. Collapsed one
-//     half-edge at a time down to a core of a few triangles, its error measured at every step, and given between the
-//     steps where it rises a rise of its own, so the morph passes through every step in turn.
-//   The far body takes over from the first of its steps no finer than the coarsest level.
+//     each body triangle, so the far meadow shows its soil where the near one does. Every variant's body meets the
+//     edge of its patch at one height, colour and cover, so patches of any mix meet without a step. Collapsed one
+//     half-edge at a time (the one simplifier's collapse, js/continuum-bake.js) down to a core of a few triangles, its
+//     error measured at every step, and given between the steps where it rises a rise of its own, so the morph passes
+//     through every step in turn.
+//   The far body takes over from the first of its steps no finer than the coarsest level, at one error for every
+//   variant (the greatest), so every patch hands over at one distance.
 //   - its splat: the canopy's height, the sward's cover and its colour from above and from the side.
-// Plants on a tile's edge band are the same in every variant of a mix, and their dropped organs are chosen by where
-// they stand, so neighbouring patches of one mix agree across their seam at every level. The variants are baked in
-// parallel, one worker thread each.
+// Every type shares one quantization frame, so every patch drapes over the ground alike (the WIND kind's DRAPED
+// form). Plants on a tile's edge band are the same in every variant of a mix, and their dropped organs are chosen by
+// where they stand, so neighbouring patches of one mix agree across their seam at every level. The variants are baked
+// in parallel, one worker thread each.
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -29,14 +34,13 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import { collapseChain, ancestor, closestOnTriangle, closest, outline, edgeCensus } from '../js/continuum-bake.js';
+import { CONTINUUM_CLUSTER_TRIANGLES, assembleContinuumAtlas, checkContinuumAtlas, continuumAtlasTypes } from '../js/continuum-format.js';
+import { CONTINUUM_HOPS, CONTINUUM_STEP_WORDS } from '../js/continuum-core.js';
+import { packContinuumWind } from '../js/wgsl/continuum-wind.js';
 import {
-  MEADOW_CONTINUUM_FORMAT, MEADOW_CONTINUUM_VERSION, MEADOW_CONTINUUM_MAGIC, MEADOW_PATCH_METRES, MEADOW_CONTINUUM_LEVELS,
-  MEADOW_CONTINUUM_CELLS, MEADOW_CONTINUUM_HEADER_WORDS, MEADOW_CONTINUUM_HEADER, MEADOW_CONTINUUM_VARIANT_WORDS,
-  MEADOW_CONTINUUM_VARIANT, MEADOW_CONTINUUM_CLUSTER_WORDS, MEADOW_CONTINUUM_CLUSTER_TRIANGLES, MEADOW_CONTINUUM_VERTEX_WORDS,
-  MEADOW_CONTINUUM_STEP_WORDS, MEADOW_CONTINUUM_NEVER, MEADOW_CONTINUUM_HOPS, MEADOW_CONTINUUM_CLUSTER_SPAN,
-  MEADOW_CONTINUUM_VARIANT_VERTICES, MEADOW_CONTINUUM_OFFSET_UNIT, MEADOW_MIX_ROLES, PORTUGAL_MEADOW_GRASS_ASSETS,
-  TROPICAL_MEADOW_GRASS_ASSETS, meadowContinuumCellsAt, packMeadowContinuumVertex, packMeadowContinuumCluster,
-  packMeadowContinuumIndices, MEADOW_BODY_FLOOR,
+  MEADOW_CONTINUUM_FORMAT, MEADOW_CONTINUUM_VERSION, MEADOW_PATCH_METRES, MEADOW_CONTINUUM_LEVELS, MEADOW_CONTINUUM_CELLS,
+  MEADOW_MIX_ROLES, PORTUGAL_MEADOW_GRASS_ASSETS, TROPICAL_MEADOW_GRASS_ASSETS, meadowContinuumCellsAt, meadowContinuumVertex, packMeadowContinuumBody,
+  validateMeadowGrass, MEADOW_BODY_FLOOR,
 } from '../js/meadow-continuum.js';
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -64,7 +68,8 @@ const CHAIN_LEAST_TRIANGLES = 6;
 // Between steps whose errors rise by at least this share, the error rises in proportion (on a log scale), and no step
 // ever has less than this over the one before, so each step has its own error and the morph passes through it.
 const KNOT_RISE = 0.01, STEP_RISE = 0.003;
-const ATLAS_LOW = [-1, -0.2, -1], ATLAS_SPAN = 6;
+// The furthest a vertex moves from its organ's midrib per unit of widening, so no organ's error runs away.
+const OFFSET_REACH = 127 / 1024;
 
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 function hash32(...values) {
@@ -217,26 +222,25 @@ function rasterAbove(base, corners, triangleCount) {
   return { height, owner };
 }
 
-// One variant's sward: its organs, the growth of each level, its clusters and their indices, its vertices, and what
-// it shows from above, from which the main thread builds its body. Run in a worker.
+// One variant's sward: its organs, the growth of each level, its welded vertices (every level's kept organs their own,
+// widened as that level draws them) with their material words and wind, its clusters and their indices, and what it
+// shows from above, from which the main thread builds its body. Run in a worker.
 function bakeSward({ V, I, variant }) {
   const organs = organsOf(variant, V, I);
   // Vertices numbered in the order of their organs' roots along a Morton curve, so a cluster's organs lie near one
-  // another in the atlas and its indices fit in 16 bits above its first vertex.
+  // another in the atlas.
   organs.sort((a, b) => morton(...a.root) - morton(...b.root) || a.plant - b.plant || a.rank - b.rank);
   const local = new Map(), sources = [], clumps = [];
   for (const o of organs) { o.start = sources.length; for (const v of o.vertices) { local.set(v, sources.length); sources.push(v); clumps.push(o.clumpRand); } }
   const count = sources.length;
-  if (count >= MEADOW_CONTINUUM_VARIANT_VERTICES) throw Error(`A meadow variant of ${count} vertices outgrows the clusters' reach`);
   const base = new Float64Array(count * 3), offset = new Float64Array(count * 3), normal = new Float64Array(count * 3);
-  const offsetUnit = MEADOW_CONTINUUM_OFFSET_UNIT * 127;
   sources.forEach((v, i) => { for (let k = 0; k < 3; k++) { base[i * 3 + k] = V[v * STRIDE + k]; normal[i * 3 + k] = V[v * STRIDE + 3 + k]; } });
   for (const o of organs) {
     o.local = o.triangles.map((v) => local.get(v));
     o.width = 0;
     for (const [v, d] of wideningOf(o, V)) {
       const i = local.get(v);
-      for (let k = 0; k < 3; k++) offset[i * 3 + k] = Math.max(-offsetUnit, Math.min(offsetUnit, d[k]));
+      for (let k = 0; k < 3; k++) offset[i * 3 + k] = Math.max(-OFFSET_REACH, Math.min(OFFSET_REACH, d[k]));
       o.width = Math.max(o.width, 2 * Math.hypot(offset[i * 3], offset[i * 3 + 1], offset[i * 3 + 2]));
     }
   }
@@ -359,56 +363,69 @@ function bakeSward({ V, I, variant }) {
     errors.push(levelErrors); spheres.push(levelSpheres);
   }
 
-  // Clusters: each cell's kept organs in Morton order, filled up to the cluster's triangles while their vertices stay
-  // within 16 bits of the first; an organ is never split.
-  const clusters = [], indexChunks = [];
-  let indexWords = 0;
+  // The welded vertices: the finest level's are the sward's own; each coarser level's kept organs have vertices of their
+  // own, widened by that level's growth, so a cluster draws its organs as its level grew them.
+  const copies = Array.from({ length: LEVELS }, () => new Map());
+  let N = count;
+  for (let level = 1; level < LEVELS; level++) for (const o of organs) if (keptAt(o, level)) { copies[level].set(o, N); N += o.vertices.length; }
+  const position = new Float32Array(N * 3), weldedNormal = new Float32Array(N * 3), sourceOf = new Int32Array(N);
+  const weld = (v, i, g) => { sourceOf[v] = i; for (let k = 0; k < 3; k++) { position[v * 3 + k] = base[i * 3 + k] + offset[i * 3 + k] * (g - 1); weldedNormal[v * 3 + k] = normal[i * 3 + k]; } };
+  for (let i = 0; i < count; i++) weld(i, i, 1);
+  for (let level = 1; level < LEVELS; level++) for (const [o, start] of copies[level]) for (let k = 0; k < o.vertices.length; k++) weld(start + k, o.start + k, growth[level]);
+  // Each vertex's material words, and its wind: how far it bends at full gust (its height, how far along its stalk it
+  // stands to the power 1.65, and how supple it is, as the shading once bent it), over the type's furthest, and its
+  // organ's phase, so organs flutter apart while their plant bends as one.
+  const raw = new Float64Array(count), phase = new Float64Array(count), highOf = new Uint32Array(count), wordOf = new Uint32Array(count);
+  let sway = 0;
+  for (const o of organs) for (let k = 0; k < o.vertices.length; k++) {
+    const i = o.start + k, src = sources[i], along = V[src * STRIDE + 9], stiffness = V[src * STRIDE + 10];
+    const flex = Math.min(1.12, Math.max(0, along * 1.26));
+    raw[i] = Math.max(0, base[i * 3 + 1]) * flex ** 1.65 * (9.5 / (Math.min(22, Math.max(3, stiffness)) + 4.5));
+    sway = Math.max(sway, raw[i]); phase[i] = o.order;
+    const words = meadowContinuumVertex({ colour: colourOf(i), along, stiffness, clump: clumps[i] });
+    highOf[i] = words.high; wordOf[i] = words.word;
+  }
+  const high = new Uint32Array(N), word = new Uint32Array(N), wind = new Uint32Array(N);
+  for (let v = 0; v < N; v++) { const i = sourceOf[v]; high[v] = highOf[i]; word[v] = wordOf[i]; wind[v] = packContinuumWind(sway > 0 ? raw[i] / sway : 0, phase[i]); }
+
+  // Clusters: each cell's kept organs in Morton order, filled up to the cluster's triangles; an organ is never split.
+  const clusters = [], indexList = [];
   for (let level = 0; level < LEVELS; level++) {
-    const n = meadowContinuumCellsAt(level), position = widened(growth[level]), byCell = Array.from({ length: n * n }, () => []);
+    const n = meadowContinuumCellsAt(level), widenedHere = widened(growth[level]), byCell = Array.from({ length: n * n }, () => []);
     for (const o of organs) if (keptAt(o, level)) byCell[cellOf(o, level)].push(o);
     byCell.forEach((list, c) => {
       list.sort((a, b) => a.start - b.start);
       const parentCell = parentOf(level, c);
-      const parentError = parentCell >= 0 ? errors[level + 1][parentCell] : 1e30, parentLod = parentCell >= 0 ? spheres[level + 1][parentCell] : spheres[level][c];
-      let open = [], tris = 0, low = Infinity, high = -Infinity;
+      const parentError = parentCell >= 0 ? errors[level + 1][parentCell] : Infinity, parentLod = parentCell >= 0 ? spheres[level + 1][parentCell] : spheres[level][c];
+      let open = [], tris = 0;
       const close = () => {
         if (!open.length) return;
-        const offsets = [], used = [];
-        for (const o of open) { for (const v of o.local) offsets.push(v - low); for (let v = o.start; v < o.start + o.vertices.length; v++) used.push(v); }
-        const words = packMeadowContinuumIndices(offsets);
-        clusters.push({ lod: spheres[level][c], parentLod, cull: sphereOfVertices(position, used), error: errors[level][c], parentError, first: indexWords, triangles: tris, level, vertexBase: low });
-        indexChunks.push(words); indexWords += words.length;
-        open = []; tris = 0; low = Infinity; high = -Infinity;
+        const first = indexList.length, used = [];
+        for (const o of open) {
+          const shift = level ? copies[level].get(o) - o.start : 0;
+          for (const v of o.local) indexList.push(v + shift);
+          for (let v = o.start; v < o.start + o.vertices.length; v++) used.push(v);
+        }
+        clusters.push({ lod: spheres[level][c], parentLod, cull: sphereOfVertices(widenedHere, used), error: errors[level][c], parentError, first, triangles: tris, level, part: 0 });
+        open = []; tris = 0;
       };
       for (const o of list) {
-        const t = o.local.length / 3, end = o.start + o.vertices.length - 1;
-        if (t > MEADOW_CONTINUUM_CLUSTER_TRIANGLES) throw Error(`An organ of ${t} triangles outgrows a cluster`);
-        if (o.vertices.length > MEADOW_CONTINUUM_CLUSTER_SPAN) throw Error(`An organ of ${o.vertices.length} vertices outgrows a cluster's indices`);
-        if (tris + t > MEADOW_CONTINUUM_CLUSTER_TRIANGLES || Math.max(high, end) - Math.min(low, o.start) >= MEADOW_CONTINUUM_CLUSTER_SPAN) close();
-        open.push(o); tris += t; low = Math.min(low, o.start); high = Math.max(high, end);
+        const t = o.local.length / 3;
+        if (t > CONTINUUM_CLUSTER_TRIANGLES) throw Error(`An organ of ${t} triangles outgrows a cluster`);
+        if (tris + t > CONTINUUM_CLUSTER_TRIANGLES) close();
+        open.push(o); tris += t;
       }
       close();
     });
   }
   // Coarsest parent first, so the clusters that can be drawn at a patch's nearest point are a prefix.
   clusters.sort((a, b) => b.parentError - a.parentError || a.level - b.level);
-  const clusterWords = new Uint32Array(clusters.length * MEADOW_CONTINUUM_CLUSTER_WORDS);
-  clusters.forEach((c, k) => clusterWords.set(packMeadowContinuumCluster(c), k * MEADOW_CONTINUUM_CLUSTER_WORDS));
-  const indices = new Uint32Array(indexWords);
-  let at = 0;
-  for (const chunk of indexChunks) { indices.set(chunk, at); at += chunk.length; }
-
-  const vertexWords = new Uint32Array(count * MEADOW_CONTINUUM_VERTEX_WORDS);
-  sources.forEach((v, i) => vertexWords.set(packMeadowContinuumVertex({
-    position: [base[i * 3], base[i * 3 + 1], base[i * 3 + 2]], normal: [normal[i * 3], normal[i * 3 + 1], normal[i * 3 + 2]], colour: colourOf(i),
-    along: V[v * STRIDE + 9], stiffness: V[v * STRIDE + 10], clump: clumps[i],
-    offset: [offset[i * 3], offset[i * 3 + 1], offset[i * 3 + 2]],
-  }, { low: ATLAS_LOW, span: ATLAS_SPAN }), i * MEADOW_CONTINUUM_VERTEX_WORDS));
+  const indices = Uint32Array.from(indexList);
   const all = [...Array(count).keys()];
   const sphere = sphereOf([], [sphereOfVertices(base, all), sphereOfVertices(widened(growth[LEVELS - 1]), all)]);
   return {
-    organs: organs.length, swardVertices: count, sourceTriangles: triangleCount, growth, shortfall, clusterWords, clusterCount: clusters.length, indices,
-    vertexWords, sphere, rootError: Math.max(...errors[LEVELS - 1]), levelErrors: errors.map((list) => Math.max(...list)),
+    organs: organs.length, swardVertices: count, vertices: N, sourceTriangles: triangleCount, growth, shortfall, clusters, indices,
+    position, normal: weldedNormal, high, word, wind, sway, sphere, rootError: Math.max(...errors[LEVELS - 1]), levelErrors: errors.map((list) => Math.max(...list)),
     levelTriangles: Array.from({ length: LEVELS }, (_, l) => clusters.filter((c) => c.level === l).reduce((s, c) => s + c.triangles, 0)),
     coverage, visibleMean, visible, topColour, sideColour: mean(side, topColour), seenAlong, headShare, gridHeight, gridCover, gridColour,
   };
@@ -482,7 +499,7 @@ function bakeBody(sward, rim) {
   const chain = collapseChain(position, index, CHAIN_LEAST_TRIANGLES), S = chain.steps.length;
   let depth = 0;
   for (let v = 0; v < SV; v++) { let d = 0; for (let w = v; chain.dieStep[w] >= 0; w = chain.target[w]) d++; depth = Math.max(depth, d); }
-  if (depth > MEADOW_CONTINUUM_HOPS) throw Error(`A canopy vertex collapses ${depth} times, past the GPU's ${MEADOW_CONTINUUM_HOPS}`);
+  if (depth > CONTINUUM_HOPS) throw Error(`A canopy vertex collapses ${depth} times, past the GPU's ${CONTINUUM_HOPS}`);
   // Every step's error and growth, measured.
   const allBase = Array.from({ length: ST }, (_, t) => t), baseFans = Array.from({ length: SV }, () => []);
   allBase.forEach((t) => { for (let k = 0; k < 3; k++) baseFans[index[t * 3 + k]].push(t); });
@@ -542,20 +559,36 @@ function bakeBody(sward, rim) {
   let canopy = 0;
   for (let j = 0; j <= G; j++) for (let i = 0; i <= G; i++) canopy += heightAt(i, j) / (side1 * side1);
 
-  const vertexWords = new Uint32Array(SV * MEADOW_CONTINUUM_VERTEX_WORDS);
-  for (let v = 0; v < SV; v++) vertexWords.set(packMeadowContinuumVertex({
-    position: [position[v * 3], position[v * 3 + 1], position[v * 3 + 2]], normal: [slabN[v * 3], slabN[v * 3 + 1], slabN[v * 3 + 2]],
-    colour: slabColour[v], along: slabAlong[v], cover: slabCover[v],
-  }, { low: ATLAS_LOW, span: ATLAS_SPAN }), v * MEADOW_CONTINUUM_VERTEX_WORDS);
-  const records = Uint32Array.from({ length: SV }, (_, v) => (chain.dieStep[v] < 0 ? MEADOW_CONTINUUM_NEVER : (chain.dieStep[v] | (chain.target[v] << 16)) >>> 0));
-  const triangles = Uint32Array.from(order.flatMap((t) => [index[t * 3], index[t * 3 + 1], index[t * 3 + 2], 0]));
-  const steps = new Uint32Array((S + 1) * MEADOW_CONTINUUM_STEP_WORDS), stepFloats = new Float32Array(steps.buffer);
-  for (let s = 0; s <= S; s++) { steps[s * 4] = alive[s]; stepFloats[s * 4 + 1] = stepErrors[s]; stepFloats[s * 4 + 2] = inflates[s]; }
-  const slabPoints = Array.from({ length: SV }, (_, v) => [position[v * 3], position[v * 3 + 1], position[v * 3 + 2]]);
+  // The far body as the one format takes it (js/continuum-bake.js bakeFar's), the slab lifted clear of the land it
+  // covers; each triangle carries its corners' mean colour and cover. Its steps are written once every variant's first
+  // error is known (farSteps).
+  const lifted = Float32Array.from(position, (v, i) => (i % 3 === 1 ? v + BODY_FLOOR : v));
+  const triangleLook = (t) => {
+    const corners = [0, 1, 2].map((k) => index[t * 3 + k]);
+    return { colour: [0, 1, 2].map((k) => corners.reduce((s, v) => s + slabColour[v][k], 0) / 3), cover: corners.reduce((s, v) => s + slabCover[v], 0) / 3 };
+  };
+  // The splat: the canopy seen from the side, its outline the patch's width by the canopy's height.
+  const ry = Math.max(canopy / 2, 0.03), area = P * Math.max(canopy, 0.06);
+  const far = {
+    position: lifted, normal: Float32Array.from(slabN), index: Uint32Array.from(index), order, chain, farFirst,
+    stats: { inflateMax: Math.max(...inflates) },
+    splat: { centre: [P / 2, BODY_FLOOR * 2 + canopy / 2, P / 2], ry, rx: area / (Math.PI * ry), area },
+  };
   return {
-    vertexWords, records, triangles, steps, canopy, sphere: sphereOf(slabPoints, [sward.sphere]),
+    far, triangleLook, stepErrors, inflates, alive, canopy,
     chain: { baseTriangles: ST, steps: S, coreTriangles: alive[S], farFirst, baseError, firstError: stepErrors[farFirst], lastError: stepErrors[S], depth, vertices: SV, knots: knots.length },
   };
+}
+// A body's steps, its errors raised from its first drawn step to the meadow's one far error, so every patch hands over
+// to its far body at one distance, rising from there as its own do and never less than the step before.
+function farSteps(body, farError) {
+  const { stepErrors, inflates, alive, chain } = body, S = chain.steps, first = chain.farFirst;
+  const errors = Float64Array.from(stepErrors);
+  for (let s = first; s <= S; s++) errors[s] = Math.max(errors[s] * farError / Math.max(stepErrors[first], 1e-6), farError * (1 + STEP_RISE) ** (s - first));
+  for (let s = 1; s <= S; s++) errors[s] = Math.max(errors[s], errors[s - 1] * (1 + STEP_RISE));
+  const steps = new Uint32Array((S + 1) * CONTINUUM_STEP_WORDS), stepFloats = new Float32Array(steps.buffer);
+  for (let s = 0; s <= S; s++) { steps[s * CONTINUUM_STEP_WORDS] = alive[s]; stepFloats[s * CONTINUUM_STEP_WORDS + 1] = errors[s]; stepFloats[s * CONTINUUM_STEP_WORDS + 2] = inflates[s]; }
+  return { steps, firstError: errors[first], lastError: errors[S] };
 }
 
 // The worker: one variant's sward at a time, the groves shared.
@@ -564,7 +597,7 @@ if (!isMainThread) {
   parentPort.on('message', ({ id, variant }) => {
     try {
       const s = bakeSward({ V, I, variant });
-      parentPort.postMessage({ id, sward: s }, [s.clusterWords.buffer, s.indices.buffer, s.vertexWords.buffer, s.visible.buffer]);
+      parentPort.postMessage({ id, sward: s }, [s.indices.buffer, s.position.buffer, s.normal.buffer, s.high.buffer, s.word.buffer, s.wind.buffer, s.visible.buffer]);
     } catch (error) { parentPort.postMessage({ id, error: String(error?.stack ?? error) }); }
   });
 }
@@ -610,70 +643,74 @@ async function bakePack(name) {
   });
   const farError = Math.max(...bodies.map((b) => b.chain.firstError)), canopy = bodies.reduce((s, b) => s + b.canopy, 0) / bodies.length;
 
-  // The atlas: header, variants, clusters, vertices, indices, then each variant's chain.
-  const H = MEADOW_CONTINUUM_HEADER, R = MEADOW_CONTINUUM_VARIANT;
-  const clusterCount = swards.reduce((n, s) => n + s.clusterCount, 0), indexWordCount = swards.reduce((n, s) => n + s.indices.length, 0);
-  const vertexCount = swards.reduce((n, s, id) => n + s.swardVertices + bodies[id].vertexWords.length / MEADOW_CONTINUUM_VERTEX_WORDS, 0);
-  const variantsAt = MEADOW_CONTINUUM_HEADER_WORDS, clustersAt = variantsAt + jobs.length * MEADOW_CONTINUUM_VARIANT_WORDS;
-  const verticesAt = clustersAt + clusterCount * MEADOW_CONTINUUM_CLUSTER_WORDS, indicesAt = verticesAt + vertexCount * MEADOW_CONTINUUM_VERTEX_WORDS;
-  const chainsAt = indicesAt + indexWordCount;
-  const words = chainsAt + bodies.reduce((n, b) => n + b.records.length + b.triangles.length + b.steps.length, 0);
-  const atlas = new Uint32Array(words), floats = new Float32Array(atlas.buffer);
-  atlas[H.magic] = MEADOW_CONTINUUM_MAGIC; atlas[H.version] = MEADOW_CONTINUUM_VERSION; atlas[H.variantCount] = jobs.length;
-  atlas[H.variantsAt] = variantsAt; atlas[H.clustersAt] = clustersAt; atlas[H.clusterCount] = clusterCount;
-  atlas[H.verticesAt] = verticesAt; atlas[H.vertexCount] = vertexCount; atlas[H.indicesAt] = indicesAt; atlas[H.indexCount] = indexWordCount * 2;
-  atlas[H.chainsAt] = chainsAt; atlas[H.words] = words; floats[H.patch] = P; floats.set(ATLAS_LOW, H.low); floats[H.span] = ATLAS_SPAN;
-  floats[H.farError] = farError; floats[H.canopy] = canopy; floats[H.rim] = rim.height;
-  let clusterAt = 0, vertexAt = 0, indexAt = 0, chainAt = chainsAt;
-  swards.forEach((s, id) => {
-    const b = bodies[id], r = variantsAt + id * MEADOW_CONTINUUM_VARIANT_WORDS;
-    atlas[r + R.clusterFirst] = clusterAt; atlas[r + R.clusterCount] = s.clusterCount;
-    for (let k = 0; k < s.clusterCount; k++) s.clusterWords[k * MEADOW_CONTINUUM_CLUSTER_WORDS + 14] += indexAt;
-    atlas.set(s.clusterWords, clustersAt + clusterAt * MEADOW_CONTINUUM_CLUSTER_WORDS); clusterAt += s.clusterCount;
-    atlas[r + R.vertexBase] = vertexAt;
-    atlas.set(s.vertexWords, verticesAt + vertexAt * MEADOW_CONTINUUM_VERTEX_WORDS);
-    atlas.set(b.vertexWords, verticesAt + (vertexAt + s.swardVertices) * MEADOW_CONTINUUM_VERTEX_WORDS);
-    atlas[r + R.chainVertices] = vertexAt + s.swardVertices; atlas[r + R.chainVertexCount] = b.chain.vertices;
-    vertexAt += s.swardVertices + b.chain.vertices;
-    atlas.set(s.indices, indicesAt + indexAt); indexAt += s.indices.length;
-    atlas[r + R.records] = chainAt; atlas.set(b.records, chainAt); chainAt += b.records.length;
-    atlas[r + R.triangles] = chainAt; atlas.set(b.triangles, chainAt); chainAt += b.triangles.length;
-    atlas[r + R.steps] = chainAt; atlas.set(b.steps, chainAt); chainAt += b.steps.length;
-    atlas[r + R.stepCount] = b.chain.steps; atlas[r + R.chainTriangleCount] = b.chain.baseTriangles; atlas[r + R.farFirst] = b.chain.farFirst;
-    floats[r + R.baseError] = b.chain.baseError; floats[r + R.canopy] = b.canopy; floats.set(b.sphere, r + R.sphere);
-    floats.set(s.topColour, r + R.topColour); floats.set(s.sideColour, r + R.sideColour);
-    atlas[r + R.mix] = jobs[id].mixIndex; atlas[r + R.sourceTriangles] = s.sourceTriangles; floats.set(s.growth, r + R.growth);
-    floats[r + R.coverage] = s.coverage; floats[r + R.firstError] = b.chain.firstError; floats[r + R.seenAlong] = s.seenAlong;
-  });
-  if (chainAt !== words || vertexAt !== vertexCount || indexAt !== indexWordCount) throw Error('The atlas was laid out wrongly');
+  // One frame every type shares: the box round every variant's sward, at every level, and body, to the centimetre.
+  const low = [Infinity, Infinity, Infinity], high = [-Infinity, -Infinity, -Infinity];
+  for (const points of [...swards.map((s) => s.position), ...bodies.map((b) => b.far.position)]) {
+    for (let v = 0; v < points.length / 3; v++) for (let k = 0; k < 3; k++) { low[k] = Math.min(low[k], points[v * 3 + k]); high[k] = Math.max(high[k], points[v * 3 + k]); }
+  }
+  const frameLow = low.map((v) => Math.floor(v * 100 - 1) / 100), frame = { low: frameLow, span: Math.ceil(Math.max(...high.map((v, k) => v - frameLow[k])) * 100 + 1) / 100 };
 
-  const bytes = new Uint8Array(atlas.buffer), gzip = zlib.gzipSync(bytes, { level: 9 });
+  // Each variant packed as one type of the one format, then the atlas assembled from them.
+  const packed = swards.map((s, id) => {
+    const b = bodies[id], lifted = farSteps(b, farError);
+    b.far.steps = lifted.steps; b.chain.firstError = lifted.firstError; b.chain.lastError = lifted.lastError;
+    const clusters = { records: s.clusters, order: Uint32Array.from({ length: s.vertices }, (_, v) => v), indices: s.indices, count: s.clusters.length };
+    const body = packMeadowContinuumBody({
+      triangles: s.sourceTriangles, frame, high: s.high, word: s.word, wind: s.wind, farTriangle: b.triangleLook, sway: s.sway,
+      look: { top: s.topColour, side: s.sideColour, seenAlong: s.seenAlong, coverage: s.coverage, canopy: b.canopy, mix: jobs[id].mixIndex },
+    }, { welded: { position: s.position, normal: s.normal }, clusters, far: b.far });
+    b.sphere = [...body.centre, body.radius];
+    return body.words;
+  });
+  const atlas = assembleContinuumAtlas(packed);
+  checkContinuumAtlas(atlas, `${name} meadow`);
+  const types = continuumAtlasTypes(atlas);
+  const bytes = new Uint8Array(atlas.buffer, atlas.byteOffset, atlas.byteLength), gzip = zlib.gzipSync(bytes, { level: 9 });
   fs.mkdirSync(out, { recursive: true });
   for (const file of fs.readdirSync(out)) fs.rmSync(path.join(out, file));
   fs.writeFileSync(path.join(root, pack.assets['atlas.bin.gz']), gzip);
+  const clusterCount = swards.reduce((n, s) => n + s.clusters.length, 0), vertexCount = swards.reduce((n, s, id) => n + s.vertices + bodies[id].chain.vertices, 0);
+  const indexCount = swards.reduce((n, s) => n + s.indices.length, 0), bakeSeconds = Math.round((Date.now() - started) / 1000);
   const manifest = {
     format: MEADOW_CONTINUUM_FORMAT, version: MEADOW_CONTINUUM_VERSION, generator: 'scripts/prepare-meadow-grass.mjs', pack: name,
     source: { format: groves.format, generator: groves.generator, manifestSha256: sha256(manifestBytes), vertices: groves.streams.vertices.rawSha256, indices: groves.streams.indices.rawSha256 },
     patchMetres: P, levels: LEVELS, cells: MEADOW_CONTINUUM_CELLS, mixes: groves.mixes, roles: MEADOW_MIX_ROLES,
     body: { cells: BODY_CELLS, quantile: BODY_QUANTILE, errorQuantile: BODY_ERROR_QUANTILE, rim: { height: +rim.height.toFixed(4), cover: +rim.cover.toFixed(4), colour: rim.colour.map((v) => +v.toFixed(5)) } },
-    organErrorShare: ORGAN_ERROR_SHARE, farError: +farError.toFixed(5), canopy: +canopy.toFixed(4),
-    variants: swards.map((s, id) => {
+    organErrorShare: ORGAN_ERROR_SHARE, farError: +farError.toFixed(5), canopy: +canopy.toFixed(4), frame: { low: frame.low, span: frame.span },
+    types: swards.map((s, id) => {
       const b = bodies[id];
       return {
-        id, mix: jobs[id].mixIndex, variant: jobs[id].variantIndex, sourceTriangles: s.sourceTriangles, organs: s.organs, clusters: s.clusterCount, coverage: +s.coverage.toFixed(4),
+        id, mix: jobs[id].mixIndex, variant: jobs[id].variantIndex, sourceTriangles: s.sourceTriangles, organs: s.organs, vertices: s.vertices, clusters: s.clusters.length,
+        coverage: +s.coverage.toFixed(4), sway: +s.sway.toFixed(4), entries: types[id],
         levels: s.levelTriangles.map((triangles, level) => ({ triangles, error: +s.levelErrors[level].toFixed(5), growth: +s.growth[level].toFixed(4), shortfall: +s.shortfall[level].toFixed(4) })),
         chain: { baseTriangles: b.chain.baseTriangles, steps: b.chain.steps, coreTriangles: b.chain.coreTriangles, farFirst: b.chain.farFirst, baseError: +b.chain.baseError.toFixed(5), firstError: +b.chain.firstError.toFixed(5), lastError: +b.chain.lastError.toFixed(5), hops: b.chain.depth, knots: b.chain.knots },
         splat: { canopy: +b.canopy.toFixed(4), seenAlong: +s.seenAlong.toFixed(4), headShare: +s.headShare.toFixed(4), topColour: s.topColour.map((v) => +v.toFixed(5)), sideColour: s.sideColour.map((v) => +v.toFixed(5)), sphere: b.sphere.map((v) => +v.toFixed(4)) },
       };
     }),
-    atlas: { words, bytes: bytes.byteLength, sha256: sha256(bytes), gzip: { file: path.basename(pack.assets['atlas.bin.gz']), bytes: gzip.byteLength, sha256: sha256(gzip) }, clusters: clusterCount, vertices: vertexCount, indices: indexWordCount * 2 },
+    atlas: { words: atlas.length, bytes: bytes.byteLength, sha256: sha256(bytes), gzip: { file: path.basename(pack.assets['atlas.bin.gz']), bytes: gzip.byteLength, sha256: sha256(gzip) }, clusters: clusterCount, vertices: vertexCount, indices: indexCount },
+    bakeSeconds,
   };
+  validateMeadowGrass(manifest);
   fs.writeFileSync(path.join(root, pack.assets['manifest.json']), `${JSON.stringify(manifest, null, 1)}\n`);
-  console.log(`${name} meadow continuum: ${jobs.length} variants, ${clusterCount} clusters, ${vertexCount} vertices, far error ${farError.toFixed(3)} m; ${(bytes.byteLength / 1048576).toFixed(1)} MiB, ${(gzip.byteLength / 1048576).toFixed(1)} MiB gzipped, in ${((Date.now() - started) / 1000).toFixed(0)} s`);
+  console.log(`${name} meadow continuum: ${jobs.length} types, ${clusterCount} clusters, ${vertexCount} vertices, ${indexCount} indices, far error ${farError.toFixed(3)} m; ${(bytes.byteLength / 1048576).toFixed(1)} MiB, ${(gzip.byteLength / 1048576).toFixed(1)} MiB gzipped, in ${bakeSeconds} s`);
+}
+
+// Reads a baked pack back as the page does and checks it against its manifest, baking nothing.
+function checkPack(name) {
+  const pack = PACKS[name], manifest = validateMeadowGrass(JSON.parse(fs.readFileSync(path.join(root, pack.assets['manifest.json']))));
+  const gzip = fs.readFileSync(path.join(root, pack.assets['atlas.bin.gz']));
+  if (sha256(gzip) !== manifest.atlas.gzip.sha256) throw Error(`The ${name} meadow atlas is not the one its manifest names`);
+  const bytes = zlib.gunzipSync(gzip);
+  if (sha256(bytes) !== manifest.atlas.sha256 || bytes.byteLength !== manifest.atlas.bytes) throw Error(`The ${name} meadow atlas unpacks wrongly`);
+  const words = checkContinuumAtlas(new Uint32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4), `${name} meadow`);
+  const types = continuumAtlasTypes(words);
+  if (types.length !== manifest.types.length) throw Error(`The ${name} meadow atlas holds ${types.length} types, its manifest ${manifest.types.length}`);
+  console.log(`${name} meadow continuum checked: ${types.length} types, ${(bytes.byteLength / 1048576).toFixed(1)} MiB, far error ${manifest.farError} m`);
 }
 
 if (isMainThread) {
-  const names = process.argv.slice(2).length ? process.argv.slice(2) : Object.keys(PACKS);
+  const args = process.argv.slice(2), check = args.includes('--check'), named = args.filter((a) => a !== '--check');
+  const names = named.length ? named : Object.keys(PACKS);
   for (const name of names) if (!PACKS[name]) throw Error(`No meadow pack ${name}; there are ${Object.keys(PACKS).join(', ')}`);
-  for (const name of names) await bakePack(name);
+  for (const name of names) if (check) checkPack(name); else await bakePack(name);
 }

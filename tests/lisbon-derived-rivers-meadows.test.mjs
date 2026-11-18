@@ -18,8 +18,11 @@ import { createInlandWaterSampler } from '../js/inland-water.js';
 import { CITY_BLOCK_FLOATS } from '../js/old-world-city.js';
 import { terrainSurfaceSample } from '../js/terrain-model.js';
 import { GROUND_DETAIL_RENDER } from '../js/wgsl/ground-detail.js';
-import { MEADOW_CUT_WGSL, MEADOW_RENDER_WGSL, buildMeadowCoverMap } from '../js/meadow-grass.js';
-import { MEADOW_CONTINUUM_HEADER, PORTUGAL_MEADOW_GRASS_ASSETS, TROPICAL_MEADOW_GRASS_ASSETS, loadMeadowGrass, validateMeadowGrass } from '../js/meadow-continuum.js';
+import { buildMeadowCoverMap } from '../js/meadow-grass.js';
+import { PORTUGAL_MEADOW_GRASS_ASSETS, TROPICAL_MEADOW_GRASS_ASSETS, loadMeadowGrass, validateMeadowGrass } from '../js/meadow-continuum.js';
+import { MEADOW_CONTINUUM_SPEC, meadowContinuumStandWGSL } from '../js/wgsl/meadow-continuum.js';
+import { continuumModuleWGSL } from '../js/wgsl/continuum-cut.js';
+import { CONTINUUM_HEADER } from '../js/continuum-format.js';
 import {
   TRADE_VESSEL_CONTINUUM_MATERIAL,
   inspectTradeVesselArchetypes,
@@ -153,7 +156,7 @@ test('Lisbon waterfront is procedurally derived with zero isLisbonRoyalDock and 
 
 test('meadow continuum atlas integrity, cover masking, and GPU-only zero-discard WGSL shaders', async () => {
   const manifest = validateMeadowGrass(JSON.parse(fs.readFileSync(PORTUGAL_MEADOW_GRASS_ASSETS['manifest.json'], 'utf8')));
-  assert.equal(manifest.variants.length, 12);
+  assert.equal(manifest.types.length, 12);
 
   const root = path.resolve('.');
   const pack = await loadMeadowGrass({
@@ -164,27 +167,22 @@ test('meadow continuum atlas integrity, cover masking, and GPU-only zero-discard
     },
   });
   assert.equal(pack.words.byteLength, manifest.atlas.bytes);
-  assert.equal(pack.words[MEADOW_CONTINUUM_HEADER.variantCount], 12);
+  assert.equal(pack.words[CONTINUUM_HEADER.typeCount], 12);
 
-  // WGSL hygiene: zero discard in any shader & <= 8 storage buffers per stage
-  assert.doesNotMatch(MEADOW_CUT_WGSL, /\bdiscard\b/);
-  assert.doesNotMatch(MEADOW_RENDER_WGSL, /\bdiscard\b/);
-  const storageCount = (MEADOW_RENDER_WGSL.match(/var<storage,/g) || []).length;
-  assert.ok(storageCount <= 8, `MEADOW_RENDER_WGSL storage buffer count=${storageCount} exceeds 8`);
+  // WGSL hygiene: zero discard in the stand pass or the meadow's view, <= 8 storage buffers per stage.
+  const stand = meadowContinuumStandWGSL();
+  const view = continuumModuleWGSL({ pass: 'view', material: MEADOW_CONTINUUM_SPEC });
+  assert.doesNotMatch(stand, /\bdiscard\b/);
+  assert.doesNotMatch(view, /\bdiscard\b/);
+  const storageCount = (view.match(/var<storage,/g) || []).length;
+  assert.ok(storageCount <= 8, `the meadow's view storage buffer count=${storageCount} exceeds 8`);
   assert.match(GROUND_DETAIL_RENDER, /fn grassWindWave\(/);
-  assert.match(MEADOW_RENDER_WGSL, /fn meadowWindField\(/);
-  // Clusters, far body and splat split each pixel's samples by the continuum's one split, carried once: complements.
-  assert.equal(MEADOW_RENDER_WGSL.split('fn continuumSamples(').length - 1, 1);
-  assert.equal(MEADOW_CUT_WGSL.split('fn continuumThin(').length - 1, 1);
-  const mask = MEADOW_RENDER_WGSL.slice(MEADOW_RENDER_WGSL.indexOf('fn meadowMask('), MEADOW_RENDER_WGSL.indexOf('@fragment fn meadowFS'));
-  assert.match(mask, /let handoff = continuumSamples\(/);
-  assert.match(mask, /let splat = handoff & continuumSamples\(/);
-  assert.match(mask, /return all & ~handoff;/);
-  assert.match(mask, /return handoff & ~splat;/);
-  assert.match(MEADOW_RENDER_WGSL, /o\.mask = meadowMask\(in\.coverage, in\.pos\.xy, in\.world\);/);
-  // One start for every patch, each pixel shared by its own distance, with one pattern for every patch.
-  assert.match(mask, /continuumHandoff\(away, meadowStart\(focal\)\)/);
-  assert.doesNotMatch(mask, /in\.coverage\.y/);
+  assert.match(view, /fn meadowWindField\(/);
+  // The meadow selects, lists and splits nothing of its own: the stand pass writes records of the one format and the
+  // one cut's sample-mask split is carried once, by the kernel.
+  assert.equal(view.split('fn continuumSamples(').length - 1, 1);
+  assert.doesNotMatch(stand, /fn meadow(Mask|Start|Cut|Decide)\(/);
+  assert.match(stand, /ContinuumRecord\(/);
   // The tropical sward is baked through the same bake into the same atlas.
   validateMeadowGrass(JSON.parse(fs.readFileSync(TROPICAL_MEADOW_GRASS_ASSETS['manifest.json'], 'utf8')));
 
