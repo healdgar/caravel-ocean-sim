@@ -7,11 +7,11 @@ import {once} from 'node:events';
 import {chromium} from 'playwright';
 import {createDevServer} from '../server.mjs';
 import {coastalRegionStageURL} from '../js/landfall.js';
-import {CREW_CONTINUUM_LISTS} from '../js/wgsl/crew-continuum.js';
+import {CONTINUUM_LISTS} from '../js/continuum-format.js';
 import {DECK_CREW_DISPATCH_WORDS,deckCrewBodyFor} from '../js/trade-vessels.js';
 
 // The bodies' streams are published, not committed: a checkout without them cannot draw people at all.
-const baked=[deckCrewBodyFor('crew',false),deckCrewBodyFor('captain',false)].every(id=>fs.existsSync(new URL(`../assets/crew/continuum/${id}/vertices.bin.gz`,import.meta.url)));
+const baked=[deckCrewBodyFor('crew',false),deckCrewBodyFor('captain',false)].every(id=>fs.existsSync(new URL(`../assets/crew/continuum/${id}/atlas.bin.gz`,import.meta.url)));
 let browser,server,base;
 before(async()=>{
   server=createDevServer();server.listen(0,'127.0.0.1');await once(server,'listening');
@@ -36,7 +36,8 @@ async function open(query){
   assert.equal(await page.evaluate(()=>window.oceanStartup.state),'ready');
   return {page,errors};
 }
-// Who the placing pass kept for each body, and how many instances each of the continuum's lists drew, over a frame.
+// Who the placing pass kept for each body, and how many instances each of the one cut's lists drew, over a frame: its
+// draws buffer opens with every list's indirect record, four words each.
 const shown=page=>page.evaluate(async({lists,dispatchWords})=>{
   await new Promise(requestAnimationFrame);await new Promise(requestAnimationFrame);
   const device=window.deckDevice,ships=window.oceanTradeVessels,deck=ships.deckCrew;
@@ -48,12 +49,12 @@ const shown=page=>page.evaluate(async({lists,dispatchWords})=>{
   const counts=deck?await read(deck.counts,deck.counts.size):null;
   const bodies=(deck?.bodies??[]).map((body,b)=>({...body,kept:counts[b*dispatchWords]}));
   const drawn=Object.fromEntries(lists.map(name=>[name,0]));
-  for(const {buffer,records} of ships.peopleDraws()){
-    const words=await read(buffer,records*16);
+  for(const {buffer} of ships.peopleDraws()){
+    const words=await read(buffer,lists.length*16);
     lists.forEach((name,i)=>{drawn[name]+=words[i*4+1];});
   }
   return {aboard:ships.deckCrewCount,bodies,drawn,census:window.oceanContinuumCensus?.latest?.families??null};
-},{lists:CREW_CONTINUUM_LISTS,dispatchWords:DECK_CREW_DISPATCH_WORDS});
+},{lists:CONTINUUM_LISTS,dispatchWords:DECK_CREW_DISPATCH_WORDS});
 
 test('hands aboard passing vessels are placed on the GPU and cut and drawn through the continuum',{skip:!baked&&'continuum bodies not baked here',timeout:600000},async()=>{
   // First where the vessels lie, then an eye on the nearest with anyone aboard, from a little off its beam.
@@ -83,8 +84,7 @@ test('hands aboard passing vessels are placed on the GPU and cut and drawn throu
     const kept=seen.bodies.reduce((n,b)=>n+b.kept,0);
     assert.ok(kept>0,`no one placed: ${JSON.stringify(seen.bodies)}`);
     for(const body of seen.bodies)assert.ok(body.kept<=body.capacity,`${body.id} keeps no more than its room`);
-    assert.ok(seen.drawn.clusters+seen.drawn.chain+seen.drawn.splat>0,`drawn: ${JSON.stringify(seen.drawn)}`);
-    assert.equal(seen.drawn.clustersCut+seen.drawn.chainCut,0,'no one aboard is cut away');
+    assert.ok(seen.drawn.clusters+seen.drawn['small clusters']+seen.drawn['far body']+seen.drawn.splat>0,`drawn: ${JSON.stringify(seen.drawn)}`);
     if(seen.census)assert.ok(seen.census.people>0,`the census counts them as people: ${JSON.stringify(seen.census)}`);
     assert.deepEqual(errors,[]);
   }finally{await page.close();}

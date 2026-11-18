@@ -1005,9 +1005,11 @@ function bakeFar(type, welded) {
 // takes over (the first no heavier than the clusters' coarsest cut, their roots; finer steps are the clusters'). A
 // skinned body may bring `groupError(welded)` (its clusters' error measured posed, bakeClusters) and `far`, the body
 // its far body is wrapped round when that is less than all of it (a horse's tack, which a beast without it hides).
+// A body too large to give corner by corner (a person's two million triangles) may bring `welded` already welded, as
+// weldDrawn makes it; it must then bring `far`.
 export async function bakeContinuumBody(body) {
   await MeshoptSimplifier.ready;
-  const welded = weldDrawn(body), clusters = await bakeClusters(welded, { groupError: body.groupError?.(welded) ?? null });
+  const welded = body.welded ?? weldDrawn(body), clusters = await bakeClusters(welded, { groupError: body.groupError?.(welded) ?? null });
   const far = body.far ? bakeFar(body.far, weldDrawn(body.far)) : bakeFar(body, welded);
   const rootTriangles = clusters.records.reduce((n, record) => n + (record.parentError === Infinity ? record.triangles : 0), 0);
   far.farFirst = 0;

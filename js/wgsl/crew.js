@@ -235,9 +235,8 @@ fn captainOwnColours(paint:vec3f,p:vec3f,flagged:f32,skin:vec4f,hair:vec3f,shirt
   return mix(worn,skin.rgb*skinShade,skinMask);
 }
 `;
-// Shading never discards, so the GPU shades only what shows. Anyone with something to cut away, someone fading out of
-// a first-person sightline or in torn clothes, lays depth first through the continuum (crewContinuumSurviving in
-// js/wgsl/crew-continuum.js) after the opaque scene, then is shaded at equal depth.
+// Shading never discards, so the GPU shades only what shows: people are drawn opaque through the one continuum
+// (js/wgsl/crew-continuum.js), and one whose body the eye stands in is not drawn at all.
 // How much of the light on dry cloth it throws back toward a grazing eye. Skin has none of it, and nor has a hull.
 export const CREW_CLOTH_SHEEN = 0.045;
 // The crew's shading. The sheen is a parameter so that a test can take the cloth's own lobe away and hold everything
@@ -332,7 +331,9 @@ fn crewClothed(tagged:vec3f,p:vec3f,shirt:vec3f,trousers:vec3f,skin:vec3f,hair:v
   if(actor.shirt.w>0.5||crewCompHidden(v.color,compMask)){out.position=vec4f(2,2,0,1);}
   return out;
 }
-fn crewShade(v:CrewVertex,front:bool,baseIn:vec3f)->vec4f {
+// The light a person throws toward the eye, before the air between (the continuum's material veils it as every
+// family's is, js/wgsl/crew-continuum.js).
+fn crewShadeLit(v:CrewVertex,front:bool,baseIn:vec3f)->vec3f {
   let dPdx=dpdx(v.world);let dPdy=dpdy(v.world);
   let dBpdx=dpdx(v.bodyPos);let dBpdy=dpdy(v.bodyPos);
   let woundAmt=v.damage.x;let scorchAmt=v.damage.y;let bSeed=v.damage.z;
@@ -416,10 +417,11 @@ fn crewShade(v:CrewVertex,front:bool,baseIn:vec3f)->vec4f {
   let clothSheen=grazing*grazing*grazing*grazing*(1.0-clamp(v.skin,0.0,1.0))*(1.0-wet.x*0.7)*${clothSheen.toFixed(4)};
   let col=lunarSurface(n,view,albedo,rough,f0,sunVis[1]*lunarShadowVisibility(shadowSample))+lightningSurface(n,view,albedo,rough)+gunFlashSurface(v.world,n,view,albedo,rough)+worldFireSurface(v.world,n,view,albedo,rough)+albedo*(direct*(diffuse/PI+clothSheen)+ambient*(1.0+clothSheen*0.5))+direct*spec*max(dot(n,sun),0.0)
     +reflected*F.windP[1].w*vesselEnvironment(n,view,rough,f0);
-  // Match timber, canvas and land: the same directional sky and marine haze
-  // must veil every surface along this view ray, including shadowed sailors.
-  return vec4f(surfaceAir(col,v.world),1);
+  return col;
 }
+// Match timber, canvas and land: the same directional sky and marine haze must veil every surface along this view
+// ray, including shadowed sailors.
+fn crewShade(v:CrewVertex,front:bool,baseIn:vec3f)->vec4f { return vec4f(surfaceAir(crewShadeLit(v,front,baseIn),v.world),1); }
 @fragment fn fs(v:CrewVertex,@builtin(front_facing) front:bool)->@location(0) vec4f {
   return crewShade(v,front,v.color);
 }

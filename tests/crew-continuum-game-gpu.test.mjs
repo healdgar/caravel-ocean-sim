@@ -6,10 +6,10 @@ import { once } from 'node:events';
 import { before, after, test } from 'node:test';
 import { chromium } from 'playwright';
 import { createDevServer } from '../server.mjs';
-import { CREW_CONTINUUM_LISTS } from '../js/wgsl/crew-continuum.js';
+import { CONTINUUM_LISTS } from '../js/continuum-format.js';
 
 // The bodies' streams are published, not committed: a checkout without them cannot draw people at all.
-const baked = ['sailor-male', 'villager-female', 'captain'].every((id) => fs.existsSync(new URL(`../assets/crew/continuum/${id}/vertices.bin.gz`, import.meta.url)));
+const baked = ['sailor-male', 'villager-female', 'captain'].every((id) => fs.existsSync(new URL(`../assets/crew/continuum/${id}/atlas.bin.gz`, import.meta.url)));
 let server, browser, origin;
 before(async () => {
   server = createDevServer(); server.listen(0, '127.0.0.1'); await once(server, 'listening');
@@ -39,9 +39,10 @@ test('the company on deck is cut and drawn through the continuum: clusters near,
       const draws = crew.continuumDraws();
       if (!device || !draws.length) return { people: crew.state.crew.filter((s) => s.visible).length, draws: draws.length, read: null };
       const read = [];
-      for (const { buffer, records } of draws) {
-        const copy = device.createBuffer({ size: records * 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }), encoder = device.createCommandEncoder();
-        encoder.copyBufferToBuffer(buffer, 0, copy, 0, records * 16);
+      // Each batch's draws open with every list's indirect record, four words each.
+      for (const { buffer } of draws) {
+        const copy = device.createBuffer({ size: lists.length * 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }), encoder = device.createCommandEncoder();
+        encoder.copyBufferToBuffer(buffer, 0, copy, 0, lists.length * 16);
         device.queue.submit([encoder.finish()]);
         await copy.mapAsync(GPUMapMode.READ);
         const words = new Uint32Array(copy.getMappedRange().slice(0));
@@ -49,14 +50,14 @@ test('the company on deck is cut and drawn through the continuum: clusters near,
         copy.destroy();
       }
       return { people: crew.state.crew.filter((s) => s.visible).length, draws: draws.length, read };
-    }, CREW_CONTINUUM_LISTS);
+    }, CONTINUUM_LISTS);
     assert.deepEqual(errors, []);
     assert.ok(result.draws >= 2, `${result.draws} batches drawn`);
     if (result.read) {
       const total = (name) => result.read.reduce((n, r) => n + r[name], 0);
-      console.log('instances by list', Object.fromEntries(CREW_CONTINUUM_LISTS.map((name) => [name, total(name)])), 'people', result.people);
-      assert.ok(total('clusters') > result.people, `near people are cut from clusters (${total('clusters')})`);
-      assert.ok(total('shadow') > 0, 'and cast shadows');
+      console.log('instances by list', Object.fromEntries(CONTINUUM_LISTS.map((name) => [name, total(name)])), 'people', result.people);
+      assert.ok(total('clusters') + total('small clusters') > result.people, `near people are cut from clusters (${total('clusters')} and ${total('small clusters')} small)`);
+      assert.ok(total('shadow far body') + total('shadow clusters') > 0, 'and cast shadows');
     }
   } finally { await page.close(); }
 });

@@ -372,13 +372,9 @@ test('sailors far from the eye keep a pose longer',async()=>{
   assert.ok(crewApparentDistance([0,0,0],boat,{x:100,y:0,z:30,fovY:.1})<30/3,'a narrow lens brings them closer');
 });
 
-test('only sailors whose fragments can actually be cut pay for the shader that cuts them',async()=>{
-  const {crewNeedsCutShader}=await import('../js/crew-pose-cadence.js');
-  assert.equal(crewNeedsCutShader(3,false,0),false,'an unhurt sailor beside a third-person eye stays opaque');
-  assert.equal(crewNeedsCutShader(3,true,0),true,'first person fades whoever stands in the sightline');
-  assert.equal(crewNeedsCutShader(20,true,0),false,'the fade only reaches so far');
-  assert.equal(crewNeedsCutShader(200,false,.46),true,'torn cloth is cut at any distance');
-  assert.equal(crewNeedsCutShader(200,false,.44),false);
+test('no sailor is drawn by a shader that cuts fragments',async()=>{
+  const cadence=await import('../js/crew-pose-cadence.js');
+  assert.equal(cadence.crewNeedsCutShader,undefined,'people are drawn opaque through the one continuum');
 });
 
 test('far sailors pose from baked clips unless their own pose still matters',async()=>{
@@ -708,20 +704,16 @@ test('modular 3D character components pack 15-bit masks losslessly in f32, keep 
     townComponentMaskForLook,
   }=await import('../js/crew-components.js');
   const {CREW_WGSL}=await import('../js/wgsl/crew.js');
-  const {crewContinuumRenderWGSL}=await import('../js/wgsl/crew-continuum.js');
-  // The townsfolk are drawn with the people continuum's opaque passes: those fragment stages, and the shading they share.
-  const continuum=crewContinuumRenderWGSL(),fnBody=name=>{
-    const at=continuum.indexOf(`fn ${name}(`);let i=continuum.indexOf('{',at),depth=0;const start=i;
-    for(;i<continuum.length;i++){if(continuum[i]==='{')depth++;else if(continuum[i]==='}'&&!--depth)break;}
-    return continuum.slice(start,i+1);
-  };
-  const TOWNSFOLK_OPAQUE=['crewContinuumFS','crewContinuumFarFS','crewContinuumMask','crewContinuumPictured','crewShade'].map(fnBody).join('\n');
+  const {CREW_CONTINUUM_MATERIAL}=await import('../js/wgsl/crew-continuum.js');
   const {INLAND_WATER_WGSL}=await import('../js/wgsl/inland-water.js');
   const {HERD_CONTINUUM_MATERIAL_SPEC}=await import('../js/wgsl/herds.js');
   const {continuumModuleWGSL}=await import('../js/wgsl/continuum-cut.js');
   const HERDS_VIEW=continuumModuleWGSL({pass:'view',material:HERD_CONTINUUM_MATERIAL_SPEC});
+  // Every person (the crew, the townsfolk, garrisons and deck hands) is drawn through the one continuum's view of the
+  // crew's material.
+  const PEOPLE_VIEW=continuumModuleWGSL({pass:'view',material:CREW_CONTINUUM_MATERIAL});
 
-  for(const [name,src] of [['crew',CREW_WGSL],['townsfolk',TOWNSFOLK_OPAQUE],['inland-water',INLAND_WATER_WGSL],['herds',HERDS_VIEW]]){
+  for(const [name,src] of [['crew',CREW_WGSL],['people',PEOPLE_VIEW],['inland-water',INLAND_WATER_WGSL],['herds',HERDS_VIEW]]){
     assert.equal(/\bdiscard\b/.test(src),false,`${name} opaque WGSL contains zero discard`);
   }
 

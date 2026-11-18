@@ -1,30 +1,27 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // People drawn through the one continuum (AGENTS.md rule 3). js/crew-continuum.js holds the baked format and
-// js/wgsl/crew-continuum.js the GPU side; this fetches bodies, keeps each batch's lists and issues its draws.
+// js/wgsl/crew-continuum.js the GPU side; this fetches bodies, and keeps each batch's scene of the one cut.
 //
-// A body is fetched once a device, in two steps. First its manifest, cut tables, far body and posing rig, small
-// enough to wait for: from then on everyone wearing it is drawn by the far body and the splat. Then its full mesh
-// and picture, after which the GPU cuts each person by projected error. A batch of people who share a body and a
-// joint buffer runs one compute workgroup a person each frame and issues six indirect draws; the CPU writes only
-// each person's orders and the batch's uniform.
+// A body is fetched once a device, whole: its atlas (one type of the one format), its picture in the codec the device
+// reads, its rig and the light mesh the pose code measures footing from. Nothing is drawn until all of it is on the GPU.
+// A batch of people who share a body and a joint buffer is one scene of the one cut: each frame its stand writes every
+// person's record and joints from the crew's own, then the one select cuts them, and the one view, shadow and capture
+// draw them. The CPU writes only each person's orders and the batch's few words.
 import { loadCrewGLB } from './gltf.js';
 import { requestOnce } from './gpu-program-cache.js';
-import { CONTINUUM_TRIANGLE_BUDGET, continuumPixelError } from './continuum-core.js';
+import { continuumAtlasTypes, continuumRoom, loadContinuumAtlas } from './continuum-format.js';
+import { requestContinuumPrograms, requestContinuumView, requestContinuumCapture, continuumCaptureDraw, uploadContinuumAtlas, createContinuumScene } from './continuum-scene.js';
+import { continuumGroundView } from './continuum-ground.js';
+import { LAND_SHADOW_FORMAT } from './shadows.js';
 import {
-  CREW_CONTINUUM_ASSETS, CREW_CONTINUUM_BODIES, CREW_CONTINUUM_CLUSTER_WORDS, CREW_CONTINUUM_REGIONS, CREW_CONTINUUM_VERTEX_WORDS,
-  crewContinuumMissingMessage, validateCrewContinuumManifest,
+  CREW_CONTINUUM_ASSETS, CREW_CONTINUUM_BODIES, crewContinuumMissingMessage, crewContinuumRig, crewContinuumWear,
+  validateCrewContinuumManifest,
 } from './crew-continuum.js';
-import {
-  CREW_CONTINUUM_ENTRY_LAYOUT, CREW_CONTINUUM_INSTANCE_VERTICES, CREW_CONTINUUM_LISTS,
-  crewContinuumPoseWGSL, crewContinuumRenderWGSL, crewContinuumSelectWGSL, crewContinuumShadowWGSL,
-} from './wgsl/crew-continuum.js';
+import { CREW_CONTINUUM_MATERIAL, CREW_CONTINUUM_POSE_VEC4S, crewContinuumPoseWGSL, crewContinuumStandWGSL } from './wgsl/crew-continuum.js';
 import { CREW_JOINT_COUNT } from './crew-skeleton.js';
 
-// What the GPU is told of a person, beside their joints and actor record (crewOrders in the cut).
-export { CREW_CONTINUUM_ORDER_CUT, CREW_CONTINUUM_ORDER_IMPORTANT } from './wgsl/crew-continuum.js';
-// Cluster entries a batch's list holds: enough for the whole scene's budget of 128-triangle clusters.
-const CREW_CONTINUUM_CLUSTER_ROOM = Math.ceil(CONTINUUM_TRIANGLE_BUDGET / 128);
-const CREW_CONTINUUM_BODY_BYTES = 256, CREW_CONTINUUM_PART_BYTES = 128, CREW_CONTINUUM_DRAW_BYTES = 16;
+// What the GPU is told of a person, beside their joints and actor record (the batch's orders).
+export { CREW_CONTINUUM_ORDER_IMPORTANT } from './wgsl/crew-continuum.js';
 
 // Which body each person wears (the owner's choice of 2026-11-17): hands by sex, captains, soldiers, and each
 // indigenous culture its own pair.
@@ -58,47 +55,29 @@ async function crewContinuumStream(manifest, name, fetchAsset) {
   return bytes;
 }
 
-// The body's uniform (CrewContinuumBody). `full` once its mesh and picture are on the GPU; until then the far body
-// draws everyone (far.x = 0).
-function crewContinuumBodyUniform(manifest, full) {
-  const bytes = new ArrayBuffer(CREW_CONTINUUM_BODY_BYTES), f = new Float32Array(bytes), u = new Uint32Array(bytes);
-  const { quantization: q, chain, splat } = manifest;
-  f.set([...q.low, q.posScale], 0);
-  f.set([...q.uvLow, ...q.uvScale], 4);
-  u.set([manifest.clusterCount, manifest.vertexCount * CREW_CONTINUUM_VERTEX_WORDS, chain.vertexCount, chain.triangleCount], 8);
-  u.set([manifest.clusterCount * CREW_CONTINUUM_CLUSTER_WORDS, chain.offsets.records, chain.offsets.indices, chain.offsets.steps], 12);
-  f.set([full ? chain.errorRange[0] : 0, chain.stepCount, splat.ry, splat.rx], 16);
-  f.set([...splat.centre, splat.joint], 20);
-  CREW_CONTINUUM_REGIONS.forEach((_, r) => {
-    const median = manifest.regionMedians[r], share = splat.regions[r];
-    f.set(median ? [...median, 1] : [0.5, 0.5, 0.5, 0], 24 + r * 4);
-    f.set([...(share.mean ?? [0, 0, 0]), share.share], 44 + r * 4);
-  });
-  return bytes;
-}
-
 // A load that found bodies unbaked: the message names every missing file and how it is made; `missing` lists them.
 const crewContinuumMissingError = (missing, cause) => Object.assign(Error(crewContinuumMissingMessage(missing), cause ? { cause } : undefined), { missing });
-// Which of the files a body is drawn from are not there: those of its first step, and the full mesh and the picture
-// this device reads. Asked beside the first step, so a body missing any of them fails at load, naming every one.
+// Which of the files a body is drawn from are not there: its manifest, atlas, light mesh and the picture this device
+// reads. Asked beside the load, so a body missing any of them fails at load, naming every one.
 function crewContinuumAbsent(id, codec, fetchAsset) {
   const paths = CREW_CONTINUUM_ASSETS[id];
-  const wanted = ['manifest.json', 'body.glb', 'clusters.bin.gz', 'chain.bin.gz', ...(codec ? ['vertices.bin.gz', 'indices.bin.gz', `${codec.stream}.gz`] : [])].map((name) => paths[name]);
+  const wanted = ['manifest.json', 'body.glb', 'atlas.bin.gz', ...(codec ? [`${codec.stream}.gz`] : [])].map((name) => paths[name]);
   return Promise.all(wanted.map((path) => Promise.resolve().then(() => fetchAsset(path, { method: 'HEAD' })).then((r) => r.ok, () => false)))
     .then((present) => wanted.filter((_, i) => !present[i]));
 }
 
 async function openCrewContinuumBody(device, id, fetchAsset) {
   if (!CREW_CONTINUUM_BODIES.some((b) => b.id === id)) throw Error(`Unknown crew continuum body: ${id}`);
-  const B = GPUBufferUsage, paths = CREW_CONTINUUM_ASSETS[id];
-  // A device with neither texture codec keeps the far body near, and fetches no full mesh or picture.
+  const paths = CREW_CONTINUUM_ASSETS[id];
   const codec = crewContinuumCodecs.find((c) => device.features.has(c.feature));
   const absent = crewContinuumAbsent(id, codec, fetchAsset);
-  let manifest, clusters, chain, standIn;
+  let atlas, picture, standIn;
   try {
-    manifest = validateCrewContinuumManifest(await (await crewContinuumFetch(paths['manifest.json'], fetchAsset)).json());
-    [clusters, chain, standIn] = await Promise.all([
-      crewContinuumStream(manifest, 'clusters.bin', fetchAsset), crewContinuumStream(manifest, 'chain.bin', fetchAsset),
+    // A device that reads neither codec cannot draw a person's picture, and nothing stands in for it.
+    if (!codec) throw Error(`Crew continuum ${id}: this device reads neither BC7 nor ASTC textures, which people's pictures are baked in`);
+    atlas = await loadContinuumAtlas({ assets: paths, validate: validateCrewContinuumManifest, label: `crew ${id}`, fetchAsset });
+    [picture, standIn] = await Promise.all([
+      crewContinuumStream(atlas.manifest, codec.stream, fetchAsset),
       crewContinuumFetch(paths['body.glb'], fetchAsset).then((r) => r.arrayBuffer()).then(loadCrewGLB),
     ]);
   } catch (error) {
@@ -107,47 +86,30 @@ async function openCrewContinuumBody(device, id, fetchAsset) {
   }
   const missing = await absent;
   if (missing.length) throw crewContinuumMissingError(missing);
-  const made = (label, size, usage) => device.createBuffer({ label, size: Math.max(16, size), usage: usage | B.COPY_DST });
-  const shape = made(`crew continuum ${id} cut and far body`, clusters.byteLength + chain.byteLength, B.STORAGE);
-  device.queue.writeBuffer(shape, 0, clusters);
-  device.queue.writeBuffer(shape, clusters.byteLength, chain);
-  const uniform = made(`crew continuum ${id} body`, CREW_CONTINUUM_BODY_BYTES, B.UNIFORM);
-  device.queue.writeBuffer(uniform, 0, crewContinuumBodyUniform(manifest, false));
-  const blank = device.createTexture({ label: `crew continuum ${id} picture (waiting)`, size: [1, 1], format: 'rgba8unorm-srgb', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
-  device.queue.writeTexture({ texture: blank }, new Uint8Array([128, 128, 128, 255]), { bytesPerRow: 4 }, [1, 1]);
-  const body = {
-    id, manifest, standIn, shape, uniform, version: 0, full: false,
-    mesh: made(`crew continuum ${id} mesh (waiting)`, 16, B.STORAGE), texture: blank, albedo: blank.createView(),
+  const { manifest, words } = atlas, B = GPUBufferUsage;
+  const uniform = (label, data) => {
+    const buffer = device.createBuffer({ label, size: data.byteLength, usage: B.UNIFORM | B.COPY_DST });
+    device.queue.writeBuffer(buffer, 0, data);
+    return buffer;
+  };
+  const { width, height, levels } = manifest.texture;
+  const texture = device.createTexture({ label: `crew continuum ${id} picture`, size: [width, height], mipLevelCount: levels.length, format: codec.format, usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+  levels.forEach((level, mipLevel) => {
+    const across = Math.ceil(level.width / 4), down = Math.ceil(level.height / 4);
+    device.queue.writeTexture({ texture, mipLevel }, picture, { offset: level.offset, bytesPerRow: across * 16, rowsPerImage: down }, [across * 4, down * 4]);
+  });
+  return {
+    id, manifest, standIn, words, types: continuumAtlasTypes(words), atlas: uploadContinuumAtlas(device, words, `crew ${id}`),
+    rig: uniform(`crew continuum ${id} rig`, crewContinuumRig(manifest)), wear: uniform(`crew continuum ${id} wear`, crewContinuumWear(manifest)),
+    texture, albedo: texture.createView(),
     sampler: device.createSampler({ label: `crew continuum ${id} picture`, magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge', maxAnisotropy: 8 }),
-    chunks: Math.ceil(manifest.chain.triangleCount / 128),
     triangles: manifest.source.triangles,
   };
-  // The full mesh and picture, behind the far body.
-  body.loaded = !codec ? Promise.resolve(body) : Promise.all(['vertices.bin', 'indices.bin', codec.stream].map((name) => crewContinuumStream(manifest, name, fetchAsset))).then(([vertices, indices, picture]) => {
-    const mesh = made(`crew continuum ${id} mesh`, vertices.byteLength + indices.byteLength, B.STORAGE);
-    device.queue.writeBuffer(mesh, 0, vertices);
-    device.queue.writeBuffer(mesh, vertices.byteLength, indices);
-    const { width, height, levels } = manifest.texture;
-    const texture = device.createTexture({ label: `crew continuum ${id} picture`, size: [width, height], mipLevelCount: levels.length, format: codec.format, usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
-    levels.forEach((level, mipLevel) => {
-      const across = Math.ceil(level.width / 4), down = Math.ceil(level.height / 4);
-      device.queue.writeTexture({ texture, mipLevel }, picture, { offset: level.offset, bytesPerRow: across * 16, rowsPerImage: down }, [across * 4, down * 4]);
-    });
-    const waiting = [body.mesh, body.texture];
-    Object.assign(body, { mesh, texture, albedo: texture.createView(), full: true });
-    device.queue.writeBuffer(uniform, 0, crewContinuumBodyUniform(manifest, true));
-    body.version++;
-    // Bind groups made with the stand-ins are rebuilt before the next draw; the stand-ins go once that frame is done.
-    device.queue.onSubmittedWorkDone().then(() => { for (const resource of waiting) resource.destroy(); });
-    return body;
-  });
-  body.loaded.catch((error) => console.error(`Crew continuum ${id}: the full mesh failed to load; the far body is drawn near too`, error));
-  return body;
 }
 
 const crewContinuumBodyCache = new WeakMap();
-// A body on this device, fetched once. Resolves when it can be drawn; `body.loaded` when it is drawn in full. A body
-// that is not baked rejects, naming its missing files: nothing stands in for it.
+// A body on this device, fetched once. Resolves when it is wholly on the GPU. A body that is not baked rejects, naming
+// its missing files: nothing stands in for it.
 export function loadCrewContinuumBody(device, id, { fetchAsset = fetch } = {}) {
   let bodies = crewContinuumBodyCache.get(device);
   if (!bodies) crewContinuumBodyCache.set(device, (bodies = new Map()));
@@ -168,45 +130,19 @@ export async function loadCrewContinuumBodies(device, ids, options) {
   throw crewContinuumMissingError([...new Set(failed.flatMap((error) => error.missing))]);
 }
 
-let crewContinuumRenderSource = null;
-const crewContinuumRender = () => (crewContinuumRenderSource ??= crewContinuumRenderWGSL());
-
-// Every program people are cut and drawn with, once a device and target. Those that draw under water are asked
-// for apart, by whoever has the water's optics, so a garrison ashore asking first leaves them to the crew afloat.
+// Every program people are stood, cut and drawn with, once a device and target: the one cut's programs, the crew's
+// view of them, the stand afloat and ashore, and (by whoever has the water's optics) the capture under water.
 export function requestCrewContinuumPipelines({ device, shader, format = 'rgba16float', samples = 4, waterOptics = null }) {
-  const drawn = requestOnce(device, `crew continuum ${format} ${samples}`, async () => {
-    const [selectModule, module, shadowModule] = await Promise.all([
-      shader(crewContinuumSelectWGSL(), 'crew continuum cut'), shader(crewContinuumRender(), 'crew continuum'), shader(crewContinuumShadowWGSL(), 'crew continuum shadow'),
-    ]);
-    const laying = { depthWriteEnabled: true, depthCompare: 'greater' }, equal = { depthWriteEnabled: false, depthCompare: 'equal' };
-    const draw = (label, vs, fs, depth, writeMask = GPUColorWrite.ALL) => device.createRenderPipelineAsync({
-      label, layout: 'auto', vertex: { module, entryPoint: vs, buffers: CREW_CONTINUUM_ENTRY_LAYOUT },
-      fragment: { module, entryPoint: fs, targets: [{ format, writeMask }] }, primitive: { topology: 'triangle-list', cullMode: 'none' },
-      depthStencil: { format: 'depth32float', ...depth }, multisample: { count: samples },
-    });
-    const [select, clusters, far, splat, cutDepthClusters, cutDepthFar, cutClusters, cutFar, shadow] = await Promise.all([
-      device.createComputePipelineAsync({ label: 'crew continuum cut', layout: 'auto', compute: { module: selectModule, entryPoint: 'crewContinuumSelect' } }),
-      draw('crew continuum clusters', 'crewContinuumClusterVS', 'crewContinuumFS', laying),
-      draw('crew continuum far body', 'crewContinuumChainVS', 'crewContinuumFarFS', laying),
-      draw('crew continuum splat', 'crewContinuumSplatVS', 'crewContinuumFarFS', laying),
-      draw('crew continuum surviving clusters', 'crewContinuumClusterVS', 'crewContinuumSurviving', laying, 0),
-      draw('crew continuum surviving far body', 'crewContinuumChainVS', 'crewContinuumSurviving', laying, 0),
-      draw('crew continuum cut clusters', 'crewContinuumClusterVS', 'crewContinuumFS', equal),
-      draw('crew continuum cut far body', 'crewContinuumChainVS', 'crewContinuumFarFS', equal),
-      device.createRenderPipelineAsync({
-        label: 'crew continuum shadow', layout: 'auto', vertex: { module: shadowModule, entryPoint: 'crewContinuumShadowVS', buffers: CREW_CONTINUUM_ENTRY_LAYOUT },
-        primitive: { topology: 'triangle-list', cullMode: 'none' }, depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'less', depthBias: 2, depthBiasSlopeScale: 1.5 },
-      }),
-    ]);
-    return { select, clusters, far, splat, cutDepthClusters, cutDepthFar, cutClusters, cutFar, shadow };
-  });
-  if (!waterOptics) return drawn;
-  const submerged = requestOnce(device, `crew continuum submerged ${format} ${samples}`, async () => {
-    const optics = await waterOptics;
-    const submerged = await (optics?.capture({ source: crewContinuumRender(), entry: 'crewContinuumSubmergedFarFS', world: 'c.world', vertex: { entryPoint: 'crewContinuumSubmergedVS', buffers: CREW_CONTINUUM_ENTRY_LAYOUT }, groups: 3 }) ?? null);
-    return { submerged };
-  });
-  return Promise.all([drawn, submerged]).then(([pipelines, under]) => ({ ...pipelines, ...under }));
+  const stand = (ground) => requestOnce(device, `crew continuum stand${ground ? ' ashore' : ''}`, async () => device.createComputePipelineAsync({
+    label: `crew continuum stand${ground ? ' ashore' : ''}`, layout: 'auto',
+    compute: { module: await shader(crewContinuumStandWGSL(ground), `crew continuum stand${ground ? ' ashore' : ''}`), entryPoint: 'crewContinuumStand' },
+  }));
+  return Promise.all([
+    requestContinuumPrograms({ device, shader, shadowFormat: LAND_SHADOW_FORMAT }),
+    requestContinuumView({ device, shader, material: CREW_CONTINUUM_MATERIAL, format, samples }),
+    waterOptics ? requestOnce(device, `crew continuum capture ${format} ${samples}`, () => requestContinuumCapture(waterOptics, CREW_CONTINUUM_MATERIAL)) : null,
+    stand(false), stand(true),
+  ]).then(([programs, view, capture, afloat, ashore]) => ({ programs, view, capture, stand: { afloat, ashore } }));
 }
 
 // The pass that poses people placed on the GPU (crewContinuumPoseWGSL), once a device.
@@ -251,7 +187,7 @@ export function createCrewContinuumPoser({ device, pipeline, placed, palettes, l
     entries: [placed, palettes, looks, rest, joints, actors, orders, run].map((buffer, binding) => ({ binding, resource: { buffer } })),
   });
   return {
-    // In a compute pass, after the placing pass and before the batch's cut.
+    // In a compute pass, after the placing pass and before the batch's stand.
     encode(pass) {
       pass.setPipeline(pipeline);
       pass.setBindGroup(0, group);
@@ -261,112 +197,73 @@ export function createCrewContinuumPoser({ device, pipeline, placed, palettes, l
   };
 }
 
-// One batch: people `first`..`first + capacity` of a joint and actor buffer, all wearing `body`.
-//   frame, hull, bones, actor   the crew's own buffers (group 0 of the cut)
+// One batch: people `first`..`first + capacity` of a joint and actor buffer, all wearing `body`, one scene of the cut.
+//   frame, hull, bones, actor   the crew's own buffers (the stand's, and the material's group 0)
 //   main                        the crew's group-0 resources for drawing, in binding order (bindings 13 and 14 as entries)
 //   shadows                     the shadow set: its `uniform` and `bind(pipeline)` for the lighting group
 //   counted                     for people a GPU pass keeps: { buffer, offset } of the indirect dispatch (count, 1, 1)
-//                               that sizes the cut; the orders are then the pose pass's to write, never the CPU's
-export function createCrewContinuumBatch({ device, pipelines: P, body, capacity, first = 0, samples = 4, frame, hull, bones, actor, main, shadows, counted = null }) {
-  const B = GPUBufferUsage, chunks = body.chunks;
-  const room = [CREW_CONTINUUM_CLUSTER_ROOM, capacity * chunks, capacity, CREW_CONTINUUM_CLUSTER_ROOM, capacity * chunks, capacity * chunks];
-  const lists = [];
-  let entries = capacity * 2;
-  for (const n of room) { lists.push([entries, n]); entries += n; }
-  const list = device.createBuffer({ label: `crew continuum ${body.id} lists`, size: entries * 8, usage: B.STORAGE | B.VERTEX | B.COPY_SRC });
-  const draws = device.createBuffer({ label: `crew continuum ${body.id} draws`, size: CREW_CONTINUUM_LISTS.length * CREW_CONTINUUM_DRAW_BYTES, usage: B.STORAGE | B.INDIRECT | B.COPY_DST | B.COPY_SRC });
+//                               that says how many there are; the orders are then the pose pass's to write
+//   ground                      they stand on the land, on the ground the land draws; else `sea`: they are afloat
+export function createCrewContinuumBatch({ device, pipelines: P, body, capacity, first = 0, samples = 4, frame, hull, bones, actor, main, shadows, counted = null, ground = false, sea = !ground }) {
+  const B = GPUBufferUsage;
+  const room = continuumRoom(body.types, [capacity]).room;
+  const scene = createContinuumScene({
+    device, atlas: { buffer: body.atlas }, programs: P.programs, capacity, room, view: P.view, poseRoom: capacity * CREW_CONTINUUM_POSE_VEC4S,
+    frame, shadowUniform: shadows.uniform, samples, label: `crew ${body.id}`,
+  });
   const orders = device.createBuffer({ label: `crew continuum ${body.id} orders`, size: Math.max(16, capacity * 4), usage: B.STORAGE | B.COPY_DST });
   device.queue.writeBuffer(orders, 0, new Uint32Array(Math.max(4, capacity)));
-  const part = device.createBuffer({ label: `crew continuum ${body.id} batch`, size: CREW_CONTINUUM_PART_BYTES, usage: B.UNIFORM | B.COPY_DST });
-  const orderWords = new Uint32Array(Math.max(4, capacity)), partWords = new Uint32Array(CREW_CONTINUUM_PART_BYTES / 4), partFloats = new Float32Array(partWords.buffer);
-  lists.forEach(([at, n], i) => partWords.set([at, n, 0, 0], 8 + i * 4));
-  const resetDraws = new Uint32Array(CREW_CONTINUUM_LISTS.length * 4);
-  CREW_CONTINUUM_INSTANCE_VERTICES.forEach((n, i) => { resetDraws[i * 4] = n; });
-
-  const entriesOf = (resources) => resources.map((resource, binding) => (resource?.resource !== undefined ? resource : { binding, resource }));
-  const groupOf = (pipeline, index, resources) => device.createBindGroup({ layout: pipeline.getBindGroupLayout(index), entries: entriesOf(resources) });
-  const select = groupOf(P.select, 0, [{ buffer: frame }, { buffer: hull }, { buffer: bones }, { buffer: actor }, { buffer: body.shape }, { buffer: list }, { buffer: draws }, { buffer: body.uniform }, { buffer: part }, { buffer: orders }, { buffer: shadows.uniform }]);
-  const shading = ['clusters', 'far', 'splat', 'cutClusters', 'cutFar'], laying = ['cutDepthClusters', 'cutDepthFar'];
-  let groups = null, version = -1;
-  // Built again once the body's full mesh and picture replace their stand-ins.
-  const bind = () => {
-    if (version === body.version) return groups;
-    version = body.version;
-    const data = [{ buffer: body.mesh }, { buffer: body.shape }, { buffer: list }, { buffer: body.uniform }, { buffer: part }, body.albedo, body.sampler];
-    groups = {};
-    for (const name of [...shading, ...laying]) groups[name] = [groupOf(P[name], 0, main), shading.includes(name) ? shadows.bind(P[name]) : null, groupOf(P[name], 2, data)];
-    groups.shadow = [groupOf(P.shadow, 0, [{ buffer: shadows.uniform }, { buffer: hull }, { buffer: bones }, { buffer: actor }]), null, groupOf(P.shadow, 2, data)];
-    if (P.submerged) groups.submerged = [P.submerged.bindGroup(main, 0), shadows.bind(P.submerged.pipeline), P.submerged.bindGroup(data, 2)];
-    return groups;
-  };
-  // A frame's cut runs once, after its lists are emptied; a pass that asks again in the same frame keeps the first.
+  const run = device.createBuffer({ label: `crew continuum ${body.id} stand`, size: 16, usage: B.UNIFORM | B.COPY_DST });
+  const orderWords = new Uint32Array(Math.max(4, capacity)), runWords = new Uint32Array(4);
+  const stand = ground ? P.stand.ashore : P.stand.afloat;
+  const standGroup = device.createBindGroup({
+    label: `crew continuum ${body.id} stand`, layout: stand.getBindGroupLayout(0),
+    entries: [
+      ...[frame, hull, bones, actor, orders, run, scene.records, scene.poses, body.rig, counted?.buffer ?? orders].map((buffer, binding) => ({ binding, resource: { buffer } })),
+      ...(ground ? [{ binding: 10, resource: continuumGroundView(device) }] : []),
+    ],
+  });
+  // The material's group 0: the crew's own, then the body's picture, its sampler and its wear. Bound when first drawn.
+  const entries = [...main, { binding: 15, resource: body.albedo }, { binding: 16, resource: body.sampler }, { binding: 17, resource: { buffer: body.wear } }]
+    .map((resource, binding) => (resource?.resource !== undefined && resource?.binding !== undefined ? resource : { binding, resource }));
+  let view = null, under;
+  const viewGroups = () => (view ??= [device.createBindGroup({ label: `crew continuum ${body.id}`, layout: P.view.pipeline.getBindGroupLayout(0), entries }), shadows.bind(P.view.pipeline)]);
+  const capture = () => (under === undefined ? (under = continuumCaptureDraw(P.capture, entries, shadows)) : under);
   let count = 0, armed = false;
-  const drawList = (pass, index) => {
-    const [at, n] = lists[index];
-    pass.setVertexBuffer(0, list, at * 8, n * 8);
-    pass.drawIndirect(draws, index * CREW_CONTINUUM_DRAW_BYTES);
-  };
-  const drawWith = (pass, name, pipeline, indices) => {
-    const [g0, g1, g2] = bind()[name];
-    pass.setPipeline(pipeline);
-    pass.setBindGroup(0, g0);
-    if (g1) pass.setBindGroup(1, g1);
-    pass.setBindGroup(2, g2);
-    for (const index of indices) drawList(pass, index);
-  };
   return {
-    body, lists, list, draws, orders,
+    body, scene, orders,
     get count() { return count; },
-    // Before the frame's passes: who is drawn, with what orders, at the scene's one pixel error.
-    // `at` moves the batch's first slot, where a garrison's captains follow however many soldiers a port has.
-    // A counted batch is given how many it may hold (a number), and the GPU says how many there are.
+    // Before the frame's passes: who is drawn, with what orders. `at` moves the batch's first slot, where a garrison's
+    // captains follow however many soldiers a port has. A counted batch is given how many it may hold (a number), and
+    // the GPU says how many there are.
     update(people, orderOf = () => 0, castShadows = true, at = first) {
       count = Math.min(typeof people === 'number' ? people : people.length, capacity);
       if (!counted) for (let i = 0; i < count; i++) orderWords[i] = orderOf(people[i], i) >>> 0;
       if (count && !counted) device.queue.writeBuffer(orders, 0, orderWords, 0, Math.max(4, count));
-      partWords.set([at, count, samples, castShadows ? 1 : 0], 0);
-      partFloats[4] = continuumPixelError();
-      device.queue.writeBuffer(part, 0, partWords);
-      device.queue.writeBuffer(draws, 0, resetDraws);
+      runWords.set([at, count, counted ? counted.offset / 4 : 0, (counted ? 1 : 0) | (sea ? 2 : 0)]);
+      device.queue.writeBuffer(run, 0, runWords);
+      scene.setCount(count);
+      scene.setShadows(castShadows);
       armed = true;
     },
-    // In a compute pass, after every joint of the batch is final for the frame.
+    // In a compute pass, after every joint of the batch is final for the frame: each person stood, then the one cut.
     encodeSelect(pass) {
-      if (!count || !armed) return;
+      if (!armed) return;
       armed = false;
-      pass.setPipeline(P.select);
-      pass.setBindGroup(0, select);
-      if (counted) pass.dispatchWorkgroupsIndirect(counted.buffer, counted.offset);
-      else pass.dispatchWorkgroups(count);
+      if (count) {
+        pass.setPipeline(stand);
+        pass.setBindGroup(0, standGroup);
+        pass.dispatchWorkgroups(count);
+      }
+      scene.encode(pass);
     },
-    drawOpaque(pass) {
-      if (!count) return;
-      drawWith(pass, 'clusters', P.clusters, [0]);
-      drawWith(pass, 'far', P.far, [1]);
-      drawWith(pass, 'splat', P.splat, [2]);
-    },
-    // Depth first for those being cut away, then shaded where that depth held.
-    drawCut(pass) {
-      if (!count) return;
-      drawWith(pass, 'cutDepthClusters', P.cutDepthClusters, [3]);
-      drawWith(pass, 'cutDepthFar', P.cutDepthFar, [4]);
-      drawWith(pass, 'cutClusters', P.cutClusters, [3]);
-      drawWith(pass, 'cutFar', P.cutFar, [4]);
-    },
-    drawShadow(pass) {
-      if (!count) return;
-      drawWith(pass, 'shadow', P.shadow, [5]);
-    },
-    // Under water, single-sampled, through the water's own capture: the far bodies the shadow list already holds.
-    drawSubmerged(pass, above = false) {
-      if (!count || !P.submerged) return;
-      const [g0, g1, g2] = bind().submerged;
-      P.submerged.bind(pass, above);
-      pass.setBindGroup(0, g0); pass.setBindGroup(1, g1); pass.setBindGroup(2, g2);
-      drawList(pass, 5);
-    },
-    // For the continuum census: every draw's own indirect record.
-    continuumDraws() { return count ? [{ buffer: draws, offset: 0, records: CREW_CONTINUUM_LISTS.length, stride: 4, people: count }] : []; },
-    destroy() { for (const resource of [list, draws, orders, part]) resource.destroy(); },
+    drawOpaque(pass) { if (count) scene.draw(pass, ...viewGroups()); },
+    drawShadow(pass) { if (count) scene.drawShadow(pass); },
+    // Under water, single-sampled, through the water's own capture: the coarse cut the shadow's lists hold.
+    drawSubmerged(pass, above = false) { if (count) capture()?.draw(pass, [scene], above); },
+    // For the continuum census: the one cut's triangle counts, with how many people the batch stands (for a counted
+    // batch, how many it may hold).
+    continuumDraws() { return count ? scene.continuumDraws().map((draw) => ({ ...draw, people: count })) : []; },
+    destroy() { for (const resource of [orders, run]) resource.destroy(); scene.destroy(); },
   };
 }

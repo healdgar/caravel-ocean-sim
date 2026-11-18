@@ -7,12 +7,12 @@ import {once} from 'node:events';
 import {chromium} from 'playwright';
 import {createDevServer} from '../server.mjs';
 import {coastalRegionStageURL} from '../js/landfall.js';
-import {CREW_CONTINUUM_LISTS} from '../js/wgsl/crew-continuum.js';
+import {CONTINUUM_LISTS} from '../js/continuum-format.js';
 import {TOWNSFOLK_DISPATCH_WORDS,TOWNSFOLK_MODELS} from '../js/wgsl/townsfolk.js';
 import {townsfolkBodiesFor} from '../js/townsfolk.js';
 
 // The bodies' streams are published, not committed: a checkout without them cannot draw people at all.
-const baked=townsfolkBodiesFor().every(id=>fs.existsSync(new URL(`../assets/crew/continuum/${id}/vertices.bin.gz`,import.meta.url)));
+const baked=townsfolkBodiesFor().every(id=>fs.existsSync(new URL(`../assets/crew/continuum/${id}/atlas.bin.gz`,import.meta.url)));
 let browser,server,base;
 before(async()=>{
   server=createDevServer();server.listen(0,'127.0.0.1');await once(server,'listening');
@@ -33,7 +33,8 @@ const instrument=()=>{
   const write=GPUQueue.prototype.writeBuffer;
   GPUQueue.prototype.writeBuffer=function(b,...rest){if(window.townCapture&&/townsfolk/.test(b.label||''))townUploads.push(b.label);return write.call(this,b,...rest);};
 };
-// How many each body's people the walk kept, and how many instances each of the continuum's lists drew, over a frame.
+// How many each body's people the walk kept, and how many instances each of the one cut's lists drew, over a frame:
+// its draws buffer opens with every list's indirect record, four words each.
 const shown=(page,lists,dispatchWords,models)=>page.evaluate(async({lists,dispatchWords,models})=>{
   townUploads.length=0;townCapture=true;
   await new Promise(requestAnimationFrame);await new Promise(requestAnimationFrame);townCapture=false;
@@ -46,8 +47,8 @@ const shown=(page,lists,dispatchWords,models)=>page.evaluate(async({lists,dispat
   const counts=townCounts?await read(townCounts,models*dispatchWords*4):null;
   const kept=counts?Array.from({length:models},(_,m)=>counts[m*dispatchWords]):[];
   const drawn=Object.fromEntries(lists.map(name=>[name,0]));
-  for(const {buffer,records} of folk?.continuumDraws?.()??[]){
-    const words=await read(buffer,records*16);
+  for(const {buffer} of folk?.continuumDraws?.()??[]){
+    const words=await read(buffer,lists.length*16);
     lists.forEach((name,i)=>{drawn[name]+=words[i*4+1];});
   }
   const census=window.oceanContinuumCensus?.latest?.families??null;
@@ -65,7 +66,7 @@ async function open(query){
   await page.waitForTimeout(8000);
   return {page,errors};
 }
-const look=page=>shown(page,CREW_CONTINUUM_LISTS,TOWNSFOLK_DISPATCH_WORDS,TOWNSFOLK_MODELS);
+const look=page=>shown(page,CONTINUUM_LISTS,TOWNSFOLK_DISPATCH_WORDS,TOWNSFOLK_MODELS);
 
 test('people walk the town by compute alone and are cut and drawn through the continuum',{skip:!baked&&'continuum bodies not baked here',timeout:300000},async()=>{
   const {page,errors}=await open({});
@@ -74,10 +75,9 @@ test('people walk the town by compute alone and are cut and drawn through the co
     console.log('townsfolk',JSON.stringify(day));
     assert.equal(day.error,null,'the town wears the continuum bodies');
     assert.ok(day.bodies>40,`only ${day.bodies} people kept: ${JSON.stringify(day)}`);
-    const seen=day.drawn.clusters+day.drawn.chain+day.drawn.splat;
+    const seen=day.drawn.clusters+day.drawn['small clusters']+day.drawn['far body']+day.drawn.splat;
     assert.ok(seen>0,`drawn: ${JSON.stringify(day.drawn)}`);
-    assert.ok(day.drawn.shadow>0,'and they cast shadows');
-    assert.equal(day.drawn.clustersCut+day.drawn.chainCut,0,'no one ashore is cut away for the helm');
+    assert.ok(day.drawn['shadow far body']+day.drawn['shadow clusters']>0,'and they cast shadows');
     if(day.census)assert.ok(day.census.people>0,`the census counts them: ${JSON.stringify(day.census)}`);
     // Only the hour, when it moves on, is sent once a town is laid out; the counts are emptied on the GPU.
     assert.ok(day.uploads.every(label=>label==='townsfolk crowd'),JSON.stringify(day.uploads));

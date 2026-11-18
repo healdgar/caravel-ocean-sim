@@ -17,14 +17,16 @@ export async function fetchCrewContinuumAsset(path, init = {}) {
     return new Response(null, { status: 404 });
   }
 }
-// What a body asks of a device beyond buffers and bind groups: a stand-in picture and its sampler. With no texture
-// codec, only the far body and the cut tables are fetched.
+// What a body asks of a device beyond buffers and bind groups: its picture (in BC7, which this device reads, for a
+// person's picture is never stood in for), its sampler, and the one cut's layouts.
 export function crewContinuumDevice(device) {
   const texture = (d) => ({ ...d, createView: () => ({ texture: d.label }), destroy() {} });
   return Object.assign(device, {
-    features: new Set(),
+    features: new Set(['texture-compression-bc']),
     createTexture: texture,
     createSampler: (d) => ({ ...d }),
+    createBindGroupLayout: (d) => ({ ...d }),
+    createPipelineLayout: (d) => ({ ...d }),
     queue: Object.assign(device.queue, { writeTexture() {}, onSubmittedWorkDone: () => Promise.resolve() }),
   });
 }
@@ -32,7 +34,8 @@ export function crewContinuumDevice(device) {
 export function crewContinuumGlobals(t) {
   const set = {
     GPUBufferUsage: { VERTEX: 1, INDEX: 2, UNIFORM: 4, STORAGE: 8, COPY_DST: 16, INDIRECT: 32, COPY_SRC: 64 },
-    GPUTextureUsage: { COPY_DST: 2, TEXTURE_BINDING: 4 },
+    GPUTextureUsage: { COPY_SRC: 1, COPY_DST: 2, TEXTURE_BINDING: 4, STORAGE_BINDING: 8, RENDER_ATTACHMENT: 16 },
+    GPUShaderStage: { VERTEX: 1, FRAGMENT: 2, COMPUTE: 4 },
     GPUColorWrite: { ALL: 15 },
   };
   const before = Object.fromEntries(Object.keys(set).map((name) => [name, globalThis[name]]));

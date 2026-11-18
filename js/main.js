@@ -5673,7 +5673,6 @@ async function main() {
     // Anything that cuts fragments or blends follows the opaque scene.
     if(drawProw){
       for(const v of hulls){
-        if(vesselHasVisibleCrew(v))v.crew?.drawCut(rp);
         if(!v.bakedWreck)v.anchorSplash.draw(rp);
         if(!v.boat.damage?.sunk)v.flood?.draw(rp);
       }

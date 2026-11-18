@@ -21,57 +21,68 @@ async function blank() {
   return page;
 }
 
-test('the cut, every draw and the shadow compile and link against the crew\'s own bindings', { timeout: 180000 }, async () => {
+// The game's own shader preparation, as js/main.js gives every program.
+async function programs(device) {
+  const { withCelestialFrame } = await import('/js/wgsl/celestial.js');
+  const { withSceneShadowCount } = await import('/js/wgsl/shadows.js');
+  const { pruneWGSLFunctions } = await import('/js/wgsl-prune.js');
+  const { createGPUProgramCache } = await import('/js/gpu-program-cache.js');
+  const compiled = [];
+  const { shader } = createGPUProgramCache({ device, prepare: (code) => pruneWGSLFunctions(withCelestialFrame(withSceneShadowCount(code, 1))), report: (messages, code, label) => {
+    for (const m of messages) if (m.type === 'error') compiled.push(`${label}:${m.lineNum}:${m.linePos} ${m.message} | ${code.split('\n')[m.lineNum - 1]?.trim()}`);
+  } });
+  return { shader, compiled };
+}
+
+test('the one cut, the crew\'s view of it, its capture under water, its stands and its pose all compile and link', { timeout: 180000 }, async () => {
   const page = await blank();
   try {
-    const result = await page.evaluate(async () => {
-      const { crewContinuumSelectWGSL, crewContinuumRenderWGSL, crewContinuumShadowWGSL, CREW_CONTINUUM_ENTRY_LAYOUT } = await import('/js/wgsl/crew-continuum.js');
-      const adapter = await navigator.gpu.requestAdapter(), device = await adapter.requestDevice({ requiredLimits: { maxStorageBuffersInVertexStage: Math.min(8, adapter.limits.maxStorageBuffersInVertexStage ?? 8) } }), errors = [];
+    const result = await page.evaluate(async (source) => {
+      const { requestCrewContinuumPipelines, requestCrewContinuumPose } = await import('/js/crew-continuum-draw.js');
+      const { continuumModuleWGSL, CONTINUUM_ENTRY_LAYOUT } = await import('/js/wgsl/continuum-cut.js');
+      const { CREW_CONTINUUM_MATERIAL } = await import('/js/wgsl/crew-continuum.js');
+      const { WATER_CAPTURE_DIRECTIVE, waterCaptureWGSL } = await import('/js/water-optics.js');
+      const adapter = await navigator.gpu.requestAdapter(), errors = [];
+      const device = await adapter.requestDevice({ requiredLimits: { maxStorageBuffersPerShaderStage: adapter.limits.maxStorageBuffersPerShaderStage, maxSampledTexturesPerShaderStage: adapter.limits.maxSampledTexturesPerShaderStage } });
       device.addEventListener('uncapturederror', (e) => errors.push(e.error.message));
-      const compile = async (code, label) => {
-        const module = device.createShaderModule({ label, code }), info = await module.getCompilationInfo();
-        const bad = info.messages.filter((m) => m.type === 'error');
-        if (bad.length) throw Error(`${label}: ${bad.map((m) => `${m.lineNum}:${m.linePos} ${m.message} | ${code.split('\n')[m.lineNum - 1]?.trim()}`).join('\n')}`);
-        return module;
-      };
-      const select = await compile(crewContinuumSelectWGSL(), 'select'), render = await compile(crewContinuumRenderWGSL(), 'render'), shadow = await compile(crewContinuumShadowWGSL(), 'shadow');
-      const made = [];
-      made.push(await device.createComputePipelineAsync({ layout: 'auto', compute: { module: select, entryPoint: 'crewContinuumSelect' } }));
-      const draw = (vs, fs, depth, writeMask = 0xf) => device.createRenderPipelineAsync({ layout: 'auto', vertex: { module: render, entryPoint: vs, buffers: CREW_CONTINUUM_ENTRY_LAYOUT },
-        fragment: { module: render, entryPoint: fs, targets: [{ format: 'rgba16float', writeMask }] }, primitive: { topology: 'triangle-list', cullMode: 'none' },
-        depthStencil: { format: 'depth32float', ...depth }, multisample: { count: 4 } });
-      const laying = { depthWriteEnabled: true, depthCompare: 'greater' }, equal = { depthWriteEnabled: false, depthCompare: 'equal' };
-      for (const [vs, fs, depth, mask] of [
-        ['crewContinuumClusterVS', 'crewContinuumFS', laying], ['crewContinuumChainVS', 'crewContinuumFarFS', laying], ['crewContinuumSplatVS', 'crewContinuumFarFS', laying],
-        ['crewContinuumClusterVS', 'crewContinuumSurviving', laying, 0], ['crewContinuumChainVS', 'crewContinuumSurviving', laying, 0],
-        ['crewContinuumClusterVS', 'crewContinuumFS', equal], ['crewContinuumChainVS', 'crewContinuumFarFS', equal],
-      ]) made.push(await draw(vs, fs, depth, mask));
-      made.push(await device.createRenderPipelineAsync({ layout: 'auto', vertex: { module: shadow, entryPoint: 'crewContinuumShadowVS', buffers: CREW_CONTINUUM_ENTRY_LAYOUT }, primitive: { topology: 'triangle-list', cullMode: 'none' }, depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'less' } }));
-      // Every render pipeline takes the crew's whole group 0 and the continuum's whole group 2.
-      const counts = made.slice(1).map((p) => [0, 2].map((g) => { try { return p.getBindGroupLayout(g) ? 1 : 0; } catch { return -1; } }));
+      const { shader, compiled } = await (0, eval)(`(${source})`)(device);
+      const P = await requestCrewContinuumPipelines({ device, shader });
+      const pose = await requestCrewContinuumPose({ device, shader });
+      // Under water the crew's view is cut by the water's capture, drawing the coarse cut.
+      const module = await shader(continuumModuleWGSL({ pass: 'capture', material: CREW_CONTINUUM_MATERIAL, capture: { directive: WATER_CAPTURE_DIRECTIVE, tail: (o) => waterCaptureWGSL({ ...o, surfaceWaves: false, land: false }) } }), 'crewContinuum capture');
+      const capture = await device.createRenderPipelineAsync({
+        layout: 'auto', vertex: { module, entryPoint: 'continuumCaptureVS', buffers: CONTINUUM_ENTRY_LAYOUT }, fragment: { module, entryPoint: 'submergedFS', targets: [{ format: 'rgba16float' }] },
+        primitive: { topology: 'triangle-list', cullMode: 'none' }, depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' }, multisample: { count: 1 },
+      });
+      // The view takes the crew's group 0, the shadow set's group 1 and the cut's data group 2.
+      const groups = [0, 1, 2].map((g) => { try { return P.view.pipeline.getBindGroupLayout(g) ? 1 : 0; } catch { return -1; } });
+      const view = continuumModuleWGSL({ pass: 'view', material: CREW_CONTINUUM_MATERIAL }).replace(/\/\/.*$/gm, '');
       await device.queue.onSubmittedWorkDone();
-      return { pipelines: made.length, counts, errors };
-    });
+      return { errors, compiled, groups, made: [P.programs.select, P.programs.shadow, P.view.pipeline, P.stand.afloat, P.stand.ashore, pose, capture].every(Boolean), discards: /\bdiscard\b/.test(view) };
+    }, programs.toString());
+    assert.deepEqual(result.compiled, []);
     assert.deepEqual(result.errors, []);
-    assert.equal(result.pipelines, 9);
+    assert.ok(result.made);
+    assert.deepEqual(result.groups, [1, 1, 1]);
+    assert.equal(result.discards, false, 'no main pass people are drawn by discards');
   } finally { await page.close(); }
 });
 
-// People in a row before the camera, 2 m to 2.5 km, at rest in their bind pose; the cut is read back.
+// People in a row before the camera, 2 m to 2.5 km, at rest in their bind pose; the one cut is read back.
 test('each person is cut by distance: clusters near, the far body past the handoff, a splat at the horizon', { timeout: 300000 }, async () => {
   const page = await blank();
   try {
-    const result = await page.evaluate(async () => {
+    const result = await page.evaluate(async (source) => {
       const { loadCrewContinuumBody, requestCrewContinuumPipelines, createCrewContinuumBatch } = await import('/js/crew-continuum-draw.js');
       const { CREW_JOINT_COUNT } = await import('/js/crew-skeleton.js');
       const adapter = await navigator.gpu.requestAdapter();
       const features = ['texture-compression-bc', 'texture-compression-astc'].filter((f) => adapter.features.has(f));
-      const device = await adapter.requestDevice({ requiredFeatures: features, requiredLimits: { maxStorageBuffersInVertexStage: Math.min(8, adapter.limits.maxStorageBuffersInVertexStage ?? 8), maxStorageBufferBindingSize: Math.min(adapter.limits.maxStorageBufferBindingSize, 256 << 20), maxBufferSize: Math.min(adapter.limits.maxBufferSize, 512 << 20) } }), errors = [];
+      const device = await adapter.requestDevice({ requiredFeatures: features, requiredLimits: { maxStorageBuffersPerShaderStage: adapter.limits.maxStorageBuffersPerShaderStage, maxStorageBufferBindingSize: Math.min(adapter.limits.maxStorageBufferBindingSize, 256 << 20), maxBufferSize: Math.min(adapter.limits.maxBufferSize, 512 << 20) } }), errors = [];
       device.addEventListener('uncapturederror', (e) => errors.push(e.error.message));
       const B = GPUBufferUsage, buffer = (data, usage) => { const b = device.createBuffer({ size: Math.max(16, data.byteLength), usage: usage | B.COPY_DST | B.COPY_SRC }); device.queue.writeBuffer(b, 0, data); return b; };
       const body = await loadCrewContinuumBody(device, 'sailor-male');
-      await body.loaded;
-      const P = await requestCrewContinuumPipelines({ device, shader: async (code, label) => device.createShaderModule({ code, label }) });
+      const { shader } = await (0, eval)(`(${source})`)(device);
+      const P = await requestCrewContinuumPipelines({ device, shader });
       const distances = [2, 5, 12, 20, 24, 40, 80, 160, 320, 640, 2560], N = distances.length;
       const tanY = Math.tan(Math.PI / 6), W = 1920, H = 1080, f = 1 / tanY, near = 0.1;
       const frame = new Float32Array(132);
@@ -88,35 +99,22 @@ test('each person is cut by distance: clusters near, the far body past the hando
       batch.update(distances.map(() => ({})));
       const encoder = device.createCommandEncoder(), pass = encoder.beginComputePass();
       batch.encodeSelect(pass); pass.end();
-      const readStates = device.createBuffer({ size: N * 16, usage: B.COPY_DST | B.MAP_READ }), readDraws = device.createBuffer({ size: 96, usage: B.COPY_DST | B.MAP_READ });
-      encoder.copyBufferToBuffer(batch.draws, 0, readDraws, 0, 96);
-      encoder.copyBufferToBuffer(batch.list, 0, readStates, 0, N * 16);
+      // The one cut's draws open with every list's indirect record, four words each.
+      const [{ buffer: drawsBuffer }] = batch.continuumDraws(), readDraws = device.createBuffer({ size: 96, usage: B.COPY_DST | B.MAP_READ });
+      encoder.copyBufferToBuffer(drawsBuffer, 0, readDraws, 0, 96);
       device.queue.submit([encoder.finish()]);
-      await Promise.all([readDraws.mapAsync(GPUMapMode.READ), readStates.mapAsync(GPUMapMode.READ)]);
-      const draws = Array.from(new Uint32Array(readDraws.getMappedRange().slice(0))), words = new Uint32Array(readStates.getMappedRange().slice(0)), floats = new Float32Array(words.buffer);
-      const people = distances.map((d, i) => ({ d, handoff: (words[i * 4] >>> 8) & 255, splat: (words[i * 4] >>> 16) & 255, step: words[i * 4 + 1] & 65535, shadowStep: words[i * 4 + 1] >>> 16, morph: floats[i * 4 + 2], thin: floats[i * 4 + 3] }));
-      return { draws, people, errors, base: body.manifest.chain.errorRange[0], steps: body.manifest.chain.stepCount };
-    });
+      await readDraws.mapAsync(GPUMapMode.READ);
+      const draws = Array.from(new Uint32Array(readDraws.getMappedRange().slice(0)));
+      return { draws, errors, handoff: body.manifest.chain.farFirst, steps: body.manifest.chain.steps };
+    }, programs.toString());
     assert.deepEqual(result.errors, []);
+    // clusters, small clusters, far body, splat; then the shadow's far body and clusters.
     const instances = [0, 1, 2, 3, 4, 5].map((i) => result.draws[i * 4 + 1]);
-    console.log('instances by list', instances, 'base error', result.base);
-    for (const p of result.people) console.log(`  ${String(p.d).padStart(5)} m  handoff ${p.handoff}  splat ${p.splat}  step ${p.step}/${result.steps} morph ${p.morph.toFixed(2)}  shadow step ${p.shadowStep}  thin ${p.thin.toFixed(2)}`);
-    // The far body takes over where its own error is all 3 px allow (focal 935 px): base error x 935 / 3, over 30% more.
-    const start = result.base * (1080 / (2 * Math.tan(Math.PI / 6))) / 3;
-    for (const p of result.people) {
-      if (p.d < start) assert.equal(p.handoff, 0, `${p.d} m is inside the handoff`);
-      if (p.d > start * 1.3) assert.equal(p.handoff, 255, `${p.d} m is past the handoff`);
-      if (p.d > 500) assert.equal(p.splat, 255, `${p.d} m is a splat`);
-      if (p.d < 300) assert.equal(p.splat, 0, `${p.d} m is no splat`);
-    }
-    const far = result.people.filter((p) => p.handoff === 255 && p.splat < 255);
-    for (let i = 1; i < far.length; i++) assert.ok(far[i].step >= far[i - 1].step, 'the far body coarsens with distance');
-    assert.ok(far.at(-1).step > far[0].step, 'and does coarsen');
-    assert.ok(instances[0] > 100, `clusters ${instances[0]}`);
-    assert.ok(instances[1] > 0, `far body pieces ${instances[1]}`);
-    assert.ok(instances[2] >= 1, `splats ${instances[2]}`);
-    assert.equal(instances[3] + instances[4], 0, 'nobody was ordered cut');
-    assert.ok(instances[5] >= 11, `shadow pieces ${instances[5]}`);
+    console.log('instances by list', instances, 'handoff', result.handoff, 'of', result.steps);
+    assert.ok(instances[0] + instances[1] > 100, `clusters ${instances[0]} and ${instances[1]} small`);
+    assert.ok(instances[2] > 0, `far bodies ${instances[2]}`);
+    assert.ok(instances[3] >= 1, `splats ${instances[3]}`);
+    assert.ok(instances[4] + instances[5] >= 11, `shadow pieces ${instances[4]} and ${instances[5]}`);
   } finally { await page.close(); }
 });
 

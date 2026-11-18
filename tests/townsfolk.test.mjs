@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { createTownsfolk, townsfolkBodiesFor } from '../js/townsfolk.js';
 import { TOWN_FATE_WORDS, TOWNSFOLK_COUNT_WORDS, TOWNSFOLK_DISPATCH_WORDS, TOWNSFOLK_MODELS, TOWNSFOLK_WALK } from '../js/wgsl/townsfolk.js';
 import { CREW_CONTINUUM_ASSETS } from '../js/crew-continuum.js';
-import { CREW_CONTINUUM_LISTS } from '../js/wgsl/crew-continuum.js';
+import { CONTINUUM_LISTS, CONTINUUM_VIEW_LISTS } from '../js/continuum-format.js';
 import { CREW_JOINT_COUNT } from '../js/crew-skeleton.js';
 import { WALKER_WORDS } from '../js/town-streets.js';
 import { crewContinuumBaked, crewContinuumDevice, crewContinuumGlobals, fetchCrewContinuumAsset } from './helpers/crew-continuum-fixture.mjs';
@@ -70,8 +70,8 @@ test('a town whose bodies are not baked fails to load, naming every missing file
   const gpu = recorder();
   const absent = await made(gpu, async () => new Response(null, { status: 404 })).then(() => null, (error) => error);
   assert.ok(absent instanceof Error, 'no town without its bodies: nothing stands in for them');
-  // A device without a texture codec fetches only the far body and its cut tables: those are what it names.
-  const wanted = townsfolkBodiesFor().flatMap((id) => ['manifest.json', 'body.glb', 'clusters.bin.gz', 'chain.bin.gz'].map((name) => CREW_CONTINUUM_ASSETS[id][name]));
+  // A body is its manifest, its light mesh, its atlas and the picture this device reads: those are what it names.
+  const wanted = townsfolkBodiesFor().flatMap((id) => ['manifest.json', 'body.glb', 'atlas.bin.gz', 'albedo.bc7.bin.gz'].map((name) => CREW_CONTINUUM_ASSETS[id][name]));
   assert.deepEqual(absent.missing, wanted);
   for (const file of wanted) assert.ok(absent.message.includes(file), `the message names ${file}`);
   assert.match(absent.message, /node scripts\/prepare-crew-continuum\.mjs --only=<body>/, 'and says how to bake them');
@@ -136,8 +136,9 @@ test('the pass is told the date in hours from when the record began, and only wh
   folk.encode(pass(), start + 78 * HOUR);
   assert.equal(hoursSent(writes).at(-1), 78, 'so someone who fell at hour 30 has lain two days');
   // Every frame resets the counts via a 1-workgroup GPU compute pass, with zero CPU writeBuffer uploads of the town's
-  // own; the walk then keeps whom it keeps, each body's people are posed as many as it counted, and each body's cut
-  // runs as many workgroups. Only the cut's own batch record is written, as for every continuum batch.
+  // own; the walk then keeps whom it keeps, and each body's people are posed as many as it counted. Each body's stand
+  // runs a workgroup for every slot it may hold (one past the count it reads is not drawn), then the one cut empties
+  // its lists and cuts them. Only each batch's stand words and its scene's view are written, as for every batch.
   writes.length = 0;
   dispatches.length = 0;
   folk.encode(pass(), start + 78 * HOUR + 1000);
@@ -146,8 +147,11 @@ test('the pass is told the date in hours from when the record began, and only wh
     { pipeline: 'townsfolk reset', workgroups: 1 }, { pipeline: 'townsfolk walk', workgroups: 1 },
     ...Array.from({ length: TOWNSFOLK_MODELS }, (_, m) => ({ pipeline: 'crew continuum pose', counted: 'townsfolk counts', offset: m * TOWNSFOLK_DISPATCH_WORDS * 4 })),
   ]);
-  // Every walker here wears the man's body, so the woman's cut has no one to run for.
-  assert.deepEqual(dispatches.slice(2 + TOWNSFOLK_MODELS), [{ pipeline: 'crew continuum cut', counted: 'townsfolk counts', offset: 0 }]);
+  // Every walker here wears the man's body, so the woman's batch has no one to stand: its cut only empties its lists.
+  assert.deepEqual(dispatches.slice(2 + TOWNSFOLK_MODELS), [
+    { pipeline: 'crew continuum stand', workgroups: 60 }, { pipeline: 'continuum reset', workgroups: 1 }, { pipeline: 'continuum cut', workgroups: 60 },
+    { pipeline: 'continuum reset', workgroups: 1 },
+  ]);
   folk.destroy();
 });
 
@@ -170,20 +174,21 @@ test('a town\'s people are cut and drawn through the continuum, one batch a body
   folk.encode(pass(), Date.UTC(1492, 7, 3));
   const [man, woman] = townsfolkBodiesFor();
   for (const [id, first, count] of [[man, 0, 25], [woman, 32, 35]]) {
-    const part = writes.filter((w) => w.label === `crew continuum ${id} batch`).at(-1).words;
-    assert.deepEqual([part[0], part[1]], [first, count], `${id}: the batch cuts its own run of slots`);
+    const part = writes.filter((w) => w.label === `crew continuum ${id} stand`).at(-1).words;
+    assert.deepEqual([part[0], part[1]], [first, count], `${id}: the batch stands its own run of slots`);
+    assert.equal(part[3] & 1, 1, `${id}: and reads how many there are from the walk's count`);
+    assert.equal(part[3] & 2, 0, `${id}: ashore, not afloat`);
   }
   folk.draw(pass());
   folk.drawShadow(pass());
   assert.deepEqual(draws.filter((d) => d.indexed), [], 'no old body is drawn');
   for (const id of [man, woman]) {
-    const own = draws.filter((d) => d.buffer.label === `crew continuum ${id} draws`);
-    assert.deepEqual(own.map((d) => d.offset / 16), [0, 1, 2, 5], `${id}: the clusters, the far body and the splat, then the shadow`);
-    assert.deepEqual(own.map((d) => d.pipeline), ['crew continuum clusters', 'crew continuum far body', 'crew continuum splat', 'crew continuum shadow']);
-    for (const d of own) assert.equal(d.list.label, `crew continuum ${id} lists`, 'each from its own list');
+    const own = draws.filter((d) => d.buffer.label === `crew ${id} continuum draws`);
+    assert.deepEqual(own.map((d) => d.offset / 16), [0, 1, 2, 3, 4, 5], `${id}: the one cut's four lists in its view, then its two in the shadow`);
+    assert.deepEqual(own.map((d) => d.pipeline), [...Array(CONTINUUM_VIEW_LISTS).fill('crewContinuum view'), 'continuum shadow', 'continuum shadow']);
+    for (const d of own) assert.equal(d.list.label, `crew ${id} continuum lists`, 'each from its own scene\'s lists');
   }
-  assert.equal(draws.length, TOWNSFOLK_MODELS * 4);
-  assert.equal(CREW_CONTINUUM_LISTS[5], 'shadow');
+  assert.equal(draws.length, TOWNSFOLK_MODELS * CONTINUUM_LISTS.length);
   folk.destroy();
 });
 

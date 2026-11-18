@@ -1978,7 +1978,8 @@ test('crew renders the full Niña watch as independent sailors in two batches, o
     catch(error){throw Error(error.message+'; '+warnings.join('\n'));}
     assert.equal(await page.getByLabel('Show crew',{exact:true}).isEnabled(),true);
     const first=await step(page,100);assert.equal(first.render.crew,undefined,'the continuum alone draws the people');
-    assert.ok(first.render['crew continuum clusters']>0);assert.ok(first.render['crew continuum shadow']>0);
+    // The one cut's shadow pipeline is every family's, so only the crew's view tells their draws apart.
+    assert.ok(first.render['crewContinuum view']>0);assert.ok(first.render['continuum shadow']>0);
     // Every slot of both batches is handed to the continuum's cut exactly once.
     assert.equal(await page.evaluate(()=>window.oceanFleet.vessels[0].crew.continuumDraws().reduce((sum,d)=>sum+d.people,0)),batches.reduce((sum,n)=>sum+n,0));
     assert.equal(await page.locator('#boat-length').inputValue(), '20');
@@ -2009,9 +2010,9 @@ test('crew renders the full Niña watch as independent sailors in two batches, o
     await page.getByRole('button',{name:'Hide captain orders',exact:true}).click();
     await page.getByRole('button',{name:'Ship settings',exact:true}).click();
     await page.getByLabel('Show crew',{exact:true}).uncheck();
-    const hidden=await step(page,100);assert.equal(hidden.render['crew continuum clusters'],undefined);assert.equal(hidden.render['crew continuum shadow'],undefined);
+    const hidden=await step(page,100);assert.equal(hidden.render['crewContinuum view'],undefined);
     await page.getByLabel('Show crew',{exact:true}).check();await page.getByLabel('Show ship',{exact:true}).uncheck();
-    const shipHidden=await step(page,100);assert.equal(shipHidden.render['crew continuum clusters'],undefined);assert.equal(shipHidden.render['crew continuum shadow'],undefined);
+    const shipHidden=await step(page,100);assert.equal(shipHidden.render['crewContinuum view'],undefined);
     assert.deepEqual(warnings,[]);
   }finally{await page.close();}
 });

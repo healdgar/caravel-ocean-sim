@@ -24,12 +24,12 @@ import { crewDeckHazard, crewMotionPolicy, crewTurnTowards, crewAdvanceWalk } fr
 import { crewNavigationStation, crewNavigationRoute, crewRoutineSegmentClear } from './crew-navigation.js';
 import { crewTrafficStep, crewTrafficAfterStep } from './crew-traffic.js';
 import { crewDeckField, crewDeckRoom } from './crew-deck.js';
-import { crewCompanyDistance, crewPoseInterval, fortPoseStride, crewApparentDistance, crewLensZoom, crewNeedsCutShader, crewClipOnly, crewBakedPose, crewPoseDue, crewPoseSolved, fortPoseDue } from './crew-pose-cadence.js';
+import { crewCompanyDistance, crewPoseInterval, fortPoseStride, crewApparentDistance, crewLensZoom, crewClipOnly, crewBakedPose, crewPoseDue, crewPoseSolved, fortPoseDue } from './crew-pose-cadence.js';
 import { createCrewClipPipeline, createCrewClipBatch, createCrewTurnPipeline, createCrewTurnBatch } from './crew-clip-pose.js';
 import { createCrewSolver, createCrewSolveBatch, createCrewArrowPipeline, createCrewArrowBatch, resolveCrewWoundsOnSkeleton } from './crew-solve.js';
 import { crewComponentMaskForActor, packCrewFaceW } from './crew-components.js';
 import { CREW_JOINT_COUNT, CREW_SLOT } from './crew-skeleton.js';
-import { CREW_CONTINUUM_ORDER_CUT, CREW_CONTINUUM_ORDER_IMPORTANT, createCrewContinuumBatch, loadCrewContinuumBodies, requestCrewContinuumPipelines } from './crew-continuum-draw.js';
+import { CREW_CONTINUUM_ORDER_IMPORTANT, createCrewContinuumBatch, loadCrewContinuumBodies, requestCrewContinuumPipelines } from './crew-continuum-draw.js';
 
 // Authored, disjoint stations keep a full company clear of stairs and masts.
 // Policies choose intent. The executor alone changes position and animation.
@@ -582,9 +582,8 @@ export function requestCrewPipelines({device,shader,format='rgba16float',samples
 // How far off, allowing for the lens, a company is still drawn. By then a person is a fifth of a pixel and thinned
 // nearly to nothing; the GPU culls and thins everyone nearer.
 export const CREW_CONTINUUM_SIGHT=6000;
-// What the cut is told of a person: drawn depth first while being cut away, and cut finer while hurt or falling.
-const crewContinuumOrder=s=>(s.cutShader?CREW_CONTINUUM_ORDER_CUT:0)
-  |(s.casualtyState==='wounded'||s.casualtyState==='fallen'||s.pendingWounds?.length||s.stuckArrows?.length||(s.knockdownTimer??0)>0?CREW_CONTINUUM_ORDER_IMPORTANT:0);
+// What the cut is told of a person: cut finer while hurt or falling.
+const crewContinuumOrder=s=>(s.casualtyState==='wounded'||s.casualtyState==='fallen'||s.pendingWounds?.length||s.stuckArrows?.length||(s.knockdownTimer??0)>0?CREW_CONTINUUM_ORDER_IMPORTANT:0);
 // The bodies a company or garrison wears, and the programs that cut and draw them. People are drawn through nothing
 // else: a body that is not baked fails the load, naming its missing files and how to bake them.
 function loadCrewContinuum({device,shader,format,samples,waterOptics},ids){
@@ -654,14 +653,11 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
     b.arrows=createCrewArrowBatch(device,arrowPipeline,b.bones,b.actor,gunTools.tubes,GUNNERY_TOOL_ARROWS);
     b.people.forEach((s,i)=>placeOf.set(s,{b,i,animator:(i<b.hands?b.model:captainModel).animator}));
   }
-  let enabled=true,drawEnabled=false,posed=false,poseFrame=0,anyCut=false;
+  let enabled=true,drawEnabled=false,posed=false,poseFrame=0;
   // Whether the company is drawn at all from where the camera is.
   const inSight=(boat,camera)=>!(crewCompanyDistance(boat,camera)/crewLensZoom(camera)>CREW_CONTINUUM_SIGHT);
   // Each part's cut is told who is drawn and how, at the scene's pixel error, every frame the company is shown.
-  const orderCut=()=>{
-    anyCut=false;
-    for(const part of everyPart){if(!part.continuum)continue;part.continuum.update(part.people,crewContinuumOrder,true);anyCut||=part.people.some(s=>s.visible!==false&&s.cutShader);}
-  };
+  const orderCut=()=>{for(const part of everyPart)part.continuum?.update(part.people,crewContinuumOrder,true);};
   return {state,assets:{poseBlendPipeline,clipPipeline,turnPipeline,arrowPipeline,captainTexture,captainTexView,captainSampler},
     // The finest cut is each body whole; what is drawn of it is the GPU's to choose.
     triangles:everyPart.reduce((n,part)=>n+part.body.triangles*part.people.length,0),
@@ -730,7 +726,6 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
             ?(s.overboard.wounded?0.45:0)
             :s.casualtyState==='fallen'?1.0:s.casualtyState==='wounded'?Math.max(0.45,Math.min(0.95,s.woundSeverity??(1-(s.health??0.5)))):0;
           const scorchAmt=Math.max(0,Math.min(0.95,s.scorchAmount??(!isLivingSwimmer&&s.casualtyState==='fallen'?0.35:s.casualtyState==='wounded'?0.18:0)));
-          s.cutShader=crewNeedsCutShader(crewApparentDistance(s.position,boat,camera,1),boat.enabled===true,woundAmt+scorchAmt);
           const bandageSeed=(!isLivingSwimmer&&(s.casualtyState==='wounded'||s.casualtyState==='fallen'))?(0.06+(((s.crewIndex??i)*0.37)%0.32)):0;
           const shirt=(!isLivingSwimmer&&s.casualtyState==='fallen')
             ?[s.shirt[0]*0.55+0.20,s.shirt[1]*0.32,s.shirt[2]*0.32]
@@ -775,14 +770,11 @@ export async function createCrew({device,frameUBO,hullUBO,transView,skyView,samp
       for(const part of everyPart)part.continuum?.drawSubmerged(pass,above);
       gunTools.drawSubmerged(pass,above);
     },
-    // Opaque sailors belong with the opaque scene. Anyone being cut follows it.
+    // Sailors are opaque, with the opaque scene.
     drawOpaque(pass){
       if(!drawEnabled)return;
       for(const part of everyPart)part.continuum?.drawOpaque(pass);
       gunTools.draw(pass);
-    },
-    drawCut(pass){
-      if(drawEnabled&&anyCut)for(const part of everyPart)part.continuum?.drawCut(pass);
     },
     drawShadow(pass){
       if(!drawEnabled)return;
@@ -2599,7 +2591,8 @@ export async function createFortSoldiers({
   const clipPipeline = shared?.clipPipeline ?? await createCrewClipPipeline(device, shader);
   const solver = await createCrewSolver(device, shader);
   // One run of a batch's slots cut and drawn through the continuum: its soldiers, or its captains after them.
-  const fortCut = (b, body, capacity) => createCrewContinuumBatch({ device, pipelines, body, capacity, samples, frame: frameUBO, hull: fortHullUBO, bones: b.bones, actor: b.actor, main: b.mainResources, shadows });
+  // They stand on the land, drawn on the ground the land draws there (js/continuum-ground.js).
+  const fortCut = (b, body, capacity) => createCrewContinuumBatch({ device, pipelines, body, capacity, samples, frame: frameUBO, hull: fortHullUBO, bones: b.bones, actor: b.actor, main: b.mainResources, shadows, ground: true });
   const indigenousBatchCache = new Map();
   // An indigenous batch wearing one culture's continuum body, kept for the next port of that culture.
   const continuumVariant = (b, body) => {

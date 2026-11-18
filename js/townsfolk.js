@@ -282,8 +282,9 @@ export async function createTownsfolk({ device, frameUBO, transView, skyView, sa
     });
     const countedOf = (m) => ({ buffer: counts, offset: m * TOWNSFOLK_DISPATCH_WORDS * 4 });
     const main = [{ buffer: frameUBO }, { buffer: hull }, { buffer: joints }, { buffer: actors }, transView, sampClamp, envCubeView, { buffer: sunVisBuf }, { buffer: moisture }, skyView, { binding: 13, resource: shared.captainTexView }, { binding: 14, resource: shared.captainSampler }];
-    // One batch for each body, cut and drawn through the continuum from the slots its people were posed into.
-    const batches = bodies.map((body, m) => createCrewContinuumBatch({ device, pipelines: continuum, body, capacity: Math.max(1, capacity[m]), first: firsts[m], samples, frame: frameUBO, hull, bones: joints, actor: actors, main, shadows, counted: countedOf(m) }));
+    // One batch for each body, cut and drawn through the continuum from the slots its people were posed into. They are
+    // ashore, on the ground the walk already set them on.
+    const batches = bodies.map((body, m) => createCrewContinuumBatch({ device, pipelines: continuum, body, capacity: Math.max(1, capacity[m]), first: firsts[m], samples, frame: frameUBO, hull, bones: joints, actor: actors, main, shadows, counted: countedOf(m), sea: false }));
     const posers = rigsOfTown.map((rig, m) => createCrewContinuumPoser({ device, pipeline: posePipeline, placed, palettes: rig.palette, looks, rest: rig.rest, joints, actors, orders: batches[m].orders, first: firsts[m], counted: countedOf(m) }));
     crowd = {
       port, people, capacity, walkers, route, looks, placed, counts, joints, actors, uniform, crowdWords, crowdHours: new Float32Array(crowdWords.buffer), hours: NaN,

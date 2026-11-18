@@ -57,14 +57,6 @@ export function crewApparentDistance(position,boat,camera,zoom=crewLensZoom(came
   return Math.hypot(x-camera.x,y-(camera.y??0),z-camera.z)/zoom;
 }
 
-// Who needs the shader that can cut fragments. Everyone within this distance of a first-person eye
-// fades from the sightline, and enough wounds leave torn cloth. Everyone else stays opaque.
-const CREW_FADE_REACH_M=6.5;
-const CREW_TORN_DAMAGE=0.45;
-export function crewNeedsCutShader(metresFromEye,firstPerson,woundAndScorch){
-  return (firstPerson&&metresFromEye<CREW_FADE_REACH_M)||woundAndScorch>CREW_TORN_DAMAGE;
-}
-
 // Beyond this a sailor's hands and feet are a few pixels, so baked clips alone will do. Someone
 // seated, fallen or just hurt still needs their own solved pose.
 const CREW_CLIP_ONLY_M=50;
