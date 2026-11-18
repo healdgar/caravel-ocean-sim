@@ -36,9 +36,9 @@ test('downloads embed sailing and native forest maps; optional mature buffers us
       assert.ok(html.includes('data:'+mime+';base64,'),file+' includes '+mime);
     assert.ok(!/href="assets\/[^"\s]+\.[a-f0-9]{16}\./.test(html),'web-only preloads do not leak into offline downloads');
     for(const source of Object.keys(manifest)){
-      // Close-up forest geometry, wind weight tables, GPU meadow grass streams, the living board and the people
-      // continuum's bodies are fetched when wanted: megabytes a downloaded page starts and sails without.
-      if(/^assets\/crew\/continuum\/[a-z-]+\/|^assets\/forest-scenery\/(saba|portugal)\/clusters\/(vertices|indices)\.bin\.gz$|^assets\/forest-scenery\/(saba|subtropical|portugal)\/wind\/weights\.bin\.gz$|^assets\/ground-cover\/portugal\/meadows-gpu\/.*\.gz$|\/surfaces\/.*\.gz$|^assets\/boards\/([^/]+\.world|partner-ports-1550\.json)$|^assets\/board\/(game|runtime)\.js$/.test(source)){
+      // Close-up forest geometry, wind weight tables, GPU meadow grass streams, the living board and the people and
+      // prefab continuums' bodies are fetched when wanted: megabytes a downloaded page starts and sails without.
+      if(/^assets\/crew\/continuum\/[a-z-]+\/|^assets\/prefab-continuum\/[a-z-]+\.bin\.gz$|^assets\/forest-scenery\/(saba|portugal)\/clusters\/(vertices|indices)\.bin\.gz$|^assets\/forest-scenery\/(saba|subtropical|portugal)\/wind\/weights\.bin\.gz$|^assets\/ground-cover\/portugal\/meadows-gpu\/.*\.gz$|\/surfaces\/.*\.gz$|^assets\/boards\/([^/]+\.world|partner-ports-1550\.json)$|^assets\/board\/(game|runtime)\.js$/.test(source)){
         assert.ok(html.includes('https://sixcailloux.com/waterworld/'+manifest[source].url),file+' uses exact optional close-up geometry');continue;
       }
       const bytes=await readFile(new URL(source,root));
