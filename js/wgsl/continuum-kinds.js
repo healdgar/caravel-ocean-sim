@@ -34,9 +34,11 @@
 //   RIDER    things that ride another body's posed surface: a ship on her own posed assembly, her lines and let-go
 //            iron with her. A point reads the rider stream (the source vertex it rides) and is placed where that vertex
 //            is posed. Brought by the ships: js/wgsl/ship-kinds.js has its pose data.
-//   WIND     foliage that sways (js/wgsl/continuum-wind.js, which defines it). Pose data: [gust phase, gust strength,
-//            stiffness, form], then the form's own vec4f (draped over the ground, felled, wounded) and a push. A point
-//            reads the wind stream (sway weight | branch phase << 16) and is displaced along the wind (F.windP) by both.
+//   WIND     bodies the wind moves (js/wgsl/continuum-wind.js defines it and its pose data). A tree bends by the bones
+//            of its skeleton, stepped as damped springs by its family's pass; a point reads the wind stream (its two
+//            bones and the first's share, its leaf's flutter phase) and goes where its bones take it, near and far
+//            alike. A sward drapes over the ground and bends by its blades: the stream is its sway weight | its plant's
+//            phase << 16. Either may stand felled or wounded.
 //   DRAPED   a whole vessel posed per vertex from her record alone: canvas brailed to its yards by her furl, oars swept
 //            through their stroke, helm swung. Brought by the ships: js/wgsl/ship-kinds.js has its pose data.
 //   HEIGHTFIELD  the land. Shares only the core test, the scene scalar, the census and the pipeline family: its pieces
