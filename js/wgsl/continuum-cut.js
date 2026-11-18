@@ -20,10 +20,11 @@ import {
   CONTINUUM_HEADER, CONTINUUM_TYPE, CONTINUUM_TYPE_WORDS, CONTINUUM_CLUSTER_WORDS, CONTINUUM_VERTEX_WORDS, CONTINUUM_TRIANGLE_WORDS, CONTINUUM_NEVER,
   CONTINUUM_CHUNK_TRIANGLES, CONTINUUM_CLUSTER_TRIANGLES, CONTINUUM_SMALL_CLUSTER, CONTINUUM_LISTS, CONTINUUM_ENTRY_TRIANGLES, CONTINUUM_VIEW_LISTS,
   CONTINUUM_TYPE_PIECES, CONTINUUM_TYPE_DETAIL_SHIFT, CONTINUUM_KIND_SHIFT, CONTINUUM_GONE, CONTINUUM_STRUCK, CONTINUUM_BROKEN, CONTINUUM_EXACT, CONTINUUM_SEA,
-  CONTINUUM_IMPORTANT_FLAG, CONTINUUM_SHATTERED, CONTINUUM_DAMAGED, CONTINUUM_STRETCHED, CONTINUUM_STREAMS, CONTINUUM_SURFACE_RANGE,
+  CONTINUUM_IMPORTANT_FLAG, CONTINUUM_SHATTERED, CONTINUUM_DAMAGED, CONTINUUM_STRETCHED, CONTINUUM_GROUNDED, CONTINUUM_STREAMS, CONTINUUM_SURFACE_RANGE,
   CONTINUUM_CLUSTER_ENTRY, CONTINUUM_FAR_ENTRY, CONTINUUM_SPLAT_ENTRY,
 } from '../continuum-format.js';
 import { continuumKindsWGSL } from './continuum-kinds.js';
+import { continuumGroundWGSL } from '../continuum-ground.js';
 
 // The vertices of one entry of each list.
 export const CONTINUUM_ENTRY_VERTICES = Object.freeze(CONTINUUM_ENTRY_TRIANGLES.map((n) => 3 * n));
@@ -53,6 +54,7 @@ const CONTINUUM_IMPORTANT_FLAG:u32=${CONTINUUM_IMPORTANT_FLAG >>> 0}u;
 const CONTINUUM_SHATTERED:u32=${CONTINUUM_SHATTERED >>> 0}u;
 const CONTINUUM_DAMAGED:u32=${CONTINUUM_DAMAGED >>> 0}u;
 const CONTINUUM_STRETCHED:u32=${CONTINUUM_STRETCHED >>> 0}u;
+const CONTINUUM_GROUNDED:u32=${CONTINUUM_GROUNDED >>> 0}u;
 const CONTINUUM_KIND_SHIFT:u32=${CONTINUUM_KIND_SHIFT}u;
 `;
 
@@ -177,14 +179,20 @@ fn continuumClusterCorner(record:ContinuumRecord,cluster:u32,vertex:u32)->Contin
   out.shown=!out.posed.hidden;
   return out;
 }
-// An instance's state for the frame, two entries ahead of the lists: handoff share | splat share << 8, step | shadow
-// step << 16, then the morph and the splat's scale (f32 bits).
+// An instance's state for the frame, two entries ahead of the lists: handoff share | splat share << 8 | the view's
+// ground lift << 16 (f16), step | shadow step << 16, then the morph (f32 bits) and the splat's scale | the captures'
+// ground lift << 16 (two f16).
 fn continuumState(instance:u32)->vec4u { let a=continuumLists[instance*2u];let b=continuumLists[instance*2u+1u];return vec4u(a.x,a.y,b.x,b.y); }
+// How far a GROUNDED instance is raised to the ground the land draws: by the view's cut, or (coarse) the captures'.
+fn continuumLift(state:vec4u,coarse:bool)->vec3f { return vec3f(0.0,select(unpack2x16float(state.x>>16u).x,unpack2x16float(state.w).y,coarse),0.0); }
 fn continuumShift()->vec3f { return vec3f(continuumView.scene.y,0.0,continuumView.scene.z); }
 `;
 
 // The data a pass binds, in this order from `first`: the atlas, the records, the lists, the view, the pose buffer.
 export const CONTINUUM_DATA_BINDINGS = 5;
+// Where the select reads the land's ground field (js/continuum-ground.js): group 0, past the frame, the data and the
+// draws.
+export const CONTINUUM_GROUND_BINDING = 8;
 const continuumDataWGSL = (group, first, lists) => /* wgsl */`
 @group(${group}) @binding(${first}) var<storage,read> continuumAtlas:array<u32>;
 @group(${group}) @binding(${first + 1}) var<storage,read> continuumRecords:array<ContinuumRecord>;
@@ -208,7 +216,8 @@ export function continuumSelectWGSL() {
   const atlasVec4 = (at) => `vec4f(bitcast<f32>(continuumAtlas[${at}]),bitcast<f32>(continuumAtlas[${at}+1u]),bitcast<f32>(continuumAtlas[${at}+2u]),bitcast<f32>(continuumAtlas[${at}+3u]))`;
   const alone = CONTINUUM_BROKEN | CONTINUUM_SHATTERED | CONTINUUM_DAMAGED | CONTINUUM_EXACT;
   const important = CONTINUUM_IMPORTANT_FLAG | CONTINUUM_STRUCK | CONTINUUM_BROKEN | CONTINUUM_DAMAGED | CONTINUUM_SHATTERED;
-  return FRAME_WGSL + SHADOW_FRAME + CONTINUUM_CORE_WGSL + continuumDataWGSL(0, 2, 'read_write') + continuumCommonWGSL() + continuumKindsWGSL() + /* wgsl */`
+  return FRAME_WGSL + SHADOW_FRAME + CONTINUUM_CORE_WGSL + continuumDataWGSL(0, 2, 'read_write') + continuumCommonWGSL() + continuumKindsWGSL()
+    + continuumGroundWGSL(0, CONTINUUM_GROUND_BINDING) + /* wgsl */`
 @group(0) @binding(0) var<uniform> F:Frame;
 @group(0) @binding(1) var<uniform> SH:ShadowFrame;
 @group(0) @binding(7) var<storage,read_write> continuumDraws:array<atomic<u32>>;
@@ -240,13 +249,14 @@ fn continuumFocal()->f32 { return F.screen.y/max(2.0*length(F.camUp.xyz),1e-4); 
 }
 var<workgroup> continuumSelected:array<vec4u,2>; // clusters to try, the first, where the far body's pieces go, how many; the shadow's far pieces, how many, its clusters to try, its detail clusters
 var<workgroup> continuumSelectedView:vec4f;      // focal, allowed pixels, scale, the shadow's allowed error (metres of the type)
+var<workgroup> continuumSelectedLift:f32;        // how far it is raised to the view's drawn ground
 var<workgroup> continuumCounted:array<atomic<u32>,${CONTINUUM_VIEW_LISTS}>; // real triangles listed in each of the view's lists
 @compute @workgroup_size(64) fn continuumSelect(@builtin(workgroup_id) group:vec3u,@builtin(local_invocation_index) lane:u32){
   let instance=group.x+group.y*${CONTINUUM_ROW}u;
   if(lane==0u){
     var candidates=0u;var firstCluster=0u;var farAt=CONTINUUM_FULL;var farChunks=0u;
     var shadowAt=CONTINUUM_FULL;var shadowChunks=0u;var shadowCandidates=0u;var detail=0u;
-    var focal=1.0;var pixels=1.0;var scale=1.0;var shadowAllowed=0.0;
+    var focal=1.0;var pixels=1.0;var scale=1.0;var shadowAllowed=0.0;var lift=vec2f(0.0);
     if(instance<continuumView.counts.x){
       let record=continuumRecords[instance];
       let model=continuumTypeOf(record);
@@ -257,7 +267,13 @@ var<workgroup> continuumCounted:array<atomic<u32>,${CONTINUUM_VIEW_LISTS}>; // r
         // Broken, shattered, damaged, exact, or a body of pieces: clusters alone, no simplified surface across parts.
         let alone=continuumFlagged(record,${alone >>> 0}u)||(continuumType(model,${CONTINUUM_TYPE.flags}u)&${CONTINUUM_TYPE_PIECES}u)!=0u;
         scale=continuumScale(record);
-        let world=continuumPlace(record,bound.xyz);
+        // One that stands on the land stands on the ground the land draws (js/continuum-ground.js), raised at its
+        // anchor before it is culled: by the view's cut, and by the captures' for the coarse cut drawn under water.
+        if(continuumFlagged(record,CONTINUUM_GROUNDED)){
+          let anchor=(record.place.xyz+continuumShift()).xz;
+          lift=vec2f(continuumGroundLift(anchor),continuumGroundLiftCut(anchor,1u));
+        }
+        let world=continuumPlace(record,bound.xyz)+vec3f(0.0,lift.x,0.0);
         // Its reach takes in whatever of it its kind carries past its type's sphere (pieces in the air, a limb).
         let reach=bound.w*scale+bitcast<f32>(record.tag.w);
         let relative=world+continuumShift()-F.camPos.xyz;
@@ -327,12 +343,13 @@ var<workgroup> continuumCounted:array<atomic<u32>,${CONTINUUM_VIEW_LISTS}>; // r
           }
         }
       }
-      continuumLists[instance*2u]=vec2u(share|(splatShare<<8u),step|(shadowStep<<16u));
-      continuumLists[instance*2u+1u]=vec2u(bitcast<u32>(morph),bitcast<u32>(splatScale));
+      continuumLists[instance*2u]=vec2u(share|(splatShare<<8u)|(pack2x16float(vec2f(lift.x,0.0))<<16u),step|(shadowStep<<16u));
+      continuumLists[instance*2u+1u]=vec2u(bitcast<u32>(morph),pack2x16float(vec2f(splatScale,lift.y)));
     }
     continuumSelected[0]=vec4u(candidates,firstCluster,farAt,farChunks);
     continuumSelected[1]=vec4u(shadowAt,shadowChunks,shadowCandidates,detail);
     continuumSelectedView=vec4f(focal,pixels,scale,shadowAllowed);
+    continuumSelectedLift=lift.x;
   }
   let chosen=workgroupUniformLoad(&continuumSelected);
   let view=continuumSelectedView;
@@ -343,7 +360,7 @@ var<workgroup> continuumCounted:array<atomic<u32>,${CONTINUUM_VIEW_LISTS}>; // r
   let tries=max(chosen[0].x,chosen[1].z);
   if(tries>0u){
     let record=continuumRecords[instance];
-    let shift=continuumShift()-F.camPos.xyz;
+    let shift=continuumShift()-F.camPos.xyz+vec3f(0.0,continuumSelectedLift,0.0);
     let sea=continuumFlagged(record,CONTINUUM_SEA);
     let clusters=continuumAtlas[${CONTINUUM_HEADER.clustersAt}u];
     for(var i=lane;i<tries;i+=64u){
@@ -473,20 +490,21 @@ fn continuumVertex(vertex:u32,listed:ContinuumEntry,coarse:bool)->ContinuumVaryi
   let touched=continuumBindings();
   let instance=listed.entry.x;let what=listed.entry.y>>28u;let item=listed.entry.y&0x0fffffffu;
   var state=continuumState(instance);
+  let lift=continuumLift(state,coarse);
   if(coarse){state.y=state.y>>16u;state.z=0u;state.x=0u;}
   let record=continuumRecords[instance];
   var s:ContinuumSurface;
   s.instance=instance;s.what=what;s.model=continuumTypeOf(record);s.record=record;s.vertex=CONTINUUM_NO_VERTEX;
   var out:ContinuumVarying;
   if(what==CONTINUUM_SPLAT_ENTRY){
-    let splat=continuumSplatCorner(record,continuumEye(),vertex,bitcast<f32>(state.w));
-    s.local=splat.local;s.world=splat.world;s.normal=splat.toward;s.corner=splat.corner;
+    let splat=continuumSplatCorner(record,continuumEye(),vertex,unpack2x16float(state.w).x);
+    s.local=splat.local;s.world=splat.world+lift;s.normal=splat.toward;s.corner=splat.corner;
   }else{
     var corner:ContinuumCorner;
     if(what==CONTINUUM_CLUSTER_ENTRY){corner=continuumClusterCorner(record,item,vertex);}
     else{corner=continuumFarCorner(record,s.model,item,vertex,state.y&65535u,bitcast<f32>(state.z));}
     if(!corner.shown){out.position=CONTINUUM_HIDDEN;return out;}
-    s.local=corner.posed.position;s.world=continuumPlace(record,s.local);s.normal=continuumTurnNormal(record,corner.posed.normal);
+    s.local=corner.posed.position;s.world=continuumPlace(record,s.local)+lift;s.normal=continuumTurnNormal(record,corner.posed.normal);
     s.high=corner.high;s.word=corner.word;s.vertex=corner.vertex;s.wear=max(corner.posed.wear,continuumSurfaceWear(corner.vertex));
   }
   out.world=s.world+vec3f(touched);
@@ -517,7 +535,7 @@ export function continuumModuleWGSL({ pass, material = null, capture = null }) {
   if((listed.entry.y>>28u)==CONTINUUM_FAR_ENTRY){corner=continuumFarCorner(record,continuumTypeOf(record),item,vertex,continuumState(instance).y>>16u,0.0);}
   else{corner=continuumClusterCorner(record,item,vertex);}
   if(!corner.shown){return CONTINUUM_HIDDEN;}
-  let world=continuumPlace(record,corner.posed.position)+vec3f(touched);
+  let world=continuumPlace(record,corner.posed.position)+continuumLift(continuumState(instance),false)+vec3f(touched);
   return SH.lightView*vec4f(world-SH.origin.xyz,1.0);
 }
 `;

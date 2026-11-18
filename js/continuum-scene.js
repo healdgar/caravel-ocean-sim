@@ -8,9 +8,10 @@
 // under water, its capture) composed by the one composer.
 import { requestOnce } from './gpu-program-cache.js';
 import { continuumPixelError } from './continuum-core.js';
+import { continuumGroundView } from './continuum-ground.js';
 import { CONTINUUM_RECORD_WORDS, CONTINUUM_RECORD, CONTINUUM_LISTS, CONTINUUM_VIEW_LISTS, writeContinuumRecord, continuumAtlasTypes } from './continuum-format.js';
 import {
-  CONTINUUM_ENTRY_LAYOUT, CONTINUUM_DRAW_WORDS, CONTINUUM_DRAWS_BYTES, CONTINUUM_VIEW_BYTES, CONTINUUM_ROW, CONTINUUM_DATA_BINDINGS, continuumModuleWGSL,
+  CONTINUUM_ENTRY_LAYOUT, CONTINUUM_DRAW_WORDS, CONTINUUM_DRAWS_BYTES, CONTINUUM_VIEW_BYTES, CONTINUUM_ROW, CONTINUUM_DATA_BINDINGS, CONTINUUM_GROUND_BINDING, continuumModuleWGSL,
 } from './wgsl/continuum-cut.js';
 
 // The select and the shadow map's program, one set a device and shadow format for every family.
@@ -18,9 +19,10 @@ export function requestContinuumPrograms({ device, shader, shadowFormat }) {
   return requestOnce(device, `continuum programs ${shadowFormat}`, async () => {
     const [selectModule, shadowModule] = await Promise.all([shader(continuumModuleWGSL({ pass: 'select' }), 'continuum cut'), shader(continuumModuleWGSL({ pass: 'shadow' }), 'continuum shadow')]);
     const C = GPUShaderStage.COMPUTE, entry = (binding, buffer) => ({ binding, visibility: C, buffer: { type: buffer } });
-    // One layout for the reset and the cut, so one bind group serves both.
+    // One layout for the reset and the cut, so one bind group serves both; the cut reads the land's ground field.
     const computeLayout = device.createBindGroupLayout({
-      label: 'continuum cut', entries: [entry(0, 'uniform'), entry(1, 'uniform'), entry(2, 'read-only-storage'), entry(3, 'read-only-storage'), entry(4, 'storage'), entry(5, 'uniform'), entry(6, 'read-only-storage'), entry(7, 'storage')],
+      label: 'continuum cut', entries: [entry(0, 'uniform'), entry(1, 'uniform'), entry(2, 'read-only-storage'), entry(3, 'read-only-storage'), entry(4, 'storage'), entry(5, 'uniform'), entry(6, 'read-only-storage'), entry(7, 'storage'),
+        { binding: CONTINUUM_GROUND_BINDING, visibility: C, texture: { sampleType: 'unfilterable-float', viewDimension: '2d-array' } }],
     });
     const layout = device.createPipelineLayout({ label: 'continuum cut', bindGroupLayouts: [computeLayout] });
     const [reset, select, shadow] = await Promise.all([
@@ -131,7 +133,11 @@ export function createContinuumScene({ device, atlas, programs: P, capacity, roo
   const data = [atlas.buffer, records, list, viewBuffer, poses ?? ownPoses];
   if (data.length !== CONTINUUM_DATA_BINDINGS) throw Error('A continuum scene binds the wrong data');
   const dataGroupFor = (pipeline, material) => group(pipeline.getBindGroupLayout(material.data.group), data.map((buffer, i) => [material.data.binding + i, buffer]));
-  const cut = group(P.computeLayout, [[0, frame], [1, shadowUniform], ...data.map((buffer, i) => [2 + i, buffer]), [7, draws]]);
+  const cut = device.createBindGroup({
+    layout: P.computeLayout,
+    entries: [...[[0, frame], [1, shadowUniform], ...data.map((buffer, i) => [2 + i, buffer]), [7, draws]].map(([binding, buffer]) => ({ binding, resource: { buffer } })),
+      { binding: CONTINUUM_GROUND_BINDING, resource: continuumGroundView(device) }],
+  });
   const drawn = view ? dataGroupFor(view.pipeline, view.material) : null;
   const shadowGroups = [group(P.shadow.getBindGroupLayout(0), [[0, shadowUniform], [1, frame]]), group(P.shadow.getBindGroupLayout(1), data.map((buffer, i) => [i, buffer]))];
   const drawList = (pass, index) => {
