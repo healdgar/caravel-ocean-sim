@@ -6,6 +6,7 @@
 // 4. Lightweight physical GPU mocked space (8192 m sections & 1024 m frontier parcels) and first-time generation on entry
 
 import assert from 'node:assert/strict';
+import { SHIP_CONTINUUM_BODIES } from '../js/ship-continuum.js';
 import fs from 'node:fs';
 import { test } from 'node:test';
 
@@ -87,12 +88,8 @@ test('ship quality parity across all playable ship hulls and trade-vessel archet
     assert.ok(arch.vertices?.length > 0 && arch.triangleCount > 100, `archetype ${arch.label} missing mesh`);
     assertAllFinite(arch.vertices, `arch.${arch.label}.vertices`);
     assert.ok(arch.collider && arch.partAssembly, `archetype ${arch.label} missing collider/partAssembly`);
-    assert.ok(arch.continuum?.vertCount > 0 && arch.continuum?.triCount > 0, `archetype ${arch.label} missing continuum`);
-    assert.ok(arch.continuum?.coreTriCount > 0, `archetype ${arch.label} missing continuum core`);
-    assert.ok(
-      Number.isFinite(arch.continuum?.splat?.rx) && Number.isFinite(arch.continuum?.splat?.ry),
-      `archetype ${arch.label} missing horizon splat radii`
-    );
+    // Its continuum is baked offline (scripts/prepare-ship-continuum.mjs) and checked by the bake test.
+    assert.equal(SHIP_CONTINUUM_BODIES.filter((b) => b.archetype === arch.index).length, 1, `archetype ${arch.label} has one continuum body`);
   }
 });
 

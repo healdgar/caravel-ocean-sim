@@ -303,9 +303,10 @@ test('fractured polyhedral boulders (18 buckets) + 4 grass buckets + progressive
   // WGSL shader and culling checks
   assert.match(HERDS_STEP_WGSL, /0\.92/);
   assert.match(HERDS_STEP_WGSL, /if\s*\(!onRoad\)\s*\{\s*return;\s*\}/);
-  assert.match(TRADE_VESSELS_WGSL, /@vertex\s+fn\s+tvVS\b/);
-  assert.match(TRADE_VESSELS_WGSL, /@fragment\s+fn\s+tvFS\b/);
-  assert.match(TRADE_VESSELS_WGSL, /@vertex\s+fn\s+tvShadowVS\b/);
+  // Trade vessels: clusters, far bodies and splats of the ship continuum, and the far body's shadow.
+  for (const entry of [/@vertex\s+fn\s+tvClusterVS\b/, /@vertex\s+fn\s+tvFarVS\b/, /@vertex\s+fn\s+tvSplatVS\b/, /@vertex\s+fn\s+tvFarShadowVS\b/, /@fragment\s+fn\s+tvFS\b/, /@fragment\s+fn\s+tvFarFS\b/]) {
+    assert.match(TRADE_VESSELS_WGSL, entry);
+  }
   assert.match(TRADE_VESSELS_WGSL, /matTone\.x\s*>\s*5\.5/);
   assert.match(GROUND_COVER_CULL, /\*f32\(6\)|ROCK_ARCHETYPES|lod\*6u/);
   // The city's cut stands every building in the world's own frame, shifted by its offset.

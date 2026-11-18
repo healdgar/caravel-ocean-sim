@@ -35,3 +35,5 @@ assets/ground-cover/portugal/meadows/
 assets/crew/continuum/*/*
 !assets/crew/continuum/*/manifest.json
 docs/assets/crew/continuum/
+# The ships' continuum is committed whole (no ship draws without it); the build's published copies are not.
+docs/assets/ships/

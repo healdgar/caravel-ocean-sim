@@ -6,7 +6,7 @@ import { FRAME_WGSL, ATMO_CORE_WGSL, CASCADES, HULL_HOLE_LIMIT, HULL_CRATER_LIMI
 import { SKY_RENDER_FUNCS } from './wgsl/sky.js';
 import { SHADOW_FRAME } from './wgsl/shadows.js';
 import { VESSEL_LIGHTING, CANVAS_OPTICS } from './wgsl/vessel.js';
-import { CONTINUUM_SPLAT_PIXELS, CONTINUUM_MIN_PIXELS, CONTINUUM_CORE_WGSL, continuumCoarsening } from './continuum-core.js';
+import { CONTINUUM_CORE_WGSL } from './continuum-core.js';
 import { SURFACE_WAVE_SAMPLE } from './wgsl/surface-waves.js';
 import { SHIP_FRACTURE_POSE_UPDATE } from './wgsl/ship-fracture.js';
 import { CREW_JOINT_COUNT } from './crew-skeleton.js';
@@ -23,7 +23,6 @@ import { createShipCollider } from './ship-collider.js';
 import { createVesselDamageState, stepVesselDamage } from './gunnery-control.js';
 import { HULL_DAMAGE_UNIFORM_BYTES, writeHullFloodUniform, writeHullCraters } from './hull-flood.js';
 import { addHullHole, stepHullHoles } from './hull-holes.js';
-import { POSED_VERTEX_LAYOUT } from './vessel-pose.js';
 import { packCrewCompMask, packCrewFaceW } from './crew-components.js';
 import { colonialGroomMask, createIndigenousCrewModels, reconcileColonialGroomAndComp, CREW_ACTOR_FLOATS } from './crew.js';
 import { DRESS_MASK_SCALE } from './indigenous-dress.js';
@@ -37,22 +36,15 @@ import { poseSeatedCrew, solveCrewLimb, turnBone } from './crew-pose.js';
 import { poseCrewFingers } from './crew-physics.js';
 import { sharedNeuralPbrBank } from './neural-pbr.js';
 import { withNeuralPbrTradeVessels } from './wgsl/neural-pbr.js';
+import { SHIP_CONTINUUM_BODIES } from './ship-continuum.js';
+import { SHIP_CONTINUUM_DAMAGED_SLOTS, SHIP_CONTINUUM_ENTRY_LAYOUT, SHIP_CONTINUUM_SHADOW_LIST, shipContinuumDataWGSL, shipContinuumOrders } from './wgsl/ship-continuum.js';
+import { loadShipContinuum, requestShipContinuumCut, createShipContinuumCut } from './ship-continuum-draw.js';
 
 export const TRADE_VESSEL_VERTEX_FLOATS = 9; // pos(3), norm(3), material(1), uv(2)
 export const TRADE_VESSEL_INSTANCE_FLOATS = 12; // posYaw(4), attitudeScaleArch(4), animSink(4)
 export const TRADE_VESSEL_ARCHETYPES = 7; // 0: cog sail, 1: cog moored, 2: carrack sail, 3: carrack moored, 4: river barge, 5: lateen caravel, 6: harbor barque
 export const MAX_TRADE_VESSELS = 84;
 export const MAX_DECK_STATIONS_PER_VESSEL = 10;
-
-export const VESSEL_CONTINUUM_BAND = 0.25;
-// The vessel cut's pixel error at the scene's base error; the cut and the near band below scale with
-// continuumCoarsening(), so they follow the scene's one pixel-error scalar (AGENTS.md rule 3, item 5).
-export const VESSEL_ERROR_PIXELS = 1.5;
-// Projected ship span, in pixels at the base error, over which the full part-built ship hands off to its continuum.
-export const VESSEL_NEAR_HI_PIXELS = 38.0;
-export const VESSEL_NEAR_LO_PIXELS = 27.0;
-export const VESSEL_SPLAT_PIXELS = CONTINUUM_SPLAT_PIXELS;
-export const VESSEL_MIN_PIXELS = CONTINUUM_MIN_PIXELS;
 
 const TV_HULL_FLOOD_WORDS = 4 * (2 + 2 * HULL_HOLE_LIMIT);
 const BARGE_Y_LIFT = 0.0;
@@ -829,7 +821,8 @@ export function bargeOarPivotsForWGSL() {
   return cachedBargeOarPivots;
 }
 
-function tradeMaterialLinearColor(matId) {
+// A material's mean linear albedo, for the far body's vertex colours and the splat (scripts/prepare-ship-continuum.mjs).
+export function tradeMaterialLinearColor(matId) {
   const m = Math.floor(matId);
   if (m === 9 || m === 13) return [0.82, 0.75, 0.62]; // Baltic canvas
   if (m === 16 || m === 15 || m === 6) return [0.34, 0.25, 0.16]; // decks / spars / oars
@@ -838,416 +831,69 @@ function tradeMaterialLinearColor(matId) {
   return [0.27, 0.18, 0.11]; // oak hull & castles
 }
 
-function buildVesselContinuum(spec, vertices, indices, designScale, beam, length, maxAirDraftMetres) {
-  const sx = designScale[0], sy = designScale[1], sz = designScale[2];
-  const vertCountAll = Math.floor(vertices.length / 9);
-  let sumArea = 0;
-  let meanR = 0, meanG = 0, meanB = 0;
-  let minY = Infinity, maxY = -Infinity;
-  let minZHull = Infinity, maxZHull = -Infinity;
-  for (let i = 0; i < vertCountAll; i++) {
-    const o = i * 9;
-    const x = vertices[o] * sx;
-    const y = vertices[o + 1] * sy;
-    const z = vertices[o + 2] * sz;
-    const mat = Math.floor(vertices[o + 6]);
-    const col = tradeMaterialLinearColor(vertices[o + 6]);
-    if (y < minY) minY = y;
-    if (y > maxY) maxY = y;
-    if (mat !== 9 && mat !== 13 && mat !== 10 && y <= beam * 0.9 + 2.2) {
-      if (z < minZHull) minZHull = z;
-      if (z > maxZHull) maxZHull = z;
-    }
-    const w = (mat === 9 || mat === 13) ? 1.8 : 1.0;
-    sumArea += w;
-    meanR += col[0] * w;
-    meanG += col[1] * w;
-    meanB += col[2] * w;
+// Where a vertex of archetype `archIndex` stands in a pose, in design units: the same motion the vertex stage gives it
+// (animateTradeOar, then animateTradeSailBrail, in tradeVesselsSource), for the continuum's bake to measure each
+// cluster's error and bound in every pose a vessel takes. `time` stands for the frame clock (F.camPos.w).
+export function poseTradeVesselPoint(archIndex, position, normal, material, uv, { time = 0, phase = 0, motion = 0, furl = 0 } = {}) {
+  let [px, py, pz] = position;
+  let [nx, ny, nz] = normal;
+  const mInt = Math.floor(Math.max(0, material));
+  const oarCode = Math.round((material - 16) * 64);
+  if (material > 5.5 && mInt === 16 && oarCode >= 1 && archIndex === 4) {
+    const station = Math.min(23, oarCode - 1);
+    const pivots = bargeOarPivotsForWGSL();
+    const pivot = [pivots[station * 4], pivots[station * 4 + 1], pivots[station * 4 + 2]], side = pivots[station * 4 + 3];
+    const cyc = motion > 0.035 ? time * 2.15 + phase + (station >> 1) * 0.16 : Math.PI;
+    const sweep = Math.sin(cyc) * 0.30, dip = -Math.cos(cyc) * 0.12;
+    const scale = getTradeVesselArchetype(4).designScale;
+    let d = [px - pivot[0], py - pivot[1], pz - pivot[2]], n = [nx, ny, nz];
+    const shaft = [side / scale[0], BARGE_OAR_SLOPE_M / scale[1], 0], shaftLength = Math.hypot(...shaft);
+    const u = shaft.map((v) => v / shaftLength);
+    const feather = Math.max(0, -Math.cos(cyc)) * 0.65;
+    const turn = (v, c, s) => {
+      const along = u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+      const cross = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+      return [0, 1, 2].map((k) => u[k] * along + (v[k] - u[k] * along) * c + cross[k] * s);
+    };
+    if (feather > 0.001) { const c = Math.cos(feather), s = Math.sin(feather) * side; d = turn(d, c, s); n = turn(n, c, s); }
+    const cy = Math.cos(sweep * side), sy = Math.sin(sweep * side), cr = Math.cos(dip * side), sr = Math.sin(dip * side);
+    const swing = (v) => { const y = [v[0] * cy - v[2] * sy, v[1], v[0] * sy + v[2] * cy]; return [y[0] * cr - y[1] * sr, y[0] * sr + y[1] * cr, y[2]]; };
+    const pd = swing(d);
+    [px, py, pz] = [pivot[0] + pd[0], pivot[1] + pd[1], pivot[2] + pd[2]];
+    [nx, ny, nz] = swing(n);
+  } else if (mInt === 28 && motion > 0.05 && (archIndex === 4 || archIndex === 6)) {
+    px += Math.sin(time * 1.45 + phase) * 0.075 * Math.min(motion, 1.4);
   }
-  if (!Number.isFinite(minY)) minY = -beam * 0.25;
-  if (!Number.isFinite(maxY)) maxY = maxAirDraftMetres;
-  if (!Number.isFinite(minZHull) || maxZHull - minZHull < 1.0) {
-    minZHull = -length * 0.5;
-    maxZHull = length * 0.5;
-  }
-  const invW = 1 / Math.max(1e-4, sumArea);
-  const meanColour = [meanR * invW, meanG * invW, meanB * invW];
-
-  // Sample longitudinal profile slabs [0..N_RINGS-1] from real scaled geometry so every ship
-  // keeps pointed bow, tapered transom, sheer/castles, and crisp sail-fin / mast silhouettes.
-  const N_RINGS = 6;
-  const zSpan = Math.max(2.0, maxZHull - minZHull);
-  const hullBins = Array.from({ length: N_RINGS }, () => ({
-    maxX: 0, minY: 0, maxDeckY: 0.4, hullColR: 0, hullColG: 0, hullColB: 0, hullN: 0,
-    deckColR: 0, deckColG: 0, deckColB: 0, deckN: 0,
-    sailMaxX: 0, sailMaxY: -Infinity, sailMinY: Infinity, sailN: 0,
-    sailColR: 0, sailColG: 0, sailColB: 0,
-    mastMaxY: -Infinity, mastN: 0,
-  }));
-  const hullTopCut = Math.max(1.8, beam * 0.85);
-  for (let i = 0; i < vertCountAll; i++) {
-    const o = i * 9;
-    const x = vertices[o] * sx;
-    const y = vertices[o + 1] * sy;
-    const z = vertices[o + 2] * sz;
-    const mat = Math.floor(vertices[o + 6]);
-    const col = tradeMaterialLinearColor(vertices[o + 6]);
-    const bin = Math.max(0, Math.min(N_RINGS - 1, Math.floor(((z - minZHull) / zSpan) * N_RINGS)));
-    const b = hullBins[bin];
-    if (mat === 9 || mat === 13) {
-      b.sailMaxX = Math.max(b.sailMaxX, Math.abs(x));
-      if (y > b.sailMaxY) b.sailMaxY = y;
-      if (y < b.sailMinY) b.sailMinY = y;
-      b.sailColR += col[0]; b.sailColG += col[1]; b.sailColB += col[2];
-      b.sailN++;
-    } else if (mat === 10) {
-      if (y > b.mastMaxY) b.mastMaxY = y;
-      b.mastN++;
-    } else {
-      if (Math.abs(x) > b.maxX && y <= hullTopCut && !(spec.index === 4 && mat === 16)) b.maxX = Math.abs(x);
-      if (y < b.minY) b.minY = y;
-      if (y <= hullTopCut && y > b.maxDeckY) b.maxDeckY = y;
-      if (y < 0.9) {
-        b.hullColR += col[0]; b.hullColG += col[1]; b.hullColB += col[2]; b.hullN++;
+  const f = Math.min(1, Math.max(0, furl));
+  if (f > 0.002 && archIndex !== 1 && archIndex !== 3 && archIndex !== 4 && (mInt === 9 || mInt === 13 || mInt === 19)) {
+    const code = Math.min(15, Math.round(Math.max(0, (material - Math.floor(material)) * 64)));
+    const rec = getTradeVesselArchetype(archIndex).sailBrailSpecs?.[code];
+    if (rec) {
+      const nLength = Math.max(Math.hypot(nx, ny, nz), 1e-5);
+      const u = Math.min(1, Math.max(0, uv[0])), v = Math.min(1, Math.max(0, uv[1]));
+      const gate = Math.min(1, Math.max(0, v * 20));
+      const blend = (a, b, t) => a + (b - a) * t;
+      const unit = (x, y, z) => { const l = Math.hypot(x, y, z) || 1; return [x / l, y / l, z / l]; };
+      let fold;
+      if (rec.isLateen) {
+        const brail = Math.min(1, Math.max(0, u + v * 0.34)), sag = (0.045 + 0.085 * Math.sin(brail * Math.PI)) * v;
+        const yard = [0, 1, 2].map((k) => blend(rec.peak[k], rec.tack[k], brail) - (k === 1 ? sag : 0));
+        const w = f * 0.96 * gate;
+        [px, py, pz] = [blend(px, yard[0], w), blend(py, yard[1], w), blend(pz, yard[2], w)];
+        fold = unit(0.88, -0.36 * v - 0.08, 0.22 * Math.sin(u * 12.566));
       } else {
-        b.deckColR += col[0]; b.deckColG += col[1]; b.deckColB += col[2]; b.deckN++;
+        const drop = (0.055 + 0.115 * Math.sin(u * Math.PI)) * v;
+        const targetY = Math.min(rec.yardY, rec.yardY - drop), targetZ = rec.yardZ - (0.04 + 0.075 * Math.sin(u * Math.PI)) * v;
+        py = blend(py, targetY, f * 0.96 * gate);
+        pz = blend(pz, targetZ, f * 0.92 * gate);
+        px *= 1 - 0.16 * f * v;
+        fold = unit((u - 0.5) * 0.25, -0.48 * v, -0.86);
       }
+      const bent = unit(...[nx, ny, nz].map((c, k) => blend(c / nLength, fold[k], f * 0.52 * gate)));
+      [nx, ny, nz] = bent.map((c) => c * nLength);
     }
   }
-
-  // Single connected closed genus-0 articulated ship cross-section:
-  // Bow apex -> N_RINGS x K=6 contour rings [keel, stbd sheer, stbd upper/sail, ridge/peak, port upper/sail, port sheer] -> Stern apex.
-  // V = 2 + 6*6 = 38 vertices, F = 6 + 5*12 + 6 = 72 tris, E = 108 edges -> V - E + F = 2.
-  const K = 6;
-  const initPos = [];
-  const vertColors = new Float32Array((2 + N_RINGS * K) * 3);
-  const vertSailMask = new Float32Array(2 + N_RINGS * K);
-  const setVertColor = (vi, col, isSail = 0) => {
-    vertColors[vi * 3 + 0] = Math.min(1, col[0]);
-    vertColors[vi * 3 + 1] = Math.min(1, col[1]);
-    vertColors[vi * 3 + 2] = Math.min(1, col[2]);
-    vertSailMask[vi] = isSail;
-  };
-
-  const bFirst = hullBins[0];
-  const bLast = hullBins[N_RINGS - 1];
-  const bowY = Math.max(0.15, (bFirst.minY + bFirst.maxDeckY) * 0.55);
-  const sternY = Math.max(0.35, (bLast.minY + bLast.maxDeckY) * 0.55);
-  initPos.push([0, bowY, minZHull - 0.12]);
-  setVertColor(0, [0.24, 0.16, 0.10], 0);
-
-  for (let r = 0; r < N_RINGS; r++) {
-    const b = hullBins[r];
-    const u = (r + 0.5) / N_RINGS;
-    const zR = minZHull + u * zSpan;
-    const taper = Math.sin(Math.pow(u, 0.85) * Math.PI);
-    const halfB = Math.max(0.28, b.maxX > 0.1 ? b.maxX : beam * 0.48 * Math.max(0.35, taper));
-    const keelY = Math.min(-0.22, b.minY < -0.1 ? b.minY * 0.85 : -Math.max(0.32, beam * 0.22));
-    const deckY = Math.max(0.45, b.maxDeckY);
-    const sheerY = Math.max(0.18, deckY * 0.82);
-
-    const hCol = b.hullN > 0 ? [b.hullColR / b.hullN, b.hullColG / b.hullN, b.hullColB / b.hullN] : [0.25, 0.17, 0.11];
-    const dCol = b.deckN > 0 ? [b.deckColR / b.deckN, b.deckColG / b.deckN, b.deckColB / b.deckN] : [0.33, 0.24, 0.15];
-    const sCol = b.sailN > 0 ? [b.sailColR / b.sailN, b.sailColG / b.sailN, b.sailColB / b.sailN] : [0.80, 0.74, 0.61];
-
-    const hasSail = !spec.furlSails && !spec.unmasted && b.sailN > 0 && b.sailMaxY > deckY + 1.0;
-    const hasBareMast = spec.furlSails && !spec.unmasted && b.mastN > 0 && b.mastMaxY > deckY + 1.2;
-
-    let shX, shY, peakY, topCol, topMask;
-    if (hasSail) {
-      shX = Math.max(0.32, Math.min(beam * 1.45, b.sailMaxX > 0.2 ? b.sailMaxX * 0.92 : beam * 0.55));
-      const sailMid = Number.isFinite(b.sailMinY) ? (b.sailMinY * 0.45 + b.sailMaxY * 0.55) : (deckY + (b.sailMaxY - deckY) * 0.5);
-      shY = Math.max(sheerY + 0.35, sailMid);
-      peakY = Math.max(shY + 0.45, b.sailMaxY * 0.96);
-      topCol = sCol;
-      topMask = 1.0;
-    } else if (hasBareMast) {
-      shX = Math.max(0.22, halfB * 0.32);
-      shY = deckY + 0.30;
-      peakY = Math.max(deckY + 0.85, b.mastMaxY * 0.92);
-      topCol = [0.40, 0.30, 0.20];
-      topMask = 0.0;
-    } else {
-      shX = Math.max(0.20, halfB * 0.45);
-      shY = deckY + 0.12;
-      peakY = deckY + 0.28;
-      topCol = dCol;
-      topMask = 0.0;
-    }
-
-    const baseV = initPos.length;
-    initPos.push([0, keelY, zR]);        // 0: keel bottom
-    initPos.push([+halfB, sheerY, zR]);  // 1: starboard sheer
-    initPos.push([+shX, shY, zR]);       // 2: starboard yard/shoulder
-    initPos.push([0, peakY, zR]);        // 3: dorsal sail/castle/mast apex
-    initPos.push([-shX, shY, zR]);       // 4: port yard/shoulder
-    initPos.push([-halfB, sheerY, zR]);  // 5: port sheer
-
-    setVertColor(baseV + 0, [0.06, 0.05, 0.04], 0);
-    setVertColor(baseV + 1, hCol, 0);
-    setVertColor(baseV + 2, topCol, topMask);
-    setVertColor(baseV + 3, topCol, topMask);
-    setVertColor(baseV + 4, topCol, topMask);
-    setVertColor(baseV + 5, hCol, 0);
-  }
-
-  const topIdx = initPos.length;
-  initPos.push([0, sternY, maxZHull + 0.05]);
-  setVertColor(topIdx, [0.26, 0.18, 0.11], 0);
-  const V = initPos.length;
-
-  const cx = 0;
-  const cy = Math.max(0.25, (minY + maxY) * 0.42);
-  const cz = 0;
-
-  // CCW outward closed winding (Euler characteristic V - E + F = 2)
-  const rawTris = [];
-  for (let s = 0; s < K; s++) {
-    const n = (s + 1) % K;
-    rawTris.push([0, 1 + n, 1 + s]);
-  }
-  for (let r = 0; r < N_RINGS - 1; r++) {
-    const r0 = 1 + r * K, r1 = 1 + (r + 1) * K;
-    for (let s = 0; s < K; s++) {
-      const n = (s + 1) % K;
-      rawTris.push([r0 + s, r0 + n, r1 + n]);
-      rawTris.push([r0 + s, r1 + n, r1 + s]);
-    }
-  }
-  const sternRing = 1 + (N_RINGS - 1) * K;
-  for (let s = 0; s < K; s++) {
-    const n = (s + 1) % K;
-    rawTris.push([sternRing + s, sternRing + n, topIdx]);
-  }
-
-  const F = rawTris.length;
-  const tris = rawTris.map((t) => [...t]);
-  const triAlive = new Uint8Array(F).fill(1);
-  const retireStep = new Int32Array(F).fill(999999);
-  const curPos = initPos.map((p) => [...p]);
-  const vertAlive = new Uint8Array(V).fill(1);
-  const ancestor = Int32Array.from({ length: V }, (_, i) => i);
-  const resolveVert = (u) => {
-    let cur = u;
-    while (ancestor[cur] !== cur) cur = ancestor[cur];
-    return cur;
-  };
-
-  const computeMeshVolumeAndNormals = () => {
-    let vol6 = 0;
-    const norms = Array.from({ length: V }, () => [0, 0, 0]);
-    for (let t = 0; t < F; t++) {
-      if (!triAlive[t]) continue;
-      const a = curPos[tris[t][0]], b = curPos[tris[t][1]], c = curPos[tris[t][2]];
-      const ax = a[0] - cx, ay = a[1] - cy, az = a[2] - cz;
-      const bx = b[0] - cx, by = b[1] - cy, bz = b[2] - cz;
-      const ccx = c[0] - cx, ccy = c[1] - cy, ccz = c[2] - cz;
-      const crx = by * ccz - bz * ccy, cry = bz * ccx - bx * ccz, crz = bx * ccy - by * ccx;
-      vol6 += ax * crx + ay * cry + az * crz;
-      const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
-      const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
-      const fnx = uy * vz - uz * vy, fny = uz * vx - ux * vz, fnz = ux * vy - uy * vx;
-      for (let k = 0; k < 3; k++) {
-        norms[tris[t][k]][0] += fnx;
-        norms[tris[t][k]][1] += fny;
-        norms[tris[t][k]][2] += fnz;
-      }
-    }
-    const outNorm = new Float32Array(V * 3);
-    const outPos = new Float32Array(V * 3);
-    for (let i = 0; i < V; i++) {
-      const r = resolveVert(i);
-      const p = curPos[r];
-      const n = norms[r];
-      const nl = Math.hypot(n[0], n[1], n[2]) || 1;
-      outPos[i * 3] = p[0]; outPos[i * 3 + 1] = p[1]; outPos[i * 3 + 2] = p[2];
-      outNorm[i * 3] = n[0] / nl; outNorm[i * 3 + 1] = n[1] / nl; outNorm[i * 3 + 2] = n[2] / nl;
-    }
-    return { vol: Math.max(1e-3, Math.abs(vol6) / 6), outPos, outNorm };
-  };
-
-  const statePositions = [];
-  const stateNormals = [];
-  const stepErrorsList = [0];
-  const stepScalesList = [1.0];
-  const initialStats = computeMeshVolumeAndNormals();
-  const vol0 = initialStats.vol;
-  statePositions.push(initialStats.outPos);
-  stateNormals.push(initialStats.outNorm);
-
-  let aliveTris = F;
-  let prevErr = 0.05;
-  let stepIdx = 0;
-  const MAX_COLLAPSE_STEPS = 56;
-
-  while (aliveTris > 6 && stepIdx < MAX_COLLAPSE_STEPS) {
-    const adjVerts = Array.from({ length: V }, () => new Set());
-    const edgeTris = new Map();
-    for (let t = 0; t < F; t++) {
-      if (!triAlive[t]) continue;
-      const [a, b, c] = tris[t];
-      adjVerts[a].add(b); adjVerts[a].add(c);
-      adjVerts[b].add(a); adjVerts[b].add(c);
-      adjVerts[c].add(a); adjVerts[c].add(b);
-      for (const [p, q] of [[a, b], [b, c], [c, a]]) {
-        const u = Math.min(p, q), v = Math.max(p, q);
-        const key = `${u}:${v}`;
-        let list = edgeTris.get(key);
-        if (!list) { list = []; edgeTris.set(key, list); }
-        list.push(t);
-      }
-    }
-
-    let bestEdge = null;
-    let bestCost = Infinity;
-    const minDot = aliveTris > 18 ? 0.05 : -0.35;
-    for (const [key, shared] of edgeTris.entries()) {
-      if (shared.length !== 2) continue;
-      const sep = key.indexOf(':');
-      const u = Number(key.slice(0, sep));
-      const v = Number(key.slice(sep + 1));
-      if (!vertAlive[u] || !vertAlive[v]) continue;
-      let commonCount = 0;
-      for (const n of adjVerts[u]) {
-        if (adjVerts[v].has(n)) commonCount++;
-      }
-      if (commonCount !== 2) continue;
-
-      const pu = curPos[u], pv = curPos[v];
-      const mid = [(pu[0] + pv[0]) * 0.5, (pu[1] + pv[1]) * 0.5, (pu[2] + pv[2]) * 0.5];
-      const edgeLen = Math.hypot(pu[0] - pv[0], pu[1] - pv[1], pu[2] - pv[2]);
-      const seamPenalty = vertSailMask[u] !== vertSailMask[v] ? 1.85 : 1.0;
-      const cost = edgeLen * seamPenalty;
-      let valid = true;
-      for (let t = 0; t < F; t++) {
-        if (!triAlive[t] || t === shared[0] || t === shared[1]) continue;
-        const tri = tris[t];
-        if (!tri.includes(u) && !tri.includes(v)) continue;
-        const a0 = curPos[tri[0]], b0 = curPos[tri[1]], c0 = curPos[tri[2]];
-        const u0x = b0[0] - a0[0], u0y = b0[1] - a0[1], u0z = b0[2] - a0[2];
-        const v0x = c0[0] - a0[0], v0y = c0[1] - a0[1], v0z = c0[2] - a0[2];
-        const n0x = u0y * v0z - u0z * v0y, n0y = u0z * v0x - u0x * v0z, n0z = u0x * v0y - u0y * v0x;
-        const a1 = (tri[0] === u || tri[0] === v) ? mid : a0;
-        const b1 = (tri[1] === u || tri[1] === v) ? mid : b0;
-        const c1 = (tri[2] === u || tri[2] === v) ? mid : c0;
-        const u1x = b1[0] - a1[0], u1y = b1[1] - a1[1], u1z = b1[2] - a1[2];
-        const v1x = c1[0] - a1[0], v1y = c1[1] - a1[1], v1z = c1[2] - a1[2];
-        const n1x = u1y * v1z - u1z * v1y, n1y = u1z * v1x - u1x * v1z, n1z = u1x * v1y - u1y * v1x;
-        const l0 = Math.hypot(n0x, n0y, n0z), l1 = Math.hypot(n1x, n1y, n1z);
-        if (l1 < 1e-5 || (n0x * n1x + n0y * n1y + n0z * n1z) / (l0 * l1 + 1e-8) < minDot) {
-          valid = false;
-          break;
-        }
-      }
-      if (!valid) continue;
-      if (cost < bestCost) {
-        bestCost = cost;
-        bestEdge = { u, v, mid, shared, edgeLen };
-      }
-    }
-
-    if (!bestEdge) break;
-    const { u, v, mid, shared, edgeLen } = bestEdge;
-    curPos[v] = mid;
-    vertAlive[u] = 0;
-    ancestor[u] = v;
-    for (const t of shared) {
-      triAlive[t] = 0;
-      retireStep[t] = stepIdx;
-      aliveTris--;
-    }
-    for (let t = 0; t < F; t++) {
-      if (!triAlive[t]) continue;
-      for (let k = 0; k < 3; k++) {
-        if (tris[t][k] === u) tris[t][k] = v;
-      }
-    }
-
-    const stats = computeMeshVolumeAndNormals();
-    const scale = Math.max(1.0, Math.min(1.12, Math.cbrt(vol0 / Math.max(stats.vol, 1e-4))));
-    const nextErr = Math.max(prevErr + 0.035, edgeLen * 0.45);
-    prevErr = nextErr;
-    stepErrorsList.push(nextErr);
-    stepScalesList.push(scale);
-    statePositions.push(stats.outPos);
-    stateNormals.push(stats.outNorm);
-    stepIdx++;
-  }
-
-  // Keep true angular <=6-triangle ship core (zero spherical balloon projection).
-  const order = Array.from({ length: F }, (_, t) => t).sort((a, b) => retireStep[b] - retireStep[a]);
-  const baseIndices = new Uint32Array(F * 3);
-  const sortedRetire = new Int32Array(F);
-  for (let i = 0; i < F; i++) {
-    const t = order[i];
-    const rt = rawTris[t];
-    baseIndices[i * 3] = rt[0];
-    baseIndices[i * 3 + 1] = rt[1];
-    baseIndices[i * 3 + 2] = rt[2];
-    sortedRetire[i] = retireStep[t];
-  }
-
-  const totalStates = statePositions.length;
-  const stepCount = totalStates - 1;
-  const activeTriCounts = new Uint32Array(totalStates);
-  for (let s = 0; s < totalStates; s++) {
-    let count = 0;
-    while (count < F && sortedRetire[count] >= s) count++;
-    activeTriCounts[s] = count;
-  }
-
-  const morphPositions = new Float32Array(totalStates * V * 3);
-  const morphNormals = new Float32Array(totalStates * V * 3);
-  for (let s = 0; s < totalStates; s++) {
-    const sc = stepScalesList[s];
-    const sp = statePositions[s];
-    const sn = stateNormals[s];
-    const dstOff = s * V * 3;
-    for (let i = 0; i < V; i++) {
-      morphPositions[dstOff + i * 3] = cx + (sp[i * 3] - cx) * sc;
-      morphPositions[dstOff + i * 3 + 1] = cy + (sp[i * 3 + 1] - cy) * sc;
-      morphPositions[dstOff + i * 3 + 2] = cz + (sp[i * 3 + 2] - cz) * sc;
-      morphNormals[dstOff + i * 3] = sn[i * 3];
-      morphNormals[dstOff + i * 3 + 1] = sn[i * 3 + 1];
-      morphNormals[dstOff + i * 3 + 2] = sn[i * 3 + 2];
-    }
-  }
-
-  const rxSplat = Math.max(0.9, beam * 0.54);
-  const rySplat = Math.max(0.7, (maxY - minY) * 0.46);
-  const rzSplat = Math.max(1.8, length * 0.52);
-  const radius = Math.max(length * 0.54, maxAirDraftMetres * 0.54, Math.hypot(beam * 0.5, length * 0.5));
-  // Start continuum only beyond full-rig silhouette span (~38 px -> 27 px MSAA handoff, never bubbling near harbor vessels).
-  const startError = Math.max(0.65, Math.min(2.4, Math.max(length, maxAirDraftMetres) * 0.045));
-  stepErrorsList[0] = startError;
-  for (let s = 1; s < totalStates; s++) {
-    if (stepErrorsList[s] <= stepErrorsList[s - 1]) stepErrorsList[s] = stepErrorsList[s - 1] + 0.06;
-  }
-
-  return Object.freeze({
-    vertCount: V,
-    triCount: F,
-    coreTriCount: activeTriCounts[totalStates - 1],
-    stepCount,
-    stateCount: totalStates,
-    genusZeroEuler: V - ((F * 3) / 2) + F,
-    baseIndices,
-    activeTriCounts,
-    stepErrors: new Float32Array(stepErrorsList),
-    stepScales: new Float32Array(stepScalesList),
-    morphPositions,
-    morphNormals,
-    vertColors,
-    vertSailMask,
-    splat: Object.freeze({
-      centre: [cx, cy, cz],
-      rx: rxSplat,
-      ry: rySplat,
-      rz: rzSplat,
-      radius,
-      colour: meanColour,
-    }),
-  });
+  return { position: [px, py, pz], normal: [nx, ny, nz] };
 }
 
 function recomputeClothNormalsInPlace(verts, inds, matFloorSet) {
@@ -1303,7 +949,8 @@ function appendNeutralBargeSweepOars(verts, inds, groups, designScale) {
     const py = pivots[stIdx * 4 + 1];
     const pz = pivots[stIdx * 4 + 2];
     const side = pivots[stIdx * 4 + 3] || st.side;
-    const matId = 16 + stIdx / 64;
+    // Station + 1, so plain material 16 (the rubrails) is never taken for an oar.
+    const matId = 16 + (stIdx + 1) / 64;
     const startIdx = inds.length;
 
     // Exact 3D collinear sweep ray through pivot (px, py, pz) at physical slope m = BARGE_OAR_SLOPE_M (-0.34): 0.000 mm kink.
@@ -2125,15 +1772,6 @@ function buildArchetypeData(index) {
   const freeboard = spec.modelId === 'lusoria'
     ? 0.55 * yRatio0
     : Math.max(0.55, (baseHydro.freeboard + baseHydro.sinkage) * yRatio0);
-  const continuum = buildVesselContinuum(
-    spec,
-    preFracture.vertices,
-    preFracture.indices,
-    designScale,
-    spec.beam,
-    spec.length,
-    maxAirDraftMetres,
-  );
 
   return Object.freeze({
     index: spec.index,
@@ -2153,7 +1791,6 @@ function buildArchetypeData(index) {
     partAssembly,
     fracture: preFracture.fracture,
     collider,
-    continuum,
     vertexCount: Math.floor(preFracture.vertices.length / 9),
     indexCount: preFracture.indices.length,
     triangleCount: Math.floor(preFracture.indices.length / 3),
@@ -4418,28 +4055,14 @@ struct HullDamage {
 };
 @group(1) @binding(2) var<uniform> hullDamage: HullDamage;
 ` : ''}
+${shipContinuumDataWGSL(2)}
+${damaged ? `@group(2) @binding(7) var<storage, read> shipPosed: array<vec4f>;
+@group(2) @binding(8) var<storage, read> shipScarred: array<f32>;
+` : ''}
 
 ${buildArchetypeScaleWGSL()}
 ${buildBargeOarPivotsWGSL()}
 ${SAIL_BRAIL_WGSL}
-
-struct TVVertexIn {
-  @location(0) pos: vec3f,
-  @location(1) norm: vec3f,
-  @location(2) material: f32,
-  @location(3) uv: vec2f,
-  ${damaged ? `
-  @location(4) posedPos: vec3f,
-  @location(5) posedNorm: vec3f,
-  @location(6) instPosYaw: vec4f,
-  @location(7) instAttitude: vec4f,
-  @location(8) instAnim: vec4f,
-  ` : `
-  @location(4) instPosYaw: vec4f,
-  @location(5) instAttitude: vec4f,
-  @location(6) instAnim: vec4f,
-  `}
-};
 
 struct TVVertexOut {
   ${damaged ? '@invariant ' : ''}@builtin(position) pos: vec4f,
@@ -4451,8 +4074,10 @@ struct TVVertexOut {
   @location(5) uv: vec2f,
   @location(6) @interpolate(flat) yawPitchRollScale: vec4f,
   @location(7) stateMatArch: vec3f,
-  // Intact: the near-to-continuum handoff share (of 65535) and the instance seed, exactly as the select pass packed them.
-  @location(8) @interpolate(flat) fade: vec2u,
+  // Which continuum draw this is and the ship's seed, and its shares (shipContinuumCoverage).
+  @location(8) @interpolate(flat) coverage: vec2u,
+  // The far body's and the splat's own colour.
+  @location(9) colour: vec3f,
 };
 
 fn rotateVessel(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
@@ -4474,8 +4099,9 @@ fn animateTradeOar(pos: vec3f, norm: vec3f, material: f32, uv: vec2f, instAnim: 
   let motion = instAnim.y;
   let aIdx = min(u32(${TRADE_VESSEL_ARCHETYPES - 1}), u32(max(0.0, round(archF))));
   let mInt = u32(max(0.0, floor(matTone.x)));
-  if (matTone.x > 5.5 && mInt == 16u && abs(archF - 4.0) < 0.5) {
-    let stationIdx = min(23u, u32(max(0.0, round((matTone.x - 16.0) * 64.0))));
+  let oarCode = round((matTone.x - 16.0) * 64.0);
+  if (matTone.x > 5.5 && mInt == 16u && oarCode >= 1.0 && abs(archF - 4.0) < 0.5) {
+    let stationIdx = min(23u, u32(oarCode) - 1u);
     let piv = BARGE_OAR_PIVOTS[stationIdx];
     let side = piv.w;
     let oarActive = motion > 0.035;
@@ -4521,43 +4147,156 @@ fn vesselWorldTransform(srcPos: vec3f, srcNorm: vec3f, material: f32, uv: vec2f,
   return array<vec3f, 3>(wp, wn, unitLocalN);
 }
 
-@vertex fn tvVS(v: TVVertexIn) -> TVVertexOut {
-  ${damaged ? `
-  let rawPos = v.posedPos;
-  let rawNorm = v.posedNorm;
-  ` : `
-  let rawPos = v.pos;
-  let rawNorm = v.norm;
-  `}
-  let nLen = max(length(v.norm), length(rawNorm));
-  let tr = vesselWorldTransform(rawPos, rawNorm, v.material, v.uv, v.instPosYaw, v.instAttitude, v.instAnim);
+// One vertex of a ship, placed as the ship stands this frame: 'rawPos' as posed, 'restPos' where it stands at rest.
+fn tvFinish(rawPos: vec3f, rawNorm: vec3f, restPos: vec3f, material: f32, uv: vec2f, inst: ShipContinuumInstance) -> TVVertexOut {
+  let tr = vesselWorldTransform(rawPos, rawNorm, material, uv, inst.posYaw, inst.attitude, inst.anim);
   let shifted = tr[0] + vec3f(nearTerrain.grid.y, 0.0, nearTerrain.grid.z);
   var o: TVVertexOut;
   o.pos = F.viewProj * vec4f(earthCurve(shifted - F.camPos.xyz, F.camPos.y), 1.0);
   o.world = shifted;
   o.normal = tr[1];
-  o.local = v.pos;
+  o.local = restPos;
   o.normalLocal = tr[2];
-  o.matId = u32(max(0.0, floor(v.material)));
-  o.uv = v.uv;
-  o.yawPitchRollScale = vec4f(v.instPosYaw.w, v.instAttitude.x, v.instAttitude.y, max(v.instAttitude.z, 0.25));
-  ${damaged ? `o.stateMatArch = vec3f(select(0.0, clamp(nLen - 1.0, 0.0, 1.5), nLen > 1.002), v.material, v.instAttitude.w);
-  o.fade = vec2u(0u);` : `// instAnim.z holds share16 + 65536 * seed as an exact integer float (TRADE_VESSEL_SELECT_WGSL).
-  let fadeWord = u32(max(round(v.instAnim.z), 0.0));
-  o.fade = vec2u(fadeWord & 0xFFFFu, fadeWord >> 16u);
-  o.stateMatArch = vec3f(f32(o.fade.x) / 65535.0, v.material, v.instAttitude.w);`}
+  o.matId = u32(max(0.0, floor(material)));
+  o.uv = uv;
+  o.yawPitchRollScale = vec4f(inst.posYaw.w, inst.attitude.x, inst.attitude.y, max(inst.attitude.z, 0.25));
+  o.stateMatArch = vec3f(0.0, material, inst.attitude.w);
   return o;
 }
-
-@vertex fn tvShadowVS(v: TVVertexIn) -> @builtin(position) vec4f {
-  ${damaged ? `
-  let tr = vesselWorldTransform(v.posedPos, v.posedNorm, v.material, v.uv, v.instPosYaw, v.instAttitude, v.instAnim);
-  ` : `
-  let tr = vesselWorldTransform(v.pos, v.norm, v.material, v.uv, v.instPosYaw, v.instAttitude, v.instAnim);
-  `}
-  let shifted = tr[0] + vec3f(nearTerrain.grid.y, 0.0, nearTerrain.grid.z);
-  return landSH.lightView * vec4f(shifted - landSH.origin.xyz, 1.0);
+fn tvHidden() -> TVVertexOut { var o: TVVertexOut; o.pos = vec4f(2.0, 2.0, 0.0, 1.0); o.matId = 0xffffffffu; return o; }
+fn tvBodyOf(inst: ShipContinuumInstance) -> ShipContinuumBody { return shipBodies[min(u32(max(round(inst.attitude.w), 0.0)), ${TRADE_VESSEL_ARCHETYPES - 1}u)]; }
+${damaged ? `
+// A damaged ship's clusters: the vertices its fracture pass has posed (shards in flight, canvas brailed), and its own
+// copy of the assembly, which carries the scars its hits have baked in.
+fn tvDamagedVertex(vertex: u32, listed: ShipContinuumEntry) -> TVVertexOut {
+  let entry = listed.entry;
+  let inst = shipInstances[entry.x];
+  let v = shipContinuumClusterVertex(tvBodyOf(inst), entry.y, vertex);
+  if (v == 0xffffffffu) { return tvHidden(); }
+  let o9 = v * 9u;
+  let restPos = vec3f(shipScarred[o9], shipScarred[o9 + 1u], shipScarred[o9 + 2u]);
+  let restNorm = vec3f(shipScarred[o9 + 3u], shipScarred[o9 + 4u], shipScarred[o9 + 5u]);
+  let material = shipScarred[o9 + 6u];
+  let posedPos = shipPosed[v * 2u].xyz;
+  let posedNorm = shipPosed[v * 2u + 1u].xyz;
+  let nLen = max(length(restNorm), length(posedNorm));
+  var o = tvFinish(posedPos, posedNorm, restPos, material, vec2f(shipScarred[o9 + 7u], shipScarred[o9 + 8u]), inst);
+  o.stateMatArch.x = select(0.0, clamp(nLen - 1.0, 0.0, 1.5), nLen > 1.002);
+  return o;
 }
+@vertex fn tvDamagedVS(@builtin(vertex_index) vertex: u32, listed: ShipContinuumEntry) -> TVVertexOut {
+  var o = tvDamagedVertex(vertex, listed);
+  o.world += vec3f(shipContinuumBindings());
+  return o;
+}
+@vertex fn tvDamagedShadowVS(@builtin(vertex_index) vertex: u32, listed: ShipContinuumEntry) -> @builtin(position) vec4f {
+  let o = tvDamagedVertex(vertex, listed);
+  if (o.matId == 0xffffffffu) { return o.pos; }
+  return landSH.lightView * vec4f(o.world + vec3f(shipContinuumBindings()) - landSH.origin.xyz, 1.0);
+}
+` : `
+@vertex fn tvClusterVS(@builtin(vertex_index) vertex: u32, listed: ShipContinuumEntry) -> TVVertexOut {
+  let touched = shipContinuumBindings();
+  let entry = listed.entry;
+  let inst = shipInstances[entry.x];
+  let body = tvBodyOf(inst);
+  let v = shipContinuumClusterVertex(body, entry.y, vertex);
+  if (v == 0xffffffffu) { return tvHidden(); }
+  let s = shipContinuumSourceVertex(body, v);
+  var o = tvFinish(s.position, s.normal, s.position, s.material, s.uv, inst);
+  o.world += vec3f(touched);
+  // The clusters give up the samples the far body takes across the handoff.
+  o.coverage = shipContinuumCoverage(1u, shipContinuumState(entry.x).x);
+  return o;
+}
+// A far-body point placed as the ship vertex it rides: grown 'grow' metres along its normal, then posed as that
+// vertex is (oars, helm and canvas), and set where the ship stands.
+fn tvFarPlace(p: ShipContinuumPoint, grow: f32, body: ShipContinuumBody, inst: ShipContinuumInstance) -> TVVertexOut {
+  let rides = shipContinuumSourceVertex(body, p.source);
+  let outward = normalize(p.normal / body.scale.xyz) * grow / body.scale.xyz;
+  var o = tvFinish(p.position + outward, p.normal, p.position, rides.material, rides.uv, inst);
+  o.colour = p.colour;
+  return o;
+}
+// One far-body vertex at 'step', on its way to where the next collapse takes it.
+fn tvFarVertex(ship: u32, chunk: u32, vertex: u32, step: u32, morph: f32) -> TVVertexOut {
+  let inst = shipInstances[ship];
+  let body = tvBodyOf(inst);
+  let triangle = chunk * 128u + vertex / 3u;
+  if (triangle >= shipContinuumStepWord(body, step, 0u)) { return tvHidden(); }
+  let corner = shipShape[body.chain.x + body.chain.z + triangle * 3u + vertex % 3u];
+  let next = min(step + 1u, u32(body.far.y));
+  let a = shipContinuumAncestor(body, corner, step);
+  let b = shipContinuumAncestor(body, a, next);
+  let grow = mix(bitcast<f32>(shipContinuumStepWord(body, step, 2u)), bitcast<f32>(shipContinuumStepWord(body, next, 2u)), morph);
+  var o = tvFarPlace(shipContinuumFarPoint(body.chain.x, a), grow, body, inst);
+  if (morph > 0.0 && b != a) {
+    let ob = tvFarPlace(shipContinuumFarPoint(body.chain.x, b), grow, body, inst);
+    o.pos = mix(o.pos, ob.pos, morph);
+    o.world = mix(o.world, ob.world, morph);
+    o.normal = normalize(mix(o.normal, ob.normal, morph));
+    o.local = mix(o.local, ob.local, morph);
+    o.colour = mix(o.colour, ob.colour, morph);
+  }
+  return o;
+}
+@vertex fn tvFarVS(@builtin(vertex_index) vertex: u32, listed: ShipContinuumEntry) -> TVVertexOut {
+  let touched = shipContinuumBindings();
+  let entry = listed.entry;
+  let state = shipContinuumState(entry.x);
+  var o = tvFarVertex(entry.x, entry.y, vertex, state.y & 65535u, bitcast<f32>(state.z));
+  o.world += vec3f(touched);
+  // The far body takes the handoff's share from the clusters and gives the splat its own.
+  o.coverage = shipContinuumCoverage(2u, state.x);
+  return o;
+}
+// The far body at the shadow map's step, unmorphed: shadows, and the ship seen from under the water.
+@vertex fn tvFarShadowVS(@builtin(vertex_index) vertex: u32, listed: ShipContinuumEntry) -> @builtin(position) vec4f {
+  let entry = listed.entry;
+  let o = tvFarVertex(entry.x, entry.y, vertex, shipContinuumState(entry.x).y >> 16u, 0.0);
+  if (o.matId == 0xffffffffu) { return o.pos; }
+  return landSH.lightView * vec4f(o.world + vec3f(shipContinuumBindings()) - landSH.origin.xyz, 1.0);
+}
+@vertex fn tvFarSubmergedVS(@builtin(vertex_index) vertex: u32, listed: ShipContinuumEntry) -> TVVertexOut {
+  let entry = listed.entry;
+  var o = tvFarVertex(entry.x, entry.y, vertex, shipContinuumState(entry.x).y >> 16u, 0.0);
+  o.world += vec3f(shipContinuumBindings());
+  o.coverage = vec2u(2u, 0u);
+  return o;
+}
+// The splat: the triangle that circumscribes the outline's ellipse, shrunk to the ellipse's own area, facing the eye,
+// as wide as the ship shows from where it is seen (side on or end on).
+@vertex fn tvSplatVS(@builtin(vertex_index) vertex: u32, listed: ShipContinuumEntry) -> TVVertexOut {
+  let touched = shipContinuumBindings();
+  let entry = listed.entry;
+  let state = shipContinuumState(entry.x);
+  let inst = shipInstances[entry.x];
+  let body = tvBodyOf(inst);
+  let scale = max(inst.attitude.z, 1e-3);
+  let centre = inst.posYaw.xyz + rotateVessel(body.splat.xyz * scale, inst.posYaw.w, inst.attitude.x, inst.attitude.y) + vec3f(nearTerrain.grid.y, 0.0, nearTerrain.grid.z);
+  let toward = normalize(F.camPos.xyz - centre);
+  var up = rotateVessel(vec3f(0.0, 1.0, 0.0), inst.posYaw.w, inst.attitude.x, inst.attitude.y);
+  up = normalize(up - toward * dot(up, toward) + vec3f(0.0, 1e-4, 0.0));
+  let right = normalize(cross(up, toward));
+  let beam = rotateVessel(vec3f(1.0, 0.0, 0.0), inst.posYaw.w, inst.attitude.x, inst.attitude.y);
+  let level = toward - up * dot(toward, up);
+  let sideOn = abs(dot(level / max(length(level), 1e-4), beam));
+  let rx = mix(body.splat.w, body.far.w, sideOn);
+  let k = 0.7776 * scale * bitcast<f32>(state.w);
+  let corner = array<vec2f, 3>(vec2f(0.0, 2.0), vec2f(-1.7320508, -1.0), vec2f(1.7320508, -1.0))[min(vertex, 2u)];
+  let world = centre + right * (corner.x * rx * k) + up * (corner.y * body.far.z * k);
+  var o: TVVertexOut;
+  o.pos = F.viewProj * vec4f(earthCurve(world - F.camPos.xyz, F.camPos.y), 1.0);
+  o.world = world + vec3f(touched);
+  o.normal = toward;
+  o.normalLocal = vec3f(0.0, 1.0, 0.0);
+  o.colour = body.colour.xyz;
+  o.yawPitchRollScale = vec4f(inst.posYaw.w, inst.attitude.x, inst.attitude.y, scale);
+  o.stateMatArch = vec3f(0.0, 0.0, inst.attitude.w);
+  o.coverage = shipContinuumCoverage(3u, state.x);
+  return o;
+}
+`}
 
 fn tradeShadowVis(world: vec3f, normal: vec3f) -> f32 {
   if (landSH.origin.w < 0.5) { return 1.0; }
@@ -4933,25 +4672,48 @@ fn tvShadeFragment(in: TVVertexOut, front: bool) -> vec4f {
   return vec4f(surfaceAir(lit, in.world), 1.0);
 }
 
-${damaged || useSubmergedEntry ? `
-@fragment fn ${useSubmergedEntry ? 'tvSubmergedFS' : 'tvFS'}(in: TVVertexOut, @builtin(front_facing) front: bool) -> @location(0) vec4f {
+${damaged ? `
+@fragment fn tvFS(in: TVVertexOut, @builtin(front_facing) front: bool) -> @location(0) vec4f {
   return tvShadeFragment(in, front);
 }
 ` : `
-struct TVFragmentOut { @location(0) color: vec4f, @builtin(sample_mask) mask: u32 };
-@fragment fn tvSolidFS(in: TVVertexOut, @builtin(front_facing) front: bool) -> @location(0) vec4f {
-  return tvShadeFragment(in, front);
+// The far body and the splat: their own colour, lit as the ship is.
+fn tvFarShade(in: TVVertexOut, front: bool) -> vec4f {
+  let n = normalize(in.normal) * select(-1.0, 1.0, front);
+  let farSun = normalize(F.sunDir.xyz);
+  let farView = normalize(F.camPos.xyz - in.world);
+  let sunRad = sunIlluminance() * solarShadowVisibility(vec3f(tradeShadowVis(in.world, n)));
+  let nDotL = max(dot(n, farSun), 0.0);
+  let skyCol = skyAtmo(normalize(vec3f(n.x * 0.35, max(n.y, 0.14), n.z * 0.35)));
+  let seaCol = skyAtmo(vec3f(0.0, 0.25, 0.0)) * 0.45 + F.waterCol.rgb * 0.65;
+  let amb = vesselAmbient(n, skyCol, seaCol);
+  let rough = 0.86;
+  let f0 = vec3f(0.04);
+  let direct = (in.colour / PI) * sunRad * nDotL;
+  let spec = select(vec3f(0.0), vesselSpecular(n, farView, farSun, rough, f0) * sunRad * nDotL, nDotL > 0.0);
+  let envSpec = textureSampleLevel(envCube, sampC, reflect(-farView, n), rough * 7.0).rgb * vesselEnvironment(n, farView, rough, f0) * 0.28;
+  return vec4f(surfaceAir(in.colour * amb * 0.82 + direct + spec + envSpec, in.world), 1.0);
 }
+${useSubmergedEntry ? `
+@fragment fn tvSubmergedFS(in: TVVertexOut, @builtin(front_facing) front: bool) -> @location(0) vec4f {
+  return tvFarShade(in, front);
+}
+` : `
+// Each continuum draw keeps only the samples of the pixel that are its own (shipContinuumMask).
+struct TVFragmentOut { @location(0) color: vec4f, @builtin(sample_mask) mask: u32 };
 @fragment fn tvFS(in: TVVertexOut, @builtin(front_facing) front: bool) -> TVFragmentOut {
-  let color = tvShadeFragment(in, front);
-  // The continuum takes these samples of the pixel (tvContFS); the full ship keeps the rest.
-  let takeMask = continuumSamples(f32(in.fade.x) / 65535.0, in.pos.xy, TV_SAMPLES, in.fade.y);
-  let keepMask = (~takeMask) & TV_SAMPLE_MASK_ALL;
   var outF: TVFragmentOut;
-  outF.color = color;
-  outF.mask = keepMask;
+  outF.color = tvShadeFragment(in, front);
+  outF.mask = shipContinuumMask(in.coverage, in.pos.xy, TV_SAMPLES);
   return outF;
 }
+@fragment fn tvFarFS(in: TVVertexOut, @builtin(front_facing) front: bool) -> TVFragmentOut {
+  var outF: TVFragmentOut;
+  outF.color = tvFarShade(in, front);
+  outF.mask = shipContinuumMask(in.coverage, in.pos.xy, TV_SAMPLES);
+  return outF;
+}
+`}
 `}
 `;
   return withNeuralPbrTradeVessels(rawSource);
@@ -4970,407 +4732,7 @@ struct TradeInstance {
   attScaleArch: vec4f,
   animSink: vec4f,
 };
-struct ArchContInfo {
-  splatCenterRad: vec4f,
-  splatExtentCol: vec4f,
-  splatCol: vec4f,
-  counts: vec4u,
-};
-struct TradeSelectParams {
-  ctrl: vec4u,
-  params: vec4f, // cut pixel error (VESSEL_ERROR_PIXELS x coarsening), coarsening, pad, pad
-  arch: array<ArchContInfo, ${TRADE_VESSEL_ARCHETYPES}>,
-};
 `;
-
-const TRADE_CONT_HALF_TRIS = MAX_TRADE_VESSELS * 100;
-
-function buildTradeVesselClearWGSL() {
-  const counts = inspectTradeVesselArchetypes().map((a) => `${a.indexCount}u`);
-  return /* wgsl */ `
-const ARCHETYPE_INDEX_COUNTS = array<u32, ${TRADE_VESSEL_ARCHETYPES}>(${counts.join(', ')});
-@group(0) @binding(8) var<storage, read_write> indirect: array<u32>;
-@compute @workgroup_size(1) fn main() {
-  for (var s = 0u; s < 28u; s++) {
-    let base = s * 5u;
-    indirect[base] = ARCHETYPE_INDEX_COUNTS[s % ${TRADE_VESSEL_ARCHETYPES}u];
-    indirect[base + 1u] = 0u;
-    indirect[base + 2u] = 0u;
-    indirect[base + 3u] = 0u;
-    indirect[base + 4u] = 0u;
-  }
-  indirect[140u] = 0u; indirect[141u] = 1u; indirect[142u] = 0u; indirect[143u] = 0u;
-  indirect[144u] = 0u; indirect[145u] = 1u; indirect[146u] = ${TRADE_CONT_HALF_TRIS * 3}u; indirect[147u] = 0u;
-  indirect[148u] = 0u; indirect[149u] = 1u; indirect[150u] = 0u; indirect[151u] = 0u;
-}
-`;
-}
-
-export const TRADE_VESSEL_SELECT_WGSL = CONTINUUM_CORE_WGSL + FRAME_WGSL + SHADOW_FRAME + TRADE_SHARED_TYPES_WGSL + /* wgsl */ `
-@group(0) @binding(0) var<uniform> F: Frame;
-@group(0) @binding(1) var<uniform> nearTerrain: TradeNearDomain;
-@group(0) @binding(2) var<uniform> selP: TradeSelectParams;
-@group(0) @binding(3) var<storage, read> srcInstances: array<TradeInstance>;
-@group(0) @binding(4) var<storage, read> stepMeta: array<vec4f>;
-@group(0) @binding(5) var<storage, read_write> nearOut: array<TradeInstance>;
-@group(0) @binding(6) var<storage, read_write> contList: array<vec4u>;
-@group(0) @binding(7) var<storage, read_write> splatList: array<vec4f>;
-@group(0) @binding(8) var<storage, read_write> indirect: array<atomic<u32>>;
-@group(0) @binding(9) var<uniform> landSH: ShadowFrame;
-
-fn rotateVesselSel(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
-  let cr = cos(roll); let sr = sin(roll);
-  let cp = cos(pitch); let sp = sin(pitch);
-  let ch = cos(heading); let sh = sin(heading);
-  let xx = cr * v.x - sr * v.y;
-  let yy = sr * v.x + cr * v.y;
-  let yp = cp * yy - sp * v.z;
-  let zp = sp * yy + cp * v.z;
-  return vec3f(ch * xx - sh * zp, yp, sh * xx + ch * zp);
-}
-
-@compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id: vec3u) {
-  let i = id.x;
-  if (i >= selP.ctrl.x) { return; }
-  let inst = srcInstances[i];
-  let aIdx = min(u32(${TRADE_VESSEL_ARCHETYPES - 1}), u32(max(0.0, round(inst.attScaleArch.w))));
-  let arch = selP.arch[aIdx];
-  let yaw = inst.posYaw.w;
-  let pitch = inst.attScaleArch.x;
-  let roll = inst.attScaleArch.y;
-  let scaleMul = max(inst.attScaleArch.z, 0.25);
-  let shipWorld = inst.posYaw.xyz + vec3f(nearTerrain.grid.y, 0.0, nearTerrain.grid.z);
-
-  // 1. Shadow frustum culling -> shadow DrawIndexedIndirect slices 7..13
-  if (landSH.origin.w > 0.5) {
-    let shPos = landSH.lightView * vec4f(shipWorld - landSH.origin.xyz, 1.0);
-    if (abs(shPos.x) <= 1.25 && abs(shPos.y) <= 1.25 && shPos.z >= -0.25 && shPos.z <= 1.25) {
-      let shSlot = atomicAdd(&indirect[(7u + aIdx) * 5u + 1u], 1u);
-      if (shSlot < ${MAX_TRADE_VESSELS}u) {
-        nearOut[(7u + aIdx) * ${MAX_TRADE_VESSELS}u + shSlot] = inst;
-      }
-    }
-  }
-
-  // 2. Camera frustum & screen-space continuum error selection
-  let worldCenter = shipWorld + rotateVesselSel(arch.splatCenterRad.xyz * scaleMul, yaw, pitch, roll);
-  let toCenter = worldCenter - F.camPos.xyz;
-  let dist = max(length(toCenter), 1.0);
-  let boundRad = arch.splatCenterRad.w * scaleMul;
-  let clip = F.viewProj * vec4f(earthCurve(toCenter, F.camPos.y), 1.0);
-  if (clip.w < -boundRad * 1.4) { return; }
-  let tanX = max(length(F.camRight.xyz), 0.15);
-  let tanY = max(length(F.camUp.xyz), 0.15);
-  let wEff = max(clip.w, 1.0);
-  if (abs(clip.x) > wEff * 1.18 + boundRad / tanX || abs(clip.y) > wEff * 1.18 + boundRad / tanY) { return; }
-
-  let focal = 0.5 * F.screen.y / tanY;
-  let startErrM = max(arch.splatExtentCol.z, 0.04) * scaleMul;
-  // The scene's one pixel-error scalar: the cut's error and the near band both coarsen with it (1 at base).
-  let errPx = selP.params.x;
-  let coarsening = selP.params.y;
-  let spanPx = continuumPixels(2.0 * boundRad, focal, dist);
-  let nearHiPx = ${VESSEL_NEAR_HI_PIXELS.toFixed(1)} * coarsening;
-  let nearLoPx = ${VESSEL_NEAR_LO_PIXELS.toFixed(1)} * coarsening;
-
-  // Keep full articulated part-built ships crisp across harbor/combat distances until ~38 px total screen span,
-  // then MSAA sample_mask crossfade cleanly into the ship-profile continuum over 38 -> 27 px (at base error).
-  if (spanPx > nearLoPx) {
-    let rawShare = select(clamp(smoothstep(nearHiPx, nearLoPx, spanPx), 0.0, 0.999), 0.0, spanPx >= nearHiPx);
-    // A share too small for the continuum half to be listed (below) keeps the ship whole and solid, so the two
-    // sides of the band are always drawn together and each takes exactly the other's complement.
-    let rawPacked = u32(round(rawShare * 65535.0));
-    let sharePacked = select(rawPacked, 0u, rawPacked <= 130u);
-    var outInst = inst;
-    // share16 + 65536 * instance seed, exact in f32 (i < ${MAX_TRADE_VESSELS}); tvVS unpacks it to a flat vec2u.
-    outInst.animSink.z = f32(sharePacked + (i << 16u));
-    let nearSlot = atomicAdd(&indirect[aIdx * 5u + 1u], 1u);
-    if (nearSlot < ${MAX_TRADE_VESSELS}u) {
-      nearOut[aIdx * ${MAX_TRADE_VESSELS}u + nearSlot] = outInst;
-    }
-    if (sharePacked == 0u) {
-      // 100% opaque intact hull -> TBDR hardware Early-Z / HSR solid slice 14..20
-      let solidSlot = atomicAdd(&indirect[(14u + aIdx) * 5u + 1u], 1u);
-      if (solidSlot < ${MAX_TRADE_VESSELS}u) {
-        nearOut[(14u + aIdx) * ${MAX_TRADE_VESSELS}u + solidSlot] = outInst;
-      }
-    } else {
-      // MSAA crossfade band (38 -> 27 px) -> sample_mask slice 21..27 + continuum crossfade half
-      let fadeSlot = atomicAdd(&indirect[(21u + aIdx) * 5u + 1u], 1u);
-      if (fadeSlot < ${MAX_TRADE_VESSELS}u) {
-        nearOut[(21u + aIdx) * ${MAX_TRADE_VESSELS}u + fadeSlot] = outInst;
-      }
-      // The continuum's half of the band; its seed is entry.x == i, the same instance seed packed above.
-      let triCount = u32(round(stepMeta[arch.counts.x].z));
-      let startVert = atomicAdd(&indirect[144u], triCount * 3u);
-      let startTri = startVert / 3u;
-      if (startTri + triCount <= selP.ctrl.y) {
-        for (var t = 0u; t < triCount; t++) {
-          contList[${TRADE_CONT_HALF_TRIS}u + startTri + t] = vec4u(i, t, 0u, sharePacked);
-        }
-      }
-    }
-    return;
-  }
-
-  // Over the core's splat band the continuum's last step hands the splat a rising share of each pixel's samples
-  // (continuumSplatShare), so the change is never a cut; under CONTINUUM_SPLAT_PIXELS the splat stands alone.
-  let splatShare = continuumSplatShare(spanPx);
-  if (splatShare > 0.0) {
-    // Sub-pixel horizon splats thin by the core's area-preserving hash, seeded by the instance so it holds still.
-    let inflate = continuumThin(spanPx, i);
-    if (inflate <= 0.0) { return; }
-    let bow = vec2f(sin(yaw), -cos(yaw));
-    let viewXZ = normalize(vec2f(toCenter.x, toCenter.z) + vec2f(1e-5, 0.0));
-    let broadFactor = abs(bow.x * viewXZ.y - bow.y * viewXZ.x);
-    let worldHalfW = mix(arch.splatExtentCol.x, arch.splatExtentCol.w, broadFactor) * scaleMul * inflate;
-    let worldHalfH = arch.splatExtentCol.y * scaleMul * inflate;
-    let sVert = atomicAdd(&indirect[148u], 3u);
-    let sIdx = sVert / 3u;
-    if (sIdx < selP.ctrl.w) {
-      splatList[sIdx * 3u] = vec4f(worldCenter, worldHalfW);
-      splatList[sIdx * 3u + 1u] = vec4f(arch.splatCol.rgb, worldHalfH);
-      // Its share and its seed, the instance's, which the continuum's half of the band uses too.
-      splatList[sIdx * 3u + 2u] = vec4f(splatShare, f32(i), 0.0, 0.0);
-    }
-    if (spanPx <= CONTINUUM_SPLAT_PIXELS) { return; }
-  }
-
-  let stepBase = arch.counts.x;
-  let stepCount = arch.counts.y;
-  let distAtLo = (2.0 * boundRad * focal) / nearLoPx;
-  // Allowed error in the archetype's own (unscaled) metres: the instance's scale folds into the focal length.
-  let rawErr = continuumAllowedError(errPx, focal * scaleMul, dist);
-  let errAtLo = continuumAllowedError(errPx, focal * scaleMul, distAtLo);
-  let stepMaxErr = stepMeta[stepBase + stepCount].x;
-  // The morph reaches the minimal core by the top of the core's splat band at base error, sooner when coarser,
-  // and never later than the band, so a finer-than-base scalar cannot carry a detailed cut into the splat.
-  let morphSpan = min(6.7, nearLoPx / CONTINUUM_SPLAT_BAND_PIXELS - 1.0);
-  let contT = clamp((rawErr - errAtLo) / max(errAtLo * morphSpan, 1e-3), 0.0, 1.0);
-  let allowedErr = mix(startErrM, stepMaxErr, contT);
-  var lo = 0u;
-  var hi = select(0u, stepCount - 1u, stepCount > 0u);
-  while (lo < hi) {
-    let mid = (lo + hi + 1u) >> 1u;
-    if (stepMeta[stepBase + mid].x <= allowedErr) { lo = mid; }
-    else { hi = mid - 1u; }
-  }
-  let e0 = stepMeta[stepBase + lo].x;
-  let e1 = stepMeta[stepBase + min(lo + 1u, stepCount)].x;
-  let morphT = clamp((allowedErr - e0) / max(e1 - e0, 1e-4), 0.0, 1.0);
-  let stepPacked = lo | (u32(round(morphT * 65535.0)) << 16u);
-  let triCount = u32(round(stepMeta[stepBase + lo].z));
-  if (splatShare > 0.0) {
-    // In the splat band the continuum draws through the sample-masked half, keeping what the splat does not take
-    // (bit 16 marks it the finer side of the handoff; tvContFS).
-    let fadeVert = atomicAdd(&indirect[144u], triCount * 3u);
-    let fadeTri = fadeVert / 3u;
-    if (fadeTri + triCount <= selP.ctrl.y) {
-      let handed = u32(round(splatShare * 65535.0)) | 0x10000u;
-      for (var t = 0u; t < triCount; t++) {
-        contList[${TRADE_CONT_HALF_TRIS}u + fadeTri + t] = vec4u(i, t, stepPacked, handed);
-      }
-    }
-    return;
-  }
-  let startVert = atomicAdd(&indirect[140u], triCount * 3u);
-  let startTri = startVert / 3u;
-  if (startTri + triCount <= selP.ctrl.y) {
-    for (var t = 0u; t < triCount; t++) {
-      contList[startTri + t] = vec4u(i, t, stepPacked, 65535u);
-    }
-  }
-}
-`;
-
-export function buildTradeVesselContinuumWGSL(samples = 4) {
-  const safeSamples = Math.max(1, Math.min(4, samples | 0));
-  const sampleMaskAll = (1 << safeSamples) - 1;
-  return CONTINUUM_CORE_WGSL + FRAME_WGSL + ATMO_CORE_WGSL + SKY_RENDER_FUNCS + VESSEL_LIGHTING + TRADE_SHARED_TYPES_WGSL + /* wgsl */ `
-const TV_CONT_SAMPLES: u32 = ${safeSamples}u;
-const TV_CONT_MASK_ALL: u32 = ${sampleMaskAll}u;
-struct ContState { px: f32, py: f32, pz: f32, normPacked: u32 };
-
-@group(0) @binding(0) var<uniform> F: Frame;
-@group(0) @binding(1) var transLUT: texture_2d<f32>;
-@group(0) @binding(2) var skyLUT: texture_2d<f32>;
-@group(0) @binding(3) var sampC: sampler;
-@group(0) @binding(4) var envCube: texture_cube<f32>;
-@group(0) @binding(12) var<uniform> nearTerrain: TradeNearDomain;
-
-@group(1) @binding(0) var<uniform> selP: TradeSelectParams;
-@group(1) @binding(1) var<storage, read> srcInstances: array<TradeInstance>;
-@group(1) @binding(2) var<storage, read> contList: array<vec4u>;
-@group(1) @binding(3) var<storage, read> baseIndices: array<u32>;
-@group(1) @binding(4) var<storage, read> contStates: array<ContState>;
-@group(1) @binding(5) var<storage, read> contVertCols: array<vec4f>;
-
-fn rotateVesselCont(v: vec3f, heading: f32, pitch: f32, roll: f32) -> vec3f {
-  let cr = cos(roll); let sr = sin(roll);
-  let cp = cos(pitch); let sp = sin(pitch);
-  let ch = cos(heading); let sh = sin(heading);
-  let xx = cr * v.x - sr * v.y;
-  let yy = sr * v.x + cr * v.y;
-  let yp = cp * yy - sp * v.z;
-  let zp = sp * yy + cp * v.z;
-  return vec3f(ch * xx - sh * zp, yp, sh * xx + ch * zp);
-}
-
-struct TVContOut {
-  @builtin(position) pos: vec4f,
-  @location(0) world: vec3f,
-  @location(1) normal: vec3f,
-  @location(2) color: vec3f,
-  // The band's share (of 65535; 65535 outside the band) and the instance seed, matching the full ship's tvFS.
-  @location(3) @interpolate(flat) fade: vec2u,
-};
-
-@vertex fn tvContVS(@builtin(vertex_index) vid: u32) -> TVContOut {
-  let triSlot = vid / 3u;
-  let corner = vid % 3u;
-  let entry = contList[triSlot];
-  let inst = srcInstances[entry.x];
-  let aIdx = min(u32(${TRADE_VESSEL_ARCHETYPES - 1}), u32(max(0.0, round(inst.attScaleArch.w))));
-  let arch = selP.arch[aIdx];
-  let stepIdx = entry.z & 0xFFFFu;
-  let morphT = f32((entry.z >> 16u) & 0xFFFFu) / 65535.0;
-  let vi = baseIndices[arch.counts.z + entry.y * 3u + corner];
-  let stepVerts = u32(max(1.0, round(arch.splatCol.w)));
-  let v0 = contStates[arch.counts.w + stepIdx * stepVerts + vi];
-  let v1 = contStates[arch.counts.w + min(stepIdx + 1u, arch.counts.y) * stepVerts + vi];
-  let colEntry = contVertCols[stepVerts * aIdx + vi];
-  var rawLocalP = mix(vec3f(v0.px, v0.py, v0.pz), vec3f(v1.px, v1.py, v1.pz), morphT);
-  if (colEntry.a > 0.5) {
-    let sailFrac = clamp(1.0 - inst.animSink.w, 0.0, 1.0);
-    let anchorY = max(1.4, arch.splatExtentCol.y * 0.42);
-    rawLocalP.x *= mix(0.08, 1.0, sailFrac);
-    rawLocalP.y = mix(anchorY, rawLocalP.y, mix(0.28, 1.0, sailFrac));
-  }
-  let scaleMul = max(inst.attScaleArch.z, 0.25);
-  let localP = rawLocalP * scaleMul;
-  let n0 = unpack4x8unorm(v0.normPacked).xyz * 2.0 - 1.0;
-  let n1 = unpack4x8unorm(v1.normPacked).xyz * 2.0 - 1.0;
-  let localN = normalize(mix(n0, n1, morphT) + vec3f(0.0, 1e-4, 0.0));
-  let shipWorld = inst.posYaw.xyz + vec3f(nearTerrain.grid.y, 0.0, nearTerrain.grid.z);
-  let worldP = shipWorld + rotateVesselCont(localP, inst.posYaw.w, inst.attScaleArch.x, inst.attScaleArch.y);
-  let worldN = normalize(rotateVesselCont(localN, inst.posYaw.w, inst.attScaleArch.x, inst.attScaleArch.y));
-
-  var o: TVContOut;
-  o.pos = F.viewProj * vec4f(earthCurve(worldP - F.camPos.xyz, F.camPos.y), 1.0);
-  o.world = worldP;
-  o.normal = worldN;
-  o.color = colEntry.rgb;
-  o.fade = vec2u(entry.w & 0x1FFFFu, entry.x);
-  return o;
-}
-
-fn tvContShade(in: TVContOut, front: bool) -> vec4f {
-  let n = normalize(in.normal) * select(-1.0, 1.0, front);
-  let sunDir = normalize(F.sunDir.xyz);
-  let viewDir = normalize(F.camPos.xyz - in.world);
-  let sunRad = sunIlluminance();
-  let nDotL = max(dot(n, sunDir), 0.0);
-  let skyCol = skyAtmo(normalize(vec3f(n.x * 0.35, max(n.y, 0.14), n.z * 0.35)));
-  let seaCol = skyAtmo(vec3f(0.0, 0.25, 0.0)) * 0.45 + F.waterCol.rgb * 0.65;
-  let amb = vesselAmbient(n, skyCol, seaCol);
-  let albedo = in.color;
-  let direct = (albedo / PI) * sunRad * nDotL;
-  let spec = select(vec3f(0.0), vesselSpecular(n, viewDir, sunDir, 0.72, vec3f(0.04)) * sunRad * nDotL, nDotL > 0.0);
-  let refl = reflect(-viewDir, n);
-  let envCol = textureSampleLevel(envCube, sampC, refl, 5.0).rgb * 0.04;
-  let lit = albedo * amb * 0.82 + direct + spec + envCol;
-  return vec4f(surfaceAir(lit, in.world), 1.0);
-}
-
-struct TVContFragOut { @location(0) color: vec4f, @builtin(sample_mask) mask: u32 };
-@fragment fn tvContSolidFS(in: TVContOut, @builtin(front_facing) front: bool) -> @location(0) vec4f {
-  return tvContShade(in, front);
-}
-@fragment fn tvContFS(in: TVContOut, @builtin(front_facing) front: bool) -> TVContFragOut {
-  let color = tvContShade(in, front);
-  // Near the ship it is the coarser side and takes exactly the samples the full ship's tvFS gives up. In the splat
-  // band (bit 16) it is the finer side and keeps exactly those tvSplatFS does not take. Whole outside both bands.
-  let taken = continuumSamples(f32(in.fade.x & 0xFFFFu) / 65535.0, in.pos.xy, TV_CONT_SAMPLES, in.fade.y);
-  let mask = select(select(taken, ~taken & TV_CONT_MASK_ALL, (in.fade.x & 0x10000u) != 0u), TV_CONT_MASK_ALL, in.fade.x == 65535u);
-  return TVContFragOut(color, mask);
-}
-`;
-}
-
-export function buildTradeVesselSplatWGSL(samples = 4) {
-  const safeSamples = Math.max(1, Math.min(4, samples | 0));
-  return CONTINUUM_CORE_WGSL + FRAME_WGSL + ATMO_CORE_WGSL + SKY_RENDER_FUNCS + VESSEL_LIGHTING + /* wgsl */ `
-const TV_SPLAT_SAMPLES: u32 = ${safeSamples}u;
-@group(0) @binding(0) var<uniform> F: Frame;
-@group(0) @binding(1) var transLUT: texture_2d<f32>;
-@group(0) @binding(2) var skyLUT: texture_2d<f32>;
-@group(0) @binding(3) var sampC: sampler;
-@group(0) @binding(4) var envCube: texture_cube<f32>;
-@group(1) @binding(0) var<storage, read> splatList: array<vec4f>;
-
-struct TVSplatOut {
-  @builtin(position) pos: vec4f,
-  @location(0) world: vec3f,
-  @location(1) color: vec3f,
-  @location(2) uv: vec2f,
-  @location(3) @interpolate(flat) fade: vec2u,
-};
-
-@vertex fn tvSplatVS(@builtin(vertex_index) vid: u32) -> TVSplatOut {
-  let sIdx = vid / 3u;
-  let corner = vid % 3u;
-  let a = splatList[sIdx * 3u];
-  let b = splatList[sIdx * 3u + 1u];
-  let c = splatList[sIdx * 3u + 2u];
-  var uv = vec2f(0.0, 2.0);
-  if (corner == 1u) { uv = vec2f(-1.7320508, -1.0); }
-  else if (corner == 2u) { uv = vec2f(1.7320508, -1.0); }
-  let toCam = normalize(F.camPos.xyz - a.xyz);
-  let right = normalize(cross(select(vec3f(0.0, 1.0, 0.0), vec3f(1.0, 0.0, 0.0), abs(toCam.y) > 0.98), toCam));
-  let up = normalize(cross(toCam, right));
-  let worldP = a.xyz + right * (uv.x * a.w) + up * (uv.y * b.w);
-  var o: TVSplatOut;
-  o.pos = F.viewProj * vec4f(earthCurve(worldP - F.camPos.xyz, F.camPos.y), 1.0);
-  o.world = worldP;
-  o.color = b.rgb;
-  o.uv = uv;
-  o.fade = vec2u(u32(round(clamp(c.x, 0.0, 1.0) * 65535.0)), u32(c.y));
-  return o;
-}
-
-struct TVSplatFragOut { @location(0) color: vec4f, @builtin(sample_mask) mask: u32 };
-@fragment fn tvSplatFS(in: TVSplatOut) -> TVSplatFragOut {
-  let ux = dpdx(in.uv);
-  let uy = dpdy(in.uv);
-  var mask = 0u;
-  if (TV_SPLAT_SAMPLES <= 1u) {
-    if (dot(in.uv, in.uv) <= 1.0) { mask = 1u; }
-  } else {
-    let offs = array<vec2f, 4>(vec2f(-0.125, -0.375), vec2f(0.375, -0.125), vec2f(-0.375, 0.125), vec2f(0.125, 0.375));
-    for (var s = 0u; s < 4u; s++) {
-      let puv = in.uv + ux * offs[s].x + uy * offs[s].y;
-      if (dot(puv, puv) <= 1.0) { mask |= (1u << s); }
-    }
-  }
-  // In the core's splat band the splat takes only its share of the samples; the continuum keeps the rest.
-  if (in.fade.x < 65535u) { mask &= continuumSamples(f32(in.fade.x) / 65535.0, in.pos.xy, TV_SPLAT_SAMPLES, in.fade.y); }
-  let n = normalize(vec3f(in.uv.x * 0.4, 0.72, -0.3) + normalize(F.camPos.xyz - in.world) * 0.55);
-  let sunDir = normalize(F.sunDir.xyz);
-  let viewDir = normalize(F.camPos.xyz - in.world);
-  let sunRad = sunIlluminance();
-  let nDotL = max(dot(n, sunDir), 0.0);
-  let skyCol = skyAtmo(vec3f(0.0, 0.45, 0.0));
-  let seaCol = skyAtmo(vec3f(0.0, 0.22, 0.0)) * 0.45 + F.waterCol.rgb * 0.65;
-  let amb = vesselAmbient(n, skyCol, seaCol);
-  let envHaze = textureSampleLevel(envCube, sampC, viewDir, 6.0).rgb * 0.02;
-  let lit = in.color * (amb * 0.85 + (sunRad * nDotL) / PI) + envHaze;
-  return TVSplatFragOut(vec4f(surfaceAir(lit, in.world), 1.0), mask);
-}
-`;
-}
-
-export const TRADE_VESSEL_CONTINUUM_WGSL = /* @__PURE__ */ buildTradeVesselContinuumWGSL(4);
-export const TRADE_VESSEL_SPLAT_WGSL = /* @__PURE__ */ buildTradeVesselSplatWGSL(4);
 
 // ============================================================================
 // GPU Multi-Point Ocean & River Wave Buoyancy Compute Pass (Zero CPU Readbacks)
@@ -5716,7 +5078,7 @@ export function bakeDeckCrewClips(a) {
     const oarPts = [];
     for (let i = 0; i < bv.length; i += 9) {
       const m = bv[i + 6];
-      if (Math.floor(m) === 16 && Math.round((m - 16) * 64) === stIdx) {
+      if (Math.floor(m) === 16 && Math.round((m - 16) * 64) === stIdx + 1) {
         const vx = bv[i], vy = bv[i + 1], vz = bv[i + 2];
         if ((vx - px) * side <= 0) {
           oarPts.push([vx, vy, vz]);
@@ -5977,42 +5339,8 @@ function getPipelineEntry(device, cacheKey, builder) {
   return map.get(cacheKey);
 }
 
-const INTACT_VERTEX_BUFFERS = Object.freeze([
-  Object.freeze({
-    arrayStride: TRADE_VESSEL_VERTEX_FLOATS * 4,
-    stepMode: 'vertex',
-    attributes: Object.freeze([
-      { shaderLocation: 0, offset: 0, format: 'float32x3' },
-      { shaderLocation: 1, offset: 12, format: 'float32x3' },
-      { shaderLocation: 2, offset: 24, format: 'float32' },
-      { shaderLocation: 3, offset: 28, format: 'float32x2' },
-    ]),
-  }),
-  Object.freeze({
-    arrayStride: TRADE_VESSEL_INSTANCE_FLOATS * 4,
-    stepMode: 'instance',
-    attributes: Object.freeze([
-      { shaderLocation: 4, offset: 0, format: 'float32x4' },
-      { shaderLocation: 5, offset: 16, format: 'float32x4' },
-      { shaderLocation: 6, offset: 32, format: 'float32x4' },
-    ]),
-  }),
-]);
-
-const DAMAGED_VERTEX_BUFFERS = Object.freeze([
-  INTACT_VERTEX_BUFFERS[0],
-  POSED_VERTEX_LAYOUT,
-  Object.freeze({
-    arrayStride: TRADE_VESSEL_INSTANCE_FLOATS * 4,
-    stepMode: 'instance',
-    attributes: Object.freeze([
-      { shaderLocation: 6, offset: 0, format: 'float32x4' },
-      { shaderLocation: 7, offset: 16, format: 'float32x4' },
-      { shaderLocation: 8, offset: 32, format: 'float32x4' },
-    ]),
-  }),
-]);
-
+// Every trade vessel is drawn through the ship continuum (AGENTS.md rule 3): its clusters, its far body and its
+// splat, each a list the cut fills (js/wgsl/ship-continuum.js), each list entry an instance of a fixed-size draw.
 export function requestTradeVesselsPipelines({
   device,
   shader,
@@ -6021,37 +5349,32 @@ export function requestTradeVesselsPipelines({
   shadowFormat = 'depth32float',
 } = {}) {
   if (!device || !shader) return Promise.resolve(null);
-  const key = `intact:${format}:${samples}:${shadowFormat}`;
+  const key = `ship:${format}:${samples}:${shadowFormat}`;
   return getPipelineEntry(device, key, async () => {
     const module = await shader(tradeVesselsSource(false, samples), 'trade vessels');
-    const [pipe, nearSolidPipe, shadowPipe] = await Promise.all([
+    const seen = (label, entryPoint, fragment) => device.createRenderPipelineAsync({
+      label,
+      layout: 'auto',
+      vertex: { module, entryPoint, buffers: SHIP_CONTINUUM_ENTRY_LAYOUT },
+      fragment: { module, entryPoint: fragment, targets: [{ format }] },
+      primitive: { topology: 'triangle-list', cullMode: 'none' },
+      depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
+      multisample: { count: samples },
+    });
+    const [clusterPipe, farPipe, splatPipe, shadowPipe, cutPipe] = await Promise.all([
+      seen('trade vessel clusters', 'tvClusterVS', 'tvFS'),
+      seen('trade vessel far bodies', 'tvFarVS', 'tvFarFS'),
+      seen('trade vessel splats', 'tvSplatVS', 'tvFarFS'),
       device.createRenderPipelineAsync({
-        label: 'trade vessels render',
+        label: 'trade vessel shadows',
         layout: 'auto',
-        vertex: { module, entryPoint: 'tvVS', buffers: INTACT_VERTEX_BUFFERS },
-        fragment: { module, entryPoint: 'tvFS', targets: [{ format }] },
-        primitive: { topology: 'triangle-list', cullMode: 'none' },
-        depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
-        multisample: { count: samples },
-      }),
-      device.createRenderPipelineAsync({
-        label: 'trade vessels near solid',
-        layout: 'auto',
-        vertex: { module, entryPoint: 'tvVS', buffers: INTACT_VERTEX_BUFFERS },
-        fragment: { module, entryPoint: 'tvSolidFS', targets: [{ format }] },
-        primitive: { topology: 'triangle-list', cullMode: 'none' },
-        depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
-        multisample: { count: samples },
-      }),
-      device.createRenderPipelineAsync({
-        label: 'trade vessels shadow',
-        layout: 'auto',
-        vertex: { module, entryPoint: 'tvShadowVS', buffers: INTACT_VERTEX_BUFFERS },
+        vertex: { module, entryPoint: 'tvFarShadowVS', buffers: SHIP_CONTINUUM_ENTRY_LAYOUT },
         primitive: { topology: 'triangle-list', cullMode: 'none' },
         depthStencil: { format: shadowFormat, depthWriteEnabled: true, depthCompare: 'less', depthBias: 2, depthBiasSlopeScale: 1.5 },
       }),
+      requestShipContinuumCut({ device, shader }),
     ]);
-    return { pipe, nearSolidPipe, shadowPipe };
+    return { clusterPipe, farPipe, splatPipe, shadowPipe, cutPipe };
   });
 }
 
@@ -6093,6 +5416,7 @@ export async function createTradeVessels({
   sharedCrew = null,
   waterOptics = null,
   submerged = null,
+  fetchAsset = fetch,
 } = {}) {
   if (!device || !shader || !resources) return null;
 
@@ -6100,24 +5424,13 @@ export async function createTradeVessels({
   let lastContext = null;
   let contextRiverAt = null;
 
-  const archGPUs = inspectTradeVesselArchetypes().map((arch) => {
-    const vertexBuffer = device.createBuffer({
-      label: `trade vessel ${arch.index} (${arch.label}) verts`,
-      size: arch.vertices.byteLength,
-      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
-    });
-    device.queue.writeBuffer(vertexBuffer, 0, arch.vertices);
-    const indexBuffer = device.createBuffer({
-      label: `trade vessel ${arch.index} (${arch.label}) indices`,
-      size: arch.indices.byteLength,
-      usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
-    });
-    device.queue.writeBuffer(indexBuffer, 0, arch.indices);
-    return { arch, vertexBuffer, indexBuffer };
-  });
+  const archs = inspectTradeVesselArchetypes();
+  // Each archetype's body, baked offline from this same assembly (scripts/prepare-ship-continuum.mjs), in archetype
+  // order: an instance's archetype is its body. Nothing is drawn until every body is here.
+  const shipBodyIds = SHIP_CONTINUUM_BODIES.filter((b) => b.family === 'trade').sort((a, b) => a.archetype - b.archetype).map((b) => b.id);
+  const shipDataPromise = loadShipContinuum(device, shipBodyIds, shipBodyIds.map((_, a) => archs[a]), { label: 'trade vessel continuum', fetchAsset });
 
   const NEAR_SLICE_BYTES = MAX_TRADE_VESSELS * TRADE_VESSEL_INSTANCE_FLOATS * 4;
-  const MAX_CONT_TRIS = MAX_TRADE_VESSELS * 100;
   const U_VERTEX = GPUBufferUsage.VERTEX ?? 32;
   const U_INDEX = GPUBufferUsage.INDEX ?? 16;
   const U_UNIFORM = GPUBufferUsage.UNIFORM ?? 64;
@@ -6126,119 +5439,9 @@ export async function createTradeVessels({
   const U_COPY_DST = GPUBufferUsage.COPY_DST ?? 8;
   const U_COPY_SRC = GPUBufferUsage.COPY_SRC ?? 4;
 
-  const instanceBuffers = archGPUs.map((_, i) => device.createBuffer({
-    label: `trade vessel instances ${i}`,
-    size: NEAR_SLICE_BYTES,
-    usage: U_VERTEX | U_COPY_DST,
-  }));
-
-  // Pack static half-edge continuum geometry across all 7 archetypes for GPU compute LOD + splat selection.
-  const selectParamsBuf = new ArrayBuffer(480);
-  const selectParamsCtrl = new Uint32Array(selectParamsBuf, 0, 4);
-  const selectParamsFloats = new Float32Array(selectParamsBuf, 16, 4);
-  const selectArchF32 = new Float32Array(selectParamsBuf, 32, TRADE_VESSEL_ARCHETYPES * 16);
-  const selectArchU32 = new Uint32Array(selectParamsBuf, 32, TRADE_VESSEL_ARCHETYPES * 16);
-  selectParamsCtrl[0] = 0;
-  selectParamsCtrl[1] = MAX_CONT_TRIS;
-  selectParamsCtrl[2] = samples;
-  selectParamsCtrl[3] = MAX_TRADE_VESSELS;
-  // The cut follows the scene's one pixel-error scalar: rewritten with the per-frame upload (writeSelectParams).
-  const writeSelectParams = () => {
-    const coarsening = continuumCoarsening();
-    selectParamsFloats[0] = VESSEL_ERROR_PIXELS * coarsening;
-    selectParamsFloats[1] = coarsening;
-  };
-  writeSelectParams();
-
-  let totalSteps = 0, totalContIndices = 0, totalStateVerts = 0, totalColVerts = 0;
-  for (let a = 0; a < archGPUs.length; a++) {
-    const c = archGPUs[a].arch.continuum;
-    const fOff = a * 16;
-    selectArchF32[fOff + 0] = c.splat.centre[0];
-    selectArchF32[fOff + 1] = c.splat.centre[1];
-    selectArchF32[fOff + 2] = c.splat.centre[2];
-    selectArchF32[fOff + 3] = c.splat.radius;
-    selectArchF32[fOff + 4] = c.splat.rx;
-    selectArchF32[fOff + 5] = c.splat.ry;
-    selectArchF32[fOff + 6] = c.stepErrors[0];
-    selectArchF32[fOff + 7] = c.splat.rz;
-    selectArchF32[fOff + 8] = c.splat.colour[0];
-    selectArchF32[fOff + 9] = c.splat.colour[1];
-    selectArchF32[fOff + 10] = c.splat.colour[2];
-    selectArchF32[fOff + 11] = c.vertCount;
-    selectArchU32[fOff + 12] = totalSteps;
-    selectArchU32[fOff + 13] = c.stepCount;
-    selectArchU32[fOff + 14] = totalContIndices;
-    selectArchU32[fOff + 15] = totalStateVerts;
-    totalSteps += c.stateCount;
-    totalContIndices += c.baseIndices.length;
-    totalStateVerts += c.stateCount * c.vertCount;
-    totalColVerts += c.vertCount;
-  }
-
-  const stepMetaArray = new Float32Array(totalSteps * 4);
-  const contBaseIdxArray = new Uint32Array(totalContIndices);
-  const contStatesBuf = new ArrayBuffer(totalStateVerts * 16);
-  const contStatesF32 = new Float32Array(contStatesBuf);
-  const contStatesU32 = new Uint32Array(contStatesBuf);
-  const contVertColsArray = new Float32Array(totalColVerts * 4);
-
-  let stepCursor = 0, idxCursor = 0, stateVertCursor = 0, colVertCursor = 0;
-  for (let a = 0; a < archGPUs.length; a++) {
-    const c = archGPUs[a].arch.continuum;
-    const stepBase = stepCursor;
-    for (let s = 0; s < c.stateCount; s++) {
-      const mOff = stepCursor * 4;
-      stepMetaArray[mOff + 0] = c.stepErrors[s];
-      stepMetaArray[mOff + 1] = c.stepScales[s];
-      stepMetaArray[mOff + 2] = c.activeTriCounts[s];
-      stepMetaArray[mOff + 3] = stepBase;
-      stepCursor++;
-      for (let i = 0; i < c.vertCount; i++) {
-        const src = (s * c.vertCount + i) * 3;
-        const wOff = stateVertCursor * 4;
-        contStatesF32[wOff + 0] = c.morphPositions[src];
-        contStatesF32[wOff + 1] = c.morphPositions[src + 1];
-        contStatesF32[wOff + 2] = c.morphPositions[src + 2];
-        const nx = Math.max(-1, Math.min(1, c.morphNormals[src]));
-        const ny = Math.max(-1, Math.min(1, c.morphNormals[src + 1]));
-        const nz = Math.max(-1, Math.min(1, c.morphNormals[src + 2]));
-        const bx = Math.round((nx * 0.5 + 0.5) * 255) & 255;
-        const by = Math.round((ny * 0.5 + 0.5) * 255) & 255;
-        const bz = Math.round((nz * 0.5 + 0.5) * 255) & 255;
-        contStatesU32[wOff + 3] = bx | (by << 8) | (bz << 16) | (255 << 24);
-        stateVertCursor++;
-      }
-    }
-    contBaseIdxArray.set(c.baseIndices, idxCursor);
-    idxCursor += c.baseIndices.length;
-    for (let i = 0; i < c.vertCount; i++) {
-      const cOff = colVertCursor * 4;
-      contVertColsArray[cOff + 0] = c.vertColors[i * 3];
-      contVertColsArray[cOff + 1] = c.vertColors[i * 3 + 1];
-      contVertColsArray[cOff + 2] = c.vertColors[i * 3 + 2];
-      contVertColsArray[cOff + 3] = c.vertSailMask ? c.vertSailMask[i] : 0.0;
-      colVertCursor++;
-    }
-  }
-
-  const selectUniformBuffer = device.createBuffer({ label: 'trade vessel select uniform', size: selectParamsBuf.byteLength, usage: U_UNIFORM | U_COPY_DST });
-  device.queue.writeBuffer(selectUniformBuffer, 0, selectParamsBuf);
-  const stepMetaBuffer = device.createBuffer({ label: 'trade vessel step meta', size: stepMetaArray.byteLength, usage: U_STORAGE | U_COPY_DST });
-  device.queue.writeBuffer(stepMetaBuffer, 0, stepMetaArray);
-  const contBaseIndicesBuffer = device.createBuffer({ label: 'trade vessel cont indices', size: contBaseIdxArray.byteLength, usage: U_STORAGE | U_COPY_DST });
-  device.queue.writeBuffer(contBaseIndicesBuffer, 0, contBaseIdxArray);
-  const contStatesBuffer = device.createBuffer({ label: 'trade vessel cont states', size: contStatesBuf.byteLength, usage: U_STORAGE | U_COPY_DST });
-  device.queue.writeBuffer(contStatesBuffer, 0, contStatesBuf);
-  const contVertColsBuffer = device.createBuffer({ label: 'trade vessel cont cols', size: contVertColsArray.byteLength, usage: U_STORAGE | U_COPY_DST });
-  device.queue.writeBuffer(contVertColsBuffer, 0, contVertColsArray);
-
-  const srcInstancesBuffer = device.createBuffer({ label: 'trade vessel src instances', size: NEAR_SLICE_BYTES, usage: U_STORAGE | U_COPY_DST });
-  const nearOutBuffer = device.createBuffer({ label: 'trade vessel near out', size: 28 * NEAR_SLICE_BYTES, usage: U_STORAGE | U_VERTEX });
-  const contListBuffer = device.createBuffer({ label: 'trade vessel cont list', size: 2 * TRADE_CONT_HALF_TRIS * 16, usage: U_STORAGE });
-  const splatListBuffer = device.createBuffer({ label: 'trade vessel splat list', size: MAX_TRADE_VESSELS * 3 * 16, usage: U_STORAGE });
-  // COPY_SRC: the continuum census reads the draws' own arguments (continuumDraws below).
-  const indirectBuffer = device.createBuffer({ label: 'trade vessel indirect', size: 156 * 4, usage: U_STORAGE | U_INDIRECT | U_COPY_DST | U_COPY_SRC });
+  // Every vessel's instance record, posed by the wave pass and cut by the continuum.
+  // Copyable, so a test can read the cut against the instances it was made from.
+  const srcInstancesBuffer = device.createBuffer({ label: 'trade vessel instances', size: NEAR_SLICE_BYTES, usage: U_STORAGE | U_COPY_DST | U_COPY_SRC });
 
   const waveParamsBuf = new ArrayBuffer(32);
   const waveParamsU32 = new Uint32Array(waveParamsBuf, 0, 4);
@@ -6287,46 +5490,8 @@ export async function createTradeVessels({
       })
     : null);
 
-  const continuumPromise = canCompute
-    ? getPipelineEntry(device, `continuum:${format}:${samples}:${Boolean(computePipe)}`, async () => {
-        const [wavePipe, clearPipe, selectPipe, contModule, splatModule] = await Promise.all([
-          makeCompute(TRADE_VESSEL_WAVE_WGSL, 'trade vessel wave hydro'),
-          makeCompute(buildTradeVesselClearWGSL(), 'trade vessel clear'),
-          makeCompute(TRADE_VESSEL_SELECT_WGSL, 'trade vessel select'),
-          shader(buildTradeVesselContinuumWGSL(samples), 'trade vessel continuum'),
-          shader(buildTradeVesselSplatWGSL(samples), 'trade vessel splat'),
-        ]);
-        const [continuumSolidPipe, continuumPipe, splatPipe] = await Promise.all([
-          device.createRenderPipelineAsync({
-            label: 'trade vessel continuum solid',
-            layout: 'auto',
-            vertex: { module: contModule, entryPoint: 'tvContVS' },
-            fragment: { module: contModule, entryPoint: 'tvContSolidFS', targets: [{ format }] },
-            primitive: { topology: 'triangle-list', cullMode: 'back' },
-            depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
-            multisample: { count: samples },
-          }),
-          device.createRenderPipelineAsync({
-            label: 'trade vessel continuum',
-            layout: 'auto',
-            vertex: { module: contModule, entryPoint: 'tvContVS' },
-            fragment: { module: contModule, entryPoint: 'tvContFS', targets: [{ format }] },
-            primitive: { topology: 'triangle-list', cullMode: 'back' },
-            depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
-            multisample: { count: samples },
-          }),
-          device.createRenderPipelineAsync({
-            label: 'trade vessel splat',
-            layout: 'auto',
-            vertex: { module: splatModule, entryPoint: 'tvSplatVS' },
-            fragment: { module: splatModule, entryPoint: 'tvSplatFS', targets: [{ format }] },
-            primitive: { topology: 'triangle-list', cullMode: 'none' },
-            depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
-            multisample: { count: samples },
-          }),
-        ]);
-        return { wavePipe, clearPipe, selectPipe, continuumSolidPipe, continuumPipe, splatPipe };
-      })
+  const wavePromise = canCompute
+    ? getPipelineEntry(device, `wave:${Boolean(computePipe)}`, () => Promise.resolve(makeCompute(TRADE_VESSEL_WAVE_WGSL, 'trade vessel wave hydro')))
     : Promise.resolve(null);
 
   const surfaceWavesPromise = oceanBridge?.surfaceWaves
@@ -6349,19 +5514,22 @@ export async function createTradeVessels({
             })).catch(() => null)
           : Promise.resolve(null);
 
-  const [{ pipe, nearSolidPipe, shadowPipe }, continuumPipes, resolvedSurfaceWaves, resolvedWaterOptics] = await Promise.all([
+  const [pipes, wavePipe, shipData, resolvedSurfaceWaves, resolvedWaterOptics] = await Promise.all([
     requestTradeVesselsPipelines({ device, shader, format, samples, shadowFormat }),
-    continuumPromise,
+    wavePromise,
+    shipDataPromise,
     surfaceWavesPromise,
     waterOpticsPromise,
   ]);
+  const { clusterPipe, farPipe, splatPipe, shadowPipe, cutPipe } = pipes;
+  // Seen from under the water, a vessel is its far body at the shadow map's step (the cut's shadow list).
   const submergedCapture = resolvedWaterOptics?.capture
     ? await resolvedWaterOptics.capture({
         source: tradeVesselsSubmergedSource(),
-        vertex: { entryPoint: 'tvVS', buffers: INTACT_VERTEX_BUFFERS },
+        vertex: { entryPoint: 'tvFarSubmergedVS', buffers: SHIP_CONTINUUM_ENTRY_LAYOUT },
         entry: 'tvSubmergedFS',
         world: 'in.world',
-        groups: 2,
+        groups: 3,
         land: false,
       }).catch((err) => {
         console.warn('[trade-vessels submerged]', err);
@@ -6369,13 +5537,8 @@ export async function createTradeVessels({
       })
     : null;
   if (destroyed) {
-    for (const g of archGPUs) { g.vertexBuffer.destroy(); g.indexBuffer.destroy(); }
-    for (const b of instanceBuffers) b.destroy();
-    for (const b of [
-      selectUniformBuffer, stepMetaBuffer, contBaseIndicesBuffer, contStatesBuffer,
-      contVertColsBuffer, srcInstancesBuffer, nearOutBuffer, contListBuffer, splatListBuffer, indirectBuffer,
-      waveParamsBuffer, vesselWaveInputBuffer, vesselHydroStateBuffer, swUniformFallbackBuffer,
-    ]) b.destroy();
+    shipData.destroy();
+    for (const b of [srcInstancesBuffer, waveParamsBuffer, vesselWaveInputBuffer, vesselHydroStateBuffer, swUniformFallbackBuffer]) b.destroy();
     seaDispFallbackTex.destroy();
     swFallbackTex.destroy();
     oakFallback.tex.destroy();
@@ -6389,80 +5552,18 @@ export async function createTradeVessels({
       entries: needed.map((b) => ({ binding: b, resource: byBinding.get(b) })),
     });
   };
-
-  const wavePipe = continuumPipes?.wavePipe ?? null;
-  const clearPipe = continuumPipes?.clearPipe ?? null;
-  const selectPipe = continuumPipes?.selectPipe ?? null;
-  const continuumSolidPipe = continuumPipes?.continuumSolidPipe ?? null;
-  const continuumPipe = continuumPipes?.continuumPipe ?? null;
-  const splatPipe = continuumPipes?.splatPipe ?? null;
-
-  const makeSelectBindGroup = (curResources = resources) => {
-    if (!selectPipe) return null;
+  // The scene's bindings the cut reads: its frame, its near-domain shift and its shadow frame.
+  const cutSceneOf = (curResources) => {
     const byBinding = new Map(curResources.map(([b, r]) => [b, r]));
-    return device.createBindGroup({
-      layout: selectPipe.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: byBinding.get(0) },
-        { binding: 1, resource: byBinding.get(12) },
-        { binding: 2, resource: { buffer: selectUniformBuffer } },
-        { binding: 3, resource: { buffer: srcInstancesBuffer } },
-        { binding: 4, resource: { buffer: stepMetaBuffer } },
-        { binding: 5, resource: { buffer: nearOutBuffer } },
-        { binding: 6, resource: { buffer: contListBuffer } },
-        { binding: 7, resource: { buffer: splatListBuffer } },
-        { binding: 8, resource: { buffer: indirectBuffer } },
-        { binding: 9, resource: byBinding.get(19) },
-      ],
-    });
+    return { frame: byBinding.get(0), offset: byBinding.get(12), shadowFrame: byBinding.get(19) };
   };
-
-  const clearBindGroup = clearPipe
-    ? device.createBindGroup({
-        layout: clearPipe.getBindGroupLayout(0),
-        entries: [{ binding: 8, resource: { buffer: indirectBuffer } }],
-      })
-    : null;
-  let selectBindGroup = makeSelectBindGroup(resources);
-  let contSolidGroup0 = continuumSolidPipe ? pickEntries(continuumSolidPipe, [0, 1, 2, 3, 4, 12]) : null;
-  const contSolidGroup1 = continuumSolidPipe
-    ? device.createBindGroup({
-        layout: continuumSolidPipe.getBindGroupLayout(1),
-        entries: [
-          { binding: 0, resource: { buffer: selectUniformBuffer } },
-          { binding: 1, resource: { buffer: srcInstancesBuffer } },
-          { binding: 2, resource: { buffer: contListBuffer } },
-          { binding: 3, resource: { buffer: contBaseIndicesBuffer } },
-          { binding: 4, resource: { buffer: contStatesBuffer } },
-          { binding: 5, resource: { buffer: contVertColsBuffer } },
-        ],
-      })
-    : null;
-  let contGroup0 = continuumPipe ? pickEntries(continuumPipe, [0, 1, 2, 3, 4, 12]) : null;
-  const contGroup1 = continuumPipe
-    ? device.createBindGroup({
-        layout: continuumPipe.getBindGroupLayout(1),
-        entries: [
-          { binding: 0, resource: { buffer: selectUniformBuffer } },
-          { binding: 1, resource: { buffer: srcInstancesBuffer } },
-          { binding: 2, resource: { buffer: contListBuffer } },
-          { binding: 3, resource: { buffer: contBaseIndicesBuffer } },
-          { binding: 4, resource: { buffer: contStatesBuffer } },
-          { binding: 5, resource: { buffer: contVertColsBuffer } },
-        ],
-      })
-    : null;
-  let splatGroup0 = splatPipe ? pickEntries(splatPipe, [0, 1, 2, 3, 4]) : null;
-  const splatGroup1 = splatPipe
-    ? device.createBindGroup({
-        layout: splatPipe.getBindGroupLayout(1),
-        entries: [{ binding: 0, resource: { buffer: splatListBuffer } }],
-      })
-    : null;
-
-  let bindGroup = pickEntries(pipe, [0, 1, 2, 3, 4, 12, 19, 20, 21]);
-  let solidBindGroup = nearSolidPipe ? pickEntries(nearSolidPipe, [0, 1, 2, 3, 4, 12, 19, 20, 21]) : bindGroup;
-  let shadowBindGroup = pickEntries(shadowPipe, [0, 12, 19]);
+  // One cut a frame enters every vessel in the lists the draws below read (js/wgsl/ship-continuum.js).
+  const shipCut = createShipContinuumCut({
+    device, pipeline: cutPipe, data: shipData, instances: srcInstancesBuffer, capacity: MAX_TRADE_VESSELS,
+    ...cutSceneOf(resources), samples, label: 'trade vessel continuum',
+  });
+  const SEEN_BINDINGS = [0, 1, 2, 3, 4, 12, 19, 20, 21];
+  const SHADOW_BINDINGS = [0, 12, 19];
   const neuralPbr = sharedNeuralPbrBank(device, { autoLoad: typeof location !== 'undefined' });
   const makeGroup1 = (targetPipe, extraEntries = []) => device.createBindGroup({
     layout: targetPipe.getBindGroupLayout(1),
@@ -6473,10 +5574,20 @@ export async function createTradeVessels({
       ...extraEntries,
     ],
   });
-  let intactGroup1 = makeGroup1(pipe);
-  let solidGroup1 = nearSolidPipe ? makeGroup1(nearSolidPipe) : intactGroup1;
-  let submergedGroup0 = submergedCapture?.pipeline ? pickEntries(submergedCapture.pipeline, [0, 1, 2, 3, 4, 12, 19, 20, 21]) : null;
-  let submergedGroup1 = submergedCapture?.pipeline ? makeGroup1(submergedCapture.pipeline) : null;
+  const emptyGroup = (targetPipe, index) => device.createBindGroup({ layout: targetPipe.getBindGroupLayout(index), entries: [] });
+  // Each draw's groups: the scene's (0), the ship's materials (1; only the clusters shade with them) and the
+  // continuum's bodies, instances and lists (2).
+  const makeDrawGroups = () => ({
+    clusters: [pickEntries(clusterPipe, SEEN_BINDINGS), makeGroup1(clusterPipe), shipCut.dataGroup(clusterPipe, 2)],
+    far: [pickEntries(farPipe, SEEN_BINDINGS), emptyGroup(farPipe, 1), shipCut.dataGroup(farPipe, 2)],
+    splat: [pickEntries(splatPipe, SEEN_BINDINGS), emptyGroup(splatPipe, 1), shipCut.dataGroup(splatPipe, 2)],
+    shadow: [pickEntries(shadowPipe, SHADOW_BINDINGS), emptyGroup(shadowPipe, 1), shipCut.dataGroup(shadowPipe, 2)],
+    submerged: submergedCapture?.pipeline
+      ? [pickEntries(submergedCapture.pipeline, SEEN_BINDINGS), emptyGroup(submergedCapture.pipeline, 1), shipCut.dataGroup(submergedCapture.pipeline, 2)]
+      : null,
+  });
+  let drawGroups = makeDrawGroups();
+  const setGroups = (pass, groups) => groups.forEach((group, index) => pass.setBindGroup(index, group));
 
   // ==========================================================================
   // Deck hands: the stations and looks the placing pass reads, and the counts it keeps
@@ -6956,6 +6067,8 @@ export async function createTradeVessels({
   // Lazy compilation for damaged-boat pipelines (render, depth prepass, shadow, compute restToPosed) triggered on first cannon hit / grounding breach.
   let damagedAssetPromise = null;
   let damagedAssets = null;
+  // The vessel drawn in each damaged list of the cut, or null.
+  const damagedSlots = new Array(SHIP_CONTINUUM_DAMAGED_SLOTS).fill(null);
   const ensureDamagedAssets = () => {
     if (damagedAssetPromise) return damagedAssetPromise;
     damagedAssetPromise = getPipelineEntry(device, `damaged:${format}:${samples}:${shadowFormat}:${Boolean(computePipe)}`, async () => {
@@ -6965,7 +6078,7 @@ export async function createTradeVessels({
         device.createRenderPipelineAsync({
           label: 'trade vessels damaged surviving',
           layout: 'auto',
-          vertex: { module: dmgModule, entryPoint: 'tvVS', buffers: DAMAGED_VERTEX_BUFFERS },
+          vertex: { module: dmgModule, entryPoint: 'tvDamagedVS', buffers: SHIP_CONTINUUM_ENTRY_LAYOUT },
           fragment: { module: dmgModule, entryPoint: 'surviving', targets: [{ format, writeMask: 0 }] },
           primitive: { topology: 'triangle-list', cullMode: 'none' },
           depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
@@ -6974,7 +6087,7 @@ export async function createTradeVessels({
         device.createRenderPipelineAsync({
           label: 'trade vessels damaged shade',
           layout: 'auto',
-          vertex: { module: dmgModule, entryPoint: 'tvVS', buffers: DAMAGED_VERTEX_BUFFERS },
+          vertex: { module: dmgModule, entryPoint: 'tvDamagedVS', buffers: SHIP_CONTINUUM_ENTRY_LAYOUT },
           fragment: { module: dmgModule, entryPoint: 'tvFS', targets: [{ format }] },
           primitive: { topology: 'triangle-list', cullMode: 'none' },
           depthStencil: { format: 'depth32float', depthWriteEnabled: false, depthCompare: 'equal' },
@@ -6983,7 +6096,7 @@ export async function createTradeVessels({
         device.createRenderPipelineAsync({
           label: 'trade vessels damaged shadow',
           layout: 'auto',
-          vertex: { module: dmgModule, entryPoint: 'tvShadowVS', buffers: DAMAGED_VERTEX_BUFFERS },
+          vertex: { module: dmgModule, entryPoint: 'tvDamagedShadowVS', buffers: SHIP_CONTINUUM_ENTRY_LAYOUT },
           primitive: { topology: 'triangle-list', cullMode: 'none' },
           depthStencil: { format: shadowFormat, depthWriteEnabled: true, depthCompare: 'less', depthBias: 2, depthBiasSlopeScale: 1.5 },
         }),
@@ -7001,7 +6114,7 @@ export async function createTradeVessels({
       if (destroyed) return null;
       damagedAssets = assets;
       for (const v of vessels) {
-        if (v.damaged && !v.damaged.group0Surviving) {
+        if (v.damaged && !v.damaged.surviving) {
           rebindDamagedVessel(v);
         }
       }
@@ -7013,40 +6126,35 @@ export async function createTradeVessels({
     return damagedAssetPromise;
   };
 
+  // A damaged vessel's groups: its clusters read its own posed vertices (shards in flight, canvas brailed) and its own
+  // scarred copy of the assembly, beside the continuum's data.
   function rebindDamagedVessel(v) {
-    if (!damagedAssets || !v.damaged) return;
-    v.damaged.group0Surviving = pickEntries(damagedAssets.survivingPipe, [0, 12]);
-    v.damaged.group0Shade = pickEntries(damagedAssets.shadePipe, [0, 1, 2, 3, 4, 12, 19, 20, 21]);
-    v.damaged.group0Shadow = pickEntries(damagedAssets.dmgShadowPipe, [0, 12, 19]);
-    v.damaged.group1Surviving = device.createBindGroup({
-      layout: damagedAssets.survivingPipe.getBindGroupLayout(1),
-      entries: [{ binding: 2, resource: { buffer: v.damaged.hullUniform } }],
-    });
-    v.damaged.group1Shade = makeGroup1(damagedAssets.shadePipe, [
-      { binding: 2, resource: { buffer: v.damaged.hullUniform } },
-    ]);
+    const d = v.damaged;
+    if (!damagedAssets || !d) return;
+    const own = [{ binding: 7, resource: { buffer: d.posedBuffer } }, { binding: 8, resource: { buffer: d.sourceBuffer } }];
+    const hull = { binding: 2, resource: { buffer: d.hullUniform } };
+    const { survivingPipe, shadePipe, dmgShadowPipe } = damagedAssets;
+    d.surviving = [pickEntries(survivingPipe, [0, 12]), device.createBindGroup({ layout: survivingPipe.getBindGroupLayout(1), entries: [hull] }), shipCut.dataGroup(survivingPipe, 2, own)];
+    d.shade = [pickEntries(shadePipe, SEEN_BINDINGS), makeGroup1(shadePipe, [hull]), shipCut.dataGroup(shadePipe, 2, own)];
+    d.shadow = [pickEntries(dmgShadowPipe, SHADOW_BINDINGS), emptyGroup(dmgShadowPipe, 1), shipCut.dataGroup(dmgShadowPipe, 2, own)];
   }
 
   function promoteDamagedBoat(v) {
     if (v.damaged || v.promoting || destroyed) return;
     v.promoting = true;
-    const { arch } = v;
-    const meshCopy = arch.vertices.slice();
+    // Its own copy of the assembly its body was baked with (the clusters name those vertices), to take its scars.
+    const drawn = shipData.assemblies[v.archIndex];
+    const meshCopy = drawn.vertices.slice();
     const sourceBuffer = device.createBuffer({
       label: `trade vessel damaged src ${v.route.id}`,
       size: meshCopy.byteLength,
-      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
     device.queue.writeBuffer(sourceBuffer, 0, meshCopy);
     const posedBuffer = device.createBuffer({
       label: `trade vessel damaged posed ${v.route.id}`,
-      size: arch.vertexCount * 32,
-      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    });
-    const instBuffer = device.createBuffer({
-      label: `trade vessel damaged inst ${v.route.id}`,
-      size: TRADE_VESSEL_INSTANCE_FLOATS * 4,
-      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+      size: drawn.vertexCount * 32,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
     const hullUniform = device.createBuffer({
       label: `trade vessel hull damage ${v.route.id}`,
@@ -7065,8 +6173,6 @@ export async function createTradeVessels({
       meshCopy,
       sourceBuffer,
       posedBuffer,
-      instBuffer,
-      instData: new Float32Array(TRADE_VESSEL_INSTANCE_FLOATS),
       hullUniform,
       hullData,
       craterData,
@@ -7075,11 +6181,11 @@ export async function createTradeVessels({
       poseData: new Float32Array(4),
       poseBindGroup: null,
       fractureGPU: null,
-      group0Surviving: null,
-      group0Shade: null,
-      group0Shadow: null,
-      group1Surviving: null,
-      group1Shade: null,
+      // Its list in the cut (js/wgsl/ship-continuum.js), held while it is drawn damaged; and its draws' groups.
+      slot: -1,
+      surviving: null,
+      shade: null,
+      shadow: null,
       needsRestCopy: true,
     };
     v.damaged = dmgState;
@@ -7092,7 +6198,7 @@ export async function createTradeVessels({
 
     Promise.all([
       ensureDamagedAssets(),
-      createShipFractureGPU({ device, computePipe: fractureCompute, posedBuffer, fracture: arch.fracture }),
+      createShipFractureGPU({ device, computePipe: fractureCompute, posedBuffer, fracture: drawnFractureOf(v.archIndex) }),
     ]).then(([assets, fractureGPU]) => {
       if (destroyed || !assets || !fractureGPU) return;
       dmgState.fractureGPU = fractureGPU;
@@ -7111,14 +6217,18 @@ export async function createTradeVessels({
     });
   }
   const ensureDamagedSlot = promoteDamagedBoat;
+  // An archetype's fracture as its body's vertices fly: its shards, with each baked vertex's.
+  const drawnFractures = new Map();
+  const drawnFractureOf = (archIndex) => {
+    if (!drawnFractures.has(archIndex)) drawnFractures.set(archIndex, Object.freeze({ ...archs[archIndex].fracture, vertexShards: shipData.assemblies[archIndex].vertexShards }));
+    return drawnFractures.get(archIndex);
+  };
 
   if (oceanBridge?.oakTex) {
     Promise.resolve(oceanBridge.oakTex).then((tex) => {
       if (!tex || destroyed) return;
       oakView = tex.createView();
-      intactGroup1 = makeGroup1(pipe);
-      solidGroup1 = nearSolidPipe ? makeGroup1(nearSolidPipe) : intactGroup1;
-      if (submergedCapture?.pipeline) submergedGroup1 = makeGroup1(submergedCapture.pipeline);
+      drawGroups = makeDrawGroups();
       for (const v of vessels) {
         if (v.damaged && damagedAssets) rebindDamagedVessel(v);
       }
@@ -7131,14 +6241,10 @@ export async function createTradeVessels({
   let worldOffsetX = 0, worldOffsetZ = 0;
   let lastUploadTime = -Infinity;
   let totalIntact = 0;
-  let gpuSelectionEncoded = false;
-  // Triangles drawn this frame at sizes the CPU holds, for the continuum census (cpuTriangles).
-  let damagedTriangles = 0, fallbackTriangles = 0;
+  // Once the wave pass has posed the vessels on the GPU, the CPU stops sampling the swell for those it leaves to it.
   let hasEncodedGpuOnce = false;
   let dirtySyncFlag = false;
   let lastEnv = { windVec: [8, 0], storm: false, avoidVessels: null };
-  const counts = new Uint32Array(TRADE_VESSEL_ARCHETYPES);
-  const scratch = Array.from({ length: TRADE_VESSEL_ARCHETYPES }, () => new Float32Array(MAX_TRADE_VESSELS * TRADE_VESSEL_INSTANCE_FLOATS));
   const allIntactScratch = new Float32Array(MAX_TRADE_VESSELS * TRADE_VESSEL_INSTANCE_FLOATS);
   const wakeCandPool = Array.from({ length: MAX_TRADE_VESSELS }, () => ({
     dSq: 0,
@@ -7255,9 +6361,9 @@ export async function createTradeVessels({
   function destroyVesselDamaged(v) {
     const d = v.damaged;
     if (!d) return;
+    if (d.slot >= 0 && damagedSlots[d.slot] === v) damagedSlots[d.slot] = null;
     d.sourceBuffer?.destroy?.();
     d.posedBuffer?.destroy?.();
-    d.instBuffer?.destroy?.();
     d.hullUniform?.destroy?.();
     d.poseUniform?.destroy?.();
     d.fractureGPU?.destroy?.();
@@ -7266,7 +6372,7 @@ export async function createTradeVessels({
 
   function makeTradeVesselRecord(route) {
     const aIdx = Math.max(0, Math.min(TRADE_VESSEL_ARCHETYPES - 1, route.archetype | 0));
-    const arch = archGPUs[aIdx].arch;
+    const arch = archs[aIdx];
     const scaleMul = route.scale || 1;
     const length = arch.length * scaleMul;
     const beam = arch.beam * scaleMul;
@@ -7417,7 +6523,7 @@ export async function createTradeVessels({
         if (!isVesselDamaged(prev)) {
           if (prev.archIndex !== aIdx && route.phase !== 'dock' && (prev.archIndex === 1 || prev.archIndex === 3)) {
             const upIdx = prev.archIndex === 1 ? 0 : 2;
-            const nextArch = archGPUs[upIdx].arch;
+            const nextArch = archs[upIdx];
             prev.archIndex = upIdx;
             prev.arch = nextArch;
             prev.boat.archetype = upIdx;
@@ -7513,18 +6619,14 @@ export async function createTradeVessels({
 
   function updateAllVessels(dt, elapsedSec, terrain = null, forceUpload = false, env = lastEnv) {
     if (!vessels.length) {
-      counts.fill(0);
       totalIntact = 0;
       activeCrewVessels = 0;
       activeWaveVesselCount = 0;
-      selectParamsCtrl[0] = 0;
-      device.queue.writeBuffer(selectUniformBuffer, 0, selectParamsCtrl);
       activeDeckSoulCount = 0;
       deckConfigU32[0] = 0;
       device.queue.writeBuffer(crewConfigBuffer, 0, deckConfigU32, 0, 4);
       waveParamsU32[0] = 0;
       device.queue.writeBuffer(waveParamsBuffer, 0, waveParamsU32, 0, 4);
-      gpuSelectionEncoded = false;
       crewEncoded = false;
       return;
     }
@@ -7623,7 +6725,6 @@ export async function createTradeVessels({
     }
     for (const u of vessels) peerTargets.push(u.boat);
 
-    counts.fill(0);
     totalIntact = 0;
     const windVec = env?.windVec ?? [8, 0];
     const stormFlag = Boolean(env?.storm);
@@ -8140,35 +7241,27 @@ export async function createTradeVessels({
         d.poseData[3] = furl;
         device.queue.writeBuffer(d.poseUniform, 0, d.poseData);
 
-        const inst = d.instData;
-        inst[0] = ai.x; inst[1] = effY; inst[2] = ai.z; inst[3] = ai.yaw;
-        inst[4] = effPitch; inst[5] = effRoll; inst[6] = v.scaleMul; inst[7] = v.archIndex;
-        inst[8] = phaseAnim; inst[9] = motion; inst[10] = floodSinkage; inst[11] = furl;
-        device.queue.writeBuffer(d.instBuffer, 0, inst);
         d.ready = true;
-        continue;
       }
 
-      // Intact (or still compiling damaged pipeline) instance batch: upload flat GPU select source; skip legacy CPU per-archetype packing once GPU selection is active
-      // Note: `instAnim.z` (`offI + 10`) is MSAA crossfade `stateVal` in intact `tvVS` (NEVER `floodSinkage`!).
-      const a = v.archIndex;
-      const idx = counts[a];
-      if (idx < MAX_TRADE_VESSELS) {
-        counts[a] = idx + 1;
-        if (!hasEncodedGpuOnce) {
-          const dst = scratch[a];
-          const offI = idx * TRADE_VESSEL_INSTANCE_FLOATS;
-          dst[offI] = ai.x; dst[offI + 1] = effY; dst[offI + 2] = ai.z; dst[offI + 3] = ai.yaw;
-          dst[offI + 4] = effPitch; dst[offI + 5] = effRoll; dst[offI + 6] = v.scaleMul; dst[offI + 7] = a;
-          dst[offI + 8] = phaseAnim; dst[offI + 9] = motion; dst[offI + 10] = 0.0; dst[offI + 11] = furl;
-        }
+      // Every vessel is one instance record the cut reads. One drawn damaged has a list of its own in the cut while one
+      // is free (its clusters then read its own posed and scarred vertices); its pose is its own, never the wave pass's.
+      // A vessel hit, flooding or aground is cut finer.
+      const wreck = v.damaged;
+      if (wreck?.ready && wreck.shade && wreck.slot < 0) {
+        const free = damagedSlots.indexOf(null);
+        if (free >= 0) { wreck.slot = free; damagedSlots[free] = v; }
       }
+      const drawnDamaged = Boolean(wreck?.ready && wreck.shade && wreck.slot >= 0);
+      const important = (dmg.hits ?? 0) > 0 || floodSinkage > 0 || Boolean(v.boat.aground);
+      v.identity ??= deckCrewStringHash(v.route.id) & 32767;
       if (totalIntact < MAX_TRADE_VESSELS) {
-        v.intactSlot = totalIntact >>> 0;
+        if (!wreck?.ready) v.intactSlot = totalIntact >>> 0;
         const flatOff = totalIntact * TRADE_VESSEL_INSTANCE_FLOATS;
         allIntactScratch[flatOff] = ai.x; allIntactScratch[flatOff + 1] = effY; allIntactScratch[flatOff + 2] = ai.z; allIntactScratch[flatOff + 3] = ai.yaw;
-        allIntactScratch[flatOff + 4] = effPitch; allIntactScratch[flatOff + 5] = effRoll; allIntactScratch[flatOff + 6] = v.scaleMul; allIntactScratch[flatOff + 7] = a;
-        allIntactScratch[flatOff + 8] = phaseAnim; allIntactScratch[flatOff + 9] = motion; allIntactScratch[flatOff + 10] = 0.0; allIntactScratch[flatOff + 11] = furl;
+        allIntactScratch[flatOff + 4] = effPitch; allIntactScratch[flatOff + 5] = effRoll; allIntactScratch[flatOff + 6] = v.scaleMul; allIntactScratch[flatOff + 7] = v.archIndex;
+        allIntactScratch[flatOff + 8] = phaseAnim; allIntactScratch[flatOff + 9] = motion; allIntactScratch[flatOff + 11] = furl;
+        allIntactScratch[flatOff + 10] = shipContinuumOrders({ important, damagedSlot: drawnDamaged ? wreck.slot : -1, identity: v.identity });
         totalIntact++;
       }
     }
@@ -8233,12 +7326,6 @@ export async function createTradeVessels({
 
     if (forceUpload || Math.abs(elapsedSec - lastUploadTime) >= 1 / 65) {
       lastUploadTime = elapsedSec;
-      selectParamsCtrl[0] = totalIntact;
-      selectParamsCtrl[1] = MAX_CONT_TRIS;
-      selectParamsCtrl[2] = samples;
-      selectParamsCtrl[3] = MAX_TRADE_VESSELS;
-      writeSelectParams();
-      device.queue.writeBuffer(selectUniformBuffer, 0, selectParamsBuf, 0, 32);
       waveParamsU32[0] = activeWaveVesselCount;
       waveParamsU32[1] = MAX_TRADE_VESSELS;
       waveParamsU32[2] = oceanBridge?.dispView ? 1 : 0;
@@ -8257,15 +7344,7 @@ export async function createTradeVessels({
       if (crewSlotCursor > 0) {
         device.queue.writeBuffer(crewSrcInstancesBuffer, 0, crewSrcInstancesScratch, 0, crewSlotCursor * TRADE_VESSEL_INSTANCE_FLOATS);
       }
-      gpuSelectionEncoded = false;
       crewEncoded = false;
-      if (!hasEncodedGpuOnce) {
-        for (let a = 0; a < TRADE_VESSEL_ARCHETYPES; a++) {
-          if (counts[a] > 0) {
-            device.queue.writeBuffer(instanceBuffers[a], 0, scratch[a], 0, counts[a] * TRADE_VESSEL_INSTANCE_FLOATS);
-          }
-        }
-      }
     }
   }
 
@@ -8585,17 +7664,9 @@ export async function createTradeVessels({
     },
     rebind(nextResources) {
       resources = nextResources;
-      bindGroup = pickEntries(pipe, [0, 1, 2, 3, 4, 12, 19, 20, 21]);
-      solidBindGroup = nearSolidPipe ? pickEntries(nearSolidPipe, [0, 1, 2, 3, 4, 12, 19, 20, 21]) : bindGroup;
-      shadowBindGroup = pickEntries(shadowPipe, [0, 12, 19]);
+      shipCut.rebind(cutSceneOf(resources));
+      drawGroups = makeDrawGroups();
       waveBindGroups = makeWaveBindGroups(resources);
-      if (submergedCapture?.pipeline) {
-        submergedGroup0 = pickEntries(submergedCapture.pipeline, [0, 1, 2, 3, 4, 12, 19, 20, 21]);
-      }
-      if (selectPipe) selectBindGroup = makeSelectBindGroup(resources);
-      if (continuumSolidPipe) contSolidGroup0 = pickEntries(continuumSolidPipe, [0, 1, 2, 3, 4, 12]);
-      if (continuumPipe) contGroup0 = pickEntries(continuumPipe, [0, 1, 2, 3, 4, 12]);
-      if (splatPipe) splatGroup0 = pickEntries(splatPipe, [0, 1, 2, 3, 4]);
       rebuildDeckCrewPlaceGroup(resources);
       for (const v of vessels) {
         if (v.damaged && damagedAssets) rebindDamagedVessel(v);
@@ -8612,20 +7683,11 @@ export async function createTradeVessels({
           for (let vi = 0; vi < vessels.length; vi++) {
             vessels[vi].hydroInitialized = true;
           }
+          hasEncodedGpuOnce = true;
         }
       }
-      if (clearPipe && clearBindGroup) {
-        pass.setPipeline(clearPipe);
-        pass.setBindGroup(0, clearBindGroup);
-        pass.dispatchWorkgroups(1);
-        if (selectPipe && selectBindGroup && totalIntact > 0) {
-          pass.setPipeline(selectPipe);
-          pass.setBindGroup(0, selectBindGroup);
-          pass.dispatchWorkgroups(Math.ceil(totalIntact / 64));
-        }
-        gpuSelectionEncoded = Boolean(selectPipe && continuumPipe && splatPipe);
-        if (gpuSelectionEncoded) hasEncodedGpuOnce = true;
-      }
+      // Every vessel cut from the instances the wave pass just posed: each into the lists its draws read.
+      shipCut.encode(pass, totalIntact);
       // Deck hands: their counts emptied, everyone in sight placed from the vessels the wave pass just posed, each body's
       // people posed, then each body's cut, as many workgroups as the placing pass kept.
       if (deckCompany?.placeGroup && activeDeckSoulCount > 0) {
@@ -8649,125 +7711,50 @@ export async function createTradeVessels({
         d.needsRestCopy = false;
         pass.setPipeline(damagedAssets.restPosePipe);
         pass.setBindGroup(0, d.poseBindGroup);
-        pass.dispatchWorkgroups(Math.ceil(v.arch.vertexCount / 64));
+        pass.dispatchWorkgroups(Math.ceil(shipData.assemblies[v.archIndex].vertexCount / 64));
         d.fractureGPU.encode(pass);
       }
     },
+    // Seen from under the water: every vessel's far body at the shadow map's step.
     drawSubmerged(pass, above = false) {
-      if (!submergedCapture || !submergedGroup0 || !submergedGroup1 || !vessels.length) return;
+      if (!submergedCapture || !drawGroups.submerged || !totalIntact) return;
       submergedCapture.bind(pass, above);
-      pass.setBindGroup(0, submergedGroup0);
-      pass.setBindGroup(1, submergedGroup1);
-      if (gpuSelectionEncoded && typeof pass.drawIndexedIndirect === 'function') {
-        for (let a = 0; a < TRADE_VESSEL_ARCHETYPES; a++) {
-          if (above && !counts[a]) continue;
-          const { vertexBuffer, indexBuffer } = archGPUs[a];
-          pass.setVertexBuffer(0, vertexBuffer);
-          pass.setVertexBuffer(1, nearOutBuffer, a * NEAR_SLICE_BYTES, NEAR_SLICE_BYTES);
-          pass.setIndexBuffer(indexBuffer, 'uint32');
-          pass.drawIndexedIndirect(indirectBuffer, a * 20);
-        }
-      } else {
-        for (let a = 0; a < TRADE_VESSEL_ARCHETYPES; a++) {
-          if (!counts[a]) continue;
-          const { arch, vertexBuffer, indexBuffer } = archGPUs[a];
-          pass.setVertexBuffer(0, vertexBuffer);
-          pass.setVertexBuffer(1, instanceBuffers[a]);
-          pass.setIndexBuffer(indexBuffer, 'uint32');
-          pass.drawIndexed(arch.indexCount, counts[a]);
-        }
-      }
+      setGroups(pass, drawGroups.submerged);
+      shipCut.draw(pass, SHIP_CONTINUUM_SHADOW_LIST);
     },
     draw(pass, elapsedSec = NaN) {
       const t = Number.isFinite(elapsedSec) ? elapsedSec : (hasSimClock ? simElapsedSec : performance.now() * 0.001);
       if (!hasSimClock || Number.isFinite(elapsedSec)) {
         updateAllVessels(0, t, null, false, lastEnv);
       }
-      // Both counts start over each frame here; drawDamaged follows draw in the same frame.
-      fallbackTriangles = 0; damagedTriangles = 0;
-      if (!pipe || !bindGroup) return;
-      const canIndirect = typeof pass.drawIndexedIndirect === 'function' && typeof pass.drawIndirect === 'function';
-      if (gpuSelectionEncoded && continuumPipe && splatPipe && canIndirect) {
-        if (totalIntact > 0) {
-          // 1. 100% opaque near hulls (spanPx >= 38) -> TBDR hardware Early-Z / HSR solid pipeline (no sample_mask)
-          const useSolidPipe = nearSolidPipe ?? pipe;
-          pass.setPipeline(useSolidPipe);
-          pass.setBindGroup(0, nearSolidPipe ? solidBindGroup : bindGroup);
-          pass.setBindGroup(1, nearSolidPipe ? solidGroup1 : intactGroup1);
-          for (let a = 0; a < TRADE_VESSEL_ARCHETYPES; a++) {
-            if (!counts[a]) continue;
-            const { vertexBuffer, indexBuffer } = archGPUs[a];
-            pass.setVertexBuffer(0, vertexBuffer);
-            pass.setVertexBuffer(1, nearOutBuffer, (14 + a) * NEAR_SLICE_BYTES, NEAR_SLICE_BYTES);
-            pass.setIndexBuffer(indexBuffer, 'uint32');
-            pass.drawIndexedIndirect(indirectBuffer, (14 + a) * 20);
-          }
-          // 2. 100% opaque continuum hulls (spanPx <= 27) -> TBDR hardware Early-Z / HSR solid pipeline
-          if (continuumSolidPipe && contSolidGroup0 && contSolidGroup1) {
-            pass.setPipeline(continuumSolidPipe);
-            pass.setBindGroup(0, contSolidGroup0);
-            pass.setBindGroup(1, contSolidGroup1);
-            pass.drawIndirect(indirectBuffer, 560);
-          }
-          // 3. MSAA sample_mask crossfade band (27 < spanPx < 38): near crossfade + continuum crossfade
-          pass.setPipeline(pipe);
-          pass.setBindGroup(0, bindGroup);
-          pass.setBindGroup(1, intactGroup1);
-          for (let a = 0; a < TRADE_VESSEL_ARCHETYPES; a++) {
-            if (!counts[a]) continue;
-            const { vertexBuffer, indexBuffer } = archGPUs[a];
-            pass.setVertexBuffer(0, vertexBuffer);
-            pass.setVertexBuffer(1, nearOutBuffer, (21 + a) * NEAR_SLICE_BYTES, NEAR_SLICE_BYTES);
-            pass.setIndexBuffer(indexBuffer, 'uint32');
-            pass.drawIndexedIndirect(indirectBuffer, (21 + a) * 20);
-          }
-          pass.setPipeline(continuumPipe);
-          pass.setBindGroup(0, contGroup0);
-          pass.setBindGroup(1, contGroup1);
-          pass.drawIndirect(indirectBuffer, 576);
-          // 4. Horizon silhouette splats (from the core's splat band down; sample-masked within it)
-          pass.setPipeline(splatPipe);
-          pass.setBindGroup(0, splatGroup0);
-          pass.setBindGroup(1, splatGroup1);
-          pass.drawIndirect(indirectBuffer, 592);
-        }
-      } else {
-        const useSolidPipe = nearSolidPipe ?? pipe;
-        pass.setPipeline(useSolidPipe);
-        pass.setBindGroup(0, nearSolidPipe ? solidBindGroup : bindGroup);
-        pass.setBindGroup(1, nearSolidPipe ? solidGroup1 : intactGroup1);
-        for (let a = 0; a < TRADE_VESSEL_ARCHETYPES; a++) {
-          if (!counts[a]) continue;
-          const { arch, vertexBuffer, indexBuffer } = archGPUs[a];
-          pass.setVertexBuffer(0, vertexBuffer);
-          pass.setVertexBuffer(1, instanceBuffers[a]);
-          pass.setIndexBuffer(indexBuffer, 'uint32');
-          pass.drawIndexed(arch.indexCount, counts[a]);
-          fallbackTriangles += (arch.indexCount / 3) * counts[a];
-        }
+      // Opaque, with no discard: the clusters, the far bodies and the splats, each keeping the samples that are its own
+      // across a handoff (shipContinuumMask), so every sample of a vessel is drawn once.
+      if (totalIntact > 0) {
+        pass.setPipeline(clusterPipe);
+        setGroups(pass, drawGroups.clusters);
+        shipCut.draw(pass, 0);
+        pass.setPipeline(farPipe);
+        setGroups(pass, drawGroups.far);
+        shipCut.draw(pass, 1);
+        pass.setPipeline(splatPipe);
+        setGroups(pass, drawGroups.splat);
+        shipCut.draw(pass, 2);
       }
 
       // Deck hands, opaque with the rest: no discard, so the GPU shades only what shows.
-      if (crewEncoded && deckCompany && canIndirect) {
+      if (crewEncoded && deckCompany) {
         for (const batch of deckCompany.batches) batch?.drawOpaque(pass);
         drawDeckFallback(pass, false);
       }
     },
-    // The triangles the CPU sized this frame, for the census to add to the indirect draws below: damaged ships
-    // (drawDamaged: their surviving depth, then their shade) and the pre-selection fallback.
-    get cpuTriangles() { return damagedTriangles + fallbackTriangles; },
-    // The indirect draws draw() submits in the main scene pass this frame, for the continuum census
-    // (js/continuum-census.js). Damaged ships (drawDamaged) and the pre-selection fallback are sized on the CPU.
+    // The indirect draws draw() and drawDamaged() submit in the main scene pass this frame, for the continuum census
+    // (js/continuum-census.js). Every vessel is drawn through them; none is sized on the CPU.
     continuumDraws() {
-      const draws = [];
-      if (gpuSelectionEncoded && continuumPipe && splatPipe && totalIntact > 0) {
-        draws.push(
-          { buffer: indirectBuffer, offset: 14 * 20, records: TRADE_VESSEL_ARCHETYPES, stride: 5 }, // whole ships, solid
-          { buffer: indirectBuffer, offset: 21 * 20, records: TRADE_VESSEL_ARCHETYPES, stride: 5 }, // whole ships, band
-          { buffer: indirectBuffer, offset: 140 * 4, records: 3, stride: 4 }, // continuum solid, continuum band, splats
-        );
-      }
-      return draws;
+      return shipCut.continuumDraws();
+    },
+    // The cut's lists and draws, for whoever reads them back (tests).
+    get continuum() {
+      return { list: shipCut.list, draws: shipCut.draws, lists: shipCut.lists, instances: srcInstancesBuffer, count: totalIntact, bodies: shipBodyIds };
     },
     // The deck hands' own draws, for the census's one family of people (js/main.js).
     peopleDraws() {
@@ -8780,73 +7767,40 @@ export async function createTradeVessels({
         ? { bodies: deckCompany.runs.map((run) => ({ id: run.id, continuum: Boolean(deckCompany.batches[run.index]), first: run.first, capacity: run.capacity })), counts: crewCountsBuffer }
         : null;
     },
+    // Each vessel drawn damaged: its clusters from its own list, their surviving depth laid first (holed timber, parted
+    // rope and ripped canvas cut away), then shaded where that depth is equal.
     drawDamaged(pass) {
-      if (!damagedAssets || !vessels.length) return;
-      for (const v of vessels) {
-        const d = v.damaged;
-        if (!d?.ready || !d.group0Surviving || !d.group0Shade) continue;
-        const { arch, indexBuffer } = archGPUs[v.archIndex];
-        pass.setIndexBuffer(indexBuffer, 'uint32');
-        // Depth prepass: discard holed timber, parted rope, and ripped canvas
+      if (!damagedAssets || !totalIntact) return;
+      damagedSlots.forEach((v, slot) => {
+        const d = v?.damaged;
+        if (!d?.surviving || !d.shade) return;
         pass.setPipeline(damagedAssets.survivingPipe);
-        pass.setBindGroup(0, d.group0Surviving);
-        pass.setBindGroup(1, d.group1Surviving);
-        pass.setVertexBuffer(0, d.sourceBuffer);
-        pass.setVertexBuffer(1, d.posedBuffer);
-        pass.setVertexBuffer(2, d.instBuffer);
-        pass.drawIndexed(arch.indexCount, 1);
-        // Color shading pass (depthCompare: 'equal')
+        setGroups(pass, d.surviving);
+        shipCut.draw(pass, shipCut.damagedList(slot));
         pass.setPipeline(damagedAssets.shadePipe);
-        pass.setBindGroup(0, d.group0Shade);
-        pass.setBindGroup(1, d.group1Shade);
-        pass.setVertexBuffer(0, d.sourceBuffer);
-        pass.setVertexBuffer(1, d.posedBuffer);
-        pass.setVertexBuffer(2, d.instBuffer);
-        pass.drawIndexed(arch.indexCount, 1);
-        damagedTriangles += (2 * arch.indexCount) / 3;
-      }
+        setGroups(pass, d.shade);
+        shipCut.draw(pass, shipCut.damagedList(slot));
+      });
     },
+    // Every vessel's far body at the shadow map's step casts its shadow; each damaged one, its own clusters.
     drawShadow(pass) {
-      if (shadowPipe && shadowBindGroup) {
+      if (totalIntact > 0) {
         pass.setPipeline(shadowPipe);
-        pass.setBindGroup(0, shadowBindGroup);
-        if (gpuSelectionEncoded && typeof pass.drawIndexedIndirect === 'function') {
-          for (let a = 0; a < TRADE_VESSEL_ARCHETYPES; a++) {
-            if (!counts[a]) continue;
-            const { vertexBuffer, indexBuffer } = archGPUs[a];
-            pass.setVertexBuffer(0, vertexBuffer);
-            pass.setVertexBuffer(1, nearOutBuffer, (7 + a) * NEAR_SLICE_BYTES, NEAR_SLICE_BYTES);
-            pass.setIndexBuffer(indexBuffer, 'uint32');
-            pass.drawIndexedIndirect(indirectBuffer, (7 + a) * 20);
-          }
-        } else {
-          for (let a = 0; a < TRADE_VESSEL_ARCHETYPES; a++) {
-            if (!counts[a]) continue;
-            const { arch, vertexBuffer, indexBuffer } = archGPUs[a];
-            pass.setVertexBuffer(0, vertexBuffer);
-            pass.setVertexBuffer(1, instanceBuffers[a]);
-            pass.setIndexBuffer(indexBuffer, 'uint32');
-            pass.drawIndexed(arch.indexCount, counts[a]);
-          }
-        }
+        setGroups(pass, drawGroups.shadow);
+        shipCut.draw(pass, SHIP_CONTINUUM_SHADOW_LIST);
       }
-      if (crewEncoded && deckCompany && typeof pass.drawIndexedIndirect === 'function') {
+      if (crewEncoded && deckCompany) {
         for (const batch of deckCompany.batches) batch?.drawShadow(pass);
         drawDeckFallback(pass, true);
       }
-      if (damagedAssets?.dmgShadowPipe) {
-        pass.setPipeline(damagedAssets.dmgShadowPipe);
-        for (const v of vessels) {
-          const d = v.damaged;
-          if (!d?.ready || !d.group0Shadow) continue;
-          const { arch, indexBuffer } = archGPUs[v.archIndex];
-          pass.setBindGroup(0, d.group0Shadow);
-          pass.setVertexBuffer(0, d.sourceBuffer);
-          pass.setVertexBuffer(1, d.posedBuffer);
-          pass.setVertexBuffer(2, d.instBuffer);
-          pass.setIndexBuffer(indexBuffer, 'uint32');
-          pass.drawIndexed(arch.indexCount, 1);
-        }
+      if (damagedAssets?.dmgShadowPipe && totalIntact > 0) {
+        damagedSlots.forEach((v, slot) => {
+          const d = v?.damaged;
+          if (!d?.shadow) return;
+          pass.setPipeline(damagedAssets.dmgShadowPipe);
+          setGroups(pass, d.shadow);
+          shipCut.draw(pass, shipCut.damagedList(slot));
+        });
       }
     },
     destroy() {
@@ -8857,15 +7811,10 @@ export async function createTradeVessels({
       for (const b of deckOwned) b?.destroy?.();
       deckOwned.length = 0;
       deckHull?.destroy?.();
-      for (const g of archGPUs) {
-        g.vertexBuffer?.destroy?.();
-        g.indexBuffer?.destroy?.();
-      }
-      for (const b of instanceBuffers) b?.destroy?.();
+      shipCut.destroy();
+      shipData.destroy();
       for (const b of [
-        selectUniformBuffer, stepMetaBuffer, contBaseIndicesBuffer, contStatesBuffer,
-        contVertColsBuffer, srcInstancesBuffer, nearOutBuffer, contListBuffer, splatListBuffer, indirectBuffer,
-        waveParamsBuffer, vesselWaveInputBuffer, vesselHydroStateBuffer, swUniformFallbackBuffer,
+        srcInstancesBuffer, waveParamsBuffer, vesselWaveInputBuffer, vesselHydroStateBuffer, swUniformFallbackBuffer,
         crewConfigBuffer, crewSrcInstancesBuffer, crewStationsBuffer, crewLooksBuffer,
         crewCountsBuffer, crewMoistureBuffer,
       ]) b?.destroy?.();

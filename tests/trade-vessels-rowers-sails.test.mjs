@@ -17,11 +17,10 @@ import {
   tradeVesselsSource,
   tradeVesselsSubmergedSource,
   TRADE_VESSELS_WGSL,
-  TRADE_VESSEL_CONTINUUM_WGSL,
-  TRADE_VESSEL_SPLAT_WGSL,
   TRADE_VESSEL_WAVE_WGSL,
   DECK_CREW_PLACE_WGSL,
 } from '../js/trade-vessels.js';
+import { shipContinuumCutWGSL } from '../js/wgsl/ship-continuum.js';
 
 function groupTriangleBounds(arch, group) {
   const min = [Infinity, Infinity, Infinity];
@@ -109,7 +108,7 @@ test('Archetype 4 river barge keeps only 4 active wooden thwarts, dry raised sol
     const ob = groupTriangleBounds(barge, og);
     const v0 = inds[og.firstVertex] * 9;
     const m = verts[v0 + 6];
-    const stIdx = Math.round((m - 16) * 64);
+    const stIdx = Math.round((m - 16) * 64) - 1;
     const pz = pivots[stIdx * 4 + 2];
     const side = pivots[stIdx * 4 + 3];
     const midZ = (ob.min[2] + ob.max[2]) * 0.5;
@@ -374,8 +373,7 @@ test('Zero-flicker traffic invariants: no duplicate crew.sweep, caravan turnarou
     ['tradeVessels(intact)', tradeVesselsSource(false, 4)],
     ['tradeVessels(damagedShade)', tradeVesselsSource(true, 4)],
     ['tradeVessels(submerged)', tradeVesselsSubmergedSource()],
-    ['continuum', TRADE_VESSEL_CONTINUUM_WGSL],
-    ['splat', TRADE_VESSEL_SPLAT_WGSL],
+    ['shipCut', shipContinuumCutWGSL()],
     ['waveCompute', TRADE_VESSEL_WAVE_WGSL],
     ['crewPlace', DECK_CREW_PLACE_WGSL],
   ];
@@ -460,7 +458,7 @@ test('Harbor stern z-separation, 0.000 mm collinear river-barge oars, over-gunwa
     const uniq = new Set();
     for (let t = og.firstVertex; t < og.firstVertex + og.vertexCount; t++) uniq.add(bi[t]);
     const firstV = bi[og.firstVertex] * 9;
-    const stIdx = Math.round((bv[firstV + 6] - 16) * 64);
+    const stIdx = Math.round((bv[firstV + 6] - 16) * 64) - 1;
     const pivDes = [pivots[stIdx * 4], pivots[stIdx * 4 + 1], pivots[stIdx * 4 + 2]];
     const side = pivots[stIdx * 4 + 3];
     const uDes = [side / ds[0], -0.37 / ds[1], 0];
@@ -514,15 +512,13 @@ test('Harbor stern z-separation, 0.000 mm collinear river-barge oars, over-gunwa
   assert.ok(barge.groups.some((g) => g.id === 'hull.cuddy.aft' && g.vertexCount > 0), 'aft cuddy deck seals stern bay');
   assert.ok(barge.groups.some((g) => g.id === 'hull.sole.ceiling' && g.vertexCount > 0), 'bilge ceiling seals sub-sole hold');
 
-  // 3. Verify TBDR Early-Z / HSR solid fragment entry points omit `@builtin(sample_mask)`
-  for (const [label, src, fnName] of [
-    ['nearSolidPipe', TRADE_VESSELS_WGSL, 'tvSolidFS'],
-    ['continuumSolidPipe', TRADE_VESSEL_CONTINUUM_WGSL, 'tvContSolidFS'],
-  ]) {
-    const start = src.indexOf(`@fragment fn ${fnName}`);
-    assert.ok(start >= 0, `${label} defines @fragment fn ${fnName}`);
-    const closeBrace = src.indexOf('\n}', start);
-    const snippet = src.slice(start, closeBrace > start ? closeBrace + 2 : start + 240);
-    assert.doesNotMatch(snippet, /@builtin\(sample_mask\)/, `${label} (${fnName}) omits @builtin(sample_mask) for hardware Early-Z/HSR`);
+  // 3. The clusters, the far body and the splat each keep only their own samples of a pixel across a handoff, through
+  // the shared split (shipContinuumMask), never by discard or blending.
+  for (const fnName of ['tvFS', 'tvFarFS']) {
+    const start = TRADE_VESSELS_WGSL.indexOf(`@fragment fn ${fnName}`);
+    assert.ok(start >= 0, `the vessels' program defines @fragment fn ${fnName}`);
+    const snippet = TRADE_VESSELS_WGSL.slice(start, TRADE_VESSELS_WGSL.indexOf('\n}', start) + 2);
+    assert.match(snippet, /shipContinuumMask\(in\.coverage/, `${fnName} keeps its samples through shipContinuumMask`);
+    assert.doesNotMatch(snippet, /\bdiscard\b/);
   }
 });

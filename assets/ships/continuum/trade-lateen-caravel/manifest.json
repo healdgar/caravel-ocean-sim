@@ -1,0 +1,196 @@
+{
+ "format": "waterworld.ship-continuum",
+ "version": 2,
+ "id": "trade-lateen-caravel",
+ "family": "trade",
+ "archetype": 5,
+ "label": "Lateen Caravel",
+ "source": {
+  "vertices": 97592,
+  "indices": 215463,
+  "shards": 286,
+  "key": "e7254fa9ba974e3851b8cfccc62130407c3931beb33062a70964ebfd440d5cb2",
+  "surface": {
+   "area": 389.62638618801316,
+   "centroid": [
+    0.14184350082499517,
+    1.7805429667937371,
+    0.4376441593709761
+   ],
+   "materials": {
+    "0": 34.23807390751962,
+    "1": 75.0664593620379,
+    "2": 2.1408180480282755,
+    "3": 9.785189139350079,
+    "4": 48.08735603512386,
+    "5": 8.340280551014214,
+    "6": 5.435045793911616,
+    "7": 0.9705183403163755,
+    "8": 0.09411837834275268,
+    "10": 18.124329105001017,
+    "11": 0.15680005140304587,
+    "12": 24.516242577556334,
+    "13": 56.50300709405061,
+    "14": 1.7147131470390002,
+    "15": 63.13221431237262,
+    "16": 24.71248862787767,
+    "17": 9.26399172135474,
+    "18": 1.2788677267875355,
+    "19": 5.2992462849817485,
+    "23": 0.7666259839406462
+   }
+  },
+  "designScale": [
+   1.361111,
+   1.355544,
+   1.35
+  ]
+ },
+ "clusterWords": 16,
+ "farVertexWords": 6,
+ "stepWords": 4,
+ "clusterCount": 2095,
+ "indexCount": 362160,
+ "copyCount": 1525,
+ "clusters": {
+  "triangles": 120720,
+  "levels": 6,
+  "roots": 856,
+  "groups": 156,
+  "parts": 472,
+  "rootError": 13.2686
+ },
+ "far": {
+  "vertexCount": 3994,
+  "triangleCount": 8000,
+  "stepCount": 3966,
+  "offsets": {
+   "vertices": 0,
+   "records": 23964,
+   "triangles": 27958,
+   "steps": 51958
+  },
+  "voxel": 0.0556,
+  "pieces": [
+   {
+    "kind": "rigid",
+    "close": 0.2779,
+    "grid": [
+     114,
+     314,
+     375
+    ],
+    "count": 1,
+    "dropped": 0,
+    "genus": 5,
+    "surfaceTriangles": 1117348
+   },
+   {
+    "kind": "canvas",
+    "close": 0.1668,
+    "grid": [
+     29,
+     231,
+     307
+    ],
+    "count": 1,
+    "dropped": 0,
+    "genus": 0,
+    "surfaceTriangles": 607612
+   }
+  ],
+  "baseTriangles": 8000,
+  "baseVertices": 3994,
+  "baseError": 0.1992,
+  "baseGeometric": 0.0473,
+  "steps": 3966,
+  "coreTriangles": 68,
+  "depth": 9,
+  "errorRange": [
+   0.1992,
+   29.7919
+  ],
+  "inflateMax": 0.6346,
+  "euler": -6
+ },
+ "splat": {
+  "centre": [
+   0.0059,
+   6.5544,
+   -1.3237
+  ],
+  "ry": 8.397,
+  "rxSide": 6.5105,
+  "rxEnd": 1.4383,
+  "colour": [
+   0.53504,
+   0.45926,
+   0.3604
+  ]
+ },
+ "bound": {
+  "centre": [
+   0,
+   6.5718,
+   -1.3516
+  ],
+  "radius": 12.8597
+ },
+ "poses": 3,
+ "files": {
+  "clusters.bin": {
+   "bytes": 134080,
+   "sha256": "a17879667219687a648894a04870becc09b8848d7f68d3076b94f8ba6f1b23d8",
+   "gzip": {
+    "file": "clusters.bin.gz",
+    "bytes": 53303,
+    "sha256": "8883d3df41c97c9f3f6fe1ea9a3a3d6de5d26c2ff0f6b81b38573609ceeb26df"
+   }
+  },
+  "indices.bin": {
+   "bytes": 1448640,
+   "sha256": "34742566b01fe1d1e8da3925df76bf69764e26d9ee497ffeda132f8b90c52395",
+   "gzip": {
+    "file": "indices.bin.gz",
+    "bytes": 458693,
+    "sha256": "35f221866673919d60e11a501f0d921be7e165d266561c276de33a27ede9c831"
+   }
+  },
+  "copies.bin": {
+   "bytes": 6100,
+   "sha256": "8e0dd55c5af1a719ac7b16dd83ba44032e9793d36a41c01917837e83012fdeb1",
+   "gzip": {
+    "file": "copies.bin.gz",
+    "bytes": 3029,
+    "sha256": "12bc996eefd3e1a0f9473b2acbc6647e1cbdb8deccac148d8d3eb58eb96f3949"
+   }
+  },
+  "far.bin": {
+   "bytes": 271304,
+   "sha256": "f91f218f4777167946564c16c51fbe39e9cdcf721d05ac5f58800b6b9fb7973b",
+   "gzip": {
+    "file": "far.bin.gz",
+    "bytes": 156536,
+    "sha256": "bc5c55956b539b0dddb0966c08d930bfa50a38fc21899d57299c9bf827bb8f2e"
+   }
+  },
+  "vertices.bin": {
+   "bytes": 3513312,
+   "sha256": "70e41d65f9299b6f0213c4a77cd696a24afcd08f4c74e414c3bc2f78014702ab",
+   "gzip": {
+    "file": "vertices.bin.gz",
+    "bytes": 816032,
+    "sha256": "b5e340f6228d1fe1104ee7cdb165c59e9caefe3db3fc4dfc87e143ad187c50e0"
+   }
+  },
+  "shards.bin": {
+   "bytes": 390368,
+   "sha256": "9f6a0b56009cae3efdde5e1b0e3250523d0eea7e82f50e70088169203bf29f7c",
+   "gzip": {
+    "file": "shards.bin.gz",
+    "bytes": 7418,
+    "sha256": "f99b7e696b214a416645e81d038e0bcd32ce646bf5e8d197a8c6bb6d6c79b4c1"
+   }
+  }
+ }
+}

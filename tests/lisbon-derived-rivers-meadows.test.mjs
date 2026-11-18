@@ -28,9 +28,9 @@ import {
 } from '../js/meadow-grass.js';
 import {
   TRADE_VESSELS_WGSL,
-  TRADE_VESSEL_CONTINUUM_WGSL,
   inspectTradeVesselArchetypes,
 } from '../js/trade-vessels.js';
+import { SHIP_CONTINUUM_BODIES } from '../js/ship-continuum.js';
 
 function upsampleSurvey(survey, targetN = 257) {
   const sN = Math.round(Math.sqrt(survey.length));
@@ -49,20 +49,18 @@ function upsampleSurvey(survey, targetN = 257) {
   return out;
 }
 
-test('ship continuum uses genus-0 cross-section (38->27 px) and rowed boats carry 3D pilots & oarsmen', () => {
+test('every trade vessel is a ship continuum body and rowed boats carry 3D pilots & oarsmen', () => {
   const archetypes = inspectTradeVesselArchetypes();
   assert.ok(archetypes.length >= 7);
+  // Each archetype is drawn through its own baked body; none has a stand-in of its own.
   for (const arch of archetypes) {
-    assert.ok(arch.continuum, `archetype ${arch.index} (${arch.label}) missing continuum`);
-    assert.equal(arch.continuum.genusZeroEuler, 2, `archetype ${arch.index} Euler=${arch.continuum.genusZeroEuler}`);
-    assert.ok(arch.continuum.coreTriCount >= 4 && arch.continuum.coreTriCount <= 6,
-      `archetype ${arch.index} coreTriCount=${arch.continuum.coreTriCount}`);
-    assert.ok(arch.continuum.vertCount >= 12);
+    assert.equal(SHIP_CONTINUUM_BODIES.filter((b) => b.family === 'trade' && b.archetype === arch.index).length, 1, `archetype ${arch.index} (${arch.label}) has one body`);
+    assert.equal(arch.continuum, undefined, `archetype ${arch.index} carries no far stand-in of its own`);
   }
-  // Continuum crossfade uses 38 -> 27 px MSAA sample_mask, zero discard in WGSL
-  assert.match(TRADE_VESSELS_WGSL, /38\.0|smoothstep\(/);
+  // Its handoffs split each pixel's samples (sample_mask), with no discard in the opaque program.
+  assert.match(TRADE_VESSELS_WGSL, /@builtin\(sample_mask\)/);
+  assert.match(TRADE_VESSELS_WGSL, /shipContinuumMask\(/);
   assert.doesNotMatch(TRADE_VESSELS_WGSL, /\bdiscard\b/);
-  assert.doesNotMatch(TRADE_VESSEL_CONTINUUM_WGSL, /\bdiscard\b/);
 
   // Arch 4 (river barge) & Arch 6 (harbor skiff) must carry zero peg-man hull geometry (mat 27 / >=29 banned),
   // real 3D wooden sweep/tiller (mat 28), and real 65-joint rigged human deckStations (stern pilot + oarsmen)

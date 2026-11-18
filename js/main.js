@@ -4692,7 +4692,7 @@ async function main() {
     return out;
   }
   window.oceanCaravans={get plan(){return {...caravanPlan,seen:undefined};},get travellers(){return terrain?.herds?.travellers??0;},ground:(x,z)=>terrain?.groundSample(x,z)??null,locate:locateActiveCaravans,vessels:()=>terrain?.tradeVessels?.locate?.()??[]};
-  window.oceanTradeVessels={get count(){return terrain?.tradeVessels?.count??0;},get deckCrewCount(){return terrain?.tradeVessels?.deckCrewCount??0;},get deckCrew(){return terrain?.tradeVessels?.deckCrew??null;},peopleDraws:()=>terrain?.tradeVessels?.peopleDraws?.()??[],locate:()=>terrain?.tradeVessels?.locate?.()??[],report:()=>terrain?.tradeVessels?.getMaritimeReport?.()??null};
+  window.oceanTradeVessels={get count(){return terrain?.tradeVessels?.count??0;},get deckCrewCount(){return terrain?.tradeVessels?.deckCrewCount??0;},get deckCrew(){return terrain?.tradeVessels?.deckCrew??null;},get continuum(){return terrain?.tradeVessels?.continuum??null;},peopleDraws:()=>terrain?.tradeVessels?.peopleDraws?.()??[],locate:()=>terrain?.tradeVessels?.locate?.()??[],report:()=>terrain?.tradeVessels?.getMaritimeReport?.()??null};
   // Where walker `index` of the town in sight is now, as the GPU walks them (the same clock and sun), or null.
   const folkStride={position:{x:0,y:0,z:0},walked:0,stopped:false,cycle:0,back:false};
   let folkWords=null,folkWordsOf=null;
@@ -5768,8 +5768,6 @@ async function main() {
     if(continuumCensus&&(censusEveryFrame||(frameIndex&7)===0)){
       // People are one family across every company, the garrison, the mate, the town and the decks of passing vessels.
       const people=[...vessels.flatMap(v=>v.crew?.continuumDraws?.()??[]),...(fortSoldiers?.continuumDraws?.()??[]),...(mateSoldiers?.continuumDraws?.()??[]),...(townsfolk?.continuumDraws?.()??[]),...(terrain?.tradeVessels?.peopleDraws?.()??[])];
-      // Damaged trade vessels and their pre-selection fallback are sized on the CPU, beside their indirect draws.
-      continuumCensus.report('trade vessels',terrain?.tradeVessels?.cpuTriangles??0);
       continuumCensus.encode(enc,[...(terrain?.continuumSources?.()??[]),...props.continuumSources(),...(people.length?[{name:'people',draws:people}]:[])]);
     }
     const doTs=profiler.resolve(enc);

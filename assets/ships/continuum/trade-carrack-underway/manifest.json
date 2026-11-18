@@ -1,0 +1,196 @@
+{
+ "format": "waterworld.ship-continuum",
+ "version": 2,
+ "id": "trade-carrack-underway",
+ "family": "trade",
+ "archetype": 2,
+ "label": "Underway Carrack",
+ "source": {
+  "vertices": 70561,
+  "indices": 175923,
+  "shards": 250,
+  "key": "d7ab311b0cb0e674f5857add259de12aa49f5038db118ec76d4ec3c250728c8f",
+  "surface": {
+   "area": 310.70699241948665,
+   "centroid": [
+    0.018278224149867583,
+    1.7907947812839777,
+    0.21034388388155204
+   ],
+   "materials": {
+    "0": 58.43939729692847,
+    "1": 44.46191764769753,
+    "2": 10.924904306720482,
+    "3": 4.367812777092414,
+    "4": 2.9230782346017503,
+    "6": 0.7229904081230032,
+    "7": 0.4087034914489499,
+    "9": 47.87113706208202,
+    "10": 16.442634576869953,
+    "11": 0.20360640378851158,
+    "12": 2.8769503055438412,
+    "13": 5.923383450243768,
+    "14": 2.2396696631035145,
+    "15": 80.4681607692594,
+    "16": 10.911024880910677,
+    "17": 14.744426110467389,
+    "18": 3.127038537806321,
+    "19": 3.1915338743317325,
+    "23": 0.3197071778147259,
+    "25": 0.13891544463543287
+   }
+  },
+  "designScale": [
+   2.194444,
+   2.145483,
+   1.966667
+  ]
+ },
+ "clusterWords": 16,
+ "farVertexWords": 6,
+ "stepWords": 4,
+ "clusterCount": 1879,
+ "indexCount": 318042,
+ "copyCount": 1041,
+ "clusters": {
+  "triangles": 106014,
+  "levels": 5,
+  "roots": 659,
+  "groups": 156,
+  "parts": 433,
+  "rootError": 14.196
+ },
+ "far": {
+  "vertexCount": 4010,
+  "triangleCount": 8000,
+  "stepCount": 3983,
+  "offsets": {
+   "vertices": 0,
+   "records": 24060,
+   "triangles": 28070,
+   "steps": 52070
+  },
+  "voxel": 0.0819,
+  "pieces": [
+   {
+    "kind": "rigid",
+    "close": 0.3278,
+    "grid": [
+     157,
+     281,
+     373
+    ],
+    "count": 1,
+    "dropped": 0,
+    "genus": 1,
+    "surfaceTriangles": 1145816
+   },
+   {
+    "kind": "canvas",
+    "close": 0.1639,
+    "grid": [
+     146,
+     231,
+     342
+    ],
+    "count": 5,
+    "dropped": 0,
+    "genus": 0,
+    "surfaceTriangles": 724976
+   }
+  ],
+  "baseTriangles": 8000,
+  "baseVertices": 4010,
+  "baseError": 0.3027,
+  "baseGeometric": 0.0888,
+  "steps": 3983,
+  "coreTriangles": 34,
+  "depth": 10,
+  "errorRange": [
+   0.3027,
+   15.8091
+  ],
+  "inflateMax": 0.9237,
+  "euler": 10
+ },
+ "splat": {
+  "centre": [
+   -0.0002,
+   9.1979,
+   -1.7886
+  ],
+  "ry": 11.0604,
+  "rxSide": 5.6531,
+  "rxEnd": 5.5747,
+  "colour": [
+   0.40494,
+   0.32367,
+   0.23685
+  ]
+ },
+ "bound": {
+  "centre": [
+   0,
+   9.1794,
+   -1.7895
+  ],
+  "radius": 18.2931
+ },
+ "poses": 3,
+ "files": {
+  "clusters.bin": {
+   "bytes": 120256,
+   "sha256": "453c27e344acbe0eee58480971242d7519500214649ee1e2737e03051799968d",
+   "gzip": {
+    "file": "clusters.bin.gz",
+    "bytes": 48801,
+    "sha256": "f2868eaa94fa7fd073a2a94871a489f791fcdbff2e9d0f035f48e51e98195a12"
+   }
+  },
+  "indices.bin": {
+   "bytes": 1272168,
+   "sha256": "081556beea2a7f7c03f987a065ed5f5119b2098166d6dfd2e48bd336dee4ead7",
+   "gzip": {
+    "file": "indices.bin.gz",
+    "bytes": 387032,
+    "sha256": "3cbc8cf58f60dcc2ee81c4d061f6725f52fea546950df902017a0dafd28288d5"
+   }
+  },
+  "copies.bin": {
+   "bytes": 4164,
+   "sha256": "c4af879286d83cb91f4a4a5b05b4b49713a58e10d7e406f199c67796cb96230e",
+   "gzip": {
+    "file": "copies.bin.gz",
+    "bytes": 2039,
+    "sha256": "244233d4855de30380f5af3615a88840d18fc49f3fce25b48fc265c44618e49f"
+   }
+  },
+  "far.bin": {
+   "bytes": 272024,
+   "sha256": "9b887a984eb292b26f9d36d339a97438ec7e165e9117b7b5a43bf33e843bb156",
+   "gzip": {
+    "file": "far.bin.gz",
+    "bytes": 158110,
+    "sha256": "8bf5d58c298aa0d48a2f6b34533471da72b42cc1a6730c41ef4579091abd969c"
+   }
+  },
+  "vertices.bin": {
+   "bytes": 2540196,
+   "sha256": "0a14e7776d1028268702cb48b80785b9c9f10f0a216c5a119089a153eac9b84f",
+   "gzip": {
+    "file": "vertices.bin.gz",
+    "bytes": 749418,
+    "sha256": "f1d358b4434c4960abbbe06b06c47a4174f5655b8c7b3eb850db9831290d8bdb"
+   }
+  },
+  "shards.bin": {
+   "bytes": 282244,
+   "sha256": "852bcacf545848e2bfd96f39ebd5cc5043fe801f45098bef782d4722d0cf9618",
+   "gzip": {
+    "file": "shards.bin.gz",
+    "bytes": 5411,
+    "sha256": "b535350cf2159c5a3a30fa186fbcd7f7f5181f0dc5c1d9715adbd6b8bf32056b"
+   }
+  }
+ }
+}

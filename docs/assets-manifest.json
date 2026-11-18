@@ -2014,6 +2014,251 @@
     "bytes": 6685,
     "sha256": "ba1fc0712d608468ae00d316da3cd532c68fb9430dd1fea786a2009679e411d5"
   },
+  "assets/ships/continuum/trade-cog-underway/manifest.json": {
+    "url": "assets/ships/continuum/trade-cog-underway/manifest.645b143f8bccf070.json",
+    "bytes": 4112,
+    "sha256": "645b143f8bccf070a65228863910e8cf6e1c814447f59f403c8de0b1fb715dcb"
+  },
+  "assets/ships/continuum/trade-cog-underway/clusters.bin.gz": {
+    "url": "assets/ships/continuum/trade-cog-underway/clusters.bin.e4963511847746a0.gz",
+    "bytes": 43725,
+    "sha256": "e4963511847746a031f298aa4a5cce4731364cff2261551ca207525db7c1ceb6"
+  },
+  "assets/ships/continuum/trade-cog-underway/indices.bin.gz": {
+    "url": "assets/ships/continuum/trade-cog-underway/indices.bin.66700de3f11a7e4d.gz",
+    "bytes": 334210,
+    "sha256": "66700de3f11a7e4d2df4f09a1471c248a16f47dbce7f9be5d8e65a7e3feb376a"
+  },
+  "assets/ships/continuum/trade-cog-underway/copies.bin.gz": {
+    "url": "assets/ships/continuum/trade-cog-underway/copies.bin.1c7300adbf08c6b3.gz",
+    "bytes": 2109,
+    "sha256": "1c7300adbf08c6b35dad5cbdebd978aebeacac289766e39df10cb9d0586aa753"
+  },
+  "assets/ships/continuum/trade-cog-underway/far.bin.gz": {
+    "url": "assets/ships/continuum/trade-cog-underway/far.bin.1ffcd3bf4f5610ec.gz",
+    "bytes": 156998,
+    "sha256": "1ffcd3bf4f5610eca852f44e0641dc67735fb196976050f09605e60dcdc9cb9f"
+  },
+  "assets/ships/continuum/trade-cog-underway/vertices.bin.gz": {
+    "url": "assets/ships/continuum/trade-cog-underway/vertices.bin.bd452a0f3d8da368.gz",
+    "bytes": 677855,
+    "sha256": "bd452a0f3d8da3684376c005a4b195ead4f8b334de811ce7055e05f45cdf42c4"
+  },
+  "assets/ships/continuum/trade-cog-underway/shards.bin.gz": {
+    "url": "assets/ships/continuum/trade-cog-underway/shards.bin.1f2d39b58daf966b.gz",
+    "bytes": 5180,
+    "sha256": "1f2d39b58daf966b4e9eae3c651a10591f805628764e492c6384a00f1cd2f243"
+  },
+  "assets/ships/continuum/trade-cog-anchored/manifest.json": {
+    "url": "assets/ships/continuum/trade-cog-anchored/manifest.f7a8e1f2ebae5276.json",
+    "bytes": 4052,
+    "sha256": "f7a8e1f2ebae52767a785a900bfd5c2793a63a818f0c793848fcb007099ec1db"
+  },
+  "assets/ships/continuum/trade-cog-anchored/clusters.bin.gz": {
+    "url": "assets/ships/continuum/trade-cog-anchored/clusters.bin.a5f7b7b588e246ec.gz",
+    "bytes": 39690,
+    "sha256": "a5f7b7b588e246ec816403444c61b8fc5307d652af626c7ab3027f6f5888e2bd"
+  },
+  "assets/ships/continuum/trade-cog-anchored/indices.bin.gz": {
+    "url": "assets/ships/continuum/trade-cog-anchored/indices.bin.b94feffa11aacb48.gz",
+    "bytes": 298448,
+    "sha256": "b94feffa11aacb48fae191b9a3030b02d689784028564e4cc2b9daad1b693cc5"
+  },
+  "assets/ships/continuum/trade-cog-anchored/copies.bin.gz": {
+    "url": "assets/ships/continuum/trade-cog-anchored/copies.bin.5c686ebccbe7aff3.gz",
+    "bytes": 2073,
+    "sha256": "5c686ebccbe7aff3176fc6349fef8fc5ee471835b55f58911e66b0b1e80f2333"
+  },
+  "assets/ships/continuum/trade-cog-anchored/far.bin.gz": {
+    "url": "assets/ships/continuum/trade-cog-anchored/far.bin.ca1df0a5db8a6abf.gz",
+    "bytes": 158273,
+    "sha256": "ca1df0a5db8a6abf4a11ddb36b63cb571689b3cb2338b718bf3a0ebd08547a75"
+  },
+  "assets/ships/continuum/trade-cog-anchored/vertices.bin.gz": {
+    "url": "assets/ships/continuum/trade-cog-anchored/vertices.bin.eb206c66260132d9.gz",
+    "bytes": 630698,
+    "sha256": "eb206c66260132d9862557cf8cd0cd4024f16e078f12f604f54fdeda21203778"
+  },
+  "assets/ships/continuum/trade-cog-anchored/shards.bin.gz": {
+    "url": "assets/ships/continuum/trade-cog-anchored/shards.bin.612581336ccac5c8.gz",
+    "bytes": 5132,
+    "sha256": "612581336ccac5c806281406bcf5936d5185ecc8c4d448e24a8aa14c2269d7c7"
+  },
+  "assets/ships/continuum/trade-carrack-underway/manifest.json": {
+    "url": "assets/ships/continuum/trade-carrack-underway/manifest.631111eb161162d6.json",
+    "bytes": 4135,
+    "sha256": "631111eb161162d6f930c961380f96502c8d6b1c34834ae48dc4c143fa209608"
+  },
+  "assets/ships/continuum/trade-carrack-underway/clusters.bin.gz": {
+    "url": "assets/ships/continuum/trade-carrack-underway/clusters.bin.f2868eaa94fa7fd0.gz",
+    "bytes": 48801,
+    "sha256": "f2868eaa94fa7fd073a2a94871a489f791fcdbff2e9d0f035f48e51e98195a12"
+  },
+  "assets/ships/continuum/trade-carrack-underway/indices.bin.gz": {
+    "url": "assets/ships/continuum/trade-carrack-underway/indices.bin.3cbc8cf58f60dcc2.gz",
+    "bytes": 387032,
+    "sha256": "3cbc8cf58f60dcc2ee81c4d061f6725f52fea546950df902017a0dafd28288d5"
+  },
+  "assets/ships/continuum/trade-carrack-underway/copies.bin.gz": {
+    "url": "assets/ships/continuum/trade-carrack-underway/copies.bin.244233d4855de303.gz",
+    "bytes": 2039,
+    "sha256": "244233d4855de30380f5af3615a88840d18fc49f3fce25b48fc265c44618e49f"
+  },
+  "assets/ships/continuum/trade-carrack-underway/far.bin.gz": {
+    "url": "assets/ships/continuum/trade-carrack-underway/far.bin.8bf5d58c298aa0d4.gz",
+    "bytes": 158110,
+    "sha256": "8bf5d58c298aa0d48a2f6b34533471da72b42cc1a6730c41ef4579091abd969c"
+  },
+  "assets/ships/continuum/trade-carrack-underway/vertices.bin.gz": {
+    "url": "assets/ships/continuum/trade-carrack-underway/vertices.bin.f1d358b4434c4960.gz",
+    "bytes": 749418,
+    "sha256": "f1d358b4434c4960abbbe06b06c47a4174f5655b8c7b3eb850db9831290d8bdb"
+  },
+  "assets/ships/continuum/trade-carrack-underway/shards.bin.gz": {
+    "url": "assets/ships/continuum/trade-carrack-underway/shards.bin.b535350cf2159c5a.gz",
+    "bytes": 5411,
+    "sha256": "b535350cf2159c5a3a30fa186fbcd7f7f5181f0dc5c1d9715adbd6b8bf32056b"
+  },
+  "assets/ships/continuum/trade-carrack-anchored/manifest.json": {
+    "url": "assets/ships/continuum/trade-carrack-anchored/manifest.b38bb84619aa8a24.json",
+    "bytes": 4072,
+    "sha256": "b38bb84619aa8a24fe5e430d7b84b5c499074750bd0b4c86d95ee50d53f84c80"
+  },
+  "assets/ships/continuum/trade-carrack-anchored/clusters.bin.gz": {
+    "url": "assets/ships/continuum/trade-carrack-anchored/clusters.bin.f163e3b90c15283a.gz",
+    "bytes": 42337,
+    "sha256": "f163e3b90c15283a73ebb9465ffbb95c0a9f8012593d0f86e5d0e680e8903639"
+  },
+  "assets/ships/continuum/trade-carrack-anchored/indices.bin.gz": {
+    "url": "assets/ships/continuum/trade-carrack-anchored/indices.bin.906cacecba5b19cd.gz",
+    "bytes": 330276,
+    "sha256": "906cacecba5b19cd7b21ce256b6c8e7935b599bd305fdd1da4dbefd892576696"
+  },
+  "assets/ships/continuum/trade-carrack-anchored/copies.bin.gz": {
+    "url": "assets/ships/continuum/trade-carrack-anchored/copies.bin.b830e90012b81fdb.gz",
+    "bytes": 2052,
+    "sha256": "b830e90012b81fdb8f5e7c795a60893b9abca3a1154f1e4eff32058ad37df805"
+  },
+  "assets/ships/continuum/trade-carrack-anchored/far.bin.gz": {
+    "url": "assets/ships/continuum/trade-carrack-anchored/far.bin.fe87f8a24152c577.gz",
+    "bytes": 158839,
+    "sha256": "fe87f8a24152c577141cd8f3721257ef996461a8d92859b712df8a79d86b500c"
+  },
+  "assets/ships/continuum/trade-carrack-anchored/vertices.bin.gz": {
+    "url": "assets/ships/continuum/trade-carrack-anchored/vertices.bin.eddc179c9b60eb46.gz",
+    "bytes": 673397,
+    "sha256": "eddc179c9b60eb4695790f3bc12c149c47084c833c65d43fe90b2f788eef03a6"
+  },
+  "assets/ships/continuum/trade-carrack-anchored/shards.bin.gz": {
+    "url": "assets/ships/continuum/trade-carrack-anchored/shards.bin.1f1211f9be471353.gz",
+    "bytes": 5360,
+    "sha256": "1f1211f9be47135364f4b7565ad51e77c20f08e921214c9e91b9a7c20227d723"
+  },
+  "assets/ships/continuum/trade-river-barge/manifest.json": {
+    "url": "assets/ships/continuum/trade-river-barge/manifest.9d6a4471cfec1c69.json",
+    "bytes": 3896,
+    "sha256": "9d6a4471cfec1c691033e75cb5d083d5d0bb68c7be0676bc675ac9941cf96538"
+  },
+  "assets/ships/continuum/trade-river-barge/clusters.bin.gz": {
+    "url": "assets/ships/continuum/trade-river-barge/clusters.bin.ff924f619097b012.gz",
+    "bytes": 25102,
+    "sha256": "ff924f619097b0122a199292d72ff0884577f66d7d59d1e256e8b65a4fda9b08"
+  },
+  "assets/ships/continuum/trade-river-barge/indices.bin.gz": {
+    "url": "assets/ships/continuum/trade-river-barge/indices.bin.83bfe42c83acf2a4.gz",
+    "bytes": 201821,
+    "sha256": "83bfe42c83acf2a4e074e85339d707f216d6bc0e0f79dd62b4c317d94b005b42"
+  },
+  "assets/ships/continuum/trade-river-barge/copies.bin.gz": {
+    "url": "assets/ships/continuum/trade-river-barge/copies.bin.f1b651238a58fe29.gz",
+    "bytes": 20,
+    "sha256": "f1b651238a58fe290baec6c5e32f3bdb1943dd2bd582f02569231f7a757c7837"
+  },
+  "assets/ships/continuum/trade-river-barge/far.bin.gz": {
+    "url": "assets/ships/continuum/trade-river-barge/far.bin.00c46788fa5e60de.gz",
+    "bytes": 155199,
+    "sha256": "00c46788fa5e60de10cc7655b3162d6319a2f5dcd386e67184009c9104129aad"
+  },
+  "assets/ships/continuum/trade-river-barge/vertices.bin.gz": {
+    "url": "assets/ships/continuum/trade-river-barge/vertices.bin.cf439876972f27bc.gz",
+    "bytes": 387982,
+    "sha256": "cf439876972f27bc83012228a3540f8bd68072aa08ac0d4425f4b02099497ae7"
+  },
+  "assets/ships/continuum/trade-river-barge/shards.bin.gz": {
+    "url": "assets/ships/continuum/trade-river-barge/shards.bin.974eba305c217d9a.gz",
+    "bytes": 2032,
+    "sha256": "974eba305c217d9a708691764712f28c5185cd30cce6130b8d03b1392f04a929"
+  },
+  "assets/ships/continuum/trade-lateen-caravel/manifest.json": {
+    "url": "assets/ships/continuum/trade-lateen-caravel/manifest.7eb7155251433add.json",
+    "bytes": 4115,
+    "sha256": "7eb7155251433addce59b65e381842b408162601f28e8f10683b00410c5a31c3"
+  },
+  "assets/ships/continuum/trade-lateen-caravel/clusters.bin.gz": {
+    "url": "assets/ships/continuum/trade-lateen-caravel/clusters.bin.8883d3df41c97c9f.gz",
+    "bytes": 53303,
+    "sha256": "8883d3df41c97c9f3f6fe1ea9a3a3d6de5d26c2ff0f6b81b38573609ceeb26df"
+  },
+  "assets/ships/continuum/trade-lateen-caravel/indices.bin.gz": {
+    "url": "assets/ships/continuum/trade-lateen-caravel/indices.bin.35f221866673919d.gz",
+    "bytes": 458693,
+    "sha256": "35f221866673919d60e11a501f0d921be7e165d266561c276de33a27ede9c831"
+  },
+  "assets/ships/continuum/trade-lateen-caravel/copies.bin.gz": {
+    "url": "assets/ships/continuum/trade-lateen-caravel/copies.bin.12bc996eefd3e1a0.gz",
+    "bytes": 3029,
+    "sha256": "12bc996eefd3e1a0f9473b2acbc6647e1cbdb8deccac148d8d3eb58eb96f3949"
+  },
+  "assets/ships/continuum/trade-lateen-caravel/far.bin.gz": {
+    "url": "assets/ships/continuum/trade-lateen-caravel/far.bin.bc5c55956b539b0d.gz",
+    "bytes": 156536,
+    "sha256": "bc5c55956b539b0dddb0966c08d930bfa50a38fc21899d57299c9bf827bb8f2e"
+  },
+  "assets/ships/continuum/trade-lateen-caravel/vertices.bin.gz": {
+    "url": "assets/ships/continuum/trade-lateen-caravel/vertices.bin.b5e340f6228d1fe1.gz",
+    "bytes": 816032,
+    "sha256": "b5e340f6228d1fe1104ee7cdb165c59e9caefe3db3fc4dfc87e143ad187c50e0"
+  },
+  "assets/ships/continuum/trade-lateen-caravel/shards.bin.gz": {
+    "url": "assets/ships/continuum/trade-lateen-caravel/shards.bin.f99b7e696b214a41.gz",
+    "bytes": 7418,
+    "sha256": "f99b7e696b214a416645e81d038e0bcd32ce646bf5e8d197a8c6bb6d6c79b4c1"
+  },
+  "assets/ships/continuum/trade-harbor-barque/manifest.json": {
+    "url": "assets/ships/continuum/trade-harbor-barque/manifest.666f1cdd70335a8f.json",
+    "bytes": 4103,
+    "sha256": "666f1cdd70335a8f53e1cc66a00f326869228f999e8183514505bf9ab2196460"
+  },
+  "assets/ships/continuum/trade-harbor-barque/clusters.bin.gz": {
+    "url": "assets/ships/continuum/trade-harbor-barque/clusters.bin.b2161fe12f1320b9.gz",
+    "bytes": 32572,
+    "sha256": "b2161fe12f1320b94a739a80675649feb0a43010300f9f95fab75718f49547ed"
+  },
+  "assets/ships/continuum/trade-harbor-barque/indices.bin.gz": {
+    "url": "assets/ships/continuum/trade-harbor-barque/indices.bin.ef1ea65b3f199e31.gz",
+    "bytes": 279553,
+    "sha256": "ef1ea65b3f199e31c7174bc139e67ebe097d4ce8ea314df257dd9455155254b6"
+  },
+  "assets/ships/continuum/trade-harbor-barque/copies.bin.gz": {
+    "url": "assets/ships/continuum/trade-harbor-barque/copies.bin.7bc21297d7c50717.gz",
+    "bytes": 998,
+    "sha256": "7bc21297d7c50717570b52003479b64d5a6a52abecc0d32a2bb780c45b1481a2"
+  },
+  "assets/ships/continuum/trade-harbor-barque/far.bin.gz": {
+    "url": "assets/ships/continuum/trade-harbor-barque/far.bin.2c6cd43813c553a6.gz",
+    "bytes": 157148,
+    "sha256": "2c6cd43813c553a666216a1d27d7b64a0b7ef6529fd341e170a9a2292fb69bb3"
+  },
+  "assets/ships/continuum/trade-harbor-barque/vertices.bin.gz": {
+    "url": "assets/ships/continuum/trade-harbor-barque/vertices.bin.cd117deadc171224.gz",
+    "bytes": 587999,
+    "sha256": "cd117deadc171224f8fb2300bf95d1ec924d59f41e52640c325bdf60cfb313d8"
+  },
+  "assets/ships/continuum/trade-harbor-barque/shards.bin.gz": {
+    "url": "assets/ships/continuum/trade-harbor-barque/shards.bin.4adb8679f83e9f9a.gz",
+    "bytes": 7041,
+    "sha256": "4adb8679f83e9f9a533b32ed9ce6f2e809fadb80093d4b8ca9046f281a71e03c"
+  },
   "assets/tree-foliage.png": {
     "url": "assets/tree-foliage.ad40fb471213f1f4.png",
     "bytes": 444839,

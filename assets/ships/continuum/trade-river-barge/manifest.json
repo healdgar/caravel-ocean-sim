@@ -1,0 +1,189 @@
+{
+ "format": "waterworld.ship-continuum",
+ "version": 2,
+ "id": "trade-river-barge",
+ "family": "trade",
+ "archetype": 4,
+ "label": "River Trade Barge",
+ "source": {
+  "vertices": 31243,
+  "indices": 93942,
+  "shards": 52,
+  "key": "968a1f24a78e49199ff2489cd8bc5ae7ce67818c8ff82ade763842cedc92088f",
+  "surface": {
+   "area": 180.44967773877525,
+   "centroid": [
+    0.0023706217758432575,
+    0.1248563792244239,
+    0.027505940116266378
+   ],
+   "materials": {
+    "0": 32.67548226325009,
+    "1": 53.70328644829757,
+    "2": 0.14152047381029204,
+    "3": 1.794817412656508,
+    "9": 2.648097241365943,
+    "12": 0.6456385821023065,
+    "13": 1.3278357589162915,
+    "14": 28.19681466356856,
+    "15": 48.28523640137618,
+    "16": 8.455577937299557,
+    "17": 1.836104660761826,
+    "24": 0.32569573877045993,
+    "28": 0.4135701565970079
+   }
+  },
+  "designScale": [
+   0.833333,
+   1.319497,
+   1.083333
+  ]
+ },
+ "clusterWords": 16,
+ "farVertexWords": 6,
+ "stepWords": 4,
+ "clusterCount": 1045,
+ "indexCount": 172881,
+ "copyCount": 0,
+ "clusters": {
+  "triangles": 57627,
+  "levels": 6,
+  "roots": 273,
+  "groups": 97,
+  "parts": 195,
+  "rootError": 4.6991
+ },
+ "far": {
+  "vertexCount": 4006,
+  "triangleCount": 8000,
+  "stepCount": 3994,
+  "offsets": {
+   "vertices": 0,
+   "records": 24036,
+   "triangles": 28042,
+   "steps": 52042
+  },
+  "voxel": 0.0362,
+  "pieces": [
+   {
+    "kind": "rigid",
+    "close": 0.2894,
+    "grid": [
+     253,
+     67,
+     381
+    ],
+    "count": 1,
+    "dropped": 0,
+    "genus": 0,
+    "surfaceTriangles": 776808
+   },
+   {
+    "kind": "canvas",
+    "close": 0.1447,
+    "grid": [
+     33,
+     34,
+     78
+    ],
+    "count": 2,
+    "dropped": 0,
+    "genus": 0,
+    "surfaceTriangles": 32084
+   }
+  ],
+  "baseTriangles": 8000,
+  "baseVertices": 4006,
+  "baseError": 0.0894,
+  "baseGeometric": 0.0366,
+  "steps": 3994,
+  "coreTriangles": 12,
+  "depth": 10,
+  "errorRange": [
+   0.0894,
+   5.4073
+  ],
+  "inflateMax": 0.4248,
+  "euler": 6
+ },
+ "splat": {
+  "centre": [
+   -0.0013,
+   0.4601,
+   -0.0035
+  ],
+  "ry": 0.8849,
+  "rxSide": 5.3007,
+  "rxEnd": 2.0518,
+  "colour": [
+   0.3296,
+   0.24106,
+   0.15781
+  ]
+ },
+ "bound": {
+  "centre": [
+   0,
+   0.3246,
+   0
+  ],
+  "radius": 6.5302
+ },
+ "poses": 11,
+ "files": {
+  "clusters.bin": {
+   "bytes": 66880,
+   "sha256": "bf8cffc115e6efb657fac56f9a2cab0e1c79012122fd41139f11502f97f322b3",
+   "gzip": {
+    "file": "clusters.bin.gz",
+    "bytes": 25102,
+    "sha256": "ff924f619097b0122a199292d72ff0884577f66d7d59d1e256e8b65a4fda9b08"
+   }
+  },
+  "indices.bin": {
+   "bytes": 691524,
+   "sha256": "385cef4424a83fcb5c2d53b7d44e943f0d4738694dc8bae72002a7a8b082323c",
+   "gzip": {
+    "file": "indices.bin.gz",
+    "bytes": 201821,
+    "sha256": "83bfe42c83acf2a4e074e85339d707f216d6bc0e0f79dd62b4c317d94b005b42"
+   }
+  },
+  "copies.bin": {
+   "bytes": 0,
+   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "gzip": {
+    "file": "copies.bin.gz",
+    "bytes": 20,
+    "sha256": "f1b651238a58fe290baec6c5e32f3bdb1943dd2bd582f02569231f7a757c7837"
+   }
+  },
+  "far.bin": {
+   "bytes": 272088,
+   "sha256": "76a569af8dc56b4af6b39de25409713488a8cb85b4809a5f21a4051c5e9e35b8",
+   "gzip": {
+    "file": "far.bin.gz",
+    "bytes": 155199,
+    "sha256": "00c46788fa5e60de10cc7655b3162d6319a2f5dcd386e67184009c9104129aad"
+   }
+  },
+  "vertices.bin": {
+   "bytes": 1124748,
+   "sha256": "48c1fc3bfa334df6566ddf3a98028140c80432fe3cd4c3f9ddf6cc796cc702c7",
+   "gzip": {
+    "file": "vertices.bin.gz",
+    "bytes": 387982,
+    "sha256": "cf439876972f27bc83012228a3540f8bd68072aa08ac0d4425f4b02099497ae7"
+   }
+  },
+  "shards.bin": {
+   "bytes": 124972,
+   "sha256": "93f8ef7f1b8dfc21fc5bab7349a49908f2237ea94bec6a80c6f1085b3e3e8838",
+   "gzip": {
+    "file": "shards.bin.gz",
+    "bytes": 2032,
+    "sha256": "974eba305c217d9a708691764712f28c5185cd30cce6130b8d03b1392f04a929"
+   }
+  }
+ }
+}

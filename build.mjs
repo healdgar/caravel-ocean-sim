@@ -23,6 +23,7 @@ import { FOREST_SURFACE_ASSETS, SUBTROPICAL_FOREST_SURFACE_ASSETS, PORTUGAL_FORE
 import { CREW_CONTINUUM_ASSETS } from './js/crew-continuum.js';
 import { CITY_CONTINUUM_ASSETS } from './js/city-continuum.js';
 import { PROP_CONTINUUM_ASSETS } from './js/prop-continuum.js';
+import { SHIP_CONTINUUM_ASSETS } from './js/ship-continuum.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const wgslModules = ['js/wgsl/common.js', 'js/wgsl/celestial.js', 'js/wgsl/hull.js', 'js/wgsl/lateen.js', 'js/wgsl/victory.js', 'js/wgsl/vessel.js', 'js/wgsl/vessel-pose.js', 'js/wgsl/shadows.js', 'js/wgsl/interaction.js', 'js/wgsl/surface-waves.js', 'js/wgsl/surface-coupling.js', 'js/wgsl/fleet-wakes.js', 'js/wgsl/cloud-model.js', 'js/wgsl/clouds.js', 'js/wgsl/sky.js', 'js/wgsl/deck.js', 'js/wgsl/spindrift.js', 'js/wgsl/wetness.js', 'js/wgsl/sim.js', 'js/wgsl/water-optics.js', 'js/wgsl/underwater.js', 'js/wgsl/ocean.js', 'js/wgsl/ocean-lighting.js', 'js/wgsl/post.js', 'js/wgsl/neural-post.js', 'js/wgsl/neural-pbr.js', 'js/wgsl/caravel.js', 'js/wgsl/crew.js', 'js/wgsl/terrain.js', 'js/wgsl/weather.js', 'js/wgsl/anchor.js', 'js/wgsl/dolphins.js', 'js/wgsl/marine-life.js', 'js/wgsl/gunnery.js', 'js/wgsl/gunnery-probe.js', 'js/wgsl/hull-contact.js', 'js/wgsl/rowing-water.js', 'js/wgsl/crew-solve.js'];
@@ -91,6 +92,8 @@ order.splice(order.indexOf('js/wgsl/terrain.js')+1,0,'js/wgsl/inland-water.js','
 wgslModules.push('js/wgsl/inland-water.js','js/wgsl/herds.js');
 order.splice(order.indexOf('js/terrain.js'),0,'js/inland-water.js','js/meadow-grass.js','js/trade-vessels.js');
 order.splice(order.indexOf('js/trade-vessels.js'),0,'js/wgsl/hull-flood.js','js/hull-flood.js');
+// Ships drawn through the one continuum: the bodies' format, the cut and the draws, ahead of the families that draw them.
+order.splice(order.indexOf('js/trade-vessels.js'),0,'js/ship-continuum.js','js/wgsl/ship-continuum.js','js/ship-continuum-draw.js');
 // A city's buildings as the guns meet them: after the fracture code it hands them to, ahead of the land it is drawn with.
 order.splice(order.indexOf('js/terrain.js'),0,'js/city-targets.js','js/boulder-continuum.js','js/city-continuum-draw.js');
 order.splice(order.indexOf('js/main.js'),0,'js/port-damage.js','js/debug-world.js');
@@ -198,6 +201,10 @@ for(const file of Object.values(PROP_CONTINUUM_ASSETS))runtimeAssetTypes.set(fil
 // not committed; a checkout without them draws the old bodies.
 for(const files of Object.values(CREW_CONTINUUM_ASSETS))for(const file of Object.values(files)){
   if(fs.existsSync(path.join(root,file)))runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':file.endsWith('.glb')?'model/gltf-binary':'application/octet-stream');
+}
+// The ships' continuum bodies (scripts/prepare-ship-continuum.mjs), committed and embedded: no ship is drawn without them.
+for(const files of Object.values(SHIP_CONTINUUM_ASSETS))for(const file of Object.values(files)){
+  runtimeAssetTypes.set(file,file.endsWith('.json')?'application/json':'application/octet-stream');
 }
 if(fs.existsSync(path.join(root,'assets/boards/partner-ports-1550.json'))){
   runtimeAssetTypes.set('assets/boards/partner-ports-1550.json','application/json');
