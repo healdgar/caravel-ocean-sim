@@ -33,16 +33,6 @@ import {
   sampleTradeVesselState,
 } from '../js/trade-vessels.js';
 import { caravanHerdSeeds } from '../js/herds.js';
-import {
-  GRASS_LODS,
-  GRASS_VARIANTS,
-  GROUND_COVER_BUCKETS,
-  ROCK_ARCHETYPES,
-  ROCK_LODS,
-  TREE_VERTEX_FLOATS,
-  groundCoverBucketGeometry,
-} from '../js/vegetation.js';
-import { GROUND_COVER_CULL } from '../js/scenery-cull.js';
 import { cityContinuumRenderWGSL, cityContinuumSelectWGSL } from '../js/wgsl/city-continuum.js';
 import { HERDS_STEP_WGSL } from '../js/wgsl/herds.js';
 import { TERRAIN } from '../js/wgsl/terrain.js';
@@ -265,42 +255,7 @@ test('live Castle & Commons economy couples to career-port and drives sea mercha
   }
 });
 
-test('fractured polyhedral boulders (18 buckets) + 4 grass buckets + progressive LOD and zero-discard WGSL shaders', () => {
-  assert.equal(ROCK_ARCHETYPES, 6);
-  assert.equal(ROCK_LODS, 3);
-  assert.equal(GRASS_VARIANTS, 2);
-  assert.equal(GRASS_LODS, 2);
-  assert.equal(GROUND_COVER_BUCKETS, ROCK_ARCHETYPES * ROCK_LODS + GRASS_VARIANTS * GRASS_LODS);
-
-  for (let arch = 0; arch < ROCK_ARCHETYPES; arch++) {
-    const counts = [];
-    for (let lod = 0; lod < ROCK_LODS; lod++) {
-      const geom = groundCoverBucketGeometry(lod * ROCK_ARCHETYPES + arch);
-      assert.ok(geom.length > 0 && geom.length % (TREE_VERTEX_FLOATS * 3) === 0);
-      assert.ok(geom.every(Number.isFinite));
-      counts.push(geom.length / TREE_VERTEX_FLOATS);
-      if (lod === 0) {
-        let nonRadial = 0;
-        const totalV = geom.length / TREE_VERTEX_FLOATS;
-        for (let k = 0; k < geom.length; k += TREE_VERTEX_FLOATS) {
-          const px = geom[k], py = geom[k + 1] - 0.3, pz = geom[k + 2];
-          const nx = geom[k + 3], ny = geom[k + 4], nz = geom[k + 5];
-          const pLen = Math.hypot(px, py, pz) || 1;
-          const dotN = (px * nx + py * ny + pz * nz) / pLen;
-          if (dotN < 0.995) nonRadial++;
-        }
-        assert.ok(nonRadial > totalV * 0.4, `archetype ${arch} has fractured crease normals (${nonRadial}/${totalV})`);
-      }
-    }
-    assert.ok(counts[0] > counts[1] && counts[1] >= counts[2], `archetype ${arch} LOD triangle decay ${counts.join(' -> ')}`);
-  }
-
-  for (let b = ROCK_ARCHETYPES * ROCK_LODS; b < GROUND_COVER_BUCKETS; b++) {
-    const geom = groundCoverBucketGeometry(b);
-    assert.ok(geom.length > 0 && geom.length % (TREE_VERTEX_FLOATS * 3) === 0);
-  }
-
-  // WGSL shader and culling checks
+test('herd, vessel and city WGSL: zero discard and the city continuum\'s sample-mask split', () => {
   assert.match(HERDS_STEP_WGSL, /0\.92/);
   assert.match(HERDS_STEP_WGSL, /if\s*\(!onRoad\)\s*\{\s*return;\s*\}/);
   // Trade vessels: clusters, far bodies and splats of the ship continuum, and the far body's shadow.
@@ -308,7 +263,6 @@ test('fractured polyhedral boulders (18 buckets) + 4 grass buckets + progressive
     assert.match(TRADE_VESSELS_WGSL, entry);
   }
   assert.match(TRADE_VESSELS_WGSL, /matTone\.x\s*>\s*5\.5/);
-  assert.match(GROUND_COVER_CULL, /\*f32\(6\)|ROCK_ARCHETYPES|lod\*6u/);
   // The city's cut stands every building in the world's own frame, shifted by its offset.
   assert.match(wgslBody('cityContinuumShift', cityContinuumSelectWGSL()), /cityView\.scene\.y\s*,\s*0\.0\s*,\s*cityView\.scene\.z/);
 

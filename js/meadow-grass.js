@@ -1,17 +1,20 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
-// 100% GPU Lush Botanical Meadow Grass Continuum on seamless 1.75 m x 1.75 m tiles (3.0625 m^2):
-//   - Near / Mid (L0..L3, ~4,420 -> 2,140 -> 960 -> 384 tris/tile = ~1,444 tris/m^2 at LOD0, 100% full density inside ~20 m):
-//     1. Arched 3-segment (5-tri, 7-vert) ryegrass, cocksfoot & fescue tussock sheaves (70%)
-//     2. Dense broad low-arching clover, ribwort & basal turf ground-huggers (20%, >80% oblique turf fullness)
-//     3. Tall sunlit golden oat/barley panicles & subtle 3D Mediterranean coastal wildflowers (10%)
-//   - Anti-grid variety: toroidal-Poisson tussocks + per-cell deterministic 90-deg quadrant rotation + world-space moisture/height modulation.
-//   - Far Continuum (out to ~780 m): MSAA @builtin(sample_mask) handoff into a closed genus-0 (Euler = 2) D4-symmetric
-//     sculpted tussock-canopy morph.bin (cullMode: 'back', O(1) u8x4 ancestor lookup), morphing into 1-triangle horizon
-//     splats (< 3.5 px) with stochastic sub-pixel thinning (< 1.0 px) and area-preserving inverseSqrt(keepProb) inflation.
-//   - Ballistics: GPU cannonball crater burial, radial blast parting, soot scorching & thrown-soil dusting,
-//     live low-flying cannonball V-wake furrows + hot-shot tip singeing, and 26 m/s impact shockwave rings.
+// Meadow grass, cut and drawn through the one continuum (AGENTS.md rule 3; js/meadow-continuum.js for the atlas,
+// scripts/prepare-meadow-grass.mjs for its bake). A meadow is 4 m patches of the groves' full-resolution sward laid
+// edge to edge on a world grid wherever the cover map (below) says grass grows. Every frame the GPU, on the shared
+// core (js/continuum-core.js) and the scene's one pixel error:
+//   - lists the blocks of 16 x 16 patches in view that hold any grass;
+//   - decides each of their patches: near, its clusters, cut by projected error; across the core's handoff band, its
+//     closed canopy body takes each pixel's samples from them (@builtin(sample_mask), never a blend); farther, that
+//     body morphs down its half-edge collapses to a core of six triangles; at a few pixels its single splat takes the
+//     samples; under a pixel the splat is thinned by a hash and the survivors grown to keep the meadow's covered area;
+//   - enters each drawn piece in one of three lists, each drawn with one indirect call.
+// A distant meadow is therefore its patches' own far end: canopy cores, then splats carrying the sward's mean colour
+// seen from above and from the side, thinned and grown below a pixel. Nothing else draws grass.
+// Grass is never a target: shot passes through it. Craters bury it, and passing shot and blast rings part it, in the
+// vertex stage, from the land's own crater field and the frame's ballistic wakes.
 import { requestOnce } from './gpu-program-cache.js';
-import { CONTINUUM_CORE_WGSL, CONTINUUM_SPLAT_PIXELS, CONTINUUM_MIN_PIXELS } from './continuum-core.js';
+import { CONTINUUM_CORE_WGSL, continuumClusterPrefixWGSL, continuumMorphStepWGSL, continuumPixelError } from './continuum-core.js';
 import { FRAME_WGSL, ATMO_CORE_WGSL } from './wgsl/common.js';
 import { SKY_RENDER_FUNCS } from './wgsl/sky.js';
 import { CLOUD_SAMPLE } from './wgsl/clouds.js';
@@ -21,109 +24,47 @@ import { CITY_BLOCK_FLOATS, CITY_GROUND } from './old-world-city.js';
 import { INLAND_WATER_FLOATS } from './wgsl/inland-water.js';
 import { LAND_CRATER_SAMPLE_WGSL, LAND_CRATER_TEXELS, LAND_CRATER_CELL_M, LAND_CRATER_TILE_M } from './wgsl/land-craters.js';
 import { streetEdgeAt } from './town-streets.js';
+import {
+  MEADOW_PATCH_METRES, MEADOW_CONTINUUM_HEADER, MEADOW_CONTINUUM_VARIANT, MEADOW_CONTINUUM_VARIANT_WORDS, MEADOW_CONTINUUM_CLUSTER_WORDS,
+  MEADOW_CONTINUUM_CLUSTER_TRIANGLES, MEADOW_CONTINUUM_VERTEX_WORDS, MEADOW_CONTINUUM_STEP_WORDS, MEADOW_CONTINUUM_TRIANGLE_WORDS,
+  MEADOW_CONTINUUM_NEVER, MEADOW_CONTINUUM_HOPS, MEADOW_CONTINUUM_CHUNK_TRIANGLES, MEADOW_CONTINUUM_OFFSET_UNIT, MEADOW_CONTINUUM_STIFFNESS_UNIT,
+} from './meadow-continuum.js';
 
-export const MEADOW_TILE_METRES = 1.75;
-export const MEADOW_FADE_IN_PX = 22.0;
-export const MEADOW_FADE_OUT_PX = 16.5;
-export const MEADOW_SPLAT_PX = CONTINUUM_SPLAT_PIXELS;
-export const MEADOW_MIN_PX = CONTINUUM_MIN_PIXELS;
-export const MEADOW_BUCKETS = 8;
-export const MEADOW_DRAW_WORDS = 4;
 export const MEADOW_MAX_SHOT_WAKES = 16;
 export const MEADOW_MAX_BLAST_RINGS = 16;
 export const MEADOW_WAKE_BUFFER_BYTES = 1040; // 16B counts + 16 * 32B ShotWake + 16 * 32B BlastRing = 1040B
-
-const MEADOW_MACRO_MUL = 6; // 6 x 1.75 m = 10.50 m outer continuum/splat ring reaching ~782 m radius
-const MEADOW_INST_FLOATS = 8;
-const MEADOW_VERT_WORDS = 8;
-const MEADOW_CLUSTER_WORDS = 12;
-const MEADOW_MORPH_VERTS = 26;
-const MEADOW_MORPH_FACES = 48;
-const MEADOW_MORPH_STEPS = 21;
-const MEADOW_MORPH_REMAP_OFFSET = MEADOW_MORPH_VERTS * MEADOW_VERT_WORDS + MEADOW_MORPH_FACES * 3; // 352
-const MEADOW_MORPH_REMAP_WORDS = 276;
-const MEADOW_MORPH_VAR_WORDS = MEADOW_MORPH_REMAP_OFFSET + MEADOW_MORPH_REMAP_WORDS; // 628 words = 2512 bytes
-const MEADOW_GRID_SIDE_DESKTOP = 152; // 152 x 152 (~266 m near span) + 6x outer continuum ring (~782 m radius)
-const MEADOW_GRID_SIDE_MOBILE = 96;   // 96 x 96 (~168 m near span) + 6x outer continuum ring (~488 m radius)
-export const MEADOW_MAX_DIST = (MEADOW_GRID_SIDE_DESKTOP / 2) * MEADOW_TILE_METRES * MEADOW_MACRO_MUL - 16.0;
-const MEADOW_COARSE_GRID = 64;
-const MEADOW_BUCKET_SPAN = 32768;
 const MEADOW_COVER_DESKTOP = 2048; // 4.0 m/texel across 8192 m region with bilinear SDF filtering
 const MEADOW_COVER_MOBILE = 1024;
 
-// Literal paths: build.mjs scans string literals from js/meadow-grass.js to emit content-hashed URLs.
-export const PORTUGAL_MEADOW_GRASS_ASSETS = Object.freeze({
-  'manifest.json': 'assets/ground-cover/portugal/meadows-gpu/manifest.json',
-  'vertices.bin.gz': 'assets/ground-cover/portugal/meadows-gpu/vertices.bin.gz',
-  'indices.bin.gz': 'assets/ground-cover/portugal/meadows-gpu/indices.bin.gz',
-  'clusters.bin.gz': 'assets/ground-cover/portugal/meadows-gpu/clusters.bin.gz',
-  'morph.bin.gz': 'assets/ground-cover/portugal/meadows-gpu/morph.bin.gz',
-});
-
-export function validateMeadowGrass(manifest) {
-  if (manifest?.format !== 'waterworld.meadow-grass-gpu' || (manifest.version !== 1 && manifest.version !== 2)) {
-    throw Error('Invalid meadow grass manifest format or version');
-  }
-  if (manifest.levels !== 4 || !(manifest.tileMetres > 0) || manifest.strideBytes !== 32 || manifest.clusterRecordWords !== MEADOW_CLUSTER_WORDS) {
-    throw Error('Invalid meadow grass manifest geometry layout');
-  }
-  const err = manifest.levelErrors, perr = manifest.levelParentErrors;
-  if (!Array.isArray(err) || !Array.isArray(perr) || err.length !== 4 || perr.length !== 4) {
-    throw Error('Meadow grass manifest missing 4-level DAG error tables');
-  }
-  for (let i = 0; i < 4; i++) {
-    if (!(err[i] < perr[i])) throw Error(`Meadow DAG level ${i} child error must be strictly below parent error`);
-    if (i > 0 && !(err[i] > err[i - 1] && perr[i] > perr[i - 1])) {
-      throw Error(`Meadow DAG level ${i} errors must be strictly monotonic`);
-    }
-  }
-  const m = manifest.morph;
-  if (!m || m.vertexCount !== MEADOW_MORPH_VERTS || m.faceCount !== MEADOW_MORPH_FACES || m.steps !== MEADOW_MORPH_STEPS ||
-      m.ancestorTableOffsetWords !== MEADOW_MORPH_REMAP_OFFSET || m.bytesPerVariant !== MEADOW_MORPH_VAR_WORDS * 4) {
-    throw Error('Meadow grass morph spec does not match GPU shader constants');
-  }
-  const vars = manifest.variantRecords;
-  if (!Array.isArray(vars) || vars.length < 12) throw Error('Meadow grass manifest requires 12 variantRecords');
-  for (const v of vars) {
-    if (v.genusZeroEuler !== 2) throw Error(`Meadow variant ${v.variantId} continuum is not genus-0 (Euler=${v.genusZeroEuler})`);
-    if (!(v.coreTriCount >= 4 && v.coreTriCount <= 6)) throw Error(`Meadow variant ${v.variantId} coreTriCount=${v.coreTriCount} out of 4..6 range`);
-  }
-  for (const k of ['vertices.bin', 'indices.bin', 'clusters.bin', 'morph.bin']) {
-    const f = manifest.files?.[k];
-    if (!f || !(f.bytes > 0) || typeof f.sha256 !== 'string' || f.sha256.length !== 64) {
-      throw Error(`Meadow grass manifest missing integrity record for ${k}`);
-    }
-  }
-  return manifest;
-}
-
-export async function loadMeadowGrass({ assets = PORTUGAL_MEADOW_GRASS_ASSETS, fetchAsset = fetch, signal } = {}) {
-  const get = async (name) => {
-    const res = await fetchAsset(assets[name], signal ? { signal } : undefined);
-    if (!res.ok) throw Error(`Meadow grass asset unavailable (${res.status}): ${name}`);
-    return res;
-  };
-  const manifest = validateMeadowGrass(await (await get('manifest.json')).json());
-  const stream = async (name) => {
-    const receipt = manifest.files[name];
-    const res = await get(`${name}.gz`);
-    const bytes = new Uint8Array(await new Response(res.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
-    if (bytes.byteLength !== receipt.bytes) throw Error(`Meadow grass stream size mismatch: ${name}`);
-    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
-    const hex = Array.from(digest, (v) => v.toString(16).padStart(2, '0')).join('');
-    if (hex !== receipt.sha256) throw Error(`Meadow grass stream SHA-256 mismatch: ${name}`);
-    return bytes;
-  };
-  const [vertices, indices, clusters, morph] = await Promise.all(['vertices.bin', 'indices.bin', 'clusters.bin', 'morph.bin'].map(stream));
-  if (vertices.byteLength !== manifest.vertexCount * MEADOW_VERT_WORDS * 4 ||
-      indices.byteLength !== manifest.triangleCount * 3 * 4 ||
-      clusters.byteLength !== manifest.clusterCount * MEADOW_CLUSTER_WORDS * 4 ||
-      morph.byteLength !== manifest.variantRecords.length * MEADOW_MORPH_VAR_WORDS * 4) {
-    throw Error('Meadow grass streams do not match manifest sizes');
-  }
-  return { manifest, vertices, indices, clusters, morph };
-}
-
+// The lists a patch's pieces are entered in, each drawn with one indirect call, and the vertices of one entry: a
+// cluster, 32 canopy-body triangles, or a splat. The unused vertices are degenerate.
+export const MEADOW_CONTINUUM_LISTS = Object.freeze(['clusters', 'far body', 'splat']);
+export const MEADOW_CONTINUUM_LIST_VERTICES = Object.freeze([3 * MEADOW_CONTINUUM_CLUSTER_TRIANGLES, 3 * MEADOW_CONTINUUM_CHUNK_TRIANGLES, 3]);
+// Patches to a block's side: the cut lists the blocks in view, then decides their patches.
+export const MEADOW_BLOCK_PATCHES = 16;
+// Room in each list; for the patches drawn, and for those whose clusters are cut. A patch past the room is dropped
+// and counted (MEADOW_COUNTER.lost).
+export const MEADOW_CONTINUUM_ROOM = Object.freeze({ clusters: 65536, far: 262144, splat: 393216, states: 524288, near: 8192 });
+const MEADOW_CONTINUUM_MOBILE_ROOM = Object.freeze({ clusters: 32768, far: 131072, splat: 196608, states: 262144, near: 4096 });
+// What an entry is, in the top four bits of its second word.
+export const MEADOW_CLUSTER_ENTRY = 1, MEADOW_FAR_ENTRY = 2, MEADOW_SPLAT_ENTRY = 3;
+// The counters: each list's draw (four words), then the patches drawn and those lost for room.
+export const MEADOW_COUNTER_WORDS = 16;
+export const MEADOW_COUNTER = Object.freeze({ states: 12, lost: 13 });
+// The work lists (blocks in view, patches to cut by clusters) begin with their own indirect dispatch.
+const MEADOW_WORK_HEADER = 4;
+// The shared uniform: 7 vec4s.
+const MEADOW_CFG_BYTES = 112;
+// How each draw reads its list: the list buffer bound as an instance-rate vertex buffer at the list's first entry.
+const MEADOW_ENTRY_LAYOUT = Object.freeze([Object.freeze({ arrayStride: 8, stepMode: 'instance', attributes: Object.freeze([Object.freeze({ shaderLocation: 0, offset: 0, format: 'uint32x2' })]) })]);
+// How far the sward may stand from where its bounds were baked: grown by the meadow's lushness and billow, bent by
+// the wind, and the land under a patch off the plane through its middle.
+const MEADOW_SWAY = 0.75;
+// A block's bounds: how far its sward reaches above its highest ground and its plants overhang its edge, and how far
+// the GPU's ground may lie from the heights the CPU read.
+const MEADOW_REACH_UP = 2.0, MEADOW_OVERHANG = 1.0, MEADOW_GROUND_SLACK = 2.0;
+// The ground meadows stop at.
+const MEADOW_WATERLINE = 0.75;
 function hash2D(ix, iz) {
   let h = (Math.imul(ix, 374761393) + Math.imul(iz, 668265263)) | 0;
   h = Math.imul(h ^ (h >>> 13), 1274126177);
@@ -656,203 +597,282 @@ fn meadowGroundY(p: vec2f, domain: vec4f, elevTex: texture_2d<f32>) -> f32 {
 }
 `;
 
-// 100% loop-free D3D12-safe compute shader on 1.75 m dense near lattice (gid.z == 0)
-// seamlessly partitioned into a 6x (10.50 m) outer continuum + horizon-splat ring out to ~782 m (gid.z == 1):
-//   - Holds 100% full LOD0 density (cut = 0, retireT = 0) inside ~20 m, then smoothly retires across [0 -> 1 -> 2 -> 3].
-//   - Zero loops, zero 90-deg float constants, per-tile slope normal packed into posRot.w via pack2x16snorm.
-export const MEADOW_STEP_WGSL = FRAME_WGSL + MEADOW_HASH_GROUND_WGSL + /* wgsl */ `
-struct MeadowStepCfg {
-  domain: vec4f, // region.x, region.z, region.span, minElev
-  params: vec4u, // gridSide, bucketSpan, clustersPerVariant, coverSize
+const MEADOW_AT = MEADOW_CONTINUUM_HEADER, MEADOW_VARIANT_AT = MEADOW_CONTINUUM_VARIANT;
+
+// What the cut and the drawing both know: the shared uniform, the atlas's layout and a patch's state.
+const MEADOW_ATLAS_WGSL = /* wgsl */ `
+const MEADOW_PATCH: f32 = ${MEADOW_PATCH_METRES.toFixed(4)};
+const MEADOW_BLOCK: i32 = ${MEADOW_BLOCK_PATCHES};
+const MEADOW_NEVER: u32 = ${MEADOW_CONTINUUM_NEVER}u;
+const MEADOW_SWAY: f32 = ${MEADOW_SWAY.toFixed(4)};
+struct MeadowCfg {
+  domain: vec4f, // the cover map's region: centre x, z, span; the waterline
+  params: vec4u, // samples a pixel, the cover map's size, 0, 0
+  crater: vec4f, // the crater field's origin x, z, its tile metres, 1 when bound
+  blocks: vec4i, // the region's first block x, z; blocks across x, z
+  scene: vec4f,  // the scene's pixel error (js/continuum-core.js), 0, 0, 0
+  room: vec4u,   // room in the lists: clusters, far body, splats; room for patches drawn
+  more: vec4u,   // room for patches cut by clusters; blocks in the region; 0, 0
 };
-
-@group(0) @binding(0) var<uniform> F: Frame;
-@group(0) @binding(1) var<uniform> cfg: MeadowStepCfg;
-@group(0) @binding(2) var<uniform> nearTerrain: MeadowNearDomain;
-@group(0) @binding(3) var elevation: texture_2d<f32>;
-@group(0) @binding(4) var meadowCover: texture_2d<f32>;
-@group(0) @binding(5) var<storage, read> meadowClusters: array<u32>;
-@group(0) @binding(6) var<storage, read_write> meadowInstWords: array<vec4f>;
-@group(0) @binding(7) var<storage, read_write> meadowDraws: array<atomic<u32>>;
-
-fn meadowCoverBilinear(uv: vec2f, cDim: i32) -> vec4f {
-  let lim = max(cDim - 1, 1);
-  let q = clamp(uv, vec2f(0.0), vec2f(1.0)) * f32(lim);
-  let i0 = min(vec2i(floor(q)), vec2i(max(lim - 1, 0)));
-  let f = q - vec2f(i0);
-  let c00 = textureLoad(meadowCover, i0, 0);
-  let c10 = textureLoad(meadowCover, min(i0 + vec2i(1, 0), vec2i(lim)), 0);
-  let c01 = textureLoad(meadowCover, min(i0 + vec2i(0, 1), vec2i(lim)), 0);
-  let c11 = textureLoad(meadowCover, min(i0 + vec2i(1, 1), vec2i(lim)), 0);
-  return mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
+fn meadowVariant(variant: u32, field: u32) -> u32 { return meadowAtlas[meadowAtlas[${MEADOW_AT.variantsAt}u] + variant * ${MEADOW_CONTINUUM_VARIANT_WORDS}u + field]; }
+fn meadowVariantF(variant: u32, field: u32) -> f32 { return bitcast<f32>(meadowVariant(variant, field)); }
+fn meadowVariantSphere(variant: u32) -> vec4f {
+  return vec4f(meadowVariantF(variant, ${MEADOW_VARIANT_AT.sphere}u), meadowVariantF(variant, ${MEADOW_VARIANT_AT.sphere + 1}u), meadowVariantF(variant, ${MEADOW_VARIANT_AT.sphere + 2}u), meadowVariantF(variant, ${MEADOW_VARIANT_AT.sphere + 3}u));
 }
-
-fn meadowPush(bucket: u32, posRot: vec4f, attrs: vec4f) {
-  let slot = atomicAdd(&meadowDraws[bucket * 4u + 1u], 1u);
-  if (slot < cfg.params.y) {
-    let base = (bucket * cfg.params.y + slot) * 2u;
-    meadowInstWords[base] = posRot;
-    meadowInstWords[base + 1u] = attrs;
-  }
+fn meadowStep(variant: u32, step: u32, word: u32) -> u32 { return meadowAtlas[meadowVariant(variant, ${MEADOW_VARIANT_AT.steps}u) + step * ${MEADOW_CONTINUUM_STEP_WORDS}u + word]; }
+fn meadowStepF(variant: u32, step: u32, word: u32) -> f32 { return bitcast<f32>(meadowStep(variant, step, word)); }
+fn meadowClusterWord(cluster: u32, word: u32) -> u32 { return meadowAtlas[meadowAtlas[${MEADOW_AT.clustersAt}u] + cluster * ${MEADOW_CONTINUUM_CLUSTER_WORDS}u + word]; }
+fn meadowClusterF(cluster: u32, word: u32) -> f32 { return bitcast<f32>(meadowClusterWord(cluster, word)); }
+fn meadowClusterSphere(cluster: u32, word: u32) -> vec4f {
+  return vec4f(meadowClusterF(cluster, word), meadowClusterF(cluster, word + 1u), meadowClusterF(cluster, word + 2u), meadowClusterF(cluster, word + 3u));
 }
-
-@compute @workgroup_size(8, 1, 1) fn meadowReset(@builtin(global_invocation_id) gid: vec3u) {
-  if (gid.x < ${MEADOW_BUCKETS}u) {
-    atomicStore(&meadowDraws[gid.x * 4u + 1u], 0u);
-  }
+fn meadowUnpackSlopeNormal(packed: u32) -> vec3f {
+  let sxz = unpack2x16snorm(packed);
+  return normalize(vec3f(sxz.x, sqrt(max(0.04, 1.0 - dot(sxz, sxz))), sxz.y));
 }
-
-@compute @workgroup_size(8, 8, 1) fn meadowSelect(@builtin(global_invocation_id) gid: vec3u) {
-  let gridSide = cfg.params.x;
-  if (gid.x >= gridSide || gid.y >= gridSide || gid.z >= 2u) { return; }
-  let halfGrid = i32(gridSide / 2u);
-  let innerMacroR = halfGrid / ${MEADOW_MACRO_MUL};
-  let innerCellR = innerMacroR * ${MEADOW_MACRO_MUL};
-  let offIJ = vec2i(i32(gid.x) - halfGrid, i32(gid.y) - halfGrid);
-
-  let isMacro = gid.z == 1u;
-  if (!isMacro) {
-    if (offIJ.x < -innerCellR || offIJ.x >= innerCellR || offIJ.y < -innerCellR || offIJ.y >= innerCellR) { return; }
-  } else {
-    if (offIJ.x >= -innerMacroR && offIJ.x < innerMacroR && offIJ.y >= -innerMacroR && offIJ.y < innerMacroR) { return; }
-  }
-
-  let shiftXZ = nearTerrain.grid.yz;
-  let camUnshifted = F.camPos.xz - shiftXZ;
-  let unitTileM = ${MEADOW_TILE_METRES.toFixed(4)};
-  let macroTileM = ${(MEADOW_TILE_METRES * MEADOW_MACRO_MUL).toFixed(4)};
-  let macroCam = vec2i(floor(camUnshifted / macroTileM));
-
-  let tileScale = select(1.0, ${MEADOW_MACRO_MUL}.0, isMacro);
-  let tileM = unitTileM * tileScale;
-  let cellIJ = select(macroCam * ${MEADOW_MACRO_MUL} + offIJ, macroCam + offIJ, isMacro);
-  let seed = meadowHash2(cellIJ ^ select(vec2i(0), vec2i(0x27d4eb2f, 0x165667b1), isMacro));
-  let originXZ = vec2f(cellIJ) * tileM;
-  let centerXZ = originXZ + vec2f(tileM * 0.5);
-
-  let outerMaxR = f32(halfGrid) * macroTileM - 16.0;
-  let horizDist = distance(centerXZ, camUnshifted);
-  if (horizDist > outerMaxR) { return; }
-
-  let uv = (centerXZ - cfg.domain.xy) / cfg.domain.z + 0.5;
-  if (uv.x <= 0.002 || uv.x >= 0.998 || uv.y <= 0.002 || uv.y >= 0.998) { return; }
-
-  let cDim = i32(cfg.params.w);
-  let cov = meadowCoverBilinear(uv, cDim);
-  let cOff = (tileM * 0.48) / cfg.domain.z;
-  let cPP = meadowCoverBilinear(uv + vec2f(cOff, cOff), cDim).r;
-  let cNP = meadowCoverBilinear(uv + vec2f(-cOff, cOff), cDim).r;
-  let cPN = meadowCoverBilinear(uv + vec2f(cOff, -cOff), cDim).r;
-  let cNN = meadowCoverBilinear(uv + vec2f(-cOff, -cOff), cDim).r;
-  let maxCorner = max(max(cPP, cNP), max(cPN, cNN));
-  let minCorner = min(min(cov.r, min(cPP, cNP)), min(cPN, cNN));
-  let minReq = select(0.020, 0.14, isMacro);
-  if (max(cov.r, maxCorner) < minReq) { return; }
-
-  let groundY = meadowGroundY(centerXZ, cfg.domain, elevation);
-  if (groundY < cfg.domain.w) { return; }
-
-  let shiftedCenter = vec3f(centerXZ.x + shiftXZ.x, groundY + 0.25, centerXZ.y + shiftXZ.y);
-  let rel = earthCurve(shiftedCenter - F.camPos.xyz, F.camPos.y);
-  let dist = length(rel);
-
-  let clip = F.viewProj * vec4f(rel, 1.0);
-  let margin = tileM * 0.95 + 1.8;
-  if (clip.w < -margin) { return; }
-  let wGuard = max(clip.w, 0.25) * 1.24 + margin;
-  if (abs(clip.x) > wGuard || abs(clip.y) > wGuard) { return; }
-
-  let epsH = max(1.5, tileM * 0.35);
-  let hx = (meadowGroundY(centerXZ + vec2f(epsH, 0.0), cfg.domain, elevation) - meadowGroundY(centerXZ - vec2f(epsH, 0.0), cfg.domain, elevation)) / (2.0 * epsH);
-  let hz = (meadowGroundY(centerXZ + vec2f(0.0, epsH), cfg.domain, elevation) - meadowGroundY(centerXZ - vec2f(0.0, epsH), cfg.domain, elevation)) / (2.0 * epsH);
-  let slopeN = normalize(vec3f(-hx, 1.0, -hz));
-  let packedSlope = bitcast<f32>(pack2x16snorm(slopeN.xz));
-
-  let mixJitter = f32((seed >> 24u) & 255u) / 255.0;
-  var mixIdx = 0u;
-  if (cov.g > 0.72 || (cov.g > 0.35 && mixJitter > 0.65)) {
-    mixIdx = 2u;
-  } else if (cov.g > 0.24) {
-    mixIdx = 1u;
-  }
-  let variantId = mixIdx * 4u + (seed & 3u);
-
-  let posRot = vec4f(originXZ.x, groundY, originXZ.y, packedSlope);
-  let seedF = bitcast<f32>(seed);
-
-  let focal = F.screen.y / max(2.0 * length(F.camUp.xyz), 0.0001);
-  let rawUnitSpanPx = (unitTileM * focal) / max(dist, 0.45);
-  let innerOrigin = vec2f(macroCam * ${MEADOW_MACRO_MUL}) * unitTileM;
-  let boxDist = max(abs(centerXZ.x - innerOrigin.x), abs(centerXZ.y - innerOrigin.y));
-  let innerBoxR = f32(innerCellR) * unitTileM;
-  let boxFade = smoothstep(innerBoxR - 18.0, innerBoxR - 2.5, boxDist);
-  let spanPx = select(
-    mix(rawUnitSpanPx, min(rawUnitSpanPx, ${MEADOW_FADE_OUT_PX.toFixed(1)} - 0.25), boxFade),
-    min(rawUnitSpanPx, ${MEADOW_FADE_OUT_PX.toFixed(1)} - 0.25),
-    isMacro,
-  );
-  let allowedErr = dist / max(focal, 1.0);
-  let vFirst = variantId * 4u;
-
-  if (!isMacro && spanPx >= ${MEADOW_FADE_IN_PX.toFixed(1)}) {
-    let e1 = bitcast<f32>(meadowClusters[(vFirst + 1u) * ${MEADOW_CLUSTER_WORDS}u + 4u]);
-    let e2 = bitcast<f32>(meadowClusters[(vFirst + 2u) * ${MEADOW_CLUSTER_WORDS}u + 4u]);
-    let e3 = bitcast<f32>(meadowClusters[(vFirst + 3u) * ${MEADOW_CLUSTER_WORDS}u + 4u]);
-    let lvl = select(select(select(0u, 1u, allowedErr >= e1), 2u, allowedErr >= e2), 3u, allowedErr >= e3);
-    let chosen = vFirst + lvl;
-    let cb = chosen * ${MEADOW_CLUSTER_WORDS}u;
-    let parentErr = bitcast<f32>(meadowClusters[cb + 3u]);
-    let selfErr = bitcast<f32>(meadowClusters[cb + 4u]);
-    // Hold 100% full LOD0 density inside ~20 m (70% of L0 error band), then smoothly retire sub-blades with zero pop!
-    let bandStart = mix(selfErr, parentErr, select(0.28, 0.70, lvl == 0u));
-    let levelT = clamp((allowedErr - bandStart) / max(parentErr - bandStart, 0.0005), 0.0, 1.0);
-    meadowPush(lvl, posRot, vec4f(bitcast<f32>(chosen), tileScale, levelT, seedF));
-    return;
-  }
-
-  if (!isMacro && spanPx > ${MEADOW_FADE_OUT_PX.toFixed(1)}) {
-    let fade = smoothstep(${MEADOW_FADE_IN_PX.toFixed(1)}, ${MEADOW_FADE_OUT_PX.toFixed(1)}, spanPx);
-    let cIdx = vFirst + 3u;
-    meadowPush(4u, posRot, vec4f(bitcast<f32>(cIdx), tileScale, fade, seedF));
-    meadowPush(5u, posRot, vec4f(bitcast<f32>(variantId), tileScale, fade, seedF));
-    return;
-  }
-
-  let tileSpanPx = (tileM * focal) / max(dist, 0.45);
-  if (tileSpanPx >= ${MEADOW_SPLAT_PX.toFixed(1)}) {
-    let uRaw = clamp((${MEADOW_FADE_OUT_PX.toFixed(1)} - spanPx) / ${(MEADOW_FADE_OUT_PX - MEADOW_SPLAT_PX).toFixed(1)}, 0.0, 1.0) * ${MEADOW_MORPH_STEPS}.0;
-    // Keep full 5x5 terrain-draped vertex grid on macro-tiles bordering roads, rivers, or steep ridges
-    let u = select(uRaw, 0.0, isMacro && minCorner < 0.42);
-    let stepIdx = min(${MEADOW_MORPH_STEPS - 1}u, u32(floor(u)));
-    let morphT = clamp(u - f32(stepIdx), 0.0, 0.999);
-    meadowPush(6u, posRot, vec4f(bitcast<f32>(variantId), tileScale, f32(stepIdx) + morphT, seedF));
-    return;
-  }
-
-  var inflate = 1.0;
-  if (tileSpanPx < ${MEADOW_MIN_PX.toFixed(1)}) {
-    let keepProb = clamp(tileSpanPx * tileSpanPx, 0.04, 1.0);
-    let uRand = f32(seed & 65535u) / 65536.0;
-    if (uRand > keepProb) { return; }
-    inflate = min(4.0, inverseSqrt(keepProb));
-  }
-  meadowPush(7u, posRot, vec4f(bitcast<f32>(variantId), tileScale, inflate, seedF));
+// A patch drawn this frame: which it is (its world cell, kept relative to the region's first block), how its
+// pixels are shared (the handoff's share | the splat's << 8 | its variant << 16), its far body's step | morph << 16
+// (or, drawn as a splat alone, the splat's scale), and its ground's slope.
+struct MeadowState { cell: vec2i, share: u32, splatShare: u32, variant: u32, step: u32, morph: f32, splatScale: f32, slope: vec3f, seed: u32 };
+fn meadowStateOf(index: u32) -> MeadowState {
+  let s = meadowStates[index];
+  var out: MeadowState;
+  out.cell = vec2i(i32(s.x & 65535u), i32(s.x >> 16u)) + cfg.blocks.xy * MEADOW_BLOCK;
+  out.share = s.y & 255u;
+  out.splatShare = (s.y >> 8u) & 255u;
+  out.variant = (s.y >> 16u) & 255u;
+  out.step = s.z & 65535u;
+  out.morph = f32(s.z >> 16u) / 65535.0;
+  out.splatScale = select(1.0, bitcast<f32>(s.z), out.splatShare == 255u);
+  out.slope = meadowUnpackSlopeNormal(s.w);
+  out.seed = meadowHash2(out.cell);
+  return out;
 }
 `;
 
+// --------------------------------------------------------------------------------------------- the cut
+export const MEADOW_CUT_WGSL = FRAME_WGSL + CONTINUUM_CORE_WGSL + MEADOW_HASH_GROUND_WGSL + /* wgsl */ `
+@group(0) @binding(0) var<uniform> F: Frame;
+@group(0) @binding(1) var<uniform> cfg: MeadowCfg;
+@group(0) @binding(2) var<uniform> nearTerrain: MeadowNearDomain;
+@group(0) @binding(3) var elevation: texture_2d<f32>;
+@group(0) @binding(4) var meadowCover: texture_2d<f32>;
+@group(0) @binding(5) var<storage, read> meadowAtlas: array<u32>;
+@group(0) @binding(6) var<storage, read> meadowBlocks: array<vec4f>;            // a block's most cover, lowest and highest ground
+@group(0) @binding(7) var<storage, read_write> meadowStates: array<vec4u>;
+@group(0) @binding(8) var<storage, read_write> meadowLists: array<vec2u>;
+@group(0) @binding(9) var<storage, read_write> meadowCounters: array<atomic<u32>>;
+@group(0) @binding(10) var<storage, read_write> meadowBlockWork: array<atomic<u32>>; // the blocks in view, as the blocks pass writes them
+@group(0) @binding(11) var<storage, read> meadowBlockList: array<u32>;             // and as the patches pass reads them
+@group(0) @binding(12) var<storage, read_write> meadowNearWork: array<atomic<u32>>;  // the patches cut by clusters, as written
+@group(0) @binding(13) var<storage, read> meadowNearList: array<u32>;              // and as read
+` + MEADOW_ATLAS_WGSL + /* wgsl */ `
+const MEADOW_FULL: u32 = 0xffffffffu;
+const MEADOW_STATES: u32 = ${MEADOW_COUNTER.states}u;
+const MEADOW_LOST: u32 = ${MEADOW_COUNTER.lost}u;
+const MEADOW_WORK: u32 = ${MEADOW_WORK_HEADER}u;
+// The morph search reads the steps of the variant in hand.
+var<private> meadowSteps: u32;
+${continuumClusterPrefixWGSL('meadowClusterPrefix', (i) => `meadowClusterF(${i}, 13u)`)}
+${continuumMorphStepWGSL('meadowMorphStep', (i) => `bitcast<f32>(meadowAtlas[meadowSteps + (${i}) * ${MEADOW_CONTINUUM_STEP_WORDS}u + 1u])`)}
+fn meadowFocal() -> f32 { return F.screen.y / max(2.0 * length(F.camUp.xyz), 1e-4); }
+fn meadowShift() -> vec3f { return vec3f(nearTerrain.grid.y, 0.0, nearTerrain.grid.z); }
+fn meadowOutside(at: vec3f, reach: f32) -> bool {
+  let m = F.viewProj; let p = vec4f(at, 1.0);
+  let w = vec4f(m[0].w, m[1].w, m[2].w, m[3].w); let x = vec4f(m[0].x, m[1].x, m[2].x, m[3].x); let y = vec4f(m[0].y, m[1].y, m[2].y, m[3].y);
+  let planes = array<vec4f, 5>(w + x, w - x, w + y, w - y, w);
+  for (var i = 0u; i < 5u; i++) { if (dot(planes[i], p) < -reach * length(planes[i].xyz)) { return true; } }
+  return false;
+}
+// Room for 'count' entries in a list: the first one's index, or MEADOW_FULL.
+fn meadowAppend(list: u32, count: u32) -> u32 {
+  let room = array<u32, 3>(cfg.room.x, cfg.room.y, cfg.room.z);
+  let first = array<u32, 3>(0u, cfg.room.x, cfg.room.x + cfg.room.y);
+  let at = atomicAdd(&meadowCounters[list * 4u + 1u], count);
+  if (at + count > room[list]) {
+    atomicSub(&meadowCounters[list * 4u + 1u], count);
+    atomicAdd(&meadowCounters[MEADOW_LOST], 1u);
+    return MEADOW_FULL;
+  }
+  return first[list] + at;
+}
+fn meadowCoverAt(uv: vec2f) -> vec4f {
+  let limit = max(vec2i(textureDimensions(meadowCover)) - vec2i(1), vec2i(1));
+  let q = clamp(uv, vec2f(0.0), vec2f(1.0)) * vec2f(limit);
+  let i = min(vec2i(floor(q)), max(limit - vec2i(1), vec2i(0)));
+  let f = q - vec2f(i);
+  let c00 = textureLoad(meadowCover, i, 0);
+  let c10 = textureLoad(meadowCover, min(i + vec2i(1, 0), limit), 0);
+  let c01 = textureLoad(meadowCover, min(i + vec2i(0, 1), limit), 0);
+  let c11 = textureLoad(meadowCover, min(i + vec2i(1, 1), limit), 0);
+  return mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
+}
+// A point of a patch, in its own metres, stood on the ground under it (without the world's offset).
+fn meadowStand(origin: vec2f, local: vec3f) -> vec3f {
+  let xz = origin + local.xz;
+  return vec3f(xz.x, meadowGroundY(xz, cfg.domain, elevation) + local.y, xz.y);
+}
+
+// The counters and work lists emptied, each draw's vertex count set.
+@compute @workgroup_size(16) fn meadowReset(@builtin(local_invocation_index) i: u32) {
+  let vertices = array<u32, 3>(${MEADOW_CONTINUUM_LIST_VERTICES.map((n) => `${n}u`).join(', ')});
+  atomicStore(&meadowCounters[i], select(0u, vertices[min(i / 4u, 2u)], i < 12u && i % 4u == 0u));
+  if (i < 4u) {
+    atomicStore(&meadowBlockWork[i], select(0u, 1u, i == 1u || i == 2u));
+    atomicStore(&meadowNearWork[i], select(0u, 1u, i == 1u || i == 2u));
+  }
+}
+
+// One thread a block of the region: those holding grass above the waterline and in view are listed, and the
+// patches pass is dispatched once for each.
+@compute @workgroup_size(64) fn meadowBlocksInView(@builtin(global_invocation_id) id: vec3u) {
+  if (id.x >= cfg.more.y) { return; }
+  let data = meadowBlocks[id.x];
+  if (data.x < 0.02 || data.z < cfg.domain.w - ${MEADOW_GROUND_SLACK.toFixed(1)}) { return; }
+  let across = u32(max(cfg.blocks.z, 1));
+  let side = MEADOW_PATCH * f32(MEADOW_BLOCK);
+  let low = vec2f(cfg.blocks.xy + vec2i(i32(id.x % across), i32(id.x / across))) * side;
+  let bottom = data.y - ${MEADOW_GROUND_SLACK.toFixed(1)};
+  let top = data.z + ${(MEADOW_REACH_UP + MEADOW_GROUND_SLACK).toFixed(1)};
+  let centre = vec3f(low.x + side * 0.5, (bottom + top) * 0.5, low.y + side * 0.5);
+  let reach = length(vec3f(side * 0.5 + ${MEADOW_OVERHANG.toFixed(1)}, (top - bottom) * 0.5, side * 0.5 + ${MEADOW_OVERHANG.toFixed(1)}));
+  if (meadowOutside(earthCurve(centre + meadowShift() - F.camPos.xyz, F.camPos.y), reach)) { return; }
+  let at = atomicAdd(&meadowBlockWork[0], 1u);
+  atomicStore(&meadowBlockWork[MEADOW_WORK + at], id.x);
+}
+
+// How one patch is drawn this frame.
+fn meadowDecide(cell: vec2i) {
+  let origin = vec2f(cell) * MEADOW_PATCH;
+  let half = MEADOW_PATCH * 0.5;
+  let middle = origin + vec2f(half);
+  let uv = (middle - cfg.domain.xy) / cfg.domain.z + 0.5;
+  if (any(uv <= vec2f(0.002)) || any(uv >= vec2f(0.998))) { return; }
+  // Grass where the cover map grows it at its middle or a corner, on dry ground.
+  let cover = meadowCoverAt(uv);
+  let o = half / cfg.domain.z;
+  let corners = max(max(meadowCoverAt(uv + vec2f(o, o)).r, meadowCoverAt(uv + vec2f(-o, o)).r), max(meadowCoverAt(uv + vec2f(o, -o)).r, meadowCoverAt(uv + vec2f(-o, -o)).r));
+  if (max(cover.r, corners) < 0.02) { return; }
+  let ground = meadowGroundY(middle, cfg.domain, elevation);
+  if (ground < cfg.domain.w) { return; }
+  let hx = (meadowGroundY(middle + vec2f(half, 0.0), cfg.domain, elevation) - meadowGroundY(middle - vec2f(half, 0.0), cfg.domain, elevation)) / MEADOW_PATCH;
+  let hz = (meadowGroundY(middle + vec2f(0.0, half), cfg.domain, elevation) - meadowGroundY(middle - vec2f(0.0, half), cfg.domain, elevation)) / MEADOW_PATCH;
+  let slope = normalize(vec3f(-hx, 1.0, -hz));
+  // Its variant: the cover map's mix (pasture, waste, field margin), one of four by a hash of where it lies.
+  let seed = meadowHash2(cell);
+  let jitter = f32((seed >> 24u) & 255u) / 255.0;
+  var mixIndex = 0u;
+  if (cover.g > 0.72 || (cover.g > 0.35 && jitter > 0.65)) { mixIndex = 2u; } else if (cover.g > 0.24) { mixIndex = 1u; }
+  let variant = mixIndex * 4u + (seed & 3u);
+  // Everything the variant can draw, stood on the plane of its ground.
+  let sphere = meadowVariantSphere(variant);
+  let centre = vec3f(origin.x + sphere.x, ground + sphere.y + hx * (sphere.x - half) + hz * (sphere.z - half), origin.y + sphere.z);
+  let reach = sphere.w * (1.0 + abs(hx) + abs(hz)) + MEADOW_SWAY;
+  let relative = centre + meadowShift() - F.camPos.xyz;
+  if (meadowOutside(earthCurve(relative, F.camPos.y), reach)) { return; }
+  let away = max(length(relative), 1e-3);
+  let focal = meadowFocal();
+  let pixels = cfg.scene.x;
+  meadowSteps = meadowVariant(variant, ${MEADOW_VARIANT_AT.steps}u);
+  let steps = meadowVariant(variant, ${MEADOW_VARIANT_AT.stepCount}u);
+  // Where the far body's error at its first step is all the scene allows, it takes over from the clusters, over a
+  // band of distance.
+  let farFirst = meadowVariant(variant, ${MEADOW_VARIANT_AT.farFirst}u);
+  let start = meadowStepF(variant, farFirst, 1u) * focal / pixels;
+  let share = u32(round(continuumHandoff(away, start) * 255.0));
+  // Its span: the width of a disc of the area the patch shows from here (its ground at this slant, its canopy
+  // standing up).
+  let toward = relative / away;
+  let canopy = meadowVariantF(variant, ${MEADOW_VARIANT_AT.canopy}u);
+  let area = MEADOW_PATCH * MEADOW_PATCH * abs(toward.y) + MEADOW_PATCH * canopy * (abs(toward.x) + abs(toward.z));
+  let span = 2.0 * sqrt(area / 3.14159265) * focal / away;
+  let splatShare = u32(round(continuumSplatShare(span) * 255.0));
+  var splat = false; var chunks = 0u; var step = 0u; var morph = 0.0; var splatScale = 1.0;
+  if (share > 0u) {
+    splatScale = continuumThin(span, seed);
+    splat = splatShare > 0u && splatScale > 0.0;
+    if (splatShare < 255u) {
+      let chosen = meadowMorphStep(steps, pixels * away / focal);
+      step = u32(chosen.x); morph = chosen.y;
+      if (step < farFirst) { step = farFirst; morph = 0.0; }
+      chunks = (meadowStep(variant, step, 0u) + ${MEADOW_CONTINUUM_CHUNK_TRIANGLES - 1}u) / ${MEADOW_CONTINUUM_CHUNK_TRIANGLES}u;
+    }
+  }
+  let near = share < 255u;
+  if (!near && !splat && chunks == 0u) { return; }
+  let slot = atomicAdd(&meadowCounters[MEADOW_STATES], 1u);
+  if (slot >= cfg.room.w) { atomicSub(&meadowCounters[MEADOW_STATES], 1u); atomicAdd(&meadowCounters[MEADOW_LOST], 1u); return; }
+  let local = vec2u(cell - cfg.blocks.xy * MEADOW_BLOCK);
+  let third = select(step | (u32(round(morph * 65535.0)) << 16u), bitcast<u32>(splatScale), splatShare == 255u);
+  meadowStates[slot] = vec4u(local.x | (local.y << 16u), share | (splatShare << 8u) | (variant << 16u), third, pack2x16snorm(slope.xz));
+  if (splat) {
+    let at = meadowAppend(2u, 1u);
+    if (at != MEADOW_FULL) { meadowLists[at] = vec2u(slot, ${MEADOW_SPLAT_ENTRY}u << 28u); }
+  }
+  if (chunks > 0u) {
+    let at = meadowAppend(1u, chunks);
+    if (at != MEADOW_FULL) { for (var c = 0u; c < chunks; c++) { meadowLists[at + c] = vec2u(slot, c | (${MEADOW_FAR_ENTRY}u << 28u)); } }
+  }
+  if (near) {
+    let at = atomicAdd(&meadowNearWork[0], 1u);
+    if (at >= cfg.more.x) { atomicSub(&meadowNearWork[0], 1u); atomicAdd(&meadowCounters[MEADOW_LOST], 1u); }
+    else { atomicStore(&meadowNearWork[MEADOW_WORK + at], slot); }
+  }
+}
+
+// One workgroup a listed block, four of its patches a lane.
+@compute @workgroup_size(64) fn meadowPatches(@builtin(workgroup_id) group: vec3u, @builtin(local_invocation_index) lane: u32) {
+  let block = meadowBlockList[MEADOW_WORK + group.x];
+  let across = u32(max(cfg.blocks.z, 1));
+  let first = (cfg.blocks.xy + vec2i(i32(block % across), i32(block / across))) * MEADOW_BLOCK;
+  for (var k = 0u; k < 4u; k++) {
+    let p = lane + k * 64u;
+    meadowDecide(first + vec2i(i32(p % u32(MEADOW_BLOCK)), i32(p / u32(MEADOW_BLOCK))));
+  }
+}
+
+var<workgroup> meadowNear: vec4u;     // the patch's state, its variant's first cluster, the clusters to try, 0
+var<workgroup> meadowNearView: vec4f; // focal, allowed pixels, how much the ground's slope widens a sphere, 0
+// One workgroup a patch cut by clusters: the clusters drawn at its distance, by the core's own test, those in view
+// entered in the list.
+@compute @workgroup_size(64) fn meadowClusters(@builtin(workgroup_id) group: vec3u, @builtin(local_invocation_index) lane: u32) {
+  if (lane == 0u) {
+    let index = meadowNearList[MEADOW_WORK + group.x];
+    let state = meadowStateOf(index);
+    let origin = vec2f(state.cell) * MEADOW_PATCH;
+    let focal = meadowFocal();
+    let pixels = cfg.scene.x;
+    let tilt = (abs(state.slope.x) + abs(state.slope.z)) / max(state.slope.y, 0.2);
+    let sphere = meadowVariantSphere(state.variant);
+    let reach = sphere.w * (1.0 + tilt) + MEADOW_SWAY;
+    let away = length(meadowStand(origin, sphere.xyz) + meadowShift() - F.camPos.xyz);
+    let first = meadowVariant(state.variant, ${MEADOW_VARIANT_AT.clusterFirst}u);
+    let candidates = meadowClusterPrefix(first, meadowVariant(state.variant, ${MEADOW_VARIANT_AT.clusterCount}u), pixels * max(away - reach, 0.25) / focal);
+    meadowNear = vec4u(index, first, candidates, 0u);
+    meadowNearView = vec4f(focal, pixels, tilt, 0.0);
+  }
+  let chosen = workgroupUniformLoad(&meadowNear);
+  let view = workgroupUniformLoad(&meadowNearView);
+  if (chosen.z == 0u) { return; }
+  let origin = vec2f(meadowStateOf(chosen.x).cell) * MEADOW_PATCH;
+  let shift = meadowShift() - F.camPos.xyz;
+  let grow = 1.0 + view.z;
+  for (var i = lane; i < chosen.z; i += 64u) {
+    let c = chosen.y + i;
+    let lod = meadowClusterSphere(c, 0u);
+    let parent = meadowClusterSphere(c, 4u);
+    if (!continuumClusterDrawn(meadowClusterF(c, 12u), meadowStand(origin, lod.xyz) + shift, lod.w * grow + MEADOW_SWAY,
+      meadowClusterF(c, 13u), meadowStand(origin, parent.xyz) + shift, parent.w * grow + MEADOW_SWAY, view.x, view.y)) { continue; }
+    let cull = meadowClusterSphere(c, 8u);
+    if (meadowOutside(earthCurve(meadowStand(origin, cull.xyz) + shift, F.camPos.y), cull.w * grow + MEADOW_SWAY)) { continue; }
+    let at = meadowAppend(0u, 1u);
+    if (at != MEADOW_FULL) { meadowLists[at] = vec2u(chosen.x, c | (${MEADOW_CLUSTER_ENTRY}u << 28u)); }
+  }
+}
+`;
+
+// --------------------------------------------------------------------------------------------- drawing
 const MEADOW_COMMON_WGSL = MEADOW_HASH_GROUND_WGSL + LAND_CRATER_SAMPLE_WGSL + /* wgsl */ `
-struct MeadowCfg {
-  domain: vec4f,            // region.x, region.z, region.span, minElev
-  params: vec4u,            // gridSide, bucketSpan, sampleCount, coverSize
-  crater: vec4f,            // originX, originZ, tileMetres (8.0), enabled (0 or 1)
-  splats: array<vec4f, 24>, // [v*2] = (centreY, rx, ry, coreTris), [v*2+1] = (meanR, meanG, meanB, tileMetres)
-};
-
-struct MeadowInst {
-  posRot: vec4f,    // tileOriginX, groundY_center, tileOriginZ, bitcast<f32>(pack2x16snorm(slopeNormal.xz))
-  attrs: vec4f,     // bitcast<f32>(clusterOrVariant), tileScale, morphParam, bitcast<f32>(seed)
-};
-
 struct ShotWake {
   posRad: vec4f,    // x, y, z (unshifted coast world m), signedRadius (< 0 = hot shot)
   velTrail: vec4f,  // vx, vy, vz (m/s), trailLen (m)
@@ -917,14 +937,6 @@ fn meadowWorldBillow(p: vec2f) -> vec3f {
   let gz = 0.06 * cos(a1) * cos(a2 * 0.85) * 0.35 + 0.05 * cos(a2) * 0.41 + 0.03 * sin(a3) * 0.18;
   return vec3f(h, gx * 0.10, gz * 0.10);
 }
-
-// Lossless right-handed (det = +1) 90-deg quadrant rotation in XZ: preserves CCW triangle winding & D4 border welds!
-fn meadowRotQuadXZ(v: vec2f, q: u32) -> vec2f {
-  if (q == 1u) { return vec2f(-v.y, v.x); }
-  if (q == 2u) { return vec2f(-v.x, -v.y); }
-  if (q == 3u) { return vec2f(v.y, -v.x); }
-  return v;
-}
 `;
 
 export const MEADOW_RENDER_WGSL = FRAME_WGSL + ATMO_CORE_WGSL + SHADOW_FRAME + SKY_RENDER_FUNCS + CLOUD_SAMPLE + CONTINUUM_CORE_WGSL + MEADOW_COMMON_WGSL + /* wgsl */ `
@@ -935,11 +947,8 @@ export const MEADOW_RENDER_WGSL = FRAME_WGSL + ATMO_CORE_WGSL + SHADOW_FRAME + S
 @group(0) @binding(4) var envCube: texture_cube<f32>;
 @group(0) @binding(5) var<uniform> cfg: MeadowCfg;
 @group(0) @binding(6) var elevation: texture_2d<f32>;
-@group(0) @binding(7) var<storage, read> meadowVerts: array<u32>;
-@group(0) @binding(8) var<storage, read> meadowIndices: array<u32>;
-@group(0) @binding(9) var<storage, read> meadowClusters: array<u32>;
-@group(0) @binding(10) var<storage, read> meadowMorph: array<u32>;
-@group(0) @binding(11) var<storage, read> meadowInstances: array<MeadowInst>;
+@group(0) @binding(7) var<storage, read> meadowAtlas: array<u32>;
+@group(0) @binding(8) var<storage, read> meadowStates: array<vec4u>;
 @group(0) @binding(12) var<uniform> nearTerrain: MeadowNearDomain;
 @group(0) @binding(13) var<uniform> wakes: MeadowWakeFrame;
 @group(0) @binding(14) var landCraterLookup: texture_2d<i32>;
@@ -951,27 +960,29 @@ export const MEADOW_RENDER_WGSL = FRAME_WGSL + ATMO_CORE_WGSL + SHADOW_FRAME + S
 @group(0) @binding(20) var landSolidShadow: texture_depth_2d;
 @group(0) @binding(21) var landShadowCompare: sampler_comparison;
 @group(0) @binding(22) var landCraterField: texture_2d_array<f32>;
-@group(2) @binding(0) var<uniform> meadowDraw: vec4u; // offsetInst, bucketId, 0, 0
-
+` + MEADOW_ATLAS_WGSL + /* wgsl */ `
 struct MeadowVertexOut {
   @builtin(position) pos: vec4f,
   @location(0) world: vec3f,
   @location(1) normal: vec3f,
   @location(2) colour: vec3f,
-  @location(3) windInfo: vec4f,    // along, gust, swell, fade
-  @location(4) tendrilFlow: vec4f, // bentUnshiftedXZ.xy, camDist, distFade
+  @location(3) windInfo: vec4f,    // along, gust, swell, 1
+  @location(4) tendrilFlow: vec4f, // bentUnshiftedXZ.xy, camDist, 1
   @location(5) damageInfo: vec2f,  // hotSinge, bendSlope
+  @location(6) @interpolate(flat) coverage: vec4u, // the draw (1 clusters, 2 far body, 3 splat), handoff | splat << 8, the patch's seed, samples
 };
 
+struct MeadowEntry { @location(0) entry: vec2u };
+
+// A vertex of the sward or of a canopy body, as the atlas holds it, in its patch's own metres.
 struct MeadowVertexData {
   pos: vec3f,
   nrm: vec3f,
   col: vec3f,
   along: f32,
   stiff: f32,
-  wTag: f32,
   tuftRand: f32,
-  morphXZ: vec2f,
+  offset: vec3f,
 };
 
 struct MeadowBallisticDeform {
@@ -981,51 +992,32 @@ struct MeadowBallisticDeform {
   hotSinge: f32,
 };
 
-fn meadowReadClusterVert(vi: u32) -> MeadowVertexData {
-  let b = vi * ${MEADOW_VERT_WORDS}u;
-  let rgba = unpack4x8unorm(meadowVerts[b + 4u]);
-  let sn = unpack4x8snorm(meadowVerts[b + 3u]);
-  let morphXZ = unpack2x16float(meadowVerts[b + 7u]);
-  return MeadowVertexData(
-    vec3f(bitcast<f32>(meadowVerts[b]), bitcast<f32>(meadowVerts[b + 1u]), bitcast<f32>(meadowVerts[b + 2u])),
-    normalize(sn.xyz),
-    pow(rgba.rgb, vec3f(2.2)),
-    bitcast<f32>(meadowVerts[b + 5u]),
-    max(bitcast<f32>(meadowVerts[b + 6u]), 0.8),
-    sn.w,
-    rgba.a,
-    morphXZ,
-  );
+fn meadowOctahedral(e: vec2f) -> vec3f {
+  let f = e * 2.0 - 1.0;
+  var n = vec3f(f.x, f.y, 1.0 - abs(f.x) - abs(f.y));
+  let t = max(-n.z, 0.0);
+  n.x += select(t, -t, n.x >= 0.0); n.y += select(t, -t, n.y >= 0.0);
+  return normalize(n);
+}
+fn meadowSigned8(v: u32) -> f32 { return f32(bitcast<i32>((v & 255u) << 24u) >> 24u) * ${MEADOW_CONTINUUM_OFFSET_UNIT.toFixed(8)}; }
+fn meadowPoint(vertex: u32) -> MeadowVertexData {
+  let at = meadowAtlas[${MEADOW_AT.verticesAt}u] + vertex * ${MEADOW_CONTINUUM_VERTEX_WORDS}u;
+  let w0 = meadowAtlas[at]; let w1 = meadowAtlas[at + 1u]; let w2 = meadowAtlas[at + 2u]; let w3 = meadowAtlas[at + 3u];
+  let low = vec3f(bitcast<f32>(meadowAtlas[${MEADOW_AT.low}u]), bitcast<f32>(meadowAtlas[${MEADOW_AT.low + 1}u]), bitcast<f32>(meadowAtlas[${MEADOW_AT.low + 2}u]));
+  var p: MeadowVertexData;
+  p.pos = low + vec3f(f32(w0 & 65535u), f32(w0 >> 16u), f32(w1 & 65535u)) * (bitcast<f32>(meadowAtlas[${MEADOW_AT.span}u]) / 65535.0);
+  p.along = f32((w1 >> 16u) & 255u) / 255.0;
+  p.stiff = max(f32((w1 >> 24u) & 15u) * ${MEADOW_CONTINUUM_STIFFNESS_UNIT.toFixed(4)}, 0.8);
+  p.tuftRand = (f32(w1 >> 28u) + 0.5) / 16.0;
+  p.nrm = meadowOctahedral(vec2f(f32(w2 & 255u), f32((w2 >> 8u) & 255u)) / 255.0);
+  p.offset = vec3f(meadowSigned8(w2 >> 16u), meadowSigned8(w2 >> 24u), meadowSigned8(w3 >> 24u));
+  p.col = pow(vec3f(f32(w3 & 255u), f32((w3 >> 8u) & 255u), f32((w3 >> 16u) & 255u)) / 255.0, vec3f(2.2));
+  return p;
 }
 
-fn meadowMorphRawXZ(vBase: u32, vi: u32) -> vec2f {
-  let b = vBase + vi * ${MEADOW_VERT_WORDS}u;
-  return vec2f(bitcast<f32>(meadowMorph[b]), bitcast<f32>(meadowMorph[b + 2u]));
-}
-
-fn meadowReadMorphVert(vBase: u32, vi: u32, tileScale: f32) -> MeadowVertexData {
-  let b = vBase + vi * ${MEADOW_VERT_WORDS}u;
-  let rgba = unpack4x8unorm(meadowMorph[b + 4u]);
-  let halfTile = ${(MEADOW_TILE_METRES * 0.5).toFixed(4)} * tileScale;
-  return MeadowVertexData(
-    vec3f(
-      bitcast<f32>(meadowMorph[b]) * tileScale + halfTile,
-      bitcast<f32>(meadowMorph[b + 1u]),
-      bitcast<f32>(meadowMorph[b + 2u]) * tileScale + halfTile,
-    ),
-    normalize(unpack4x8snorm(meadowMorph[b + 3u]).xyz),
-    pow(rgba.rgb, vec3f(2.2)),
-    bitcast<f32>(meadowMorph[b + 5u]),
-    max(bitcast<f32>(meadowMorph[b + 6u]), 0.8),
-    1.0,
-    1.0,
-    vec2f(0.0),
-  );
-}
-
-fn meadowDegenerateOut() -> MeadowVertexOut {
+fn meadowHidden() -> MeadowVertexOut {
   var o: MeadowVertexOut;
-  o.pos = vec4f(0.0, 0.0, 0.0, 1.0);
+  o.pos = vec4f(2.0, 2.0, 0.0, 1.0);
   return o;
 }
 
@@ -1039,11 +1031,6 @@ fn meadowGroundColour(unshiftedXZ: vec2f) -> vec3f {
 
 fn meadowCoverAt(unshiftedXZ: vec2f) -> vec4f {
   return textureSampleLevel(meadowCover, landSampler, meadowDomainUV(unshiftedXZ), 0.0);
-}
-
-fn meadowUnpackSlopeNormal(packedSlopeF: f32) -> vec3f {
-  let sxz = unpack2x16snorm(bitcast<u32>(packedSlopeF));
-  return normalize(vec3f(sxz.x, sqrt(max(0.04, 1.0 - dot(sxz, sxz))), sxz.y));
 }
 
 // Evaluates GPU crater burial + radial blast parting, live low-flying cannonball V-wake furrows,
@@ -1148,24 +1135,17 @@ fn meadowEvalBallistics(unshiftedXZ: vec2f, groundY: f32, seed: u32) -> MeadowBa
   return out;
 }
 
-fn meadowShadePlace(inst: MeadowInst, vd: MeadowVertexData, fadeVal: f32) -> MeadowVertexOut {
-  let seed = bitcast<u32>(inst.attrs.w);
-  let rotQ = (seed >> 2u) & 3u;
-  let tileScale = max(inst.attrs.y, 1.0);
-  let halfTile = ${(MEADOW_TILE_METRES * 0.5).toFixed(4)} * tileScale;
-
-  // Per-cell deterministic 90-deg (0/90/180/270) rotation around cell center -> zero grid stripes or seams!
-  let rotLocalXZ = meadowRotQuadXZ(vd.pos.xz - vec2f(halfTile), rotQ) + vec2f(halfTile);
-  let unshiftedXZ = inst.posRot.xz + rotLocalXZ;
+// A point of a patch stood on the ground under it, grown by the meadow's lushness and billow, bent by the wind and
+// parted by shot. 'blade': a point of the sward, thinned plant by plant where the cover thins; otherwise of a canopy
+// body, which sinks there instead.
+fn meadowShadePlace(state: MeadowState, vd: MeadowVertexData, blade: bool) -> MeadowVertexOut {
+  let seed = state.seed;
+  let unshiftedXZ = vec2f(state.cell) * MEADOW_PATCH + vd.pos.xz;
   let groundY = meadowGroundY(unshiftedXZ, cfg.domain, elevation);
   let shiftXZ = nearTerrain.grid.yz;
-  let camUnshifted = F.camPos.xz - shiftXZ;
-  let horizDist = distance(unshiftedXZ, camUnshifted);
   let camDist = distance(vec3f(unshiftedXZ.x + shiftXZ.x, groundY, unshiftedXZ.y + shiftXZ.y), F.camPos.xyz);
 
   let vCov = meadowCoverAt(unshiftedXZ);
-  let maxOuterR = f32(cfg.params.x / 2u) * ${(MEADOW_TILE_METRES * MEADOW_MACRO_MUL).toFixed(4)} - 16.0;
-  let distFade = 1.0 - smoothstep(maxOuterR * 0.80, maxOuterR, horizDist);
 
   // Strict waterline & submerged terrain exclusion (zero blades on sea, estuaries, or carved inlandWater!)
   let dryLand = step(cfg.domain.w, groundY);
@@ -1173,16 +1153,15 @@ fn meadowShadePlace(inst: MeadowInst, vd: MeadowVertexData, fadeVal: f32) -> Mea
   // Organic ecotone blending along paths, beaches & riverbanks (cover 0.55 -> 0.06):
   // per-clump deterministic hash breaks borders into scattered tussocks & short grazed tufts (scaleY 0.40..1.0)
   // rather than uniform sparse needles!
-  let isClusterBlade = vd.tuftRand < 0.995;
   var tuftAlive = smoothstep(0.06, 0.55, vCov.r);
   var ecotoneScaleY = 1.0;
-  if (isClusterBlade) {
+  if (blade) {
     let keepFrac = smoothstep(0.06, 0.55, vCov.r);
     let clumpHash = clamp(fract(vd.tuftRand * 1.07 + f32((seed >> 8u) & 255u) / 256.0), 0.04, 0.96);
     tuftAlive = smoothstep(clumpHash - 0.06, clumpHash + 0.06, keepFrac);
     ecotoneScaleY = mix(0.40, 1.0, keepFrac);
   }
-  let bladeAlive = tuftAlive * distFade * dryLand;
+  let bladeAlive = tuftAlive * dryLand;
   let heightWeight = ecotoneScaleY * bladeAlive;
 
   let wind = meadowWindField(unshiftedXZ, F.camPos.w, F.windP[0]);
@@ -1199,7 +1178,7 @@ fn meadowShadePlace(inst: MeadowInst, vd: MeadowVertexData, fadeVal: f32) -> Mea
   let ballistics = meadowEvalBallistics(unshiftedXZ, groundY, seed);
 
   // Tuck retired / submerged / crater-buried roots cleanly beneath terrain surface.
-  let marginRetired = max(1.0 - smoothstep(0.03, 0.06, vCov.r * distFade * dryLand), 1.0 - smoothstep(0.02, 0.16, bladeAlive));
+  let marginRetired = max(1.0 - smoothstep(0.03, 0.06, vCov.r * dryLand), 1.0 - smoothstep(0.02, 0.16, bladeAlive));
   let edgeTuck = -0.045 * marginRetired - 0.090 * ballistics.buryDepth;
 
   let flexAlong = clamp(vd.along * 1.26, 0.0, 1.12);
@@ -1229,14 +1208,12 @@ fn meadowShadePlace(inst: MeadowInst, vd: MeadowVertexData, fadeVal: f32) -> Mea
 
   let world = vec3f(unshiftedXZ.x + dispXZ.x + shiftXZ.x, groundY + heightM - arcDrop, unshiftedXZ.y + dispXZ.y + shiftXZ.y);
 
-  // Rotate vertex normals with the 90-deg cell quadrant AND tilt dynamically with the wind bend:
-  //   nBent = normalize(nRest - bendDir * bendSlope * 0.85)
-  let terrainN = meadowUnpackSlopeNormal(inst.posRot.w);
-  let rotNrmXZ = meadowRotQuadXZ(vd.nrm.xz, rotQ);
+  // Normals lean on the ground's slope and tilt with the wind bend: nBent = normalize(nRest - bendDir * bendSlope * 0.85)
+  let terrainN = state.slope;
   let nRest = normalize(vec3f(
-    terrainN.x * 0.55 + rotNrmXZ.x * 0.72 - billow.y,
+    terrainN.x * 0.55 + vd.nrm.x * 0.72 - billow.y,
     max(0.32, terrainN.y * 0.65 + vd.nrm.y * 0.68),
-    terrainN.z * 0.55 + rotNrmXZ.y * 0.72 - billow.z,
+    terrainN.z * 0.55 + vd.nrm.z * 0.72 - billow.z,
   ));
   let bendSlope = clamp(1.65 * bendSin * pow(max(flexAlong, 0.02), 0.65), 0.0, 0.96) * bladeAlive;
   let bendDir3 = vec3f(bendDir.x, 0.0, bendDir.y);
@@ -1247,174 +1224,110 @@ fn meadowShadePlace(inst: MeadowInst, vd: MeadowVertexData, fadeVal: f32) -> Mea
   o.world = world;
   o.normal = bentN;
   o.colour = vd.col;
-  o.windInfo = vec4f(vd.along, wind.x, wind.y, fadeVal);
-  o.tendrilFlow = vec4f(unshiftedXZ - dispXZ * 0.65, camDist, distFade);
+  o.windInfo = vec4f(vd.along, wind.x, wind.y, 1.0);
+  o.tendrilFlow = vec4f(unshiftedXZ - dispXZ * 0.65, camDist, 1.0);
   o.damageInfo = vec2f(ballistics.hotSinge, bendSlope);
   o.pos = F.viewProj * vec4f(earthCurve(world - F.camPos.xyz, F.camPos.y), 1.0);
   return o;
 }
 
-@vertex fn meadowClusterVS(@builtin(instance_index) ii: u32, @builtin(vertex_index) vid: u32) -> MeadowVertexOut {
-  let inst = meadowInstances[meadowDraw.x + ii];
-  let cIdx = bitcast<u32>(inst.attrs.x);
-  let cBase = cIdx * ${MEADOW_CLUSTER_WORDS}u;
-  let firstIdx = meadowClusters[cBase];
-  let idxCount = meadowClusters[cBase + 1u];
-  if (vid >= idxCount) { return meadowDegenerateOut(); }
-  let vi = meadowIndices[firstIdx + vid];
-  var vd = meadowReadClusterVert(vi);
-  let isFade = meadowDraw.y == 4u;
-  if (!isFade) {
-    let levelT = clamp(inst.attrs.z, 0.0, 1.0);
-    if (vd.wTag < 0.0) {
-      let startT = clamp((-vd.wTag - 0.10) / 0.86, 0.0, 0.56);
-      let settle = smoothstep(startT, min(1.0, startT + 0.44), levelT);
-      vd.pos = vec3f(
-        vd.pos.x + vd.morphXZ.x * settle,
-        mix(vd.pos.y, -0.015, settle),
-        vd.pos.z + vd.morphXZ.y * settle,
-      );
-      vd.along = mix(vd.along, 0.0, settle);
-    } else {
-      vd.pos = vec3f(vd.pos.x + vd.morphXZ.x * levelT, vd.pos.y, vd.pos.z + vd.morphXZ.y * levelT);
-    }
-  }
-  let fadeVal = select(1.0, inst.attrs.z, isFade);
-  return meadowShadePlace(inst, vd, fadeVal);
+// A cluster's vertex: a point of the sward, its organ widened as its level keeps fewer of them.
+fn meadowClusterVertex(state: MeadowState, cluster: u32, vertex: u32) -> MeadowVertexOut {
+  let packed = meadowClusterWord(cluster, 15u);
+  if (vertex / 3u >= (packed & 255u)) { return meadowHidden(); }
+  var p = meadowPoint(meadowAtlas[meadowAtlas[${MEADOW_AT.indicesAt}u] + meadowClusterWord(cluster, 14u) + vertex]);
+  p.pos += p.offset * (meadowVariantF(state.variant, ${MEADOW_VARIANT_AT.growth}u + ((packed >> 8u) & 255u)) - 1.0);
+  return meadowShadePlace(state, p, true);
 }
 
-// O(1) cumulative vertex ancestor lookup (1 storage read, zero loops):
-// unpacks (v0, v1) u8 pair at stepIdx from flat baked u8x4 table in morph.bin!
-fn meadowMorphStepRemap(vBase: u32, vi: u32, stepIdx: u32) -> vec2u {
-  let e = stepIdx * ${MEADOW_MORPH_VERTS}u + vi;
-  let word = meadowMorph[vBase + ${MEADOW_MORPH_REMAP_OFFSET}u + (e >> 1u)];
-  let pair = (word >> ((e & 1u) * 16u)) & 0xffffu;
-  return vec2u(pair & 0xffu, (pair >> 8u) & 0xffu);
+// Where canopy-body vertex v has gone by step s: each record is the step it collapses at and the vertex it joins.
+fn meadowAncestor(variant: u32, vertex: u32, step: u32) -> u32 {
+  let records = meadowVariant(variant, ${MEADOW_VARIANT_AT.records}u);
+  var v = vertex;
+  for (var hop = 0u; hop < ${MEADOW_CONTINUUM_HOPS}u; hop++) {
+    let record = meadowAtlas[records + v];
+    let at = record & 65535u;
+    if (at == MEADOW_NEVER || at >= step) { break; }
+    v = record >> 16u;
+  }
+  return v;
+}
+// One corner of the canopy body at its step, on its way to where the next collapse takes it, grown along its normals
+// by what the collapses have taken off the outline.
+fn meadowFarVertex(state: MeadowState, chunk: u32, vertex: u32) -> MeadowVertexOut {
+  let variant = state.variant;
+  let triangle = chunk * ${MEADOW_CONTINUUM_CHUNK_TRIANGLES}u + vertex / 3u;
+  if (triangle >= meadowStep(variant, state.step, 0u)) { return meadowHidden(); }
+  let at = meadowVariant(variant, ${MEADOW_VARIANT_AT.triangles}u) + triangle * ${MEADOW_CONTINUUM_TRIANGLE_WORDS}u;
+  let next = min(state.step + 1u, meadowVariant(variant, ${MEADOW_VARIANT_AT.stepCount}u));
+  let a = meadowAncestor(variant, meadowAtlas[at + vertex % 3u], state.step);
+  let b = meadowAncestor(variant, a, next);
+  let first = meadowVariant(variant, ${MEADOW_VARIANT_AT.chainVertices}u);
+  let pa = meadowPoint(first + a);
+  let pb = meadowPoint(first + b);
+  let grow = mix(meadowStepF(variant, state.step, 2u), meadowStepF(variant, next, 2u), state.morph);
+  var p = pa;
+  p.pos = mix(pa.pos + pa.nrm * grow, pb.pos + pb.nrm * grow, state.morph);
+  let n = mix(pa.nrm, pb.nrm, state.morph);
+  p.nrm = select(vec3f(0.0, 1.0, 0.0), normalize(n), dot(n, n) > 1e-6);
+  p.col = mix(pa.col, pb.col, state.morph);
+  p.along = mix(pa.along, pb.along, state.morph);
+  p.stiff = mix(pa.stiff, pb.stiff, state.morph);
+  return meadowShadePlace(state, p, false);
 }
 
-fn meadowMorphCornerWorldXZ(originXZ: vec2f, vBase: u32, pair: vec2u, morphT: f32, tileScale: f32, rotQ: u32) -> vec2f {
-  let rawXZ = mix(meadowMorphRawXZ(vBase, pair.x), meadowMorphRawXZ(vBase, pair.y), morphT) * tileScale;
-  let halfTile = ${(MEADOW_TILE_METRES * 0.5).toFixed(4)} * tileScale;
-  return originXZ + meadowRotQuadXZ(rawXZ, rotQ) + vec2f(halfTile);
-}
+// The splat: one triangle facing the eye, circumscribing an ellipse as wide as the patch across the line of sight
+// and as high as it stands at this slant, shrunk to the area the patch shows from here (as the cut measured it),
+// to the share of it grass covers, and grown where the splat is thinned to keep the horizon's covered area. Its
+// colour is the sward's own, seen from above and from the side.
+fn meadowSplatVertex(state: MeadowState, vertex: u32) -> MeadowVertexOut {
+  let variant = state.variant;
+  let middle = vec2f(state.cell) * MEADOW_PATCH + vec2f(MEADOW_PATCH * 0.5);
+  let ground = meadowGroundY(middle, cfg.domain, elevation);
+  let cover = meadowCoverAt(middle);
+  let ballistics = meadowEvalBallistics(middle, ground, state.seed);
+  let canopy = meadowVariantF(variant, ${MEADOW_VARIANT_AT.canopy}u);
+  let standing = canopy * (0.82 + 0.44 * cover.b) * meadowWorldBillow(middle).x * (1.0 - ballistics.buryDepth);
+  let shift = vec3f(nearTerrain.grid.y, 0.0, nearTerrain.grid.z);
+  let centre = vec3f(middle.x, ground + standing * 0.5, middle.y) + shift;
+  let relative = centre - F.camPos.xyz;
+  let toward = relative / max(length(relative), 1e-3);
+  let level = length(toward.xz);
+  let wide = MEADOW_PATCH * max((abs(toward.x) + abs(toward.z)) / max(level, 1e-6), 1.0);
+  let tall = abs(toward.y) * wide + canopy * level;
+  let area = MEADOW_PATCH * MEADOW_PATCH * abs(toward.y) + MEADOW_PATCH * canopy * (abs(toward.x) + abs(toward.z));
+  let fit = sqrt(area / max(0.785398 * wide * tall, 1e-6));
+  let k = 0.7776 * state.splatScale * fit * sqrt(smoothstep(0.06, 0.55, cover.r)) * (1.0 - ballistics.buryDepth);
+  let corner = array<vec2f, 3>(vec2f(0.0, 2.0), vec2f(-1.7320508, -1.0), vec2f(1.7320508, -1.0))[min(vertex, 2u)];
+  let world = centre + normalize(F.camRight.xyz) * (corner.x * wide * 0.5 * k) + normalize(F.camUp.xyz) * (corner.y * tall * 0.5 * k);
 
-@vertex fn meadowContVS(@builtin(instance_index) ii: u32, @builtin(vertex_index) vid: u32) -> MeadowVertexOut {
-  let inst = meadowInstances[meadowDraw.x + ii];
-  let variantId = bitcast<u32>(inst.attrs.x);
-  let tileScale = max(inst.attrs.y, 1.0);
-  let vBase = variantId * ${MEADOW_MORPH_VAR_WORDS}u;
-  let face = vid / 3u;
-  let corner = vid % 3u;
-  let faceBase = vBase + ${MEADOW_MORPH_VERTS * MEADOW_VERT_WORDS}u + face * 3u;
-
-  let isFade = meadowDraw.y == 5u;
-  let stepIdx = select(min(${MEADOW_MORPH_STEPS - 1}u, u32(floor(inst.attrs.z))), 0u, isFade);
-  let morphT = select(clamp(inst.attrs.z - floor(inst.attrs.z), 0.0, 1.0), 0.0, isFade);
-
-  let rA = meadowMorphStepRemap(vBase, meadowMorph[faceBase], stepIdx);
-  let rB = meadowMorphStepRemap(vBase, meadowMorph[faceBase + 1u], stepIdx);
-  let rC = meadowMorphStepRemap(vBase, meadowMorph[faceBase + 2u], stepIdx);
-  if (rA.x == rB.x || rB.x == rC.x || rC.x == rA.x) { return meadowDegenerateOut(); }
-
-  // Prevent outer macro-continuum triangles from ever spanning onto roads, beaches, or rivers.
-  if (tileScale > 1.5) {
-    let seed = bitcast<u32>(inst.attrs.w);
-    let rotQ = (seed >> 2u) & 3u;
-    let wA = meadowMorphCornerWorldXZ(inst.posRot.xz, vBase, rA, morphT, tileScale, rotQ);
-    let wB = meadowMorphCornerWorldXZ(inst.posRot.xz, vBase, rB, morphT, tileScale, rotQ);
-    let wC = meadowMorphCornerWorldXZ(inst.posRot.xz, vBase, rC, morphT, tileScale, rotQ);
-    let minCov = min(meadowCoverAt(wA).r, min(meadowCoverAt(wB).r, meadowCoverAt(wC).r));
-    let minGnd = min(
-      meadowGroundY(wA, cfg.domain, elevation),
-      min(meadowGroundY(wB, cfg.domain, elevation), meadowGroundY(wC, cfg.domain, elevation)),
-    );
-    if (minCov < 0.14 || minGnd < cfg.domain.w) { return meadowDegenerateOut(); }
-  }
-
-  let pair = select(select(rC, rB, corner == 1u), rA, corner == 0u);
-  let a = meadowReadMorphVert(vBase, pair.x, tileScale);
-  let b = meadowReadMorphVert(vBase, pair.y, tileScale);
-  let vd = MeadowVertexData(
-    mix(a.pos, b.pos, morphT),
-    normalize(mix(a.nrm, b.nrm, morphT)),
-    mix(a.col, b.col, morphT),
-    mix(a.along, b.along, morphT),
-    mix(a.stiff, b.stiff, morphT),
-    1.0,
-    1.0,
-    vec2f(0.0),
-  );
-  return meadowShadePlace(inst, vd, inst.attrs.z);
-}
-
-@vertex fn meadowSplatVS(@builtin(instance_index) ii: u32, @builtin(vertex_index) vid: u32) -> MeadowVertexOut {
-  let inst = meadowInstances[meadowDraw.x + ii];
-  let variantId = min(11u, bitcast<u32>(inst.attrs.x));
-  let tileScale = max(inst.attrs.y, 1.0);
-  let sA = cfg.splats[variantId * 2u];
-  let sB = cfg.splats[variantId * 2u + 1u];
-  let inflate = clamp(inst.attrs.z, 1.0, 4.0);
-  let unshiftedCenter = inst.posRot.xz + vec2f(${(MEADOW_TILE_METRES * 0.5).toFixed(4)} * tileScale);
-  let shiftXZ = nearTerrain.grid.yz;
-  let camUnshifted = F.camPos.xz - shiftXZ;
-  let horizDist = distance(unshiftedCenter, camUnshifted);
-  let maxOuterR = f32(cfg.params.x / 2u) * ${(MEADOW_TILE_METRES * MEADOW_MACRO_MUL).toFixed(4)} - 16.0;
-  let distFade = 1.0 - smoothstep(maxOuterR * 0.80, maxOuterR, horizDist);
-
-  let rx = sA.y * tileScale * inflate;
-  let ry = sA.z * inflate;
-  let camRightXZ = normalize(select(vec2f(1.0, 0.0), F.camRight.xz, length(F.camRight.xz) > 0.01));
-  let camFwdXZ = vec2f(-camRightXZ.y, camRightXZ.x);
-
-  let p0XZ = unshiftedCenter + camFwdXZ * (rx * 1.35);
-  let p1XZ = unshiftedCenter - camFwdXZ * (rx * 0.85) - camRightXZ * (rx * 1.45);
-  let p2XZ = unshiftedCenter - camFwdXZ * (rx * 0.85) + camRightXZ * (rx * 1.45);
-  if (tileScale > 1.5) {
-    let minCov = min(meadowCoverAt(p0XZ).r, min(meadowCoverAt(p1XZ).r, meadowCoverAt(p2XZ).r));
-    if (minCov < 0.14) { return meadowDegenerateOut(); }
-  }
-
-  var sampleXZ = p0XZ;
-  var oyBase = ry * 1.75;
-  if (vid == 1u) {
-    sampleXZ = p1XZ;
-    oyBase = 0.0;
-  } else if (vid == 2u) {
-    sampleXZ = p2XZ;
-    oyBase = 0.0;
-  }
-
-  let vCov = meadowCoverAt(sampleXZ);
-  let groundY0 = meadowGroundY(sampleXZ, cfg.domain, elevation);
-  if (groundY0 < cfg.domain.w) { return meadowDegenerateOut(); }
-  let coverFade = smoothstep(0.06, 0.55, vCov.r);
-  let swardWeight = coverFade * distFade;
-  let seed = bitcast<u32>(inst.attrs.w);
-  let ballistics = meadowEvalBallistics(sampleXZ, groundY0, seed);
-  let edgeTuck = -0.045 * (1.0 - smoothstep(0.03, 0.06, vCov.r * distFade)) - 0.090 * ballistics.buryDepth;
-
-  let wind = meadowWindField(sampleXZ, F.camPos.w, F.windP[0]);
+  let wind = meadowWindField(middle, F.camPos.w, F.windP[0]);
   let rawDir = F.windP[0].xy;
   let windDir = select(vec2f(0.82, 0.57), normalize(rawDir), dot(rawDir, rawDir) > 0.0004);
-  let oy = oyBase * swardWeight * (1.0 - ballistics.buryDepth) * (1.0 - ballistics.pressDown * 0.7) + edgeTuck;
-  let worldXZ = sampleXZ + windDir * (wind.x * max(0.0, oy) * 0.45) + ballistics.pushXZ * 0.5;
-  let groundY = select(groundY0, meadowGroundY(worldXZ, cfg.domain, elevation), length(worldXZ - sampleXZ) > 0.08);
-  let camDist = distance(vec3f(worldXZ.x + shiftXZ.x, groundY, worldXZ.y + shiftXZ.y), F.camPos.xyz);
-
-  let terrainN = meadowUnpackSlopeNormal(inst.posRot.w);
-  let bendSlope = 0.55 * wind.x * swardWeight;
-  let swardN = normalize(terrainN - vec3f(windDir.x, 0.0, windDir.y) * (bendSlope * 0.70) + vec3f(0.0, 0.14, 0.0));
-
-  let world = vec3f(worldXZ.x + shiftXZ.x, groundY + oy, worldXZ.y + shiftXZ.y);
+  let bendSlope = 0.55 * wind.x;
+  let top = vec3f(meadowVariantF(variant, ${MEADOW_VARIANT_AT.topColour}u), meadowVariantF(variant, ${MEADOW_VARIANT_AT.topColour + 1}u), meadowVariantF(variant, ${MEADOW_VARIANT_AT.topColour + 2}u));
+  let side = vec3f(meadowVariantF(variant, ${MEADOW_VARIANT_AT.sideColour}u), meadowVariantF(variant, ${MEADOW_VARIANT_AT.sideColour + 1}u), meadowVariantF(variant, ${MEADOW_VARIANT_AT.sideColour + 2}u));
   var o: MeadowVertexOut;
   o.world = world;
-  o.normal = normalize(mix(terrainN, swardN, swardWeight));
-  o.colour = sB.rgb;
+  o.normal = normalize(state.slope - vec3f(windDir.x, 0.0, windDir.y) * (bendSlope * 0.70) + vec3f(0.0, 0.14, 0.0));
+  o.colour = mix(side, top, abs(toward.y));
   o.windInfo = vec4f(0.48, wind.x, wind.y, 1.0);
-  o.tendrilFlow = vec4f(worldXZ, camDist, distFade);
+  o.tendrilFlow = vec4f(middle, distance(centre, F.camPos.xyz), 1.0);
   o.damageInfo = vec2f(ballistics.hotSinge, bendSlope);
   o.pos = F.viewProj * vec4f(earthCurve(world - F.camPos.xyz, F.camPos.y), 1.0);
   return o;
+}
+
+@vertex fn meadowVS(@builtin(vertex_index) vertex: u32, listed: MeadowEntry) -> MeadowVertexOut {
+  let state = meadowStateOf(listed.entry.x);
+  let what = listed.entry.y >> 28u;
+  let item = listed.entry.y & 0x0fffffffu;
+  var out: MeadowVertexOut;
+  if (what == ${MEADOW_CLUSTER_ENTRY}u) { out = meadowClusterVertex(state, item, vertex); }
+  else if (what == ${MEADOW_FAR_ENTRY}u) { out = meadowFarVertex(state, item, vertex); }
+  else { out = meadowSplatVertex(state, vertex); }
+  out.coverage = vec4u(what, state.share | (state.splatShare << 8u), state.seed, cfg.params.x);
+  return out;
 }
 
 fn meadowShadowVis(world: vec3f, normal: vec3f) -> f32 {
@@ -1468,7 +1381,7 @@ fn meadowShade(in: MeadowVertexOut, frontFacing: bool) -> vec4f {
   let swell = in.windInfo.z;
   let distFade = clamp(in.tendrilFlow.w, 0.0, 1.0);
   let bendSlope = clamp(in.damageInfo.y, 0.0, 1.0);
-  let isContinuum = meadowDraw.y >= 5u;
+  let isContinuum = in.coverage.x >= 2u;
 
   let unshiftedWorldXZ = in.world.xz - nearTerrain.grid.yz;
   let fCov = meadowCoverAt(unshiftedWorldXZ);
@@ -1622,70 +1535,106 @@ fn meadowShade(in: MeadowVertexOut, frontFacing: bool) -> vec4f {
   return vec4f(col, 1.0);
 }
 
-// A tile changing over from its clusters to its continuum splits each pixel with the continuum's one split
-// (continuumSamples): the continuum takes the samples its share (windInfo.w) asks for, and the clusters keep
-// exactly the rest, so each sample is drawn once and nothing is blended.
+// The samples of this pixel each draw takes (continuumSamples, the shared core's split): the far side the handoff's
+// share and the clusters the rest; of the far side's, the splat its own share and the canopy body the rest. Every
+// sample is drawn by exactly one of the three.
 struct MeadowCoverageOut {
   @location(0) colour: vec4f,
   @builtin(sample_mask) mask: u32,
 };
-
-@fragment fn meadowFS(in: MeadowVertexOut, @builtin(front_facing) front: bool) -> @location(0) vec4f {
-  return meadowShade(in, front);
+fn meadowMask(coverage: vec4u, pixel: vec2f) -> u32 {
+  let samples = clamp(coverage.w, 1u, 8u);
+  let all = (1u << samples) - 1u;
+  let handoff = continuumSamples(f32(coverage.y & 255u) / 255.0, pixel, samples, coverage.z);
+  let splat = handoff & continuumSamples(f32((coverage.y >> 8u) & 255u) / 255.0, pixel, samples, coverage.z + 7u);
+  if (coverage.x == ${MEADOW_CLUSTER_ENTRY}u) { return all & ~handoff; }
+  if (coverage.x == ${MEADOW_FAR_ENTRY}u) { return handoff & ~splat; }
+  return splat;
 }
 
-@fragment fn meadowClusterFadeFS(in: MeadowVertexOut, @builtin(front_facing) front: bool) -> MeadowCoverageOut {
-  let samples = max(1u, cfg.params.z);
-  let full = (1u << samples) - 1u;
-  let contMask = continuumSamples(in.windInfo.w, in.pos.xy, samples, 0u);
+@fragment fn meadowFS(in: MeadowVertexOut, @builtin(front_facing) front: bool) -> MeadowCoverageOut {
   var o: MeadowCoverageOut;
   o.colour = meadowShade(in, front);
-  o.mask = full & (~contMask);
-  return o;
-}
-
-@fragment fn meadowContFadeFS(in: MeadowVertexOut, @builtin(front_facing) front: bool) -> MeadowCoverageOut {
-  let samples = max(1u, cfg.params.z);
-  var o: MeadowCoverageOut;
-  o.colour = meadowShade(in, front);
-  o.mask = continuumSamples(in.windInfo.w, in.pos.xy, samples, 0u);
+  o.mask = meadowMask(in.coverage, in.pos.xy);
   return o;
 }
 `;
 
+// The cut's four passes (each with its own bind group layout, so a work list is written by one pass and read, and
+// dispatched from, by the next) and the two drawing pipelines: the sward's clusters, seen from both sides, and the
+// closed canopy bodies and splats, their far faces left out.
 export function requestMeadowPipelines({ device, shader, format = 'rgba16float', samples = 4 }) {
-  return requestOnce(device, `meadow grass ${format} ${samples}`, async () => {
-    // Compile sequentially across all pipelines so Windows D3D12 DXC never spikes PSO heap memory.
-    const stepMod = await shader(MEADOW_STEP_WGSL, 'meadow grass step');
-    const resetPipe = await device.createComputePipelineAsync({
-      label: 'meadow reset',
-      layout: 'auto',
-      compute: { module: stepMod, entryPoint: 'meadowReset' },
-    });
-    const stepPipe = await device.createComputePipelineAsync({
-      label: 'meadow select',
-      layout: 'auto',
-      compute: { module: stepMod, entryPoint: 'meadowSelect' },
-    });
-    const renderMod = await shader(MEADOW_RENDER_WGSL, 'meadow grass render');
-    const depth = { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' };
-    const mkPipe = (label, vs, fs, cullMode = 'none') => device.createRenderPipelineAsync({
-      label,
-      layout: 'auto',
-      vertex: { module: renderMod, entryPoint: vs },
-      fragment: { module: renderMod, entryPoint: fs, targets: [{ format }] },
+  return requestOnce(device, `meadow continuum ${format} ${samples}`, async () => {
+    const C = GPUShaderStage.COMPUTE;
+    const buffer = (binding, type) => ({ binding, visibility: C, buffer: { type } });
+    const texture = (binding) => ({ binding, visibility: C, texture: { sampleType: 'unfilterable-float' } });
+    const uniforms = [buffer(0, 'uniform'), buffer(1, 'uniform'), buffer(2, 'uniform')];
+    const entries = {
+      reset: [buffer(9, 'storage'), buffer(10, 'storage'), buffer(12, 'storage')],
+      blocks: [...uniforms, buffer(6, 'read-only-storage'), buffer(10, 'storage')],
+      patches: [...uniforms, texture(3), texture(4), buffer(5, 'read-only-storage'), buffer(7, 'storage'), buffer(8, 'storage'), buffer(9, 'storage'), buffer(11, 'read-only-storage'), buffer(12, 'storage')],
+      clusters: [...uniforms, texture(3), buffer(5, 'read-only-storage'), buffer(7, 'storage'), buffer(8, 'storage'), buffer(9, 'storage'), buffer(13, 'read-only-storage')],
+    };
+    const points = { reset: 'meadowReset', blocks: 'meadowBlocksInView', patches: 'meadowPatches', clusters: 'meadowClusters' };
+    const cutModule = await shader(MEADOW_CUT_WGSL, 'meadow continuum cut');
+    const layouts = {}, cut = {};
+    for (const [name, list] of Object.entries(entries)) {
+      layouts[name] = device.createBindGroupLayout({ label: `meadow continuum ${name}`, entries: list });
+      cut[name] = await device.createComputePipelineAsync({
+        label: `meadow continuum ${name}`, layout: device.createPipelineLayout({ label: `meadow continuum ${name}`, bindGroupLayouts: [layouts[name]] }),
+        compute: { module: cutModule, entryPoint: points[name] },
+      });
+    }
+    const renderModule = await shader(MEADOW_RENDER_WGSL, 'meadow continuum render');
+    const draw = (label, cullMode) => device.createRenderPipelineAsync({
+      label, layout: 'auto',
+      vertex: { module: renderModule, entryPoint: 'meadowVS', buffers: MEADOW_ENTRY_LAYOUT },
+      fragment: { module: renderModule, entryPoint: 'meadowFS', targets: [{ format }] },
       primitive: { topology: 'triangle-list', frontFace: 'ccw', cullMode },
-      depthStencil: depth,
+      depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
       multisample: { count: samples },
     });
-    const clusterPipe = await mkPipe('meadow clusters', 'meadowClusterVS', 'meadowFS', 'none');
-    const clusterFadePipe = await mkPipe('meadow cluster fade', 'meadowClusterVS', 'meadowClusterFadeFS', 'none');
-    // Closed genus-0 sculpted continuum uses cullMode: 'back' so underground bottom cap faces are 100% hardware-culled!
-    const contFadePipe = await mkPipe('meadow continuum fade', 'meadowContVS', 'meadowContFadeFS', 'back');
-    const contSolidPipe = await mkPipe('meadow continuum solid', 'meadowContVS', 'meadowFS', 'back');
-    const splatPipe = await mkPipe('meadow splat', 'meadowSplatVS', 'meadowFS', 'none');
-    return [stepPipe, clusterPipe, clusterFadePipe, contFadePipe, contSolidPipe, splatPipe, resetPipe];
+    const clusters = await draw('meadow continuum clusters', 'none');
+    const far = await draw('meadow continuum far', 'back');
+    return { ...cut, layouts, clusterDraw: clusters, farDraw: far };
   });
+}
+
+// The blocks of `region` on the world's grid of blocks, and for each the most grass the cover map grows on or beside
+// it and the lowest and highest ground under that grass: what the cut's first pass reads.
+export function meadowBlocksOf({ cover, size, region, heights }) {
+  const side = MEADOW_PATCH_METRES * MEADOW_BLOCK_PATCHES, span = region.span;
+  const x0 = region.x - span * 0.5, z0 = region.z - span * 0.5, step = span / size;
+  const first = [Math.floor(x0 / side), Math.floor(z0 / side)];
+  const across = [Math.ceil((x0 + span) / side) - first[0], Math.ceil((z0 + span) / side) - first[1]];
+  const data = new Float32Array(across[0] * across[1] * 4);
+  for (let b = 0; b < across[0] * across[1]; b++) data.set([0, Infinity, -Infinity, 0], b * 4);
+  const n = region.size || Math.round(Math.sqrt(heights?.length || 0));
+  const hasHeights = n >= 2 && heights?.length >= n * n;
+  // A patch reads the cover map bilinearly at its middle and its corners: a texel touches the blocks within a texel
+  // and half a patch of it.
+  const reach = step + MEADOW_PATCH_METRES * 0.5;
+  let texels = 0;
+  for (let j = 0; j < size; j++) {
+    const wz = z0 + (j + 0.5) * step, v = (j + 0.5) / size;
+    for (let i = 0; i < size; i++) {
+      const r = cover[(j * size + i) * 4];
+      if (r >= 32) texels++;
+      if (r < 5) continue;
+      const wx = x0 + (i + 0.5) * step, u = (i + 0.5) / size;
+      const y = hasHeights ? sampleGridBilinear(heights, n, u, v) : 0;
+      const bi0 = Math.max(0, Math.floor((wx - reach) / side) - first[0]), bi1 = Math.min(across[0] - 1, Math.floor((wx + reach) / side) - first[0]);
+      const bj0 = Math.max(0, Math.floor((wz - reach) / side) - first[1]), bj1 = Math.min(across[1] - 1, Math.floor((wz + reach) / side) - first[1]);
+      for (let bj = bj0; bj <= bj1; bj++) for (let bi = bi0; bi <= bi1; bi++) {
+        const at = (bj * across[0] + bi) * 4;
+        data[at] = Math.max(data[at], r / 255);
+        data[at + 1] = Math.min(data[at + 1], y);
+        data[at + 2] = Math.max(data[at + 2], y);
+      }
+    }
+  }
+  for (let b = 0; b < across[0] * across[1]; b++) if (!(data[b * 4] > 0)) data.set([0, 0, 0, 0], b * 4);
+  return { first, across, count: across[0] * across[1], data, texels };
 }
 
 export async function createMeadowGrass({
@@ -1710,120 +1659,52 @@ export async function createMeadowGrass({
   isMobile = false,
   coverSize = isMobile ? MEADOW_COVER_MOBILE : MEADOW_COVER_DESKTOP,
 }) {
-  if (!pack?.vertices?.byteLength || !pack?.indices?.byteLength || !pack?.clusters?.byteLength || !pack?.morph?.byteLength) {
-    return null;
-  }
+  if (!(pack?.words?.length > 0) || !pack.manifest) return null;
   const B = GPUBufferUsage;
-  const mkBuf = (label, data, usage) => {
-    const buf = device.createBuffer({ label, size: Math.max(16, data.byteLength), usage: usage | B.COPY_DST });
-    if (data.byteLength) device.queue.writeBuffer(buf, 0, data);
+  const P = await requestMeadowPipelines({ device, shader, format, samples });
+  const room = isMobile ? MEADOW_CONTINUUM_MOBILE_ROOM : MEADOW_CONTINUUM_ROOM;
+  const mkBuf = (label, size, usage, data = null) => {
+    const buf = device.createBuffer({ label, size: Math.max(16, size), usage });
+    if (data?.byteLength) device.queue.writeBuffer(buf, 0, data);
     return buf;
   };
 
-  const [stepPipe, clusterPipe, clusterFadePipe, contFadePipe, contSolidPipe, splatPipe, resetPipe] = await requestMeadowPipelines({
-    device,
-    shader,
-    format,
-    samples,
-  });
+  // The atlas, once; the patches drawn and the three lists, each a list's room; the counters, each list's draw first.
+  const atlasBuf = mkBuf('meadow continuum atlas', pack.words.byteLength, B.STORAGE | B.COPY_DST, pack.words);
+  const statesBuf = mkBuf('meadow continuum states', room.states * 16, B.STORAGE | B.COPY_SRC);
+  const listsBuf = mkBuf('meadow continuum lists', (room.clusters + room.far + room.splat) * 8, B.STORAGE | B.VERTEX | B.COPY_SRC);
+  const countersBuf = mkBuf('meadow continuum draws', MEADOW_COUNTER_WORDS * 4, B.STORAGE | B.INDIRECT | B.COPY_SRC);
+  const nearWork = mkBuf('meadow continuum near patches', (MEADOW_WORK_HEADER + room.near) * 4, B.STORAGE | B.INDIRECT | B.COPY_SRC);
+  let blockWork = null, blocksBuf = null, blockCount = 0;
 
-  const gridSide = isMobile ? MEADOW_GRID_SIDE_MOBILE : MEADOW_GRID_SIDE_DESKTOP;
-  const maxMeadowDist = (gridSide * 0.5) * MEADOW_TILE_METRES * MEADOW_MACRO_MUL - 16.0;
-  const vertsBuf = mkBuf('meadow verts', pack.vertices, B.STORAGE);
-  const idxBuf = mkBuf('meadow indices', pack.indices, B.STORAGE);
-  const clusterBuf = mkBuf('meadow clusters', pack.clusters, B.STORAGE);
-  const morphBuf = mkBuf('meadow morph', pack.morph, B.STORAGE);
-  const instancesBuf = device.createBuffer({
-    label: 'meadow instances',
-    size: MEADOW_BUCKETS * MEADOW_BUCKET_SPAN * MEADOW_INST_FLOATS * 4,
-    usage: B.STORAGE,
-  });
-
-  const clU32 = new Uint32Array(pack.clusters.buffer, pack.clusters.byteOffset, Math.floor(pack.clusters.byteLength / 4));
-  const lvlMaxIdx = [13500, 6600, 3000, 1200];
-  for (let i = 0; i + MEADOW_CLUSTER_WORDS <= clU32.length; i += MEADOW_CLUSTER_WORDS) {
-    const idxCnt = clU32[i + 1];
-    const lvl = Math.min(3, clU32[i + 2]);
-    if (idxCnt > lvlMaxIdx[lvl]) lvlMaxIdx[lvl] = idxCnt;
-  }
-  const bucketCaps = [
-    lvlMaxIdx[0],
-    lvlMaxIdx[1],
-    lvlMaxIdx[2],
-    lvlMaxIdx[3],
-    lvlMaxIdx[3],
-    MEADOW_MORPH_FACES * 3,
-    MEADOW_MORPH_FACES * 3,
-    3,
-  ];
-  const drawTemplate = new Uint32Array(MEADOW_BUCKETS * MEADOW_DRAW_WORDS);
-  for (let b = 0; b < MEADOW_BUCKETS; b++) drawTemplate[b * MEADOW_DRAW_WORDS] = bucketCaps[b];
-  const drawsBuf = mkBuf('meadow draws', drawTemplate, B.STORAGE | B.INDIRECT | B.COPY_SRC);
-
-  const stepCfgData = new ArrayBuffer(32);
-  const stepCfgF = new Float32Array(stepCfgData);
-  const stepCfgU = new Uint32Array(stepCfgData);
-
-  // MeadowCfg = domain(16) + params(16) + crater(16) + splats(24 * 16) = 432 bytes
-  const cfgBufData = new ArrayBuffer((3 + 24) * 16);
-  const cfgF = new Float32Array(cfgBufData);
-  const cfgU = new Uint32Array(cfgBufData);
+  // The uniform both the cut and the drawing read: MeadowCfg.
+  const cfgData = new ArrayBuffer(MEADOW_CFG_BYTES);
+  const cfgF = new Float32Array(cfgData), cfgU = new Uint32Array(cfgData), cfgI = new Int32Array(cfgData);
+  const cfgBuf = mkBuf('meadow continuum cfg', MEADOW_CFG_BYTES, B.UNIFORM | B.COPY_DST);
+  cfgU.set([samples, coverSize, 0, 0], 4);
+  cfgU.set([room.clusters, room.far, room.splat, room.states], 20);
+  cfgU[24] = room.near;
+  let cfgDirty = true;
 
   let boundCraters = null;
   let unsubscribeCraters = null;
-
-  const syncCraterCfg = () => {
+  const syncCraterCfg = (reg) => {
     const orig = boundCraters?.regionOrigin;
-    cfgF[8] = orig ? orig[0] : (region.x - region.span * 0.5);
-    cfgF[9] = orig ? orig[1] : (region.z - region.span * 0.5);
+    cfgF[8] = orig ? orig[0] : (reg.x - reg.span * 0.5);
+    cfgF[9] = orig ? orig[1] : (reg.z - reg.span * 0.5);
     cfgF[10] = LAND_CRATER_TILE_M;
     cfgF[11] = boundCraters?.fieldTexture && boundCraters?.lookupTexture ? 1.0 : 0.0;
+    cfgDirty = true;
   };
-
-  const writeRegionCfg = (reg) => {
-    stepCfgF[0] = reg.x;
-    stepCfgF[1] = reg.z;
-    stepCfgF[2] = reg.span;
-    stepCfgF[3] = 0.75;
-    stepCfgU[4] = gridSide;
-    stepCfgU[5] = MEADOW_BUCKET_SPAN;
-    stepCfgU[6] = 4;
-    stepCfgU[7] = coverSize;
-
-    cfgF[0] = reg.x;
-    cfgF[1] = reg.z;
-    cfgF[2] = reg.span;
-    cfgF[3] = 0.75;
-    cfgU[4] = gridSide;
-    cfgU[5] = MEADOW_BUCKET_SPAN;
-    cfgU[6] = samples;
-    cfgU[7] = coverSize;
-    syncCraterCfg();
-  };
-  writeRegionCfg(region);
-  for (let v = 0; v < 12; v++) {
-    const rec = pack.manifest.variantRecords[v];
-    const base = 12 + v * 8;
-    cfgF[base] = rec.splat.centreY;
-    cfgF[base + 1] = rec.splat.rx;
-    cfgF[base + 2] = rec.splat.ry;
-    cfgF[base + 3] = rec.coreTriCount;
-    cfgF[base + 4] = rec.splat.meanCol[0];
-    cfgF[base + 5] = rec.splat.meanCol[1];
-    cfgF[base + 6] = rec.splat.meanCol[2];
-    cfgF[base + 7] = pack.manifest.tileMetres;
-  }
-  const stepCfgBuf = mkBuf('meadow step cfg', new Uint8Array(stepCfgData), B.UNIFORM);
-  const cfgBuf = mkBuf('meadow cfg', new Uint8Array(cfgBufData), B.UNIFORM);
 
   // 1040-byte MeadowWakeFrame uniform buffer + zero-alloc CPU packing views
   const wakeData = new ArrayBuffer(MEADOW_WAKE_BUFFER_BYTES);
   const wakeU32 = new Uint32Array(wakeData);
   const wakeF32 = new Float32Array(wakeData);
-  const wakeBuf = mkBuf('meadow ballistic wakes', new Uint8Array(wakeData), B.UNIFORM);
+  const wakeBuf = mkBuf('meadow ballistic wakes', MEADOW_WAKE_BUFFER_BYTES, B.UNIFORM | B.COPY_DST, new Uint8Array(wakeData));
   let wakesWereEmpty = true;
 
-  // 1x1 fallback crater textures when no craters are bound or before first impact allocates fieldTexture
+  // 1x1 crater textures while no craters are bound, or before the first impact allocates the field
   const fallbackCraterLookup = device.createTexture({
     label: 'meadow crater lookup fallback',
     size: [1, 1],
@@ -1831,7 +1712,6 @@ export async function createMeadowGrass({
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
   });
   device.queue.writeTexture({ texture: fallbackCraterLookup }, new Int16Array([-1]), { offset: 0 }, [1, 1]);
-
   const fallbackCraterField = device.createTexture({
     label: 'meadow crater field fallback',
     size: [1, 1, 1],
@@ -1846,44 +1726,35 @@ export async function createMeadowGrass({
     format: 'rgba8unorm',
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
   });
+  const elevationView = elevation.createView(), coverView = coverTexture.createView();
 
-  const bucketUniforms = [];
-  for (let b = 0; b < MEADOW_BUCKETS; b++) {
-    bucketUniforms.push(mkBuf(`meadow bucket ${b}`, new Uint32Array([b * MEADOW_BUCKET_SPAN, b, 0, 0]), B.UNIFORM));
-  }
+  // The cut's bind groups, one a pass; rebuilt when the region's blocks are.
+  let cutGroups = null;
+  const buildCutGroups = () => {
+    const resource = {
+      0: new Map(activeResources).get(0), 1: { buffer: cfgBuf }, 2: { buffer: nearDomain }, 3: elevationView, 4: coverView,
+      5: { buffer: atlasBuf }, 6: { buffer: blocksBuf }, 7: { buffer: statesBuf }, 8: { buffer: listsBuf }, 9: { buffer: countersBuf },
+      10: { buffer: blockWork }, 11: { buffer: blockWork }, 12: { buffer: nearWork }, 13: { buffer: nearWork },
+    };
+    const bindings = { reset: [9, 10, 12], blocks: [0, 1, 2, 6, 10], patches: [0, 1, 2, 3, 4, 5, 7, 8, 9, 11, 12], clusters: [0, 1, 2, 3, 5, 7, 8, 9, 13] };
+    cutGroups = Object.fromEntries(Object.entries(bindings).map(([name, ids]) => [name, device.createBindGroup({
+      label: `meadow continuum ${name}`, layout: P.layouts[name], entries: ids.map((binding) => ({ binding, resource: resource[binding] })),
+    })]));
+  };
 
+  // The drawing's bind groups, one a pipeline; rebuilt when the land's resources or the craters change.
   let activeResources = resources;
-  let stepGroup = null;
-  const resetGroup = device.createBindGroup({
-    label: 'meadow reset group',
-    layout: resetPipe.getBindGroupLayout(0),
-    entries: [{ binding: 7, resource: { buffer: drawsBuf } }],
-  });
-  const pipeGroups = new Map();
-  const pipeCloudGroups = new Map();
-  const bucketBindGroups = new Map();
-
-  const CLOUD_PIPES = [clusterPipe, clusterFadePipe, contFadePipe, contSolidPipe, splatPipe];
-  for (const pipe of CLOUD_PIPES) {
-    pipeCloudGroups.set(pipe, clouds.bindVolume(pipe));
-  }
-
-  function buildPipeBindGroups(resList) {
-    pipeGroups.clear();
-    bucketBindGroups.clear();
+  const drawGroups = new Map();
+  const cloudGroups = new Map([[P.clusterDraw, clouds.bindVolume(P.clusterDraw)], [P.farDraw, clouds.bindVolume(P.farDraw)]]);
+  function buildDrawGroups(resList) {
     const resMap = new Map(resList);
-    const elevationView = elevation.createView();
-    const coverView = coverTexture.createView();
     const craterLookupView = (boundCraters?.lookupTexture ?? fallbackCraterLookup).createView();
     const craterFieldView = (boundCraters?.fieldTexture ?? fallbackCraterField).createView({ dimension: '2d-array' });
     const extraMap = new Map([
       [5, { buffer: cfgBuf }],
       [6, elevationView],
-      [7, { buffer: vertsBuf }],
-      [8, { buffer: idxBuf }],
-      [9, { buffer: clusterBuf }],
-      [10, { buffer: morphBuf }],
-      [11, { buffer: instancesBuf }],
+      [7, { buffer: atlasBuf }],
+      [8, { buffer: statesBuf }],
       [12, { buffer: nearDomain }],
       [13, { buffer: wakeBuf }],
       [14, craterLookupView],
@@ -1893,44 +1764,13 @@ export async function createMeadowGrass({
       [18, resMap.get(8)],
       [22, craterFieldView],
     ]);
-    const getRes = (id) => extraMap.get(id) ?? resMap.get(id);
-
-    stepGroup = device.createBindGroup({
-      label: 'meadow select group',
-      layout: stepPipe.getBindGroupLayout(0),
-      entries: [
-        [0, getRes(0)],
-        [1, { buffer: stepCfgBuf }],
-        [2, getRes(12)],
-        [3, elevationView],
-        [4, coverView],
-        [5, { buffer: clusterBuf }],
-        [6, { buffer: instancesBuf }],
-        [7, { buffer: drawsBuf }],
-      ].map(([binding, resource]) => ({ binding, resource })),
-    });
-
-    const pipeSpecs = [
-      [clusterPipe, 'meadow cluster', [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22], [0, 1, 2, 3]],
-      [clusterFadePipe, 'meadow cluster fade', [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22], [4]],
-      [contFadePipe, 'meadow cont fade', [0, 1, 2, 3, 4, 5, 6, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22], [5]],
-      [contSolidPipe, 'meadow cont solid', [0, 1, 2, 3, 4, 5, 6, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22], [6]],
-      [splatPipe, 'meadow splat', [0, 1, 2, 3, 4, 5, 6, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22], [7]],
-    ];
-    for (const [pipe, name, ids, buckets] of pipeSpecs) {
-      pipeGroups.set(pipe, device.createBindGroup({
-        label: `${name} group0`,
+    const ids = [0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
+    for (const pipe of [P.clusterDraw, P.farDraw]) {
+      drawGroups.set(pipe, device.createBindGroup({
+        label: `${pipe.label} group0`,
         layout: pipe.getBindGroupLayout(0),
-        entries: ids.map((id) => ({ binding: id, resource: getRes(id) })),
+        entries: ids.map((id) => ({ binding: id, resource: extraMap.get(id) ?? resMap.get(id) })),
       }));
-      const bLayout = pipe.getBindGroupLayout(2);
-      for (const b of buckets) {
-        bucketBindGroups.set(b, device.createBindGroup({
-          label: `${name} bucket ${b}`,
-          layout: bLayout,
-          entries: [{ binding: 0, resource: { buffer: bucketUniforms[b] } }],
-        }));
-      }
     }
   }
 
@@ -1943,101 +1783,8 @@ export async function createMeadowGrass({
   let curBoard = board;
   let curInlandWater = inlandWater;
   let coverTexels = 0;
-  let worldOffX = 0, worldOffZ = 0;
-  let covMinX = -Infinity, covMaxX = Infinity, covMinZ = -Infinity, covMaxZ = Infinity;
-  const coarseMaxCover = new Uint8Array(MEADOW_COARSE_GRID * MEADOW_COARSE_GRID);
-  const coarseMinY = new Float32Array(MEADOW_COARSE_GRID * MEADOW_COARSE_GRID);
-  const coarseMaxY = new Float32Array(MEADOW_COARSE_GRID * MEADOW_COARSE_GRID);
-  let lastEncodeActive = true;
+  let active = false;
   let destroyed = false;
-
-  function isCameraInMeadowRange(camOrFrame = null, viewProjArg = null) {
-    if (!coverTexels) return false;
-    let camX = NaN, camY = NaN, camZ = NaN;
-    let vp = viewProjArg && viewProjArg.length >= 16 ? viewProjArg : null;
-    if (camOrFrame) {
-      if ((camOrFrame instanceof Float32Array || Array.isArray(camOrFrame)) && camOrFrame.length >= 19) {
-        camX = camOrFrame[16];
-        camY = camOrFrame[17];
-        camZ = camOrFrame[18];
-        if (!vp) vp = camOrFrame;
-      } else if (typeof camOrFrame === 'object') {
-        camX = Number(camOrFrame.x ?? camOrFrame[0]);
-        camY = Number(camOrFrame.y ?? camOrFrame[1] ?? 6);
-        camZ = Number(camOrFrame.z ?? camOrFrame[2]);
-      }
-    }
-    if (!Number.isFinite(camX) || !Number.isFinite(camZ)) return true;
-    const ux = camX - worldOffX;
-    const uz = camZ - worldOffZ;
-    const reach = maxMeadowDist + 60.0;
-    if (ux < covMinX - reach || ux > covMaxX + reach || uz < covMinZ - reach || uz > covMaxZ + reach) {
-      return false;
-    }
-
-    const span = curRegion.span;
-    const rx0 = curRegion.x - span * 0.5;
-    const rz0 = curRegion.z - span * 0.5;
-    const cellM = span / MEADOW_COARSE_GRID;
-    const invCell = MEADOW_COARSE_GRID / span;
-    const ci0 = Math.max(0, Math.floor((ux - reach - rx0) * invCell));
-    const ci1 = Math.min(MEADOW_COARSE_GRID - 1, Math.floor((ux + reach - rx0) * invCell));
-    const cj0 = Math.max(0, Math.floor((uz - reach - rz0) * invCell));
-    const cj1 = Math.min(MEADOW_COARSE_GRID - 1, Math.floor((uz + reach - rz0) * invCell));
-    if (ci0 > ci1 || cj0 > cj1) return false;
-
-    const reachSq = reach * reach;
-    let hasNearby = false;
-    let lMinX = Infinity, lMaxX = -Infinity, lMinY = Infinity, lMaxY = -Infinity, lMinZ = Infinity, lMaxZ = -Infinity;
-    for (let cj = cj0; cj <= cj1; cj++) {
-      const cz0 = rz0 + cj * cellM, cz1 = cz0 + cellM;
-      const dz = Math.max(cz0 - uz, 0, uz - cz1);
-      const dzSq = dz * dz;
-      if (dzSq > reachSq) continue;
-      const row = cj * MEADOW_COARSE_GRID;
-      for (let ci = ci0; ci <= ci1; ci++) {
-        if (!coarseMaxCover[row + ci]) continue;
-        const cx0 = rx0 + ci * cellM, cx1 = cx0 + cellM;
-        const dx = Math.max(cx0 - ux, 0, ux - cx1);
-        if (dx * dx + dzSq > reachSq) continue;
-        hasNearby = true;
-        if (cx0 < lMinX) lMinX = cx0;
-        if (cx1 > lMaxX) lMaxX = cx1;
-        if (cz0 < lMinZ) lMinZ = cz0;
-        if (cz1 > lMaxZ) lMaxZ = cz1;
-        const cMinY = coarseMinY[row + ci], cMaxY = coarseMaxY[row + ci];
-        if (cMinY < lMinY) lMinY = cMinY;
-        if (cMaxY > lMaxY) lMaxY = cMaxY;
-      }
-    }
-    if (!hasNearby) return false;
-
-    // Safe vertical altitude check: above 3.2 km over highest nearby grass ground, macro-tiles are sub-0.3 px and blend into landAlbedo.
-    if (Number.isFinite(camY) && camY - lMaxY > Math.max(maxMeadowDist * 3.5, 2800)) {
-      return false;
-    }
-
-    // Safe conservative frustum sphere check against nearby covered meadow AABB
-    if (vp && Number.isFinite(camY)) {
-      const boxMinY = lMinY - 32.0, boxMaxY = lMaxY + 18.0;
-      const cx = (lMinX + lMaxX) * 0.5 + worldOffX;
-      const cy = (boxMinY + boxMaxY) * 0.5;
-      const cz = (lMinZ + lMaxZ) * 0.5 + worldOffZ;
-      const rad = Math.hypot(lMaxX - lMinX, boxMaxY - boxMinY, lMaxZ - lMinZ) * 0.5 + 24.0;
-      const rx = cx - camX, ry = cy - camY, rz = cz - camZ;
-      const isCamRel = Math.abs(vp[12]) < 1e-4 && Math.abs(vp[13]) < 1e-4 && Math.abs(vp[15]) < 1e-4;
-      const px = isCamRel ? rx : cx, py = isCamRel ? ry : cy, pz = isCamRel ? rz : cz;
-      const clipX = vp[0] * px + vp[4] * py + vp[8] * pz + vp[12];
-      const clipY = vp[1] * px + vp[5] * py + vp[9] * pz + vp[13];
-      const clipW = vp[3] * px + vp[7] * py + vp[11] * pz + vp[15];
-      if (clipW < -rad * Math.hypot(vp[3], vp[7], vp[11])) return false;
-      if (clipW + clipX < -rad * Math.hypot(vp[3] + vp[0], vp[7] + vp[4], vp[11] + vp[8])) return false;
-      if (clipW - clipX < -rad * Math.hypot(vp[3] - vp[0], vp[7] - vp[4], vp[11] - vp[8])) return false;
-      if (clipW + clipY < -rad * Math.hypot(vp[3] + vp[1], vp[7] + vp[5], vp[11] + vp[9])) return false;
-      if (clipW - clipY < -rad * Math.hypot(vp[3] - vp[1], vp[7] - vp[5], vp[11] - vp[9])) return false;
-    }
-    return true;
-  }
 
   function sync(next = {}) {
     if (next.region !== undefined) curRegion = next.region;
@@ -2048,9 +1795,6 @@ export async function createMeadowGrass({
     if (next.city !== undefined) curCity = next.city;
     if (next.board !== undefined) curBoard = next.board;
     if (next.inlandWater !== undefined) curInlandWater = next.inlandWater;
-    writeRegionCfg(curRegion);
-    device.queue.writeBuffer(stepCfgBuf, 0, stepCfgData, 0, 32);
-    device.queue.writeBuffer(cfgBuf, 0, cfgBufData, 0, 48);
     const map = buildMeadowCoverMap({
       region: curRegion,
       heights: curHeights,
@@ -2062,48 +1806,21 @@ export async function createMeadowGrass({
       inlandWater: curInlandWater,
       size: coverSize,
     });
-    coverTexels = 0;
-    coarseMaxCover.fill(0);
-    coarseMinY.fill(Infinity);
-    coarseMaxY.fill(-Infinity);
-    covMinX = Infinity; covMaxX = -Infinity; covMinZ = Infinity; covMaxZ = -Infinity;
-    const span = curRegion.span;
-    const rx0 = curRegion.x - span * 0.5, rz0 = curRegion.z - span * 0.5;
-    const step = span / coverSize;
-    const hN = curRegion.size || Math.round(Math.sqrt(curHeights?.length || 0));
-    const hasH = hN >= 2 && curHeights?.length >= hN * hN;
-    for (let j = 0; j < coverSize; j++) {
-      const cj = Math.min(MEADOW_COARSE_GRID - 1, Math.floor((j * MEADOW_COARSE_GRID) / coverSize));
-      const wz = rz0 + (j + 0.5) * step;
-      const hj = hasH ? Math.min(hN - 1, Math.floor(((j + 0.5) / coverSize) * (hN - 1))) * hN : 0;
-      const row = j * coverSize;
-      for (let i = 0; i < coverSize; i++) {
-        const r = map[(row + i) * 4];
-        if (r >= 32) coverTexels++;
-        if (r >= 5) {
-          const wx = rx0 + (i + 0.5) * step;
-          if (wx < covMinX) covMinX = wx;
-          if (wx > covMaxX) covMaxX = wx;
-          if (wz < covMinZ) covMinZ = wz;
-          if (wz > covMaxZ) covMaxZ = wz;
-          const ci = Math.min(MEADOW_COARSE_GRID - 1, Math.floor((i * MEADOW_COARSE_GRID) / coverSize));
-          const cIdx = cj * MEADOW_COARSE_GRID + ci;
-          if (r > coarseMaxCover[cIdx]) coarseMaxCover[cIdx] = r;
-          const gy = hasH
-            ? curHeights[hj + Math.min(hN - 1, Math.floor(((i + 0.5) / coverSize) * (hN - 1)))]
-            : 0;
-          if (gy < coarseMinY[cIdx]) coarseMinY[cIdx] = gy;
-          if (gy > coarseMaxY[cIdx]) coarseMaxY[cIdx] = gy;
-        }
-      }
-    }
-    for (let k = 0; k < coarseMaxCover.length; k++) {
-      if (!coarseMaxCover[k]) {
-        coarseMinY[k] = 0;
-        coarseMaxY[k] = 0;
-      }
-    }
     device.queue.writeTexture({ texture: coverTexture }, map, { bytesPerRow: coverSize * 4 }, [coverSize, coverSize]);
+    const blocks = meadowBlocksOf({ cover: map, size: coverSize, region: curRegion, heights: curHeights });
+    coverTexels = blocks.texels;
+    if (blocks.count !== blockCount) {
+      blocksBuf?.destroy(); blockWork?.destroy();
+      blockCount = blocks.count;
+      blocksBuf = mkBuf('meadow continuum blocks', blockCount * 16, B.STORAGE | B.COPY_DST | B.COPY_SRC);
+      blockWork = mkBuf('meadow continuum blocks in view', (MEADOW_WORK_HEADER + blockCount) * 4, B.STORAGE | B.INDIRECT | B.COPY_SRC);
+      buildCutGroups();
+    }
+    device.queue.writeBuffer(blocksBuf, 0, blocks.data);
+    cfgF.set([curRegion.x, curRegion.z, curRegion.span, MEADOW_WATERLINE], 0);
+    cfgI.set([blocks.first[0], blocks.first[1], blocks.across[0], blocks.across[1]], 12);
+    cfgU[25] = blockCount;
+    syncCraterCfg(curRegion);
   }
 
   function bindCraters(nextCraters = null) {
@@ -2111,16 +1828,14 @@ export async function createMeadowGrass({
     unsubscribeCraters = null;
     boundCraters = nextCraters || null;
     const applyCraterBinding = () => {
-      syncCraterCfg();
-      device.queue.writeBuffer(cfgBuf, 32, cfgBufData, 32, 16);
-      buildPipeBindGroups(activeResources);
+      syncCraterCfg(curRegion);
+      buildDrawGroups(activeResources);
     };
     if (typeof boundCraters?.onReallocate === 'function') {
       unsubscribeCraters = boundCraters.onReallocate(applyCraterBinding);
     }
     applyCraterBinding();
   }
-
   function setBallisticWakes(shots = null, rings = null) {
     let shotCount = 0;
     const shotBase = 4; // float offset after counts: vec4u (16 bytes)
@@ -2208,95 +1923,85 @@ export async function createMeadowGrass({
   }
 
   sync({ region, heights, biome, beaches, port, city, board, inlandWater });
-  if (craters) {
-    bindCraters(craters);
-  } else {
-    buildPipeBindGroups(activeResources);
-  }
+  if (craters) bindCraters(craters);
+  else buildDrawGroups(activeResources);
 
-  const DRAW_ORDER = [
-    [clusterPipe, [0, 1, 2, 3]],
-    [clusterFadePipe, [4]],
-    [contFadePipe, [5]],
-    [contSolidPipe, [6]],
-    [splatPipe, [7]],
-  ];
-
+  // Each list's first entry and room, in entries; the clusters and splats are drawn seen from both sides, the closed
+  // canopy bodies from outside.
+  const lists = [[0, room.clusters, P.clusterDraw], [room.clusters, room.far, P.farDraw], [room.clusters + room.far, room.splat, P.clusterDraw]];
+  const variants = pack.manifest.variants ?? [];
   return {
     stats: {
       loaded: true,
-      style: pack.manifest.style ?? 'botanical-tussock-continuum',
-      variants: pack.manifest.variantRecords.length,
-      clusters: pack.manifest.clusterCount,
-      triangles: pack.manifest.triangleCount,
-      gridSide,
+      style: pack.manifest.format,
+      variants: variants.length,
+      clusters: variants.reduce((n, v) => n + v.clusters, 0),
+      sourceTriangles: variants.reduce((n, v) => n + v.sourceTriangles, 0),
+      patchMetres: MEADOW_PATCH_METRES,
       coverSize,
+      room,
       get coveredTexels() { return coverTexels; },
+      get blocks() { return blockCount; },
     },
+    lists: MEADOW_CONTINUUM_LISTS,
+    counters: countersBuf,
+    states: statesBuf,
+    listBuffer: listsBuf,
+    nearWork,
+    get blockWork() { return blockWork; },
     sync,
     bindCraters,
     setBallisticWakes,
-    setWorldOffset(dx = 0, dz = 0) {
-      worldOffX = Number.isFinite(dx) ? dx : 0;
-      worldOffZ = Number.isFinite(dz) ? dz : 0;
-    },
     rebind(nextResources) {
       activeResources = nextResources;
-      buildPipeBindGroups(activeResources);
+      buildCutGroups();
+      buildDrawGroups(activeResources);
     },
-    encode(pass, camOrFrame = null, viewProjArg = null) {
-      if (!isCameraInMeadowRange(camOrFrame, viewProjArg)) {
-        lastEncodeActive = false;
-        return;
-      }
-      lastEncodeActive = true;
-      pass.setPipeline(resetPipe);
-      pass.setBindGroup(0, resetGroup);
+    // The cut: every patch of grass in view decided on the GPU, each list's draw written for draw().
+    encode(pass) {
+      active = !destroyed && coverTexels > 0 && cutGroups !== null;
+      if (!active) return;
+      const pixels = continuumPixelError();
+      if (cfgF[16] !== Math.fround(pixels)) { cfgF[16] = pixels; cfgDirty = true; }
+      if (cfgDirty) { device.queue.writeBuffer(cfgBuf, 0, cfgData); cfgDirty = false; }
+      pass.setPipeline(P.reset);
+      pass.setBindGroup(0, cutGroups.reset);
       pass.dispatchWorkgroups(1);
-      pass.setPipeline(stepPipe);
-      pass.setBindGroup(0, stepGroup);
-      const groups = Math.ceil(gridSide / 8);
-      pass.dispatchWorkgroups(groups, groups, 2);
+      pass.setPipeline(P.blocks);
+      pass.setBindGroup(0, cutGroups.blocks);
+      pass.dispatchWorkgroups(Math.ceil(blockCount / 64));
+      pass.setPipeline(P.patches);
+      pass.setBindGroup(0, cutGroups.patches);
+      pass.dispatchWorkgroupsIndirect(blockWork, 0);
+      pass.setPipeline(P.clusters);
+      pass.setBindGroup(0, cutGroups.clusters);
+      pass.dispatchWorkgroupsIndirect(nearWork, 0);
     },
-    draw(pass, camOrFrame = null, viewProjArg = null) {
-      if (!coverTexels || !lastEncodeActive) return;
-      if (camOrFrame && !isCameraInMeadowRange(camOrFrame, viewProjArg)) return;
-      for (const [pipe, buckets] of DRAW_ORDER) {
+    draw(pass) {
+      if (!active || destroyed) return;
+      lists.forEach(([at, n, pipe], index) => {
         pass.setPipeline(pipe);
-        pass.setBindGroup(0, pipeGroups.get(pipe));
-        pass.setBindGroup(1, pipeCloudGroups.get(pipe));
-        for (const b of buckets) {
-          pass.setBindGroup(2, bucketBindGroups.get(b));
-          pass.drawIndirect(drawsBuf, b * 16);
-        }
-      }
+        pass.setBindGroup(0, drawGroups.get(pipe));
+        pass.setBindGroup(1, cloudGroups.get(pipe));
+        pass.setVertexBuffer(0, listsBuf, at * 8, n * 8);
+        pass.drawIndirect(countersBuf, index * 16);
+      });
     },
-    drawOpaque(pass, camOrFrame = null, viewProjArg = null) {
-      this.draw(pass, camOrFrame, viewProjArg);
-    },
-    // draw()'s indirect records, every bucket drawn once, for the continuum census (js/continuum-census.js).
+    // draw()'s indirect records, one a list, for the continuum census (js/continuum-census.js).
     continuumDraws() {
-      if (destroyed || !coverTexels || !lastEncodeActive) return [];
-      return [{ buffer: drawsBuf, offset: 0, records: MEADOW_BUCKETS, stride: MEADOW_DRAW_WORDS }];
+      if (destroyed || !active) return [];
+      return [{ buffer: countersBuf, offset: 0, records: MEADOW_CONTINUUM_LISTS.length, stride: 4 }];
     },
     destroy() {
       destroyed = true;
+      active = false;
       unsubscribeCraters?.();
       unsubscribeCraters = null;
       boundCraters = null;
-      vertsBuf.destroy();
-      idxBuf.destroy();
-      clusterBuf.destroy();
-      morphBuf.destroy();
-      instancesBuf.destroy();
-      drawsBuf.destroy();
-      stepCfgBuf.destroy();
-      cfgBuf.destroy();
-      wakeBuf.destroy();
+      for (const buf of [atlasBuf, statesBuf, listsBuf, countersBuf, nearWork, blockWork, blocksBuf, cfgBuf, wakeBuf]) buf?.destroy();
       fallbackCraterLookup.destroy();
       fallbackCraterField.destroy();
       coverTexture.destroy();
-      for (const b of bucketUniforms) b.destroy();
     },
   };
 }

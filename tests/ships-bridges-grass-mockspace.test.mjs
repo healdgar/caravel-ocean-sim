@@ -2,7 +2,7 @@
 // End-to-end verification of:
 // 1. Ship quality parity across all playable ships and trade-vessel archetypes
 // 2. Road-aligned bridges, level multi-arch STONE_BRIDGE_SPAN decks, approach paving & street parapet/portal rules
-// 3. Seamless Nanite meadow grass continuum (1.35 m tiles, low-relief Euler=2 sward morph, zero 280 m cutoff, @binding 17/18 terrain sync)
+// 3. Meadow grass on the one continuum (4 m patches cut by projected error, a 4–6 triangle core, terrain bindings)
 // 4. Lightweight physical GPU mocked space (8192 m sections & 1024 m frontier parcels) and first-time generation on entry
 
 import assert from 'node:assert/strict';
@@ -17,7 +17,8 @@ import {
   generateProceduralCoastalPack,
   growFrontierParcel,
 } from '../js/coastal-world.js';
-import { MEADOW_RENDER_WGSL, MEADOW_STEP_WGSL } from '../js/meadow-grass.js';
+import { MEADOW_CUT_WGSL, MEADOW_RENDER_WGSL } from '../js/meadow-grass.js';
+import { validateMeadowGrass } from '../js/meadow-continuum.js';
 import { OLD_WORLD_LAND, registerBakedBoard } from '../js/old-world.js';
 import {
   BOARD_ROAD_BRIDGE,
@@ -225,26 +226,19 @@ test('bridges align with road direction, use level STONE_BRIDGE_SPAN, stamp appr
   assert.ok(fs.readFileSync('js/forest-groves.js', 'utf8').includes('section.groundSize'), 'forest-groves must check groundSize on section resize');
 });
 
-test('Nanite meadow grass uses botanical-tussock-continuum manifold, loop-free D3D12-safe meadowSelect, Euler=2 morph, ballistic wakes, and terrain albedo bindings', () => {
-  const manifest = JSON.parse(fs.readFileSync('assets/ground-cover/portugal/meadows-gpu/manifest.json', 'utf8'));
-  assert.equal(manifest.tileMetres, 1.75);
-  assert.equal(manifest.levels, 4);
-  assert.equal(manifest.style, 'botanical-tussock-continuum');
-  assert.ok(Array.isArray(manifest.variantRecords) && manifest.variantRecords.length === 12);
-
-  for (const rec of manifest.variantRecords) {
-    assert.equal(rec.genusZeroEuler, 2, `${rec.mix}#${rec.variant} lost Euler=2 genus-0 closure`);
-    assert.ok(rec.coreTriCount >= 4 && rec.coreTriCount <= 6, `${rec.mix}#${rec.variant} must retain 4..6 core tris for gap-free continuum, got ${rec.coreTriCount}`);
-    assert.ok(rec.splat?.rx >= 0.85, `${rec.mix}#${rec.variant} splat rx=${rec.splat?.rx} too narrow for 1.75 m tiles`);
-    assert.ok(rec.splat?.ry <= 0.38, `${rec.mix}#${rec.variant} splat ry=${rec.splat?.ry} too tall`);
+test('meadow grass is one continuum atlas cut on the GPU: clusters, a 4..6 triangle core, ballistic wakes and terrain bindings', () => {
+  const manifest = validateMeadowGrass(JSON.parse(fs.readFileSync('assets/ground-cover/portugal/meadows-gpu/manifest.json', 'utf8')));
+  assert.equal(manifest.patchMetres, 4);
+  assert.equal(manifest.levels, 5);
+  assert.equal(manifest.variants.length, 12);
+  for (const variant of manifest.variants) {
+    assert.ok(variant.chain.coreTriangles >= 4 && variant.chain.coreTriangles <= 6, `variant ${variant.id} must end in a 4..6 triangle core, got ${variant.chain.coreTriangles}`);
+    assert.ok(variant.clusters > 0 && variant.chain.baseTriangles > variant.chain.coreTriangles);
   }
-
-  assert.equal(MEADOW_STEP_WGSL.includes('280.0'), false, 'MEADOW_STEP_WGSL must not retain hard 280.0 m clip');
-  assert.equal(MEADOW_STEP_WGSL.includes('1.570796'), false, 'MEADOW_STEP_WGSL must not use 90-degree parquet tile rotations');
-  assert.equal(/\b(?:for|while)\s*\(/.test(MEADOW_STEP_WGSL), false, 'MEADOW_STEP_WGSL must remain 100% loop-free for Windows D3D12 FXC/DXC');
-  assert.equal(MEADOW_STEP_WGSL.includes('SplatUniform'), false, 'MEADOW_STEP_WGSL must not bind unused 384-byte SplatUniform');
+  // The cut reads the scene's pixel error and the continuum's core; it never clips at a fixed range.
+  assert.equal(MEADOW_CUT_WGSL.includes('280.0'), false, 'the meadow cut must not keep a hard 280 m clip');
+  assert.equal(/\bdiscard\b/.test(MEADOW_CUT_WGSL), false);
   assert.equal(/\bdiscard\b/.test(MEADOW_RENDER_WGSL), false, 'MEADOW_RENDER_WGSL must remain discard-free (MSAA sample_mask)');
-  assert.ok(MEADOW_RENDER_WGSL.includes('meadowWorldBillow'), 'MEADOW_RENDER_WGSL missing world-space continuum billows');
   assert.ok(MEADOW_RENDER_WGSL.includes('@binding(13)'), 'MEADOW_RENDER_WGSL missing ballistic wakes @binding(13)');
   assert.ok(MEADOW_RENDER_WGSL.includes('@binding(14)'), 'MEADOW_RENDER_WGSL missing landCraterLookup @binding(14)');
   assert.ok(MEADOW_RENDER_WGSL.includes('@binding(15)'), 'MEADOW_RENDER_WGSL missing terrain landLight @binding(15)');
@@ -255,8 +249,9 @@ test('Nanite meadow grass uses botanical-tussock-continuum manifold, loop-free D
   assert.ok(MEADOW_RENDER_WGSL.includes('grassWindWave'), 'MEADOW_RENDER_WGSL missing grassWindWave sync');
 
   const meadowSrc = fs.readFileSync('js/meadow-grass.js', 'utf8');
-  const reqBlock = meadowSrc.slice(meadowSrc.indexOf('async function requestMeadowPipelines'), meadowSrc.indexOf('export async function createMeadowGrass'));
-  assert.equal(reqBlock.includes('Promise.all'), false, 'requestMeadowPipelines must compile pipelines sequentially to avoid D3D12 PSO OOM');
+  const reqBlock = meadowSrc.slice(meadowSrc.indexOf('export function requestMeadowPipelines'), meadowSrc.indexOf('export function meadowBlocksOf'));
+  assert.ok(reqBlock.includes('createComputePipelineAsync'));
+  assert.equal(reqBlock.includes('Promise.all'), false,'requestMeadowPipelines must compile pipelines sequentially to avoid D3D12 PSO OOM');
 });
 
 test('ungrown frontier parcels & neighbor sections stay mocked until player entry, then grow once on first entry', () => {

@@ -187,47 +187,13 @@ test('WebGPU compiles HEAD + submerged + direct `main`-branch shaders with zero 
         errors.push(...res.errs);
       }
 
-      // Verify auto-layout isolation: `groundFS` in TERRAIN must NOT require bindings 22 or 23,
-      // whereas `fs` (landOpaque -> landSurface) MUST accept bindings 22 and 23!
-      let layoutIsolationOk = false;
-      if (errors.length === 0) {
-        const treeBuffers = [
-          {
-            arrayStride: 40,
-            attributes: [
-              { shaderLocation: 0, offset: 0, format: 'float32x3' },
-              { shaderLocation: 1, offset: 12, format: 'float32x3' },
-              { shaderLocation: 2, offset: 24, format: 'float32x2' },
-              { shaderLocation: 5, offset: 32, format: 'float32x2' },
-            ],
-          },
-          {
-            arrayStride: 32,
-            stepMode: 'instance',
-            attributes: [
-              { shaderLocation: 3, offset: 0, format: 'float32x4' },
-              { shaderLocation: 4, offset: 16, format: 'float32x4' },
-            ],
-          },
-        ];
-        const groundPipe = await device.createRenderPipelineAsync({
-          label: 'groundFS isolation check',
-          layout: 'auto',
-          vertex: { module: compiledHead.terrain, entryPoint: 'groundVS', buffers: treeBuffers },
-          fragment: { module: compiledHead.terrain, entryPoint: 'groundFS', targets: [{ format: 'rgba16float' }] },
-        });
-        // Check that groundPipe's layout exists and raises zero uncaptured errors when queried
-        groundPipe.getBindGroupLayout(0);
-        layoutIsolationOk = true;
-      }
 
       await device.queue.onSubmittedWorkDone();
-      return { errors, uncaptured, layoutIsolationOk };
+      return { errors, uncaptured };
     }, { headSrcs: headVariants, mainSrcs: mainVariants });
 
     assert.deepEqual(report.errors, [], `Shader compilation errors:\n${report.errors.join('\n')}`);
     assert.deepEqual(report.uncaptured, [], `Uncaptured WebGPU errors:\n${report.uncaptured.join('\n')}`);
-    assert.equal(report.layoutIsolationOk, true);
   } finally {
     await page.close();
   }

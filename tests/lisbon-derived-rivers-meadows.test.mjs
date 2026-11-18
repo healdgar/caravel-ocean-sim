@@ -3,7 +3,7 @@
 // 1. Articulated genus-0 ship continuum (38->27 px) & physical 3D pilots/oarsmen on river vessels
 // 2. Canonical C&C BOARD_MODEL source of truth for manned W.riverBoats & boatmen (with untouched game.js)
 // 3. Procedural Lisbon derivation (zero isLisbonRoyalDock hardcoding), survey ground fit, and zero river-building overlaps
-// 4. GPU Nanite-style meadow grasses pack integrity, river/street cover masking, and synchronized wind waves
+// 4. The meadow continuum atlas's integrity, river/street cover masking, and synchronized wind waves
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -18,14 +18,8 @@ import { createInlandWaterSampler } from '../js/inland-water.js';
 import { CITY_BLOCK_FLOATS } from '../js/old-world-city.js';
 import { terrainSurfaceSample } from '../js/terrain-model.js';
 import { GROUND_DETAIL_RENDER } from '../js/wgsl/ground-detail.js';
-import {
-  MEADOW_RENDER_WGSL,
-  MEADOW_STEP_WGSL,
-  PORTUGAL_MEADOW_GRASS_ASSETS,
-  buildMeadowCoverMap,
-  loadMeadowGrass,
-  validateMeadowGrass,
-} from '../js/meadow-grass.js';
+import { MEADOW_CUT_WGSL, MEADOW_RENDER_WGSL, buildMeadowCoverMap } from '../js/meadow-grass.js';
+import { MEADOW_CONTINUUM_HEADER, PORTUGAL_MEADOW_GRASS_ASSETS, loadMeadowGrass, validateMeadowGrass } from '../js/meadow-continuum.js';
 import {
   TRADE_VESSELS_WGSL,
   inspectTradeVesselArchetypes,
@@ -154,9 +148,9 @@ test('Lisbon waterfront is procedurally derived with zero isLisbonRoyalDock and 
   assert.ok(Number.isFinite(g(region.x, region.z)));
 });
 
-test('Nanite meadow grass pack integrity, cover masking, and GPU-only zero-discard WGSL shaders', async () => {
+test('meadow continuum atlas integrity, cover masking, and GPU-only zero-discard WGSL shaders', async () => {
   const manifest = validateMeadowGrass(JSON.parse(fs.readFileSync(PORTUGAL_MEADOW_GRASS_ASSETS['manifest.json'], 'utf8')));
-  assert.equal(manifest.variantRecords.length, 12);
+  assert.equal(manifest.variants.length, 12);
 
   const root = path.resolve('.');
   const pack = await loadMeadowGrass({
@@ -166,21 +160,25 @@ test('Nanite meadow grass pack integrity, cover masking, and GPU-only zero-disca
       return new Response(buf, { status: 200 });
     },
   });
-  assert.equal(pack.manifest.vertexCount, manifest.vertexCount);
-  assert.equal(pack.vertices.byteLength, manifest.vertexCount * 32);
+  assert.equal(pack.words.byteLength, manifest.atlas.bytes);
+  assert.equal(pack.words[MEADOW_CONTINUUM_HEADER.variantCount], 12);
 
   // WGSL hygiene: zero discard in any shader & <= 8 storage buffers per stage
-  assert.doesNotMatch(MEADOW_STEP_WGSL, /\bdiscard\b/);
+  assert.doesNotMatch(MEADOW_CUT_WGSL, /\bdiscard\b/);
   assert.doesNotMatch(MEADOW_RENDER_WGSL, /\bdiscard\b/);
   const storageCount = (MEADOW_RENDER_WGSL.match(/var<storage,/g) || []).length;
   assert.ok(storageCount <= 8, `MEADOW_RENDER_WGSL storage buffer count=${storageCount} exceeds 8`);
   assert.match(GROUND_DETAIL_RENDER, /fn grassWindWave\(/);
   assert.match(MEADOW_RENDER_WGSL, /fn meadowWindField\(/);
-  // The cluster/continuum handoff is the continuum's one split, carried once, the clusters keeping its complement.
+  // Clusters, far body and splat split each pixel's samples by the continuum's one split, carried once: complements.
   assert.equal(MEADOW_RENDER_WGSL.split('fn continuumSamples(').length - 1, 1);
-  assert.doesNotMatch(MEADOW_RENDER_WGSL, /meadowSampleMask/);
-  assert.match(MEADOW_RENDER_WGSL, /let contMask = continuumSamples\(in\.windInfo\.w, in\.pos\.xy, samples, 0u\);[\s\S]*?o\.mask = full & \(~contMask\);/);
-  assert.match(MEADOW_RENDER_WGSL, /o\.mask = continuumSamples\(in\.windInfo\.w, in\.pos\.xy, samples, 0u\);/);
+  assert.equal(MEADOW_CUT_WGSL.split('fn continuumThin(').length - 1, 1);
+  const mask = MEADOW_RENDER_WGSL.slice(MEADOW_RENDER_WGSL.indexOf('fn meadowMask('), MEADOW_RENDER_WGSL.indexOf('@fragment fn meadowFS'));
+  assert.match(mask, /let handoff = continuumSamples\(/);
+  assert.match(mask, /let splat = handoff & continuumSamples\(/);
+  assert.match(mask, /return all & ~handoff;/);
+  assert.match(mask, /return handoff & ~splat;/);
+  assert.match(MEADOW_RENDER_WGSL, /o\.mask = meadowMask\(in\.coverage, in\.pos\.xy\);/);
 
   // Build cover map on Lisbon and confirm zero grass in rivers/streets and real grass on hillsides
   const baked = JSON.parse(fs.readFileSync(BAKED_BOARDS['lisbon:1550'], 'utf8'));

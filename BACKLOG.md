@@ -1,5 +1,15 @@
 # Ocean Sailing Simulator backlog and overnight checkpoint
 
+## November 17: meadow grass on the one continuum, what remains
+
+Grass now draws only through the meadow continuum (`js/meadow-grass.js`, atlas from `scripts/prepare-meadow-grass.mjs`): 4 m patches cut by projected error into sward clusters, handed by sample mask to a canopy body that collapses to a 6-triangle core, then one splat, thinned and grown below a pixel. Open:
+
+- Only Portugal has a meadow pack. Every other coast grows no grass at all now that ground cover's grass is gone; each needs its own bake.
+- Close up, a coarse cut of the sward reads sparse beside the canopy body, which reads as an opaque green slab, and adjacent 4 m patches in different states show as squares. The cuts are whole (the test checks it); the cluster error undercounts lost coverage. Bake each variant's top coverage into the atlas (variant words 29–31 are free) and mix ground colour into the body and splat by view coverage, and let decimated blades widen to keep their area.
+- The step errors plateau over the chain's first ~56 steps, so the body jumps from its first step to the plateau's end at once.
+- The meadow casts no shadow and is absent from the water's captures. Both should take coarse cuts of the same continuum, never a separate mesh.
+- The cut decides about 300k patches a frame over the whole region. Not measured, per the continuum rules; worth a coarser block reject once timing is allowed.
+
 ## November 5: streets, roads and townsfolk
 
 Buildings now find their own ground, because the port layout assumes a straight shore and real coasts curve. San Juan had 11 of 31 buildings on the seabed, its fort in 15 to 32 m of water, and Havana, Portobelo and Santo Domingo had a few each. Each prefab says what it needs (dry land, the water's edge, a bank at each end of a bridge), takes the nearest place that gives it that, and is left out if nothing within 300 m does. Piers slide along their heading until their root is ashore. Neighbours keep 5 m apart so a street fits.
@@ -224,7 +234,7 @@ What was wrong, largest first:
 - The ocean fetched 130 shadow texels per pixel near a ship. A compute pass now bakes each ship's sea shadow, with blur levels, once a frame, and the ocean reads about 6 texels (`js/sea-shadows.js`). A first attempt that simply took fewer samples left hard edges with ghost lines, so it was replaced. The bake still follows the waves, checked in a rough sea.
 - The tree and ground list cache could never hit on a moving ship: its key used exact float comparison on a rotating camera. Scenery went from 6.9 ms to 0.1 ms.
 - Sailor skeletons were all solved in JavaScript every frame. Solves are now spread out by apparent distance and a compute pass blends every joint between them. Sailors beyond 50 m and fort soldiers pose in a compute pass from clips baked once per model (`js/crew-clip-pose.js`), with no JavaScript per joint. The solve itself is now a compute pass too (`js/crew-solve.js`): JavaScript writes each sailor who is due a short list of steps, and Victory at Lisbon sends about 9 KB a frame for her poses in 5 writes where she sent about 150 KB of joints in 37. Crew time on the main thread fell from about 2.8 ms a frame to about 1.0; the pass costs the GPU about 0.3 ms, more when the GPU is contended. Still read on the CPU: a shot is matched to its bone on a JavaScript skeleton once, when it lands, and wetness probes at the pelvis, chest and head are taken from the body at rest.
-- Ground cover and the old tree path culled in JavaScript beside the forest's GPU culling. A compute pass now culls both and writes an indirect draw (`js/scenery-cull.js`). `selectTreeLods`, `groundCoverVisible` and `visibleForestIds` in `js/vegetation.js` stay only as tested references.
+- Ground cover and the old tree path culled in JavaScript beside the forest's GPU culling. A compute pass now culls both and writes an indirect draw (`js/scenery-cull.js`). `selectTreeLods` and `visibleForestIds` in `js/vegetation.js` stay only as tested references. Ground cover's grass has since gone: grass grows only on the meadow continuum (`js/meadow-grass.js`), and ground cover's rocks lie on the boulder continuum.
 - Forest leaves lay depth first and carry no `discard`. Their furthest native tier draws 5 to 6.5% of leaf quads, with larger cards, instead of 17 to 22%.
 
 Rules that follow are in `GPU_ARCHITECTURE.md`. The voyage panel layout test failed in two of four full suite runs and passes alone: something covers the centre of the screen at 800×600, and the test now names it when it happens.

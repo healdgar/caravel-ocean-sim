@@ -382,8 +382,8 @@ export function withNeuralPbrVessel(source, { group = 0, latentBinding = 16, wei
 /**
  * Injects Shared Neural PBR Material Bank evaluation & dry dielectric microfacet sheen
  * into TERRAIN (buildings, roofs, Pedra Lioz masonry, limewash stucco, cobbles, cliffs).
- * Uses `var<private> landNpbrGloss` so non-`landSurface` entry points (`groundFS`) never touch
- * the Neural PBR bindings in WebGPU auto-layout reflection.
+ * Uses `var<private> landNpbrGloss` so entry points other than `landSurface` never touch the Neural PBR
+ * bindings in WebGPU auto-layout reflection.
  */
 export function withNeuralPbrTerrain(source, { group = 0, latentBinding = 22, weightBinding = 23 } = {}) {
   const block = createNeuralPbrWGSL({ group, latentBinding, weightBinding });

@@ -770,20 +770,6 @@ fn cityRoofAge(root:vec4f,tone:f32)->f32{return fract(tone*3.17+root.x*0.071+roo
   o.pos=F.viewProj*vec4f(earthCurve(shifted-F.camPos.xyz,F.camPos.y),1.0);
   return o;
 }
-@vertex fn groundVS(@location(0) position:vec3f,@location(1) normal:vec3f,@location(2) kind:vec2f,
-  @location(3) root:vec4f,@location(4) shape:vec4f,@location(5) leafUV:vec2f)->LandVertex{
-  let angle=shape.y*2.0*PI;let c=cos(angle);let s=sin(angle);
-  let up=normalize(vec3f(-shape.z,1,-shape.w));let right=normalize(vec3f(1,shape.z,0));let front=cross(right,up);
-  let p=vec3f((position.x*c-position.z*s)*root.w,position.y*shape.x,(position.x*s+position.z*c)*root.w);
-  let grass=kind.x>6.5;
-  var sway=vec3f(0);
-  if(grass){let bend=F.windP[0].xy*clamp(F.windP[0].z/12.0,0.0,2.2)*.035*shape.x*position.y*position.y*sin(F.camPos.w*1.8+angle);sway=vec3f(bend.x,0,bend.y);}
-  let scaled=normal/max(vec3f(root.w,shape.x,root.w),vec3f(.001));
-  let n=vec3f(scaled.x*c-scaled.z*s,scaled.y,scaled.x*s+scaled.z*c);
-  let rawMag=max(length(normal),1.0);
-  var o:LandVertex;o.world=root.xyz+right*p.x+up*p.y+front*p.z+sway;o.normal=normalize(right*n.x+up*n.y+front*n.z)*rawMag;
-  o.kind=kind;o.leafUV=leafUV;o.pos=F.viewProj*vec4f(earthCurve(o.world-F.camPos.xyz,F.camPos.y),1);return o;
-}
 // The opaque call graph contains neither discard nor a leaf texture fetch.
 // Keep that property for Apple's hidden-surface removal; a runtime branch in
 // one shared cutout fragment would still make solid ground a feedback shader.
@@ -1518,68 +1504,6 @@ fn landSurface(in:LandVertex,pit:LandPit)->vec4f{
   return landFinish(world,n,albedo,diffuse,ambientVisibility,wet,roughness);
 }
 @fragment fn fs(in:LandVertex)->@location(0) vec4f{return landOpaque(in);}
-// The props use local atmosphere and the terrain's cached cloud sunlight. A
-// twelve-step volume integration per grass blade would defeat their budget.
-@fragment fn groundFS(in:LandVertex,@builtin(front_facing) front:bool)->@location(0) vec4f{
-  let world=in.world;let grass=in.kind.x>6.5;
-  let rawExposure=clamp((length(in.normal)-1.0)/0.6,0.0,1.0);
-  var n=normalize(in.normal);if(grass){n*=select(-1.0,1.0,front);}
-  let uv=(world.xz-LAND.domain.xy)/LAND.domain.z+.5;
-  let source=pow(textureSample(landAlbedo,landSampler,uv).rgb,vec3f(2.2));
-  let vegetation=textureSampleLevel(vegetationMask,landSampler,uv,0).r;
-  let shade=.72+in.kind.y*.30;
-  let vEye=normalize(F.camPos.xyz-world);
-  let camDist=distance(world,F.camPos.xyz);
-  // Fractured boulder mineral lithology, raw cleavage scars, crustose lichen & crystal micro-bump vs grass blades.
-  var albedo=vec3f(0.0);
-  var roughness=0.84;
-  if(!grass){
-    let archTone=in.leafUV.x;
-    let stoneA=vec3f(0.24,0.23,0.21);
-    let stoneB=vec3f(0.32,0.28,0.22);
-    let stoneC=vec3f(0.16,0.16,0.17);
-    let litho=mix(mix(stoneA,stoneB,smoothstep(0.0,0.65,archTone)),stoneC,smoothstep(0.55,1.0,archTone));
-    let crystal=sin(world.x*9.5+world.z*7.1)*0.5+cos(world.y*12.3-world.x*5.7)*0.5;
-    let grainFade=smoothstep(48.0,10.0,camDist);
-    let gx=cos(world.x*19.0+world.z*11.0)*0.075*(grainFade+rawExposure*0.45);
-    let gz=sin(world.z*19.0-world.x*11.0)*0.075*(grainFade+rawExposure*0.45);
-    n=normalize(n+vec3f(gx,0.0,gz));
-    let lichenNoise=sin(world.x*2.4+world.z*1.9)*cos(world.z*3.1-world.x*2.7);
-    let lichen=smoothstep(0.55,0.88,max(n.y,0.0))*smoothstep(0.20,0.75,lichenNoise)*smoothstep(0.08,0.45,vegetation)*(1.0-rawExposure);
-    let rootMask=(1.0-smoothstep(0.02,0.32,in.leafUV.y))*(1.0-rawExposure);
-    var rockBase=mix(litho,source,0.22*(1.0-rawExposure*0.8))*shade*(0.90+0.12*max(n.y,0.0)+crystal*0.045*grainFade);
-    let freshCore=mix(litho*1.38+vec3f(0.045,0.042,0.038),vec3f(0.46,0.43,0.38),0.28+0.22*crystal);
-    let scorchRim=smoothstep(0.05,0.38,rawExposure)*(1.0-smoothstep(0.42,0.88,rawExposure));
-    rockBase=mix(rockBase,freshCore*shade,rawExposure*0.82);
-    rockBase=mix(rockBase,vec3f(0.055,0.050,0.046),scorchRim*0.36);
-    rockBase=mix(rockBase,vec3f(0.24,0.27,0.16)*shade,lichen*0.62);
-    rockBase=mix(rockBase,source*0.72,rootMask*0.38);
-    albedo=rockBase;
-    roughness=clamp(0.76-crystal*0.05+lichen*0.14-rawExposure*0.10,0.52,0.92);
-  }else{
-    let dry=vec3f(.17,.145,.065);let green=mix(leafMean.rgb,source,.18);
-    albedo=mix(dry,green,smoothstep(.12,.7,vegetation))*shade;
-  }
-  let sunlight=textureSampleLevel(landLight,sampC,uv,0).r;
-  let shadowed=vec3f(landShadowVisibility(world,n));
-  let direct=sunIlluminance()*sunlight*solarShadowVisibility(shadowed).x;
-  let ambient=textureSampleLevel(envCube,sampC,vec3f(0,1,0),7).rgb;
-  let diffuse=max(dot(n,F.sunDir.xyz),0.0)+select(0.0,max(dot(-n,F.sunDir.xyz),0.0)*.38,grass);
-  let visibility=select(.35+.30*max(n.y,0.0),.32+in.kind.y*.32,grass);
-  let wet=(1.0-smoothstep(0.6,3.2,world.y))*.55;
-  var color=albedo*(1.0-wet*.3)*(direct*diffuse/PI+ambient*visibility);
-  if(!grass){
-    let sunL=select(vec3f(0.0,1.0,0.0),normalize(F.sunDir.xyz),length(F.sunDir.xyz)>1e-5);
-    let hRaw=vEye+sunL;
-    let hVec=select(vec3f(0.0,1.0,0.0),normalize(hRaw),length(hRaw)>1e-5);
-    let nDotH=max(dot(n,hVec),0.0);
-    let specPower=mix(14.0,36.0,wet);
-    color+=direct*pow(nDotH,specPower)*(0.045+wet*0.12);
-  }
-  color+=lunarSurface(n,vEye,albedo,roughness,vec3f(.035),vec3f(textureSampleLevel(landLight,sampC,uv,0).g)*lunarShadowVisibility(shadowed));
-  color+=lightningSurface(n,vEye,albedo,roughness)+worldFireSurface(world,n,vEye,albedo,roughness);
-  return vec4f(surfaceAir(color,world),1);
-}
 `+LAND_CRATER_RENDER+/* wgsl */ `
 @vertex fn portShadowVS(@location(0) position:vec3f)->@builtin(position) vec4f{
   return landSH.lightView*vec4f(position-landSH.origin.xyz,1.0);

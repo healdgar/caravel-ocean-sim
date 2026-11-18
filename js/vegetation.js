@@ -30,14 +30,11 @@ export function seedVegetation(region,sampleHeight,mask){
   }
   return new Float32Array(out);
 }
-// Authored local ground cover. Region-resident patch bounds are cheap; exact
-// roots are expanded lazily only after frustum and projected-extent culling.
-export const GROUND_COVER=Object.freeze({patchSpan:64,grassPerPatch:32,rocksPerPatch:3,variants:4,maxExtent:5.1});
+// Authored local ground cover: the rocks lying about the land, drawn by the boulder continuum
+// (js/boulder-continuum.js); its grass is the meadow's (js/meadow-grass.js). Region-resident patch bounds are
+// cheap; a patch's rocks are worked out when it comes into range.
+export const GROUND_COVER=Object.freeze({patchSpan:64,rocksPerPatch:3,maxExtent:5.1});
 export const ROCK_ARCHETYPES=6;
-export const ROCK_LODS=3;
-export const GRASS_VARIANTS=2;
-export const GRASS_LODS=2;
-export const GROUND_COVER_BUCKETS=ROCK_ARCHETYPES*ROCK_LODS+GRASS_VARIANTS*GRASS_LODS;
 export function createGroundCoverPatches(region,sampleHeight,extraHeightBounds=null){
   const span=GROUND_COVER.patchSpan,count=Math.ceil(region.span/span),patches=[];
   for(let j=0;j<count;j++)for(let i=0;i<count;i++){
@@ -60,161 +57,20 @@ export function rockArchetypeFromSeed(seed,group=seed>.5?1:0){
   const f=seed*17.31+(group&1)*.5;
   return Math.max(0,Math.min(ROCK_ARCHETYPES-1,Math.floor((f-Math.floor(f))*ROCK_ARCHETYPES)));
 }
-export function mayGrowGroundCover(craterLedger,x,z,isRock=false){
-  return isRock?true:!craterLedger?.covers?.(x,z);
-}
-export function groundCoverInstances(patch,region,sampleHeight,mask,mayGrowAt=null){
+// A patch's rocks, in two groups by their seed: root x, y, z, radius, height, seed and the ground's slope x, z.
+export function groundCoverInstances(patch,sampleHeight,mayLieAt=null){
   if(patch.instances)return patch.instances;
-  const rand=random(patch.seed),groups=[[],[],[],[]],span=GROUND_COVER.patchSpan;
-  for(let i=0;i<GROUND_COVER.grassPerPatch+GROUND_COVER.rocksPerPatch;i++){
-    const isRock=i<GROUND_COVER.rocksPerPatch,grass=!isRock,u=rand(),v=rand(),density=rand(),seed=rand(),size=rand(),tall=rand();
+  const rand=random(patch.seed),groups=[[],[]],span=GROUND_COVER.patchSpan;
+  for(let i=0;i<GROUND_COVER.rocksPerPatch;i++){
+    const u=rand(),v=rand(),density=rand(),seed=rand(),size=rand(),tall=rand();
     const x=patch.x+u*span,z=patch.z+v*span,h=sampleHeight(x,z);
-    if(h<5||h>855||(mayGrowAt&&!mayGrowAt(x,z,isRock)))continue;
+    if(h<5||h>855||(mayLieAt&&!mayLieAt(x,z)))continue;
     const sx=(sampleHeight(x+.5,z)-sampleHeight(x-.5,z)),sz=(sampleHeight(x,z+.5)-sampleHeight(x,z-.5)),slope=Math.hypot(sx,sz);
-    const probability=vegetationProbability(mask,region.biomeSize??512,(x-region.x)/region.span+.5,(z-region.z)/region.span+.5);
-    if(grass?(probability<=0||slope>.9||density>probability*.9):(slope>1.8||density>.35+slope*.3))continue;
-    const variant=(grass?2:0)+(seed>.5?1:0),radius=grass?.7+size*1.1:.62+size*1.78,height=grass?.28+tall*.52:Math.min(2.05,Math.max(.36,radius*(.38+tall*.28)));
-    groups[variant].push(x,h,z,radius,height,seed,sx,sz);
+    if(slope>1.8||density>.35+slope*.3)continue;
+    const radius=.62+size*1.78,height=Math.min(2.05,Math.max(.36,radius*(.38+tall*.28)));
+    groups[seed>.5?1:0].push(x,h,z,radius,height,seed,sx,sz);
   }
   patch.instances=groups.map(data=>new Float32Array(data));return patch.instances;
-}
-// A whole prop may disappear only when its conservative projected geometric
-// extent is below the same actual-pixel target as trees. Rigid slope alignment
-// preserves radius; 20% covers the small grass wind bend. No fixed metre LOD.
-export function projectedGroundExtent(x,y,z,extent,camera,margin=0){
-  const f=camera.forward,length=f?Math.hypot(f[0],f[1],f[2]):0;
-  if(!(camera.screenHeight>0&&camera.tanHalfFovY>0&&length>0))return Infinity;
-  const dx=x-camera.x,dy=y-camera.y,dz=z-camera.z,depth=(dx*f[0]+dy*f[1]+dz*f[2])/length;
-  const near=depth-extent-margin;
-  if(near<=extent)return Infinity;
-  const lateral=Math.sqrt(Math.max(0,dx*dx+dy*dy+dz*dz-depth*depth))+extent+margin;
-  return camera.screenHeight/(2*camera.tanHalfFovY)*extent*Math.sqrt(1+(lateral/near)**2)/(near-extent);
-}
-export function groundCoverError(x,y,z,radius,height,camera){
-  return projectedGroundExtent(x,y,z,Math.hypot(radius*Math.SQRT2,height)*1.2,camera);
-}
-export function groundCoverVisible(error,wasVisible=false,pixelError=TREE_PIXEL_ERROR){
-  return !Number.isFinite(error)||error>=pixelError*(wasVisible?.88:1);
-}
-const groundGeometryCache=new Map();
-function buildBoulderGeometry(archetype=0,lod=0){
-  const cacheKey=`boulder:${archetype}:${lod}`;
-  if(groundGeometryCache.has(cacheKey))return groundGeometryCache.get(cacheKey);
-  const rand=random(29173+archetype*13007);
-  const out=[];
-  const verts=[];
-  const t=(1+Math.sqrt(5))/2;
-  for(const p of[[-1,t,0],[1,t,0],[-1,-t,0],[1,-t,0],[0,-1,t],[0,1,t],[0,-1,-t],[0,1,-t],[t,0,-1],[t,0,1],[-t,0,-1],[-t,0,1]])verts.push(treeNormal(p));
-  let tris=[[0,11,5],[0,5,1],[0,1,7],[0,7,10],[0,10,11],[1,5,9],[5,11,4],[11,10,2],[10,7,6],[7,1,8],[3,9,4],[3,4,2],[3,2,6],[3,6,8],[3,8,9],[4,9,5],[2,4,11],[6,2,10],[8,6,7],[9,8,1]];
-  const subdiv=Math.max(0,2-lod);
-  for(let level=0;level<subdiv;level++){
-    const mid=new Map(),half=(a,b)=>{const k=a<b?a*4096+b:b*4096+a;if(!mid.has(k)){verts.push(treeNormal(treeAdd(verts[a],verts[b])));mid.set(k,verts.length-1);}return mid.get(k);};
-    tris=tris.flatMap(([a,b,c])=>{const ab=half(a,b),bc=half(b,c),ca=half(c,a);return[[a,ab,ca],[b,bc,ab],[c,ca,bc],[ab,bc,ca]];});
-  }
-  // Six fractured polyhedral archetypes built by intersecting geological cleavage half-spaces around [0, 0.3, 0].
-  const cuts=[];
-  // Broad basal root plane (-0.20 m below ground) keeps every boulder grounded and star-convex around y = 0.3.
-  cuts.push({n:[0,-1,0],d:.50});
-  const topTilt=archetype===0?[.22,.96,.12]:archetype===2?[.48,.82,-.28]:archetype===5?[.08,.99,-.06]:[.18+rand()*.24,.92,.14-rand()*.28];
-  const topD=archetype===0?.38:archetype===2?.46:archetype===4?.40:.44+rand()*.10;
-  cuts.push({n:treeNormal(topTilt),d:topD});
-  const sideCount=archetype===5?6:8+Math.floor(rand()*5);
-  const phase=rand()*Math.PI*2;
-  for(let i=0;i<sideCount;i++){
-    const az=phase+(i/sideCount)*Math.PI*2+(rand()-.5)*(archetype===5?.12:.42);
-    const el=(archetype===3&&i%2===0)?.52:archetype===5?.06:(rand()-.18)*.75;
-    const dist=(archetype===1||archetype===2?(.58+rand()*.32):(.64+rand()*.28));
-    cuts.push({n:treeNormal([Math.cos(az)*Math.cos(el),Math.sin(el),Math.sin(az)*Math.cos(el)]),d:dist});
-  }
-  if(archetype===2||archetype===3){
-    // Secondary shoulder shear plane for wedged talus / stepped outcrop profiles.
-    const a=phase+1.15;
-    cuts.push({n:treeNormal([Math.cos(a)*.62,.76,Math.sin(a)*.62]),d:.48+rand()*.08});
-  }
-  const starY=0.3;
-  const stretchX=archetype===0?1.14:archetype===4?1.08:.86+rand()*.26;
-  const stretchZ=archetype===0?.84:archetype===4?.92:.82+rand()*.26;
-  const pos=verts.map(u=>{
-    let best=1.18;
-    for(const c of cuts){
-      const dDot=u[0]*c.n[0]+u[1]*c.n[1]+u[2]*c.n[2];
-      if(dDot>1e-3)best=Math.min(best,c.d/dDot);
-    }
-    const ripple=1+.025*Math.sin(u[0]*6.7+u[2]*5.3+archetype)+.015*Math.cos(u[1]*9.1-u[0]*4.1);
-    const r=best*ripple;
-    return [u[0]*r*stretchX,starY+u[1]*r,u[2]*r*stretchZ];
-  });
-  let minY=Infinity,maxY=-Infinity,maxXZ=0;
-  for(const p of pos){minY=Math.min(minY,p[1]);maxY=Math.max(maxY,p[1]);maxXZ=Math.max(maxXZ,Math.hypot(p[0],p[2]));}
-  const xzScale=.92/Math.max(1e-3,maxXZ);
-  const negScale=minY<starY?(.48/(starY-minY)):1;
-  const posScale=maxY>starY?(Math.min(.58,maxY-starY)/(maxY-starY)):1;
-  for(const p of pos){
-    p[0]*=xzScale;p[2]*=xzScale;
-    if(p[1]<starY)p[1]=starY+(p[1]-starY)*Math.max(.85,Math.min(1.06,negScale));
-    else p[1]=starY+(p[1]-starY)*Math.min(1.0,posScale);
-  }
-  const faceN=tris.map(([a,b,c])=>{
-    const ab=[pos[b][0]-pos[a][0],pos[b][1]-pos[a][1],pos[b][2]-pos[a][2]];
-    const ac=[pos[c][0]-pos[a][0],pos[c][1]-pos[a][1],pos[c][2]-pos[a][2]];
-    return treeNormal(treeCross(ab,ac));
-  });
-  const adj=Array.from({length:pos.length},()=>[]);
-  tris.forEach((f,fi)=>{for(const v of f)adj[v].push(fi);});
-  // Encode per-archetype stone hash in leafUV.x so groundFS varies granite, limestone, ironstone, and basalt tinting.
-  const archTag=(archetype+.5)/ROCK_ARCHETYPES;
-  for(let fi=0;fi<tris.length;fi++){
-    const f=tris[fi],fn=faceN[fi];
-    for(const v of f){
-      let sx=0,sy=0,sz=0;
-      for(const nfi of adj[v]){
-        const nf=faceN[nfi];
-        if(nf[0]*fn[0]+nf[1]*fn[1]+nf[2]*fn[2]>=.985){sx+=nf[0];sy+=nf[1];sz+=nf[2];}
-      }
-      const vn=sx||sy||sz?treeNormal([sx,sy,sz]):fn;
-      const heightTerm=Math.max(0,Math.min(1,(pos[v][1]+.20)/1.05));
-      const upLight=.65+.35*Math.max(0,fn[1]);
-      const shade=.42+.56*(heightTerm*.6+upLight*.4);
-      out.push(pos[v][0],pos[v][1],pos[v][2],vn[0],vn[1],vn[2],6,shade,archTag,heightTerm);
-    }
-  }
-  const geom=new Float32Array(out);groundGeometryCache.set(cacheKey,geom);return geom;
-}
-function buildGrassGeometry(variant=0,lod=0){
-  const cacheKey=`grass:${variant}:${lod}`;
-  if(groundGeometryCache.has(cacheKey))return groundGeometryCache.get(cacheKey);
-  const rand=random(18491+(variant+2)*7919),out=[];
-  const triangle=(a,b,c,kind,shade)=>{
-    const n=treeNormal(treeCross(b.map((v,k)=>v-a[k]),c.map((v,k)=>v-a[k])));
-    for(const p of[a,b,c])out.push(...p,...n,kind,shade,0,0);
-  };
-  const blades=lod===0?18:12;
-  const rowsAt=lod===0?[0,.48,.82]:[0,.55];
-  for(let blade=0;blade<blades;blade++){
-    const angle=rand()*Math.PI*2,r=Math.sqrt(rand())*.76,x=Math.cos(angle)*r,z=Math.sin(angle)*r,turn=rand()*Math.PI*2,h=.4+rand()*.6,width=(lod===0?.025:.034)+rand()*.025;
-    const right=[Math.cos(turn)*width,0,Math.sin(turn)*width],bend=[-Math.sin(turn)*.22,0,Math.cos(turn)*.22];
-    const rows=rowsAt.map(t=>[-1,1].map(side=>[x+right[0]*side*(1-t*.7)+bend[0]*t*t,h*t,z+right[2]*side*(1-t*.7)+bend[2]*t*t]));
-    const tip=[x+bend[0],h,z+bend[2]],shade=.45+rand()*.5;
-    for(let j=0;j<rows.length-1;j++){triangle(rows[j][0],rows[j][1],rows[j+1][0],7,shade);triangle(rows[j][1],rows[j+1][1],rows[j+1][0],7,shade);}
-    const top=rows[rows.length-1];
-    triangle(top[0],top[1],tip,7,shade);
-  }
-  const geom=new Float32Array(out);groundGeometryCache.set(cacheKey,geom);return geom;
-}
-export function groundCoverGeometry(variant=0,lod=0){
-  const key=variant%GROUND_COVER.variants;
-  if(key<2)return buildBoulderGeometry(key,Math.max(0,Math.min(ROCK_LODS-1,lod)));
-  return buildGrassGeometry(key-2,Math.max(0,Math.min(GRASS_LODS-1,lod)));
-}
-export function groundCoverBucketGeometry(bucket=0){
-  const b=((bucket%GROUND_COVER_BUCKETS)+GROUND_COVER_BUCKETS)%GROUND_COVER_BUCKETS;
-  if(b<ROCK_ARCHETYPES*ROCK_LODS){
-    const lod=Math.floor(b/ROCK_ARCHETYPES),arch=b%ROCK_ARCHETYPES;
-    return buildBoulderGeometry(arch,lod);
-  }
-  const gi=b-ROCK_ARCHETYPES*ROCK_LODS;
-  const lod=Math.floor(gi/GRASS_VARIANTS),gVar=gi%GRASS_VARIANTS;
-  return buildGrassGeometry(gVar,lod);
 }
 const treeNormal=p=>{const l=Math.hypot(...p)||1;return p.map(x=>x/l);};
 const treeCross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];

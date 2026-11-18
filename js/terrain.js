@@ -1,11 +1,10 @@
 import { ISLAND, decodeIsland, decodeBiome, islandGeometry, terrainSample, terrainSurfaceSample, constrainIslandMotion, safeLandfallStart, SPANISH_MAIN_1550_REGIONS, HISTORICAL_COLONIAL_PORTS, resolveColonialEra, generateProceduralCoastalPack, upgradeProceduralPackWithRealDEM } from './terrain-model.js';
 import { TREE_VERTEX_FLOATS, TREE_PIXEL_ERROR,
-  GROUND_COVER, GROUND_COVER_BUCKETS, ROCK_ARCHETYPES, ROCK_LODS, createGroundCoverPatches, groundCoverInstances, groundCoverBucketGeometry, mayGrowGroundCover } from './vegetation.js';
+  GROUND_COVER, createGroundCoverPatches, groundCoverInstances } from './vegetation.js';
 import { TERRAIN, TERRAIN_LIGHT, COASTAL_FIELD_BAKE } from './wgsl/terrain.js';
 import { GROUND_DETAIL_BAKE } from './wgsl/ground-detail.js';
 import { createCoastalField } from './coastal-field.js';
 import { coastalClarity, coastalTurbidityScale } from './sea-colour.js';
-import { createSceneryCull, GROUND_COVER_CULL } from './scenery-cull.js';
 import {loadTerrainNear,terrainNearGeometry,terrainNearSample,terrainNearPatchBounds,sampleTerrainNear} from './terrain-near.js';
 import {chooseForestSurfaceCodec} from './forest-surfaces.js';
 import {loadForestScenery,createForestRenderer,FOREST_VERTEX_WGSL,FOREST_SHADOW_WGSL,FOREST_ASSETS,SUBTROPICAL_FOREST_ASSETS,PORTUGAL_FOREST_ASSETS} from './forest-scenery.js';
@@ -21,7 +20,8 @@ import {bakedBoardAsset} from './board-model.js';
 import {createBoardStamp,requestBoardStampPipelines} from './board-stamp.js';
 import {createInlandWater,requestInlandWaterPipeline,createInlandWaterSampler} from './inland-water.js';
 import {bridgeDeckYAt,createLivestockHerds} from './herds.js';
-import {PORTUGAL_MEADOW_GRASS_ASSETS,loadMeadowGrass,createMeadowGrass} from './meadow-grass.js';
+import {createMeadowGrass} from './meadow-grass.js';
+import {PORTUGAL_MEADOW_GRASS_ASSETS,loadMeadowGrass} from './meadow-continuum.js';
 import {createTradeVessels,requestTradeVesselsPipelines} from './trade-vessels.js';
 import {CITY_BLOCK_FLOATS} from './old-world-city.js';
 import {CITY_TYPED_FLOATS,compileCityBuildingTypes} from './old-world-buildings.js';
@@ -930,7 +930,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const meshLayout={arrayStride:32,attributes:[{shaderLocation:0,offset:0,format:'float32x3'},{shaderLocation:1,offset:12,format:'float32x3'},{shaderLocation:2,offset:24,format:'float32x2'}]};
   const treeLayout={arrayStride:TREE_VERTEX_FLOATS*4,attributes:[...meshLayout.attributes,{shaderLocation:5,offset:32,format:'float32x2'}]};
   const treeBuffers=[treeLayout,{arrayStride:32,stepMode:'instance',attributes:[{shaderLocation:3,offset:0,format:'float32x4'},{shaderLocation:4,offset:16,format:'float32x4'}]}];
-  const makePipe=(module,entryPoint,buffers,fragmentEntry='fs',cullMode='none')=>device.createRenderPipelineAsync({label:entryPoint==='vs'?'island':entryPoint==='cityStruckVS'?'city ruins':'island ground cover',layout:'auto',
+  const makePipe=(module,entryPoint,buffers,fragmentEntry='fs',cullMode='none')=>device.createRenderPipelineAsync({label:entryPoint==='vs'?'island':'city ruins',layout:'auto',
     vertex:{module,entryPoint,buffers},fragment:{module,entryPoint:fragmentEntry,targets:[{format}]},
     primitive:{topology:'triangle-list',cullMode},
     depthStencil:{format:'depth32float',depthWriteEnabled:true,depthCompare:'greater'},multisample:{count:samples}});
@@ -943,7 +943,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   });
   const terrainPipesPromise=modulePromise.then(module=>Promise.all([
     makePipe(module,'vs',[meshLayout]),
-    makePipe(module,'groundVS',treeBuffers,'groundFS'),
     makeShadowPipe(module,'portShadowVS',[meshLayout]),
     computePipe(TERRAIN_LIGHT,'island sunlight'),
     module,
@@ -955,13 +954,11 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   terrainPipesPromise.catch(()=>{});
   const submergedPipesPromise=waterOpticsResolvedPromise.then(wo=>wo?Promise.all([
     wo.capture({source:terrainSource,vertex:{buffers:[meshLayout]},world:'in.world',groups:2,land:true}),
-    wo.capture({source:TERRAIN,vertex:{entryPoint:'groundVS',buffers:treeBuffers},entry:'groundFS',world:'in.world',groups:1,land:true}),
-  ]):[null,null]);
+  ]):[null]);
   submergedPipesPromise.catch(()=>{});
   // The rest of the land's programs, asked for now so that they compile while the land itself is being made. Left
   // until each is first needed, they compile one after another once it is.
   for(const pending of [computePipe(COASTAL_FIELD_BAKE,'coastal field'),computePipe(GROUND_DETAIL_BAKE,'ground detail bake'),
-    computePipe(GROUND_COVER_CULL,'ground cover cull'),
     useProcedural?requestCityContinuumPipelines({device,shader,shadowFormat:activeLandShadows.format}):null,
     canopyMode==='off'||!useProcedural||search.get('forestGroves')==='0'?null:requestForestGrovePipelines({device,shader,module:modulePromise,format,samples}),
     requestLandCraterPipelines({device,shader,computePipe,module:modulePromise,format,samples}),
@@ -989,7 +986,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const groveAssets=useSubtropicalForest?SUBTROPICAL_FOREST_GROVE_ASSETS:usePortugalForest?PORTUGAL_FOREST_GROVE_ASSETS:null;
   const grovePromise=canopyMode==='off'||!useProcedural||!groveAssets||search.get('forestGroves')==='0'?Promise.resolve(null):loadForestGroves({assets:groveAssets}).catch(error=>{groveFailure=error.message;return null;});
   let meadowFailure=null;
-  const meadowPromise=!useProcedural||!usePortugalForest||search.get('meadowGrass')==='0'?Promise.resolve(null):loadMeadowGrass({assets:PORTUGAL_MEADOW_GRASS_ASSETS}).catch(error=>{meadowFailure=error.message;return null;});
+  const meadowPromise=!useProcedural||!usePortugalForest?Promise.resolve(null):loadMeadowGrass({assets:PORTUGAL_MEADOW_GRASS_ASSETS}).catch(error=>{meadowFailure=error.message;return null;});
   const autoCurated1550=isKnownSpanishMain&&search.get('discover')!=='1'&&search.get('era')!=='2026'&&search.get('realDEM')!=='off';
   const useRealDEM=useProcedural&&search.get('realDEM')!=='off'&&!autoCurated1550;
   const proceduralGridOpts=isMobile
@@ -1270,24 +1267,16 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const biomeTexture=device.createTexture({label:'regional vegetation probability',size:[activeRegion.biomeSize,activeRegion.biomeSize],format:'r8unorm',usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST});
   device.queue.writeTexture({texture:biomeTexture},biome,{bytesPerRow:activeRegion.biomeSize},[activeRegion.biomeSize,activeRegion.biomeSize]);
   const landSampler=device.createSampler({minFilter:'linear',magFilter:'linear',mipmapFilter:'linear',addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge',maxAnisotropy:4});
-  const [terrainPipe,groundPipe,portShadowPipe,lightPipe,module,cityPipe,cityStruckPipe]=await terrainPipesPromise;
-  const groundMeshes=Array.from({length:GROUND_COVER_BUCKETS},(_,bucket)=>{
-    const geometry=groundCoverBucketGeometry(bucket);return{buffer:buffer(geometry,GPUBufferUsage.VERTEX,`ground cover bucket ${bucket}`),count:geometry.length/TREE_VERTEX_FLOATS};
-  });
-  const groundCullPipeline=await computePipe(GROUND_COVER_CULL,'ground cover cull');
-  const groundBlock=GROUND_COVER.grassPerPatch+GROUND_COVER.rocksPerPatch;
+  const [terrainPipe,portShadowPipe,lightPipe,module,cityPipe,cityStruckPipe]=await terrainPipesPromise;
+  // A block of slots a ground-cover patch: its rocks, drawn by the boulder continuum.
+  const groundBlock=GROUND_COVER.rocksPerPatch;
   const groundBlocks=Math.ceil(Math.PI*(GROUND_RESIDENT_M*GROUND_RESIDENT_RELEASE/GROUND_COVER.patchSpan+1)**2);
-  const rockBucketOffset=ROCK_ARCHETYPES*ROCK_LODS;
-  const groundCull=createSceneryCull({device,pipeline:groundCullPipeline,frameUBO,label:'ground cover',capacity:groundBlocks*groundBlock,
-    bucketCapacities:Array.from({length:GROUND_COVER_BUCKETS},(_,bucket)=>groundBlocks*(bucket<rockBucketOffset?GROUND_COVER.rocksPerPatch:GROUND_COVER.grassPerPatch)),vertexCounts:[groundMeshes.map(mesh=>mesh.count)]});
-  groundCull.setPixelError(TREE_PIXEL_ERROR);
-  groundCull.setSkipRocks(true);
   let boulderContinuum=null;
   const groundStats={patches:groundPatches.length,resident:0};
   const groundResident=new Map(),groundFreeBlocks=Array.from({length:groundBlocks},(_,block)=>block);
   let groundWanted=[],groundResidencyAt=null;
   function clearGroundResidency(){
-    for(const block of groundResident.values()){groundCull.clearSlots(block*groundBlock,groundBlock);boulderContinuum?.clearSlots(block*groundBlock,groundBlock);groundFreeBlocks.push(block);}
+    for(const block of groundResident.values()){boulderContinuum?.clearSlots(block*groundBlock,groundBlock);groundFreeBlocks.push(block);}
     groundResident.clear();groundWanted=[];groundResidencyAt=null;groundStats.resident=0;
   }
   // Instances are worked out once per patch and uploaded as it comes into range; the GPU does the rest.
@@ -1297,31 +1286,18 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       groundResidencyAt={x:camera.x,z:camera.z};
       const distanceOf=patch=>Math.hypot(patch.centre[0]-camera.x,patch.centre[2]-camera.z);
       for(const [patch,block] of groundResident)if(distanceOf(patch)>GROUND_RESIDENT_M*GROUND_RESIDENT_RELEASE){
-        groundCull.clearSlots(block*groundBlock,groundBlock);boulderContinuum?.clearSlots(block*groundBlock,groundBlock);groundFreeBlocks.push(block);groundResident.delete(patch);
+        boulderContinuum?.clearSlots(block*groundBlock,groundBlock);groundFreeBlocks.push(block);groundResident.delete(patch);
       }
       groundWanted=groundPatches.filter(patch=>!groundResident.has(patch)&&distanceOf(patch)<GROUND_RESIDENT_M).sort((a,b)=>distanceOf(b)-distanceOf(a));
     }
     for(let i=0;i<GROUND_PATCHES_PER_FRAME&&groundWanted.length&&groundFreeBlocks.length;i++){
-      const patch=groundWanted.pop(),block=groundFreeBlocks.pop(),perVariant=groundCoverInstances(patch,activeRegion,baseGroundSample,biome,(x,z,isRock)=>streetEdgeAt(proceduralPack?.port?.streets,x,z)>=GROUND_COVER_STREET_GAP_M&&mayGrowGroundCover(craterLedger,x,z,isRock)&&!inlandWaterSampler?.(x,z));
+      const patch=groundWanted.pop(),block=groundFreeBlocks.pop(),perVariant=groundCoverInstances(patch,baseGroundSample,(x,z)=>streetEdgeAt(proceduralPack?.port?.streets,x,z)>=GROUND_COVER_STREET_GAP_M&&!inlandWaterSampler?.(x,z));
       const floats=new Float32Array(groundBlock*8),slotGroups=new Uint32Array(groundBlock).fill(0xffffffff);let slot=0;
       perVariant.forEach((data,variant)=>{for(let k=0;k<data.length;k+=8){floats.set(data.subarray(k,k+8),slot*8);slotGroups[slot++]=variant;}});
       boulderContinuum?.setInstances(block*groundBlock,floats,slotGroups);
-      if(!meadowGrass)groundCull.setInstances(block*groundBlock,floats,slotGroups);
       groundResident.set(patch,block);
     }
     groundStats.resident=groundResident.size;
-  }
-  // What grew or lay where a pit has opened is worked out again without it, from the patch's same seed.
-  function clearGroundCoverAt(x,z,radius){
-    if(meadowGrass)return;
-    for(const patch of groundPatches){
-      if(x+radius<patch.x||x-radius>patch.x+GROUND_COVER.patchSpan||z+radius<patch.z||z-radius>patch.z+GROUND_COVER.patchSpan)continue;
-      patch.instances=null;
-      const block=groundResident.get(patch);
-      if(block===undefined)continue;
-      groundCull.clearSlots(block*groundBlock,groundBlock);boulderContinuum?.clearSlots(block*groundBlock,groundBlock);groundFreeBlocks.push(block);groundResident.delete(patch);
-      groundWanted.push(patch);
-    }
   }
   let currentPixelError=TREE_PIXEL_ERROR;
   let lastCamera=null,lastView=null;
@@ -1331,7 +1307,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     if(Number.isFinite(camera?.pixelError)&&camera.pixelError>0&&camera.pixelError!==currentPixelError){
       currentPixelError=camera.pixelError;
       forest?.setPixelError?.(currentPixelError);
-      groundCull.setPixelError(currentPixelError,isMobile&&currentPixelError>3.8?1.35:1);
       boulderContinuum?.setPixelScale(TREE_PIXEL_ERROR/currentPixelError);
     }
     if(allowStream)checkPlayerFrontierEntry?.(camera);
@@ -1425,12 +1400,10 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const groups=[bind(terrainPipe,nearResources)];
   let cityGroup=bind(cityPipe,nearResources);const cityClouds=clouds.bindVolume(cityPipe);
   let cityStruckGroup=bind(cityStruckPipe,nearResources);const cityStruckClouds=clouds.bindVolume(cityStruckPipe);
-  const groundGroup=bind(groundPipe,resources);
   const cloudGroups=[clouds.bindVolume(terrainPipe)];
-  const [submerged,submergedGround]=await submergedPipesPromise;
+  const [submerged]=await submergedPipesPromise;
   let submergedGroup=submerged?.bindGroup(nearResources.map(([binding,resource])=>({binding,resource})));
   const submergedClouds=submerged?clouds.bindVolume(submerged.pipeline):null;
-  const submergedGroundGroup=submergedGround?.bindGroup(resources.map(([binding,resource])=>({binding,resource})));
   const lightGroup=bind(lightPipe,[[0,{buffer:frameUBO}],[4,elevation.createView()],[5,lighting.createView()],[6,{buffer:uniform}],[7,{buffer:nearDomain}],[8,{buffer:nearElevation}]]);
   const cloudLight=clouds.bindVolume(lightPipe,true);
   try {
@@ -2367,11 +2340,11 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     // The forest's own roots, as a ball meets them. Null with no forest, and for a moment while one loads.
     get forestTrunks(){return forest?.trunks??null;},
     get forestStrikeKey(){return forest?forestStrikeKey:null;},
-    groundStats,groundTriangles:groundMeshes.map(mesh=>mesh.count/3),forestStats,
+    groundStats,forestStats,
     prepare:(cam,vp)=>updateTrees(cam,vp,true),groundDetail,
     // Each family's indirect draws for the continuum census (js/continuum-census.js): only the families that offer them.
-    continuumSources(){return [['forest',forest],['boulders',boulderContinuum],['meadow',meadowGrass],['herds',herds],['trade vessels',tradeVessels],['city',cityContinuum],['ground',groundCull]].map(([name,family])=>({name,draws:family?.continuumDraws?.()??null})).filter(source=>source.draws?.length);},
-    setPixelError(next){if(Number.isFinite(next)&&next>0){currentPixelError=next;forest?.setPixelError?.(next);groundCull.setPixelError(next,isMobile&&next>3.8?1.35:1);boulderContinuum?.setPixelScale(TREE_PIXEL_ERROR/next);cityContinuum?.setPixelError(next);}},
+    continuumSources(){return [['forest',forest],['boulders',boulderContinuum],['meadow',meadowGrass],['herds',herds],['trade vessels',tradeVessels],['city',cityContinuum]].map(([name,family])=>({name,draws:family?.continuumDraws?.()??null})).filter(source=>source.draws?.length);},
+    setPixelError(next){if(Number.isFinite(next)&&next>0){currentPixelError=next;forest?.setPixelError?.(next);boulderContinuum?.setPixelScale(TREE_PIXEL_ERROR/next);cityContinuum?.setPixelError(next);}},
     nearStats:{loaded:!!nearTile,error:nearFailure,domain:nearTile?.manifest.domain??null,triangles:(fineMesh?.indices.length??0)/3},
     height:(x,z)=>heightSample(x-worldOffset.x,z-worldOffset.z),
     surfaceHeight:(x,z)=>baseGroundSample(x-worldOffset.x,z-worldOffset.z),
@@ -2724,8 +2697,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       activeTownField?.texture.destroy();activeTownField?.window.destroy();
       if(nearAlbedo&&nearAlbedo!==albedo)nearAlbedo?.destroy?.();
       biomeTexture?.destroy?.();leafMean?.destroy?.();
-      for(const g of groundMeshes)g.buffer?.destroy?.();
-      groundCull.destroy();
       boulderContinuum?.destroy();
       cityContinuumMade++;cityContinuum?.destroy();cityContinuum=null;cityStruck?.destroy();
       inlandWater?.destroy?.();
@@ -2784,7 +2755,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         for(const hit of hits){
           const local={...hit,x:hit.x-worldOffset.x,z:hit.z-worldOffset.z},record=craters.strike(local),radius=landCraterSize(record.energyJ).radius;
           recordBlastRing(hit.x,hit.z,Math.min(2.0,Math.max(0.45,Math.cbrt((hit.energyJ??4e5)/1.1e6))),Boolean(hit.heated||hit.hot));
-          clearGroundCoverAt(record.x,record.z,radius*1.35);
           forest?.strike?.(record.x,record.z,now,groundSample);
         }
         portDamage?.setGround(craterCoast,craterLedger.snapshot());
@@ -2836,7 +2806,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
       portFractures?.encode(pass);
       for(const sec of loadedSections.values())sec.portFractures?.encode(pass);
       boulderContinuum?.prepare(pass);
-      if(!meadowGrass)groundCull.encode(pass);
       cityContinuum?.setPixelError(currentPixelError);cityContinuum?.encode(pass);
       forest?.encode(pass);
       groves?.encode(pass,frame);
@@ -2865,10 +2834,6 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
             pass.setBindGroup(0,sec.submergedGroup);pass.setVertexBuffer(0,sec.vertices);pass.setIndexBuffer(sec.submergedIndices,'uint32');pass.drawIndexed(sec.submergedCount);
           }
         }
-      }
-      if(submergedGround&&!meadowGrass){
-        submergedGround.bind(pass,above);pass.setBindGroup(0,submergedGroundGroup);
-        for(let i=0;i<groundMeshes.length;i++)groundCull.draw(pass,i,0,groundMeshes[i].buffer);
       }
       tradeVessels?.drawSubmerged?.(pass,above);
     },
@@ -2909,14 +2874,9 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
         }
       }
       if(boulderContinuum&&isSectionVisible(activeRegion,camera,viewProjection,4800))boulderContinuum.draw(pass);
-      // Opaque ground props have no cutout/depth reconstruction and no cloud
-      // ray march per blade. They remain in Apple's opaque visibility path.
-      if(!meadowGrass){
-        pass.setPipeline(groundPipe);pass.setBindGroup(0,groundGroup);
-        for(let i=0;i<groundMeshes.length;i++)groundCull.draw(pass,i,0,groundMeshes[i].buffer);
-      }
       if(herds&&isSectionVisible(activeRegion,camera,viewProjection,2600))herds.draw(pass);
-      if(meadowGrass&&isSectionVisible(activeRegion,camera,viewProjection,2400))meadowGrass.draw(pass);
+      // Every patch of grass, cut on the GPU through the one continuum (js/meadow-grass.js).
+      meadowGrass?.draw(pass);
       if(tradeVessels&&isSectionVisible(activeRegion,camera,viewProjection,12000))tradeVessels.draw(pass);
       // Solid wood and crowns before cutout leaves, for Apple's hidden-surface removal.
       forest?.drawOpaque(pass);groves?.drawOpaque(pass,viewProjection);

@@ -16,7 +16,7 @@ import { FOREST_CLUSTER_ASSETS, SUBTROPICAL_FOREST_CLUSTER_ASSETS, PORTUGAL_FORE
 import { FOREST_WIND_ASSETS, SUBTROPICAL_FOREST_WIND_ASSETS, PORTUGAL_FOREST_WIND_ASSETS } from './js/forest-wind.js';
 import { FOREST_CROWN_ASSETS, SUBTROPICAL_FOREST_CROWN_ASSETS, PORTUGAL_FOREST_CROWN_ASSETS } from './js/forest-crowns.js';
 import { SUBTROPICAL_FOREST_GROVE_ASSETS, PORTUGAL_FOREST_GROVE_ASSETS } from './js/forest-groves.js';
-import { PORTUGAL_MEADOW_GRASS_ASSETS } from './js/meadow-grass.js';
+import { PORTUGAL_MEADOW_GRASS_ASSETS } from './js/meadow-continuum.js';
 import { FOREST_SURFACE_ASSETS, SUBTROPICAL_FOREST_SURFACE_ASSETS, PORTUGAL_FOREST_SURFACE_ASSETS } from './js/forest-surfaces.js';
 import { CREW_CONTINUUM_ASSETS } from './js/crew-continuum.js';
 import { CITY_CONTINUUM_ASSETS } from './js/city-continuum.js';
@@ -85,7 +85,7 @@ order.splice(order.indexOf('js/coastal-world.js'),0,'js/models/livestock-meshes.
 order.splice(order.indexOf('js/terrain.js'),0,'js/board-stamp.js');
 order.splice(order.indexOf('js/wgsl/terrain.js')+1,0,'js/wgsl/inland-water.js','js/wgsl/herds.js');
 wgslModules.push('js/wgsl/inland-water.js','js/wgsl/herds.js');
-order.splice(order.indexOf('js/terrain.js'),0,'js/inland-water.js','js/meadow-grass.js','js/trade-vessels.js');
+order.splice(order.indexOf('js/terrain.js'),0,'js/inland-water.js','js/meadow-continuum.js','js/meadow-grass.js','js/trade-vessels.js');
 order.splice(order.indexOf('js/trade-vessels.js'),0,'js/wgsl/hull-flood.js','js/hull-flood.js');
 // Ships drawn through the one continuum: the bodies' format, the cut and the draws, ahead of the families that draw them.
 order.splice(order.indexOf('js/trade-vessels.js'),0,'js/ship-continuum.js','js/wgsl/ship-continuum.js','js/ship-continuum-draw.js');

@@ -1,9 +1,9 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // Culls and picks detail for instanced scenery on the GPU, as the forest does. The survivors are
 // written straight into the vertex buffer the draws read, so their shaders do not change, and
-// JavaScript only uploads an instance when it first comes into use. Used by ground cover and trees.
+// JavaScript only uploads an instance when it first comes into use. Used by trees.
 import { FRAME_WGSL } from './wgsl/common.js';
-import { GRASS_VARIANTS, ROCK_ARCHETYPES, TREE_GEOMETRY_ERRORS, TREE_LOD, TREE_VARIANTS } from './vegetation.js';
+import { TREE_GEOMETRY_ERRORS, TREE_LOD, TREE_VARIANTS } from './vegetation.js';
 
 const INSTANCE_BYTES = 32;
 const DRAW_WORDS = 4;
@@ -52,36 +52,6 @@ ${select}
 }
 `;
 
-// Multi-LOD ground cover selection across 6 fractured boulder archetypes x 3 LODs (0..17) and 2 grass variants x 2 LODs (18..21).
-export const GROUND_COVER_CULL = cullShell(1, /* wgsl */ `
-fn scenerySelect(index:u32,group:u32,instance:SceneryInstance)->i32 {
-  let relative=instance.root.xyz-F.camPos.xyz;
-  let extent=length(vec2f(instance.root.w*1.41421356,instance.shape.x))*1.2;
-  if(!sceneryInFrustum(relative,extent)){previous[index]=0u;return -1;}
-  let wasVisible=previous[index]>0u;
-  let oldLod=select(2u,previous[index]-1u,wasVisible);
-  let threshold=params.x*params.y*select(1.0,0.88,wasVisible);
-  let px=sceneryProjected(relative,extent,extent);
-  if(px<threshold){previous[index]=0u;return -1;}
-  if(group<2u){
-    if(params.z>0.5){previous[index]=0u;return -1;}
-    let arch=u32(clamp(floor(fract(instance.shape.y*17.31+f32(group)*0.5)*f32(${ROCK_ARCHETYPES})),0.0,f32(${ROCK_ARCHETYPES-1})));
-    let h0=select(1.0,0.85,oldLod==0u);
-    let h1=select(1.0,0.85,oldLod<=1u);
-    var lod=2u;
-    if(px>=threshold*9.5*h0){lod=0u;}
-    else if(px>=threshold*3.4*h1){lod=1u;}
-    previous[index]=lod+1u;
-    return i32(lod*${ROCK_ARCHETYPES}u+arch);
-  }
-  let gVar=min(group-2u,${GRASS_VARIANTS-1}u);
-  let gHold=select(1.0,0.85,oldLod==0u);
-  let lod=select(1u,0u,px>=threshold*4.2*gHold);
-  previous[index]=lod+1u;
-  return i32(${ROCK_ARCHETYPES*3}u+lod*${GRASS_VARIANTS}u+gVar);
-}
-`);
-
 // Two draws per tree, wood and canopy then leaves. The simplest model whose error stays under the
 // pixel target wins. Mirrors selectTreeLods with treeProjectedError.
 export const TREE_CULL = cullShell(2, /* wgsl */ `
@@ -126,7 +96,7 @@ export function createSceneryCull({ device, pipeline, frameUBO, label, capacity,
   const paramValues = new Float32Array(4);
   const emptied = new Uint32Array(capacity).fill(EMPTY_SLOT);
   device.queue.writeBuffer(groups, 0, emptied);
-  // A cull never encoded has drawn nothing (ground cover stands down when the meadow draws instead).
+  // A cull never encoded has drawn nothing.
   let encoded = false;
   const group = device.createBindGroup({ label: `${label} cull`, layout: pipeline.getBindGroupLayout(0), entries: [frameUBO, params, instances, groups, shown, draws, previous, firstBuffer].map((buffer, binding) => ({ binding, resource: { buffer } })) });
   return {
@@ -146,10 +116,6 @@ export function createSceneryCull({ device, pipeline, frameUBO, label, capacity,
       paramValues[2] = dx; paramValues[3] = dz;
       device.queue.writeBuffer(params, 0, paramValues);
     },
-    setSkipRocks(skip = true) {
-      paramValues[2] = skip ? 1 : 0;
-      device.queue.writeBuffer(params, 0, paramValues);
-    },
     encode(pass) {
       encoded = true;
       device.queue.writeBuffer(draws, 0, drawArguments);
@@ -161,7 +127,7 @@ export function createSceneryCull({ device, pipeline, frameUBO, label, capacity,
       pass.drawIndirect(draws, (bucket * parts + part) * DRAW_WORDS * 4);
     },
     // Every bucket's indirect draws, each part a drawIndirect record of four words, for the continuum census
-    // (js/continuum-census.js). Shared by the city's types, the trees and the ground cover alike.
+    // (js/continuum-census.js).
     continuumDraws() { return encoded ? [{ buffer: draws, offset: 0, records: buckets * parts, stride: DRAW_WORDS }] : []; },
     destroy() { for (const buffer of [instances, groups, previous, shown, firstBuffer, draws, params]) buffer.destroy(); },
   };
