@@ -1,7 +1,9 @@
 // Copyright (c) 2026 Six Cailloux, LLC. MIT License; see LICENSE.
 // The one continuum's simplifier (AGENTS.md rule 3): one rigid body's bake, the same code offline and in game. The
 // offline bakes (scripts/prepare-city-continuum.mjs for the city's types, scripts/prepare-prefab-continuum.mjs for
-// the coasts' prefabs) import it under Node; the page's bake worker (js/continuum-bake-worker.js, bundled by
+// the coasts' prefabs, scripts/prepare-prop-continuum.mjs, scripts/prepare-animal-continuum.mjs,
+// scripts/prepare-meadow-grass.mjs, and scripts/prepare-ship-continuum.mjs, whose far bodies are voxel pieces below)
+// import it under Node; the page's bake worker (js/continuum-bake-worker.js, bundled by
 // build.mjs into assets/continuum/bake-worker.js) runs it in the browser for whatever the offline bakes did not
 // cover. It is no part of the page's own bundle.
 //   clusters   a cluster hierarchy the GPU cuts by projected error. Every part of the body's assembly is clustered
@@ -96,20 +98,21 @@ export function triangleGrid(position, corners, cell) {
       if (list) list.push(t); else cells.set(at, [t]);
     }
   }
-  const mesh = { position, corners };
+  const mesh = { position, corners }, seen = new Int32Array(T);
+  let query = 0;
   // The nearest triangle to p: rings of cells outward until the best found is nearer than the next ring.
   return (px, py, pz, accept = null) => {
     const ci = Math.floor((px - lo[0]) / cell), cj = Math.floor((py - lo[1]) / cell), ck = Math.floor((pz - lo[2]) / cell);
     let best = Infinity, found = -1, bs = 0, bt = 0;
-    const seen = new Set();
+    query++;
     for (let ring = 0; ring < 4096; ring++) {
       if (found >= 0 && (ring - 1) * cell > Math.sqrt(best)) break;
       if (ring > 2 && cells.size && ring * cell > 1e4) break;
       for (let i = ci - ring; i <= ci + ring; i++) for (let j = cj - ring; j <= cj + ring; j++) for (let k = ck - ring; k <= ck + ring; k++) {
         if (Math.max(Math.abs(i - ci), Math.abs(j - cj), Math.abs(k - ck)) !== ring) continue;
         for (const t of cells.get(key(i, j, k)) ?? []) {
-          if (seen.has(t) || (accept && !accept(t))) continue;
-          seen.add(t);
+          if (seen[t] === query || (accept && !accept(t))) continue;
+          seen[t] = query;
           const sx = spheres[t * 4] - px, sy = spheres[t * 4 + 1] - py, sz = spheres[t * 4 + 2] - pz, gap = Math.sqrt(sx * sx + sy * sy + sz * sz) - spheres[t * 4 + 3];
           if (gap > 0 && gap * gap >= best) continue;
           const a = corners[t * 3] * 3, b = corners[t * 3 + 1] * 3, c = corners[t * 3 + 2] * 3, X = mesh.position;
@@ -122,15 +125,21 @@ export function triangleGrid(position, corners, cell) {
     return found;
   };
 }
+// A surface's edges: how many there are, how many have one triangle (a boundary) or more than two (non-manifold), and
+// its Euler characteristic (vertices less edges plus faces; two less twice the genus for each closed shell). Edges are
+// keyed by the vertex count, exactly for any surface under ninety million vertices.
 export function edgeCensus(index) {
-  const edges = new Map();
+  let most = 0;
+  for (let i = 0; i < index.length; i++) if (index[i] > most) most = index[i];
+  const stride = most + 1, edges = new Map();
   for (let t = 0; t < index.length; t += 3) for (let k = 0; k < 3; k++) {
-    const a = index[t + k], b = index[t + ((k + 1) % 3)], key = a < b ? a * 1048576 + b : b * 1048576 + a;
+    const a = index[t + k], b = index[t + ((k + 1) % 3)], key = a < b ? a * stride + b : b * stride + a;
     edges.set(key, (edges.get(key) ?? 0) + 1);
   }
   let boundary = 0, nonManifold = 0;
   for (const n of edges.values()) { if (n === 1) boundary++; if (n > 2) nonManifold++; }
-  return { edges: edges.size, boundary, nonManifold };
+  const vertices = new Set(index).size;
+  return { edges: edges.size, boundary, nonManifold, euler: vertices - edges.size + index.length / 3 };
 }
 export const surfaceArea = (corners, triangles, X) => triangles.reduce((sum, t) => {
   const [a, b, c] = [0, 1, 2].map((k) => corners[t * 3 + k] * 3), e = [0, 1, 2].map((k) => X[b + k] - X[a + k]), f = [0, 1, 2].map((k) => X[c + k] - X[a + k]);
@@ -138,115 +147,180 @@ export const surfaceArea = (corners, triangles, X) => triangles.reduce((sum, t) 
 }, 0);
 
 // Half-edge collapses, cheapest first by quadric error (Garland and Heckbert), each vertex moving onto a neighbour so
-// every survivor keeps its own attributes. A collapse that would fold a triangle over or pinch the surface (the link
-// condition) is refused, so a closed body stays closed and keeps its genus to the last step.
-export function collapseChain(position, index, least) {
+// every survivor keeps its own attributes (its place, its kind, the source vertex it rides). A collapse that would
+// pinch the surface (the link condition), lay two triangles on the same corners, or turn a triangle further than
+// `fold(living)` allows (the least cosine, given how many triangles are left) is refused, so a closed body stays closed
+// and keeps its genus while it can. Where `region` gives each vertex a class (a ship's wood, canvas, iron and paint), a
+// collapse across a border of class costs `border` times as much, so borders go last.
+export const CHAIN_FOLD = (living) => (living > 400 ? 0.2 : living > 60 ? -0.3 : -0.9);
+export function collapseChain(position, index, least, { region = null, border = 6, fold = CHAIN_FOLD } = {}) {
   const V = position.length / 3, T = index.length / 3, corners = Int32Array.from(index), alive = new Uint8Array(T).fill(1), death = new Int32Array(T).fill(-1);
   const Q = new Float64Array(V * 10), fans = Array.from({ length: V }, () => []);
-  const p = (v, k) => position[v * 3 + k];
   for (let t = 0; t < T; t++) {
-    const [a, b, c] = [corners[t * 3], corners[t * 3 + 1], corners[t * 3 + 2]];
-    const e = [0, 1, 2].map((k) => p(b, k) - p(a, k)), f = [0, 1, 2].map((k) => p(c, k) - p(a, k));
-    const n = [e[1] * f[2] - e[2] * f[1], e[2] * f[0] - e[0] * f[2], e[0] * f[1] - e[1] * f[0]], l = Math.hypot(...n) || 1e-12, w = l / 2;
-    const [nx, ny, nz] = n.map((x) => x / l), d = -(nx * p(a, 0) + ny * p(a, 1) + nz * p(a, 2));
-    const q = [nx * nx, nx * ny, nx * nz, nx * d, ny * ny, ny * nz, ny * d, nz * nz, nz * d, d * d];
-    for (const v of [a, b, c]) { for (let k = 0; k < 10; k++) Q[v * 10 + k] += w * q[k]; fans[v].push(t); }
+    const a = corners[t * 3] * 3, b = corners[t * 3 + 1] * 3, c = corners[t * 3 + 2] * 3;
+    const ex = position[b] - position[a], ey = position[b + 1] - position[a + 1], ez = position[b + 2] - position[a + 2];
+    const fx = position[c] - position[a], fy = position[c + 1] - position[a + 1], fz = position[c + 2] - position[a + 2];
+    let nx = ey * fz - ez * fy, ny = ez * fx - ex * fz, nz = ex * fy - ey * fx;
+    const l = Math.hypot(nx, ny, nz) || 1e-12, w = l / 2;
+    nx /= l; ny /= l; nz /= l;
+    const d = -(nx * position[a] + ny * position[a + 1] + nz * position[a + 2]);
+    for (let k = 0; k < 3; k++) {
+      const v = corners[t * 3 + k], o = v * 10;
+      Q[o] += w * nx * nx; Q[o + 1] += w * nx * ny; Q[o + 2] += w * nx * nz; Q[o + 3] += w * nx * d; Q[o + 4] += w * ny * ny;
+      Q[o + 5] += w * ny * nz; Q[o + 6] += w * ny * d; Q[o + 7] += w * nz * nz; Q[o + 8] += w * nz * d; Q[o + 9] += w * d * d;
+      fans[v].push(t);
+    }
   }
-  const quadric = (u, v) => {
-    const x = p(v, 0), y = p(v, 1), z = p(v, 2), q = (k) => Q[u * 10 + k] + Q[v * 10 + k];
-    return q(0) * x * x + 2 * q(1) * x * y + 2 * q(2) * x * z + 2 * q(3) * x + q(4) * y * y + 2 * q(5) * y * z + 2 * q(6) * y + q(7) * z * z + 2 * q(8) * z + q(9);
-  };
-  const ring = (v) => { const s = new Set(); for (const t of fans[v]) if (alive[t]) for (let k = 0; k < 3; k++) if (corners[t * 3 + k] !== v) s.add(corners[t * 3 + k]); return s; };
   const cost = (u, v) => {
-    const l2 = (p(u, 0) - p(v, 0)) ** 2 + (p(u, 1) - p(v, 1)) ** 2 + (p(u, 2) - p(v, 2)) ** 2;
-    return Math.max(0, quadric(u, v)) + 1e-4 * l2 * l2;
+    const x = position[v * 3], y = position[v * 3 + 1], z = position[v * 3 + 2], a = u * 10, b = v * 10, q = (k) => Q[a + k] + Q[b + k];
+    const e = q(0) * x * x + 2 * q(1) * x * y + 2 * q(2) * x * z + 2 * q(3) * x + q(4) * y * y + 2 * q(5) * y * z + 2 * q(6) * y + q(7) * z * z + 2 * q(8) * z + q(9);
+    const l2 = (position[u * 3] - x) ** 2 + (position[u * 3 + 1] - y) ** 2 + (position[u * 3 + 2] - z) ** 2;
+    return (Math.max(0, e) + 1e-4 * l2 * l2) * (region && region[u] !== region[v] ? border : 1);
   };
-  const normalOf = (a, b, c) => {
-    const e = [0, 1, 2].map((k) => p(b, k) - p(a, k)), f = [0, 1, 2].map((k) => p(c, k) - p(a, k));
-    return [e[1] * f[2] - e[2] * f[1], e[2] * f[0] - e[0] * f[2], e[0] * f[1] - e[1] * f[0]];
-  };
-  let living = T;
   const hasCorner = (t, w) => corners[t * 3] === w || corners[t * 3 + 1] === w || corners[t * 3 + 2] === w;
-  // A triangle's corners as one number, whichever way round it is wound.
-  const cornerKey = (a, b, c) => { const lo = Math.min(a, b, c), hi = Math.max(a, b, c); return (lo * V + (a + b + c - lo - hi)) * V + hi; };
-  // Folds are refused while the body has triangles to spare; near the core, only a triangle turned right over is.
-  const valid = (u, v) => {
-    const fold = living > 400 ? 0.2 : living > 60 ? -0.3 : -0.9;
-    const ru = ring(u), rv = ring(v);
-    let shared = 0, common = 0;
-    for (const t of fans[u]) if (alive[t] && (corners[t * 3] === v || corners[t * 3 + 1] === v || corners[t * 3 + 2] === v)) shared++;
-    for (const w of ru) if (rv.has(w)) common++;
-    if (shared !== 2 || common !== 2) return false;
-    for (const t of fans[u]) {
+  // A triangle about w as the two corners it has besides w: one number, whichever way round it is wound.
+  const pairKey = (t, w) => {
+    const a = corners[t * 3], b = corners[t * 3 + 1], c = corners[t * 3 + 2], p = a === w ? b : a, q = c === w ? b : c;
+    return p < q ? p * V + q : q * V + p;
+  };
+  // A vertex's ring, into `out`, its dead triangles dropped from its fan as it goes; `mark` stamped with the tick.
+  const markA = new Int32Array(V), markB = new Int32Array(V);
+  let tick = 0;
+  const ring = (v, out, mark) => {
+    tick++;
+    out.length = 0;
+    const fan = fans[v];
+    let n = 0;
+    for (let i = 0; i < fan.length; i++) {
+      const t = fan[i];
       if (!alive[t]) continue;
-      const [a, b, c] = [corners[t * 3], corners[t * 3 + 1], corners[t * 3 + 2]];
-      if (a === v || b === v || c === v) continue;
-      const before = normalOf(a, b, c), after = normalOf(a === u ? v : a, b === u ? v : b, c === u ? v : c);
-      const lb = Math.hypot(...before), la = Math.hypot(...after);
-      if (la < 1e-10 || (lb > 1e-10 && (before[0] * after[0] + before[1] * after[1] + before[2] * after[2]) / (lb * la) < fold)) return false;
+      fan[n++] = t;
+      for (let k = 0; k < 3; k++) { const c = corners[t * 3 + k]; if (c !== v && mark[c] !== tick) { mark[c] = tick; out.push(c); } }
+    }
+    fan.length = n;
+    return tick;
+  };
+  // The cosine a triangle (a, b, c) turns through when u goes to v; -2 if it is left with no area.
+  const turn = (a, b, c, u, v) => {
+    const P = position, A = (a === u ? v : a) * 3, B = (b === u ? v : b) * 3, C = (c === u ? v : c) * 3, a3 = a * 3, b3 = b * 3, c3 = c * 3;
+    const ex = P[b3] - P[a3], ey = P[b3 + 1] - P[a3 + 1], ez = P[b3 + 2] - P[a3 + 2], fx = P[c3] - P[a3], fy = P[c3 + 1] - P[a3 + 1], fz = P[c3 + 2] - P[a3 + 2];
+    const gx = P[B] - P[A], gy = P[B + 1] - P[A + 1], gz = P[B + 2] - P[A + 2], hx = P[C] - P[A], hy = P[C + 1] - P[A + 1], hz = P[C + 2] - P[A + 2];
+    const n0x = ey * fz - ez * fy, n0y = ez * fx - ex * fz, n0z = ex * fy - ey * fx, n1x = gy * hz - gz * hy, n1y = gz * hx - gx * hz, n1z = gx * hy - gy * hx;
+    const l0 = Math.hypot(n0x, n0y, n0z), l1 = Math.hypot(n1x, n1y, n1z);
+    if (l1 < 1e-12) return -2;
+    return l0 < 1e-12 ? 1 : (n0x * n1x + n0y * n1y + n0z * n1z) / (l0 * l1);
+  };
+  const ringU = [], ringV = [], scratch = [], about = new Set();
+  let living = T;
+  const valid = (u, v) => {
+    const tu = ring(u, ringU, markA);
+    ring(v, ringV, markB);
+    let shared = 0, common = 0;
+    for (const t of fans[u]) if (hasCorner(t, v)) shared++;
+    for (const w of ringV) if (w !== u && markA[w] === tu) common++;
+    if (shared !== 2 || common !== 2) return false;
+    const least = fold(living);
+    for (const t of fans[u]) {
+      if (hasCorner(t, v)) continue;
+      if (turn(corners[t * 3], corners[t * 3 + 1], corners[t * 3 + 2], u, v) < least) return false;
     }
     // Nor one that would lay two triangles on the same corners (a tetrahedron's last edge): they enclose nothing.
-    const about = new Set();
-    for (const t of fans[v]) if (alive[t] && !hasCorner(t, u)) about.add(cornerKey(corners[t * 3], corners[t * 3 + 1], corners[t * 3 + 2]));
-    for (const t of fans[u]) {
-      if (!alive[t] || hasCorner(t, v)) continue;
-      const key = cornerKey(...[0, 1, 2].map((k) => (corners[t * 3 + k] === u ? v : corners[t * 3 + k])));
-      if (about.has(key)) return false;
-    }
+    about.clear();
+    for (const t of fans[v]) if (!hasCorner(t, u)) about.add(pairKey(t, v));
+    for (const t of fans[u]) if (!hasCorner(t, v) && about.has(pairKey(t, u))) return false;
     return true;
   };
-  // A binary heap of [cost, u, v, stamp of u, stamp of v].
-  const heap = [], stamp = new Int32Array(V);
-  const push = (item) => { heap.push(item); let i = heap.length - 1; while (i > 0) { const j = (i - 1) >> 1; if (heap[j][0] <= heap[i][0]) break; [heap[i], heap[j]] = [heap[j], heap[i]]; i = j; } };
-  const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === i) break; [heap[i], heap[m]] = [heap[m], heap[i]]; i = m; } } return top; };
-  const offer = (u) => { for (const w of ring(u)) { push([cost(u, w), u, w, stamp[u], stamp[w]]); push([cost(w, u), w, u, stamp[w], stamp[u]]); } };
-  for (let v = 0; v < V; v++) for (const w of ring(v)) push([cost(v, w), v, w, stamp[v], stamp[w]]);
-  const dieStep = new Int32Array(V).fill(-1), target = new Int32Array(V).fill(-1), steps = [];
-  while (living > least && heap.length) {
-    const [, u, v, su, sv] = pop();
-    if (su !== stamp[u] || sv !== stamp[v] || dieStep[u] >= 0 || dieStep[v] >= 0 || !valid(u, v)) continue;
+  // A binary heap of (cost, u, v, u's stamp) in typed arrays. Each vertex offers its cheapest collapse; a refused one
+  // makes way for its next cheapest that is allowed.
+  let hc = new Float64Array(1 << 16), hu = new Int32Array(1 << 16), hv = new Int32Array(1 << 16), hs = new Int32Array(1 << 16), hn = 0;
+  const push = (c, u, v, s) => {
+    if (hn === hc.length) {
+      const grow = (a) => { const b = new a.constructor(a.length * 2); b.set(a); return b; };
+      hc = grow(hc); hu = grow(hu); hv = grow(hv); hs = grow(hs);
+    }
+    let i = hn++;
+    while (i > 0) { const j = (i - 1) >> 1; if (hc[j] <= c) break; hc[i] = hc[j]; hu[i] = hu[j]; hv[i] = hv[j]; hs[i] = hs[j]; i = j; }
+    hc[i] = c; hu[i] = u; hv[i] = v; hs[i] = s;
+  };
+  let topU = 0, topV = 0, topS = 0;
+  const pop = () => {
+    topU = hu[0]; topV = hv[0]; topS = hs[0];
+    const n = --hn, c = hc[n], u = hu[n], v = hv[n], s = hs[n];
+    let i = 0;
+    for (;;) {
+      const l = 2 * i + 1, r = l + 1;
+      let m = -1, mc = c;
+      if (l < n && hc[l] < mc) { m = l; mc = hc[l]; }
+      if (r < n && hc[r] < mc) { m = r; mc = hc[r]; }
+      if (m < 0) break;
+      hc[i] = hc[m]; hu[i] = hu[m]; hv[i] = hv[m]; hs[i] = hs[m]; i = m;
+    }
+    hc[i] = c; hu[i] = u; hv[i] = v; hs[i] = s;
+  };
+  const stamp = new Int32Array(V), dieStep = new Int32Array(V).fill(-1), target = new Int32Array(V).fill(-1), steps = [];
+  const offer = (u) => {
+    ring(u, scratch, markA);
+    let best = Infinity, to = -1;
+    for (const w of scratch) { const c = cost(u, w); if (c < best) { best = c; to = w; } }
+    if (to >= 0) push(best, u, to, stamp[u]);
+  };
+  const offerAllowed = (u, refused) => {
+    ring(u, scratch, markA);
+    const options = scratch.filter((w) => w !== refused).map((w) => [cost(u, w), w]).sort((p, q) => p[0] - q[0]);
+    for (const [c, w] of options) if (valid(u, w)) { push(c, u, w, stamp[u]); return; }
+  };
+  // u taken into v: u's triangles across the edge die, the rest become v's.
+  const collapse = (u, v) => {
     const step = steps.length;
     steps.push({ u, v });
     dieStep[u] = step; target[u] = v;
     for (const t of fans[u]) {
       if (!alive[t]) continue;
-      if (corners[t * 3] === v || corners[t * 3 + 1] === v || corners[t * 3 + 2] === v) { alive[t] = 0; death[t] = step + 1; living--; continue; }
+      if (hasCorner(t, v)) { alive[t] = 0; death[t] = step + 1; living--; continue; }
       for (let k = 0; k < 3; k++) if (corners[t * 3 + k] === u) corners[t * 3 + k] = v;
       fans[v].push(t);
     }
+    fans[u].length = 0;
     for (let k = 0; k < 10; k++) Q[v * 10 + k] += Q[u * 10 + k];
-    const neighbours = ring(v);
+    return step;
+  };
+  for (let v = 0; v < V; v++) offer(v);
+  const neighbours = [];
+  while (living > least && hn) {
+    pop();
+    const u = topU, v = topV;
+    if (topS !== stamp[u] || dieStep[u] >= 0 || dieStep[v] >= 0) continue;
+    if (!valid(u, v)) { offerAllowed(u, v); continue; }
+    collapse(u, v);
+    ring(v, neighbours, markB);
+    const around = neighbours.slice();
     stamp[v]++;
-    for (const w of neighbours) stamp[w]++;
+    for (const w of around) stamp[w]++;
     offer(v);
-    for (const w of neighbours) offer(w);
+    for (const w of around) offer(w);
   }
   // Where the link condition stops it short of the core, the body is in several shells (a jetty's pilings, a tower
-  // apart from its church) or has a hole through it (an arch, a cloister's garth). Then each shell but the largest is
-  // drawn in on itself and taken into the nearest point of the rest, smallest first; and what is left is collapsed
-  // without the link condition, cheapest first. A collapse is a simplicial map, so every edge keeps an even number of
-  // triangles: the body stays closed, and comes down to one core of `least` triangles or fewer, never under four.
+  // apart from its church, a ship's sails apart from her hull) or has a hole through it (an arch, a cloister's garth,
+  // a gunport). Then each shell but the largest is drawn in on itself and taken into the nearest point of the rest,
+  // smallest first; and what is left is collapsed without the link condition, cheapest first. A collapse is a
+  // simplicial map, so every edge keeps an even number of triangles: the body stays closed, and comes down to one core
+  // of `least` triangles or fewer, never under four.
   const force = (u, v) => {
     // Only into a vertex still standing: a chain must never come round on itself.
     if (dieStep[u] >= 0 || dieStep[v] >= 0 || u === v) throw Error(`collapse ${u} → ${v} of a vertex already gone`);
-    const step = steps.length;
-    steps.push({ u, v });
-    dieStep[u] = step; target[u] = v;
-    for (const t of fans[u]) {
-      if (!alive[t]) continue;
-      if (corners[t * 3] === v || corners[t * 3 + 1] === v || corners[t * 3 + 2] === v) { alive[t] = 0; death[t] = step + 1; living--; continue; }
-      for (let k = 0; k < 3; k++) if (corners[t * 3 + k] === u) corners[t * 3 + k] = v;
-      fans[v].push(t);
-    }
-    for (let k = 0; k < 10; k++) Q[v * 10 + k] += Q[u * 10 + k];
+    const step = collapse(u, v), seen = new Map();
     // Two triangles on the same corners enclose nothing: both go.
-    const seen = new Map();
     for (const t of fans[v]) {
       if (!alive[t]) continue;
-      const key = cornerKey(corners[t * 3], corners[t * 3 + 1], corners[t * 3 + 2]), twin = seen.get(key);
+      const key = pairKey(t, v), twin = seen.get(key);
       if (twin === undefined) { seen.set(key, t); continue; }
       alive[t] = 0; alive[twin] = 0; death[t] = death[twin] = step + 1; living -= 2; seen.delete(key);
     }
+  };
+  const area = (t) => {
+    const a = corners[t * 3] * 3, b = corners[t * 3 + 1] * 3, c = corners[t * 3 + 2] * 3, X = position;
+    const ex = X[b] - X[a], ey = X[b + 1] - X[a + 1], ez = X[b + 2] - X[a + 2], fx = X[c] - X[a], fy = X[c + 1] - X[a + 1], fz = X[c + 2] - X[a + 2];
+    return 0.5 * Math.hypot(ey * fz - ez * fy, ez * fx - ex * fz, ex * fy - ey * fx);
   };
   const shells = () => {
     const root = new Int32Array(V).map((_, v) => v), find = (v) => { while (root[v] !== v) v = root[v] = root[root[v]]; return v; };
@@ -255,26 +329,28 @@ export function collapseChain(position, index, least) {
     for (let t = 0; t < T; t++) {
       if (!alive[t]) continue;
       const r = find(corners[t * 3]);
-      if (!byRoot.has(r)) byRoot.set(r, { triangles: [], vertices: new Set(), area: 0 });
+      if (!byRoot.has(r)) byRoot.set(r, { vertices: new Set(), area: 0 });
       const shell = byRoot.get(r);
-      shell.triangles.push(t); shell.area += surfaceArea(corners, [t], position);
+      shell.area += area(t);
       for (let k = 0; k < 3; k++) shell.vertices.add(corners[t * 3 + k]);
     }
     return [...byRoot.values()].sort((a, b) => a.area - b.area);
   };
+  const gap2 = (a, b) => (position[a * 3] - position[b * 3]) ** 2 + (position[a * 3 + 1] - position[b * 3 + 1]) ** 2 + (position[a * 3 + 2] - position[b * 3 + 2]) ** 2;
   if (living > least) {
     const all = shells();
     for (let i = 0; i < all.length - 1; i++) {
       // Into the shells still standing: those no smaller than it.
       const shell = all[i], rest = all.slice(i + 1).flatMap((other) => [...other.vertices]);
       let at = -1, into = -1, best = Infinity;
-      for (const u of shell.vertices) for (const w of rest) { const d = (p(u, 0) - p(w, 0)) ** 2 + (p(u, 1) - p(w, 1)) ** 2 + (p(u, 2) - p(w, 2)) ** 2; if (d < best) { best = d; at = u; into = w; } }
+      for (const u of shell.vertices) for (const w of rest) { const d = gap2(u, w); if (d < best) { best = d; at = u; into = w; } }
       // Drawn in on its point nearest the rest, farthest first, then that point taken in.
-      const order = [...shell.vertices].filter((u) => u !== at).sort((a, b) => ((p(b, 0) - p(at, 0)) ** 2 + (p(b, 1) - p(at, 1)) ** 2 + (p(b, 2) - p(at, 2)) ** 2) - ((p(a, 0) - p(at, 0)) ** 2 + (p(a, 1) - p(at, 1)) ** 2 + (p(a, 2) - p(at, 2)) ** 2));
+      const order = [...shell.vertices].filter((u) => u !== at).sort((a, b) => gap2(b, at) - gap2(a, at));
       for (const u of order) force(u, at);
       force(at, into);
     }
   }
+  const counts = new Map();
   while (living > least) {
     let pick = null;
     for (const strict of [true, false]) {
@@ -283,18 +359,16 @@ export function collapseChain(position, index, least) {
         for (let k = 0; k < 3; k++) for (const [u, v] of [[corners[t * 3 + k], corners[t * 3 + ((k + 1) % 3)]], [corners[t * 3 + ((k + 1) % 3)], corners[t * 3 + k]]]) {
           let dying = 0, flips = false;
           // What survives about v once u is taken into it, by corners: a pair on the same corners goes too.
-          const about = new Map();
-          for (const f of fans[v]) if (alive[f] && !hasCorner(f, u)) { const k = cornerKey(corners[f * 3], corners[f * 3 + 1], corners[f * 3 + 2]); about.set(k, (about.get(k) ?? 0) + 1); }
+          counts.clear();
+          for (const f of fans[v]) if (alive[f] && !hasCorner(f, u)) { const key = pairKey(f, v); counts.set(key, (counts.get(key) ?? 0) + 1); }
           for (const f of fans[u]) {
             if (!alive[f]) continue;
-            const [a, b, c] = [corners[f * 3], corners[f * 3 + 1], corners[f * 3 + 2]];
-            if (a === v || b === v || c === v) { dying++; continue; }
-            const k = cornerKey(a === u ? v : a, b === u ? v : b, c === u ? v : c);
-            about.set(k, (about.get(k) ?? 0) + 1);
-            const before = normalOf(a, b, c), after = normalOf(a === u ? v : a, b === u ? v : b, c === u ? v : c), lb = Math.hypot(...before), la = Math.hypot(...after);
-            if (la < 1e-10 || (lb > 1e-10 && (before[0] * after[0] + before[1] * after[1] + before[2] * after[2]) / (lb * la) < -0.9)) flips = true;
+            if (hasCorner(f, v)) { dying++; continue; }
+            const key = pairKey(f, u);
+            counts.set(key, (counts.get(key) ?? 0) + 1);
+            if (turn(corners[f * 3], corners[f * 3 + 1], corners[f * 3 + 2], u, v) < -0.9) flips = true;
           }
-          for (const n of about.values()) dying += n - (n % 2);
+          for (const n of counts.values()) dying += n - (n % 2);
           if (living - dying < 4 || (strict && flips)) continue;
           const c = cost(u, v);
           if (!pick || c < pick[0]) pick = [c, u, v];
@@ -305,17 +379,18 @@ export function collapseChain(position, index, least) {
     if (!pick) break;
     force(pick[1], pick[2]);
   }
-  return { dieStep, target, death, steps, living };
+  return { dieStep, target, death, steps, living, corners, alive };
 }
 // Where vertex v has gone by step s.
 export const ancestor = (chain, v, s) => { while (chain.dieStep[v] >= 0 && chain.dieStep[v] < s) v = chain.target[v]; return v; };
 
 // The outline a mesh casts along each of `views` (pairs of axes across and up, and the depth axis) on a grid over
-// the body: cells covered, and each cell's nearest triangle's label. `inflate` grows the surface along its normals.
+// the body: cells covered, and each cell's nearest triangle's label (-1 where none; the triangle itself, if
+// `labelOf` is (t) => t). `inflate` grows the surface along its normals.
 export function outline(position, normal, corners, triangles, inflate, frame, labelOf = null, views = [[0, 1, 2], [2, 1, 0], [0, 2, 1]]) {
   const { low, size, cells } = frame, result = [];
   for (const [ax, ay, az] of views) {
-    const depth = new Float32Array(cells * cells).fill(Infinity), label = new Int16Array(cells * cells).fill(-1);
+    const depth = new Float32Array(cells * cells).fill(Infinity), label = new Int32Array(cells * cells).fill(-1);
     for (const t of triangles) {
       const v = [0, 1, 2].map((k) => corners[t * 3 + k]);
       const x = v.map((w) => ((position[w * 3 + ax] + normal[w * 3 + ax] * inflate - low[ax]) / size) * cells);
@@ -336,6 +411,227 @@ export function outline(position, normal, corners, triangles, inflate, frame, la
     result.push({ covered, label });
   }
   return result;
+}
+
+// ------------------------------------------------------------------------------------------------ voxel shells
+// A far body for what moves in pieces (a ship's rigid hull and spars, and her canvas, which brails up its yard): each
+// piece voxelized apart, closed over its own gaps, its surface taken by marching tetrahedra and smoothed, the pieces
+// then simplified together to a base, never across a piece (each vertex keeps its piece as its region). Each base
+// vertex then rides the source vertex of its own piece nearest it, so the far body moves as the source does.
+
+// A piece's triangles (`triangles` of `index` over `position`, metres) as voxels `h` metres wide, closed over gaps of
+// `close` cells and filled within, each 6-connected part of fewer than `least` voxels dropped. `away` is the outside
+// grown by the closing: a voxel solid but not away was buried by it, and cannot be seen from outside.
+export function voxelShell(position, index, triangles, h, close, least) {
+  const P = position, lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (const t of triangles) for (let c = 0; c < 3; c++) { const v = index[t * 3 + c]; for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], P[v * 3 + k]); hi[k] = Math.max(hi[k], P[v * 3 + k]); } }
+  const pad = close + 2, origin = lo.map((l) => l - pad * h), dims = [0, 1, 2].map((k) => Math.ceil((hi[k] - lo[k]) / h) + 2 * pad + 1);
+  const [nx, ny, nz] = dims, N = nx * ny * nz, surface = new Uint8Array(N);
+  const cellOf = (x, y, z) => Math.floor((x - origin[0]) / h) + nx * (Math.floor((y - origin[1]) / h) + ny * Math.floor((z - origin[2]) / h));
+  for (const t of triangles) {
+    const [a, b, c] = [0, 1, 2].map((k) => index[t * 3 + k] * 3);
+    const longest = Math.max(Math.hypot(P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]), Math.hypot(P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]), Math.hypot(P[c] - P[b], P[c + 1] - P[b + 1], P[c + 2] - P[b + 2]));
+    const n = Math.max(1, Math.ceil(longest / (h / 3)));
+    for (let i = 0; i <= n; i++) for (let j = 0; j <= n - i; j++) {
+      const u = i / n, w = j / n, r = 1 - u - w;
+      surface[cellOf(r * P[a] + u * P[b] + w * P[c], r * P[a + 1] + u * P[b + 1] + w * P[c + 1], r * P[a + 2] + u * P[b + 2] + w * P[c + 2])] = 1;
+    }
+  }
+  const strides = [1, nx, nx * ny];
+  // A cube's dilation, an axis at a time, by a running count over each line.
+  const dilate = (src, r) => {
+    let a = src.slice(), b = new Uint8Array(N);
+    if (r <= 0) return a;
+    for (let axis = 0; axis < 3; axis++) {
+      const len = dims[axis], stride = strides[axis], [u, w] = [0, 1, 2].filter((k) => k !== axis);
+      for (let j = 0; j < dims[w]; j++) for (let i = 0; i < dims[u]; i++) {
+        const start = i * strides[u] + j * strides[w];
+        let count = 0;
+        for (let k = 0; k < Math.min(r, len); k++) count += a[start + k * stride];
+        for (let k = 0; k < len; k++) {
+          if (k + r < len) count += a[start + (k + r) * stride];
+          if (k - r - 1 >= 0) count -= a[start + (k - r - 1) * stride];
+          b[start + k * stride] = count > 0 ? 1 : 0;
+        }
+      }
+      [a, b] = [b, a];
+    }
+    return a;
+  };
+  const grown = dilate(surface, close), outside = new Uint8Array(N), queue = new Int32Array(N);
+  let head = 0, tail = 0;
+  const reach = (i) => { if (!grown[i] && !outside[i]) { outside[i] = 1; queue[tail++] = i; } };
+  for (let z = 0; z < nz; z++) for (let y = 0; y < ny; y++) for (let x = 0; x < nx; x++) if (x === 0 || y === 0 || z === 0 || x === nx - 1 || y === ny - 1 || z === nz - 1) reach(x + nx * (y + ny * z));
+  while (head < tail) {
+    const i = queue[head++], x = i % nx, y = Math.floor(i / nx) % ny, z = Math.floor(i / (nx * ny));
+    if (x > 0) reach(i - 1); if (x < nx - 1) reach(i + 1);
+    if (y > 0) reach(i - nx); if (y < ny - 1) reach(i + nx);
+    if (z > 0) reach(i - nx * ny); if (z < nz - 1) reach(i + nx * ny);
+  }
+  // Closing: what the grown outside does not reach, with every surface voxel kept and grown by one, so a sheet is
+  // three voxels thick and never touches itself only across a corner (which would open a handle in it).
+  const away = dilate(outside, close), thick = dilate(surface, 1), solid = new Uint8Array(N);
+  for (let i = 0; i < N; i++) solid[i] = !away[i] || thick[i] ? 1 : 0;
+  // Parts: 6-connected; the small ones go.
+  const label = new Int32Array(N).fill(-1), sizes = [];
+  for (let start = 0; start < N; start++) {
+    if (!solid[start] || label[start] >= 0) continue;
+    const id = sizes.length;
+    let size = 0;
+    head = tail = 0;
+    label[start] = id; queue[tail++] = start;
+    while (head < tail) {
+      const i = queue[head++], x = i % nx, y = Math.floor(i / nx) % ny, z = Math.floor(i / (nx * ny));
+      size++;
+      for (const [ok, j] of [[x > 0, i - 1], [x < nx - 1, i + 1], [y > 0, i - nx], [y < ny - 1, i + nx], [z > 0, i - nx * ny], [z < nz - 1, i + nx * ny]]) {
+        if (ok && solid[j] && label[j] < 0) { label[j] = id; queue[tail++] = j; }
+      }
+    }
+    sizes.push(size);
+  }
+  let dropped = 0;
+  for (let i = 0; i < N; i++) if (solid[i] && sizes[label[i]] < least) { solid[i] = 0; dropped++; }
+  const kept = sizes.filter((n) => n >= least).length;
+  // Whether a point (metres) lies in a voxel the closing buried.
+  const buried = (x, y, z) => { const i = cellOf(x, y, z); return solid[i] === 1 && !away[i]; };
+  return { solid, away, dims, origin, h, pieces: kept, droppedPieces: sizes.length - kept, droppedVoxels: dropped, buried };
+}
+// The solid's surface by marching tetrahedra over the voxel centres, each cube cut into the six tetrahedra about its
+// main diagonal (Kuhn's), the same in every cube, so the surface is closed and every edge has two triangles.
+export function marchingTetrahedra({ solid, dims, origin, h }) {
+  const [nx, ny] = dims, sxy = nx * ny, offsets = [0, 1, nx, nx + 1, sxy, sxy + 1, sxy + nx, sxy + nx + 1];
+  const tets = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]].map(([a, b]) => [0, 1 << a, (1 << a) | (1 << b), 7]);
+  const vertexOf = new Map(), position = [], index = [];
+  const at = (i) => [origin[0] + ((i % nx) + 0.5) * h, origin[1] + ((Math.floor(i / nx) % ny) + 0.5) * h, origin[2] + (Math.floor(i / sxy) + 0.5) * h];
+  // The vertex halfway along the edge from corner ca to corner cb (ca's bits a subset of cb's) of the cube at `base`.
+  const edge = (base, ca, cb) => {
+    const lowCorner = (ca & cb) === ca ? ca : cb, high = lowCorner === ca ? cb : ca, i = base + offsets[lowCorner], key = i * 8 + (high ^ lowCorner);
+    let v = vertexOf.get(key);
+    if (v === undefined) {
+      const p = at(i), q = at(base + offsets[high]);
+      v = position.length / 3;
+      position.push((p[0] + q[0]) / 2, (p[1] + q[1]) / 2, (p[2] + q[2]) / 2);
+      vertexOf.set(key, v);
+    }
+    return v;
+  };
+  const emit = (a, b, c, inward, outward) => {
+    const P = position, e = [0, 1, 2].map((k) => P[b * 3 + k] - P[a * 3 + k]), f = [0, 1, 2].map((k) => P[c * 3 + k] - P[a * 3 + k]);
+    const n = [e[1] * f[2] - e[2] * f[1], e[2] * f[0] - e[0] * f[2], e[0] * f[1] - e[1] * f[0]];
+    const g = [0, 1, 2].map((k) => outward[k] - inward[k]);
+    if (n[0] * g[0] + n[1] * g[1] + n[2] * g[2] >= 0) index.push(a, b, c); else index.push(a, c, b);
+  };
+  const corner = (base, c) => at(base + offsets[c]);
+  for (let z = 0; z < dims[2] - 1; z++) for (let y = 0; y < ny - 1; y++) for (let x = 0; x < nx - 1; x++) {
+    const base = x + nx * (y + ny * z);
+    let mask = 0;
+    for (let c = 0; c < 8; c++) if (solid[base + offsets[c]]) mask |= 1 << c;
+    if (mask === 0 || mask === 255) continue;
+    for (const tet of tets) {
+      const inside = tet.filter((c) => mask & (1 << c)), outside = tet.filter((c) => !(mask & (1 << c)));
+      if (!inside.length || !outside.length) continue;
+      const mean = (cs) => { const s = [0, 0, 0]; for (const c of cs) { const p = corner(base, c); for (let k = 0; k < 3; k++) s[k] += p[k] / cs.length; } return s; };
+      const inward = mean(inside), outward = mean(outside);
+      if (inside.length === 1) emit(edge(base, inside[0], outside[0]), edge(base, inside[0], outside[1]), edge(base, inside[0], outside[2]), inward, outward);
+      else if (outside.length === 1) emit(edge(base, outside[0], inside[0]), edge(base, outside[0], inside[1]), edge(base, outside[0], inside[2]), inward, outward);
+      else {
+        const [i0, i1] = inside, [o0, o1] = outside, A = edge(base, i0, o0), B = edge(base, i0, o1), C = edge(base, i1, o1), D = edge(base, i1, o0);
+        emit(A, B, C, inward, outward);
+        emit(A, C, D, inward, outward);
+      }
+    }
+  }
+  return { position: Float32Array.from(position), index: Uint32Array.from(index) };
+}
+// Uniform Taubin smoothing (lambda 0.5, mu -0.53): takes the voxel lattice's steps off a closed surface without
+// shrinking it.
+export function taubin(position, index, rounds) {
+  const V = position.length / 3, count = new Int32Array(V + 1);
+  for (let i = 0; i < index.length; i++) count[index[i] + 1]++;
+  for (let v = 0; v < V; v++) count[v + 1] += count[v];
+  const fill = count.slice(0, V), next = new Int32Array(index.length);
+  // Each half-edge a -> b gives a its neighbour b; on a closed surface, each neighbour once.
+  for (let t = 0; t < index.length; t += 3) for (let k = 0; k < 3; k++) next[fill[index[t + k]]++] = index[t + ((k + 1) % 3)];
+  const out = Float32Array.from(position), mean = new Float32Array(V * 3);
+  for (let r = 0; r < rounds * 2; r++) {
+    const f = r % 2 ? -0.53 : 0.5;
+    mean.fill(0);
+    for (let v = 0; v < V; v++) {
+      const n = count[v + 1] - count[v];
+      if (!n) continue;
+      for (let i = count[v]; i < count[v + 1]; i++) for (let k = 0; k < 3; k++) mean[v * 3 + k] += out[next[i] * 3 + k] / n;
+    }
+    for (let v = 0; v < V; v++) if (count[v + 1] > count[v]) for (let k = 0; k < 3; k++) out[v * 3 + k] += f * (mean[v * 3 + k] - out[v * 3 + k]);
+  }
+  return out;
+}
+// The nearest of a set of points (`members` of `position`) to p, by a uniform grid of cells `cell` metres wide.
+export function pointGrid(position, members, cell) {
+  const buckets = new Map(), key = (x, y, z) => ((x + 4096) * 8192 + (y + 4096)) * 8192 + (z + 4096);
+  for (const v of members) {
+    const k = key(Math.floor(position[v * 3] / cell), Math.floor(position[v * 3 + 1] / cell), Math.floor(position[v * 3 + 2] / cell));
+    if (!buckets.has(k)) buckets.set(k, []);
+    buckets.get(k).push(v);
+  }
+  return (px, py, pz) => {
+    const cx = Math.floor(px / cell), cy = Math.floor(py / cell), cz = Math.floor(pz / cell);
+    let best = -1, bestD = Infinity;
+    for (let ring = 0; ring < 4096; ring++) {
+      if (best >= 0 && (ring - 1) * cell > Math.sqrt(bestD)) break;
+      for (let x = cx - ring; x <= cx + ring; x++) for (let y = cy - ring; y <= cy + ring; y++) for (let z = cz - ring; z <= cz + ring; z++) {
+        if (Math.max(Math.abs(x - cx), Math.abs(y - cy), Math.abs(z - cz)) !== ring) continue;
+        for (const v of buckets.get(key(x, y, z)) ?? []) {
+          const d = (position[v * 3] - px) ** 2 + (position[v * 3 + 1] - py) ** 2 + (position[v * 3 + 2] - pz) ** 2;
+          if (d < bestD) { bestD = d; best = v; }
+        }
+      }
+    }
+    return best;
+  };
+}
+// The pieces' far body before its chain: `pieces` is [{ triangles, close, name }] of the source (`position` in metres,
+// `index`), each voxelized `h` metres wide and closed over `close` metres, parts under `least` voxels dropped. The
+// surfaces, smoothed by `smooth` Taubin rounds, are simplified together to `base` triangles with no triangle turned
+// further than `fold` allows, never across a piece. Returns the base (its vertices' piece in `piece`, area-weighted
+// normals), each piece's voxels and census, and `rides`: each base vertex's nearest source vertex of its own piece.
+export function voxelPieces(position, index, pieces, { h, least = 27, smooth = 8, base, fold = () => 0.5, lap = () => {} }) {
+  const merged = { position: [], index: [], piece: [] }, out = [];
+  pieces.forEach((piece, p) => {
+    if (!piece.triangles.length) return;
+    const close = Math.max(1, Math.round(piece.close / h)), voxels = voxelShell(position, index, piece.triangles, h, close, least), surface = marchingTetrahedra(voxels);
+    const census = edgeCensus(surface.index);
+    if (census.boundary || census.nonManifold) throw Error(`The voxel surface of ${piece.name ?? `piece ${p}`} is open: ${JSON.stringify(census)}`);
+    const at = merged.position.length / 3;
+    for (const x of surface.position) merged.position.push(x);
+    for (const v of surface.index) merged.index.push(v + at);
+    for (let v = 0; v < surface.position.length / 3; v++) merged.piece.push(p);
+    const genus = (2 * voxels.pieces - census.euler) / 2;
+    out.push({ piece: p, voxels, close: close * h, count: voxels.pieces, genus, surface: surface.index.length / 3 });
+    lap(`${piece.name ?? `piece ${p}`}: voxels ${voxels.dims.join('x')} at ${(h * 100).toFixed(1)} cm closed over ${(close * h * 100).toFixed(0)} cm, ${voxels.pieces} parts of genus ${genus} in all, ${surface.index.length / 3} triangles`);
+  });
+  const surfaceIndex = Uint32Array.from(merged.index), smoothed = taubin(Float32Array.from(merged.position), surfaceIndex, smooth), mergedPiece = Uint8Array.from(merged.piece);
+  const reduced = collapseChain(smoothed, surfaceIndex, base, { region: mergedPiece, fold }), kept = [];
+  for (let t = 0; t < reduced.alive.length; t++) if (reduced.alive[t]) kept.push(reduced.corners[t * 3], reduced.corners[t * 3 + 1], reduced.corners[t * 3 + 2]);
+  const used = [...new Set(kept)], local = new Map(used.map((v, i) => [v, i])), V = used.length, T = kept.length / 3;
+  const baseIndex = Uint32Array.from(kept, (v) => local.get(v)), basePosition = new Float32Array(V * 3), piece = Uint8Array.from(used, (v) => mergedPiece[v]);
+  used.forEach((v, i) => basePosition.set(smoothed.subarray(v * 3, v * 3 + 3), i * 3));
+  const census = edgeCensus(baseIndex);
+  if (census.boundary || census.nonManifold) throw Error(`The far body's base is open: ${JSON.stringify(census)}`);
+  const { normal } = normalsOf(basePosition, baseIndex);
+  // Each base vertex rides the nearest source vertex of its own piece.
+  const rides = new Uint32Array(V), sourceVertices = pieces.map(() => []), baseVertices = pieces.map(() => []);
+  pieces.forEach((p, k) => {
+    const referenced = new Uint8Array(position.length / 3);
+    for (const t of p.triangles) for (let c = 0; c < 3; c++) referenced[index[t * 3 + c]] = 1;
+    for (let v = 0; v < referenced.length; v++) if (referenced[v]) sourceVertices[k].push(v);
+  });
+  for (let i = 0; i < V; i++) baseVertices[piece[i]].push(i);
+  pieces.forEach((_, k) => {
+    if (!baseVertices[k].length) return;
+    const nearest = pointGrid(position, sourceVertices[k], 0.25);
+    for (const i of baseVertices[k]) rides[i] = nearest(basePosition[i * 3], basePosition[i * 3 + 1], basePosition[i * 3 + 2]);
+  });
+  return { position: basePosition, index: baseIndex, normal, piece, rides, pieces: out, census, sourceVertices, baseVertices };
 }
 
 // The far body's cells: about this many across a type's longest side, within these sizes (metres).

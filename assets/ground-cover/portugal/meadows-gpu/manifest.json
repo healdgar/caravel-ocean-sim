@@ -64,7 +64,7 @@
     "coreTriangles": 6,
     "farFirst": 0,
     "baseError": 0.06145,
-    "lastError": 0.72393,
+    "lastError": 1.07719,
     "hops": 6
    },
    "splat": {
@@ -128,7 +128,7 @@
     "farFirst": 0,
     "baseError": 0.05976,
     "lastError": 0.89952,
-    "hops": 8
+    "hops": 5
    },
    "splat": {
     "canopy": 0.3659,
@@ -190,8 +190,8 @@
     "coreTriangles": 6,
     "farFirst": 0,
     "baseError": 0.06558,
-    "lastError": 1.8846,
-    "hops": 6
+    "lastError": 0.91591,
+    "hops": 8
    },
    "splat": {
     "canopy": 0.3865,
@@ -253,8 +253,8 @@
     "coreTriangles": 6,
     "farFirst": 0,
     "baseError": 0.06946,
-    "lastError": 0.86976,
-    "hops": 8
+    "lastError": 0.72036,
+    "hops": 5
    },
    "splat": {
     "canopy": 0.398,
@@ -316,7 +316,7 @@
     "coreTriangles": 6,
     "farFirst": 0,
     "baseError": 0.10552,
-    "lastError": 0.77656,
+    "lastError": 0.63144,
     "hops": 6
    },
    "splat": {
@@ -379,8 +379,8 @@
     "coreTriangles": 6,
     "farFirst": 0,
     "baseError": 0.10505,
-    "lastError": 1.15875,
-    "hops": 6
+    "lastError": 0.66919,
+    "hops": 7
    },
    "splat": {
     "canopy": 0.4037,
@@ -443,7 +443,7 @@
     "farFirst": 0,
     "baseError": 0.09939,
     "lastError": 0.95691,
-    "hops": 5
+    "hops": 7
    },
    "splat": {
     "canopy": 0.3924,
@@ -568,8 +568,8 @@
     "coreTriangles": 6,
     "farFirst": 0,
     "baseError": 0.10486,
-    "lastError": 1.28327,
-    "hops": 7
+    "lastError": 1.28343,
+    "hops": 8
    },
    "splat": {
     "canopy": 0.4025,
@@ -631,7 +631,7 @@
     "coreTriangles": 6,
     "farFirst": 0,
     "baseError": 0.10483,
-    "lastError": 1.16562,
+    "lastError": 0.77943,
     "hops": 7
    },
    "splat": {
@@ -694,8 +694,8 @@
     "coreTriangles": 6,
     "farFirst": 0,
     "baseError": 0.10226,
-    "lastError": 0.73349,
-    "hops": 6
+    "lastError": 1.11812,
+    "hops": 5
    },
    "splat": {
     "canopy": 0.3994,
@@ -784,11 +784,11 @@
  "atlas": {
   "words": 7559267,
   "bytes": 30237068,
-  "sha256": "14c33f34a92ef0a7e253eeef5b0f977f222df33721baec8b3a6b07214831d65f",
+  "sha256": "1df77be68f1f6c63311f871a557182b8fca57c64e8e06d7ca5256270122e819b",
   "gzip": {
    "file": "atlas.bin.gz",
-   "bytes": 13009474,
-   "sha256": "7714f3b5a494898f0a5c4d399f6f42312a267581429b812f815f33f61b436fc4"
+   "bytes": 13009814,
+   "sha256": "94a2f923063c86a831b563c781353b13783acb22bcb8699bb03865b9aa4c5df6"
   },
   "clusters": 13415,
   "vertices": 774696,

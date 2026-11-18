@@ -56,7 +56,7 @@
  "far": {
   "vertexCount": 4006,
   "triangleCount": 8000,
-  "stepCount": 3994,
+  "stepCount": 4002,
   "offsets": {
    "vertices": 0,
    "records": 24036,
@@ -96,12 +96,12 @@
   "baseVertices": 4006,
   "baseError": 0.0894,
   "baseGeometric": 0.0366,
-  "steps": 3994,
-  "coreTriangles": 12,
+  "steps": 4002,
+  "coreTriangles": 4,
   "depth": 10,
   "errorRange": [
    0.0894,
-   5.4073
+   5.4289
   ],
   "inflateMax": 0.4248,
   "euler": 6
@@ -159,12 +159,12 @@
    }
   },
   "far.bin": {
-   "bytes": 272088,
-   "sha256": "76a569af8dc56b4af6b39de25409713488a8cb85b4809a5f21a4051c5e9e35b8",
+   "bytes": 272216,
+   "sha256": "5a3ac3ca3069084dfde1d6c6dc265c94acd7facd153c72402f4d2604013027ae",
    "gzip": {
     "file": "far.bin.gz",
-    "bytes": 155199,
-    "sha256": "00c46788fa5e60de10cc7655b3162d6319a2f5dcd386e67184009c9104129aad"
+    "bytes": 155245,
+    "sha256": "37849f4028d4b5b5e98d002f5ffea46a88d4468f58406c995016f6c761e37f2b"
    }
   },
   "vertices.bin": {

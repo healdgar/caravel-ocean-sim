@@ -90,7 +90,7 @@
     "rootTriangles": 82,
     "farFirst": 651,
     "farFirstTriangles": 82,
-    "handoffError": 0.2693
+    "handoffError": 0.267
    },
    "splat": {
     "centre": [
@@ -111,7 +111,7 @@
     "standing": 18,
     "error": 26
    },
-   "bakeMs": 4882
+   "bakeMs": 2278
   },
   {
    "id": 1,
@@ -161,16 +161,16 @@
     "simplifyError": 0.0197,
     "steps": 968,
     "coreTriangles": 6,
-    "depth": 8,
+    "depth": 7,
     "errorRange": [
      0.133,
-     1.0945
+     0.9868
     ],
     "inflateMax": 0.1979,
     "rootTriangles": 115,
     "farFirst": 918,
     "farFirstTriangles": 114,
-    "handoffError": 0.3978
+    "handoffError": 0.3991
    },
    "splat": {
     "centre": [
@@ -191,7 +191,7 @@
     "standing": 18,
     "error": 26
    },
-   "bakeMs": 7375
+   "bakeMs": 3386
   },
   {
    "id": 2,
@@ -244,7 +244,7 @@
     "depth": 7,
     "errorRange": [
      0.0923,
-     0.4868
+     0.4473
     ],
     "inflateMax": 0.096,
     "rootTriangles": 435,
@@ -271,7 +271,7 @@
     "standing": 18,
     "error": 26
    },
-   "bakeMs": 5246
+   "bakeMs": 2259
   },
   {
    "id": 3,
@@ -321,10 +321,10 @@
     "simplifyError": 0.0126,
     "steps": 912,
     "coreTriangles": 6,
-    "depth": 7,
+    "depth": 8,
     "errorRange": [
      0.1856,
-     0.8442
+     1.0408
     ],
     "inflateMax": 0.2099,
     "rootTriangles": 230,
@@ -351,7 +351,7 @@
     "standing": 18,
     "error": 26
    },
-   "bakeMs": 9855
+   "bakeMs": 3269
   },
   {
    "id": 4,
@@ -404,7 +404,7 @@
     "depth": 8,
     "errorRange": [
      0.4212,
-     2.7845
+     4.3009
     ],
     "inflateMax": 0.646,
     "rootTriangles": 1034,
@@ -431,7 +431,7 @@
     "standing": 73,
     "error": 73
    },
-   "bakeMs": 18749
+   "bakeMs": 8012
   },
   {
    "id": 5,
@@ -480,11 +480,11 @@
     "inward": 0.3053,
     "simplifyError": 0.0316,
     "steps": 1068,
-    "coreTriangles": 4,
+    "coreTriangles": 6,
     "depth": 8,
     "errorRange": [
      0.3053,
-     2.3442
+     2.52
     ],
     "inflateMax": 0.6507,
     "rootTriangles": 1488,
@@ -511,7 +511,7 @@
     "standing": 73,
     "error": 73
    },
-   "bakeMs": 17184
+   "bakeMs": 7787
   },
   {
    "id": 6,
@@ -561,10 +561,10 @@
     "simplifyError": 0.0299,
     "steps": 875,
     "coreTriangles": 6,
-    "depth": 7,
+    "depth": 9,
     "errorRange": [
      0.3744,
-     1.9243
+     1.7804
     ],
     "inflateMax": 0.6264,
     "rootTriangles": 877,
@@ -591,7 +591,7 @@
     "standing": 73,
     "error": 73
    },
-   "bakeMs": 11992
+   "bakeMs": 4685
   },
   {
    "id": 7,
@@ -641,10 +641,10 @@
     "simplifyError": 0.0105,
     "steps": 1975,
     "coreTriangles": 4,
-    "depth": 9,
+    "depth": 8,
     "errorRange": [
      0.0892,
-     1.0917
+     1.2601
     ],
     "inflateMax": 0.3158,
     "rootTriangles": 182,
@@ -671,7 +671,7 @@
     "standing": 5,
     "error": 5
    },
-   "bakeMs": 7635
+   "bakeMs": 6217
   },
   {
    "id": 8,
@@ -751,7 +751,7 @@
     "standing": 5,
     "error": 5
    },
-   "bakeMs": 1404
+   "bakeMs": 1020
   },
   {
    "id": 9,
@@ -804,7 +804,7 @@
     "depth": 8,
     "errorRange": [
      0.9163,
-     4.3241
+     4.4095
     ],
     "inflateMax": 1.4269,
     "rootTriangles": 1785,
@@ -831,18 +831,18 @@
     "standing": 9,
     "error": 9
    },
-   "bakeMs": 18241
+   "bakeMs": 8807
   }
  ],
  "atlas": {
   "words": 1022840,
   "bytes": 4091360,
-  "sha256": "528085a5554f23629cfe4d03a62e15b1f6742d2405596b1ee8ea207c8e9a9c6a",
+  "sha256": "be3f087b8200e4fb8deb789158d7340d594240d6ef195d9f76b4a2e266942e1b",
   "gzip": {
    "file": "atlas.bin.gz",
-   "bytes": 1568334,
-   "sha256": "577d8d1fffd7dab1e726c49d6ae758e24f3dbb01af32aa828dad13d71d9e83ed"
+   "bytes": 1567729,
+   "sha256": "a69168f93e51765fee6832910313ab773abbfdc875d0233571f598ebdd4eece0"
   }
  },
- "bakeSeconds": 103.7
+ "bakeSeconds": 48.9
 }
