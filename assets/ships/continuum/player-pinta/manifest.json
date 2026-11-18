@@ -1,0 +1,186 @@
+{
+ "format": "waterworld.ship-continuum",
+ "version": 2,
+ "id": "player-pinta",
+ "family": "player",
+ "model": "pinta",
+ "label": "Pinta",
+ "source": {
+  "vertices": 57994,
+  "indices": 144972,
+  "shards": 237,
+  "key": "ce5fd99de74927f3c46aa7c74f13f4898f7cfef282c7c3cec6481bd9e31a7804",
+  "surface": {
+   "area": 316.2852820167977,
+   "centroid": [
+    0.0002636397570547131,
+    2.336453493976868,
+    0.17026875016101384
+   ],
+   "materials": {
+    "0": 44.8843691193524,
+    "1": 35.80130524373965,
+    "2": 13.854927586730717,
+    "3": 3.884691781511477,
+    "4": 2.2964077990321927,
+    "6": 0.48210464558221133,
+    "7": 0.2086550809995595,
+    "9": 71.85499816358107,
+    "10": 18.737801913611342,
+    "11": 0.1611064027454282,
+    "12": 2.2379799125607924,
+    "13": 15.164999631643383,
+    "14": 2.560632779479496,
+    "15": 74.72154569270536,
+    "16": 10.518178900432957,
+    "17": 13.123485687472003,
+    "18": 1.9750002264976558,
+    "19": 3.678230645674918,
+    "25": 0.13886080344124538
+   }
+  },
+  "designScale": [
+   1.947333,
+   2.159,
+   2.159
+  ]
+ },
+ "clusterWords": 16,
+ "farVertexWords": 6,
+ "stepWords": 4,
+ "clusterCount": 1582,
+ "indexCount": 259467,
+ "copyCount": 316,
+ "clusters": {
+  "triangles": 86489,
+  "levels": 6,
+  "roots": 582,
+  "groups": 133,
+  "parts": 400,
+  "rootError": 19.7205
+ },
+ "far": {
+  "vertexCount": 4008,
+  "triangleCount": 8000,
+  "stepCount": 3992,
+  "offsets": {
+   "vertices": 0,
+   "records": 24048,
+   "triangles": 28056,
+   "steps": 52056
+  },
+  "voxel": 0.0885,
+  "pieces": [
+   {
+    "kind": "rigid",
+    "close": 0.2654,
+    "grid": [
+     149,
+     320,
+     371
+    ],
+    "count": 1,
+    "dropped": 0,
+    "genus": 0,
+    "surfaceTriangles": 941700
+   },
+   {
+    "kind": "canvas",
+    "close": 0.1769,
+    "grid": [
+     142,
+     210,
+     243
+    ],
+    "count": 3,
+    "dropped": 0,
+    "genus": 0,
+    "surfaceTriangles": 842628
+   }
+  ],
+  "baseTriangles": 8000,
+  "baseVertices": 4008,
+  "baseError": 0.3248,
+  "baseGeometric": 0.1508,
+  "steps": 3992,
+  "coreTriangles": 16,
+  "depth": 9,
+  "errorRange": [
+   0.3248,
+   11.7787
+  ],
+  "inflateMax": 0.2956,
+  "euler": 8
+ },
+ "splat": {
+  "centre": [
+   -0.0155,
+   11.3383,
+   -1.6872
+  ],
+  "ry": 13.79,
+  "rxSide": 6.0117,
+  "rxEnd": 5.4885,
+  "colour": [
+   0.45086,
+   0.37281,
+   0.28241
+  ]
+ },
+ "bound": {
+  "centre": [
+   0,
+   11.381,
+   -1.6967
+  ],
+  "radius": 33.6696
+ },
+ "poses": 1,
+ "files": {
+  "clusters.bin": {
+   "bytes": 101248,
+   "sha256": "422333a5298e270694a66f0375f2ca2c5739ec4fd1f1a1cfab3942bfda58a785",
+   "gzip": {
+    "file": "clusters.bin.gz",
+    "bytes": 40595,
+    "sha256": "0e805a84cfdb38cdf0a214a940fe09820162071e855d19c66fe130d1e8774b58"
+   }
+  },
+  "indices.bin": {
+   "bytes": 1037868,
+   "sha256": "ca78ccdaac4df029a37c1a7a3f451a8f8c9851982b0e4b60732c1f2fb3430a56",
+   "gzip": {
+    "file": "indices.bin.gz",
+    "bytes": 313459,
+    "sha256": "57b34f9edcca2d55403b8e99e9e5a995bd0ff1f9564376aab6965afe920675df"
+   }
+  },
+  "copies.bin": {
+   "bytes": 1264,
+   "sha256": "597785c370f7e4acec677196eff731a4745c8de697fbec34f5a36e54b533f4d3",
+   "gzip": {
+    "file": "copies.bin.gz",
+    "bytes": 647,
+    "sha256": "f9a1854277285c0028559f07534bcbf5378b8b49516605811593d32135019e38"
+   }
+  },
+  "far.bin": {
+   "bytes": 272112,
+   "sha256": "990dd70d5488dd1ee38cc2f694dd4b6247281865917e7f9a9ecac8111a4da7a3",
+   "gzip": {
+    "file": "far.bin.gz",
+    "bytes": 157415,
+    "sha256": "3f14948b5ae14f1eb40e667d691f2a458ae45b0fb59bd6afbc2cbbe7fff1a19c"
+   }
+  },
+  "corners.bin": {
+   "bytes": 579888,
+   "sha256": "410581ed16524cc29aa72131f124f46530b8c63b048cb9842d3b057e9e66a9d6",
+   "gzip": {
+    "file": "corners.bin.gz",
+    "bytes": 172503,
+    "sha256": "8dfb2a83f0682dd78f8f4588dd1bcc8aa7adc436b97b9386c09b59b340fa1094"
+   }
+  }
+ }
+}

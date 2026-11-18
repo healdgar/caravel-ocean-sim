@@ -1,0 +1,186 @@
+{
+ "format": "waterworld.ship-continuum",
+ "version": 2,
+ "id": "player-santa-maria",
+ "family": "player",
+ "model": "santa-maria",
+ "label": "Santa María",
+ "source": {
+  "vertices": 66561,
+  "indices": 169371,
+  "shards": 242,
+  "key": "97db0ab100f5cf34438276854f7bd134f2443bc537d2877dacd796dda7c45b8e",
+  "surface": {
+   "area": 317.72954278882906,
+   "centroid": [
+    0.0007857768612642597,
+    2.019654792904599,
+    0.25438127045843817
+   ],
+   "materials": {
+    "0": 58.21713561590417,
+    "1": 44.73973274840008,
+    "2": 12.194780105618909,
+    "3": 3.9564936655489724,
+    "4": 2.983407801611067,
+    "6": 0.7332474380989211,
+    "7": 0.34090754423242187,
+    "9": 52.39499736368671,
+    "10": 18.341052233287158,
+    "11": 0.24610640423554642,
+    "12": 2.8618631705180793,
+    "13": 6.145000242807612,
+    "14": 2.234849882361077,
+    "15": 80.61278121168998,
+    "16": 10.927106945322695,
+    "17": 14.501511486935462,
+    "18": 2.619999902248381,
+    "19": 3.539708201015452,
+    "25": 0.1388608253035051
+   }
+  },
+  "designScale": [
+   2.211111,
+   2.358333,
+   2.358333
+  ]
+ },
+ "clusterWords": 16,
+ "farVertexWords": 6,
+ "stepWords": 4,
+ "clusterCount": 1827,
+ "indexCount": 311757,
+ "copyCount": 310,
+ "clusters": {
+  "triangles": 103919,
+  "levels": 6,
+  "roots": 618,
+  "groups": 159,
+  "parts": 414,
+  "rootError": 17.3061
+ },
+ "far": {
+  "vertexCount": 4012,
+  "triangleCount": 8000,
+  "stepCount": 3988,
+  "offsets": {
+   "vertices": 0,
+   "records": 24072,
+   "triangles": 28084,
+   "steps": 52084
+  },
+  "voxel": 0.0983,
+  "pieces": [
+   {
+    "kind": "rigid",
+    "close": 0.2948,
+    "grid": [
+     132,
+     286,
+     371
+    ],
+    "count": 1,
+    "dropped": 0,
+    "genus": 0,
+    "surfaceTriangles": 1003208
+   },
+   {
+    "kind": "canvas",
+    "close": 0.0983,
+    "grid": [
+     122,
+     239,
+     329
+    ],
+    "count": 5,
+    "dropped": 0,
+    "genus": 0,
+    "surfaceTriangles": 583632
+   }
+  ],
+  "baseTriangles": 8000,
+  "baseVertices": 4012,
+  "baseError": 0.3397,
+  "baseGeometric": 0.1059,
+  "steps": 3988,
+  "coreTriangles": 24,
+  "depth": 11,
+  "errorRange": [
+   0.3397,
+   14.2572
+  ],
+  "inflateMax": 0.8293,
+  "euler": 12
+ },
+ "splat": {
+  "centre": [
+   -0.0079,
+   11.5123,
+   -2.0968
+  ],
+  "ry": 13.6462,
+  "rxSide": 5.8547,
+  "rxEnd": 5.6669,
+  "colour": [
+   0.37356,
+   0.29394,
+   0.21209
+  ]
+ },
+ "bound": {
+  "centre": [
+   0,
+   11.5337,
+   -2.1459
+  ],
+  "radius": 36.5904
+ },
+ "poses": 1,
+ "files": {
+  "clusters.bin": {
+   "bytes": 116928,
+   "sha256": "ed3cde2c4c6f9a802d107930a6c117ad0528e49b7a2b35025773284358b54a23",
+   "gzip": {
+    "file": "clusters.bin.gz",
+    "bytes": 47250,
+    "sha256": "e98d70534a7bb7eab0265817730cd9159c5d137588874fe6844088c9211fa113"
+   }
+  },
+  "indices.bin": {
+   "bytes": 1247028,
+   "sha256": "1ab5d625a2d7cbc4e904230a4a3d1a2ae4ed720487826bd996dd1053bd51e54c",
+   "gzip": {
+    "file": "indices.bin.gz",
+    "bytes": 374673,
+    "sha256": "1b16db1aa527521499693db34fa965663f44c9d389b2c4049eb24894835ffe04"
+   }
+  },
+  "copies.bin": {
+   "bytes": 1240,
+   "sha256": "9d4e63ec5badaea00a8cef0bfc35f55bdd0cf476f0849314de58601f0ddfc02f",
+   "gzip": {
+    "file": "copies.bin.gz",
+    "bytes": 621,
+    "sha256": "f9453089624b071d43fa3b745758c257afe6b6519c0633c04fd6849ee5932147"
+   }
+  },
+  "far.bin": {
+   "bytes": 272160,
+   "sha256": "22a570b6c893871c3cc0875fcffe8c8a11e312737c3f7f344243a3cc45fd9aee",
+   "gzip": {
+    "file": "far.bin.gz",
+    "bytes": 158520,
+    "sha256": "b9daa38212d58d3a18933c4164aca87abdc6197080a23fd4127909dff234c103"
+   }
+  },
+  "corners.bin": {
+   "bytes": 677484,
+   "sha256": "1f90255e8c31aa52f2bca7a2b2c270b848f043b218ac20aae232d63478912bd4",
+   "gzip": {
+    "file": "corners.bin.gz",
+    "bytes": 201413,
+    "sha256": "942051862a1e2cb73583cbb5dee98657db8668c4238c6988775570629d1a126d"
+   }
+  }
+ }
+}

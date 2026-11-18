@@ -37,7 +37,7 @@ import { poseCrewFingers } from './crew-physics.js';
 import { sharedNeuralPbrBank } from './neural-pbr.js';
 import { withNeuralPbrTradeVessels } from './wgsl/neural-pbr.js';
 import { SHIP_CONTINUUM_BODIES } from './ship-continuum.js';
-import { SHIP_CONTINUUM_DAMAGED_SLOTS, SHIP_CONTINUUM_ENTRY_LAYOUT, SHIP_CONTINUUM_SHADOW_LIST, shipContinuumDataWGSL, shipContinuumOrders } from './wgsl/ship-continuum.js';
+import { SHIP_CONTINUUM_DAMAGED_SLOTS, SHIP_CONTINUUM_ENTRY_LAYOUT, SHIP_CONTINUUM_SHADOW_LIST, SHIP_CONTINUUM_SHADOW_CLUSTER_LIST, shipContinuumDataWGSL, shipContinuumOrders } from './wgsl/ship-continuum.js';
 import { loadShipContinuum, requestShipContinuumCut, createShipContinuumCut } from './ship-continuum-draw.js';
 
 export const TRADE_VESSEL_VERTEX_FLOATS = 9; // pos(3), norm(3), material(1), uv(2)
@@ -4250,11 +4250,25 @@ fn tvFarVertex(ship: u32, chunk: u32, vertex: u32, step: u32, morph: f32) -> TVV
   o.coverage = shipContinuumCoverage(2u, state.x);
   return o;
 }
-// The far body at the shadow map's step, unmorphed: shadows, and the ship seen from under the water.
+// The far body at the shadow map's step, unmorphed: shadows, and the ship seen from under the water. A ship whose
+// clusters cast her shadow (near the eye, where the map asks for less error than her far body holds) casts none here.
 @vertex fn tvFarShadowVS(@builtin(vertex_index) vertex: u32, listed: ShipContinuumEntry) -> @builtin(position) vec4f {
   let entry = listed.entry;
-  let o = tvFarVertex(entry.x, entry.y, vertex, shipContinuumState(entry.x).y >> 16u, 0.0);
+  let state = shipContinuumState(entry.x);
+  if (shipContinuumClustersCast(state)) { return tvHidden().pos + vec4f(shipContinuumBindings()); }
+  let o = tvFarVertex(entry.x, entry.y, vertex, state.y >> 16u, 0.0);
   if (o.matId == 0xffffffffu) { return o.pos; }
+  return landSH.lightView * vec4f(o.world + vec3f(shipContinuumBindings()) - landSH.origin.xyz, 1.0);
+}
+// Her clusters, cut to the shadow map's texel, casting the shadow of a ship near the eye.
+@vertex fn tvClusterShadowVS(@builtin(vertex_index) vertex: u32, listed: ShipContinuumEntry) -> @builtin(position) vec4f {
+  let entry = listed.entry;
+  let inst = shipInstances[entry.x];
+  let body = tvBodyOf(inst);
+  let v = shipContinuumClusterVertex(body, entry.y, vertex);
+  if (v == 0xffffffffu) { return tvHidden().pos; }
+  let s = shipContinuumSourceVertex(body, v);
+  let o = tvFinish(s.position, s.normal, s.position, s.material, s.uv, inst);
   return landSH.lightView * vec4f(o.world + vec3f(shipContinuumBindings()) - landSH.origin.xyz, 1.0);
 }
 @vertex fn tvFarSubmergedVS(@builtin(vertex_index) vertex: u32, listed: ShipContinuumEntry) -> TVVertexOut {
@@ -5361,20 +5375,22 @@ export function requestTradeVesselsPipelines({
       depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
       multisample: { count: samples },
     });
-    const [clusterPipe, farPipe, splatPipe, shadowPipe, cutPipe] = await Promise.all([
+    const cast = (label, entryPoint) => device.createRenderPipelineAsync({
+      label,
+      layout: 'auto',
+      vertex: { module, entryPoint, buffers: SHIP_CONTINUUM_ENTRY_LAYOUT },
+      primitive: { topology: 'triangle-list', cullMode: 'none' },
+      depthStencil: { format: shadowFormat, depthWriteEnabled: true, depthCompare: 'less', depthBias: 2, depthBiasSlopeScale: 1.5 },
+    });
+    const [clusterPipe, farPipe, splatPipe, shadowPipe, clusterShadowPipe, cutPipe] = await Promise.all([
       seen('trade vessel clusters', 'tvClusterVS', 'tvFS'),
       seen('trade vessel far bodies', 'tvFarVS', 'tvFarFS'),
       seen('trade vessel splats', 'tvSplatVS', 'tvFarFS'),
-      device.createRenderPipelineAsync({
-        label: 'trade vessel shadows',
-        layout: 'auto',
-        vertex: { module, entryPoint: 'tvFarShadowVS', buffers: SHIP_CONTINUUM_ENTRY_LAYOUT },
-        primitive: { topology: 'triangle-list', cullMode: 'none' },
-        depthStencil: { format: shadowFormat, depthWriteEnabled: true, depthCompare: 'less', depthBias: 2, depthBiasSlopeScale: 1.5 },
-      }),
+      cast('trade vessel shadows', 'tvFarShadowVS'),
+      cast('trade vessel cluster shadows', 'tvClusterShadowVS'),
       requestShipContinuumCut({ device, shader }),
     ]);
-    return { clusterPipe, farPipe, splatPipe, shadowPipe, cutPipe };
+    return { clusterPipe, farPipe, splatPipe, shadowPipe, clusterShadowPipe, cutPipe };
   });
 }
 
@@ -5521,7 +5537,7 @@ export async function createTradeVessels({
     surfaceWavesPromise,
     waterOpticsPromise,
   ]);
-  const { clusterPipe, farPipe, splatPipe, shadowPipe, cutPipe } = pipes;
+  const { clusterPipe, farPipe, splatPipe, shadowPipe, clusterShadowPipe, cutPipe } = pipes;
   // Seen from under the water, a vessel is its far body at the shadow map's step (the cut's shadow list).
   const submergedCapture = resolvedWaterOptics?.capture
     ? await resolvedWaterOptics.capture({
@@ -5582,6 +5598,7 @@ export async function createTradeVessels({
     far: [pickEntries(farPipe, SEEN_BINDINGS), emptyGroup(farPipe, 1), shipCut.dataGroup(farPipe, 2)],
     splat: [pickEntries(splatPipe, SEEN_BINDINGS), emptyGroup(splatPipe, 1), shipCut.dataGroup(splatPipe, 2)],
     shadow: [pickEntries(shadowPipe, SHADOW_BINDINGS), emptyGroup(shadowPipe, 1), shipCut.dataGroup(shadowPipe, 2)],
+    clusterShadow: [pickEntries(clusterShadowPipe, SHADOW_BINDINGS), emptyGroup(clusterShadowPipe, 1), shipCut.dataGroup(clusterShadowPipe, 2)],
     submerged: submergedCapture?.pipeline
       ? [pickEntries(submergedCapture.pipeline, SEEN_BINDINGS), emptyGroup(submergedCapture.pipeline, 1), shipCut.dataGroup(submergedCapture.pipeline, 2)]
       : null,
@@ -7782,12 +7799,16 @@ export async function createTradeVessels({
         shipCut.draw(pass, shipCut.damagedList(slot));
       });
     },
-    // Every vessel's far body at the shadow map's step casts its shadow; each damaged one, its own clusters.
+    // Every vessel's far body at the shadow map's step casts its shadow, or near the eye her clusters cut to the map's
+    // texel; each damaged one, its own clusters.
     drawShadow(pass) {
       if (totalIntact > 0) {
         pass.setPipeline(shadowPipe);
         setGroups(pass, drawGroups.shadow);
         shipCut.draw(pass, SHIP_CONTINUUM_SHADOW_LIST);
+        pass.setPipeline(clusterShadowPipe);
+        setGroups(pass, drawGroups.clusterShadow);
+        shipCut.draw(pass, SHIP_CONTINUUM_SHADOW_CLUSTER_LIST);
       }
       if (crewEncoded && deckCompany) {
         for (const batch of deckCompany.batches) batch?.drawShadow(pass);

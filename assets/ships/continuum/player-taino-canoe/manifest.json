@@ -1,0 +1,161 @@
+{
+ "format": "waterworld.ship-continuum",
+ "version": 2,
+ "id": "player-taino-canoe",
+ "family": "player",
+ "model": "taino-canoe",
+ "label": "Taíno-style thirty-person dugout · c. 1492",
+ "source": {
+  "vertices": 27323,
+  "indices": 83562,
+  "shards": 40,
+  "key": "fe39063646848f6a5349d2e0d14f654327d0de648fbf937072849b0dd94c07cc",
+  "surface": {
+   "area": 146.4491433452266,
+   "centroid": [
+    0.0054298265501264405,
+    0.03370284279466442,
+    -0.031390620050113144
+   ],
+   "materials": {
+    "0": 24.82039945960601,
+    "1": 61.080140162245044,
+    "2": 0.3339556402594043,
+    "3": 0.5520507475435615,
+    "15": 45.69042938603818,
+    "16": 13.338108104824144,
+    "17": 0.6340598447102452
+   }
+  },
+  "designScale": [
+   0.5,
+   1.166667,
+   1.166667
+  ]
+ },
+ "clusterWords": 16,
+ "farVertexWords": 6,
+ "stepWords": 4,
+ "clusterCount": 1009,
+ "indexCount": 161733,
+ "copyCount": 0,
+ "clusters": {
+  "triangles": 53911,
+  "levels": 7,
+  "roots": 218,
+  "groups": 101,
+  "parts": 149,
+  "rootError": 2.9881
+ },
+ "far": {
+  "vertexCount": 4002,
+  "triangleCount": 8000,
+  "stepCount": 3998,
+  "offsets": {
+   "vertices": 0,
+   "records": 24012,
+   "triangles": 28014,
+   "steps": 52014
+  },
+  "voxel": 0.0389,
+  "pieces": [
+   {
+    "kind": "rigid",
+    "close": 0.3115,
+    "grid": [
+     84,
+     75,
+     381
+    ],
+    "count": 1,
+    "dropped": 0,
+    "genus": 0,
+    "surfaceTriangles": 551556
+   }
+  ],
+  "baseTriangles": 8000,
+  "baseVertices": 4002,
+  "baseError": 0.0796,
+  "baseGeometric": 0,
+  "steps": 3998,
+  "coreTriangles": 4,
+  "depth": 9,
+  "errorRange": [
+   0.0796,
+   2.9107
+  ],
+  "inflateMax": 0.4547,
+  "euler": 2
+ },
+ "splat": {
+  "centre": [
+   0.0117,
+   0.3657,
+   0
+  ],
+  "ry": 1.1051,
+  "rxSide": 5.803,
+  "rxEnd": 0.8572,
+  "colour": [
+   0.32373,
+   0.23373,
+   0.14838
+  ]
+ },
+ "bound": {
+  "centre": [
+   0,
+   0.3694,
+   0
+  ],
+  "radius": 13.8604
+ },
+ "poses": 1,
+ "files": {
+  "clusters.bin": {
+   "bytes": 64576,
+   "sha256": "b3d38cd93cc62526c86191e14645c7834e4b2e73587b22f978f7120ef1c48736",
+   "gzip": {
+    "file": "clusters.bin.gz",
+    "bytes": 23645,
+    "sha256": "6da2fc2d71a701af50f0df0043ae021d9de6d05e17eac18581242a562f9c4cc8"
+   }
+  },
+  "indices.bin": {
+   "bytes": 646932,
+   "sha256": "45fdb57a0fbf39ef973ba26f2d3a90aed3abb74f254944334ff0f21d30871988",
+   "gzip": {
+    "file": "indices.bin.gz",
+    "bytes": 189843,
+    "sha256": "360f9155efc940c708c88fc2d019183406fe0f2bc52c8fafcb29dae10e278cd4"
+   }
+  },
+  "copies.bin": {
+   "bytes": 0,
+   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "gzip": {
+    "file": "copies.bin.gz",
+    "bytes": 20,
+    "sha256": "f1b651238a58fe290baec6c5e32f3bdb1943dd2bd582f02569231f7a757c7837"
+   }
+  },
+  "far.bin": {
+   "bytes": 272040,
+   "sha256": "8fe099f832afac491bf1477c0d20ffd8e101bd182ce324c380924f91450fdaa5",
+   "gzip": {
+    "file": "far.bin.gz",
+    "bytes": 151833,
+    "sha256": "c4ab207f8c4a41e1ba2e42beb580cdacec64c75c79f4b9f53469f0a6ff9b73c8"
+   }
+  },
+  "corners.bin": {
+   "bytes": 334248,
+   "sha256": "e931a4d213caa8fc0d836738dca393fa56655b4aacac78e1898fb6779a1beaae",
+   "gzip": {
+    "file": "corners.bin.gz",
+    "bytes": 90740,
+    "sha256": "f8873887f559c6b9e60ec6b44c0a170a2d7ca0c85ebe1eabe210b9b653e365b9"
+   }
+  }
+ }
+}

@@ -23,7 +23,8 @@ export const SHIP_CONTINUUM_NEVER = 65535;
 // Every ancestor walk on the GPU stops after this many hops; the bake holds each chain under it.
 export const SHIP_CONTINUUM_MAX_DEPTH = 96;
 
-// The bodies, by id, and the trade vessel archetype each is baked from (js/trade-vessels.js ARCHETYPE_SPECS).
+// The bodies, by id: each trade vessel archetype (js/trade-vessels.js ARCHETYPE_SPECS) and each ship the player can
+// sail (js/ship-models.js SHIP_MODELS), each baked from the assembly the game builds of it.
 export const SHIP_CONTINUUM_BODIES = Object.freeze([
   { id: 'trade-cog-underway', family: 'trade', archetype: 0 },
   { id: 'trade-cog-anchored', family: 'trade', archetype: 1 },
@@ -32,13 +33,30 @@ export const SHIP_CONTINUUM_BODIES = Object.freeze([
   { id: 'trade-river-barge', family: 'trade', archetype: 4 },
   { id: 'trade-lateen-caravel', family: 'trade', archetype: 5 },
   { id: 'trade-harbor-barque', family: 'trade', archetype: 6 },
+  { id: 'player-victory', family: 'player', model: 'victory' },
+  { id: 'player-nina', family: 'player', model: 'nina' },
+  { id: 'player-pinta', family: 'player', model: 'pinta' },
+  { id: 'player-santa-maria', family: 'player', model: 'santa-maria' },
+  { id: 'player-oseberg', family: 'player', model: 'oseberg' },
+  { id: 'player-lusoria', family: 'player', model: 'lusoria' },
+  { id: 'player-taino-canoe', family: 'player', model: 'taino-canoe' },
+  { id: 'player-flying-cloud', family: 'player', model: 'flying-cloud' },
+  { id: 'player-gipsy-moth-iv', family: 'player', model: 'gipsy-moth-iv' },
 ].map(Object.freeze));
-// The streams of a body: its clusters and their corners, the seam copies they name, its far body, and the assembly it
-// was baked from (vertices of 9 floats: position, normal, material, uv) with each vertex's fracture shard.
-export const SHIP_CONTINUUM_STREAMS = Object.freeze(['clusters.bin', 'indices.bin', 'copies.bin', 'far.bin', 'vertices.bin', 'shards.bin']);
+// The streams of a body, by family: its clusters and their corners, the seam copies they name and its far body; then
+// for a trade vessel the assembly it was baked from (vertices of 9 floats: position, normal, material, uv) with each
+// vertex's fracture shard, which it draws and breaks; and for a player's ship the assembly's own corners (its index
+// buffer as baked), by which the corners and the far body's riders are renumbered onto the ship as built where it is
+// drawn (an engine that rounds a sine in the last place welds a few vertices otherwise), so the ship draws, poses,
+// wets and breaks the one mesh its physics uses.
+export const SHIP_CONTINUUM_STREAMS = Object.freeze({
+  trade: Object.freeze(['clusters.bin', 'indices.bin', 'copies.bin', 'far.bin', 'vertices.bin', 'shards.bin']),
+  player: Object.freeze(['clusters.bin', 'indices.bin', 'copies.bin', 'far.bin', 'corners.bin']),
+});
+export const shipContinuumStreams = (family) => SHIP_CONTINUUM_STREAMS[family] ?? [];
 // Every file of every body, by body and file name, for loading and for build.mjs to publish. Spelled out, not
 // composed, because the build publishes (and versions) only the asset paths it finds quoted in the source; the bake
-// test holds this table to SHIP_CONTINUUM_BODIES and SHIP_CONTINUUM_STREAMS.
+// test holds this table to SHIP_CONTINUUM_BODIES and their family's SHIP_CONTINUUM_STREAMS.
 export const SHIP_CONTINUUM_ASSETS = Object.freeze({
   'trade-cog-underway': Object.freeze({
     'manifest.json': 'assets/ships/continuum/trade-cog-underway/manifest.json',
@@ -102,6 +120,78 @@ export const SHIP_CONTINUUM_ASSETS = Object.freeze({
     'far.bin.gz': 'assets/ships/continuum/trade-harbor-barque/far.bin.gz',
     'vertices.bin.gz': 'assets/ships/continuum/trade-harbor-barque/vertices.bin.gz',
     'shards.bin.gz': 'assets/ships/continuum/trade-harbor-barque/shards.bin.gz',
+  }),
+  'player-victory': Object.freeze({
+    'manifest.json': 'assets/ships/continuum/player-victory/manifest.json',
+    'clusters.bin.gz': 'assets/ships/continuum/player-victory/clusters.bin.gz',
+    'indices.bin.gz': 'assets/ships/continuum/player-victory/indices.bin.gz',
+    'copies.bin.gz': 'assets/ships/continuum/player-victory/copies.bin.gz',
+    'far.bin.gz': 'assets/ships/continuum/player-victory/far.bin.gz',
+    'corners.bin.gz': 'assets/ships/continuum/player-victory/corners.bin.gz',
+  }),
+  'player-nina': Object.freeze({
+    'manifest.json': 'assets/ships/continuum/player-nina/manifest.json',
+    'clusters.bin.gz': 'assets/ships/continuum/player-nina/clusters.bin.gz',
+    'indices.bin.gz': 'assets/ships/continuum/player-nina/indices.bin.gz',
+    'copies.bin.gz': 'assets/ships/continuum/player-nina/copies.bin.gz',
+    'far.bin.gz': 'assets/ships/continuum/player-nina/far.bin.gz',
+    'corners.bin.gz': 'assets/ships/continuum/player-nina/corners.bin.gz',
+  }),
+  'player-pinta': Object.freeze({
+    'manifest.json': 'assets/ships/continuum/player-pinta/manifest.json',
+    'clusters.bin.gz': 'assets/ships/continuum/player-pinta/clusters.bin.gz',
+    'indices.bin.gz': 'assets/ships/continuum/player-pinta/indices.bin.gz',
+    'copies.bin.gz': 'assets/ships/continuum/player-pinta/copies.bin.gz',
+    'far.bin.gz': 'assets/ships/continuum/player-pinta/far.bin.gz',
+    'corners.bin.gz': 'assets/ships/continuum/player-pinta/corners.bin.gz',
+  }),
+  'player-santa-maria': Object.freeze({
+    'manifest.json': 'assets/ships/continuum/player-santa-maria/manifest.json',
+    'clusters.bin.gz': 'assets/ships/continuum/player-santa-maria/clusters.bin.gz',
+    'indices.bin.gz': 'assets/ships/continuum/player-santa-maria/indices.bin.gz',
+    'copies.bin.gz': 'assets/ships/continuum/player-santa-maria/copies.bin.gz',
+    'far.bin.gz': 'assets/ships/continuum/player-santa-maria/far.bin.gz',
+    'corners.bin.gz': 'assets/ships/continuum/player-santa-maria/corners.bin.gz',
+  }),
+  'player-oseberg': Object.freeze({
+    'manifest.json': 'assets/ships/continuum/player-oseberg/manifest.json',
+    'clusters.bin.gz': 'assets/ships/continuum/player-oseberg/clusters.bin.gz',
+    'indices.bin.gz': 'assets/ships/continuum/player-oseberg/indices.bin.gz',
+    'copies.bin.gz': 'assets/ships/continuum/player-oseberg/copies.bin.gz',
+    'far.bin.gz': 'assets/ships/continuum/player-oseberg/far.bin.gz',
+    'corners.bin.gz': 'assets/ships/continuum/player-oseberg/corners.bin.gz',
+  }),
+  'player-lusoria': Object.freeze({
+    'manifest.json': 'assets/ships/continuum/player-lusoria/manifest.json',
+    'clusters.bin.gz': 'assets/ships/continuum/player-lusoria/clusters.bin.gz',
+    'indices.bin.gz': 'assets/ships/continuum/player-lusoria/indices.bin.gz',
+    'copies.bin.gz': 'assets/ships/continuum/player-lusoria/copies.bin.gz',
+    'far.bin.gz': 'assets/ships/continuum/player-lusoria/far.bin.gz',
+    'corners.bin.gz': 'assets/ships/continuum/player-lusoria/corners.bin.gz',
+  }),
+  'player-taino-canoe': Object.freeze({
+    'manifest.json': 'assets/ships/continuum/player-taino-canoe/manifest.json',
+    'clusters.bin.gz': 'assets/ships/continuum/player-taino-canoe/clusters.bin.gz',
+    'indices.bin.gz': 'assets/ships/continuum/player-taino-canoe/indices.bin.gz',
+    'copies.bin.gz': 'assets/ships/continuum/player-taino-canoe/copies.bin.gz',
+    'far.bin.gz': 'assets/ships/continuum/player-taino-canoe/far.bin.gz',
+    'corners.bin.gz': 'assets/ships/continuum/player-taino-canoe/corners.bin.gz',
+  }),
+  'player-flying-cloud': Object.freeze({
+    'manifest.json': 'assets/ships/continuum/player-flying-cloud/manifest.json',
+    'clusters.bin.gz': 'assets/ships/continuum/player-flying-cloud/clusters.bin.gz',
+    'indices.bin.gz': 'assets/ships/continuum/player-flying-cloud/indices.bin.gz',
+    'copies.bin.gz': 'assets/ships/continuum/player-flying-cloud/copies.bin.gz',
+    'far.bin.gz': 'assets/ships/continuum/player-flying-cloud/far.bin.gz',
+    'corners.bin.gz': 'assets/ships/continuum/player-flying-cloud/corners.bin.gz',
+  }),
+  'player-gipsy-moth-iv': Object.freeze({
+    'manifest.json': 'assets/ships/continuum/player-gipsy-moth-iv/manifest.json',
+    'clusters.bin.gz': 'assets/ships/continuum/player-gipsy-moth-iv/clusters.bin.gz',
+    'indices.bin.gz': 'assets/ships/continuum/player-gipsy-moth-iv/indices.bin.gz',
+    'copies.bin.gz': 'assets/ships/continuum/player-gipsy-moth-iv/copies.bin.gz',
+    'far.bin.gz': 'assets/ships/continuum/player-gipsy-moth-iv/far.bin.gz',
+    'corners.bin.gz': 'assets/ships/continuum/player-gipsy-moth-iv/corners.bin.gz',
   }),
 });
 
@@ -173,7 +263,7 @@ export function shipContinuumSurfaceMatches(baked, built, tolerance = SHIP_CONTI
 export function validateShipContinuumManifest(manifest) {
   if (manifest?.format !== SHIP_CONTINUUM_FORMAT || manifest.version !== SHIP_CONTINUUM_VERSION || manifest.clusterWords !== SHIP_CONTINUUM_CLUSTER_WORDS || manifest.farVertexWords !== SHIP_CONTINUUM_FAR_VERTEX_WORDS || manifest.stepWords !== SHIP_CONTINUUM_STEP_WORDS) throw Error('Invalid ship continuum manifest');
   const body = SHIP_CONTINUUM_BODIES.find((b) => b.id === manifest.id);
-  if (!body || body.archetype !== manifest.archetype) throw Error(`Unknown ship continuum body: ${manifest.id}`);
+  if (!body || body.family !== manifest.family || body.archetype !== manifest.archetype || body.model !== manifest.model) throw Error(`Unknown ship continuum body: ${manifest.id}`);
   const { source, clusterCount, indexCount, copyCount, far, splat, bound, files } = manifest;
   if (!(source?.vertices > 0) || !(source.indices > 0) || !/^[0-9a-f]{64}$/.test(source.key ?? '') || !(source.surface?.area > 0) || source.surface.centroid?.length !== 3 || source.designScale?.length !== 3) throw Error(`Ship continuum source is malformed: ${manifest.id}`);
   if (!(clusterCount > 0) || !(indexCount > 0) || indexCount % 3 || !(copyCount >= 0)) throw Error(`Ship continuum counts are malformed: ${manifest.id}`);
@@ -183,7 +273,9 @@ export function validateShipContinuumManifest(manifest) {
   if (!(far.baseError > 0)) throw Error(`Ship continuum far body has no error: ${manifest.id}`);
   if (!splat || splat.centre?.length !== 3 || !(splat.ry > 0) || !(splat.rxSide > 0) || !(splat.rxEnd > 0) || splat.colour?.length !== 3) throw Error(`Ship continuum splat is malformed: ${manifest.id}`);
   if (!bound || bound.centre?.length !== 3 || !(bound.radius > 0)) throw Error(`Ship continuum bound is malformed: ${manifest.id}`);
-  if (files?.['clusters.bin']?.bytes !== clusterCount * SHIP_CONTINUUM_CLUSTER_WORDS * 4 || files?.['indices.bin']?.bytes !== indexCount * 4 || files?.['copies.bin']?.bytes !== copyCount * 4 || files?.['vertices.bin']?.bytes !== source.vertices * 36 || files?.['shards.bin']?.bytes !== source.vertices * 4) throw Error(`Ship continuum stream sizes disagree: ${manifest.id}`);
-  for (const name of SHIP_CONTINUUM_STREAMS) if (!files?.[name]?.gzip?.file || !/^[0-9a-f]{64}$/.test(files[name].sha256 ?? '')) throw Error(`Ship continuum stream missing: ${manifest.id} ${name}`);
+  if (files?.['clusters.bin']?.bytes !== clusterCount * SHIP_CONTINUUM_CLUSTER_WORDS * 4 || files?.['indices.bin']?.bytes !== indexCount * 4 || files?.['copies.bin']?.bytes !== copyCount * 4) throw Error(`Ship continuum stream sizes disagree: ${manifest.id}`);
+  const streams = shipContinuumStreams(body.family), sized = { 'vertices.bin': source.vertices * 36, 'shards.bin': source.vertices * 4, 'corners.bin': source.indices * 4 };
+  for (const name of streams) if (name in sized && files?.[name]?.bytes !== sized[name]) throw Error(`Ship continuum stream sizes disagree: ${manifest.id} ${name}`);
+  for (const name of streams) if (!files?.[name]?.gzip?.file || !/^[0-9a-f]{64}$/.test(files[name].sha256 ?? '')) throw Error(`Ship continuum stream missing: ${manifest.id} ${name}`);
   return manifest;
 }

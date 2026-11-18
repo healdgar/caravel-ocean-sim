@@ -1,0 +1,178 @@
+{
+ "format": "waterworld.ship-continuum",
+ "version": 2,
+ "id": "player-oseberg",
+ "family": "player",
+ "model": "oseberg",
+ "label": "Oseberg-based vessel · c. 850",
+ "source": {
+  "vertices": 72776,
+  "indices": 172878,
+  "shards": 101,
+  "key": "8917479430f3583419b86df7db15a6c2e59c00fb1a1e52ce84be2572112035e7",
+  "surface": {
+   "area": 188.12397237553046,
+   "centroid": [
+    0.00005899086433448426,
+    0.7168489847844061,
+    0.0249455423048489
+   ],
+   "materials": {
+    "0": 21.99354646691704,
+    "1": 74.44966346254347,
+    "2": 1.8315729181405638,
+    "3": 0.5999134421761992,
+    "9": 27.87907033821594,
+    "10": 2.7612888639196624,
+    "12": 1.7490573441170056,
+    "15": 46.545521260230025,
+    "16": 9.444086501312848,
+    "17": 0.2905522598233671,
+    "19": 0.5796995181342764
+   }
+  },
+  "designScale": [
+   1.388889,
+   1.791667,
+   1.791667
+  ]
+ },
+ "clusterWords": 16,
+ "farVertexWords": 6,
+ "stepWords": 4,
+ "clusterCount": 2127,
+ "indexCount": 313659,
+ "copyCount": 70,
+ "clusters": {
+  "triangles": 104553,
+  "levels": 6,
+  "roots": 723,
+  "groups": 178,
+  "parts": 427,
+  "rootError": 9.6051
+ },
+ "far": {
+  "vertexCount": 3840,
+  "triangleCount": 8000,
+  "stepCount": 3522,
+  "offsets": {
+   "vertices": 0,
+   "records": 23040,
+   "triangles": 26880,
+   "steps": 50880
+  },
+  "voxel": 0.0622,
+  "pieces": [
+   {
+    "kind": "rigid",
+    "close": 0.3108,
+    "grid": [
+     182,
+     200,
+     375
+    ],
+    "count": 1,
+    "dropped": 0,
+    "genus": 82,
+    "surfaceTriangles": 877240
+   },
+   {
+    "kind": "canvas",
+    "close": 0.1243,
+    "grid": [
+     162,
+     130,
+     9
+    ],
+    "count": 1,
+    "dropped": 0,
+    "genus": 0,
+    "surfaceTriangles": 315948
+   }
+  ],
+  "baseTriangles": 8000,
+  "baseVertices": 3840,
+  "baseError": 0.1897,
+  "baseGeometric": 0.0562,
+  "steps": 3522,
+  "coreTriangles": 956,
+  "depth": 9,
+  "errorRange": [
+   0.1897,
+   9.9592
+  ],
+  "inflateMax": 0.4809,
+  "euler": -160
+ },
+ "splat": {
+  "centre": [
+   -0.0061,
+   4.8438,
+   -0.0068
+  ],
+  "ry": 5.8113,
+  "rxSide": 2.8615,
+  "rxEnd": 4.666,
+  "colour": [
+   0.31739,
+   0.22947,
+   0.14923
+  ]
+ },
+ "bound": {
+  "centre": [
+   0,
+   4.8563,
+   0
+  ],
+  "radius": 23.6199
+ },
+ "poses": 1,
+ "files": {
+  "clusters.bin": {
+   "bytes": 136128,
+   "sha256": "eb984d077ce69d76b981831bfd00b7c7536ed722d8635ee60dfb5bde225f093d",
+   "gzip": {
+    "file": "clusters.bin.gz",
+    "bytes": 54136,
+    "sha256": "7785490919b612b71d4a7cd49d25e2781cb0fcecabfde256b94e4d5a32781e1f"
+   }
+  },
+  "indices.bin": {
+   "bytes": 1254636,
+   "sha256": "51167d337c8051a8f8f360ebf3b949eb4d1493a63358354ef9ae65b9d8c2ca53",
+   "gzip": {
+    "file": "indices.bin.gz",
+    "bytes": 402254,
+    "sha256": "b813ae94c0e8cc82e2a68e7219099515a441261a80f303dbe4f615f3647865aa"
+   }
+  },
+  "copies.bin": {
+   "bytes": 280,
+   "sha256": "b0541083debe7bb5e9f282b8dbc3162ed8922cb76fda0962972746ce1adb3765",
+   "gzip": {
+    "file": "copies.bin.gz",
+    "bytes": 182,
+    "sha256": "b323e0ebc69bf6de224a22f749f6683287f7997c254c654f9ab41476311d5617"
+   }
+  },
+  "far.bin": {
+   "bytes": 259888,
+   "sha256": "52df344d5fe761431ea4de208a5e1d071aa65daa50fa7d5f325aeb5169c86af7",
+   "gzip": {
+    "file": "far.bin.gz",
+    "bytes": 148271,
+    "sha256": "f7732c250da4b89952ef6fa0b4e9c876f90d409f228af1eb3726b90bd1e736da"
+   }
+  },
+  "corners.bin": {
+   "bytes": 691512,
+   "sha256": "7dc3c4f9223e412c6f0fc7df0524d1985208e503c81b45f97dca0428f92d0256",
+   "gzip": {
+    "file": "corners.bin.gz",
+    "bytes": 199629,
+    "sha256": "a063e61db789c4f925f181fd5b4487da164ce70dfce41c29b73c6dbf6f5cecac"
+   }
+  }
+ }
+}

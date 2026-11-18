@@ -12,12 +12,14 @@ import { createDevServer } from '../server.mjs';
 import { SHIP_CONTINUUM_ASSETS, SHIP_CONTINUUM_BODIES, SHIP_CONTINUUM_STEP_WORDS } from '../js/ship-continuum.js';
 import {
   SHIP_CONTINUUM_DAMAGED_LIST, SHIP_CONTINUUM_DAMAGED_SHIFT, SHIP_CONTINUUM_INSTANCE_FLOATS, SHIP_CONTINUUM_INSTANCE_VERTICES,
-  SHIP_CONTINUUM_LISTS, SHIP_CONTINUUM_SHADOW_LIST,
+  SHIP_CONTINUUM_LISTS, SHIP_CONTINUUM_SHADOW_LIST, SHIP_CONTINUUM_DAMAGED_SLOTS, SHIP_CONTINUUM_SHADOW_CLUSTER_LIST,
+  SHIP_CONTINUUM_CLUSTERS_CAST,
 } from '../js/wgsl/ship-continuum.js';
 
 const at = (file) => new URL(`../${file}`, import.meta.url);
 // Each body's cluster count and, for each step of its far body, the triangles alive.
-const bodies = Object.fromEntries(SHIP_CONTINUUM_BODIES.map(({ id }) => {
+const TRADE_BODIES = SHIP_CONTINUUM_BODIES.filter((b) => b.family === 'trade');
+const bodies = Object.fromEntries(TRADE_BODIES.map(({ id }) => {
   const manifest = JSON.parse(fs.readFileSync(at(SHIP_CONTINUUM_ASSETS[id]['manifest.json']), 'utf8'));
   const far = zlib.gunzipSync(fs.readFileSync(at(SHIP_CONTINUUM_ASSETS[id]['far.bin.gz']))), words = new Uint32Array(far.buffer, far.byteOffset, far.length / 4);
   const alive = Array.from({ length: manifest.far.stepCount + 1 }, (_, s) => words[manifest.far.offsets.steps + s * SHIP_CONTINUUM_STEP_WORDS]);
@@ -73,7 +75,7 @@ async function open(query) {
 // Every list against the instances it was cut from and the bodies: what each ship drew, and where.
 function check(cut) {
   const { count, lists, draws, list, instances } = cut;
-  assert.deepEqual(cut.bodies, SHIP_CONTINUUM_BODIES.map(({ id }) => id), 'the trade bodies, by archetype');
+  assert.deepEqual(cut.bodies, TRADE_BODIES.map(({ id }) => id), 'the trade bodies, by archetype');
   const entries = (L) => {
     const [first, room] = lists[L], n = draws[L * 4 + 1];
     assert.ok(n <= room, `${SHIP_CONTINUUM_LISTS[L]} holds no more than its room`);
@@ -88,7 +90,8 @@ function check(cut) {
     return {
       body: cut.bodies[Math.round(f[7])], damaged: (Math.round(f[10]) >>> SHIP_CONTINUUM_DAMAGED_SHIFT) & 31,
       share: (list[s * 4] >>> 8) & 255, splatShare: (list[s * 4] >>> 16) & 255, step: list[s * 4 + 1] & 0xffff, shadowStep: list[s * 4 + 1] >>> 16,
-      clusters: new Set(), far: [], splat: 0, shadow: [], damagedClusters: 0,
+      cast: (list[s * 4] & SHIP_CONTINUUM_CLUSTERS_CAST) !== 0,
+      clusters: new Set(), far: [], splat: 0, shadow: [], casting: new Set(), damagedClusters: 0,
     };
   });
   for (const [ship, i] of entries(0)) {
@@ -99,12 +102,19 @@ function check(cut) {
   for (const [ship, c] of entries(1)) ships[ship].far.push(c);
   for (const [ship] of entries(2)) ships[ship].splat++;
   for (const [ship, c] of entries(SHIP_CONTINUUM_SHADOW_LIST)) ships[ship].shadow.push(c);
-  for (let L = SHIP_CONTINUUM_DAMAGED_LIST; L < SHIP_CONTINUUM_LISTS.length; L++) for (const [ship] of entries(L)) ships[ship].damagedClusters++;
+  for (const [ship, i] of entries(SHIP_CONTINUUM_SHADOW_CLUSTER_LIST)) {
+    assert.ok(ship < count && i < bodies[ships[ship].body].clusters && !ships[ship].casting.has(i), `ship ${ship} casts cluster ${i} once, one its body has`);
+    ships[ship].casting.add(i);
+  }
+  for (let L = SHIP_CONTINUUM_DAMAGED_LIST; L < SHIP_CONTINUUM_DAMAGED_LIST + SHIP_CONTINUUM_DAMAGED_SLOTS; L++) for (const [ship] of entries(L)) ships[ship].damagedClusters++;
   const range = (n) => Array.from({ length: n }, (_, i) => i);
   ships.forEach((s, k) => {
     if (s.damaged) return;
-    // Every whole ship casts its shadow from its far body at the shadow map's step, seen or not.
+    // Every whole ship enters its far body at the shadow map's step, seen or not: it casts the shadow and stands for her
+    // under the water, unless near the eye her clusters, cut to the map's texel, cast it instead.
     assert.deepEqual(s.shadow.sort((x, y) => x - y), range(chunks(s.body, s.shadowStep)), `ship ${k} (${s.body}) shadow is its far body at step ${s.shadowStep}`);
+    if (s.cast) assert.ok(s.casting.size > 0, `ship ${k} (${s.body}) casts her shadow from her clusters`);
+    else assert.equal(s.casting.size, 0, `ship ${k} (${s.body}) casts her shadow from her far body alone`);
     // Handed off (in part) to the far continuum: its far body at the chosen step, all of it, and/or its splat.
     if (s.share > 0 && s.splatShare < 255) assert.deepEqual(s.far.sort((x, y) => x - y), range(chunks(s.body, s.step)), `ship ${k} (${s.body}) far body at step ${s.step}`);
     else assert.equal(s.far.length, 0, `ship ${k} draws no far body unless handed to it`);
@@ -114,7 +124,7 @@ function check(cut) {
   });
   const tally = Object.fromEntries(SHIP_CONTINUUM_LISTS.slice(0, SHIP_CONTINUUM_DAMAGED_LIST).map((name, L) => [name, draws[L * 4 + 1]]));
   if (cut.census) assert.ok(cut.census['trade vessels'] > 0, `the census counts the vessels: ${JSON.stringify(cut.census)}`);
-  return { count, tally, near: ships.filter((s) => s.clusters.size > 0).length, far: ships.filter((s) => s.far.length || s.splat).length };
+  return { count, tally, near: ships.filter((s) => s.clusters.size > 0).length, far: ships.filter((s) => s.far.length || s.splat).length, cast: ships.filter((s) => s.cast).length };
 }
 
 test('trade vessels at Lisbon\'s harbour are cut on the GPU into clusters, far bodies, splats and shadows, each ship as its body allows', { timeout: 900000 }, async () => {
@@ -147,6 +157,7 @@ test('trade vessels at Lisbon\'s harbour are cut on the GPU into clusters, far b
     await page.screenshot({ path: new URL('../shots/ship-continuum-lisbon-near.png', import.meta.url).pathname });
     console.log('ship continuum, beside', JSON.stringify({ target: { id: target.id, kind: target.kind, phase: target.phase }, ...seen }));
     assert.ok(seen.near > 0, `the vessel beside the eye is cut from her clusters (${seen.near} of ${seen.count})`);
+    assert.ok(seen.cast > 0, `the vessel beside the eye casts her shadow from her clusters (${seen.cast} of ${seen.count})`);
     assert.deepEqual(errors, []);
   } finally { await page.close(); }
 });

@@ -15,11 +15,18 @@ import { SHIP_CONTINUUM_CLUSTER_WORDS, SHIP_CONTINUUM_FAR_VERTEX_WORDS, SHIP_CON
 // Ships a frame can hold that are damaged at once, each with its own list (and its fracture's posed vertices).
 export const SHIP_CONTINUUM_DAMAGED_SLOTS = 16;
 // The lists a ship can be entered in, each with its own indirect draw: clusters, the far body, the splat, the far body
-// at the shadow map's step (shadows and the underwater capture), and each damaged ship's clusters.
-export const SHIP_CONTINUUM_LISTS = Object.freeze(['clusters', 'far', 'splat', 'shadow', ...Array.from({ length: SHIP_CONTINUUM_DAMAGED_SLOTS }, (_, i) => `damaged${i}`)]);
+// at the shadow map's step (shadows and the underwater capture), each damaged ship's clusters, and the clusters that
+// cast a shadow finer than the far body can.
+export const SHIP_CONTINUUM_LISTS = Object.freeze(['clusters', 'far', 'splat', 'shadow', ...Array.from({ length: SHIP_CONTINUUM_DAMAGED_SLOTS }, (_, i) => `damaged${i}`), 'shadowClusters']);
 // The far bodies at the shadow map's step (shadows, and ships seen from under the water), and the first damaged list.
 export const SHIP_CONTINUUM_SHADOW_LIST = 3;
 export const SHIP_CONTINUUM_DAMAGED_LIST = 4;
+// The clusters a ship's shadow is cast by where the shadow map asks for less error than her far body's finest step
+// holds (a ship near the eye): her far body is still entered at the shadow list for the water's capture, flagged in
+// her state (shipContinuumClustersCast) so no shadow is cast twice.
+export const SHIP_CONTINUUM_SHADOW_CLUSTER_LIST = SHIP_CONTINUUM_DAMAGED_LIST + SHIP_CONTINUUM_DAMAGED_SLOTS;
+// The bit of a ship's state word x that says her shadow is cast by her clusters.
+export const SHIP_CONTINUUM_CLUSTERS_CAST = 1 << 24;
 // Vertices per list instance.
 export const SHIP_CONTINUUM_INSTANCE_VERTICES = Object.freeze(SHIP_CONTINUUM_LISTS.map((name) => (name === 'splat' ? 3 : 384)));
 export const SHIP_CONTINUUM_DRAW_BYTES = 16;
@@ -95,9 +102,11 @@ fn shipContinuumAncestor(body:ShipContinuumBody,vertex:u32,step:u32)->u32 {
   }
   return v;
 }
-// The ship's state, two entries ahead of the lists: x = seed | handoff share << 8 | splat share << 16,
-// y = step | shadow step << 16; then morph (f32 bits) and splat scale (f32 bits).
+// The ship's state, two entries ahead of the lists: x = seed | handoff share << 8 | splat share << 16 | 1 << 24 when
+// her clusters cast her shadow, y = step | shadow step << 16; then morph (f32 bits) and splat scale (f32 bits).
 fn shipContinuumState(ship:u32)->vec4u { let a=shipList[ship*2u];let b=shipList[ship*2u+1u];return vec4u(a.x,a.y,b.x,b.y); }
+// Whether a ship's shadow is cast by her clusters (SHIP_CONTINUUM_SHADOW_CLUSTER_LIST) rather than her far body.
+fn shipContinuumClustersCast(state:vec4u)->bool { return (state.x&${SHIP_CONTINUUM_CLUSTERS_CAST}u)!=0u; }
 // What a draw tells its fragments: which draw it is and the ship's seed (x), and the shares (y).
 fn shipContinuumCoverage(kind:u32,state:u32)->vec2u { return vec2u(kind|((state&255u)<<8u),(state>>8u)&65535u); }
 // The samples of this pixel each draw takes (continuumSamples, the shared core's split): the far body the handoff's
@@ -173,9 +182,9 @@ const SHIP_CONTINUUM_SHADOW_TEXELS:f32=${SHIP_CONTINUUM_SHADOW_TEXELS.toFixed(4)
 ${continuumClusterPrefixWGSL('shipContinuumPrefix', (i) => `bitcast<f32>(shipShape[shipCutBody.clusters.x+(${i})*${SHIP_CONTINUUM_CLUSTER_WORDS}u+13u])`)}
 ${continuumMorphStepWGSL('shipContinuumMorphStep', (i) => `bitcast<f32>(shipShape[shipCutBody.chain.x+shipCutBody.chain.w+(${i})*${SHIP_CONTINUUM_STEP_WORDS}u+1u])`)}
 var<private> shipCutBody:ShipContinuumBody;
-var<workgroup> shipShared:vec4u;   // candidate clusters, list, ship body, unused
+var<workgroup> shipShared:vec4u;   // candidate clusters, list, ship body, candidate clusters of the shadow
 var<workgroup> shipView:vec4f;     // focal, allowed pixels, scale, 1 when clusters are culled to the view
-var<workgroup> shipPose:vec4f;     // yaw, pitch, roll, unused
+var<workgroup> shipPose:vec4f;     // yaw, pitch, roll, the shadow's allowed error (m)
 var<workgroup> shipAt:vec3f;       // the ship's origin from the camera
 fn shipContinuumRotate(v:vec3f,heading:f32,pitch:f32,roll:f32)->vec3f {
   let cr=cos(roll);let sr=sin(roll);let cp=cos(pitch);let sp=sin(pitch);let ch=cos(heading);let sh=sin(heading);
@@ -207,7 +216,7 @@ fn shipContinuumChunks(list:u32,ship:u32,step:u32){
 @compute @workgroup_size(64) fn shipContinuumSelect(@builtin(workgroup_id) group:vec3u,@builtin(local_invocation_index) lane:u32){
   let ship=group.x;
   if(lane==0u){
-    var candidates=0u;var list=0u;var share=0u;
+    var candidates=0u;var list=0u;var share=0u;var shadowCandidates=0u;var castBit=0u;
     let inst=shipInstances[ship];
     let orders=u32(max(round(inst.anim.z),0.0));
     let damaged=(orders>>${SHIP_CONTINUUM_DAMAGED_SHIFT}u)&31u;
@@ -234,9 +243,18 @@ fn shipContinuumChunks(list:u32,ship:u32,step:u32){
         list=${SHIP_CONTINUUM_DAMAGED_LIST}u+min(damaged-1u,${SHIP_CONTINUUM_DAMAGED_SLOTS - 1}u);
       }
     } else {
-      // The far body, coarse enough for the shadow map, casts every shadow, seen or not, and stands for the ship under water.
-      shadowStep=u32(shipContinuumMorphStep(steps,max(SHIP_CONTINUUM_SHADOW_TEXELS*SH.texel.x,pixels*away/focal)/scale).x);
+      // The far body, coarse enough for the shadow map, casts every shadow, seen or not, and stands for the ship under
+      // water. Where the map asks for less error than its finest step holds, her clusters cast it instead, cut to the
+      // map's texel: the map is an orthographic view, so the cut's error is in metres alone (continuumClusterDrawn at
+      // unit distance and unit focal length).
+      let shadowAllowed=max(SHIP_CONTINUUM_SHADOW_TEXELS*SH.texel.x,pixels*away/focal);
+      shadowStep=u32(shipContinuumMorphStep(steps,shadowAllowed/scale).x);
       shipContinuumChunks(${SHIP_CONTINUUM_SHADOW_LIST}u,ship,shadowStep);
+      if(shadowAllowed<shipCutBody.far.x*scale){
+        castBit=${SHIP_CONTINUUM_CLUSTERS_CAST}u;
+        shadowCandidates=shipContinuumPrefix(0u,shipCutBody.clusters.y,shadowAllowed/scale);
+        shipPose.w=shadowAllowed;
+      }
       if(!shipContinuumOutside(centre,reach)){
         // Where the far body's own error is all the scene allows, it takes over, over a band of distance.
         let start=shipCutBody.far.x*scale*focal/pixels;
@@ -259,12 +277,13 @@ fn shipContinuumChunks(list:u32,ship:u32,step:u32){
         if(share<255u){candidates=shipContinuumPrefix(0u,shipCutBody.clusters.y,pixels*nearest/(focal*scale));list=0u;}
       }
     }
-    shipList[ship*2u]=vec2u(seed|(share<<8u)|(splatShare<<16u),step|(shadowStep<<16u));
+    shipList[ship*2u]=vec2u(seed|(share<<8u)|(splatShare<<16u)|castBit,step|(shadowStep<<16u));
     shipList[ship*2u+1u]=vec2u(bitcast<u32>(morph),bitcast<u32>(splatScale));
-    shipShared=vec4u(candidates,list,bodyIndex,0u);
+    shipShared=vec4u(candidates,list,bodyIndex,shadowCandidates);
   }
   let cut=workgroupUniformLoad(&shipShared);
   let view=shipView;
+  let shadowAllowed=shipPose.w;
   let body=shipBodies[cut.z];
   let scale=view.z;
   for(var i=lane;i<cut.x;i+=64u){
@@ -275,6 +294,13 @@ fn shipContinuumChunks(list:u32,ship:u32,step:u32){
     let cull=vec4f(bitcast<f32>(shipShape[at+8u]),bitcast<f32>(shipShape[at+9u]),bitcast<f32>(shipShape[at+10u]),bitcast<f32>(shipShape[at+11u]));
     if(view.w>0.5&&shipContinuumOutside(shipContinuumPlace(cull.xyz),cull.w*scale)){continue;}
     let entry=shipContinuumAppend(cut.y,1u);
+    if(entry!=0xffffffffu){shipList[entry]=vec2u(group.x,i);}
+  }
+  for(var i=lane;i<cut.w;i+=64u){
+    let at=body.clusters.x+i*${SHIP_CONTINUUM_CLUSTER_WORDS}u;
+    let unit=vec3f(0.0,0.0,1.0);
+    if(!continuumClusterDrawn(bitcast<f32>(shipShape[at+12u])*scale,unit,0.0,bitcast<f32>(shipShape[at+13u])*scale,unit,0.0,1.0,shadowAllowed)){continue;}
+    let entry=shipContinuumAppend(${SHIP_CONTINUUM_SHADOW_CLUSTER_LIST}u,1u);
     if(entry!=0xffffffffu){shipList[entry]=vec2u(group.x,i);}
   }
 }

@@ -1,0 +1,185 @@
+{
+ "format": "waterworld.ship-continuum",
+ "version": 2,
+ "id": "player-flying-cloud",
+ "family": "player",
+ "model": "flying-cloud",
+ "label": "Flying Cloud · 1851",
+ "source": {
+  "vertices": 94994,
+  "indices": 284397,
+  "shards": 286,
+  "key": "bbf05770bc12ee17734984ce97acb791021822b30880d722c19455b59803e5dc",
+  "surface": {
+   "area": 269.79865689396064,
+   "centroid": [
+    -0.0037328775114298957,
+    2.2116507848209768,
+    -0.07601381829295466
+   ],
+   "materials": {
+    "0": 31.615203115285148,
+    "1": 21.315643910207477,
+    "2": 7.071391522098491,
+    "3": 1.0657124530760713,
+    "6": 0.2973287862328391,
+    "8": 0.12115510897181277,
+    "9": 91.58535330659386,
+    "10": 8.610384834337241,
+    "11": 0.0184322562354947,
+    "12": 10.551754913251608,
+    "13": 18.635566895162718,
+    "14": 0.5488998934067609,
+    "16": 0.024024624850498513,
+    "17": 1.6867554829613494,
+    "18": 0.9763999663352934,
+    "20": 64.7658109541534,
+    "23": 10.648392390760545,
+    "25": 0.2604464800360027
+   }
+  },
+  "designScale": [
+   3.471333,
+   5.715,
+   5.715
+  ]
+ },
+ "clusterWords": 16,
+ "farVertexWords": 6,
+ "stepWords": 4,
+ "clusterCount": 2827,
+ "indexCount": 534909,
+ "copyCount": 282,
+ "clusters": {
+  "triangles": 178303,
+  "levels": 9,
+  "roots": 730,
+  "groups": 272,
+  "parts": 512,
+  "rootError": 34.1707
+ },
+ "far": {
+  "vertexCount": 3998,
+  "triangleCount": 8000,
+  "stepCount": 3893,
+  "offsets": {
+   "vertices": 0,
+   "records": 23988,
+   "triangles": 27986,
+   "steps": 51986
+  },
+  "voxel": 0.2298,
+  "pieces": [
+   {
+    "kind": "rigid",
+    "close": 0.2298,
+    "grid": [
+     116,
+     258,
+     367
+    ],
+    "count": 1,
+    "dropped": 0,
+    "genus": 5,
+    "surfaceTriangles": 730468
+   },
+   {
+    "kind": "canvas",
+    "close": 0.2298,
+    "grid": [
+     104,
+     204,
+     366
+    ],
+    "count": 10,
+    "dropped": 0,
+    "genus": 7,
+    "surfaceTriangles": 995700
+   }
+  ],
+  "baseTriangles": 8000,
+  "baseVertices": 3998,
+  "baseError": 0.8402,
+  "baseGeometric": 0.2466,
+  "steps": 3893,
+  "coreTriangles": 214,
+  "depth": 10,
+  "errorRange": [
+   0.8402,
+   33.7857
+  ],
+  "inflateMax": 2.5273,
+  "euler": -2
+ },
+ "splat": {
+  "centre": [
+   -0.085,
+   23.3638,
+   -5.7441
+  ],
+  "ry": 29.0709,
+  "rxSide": 23.2195,
+  "rxEnd": 10.2603,
+  "colour": [
+   0.56619,
+   0.49062,
+   0.39083
+  ]
+ },
+ "bound": {
+  "centre": [
+   0,
+   23.2831,
+   -5.8125
+  ],
+  "radius": 85.8188
+ },
+ "poses": 1,
+ "files": {
+  "clusters.bin": {
+   "bytes": 180928,
+   "sha256": "57121ed2269535b6c328e1ede8068de12d99d965993c4713deb79efe323b7978",
+   "gzip": {
+    "file": "clusters.bin.gz",
+    "bytes": 74945,
+    "sha256": "b9223dd00e6784d96b331eedafb72aa944c71e694ef4a5e6a60065d2cb4d5860"
+   }
+  },
+  "indices.bin": {
+   "bytes": 2139636,
+   "sha256": "5dbaf28b07a529d4c6c0a3afeabaf34672aa36ffe84481d2709be997470d2319",
+   "gzip": {
+    "file": "indices.bin.gz",
+    "bytes": 618201,
+    "sha256": "81e3dda7a5727ae4f08663572c9565b95df260b3b032113b7383186901e1c164"
+   }
+  },
+  "copies.bin": {
+   "bytes": 1128,
+   "sha256": "4e92fcd392b96cd57b50b350502251b34d9990de55567a33e8845e90d7746f85",
+   "gzip": {
+    "file": "copies.bin.gz",
+    "bytes": 571,
+    "sha256": "e13616cfd28f79cc677513ad3eff3cd5df6e7ee83358751cfc38606ad9ee870d"
+   }
+  },
+  "far.bin": {
+   "bytes": 270248,
+   "sha256": "3d9106fa7eeb7365e1507451a91479e6573c050e29ad23056a96badf59bacd7d",
+   "gzip": {
+    "file": "far.bin.gz",
+    "bytes": 155167,
+    "sha256": "dfabf7bd0098543e770303f700d8f7d5418ff88cc769c34a4ad7fa458715cc1f"
+   }
+  },
+  "corners.bin": {
+   "bytes": 1137588,
+   "sha256": "9025abbe15c123e464f80d3697c4ddb475de4a901c36dda1189e322d7d45b8a8",
+   "gzip": {
+    "file": "corners.bin.gz",
+    "bytes": 300740,
+    "sha256": "d22f3769fe8be41c10f1a4e645ff6d506cbb776ad4389457a98f4eb3301746ba"
+   }
+  }
+ }
+}

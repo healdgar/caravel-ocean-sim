@@ -1,0 +1,188 @@
+{
+ "format": "waterworld.ship-continuum",
+ "version": 2,
+ "id": "player-victory",
+ "family": "player",
+ "model": "victory",
+ "label": "HMS Victory · 1805",
+ "source": {
+  "vertices": 145191,
+  "indices": 281751,
+  "shards": 753,
+  "key": "69d47b588f910b4af9e595907804bbedaa34162f4eba78916b999f7a3d3b09ed",
+  "surface": {
+   "area": 750.6295517059609,
+   "centroid": [
+    0.0002636955608557929,
+    1.9512512629777887,
+    -0.1294567471509381
+   ],
+   "materials": {
+    "0": 159.96142456717718,
+    "1": 163.34854154960786,
+    "2": 3.0573209111183015,
+    "3": 10.377948694965863,
+    "4": 5.281734586118029,
+    "7": 0.47411973479698233,
+    "9": 91.10659657379121,
+    "10": 26.380482538428044,
+    "11": 2.365915077994903,
+    "12": 2.4367547940638787,
+    "13": 26.814428744159073,
+    "14": 3.2097991906523795,
+    "18": 1.2064998272657448,
+    "19": 5.440327324223983,
+    "20": 84.5769137231236,
+    "21": 55.577947307359054,
+    "22": 58.368909962972396,
+    "23": 12.258862861451128,
+    "24": 33.53913045876844,
+    "25": 4.745993304909536,
+    "26": 0.09989997307062026
+   }
+  },
+  "designScale": [
+   4.402667,
+   4.7244,
+   4.7244
+  ]
+ },
+ "clusterWords": 16,
+ "farVertexWords": 6,
+ "stepWords": 4,
+ "clusterCount": 3612,
+ "indexCount": 484539,
+ "copyCount": 5,
+ "clusters": {
+  "triangles": 161513,
+  "levels": 10,
+  "roots": 1517,
+  "groups": 302,
+  "parts": 1037,
+  "rootError": 30.832
+ },
+ "far": {
+  "vertexCount": 3788,
+  "triangleCount": 8000,
+  "stepCount": 3331,
+  "offsets": {
+   "vertices": 0,
+   "records": 22728,
+   "triangles": 26516,
+   "steps": 50516
+  },
+  "voxel": 0.2254,
+  "pieces": [
+   {
+    "kind": "rigid",
+    "close": 0.2254,
+    "grid": [
+     130,
+     323,
+     367
+    ],
+    "count": 2,
+    "dropped": 0,
+    "genus": 115,
+    "surfaceTriangles": 1655584
+   },
+   {
+    "kind": "canvas",
+    "close": 0.2254,
+    "grid": [
+     124,
+     210,
+     361
+    ],
+    "count": 7,
+    "dropped": 0,
+    "genus": 0,
+    "surfaceTriangles": 931112
+   }
+  ],
+  "baseTriangles": 8000,
+  "baseVertices": 3788,
+  "baseError": 1.011,
+  "baseGeometric": 0.2457,
+  "steps": 3331,
+  "coreTriangles": 1338,
+  "depth": 7,
+  "errorRange": [
+   1.011,
+   22.1252
+  ],
+  "inflateMax": 0.0788,
+  "euler": -212
+ },
+ "splat": {
+  "centre": [
+   -0.056,
+   26.7859,
+   -9.2244
+  ],
+  "ry": 35.8249,
+  "rxSide": 24.1085,
+  "rxEnd": 11.9117,
+  "colour": [
+   0.41366,
+   0.33284,
+   0.24991
+  ]
+ },
+ "bound": {
+  "centre": [
+   0,
+   26.7815,
+   -9.3373
+  ],
+  "radius": 76.924
+ },
+ "poses": 1,
+ "files": {
+  "clusters.bin": {
+   "bytes": 231168,
+   "sha256": "67852107d0324593e3ba4f78710c002b60810035686f1300a32adfd5cb7c769a",
+   "gzip": {
+    "file": "clusters.bin.gz",
+    "bytes": 92036,
+    "sha256": "e682363566f6f749ecd2580d27bfff81b792d502a549fdd70d09a9f211711a02"
+   }
+  },
+  "indices.bin": {
+   "bytes": 1938156,
+   "sha256": "cfe298e7c53b146ac68e1ee9025672275beb0add37695fb3eb2dd142180721f3",
+   "gzip": {
+    "file": "indices.bin.gz",
+    "bytes": 629970,
+    "sha256": "e0cdefe79f3a4e3c62e6a451c2c006c82843a531f54440da075f61dc3d4bfdb7"
+   }
+  },
+  "copies.bin": {
+   "bytes": 20,
+   "sha256": "69d1ac08e91bf00f9822332dca88cc0be83a30cc68cb1f593d203dd30648a7a1",
+   "gzip": {
+    "file": "copies.bin.gz",
+    "bytes": 36,
+    "sha256": "10b53b007fb398e81bacee71138def9256e9a97dfec5ada16cf34fd02479f916"
+   }
+  },
+  "far.bin": {
+   "bytes": 255376,
+   "sha256": "a95128850d41feec5817baa900b97da415633f10b64a4eb8d7f3c6fb3dd16ea2",
+   "gzip": {
+    "file": "far.bin.gz",
+    "bytes": 147179,
+    "sha256": "1e9cae3fcbb46c57ee96c632a8d5eb4d9c38fde8ac542fa93458389893e74bc1"
+   }
+  },
+  "corners.bin": {
+   "bytes": 1127004,
+   "sha256": "5dd7f894a99d24002918797a71f4f692d08a41d5dc55ad7c7d74ac04cf129e4c",
+   "gzip": {
+    "file": "corners.bin.gz",
+    "bytes": 354518,
+    "sha256": "18143be7de654650c8636a787e3a690fa8b498c1bccfcc62566f90c241530559"
+   }
+  }
+ }
+}

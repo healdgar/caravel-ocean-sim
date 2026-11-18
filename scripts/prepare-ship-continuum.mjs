@@ -3,7 +3,11 @@
 // Bakes each ship body into the ship continuum (AGENTS.md rule 3; js/ship-continuum.js).
 //   node scripts/prepare-ship-continuum.mjs [--only=trade-cog-underway] [--out=assets/ships/continuum] [--cells=360]
 //                                           [--close=0.3] [--close-canvas=0.14] [--chain=8000]
-// Each body is the ship's own assembly, as the game builds it (js/trade-vessels.js getTradeVesselArchetype):
+// Each body is the ship's own assembly, as the game builds it: a trade vessel's (js/trade-vessels.js
+// getTradeVesselArchetype) or a ship the player sails (js/ship-mesh.js createShipAssetCache). A player's ship is posed
+// on the GPU alone (js/vessel-pose.js: its canvas, yards, oars, helm, guns and parts), so its spheres are not measured
+// in poses but grown by how far each of its points can move (playerSlack); every one still holds its points.
+// For each body:
 //   clusters   a cluster hierarchy the GPU cuts by projected error. Each part (a group of the assembly) and each
 //              fracture shard is clustered apart, its boundary a seam both sides coarsen together, so no simplified
 //              triangle crosses a part or a shard. Each group's error is measured in every pose the ship takes (oars
@@ -21,7 +25,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { buildDag } from '../third_party/threejs-nanites/dag/build.ts';
+// What every rigid family's bake shares (scripts/continuum-bake.mjs), used here as it is there.
+import { closest, closestOnTriangle, triangleSpheres, surfaceArea, ancestor } from './continuum-bake.mjs';
 import { getTradeVesselArchetype, poseTradeVesselPoint, tradeMaterialLinearColor } from '../js/trade-vessels.js';
+import { createShipAssetCache } from '../js/ship-mesh.js';
+import { vesselHull } from '../js/hull.js';
 import {
   SHIP_CONTINUUM_FORMAT, SHIP_CONTINUUM_VERSION, SHIP_CONTINUUM_CLUSTER_WORDS, SHIP_CONTINUUM_FAR_VERTEX_WORDS, SHIP_CONTINUUM_STEP_WORDS,
   SHIP_CONTINUUM_NEVER, SHIP_CONTINUUM_MAX_DEPTH, SHIP_CONTINUUM_BODIES,
@@ -119,42 +127,6 @@ function posePoints(archIndex, scale, poses, { count, design, designNormal, mate
 }
 
 // ------------------------------------------------------------------------------------------------ geometry
-const closest = new Float64Array(3);
-// Ericson's closest point on triangle a + s*e0 + t*e1 to p: writes [squared distance, s, t] into `closest`.
-function closestOnTriangle(px, py, pz, ax, ay, az, bx, by, bz, cx, cy, cz) {
-  const abx = bx - ax, aby = by - ay, abz = bz - az, acx = cx - ax, acy = cy - ay, acz = cz - az;
-  const apx = px - ax, apy = py - ay, apz = pz - az;
-  const d1 = abx * apx + aby * apy + abz * apz, d2 = acx * apx + acy * apy + acz * apz;
-  let s, t;
-  if (d1 <= 0 && d2 <= 0) { s = 0; t = 0; } else {
-    const bpx = px - bx, bpy = py - by, bpz = pz - bz, d3 = abx * bpx + aby * bpy + abz * bpz, d4 = acx * bpx + acy * bpy + acz * bpz;
-    if (d3 >= 0 && d4 <= d3) { s = 1; t = 0; } else {
-      const vc = d1 * d4 - d3 * d2;
-      if (vc <= 0 && d1 >= 0 && d3 <= 0) { s = d1 / (d1 - d3); t = 0; } else {
-        const cpx = px - cx, cpy = py - cy, cpz = pz - cz, d5 = abx * cpx + aby * cpy + abz * cpz, d6 = acx * cpx + acy * cpy + acz * cpz;
-        if (d6 >= 0 && d5 <= d6) { s = 0; t = 1; } else {
-          const vb = d5 * d2 - d1 * d6;
-          if (vb <= 0 && d2 >= 0 && d6 <= 0) { s = 0; t = d2 / (d2 - d6); } else {
-            const va = d3 * d6 - d5 * d4;
-            if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) { t = (d4 - d3) / (d4 - d3 + (d5 - d6)); s = 1 - t; } else if (va + vb + vc > 1e-30) {
-              const denominator = 1 / (va + vb + vc);
-              s = vb * denominator; t = vc * denominator;
-            } else {
-              // A sliver with no area: the nearest of its three edges.
-              const onEdge = (ex, ey, ez, ox, oy, oz) => { const l = ex * ex + ey * ey + ez * ez; return l > 1e-30 ? Math.min(1, Math.max(0, ((px - ox) * ex + (py - oy) * ey + (pz - oz) * ez) / l)) : 0; };
-              const u = onEdge(abx, aby, abz, ax, ay, az), w = onEdge(acx, acy, acz, ax, ay, az), m = onEdge(cx - bx, cy - by, cz - bz, bx, by, bz);
-              const gap = (ss, tt) => (ax + abx * ss + acx * tt - px) ** 2 + (ay + aby * ss + acy * tt - py) ** 2 + (az + abz * ss + acz * tt - pz) ** 2;
-              const options = [[u, 0], [0, w], [1 - m, m]];
-              [s, t] = options.reduce((best, o) => (gap(o[0], o[1]) < gap(best[0], best[1]) ? o : best));
-            }
-          }
-        }
-      }
-    }
-  }
-  const qx = ax + abx * s + acx * t - px, qy = ay + aby * s + acy * t - py, qz = az + abz * s + acz * t - pz;
-  closest[0] = qx * qx + qy * qy + qz * qz; closest[1] = s; closest[2] = t;
-}
 // Nearest point of a list of triangles to p, pruned by each triangle's bounding sphere. Returns the triangle's
 // position in the list, with its barycentric pair in `closest`; -1 for an empty list.
 function nearestTriangle(px, py, pz, list, P, spheres) {
@@ -169,17 +141,6 @@ function nearestTriangle(px, py, pz, list, P, spheres) {
   }
   closest[0] = best; closest[1] = bs; closest[2] = bt;
   return found;
-}
-function triangleSpheres(position, corners, triangles) {
-  const out = new Float64Array(triangles.length * 4);
-  triangles.forEach((t, k) => {
-    const a = corners[t * 3] * 3, b = corners[t * 3 + 1] * 3, c = corners[t * 3 + 2] * 3;
-    const cx = (position[a] + position[b] + position[c]) / 3, cy = (position[a + 1] + position[b + 1] + position[c + 1]) / 3, cz = (position[a + 2] + position[b + 2] + position[c + 2]) / 3;
-    let r = 0;
-    for (const v of [a, b, c]) r = Math.max(r, Math.hypot(position[v] - cx, position[v + 1] - cy, position[v + 2] - cz));
-    out.set([cx, cy, cz, r], k * 4);
-  });
-  return out;
 }
 // How far apart, in the worst pose, point v of `from` and the barycentric point on triangle (a, b, c) of `to` are.
 function posedGap(from, v, to, a, b, c, s, t) {
@@ -267,7 +228,8 @@ function posedGroupError(body, posed) {
 // The radius about `centre` that holds `vertices` in every pose.
 function posedReach(posed, vertices, centre) {
   let r = 0;
-  for (const X of posed) for (const v of vertices) r = Math.max(r, Math.hypot(X[v * 3] - centre[0], X[v * 3 + 1] - centre[1], X[v * 3 + 2] - centre[2]));
+  const slack = posed.slack;
+  for (const X of posed) for (const v of vertices) r = Math.max(r, Math.hypot(X[v * 3] - centre[0], X[v * 3 + 1] - centre[1], X[v * 3 + 2] - centre[2]) + (slack ? slack[v] : 0));
   return r;
 }
 
@@ -657,8 +619,6 @@ function triangleGrid(position, corners, triangles, cell) {
     return found;
   };
 }
-// Where vertex v has gone by step s.
-const ancestor = (chain, v, s) => { while (chain.dieStep[v] >= 0 && chain.dieStep[v] < s) v = chain.target[v]; return v; };
 
 // The outline a mesh casts, end on and side on, on a grid over the ship: each pixel's nearest triangle (-1 where none).
 function outline(position, normal, corners, triangles, inflate, frame) {
@@ -686,10 +646,6 @@ function outline(position, normal, corners, triangles, inflate, frame) {
   }
   return result;
 }
-const surfaceArea = (corners, triangles, X) => triangles.reduce((sum, t) => {
-  const [a, b, c] = [0, 1, 2].map((k) => corners[t * 3 + k] * 3), e = [0, 1, 2].map((k) => X[b + k] - X[a + k]), f = [0, 1, 2].map((k) => X[c + k] - X[a + k]);
-  return sum + 0.5 * Math.hypot(e[1] * f[2] - e[2] * f[1], e[2] * f[0] - e[0] * f[2], e[0] * f[1] - e[1] * f[0]);
-}, 0);
 // Vertex colours blur what lies within half their spacing, which counts as error too.
 const appearance = (area, vertices) => 0.5 * Math.sqrt(area / Math.max(vertices, 1));
 
@@ -914,12 +870,37 @@ function receipt(bytes, dir, name) {
 }
 const asBytes = (typed) => Buffer.from(typed.buffer, typed.byteOffset, typed.byteLength);
 
+// ------------------------------------------------------------------------------------------------ the player's ships
+const shipAssets = createShipAssetCache();
+// A ship the player sails, in the terms the bake takes: her assembly as js/ship-mesh.js builds it, in metres by the
+// hull transform's own scale (js/wgsl/caravel.js: beam over 3.6, the frame's vertical scale, length over 12).
+function playerAssembly(modelId) {
+  const asset = shipAssets.get(modelId), model = asset.model, frame = vesselHull(modelId).frame;
+  return {
+    index: -1, label: model.name, length: model.runtime.length,
+    designScale: Float32Array.of(model.runtime.beam / frame.beam, frame.verticalScale, model.runtime.length / frame.length),
+    vertices: asset.vertices, indices: asset.indices, groups: asset.groups, fracture: asset.fracture,
+    vertexCount: asset.vertices.length / 9, indexCount: asset.indices.length, triangleCount: asset.indices.length / 3,
+  };
+}
+// How far each point of a player's ship can move from rest (metres): canvas, cordage, spars, oars and the helm swing
+// with the rig, a yard's end as far as six tenths of her length; the rest (guns run in and out, hatches, the rudder)
+// a metre and a half.
+const RIGGED = new Set([2, 9, 10, 12, 13, 16, 19, 28]);
+function playerSlack(arch, body) {
+  const slack = new Float32Array(body.count), rig = 0.6 * arch.length;
+  for (let v = 0; v < body.count; v++) slack[v] = RIGGED.has(Math.floor(body.material[v])) ? rig : 1.5;
+  return slack;
+}
+
 async function bake(entry) {
   const started = Date.now(), lap = (label) => console.log(`  ${((Date.now() - started) / 1000).toFixed(1).padStart(6)} s  ${label}`);
-  const arch = getTradeVesselArchetype(entry.archetype);
+  const player = entry.family === 'player';
+  const arch = player ? playerAssembly(entry.model) : getTradeVesselArchetype(entry.archetype);
   console.log(`${entry.id}: ${arch.label}, ${arch.vertexCount} vertices, ${arch.triangleCount} triangles`);
-  const body = splitParts(arch), poses = posesFor(arch.index);
+  const body = splitParts(arch), poses = player ? [{ time: 0, phase: 0, motion: 0, furl: 0 }] : posesFor(arch.index);
   body.posed = posePoints(arch.index, arch.designScale, poses, { count: body.count, design: body.design, designNormal: body.designNormal, material: body.material, uv: body.uv, rest: body.position });
+  if (player) body.posed.slack = playerSlack(arch, body);
   lap(`${body.parts} parts, ${body.copies} seam copies, ${poses.length} poses`);
   const clusters = await bakeClusters(body, body.posed);
   lap(`${clusters.count} clusters, ${clusters.levels} levels, root error ${clusters.rootError.toFixed(3)} m`);
@@ -930,7 +911,7 @@ async function bake(entry) {
   for (const X of body.posed) for (const v of drawnVertices) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], X[v * 3 + k]); hi[k] = Math.max(hi[k], X[v * 3 + k]); }
   const centre = lo.map((l, k) => (l + hi[k]) / 2);
   let radius = 0;
-  for (const X of body.posed) for (const v of drawnVertices) radius = Math.max(radius, Math.hypot(X[v * 3] - centre[0], X[v * 3 + 1] - centre[1], X[v * 3 + 2] - centre[2]));
+  radius = posedReach(body.posed, drawnVertices, centre);
 
   // The far body: its vertices, each vertex's collapse (the step it goes at, and where), its triangles in order of
   // death, and its steps.
@@ -951,13 +932,18 @@ async function bake(entry) {
     'indices.bin': receipt(asBytes(clusters.indices), dir, 'indices.bin'),
     'copies.bin': receipt(asBytes(copies), dir, 'copies.bin'),
     'far.bin': receipt(asBytes(farWords), dir, 'far.bin'),
-    // The assembly as baked: the vertices the clusters name and the shard each one flies with when the ship breaks.
-    'vertices.bin': receipt(asBytes(arch.vertices), dir, 'vertices.bin'),
-    'shards.bin': receipt(asBytes(Uint32Array.from(arch.fracture.vertexShards)), dir, 'shards.bin'),
+    ...(player ? {
+      // The assembly's corners as baked, by which the runtime renumbers the clusters onto the ship as built there.
+      'corners.bin': receipt(asBytes(Uint32Array.from(arch.indices)), dir, 'corners.bin'),
+    } : {
+      // The assembly as baked: the vertices the clusters name and the shard each one flies with when the ship breaks.
+      'vertices.bin': receipt(asBytes(arch.vertices), dir, 'vertices.bin'),
+      'shards.bin': receipt(asBytes(Uint32Array.from(arch.fracture.vertexShards)), dir, 'shards.bin'),
+    }),
   };
   const surface = shipContinuumSurface(arch.vertices, arch.indices);
   const manifest = {
-    format: SHIP_CONTINUUM_FORMAT, version: SHIP_CONTINUUM_VERSION, id: entry.id, family: entry.family, archetype: entry.archetype, label: arch.label,
+    format: SHIP_CONTINUUM_FORMAT, version: SHIP_CONTINUUM_VERSION, id: entry.id, family: entry.family, archetype: entry.archetype, model: entry.model, label: arch.label,
     source: {
       vertices: arch.vertexCount, indices: arch.indexCount, shards: arch.fracture.shardCount,
       key: createHash('sha256').update(shipContinuumSourceKey(arch)).digest('hex'),

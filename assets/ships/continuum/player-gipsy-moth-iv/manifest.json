@@ -1,0 +1,182 @@
+{
+ "format": "waterworld.ship-continuum",
+ "version": 2,
+ "id": "player-gipsy-moth-iv",
+ "family": "player",
+ "model": "gipsy-moth-iv",
+ "label": "Gipsy Moth IV · 1966",
+ "source": {
+  "vertices": 23614,
+  "indices": 77091,
+  "shards": 130,
+  "key": "153a63e329fb6ba9242559658dafdcd4cf63962ee6ee005abcef83434ed9850f",
+  "surface": {
+   "area": 175.0158013312437,
+   "centroid": [
+    0.00031092823362196127,
+    1.5319103380114836,
+    0.19940505253819935
+   ],
+   "materials": {
+    "0": 24.811459666136535,
+    "1": 5.236388524867795,
+    "2": 4.439917796937319,
+    "3": 10.253709653623114,
+    "6": 0.21839994187635625,
+    "7": 0.2416815680597473,
+    "10": 1.9970961636128302,
+    "11": 0.2691441053261201,
+    "12": 7.46628885415141,
+    "13": 44.95802811652672,
+    "14": 1.5827114864302922,
+    "17": 0.4352071508756044,
+    "18": 0.7136625361588074,
+    "23": 72.0327219788208,
+    "25": 0.35938378784350133
+   }
+  },
+  "designScale": [
+   0.889,
+   1.34874,
+   1.34874
+  ]
+ },
+ "clusterWords": 16,
+ "farVertexWords": 6,
+ "stepWords": 4,
+ "clusterCount": 894,
+ "indexCount": 148542,
+ "copyCount": 228,
+ "clusters": {
+  "triangles": 49514,
+  "levels": 10,
+  "roots": 204,
+  "groups": 95,
+  "parts": 156,
+  "rootError": 12.5646
+ },
+ "far": {
+  "vertexCount": 4004,
+  "triangleCount": 8000,
+  "stepCount": 3987,
+  "offsets": {
+   "vertices": 0,
+   "records": 24024,
+   "triangles": 28028,
+   "steps": 52028
+  },
+  "voxel": 0.0466,
+  "pieces": [
+   {
+    "kind": "rigid",
+    "close": 0.2796,
+    "grid": [
+     87,
+     377,
+     365
+    ],
+    "count": 1,
+    "dropped": 0,
+    "genus": 1,
+    "surfaceTriangles": 780896
+   },
+   {
+    "kind": "canvas",
+    "close": 0.1398,
+    "grid": [
+     11,
+     293,
+     302
+    ],
+    "count": 2,
+    "dropped": 0,
+    "genus": 0,
+    "surfaceTriangles": 613152
+   }
+  ],
+  "baseTriangles": 8000,
+  "baseVertices": 4004,
+  "baseError": 0.1516,
+  "baseGeometric": 0.0861,
+  "steps": 3987,
+  "coreTriangles": 26,
+  "depth": 10,
+  "errorRange": [
+   0.1516,
+   13.201
+  ],
+  "inflateMax": 0.5371,
+  "euler": 4
+ },
+ "splat": {
+  "centre": [
+   -0.0032,
+   5.9978,
+   -0.0085
+  ],
+  "ry": 8.4559,
+  "rxSide": 4.6937,
+  "rxEnd": 0.4078,
+  "colour": [
+   0.56794,
+   0.4967,
+   0.39967
+  ]
+ },
+ "bound": {
+  "centre": [
+   0,
+   6.0254,
+   -0.0128
+  ],
+  "radius": 18.7053
+ },
+ "poses": 1,
+ "files": {
+  "clusters.bin": {
+   "bytes": 57216,
+   "sha256": "5b3630003037637dd0e77cc3541654ef1cb8af112cf9554262042f1c4341297a",
+   "gzip": {
+    "file": "clusters.bin.gz",
+    "bytes": 21515,
+    "sha256": "612b30605770ce9bc6c2f9cfba718c12485c55b23f43a8dab80acd24c97a0536"
+   }
+  },
+  "indices.bin": {
+   "bytes": 594168,
+   "sha256": "8343eeb4497ea2668e873dbf1a9c889bbbf9e3ef0b61a56057e6eed5d6e310b0",
+   "gzip": {
+    "file": "indices.bin.gz",
+    "bytes": 175380,
+    "sha256": "73f48c288944b3c017818e0d2d7fbb884a78e0ab288612b018bbb302400b3951"
+   }
+  },
+  "copies.bin": {
+   "bytes": 912,
+   "sha256": "9ff35c14df8f940ef62464da8e0930ea6a4bcb8897654843520253eadfc59967",
+   "gzip": {
+    "file": "copies.bin.gz",
+    "bytes": 463,
+    "sha256": "7c032ecb69d3f4837b5e9071563c5efcb8b398b499e322cf6e3dadc572851154"
+   }
+  },
+  "far.bin": {
+   "bytes": 271920,
+   "sha256": "98dbe5fab11fe4a1125ecfa3068347700d2b77e377d3de1af3f5191eb78c66f1",
+   "gzip": {
+    "file": "far.bin.gz",
+    "bytes": 155922,
+    "sha256": "2f587561daa682a8b37204c3a6b004c938f34fd30b04d76ed3f3be3a92bb13ba"
+   }
+  },
+  "corners.bin": {
+   "bytes": 308364,
+   "sha256": "00ff46b669109a28253bad8044d94fef73e55fba10ca9ba7e6aabc932a1cf370",
+   "gzip": {
+    "file": "corners.bin.gz",
+    "bytes": 89927,
+    "sha256": "a682bf488a07a80584f5230b55e66617862cdf8b079c1d65258f08d19f0cc593"
+   }
+  }
+ }
+}
