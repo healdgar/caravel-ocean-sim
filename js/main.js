@@ -2203,6 +2203,17 @@ async function main() {
   // Two fire lights ride in spare slots of the frame. The GPU fills them from its own fire records after
   // this upload (gunEffects.encodeLights), so all JavaScript sends is darkness.
   function clearFireLights(f){for(const slot of FRAME_FIRE_SLOTS)f[slot]=0;}
+  // The hulls near enough to the eye to brush a bank's trees as they pass (js/terrain.js pressTrees): the player's and
+  // every vessel's afloat within 400 m, six at most.
+  function treeHulls(x,z){
+    const near=[];
+    for(const b of [boat,...vessels.map(v=>v?.boat)]){
+      if(near.length>=6)break;
+      if(!b||!Number.isFinite(b.x)||!Number.isFinite(b.z)||Math.hypot(b.x-x,b.z-z)>400||near.some(h=>h.of===b))continue;
+      near.push({of:b,x:b.x,z:b.z,heading:(b.heading||0)*D2R,length:b.length,beam:b.beam,heave:b.heave});
+    }
+    return near;
+  }
   const lastFiniteFrameState = { x: 0, y: 2.5, z: 0, yaw: 0, pitch: 0, fovY: 60 * D2R, waterH: 0 };
   function writeFrame(time) {
     if (Number.isFinite(cam.x) && Math.abs(cam.x) < 1e7) lastFiniteFrameState.x = cam.x; else cam.x = lastFiniteFrameState.x;
@@ -5495,7 +5506,7 @@ async function main() {
     frameStages.mark('Effects');
     const terrainCamera={x:frameF[16],y:frameF[17],z:frameF[18],screenHeight:H,
       tanHalfFovY:Math.hypot(frameF[24],frameF[25],frameF[26]),forward:frameF.subarray(28,31),
-      playerX:ashore.on?cam.x:boat.x,playerZ:ashore.on?cam.z:boat.z};
+      playerX:ashore.on?cam.x:boat.x,playerZ:ashore.on?cam.z:boat.z,onFoot:ashore.on,hulls:treeHulls(frameF[16],frameF[18])};
     terrain?.prepare(terrainCamera,frameF);
     const enc = device.createCommandEncoder();
     if(celestial.update())envFull=true;celestial.encode(enc);

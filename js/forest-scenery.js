@@ -8,10 +8,10 @@ import {continuumGroundView} from './continuum-ground.js';
 import {createTaskYieldBudget} from './task-yield.js';
 import {CONTINUUM_RECORD_WORDS,continuumRoom} from './continuum-format.js';
 import {CONTINUUM_ROW} from './wgsl/continuum-cut.js';
-import {CONTINUUM_WIND_POSE} from './wgsl/continuum-wind.js';
+import {CONTINUUM_WIND_BONES,CONTINUUM_WIND_POSE,CONTINUUM_WIND_SKELETON} from './wgsl/continuum-wind.js';
 import {createContinuumScene,requestContinuumAtlas,requestContinuumPrograms,requestContinuumView} from './continuum-scene.js';
 import {loadForestContinuum,forestContinuumAssetsFor} from './forest-continuum.js';
-import {FOREST_CONTINUUM_BLASTS,FOREST_CONTINUUM_STAND_BYTES,FOREST_CONTINUUM_STOOD_BYTES,forestContinuumMaterial,forestContinuumStandWGSL} from './wgsl/forest-continuum.js';
+import {FOREST_CONTINUUM_STAND_BYTES,FOREST_CONTINUUM_STOOD_BYTES,FOREST_WIND_BASIS,FOREST_WIND_BYTES,FOREST_WIND_CAPSULES,FOREST_WIND_CAPSULE_AT,FOREST_WIND_EVENT,FOREST_WIND_FORCES,FOREST_WIND_FORCE_AT,FOREST_WIND_LANES,FOREST_WIND_OWN,forestContinuumMaterial,forestContinuumStandWGSL,forestWindSkeletons,forestWindStateBytes,forestWindStepWGSL} from './wgsl/forest-continuum.js';
 import {FOREST_FALL_BEARINGS,FOREST_FALL_SECONDS,FOREST_LONG_FALLEN,TREE_STRIKE_REACH_M,blastForestRoot,buildForestTrunkGridAsync,forestStrikesFromSave,forestStrikesToSave,forestTrunkShape,nearestForestRoot,reapplyForestStrikes,strikeForestTree} from './forest-trunks.js';
 import {FOREST_SURFACE_ASSETS,SUBTROPICAL_FOREST_SURFACE_ASSETS,PORTUGAL_FOREST_SURFACE_ASSETS,chooseForestSurfaceCodec,createForestSurfaceTextures,forestMaterialOptics,loadForestSurfaceSet} from './forest-surfaces.js';
 
@@ -499,9 +499,10 @@ export function forestPackRoots(pack){
 
 // The forest of a pack, drawn through the one continuum (AGENTS.md rule 3). Each prototype is a type of the pack's
 // atlas (js/forest-continuum.js); each frame the stand pass (js/wgsl/forest-continuum.js) writes every root in view or
-// in the shadow map's box as a record of the one format, posed by the WIND kind with its gust, any blast's push and
-// what shot has done to it; the one cut (js/continuum-scene.js) cuts each at the scene's one pixel error and draws it
-// with the forest's material, and casts its shadow. Nothing here selects, lists or draws a tree of its own.
+// in the shadow map's box as a record of the one format, posed by the WIND kind by its skeletons (its wind lane's and,
+// near or pushed, its own, stepped by the wind pass) and what shot has done to it; the one cut (js/continuum-scene.js)
+// cuts each at the scene's one pixel error and draws it with the forest's material, and casts its shadow. Nothing here
+// selects, lists or draws a tree of its own.
 export async function createForestRenderer({device,shader,frameUBO,resources,clouds,format,samples,shadowFormat,terrainSource,pack,groundSample,
   savedStrikes=null,strikeOrigin={x:0,z:0},onStrikesChanged=null}){
   if(samples<2)throw Error('Forest leaf coverage requires MSAA');
@@ -529,6 +530,7 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
       requestContinuumPrograms({device,shader,shadowFormat,pages}),
       requestContinuumView({device,shader,material:forestContinuumMaterial(terrainSource),format,samples,pages}),
       shader(forestContinuumStandWGSL(),'forest stand'),
+      shader(forestWindStepWGSL(),'forest wind'),
     ]);
     ready.catch(()=>{});
     // A pack planted for a coast (js/terrain.js) is the coast's own, and its arrays are struck where they lie. A pack
@@ -572,42 +574,70 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
     };
     const rootsBuffer=capacity=>device.createBuffer({size:Math.max(48,capacity*48),usage:B.STORAGE|B.COPY_DST|B.COPY_SRC,label:'forest root transforms'});
     // The roots stood each frame, and the cut's workgroups for them; and what the stand pass is told: the roots in
-    // use, the records it may write, whether shadows are cast, the blasts, the world's offset.
+    // use, the records it may write, whether shadows are cast, where the trees' poses begin, the world's offset.
     const stood=device.createBuffer({label:'forest stood',size:FOREST_CONTINUUM_STOOD_BYTES,usage:B.STORAGE|B.INDIRECT});allocated.push(stood);
     const standBytes=new ArrayBuffer(FOREST_CONTINUUM_STAND_BYTES),standWords=new Uint32Array(standBytes),standFloats=new Float32Array(standBytes);
     const standUniform=make(new Uint8Array(standBytes),B.UNIFORM,'forest stand');
-    const blasts=[];let shiftX=0,shiftZ=0,standChanged=true;
-    // A blast whips the trees its wave reaches: at its centre `strength` metres at a tree's tips, none past `radius`.
-    // The frame's clock comes round again, so one is forgotten a few seconds after it went off.
-    const addBlast=(x,y,z,now,radius,strength,speed)=>{
-      if(!Number.isFinite(x+y+z+now))return;
-      blasts.push({x,y,z,now,radius,strength,speed,until:performance.now()+8000});
-      while(blasts.length>FOREST_CONTINUUM_BLASTS)blasts.shift();
-      standChanged=true;
+    let shiftX=0,shiftZ=0,standChanged=true;
+    // The skeletons the wind pass steps, at the head of the pose buffer (js/wgsl/forest-continuum.js): every type's for
+    // each lane of the wind, then the trees' own. Their springs' state and which tree owns each own skeleton are the
+    // wind pass's alone, and start at rest.
+    const skeletons=forestWindSkeletons(P),skeletonRoom=skeletons*CONTINUUM_WIND_SKELETON;
+    const windState=device.createBuffer({label:'forest wind state',size:forestWindStateBytes(P),usage:B.STORAGE});allocated.push(windState);
+    const windOwners=device.createBuffer({label:'forest wind owners',size:FOREST_WIND_OWN*4,usage:B.STORAGE|B.COPY_DST});allocated.push(windOwners);
+    // What pushes the trees besides the wind, in the roots' frame (js/wgsl/forest-continuum.js FOREST_WIND_BYTES):
+    // forces (a blast's wave, the rush ahead of a falling tree) and capsules pressed into the trees (a falling trunk, and
+    // what its callers set: a walker, passing shot, a hull). The frame's clock comes round again, so a force or a timed
+    // capsule is forgotten a few seconds after it is spent.
+    const windBytes=new ArrayBuffer(FOREST_WIND_BYTES),windWords=new Uint32Array(windBytes),windFloats=new Float32Array(windBytes);
+    const windUniform=make(new Uint8Array(windBytes),B.UNIFORM,'forest wind');
+    const forces=[],fallCapsules=[],pushers=new Map([['walker',[]],['shot',[]],['hull',[]]]);let windChanged=true;
+    const forget=seconds=>performance.now()+seconds*1000;
+    const pushForce=({x,y,z,radius,toward=[0,0,0],pressure,start,wave=0,lobe=0,cone=-1,basis=FOREST_WIND_BASIS.RADIAL,event=FOREST_WIND_EVENT.FRIEDLANDER,lasts=8})=>{
+      if(!Number.isFinite(x+y+z+radius+pressure+start))return;
+      forces.push({at:[x,y,z,radius],toward:[...toward,pressure],timing:[start,wave,lobe,cone],kind:[basis,event,0,0],until:forget(lasts)});
+      while(forces.length>FOREST_WIND_FORCES)forces.shift();
+      windChanged=true;
+    };
+    // A capsule from a to b of `radius`, pushing `push` newtons at its axis, falling off to none at its skin by `power`;
+    // from `start` for `lasts` seconds of the frame's clock, or while set if `lasts` is 0.
+    const capsuleWords=c=>[c.a[0],c.a[1],c.a[2],c.radius,c.b[0],c.b[1],c.b[2],c.push,c.power??1.5,0,c.start??0,c.lasts??0];
+    const writeWind=()=>{
+      const clock=performance.now();
+      for(let k=forces.length-1;k>=0;k--)if(forces[k].until<clock){forces.splice(k,1);windChanged=true;}
+      for(let k=fallCapsules.length-1;k>=0;k--)if(fallCapsules[k].until<clock){fallCapsules.splice(k,1);windChanged=true;}
+      if(!windChanged)return;
+      const capsules=[...fallCapsules,...[...pushers.values()].flat()].slice(0,FOREST_WIND_CAPSULES);
+      windFloats.fill(0);
+      windWords.set([forces.length,capsules.length,P,0],0);windFloats[4]=1;
+      forces.forEach((f,k)=>windFloats.set([...f.at,...f.toward,...f.timing,...f.kind],FOREST_WIND_FORCE_AT(k)));
+      capsules.forEach((c,k)=>windFloats.set(capsuleWords(c),FOREST_WIND_CAPSULE_AT(k)));
+      device.queue.writeBuffer(windUniform,0,windBytes);windChanged=false;
     };
     const writeStand=capacity=>{
-      const clock=performance.now();
-      for(let k=blasts.length-1;k>=0;k--)if(blasts[k].until<clock){blasts.splice(k,1);standChanged=true;}
       if(!standChanged)return;
-      standWords.set([activeRootCount,capacity,1,blasts.length],0);
+      standWords.set([activeRootCount,capacity,1,skeletonRoom],0);
       standFloats.set([shiftX,0,shiftZ,0],4);
-      blasts.forEach((b,k)=>standFloats.set([b.x,b.y,b.z,b.now,b.radius,b.strength,b.speed,0],8+k*8));
       device.queue.writeBuffer(standUniform,0,standBytes);standChanged=false;
     };
-    let standLayout=null,atlas=null,programs=null,view=null;
-    // One scene as large as the roots held: every root may stand in view at once. Made anew when the roots grow.
+    let standLayout=null,windLayout=null,windRest=null,windGroup=null,atlas=null,programs=null,view=null;
+    // One scene as large as the roots held: every root may stand in view at once, and every skeleton before them. Made
+    // anew when the roots grow.
     const makeScene=()=>{
       const capacity=Math.max(1,Math.min(rootCapacity,Math.floor(Math.min(device.limits.maxStorageBufferBindingSize,device.limits.maxBufferSize)/(CONTINUUM_RECORD_WORDS*4))));
-      if(scene?.capacity===capacity){standGroup=standBindGroup();return;}
+      if(scene?.capacity===capacity){standGroup=standBindGroup();windGroup=windBindGroup();return;}
       if(scene)retire([scene]);
       const {room}=continuumRoom(atlas.types,new Array(atlas.types.length).fill(capacity));
-      scene=createContinuumScene({device,atlas,programs,capacity,room,view,poseRoom:capacity*CONTINUUM_WIND_POSE,frame:frameUBO,shadowUniform,samples,label:'forest',written:true});
+      scene=createContinuumScene({device,atlas,programs,capacity,room,view,poseRoom:skeletonRoom+capacity*CONTINUUM_WIND_POSE,frame:frameUBO,shadowUniform,samples,label:'forest',written:true});
       scene.setCount(capacity);scene.setWorldOffset(shiftX,shiftZ);
-      standGroup=standBindGroup();standChanged=true;
+      standGroup=standBindGroup();windGroup=windBindGroup();standChanged=true;
     };
     const standBindGroup=()=>device.createBindGroup({label:'forest stand',layout:standLayout,entries:[
       ...[frameUBO,shadowUniform,roots,atlas.buffer,scene.records,scene.poses,stood,standUniform].map((buffer,binding)=>({binding,resource:{buffer}})),
-      {binding:8,resource:continuumGroundView(device)}]});
+      {binding:8,resource:continuumGroundView(device)},
+      ...[windUniform,windState,windOwners].map((buffer,k)=>({binding:9+k,resource:{buffer}}))]});
+    const windBindGroup=()=>device.createBindGroup({label:'forest wind',layout:windLayout,entries:
+      [frameUBO,windUniform,roots,windRest,windState,scene.poses,windOwners].map((buffer,binding)=>({binding,resource:{buffer}}))});
     // The sections the pack holds, nearest the player first, each whole or not at all: those that fit the device's
     // roots in that order are held, and the first that does not is let go with every one beyond it. An array held
     // before keeps its place in the roots; one let go is zeroed; one new takes the first gap that holds it. When none
@@ -650,6 +680,8 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
         const next=rootsBuffer(capacity);let at=0;
         for(const slab of [...slabs.values()].sort((a,b)=>a.start-b.start)){encoder.copyBufferToBuffer(roots,slab.start*48,next,at*48,slab.count*48);slab.start=at;at+=slab.count;}
         previous.push(roots);roots=next;
+        // A tree's own skeleton is claimed by where it lies in the roots, which this moves: each tree claims one anew.
+        encoder.clearBuffer(windOwners);
         rootCapacity=capacity;placed.length=0;
         for(const part of fresh){const count=Math.floor(part.length/12);placed.push(slabOf(part,count,at));at+=count;}
       }
@@ -696,19 +728,28 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
     stats.materialLayers=surfaces.layers;stats.textureFamilies=surfaces.families.map(f=>({width:f.width,height:f.height,layers:f.rows.length,mipLevels:f.levels}));
     // The GPU holds the surfaces now; the pack lets go of its maps.
     pack.releaseSurfaces?.();
-    let standModule;
-    [atlas,programs,view,standModule]=await ready;forestLoadAbort(abort.signal);
+    let standModule,windModule;
+    [atlas,programs,view,standModule,windModule]=await ready;forestLoadAbort(abort.signal);
     // A pack's atlas is its own: one type a prototype, in its order, named for it.
     const names=m.prototypes.map(p=>`${p.species}${p.cohort?`-${p.cohort}`:''}`),types=atlas.manifest.types;
     if(types.length!==P||types.some((type,id)=>type.name!==names[id]))throw Error(`The forest continuum atlas is not this pack's (${types.map(t=>t.name)} for ${names}): rebake it with scripts/prepare-forest-continuum.mjs`);
     const firstLayers=[];let layer=0;for(const p of m.prototypes){firstLayers.push(layer);layer+=p.nativeMaterials.length;}
     const C=GPUShaderStage.COMPUTE,entry=(binding,type)=>({binding,visibility:C,buffer:{type}});
     standLayout=device.createBindGroupLayout({label:'forest stand',entries:[entry(0,'uniform'),entry(1,'uniform'),entry(2,'read-only-storage'),entry(3,'read-only-storage'),entry(4,'storage'),entry(5,'storage'),entry(6,'storage'),entry(7,'uniform'),
-      {binding:8,visibility:C,texture:{sampleType:'unfilterable-float',viewDimension:'2d-array'}}]});
+      {binding:8,visibility:C,texture:{sampleType:'unfilterable-float',viewDimension:'2d-array'}},entry(9,'uniform'),entry(10,'storage'),entry(11,'storage')]});
     const standPipelineLayout=device.createPipelineLayout({label:'forest stand',bindGroupLayouts:[standLayout]});
-    const [standReset,standRoots,standFinish]=await Promise.all(['forestStandReset','forestStandRoots','forestStandFinish'].map(entryPoint=>
-      device.createComputePipelineAsync({label:`forest ${entryPoint}`,layout:standPipelineLayout,compute:{module:standModule,entryPoint}})));
+    // Every type's skeleton at rest, as the bake measured it from its wood and leaves (scripts/prepare-forest-continuum.mjs).
+    const restWords=new Float32Array(P*CONTINUUM_WIND_BONES*16);
+    types.forEach((type,id)=>restWords.set(type.wind.bones,id*CONTINUUM_WIND_BONES*16));
+    windRest=make(restWords,B.STORAGE,'forest wind rest');
+    windLayout=device.createBindGroupLayout({label:'forest wind',entries:[entry(0,'uniform'),entry(1,'uniform'),entry(2,'read-only-storage'),entry(3,'read-only-storage'),entry(4,'storage'),entry(5,'storage'),entry(6,'storage')]});
+    const windPipelineLayout=device.createPipelineLayout({label:'forest wind',bindGroupLayouts:[windLayout]});
+    const compute=(layout,module,entryPoint)=>device.createComputePipelineAsync({label:`forest ${entryPoint}`,layout,compute:{module,entryPoint}});
+    const [standReset,standRoots,standFinish,windHead,windLanes,windOwn]=await Promise.all([
+      ...['forestStandReset','forestStandRoots','forestStandFinish'].map(entryPoint=>compute(standPipelineLayout,standModule,entryPoint)),
+      ...['forestWindHead','forestWindLanes','forestWindOwn'].map(entryPoint=>compute(windPipelineLayout,windModule,entryPoint))]);
     forestLoadAbort(abort.signal);
+    stats.wind={skeletons,lanes:P*FOREST_WIND_LANES,own:FOREST_WIND_OWN,bones:types.map(type=>{let n=0;for(let b=0;b<CONTINUUM_WIND_BONES;b++)if((type.wind.bones[b*16+3]>>8)&1)n++;return n;})};
     makeScene();
     // The view's groups: the land's scene (its frame, sky, light and shadow map), the clouds, and the pack's maps.
     const sceneIds=[0,1,2,3,4,5,6,19,20,21];
@@ -747,16 +788,20 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
     };
     const trunksReady=rebuildTrunks();
     const writeRoot=(slab,index)=>{if(slabs.get(slab.part)===slab)device.queue.writeBuffer(roots,(slab.start+index)*48,slab.part,index*12,12);};
-    // A tree coming down whips the trees it falls through, along the line it falls.
+    // A tree coming down drives the air ahead of it through the trees it falls toward, and its trunk and crown sweep
+    // through those that stand in its way.
     const noteFall=(slab,index,now)=>{
       const live=slab.part,at=index*12;
       const fx=live[at],fy=live[at+1],fz=live[at+2],fScale=Math.max(0.5,live[at+3]);
       falling.push({x:fx,z:fz,now,part:live,index});
       const proto=m.prototypes[live[at+8]|0]??m.prototypes[0];
       const code=(live[at+9]|0)>>>0;
-      const fallAng=(((code>>>11)&(FOREST_FALL_BEARINGS-1))/FOREST_FALL_BEARINGS)*Math.PI*2;
-      const reach=Math.max(4,(proto?.high?.[1]??16)*fScale*0.88);
-      addBlast(fx+Math.cos(fallAng)*reach*0.55,fy+3.5,fz+Math.sin(fallAng)*reach*0.55,now,reach*1.15,0.8,FOREST_FALL_SECONDS+0.8);
+      const fallAng=(((code>>>11)&(FOREST_FALL_BEARINGS-1))/FOREST_FALL_BEARINGS)*Math.PI*2,bx=Math.cos(fallAng),bz=Math.sin(fallAng);
+      const height=(proto?.high?.[1]??16)*fScale,reach=Math.max(4,height*0.88),lasts=FOREST_FALL_SECONDS+0.8;
+      pushForce({x:fx+bx*reach*0.55,y:fy+3.5,z:fz+bz*reach*0.55,radius:reach*1.15,toward:[bx,0,bz],pressure:340,start:now,wave:lasts,lobe:0.6,event:FOREST_WIND_EVENT.PULSE,lasts:lasts+6});
+      fallCapsules.push({a:[fx+bx*1.5,fy+height*0.45,fz+bz*1.5],b:[fx+bx*reach,fy+height*0.18,fz+bz*reach],radius:Math.max(2.5,height*0.2),push:14500,power:1.4,start:now,lasts,until:forget(lasts+6)});
+      while(fallCapsules.length>FOREST_WIND_CAPSULES/2)fallCapsules.shift();
+      windChanged=true;
     };
     // The arrays whose ground reaches within this of a point.
     const slabsNear=(x,z,reach)=>[...slabs.values()].filter(s=>x>=s.minX-reach&&x<=s.maxX+reach&&z>=s.minZ-reach&&z<=s.maxZ+reach);
@@ -780,7 +825,7 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
       strike(x,z,now=0,groundAt=null){
         if(destroyed)return;
         const gy=groundAt?groundAt(x,z):0;
-        addBlast(x,(Number.isFinite(gy)?gy:0)+2.4,z,now,34,1.6,280);
+        pushForce({x,y:(Number.isFinite(gy)?gy:0)+2.4,z,radius:34,pressure:920,start:now,wave:280});
         let slab=null,index=-1,distance=Infinity;
         for(const near of slabsNear(x,z,TREE_STRIKE_REACH_M)){
           const found=nearestForestRoot(near.part,near.count,x,z);
@@ -795,7 +840,8 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
       strikeTree(hit,impact,now=0,groundAt=null){
         if(destroyed)return null;
         const hx=hit.x??0,hz=hit.z??0,hy=(groundAt?groundAt(hx,hz):0)+(hit.height??3);
-        addBlast(hx,Number.isFinite(hy)?hy:3,hz,now,26,1.1,290);
+        const bearing=Number.isFinite(impact?.bearing)?impact.bearing:0;
+        pushForce({x:hx,y:Number.isFinite(hy)?hy:3,z:hz,radius:26,toward:[Math.cos(bearing),0,Math.sin(bearing)],pressure:720,start:now,wave:290,lobe:0.35});
         const found=liveRoot(hit);if(!found)return null;
         const {slab,index}=found;
         const result=strikeForestTree(slab.part,index,trunkShapes[slab.part[index*12+8]|0],{...impact,height:hit.height,onTrunk:hit.onTrunk,now,groundAt},strikes);
@@ -822,14 +868,29 @@ export async function createForestRenderer({device,shader,frameUBO,resources,clo
         if(destroyed||(x===shiftX&&z===shiftZ))return;
         shiftX=x;shiftZ=z;standChanged=true;scene.setWorldOffset(x,z);
       },
-      // In the frame's compute pass: every root stood, then the one cut over what was stood.
+      // What presses into the trees now, of one kind ('walker', 'shot' or 'hull'), in the roots' frame: capsules
+      // {a:[x,y,z], b:[x,y,z], radius, push (N at the axis), power}, the trees in reach of which step their own skeletons.
+      // Those of all kinds together are FOREST_WIND_CAPSULES at most, a falling tree's first.
+      setPushers(kind,list=[]){
+        if(destroyed||!pushers.has(kind))return;
+        const next=list.filter(c=>c&&[...c.a,...c.b,c.radius,c.push].every(Number.isFinite)).slice(0,FOREST_WIND_CAPSULES).map(c=>({a:c.a,b:c.b,radius:c.radius,push:c.push,power:c.power??1.5}));
+        const was=pushers.get(kind);
+        if(next.length===was.length&&next.every((c,k)=>capsuleWords(c).every((v,j)=>v===capsuleWords(was[k])[j])))return;
+        pushers.set(kind,next);windChanged=true;
+      },
+      // In the frame's compute pass: the wind's clock, every root stood (claiming its own skeleton when near or
+      // pushed), every skeleton stepped, then the one cut over what was stood.
       encode(pass){
         if(destroyed)return;
-        writeStand(scene.capacity);
+        writeStand(scene.capacity);writeWind();
+        pass.setBindGroup(0,windGroup);pass.setPipeline(windHead);pass.dispatchWorkgroups(1);
         pass.setBindGroup(0,standGroup);
         pass.setPipeline(standReset);pass.dispatchWorkgroups(1);
         if(activeRootCount){const groups=Math.ceil(activeRootCount/64);pass.setPipeline(standRoots);pass.dispatchWorkgroups(Math.min(groups,65535),Math.ceil(groups/65535));}
         pass.setPipeline(standFinish);pass.dispatchWorkgroups(CONTINUUM_ROW/64);
+        pass.setBindGroup(0,windGroup);
+        pass.setPipeline(windLanes);pass.dispatchWorkgroups(Math.ceil(P*FOREST_WIND_LANES/64));
+        pass.setPipeline(windOwn);pass.dispatchWorkgroups(FOREST_WIND_OWN/64);
         scene.encode(pass,{buffer:stood});
       },
       draw(pass){if(destroyed)return;pass.setBindGroup(3,surfaceGroup);scene.draw(pass,sceneGroup,cloudGroup);},

@@ -70,6 +70,21 @@ const CHAIN_LEAST_TRIANGLES = 6;
 const KNOT_RISE = 0.01, STEP_RISE = 0.003;
 // The furthest a vertex moves from its organ's midrib per unit of widening, so no organ's error runs away.
 const OFFSET_REACH = 127 / 1024;
+// The bands of height a sward's sway weight is measured in for its canopy body (farWindOf).
+const WIND_HEIGHTS = 24;
+// A canopy body's vertex sways as the sward at its height (its top over the ground, the floor's lift taken off): the
+// sward's mean weight there, from none at the ground, and a phase by where it lies that varies smoothly across it.
+function farWindOf(sward, far) {
+  const { windProfile: profile, windTop: top } = sward, out = new Uint32Array(far.position.length / 3);
+  for (let i = 0; i < out.length; i++) {
+    const x = far.position[i * 3], h = far.position[i * 3 + 1] - BODY_FLOOR, z = far.position[i * 3 + 2];
+    const at = (Math.max(0, h) / top) * WIND_HEIGHTS - 0.5, b = Math.floor(at), f = at - b;
+    const below = b < 0 ? 0 : profile[Math.min(b, WIND_HEIGHTS - 1)], above = profile[Math.max(0, Math.min(b + 1, WIND_HEIGHTS - 1))];
+    const weight = b < 0 ? above * Math.max(0, at + 0.5) / 0.5 : below + (above - below) * f;
+    out[i] = packContinuumWind(Math.max(0, Math.min(1, weight)), (x * 0.37 + z * 0.23) / P);
+  }
+  return out;
+}
 
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 function hash32(...values) {
@@ -387,6 +402,16 @@ function bakeSward({ V, I, variant }) {
   }
   const high = new Uint32Array(N), word = new Uint32Array(N), wind = new Uint32Array(N);
   for (let v = 0; v < N; v++) { const i = sourceOf[v]; high[v] = highOf[i]; word[v] = wordOf[i]; wind[v] = packContinuumWind(sway > 0 ? raw[i] / sway : 0, phase[i]); }
+  // The sward's sway weight by height (WIND_HEIGHTS bands up to its tallest point, each the mean of the points in it),
+  // so the canopy body over it sways as the sward at its height does.
+  let windTop = 1e-6;
+  for (let i = 0; i < count; i++) windTop = Math.max(windTop, base[i * 3 + 1]);
+  const windProfile = new Float64Array(WIND_HEIGHTS), inBand = new Float64Array(WIND_HEIGHTS);
+  for (let i = 0; i < count; i++) {
+    const band = Math.min(WIND_HEIGHTS - 1, Math.max(0, Math.floor((base[i * 3 + 1] / windTop) * WIND_HEIGHTS)));
+    windProfile[band] += sway > 0 ? raw[i] / sway : 0; inBand[band]++;
+  }
+  for (let b = 0; b < WIND_HEIGHTS; b++) windProfile[b] = inBand[b] ? windProfile[b] / inBand[b] : b ? windProfile[b - 1] : 0;
 
   // Clusters: each cell's kept organs in Morton order, filled up to the cluster's triangles; an organ is never split.
   const clusters = [], indexList = [];
@@ -425,7 +450,7 @@ function bakeSward({ V, I, variant }) {
   const sphere = sphereOf([], [sphereOfVertices(base, all), sphereOfVertices(widened(growth[LEVELS - 1]), all)]);
   return {
     organs: organs.length, swardVertices: count, vertices: N, sourceTriangles: triangleCount, growth, shortfall, clusters, indices,
-    position, normal: weldedNormal, high, word, wind, sway, sphere, rootError: Math.max(...errors[LEVELS - 1]), levelErrors: errors.map((list) => Math.max(...list)),
+    position, normal: weldedNormal, high, word, wind, sway, windProfile, windTop, sphere, rootError: Math.max(...errors[LEVELS - 1]), levelErrors: errors.map((list) => Math.max(...list)),
     levelTriangles: Array.from({ length: LEVELS }, (_, l) => clusters.filter((c) => c.level === l).reduce((s, c) => s + c.triangles, 0)),
     coverage, visibleMean, visible, topColour, sideColour: mean(side, topColour), seenAlong, headShare, gridHeight, gridCover, gridColour,
   };
@@ -656,7 +681,7 @@ async function bakePack(name) {
     b.far.steps = lifted.steps; b.chain.firstError = lifted.firstError; b.chain.lastError = lifted.lastError;
     const clusters = { records: s.clusters, order: Uint32Array.from({ length: s.vertices }, (_, v) => v), indices: s.indices, count: s.clusters.length };
     const body = packMeadowContinuumBody({
-      triangles: s.sourceTriangles, frame, high: s.high, word: s.word, wind: s.wind, farTriangle: b.triangleLook, sway: s.sway,
+      triangles: s.sourceTriangles, frame, high: s.high, word: s.word, wind: s.wind, farWind: farWindOf(s, b.far), farTriangle: b.triangleLook, sway: s.sway,
       look: { top: s.topColour, side: s.sideColour, seenAlong: s.seenAlong, coverage: s.coverage, canopy: b.canopy, mix: jobs[id].mixIndex },
     }, { welded: { position: s.position, normal: s.normal }, clusters, far: b.far });
     b.sphere = [...body.centre, body.radius];

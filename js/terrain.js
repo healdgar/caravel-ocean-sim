@@ -1115,8 +1115,11 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const groveAssets=useSubtropicalForest?SUBTROPICAL_FOREST_GROVE_ASSETS:usePortugalForest?PORTUGAL_FOREST_GROVE_ASSETS:null;
   const grovePromise=canopyMode==='off'||!useProcedural||!groveAssets||search.get('forestGroves')==='0'?Promise.resolve(null):loadForestGroves({assets:groveAssets}).catch(error=>{groveFailure=error.message;return null;});
   let meadowFailure=null;
-  // Every coast grows grass: the tropical sward where the forest is subtropical and on Saba, the Portuguese elsewhere.
-  const meadowPromise=loadMeadowGrass({assets:useSubtropicalForest||!useProcedural?TROPICAL_MEADOW_GRASS_ASSETS:PORTUGAL_MEADOW_GRASS_ASSETS}).catch(error=>{meadowFailure=error.message;return null;});
+  // Every coast grows the grass of its climate, as its forest does: the tropical sward where the place's climate is
+  // subtropical (Saba's among them), the Portuguese elsewhere. There is no cold-temperate or boreal sward or forest
+  // yet, so Québec, New England and the north take the Portuguese.
+  const tropicalSward=forestMixParam?useSubtropicalForest:activeClimate.forestPackKind==='subtropical';
+  const meadowPromise=loadMeadowGrass({assets:tropicalSward?TROPICAL_MEADOW_GRASS_ASSETS:PORTUGAL_MEADOW_GRASS_ASSETS}).catch(error=>{meadowFailure=error.message;return null;});
   const autoCurated1550=isKnownSpanishMain&&search.get('discover')!=='1'&&search.get('era')!=='2026'&&search.get('realDEM')!=='off';
   const useRealDEM=useProcedural&&search.get('realDEM')!=='off'&&!autoCurated1550;
   const proceduralGridOpts=isMobile
@@ -1473,7 +1476,27 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     craters?.follow(localCam);
     activeTownField?.follow?.(localCam);
     lastCamera=camera;lastView=viewProjection;
-
+    if(forest)pressTrees(camera);
+  }
+  // What presses into the trees as the frame begins (js/forest-scenery.js setPushers), in the roots' frame: the walker
+  // ashore, brushing through low boughs from the knee to the head, and the hulls passing close to a bank, each from
+  // its bow to its stern about its waterline. Passing shot is set with the projectiles (setBallisticProjectiles).
+  function pressTrees(camera){
+    const walker=[];
+    if(camera.onFoot&&Number.isFinite(camera.playerX)&&Number.isFinite(camera.playerZ)){
+      const x=camera.playerX-worldOffset.x,z=camera.playerZ-worldOffset.z,y=groundSample(x,z);
+      if(Number.isFinite(y))walker.push({a:[x,y+.25,z],b:[x,y+1.85,z],radius:1.45,push:1150,power:1.6});
+    }
+    forest.setPushers('walker',walker);
+    const hulls=[];
+    for(const hull of camera.hulls??[]){
+      if(hulls.length>=6)break;
+      const x=hull.x-worldOffset.x,z=hull.z-worldOffset.z,half=Math.max(4,hull.length??20)*.42,h=hull.heading??0;
+      if(!Number.isFinite(x+z+half+h))continue;
+      const fx=Math.sin(h)*half,fz=-Math.cos(h)*half,y=(hull.heave??0)+1.2;
+      hulls.push({a:[x+fx,y,z+fz],b:[x-fx,y,z-fz],radius:Math.max(2,(hull.beam??6)*.5+1.5),push:6000,power:1.2});
+    }
+    forest.setPushers('hull',hulls);
   }
   const bind=(pipe,entries)=>device.createBindGroup({layout:pipe.getBindGroupLayout(0),entries:entries.map(([binding,resource])=>({binding,resource}))});
   const resources=[[0,{buffer:frameUBO}],[1,transView],[2,skyView],[3,sampler],[4,envCubeView],[5,lighting.createView()],[6,{buffer:uniform}],[7,albedo.createView()],[8,landSampler],[9,biomeTexture.createView()],...activeLandShadows.terrainResources];
@@ -1548,7 +1571,7 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
   const activeForestPack=proceduralPack&&forestPack?retargetForestPackToProcedural(forestPack,proceduralPack,baseGroundSample,{isMobile,maxRootCapacity:streamMaxRoots,climateProfile:activeClimate,stand:grovePack,rootCapacity,near:forestNear,owner:forestOwner}):forestPack;
   // What has been shot down on this coast comes back with it, and is kept with the port damage.
   const forestStrikeKey=activeRegion.id??`${activeRegion.latitude},${activeRegion.longitude}`;
-  const forest=activeForestPack?await createForestRenderer({device,shader,frameUBO,resources,clouds,format,samples,shadowFormat:activeLandShadows.format,terrainSource,pack:activeForestPack,groundSample:proceduralPack?null:groundSample,savedStrikes:portDamage?.forestStrikes?.(forestStrikeKey)??null,strikeOrigin:{x:activeRegion.x??0,z:activeRegion.z??0},onStrikesChanged:trees=>portDamage?.setForestStrikes?.(forestStrikeKey,trees)}).catch(error=>{forestFailure=error.message;return null;}):null;
+  const forest=activeForestPack?await createForestRenderer({device,shader,frameUBO,resources,clouds,format,samples,shadowFormat:activeLandShadows.format,terrainSource,pack:activeForestPack,groundSample:proceduralPack?null:groundSample,savedStrikes:portDamage?.forestStrikes?.(forestStrikeKey)??null,strikeOrigin:{x:activeRegion.x??0,z:activeRegion.z??0},onStrikesChanged:trees=>portDamage?.setForestStrikes?.(forestStrikeKey,trees)}).catch(error=>{forestFailure=error.message;console.error('forest continuum',error);return null;}):null;
   const forestStats=forest?.stats??{loaded:false,mode:canopyMode,error:forestFailure};
   const forestHeld=pack=>({roots:pack?.manifest?.rootCount??0,groveRoots:pack?.groveRoots??0,sections:pack?.sectionsResident??0,released:pack?.sectionsReleased??0});
   forestStats.groves=grovePack?{loaded:true,...forestHeld(activeForestPack),rootCapacity}:{loaded:false,error:groveFailure};
@@ -2799,6 +2822,20 @@ export async function createTerrain({device,frameUBO,transView,skyView,sampler,e
     },
     setBallisticProjectiles(projectiles,nowSec=0){
       if(Number.isFinite(nowSec))lastBallisticClock=nowSec;
+      // A ball passing through the trees parts the boughs along the last of its flight: the trees in its reach take it.
+      if(forest){
+        const passing=[];
+        if(Array.isArray(projectiles))for(let i=0;i<projectiles.length&&passing.length<6;i++){
+          const p=projectiles[i];
+          if(!p||p.active===false||!Number.isFinite(p.x)||!Number.isFinite(p.z))continue;
+          const x=p.x-worldOffset.x,z=p.z-worldOffset.z,y=p.y??0,gy=baseGroundSample(x,z);
+          if(!Number.isFinite(gy)||!Number.isFinite(y)||y>gy+45||y<gy-2)continue;
+          const vx=p.vx??0,vy=p.vy??0,vz=p.vz??0,back=.12;
+          if(!Number.isFinite(vx+vy+vz))continue;
+          passing.push({a:[x,y,z],b:[x-vx*back,y-vy*back,z-vz*back],radius:1.6,push:2600,power:1.8});
+        }
+        forest.setPushers('shot',passing);
+      }
       if(!meadowGrass)return;
       if((!projectiles||projectiles.length===0)&&recentBlastRings.length===0&&!hadActiveBallistics)return;
       for(let i=recentBlastRings.length-1;i>=0;i--){

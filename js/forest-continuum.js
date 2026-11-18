@@ -8,22 +8,28 @@
 // material (js/wgsl/forest-continuum.js). This is what a tree puts in the atlas:
 //   a vertex   high: its layer (the prototype's own; FOREST_CONTINUUM_UNTEXTURED if colour alone) | leaf << 4 | exposure << 5 (8 bits); word: its colour
 //              (each channel's square root, 8 bits) | the light its own canopy lets through << 24 (8 bits); the UV
-//              stream its texture coordinates over its type's range; the wind stream its sway weight and phase.
+//              stream its texture coordinates over its type's range; the wind stream the bones that carry it
+//              (packContinuumWindBones), as does every vertex of its far body.
 //   a far triangle  leaf | material << 1 | exposure << 5 (6 bits) | canopy light << 11 (6 bits) | colour << 17
 //              (5 bits a channel, square roots), of the surface nearest it.
-//   a type's material block  its texture coordinates' range, its sway at full weight, its splat's look (a far word),
-//              and its first layer among the pack's materials.
+//   a type's material block  its texture coordinates' range, its splat's look (a far word), and its first layer
+//              among the pack's materials.
+//   its manifest's type  its skeleton's rest (wind.bones: CONTINUUM_WIND_BONES of FOREST_CONTINUUM_BONE_FLOATS, as
+//              scripts/prepare-forest-continuum.mjs windSkeleton lays them), which js/wgsl/forest-continuum.js steps.
 import {
   CONTINUUM_ATLAS_VERSION, CONTINUUM_HEADER_WORDS, CONTINUUM_NEVER, CONTINUUM_TYPE, continuumFloatWord, packContinuumBody, packContinuumUV, loadContinuumAtlas,
 } from './continuum-format.js';
-import { packContinuumWind } from './wgsl/continuum-wind.js';
+import { CONTINUUM_WIND_BONES } from './wgsl/continuum-wind.js';
 
 export const FOREST_CONTINUUM_FORMAT = 'waterworld.forest-continuum';
 export const FOREST_CONTINUUM_VERSION = CONTINUUM_ATLAS_VERSION;
 // A type's material block (js/continuum-format.js CONTINUUM_TYPE.material).
 export const FOREST_CONTINUUM_MATERIAL = Object.freeze({
-  uvLow: CONTINUUM_TYPE.material, uvScale: CONTINUUM_TYPE.material + 2, sway: CONTINUUM_TYPE.material + 4, splat: CONTINUUM_TYPE.material + 5, firstLayer: CONTINUUM_TYPE.material + 6,
+  uvLow: CONTINUUM_TYPE.material, uvScale: CONTINUUM_TYPE.material + 2, splat: CONTINUUM_TYPE.material + 4, firstLayer: CONTINUUM_TYPE.material + 5,
 });
+// A bone's rest, in floats: [pivot, parent + 1 | group << 6 | 1 << 8], [axis, how far out along the tree], [lever to
+// where the wind presses what it carries, that drag area], [stiffness, natural angular frequency, damping, largest bend].
+export const FOREST_CONTINUUM_BONE_FLOATS = 16;
 // A body's kind floats (js/continuum-bake.js): [FOREST_CONTINUUM_BARK or _LEAF, the source vertex].
 export const FOREST_CONTINUUM_BARK = 0, FOREST_CONTINUUM_LEAF = 1;
 
@@ -65,20 +71,21 @@ export function forestContinuumFarWord({ material, leaf, colour, exposure, canop
     | (forestUnit(root[0], 5) << 17) | (forestUnit(root[1], 5) << 22) | (forestUnit(root[2], 5) << 27)) >>> 0;
 }
 // How a tree is packed (js/continuum-format.js packContinuumBody). `surface(v)` gives a packed vertex's source
-// attributes (forestContinuumVertex's), `uv(v)` its texture coordinates and `wind(v)` its [weight, phase]; `farSurface(t)`
-// a far triangle's; `look` the splat's (a far word's attributes); `uvRange` [low u, low v, span u, span v]; `sway` the
-// metres its tips move at full gust strength; `firstLayer` its first among the pack's materials.
-export function packForestContinuumBody({ triangles, surface, uv, wind, farSurface, look, uvRange, sway, firstLayer }, baked) {
+// attributes (forestContinuumVertex's), `uv(v)` its texture coordinates and `wind(v)` its wind word (its bones,
+// packContinuumWindBones), `farWind(i)` far vertex i's; `farSurface(t)` a far triangle's; `look` the splat's (a far
+// word's attributes); `uvRange` [low u, low v, span u, span v]; `firstLayer` its first among the pack's materials.
+export function packForestContinuumBody({ triangles, surface, uv, wind, farWind, farSurface, look, uvRange, firstLayer }, baked) {
   const [lowU, lowV, spanU, spanV] = uvRange;
   return packContinuumBody({
     triangles,
-    material: [continuumFloatWord(lowU), continuumFloatWord(lowV), continuumFloatWord(spanU), continuumFloatWord(spanV), continuumFloatWord(sway), forestContinuumFarWord(look), firstLayer >>> 0],
+    material: [continuumFloatWord(lowU), continuumFloatWord(lowV), continuumFloatWord(spanU), continuumFloatWord(spanV), forestContinuumFarWord(look), firstLayer >>> 0],
     vertex: (v) => forestContinuumVertex(surface(v)),
     farWord: (t) => forestContinuumFarWord(farSurface(t)),
     streams: {
       uv: (v) => { const [u, w] = uv(v); return [packContinuumUV([Math.max(0, Math.min(1, (u - lowU) / spanU)), Math.max(0, Math.min(1, (w - lowV) / spanV))])]; },
-      wind: (v) => { const [weight, phase] = wind(v); return [packContinuumWind(weight, phase)]; },
+      wind: (v) => [wind(v)],
     },
+    farStreams: { wind: (i) => [farWind(i)] },
   }, baked);
 }
 
@@ -89,6 +96,7 @@ export function validateForestContinuumManifest(manifest) {
   types.forEach((type, id) => {
     if (type.id !== id || !/^[0-9a-f]{64}$/.test(type.fingerprint ?? '')) throw Error(`Forest continuum type ${id} is malformed`);
     if (!(type.clusters?.count > 0) || !(type.chain?.baseTriangles >= 4) || !(type.chain.steps >= 1 && type.chain.steps < CONTINUUM_NEVER)) throw Error(`Forest continuum type ${id} is incomplete`);
+    if (type.wind?.bones?.length !== CONTINUUM_WIND_BONES * FOREST_CONTINUUM_BONE_FLOATS || !type.wind.bones.every(Number.isFinite) || !(type.wind.bones[3] > 0)) throw Error(`Forest continuum type ${id} has no skeleton: rebake it`);
   });
   if (!(atlas?.words > CONTINUUM_HEADER_WORDS) || atlas.bytes !== atlas.words * 4 || !/^[0-9a-f]{64}$/.test(atlas.sha256 ?? '') || !atlas.gzip?.file) throw Error('The forest continuum atlas is malformed');
   return manifest;

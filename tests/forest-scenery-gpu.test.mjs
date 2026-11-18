@@ -18,14 +18,20 @@ test('the forest stand compiles as the game prepares it, and its passes build on
       const {withCelestialFrame}=await import('/js/wgsl/celestial.js');
       const {pruneWGSLFunctions}=await import('/js/wgsl-prune.js');
       const {withSceneShadowCount}=await import('/js/wgsl/shadows.js');
-      const {forestContinuumStandWGSL}=await import('/js/wgsl/forest-continuum.js');
+      const {forestContinuumStandWGSL,forestWindStepWGSL}=await import('/js/wgsl/forest-continuum.js');
       const device=await(await navigator.gpu.requestAdapter()).requestDevice(),errors=[];device.onuncapturederror=e=>errors.push(e.error.message);
       const module=device.createShaderModule({code:pruneWGSLFunctions(withCelestialFrame(withSceneShadowCount(forestContinuumStandWGSL(),1)))});
       errors.push(...(await module.getCompilationInfo()).messages.filter(m=>m.type==='error').map(m=>m.message));
       const C=GPUShaderStage.COMPUTE,entry=(binding,type)=>({binding,visibility:C,buffer:{type}});
-      const layout=device.createBindGroupLayout({entries:[entry(0,'uniform'),entry(1,'uniform'),entry(2,'read-only-storage'),entry(3,'read-only-storage'),entry(4,'storage'),entry(5,'storage'),entry(6,'storage'),entry(7,'uniform'),{binding:8,visibility:C,texture:{sampleType:'unfilterable-float',viewDimension:'2d-array'}}]});
+      const layout=device.createBindGroupLayout({entries:[entry(0,'uniform'),entry(1,'uniform'),entry(2,'read-only-storage'),entry(3,'read-only-storage'),entry(4,'storage'),entry(5,'storage'),entry(6,'storage'),entry(7,'uniform'),{binding:8,visibility:C,texture:{sampleType:'unfilterable-float',viewDimension:'2d-array'}},entry(9,'uniform'),entry(10,'storage'),entry(11,'storage')]});
+      // The wind's step, which steps the skeletons the stand hands each tree.
+      const wind=device.createShaderModule({code:pruneWGSLFunctions(withCelestialFrame(forestWindStepWGSL()))});
+      errors.push(...(await wind.getCompilationInfo()).messages.filter(m=>m.type==='error').map(m=>m.message));
+      const windLayout=device.createBindGroupLayout({entries:[entry(0,'uniform'),entry(1,'uniform'),entry(2,'read-only-storage'),entry(3,'read-only-storage'),entry(4,'storage'),entry(5,'storage'),entry(6,'storage')]});
       device.pushErrorScope('validation');
-      await Promise.all(['forestStandReset','forestStandRoots','forestStandFinish'].map(entryPoint=>device.createComputePipelineAsync({layout:device.createPipelineLayout({bindGroupLayouts:[layout]}),compute:{module,entryPoint}}).catch(e=>errors.push(String(e.message??e)))));
+      await Promise.all([
+        ...['forestStandReset','forestStandRoots','forestStandFinish'].map(entryPoint=>device.createComputePipelineAsync({layout:device.createPipelineLayout({bindGroupLayouts:[layout]}),compute:{module,entryPoint}}).catch(e=>errors.push(String(e.message??e)))),
+        ...['forestWindHead','forestWindLanes','forestWindOwn'].map(entryPoint=>device.createComputePipelineAsync({layout:device.createPipelineLayout({bindGroupLayouts:[windLayout]}),compute:{module:wind,entryPoint}}).catch(e=>errors.push(String(e.message??e))))]);
       const scope=await device.popErrorScope();if(scope)errors.push(scope.message);
       await device.queue.onSubmittedWorkDone();device.destroy();return {errors};
     });

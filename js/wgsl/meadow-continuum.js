@@ -3,7 +3,9 @@
 // the material that wears them. Their cut, their shadow, their capture under water and their sway are the one cut's
 // (the WIND kind, draped, js/wgsl/continuum-wind.js); this is only where each 4 m patch stands each frame and how its
 // sward is worn (js/meadow-continuum.js for the atlas, js/meadow-grass.js for the cover map and the CPU's part).
-//   stand     the blocks of 16 x 16 patches in view, or in the shadow map's box, that hold any grass are listed; then one
+//   stand     the blocks of 16 x 16 patches in view, or in the shadow map's box, that hold any grass are listed and
+//             counted by their distance; the records are spent nearest first, every patch near and, where a view asks
+//             more than the scene holds, far blocks stood coarser, one record stretched over many patches; then one
 //             workgroup a listed block writes each of its patches the cover map grows as a record of the one format:
 //             its variant (the mix growing most at its middle, one of four by a hash of where it lies), stood on the
 //             ground the land draws, as tall as the meadow's lushness and billow grow it and shot presses it, draped
@@ -20,9 +22,9 @@ import { SKY_RENDER_FUNCS } from './sky.js';
 import { CLOUD_SAMPLE } from './clouds.js';
 import { LAND_CRATER_SAMPLE_WGSL, LAND_CRATER_TEXELS, LAND_CRATER_CELL_M, LAND_CRATER_TILE_M } from './land-craters.js';
 import { CONTINUUM_RECORD_WGSL, CONTINUUM_ROW } from './continuum-cut.js';
-import { CONTINUUM_WIND_FORM, CONTINUUM_WIND_POSE } from './continuum-wind.js';
+import { CONTINUUM_WIND_FORM, CONTINUUM_WIND_DRAPED_POSE } from './continuum-wind.js';
 import { CONTINUUM_HEADER, CONTINUUM_TYPE, CONTINUUM_TYPE_WORDS, CONTINUUM_KIND, CONTINUUM_KIND_SHIFT, CONTINUUM_STRETCHED } from '../continuum-format.js';
-import { continuumGroundWGSL } from '../continuum-ground.js';
+import { CONTINUUM_GROUNDED, continuumGroundWGSL } from '../continuum-ground.js';
 import { MEADOW_PATCH_METRES, MEADOW_CONTINUUM_MATERIAL, MEADOW_CONTINUUM_STIFFNESS_UNIT } from '../meadow-continuum.js';
 
 export const MEADOW_MAX_SHOT_WAKES = 16;
@@ -30,10 +32,19 @@ export const MEADOW_MAX_BLAST_RINGS = 16;
 export const MEADOW_WAKE_BUFFER_BYTES = 1040; // 16B counts + 16 * 32B ShotWake + 16 * 32B BlastRing = 1040B
 // Patches to a block's side: the stand pass lists the blocks in view, then stands their patches.
 export const MEADOW_BLOCK_PATCHES = 16;
-// The blocks-in-view list begins with its own indirect dispatch.
-export const MEADOW_WORK_HEADER = 4;
-// A patch's pose data, in vec4f: its stretch (STRETCHED), then the WIND kind's.
-export const MEADOW_CONTINUUM_POSE = 1 + CONTINUUM_WIND_POSE;
+// The scene's records are spent nearest first. Each listed block is counted in a band of its distance from the eye
+// (three to an octave, from 8 m), at each grain it could be stood at: a patch of 4 m, or 2, 4, 8 or 16 patches to a
+// side as one record stretched over them (CONTINUUM_STRETCHED). The bands nearest the eye keep the finest grain the
+// records allow; beyond, a band's grain doubles with each octave, so a far record's size on screen stays a near one's.
+export const MEADOW_BANDS = 32, MEADOW_GRAINS = 5;
+// The blocks-in-view list begins with its own indirect dispatch, then each band's count at each grain and the grain
+// each band is stood at.
+export const MEADOW_WORK_HEADER = 4 + MEADOW_BANDS * (MEADOW_GRAINS + 1);
+// A block's upper bounds of the records it can take at each grain (meadowBlockGrains), in one word: 9, 7, 5, 3 and 1
+// bits from the finest.
+export const MEADOW_GRAIN_BITS = Object.freeze([[0, 9], [9, 7], [16, 5], [21, 3], [24, 1]]);
+// A patch's pose data, in vec4f: its stretch (STRETCHED), then the WIND kind's for a draped body.
+export const MEADOW_CONTINUUM_POSE = 1 + CONTINUUM_WIND_DRAPED_POSE;
 // The shared uniform, MeadowCfg: 9 vec4.
 export const MEADOW_CONTINUUM_CFG_BYTES = 144;
 // The stand pass's own buffer: the select's workgroups (x, y, z), then how many records it wrote.
@@ -292,7 +303,7 @@ fn meadowEvalBallistics(unshiftedXZ: vec2f, groundY: f32, seed: u32) -> MeadowBa
 // read, and dispatched from, by the next.
 export function meadowContinuumStandWGSL() {
   const T = CONTINUUM_TYPE, M = MEADOW_CONTINUUM_MATERIAL, W = CONTINUUM_WIND_FORM;
-  const tag = ((CONTINUUM_KIND.WIND << CONTINUUM_KIND_SHIFT) | CONTINUUM_STRETCHED) >>> 0;
+  const tag = ((CONTINUUM_KIND.WIND << CONTINUUM_KIND_SHIFT) | CONTINUUM_STRETCHED | CONTINUUM_GROUNDED) >>> 0;
   return FRAME_WGSL + SHADOW_FRAME + CONTINUUM_RECORD_WGSL + continuumGroundWGSL(0, 17) + MEADOW_COMMON_WGSL + /* wgsl */`
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<uniform> cfg: MeadowCfg;
@@ -300,7 +311,7 @@ export function meadowContinuumStandWGSL() {
 @group(0) @binding(3) var elevation: texture_2d<f32>;
 @group(0) @binding(4) var meadowCover: texture_2d<f32>;
 @group(0) @binding(5) var<storage, read> meadowAtlas: array<u32>;
-@group(0) @binding(6) var<storage, read> meadowBlocks: array<vec4f>;            // a block's most cover, lowest and highest ground
+@group(0) @binding(6) var<storage, read> meadowBlocks: array<vec4f>;            // a block's most cover, lowest and highest ground, records at each grain (bits)
 @group(0) @binding(7) var<storage, read_write> meadowRecords: array<ContinuumRecord>;
 @group(0) @binding(8) var<storage, read_write> meadowPoses: array<vec4f>;
 @group(0) @binding(9) var<storage, read_write> meadowStood: array<atomic<u32>, 4>;
@@ -311,9 +322,16 @@ export function meadowContinuumStandWGSL() {
 @group(0) @binding(14) var landCraterLookup: texture_2d<i32>;
 @group(0) @binding(15) var landCraterField: texture_2d_array<f32>;
 @group(0) @binding(16) var landSampler: sampler;
-// A block listed for the camera carries this bit; one listed for the sun alone does not.
+// A block listed for the camera carries this bit; one listed for the sun alone does not. Its band lies in the 5 bits
+// below it.
 const MEADOW_SEEN: u32 = 0x80000000u;
+const MEADOW_BAND_SHIFT: u32 = 24u;
 const MEADOW_WORK: u32 = ${MEADOW_WORK_HEADER}u;
+const MEADOW_BANDS: u32 = ${MEADOW_BANDS}u;
+const MEADOW_GRAINS: u32 = ${MEADOW_GRAINS}u;
+// Where each band's counts (a word a grain) and then each band's grain lie in the blocks-in-view buffer.
+const MEADOW_COUNTS: u32 = 4u;
+const MEADOW_GRAIN: u32 = ${4 + MEADOW_BANDS * MEADOW_GRAINS}u;
 fn meadowFocal() -> f32 { return F.screen.y / max(2.0 * length(F.camUp.xyz), 1e-4); }
 fn meadowShift() -> vec3f { return vec3f(nearTerrain.grid.y, 0.0, nearTerrain.grid.z); }
 fn meadowStandTypeF(model: u32, field: u32) -> f32 { return bitcast<f32>(meadowAtlas[meadowAtlas[${CONTINUUM_HEADER.typesAt}u] + model * ${CONTINUUM_TYPE_WORDS}u + field]); }
@@ -336,14 +354,15 @@ fn meadowInLight(at: vec3f, reach: f32) -> bool {
 // The ground the land draws at a point (js/continuum-ground.js), in the scene's frame.
 fn meadowDrawnGround(at: vec2f, shift: vec3f) -> f32 { return meadowGroundY(at, cfg.domain, elevation) + continuumGroundLift(at + shift.xz); }
 
-// The stand emptied and the blocks-in-view list's dispatch set.
-@compute @workgroup_size(4) fn meadowStandReset(@builtin(local_invocation_index) i: u32) {
+// The stand emptied, the blocks-in-view list's dispatch set and every band's counts cleared.
+@compute @workgroup_size(64) fn meadowStandReset(@builtin(local_invocation_index) i: u32) {
   if (i == 0u) { atomicStore(&meadowStood[3], 0u); }
-  atomicStore(&meadowBlockWork[i], select(0u, 1u, i == 1u || i == 2u));
+  for (var k = i; k < MEADOW_WORK; k += 64u) { atomicStore(&meadowBlockWork[k], select(0u, 1u, k == 1u || k == 2u)); }
 }
 
 // One thread a block of the region: those holding grass above the waterline and in view, or in the sun's box, are
-// listed (marked MEADOW_SEEN for the camera), and the patches pass is dispatched once for each.
+// listed (marked MEADOW_SEEN for the camera, with their band), counted in their band at every grain, and the patches
+// pass is dispatched once for each.
 @compute @workgroup_size(64) fn meadowBlocksInView(@builtin(global_invocation_id) id: vec3u) {
   if (id.x >= cfg.more.y) { return; }
   let data = meadowBlocks[id.x];
@@ -359,20 +378,47 @@ fn meadowDrawnGround(at: vec2f, shift: vec3f) -> f32 { return meadowGroundY(at, 
   let reach = size + continuumGroundBound(cfg.scene.x, meadowFocal(), length(centre + meadowShift() - F.camPos.xyz) + size);
   let seen = !meadowOutside(earthCurve(centre + meadowShift() - F.camPos.xyz, F.camPos.y), reach);
   if (!seen && !meadowInLight(centre, reach)) { return; }
+  let band = u32(clamp(floor(log2(max(length(centre + meadowShift() - F.camPos.xyz), 8.0) / 8.0) * 3.0), 0.0, f32(MEADOW_BANDS - 1u)));
+  let most = bitcast<u32>(data.w);
+  var bits = array<vec2u, 5>(${MEADOW_GRAIN_BITS.map(([at, n]) => `vec2u(${at}u, ${(1 << n) - 1}u)`).join(', ')});
+  for (var g = 0u; g < MEADOW_GRAINS; g++) { atomicAdd(&meadowBlockWork[MEADOW_COUNTS + band * MEADOW_GRAINS + g], (most >> bits[g].x) & bits[g].y); }
   let at = atomicAdd(&meadowBlockWork[0], 1u);
-  atomicStore(&meadowBlockWork[MEADOW_WORK + at], id.x | select(0u, MEADOW_SEEN, seen));
+  atomicStore(&meadowBlockWork[MEADOW_WORK + at], id.x | (band << MEADOW_BAND_SHIFT) | select(0u, MEADOW_SEEN, seen));
 }
 
-// One patch stood as a record of the one cut, if grass grows on it and it is in view or in the sun's box.
-fn meadowStandPatch(cell: vec2i, blockSeen: bool) {
+// The grain of each band, the nearest first: the finest that fits the records, as far out as it can go. Bands from s
+// out are coarsened, their grain doubling every three bands (an octave) beyond s; the search takes the farthest s
+// whose bands' counts fit, so the near bands keep every patch and an overflow coarsens only the far. Each count is an
+// upper bound of the records its blocks take at that grain, so no patch is ever stood past the scene's capacity.
+fn meadowGrainFrom(band: u32, s: i32) -> u32 { return select(u32(min((i32(band) - s) / 3 + 1, i32(MEADOW_GRAINS) - 1)), 0u, i32(band) < s); }
+@compute @workgroup_size(1) fn meadowStandBudget() {
+  var s = i32(MEADOW_BANDS);
+  for (; s > -3 * i32(MEADOW_GRAINS); s--) {
+    var total = 0u;
+    for (var b = 0u; b < MEADOW_BANDS; b++) { total += atomicLoad(&meadowBlockWork[MEADOW_COUNTS + b * MEADOW_GRAINS + meadowGrainFrom(b, s)]); }
+    if (total <= cfg.params.z) { break; }
+  }
+  for (var b = 0u; b < MEADOW_BANDS; b++) { atomicStore(&meadowBlockWork[MEADOW_GRAIN + b], meadowGrainFrom(b, s)); }
+}
+
+// One patch stood as a record of the one cut, if grass grows on it and it is in view or in the sun's box: a patch of
+// the cover map's own, or at a coarser grain (its band's, meadowStandBudget) as many patches to a side, one record
+// stretched over them.
+fn meadowStandPatch(cell: vec2i, grain: u32, blockSeen: bool) {
+  let g = f32(grain);
   let origin = vec2f(cell) * MEADOW_PATCH;
-  let half = MEADOW_PATCH * 0.5;
+  let half = MEADOW_PATCH * 0.5 * g;
   let middle = origin + vec2f(half);
   let uv = (middle - cfg.domain.xy) / cfg.domain.z + 0.5;
   if (any(uv <= vec2f(0.002)) || any(uv >= vec2f(0.998))) { return; }
-  // Grass where the cover map grows it at its middle or a corner, on dry ground.
+  // Grass where the cover map grows it at its middle or a corner (a coarse patch: anywhere on a lattice of at most
+  // five points a side over it), on dry ground.
   let cover = meadowCoverAt(middle);
-  let corners = max(max(meadowCoverAt(middle + vec2f(half, half)).r, meadowCoverAt(middle + vec2f(-half, half)).r), max(meadowCoverAt(middle + vec2f(half, -half)).r, meadowCoverAt(middle + vec2f(-half, -half)).r));
+  var corners = max(max(meadowCoverAt(middle + vec2f(half, half)).r, meadowCoverAt(middle + vec2f(-half, half)).r), max(meadowCoverAt(middle + vec2f(half, -half)).r, meadowCoverAt(middle + vec2f(-half, -half)).r));
+  if (grain > 1u) {
+    let steps = min(grain, 4u);let step = 2.0 * half / f32(steps);
+    for (var j = 0u; j <= steps && corners < 0.02; j++) { for (var i = 0u; i <= steps; i++) { corners = max(corners, meadowCoverAt(origin + vec2f(f32(i), f32(j)) * step).r); } }
+  }
   if (max(cover.r, corners) < 0.02) { return; }
   let ground = meadowGroundY(middle, cfg.domain, elevation);
   if (ground < cfg.domain.w) { return; }
@@ -381,19 +427,28 @@ fn meadowStandPatch(cell: vec2i, blockSeen: bool) {
   let mixes = meadowMixWeights(cover.g, middle);
   let model = select(select(0u, 1u, mixes.y > mixes.x), 2u, mixes.z > max(mixes.x, mixes.y)) * 4u + (seed & 3u);
   let shift = meadowShift();
-  // It stands on the ground the land draws under its middle, as tall as the meadow's lushness and billow grow it (a
-  // patch a little taller or shorter than its neighbours), pressed down by shot and blast and sunk into a crater.
-  let place = vec3f(origin.x, meadowDrawnGround(middle, shift), origin.y);
+  // It stands on the true ground under its middle, and the one cut raises it at its anchor (GROUNDED) to the ground
+  // the land draws there: the view's cut in the view and its shadow, the captures' under water. It is as tall as the
+  // meadow's lushness and billow grow it (a patch a little taller or shorter than its neighbours), pressed down by shot
+  // and blast and sunk into a crater.
+  let place = vec3f(origin.x, ground, origin.y);
+  let lifted = continuumGroundLift(origin + shift.xz);
   let ballistics = meadowEvalBallistics(middle, ground, seed);
   let vigour = 0.92 + 0.16 * f32((seed >> 16u) & 255u) / 255.0;
   let tall = clamp((0.82 + 0.44 * cover.b) * meadowWorldBillow(middle).x * vigour * (1.0 - 0.7 * ballistics.pressDown) * (1.0 - ballistics.buryDepth), 0.05, 2.0);
-  // Draped over the ground drawn under the corners of its type's square (the WIND kind's DRAPED form), and sunk by
-  // as much as that drape would float over the ground at its middle.
-  let low = vec2f(meadowStandTypeF(model, ${T.low}u), meadowStandTypeF(model, ${T.low + 2}u));
-  let span = meadowStandTypeF(model, ${T.span}u);
+  // Draped over the ground the view draws under the corners of its type's square (the WIND kind's DRAPED form), from
+  // where its anchor is raised to, and sunk by as much as that drape would float over the ground drawn at its middle.
+  // A capture raises it by its own cut at the anchor, and the drape carries it over the view's ground between. A
+  // coarse patch's square is its type's stretched by its grain.
+  let low = vec2f(meadowStandTypeF(model, ${T.low}u), meadowStandTypeF(model, ${T.low + 2}u)) * g;
+  let span = meadowStandTypeF(model, ${T.span}u) * g;
   let c0 = origin + low;
-  var drape = vec4f(meadowDrawnGround(c0, shift), meadowDrawnGround(c0 + vec2f(span, 0.0), shift), meadowDrawnGround(c0 + vec2f(0.0, span), shift), meadowDrawnGround(c0 + vec2f(span), shift)) - vec4f(place.y);
-  drape -= vec4f(max(dot(drape, vec4f(0.25)), 0.0));
+  let stood = place.y + lifted;
+  var drape = vec4f(meadowDrawnGround(c0, shift), meadowDrawnGround(c0 + vec2f(span, 0.0), shift), meadowDrawnGround(c0 + vec2f(0.0, span), shift), meadowDrawnGround(c0 + vec2f(span), shift)) - vec4f(stood);
+  drape -= vec4f(max(dot(drape, vec4f(0.25)) - (meadowDrawnGround(middle, shift) - stood), 0.0));
+  // Where the cover thins toward a path, a beach or a bank, its plants stand lower: the share standing at the corners.
+  let thins = vec4f(meadowCoverAt(c0).r, meadowCoverAt(c0 + vec2f(span, 0.0)).r, meadowCoverAt(c0 + vec2f(0.0, span)).r, meadowCoverAt(c0 + vec2f(span)).r);
+  let standing = smoothstep(vec4f(0.06), vec4f(0.55), thins);
   // The gust fronts: the wind field's 14 m rollers rolling downwind (meadowWindField), each patch's sward bent as the
   // front crosses it (the kind's phase, less its wave number times how far downwind a point stands), as strongly as
   // the gust packet over it and the wind's speed bend it.
@@ -412,33 +467,41 @@ fn meadowStandPatch(cell: vec2i, blockSeen: bool) {
   // and how far the drawn ground may lie from the true.
   let sphere = vec4f(meadowStandTypeF(model, ${T.sphere}u), meadowStandTypeF(model, ${T.sphere + 1}u), meadowStandTypeF(model, ${T.sphere + 2}u), meadowStandTypeF(model, ${T.sphere + 3}u));
   let deviation = max(max(abs(drape.x), abs(drape.y)), max(abs(drape.z), abs(drape.w)));
-  let centre = place + vec3f(sphere.x, sphere.y * tall + dot(drape, vec4f(0.25)), sphere.z);
-  let radius = sphere.w * max(tall, 1.0) + deviation + abs(strength) * 1.8 + length(ballistics.pushXZ);
+  let centre = place + vec3f(sphere.x * g, lifted + sphere.y * tall + dot(drape, vec4f(0.25)), sphere.z * g);
+  let radius = sphere.w * max(tall, g) + deviation + abs(strength) * 1.1 + length(ballistics.pushXZ);
   let relative = centre + shift - F.camPos.xyz;
   let reach = radius + continuumGroundBound(cfg.scene.x, meadowFocal(), length(relative) + radius);
   let seen = blockSeen && !meadowOutside(earthCurve(relative, F.camPos.y), reach);
   if (!seen && !meadowInLight(centre, reach)) { return; }
+  // The budget (meadowStandBudget) leaves room for every record its bands can take; the test only guards the buffer.
   let slot = atomicAdd(&meadowStood[3], 1u);
   if (slot >= cfg.params.z) { return; }
   let pose = slot * ${MEADOW_CONTINUUM_POSE}u;
-  meadowPoses[pose] = vec4f(1.0, tall, 1.0, 0.0);
-  meadowPoses[pose + 1u] = vec4f(phase, strength, 0.0, ${W.DRAPED}.0);
+  // Stretched over its grain across, as tall as it grows; its sway and push in its type's metres across, so a coarse
+  // patch sways the metres a fine one does.
+  meadowPoses[pose] = vec4f(g, tall, g, 0.0);
+  meadowPoses[pose + 1u] = vec4f(phase, strength / g, packet, ${W.DRAPED}.0);
   meadowPoses[pose + 2u] = drape / tall;
-  meadowPoses[pose + 3u] = vec4f(ballistics.pushXZ.x, 0.0, ballistics.pushXZ.y, wave);
+  meadowPoses[pose + 3u] = vec4f(ballistics.pushXZ.x / g, 0.0, ballistics.pushXZ.y / g, wave);
+  meadowPoses[pose + 4u] = standing;
   // Its seed is where it lies, so its samples' pattern and its splat's thinning are its own however the patches are
   // listed.
   meadowRecords[slot] = ContinuumRecord(vec4f(place, 1.0), vec4f(0.0, 0.0, 0.0, 1.0), vec4u(model | ${tag}u, pose, seed, 0u), vec4u(0u));
 }
 
-// One workgroup a listed block, four of its patches a lane.
+// One workgroup a listed block, at its band's grain: four of its patches a lane at the finest, fewer and larger coarser.
 @compute @workgroup_size(64) fn meadowStandPatches(@builtin(workgroup_id) group: vec3u, @builtin(local_invocation_index) lane: u32) {
   let listed = meadowBlockList[MEADOW_WORK + group.x];
-  let block = listed & ~MEADOW_SEEN;
+  let block = listed & ((1u << MEADOW_BAND_SHIFT) - 1u);
+  let coarse = meadowBlockList[MEADOW_GRAIN + ((listed >> MEADOW_BAND_SHIFT) & (MEADOW_BANDS - 1u))];
+  let grain = 1u << coarse;
+  let side = u32(MEADOW_BLOCK) >> coarse;
   let across = u32(max(cfg.blocks.z, 1));
   let first = (cfg.blocks.xy + vec2i(i32(block % across), i32(block / across))) * MEADOW_BLOCK;
   for (var k = 0u; k < 4u; k++) {
     let p = lane + k * 64u;
-    meadowStandPatch(first + vec2i(i32(p % u32(MEADOW_BLOCK)), i32(p / u32(MEADOW_BLOCK))), (listed & MEADOW_SEEN) != 0u);
+    if (p >= side * side) { break; }
+    meadowStandPatch(first + vec2i(i32(p % side), i32(p / side)) * i32(grain), grain, (listed & MEADOW_SEEN) != 0u);
   }
 }
 

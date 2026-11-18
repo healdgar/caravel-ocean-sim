@@ -23,14 +23,15 @@ import { streetEdgeAt } from './town-streets.js';
 import { MEADOW_PATCH_METRES, MEADOW_MIX_ROLES, MEADOW_CONTINUUM_MATERIAL } from './meadow-continuum.js';
 import {
   MEADOW_MAX_SHOT_WAKES, MEADOW_MAX_BLAST_RINGS, MEADOW_WAKE_BUFFER_BYTES, MEADOW_BLOCK_PATCHES, MEADOW_WORK_HEADER, MEADOW_CONTINUUM_POSE,
-  MEADOW_CONTINUUM_CFG_BYTES, MEADOW_CONTINUUM_STOOD_BYTES, MEADOW_GUST_WAVE, MEADOW_CONTINUUM_SPEC, meadowContinuumStandWGSL,
+  MEADOW_CONTINUUM_CFG_BYTES, MEADOW_CONTINUUM_STOOD_BYTES, MEADOW_GUST_WAVE, MEADOW_CONTINUUM_SPEC, MEADOW_GRAIN_BITS, meadowContinuumStandWGSL,
 } from './wgsl/meadow-continuum.js';
 
 const MEADOW_COVER_DESKTOP = 2048; // 4.0 m/texel across 8192 m region with bilinear SDF filtering
 const MEADOW_COVER_MOBILE = 1024;
-// The records the stand pass may write a frame: the patches in view and in the shadow map's box. One past them is
-// not stood that frame.
-const MEADOW_CONTINUUM_CAPACITY = 524288, MEADOW_CONTINUUM_MOBILE_CAPACITY = 262144;
+// The most records the stand pass may write a frame (the patches in view and in the shadow map's box), held further
+// to what the device lets one buffer bind: Lisbon's dock stands about 1.07M. A view that asks more than the scene holds
+// is stood coarser far off (meadowStandBudget), never short near.
+const MEADOW_CONTINUUM_CAPACITY = 1 << 21, MEADOW_CONTINUUM_MOBILE_CAPACITY = 1 << 18;
 // The ground meadows stop at.
 const MEADOW_WATERLINE = 0.75;
 
@@ -553,6 +554,10 @@ export function meadowBlocksOf({ cover, size, region, heights }) {
   // A patch reads the cover map bilinearly at its middle and its corners: a texel touches the blocks within a texel
   // and half a patch of it.
   const reach = step + MEADOW_PATCH_METRES * 0.5;
+  // Which patches could stand at all: those with a point the stand pass reads (a patch's middle and corners, or a
+  // coarse patch's lattice, all on its patches' edges) within a texel of grass.
+  const P = MEADOW_PATCH_METRES, cellsX = across[0] * MEADOW_BLOCK_PATCHES, cellsZ = across[1] * MEADOW_BLOCK_PATCHES;
+  const cellX0 = first[0] * MEADOW_BLOCK_PATCHES, cellZ0 = first[1] * MEADOW_BLOCK_PATCHES, cells = new Uint8Array(cellsX * cellsZ);
   let texels = 0;
   for (let j = 0; j < size; j++) {
     const wz = z0 + (j + 0.5) * step, v = (j + 0.5) / size;
@@ -570,13 +575,38 @@ export function meadowBlocksOf({ cover, size, region, heights }) {
         data[at + 1] = Math.min(data[at + 1], y);
         data[at + 2] = Math.max(data[at + 2], y);
       }
+      const ci0 = Math.max(0, Math.ceil((wx - step) / P) - 1 - cellX0), ci1 = Math.min(cellsX - 1, Math.floor((wx + step) / P) - cellX0);
+      const cj0 = Math.max(0, Math.ceil((wz - step) / P) - 1 - cellZ0), cj1 = Math.min(cellsZ - 1, Math.floor((wz + step) / P) - cellZ0);
+      for (let cj = cj0; cj <= cj1; cj++) if (ci0 <= ci1) cells.fill(1, cj * cellsX + ci0, cj * cellsX + ci1 + 1);
     }
   }
   for (let b = 0; b < across[0] * across[1]; b++) if (!(data[b * 4] > 0)) data.set([0, 0, 0, 0], b * 4);
+  // Each block's most records at each grain (js/wgsl/meadow-continuum.js meadowStandBudget): its patches that could
+  // stand, and its squares of 2, 4, 8 and 16 patches holding any.
+  const grains = new Uint32Array(data.buffer, data.byteOffset, data.length), B = MEADOW_BLOCK_PATCHES;
+  for (let bj = 0; bj < across[1]; bj++) for (let bi = 0; bi < across[0]; bi++) {
+    const at = (bj * across[0] + bi) * 4;
+    if (!(data[at] > 0)) continue;
+    let word = 0;
+    MEADOW_GRAIN_BITS.forEach(([shift], level) => {
+      const g = 1 << level, side = B >> level;
+      let n = 0;
+      for (let gz = 0; gz < side; gz++) for (let gx = 0; gx < side; gx++) {
+        let any = false;
+        for (let z = 0; z < g && !any; z++) {
+          const row = (bj * B + gz * g + z) * cellsX + bi * B + gx * g;
+          for (let x = 0; x < g; x++) if (cells[row + x]) { any = true; break; }
+        }
+        if (any) n++;
+      }
+      word |= n << shift;
+    });
+    grains[at + 3] = word >>> 0;
+  }
   return { first, across, count: across[0] * across[1], data, texels };
 }
 
-// The stand pass's four programs, each with its own bind group layout, so the blocks-in-view list is written by one
+// The stand pass's five programs, each with its own bind group layout, so the blocks-in-view list is written by one
 // pass and read, and dispatched from, by the next. One set a device, compiled one after another (D3D12 runs out of
 // pipeline state memory compiling them at once).
 export function requestMeadowStand(device, shader) {
@@ -588,12 +618,13 @@ export function requestMeadowStand(device, shader) {
     const entries = {
       reset: [buffer(9, 'storage'), buffer(10, 'storage')],
       blocks: [...uniforms, buffer(6, 'read-only-storage'), buffer(10, 'storage'), buffer(12, 'uniform')],
+      budget: [buffer(1, 'uniform'), buffer(10, 'storage')],
       patches: [...uniforms, texture(3, 'unfilterable-float'), texture(4, 'float'), buffer(5, 'read-only-storage'), buffer(7, 'storage'), buffer(8, 'storage'), buffer(9, 'storage'),
         buffer(11, 'read-only-storage'), buffer(12, 'uniform'), buffer(13, 'uniform'), texture(14, 'sint'), texture(15, 'float', '2d-array'),
         { binding: 16, visibility: C, sampler: { type: 'filtering' } }, texture(17, 'unfilterable-float', '2d-array')],
       finish: [buffer(1, 'uniform'), buffer(7, 'storage'), buffer(9, 'storage')],
     };
-    const points = { reset: 'meadowStandReset', blocks: 'meadowBlocksInView', patches: 'meadowStandPatches', finish: 'meadowStandFinish' };
+    const points = { reset: 'meadowStandReset', blocks: 'meadowBlocksInView', budget: 'meadowStandBudget', patches: 'meadowStandPatches', finish: 'meadowStandFinish' };
     const module = await shader(meadowContinuumStandWGSL(), 'meadow stand');
     const layouts = {}, pipelines = {};
     for (const [name, list] of Object.entries(entries)) {
@@ -607,7 +638,7 @@ export function requestMeadowStand(device, shader) {
   });
 }
 // What each stand pass binds.
-const MEADOW_STAND_BINDINGS = Object.freeze({ reset: [9, 10], blocks: [0, 1, 2, 6, 10, 12], patches: [0, 1, 2, 3, 4, 5, 7, 8, 9, 11, 12, 13, 14, 15, 16, 17], finish: [1, 7, 9] });
+const MEADOW_STAND_BINDINGS = Object.freeze({ reset: [9, 10], blocks: [0, 1, 2, 6, 10, 12], budget: [1, 10], patches: [0, 1, 2, 3, 4, 5, 7, 8, 9, 11, 12, 13, 14, 15, 16, 17], finish: [1, 7, 9] });
 // What the material's view, and its capture under water, bind in group 0.
 const MEADOW_VIEW_BINDINGS = Object.freeze([0, 1, 2, 3, 4, 5, 6, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]);
 
@@ -660,10 +691,11 @@ export async function createMeadowGrass({
     return buf;
   };
 
-  // One scene of every patch the stand pass may write a frame, its room split evenly over the variants.
+  // One scene of every patch the stand pass may write a frame, as many as the device binds in one buffer (a patch's
+  // pose data is its largest share), its room split evenly over the variants.
   const wanted = isMobile ? MEADOW_CONTINUUM_MOBILE_CAPACITY : MEADOW_CONTINUUM_CAPACITY;
   const most = Math.floor(Math.min(device.limits.maxStorageBufferBindingSize, device.limits.maxBufferSize) / (MEADOW_CONTINUUM_POSE * 16));
-  const perType = Math.ceil(Math.min(wanted, most) / atlas.types.length);
+  const perType = Math.floor(Math.min(wanted, most) / atlas.types.length);
   const { capacity, room } = continuumRoom(atlas.types, atlas.types.map(() => perType));
   const scene = createContinuumScene({ device, atlas, programs, capacity, room, view, poseRoom: capacity * MEADOW_CONTINUUM_POSE, frame, shadowUniform, samples, label: 'meadow', written: true });
   scene.setCount(capacity);
@@ -951,7 +983,8 @@ export async function createMeadowGrass({
     setWorldOffset(x = 0, z = 0) {
       if (!destroyed) scene.setWorldOffset(x, z);
     },
-    // In the frame's compute pass: every patch of grass in view or in the sun's box stood, then the one cut over them.
+    // In the frame's compute pass: every patch of grass in view or in the sun's box stood, the far ones coarser if the
+    // view asks more than the scene holds, then the one cut over them.
     encode(pass) {
       active = !destroyed && coverTexels > 0 && standGroups !== null;
       if (!active) return;
@@ -965,6 +998,9 @@ export async function createMeadowGrass({
       pass.setPipeline(P.blocks);
       pass.setBindGroup(0, standGroups.blocks);
       pass.dispatchWorkgroups(Math.ceil(blockCount / 64));
+      pass.setPipeline(P.budget);
+      pass.setBindGroup(0, standGroups.budget);
+      pass.dispatchWorkgroups(1);
       pass.setPipeline(P.patches);
       pass.setBindGroup(0, standGroups.patches);
       pass.dispatchWorkgroupsIndirect(blockWork, 0);

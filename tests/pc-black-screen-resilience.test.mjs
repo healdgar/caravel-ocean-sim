@@ -328,13 +328,14 @@ test('7. #err HUD banner, post-startup device.lost recovery, swapchain/init-flag
   assert.doesNotMatch(sceneSrc, /device\.create(Compute|Render)Pipeline\s*\(/);
   assert.match(sceneSrc, /device\.createRenderPipelineAsync\s*\(/);
 
-  // The forest's wind keeps no simulated state that could run away: each tree's gust is closed-form and bounded, and
-  // a blast's wave whips a tree for a few seconds and is gone (js/wgsl/forest-continuum.js forestStandRoots).
-  const forestStandSrc = readRepoFile('js/wgsl/forest-continuum.js');
-  assert.match(forestStandSrc, /clamp\(speed\/14\.0,0\.0,1\.6\)/);
-  assert.match(forestStandSrc, /if\(age<0\.0\|\|age>4\.0\)\{continue;\}/);
-  assert.match(forestStandSrc, /min\(forestStand\.counts\.w,\$\{FOREST_CONTINUUM_BLASTS\}u\)/);
-  assert.equal(/theta|omegaVel|simState/.test(forestStandSrc), false, 'no bone state to guard');
+  // The forest's wind steps its bones as damped springs (js/wgsl/forest-continuum.js forestWindStep), and none can run
+  // away: its step is clamped, every bend saturates at its bone's largest, a turn or rate that is not finite is put back
+  // at rest, and a force or a pushing capsule is forgotten a few seconds after it is spent (js/forest-scenery.js).
+  const forestWindSrc = readRepoFile('js/wgsl/forest-continuum.js');
+  assert.match(forestWindSrc, /clamp\(now-forestWindState\[0\]\.x,0\.0,0\.05\)/);
+  assert.match(forestWindSrc, /let held=most\*tanh\(l\/most\);/);
+  assert.match(forestWindSrc, /if\(!forestWindFinite\(angle\)\|\|!forestWindFinite\(rate\*0\.01\)\)\{angle=vec3f\(0\.0\);rate=vec3f\(0\.0\);\}/);
+  assert.match(readRepoFile('js/forest-scenery.js'), /if\(forces\[k\]\.until<clock\)/);
 });
 
 test('8. Build & GPU contract: zero aliased ES imports in js/*.js and P2 D3D12 fast-math guards present', () => {
